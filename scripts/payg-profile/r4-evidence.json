@@ -1,0 +1,2282 @@
+[
+  {
+    "id": "openai/gpt-6-luna:output:chinese:output-stress:0:r4",
+    "requestHash": "79a8b62e5d138e45123854bbc87e6e7e258ca3c0e627d5e7c243b230b864cb45",
+    "model": "openai/gpt-6-luna",
+    "kind": "output",
+    "B": 4096,
+    "P": 1006,
+    "rB": 0.24560546875,
+    "rT": 0.08186848958333333,
+    "status": "SAMPLE_WITHIN_BOUNDS",
+    "receipt": {
+      "sampleId": "openai/gpt-6-luna:output:chinese:output-stress:0:r4",
+      "requestHash": "79a8b62e5d138e45123854bbc87e6e7e258ca3c0e627d5e7c243b230b864cb45",
+      "model": "openai/gpt-6-luna",
+      "endpointTag": "openai",
+      "nativePromptTokens": 1006,
+      "nativeCompletionTokens": 512,
+      "costUsd": "0.0003566",
+      "cachedTokens": 0,
+      "cacheWriteTokens": 0,
+      "source": "response.prompt_tokens",
+      "includesReasoning": true,
+      "finishReason": "length"
+    },
+    "outputCapReached": true,
+    "finishReason": "length",
+    "sourceHashes": [
+      "a9f21dd45597c0d68956762e382ec4b8e604e6b651583a08f822d53d5e964755"
+    ]
+  },
+  {
+    "id": "openai/gpt-6-luna:output:code:output-stress:1:r4",
+    "requestHash": "f8ff7276203f2d4955eecf9a1e55e030b6cf7b6cd21cc5d4112923d19bd69c13",
+    "model": "openai/gpt-6-luna",
+    "kind": "output",
+    "B": 4096,
+    "P": 1192,
+    "rB": 0.291015625,
+    "rT": 0.09700520833333333,
+    "status": "SAMPLE_WITHIN_BOUNDS",
+    "receipt": {
+      "sampleId": "openai/gpt-6-luna:output:code:output-stress:1:r4",
+      "requestHash": "f8ff7276203f2d4955eecf9a1e55e030b6cf7b6cd21cc5d4112923d19bd69c13",
+      "model": "openai/gpt-6-luna",
+      "endpointTag": "openai",
+      "nativePromptTokens": 1192,
+      "nativeCompletionTokens": 512,
+      "costUsd": "0.000404925",
+      "cachedTokens": 0,
+      "cacheWriteTokens": 1189,
+      "source": "response.prompt_tokens",
+      "includesReasoning": true,
+      "finishReason": "length"
+    },
+    "outputCapReached": true,
+    "finishReason": "length",
+    "sourceHashes": [
+      "59f75610638f0954765a45f6346d0f57f0a294b6db6d3061f4f2e23f9f3dd918"
+    ]
+  },
+  {
+    "id": "openai/gpt-6-luna:output:chinese:output-stress:2:r4",
+    "requestHash": "91db8eee65978a83275b549125496c8358f14261b4c6db8e88c08426ac8d3ed2",
+    "model": "openai/gpt-6-luna",
+    "kind": "output",
+    "B": 4096,
+    "P": 999,
+    "rB": 0.243896484375,
+    "rT": 0.081298828125,
+    "status": "SAMPLE_WITHIN_BOUNDS",
+    "receipt": {
+      "sampleId": "openai/gpt-6-luna:output:chinese:output-stress:2:r4",
+      "requestHash": "91db8eee65978a83275b549125496c8358f14261b4c6db8e88c08426ac8d3ed2",
+      "model": "openai/gpt-6-luna",
+      "endpointTag": "openai",
+      "nativePromptTokens": 999,
+      "nativeCompletionTokens": 512,
+      "costUsd": "0.0003559",
+      "cachedTokens": 0,
+      "cacheWriteTokens": 0,
+      "source": "response.prompt_tokens",
+      "includesReasoning": true,
+      "finishReason": "length"
+    },
+    "outputCapReached": true,
+    "finishReason": "length",
+    "sourceHashes": [
+      "aaf8d46882ff7a8363060a68fc0a1e5fce9d5ec79dca58f3529d22843701a66f"
+    ]
+  },
+  {
+    "id": "openai/gpt-6-luna:output:code:output-stress:3:r4",
+    "requestHash": "8c8b1f5300d7fffa46f3eacb00d3ef30d4d6c5fd6e0d4b02f18aef1f279b883c",
+    "model": "openai/gpt-6-luna",
+    "kind": "output",
+    "B": 4096,
+    "P": 1182,
+    "rB": 0.28857421875,
+    "rT": 0.09619140625,
+    "status": "SAMPLE_WITHIN_BOUNDS",
+    "receipt": {
+      "sampleId": "openai/gpt-6-luna:output:code:output-stress:3:r4",
+      "requestHash": "8c8b1f5300d7fffa46f3eacb00d3ef30d4d6c5fd6e0d4b02f18aef1f279b883c",
+      "model": "openai/gpt-6-luna",
+      "endpointTag": "openai",
+      "nativePromptTokens": 1182,
+      "nativeCompletionTokens": 512,
+      "costUsd": "0.000403675",
+      "cachedTokens": 0,
+      "cacheWriteTokens": 1179,
+      "source": "response.prompt_tokens",
+      "includesReasoning": true,
+      "finishReason": "length"
+    },
+    "outputCapReached": true,
+    "finishReason": "length",
+    "sourceHashes": [
+      "05ae14728dc0702f586ccc5fc27e211e75e541490200b181655e2532922380b9"
+    ]
+  },
+  {
+    "id": "openai/gpt-6-luna:matrix:chinese:small:0",
+    "requestHash": "1e28d396b19e5cd1e707426a235f60b185fd0156739d40c172fbb6d1607200eb",
+    "model": "openai/gpt-6-luna",
+    "kind": "matrix",
+    "B": 417,
+    "P": 29,
+    "rB": 0.06954436450839328,
+    "rT": 0.0033685677779068416,
+    "status": "SAMPLE_WITHIN_BOUNDS",
+    "receipt": {
+      "sampleId": "openai/gpt-6-luna:matrix:chinese:small:0",
+      "requestHash": "1e28d396b19e5cd1e707426a235f60b185fd0156739d40c172fbb6d1607200eb",
+      "model": "openai/gpt-6-luna",
+      "endpointTag": "openai",
+      "nativePromptTokens": 29,
+      "nativeCompletionTokens": 145,
+      "costUsd": "0.0000754",
+      "cachedTokens": 0,
+      "cacheWriteTokens": 0,
+      "source": "response.prompt_tokens",
+      "includesReasoning": true,
+      "finishReason": "stop"
+    },
+    "outputCapReached": false,
+    "finishReason": "stop",
+    "sourceHashes": [
+      "8bd97a3aa9f881bbeb936347afd64b3c24ec0dfd6aae6f95ea8c7faf081a0cdb"
+    ]
+  },
+  {
+    "id": "openai/gpt-6-luna:matrix:chinese:small:1",
+    "requestHash": "9d19fd6c05019c2bf693b7e926c2ab6cd4cdf0ddf7c31839c06bbde451f167f2",
+    "model": "openai/gpt-6-luna",
+    "kind": "matrix",
+    "B": 3829,
+    "P": 948,
+    "rB": 0.24758422564638286,
+    "rT": 0.07886199151484902,
+    "status": "SAMPLE_WITHIN_BOUNDS",
+    "receipt": {
+      "sampleId": "openai/gpt-6-luna:matrix:chinese:small:1",
+      "requestHash": "9d19fd6c05019c2bf693b7e926c2ab6cd4cdf0ddf7c31839c06bbde451f167f2",
+      "model": "openai/gpt-6-luna",
+      "endpointTag": "openai",
+      "nativePromptTokens": 948,
+      "nativeCompletionTokens": 607,
+      "costUsd": "0.0003983",
+      "cachedTokens": 0,
+      "cacheWriteTokens": 0,
+      "source": "response.prompt_tokens",
+      "includesReasoning": true,
+      "finishReason": "stop"
+    },
+    "outputCapReached": false,
+    "finishReason": "stop",
+    "sourceHashes": [
+      "06dd9b06879532bb8e978b6b3e7fd7cabbfdc4ab8cdb6c680c0a46aaebfc19b7"
+    ]
+  },
+  {
+    "id": "openai/gpt-6-luna:matrix:chinese:small:2",
+    "requestHash": "f4b3e7d0357c8e73d9e5a78e6df101b8a099f61fc678b94d21980bdd348d418c",
+    "model": "openai/gpt-6-luna",
+    "kind": "matrix",
+    "B": 3932,
+    "P": 976,
+    "rB": 0.24821973550356052,
+    "rT": 0.08050148465852854,
+    "status": "SAMPLE_WITHIN_BOUNDS",
+    "receipt": {
+      "sampleId": "openai/gpt-6-luna:matrix:chinese:small:2",
+      "requestHash": "f4b3e7d0357c8e73d9e5a78e6df101b8a099f61fc678b94d21980bdd348d418c",
+      "model": "openai/gpt-6-luna",
+      "endpointTag": "openai",
+      "nativePromptTokens": 976,
+      "nativeCompletionTokens": 479,
+      "costUsd": "0.0003371",
+      "cachedTokens": 0,
+      "cacheWriteTokens": 0,
+      "source": "response.prompt_tokens",
+      "includesReasoning": true,
+      "finishReason": "stop"
+    },
+    "outputCapReached": false,
+    "finishReason": "stop",
+    "sourceHashes": [
+      "70265abca13a5a549fe0f2abd25bc9edb6ded1ccb69e07abbdc56217ec96b82b"
+    ]
+  },
+  {
+    "id": "openai/gpt-6-luna:matrix:chinese:small:3",
+    "requestHash": "dfdc4e190cb54acd757e54f1d374efd905917905ad1af138f9d79310ba881540",
+    "model": "openai/gpt-6-luna",
+    "kind": "matrix",
+    "B": 4096,
+    "P": 1020,
+    "rB": 0.2490234375,
+    "rT": 0.0830078125,
+    "status": "SAMPLE_WITHIN_BOUNDS",
+    "receipt": {
+      "sampleId": "openai/gpt-6-luna:matrix:chinese:small:3",
+      "requestHash": "dfdc4e190cb54acd757e54f1d374efd905917905ad1af138f9d79310ba881540",
+      "model": "openai/gpt-6-luna",
+      "endpointTag": "openai",
+      "nativePromptTokens": 1020,
+      "nativeCompletionTokens": 504,
+      "costUsd": "0.000354",
+      "cachedTokens": 0,
+      "cacheWriteTokens": 0,
+      "source": "response.prompt_tokens",
+      "includesReasoning": true,
+      "finishReason": "stop"
+    },
+    "outputCapReached": false,
+    "finishReason": "stop",
+    "sourceHashes": [
+      "73b06e10b85428025d284cfa90b9d9714120d45310e228cad110d5e68d71420b"
+    ]
+  },
+  {
+    "id": "openai/gpt-6-luna:matrix:chinese:medium:0",
+    "requestHash": "ca6a10049e9d190b8d57c6b3b9cee03057035820513d4180ac3f4306a7ea3d3f",
+    "model": "openai/gpt-6-luna",
+    "kind": "matrix",
+    "B": 29818,
+    "P": 6966,
+    "rB": 0.23361727815413508,
+    "rT": 0.18326756116811366,
+    "status": "SAMPLE_WITHIN_BOUNDS",
+    "receipt": {
+      "sampleId": "openai/gpt-6-luna:matrix:chinese:medium:0",
+      "requestHash": "ca6a10049e9d190b8d57c6b3b9cee03057035820513d4180ac3f4306a7ea3d3f",
+      "model": "openai/gpt-6-luna",
+      "endpointTag": "openai",
+      "nativePromptTokens": 6966,
+      "nativeCompletionTokens": 528,
+      "costUsd": "0.001134675",
+      "cachedTokens": 0,
+      "cacheWriteTokens": 6963,
+      "source": "response.prompt_tokens",
+      "includesReasoning": true,
+      "finishReason": "stop"
+    },
+    "outputCapReached": false,
+    "finishReason": "stop",
+    "sourceHashes": [
+      "9e0afaf701e1c4e13e7be19a588115a53b4f8d50594e4a8d701db70c5336f3dd"
+    ]
+  },
+  {
+    "id": "openai/gpt-6-luna:matrix:chinese:medium:1",
+    "requestHash": "bc1d0cdbe8a1c475737cb8410826984983ef2c2d25fc75bec912930f1e101069",
+    "model": "openai/gpt-6-luna",
+    "kind": "matrix",
+    "B": 30638,
+    "P": 7188,
+    "rB": 0.23461061426986096,
+    "rT": 0.18511460211176925,
+    "status": "SAMPLE_WITHIN_BOUNDS",
+    "receipt": {
+      "sampleId": "openai/gpt-6-luna:matrix:chinese:medium:1",
+      "requestHash": "bc1d0cdbe8a1c475737cb8410826984983ef2c2d25fc75bec912930f1e101069",
+      "model": "openai/gpt-6-luna",
+      "endpointTag": "openai",
+      "nativePromptTokens": 7188,
+      "nativeCompletionTokens": 494,
+      "costUsd": "0.00100225",
+      "cachedTokens": 1245,
+      "cacheWriteTokens": 5940,
+      "source": "response.prompt_tokens",
+      "includesReasoning": true,
+      "finishReason": "stop"
+    },
+    "outputCapReached": false,
+    "finishReason": "stop",
+    "sourceHashes": [
+      "bebea63a785e74f7c609e0580c6dbeb82f9b76eec02885d259e9518d39b6cbba"
+    ]
+  },
+  {
+    "id": "openai/gpt-6-luna:matrix:chinese:medium:2",
+    "requestHash": "5b9692d97571fe31f8a0ce4192be9a49c2ef7639af5d5d9f712c7bde1643da7a",
+    "model": "openai/gpt-6-luna",
+    "kind": "matrix",
+    "B": 31457,
+    "P": 7407,
+    "rB": 0.23546428457894905,
+    "rT": 0.18681429544250802,
+    "status": "SAMPLE_WITHIN_BOUNDS",
+    "receipt": {
+      "sampleId": "openai/gpt-6-luna:matrix:chinese:medium:2",
+      "requestHash": "5b9692d97571fe31f8a0ce4192be9a49c2ef7639af5d5d9f712c7bde1643da7a",
+      "model": "openai/gpt-6-luna",
+      "endpointTag": "openai",
+      "nativePromptTokens": 7407,
+      "nativeCompletionTokens": 410,
+      "costUsd": "0.000987625",
+      "cachedTokens": 1245,
+      "cacheWriteTokens": 6159,
+      "source": "response.prompt_tokens",
+      "includesReasoning": true,
+      "finishReason": "stop"
+    },
+    "outputCapReached": false,
+    "finishReason": "stop",
+    "sourceHashes": [
+      "3290dfc6cba0109fd14778cde8c9b3259add78a438cbd985ffb9dae2bf74c9b0"
+    ]
+  },
+  {
+    "id": "openai/gpt-6-luna:matrix:chinese:medium:3",
+    "requestHash": "35acb9560f1dcd0285ee73e5cf517da1cf32cdd6d4e176e27845b18bcbeebc52",
+    "model": "openai/gpt-6-luna",
+    "kind": "matrix",
+    "B": 32768,
+    "P": 7762,
+    "rB": 0.23687744140625,
+    "rT": 0.189501953125,
+    "status": "SAMPLE_WITHIN_BOUNDS",
+    "receipt": {
+      "sampleId": "openai/gpt-6-luna:matrix:chinese:medium:3",
+      "requestHash": "35acb9560f1dcd0285ee73e5cf517da1cf32cdd6d4e176e27845b18bcbeebc52",
+      "model": "openai/gpt-6-luna",
+      "endpointTag": "openai",
+      "nativePromptTokens": 7762,
+      "nativeCompletionTokens": 539,
+      "costUsd": "0.0010965",
+      "cachedTokens": 1245,
+      "cacheWriteTokens": 6514,
+      "source": "response.prompt_tokens",
+      "includesReasoning": true,
+      "finishReason": "stop"
+    },
+    "outputCapReached": false,
+    "finishReason": "stop",
+    "sourceHashes": [
+      "66cedec68aa2c9e48632c33683bf4f5542f03199659e65f88d25de335628a94c"
+    ]
+  },
+  {
+    "id": "openai/gpt-6-luna:matrix:chinese:large:0",
+    "requestHash": "9f900d21291be57ec6bb509a381943e342134c928945dba91fc3ccf7f76ea3ae",
+    "model": "openai/gpt-6-luna",
+    "kind": "matrix",
+    "B": 178913,
+    "P": 47171,
+    "rB": 0.2636532839983679,
+    "rT": 0.2521097779321771,
+    "status": "SAMPLE_WITHIN_BOUNDS",
+    "receipt": {
+      "sampleId": "openai/gpt-6-luna:matrix:chinese:large:0",
+      "requestHash": "9f900d21291be57ec6bb509a381943e342134c928945dba91fc3ccf7f76ea3ae",
+      "model": "openai/gpt-6-luna",
+      "endpointTag": "openai",
+      "nativePromptTokens": 47171,
+      "nativeCompletionTokens": 456,
+      "costUsd": "0.005981125",
+      "cachedTokens": 1245,
+      "cacheWriteTokens": 45923,
+      "source": "response.prompt_tokens",
+      "includesReasoning": true,
+      "finishReason": "stop"
+    },
+    "outputCapReached": false,
+    "finishReason": "stop",
+    "sourceHashes": [
+      "9867778b474f902cf3a8720a8a6d8d0f384fa7d18202adfd4dc1a79764446734"
+    ]
+  },
+  {
+    "id": "openai/gpt-6-luna:matrix:chinese:large:1",
+    "requestHash": "425b8aced8d38728edbc040bf7694cb9f3f46bfda7a38d7ced9bb282ebb1d9b3",
+    "model": "openai/gpt-6-luna",
+    "kind": "matrix",
+    "B": 183828,
+    "P": 48496,
+    "rB": 0.263811824096438,
+    "rT": 0.25255702530986357,
+    "status": "SAMPLE_WITHIN_BOUNDS",
+    "receipt": {
+      "sampleId": "openai/gpt-6-luna:matrix:chinese:large:1",
+      "requestHash": "425b8aced8d38728edbc040bf7694cb9f3f46bfda7a38d7ced9bb282ebb1d9b3",
+      "model": "openai/gpt-6-luna",
+      "endpointTag": "openai",
+      "nativePromptTokens": 48496,
+      "nativeCompletionTokens": 463,
+      "costUsd": "0.00615025",
+      "cachedTokens": 1245,
+      "cacheWriteTokens": 47248,
+      "source": "response.prompt_tokens",
+      "includesReasoning": true,
+      "finishReason": "stop"
+    },
+    "outputCapReached": false,
+    "finishReason": "stop",
+    "sourceHashes": [
+      "4c6902a8aa2d346c990863e9466cd377b4230133d119184a4ee088799405ad7a"
+    ]
+  },
+  {
+    "id": "openai/gpt-6-luna:matrix:chinese:large:2",
+    "requestHash": "ffb05e95f3996b8c98802198d5bb0e74e19ec2c50e25ce5537dbf72221605d75",
+    "model": "openai/gpt-6-luna",
+    "kind": "matrix",
+    "B": 188743,
+    "P": 49821,
+    "rB": 0.2639621072039758,
+    "rT": 0.2529819483585955,
+    "status": "SAMPLE_WITHIN_BOUNDS",
+    "receipt": {
+      "sampleId": "openai/gpt-6-luna:matrix:chinese:large:2",
+      "requestHash": "ffb05e95f3996b8c98802198d5bb0e74e19ec2c50e25ce5537dbf72221605d75",
+      "model": "openai/gpt-6-luna",
+      "endpointTag": "openai",
+      "nativePromptTokens": 49821,
+      "nativeCompletionTokens": 435,
+      "costUsd": "0.006301875",
+      "cachedTokens": 1245,
+      "cacheWriteTokens": 48573,
+      "source": "response.prompt_tokens",
+      "includesReasoning": true,
+      "finishReason": "stop"
+    },
+    "outputCapReached": false,
+    "finishReason": "stop",
+    "sourceHashes": [
+      "5d5caa9de73be58625487a2801b1ff1e4443bb63aa6567849a26a3f421e43110"
+    ]
+  },
+  {
+    "id": "openai/gpt-6-luna:matrix:chinese:large:3",
+    "requestHash": "f1e2ac73506eca0a6894f3c617c09e392aeafc97c33bc1d5aa191c6b23369e7c",
+    "model": "openai/gpt-6-luna",
+    "kind": "matrix",
+    "B": 196608,
+    "P": 51944,
+    "rB": 0.2642008463541667,
+    "rT": 0.2536328125,
+    "status": "SAMPLE_WITHIN_BOUNDS",
+    "receipt": {
+      "sampleId": "openai/gpt-6-luna:matrix:chinese:large:3",
+      "requestHash": "f1e2ac73506eca0a6894f3c617c09e392aeafc97c33bc1d5aa191c6b23369e7c",
+      "model": "openai/gpt-6-luna",
+      "endpointTag": "openai",
+      "nativePromptTokens": 51944,
+      "nativeCompletionTokens": 485,
+      "costUsd": "0.00659225",
+      "cachedTokens": 1245,
+      "cacheWriteTokens": 50696,
+      "source": "response.prompt_tokens",
+      "includesReasoning": true,
+      "finishReason": "stop"
+    },
+    "outputCapReached": false,
+    "finishReason": "stop",
+    "sourceHashes": [
+      "d49442514e14ada4035caa9167965f4f041d2630c8727c5f21d84c66ff2246aa"
+    ]
+  },
+  {
+    "id": "openai/gpt-6-luna:matrix:english:small:0",
+    "requestHash": "2f57b267bcea2e80299beed317f78a9821799c2efd13c6db9ed787c9d5bba49c",
+    "model": "openai/gpt-6-luna",
+    "kind": "matrix",
+    "B": 417,
+    "P": 29,
+    "rB": 0.06954436450839328,
+    "rT": 0.0033685677779068416,
+    "status": "SAMPLE_WITHIN_BOUNDS",
+    "receipt": {
+      "sampleId": "openai/gpt-6-luna:matrix:english:small:0",
+      "requestHash": "2f57b267bcea2e80299beed317f78a9821799c2efd13c6db9ed787c9d5bba49c",
+      "model": "openai/gpt-6-luna",
+      "endpointTag": "openai",
+      "nativePromptTokens": 29,
+      "nativeCompletionTokens": 156,
+      "costUsd": "0.0000809",
+      "cachedTokens": 0,
+      "cacheWriteTokens": 0,
+      "source": "response.prompt_tokens",
+      "includesReasoning": true,
+      "finishReason": "stop"
+    },
+    "outputCapReached": false,
+    "finishReason": "stop",
+    "sourceHashes": [
+      "f7fae3a4c428c9f0184684b74f30706d69ccfd8d07542258934f90ac10060c60"
+    ]
+  },
+  {
+    "id": "openai/gpt-6-luna:matrix:english:small:1",
+    "requestHash": "77e46709d0e39ac07235870492817db291ed960ed211ca6cf1bb7b1511b0f51c",
+    "model": "openai/gpt-6-luna",
+    "kind": "matrix",
+    "B": 3829,
+    "P": 794,
+    "rB": 0.20736484721859494,
+    "rT": 0.06605107728142418,
+    "status": "SAMPLE_WITHIN_BOUNDS",
+    "receipt": {
+      "sampleId": "openai/gpt-6-luna:matrix:english:small:1",
+      "requestHash": "77e46709d0e39ac07235870492817db291ed960ed211ca6cf1bb7b1511b0f51c",
+      "model": "openai/gpt-6-luna",
+      "endpointTag": "openai",
+      "nativePromptTokens": 794,
+      "nativeCompletionTokens": 655,
+      "costUsd": "0.0004069",
+      "cachedTokens": 0,
+      "cacheWriteTokens": 0,
+      "source": "response.prompt_tokens",
+      "includesReasoning": true,
+      "finishReason": "stop"
+    },
+    "outputCapReached": false,
+    "finishReason": "stop",
+    "sourceHashes": [
+      "1e9f485fcd0ff06ef517aedc4f055d38d0eb77937aa43393a90984e6222fe95a"
+    ]
+  },
+  {
+    "id": "openai/gpt-6-luna:matrix:english:small:2",
+    "requestHash": "ea5e17240d3b28705e7c53a4b452ec4c29e776bd068307c30f6eec312bf68084",
+    "model": "openai/gpt-6-luna",
+    "kind": "matrix",
+    "B": 3932,
+    "P": 818,
+    "rB": 0.20803662258392674,
+    "rT": 0.0674694820191356,
+    "status": "SAMPLE_WITHIN_BOUNDS",
+    "receipt": {
+      "sampleId": "openai/gpt-6-luna:matrix:english:small:2",
+      "requestHash": "ea5e17240d3b28705e7c53a4b452ec4c29e776bd068307c30f6eec312bf68084",
+      "model": "openai/gpt-6-luna",
+      "endpointTag": "openai",
+      "nativePromptTokens": 818,
+      "nativeCompletionTokens": 671,
+      "costUsd": "0.0004173",
+      "cachedTokens": 0,
+      "cacheWriteTokens": 0,
+      "source": "response.prompt_tokens",
+      "includesReasoning": true,
+      "finishReason": "stop"
+    },
+    "outputCapReached": false,
+    "finishReason": "stop",
+    "sourceHashes": [
+      "6778d767230e1ce5c1e8c89f2a81cee87834535e557e331cf672c2e6252f4b46"
+    ]
+  },
+  {
+    "id": "openai/gpt-6-luna:matrix:english:small:3",
+    "requestHash": "1cd13c51bd1a42a79655915d5dcacc78332ab398c3b97d4f298055f3591ad994",
+    "model": "openai/gpt-6-luna",
+    "kind": "matrix",
+    "B": 4096,
+    "P": 854,
+    "rB": 0.20849609375,
+    "rT": 0.06949869791666667,
+    "status": "SAMPLE_WITHIN_BOUNDS",
+    "receipt": {
+      "sampleId": "openai/gpt-6-luna:matrix:english:small:3",
+      "requestHash": "1cd13c51bd1a42a79655915d5dcacc78332ab398c3b97d4f298055f3591ad994",
+      "model": "openai/gpt-6-luna",
+      "endpointTag": "openai",
+      "nativePromptTokens": 854,
+      "nativeCompletionTokens": 523,
+      "costUsd": "0.0003469",
+      "cachedTokens": 0,
+      "cacheWriteTokens": 0,
+      "source": "response.prompt_tokens",
+      "includesReasoning": true,
+      "finishReason": "stop"
+    },
+    "outputCapReached": false,
+    "finishReason": "stop",
+    "sourceHashes": [
+      "7efa3bdfbe79b1c99244c20860e4c289c09b5440c6fe08cba0619821d0f60439"
+    ]
+  },
+  {
+    "id": "openai/gpt-6-luna:matrix:english:medium:0",
+    "requestHash": "b4a2ef62d2873ea46258cadafa39d7e7a3bdaab789c331b5a7f30adfbd5ca4f2",
+    "model": "openai/gpt-6-luna",
+    "kind": "matrix",
+    "B": 29818,
+    "P": 6017,
+    "rB": 0.20179086457844256,
+    "rT": 0.15830044725072348,
+    "status": "SAMPLE_WITHIN_BOUNDS",
+    "receipt": {
+      "sampleId": "openai/gpt-6-luna:matrix:english:medium:0",
+      "requestHash": "b4a2ef62d2873ea46258cadafa39d7e7a3bdaab789c331b5a7f30adfbd5ca4f2",
+      "model": "openai/gpt-6-luna",
+      "endpointTag": "openai",
+      "nativePromptTokens": 6017,
+      "nativeCompletionTokens": 345,
+      "costUsd": "0.000781375",
+      "cachedTokens": 1245,
+      "cacheWriteTokens": 4769,
+      "source": "response.prompt_tokens",
+      "includesReasoning": true,
+      "finishReason": "stop"
+    },
+    "outputCapReached": false,
+    "finishReason": "stop",
+    "sourceHashes": [
+      "393ffd44a757e284ec00d161b344fab4b13f1deb6b9d3d0d5c1c73db482372db"
+    ]
+  },
+  {
+    "id": "openai/gpt-6-luna:matrix:english:medium:1",
+    "requestHash": "135cebc1f36efe6857f5858d902e58700e3cd0646afe5a0ca8c9ab4556c54684",
+    "model": "openai/gpt-6-luna",
+    "kind": "matrix",
+    "B": 30638,
+    "P": 6199,
+    "rB": 0.20233043932371564,
+    "rT": 0.1596446046870976,
+    "status": "SAMPLE_WITHIN_BOUNDS",
+    "receipt": {
+      "sampleId": "openai/gpt-6-luna:matrix:english:medium:1",
+      "requestHash": "135cebc1f36efe6857f5858d902e58700e3cd0646afe5a0ca8c9ab4556c54684",
+      "model": "openai/gpt-6-luna",
+      "endpointTag": "openai",
+      "nativePromptTokens": 6199,
+      "nativeCompletionTokens": 574,
+      "costUsd": "0.000918625",
+      "cachedTokens": 1245,
+      "cacheWriteTokens": 4951,
+      "source": "response.prompt_tokens",
+      "includesReasoning": true,
+      "finishReason": "stop"
+    },
+    "outputCapReached": false,
+    "finishReason": "stop",
+    "sourceHashes": [
+      "838983b586a983cf374bffde65654929fcf73b14e9adf718563663d56f778e21"
+    ]
+  },
+  {
+    "id": "openai/gpt-6-luna:matrix:english:medium:2",
+    "requestHash": "33fc962cb54bbbe6abae299cb4ac2a5893e8f6d58edbf770e4bf62b9aa635920",
+    "model": "openai/gpt-6-luna",
+    "kind": "matrix",
+    "B": 31457,
+    "P": 6382,
+    "rB": 0.20288012207139905,
+    "rT": 0.16096244545890187,
+    "status": "SAMPLE_WITHIN_BOUNDS",
+    "receipt": {
+      "sampleId": "openai/gpt-6-luna:matrix:english:medium:2",
+      "requestHash": "33fc962cb54bbbe6abae299cb4ac2a5893e8f6d58edbf770e4bf62b9aa635920",
+      "model": "openai/gpt-6-luna",
+      "endpointTag": "openai",
+      "nativePromptTokens": 6382,
+      "nativeCompletionTokens": 468,
+      "costUsd": "0.0008885",
+      "cachedTokens": 1245,
+      "cacheWriteTokens": 5134,
+      "source": "response.prompt_tokens",
+      "includesReasoning": true,
+      "finishReason": "stop"
+    },
+    "outputCapReached": false,
+    "finishReason": "stop",
+    "sourceHashes": [
+      "ad7c7aa13629144a1db97c4ca3bbe0ffb35f6254a72be4a2a44ced0912f57b3f"
+    ]
+  },
+  {
+    "id": "openai/gpt-6-luna:matrix:english:medium:3",
+    "requestHash": "ae31d920304931beb43ebcdd59840bbb836e22bc02b3b76f9a3f70b042be614b",
+    "model": "openai/gpt-6-luna",
+    "kind": "matrix",
+    "B": 32768,
+    "P": 6679,
+    "rB": 0.203826904296875,
+    "rT": 0.1630615234375,
+    "status": "SAMPLE_WITHIN_BOUNDS",
+    "receipt": {
+      "sampleId": "openai/gpt-6-luna:matrix:english:medium:3",
+      "requestHash": "ae31d920304931beb43ebcdd59840bbb836e22bc02b3b76f9a3f70b042be614b",
+      "model": "openai/gpt-6-luna",
+      "endpointTag": "openai",
+      "nativePromptTokens": 6679,
+      "nativeCompletionTokens": 464,
+      "costUsd": "0.000923625",
+      "cachedTokens": 1245,
+      "cacheWriteTokens": 5431,
+      "source": "response.prompt_tokens",
+      "includesReasoning": true,
+      "finishReason": "stop"
+    },
+    "outputCapReached": false,
+    "finishReason": "stop",
+    "sourceHashes": [
+      "0a07c69135f16cbee7571b68fe6f13d105a70a03ed3e7541d1bbe28d9bbfe5b9"
+    ]
+  },
+  {
+    "id": "openai/gpt-6-luna:matrix:english:large:0",
+    "requestHash": "8d1b4957652052c23f1dd239f0cb4afed20c24c5c3b85d0ae7a7f771a92bcad3",
+    "model": "openai/gpt-6-luna",
+    "kind": "matrix",
+    "B": 178913,
+    "P": 39519,
+    "rB": 0.22088389328891697,
+    "rT": 0.21121295529248282,
+    "status": "SAMPLE_WITHIN_BOUNDS",
+    "receipt": {
+      "sampleId": "openai/gpt-6-luna:matrix:english:large:0",
+      "requestHash": "8d1b4957652052c23f1dd239f0cb4afed20c24c5c3b85d0ae7a7f771a92bcad3",
+      "model": "openai/gpt-6-luna",
+      "endpointTag": "openai",
+      "nativePromptTokens": 39519,
+      "nativeCompletionTokens": 352,
+      "costUsd": "0.004972625",
+      "cachedTokens": 1245,
+      "cacheWriteTokens": 38271,
+      "source": "response.prompt_tokens",
+      "includesReasoning": true,
+      "finishReason": "stop"
+    },
+    "outputCapReached": false,
+    "finishReason": "stop",
+    "sourceHashes": [
+      "bbb890e83461714eaaae77dc7fdf66cd9a54cf5393a4934e6fc110bd3054aca9"
+    ]
+  },
+  {
+    "id": "openai/gpt-6-luna:matrix:english:large:1",
+    "requestHash": "0abce7fef57e81db9a9b352c93d9bb9633ddedc45e2e0c610b4c090a162662c7",
+    "model": "openai/gpt-6-luna",
+    "kind": "matrix",
+    "B": 183828,
+    "P": 40624,
+    "rB": 0.2209891855430076,
+    "rT": 0.21156129569836477,
+    "status": "SAMPLE_WITHIN_BOUNDS",
+    "receipt": {
+      "sampleId": "openai/gpt-6-luna:matrix:english:large:1",
+      "requestHash": "0abce7fef57e81db9a9b352c93d9bb9633ddedc45e2e0c610b4c090a162662c7",
+      "model": "openai/gpt-6-luna",
+      "endpointTag": "openai",
+      "nativePromptTokens": 40624,
+      "nativeCompletionTokens": 400,
+      "costUsd": "0.00513475",
+      "cachedTokens": 1245,
+      "cacheWriteTokens": 39376,
+      "source": "response.prompt_tokens",
+      "includesReasoning": true,
+      "finishReason": "stop"
+    },
+    "outputCapReached": false,
+    "finishReason": "stop",
+    "sourceHashes": [
+      "caeed1075689a69a8f644d0f7186851c902754d1df7245a4609ee659d80d0134"
+    ]
+  },
+  {
+    "id": "openai/gpt-6-luna:matrix:english:large:2",
+    "requestHash": "533467932f95b431d6b977a6dea2762ec6a88828e5df74ebf0f07a08022d4a59",
+    "model": "openai/gpt-6-luna",
+    "kind": "matrix",
+    "B": 188743,
+    "P": 41727,
+    "rB": 0.22107839760944778,
+    "rT": 0.21188209307639577,
+    "status": "SAMPLE_WITHIN_BOUNDS",
+    "receipt": {
+      "sampleId": "openai/gpt-6-luna:matrix:english:large:2",
+      "requestHash": "533467932f95b431d6b977a6dea2762ec6a88828e5df74ebf0f07a08022d4a59",
+      "model": "openai/gpt-6-luna",
+      "endpointTag": "openai",
+      "nativePromptTokens": 41727,
+      "nativeCompletionTokens": 433,
+      "costUsd": "0.005289125",
+      "cachedTokens": 1245,
+      "cacheWriteTokens": 40479,
+      "source": "response.prompt_tokens",
+      "includesReasoning": true,
+      "finishReason": "stop"
+    },
+    "outputCapReached": false,
+    "finishReason": "stop",
+    "sourceHashes": [
+      "12720dd1bbd67b4066ee24f1807a6c5c3d4aa34c6d1692cf4ebe485a3b118499"
+    ]
+  },
+  {
+    "id": "openai/gpt-6-luna:matrix:english:large:3",
+    "requestHash": "2fcef874494e8ba7fd746b3920fc58e716b5808d66b227a28352b32cfdd968dc",
+    "model": "openai/gpt-6-luna",
+    "kind": "matrix",
+    "B": 196608,
+    "P": 43498,
+    "rB": 0.22124226888020834,
+    "rT": 0.212392578125,
+    "status": "SAMPLE_WITHIN_BOUNDS",
+    "receipt": {
+      "sampleId": "openai/gpt-6-luna:matrix:english:large:3",
+      "requestHash": "2fcef874494e8ba7fd746b3920fc58e716b5808d66b227a28352b32cfdd968dc",
+      "model": "openai/gpt-6-luna",
+      "endpointTag": "openai",
+      "nativePromptTokens": 43498,
+      "nativeCompletionTokens": 357,
+      "costUsd": "0.0054725",
+      "cachedTokens": 1245,
+      "cacheWriteTokens": 42250,
+      "source": "response.prompt_tokens",
+      "includesReasoning": true,
+      "finishReason": "stop"
+    },
+    "outputCapReached": false,
+    "finishReason": "stop",
+    "sourceHashes": [
+      "660ea956659f2ddbae5f524ea069476d31a508173a219dbc85ca541b647e8d44"
+    ]
+  },
+  {
+    "id": "openai/gpt-6-luna:matrix:code:small:0",
+    "requestHash": "5fd668d8c1711beb73f1ca80bdfaf8861781516983845ba3d695b2e39a48361c",
+    "model": "openai/gpt-6-luna",
+    "kind": "matrix",
+    "B": 414,
+    "P": 29,
+    "rB": 0.07004830917874397,
+    "rT": 0.0033697420404369045,
+    "status": "SAMPLE_WITHIN_BOUNDS",
+    "receipt": {
+      "sampleId": "openai/gpt-6-luna:matrix:code:small:0",
+      "requestHash": "5fd668d8c1711beb73f1ca80bdfaf8861781516983845ba3d695b2e39a48361c",
+      "model": "openai/gpt-6-luna",
+      "endpointTag": "openai",
+      "nativePromptTokens": 29,
+      "nativeCompletionTokens": 130,
+      "costUsd": "0.0000679",
+      "cachedTokens": 0,
+      "cacheWriteTokens": 0,
+      "source": "response.prompt_tokens",
+      "includesReasoning": true,
+      "finishReason": "stop"
+    },
+    "outputCapReached": false,
+    "finishReason": "stop",
+    "sourceHashes": [
+      "99ac7e2e68d6343fafb74697d7453c88fe2ee744fdee2527dd09af02a1c0a0b8"
+    ]
+  },
+  {
+    "id": "openai/gpt-6-luna:matrix:code:small:1",
+    "requestHash": "d6f062910804eeb8169f7aaae298f59a1445be0eaabbf6bee221155ebbf22fbd",
+    "model": "openai/gpt-6-luna",
+    "kind": "matrix",
+    "B": 3829,
+    "P": 1156,
+    "rB": 0.30190650300339517,
+    "rT": 0.0961650445054488,
+    "status": "SAMPLE_WITHIN_BOUNDS",
+    "receipt": {
+      "sampleId": "openai/gpt-6-luna:matrix:code:small:1",
+      "requestHash": "d6f062910804eeb8169f7aaae298f59a1445be0eaabbf6bee221155ebbf22fbd",
+      "model": "openai/gpt-6-luna",
+      "endpointTag": "openai",
+      "nativePromptTokens": 1156,
+      "nativeCompletionTokens": 738,
+      "costUsd": "0.000513425",
+      "cachedTokens": 0,
+      "cacheWriteTokens": 1153,
+      "source": "response.prompt_tokens",
+      "includesReasoning": true,
+      "finishReason": "stop"
+    },
+    "outputCapReached": false,
+    "finishReason": "stop",
+    "sourceHashes": [
+      "6cc3d25e9b7c0cd6818af401f51d29c77060c26cc81dcf164853d011ad20096d"
+    ]
+  },
+  {
+    "id": "openai/gpt-6-luna:matrix:code:small:2",
+    "requestHash": "bdc7fe6c5b89f60aaa2b788af6597ccf125caebaf455639f423de51383e432d8",
+    "model": "openai/gpt-6-luna",
+    "kind": "matrix",
+    "B": 3932,
+    "P": 1191,
+    "rB": 0.3028992878942014,
+    "rT": 0.09823490597162653,
+    "status": "SAMPLE_WITHIN_BOUNDS",
+    "receipt": {
+      "sampleId": "openai/gpt-6-luna:matrix:code:small:2",
+      "requestHash": "bdc7fe6c5b89f60aaa2b788af6597ccf125caebaf455639f423de51383e432d8",
+      "model": "openai/gpt-6-luna",
+      "endpointTag": "openai",
+      "nativePromptTokens": 1191,
+      "nativeCompletionTokens": 456,
+      "costUsd": "0.0003768",
+      "cachedTokens": 0,
+      "cacheWriteTokens": 1188,
+      "source": "response.prompt_tokens",
+      "includesReasoning": true,
+      "finishReason": "stop"
+    },
+    "outputCapReached": false,
+    "finishReason": "stop",
+    "sourceHashes": [
+      "726652a06a522183ba5badc3387b7bf51a57f0af845a82fed41077508370885b"
+    ]
+  },
+  {
+    "id": "openai/gpt-6-luna:matrix:code:small:3",
+    "requestHash": "fc22b13f16bd88d0344d9ffde34912f4d7adf32b773eeb644347bca6a62c820e",
+    "model": "openai/gpt-6-luna",
+    "kind": "matrix",
+    "B": 4096,
+    "P": 1245,
+    "rB": 0.303955078125,
+    "rT": 0.101318359375,
+    "status": "SAMPLE_WITHIN_BOUNDS",
+    "receipt": {
+      "sampleId": "openai/gpt-6-luna:matrix:code:small:3",
+      "requestHash": "fc22b13f16bd88d0344d9ffde34912f4d7adf32b773eeb644347bca6a62c820e",
+      "model": "openai/gpt-6-luna",
+      "endpointTag": "openai",
+      "nativePromptTokens": 1245,
+      "nativeCompletionTokens": 593,
+      "costUsd": "0.00045205",
+      "cachedTokens": 0,
+      "cacheWriteTokens": 1242,
+      "source": "response.prompt_tokens",
+      "includesReasoning": true,
+      "finishReason": "stop"
+    },
+    "outputCapReached": false,
+    "finishReason": "stop",
+    "sourceHashes": [
+      "fb41dac0d056c646ac9d47a65076c2bb18b2a71825b9a8a0b2172a71f8c645d5"
+    ]
+  },
+  {
+    "id": "openai/gpt-6-luna:matrix:code:medium:0",
+    "requestHash": "95b39433142fa653177907d060dca4849a8dbd1e6f2da0f62b8c41675599b8d0",
+    "model": "openai/gpt-6-luna",
+    "kind": "matrix",
+    "B": 29818,
+    "P": 8231,
+    "rB": 0.2760413173251056,
+    "rT": 0.21654827676927124,
+    "status": "SAMPLE_WITHIN_BOUNDS",
+    "receipt": {
+      "sampleId": "openai/gpt-6-luna:matrix:code:medium:0",
+      "requestHash": "95b39433142fa653177907d060dca4849a8dbd1e6f2da0f62b8c41675599b8d0",
+      "model": "openai/gpt-6-luna",
+      "endpointTag": "openai",
+      "nativePromptTokens": 8231,
+      "nativeCompletionTokens": 416,
+      "costUsd": "0.001093625",
+      "cachedTokens": 1245,
+      "cacheWriteTokens": 6983,
+      "source": "response.prompt_tokens",
+      "includesReasoning": true,
+      "finishReason": "stop"
+    },
+    "outputCapReached": false,
+    "finishReason": "stop",
+    "sourceHashes": [
+      "39996d16969433b532c1072c0a15c6735a3fedd75ec3b04e1bcc4d50d67d1fbb"
+    ]
+  },
+  {
+    "id": "openai/gpt-6-luna:matrix:code:medium:1",
+    "requestHash": "8e17311508fc1dda5e0c876e3909b8d57bc2b8e3b7eabc768c44d12fe3b8c9e9",
+    "model": "openai/gpt-6-luna",
+    "kind": "matrix",
+    "B": 30638,
+    "P": 8502,
+    "rB": 0.2774985312357203,
+    "rT": 0.21895441668812773,
+    "status": "SAMPLE_WITHIN_BOUNDS",
+    "receipt": {
+      "sampleId": "openai/gpt-6-luna:matrix:code:medium:1",
+      "requestHash": "8e17311508fc1dda5e0c876e3909b8d57bc2b8e3b7eabc768c44d12fe3b8c9e9",
+      "model": "openai/gpt-6-luna",
+      "endpointTag": "openai",
+      "nativePromptTokens": 8502,
+      "nativeCompletionTokens": 436,
+      "costUsd": "0.0011375",
+      "cachedTokens": 1245,
+      "cacheWriteTokens": 7254,
+      "source": "response.prompt_tokens",
+      "includesReasoning": true,
+      "finishReason": "stop"
+    },
+    "outputCapReached": false,
+    "finishReason": "stop",
+    "sourceHashes": [
+      "f6b6f548c458841b639016568b7c7f2f0af9aecd6d860b80e079983a8437be71"
+    ]
+  },
+  {
+    "id": "openai/gpt-6-luna:matrix:code:medium:2",
+    "requestHash": "be828ee186f3ed06909cd24f1fde4f9929f8c1861a70a72fda6ed1a649fe4673",
+    "model": "openai/gpt-6-luna",
+    "kind": "matrix",
+    "B": 31457,
+    "P": 8775,
+    "rB": 0.27895222049146456,
+    "rT": 0.22131705717672576,
+    "status": "SAMPLE_WITHIN_BOUNDS",
+    "receipt": {
+      "sampleId": "openai/gpt-6-luna:matrix:code:medium:2",
+      "requestHash": "be828ee186f3ed06909cd24f1fde4f9929f8c1861a70a72fda6ed1a649fe4673",
+      "model": "openai/gpt-6-luna",
+      "endpointTag": "openai",
+      "nativePromptTokens": 8775,
+      "nativeCompletionTokens": 406,
+      "costUsd": "0.001156625",
+      "cachedTokens": 1245,
+      "cacheWriteTokens": 7527,
+      "source": "response.prompt_tokens",
+      "includesReasoning": true,
+      "finishReason": "stop"
+    },
+    "outputCapReached": false,
+    "finishReason": "stop",
+    "sourceHashes": [
+      "71909b0997d43eb35139e06de54e6eaef7bb5f2f76c25b30994484082dacb763"
+    ]
+  },
+  {
+    "id": "openai/gpt-6-luna:matrix:code:medium:3",
+    "requestHash": "684a00d8d20cf9f4df88de1ab1a545c74da6dd885d5e70e1f9efd1462be605cb",
+    "model": "openai/gpt-6-luna",
+    "kind": "matrix",
+    "B": 32768,
+    "P": 9205,
+    "rB": 0.280914306640625,
+    "rT": 0.2247314453125,
+    "status": "SAMPLE_WITHIN_BOUNDS",
+    "receipt": {
+      "sampleId": "openai/gpt-6-luna:matrix:code:medium:3",
+      "requestHash": "684a00d8d20cf9f4df88de1ab1a545c74da6dd885d5e70e1f9efd1462be605cb",
+      "model": "openai/gpt-6-luna",
+      "endpointTag": "openai",
+      "nativePromptTokens": 9205,
+      "nativeCompletionTokens": 338,
+      "costUsd": "0.001176375",
+      "cachedTokens": 1245,
+      "cacheWriteTokens": 7957,
+      "source": "response.prompt_tokens",
+      "includesReasoning": true,
+      "finishReason": "stop"
+    },
+    "outputCapReached": false,
+    "finishReason": "stop",
+    "sourceHashes": [
+      "3f63b0fa9d3091eec6c893043fc0c545f0c037bcdaf5e1c6877c0fea52b70123"
+    ]
+  },
+  {
+    "id": "openai/gpt-6-luna:matrix:code:large:0",
+    "requestHash": "85eaf5d30e1c30802c393bee2698a0759dc7c67bee13d6bff4e1de28bbba9614",
+    "model": "openai/gpt-6-luna",
+    "kind": "matrix",
+    "B": 178913,
+    "P": 57344,
+    "rB": 0.32051332211745376,
+    "rT": 0.30648031853771945,
+    "status": "SAMPLE_WITHIN_BOUNDS",
+    "receipt": {
+      "sampleId": "openai/gpt-6-luna:matrix:code:large:0",
+      "requestHash": "85eaf5d30e1c30802c393bee2698a0759dc7c67bee13d6bff4e1de28bbba9614",
+      "model": "openai/gpt-6-luna",
+      "endpointTag": "openai",
+      "nativePromptTokens": 57344,
+      "nativeCompletionTokens": 407,
+      "costUsd": "0.00722825",
+      "cachedTokens": 1245,
+      "cacheWriteTokens": 56096,
+      "source": "response.prompt_tokens",
+      "includesReasoning": true,
+      "finishReason": "stop"
+    },
+    "outputCapReached": false,
+    "finishReason": "stop",
+    "sourceHashes": [
+      "4238c48a77b6c829779681f35702178928d9f2a3bc52c6082d9e5b46cd27ab7a"
+    ]
+  },
+  {
+    "id": "openai/gpt-6-luna:matrix:code:large:1",
+    "requestHash": "a8f39cee8a7bbf35028392b7417e0e152372846163a08caf0aaac4b5fa7b7e23",
+    "model": "openai/gpt-6-luna",
+    "kind": "matrix",
+    "B": 183828,
+    "P": 58965,
+    "rB": 0.3207617990730465,
+    "rT": 0.3070773877721071,
+    "status": "SAMPLE_WITHIN_BOUNDS",
+    "receipt": {
+      "sampleId": "openai/gpt-6-luna:matrix:code:large:1",
+      "requestHash": "a8f39cee8a7bbf35028392b7417e0e152372846163a08caf0aaac4b5fa7b7e23",
+      "model": "openai/gpt-6-luna",
+      "endpointTag": "openai",
+      "nativePromptTokens": 58965,
+      "nativeCompletionTokens": 486,
+      "costUsd": "0.007470375",
+      "cachedTokens": 1245,
+      "cacheWriteTokens": 57717,
+      "source": "response.prompt_tokens",
+      "includesReasoning": true,
+      "finishReason": "stop"
+    },
+    "outputCapReached": false,
+    "finishReason": "stop",
+    "sourceHashes": [
+      "87254ff3febaf928e16862abb52ad10796e314e519f98e061cfb524cd95656f1"
+    ]
+  },
+  {
+    "id": "openai/gpt-6-luna:matrix:code:large:2",
+    "requestHash": "7b8b5f31f303e68966e06649dda1766c8de9409c0f19e5ff3cbf9ba51d4dd860",
+    "model": "openai/gpt-6-luna",
+    "kind": "matrix",
+    "B": 188743,
+    "P": 60585,
+    "rB": 0.3209920367907684,
+    "rT": 0.307639576510016,
+    "status": "SAMPLE_WITHIN_BOUNDS",
+    "receipt": {
+      "sampleId": "openai/gpt-6-luna:matrix:code:large:2",
+      "requestHash": "7b8b5f31f303e68966e06649dda1766c8de9409c0f19e5ff3cbf9ba51d4dd860",
+      "model": "openai/gpt-6-luna",
+      "endpointTag": "openai",
+      "nativePromptTokens": 60585,
+      "nativeCompletionTokens": 522,
+      "costUsd": "0.007690875",
+      "cachedTokens": 1245,
+      "cacheWriteTokens": 59337,
+      "source": "response.prompt_tokens",
+      "includesReasoning": true,
+      "finishReason": "stop"
+    },
+    "outputCapReached": false,
+    "finishReason": "stop",
+    "sourceHashes": [
+      "856865e37e73d0c9519413a602f3fbf4d0c9dfc8162e549b9cae9575e94ad045"
+    ]
+  },
+  {
+    "id": "openai/gpt-6-luna:matrix:code:large:3",
+    "requestHash": "3416440e6ae1a47f53fe03b0930ab7549130c9f2d2570420c635a67ab45b6647",
+    "model": "openai/gpt-6-luna",
+    "kind": "matrix",
+    "B": 196608,
+    "P": 63177,
+    "rB": 0.3213348388671875,
+    "rT": 0.3084814453125,
+    "status": "SAMPLE_WITHIN_BOUNDS",
+    "receipt": {
+      "sampleId": "openai/gpt-6-luna:matrix:code:large:3",
+      "requestHash": "3416440e6ae1a47f53fe03b0930ab7549130c9f2d2570420c635a67ab45b6647",
+      "model": "openai/gpt-6-luna",
+      "endpointTag": "openai",
+      "nativePromptTokens": 63177,
+      "nativeCompletionTokens": 413,
+      "costUsd": "0.007960375",
+      "cachedTokens": 1245,
+      "cacheWriteTokens": 61929,
+      "source": "response.prompt_tokens",
+      "includesReasoning": true,
+      "finishReason": "stop"
+    },
+    "outputCapReached": false,
+    "finishReason": "stop",
+    "sourceHashes": [
+      "c5ecc0c8972ef96344a5e7272637ada0c75cc2c1eb654e887b617e400c0aae92"
+    ]
+  },
+  {
+    "id": "openai/gpt-6-luna:matrix:json:small:0",
+    "requestHash": "7fdc589157d4334b36f202e91971f2fc64b12b63cadbf15608ca8d81c2b7e983",
+    "model": "openai/gpt-6-luna",
+    "kind": "matrix",
+    "B": 414,
+    "P": 29,
+    "rB": 0.07004830917874397,
+    "rT": 0.0033697420404369045,
+    "status": "SAMPLE_WITHIN_BOUNDS",
+    "receipt": {
+      "sampleId": "openai/gpt-6-luna:matrix:json:small:0",
+      "requestHash": "7fdc589157d4334b36f202e91971f2fc64b12b63cadbf15608ca8d81c2b7e983",
+      "model": "openai/gpt-6-luna",
+      "endpointTag": "openai",
+      "nativePromptTokens": 29,
+      "nativeCompletionTokens": 88,
+      "costUsd": "0.0000469",
+      "cachedTokens": 0,
+      "cacheWriteTokens": 0,
+      "source": "response.prompt_tokens",
+      "includesReasoning": true,
+      "finishReason": "stop"
+    },
+    "outputCapReached": false,
+    "finishReason": "stop",
+    "sourceHashes": [
+      "26fe4985852fc72491bc5b281040b60c2749c624bf87977f1995c9c3c42418e2"
+    ]
+  },
+  {
+    "id": "openai/gpt-6-luna:matrix:json:small:1",
+    "requestHash": "f3a3d0f6c936277a73528b9051c7cef3adcab657718f5dfd2852e2192ef9d21c",
+    "model": "openai/gpt-6-luna",
+    "kind": "matrix",
+    "B": 3829,
+    "P": 1079,
+    "rB": 0.28179681378950117,
+    "rT": 0.08975958738873638,
+    "status": "SAMPLE_WITHIN_BOUNDS",
+    "receipt": {
+      "sampleId": "openai/gpt-6-luna:matrix:json:small:1",
+      "requestHash": "f3a3d0f6c936277a73528b9051c7cef3adcab657718f5dfd2852e2192ef9d21c",
+      "model": "openai/gpt-6-luna",
+      "endpointTag": "openai",
+      "nativePromptTokens": 1079,
+      "nativeCompletionTokens": 408,
+      "costUsd": "0.0003388",
+      "cachedTokens": 0,
+      "cacheWriteTokens": 1076,
+      "source": "response.prompt_tokens",
+      "includesReasoning": true,
+      "finishReason": "stop"
+    },
+    "outputCapReached": false,
+    "finishReason": "stop",
+    "sourceHashes": [
+      "099accc5cdbc9751165720057c53a4e7d341b86db043bc2b4b14205e9854d5cd"
+    ]
+  },
+  {
+    "id": "openai/gpt-6-luna:matrix:json:small:2",
+    "requestHash": "6874dad112965e48337fc8be4cfaba2ac72753a509698b34a9930f3cc640a1e3",
+    "model": "openai/gpt-6-luna",
+    "kind": "matrix",
+    "B": 3932,
+    "P": 1111,
+    "rB": 0.2825534079348932,
+    "rT": 0.09163642362256681,
+    "status": "SAMPLE_WITHIN_BOUNDS",
+    "receipt": {
+      "sampleId": "openai/gpt-6-luna:matrix:json:small:2",
+      "requestHash": "6874dad112965e48337fc8be4cfaba2ac72753a509698b34a9930f3cc640a1e3",
+      "model": "openai/gpt-6-luna",
+      "endpointTag": "openai",
+      "nativePromptTokens": 1111,
+      "nativeCompletionTokens": 851,
+      "costUsd": "0.0005643",
+      "cachedTokens": 0,
+      "cacheWriteTokens": 1108,
+      "source": "response.prompt_tokens",
+      "includesReasoning": true,
+      "finishReason": "stop"
+    },
+    "outputCapReached": false,
+    "finishReason": "stop",
+    "sourceHashes": [
+      "04cf1ba029b9a74fd2b37a3ed86b984e60d50b914b84d8dfca0be1d8f52ff541"
+    ]
+  },
+  {
+    "id": "openai/gpt-6-luna:matrix:json:small:3",
+    "requestHash": "723416465da0cd08208587f208cfc4e57cff451da5cfdfaa4b5a12d1423bcd46",
+    "model": "openai/gpt-6-luna",
+    "kind": "matrix",
+    "B": 4096,
+    "P": 1160,
+    "rB": 0.283203125,
+    "rT": 0.09440104166666667,
+    "status": "SAMPLE_WITHIN_BOUNDS",
+    "receipt": {
+      "sampleId": "openai/gpt-6-luna:matrix:json:small:3",
+      "requestHash": "723416465da0cd08208587f208cfc4e57cff451da5cfdfaa4b5a12d1423bcd46",
+      "model": "openai/gpt-6-luna",
+      "endpointTag": "openai",
+      "nativePromptTokens": 1160,
+      "nativeCompletionTokens": 419,
+      "costUsd": "0.000354425",
+      "cachedTokens": 0,
+      "cacheWriteTokens": 1157,
+      "source": "response.prompt_tokens",
+      "includesReasoning": true,
+      "finishReason": "stop"
+    },
+    "outputCapReached": false,
+    "finishReason": "stop",
+    "sourceHashes": [
+      "0965bda34a3a35831660ff3fb0c308f715be60182c933f356bec00b56af23099"
+    ]
+  },
+  {
+    "id": "openai/gpt-6-luna:matrix:json:medium:0",
+    "requestHash": "df03e36dd31cfd3b7ae66f19a0cbf5822dbffa27f3360f5d2eee2cbbddd9ef30",
+    "model": "openai/gpt-6-luna",
+    "kind": "matrix",
+    "B": 29818,
+    "P": 7769,
+    "rB": 0.26054732041049034,
+    "rT": 0.20439358063667457,
+    "status": "SAMPLE_WITHIN_BOUNDS",
+    "receipt": {
+      "sampleId": "openai/gpt-6-luna:matrix:json:medium:0",
+      "requestHash": "df03e36dd31cfd3b7ae66f19a0cbf5822dbffa27f3360f5d2eee2cbbddd9ef30",
+      "model": "openai/gpt-6-luna",
+      "endpointTag": "openai",
+      "nativePromptTokens": 7769,
+      "nativeCompletionTokens": 312,
+      "costUsd": "0.000983875",
+      "cachedTokens": 1245,
+      "cacheWriteTokens": 6521,
+      "source": "response.prompt_tokens",
+      "includesReasoning": true,
+      "finishReason": "stop"
+    },
+    "outputCapReached": false,
+    "finishReason": "stop",
+    "sourceHashes": [
+      "ea85973b54a86db47f7c70773024fd3245046f439287109f85b07c1dbb78d485"
+    ]
+  },
+  {
+    "id": "openai/gpt-6-luna:matrix:json:medium:1",
+    "requestHash": "8c2e455bed256735b04da16dbd40e1197099a4c0e4a430348e0c0a166aff94ac",
+    "model": "openai/gpt-6-luna",
+    "kind": "matrix",
+    "B": 30638,
+    "P": 8024,
+    "rB": 0.261896990665187,
+    "rT": 0.20664434715426216,
+    "status": "SAMPLE_WITHIN_BOUNDS",
+    "receipt": {
+      "sampleId": "openai/gpt-6-luna:matrix:json:medium:1",
+      "requestHash": "8c2e455bed256735b04da16dbd40e1197099a4c0e4a430348e0c0a166aff94ac",
+      "model": "openai/gpt-6-luna",
+      "endpointTag": "openai",
+      "nativePromptTokens": 8024,
+      "nativeCompletionTokens": 336,
+      "costUsd": "0.00102775",
+      "cachedTokens": 1245,
+      "cacheWriteTokens": 6776,
+      "source": "response.prompt_tokens",
+      "includesReasoning": true,
+      "finishReason": "stop"
+    },
+    "outputCapReached": false,
+    "finishReason": "stop",
+    "sourceHashes": [
+      "e9d27c04941438237674d915581ee5b16c7a955c53942d4bd1aeab4e1030b9ba"
+    ]
+  },
+  {
+    "id": "openai/gpt-6-luna:matrix:json:medium:2",
+    "requestHash": "7f88dda96aecc401a65508d986d9151d1e0b843a265c2220001b10e94434207c",
+    "model": "openai/gpt-6-luna",
+    "kind": "matrix",
+    "B": 31457,
+    "P": 8274,
+    "rB": 0.26302571764631083,
+    "rT": 0.20868117733108024,
+    "status": "SAMPLE_WITHIN_BOUNDS",
+    "receipt": {
+      "sampleId": "openai/gpt-6-luna:matrix:json:medium:2",
+      "requestHash": "7f88dda96aecc401a65508d986d9151d1e0b843a265c2220001b10e94434207c",
+      "model": "openai/gpt-6-luna",
+      "endpointTag": "openai",
+      "nativePromptTokens": 8274,
+      "nativeCompletionTokens": 262,
+      "costUsd": "0.001022",
+      "cachedTokens": 1245,
+      "cacheWriteTokens": 7026,
+      "source": "response.prompt_tokens",
+      "includesReasoning": true,
+      "finishReason": "stop"
+    },
+    "outputCapReached": false,
+    "finishReason": "stop",
+    "sourceHashes": [
+      "dccb77b5b1859784a20cc661d1912bcaaa227354bee72688ec6bcf368ce8b748"
+    ]
+  },
+  {
+    "id": "openai/gpt-6-luna:matrix:json:medium:3",
+    "requestHash": "f6352ff8a0e817a7ff4f94b45e091db85ffd863ab86abff4b5673262e2f1d5e7",
+    "model": "openai/gpt-6-luna",
+    "kind": "matrix",
+    "B": 32768,
+    "P": 8679,
+    "rB": 0.264862060546875,
+    "rT": 0.2118896484375,
+    "status": "SAMPLE_WITHIN_BOUNDS",
+    "receipt": {
+      "sampleId": "openai/gpt-6-luna:matrix:json:medium:3",
+      "requestHash": "f6352ff8a0e817a7ff4f94b45e091db85ffd863ab86abff4b5673262e2f1d5e7",
+      "model": "openai/gpt-6-luna",
+      "endpointTag": "openai",
+      "nativePromptTokens": 8679,
+      "nativeCompletionTokens": 252,
+      "costUsd": "0.001067625",
+      "cachedTokens": 1245,
+      "cacheWriteTokens": 7431,
+      "source": "response.prompt_tokens",
+      "includesReasoning": true,
+      "finishReason": "stop"
+    },
+    "outputCapReached": false,
+    "finishReason": "stop",
+    "sourceHashes": [
+      "f47738bde98fe47870cfbe0f1c5bd30f37b1c96499ad891bdcf8083fd5be048d"
+    ]
+  },
+  {
+    "id": "openai/gpt-6-luna:matrix:json:large:0:r3",
+    "requestHash": "c65fa98ae33bad3ab66fb01a55ff84654a47dd1dfbfa82f6a718768532fc888a",
+    "model": "openai/gpt-6-luna",
+    "kind": "matrix",
+    "B": 178913,
+    "P": 49543,
+    "rB": 0.2769111244012453,
+    "rT": 0.26478715159936933,
+    "status": "SAMPLE_WITHIN_BOUNDS",
+    "receipt": {
+      "sampleId": "openai/gpt-6-luna:matrix:json:large:0:r3",
+      "requestHash": "c65fa98ae33bad3ab66fb01a55ff84654a47dd1dfbfa82f6a718768532fc888a",
+      "model": "openai/gpt-6-luna",
+      "endpointTag": "openai",
+      "nativePromptTokens": 49543,
+      "nativeCompletionTokens": 288,
+      "costUsd": "0.006193625",
+      "cachedTokens": 1245,
+      "cacheWriteTokens": 48295,
+      "source": "response.prompt_tokens",
+      "includesReasoning": true,
+      "finishReason": "stop"
+    },
+    "outputCapReached": false,
+    "finishReason": "stop",
+    "sourceHashes": [
+      "6a682cff3eb6ecbc5a5c712fd5a4eebcb692b8694495a6db129eecc1e8f83ce0"
+    ]
+  },
+  {
+    "id": "openai/gpt-6-luna:matrix:json:large:1:r3",
+    "requestHash": "d741757e9a2f42c1b9c7db6c1b2fad4b01a0abfb01eb517dab80e49cac6ef4b5",
+    "model": "openai/gpt-6-luna",
+    "kind": "matrix",
+    "B": 183828,
+    "P": 50936,
+    "rB": 0.27708510129033664,
+    "rT": 0.26526403499635454,
+    "status": "SAMPLE_WITHIN_BOUNDS",
+    "receipt": {
+      "sampleId": "openai/gpt-6-luna:matrix:json:large:1:r3",
+      "requestHash": "d741757e9a2f42c1b9c7db6c1b2fad4b01a0abfb01eb517dab80e49cac6ef4b5",
+      "model": "openai/gpt-6-luna",
+      "endpointTag": "openai",
+      "nativePromptTokens": 50936,
+      "nativeCompletionTokens": 398,
+      "costUsd": "0.00642275",
+      "cachedTokens": 1245,
+      "cacheWriteTokens": 49688,
+      "source": "response.prompt_tokens",
+      "includesReasoning": true,
+      "finishReason": "stop"
+    },
+    "outputCapReached": false,
+    "finishReason": "stop",
+    "sourceHashes": [
+      "08f9fdc25ec3dee956734da9a59596a6c00fa17b3153b9658f12b22a30fe3a92"
+    ]
+  },
+  {
+    "id": "openai/gpt-6-luna:matrix:json:large:2:r3",
+    "requestHash": "015b0a02c03e3aaafe725ae9bd0abb48e0679d78d39e9fa02699b6097c6e5472",
+    "model": "openai/gpt-6-luna",
+    "kind": "matrix",
+    "B": 188743,
+    "P": 52331,
+    "rB": 0.2772606136386515,
+    "rT": 0.2657272704191738,
+    "status": "SAMPLE_WITHIN_BOUNDS",
+    "receipt": {
+      "sampleId": "openai/gpt-6-luna:matrix:json:large:2:r3",
+      "requestHash": "015b0a02c03e3aaafe725ae9bd0abb48e0679d78d39e9fa02699b6097c6e5472",
+      "model": "openai/gpt-6-luna",
+      "endpointTag": "openai",
+      "nativePromptTokens": 52331,
+      "nativeCompletionTokens": 379,
+      "costUsd": "0.006587625",
+      "cachedTokens": 1245,
+      "cacheWriteTokens": 51083,
+      "source": "response.prompt_tokens",
+      "includesReasoning": true,
+      "finishReason": "stop"
+    },
+    "outputCapReached": false,
+    "finishReason": "stop",
+    "sourceHashes": [
+      "39b7d117c3560762af6875f43fa33c7989316e99fd5a1b77908732706a8bbc51"
+    ]
+  },
+  {
+    "id": "openai/gpt-6-luna:matrix:json:large:3:r3",
+    "requestHash": "1bce34d91cfb10f54a70105e5d4cf687043d8a4c29f6c024a22bd1b6bd513814",
+    "model": "openai/gpt-6-luna",
+    "kind": "matrix",
+    "B": 196608,
+    "P": 54561,
+    "rB": 0.2775115966796875,
+    "rT": 0.2664111328125,
+    "status": "SAMPLE_WITHIN_BOUNDS",
+    "receipt": {
+      "sampleId": "openai/gpt-6-luna:matrix:json:large:3:r3",
+      "requestHash": "1bce34d91cfb10f54a70105e5d4cf687043d8a4c29f6c024a22bd1b6bd513814",
+      "model": "openai/gpt-6-luna",
+      "endpointTag": "openai",
+      "nativePromptTokens": 54561,
+      "nativeCompletionTokens": 346,
+      "costUsd": "0.006849875",
+      "cachedTokens": 1245,
+      "cacheWriteTokens": 53313,
+      "source": "response.prompt_tokens",
+      "includesReasoning": true,
+      "finishReason": "stop"
+    },
+    "outputCapReached": false,
+    "finishReason": "stop",
+    "sourceHashes": [
+      "492145ca2bd8c28451cf59ec23f50f1dc6ad299af2b0b90977a6614bba6beb76"
+    ]
+  },
+  {
+    "id": "openai/gpt-6-luna:matrix:tools:small:0",
+    "requestHash": "283532e8a0b1fd254fbd218c680e2ddece354b83874e86e95ea709fbae673328",
+    "model": "openai/gpt-6-luna",
+    "kind": "matrix",
+    "B": 679,
+    "P": 72,
+    "rB": 0.10603829160530191,
+    "rT": 0.008116334122421373,
+    "status": "SAMPLE_WITHIN_BOUNDS",
+    "receipt": {
+      "sampleId": "openai/gpt-6-luna:matrix:tools:small:0",
+      "requestHash": "283532e8a0b1fd254fbd218c680e2ddece354b83874e86e95ea709fbae673328",
+      "model": "openai/gpt-6-luna",
+      "endpointTag": "openai",
+      "nativePromptTokens": 72,
+      "nativeCompletionTokens": 23,
+      "costUsd": "0.0000187",
+      "cachedTokens": 0,
+      "cacheWriteTokens": 0,
+      "source": "response.prompt_tokens",
+      "includesReasoning": true,
+      "finishReason": "tool_calls"
+    },
+    "outputCapReached": false,
+    "finishReason": "tool_calls",
+    "sourceHashes": [
+      "6b594e44e39d15382cf38cd197cc94f02e88ff9990ad4efb9fcb3d035d1c4b90"
+    ]
+  },
+  {
+    "id": "openai/gpt-6-luna:matrix:tools:small:1",
+    "requestHash": "6a0af5660b023215cabb68f70f78637b107508b398f348be8c85c36cca59e175",
+    "model": "openai/gpt-6-luna",
+    "kind": "matrix",
+    "B": 3829,
+    "P": 570,
+    "rB": 0.14886393314181248,
+    "rT": 0.047417020214624406,
+    "status": "SAMPLE_WITHIN_BOUNDS",
+    "receipt": {
+      "sampleId": "openai/gpt-6-luna:matrix:tools:small:1",
+      "requestHash": "6a0af5660b023215cabb68f70f78637b107508b398f348be8c85c36cca59e175",
+      "model": "openai/gpt-6-luna",
+      "endpointTag": "openai",
+      "nativePromptTokens": 570,
+      "nativeCompletionTokens": 81,
+      "costUsd": "0.0000975",
+      "cachedTokens": 0,
+      "cacheWriteTokens": 0,
+      "source": "response.prompt_tokens",
+      "includesReasoning": true,
+      "finishReason": "tool_calls"
+    },
+    "outputCapReached": false,
+    "finishReason": "tool_calls",
+    "sourceHashes": [
+      "813ec4429d885aa1a1c7349b8000e5134fa0c733fda6c860a4501e9e08425c6e"
+    ]
+  },
+  {
+    "id": "openai/gpt-6-luna:matrix:tools:small:2",
+    "requestHash": "7802c08712c9954ab9fd1f018756c3586123b5e5ea963a01d4949fc1f7508f06",
+    "model": "openai/gpt-6-luna",
+    "kind": "matrix",
+    "B": 3932,
+    "P": 587,
+    "rB": 0.14928789420142421,
+    "rT": 0.04841636423622567,
+    "status": "SAMPLE_WITHIN_BOUNDS",
+    "receipt": {
+      "sampleId": "openai/gpt-6-luna:matrix:tools:small:2",
+      "requestHash": "7802c08712c9954ab9fd1f018756c3586123b5e5ea963a01d4949fc1f7508f06",
+      "model": "openai/gpt-6-luna",
+      "endpointTag": "openai",
+      "nativePromptTokens": 587,
+      "nativeCompletionTokens": 28,
+      "costUsd": "0.0000727",
+      "cachedTokens": 0,
+      "cacheWriteTokens": 0,
+      "source": "response.prompt_tokens",
+      "includesReasoning": true,
+      "finishReason": "tool_calls"
+    },
+    "outputCapReached": false,
+    "finishReason": "tool_calls",
+    "sourceHashes": [
+      "0bf8a2edd16b5479346e6ec11413775e115e7550a8ed35de85a0c26820ab4034"
+    ]
+  },
+  {
+    "id": "openai/gpt-6-luna:matrix:tools:small:3",
+    "requestHash": "82dd1f241c4f1747288bbf871915025713985b7ef891b90e3904633405f4ab17",
+    "model": "openai/gpt-6-luna",
+    "kind": "matrix",
+    "B": 4096,
+    "P": 610,
+    "rB": 0.14892578125,
+    "rT": 0.049641927083333336,
+    "status": "SAMPLE_WITHIN_BOUNDS",
+    "receipt": {
+      "sampleId": "openai/gpt-6-luna:matrix:tools:small:3",
+      "requestHash": "82dd1f241c4f1747288bbf871915025713985b7ef891b90e3904633405f4ab17",
+      "model": "openai/gpt-6-luna",
+      "endpointTag": "openai",
+      "nativePromptTokens": 610,
+      "nativeCompletionTokens": 259,
+      "costUsd": "0.0001905",
+      "cachedTokens": 0,
+      "cacheWriteTokens": 0,
+      "source": "response.prompt_tokens",
+      "includesReasoning": true,
+      "finishReason": "stop"
+    },
+    "outputCapReached": false,
+    "finishReason": "stop",
+    "sourceHashes": [
+      "7690d20ce35d43675fc4fd9bac89079116b8080e523f7fb41a4c147302b92edf"
+    ]
+  },
+  {
+    "id": "openai/gpt-6-luna:matrix:tools:medium:0",
+    "requestHash": "e85503b88ff9e2e36f01106f2558d7fb0aa13a9e3eb4aa1ea5bb0499019721ea",
+    "model": "openai/gpt-6-luna",
+    "kind": "matrix",
+    "B": 29818,
+    "P": 4109,
+    "rB": 0.13780266952847273,
+    "rT": 0.10810313075506446,
+    "status": "SAMPLE_WITHIN_BOUNDS",
+    "receipt": {
+      "sampleId": "openai/gpt-6-luna:matrix:tools:medium:0",
+      "requestHash": "e85503b88ff9e2e36f01106f2558d7fb0aa13a9e3eb4aa1ea5bb0499019721ea",
+      "model": "openai/gpt-6-luna",
+      "endpointTag": "openai",
+      "nativePromptTokens": 4109,
+      "nativeCompletionTokens": 276,
+      "costUsd": "0.00065155",
+      "cachedTokens": 0,
+      "cacheWriteTokens": 4106,
+      "source": "response.prompt_tokens",
+      "includesReasoning": true,
+      "finishReason": "stop"
+    },
+    "outputCapReached": false,
+    "finishReason": "stop",
+    "sourceHashes": [
+      "73cc9651ef69cc92738927f0789158e038ca1c73f0753fedda91bc72b2793be7"
+    ]
+  },
+  {
+    "id": "openai/gpt-6-luna:matrix:tools:medium:1",
+    "requestHash": "2ab4fa8f1d7ff9237482fac1d62a352c062305a9b1ab9962b99753419f3ce889",
+    "model": "openai/gpt-6-luna",
+    "kind": "matrix",
+    "B": 30638,
+    "P": 4240,
+    "rB": 0.13839023434950062,
+    "rT": 0.1091939222250837,
+    "status": "SAMPLE_WITHIN_BOUNDS",
+    "receipt": {
+      "sampleId": "openai/gpt-6-luna:matrix:tools:medium:1",
+      "requestHash": "2ab4fa8f1d7ff9237482fac1d62a352c062305a9b1ab9962b99753419f3ce889",
+      "model": "openai/gpt-6-luna",
+      "endpointTag": "openai",
+      "nativePromptTokens": 4240,
+      "nativeCompletionTokens": 183,
+      "costUsd": "0.00022962",
+      "cachedTokens": 3407,
+      "cacheWriteTokens": 830,
+      "source": "response.prompt_tokens",
+      "includesReasoning": true,
+      "finishReason": "stop"
+    },
+    "outputCapReached": false,
+    "finishReason": "stop",
+    "sourceHashes": [
+      "3076ada654ba05a32f70974cbc478bff8dfa0791e591f761916e2cd2a98c476e"
+    ]
+  },
+  {
+    "id": "openai/gpt-6-luna:matrix:tools:medium:2",
+    "requestHash": "b3e817f560e3c542bd7b24719803b08bbd32caf6fe4a839bfc4a9a21b285fa0b",
+    "model": "openai/gpt-6-luna",
+    "kind": "matrix",
+    "B": 31457,
+    "P": 4368,
+    "rB": 0.1388562164224179,
+    "rT": 0.11016671290574793,
+    "status": "SAMPLE_WITHIN_BOUNDS",
+    "receipt": {
+      "sampleId": "openai/gpt-6-luna:matrix:tools:medium:2",
+      "requestHash": "b3e817f560e3c542bd7b24719803b08bbd32caf6fe4a839bfc4a9a21b285fa0b",
+      "model": "openai/gpt-6-luna",
+      "endpointTag": "openai",
+      "nativePromptTokens": 4368,
+      "nativeCompletionTokens": 147,
+      "costUsd": "0.00022762",
+      "cachedTokens": 3407,
+      "cacheWriteTokens": 958,
+      "source": "response.prompt_tokens",
+      "includesReasoning": true,
+      "finishReason": "stop"
+    },
+    "outputCapReached": false,
+    "finishReason": "stop",
+    "sourceHashes": [
+      "2abb624d4ec11520c419987d5c438128fe7979cc131da4652e734b6b436d1aa8"
+    ]
+  },
+  {
+    "id": "openai/gpt-6-luna:matrix:tools:medium:3",
+    "requestHash": "d32339b846a048ee5a344c0fef862f6a72a1202cb950a85285e7c885fde8e902",
+    "model": "openai/gpt-6-luna",
+    "kind": "matrix",
+    "B": 32768,
+    "P": 4575,
+    "rB": 0.139617919921875,
+    "rT": 0.1116943359375,
+    "status": "SAMPLE_WITHIN_BOUNDS",
+    "receipt": {
+      "sampleId": "openai/gpt-6-luna:matrix:tools:medium:3",
+      "requestHash": "d32339b846a048ee5a344c0fef862f6a72a1202cb950a85285e7c885fde8e902",
+      "model": "openai/gpt-6-luna",
+      "endpointTag": "openai",
+      "nativePromptTokens": 4575,
+      "nativeCompletionTokens": 176,
+      "costUsd": "0.000267995",
+      "cachedTokens": 3407,
+      "cacheWriteTokens": 1165,
+      "source": "response.prompt_tokens",
+      "includesReasoning": true,
+      "finishReason": "stop"
+    },
+    "outputCapReached": false,
+    "finishReason": "stop",
+    "sourceHashes": [
+      "756777299332a42ebb42a062e6198680da42ee04e8356c8988246ac291b84fc0"
+    ]
+  },
+  {
+    "id": "openai/gpt-6-luna:matrix:tools:large:0",
+    "requestHash": "47da1551c97897237af5904ca27308d8ccb4364335fa0eb08aac973156f1af56",
+    "model": "openai/gpt-6-luna",
+    "kind": "matrix",
+    "B": 178913,
+    "P": 27651,
+    "rB": 0.1545499768043686,
+    "rT": 0.14778333021565432,
+    "status": "SAMPLE_WITHIN_BOUNDS",
+    "receipt": {
+      "sampleId": "openai/gpt-6-luna:matrix:tools:large:0",
+      "requestHash": "47da1551c97897237af5904ca27308d8ccb4364335fa0eb08aac973156f1af56",
+      "model": "openai/gpt-6-luna",
+      "endpointTag": "openai",
+      "nativePromptTokens": 27651,
+      "nativeCompletionTokens": 174,
+      "costUsd": "0.003151495",
+      "cachedTokens": 3407,
+      "cacheWriteTokens": 24241,
+      "source": "response.prompt_tokens",
+      "includesReasoning": true,
+      "finishReason": "stop"
+    },
+    "outputCapReached": false,
+    "finishReason": "stop",
+    "sourceHashes": [
+      "5dfd8d73a74e6998bc5e3c0f2e5af58818343acb26fabd61a98a9c6da9748f86"
+    ]
+  },
+  {
+    "id": "openai/gpt-6-luna:matrix:tools:large:1",
+    "requestHash": "bb3eaaaf48825dcdda1644f1d62f7c9eb762c562ea4059331573a4bad76add14",
+    "model": "openai/gpt-6-luna",
+    "kind": "matrix",
+    "B": 183828,
+    "P": 28427,
+    "rB": 0.15463911917662163,
+    "rT": 0.14804187063847515,
+    "status": "SAMPLE_WITHIN_BOUNDS",
+    "receipt": {
+      "sampleId": "openai/gpt-6-luna:matrix:tools:large:1",
+      "requestHash": "bb3eaaaf48825dcdda1644f1d62f7c9eb762c562ea4059331573a4bad76add14",
+      "model": "openai/gpt-6-luna",
+      "endpointTag": "openai",
+      "nativePromptTokens": 28427,
+      "nativeCompletionTokens": 181,
+      "costUsd": "0.003251995",
+      "cachedTokens": 3407,
+      "cacheWriteTokens": 25017,
+      "source": "response.prompt_tokens",
+      "includesReasoning": true,
+      "finishReason": "stop"
+    },
+    "outputCapReached": false,
+    "finishReason": "stop",
+    "sourceHashes": [
+      "906bf9a0d48239f6a4d7c2aeaf97a602e0cbbde4062bec43ac1035575ffbfebb"
+    ]
+  },
+  {
+    "id": "openai/gpt-6-luna:matrix:tools:large:2",
+    "requestHash": "b12bbe28123b7a44043ebde6bad53b4b7db3cb34c20ca436a763e40ef01263cb",
+    "model": "openai/gpt-6-luna",
+    "kind": "matrix",
+    "B": 188743,
+    "P": 29203,
+    "rB": 0.15472361888917735,
+    "rT": 0.14828750602990834,
+    "status": "SAMPLE_WITHIN_BOUNDS",
+    "receipt": {
+      "sampleId": "openai/gpt-6-luna:matrix:tools:large:2",
+      "requestHash": "b12bbe28123b7a44043ebde6bad53b4b7db3cb34c20ca436a763e40ef01263cb",
+      "model": "openai/gpt-6-luna",
+      "endpointTag": "openai",
+      "nativePromptTokens": 29203,
+      "nativeCompletionTokens": 100,
+      "costUsd": "0.003308495",
+      "cachedTokens": 3407,
+      "cacheWriteTokens": 25793,
+      "source": "response.prompt_tokens",
+      "includesReasoning": true,
+      "finishReason": "stop"
+    },
+    "outputCapReached": false,
+    "finishReason": "stop",
+    "sourceHashes": [
+      "c14c21d7738b147e5581d0986fc9dafb42010ebacdd7caf53a2c892db6848a4b"
+    ]
+  },
+  {
+    "id": "openai/gpt-6-luna:matrix:tools:large:3",
+    "requestHash": "1aefe2f7602bd17bba014dc8c28edf3df9194b0a7fd7ee9caa1e6653f3b8baa6",
+    "model": "openai/gpt-6-luna",
+    "kind": "matrix",
+    "B": 196608,
+    "P": 30445,
+    "rB": 0.15485127766927084,
+    "rT": 0.1486572265625,
+    "status": "SAMPLE_WITHIN_BOUNDS",
+    "receipt": {
+      "sampleId": "openai/gpt-6-luna:matrix:tools:large:3",
+      "requestHash": "1aefe2f7602bd17bba014dc8c28edf3df9194b0a7fd7ee9caa1e6653f3b8baa6",
+      "model": "openai/gpt-6-luna",
+      "endpointTag": "openai",
+      "nativePromptTokens": 30445,
+      "nativeCompletionTokens": 137,
+      "costUsd": "0.003482245",
+      "cachedTokens": 3407,
+      "cacheWriteTokens": 27035,
+      "source": "response.prompt_tokens",
+      "includesReasoning": true,
+      "finishReason": "stop"
+    },
+    "outputCapReached": false,
+    "finishReason": "stop",
+    "sourceHashes": [
+      "2bdd7e977bf77cf74038f63e23017f3a84e4c0c93c3278139702c92945347ca3"
+    ]
+  },
+  {
+    "id": "openai/gpt-6-luna:messages:english:short-64:0",
+    "requestHash": "3028ada28b72874945f838362228c4c789217443e3a21265bf4fee254169b98d",
+    "model": "openai/gpt-6-luna",
+    "kind": "messages",
+    "B": 16384,
+    "P": 3316,
+    "rB": 0.202392578125,
+    "rT": 0.13492838541666666,
+    "status": "SAMPLE_WITHIN_BOUNDS",
+    "receipt": {
+      "sampleId": "openai/gpt-6-luna:messages:english:short-64:0",
+      "requestHash": "3028ada28b72874945f838362228c4c789217443e3a21265bf4fee254169b98d",
+      "model": "openai/gpt-6-luna",
+      "endpointTag": "openai",
+      "nativePromptTokens": 3316,
+      "nativeCompletionTokens": 312,
+      "costUsd": "0.00042725",
+      "cachedTokens": 1245,
+      "cacheWriteTokens": 2068,
+      "source": "response.prompt_tokens",
+      "includesReasoning": true,
+      "finishReason": "stop"
+    },
+    "outputCapReached": false,
+    "finishReason": "stop",
+    "sourceHashes": [
+      "84444fc6931060f5479408e9e9aefbd3b279837c2ec22f0812f6498afc4543c1"
+    ]
+  },
+  {
+    "id": "openai/gpt-6-luna:messages:english:short-64:1",
+    "requestHash": "6ab4a27f402c6eb095c604028b79e84587c104cc5d5c620887f5b0219ffc22f9",
+    "model": "openai/gpt-6-luna",
+    "kind": "messages",
+    "B": 16384,
+    "P": 3316,
+    "rB": 0.202392578125,
+    "rT": 0.13492838541666666,
+    "status": "SAMPLE_WITHIN_BOUNDS",
+    "receipt": {
+      "sampleId": "openai/gpt-6-luna:messages:english:short-64:1",
+      "requestHash": "6ab4a27f402c6eb095c604028b79e84587c104cc5d5c620887f5b0219ffc22f9",
+      "model": "openai/gpt-6-luna",
+      "endpointTag": "openai",
+      "nativePromptTokens": 3316,
+      "nativeCompletionTokens": 220,
+      "costUsd": "0.00038125",
+      "cachedTokens": 1245,
+      "cacheWriteTokens": 2068,
+      "source": "response.prompt_tokens",
+      "includesReasoning": true,
+      "finishReason": "stop"
+    },
+    "outputCapReached": false,
+    "finishReason": "stop",
+    "sourceHashes": [
+      "bf0f1175498be40457f2622a79d6fd64dbf196bd48735093d7930a0409d557ce"
+    ]
+  },
+  {
+    "id": "openai/gpt-6-luna:messages:english:long-64:0",
+    "requestHash": "da7b5c8cb963703dffcde8f1fd789af3cee7731081597b96e1a7dc228da541be",
+    "model": "openai/gpt-6-luna",
+    "kind": "messages",
+    "B": 180000,
+    "P": 48451,
+    "rB": 0.2691722222222222,
+    "rT": 0.25745515218500253,
+    "status": "SAMPLE_WITHIN_BOUNDS",
+    "receipt": {
+      "sampleId": "openai/gpt-6-luna:messages:english:long-64:0",
+      "requestHash": "da7b5c8cb963703dffcde8f1fd789af3cee7731081597b96e1a7dc228da541be",
+      "model": "openai/gpt-6-luna",
+      "endpointTag": "openai",
+      "nativePromptTokens": 48451,
+      "nativeCompletionTokens": 99,
+      "costUsd": "0.005962625",
+      "cachedTokens": 1245,
+      "cacheWriteTokens": 47203,
+      "source": "response.prompt_tokens",
+      "includesReasoning": true,
+      "finishReason": "stop"
+    },
+    "outputCapReached": false,
+    "finishReason": "stop",
+    "sourceHashes": [
+      "999c2c365c6353cc10461bd15eba3646b5950319af41e5d7a4b48068c5af7426"
+    ]
+  },
+  {
+    "id": "openai/gpt-6-luna:messages:english:long-64:1",
+    "requestHash": "74c3a3e76c5ab0200b2766aeb6ff3de4ea6c91386f13be496b1444702560e924",
+    "model": "openai/gpt-6-luna",
+    "kind": "messages",
+    "B": 180000,
+    "P": 48451,
+    "rB": 0.2691722222222222,
+    "rT": 0.25745515218500253,
+    "status": "SAMPLE_WITHIN_BOUNDS",
+    "receipt": {
+      "sampleId": "openai/gpt-6-luna:messages:english:long-64:1",
+      "requestHash": "74c3a3e76c5ab0200b2766aeb6ff3de4ea6c91386f13be496b1444702560e924",
+      "model": "openai/gpt-6-luna",
+      "endpointTag": "openai",
+      "nativePromptTokens": 48451,
+      "nativeCompletionTokens": 303,
+      "costUsd": "0.006064625",
+      "cachedTokens": 1245,
+      "cacheWriteTokens": 47203,
+      "source": "response.prompt_tokens",
+      "includesReasoning": true,
+      "finishReason": "stop"
+    },
+    "outputCapReached": false,
+    "finishReason": "stop",
+    "sourceHashes": [
+      "4f72b2dac6a8eeff57bf0b03720a03f596abd4125b8ff647a4dc21736af8811a"
+    ]
+  },
+  {
+    "id": "openai/gpt-6-luna:messages:english:short-96:0",
+    "requestHash": "6bf80846a633367bc2e8039409810755bd66275955e1c4532a8b5b2d815c0f9f",
+    "model": "openai/gpt-6-luna",
+    "kind": "messages",
+    "B": 16384,
+    "P": 3282,
+    "rB": 0.2003173828125,
+    "rT": 0.133544921875,
+    "status": "SAMPLE_WITHIN_BOUNDS",
+    "receipt": {
+      "sampleId": "openai/gpt-6-luna:messages:english:short-96:0",
+      "requestHash": "6bf80846a633367bc2e8039409810755bd66275955e1c4532a8b5b2d815c0f9f",
+      "model": "openai/gpt-6-luna",
+      "endpointTag": "openai",
+      "nativePromptTokens": 3282,
+      "nativeCompletionTokens": 361,
+      "costUsd": "0.0004475",
+      "cachedTokens": 1245,
+      "cacheWriteTokens": 2034,
+      "source": "response.prompt_tokens",
+      "includesReasoning": true,
+      "finishReason": "stop"
+    },
+    "outputCapReached": false,
+    "finishReason": "stop",
+    "sourceHashes": [
+      "c1ad559e8a154e8ff854b79415f6d83814996558a4c795c38ccac43807a17b86"
+    ]
+  },
+  {
+    "id": "openai/gpt-6-luna:messages:english:short-96:1",
+    "requestHash": "d6f9692c90be904814c7c6971853a61480feac7999fa15989811ee77ca3f2f89",
+    "model": "openai/gpt-6-luna",
+    "kind": "messages",
+    "B": 16384,
+    "P": 3282,
+    "rB": 0.2003173828125,
+    "rT": 0.133544921875,
+    "status": "SAMPLE_WITHIN_BOUNDS",
+    "receipt": {
+      "sampleId": "openai/gpt-6-luna:messages:english:short-96:1",
+      "requestHash": "d6f9692c90be904814c7c6971853a61480feac7999fa15989811ee77ca3f2f89",
+      "model": "openai/gpt-6-luna",
+      "endpointTag": "openai",
+      "nativePromptTokens": 3282,
+      "nativeCompletionTokens": 396,
+      "costUsd": "0.000465",
+      "cachedTokens": 1245,
+      "cacheWriteTokens": 2034,
+      "source": "response.prompt_tokens",
+      "includesReasoning": true,
+      "finishReason": "stop"
+    },
+    "outputCapReached": false,
+    "finishReason": "stop",
+    "sourceHashes": [
+      "eff5d3204081f6bba1dccdc7b61fe6a6aa90defcd7d77f1810beff593c1d9898"
+    ]
+  },
+  {
+    "id": "openai/gpt-6-luna:messages:english:long-96:0",
+    "requestHash": "a7bb87b1f2b9dbf39110ae75ed3c6c3a751595e4cbf9c4a0aba3ddbda48d8791",
+    "model": "openai/gpt-6-luna",
+    "kind": "messages",
+    "B": 180000,
+    "P": 48418,
+    "rB": 0.2689888888888889,
+    "rT": 0.25727979935385137,
+    "status": "SAMPLE_WITHIN_BOUNDS",
+    "receipt": {
+      "sampleId": "openai/gpt-6-luna:messages:english:long-96:0",
+      "requestHash": "a7bb87b1f2b9dbf39110ae75ed3c6c3a751595e4cbf9c4a0aba3ddbda48d8791",
+      "model": "openai/gpt-6-luna",
+      "endpointTag": "openai",
+      "nativePromptTokens": 48418,
+      "nativeCompletionTokens": 346,
+      "costUsd": "0.006082",
+      "cachedTokens": 1245,
+      "cacheWriteTokens": 47170,
+      "source": "response.prompt_tokens",
+      "includesReasoning": true,
+      "finishReason": "stop"
+    },
+    "outputCapReached": false,
+    "finishReason": "stop",
+    "sourceHashes": [
+      "3622b119602cd55a901cf8b9cfe54b45b1ccb47adfc2444ce743eb2c3c93b03c"
+    ]
+  },
+  {
+    "id": "openai/gpt-6-luna:messages:english:long-96:1",
+    "requestHash": "29f622daea2a422af27f28164881491c8570a2d7de3b822c463edde0f2c1eb01",
+    "model": "openai/gpt-6-luna",
+    "kind": "messages",
+    "B": 180000,
+    "P": 48418,
+    "rB": 0.2689888888888889,
+    "rT": 0.25727979935385137,
+    "status": "SAMPLE_WITHIN_BOUNDS",
+    "receipt": {
+      "sampleId": "openai/gpt-6-luna:messages:english:long-96:1",
+      "requestHash": "29f622daea2a422af27f28164881491c8570a2d7de3b822c463edde0f2c1eb01",
+      "model": "openai/gpt-6-luna",
+      "endpointTag": "openai",
+      "nativePromptTokens": 48418,
+      "nativeCompletionTokens": 349,
+      "costUsd": "0.0060835",
+      "cachedTokens": 1245,
+      "cacheWriteTokens": 47170,
+      "source": "response.prompt_tokens",
+      "includesReasoning": true,
+      "finishReason": "stop"
+    },
+    "outputCapReached": false,
+    "finishReason": "stop",
+    "sourceHashes": [
+      "4d0663a1bdba20d6d3bc5a78531d7eb3440f281c71ea5c8573cd31c7cc493f40"
+    ]
+  },
+  {
+    "id": "openai/gpt-6-luna:messages:english:short-128:0",
+    "requestHash": "75e283a3a3cedbbc3b90d5786236e6b20207e3cf3db2c639c7dae49b8f8e85a7",
+    "model": "openai/gpt-6-luna",
+    "kind": "messages",
+    "B": 16384,
+    "P": 3235,
+    "rB": 0.19744873046875,
+    "rT": 0.13163248697916666,
+    "status": "SAMPLE_WITHIN_BOUNDS",
+    "receipt": {
+      "sampleId": "openai/gpt-6-luna:messages:english:short-128:0",
+      "requestHash": "75e283a3a3cedbbc3b90d5786236e6b20207e3cf3db2c639c7dae49b8f8e85a7",
+      "model": "openai/gpt-6-luna",
+      "endpointTag": "openai",
+      "nativePromptTokens": 3235,
+      "nativeCompletionTokens": 454,
+      "costUsd": "0.000488125",
+      "cachedTokens": 1245,
+      "cacheWriteTokens": 1987,
+      "source": "response.prompt_tokens",
+      "includesReasoning": true,
+      "finishReason": "stop"
+    },
+    "outputCapReached": false,
+    "finishReason": "stop",
+    "sourceHashes": [
+      "0ac4de77ce4aafe3657317292000e209186a1493ffe17701baf5cbcc4a17fc2c"
+    ]
+  },
+  {
+    "id": "openai/gpt-6-luna:messages:english:short-128:1",
+    "requestHash": "3806f882d9fbf7e8ca8143e58242a8cf70768cefcf1a63a669e72751243a5c64",
+    "model": "openai/gpt-6-luna",
+    "kind": "messages",
+    "B": 16384,
+    "P": 3235,
+    "rB": 0.19744873046875,
+    "rT": 0.13163248697916666,
+    "status": "SAMPLE_WITHIN_BOUNDS",
+    "receipt": {
+      "sampleId": "openai/gpt-6-luna:messages:english:short-128:1",
+      "requestHash": "3806f882d9fbf7e8ca8143e58242a8cf70768cefcf1a63a669e72751243a5c64",
+      "model": "openai/gpt-6-luna",
+      "endpointTag": "openai",
+      "nativePromptTokens": 3235,
+      "nativeCompletionTokens": 115,
+      "costUsd": "0.000318625",
+      "cachedTokens": 1245,
+      "cacheWriteTokens": 1987,
+      "source": "response.prompt_tokens",
+      "includesReasoning": true,
+      "finishReason": "stop"
+    },
+    "outputCapReached": false,
+    "finishReason": "stop",
+    "sourceHashes": [
+      "29b473d43557090c0dea1e35113cad7d65447838c6869fdd903f1c41be842fcc"
+    ]
+  },
+  {
+    "id": "openai/gpt-6-luna:messages:english:long-128:0",
+    "requestHash": "cbcddb2dc0e7000c521dd31bd4b3894d604b594d25809dcdedb694d86e9d17f5",
+    "model": "openai/gpt-6-luna",
+    "kind": "messages",
+    "B": 180000,
+    "P": 48371,
+    "rB": 0.2687277777777778,
+    "rT": 0.25703005441251486,
+    "status": "SAMPLE_WITHIN_BOUNDS",
+    "receipt": {
+      "sampleId": "openai/gpt-6-luna:messages:english:long-128:0",
+      "requestHash": "cbcddb2dc0e7000c521dd31bd4b3894d604b594d25809dcdedb694d86e9d17f5",
+      "model": "openai/gpt-6-luna",
+      "endpointTag": "openai",
+      "nativePromptTokens": 48371,
+      "nativeCompletionTokens": 428,
+      "costUsd": "0.006117125",
+      "cachedTokens": 1245,
+      "cacheWriteTokens": 47123,
+      "source": "response.prompt_tokens",
+      "includesReasoning": true,
+      "finishReason": "stop"
+    },
+    "outputCapReached": false,
+    "finishReason": "stop",
+    "sourceHashes": [
+      "c804b96fde7c194e83682d65952fcdaeef955ae2ef11c3c6c5378c3aec90db3d"
+    ]
+  },
+  {
+    "id": "openai/gpt-6-luna:messages:english:long-128:1",
+    "requestHash": "39396a0e43500c1f4aa31ca8bb0be7021acaea7e4a37acaff02eb617b8bcb036",
+    "model": "openai/gpt-6-luna",
+    "kind": "messages",
+    "B": 180000,
+    "P": 48371,
+    "rB": 0.2687277777777778,
+    "rT": 0.25703005441251486,
+    "status": "SAMPLE_WITHIN_BOUNDS",
+    "receipt": {
+      "sampleId": "openai/gpt-6-luna:messages:english:long-128:1",
+      "requestHash": "39396a0e43500c1f4aa31ca8bb0be7021acaea7e4a37acaff02eb617b8bcb036",
+      "model": "openai/gpt-6-luna",
+      "endpointTag": "openai",
+      "nativePromptTokens": 48371,
+      "nativeCompletionTokens": 256,
+      "costUsd": "0.006031125",
+      "cachedTokens": 1245,
+      "cacheWriteTokens": 47123,
+      "source": "response.prompt_tokens",
+      "includesReasoning": true,
+      "finishReason": "stop"
+    },
+    "outputCapReached": false,
+    "finishReason": "stop",
+    "sourceHashes": [
+      "212725723a64ff4e9be1fcd0b1e61816a388c0830476261dc8461d40bcef9930"
+    ]
+  }
+]

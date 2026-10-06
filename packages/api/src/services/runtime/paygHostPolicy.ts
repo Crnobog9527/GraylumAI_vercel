@@ -13,18 +13,20 @@ export const PAYG_HOST_SETTING = 'runtime_payg_staging';
 const reference = z.string().trim().min(1).max(128);
 const admittedRoutes: Readonly<Record<string,string>> = {
   'anthropic/claude-sonnet-5.5':'anthropic',
-  'google/gemini-3.8-flash':'google-vertex/global',
+  'google/gemini-3.8-flash':'google-ai-studio',
   'openai/gpt-6-luna':'openai',
 };
 const phase = z.enum(['ordinary', 'skill', 'organizer', 'skill_matching', 'attached_organizer', 'report']);
 /** Trusted admin configuration, never a browser admission field. Evidence references
  * must identify independently checked real samples; fixture results are not evidence. */
+// Small-cap probes establish truncation semantics; outputLimit is the separately authorized profile cap.
+// Direct variants need two length receipts. The approved Sonnet low exception references same-route none evidence.
 export const paygHostProfile = z.object({
   model: reference, endpointTag: reference, protocol: z.literal('openrouter-chat-v1'),
   profileVersion: reference, evidenceVersion: reference,
   admissionPath: z.literal('empirical'),
   templateTokens: z.literal(4096), marginTokens: z.literal(4096),
-  maxBytes: z.literal(196608), maxMessages: z.literal(32),
+  maxBytes: z.literal(196608), maxMessages: z.literal(128),
   maxTools: z.literal(2), maxSchemaBytes: z.literal(16384),
   purposes: z.array(phase).min(1).max(6),
   requestFormats: z.array(z.enum(['serial-tools-v2', 'serial-tools-v4-stream',
@@ -32,19 +34,35 @@ export const paygHostProfile = z.object({
   reasoningVariants: z.array(z.object({
     reasoning: reasoningPolicy,
     outputLimit: z.number().int().positive().max(PURPOSE_OUTPUT_CAP),
+    testedOutputLimit: z.number().int().positive().max(PURPOSE_OUTPUT_CAP),
     evidenceReference: reference, manifestHash: z.string().regex(/^[a-f0-9]{64}$/),
-    outputStressSamples: z.number().int().min(2), includesReasoning: z.literal(true),
+    outputStressSamples: z.number().int().min(0), includesReasoning: z.literal(true),
+    outputSemanticsEvidence: z.literal('same-route-none').optional(),
   }).strict()).min(1).max(16),
   outputLimit: z.number().int().min(1).max(PURPOSE_OUTPUT_CAP),
   expiresAt: z.string().datetime(),
   evidence: z.object({
     reference, manifestHash: z.string().regex(/^[a-f0-9]{64}$/),
-    distinctSamples: z.literal(60), completeCells: z.literal(15), variantsPerCell: z.literal(4),
+    distinctSamples: z.literal(60), messageStressSamples: z.literal(12), maxVerifiedMessages: z.literal(128),
+    completeCells: z.literal(15), variantsPerCell: z.literal(4),
     maxPromptToBytes: z.number().positive().max(0.7), maxPromptToUpper: z.number().positive().max(0.7),
     outputLimit: z.number().int().positive().max(PURPOSE_OUTPUT_CAP),
+    testedOutputLimit: z.number().int().positive().max(PURPOSE_OUTPUT_CAP),
+    outputSemantics: z.literal('max-tokens-includes-reasoning'),
     includesReasoning: z.literal(true), cacheCovered: z.literal(true), costBoundPassed: z.literal(true),
   }).strict(),
-}).strict().refine(p => p.outputLimit <= p.evidence.outputLimit, { message: 'PAYG_OUTPUT_EVIDENCE_REQUIRED' });
+}).strict().refine(p => p.outputLimit <= p.evidence.outputLimit
+  && p.reasoningVariants.every(v => v.outputLimit <= p.evidence.outputLimit
+    && v.testedOutputLimit === p.evidence.testedOutputLimit),
+{ message: 'PAYG_OUTPUT_EVIDENCE_REQUIRED' }).refine(p => p.reasoningVariants.every(v => {
+  if (!v.outputSemanticsEvidence) return v.outputStressSamples >= 2;
+  return p.model === 'anthropic/claude-sonnet-5.5' && p.endpointTag === 'anthropic'
+    && isDeepStrictEqual(v.reasoning, {effort:'low'}) && v.outputStressSamples === 0 && v.testedOutputLimit === 2048
+    && p.reasoningVariants.some(source => !source.outputSemanticsEvidence
+      && isDeepStrictEqual(source.reasoning, {parameter:'none'}) && source.outputStressSamples >= 2
+      && source.testedOutputLimit === 2048 && source.outputLimit >= v.outputLimit
+      && source.evidenceReference === v.evidenceReference && source.manifestHash === v.manifestHash);
+}), { message: 'PAYG_SAME_ROUTE_NONE_EVIDENCE_REQUIRED' });
 export const paygHostSettings = z.object({
   version: z.literal(1), enabled: z.boolean(), windowId: z.string().uuid(),
   profiles: z.array(paygHostProfile).max(16),

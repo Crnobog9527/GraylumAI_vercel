@@ -1,0 +1,32 @@
+{
+  "id": "google/gemini-3.8-flash:output:chinese:output-stress:0:r5b",
+  "requestHash": "667b0ed2d0985766035f6f4d2ce6820003b719c3c773180e71ddc745dcb18521",
+  "model": "google/gemini-3.8-flash",
+  "kind": "output",
+  "B": 4096,
+  "P": 1029,
+  "rB": 0.251220703125,
+  "rT": 0.083740234375,
+  "manifestHash": "4f8002e7989930cbf5cddd6ea2cae04e46548a196a885ac607a9b5f579b2990d",
+  "originalStatus": "OUTPUT_CAP_NOT_REACHED",
+  "originalOutputCapReached": false,
+  "testedOutputLimit": 512,
+  "reasoningTokens": 489,
+  "receipt": {
+    "sampleId": "google/gemini-3.8-flash:output:chinese:output-stress:0:r5b",
+    "requestHash": "667b0ed2d0985766035f6f4d2ce6820003b719c3c773180e71ddc745dcb18521",
+    "model": "google/gemini-3.8-flash",
+    "endpointTag": "google-vertex/global",
+    "nativePromptTokens": 1029,
+    "nativeCompletionTokens": 508,
+    "costUsd": "0.00267675",
+    "cachedTokens": 0,
+    "cacheWriteTokens": 0,
+    "source": "response.prompt_tokens",
+    "includesReasoning": true,
+    "finishReason": "length"
+  },
+  "sourceHashes": [
+    "987ec0948072fb59d478fccf9ba88a64341cd61f93e74388ba87399a7b55306c"
+  ]
+}

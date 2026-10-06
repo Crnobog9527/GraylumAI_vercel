@@ -67,13 +67,13 @@ export function registerPaygHostTests(db:pg.Client,fixture:()=>Promise<Fixture>)
   }
   const profiles=pairs.map(([,model,endpointTag])=>({model,endpointTag,protocol:'openrouter-chat-v1',
    profileVersion:'synthetic-only',evidenceVersion:'synthetic-only',admissionPath:'empirical',
-   templateTokens:4096,marginTokens:4096,maxBytes:196608,maxMessages:32,maxTools:2,maxSchemaBytes:16384,
+   templateTokens:4096,marginTokens:4096,maxBytes:196608,maxMessages:128,maxTools:2,maxSchemaBytes:16384,
    purposes:['ordinary','skill','organizer','skill_matching','attached_organizer'],
    requestFormats:['serial-tools-v2','serial-tools-v4-stream','serial-tools-v6-reasoning','agent-turn-v5-stream'],
-   reasoningVariants:[{parameter:'none'},{effort:'low'}].map(reasoning=>({reasoning,outputLimit:8192,evidenceReference:'synthetic-only',
+   reasoningVariants:[{parameter:'none'},{effort:'low'}].map(reasoning=>({reasoning,outputLimit:8192,testedOutputLimit:512,evidenceReference:'synthetic-only',
     manifestHash:'b'.repeat(64),outputStressSamples:2,includesReasoning:true})),outputLimit:8192,expiresAt,
-   evidence:{reference:'synthetic-only',manifestHash:'a'.repeat(64),distinctSamples:60,completeCells:15,variantsPerCell:4,
-    maxPromptToBytes:0.5,maxPromptToUpper:0.4,outputLimit:8192,includesReasoning:true,cacheCovered:true,costBoundPassed:true}}));
+   evidence:{reference:'synthetic-only',manifestHash:'a'.repeat(64),distinctSamples:60,messageStressSamples:12,maxVerifiedMessages:128,completeCells:15,variantsPerCell:4,
+    maxPromptToBytes:0.5,maxPromptToUpper:0.4,outputLimit:8192,testedOutputLimit:512,outputSemantics:'max-tokens-includes-reasoning',includesReasoning:true,cacheCovered:true,costBoundPassed:true}}));
   const values={runtime_payg_staging:{version:1,enabled:true,windowId,profiles},billing_credits_per_usd:'100',
    billing_token_price_multiplier:'3',billing_payg_start_thresholds:{version:'synthetic-only',
     thresholds:pairs.flatMap(([,model])=>['ordinary','skill','skill_matching','organizer','attached_organizer'].map(purpose=>({model,purpose,credits:1})))}};
@@ -111,11 +111,17 @@ export function registerPaygHostTests(db:pg.Client,fixture:()=>Promise<Fixture>)
    };
    const e=await rpc('runtime_execution',{p_execution_id:admitted.executionId,p_action:'begin'});
    const billing=e.billing as FrozenPaygRun,c=runtimeContext.parse(e.context);
-   expect(billing.contractVersion).toBe('bill2.v2');expect(c.historyItems).toBeLessThanOrEqual(30);
+   expect(billing.contractVersion).toBe('bill2.v2');expect(c.historyItems).toBe(100);
    const policy=billing.callPolicy.find(p=>p.modelId===c.modelId)!;
-   const request=openRouterRequestBody(JSON.stringify({model:policy.model,messages:[{role:'user',content:'Synthetic claim'}],
+   const request=openRouterRequestBody(JSON.stringify({model:policy.model,messages:[{role:'system',content:'Synthetic instructions'},
+     ...Array.from({length:126},(_,i)=>({role:i%2?'assistant':'user',content:'Synthetic history'})),
+     {role:'user',content:'Synthetic claim'}],
     max_tokens:c.maxOutputTokens,...frozenReasoningFields(c.reasoning)}),{context:c,policy,phase:c.role,primaryDialogue:true});
    const {call}=runtimePaygCall(request,c.role,policy,billing.rules,e.epoch,true);
+   expect(call.payg?.messages).toBe(128);
+   const excessive=JSON.parse(request);excessive.messages.push({role:'user',content:'One too many'});
+   expect(()=>runtimePaygCall(JSON.stringify(excessive),c.role,policy,billing.rules,e.epoch,true))
+    .toThrow('BILL2_INPUT_PROFILE_INVALID');
    const claimed=await rpc('bill2_claim',{p_run_id:e.runId,p_sequence:1,p_payload:call});
    expect(claimed.id).toEqual(expect.any(String));
    expect((await rpc('bill2_claim',{p_run_id:e.runId,p_sequence:1,p_payload:call})).id).toBe(claimed.id);

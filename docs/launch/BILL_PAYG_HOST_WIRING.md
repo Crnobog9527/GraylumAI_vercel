@@ -35,10 +35,18 @@
 不把设置、窗口身份或完整请求写进公开 PR。
 
 首版只认 #553 的精确候选：Claude Sonnet 5.5 / anthropic、Gemini 3.8 Flash /
- google-vertex/global、GPT-6 Luna / openai。不按模型前缀授权。
+ google-ai-studio、GPT-6 Luna / openai。不按模型前缀授权。
+Gemini绑定依[Owner线路决定](https://github.com/Crnobog9527/GraylumAI_vercel/pull/665#issuecomment-6001418763)更新：
+仅新准入接受AI Studio精确tag，Vertex和flex/priority拒绝；不改实际路由/设置，不重写旧执行的冻结报价。
+Vertex证据不计入AI Studio。未来配置仍须使实际路由tag与profile相同，由主窗口另行处理。
 每个模型/完整线路只有一个 profile；`reasoningVariants` 列出多种思考参数及各自的
-`outputLimit/evidenceReference/manifestHash/outputStressSamples/includesReasoning`。
-每种实际使用的 reasoning 必须有至少两个输出压力样本，证据包含 reasoning 且覆盖该用途的 O。
+`outputLimit/testedOutputLimit/evidenceReference/manifestHash/outputStressSamples/includesReasoning`。
+每种实际使用的 reasoning 必须有至少两个 length 且 0.9O ≤ completion ≤ O 的输出压力样本，completion 包含 reasoning。
+依据 [r6 判定决定](https://github.com/Crnobog9527/GraylumAI_vercel/pull/665#issuecomment-6000858032)，超过 O 仍立即失败；
+未达到判定标准的样本只记失败与费用，不能计入 profile 的合格证据数量。
+`testedOutputLimit` 记录测试上限；profile、variant 和 evidence 的 `outputLimit` 记录允许上限（最多 8192）。
+同一模型的测试上限须一致，evidence.outputSemantics 必须为 `max-tokens-includes-reasoning`；
+小上限可证明该执行语义，不冒称已实测 8192，依据主窗口 2026-10-06 决定（#665 评论 5999661106）。
 普通调用的无参数 `{parameter:"none"}` 与导师 low/medium 可共存；未列出的组合直接拒绝。
 profile 同时绑定协议、请求格式、用途、有效期、版本和输入计量实测材料引用/hash。
 用途统一为 `ordinary / skill / organizer / skill_matching / attached_organizer`，不使用 matching。
@@ -47,9 +55,10 @@ profile 同时绑定协议、请求格式、用途、有效期、版本和输入
 启用前必须独立核对引用材料，不得将单元测试里的 synthetic profile 写入真实配置。
 
 `B` 来自最终规范化、缓存标记后的 UTF-8 请求，`T=B+4096+4096`。
-遵守 #553 的 196608 bytes / 32 messages / 2 tools / 16384 schema bytes 上界，
+遵守 #553 的 196608 bytes / 128 messages / 2 tools / 16384 schema bytes（2026-10-05 Owner 决定取代 32 条） 上界，
 且 60 个不同样本、15 格×4 变体、最大 P/B 与 P/T 均不超过 0.70；必须覆盖缓存和费用上界，
-输出硬限包括 reasoning。样本/模板/用途的具体覆盖仍以引用的实测清单为准。
+输出硬限包括 reasoning；另需 messageStressSamples=12、maxVerifiedMessages=128 的真实多消息证据摘要。
+样本/模板/用途的具体覆盖仍以引用的实测清单为准，详见 [新预演](BILL_PAYG_PROFILE_DRY_RUN.md)。
 
 准入证明最坏 `196608+4096+4096+O <= contextTokens`：
 O=8192 时需要至少 **212992** context tokens。达不到就拒绝该组合。

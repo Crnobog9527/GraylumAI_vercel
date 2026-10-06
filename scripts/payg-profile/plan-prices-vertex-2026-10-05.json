@@ -1,5 +1,5 @@
 {
-  "source": "OpenRouter public Gemini exact google-ai-studio endpoint/models, 2026-10-06; catalog-2026-10-06-r7.json; other routes unchanged from 2026-10-05",
+  "source": "OpenRouter public models and exact endpoint catalogs, 2026-10-05; catalog-2026-10-05.json",
   "currentVerified": true,
   "routes": [
     {
@@ -57,7 +57,7 @@
     },
     {
       "model": "google/gemini-3.8-flash",
-      "endpointTag": "google-ai-studio",
+      "endpointTag": "google-vertex/global",
       "contextTokens": 1048576,
       "prompt": "0.750000000000",
       "completion": "3.750000000000",
@@ -77,19 +77,18 @@
       "matrixReasoning": {
         "effort": "low"
       },
-      "providerName": "Google AI Studio",
+      "providerName": "Google",
       "maxCompletionTokens": 65536,
       "supportedParameters": [
         "reasoning",
         "include_reasoning",
         "max_tokens",
-        "temperature",
-        "top_p",
         "seed",
         "response_format",
+        "stop",
         "structured_outputs",
-        "tool_choice",
         "tools",
+        "tool_choice",
         "reasoning_effort"
       ],
       "outputCapIncludesReasoning": true,
@@ -106,7 +105,7 @@
         "default_effort": "medium"
       },
       "priceNotes": "Request fee absent in catalog = 0; no server tools, media or 1h cache. Cache write rounded upwards at 12 decimal places; implicit caching only; no cache storage API.",
-      "outputCapBasis": "Combined reasoning + visible output is the documented contract; AI Studio route unverified until real samples pass. Vertex evidence is not transferable."
+      "outputCapBasis": "Documented combined reasoning + visible output; not yet verified on this exact route. Conflicting public observation: https://discuss.ai.google.dev/t/gemini-3-8-flash-high-does-maxoutputtokens-include-thinking-tokens/181077/4 ; output stress goes first, any overshoot fails unchanged O."
     },
     {
       "model": "openai/gpt-6-luna",
@@ -164,6 +163,6 @@
       "outputCapBasis": "Documented combined reasoning + visible output; not yet verified on this exact route."
     }
   ],
-  "retrievedAt": "2026-10-05T19:21:55.810570+00:00",
-  "catalogHash": "0de8ceea446a668d83951e278a52d0f776f43f4731b91f5720a2a6364c0564bb"
+  "retrievedAt": "2026-10-05T12:58:34.775279+00:00",
+  "catalogHash": "a12364d1cff339031ee34cf73b389e7cd1592b8eb7cce85c6510464fb59f91a7"
 }

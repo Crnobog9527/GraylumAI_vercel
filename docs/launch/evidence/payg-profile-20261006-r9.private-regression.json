@@ -1,0 +1,14 @@
+{
+  "regression": "PASS",
+  "sourceHash": "be92ffafb046376df0233e51e38a0a916bb5d0ad7282ef67a98fee8c57ecb9ca",
+  "generationIdHash": "aef974448a1900ba9218c1392c95cd42e5b7442ac5ed2dc4d93fa32db034a5dc",
+  "providerName": "Anthropic",
+  "finishReason": "stop",
+  "P": 2046,
+  "completion": 314,
+  "costUsd": "0.0076005",
+  "offlineVerdict": "SAMPLE_WITHIN_BOUNDS",
+  "originalVerdict": "UNKNOWN",
+  "retainedAsQualifiedEvidence": false,
+  "networkCalls": 0
+}

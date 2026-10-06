@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { expect, it, vi } from 'vitest';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { readPaygHostPolicies, type PaygHostProfile } from './paygHostPolicy';
+import { readPaygHostPolicies, paygHostProfile, type PaygHostProfile } from './paygHostPolicy';
 import type { StagingPolicy } from './stagingPolicy';
 const id = '10000000-0000-4000-8000-000000000001';
 const env = { VERCEL: '1', VERCEL_PROJECT_PRODUCTION_URL: 'auth-staging.graylum.com',
@@ -13,13 +13,13 @@ const env = { VERCEL: '1', VERCEL_PROJECT_PRODUCTION_URL: 'auth-staging.graylum.
 function fixture() {
   const profile: PaygHostProfile = { model: 'anthropic/claude-sonnet-5.5', endpointTag: 'anthropic', protocol:'openrouter-chat-v1',
     profileVersion: 'test-only', evidenceVersion: 'test-only', admissionPath:'empirical',
-    templateTokens:4096,marginTokens:4096,maxBytes:196608,maxMessages:32,maxTools:2,maxSchemaBytes:16384,
+    templateTokens:4096,marginTokens:4096,maxBytes:196608,maxMessages:128,maxTools:2,maxSchemaBytes:16384,
     purposes:['ordinary','skill','organizer','skill_matching','attached_organizer'],
     requestFormats:['serial-tools-v2','agent-turn-v5-stream','serial-tools-v4-stream','serial-tools-v6-reasoning'],
-    reasoningVariants:[{reasoning:{parameter:'none'},outputLimit:8192,evidenceReference:'test-only',
+    reasoningVariants:[{reasoning:{parameter:'none'},outputLimit:8192,testedOutputLimit:512,evidenceReference:'test-only',
       manifestHash:'b'.repeat(64),outputStressSamples:2,includesReasoning:true}],outputLimit:8192,expiresAt:'2099-01-01T00:00:00Z',
-    evidence:{reference:'test-only',manifestHash:'a'.repeat(64),distinctSamples:60,completeCells:15,variantsPerCell:4,
-      maxPromptToBytes:0.5,maxPromptToUpper:0.4,outputLimit:8192,includesReasoning:true,cacheCovered:true,costBoundPassed:true} };
+    evidence:{reference:'test-only',manifestHash:'a'.repeat(64),distinctSamples:60,messageStressSamples:12,maxVerifiedMessages:128,completeCells:15,variantsPerCell:4,
+      maxPromptToBytes:0.5,maxPromptToUpper:0.4,outputLimit:8192,testedOutputLimit:512,outputSemantics:'max-tokens-includes-reasoning',includesReasoning:true,cacheCovered:true,costBoundPassed:true} };
   const policy: StagingPolicy['callPolicies'][number] = { modelId:id,model:profile.model,provider:'openrouter',
     account:'test-only',protocol:'openrouter-chat-v1',inputLimit:196608,outputLimit:8192,upperUsd:'1',
     automaticRetry:false,hiddenTools:false,lookupSupported:true,
@@ -58,6 +58,7 @@ it.each([
   f=>{f.profile.requestFormats=['agent-turn-v5-stream'];},
   f=>{f.profile.expiresAt='2000-01-01T00:00:00Z';},
   f=>{f.profile.evidence.maxPromptToUpper=0.71;},
+  f=>{delete (f.profile.evidence as Partial<PaygHostProfile['evidence']>).maxVerifiedMessages;},
   f=>{f.config.profiles.push({...f.profile});},
   f=>{f.config.profiles=[];},
   f=>{f.config.windowId='20000000-0000-4000-8000-000000000002';},
@@ -91,4 +92,69 @@ it('legacy serialized emergency off is honored, while malformed string values fa
  expect(await f.run()).toBeUndefined();
  f.single.mockResolvedValue({data:{value:'{"enabled":"false"}'},error:null});
  await expect(f.run()).rejects.toThrow('RUNTIME_PAYG_PROFILE_REQUIRED');
+});
+
+it.each([512,2048])('strict truncation semantics tested at %i permit the authorized 8192 cap',async tested=>{
+ const f=fixture();f.profile.evidence.testedOutputLimit=tested;
+ f.profile.reasoningVariants[0].testedOutputLimit=tested;
+ await expect(f.run('ordinary',8192)).resolves.toBeDefined();
+ await expect(f.run('ordinary',8193)).rejects.toThrow('RUNTIME_PAYG_PROFILE_REQUIRED');
+});
+it.each([
+ (f:ReturnType<typeof fixture>)=>{delete (f.profile.evidence as Partial<PaygHostProfile['evidence']>).testedOutputLimit;},
+ f=>{delete (f.profile.evidence as Partial<PaygHostProfile['evidence']>).outputSemantics;},
+ f=>{f.profile.evidence.testedOutputLimit=2048;},
+ f=>{f.profile.reasoningVariants[0].testedOutputLimit=0;},
+ f=>{f.profile.reasoningVariants[0].testedOutputLimit=8193;},
+ f=>{f.profile.reasoningVariants[0].outputStressSamples=1;},
+ f=>{Reflect.set(f.profile.reasoningVariants[0],'includesReasoning',false);},
+ f=>{Reflect.set(f.profile.evidence,'outputSemantics','completion-excludes-reasoning');},
+ f=>{f.profile.outputLimit=8193;},
+])('rejects missing or inconsistent semantic evidence (%#)',async mutate=>{
+ const f=fixture();mutate(f);await expect(f.run()).rejects.toThrow('RUNTIME_PAYG_PROFILE_REQUIRED');
+});
+it('each requested reasoning setting independently needs two semantic probes',async()=>{
+ const f=fixture();f.profile.reasoningVariants.push({...f.profile.reasoningVariants[0],reasoning:{effort:'low'},outputStressSamples:1});
+ await expect(f.run()).rejects.toThrow('RUNTIME_PAYG_PROFILE_REQUIRED');
+});
+
+it.each([
+ ['google-ai-studio','google-ai-studio',true],
+ ['google-vertex/global','google-vertex/global',false],
+ ['google-ai-studio/flex','google-ai-studio/flex',false],
+ ['google-ai-studio/priority','google-ai-studio/priority',false],
+ ['google-ai-studio','google-vertex/global',false],
+ ['google-vertex/global','google-ai-studio',false],
+] as const)('Gemini exact route binding: profile %s / policy %s',async(profileTag,policyTag,accepted)=>{
+ const f=fixture();f.profile.model=f.policy.model='google/gemini-3.8-flash';
+ f.profile.endpointTag=profileTag;f.policy.providerLimits!.providerSlug=policyTag;
+ const frozen=structuredClone(f.policy);
+ if(accepted)expect(await f.run()).toBeDefined();
+ else await expect(f.run()).rejects.toThrow('RUNTIME_PAYG_PROFILE_REQUIRED');
+ expect(f.policy).toEqual(frozen);
+});
+it('AI Studio still refuses incomplete output evidence',async()=>{
+ const f=fixture();f.profile.model=f.policy.model='google/gemini-3.8-flash';
+ f.profile.endpointTag=f.policy.providerLimits!.providerSlug='google-ai-studio';
+ f.profile.reasoningVariants[0].outputStressSamples=1;
+ await expect(f.run()).rejects.toThrow('RUNTIME_PAYG_PROFILE_REQUIRED');
+});
+
+it('Sonnet low may cite same-route none evidence only under the precise approved relation',()=>{
+ const f=fixture(),p=f.profile;
+ p.evidence.testedOutputLimit=2048;p.reasoningVariants[0]!.testedOutputLimit=2048;
+ const source=p.reasoningVariants[0]!;
+ p.reasoningVariants.push({...source,reasoning:{effort:'low'},outputStressSamples:0,outputSemanticsEvidence:'same-route-none'});
+ expect(paygHostProfile.safeParse(p).success).toBe(true);
+ const bad=[
+  {...p,model:'google/gemini-3.8-flash',endpointTag:'google-ai-studio'},
+  {...p,endpointTag:'anthropic/other'},
+  {...p,reasoningVariants:[p.reasoningVariants[1]]},
+  {...p,reasoningVariants:[{...source,outputStressSamples:1},p.reasoningVariants[1]]},
+  {...p,reasoningVariants:[source,{...p.reasoningVariants[1],evidenceReference:'different'}]},
+  {...p,reasoningVariants:[source,{...p.reasoningVariants[1],manifestHash:'c'.repeat(64)}]},
+  {...p,reasoningVariants:[source,{...p.reasoningVariants[1],reasoning:{effort:'high'}}]},
+  {...p,reasoningVariants:[source,{...p.reasoningVariants[1],outputSemanticsEvidence:undefined}]},
+ ];
+ for(const value of bad)expect(paygHostProfile.safeParse(value).success).toBe(false);
 });

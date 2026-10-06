@@ -84,6 +84,10 @@
 
 ### 2.1 Owner 的新决定（2026-09-27 起，2026-10-06 更新）
 
+- **2026-10-06 BILL-PAYG r9（仅准备）**：主窗口技术决定原话：“Sonnet low 的输出语义改用同一线路的证据来证明，不再要求 low 自己触顶。”[出处](https://github.com/Crnobog9527/GraylumAI_vercel/pull/665#issuecomment-6010007610)。仅Sonnet/anthropic/low采用 `outputSemanticsEvidence: same-route-none`、testedOutputLimit=2048，引用none直接触顶证据，low自身触顶数如实为0；取代对此设置要求两条自身触顶的旧限制，不改其他模型的证据要求或输出/费用硬限。r8第3条费用$0.0076005已确认、原UNKNOWN不计合格。r9只准备12条路由补测；已入账$6.537562065、累计上界<$25，三条Sonnet长样本沿用$0.60例外。
+
+- **2026-10-06 BILL-PAYG r8（仅准备）**：依据[主窗口技术决定](https://github.com/Crnobog9527/GraylumAI_vercel/pull/665#issuecomment-6002163766)，允许 Luna purposes=[organizer, attached_organizer] 与三个已测格式交叉组合，Sonnet/Gemini按相同原则处理；统一有效期为 `2026-10-13T00:00:00Z`，覆盖测试窗口 `2026-10-09T15:59:59Z`。取代r7建议的24小时有效期及用途/格式必须逐对配置的建议限制，不改变真实输出证据要求。r8只准备、不发送；已入账$6.470137565，累计上界<$25。单条上限未因此放宽。
+
 1. **对话交互**：Agent 按 Skill 主导引导；用提问卡提问；步骤完成后 Agent 提示并自动推进；右侧由独立整理模型按 Skill 格式整理，最终生成定位分析报告；体验要快、要流式；步骤和问题不能在宿主代码里写死（第 3 节）。
 2. **Fusion**：定稿后由管理员指定的多个模型加载评审 Skill 评审报告，再给出修订后的最终版（2026-09-30 修订：报告 v1 出来后由用户选择是否开启；评审不联网，只用前面已收集的资料；用专用 workspace 里禁用联网的 OpenRouter Fusion，实测不通过评审模式保持关闭上线，不做自研；评审和对比两种模式各有后台总开关，见第 4 节和 D12）；自由对话和其他 Skill 中，用户可以手动开启并自己选择模型并行对比；按会员等级开放，由管理员配置（第 4 节）。
 3. **资料库**：成为真正的个人资料库，支持上传自己的文档（第一版 `.txt`、`.md`、`.docx`，见 D6），暂不存图片、音频、视频但留好接口；设"语料库"学习用户文风并用于写作；控制存储和向量成本，不把资料长期放进 OpenAI Vector Store（第 5 节）。
@@ -611,6 +615,25 @@ Owner 原话：「同意 A：出卡前导师写的分析保留并保存，卡片
 新回合的正文保存助手分析和卡片 `message`，精确重复只保留一次；实时连续增长，刷新及下一轮历史与保存正文一致。
 旧回合保持原样。这取代 CHAT_NATIVE_OUTPUT_PLAN.md §2.3 中“出卡前的助手文字在出卡时被替换”的旧规则。
 
+55. **BILL-PAYG profile 单次消息上限提高到 128**（Owner 2026-10-05，
+    [#662 决定记录](https://github.com/Crnobog9527/GraylumAI_vercel/pull/662#issuecomment-5994766922)）。Owner 原话：
+
+    > 采样时把单次消息条数上限提高到 128，对话历史恢复到和现在差不多。
+
+    取代 profile 的 `maxMessages=32` 限制；真实采样加入 64、96、128 条短消息和长消息及缓存场景，
+    用原生用量证明逐条消息模板开销仍在 K+M=8192 的余量内。历史最多保留与 v1 相近的 100 条，
+    仍受 `maxBytes=196608` 和工具轮次预留约束；不能用离线预演代替真实证明。
+    采样计划与执行器先交主窗口审阅，通知后才可使用已批准的 OpenRouter 测试余额；不充值。
+
+**2026-10-06：BILL-PAYG profile 采样累计限额降为 $25**
+
+Owner 原话：「把 #665 采样的累计总限额从 48 美元降到 25 美元」。
+依据：[#665 决定记录](https://github.com/Crnobog9527/GraylumAI_vercel/pull/665#issuecomment-5998517105)。
+从第三批起取代原 $48 限额；累计上界为前两批已入账 $2.5964977 加新批次上界，必须小于 $25，单条上限不变。
+第二批第 49 条经 Owner 核实服务商后台总额后按 $0 入账，原 UNKNOWN 回执保持不变，
+依据：[费用核实](https://github.com/Crnobog9527/GraylumAI_vercel/pull/665#issuecomment-5998488867)。
+第三批先准备和复核，收到主窗口通知前不得发送真实请求；不补跑、不充值、不删除旧锁。
+
 **2026-10-05：REPORT-GEN 后端默认关闭开工，合并报告前服务端会员检查**
 
 Owner 原话（本次实施授权）：
@@ -623,6 +646,46 @@ REPORT-GEN 后端现在开工，标明“未完成、默认关闭”，报告入
 真实 staging 实测仍等 BILL-PAYG 在 staging 开启；D2 模型与额度、D3 是否临时调高 8192、写满截断时收费，
 由主窗口在实测前询问 Owner。本次不授权真实模型调用、远端数据库访问、应用迁移、环境配置或合并。
 依赖升级另作只读评估，不纳入本实现。
+
+**2026-10-06：BILL-PAYG 小输出硬限实测（主窗口技术决定）**
+
+依据：[#665 第三批审计](https://github.com/Crnobog9527/GraylumAI_vercel/pull/665#issuecomment-5999267254)。
+后续每模型每种思考设置至少两条小 max_tokens 输出压力，要求 length 且原生 completion（含 reasoning）精确等于上限。
+取代“所有输出压力必须写到 8192”的采样标准；已有 8192 触顶保留为观测。host profile 如实填写所证明的较小 outputLimit，
+不外推放行更大请求。r4 为 Luna 剩余样本和 Sonnet 新输出压力，r5 为 Gemini 剩余样本；两批单独授权，
+Gemini 等原 google-vertex/global 线路恢复，不换线路。累计限额仍 $25，当前已入账 $4.8101395；本轮只准备。
+
+**2026-10-06：BILL-PAYG 输出语义与用途上限分开（主窗口技术决定）**
+
+依据：[#665 r4 复核及执行授权](https://github.com/Crnobog9527/GraylumAI_vercel/pull/665#issuecomment-5999661106)。
+小 max_tokens 样本证明严格截断且 completion 包含 reasoning；每种设置至少两条成立后，profile 的 outputLimit 可用
+PURPOSE_OUTPUT_CAP（8192）。证据分别记录 testedOutputLimit 与允许的 outputLimit，不把小上限触顶冒称 8192 实测。
+取代上一条“profile 只能填写较小 outputLimit、不放行更大请求”的限制；输入、缓存、费用和思考设置覆盖要求不变。
+本轮只授权 r4，r5 不得执行；任何停止不补跑，配置建议只写 PR，由主窗口决定应用。累计预算仍 $25。
+
+**2026-10-06：BILL-PAYG 输出压力判定调整（主窗口技术决定）**
+
+依据：[#665 r5b 审计](https://github.com/Crnobog9527/GraylumAI_vercel/pull/665#issuecomment-6000858032)。
+主窗口原文：“通过标准改为：finish_reason=length，并且 completion（含 reasoning）≤ O，并且 ≥ 0.9 × O”；
+“OUTPUT_CAP_NOT_REACHED 改为记录后继续，不再停批”。取代上述小上限必须精确等于 O 和未触顶即停批的采样要求。
+超过 O、费用未知、越界、拒绝、线路/目录不可用、身份/hash失败仍停；未达标样本不成为合格 profile 证据，不补跑。
+r5b首条508/512、length作为合格证据保留，原始停批记录不改写；其余95条原请求准备r6，当前已入账$4.991984715。
+累计限额仍$25；本轮只准备，主窗口复核通知前不发送任何真实请求。
+
+**2026-10-06：BILL-PAYG Gemini采样改用AI Studio（Owner决定）**
+
+依据：[Owner原话](https://github.com/Crnobog9527/GraylumAI_vercel/pull/665#issuecomment-6001418763)：
+“665切换为Google AI Studio 的线路测试， Gemini 的 Vertex 线路太不稳定。”
+取代此前Gemini固定google-vertex/global采样的决定，改为完整tag google-ai-studio，不加/flex或/priority。
+Vertex首条不能移作AI Studio证据，完整76条重新准备；r6不执行，Luna整理16和Sonnet输出4原请求保留为r7。
+已入账$4.991984715，累计仍不得达$25；本轮只准备不执行，未来实际路由配置由主窗口另行处理。
+
+**2026-10-06：BILL-PAYG r4费用确认与r5b准备**
+
+依据：[Owner后台核实](https://github.com/Crnobog9527/GraylumAI_vercel/pull/665#issuecomment-6000132517)。
+r4第77条未收费，按$0入账；r4已入账$0.179168465，前四批累计$4.989307965，原始UNKNOWN回执不改写。
+本次Owner要求原r5作废，改为r5b的Gemini76条、Sonnet新ID输出4条，并补齐Luna整理用途/格式缺口。
+取代此前r5独立执行安排，累计限额仍$25；只准备，主窗口复核通知前不得发送真实请求。
 
 **2026-10-06：报告前端开工；写满截断照常收费并提示；D2、D3 定案**
 

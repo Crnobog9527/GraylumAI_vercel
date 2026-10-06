@@ -2112,7 +2112,7 @@
   "fn:bill2_payg_review_invalidate_call()": "7b170a19a4d6",
   "fn:bill2_payg_review_invalidate_receipt()": "d7713d93dd6f",
   "fn:bill2_payg_review_metering(uuid,uuid,uuid,jsonb)": "f01f7a19b54b",
-  "fn:bill2_payg_validate_quote(bill2_runs,jsonb)": "33d989f4d285",
+  "fn:bill2_payg_validate_quote(bill2_runs,jsonb)": "7a33261f1ae5",
   "fn:bill2_pending_calls(uuid,uuid)": "a561dbeaf32e",
   "fn:bill2_prepare(uuid,uuid,jsonb)": "4e042010b127",
   "fn:bill2_private_input(uuid,uuid)": "213098910da3",

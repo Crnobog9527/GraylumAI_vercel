@@ -33,3 +33,9 @@ it('per-call bound uses max cache-write price and rounds once at 12 decimals', (
   expect(openRouterCallBound({ ...limits, promptUsdPerMillion: '0.0000011',
     cacheWriteUsdPerMillion: '0', completionUsdPerMillion: '0' }, 1, 1).upperUsd).toBe('0.000000000002');
 });
+
+it('accepts 128-message per-call evidence and rejects 129 without weakening T',()=>{
+ expect(paygCallQuote.safeParse({...quote,messages:128}).success).toBe(true);
+ expect(paygCallQuote.safeParse({...quote,messages:129}).success).toBe(false);
+ expect(paygCallQuote.safeParse({...quote,messages:128,promptTokensUpper:100}).success).toBe(false);
+});
