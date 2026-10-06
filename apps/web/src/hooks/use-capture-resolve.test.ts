@@ -34,14 +34,17 @@ describe("resolveCaptureUpdate", () => {
       expect(t.resolve).not.toHaveBeenCalled();
     }
   });
-  it("refreshes after a definite refusal, and keeps the content on other failures", async () => {
+  it("refreshes after any failure and only calls a definite refusal stale", async () => {
     for (const code of ["OPC_SUGGESTION_CHANGED", "OPC_INFORMATION_CONFLICT", "OPC_CAPTURE_DENIED"]) {
       const t = io(shown, vi.fn(async () => { throw new Error(code); }));
       expect(await resolveCaptureUpdate(t.io, "goal", "goal", shown, "accept")).toBe(RESOLVE_STALE_NOTICE);
       expect(t.order.at(-1)).toBe("read");
     }
+    // A lost reply may have committed: re-read and never claim the content is unchanged.
     const t = io(shown, vi.fn(async () => { throw new Error("timeout"); }));
     expect(await resolveCaptureUpdate(t.io, "goal", "goal", shown, "accept")).toBe(RESOLVE_FAILED_NOTICE);
+    expect(t.order).toEqual(["flush", "read", "resolve", "read"]);
+    expect(RESOLVE_FAILED_NOTICE).not.toContain("不变");
     const unreadable = { ...io(shown).io, refetch: async () => ({ error: new Error("x") }) };
     expect(await resolveCaptureUpdate(unreadable, "goal", "goal", shown, "accept")).toBe(RESOLVE_FAILED_NOTICE);
   });

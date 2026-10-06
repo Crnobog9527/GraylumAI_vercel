@@ -22,7 +22,8 @@ export type CaptureResolveDeps = {
 /** Refusals that prove nothing was written: the update changed or became unreadable, or the step moved on. */
 export const RESOLVE_STALE = ["OPC_SUGGESTION_CHANGED", "OPC_INFORMATION_CONFLICT", "OPC_REQUEST_CONFLICT", "OPC_CAPTURE_DENIED"];
 export const RESOLVE_STALE_NOTICE = "这条更新已经处理过或刚刚有变化，已刷新为最新内容。请再看一下右侧清单。";
-export const RESOLVE_FAILED_NOTICE = "这次没有处理成功，原内容保持不变。请稍后重试。";
+/** The outcome is unknown (for example a lost reply): never claim the content is unchanged. */
+export const RESOLVE_FAILED_NOTICE = "这次处理的结果暂未确认，页面已重新读取。请以右侧清单当前的内容为准，需要时再操作一次。";
 
 /**
  * One adopt/ignore of the update the user saw. Returns the notice to show, or
@@ -45,9 +46,9 @@ export async function resolveCaptureUpdate(io: Pick<CaptureResolveDeps, "draftId
   } catch (cause) {
     const message = cause instanceof Error ? cause.message : "";
     // A lost reply is retried by a new click: the server then reports the update as already gone.
-    if (!RESOLVE_STALE.some(code => message.includes(code))) return RESOLVE_FAILED_NOTICE;
+    // Refresh either way: a lost reply may still have committed, and the panel must show what the server holds.
     await io.refetch().catch(() => undefined);
-    return RESOLVE_STALE_NOTICE;
+    return RESOLVE_STALE.some(code => message.includes(code)) ? RESOLVE_STALE_NOTICE : RESOLVE_FAILED_NOTICE;
   }
 }
 

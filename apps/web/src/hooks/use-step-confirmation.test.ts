@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { describe, expect, it, vi } from "vitest";
-import { confirmKey, executeConfirmation, prepareConfirmation, type ConfirmationIo, type ConfirmRead } from "./use-step-confirmation";
+import { confirmKey, executeConfirmation, prepareConfirmation, refreshedDeferrals, type ConfirmationIo, type ConfirmRead } from "./use-step-confirmation";
 import { stepConfirmationValues, visibleStep, type FieldValue, type VisibleStep } from "@/components/opc/capture-state";
 import type { ConfirmStepEnvelope } from "@/app/positioning/[draftId]/confirm-envelope";
 
@@ -106,5 +106,14 @@ describe("executeConfirmation", () => {
     await executeConfirmation(s.io, { ...step, dependsOn: ["s0"] }, envelope(confirmed, { phase: "save" }));
     expect(s.calls).toEqual(["save"]);
     expect(s.io.onConfirmed).not.toHaveBeenCalled();
+  });
+});
+
+describe("refreshedDeferrals", () => {
+  it("follows the refreshed content, except where the user switched a deferral in this dialog", () => {
+    const baseline = { values: { a: v("另一个窗口暂缓了", "deferred"), b: v("已改为草稿"), c: v("原因", "deferred"), d: v("x") }, updates: {} };
+    // b was deferred before the refresh but the other tab un-deferred it; c the user un-ticked; d the user ticked.
+    const next = refreshedDeferrals(baseline, new Set(["b", "d"]), new Set(["c", "d"]));
+    expect([...next].sort()).toEqual(["a", "d"]);
   });
 });

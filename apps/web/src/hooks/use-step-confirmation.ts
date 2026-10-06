@@ -125,7 +125,16 @@ export async function prepareConfirmation(io: ConfirmationIo, step: Step, info: 
   return { envelope };
 }
 
-type Review = { stepId: string; baseline: VisibleStep; deferred: Set<string>; problems: ReviewProblem[]; changed: boolean };
+/** `touched`: deferrals the user switched in this dialog; every other one follows the reviewed content. */
+type Review = { stepId: string; baseline: VisibleStep; deferred: Set<string>; touched: Set<string>; problems: ReviewProblem[]; changed: boolean };
+
+/** Deferrals after the review baseline is refreshed: the new content's own, except the ones the user chose here. */
+export function refreshedDeferrals(baseline: VisibleStep, deferred: ReadonlySet<string>, touched: ReadonlySet<string>) {
+  const next = new Set<string>();
+  for (const [id, value] of Object.entries(baseline.values))
+    if (touched.has(id) ? deferred.has(id) : value.status === "deferred") next.add(id);
+  return next;
+}
 
 /**
  * One confirmation per step, bound to the snapshot the user reviewed
@@ -209,7 +218,7 @@ export function useStepConfirmation(deps: StepConfirmationDeps) {
     }
     if (state.kind === "valid") { void guarded(step, async () => state.envelope); return; }
     const deferred = new Set((info.schema ?? []).filter(field => info.values?.[field.id]?.status === "deferred").map(field => field.id));
-    setReview({ stepId, baseline: visibleStep(info, edits), deferred, problems: [], changed: false });
+    setReview({ stepId, baseline: visibleStep(info, edits), deferred, touched: new Set(), problems: [], changed: false });
   }
 
   function setDeferred(fieldId: string, deferred: boolean) {
@@ -217,7 +226,7 @@ export function useStepConfirmation(deps: StepConfirmationDeps) {
       if (!old) return old;
       const next = new Set(old.deferred);
       if (deferred) next.add(fieldId); else next.delete(fieldId);
-      return { ...old, deferred: next, problems: old.problems.filter(problem => problem.fieldId !== fieldId) };
+      return { ...old, deferred: next, touched: new Set(old.touched).add(fieldId), problems: old.problems.filter(problem => problem.fieldId !== fieldId) };
     });
   }
 
@@ -233,7 +242,8 @@ export function useStepConfirmation(deps: StepConfirmationDeps) {
       const prepared = await prepareConfirmation(io(), step, info, reviewed, values);
       if ("envelope" in prepared) return prepared.envelope;
       // Something the user did not see arrived: show it and ask for a new review.
-      setReview({ ...review, baseline: prepared.changed, problems: [], changed: true });
+      setReview({ ...review, baseline: prepared.changed, problems: [], changed: true,
+        deferred: refreshedDeferrals(prepared.changed, review.deferred, review.touched) });
       throw new Error(REVIEW_CHANGED);
     });
   }

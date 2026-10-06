@@ -488,9 +488,11 @@ function PositioningDraftContent({draftId}:{draftId:string}){
   async function flushInformation(stepId: string) {
     if (autosaveTimer.current) clearTimeout(autosaveTimer.current);
     autosaveTimer.current = null;
+    // Any step can be edited in the checklist: the cleared timer also covered the other steps' edits.
+    for (const [other, pending] of Object.entries(infoEditsRef.current)) if (other !== stepId && !sessionStorage.getItem("opc-confirm-step:"
+      + draftId + ":" + other)) void enqueueInformation(other, pending).catch(() => setError("自动保存暂时失败。内容仍保留在本机，可重试保存。"));
     const values = infoEditsRef.current[stepId];
-    if (values) await enqueueInformation(stepId, values);
-    else await autosaveChain.current;
+    await (values ? enqueueInformation(stepId, values) : autosaveChain.current);
   }
   useEffect(() => {
     if (planView || hydratedDraft !== draftId || composing.current) return;
@@ -818,9 +820,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
     if (sessionStorage.getItem(key))
       setError(quiet ? "" : admissionMessage(failure) ?? RETRY_PENDING_NOTICE);
   }
-  function sameInformation(a: Information | undefined, b: Information | undefined) {
-    return a?.value === b?.value && a?.status === b?.status && a?.nature === b?.nature;
-  }
+  const sameInformation = (a?: Information, b?: Information) => a?.value === b?.value && a?.status === b?.status && a?.nature === b?.nature;
   function update(index: number, key: keyof Item, value: string) {
     setItems((old) =>
       old.map((item, n) => (n === index ? { ...item, [key]: value } : item)),
