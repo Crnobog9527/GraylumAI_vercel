@@ -26,6 +26,6 @@ export function claimFailure(error: unknown): Error {
   const message = error && typeof error === 'object' && 'message' in error ? error.message : null;
   const code = typeof message === 'string' && claimRejections.has(message)
     ? message : 'BILL2_DATABASE_UNAVAILABLE';
-  logger.warn('api', 'bill2_claim_rejected', { code });
+  logger.warn('api', 'Billing claim rejected', { code });
   return code === 'BILL2_DATABASE_UNAVAILABLE' ? new Error(code) : new BillingClaimRejection(code);
 }
