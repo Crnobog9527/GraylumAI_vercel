@@ -86,14 +86,14 @@ export function evaluateRefundPolicy(raw: unknown): RefundPolicyResult {
   if (order.kind === 'unknown') return review('purchase_kind_unresolved');
   if (input.reason === 'ordinary') {
     if (order.kind === 'renewal') return reject('renewal');
+    if (submitted - paid > REFUND_WINDOW_MICROSECONDS) return reject('outside_refund_window');
+    if (consumption.state === 'consumed') return reject('account_consumed_since_payment');
     if (order.kind === 'membership_first') {
       const history = input.membershipHistory;
       if (!history || history.userId !== order.userId || history.orderId !== order.id
         || refundTime(history.paidAt)! !== paid || !history.complete) return review('membership_history_unresolved');
       if (history.priorPaidMembershipCount > 0) return reject('not_first_membership_purchase');
     }
-    if (submitted - paid > REFUND_WINDOW_MICROSECONDS) return reject('outside_refund_window');
-    if (consumption.state === 'consumed') return reject('account_consumed_since_payment');
     if (consumption.state !== 'unused' || !consumption.completeAccountHistory || consumption.settlementState !== 'clear') {
       return review('consumption_unresolved');
     }

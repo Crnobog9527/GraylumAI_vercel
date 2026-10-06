@@ -136,6 +136,10 @@ describe('ordinary eligibility and evidence', () => {
     const input = fixture(); input.order.kind = kind; input.membershipHistory!.priorPaidMembershipCount = 2;
     expect(evaluateRefundPolicy(input).status).toBe('eligible');
   });
+  it('keeps conclusive consumption rejection ahead of missing first-purchase evidence', () => {
+    const input = fixture(); delete input.membershipHistory; input.consumption.state = 'consumed';
+    expect(evaluateRefundPolicy(input)).toMatchObject({ status: 'rejected', reason: 'account_consumed_since_payment' });
+  });
   it('invalid input fails closed without an exception', () => {
     for (const input of [null, {}, [], 'invalid']) expect(evaluateRefundPolicy(input).status).toBe('review_required');
   });
