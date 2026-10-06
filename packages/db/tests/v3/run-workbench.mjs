@@ -526,12 +526,22 @@ try {
               const [contextRaw,primaryRaw='']=organizerText.split('\n\nPrimary assistant reply:\n');
               const context=JSON.parse(contextRaw);JSON.parse(primaryRaw);
               const {mentorQuestionFixture}=await import('./opc-mentor-fixture.mjs');
+              if(context.captureFormat==='v2'){
+                // B2 checklist input: the fixture answers the turn's focus (the server's rule) and returns v2 patches.
+                const index=context.checklist.findIndex(step=>step.id===context.originalStepId),fields=context.checklist[index]?.fields??[];
+                const focus=context.userInput==='HOST_OPEN_CURRENT_QUESTION'?fields[0]:fields.find(field=>field.required&&field.status==='missing')??fields.find(field=>field.status!=='confirmed')??fields.at(-1);
+                const extraction=mentorQuestionFixture('Current information question: '+JSON.stringify(focus?{id:focus.id,title:focus.title}:null)+
+                  '\nField roles for the current question: '+JSON.stringify(fields.map(field=>({id:field.id,elicit:field.elicit})))+'. ',context.userInput,index);
+                const patches=Object.entries(extraction.informationPatch??{}).map(([fieldId,entry])=>({stepId:extraction.targetStepId??context.originalStepId,fieldId,...entry}));
+                content=JSON.stringify({inputKind:extraction.inputKind??'answer',patches,notes:[]});
+              }else{
               const extraction=mentorQuestionFixture(
                 'Current information question: '+JSON.stringify(context.currentQuestion)+'\nField roles for the current question: '+JSON.stringify(context.currentQuestion?.fields??[])+'. ',
                 context.userInput,
                 Object.keys(context.allowedWorkflow??{}).indexOf(context.originalStepId),
               );
               content=JSON.stringify({inputKind:extraction.inputKind??'answer',targetStepId:extraction.targetStepId??context.originalStepId,informationPatch:extraction.informationPatch??{}});
+              }
             }catch{content=JSON.stringify({inputKind:'answer',informationPatch:{}});}
           }
           const input=isOrganizer ? {} : JSON.parse(last.content);

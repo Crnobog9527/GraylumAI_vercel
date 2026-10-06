@@ -60,7 +60,7 @@ it.runIf(process.env.V3_LOCAL_STAGING_HOST==='true').each(['normal','refresh','p
    const chat=node.parentElement!;
    return {panelWidth:panel.width,panelBottom:panel.bottom,left:box.left-panel.left,right:panel.right-box.right,logTop:box.top,
     overflowY:getComputedStyle(node).overflowY,scrolls:node.scrollHeight>node.clientHeight,
-    messages:[...node.querySelectorAll('[data-message-role=assistant]')].map(rect),current:rect(node.querySelector('section[aria-label="当前问题操作"]')),
+    messages:[...node.querySelectorAll('[data-message-role=assistant]')].map(rect),current:rect(node.querySelector('[aria-label="本步小结"]')),
     composer:rect([...chat.children].find(child=>child.querySelector('textarea[aria-label="给导师的回复"]'))),notes:rect(chat.lastElementChild),
     steps:rect(main.querySelector('nav[aria-label="定位步骤"]')),footer:rect(main.querySelector(':scope>div>footer')),
     pageFits:document.documentElement.scrollWidth<=innerWidth,logFits:node.scrollWidth<=node.clientWidth};
@@ -72,9 +72,9 @@ it.runIf(process.env.V3_LOCAL_STAGING_HOST==='true').each(['normal','refresh','p
    // Composer and notes sit on the CSS gutter; log rows also keep symmetric scrollbar slots, so they may be narrower
    // (the first row keeps its existing 690px cap) but never leave the centered column.
    for(const box of [l.composer!,l.notes!]){expect(Math.abs(box.width-column)).toBeLessThanOrEqual(1);expect(Math.abs(box.center)).toBeLessThanOrEqual(1);}
-   expect(l.messages.length).toBeGreaterThan(0);expect(l.current).not.toBeNull();
-   for(const box of [...l.messages,l.current]){expect(box!.left).toBeGreaterThanOrEqual(-column/2-1);expect(box!.right).toBeLessThanOrEqual(column/2+1);}
-   expect(Math.abs(l.current!.center)).toBeLessThanOrEqual(1);
+   // The step summary card appears only once a step is complete; when shown it stays in the column.
+   expect(l.messages.length).toBeGreaterThan(0);
+   for(const box of [...l.messages,...(l.current?[l.current]:[])]){expect(box!.left).toBeGreaterThanOrEqual(-column/2-1);expect(box!.right).toBeLessThanOrEqual(column/2+1);}
    // Header and step tabs stay above the log; composer and the publish bar stay below it, inside the panel.
    expect(l.steps!.bottom).toBeLessThanOrEqual(l.logTop+1);expect(l.composer!.bottom).toBeLessThanOrEqual(l.footer!.top+1);
    expect(l.footer!.bottom).toBeLessThanOrEqual(l.panelBottom+1);
@@ -93,7 +93,7 @@ it.runIf(process.env.V3_LOCAL_STAGING_HOST==='true').each(['normal','refresh','p
    await page.getByRole('button',{name:'收起成果面板'}).click();await page.getByRole('button',{name:'展开右边栏'}).waitFor();
    expect((await expectColumn(24)).panelWidth).toBeGreaterThan(1000);
    await page.screenshot({path:process.env.V3_WORKBENCH_OUTPUT+'/mentor-scroll-surface-single-wide.png'});
-   await page.getByRole('button',{name:'展开右边栏'}).click();await page.getByRole('heading',{name:'已确认的定位'}).waitFor();
+   await page.getByRole('button',{name:'展开右边栏'}).click();await page.getByRole('heading',{name:'定位清单'}).waitFor();
   }
   // A host-opened turn is admitted without the card tool: text only.
   expect(await page.getByText('请选择当前问题最接近的答案：',{exact:true}).count()).toBe(0);
@@ -101,7 +101,7 @@ it.runIf(process.env.V3_LOCAL_STAGING_HOST==='true').each(['normal','refresh','p
   const openingValue=(await f.service.read(d.draftId)).information['step-0'].values?.product;
   if(scenario==='proposal'){
    const openingExecution=(await sql.query('select result from runtime_executions where actor_id=$1 order by created_at',[f.actor])).rows[0];
-   expect(JSON.parse(openingExecution.result.summary).informationPatch.product).toMatchObject({status:'provisional',basis:'agent_proposal',value:openingValue.value});
+   expect(JSON.parse(openingExecution.result.summary).patches).toEqual([expect.objectContaining({stepId:'step-0',fieldId:'product',status:'provisional',basis:'agent_proposal',value:openingValue.value})]);
    await poll(()=>page.getByText(openingValue.value,{exact:true}).count()).toBeGreaterThan(0);
   }
   else expect(openingValue?.value??'').toBe('');
@@ -148,7 +148,7 @@ it.runIf(process.env.V3_LOCAL_STAGING_HOST==='true').each(['normal','refresh','p
    const settledAt=Date.now(),soon={timeout:10000},refreshed=executions.at(-1);
    await poll(()=>page.getByText('请选择当前问题最接近的答案：',{exact:true}).count(),soon).toBeGreaterThan(0);
    await poll(()=>page.evaluate(id=>sessionStorage.getItem('opc-step:'+id+':step-0'),d.draftId),soon).toBeNull();
-   await poll(()=>send.isEnabled(),soon).toBe(true);await poll(()=>page.getByRole('button',{name:'确认当前信息，继续',exact:true}).isEnabled(),soon).toBe(true);
+   await poll(()=>send.isEnabled(),soon).toBe(true);await poll(()=>page.locator('#step-0-product').inputValue(),soon).not.toBe('');
    timings.refreshSettledToRecoveredMs=Date.now()-settledAt;expect(await composer.isEditable()).toBe(true);
    expect([await recoveryCard.count(),await retryLine.count(),await page.getByText('正在回复…',{exact:true}).count()]).toEqual([0,0,0]);
    await poll(async()=>(await f.service.read(d.draftId)).information['step-0'].values?.product?.status).toBe('provisional');
@@ -157,7 +157,6 @@ it.runIf(process.env.V3_LOCAL_STAGING_HOST==='true').each(['normal','refresh','p
    expect((await sql.query('select id,request_id from runtime_executions where actor_id=$1 order by created_at',[f.actor])).rows).toEqual(executions);
    expect((await sql.query('select count(*)::int n from opc_turns where draft_id=$1 and request_id=$2',[d.draftId,refreshed.request_id])).rows[0].n).toBe(1);
    await poll(async()=>(await sql.query("select count(t.id)::int n from runtime_executions e join credit_transactions t on t.bill2_run_id=e.billing_run_id and t.reason_code='bill2_spend' where e.id=$1",[refreshed.id])).rows[0].n).toBe(1);
-   expect(await page.getByRole('button',{name:'确认当前信息，继续',exact:true}).isEnabled()).toBe(true);
    await page.screenshot({path:process.env.V3_WORKBENCH_OUTPUT+'/mentor-refresh-auto-recovered.png',fullPage:true});
   }else await control(4);
   await poll(()=>send.isEnabled()).toBe(true);expect(await composer.inputValue()).toBe('这是下一条尚未发送的新草稿');
@@ -221,7 +220,14 @@ it.runIf(process.env.V3_LOCAL_STAGING_HOST==='true').each(['normal','refresh','p
    expect(material).toMatchObject({question:saved.card.question,recommended:saved.card.recommended,
     selectedIndex:scenario==='refresh'?null:0,selectedOption:scenario==='refresh'?null:saved.card.options[0]});
   }
-  await page.getByRole('button',{name:'确认当前信息，继续',exact:true}).click();await poll(async()=>(await control()).length).toBe(7);expect((await control())[6]!.stream).toBe(true);await control(7);await poll(async()=>(await control()).length).toBe(8);await control(8);await poll(()=>send.isEnabled()).toBe(true);
+  // The step is confirmed once: complete it in the right checklist, review the visible snapshot, confirm. No question-by-question flow.
+  for(const [id,value] of [['platforms','先只做公众号。'],['time','每周 3 小时。']] as const)await page.locator('#step-0-'+id).fill(value);
+  await poll(async()=>(await f.service.read(d.draftId)).information['step-0'].values?.time?.value).toBe('每周 3 小时。');
+  await page.getByRole('group',{name:'本步小结'}).getByRole('button',{name:'核对并确认',exact:true}).click();
+  const review=page.getByRole('dialog',{name:'核对并确认：需求确认'});await review.getByRole('button',{name:'确认这一步',exact:true}).click();
+  await poll(()=>review.count()).toBe(0);
+  // Confirming opens the next step by itself: one mentor stream and one organizer call.
+  await poll(async()=>(await control()).length).toBe(7);expect((await control())[6]!.stream).toBe(true);await control(7);await poll(async()=>(await control()).length).toBe(8);await control(8);await poll(()=>send.isEnabled()).toBe(true);
   // A reader at the bottom keeps following the newest mentor message as it arrives.
   if(scenario==='normal')await poll(()=>log.evaluate(node=>
    node.scrollHeight>node.clientHeight+300&&node.scrollHeight-node.clientHeight-node.scrollTop<64)).toBe(true);

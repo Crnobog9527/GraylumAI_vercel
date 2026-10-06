@@ -11,7 +11,6 @@ import {
   liveReplyAfter,
   livePhaseNotice,
   mentorReplyDisplay,
-  questionCardStatus,
   showsTurnState,
   startLiveReply,
   type MentorReplySource,
@@ -196,59 +195,6 @@ describe("livePhaseNotice", () => {
   });
 });
 
-describe("questionCardStatus", () => {
-  type Binding = { roundId?: string | null; stepId?: string; questionId?: string | null };
-  const turn = { roundId: "round-1", stepId: "audience", questionId: "who" };
-  const shown = { roundId: "round-1", stepId: "audience", questionId: "who" };
-  const reply = (input: string | null, binding: Binding = turn) => ({ ...binding, input });
-
-  it("is open only on the newest turn without a pending reply", () => {
-    expect(questionCardStatus({ isLatest: true, reply: null, turn, shown })).toEqual({
-      answered: false,
-      answer: null,
-      onShownQuestion: true,
-    });
-  });
-
-  it("becomes history once the user replied under its question or a later turn exists", () => {
-    expect(questionCardStatus({ isLatest: true, reply: reply("刚入行的新人"), turn, shown })).toMatchObject({
-      answered: true,
-      answer: "刚入行的新人",
-    });
-    expect(questionCardStatus({ isLatest: false, reply: reply("自己写的回答"), turn, shown })).toMatchObject({
-      answered: true,
-      answer: "自己写的回答",
-    });
-    expect(questionCardStatus({ isLatest: false, reply: reply(null), turn, shown })).toMatchObject({ answered: true, answer: null });
-  });
-
-  it("never takes a turn sent under another round, step or question as its answer", () => {
-    const elsewhere = [
-      reply("刚入行的新人", { ...turn, roundId: "round-2" }),
-      reply("刚入行的新人", { ...turn, stepId: "positioning" }),
-      reply("刚入行的新人", { ...turn, questionId: "pain" }),
-      reply("刚入行的新人", { stepId: "audience", questionId: "who" }),
-      reply("刚入行的新人", {}),
-    ];
-    for (const next of elsewhere) {
-      expect(questionCardStatus({ isLatest: false, reply: next, turn, shown })).toMatchObject({ answered: true, answer: null });
-      // A send waiting under another question does not answer the newest card either.
-      expect(questionCardStatus({ isLatest: true, reply: next, turn, shown })).toMatchObject({ answered: false, answer: null });
-    }
-  });
-
-  it("is sendable only while its own question is on screen in its own round", () => {
-    const status = (t: Binding | undefined, s = shown) =>
-      questionCardStatus({ isLatest: true, reply: null, turn: t, shown: s }).onShownQuestion;
-    expect(status(turn)).toBe(true);
-    expect(status(turn, { ...shown, roundId: "round-2" })).toBe(false);
-    expect(status(turn, { ...shown, stepId: "positioning" })).toBe(false);
-    expect(status(turn, { ...shown, questionId: "pain" })).toBe(false);
-    expect(status({ ...turn, questionId: null })).toBe(false);
-    expect(status({ stepId: "audience", questionId: "who" })).toBe(false);
-    expect(status(undefined)).toBe(false);
-  });
-});
 
 it('keeps provider_history on reload instead of showing a generic stopped message',()=>{
  const shown=mentorReplyDisplay(source(null,{state:'cancelled',unavailableReason:'provider_history'}));
