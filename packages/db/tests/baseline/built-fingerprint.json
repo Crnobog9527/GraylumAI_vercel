@@ -2212,7 +2212,7 @@
   "fn:pay_common_channel_setting_guard()": "a1698fd2f2c2",
   "fn:pay_common_close_checkout(uuid,uuid,text,text,text,text,text)": "dbdb81e0a787",
   "fn:pay_common_conflict_append_guard()": "022bb9d56206",
-  "fn:pay_common_create_purchase(uuid,text,uuid,text,text,text,text)": "649a647b205b",
+  "fn:pay_common_create_purchase(uuid,text,uuid,text,text,text,text)": "8c991c72aa24",
   "fn:pay_common_derived_guard()": "2373a363e533",
   "fn:pay_common_finish_change(uuid,jsonb,jsonb,text)": "5702d0cfe242",
   "fn:pay_common_frozen_guard()": "9a8f8f258729",

@@ -4,13 +4,13 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { freezePurchaseSnapshot } from './contracts';
 import { type StripeScope, type PurchaseAction } from './purchaseFacts';
 import { buildStripeCheckoutRequest, dispatchStripeCheckoutIntent } from './stripeCheckoutIntent';
-import { closeExpiredStripeCheckout, type CheckoutEvidenceOrder } from './stripePurchaseEvidence';
+import { closeExpiredStripeCheckout, expireUnpaidStripeCheckout, type CheckoutEvidenceOrder } from './stripePurchaseEvidence';
 
 type PaymentDb = Pick<SupabaseClient, 'from' | 'rpc'>;
 type PurchaseOrder = CheckoutEvidenceOrder & {
   price_ref_id: string;
   checkout_request: Stripe.Checkout.SessionCreateParams | null;
-  metadata: { productName?: string };
+  metadata: { productName?: string; requoteRequired?: boolean };
   created_at: string;
 };
 
@@ -96,7 +96,8 @@ export async function createDurableStripeCheckout(input: {
       throw new Error('PAY_COMMON_ATTEMPT_IDENTITY_MISMATCH');
     }
     const snapshot = freezePurchaseSnapshot(order.purchase_snapshot);
-    const changingItem = snapshot.item_id !== action.itemId || snapshot.item_type !== action.itemType
+    if (typeof order.metadata?.requoteRequired !== 'boolean') throw new Error('PAY_COMMON_REQUOTE_CHECK_REQUIRED');
+    const requiresRetirement = order.metadata.requoteRequired || snapshot.item_id !== action.itemId || snapshot.item_type !== action.itemType
       || snapshot.billing_cycle !== action.billingCycle;
     const closeUnmappedAttempt = async (status: 'not_prepared' | 'never_created') => {
       const closed = await db.rpc('pay_common_close_checkout', {
@@ -106,7 +107,7 @@ export async function createDurableStripeCheckout(input: {
       });
       if (closed.error || closed.data !== true) throw new Error('PAY_COMMON_ATTEMPT_CLOSE_FAILED');
     };
-    if (order.checkout_request === null && changingItem) {
+    if (order.checkout_request === null && requiresRetirement) {
       // The transaction arbitrates concurrent prepare/payment; only its confirmed closure allows a new admission.
       await closeUnmappedAttempt('not_prepared');
       continue;
@@ -135,16 +136,16 @@ export async function createDurableStripeCheckout(input: {
     const session = await dispatchStripeCheckoutIntent({ stripe, scope,
       intent: { id: order.id, userId: order.user_id, scope, snapshot: order.purchase_snapshot,
         priceId: price.external_id, request, sessionId: sessionId ?? null, recover: Boolean(order.checkout_request) },
-      createIfMissing: !changingItem,
+      createIfMissing: !requiresRetirement,
       closeNeverCreated: () => closeUnmappedAttempt('never_created'),
       persistSession: session => recordStripeCheckout(db, order.id, scope, session),
     });
     if (!session) continue;
-    if (changingItem && session.status === 'open' && session.payment_status === 'unpaid') {
-      // Ignore the mutation response. A separate authoritative read below must prove safe closure.
-      await stripe.checkout.sessions.expire(session.id);
+    if (requiresRetirement && session.status === 'open' && session.payment_status === 'unpaid') {
+      // Verify unpaid monetary facts before expiration; a separate read below proves terminal closure.
+      await expireUnpaidStripeCheckout({ stripe, scope, order, session });
     }
-    if (session.status === 'expired' || changingItem) {
+    if (session.status === 'expired' || requiresRetirement) {
       const closed = await closeExpiredStripeCheckout({ stripe, supabase: db, scope, order, mappedSessionId: session.id });
       if (!closed) throw new Error('PAY_COMMON_ATTEMPT_CLOSE_FAILED');
       continue;
