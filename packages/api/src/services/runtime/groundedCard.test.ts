@@ -52,3 +52,12 @@ it('old frozen contexts and tool arguments remain accepted without new fields',a
  expect(questionCardFromResult(output)?.message).toBe('legacy prose');
  expect(groundedCardTool(()=>sources).parameters).not.toHaveProperty('message');
 });
+
+it('invalid guarded card keeps paid separate prose and conflicting oversized prose stays bounded',()=>{
+ const text='已经输出的分析';
+ const invalid=agentTurnResult(text,INVALID_CARD_RESULT,true,undefined,true,false);
+ expect(rejectSeparateCardProse(text,invalid)).toMatchObject({card:null,message:text});
+ const valid=agentTurnResult('',groundedCardResult(choice,sources),true,undefined,true,false);
+ const bounded=rejectSeparateCardProse('x'.repeat(262145),valid);
+ expect(bounded.message.length).toBe(262144);expect(bounded.truncated).toBe(true);expect(bounded.card).toBeNull();
+});

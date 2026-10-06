@@ -376,7 +376,7 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
     if(latest.unavailable)return {state:latest.state,unavailable:'latest' as const};
    }
    budget.timing?.mark('fullModelReply');
-   let turn=agentTurn&&!context.reportGeneration?agentTurnResult(agentText,body,agentToolCalled,agentCardMessage,native,
+   let turn=agentTurn&&!context.reportGeneration?agentTurnResult(agentText,body,agentToolCalled,grounded?undefined:agentCardMessage,native,
     !grounded&&Boolean(context.mentorText)):null;
    if(grounded&&turn)turn=rejectSeparateCardProse(agentText,turn);
    if(turn){

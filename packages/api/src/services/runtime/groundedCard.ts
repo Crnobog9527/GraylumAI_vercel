@@ -93,5 +93,7 @@ export function groundedCardToolBytes(): number {
 /** Never append an independently written explanation to a checked card. Already streamed
  * separate prose is retained as prose, but cannot acquire a potentially conflicting card. */
 export function rejectSeparateCardProse(text: string, turn: {body: string; message: string; card: QuestionCard | null; truncated: boolean}) {
-  return text.trim() && turn.card ? {...turn, body: agentTurnBody(text, null, 262144), message: text, card: null} : turn;
+  if (!text.trim() || !turn.card) return turn;
+  const message = text.trim().slice(0, 262144);
+  return {...turn, body: agentTurnBody(message, null, 262144), message, card: null, truncated: text.trim().length > 262144};
 }
