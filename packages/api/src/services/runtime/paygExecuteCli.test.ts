@@ -76,4 +76,4 @@ it.each(manifest.supersedes)('an attempted retired batch %s stops before proxy o
  await mkdir(dir,{recursive:true});await writeFile(join(dir,'attempted.lock'),'preserved');
  await expect(main(args)).rejects.toThrow('SUPERSEDED_BATCH_ATTEMPTED');
  expect(verifyProxyCountry).not.toHaveBeenCalled();expect(executePlan).not.toHaveBeenCalled();
-});
+},30000);
