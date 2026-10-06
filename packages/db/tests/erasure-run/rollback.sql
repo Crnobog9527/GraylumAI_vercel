@@ -12,7 +12,5 @@ DROP FUNCTION public.account_erasure_scrub_run(uuid,uuid);
 DROP FUNCTION public.bill2_run_erasure_guard();
 DROP FUNCTION public.bill2_erasure_run_payload(jsonb);
 DROP FUNCTION public.bill2_erasure_fields(jsonb,jsonb);
-ALTER TABLE public.bill2_runs DROP CONSTRAINT bill2_run_erasure_facts;
 ALTER TABLE public.bill2_runs DROP COLUMN content_erased_at;
-ALTER TABLE public.bill2_runs DROP COLUMN original_payload_hash;
 COMMIT;

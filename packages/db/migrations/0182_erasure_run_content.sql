@@ -3,14 +3,9 @@
 BEGIN;
 SET LOCAL lock_timeout = '5s';
 
--- Two facts are required for one-way enforcement and original request integrity.
+-- A single one-way marker prevents refill. Do not retain a hash of deleted user content.
 -- Financial state continues to live in the original run/call/receipt/ledger.
 ALTER TABLE public.bill2_runs ADD COLUMN IF NOT EXISTS content_erased_at timestamptz;
-ALTER TABLE public.bill2_runs ADD COLUMN IF NOT EXISTS original_payload_hash text;
-ALTER TABLE public.bill2_runs DROP CONSTRAINT IF EXISTS bill2_run_erasure_facts;
-ALTER TABLE public.bill2_runs ADD CONSTRAINT bill2_run_erasure_facts CHECK (
-  (content_erased_at IS NULL AND original_payload_hash IS NULL) OR
-  (content_erased_at IS NOT NULL AND original_payload_hash IS NOT NULL AND original_payload_hash ~ '^[a-f0-9]{64}$'));
 
 -- Private recursive whitelist, used only with the fixed contract below. No arbitrary JSON survives.
 -- Preserve the original scalar representation for decimal/accounting facts; reject malformed facts.
@@ -68,7 +63,6 @@ LANGUAGE sql STABLE SET search_path = public, pg_temp AS $$
   "operation": "id",
   "modelId": "uuid",
   "revisionId": "uuid",
-  "sourceHash": "hash",
   "callPolicy": [
     {
       "modelId": "uuid",
@@ -195,7 +189,7 @@ LANGUAGE plpgsql SET search_path = public, pg_temp AS $$
 DECLARE projected jsonb;
 BEGIN
   IF TG_OP = 'INSERT' THEN
-    IF NEW.content_erased_at IS NOT NULL OR NEW.original_payload_hash IS NOT NULL THEN
+    IF NEW.content_erased_at IS NOT NULL THEN
       RAISE EXCEPTION 'BILL2_RUN_ERASURE_IMMUTABLE';
     END IF;
     RETURN NEW;
@@ -207,18 +201,16 @@ BEGIN
       OR NOT OLD.closed THEN RAISE EXCEPTION 'BILL2_RUN_ERASURE_DENIED'; END IF;
     projected := CASE WHEN OLD.result_financial_projection_version IS NOT NULL THEN OLD.result
       ELSE bill2_outcome_projection(OLD.result) END;
-    IF (to_jsonb(NEW) - ARRAY['payload','scope','result','content_erased_at','original_payload_hash',
+    IF (to_jsonb(NEW) - ARRAY['payload','scope','result','content_erased_at',
         'result_financial_projection_hash','result_financial_projection_version']) IS DISTINCT FROM
-       (to_jsonb(OLD) - ARRAY['payload','scope','result','content_erased_at','original_payload_hash',
+       (to_jsonb(OLD) - ARRAY['payload','scope','result','content_erased_at',
         'result_financial_projection_hash','result_financial_projection_version'])
       OR NEW.payload IS DISTINCT FROM bill2_erasure_run_payload(OLD.payload)
-      OR NEW.scope IS DISTINCT FROM '{}'::jsonb OR NEW.result IS DISTINCT FROM projected
-      OR NEW.original_payload_hash IS DISTINCT FROM encode(sha256(convert_to(OLD.payload::text,'utf8')),'hex') THEN
+      OR NEW.scope IS DISTINCT FROM '{}'::jsonb OR NEW.result IS DISTINCT FROM projected THEN
       RAISE EXCEPTION 'BILL2_RUN_ERASURE_IMMUTABLE';
     END IF;
   ELSE
     IF NEW.content_erased_at IS DISTINCT FROM OLD.content_erased_at
-      OR NEW.original_payload_hash IS DISTINCT FROM OLD.original_payload_hash
       OR NEW.payload IS DISTINCT FROM OLD.payload OR NEW.scope IS DISTINCT FROM OLD.scope THEN
       RAISE EXCEPTION 'BILL2_RUN_ERASURE_IMMUTABLE';
     END IF;
@@ -261,7 +253,7 @@ BEGIN
   result_projection := CASE WHEN r.result_financial_projection_version IS NOT NULL THEN r.result
     ELSE bill2_outcome_projection(r.result) END;
   UPDATE bill2_runs SET payload=projected,scope='{}',result=result_projection,
-    content_erased_at=clock_timestamp(),original_payload_hash=encode(sha256(convert_to(r.payload::text,'utf8')),'hex'),
+    content_erased_at=clock_timestamp(),
     result_financial_projection_version=CASE WHEN result_projection IS NOT NULL THEN 1 END,
     result_financial_projection_hash=CASE WHEN result_projection IS NOT NULL
       THEN encode(sha256(convert_to(result_projection::text,'utf8')),'hex') END WHERE id=r.id;

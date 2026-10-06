@@ -12,7 +12,7 @@
 返回 processed/remaining 只指这个 run 的三个内容字段，不包含正文或错误原文。
 
 - payload：逐层白名单重建，清掉 input、scope、sessionRef、额外字段及嵌套正文。
-  保留契约/规则版本、内部模型/工具版本编号、原 sourceHash、操作类别、冻结预算、时间、
+  保留契约/规则版本、内部模型/工具版本编号、操作类别、冻结预算、时间、
   汇率、billingUnit 和调用策略；PAYG 的原 nominalPricing 阶梯、时段、缓存价格及报价上限
   保持原精确表示。财务标识沿用创建时的非空字符串规则，允许空格、符号和 Unicode；
   UUID 接受大小写。不添加会卡住合法历史 run 的新字符限制。对象/数组不能藏进标量，
@@ -23,8 +23,9 @@
 - 未决/unknown 仍保留原预留、真实 call/receipt/供应商编号和冻结财务策略；不猜测零费用。
   原按 ID 核对、迟到 close、汇率换算、一次结算/退款继续可用。
 
-已有对象缺少“payload 已擦除”的事实和原请求完整性摘要：仅追加 content_erased_at 与
-original_payload_hash 两列。没有新表、RPC 家族、队列或调度；原 run/call/receipt/账本仍是唯一权威。
+已有对象缺少“payload 已擦除”的事实：仅追加 content_erased_at 一列。
+按正文指纹清除规则删除 payload.sourceHash，不记录原 payload 摘要；run/request/call 的
+原编号和既有财务幂等证据保持不变。没有新表、RPC 家族、队列或调度；原 run/call/receipt/账本仍是唯一权威。
 不允许已擦除 payload/scope 回填、清除标记回退或重新提交原正文 result；迟到 close 只接受
 现有 B2a 财务投影。普通账号路径不变，旧客户端仍调用原 RPC，且没有新增表写权限。
 
@@ -38,7 +39,7 @@ node packages/db/tests/run-db-baseline-replay.mjs --local-only --write-built
 runner 仅允许本机 Docker Unix socket 和 loopback 临时数据库，不接受业务数据库 URL，
 不读取业务环境文件。使用合成数据和 PostgreSQL 17；清理本次创建的容器。
 用例也接入既有 BILL2 required 集成入口，不修改 CI/workflow/豁免清单。
-覆盖允许/拒绝、伪封闭、v1/v2、精确金额及财务快照、递归清除、原摘要、重复推进、
+覆盖允许/拒绝、伪封闭、v1/v2、精确金额及财务快照、递归清除、正文指纹不残留、重复推进、
 迟到费用/结果、FX、故障全退后迟到成本、Runtime 恢复与 B1b、两连接实际锁竞争。
 完整 runner 还覆盖迁移在历史位置重复执行、精确空事实回退/重应用及有事实拒绝回退。
 

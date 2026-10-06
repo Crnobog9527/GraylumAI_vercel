@@ -5,7 +5,7 @@ import {rpc, fixture, call, evidence, closeAccount, outcome} from '../erasure-b2
 import {createFixture, claim} from '../payg/fixture.mjs';
 export const scrub = (db, f) => rpc(db, 'account_erasure_scrub_run', f.actor, f.run);
 export const row = async (db, f) => (await db.query('SELECT * FROM bill2_runs WHERE id=$1', [f.run])).rows[0];
-const bodyFields = ['payload','scope','result','content_erased_at','original_payload_hash',
+const bodyFields = ['payload','scope','result','content_erased_at',
   'result_financial_projection_hash','result_financial_projection_version'];
 const financial = value => Object.fromEntries(Object.entries(value).filter(([k]) => !bodyFields.includes(k)));
 const ledger = async (db, f) => JSON.stringify((await db.query(`SELECT
@@ -52,15 +52,15 @@ export async function runCases(db, report) {
     assert.deepEqual(financial(after),financial(before));
     assert.equal(await ledger(db,f),money);
     assert.deepEqual(after.scope,{});
+    assert.deepEqual({sourceHash:after.payload.sourceHash,originalHash:after.original_payload_hash},
+      {sourceHash:undefined,originalHash:undefined},'content-derived fingerprints must not survive erasure');
     assert.deepEqual(after.payload,f.payload.input ? Object.fromEntries(Object.entries(f.payload)
-      .filter(([key])=>!['input','scope','sessionRef'].includes(key))) : after.payload);
+      .filter(([key])=>!['input','scope','sessionRef','sourceHash'].includes(key))) : after.payload);
     assert.doesNotMatch(JSON.stringify(after),/PRIVATE_RUN|B2A_PRIVATE|PAYG_LOCAL_PRIVATE|evidenceRef"/);
-    assert.equal(after.original_payload_hash,(await db.query(
-      "SELECT encode(sha256(convert_to($1::jsonb::text,'utf8')),'hex') h",[before.payload])).rows[0].h);
     await assert.rejects(db.query('UPDATE bill2_runs SET payload=$2 WHERE id=$1',[f.run,before.payload]),/ERASURE_IMMUTABLE/);
     await assert.rejects(db.query('UPDATE bill2_runs SET scope=$2 WHERE id=$1',[f.run,before.scope]),/ERASURE_IMMUTABLE/);
     await assert.rejects(db.query('UPDATE bill2_runs SET result=$2 WHERE id=$1',[f.run,outcome]),/ERASURE_IMMUTABLE/);
-    await assert.rejects(db.query('UPDATE bill2_runs SET content_erased_at=NULL,original_payload_hash=NULL WHERE id=$1',[f.run]),
+    await assert.rejects(db.query('UPDATE bill2_runs SET content_erased_at=NULL WHERE id=$1',[f.run]),
       /ERASURE_IMMUTABLE/);
     await rpc(db,'bill2_close',f.actor,f.run,'delivered',outcome);
     const settled = await rpc(db,'bill2_finalize',f.actor,f.run);
@@ -70,7 +70,7 @@ export async function runCases(db, report) {
     await rpc(db,'bill2_record',f.actor,f.run,c.id,original);
     assert.equal(await ledger(db,f),settledMoney);
     await assert.rejects(rpc(db,'bill2_claim',f.actor,f.run,2,{}),/ACTOR_DENIED|RUN_DENIED/);
-    report.checks.push(contract+': permissions, real closure, recursive projection, exact money, replay/finalize and refill denial');
+    report.checks.push(contract+': permissions, real closure, recursive projection, exact money, no content fingerprints, replay/finalize and refill denial');
   }
   const f = await fixture(db), c = await call(db,f);
   await closeAccount(db,f);
