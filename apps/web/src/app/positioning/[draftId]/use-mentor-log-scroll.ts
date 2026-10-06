@@ -8,14 +8,23 @@ const atBottom = (node: HTMLElement) => node.scrollHeight - node.clientHeight - 
 
 /**
  * Scroll of the mentor log: on first load restore this tab's saved position (or start at the latest
- * message), then follow new content only while the reader is at the bottom. History, the pending
- * bubble and the live reply re-pin after React updates; anything else that grows the log (cards,
- * notices, the next question, a docked card shrinking it) is followed by watching the DOM.
+ * message), then follow new content only while the reader is at the bottom. Nothing follows or saves
+ * before the restore, and afterwards only a real size change pins: history, the pending bubble and
+ * the live reply check after React updates; anything else that grows the log (cards, notices, the
+ * next question, a docked card shrinking it) is followed by watching the DOM. A refetch or a DOM
+ * change that leaves the sizes alone keeps a restored position near (but not at) the bottom.
  */
 export function useMentorLogScroll(draftId: string, history: unknown, pendingBubble: unknown, liveReply: unknown) {
   const [node, attach] = useState<HTMLDivElement | null>(null);
   const restored = useRef<HTMLDivElement | null>(null), follow = useRef(true);
+  const pin = useRef<ReturnType<typeof pinToBottomOnGrowth> | null>(null);
   const key = "opc-position-chat-scroll:" + draftId;
+  useEffect(() => {
+    if (!node) return;
+    const pinner = pinToBottomOnGrowth(node, () => restored.current === node && follow.current);
+    pin.current = pinner;
+    return () => { pinner.stop(); if (pin.current === pinner) pin.current = null; };
+  }, [node]);
   useEffect(() => {
     if (!node || !history) return;
     if (restored.current !== node) {
@@ -23,9 +32,9 @@ export function useMentorLogScroll(draftId: string, history: unknown, pendingBub
       node.scrollTop = saved === null ? node.scrollHeight : Number(saved) || 0;
       follow.current = atBottom(node);
       restored.current = node;
-    } else if (follow.current) node.scrollTop = node.scrollHeight;
+      pin.current?.rebase();
+    } else pin.current?.check();
   }, [node, history, key, pendingBubble, liveReply]);
-  useEffect(() => node ? pinToBottomOnGrowth(node, () => restored.current === node && follow.current) : undefined, [node]);
   const onScroll = (event: UIEvent<HTMLDivElement>) => {
     const target = event.currentTarget;
     follow.current = atBottom(target);

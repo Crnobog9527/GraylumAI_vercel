@@ -41,32 +41,30 @@ export function followTranscript(node: ScrollNode, state: ChatScrollState, key: 
 }
 
 /**
- * Keep a transcript pinned to the bottom whenever its content or its own height changes, while
+ * Keep a transcript pinned to the bottom when its content grows (or its own height shrinks), while
  * `following()` says the reader is there. Watching the DOM instead of a list of React values covers
  * everything that grows the transcript (streamed text, cards, notices, a docked composer shrinking it).
- * Returns the cleanup.
+ * Only a real size change pins: a DOM change that leaves the sizes alone, and the first report a
+ * ResizeObserver makes for every element, never move a restored position near (but not at) the bottom.
+ * `check` applies a pending size change now; `rebase` records the current sizes without pinning, for
+ * right after the caller sets the scroll position itself (restoring a saved one).
  */
 export function pinToBottomOnGrowth(node: HTMLElement, following: () => boolean) {
-  const pin = () => { if (following() && !isNearBottom(node, 1)) node.scrollTop = node.scrollHeight; };
-  // A ResizeObserver reports every element once when observed; only a later, real size change may pin,
-  // so a restored position near (but not at) the bottom is not overwritten.
-  const heights = new WeakMap<Element, number>();
-  const sizes = new ResizeObserver(entries => {
-    let grew = false;
-    for (const entry of entries) {
-      const before = heights.get(entry.target), height = entry.contentRect.height;
-      if (before !== undefined && before !== height) grew = true;
-      heights.set(entry.target, height);
-    }
-    if (grew) pin();
-  });
+  let content = node.scrollHeight, view = node.clientHeight;
+  const rebase = () => { content = node.scrollHeight; view = node.clientHeight; };
+  const check = () => {
+    const grew = node.scrollHeight > content || node.clientHeight < view;
+    rebase();
+    if (grew && following() && !isNearBottom(node, 1)) node.scrollTop = node.scrollHeight;
+  };
+  const sizes = new ResizeObserver(check);
   const watch = () => {
     sizes.disconnect();
     sizes.observe(node);
     for (const child of Array.from(node.children)) sizes.observe(child);
   };
-  const changes = new MutationObserver(() => { watch(); pin(); });
+  const changes = new MutationObserver(() => { watch(); check(); });
   watch();
   changes.observe(node, { childList: true, subtree: true, characterData: true });
-  return () => { changes.disconnect(); sizes.disconnect(); };
+  return { check, rebase, stop: () => { changes.disconnect(); sizes.disconnect(); } };
 }
