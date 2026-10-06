@@ -1,3 +1,5 @@
+> 当前进度：Owner 已批准最后一次第三轮修复；执行前计划见 [第三轮计划](CONVERSATION_CAPTURE_B2_ROUND3.md)。本文既有轮次记录保留为历史。
+
 # CONVERSATION-DRIVEN-CAPTURE B2 / PROMPT-CACHE-HISTORY H1
 
 ## 当前状态：等待第二轮计划复核
