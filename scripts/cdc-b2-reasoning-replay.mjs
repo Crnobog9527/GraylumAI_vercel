@@ -4,9 +4,11 @@ import { randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { mkdirSync, openSync, closeSync } from 'node:fs';
 import { join } from 'node:path';
-import { root, save, read, lines, loadSource, assert, expectedManifest } from './cdc-b2-eval/reasoningSource.mjs';
+import { root as reasoningRoot, save, read, lines, loadSource, assert, expectedManifest } from './cdc-b2-eval/reasoningSource.mjs';
 
-const [mode] = process.argv.slice(2);
+const [mode, profile] = process.argv.slice(2);
+assert(profile === undefined || profile === 'capability', 'PROFILE');
+const root = profile === 'capability' ? join(reasoningRoot, '../cdc-capability-20261006') : reasoningRoot;
 assert(['baseline', 'results'].includes(mode), 'REPLAY_USAGE');
 const source = loadSource(), secret = randomUUID();
 const slots = new Set(source.organizers.map(q => q.slot));

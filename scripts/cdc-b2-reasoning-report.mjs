@@ -2,9 +2,11 @@
 import { randomUUID, randomInt } from 'node:crypto';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { root, sourceRoot, read, lines, save, hash, assert, loadSource } from './cdc-b2-eval/reasoningSource.mjs';
+import { root as reasoningRoot, sourceRoot, read, lines, save, hash, assert, loadSource } from './cdc-b2-eval/reasoningSource.mjs';
 
-const [mode] = process.argv.slice(2);
+const [mode, profile] = process.argv.slice(2);
+assert(profile === undefined || profile === 'capability', 'PROFILE');
+const root = profile === 'capability' ? join(reasoningRoot, '../cdc-capability-20261006') : reasoningRoot;
 assert(['pack', 'report'].includes(mode), 'REPORT_USAGE');
 const source = loadSource(), blind = join(root, 'blind');
 const originalPacket = read(join(sourceRoot, 'blind-round2/packet.json'));
