@@ -1,12 +1,12 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { describe, expect, it, vi } from 'vitest';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { executePackageRefund, readPackageRefundCash, reconcilePackageRefund, type RefundStripe } from './packageRefund';
+import { executePackageRefund, readPackageRefundStatus, readPackageRefundCash, reconcilePackageRefund, type RefundStripe } from './packageRefund';
 
 const orderId = '11111111-1111-4111-8111-111111111111';
 const intentId = '22222222-2222-4222-8222-222222222222';
 function fixture() {
-  const approval = { id: intentId, orderId, ticketId: orderId, status: 'dispatching',
+  const approval = { id: intentId, orderId, ticketId: orderId, status: 'review_required',
     netMinor: 9400, currency: 'usd', idempotencyKey: 'pay-common:refund:' + intentId,
     claimedAt: new Date().toISOString(), cash: { chargeId: 'ch_fixture', paymentIntentId: 'pi_fixture' } };
   const order = { id: orderId, user_id: orderId, payment_channel: 'stripe', payment_mode: 'test',
@@ -79,6 +79,7 @@ describe('package refund dispatch boundary', () => {
     expect(await executePackageRefund(f.db, f.provider, orderId, { orderId, intentId }))
       .toMatchObject({ status: 'review_required', intentId });
     expect(f.rpc).toHaveBeenCalledTimes(1);
+    expect(await readPackageRefundStatus(f.db, orderId)).toMatchObject({ status: 'review_required', id: intentId });
   });
   it('cash success followed by local failure remains unresolved', async () => {
     const f = fixture();
@@ -87,6 +88,7 @@ describe('package refund dispatch boundary', () => {
     expect(await executePackageRefund(f.db, f.provider, orderId, { orderId, intentId }))
       .toMatchObject({ status: 'review_required' });
     expect(f.stripe.refunds.create).toHaveBeenCalledTimes(1);
+    expect(await readPackageRefundStatus(f.db, orderId)).toMatchObject({ status: 'review_required', id: intentId });
   });
 });
 describe('original payment reconciliation', () => {
@@ -96,8 +98,8 @@ describe('original payment reconciliation', () => {
     expect(f.stripe.refunds.create).not.toHaveBeenCalled();
     expect(f.rpc).toHaveBeenCalledWith('pay_common_package_refund_result', expect.objectContaining({ p_intent: intentId }));
   });
-  it('retries only the identical durable key after complete lookup', async () => {
-    const f = fixture();
+  it.each(['review_required', 'dispatching'])('retries %s only with the identical durable key after complete lookup', async status => {
+    const f = fixture(); f.approval.status = status;
     await reconcilePackageRefund(f.db, f.provider, orderId, orderId);
     expect(f.stripe.refunds.list).toHaveBeenCalledTimes(2);
     expect(f.stripe.refunds.create).toHaveBeenCalledWith(expect.anything(), { idempotencyKey: f.approval.idempotencyKey });

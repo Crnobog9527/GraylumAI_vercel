@@ -19,7 +19,9 @@ export async function runCases({db,Client,connectionString,report}) {
  assert.equal(q.feeMinor,600);assert.equal(q.netMinor,9400);assert.equal(q.credits,1100);
  let i=await decide(f,q);
  assert.equal((await decide(f,q)).id,i.id);
- await claim(f,i);assert.equal(await balance(f),400);
+ const claimed=await claim(f,i);assert.equal(await balance(f),400);
+ assert.equal(claimed.status,'review_required');
+ assert.equal((await run('select refund_approval from payment_orders where id=$1',[f.order]))[0].refund_approval.status,'review_required');
  assert.equal((await run('select pay_common_package_refund_retry($1,$2,$3,$4) q',[f.actor,f.order,i.id,f.cash]))[0].q.id,i.id);
  await assert.rejects(()=>run('select pay_common_package_refund_retry($1,$2,$3,$4)',[f.user,f.order,i.id,f.cash]),/PAY_REFUND_ADMIN_REQUIRED/);
  await assert.rejects(()=>claim(f,i),/PAY_REFUND_NOT_APPROVED/);
@@ -38,6 +40,21 @@ export async function runCases({db,Client,connectionString,report}) {
  assert.equal(o.status,'partially_refunded');assert.equal(o.refund_approval.status,'succeeded');
  assert.equal((await run("select count(*)::int n from credit_transactions where source_order_id=$1 and ledger_type='refund_clawback'",[f.order]))[0].n,1);
  report.checks.push('allowed approve/claim, 6% cash, full package+bonus clawback, other 400 unchanged, duplicate/late pending idempotent');
+ f=await fresh();q=await quote(f);i=await decide(f,q);const uncertain=await claim(f,i);
+ const retry=()=>run('select pay_common_package_refund_retry($1,$2,$3,$4) q',[f.actor,f.order,i.id,f.cash]);
+ for(let n=0;n<2;n++) assert.deepEqual((await retry())[0].q,uncertain);
+ assert.equal(await balance(f),400);
+ assert.equal((await run("select count(*)::int n from credit_transactions where source_order_id=$1 and ledger_type='refund_clawback'",[f.order]))[0].n,1);
+ await run("update payment_orders set refund_approval=jsonb_set(refund_approval,'{claimedAt}',to_jsonb((now()-interval '21 hours')::text)) where id=$1",[f.order]);
+ await assert.rejects(retry,/PAY_REFUND_RETRY_REQUIRES_REVIEW/);
+ const expired=(await run('select refund_approval from payment_orders where id=$1',[f.order]))[0].refund_approval;
+ assert.equal(expired.status,'review_required');assert.equal(expired.id,uncertain.id);
+ assert.equal(expired.idempotencyKey,uncertain.idempotencyKey);
+ await assert.rejects(()=>claim(f,i),/PAY_REFUND_NOT_APPROVED/);
+ await result(f,i);await result(f,i,'pending');assert.equal(await balance(f),400);
+ assert.equal((await run('select refund_approval from payment_orders where id=$1',[f.order]))[0].refund_approval.status,'succeeded');
+ report.checks.push('uncertainty persisted atomically; repeated retry keeps identity/time/one clawback; expired resend denied, late result reconciles');
+
  f=await fresh();q=await quote(f);i=await decide(f,q);await claim(f,i);
  await result(f,i,'failed');await result(f,i,'failed');assert.equal(await balance(f),1500);
  await assert.rejects(()=>result(f,i),/PAY_REFUND_TERMINAL_CONFLICT/);

@@ -137,7 +137,9 @@ BEGIN
    source_type,source_order_id,idempotency_key,balance_before,balance_after)
  VALUES(owner_id,-amount,'deduction','Approved package refund','refund_clawback','refund_clawback',
    'stripe_refund',p_order,'pay-common:refund:'||p_intent,balance,balance-amount);
- intent:=intent||jsonb_build_object('status','dispatching','claimedAt',clock_timestamp(),
+ -- Persist uncertainty together with the identity and clawback BEFORE external dispatch.
+ -- A crash, timeout or failed result write therefore never hides the need for reconciliation.
+ intent:=intent||jsonb_build_object('status','review_required','claimedAt',clock_timestamp(),
    'idempotencyKey','pay-common:refund:'||p_intent);
  UPDATE payment_orders SET refund_approval=intent WHERE id=p_order;
  RETURN intent;
@@ -154,7 +156,7 @@ BEGIN
    THEN RAISE EXCEPTION 'PAY_REFUND_ADMIN_REQUIRED'; END IF;
  PERFORM 1 FROM profiles WHERE id=(SELECT user_id FROM payment_orders WHERE id=p_order) FOR UPDATE;
  SELECT refund_approval INTO i FROM payment_orders WHERE id=p_order FOR UPDATE;
- IF i->>'id' IS DISTINCT FROM p_intent::text OR i->>'status' IS DISTINCT FROM 'dispatching'
+ IF i->>'id' IS DISTINCT FROM p_intent::text OR coalesce(i->>'status','') NOT IN ('dispatching','review_required')
    OR i->>'idempotencyKey' IS DISTINCT FROM 'pay-common:refund:'||p_intent
    OR i->'cash' IS DISTINCT FROM p_cash
    OR (i->>'claimedAt')::timestamptz IS NULL

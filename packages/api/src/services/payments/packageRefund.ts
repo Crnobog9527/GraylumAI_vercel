@@ -127,7 +127,7 @@ export async function reconcilePackageRefund(db: Db, stripe: RefundStripe, actor
       const age = Date.now() - Date.parse(approval.claimedAt ?? '');
       // Stripe retains keys for at least 24 hours. Retry only within 20 hours,
       // after a complete lookup and fresh original-payment/dispute checks.
-      if (found.length === 0 && approval.status === 'dispatching' && age >= 0 && age < 20 * 60 * 60 * 1000) {
+      if (found.length === 0 && ['dispatching', 'review_required'].includes(approval.status) && age >= 0 && age < 20 * 60 * 60 * 1000) {
         const cash = await readPackageRefundCash(db, stripe, orderId);
         if (cash.chargeId !== approval.cash.chargeId) throw new Error('PAY_REFUND_CHARGE_MISMATCH');
         await rpc(db, 'pay_common_package_refund_retry', { p_actor: actorId,
