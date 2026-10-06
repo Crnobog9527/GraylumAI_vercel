@@ -10,8 +10,8 @@ const information:Record<string,CaptureState>={
 };
 it('all pinned steps and roles, protected states and values stay in their proper envelopes',()=>{
  const host=captureHostContext(steps,information,'first',false);
- expect(JSON.stringify(host)).not.toContain('User fact');
- expect(host.checklist[0]!.fields).toEqual([
+ expect(JSON.stringify(host)).toContain('User fact');
+ expect(host.checklist[0]!.fields).toMatchObject([
   {id:'goal',title:'Goal',required:true,role:'user_fact',status:'draft',protected:true},
   {id:'audience',title:'Audience',required:true,role:'user_fact',status:'missing',protected:false},
   {id:'proposal',title:'proposal',required:false,role:'agent_proposal',status:'missing',protected:true},
@@ -53,4 +53,20 @@ it('uses frozen values and protected flags rather than the earlier browser proje
  expect(captureHostContext(steps,selected,'first',false).checklist[0]!.fields[0])
   .toMatchObject({status:'confirmed',protected:true});
  expect(()=>captureFrozenInformation(information,{})).toThrow('OPC_CAPTURE_MATERIAL_MISMATCH');
+});
+
+it('carries manual facts, nature and pending-suggestion flags without adopting suggestions',()=>{
+ const selected={first:{schema,values:{goal:{value:'最多每周4小时',nature:'fact',status:'confirmed'}},
+  meta:{goal:{protected:true,source:'user',basis:'agent_proposal',hasPendingSuggestion:true}}}};
+ const field=captureHostContext(steps,selected,'first',false).checklist[0]!.fields[0]!;
+ expect(field).toMatchObject({value:'最多每周4小时',nature:'fact',basis:'user_statement',source:'user',
+  protected:true,hasPendingSuggestion:true,status:'confirmed'});
+});
+it('enforces UTF-8 host bytes and marks compressed confirmed values without losing status',()=>{
+ const selected={first:{schema,values:{goal:{value:'中'.repeat(6000),status:'confirmed'}}}};
+ const host=captureHostContext(steps,selected,'first',false);
+ expect(Buffer.byteLength(JSON.stringify(host))).toBeLessThanOrEqual(16000);
+ expect(host.checklist[0]!.fields[0]).toMatchObject({value:'',valueOmitted:true,status:'confirmed'});
+ selected.first.values.goal.status='provisional';
+ expect(()=>captureHostContext(steps,selected,'first',false)).toThrow('OPC_CAPTURE_INPUT_LIMIT');
 });
