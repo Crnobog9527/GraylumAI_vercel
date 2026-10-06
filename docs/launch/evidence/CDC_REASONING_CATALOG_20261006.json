@@ -1,0 +1,56 @@
+{
+  "checkedAt": "2026-10-06T11:38:50.181Z",
+  "sources": [
+    "https://openrouter.ai/api/v1/models",
+    "https://openrouter.ai/api/v1/models/openai/gpt-6-luna/endpoints"
+  ],
+  "model": "openai/gpt-6-luna",
+  "reasoning": {
+    "mandatory": false,
+    "default_enabled": true,
+    "supported_efforts": [
+      "max",
+      "xhigh",
+      "high",
+      "medium",
+      "low",
+      "none"
+    ],
+    "default_effort": "medium"
+  },
+  "endpoint": {
+    "tag": "openai",
+    "provider_name": "OpenAI",
+    "supported_parameters": [
+      "reasoning",
+      "include_reasoning",
+      "seed",
+      "max_tokens",
+      "response_format",
+      "structured_outputs",
+      "tools",
+      "tool_choice",
+      "verbosity",
+      "reasoning_effort"
+    ],
+    "context_length": 1050000,
+    "max_completion_tokens": 128000,
+    "pricing": {
+      "prompt": "0.0000001",
+      "completion": "0.0000005",
+      "web_search": "0.01",
+      "input_cache_read": "0.00000001",
+      "input_cache_write": "0.000000125",
+      "discount": 0,
+      "overrides": [
+        {
+          "min_prompt_tokens": 272000,
+          "prompt": "0.0000002",
+          "completion": "0.00000075",
+          "input_cache_read": "0.00000002",
+          "input_cache_write": "0.00000025"
+        }
+      ]
+    }
+  }
+}

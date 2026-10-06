@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { randomUUID, randomInt } from 'node:crypto';
-import { mkdirSync, readFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { root, sourceRoot, read, lines, save, hash, assert, loadSource } from './cdc-b2-eval/reasoningSource.mjs';
 
@@ -46,7 +46,8 @@ if (mode === 'pack') {
         Object.assign(entry, { opaqueId, organizerOutput: result.summary,
           after: Object.fromEntries(Object.entries(result.after.information).map(([id, s]) => [id, s.values])),
           afterState: Object.fromEntries(Object.entries(result.after.snapshot.steps).map(([id, s]) =>
-            [id, { valid: s.valid, fieldMeta: s.fieldMeta }])), capture: result.capture });
+            [id, { valid: s.valid, fieldMeta: s.fieldMeta }])),
+          capture: { processed: [result.capture], remaining: 0, hasMore: false } });
         turns.push(scrub(entry));
         mapping.push({ opaqueId, effort, slot: turn.slot, scenario, round: turnIndex + 1 });
       }
@@ -95,6 +96,7 @@ if (mode === 'report') {
         writebackCorrect: score.writebackCorrect, uncertain: score.uncertain,
         protectedDirectChanged: objective.protectedDirectChanged,
         formatError: objective.formatError, costUsd: usage.cost,
+        generationCostUsd: generation?.total_cost ?? null,
         elapsedMs: original ? null : row.elapsedMs, generationMs: generation?.generation_time ?? null,
         providerLatencyMs: generation?.latency ?? null, reasoningTokens: usage.completion_tokens_details?.reasoning_tokens ?? null,
         promptTokens: usage.prompt_tokens, completionTokens: usage.completion_tokens,
@@ -119,5 +121,8 @@ if (mode === 'report') {
       results: Object.fromEntries(totals.map(t => [t.effort,
         rows.filter(r => r.scenario === s.scenario && r.effort === t.effort && r.writebackCorrect).length])) })), rows };
   save(join(root, 'report.json'), report);
+  const columns = Object.keys(rows[0]);
+  const csv = [columns.join(','), ...rows.map(row => columns.map(key => row[key] ?? '').join(','))].join('\n') + '\n';
+  writeFileSync(join(root, 'public-calls.csv'), csv, { flag: 'wx', mode: 0o600 });
   console.log(JSON.stringify({ totals, scenarios: report.scenarios, settledNano: report.ledger.settledNano }, null, 2));
 }
