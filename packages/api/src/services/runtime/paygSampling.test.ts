@@ -6,23 +6,26 @@ import r5 from '../../../../../docs/launch/evidence/payg-profile-20261006-r5.man
 import prices from '../../../../../scripts/payg-profile/plan-prices-vertex-2026-10-05.json';
 import {createSamplePlan,recordSamples} from '../../../../../scripts/payg-profile/sampling';
 import {decimal} from '../bill2/decimal';
-it('independent batches preserve completed evidence and untouched requests; reserve both under 25',()=>{
+// Generate each full batch under the unchanged per-test deadline. Both remain checked
+// against their committed manifests; cross-batch reservations use that same pair.
+it.each(['r4','r5'] as const)('%s preserves completed evidence and untouched requests; reserves both under 25',selected=>{
  const fetch=vi.spyOn(globalThis,'fetch').mockImplementation(()=>{throw new Error('NETWORK_FORBIDDEN');});
  try{
-  const plans=[createSamplePlan(prices,'r4'),createSamplePlan(prices,'r5')];
-  expect(plans.map(p=>p.manifest)).toEqual([r4,r5]);
-  expect(plans.map(p=>p.manifest.calls)).toEqual([80,76]);
-  const samples=plans.flatMap(p=>p.manifest.samples),requests=plans.flatMap(p=>p.requests);
-  expect(new Set(samples.map(s=>s.requestHash)).size).toBe(156);
-  expect(plans[0].manifest.samples[0].model).toBe('openai/gpt-6-luna');
-  expect(plans[1].manifest.samples.every(s=>s.model==='google/gemini-3.8-flash')).toBe(true);
-  for(const {manifest} of plans){
+  const plan=createSamplePlan(prices,selected);
+  expect(plan.manifest).toEqual(selected==='r4'?r4:r5);
+  const manifests=selected==='r4'?[plan.manifest,r5]:[r4,plan.manifest];
+  expect(manifests.map(m=>m.calls)).toEqual([80,76]);
+  const allSamples=manifests.flatMap(m=>m.samples),{samples}=plan.manifest,requests=plan.requests;
+  expect(new Set(allSamples.map(s=>s.requestHash)).size).toBe(156);
+  expect(manifests[0].samples[0].model).toBe('openai/gpt-6-luna');
+  expect(manifests[1].samples.every(s=>s.model==='google/gemini-3.8-flash')).toBe(true);
+  for(const manifest of manifests){
    expect(manifest.retainedEvidence).toHaveLength(79);
    expect(manifest.priorAccountedUsd).toBe('4.810139500000');
    expect(manifest.retainedEvidence.reduce((n,s)=>n+decimal(s.receipt.costUsd),0n)).toBe(decimal(manifest.priorAccountedUsd));
    expect(manifest.cumulativeCapUsd).toBe('25');
    expect(decimal(manifest.cumulativeUpperUsd)).toBe(decimal(manifest.priorAccountedUsd)
-    +decimal(plans[0].manifest.totalUsd)+decimal(plans[1].manifest.totalUsd));
+    +decimal(manifests[0].totalUsd)+decimal(manifests[1].totalUsd));
    expect(Number(manifest.cumulativeUpperUsd)).toBeLessThan(25);
    expect(manifest.retainedEvidence.filter(s=>s.kind==='output'&&s.outputCapReached)).toHaveLength(1);
    const retained=new Set(manifest.retainedEvidence.map(s=>s.requestHash));
@@ -40,11 +43,11 @@ it('independent batches preserve completed evidence and untouched requests; rese
    }else expect(sample).toEqual(previous.samples.find(s=>s.id===sample.id));
   }
   for(const route of prices.routes)for(const reasoning of route.reasoning){
-   expect(samples.filter(s=>s.kind==='output'&&s.model===route.model&&JSON.stringify(s.reasoning)===JSON.stringify(reasoning)))
+   expect(allSamples.filter(s=>s.kind==='output'&&s.model===route.model&&JSON.stringify(s.reasoning)===JSON.stringify(reasoning)))
     .toHaveLength(2);
   }
-  expect(samples.filter(s=>s.model==='anthropic/claude-sonnet-5.5'&&s.kind!=='output')).toHaveLength(0);
-  for(const model of ['openai/gpt-6-luna','google/gemini-3.8-flash']){
+  expect(allSamples.filter(s=>s.model==='anthropic/claude-sonnet-5.5'&&s.kind!=='output')).toHaveLength(0);
+  for(const model of selected==='r4'?['openai/gpt-6-luna']:['google/gemini-3.8-flash']){
    expect(samples.filter(s=>s.model===model&&s.kind==='matrix')).toHaveLength(60);
    for(const count of [64,96,128])for(const length of ['short','long']){
     const stress=samples.filter(s=>s.model===model&&s.kind==='messages'&&s.band===`${length}-${count}`);
@@ -55,7 +58,7 @@ it('independent batches preserve completed evidence and untouched requests; rese
    }
   }
   expect(fetch).not.toHaveBeenCalled();
-  const manifest=plans[0].manifest,sample=manifest.samples[0];
+  const manifest=plan.manifest,sample=manifest.samples[0];
   const receipt={sampleId:sample.id,requestHash:sample.requestHash,model:sample.model,endpointTag:sample.endpointTag,
    nativePromptTokens:100,nativeCompletionTokens:512,finishReason:'length',costUsd:'0.001',cachedTokens:25,cacheWriteTokens:0,
    source:'response.prompt_tokens',includesReasoning:true};

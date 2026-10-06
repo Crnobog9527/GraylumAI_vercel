@@ -1,5 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { createHash } from 'node:crypto';
+import { claimFailure } from './claimFailure';
 import { z } from 'zod';
 import { transportEvidence, unknownEvidence, type CallIdentity, type TransportObservation } from './fixtureAdapter';
 import {openRouterLimits,OPENROUTER_LOOKUP_TIMEOUT_MS} from './openRouterPolicy';
@@ -94,11 +95,7 @@ export function authoritativeBilling(deps: { budget?:RuntimeBudget; admin: Billi
     const remaining=Math.max(1,Math.floor(deps.budget?.remainingPersistence()??10_000));
     const result=await (financialNames.has(name)&&query.abortSignal ? query.abortSignal(AbortSignal.timeout(Math.min(10_000,remaining))) : query);
     if (result.error) {
-      const code = typeof result.error === 'object' && 'message' in result.error ? result.error.message : null;
-      if (name === 'bill2_claim' && typeof code === 'string' &&
-        ['REPORT_MEMBERSHIP_REQUIRED', 'REPORT_ENTITLEMENTS_UNAVAILABLE', 'REPORT_SOURCE_CONFLICT'].includes(code)) {
-        throw new Error(code);
-      }
+      if (name === 'bill2_claim') throw claimFailure(result.error);
       throw new Error('BILL2_DATABASE_UNAVAILABLE');
     }
     return result.data as T;
