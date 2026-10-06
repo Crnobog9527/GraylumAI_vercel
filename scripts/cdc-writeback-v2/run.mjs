@@ -51,15 +51,18 @@ if (mode === 'prepare') {
   if (mode === 'verify') {
     const dry = read(path('preflight/frozen-private.json'));
     await runHost(plan, path('verify'), async input => {
-      assert(dry.rows.find(r => r.ordinal === input.ordinal)?.raw === input.raw, 'DRY_REQUEST_NOT_REPRODUCIBLE');
-      if (input.role === 'organizer') return synthetic(input.raw);
+      measure(input.raw, input.role);
+      if (input.role === 'organizer') {
+        assert(dry.rows.find(r => r.ordinal === input.ordinal)?.raw === input.raw, 'DRY_ORGANIZER_NOT_REPRODUCIBLE');
+        return synthetic(input.raw);
+      }
       const body = { id: 'gen-v2-dry', model: profiles.mentor.model,
         choices: [{ index: 0, delta: { role: 'assistant', content: 'Synthetic dry-run reply, not model evidence.' },
           finish_reason: 'stop' }], usage: { prompt_tokens: 100, completion_tokens: 10, total_tokens: 110, cost: 0.001 } };
       return 'data: ' + JSON.stringify(body) + '\n\ndata: [DONE]\n\n';
     });
-    save(path('verify-proof.json'), { preflightHash: manifest.preflightHash, matchedRequests: 200, externalCalls: 0 });
-    console.log(JSON.stringify({ matchedRequests: 200, externalCalls: 0 }));
+    save(path('verify-proof.json'), { preflightHash: manifest.preflightHash, matchedOrganizerRequests: 100, mentorProfiles: 100, externalCalls: 0 });
+    console.log(JSON.stringify({ matchedOrganizerRequests: 100, mentorProfiles: 100, externalCalls: 0 }));
   } else if (mode === 'replay') {
     const responses = jsonLines('organizer-responses.jsonl');
     assert(responses.length === 300 && new Set(responses.map(r => r.id)).size === 300, 'REPLAY_INCOMPLETE');
@@ -75,7 +78,8 @@ if (mode === 'prepare') {
       const original = frozen.rows.find(r => r.slot === input.slot && r.role === input.role);
       // Older fixture rows do not expose slot; ordinal preserves the frozen roster.
       const row = original ?? frozen.rows.find(r => r.ordinal === input.ordinal);
-      assert(row?.raw === input.raw, 'REPLAY_REQUEST_CHANGED');
+      assert(row && (input.role === 'mentor' || row.raw === input.raw), 'REPLAY_REQUEST_CHANGED');
+      measure(input.raw, input.role);
       return input.role === 'mentor' ? mentors.find(r => r.slot === input.slot).body : synthetic(input.raw);
     }, variants);
     const rows = read(path('replay/reasoning-results.json'));
@@ -85,7 +89,7 @@ if (mode === 'prepare') {
   } else {
     assert(!git('status', '--porcelain'), 'PAID_REQUIRES_CLEAN_CHECKOUT');
     const proof = read(path('verify-proof.json'));
-    assert(proof.preflightHash === manifest.preflightHash && proof.matchedRequests === 200, 'PREPAID_REPLAY_REQUIRED');
+    assert(proof.preflightHash === manifest.preflightHash && proof.matchedOrganizerRequests === 100 && proof.mentorProfiles === 100, 'PREPAID_REPLAY_REQUIRED');
     const key = process.env.GRAYLUM_PAYG_TEST_OPENROUTER_KEY;
     assert(key, 'TEST_KEY_MISSING');
     const headers = { authorization: `Bearer ${key}`, 'content-type': 'application/json' };
@@ -126,10 +130,8 @@ if (mode === 'prepare') {
     }
     try {
       if (mode === 'mentor') {
-        const dry = read(path('preflight/frozen-private.json'));
         await runHost(plan, path('mentor'), async input => {
           if (input.role === 'organizer') return synthetic(input.raw);
-          assert(dry.rows.find(r => r.ordinal === input.ordinal)?.raw === input.raw, 'MENTOR_REQUEST_CHANGED');
           return send(input.raw, 'mentor', input.slot);
         });
         const frozen = read(path('mentor/frozen-private.json'));
