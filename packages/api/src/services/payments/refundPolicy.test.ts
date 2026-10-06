@@ -14,6 +14,8 @@ function fixture(): RefundPolicyInput {
       kind: 'membership_first', refundState: 'none' },
     ticket: { id: 'ticket-fixture', userId: 'subject-fixture', orderId: 'order-fixture', submittedAt: boundary,
       bindingEvidenceRef: 'binding-fixture' },
+    membershipHistory: { userId: 'subject-fixture', orderId: 'order-fixture', paidAt,
+      evidenceRef: 'membership-history-fixture', complete: true, priorPaidMembershipCount: 0 },
     observedAt, consumption: { userId: 'subject-fixture', from: paidAt, through: observedAt,
       evidenceRef: 'history-fixture', state: 'unused', completeAccountHistory: true, settlementState: 'clear' },
     accountState: 'active', feePermitted: 'confirmed', reason: 'ordinary',
@@ -113,6 +115,26 @@ describe('ordinary eligibility and evidence', () => {
   ] as const)('rejects known %s before unknown fee evidence', (reason, edit) => {
     const input = fixture(); input.feePermitted = 'unknown'; edit(input);
     expect(evaluateRefundPolicy(input)).toMatchObject({ status: 'rejected', reason, quote: null });
+  });
+  it.each(['ended same plan', 'cancelled then resubscribed', 'changed plan', 'monthly to yearly', 'previously refunded'])(
+    'rejects repeat membership checkout: %s', () => {
+      const input = fixture(); input.membershipHistory!.priorPaidMembershipCount = 1;
+      expect(evaluateRefundPolicy(input)).toMatchObject({ status: 'rejected', reason: 'not_first_membership_purchase' });
+    },
+  );
+  it.each([
+    (i: RefundPolicyInput) => { delete i.membershipHistory; },
+    (i: RefundPolicyInput) => { i.membershipHistory!.complete = false; },
+    (i: RefundPolicyInput) => { i.membershipHistory!.userId = 'another-subject'; },
+    (i: RefundPolicyInput) => { i.membershipHistory!.orderId = 'another-order'; },
+    (i: RefundPolicyInput) => { i.membershipHistory!.paidAt = boundary; },
+  ])('does not infer first purchase from checkout or absent active membership (%#)', edit => {
+    const input = fixture(); edit(input);
+    expect(evaluateRefundPolicy(input)).toMatchObject({ status: 'review_required', reason: 'membership_history_unresolved' });
+  });
+  it.each(['credit_package', 'pro_to_gold'] as const)('retains the separate %s rule despite prior membership', kind => {
+    const input = fixture(); input.order.kind = kind; input.membershipHistory!.priorPaidMembershipCount = 2;
+    expect(evaluateRefundPolicy(input).status).toBe('eligible');
   });
   it('invalid input fails closed without an exception', () => {
     for (const input of [null, {}, [], 'invalid']) expect(evaluateRefundPolicy(input).status).toBe('review_required');

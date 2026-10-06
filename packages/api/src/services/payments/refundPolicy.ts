@@ -19,6 +19,12 @@ const inputSchema = z.object({
   // The binding is established by the server/admin; ticket text is not evidence.
   ticket: z.object({ id: ref, userId: ref, orderId: ref, submittedAt: time, bindingEvidenceRef: ref }).strict(),
   observedAt: time,
+  // Complete paid membership history across plans/cycles, including ended or
+  // refunded contracts. A new Checkout or no active subscription is not proof.
+  membershipHistory: z.object({
+    userId: ref, orderId: ref, paidAt: time, evidenceRef: ref,
+    complete: z.boolean(), priorPaidMembershipCount: minor,
+  }).strict().optional(),
   consumption: refundConsumptionSchema,
   accountState: z.enum(['active', 'closed', 'violation_terminated', 'unknown']),
   feePermitted: z.enum(['confirmed', 'unknown', 'not_permitted']),
@@ -80,6 +86,12 @@ export function evaluateRefundPolicy(raw: unknown): RefundPolicyResult {
   if (order.kind === 'unknown') return review('purchase_kind_unresolved');
   if (input.reason === 'ordinary') {
     if (order.kind === 'renewal') return reject('renewal');
+    if (order.kind === 'membership_first') {
+      const history = input.membershipHistory;
+      if (!history || history.userId !== order.userId || history.orderId !== order.id
+        || refundTime(history.paidAt)! !== paid || !history.complete) return review('membership_history_unresolved');
+      if (history.priorPaidMembershipCount > 0) return reject('not_first_membership_purchase');
+    }
     if (submitted - paid > REFUND_WINDOW_MICROSECONDS) return reject('outside_refund_window');
     if (consumption.state === 'consumed') return reject('account_consumed_since_payment');
     if (consumption.state !== 'unused' || !consumption.completeAccountHistory || consumption.settlementState !== 'clear') {
@@ -114,6 +126,9 @@ export function evaluateRefundPolicy(raw: unknown): RefundPolicyResult {
       : order.kind === 'pro_to_gold' ? 'restore_pro'
         : order.kind === 'credit_package' ? 'credit_package' : 'first_purchase';
   const answer = { ...output('eligible', 'manual_approval_required'), quote, treatment } satisfies RefundPolicyResult;
+  if (input.reason === 'ordinary' && order.kind === 'membership_first') {
+    answer.evidenceRefs!.push(input.membershipHistory!.evidenceRef);
+  }
   if (input.exceptionBasis) answer.evidenceRefs!.push(input.exceptionBasis.evidenceRef);
   return answer;
 }
