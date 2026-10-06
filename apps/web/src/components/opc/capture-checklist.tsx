@@ -138,21 +138,27 @@ function StepFields({ props, step }: { props: CaptureChecklistProps; step: Step 
   );
 }
 
+/** A light status that never blocks editing: unsaved edits read as saving until their save settles. */
+export function saveLabel(state: CaptureChecklistProps["saveState"][string] | undefined, unsaved: boolean) {
+  if (state === "error") return "自动保存失败";
+  if (state === "saving" || unsaved) return "保存中…";
+  return state === "saved" ? "已保存 ✓" : null;
+}
+
 /** The right panel: every step's checklist, filled from the conversation and confirmed once per step. */
 export function CaptureChecklist(props: CaptureChecklistProps) {
   return (
     <div className={styles.list} aria-label="定位清单">
       {props.steps.map((step, index) => {
         const selected = step.id === props.selectedStepId;
-        const saving = props.saveState[step.id];
+        const saving = saveLabel(props.saveState[step.id], Boolean(props.edits[step.id]));
         return (
           <details key={step.id} open={selected} className={styles.step}>
             <summary>
               <span>{index + 1}. {step.title}</span>
               <small>{stepStatus(props, step)}</small>
             </summary>
-            {selected && saving && saving !== "idle" && <p role="status" className={styles.saving}>
-              {saving === "saving" ? "正在自动保存…" : saving === "error" ? "自动保存失败" : "已自动保存"}</p>}
+            {selected && saving && <p role="status" className={styles.saving}>{saving}</p>}
             <StepFields props={props} step={step}/>
           </details>
         );

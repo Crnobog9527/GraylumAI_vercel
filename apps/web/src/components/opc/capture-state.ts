@@ -24,7 +24,8 @@ export type CaptureSuggestion = {
   status: FieldStatus;
   nature: FieldNature;
 };
-export type FieldMeta = { source?: "capture" | "user"; protected?: boolean; suggestion?: CaptureSuggestion };
+/** `basis` is recorded with each capture since #702; older captures have none. */
+export type FieldMeta = { source?: "capture" | "user"; basis?: "user_statement" | "agent_proposal"; protected?: boolean; suggestion?: CaptureSuggestion };
 export type StepInformation = {
   schema: ChecklistField[];
   values?: Record<string, FieldValue>;
@@ -46,6 +47,7 @@ export function fieldMeta(info: StepInformation | undefined, fieldId: string): F
   const meta: FieldMeta = {};
   if (raw.source === "capture" || raw.source === "user") meta.source = raw.source;
   if (typeof raw.protected === "boolean") meta.protected = raw.protected;
+  if (raw.basis === "user_statement" || raw.basis === "agent_proposal") meta.basis = raw.basis;
   const s = raw.suggestion;
   if (isObject(s) && typeof s.executionId === "string" && typeof s.hash === "string" && s.hash &&
       typeof s.value === "string" && s.value.trim() && statuses.has(String(s.status)) && natures.has(String(s.nature)))
@@ -66,13 +68,15 @@ export function fieldState(value: FieldValue | undefined): FieldState {
 
 /**
  * Where a draft value came from. The server marks captured values `capture` and the user's own edits
- * (and adopted updates) `user`. A captured value of a field the Skill declares as the mentor's proposal
- * can only hold the mentor's concrete suggestion, so it reads as 导师建议. Unknown history stays unknown.
+ * (and adopted updates) `user`. A capture records its basis (#702): `agent_proposal` reads as 导师建议.
+ * Captures from before that have no basis; a field the Skill declares as the mentor's proposal can only
+ * hold the mentor's suggestion, so it still reads as 导师建议. Unknown history stays unknown.
  */
 export type FieldOrigin = "user" | "capture" | "proposal" | "unknown";
 export function fieldOrigin(field: Pick<ChecklistField, "elicitation">, meta: FieldMeta): FieldOrigin {
   if (meta.source === "user") return "user";
-  if (meta.source === "capture") return field.elicitation === "agent_proposal" ? "proposal" : "capture";
+  if (meta.source === "capture")
+    return (meta.basis ?? (field.elicitation === "agent_proposal" ? "agent_proposal" : "user_statement")) === "agent_proposal" ? "proposal" : "capture";
   return "unknown";
 }
 const originLabels: Record<FieldOrigin, string> = {

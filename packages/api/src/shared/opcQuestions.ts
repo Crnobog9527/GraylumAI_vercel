@@ -338,3 +338,21 @@ export function confirmQuestionValues(
   };
   return { values, finishStep: schema.every(item => questionIsConfirmed(values[item.id])) };
 }
+
+/** Explicit UI action marker, never inferred from user prose. IDs are scoped to the current step. */
+export const CHECKLIST_UPDATED_INPUT = 'HOST_CHECKLIST_UPDATED:';
+export function checklistUpdatedInput(fieldIds: string[]): string {
+  const input = CHECKLIST_UPDATED_INPUT + JSON.stringify(fieldIds);
+  readChecklistUpdatedInput(input);
+  return input;
+}
+export function readChecklistUpdatedInput(input: string): string[] | undefined {
+  if (!input.startsWith(CHECKLIST_UPDATED_INPUT)) return undefined;
+  let ids: unknown;
+  try { ids = JSON.parse(input.slice(CHECKLIST_UPDATED_INPUT.length)); }
+  catch { throw new Error('OPC_INFORMATION_INVALID'); }
+  if (!Array.isArray(ids) || !ids.length || ids.length > 100 ||
+      ids.some(id => typeof id !== 'string' || !/^[a-z][a-z0-9_-]{0,63}$/.test(id)) ||
+      new Set(ids).size !== ids.length) throw new Error('OPC_INFORMATION_INVALID');
+  return ids;
+}

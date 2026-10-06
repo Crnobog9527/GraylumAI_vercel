@@ -35,7 +35,10 @@ it('measures final B2 checklist/text with a declared synthetic material distribu
    fallback:currentInputBytes(current)>frozen.currentReserveBytes,oldItems:legacy.length,newItems:selected.length,
    oldBytes:bytes(legacy),newBytes:bytes(selected)});
   expect(captureOrganizerInput(host,information,{},'u'.repeat(inputChars)).length).toBeLessThanOrEqual(24000);
-  expect(selected.length).toBeGreaterThanOrEqual(8);
+  // Field values now occupy current input; the legacy 64 KB budget retains fewer history items.
+  expect(selected.length).toBeGreaterThanOrEqual(inputBytes === 90000 ? 8 : 2);
+  expect(Buffer.byteLength(instructions) + bytes(current) + bytes(selected) + options.toolBytes)
+   .toBeLessThanOrEqual(inputBytes);
  }
  const report={systemBytes:Buffer.byteLength(instructions),reserve:frozen.currentReserveBytes,rows,
   fallbackSamples:rows.filter(r=>r.fallback).length,totalSamples:rows.length};

@@ -27,6 +27,9 @@ describe("field origin", () => {
     expect(fieldOrigin(i.schema[1]!, { source: "capture" })).toBe("capture");
     expect(fieldOrigin(i.schema[2]!, { source: "capture" })).toBe("proposal");
     expect(fieldOrigin(i.schema[1]!, {})).toBe("unknown");
+    // Since #702 each capture records its basis, which wins over the Skill role.
+    expect(fieldOrigin(i.schema[1]!, { source: "capture", basis: "agent_proposal" })).toBe("proposal");
+    expect(fieldOrigin(i.schema[2]!, { source: "capture", basis: "user_statement" })).toBe("capture");
     expect(fieldStateLabel(v("x"), { source: "capture" }, i.schema[2]!)).toBe("草稿 · 导师建议");
     expect(fieldStateLabel(v("x"), { source: "capture" }, i.schema[1]!)).toBe("草稿 · 从对话记下");
     expect(fieldStateLabel(v("x"), { source: "user" }, i.schema[2]!)).toBe("草稿 · 你填写的");

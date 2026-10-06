@@ -129,3 +129,14 @@ describe("StepReviewDialog", () => {
   });
 });
 
+describe("autosave status", () => {
+  it("shows a light status and never disables editing while saving", () => {
+    const html = render(props({ saveState: { s1: "saving" } }));
+    expect(html).toContain("保存中…");
+    expect(html).not.toMatch(/<textarea[^>]* disabled=""/);
+    expect(render(props({ saveState: { s1: "saved" } }))).toContain("已保存 ✓");
+    expect(render(props({ saveState: { s1: "saved" }, edits: { s1: { goal: v("新目标") } } }))).toContain("保存中…");
+    expect(render(props({ saveState: { s1: "error" }, edits: { s1: { goal: v("新目标") } } }))).toContain("自动保存失败");
+    expect(render(props())).not.toContain("保存中…");
+  });
+});

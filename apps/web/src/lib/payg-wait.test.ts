@@ -2,7 +2,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { runtimeGateMessages } from "../../../../packages/api/src/shared/runtimeGateMessages";
 import {
-  ORGANIZER_PENDING_NOTICE, ORGANIZER_SKIPPED_NOTICE, ORGANIZER_STILL_SHORT_NOTICE, ORGANIZER_WAITING_CREDITS_NOTICE, RESUME_ADMIN_NOTICE, RESUME_CONFLICT_NOTICE, RESUME_UNKNOWN_NOTICE,
+  hostNotice, ORGANIZER_PENDING_NOTICE, ORGANIZER_SKIPPED_NOTICE, ORGANIZER_STILL_SHORT_NOTICE, ORGANIZER_WAITING_CREDITS_NOTICE, RESUME_ADMIN_NOTICE, RESUME_CONFLICT_NOTICE, RESUME_UNKNOWN_NOTICE,
   RESUMING_NOTICE, STILL_SHORT_NOTICE, TOP_UP_HREF, UNNAMED_ORGANIZER, WAITING_CREDITS_NOTICE, WAITING_RESUME_NOTICE,
   blockedAdmission, isOrganizerPendingError, openTopUp, organizerBlockedNotices, organizerSkipped, paygResumeController,
   paygResumeToken, paygTurnNotices, resumeFailureNotice, resumeOutcome, type PaygTurn,
@@ -259,5 +259,49 @@ describe("去充值", () => {
     openTopUp();
     expect(open).toHaveBeenCalledWith(TOP_UP_HREF, "_blank", "noopener");
     expect(TOP_UP_HREF).toBe("/profile?tab=subscription");
+  });
+});
+
+/**
+ * One execution exactly as runtime_view returns it while a mentor turn waits for credits between its
+ * reply and its organizer (migration 0171): `organizerComplete` is `result ? 'summary'`, which is
+ * null while the turn has no result, never false. #691's browser check failed on this shape.
+ */
+const viewWaitingOrganizer = {
+  executionId: ID, cursor: 1, epoch: 0, remainingCalls: 1,
+  request: { draftId: OTHER, stepId: "step-0", purpose: "mentor", requestId: OTHER, input: "社区咖啡店，先做小红书图文", organizeAfter: true },
+  createdAt: "2026-10-06T17:04:50.669Z", state: "waiting_credits", input: "社区咖啡店，先做小红书图文",
+  body: null, primaryBody: '{"message":"导师的完整回复"}', organizerComplete: null, code: "RUNTIME_WAITING_CREDITS",
+  summary: null, skillExecution: true, needsTask: false, historyOmitted: false, unavailableReason: null,
+};
+
+describe("pause notice on the real runtime_view shape", () => {
+  it("says the reply is done and the organizer waits, when the view reports organizerComplete as null", () => {
+    const [notice] = paygTurnNotices(viewWaitingOrganizer, ctx());
+    expect(notice).toMatchObject({ text: ORGANIZER_WAITING_CREDITS_NOTICE });
+    expect(labels(notice)).toEqual(["继续", "去充值"]);
+    expect(paygTurnNotices(viewWaitingOrganizer, ctx({ outcome: { kind: "short" } }))[0]).toMatchObject({ text: ORGANIZER_STILL_SHORT_NOTICE });
+  });
+  it("keeps the general text before the reply is saved, or once the organizer finished", () => {
+    expect(paygTurnNotices({ ...viewWaitingOrganizer, primaryBody: null }, ctx())[0]).toMatchObject({ text: WAITING_CREDITS_NOTICE });
+    expect(paygTurnNotices({ ...viewWaitingOrganizer, organizerComplete: true }, ctx())[0]).toMatchObject({ text: WAITING_CREDITS_NOTICE });
+  });
+  it("treats the same null as an open organizer for a blocked new message and a skipped organizer", () => {
+    expect(organizerBlockedNotices([viewWaitingOrganizer], UNNAMED_ORGANIZER, ctx())).toHaveLength(1);
+    expect(organizerSkipped({ ...viewWaitingOrganizer, state: "cancelled", remainingCalls: 0 })).toBe(true);
+  });
+});
+
+describe("hostNotice (#698)", () => {
+  const claim = "当前任务状态已变化，暂时无法继续，请刷新后查看原任务。";
+  it("shows the host's fixed notice first in a resume outcome", () => {
+    expect(hostNotice({ state: "cancelled", notice: claim })).toBe(claim);
+    expect(resumeOutcome({ state: "cancelled", unavailable: "paused", notice: claim })).toEqual({ kind: "notice", text: claim });
+  });
+  it("leaves a pause to its own notice and keeps the old outcomes without a notice", () => {
+    expect(hostNotice({ state: "waiting_credits", notice: "余额不足，任务已暂停，请补充积分后继续。" })).toBeNull();
+    expect(resumeOutcome({ state: "waiting_credits", notice: "余额不足，任务已暂停，请补充积分后继续。" })).toEqual({ kind: "short" });
+    for (const result of [{ state: "cancelled", notice: "  " }, { state: "cancelled", notice: 1 }, null, "x"]) expect(hostNotice(result)).toBeNull();
+    expect(resumeOutcome({ state: "completed" })).toBeNull();
   });
 });
