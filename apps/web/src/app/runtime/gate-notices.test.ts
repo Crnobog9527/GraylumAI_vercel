@@ -133,3 +133,11 @@ describe('paused rounds', () => {
     expect(showsReply({ state: 'waiting_credits', body: null, primaryBody: '主回复' })).toBe(true);
   });
 });
+
+it('shows the host notice first and only otherwise the gate notice (#698)', () => {
+  const notice = '当前任务已停止，无法继续执行，请查看原任务。';
+  expect(runtimeExecutionNotice({ state: 'cancelled', unavailable: 'paused', notice })).toBe(notice);
+  expect(runtimeExecutionNotice({ state: 'cancelled', notice })).toBe(notice);
+  expect(runtimeExecutionNotice({ state: 'waiting_credits', notice: '余额不足，任务已暂停，请补充积分后继续。' })).toBeNull();
+  expect(runtimeExecutionNotice({ state: 'cancelled', unavailable: 'provider_history' })).toBe(runtimeExecutionNotice({ unavailable: 'provider_history' }));
+});

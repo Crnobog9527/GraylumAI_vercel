@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { expect, it, vi } from 'vitest';
 import { runtimeGateMessages } from '../../../../../../../packages/api/src/shared/runtimeGateMessages';
-import { topicExecutionNotice, topicFailureMessage, topicOpenTurnNotice, topicRejectedTurn, topicTurnShows } from './topic-notices';
+import { topicExecutionNotice, topicFailureMessage, topicTurnOutcome, topicOpenTurnNotice, topicRejectedTurn, topicTurnShows } from './topic-notices';
 import { PROVIDER_REJECTED_NOTICE } from '@/lib/runtime-gate-notice';
 
 const turnRefusal = (code: string, message: string) =>
@@ -83,4 +83,13 @@ it('does not repeat the live refusal error once the last turn shows it', () => {
 it('leaves a paused topic turn to its pause notice', () => {
   for (const state of ['waiting_credits', 'waiting_resume'])
     expect(topicOpenTurnNotice({ executionId: 'e', state }, { busy: false, finished: null, stopping: false, onRetry: vi.fn(), onStop: vi.fn() })).toBeNull();
+});
+
+it('shows the host notice first but keeps the typed input only after a gate stop (#698)', () => {
+  const notice = '当前任务已停止，无法继续执行，请查看原任务。';
+  expect(topicTurnOutcome({ state: 'cancelled', notice })).toEqual({ notice, keepInput: false });
+  expect(topicTurnOutcome({ state: 'cancelled', unavailable: 'paused', notice })).toEqual({ notice, keepInput: true });
+  expect(topicTurnOutcome({ state: 'cancelled', unavailable: 'paused' })).toEqual({ notice: runtimeGateMessages.paused, keepInput: true });
+  expect(topicTurnOutcome({ state: 'completed' })).toEqual({ notice: null, keepInput: false });
+  expect(topicTurnOutcome({ state: 'waiting_credits', notice: '余额不足，任务已暂停，请补充积分后继续。' })).toEqual({ notice: null, keepInput: false });
 });

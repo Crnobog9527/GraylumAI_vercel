@@ -26,7 +26,7 @@ import topicStyles from './topic-candidates.module.css';
 import { trpc } from '@/trpc/client';
 import { planItem, opcPlan, opcHandoff, opcTopicTurn, opcTopicDraft, opcAdoptTopics } from '@repo/api/src/shared/opcRequests';
 import { consentedTopicIds } from './adoption-consent';
-import { topicExecutionNotice, topicFailureMessage, topicOpenTurnNotice, topicRejectedTurn, topicTurnShows } from './topic-notices';
+import { topicFailureMessage, topicTurnOutcome, topicOpenTurnNotice, topicRejectedTurn, topicTurnShows } from './topic-notices';
 import { finishedExecution } from '@/lib/finished-execution';
 import { isOrganizerPendingError, isPaygWaiting, type PaygViewFields } from '@/lib/payg-wait';
 import { usePaygResume } from '@/lib/use-payg-resume';
@@ -313,9 +313,9 @@ export default function TopicWorkspacePage() {
             if (!payg.admitted(admitted)) { setOutgoing(null); localStorage.removeItem(storageKey); setPending(null); return; }
             setOutgoing(old => old && { ...old, executionId: admitted.executionId });
             if (op.candidateAtSend) localStorage.setItem('opc-topic-adoption-context:'+sessionId+':'+admitted.executionId,JSON.stringify(op.candidateAtSend));
-            const notice = topicExecutionNotice(await execute.mutateAsync({ executionId: admitted.executionId }));
-            if (notice) setError(notice);
-            else setInput(current=>{if(current===op.request.input){localStorage.removeItem(inputKey);return '';}return current;});
+            const outcome = topicTurnOutcome(await execute.mutateAsync({ executionId: admitted.executionId }));
+            if (outcome.notice) setError(outcome.notice);
+            if (!outcome.keepInput) setInput(current=>{if(current===op.request.input){localStorage.removeItem(inputKey);return '';}return current;});
           } else if (op.kind === 'save') {
             const result = await savePlan.mutateAsync(op.request);
             editCandidate(null);

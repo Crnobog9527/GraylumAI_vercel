@@ -12,6 +12,7 @@ import { PanelRightOpen, X } from "lucide-react";
 import resultStyles from "@/components/opc/positioning-result.module.css";
 import { WorkComposer, useFreeConversation } from '@/components/opc/work-composer';
 import { mergeInformation } from "./information-merge";
+import { createInformationAutosave, informationBaseKey, tabStorage, savedRead, stepView, type AutosaveIo, type SaveState } from "./information-autosave";
 import { readPlanEnvelope, type PlanEnvelope, type PlanRequest } from "./plan-envelope";
 import { admissionMessage } from "./admission-message";
 import { readWorkflowMentorExecution } from "./mentor-response";
@@ -170,14 +171,36 @@ function PositioningDraftContent({draftId}:{draftId:string}){
     setPendingBubble(retained??null);
   },[read.data,hydratedDraft,draftId]);
 
-  const [saveState, setSaveState] = useState<
-    Record<string, "idle" | "saving" | "saved" | "error">
-  >({});
+  const [saveState, setSaveState] = useState<Record<string, SaveState>>({});
   const [informationConflicts, setInformationConflicts] = useState<Record<string, { current: Record<string, Information>; fields: string[] }>>({});
   const infoEditsRef = useRef(infoEdits);
-  const autosaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const autosaveChain = useRef<Promise<void>>(Promise.resolve());
   const composing = useRef(false);
+  const autosaveIo = useRef<AutosaveIo>(null!);
+  autosaveIo.current = {
+    draftId, storage: tabStorage, newId: () => crypto.randomUUID(), onError: setError,
+    cached: stepId => stepView(utils.opc.read.getData({ draftId }), stepId),
+    refetch: async stepId => stepView((await read.refetch()).data, stepId),
+    write: request => information.mutateAsync(request),
+    applySaved: (stepId, values, version) => utils.opc.read.setData({ draftId }, (old: unknown) => savedRead(old, stepId, values, version)),
+    refreshLater: () => { if (!Object.keys(infoEditsRef.current).length) void utils.opc.read.invalidate({ draftId }); },
+    edits: () => infoEditsRef.current,
+    setEdits: (stepId, values) => {
+      const next = { ...infoEditsRef.current };
+      if (values) next[stepId] = values; else delete next[stepId];
+      infoEditsRef.current = next; setInfoEdits(next);
+    },
+    setSaveState: (stepId, state) => setSaveState(old => ({ ...old, [stepId]: state })),
+    setConflict: (stepId, conflict) => setInformationConflicts(old => ({ ...old, [stepId]: conflict })),
+  };
+  const [autosave] = useState(() => createInformationAutosave(() => autosaveIo.current));
+  const flushInformation = autosave.flush;
+  useEffect(() => {
+    // Mirror `infoEdits` before scheduling: the scheduler reads the ref.
+    infoEditsRef.current = infoEdits;
+    if (planView || hydratedDraft !== draftId || composing.current) return;
+    autosave.schedule();
+    return autosave.cancel;
+  }, [planView, draftId, hydratedDraft, infoEdits]);
   const [planRecovery, setPlanRecovery] = useState<
     "idle" | "running" | "invalid" | "unknown" | "stale"
   >("idle");
@@ -342,9 +365,6 @@ function PositioningDraftContent({draftId}:{draftId:string}){
     manualMentorEnabled,
   ]);
   useEffect(() => {
-    infoEditsRef.current = infoEdits;
-  }, [infoEdits]);
-  useEffect(() => {
     if (hydratedDraft === draftId && !dirtyPlan && latest?.body)
       setItems(latest.body);
   }, [draftId, hydratedDraft, latest?.planId, dirtyPlan]);
@@ -376,139 +396,9 @@ function PositioningDraftContent({draftId}:{draftId:string}){
   }, [planView, hydratedDraft, draftId, d?.roundId]);
   const { attach: attachChatScroll, follow: chatFollow, onScroll: onChatScroll } = useMentorLogScroll(draftId, history.data, pendingBubble, liveReply);
   function captureInformationBase(stepId: string) {
-    const key = "opc-information-base:" + draftId + ":" + stepId;
+    const key = informationBaseKey(draftId, stepId);
     if (!sessionStorage.getItem(key)) sessionStorage.setItem(key, JSON.stringify(d.information[stepId].values ?? {}));
   }
-  async function persistInformation(
-    stepId: string,
-    requestedValues: Record<string, Information>,
-  ) {
-    const storageKey = "opc-information-autosave:" + draftId + ":" + stepId;
-    // A queued task may outlive the edit that scheduled it.
-    if (!infoEditsRef.current[stepId] && !sessionStorage.getItem(storageKey)) return;
-    let wanted = infoEditsRef.current[stepId] ?? requestedValues;
-    let retriedConflict = false;
-    setSaveState((old) => ({ ...old, [stepId]: "saving" }));
-    try {
-      for (;;) {
-        let fixed: {
-          draftId: string;
-          stepId: string;
-          requestId: string;
-          expectedVersion: number;
-          values: Record<string, Information>;
-          editingSnapshot: string;
-        } | null = null;
-        try {
-          const raw = sessionStorage.getItem(storageKey);
-          if (raw) fixed = JSON.parse(raw);
-        } catch {
-          throw new Error("OPC_AUTOSAVE_IDENTITY_UNREADABLE");
-        }
-        if (!fixed) {
-          const current = (await read.refetch()).data;
-          if (!current) throw new Error("OPC_UNAVAILABLE");
-          const rawBase = sessionStorage.getItem("opc-information-base:" + draftId + ":" + stepId);
-          if (!rawBase) {
-            setInformationConflicts(old=>({...old,[stepId]:{current:current.information[stepId].values ?? {},fields:Object.keys(wanted)}}));
-            throw new Error("OPC_EDIT_BASE_MISSING");
-          }
-          const merged = mergeInformation(JSON.parse(rawBase), wanted, current.information[stepId].values ?? {});
-          if (merged.conflicts.length) {
-            setInformationConflicts(old=>({...old,[stepId]:{current:current.information[stepId].values ?? {},fields:merged.conflicts}}));
-            throw new Error("OPC_FIELD_CONFLICT:" + merged.conflicts.join(","));
-          }
-          fixed = {
-            draftId,
-            stepId,
-            requestId: crypto.randomUUID(),
-            expectedVersion: current.snapshot.steps[stepId].version,
-            values: merged.values as Record<string, Information>,
-            editingSnapshot: JSON.stringify(wanted),
-          };
-          sessionStorage.setItem(storageKey, JSON.stringify(fixed));
-        }
-        try {
-          const { editingSnapshot: _editingSnapshot, ...request } = fixed;
-          await information.mutateAsync(request);
-        } catch (cause) {
-          if (
-            !retriedConflict &&
-            cause instanceof Error &&
-            cause.message.includes("OPC_INFORMATION_CONFLICT")
-          ) {
-            // A version conflict is a definite rollback. Refresh and create a
-            // new identity once; ambiguous failures retain the original ID.
-            retriedConflict = true;
-            sessionStorage.removeItem(storageKey);
-            await read.refetch();
-            continue;
-          }
-          throw cause;
-        }
-        sessionStorage.removeItem(storageKey);
-        await read.refetch();
-        const latestValues = infoEditsRef.current[stepId];
-        const hasLaterEdit = latestValues && JSON.stringify(latestValues) !== fixed.editingSnapshot;
-        if (!hasLaterEdit) {
-          infoEditsRef.current = { ...infoEditsRef.current };
-          delete infoEditsRef.current[stepId];
-          setInfoEdits(infoEditsRef.current);
-          sessionStorage.removeItem("opc-information-base:" + draftId + ":" + stepId);
-          break;
-        }
-        // Only edits made after this immutable request become the next request.
-        const pending = mergeInformation(JSON.parse(fixed.editingSnapshot), latestValues, fixed.values);
-        if (pending.conflicts.length) throw new Error("OPC_FIELD_CONFLICT:" + pending.conflicts.join(","));
-        wanted = pending.values as Record<string, Information>;
-        sessionStorage.setItem("opc-information-base:" + draftId + ":" + stepId, JSON.stringify(fixed.values));
-        infoEditsRef.current = { ...infoEditsRef.current, [stepId]: wanted };
-        setInfoEdits(infoEditsRef.current);
-        retriedConflict = false;
-      }
-      setSaveState((old) => ({ ...old, [stepId]: "saved" }));
-    } catch (cause) {
-      setSaveState((old) => ({ ...old, [stepId]: "error" }));
-      if (cause instanceof Error && /OPC_FIELD_CONFLICT|OPC_EDIT_BASE_MISSING/.test(cause.message)) {
-        setError("其他窗口修改了相同信息。你的输入仍保留，请核对后再保存，未覆盖服务器内容。");
-      }
-      throw cause;
-    }
-  }
-  function enqueueInformation(
-    stepId: string,
-    values: Record<string, Information>,
-  ) {
-    const task = autosaveChain.current.then(() =>
-      persistInformation(stepId, values),
-    );
-    autosaveChain.current = task.catch(() => undefined);
-    return task;
-  }
-  async function flushInformation(stepId: string) {
-    if (autosaveTimer.current) clearTimeout(autosaveTimer.current);
-    autosaveTimer.current = null;
-    // Any step can be edited in the checklist: the cleared timer also covered the other steps' edits.
-    for (const [other, pending] of Object.entries(infoEditsRef.current)) if (other !== stepId && !sessionStorage.getItem("opc-confirm-step:"
-      + draftId + ":" + other)) void enqueueInformation(other, pending).catch(() => setError("自动保存暂时失败。内容仍保留在本机，可重试保存。"));
-    const values = infoEditsRef.current[stepId];
-    await (values ? enqueueInformation(stepId, values) : autosaveChain.current);
-  }
-  useEffect(() => {
-    if (planView || hydratedDraft !== draftId || composing.current) return;
-    if (autosaveTimer.current) clearTimeout(autosaveTimer.current);
-    const pending = Object.entries(infoEdits).filter(([stepId]) => !sessionStorage.getItem("opc-confirm-step:" + draftId + ":" + stepId));
-    if (!pending.length) return;
-    autosaveTimer.current = setTimeout(() => {
-      for (const [stepId, values] of pending)
-        void enqueueInformation(stepId, values).catch(() => {
-          setError("自动保存暂时失败。内容仍保留在本机，可重试保存。");
-        });
-    }, 700);
-    return () => {
-      if (autosaveTimer.current) clearTimeout(autosaveTimer.current);
-    };
-  }, [planView, draftId, hydratedDraft, infoEdits]);
   /**
    * The Agent opens each step itself, once per step and round, so a beginner is
    * never asked to send a placeholder like "你好" or "继续" first. It runs on first
@@ -1301,7 +1191,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
   }
   function retrySave(stepId: string) {
     const values = infoEditsRef.current[stepId];
-    if (values) void enqueueInformation(stepId, values).catch(() => setError("自动保存仍未成功。内容已保留，请稍后重试。"));
+    if (values) void autosave.enqueue(stepId).catch(() => setError("自动保存仍未成功。内容已保留，请稍后重试。"));
   }
   function checklistProps(): Parameters<typeof CaptureChecklist>[0] {
     const locked = busy || hasPendingStepRequest || Boolean(pendingMentor);

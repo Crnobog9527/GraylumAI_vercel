@@ -2,7 +2,7 @@
 import type { AgentTurnEvent, AgentTurnOutcome, QuestionAnswerSource } from "@repo/api/src/shared/agentTurn";
 import { OPENING_INPUT, openingRequestId } from "@repo/api/src/shared/opcQuestions";
 import { gateResultNotice, PROVIDER_HISTORY_NOTICE } from "@/lib/runtime-gate-notice";
-import { blockedAdmission, type PaygViewFields } from "@/lib/payg-wait";
+import { blockedAdmission, hostNotice, type PaygViewFields } from "@/lib/payg-wait";
 
 /** One mentor turn as sent to `opc.mentorTurnStream` (same input as `opc.prepareStep`). */
 export type MentorRequest = {
@@ -201,7 +201,10 @@ export async function readAgentTurn(
  */
 export function turnResultNotice(result: AgentTurnOutcome): string | null {
   // A Q1 refusal is shown with its "继续" by the page's pause notices (payg-wait.ts).
-  if (result.unavailable === "output_truncated" || blockedAdmission(result)) return null;
+  if (blockedAdmission(result)) return null;
+  const notice = hostNotice(result);
+  if (notice) return notice;
+  if (result.unavailable === "output_truncated") return null;
   if (result.unavailable === "provider_history")
     return PROVIDER_HISTORY_NOTICE;
   if (result.unavailable === "preflight") return "本次执行在模型派发前检查失败，已停止并保留原记录。请核对服务状态后再继续，不会自动重放。";
