@@ -75,3 +75,26 @@ it('rejects an unknown new field before material, billing or model admission',as
  const f=fixture();await expect(f.service.prepareStep({...request,questionId:'unknown'})).rejects.toThrow('OPC_QUESTION_NOT_REACHED');
  expect(f.reads).not.toContain('opc_step_material');expect(captured.policy).toBeUndefined();
 });
+
+it('explicit checklist notification uses ordinary request identity and no organizer user speech',async()=>{
+ const {checklistUpdatedInput}=await import('../../shared/opcQuestions');
+ const input=checklistUpdatedInput(['goal']);
+ await fixture().service.prepareStep({...request,input});
+ expect(captured.request).toMatchObject({requestId,input,organizeAfter:true});
+ expect(captured.policy).toMatchObject({maxCalls:2,inputBytes:64000,hostTurnContext:{updatedFieldIds:['goal']}});
+ const organizer=JSON.parse(captured.policy!.organizerInput!);
+ expect(organizer).toMatchObject({userInput:'',hostEvent:{kind:'checklist_updated',fieldIds:['goal']}});
+ expect(captured.policy!.additionalInstructions).not.toContain(input);
+ const replay=fixture(null,{executionId:sourceId});
+ expect(await replay.service.prepareStep({...request,input})).toEqual({executionId:sourceId});
+ expect(replay.reads).not.toContain('opc_capture_apply');
+});
+it('refuses malformed, unknown or mis-scoped host updates before admission',async()=>{
+ for(const input of ['HOST_CHECKLIST_UPDATED:[]','HOST_CHECKLIST_UPDATED:bad','HOST_CHECKLIST_UPDATED:["unknown"]']) {
+  const f=fixture();
+  await expect(f.service.prepareStep({...request,input})).rejects.toThrow('OPC_INFORMATION_INVALID');
+  expect(f.reads).not.toContain('opc_step_material');
+ }
+ await expect(fixture().service.prepareStep({...request,purpose:'step',input:'HOST_CHECKLIST_UPDATED:["goal"]'}))
+  .rejects.toThrow('OPC_STEP_DENIED');
+});
