@@ -1,4 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import {withClaimNotice} from './claimNotice';
 import {NativeTextTransport,type NativeTextDelta} from './nativeProgress';
 import type {ResumeInput} from './paygRuntime';
 import {admitPricing} from './pricingAdmission';
@@ -53,7 +54,7 @@ export async function executeOriginalExecution(host:OriginalExecutionHost,execut
     const leave=host.budget?.timing?.enter('host');
     try{await captureCompleted(host.admin,host.actorId,executionId);}finally{leave?.();}
    }
-   if(!['cancelled','cost_pending'].includes(result.state))return result;
+   if(!['cancelled','cost_pending'].includes(result.state))return withClaimNotice(result);
    const reason=await retainedOutputReason(host.admin,host.actorId,executionId);
    return {...result,...(reason?{unavailable:reason}:{})};
   };
