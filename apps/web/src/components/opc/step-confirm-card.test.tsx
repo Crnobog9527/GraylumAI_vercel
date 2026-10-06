@@ -79,7 +79,7 @@ function clickables(node: ReactNode): Array<{ label: string; click: () => void; 
   return [...own, ...clickables(element.props.children)];
 }
 function props(extra: Partial<StepConfirmCardProps> = {}): StepConfirmCardProps {
-  return { title: "了解你", model: confirmCardModel(info()), resuming: false, disabled: false, canConfirm: true,
+  return { title: "了解你", info: info(), resuming: false, disabled: false, canConfirm: true,
     onConfirm: vi.fn(), onEdit: vi.fn(), onReview: vi.fn(), ...extra };
 }
 const html = (p: StepConfirmCardProps) => renderToStaticMarkup(createElement(StepConfirmCard, p));
@@ -102,9 +102,14 @@ describe("StepConfirmCard", () => {
     expect(p.onEdit).toHaveBeenCalledWith(["audience", "position"]);
     button(p, "逐项核对或暂缓")!.click();
     expect(p.onReview).toHaveBeenCalled();
-    const ownOnly = props({ model: { ...confirmCardModel(info()), look: [] } });
+    const own = info(); own.meta = { goal: { source: "user" }, audience: { source: "user" }, position: { source: "user" }, benchmark: { source: "user" } };
+    const ownOnly = props({ info: own });
     button(ownOnly, "我要改")!.click();
     expect(ownOnly.onEdit).toHaveBeenCalledWith(["goal", "audience", "position", "benchmark"]);
+  });
+  it("does not promise the next step for an account revision, which stays on the edited step", () => {
+    expect(button(props({ revision: true }), "没问题，确认这一步的修改")).toBeDefined();
+    expect(button(props({ revision: true }), "没问题，进入下一步")).toBeUndefined();
   });
   it("cannot confirm while a reply runs or before upstream steps are confirmed", () => {
     expect(button(props({ canConfirm: false }), "没问题，进入下一步")!.disabled).toBe(true);
@@ -115,7 +120,7 @@ describe("StepConfirmCard", () => {
   });
   it("names what is missing and keeps the deferral entry", () => {
     const i = info(); i.values!.audience = v("");
-    const p = props({ model: confirmCardModel(i) });
+    const p = props({ info: i });
     const out = html(p);
     expect(out).toContain("还差：受众");
     expect(out).not.toContain("没问题，进入下一步");
@@ -125,13 +130,13 @@ describe("StepConfirmCard", () => {
     expect(p.onReview).toHaveBeenCalled();
   });
   it("shows nothing before anything was recorded, and continues a started confirmation", () => {
-    expect(html(props({ model: confirmCardModel({ ...info(), values: {} }) }))).toBe("");
-    const resume = props({ resuming: true, model: confirmCardModel({ ...info(), values: {} }) });
+    expect(html(props({ info: { ...info(), values: {} } }))).toBe("");
+    const resume = props({ resuming: true, info: { ...info(), values: {} } });
     expect(html(resume)).toContain("确认还没完成");
     expect(button(resume, "继续完成确认")).toBeDefined();
   });
   it("mentions pending updates are not part of the confirmation", () => {
     const i = info(); i.meta!.goal = { source: "user", suggestion: { executionId: "e", hash: "h", value: "新", status: "provisional", nature: "decision" } };
-    expect(html(props({ model: confirmCardModel(i) }))).toContain("还有 1 条“根据对话整理的更新”没处理");
+    expect(html(props({ info: i }))).toContain("还有 1 条“根据对话整理的更新”没处理");
   });
 });

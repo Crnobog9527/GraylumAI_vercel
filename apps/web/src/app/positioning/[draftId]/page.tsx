@@ -20,7 +20,7 @@ import { focusReply, mentorReplyDisplay, showsTurnState } from "./agent-turn-dis
 import { OpenQuestionRecord, OTHER_PLACEHOLDER, QuestionCardView } from "@/components/opc/question-card";
 import { CaptureChecklist } from "@/components/opc/capture-checklist";
 import { StepReviewDialog } from "@/components/opc/step-review-dialog";
-import { confirmCardModel, focusChecklistField, StepConfirmCard } from "@/components/opc/step-confirm-card";
+import { focusChecklistField, StepConfirmCard } from "@/components/opc/step-confirm-card";
 import { cardStatus, editedValue, fieldMeta, focusField, type StepInformation } from "@/components/opc/capture-state";
 import { reviewedStep, useStepConfirmation } from "@/hooks/use-step-confirmation";
 import { useCaptureResolve } from "@/hooks/use-capture-resolve";
@@ -1347,8 +1347,8 @@ function PositioningDraftContent({draftId}:{draftId:string}){
                     recovery: recoveryNeedsUser[0] && !busy
                       ? { readable: recoveryNeedsUser[0].readable, onClick: () => void recoverPendingStep(recoveryNeedsUser[0]!.step) } : null })]}/>
                   </div>
-                  {!manualEntry && snap.state === "draft" && !s.valid && <StepConfirmCard title={step.title} onReview={() => openReview(step.id)}
-                    model={confirmCardModel(d.information[step.id], infoEdits[step.id])} resuming={confirmation.envelopeState(step.id).kind === "valid"}
+                  {!manualEntry && snap.state === "draft" && !s.valid && <StepConfirmCard revision={!!d.accountRevision} onReview={() => openReview(step.id)}
+                    title={step.title} info={d.information[step.id]} edits={infoEdits[step.id]} resuming={confirmation.envelopeState(step.id).kind === "valid"}
                     canConfirm={confirmableStep(step) && !pendingMentor && !awaitingReply && !liveOnly} disabled={busy || hasPendingStepRequest}
                     onConfirm={() => confirmation.confirmNow(step.id, d.information[step.id], infoEdits[step.id], snap.steps)} onEdit={highlightFields(step.id)}/>}
                   <WorkComposer value={mentorInput} onChange={setMentorInput} label="给导师的回复" placeholder={OTHER_PLACEHOLDER} attachment={dock} maxLength={8000} disabled={snap.state!=="draft"} sendDisabled={sendLocked} onSend={skill=>{if(skill)void free.send(mentorInput,skill);else void ask(step);}}/>
