@@ -561,3 +561,25 @@ it('BILL2: historical receipt erasure preserves v1/v2 accounting and immutable e
   writeFileSync(resolve(process.env.V3_WORKBENCH_OUTPUT!,'erasure-receipts.json'),JSON.stringify(report,null,2));
  }
 },60000);
+
+
+it('BILL2: erased run content keeps original financial recovery and rejects late refill',async()=>{
+ const base=new URL('../../../../db/tests/erasure-run/',import.meta.url);
+ const report={checks:[] as string[]};
+ const prior=(await db.query("select value from system_settings where key='billing_payg_start_thresholds'")).rows[0];
+ if(!(await db.query("select to_regnamespace('b2a_test') name")).rows[0].name){
+  await db.query(readFileSync(new URL('../erasure-b2a/fixture.sql',base),'utf8'));
+ }
+ try{
+  const {runCases}=await import(/* @vite-ignore */new URL('cases.mjs',base).href);
+  const {runConcurrency}=await import(/* @vite-ignore */new URL('concurrency.mjs',base).href);
+  await runCases(db,report);
+  await runConcurrency({db,Client:pg.Client,connectionString,report});
+  expect(report.checks).toHaveLength(8);
+ }finally{
+  await db.query('RESET ROLE');
+  if(prior)await db.query("update system_settings set value=$1 where key='billing_payg_start_thresholds'",[prior.value]);
+  else await db.query("delete from system_settings where key='billing_payg_start_thresholds'");
+  writeFileSync(resolve(process.env.V3_WORKBENCH_OUTPUT!,'erasure-run.json'),JSON.stringify(report,null,2));
+ }
+},60000);
