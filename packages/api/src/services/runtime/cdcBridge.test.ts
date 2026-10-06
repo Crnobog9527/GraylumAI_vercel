@@ -4,7 +4,7 @@ import {mkdtempSync,readFileSync,rmSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {bridge} from '../../../../../scripts/cdc-b2-eval/bridge';
-import {secondRound} from '../../../../../scripts/cdc-b2-eval/secondRound';
+import {thirdRound} from '../../../../../scripts/cdc-b2-eval/thirdRound';
 import {quote} from '../../../../../scripts/cdc-b2-eval/policy';
 import {openRouterBound} from '../bill2/openRouterPolicy';
 it('serial sender settles a known cost and stops permanently on unknown cost without retry',async()=>{
@@ -20,7 +20,7 @@ it('serial sender settles a known cost and stops permanently on unknown cost wit
   body:JSON.stringify({ordinal,slot,role:'organizer',raw})});
  try{
   expect((await send(1,'a')).status).toBe(200);
-  expect(JSON.parse(readFileSync(dir+'/ledger.json','utf8'))).toMatchObject({nano:secondRound.priorNano+1000000,pending:false});
+  expect(JSON.parse(readFileSync(dir+'/ledger.json','utf8'))).toMatchObject({nano:thirdRound.priorNano+1000000,pending:false});
   expect((await send(2,'b')).status).toBe(409);
   expect(JSON.parse(readFileSync(dir+'/ledger.json','utf8'))).toMatchObject({pending:true,calls:{organizer:2}});
   expect((await send(2,'b')).status).toBe(409);expect(sends).toBe(2);

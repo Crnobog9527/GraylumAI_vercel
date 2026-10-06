@@ -7,13 +7,13 @@ import {organizerAnswerCard, type AnsweredCard} from './answerCard';
 export type CaptureState = {
   schema: readonly MethodInformationField[];
   values?: Record<string, {value?: unknown; status?: string; nature?: string}>;
-  meta?: Record<string, {protected?: boolean}>;
+  meta?: Record<string, {protected?: boolean; suggestion?: {value?: unknown; nature?: string; basis?: string}}>;
   notes?: unknown[];
 };
 type Step = {id: string; title: string};
 export function captureHostContext(steps: readonly Step[], information: Record<string, CaptureState>,
   stepId: string, opening: boolean): HostTurnContext {
-  return hostTurnContextSchema.parse({cardContract: GROUNDED_CARD_CONTRACT, stepId, opening, checklist: steps.map(step => ({
+  return hostTurnContextSchema.parse({confirmationQuestions: true, cardContract: GROUNDED_CARD_CONTRACT, stepId, opening, checklist: steps.map(step => ({
     id: step.id, title: step.title,
     fields: (information[step.id]?.schema ?? []).map(field => {
       const state = information[step.id]!;
@@ -38,6 +38,13 @@ export function captureOrganizerInput(host: HostTurnContext, information: Record
     fields: step.fields.map(field => ({...field, elicit: field.role,
       value: information[step.id]?.values?.[field.id]?.value ?? '',
       nature: information[step.id]?.values?.[field.id]?.nature ?? 'unknown',
+      ...(information[step.id]?.meta?.[field.id]?.suggestion ? {
+        pendingSuggestion: {
+          value: information[step.id]!.meta![field.id]!.suggestion!.value,
+          basis: information[step.id]!.meta![field.id]!.suggestion!.basis,
+          nature: information[step.id]!.meta![field.id]!.suggestion!.nature,
+        },
+      } : {}),
     })),
     ...(!confirmed[step.id] ? {notes: information[step.id]?.notes ?? []} : {}),
   }));

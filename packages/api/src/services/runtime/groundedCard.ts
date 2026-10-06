@@ -1,5 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import {z} from 'zod';
+import {inferenceQuestion} from './inferenceQuestions';
 import {ASK_QUESTION_TOOL, agentTurnBody, questionToolCardSchema, OPTION_MAX_CHARS, type QuestionCard} from '../../shared/agentTurn';
 import type {RuntimeTool} from './runner';
 import {INVALID_CARD_RESULT} from './agentTools';
@@ -46,7 +47,7 @@ const contains = (sources: string[], quote: string) => sources.some(source => so
 
 /** Semantic classification is the model's job; the host enforces its declared decision and
  * exact user-source evidence. This is not a general natural-language entailment checker. */
-export function groundedCardResult(value: unknown, sources: CardSources): string {
+export function groundedCardResult(value: unknown, sources: CardSources, questions = false): string {
   const parsed = groundedCardParameters.safeParse(value);
   if (!parsed.success) return INVALID_CARD_RESULT;
   const v = parsed.data;
@@ -60,15 +61,16 @@ export function groundedCardResult(value: unknown, sources: CardSources): string
   // their prose rendering have exactly one source. All professional reasoning is tentative.
   const options = v.options.map(option => option.text);
   const chosen = v.recommended === null ? undefined : v.options[v.recommended];
-  const reason = chosen?.reason ? '推测，待你确认：' + chosen.reason : null;
+  const renderReason = (value: string) => questions ? inferenceQuestion(value) : '推测，待你确认：' + value;
+  const reason = chosen?.reason ? renderReason(chosen.reason) : null;
   const message = neutral ? '下面是中性的范围或类别，请按实际情况选择。'
-    : v.options.map((option, index) => `${index + 1}. ${option.text}\n推测，待你确认：${option.reason}`).join('\n\n') +
+    : v.options.map((option, index) => `${index + 1}. ${option.text}\n${renderReason(option.reason!)}`).join('\n\n') +
       (chosen ? `\n\n建议选择「${chosen.text}」。${reason}` : '');
   const card = questionToolCardSchema.safeParse({question: v.question, options, recommended: v.recommended,
     message, recommendationReason: reason});
   return card.success ? JSON.stringify({card: 'question', ...card.data}) : INVALID_CARD_RESULT;
 }
-export function groundedCardTool(sources: () => CardSources): RuntimeTool {
+export function groundedCardTool(sources: () => CardSources, questions = false): RuntimeTool {
   return {name: ASK_QUESTION_TOOL, parameters: groundedCardParameters,
     description: 'Show a choice card ONLY for a grounded comparison of actual user-supplied alternatives or plans '+
       'computed from explicit constraints, or neutral categories explicitly requested in the current user message. '+
@@ -83,7 +85,7 @@ export function groundedCardTool(sources: () => CardSources): RuntimeTool {
       'or broaden a user fact. The host labels reasons as hypotheses. Put the complete option in text exactly once. '+
       'Do not send separate assistant prose when calling this tool: the host renders the public explanation and recommendation '+
       'from these options, and rejects cards accompanied by separate prose. Ends your turn.',
-    invalidResult: INVALID_CARD_RESULT, execute: async args => groundedCardResult(args, sources())};
+    invalidResult: INVALID_CARD_RESULT, execute: async args => groundedCardResult(args, sources(), questions)};
 }
 export function groundedCardToolBytes(): number {
   const tool = groundedCardTool(() => ({current: '', user: []}));

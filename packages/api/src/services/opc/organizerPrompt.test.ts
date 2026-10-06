@@ -78,3 +78,12 @@ vi.mock('../runtime/newWorkGate', async importOriginal => ({
  ...await importOriginal<typeof import('../runtime/newWorkGate')>(),
  ...(await import('../__tests__/fixtures/runtimeGates')).testAdmissionGates,
 }));
+
+it('extracts user evidence independently across proposal fields and preserves pending user-backed qualifications',()=>{
+ expect(ORGANIZER_INSTRUCTIONS).toContain('An agent_proposal field also accepts explicit user statements');
+ expect(ORGANIZER_INSTRUCTIONS).toContain('regardless of current focus');
+ expect(ORGANIZER_INSTRUCTIONS).toContain('never explicit user facts or supported negative experience');
+ expect(ORGANIZER_INSTRUCTIONS).toContain('A pendingSuggestion is unaccepted data');
+ expect(ORGANIZER_INSTRUCTIONS).toContain('Protection is not a reason to emit no patch');
+ expect(ORGANIZER_INSTRUCTIONS).not.toContain('only a relevant concrete mentor recommendation can update that field');
+});

@@ -2,13 +2,13 @@
 import {createServer} from 'node:http';
 import {randomUUID} from 'node:crypto';
 import {writeFileSync,readFileSync,appendFileSync} from 'node:fs';
-import {streamObserver} from '../../packages/api/src/scripts/ac0Probe/sse.ts';
-import {secondRound} from './secondRound.ts';
-import {budget,measure,EXPIRES,hash,type Role} from './policy.ts';
+import {streamObserver} from '../../packages/api/src/scripts/ac0Probe/sse';
+import {thirdRound} from './thirdRound';
+import {budget,measure,EXPIRES,hash,type Role} from './policy';
 /** The only external sending boundary. Caller must verify the exact PR authorization first. */
 export async function bridge(output:string,slots:Array<{slot:string;role:Role}>,key:string){
  const ledgerPath=output+'/ledger.json';
- writeFileSync(ledgerPath,JSON.stringify({calls:{mentor:0,organizer:0},nano:secondRound.priorNano,pending:false}),{flag:'wx',mode:0o600});
+ writeFileSync(ledgerPath,JSON.stringify({calls:{mentor:0,organizer:0},nano:thirdRound.priorNano,pending:false}),{flag:'wx',mode:0o600});
  const gate=budget(()=>JSON.parse(readFileSync(ledgerPath,'utf8')),state=>writeFileSync(ledgerPath,JSON.stringify(state),{mode:0o600}));
  let next=0,busy=false,stopped=false;const secret=randomUUID()+randomUUID();
  const server=createServer(async(req,res)=>{

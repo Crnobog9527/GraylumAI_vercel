@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import {createHash} from 'node:crypto';
-import {openRouterBound,openRouterCallBound,measureCallInput} from '../../packages/api/src/services/bill2/openRouterPolicy.ts';
+import {openRouterBound,openRouterCallBound,measureCallInput} from '../../packages/api/src/services/bill2/openRouterPolicy';
 export const hash=(raw:string|Buffer)=>createHash('sha256').update(raw).digest('hex');
 export const EXPIRES='2026-10-09T15:59:59Z';
 export const CAP_NANO=9_000_000_000;

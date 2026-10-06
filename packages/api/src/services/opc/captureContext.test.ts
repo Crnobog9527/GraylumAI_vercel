@@ -54,3 +54,15 @@ it('uses frozen values and protected flags rather than the earlier browser proje
   .toMatchObject({status:'confirmed',protected:true});
  expect(()=>captureFrozenInformation(information,{})).toThrow('OPC_CAPTURE_MATERIAL_MISMATCH');
 });
+
+it('carries unaccepted user-backed suggestions across protected updates without replacing the official value',()=>{
+ const state=structuredClone(information);
+ state.first!.meta!.goal={protected:true,suggestion:{value:'原目标；每月一次反馈',basis:'user_statement',nature:'decision'}};
+ const host=captureHostContext(steps,state,'first',false);
+ const input=JSON.parse(captureOrganizerInput(host,state,{},'再加一个限定'));
+ const field=input.checklist[0].fields[0];
+ expect(field.value).toBe('User fact');expect(field.protected).toBe(true);
+ expect(field.pendingSuggestion).toEqual({value:'原目标；每月一次反馈',basis:'user_statement',nature:'decision'});
+ expect(state.first!.values!.goal!.value).toBe('User fact');
+ expect(JSON.stringify(host)).not.toContain('每月一次反馈');
+});
