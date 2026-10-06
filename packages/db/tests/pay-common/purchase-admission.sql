@@ -1,6 +1,11 @@
 -- Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved.
 -- Local, synthetic purchase admission fixtures only; no provider operations.
 BEGIN;
+-- Freeze the wall clock in this rollback-only fixture transaction so expiry construction
+-- and the unmodified closure RPC observe the same instant, even across second boundaries.
+-- The catalog replacement is transactional and is never committed.
+CREATE OR REPLACE FUNCTION pg_catalog.clock_timestamp() RETURNS timestamptz
+LANGUAGE sql VOLATILE PARALLEL SAFE AS 'SELECT now()';
 -- Isolated test setup: explicitly select Stripe; the surrounding rollback restores the prior setting.
 INSERT INTO public.system_settings(key,value)
 SELECT 'payment_new_purchase_channel',jsonb_build_object('channel','stripe','version',
