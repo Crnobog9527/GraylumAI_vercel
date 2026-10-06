@@ -248,3 +248,22 @@ describe("saved fields", () => {
     expect(onSaved).not.toHaveBeenCalled();
   });
 });
+
+describe("saved fields after a lost reply", () => {
+  it("a replay after a reload still reports the fields the original request changed", async () => {
+    const t = setup();
+    const onSaved = vi.fn();
+    t.io.onSaved = onSaved;
+    t.edit({ a: v("new") });
+    // The write commits but its reply is lost; the retained request stays in storage.
+    (t.io.write as ReturnType<typeof vi.fn>).mockImplementationOnce(async (request: InformationRequest) => {
+      t.writes.push(request); t.otherTab({ a: v("new") }); throw new Error("network");
+    });
+    await expect(t.autosave.flush("s1")).rejects.toThrow("network");
+    // After a reload the read already holds the saved value; replaying the same request is idempotent here.
+    const replay = createInformationAutosave(() => ({ ...t.io, cached: () => ({ version: 4, values: t.server().values }),
+      write: async () => ({ version: 4 }) }));
+    await replay.flush("s1");
+    expect(onSaved).toHaveBeenCalledWith("s1", ["a"]);
+  });
+});

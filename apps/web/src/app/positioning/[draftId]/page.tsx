@@ -672,12 +672,13 @@ function PositioningDraftContent({draftId}:{draftId:string}){
     const questionId = focusField(d.information[step.id]);
     const fixed:StepEnvelope={request:{...(answerSource ? {answerSource} : {}),draftId,stepId:step.id,
       purpose:'mentor',requestId:crypto.randomUUID(),input,questionId,organizeAfter:true}};
-    sessionStorage.setItem(key,JSON.stringify(fixed));clearSavedFields(sessionStorage,draftId); // The mentor now reads the current checklist.
+    sessionStorage.setItem(key,JSON.stringify(fixed));
     mentorSendInFlight.current=true;
     setPendingBubble(fixed.request);if(inputOverride===undefined)setMentorInput('');
     chatFollow.current=true;
     if(manualEntry)setManualMentorEnabled(true);
-    try{await run(async()=>{await flushInformation(step.id);await resumeStepEnvelope(step,fixed);});}
+    // The nudge is cleared after the flush: this message carries those saved edits too.
+    try{await run(async()=>{await flushInformation(step.id);clearSavedFields(sessionStorage,draftId);await resumeStepEnvelope(step,fixed);});}
     finally{mentorSendInFlight.current=false;}
   }
 
@@ -1047,8 +1048,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
     });
   }
   function retainConflictingInput(stepId: string) {
-    const conflict=informationConflicts[stepId], edited=infoEditsRef.current[stepId];
-    if (!conflict || !edited) return;
+    const conflict=informationConflicts[stepId], edited=infoEditsRef.current[stepId]; if (!conflict || !edited) return;
     autosaveIo.current.setEdits(stepId, keepConflictingEdits(tabStorage, draftId, stepId, edited, conflict));
     setInformationConflicts(old=>{const next={...old};delete next[stepId];return next;});
   }

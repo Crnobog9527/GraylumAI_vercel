@@ -9,7 +9,8 @@ export type StepView = { version: number; values: Values };
 export type InformationRequest = {
   draftId: string; stepId: string; requestId: string; expectedVersion: number; values: Values;
 };
-type Fixed = InformationRequest & { editingSnapshot: string };
+/** `changed`: the fields this request changes, kept with it so a replay after a reload still reports them. */
+type Fixed = InformationRequest & { editingSnapshot: string; changed?: string[] };
 
 export type AutosaveIo = {
   draftId: string;
@@ -101,7 +102,7 @@ export function createInformationAutosave(io: () => AutosaveIo) {
     x.setSaveState(stepId, "saving");
     try {
       for (;;) {
-        let fixed: Fixed | null = null, before: Values | null = null;
+        let fixed: Fixed | null = null;
         try {
           const raw = x.storage.getItem(key);
           if (raw) fixed = JSON.parse(raw);
@@ -122,9 +123,9 @@ export function createInformationAutosave(io: () => AutosaveIo) {
             x.setConflict(stepId, { current: current.values, fields: merged.conflicts });
             throw new Error("OPC_FIELD_CONFLICT:" + merged.conflicts.join(","));
           }
-          before = current.values;
-          fixed = { draftId: x.draftId, stepId, requestId: x.newId(), expectedVersion: current.version,
-            values: merged.values as Values, editingSnapshot: JSON.stringify(wanted) };
+          const values = merged.values as Values;
+          fixed = { draftId: x.draftId, stepId, requestId: x.newId(), expectedVersion: current.version, values,
+            editingSnapshot: JSON.stringify(wanted), changed: Object.keys(values).filter(id => !sameValue(values[id], current.values[id])) };
           x.storage.setItem(key, JSON.stringify(fixed));
         }
         let result: unknown;
@@ -143,10 +144,7 @@ export function createInformationAutosave(io: () => AutosaveIo) {
           throw cause;
         }
         x.storage.removeItem(key);
-        // A request retained from earlier was based on what the page holds now, at best.
-        before ??= newest(stepId, x.cached(stepId))?.values ?? {};
-        const changed = Object.keys(fixed.values).filter(id => !sameValue(fixed.values[id], before![id]));
-        if (changed.length) x.onSaved?.(stepId, changed);
+        if (fixed.changed?.length) x.onSaved?.(stepId, fixed.changed);
         const version = savedVersion(result);
         if (version === null) await x.refetch(stepId);
         else {
