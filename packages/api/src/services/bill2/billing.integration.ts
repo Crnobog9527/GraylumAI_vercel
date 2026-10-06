@@ -512,7 +512,7 @@ it('BILL2: PAYG v2 money paths, erasure, nominal pricing and real concurrency re
   const {createFixture,claim,receipt}=await load('fixture');
   try{
     for(const [file,entry]of [
-      ['legacy','legacyCases'],['core','coreCases'],['nominal','nominalCases'],
+      ['legacy','legacyCases'],['core','coreCases'],['nominal','nominalCases'],['thresholds','thresholdCases'],
       ['grants','grantCases'],['edges','edgeCases'],['monitor','monitorCases'],['erasure','erasureCases'],
     ]){
       const module=await load(file!);
