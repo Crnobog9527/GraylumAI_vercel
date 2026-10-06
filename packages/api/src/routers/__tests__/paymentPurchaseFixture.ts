@@ -76,7 +76,7 @@ export function installPurchaseFixture(user: Db, admin: Db, getStripe: () => Str
       const order = { id, user_id: args.p_user_id, item_type: args.p_item_type, item_id: args.p_item_id,
         amount_total: amount, billing_cycle: cycle, status: 'pending', payment_status: 'unpaid', checkout_request: null,
         payment_channel: 'stripe', merchant_namespace: 'acct_fixture', payment_mode: 'test', price_ref_id: `price-ref-${id}`,
-        metadata: { productName: item.name }, purchase_snapshot: { version: 1, item_type: args.p_item_type,
+        metadata: { productName: item.name, requoteRequired: false }, purchase_snapshot: { version: 1, item_type: args.p_item_type,
           item_id: args.p_item_id, item_updated_at: '2026-10-05T00:00:00.000Z', billing_cycle: cycle,
           currency: 'usd', unit: 'major', price: (amount / 100).toFixed(2), discount: '0.00', tax_behavior: 'unspecified',
           credits: 100, bonus_credits: 0 } };

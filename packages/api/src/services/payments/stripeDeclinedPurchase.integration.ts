@@ -46,6 +46,8 @@ beforeAll(() => {
   local = JSON.parse(execFileSync('node', [resolve(root, 'packages/db/tests/pay-common/decline-local-db.mjs'),
     '--local-only'], { ...options, timeout: 240000 }));
   expect(local.steps).toBeGreaterThan(170);
+  sql(`INSERT INTO system_settings(key,value)
+    VALUES('payment_new_purchase_channel','{"channel":"stripe","version":1}');`);
 }, 240000);
 afterAll(() => {
   if (local) execFileSync('docker', ['--host', local.endpoint, 'rm', '-f', '-v', local.name], options);
