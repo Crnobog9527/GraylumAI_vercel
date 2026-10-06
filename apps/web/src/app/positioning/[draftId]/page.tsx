@@ -91,7 +91,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
     savePlan = trpc.opc.savePlan.useMutation(),
     handoff = trpc.opc.handoff.useMutation();
   const [running, setRunning] = useState(false);
-  const [resultOpen,setResultOpen]=useState(true), [highlight,setHighlight]=useState<string[]>([]);
+  const [resultOpen,setResultOpen]=useState(true), [highlight,setHighlight]=useState<string[]>([]), [reveal,setReveal]=useState(0);
   const [workInfoOpen,setWorkInfoOpen]=useState(false);
   useEffect(()=>{if(!workInfoOpen)return;const close=(event:KeyboardEvent)=>{if(event.key==='Escape')setWorkInfoOpen(false);};window.addEventListener('keydown',close);return()=>window.removeEventListener('keydown',close);},[workInfoOpen]);
   const [resultBodyNode,setResultBodyNode]=useState<HTMLDivElement|null>(null);
@@ -1298,7 +1298,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
   }
   function openReview(stepId: string) { setActiveStep(stepId); confirmation.open(stepId, d.information[stepId], infoEditsRef.current[stepId], snap.steps); }
   /** “我要改”: show the right checklist with these fields marked, cursor in the first. */
-  function highlightFields(stepId: string, ids: string[]) { setResultOpen(true); setHighlight(ids); focusChecklistField(stepId, ids[0]); }
+  function highlightFields(step: string, ids: string[]) { setResultOpen(true); setReveal(n => n + 1); setHighlight(ids); focusChecklistField(step, ids[0]); }
   function retrySave(stepId: string) {
     const values = infoEditsRef.current[stepId];
     if (values) void enqueueInformation(stepId, values).catch(() => setError("自动保存仍未成功。内容已保留，请稍后重试。"));
@@ -1336,7 +1336,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
       onConfirm={() => confirmation.submit(info)} onClose={confirmation.close}/>;
   }
   return (
-    <WorkspaceFrame area="chat" notice={d?.runtimeMode==='staging_test'?'Staging 真实模型测试 · 未开放联网研究':'本地模拟 · 回复、保存与交接均为演示'} rightOpen={resultOpen} onToggleRight={()=>setResultOpen(value=>!value)} right={<div className={resultStyles.panel}><header><h2>定位清单</h2><p>{snap.state==='draft'?'跟着对话自动记录；每一步核对后确认一次':'已确认的定位'}</p></header>
+    <WorkspaceFrame area="chat" notice={d?.runtimeMode==='staging_test'?'Staging 真实模型测试 · 未开放联网研究':'本地模拟 · 回复、保存与交接均为演示'} revealRight={reveal} rightOpen={resultOpen} onToggleRight={()=>setResultOpen(value=>!value)} right={<div className={resultStyles.panel}><header><h2>定位清单</h2><p>{snap.state==='draft'?'跟着对话自动记录；每一步核对后确认一次':'已确认的定位'}</p></header>
       <div className={resultStyles.body} ref={setResultBodyNode}><CaptureChecklist {...checklistProps()}/></div></div>}>
     <main className={`${resultStyles.workspaceMain} ${!planView ? resultStyles.conversationPage : ""} h-full w-full overflow-y-auto text-[var(--text-primary)]`}><div className={resultStyles.workspaceContent}>
       <header className={resultStyles.positionTop}>

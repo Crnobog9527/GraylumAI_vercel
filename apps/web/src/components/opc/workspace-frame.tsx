@@ -20,11 +20,14 @@ type Business = {businessId:string;accounts:Account[]};
 type Draft = {draftId:string;businessName?:string;createdAt?:string;currentVersion?:number;state?:string};
 
 /** The accepted U0/U1 shell, with real owned OPC projections instead of demo state. */
-export function WorkspaceFrame({children,right,rightOpen=true,onToggleRight,activeWorkItemId,area='chat',notice}:{
+export function WorkspaceFrame({children,right,rightOpen=true,onToggleRight,activeWorkItemId,area='chat',notice,revealRight}:{
  children:ReactNode;right?:ReactNode;rightOpen?:boolean;onToggleRight?:()=>void;
+ /** Changes to a new number when the page wants the right panel shown, also on a phone (where it is an overlay). */
+ revealRight?:number;
  activeWorkItemId?:string;area?:'chat'|'library'|'topics'|'marketplace'|'search'|'start';notice?:string;
 }){
  const [mobileNav,setMobileNav]=useState(false),[mobileRight,setMobileRight]=useState(false);
+ useEffect(()=>{if(revealRight)setMobileRight(true);},[revealRight]);
  const [archiveView,setArchiveView]=useState(false),[menuId,setMenuId]=useState(''),[menuPosition,setMenuPosition]=useState({top:0,left:0});
  const [renameId,setRenameId]=useState(''),[renameValue,setRenameValue]=useState(''),[confirmDelete,setConfirmDelete]=useState(''),[uiError,setUiError]=useState('');
  const [renameAccountId,setRenameAccountId]=useState(''),[renameAccountValue,setRenameAccountValue]=useState('');
