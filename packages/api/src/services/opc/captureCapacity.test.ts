@@ -1,4 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import {groundedCardToolBytes} from '../runtime/groundedCard';
 import {expect,it} from 'vitest';
 import {captureWorkflowSteps as steps} from '../__tests__/fixtures/captureWorkflow';
 import {captureHostContext,captureOrganizerInput} from './captureContext';
@@ -6,7 +7,6 @@ import {agentTurnInstructions} from './agentTurnPrompt';
 import {selectBlockHistory,currentInputBytes} from '../runtime/historySelection';
 import {selectRuntimeHistory,runtimeScopeInput} from '../runtime/context';
 import {freezeHistorySelection} from '../runtime/hostTurn';
-import {askQuestionToolBytes,QUESTION_CONTRACT_INSTRUCTIONS} from '../runtime/agentTools';
 const history=Array.from({length:160},(_,i)=>({role:i%2?'assistant':'user',content:'h'.repeat(i%2?1600:600)}));
 const bytes=(v:unknown)=>Buffer.byteLength(JSON.stringify(v));
 const frozen=freezeHistorySelection();
@@ -23,11 +23,11 @@ function material(width:number,notes=false) {
 it('measures final B2 checklist/text with a declared synthetic material distribution',()=>{
  const rows=[];
  // Skill prose is private; use the prior H1 16 KB fixed-system baseline PLUS final B2 rules and tool contract.
- const instructions='S'.repeat(16000)+'\n'+agentTurnInstructions()+'\n'+QUESTION_CONTRACT_INSTRUCTIONS;
+ const instructions='S'.repeat(16000)+'\n'+agentTurnInstructions();
  for(const inputBytes of [64000,90000])for(const inputChars of [100,1000,8000])for(const fieldChars of [0,100,400]){
   const {host,scope,information}=material(fieldChars);
   const current=[{role:'user',content:runtimeScopeInput('u'.repeat(inputChars),scope,host)}];
-  const options={instructions,inputBytes,historyItems:100,toolBytes:askQuestionToolBytes(true)+150,
+  const options={instructions,inputBytes,historyItems:100,toolBytes:groundedCardToolBytes()+150,
    historySelection:frozen,revisions:history.map((_,i)=>i+1)};
   const selected=selectBlockHistory(history,current,options).slice(0,-1);
   const legacy=selectRuntimeHistory(history,current,options).slice(0,-1);

@@ -87,7 +87,13 @@ const HOST_RULES = [
   "impose a fixed paragraph count or response template.\n",
 ].join('');
 
-export const AGENT_TURN_STABLE_PREFIX = HOST_RULES + '\n' + HOST_TURN_DATA_NOTICE_V1;
+const GROUNDED_RULES = [
+  'grounded-card-v1 overrides prior card delivery: host renders prose; no separate text.',
+  'Neutral cards require an explicit current request; no follow-up pivots.',
+  'Label deductions as guesses. Never broaden negation, infer schedules from occupation,',
+  'or infer commercial exclusivity from delivery scope.',
+].join(' ');
+export const AGENT_TURN_STABLE_PREFIX = HOST_RULES + '\n' + GROUNDED_RULES + '\n' + HOST_TURN_DATA_NOTICE_V1;
 export const AGENT_TURN_STABLE_PREFIX_CHARS = AGENT_TURN_STABLE_PREFIX.length;
 export function agentTurnInstructions(): string {
   return AGENT_TURN_STABLE_PREFIX;

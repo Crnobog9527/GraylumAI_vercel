@@ -1,5 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import {fieldElicitation, type MethodInformationField} from '../../shared/opcMethodPolicy';
+import {GROUNDED_CARD_CONTRACT} from '../runtime/groundedCard';
 import {hostTurnContextSchema, type HostTurnContext} from '../runtime/hostTurn';
 import {organizerAnswerCard, type AnsweredCard} from './answerCard';
 
@@ -12,7 +13,7 @@ export type CaptureState = {
 type Step = {id: string; title: string};
 export function captureHostContext(steps: readonly Step[], information: Record<string, CaptureState>,
   stepId: string, opening: boolean): HostTurnContext {
-  return hostTurnContextSchema.parse({stepId, opening, checklist: steps.map(step => ({
+  return hostTurnContextSchema.parse({cardContract: GROUNDED_CARD_CONTRACT, stepId, opening, checklist: steps.map(step => ({
     id: step.id, title: step.title,
     fields: (information[step.id]?.schema ?? []).map(field => {
       const state = information[step.id]!;

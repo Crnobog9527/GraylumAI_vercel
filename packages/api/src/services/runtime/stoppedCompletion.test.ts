@@ -2,6 +2,7 @@
 import {expect,it,vi} from 'vitest';
 import {stoppedCompletion,type StopExecution} from './stoppedCompletion';
 import type {authoritativeBilling} from '../bill2/service';
+import {freezeHistorySelection} from './hostTurn';
 import {QUESTION_CONTRACT} from './agentTools';
 import {agentTurnBody} from '../../shared/agentTurn';
 const id='10000000-0000-4000-8000-000000000001';
@@ -150,4 +151,16 @@ it('the original finished HTTP immediately looks up a missing receipt inside the
  const f=fixture();f.raws.clear();Object.assign(f.execution.stopCalls![0],{settled:false,responsePending:true});
  expect(await f.complete(id,undefined,undefined,true)).toEqual({state:'cost_pending'});
  expect(f.billing.recoverReceipts).toHaveBeenCalledExactlyOnceWith(id,undefined);
+});
+
+it.each(['','Visible prose'])('guarded card stop never reconstructs unchecked arguments (%j)',async prose=>{
+ const f=fixture();f.execution.context={...f.execution.context as object,providerRequestFormat:'agent-turn-v5-stream',
+  envelopeOrder:undefined,tools:['ask_question'],questionContract:QUESTION_CONTRACT,mentorText:'append-card-v1',
+  inputSelection:'scope-projection-v2',historySelection:freezeHistorySelection(),
+  hostTurnContext:{stepId:'s',opening:false,checklist:[],cardContract:'grounded-card-v1'}};
+ f.execution.stop={stopAt:5,source:'assistant'};
+ f.raws.set(1,JSON.stringify({model:'model',choices:[{finish_reason:'tool_calls',message:{content:prose,
+  tool_calls:[{id:'card',function:{name:'ask_question',arguments:JSON.stringify({requestQuote:'private quote'})}}]}}]}));
+ const result=await f.complete(id);
+ expect(result).toMatchObject(prose?{state:'completed',body:agentTurnBody('Visib',null)}:{state:'cancelled'});
 });

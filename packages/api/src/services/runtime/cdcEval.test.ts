@@ -25,3 +25,12 @@ it('enforces separate call caps, reserves uncached prices, and rejects profile d
  expect(()=>measure(JSON.stringify({...body,max_tokens:8193}),'mentor')).toThrow('CDC_REQUEST_PROFILE');
  expect(()=>measure(JSON.stringify({...body,reasoning_effort:'high'}),'mentor')).toThrow('CDC_REASONING_PROFILE');
 });
+
+it('second round reserves against the first settled cost, never against a fresh nine-dollar balance',async()=>{
+ const {secondRound}=await import('../../../../../scripts/cdc-b2-eval/secondRound');
+ const s=state(secondRound.priorNano),b=budget(s.read,s.write);
+ expect(()=>b.reserve('mentor',secondRound.remainingNano+1)).toThrow('CDC_BUDGET_STOP');
+ const settle=b.reserve('mentor',secondRound.remainingNano);settle(.01);
+ expect(s.read().nano).toBe(secondRound.priorNano+10000000);
+ expect(secondRound.priorNano).toBeGreaterThanOrEqual(secondRound.priorOfficialUsd*1e9);
+});

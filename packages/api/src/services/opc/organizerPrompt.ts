@@ -2,6 +2,9 @@
 import {elicitFieldSpecs, type MethodInformationField} from '../../shared/opcMethodPolicy';
 
 export const ORGANIZER_INSTRUCTIONS = [
+  "When updating a field, preserve existing supported qualifications unless the user explicitly retracts them. ",
+  "A new limit narrows only its stated dimension; do not infer broader exclusions or commercial exclusivity. ",
+  "Mentor hypotheses and reasons labelled as guesses are not user facts. Map audience, offer and roles separately. ",
   "You are the independent structured-information extractor, separate from the public mentor. Return only one JSO",
   "N object: {inputKind: answer|acknowledgement|uncertainty|request|revision_request, patches: [",
   "{stepId,fieldId,value,status,nature,basis}], notes: []}, with quoted JSON keys and strings, no code fences. ",

@@ -6,7 +6,7 @@ import {UNSURE_INPUT} from '../../shared/agentTurn';
 import {captureHostContext} from '../opc/captureContext';
 import {hostTurnInput} from './hostTurn';
 import {agentTurnInstructions} from '../opc/agentTurnPrompt';
-import {askQuestionTool} from './agentTools';
+import {groundedCardTool,cardSources} from './groundedCard';
 import {runRuntime} from './runner';
 import {openRouterRequestBody} from './providerRequest';
 
@@ -41,7 +41,7 @@ it.each(['ordinary','opening','answer-card'] as const)('freezes a complete B2 H1
  const requests:string[]=[];
  await runRuntime({model,instructions,input,session:session(),
   // A host-opened turn is admitted without the card tool (see admission.ts).
-  maxOutputTokens:4096,maxTurns:1,tools:opening?[]:[askQuestionTool()],stream:true,reasoning,
+  maxOutputTokens:4096,maxTurns:1,tools:opening?[]:[groundedCardTool(()=>cardSources(userText,[]))],stream:true,reasoning,
   firstToolCallOnly:true,...(opening?{}:{stopAtToolNames:['ask_question']}),allowEmptyResult:true,commitSessionOnSuccess:true,
   selectHistory:async(_history,incoming)=>incoming,
   exchange:async(_sequence,body)=>{
@@ -60,8 +60,8 @@ it.each(['ordinary','opening','answer-card'] as const)('freezes a complete B2 H1
  else{
   expect(sent.tools.map((tool:{function:{name:string}})=>tool.function.name)).toEqual(['ask_question']);
   expect(sent.tools[0].function).toMatchObject({strict:true,parameters:{additionalProperties:false,
-   required:['question','options','recommended'],properties:{question:{minLength:1,maxLength:500},
-    options:{minItems:2,maxItems:5,items:{minLength:1,maxLength:200}},
+   required:['intent','requestQuote','basisQuotes','question','options','recommended'],properties:{question:{minLength:1,maxLength:500},
+    options:{minItems:2,maxItems:5,items:{properties:{text:{minLength:1,maxLength:200}}}},
     recommended:{anyOf:[{type:'number'},{type:'null'}]}}}});
  }
  expect(sent).not.toHaveProperty('parallel_tool_calls');expect(sent).not.toHaveProperty('tool_choice');
