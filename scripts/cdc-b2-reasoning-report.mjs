@@ -36,7 +36,10 @@ if (mode === 'pack') {
   mkdirSync(blind, { mode: 0o700 });
   const items = [], mapping = [], scenarios = [];
   for (const [index, group] of shuffle([...source.groups]).entries()) {
-    const scenario = `S${String(index + 1).padStart(2, '0')}`;
+    const scenario = profile === 'capability'
+      ? read(join(reasoningRoot, 'private-mapping.json')).scenarios.find(s => s.slots.includes(group.turns[0].slot))?.scenario
+      : `S${String(index + 1).padStart(2, '0')}`;
+    assert(scenario, 'SCENARIO_MAPPING');
     scenarios.push({ scenario, slots: group.turns.map(t => t.slot) });
     for (const effort of manifest.efforts) {
       const turns = [];
