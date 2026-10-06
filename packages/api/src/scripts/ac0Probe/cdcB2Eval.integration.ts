@@ -9,6 +9,7 @@ import {allowTestCalls} from '../../services/__tests__/fixtures/runtimeGates';
 import {historyItems} from './trial';
 import {hash,measure,profiles,type Role} from '../../../../../scripts/cdc-b2-eval/policy.ts';
 import {assertOutsideRepository} from './paths';
+import {seedCase} from '../../../../../scripts/cdc-writeback-v2/seed';
 import {replayReasoning} from '../../../../../scripts/cdc-b2-eval/reasoningReplay';
 
 // Disposable fixture has no remote Redis. External dispatch uses the separate $9 gate.
@@ -23,6 +24,8 @@ it('CDC_EVAL: freeze or execute exactly the approved roster through local OPC an
  if(plan.reasoningReplay)assertOutsideRepository(plan.reasoningReplay);
  const f=await fixture(plan.moduleSkill),rows:Array<ReturnType<typeof measure>&{ordinal:number;category:string;role:Role;raw:string}>=[],results:unknown[]=[];
  const reasoningResults:unknown[]=[];
+ if(plan.writebackV2)await f.db.query('update runtime_test_windows set max_calls=1000,max_cost_usd=100 where id=$1',
+  [process.env.V3_RUNTIME_STAGING_WINDOW_ID]);
  let active:{organize:boolean;dryPatches:unknown[];category:string;slot:string},currentExecution='',ordinal=0,phase=0;
  const adapter=openRouterAdapter({allowAgentTools:true,credential:async()=> 'LOCAL_BOUNDARY_ONLY',transport:async(url,init)=>{
   if(String(url)!=='https://openrouter.ai/api/v1/chat/completions')throw new Error('CDC_NO_LOOKUP_OR_RETRY');
@@ -49,7 +52,7 @@ it('CDC_EVAL: freeze or execute exactly the approved roster through local OPC an
    const draft=await f.service.start({requestId:randomUUID(),registration:f.registration,mode:'mentor'});
    const initial=await f.service.read(draft.draftId);
    // Fixture-only prerequisite state for original scenarios that start at a later step.
-   for(const stepId of Object.keys(initial.snapshot.steps).filter(id=>id!==group.stepId))await f.db.query(
+   for(const stepId of Object.keys(initial.snapshot.steps).filter(id=>plan.writebackV2?id<group.stepId:id!==group.stepId))await f.db.query(
     "update artifact_rounds set steps=jsonb_set(steps,ARRAY[$2,'valid'],'true'::jsonb) where id=$1",[initial.roundId,stepId]);
    // Seed only approved synthetic history, no extra provider calls. A completed local fixture owns its provenance.
    if(group.history?.length){
@@ -66,6 +69,13 @@ it('CDC_EVAL: freeze or execute exactly the approved roster through local OPC an
    }
    if(group.fieldValues)await f.db.query("update artifact_rounds set steps=jsonb_set(steps,ARRAY[$2,'information'],$3) where id=$1",
     [initial.roundId,group.stepId,JSON.stringify(group.fieldValues)]);
+   if(plan.writebackV2){
+    await seedCase(f,draft.draftId,group.stepId,group.questionId,group.initial??[]);
+    // Manual fixture edits invalidate descendants. Restore the declared starting
+    // step's prerequisites after seeding, before freezing any evaluated request.
+    for(const stepId of Object.keys(initial.snapshot.steps).filter(id=>id<group.stepId))await f.db.query(
+     "update artifact_rounds set steps=jsonb_set(steps,ARRAY[$2,'valid'],'true'::jsonb) where id=$1",[initial.roundId,stepId]);
+   }
    for(const turn of group.turns){
     active=turn;phase=0;
     if(turn.pauseBefore&&plan.bridge){
@@ -81,6 +91,7 @@ it('CDC_EVAL: freeze or execute exactly the approved roster through local OPC an
        step.values?.[field.id]??{value:'',status:'unknown',nature:'unknown'}])),
        [turn.manual.fieldId]:{value:turn.manual.value,status:'provisional',nature:'fact'}}});
     }
+    const before=await f.service.read(draft.draftId);
     const prepared=await f.service.prepareStep({draftId:draft.draftId,requestId:randomUUID(),purpose:'mentor',
      stepId:group.stepId,questionId:group.questionId,input:turn.input,organizeAfter:turn.organize});
     currentExecution=prepared.executionId;
@@ -95,16 +106,16 @@ it('CDC_EVAL: freeze or execute exactly the approved roster through local OPC an
     if(!plan.bridge&&capture&&(capture.processed.length!==1||
      !['applied','suggested'].includes(capture.processed[0]?.result)))throw new Error('CDC_DRY_CAPTURE');
     const after=await f.service.read(draft.draftId);
-    results.push({slot:turn.slot,frozen,result,capture,after});
+    results.push({slot:turn.slot,frozen,result,capture,after,...(plan.writebackV2?{before}: {})});
    }
   }
-  if(rows.length!==(plan.reasoningReplay?60:100))throw new Error('CDC_ROSTER_INCOMPLETE');
+  if(rows.length!==(plan.writebackV2?plan.groups.length*2:plan.reasoningReplay?60:100))throw new Error('CDC_ROSTER_INCOMPLETE');
   const privateOutput=JSON.stringify({inputHash:hash(readFileSync(path)),rows,results});
   writeFileSync(plan.output+'/frozen-private.json',privateOutput,{mode:0o600,flag:'wx'});
   if(plan.reasoningReplay)writeFileSync(plan.output+'/reasoning-results.json',JSON.stringify(reasoningResults),{mode:0o600,flag:'wx'});
   const measures=rows.map((row)=>{const {raw,...safe}=row;void raw;return safe;});
   writeFileSync(plan.output+'/summary.json',JSON.stringify({mode:plan.reasoningReplay?'offline-replay':plan.bridge?'live':'freeze',
-   dispatches:plan.reasoningReplay?0:plan.bridge?100:0,
+   dispatches:plan.writebackV2?null:plan.reasoningReplay?0:plan.bridge?100:0,
    privateHash:hash(privateOutput),rows:measures},null,2),{mode:0o600,flag:'wx'});
  }finally{await f.db.end();}
 },7_200_000);

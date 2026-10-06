@@ -2,7 +2,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { runtimeGateMessages } from "../../../../packages/api/src/shared/runtimeGateMessages";
 import {
-  ORGANIZER_PENDING_NOTICE, ORGANIZER_SKIPPED_NOTICE, RESUME_ADMIN_NOTICE, RESUME_CONFLICT_NOTICE, RESUME_UNKNOWN_NOTICE,
+  ORGANIZER_PENDING_NOTICE, ORGANIZER_SKIPPED_NOTICE, ORGANIZER_STILL_SHORT_NOTICE, ORGANIZER_WAITING_CREDITS_NOTICE, RESUME_ADMIN_NOTICE, RESUME_CONFLICT_NOTICE, RESUME_UNKNOWN_NOTICE,
   RESUMING_NOTICE, STILL_SHORT_NOTICE, TOP_UP_HREF, UNNAMED_ORGANIZER, WAITING_CREDITS_NOTICE, WAITING_RESUME_NOTICE,
   blockedAdmission, isOrganizerPendingError, openTopUp, organizerBlockedNotices, organizerSkipped, paygResumeController,
   paygResumeToken, paygTurnNotices, resumeFailureNotice, resumeOutcome, type PaygTurn,
@@ -71,6 +71,23 @@ describe("paygTurnNotices", () => {
     expect(notices).toHaveLength(1);
     expect(notices[0]).toMatchObject({ tone: "warning", text: STILL_SHORT_NOTICE });
     expect(labels(notices[0])).toEqual(["继续", "去充值"]);
+  });
+
+  it("says the reply is done and only the organizer waits for credits", () => {
+    const waiting = turn({ primaryBody: "导师的完整回复", organizerComplete: false });
+    const [notice] = paygTurnNotices(waiting, ctx());
+    expect(notice).toMatchObject({ tone: "warning", text: ORGANIZER_WAITING_CREDITS_NOTICE });
+    expect(notice.text).toContain("回复已完成");
+    expect(notice.text).toContain("整理在等积分");
+    expect(labels(notice)).toEqual(["继续", "去充值"]);
+    expect(paygTurnNotices(waiting, ctx({ outcome: { kind: "short" } }))[0]).toMatchObject({ text: ORGANIZER_STILL_SHORT_NOTICE });
+  });
+
+  it("keeps the general pause text when no finished reply is waiting for its organizer", () => {
+    for (const extra of [{}, { primaryBody: "回复", organizerComplete: true }, { primaryBody: null, organizerComplete: false }])
+      expect(paygTurnNotices(turn(extra), ctx())[0]).toMatchObject({ text: WAITING_CREDITS_NOTICE });
+    expect(paygTurnNotices(turn({ state: "waiting_resume", primaryBody: "回复", organizerComplete: false }), ctx())[0])
+      .toMatchObject({ text: WAITING_RESUME_NOTICE });
   });
 
   it("adds a fixed outcome notice under the pause", () => {

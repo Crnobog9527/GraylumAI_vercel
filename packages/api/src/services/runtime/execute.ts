@@ -1,4 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import {billingClaimNotice} from './claimNotice';
 import {stoppedCompletion} from './stoppedCompletion';
 import {NativeSession} from './nativeSession';
 import {NativeProgressProjection} from './nativeProgress';
@@ -94,6 +95,7 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
   const session=new PostgresSession(ownerDatabase,{actorId:await options.actor(),sessionId:execution.sessionId,executionId});
   const nativeSession=native&&!context.reportGeneration?new NativeSession(session,Boolean(context.mentorText)):undefined;
   let transportNotStarted=false,providerRejected=false;
+  let claimNotice:string|undefined;
   let reportFailure:'REPORT_MEMBERSHIP_REQUIRED'|'REPORT_ENTITLEMENTS_UNAVAILABLE'|'REPORT_SOURCE_CONFLICT'|undefined;
   let terminalReplyFailure=false;
   let gateChecked=resumedGate,moderationBlocked=false;
@@ -158,13 +160,14 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
        }catch(error){gateRejection??='limit_unavailable';throw error;}
        finally{leaveRateLimit?.();}
       }
-      const claim=isPayg?await billing.claimPaygCall(execution.runId,sequence,call).catch(error=>{
-        if(context.reportGeneration&&error instanceof Error&&
+      const claim=await (isPayg?billing.claimPaygCall(execution.runId,sequence,call)
+       :billing.claimCall(execution.runId,sequence,call)).catch(error=>{
+        claimNotice=billingClaimNotice(error);
+        if(isPayg&&context.reportGeneration&&error instanceof Error&&
          (error.message==='REPORT_MEMBERSHIP_REQUIRED'||error.message==='REPORT_ENTITLEMENTS_UNAVAILABLE'
           ||error.message==='REPORT_SOURCE_CONFLICT'))reportFailure=error.message;
         throw error;
-       })
-       :await billing.claimCall(execution.runId,sequence,call);
+       });
       if(claim.id===null)pause('waiting_credits');
       try{
        if(selectedPolicy.protocol==='openrouter-chat-v1')budget.modelCallTimeout(OPENROUTER_RESPONSE_TIMEOUT_MS);
@@ -177,9 +180,7 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
       // provider content or hand it to the SDK, Session or stream.
       if(dispatch.accountClosed)closed();
       if(dispatch.pendingReceipt){
-       // Keep the already obtained private observation while inspecting the
-       // original call. A lost commit response needs no duplicate write;
-       // a confirmed missing response permits bounded idempotent receipt replay.
+       // Inspect the original call first; only confirmed missing receipts permit bounded replay.
        const pending=dispatch.pendingReceipt;
        for(let attempt=0;attempt<2;attempt++){
         const savedReceipt=await ownerRpc<boolean>('runtime_receipt_saved',
@@ -440,7 +441,7 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
    }
    if(reportFailure){
     const stopped=await ownerRpc<{state:'cancelled'|'cost_pending'}>('runtime_cancel',args);
-    return {state:stopped.state,code:reportFailure};
+    return {state:stopped.state,code:reportFailure,...(claimNotice?{notice:claimNotice}:{})};
    }
    // The SDK may wrap the error; rely on the latch. Every Runtime write now
    // refuses this actor, so leave settlement to trusted financial recovery.
@@ -488,10 +489,10 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
    if(failed?.state==='cancelled'){
     const unavailable:GateRejection|'provider_history'|'preflight'|'capacity'|undefined=gateRejection??(preflightFailure?
      preflightFailure==='RUNTIME_PROVIDER_HISTORY_DENIED'?'provider_history':'preflight':capacity?'capacity':undefined);
-    return {state:'cancelled' as const,...(unavailable?{unavailable}:{})};
+    return {state:'cancelled' as const,...(unavailable?{unavailable}:{}),...(claimNotice?{notice:claimNotice}:{})};
    }
    await ownerRpc('runtime_execution',{...args,p_action:'interrupt'}).catch(()=>{});
-   return {state:'pending' as const,...(capacity?{unavailable:'capacity' as const}:{})};
+   return {state:'pending' as const,...(capacity?{unavailable:'capacity' as const}:{}),...(claimNotice?{notice:claimNotice}:{})};
   }
  }};
 }
