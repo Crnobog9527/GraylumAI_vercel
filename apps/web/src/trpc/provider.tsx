@@ -8,6 +8,8 @@ import { createClient } from '@/lib/supabase';
 import { isUnauthorizedError } from '@/lib/auth-recovery';
 import { useUnauthorizedRecovery } from '@/hooks/use-unauthorized-recovery';
 import { UnauthorizedNotice } from '@/components/auth/UnauthorizedNotice';
+import { createSessionRefresher } from '@/lib/session-refresh';
+import { sessionRefreshLink } from '@/trpc/session-refresh-link';
 
 export default function Provider({ children }: { children: React.ReactNode }) {
   // The query client is created once; it reaches the latest recovery handler through this ref.
@@ -92,7 +94,13 @@ export default function Provider({ children }: { children: React.ReactNode }) {
         return {};
       },
     };
-    return trpc.createClient({ links: [splitLink({
+    // Refresh a token close to expiry before Runtime needs it, and retry its refusal once.
+    const session = createSessionRefresher({
+      getSession: () => supabase.auth.getSession(),
+      refreshSession: () => supabase.auth.refreshSession(),
+      onToken: token => { accessTokenRef.current = token; sessionPromiseRef.current = Promise.resolve(token); },
+    });
+    return trpc.createClient({ links: [sessionRefreshLink(session), splitLink({
       // Entry must not wait for unrelated sidebar statistics in the same batch.
       condition: op => op.path === 'workbench.chatLocate' || op.path === 'workbench.chatOpen',
       true: httpLink(options),
