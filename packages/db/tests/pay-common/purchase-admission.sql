@@ -242,4 +242,69 @@ BEGIN
     buyer,intent.id),'23514','PAY_COMMON_ATTEMPT_NOT_TERMINAL');
   RESET ROLE;
 END $$;
+-- Requote decisions are computed under the existing admission locks, not trusted metadata.
+DO $$
+DECLARE buyer uuid:=gen_random_uuid(); package uuid; plan uuid; initial payment_orders; replay payment_orders;
+BEGIN
+  INSERT INTO profiles(id,membership_level) VALUES(buyer,'free');
+  UPDATE membership_plans SET is_active='false' WHERE level='gold';
+  INSERT INTO membership_plans(name,level,package_discount,allow_fusion_review,allow_fusion_compare,library_storage_bytes,is_active)
+    VALUES('Requote discount','gold',90,false,false,0,'true')
+    ON CONFLICT(level) DO UPDATE SET package_discount=90,is_active='true' RETURNING id INTO plan;
+  INSERT INTO credit_packages(name,price,credits_amount,active)
+    VALUES('Requote package',100,100,'true') RETURNING id INTO package;
+  INSERT INTO payment_provider_refs(channel,merchant_namespace,mode,object_type,external_id,credit_package_id,billing_cycle,is_current)
+    VALUES('stripe','acct_requote','test','price','price_requote',package,'one_time',true);
+  SET LOCAL ROLE service_role;
+  initial:=pay_common_create_purchase(buyer,'credit_package',package,'one_time','acct_requote','test','free');
+  replay:=pay_common_create_purchase(buyer,'credit_package',package,'one_time','acct_requote','test','free');
+  PERFORM pg_temp.assert_true(replay.id=initial.id AND replay.metadata->'requoteRequired'='false','same quote reuses');
+  RESET ROLE;
+  UPDATE profiles SET membership_level='gold' WHERE id=buyer;
+  SET LOCAL ROLE service_role;
+  UPDATE payment_orders SET metadata=metadata||'{"requoteRequired":false}' WHERE id=initial.id;
+  replay:=pay_common_create_purchase(buyer,'credit_package',package,'one_time','acct_requote','test','gold');
+  PERFORM pg_temp.assert_true(replay.id=initial.id AND replay.metadata->'requoteRequired'='true','tier change requires closure');
+  PERFORM pg_temp.assert_true(replay.purchase_snapshot=initial.purchase_snapshot,'old monetary snapshot remains frozen');
+  PERFORM pg_temp.assert_true(pay_common_close_checkout(buyer,initial.id,NULL,'acct_requote','test','not_prepared','unpaid'),
+    'existing protected closure retires unprepared quote');
+  replay:=pay_common_create_purchase(buyer,'credit_package',package,'one_time','acct_requote','test','gold');
+  PERFORM pg_temp.assert_true(replay.id<>initial.id AND replay.amount_total=90,'new quote is discounted');
+  initial:=replay;
+  RESET ROLE;
+  UPDATE membership_plans SET package_discount=89 WHERE id=plan;
+  SET LOCAL ROLE service_role;
+  replay:=pay_common_create_purchase(buyer,'credit_package',package,'one_time','acct_requote','test','gold');
+  PERFORM pg_temp.assert_true(replay.metadata->'requoteRequired'='true','discount input change requires closure');
+  RESET ROLE;
+  UPDATE payment_orders SET payment_status='paid',status='completed' WHERE id=initial.id;
+  SET LOCAL ROLE service_role;
+  PERFORM pg_temp.denied(format('SELECT pay_common_close_checkout(%L,%L,NULL,''acct_requote'',''test'',''not_prepared'',''unpaid'')',
+    buyer,initial.id),'23514','PAY_COMMON_ATTEMPT_NOT_TERMINAL');
+  RESET ROLE;
+END $$;
+-- Deactivation must return the frozen attempt for verified retirement before denying a new quote.
+DO $$
+DECLARE buyer uuid:=gen_random_uuid(); package uuid; initial payment_orders; replay payment_orders;
+BEGIN
+  INSERT INTO profiles(id,membership_level) VALUES(buyer,'free');
+  INSERT INTO credit_packages(name,price,credits_amount,active)
+    VALUES('Retire unavailable',100,100,'true') RETURNING id INTO package;
+  INSERT INTO payment_provider_refs(channel,merchant_namespace,mode,object_type,external_id,credit_package_id,billing_cycle,is_current)
+    VALUES('stripe','acct_inactive','test','price','price_inactive',package,'one_time',true);
+  SET LOCAL ROLE service_role;
+  initial:=pay_common_create_purchase(buyer,'credit_package',package,'one_time','acct_inactive','test','free');
+  RESET ROLE;
+  UPDATE credit_packages SET active='false' WHERE id=package;
+  SET LOCAL ROLE service_role;
+  replay:=pay_common_create_purchase(buyer,'credit_package',package,'one_time','acct_inactive','test','free');
+  PERFORM pg_temp.assert_true(replay.id=initial.id AND replay.metadata->'requoteRequired'='true',
+    'inactive product returns unresolved quote for retirement');
+  PERFORM pg_temp.assert_true(pay_common_close_checkout(buyer,initial.id,NULL,'acct_inactive','test','not_prepared','unpaid'),
+    'inactive unprepared quote safely closes');
+  PERFORM pg_temp.denied(format('SELECT pay_common_create_purchase(%L,''credit_package'',%L,''one_time'',
+    ''acct_inactive'',''test'',''free'')',buyer,package),'23514','PAY_COMMON_PRODUCT_UNAVAILABLE');
+  PERFORM pg_temp.assert_true((SELECT count(*)=1 FROM payment_orders WHERE user_id=buyer),'no replacement for disabled product');
+  RESET ROLE;
+END $$;
 ROLLBACK;

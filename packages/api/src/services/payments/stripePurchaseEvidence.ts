@@ -54,6 +54,7 @@ async function assertUnpaidIntent(input: {
   session: Stripe.Checkout.Session;
   order: CheckoutEvidenceOrder;
   scope: StripeScope;
+  beforeExpiration?: boolean;
 }) {
   const { stripe, session, order, scope } = input;
   const intentId = objectId(session.payment_intent);
@@ -69,7 +70,7 @@ async function assertUnpaidIntent(input: {
   }
   assertPurchaseReceipt({ snapshot: order.purchase_snapshot, amount: intent.amount,
     currency: intent.currency, livemode: intent.livemode, scope });
-  if (!(intent.status === 'canceled' || (session.status === 'expired' && intent.status === 'requires_payment_method'))
+  if (!(intent.status === 'canceled' || ((session.status === 'expired' || input.beforeExpiration) && intent.status === 'requires_payment_method'))
     || intent.amount_received !== 0 || intent.amount_capturable !== 0) {
     throw new Error('PAY_COMMON_ATTEMPT_NOT_TERMINAL');
   }
@@ -108,6 +109,24 @@ async function assertUnpaidIntent(input: {
     cursor = next;
   }
   throw new Error('PAY_COMMON_ATTEMPT_NOT_TERMINAL');
+}
+
+// Check monetary facts before the provider mutation, then closeExpiredStripeCheckout reads again.
+// Stripe's open-session-only expiration arbitrates a payment racing the preflight.
+export async function expireUnpaidStripeCheckout(input: {
+  stripe: Pick<Stripe, 'checkout' | 'paymentIntents' | 'charges'>;
+  session: Stripe.Checkout.Session;
+  order: CheckoutEvidenceOrder;
+  scope: StripeScope;
+}) {
+  const { session, order, scope } = input;
+  if (session.status !== 'open' || session.payment_status !== 'unpaid' || session.subscription
+    || session.metadata?.orderId !== order.id || session.metadata?.userId !== order.user_id
+    || session.client_reference_id !== order.user_id) throw new Error('PAY_COMMON_ATTEMPT_NOT_TERMINAL');
+  assertPurchaseReceipt({ snapshot: order.purchase_snapshot, amount: session.amount_total,
+    currency: session.currency, livemode: session.livemode, scope });
+  if (session.payment_intent) await assertUnpaidIntent({ ...input, beforeExpiration: true });
+  await input.stripe.checkout.sessions.expire(session.id);
 }
 
 // The caller supplies the original order and its mapped external session, never a browser's

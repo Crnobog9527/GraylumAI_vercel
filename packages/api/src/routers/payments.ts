@@ -1271,15 +1271,15 @@ export const paymentsRouter = router({
 
       const itemId = input.kind === 'credit_package' ? input.packageId : input.planId;
       const product = await readCheckoutData<{ id: string; name: string; level?: string; is_active?: string; active?: string }>({
-        query: ctx.supabase.from(input.kind === 'credit_package' ? 'credit_packages' : 'membership_plans')
+        query: ctx.supabaseAdmin.from(input.kind === 'credit_package' ? 'credit_packages' : 'membership_plans')
           .select(input.kind === 'credit_package' ? 'id, name, active' : 'id, name, level, is_active')
           .eq('id', itemId).maybeSingle(),
         checkoutInput: input, stage: input.kind === 'credit_package' ? 'package_read' : 'plan_read',
         operation: input.kind === 'credit_package' ? '积分包服务' : '会员套餐服务',
       });
       if (!product) throw new TRPCError({ code: 'NOT_FOUND', message: input.kind === 'credit_package' ? '积分包不存在' : '会员套餐不存在' });
-      if (input.kind === 'credit_package' && product.active !== 'true') throw toCheckoutConfigError('该积分包当前未上架');
-      if (input.kind === 'membership_plan' && product.is_active !== 'true') throw toCheckoutConfigError('该会员套餐当前未启用');
+      // Internal lookup includes inactive items hidden by public RLS; nothing here exposes their data.
+      // Admission must first retire an old payable quote before denying an unavailable replacement.
       if (product.level === 'free') throw toCheckoutConfigError('免费套餐无需创建支付会话');
       let eligibility;
       try {

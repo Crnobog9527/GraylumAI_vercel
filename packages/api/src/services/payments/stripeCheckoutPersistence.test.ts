@@ -13,7 +13,7 @@ function fixture() {
   const order = { id: '22222222-2222-4222-8222-222222222222', user_id: 'fixture_user',
     payment_channel: 'stripe', merchant_namespace: scope.merchant, payment_mode: scope.mode,
     purchase_snapshot: snapshot, checkout_request: null as Stripe.Checkout.SessionCreateParams | null, price_ref_id: 'fixture_price_ref',
-    metadata: { productName: 'Fixture' } };
+    metadata: { productName: 'Fixture', requoteRequired: false } };
   const mapping = { external_id: 'price_fixture', channel: 'stripe', merchant_namespace: scope.merchant, mode: scope.mode };
   const rpc = vi.fn(async (name: string, args: Record<string, unknown>): Promise<{ data: unknown; error: unknown }> => {
     operations.push(name);
@@ -95,12 +95,27 @@ describe('Stripe checkout persistence boundary', () => {
         t.order.id = '44444444-4444-4444-8444-444444444444';
         t.order.purchase_snapshot = { ...snapshot, item_id: t.args.action.itemId };
         t.order.checkout_request = null;
+        t.order.metadata.requoteRequired = false;
         return { data: true, error: null };
       }
       return original(name, args);
     });
     return { ...t, retrieve, expire, list, oldSession, oldId };
   }
+  it('retires the same item when admission detects changed pricing inputs', async () => {
+    const t = replacementFixture();
+    t.args.action.itemId = snapshot.item_id;
+    t.order.metadata.requoteRequired = true;
+    await expect(createDurableStripeCheckout(t.args)).resolves.toMatchObject({ id: 'cs_fixture' });
+    expect(t.expire).toHaveBeenCalledExactlyOnceWith('cs_old');
+    expect(t.create).toHaveBeenCalledOnce();
+  });
+  it('fails closed when pricing comparison is unavailable from an older database', async () => {
+    const t = fixture();
+    Reflect.deleteProperty(t.order.metadata, 'requoteRequired');
+    await expect(createDurableStripeCheckout(t.args)).rejects.toThrow('PAY_COMMON_REQUOTE_CHECK_REQUIRED');
+    expect(t.create).not.toHaveBeenCalled();
+  });
   it('expires and re-reads the old unpaid session before admitting the explicitly selected replacement', async () => {
     const t = replacementFixture();
     await expect(createDurableStripeCheckout(t.args)).resolves.toMatchObject({ id: 'cs_fixture' });
