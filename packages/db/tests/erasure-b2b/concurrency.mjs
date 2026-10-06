@@ -1,12 +1,14 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import assert from 'node:assert/strict';
 import {rpc, fixture, call, evidence, closeAccount} from '../erasure-b2a/cases.mjs';
+import {seedHistoricalReceipt} from './cases.mjs';
 
 export async function receiptConcurrency({db, Client, connectionString, report}) {
   const f = await fixture(db);
   const c = await call(db, f);
   const original = evidence(c);
   await rpc(db, 'bill2_record', f.actor, f.run, c.id, original);
+  const rejected = await seedHistoricalReceipt(db, c, {provider: 'unexpected-provider'});
   await closeAccount(db, f);
   const a = new Client({connectionString});
   const b = new Client({connectionString});
@@ -32,10 +34,11 @@ export async function receiptConcurrency({db, Client, connectionString, report})
       await a.query('COMMIT');
       const result = await handled;
       if (result.error) throw result.error;
-      if (mode === 'scrub') assert.deepEqual(result.value, {processed: 0, remaining: 0});
-      assert.equal((await db.query('SELECT count(*)::int n FROM bill2_receipts WHERE call_id=$1', [c.id])).rows[0].n, 1);
+      if (mode === 'scrub') assert.deepEqual(result.value, {processed: 0, remaining: 1, manualReview: 1});
+      assert.equal((await db.query('SELECT count(*)::int n FROM bill2_receipts WHERE call_id=$1', [c.id])).rows[0].n, 2);
+      assert.deepEqual((await db.query('SELECT * FROM bill2_receipts WHERE id=$1', [rejected.id])).rows[0], rejected);
     }
-    report.checks.push('two real connections: scrub/scrub and scrub/record serialize; no duplicate/refill');
+    report.checks.push('two real connections: scrub/scrub and scrub/record serialize; no duplicate/refill; rejected evidence unchanged');
   } finally {
     await a.query('ROLLBACK');
     await a.end();

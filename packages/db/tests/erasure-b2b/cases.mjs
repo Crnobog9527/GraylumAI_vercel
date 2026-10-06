@@ -14,6 +14,15 @@ const money = async (db, f) => JSON.stringify((await db.query(`SELECT
   (SELECT jsonb_agg(to_jsonb(h) ORDER BY id) FROM billing_history h WHERE user_id=$2) AS history,
   (SELECT credits FROM profiles WHERE id=$2) AS credits`, [f.run, f.actor])).rows);
 
+// Seed historical malformed evidence by owner INSERT in a disposable database.
+// All immutable triggers remain enabled. The small UUID prefix exercises early-row starvation.
+export async function seedHistoricalReceipt(db, c, overrides) {
+  const id = '00000000-' + randomUUID().slice(9);
+  return (await db.query(`INSERT INTO bill2_receipts(id,call_id,payload,payload_hash,conflict)
+    VALUES($1,$2,$3::jsonb,encode(sha256(convert_to($3::jsonb::text,'utf8')),'hex'),true)
+    RETURNING *`, [id, c.id, JSON.stringify(evidence(c, null, overrides))])).rows[0];
+}
+
 export async function receiptCases(db, report) {
   const f = await fixture(db);
   const c = await call(db, f);
@@ -23,6 +32,9 @@ export async function receiptCases(db, report) {
   for (const role of ['anon', 'authenticated']) {
     await db.query('SET ROLE ' + role);
     await assert.rejects(scrub(db, f), /permission denied/);
+    const visible = await db.query('SELECT payload FROM bill2_receipts WHERE id=$1', [before[0].id])
+      .catch(error => { assert.match(error.message, /permission denied/); return {rows: []}; });
+    assert.equal(visible.rows.length, 0, role + ' cannot read receipt evidence');
     await db.query('RESET ROLE');
   }
   await db.query('SET ROLE service_role');
@@ -49,8 +61,8 @@ export async function receiptCases(db, report) {
   [before[0].id]), /IMMUTABLE/);
   const originalMoney = await money(db, f);
   await db.query('SET ROLE service_role');
-  assert.deepEqual(await scrub(db, f), {processed: 1, remaining: 0});
-  assert.deepEqual(await scrub(db, f), {processed: 0, remaining: 0});
+  assert.deepEqual(await scrub(db, f), {processed: 1, remaining: 0, manualReview: 0});
+  assert.deepEqual(await scrub(db, f), {processed: 0, remaining: 0, manualReview: 0});
   await db.query('RESET ROLE');
   assert.equal(await money(db, f), originalMoney);
   const cleaned = (await rows(db, f))[0];
@@ -106,21 +118,55 @@ export async function receiptCases(db, report) {
   for (let n = 0; n < 3; n++) await rpc(db, 'bill2_record', batch.actor, batch.run, bc.id,
     evidence(bc, '0.0001', {sourceHash: String(n).repeat(64)}));
   await closeAccount(db, batch);
-  assert.deepEqual(await scrub(db, batch, 1), {processed: 1, remaining: 2});
-  assert.deepEqual(await scrub(db, batch, 1), {processed: 1, remaining: 1});
-  assert.deepEqual(await scrub(db, batch, 1), {processed: 1, remaining: 0});
+  assert.deepEqual(await scrub(db, batch, 1), {processed: 1, remaining: 2, manualReview: 0});
+  assert.deepEqual(await scrub(db, batch, 1), {processed: 1, remaining: 1, manualReview: 0});
+  assert.deepEqual(await scrub(db, batch, 1), {processed: 1, remaining: 0, manualReview: 0});
   report.checks.push('bounded batches report remaining; repeated progress converges');
 
-  // Historical shapes outside the proven financial contract fail closed.
-  const invalid = await fixture(db);
-  const ic = await call(db, invalid);
-  await rpc(db, 'bill2_record', invalid.actor, invalid.run, ic.id, evidence(ic));
-  await rpc(db, 'bill2_record', invalid.actor, invalid.run, ic.id,
-    evidence(ic, null, {currency: 'invalid-currency', sourceHash: 'e'.repeat(64)}));
-  await closeAccount(db, invalid);
-  const invalidRows = await rows(db, invalid);
-  await assert.rejects(scrub(db, invalid), /INVALID_FINANCIAL_PROJECTION/);
-  assert.deepEqual(await rows(db, invalid), invalidRows);
+  for (const contract of ['v1', 'v2']) {
+    const mixed = contract === 'v1' ? await fixture(db) : await createFixture(db);
+    const mixedCall = contract === 'v1' ? await call(db, mixed) : await claim(db, mixed);
+    const model = contract === 'v1' ? 'b2a-fixture' : mixed.claimPayload.model;
+    for (const sourceHash of ['a'.repeat(64), 'b'.repeat(64)]) {
+      await rpc(db, 'bill2_record', mixed.actor, mixed.run, mixedCall.id,
+        evidence(mixedCall, '0.0001', {model, sourceHash}));
+    }
+    const rejected = [];
+    for (const invalid of [
+      {provider: 'unexpected-provider'}, {account: 'unexpected-namespace'},
+      {protocol: {body: 'B2B_PRIVATE_REJECTED'}}, {currency: 'invalid-currency'},
+      {observedAt: 'not-a-date'}, {observedAt: '2026-99-99'},
+      {cost: 'invalid-cost'}, {includedDetails: {}}, {source: 'unknown-source'},
+    ]) rejected.push(await seedHistoricalReceipt(db, mixedCall, {model, ...invalid}));
+    await closeAccount(db, mixed);
+    const beforeMoney = await money(db, mixed);
+    const count = rejected.length;
+    await db.query('SET ROLE service_role');
+    const first = await scrub(db, mixed, 1);
+    const second = await scrub(db, mixed, 1);
+    const repeated = await scrub(db, mixed, 1);
+    await db.query('RESET ROLE');
+    assert.deepEqual(first, {processed: 1, remaining: count + 1, manualReview: count});
+    assert.deepEqual(second, {processed: 1, remaining: count, manualReview: count});
+    assert.deepEqual(repeated, {processed: 0, remaining: count, manualReview: count});
+    assert.equal(await money(db, mixed), beforeMoney, 'all original financial facts remain unchanged');
+    const after = await rows(db, mixed);
+    for (const original of rejected) {
+      assert.deepEqual(after.find(row => row.id === original.id), original,
+        'untrusted evidence is neither rewritten nor reported as erased');
+    }
+    const projectedRows = after.filter(row => row.financial_projection_version !== null);
+    assert.equal(projectedRows.length, 2);
+    assert.doesNotMatch(JSON.stringify(projectedRows), /B2A_PRIVATE|sdkResponse|rawBody/);
+    for (const role of ['anon', 'authenticated']) {
+      await db.query('SET ROLE ' + role);
+      const visible = await db.query('SELECT payload FROM bill2_receipts WHERE id=$1', [rejected[0].id])
+        .catch(error => { assert.match(error.message, /permission denied/); return {rows: []}; });
+      assert.equal(visible.rows.length, 0);
+      await db.query('RESET ROLE');
+    }
+    report.checks.push(contract + ': early untrusted/invalid rows do not starve valid batches; remaining/manualReview persist; evidence/money unchanged');
+  }
   const atomic = await fixture(db);
   const ac = await call(db, atomic);
   for (let n = 0; n < 2; n++) await rpc(db, 'bill2_record', atomic.actor, atomic.run, ac.id,
@@ -139,5 +185,5 @@ export async function receiptCases(db, report) {
     await db.query('DROP TRIGGER b2b_injected_fault ON bill2_receipts; DROP FUNCTION b2b_injected_fault()');
   }
   assert.equal((await scrub(db, atomic)).processed, 2);
-  report.checks.push('unprojectable evidence rejected; second-row injected fault rolls back first-row cleanup');
+  report.checks.push('unexpected second-row write failure rolls back first-row cleanup');
 }

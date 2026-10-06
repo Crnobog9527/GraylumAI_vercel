@@ -26,7 +26,7 @@ const sql=input=>docker(['exec','-i',name,'psql','-X','-qAt','-U','postgres','-d
 const fp=read('packages/db/tests/baseline/fingerprint.sql');
 const objectSql=fp.slice(0,fp.indexOf('-- FINAL'))+'SELECT jsonb_object_agg(k,d ORDER BY k) FROM grouped;';
 const snapshot=()=>JSON.parse(ok(sql(objectSql)));
-const migrationPath='packages/db/migrations/0176_erasure_receipt_scrub.sql';
+const migrationPath='packages/db/migrations/0181_erasure_untrusted_receipts.sql';
 const migration=read(migrationPath);
 const report={development,build:null,checks:[],failed:null};
 let client;
@@ -51,18 +51,22 @@ try {
   applyServerOnly:input=>outcome(docker(['exec',name,'psql','-X','-qAt','-U','postgres','-d','b2a','-c',input])),
   fingerprint:development?undefined:snapshot});
  assert.equal(report.build.failed,null);
- assert.ok(before,'0176 must be applied through the canonical build plan');
+ assert.ok(before,'0181 must be applied through the canonical build plan');
  const once=snapshot();
- ok(sql(migration));assert.deepEqual(snapshot(),once,'repeat 0176 is a structural no-op');
- report.checks.push('0176 canonical application/replay: identical full catalog');
+ ok(sql(migration));assert.deepEqual(snapshot(),once,'repeat 0181 is a structural no-op');
+ report.checks.push('0181 canonical application/replay: identical full catalog');
  // Refuse source drift before any lasting change, then verify exact no-data rollback.
- const original=ok(sql("SELECT pg_get_functiondef('bill2_evidence_immutable()'::regprocedure);"));
- ok(sql(original.replace('AS $function$', 'AS $function$\n-- deliberate local drift\n')));
- const drift=snapshot(); const refused=sql(migration);
- assert.notEqual(refused.status,0); assert.match(refused.stderr,/ERASURE_RECEIPT_SOURCE_MISMATCH/);
- assert.deepEqual(snapshot(),drift);
- ok(sql(original));
- ok(sql(read('packages/db/tests/erasure-b2b/rollback.sql')));
+ for (const signature of ['bill2_evidence_immutable()',
+  'bill2_erasure_receipt_projection(jsonb,bill2_calls)',
+  'account_erasure_scrub_receipts(uuid,uuid,integer)']) {
+  const original=ok(sql(`SELECT pg_get_functiondef('${signature}'::regprocedure);`));
+  ok(sql(original.replace('AS $function$', 'AS $function$\n-- deliberate local drift\n')));
+  const drift=snapshot(); const refused=sql(migration);
+  assert.notEqual(refused.status,0); assert.match(refused.stderr,/ERASURE_RECEIPT_SOURCE_MISMATCH/);
+  assert.deepEqual(snapshot(),drift);
+  ok(sql(original));
+ }
+ ok(sql(read('packages/db/tests/erasure-b2b/rollback-0181.sql')));
  assert.deepEqual(snapshot(),before,'empty structural rollback restores pre-migration catalog');
  ok(sql(migration)); assert.deepEqual(snapshot(),once);
  report.checks.push('source drift rejects atomically; empty rollback/reapply exact');
@@ -74,7 +78,7 @@ try {
  await client.query(read('packages/db/tests/erasure-b2a/fixture.sql'));
  await receiptCases(client,report);
  await receiptConcurrency({db:client,Client,connectionString,report});
- const unsafeRollback=sql(read('packages/db/tests/erasure-b2b/rollback.sql'));
+ const unsafeRollback=sql(read('packages/db/tests/erasure-b2b/rollback-0181.sql'));
  assert.notEqual(unsafeRollback.status,0);assert.match(unsafeRollback.stderr,/ERASURE_RECEIPT_ROLLBACK_REQUIRES_FORWARD_FIX/);
  report.checks.push('rollback refuses after financial projection; no erased content restoration');
  const audits=ok(sql(read('packages/db/tests/account-open-policy-audit.sql')));
