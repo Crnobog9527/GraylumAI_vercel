@@ -3250,6 +3250,7 @@ describe('createCheckoutSession catalog fail-closed guards', () => {
       caller: createProtectedCaller({ supabase, supabaseAdmin }),
       sessionCreate,
       orderInserts,
+      supabase, supabaseAdmin,
     };
   }
 
@@ -3372,7 +3373,7 @@ describe('createCheckoutSession catalog fail-closed guards', () => {
   it.each([
     ['database error', Promise.resolve({ data: null, error: { code: '57014' } }), 'SERVICE_UNAVAILABLE', '积分包服务暂不可用，请稍后重试'],
     ['successful not-found', Promise.resolve({ data: null, error: null }), 'NOT_FOUND', '积分包不存在'],
-    ['inactive', Promise.resolve({ data: { id: packageId, name: 'Credits', active: 'false', stripe_price_id: 'price_test_package', price: 1000 }, error: null }), 'BAD_REQUEST', '该积分包当前未上架'],
+    ['inactive', Promise.resolve({ data: { id: packageId, name: 'Credits', active: 'false', stripe_price_id: 'price_test_package', price: 1000 }, error: null }), 'BAD_REQUEST', '该商品暂不可购买，请稍后重试'],
     ['Price missing', Promise.resolve({ data: { id: packageId, name: 'Credits', active: 'true', stripe_price_id: null, price: 1000 }, error: null }), 'BAD_REQUEST', '该商品暂不可购买，请稍后重试'],
     ['Price blank', Promise.resolve({ data: { id: packageId, name: 'Credits', active: 'true', stripe_price_id: '   ', price: 1000 }, error: null }), 'BAD_REQUEST', '该商品暂不可购买，请稍后重试'],
     ['invalid amount', Promise.resolve({ data: { id: packageId, name: 'Credits', active: 'true', stripe_price_id: 'price_test_package', price: null }, error: null }), 'BAD_REQUEST', '该商品暂不可购买，请稍后重试'],
@@ -3389,7 +3390,7 @@ describe('createCheckoutSession catalog fail-closed guards', () => {
   it.each([
     ['database error', Promise.resolve({ data: null, error: { code: '42501' } }), 'SERVICE_UNAVAILABLE', '会员套餐服务暂不可用，请稍后重试'],
     ['successful not-found', Promise.resolve({ data: null, error: null }), 'NOT_FOUND', '会员套餐不存在'],
-    ['inactive', Promise.resolve({ data: { id: planId, name: 'Pro', level: 'pro', is_active: 'false', stripe_monthly_price_id: 'price_test_monthly', stripe_yearly_price_id: 'price_test_yearly', monthly_price: 9900, yearly_price: 99900 }, error: null }), 'BAD_REQUEST', '该会员套餐当前未启用'],
+    ['inactive', Promise.resolve({ data: { id: planId, name: 'Pro', level: 'pro', is_active: 'false', stripe_monthly_price_id: 'price_test_monthly', stripe_yearly_price_id: 'price_test_yearly', monthly_price: 9900, yearly_price: 99900 }, error: null }), 'BAD_REQUEST', '该会员套餐暂不可购买，请稍后重试'],
     ['Price missing', Promise.resolve({ data: { id: planId, name: 'Pro', level: 'pro', is_active: 'true', stripe_monthly_price_id: null, stripe_yearly_price_id: 'price_test_yearly', monthly_price: 9900, yearly_price: 99900 }, error: null }), 'BAD_REQUEST', '该会员套餐暂不可购买，请稍后重试'],
     ['Price blank', Promise.resolve({ data: { id: planId, name: 'Pro', level: 'pro', is_active: 'true', stripe_monthly_price_id: '   ', stripe_yearly_price_id: 'price_test_yearly', monthly_price: 9900, yearly_price: 99900 }, error: null }), 'BAD_REQUEST', '该会员套餐暂不可购买，请稍后重试'],
     ['invalid amount', Promise.resolve({ data: { id: planId, name: 'Pro', level: 'pro', is_active: 'true', stripe_monthly_price_id: 'price_test_monthly', stripe_yearly_price_id: 'price_test_yearly', monthly_price: null, yearly_price: 99900 }, error: null }), 'BAD_REQUEST', '该会员套餐暂不可购买，请稍后重试'],
@@ -3403,6 +3404,25 @@ describe('createCheckoutSession catalog fail-closed guards', () => {
     })).rejects.toMatchObject<Partial<TRPCError>>({ code, message });
     expectNoCheckoutWrites(harness);
   });
+
+  it.each(['credit_package', 'membership_plan'] as const)(
+    'routes an RLS-hidden inactive %s to authoritative admission before denying it', async kind => {
+      const harness = createGuardHarness({ kind, itemResult: Promise.resolve({ data: {
+        id: kind === 'credit_package' ? packageId : planId, name: 'Inactive fixture', level: 'pro',
+        active: 'false', is_active: 'false', price: 1000, monthly_price: 1000,
+        stripe_price_id: 'price_fixture', stripe_monthly_price_id: 'price_fixture',
+      }, error: null }) });
+      const publicRead = harness.supabase.from.bind(harness.supabase);
+      vi.spyOn(harness.supabase, 'from').mockImplementation(table =>
+        table === 'credit_packages' || table === 'membership_plans'
+          ? createSingleQueryBuilder(Promise.resolve({ data: null, error: null })) : publicRead(table));
+      const internalRead = vi.spyOn(harness.supabaseAdmin, 'from');
+      await expect(harness.caller.createCheckoutSession(kind === 'credit_package' ? { kind, packageId }
+        : { kind, planId, billingCycle: 'monthly' })).rejects.toMatchObject({ code: 'BAD_REQUEST',
+        message: kind === 'credit_package' ? '该商品暂不可购买，请稍后重试' : '该会员套餐暂不可购买，请稍后重试' });
+      expect(internalRead).toHaveBeenCalledWith(kind === 'credit_package' ? 'credit_packages' : 'membership_plans');
+      expectNoCheckoutWrites(harness);
+    });
 
   it('fails closed for a blank yearly membership Price before Stripe or order writes', async () => {
     const harness = createGuardHarness({

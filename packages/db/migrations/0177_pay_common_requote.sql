@@ -69,55 +69,66 @@ BEGIN
       RAISE EXCEPTION 'PAY_COMMON_LIVE_PURCHASE_DISABLED' USING ERRCODE='23514';
     END IF;
   END IF;
-  IF p_item_type='membership_plan' THEN
-    IF intent.id IS NULL AND EXISTS(SELECT 1 FROM public.user_subscriptions s WHERE s.user_id=p_user_id
-      AND (s.status IN ('active','trialing','past_due','incomplete','unpaid')
-        OR s.current_period_end>now() AND s.status NOT IN ('canceled','cancelled'))) THEN
-      RAISE EXCEPTION 'PAY_COMMON_SUBSCRIPTION_EXISTS' USING ERRCODE='23514';
-    END IF;
-    SELECT to_jsonb(p) INTO product FROM public.membership_plans p
-      WHERE id=p_item_id AND is_active='true' AND level IN ('pro','gold') FOR SHARE;
-    price_cents:=(product->>(CASE p_billing_cycle WHEN 'monthly' THEN 'monthly_price' ELSE 'yearly_price' END))::integer;
-    grant_credits:=(product->>(CASE p_billing_cycle WHEN 'monthly' THEN 'monthly_credits' ELSE 'yearly_credits' END))::integer;
-    bonus:=CASE p_billing_cycle WHEN 'monthly' THEN coalesce((product->>'monthly_bonus_credits')::integer,0) ELSE 0 END;
-  ELSE
-    SELECT to_jsonb(p) INTO product FROM public.credit_packages p WHERE id=p_item_id AND active='true' FOR SHARE;
-    IF actor.membership_level<>'free' THEN
-      SELECT package_discount INTO discount FROM public.membership_plans
-        WHERE level=actor.membership_level AND is_active='true' FOR SHARE;
-      IF NOT FOUND OR discount IS NULL OR discount<0 OR discount>100 THEN
-        RAISE EXCEPTION 'PAY_COMMON_DISCOUNT_UNKNOWN' USING ERRCODE='23514';
+  BEGIN
+    IF p_item_type='membership_plan' THEN
+      IF intent.id IS NULL AND EXISTS(SELECT 1 FROM public.user_subscriptions s WHERE s.user_id=p_user_id
+        AND (s.status IN ('active','trialing','past_due','incomplete','unpaid')
+          OR s.current_period_end>now() AND s.status NOT IN ('canceled','cancelled'))) THEN
+        RAISE EXCEPTION 'PAY_COMMON_SUBSCRIPTION_EXISTS' USING ERRCODE='23514';
       END IF;
+      SELECT to_jsonb(p) INTO product FROM public.membership_plans p
+        WHERE id=p_item_id AND is_active='true' AND level IN ('pro','gold') FOR SHARE;
+      price_cents:=(product->>(CASE p_billing_cycle WHEN 'monthly' THEN 'monthly_price' ELSE 'yearly_price' END))::integer;
+      grant_credits:=(product->>(CASE p_billing_cycle WHEN 'monthly' THEN 'monthly_credits' ELSE 'yearly_credits' END))::integer;
+      bonus:=CASE p_billing_cycle WHEN 'monthly' THEN coalesce((product->>'monthly_bonus_credits')::integer,0) ELSE 0 END;
+    ELSE
+      SELECT to_jsonb(p) INTO product FROM public.credit_packages p WHERE id=p_item_id AND active='true' FOR SHARE;
+      IF actor.membership_level<>'free' THEN
+        SELECT package_discount INTO discount FROM public.membership_plans
+          WHERE level=actor.membership_level AND is_active='true' FOR SHARE;
+        IF NOT FOUND OR discount IS NULL OR discount<0 OR discount>100 THEN
+          RAISE EXCEPTION 'PAY_COMMON_DISCOUNT_UNKNOWN' USING ERRCODE='23514';
+        END IF;
+      END IF;
+      price_cents:=(product->>'price')::integer;
+      grant_credits:=(product->>'credits_amount')::integer;
+      bonus:=coalesce((product->>'bonus_credits')::integer,0);
     END IF;
-    price_cents:=(product->>'price')::integer;
-    grant_credits:=(product->>'credits_amount')::integer;
-    bonus:=coalesce((product->>'bonus_credits')::integer,0);
-  END IF;
-  IF product IS NULL OR price_cents IS NULL OR price_cents<=0 OR grant_credits IS NULL
-    OR grant_credits<0 OR bonus<0 OR grant_credits::bigint+bonus<=0
-    OR grant_credits::bigint+bonus>2147483647 THEN
-    RAISE EXCEPTION 'PAY_COMMON_PRODUCT_UNAVAILABLE' USING ERRCODE='23514';
-  END IF;
-  -- Zero/ambiguous current mappings are domain failures, never P0002/P0003.
-  FOR mapped IN SELECT * FROM public.payment_provider_refs r
-    WHERE r.channel='stripe' AND r.merchant_namespace=p_merchant_namespace AND r.mode=p_payment_mode
-    AND r.object_type='price' AND r.billing_cycle=p_billing_cycle AND r.is_current
-    AND CASE p_item_type WHEN 'membership_plan' THEN r.membership_plan_id=p_item_id ELSE r.credit_package_id=p_item_id END
-    FOR SHARE LOOP
-    mapping_count:=coalesce(mapping_count,0)+1;
-  END LOOP;
-  IF coalesce(mapping_count,0)=0 THEN
-    RAISE EXCEPTION 'PAY_COMMON_PRICE_MAPPING_MISSING' USING ERRCODE='23514';
-  ELSIF mapping_count<>1 THEN
-    RAISE EXCEPTION 'PAY_COMMON_PRICE_MAPPING_AMBIGUOUS' USING ERRCODE='23514';
-  END IF;
-  final_cents:=round(price_cents::numeric*discount/100)::integer;
-  IF final_cents<=0 THEN RAISE EXCEPTION 'PAY_COMMON_AMOUNT_INVALID' USING ERRCODE='23514'; END IF;
-  version_time:=to_char((product->>'updated_at')::timestamptz AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"');
-  snapshot:=jsonb_build_object('version',1,'item_type',p_item_type,'item_id',p_item_id,
-    'item_updated_at',version_time,'billing_cycle',p_billing_cycle,'currency','usd','unit','major',
-    'price',(price_cents::numeric/100)::numeric(18,2)::text,'discount',((price_cents-final_cents)::numeric/100)::numeric(18,2)::text,
-    'tax_behavior','unspecified','credits',grant_credits,'bonus_credits',bonus);
+    IF product IS NULL OR price_cents IS NULL OR price_cents<=0 OR grant_credits IS NULL
+      OR grant_credits<0 OR bonus<0 OR grant_credits::bigint+bonus<=0
+      OR grant_credits::bigint+bonus>2147483647 THEN
+      RAISE EXCEPTION 'PAY_COMMON_PRODUCT_UNAVAILABLE' USING ERRCODE='23514';
+    END IF;
+    -- Zero/ambiguous current mappings are domain failures, never P0002/P0003.
+    FOR mapped IN SELECT * FROM public.payment_provider_refs r
+      WHERE r.channel='stripe' AND r.merchant_namespace=p_merchant_namespace AND r.mode=p_payment_mode
+      AND r.object_type='price' AND r.billing_cycle=p_billing_cycle AND r.is_current
+      AND CASE p_item_type WHEN 'membership_plan' THEN r.membership_plan_id=p_item_id ELSE r.credit_package_id=p_item_id END
+      FOR SHARE LOOP
+      mapping_count:=coalesce(mapping_count,0)+1;
+    END LOOP;
+    IF coalesce(mapping_count,0)=0 THEN
+      RAISE EXCEPTION 'PAY_COMMON_PRICE_MAPPING_MISSING' USING ERRCODE='23514';
+    ELSIF mapping_count<>1 THEN
+      RAISE EXCEPTION 'PAY_COMMON_PRICE_MAPPING_AMBIGUOUS' USING ERRCODE='23514';
+    END IF;
+    final_cents:=round(price_cents::numeric*discount/100)::integer;
+    IF final_cents<=0 THEN RAISE EXCEPTION 'PAY_COMMON_AMOUNT_INVALID' USING ERRCODE='23514'; END IF;
+    version_time:=to_char((product->>'updated_at')::timestamptz AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"');
+    snapshot:=jsonb_build_object('version',1,'item_type',p_item_type,'item_id',p_item_id,
+      'item_updated_at',version_time,'billing_cycle',p_billing_cycle,'currency','usd','unit','major',
+      'price',(price_cents::numeric/100)::numeric(18,2)::text,'discount',((price_cents-final_cents)::numeric/100)::numeric(18,2)::text,
+      'tax_behavior','unspecified','credits',grant_credits,'bonus_credits',bonus);
+  EXCEPTION WHEN check_violation THEN
+    -- An unavailable replacement must not strand a still-payable old quote.
+    -- Return only the frozen attempt for verified retirement; the next admission
+    -- reports this catalog error once the old attempt has safely closed.
+    IF intent.id IS NULL OR SQLERRM NOT IN ('PAY_COMMON_PRODUCT_UNAVAILABLE',
+      'PAY_COMMON_DISCOUNT_UNKNOWN','PAY_COMMON_PRICE_MAPPING_MISSING',
+      'PAY_COMMON_PRICE_MAPPING_AMBIGUOUS','PAY_COMMON_AMOUNT_INVALID') THEN RAISE; END IF;
+    intent.metadata:=intent.metadata||jsonb_build_object('requoteRequired',true);
+    RETURN intent;
+  END;
   -- Reuse the immutable request digest: no new storage or mutable metadata authority.
   -- Versioned pricing inputs detect even same-cent rounding and equal-discount tier changes.
   request_hash:=encode(extensions.digest(jsonb_build_object(

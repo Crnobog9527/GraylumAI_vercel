@@ -181,6 +181,35 @@ describe('checkout repricing with real protected PostgreSQL and simulated test-m
     expect(next.amount_total).toBe(200); expect(next.id).not.toBe(first.id);
     expect((await createDurableStripeCheckout(t.args)).id).toBe(next.id);
   });
+  it.each([
+    ['credit_package', 'one_time'], ['membership_plan', 'monthly'], ['membership_plan', 'yearly'],
+  ] as const)('retires an unpaid disabled %s/%s without a replacement', async (kind, cycle) => {
+    const t = fixture(kind, cycle); const first = await createDurableStripeCheckout(t.args);
+    sql(`UPDATE ${kind === 'credit_package' ? 'credit_packages' : 'membership_plans'}
+      SET ${kind === 'credit_package' ? 'active' : 'is_active'}='false' WHERE id=${quote(t.itemId)};`);
+    await expect(createDurableStripeCheckout(t.args)).rejects.toThrow();
+    expect(t.sessions.get(first.id)?.status).toBe('expired');
+    expect(t.expire).toHaveBeenCalledOnce(); expect(t.create).toHaveBeenCalledOnce();
+    expect(t.orders()).toHaveLength(1); expect(t.orders()[0].purchase_closed_at).not.toBeNull();
+    await expect(createDurableStripeCheckout(t.args)).rejects.toThrow();
+    expect(t.sessions.size).toBe(1);
+  });
+  it.each(['credit_package', 'membership_plan'] as const)('never expires a paid disabled %s', async kind => {
+    const t = fixture(kind); const first = await createDurableStripeCheckout(t.args);
+    const session = t.sessions.get(first.id)!; session.status = 'complete'; session.payment_status = 'paid';
+    sql(`UPDATE ${kind === 'credit_package' ? 'credit_packages' : 'membership_plans'}
+      SET ${kind === 'credit_package' ? 'active' : 'is_active'}='false' WHERE id=${quote(t.itemId)};`);
+    await expect(createDurableStripeCheckout(t.args)).rejects.toThrow();
+    expect(t.expire).not.toHaveBeenCalled(); expect(t.create).toHaveBeenCalledOnce();
+    expect(t.orders()[0].purchase_closed_at).toBeNull();
+  });
+  it('retires a quote whose current price mapping was removed, without creating a replacement', async () => {
+    const t = fixture(); const first = await createDurableStripeCheckout(t.args);
+    sql(`UPDATE payment_provider_refs SET is_current=false WHERE external_id=${quote(t.priceId)};`);
+    await expect(createDurableStripeCheckout(t.args)).rejects.toThrow();
+    expect(t.sessions.get(first.id)?.status).toBe('expired');
+    expect(t.create).toHaveBeenCalledOnce(); expect(t.orders()).toHaveLength(1);
+  });
   it.each(['session-paid', 'intent-paid', 'capturable', 'processing', 'successful-charge', 'payment-race'] as const)(
     'never closes or creates a replacement on unsafe evidence: %s', async reason => {
       const t = fixture(); const first = await createDurableStripeCheckout(t.args); t.tier();

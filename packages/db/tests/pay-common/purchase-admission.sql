@@ -283,4 +283,28 @@ BEGIN
     buyer,initial.id),'23514','PAY_COMMON_ATTEMPT_NOT_TERMINAL');
   RESET ROLE;
 END $$;
+-- Deactivation must return the frozen attempt for verified retirement before denying a new quote.
+DO $$
+DECLARE buyer uuid:=gen_random_uuid(); package uuid; initial payment_orders; replay payment_orders;
+BEGIN
+  INSERT INTO profiles(id,membership_level) VALUES(buyer,'free');
+  INSERT INTO credit_packages(name,price,credits_amount,active)
+    VALUES('Retire unavailable',100,100,'true') RETURNING id INTO package;
+  INSERT INTO payment_provider_refs(channel,merchant_namespace,mode,object_type,external_id,credit_package_id,billing_cycle,is_current)
+    VALUES('stripe','acct_inactive','test','price','price_inactive',package,'one_time',true);
+  SET LOCAL ROLE service_role;
+  initial:=pay_common_create_purchase(buyer,'credit_package',package,'one_time','acct_inactive','test','free');
+  RESET ROLE;
+  UPDATE credit_packages SET active='false' WHERE id=package;
+  SET LOCAL ROLE service_role;
+  replay:=pay_common_create_purchase(buyer,'credit_package',package,'one_time','acct_inactive','test','free');
+  PERFORM pg_temp.assert_true(replay.id=initial.id AND replay.metadata->'requoteRequired'='true',
+    'inactive product returns unresolved quote for retirement');
+  PERFORM pg_temp.assert_true(pay_common_close_checkout(buyer,initial.id,NULL,'acct_inactive','test','not_prepared','unpaid'),
+    'inactive unprepared quote safely closes');
+  PERFORM pg_temp.denied(format('SELECT pay_common_create_purchase(%L,''credit_package'',%L,''one_time'',
+    ''acct_inactive'',''test'',''free'')',buyer,package),'23514','PAY_COMMON_PRODUCT_UNAVAILABLE');
+  PERFORM pg_temp.assert_true((SELECT count(*)=1 FROM payment_orders WHERE user_id=buyer),'no replacement for disabled product');
+  RESET ROLE;
+END $$;
 ROLLBACK;

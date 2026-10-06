@@ -11,9 +11,11 @@ type Db = { from: (table: string) => Query; rpc?: (name: string, args: Row) => P
 export function installPurchaseFixture(user: Db, admin: Db, getStripe: () => Stripe) {
   const previousRpc = admin.rpc?.bind(admin);
   const from = admin.from.bind(admin);
+  const userFrom = user.from.bind(user);
   const refs: Row[] = [];
   const orders = new Map<string, Row>();
   admin.from = (table: string) => {
+    if (table === 'credit_packages' || table === 'membership_plans') return userFrom(table);
     if (table === 'system_settings') return { select() { return this; }, eq() { return this; },
       maybeSingle: async () => ({ data: { value: { channel: 'stripe', version: 1 } } }) } as unknown as Query;
     if (table === 'payment_orders') {
@@ -61,7 +63,8 @@ export function installPurchaseFixture(user: Db, admin: Db, getStripe: () => Str
   admin.rpc = async (name, args) => {
     if (name === 'pay_common_create_purchase') {
       const recurring = args.p_item_type === 'membership_plan';
-      const item = (await user.from(recurring ? 'membership_plans' : 'credit_packages').select().eq('id', args.p_item_id).maybeSingle()).data!;
+      const item = (await admin.from(recurring ? 'membership_plans' : 'credit_packages').select().eq('id', args.p_item_id).maybeSingle()).data!;
+      if (item[recurring ? 'is_active' : 'active'] !== 'true') return { error: { message: 'PAY_COMMON_PRODUCT_UNAVAILABLE' } };
       const cycle = String(args.p_billing_cycle);
       const priceId = item[recurring ? cycle === 'yearly' ? 'stripe_yearly_price_id' : 'stripe_monthly_price_id' : 'stripe_price_id'];
       const amount = item[recurring ? cycle === 'yearly' ? 'yearly_price' : 'monthly_price' : 'price'];
