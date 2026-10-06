@@ -73,7 +73,7 @@ export function registerReportTests(db: pg.Client, fixture: () => Promise<Fixtur
         const wire = JSON.parse(String(init?.body)); requests.push(wire);
         const frame = { id: 'gen-report-' + randomUUID(), object: 'chat.completion.chunk', model,
           choices: [{ index: 0, delta: { role: 'assistant', content: '## One\nReport body\n## Two\nMore body' },
-            finish_reason: 'stop' }], usage: { prompt_tokens: 3000, completion_tokens: 10, total_tokens: 3010, cost: 0.003 } };
+            finish_reason: 'stop' }], usage: { prompt_tokens: 300, completion_tokens: 10, total_tokens: 310, cost: 0.00031 } };
         return new Response('data: ' + JSON.stringify(frame) + '\n\ndata: [DONE]\n\n',
           { headers: { 'content-type': 'text/event-stream' } });
       } });
@@ -206,8 +206,8 @@ export function registerReportTests(db: pg.Client, fixture: () => Promise<Fixtur
           expect(requests[0]).toMatchObject({ model, reasoning_effort: 'low', stream: true, max_tokens: 8192 });
           expect(requests[0]).not.toHaveProperty('reasoning'); expect(requests[0]).not.toHaveProperty('tools');
           expect(requests[0]!.messages).toHaveLength(2);
-          expect((await db.query('select payload->>\'phase\' phase from bill2_calls where run_id=$1', [admitted.runId])).rows)
-            .toEqual([{ phase: 'report' }]);
+          expect((await db.query('select payload->>\'phase\' phase, metering_exit, metering_missing, budget_conflict from bill2_calls where run_id=$1', [admitted.runId])).rows)
+            .toEqual([{ phase: 'report', metering_exit: false, metering_missing: false, budget_conflict: false }]);
         }
         if (scenario === 'length') {
           expect((await db.query('select charged_delta from bill2_calls where run_id=$1', [admitted.runId])).rows[0].charged_delta).toBe(2);
