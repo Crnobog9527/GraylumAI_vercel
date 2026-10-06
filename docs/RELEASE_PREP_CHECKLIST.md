@@ -51,6 +51,7 @@
 - Vercel preview / production base URL
 - Deployment Protection bypass 流程
 - Sentry 项目、DSN、告警入口
+- 新落地页公开上线时，在正式环境设置 `SITE_INDEXING=public`（`/robots.txt` 才会改为拒绝训练爬虫、放行搜索爬虫，未设置时所有站点一律 `Disallow: /`），并撤掉 `apps/web/next.config.ts` 里的 `X-Robots-Tag: noindex, nofollow` 响应头
 - 最终上线前删除或重置 `E2E_TEST_PASSWORD` / `E2E_ADMIN_PASSWORD` 对应测试账号，并从生产环境变量中移除不再需要的 E2E 凭证
 
 ### 本地基线
