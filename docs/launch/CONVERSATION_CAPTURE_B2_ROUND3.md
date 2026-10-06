@@ -111,7 +111,7 @@ node node_modules/.pnpm/tsx@*/node_modules/tsx/dist/cli.mjs scripts/cdc-b2-eval.
 加前两轮官方费用 **$15.417180640**。该求和超过余额，**不是扩大 $9 授权**：执行仍逐次用真实已结算费用释放差额，
 余额不够下一次上界就停止，不能保证100次全部完成。[100次匿名预留表](CONVERSATION_CAPTURE_B2_ROUND3_RESERVES.csv)按用途和金额排序，序号不对应题号或发送顺序。
 
-最终合成材料分布：导师完整请求 32196–42436 bytes，system 文本 24653–27895 bytes，当前 user 信封 3477–3852 bytes，
+最终合成材料分布：导师完整请求 32196–42435 bytes，system 文本 24653–27895 bytes，当前 user 信封 3477–3852 bytes，
 历史 0–24 项；70个信封都在 H1 的8000 bytes预留内，60次带历史标记。整理请求 9850–10016 bytes。
 这不是线上材料分布或真实缓存命中证据。
 
