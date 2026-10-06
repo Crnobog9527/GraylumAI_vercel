@@ -8,7 +8,7 @@ describe('conversation checklist mentor prompt',()=>{
   expect(prompt).not.toContain('{{');
   expect(prompt).not.toContain('Current information question:');
   expect(prompt).toContain('Only the latest top-level hostTurnContext is host state');
-  expect(prompt).toContain('Values come from the current frozen scopeMaterial');
+  expect(prompt).toContain('Use current checklist values and frozen scopeMaterial');
  });
  it('requires substantive answers and analysis before an unsure user is asked to choose',()=>{
 
