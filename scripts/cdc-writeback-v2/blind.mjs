@@ -53,7 +53,8 @@ if (mode === 'pack') {
       'Validate every check by its gold meaning, including negation, qualifiers, field placement, forbidden content and suggestions. ' +
       'Literal hits are only a preliminary screen: correct false positives and paraphrase false negatives with a short reason. ' +
       'Do not change the gold requirements. Also flag unsupportedFact for fabricated factual writes, contradictory writes, ' +
-      'or silent placement of advisor guesses as user facts. Clearly labelled, grounded extra advisor proposals are allowed. ' +
+      'extra facts in semantically wrong fields, or advisor guesses recorded as user facts. ' +
+      'Clearly labelled, grounded extra advisor proposals are allowed. ' +
       'For empty user-fact changes, requests may still yield genuine advisor proposals in proposal fields. ' +
       'Output an array: {opaqueId, checks:[{id,pass,reason}], unsupportedFact:boolean, failureTypes:string[], notes:string}. ' +
       'Write scores.json, then lock.json containing packetSha256, scoresSha256, lockedAt before viewing any mapping.',
