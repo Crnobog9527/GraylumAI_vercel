@@ -131,11 +131,17 @@ export async function receiptCases(db, report) {
       await rpc(db, 'bill2_record', mixed.actor, mixed.run, mixedCall.id,
         evidence(mixedCall, '0.0001', {model, sourceHash}));
     }
+    for (const [value, code] of [
+      ['2026-01-01T00:00:00+25:00', '22009'],
+      ['2026-01-01 00:00:00 Unknown/Zone', '22023'],
+    ]) await assert.rejects(db.query('SELECT $1::timestamptz', [value]), {code});
     const rejected = [];
     for (const invalid of [
       {provider: 'unexpected-provider'}, {account: 'unexpected-namespace'},
       {protocol: {body: 'B2B_PRIVATE_REJECTED'}}, {currency: 'invalid-currency'},
       {observedAt: 'not-a-date'}, {observedAt: '2026-99-99'},
+      {observedAt: '2026-01-01T00:00:00+25:00'},
+      {observedAt: '2026-01-01 00:00:00 Unknown/Zone'},
       {cost: 'invalid-cost'}, {includedDetails: {}}, {source: 'unknown-source'},
     ]) rejected.push(await seedHistoricalReceipt(db, mixedCall, {model, ...invalid}));
     await closeAccount(db, mixed);

@@ -12,7 +12,7 @@ DO $$ BEGIN
       IS DISTINCT FROM '28c1455c7a48f825219503a2458a3b42'
     OR (SELECT md5(prosrc) FROM pg_proc
       WHERE oid = 'public.account_erasure_scrub_receipts(uuid,uuid,integer)'::regprocedure)
-      NOT IN ('33be25d367075e18f1c77e32f25ded66', '2ad85dfb6abf54aa46817e265af5e26d') THEN
+      NOT IN ('33be25d367075e18f1c77e32f25ded66', 'bc9e3e3ec79b729f9d597cbf4b85c02f') THEN
     RAISE EXCEPTION 'ERASURE_RECEIPT_SOURCE_MISMATCH';
   END IF;
 END $$;
@@ -47,7 +47,8 @@ BEGIN
             'BILL2_INVALID_COVERAGE', 'BILL2_INVALID_DECIMAL') THEN RAISE; END IF;
         manual_review := manual_review + 1;
         CONTINUE;
-      WHEN invalid_datetime_format OR datetime_field_overflow THEN
+      WHEN invalid_datetime_format OR datetime_field_overflow
+        OR invalid_time_zone_displacement_value OR invalid_parameter_value THEN
         manual_review := manual_review + 1;
         CONTINUE;
     END;
