@@ -73,12 +73,18 @@ export async function runCases({db,Client,connectionString,report}) {
  for(const role of ['anon','authenticated']) {
   await run('set role '+role);
   await assert.rejects(()=>quote(f),/permission denied/);
+  await assert.rejects(()=>run('select refund_approval from payment_orders where id=$1',[f.order]),/permission denied/);
+  if(role==='authenticated') {
+   await run("select set_config('request.jwt.claim.sub',$1,false)",[f.user]);
+   assert.equal((await run('select id,amount_total,status from payment_orders where id=$1',[f.order]))[0].amount_total,10000);
+   assert.equal((await run('select id from payment_orders where id=$1',[other.order])).length,0);
+  }
   await assert.rejects(()=>run('update payment_orders set refund_approval=$1 where id=$2',['{}',f.order]),/permission denied/);
   await run('reset role');
  }
  await run('set role service_role');q=await quote(f);i=await decide(f,q);await claim(f,i);await result(f,i);
  await run('reset role');
- report.checks.push('client roles cannot approve/write; service-role path validates admin');
+ report.checks.push('client roles cannot read approval or approve/write; own legacy fields readable, cross-subject denied; service-role allowed');
  const second=new Client({connectionString});await second.connect();
  try {
   f=await fresh();q=await quote(f);
