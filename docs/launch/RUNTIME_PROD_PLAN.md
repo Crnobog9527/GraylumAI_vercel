@@ -110,6 +110,22 @@ SQL 检查范围必须覆盖 prepare、claim、dispatch、resume、取消及恢�
 保留现有权限/RLS、锁序、幂等键、active_execution、runtime_epoch 和 stopAt 语义。
 权限只来自服务端与 SQL，不来自客户端的 mode、model、价格或 actor 字段。
 
+### 3.4 provider 语义
+
+后台标签和准入比较要区分以下身份，不做全库字段重命名：
+
+| 字段/概念 | 正式用途 |
+| --- | --- |
+| `ai_models.provider` | 现有模型记录的提供方/接口分类；其含义由 `providerUtils` 和当前模型数据确认，不能拿它猜实际服务线路 |
+| call 的 `provider=openrouter`、`protocol=openrouter-chat-v1` | 本次调用的聚合服务和协议 |
+| `providerLimits.providerSlug`、`endpointTag` | OpenRouter 精确服务线路；资格、价格、路由及线路倍数按它绑定 |
+| 模型 ID 的前缀 | 模型发布方，不代表实际供应商线路 |
+| call 的 `account` / `account_namespace` | 原凭据的私有账户绑定，供幂等和回执核对，不是供应商名称 |
+
+实施检查现有 SQL 的 provider 判等和 transport 的接口解析，明确模型记录分类与 call 聚合服务
+的映射；未知组合拒绝。先在局部边界用具名变量/类型澄清，只有真实数据不兼容时才追加最小迁移。
+第三方搜索线路沿用自身身份和费用规则，不把它们硬塞进 OpenRouter 的 endpointTag。
+
 ## 4. 报价、门槛与结算
 
 ### 4.1 自动报价不等于自动换线路
