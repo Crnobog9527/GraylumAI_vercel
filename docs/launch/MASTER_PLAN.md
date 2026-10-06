@@ -86,9 +86,21 @@
 
 **2026-10-07：RUNTIME-PROD 正式准入生命周期**
 
-Owner 原话（RUNTIME-PROD 方案任务授权，见 [方案 #701](https://github.com/Crnobog9527/GraylumAI_vercel/pull/701)）：
+据[出处更正记录](https://github.com/Crnobog9527/GraylumAI_vercel/pull/701#issuecomment-6022130115)，Owner 实际原话为：
 
-> 正式环境不设固定到期日，花费上限以 OpenRouter 为准；启动门槛按 typicalUsd 随倍数自动计算（#686）；准入名单只在换模型、换线路或实时计量检查异常时重新采样；默认倍数 m=6。
+- 2026-10-06（OpenRouter 上限）：
+  > 所有花费的上限源头都是我的 OpenRouter API，我做了限制，所以你这个测试窗口、准入名单的这些限制其实完全没有任何必要。
+- 2026-10-06（到期日与上限）：
+  > 同意把测试窗口和准入名单的到期日延到 2027 年底，花费和次数上限放开，以 OpenRouter 的限制为准。
+- 2026-10-06（门槛自动化，[#686](https://github.com/Crnobog9527/GraylumAI_vercel/pull/686)，按更正记录摘录，省略号保留）：
+  > 我觉得不要手动……这个门槛必须做成自动化适配的机制。
+
+m=6 来自 2026-10-03 本节第 50 项定价决定及其
+[确认记录](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5969267583)，
+不属于上述三段原话。
+
+“正式环境不设固定到期日”“只在换模型、换线路或实时计量检查异常时重新采样”
+是**主窗口根据以上原话归纳的执行口径**，不是 Owner 逐字表述；任务约束摘要不作为原话引用。
 
 正式准入不沿用 staging 测试窗口和 PAYG profile 的固定 expiresAt 作为开放资格到期规则；
 仅在换模型、换线路或实时计量检查异常时重新采样，取代将本节 BILL-PAYG r8 测试有效期、`paygHostPolicy.ts`/`paygPolicy.ts`
