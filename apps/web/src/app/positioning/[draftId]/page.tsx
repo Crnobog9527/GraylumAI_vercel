@@ -19,8 +19,8 @@ import { focusReply, mentorReplyDisplay, showsTurnState } from "./agent-turn-dis
 import { OpenQuestionRecord, OTHER_PLACEHOLDER, QuestionCardView } from "@/components/opc/question-card";
 import { CaptureChecklist } from "@/components/opc/capture-checklist";
 import { StepReviewDialog, StepSummaryCard } from "@/components/opc/step-review-dialog";
-import { cardStatus, fieldMeta, focusField, stepProgress, withEdits, type StepInformation } from "@/components/opc/capture-state";
-import { useStepConfirmation } from "@/hooks/use-step-confirmation";
+import { cardStatus, editedValue, fieldMeta, focusField, stepProgress, type StepInformation } from "@/components/opc/capture-state";
+import { reviewedStep, useStepConfirmation } from "@/hooks/use-step-confirmation";
 import { useCaptureResolve } from "@/hooks/use-capture-resolve";
 import { MessageMarkdown } from "@/components/chat/MessageMarkdown";
 import { ChatInlineNotice, ChatNoticeList, ChatPendingStatus } from "@/components/chat/ChatInlineNotice";
@@ -1286,9 +1286,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
       const info = d.information[stepId];
       const values: Record<string, Information> = Object.fromEntries(info.schema.map((field: { id: string }) =>
         [field.id, old[stepId]?.[field.id] ?? info.values?.[field.id] ?? { status: "unknown", nature: "unknown", value: "" }]));
-      const value = values[fieldId]!;
-      values[fieldId] = { ...value, value: text, status: text.trim() ? "provisional" : "unknown",
-        nature: value.nature === "unknown" ? "decision" : value.nature };
+      values[fieldId] = editedValue(values[fieldId]!, text);
       return { ...old, [stepId]: values };
     });
   }
@@ -1330,9 +1328,11 @@ function PositioningDraftContent({draftId}:{draftId:string}){
       const update = fieldMeta(info, field.id).suggestion;
       return update && review.baseline.updates[field.id] === update.executionId + ":" + update.hash ? [[field.id, update.value]] : [];
     }));
-    return <StepReviewDialog title={step.title} schema={info.schema} reviewed={withEdits(review.baseline, infoEdits[review.stepId])}
+    const reviewed = reviewedStep(review, infoEdits[review.stepId]);
+    return <StepReviewDialog title={step.title} schema={info.schema} reviewed={reviewed}
       updates={shown} deferred={review.deferred} problems={review.problems} changed={review.changed} busy={busy}
-      onEdit={(fieldId, value) => editField(review.stepId, fieldId, value)} onDefer={confirmation.setDeferred}
+      onEdit={(fieldId, value) => { confirmation.noteEdit(fieldId, editedValue(reviewed.values[fieldId]!, value)); editField(review.stepId, fieldId, value); }}
+      onDefer={confirmation.setDeferred}
       onConfirm={() => confirmation.submit(info)} onClose={confirmation.close}/>;
   }
   return (

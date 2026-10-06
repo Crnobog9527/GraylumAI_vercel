@@ -144,9 +144,16 @@ export async function prepareConfirmation(io: ConfirmationIo, step: Step, info: 
   return { envelope };
 }
 
+/** What the dialog shows and the confirmation compares: baseline, this dialog's edits, then any unsaved edit. */
+export function reviewedStep(review: { baseline: VisibleStep; edits: Record<string, FieldValue> },
+  pending?: Record<string, FieldValue>) {
+  return withEdits(withEdits(review.baseline, review.edits), pending);
+}
+
 /** `touched`: deferrals the user switched in this dialog; every other one follows the reviewed content. */
-type Review = { stepId: string; baseline: VisibleStep; upstream: Record<string, number>; deferred: Set<string>; touched: Set<string>;
-  problems: ReviewProblem[]; changed: boolean };
+/** `edits`: fields typed in this dialog, kept after their autosave clears the page's unsaved edits. */
+type Review = { stepId: string; baseline: VisibleStep; upstream: Record<string, number>; edits: Record<string, FieldValue>;
+  deferred: Set<string>; touched: Set<string>; problems: ReviewProblem[]; changed: boolean };
 
 /** Deferrals after the review baseline is refreshed: the new content's own, except the ones the user chose here. */
 export function refreshedDeferrals(baseline: VisibleStep, deferred: ReadonlySet<string>, touched: ReadonlySet<string>) {
@@ -238,8 +245,10 @@ export function useStepConfirmation(deps: StepConfirmationDeps) {
       return;
     }
     if (state.kind === "valid") { void guarded(step, async () => state.envelope); return; }
-    const deferred = new Set((info.schema ?? []).filter(field => info.values?.[field.id]?.status === "deferred").map(field => field.id));
-    setReview({ stepId, baseline: visibleStep(info, edits), upstream: upstreamVersions(deps.steps, stepId, stepStates),
+    // Deferrals follow what the dialog shows, including an unsaved edit that replaced a deferral reason.
+    const baseline = visibleStep(info, edits);
+    const deferred = new Set(Object.entries(baseline.values).filter(([, value]) => value.status === "deferred").map(([id]) => id));
+    setReview({ stepId, baseline, upstream: upstreamVersions(deps.steps, stepId, stepStates), edits: {},
       deferred, touched: new Set(), problems: [], changed: false });
   }
 
@@ -257,14 +266,14 @@ export function useStepConfirmation(deps: StepConfirmationDeps) {
     if (!review) return;
     const step = deps.steps.find(item => item.id === review.stepId);
     if (!step) return;
-    const reviewed = withEdits(review.baseline, deps.pendingEdits(step.id));
+    const reviewed = reviewedStep(review, deps.pendingEdits(step.id));
     const { values, problems } = stepConfirmationValues(info.schema, reviewed, review.deferred, deps.nonAnswers(step.id));
     if (problems.length) { setReview({ ...review, problems, changed: false }); return; }
     void guarded(step, async () => {
       const prepared = await prepareConfirmation(io(), step, info, reviewed, values, review.upstream, deps.steps);
       if ("envelope" in prepared) return prepared.envelope;
       // Something the user did not see arrived: show it and ask for a new review.
-      setReview({ ...review, baseline: prepared.changed, upstream: prepared.upstream, problems: [], changed: true,
+      setReview({ ...review, baseline: prepared.changed, upstream: prepared.upstream, edits: {}, problems: [], changed: true,
         deferred: refreshedDeferrals(prepared.changed, review.deferred, review.touched) });
       throw new Error(REVIEW_CHANGED);
     });
@@ -272,6 +281,8 @@ export function useStepConfirmation(deps: StepConfirmationDeps) {
 
   return {
     confirming, review, envelopeState, recoverMalformed, open, setDeferred, submit,
+    noteEdit: (fieldId: string, value: FieldValue) =>
+      setReview(old => old ? { ...old, edits: { ...old.edits, [fieldId]: value } } : old),
     close: () => setReview(null),
   };
 }

@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { describe, expect, it, vi } from "vitest";
-import { confirmKey, executeConfirmation, prepareConfirmation, refreshedDeferrals, upstreamVersions, type ConfirmationIo, type ConfirmRead } from "./use-step-confirmation";
+import { confirmKey, executeConfirmation, prepareConfirmation, refreshedDeferrals, reviewedStep, upstreamVersions, type ConfirmationIo, type ConfirmRead } from "./use-step-confirmation";
 import { stepConfirmationValues, visibleStep, type FieldValue, type VisibleStep } from "@/components/opc/capture-state";
 import type { ConfirmStepEnvelope } from "@/app/positioning/[draftId]/confirm-envelope";
 
@@ -137,5 +137,16 @@ describe("refreshedDeferrals", () => {
     // b was deferred before the refresh but the other tab un-deferred it; c the user un-ticked; d the user ticked.
     const next = refreshedDeferrals(baseline, new Set(["b", "d"]), new Set(["c", "d"]));
     expect([...next].sort()).toEqual(["a", "d"]);
+  });
+});
+
+describe("reviewedStep", () => {
+  it("keeps an edit made in the review after its autosave cleared the page's unsaved edits", () => {
+    const baseline = { values: { a: v("旧内容"), b: v("原因", "deferred") }, updates: {} };
+    const review = { baseline, edits: { a: v("在核对页改的") } };
+    // After autosave there is no pending edit any more: the dialog still shows and compares the edited value.
+    expect(reviewedStep(review, undefined).values.a!.value).toBe("在核对页改的");
+    expect(reviewedStep(review, { a: v("又改了一次"), b: v("原因", "deferred") }).values.a!.value).toBe("又改了一次");
+    expect(reviewedStep({ baseline, edits: {} }).values).toEqual(baseline.values);
   });
 });

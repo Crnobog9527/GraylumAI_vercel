@@ -73,6 +73,12 @@ export function fieldStateLabel(value: FieldValue | undefined, meta: FieldMeta) 
   return meta.source === "capture" ? "草稿 · 从对话记下" : meta.source === "user" ? "草稿 · 你填写的" : "草稿";
 }
 
+/** A user's typed text applied to a field, exactly as the autosave stores it. */
+export function editedValue(previous: FieldValue, text: string): FieldValue {
+  return { ...previous, value: text, status: text.trim() ? "provisional" : "unknown",
+    nature: previous.nature === "unknown" ? "decision" : previous.nature };
+}
+
 /** The value a field shows: the user's unsaved edit first, then the server value. */
 export function shownValue(info: StepInformation | undefined, edits: Record<string, FieldValue> | undefined, fieldId: string) {
   return edits?.[fieldId] ?? info?.values?.[fieldId] ?? EMPTY_VALUE;

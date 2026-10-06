@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { describe, expect, it } from "vitest";
 import {
-  cardStatus, fieldMeta, fieldState, fieldStateLabel, focusField, needsReview, sameVisibleStep, stepBody,
+  cardStatus, editedValue, fieldMeta, fieldState, fieldStateLabel, focusField, needsReview, sameVisibleStep, stepBody,
   stepConfirmationValues, stepProgress, visibleStep, withEdits, type FieldValue, type StepInformation,
 } from "./capture-state";
 
@@ -151,5 +151,13 @@ describe("cardStatus", () => {
     expect(cardStatus({ isLatest: true, reply: null, turn, shown: { ...shown, roundId: "round-2" } }).onShownStep).toBe(false);
     expect(cardStatus({ isLatest: true, reply: null, turn: undefined, shown }).onShownStep).toBe(false);
     expect(cardStatus({ isLatest: true, reply: null, turn: { stepId: "audience" }, shown }).onShownStep).toBe(false);
+  });
+});
+
+describe("editedValue", () => {
+  it("stores typed text like the autosave: provisional, empty is unknown, unknown nature becomes a decision", () => {
+    expect(editedValue(v("原因", "deferred", "fact"), "具体答案")).toEqual(v("具体答案", "provisional", "fact"));
+    expect(editedValue({ value: "", status: "unknown", nature: "unknown" }, "新")).toEqual(v("新"));
+    expect(editedValue(v("x"), "  ")).toEqual({ value: "  ", status: "unknown", nature: "decision" });
   });
 });
