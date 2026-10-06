@@ -12,6 +12,9 @@ import { profileTabHref } from '@/lib/profile-tabs';
  */
 export const WAITING_CREDITS_NOTICE = '积分不够，这一步已暂停。充值后点“继续”，会从暂停的地方接着做，已完成的部分不会重复扣费。';
 export const STILL_SHORT_NOTICE = '积分还是不够，这一步仍然暂停。充值后再点“继续”，会从暂停的地方接着做，已完成的部分不会重复扣费。';
+/** The main reply is already shown; only the organizer that updates the right panel waits for credits. */
+export const ORGANIZER_WAITING_CREDITS_NOTICE = '回复已完成，右侧信息的整理在等积分。充值后点“继续”，只补做这次整理，已完成的回复不会重复扣费。';
+export const ORGANIZER_STILL_SHORT_NOTICE = '积分还是不够，整理仍在等待。充值后再点“继续”，只补做这次整理，已完成的回复不会重复扣费。';
 export const WAITING_RESUME_NOTICE = '已暂停，点“继续”会接着做。';
 export const RESUMING_NOTICE = '正在继续…';
 /** A new message refused because this session's previous organizer has not finished. */
@@ -134,10 +137,13 @@ export function paygTurnNotices(turn: PaygTurn, ctx: {
   const token = paygResumeToken(turn);
   if (!token) return [];
   const credits = turn.state === 'waiting_credits';
+  // A reply that already finished is waiting only for its organizer: say so instead of "这一步已暂停".
+  const organizer = credits && openOrganizer(turn), short = ctx.outcome?.kind === 'short';
   const resume = { label: PAYG_ACTION.resume, disabled: Boolean(ctx.disabled || ctx.resumingId), onClick: () => ctx.onResume(token) };
   const notices: ChatNotice[] = [{
     id: id('wait'), tone: 'warning', label: credits ? '积分不足已暂停' : '已暂停',
-    text: !credits ? WAITING_RESUME_NOTICE : ctx.outcome?.kind === 'short' ? STILL_SHORT_NOTICE : WAITING_CREDITS_NOTICE,
+    text: !credits ? WAITING_RESUME_NOTICE : organizer ? (short ? ORGANIZER_STILL_SHORT_NOTICE : ORGANIZER_WAITING_CREDITS_NOTICE)
+      : short ? STILL_SHORT_NOTICE : WAITING_CREDITS_NOTICE,
     actions: credits ? [resume, { label: PAYG_ACTION.topUp, onClick: ctx.onTopUp ?? openTopUp }] : [resume],
   }];
   if (ctx.outcome?.kind === 'notice') notices.push({ id: id('outcome'), tone: 'warning', text: ctx.outcome.text });
