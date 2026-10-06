@@ -1299,7 +1299,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
   }
   function openReview(stepId: string) {
     setActiveStep(stepId);
-    confirmation.open(stepId, d.information[stepId], infoEditsRef.current[stepId]);
+    confirmation.open(stepId, d.information[stepId], infoEditsRef.current[stepId], snap.steps);
   }
   function retrySave(stepId: string) {
     const values = infoEditsRef.current[stepId];

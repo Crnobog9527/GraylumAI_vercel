@@ -48,7 +48,7 @@ export function StepReviewDialog(props: StepReviewProps) {
           <button type="button" aria-label="关闭核对" disabled={props.busy} onClick={props.onClose}>×</button></header>
         <p>确认的是下面你看到的这一版内容。还没处理的“根据对话整理的更新”不会被确认，确认后仍可采用。</p>
         {props.changed && <ChatInlineNotice tone="warning" alert>
-          内容刚刚有变化（整理结果、另一个窗口的修改或新的更新），已刷新为最新内容。请重新核对后再确认。
+          内容刚刚有变化（整理结果、另一个窗口的修改、前面步骤的修改或新的更新），已刷新为最新内容。请重新核对后再确认。
         </ChatInlineNotice>}
         {props.schema.map(field => {
           const value = props.reviewed.values[field.id] ?? EMPTY_VALUE;

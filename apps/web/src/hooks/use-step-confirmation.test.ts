@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { describe, expect, it, vi } from "vitest";
-import { confirmKey, executeConfirmation, prepareConfirmation, refreshedDeferrals, type ConfirmationIo, type ConfirmRead } from "./use-step-confirmation";
+import { confirmKey, executeConfirmation, prepareConfirmation, refreshedDeferrals, upstreamVersions, type ConfirmationIo, type ConfirmRead } from "./use-step-confirmation";
 import { stepConfirmationValues, visibleStep, type FieldValue, type VisibleStep } from "@/components/opc/capture-state";
 import type { ConfirmStepEnvelope } from "@/app/positioning/[draftId]/confirm-envelope";
 
@@ -37,7 +37,7 @@ describe("prepareConfirmation", () => {
     const s = server({ goal: v("增加客流"), audience: v("自由职业者") });
     const reviewed = visibleStep((await s.io.refetch()).data!.information.s1);
     const { values } = stepConfirmationValues(schema, reviewed, new Set());
-    const prepared = await prepareConfirmation(s.io, step, { schema }, reviewed, values);
+    const prepared = await prepareConfirmation(s.io, step, { schema }, reviewed, values, {}, [step]);
     expect(s.calls).toEqual(["flush"]);
     if (!("envelope" in prepared)) throw new Error("expected an envelope");
     expect(prepared.envelope).toMatchObject({ phase: "information", finishStep: true,
@@ -54,12 +54,34 @@ describe("prepareConfirmation", () => {
       { ...seen, updates: {} },
       { ...seen, updates: { goal: "e1:h0" } },
     ]) {
-      const prepared = await prepareConfirmation(s.io, step, { schema }, reviewed, {});
-      expect(prepared).toEqual({ changed: seen });
+      const prepared = await prepareConfirmation(s.io, step, { schema }, reviewed, {}, {}, [step]);
+      expect(prepared).toEqual({ changed: seen, upstream: {} });
     }
     const typing = { ...s.io, pendingEdits: () => ({ goal: v("还在打字") }) };
-    expect("changed" in await prepareConfirmation(typing, step, { schema }, seen, {})).toBe(true);
+    expect("changed" in await prepareConfirmation(typing, step, { schema }, seen, {}, {}, [step])).toBe(true);
     expect(s.store.size).toBe(0);
+  });
+});
+
+describe("upstream steps", () => {
+  const flow = [{ id: "s0", title: "a" }, { id: "s1", title: "b", dependsOn: ["s0"] }, { id: "s2", title: "c", dependsOn: ["s1"] }];
+  it("collects the versions of every step this one depends on, transitively", () => {
+    const state = { s0: { version: 4 }, s1: { version: 7 }, s2: { version: 1 } };
+    expect(upstreamVersions(flow, "s2", state)).toEqual({ s1: 7, s0: 4 });
+    expect(upstreamVersions(flow, "s0", state)).toEqual({});
+  });
+  it("stops the confirmation when a step it depends on changed, even with identical values", async () => {
+    const s = server({ goal: v("增加客流"), audience: v("自由职业者") });
+    const reviewed = visibleStep((await s.io.refetch()).data!.information.s1);
+    const refetch = s.io.refetch;
+    s.io.refetch = async () => {
+      const read = await refetch();
+      return { data: { ...read.data!, snapshot: { steps: { ...read.data!.snapshot.steps, s0: { version: 9, reviewVersion: 0, valid: true, evidenceIds: [] } } } } };
+    };
+    const prepared = await prepareConfirmation(s.io, flow[1]!, { schema }, reviewed, {}, { s0: 8 }, flow);
+    expect(prepared).toEqual({ changed: reviewed, upstream: { s0: 9 } });
+    expect(s.store.size).toBe(0);
+    expect("envelope" in await prepareConfirmation(s.io, flow[1]!, { schema }, reviewed, {}, { s0: 9 }, flow)).toBe(true);
   });
 });
 

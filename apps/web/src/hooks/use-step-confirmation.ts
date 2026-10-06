@@ -103,15 +103,34 @@ export async function executeConfirmation(io: ConfirmationIo, step: Step, reques
 }
 
 /**
- * Before the first phase, the server content must still be exactly what the user
- * reviewed (their own edits included). Anything else stops with the fresh content.
+ * Versions of the steps this one depends on (transitively). An upstream edit invalidates the
+ * step without touching its own values; the step's own reviewVersion cannot show that, since
+ * the user's own autosave and the information phase raise it too.
  */
-export async function prepareConfirmation(io: ConfirmationIo, step: Step, info: StepInformation,
-  reviewed: VisibleStep, values: Record<string, FieldValue>): Promise<{ changed: VisibleStep } | { envelope: ConfirmStepEnvelope }> {
+export function upstreamVersions(steps: readonly Step[], stepId: string, state: Record<string, { version: number }>) {
+  const result: Record<string, number> = {}, queue = [...(steps.find(item => item.id === stepId)?.dependsOn ?? [])];
+  while (queue.length) {
+    const id = queue.shift()!;
+    if (Object.hasOwn(result, id) || !state[id]) continue;
+    result[id] = state[id].version;
+    queue.push(...(steps.find(item => item.id === id)?.dependsOn ?? []));
+  }
+  return result;
+}
+
+/**
+ * Before the first phase, the server content must still be exactly what the user
+ * reviewed (their own edits included), and no step it depends on may have changed.
+ * Anything else stops with the fresh content.
+ */
+export async function prepareConfirmation(io: ConfirmationIo, step: Step, info: StepInformation, reviewed: VisibleStep,
+  values: Record<string, FieldValue>, upstream: Record<string, number>, steps: readonly Step[],
+): Promise<{ changed: VisibleStep; upstream: Record<string, number> } | { envelope: ConfirmStepEnvelope }> {
   await io.flush(step.id);
   const current = await readConfirmation(io);
-  const now = visibleStep(current.information[step.id]);
-  if (io.pendingEdits(step.id) || !sameVisibleStep(reviewed, now)) return { changed: now };
+  const now = visibleStep(current.information[step.id]), nowUpstream = upstreamVersions(steps, step.id, current.snapshot.steps);
+  const upstreamMoved = Object.keys({ ...upstream, ...nowUpstream }).some(id => upstream[id] !== nowUpstream[id]);
+  if (io.pendingEdits(step.id) || upstreamMoved || !sameVisibleStep(reviewed, now)) return { changed: now, upstream: nowUpstream };
   const state = current.snapshot.steps[step.id]!;
   const envelope: ConfirmStepEnvelope = {
     phase: "information", finishStep: true, values, editingSnapshot: JSON.stringify(null),
@@ -126,7 +145,8 @@ export async function prepareConfirmation(io: ConfirmationIo, step: Step, info: 
 }
 
 /** `touched`: deferrals the user switched in this dialog; every other one follows the reviewed content. */
-type Review = { stepId: string; baseline: VisibleStep; deferred: Set<string>; touched: Set<string>; problems: ReviewProblem[]; changed: boolean };
+type Review = { stepId: string; baseline: VisibleStep; upstream: Record<string, number>; deferred: Set<string>; touched: Set<string>;
+  problems: ReviewProblem[]; changed: boolean };
 
 /** Deferrals after the review baseline is refreshed: the new content's own, except the ones the user chose here. */
 export function refreshedDeferrals(baseline: VisibleStep, deferred: ReadonlySet<string>, touched: ReadonlySet<string>) {
@@ -208,7 +228,8 @@ export function useStepConfirmation(deps: StepConfirmationDeps) {
   }
 
   /** "确认这一步": resume a retained envelope, or open the review of the visible step. */
-  function open(stepId: string, info: StepInformation, edits?: Record<string, FieldValue>) {
+  function open(stepId: string, info: StepInformation, edits: Record<string, FieldValue> | undefined,
+    stepStates: Record<string, { version: number }>) {
     const step = deps.steps.find(item => item.id === stepId);
     if (!step) return;
     const state = envelopeState(stepId);
@@ -218,7 +239,8 @@ export function useStepConfirmation(deps: StepConfirmationDeps) {
     }
     if (state.kind === "valid") { void guarded(step, async () => state.envelope); return; }
     const deferred = new Set((info.schema ?? []).filter(field => info.values?.[field.id]?.status === "deferred").map(field => field.id));
-    setReview({ stepId, baseline: visibleStep(info, edits), deferred, touched: new Set(), problems: [], changed: false });
+    setReview({ stepId, baseline: visibleStep(info, edits), upstream: upstreamVersions(deps.steps, stepId, stepStates),
+      deferred, touched: new Set(), problems: [], changed: false });
   }
 
   function setDeferred(fieldId: string, deferred: boolean) {
@@ -239,10 +261,10 @@ export function useStepConfirmation(deps: StepConfirmationDeps) {
     const { values, problems } = stepConfirmationValues(info.schema, reviewed, review.deferred, deps.nonAnswers(step.id));
     if (problems.length) { setReview({ ...review, problems, changed: false }); return; }
     void guarded(step, async () => {
-      const prepared = await prepareConfirmation(io(), step, info, reviewed, values);
+      const prepared = await prepareConfirmation(io(), step, info, reviewed, values, review.upstream, deps.steps);
       if ("envelope" in prepared) return prepared.envelope;
       // Something the user did not see arrived: show it and ask for a new review.
-      setReview({ ...review, baseline: prepared.changed, problems: [], changed: true,
+      setReview({ ...review, baseline: prepared.changed, upstream: prepared.upstream, problems: [], changed: true,
         deferred: refreshedDeferrals(prepared.changed, review.deferred, review.touched) });
       throw new Error(REVIEW_CHANGED);
     });
