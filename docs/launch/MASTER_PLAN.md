@@ -84,6 +84,8 @@
 
 ### 2.1 Owner 的新决定（2026-09-27 起，2026-10-05 更新）
 
+- **2026-10-06 BILL-PAYG r9（仅准备）**：主窗口技术决定原话：“Sonnet low 的输出语义改用同一线路的证据来证明，不再要求 low 自己触顶。”[出处](https://github.com/Crnobog9527/GraylumAI_vercel/pull/665#issuecomment-6010007610)。仅Sonnet/anthropic/low采用 `outputSemanticsEvidence: same-route-none`、testedOutputLimit=2048，引用none直接触顶证据，low自身触顶数如实为0；取代对此设置要求两条自身触顶的旧限制，不改其他模型的证据要求或输出/费用硬限。r8第3条费用$0.0076005已确认、原UNKNOWN不计合格。r9只准备12条路由补测；已入账$6.537562065、累计上界<$25，三条Sonnet长样本沿用$0.60例外。
+
 - **2026-10-06 BILL-PAYG r8（仅准备）**：依据[主窗口技术决定](https://github.com/Crnobog9527/GraylumAI_vercel/pull/665#issuecomment-6002163766)，允许 Luna purposes=[organizer, attached_organizer] 与三个已测格式交叉组合，Sonnet/Gemini按相同原则处理；统一有效期为 `2026-10-13T00:00:00Z`，覆盖测试窗口 `2026-10-09T15:59:59Z`。取代r7建议的24小时有效期及用途/格式必须逐对配置的建议限制，不改变真实输出证据要求。r8只准备、不发送；已入账$6.470137565，累计上界<$25。单条上限未因此放宽。
 
 1. **对话交互**：Agent 按 Skill 主导引导；用提问卡提问；步骤完成后 Agent 提示并自动推进；右侧由独立整理模型按 Skill 格式整理，最终生成定位分析报告；体验要快、要流式；步骤和问题不能在宿主代码里写死（第 3 节）。

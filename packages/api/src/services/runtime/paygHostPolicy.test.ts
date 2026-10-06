@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { expect, it, vi } from 'vitest';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { readPaygHostPolicies, type PaygHostProfile } from './paygHostPolicy';
+import { readPaygHostPolicies, paygHostProfile, type PaygHostProfile } from './paygHostPolicy';
 import type { StagingPolicy } from './stagingPolicy';
 const id = '10000000-0000-4000-8000-000000000001';
 const env = { VERCEL: '1', VERCEL_PROJECT_PRODUCTION_URL: 'auth-staging.graylum.com',
@@ -138,4 +138,23 @@ it('AI Studio still refuses incomplete output evidence',async()=>{
  f.profile.endpointTag=f.policy.providerLimits!.providerSlug='google-ai-studio';
  f.profile.reasoningVariants[0].outputStressSamples=1;
  await expect(f.run()).rejects.toThrow('RUNTIME_PAYG_PROFILE_REQUIRED');
+});
+
+it('Sonnet low may cite same-route none evidence only under the precise approved relation',()=>{
+ const f=fixture(),p=f.profile;
+ p.evidence.testedOutputLimit=2048;p.reasoningVariants[0]!.testedOutputLimit=2048;
+ const source=p.reasoningVariants[0]!;
+ p.reasoningVariants.push({...source,reasoning:{effort:'low'},outputStressSamples:0,outputSemanticsEvidence:'same-route-none'});
+ expect(paygHostProfile.safeParse(p).success).toBe(true);
+ const bad=[
+  {...p,model:'google/gemini-3.8-flash',endpointTag:'google-ai-studio'},
+  {...p,endpointTag:'anthropic/other'},
+  {...p,reasoningVariants:[p.reasoningVariants[1]]},
+  {...p,reasoningVariants:[{...source,outputStressSamples:1},p.reasoningVariants[1]]},
+  {...p,reasoningVariants:[source,{...p.reasoningVariants[1],evidenceReference:'different'}]},
+  {...p,reasoningVariants:[source,{...p.reasoningVariants[1],manifestHash:'c'.repeat(64)}]},
+  {...p,reasoningVariants:[source,{...p.reasoningVariants[1],reasoning:{effort:'high'}}]},
+  {...p,reasoningVariants:[source,{...p.reasoningVariants[1],outputSemanticsEvidence:undefined}]},
+ ];
+ for(const value of bad)expect(paygHostProfile.safeParse(value).success).toBe(false);
 });

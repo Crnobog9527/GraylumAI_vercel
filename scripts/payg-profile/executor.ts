@@ -2,7 +2,8 @@
 import {createHash} from 'node:crypto';
 import {isDeepStrictEqual} from 'node:util';
 import {priceSchema,recordSamples,outputPressurePassed} from './sampling';
-import {createR8Plan,R8_ID} from './batch-r8';
+import {createR9Plan,R9_ID} from './batch-r9';
+import {streamMetadata} from './stream-metadata';
 import {openRouterAdapter} from '../../packages/api/src/services/bill2/openRouterAdapter';
 import {decimal} from '../../packages/api/src/services/bill2/decimal';
 import type {CallIdentity,TransportObservation} from '../../packages/api/src/services/bill2/fixtureAdapter';
@@ -10,7 +11,7 @@ import type {OpenRouterIdentity} from '../../packages/api/src/services/bill2/ope
 import type {OpenRouterLimits} from '../../packages/api/src/services/bill2/openRouterPolicy';
 import {decodeOpenRouterStreamObservation} from '../../packages/api/src/services/bill2/openRouterEvidence';
 
-export type Plan=ReturnType<typeof createR8Plan>;
+export type Plan=ReturnType<typeof createR9Plan>;
 export type Sample=Plan['manifest']['samples'][number];
 export type Event=Record<string,unknown>;
 export type Journal={append:(event:Event)=>Promise<void>;events:Event[];
@@ -21,8 +22,8 @@ const integer=(value:unknown):number|null=>typeof value==='string'&&/^\d+$/.test
 
 export function verifiedPlan(prices:unknown,manifest:unknown,approvedHash:string){
  const id=(manifest as {batch?:{id?:string}}|null)?.batch?.id;
- if(id!==R8_ID)throw new Error('APPROVED_MANIFEST_MISMATCH');
- const plan=createR8Plan(prices);
+ if(id!==R9_ID)throw new Error('APPROVED_MANIFEST_MISMATCH');
+ const plan=createR9Plan(prices);
  if(!isDeepStrictEqual(plan.manifest,manifest)||approvedHash!==plan.manifest.manifestHash)
   throw new Error('APPROVED_MANIFEST_MISMATCH');
  if(!plan.manifest.currentPricesVerified||decimal(plan.manifest.cumulativeUpperUsd)>=decimal('25')
@@ -106,12 +107,17 @@ export function identityFor(sample:Sample,prices:unknown):CallIdentity & OpenRou
 
 /** Reuse production timeout, redirect, exact-money, identity and terminal-receipt handling.
  * Never persist SDK text, credentials, headers or raw error messages to the public report. */
-function observationEvent(adapter:ReturnType<typeof openRouterAdapter>,observation:TransportObservation,
+export function observationEvent(adapter:ReturnType<typeof openRouterAdapter>,observation:TransportObservation,
  identity:CallIdentity & OpenRouterIdentity,source:'response'|'lookup',sample:Sample,expectedId?:string){
  const evidence=adapter.evidence(observation,identity,source,expectedId);
  const usage=evidence.usage;
- let providerName:unknown=null,finishReason:unknown=null,regionBlocked=false,contentRefused=false;
+ let providerName:unknown=null,finishReason:unknown=null,regionBlocked=false,contentRefused=false,metadataConflict=false;
  try{
+  if(source==='response'&&observation.stream&&observation.httpStatus>=200&&observation.httpStatus<300){
+   const metadata=streamMetadata(observation,identity.model,evidence.providerId);
+   providerName=metadata.providerName;finishReason=metadata.finishReason;
+   contentRefused=metadata.contentRefused;metadataConflict=metadata.conflict;
+  }else{
   const raw=observation.rawBodyEncoding?decodeOpenRouterStreamObservation(observation).toString('utf8'):observation.rawBody;
   const value=JSON.parse(raw);providerName=source==='lookup'?value.data?.provider_name:value.provider;
   finishReason=source==='lookup'?value.data?.finish_reason:value.choices?.[0]?.finish_reason;
@@ -119,13 +125,14 @@ function observationEvent(adapter:ReturnType<typeof openRouterAdapter>,observati
   contentRefused=finishReason==='content_filter'||nativeFinish==='refusal';
   regionBlocked=observation.httpStatus===403&&value.error?.code===403
    &&value.error?.metadata?.failed_routing_step==='Gate Endpoints with Geo Restrictions';
+  }
  }catch{/* Unknown metadata is not a verified route. */}
  return {type:'observation',sampleId:sample.id,source,providerId:evidence.providerId,sourceHash:evidence.sourceHash,
   httpStatus:observation.httpStatus,complete:observation.complete,final:evidence.final,costUsd:evidence.cost,
   nativePromptTokens:integer(usage?.inputTokens),nativeCompletionTokens:integer(usage?.outputTokens),
   reasoningTokens:integer(usage?.reasoningTokens),cachedTokens:integer(usage?.cachedTokens),
   cacheWriteTokens:integer(usage?.cacheCreationTokens),providerName,finishReason,
-  regionBlocked,contentRefused,rejected:'rejectedReason' in evidence?evidence.rejectedReason:null};
+  regionBlocked,contentRefused,rejected:metadataConflict?'identity_or_response_mismatch':'rejectedReason' in evidence?evidence.rejectedReason:null};
 }
 
 export async function executePlan(options:{prices:unknown;manifest:unknown;approvedHash:string;journal:Journal;

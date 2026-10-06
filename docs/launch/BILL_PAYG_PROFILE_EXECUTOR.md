@@ -1,6 +1,6 @@
 # BILL-PAYG profile 执行器交接（仅准备）
 
-**r8 准备完成，等待复核（含单条预算阻塞）。r7已完成；r6未执行并作废，旧批次均不得重跑。** 旧批次已锁定；本轮不发送模型请求、不访问远端数据库、不改配置。
+**r9 准备完成，等待复核。r8已停止并入账，旧批次均不得重跑。** 旧批次已锁定；本轮不发送模型请求、不访问远端数据库、不改配置。
 本页不是执行批准；必须先收到主窗口对本 PR 最终版本和 manifest 的审阅通过及执行通知。
 
 ## 入口
@@ -10,9 +10,20 @@
 凭据选择必须由执行窗口核实属于 Owner 批准的测试余额；环境变量名本身不证明归属。
 没有足够余额时报错停止，不改用另一凭据。
 
-r7已完成，旧命令已移除，禁止重复运行。r8仅离线准备且保留单条预算阻塞；执行入口尚未切换。
-详见 [r8清单、费用与阻塞](BILL_PAYG_PROFILE_R8.md)。审批和新hash复核完成前没有可运行的r8命令。
+当前入口仅接受r9精确清单。详见[r9逐条上界、私有回执离线回归与证据范围](BILL_PAYG_PROFILE_R9.md)。
+以下命令仅供复核通过并另行收到执行通知后使用，本轮没有运行：
 
+```bash
+set +x
+set -a
+. ~/.graylum/secrets/payg-profile.env
+set +a
+NODE_USE_ENV_PROXY=1 NO_PROXY= no_proxy= https_proxy= node scripts/payg-profile-execute.mjs execute-approved \
+  scripts/payg-profile/plan-prices.json \
+  docs/launch/evidence/payg-profile-20261006-r9.manifest.json \
+  31ecd1e3397ce1fe8b92613e0230e5b4917a3c9f550e31f92f873fec2ff2158d \
+  owner-approved-test-balance-only
+```
 
 必须始终用同一个系统用户运行，**不用 sudo**，不切换 HOME 或复制工作区来绕过已有锁。
 
@@ -25,22 +36,22 @@ r7已完成，旧命令已移除，禁止重复运行。r8仅离线准备且保�
 本地费用计算复用 openRouterCallBound，发送和查账复用现有 openRouterAdapter/openRouterEvidence；
 无 SDK 自动重试、无 fallback、固定 OpenRouter URL、禁止重定向。工具样本只带合成历史，不执行真实工具。
 
-## r7 范围与费用
+## r9 范围与费用
 
-当前执行器只接受 r7 的精确审阅清单；r6未执行并作废，旧批次hash不能启动。
-详见 [r7 预演、公开目录和逐条上界](BILL_PAYG_PROFILE_R7.md)。
-Gemini改为精确google-ai-studio，重新生成完整76条（60矩阵、12多消息、4输出压力）；Vertex首条不能计入AI Studio证据。
-Luna整理16条、Sonnet输出4条的请求、hash和上界与r6一致，共96条。
-本批上界$5.396385750000；已入账$4.991984715000，累计上界$10.388370465000 < $25。
-Gemini样本ID带r7后缀，其他20条保留来源ID。旧价格冻结为plan-prices-vertex-2026-10-05.json，只用于历史离线复现。
+仅12条Sonnet/Gemini实际路由补测，全部low，新ID但请求正文及逐条费用上界保持r8对应值。
+不再有low输出压力。Sonnet长样本三条approvedCap=$0.60，其他限制不变。
+本批上界$2.792448；已入账$6.537562065；累计上界$9.330010065 < $25。
+r8第3条UNKNOWN但费用已知，保留原始记录，不加入合格证据。流式费用/usage/ID由现有账务解析器读取，
+provider/finish由校验过的SSE分块补充；缺失保持未知，冲突停止，不用预期值补造。
 
 凭据/代理/加锁前核对本机已有旧锁对应的报告，按 manifest 绑定的批次、样本ID、requestHash、原始UNKNOWN状态和
 Owner确认记录逐一对账。r1首条、r2第49条、r4第77条仅这三个固定例外按$0入账，原始report/events不写回。
 未知数量、样本身份、已知小计、实际总额或金额汇总不匹配即 PRIOR_ACCOUNTING_MISMATCH，不接收临时豁免参数。
 原r5或r6若意外出现attempted.lock，停止为SUPERSEDED_BATCH_ATTEMPTED，不能视作未执行。没有本机旧锁时以清单引用的已审计证据为依据。
 
-输出压力Sonnet O=2048、Gemini O=512，两种设置各两条；原生completion（含reasoning）必须满足 0.9O ≤ completion ≤ O 且 finish_reason=length。
-OUTPUT_CAP_NOT_REACHED 如实记录费用和未合格判定后继续；不得补发，不得计入合格输出证据。completion > O 仍立即停批。Luna补测O=1024只验证整理适配，复用r4已成立的512输出语义，不能冒充新增触顶证据。
+既有直接输出压力证据仍要求length且0.9O≤completion（含reasoning）≤O。
+Sonnet low按主窗口批准使用同线路none语义证据，标注same-route-none；不伪造low触顶记录。
+OUTPUT_CAP_NOT_REACHED仍不计入直接证据；completion > O仍立即停止，费用和身份保护不变。
 
 finish_reason=content_filter 或 native_finish_reason=refusal（response 或原 ID lookup）立即记
 PROVIDER_CONTENT_REFUSED 并停批；response 已识别时不再查账，lookup 识别后不再继续查账。

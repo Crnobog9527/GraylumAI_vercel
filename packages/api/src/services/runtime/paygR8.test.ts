@@ -83,8 +83,8 @@ it('drafts keep only proven reasoning, declared pending scope and the approved e
   expect(drafts.profiles.find(p=>p.model.startsWith('openai/'))!.purposes).toEqual(['organizer','attached_organizer']);
 });
 
-it('accepts only the exact current r8 manifest and refuses r7 before dispatch',()=>{
-  expect(verifiedPlan(prices,frozen,frozen.manifestHash).manifest).toEqual(frozen);
+it('refuses historical r8 and r7 manifests before dispatch',()=>{
+  expect(()=>verifiedPlan(prices,frozen,frozen.manifestHash)).toThrow('APPROVED_MANIFEST_MISMATCH');
   expect(()=>verifiedPlan(prices,previous,previous.manifestHash)).toThrow('APPROVED_MANIFEST_MISMATCH');
   const changed=structuredClone(frozen);changed.samples[0].approvedCap='0.60';
   expect(()=>verifiedPlan(prices,changed,frozen.manifestHash)).toThrow('APPROVED_MANIFEST_MISMATCH');
