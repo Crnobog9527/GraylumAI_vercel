@@ -14,7 +14,7 @@ const path = name => join(root, name);
 const jsonLines = name => readFileSync(path(name), 'utf8').trim().split('\n').map(JSON.parse);
 const record = (name, value) => appendFileSync(path(name), JSON.stringify(value) + '\n', { mode: 0o600 });
 const fileHash = name => hash(readFileSync(path(name)));
-const synthetic = raw => JSON.stringify({ id: 'gen-v2-' + randomUUID(), model: JSON.parse(raw).model,
+const synthetic = raw => JSON.stringify({ id: 'gen-v2-' + randomUUID(), object: 'chat.completion', created: 1, model: JSON.parse(raw).model,
   choices: [{ index: 0, message: { role: 'assistant', content: '{"inputKind":"answer","patches":[],"notes":[]}' }, finish_reason: 'stop' }],
   usage: { prompt_tokens: 100, completion_tokens: 10, total_tokens: 110, cost: 0.001 } });
 
@@ -56,7 +56,7 @@ if (mode === 'prepare') {
         assert(dry.rows.find(r => r.ordinal === input.ordinal)?.raw === input.raw, 'DRY_ORGANIZER_NOT_REPRODUCIBLE');
         return synthetic(input.raw);
       }
-      const body = { id: 'gen-v2-dry', model: profiles.mentor.model,
+      const body = { id: 'gen-v2-dry-' + randomUUID(), object: 'chat.completion.chunk', created: 1, model: profiles.mentor.model,
         choices: [{ index: 0, delta: { role: 'assistant', content: 'Synthetic dry-run reply, not model evidence.' },
           finish_reason: 'stop' }], usage: { prompt_tokens: 100, completion_tokens: 10, total_tokens: 110, cost: 0.001 } };
       return 'data: ' + JSON.stringify(body) + '\n\ndata: [DONE]\n\n';
