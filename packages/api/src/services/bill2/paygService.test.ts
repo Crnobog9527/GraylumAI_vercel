@@ -108,3 +108,11 @@ it.each(['prepared', 'cost_pending', 'refunded'])('v2 %s does not issue a premat
   expect(rpc.mock.calls.map(([name]) => name)).toEqual(['bill2_finalize']);
   expect(rebate).not.toHaveBeenCalled();
 });
+it('preserves a definite PAYG claim refusal and never grants a dispatch capability', async () => {
+  const { api, rpc, adapter } = setup();
+  rpc.mockResolvedValueOnce({ data: null, error: { message: 'BILL2_START_THRESHOLD_UNCONFIGURED' } } as never);
+  await expect(api.claimPaygCall(runId, 1, frozenCall('{}'))).rejects.toThrow('BILL2_START_THRESHOLD_UNCONFIGURED');
+  expect(await api.dispatchOnce(callId, '{}')).toEqual({ dispatched: false });
+  expect(adapter.dispatch).not.toHaveBeenCalled();
+  expect(adapter.prepareDispatch).not.toHaveBeenCalled();
+});

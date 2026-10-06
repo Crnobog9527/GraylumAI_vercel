@@ -1,6 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import {expect,it} from 'vitest';
 import {randomUUID} from 'node:crypto';
+import {readFileSync} from 'node:fs';
 import type pg from 'pg';
 import type {SupabaseClient} from '@supabase/supabase-js';
 import type {createTRPCContext} from '../../trpc';
@@ -23,7 +24,7 @@ type Fixture={actor:string;user:SupabaseClient;admin:SupabaseClient;registration
 /** Real router -> real admission/pricing -> loopback PostgREST -> real PostgreSQL.
  * No policy/pricing/RPC mocks and no provider network request. */
 export function registerPaygHostTests(db:pg.Client,fixture:()=>Promise<Fixture>){
- it.each(['ordinary','work','mentor','step','plan','topic'] as const)('RUNTIME: PAYG host SQL %s admission and claim',async entry=>{
+ it.each(['ordinary','work','mentor','step','plan','topic','mentor-final-profile'] as const)('RUNTIME: PAYG host SQL %s admission and claim',async entry=>{
   const f=await fixture(),ctx=await f.context(),opc=opcRouter.createCaller(ctx),runtime=runtimeRouter.createCaller(ctx);
   const service=opcService(f.user,f.admin),artifacts=workbenchService(f.user,f.admin);
   const d=entry==='topic'||entry==='plan'||entry==='step'
@@ -74,8 +75,17 @@ export function registerPaygHostTests(db:pg.Client,fixture:()=>Promise<Fixture>)
     manifestHash:'b'.repeat(64),outputStressSamples:2,includesReasoning:true})),outputLimit:8192,expiresAt,
    evidence:{reference:'synthetic-only',manifestHash:'a'.repeat(64),distinctSamples:60,messageStressSamples:12,maxVerifiedMessages:128,completeCells:15,variantsPerCell:4,
     maxPromptToBytes:0.5,maxPromptToUpper:0.4,outputLimit:8192,testedOutputLimit:512,outputSemantics:'max-tokens-includes-reasoning',includesReasoning:true,cacheCovered:true,costBoundPassed:true}}));
-  const values={runtime_payg_staging:{version:1,enabled:true,windowId,profiles},billing_credits_per_usd:'100',
-   billing_token_price_multiplier:'3',billing_payg_start_thresholds:{version:'synthetic-only',
+  // Use the delivered profile unchanged except local expiry/window lifetimes.
+  // This is a disposable regression fixture, never a production configuration.
+  const finalProfiles=entry==='mentor-final-profile'
+   ?JSON.parse(readFileSync(new URL('../../../../../docs/launch/evidence/payg-profile-final.json',import.meta.url),'utf8'))
+     .profiles.map((p:Record<string,unknown>)=>({...p,expiresAt})):profiles;
+  const values={runtime_payg_staging:{version:1,enabled:true,windowId,profiles:finalProfiles},billing_credits_per_usd:'100',
+   billing_token_price_multiplier:'3',
+   ...(entry==='mentor-final-profile'?{runtime_purpose_budgets:{version:2,
+    interactive:{inputBytes:90000,historyItems:100},organize:{inputBytes:64000,historyItems:100},
+    report:{inputBytes:196608,historyItems:0}}}:{}),
+   billing_payg_start_thresholds:{version:'synthetic-only',
     thresholds:pairs.flatMap(([,model])=>['ordinary','skill','skill_matching','organizer','attached_organizer'].map(purpose=>({model,purpose,credits:1})))}};
   const saved=(await db.query('select key,value from system_settings where key=any($1)',[Object.keys(values)])).rows;
   const env={VERCEL:'1',VERCEL_PROJECT_PRODUCTION_URL:'auth-staging.graylum.com',VERCEL_GIT_COMMIT_REF:'staging',
@@ -86,6 +96,7 @@ export function registerPaygHostTests(db:pg.Client,fixture:()=>Promise<Fixture>)
   try{
    for(const [key,value] of Object.entries(values))await db.query(
     'insert into system_settings(key,value) values($1,$2) on conflict(key) do update set value=excluded.value',[key,JSON.stringify(value)]);
+   if(entry==='mentor-final-profile')await db.query("delete from system_settings where key='billing_payg_start_thresholds'");
    await db.query(`insert into runtime_test_windows(id,enabled,actor_ids,call_policies,credits_per_usd,multiplier,
     max_cost_usd,max_calls,expires_at) values($1,true,$2,$3,100,3,10,100,$4)`,[windowId,[f.actor],JSON.stringify(policies),expiresAt]);
    Object.assign(process.env,env);
@@ -104,14 +115,19 @@ export function registerPaygHostTests(db:pg.Client,fixture:()=>Promise<Fixture>)
     admitted=await runtime.prepare({sessionId:s.sessionId,requestId:randomUUID(),input:'Synthetic host input',
      selection:{kind:'ordinary',modelId:f.mentorModel},network:'deny'});
    }else if(entry==='topic')admitted=await opc.topicTurn({draftId:d.draftId,requestId:randomUUID(),input:'Synthetic topic'});
-   else admitted=await opc.prepareStep({draftId:d.draftId,stepId:'step-0',purpose:entry,requestId:randomUUID(),
-    input:entry==='mentor'?OPENING_INPUT:'Synthetic host input',...(entry==='mentor'?{questionId:'goal'}:{})});
+   else admitted=await opc.prepareStep({draftId:d.draftId,stepId:'step-0',purpose:entry==='mentor-final-profile'?'mentor':entry,requestId:randomUUID(),
+    input:(entry==='mentor'||entry==='mentor-final-profile')?OPENING_INPUT:'Synthetic host input',...((entry==='mentor'||entry==='mentor-final-profile')?{questionId:'goal'}:{})});
    const rpc=async(name:string,args:Record<string,unknown>)=>{
     const result=await f.admin.rpc(name,{p_actor_id:f.actor,...args});if(result.error)throw new Error(result.error.message);return result.data;
    };
    const e=await rpc('runtime_execution',{p_execution_id:admitted.executionId,p_action:'begin'});
    const billing=e.billing as FrozenPaygRun,c=runtimeContext.parse(e.context);
    expect(billing.contractVersion).toBe('bill2.v2');expect(c.historyItems).toBe(100);
+   if(entry==='mentor-final-profile'){
+    expect(c.maxOutputTokens).toBe(8192);expect(c.purposeBudget?.inputBytes).toBe(90000);
+    expect(c.reasoning).toMatchObject({effort:'low'});
+    expect(c.attachedOrganizer).toMatchObject({model:'openai/gpt-6-luna',maxOutputTokens:2048,inputBytes:64000});
+   }
    const policy=billing.callPolicy.find(p=>p.modelId===c.modelId)!;
    const request=openRouterRequestBody(JSON.stringify({model:policy.model,messages:[{role:'system',content:'Synthetic instructions'},
      ...Array.from({length:126},(_,i)=>({role:i%2?'assistant':'user',content:'Synthetic history'})),
@@ -122,6 +138,13 @@ export function registerPaygHostTests(db:pg.Client,fixture:()=>Promise<Fixture>)
    const excessive=JSON.parse(request);excessive.messages.push({role:'user',content:'One too many'});
    expect(()=>runtimePaygCall(JSON.stringify(excessive),c.role,policy,billing.rules,e.epoch,true))
     .toThrow('BILL2_INPUT_PROFILE_INVALID');
+   if(entry==='mentor-final-profile'){
+    await expect(rpc('bill2_claim',{p_run_id:e.runId,p_sequence:1,p_payload:call})).rejects.toThrow('BILL2_START_THRESHOLD_UNCONFIGURED');
+    expect((await db.query('select count(*)::int n from bill2_calls where run_id=$1',[e.runId])).rows[0].n).toBe(0);
+    expect((await db.query('select credits from profiles where id=$1',[f.actor])).rows[0].credits).toBe(1000);
+    await db.query('insert into system_settings(key,value) values($1,$2)',
+     ['billing_payg_start_thresholds',JSON.stringify(values.billing_payg_start_thresholds)]);
+   }
    const claimed=await rpc('bill2_claim',{p_run_id:e.runId,p_sequence:1,p_payload:call});
    expect(claimed.id).toEqual(expect.any(String));
    expect((await rpc('bill2_claim',{p_run_id:e.runId,p_sequence:1,p_payload:call})).id).toBe(claimed.id);
