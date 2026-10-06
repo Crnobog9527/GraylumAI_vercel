@@ -43,7 +43,7 @@ export function registerReportTests(db: pg.Client, fixture: () => Promise<Fixtur
         automaticRetry: false, hiddenTools: false, lookupSupported: false,
         providerLimits: { providerSlug: endpointTag, contextTokens: 250000, promptUsdPerMillion: '1', completionUsdPerMillion: '1', requestUsd: '0' },
         payg: { version: 'v1', policyId: 'report-test', profileVersion: 'fixture', evidenceVersion: 'fixture', pricingHash, endpointTag,
-          templateTokens: 4096, marginTokens: 4096, admissionPath: 'fixture', maxBytes: 196608, maxMessages: 32,
+          templateTokens: 4096, marginTokens: 4096, admissionPath: real ? 'empirical' : 'fixture', maxBytes: 196608, maxMessages: 32,
           maxTools: 0, maxSchemaBytes: 16384, purposes: ['report'], expiresAt: new Date(Date.now() + 7200000).toISOString(),
           nominalPricing: { version: 'nominal-v1', pricingHash, endpointTag,
             tiers: [{ minPromptTokens: 0, prompt: '1', completion: '1', request: '0' }], timeOfDay: [] } } };
