@@ -69,3 +69,20 @@ test('truncated journal and permanent failure stop fail closed', t => {
   budget.close();
   assert.throws(() => openBudget(dir), /BUDGET_PREVIOUS_STOP/);
 });
+
+test('authorized new batch carries old settled and unknown exposure without releasing either', t => {
+  const dir = temporary(t), carry = { settledNano: 1_236_088_710, heldNano: 6_337_000, sourceHash: 'b'.repeat(64) };
+  const budget = openBudget(dir, carry);
+  assert.equal(budget.snapshot().heldNano, carry.heldNano);
+  assert.throws(() => budget.reserve(reserve('new/2/a', capNano - carry.settledNano - carry.heldNano + 1)), /BUDGET_STOP/);
+  budget.reserve(reserve('new/2/a', 100));
+  budget.settle('new/2/a', 0.00000005);
+  budget.close();
+  assert.throws(() => openBudget(dir), /CARRY_REQUIRED/);
+  assert.throws(() => openBudget(dir, { ...carry, heldNano: 0 }), /CARRY_CHANGED/);
+  const reopened = openBudget(dir, carry);
+  assert.equal(reopened.snapshot().settledNano, carry.settledNano + 50);
+  assert.equal(reopened.snapshot().heldNano, carry.heldNano);
+  reopened.stop('NETWORK'); reopened.close();
+  assert.throws(() => openBudget(dir, carry), /BUDGET_PREVIOUS_STOP/);
+});

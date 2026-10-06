@@ -4,9 +4,10 @@ import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { root, read, save, assert, hash } from './source.mjs';
 import { objectiveChecks, aggregate, runStatistics } from './score.mjs';
-const [mode] = process.argv.slice(2);
+const [mode, batch] = process.argv.slice(2);
 assert(['pack', 'report'].includes(mode), 'BLIND_USAGE');
-const path = name => join(root, name);
+assert(batch === undefined || batch === 'continuation', 'BLIND_BATCH');
+const path = name => join(root, ...(batch ? ['continuation-20261007'] : []), name);
 const fileHash = name => hash(readFileSync(path(name)));
 const manifest = read(path('manifest.json'));
 assert(manifest.casesHash === fileHash('cases.json'), 'GOLD_CHANGED');
@@ -14,7 +15,13 @@ assert(read(path('replay-proof.json')).resultHash === fileHash('replay/reasoning
 const stopped = existsSync(path('sealed-stopped.json')) ? read(path('sealed-stopped.json')) : null;
 if (stopped) assert(read(path('replay-proof.json')).stoppedSealHash === fileHash('sealed-stopped.json') &&
   stopped.responsesHash === fileHash('organizer-responses.jsonl') && stopped.budgetHash === fileHash('budget.jsonl'), 'STOPPED_SEAL_CHANGED');
-const expectedCount = stopped?.received ?? 300;
+if (batch) {
+  const auth = read(path('authorization.json'));
+  for (const name of ['report.json', 'blind/lock.json', 'blind/scores.json'])
+    assert(hash(readFileSync(join(root, name))) === auth.sourceHashes[name], 'PREVIOUS_SCORES_CHANGED');
+  assert(read(path('completed.json')).responsesHash === fileHash('organizer-responses.jsonl'), 'COMPLETED_CHANGED');
+}
+const expectedCount = batch ? 200 : stopped?.received ?? 300;
 const cases = read(path('cases.json')), replay = read(path('replay/reasoning-results.json'));
 const frozen = read(path('mentor/frozen-private.json'));
 assert(read(path('organizer-manifest.json')).frozenHash === fileHash('mentor/frozen-private.json'), 'FREEZE_CHANGED');
@@ -38,7 +45,7 @@ if (mode === 'pack') {
   const items = [], mapping = [];
   for (const c of cases) for (let run = 1; run <= 3; run++) {
     const row = replay.find(r => r.slot === c.id && r.effort === `run-${run}`);
-    if (!row && stopped) continue;
+    if (!row && (stopped || batch)) continue;
     const original = frozen.results.find(r => r.slot === c.id);
     assert(row && original?.before, 'BLIND_MISSING');
     const opaqueId = randomUUID(), { id, ...gold } = c;
@@ -85,6 +92,7 @@ if (mode === 'pack') {
       checks: score.checks, unsupportedFact: score.unsupportedFact, failureTypes: score.failureTypes,
       costUsd: usage.cost, elapsedMs: raw.elapsedMs, reasoningTokens: usage.completion_tokens_details?.reasoning_tokens ?? null };
   });
+  if (batch) rows.push(...read(join(root, 'report.json')).rows.filter(r => r.run === 1));
   const report = { unblindedAt: new Date().toISOString(), lock, stopped, rows, ...runStatistics(rows),
     categories: [...new Set(cases.map(c => c.category))].map(category => ({ category,
       ...aggregate(rows.filter(r => r.category === category)) })),

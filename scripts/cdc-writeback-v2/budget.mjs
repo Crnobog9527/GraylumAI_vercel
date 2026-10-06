@@ -11,15 +11,20 @@ const integer = value => Number.isSafeInteger(value) && value >= 0;
 // One private journal for all four stages. A pending call or a recorded stop is terminal:
 // restarting the process must never turn an uncertain request into a fresh dispatch.
 export function budgetState(events) {
-  const state = { settledNano: 0, pending: null, stopped: false, calls: new Set() };
+  const state = { settledNano: 0, heldNano: 0, pending: null, stopped: false, calls: new Set() };
   for (const event of events) {
     assert(!state.stopped, 'JOURNAL_AFTER_STOP');
-    if (event.type === 'reserve') {
+    if (event.type === 'carry') {
+      assert(event === events[0] && integer(event.settledNano) && integer(event.heldNano) &&
+        event.settledNano + event.heldNano <= capNano && /^[a-f0-9]{64}$/.test(event.sourceHash), 'CARRY_INVALID');
+      state.settledNano = event.settledNano;
+      state.heldNano = event.heldNano;
+    } else if (event.type === 'reserve') {
       assert(!state.pending && !state.calls.has(event.id), 'CALL_ALREADY_RESERVED');
       assert(typeof event.id === 'string' && event.id.length > 0, 'CALL_ID');
       assert(['baseline', 'fields', 'prompt', 'suggestions'].includes(event.stage), 'STAGE');
       assert(/^[a-f0-9]{64}$/.test(event.requestHash), 'REQUEST_HASH');
-      assert(integer(event.nano) && event.nano > 0 && state.settledNano + event.nano <= capNano, 'BUDGET_STOP');
+      assert(integer(event.nano) && event.nano > 0 && state.settledNano + state.heldNano + event.nano <= capNano, 'BUDGET_STOP');
       state.calls.add(event.id);
       state.pending = event;
     } else if (event.type === 'settle') {
@@ -35,7 +40,7 @@ export function budgetState(events) {
   return state;
 }
 
-export function openBudget(directory = root) {
+export function openBudget(directory = root, carry) {
   mkdirSync(directory, { recursive: true, mode: 0o700 });
   const lock = join(directory, 'budget.lock');
   // An abrupt exit leaves this lock intact: investigate, do not auto-unlock or resend.
@@ -46,6 +51,9 @@ export function openBudget(directory = root) {
     const raw = existsSync(path) ? readFileSync(path, 'utf8') : '';
     assert(raw === '' || raw.endsWith('\n'), 'JOURNAL_TRUNCATED');
     const events = raw === '' ? [] : raw.trimEnd().split('\n').map(JSON.parse);
+    if (carry && events.length) assert(JSON.stringify(events[0], ['type', 'settledNano', 'heldNano', 'sourceHash']) ===
+      JSON.stringify({ type: 'carry', ...carry }, ['type', 'settledNano', 'heldNano', 'sourceHash']), 'CARRY_CHANGED');
+    assert(carry || events[0]?.type !== 'carry', 'CARRY_REQUIRED');
     let state = budgetState(events);
     assert(!state.pending && !state.stopped, 'BUDGET_PREVIOUS_STOP');
     journalFd = openSync(path, 'a', 0o600);
@@ -72,6 +80,7 @@ export function openBudget(directory = root) {
       events.push(event);
       state = next;
     }
+    if (carry && events.length === 0) append({ type: 'carry', ...carry });
     return {
       reserve({ id, stage, requestHash, nano }) { append({ type: 'reserve', id, stage, requestHash, nano }); },
       settle(id, cost) {
@@ -80,7 +89,7 @@ export function openBudget(directory = root) {
       },
       stop(code) { append({ type: 'stop', code }); },
       snapshot() {
-        return { settledNano: state.settledNano, pendingNano: state.pending?.nano ?? 0,
+        return { settledNano: state.settledNano, heldNano: state.heldNano, pendingNano: state.pending?.nano ?? 0,
           dispatched: state.calls.size, stopped: state.stopped, capNano };
       },
       close() {
