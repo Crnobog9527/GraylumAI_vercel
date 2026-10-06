@@ -1,10 +1,10 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, unlinkSync, writeSync } from 'node:fs';
-import { homedir } from 'node:os';
+import { userInfo } from 'node:os';
 import { join } from 'node:path';
 import { assert, settlementNano } from '../cdc-b2-eval/reasoningSource.mjs';
 
-export const root = join(homedir(), '.graylum/cdc-writeback-v2-20261006');
+export const root = join(userInfo().homedir, '.graylum/cdc-writeback-v2-20261006');
 export const capNano = 5_000_000_000;
 const integer = value => Number.isSafeInteger(value) && value >= 0;
 
