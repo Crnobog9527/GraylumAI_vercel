@@ -3,7 +3,7 @@
  * All rights reserved.
  * This code is proprietary and confidential.
  */
-
+import { reconcileApprovedPackageRefundWebhook } from './payments/packageRefundWebhook';
 import { retrievePaidStripeInvoice, retrieveInvoiceSubscription } from './payments/stripeInvoiceEvidence';
 import { recordStripeInvoiceConflict } from './payments/stripeConflictEvidence';
 import type Stripe from 'stripe';
@@ -19,7 +19,6 @@ import {
   reconcileSubscriptionRefundCreditGrants,
 } from './subscriptionCreditGrants';
 import { isSubscriptionPlanChangeOrder } from './subscriptionPlanChangeLock';
-
 type SupabaseLikeClient = any;
 type SubscriptionRefundOrderRow = {
   id?: string | null;
@@ -74,7 +73,6 @@ type StripeRefundWebhookEvent =
   | (Stripe.Event & { type: 'refund.created' | 'refund.updated'; data: { object: Stripe.Refund } })
   | (Stripe.Event & { type: 'charge.refund.updated' | 'refund.failed'; data: { object: Stripe.Refund } })
   | (Stripe.Event & { type: 'charge.refunded'; data: { object: Stripe.Charge } });
-
 const STRIPE_LIST_PAGE_SIZE = 100;
 const STRIPE_LIST_MAX_PAGES = 10;
 const STRIPE_LIST_MAX_ITEMS = 1_000;
@@ -1615,6 +1613,8 @@ export async function reconcileStripeRefund(
   supabase: SupabaseLikeClient,
   input: RefundReconciliationInput,
 ) {
+  const approval = await reconcileApprovedPackageRefundWebhook(supabase, input);
+  if (approval.handled) return approval.result;
   const facts = 'charge' in input ? buildChargeRefundFacts(input) : buildRefundFacts(input);
   // Alipay refunds are asynchronous. Pending/canceled refunds must not mark
   // an order refunded or consume the existing financial idempotency key.
