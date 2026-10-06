@@ -98,7 +98,6 @@ describe('ordinary eligibility and evidence', () => {
     (i: RefundPolicyInput) => { i.order.kind = 'unknown'; },
     (i: RefundPolicyInput) => { i.order.paidMinor = 0; },
     (i: RefundPolicyInput) => { i.feePermitted = 'unknown'; },
-    (i: RefundPolicyInput) => { i.feePermitted = 'not_permitted'; },
   ])('requires evidence instead of inferring a safe default (%#)', edit => {
     const input = fixture(); edit(input);
     expect(evaluateRefundPolicy(input)).toMatchObject({ status: 'review_required', quote: null });
@@ -139,10 +138,12 @@ function history() {
     completeAccountHistory: true, settlementState: 'clear', rows: [] as Array<{
       id: string; user_id: string; created_at: string; amount: number | string;
       type: string; ledger_type: string | null; reason_code: string | null;
+      counts_as_spend?: boolean; source_type?: string; idempotency_key?: string;
     }> };
 }
 function row(amount: number | string, type = 'consumption', created_at = boundary) {
-  return { id: 'ledger-fixture', user_id: 'subject-fixture', created_at, amount, type, ledger_type: null, reason_code: null };
+  return { id: 'ledger-fixture', user_id: 'subject-fixture', created_at, amount, type,
+    ledger_type: ['consumption', 'deduction'].includes(type) ? 'spend' : null, reason_code: null };
 }
 
 describe('read-only account-wide consumption assembly', () => {
@@ -190,6 +191,30 @@ describe('read-only account-wide consumption assembly', () => {
   it('preserves uncertainty even when a definite consumption already rejects ordinary refunds', () => {
     const input = history(); input.rows = [row(-1), { ...row(-2, 'adjustment'), id: 'unknown-debit' }];
     expect(assembleRefundConsumption(input)).toMatchObject({ state: 'consumed', settlementState: 'unknown' });
+  });
+  it.each(['refund_clawback', 'adjustment', 'expiration'])('does not count authoritative %s as consumption', ledger_type => {
+    const input = history(); input.rows = [{ ...row(-1, 'deduction'), ledger_type, counts_as_spend: false }];
+    expect(assembleRefundConsumption(input)?.state).toBe('unused');
+    const policy = fixture(); policy.consumption = assembleRefundConsumption(input)!;
+    expect(evaluateRefundPolicy(policy).status).toBe('eligible');
+  });
+  it('uses existing legacy normalization and refuses conflicting semantics', () => {
+    const input = history();
+    input.rows = [{ ...row(-1), ledger_type: null, source_type: 'ai_task' }];
+    expect(assembleRefundConsumption(input)?.state).toBe('consumed');
+    input.rows = [{ ...row(-1), ledger_type: null, source_type: 'admin' }];
+    expect(assembleRefundConsumption(input)?.state).toBe('unused');
+    input.rows = [{ ...row(-1), ledger_type: 'spend', counts_as_spend: false }];
+    expect(assembleRefundConsumption(input)?.state).toBe('unresolved');
+    input.rows = [{ ...row(-1), ledger_type: 'new-unknown-type' }];
+    expect(assembleRefundConsumption(input)?.state).toBe('unresolved');
+  });
+  it('quotes the full eligible amount when a verified prohibition disallows the fee', () => {
+    const input = fixture(); input.feePermitted = 'not_permitted';
+    expect(evaluateRefundPolicy(input)).toMatchObject({ status: 'eligible', executable: false,
+      quote: { basisMinor: 6900, feeMinor: 0, netMinor: 6900 } });
+    input.feePermitted = 'unknown';
+    expect(evaluateRefundPolicy(input)).toMatchObject({ status: 'review_required', quote: null });
   });
   it('does not mutate supplied evidence', () => {
     const input = history(); input.rows = [row(-1)]; const copy = JSON.stringify(input);

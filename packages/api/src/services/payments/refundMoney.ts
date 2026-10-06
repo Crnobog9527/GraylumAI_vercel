@@ -11,6 +11,7 @@ export function calculateRefundMoney(input: {
   paidMinor: number;
   refundedMinor: number;
   basisMinor: number;
+  feePermitted?: boolean;
 }) {
   const paid = minorAmount(input.paidMinor);
   const refunded = minorAmount(input.refundedMinor);
@@ -18,7 +19,11 @@ export function calculateRefundMoney(input: {
   if (paid === 0n || basis === 0n || refunded > paid || basis > paid) {
     throw new Error('PAY_COMMON_REFUND_AMOUNT_INVALID');
   }
-  const fee = basis * 6n / 100n;
+  // Only a verified legal prohibition removes the fixed fee; no arbitrary rate.
+  if (input.feePermitted !== undefined && typeof input.feePermitted !== 'boolean') {
+    throw new Error('PAY_COMMON_REFUND_FEE_EVIDENCE_INVALID');
+  }
+  const fee = input.feePermitted === false ? 0n : basis * 6n / 100n;
   const net = basis - fee;
   if (net > paid - refunded) throw new Error('PAY_COMMON_REFUND_EXCEEDS_REMAINING');
   return { basisMinor: Number(basis), feeMinor: Number(fee), netMinor: Number(net),

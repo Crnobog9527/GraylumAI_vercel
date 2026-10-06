@@ -1,6 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { z } from 'zod';
 import { refundTime } from './refundMoney';
+import { countsAsCreditSpend, normalizeCreditLedgerType } from '../creditLedger';
 
 const reference = z.string().trim().min(1).max(160);
 const time = z.string().refine(value => refundTime(value) !== null);
@@ -23,6 +24,9 @@ const ledgerRowSchema = z.object({
   type: z.string(),
   ledger_type: z.string().nullable(),
   reason_code: z.string().nullable(),
+  counts_as_spend: z.boolean().nullable().optional(),
+  source_type: z.string().nullable().optional(),
+  idempotency_key: z.string().nullable().optional(),
 }).strict();
 const evidenceSchema = z.object({
   userId: reference,
@@ -60,13 +64,20 @@ export function assembleRefundConsumption(input: unknown): RefundConsumption | n
     const amount = String(row.amount);
     const nonzero = /[1-9]/.test(amount);
     const negative = amount.startsWith('-') && nonzero;
-    const spend = row.type === 'consumption' || row.type === 'deduction'
-      || row.ledger_type === 'spend' || row.reason_code === 'bill2_spend';
-    if (spend) {
+    const semantic = normalizeCreditLedgerType(row);
+    const knownSemantic = ['grant', 'spend', 'refund_clawback', 'adjustment', 'expiration'].includes(row.ledger_type ?? '');
+    if (row.ledger_type && !knownSemantic) { unresolved = true; continue; }
+    if (knownSemantic && typeof row.counts_as_spend === 'boolean'
+      && row.counts_as_spend !== (semantic === 'spend')) { unresolved = true; continue; }
+    if (countsAsCreditSpend(row)) {
       if (negative) consumed = true;
-      else if (nonzero) unresolved = true; // Invalid sign, not evidence of no usage.
-    } else if (negative && row.reason_code !== 'bill2_reserve') {
-      // An unclassified debit could be consumption: do not guess it away.
+      else if (nonzero) unresolved = true;
+    } else if (negative && !knownSemantic && semantic === 'adjustment'
+      && row.source_type !== 'admin' && row.reason_code !== 'bill2_reserve'
+      && !row.idempotency_key?.startsWith('admin_adjustment:')
+      && !row.idempotency_key?.startsWith('admin_credit_deduction:')) {
+      // Unclassified legacy debits need evidence. Do not override authoritative
+      // non-spend types with the legacy deduction label or amount sign.
       unresolved = true;
     }
   }
