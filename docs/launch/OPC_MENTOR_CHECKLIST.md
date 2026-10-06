@@ -18,7 +18,7 @@ hostTurnContext 的每个字段携带 value、nature、basis、source、protecte
 
 ## 本机验证与迁移
 
-0183 只替换已有函数，不添加表、RPC 家族、权限或配置。保存响应是向后兼容的附加字段；新增冻结元数据可被旧代码忽略。保留原有权限、项目锁和 requestId 比较。与其他任务的 0182 编号错开；built-fingerprint.json 是共享生成文件，本 PR 只包含本迁移对应函数条目，不能用本分支指纹覆盖其他迁移的条目。
+0182 只替换已有函数，不添加表、RPC 家族、权限或配置。保存响应是向后兼容的附加字段；新增冻结元数据可被旧代码忽略。保留原有权限、项目锁和 requestId 比较。当前 staging 的下一迁移序号为 0182，仓库检查禁止跳号；与 #699 的另一个 0182 是并行 PR 的编号冲突，后合入者必须基于新 staging 重编号并重跑迁移检查，不能同时按原编号合入。built-fingerprint.json 是共享生成文件，本 PR 只包含本迁移对应函数条目，不能用本分支指纹覆盖其他迁移的条目。
 
 所有数据库验证仅在一次性本机 Docker PostgreSQL 上执行。撤回时优先回退后端代码；额外响应字段与元数据无损兼容。若要撤回函数定义，应从应用前的数据库定义恢复这四个函数（opc_information、runtime_work_projection、opc_capture_apply、opc_historical_reach），保留已保存 values、版本、来源和请求记录；不执行早期 0159 整体回滚，也不删除业务数据。未执行任何远端迁移。
 

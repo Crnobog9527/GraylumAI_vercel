@@ -215,10 +215,14 @@ it('RUNTIME: capture complete callback persists and new projection strips privat
   await f.save('user');
   await f.apply(await f.seed(output([patch('suggestion')])));
   const projection = (await db.query('select runtime_work_projection($1,$2,$3) v', [f.actor, f.d.sessionId, f.d.roundId])).rows[0].v;
-  expect(projection.steps['step-0'].fieldMeta.goal).toMatchObject({ protected: true });
+  expect(projection.steps['step-0'].fieldMeta.goal).toEqual({protected:true,source:'user',basis:'user_statement',hasPendingSuggestion:true});
   expect(projection.steps['step-0'].information.goal.value).toBe('user');
   const view = await f.read();
   expect(view.information['step-0'].meta.goal.suggestion.value).toBe('suggestion');
+  await db.query("update runtime_executions set unavailable_reason='revoked' where id=$1",
+    [view.information['step-0'].meta.goal.suggestion.executionId]);
+  const hidden=(await db.query('select runtime_work_projection($1,$2,$3) v',[f.actor,f.d.sessionId,f.d.roundId])).rows[0].v;
+  expect(hidden.steps['step-0'].fieldMeta.goal.hasPendingSuggestion).toBe(false);
 });
 
 it.each(['nonempty', 'cleared', 'confirmed', 'deferred', 'changed-fingerprint', 'missing-record', 'A-B-A', 'A-empty-A'])
@@ -386,7 +390,7 @@ it('RUNTIME: capture rollback rejects a second rollback, preserves values and pr
   const rollback = readFileSync(resolve('../../docs/launch/rollback/CONVERSATION_CAPTURE_B1.sql'), 'utf8');
   const forward = readFileSync(resolve('../db/migrations/0159_opc_capture.sql'), 'utf8');
   // Exercise the historical rollback against its exact 0159 definitions, then restore current migration.
-  const latest = readFileSync(resolve('../db/migrations/0183_opc_mentor_checklist.sql'), 'utf8');
+  const latest = readFileSync(resolve('../db/migrations/0182_opc_mentor_checklist.sql'), 'utf8');
   for (const name of ['opc_information','runtime_work_projection','opc_capture_apply']) {
     await db.query(forward.match(new RegExp('CREATE OR REPLACE FUNCTION ' + name + '[\\s\\S]*?END \\$\\$;'))![0]);
   }
@@ -431,7 +435,7 @@ it.each(['ascii', 'utf8'])('RUNTIME: full fields and protected markers fit 32768
     await f.service.information({ draftId: f.draft.draftId, requestId: randomUUID(), stepId, expectedVersion: step.version, values });
   }
   const root = resolve(import.meta.dirname, '../../../../..');
-  const forward = readFileSync(resolve(root, 'packages/db/migrations/0183_opc_mentor_checklist.sql'), 'utf8');
+  const forward = readFileSync(resolve(root, 'packages/db/migrations/0182_opc_mentor_checklist.sql'), 'utf8');
   const rollback = readFileSync(resolve(root, 'docs/launch/rollback/CONVERSATION_CAPTURE_B1.sql'), 'utf8');
   const oldProjection = rollback.match(/CREATE OR REPLACE FUNCTION runtime_work_projection[\s\S]*?END \$\$;/)![0];
   let oldId: string;
@@ -806,7 +810,7 @@ it('RUNTIME: migration rejects an unexpected previous function definition before
     await db.query('rollback');
     expect((await db.query("select md5(pg_get_functiondef('opc_capture_apply(uuid,uuid,uuid)'::regprocedure)) h")).rows[0].h).toBe(before);
   } finally { await db.query('rollback'); await db.query(original); }
-  const latest = readFileSync(resolve('../db/migrations/0183_opc_mentor_checklist.sql'), 'utf8');
+  const latest = readFileSync(resolve('../db/migrations/0182_opc_mentor_checklist.sql'), 'utf8');
   await db.query(latest);
 });
 
