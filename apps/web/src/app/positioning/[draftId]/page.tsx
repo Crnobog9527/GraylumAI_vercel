@@ -1297,8 +1297,8 @@ function PositioningDraftContent({draftId}:{draftId:string}){
     return step.dependsOn ? step.dependsOn.every(id => snap.steps[id]?.valid) : steps.indexOf(step) <= firstPending;
   }
   function openReview(stepId: string) { setActiveStep(stepId); confirmation.open(stepId, d.information[stepId], infoEditsRef.current[stepId], snap.steps); }
-  /** “我要改”: show the right checklist with these fields marked, cursor in the first. */
-  function highlightFields(step: string, ids: string[]) { setResultOpen(true); setReveal(n => n + 1); setHighlight(ids); focusChecklistField(step, ids[0]); }
+  const highlightFields = (step: string) => (ids: string[]) => { // “我要改”: show the checklist, mark these fields, cursor in the first.
+    setResultOpen(true); setReveal(n => n + 1); setHighlight(ids); focusChecklistField(step, ids[0]); };
   function retrySave(stepId: string) {
     const values = infoEditsRef.current[stepId];
     if (values) void enqueueInformation(stepId, values).catch(() => setError("自动保存仍未成功。内容已保留，请稍后重试。"));
@@ -1457,10 +1457,10 @@ function PositioningDraftContent({draftId}:{draftId:string}){
                     recovery: recoveryNeedsUser[0] && !busy
                       ? { readable: recoveryNeedsUser[0].readable, onClick: () => void recoverPendingStep(recoveryNeedsUser[0]!.step) } : null })]}/>
                   </div>
-                  {!manualEntry && snap.state === "draft" && !s.valid && <StepConfirmCard title={step.title} resuming={hasPendingConfirmation}
-                    model={confirmCardModel(d.information[step.id], infoEdits[step.id])} disabled={busy || hasPendingStepRequest} onReview={() => openReview(step.id)}
-                    canConfirm={confirmableStep(step) && !pendingMentor && !awaitingReply && !liveOnly} onEdit={ids => highlightFields(step.id, ids)}
-                    onConfirm={() => confirmation.confirmNow(step.id, d.information[step.id], infoEditsRef.current[step.id], snap.steps)}/>}
+                  {!manualEntry && snap.state === "draft" && !s.valid && <StepConfirmCard title={step.title} onReview={() => openReview(step.id)}
+                    model={confirmCardModel(d.information[step.id], infoEdits[step.id])} resuming={confirmation.envelopeState(step.id).kind === "valid"}
+                    canConfirm={confirmableStep(step) && !pendingMentor && !awaitingReply && !liveOnly} disabled={busy || hasPendingStepRequest}
+                    onConfirm={() => confirmation.confirmNow(step.id, d.information[step.id], infoEdits[step.id], snap.steps)} onEdit={highlightFields(step.id)}/>}
                   <WorkComposer value={mentorInput} onChange={setMentorInput} label="给导师的回复" placeholder={OTHER_PLACEHOLDER} attachment={dock} maxLength={8000} disabled={snap.state!=="draft"} sendDisabled={sendLocked} onSend={skill=>{if(skill)void free.send(mentorInput,skill);else void ask(step);}}/>
                   <p className="text-xs text-[var(--text-secondary)]">
                     同一账号的步骤共用这条对话，未确认内容保留在草稿中。{d?.runtimeMode==='staging_test'?'当前使用真实模型，仅处理你提供的资料。':'当前为隔离模拟，不调用真实模型。'}

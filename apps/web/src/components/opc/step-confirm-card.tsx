@@ -15,11 +15,9 @@ export type ConfirmCardModel = {
   updates: number;
 };
 
-const SHORT = 40;
-const short = (text: string) => { const chars = Array.from(text.trim()); return chars.length > SHORT ? chars.slice(0, SHORT).join("") + "…" : chars.join(""); };
 
 /**
- * What the step's confirmation card shows. A field the user has edited locally reads as theirs,
+ * What the step's confirmation card shows, every filled value in full. A field the user has edited locally reads as theirs,
  * whatever the server recorded before. Uses existing data only (status, source, Skill role); the
  * server's own readiness signal can replace `ready` later without changing the card.
  */
@@ -28,7 +26,8 @@ export function confirmCardModel(info: StepInformation | undefined, edits?: Reco
   const rows = (info?.schema ?? []).filter(field => hasContent(shownValue(info, edits, field.id))).map(field => {
     const value = shownValue(info, edits, field.id);
     const look = !editedLocally(info, edits, field.id) && needsLook(value, field, fieldMeta(info, field.id));
-    return { id: field.id, title: field.title, text: short(value.value), look, state: fieldState(value) };
+    // The whole value: one click confirms exactly what the card shows, never an unseen remainder.
+    return { id: field.id, title: field.title, text: value.value.trim(), look, state: fieldState(value) };
   });
   return { ready: progress.ready, rows, look: rows.filter(row => row.look).map(row => row.id),
     missing: progress.missingRequired.map(field => ({ id: field.id, title: field.title })), updates: progress.updates };

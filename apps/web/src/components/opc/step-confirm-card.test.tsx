@@ -50,13 +50,13 @@ describe("confirmCardModel", () => {
     expect(model.look).toEqual(["audience", "position"]);
     expect(model.missing).toEqual([]);
   });
-  it("treats a local edit as the user's own and shortens long values", () => {
+  it("treats a local edit as the user's own and shows long values in full", () => {
     const long = "很长的受众描述".repeat(10);
     const model = confirmCardModel(info(), { ...info().values!, audience: v(long) });
     expect(model.look).toEqual(["position"]);
     // The edit buffer carries unchanged fields too: those keep their origin.
     expect(confirmCardModel(info(), { ...info().values! }).look).toEqual(["audience", "position"]);
-    expect(Array.from(model.rows.find(row => row.id === "audience")!.text)).toHaveLength(41);
+    expect(model.rows.find(row => row.id === "audience")!.text).toBe(long);
   });
   it("names the missing required items", () => {
     const i = info(); i.values!.audience = v("");
