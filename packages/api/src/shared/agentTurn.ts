@@ -136,6 +136,8 @@ export type AgentTurnOutcome = {
   code?: 'REPORT_MEMBERSHIP_REQUIRED' | 'REPORT_ENTITLEMENTS_UNAVAILABLE' | 'REPORT_SOURCE_CONFLICT'
     | 'RUNTIME_WAITING_CREDITS' | 'RUNTIME_WAITING_RESUME' | 'RUNTIME_USAGE_CONFIGURATION_REQUIRED';
   executionId?: string; cursor?: number; epoch?: number; remainingCalls?: number;
+  /** Fixed host-authored notice; never raw database or provider details. */
+  notice?: string;
   state: AgentTurnState;
   body?: string;
   summary?: string;

@@ -133,3 +133,18 @@ it('holds even the terminal native snapshot until the 100ms window ends',async()
  expect((await stream.next()).value).toEqual({type:'result',result:{state:'completed'}});
  await stream.next();
 });
+
+it('streams the fixed claim notice without losing the original state or preceding progress', async () => {
+ const {billingClaimNotice,withClaimNotice}=await import('./claimNotice');
+ const {BillingClaimRejection}=await import('../bill2/claimFailure');
+ const notice=billingClaimNotice(new BillingClaimRejection('BILL2_START_THRESHOLD_UNCONFIGURED'));
+ for(const result of [{state:'cancelled' as const,notice},{state:'pending' as const,notice},
+  withClaimNotice({state:'waiting_credits' as const,code:'RUNTIME_WAITING_CREDITS' as const})]){
+  const events=[];
+  for await(const event of streamOriginalExecution(async progress=>{
+   progress({type:'text',text:'已有回复'});return result;
+  },undefined,'runtime.executeStream'))events.push(event);
+  expect(events).toEqual([{type:'text',text:'已有回复'},{type:'result',result}]);
+  expect(events[1]).toHaveProperty('result.notice',result.notice);
+ }
+});
