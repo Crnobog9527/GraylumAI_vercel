@@ -66,12 +66,14 @@ FROM public.bill2_receipts x JOIN public.bill2_calls c ON c.id = x.call_id
 JOIN matches r ON r.id = c.run_id AND r.match_count = 1
 ORDER BY c.sequence, x.created_at, x.id;
 
--- Check deployed function identity without invoking a mutating recovery function.
+-- Selective function fingerprints only; not a substitute for baseline/fingerprint.sql.
+-- Read definitions without invoking a mutating recovery function.
 SELECT p.oid::regprocedure::text AS function_signature, md5(pg_get_functiondef(p.oid)) AS definition_md5
 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
 WHERE n.nspname = 'public' AND p.proname IN
   ('runtime_pending_financial_batch', 'runtime_financial_recovery', 'bill2_recovery_claim',
    'bill2_read', 'bill2_pending_calls', 'bill2_record',
+   'bill2_legacy_refund', 'bill2_legacy_settle',
    'bill2_finalize', 'bill2_close', 'bill2_cancel', 'bill2_payg_metering_review_snapshot')
 ORDER BY function_signature;
 ROLLBACK;
