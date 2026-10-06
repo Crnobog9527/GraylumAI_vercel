@@ -8,8 +8,9 @@ export const root = join(userInfo().homedir, '.graylum/cdc-writeback-v2-20261006
 export const capNano = 5_000_000_000;
 const integer = value => Number.isSafeInteger(value) && value >= 0;
 
-// One private journal for all four stages. A pending call or a recorded stop is terminal:
-// restarting the process must never turn an uncertain request into a fresh dispatch.
+// A pending call or a recorded stop is terminal for its journal. A separately
+// authorized batch carries all old exposure without changing the stopped journal.
+// Restarting a process must never turn an uncertain request into a fresh dispatch.
 export function budgetState(events) {
   const state = { settledNano: 0, heldNano: 0, pending: null, stopped: false, calls: new Set() };
   for (const event of events) {
