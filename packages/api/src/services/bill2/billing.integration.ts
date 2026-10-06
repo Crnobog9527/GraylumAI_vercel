@@ -553,7 +553,7 @@ it('BILL2: historical receipt erasure preserves v1/v2 accounting and immutable e
   const {receiptConcurrency}=await import(/* @vite-ignore */new URL('concurrency.mjs',base).href);
   await receiptCases(db,report);
   await receiptConcurrency({db,Client:pg.Client,connectionString,report});
-  expect(report.checks).toHaveLength(6);
+  expect(report.checks).toHaveLength(8);
  }finally{
   await db.query('RESET ROLE');
   if(prior)await db.query("update system_settings set value=$1 where key='billing_payg_start_thresholds'",[prior.value]);
