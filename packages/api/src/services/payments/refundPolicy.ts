@@ -14,7 +14,7 @@ const inputSchema = z.object({
     paidAt: time, paidMinor: minor, refundedMinor: minor,
     paymentEvidenceRef: ref,
     kind: z.enum(['membership_first', 'credit_package', 'pro_to_gold', 'renewal', 'unknown']),
-    refundState: z.enum(['none', 'pending', 'refunded', 'disputed', 'unknown']),
+    refundState: z.enum(['none', 'partial', 'pending', 'refunded', 'disputed', 'unknown']),
   }).strict(),
   // The binding is established by the server/admin; ticket text is not evidence.
   ticket: z.object({ id: ref, userId: ref, orderId: ref, submittedAt: time, bindingEvidenceRef: ref }).strict(),
@@ -34,6 +34,7 @@ const inputSchema = z.object({
   exceptionBasis: z.object({
     reason: z.enum(['feature_reduction', 'unjust_termination']),
     orderId: ref, currency: z.string(), basisMinor: minor, evidenceRef: ref,
+    priorRefundedMinor: minor.optional(),
   }).strict().optional(),
 }).strict();
 export type RefundPolicyInput = z.infer<typeof inputSchema>;
@@ -79,8 +80,10 @@ export function evaluateRefundPolicy(raw: unknown): RefundPolicyResult {
     || refundTime(consumption.through)! !== observed) return review('evidence_time_mismatch');
   if (order.paidMinor <= 0 || order.refundedMinor > order.paidMinor) return review('invalid_payment_amount');
   if (order.refundState === 'disputed') return reject('disputed_order');
-  if (order.refundState === 'refunded' || order.refundedMinor > 0) return reject('already_refunded');
-  if (order.refundState !== 'none') return review('refund_unresolved');
+  if (order.refundState === 'refunded' || order.refundedMinor === order.paidMinor) return reject('already_refunded');
+  if (order.refundState !== 'none' && order.refundState !== 'partial') return review('refund_unresolved');
+  if ((order.refundState === 'partial') !== (order.refundedMinor > 0)) return review('refund_evidence_mismatch');
+  if (order.refundedMinor > 0 && input.reason === 'ordinary') return review('prior_refund_requires_review');
   if (input.accountState === 'violation_terminated') return reject('violation_terminated');
   if (input.accountState === 'unknown') return review('account_unresolved');
   if (order.kind === 'unknown') return review('purchase_kind_unresolved');
@@ -103,6 +106,11 @@ export function evaluateRefundPolicy(raw: unknown): RefundPolicyResult {
     if (!basis) return review('exception_contract_amount_required');
     if (basis.orderId !== order.id || basis.currency !== order.currency || basis.reason !== input.reason) {
       return review('exception_evidence_mismatch');
+    }
+    // The contract amount must explicitly account for the exact prior cash refund.
+    // A remaining cash cap alone cannot prove a distinct amount is still owed.
+    if (order.refundedMinor > 0 && basis.priorRefundedMinor !== order.refundedMinor) {
+      return review('prior_refund_contract_required');
     }
     if (order.kind === 'credit_package' && input.reason === 'feature_reduction') {
       return review('exception_contract_scope_required');

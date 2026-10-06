@@ -77,7 +77,6 @@ describe('ordinary eligibility and evidence', () => {
     ['renewal', (i: RefundPolicyInput) => { i.order.kind = 'renewal'; }],
     ['account_consumed_since_payment', (i: RefundPolicyInput) => { i.consumption.state = 'consumed'; }],
     ['disputed_order', (i: RefundPolicyInput) => { i.order.refundState = 'disputed'; }],
-    ['already_refunded', (i: RefundPolicyInput) => { i.order.refundedMinor = 1; }],
     ['already_refunded', (i: RefundPolicyInput) => { i.order.refundState = 'refunded'; }],
     ['violation_terminated', (i: RefundPolicyInput) => { i.accountState = 'violation_terminated'; }],
   ] as const)('rejects %s', (reason, edit) => {
@@ -157,6 +156,36 @@ describe('exception preview', () => {
       ? 'end_membership_keep_granted' : 'end_membership_refund_unused_purchased');
     input.consumption.settlementState = 'unknown';
     expect(evaluateRefundPolicy(input).status).toBe('review_required');
+  });
+  it.each(['feature_reduction', 'unjust_termination'] as const)('quotes distinct %s remainder after partial refund', reason => {
+    const input = fixture(); input.reason = reason;
+    input.order.refundState = 'partial'; input.order.refundedMinor = 5960;
+    input.exceptionBasis = { reason, orderId: input.order.id, currency: 'usd', basisMinor: 1000,
+      priorRefundedMinor: 5960, evidenceRef: 'distinct-owed-remainder' };
+    expect(evaluateRefundPolicy(input)).toMatchObject({ status: 'eligible', executable: false,
+      quote: { netMinor: 940, feeMinor: 60 } });
+    input.exceptionBasis.basisMinor = 1002;
+    expect(evaluateRefundPolicy(input).reason).toBe('invalid_refund_amount');
+  });
+  it.each([undefined, 1])('requires contract evidence to account for prior refunded cash: %s', priorRefundedMinor => {
+    const input = fixture(); input.reason = 'feature_reduction';
+    input.order.refundState = 'partial'; input.order.refundedMinor = 100;
+    input.exceptionBasis = { reason: input.reason, orderId: input.order.id, currency: 'usd', basisMinor: 1000,
+      priorRefundedMinor, evidenceRef: 'contract' };
+    expect(evaluateRefundPolicy(input).reason).toBe('prior_refund_contract_required');
+  });
+  it.each(['pending', 'unknown', 'disputed', 'refunded'] as const)('does not quote a partial order marked %s', refundState => {
+    const input = fixture(); input.reason = 'feature_reduction';
+    input.order.refundState = refundState; input.order.refundedMinor = 100;
+    expect(evaluateRefundPolicy(input)).toMatchObject({ quote: null, executable: false });
+  });
+  it('requires manual reconciliation for ordinary partials and inconsistent refund facts', () => {
+    const input = fixture(); input.order.refundedMinor = 1;
+    expect(evaluateRefundPolicy(input).reason).toBe('refund_evidence_mismatch');
+    input.order.refundState = 'partial';
+    expect(evaluateRefundPolicy(input).reason).toBe('prior_refund_requires_review');
+    input.order.refundedMinor = input.order.paidMinor;
+    expect(evaluateRefundPolicy(input).reason).toBe('already_refunded');
   });
   it('requires matching exception amount evidence and rejects abuse termination', () => {
     const input = fixture(); input.reason = 'unjust_termination';
