@@ -35,12 +35,13 @@ node packages/db/tests/run-db-baseline-replay.mjs --local-only --write-built --a
 ```
 
 `purchase-admission.sql` 也由现有 CI 的数据库回放执行。完整命令结果见 PR 交接；
-迁移编号必须在 #674 的 0176 合入后连续，不建立占位迁移或放宽检查。
+迁移编号从 staging 的 0176 连续到本任务的 0177，不建立占位迁移或放宽检查。
 
 ## Validation handoff
 
 本任务不合并、不连接远端数据库、不应用远端迁移、不修改配置。
-后续获授权窗口在 staging 已完成必要交付后执行以下 Stripe 测试模式验收：
+主窗口在 Owner 批准后先把 0177 应用到 staging，再完成审计和合并；本任务不执行这些操作。
+服务端交付后，在 staging 执行以下 Stripe 测试模式验收：
 
 1. 免费身份打开积分包结账，记下金额，不付款。
 2. 升级为会员，再点击同一个积分包。
