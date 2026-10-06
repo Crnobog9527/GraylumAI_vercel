@@ -50,6 +50,7 @@
     "./src/services/modelCapabilities": "./src/services/modelCapabilities.ts",
     "./services/bill2": "./src/services/bill2/service.ts",
     "./skills/workflowManifest": "./src/services/skills/workflowManifest.ts",
+    "./skills/modulePublication": "./src/services/skills/modulePublication.ts",
     "./src/services/runtime/automaticRecovery": "./src/services/runtime/automaticRecovery.ts"
   },
   "dependencies": {
