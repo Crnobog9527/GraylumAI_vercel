@@ -26,7 +26,7 @@ const sql=input=>docker(['exec','-i',name,'psql','-X','-qAt','-U','postgres','-d
 const fp=read('packages/db/tests/baseline/fingerprint.sql');
 const objectSql=fp.slice(0,fp.indexOf('-- FINAL'))+'SELECT jsonb_object_agg(k,d ORDER BY k) FROM grouped;';
 const snapshot=()=>JSON.parse(ok(sql(objectSql)));
-const migrationPath='packages/db/migrations/0182_erasure_run_content.sql';
+const migrationPath='packages/db/migrations/0183_erasure_run_content.sql';
 const migration=read(migrationPath);
 const report={development,build:null,checks:[],failed:null};
 let client;
@@ -51,10 +51,10 @@ try {
   applyServerOnly:input=>outcome(docker(['exec',name,'psql','-X','-qAt','-U','postgres','-d','b2a','-c',input])),
   fingerprint:development?undefined:snapshot});
  assert.equal(report.build.failed,null);
- assert.ok(before,'0182 must be applied through the canonical build plan');
+ assert.ok(before,'0183 must be applied through the canonical build plan');
  const once=snapshot();
- ok(sql(migration));assert.deepEqual(snapshot(),once,'repeat 0182 is a structural no-op');
- report.checks.push('0182 canonical application/replay: identical full catalog');
+ ok(sql(migration));assert.deepEqual(snapshot(),once,'repeat 0183 is a structural no-op');
+ report.checks.push('0183 canonical application/replay: identical full catalog');
  // Refuse source drift before any lasting change, then verify exact no-data rollback.
  ok(sql(read('packages/db/tests/erasure-run/rollback.sql')));
  assert.deepEqual(snapshot(),before,'empty structural rollback restores pre-migration catalog');

@@ -91,5 +91,5 @@ node packages/db/tests/v3/run-workbench.mjs --bill2-core-only --without-app --sc
 
 不访问远端数据库、不执行 staging 迁移、不改配置、不合并。主窗口负责后续外部交付。
 
-下一切片 0182 的 run 正文清除及验证见 [运行单交接](../erasure-run/README.md)。
+下一切片 0183 的 run 正文清除及验证见 [运行单交接](../erasure-run/README.md)。
 异常收据正文仍未清除；不因 run 已清除而改变本页剩余边界。
