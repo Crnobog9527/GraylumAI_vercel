@@ -363,11 +363,7 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
    try{body=await runPrimary();}
    catch(error){
     if(execution.live||context.inputSelection||!responseConflict)throw error;
-    // Unmarked executions exist on both sides of the selector upgrade. Try the
-    // prior selector only when a saved call rejects the new bytes. Both SDK runs
-    // are replay-only: every response still must match its original hash, tools
-    // reuse their original claims/results, and nothing is dispatched or rewritten.
-    // Marked executions never negotiate a different input policy.
+    // Legacy replay only: response hashes and tool claims remain immutable.
     callSequence=primarySequence;
     body=await runPrimary(true);
    }

@@ -35,13 +35,14 @@
    两条原 mentorTurnStream 测试的正文、调用次数、并发及重发断言均保持第二轮原文；第三轮转换用例随功能撤回。
 2. `bridge.ts`、`policy.ts`、`secondRound.ts` 的 TypeScript 静态导入移除 `.ts` 后缀，共5处，解决 TS5097。
    没有改 tsconfig、编译限制、费用值、预算算法或执行授权判断；工具仍由 tsx 入口加载。
-3. `execute.ts` 已恢复第二轮500行，自动满足500行限制，因此无需保留第三轮精简注释。
+3. `execute.ts` 仅保留此前的回放说明注释精简：5行注释变1行，所有执行语句与第二轮一致。
+   第二轮原文件本机500行，远程合并检查为501行，因此须保留该CI修复；本机现496行。
    大小检查、基线、限制均未放宽。
 4. 容量、准入与请求快照恢复第二轮原文，没有运行快照更新。
    第三轮45字节及对应历史截断变化已不存在，不能保留第三轮快照数值；用恢复后的真实测试计算核验。
 
 以下逐文件覆盖本PR第二轮代码范围及第三轮曾修改的代码，包含测试、快照与工具；
-全仓库 `git diff bbed64ab -- packages scripts apps` 的非空文件只能是上述4个CI文件。
+全仓库 `git diff bbed64ab -- packages scripts apps` 的非空文件只能是上述5个CI文件。
 
 |文件|对比结论|
 |---|---|
@@ -78,7 +79,7 @@
 | `packages/api/src/services/runtime/agentTurnRequest.test.ts` | 逐字相同 |
 | `packages/api/src/services/runtime/cdcBridge.test.ts` | 逐字相同 |
 | `packages/api/src/services/runtime/cdcEval.test.ts` | 逐字相同 |
-| `packages/api/src/services/runtime/execute.ts` | 逐字相同 |
+| `packages/api/src/services/runtime/execute.ts` | CI 行数修复：仅5行回放注释精简为1行，执行语句相同 |
 | `packages/api/src/services/runtime/groundedCard.test.ts` | 逐字相同 |
 | `packages/api/src/services/runtime/groundedCard.ts` | 逐字相同 |
 | `packages/api/src/services/runtime/groundedCardRunner.test.ts` | 逐字相同 |
