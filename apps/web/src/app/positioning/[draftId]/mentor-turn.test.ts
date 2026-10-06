@@ -278,6 +278,18 @@ describe("openingRequest", () => {
 });
 
 describe("turnResultNotice", () => {
+  it("shows the host's fixed notice first, without changing what the turn does (#698)", () => {
+    const notice = "当前任务状态已变化，暂时无法继续，请刷新后查看原任务。";
+    const result = { state: "cancelled" as const, unavailable: "paused" as const, notice };
+    expect(turnResultNotice(result)).toBe(notice);
+    expect(turnResultNotice({ state: "completed", unavailable: "output_truncated", notice })).toBe(notice);
+    expect(envelopeAfterTurn(JSON.stringify({ request }), request.requestId, executionId, result)).toEqual({ release: true });
+    expect(envelopeAfterTurn(JSON.stringify({ request }), request.requestId, executionId, { state: "pending", notice }))
+      .toEqual(envelopeAfterTurn(JSON.stringify({ request }), request.requestId, executionId, { state: "pending" }));
+    // A pause keeps its own notice with 继续; a refused new message is shown by the pause notices.
+    expect(turnResultNotice({ state: "waiting_credits", notice: "余额不足，任务已暂停，请补充积分后继续。" })).toBeNull();
+    expect(turnResultNotice({ state: "completed", admitted: false, executionId, notice })).toBeNull();
+  });
   it("maps each unavailable reason that has a notice, and nothing else", () => {
     expect(turnResultNotice({ state: "completed", unavailable: "output_truncated" })).toBeNull(); // Shown once under the turn.
     expect(turnResultNotice({ state: "cancelled", unavailable: "provider_history" })).toContain("请新开一个对话");

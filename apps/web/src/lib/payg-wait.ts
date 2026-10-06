@@ -60,12 +60,27 @@ export function paygResumeToken(turn: PaygTurn): PaygResumeToken | null {
  * run's calls were used up: the server closed it quietly (#632 P2-3).
  */
 export function organizerSkipped(turn: PaygTurn) {
-  return turn.state === 'cancelled' && Boolean(turn.primaryBody) && turn.organizerComplete === false && turn.remainingCalls === 0;
+  return turn.state === 'cancelled' && Boolean(turn.primaryBody) && turn.organizerComplete !== true && turn.remainingCalls === 0;
 }
 
-/** A turn that still holds the session's organizer: its main reply is saved, the organizer is not done. */
+/**
+ * The host's fixed notice on a turn result (#698, a server whitelist; never raw details). It goes first in
+ * every result notice. A pause keeps its own notice with 继续/去充值, so a paused result shows none here.
+ */
+export function hostNotice(result: unknown): string | null {
+  if (!result || typeof result !== 'object') return null;
+  const { notice, state } = result as { notice?: unknown; state?: unknown };
+  return typeof notice === 'string' && notice.trim() && !isPaygWaiting(state) ? notice.trim() : null;
+}
+
+/**
+ * A turn that still holds the session's organizer: its main reply is saved, the organizer is not done.
+ * runtime_view reports `organizerComplete` as `result ? 'summary'`: null while the turn has no result yet
+ * (every paused or running turn), so only `true` means done. `primaryBody` is only ever saved for a turn
+ * with an attached organizer.
+ */
 export function openOrganizer(turn: PaygTurn) {
-  return Boolean(turn.primaryBody) && turn.organizerComplete === false && turn.state !== 'completed' && turn.state !== 'cancelled';
+  return Boolean(turn.primaryBody) && turn.organizerComplete !== true && turn.state !== 'completed' && turn.state !== 'cancelled';
 }
 
 /**
@@ -110,6 +125,8 @@ export type PaygOutcome = { kind: 'short' } | { kind: 'notice'; text: string };
 export function resumeOutcome(result: unknown): PaygOutcome | null {
   if (!result || typeof result !== 'object') return null;
   const value = result as { state?: unknown; unavailable?: unknown };
+  const notice = hostNotice(result);
+  if (notice) return { kind: 'notice', text: notice };
   const gate = gateResultNotice(value.unavailable);
   if (gate) return { kind: 'notice', text: gate };
   if (['usage_configuration_required', 'RUNTIME_PRICE_UNCONFIRMED', 'RUNTIME_PRICE_CONFIGURATION_PENDING'].includes(String(value.unavailable)))
