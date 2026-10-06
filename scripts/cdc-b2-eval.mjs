@@ -4,14 +4,14 @@ import {readFileSync,writeFileSync,mkdirSync,chmodSync} from 'node:fs';
 import {resolve,join} from 'node:path';
 import {homedir} from 'node:os';
 import {hash,profiles,EXPIRES} from './cdc-b2-eval/policy.ts';
-import {thirdRound,verifyPriorRounds} from './cdc-b2-eval/thirdRound.ts';
+import {secondRound,verifyPriorRound} from './cdc-b2-eval/secondRound.ts';
 import {bridge} from './cdc-b2-eval/bridge.ts';
 import {assertOutsideRepository} from '../packages/api/src/scripts/ac0Probe/paths.ts';
 const [mode,inputArg,approvalId]=process.argv.slice(2);
 if(!['--freeze','--execute'].includes(mode)||!inputArg||mode==='--freeze'&&approvalId)throw new Error('CDC_USAGE');
 const root=resolve(import.meta.dirname,'..'),inputPath=resolve(inputArg);assertOutsideRepository(inputPath);
 const inputBytes=readFileSync(inputPath),plan=JSON.parse(inputBytes);assertOutsideRepository(plan.output);
-verifyPriorRounds(plan);
+verifyPriorRound(plan);
 if(plan.groups.length!==50||plan.groups.flatMap(g=>g.turns).length!==70)throw new Error('CDC_ROSTER');
 const slots=plan.groups.flatMap(g=>g.turns.flatMap(t=>[{slot:t.slot,role:'mentor'},...(t.organize?[{slot:t.slot,role:'organizer'}]:[])]));
 if(slots.length!==100||new Set(slots.map(s=>s.slot+':'+s.role)).size!==100)throw new Error('CDC_ROSTER');
@@ -33,7 +33,7 @@ try{
    !comment.body.split(/\r?\n/).some(line=>line.trim()==='PASS/授权 '+hash(JSON.stringify(manifest))))throw new Error('CDC_APPROVAL_BINDING');
   if(!process.env.GRAYLUM_PAYG_TEST_OPENROUTER_KEY)throw new Error('CDC_KEY_MISSING');
   const locks=join(homedir(),'.graylum/cdc-b2-authorizations');mkdirSync(locks,{recursive:true,mode:0o700});
-  writeFileSync(join(locks,'round-3.lock'),hash(JSON.stringify(manifest)),{flag:'wx',mode:0o600});
+  writeFileSync(join(locks,'round-2.lock'),hash(JSON.stringify(manifest)),{flag:'wx',mode:0o600});
   writeFileSync(join(locks,approvalId+'.lock'),manifest.inputHash,{flag:'wx',mode:0o600});
   plan.output+='/live';mkdirSync(plan.output,{mode:0o700});
   live=await bridge(plan.output,slots,process.env.GRAYLUM_PAYG_TEST_OPENROUTER_KEY);plan.bridge={url:live.url,secret:live.secret};
@@ -49,7 +49,7 @@ try{
  const summary=JSON.parse(readFileSync(plan.output+'/summary.json','utf8'));
  const totals=Object.fromEntries(Object.keys(profiles).map(role=>[role,{calls:summary.rows.filter(r=>r.role===role).length,
   reserveUsd:summary.rows.filter(r=>r.role===role).reduce((sum,r)=>sum+r.reserveNano,0)/1e9}]));
- const manifest={version:3,thirdRound,sourceHash,inputHash:hash(inputBytes),head:git('rev-parse','HEAD'),profiles,
+ const manifest={version:2,secondRound,sourceHash,inputHash:hash(inputBytes),head:git('rev-parse','HEAD'),profiles,
   privateHash:summary.privateHash,totals,totalReserveUsd:summary.rows.reduce((sum,r)=>sum+r.reserveNano,0)/1e9,
   rows:summary.rows,actualDispatches:mode==='--freeze'?0:100};
  writeFileSync(plan.output+'/manifest.json',JSON.stringify(manifest,null,2),{mode:0o600,flag:'wx'});

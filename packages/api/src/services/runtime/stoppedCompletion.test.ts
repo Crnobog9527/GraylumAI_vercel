@@ -164,15 +164,3 @@ it.each(['','Visible prose'])('guarded card stop never reconstructs unchecked ar
  const result=await f.complete(id);
  expect(result).toMatchObject(prose?{state:'completed',body:agentTurnBody('Visib',null)}:{state:'cancelled'});
 });
-it.each([true,false])('stopped confirmation prose replays the same visible coordinates (new contract=%s)',async enabled=>{
- const f=fixture();f.execution.context={...f.execution.context as object,
-  providerRequestFormat:'agent-turn-v5-stream',envelopeOrder:undefined,mentorText:'append-card-v1',
-  tools:['ask_question'],questionContract:QUESTION_CONTRACT,
-  inputSelection:'scope-projection-v2',historySelection:freezeHistorySelection(),
-  hostTurnContext:{stepId:'s',opening:false,checklist:[],...(enabled?{confirmationQuestions:true}:{})}};
- const visible=enabled?'我猜：偏好安静，对吗？':'我猜：偏好安静。';
- f.execution.stop={stopAt:Array.from(visible).length,source:'assistant'};
- f.raws.set(1,f.response('我猜：偏好安静。\n下一行内容'));
- expect(await f.complete(id)).toMatchObject({state:'completed',body:agentTurnBody(visible,null),completeness:'stopped'});
- expect(f.billing.dispatchOnce).not.toHaveBeenCalled();
-});

@@ -1,5 +1,4 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-import {confirmProseTurn} from './inferenceQuestions';
 import {allowedOutput} from './moderation';
 import { agentTurnResult } from './agentTurnResult';
 import { questionMessageFromArguments, QUESTION_CONTRACT, askQuestionTool } from './agentTools';
@@ -97,17 +96,12 @@ export function stoppedCompletion(options: RuntimeExecutorOptions, billing: Retu
     }else if(message?.tool_calls?.length)valid=false;
     try{
       if(valid){
-        if(agent&&context.hostTurnContext?.confirmationQuestions&&!execution.primaryResult?.body){
-          const turn=JSON.parse(body) as {message:string;card:null;body:string};
-          body=confirmProseTurn({...turn,body}).body;
-        }
         const fitted=prepareNativePrimary(body,{}, {envelopeOrder:context.envelopeOrder,appendCard:Boolean(context.mentorText),
           length:choice?.finish_reason==='length',attachedOrganizer:Boolean(context.attachedOrganizer),executionId});
         body=execution.primaryResult?.body??fitted.body;
         capacityLimited=fitted.metadata.completeness==='length_limit'&&choice?.finish_reason!=='length';
         if(agent||step){
           const projection=new NativeProgressProjection({mode:agent?'agent':'message-first',
-            confirmationQuestions:context.hostTurnContext?.confirmationQuestions,
             toolMessage:agent&&Boolean(context.questionContract)&&!context.hostTurnContext?.cardContract,appendCard:Boolean(context.mentorText)});
           let update=projection.appendText(message?.content??'');
           const tool=message?.tool_calls?.[0];

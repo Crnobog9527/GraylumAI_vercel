@@ -6,7 +6,7 @@ exports[`measures final B2 checklist/text with a declared synthetic material dis
   "reserve": 8000,
   "rows": [
     {
-      "currentBytes": 3241,
+      "currentBytes": 3210,
       "fallback": false,
       "fieldChars": 0,
       "inputBytes": 64000,
@@ -17,7 +17,7 @@ exports[`measures final B2 checklist/text with a declared synthetic material dis
       "oldItems": 29,
     },
     {
-      "currentBytes": 5923,
+      "currentBytes": 5892,
       "fallback": false,
       "fieldChars": 100,
       "inputBytes": 64000,
@@ -28,18 +28,18 @@ exports[`measures final B2 checklist/text with a declared synthetic material dis
       "oldItems": 26,
     },
     {
-      "currentBytes": 14023,
+      "currentBytes": 13992,
       "fallback": true,
       "fieldChars": 400,
       "inputBytes": 64000,
       "inputChars": 100,
-      "newBytes": 20368,
-      "newItems": 18,
-      "oldBytes": 22002,
-      "oldItems": 19,
+      "newBytes": 22631,
+      "newItems": 20,
+      "oldBytes": 22631,
+      "oldItems": 20,
     },
     {
-      "currentBytes": 4141,
+      "currentBytes": 4110,
       "fallback": false,
       "fieldChars": 0,
       "inputBytes": 64000,
@@ -50,7 +50,7 @@ exports[`measures final B2 checklist/text with a declared synthetic material dis
       "oldItems": 28,
     },
     {
-      "currentBytes": 6823,
+      "currentBytes": 6792,
       "fallback": false,
       "fieldChars": 100,
       "inputBytes": 64000,
@@ -61,7 +61,7 @@ exports[`measures final B2 checklist/text with a declared synthetic material dis
       "oldItems": 26,
     },
     {
-      "currentBytes": 14923,
+      "currentBytes": 14892,
       "fallback": true,
       "fieldChars": 400,
       "inputBytes": 64000,
@@ -72,7 +72,7 @@ exports[`measures final B2 checklist/text with a declared synthetic material dis
       "oldItems": 18,
     },
     {
-      "currentBytes": 11141,
+      "currentBytes": 11110,
       "fallback": true,
       "fieldChars": 0,
       "inputBytes": 64000,
@@ -83,7 +83,7 @@ exports[`measures final B2 checklist/text with a declared synthetic material dis
       "oldItems": 22,
     },
     {
-      "currentBytes": 13823,
+      "currentBytes": 13792,
       "fallback": true,
       "fieldChars": 100,
       "inputBytes": 64000,
@@ -94,7 +94,7 @@ exports[`measures final B2 checklist/text with a declared synthetic material dis
       "oldItems": 20,
     },
     {
-      "currentBytes": 21923,
+      "currentBytes": 21892,
       "fallback": true,
       "fieldChars": 400,
       "inputBytes": 64000,
@@ -105,7 +105,7 @@ exports[`measures final B2 checklist/text with a declared synthetic material dis
       "oldItems": 12,
     },
     {
-      "currentBytes": 3241,
+      "currentBytes": 3210,
       "fallback": false,
       "fieldChars": 0,
       "inputBytes": 90000,
@@ -116,7 +116,7 @@ exports[`measures final B2 checklist/text with a declared synthetic material dis
       "oldItems": 52,
     },
     {
-      "currentBytes": 5923,
+      "currentBytes": 5892,
       "fallback": false,
       "fieldChars": 100,
       "inputBytes": 90000,
@@ -127,7 +127,7 @@ exports[`measures final B2 checklist/text with a declared synthetic material dis
       "oldItems": 50,
     },
     {
-      "currentBytes": 14023,
+      "currentBytes": 13992,
       "fallback": true,
       "fieldChars": 400,
       "inputBytes": 90000,
@@ -138,7 +138,7 @@ exports[`measures final B2 checklist/text with a declared synthetic material dis
       "oldItems": 42,
     },
     {
-      "currentBytes": 4141,
+      "currentBytes": 4110,
       "fallback": false,
       "fieldChars": 0,
       "inputBytes": 90000,
@@ -149,7 +149,7 @@ exports[`measures final B2 checklist/text with a declared synthetic material dis
       "oldItems": 51,
     },
     {
-      "currentBytes": 6823,
+      "currentBytes": 6792,
       "fallback": false,
       "fieldChars": 100,
       "inputBytes": 90000,
@@ -160,7 +160,7 @@ exports[`measures final B2 checklist/text with a declared synthetic material dis
       "oldItems": 48,
     },
     {
-      "currentBytes": 14923,
+      "currentBytes": 14892,
       "fallback": true,
       "fieldChars": 400,
       "inputBytes": 90000,
@@ -171,7 +171,7 @@ exports[`measures final B2 checklist/text with a declared synthetic material dis
       "oldItems": 42,
     },
     {
-      "currentBytes": 11141,
+      "currentBytes": 11110,
       "fallback": true,
       "fieldChars": 0,
       "inputBytes": 90000,
@@ -182,7 +182,7 @@ exports[`measures final B2 checklist/text with a declared synthetic material dis
       "oldItems": 45,
     },
     {
-      "currentBytes": 13823,
+      "currentBytes": 13792,
       "fallback": true,
       "fieldChars": 100,
       "inputBytes": 90000,
@@ -193,18 +193,18 @@ exports[`measures final B2 checklist/text with a declared synthetic material dis
       "oldItems": 42,
     },
     {
-      "currentBytes": 21923,
+      "currentBytes": 21892,
       "fallback": true,
       "fieldChars": 400,
       "inputBytes": 90000,
       "inputChars": 8000,
-      "newBytes": 38472,
-      "newItems": 34,
-      "oldBytes": 40106,
-      "oldItems": 35,
+      "newBytes": 40735,
+      "newItems": 36,
+      "oldBytes": 40735,
+      "oldItems": 36,
     },
   ],
-  "systemBytes": 23751,
+  "systemBytes": 23708,
   "totalSamples": 18,
 }
 `;

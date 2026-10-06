@@ -1,5 +1,4 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-import {confirmationQuestions} from './inferenceQuestions';
 import {streamingMentorText} from './mentorText';
 import {NativeMessageScanner, NativeTextAccumulator} from './nativeMessageScanner';
 
@@ -31,7 +30,7 @@ export class NativeProgressProjection {
   private source: NativeTextSource;
 
   constructor(private readonly options: {
-    mode: 'message-first' | 'agent'; confirmationQuestions?: boolean; toolMessage?: boolean; maxCodePoints?: number; appendCard?: boolean;
+    mode: 'message-first' | 'agent'; toolMessage?: boolean; maxCodePoints?: number; appendCard?: boolean;
   }) {
     this.source = options.mode === 'agent' ? 'assistant' : 'message';
     this.assistant = new NativeTextAccumulator(options.maxCodePoints);
@@ -46,10 +45,6 @@ export class NativeProgressProjection {
     if (this.toolVisible) return null;
     const source = this.options.mode === 'message-first' ? this.message : this.assistant;
     const delta = source.append(fragment);
-    if (this.options.confirmationQuestions) {
-      const text = confirmationQuestions(source.text, false);
-      return text === this.visible ? null : this.update(text, text.slice(this.visible.length), false);
-    }
     return delta ? this.update(source.text, delta, false) : null;
   }
 
