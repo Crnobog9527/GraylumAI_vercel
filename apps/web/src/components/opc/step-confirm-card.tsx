@@ -45,7 +45,7 @@ export type StepConfirmCardProps = {
   onConfirm: () => void;
   /** Highlight the fields to change in the right checklist. */
   onEdit: (fieldIds: string[]) => void;
-  /** The full review: edit everything, or defer a required item with a written reason. */
+  /** The full review: edit everything, or defer a required item with a written reason. Locked like the confirmation. */
   onReview: () => void;
 };
 
@@ -58,7 +58,7 @@ export function StepConfirmCard({ title, model, resuming, disabled, canConfirm, 
       <p>“{title}”还差：{model.missing.map(field => field.title).join("、")}。可以继续和导师聊，或在右侧直接填写。</p>
       <div>
         <Button variant="outline" disabled={disabled} onClick={() => onEdit(model.missing.map(field => field.id))}>去右侧补充</Button>
-        <button type="button" className={styles.linkButton} disabled={disabled} onClick={onReview}>暂时无法确定，写原因暂缓</button>
+        <button type="button" className={styles.linkButton} disabled={disabled || !canConfirm} onClick={onReview}>暂时无法确定，写原因暂缓</button>
       </div>
     </section>
   );
@@ -72,7 +72,7 @@ export function StepConfirmCard({ title, model, resuming, disabled, canConfirm, 
       <div>
         <Button disabled={disabled || !canConfirm} onClick={onConfirm}>{resuming ? "继续完成确认" : "没问题，进入下一步"}</Button>
         <Button variant="outline" disabled={disabled} onClick={() => onEdit(model.look.length ? model.look : model.rows.map(row => row.id))}>我要改</Button>
-        <button type="button" className={styles.linkButton} disabled={disabled} onClick={onReview}>逐项核对或暂缓</button>
+        <button type="button" className={styles.linkButton} disabled={disabled || !canConfirm} onClick={onReview}>逐项核对或暂缓</button>
       </div>
     </section>
   );

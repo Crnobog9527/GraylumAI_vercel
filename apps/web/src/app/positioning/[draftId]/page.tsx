@@ -92,7 +92,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
     savePlan = trpc.opc.savePlan.useMutation(),
     handoff = trpc.opc.handoff.useMutation();
   const [running, setRunning] = useState(false);
-  const [resultOpen,setResultOpen]=useState(true), [highlight,setHighlight]=useState<string[]>([]), [reveal,setReveal]=useState(0);
+  const [resultOpen,setResultOpen]=useState(true), [highlight,setHighlight]=useState<{ stepId: string; fieldIds: string[] }>(), [reveal,setReveal]=useState(0);
   const [workInfoOpen,setWorkInfoOpen]=useState(false);
   useEffect(()=>{if(!workInfoOpen)return;const close=(event:KeyboardEvent)=>{if(event.key==='Escape')setWorkInfoOpen(false);};window.addEventListener('keydown',close);return()=>window.removeEventListener('keydown',close);},[workInfoOpen]);
   const [resultBodyNode,setResultBodyNode]=useState<HTMLDivElement|null>(null);
@@ -1188,7 +1188,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
   }
   function openReview(stepId: string) { setActiveStep(stepId); confirmation.open(stepId, d.information[stepId], infoEditsRef.current[stepId], snap.steps); }
   const highlightFields = (step: string) => (ids: string[]) => { // “我要改”: show the checklist, mark these fields, cursor in the first.
-    setResultOpen(true); setReveal(n => n + 1); setHighlight(ids); focusChecklistField(step, ids[0]); };
+    setResultOpen(true); setReveal(n => n + 1); setHighlight({ stepId: step, fieldIds: ids }); focusChecklistField(step, ids[0]); };
   function retrySave(stepId: string) {
     const values = infoEditsRef.current[stepId];
     if (values) void autosave.enqueue(stepId).catch(() => setError("自动保存仍未成功。内容已保留，请稍后重试。"));
@@ -1220,9 +1220,9 @@ function PositioningDraftContent({draftId}:{draftId:string}){
     }));
     const reviewed = reviewedStep(review, infoEdits[review.stepId]);
     return <StepReviewDialog title={step.title} schema={info.schema} reviewed={reviewed}
-      updates={shown} deferred={review.deferred} problems={review.problems} changed={review.changed} busy={busy}
+      updates={shown} deferred={review.deferred} problems={review.problems} changed={review.changed} onDefer={confirmation.setDeferred}
       onEdit={(fieldId, value) => { confirmation.noteEdit(fieldId, editedValue(reviewed.values[fieldId]!, value)); editField(review.stepId, fieldId, value); }}
-      onDefer={confirmation.setDeferred}
+      busy={busy || Boolean(pendingMentor) || awaitingReply || Boolean(liveOnly)} // A running reply may still capture into this step.
       onConfirm={() => confirmation.submit(info)} onClose={confirmation.close}/>;
   }
   return (

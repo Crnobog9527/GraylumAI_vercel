@@ -140,3 +140,12 @@ describe("autosave status", () => {
     expect(render(props())).not.toContain("保存中…");
   });
 });
+
+describe("highlight", () => {
+  it("marks fields only in the step the confirmation card asked about, and not once it is confirmed", () => {
+    const marked = (p: CaptureChecklistProps) => (render(p).match(/data-highlight="true"/g) ?? []).length;
+    expect(marked(props({ highlight: { stepId: "s1", fieldIds: ["goal", "audience"] } }))).toBe(2);
+    expect(marked(props({ highlight: { stepId: "s2", fieldIds: ["goal"] } }))).toBe(0);
+    expect(marked(props({ highlight: { stepId: "s1", fieldIds: ["goal"] }, valid: { s1: true, s2: false, s3: false } }))).toBe(0);
+  });
+});

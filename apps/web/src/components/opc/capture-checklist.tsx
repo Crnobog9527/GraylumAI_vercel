@@ -31,7 +31,7 @@ export type CaptureChecklistProps = {
   saveState: Record<string, "idle" | "saving" | "saved" | "error">;
   conflicts: Record<string, { current: Record<string, FieldValue>; fields: string[] }>;
   /** Field ids the confirmation card asked the user to look at (“我要改”). */
-  highlight?: readonly string[];
+  highlight?: { stepId: string; fieldIds: readonly string[] };
   /** `stepId:fieldId` of the update being adopted or ignored. */
   resolving: string | null;
   onEdit: (stepId: string, fieldId: string, value: string) => void;
@@ -89,7 +89,7 @@ function StepFields({ props, step }: { props: CaptureChecklistProps; step: Step 
         const state = fieldState(value);
         return (
           <div key={field.id} className={styles.field} data-field-state={state}
-            data-highlight={props.highlight?.includes(field.id) || undefined}
+            data-highlight={(props.highlight?.stepId === step.id && !props.valid[step.id] && props.highlight.fieldIds.includes(field.id)) || undefined}
             data-origin={editedLocally(info, edits, field.id) ? "user" : fieldOrigin(field, meta)}>
             <div className={styles.fieldHead}>
               <label htmlFor={`${step.id}-${field.id}`}>{field.title}<small>{field.required ? "必需" : "选填"}</small></label>

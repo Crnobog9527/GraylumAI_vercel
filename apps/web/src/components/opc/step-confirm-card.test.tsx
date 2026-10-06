@@ -110,6 +110,8 @@ describe("StepConfirmCard", () => {
     expect(button(props({ canConfirm: false }), "没问题，进入下一步")!.disabled).toBe(true);
     expect(button(props({ canConfirm: false }), "我要改")!.disabled).toBe(false);
     expect(button(props({ disabled: true }), "我要改")!.disabled).toBe(true);
+    // The review confirms too, so it waits for the same conditions.
+    expect(button(props({ canConfirm: false }), "逐项核对或暂缓")!.disabled).toBe(true);
   });
   it("names what is missing and keeps the deferral entry", () => {
     const i = info(); i.values!.audience = v("");
