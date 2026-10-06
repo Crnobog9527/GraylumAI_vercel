@@ -82,7 +82,23 @@
 <a id="changes"></a><a id="conflicts"></a>
 ## 2. 本版的新决定和被取代的旧规则
 
-### 2.1 Owner 的新决定（2026-09-27 起，2026-10-06 更新）
+### 2.1 Owner 的新决定（2026-09-27 起，2026-10-07 更新）
+
+**2026-10-07：RUNTIME-PROD 正式准入生命周期**
+
+Owner 原话（RUNTIME-PROD 方案任务授权，见 [方案 #701](https://github.com/Crnobog9527/GraylumAI_vercel/pull/701)）：
+
+> 正式环境不设固定到期日，花费上限以 OpenRouter 为准；启动门槛按 typicalUsd 随倍数自动计算（#686）；准入名单只在换模型、换线路或实时计量检查异常时重新采样；默认倍数 m=6。
+
+正式准入不沿用 staging 测试窗口和 PAYG profile 的固定 expiresAt 作为开放资格到期规则；
+仅在换模型、换线路或实时计量检查异常时重新采样，取代将本节 BILL-PAYG r8 测试有效期、`paygHostPolicy.ts`/`paygPolicy.ts`
+及 `bill2_payg_validate_quote` 的 expiresAt 契约直接沿用到正式资格的设想；
+这些现有 staging 实现仍须在后续实施中保持兼容，本文本同步本身不修改其行为。
+staging 测试窗口的到期日与预算、价格快照的新鲜度要求、每 call 执行/恢复时限均不改变。
+无到期不扩大既有证据覆盖范围；未覆盖的用途、格式、思考或容量仍不放行。
+正式全站每日成本上限由 OpenRouter 执行，不新增平台内部预算计数器；具体金额与外部配置仍需上线批准。
+本项只记录产品决定，不授权实现、生产访问、配置写入、部署或合并。实施边界见
+[RUNTIME-PROD 方案](RUNTIME_PROD_PLAN.md)。
 
 - **2026-10-06 BILL-PAYG r9（仅准备）**：主窗口技术决定原话：“Sonnet low 的输出语义改用同一线路的证据来证明，不再要求 low 自己触顶。”[出处](https://github.com/Crnobog9527/GraylumAI_vercel/pull/665#issuecomment-6010007610)。仅Sonnet/anthropic/low采用 `outputSemanticsEvidence: same-route-none`、testedOutputLimit=2048，引用none直接触顶证据，low自身触顶数如实为0；取代对此设置要求两条自身触顶的旧限制，不改其他模型的证据要求或输出/费用硬限。r8第3条费用$0.0076005已确认、原UNKNOWN不计合格。r9只准备12条路由补测；已入账$6.537562065、累计上界<$25，三条Sonnet长样本沿用$0.60例外。
 
