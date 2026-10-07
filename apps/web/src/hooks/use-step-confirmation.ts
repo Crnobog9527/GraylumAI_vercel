@@ -262,11 +262,13 @@ export function useStepConfirmation(deps: StepConfirmationDeps) {
    * checks as the review. A problem, or content that changed meanwhile, opens the review instead.
    */
   function confirmNow(stepId: string, info: StepInformation, edits: Record<string, FieldValue> | undefined,
-    stepStates: Record<string, { version: number }>) {
+    stepStates: Record<string, { version: number }>, settled = true) {
     const step = deps.steps.find(item => item.id === stepId);
     if (!step) return;
     const state = envelopeState(stepId);
     if (state.kind !== "none") { open(stepId, info, edits, stepStates); return; }
+    // The card changed (or the tab came back) moments ago: show the current content in the review, flagged as changed.
+    if (!settled) { setReview({ ...newReview(stepId, info, edits, stepStates), changed: true }); return; }
     submitReview(newReview(stepId, info, edits, stepStates), info);
   }
 
