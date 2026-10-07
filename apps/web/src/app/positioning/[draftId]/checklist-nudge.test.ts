@@ -61,3 +61,8 @@ describe("checklist nudge", () => {
     expect(isChecklistUpdate("我更新了清单")).toBe(false);
   });
 });
+
+it("hides the prompt as soon as a message is queued, before its saves clear the list", () => {
+  expect(nudgeNotice(["goal"], () => undefined, true, true)).toBeNull();
+  expect(nudgeNotice(["goal"], () => undefined, true)).toMatchObject({ id: "checklist-nudge" });
+});

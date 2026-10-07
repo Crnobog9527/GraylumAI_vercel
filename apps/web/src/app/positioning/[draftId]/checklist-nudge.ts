@@ -47,9 +47,12 @@ export function shownInput(input: string | null | undefined) {
   return count ? `我在清单里更新了 ${count} 项，请接着聊` : "我更新了清单，请接着聊";
 }
 
-/** The one-line prompt above the message box; only a click sends anything. */
-export function nudgeNotice(fieldIds: readonly string[], onClick: () => void, disabled: boolean): ChatNotice | null {
-  if (!fieldIds.length) return null;
+/**
+ * The one-line prompt above the message box; only a click sends anything. It disappears as soon as any
+ * message is queued (`queued`), even before that message's pending saves finish and clear the list.
+ */
+export function nudgeNotice(fieldIds: readonly string[], onClick: () => void, disabled: boolean, queued = false): ChatNotice | null {
+  if (!fieldIds.length || queued) return null;
   return { id: "checklist-nudge", tone: "status", text: `你在清单里更新了 ${fieldIds.length} 项`,
     actions: [{ label: "让导师接着聊", onClick, disabled }] };
 }

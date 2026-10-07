@@ -1340,7 +1340,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
                         {shownInput(pendingBubble.input)}</p><ChatPendingStatus sending={running}/></div>}
                   {liveOnly&&(liveOnly.text||!liveOnly.card)&&<div data-message-role="assistant" aria-label="导师正在回复" className="mr-4 rounded-xl border border-[var(--border-primary)] p-3"><span className={resultStyles.agentIdentity}><img src="/graylum-logo.png" alt=""/>导师</span>{liveOnly.text?<MessageMarkdown className={`mt-1 ${resultStyles.messageBody}`} text={liveOnly.text} streaming/>:<p className={`mt-1 ${resultStyles.messageBody}`}>导师正在思考…</p>}</div>}
                   <ChatNoticeList notices={[...payg.blockedNotices(mentorExecutions, busy),
-                    nudgeNotice(nudged, () => void ask(step, checklistUpdatedInput(nudged)), sendLocked),
+                    nudgeNotice(nudged, () => void ask(step, checklistUpdatedInput(nudged)), sendLocked, hasPendingStepRequest),
                     ...mentorTailNotices({ livePhase: live.phase, stop: live.stopAction,
                     saving: hasUnsavedInformation, error, notice, freeError: free.error, replying: awaitingReply, lastTurnOpen: lastTurnNotice, lastTurnText,
                     recovery: recoveryNeedsUser[0] && !busy
