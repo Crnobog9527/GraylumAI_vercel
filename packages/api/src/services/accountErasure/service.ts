@@ -6,6 +6,7 @@ import { checkRateLimitOrThrow } from '../redisRateLimiter';
 import { assertRecentAuthTime, readVerifiedAuthTime } from './reauth';
 import { loadOpeningGrantDigests } from './openingGrantIdentity';
 import { closeErasedAccountFinancials } from './financialRecovery';
+import { issueAccountErasureProgress } from './progress';
 
 type Client = SupabaseClient;
 
@@ -94,6 +95,8 @@ export async function confirmAccountErasure(input: {
     throw unavailable();
   }
 
+  // Capture the one-time restricted capability before Auth access is revoked; its hash alone is stored.
+  const progressToken = await issueAccountErasureProgress(input.admin, input.userId, result.data.requestId);
   // The DB marker already closed the account; Auth revocation is best effort and retried later.
   const authRevoked = await revokeAuthAccess(input.admin, input.userId);
   // The erasure transaction has committed. Financial locks are taken separately,
@@ -104,7 +107,7 @@ export async function confirmAccountErasure(input: {
       failed: financial.failed, pending: financial.pending,
     });
   } catch { logger.error('auth', 'account_erasure_financial_pending'); }
-  return { ...result.data, authRevoked };
+  return { ...result.data, authRevoked, progressToken };
 }
 
 async function revokeAuthAccess(admin: Client, userId: string): Promise<boolean> {
