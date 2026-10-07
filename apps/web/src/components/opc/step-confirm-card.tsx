@@ -109,7 +109,8 @@ function useShownSince(content: string) {
 export function StepConfirmCard({ title, info, edits, signal, resuming, disabled, stays, canConfirm, onConfirm, onEdit, onReview }:
   StepConfirmCardProps) {
   const model = confirmCardModel(info, edits, readStepSignal(signal));
-  const settled = useShownSince(JSON.stringify(model.rows.map(row => [row.id, row.text, row.state])));
+  // The step is part of what is shown: switching steps restarts the wait even when the rows look the same.
+  const settled = useShownSince(JSON.stringify([title, model.rows.map(row => [row.id, row.text, row.state])]));
   // Never confirm from a stale signal: wait for the edit to save and the read to refresh.
   const confirmNow = canConfirm && (resuming || model.current);
   // Nothing recorded yet: the conversation has just started, no card.
