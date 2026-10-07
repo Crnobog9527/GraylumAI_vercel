@@ -7,7 +7,7 @@ export const PURPOSE_BUDGET_KEY = 'runtime_purpose_budgets';
 // Derived from full frozen payload measurements, including duplicated input,
 // attached organization and JSON escaping. See MENTOR-BUDGET.md.
 export const PURPOSE_INPUT_CAPS = { interactive: 90000, organize: 112000, report: 196608 } as const;
-// 2 * 8192 * 8 serialized bytes + 8192 envelope bytes = 139264.
+// 2 * 32768 * 8 serialized bytes + 8192 envelope bytes = 532480.
 // The second copy reserves reasoning duplicated in reasoning_details.
 // Shared with response and frame capacity without loading admission dependencies.
 export { PURPOSE_OUTPUT_CAP };
@@ -59,15 +59,19 @@ export async function readPurposeBudgets(db: SupabaseClient): Promise<PurposeBud
   } catch { throw new StagingAccessError('RUNTIME_BUDGET_CONFIG_INVALID'); }
 }
 
+// Ignored legacy output fields stay readable by the 8192-era rollback release.
+// The live admin view exposes the new cap; admission never uses these stored fields.
 function rollbackCompatibleBudget(current: PurposeBudgetsV2) {
   return { ...current, version: 1 as const,
-    interactive: { ...current.interactive, maxOutputTokens: PURPOSE_OUTPUT_CAP },
-    report: { ...current.report, maxOutputTokens: PURPOSE_OUTPUT_CAP } };
+    interactive: { ...current.interactive, maxOutputTokens: 8192 },
+    report: { ...current.report, maxOutputTokens: 8192 } };
 }
 
 export async function readPurposeBudgetView(db: SupabaseClient) {
   const current = await readPurposeBudgets(db);
-  const config = current ? rollbackCompatibleBudget(current) : null;
+  const config = current ? { ...rollbackCompatibleBudget(current),
+    interactive: { ...current.interactive, maxOutputTokens: PURPOSE_OUTPUT_CAP },
+    report: { ...current.report, maxOutputTokens: PURPOSE_OUTPUT_CAP } } : null;
   const summary = await db.from('system_settings').select('value').eq('key', 'v3_summary_max_tokens').maybeSingle();
   if (summary.error) throw new Error('RUNTIME_BUDGET_CONFIG_UNAVAILABLE');
   const maxOutputTokens = z.coerce.number().int().min(128).max(4096).parse(summary.data?.value ?? 2048);

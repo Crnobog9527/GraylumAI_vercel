@@ -1,6 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import type { AgentInputItem, Session } from '@openai/agents';
 import { fitNativeSessionItem } from './resultCapacity';
+import { projectOpenRouterItemsForSizing } from './openRouterHistory';
 
 type Item = Record<string, unknown>;
 function shortText(text: string): string {
@@ -60,6 +61,23 @@ function projectCallCopies(item: Item, calls: ReadonlyMap<unknown, string>): Ite
     }) };
   }
   return item;
+}
+
+/** Receipts retain original reasoning. Only oversized, validated tool-free history
+ * may omit storage-only reasoning; unknown metadata and tool continuations fail closed. */
+function projectOversizedReasoning(item: Item): Item {
+  if (fitNativeSessionItem(item) !== null || item.role !== 'assistant' && item.type !== 'reasoning') return item;
+  projectOpenRouterItemsForSizing([item]);
+  if (item.type === 'reasoning') return { ...item, rawContent: [] };
+  if (!Array.isArray(item.content)) return item;
+  return { ...item, content: item.content.map(part => {
+    const metadata = record(part?.providerData);
+    if (!metadata) return part;
+    const projected = { ...metadata };
+    delete projected.reasoning;
+    delete projected.reasoning_details;
+    return { ...part, providerData: projected };
+  }) };
 }
 
 /** Holds only this run's pending appends, so native results and Session use one saved projection. */
@@ -130,6 +148,7 @@ export class NativeSession implements Session {
         item = { ...item, output: cardResult(item.output, card) };
       }
       if (cardCalls.size) item = projectCallCopies(item, cardCalls);
+      if (!card) item = projectOversizedReasoning(item);
       if (fitNativeSessionItem(item) === null) {
         if (card && item.role === 'assistant') return [];
         throw new Error('RUNTIME_SESSION_CAPACITY');

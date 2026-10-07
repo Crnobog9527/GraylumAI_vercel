@@ -31,7 +31,7 @@ it('accepts v2 without output controls and rejects unknown or out-of-bound confi
   const v2 = normalizePurposeBudgets(old);
   expect(purposeBudgetsSchema.parse(v2)).toEqual(v2);
   expect(purposeBudgetsSchema.safeParse({ ...v2, interactive: { ...v2.interactive, maxOutputTokens: 1000 } }).success).toBe(false);
-  expect(purposeBudgetsSchema.safeParse({ ...old, interactive: { ...old.interactive, maxOutputTokens: 8193 } }).success).toBe(false);
+  expect(purposeBudgetsSchema.safeParse({ ...old, interactive: { ...old.interactive, maxOutputTokens: 32769 } }).success).toBe(false);
 });
 
 it('persists a v2 submission in the v1 shape that previous server releases accept', async () => {
@@ -42,4 +42,13 @@ it('persists a v2 submission in the v1 shape that previous server releases accep
   expect(f.stored()).toEqual({ version: 1, interactive: { ...input.interactive, maxOutputTokens: 8192 },
     organize: input.organize, report: { ...input.report, maxOutputTokens: 8192 } });
   expect(await readPurposeBudgets(f.db)).toEqual(input);
+});
+
+it('shows 32768 while preserving input budgets, organizer output and rollback-compatible storage', async () => {
+  const f = database(old);
+  const view = await readPurposeBudgetView(f.db);
+  expect(view.limits.maxOutputTokens).toBe(32768);
+  expect(view.organizeOutput.maxOutputTokens).toBe(2048);
+  expect(view.config?.interactive.inputBytes).toBe(old.interactive.inputBytes);
+  expect(purposeBudgetsSchema.safeParse({ ...old, report: { ...old.report, maxOutputTokens: 32768 } }).success).toBe(true);
 });

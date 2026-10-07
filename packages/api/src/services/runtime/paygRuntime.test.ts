@@ -41,3 +41,16 @@ it('rejects unsupported purpose, oversized messages, missing policy and mismatch
   const bad = structuredClone(policy); bad.payg!.nominalPricing.tiers[0]!.prompt = '100';
   expect(() => runtimePaygCall(body, 'ordinary', bad, rules, 1)).toThrow('BILL2_NOMINAL_BOUND_CONFLICT');
 });
+
+it.each([8192,32768])('reserves exact request-based money for frozen O=%i without changing input capacity', outputLimit => {
+ const frozen={...policy,outputLimit,upperUsd:openRouterBound(limits,outputLimit).upperUsd};
+ const body=JSON.stringify({model:'model',max_tokens:outputLimit,messages:[{role:'user',content:'Synthetic cap test'}]});
+ const {call,upperCredits}=runtimePaygCall(body,'ordinary',frozen,rules,1,true);
+ const t=Buffer.byteLength(body)+8192;
+ const u=(BigInt(t)*1250000000000n+BigInt(outputLimit)*2000000000000n+999999n)/1000000n;
+ expect(call.upperUsd).toBe(`${u/1000000000000n}.${String(u%1000000000000n).padStart(12,'0')}`);
+ expect(upperCredits).toBe(Number((u*300n+999999999999n)/1000000000000n));
+ expect(call.inputLimit).toBe(196608);expect(call.outputLimit).toBe(outputLimit);
+ const tooLarge=JSON.stringify({...JSON.parse(body),max_tokens:outputLimit+1});
+ expect(()=>runtimePaygCall(tooLarge,'ordinary',frozen,rules,1,true)).toThrow('RUNTIME_COMPLETE_REQUEST_EXCEEDS_CAPACITY');
+});

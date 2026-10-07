@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { createHash } from 'node:crypto';
-import {OPENROUTER_RESPONSE_BYTE_LIMIT} from './responseCapacity';
+import {OPENROUTER_RESPONSE_BYTE_LIMIT,OPENROUTER_RECEIPT_BYTE_LIMIT} from './responseCapacity';
 import {gunzipSync} from 'node:zlib';
 import { decimal, parseExactJson } from './decimal';
 import {openRouterStream,OPENROUTER_STREAM_BYTE_LIMIT} from './openRouterStream';
@@ -35,7 +35,7 @@ function receiptIssue(value:unknown):'invalid_receipt_text'|'receipt_size_limit'
  let numbers=0,invalidText=false;
  const json=JSON.stringify(value,(_key,item)=>{if(typeof item==='number')numbers++;if(typeof item==='string'&&(item.includes('\0')||!item.isWellFormed()))invalidText=true;return item;});
  if(invalidText)return 'invalid_receipt_text';
- return Buffer.byteLength(json)+(json.match(/[:,]/g)?.length??0)+numbers*400<=524288-16384?null:'receipt_size_limit';
+ return Buffer.byteLength(json)+(json.match(/[:,]/g)?.length??0)+numbers*400<=OPENROUTER_RECEIPT_BYTE_LIMIT-16384?null:'receipt_size_limit';
 }
 /** JSON may encode a small official cost with an exponent. Expand digits
  * exactly, never via Number; unsupported ledger precision stays unknown. */

@@ -153,7 +153,7 @@ it.each(['bad gzip','wrong hash','wrong size','oversize inflate'])('rejects %s c
 it.each([false,true])('bounds incompressible evidence while preserving identity conflict=%s',async(conflict)=>{
  // Valid comment frames do not enlarge canonical output, but their entropy can
  // exceed the durable evidence bound even after compression.
- const padding=Array.from({length:1400},()=>': '+randomBytes(512).toString('base64')+'\n\n').join('');
+ const padding=Array.from({length:9000},()=>': '+randomBytes(512).toString('base64')+'\n\n').join('');
  const large=padding+wire,adapter=adapterFor(async()=>new Response(large,{headers:{'X-Generation-Id':conflict?'gen-conflict':'gen-stream'}}));
  const observation=await adapter.dispatch({input:body},identity),evidence=adapter.evidence(observation,identity,'response');
  expect(evidence).toMatchObject({providerId:conflict?null:'gen-stream',cost:null,final:false,rejectedReason:conflict?'identity_or_response_mismatch':'receipt_size_limit',transport:{rawBodyOmitted:'receipt_size_limit'}});

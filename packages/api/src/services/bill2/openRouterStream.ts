@@ -3,7 +3,8 @@ import {parseExactJson} from './decimal';
 import {ASK_QUESTION_TOOL,ASK_QUESTION_ARGUMENT_LIMIT,DEFAULT_TOOL_ARGUMENT_LIMIT,toolArgumentLimit} from '../../shared/agentTurn';
 import {OPENROUTER_RESPONSE_BYTE_LIMIT,PURPOSE_OUTPUT_CAP} from './responseCapacity';
 
-export const OPENROUTER_STREAM_BYTE_LIMIT=4_194_304;
+// Preserve the existing 512 wire-byte allowance per output unit (SSE envelopes included).
+export const OPENROUTER_STREAM_BYTE_LIMIT=512*PURPOSE_OUTPUT_CAP;
 // Allow separate token/reasoning-detail frames plus role, finish and usage metadata.
 export const OPENROUTER_STREAM_FRAME_LIMIT=2*PURPOSE_OUTPUT_CAP+64;
 const object=(v:unknown):v is Record<string,unknown>=>Boolean(v&&typeof v==='object'&&!Array.isArray(v));
