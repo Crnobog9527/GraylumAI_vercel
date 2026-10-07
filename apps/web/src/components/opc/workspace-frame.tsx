@@ -27,7 +27,8 @@ export function WorkspaceFrame({children,right,rightOpen=true,onToggleRight,acti
  activeWorkItemId?:string;area?:'chat'|'library'|'topics'|'marketplace'|'search'|'start';notice?:string;
 }){
  const [mobileNav,setMobileNav]=useState(false),[mobileRight,setMobileRight]=useState(false);
- useEffect(()=>{if(revealRight)setMobileRight(true);},[revealRight]);
+ // Reveal before the next animation frame, when the checklist requests field focus.
+ useLayoutEffect(()=>{if(revealRight)setMobileRight(true);},[revealRight]);
  const [archiveView,setArchiveView]=useState(false),[menuId,setMenuId]=useState(''),[menuPosition,setMenuPosition]=useState({top:0,left:0});
  const [renameId,setRenameId]=useState(''),[renameValue,setRenameValue]=useState(''),[confirmDelete,setConfirmDelete]=useState(''),[uiError,setUiError]=useState('');
  const [renameAccountId,setRenameAccountId]=useState(''),[renameAccountValue,setRenameAccountValue]=useState('');
