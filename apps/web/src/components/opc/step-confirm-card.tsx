@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 "use client";
-import { useEffect, useRef } from "react";
+import { useEffect, useLayoutEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import styles from "./capture-checklist.module.css";
 import { editedLocally, fieldMeta, fieldState, hasContent, needsLook, shownValue, stepProgress, type FieldValue, type StepInformation } from "./capture-state";
@@ -94,7 +94,8 @@ export function shownLongEnough(at: { changedAt: number; visibleAt: number; now:
 /** When the shown content last changed, and when the tab last became visible. */
 function useShownSince(content: string) {
   const since = useRef({ changedAt: 0, visibleAt: 0 });
-  useEffect(() => { since.current.changedAt = Date.now(); }, [content]);
+  // A layout effect runs before the browser paints the new rows, so no click can land on them with the old time.
+  useLayoutEffect(() => { since.current.changedAt = Date.now(); }, [content]);
   useEffect(() => {
     since.current.visibleAt = Date.now();
     const onVisible = () => { if (document.visibilityState === "visible") since.current.visibleAt = Date.now(); };
