@@ -41,30 +41,37 @@ try {
  assert.ok(ready,'local postgres ready');
  installPgCronStub(root,name,(argv,input)=>ok(docker(['exec',...argv],input)));
  const outcome=r=>({ok:r.status===0&&!r.error,error:r.stderr});
- let before;
+ let historicalChecked=false;
  report.build=buildFromFiles(root,{applyFile:path=>{
-  if(path===migrationPath&&!before){
-   before=snapshot();
-  }
-  return outcome(sql(read(path)));
+  if(path!==migrationPath||historicalChecked)return outcome(sql(read(path)));
+  const before=snapshot();
+  const applied=sql(read(path));
+  if(applied.status!==0||applied.error)return outcome(applied);
+  const once=snapshot();
+  // Compare rollback at this migration's historical position, before later migrations exist.
+  ok(sql("CREATE OR REPLACE FUNCTION public.runtime_binding_guard() RETURNS trigger LANGUAGE plpgsql "
+   +"SET search_path=public,pg_temp AS $$ BEGIN RETURN NEW; END $$;"));
+  const drift=snapshot();
+  const refused=sql(migration);
+  assert.notEqual(refused.status,0);
+  assert.match(refused.stderr,/ERASURE_BINDING_SOURCE_MISMATCH/);
+  assert.deepEqual(snapshot(),drift,'source drift does not mutate catalog');
+  ok(sql(read('packages/db/tests/erasure-binding/rollback.sql')));
+  assert.deepEqual(snapshot(),before,'historical empty rollback restores pre-migration catalog');
+  ok(sql(migration));
+  assert.deepEqual(snapshot(),once);
+  historicalChecked=true;
+  report.checks.push('0187 historical source-drift refusal and empty rollback/reapply exact');
+  return outcome(applied);
  },
   applyServerOnly:input=>outcome(docker(['exec',name,'psql','-X','-qAt','-U','postgres','-d','b2a','-c',input])),
   fingerprint:development?undefined:snapshot});
  assert.equal(report.build.failed,null);
- assert.ok(before,'0187 must be applied through the canonical build plan');
- const once=snapshot();
- ok(sql(migration));assert.deepEqual(snapshot(),once,'repeat 0187 is a structural no-op');
- report.checks.push('0187 canonical application/replay: identical full catalog');
- // Refuse source drift before any lasting change, then verify exact no-data rollback.
- ok(sql("CREATE OR REPLACE FUNCTION public.runtime_binding_guard() RETURNS trigger LANGUAGE plpgsql "
-  +"SET search_path=public,pg_temp AS $$ BEGIN RETURN NEW; END $$;"));
- const drift=snapshot();const refused=sql(migration);
- assert.notEqual(refused.status,0);assert.match(refused.stderr,/ERASURE_BINDING_SOURCE_MISMATCH/);
- assert.deepEqual(snapshot(),drift,'source drift does not mutate catalog');
- ok(sql(read('packages/db/tests/erasure-binding/rollback.sql')));
- assert.deepEqual(snapshot(),before,'empty structural rollback restores pre-migration catalog');
- ok(sql(migration)); assert.deepEqual(snapshot(),once);
- report.checks.push('empty rollback/reapply exact');
+ assert.ok(historicalChecked,'0187 must be verified through the canonical build plan');
+ const finalCatalog=snapshot();
+ ok(sql(migration));
+ assert.deepEqual(snapshot(),finalCatalog,'repeat 0187 preserves the complete final catalog');
+ report.checks.push('0187 reapplication with all later migrations preserves full catalog');
  const require=createRequire(resolve(root,'packages/api/package.json'));
  const {Client}=require('pg');
  const address=ok(docker(['port',name,'5432/tcp']));assert.match(address,/^127\.0\.0\.1:\d+$/);
