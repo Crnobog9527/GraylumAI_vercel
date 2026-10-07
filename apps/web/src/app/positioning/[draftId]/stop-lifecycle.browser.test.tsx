@@ -6,9 +6,11 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { chromium, expect as ui, type Browser, type Page } from '@playwright/test';
 import { afterAll, beforeAll, expect, it } from 'vitest';
 import { agentTurnBody } from '@repo/api/src/shared/agentTurn';
+import { livePrefixKey } from './live-prefix';
 
 const executionId = '00000000-0000-4000-8000-000000000001';
 const prefix = '合成🧭正文\n这是**停止时的重点';
+const unseenCheckpoint = '只在未确认检查点存在的合成正文';
 const artifacts = process.env.C2_LIFECYCLE_ARTIFACTS;
 let browser: Browser;
 let code: string;
@@ -25,7 +27,8 @@ beforeAll(async () => {
       ...(input?{body:JSON.stringify(input),headers:{'Content-Type':'application/json'}}:{})});
     if(!response.ok)throw new Error('fixture HTTP '+response.status);return response.json();}
     export async function* events(path,input){
-      const response=await fetch(path,{method:input?'POST':'GET',...(input?{body:JSON.stringify(input)}:{})});
+      const response=await fetch(path,{method:input?'POST':'GET',headers:{'x-fixture-document':String(performance.timeOrigin)},
+        ...(input?{body:JSON.stringify(input)}:{})});
       if(!response.ok)throw new Error('fixture stream');
       const reader=response.body.getReader(),decoder=new TextDecoder();let pending='';
       try{while(true){const {done,value}=await reader.read();if(done)break;
@@ -72,7 +75,7 @@ beforeAll(async () => {
             const reply=mentorReplyDisplay({...execution,legacyMessage:'',liveText:live.reply?.text,
               liveCard:live.reply?.card,stopLocal:live.stopLocal('${executionId}'),active:!!history?.activeExecution,busy:false});
             return <><main id="message"><MentorMarkdown text={reply.text} live={!!live.reply} result={execution}/></main>
-              <output id="history-state">{execution.state}:{String(execution.userStopPending)}</output>
+              <output id="history-state" data-execution-id={execution.executionId}>{execution.state}:{String(execution.userStopPending)}</output>
               <ChatNoticeList notices={live.phase?mentorTailNotices({livePhase:live.phase,stop:live.stopAction,
                 replying:false,lastTurnOpen:false,saving:false,recovery:null,error:'',notice:'',freeError:''})
                 :[mentorTurnNotice('turn',reply.notice,null)]}/></>;}
@@ -92,10 +95,11 @@ beforeAll(async () => {
 }, 30000);
 afterAll(async () => { await browser?.close(); });
 
-async function fixture(width: number) {
+async function fixture(width: number, pendingCheckpoint = false) {
   let state = 'running', stopped = false;
   let stream: ServerResponse | undefined;
   const stops: unknown[] = [], resumes: unknown[] = [];
+  const resumeDocuments: string[] = [];
   let streams = 0;
   const saved = () => state === 'completed';
   const server = createServer(async (request, response) => {
@@ -110,6 +114,7 @@ async function fixture(width: number) {
       response.setHeader('Content-Type', 'application/json');
       response.end(JSON.stringify({ activeExecution: saved() ? null : executionId, executions: [{
         executionId, state, userStopPending: stopped && !saved(),
+        ...(pendingCheckpoint && stopped && !saved() ? { body: agentTurnBody(unseenCheckpoint, null) } : {}),
         ...(saved() ? { body: agentTurnBody(prefix, null), stopped: true, completeness: 'stopped', organized: false } : {}),
       }] })); return;
     }
@@ -131,6 +136,7 @@ async function fixture(width: number) {
     }
     if (path === '/resume') {
       resumes.push(JSON.parse(input));
+      resumeDocuments.push(String(request.headers['x-fixture-document']));
       response.setHeader('Content-Type', 'application/x-ndjson');
       response.end(JSON.stringify({ type: 'result', result: { state: saved() ? 'completed' : 'stopping' } }) + '\n'); return;
     }
@@ -150,7 +156,7 @@ async function fixture(width: number) {
   const failures: string[] = [];
   page.on('requestfailed', request => failures.push(new URL(request.url()).pathname));
   await page.goto(origin);
-  return { page, context, stops, resumes, failures, unexpected, streams: () => streams,
+  return { page, context, stops, resumes, resumeDocuments, failures, unexpected, streams: () => streams,
     release: () => { state = 'completed'; },
     close: async () => { await context.setOffline(false); await context.close(); server.closeAllConnections();
       await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve())); },
@@ -264,6 +270,64 @@ for (const offline of [false, true]) {
         expect(f.streams()).toBe(1); expect(f.stops).toHaveLength(1);
       }
       expect(f.unexpected).toEqual([]);
+    } finally { await f.close(); }
+  }, 35000);
+}
+
+
+for (const keepPrefix of [true, false]) {
+  it(`C2: reload during pending v1 saving with ${keepPrefix ? 'a retained' : 'no retained'} prefix`, async () => {
+    const f = await fixture(keepPrefix ? 1920 : 390, true);
+    try {
+      await observeAndClick(f.page);
+      await ui(f.page.locator('#history-state')).toHaveText('running:true');
+      const before = await f.page.evaluate(() => (window as unknown as FixtureWindow).finish().baseline!);
+      // The gate is still closed. A new document, rather than a remount, must recover this execution.
+      await f.page.evaluate(() => { (window as unknown as { oldDocument: boolean }).oldDocument = true; });
+      await f.page.addInitScript(({ dropKey, marker }) => {
+        if (dropKey) sessionStorage.removeItem(dropKey);
+        const win = window as unknown as { checkpointExposed: boolean };
+        win.checkpointExposed = false;
+        new MutationObserver(records => {
+          if (document.body?.textContent?.includes(marker) || records.some(record =>
+            [...record.addedNodes, ...record.removedNodes].some(node => node.textContent?.includes(marker))))
+            win.checkpointExposed = true;
+        }).observe(document, { subtree: true, childList: true, characterData: true });
+      }, { dropKey: keepPrefix ? null : livePrefixKey('synthetic-draft'), marker: unseenCheckpoint });
+      await f.page.reload();
+      expect(await f.page.evaluate(() => 'oldDocument' in window)).toBe(false);
+      await ui(f.page.locator('#history-state')).toHaveText('running:true');
+      await ui(f.page.locator('#history-state')).toHaveAttribute('data-execution-id', executionId);
+      await ui(f.page.getByText('已停止，正在保存已显示的内容…', { exact: true })).toBeVisible();
+      await ui(f.page.getByRole('button', { name: '停止', exact: true })).toHaveCount(0);
+      await ui(f.page.getByRole('button', { name: '重试', exact: true })).toHaveCount(0);
+      await ui(f.page.getByText('本轮未整理', { exact: false })).toHaveCount(0);
+      const body = f.page.locator('[data-message-markdown]');
+      const pendingText = await body.innerText();
+      // A safe restored prefix is allowed, but continuous visibility is not a new requirement.
+      expect(keepPrefix ? ['', before.text] : ['']).toContain(pendingText);
+      expect(await f.page.evaluate(() => (window as unknown as { checkpointExposed: boolean }).checkpointExposed)).toBe(false);
+      // Bind the follow-up to the new document, not an old request finishing during navigation.
+      const documentId = await f.page.evaluate(() => String(performance.timeOrigin));
+      await expect.poll(() => f.resumeDocuments.includes(documentId), { timeout: 7000 }).toBe(true);
+      await ui(f.page.locator('#history-state')).toHaveText('running:true');
+      expect(await body.innerText()).toBe(pendingText);
+      expect(f.stops).toEqual([{ executionId, stopAt: Array.from(prefix).length, source: 'assistant' }]);
+      expect(f.streams()).toBe(1);
+      f.release();
+      await ui(f.page.locator('#history-state')).toHaveText('completed:false', { timeout: 15000 });
+      await ui(f.page.getByText('已停止，保留了停止前显示的内容。', { exact: false })).toBeVisible();
+      await ui(f.page.getByText('本轮未整理', { exact: false })).toBeVisible();
+      expect(await body.innerText()).toBe(before.text);
+      expect(await body.innerHTML()).toBe(before.html);
+      expect(f.stops).toHaveLength(1); expect(f.streams()).toBe(1);
+      for (const request of f.resumes) expect(request).toEqual({ executionId, textProtocol: 'textDelta-v1' });
+      expect(await f.page.evaluate(() => (window as unknown as { checkpointExposed: boolean }).checkpointExposed)).toBe(false);
+      expect(f.unexpected).toEqual([]);
+      if (artifacts) writeFileSync(`${artifacts}/pending-reload-${keepPrefix}.json`, JSON.stringify({
+        keepPrefix, realReload: true, pendingText, finalText: await body.innerText(),
+        checkpointExposed: false, stops: f.stops, streams: f.streams(), resumes: f.resumes,
+      }, null, 2));
     } finally { await f.close(); }
   }, 35000);
 }
