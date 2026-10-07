@@ -2,7 +2,8 @@
 import { createElement, isValidElement, type ReactElement, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
-import { confirmCardModel, StepConfirmCard, type StepConfirmCardProps } from "./step-confirm-card";
+import { confirmCardModel, readStepSignal, StepConfirmCard, type StepConfirmCardProps } from "./step-confirm-card";
+import { stepConfirmation } from "../../../../../packages/api/src/shared/opcStepConfirmation";
 import { fieldOrigin, fieldStateLabel, needsLook, type FieldValue, type StepInformation } from "./capture-state";
 
 const v = (value: string, status: FieldValue["status"] = "provisional"): FieldValue => ({ value, status, nature: "decision" });
@@ -138,5 +139,40 @@ describe("StepConfirmCard", () => {
   it("mentions pending updates are not part of the confirmation", () => {
     const i = info(); i.meta!.goal = { source: "user", suggestion: { executionId: "e", hash: "h", value: "新", status: "provisional", nature: "decision" } };
     expect(html(props({ info: i }))).toContain("还有 1 条“根据对话整理的更新”没处理");
+  });
+});
+
+describe("server confirmation signal (#713)", () => {
+  // The backend's own function, so the card is tested against the real signal shape.
+  const signal = (i: StepInformation, valid = false) => stepConfirmation(i as Parameters<typeof stepConfirmation>[0], valid);
+  it("reads only a well-formed signal", () => {
+    expect(readStepSignal(signal(info()))).toEqual(signal(info()));
+    for (const bad of [null, "x", { ...signal(info()), stepReady: "yes" }, { ...signal(info()), needsLookFieldIds: [1] }])
+      expect(readStepSignal(bad)).toBeUndefined();
+  });
+  it("uses the server's readiness and look list while nothing is edited locally", () => {
+    const legacy = info(); legacy.meta = {}; // No recorded source: the server conservatively asks for a look.
+    const model = confirmCardModel(legacy, undefined, readStepSignal(signal(legacy)));
+    expect(model).toMatchObject({ ready: true, current: true });
+    expect(model.look).toEqual(["goal", "audience", "position"]);
+    const missing = info(); missing.values!.audience = v("");
+    expect(confirmCardModel(missing, undefined, readStepSignal(signal(missing))).ready).toBe(false);
+  });
+  it("never offers one-click confirmation from a signal older than a local edit", () => {
+    const i = info();
+    const model = confirmCardModel(i, { ...i.values!, goal: v("刚改的目标") }, readStepSignal(signal(i)));
+    expect(model.current).toBe(false);
+    expect(model.look).toEqual(["audience", "position"]);
+    const p = props({ edits: { ...i.values!, goal: v("刚改的目标") }, signal: signal(i) });
+    expect(html(p)).toContain("刚改过的内容正在保存");
+    expect(button(p, "没问题，进入下一步")!.disabled).toBe(true);
+    expect(button(p, "逐项核对或暂缓")!.disabled).toBe(false);
+    // An unchanged edit buffer is not a newer edit.
+    expect(button(props({ edits: { ...i.values! }, signal: signal(i) }), "没问题，进入下一步")!.disabled).toBe(false);
+  });
+  it("keeps resuming a started confirmation available", () => {
+    const i = info();
+    const p = props({ resuming: true, edits: { ...i.values!, goal: v("刚改的目标") }, signal: signal(i) });
+    expect(button(p, "继续完成确认")!.disabled).toBe(false);
   });
 });

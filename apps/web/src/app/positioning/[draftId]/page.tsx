@@ -34,6 +34,7 @@ import { ReportEntry } from "./report-panel";
 import { sameRequest, releaseRejectedAnswer, openingRequest, parseStepEnvelope, type MentorRequest,
   retainExecution, settleEnvelope, TEXT_PROTOCOL, turnResultNotice, type MentorTurn, type MentorExecution } from "./mentor-turn";
 import { usePaygResume } from "@/lib/use-payg-resume";
+import { openOrganizer } from "@/lib/payg-wait";
 import { isOpeningInput, openingEntryKey } from "@repo/api/src/shared/opcQuestions";
 type Step = { id: string; title: string; dependsOn?: string[] };
 import { isRecord, type Information, type Item, type StepEnvelope } from "./confirm-envelope";
@@ -1182,7 +1183,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
     });
   }
   /** A step can be confirmed once the steps it depends on are confirmed. */
-  function confirmableStep(step: Step) { // Another step's unfinished confirmation is resumed first, never bypassed.
+  function confirmableStep(step: Step) { if (pendingMentor || awaitingReply || liveOnly || mentorExecutions.some(openOrganizer)) return false;
     if (steps.some(other => other.id !== step.id && confirmation.envelopeState(other.id).kind === "valid")) return false;
     return Boolean(d.accountRevision) || (step.dependsOn ? step.dependsOn.every(id => snap.steps[id]?.valid) : steps.indexOf(step) <= firstPending);
   }
@@ -1211,8 +1212,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
     };
   }
   function reviewDialog(review: NonNullable<typeof confirmation.review>) {
-    const step = steps.find(item => item.id === review.stepId), info = d.information[review.stepId] as StepInformation;
-    if (!step) return null;
+    const step = steps.find(item => item.id === review.stepId), info = d.information[review.stepId] as StepInformation; if (!step) return null;
     // Only the updates the user saw when the review opened are listed; a newer one makes the submit stop.
     const shown = Object.fromEntries(info.schema.flatMap(field => {
       const update = fieldMeta(info, field.id).suggestion;
@@ -1349,8 +1349,8 @@ function PositioningDraftContent({draftId}:{draftId:string}){
                   </div>
                   {!manualEntry && snap.state === "draft" && !s.valid && <StepConfirmCard revision={!!d.accountRevision} onReview={() => openReview(step.id)}
                     title={step.title} info={d.information[step.id]} edits={infoEdits[step.id]} resuming={confirmation.envelopeState(step.id).kind === "valid"}
-                    canConfirm={confirmableStep(step) && !pendingMentor && !awaitingReply && !liveOnly} disabled={busy || hasPendingStepRequest}
-                    onConfirm={() => confirmation.confirmNow(step.id, d.information[step.id], infoEdits[step.id], snap.steps)} onEdit={highlightFields(step.id)}/>}
+                    canConfirm={confirmableStep(step)} disabled={busy || hasPendingStepRequest} signal={d.stepConfirmation?.[step.id]} onEdit={highlightFields(step.id)}
+                    onConfirm={() => confirmation.confirmNow(step.id, d.information[step.id], infoEdits[step.id], snap.steps)}/>}
                   <WorkComposer value={mentorInput} onChange={setMentorInput} label="给导师的回复" placeholder={OTHER_PLACEHOLDER} attachment={dock} maxLength={8000} disabled={snap.state!=="draft"} sendDisabled={sendLocked} onSend={skill=>{if(skill)void free.send(mentorInput,skill);else void ask(step);}}/>
                   <p className="text-xs text-[var(--text-secondary)]">
                     同一账号的步骤共用这条对话，未确认内容保留在草稿中。{d?.runtimeMode==='staging_test'?'当前使用真实模型，仅处理你提供的资料。':'当前为隔离模拟，不调用真实模型。'}
