@@ -32,7 +32,7 @@
   "apps/web/src/app/maintenance/page.tsx": {"longLines":3},
   "apps/web/src/app/marketplace/page.tsx": {"lines":526,"longLines":7},
   "apps/web/src/app/page.tsx": {"longLines":4},
-  "apps/web/src/app/positioning/[draftId]/page.tsx": {"lines":1832,"longLines":19},
+  "apps/web/src/app/positioning/[draftId]/page.tsx": {"lines":1832,"longLines":18},
   "apps/web/src/app/positioning/[draftId]/topics/page.tsx": {"lines":625,"longLines":16},
   "apps/web/src/app/positioning/page.tsx": {"longLines":23},
   "apps/web/src/app/profile/page.tsx": {"longLines":1},

@@ -161,3 +161,10 @@ describe("editedValue", () => {
     expect(editedValue(v("x"), "  ")).toEqual({ value: "  ", status: "unknown", nature: "decision" });
   });
 });
+
+describe("fieldMeta basis (#702)", () => {
+  it("reads the recorded basis of a capture and ignores anything else", () => {
+    expect(fieldMeta({ schema: [], meta: { a: { source: "capture", basis: "agent_proposal" } } }, "a")).toEqual({ source: "capture", basis: "agent_proposal" });
+    expect(fieldMeta({ schema: [], meta: { a: { source: "capture", basis: "guess" } } }, "a")).toEqual({ source: "capture" });
+  });
+});

@@ -19,8 +19,9 @@ import { readWorkflowMentorExecution } from "./mentor-response";
 import { focusReply, mentorReplyDisplay, showsTurnState } from "./agent-turn-display";
 import { OpenQuestionRecord, OTHER_PLACEHOLDER, QuestionCardView } from "@/components/opc/question-card";
 import { CaptureChecklist } from "@/components/opc/capture-checklist";
-import { StepReviewDialog, StepSummaryCard } from "@/components/opc/step-review-dialog";
-import { cardStatus, editedValue, fieldMeta, focusField, stepProgress, type StepInformation } from "@/components/opc/capture-state";
+import { StepReviewDialog } from "@/components/opc/step-review-dialog";
+import { focusChecklistField, StepConfirmCard } from "@/components/opc/step-confirm-card";
+import { cardStatus, editedValue, fieldMeta, focusField, type StepInformation } from "@/components/opc/capture-state";
 import { reviewedStep, useStepConfirmation } from "@/hooks/use-step-confirmation";
 import { useCaptureResolve } from "@/hooks/use-capture-resolve";
 import { MessageMarkdown } from "@/components/chat/MessageMarkdown";
@@ -32,7 +33,7 @@ import { useLiveReply } from "./use-live-reply";
 import { ReportEntry } from "./report-panel";
 import { sameRequest, releaseRejectedAnswer, openingRequest, parseStepEnvelope, type MentorRequest,
   retainExecution, settleEnvelope, TEXT_PROTOCOL, turnResultNotice, type MentorTurn, type MentorExecution } from "./mentor-turn";
-import { usePaygResume } from "@/lib/use-payg-resume";
+import { openOrganizer, usePaygResume } from "@/lib/use-payg-resume";
 import { isOpeningInput, openingEntryKey } from "@repo/api/src/shared/opcQuestions";
 type Step = { id: string; title: string; dependsOn?: string[] };
 import { isRecord, type Information, type Item, type StepEnvelope } from "./confirm-envelope";
@@ -91,7 +92,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
     savePlan = trpc.opc.savePlan.useMutation(),
     handoff = trpc.opc.handoff.useMutation();
   const [running, setRunning] = useState(false);
-  const [resultOpen,setResultOpen]=useState(true);
+  const [resultOpen,setResultOpen]=useState(true), [highlight,setHighlight]=useState<{ stepId: string; fieldIds: string[] }>(), [reveal,setReveal]=useState(0);
   const [workInfoOpen,setWorkInfoOpen]=useState(false);
   useEffect(()=>{if(!workInfoOpen)return;const close=(event:KeyboardEvent)=>{if(event.key==='Escape')setWorkInfoOpen(false);};window.addEventListener('keydown',close);return()=>window.removeEventListener('keydown',close);},[workInfoOpen]);
   const [resultBodyNode,setResultBodyNode]=useState<HTMLDivElement|null>(null);
@@ -1181,24 +1182,23 @@ function PositioningDraftContent({draftId}:{draftId:string}){
     });
   }
   /** A step can be confirmed once the steps it depends on are confirmed. */
-  function confirmableStep(step: Step) {
-    if (d.accountRevision) return true;
-    return step.dependsOn ? step.dependsOn.every(id => snap.steps[id]?.valid) : steps.indexOf(step) <= firstPending;
+  function confirmableStep(step: Step) { if (pendingMentor || awaitingReply || liveOnly || mentorExecutions.some(openOrganizer)) return false;
+    if (steps.some(other => other.id !== step.id && confirmation.envelopeState(other.id).kind === "valid")) return false;
+    return Boolean(d.accountRevision) || (step.dependsOn ? step.dependsOn.every(id => snap.steps[id]?.valid) : steps.indexOf(step) <= firstPending);
   }
-  function openReview(stepId: string) {
-    setActiveStep(stepId);
-    confirmation.open(stepId, d.information[stepId], infoEditsRef.current[stepId], snap.steps);
-  }
+  function openReview(stepId: string) { setActiveStep(stepId); confirmation.open(stepId, d.information[stepId], infoEditsRef.current[stepId], snap.steps); }
+  const highlightFields = (step: string) => (ids: string[]) => { // “我要改”: show the checklist, mark these fields, cursor in the first.
+    setResultOpen(true); setReveal(n => n + 1); setHighlight({ stepId: step, fieldIds: ids }); focusChecklistField(step, ids[0]); };
   function retrySave(stepId: string) {
     const values = infoEditsRef.current[stepId];
     if (values) void autosave.enqueue(stepId).catch(() => setError("自动保存仍未成功。内容已保留，请稍后重试。"));
   }
   function checklistProps(): Parameters<typeof CaptureChecklist>[0] {
-    const locked = busy || hasPendingStepRequest || Boolean(pendingMentor);
+    const locked = busy || hasPendingStepRequest || Boolean(pendingMentor) || mentorExecutions.some(openOrganizer);
     return {
       steps, information: d.information, edits: infoEdits, selectedStepId: selectedStep.id, editable: snap.state === "draft",
       valid: Object.fromEntries(steps.map(step => [step.id, Boolean(snap.steps[step.id].valid)])),
-      manual: manualEntry, locked, saveState, conflicts: informationConflicts, resolving: updates.resolving,
+      manual: manualEntry, locked, saveState, highlight, conflicts: informationConflicts, resolving: updates.resolving,
       confirmable: stepId => confirmableStep(steps.find(step => step.id === stepId)!),
       confirmation: stepId => confirmation.envelopeState(stepId).kind,
       onEdit: editField, onReview: openReview, onRecoverConfirmation: stepId => void confirmation.recoverMalformed(stepId),
@@ -1211,8 +1211,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
     };
   }
   function reviewDialog(review: NonNullable<typeof confirmation.review>) {
-    const step = steps.find(item => item.id === review.stepId), info = d.information[review.stepId] as StepInformation;
-    if (!step) return null;
+    const step = steps.find(item => item.id === review.stepId), info = d.information[review.stepId] as StepInformation; if (!step) return null;
     // Only the updates the user saw when the review opened are listed; a newer one makes the submit stop.
     const shown = Object.fromEntries(info.schema.flatMap(field => {
       const update = fieldMeta(info, field.id).suggestion;
@@ -1220,13 +1219,13 @@ function PositioningDraftContent({draftId}:{draftId:string}){
     }));
     const reviewed = reviewedStep(review, infoEdits[review.stepId]);
     return <StepReviewDialog title={step.title} schema={info.schema} reviewed={reviewed}
-      updates={shown} deferred={review.deferred} problems={review.problems} changed={review.changed} busy={busy}
+      updates={shown} deferred={review.deferred} problems={review.problems} changed={review.changed} onDefer={confirmation.setDeferred}
       onEdit={(fieldId, value) => { confirmation.noteEdit(fieldId, editedValue(reviewed.values[fieldId]!, value)); editField(review.stepId, fieldId, value); }}
-      onDefer={confirmation.setDeferred}
+      busy={busy || Boolean(pendingMentor) || awaitingReply || Boolean(liveOnly) || mentorExecutions.some(openOrganizer)}
       onConfirm={() => confirmation.submit(info)} onClose={confirmation.close}/>;
   }
   return (
-    <WorkspaceFrame area="chat" notice={d?.runtimeMode==='staging_test'?'Staging 真实模型测试 · 未开放联网研究':'本地模拟 · 回复、保存与交接均为演示'} rightOpen={resultOpen} onToggleRight={()=>setResultOpen(value=>!value)} right={<div className={resultStyles.panel}><header><h2>定位清单</h2><p>{snap.state==='draft'?'跟着对话自动记录；每一步核对后确认一次':'已确认的定位'}</p></header>
+    <WorkspaceFrame area="chat" notice={d?.runtimeMode==='staging_test'?'Staging 真实模型测试 · 未开放联网研究':'本地模拟 · 回复、保存与交接均为演示'} revealRight={reveal} rightOpen={resultOpen} onToggleRight={()=>setResultOpen(value=>!value)} right={<div className={resultStyles.panel}><header><h2>定位清单</h2><p>{snap.state==='draft'?'跟着对话自动记录；每一步核对后确认一次':'已确认的定位'}</p></header>
       <div className={resultStyles.body} ref={setResultBodyNode}><CaptureChecklist {...checklistProps()}/></div></div>}>
     <main className={`${resultStyles.workspaceMain} ${!planView ? resultStyles.conversationPage : ""} h-full w-full overflow-y-auto text-[var(--text-primary)]`}><div className={resultStyles.workspaceContent}>
       <header className={resultStyles.positionTop}>
@@ -1266,7 +1265,6 @@ function PositioningDraftContent({draftId}:{draftId:string}){
           const s = snap.steps[step.id];
           const sendLocked = busy || Boolean(history.data?.activeExecution) || openingSteps.includes(step.id) || Boolean(pendingMentor) ||
             hasPendingConfirmation || hasPendingStepRequest || free.busy;
-          const progress = stepProgress(d.information[step.id], infoEdits[step.id]);
           chatShown = true; // Its message list carries the page's notices.
           return (
             <article key="positioning-workspace" className={`${resultStyles.stepArticle} space-y-3`}>
@@ -1347,10 +1345,12 @@ function PositioningDraftContent({draftId}:{draftId:string}){
                     saving: hasUnsavedInformation, error, notice, freeError: free.error, replying: awaitingReply, lastTurnOpen: lastTurnNotice, lastTurnText,
                     recovery: recoveryNeedsUser[0] && !busy
                       ? { readable: recoveryNeedsUser[0].readable, onClick: () => void recoverPendingStep(recoveryNeedsUser[0]!.step) } : null })]}/>
-                  {!manualEntry && snap.state === "draft" && !s.valid && progress.ready && !hasPendingConfirmation && !awaitingReply && !pendingMentor && !liveOnly &&
-                    <StepSummaryCard title={step.title} disabled={busy || hasPendingStepRequest || !confirmableStep(step)}
-                      onReview={() => openReview(step.id)} onMore={focusReply}/>}
                   </div>
+                  {!manualEntry && snap.state === "draft" && !s.valid && <StepConfirmCard stays={!!d.accountRevision || index === steps.length - 1}
+                    title={step.title} info={d.information[step.id]} edits={infoEdits[step.id]} resuming={confirmation.envelopeState(step.id).kind === "valid"}
+                    canConfirm={confirmableStep(step)} disabled={busy || hasPendingStepRequest} signal={d.stepConfirmation?.[step.id]}
+                    onConfirm={() => confirmation.confirmNow(step.id, d.information[step.id], infoEdits[step.id], snap.steps)} onEdit={highlightFields(step.id)}
+                    onReview={() => openReview(step.id)}/>}
                   <WorkComposer value={mentorInput} onChange={setMentorInput} label="给导师的回复" placeholder={OTHER_PLACEHOLDER} attachment={dock} maxLength={8000} disabled={snap.state!=="draft"} sendDisabled={sendLocked} onSend={skill=>{if(skill)void free.send(mentorInput,skill);else void ask(step);}}/>
                   <p className="text-xs text-[var(--text-secondary)]">
                     同一账号的步骤共用这条对话，未确认内容保留在草稿中。{d?.runtimeMode==='staging_test'?'当前使用真实模型，仅处理你提供的资料。':'当前为隔离模拟，不调用真实模型。'}
