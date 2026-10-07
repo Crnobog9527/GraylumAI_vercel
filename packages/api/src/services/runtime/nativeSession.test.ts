@@ -96,3 +96,46 @@ it.each([false, true])('preserves valid SDK tool-call history copies (rewrite=%s
     expect(stored[3]).toMatchObject({ output: { text: JSON.stringify({ card: 'question', ...card }) } });
   }
 });
+
+it.each([false, true])('projects oversized tool-free reasoning without altering receipt or public text (signed=%s)', async signed => {
+  const f = fixture(), text = '文'.repeat(32768), thinking = '思'.repeat(32768);
+  const details = [{ type: 'reasoning.text', text: thinking, index: 0,
+    format: signed ? 'anthropic-claude-v1' : 'unknown', ...(signed ? { signature: 'synthetic-signature' } : {}) }];
+  const item: AgentInputItem = { type: 'message', role: 'assistant', status: 'completed',
+    content: [{ type: 'output_text', text, providerData: { role: 'assistant', reasoning: thinking, reasoning_details: details } }] };
+  const before = JSON.stringify(item);
+  expect(jsonbBytes(item)).toBeGreaterThan(RESULT_BYTE_LIMIT);
+  await f.session.addItems([item]);
+  await f.session.finish(text, false);
+  expect(f.saved[0]?.[0]).toMatchObject({ content: [{ text, providerData: { role: 'assistant' } }] });
+  expect(JSON.stringify(f.saved)).not.toContain('reasoning');
+  expect(recoverOpenRouterHistory(f.saved.flat(), new Set())).toEqual(f.saved.flat());
+  expect(jsonbBytes(f.saved[0]?.[0])).toBeLessThanOrEqual(RESULT_BYTE_LIMIT);
+  expect(JSON.stringify(item)).toBe(before);
+});
+it('keeps small reasoning byte-identical and refuses unknown oversized metadata', async () => {
+  const f = fixture();
+  const item: AgentInputItem = { role: 'assistant', status: 'completed',
+    content: [{ type: 'output_text', text: 'answer', providerData: { reasoning: 'small' } }] };
+  await f.session.addItems([item]);
+  await f.session.finish('answer', false);
+  expect(f.saved[0]?.[0]).toEqual(item);
+  const bad = fixture();
+  await bad.session.addItems([{ role: 'assistant', status: 'completed', content: [{ type: 'output_text', text: 'answer',
+    providerData: { reasoning: 'x'.repeat(300000), plugins: [{ id: 'unknown' }] } }] }]);
+  await expect(bad.session.finish('answer', false)).rejects.toThrow('RUNTIME_PROVIDER_HISTORY_DENIED');
+  expect(bad.saved).toEqual([]);
+});
+
+it('projects oversized standalone reasoning but never discards a tool continuation', async () => {
+  const f = fixture();
+  await f.session.addItems([{ type: 'reasoning', content: [], rawContent: [{ type: 'reasoning_text', text: '思'.repeat(100000) }] }]);
+  await f.session.finish('answer', false);
+  expect(f.saved[0]?.[0]).toEqual({ type: 'reasoning', content: [], rawContent: [] });
+  const bad = fixture();
+  const call = { id: 'call', type: 'function', function: { name: 'ask_question', arguments: '{}' } };
+  await bad.session.addItems([{ role: 'assistant', status: 'completed', content: [{ type: 'output_text', text: 'answer',
+    providerData: { reasoning: 'x'.repeat(300000), tool_calls: [call] } }] }]);
+  await expect(bad.session.finish('answer', false)).rejects.toThrow('RUNTIME_PROVIDER_HISTORY_DENIED');
+  expect(bad.saved).toEqual([]);
+});

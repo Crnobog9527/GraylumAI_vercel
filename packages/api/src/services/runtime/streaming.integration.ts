@@ -1040,13 +1040,13 @@ it.each(['missing','cost','terminal-no-cost','nonterminal-cost','timeout','5xx']
  expect(lookups).toBe(2);expect(posts).toBe(1);
 });
 
-it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true').each(['step','large','fallback','card','length','plain-step','confirmed','empty','invalid-length'] as const)(
+it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true').each(['step','large','large-reasoning','fallback','card','length','plain-step','confirmed','empty','invalid-length'] as const)(
  'RUNTIME: native C0 C1 %s streams safely and replays a terminal snapshot without redispatch',async mode=>{
- const agent=mode==='card'||mode==='length';
- const f=await fixture(agent?'agent-turn-v5-stream':'serial-tools-v4-stream',false,mode==='large'?32768:8192,
+ const agent=mode==='card'||mode==='length',large=mode==='large'||mode==='large-reasoning';
+ const f=await fixture(agent?'agent-turn-v5-stream':'serial-tools-v4-stream',false,large?32768:8192,
   false,undefined,false,40000,agent,true);
  const card={question:'Private question?',options:['First','Second'],recommended:0,message:'公开😀正文',recommendationReason:'Private reason'};
- const text=mode==='large'?'文'.repeat(32768):mode==='empty'?'':mode==='length'?'长正文😀':card.message;
+ const text=large?'文'.repeat(32768):mode==='empty'?'':mode==='length'?'长正文😀':card.message;
  const body=mode==='plain-step'?text:mode==='invalid-length'?'unfinished non-envelope':agent?text:JSON.stringify(
   mode==='fallback'?{informationPatch:{},message:text}:mode==='confirmed'?{message:text,informationPatch:{audience:{value:'读者',status:'confirmed',nature:'fact'}}}:{message:text,informationPatch:{}});
  const gate=latch(),started=latch();let posts=0;
@@ -1054,8 +1054,12 @@ it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true').each(['step','large','fal
   posts++;let raw='';for await(const part of req)raw+=part;
   const request=JSON.parse(raw),id='gen-native-'+f.execution.executionId;
   res.setHeader('content-type','text/event-stream');
-  if(mode==='large'){
+  if(large){
    expect(request.max_tokens).toBe(32768);
+   if(mode==='large-reasoning')for(let i=0;i<32768;i+=2048){
+    const thinking='\u0001'.repeat(2048);
+    chunk(res,id,request.model,{reasoning:thinking,reasoning_details:[{type:'reasoning.text',text:thinking,index:0,format:'unknown'}]});
+   }
    for(let i=0;i<body.length-2;i+=2048)chunk(res,id,request.model,{content:body.slice(i,Math.min(i+2048,body.length-2))});
   }else chunk(res,id,request.model,{role:'assistant',content:mode==='card'?'Earlier prose':body.slice(0,body.length-2)});
   started.release();await gate.promise;
@@ -1106,6 +1110,16 @@ it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true').each(['step','large','fal
   expect(posts).toBe(1);
   const saved=(await db.query('select result,octet_length(result::text) bytes from runtime_executions where id=$1',[f.execution.executionId])).rows[0];
   expect(saved.bytes).toBe(jsonbBytes(saved.result));expect(saved.bytes).toBeLessThanOrEqual(262144);
+  if(mode==='large-reasoning'){
+   const history=(await db.query('select item,octet_length(item::text) bytes from runtime_session_history where session_id=$1',[f.session.sessionId])).rows;
+   expect(history.some(row=>row.item.role==='assistant')).toBe(true);
+   for(const row of history)expect(row.bytes).toBeLessThanOrEqual(262144);
+   expect(JSON.stringify(history.filter(row=>row.item.role==='assistant'))).not.toContain('reasoning_details');
+   const receipt=(await db.query("select r.payload from bill2_receipts r join bill2_calls c on c.id=r.call_id where c.run_id=$1 and r.payload ? 'transport'",[f.execution.runId])).rows[0].payload;
+   expect(receipt.usage.sdkResponse.choices[0].message.reasoning).toBe('\u0001'.repeat(32768));
+   expect(receipt.usage.sdkResponse.choices[0].message.reasoning_details[0].text).toBe('\u0001'.repeat(32768));
+   expect((await db.query('select charged from bill2_runs where id=$1',[f.execution.runId])).rows[0].charged).toBe(3);
+  }
   const charges=await db.query('select count(*)::int n from bill2_calls where run_id=$1',[f.execution.runId]);
   expect(charges.rows[0].n).toBe(1);
  }finally{gate.release();await running;server.closeAllConnections();await new Promise<void>(resolve=>server.close(()=>resolve()));}
