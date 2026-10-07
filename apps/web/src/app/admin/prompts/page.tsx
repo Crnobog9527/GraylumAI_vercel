@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { ModuleSkillEditor, emptySkillForm, type SkillForm } from './module-skill-editor';
+import { ModuleSkillEditor, emptySkillForm, skillPublicationFields, type SkillForm } from './module-skill-editor';
 import type { ElementType } from 'react';
 import { trpc } from '@/trpc/client';
 import { toast } from 'sonner';
@@ -312,7 +312,7 @@ export default function AdminPromptsPage() {
         if (!data) throw new Error('Skill 配置不存在');
         setSkillIdentity(current => current?.moduleId === module.id ? { ...current, skillId: data.skillId, expectedVersion: data.expectedVersion } : current);
         setSkillForm({ directoryName: data.directoryName, kind: data.workflow.kind, files: data.files,
-          planResources: data.workflow.planResources,
+          planResources: data.workflow.planResources, reportGeneration: data.workflow.reportGeneration,
           steps: data.workflow.steps.map(s => ({ title: s.title, resources: s.resources, information:s.information })), reviewed: false });
       }).catch(e => { if (session === editorSession.current) setSkillError(e instanceof Error ? e.message : '读取 Skill 失败'); }).finally(() => { if (session === editorSession.current) setSkillLoading(false); });
     }
@@ -386,8 +386,7 @@ export default function AdminPromptsPage() {
       if (skillReading || skillLoading || saveSkill.isPending || !skillIdentity || !formData.modelId || !skillForm.reviewed) return;
       setSkillError('');
       saveSkill.mutate({ ...skillIdentity, expectedUpdatedAt: editingModule?.updated_at ?? null,
-        directoryName: skillForm.directoryName, kind: skillForm.kind, files: skillForm.files,
-        steps: skillForm.steps, planResources:skillForm.planResources, resourcePlanReviewed: true,
+        directoryName: skillForm.directoryName, ...skillPublicationFields(skillForm), resourcePlanReviewed: true,
         module: { title: formData.title, description: formData.description || null,
           full_description: formData.fullDescription || null, model_id: formData.modelId,
           platform: formData.platform, category: formData.category, icon: formData.icon,

@@ -218,7 +218,10 @@ export function createInformationAutosave(io: () => AutosaveIo) {
   return { enqueue, schedule, flush, cancel };
 }
 
-type DraftRead = { information?: Record<string, { values?: Values }>; snapshot?: { steps?: Record<string, { version?: number }> } };
+type DraftRead = { information?: Record<string, { values?: Values }>; snapshot?: { steps?: Record<string, { version?: number }> };
+  stepConfirmation?: Record<string, unknown> };
+/** Marks a step's confirmation signal as older than its cached values until the next full read (step-confirm-card.tsx). */
+export const STALE_SIGNAL = { stale: true } as const;
 
 /** The step from a read of the draft, or null when the read does not have it. */
 export function stepView(read: unknown, stepId: string): StepView | null {
@@ -227,7 +230,10 @@ export function stepView(read: unknown, stepId: string): StepView | null {
   return { version, values: (read as DraftRead).information?.[stepId]?.values ?? {} };
 }
 
-/** A cached read with one committed write applied; the background refresh brings the rest. */
+/**
+ * A cached read with one committed write applied; the background refresh brings the rest. The step's server
+ * signal (#713) was computed from the old values, so it is marked stale rather than paired with the new ones.
+ */
 export function savedRead<T>(read: T, stepId: string, values: Values, version: number): T {
   const old = read as DraftRead | undefined;
   if (!old?.information?.[stepId] || !old.snapshot?.steps?.[stepId]) return read;
@@ -236,5 +242,6 @@ export function savedRead<T>(read: T, stepId: string, values: Values, version: n
   return { ...old,
     information: { ...old.information, [stepId]: { ...old.information[stepId], values } },
     snapshot: { ...old.snapshot, steps: { ...old.snapshot.steps, [stepId]: { ...old.snapshot.steps[stepId], version } } },
+    ...(old.stepConfirmation ? { stepConfirmation: { ...old.stepConfirmation, [stepId]: STALE_SIGNAL } } : {}),
   } as T;
 }

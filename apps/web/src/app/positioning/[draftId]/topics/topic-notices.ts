@@ -2,7 +2,7 @@
 import { CHAT_ACTION, type ChatNotice } from '@/components/chat/ChatInlineNotice';
 import { PROVIDER_REJECTED_NOTICE, gateAdmissionNotice, gateResultNotice } from '@/lib/runtime-gate-notice';
 import { inFlight } from '@/app/runtime/runtime-notices';
-import { isPaygWaiting } from '@/lib/payg-wait';
+import { hostNotice, isPaygWaiting } from '@/lib/payg-wait';
 
 /** Fixed wording for a failed topic operation; the pending operation itself is kept by the caller. */
 export function topicFailureMessage(cause: unknown) {
@@ -25,9 +25,19 @@ export function topicFailureMessage(cause: unknown) {
  * The execution is cancelled with no charge, so the operation is finished,
  * but the typed input stays in the box for an explicit new send.
  */
-export function topicExecutionNotice(result: unknown): string | null {
+export function topicGateNotice(result: unknown): string | null {
   if (!result || typeof result !== 'object' || !('unavailable' in result)) return null;
   return gateResultNotice(result.unavailable);
+}
+
+/** What a finished topic turn shows: the host's notice first (#698), else the gate's. Display only. */
+export function topicExecutionNotice(result: unknown): string | null {
+  return hostNotice(result) ?? topicGateNotice(result);
+}
+
+/** A finished topic turn: its notice, and whether the typed input stays (only after a gate stop; a notice is display only). */
+export function topicTurnOutcome(result: unknown) {
+  return { notice: topicExecutionNotice(result), keepInput: Boolean(topicGateNotice(result)) };
 }
 
 /** A cancelled turn the provider refused before any charge: the live notice, kept after a reload. */

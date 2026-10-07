@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { OUTPUT_TRUNCATED_NOTICE, PROVIDER_HISTORY_NOTICE, gateAdmissionNotice, gateResultNotice, isRuntimeGateReason } from '@/lib/runtime-gate-notice';
-import { isPaygWaiting } from '@/lib/payg-wait';
+import { hostNotice, isPaygWaiting } from '@/lib/payg-wait';
 
 export { OUTPUT_TRUNCATED_NOTICE };
 const videoGatePrefix = 'OPC_CONTENT_GATE_';
@@ -12,6 +12,8 @@ export function runtimeAdmissionNotice(cause: unknown): string | null {
 
 /** Fixed notice for an execution result; capacity keeps its page-specific handling. */
 export function runtimeExecutionNotice(result: unknown): string | null {
+  const notice = hostNotice(result);
+  if (notice) return notice;
   if (!result || typeof result !== 'object' || !('unavailable' in result)) return null;
   if (result.unavailable === 'provider_history') return PROVIDER_HISTORY_NOTICE;
   if (result.unavailable === 'output_truncated') return OUTPUT_TRUNCATED_NOTICE;

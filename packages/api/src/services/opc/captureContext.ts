@@ -1,4 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import {stepConfirmation} from '../../shared/opcStepConfirmation';
 import {fieldElicitation, type MethodInformationField} from '../../shared/opcMethodPolicy';
 import {GROUNDED_CARD_CONTRACT} from '../runtime/groundedCard';
 import {HOST_TURN_MAX_BYTES, hostTurnContextSchema, type HostTurnContext} from '../runtime/hostTurn';
@@ -12,8 +13,9 @@ export type CaptureState = {
 };
 type Step = {id: string; title: string};
 export function captureHostContext(steps: readonly Step[], information: Record<string, CaptureState>,
-  stepId: string, opening: boolean, updatedFieldIds?: string[]): HostTurnContext {
+  stepId: string, opening: boolean, updatedFieldIds?: string[], confirmed: Record<string, boolean> = {}): HostTurnContext {
   const context: HostTurnContext = {cardContract: GROUNDED_CARD_CONTRACT, stepId, opening,
+    confirmation: stepConfirmation(information[stepId], confirmed[stepId] === true),
     ...(updatedFieldIds ? {updatedFieldIds} : {}), checklist: steps.map(step => ({
     id: step.id, title: step.title,
     fields: (information[step.id]?.schema ?? []).map(field => {
