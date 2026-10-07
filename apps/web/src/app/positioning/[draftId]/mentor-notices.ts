@@ -1,7 +1,8 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import { createElement } from "react";
 import { CHAT_ACTION, type ChatNotice } from "@/components/chat/ChatInlineNotice";
 import { livePhaseNotice, type ReplyNotice } from "./agent-turn-display";
-import { stopSaving } from "./stop-reply";
+import { STOPPED_NOTICE, UNORGANIZED_NOTICE, stopSaving } from "./stop-reply";
 
 /** The failed explicit retry of a retained request; the retry notice already says the same. */
 export const RETRY_PENDING_NOTICE = "原请求仍未确认结果，已继续保留。请稍后再点“重试”，不会重复发送或重复扣费。";
@@ -51,7 +52,10 @@ export function mentorTailNotices(ctx: {
 export function mentorTurnNotice(id: string, reply: ReplyNotice | undefined, stalled: Action | null): ChatNotice | null {
   const base = reply ?? (stalled ? { tone: "warning" as const, text: "回复暂未完成，请继续核对。" } : null);
   if (!base) return null;
-  return { id, ...base, ...(stalled ? { actions: [{ label: CHAT_ACTION.retry, ...stalled }] } : {}) };
+  // Only this stopped-result notice has a required two-line layout; other notices keep their normal wrapping.
+  const text = base.text.includes(STOPPED_NOTICE + "\n" + UNORGANIZED_NOTICE)
+    ? createElement("span", { style: { whiteSpace: "pre-line" } }, base.text) : base.text;
+  return { id, ...base, text, ...(stalled ? { actions: [{ label: CHAT_ACTION.retry, ...stalled }] } : {}) };
 }
 
 /**
