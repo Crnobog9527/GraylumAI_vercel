@@ -9,10 +9,10 @@ import {OPENROUTER_RESPONSE_BYTE_LIMIT as limit} from './responseCapacity';
 import {mentorOutputFixture,mentorOutputWire,fullBudgetText} from '../__tests__/fixtures/mentorOutput';
 import {normalizeOpenRouterHistory} from '../runtime/openRouterHistory';
 const identity={provider:'openrouter',account:'synthetic',model:'test/model',protocol:'openrouter-chat-v1',
- providerLimits:{providerSlug:'synthetic',contextTokens:10000,promptUsdPerMillion:'2',completionUsdPerMillion:'0',requestUsd:'0'},
- outputLimit:8192,upperUsd:'0.02'} as const;
+ providerLimits:{providerSlug:'synthetic',contextTokens:40000,promptUsdPerMillion:'2',completionUsdPerMillion:'0',requestUsd:'0'},
+ outputLimit:32768,upperUsd:'0.08'} as const;
 function input(stream:boolean){return {input:JSON.stringify({model:identity.model,stream,
- ...(stream?{stream_options:{include_usage:true}}:{}),store:false,messages:[],max_tokens:8192,
+ ...(stream?{stream_options:{include_usage:true}}:{}),store:false,messages:[],max_tokens:32768,
  provider:openRouterBound(identity.providerLimits,identity.outputLimit).routing})};}
 it.each(['body','thinking','duplicated'] as const)('accepts exact full byte limit and rejects +1 byte/unit: %s',async mode=>{
  const fixture=mentorOutputFixture(mode==='duplicated');

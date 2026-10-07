@@ -158,3 +158,18 @@ it('Sonnet low may cite same-route none evidence only under the precise approved
  ];
  for(const value of bad)expect(paygHostProfile.safeParse(value).success).toBe(false);
 });
+
+it('requires a 32768-authorized profile and sufficient context; rejects cap plus one', async () => {
+ const f=fixture();
+ await expect(f.run('ordinary',32768)).rejects.toThrow('RUNTIME_PAYG_PROFILE_REQUIRED');
+ f.profile.outputLimit=32768;f.profile.evidence.outputLimit=32768;
+ f.profile.reasoningVariants[0].outputLimit=32768;
+ f.policy.outputLimit=32768;
+ f.policy.providerLimits!.contextTokens=237568;
+ await expect(f.run('ordinary',32768)).resolves.toBeDefined();
+ await expect(f.run('ordinary',32769)).rejects.toThrow('RUNTIME_PAYG_PROFILE_REQUIRED');
+ f.policy.providerLimits!.contextTokens=237567;
+ await expect(f.run('ordinary',32768)).rejects.toThrow('RUNTIME_PAYG_PROFILE_REQUIRED');
+ f.profile.outputLimit=32769;
+ expect(paygHostProfile.safeParse(f.profile).success).toBe(false);
+});

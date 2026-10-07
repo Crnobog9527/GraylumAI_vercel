@@ -24,7 +24,8 @@ type Fixture={actor:string;user:SupabaseClient;admin:SupabaseClient;registration
 /** Real router -> real admission/pricing -> loopback PostgREST -> real PostgreSQL.
  * No policy/pricing/RPC mocks and no provider network request. */
 export function registerPaygHostTests(db:pg.Client,fixture:()=>Promise<Fixture>){
- it.each(['ordinary','work','mentor','step','plan','topic','mentor-final-profile'] as const)('RUNTIME: PAYG host SQL %s admission and claim',async entry=>{
+ it.each(['ordinary','ordinary-cap','work','mentor','step','plan','topic','mentor-final-profile'] as const)('RUNTIME: PAYG host SQL %s admission and claim',async entry=>{
+  const outputLimit=entry==='ordinary-cap'?32768:8192;
   const f=await fixture(),ctx=await f.context(),opc=opcRouter.createCaller(ctx),runtime=runtimeRouter.createCaller(ctx);
   const service=opcService(f.user,f.admin),artifacts=workbenchService(f.user,f.admin);
   const d=entry==='topic'||entry==='plan'||entry==='step'
@@ -54,7 +55,7 @@ export function registerPaygHostTests(db:pg.Client,fixture:()=>Promise<Fixture>)
   const policies=pairs.map(([modelId,model,providerSlug])=>{
    const providerLimits={providerSlug,contextTokens:250000,promptUsdPerMillion:'1',completionUsdPerMillion:'1',requestUsd:'0'};
    return {modelId,model,provider:'openrouter',account:'synthetic',protocol:'openrouter-chat-v1',providerLimits,
-    upperUsd:openRouterBound(providerLimits,8192).upperUsd,inputLimit:196608,outputLimit:8192,multiplier:'3',
+    upperUsd:openRouterBound(providerLimits,outputLimit).upperUsd,inputLimit:196608,outputLimit,multiplier:'3',
     automaticRetry:false,hiddenTools:false,lookupSupported:true};
   });
   for(const [id,model,tag] of pairs){
@@ -63,18 +64,18 @@ export function registerPaygHostTests(db:pg.Client,fixture:()=>Promise<Fixture>)
    const catalog={...config.reasoning.catalog,reasoning:{mandatory:false,defaultEnabled:false,
     supportedEfforts:['low'],defaultEffort:null,supportsMaxTokens:false}};
    const reasoning={...config.reasoning,catalog,purposes:{interactive:{mode:'effort',effort:'low',wire:'reasoning_effort'},organize:{mode:'provider_default'}}};
-   await db.query("update ai_models set model_id=$2,provider='openrouter',input_limit=250000,max_tokens=8192,config=$3 where id=$1",
-    [id,model,{...config,reasoning}]);
+   await db.query("update ai_models set model_id=$2,provider='openrouter',input_limit=250000,max_tokens=$4,config=$3 where id=$1",
+    [id,model,{...config,reasoning},outputLimit]);
   }
   const profiles=pairs.map(([,model,endpointTag])=>({model,endpointTag,protocol:'openrouter-chat-v1',
    profileVersion:'synthetic-only',evidenceVersion:'synthetic-only',admissionPath:'empirical',
    templateTokens:4096,marginTokens:4096,maxBytes:196608,maxMessages:128,maxTools:2,maxSchemaBytes:16384,
    purposes:['ordinary','skill','organizer','skill_matching','attached_organizer'],
    requestFormats:['serial-tools-v2','serial-tools-v4-stream','serial-tools-v6-reasoning','agent-turn-v5-stream'],
-   reasoningVariants:[{parameter:'none'},{effort:'low'}].map(reasoning=>({reasoning,outputLimit:8192,testedOutputLimit:512,evidenceReference:'synthetic-only',
-    manifestHash:'b'.repeat(64),outputStressSamples:2,includesReasoning:true})),outputLimit:8192,expiresAt,
+   reasoningVariants:[{parameter:'none'},{effort:'low'}].map(reasoning=>({reasoning,outputLimit,testedOutputLimit:512,evidenceReference:'synthetic-only',
+    manifestHash:'b'.repeat(64),outputStressSamples:2,includesReasoning:true})),outputLimit,expiresAt,
    evidence:{reference:'synthetic-only',manifestHash:'a'.repeat(64),distinctSamples:60,messageStressSamples:12,maxVerifiedMessages:128,completeCells:15,variantsPerCell:4,
-    maxPromptToBytes:0.5,maxPromptToUpper:0.4,outputLimit:8192,testedOutputLimit:512,outputSemantics:'max-tokens-includes-reasoning',includesReasoning:true,cacheCovered:true,costBoundPassed:true}}));
+    maxPromptToBytes:0.5,maxPromptToUpper:0.4,outputLimit,testedOutputLimit:512,outputSemantics:'max-tokens-includes-reasoning',includesReasoning:true,cacheCovered:true,costBoundPassed:true}}));
   // Use the delivered profile unchanged except local expiry/window lifetimes.
   // This is a disposable regression fixture, never a production configuration.
   const finalProfiles=entry==='mentor-final-profile'
@@ -86,7 +87,7 @@ export function registerPaygHostTests(db:pg.Client,fixture:()=>Promise<Fixture>)
     interactive:{inputBytes:90000,historyItems:100},organize:{inputBytes:64000,historyItems:100},
     report:{inputBytes:196608,historyItems:0}}}:{}),
    billing_payg_start_thresholds:{version:'synthetic-only',
-    thresholds:pairs.flatMap(([,model])=>['ordinary','skill','skill_matching','organizer','attached_organizer'].map(purpose=>({model,purpose,credits:1})))}};
+    thresholds:pairs.flatMap(([,model])=>['ordinary','skill','skill_matching','organizer','attached_organizer'].map(purpose=>({model,purpose,typicalUsd:'0.04415'})))}};
   const saved=(await db.query('select key,value from system_settings where key=any($1)',[Object.keys(values)])).rows;
   const env={VERCEL:'1',VERCEL_PROJECT_PRODUCTION_URL:'auth-staging.graylum.com',VERCEL_GIT_COMMIT_REF:'staging',
    VERCEL_GIT_REPO_OWNER:'Crnobog9527',VERCEL_GIT_REPO_SLUG:'GraylumAI_vercel',VERCEL_PROJECT_ID:'synthetic',
@@ -101,7 +102,7 @@ export function registerPaygHostTests(db:pg.Client,fixture:()=>Promise<Fixture>)
     max_cost_usd,max_calls,expires_at) values($1,true,$2,$3,100,3,10,100,$4)`,[windowId,[f.actor],JSON.stringify(policies),expiresAt]);
    Object.assign(process.env,env);
    let admitted:{executionId:string};
-   if(entry==='ordinary'||entry==='work'){
+   if(entry==='ordinary'||entry==='ordinary-cap'||entry==='work'){
     let scope:{kind:string;projectId?:string;workItemId?:string}={kind:'positioning_draft'};
     if(entry==='work'){
      const parent=randomUUID(),work=randomUUID();
@@ -135,6 +136,7 @@ export function registerPaygHostTests(db:pg.Client,fixture:()=>Promise<Fixture>)
     max_tokens:c.maxOutputTokens,...frozenReasoningFields(c.reasoning)}),{context:c,policy,phase:c.role,primaryDialogue:true});
    const {call}=runtimePaygCall(request,c.role,policy,billing.rules,e.epoch,true);
    expect(call.payg?.messages).toBe(128);
+   expect(c.maxOutputTokens).toBe(outputLimit);
    const excessive=JSON.parse(request);excessive.messages.push({role:'user',content:'One too many'});
    expect(()=>runtimePaygCall(JSON.stringify(excessive),c.role,policy,billing.rules,e.epoch,true))
     .toThrow('BILL2_INPUT_PROFILE_INVALID');
@@ -147,6 +149,10 @@ export function registerPaygHostTests(db:pg.Client,fixture:()=>Promise<Fixture>)
    }
    const claimed=await rpc('bill2_claim',{p_run_id:e.runId,p_sequence:1,p_payload:call});
    expect(claimed.id).toEqual(expect.any(String));
+   const stored=(await db.query('select start_threshold,payload from bill2_calls where id=$1',[claimed.id])).rows[0];
+   expect(stored.start_threshold).toBe(14); // ceil(typicalUsd 0.04415 * q 100 * m 3)
+   expect(stored.payload.outputLimit).toBe(outputLimit);
+   expect(stored.payload.upperUsd).toBe(call.upperUsd);
    expect((await rpc('bill2_claim',{p_run_id:e.runId,p_sequence:1,p_payload:call})).id).toBe(claimed.id);
    expect((await db.query('select count(*)::int n from bill2_calls where run_id=$1',[e.runId])).rows[0].n).toBe(1);
    expect((await db.query('select credits from profiles where id=$1',[f.actor])).rows[0].credits).toBeGreaterThanOrEqual(0);

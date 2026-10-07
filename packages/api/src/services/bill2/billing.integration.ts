@@ -11,6 +11,8 @@ import { authoritativeBilling, type FrozenRun, type FrozenCall } from './service
 import {fullBudgetText,mentorOutputFixture,outputUnit} from '../__tests__/fixtures/mentorOutput';
 import {openRouterAdapter} from './openRouterAdapter';
 import {openRouterBound} from './openRouterPolicy';
+import {fitNativeResult,attachNativeSummary} from '../runtime/resultCapacity';
+import {OPENROUTER_RECEIPT_BYTE_LIMIT} from './responseCapacity';
 import {PURPOSE_OUTPUT_CAP} from '../runtime/purposeBudgets';
 import { fixtureEvidence, localFixtureAdapter } from './fixtureAdapter';
 import { makePackage, makeWorkflow } from '../__tests__/fixtures/artifacts';
@@ -432,10 +434,12 @@ it('BILL2: a later network failure cannot invalidate an earlier authoritative re
 it('BILL2: configured maximum output and attached summary survive jsonb close and one settlement',async()=>{
  const f=await fixture(),run=await f.prepare(),cid=await call(f.actor,run.id);
  await receipt(f.actor,run.id,cid);
- const saved={...result(),body:fullBudgetText,summary:outputUnit.repeat(4096)};
- expect(PURPOSE_OUTPUT_CAP).toBe(8192);
- expect(Buffer.byteLength(JSON.stringify(saved.body))-2).toBe(8192*8);
- expect(Buffer.byteLength(JSON.stringify(saved.summary))-2).toBe(4096*8);
+ const saved=attachNativeSummary(fitNativeResult({...result(),body:fullBudgetText},
+  {attachedOrganizer:true}),outputUnit.repeat(4096));
+ expect(PURPOSE_OUTPUT_CAP).toBe(32768);
+ expect(saved.body.length).toBeLessThan(fullBudgetText.length);
+ expect(saved.completeness).toBe('length_limit');
+ expect(saved.summary).toBe(''); // Truncated primary cannot have an authoritative summary.
  const bytes=(await db.query('select octet_length($1::jsonb::text) bytes',[JSON.stringify(saved)])).rows[0].bytes;
  expect(bytes).toBeLessThan(262144-8192);
  await sqlRpc('bill2_close',[f.actor,run.id,'delivered',saved]);
@@ -452,22 +456,22 @@ it('BILL2: configured maximum output and attached summary survive jsonb close an
 it.each([
  {stream:false,reasoning:false},{stream:false,reasoning:true},
  {stream:true,reasoning:false},{stream:true,reasoning:true},
-])('BILL2: 8192 output receipt persists and settles once with stream=$stream reasoning=$reasoning',async({stream,reasoning})=>{
+])('BILL2: 32768 output receipt persists and settles once with stream=$stream reasoning=$reasoning',async({stream,reasoning})=>{
  const f=await fixture(),capacityModelId=randomUUID(),windowId=randomUUID();
  const {response,wire}=mentorOutputFixture(reasoning);
  const identity={provider:'openrouter',account:'synthetic-output-'+windowId,model:response.model,
-  protocol:'openrouter-chat-v1' as const,providerLimits:{providerSlug:'synthetic',contextTokens:10000,
+  protocol:'openrouter-chat-v1' as const,providerLimits:{providerSlug:'synthetic',contextTokens:40000,
    promptUsdPerMillion:'2',completionUsdPerMillion:'0',requestUsd:'0'},
-  inputLimit:10000,outputLimit:PURPOSE_OUTPUT_CAP,automaticRetry:false as const,hiddenTools:false as const,lookupSupported:true};
+  inputLimit:40000,outputLimit:PURPOSE_OUTPUT_CAP,automaticRetry:false as const,hiddenTools:false as const,lookupSupported:true};
  const bound=openRouterBound(identity.providerLimits,identity.outputLimit);
  const policy={...identity,upperUsd:bound.upperUsd,modelId:capacityModelId};
  await db.query("insert into ai_models(id,name,model_id,provider,is_active) values($1,'Synthetic output capacity',$2,'openrouter','true')",
   [capacityModelId,identity.model]);
  await db.query("insert into runtime_test_windows(id,enabled,actor_ids,call_policies,credits_per_usd,multiplier,max_cost_usd,max_calls,expires_at) " +
-  "values($1,true,$2,$3,1000,1,0.02,1,now()+interval '2 hours')",[windowId,[f.actor],JSON.stringify([policy])]);
+  "values($1,true,$2,$3,1000,1,0.08,1,now()+interval '2 hours')",[windowId,[f.actor],JSON.stringify([policy])]);
  const payload:FrozenRun={...f.payload,mode:'staging_test',testWindowId:windowId,modelId:capacityModelId,
   input:{version:'runtime.v1',network:'deny',tools:[]},callPolicy:[policy],
-  rules:{...f.payload.rules,version:'runtime-staging-v1',quoteVersion:windowId},limits:{...f.payload.limits,maxCalls:1}};
+  rules:{...f.payload.rules,version:'runtime-staging-v1',quoteVersion:windowId},limits:{...f.payload.limits,costUsd:'0.08',credits:80,maxPreDeduct:80,maxCalls:1}};
  const request=JSON.stringify({model:identity.model,stream,...(stream?{stream_options:{include_usage:true}}:{}),
   store:false,messages:[],max_tokens:PURPOSE_OUTPUT_CAP,provider:bound.routing});
  const original=stream?wire:JSON.stringify(response);let sends=0;
@@ -482,7 +486,7 @@ it.each([
  const rows=await db.query("select payload,octet_length(payload::text) bytes from bill2_receipts where call_id=$1 and payload ? 'transport'",[claimed.id]);
  expect(rows.rows).toHaveLength(1);
  const saved=rows.rows[0].payload;
- expect(rows.rows[0].bytes).toBeLessThan(524288-16384);
+ expect(rows.rows[0].bytes).toBeLessThan(OPENROUTER_RECEIPT_BYTE_LIMIT-16384);
  expect(saved).toMatchObject({final:true,cost:'0.007',sourceHash:hash(original),usage:{sdkResponse:response}});
  expect(JSON.parse(saved.rawBody)).toEqual(response);
  expect(saved.transport).toMatchObject({complete:true,transportIssue:null,rawBodyEncoding:'gzip-base64',
@@ -491,7 +495,7 @@ it.each([
  await billing.recordReceipt(run.id,claimed.id,saved);
  await billing.recordReceipt(run.id,claimed.id,saved);
  expect((await db.query('select count(*)::int n from bill2_receipts where call_id=$1',[claimed.id])).rows[0].n).toBe(stream?2:1);
- const delivered={...result(),body:fullBudgetText,summary:outputUnit.repeat(4096)};
+ const delivered=fitNativeResult({...result(),body:fullBudgetText,summary:outputUnit.repeat(4096)});
  await billing.closeRun(run.id,'delivered',delivered);
  expect(await billing.finalizeRun(run.id)).toMatchObject({state:'settled',chargedCredits:7,conflict:false});
  const settled=await snapshot(f.actor);
@@ -604,3 +608,18 @@ it('BILL2: erased call content keeps original financial recovery and rejects lat
   writeFileSync(resolve(process.env.V3_WORKBENCH_OUTPUT!,'erasure-call.json'),JSON.stringify(report,null,2));
  }
 },60000);
+
+it('BILL2: receipt CHECK accepts exactly 4 MiB and rejects one byte more without widening result storage',async()=>{
+ const f=await fixture(),run=await f.prepare(),cid=await call(f.actor,run.id);
+ const body={probe:''};
+ const overhead=(await db.query('select octet_length($1::jsonb::text) n',[JSON.stringify(body)])).rows[0].n;
+ body.probe='x'.repeat(OPENROUTER_RECEIPT_BYTE_LIMIT-overhead);
+ await db.query('insert into bill2_receipts(call_id,payload,payload_hash) values($1,$2,$3)',[cid,body,'f'.repeat(64)]);
+ expect((await db.query('select octet_length(payload::text) n from bill2_receipts where call_id=$1',[cid])).rows[0].n)
+  .toBe(OPENROUTER_RECEIPT_BYTE_LIMIT);
+ await expect(db.query('insert into bill2_receipts(call_id,payload,payload_hash) values($1,$2,$3)',
+  [cid,{probe:body.probe+'x'},'e'.repeat(64)]))
+  .rejects.toMatchObject({code:'23514',constraint:'bill2_receipts_payload_check'});
+ await expect(sqlRpc('bill2_close',[f.actor,run.id,'delivered',{...result(),body:'x'.repeat(262144)}]))
+  .rejects.toThrow();
+});

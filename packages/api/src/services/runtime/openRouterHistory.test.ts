@@ -167,7 +167,7 @@ it.each([
  {...encryptedDetail,index:-1},
  {...encryptedDetail,index:0.5},
  {...encryptedDetail,extra:'hidden'},
- {...encryptedDetail,data:'x'.repeat(139265)},
+ {...encryptedDetail,data:'x'.repeat(532481)},
 ])('rejects malformed opaque reasoning before sizing cuts or credential access %#',async(detail)=>{
  const metadata={role:'assistant',reasoning_details:[detail]};
  const item={type:'message',role:'assistant',content:[{type:'output_text',text:'Synthetic answer',providerData:metadata}]},incoming=[{role:'user',content:'Next'}];
@@ -201,7 +201,7 @@ it.each([
  {...summaryDetail,summary:null},
  {...summaryDetail,summary:23},
  {...summaryDetail,summary:{text:'hidden'}},
- {...summaryDetail,summary:'x'.repeat(139265)},
+ {...summaryDetail,summary:'x'.repeat(532481)},
  {...summaryDetail,id:23},
  {...summaryDetail,id:''},
  {...summaryDetail,id:'x'.repeat(257)},

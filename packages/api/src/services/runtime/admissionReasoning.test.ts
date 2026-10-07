@@ -295,15 +295,33 @@ it.each([false,true])('real Skill admission freezes step streaming and leaves pl
  expect(JSON.stringify(await service.prepare(input))).toBe(bytes);
 });
 
-it.each([8192,8193])('v1 native O is capped at 8192 for model/quote boundary %i with unchanged frozen charges', async limit => {
+it.each([8192,32768,32769])('v1 native O is capped at 32768 for model/quote boundary %i with unchanged frozen charges', async limit => {
  const f=fixture();
  f.models[0]!.max_tokens=limit;
  f.policy.real.callPolicies[0]!.outputLimit=limit;
  const before=structuredClone(f.policy.real.callPolicies);
  const result=await runtimeAdmissionService(f.user,f.admin,f.policy).prepare({...f.input,organizeAfter:false});
  expect(result.context.nativeOutput).toBe('native-output-v1');
- expect(result.context.maxOutputTokens).toBe(8192);
+ expect(result.context.maxOutputTokens).toBe(Math.min(limit,32768));
  expect(result.billing.contractVersion).toBe('bill2.v1');
  expect(result.billing.callPolicy).toEqual([before[0]]);
  expect(result.billing.limits).toMatchObject({costUsd:'0.008000000000',credits:8,maxPreDeduct:8});
+});
+
+it('new cap freezes the new quote while an old execution and organizer retain their original limits', async () => {
+ const f=fixture();
+ const old=await f.service.prepare(f.input),oldBytes=JSON.stringify(old);
+ const quote=f.policy.real.callPolicies[0]!;
+ quote.providerLimits.contextTokens=100000;
+ quote.outputLimit=32768;
+ quote.upperUsd=openRouterBound(quote.providerLimits,32768).upperUsd;
+ f.models[0]!.max_tokens=32768;f.models[0]!.input_limit=100000;
+ const next=runtimeAdmissionService(f.user,f.admin,f.policy);
+ const admitted=await next.prepare({...f.input,requestId:nextId});
+ expect(admitted.context.maxOutputTokens).toBe(32768);
+ expect(admitted.context.attachedOrganizer.maxOutputTokens).toBe(4096);
+ expect(admitted.billing.callPolicy[0].upperUsd).toBe('0.013276800000');
+ expect(admitted.billing.limits).toMatchObject({costUsd:'0.026553600000',credits:27,maxPreDeduct:27});
+ expect(JSON.stringify(await next.prepare(f.input))).toBe(oldBytes);
+ expect(old.context.maxOutputTokens).toBe(8192);
 });
