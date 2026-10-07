@@ -7,9 +7,11 @@ import { editedLocally, fieldMeta, fieldState, hasContent, needsLook, shownValue
 export type ConfirmCardRow = { id: string; title: string; text: string; look: boolean; state: ReturnType<typeof fieldState> };
 /** The server's per-step confirmation signal (opc.read `stepConfirmation`, #713). Display only, never a permission. */
 export type StepSignal = { requiredComplete: boolean; stepConfirmed: boolean; stepReady: boolean; needsLookFieldIds: string[] };
-export function readStepSignal(raw: unknown): StepSignal | undefined {
+/** "stale": the cached values are newer than this signal (a save was applied locally; the next read refreshes it). */
+export function readStepSignal(raw: unknown): StepSignal | "stale" | undefined {
   if (!raw || typeof raw !== "object") return undefined;
   const value = raw as Record<string, unknown>;
+  if (value.stale === true) return "stale";
   if (typeof value.requiredComplete !== "boolean" || typeof value.stepConfirmed !== "boolean" || typeof value.stepReady !== "boolean" ||
       !Array.isArray(value.needsLookFieldIds) || !value.needsLookFieldIds.every(id => typeof id === "string")) return undefined;
   return { requiredComplete: value.requiredComplete, stepConfirmed: value.stepConfirmed, stepReady: value.stepReady,
@@ -34,14 +36,16 @@ export type ConfirmCardModel = {
  * the fields to look at; while a local edit is newer than that signal, or for a server without it, the same rules are
  * derived locally and the card is not `current`. A field the user has edited locally reads as theirs.
  */
-export function confirmCardModel(info: StepInformation | undefined, edits?: Record<string, FieldValue>, signal?: StepSignal): ConfirmCardModel {
+export function confirmCardModel(info: StepInformation | undefined, edits?: Record<string, FieldValue>,
+  signal?: StepSignal | "stale"): ConfirmCardModel {
   const progress = stepProgress(info, edits);
   const edited = (info?.schema ?? []).some(field => editedLocally(info, edits, field.id));
-  const server = signal && !edited ? signal : undefined;
+  const server = signal && signal !== "stale" && !edited ? signal : undefined;
   const rows = (info?.schema ?? []).filter(field => hasContent(shownValue(info, edits, field.id))).map(field => {
     const value = shownValue(info, edits, field.id);
-    const look = server ? server.needsLookFieldIds.includes(field.id)
-      : !editedLocally(info, edits, field.id) && needsLook(value, field, fieldMeta(info, field.id));
+    // A stale signal's provenance may be stale too: no marks until the next read.
+    const look = server ? server.needsLookFieldIds.includes(field.id) : signal !== "stale" &&
+      !editedLocally(info, edits, field.id) && needsLook(value, field, fieldMeta(info, field.id));
     // The whole value: one click confirms exactly what the card shows, never an unseen remainder.
     return { id: field.id, title: field.title, text: value.value.trim(), look, state: fieldState(value) };
   });
@@ -95,7 +99,7 @@ export function StepConfirmCard({ title, info, edits, signal, resuming, disabled
       <ul>{model.rows.map(row => <li key={row.id} data-look={row.look || undefined}><span>{row.title}</span>
         {row.state === "deferred" ? "（暂缓）" : ""}{row.text}</li>)}</ul>
       {model.look.length > 0 && <p>标出“请看一眼”的是根据对话整理或导师建议的内容，你自己填写的不用再看。</p>}
-      {!model.current && !resuming && <p>刚改过的内容正在保存，保存后就可以确认。</p>}
+      {!model.current && !resuming && <p>刚改过的内容正在保存和刷新，完成后就可以确认。</p>}
       {model.updates > 0 && <p>还有 {model.updates} 条“根据对话整理的更新”没处理，它们不会被确认，确认后仍可采用。</p>}
       <div>
         <Button disabled={disabled || !confirmNow} onClick={onConfirm}>{resuming ? "继续完成确认" : revision ? "没问题，确认这一步的修改" : "没问题，进入下一步"}</Button>

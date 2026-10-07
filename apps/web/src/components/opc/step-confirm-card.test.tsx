@@ -4,6 +4,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import { confirmCardModel, readStepSignal, StepConfirmCard, type StepConfirmCardProps } from "./step-confirm-card";
 import { stepConfirmation } from "../../../../../packages/api/src/shared/opcStepConfirmation";
+import { savedRead } from "@/app/positioning/[draftId]/information-autosave";
 import { fieldOrigin, fieldStateLabel, needsLook, type FieldValue, type StepInformation } from "./capture-state";
 
 const v = (value: string, status: FieldValue["status"] = "provisional"): FieldValue => ({ value, status, nature: "decision" });
@@ -174,5 +175,23 @@ describe("server confirmation signal (#713)", () => {
     const i = info();
     const p = props({ resuming: true, edits: { ...i.values!, goal: v("刚改的目标") }, signal: signal(i) });
     expect(button(p, "继续完成确认")!.disabled).toBe(false);
+  });
+});
+
+describe("a signal older than the cached values", () => {
+  it("is marked stale when an autosave writes values into the cached read, and the card waits for the next read", () => {
+    const i = info();
+    const read = { information: { s1: i }, snapshot: { steps: { s1: { version: 3 } } }, stepConfirmation: { s1: stepConfirmation(i as never, false) } };
+    const saved = savedRead(read, "s1", { ...i.values!, audience: v("") }, 4);
+    expect(saved.stepConfirmation.s1).toEqual({ stale: true });
+    expect(readStepSignal(saved.stepConfirmation.s1)).toBe("stale");
+    // The cleared required field shows as missing from the saved values, never as complete from the old signal.
+    const model = confirmCardModel(saved.information.s1, undefined, readStepSignal(saved.stepConfirmation.s1));
+    expect(model).toMatchObject({ ready: false, current: false, look: [] });
+    const filled = confirmCardModel(i, undefined, "stale");
+    expect(filled).toMatchObject({ ready: true, current: false, look: [] });
+    expect(button(props({ signal: { stale: true } }), "没问题，进入下一步")!.disabled).toBe(true);
+    // A read without signals (an older server) keeps the local rules.
+    expect(savedRead({ information: { s1: i }, snapshot: { steps: { s1: { version: 3 } } } }, "s1", i.values!, 4)).not.toHaveProperty("stepConfirmation");
   });
 });

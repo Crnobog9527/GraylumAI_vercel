@@ -1222,7 +1222,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
     return <StepReviewDialog title={step.title} schema={info.schema} reviewed={reviewed}
       updates={shown} deferred={review.deferred} problems={review.problems} changed={review.changed} onDefer={confirmation.setDeferred}
       onEdit={(fieldId, value) => { confirmation.noteEdit(fieldId, editedValue(reviewed.values[fieldId]!, value)); editField(review.stepId, fieldId, value); }}
-      busy={busy || Boolean(pendingMentor) || awaitingReply || Boolean(liveOnly)} // A running reply may still capture into this step.
+      busy={busy || Boolean(pendingMentor) || awaitingReply || Boolean(liveOnly) || mentorExecutions.some(openOrganizer)}
       onConfirm={() => confirmation.submit(info)} onClose={confirmation.close}/>;
   }
   return (
