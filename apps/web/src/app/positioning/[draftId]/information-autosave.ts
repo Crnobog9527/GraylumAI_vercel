@@ -9,7 +9,8 @@ export type StepView = { version: number; values: Values };
 export type InformationRequest = {
   draftId: string; stepId: string; requestId: string; expectedVersion: number; values: Values;
 };
-type Fixed = InformationRequest & { editingSnapshot: string };
+/** `changed`: the fields this request changes, kept with it so a replay after a reload still reports them. */
+type Fixed = InformationRequest & { editingSnapshot: string; changed?: string[] };
 
 export type AutosaveIo = {
   draftId: string;
@@ -27,9 +28,24 @@ export type AutosaveIo = {
   setEdits: (stepId: string, values: Values | null) => void;
   setSaveState: (stepId: string, state: SaveState) => void;
   setConflict: (stepId: string, conflict: { current: Values; fields: string[] }) => void;
+  /** Fields a committed write changed from the values it was based on. */
+  onSaved?: (stepId: string, fieldIds: string[]) => void;
   onError: (message: string) => void;
   newId: () => string;
 };
+
+/**
+ * "保留我的这些修改": the user's values for the conflicting fields over the server's current values.
+ * The user has compared these exact server values, so they become the edit base; later changes still conflict.
+ */
+export function keepConflictingEdits(storage: AutosaveIo["storage"], draftId: string, stepId: string, edited: Values,
+  conflict: { current: Values; fields: string[] }) {
+  const baseRaw = storage.getItem(informationBaseKey(draftId, stepId));
+  const values = { ...mergeInformation(baseRaw ? JSON.parse(baseRaw) : {}, edited, conflict.current).values } as Values;
+  for (const field of conflict.fields) values[field] = edited[field]!;
+  storage.setItem(informationBaseKey(draftId, stepId), JSON.stringify(conflict.current));
+  return values;
+}
 
 /** sessionStorage, looked up on use: the page also renders where it does not exist. */
 export const tabStorage: AutosaveIo["storage"] = {
@@ -42,6 +58,11 @@ const FIELD_CONFLICT = "其他窗口修改了相同信息。你的输入仍保�
 const autosaveKey = (draftId: string, stepId: string) => "opc-information-autosave:" + draftId + ":" + stepId;
 export const informationBaseKey = (draftId: string, stepId: string) => "opc-information-base:" + draftId + ":" + stepId;
 const confirmingKey = (draftId: string, stepId: string) => "opc-confirm-step:" + draftId + ":" + stepId;
+
+function sameValue(a: Information | undefined, b: Information | undefined) {
+  return (a?.value ?? "") === (b?.value ?? "") && (a?.status ?? "unknown") === (b?.status ?? "unknown") &&
+    (a?.nature ?? "unknown") === (b?.nature ?? "unknown");
+}
 
 function savedVersion(result: unknown) {
   const version = result && typeof result === "object" ? (result as { version?: unknown }).version : undefined;
@@ -102,8 +123,9 @@ export function createInformationAutosave(io: () => AutosaveIo) {
             x.setConflict(stepId, { current: current.values, fields: merged.conflicts });
             throw new Error("OPC_FIELD_CONFLICT:" + merged.conflicts.join(","));
           }
-          fixed = { draftId: x.draftId, stepId, requestId: x.newId(), expectedVersion: current.version,
-            values: merged.values as Values, editingSnapshot: JSON.stringify(wanted) };
+          const values = merged.values as Values;
+          fixed = { draftId: x.draftId, stepId, requestId: x.newId(), expectedVersion: current.version, values,
+            editingSnapshot: JSON.stringify(wanted), changed: Object.keys(values).filter(id => !sameValue(values[id], current.values[id])) };
           x.storage.setItem(key, JSON.stringify(fixed));
         }
         let result: unknown;
@@ -122,6 +144,7 @@ export function createInformationAutosave(io: () => AutosaveIo) {
           throw cause;
         }
         x.storage.removeItem(key);
+        if (fixed.changed?.length) x.onSaved?.(stepId, fixed.changed);
         const version = savedVersion(result);
         if (version === null) await x.refetch(stepId);
         else {
@@ -183,13 +206,16 @@ export function createInformationAutosave(io: () => AutosaveIo) {
     }, AUTOSAVE_DELAY_MS);
   }
 
-  /** Save now and wait until this step's save (and every earlier one) is done. */
+  /**
+   * Save now and wait until every pending save is done: this step's (its failure is thrown) and the other
+   * steps' (any step can be edited in the checklist; their failures are reported, not thrown). A message sent
+   * after this carries every edit made before it.
+   */
   async function flush(stepId: string) {
     cancel();
-    // Any step can be edited in the checklist: the cleared timer also covered the other steps' edits.
-    for (const other of pendingSteps())
-      if (other !== stepId) void enqueue(other).catch(() => io().onError(AUTOSAVE_FAILED));
-    await (io().edits()[stepId] ? enqueue(stepId) : chain);
+    const others = pendingSteps().filter(other => other !== stepId)
+      .map(other => enqueue(other).catch(() => io().onError(AUTOSAVE_FAILED)));
+    await Promise.all([io().edits()[stepId] ? enqueue(stepId) : chain, ...others]);
   }
 
   return { enqueue, schedule, flush, cancel };

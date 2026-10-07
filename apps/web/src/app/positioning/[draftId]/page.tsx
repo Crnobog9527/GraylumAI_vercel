@@ -11,8 +11,8 @@ import { WorkspaceFrame } from "@/components/opc/workspace-frame";
 import { PanelRightOpen, X } from "lucide-react";
 import resultStyles from "@/components/opc/positioning-result.module.css";
 import { WorkComposer, useFreeConversation } from '@/components/opc/work-composer';
-import { mergeInformation } from "./information-merge";
-import { createInformationAutosave, informationBaseKey, tabStorage, savedRead, stepView, type AutosaveIo, type SaveState } from "./information-autosave";
+import { createInformationAutosave, informationBaseKey, keepConflictingEdits, tabStorage, savedRead, stepView,
+  type AutosaveIo, type SaveState } from "./information-autosave";
 import { readPlanEnvelope, type PlanEnvelope, type PlanRequest } from "./plan-envelope";
 import { admissionMessage } from "./admission-message";
 import { readWorkflowMentorExecution } from "./mentor-response";
@@ -34,7 +34,8 @@ import { ReportEntry } from "./report-panel";
 import { sameRequest, releaseRejectedAnswer, openingRequest, parseStepEnvelope, type MentorRequest,
   retainExecution, settleEnvelope, TEXT_PROTOCOL, turnResultNotice, type MentorTurn, type MentorExecution } from "./mentor-turn";
 import { openOrganizer, usePaygResume } from "@/lib/use-payg-resume";
-import { isOpeningInput, openingEntryKey } from "@repo/api/src/shared/opcQuestions";
+import { checklistUpdatedInput, isOpeningInput, openingEntryKey } from "@repo/api/src/shared/opcQuestions";
+import { clearSavedFields, isChecklistUpdate, noteSavedFields, nudgeNotice, refusedTurn, savedFields, shownInput } from "./checklist-nudge";
 type Step = { id: string; title: string; dependsOn?: string[] };
 import { isRecord, type Information, type Item, type StepEnvelope } from "./confirm-envelope";
 /**
@@ -192,6 +193,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
     },
     setSaveState: (stepId, state) => setSaveState(old => ({ ...old, [stepId]: state })),
     setConflict: (stepId, conflict) => setInformationConflicts(old => ({ ...old, [stepId]: conflict })),
+    onSaved: (stepId, fieldIds) => noteSavedFields(sessionStorage, draftId, stepId, fieldIds),
   };
   const [autosave] = useState(() => createInformationAutosave(() => autosaveIo.current));
   const flushInformation = autosave.flush;
@@ -237,7 +239,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
     return ((history.data?.executions ?? []) as MentorExecution[])
       .filter(execution => turns.get(execution.executionId)?.stepId === stepId)
       .map(execution => readWorkflowMentorExecution(execution.body ?? execution.primaryBody, execution.summary, stepId,
-        d.information).inputKind === "answer" ? "" : execution.input ?? "")
+        d.information).inputKind === "answer" || isChecklistUpdate(execution.input) ? "" : execution.input ?? "")
       .filter(Boolean);
   }
   const confirmation = useStepConfirmation({
@@ -631,7 +633,8 @@ function PositioningDraftContent({draftId}:{draftId:string}){
       throw new Error('OPC_MENTOR_READBACK_UNAVAILABLE');
     // A running execution keeps envelope and bubble until a resume sees a terminal result; a Q1 refusal refills the box.
     if (!settleEnvelope(sessionStorage, key, request.requestId, executionId, result)) return;
-    setPendingBubble(old=>old?.requestId===request.requestId?null:old);if(!payg.admitted(result))setMentorInput(old=>old.trim()?old:request.input);
+    setPendingBubble(old=>old?.requestId===request.requestId?null:old);
+    if(!payg.admitted(result))refusedTurn(sessionStorage,draftId,step.id,request.input,()=>setMentorInput(old=>old.trim()?old:request.input));
     live.clear();
   }
   async function resumeInterruptedOpening() {
@@ -664,7 +667,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
     const input=(inputOverride??mentorInput).trim();if(!input)return;
     const latest = mentorExecutions.at(-1), sourceTurn = latest && mentorTurns.get(latest.executionId);
     // Typing instead of choosing still answers the newest card of this step and round.
-    if (!answerSource && latest?.state === "completed" && sourceTurn && sourceTurn.roundId === d.roundId &&
+    if (!answerSource && !isChecklistUpdate(input) && latest?.state === "completed" && sourceTurn && sourceTurn.roundId === d.roundId &&
       sourceTurn.stepId === step.id && readAgentTurnBody(latest.body).card)
       answerSource = { executionId: latest.executionId };
     const questionId = focusField(d.information[step.id]);
@@ -675,7 +678,8 @@ function PositioningDraftContent({draftId}:{draftId:string}){
     setPendingBubble(fixed.request);if(inputOverride===undefined)setMentorInput('');
     chatFollow.current=true;
     if(manualEntry)setManualMentorEnabled(true);
-    try{await run(async()=>{await flushInformation(step.id);await resumeStepEnvelope(step,fixed);});}
+    // The nudge is cleared after the flush: this message carries those saved edits too.
+    try{await run(async()=>{await flushInformation(step.id);clearSavedFields(sessionStorage,draftId);await resumeStepEnvelope(step,fixed);});}
     finally{mentorSendInFlight.current=false;}
   }
 
@@ -1045,17 +1049,8 @@ function PositioningDraftContent({draftId}:{draftId:string}){
     });
   }
   function retainConflictingInput(stepId: string) {
-    const conflict=informationConflicts[stepId];
-    const edited=infoEditsRef.current[stepId];
-    const baseRaw=sessionStorage.getItem("opc-information-base:"+draftId+":"+stepId);
-    if (!conflict || !edited) return;
-    const merged=mergeInformation(baseRaw ? JSON.parse(baseRaw) : {},edited,conflict.current);
-    const values={...merged.values} as Record<string,Information>;
-    for(const field of conflict.fields) values[field]=edited[field];
-    // The user has compared these exact server values. Later changes still conflict.
-    sessionStorage.setItem("opc-information-base:"+draftId+":"+stepId,JSON.stringify(conflict.current));
-    infoEditsRef.current={...infoEditsRef.current,[stepId]:values};
-    setInfoEdits(infoEditsRef.current);
+    const conflict=informationConflicts[stepId], edited=infoEditsRef.current[stepId]; if (!conflict || !edited) return;
+    autosaveIo.current.setEdits(stepId, keepConflictingEdits(tabStorage, draftId, stepId, edited, conflict));
     setInformationConflicts(old=>{const next={...old};delete next[stepId];return next;});
   }
   /** The server's identity/lifecycle projection for the retained request. */
@@ -1265,6 +1260,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
           const s = snap.steps[step.id];
           const sendLocked = busy || Boolean(history.data?.activeExecution) || openingSteps.includes(step.id) || Boolean(pendingMentor) ||
             hasPendingConfirmation || hasPendingStepRequest || free.busy;
+          const nudged = manualEntry || s.valid || infoEdits[step.id] ? [] : savedFields(sessionStorage, draftId, step.id, d.information[step.id].schema);
           chatShown = true; // Its message list carries the page's notices.
           return (
             <article key="positioning-workspace" className={`${resultStyles.stepArticle} space-y-3`}>
@@ -1321,7 +1317,8 @@ function PositioningDraftContent({draftId}:{draftId:string}){
                           {!openingTurn && (
                             <div data-message-role="user" className="ml-8 rounded-xl bg-[var(--bg-tertiary)] p-3">
                               <span className="text-xs text-[var(--text-secondary)]">你{turnLabel}</span>
-                              <p className={`mt-1 whitespace-pre-wrap break-words ${resultStyles.messageBody}`}>{execution.input ?? "内容暂不可用"}</p>
+                              <p className={`mt-1 whitespace-pre-wrap break-words ${resultStyles.messageBody}`}>
+                                {shownInput(execution.input) ?? "内容暂不可用"}</p>
                             </div>
                           )}
                           {reply.text && <div data-message-role="assistant" className="mr-4 rounded-xl border border-[var(--border-primary)] p-3">
@@ -1339,9 +1336,12 @@ function PositioningDraftContent({draftId}:{draftId:string}){
                     })}
                     {pendingBubble&&!mentorExecutions.some(e=>e.request?.requestId===pendingBubble.requestId)&&<div data-message-role="user" data-request-id={pendingBubble.requestId} className="ml-8 rounded-xl bg-[var(--bg-tertiary)] p-3">
                       <span>你 · {steps.find(candidate => candidate.id === pendingBubble.stepId)?.title}</span>
-                      <p className={`whitespace-pre-wrap ${resultStyles.messageBody}`}>{pendingBubble.input}</p><ChatPendingStatus sending={running}/></div>}
+                      <p className={`whitespace-pre-wrap ${resultStyles.messageBody}`}>
+                        {shownInput(pendingBubble.input)}</p><ChatPendingStatus sending={running}/></div>}
                   {liveOnly&&(liveOnly.text||!liveOnly.card)&&<div data-message-role="assistant" aria-label="导师正在回复" className="mr-4 rounded-xl border border-[var(--border-primary)] p-3"><span className={resultStyles.agentIdentity}><img src="/graylum-logo.png" alt=""/>导师</span>{liveOnly.text?<MessageMarkdown className={`mt-1 ${resultStyles.messageBody}`} text={liveOnly.text} streaming/>:<p className={`mt-1 ${resultStyles.messageBody}`}>导师正在思考…</p>}</div>}
-                  <ChatNoticeList notices={[...payg.blockedNotices(mentorExecutions, busy), ...mentorTailNotices({ livePhase: live.phase, stop: live.stopAction,
+                  <ChatNoticeList notices={[...payg.blockedNotices(mentorExecutions, busy),
+                    nudgeNotice(nudged, () => void ask(step, checklistUpdatedInput(nudged)), sendLocked, hasPendingStepRequest),
+                    ...mentorTailNotices({ livePhase: live.phase, stop: live.stopAction,
                     saving: hasUnsavedInformation, error, notice, freeError: free.error, replying: awaitingReply, lastTurnOpen: lastTurnNotice, lastTurnText,
                     recovery: recoveryNeedsUser[0] && !busy
                       ? { readable: recoveryNeedsUser[0].readable, onClick: () => void recoverPendingStep(recoveryNeedsUser[0]!.step) } : null })]}/>

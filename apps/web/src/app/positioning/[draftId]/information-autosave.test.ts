@@ -154,6 +154,30 @@ describe("information autosave", () => {
     expect(t.server().version).toBe(4);
   });
 
+  it("flush also waits for other steps' saves queued behind this step's, so a message carries every earlier edit", async () => {
+    const t = setup();
+    const events: string[] = [];
+    const setSaveState = t.io.setSaveState;
+    t.io.setSaveState = (stepId, state) => {
+      setSaveState(stepId, state);
+      if (stepId === "s2" && state !== "saving") events.push("s2 settled");
+    };
+    t.edit({ a: v("new") });
+    t.gate();
+    const first = t.autosave.flush("s1");
+    await vi.waitFor(() => expect(t.writes).toHaveLength(1));
+    t.edit({ a: v("newer") });
+    void t.autosave.enqueue("s1").catch(() => undefined); // A save of s1 that has not started yet.
+    // Another step edited before the message: its save queues behind s1's.
+    t.storage.setItem(informationBaseKey("d1", "s2"), JSON.stringify(t.server().values));
+    t.io.setEdits("s2", { a: v("old"), b: v("s2 edit") });
+    const flush = t.autosave.flush("s1").then(() => void events.push("flushed"));
+    t.release();
+    await first;
+    await flush;
+    expect(events).toEqual(["s2 settled", "flushed"]);
+  });
+
   it("leaves a step whose confirmation is in flight to that confirmation", async () => {
     vi.useFakeTimers();
     const t = setup();
@@ -223,5 +247,47 @@ describe("background refresh", () => {
     await first; await second;
     expect(t.writes.map(w => w.values.a)).toEqual([v("one"), v("two")]);
     expect(t.io.refreshLater).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("saved fields", () => {
+  it("reports only the fields a committed write changed", async () => {
+    const t = setup();
+    const onSaved = vi.fn();
+    t.io.onSaved = onSaved;
+    t.edit({ a: v("new") });
+    await t.autosave.flush("s1");
+    expect(onSaved).toHaveBeenCalledWith("s1", ["a"]);
+  });
+
+  it("reports nothing when the write changed nothing and nothing for a failed write", async () => {
+    const t = setup();
+    const onSaved = vi.fn();
+    t.io.onSaved = onSaved;
+    t.edit({ a: v("old") });
+    await t.autosave.flush("s1");
+    t.edit({ b: v("x") });
+    (t.io.write as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error("network"));
+    await expect(t.autosave.flush("s1")).rejects.toThrow("network");
+    expect(onSaved).not.toHaveBeenCalled();
+  });
+});
+
+describe("saved fields after a lost reply", () => {
+  it("a replay after a reload still reports the fields the original request changed", async () => {
+    const t = setup();
+    const onSaved = vi.fn();
+    t.io.onSaved = onSaved;
+    t.edit({ a: v("new") });
+    // The write commits but its reply is lost; the retained request stays in storage.
+    (t.io.write as ReturnType<typeof vi.fn>).mockImplementationOnce(async (request: InformationRequest) => {
+      t.writes.push(request); t.otherTab({ a: v("new") }); throw new Error("network");
+    });
+    await expect(t.autosave.flush("s1")).rejects.toThrow("network");
+    // After a reload the read already holds the saved value; replaying the same request is idempotent here.
+    const replay = createInformationAutosave(() => ({ ...t.io, cached: () => ({ version: 4, values: t.server().values }),
+      write: async () => ({ version: 4 }) }));
+    await replay.flush("s1");
+    expect(onSaved).toHaveBeenCalledWith("s1", ["a"]);
   });
 });
