@@ -18,7 +18,7 @@ const app = router({ opc: opcRouter, runtime: runtimeRouter });
 const actor = '00000000-0000-4000-8000-000000000001';
 const windowId = '00000000-0000-4000-8000-000000000002';
 const remote = {
-  V3_RUNTIME_STAGING_ENABLED: 'true', VERCEL: '1', VERCEL_PROJECT_PRODUCTION_URL: 'graylumai-staging.vercel.app',
+  V3_RUNTIME_STAGING_ENABLED: 'true', VERCEL: '1', VERCEL_PROJECT_PRODUCTION_URL: 'auth-staging.graylum.com',
   VERCEL_GIT_COMMIT_REF: 'staging', VERCEL_GIT_REPO_OWNER: 'Crnobog9527', VERCEL_GIT_REPO_SLUG: 'GraylumAI_vercel',
   V3_RUNTIME_STAGING_PROJECT_ID: 'test-project', VERCEL_PROJECT_ID: 'test-project',
   NEXT_PUBLIC_SUPABASE_URL: 'https://synthetic.supabase.co', V3_RUNTIME_STAGING_DATABASE_HOST: 'synthetic.supabase.co',
@@ -108,6 +108,18 @@ describe('remote staging admission and HTTP error boundary', () => {
     vi.stubEnv('VERCEL_PROJECT_ID','wrong'); vi.stubEnv('V3_RUNTIME_LOCAL_ENDPOINT','http://127.0.0.1:5555');
     await expect(app.createCaller(context()).runtime.start(startInput)).rejects.toMatchObject({code:'FORBIDDEN'});
     expect(rpc).not.toHaveBeenCalled();
+  });
+  it.each(['true', 'false'])('rejects the retired host before admission or recovery RPCs when enabled=%s', async enabled => {
+    vi.stubEnv('VERCEL_PROJECT_PRODUCTION_URL', 'graylumai-staging.vercel.app');
+    vi.stubEnv('V3_RUNTIME_STAGING_ENABLED', enabled);
+    const caller = app.createCaller(context());
+    for (const call of [() => caller.runtime.start(startInput), () => caller.opc.library(libraryInput),
+      () => caller.opc.conversations(), () => caller.runtime.view({sessionId: actor})]) {
+      await expect(call()).rejects.toMatchObject({code:'FORBIDDEN'});
+    }
+    expect(rpc).not.toHaveBeenCalled();
+    expect(mocks.start).not.toHaveBeenCalled();
+    expect(mocks.library).not.toHaveBeenCalled();
   });
   it('keeps unexpected internal errors at 500 with a safe correlatable diagnostic', async () => {
     mocks.library.mockRejectedValueOnce(new Error('secret business SQL body'));

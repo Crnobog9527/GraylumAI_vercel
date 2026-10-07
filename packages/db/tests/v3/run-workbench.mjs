@@ -880,7 +880,7 @@ try {
     V3_LOCAL_DB: `postgres://postgres@127.0.0.1:${port(db, "5432")}/v3_disposable`,
     V3_LOCAL_REST: apiUrl,
     ...((opcMode||runtimeMode||runtimeUpgrade)&&!stagingHost?{V3_RUNTIME_LOCAL_ENDPOINT:apiUrl}:{}),
-    ...(stagingHost?{V3_LOCAL_STAGING_HOST:'true',V3_RUNTIME_STAGING_ENABLED:'true',VERCEL:'1',VERCEL_PROJECT_PRODUCTION_URL:'graylumai-staging.vercel.app',VERCEL_GIT_COMMIT_REF:'staging',VERCEL_GIT_REPO_OWNER:'Crnobog9527',VERCEL_GIT_REPO_SLUG:'GraylumAI_vercel',V3_RUNTIME_STAGING_PROJECT_ID:'synthetic-project',VERCEL_PROJECT_ID:'synthetic-project',V3_RUNTIME_STAGING_DATABASE_HOST:syntheticStagingHost,V3_RUNTIME_STAGING_WINDOW_ID:stagingWindowId}:{}),
+    ...(stagingHost?{V3_LOCAL_STAGING_HOST:'true',V3_RUNTIME_STAGING_ENABLED:'true',VERCEL:'1',VERCEL_PROJECT_PRODUCTION_URL:'auth-staging.graylum.com',VERCEL_GIT_COMMIT_REF:'staging',VERCEL_GIT_REPO_OWNER:'Crnobog9527',VERCEL_GIT_REPO_SLUG:'GraylumAI_vercel',V3_RUNTIME_STAGING_PROJECT_ID:'synthetic-project',VERCEL_PROJECT_ID:'synthetic-project',V3_RUNTIME_STAGING_DATABASE_HOST:syntheticStagingHost,V3_RUNTIME_STAGING_WINDOW_ID:stagingWindowId}:{}),
     V3_LOCAL_CONTROL: controlToken,
     V3_LOCAL_SERVICE_JWT: service,
     V3_LOCAL_USER_JWT: jwt("authenticated"),
