@@ -5,6 +5,9 @@ import { trpc } from '@/trpc/client';
 import { createClient } from '@/lib/supabase';
 import { CAPTCHA_EXPIRED_MESSAGE, captchaOptionsFromToken } from '@/lib/dialogCaptcha';
 import { describeErasureError, isAccountClosedError, type AccountErasurePreview } from '@/lib/account-erasure';
+import {
+  ERASURE_PROGRESS_PATH, parseProgressCredential, saveErasureHandoff, type ErasureHandoff,
+} from '@/lib/erasure-progress';
 
 export type ErasureStep = 'impact' | 'verify' | 'confirm' | 'done';
 const CODE_COOLDOWN_SECONDS = 60;
@@ -18,12 +21,17 @@ export function useAccountErasure(options: { email?: string; usesPassword: boole
   const [codeSentAt, setCodeSentAt] = useState<number | null>(null);
   const [captchaToken, setCaptchaToken] = useState<string | null>(null);
   const [captchaKey, setCaptchaKey] = useState(0);
+  const [handoff, setHandoff] = useState<ErasureHandoff | null>(null);
+  const [handoffStored, setHandoffStored] = useState(true);
+  const confirming = useRef(false);
+  const terminal = useRef(false);
   const requestId = useRef<string | null>(null);
-  const preview = trpc.account.erasurePreview.useQuery(undefined, { enabled: open, staleTime: 0 });
-  const confirmMutation = trpc.account.erasureConfirm.useMutation();
+  const preview = trpc.account.erasurePreview.useQuery(undefined, { enabled: open && step !== 'done', staleTime: 0 });
+  const confirmMutation = trpc.account.erasureConfirm.useMutation({ retry: false, gcTime: 0 });
   const portal = trpc.payments.createCustomerPortalSession.useMutation();
 
   const reset = (nextOpen: boolean) => {
+    if (confirming.current || terminal.current) return;
     setOpen(nextOpen);
     setStep('impact');
     setSecret('');
@@ -77,14 +85,40 @@ export function useAccountErasure(options: { email?: string; usesPassword: boole
     setStep('confirm');
   }).catch(() => setError('请完成人机验证后重试。'));
 
-  const confirm = () => run(async () => {
+  const confirm = async () => {
+    if (confirming.current || terminal.current) return;
+    confirming.current = true;
+    await run(async () => {
+      let next: ErasureHandoff;
+      try {
+        requestId.current ??= crypto.randomUUID();
+        const result = await confirmMutation.mutateAsync({ requestId: requestId.current, acknowledged: true });
+        next = { closed: true, credential: parseProgressCredential(`${result.requestId}.${result.progressToken ?? ''}`) };
+      } catch (confirmError) {
+        const code = (confirmError as { data?: { code?: string } } | null)?.data?.code;
+        if (!isAccountClosedError(confirmError) && code && ['BAD_REQUEST', 'UNAUTHORIZED', 'FORBIDDEN', 'TOO_MANY_REQUESTS'].includes(code)) {
+          setError(describeErasureError(confirmError));
+          return;
+        }
+        // A lost/ambiguous confirmation may already have closed the account. Never reissue to recover a bearer.
+        next = { closed: isAccountClosedError(confirmError), credential: null };
+      }
+      terminal.current = true;
+      setHandoffStored(saveErasureHandoff(next));
+      setHandoff(next);
+      confirmMutation.reset();
+      setStep('done');
+    }).finally(() => { confirming.current = false; });
+  };
+
+  const finish = () => run(async () => {
+    if (!terminal.current) return;
+    // The user has had the opportunity to copy/save before clearing the local login session.
     try {
-      await confirmMutation.mutateAsync({ requestId: requestId.current ?? crypto.randomUUID(), acknowledged: true });
-    } catch (confirmError) {
-      if (!isAccountClosedError(confirmError)) return setError(describeErasureError(confirmError));
-    }
-    await createClient().auth.signOut({ scope: 'local' }).catch(() => undefined);
-    setStep('done');
+      const result = await createClient().auth.signOut({ scope: 'local' });
+      if (result.error) throw result.error;
+      window.location.assign(ERASURE_PROGRESS_PATH);
+    } catch { setError('未能退出本机登录，请先保存凭证，再重试退出。'); }
   });
 
   const openPortal = () => run(async () => {
@@ -97,12 +131,12 @@ export function useAccountErasure(options: { email?: string; usesPassword: boole
   });
 
   return {
-    open, step, secret, busy, error, codeSent: codeSentAt !== null,
+    open, step, secret, busy, error, handoff, handoffStored, codeSent: codeSentAt !== null,
     preview: preview.data as AccountErasurePreview | undefined,
     previewLoading: preview.isLoading,
     previewFailed: Boolean(preview.error),
     captchaKey, setCaptchaToken, captchaExpired: () => setError(CAPTCHA_EXPIRED_MESSAGE),
     captchaUnavailable: () => setError('人机验证暂不可用，请稍后重试。'),
-    setOpen: reset, setStep, setSecret, sendCode, verify, confirm, openPortal,
+    setOpen: reset, setStep, setSecret, sendCode, verify, confirm, finish, openPortal,
   };
 }
