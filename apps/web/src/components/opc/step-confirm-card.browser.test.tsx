@@ -21,9 +21,9 @@ beforeAll(async () => {
         import {flushSync} from 'react-dom'; import {StepConfirmCard} from ${JSON.stringify(source)};
         const root=createRoot(document.getElementById('root'));
         window.confirmed=[]; window.now=10000; Date.now=()=>window.now;
-        window.renderCard=(stepId, text='相同内容')=>flushSync(()=>root.render(React.createElement(StepConfirmCard, {
+        window.renderCard=(stepId, text='相同内容', suggestion=null)=>flushSync(()=>root.render(React.createElement(StepConfirmCard, {
           stepId, title:'同名步骤', info:{schema:[{id:'field',title:'字段',required:true}],
-            values:{field:{value:text,status:'provisional'}}},
+            values:{field:{value:text,status:'provisional'}},meta:{field:{suggestion}}},
           resuming:false,disabled:false,canConfirm:true,onConfirm:settled=>window.confirmed.push(settled),
           onEdit:()=>{},onReview:()=>{}
         })));
@@ -63,5 +63,11 @@ it('requires a fresh visible interval for different step IDs even with identical
     await page.evaluate(`window.now=18000; document.dispatchEvent(new Event('visibilitychange'))`);
     await confirm.click();
     expect(await page.evaluate('window.confirmed')).toEqual([true,false,true,false,false]);
+    // A new pending-update warning changes the visible card even when its saved row is unchanged.
+    await page.evaluate(`window.now=21000; window.renderCard('step-2','刚刷新的内容',
+      {executionId:'suggestion-1',hash:'v1',value:'待核对建议',status:'provisional',nature:'fact'});
+      document.querySelector('button').click()`);
+    await browserExpect(page.getByText(/还有 1 条/)).toBeVisible();
+    expect(await page.evaluate('window.confirmed')).toEqual([true,false,true,false,false,false]);
   } finally { await page.close(); }
 }, 15000);

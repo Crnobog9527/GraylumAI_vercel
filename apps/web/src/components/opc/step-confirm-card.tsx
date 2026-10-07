@@ -111,7 +111,7 @@ export function StepConfirmCard({ stepId, title, info, edits, signal, resuming, 
   StepConfirmCardProps) {
   const model = confirmCardModel(info, edits, readStepSignal(signal));
   // The step is part of what is shown: switching steps restarts the wait even when the rows look the same.
-  const settled = useShownSince(JSON.stringify([stepId, title, model.rows.map(row => [row.id, row.text, row.state])]));
+  const settled = useShownSince(JSON.stringify([stepId, title, model.rows, model.updates]));
   // Never confirm from a stale signal: wait for the edit to save and the read to refresh.
   const confirmNow = canConfirm && (resuming || model.current);
   // Nothing recorded yet: the conversation has just started, no card.
