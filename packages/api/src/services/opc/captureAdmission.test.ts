@@ -14,7 +14,7 @@ vi.mock('../runtime/admission',()=>({runtimeAdmissionService:(_u:unknown,_a:unkn
 }}));
 vi.mock('../artifacts/workbench',()=>({workbenchService:()=>({read:async()=>({state:'draft',revisionId:id,
  workflow:{steps:[{id:'first',title:'First',information:schema}]},steps:{first:{valid:false}}})})}));
-function fixture(saved:unknown=null,replay:unknown=null) {
+function fixture(saved:unknown=null,replay:unknown=null, frozen?:Record<string, unknown>) {
  const reads:string[]=[];
  const query={select:()=>query,eq:()=>query,maybeSingle:async()=>({data:saved,error:null})};
  const rpc=vi.fn((name:string,_args:Record<string,unknown>)=>{
@@ -22,7 +22,7 @@ function fixture(saved:unknown=null,replay:unknown=null) {
   const map:Record<string,unknown>={opc_query:{projectId:id,roundId:id,sessionId:id,information:{first:{schema,
    values:{goal:{value:'Already known',status:'provisional'}}}}},
    artifact_query:{moduleId:id,workflow:{steps:[{id:'first',resources:[]}]}},runtime_admission_replay:replay,
-   runtime_session_context:{waitingOrganizer:null,scopeMaterial:{revision:1,content:{work:{roundId:id,steps:{first:{information:{goal:{value:'Already known',status:'provisional'}}}}}}}},opc_capture_apply:{processed:[],remaining:0,hasMore:false},
+   runtime_session_context:{waitingOrganizer:null,scopeMaterial:{revision:1,content:{work:{roundId:id,steps:{first:{information:{goal:{value:'Already known',status:'provisional'}},...frozen}}}}}},opc_capture_apply:{processed:[],remaining:0,hasMore:false},
    opc_step_material:{revision:1,turnToken:id},runtime_execution:{sessionId:id,context:saved},runtime_view:{executions:[{executionId:sourceId,state:'completed',
     request:{draftId:id,stepId:'first',purpose:'mentor',questionId:'goal'},
     body:JSON.stringify({format:'agent-turn.v1',message:'Choose',card:{question:'Platform?',options:['A','B'],recommended:null}})}]}};
@@ -97,4 +97,24 @@ it('refuses malformed, unknown or mis-scoped host updates before admission',asyn
  }
  await expect(fixture().service.prepareStep({...request,purpose:'step',input:'HOST_CHECKLIST_UPDATED:["goal"]'}))
   .rejects.toThrow('OPC_STEP_DENIED');
+});
+
+it.each(['继续','下一步','没问题','好的','确认了，进入下一步','好的，后续我想每周发三次']) (
+ 'complete unconfirmed steps stay behind the confirmation gate for %s', async input => {
+  const f=fixture(null,null,{valid:false,information:{goal:{value:'Recorded goal',status:'provisional'},
+   audience:{value:'Pilot first',status:'deferred'}},fieldMeta:{goal:{source:'capture',basis:'user_statement'}}});
+  await f.service.prepareStep({...request,input});
+  expect(captured.policy!.hostTurnContext!.confirmation).toEqual({requiredComplete:true,stepConfirmed:false,
+   stepReady:true,needsLookFieldIds:['goal']});
+  expect(captured.policy!.additionalInstructions).toContain('Do not start the next step');
+  expect(captured.policy!.additionalInstructions).toContain('any verbal assent are not confirmation');
+  expect(JSON.parse(captured.policy!.organizerInput!).userInput).toBe(input);
+  expect(captured.policy!.organizerInstructions).toContain('including later steps');
+  expect(f.reads).not.toContain('artifact_transition');
+  expect(f.reads).not.toContain('opc_information');
+ });
+it('uses frozen step validity rather than the earlier snapshot and preserves legacy replay',async()=>{
+ await fixture(null,null,{valid:true,information:{goal:{value:'A',status:'confirmed'},audience:{value:'B',status:'confirmed'}}})
+  .service.prepareStep(request);
+ expect(captured.policy!.hostTurnContext!.confirmation).toMatchObject({stepConfirmed:true,stepReady:false});
 });

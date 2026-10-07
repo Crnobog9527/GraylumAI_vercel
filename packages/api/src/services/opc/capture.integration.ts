@@ -1049,3 +1049,32 @@ it('RUNTIME: checklist read historical saturation has identical output with boun
  console.info('CHECKLIST_READ_BENCHMARK',JSON.stringify({environment:'local disposable PostgreSQL',requests:2000,fields:24,
   samples:7,before:{medianMs:before!.medianMs,maxMs:before!.maxMs},after:{medianMs:after.medianMs,maxMs:after.maxMs}}));
 },60000);
+
+
+it('RUNTIME: confirmation gate read and frozen admission agree without automatic confirmation', async () => {
+ const f = await fixture();
+ const captured = await f.seed(output([patch('Current goal'), patch('Later goal', 'step-2')]));
+ await f.apply(captured);
+ const before = await f.read();
+ expect(before.stepConfirmation['step-0']).toEqual({requiredComplete:true,stepConfirmed:false,
+  stepReady:true,needsLookFieldIds:['goal']});
+ expect(before.information['step-2'].values.goal.value).toBe('Later goal');
+ expect(before.snapshot.steps['step-2'].valid).toBe(false);
+ for (const input of ['继续','下一步','没问题','好的']) {
+  const request = {draftId:f.draft.draftId,requestId:randomUUID(),stepId:'step-0',purpose:'mentor',input};
+  const turn = await f.service.prepareStep(request);
+  const payload = (await db.query('select payload from runtime_executions where id=$1',[turn.executionId])).rows[0].payload;
+  expect(payload.hostTurnContext.confirmation).toEqual(before.stepConfirmation['step-0']);
+  expect(payload.instructions).toContain('Do not start the next step');
+  expect(payload.hostTurnContext.checklist[2].fields[0].value).toBe('Later goal');
+  await rpc('runtime_cancel',{p_actor_id:f.actor,p_execution_id:turn.executionId});
+  expect(await f.service.prepareStep(request)).toMatchObject({executionId:turn.executionId});
+  expect((await f.read()).snapshot.steps).toEqual(before.snapshot.steps);
+ }
+ // Even malicious structured model output cannot use confirmed as a write status.
+ const illegal = await f.seed(output([{...patch('Unauthorized confirmation'),status:'confirmed'}]));
+ expect((await f.apply(illegal)).discarded).toContainEqual({index:1,reason:'invalid_patch'});
+ expect((await f.read()).stepConfirmation['step-0'].stepConfirmed).toBe(false);
+ await f.save('Manually reviewed goal');
+ expect((await f.read()).stepConfirmation['step-0']).toMatchObject({stepReady:true,needsLookFieldIds:[]});
+});

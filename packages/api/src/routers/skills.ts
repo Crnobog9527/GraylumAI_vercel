@@ -8,7 +8,7 @@ import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
 import { adminProcedure, router } from '../trpc';
 import { packagePublicationInput, publishSkillPackage } from '../services/skills/publication';
-import { moduleSkillInput, saveModuleSkill } from '../services/skills/modulePublication';
+import { moduleSkillInput, saveModuleSkill, type ModuleSkillInput } from '../services/skills/modulePublication';
 import { resolvePublishedSkillSnapshot } from '../services/skillRuntime';
 
 const skillColumns = 'id, skill_key, draft_content, status, published_version, published_content_hash, published_at';
@@ -49,7 +49,7 @@ export const skillsRouter = router({
     const { data, error } = await ctx.supabase.rpc('admin_read_skill_module', { p_actor_id: ctx.profileId, p_module_id: input.id });
     if (error) throw new TRPCError({ code: 'BAD_REQUEST', message: '读取 Skill 配置失败；旧版文本 Skill 请使用原有管理入口。' });
     return data as null | { skillId: string; expectedVersion: number; directoryName: string;
-      files: { path: string; base64: string }[]; workflow: { kind: 'document' | 'social'; planResources?: string[]; steps: { title: string; resources: string[]; information?: {id:string;title:string;required:boolean;profileKey?:string;elicitation?:'user_fact'|'agent_proposal'}[] }[] } };
+      files: { path: string; base64: string }[]; workflow: { kind: 'document' | 'social'; planResources?: string[]; reportGeneration?: ModuleSkillInput['reportGeneration']; steps: { title: string; resources: string[]; information?: {id:string;title:string;required:boolean;profileKey?:string;elicitation?:'user_fact'|'agent_proposal'}[] }[] } };
   }),
   publishPackage: adminProcedure.input(packagePublicationInput).mutation(async ({ ctx, input }) => {
     try { return await publishSkillPackage(ctx.supabase, ctx.profileId, input); }
