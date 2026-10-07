@@ -31,6 +31,7 @@ import { mentorTailNotices, mentorTurnNotice, RETRY_PENDING_NOTICE, turnNeedsRet
 import { useAutoStepRecovery, useHistoryPolling } from "./use-step-recovery";
 import { useLiveReply } from "./use-live-reply";
 import { ReportEntry } from "./report-panel";
+import { InformationExport } from "./InformationExport";
 import { sameRequest, releaseRejectedAnswer, openingRequest, parseStepEnvelope, type MentorRequest,
   retainExecution, settleEnvelope, TEXT_PROTOCOL, turnResultNotice, type MentorTurn, type MentorExecution } from "./mentor-turn";
 import { openOrganizer, usePaygResume } from "@/lib/use-payg-resume";
@@ -61,7 +62,6 @@ export default function PositioningDraft({
   const { draftId } = use(params);
   return <PositioningDraftContent key={draftId} draftId={draftId}/>;
 }
-
 function PositioningDraftContent({draftId}:{draftId:string}){
   const router = useRouter();
   const planView = usePathname().endsWith("/plan");
@@ -163,7 +163,6 @@ function PositioningDraftContent({draftId}:{draftId:string}){
     }
     if (removed) refreshStepEnvelopes(value => value + 1);
   }, [read.data, history.data, hydratedDraft, draftId]);
-
   useEffect(()=>{
     if(!read.data||hydratedDraft!==draftId)return;
     const retained=Object.keys(read.data.information??{}).map(stepId=>{
@@ -1382,6 +1381,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
       {confirmation.review && reviewDialog(confirmation.review)}
       </>}
       {!planView && <footer className={resultStyles.publishBar}><div>
+      <InformationExport draftId={draftId} current={d}/>
       {!planView && snap.state === "published" && (
         <Button
           variant="outline"

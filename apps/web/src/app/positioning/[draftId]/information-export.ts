@@ -2,7 +2,8 @@
 import { z } from 'zod';
 
 const field = z.object({ id: z.string().min(1), title: z.string() });
-const value = z.object({ value: z.string(), status: z.string(), nature: z.string().optional() });
+const value = z.object({ value: z.string(), status: z.string(),
+  nature: z.enum(['fact', 'hypothesis', 'decision', 'unknown']).optional() });
 const readSchema = z.object({
   draftId: z.string().min(1), projectId: z.string().min(1),
   roundId: z.string().min(1), sessionId: z.string().min(1),

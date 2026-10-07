@@ -7,6 +7,7 @@ import { afterAll, beforeAll, expect, it } from 'vitest';
 
 let browser: Browser;
 let code: string;
+let css: string;
 const entry = fileURLToPath(new URL('./__information_export_fixture__.js', import.meta.url));
 const fixture = { draftId: 'draft', projectId: 'project', roundId: 'round', sessionId: 'session',
   snapshot: { state: 'draft', workflow: { steps: [{ id: 's', title: '了解你' }] },
@@ -20,14 +21,21 @@ beforeAll(async () => {
   const require = createRequire(import.meta.url);
   const { build } = await import(pathToFileURL(createRequire(require.resolve('vitest/package.json')).resolve('vite')).href);
   const component = fileURLToPath(new URL('./InformationExport.tsx', import.meta.url));
+  const positioning = fileURLToPath(new URL('./page.tsx', import.meta.url));
   const client = fileURLToPath(new URL('../../../trpc/client.ts', import.meta.url));
   const bundle = await build({ configFile: false, logLevel: 'silent',
     define: { 'process.env.NODE_ENV': JSON.stringify('development') },
     oxc: { jsx: { runtime: 'automatic' } },
     resolve: { alias: { '@': fileURLToPath(new URL('../../../', import.meta.url)) } },
     plugins: [{ name: 'export-fixture', enforce: 'pre',
-      resolveId(id: string) { if (id === entry || id.endsWith('/lib/supabase')) return id; },
+      resolveId(id: string) { if (id === entry || id.endsWith('/lib/supabase') || id === 'next/navigation' || id === 'next/link' ||
+          id.endsWith('/components/opc/workspace-frame')) return id; },
       load(id: string) {
+        if (id === 'next/navigation') return `export const useRouter=()=>({replace:()=>{},push:()=>{}});
+          export const usePathname=()=>'/positioning/draft'; export const useSearchParams=()=>new URLSearchParams();`;
+        if (id === 'next/link') return `import React from 'react'; export default function Link(p){return React.createElement('a',p)}`;
+        if (id.endsWith('/components/opc/workspace-frame')) return `import React from 'react';
+          export function WorkspaceFrame(p){return React.createElement('div',null,p.children,p.right)}`;
         if (id.endsWith('/lib/supabase')) return `let actor='synthetic-user'; const listeners=new Set();
           window.switchActor=id=>{actor=id;for(const cb of listeners)cb('SIGNED_IN',id?{user:{id}}:null)};
           export const createClient=()=>({auth:{getSession:async()=>({data:{session:actor?{user:{id:actor}}:null},error:null}),
@@ -38,6 +46,7 @@ beforeAll(async () => {
           import {QueryClient,QueryClientProvider} from '@tanstack/react-query';
           import {httpLink} from '@trpc/client'; import {trpc} from ${JSON.stringify(client)};
           import {InformationExport} from ${JSON.stringify(component)};
+          import PositioningDraft from ${JSON.stringify(positioning)};
           const queryClient=new QueryClient({defaultOptions:{queries:{retry:false}}});
           const client=trpc.createClient({links:[httpLink({url:'http://export.test/api/trpc'})]});
           const root=createRoot(document.getElementById('root')); let data=${JSON.stringify(fixture)};
@@ -46,11 +55,17 @@ beforeAll(async () => {
             React.createElement('h1',null,'我的定位分析'),
             React.createElement('textarea',{defaultValue:'本机未保存输入', 'aria-label':'未保存输入'}),
             React.createElement(InformationExport,{draftId:data.draftId,current:data})))))};
+          window.renderPositioning=()=>root.render(React.createElement(trpc.Provider,{client,queryClient},
+            React.createElement(QueryClientProvider,{client:queryClient},React.createElement(React.Suspense,{fallback:'加载'},
+              React.createElement(PositioningDraft,{params:Promise.resolve({draftId:'draft'})})))));
           window.unmountExport=()=>root.unmount(); window.renderExport();`;
       } }],
     build: { write: false, minify: false, lib: { entry, name: 'InformationExportTest', formats: ['iife'] } },
   });
-  code = (Array.isArray(bundle) ? bundle[0].output : bundle.output).find((item: { type: string }) => item.type === 'chunk').code;
+  const output = Array.isArray(bundle) ? bundle[0].output : bundle.output;
+  code = output.find((item: { type: string }) => item.type === 'chunk').code;
+  css = output.filter((item: { fileName: string }) => item.fileName.endsWith('.css'))
+    .map((item: { source: string }) => item.source).join('\n');
   const chrome = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
   browser = await chromium.launch({ executablePath: existsSync(chrome) ? chrome : undefined, headless: true });
 }, 30000);
@@ -128,3 +143,47 @@ for (const scenario of ['failure', 'version', 'identity', 'actor', 'actor-roundt
     } finally { release(); await page.close(); }
   });
 }
+
+for (const width of [390, 1920]) it(`downloads from the actual positioning page entry at ${width}px`, async () => {
+  const page = await browser.newPage({ viewport: { width, height: 963 } });
+  const requests: string[] = [], errors: string[] = [];
+  page.on('pageerror', error => errors.push(error.message));
+  const data = { ...structuredClone(fixture), mode: 'manual', plans: [], turns: [], runtimeMode: 'isolated' };
+  try {
+    await page.route('**/*', async route => {
+      const path = new URL(route.request().url()).pathname;
+      if (path === '/') return route.fulfill({ contentType: 'text/html', body: '<div id="root"></div>' });
+      requests.push(route.request().method() + ' ' + path);
+      const result = path.endsWith('/opc.read') ? data : path.endsWith('/runtime.view') ? { executions: [] }
+        : path.endsWith('/opc.list') ? { drafts: [] } : path.endsWith('/opc.library') ? { businesses: [] }
+          : path.endsWith('/opc.capturePending') ? { processed: [] } : {};
+      await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ result: { data: result } }) });
+    });
+    await page.goto('http://export.test/');
+    await page.addStyleTag({ content: css });
+    await page.addScriptTag({ content: code });
+    await page.evaluate(() => (window as unknown as { renderPositioning: () => void }).renderPositioning());
+    await ui(page.getByRole('heading', { name: '录入已有定位', exact: true })).toBeVisible({ timeout: 3000 });
+    await ui(page.getByRole('button', { name: '导出已确认资料' })).toBeVisible();
+    await page.getByRole('textbox', { name: '给导师的回复' }).fill('未发送的本机输入');
+    // Page initialization has its own existing reads/capture catch-up. Measure the export action separately.
+    await page.waitForLoadState('networkidle');
+    requests.length = 0;
+    const downloaded = page.waitForEvent('download');
+    await page.getByRole('button', { name: '导出已确认资料' }).click();
+    const download = await downloaded;
+    const stream = await download.createReadStream();
+    const chunks: Buffer[] = [];
+    for await (const chunk of stream!) chunks.push(chunk);
+    const content = Buffer.concat(chunks).toString('utf8');
+    expect(content).toContain('中文已确认');
+    expect(content).not.toContain('未发送的本机输入');
+    const box = await page.getByRole('button', { name: '导出已确认资料' }).boundingBox();
+    expect(box!.x).toBeGreaterThanOrEqual(0);
+    expect(box!.x + box!.width).toBeLessThanOrEqual(width);
+    if (process.env.INFORMATION_EXPORT_SHOTS)
+      await page.screenshot({ path: `${process.env.INFORMATION_EXPORT_SHOTS}/information-export-${width}.png` });
+    expect(requests).toEqual(['GET /api/trpc/opc.read']);
+    expect(errors).toEqual([]);
+  } finally { await page.close(); }
+}, 20000);
