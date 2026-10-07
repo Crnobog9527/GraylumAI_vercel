@@ -107,7 +107,7 @@
   "packages/api/src/services/artifacts/reuse.ts": {"longLines":1},
   "packages/api/src/services/artifacts/store.ts": {"longLines":6},
   "packages/api/src/services/artifacts/workbench.ts": {"longLines":4},
-  "packages/api/src/services/artifacts/workflow.ts": {"longLines":3},
+  "packages/api/src/services/artifacts/workflow.ts": {"longLines":2},
   "packages/api/src/services/bill2/fixtureAdapter.ts": {"longLines":5},
   "packages/api/src/services/bill2/openRouterAdapter.ts": {"longLines":8},
   "packages/api/src/services/bill2/openRouterEvidence.ts": {"longLines":2},

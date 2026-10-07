@@ -8,6 +8,7 @@ const path = z.string().min(1).max(240);
 const id = z.string().regex(/^[a-z][a-z0-9_-]{0,63}$/);
 const informationSchema = z.object({
   id,title:label,required:z.boolean(),profileKey:id.optional(),
+  description:z.string().trim().min(1).max(400).optional(),
   elicitation:z.enum(['user_fact','agent_proposal']).optional(),
 }).strict();
 const manifestSchema = z.object({

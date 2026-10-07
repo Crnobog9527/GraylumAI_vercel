@@ -78,3 +78,21 @@ vi.mock('../runtime/newWorkGate', async importOriginal => ({
  ...await importOriginal<typeof import('../runtime/newWorkGate')>(),
  ...(await import('../__tests__/fixtures/runtimeGates')).testAdmissionGates,
 }));
+
+it('preserves organizer descriptions without adding them to mentor field specs',async()=>{
+ const {elicitFieldSpecs}=await import('../../shared/opcMethodPolicy');
+ const fields=[{id:'plan',description:'Only a concrete first-month schedule.'}];
+ expect(organizerStepMaterial('later',fields).fields[0]).toHaveProperty('description',fields[0]!.description);
+ expect(elicitFieldSpecs(fields)[0]).not.toHaveProperty('description');
+});
+
+it('accepts explicit user plans in proposal fields without relaxing source or event isolation',()=>{
+ expect(ORGANIZER_INSTRUCTIONS).toContain('default collection method, not a restriction');
+ expect(ORGANIZER_INSTRUCTIONS).toContain('explicit user statement or explicit adoption of a specific proposal');
+ expect(ORGANIZER_INSTRUCTIONS).toContain('can update that field with basis user_statement');
+ expect(ORGANIZER_INSTRUCTIONS).toContain('bare acknowledgement, request or ambiguous reference is not adoption');
+ expect(ORGANIZER_INSTRUCTIONS).toContain('Keep user plans as plans or decisions, not completed facts');
+ expect(ORGANIZER_INSTRUCTIONS).toContain('Do not redirect a later-step plan into a current-step field');
+ expect(ORGANIZER_INSTRUCTIONS).toContain('Never extract user_fact fields, user_statement patches or the host marker for that event');
+ expect(ORGANIZER_INSTRUCTIONS).not.toContain('only a relevant concrete mentor recommendation can update that field');
+});
