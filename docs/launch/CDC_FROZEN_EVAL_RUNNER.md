@@ -17,3 +17,33 @@ A/B与完整Skill及真实产品验收分别记账。不得读取完整私有Ski
 已完成：目标/现行规则/工程规范/检查要求和本线唯一写入核对；现有开放前端PR无文件重叠。
 下一步：最小实现、无网络失败测试、实际冻结包只读校验、全部远程检查与独立审查。
 尚未运行：新工具验证、任何真实模型调用、Skill发布及完整V2验收。私有正文与付费仍待批准。
+
+## 使用与停止条件
+
+`node scripts/cdc-writeback-v2/frozen-run.mjs verify` 仅读取冻结包和原账本，零网络、零凭据读取。
+路径固定在本机 `.graylum/cdc-writeback-v2-approval-20261007`；清单/专项/逐请求/历史账本哈希均绑定。
+不能用该入口加载Skill包、生成导师回复或改数据库。
+
+将来真实调用仍需Owner新的明确批准。执行者核实批准来源后才可在本机放置
+`execution-approval.json`，包含 authorized=true、manifestHash、executionHead、evidenceUrl、
+newReserveNano=1639811000、count=224、totalCapNano=5000000000、unknownHeldNano=6337000。
+executionHead绑定当时干净checkout的完整提交；evidenceUrl指向记录当前Owner授权的本仓库评论。
+工具校验本机批准记录形状和范围，不把文件本身或评论URL格式当成Owner真实授权证明；执行者仍须核对来源。
+本PR不创建此文件、不读取凭据、不调用execute模式。
+
+批准后分四批执行：`execute A100`、`execute B100`、`execute A12`、`execute B12`。
+前一批完成并匿名锁分后才进入下一批。`execution/<batch>.scores.json`为[{id,pass}]数组；
+`<batch>.score-lock.json`包含scoresHash与completed.json中的responsesHash；必须先完成真实评分，不能用
+占位分数放行。工具验证记录完整性，不能替代独立匿名评分。A相对历史基线、B相对A、专项单独报告。
+
+复用现有openBudget，包含历史未知预留，派发前逐次fsync预留；同目录排他锁、每批started标记及
+账本pending/stop阻止并发和失败重启。运行中再次核验请求及旧账本；原请求身份不变，不释放未知金额。
+无论前批实际费用多低，新批的总授权次数和全额预留仍限定在冻结清单内。
+执行前只查询整理模型公开目录，核验匹配路线与全部价格档位；不自动降价换路线或借用导师预算。
+
+认证/代理拒绝、HTTP错误、超时、未知费用、费用超预留、路由改变、截断、非法输出或落盘失败立即停，
+不重试不补样。响应原文只留本机私有目录，控制台仅结构结果。字段语义错记失败分母，不自动改金标。
+此入口不应用任何patch，宿主保护和P12的SQL回读要后续单独验证，不能拿直接模型输出冒充写回通过。
+
+恢复：停止的账本/标记保持，不删除锁或改身份重新发送；先核对真实供应商状态，获得新的明确处理授权。
+撤回该工具文件不会影响网站、数据库或已发布Skill；已有本机账本必须保留，不以回退代码释放占用。
