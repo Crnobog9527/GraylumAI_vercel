@@ -1,8 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { logServerError } from '@/lib/server-log';
-
-const TICKET_ATTACHMENT_BUCKET = 'ticket-attachments';
+import { uploadWithIntent } from './upload-intent';
 
 async function isMaintenanceModeEnabled(supabaseAdmin: any) {
   const { data, error } = await supabaseAdmin
@@ -74,9 +73,9 @@ export async function POST(request: NextRequest) {
 
     // Parse form data
     const formData = await request.formData();
-    const file = formData.get('file') as File;
+    const file = formData.get('file');
 
-    if (!file) {
+    if (!(file instanceof File)) {
       return NextResponse.json({ error: 'No file provided' }, { status: 400 });
     }
 
@@ -91,65 +90,11 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'File too large. Max 5MB allowed.' }, { status: 400 });
     }
 
-    // Generate unique filename
-    const timestamp = Date.now();
-    const ext = file.name.split('.').pop() || 'jpg';
-    const fileName = `${user.id}/${timestamp}-${Math.random().toString(36).substring(7)}.${ext}`;
-
     // Convert File to ArrayBuffer then to Buffer
     const arrayBuffer = await file.arrayBuffer();
     const buffer = Buffer.from(arrayBuffer);
-
-    // Upload to Supabase Storage
-    const { data: uploadData, error: uploadError } = await supabaseAdmin.storage
-      .from(TICKET_ATTACHMENT_BUCKET)
-      .upload(fileName, buffer, {
-        contentType: file.type,
-        upsert: false,
-      });
-
-    if (uploadError) {
-      logServerError('api', 'upload_storage_failed', {
-        errorName: uploadError.name,
-      });
-      // If bucket doesn't exist, try to create it (first time setup)
-      if (uploadError.message?.includes('not found') || uploadError.message?.includes('does not exist')) {
-        // Try creating the bucket
-        const { error: createBucketError } = await supabaseAdmin.storage.createBucket(TICKET_ATTACHMENT_BUCKET, {
-          public: false,
-          fileSizeLimit: 5 * 1024 * 1024, // 5MB
-          allowedMimeTypes: allowedTypes,
-        });
-
-        if (createBucketError && !createBucketError.message?.includes('already exists')) {
-          logServerError('api', 'upload_bucket_create_failed', {
-            errorName: createBucketError.name,
-          });
-          return NextResponse.json({ error: 'Storage not configured. Please contact support.' }, { status: 500 });
-        }
-
-        // Retry upload
-        const { data: retryData, error: retryError } = await supabaseAdmin.storage
-          .from(TICKET_ATTACHMENT_BUCKET)
-          .upload(fileName, buffer, {
-            contentType: file.type,
-            upsert: false,
-          });
-
-        if (retryError) {
-          logServerError('api', 'upload_retry_failed', {
-            errorName: retryError.name,
-          });
-          return NextResponse.json({ error: 'Failed to upload file' }, { status: 500 });
-        }
-
-        return NextResponse.json({ path: retryData.path });
-      }
-
-      return NextResponse.json({ error: 'Failed to upload file' }, { status: 500 });
-    }
-
-    return NextResponse.json({ path: uploadData.path });
+    const uploaded = await uploadWithIntent({ client: supabaseAdmin, profileId: user.id, mime: file.type, body: buffer });
+    return NextResponse.json(uploaded.status === 200 ? { path: uploaded.path } : { error: uploaded.error }, { status: uploaded.status });
   } catch {
     logServerError('api', 'upload_handler_failed');
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
