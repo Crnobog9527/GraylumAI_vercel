@@ -104,7 +104,8 @@ export function StepConfirmCard({ title, info, edits, signal, resuming, disabled
       <div>
         <Button disabled={disabled || !confirmNow} onClick={onConfirm}>{resuming ? "继续完成确认" : revision ? "没问题，确认这一步的修改" : "没问题，进入下一步"}</Button>
         <Button variant="outline" disabled={disabled} onClick={() => onEdit(model.look.length ? model.look : model.rows.map(row => row.id))}>我要改</Button>
-        <button type="button" className={styles.linkButton} disabled={disabled || !canConfirm} onClick={onReview}>逐项核对或暂缓</button>
+        {/* Resuming runs the retained confirmation; the review would resume it too, so it is not offered. */}
+        {!resuming && <button type="button" className={styles.linkButton} disabled={disabled || !canConfirm} onClick={onReview}>逐项核对或暂缓</button>}
       </div>
     </section>
   );

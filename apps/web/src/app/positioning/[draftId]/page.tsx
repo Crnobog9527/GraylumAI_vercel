@@ -1195,7 +1195,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
     if (values) void autosave.enqueue(stepId).catch(() => setError("自动保存仍未成功。内容已保留，请稍后重试。"));
   }
   function checklistProps(): Parameters<typeof CaptureChecklist>[0] {
-    const locked = busy || hasPendingStepRequest || Boolean(pendingMentor);
+    const locked = busy || hasPendingStepRequest || Boolean(pendingMentor) || mentorExecutions.some(openOrganizer);
     return {
       steps, information: d.information, edits: infoEdits, selectedStepId: selectedStep.id, editable: snap.state === "draft",
       valid: Object.fromEntries(steps.map(step => [step.id, Boolean(snap.steps[step.id].valid)])),

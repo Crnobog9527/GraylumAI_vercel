@@ -175,6 +175,8 @@ describe("server confirmation signal (#713)", () => {
     const i = info();
     const p = props({ resuming: true, edits: { ...i.values!, goal: v("刚改的目标") }, signal: signal(i) });
     expect(button(p, "继续完成确认")!.disabled).toBe(false);
+    // The review would resume the retained confirmation as well, so it is not offered meanwhile.
+    expect(button(p, "逐项核对或暂缓")).toBeUndefined();
   });
 });
 
