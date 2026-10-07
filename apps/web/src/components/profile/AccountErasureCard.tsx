@@ -119,7 +119,7 @@ export function AccountErasureCard({ user }: { user: { email?: string; auth_prov
           {erasure.step === 'confirm' && (
             <label className="flex items-start gap-2 py-2 text-sm" style={{ color: 'var(--text-primary)' }}>
               <input type="checkbox" checked={acknowledged} onChange={(event) => setAcknowledged(event.target.checked)} />
-              我已了解：账号立即关闭且不能撤销，剩余积分作废，付费默认不退款。
+              我已了解上述退款规则：如需申请退款，应在注销前通过客服工单处理；确认后账号立即关闭且不能撤销，剩余积分作废。
             </label>
           )}
 

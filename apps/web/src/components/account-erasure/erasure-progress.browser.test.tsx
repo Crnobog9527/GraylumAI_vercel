@@ -334,3 +334,36 @@ it('holds an already-running 401 lookup while confirmation is pending and preser
     expect(f.requests.filter(r => r.path === '/signout')).toHaveLength(0);
   } finally { await f.close(); }
 }, 20000);
+
+for (const width of [390, 1280]) {
+  it(`shows current refund rules before closure and keeps confirmation deliberate at ${width}px`, async () => {
+    const f = await fixture({ width });
+    try {
+      await f.page.goto(`${f.origin}/profile`);
+      await f.page.getByRole('button', { name: '注销账号', exact: true }).click();
+      const dialog = f.page.getByRole('dialog');
+      await ui(dialog).toContainText('购买后 7 天内且从这次付款起整个账户没有任何积分消耗');
+      await ui(dialog).toContainText('不受上述 7 天和未消耗条件限制');
+      await ui(dialog).toContainText('无故终止账号还退没用完的已购积分');
+      await ui(dialog).toContainText('违规被终止账号不退款');
+      const instructions = dialog.getByText('如需退款，请在注销前通过客服工单申请并先处理', { exact: false });
+      await instructions.scrollIntoViewIfNeeded();
+      await ui(instructions).toBeInViewport();
+      await ui(instructions).toContainText('人工审批后原渠道执行，法律允许时扣 6%');
+      await ui(dialog).not.toContainText('默认不退款');
+      await f.page.getByRole('button', { name: '继续', exact: true }).click();
+      await f.page.getByLabel('当前密码', { exact: true }).fill('synthetic-only');
+      await f.page.getByRole('button', { name: '验证身份', exact: true }).click();
+      const submit = f.page.getByRole('button', { name: '确认注销', exact: true });
+      await ui(submit).toBeDisabled();
+      await ui(dialog).toContainText('我已了解上述退款规则');
+      await ui(dialog).not.toContainText('默认不退款');
+      await f.page.getByRole('checkbox').check();
+      await ui(submit).toBeEnabled();
+      if (artifacts) await f.page.screenshot({ path: `${artifacts}/refund-confirm-${width}.png` });
+      await f.page.getByRole('button', { name: '取消', exact: true }).click();
+      expect(f.requests.some(r => r.path.includes('erasureConfirm') || r.path === '/signout')).toBe(false);
+      expect(f.unexpected).toEqual([]);
+    } finally { await f.close(); }
+  });
+}

@@ -46,14 +46,16 @@ no test rollback script is authorization to undo a populated remote database.
 Frozen inputs: #734 e63cbf9cf38e8f032f03caae73f845b11c02e0d5,
 #737 e5526d4e335f57ffa21beb836364c3eb46fcec12, and
 #740 38eee93d54776567740fe1be2cdf450bb6c9ce0d (UI delta from af52fda1).
-The runtime imports are byte-identical to those inputs; this slice adds local tests
-and evidence, not new runtime infrastructure.
+The initial integration imported those inputs byte-for-byte. The follow-up corrects
+refund disclosure in AccountErasureCard and its inherited impact-copy helper, with
+focused browser/unit tests. The other source imports and all SQL/built remain
+unchanged; no new runtime infrastructure is introduced.
 
 Deployment remains unapproved: 0190 before upload, 0191 before progress, and
 0193–0195 before monthly execution. Old-upload drain, real SDK compatibility,
 authoritative manifest, host and binding proof remain separate. The upload
 close-race's `Storage.remove` is a real external effect requiring explicit scope.
-The existing “默认不退款” checkbox contradicts `docs/launch/tasks/DATA-ERASURE.md`
-§2 / MASTER_PLAN §2.1 item 51. It is retained under the handoff boundary, recorded
-as an activation blocker, and must be corrected by coordinated same-product-rule
-work before real account closure is opened. No new refund promise is decided here.
+The follow-up corrects the outdated refund disclosure to DATA-ERASURE §2 /
+MASTER_PLAN §2.1 item 51. It changes no eligibility, money, execution permissions
+or service logic. Deployed-page validation and the external prerequisites above
+remain outstanding; corrected copy does not authorize real account closure.
