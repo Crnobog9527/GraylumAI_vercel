@@ -20,7 +20,7 @@
 
 `ProviderContract` 是显式审核的解码接入点；生产工厂没有猜测的默认 decoder。原始测试 decoder 使用虚构 envelope 与 `Fixture/Search`，不能声称真实服务支持这些字段/能力。后续已观察 Sorsa 契约的独立接线见文末；平台质量、许可与新适配器远端运行仍待单独验证。
 
-直接锁定：`@modelcontextprotocol/client@2.0.0`、测试用 `@modelcontextprotocol/server@2.0.0` / `@modelcontextprotocol/node@2.0.0`、`ajv@8.18.0`、`@types/pg@8.15.6`。SDK v2 stable/Node >=20 经 [官方仓库](https://github.com/modelcontextprotocol/typescript-sdk/blob/5119ee7fd7790e335a3fb60ef36f85334e2a6326/README.md) 与 npm 核实。实际发布包 LICENSE 说明 Apache-2.0 迁移并保留部分历史 MIT 代码；不能只按 package metadata 写成全部 MIT。Ajv/@types/pg 为 MIT。未升级既有依赖版本；保留 pnpm integrity 锁。未复制供应商商业方法。
+当前直接锁定（2026-10-07 核对 `packages/api/package.json` 与 `pnpm-lock.yaml`）：`@modelcontextprotocol/client@2.2.0`、测试用 `@modelcontextprotocol/server@2.2.0` / `@modelcontextprotocol/node@2.0.0`、`ajv@8.18.0`、`@types/pg@8.15.6`。SDK v2 stable/Node >=20 经 [官方仓库](https://github.com/modelcontextprotocol/typescript-sdk/blob/5119ee7fd7790e335a3fb60ef36f85334e2a6326/README.md) 与 npm 核实。实际发布包 LICENSE 说明 Apache-2.0 迁移并保留部分历史 MIT 代码；不能只按 package metadata 写成全部 MIT。Ajv/@types/pg 为 MIT。最初研究批次未升级既有依赖；后续 [#705](https://github.com/Crnobog9527/GraylumAI_vercel/pull/705) 安全修复已将 client/server 从 2.0.0 升至 2.2.0，node 仍为 2.0.0，保留 pnpm integrity 锁。本次仅同步该 PR [P2 文档意见](https://github.com/Crnobog9527/GraylumAI_vercel/pull/705#discussion_r4198409002)，不修改依赖或锁文件。未复制供应商商业方法。
 
 ## 可复现的本地验证
 
