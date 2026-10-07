@@ -7,7 +7,8 @@
  * - `agent_proposal`: this field is a deliverable (naming, positioning,
  *   differentiation, content, operations, monetization). The Agent produces a
  *   grounded proposal from what is already known and the user verifies, edits
- *   or defers it. A beginner is never required to author the analysis.
+ *   or defers it. A beginner is never required to author the analysis. This is
+ *   the default collection method, not a ban on the user stating their own plan.
  *
  * The published Skill revision is the only authority for this role. It declares
  * the optional `elicitation` property per information field, which the shared

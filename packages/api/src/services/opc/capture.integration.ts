@@ -47,7 +47,11 @@ async function fixture(extraFields = 0, informationCounts?: number[], allRequire
     field === 0 ? { id: 'goal', title: 'Goal', required: true, profileKey: 'goal_' + i }
       : { id: field === 1 ? 'other' : 'extra' + field, title: 'Other', required: allRequired }); });
   for (let i = 0; i < extraFields; i++) flow.steps[0].information!.push({ id: 'extra' + i, title: 'Extra', required: false });
-  if (proposalField) flow.steps[0].information![1]!.elicitation = "agent_proposal";
+  if (proposalField) for (const index of [0, 2]) {
+    Object.assign(flow.steps[index]!.information![1]!, {
+      elicitation: 'agent_proposal', description: '具体的试行计划；保留频率和商业限制，不当作已完成事实。',
+    });
+  }
   await publishSkillPackage(admin, owner, pack);
   await db.query('insert into artifact_workflows(id,module_id,skill_id,revision_id,workflow,label,enabled) values($1,$2,$3,$4,$5,$6,true)', [registration, moduleId, pack.id, pack.revisionId, flow, registration]);
   const user = createClient(process.env.V3_LOCAL_REST!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!, { auth: { persistSession: false } });
@@ -1077,4 +1081,29 @@ it('RUNTIME: confirmation gate read and frozen admission agree without automatic
  expect((await f.read()).stepConfirmation['step-0'].stepConfirmed).toBe(false);
  await f.save('Manually reviewed goal');
  expect((await f.read()).stepConfirmation['step-0']).toMatchObject({stepReady:true,needsLookFieldIds:[]});
+});
+
+it('RUNTIME: user-stated proposal plans cross steps, round-trip descriptions and retain manual protection',async()=>{
+ const f=await fixture(0,undefined,false,true);
+ const before=await f.read();
+ expect(before.information['step-2'].schema[1]).toMatchObject({elicitation:'agent_proposal',
+  description:'具体的试行计划；保留频率和商业限制，不当作已完成事实。'});
+ const plan={...patch('首月每周三、周五各一篇图文，只拍阅读角，不做促销','step-2','other'),nature:'decision'};
+ const execution=await f.seed(output([plan]));
+ expect(await f.apply(execution)).toMatchObject({result:'applied'});
+ const after=await f.read();
+ expect(after.information['step-2'].values.other).toMatchObject({value:plan.value,status:'provisional',nature:'decision'});
+ expect(after.information['step-0'].values.goal.value).toBe('');
+ expect((await f.steps())['step-2'].valid).not.toBe(true);
+ const records=(await f.records()).rows.length;
+ await f.apply(execution);expect((await f.records()).rows).toHaveLength(records);
+ await f.save('手动保留的试行计划','other');
+ const replacement={...plan,stepId:'step-0',value:'用户明确改为每周一篇，仍不促销'};
+ const next=await f.seed(output([replacement]));
+ expect(await f.apply(next)).toMatchObject({result:'suggested'});
+ const protectedRead=await f.read();
+ expect(protectedRead.information['step-0'].values.other.value).toBe('手动保留的试行计划');
+ expect(protectedRead.information['step-0'].meta.other.suggestion).toMatchObject({
+  value:replacement.value,basis:'user_statement',nature:'decision',status:'provisional',
+ });
 });
