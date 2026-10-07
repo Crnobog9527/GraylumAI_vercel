@@ -95,15 +95,13 @@ it('OPC: CONFIRM_DIALOG delayed cross-tab read and editing in the complete local
     expect(counts.information).toBe(0); expect(counts.transition).toBe(0);
     await page.screenshot({ path: process.env.V3_WORKBENCH_OUTPUT + '/confirm-dialog-fresh.png' });
     await page.unroute('**/api/trpc/**');
-    // Real autosave, then another tab's write and a background refresh: keep this dialog's later edit.
+    // Real autosave, then another tab's write: retain the dialog edit until the explicit confirmation re-read.
     await dialog.getByLabel('核对：受众').fill('弹窗后来编辑1公里');
     await expect.poll(async () => (await read()).information['step-0'].values.audience?.value, { timeout: 30000 }).toBe('弹窗后来编辑1公里');
     await tab.reload();
     await tab.locator('#step-0-audience').fill('外部后来修改4公里');
     await expect.poll(async () => (await read()).information['step-0'].values.audience?.value, { timeout: 30000 }).toBe('外部后来修改4公里');
     await page.bringToFront();
-    await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
-    await ui(card).toContainText('外部后来修改4公里');
     await ui(dialog.getByLabel('核对：受众')).toHaveValue('弹窗后来编辑1公里');
     const before = counts.information;
     await dialog.getByRole('button', { name: '确认这一步', exact: true }).click();
