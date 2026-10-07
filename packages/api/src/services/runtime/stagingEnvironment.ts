@@ -1,11 +1,11 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { z } from 'zod';
 import { StagingAccessError } from './stagingErrors';
-/** Exact production domains of the separate staging project. Vercel reports
- * the project's custom production domain (not the vercel.app one) as
- * VERCEL_PROJECT_PRODUCTION_URL once one is added, so both names are listed.
+/** Exact production domain of the separate staging project. Vercel reports
+ * the project's custom production domain as VERCEL_PROJECT_PRODUCTION_URL.
+ * The retired vercel.app domain must not admit calls or maintenance reads.
  * Exact match only: no suffix or wildcard, so a new domain needs a code change. */
-const STAGING_PRODUCTION_URLS: ReadonlySet<string> = new Set(['graylumai-staging.vercel.app', 'auth-staging.graylum.com']);
+const STAGING_PRODUCTION_URLS: ReadonlySet<string> = new Set(['auth-staging.graylum.com']);
 /** Server environment only. The separate staging project uses Vercel's
  * production class; project, source branch and database bind the target. */
 export function stagingRuntimeWindow(env: Record<string, string | undefined>, maintenance = false): string {
