@@ -51,11 +51,14 @@ export function captureFocus(state: CaptureState): string {
 export function captureOrganizerInput(host: HostTurnContext, information: Record<string, CaptureState>,
   confirmed: Record<string, boolean>, userInput: string, answer?: AnsweredCard): string {
   const checklist = host.checklist.map(step => ({...step, confirmed: Boolean(confirmed[step.id]),
-    fields: step.fields.map(field => ({id: field.id, title: field.title, required: field.required,
+    fields: step.fields.map(field => {
+      const description = information[step.id]?.schema.find(item => item.id === field.id)?.description;
+      return {id: field.id, title: field.title, required: field.required,
+      ...(description !== undefined ? {description} : {}),
       role: field.role, status: field.status, protected: field.protected, elicit: field.role,
       value: information[step.id]?.values?.[field.id]?.value ?? '',
       nature: information[step.id]?.values?.[field.id]?.nature ?? 'unknown',
-    })),
+    }; }),
     ...(!confirmed[step.id] ? {notes: information[step.id]?.notes ?? []} : {}),
   }));
   const serialize = () => JSON.stringify({captureFormat: 'v2',

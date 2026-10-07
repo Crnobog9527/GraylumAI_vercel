@@ -23,6 +23,8 @@ export type Elicitation = "user_fact" | "agent_proposal";
 export type MethodInformationField = {
   id: string;
   title?: string;
+  /** Pinned semantic scope, passed only to the organizer. */
+  description?: string;
   required?: boolean;
   elicitation?: Elicitation;
 };

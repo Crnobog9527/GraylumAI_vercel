@@ -78,3 +78,10 @@ vi.mock('../runtime/newWorkGate', async importOriginal => ({
  ...await importOriginal<typeof import('../runtime/newWorkGate')>(),
  ...(await import('../__tests__/fixtures/runtimeGates')).testAdmissionGates,
 }));
+
+it('preserves organizer descriptions without adding them to mentor field specs',async()=>{
+ const {elicitFieldSpecs}=await import('../../shared/opcMethodPolicy');
+ const fields=[{id:'plan',description:'Only a concrete first-month schedule.'}];
+ expect(organizerStepMaterial('later',fields).fields[0]).toHaveProperty('description',fields[0]!.description);
+ expect(elicitFieldSpecs(fields)[0]).not.toHaveProperty('description');
+});

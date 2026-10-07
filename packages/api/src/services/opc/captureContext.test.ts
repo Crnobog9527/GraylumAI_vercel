@@ -70,3 +70,20 @@ it('enforces UTF-8 host bytes and marks compressed confirmed values without losi
  selected.first.values.goal.status='provisional';
  expect(()=>captureHostContext(steps,selected,'first',false)).toThrow('OPC_CAPTURE_INPUT_LIMIT');
 });
+
+it('passes pinned descriptions only to the organizer, including later steps',()=>{
+ const described=structuredClone(information);
+ described.later!.schema=[{id:'proposal',title:'Proposal',description:'首月排期；不放入赛道。',elicitation:'agent_proposal'}];
+ const host=captureHostContext(steps,described,'first',false);
+ expect(JSON.stringify(host)).not.toContain('description');
+ const input=JSON.parse(captureOrganizerInput(host,described,{},'首月每周两篇'));
+ expect(input.checklist[1].fields[0]).toMatchObject({id:'proposal',description:'首月排期；不放入赛道。'});
+ expect(input.checklist[0].fields[0]).not.toHaveProperty('description');
+});
+it('counts descriptions toward the existing organizer input limit without truncating field meaning',()=>{
+ const described:Record<string,CaptureState>={first:{schema:Array.from({length:24},(_,i)=>({
+  id:`field-${i}`,description:'边'.repeat(400),required:false,
+ }))}};
+ const host=captureHostContext(steps,described,'first',false);
+ expect(()=>captureOrganizerInput(host,described,{},'x'.repeat(16000))).toThrow('OPC_CAPTURE_INPUT_LIMIT');
+});

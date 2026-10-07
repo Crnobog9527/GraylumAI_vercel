@@ -2,6 +2,8 @@
 import { randomUUID } from 'node:crypto';
 import { describe, it, expect, vi } from 'vitest';
 import { prepareModuleSkill, saveModuleSkill, type ModuleSkillInput } from '../skills/modulePublication';
+import { parseWorkflowManifest } from '../skills/workflowManifest';
+import { workflowSchema } from '../artifacts/workflow';
 import { makePackage } from './fixtures/artifacts';
 export function moduleInput(): ModuleSkillInput {
   const pack = makePackage();
@@ -125,4 +127,38 @@ describe('administrator module publication', () => {
       expect(db.rpc).not.toHaveBeenCalled();
     }
   });
+});
+
+describe('bounded organizer descriptions in pinned workflows',()=>{
+ function withDescription(description?:unknown) {
+  const input=moduleInput();
+  input.reportGeneration={resources:['SKILL.md'],sections:['Synthetic report'],maxCharacters:12000};
+  input.steps[0]!.information=[{id:'schedule',title:'Schedule',required:true,
+   ...(description!==undefined?{description:description as string}:{}),elicitation:'agent_proposal'}];
+  const manifest={kind:input.kind,steps:input.steps,reportGeneration:input.reportGeneration};
+  // JSON is a YAML subset; preserve byte identity through publication validation.
+  input.files.push({path:'workflow.yaml',base64:Buffer.from(JSON.stringify(manifest)).toString('base64')});
+  return {input,manifest};
+ }
+ it.each([undefined,'首月具体排期，不是赛道。','字'.repeat(400)])('round-trips old and described revisions, preserving reportGeneration',description=>{
+  const {input,manifest}=withDescription(description);
+  expect(parseWorkflowManifest(JSON.stringify(manifest))).toEqual(manifest);
+  const prepared=prepareModuleSkill(input);
+  expect(prepared.workflow.steps[0]!.information).toEqual(input.steps[0]!.information);
+  expect(prepared.workflow.reportGeneration).toEqual(input.reportGeneration);
+  expect(workflowSchema.parse(prepared.workflow)).toEqual(prepared.workflow);
+ });
+ it.each(['','   ','字'.repeat(401),null,42])('rejects invalid descriptions at both publication and read boundaries',description=>{
+  const {input,manifest}=withDescription(description);
+  expect(()=>parseWorkflowManifest(JSON.stringify(manifest))).toThrow();
+  expect(()=>prepareModuleSkill(input)).toThrow();
+  const valid=prepareModuleSkill(withDescription().input).workflow;
+  Object.assign(valid.steps[0]!.information![0]!,{description});
+  expect(workflowSchema.safeParse(valid).success).toBe(false);
+ });
+ it('rejects a submitted description different from the immutable manifest',()=>{
+  const {input}=withDescription('首月计划');
+  input.steps[0]!.information![0]!.description='已经完成的成果';
+  expect(()=>prepareModuleSkill(input)).toThrow('workflow.yaml 与提交的步骤或问题不一致');
+ });
 });
