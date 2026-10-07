@@ -103,8 +103,9 @@ export function StepConfirmCard({ title, info, edits, signal, resuming, disabled
       {model.updates > 0 && <p>还有 {model.updates} 条“根据对话整理的更新”没处理，它们不会被确认，确认后仍可采用。</p>}
       <div>
         <Button disabled={disabled || !confirmNow} onClick={onConfirm}>{resuming ? "继续完成确认" : stays ? "没问题，确认这一步" : "没问题，进入下一步"}</Button>
-        <Button variant="outline" disabled={disabled} onClick={() => onEdit(model.look.length ? model.look : model.rows.map(row => row.id))}>我要改</Button>
-        {/* Resuming runs the retained confirmation; the review would resume it too, so it is not offered. */}
+        {!resuming && <Button variant="outline" disabled={disabled}
+          onClick={() => onEdit(model.look.length ? model.look : model.rows.map(row => row.id))}>我要改</Button>}
+        {/* Resuming runs the retained confirmation: fields stay locked and the review would resume it too. */}
         {!resuming && <button type="button" className={styles.linkButton} disabled={disabled || !canConfirm} onClick={onReview}>逐项核对或暂缓</button>}
       </div>
     </section>
