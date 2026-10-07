@@ -232,6 +232,9 @@ for (const offline of [false, true]) {
         expect(probeFailed).toBe(true);
         // Keep the persistence gate closed until a real scheduled recovery request fails offline.
         await expect.poll(() => f.failures.includes('/resume'), { timeout: 7000 }).toBe(true);
+        // The hook invalidates history after the failed stream. Keep that read offline too,
+        // so recovery cannot race through it before the next scheduled follow-up.
+        await expect.poll(() => f.failures.includes('/history'), { timeout: 7000 }).toBe(true);
         expect(f.resumes).toHaveLength(0);
         expect(f.failures).toContain('/probe');
       } else {
