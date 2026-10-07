@@ -24,7 +24,8 @@ export type CaptureSuggestion = {
   status: FieldStatus;
   nature: FieldNature;
 };
-export type FieldMeta = { source?: "capture" | "user"; protected?: boolean; suggestion?: CaptureSuggestion };
+/** `basis` is recorded with each capture since #702; older captures have none. */
+export type FieldMeta = { source?: "capture" | "user"; basis?: "user_statement" | "agent_proposal"; protected?: boolean; suggestion?: CaptureSuggestion };
 export type StepInformation = {
   schema: ChecklistField[];
   values?: Record<string, FieldValue>;
@@ -46,6 +47,7 @@ export function fieldMeta(info: StepInformation | undefined, fieldId: string): F
   const meta: FieldMeta = {};
   if (raw.source === "capture" || raw.source === "user") meta.source = raw.source;
   if (typeof raw.protected === "boolean") meta.protected = raw.protected;
+  if (raw.basis === "user_statement" || raw.basis === "agent_proposal") meta.basis = raw.basis;
   const s = raw.suggestion;
   if (isObject(s) && typeof s.executionId === "string" && typeof s.hash === "string" && s.hash &&
       typeof s.value === "string" && s.value.trim() && statuses.has(String(s.status)) && natures.has(String(s.nature)))
@@ -64,13 +66,45 @@ export function fieldState(value: FieldValue | undefined): FieldState {
   return hasContent(value) ? "draft" : "missing";
 }
 
+/**
+ * Where a draft value came from. The server marks captured values `capture` and the user's own edits
+ * (and adopted updates) `user`. A capture records its basis (#702): `agent_proposal` reads as 导师建议.
+ * Captures from before that have no basis; a field the Skill declares as the mentor's proposal can only
+ * hold the mentor's suggestion, so it still reads as 导师建议. Unknown history stays unknown.
+ */
+export type FieldOrigin = "user" | "capture" | "proposal" | "unknown";
+export function fieldOrigin(field: Pick<ChecklistField, "elicitation">, meta: FieldMeta): FieldOrigin {
+  if (meta.source === "user") return "user";
+  if (meta.source === "capture")
+    return (meta.basis ?? (field.elicitation === "agent_proposal" ? "agent_proposal" : "user_statement")) === "agent_proposal" ? "proposal" : "capture";
+  return "unknown";
+}
+const originLabels: Record<FieldOrigin, string> = {
+  user: "草稿 · 你填写的", capture: "草稿 · 从对话记下", proposal: "草稿 · 导师建议", unknown: "草稿",
+};
+
+/** The user changed this field locally (the edit buffer holds every field of a step, changed or not). */
+export function editedLocally(info: StepInformation | undefined, edits: Record<string, FieldValue> | undefined, fieldId: string) {
+  const edit = edits?.[fieldId], saved = info?.values?.[fieldId] ?? EMPTY_VALUE;
+  return Boolean(edit) && (edit!.value !== saved.value || edit!.status !== saved.status || edit!.nature !== saved.nature);
+}
+
 /** The short status shown next to a field: never a question number. */
-export function fieldStateLabel(value: FieldValue | undefined, meta: FieldMeta) {
+export function fieldStateLabel(value: FieldValue | undefined, meta: FieldMeta, field: Pick<ChecklistField, "elicitation"> = {}) {
   const state = fieldState(value);
   if (state === "confirmed") return "已确认";
   if (state === "deferred") return "已暂缓";
   if (state === "missing") return "还没聊到";
-  return meta.source === "capture" ? "草稿 · 从对话记下" : meta.source === "user" ? "草稿 · 你填写的" : "草稿";
+  return originLabels[fieldOrigin(field, meta)];
+}
+
+/**
+ * Draft items the user should glance at before confirming: content the AI organized or suggested.
+ * The user's own text is not flagged; confirmed and deferred items are already decided.
+ */
+export function needsLook(value: FieldValue | undefined, field: Pick<ChecklistField, "elicitation">, meta: FieldMeta) {
+  const origin = fieldOrigin(field, meta);
+  return fieldState(value) === "draft" && (origin === "capture" || origin === "proposal");
 }
 
 /** A user's typed text applied to a field, exactly as the autosave stores it. */

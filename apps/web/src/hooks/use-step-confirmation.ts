@@ -245,11 +245,29 @@ export function useStepConfirmation(deps: StepConfirmationDeps) {
       return;
     }
     if (state.kind === "valid") { void guarded(step, async () => state.envelope); return; }
-    // Deferrals follow what the dialog shows, including an unsaved edit that replaced a deferral reason.
+    setReview(newReview(stepId, info, edits, stepStates));
+  }
+
+  /** The review of exactly what is shown now. Deferrals follow it, including an unsaved edit that replaced a reason. */
+  function newReview(stepId: string, info: StepInformation, edits: Record<string, FieldValue> | undefined,
+    stepStates: Record<string, { version: number }>): Review {
     const baseline = visibleStep(info, edits);
     const deferred = new Set(Object.entries(baseline.values).filter(([, value]) => value.status === "deferred").map(([id]) => id));
-    setReview({ stepId, baseline, upstream: upstreamVersions(deps.steps, stepId, stepStates), edits: {},
-      deferred, touched: new Set(), problems: [], changed: false });
+    return { stepId, baseline, upstream: upstreamVersions(deps.steps, stepId, stepStates), edits: {},
+      deferred, touched: new Set(), problems: [], changed: false };
+  }
+
+  /**
+   * The confirmation card's one click: confirm what the card shows, with the same snapshot and upstream
+   * checks as the review. A problem, or content that changed meanwhile, opens the review instead.
+   */
+  function confirmNow(stepId: string, info: StepInformation, edits: Record<string, FieldValue> | undefined,
+    stepStates: Record<string, { version: number }>) {
+    const step = deps.steps.find(item => item.id === stepId);
+    if (!step) return;
+    const state = envelopeState(stepId);
+    if (state.kind !== "none") { open(stepId, info, edits, stepStates); return; }
+    submitReview(newReview(stepId, info, edits, stepStates), info);
   }
 
   function setDeferred(fieldId: string, deferred: boolean) {
@@ -263,7 +281,10 @@ export function useStepConfirmation(deps: StepConfirmationDeps) {
 
   /** Submit the review: the server content must still be exactly what the user saw. */
   function submit(info: StepInformation) {
-    if (!review) return;
+    if (review) submitReview(review, info);
+  }
+
+  function submitReview(review: Review, info: StepInformation) {
     const step = deps.steps.find(item => item.id === review.stepId);
     if (!step) return;
     const reviewed = reviewedStep(review, deps.pendingEdits(step.id));
@@ -280,7 +301,7 @@ export function useStepConfirmation(deps: StepConfirmationDeps) {
   }
 
   return {
-    confirming, review, envelopeState, recoverMalformed, open, setDeferred, submit,
+    confirming, review, envelopeState, recoverMalformed, open, confirmNow, setDeferred, submit,
     noteEdit: (fieldId: string, value: FieldValue) =>
       setReview(old => old ? { ...old, edits: { ...old.edits, [fieldId]: value } } : old),
     close: () => setReview(null),

@@ -3,7 +3,7 @@ import { createElement, isValidElement, type ReactElement, type ReactNode } from
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import { CaptureChecklist, type CaptureChecklistProps } from "./capture-checklist";
-import { StepReviewDialog, StepSummaryCard } from "./step-review-dialog";
+import { StepReviewDialog } from "./step-review-dialog";
 import { visibleStep, type FieldValue } from "./capture-state";
 
 const v = (value: string, status: FieldValue["status"] = "provisional"): FieldValue => ({ value, status, nature: "decision" });
@@ -129,16 +129,6 @@ describe("StepReviewDialog", () => {
   });
 });
 
-describe("StepSummaryCard", () => {
-  it("offers review or more conversation, with no model call", () => {
-    const onReview = vi.fn(), onMore = vi.fn();
-    const out = renderToStaticMarkup(createElement(StepSummaryCard, { title: "了解你", disabled: false, onReview, onMore }));
-    expect(out).toContain("“了解你”的信息已经齐了");
-    expect(out).toContain("核对并确认");
-    expect(out).toContain("我还要补充");
-  });
-});
-
 describe("autosave status", () => {
   it("shows a light status and never disables editing while saving", () => {
     const html = render(props({ saveState: { s1: "saving" } }));
@@ -148,5 +138,14 @@ describe("autosave status", () => {
     expect(render(props({ saveState: { s1: "saved" }, edits: { s1: { goal: v("新目标") } } }))).toContain("保存中…");
     expect(render(props({ saveState: { s1: "error" }, edits: { s1: { goal: v("新目标") } } }))).toContain("自动保存失败");
     expect(render(props())).not.toContain("保存中…");
+  });
+});
+
+describe("highlight", () => {
+  it("marks fields only in the step the confirmation card asked about, and not once it is confirmed", () => {
+    const marked = (p: CaptureChecklistProps) => (render(p).match(/data-highlight="true"/g) ?? []).length;
+    expect(marked(props({ highlight: { stepId: "s1", fieldIds: ["goal", "audience"] } }))).toBe(2);
+    expect(marked(props({ highlight: { stepId: "s2", fieldIds: ["goal"] } }))).toBe(0);
+    expect(marked(props({ highlight: { stepId: "s1", fieldIds: ["goal"] }, valid: { s1: true, s2: false, s3: false } }))).toBe(0);
   });
 });
