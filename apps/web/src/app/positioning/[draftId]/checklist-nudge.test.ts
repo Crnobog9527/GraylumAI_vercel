@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { describe, expect, it, vi } from "vitest";
 import { checklistUpdatedInput } from "@repo/api/src/shared/opcQuestions";
-import { clearSavedFields, isChecklistUpdate, noteSavedFields, nudgeNotice, savedFields, shownInput } from "./checklist-nudge";
+import { clearSavedFields, isChecklistUpdate, noteSavedFields, nudgeNotice, refusedTurn, savedFields, shownInput } from "./checklist-nudge";
 
 function memory() {
   const map = new Map<string, string>();
@@ -65,4 +65,16 @@ describe("checklist nudge", () => {
 it("hides the prompt as soon as a message is queued, before its saves clear the list", () => {
   expect(nudgeNotice(["goal"], () => undefined, true, true)).toBeNull();
   expect(nudgeNotice(["goal"], () => undefined, true)).toMatchObject({ id: "checklist-nudge" });
+});
+
+it("brings the prompt back after an unadmitted checklist turn, and a typed message back into the box", () => {
+  const store = new Map<string, string>();
+  const storage = { getItem: (k: string) => store.get(k) ?? null, setItem: (k: string, v: string) => void store.set(k, v), removeItem: (k: string) => void store.delete(k) };
+  const schema = [{ id: "goal" }, { id: "audience" }];
+  const restore = vi.fn();
+  refusedTurn(storage, "d", "s1", checklistUpdatedInput(["audience", "goal"]), restore);
+  expect(savedFields(storage, "d", "s1", schema)).toEqual(["goal", "audience"]);
+  expect(restore).not.toHaveBeenCalled();
+  refusedTurn(storage, "d", "s1", "我的回答", restore);
+  expect(restore).toHaveBeenCalledTimes(1);
 });

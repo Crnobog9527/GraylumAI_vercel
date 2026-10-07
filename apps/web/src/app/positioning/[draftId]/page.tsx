@@ -35,7 +35,7 @@ import { sameRequest, releaseRejectedAnswer, openingRequest, parseStepEnvelope, 
   retainExecution, settleEnvelope, TEXT_PROTOCOL, turnResultNotice, type MentorTurn, type MentorExecution } from "./mentor-turn";
 import { openOrganizer, usePaygResume } from "@/lib/use-payg-resume";
 import { checklistUpdatedInput, isOpeningInput, openingEntryKey } from "@repo/api/src/shared/opcQuestions";
-import { clearSavedFields, isChecklistUpdate, noteSavedFields, nudgeNotice, savedFields, shownInput } from "./checklist-nudge";
+import { clearSavedFields, isChecklistUpdate, noteSavedFields, nudgeNotice, refusedTurn, savedFields, shownInput } from "./checklist-nudge";
 type Step = { id: string; title: string; dependsOn?: string[] };
 import { isRecord, type Information, type Item, type StepEnvelope } from "./confirm-envelope";
 /**
@@ -634,7 +634,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
     // A running execution keeps envelope and bubble until a resume sees a terminal result; a Q1 refusal refills the box.
     if (!settleEnvelope(sessionStorage, key, request.requestId, executionId, result)) return;
     setPendingBubble(old=>old?.requestId===request.requestId?null:old);
-    if(!payg.admitted(result)&&!isChecklistUpdate(request.input))setMentorInput(old=>old.trim()?old:request.input);
+    if(!payg.admitted(result))refusedTurn(sessionStorage,draftId,step.id,request.input,()=>setMentorInput(old=>old.trim()?old:request.input));
     live.clear();
   }
   async function resumeInterruptedOpening() {

@@ -206,13 +206,16 @@ export function createInformationAutosave(io: () => AutosaveIo) {
     }, AUTOSAVE_DELAY_MS);
   }
 
-  /** Save now and wait until this step's save (and every earlier one) is done. */
+  /**
+   * Save now and wait until every pending save is done: this step's (its failure is thrown) and the other
+   * steps' (any step can be edited in the checklist; their failures are reported, not thrown). A message sent
+   * after this carries every edit made before it.
+   */
   async function flush(stepId: string) {
     cancel();
-    // Any step can be edited in the checklist: the cleared timer also covered the other steps' edits.
-    for (const other of pendingSteps())
-      if (other !== stepId) void enqueue(other).catch(() => io().onError(AUTOSAVE_FAILED));
-    await (io().edits()[stepId] ? enqueue(stepId) : chain);
+    const others = pendingSteps().filter(other => other !== stepId)
+      .map(other => enqueue(other).catch(() => io().onError(AUTOSAVE_FAILED)));
+    await Promise.all([io().edits()[stepId] ? enqueue(stepId) : chain, ...others]);
   }
 
   return { enqueue, schedule, flush, cancel };

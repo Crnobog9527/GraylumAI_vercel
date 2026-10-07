@@ -37,6 +37,17 @@ export function clearSavedFields(storage: Storage, draftId: string) {
   storage.removeItem(key(draftId));
 }
 
+/**
+ * A turn the server did not admit (Q1, nothing stored): a checklist turn notes its fields again so the prompt
+ * returns for a retry; a typed message goes back into the box (`restoreInput`), never the raw host marker.
+ */
+export function refusedTurn(storage: Storage, draftId: string, stepId: string, input: string, restoreInput: () => void) {
+  if (!isChecklistUpdate(input)) { restoreInput(); return; }
+  let ids: string[] | undefined;
+  try { ids = readChecklistUpdatedInput(input); } catch { ids = undefined; }
+  if (ids?.length) noteSavedFields(storage, draftId, stepId, ids);
+}
+
 export const isChecklistUpdate = (input: string | null | undefined) => (input ?? "").startsWith(CHECKLIST_UPDATED_INPUT);
 
 /** What the conversation shows for a turn's input: the update marker is the user's click, never shown raw. */

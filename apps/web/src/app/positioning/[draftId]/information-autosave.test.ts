@@ -154,6 +154,30 @@ describe("information autosave", () => {
     expect(t.server().version).toBe(4);
   });
 
+  it("flush also waits for other steps' saves queued behind this step's, so a message carries every earlier edit", async () => {
+    const t = setup();
+    const events: string[] = [];
+    const setSaveState = t.io.setSaveState;
+    t.io.setSaveState = (stepId, state) => {
+      setSaveState(stepId, state);
+      if (stepId === "s2" && state !== "saving") events.push("s2 settled");
+    };
+    t.edit({ a: v("new") });
+    t.gate();
+    const first = t.autosave.flush("s1");
+    await vi.waitFor(() => expect(t.writes).toHaveLength(1));
+    t.edit({ a: v("newer") });
+    void t.autosave.enqueue("s1").catch(() => undefined); // A save of s1 that has not started yet.
+    // Another step edited before the message: its save queues behind s1's.
+    t.storage.setItem(informationBaseKey("d1", "s2"), JSON.stringify(t.server().values));
+    t.io.setEdits("s2", { a: v("old"), b: v("s2 edit") });
+    const flush = t.autosave.flush("s1").then(() => void events.push("flushed"));
+    t.release();
+    await first;
+    await flush;
+    expect(events).toEqual(["s2 settled", "flushed"]);
+  });
+
   it("leaves a step whose confirmation is in flight to that confirmation", async () => {
     vi.useFakeTimers();
     const t = setup();
