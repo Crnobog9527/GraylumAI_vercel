@@ -64,6 +64,7 @@ async function fixture(run: (page: Page) => Promise<void>) {
 
 it('A5a: delayed fresh read replaces the cached dialog baseline before claiming freshness or allowing confirmation', async () => {
   await fixture(async page => {
+    expect(await page.getByText(/已刷新为最新/).count()).toBe(0);
     await ui(page.getByText(/正在读取/)).toBeVisible();
     await ui(page.getByText(/已刷新为最新/)).toHaveCount(0);
     await ui(page.getByRole('button', { name: '确认这一步', exact: true })).toBeDisabled();
@@ -76,5 +77,56 @@ it('A5a: delayed fresh read replaces the cached dialog baseline before claiming 
     await ui(page.getByRole('button', { name: '确认这一步', exact: true })).toBeEnabled();
     expect(await page.evaluate('window.writes')).toEqual([]);
     expect(await page.evaluate('window.transitions')).toEqual([]);
+  });
+});
+
+it('ignores a late result after closing and reopening the same step', async () => {
+  await fixture(async page => {
+    await expect.poll(() => page.evaluate('window.reads.length')).toBe(1);
+    await page.getByRole('button', { name: '关闭核对' }).click();
+    await page.getByRole('button', { name: '立即核对' }).click();
+    await expect.poll(() => page.evaluate('window.reads.length')).toBe(2);
+    await page.evaluate("window.reads[1]('新弹窗内容')");
+    await ui(page.getByLabel('核对：受众')).toHaveValue('新弹窗内容');
+    await page.getByLabel('核对：受众').fill('后来手动编辑');
+    await page.evaluate("window.reads[0]('旧请求迟到内容')");
+    await ui(page.getByLabel('核对：受众')).toHaveValue('后来手动编辑');
+  });
+});
+
+it('read failure never enables confirmation or claims freshness and can reopen successfully', async () => {
+  await fixture(async page => {
+    await expect.poll(() => page.evaluate('window.reads.length')).toBe(1);
+    await page.evaluate("window.reads[0]('',true)");
+    await ui(page.getByText(/读取未完成/)).toBeVisible();
+    await ui(page.getByRole('button', { name: '确认这一步', exact: true })).toBeDisabled();
+    await ui(page.getByText(/已刷新为最新/)).toHaveCount(0);
+    await page.evaluate('window.c.submit({schema:[]})');
+    expect(await page.evaluate('window.writes.length')).toBe(0);
+    await page.getByRole('button', { name: '关闭核对' }).click();
+    await page.getByRole('button', { name: '立即核对' }).click();
+    await expect.poll(() => page.evaluate('window.reads.length')).toBe(2);
+    await page.evaluate("window.reads[1]('重试读取值')");
+    await ui(page.getByLabel('核对：受众')).toHaveValue('重试读取值');
+  });
+});
+
+it('keeps post-open edits across query refresh and re-reads before allowing a conflicting confirmation', async () => {
+  await fixture(async page => {
+    await expect.poll(() => page.evaluate('window.reads.length')).toBe(1);
+    await page.evaluate("window.reads[0]('2公里')");
+    await page.getByLabel('核对：受众').fill('我的后来编辑');
+    await page.evaluate("window.refreshCache('外部新内容')");
+    await ui(page.getByLabel('核对：受众')).toHaveValue('我的后来编辑');
+    await page.getByRole('button', { name: '确认这一步', exact: true }).click();
+    await expect.poll(() => page.evaluate('window.reads.length')).toBe(2);
+    // Double submission while the pre-confirmation read waits must remain one read and zero writes.
+    await page.evaluate('window.c.submit({schema:[{id:"audience",title:"受众",required:true}]})');
+    expect(await page.evaluate('window.reads.length')).toBe(2);
+    await page.evaluate("window.reads[1]('外部新内容')");
+    await ui(page.getByLabel('核对：受众')).toHaveValue('外部新内容');
+    await ui(page.getByText(/内容刚刚有变化/)).toBeVisible();
+    expect(await page.evaluate('window.writes.length')).toBe(0);
+    expect(await page.evaluate('window.transitions.length')).toBe(0);
   });
 });

@@ -18,6 +18,8 @@ export type StepReviewProps = {
   problems: readonly ReviewProblem[];
   /** The content changed after the review opened; the user has to look again. */
   changed: boolean;
+  loading?: boolean;
+  loadError?: boolean;
   busy: boolean;
   onEdit: (fieldId: string, value: string) => void;
   onDefer: (fieldId: string, deferred: boolean) => void;
@@ -38,6 +40,7 @@ const problemText: Record<ReviewProblem["reason"], string> = {
  */
 export function StepReviewDialog(props: StepReviewProps) {
   const dialog = useRef<HTMLElement>(null);
+  const blocked = props.busy || props.loading || props.loadError;
   useEffect(() => { dialog.current?.focus(); }, []);
   return (
     <div className="fixed inset-0 z-50 grid place-items-center bg-black/40 p-4"
@@ -47,6 +50,10 @@ export function StepReviewDialog(props: StepReviewProps) {
         <header><h2>核对并确认：{props.title}</h2>
           <button type="button" aria-label="关闭核对" disabled={props.busy} onClick={props.onClose}>×</button></header>
         <p>确认的是下面你看到的这一版内容。还没处理的“根据对话整理的更新”不会被确认，确认后仍可采用。</p>
+        {props.loading && <ChatInlineNotice tone="status" busy>正在读取已保存的内容，请稍候再核对。</ChatInlineNotice>}
+        {props.loadError && <ChatInlineNotice tone="warning" alert>
+          读取未完成，暂时不能确认。请关闭核对页后重试，你的输入仍保留。
+        </ChatInlineNotice>}
         {props.changed && <ChatInlineNotice tone="warning" alert>
           内容刚刚有变化（整理结果、另一个窗口的修改、前面步骤的修改或新的更新），已刷新为最新内容。请重新核对后再确认。
         </ChatInlineNotice>}
@@ -58,11 +65,11 @@ export function StepReviewDialog(props: StepReviewProps) {
           return (
             <div key={field.id} className={styles.reviewField}>
               <label htmlFor={`review-${field.id}`}>{field.title}{field.required ? "（必需）" : "（选填）"}</label>
-              <Textarea id={`review-${field.id}`} aria-label={`核对：${field.title}`} maxLength={400} disabled={props.busy}
+              <Textarea id={`review-${field.id}`} aria-label={`核对：${field.title}`} maxLength={400} disabled={Boolean(blocked)}
                 placeholder={deferred ? "写下暂时无法确定的原因" : field.required ? "请补充这一项" : "选填，可以留空"}
                 value={value.value} onChange={event => props.onEdit(field.id, event.target.value)}/>
               <label className={styles.defer}>
-                <input type="checkbox" checked={deferred} disabled={props.busy}
+                <input type="checkbox" checked={deferred} disabled={Boolean(blocked)}
                   onChange={event => props.onDefer(field.id, event.target.checked)}/>
                 暂时无法确定，写明原因后暂缓（确认正式定位前需要补上）
               </label>
@@ -73,7 +80,7 @@ export function StepReviewDialog(props: StepReviewProps) {
         })}
         <footer>
           <Button variant="outline" disabled={props.busy} onClick={props.onClose}>返回继续补充</Button>
-          <Button disabled={props.busy} onClick={props.onConfirm}>确认这一步</Button>
+          <Button disabled={Boolean(blocked)} onClick={props.onConfirm}>确认这一步</Button>
         </footer>
       </section>
     </div>
