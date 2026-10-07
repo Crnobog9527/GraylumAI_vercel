@@ -163,7 +163,7 @@ function next(intent: MonthlyRefundIntent, seen: MonthlyRefundObservation, now: 
   }
   if (refund?.status === 'succeeded') {
     if (subscription.status === 'canceled') return { kind: 'finalize_success', refundId: refund.id };
-    if (local.account !== 'active' || subscription.status !== 'active' || subscription.preflight !== 'clear') {
+    if (subscription.status !== 'active' || subscription.preflight !== 'clear') {
       return review('cash_succeeded_subscription_unresolved');
     }
     return request(intent, 'cancel', now);
@@ -194,10 +194,10 @@ function next(intent: MonthlyRefundIntent, seen: MonthlyRefundObservation, now: 
 }
 
 /** Non-executing decision service. No Stripe, Supabase, router or scheduler import.
- * Every decision remains executable=false. A future adapter MUST use the narrow
+ * Every decision remains executable=false. The adapter must use the narrow
  * DB transaction to revalidate/claim/CAS before applying it; a returned decision
- * is never a permission token. Real readers, locks, persisted guards, webhook
- * routing and cancellation ownership proof remain blocked on the erasure handoff.
+ * is never a permission token. Channel readers and the database transaction provide authority; this pure result
+ * alone does not grant permission to dispatch.
  */
 export function planMonthlyRefundStep(rawIntent: unknown, rawObservation: unknown, now: string): MonthlyRefundDecision {
   const intent = intentSchema.safeParse(rawIntent);

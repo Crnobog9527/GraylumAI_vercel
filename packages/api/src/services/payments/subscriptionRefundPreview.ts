@@ -4,7 +4,7 @@ import type Stripe from 'stripe';
 import { freezePurchaseSnapshot } from './contracts';
 import { assembleRefundConsumption } from './refundFacts';
 import { refundTime } from './refundMoney';
-import { evaluateRefundPolicy, type RefundPolicyResult } from './refundPolicy';
+import { evaluateRefundPolicy, type RefundPolicyResult, type RefundPolicyInput } from './refundPolicy';
 import type { RefundRequest, RefundStripe } from './packageRefund';
 import { resolveStripeScope } from './stripeCheckoutPersistence';
 import {
@@ -163,13 +163,19 @@ function verifyGrants(evidence: SubscriptionRefundEvidence, order: PreviewOrder)
  * No provider/DB mutations, no persistent new identity, no dependency on private text.
  * Caller supplies an existing authenticated admin and server-created connections.
  */
-export async function previewSubscriptionRefund(
+export async function readSubscriptionRefundFacts(
   db: PreviewDb, stripe: SubscriptionRefundStripe, actorId: string, input: SubscriptionRefundPreviewRequest,
-): Promise<RefundPolicyResult> {
-  try {
+  approved?: { id: string; versionHash: string; approvedBy: string },
+) {
     requireEvidence(input.feeEvidence.trim().length > 0 && input.feeEvidence.length <= 160, 'PAY_REFUND_FEE_EVIDENCE_REQUIRED');
     const order = await readPreviewOrder(db, input.orderId);
-    verifyOrder(order);
+    if (approved) {
+      const { data, error } = await db.from('payment_orders').select('refund_approval').eq('id', order.id).single();
+      const i = data?.refund_approval;
+      requireEvidence(!error && i?.kind === 'monthly_first_purchase' && i.status === 'approved'
+        && i.id === approved.id && i.versionHash === approved.versionHash, 'PAY_REFUND_STALE_APPROVAL');
+      verifyOrder({ ...order, refund_status: null });
+    } else verifyOrder(order);
     const first = await readSubscriptionRefundEvidence(db, actorId, order, input.ticketId);
     requireEvidence(hash(first.orders.find(row => row.id === order.id)) === hash(order), 'PAY_REFUND_EVIDENCE_CHANGED');
     verifyGrants(first, order);
@@ -188,19 +194,23 @@ export async function previewSubscriptionRefund(
     requireEvidence(spend, 'PAY_REFUND_CONSUMPTION_UNRESOLVED');
     const kind = target.billingReason === 'subscription_create' && !order.source_order_id ? 'membership_first'
       : target.billingReason === 'subscription_cycle' ? 'renewal' : 'unknown';
-    return evaluateRefundPolicy({
-      order: { id: order.id, userId: order.user_id, channel: 'stripe', mode: 'test', merchant: order.merchant_namespace,
+    const policy: RefundPolicyInput = {
+      order: { id: order.id, userId: order.user_id, channel: 'stripe', mode: 'test', merchant: order.merchant_namespace!,
         currency: order.currency, paidAt, paidMinor: provider.cash.paidMinor, refundedMinor: 0,
         paymentEvidenceRef: hash(provider), kind, refundState: 'none' },
       ticket: { id: last.ticket.id, userId: last.ticket.user_id, orderId: order.id,
-        submittedAt: last.ticket.created_at, bindingEvidenceRef: hash([last.ticket, order.id, actorId]) },
+        submittedAt: last.ticket.created_at, bindingEvidenceRef: hash([last.ticket, order.id, approved?.approvedBy ?? actorId]) },
       membershipHistory: { userId: order.user_id, orderId: order.id, paidAt, complete: true,
         priorPaidMembershipCount: other.filter(row => refundTime(row.paidAt)! < paid).length,
         evidenceRef: hash(provider.invoices) },
       consumption: spend, observedAt, accountState: 'active', feePermitted: input.feePermitted, reason: 'ordinary',
-    });
-  } catch {
-    // Never disclose SDK/DB objects, private text or underlying error messages.
-    return review('subscription_evidence_requires_review');
-  }
+    };
+    return { policy, order, evidence: last, provider };
+}
+
+export async function previewSubscriptionRefund(
+  db: PreviewDb, stripe: SubscriptionRefundStripe, actorId: string, input: SubscriptionRefundPreviewRequest,
+): Promise<RefundPolicyResult> {
+  try { return evaluateRefundPolicy((await readSubscriptionRefundFacts(db, stripe, actorId, input)).policy); }
+  catch { return review('subscription_evidence_requires_review'); }
 }

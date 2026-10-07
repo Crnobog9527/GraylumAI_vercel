@@ -107,7 +107,7 @@ type RefundWebhookRow = Record<string, any>;
 type RefundWebhookFilter = {
   column: string;
   value: unknown;
-  operator: 'eq' | 'neq' | 'lte' | 'like' | 'is';
+  operator: 'eq' | 'neq' | 'lte' | 'like' | 'is' | 'in';
 };
 type RefundWebhookMockHooks = {
   onBeforeRpc?: (input: {
@@ -173,6 +173,11 @@ class RefundWebhookMockQuery {
 
   eq(column: string, value: unknown) {
     this.filters.push({ column, value, operator: 'eq' });
+    return this;
+  }
+
+  in(column: string, value: unknown[]) {
+    this.filters.push({ column, value, operator: 'in' });
     return this;
   }
 
@@ -288,9 +293,11 @@ class RefundWebhookMockQuery {
   private matchingRows() {
     const rows = this.tables[this.table].filter((row) =>
       this.filters.every(({ column, value, operator }) => {
+        const field = column.split(/->>?/).reduce((v, key) => v?.[key], row);
+        if (operator === 'in') return Array.isArray(value) && value.includes(field);
         if (operator === 'eq') {
           if (column === 'metadata' && typeof value === 'string') return isDeepStrictEqual(row[column], JSON.parse(value));
-          return row[column] === value;
+          return field === value;
         }
 
         if (operator === 'neq') {
@@ -310,7 +317,7 @@ class RefundWebhookMockQuery {
           return row[column] === null || row[column] === undefined;
         }
 
-        return row[column] === value;
+        return field === value;
       })
       && this.containsFilters.every(({ column, value }) =>
         refundWebhookContainsValue(row[column], value),
@@ -5377,7 +5384,8 @@ describe('PAY-1 card and Alipay fulfillment compatibility', () => {
       });
       for (const table of ['profiles', 'credit_transactions', 'payment_orders', 'subscription_credit_grants'] as const) {
         expect(tables[table]).toEqual(before[table]);
-        expect(supabase.from).not.toHaveBeenCalledWith(table);
+        // The monthly hold lookup reads orders; the row comparison still proves no mutation.
+        if (table !== 'payment_orders') expect(supabase.from).not.toHaveBeenCalledWith(table);
       }
       expect(rpc).toHaveBeenCalledWith('pay_common_sync_subscription', expect.any(Object));
     });

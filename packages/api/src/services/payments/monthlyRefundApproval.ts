@@ -62,7 +62,7 @@ type Binding = {
 };
 
 /** Pure server-evidence preparation, never approval or dispatch. The real reader and
- * atomic approval/claim transaction are deliberately NOT connected in this slice.
+ * atomic approval/claim transaction live in monthlyRefundService and the narrow SQL RPCs.
  * Binding must come from the original order/provider/grants, never request fields.
  */
 export function prepareMonthlyRefundQuote(policy: RefundPolicyInput, binding: Binding):
