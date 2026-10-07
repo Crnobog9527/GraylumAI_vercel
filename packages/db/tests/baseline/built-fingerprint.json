@@ -2212,7 +2212,7 @@
   "fn:model_setting_references(text,jsonb)": "c0dc2119e886",
   "fn:monthly_refund_account_guard()": "5e0283ed0065",
   "fn:monthly_refund_assert_admin(uuid)": "53ebf27a40ee",
-  "fn:monthly_refund_erasure_safe(jsonb)": "9a548bed838b",
+  "fn:monthly_refund_erasure_safe(jsonb)": "924a96da1731",
   "fn:monthly_refund_lock(uuid,uuid)": "9a3b303af150",
   "fn:monthly_refund_observation(jsonb,jsonb)": "c437c8f093c5",
   "fn:monthly_refund_source_guard()": "fca9f81782ba",

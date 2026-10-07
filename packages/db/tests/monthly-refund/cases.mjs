@@ -1,5 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import assert from 'node:assert/strict';
+import {checkErasureProof} from './erasure-cases.mjs';
 export async function runCases({db,Client,connectionString,report}) {
  const one=async(sql,args=[])=>(await db.query(sql,args)).rows[0];
  const fx=async(level='pro')=>(await one('select monthly_test.fixture($1) f',[level])).f;
@@ -48,7 +49,7 @@ export async function runCases({db,Client,connectionString,report}) {
   i=await finish(f,i,e);assert.equal(i.status,'succeeded');
   assert.equal((await finish(f,i,e)).status,'succeeded');
   assert.equal((await one('select credits from profiles where id=$1',[f.user])).credits,400);
-  assert.equal((await one('select monthly_refund_erasure_safe($1) ok',[i])).ok,true);
+  await checkErasureProof(db,i);
   assert.equal((await one('select monthly_refund_erasure_safe($1) ok',[{...i,unknownBody:'do not erase'}])).ok,false);
   const conflict=await result(f,i,{...r,status:'failed'});assert.equal(conflict.status,'review_required');
   assert.equal(conflict.recordedRefund.status,'succeeded');
@@ -73,6 +74,8 @@ export async function runCases({db,Client,connectionString,report}) {
  restore.subscription.cancelAtPeriodEnd=false;i=await finish(f,i,restore);await finish(f,i,restore);
  assert.equal((await one('select credits,membership_level from profiles where id=$1',[f.user])).credits,1500);
  assert.equal((await one('select status from subscription_credit_grants where id=$1',[f.grant])).status,'granted');
+ assert.equal((await one('select monthly_refund_erasure_safe($1) ok',[i])).ok,true);
+ report.checks.push('complete success/failure financial proofs accepted; each missing/null/wrong-type field and contradictory terminal evidence refused');
  report.checks.push('confirmed failure restores original grant/balance exactly once');
  const blocked=await fx();await db.query("insert into credit_transactions(user_id,amount,type,ledger_type) values($1,-1,'deduction','spend')",[blocked.user]);
  await assert.rejects(()=>approve(blocked),/CONSUMPTION/);

@@ -47,7 +47,7 @@ END $$;
 CREATE OR REPLACE FUNCTION public.monthly_refund_erasure_safe(i jsonb)
 RETURNS boolean LANGUAGE plpgsql IMMUTABLE SET search_path=public,pg_temp AS $$
 DECLARE allowed text[]:=ARRAY['kind','id','status','terms','versionHash','localVersion','approvedBy','approvedAt',
- 'claimedAt','started','recordedRefund','hold','revision','idempotencyKey','finishedAt'];t jsonb;
+ 'claimedAt','started','recordedRefund','hold','revision','idempotencyKey','finishedAt'];t jsonb;b jsonb;v jsonb;k text;at timestamptz;
 BEGIN
  IF i IS NULL OR jsonb_typeof(i)<>'object' OR i->>'kind' IS DISTINCT FROM 'monthly_first_purchase'
  OR i->>'status' IS NULL OR i->>'status' NOT IN ('succeeded','failed') OR i->>'finishedAt' IS NULL
@@ -62,6 +62,74 @@ BEGIN
  'feeEvidence','evidenceRefs','snapshot']<>'{}'::jsonb THEN RETURN false; END IF;
  IF (i->'started')-ARRAY['stop_renewal','refund','cancel','restore_renewal']<>'{}'::jsonb
  OR (i->'recordedRefund')-ARRAY['id','status']<>'{}'::jsonb THEN RETURN false; END IF;
+ -- The projection above rejects unknown content, but does not establish completeness.
+ -- Require every nested key and validate actual values before treating this as financial proof.
+ FOREACH b IN ARRAY ARRAY[i,t,t->'snapshot',i->'recordedRefund'] LOOP
+  FOR k,v IN SELECT * FROM jsonb_each(b) LOOP
+   IF v='null'::jsonb THEN RETURN false; END IF;
+   IF jsonb_typeof(v)='string' AND (length(btrim(b->>k))=0 OR length(b->>k)>160) THEN RETURN false; END IF;
+  END LOOP;
+ END LOOP;
+ IF NOT t ?& ARRAY['kind','orderId','userId','ticketId','subscriptionId','providerSubscriptionId',
+  'paymentIntentId','chargeId','invoiceId','merchant','mode','currency','plan','paidAt','submittedAt','periodEnd',
+  'originalCancelAtPeriodEnd','paidMinor','basisMinor','feeMinor','netMinor','credits','feePermitted',
+  'feeEvidence','evidenceRefs','snapshot']
+ OR NOT (t->'snapshot') ?& ARRAY['version','item_type','item_id','item_updated_at','billing_cycle','currency',
+  'unit','price','discount','tax_behavior','credits','bonus_credits']
+ OR NOT (i->'started') ?& ARRAY['stop_renewal','refund','cancel','restore_renewal']
+ OR NOT (i->'recordedRefund') ?& ARRAY['id','status'] THEN RETURN false; END IF;
+ PERFORM (i->>'id')::uuid,(i->>'approvedBy')::uuid;
+ FOREACH k IN ARRAY ARRAY['orderId','userId','ticketId','subscriptionId'] LOOP PERFORM (t->>k)::uuid; END LOOP;
+ PERFORM (t->'snapshot'->>'item_id')::uuid;
+ FOREACH b IN ARRAY ARRAY[i,t,t->'snapshot'] LOOP
+  FOREACH k IN ARRAY ARRAY['approvedAt','claimedAt','finishedAt','paidAt','submittedAt','periodEnd','item_updated_at'] LOOP
+   IF b ? k THEN
+    IF jsonb_typeof(b->k)<>'string' OR (b->>k) !~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}[T ]' THEN RETURN false; END IF;
+    at:=(b->>k)::timestamptz;IF NOT isfinite(at) THEN RETURN false; END IF;
+   END IF;
+  END LOOP;
+ END LOOP;
+ FOREACH b IN ARRAY ARRAY[t,t->'snapshot',i] LOOP
+  FOREACH k IN ARRAY ARRAY['paidMinor','basisMinor','feeMinor','netMinor','credits','bonus_credits','revision','version'] LOOP
+   IF b ? k AND (jsonb_typeof(b->k)<>'number' OR (b->>k)::numeric<0 OR (b->>k)::numeric>9007199254740991
+    OR (b->>k)::numeric<>trunc((b->>k)::numeric)) THEN RETURN false; END IF;
+  END LOOP;
+ END LOOP;
+ IF t->>'kind'<>'monthly_first_purchase' OR t->>'mode'<>'test' OR t->>'plan' NOT IN ('pro','gold')
+ OR t->>'currency' !~ '^[a-z]{3}$' OR jsonb_typeof(t->'originalCancelAtPeriodEnd')<>'boolean'
+ OR t->>'feePermitted' NOT IN ('confirmed','not_permitted')
+ OR (t->>'paidMinor')::bigint<=0 OR (t->>'basisMinor')::bigint<>(t->>'paidMinor')::bigint
+ OR (t->>'feeMinor')::bigint<>(CASE WHEN t->>'feePermitted'='confirmed' THEN (t->>'paidMinor')::bigint*6/100 ELSE 0 END)
+ OR (t->>'netMinor')::bigint<=0 OR (t->>'netMinor')::bigint<>(t->>'paidMinor')::bigint-(t->>'feeMinor')::bigint
+ OR (t->>'credits')::bigint NOT BETWEEN 1 AND 2147483647 OR (i->>'revision')::bigint<1
+ OR (t->>'submittedAt')::timestamptz-(t->>'paidAt')::timestamptz NOT BETWEEN interval '0' AND interval '168 hours'
+ OR (i->>'approvedAt')::timestamptz<(t->>'submittedAt')::timestamptz
+ OR (i->>'claimedAt')::timestamptz<(i->>'approvedAt')::timestamptz
+ OR (i->>'finishedAt')::timestamptz<(i->>'claimedAt')::timestamptz
+ OR (t->>'periodEnd')::timestamptz<=(i->>'claimedAt')::timestamptz
+ OR jsonb_typeof(t->'evidenceRefs')<>'array' OR jsonb_array_length(t->'evidenceRefs')<4
+ OR EXISTS(SELECT 1 FROM jsonb_array_elements(t->'evidenceRefs') x WHERE jsonb_typeof(x)<>'string'
+  OR length(btrim(x#>>'{}')) NOT BETWEEN 1 AND 160) THEN RETURN false; END IF;
+ b:=t->'snapshot';
+ IF b->>'version'<>'1' OR b->>'item_type'<>'membership_plan' OR b->>'billing_cycle'<>'monthly'
+ OR b->>'currency'<>t->>'currency' OR b->>'unit'<>'major' OR b->>'tax_behavior' NOT IN ('inclusive','exclusive','unspecified')
+ OR jsonb_typeof(b->'price')<>'string' OR jsonb_typeof(b->'discount')<>'string'
+ OR b->>'price' !~ '^(0|[1-9][0-9]{0,17})(\.[0-9]{1,12})?$' OR b->>'discount' !~ '^(0|[1-9][0-9]{0,17})(\.[0-9]{1,12})?$'
+ OR (b->>'credits')::bigint>2147483647 OR (b->>'bonus_credits')::bigint>2147483647
+ OR (b->>'credits')::bigint+(b->>'bonus_credits')::bigint<>(t->>'credits')::bigint THEN RETURN false; END IF;
+ FOR k,v IN SELECT * FROM jsonb_each(i->'started') LOOP
+  IF v<>'null'::jsonb THEN
+   IF jsonb_typeof(v)<>'string' OR (v#>>'{}') !~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}[T ]' THEN RETURN false; END IF;
+   at:=(v#>>'{}')::timestamptz;
+   IF NOT isfinite(at) OR at<(i->>'claimedAt')::timestamptz OR at>(i->>'finishedAt')::timestamptz THEN RETURN false; END IF;
+  END IF;
+ END LOOP;
+ IF i->'started'->>'refund' IS NULL
+ OR t->>'originalCancelAtPeriodEnd'='false' AND i->'started'->>'stop_renewal' IS NULL
+ OR i->'started'->>'stop_renewal' IS NOT NULL
+  AND (i->'started'->>'stop_renewal')::timestamptz>(i->'started'->>'refund')::timestamptz
+ OR i->>'status'='succeeded' AND i->'started'->>'restore_renewal' IS NOT NULL
+ OR i->>'status'='failed' AND i->'started'->>'cancel' IS NOT NULL THEN RETURN false; END IF;
  RETURN coalesce((i->>'status'='succeeded' AND i->>'hold'='terminated' AND i->'recordedRefund'->>'status'='succeeded')
  OR (i->>'status'='failed' AND i->>'hold'='released' AND i->'recordedRefund'->>'status' IN ('failed','canceled')),false);
 EXCEPTION WHEN others THEN RETURN false;
