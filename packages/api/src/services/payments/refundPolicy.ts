@@ -115,8 +115,11 @@ export function evaluateRefundPolicy(raw: unknown): RefundPolicyResult {
     if (order.kind === 'credit_package' && input.reason === 'feature_reduction') {
       return review('exception_contract_scope_required');
     }
-    // Unused purchased-credit valuation cannot be trusted with unknown settlements.
-    if (consumption.state === 'unresolved' || !consumption.completeAccountHistory || consumption.settlementState !== 'clear') {
+    // Time-only feature reduction retains granted credits. Its contractual
+    // cash amount does not depend on consumption; unused purchased-credit
+    // reimbursement on unjust termination still requires settled evidence.
+    if (input.reason === 'unjust_termination' && (consumption.state === 'unresolved'
+      || !consumption.completeAccountHistory || consumption.settlementState !== 'clear')) {
       return review('consumption_unresolved');
     }
   }

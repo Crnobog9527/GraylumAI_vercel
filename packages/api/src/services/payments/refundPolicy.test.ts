@@ -155,7 +155,32 @@ describe('exception preview', () => {
     expect(result.treatment).toBe(reason === 'feature_reduction'
       ? 'end_membership_keep_granted' : 'end_membership_refund_unused_purchased');
     input.consumption.settlementState = 'unknown';
-    expect(evaluateRefundPolicy(input).status).toBe('review_required');
+    expect(evaluateRefundPolicy(input).status).toBe(reason === 'feature_reduction' ? 'eligible' : 'review_required');
+  });
+  it.each(['unknown', 'pending'] as const)('time-only reduction does not require %s consumption settlement', settlementState => {
+    const input = fixture();
+    input.reason = 'feature_reduction';
+    input.consumption = { ...input.consumption, state: 'unresolved', completeAccountHistory: false, settlementState };
+    input.exceptionBasis = { reason: input.reason, orderId: input.order.id, currency: 'usd',
+      basisMinor: 1000, evidenceRef: 'remaining-service-contract' };
+    expect(evaluateRefundPolicy(input)).toMatchObject({ status: 'eligible', executable: false,
+      treatment: 'end_membership_keep_granted', quote: { netMinor: 940 } });
+    input.reason = 'unjust_termination';
+    input.exceptionBasis.reason = input.reason;
+    expect(evaluateRefundPolicy(input)).toMatchObject({ status: 'review_required', reason: 'consumption_unresolved' });
+  });
+  it('time-only reduction still rejects disputed cash and invalid subject evidence', () => {
+    const input = fixture();
+    input.reason = 'feature_reduction';
+    input.exceptionBasis = { reason: input.reason, orderId: input.order.id, currency: 'usd',
+      basisMinor: 1000, evidenceRef: 'remaining-service-contract' };
+    input.consumption.state = 'unresolved';
+    input.consumption.completeAccountHistory = false;
+    input.order.refundState = 'disputed';
+    expect(evaluateRefundPolicy(input).reason).toBe('disputed_order');
+    input.order.refundState = 'none';
+    input.consumption.userId = 'other-subject';
+    expect(evaluateRefundPolicy(input).reason).toBe('evidence_identity_mismatch');
   });
   it.each(['feature_reduction', 'unjust_termination'] as const)('quotes distinct %s remainder after partial refund', reason => {
     const input = fixture(); input.reason = reason;

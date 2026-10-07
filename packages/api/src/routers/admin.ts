@@ -1,5 +1,6 @@
 import { adminSettingsRowSchema, genericAdminSettingsRows } from '../services/adminSettings';
 import { modelPriceView } from '../shared/modelPriceView';
+import { adminRefundProcedures } from './adminRefunds';
 import { membershipPlanMutations } from './adminMembershipPlans';
 import { entitlementRowShape } from '../services/membershipEntitlementConfig';
 import { ANNOUNCEMENT_LINK_ERROR, resolveAnnouncementLink } from '../shared/announcementLink';
@@ -29,7 +30,6 @@ import {
   ADMIN_ACTIVITY_COLUMNS, ADMIN_ACTIVITY_WITH_PROFILES, ADMIN_PROFILE_COLUMNS, ADMIN_PROFILE_LIST_COLUMNS,
   ADMIN_TRANSACTION_COLUMNS, recordAdminActivity, withUnrecordedLoginFields,
 } from '../services/adminUserAccess';
-
 const promptCategorySchema = z.enum(['writing', 'marketing', 'video', 'business', 'education', 'coding', 'analysis', 'creative', 'other']);
 const promptPlatformSchema = z.enum(['all', 'web', 'mobile', 'desktop', 'api']);
 const moduleBadgeTypeSchema = z.enum(['new', 'hot', 'recommend']).nullable().optional();
@@ -94,7 +94,6 @@ const adminFinancePaymentOrderRowSchema = z.object({
     order.status === 'completed'
     && (order.payment_status === 'paid' || order.payment_status === 'no_payment_required')
     && order.currency.toLowerCase() === 'usd';
-
   if (isPaidCompletedOrder && order.amount_total === null) {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
@@ -347,6 +346,7 @@ function convertUsdPer1KSearchToCreditsPer1KSearch(
 }
 
 export const adminRouter = router({
+  ...adminRefundProcedures,
   /**
    * Get enhanced dashboard statistics
    * Returns comprehensive overview for the admin dashboard
