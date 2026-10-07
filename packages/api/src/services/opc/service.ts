@@ -20,6 +20,7 @@ import { isOpeningInput, openingRequestId, questionTask } from "./questions";
 import { agentTurnInstructions, AGENT_TURN_STABLE_PREFIX, OPENING_EXTRACTION_RULE } from "./agentTurnPrompt";
 import { ORGANIZER_INSTRUCTIONS } from "./organizerPrompt";
 import {captureHostContext, captureFocus, captureOrganizerInput, captureFrozenInformation} from './captureContext';
+import {withStepConfirmation} from '../../shared/opcStepConfirmation';
 import {captureAdmissionReplay} from './captureReplay';
 import { planItem, opcPlan, opcHandoff, opcTopicTurn, opcTopicDraft, opcAdoptTopics, opcLibraryEdit, opcContentFromExecution, opcContentManualSave, opcVideoPackage, opcVideoResults, opcVideoExecutionCheck, opcVideoMaterialPrepare } from "../../shared/opcRequests";
 export { planItem, opcPlan, opcHandoff, opcTopicTurn, opcTopicDraft, opcAdoptTopics, opcLibraryEdit, opcContentFromExecution, opcContentManualSave, opcVideoPackage, opcVideoResults, opcVideoExecutionCheck, opcVideoMaterialPrepare } from "../../shared/opcRequests";
@@ -108,7 +109,6 @@ export function opcService(user: SupabaseClient, admin: SupabaseClient, real?:St
         network: "deny" as const,
         sources: [],
       };
-      // Recover the original frozen question before newer form state is checked.
       const replay = await captureAdmissionReplay(admin, (await user.auth.getUser()).data.user!.id,
         runtimeRequest, v.purpose === "mentor");
       if (replay) {
@@ -197,7 +197,7 @@ export function opcService(user: SupabaseClient, admin: SupabaseClient, real?:St
         if (!opening && !answeredCard) runtimeRequest.selection.task = questionTask(captureFocus(captureInformation[v.stepId]!));
       }
       const hostTurnContext = v.purpose === "mentor"
-        ? captureHostContext(snapshot.workflow.steps, captureInformation, v.stepId, opening, updatedFieldIds) : undefined;
+        ? captureHostContext(snapshot.workflow.steps, captureInformation, v.stepId, opening, updatedFieldIds, captureConfirmed) : undefined;
       let organizerInstructions = v.purpose === "mentor" && organizeAfter
         ? ORGANIZER_INSTRUCTIONS : undefined;
       if (organizerInstructions) organizerInstructions += "\n" + ANSWER_CARD_RULE;
@@ -399,7 +399,7 @@ export function opcService(user: SupabaseClient, admin: SupabaseClient, real?:St
       }).prepare(runtimeRequest);
     },
     read: async (draftId: string) =>
-      ({...(await rpc("opc_query", { p_draft_id: uuid.parse(draftId) })),runtimeMode:real?"staging_test":"isolated"}),
+      ({...withStepConfirmation(await rpc("opc_query", {p_draft_id: uuid.parse(draftId)})),runtimeMode:real?"staging_test":"isolated"}),
     start: async (value: unknown) => {
       const v = opcStart.parse(value);
       return rpc("opc_start_b1", {

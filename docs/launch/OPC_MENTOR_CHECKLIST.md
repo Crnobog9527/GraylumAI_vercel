@@ -23,3 +23,47 @@ hostTurnContext 的每个字段携带 value、nature、basis、source、protecte
 所有数据库验证仅在一次性本机 Docker PostgreSQL 上执行。撤回时优先回退后端代码；额外响应字段与元数据无损兼容。若要撤回函数定义，应从应用前的数据库定义恢复这四个函数（opc_information、runtime_work_projection、opc_capture_apply、opc_historical_reach），保留已保存 values、版本、来源和请求记录；不执行早期 0159 整体回滚，也不删除业务数据。未执行任何远端迁移。
 
 性能优化仅在历史遍历已达到全部字段时提前结束，不更改权限、字段顺序或返回值。不宣称定位了线上 1–3.4 秒的唯一原因：线上耗时还可能含认证、网络、数据库负载，当前任务禁止访问远端数据库。可复现实测结果见 Validation handoff。
+
+## 整步确认信号
+
+后端确认关卡复用已有投影，不新增迁移、持久状态或自动确认路径。
+
+`opc.read({draftId})` 新增 `stepConfirmation`，按步骤 id 索引，示例：
+
+```json
+{
+  "stepConfirmation": {
+    "step-0": {
+      "requiredComplete": true,
+      "stepConfirmed": false,
+      "stepReady": true,
+      "needsLookFieldIds": ["goal", "audience"]
+    }
+  }
+}
+```
+
+- `requiredComplete`：固定 Skill 中所有必填项都有非空字符串内容（trim 后）；暂缓需要写有原因。
+  无 schema 返回 false；可选项为空不阻塞。这里只判断是否有内容，不宣称语义质量已通过。
+- `stepConfirmed`：同一次读取的 `snapshot.steps[stepId].valid === true`。字段全为 confirmed
+  不等于整步确认；上游变化导致整步失效时返回 false。
+- `stepReady`：`requiredComplete && !stepConfirmed`，用于决定是否展示待确认卡；不是自动推进许可。
+- `needsLookFieldIds`：按 schema 顺序，仅当前步骤、非空、未 confirmed/deferred、非 `source=user` 的字段，
+  满足 `basis=agent_proposal`（meta 优先于 value）、`status=provisional`，
+  或已知 `source=capture` 且 `status=unclear`。包含可选字段。
+  用户手填或已采纳为用户值的字段不标记；旧草稿缺少来源时，provisional 保守标记待看。
+  整步已确认返回空列表。待采纳 suggestion 不当成当前值，不在这里自动采纳。
+
+前端从同一响应的 information 取字段标题和值，渲染聊天确认卡；本接口不返回模型生成的卡片。
+本次保留 turn/stream 的现有协议，稳定信号位于读取接口。每轮整理完成后及保存、采纳、
+确认、上游修改后重新读取；整理尚未落库或本地还有未保存编辑时，不用旧信号提交确认。
+沿用既有整步确认流程：可见快照、字段保存版本和前置步骤版本仍须验证，信号不绕过任何校验。
+
+导师收到 `hostTurnContext.confirmation`，结构与上述单步对象完全一致，但来自
+`opc_step_material` 后冻结的当前回合内容及 valid，而非稍早读取或客户端传值。
+它是入场时状态，不是整理完成后的最新状态。旧冻结执行可无此字段，照原执行重放；
+新回合始终计算它，旧草稿无需升级。宿主 16,000 字节、提示词 8,000 字符和原计费预算不变。
+
+齐全未确认时，导师简短总结本步、提示待看字段并请求点击聊天确认卡；
+“继续／下一步／没问题／好的”等文字均不能确认，也不展开后续步骤工作。
+用户主动提到后续信息仍照常回应和整理。模型与整理器没有整步确认权限。
