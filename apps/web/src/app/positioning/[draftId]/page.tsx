@@ -24,7 +24,7 @@ import { focusChecklistField, StepConfirmCard } from "@/components/opc/step-conf
 import { cardStatus, editedValue, fieldMeta, focusField, type StepInformation } from "@/components/opc/capture-state";
 import { reviewedStep, useStepConfirmation } from "@/hooks/use-step-confirmation";
 import { useCaptureResolve } from "@/hooks/use-capture-resolve";
-import { MessageMarkdown } from "@/components/chat/MessageMarkdown";
+import { MentorMarkdown } from "./MentorMarkdown";
 import { ChatInlineNotice, ChatNoticeList, ChatPendingStatus } from "@/components/chat/ChatInlineNotice";
 import { useMentorLogScroll } from "./use-mentor-log-scroll";
 import { mentorTailNotices, mentorTurnNotice, RETRY_PENDING_NOTICE, turnNeedsRetry } from "./mentor-notices";
@@ -1323,7 +1323,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
                           )}
                           {reply.text && <div data-message-role="assistant" className="mr-4 rounded-xl border border-[var(--border-primary)] p-3">
                             <span className={resultStyles.agentIdentity}><img src="/graylum-logo.png" alt=""/>{openingTurn ? "导师主动引导" : "导师"}{turnLabel}</span>
-                            <MessageMarkdown className={`mt-1 ${resultStyles.messageBody}`} text={reply.text} streaming={Boolean(live)}/>
+                            <MentorMarkdown className={`mt-1 ${resultStyles.messageBody}`} text={reply.text} live={Boolean(live)} result={execution}/>
                           </div>}
                           {/* Answered: gone. Open: docked. Folded: one line. */reply.card && !status.answered && foldedCard === execution.executionId
                             && <OpenQuestionRecord card={reply.card} onShow={() => setFoldedCard("")}/>}
@@ -1338,7 +1338,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
                       <span>你 · {steps.find(candidate => candidate.id === pendingBubble.stepId)?.title}</span>
                       <p className={`whitespace-pre-wrap ${resultStyles.messageBody}`}>
                         {shownInput(pendingBubble.input)}</p><ChatPendingStatus sending={running}/></div>}
-                  {liveOnly&&(liveOnly.text||!liveOnly.card)&&<div data-message-role="assistant" aria-label="导师正在回复" className="mr-4 rounded-xl border border-[var(--border-primary)] p-3"><span className={resultStyles.agentIdentity}><img src="/graylum-logo.png" alt=""/>导师</span>{liveOnly.text?<MessageMarkdown className={`mt-1 ${resultStyles.messageBody}`} text={liveOnly.text} streaming/>:<p className={`mt-1 ${resultStyles.messageBody}`}>导师正在思考…</p>}</div>}
+                  {liveOnly&&(liveOnly.text||!liveOnly.card)&&<div data-message-role="assistant" aria-label="导师正在回复" className="mr-4 rounded-xl border border-[var(--border-primary)] p-3"><span className={resultStyles.agentIdentity}><img src="/graylum-logo.png" alt=""/>导师</span>{liveOnly.text?<MentorMarkdown className={`mt-1 ${resultStyles.messageBody}`} text={liveOnly.text} live/>:<p className={`mt-1 ${resultStyles.messageBody}`}>导师正在思考…</p>}</div>}
                   <ChatNoticeList notices={[...payg.blockedNotices(mentorExecutions, busy),
                     nudgeNotice(nudged, () => void ask(step, checklistUpdatedInput(nudged)), sendLocked, hasPendingStepRequest),
                     ...mentorTailNotices({ livePhase: live.phase, stop: live.stopAction,
