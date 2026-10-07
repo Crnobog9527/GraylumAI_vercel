@@ -1,12 +1,12 @@
 'use client';
 
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { trpc } from '@/trpc/client';
 import { createClient } from '@/lib/supabase';
 import { CAPTCHA_EXPIRED_MESSAGE, captchaOptionsFromToken } from '@/lib/dialogCaptcha';
 import { describeErasureError, isAccountClosedError, type AccountErasurePreview } from '@/lib/account-erasure';
 import {
-  ERASURE_PROGRESS_PATH, parseProgressCredential, saveErasureHandoff, type ErasureHandoff,
+  ERASURE_PROGRESS_PATH, parseProgressCredential, saveErasureHandoff, setErasureHandoffActive, type ErasureHandoff,
 } from '@/lib/erasure-progress';
 
 export type ErasureStep = 'impact' | 'verify' | 'confirm' | 'done';
@@ -25,6 +25,7 @@ export function useAccountErasure(options: { email?: string; usesPassword: boole
   const [handoffStored, setHandoffStored] = useState(true);
   const confirming = useRef(false);
   const terminal = useRef(false);
+  useEffect(() => () => setErasureHandoffActive(false), []);
   const requestId = useRef<string | null>(null);
   const preview = trpc.account.erasurePreview.useQuery(undefined, { enabled: open && step !== 'done', staleTime: 0 });
   const confirmMutation = trpc.account.erasureConfirm.useMutation({ retry: false, gcTime: 0 });
@@ -88,6 +89,7 @@ export function useAccountErasure(options: { email?: string; usesPassword: boole
   const confirm = async () => {
     if (confirming.current || terminal.current) return;
     confirming.current = true;
+    setErasureHandoffActive(true);
     await run(async () => {
       let next: ErasureHandoff;
       try {
@@ -96,7 +98,9 @@ export function useAccountErasure(options: { email?: string; usesPassword: boole
         next = { closed: true, credential: parseProgressCredential(`${result.requestId}.${result.progressToken ?? ''}`) };
       } catch (confirmError) {
         const code = (confirmError as { data?: { code?: string } } | null)?.data?.code;
-        if (!isAccountClosedError(confirmError) && code && ['BAD_REQUEST', 'UNAUTHORIZED', 'FORBIDDEN', 'TOO_MANY_REQUESTS'].includes(code)) {
+        const refused = code && ['BAD_REQUEST', 'UNAUTHORIZED', 'FORBIDDEN', 'TOO_MANY_REQUESTS', 'PRECONDITION_FAILED'].includes(code);
+        if (!isAccountClosedError(confirmError) && refused) {
+          setErasureHandoffActive(false);
           setError(describeErasureError(confirmError));
           return;
         }

@@ -3,6 +3,10 @@ import { z } from 'zod';
 
 export const ERASURE_PROGRESS_PATH = '/account-erasure';
 const SESSION_KEY = 'graylum:erasure-progress';
+// Navigation hold only, not an auth/session grant. It also works when sessionStorage is denied.
+let handoffActive = false;
+export const isErasureHandoffActive = () => handoffActive;
+export function setErasureHandoffActive(active: boolean) { handoffActive = active; }
 const credentialSchema = z.object({
   requestId: z.string().uuid(), token: z.string().regex(/^[A-Za-z0-9_-]{43}$/),
 }).strict();

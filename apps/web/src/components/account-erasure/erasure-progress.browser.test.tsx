@@ -20,16 +20,15 @@ beforeAll(async () => {
   const src = fileURLToPath(new URL('../../', import.meta.url));
   const transport = `async function call(path,input){const response=await fetch(path,{method:'POST',body:JSON.stringify(input)});
     const data=await response.json();if(!response.ok)throw data;return data;}
-    const mutation=()=>({mutateAsync:input=>call('/confirm',input),reset:()=>{}});
-    export const trpc={account:{erasurePreview:{useQuery:()=>({data:{credits:0,subscriptionRenewing:false,
-      subscriptionActiveUntil:null,pendingPayments:0,runsInFlight:0,closed:false}})},erasureConfirm:{useMutation:mutation}},
-      payments:{createCustomerPortalSession:{useMutation:()=>({mutateAsync:()=>{throw Error('forbidden portal')}})}}};
     export const createClient=()=>({auth:{signInWithPassword:async()=>({error:null}),
+      getSession:async()=>({data:{session:null}}),getUser:()=>call('/auth-check',{}),
+      refreshSession:async()=>({data:{session:null},error:null}),
+      onAuthStateChange:()=>({data:{subscription:{unsubscribe:()=>{}}}}),
       signOut:()=>call('/signout',{})}});`;
   const bundle = await build({
     configFile: false, logLevel: 'silent', define: { 'process.env.NODE_ENV': JSON.stringify('development'), 'process.env.NEXT_PUBLIC_HCAPTCHA_SITEKEY': JSON.stringify('synthetic') },
     oxc: { jsx: { runtime: 'automatic' } },
-    resolve: { alias: { '@/trpc/client': '\0erasure-mocks', '@/lib/supabase': '\0erasure-mocks',
+    resolve: { alias: { '@/lib/supabase': '\0erasure-mocks',
       '@/components/auth/DialogCaptcha': '\0erasure-captcha', '@': src } },
     plugins: [{ name: 'erasure-ui-fixture', enforce: 'pre',
       resolveId(id: string) { if (id === entry || id.startsWith('\0erasure-')) return id; },
@@ -42,8 +41,11 @@ beforeAll(async () => {
           import '@/app/globals.css';
           import {AccountErasureCard} from '@/components/profile/AccountErasureCard';
           import {ErasureProgressPage} from '@/components/account-erasure/ErasureProgressPage';
-          createRoot(document.getElementById('root')).render(location.pathname==='/profile'
-            ? <AccountErasureCard user={{email:'synthetic@example.invalid'}}/> : <ErasureProgressPage/>);`;
+          import Provider from '@/trpc/provider';import {trpc} from '@/trpc/client';
+          function App(){const [reject,setReject]=React.useState(false);window.rejectAdjacent=()=>setReject(true);
+            const adjacent=trpc.user.getUserProfile.useQuery(undefined,{enabled:reject,retry:false});
+            return <><output hidden id="adjacent-state">{adjacent.status}</output>{location.pathname==='/profile' ? <AccountErasureCard user={{email:'synthetic@example.invalid'}}/> : <ErasureProgressPage/>}</>;}
+          createRoot(document.getElementById('root')).render(<Provider><App/></Provider>);`;
       },
     }],
     build: { write: false, minify: false, cssCodeSplit: false, lib: { entry, name: 'ErasureUiTest', formats: ['iife'] } },
@@ -58,10 +60,12 @@ beforeAll(async () => {
 }, 30000);
 afterAll(async () => { await browser?.close(); });
 
-async function fixture(options: { width?: number; confirm?: 'missing' | 'unknown' | 'closed' | 'denied'; storageDenied?: boolean; signoutFails?: boolean } = {}) {
+async function fixture(options: { width?: number; confirm?: 'missing' | 'unknown' | 'closed' | 'denied' | 'renewing'; storageDenied?: boolean; signoutFails?: boolean; holdAuth?: boolean; holdConfirm?: boolean } = {}) {
   const requests: { path: string; method: string; body: unknown; cookie?: string; authorization?: string }[] = [];
   let stage = 'closed', errorCode = '', hold = false;
   const pending: ServerResponse[] = [];
+  const authPending: ServerResponse[] = [];
+  const confirmPending: (() => void)[] = [];
   const view = () => ({ stage, confirmedAt: '2026-10-08T00:00:00Z', updatedAt: '2026-10-08T01:00:00Z',
     needsReview: stage === 'billing_pending' });
   const respond = (response: ServerResponse) => {
@@ -74,6 +78,7 @@ async function fixture(options: { width?: number; confirm?: 'missing' | 'unknown
   };
   const server = createServer(async (request, response) => {
     const path = request.url ?? '';
+    const pathname = new URL(path, 'http://fixture.invalid').pathname;
     response.setHeader('Cache-Control', 'no-store');
     if (path === '/profile' || path === '/account-erasure') {
       response.setHeader('Content-Type', 'text/html; charset=utf-8');
@@ -88,15 +93,31 @@ async function fixture(options: { width?: number; confirm?: 'missing' | 'unknown
     requests.push({ path, method: request.method ?? '', body: input ? JSON.parse(input) : null,
       cookie: request.headers.cookie, authorization: request.headers.authorization });
     response.setHeader('Content-Type', 'application/json');
-    if (path === '/confirm') {
-      if (options.confirm === 'denied') { response.statusCode = 400;
-        response.end(JSON.stringify({ message: 'ACCOUNT_ERASURE_REAUTH_REQUIRED', data: { code: 'BAD_REQUEST' } })); return; }
-      if (options.confirm === 'unknown' || options.confirm === 'closed') {
-        response.statusCode = 500;
-        response.end(JSON.stringify(options.confirm === 'closed' ? { message: 'ACCOUNT_CLOSED' } : { message: 'lost response' }));
-      } else response.end(JSON.stringify({ requestId, progressToken: options.confirm === 'missing' ? null : token }));
-      return;
+    if (pathname.startsWith('/api/trpc/')) {
+      const batch = path.includes('batch=1');
+      const send = (data: unknown) => response.end(JSON.stringify(batch ? [data] : data));
+      const fail = (code: string, message: string, httpStatus: number) => {
+        response.statusCode = httpStatus;
+        send({ error: { message, code: -32001, data: { code, httpStatus, path: pathname.slice(10) } } });
+      };
+      if (pathname === '/api/trpc/account.erasurePreview') {
+        send({ result: { data: { credits: 0, subscriptionRenewing: false, subscriptionActiveUntil: null,
+          pendingPayments: 0, runsInFlight: 0, closed: false } } }); return;
+      }
+      if (pathname === '/api/trpc/account.erasureConfirm') {
+        if (options.confirm === 'denied') fail('BAD_REQUEST', 'ACCOUNT_ERASURE_REAUTH_REQUIRED', 400);
+        else if (options.confirm === 'renewing') fail('PRECONDITION_FAILED', 'ACCOUNT_ERASURE_SUBSCRIPTION_RENEWING', 412);
+        else if (options.confirm === 'unknown') fail('INTERNAL_SERVER_ERROR', 'lost response', 500);
+        else if (options.confirm === 'closed') fail('FORBIDDEN', 'ACCOUNT_CLOSED', 403);
+        else { const finish = () => send({ result: { data: { requestId, progressToken: options.confirm === 'missing' ? null : token } } });
+          if (options.holdConfirm) confirmPending.push(finish); else finish(); }
+        return;
+      }
+      if (pathname === '/api/trpc/user.getUserProfile') { fail('UNAUTHORIZED', 'Login required', 401); return; }
     }
+    if (path === '/auth-check') {
+      if (options.holdAuth) authPending.push(response); else response.end(JSON.stringify({ data: { user: null } }));
+      return; }
     if (path === '/signout') { response.end(JSON.stringify({ error: options.signoutFails ? { message: 'synthetic failure' } : null })); return; }
     if (path === '/api/trpc/account.erasureProgress') {
       if (hold) pending.push(response); else respond(response);
@@ -124,20 +145,22 @@ async function fixture(options: { width?: number; confirm?: 'missing' | 'unknown
   page.on('pageerror', error => logs.push(error.message));
   return { page, context, requests, logs, unexpected, origin,
     setStage: (value: string) => { stage = value; }, setError: (value: string) => { errorCode = value; },
+    releaseAuth: () => authPending.splice(0).forEach(response => response.end(JSON.stringify({ data: { user: null } }))),
+    releaseConfirm: () => confirmPending.splice(0).forEach(finish => finish()),
     hold: () => { hold = true; }, release: () => { hold = false; pending.splice(0).forEach(respond); },
     close: async () => { await context.close(); server.closeAllConnections();
       await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve())); },
   };
 }
 
-async function confirm(page: Page, origin: string) {
+async function confirm(page: Page, origin: string, submit = true) {
   await page.goto(`${origin}/profile`);
   await page.getByRole('button', { name: '注销账号', exact: true }).click();
   await page.getByRole('button', { name: '继续', exact: true }).click();
   await page.getByLabel('当前密码', { exact: true }).fill('synthetic-only');
   await page.getByRole('button', { name: '验证身份', exact: true }).click();
   await page.getByRole('checkbox').check();
-  await page.getByRole('button', { name: '确认注销', exact: true }).click();
+  if (submit) await page.getByRole('button', { name: '确认注销', exact: true }).click();
 }
 
 it('offers copy/download before signout, restores after real reload and queries every stage by credential-only POST', async () => {
@@ -170,7 +193,7 @@ it('offers copy/download before signout, restores after real reload and queries 
     expect(queries).toHaveLength(4);
     for (const request of queries) expect(request).toEqual({ path: '/api/trpc/account.erasureProgress', method: 'POST',
       body: { requestId, token }, cookie: undefined, authorization: undefined });
-    expect(f.requests.filter(r => r.path === '/confirm')).toHaveLength(1);
+    expect(f.requests.filter(r => r.path.startsWith('/api/trpc/account.erasureConfirm'))).toHaveLength(1);
     expect(f.requests.filter(r => r.path === '/signout')).toHaveLength(1);
     expect(await f.page.evaluate(() => localStorage.length)).toBe(0);
     expect(f.page.url()).toBe(`${f.origin}/account-erasure`);
@@ -234,7 +257,7 @@ for (const mode of ['missing', 'unknown', 'closed'] as const) it(`does not re-co
     await ui(f.page.getByRole('heading', { name: '注销进度', exact: true })).toBeVisible();
     await f.page.reload();
     await ui(f.page.getByText('当前无法查询进度。', { exact: false }).first()).toBeVisible();
-    expect(f.requests.filter(r => r.path === '/confirm')).toHaveLength(1);
+    expect(f.requests.filter(r => r.path.startsWith('/api/trpc/account.erasureConfirm'))).toHaveLength(1);
     expect(f.requests.filter(r => r.path.includes('erasureProgress'))).toHaveLength(0);
   } finally { await f.close(); }
 }, 20000);
@@ -248,6 +271,14 @@ it('retains the returned credential on storage failure and offers manual copy on
     await confirm(f.page, f.origin);
     await ui(f.page.getByLabel('查询凭证', { exact: true })).toHaveValue(credential);
     await ui(f.page.getByRole('alert')).toContainText('无法保存会话副本');
+    await f.page.evaluate(() => (window as unknown as { rejectAdjacent: () => void }).rejectAdjacent());
+    await ui.poll(() => f.requests.filter(r => r.path.includes('user.getUserProfile')).length).toBe(1);
+    await ui(f.page.locator('#adjacent-state')).toHaveText('error');
+    await f.page.waitForLoadState('networkidle');
+    // A fresh 401 passes through the actual Provider while only memory holds the bearer.
+    await ui(f.page.getByLabel('查询凭证', { exact: true })).toHaveValue(credential);
+    expect(f.page.url()).toBe(`${f.origin}/profile`);
+    expect(f.requests.filter(r => r.path === '/auth-check')).toHaveLength(0);
     await f.page.getByRole('button', { name: '复制凭证', exact: true }).click();
     await ui(f.page.getByText('无法自动复制，请选中上方完整凭证手动复制。')).toBeVisible();
     expect(f.requests.filter(r => r.path === '/signout')).toHaveLength(0);
@@ -257,14 +288,16 @@ it('retains the returned credential on storage failure and offers manual copy on
 }, 20000);
 
 
-it('keeps a definite pre-confirmation refusal on the confirmation screen without claiming closure', async () => {
-  const f = await fixture({ confirm: 'denied' });
+for (const refusal of ['denied', 'renewing'] as const) it(`keeps definite ${refusal} refusal without claiming closure`, async () => {
+  const f = await fixture({ confirm: refusal });
   try {
     await confirm(f.page, f.origin);
-    await ui(f.page.getByRole('alert')).toContainText('重新验证');
+    await ui(f.page.getByRole('alert')).toContainText(refusal === 'denied' ? '重新验证' : '取消自动续费');
     await ui(f.page.getByRole('button', { name: '确认注销', exact: true })).toBeVisible();
     expect(f.requests.filter(r => r.path === '/signout')).toHaveLength(0);
     expect(await f.page.evaluate(() => sessionStorage.getItem('graylum:erasure-progress'))).toBeNull();
+    await f.page.evaluate(() => (window as unknown as { rejectAdjacent: () => void }).rejectAdjacent());
+    await f.page.waitForURL('**/login?**');
   } finally { await f.close(); }
 }, 20000);
 
@@ -276,7 +309,28 @@ it('keeps the credential available when local signout fails and never resubmits 
     await f.page.getByRole('button', { name: '退出登录并查看进度' }).click();
     await ui(f.page.getByRole('alert')).toContainText('未能退出本机登录');
     await ui(f.page.getByLabel('查询凭证', { exact: true })).toHaveValue(credential);
-    expect(f.requests.filter(r => r.path === '/confirm')).toHaveLength(1);
+    expect(f.requests.filter(r => r.path.startsWith('/api/trpc/account.erasureConfirm'))).toHaveLength(1);
     expect(f.page.url()).toBe(`${f.origin}/profile`);
+  } finally { await f.close(); }
+}, 20000);
+
+
+it('holds an already-running 401 lookup while confirmation is pending and preserves the bearer on receipt', async () => {
+  const f = await fixture({ storageDenied: true, holdAuth: true, holdConfirm: true });
+  try {
+    await confirm(f.page, f.origin, false);
+    await f.page.evaluate(() => (window as unknown as { rejectAdjacent: () => void }).rejectAdjacent());
+    await ui.poll(() => f.requests.filter(r => r.path === '/auth-check').length).toBe(1);
+    await f.page.getByRole('button', { name: '确认注销', exact: true }).click();
+    await ui.poll(() => f.requests.filter(r => r.path.includes('account.erasureConfirm')).length).toBe(1);
+    f.releaseAuth();
+    // The confirmation HTTP response remains withheld while Auth has already denied the old session.
+    await ui(f.page.getByRole('button', { name: '确认注销', exact: true })).toBeDisabled();
+    f.releaseConfirm();
+    await ui(f.page.getByLabel('查询凭证', { exact: true })).toHaveValue(credential);
+    await f.page.waitForLoadState('networkidle');
+    expect(f.page.url()).toBe(`${f.origin}/profile`);
+    expect(f.requests.filter(r => r.path.includes('account.erasureConfirm'))).toHaveLength(1);
+    expect(f.requests.filter(r => r.path === '/signout')).toHaveLength(0);
   } finally { await f.close(); }
 }, 20000);
