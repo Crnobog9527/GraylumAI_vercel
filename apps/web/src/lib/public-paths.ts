@@ -1,6 +1,7 @@
 // Paths anyone may open without logging in. Shared by the proxy (server) and the client-side
 // 401 recovery, which must never send a visitor on one of these pages to the login page.
 export const PUBLIC_PATHS = [
+  '/account-erasure',
   '/login',
   '/register',
   '/verify-email',

@@ -12,9 +12,14 @@ import {buildFromFiles,installPgCronStub} from '../baseline/build-from-files.mjs
 import {runCases} from './cases.mjs';
 import {runService} from './service-cases.mjs';
 import {runConcurrency} from './concurrency.mjs';
+import {seedUpgrade,verifyUpgrade} from '../pay-erasure-integration/upgrade.mjs';
+import {runCombined} from '../pay-erasure-integration/combined.mjs';
 
-const development=process.argv.slice(2).join(' ')==='--local-only --development';
-if ((!development && process.argv.slice(2).join(' ') !== '--local-only') || process.env.CI) throw new Error('Require --local-only');
+const args=process.argv.slice(2).join(' ');
+const modes=['--local-only','--local-only --development','--local-only --from-0186','--local-only --from-0186 --development'];
+if(!modes.includes(args)||process.env.CI)throw new Error('Require explicit local-only mode');
+const integrated=args.includes('--from-0186');
+const development=args.endsWith('--development');
 const root=resolve(import.meta.dirname,'../../../..');
 const read=path=>readFileSync(resolve(root,path),'utf8');
 const run=(cmd,args,input)=>spawnSync(cmd,args,{input,encoding:'utf8',cwd:root,
@@ -30,7 +35,7 @@ const sql=input=>docker(['exec','-i',name,'psql','-X','-qAt','-U','postgres','-d
 const fp=read('packages/db/tests/baseline/fingerprint.sql');
 const objectSql=fp.slice(0,fp.indexOf('-- FINAL'))+'SELECT jsonb_object_agg(k,d ORDER BY k) FROM grouped;';
 const snapshot=()=>JSON.parse(ok(sql(objectSql)));
-const report={development,build:null,checks:[],failed:null};
+const report={development,integrated,build:null,checks:[],failed:null};
 let client;let compiled;
 try {
  ok(docker(['run','-d','--pull=never','--name',name,'-p','127.0.0.1::5432',
@@ -43,12 +48,15 @@ try {
  assert.ok(ready,'local postgres ready');
  installPgCronStub(root,name,(argv,input)=>ok(docker(['exec',...argv],input)));
  const outcome=r=>({ok:r.status===0&&!r.error,error:r.stderr});
- let before;let rolled=false;
+ let before;let rolled=false;let seeded;
  const additions=['0193_monthly_refund_transactions.sql','0194_monthly_refund_recovery.sql','0195_monthly_refund_shared_guards.sql'];
  report.build=buildFromFiles(root,{applyFile:path=>{
   if(path.endsWith('/'+additions[0])&&!before)before=snapshot();
   const applied=sql(read(path));
-  if(applied.status===0&&path.endsWith('/'+additions.at(-1))&&!rolled){
+  if(integrated&&applied.status===0&&path.includes('/0186_')&&!seeded){
+   seeded=seedUpgrade({sql:input=>ok(sql(input)),read,snapshot,report});
+  }
+  if(!integrated&&applied.status===0&&path.endsWith('/'+additions.at(-1))&&!rolled){
    const once=snapshot();ok(sql(read('packages/db/tests/monthly-refund/rollback.sql')));
    assert.deepEqual(snapshot(),before,'empty monthly rollback restores inherited deletion stack');
    for(const name of additions)ok(sql(read('packages/db/migrations/'+name)));
@@ -65,7 +73,11 @@ try {
  const address=ok(docker(['port',name,'5432/tcp']));assert.match(address,/^127\.0\.0\.1:\d+$/);
  const connectionString=`postgres://postgres@${address}/b2a`;
  client=new Client({connectionString});await client.connect();
- await client.query(read('packages/db/tests/monthly-refund/fixture.sql'));
+ if(integrated){
+  assert.ok(seeded,'0186 seed reached');
+  await verifyUpgrade({db:client,before:seeded,sql:input=>ok(sql(input)),snapshot,
+   built:JSON.parse(read('packages/db/tests/baseline/built-fingerprint.json')),report});
+ }else await client.query(read('packages/db/tests/monthly-refund/fixture.sql'));
  await runCases({db:client,Client,connectionString,report});
  await runConcurrency({db:client,Client,connectionString,report});
  const ts=require('typescript');compiled=mkdtempSync(resolve(root,'packages/api/.monthly-refund-test-'));
@@ -89,6 +101,11 @@ try {
  const service=await import(pathToFileURL(compile(resolve(root,'packages/api/src/services/payments/monthlyRefundService.ts'))).href);
  const webhook=await import(pathToFileURL(compile(resolve(root,'packages/api/src/services/payments/monthlyRefundWebhook.ts'))).href);
  await runService({db:client,service,webhook,report});
+ if(integrated){
+  const module=async name=>import(pathToFileURL(compile(resolve(root,'packages/api/src/services/accountErasure/'+name+'.ts'))).href);
+  await runCombined({db:client,service,webhook,report,require,ts,run,root,
+   ...(await module('processor')),...(await module('storage')),...(await module('storageTransport')),...(await module('authAdapter'))});
+ }
  const unsafe=sql(read('packages/db/tests/monthly-refund/rollback.sql'));
  assert.notEqual(unsafe.status,0);assert.match(unsafe.stderr,/PAY_MONTHLY_ROLLBACK_REQUIRES_FORWARD_FIX/);
  report.checks.push('any original approval blocks rollback; forward recovery required');

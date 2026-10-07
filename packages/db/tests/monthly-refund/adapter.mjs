@@ -17,7 +17,8 @@ export function transport(client) {
    const filters=[],values=[];let selected='id',offset=0,limit=2001,single=false;
    const run=async()=>{
     try {
-     const selection=selected.split(',').map(raw=>{
+     const selection=selected.split(',').map(value=>{
+      const raw=value.trim();
       const [alias,path]=raw.includes(':')?raw.split(':'):[raw,raw];return col(path)+' as '+id(alias);
      }).join(',');
      const result=await client.query(`select row_to_json(t) row from (select ${selection} from public.${id(table)} ${filters.length?'where '+filters.join(' and '):''}) t`,values);

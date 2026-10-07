@@ -39,9 +39,16 @@ describe('proxy login requirement by host', () => {
   });
 
   it('keeps public pages open on the staging domain', async () => {
-    for (const path of ['/login', '/verify-email', '/landing', '/forgot-password', '/reset-password']) {
+    for (const path of ['/account-erasure', '/login', '/verify-email', '/landing', '/forgot-password', '/reset-password']) {
       expect((await get(`https://auth-staging.graylum.com${path}`)).status).toBe(200);
     }
+  });
+
+  it('opens progress without a verified login but keeps similarly named private paths protected', async () => {
+    getUser.mockResolvedValue({ data: { user: { email: 'synthetic@example.invalid', email_confirmed_at: null } } });
+    expect(await get('https://auth-staging.graylum.com/account-erasure')).toEqual({ status: 200, location: null });
+    getUser.mockResolvedValue({ data: { user: null } });
+    expect((await get('https://auth-staging.graylum.com/account-erasure-admin')).status).toBe(307);
   });
 
   it('lets a signed-in user open the reset pages instead of bouncing them like the login page', async () => {
