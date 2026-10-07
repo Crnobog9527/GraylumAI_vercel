@@ -2,10 +2,10 @@
 import { createElement, isValidElement, type ReactElement, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
-import { confirmCardModel, readStepSignal, StepConfirmCard, type StepConfirmCardProps } from "./step-confirm-card";
+import { CARD_SETTLE_MS, confirmCardModel, readStepSignal, shownLongEnough, StepConfirmCard, type StepConfirmCardProps } from "./step-confirm-card";
 import { stepConfirmation } from "../../../../../packages/api/src/shared/opcStepConfirmation";
 import { savedRead } from "@/app/positioning/[draftId]/information-autosave";
-import { fieldOrigin, fieldStateLabel, needsLook, type FieldValue, type StepInformation } from "./capture-state";
+import { fieldOrigin, fieldStateLabel, needsLook, sameVisibleStep, visibleStep, type FieldValue, type StepInformation } from "./capture-state";
 
 const v = (value: string, status: FieldValue["status"] = "provisional"): FieldValue => ({ value, status, nature: "decision" });
 const info = (): StepInformation => ({
@@ -81,11 +81,17 @@ function clickables(node: ReactNode): Array<{ label: string; click: () => void; 
   return [...own, ...clickables(element.props.children)];
 }
 function props(extra: Partial<StepConfirmCardProps> = {}): StepConfirmCardProps {
-  return { title: "了解你", info: info(), resuming: false, disabled: false, canConfirm: true,
+  return { stepId: "step-1", title: "了解你", info: info(), resuming: false, disabled: false, canConfirm: true,
     onConfirm: vi.fn(), onEdit: vi.fn(), onReview: vi.fn(), ...extra };
 }
 const html = (p: StepConfirmCardProps) => renderToStaticMarkup(createElement(StepConfirmCard, p));
-const button = (p: StepConfirmCardProps, label: string) => clickables(StepConfirmCard(p)).find(item => item.label === label);
+/** The card's element tree, captured inside a real render so its hooks run. */
+function tree(p: StepConfirmCardProps): ReactNode {
+  let captured: ReactNode = null;
+  renderToStaticMarkup(createElement(() => (captured = StepConfirmCard(p))));
+  return captured;
+}
+const button = (p: StepConfirmCardProps, label: string) => clickables(tree(p)).find(item => item.label === label);
 
 describe("StepConfirmCard", () => {
   it("is one card with the values, the items to look at, and one click to confirm", () => {
@@ -196,5 +202,23 @@ describe("a signal older than the cached values", () => {
     expect(button(props({ signal: { stale: true } }), "没问题，进入下一步")!.disabled).toBe(true);
     // A read without signals (an older server) keeps the local rules.
     expect(savedRead({ information: { s1: i }, snapshot: { steps: { s1: { version: 3 } } } }, "s1", i.values!, 4)).not.toHaveProperty("stepConfirmation");
+  });
+});
+
+describe("one click only after the content has been on screen (A5)", () => {
+  it("is refused when the card changed or the tab became visible moments before the click", () => {
+    // Tab Y saved a new value; returning to tab X refetched the read a moment later, so X's card changed
+    // right before the click. The click must open the review, not confirm what the user had no time to see.
+    expect(shownLongEnough({ changedAt: 10_000, visibleAt: 0, now: 10_500 })).toBe(false);
+    expect(shownLongEnough({ changedAt: 0, visibleAt: 10_000, now: 10_500 })).toBe(false);
+    expect(shownLongEnough({ changedAt: 10_000, visibleAt: 9_000, now: 10_000 + CARD_SETTLE_MS })).toBe(true);
+  });
+  it("without the settle check, the stale-then-refreshed card would confirm the new value unseen", async () => {
+    // The click handler sees the refreshed props, and the server still has them: the snapshot comparison
+    // alone cannot tell that the user never looked at them.
+    const fresh = info(); fresh.values!.audience = v("周边2公里、偏好周六下午体验双人合作桌游");
+    const reviewed = visibleStep(fresh);
+    expect(sameVisibleStep(reviewed, visibleStep(fresh))).toBe(true);
+    expect(shownLongEnough({ changedAt: 1_000, visibleAt: 0, now: 1_300 })).toBe(false);
   });
 });

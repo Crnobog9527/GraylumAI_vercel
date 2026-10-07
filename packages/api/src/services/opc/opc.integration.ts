@@ -11401,3 +11401,81 @@ it.each([[0, 'paused'], [1, 'unknown structured 503'], [2, 'plain non-tRPC 503']
 it.each(['guidance403', 'video412', 'video412AbandonFails', 'materialRefusedOnRecovery'] as const)(
   "OPC: RATE-LIMIT /runtime definite 4xx refusal before admission ends or holds by what it proves (%s)",
   refusalCase => runtimeHoldCase('refusal', -1, refusalCase), 1200000);
+
+it('OPC: CONFIRM_CARD full-page cross-tab review, stable confirmation, saving and deferral', async () => {
+  const f = await mergedPositioningFixture(flow => {
+    flow.steps[1].information!.push({id:'missing',title:'待补充依据',required:true,profileKey:'missing',elicitation:'user_fact'});
+  });
+  await planFixtureModel(f.moduleId);
+  const d = await f.service.start({requestId:randomUUID(),registration:f.registration,mode:'mentor',businessName:'Confirmation preview'});
+  const {chromium,expect:ui} = await import('../../../../../apps/web/node_modules/@playwright/test');
+  const browser = await chromium.launch({executablePath:'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',headless:true});
+  const context = await browser.newContext({viewport:{width:1440,height:1000}});
+  await context.route('**/*',route=>['127.0.0.1','localhost'].includes(new URL(route.request().url()).hostname)?route.continue():route.abort());
+  const page = await context.newPage(); page.setDefaultTimeout(60000);
+  const path='/positioning/'+d.draftId;
+  const read=()=>f.service.read(d.draftId);
+  const card=page.getByRole('region',{name:'本步确认',exact:true});
+  const confirm=()=>card.getByRole('button',{name:'没问题，进入下一步',exact:true});
+  let releaseSave=()=>{};
+  try {
+    await page.goto(process.env.V3_LOCAL_APP+'/login?redirect='+encodeURIComponent(path));
+    await page.getByPlaceholder('name@example.com').fill(f.email);
+    await page.getByPlaceholder('输入你的密码').fill(f.password);
+    await page.getByRole('button',{name:'登录',exact:true}).last().click();
+    await page.waitForURL('**'+path);
+    await ui(page.getByRole('textbox',{name:'给导师的回复',exact:true})).toBeEnabled({timeout:30000});
+    for(const [id,value] of [['product','摄影课程'],['platforms','公众号'],['time','每周三小时']])
+      await page.locator('#step-0-'+id).fill(value);
+    await expect.poll(async()=>(await read()).information['step-0'].values.time?.value,{timeout:30000}).toBe('每周三小时');
+    await ui(confirm()).toBeEnabled();
+    const tab=await context.newPage();
+    await tab.goto(process.env.V3_LOCAL_APP+path);
+    await tab.locator('#step-0-product').fill('另一标签页保存的摄影课程');
+    await expect.poll(async()=>(await read()).information['step-0'].values.product?.value,{timeout:30000}).toBe('另一标签页保存的摄影课程');
+    await page.bringToFront();
+    await confirm().click();
+    const review=page.getByRole('dialog',{name:'核对并确认：需求确认'});
+    await ui(review).toBeVisible();
+    await ui(review.getByText(/内容刚刚有变化/)).toBeVisible();
+    await ui(review.getByLabel('核对：产品与服务')).toHaveValue('另一标签页保存的摄影课程');
+    expect((await read()).snapshot.steps['step-0'].valid).toBe(false);
+    await page.screenshot({path:process.env.V3_WORKBENCH_OUTPUT+'/confirm-card-A5.png'});
+    await review.getByRole('button',{name:'关闭核对'}).click();
+    // A7: hold an actual autosave; the full page must disable confirmation until its write/read completes.
+    const held=new Promise<void>(resolve=>{releaseSave=resolve;});
+    await page.route('**/api/trpc/opc.information*',async route=>{await held;await route.continue();});
+    await page.locator('#step-0-time').fill('每周四小时');
+    await ui(confirm()).toBeDisabled();
+    await ui(card.getByText('刚改过的内容正在保存和刷新，完成后就可以确认。')).toBeVisible();
+    releaseSave();
+    await expect.poll(async()=>(await read()).information['step-0'].values.time?.value,{timeout:30000}).toBe('每周四小时');
+    await page.unroute('**/api/trpc/opc.information*');
+    await ui(confirm()).toBeEnabled();
+    await ui(card).toContainText('每周四小时');
+    // A6: only the stabilized, visibly refreshed values may be confirmed.
+    await page.waitForTimeout(2100);
+    let writes=0;
+    page.on('request',request=>{if(request.url().includes('opc.information'))writes++;});
+    await confirm().click();
+    await expect.poll(async()=>(await read()).snapshot.steps['step-0'].valid,{timeout:30000}).toBe(true);
+    expect(writes).toBe(1);
+    expect((await read()).information['step-0'].values.product).toMatchObject({value:'另一标签页保存的摄影课程',status:'confirmed'});
+    await ui(page.getByRole('textbox',{name:'给导师的回复',exact:true})).toBeEnabled({timeout:30000});
+    await ui(card).toContainText('还差：');
+    // A8: the real review accepts a written deferral; no public finalization is performed.
+    await card.getByRole('button',{name:'暂时无法确定，写原因暂缓'}).click();
+    const nextReview=page.getByRole('dialog',{name:'核对并确认：竞品研究'});
+    await nextReview.getByRole('checkbox').nth(1).check();
+    await nextReview.getByLabel('核对：待补充依据').fill('需要后续补充真实资料');
+    await nextReview.getByRole('button',{name:'确认这一步',exact:true}).click();
+    await expect.poll(async()=>(await read()).information['step-1'].values.missing?.status,{timeout:30000}).toBe('deferred');
+    await expect.poll(async()=>(await read()).snapshot.steps['step-1'].valid,{timeout:30000}).toBe(true);
+    await ui(nextReview).not.toBeVisible();
+    await ui(page.getByRole('button',{name:'确认正式定位',exact:true})).toBeDisabled();
+    await page.screenshot({path:process.env.V3_WORKBENCH_OUTPUT+'/confirm-card-A8.png'});
+  } catch(error) {
+    await page.screenshot({path:process.env.V3_WORKBENCH_OUTPUT+'/confirm-card-failure.png'}).catch(()=>{});
+    throw error;
+  } finally {releaseSave();await browser.close();}
+},240000);
