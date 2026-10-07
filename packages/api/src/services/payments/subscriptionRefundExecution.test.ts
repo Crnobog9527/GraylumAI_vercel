@@ -210,6 +210,17 @@ describe('identity, lifecycle and missing-evidence refusal', () => {
     const f = stoppedFixture(); f.seen.checkedAt = checkedAt;
     expect(run(f)).toMatchObject({ kind: 'review_required', reason: 'fresh_observation_required' });
   });
+  it.each([
+    ['failed', 'cancel'], ['canceled', 'cancel'], ['pending', 'cancel'],
+    ['succeeded', 'restore_renewal'], ['pending', 'restore_renewal'],
+  ] as const)('rejects %s cash with an already started %s stage', (status, stage) => {
+    const f = refundFixture(status); record(f); f.intent.started[stage] = now;
+    expect(run(f)).toMatchObject({ kind: 'review_required', reason: 'stage_outcome_conflict' });
+  });
+  it.each(['cancel', 'restore_renewal'] as const)('requires persisted cash outcome before %s', stage => {
+    const f = refundFixture(stage === 'cancel' ? 'succeeded' : 'failed'); f.intent.started[stage] = now;
+    expect(run(f)).toMatchObject({ kind: 'review_required', reason: 'stage_outcome_conflict' });
+  });
   it('rejects inconsistent cancel and restoration stages', () => {
     const f = refundFixture(); f.intent.started.cancel = now; f.intent.started.restore_renewal = now;
     expect(run(f)).toMatchObject({ kind: 'review_required', reason: 'stage_order_invalid' });

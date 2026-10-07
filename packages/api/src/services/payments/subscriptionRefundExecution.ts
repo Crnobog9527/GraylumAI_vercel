@@ -144,6 +144,10 @@ function next(intent: MonthlyRefundIntent, seen: MonthlyRefundObservation, now: 
   if (refundTime(intent.claimedAt)! > observed || local.hold !== 'held') return review('claim_or_reservation_unresolved');
   if (refund && intent.started.refund === null) return review('refund_without_dispatch_identity');
   const recorded = intent.recordedRefund;
+  if (intent.started.cancel && recorded?.status !== 'succeeded'
+    || intent.started.restore_renewal && !['failed', 'canceled'].includes(recorded?.status ?? '')) {
+    return review('stage_outcome_conflict');
+  }
   if (recorded && (!refund || refund.id !== recorded.id)) return review('recorded_refund_missing_or_changed');
   if (recorded && ['succeeded', 'failed', 'canceled'].includes(recorded.status) && refund!.status !== recorded.status) {
     return review('terminal_refund_conflict');
