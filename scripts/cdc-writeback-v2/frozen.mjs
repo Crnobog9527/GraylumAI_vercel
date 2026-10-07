@@ -1,12 +1,13 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { readFileSync, mkdirSync, openSync, writeSync, fsyncSync, closeSync, existsSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, dirname } from 'node:path';
 import { assert, hash, measure } from './source.mjs';
 import { budgetState, openBudget } from './budget.mjs';
 
 export const pin = Object.freeze({
   manifestHash: '48f647dc033063b2933bb232ad1f019fb533e2daf25d7e48a1d528adfe517818',
   oldLedgerHash: 'df1c877d31897833398166c36edfb80ab55a44cffda3211e8f4d1c7a55ce165b',
+  casesHash: '8258d5753b4a8626a26234246c37e9e3a9cd3c94f24bf86ea4c96b7303b6f76f',
   specialHash: '9c29090a99ff60584c7265f5bfc5eceff7e71d9be334bcbe2527422d9e822c7e',
   settledNano: 1_283_921_128, heldNano: 6_337_000, newReserveNano: 1_639_811_000, count: 224,
 });
@@ -16,9 +17,10 @@ const digest = path => hash(readFileSync(path));
 const integer = n => Number.isSafeInteger(n) && n >= 0;
 
 // The injected pin is for synthetic tests; the CLI always uses the constant above.
-export function loadFrozen(directory, ledgerPath, expected = pin) {
+export function loadFrozen(directory, ledgerPath, expected = pin, casesPath = join(dirname(dirname(ledgerPath)), 'cases.json')) {
   assert(digest(join(directory, 'requests.manifest.json')) === expected.manifestHash, 'MANIFEST_CHANGED');
   assert(digest(join(directory, 'special12.json')) === expected.specialHash, 'SPECIAL_CHANGED');
+  assert(digest(casesPath) === expected.casesHash, 'CASES_CHANGED');
   const rawLedger = readFileSync(ledgerPath, 'utf8');
   assert(hash(rawLedger) === expected.oldLedgerHash && rawLedger.endsWith('\n'), 'OLD_LEDGER_CHANGED');
   const old = budgetState(rawLedger.trimEnd().split('\n').map(JSON.parse));
@@ -44,7 +46,7 @@ export function loadFrozen(directory, ledgerPath, expected = pin) {
   });
   assert(integer(sum) && sum === expected.newReserveNano &&
     sum + old.settledNano + old.heldNano <= 5_000_000_000, 'FROZEN_BUDGET');
-  return { requests, expected, directory, ledgerPath,
+  return { requests, expected, directory, ledgerPath, casesPath,
     carry: { settledNano: old.settledNano, heldNano: old.heldNano, sourceHash: expected.oldLedgerHash } };
 }
 
@@ -124,7 +126,12 @@ export async function executeBatch(frozen, batch, approval, executionHead, { pre
     const reservedTotal = frozen.requests.filter(r => allStarted.includes(r.batch)).reduce((sum, r) => sum + r.reserveNano, 0);
     assert(reservedTotal <= approval.newReserveNano, 'NEW_BUDGET_STOP');
     const responseHashes = [];
+    const checkGold = () => {
+      assert(digest(join(frozen.directory, 'special12.json')) === frozen.expected.specialHash, 'SPECIAL_CHANGED');
+      assert(digest(frozen.casesPath) === frozen.expected.casesHash, 'CASES_CHANGED');
+    };
     for (const row of selected) {
+      checkGold();
       assert(digest(frozen.ledgerPath) === frozen.expected.oldLedgerHash, 'OLD_LEDGER_CHANGED');
       assert(digest(join(frozen.directory, 'requests.manifest.json')) === frozen.expected.manifestHash &&
         digest(join(frozen.directory, row.id.replace('/', '-') + '.request.json')) === row.requestHash, 'REQUEST_CHANGED');
@@ -138,6 +145,7 @@ export async function executeBatch(frozen, batch, approval, executionHead, { pre
       budget.settle(row.id, cost);
       responseHashes.push(digest(responsePath));
     }
+    checkGold();
     durable(join(output, `${batch}.completed.json`), { ids: selected.map(r => r.id),
       responsesHash: hash(JSON.stringify(responseHashes)), ...budget.snapshot() });
     return { completed: selected.length, ...budget.snapshot() };

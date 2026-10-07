@@ -19,13 +19,13 @@ function fixture(t) {
   const rows = ['A/C001', 'B/C001', 'A/P01', 'B/P01'].map(id => ({ id, stage: id[0], slot: id.slice(2),
     group: id[2] === 'C' ? 'original100' : 'source12', bytes: Buffer.byteLength(raw), ...measure(raw, 'organizer') }));
   for (const row of rows) writeFileSync(join(dir, row.id.replace('/', '-') + '.request.json'), raw);
-  write('requests.manifest.json', rows); write('special12.json', []);
+  write('requests.manifest.json', rows); write('special12.json', []); write('cases.json', []);
   write('old.jsonl', { type: 'carry', settledNano: 1_283_921_128, heldNano: 6_337_000, sourceHash: 'c'.repeat(64) });
   const ledger = join(dir, 'old.jsonl');
-  const expected = { manifestHash: hash(readFileSync(join(dir, 'requests.manifest.json'))),
+  const expected = { casesHash: hash(readFileSync(join(dir, 'cases.json'))), manifestHash: hash(readFileSync(join(dir, 'requests.manifest.json'))),
     specialHash: hash(readFileSync(join(dir, 'special12.json'))), oldLedgerHash: hash(readFileSync(ledger)),
     count: 4, newReserveNano: rows.reduce((s, r) => s + r.reserveNano, 0), settledNano: 1_283_921_128, heldNano: 6_337_000 };
-  const frozen = loadFrozen(dir, ledger, expected);
+  const frozen = loadFrozen(dir, ledger, expected, join(dir, 'cases.json'));
   const approval = { authorized: true, manifestHash: expected.manifestHash, executionHead: head,
     evidenceUrl: 'https://github.com/Crnobog9527/GraylumAI_vercel/issues/716#issuecomment-123',
     newReserveNano: expected.newReserveNano, count: 4, totalCapNano: 5e9, unknownHeldNano: 6337000 };
@@ -116,7 +116,7 @@ test('preflight rejection never dispatches', async t => {
 test('manifest, per-request and special gold corruption cannot load', t => {
   for (const name of ['requests.manifest.json', 'A-C001.request.json', 'special12.json']) {
     const f = fixture(t); writeFileSync(join(f.dir, name), '{}');
-    strict.throws(() => loadFrozen(f.dir, f.ledger, f.expected));
+    strict.throws(() => loadFrozen(f.dir, f.ledger, f.expected, join(f.dir, 'cases.json')));
   }
 });
 
@@ -158,4 +158,20 @@ test('concurrent batch cannot take the journal while the first send is pending',
     preflight: async () => strict.fail('second preflight'), send: async () => strict.fail('second dispatch'),
   }), /EEXIST/);
   release(); await first;
+});
+
+
+test('original and special gold drift before send or during final response blocks completion', async t => {
+  for (const name of ['cases.json', 'special12.json']) for (const timing of ['preflight', 'response']) {
+    await t.test(`${name}/${timing}`, async t => {
+      const f = fixture(t); let sent = 0;
+      await strict.rejects(executeBatch(f.frozen, 'A100', f.approval, head, {
+        preflight: async () => { if (timing === 'preflight') f.write(name, ['changed']); },
+        send: async () => { sent++; if (timing === 'response') f.write(name, ['changed']); return good(); },
+      }), /CHANGED/);
+      strict.equal(sent, timing === 'preflight' ? 0 : 1);
+      strict.equal(existsSync(join(f.dir, 'execution/A100.completed.json')), false);
+      strict.equal(f.state().stopped, true);
+    });
+  }
 });
