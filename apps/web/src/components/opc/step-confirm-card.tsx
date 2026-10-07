@@ -56,6 +56,7 @@ export function confirmCardModel(info: StepInformation | undefined, edits?: Reco
 }
 
 export type StepConfirmCardProps = {
+  stepId: string;
   title: string;
   info: StepInformation | undefined;
   /** The step's unsaved local edits. */
@@ -106,11 +107,11 @@ function useShownSince(content: string) {
 }
 
 /** The one confirmation card of a step, pinned above the message box until the step is confirmed. */
-export function StepConfirmCard({ title, info, edits, signal, resuming, disabled, stays, canConfirm, onConfirm, onEdit, onReview }:
+export function StepConfirmCard({ stepId, title, info, edits, signal, resuming, disabled, stays, canConfirm, onConfirm, onEdit, onReview }:
   StepConfirmCardProps) {
   const model = confirmCardModel(info, edits, readStepSignal(signal));
   // The step is part of what is shown: switching steps restarts the wait even when the rows look the same.
-  const settled = useShownSince(JSON.stringify([title, model.rows.map(row => [row.id, row.text, row.state])]));
+  const settled = useShownSince(JSON.stringify([stepId, title, model.rows.map(row => [row.id, row.text, row.state])]));
   // Never confirm from a stale signal: wait for the edit to save and the read to refresh.
   const confirmNow = canConfirm && (resuming || model.current);
   // Nothing recorded yet: the conversation has just started, no card.

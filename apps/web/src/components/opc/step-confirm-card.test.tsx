@@ -81,7 +81,7 @@ function clickables(node: ReactNode): Array<{ label: string; click: () => void; 
   return [...own, ...clickables(element.props.children)];
 }
 function props(extra: Partial<StepConfirmCardProps> = {}): StepConfirmCardProps {
-  return { title: "了解你", info: info(), resuming: false, disabled: false, canConfirm: true,
+  return { stepId: "step-1", title: "了解你", info: info(), resuming: false, disabled: false, canConfirm: true,
     onConfirm: vi.fn(), onEdit: vi.fn(), onReview: vi.fn(), ...extra };
 }
 const html = (p: StepConfirmCardProps) => renderToStaticMarkup(createElement(StepConfirmCard, p));
