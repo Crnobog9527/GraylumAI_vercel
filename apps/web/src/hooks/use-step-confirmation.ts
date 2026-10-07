@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 "use client";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   isConfirmStepEnvelope, type ConfirmEnvelopeState, type ConfirmStepEnvelope, type Information,
 } from "@/app/positioning/[draftId]/confirm-envelope";
@@ -153,7 +153,8 @@ export function reviewedStep(review: { baseline: VisibleStep; edits: Record<stri
 /** `touched`: deferrals the user switched in this dialog; every other one follows the reviewed content. */
 /** `edits`: fields typed in this dialog, kept after their autosave clears the page's unsaved edits. */
 type Review = { stepId: string; baseline: VisibleStep; upstream: Record<string, number>; edits: Record<string, FieldValue>;
-  deferred: Set<string>; touched: Set<string>; problems: ReviewProblem[]; changed: boolean };
+  deferred: Set<string>; touched: Set<string>; problems: ReviewProblem[]; changed: boolean;
+  loading?: boolean; loadError?: boolean };
 
 /** Deferrals after the review baseline is refreshed: the new content's own, except the ones the user chose here. */
 export function refreshedDeferrals(baseline: VisibleStep, deferred: ReadonlySet<string>, touched: ReadonlySet<string>) {
@@ -171,6 +172,8 @@ export function refreshedDeferrals(baseline: VisibleStep, deferred: ReadonlySet<
  */
 export function useStepConfirmation(deps: StepConfirmationDeps) {
   const lock = useRef(false);
+  const reviewRead = useRef(0);
+  useEffect(() => () => { reviewRead.current++; }, [deps.draftId]);
   const [confirming, setConfirming] = useState(false);
   const [review, setReview] = useState<Review | null>(null);
   const key = (stepId: string) => confirmKey(deps.draftId, stepId);
@@ -245,7 +248,7 @@ export function useStepConfirmation(deps: StepConfirmationDeps) {
       return;
     }
     if (state.kind === "valid") { void guarded(step, async () => state.envelope); return; }
-    setReview(newReview(stepId, info, edits, stepStates));
+    loadReview(stepId, info, edits, stepStates);
   }
 
   /** The review of exactly what is shown now. Deferrals follow it, including an unsaved edit that replaced a reason. */
@@ -255,6 +258,29 @@ export function useStepConfirmation(deps: StepConfirmationDeps) {
     const deferred = new Set(Object.entries(baseline.values).filter(([, value]) => value.status === "deferred").map(([id]) => id));
     return { stepId, baseline, upstream: upstreamVersions(deps.steps, stepId, stepStates), edits: {},
       deferred, touched: new Set(), problems: [], changed: false };
+  }
+
+  /** Bind a newly opened dialog to an actual read, never to the cache passed by the card. */
+  function loadReview(stepId: string, info: StepInformation, edits: Record<string, FieldValue> | undefined,
+    stepStates: Record<string, { version: number }>) {
+    if (lock.current) return;
+    const request = ++reviewRead.current;
+    const initial = newReview(stepId, info, edits, stepStates);
+    setReview({ ...initial, loading: true });
+    void (async () => {
+      try {
+        await deps.flush(stepId);
+        const current = await readConfirmation(io());
+        if (!current.information[stepId] || !current.snapshot.steps[stepId]) throw new Error("OPC_UNAVAILABLE");
+        if (reviewRead.current !== request) return;
+        const fresh = newReview(stepId, current.information[stepId], deps.pendingEdits(stepId), current.snapshot.steps);
+        setReview(old => old ? { ...fresh, edits: old.edits, touched: old.touched,
+          deferred: refreshedDeferrals(fresh.baseline, old.deferred, old.touched),
+          changed: !sameVisibleStep(initial.baseline, fresh.baseline), loading: false } : old);
+      } catch {
+        if (reviewRead.current === request) setReview(old => old ? { ...old, loading: false, loadError: true } : old);
+      }
+    })();
   }
 
   /**
@@ -267,8 +293,8 @@ export function useStepConfirmation(deps: StepConfirmationDeps) {
     if (!step) return;
     const state = envelopeState(stepId);
     if (state.kind !== "none") { open(stepId, info, edits, stepStates); return; }
-    // The card changed (or the tab came back) moments ago: show the current content in the review, flagged as changed.
-    if (!settled) { setReview({ ...newReview(stepId, info, edits, stepStates), changed: true }); return; }
+    // The tab may have returned before its background query: read before allowing review confirmation.
+    if (!settled) { loadReview(stepId, info, edits, stepStates); return; }
     submitReview(newReview(stepId, info, edits, stepStates), info);
   }
 
@@ -283,7 +309,7 @@ export function useStepConfirmation(deps: StepConfirmationDeps) {
 
   /** Submit the review: the server content must still be exactly what the user saw. */
   function submit(info: StepInformation) {
-    if (review) submitReview(review, info);
+    if (review && !review.loading && !review.loadError) submitReview(review, info);
   }
 
   function submitReview(review: Review, info: StepInformation) {
@@ -306,6 +332,6 @@ export function useStepConfirmation(deps: StepConfirmationDeps) {
     confirming, review, envelopeState, recoverMalformed, open, confirmNow, setDeferred, submit,
     noteEdit: (fieldId: string, value: FieldValue) =>
       setReview(old => old ? { ...old, edits: { ...old.edits, [fieldId]: value } } : old),
-    close: () => setReview(null),
+    close: () => { reviewRead.current++; setReview(null); },
   };
 }
