@@ -33,8 +33,7 @@ import { useLiveReply } from "./use-live-reply";
 import { ReportEntry } from "./report-panel";
 import { sameRequest, releaseRejectedAnswer, openingRequest, parseStepEnvelope, type MentorRequest,
   retainExecution, settleEnvelope, TEXT_PROTOCOL, turnResultNotice, type MentorTurn, type MentorExecution } from "./mentor-turn";
-import { usePaygResume } from "@/lib/use-payg-resume";
-import { openOrganizer } from "@/lib/payg-wait";
+import { openOrganizer, usePaygResume } from "@/lib/use-payg-resume";
 import { isOpeningInput, openingEntryKey } from "@repo/api/src/shared/opcQuestions";
 type Step = { id: string; title: string; dependsOn?: string[] };
 import { isRecord, type Information, type Item, type StepEnvelope } from "./confirm-envelope";
@@ -1347,10 +1346,11 @@ function PositioningDraftContent({draftId}:{draftId:string}){
                     recovery: recoveryNeedsUser[0] && !busy
                       ? { readable: recoveryNeedsUser[0].readable, onClick: () => void recoverPendingStep(recoveryNeedsUser[0]!.step) } : null })]}/>
                   </div>
-                  {!manualEntry && snap.state === "draft" && !s.valid && <StepConfirmCard revision={!!d.accountRevision} onReview={() => openReview(step.id)}
+                  {!manualEntry && snap.state === "draft" && !s.valid && <StepConfirmCard stays={!!d.accountRevision || index === steps.length - 1}
                     title={step.title} info={d.information[step.id]} edits={infoEdits[step.id]} resuming={confirmation.envelopeState(step.id).kind === "valid"}
-                    canConfirm={confirmableStep(step)} disabled={busy || hasPendingStepRequest} signal={d.stepConfirmation?.[step.id]} onEdit={highlightFields(step.id)}
-                    onConfirm={() => confirmation.confirmNow(step.id, d.information[step.id], infoEdits[step.id], snap.steps)}/>}
+                    canConfirm={confirmableStep(step)} disabled={busy || hasPendingStepRequest} signal={d.stepConfirmation?.[step.id]}
+                    onConfirm={() => confirmation.confirmNow(step.id, d.information[step.id], infoEdits[step.id], snap.steps)} onEdit={highlightFields(step.id)}
+                    onReview={() => openReview(step.id)}/>}
                   <WorkComposer value={mentorInput} onChange={setMentorInput} label="给导师的回复" placeholder={OTHER_PLACEHOLDER} attachment={dock} maxLength={8000} disabled={snap.state!=="draft"} sendDisabled={sendLocked} onSend={skill=>{if(skill)void free.send(mentorInput,skill);else void ask(step);}}/>
                   <p className="text-xs text-[var(--text-secondary)]">
                     同一账号的步骤共用这条对话，未确认内容保留在草稿中。{d?.runtimeMode==='staging_test'?'当前使用真实模型，仅处理你提供的资料。':'当前为隔离模拟，不调用真实模型。'}

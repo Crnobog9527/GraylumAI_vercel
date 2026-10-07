@@ -64,8 +64,8 @@ export type StepConfirmCardProps = {
   /** A step confirmation already started; the button continues it. */
   resuming: boolean;
   disabled: boolean;
-  /** An account revision confirms the edited step and stays on it; the button must not promise the next step. */
-  revision?: boolean;
+  /** Confirming stays on this step (an account revision, or the last step): the button must not promise the next step. */
+  stays?: boolean;
   /** The step may be confirmed now: upstream steps confirmed, no reply running. */
   canConfirm: boolean;
   /** One click: confirm exactly what is shown (snapshot and upstream checks still apply). */
@@ -77,7 +77,7 @@ export type StepConfirmCardProps = {
 };
 
 /** The one confirmation card of a step, pinned above the message box until the step is confirmed. */
-export function StepConfirmCard({ title, info, edits, signal, resuming, disabled, revision, canConfirm, onConfirm, onEdit, onReview }:
+export function StepConfirmCard({ title, info, edits, signal, resuming, disabled, stays, canConfirm, onConfirm, onEdit, onReview }:
   StepConfirmCardProps) {
   const model = confirmCardModel(info, edits, readStepSignal(signal));
   // Never confirm from a stale signal: wait for the edit to save and the read to refresh.
@@ -102,7 +102,7 @@ export function StepConfirmCard({ title, info, edits, signal, resuming, disabled
       {!model.current && !resuming && <p>刚改过的内容正在保存和刷新，完成后就可以确认。</p>}
       {model.updates > 0 && <p>还有 {model.updates} 条“根据对话整理的更新”没处理，它们不会被确认，确认后仍可采用。</p>}
       <div>
-        <Button disabled={disabled || !confirmNow} onClick={onConfirm}>{resuming ? "继续完成确认" : revision ? "没问题，确认这一步的修改" : "没问题，进入下一步"}</Button>
+        <Button disabled={disabled || !confirmNow} onClick={onConfirm}>{resuming ? "继续完成确认" : stays ? "没问题，确认这一步" : "没问题，进入下一步"}</Button>
         <Button variant="outline" disabled={disabled} onClick={() => onEdit(model.look.length ? model.look : model.rows.map(row => row.id))}>我要改</Button>
         {/* Resuming runs the retained confirmation; the review would resume it too, so it is not offered. */}
         {!resuming && <button type="button" className={styles.linkButton} disabled={disabled || !canConfirm} onClick={onReview}>逐项核对或暂缓</button>}

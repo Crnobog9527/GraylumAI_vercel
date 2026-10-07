@@ -109,9 +109,9 @@ describe("StepConfirmCard", () => {
     button(ownOnly, "我要改")!.click();
     expect(ownOnly.onEdit).toHaveBeenCalledWith(["goal", "audience", "position", "benchmark"]);
   });
-  it("does not promise the next step for an account revision, which stays on the edited step", () => {
-    expect(button(props({ revision: true }), "没问题，确认这一步的修改")).toBeDefined();
-    expect(button(props({ revision: true }), "没问题，进入下一步")).toBeUndefined();
+  it("does not promise the next step when confirming stays on it (account revision or last step)", () => {
+    expect(button(props({ stays: true }), "没问题，确认这一步")).toBeDefined();
+    expect(button(props({ stays: true }), "没问题，进入下一步")).toBeUndefined();
   });
   it("cannot confirm while a reply runs or before upstream steps are confirmed", () => {
     expect(button(props({ canConfirm: false }), "没问题，进入下一步")!.disabled).toBe(true);

@@ -5,6 +5,7 @@ import {
   organizerBlockedNotices, paygResumeController, paygTurnNotices,
   type PaygResumeState, type PaygTurn,
 } from './payg-wait';
+export { openOrganizer } from './payg-wait';
 
 /**
  * The page's BILL-PAYG pauses (see payg-wait.ts) bound to `runtime.resume` and React state.
