@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { adminProcedure } from '../trpc';
 import { createSafeInternalError } from '../lib/publicError';
 import { getStripeClient } from '../services/stripe';
+import { previewSubscriptionRefund } from '../services/payments/subscriptionRefundPreview';
 import {
   previewPackageRefund, decidePackageRefund, executePackageRefund, reconcilePackageRefund, rejectPackageRefund, readPackageRefundStatus,
 } from '../services/payments/packageRefund';
@@ -15,6 +16,10 @@ async function safe<T>(action: () => Promise<T>) {
   }
 }
 export const adminRefundProcedures = {
+  previewSubscriptionRefund: adminProcedure.input(request.extend({
+    feePermitted: z.enum(['confirmed', 'not_permitted', 'unknown']),
+  })).query(({ ctx, input }) =>
+    safe(() => previewSubscriptionRefund(ctx.supabaseAdmin, getStripeClient(), ctx.profileId, input))),
   getPackageRefundStatus: adminProcedure.input(z.object({ orderId: z.string().uuid() }).strict())
     .query(({ ctx, input }) => safe(() => readPackageRefundStatus(ctx.supabaseAdmin, input.orderId))),
   rejectPackageRefund: adminProcedure.input(z.object({ orderId: z.string().uuid(), ticketId: z.string().uuid(),
