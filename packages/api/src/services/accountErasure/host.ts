@@ -70,7 +70,19 @@ export function createAccountErasureHost(input: {
       })]);
       clearTimeout(timer);
       if (controller.signal.aborted) throw new Error('ERASURE_HOST_TIMEOUT');
-      const manifest = createErasureAttachmentManifest({ client: input.client, limits: { timeoutMs: timeout },
+      // Track the actual query, not manifest's timeout race. This deliberately
+      // exposes only the query operations used by the raw-reference adapter.
+      const metadata = { from(table: string) { return { select(columns: string, options: { count: 'exact' }) {
+        let query = input.client.from(table).select(columns, options);
+        const page = {
+          order(column: string) { query = query.order(column); return page; },
+          limit(count: number) { query = query.limit(count); return page; },
+          gt(column: string, value: string) { query = query.gt(column, value); return page; },
+          abortSignal(signal: AbortSignal) { return track(() => query.abortSignal(signal)); },
+        };
+        return page;
+      } }; } } as unknown as Pick<SupabaseClient, 'from'>;
+      const manifest = createErasureAttachmentManifest({ client: metadata, limits: { timeoutMs: timeout },
         verifyRetainedHistory: async (profileId, signal) => {
           await track(() => input.verifyRetainedHistory!(profileId, signal));
           await track(() => input.verifyQuiescence!(profileId, signal));

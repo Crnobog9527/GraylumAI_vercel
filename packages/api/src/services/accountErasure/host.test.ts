@@ -123,3 +123,23 @@ it('seals a timed-out Storage pass and rejects re-entry while its I/O is outstan
   expect(f.storage.remove).not.toHaveBeenCalled(); expect(f.auth.remove).not.toHaveBeenCalled();
   expect((await host.run()).stage).toBe('completed');
 });
+
+it('tracks a metadata query that ignores abort until the actual query settles', async () => {
+  const f = fixture();
+  const original = f.from.getMockImplementation()!;
+  const value = { data: [], count: 0, error: null };
+  let release!: (result: typeof value) => void;
+  const pending = new Promise<typeof value>(resolve => { release = resolve; });
+  let reads = 0;
+  f.from.mockImplementation(table => {
+    const query = original(table);
+    if (table === 'tickets') query.abortSignal = () => { reads++; return reads === 1 ? pending : Promise.resolve(value); };
+    return query;
+  });
+  const host = createAccountErasureHost({ ...f.input, operationTimeoutMs: 10 });
+  expect((await host.run()).stage).not.toBe('completed');
+  expect((await host.run()).errorCodes).toContain('ERASURE_HOST_BUSY');
+  expect(reads).toBe(1); expect(f.storage.remove).not.toHaveBeenCalled(); expect(f.auth.remove).not.toHaveBeenCalled();
+  release(value); await new Promise(resolve => setTimeout(resolve, 0));
+  expect((await host.run()).stage).toBe('completed');
+});
