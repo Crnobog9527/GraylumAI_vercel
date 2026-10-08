@@ -48,7 +48,7 @@ it('keeps administrator ownership and stable path pagination; classifies across 
   expect(first.items[0].path).toBe(`${actor}/own.png`);
   expect((await list(f, first.nextCursor))).toEqual({ items: [{ path, uploaderId: admin, subjectId: actor }], nextCursor: null });
   expect(await f.manifest.classify({ profileId: actor, paths: [path], signal: signal() }))
-    .toEqual([{ path, state: 'exclusive' }]);
+    .toEqual([{ path, state: 'unknown' }]);
   f.data.tickets.push({ id: second, user_id: other, attachments: [] });
   f.data.ticket_replies.push({ id: second, ticket_id: second, user_id: admin, attachments: [path] });
   expect(await f.manifest.classify({ profileId: actor, paths: [path, `${actor}/orphan.png`], signal: signal() }))

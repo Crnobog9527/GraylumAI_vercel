@@ -6,14 +6,14 @@ import {syntheticSdk} from './sdk.mjs';
 export async function runManifest(input){
  const {db,Client,connectionString,report,require,createErasureAttachmentManifest,
   createErasureStorageAdapter,createErasureStorageTransport,createErasureAuthAdapter,processAccountErasure}=input;
- const fixture=async()=>{
+ const fixture=async(adminReply=true)=>{
   const actor=randomUUID(),admin=randomUUID(),other=randomUUID(),ticket=randomUUID(),open=randomUUID();
   await db.query('insert into profiles(id) values($1),($2),($3)',[actor,admin,other]);
   await db.query(`insert into tickets(id,user_id,title,description,attachments,is_deleted,deleted_at)
    values($1,$2,'Synthetic','Synthetic',$3,'true',clock_timestamp()-interval '40 days'),
    ($4,$5,'Synthetic','Synthetic','[]','true',clock_timestamp()-interval '40 days')`,
    [ticket,actor,JSON.stringify([actor+'/a.png']),open,other]);
-  await db.query(`insert into ticket_replies(ticket_id,user_id,content,attachments,is_deleted,deleted_at)
+  if(adminReply)await db.query(`insert into ticket_replies(ticket_id,user_id,content,attachments,is_deleted,deleted_at)
    values($1,$2,'Synthetic',$3,'true',clock_timestamp()-interval '40 days')`,[ticket,admin,JSON.stringify([admin+'/reply.png'])]);
   return {actor,admin,other,ticket,open};
  };
@@ -48,8 +48,17 @@ export async function runManifest(input){
  const result=await processAccountErasure({profileId:f.actor,database:{rpc},
   storageAdapter:createErasureStorageAdapter({manifest,storage:createErasureStorageTransport(sdk.client)}),
   authAdapter:createErasureAuthAdapter(sdk.client,f.actor),budget:{deadline:Date.now()+30000,operationTimeoutMs:5000}});
- assert.equal(result.stage,'completed',JSON.stringify(result));assert.equal(sdk.objects.size,0);assert.equal(sdk.authDeletes(),1);
- assert.equal((await db.query('select count(*)::int n from tickets where id=$1',[f.ticket])).rows[0].n,0);
+ assert.notEqual(result.stage,'completed');assert.equal(sdk.objects.has(f.admin+'/reply.png'),true);assert.equal(sdk.authDeletes(),0);
+ assert.equal((await db.query('select count(*)::int n from tickets where id=$1',[f.ticket])).rows[0].n,1);
+ const own=await fixture(false);await db.query('select account_erasure_confirm($1,$2)',[own.actor,randomUUID()]);
+ const ownSdk=syntheticSdk(require('@supabase/supabase-js').createClient,own.actor);
+ const ownManifest=createErasureAttachmentManifest({client:database,limits:{timeoutMs:5000},
+  verifyRetainedHistory:async profile=>{assert.equal(profile,own.actor);}});
+ const done=await processAccountErasure({profileId:own.actor,database:{rpc},
+  storageAdapter:createErasureStorageAdapter({manifest:ownManifest,storage:createErasureStorageTransport(ownSdk.client)}),
+  authAdapter:createErasureAuthAdapter(ownSdk.client,own.actor),budget:{deadline:Date.now()+30000,operationTimeoutMs:5000}});
+ assert.equal(done.stage,'completed',JSON.stringify(done));assert.equal(ownSdk.objects.size,0);assert.equal(ownSdk.authDeletes(),1);
+ assert.equal((await db.query('select count(*)::int n from tickets where id=$1',[own.ticket])).rows[0].n,0);
  const g=await fixture();const closing=new Client({connectionString}),purging=new Client({connectionString});
  await closing.connect();await purging.connect();
  try{
@@ -74,5 +83,5 @@ export async function runManifest(input){
   assert.equal((await db.query('select count(*)::int n from tickets where id=$1',[stale.ticket])).rows[0].n,1);
  }finally{await snapshotClient.query('ROLLBACK');await snapshotClient.end();}
  report.checks.push('0196 populated upgrade retains admin references; ordinary purge unchanged; public denied/service allowed; two-connection closure/purge lock');
- report.checks.push('real metadata manifest + locked SDK mock HTTP + processor/SQL: unknown historical coverage removes nothing; admin objects clean before references/Auth');
+ report.checks.push('real metadata manifest + locked SDK mock HTTP + processor/SQL: unknown history removes nothing; admin references remain pending; own objects clean before references/Auth');
 }

@@ -10,8 +10,9 @@ concurrency and recovery cases. At migration 0186 it compares the local catalog 
 `staging-fingerprint.json` at its recorded precision (using only the existing
 platform-only exclusions), then seeds synthetic open/closed accounts, attachment
 references, financial rows, an unresolved original approval and a dispatched
-Runtime call. It applies 0187–0196. The original 0187–0195 migrations remain unchanged; 0196 changes
-only the existing purge function, so built is updated for that actual SQL change.
+Runtime call. It applies 0187–0196. The original 0187–0195 migrations remain
+unchanged; 0196 changes the existing purge and ticket-guard function bodies, so
+built is updated for that actual SQL change.
 Original row fields, cash, approval and dispatch identities must remain intact;
 the final catalog must match the current 0196 built fingerprint exactly.
 
@@ -49,7 +50,8 @@ Frozen inputs: #734 e63cbf9cf38e8f032f03caae73f845b11c02e0d5,
 #740 38eee93d54776567740fe1be2cdf450bb6c9ce0d (UI delta from af52fda1).
 The initial integration imported those inputs byte-for-byte. The follow-up corrects
 refund disclosure in AccountErasureCard and its inherited impact-copy helper, with
-focused browser/unit tests. The other source imports remain unchanged. The manifest/retention follow-up adds 0196 and its built
+focused browser/unit tests. The other source imports remain unchanged. The
+manifest/retention follow-up adds 0196 and its built
 fingerprint; no table, queue, host, cron or HTTP endpoint is introduced.
 
 Deployment remains unapproved: 0190 before upload, 0191 before progress, and
@@ -66,7 +68,10 @@ including soft-deleted rows and administrator replies, using bounded keyset page
 and exact remaining counts. Missing pages, malformed references, missing parents,
 query errors or budget exhaustion fail closed. It does not use the display helper,
 which silently filters invalid references. Classification covers both tables across
-all subjects. A shared path remains pending and is never removed by this adapter.
+all subjects. Shared paths and administrator/other-uploader paths remain pending,
+and are never
+removed by this adapter, even when a retained administrator reply appears exclusive
+to the subject. This is the current authorized conservative boundary.
 
 Current rows are not historical completeness proof. The adapter defaults to refusal
 unless a trusted host supplies `verifyRetainedHistory`; no real verifier or host is
@@ -83,7 +88,8 @@ increase the product retention period or preserve ticket bodies as a new purpose
 the purge clears expired title/description/reply content while keeping the original
 ids/paths. A narrow trigger branch permits only this monotonic body erasure, with
 all other fields identical; existing grants remain unchanged and still deny direct
-client/service body writes. Refilling body or changing attachments is refused. Synthetic tests exercise
+client/service body writes. Refilling body or changing attachments is refused.
+Synthetic tests exercise
 public/service permissions, aged references upgraded from 0186, exact real SDK with
 mock HTTP, cleanup order and two-connection closure/purge contention. Reapplying
 0196 is safe; recovery is a forward correction preserving original references.

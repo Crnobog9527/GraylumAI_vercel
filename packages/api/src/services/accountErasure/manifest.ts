@@ -106,8 +106,11 @@ export function createErasureAttachmentManifest(input: {
       const refs = await inventory(profileId, signal);
       return paths.map(path => {
         const owners = new Set(refs.filter(row => row.path === path).map(row => row.subjectId));
-        const state = owners.size === 0 ? 'unreferenced'
-          : owners.size === 1 && owners.has(profileId) ? 'exclusive' : 'shared';
+        // This slice does not authorize removal of administrator/other-uploader paths,
+        // even when the retained ticket currently appears exclusive to the subject.
+        const state = owners.size > 0 && (owners.size > 1 || !owners.has(profileId)) ? 'shared'
+          : !path.startsWith(`${profileId}/`) ? 'unknown'
+            : owners.size === 0 ? 'unreferenced' : 'exclusive';
         return { path, state };
       });
     },
