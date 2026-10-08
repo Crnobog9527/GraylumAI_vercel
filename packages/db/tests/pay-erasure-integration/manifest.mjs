@@ -18,6 +18,10 @@ export async function runManifest(input){
   return {actor,admin,other,ticket,open};
  };
  const f=await fixture();
+ await db.query(`insert into ticket_replies(ticket_id,user_id,content,attachments,is_deleted,deleted_at)
+  values($1,$2,'Fresh reply',$3,'false',null),($1,$2,'Recent soft deletion',$3,'true',clock_timestamp()-interval '1 day')`,
+  [f.ticket,f.admin,JSON.stringify([f.admin+'/fresh.png'])]);
+ const originalReplies=(await db.query('select id,ticket_id,user_id,attachments,is_deleted,deleted_at from ticket_replies where ticket_id=$1 order by id',[f.ticket])).rows;
  await db.query('select account_erasure_confirm($1,$2)',[f.actor,randomUUID()]);
  const inherited=(await db.query("select f from monthly_test.upgrade_facts where kind='closed'")).rows[0].f;
  for(const role of ['anon','authenticated']){
@@ -27,9 +31,12 @@ export async function runManifest(input){
  await db.query('SET ROLE service_role');await db.query('select * from purge_deleted_records(30)');await db.query('RESET ROLE');
  assert.equal((await db.query('select count(*)::int n from tickets where id=$1',[f.open])).rows[0].n,0,'ordinary retention still purges');
  assert.equal((await db.query('select count(*)::int n from tickets where id=ANY($1)',[[f.ticket,inherited.ticket]])).rows[0].n,2);
- assert.equal((await db.query('select count(*)::int n from ticket_replies where ticket_id=ANY($1)',[[f.ticket,inherited.ticket]])).rows[0].n,2);
+ assert.equal((await db.query('select count(*)::int n from ticket_replies where ticket_id=ANY($1)',[[f.ticket,inherited.ticket]])).rows[0].n,4);
  assert.deepEqual((await db.query('select title,description from tickets where id=$1',[f.ticket])).rows[0],{title:'',description:''});
- assert.equal((await db.query('select content from ticket_replies where ticket_id=$1',[f.ticket])).rows[0].content,'');
+ assert.equal((await db.query("select count(*)::int n from ticket_replies where ticket_id=$1 and content<>''",[f.ticket])).rows[0].n,0);
+ assert.deepEqual((await db.query('select id,ticket_id,user_id,attachments,is_deleted,deleted_at from ticket_replies where ticket_id=$1 order by id',[f.ticket])).rows,originalReplies);
+ await assert.rejects(db.query("update ticket_replies set content='refill' where ticket_id=$1",[f.ticket]),/ACCOUNT_ERASURE/);
+ await assert.rejects(db.query("update ticket_replies set content='',attachments='[]' where ticket_id=$1",[f.ticket]),/ACCOUNT_ERASURE/);
  await assert.rejects(db.query("update tickets set description='refill' where id=$1",[f.ticket]),/ACCOUNT_ERASURE/);
  await assert.rejects(db.query("update tickets set description='',attachments='[]' where id=$1",[f.ticket]),/ACCOUNT_ERASURE/);
  await db.query('SET ROLE service_role');
@@ -59,6 +66,12 @@ export async function runManifest(input){
   authAdapter:createErasureAuthAdapter(ownSdk.client,own.actor),budget:{deadline:Date.now()+30000,operationTimeoutMs:5000}});
  assert.equal(done.stage,'completed',JSON.stringify(done));assert.equal(ownSdk.objects.size,0);assert.equal(ownSdk.authDeletes(),1);
  assert.equal((await db.query('select count(*)::int n from tickets where id=$1',[own.ticket])).rows[0].n,0);
+ const related=await fixture();
+ await db.query(`insert into ticket_replies(ticket_id,user_id,content) values($1,$2,'Sibling fresh body')`,[related.ticket,related.other]);
+ await db.query('select account_erasure_confirm($1,$2)',[related.admin,randomUUID()]);
+ await db.query('select * from purge_deleted_records(30)');
+ assert.equal((await db.query("select count(*)::int n from ticket_replies where ticket_id=$1 and content<>''",[related.ticket])).rows[0].n,0);
+ assert.equal((await db.query('select count(*)::int n from tickets where id=$1',[related.ticket])).rows[0].n,1);
  const g=await fixture();const closing=new Client({connectionString}),purging=new Client({connectionString});
  await closing.connect();await purging.connect();
  try{

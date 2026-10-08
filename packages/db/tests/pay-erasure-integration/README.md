@@ -86,7 +86,9 @@ preserves affected ticket/reply references until the existing Storage-verified
 cleanup removes them. Ordinary non-erasure retention stays unchanged. It does not
 increase the product retention period or preserve ticket bodies as a new purpose;
 the purge clears expired title/description/reply content while keeping the original
-ids/paths. A narrow trigger branch permits only this monotonic body erasure, with
+ids/paths. Parent expiration also clears every reply body that the previous parent
+delete would have cascaded to, including fresh or not separately soft-deleted
+replies; their original metadata remains unchanged. A narrow trigger branch permits only this monotonic body erasure, with
 all other fields identical; existing grants remain unchanged and still deny direct
 client/service body writes. Refilling body or changing attachments is refused.
 Synthetic tests exercise
