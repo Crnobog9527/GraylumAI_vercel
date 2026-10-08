@@ -22,8 +22,10 @@ beforeAll(async () => {
   const entry = fileURLToPath(new URL('./__stop_lifecycle_fixture__.tsx', import.meta.url));
   const directory = fileURLToPath(new URL('./', import.meta.url));
   // Test-only transport: the production hook/controller still own stopping, recovery and lifecycle.
-  const transport = `export async function json(path,input){
+  const transport = `let resumed=0;
+    export async function json(path,input,source){
     const response=await fetch(path,{method:input?'POST':'GET',cache:'no-store',
+      headers:{'x-fixture-history-source':source??(resumed?'resume:'+resumed:'stop')},
       ...(input?{body:JSON.stringify(input),headers:{'Content-Type':'application/json'}}:{})});
     if(!response.ok)throw new Error('fixture HTTP '+response.status);return response.json();}
     export async function* events(path,input){
@@ -31,7 +33,7 @@ beforeAll(async () => {
         ...(input?{body:JSON.stringify(input)}:{})});
       if(!response.ok)throw new Error('fixture stream');
       const reader=response.body.getReader(),decoder=new TextDecoder();let pending='';
-      try{while(true){const {done,value}=await reader.read();if(done)break;
+      try{while(true){const {done,value}=await reader.read();if(done){if(path==='/resume')resumed++;break;}
         pending+=decoder.decode(value,{stream:true});let end;
         while((end=pending.indexOf('\\n'))>=0){const line=pending.slice(0,end);pending=pending.slice(end+1);
           if(line)yield JSON.parse(line);}}}finally{reader.releaseLock();}}
@@ -63,7 +65,7 @@ beforeAll(async () => {
             const [history,setHistory]=React.useState();bindHistory(setHistory);
             const live=useLiveReply('synthetic-draft',history);
             React.useEffect(()=>{let disposed=false;
-              void json('/history').then(h=>{if(disposed)return;setHistory(h);
+              void json('/history',undefined,'initial').then(h=>{if(disposed)return;setHistory(h);
                 if(h.executions[0].state==='running'&&!h.executions[0].userStopPending)
                   void live.stream(async()=>events('/stream'),{}).catch(()=>{});});
               return()=>{disposed=true;};},[]);
@@ -75,7 +77,8 @@ beforeAll(async () => {
             const reply=mentorReplyDisplay({...execution,legacyMessage:'',liveText:live.reply?.text,
               liveCard:live.reply?.card,stopLocal:live.stopLocal('${executionId}'),active:!!history?.activeExecution,busy:false});
             return <><main id="message"><MentorMarkdown text={reply.text} live={!!live.reply} result={execution}/></main>
-              <output id="history-state" data-execution-id={execution.executionId}>{execution.state}:{String(execution.userStopPending)}</output>
+              <output id="history-state" data-history-source={history?.source} data-history-sequence={history?.sequence}
+                data-execution-id={execution.executionId}>{execution.state}:{String(execution.userStopPending)}</output>
               <ChatNoticeList notices={live.phase?mentorTailNotices({livePhase:live.phase,stop:live.stopAction,
                 replying:false,lastTurnOpen:false,saving:false,recovery:null,error:'',notice:'',freeError:''})
                 :[mentorTurnNotice('turn',reply.notice,null)]}/></>;}
@@ -95,12 +98,13 @@ beforeAll(async () => {
 }, 30000);
 afterAll(async () => { await browser?.close(); });
 
-async function fixture(width: number, pendingCheckpoint = false) {
+async function fixture(width: number, pendingCheckpoint = false, holdFirstResume = true) {
   let state = 'running', stopped = false;
   let stream: ServerResponse | undefined;
   const stops: unknown[] = [], resumes: unknown[] = [];
   const resumeDocuments: string[] = [];
-  let streams = 0;
+  let streams = 0, historySequence = 0;
+  const heldResumes = new Map<string, () => void>();
   const saved = () => state === 'completed';
   const server = createServer(async (request, response) => {
     response.setHeader('Cache-Control', 'no-store');
@@ -112,7 +116,8 @@ async function fixture(width: number, pendingCheckpoint = false) {
     if (path === '/probe') { response.end('online'); return; }
     if (path === '/history') {
       response.setHeader('Content-Type', 'application/json');
-      response.end(JSON.stringify({ activeExecution: saved() ? null : executionId, executions: [{
+      response.end(JSON.stringify({ sequence: ++historySequence,
+        source: request.headers['x-fixture-history-source'], activeExecution: saved() ? null : executionId, executions: [{
         executionId, state, userStopPending: stopped && !saved(),
         ...(pendingCheckpoint && stopped && !saved() ? { body: agentTurnBody(unseenCheckpoint, null) } : {}),
         ...(saved() ? { body: agentTurnBody(prefix, null), stopped: true, completeness: 'stopped', organized: false } : {}),
@@ -138,7 +143,11 @@ async function fixture(width: number, pendingCheckpoint = false) {
       resumes.push(JSON.parse(input));
       resumeDocuments.push(String(request.headers['x-fixture-document']));
       response.setHeader('Content-Type', 'application/x-ndjson');
-      response.end(JSON.stringify({ type: 'result', result: { state: saved() ? 'completed' : 'stopping' } }) + '\n'); return;
+      const finish = () => response.end(JSON.stringify({ type: 'result', result: { state: saved() ? 'completed' : 'stopping' } }) + '\n');
+      const documentId = String(request.headers['x-fixture-document']);
+      if (holdFirstResume && resumeDocuments.filter(id => id === documentId).length === 1) heldResumes.set(documentId, finish);
+      else finish();
+      return;
     }
     response.statusCode = 404; response.end();
   });
@@ -158,9 +167,31 @@ async function fixture(width: number, pendingCheckpoint = false) {
   await page.goto(origin);
   return { page, context, stops, resumes, resumeDocuments, failures, unexpected, streams: () => streams,
     release: () => { state = 'completed'; },
+    continueResume: (documentId: string) => {
+      const finish = heldResumes.get(documentId);
+      if (!finish) throw new Error('no held resume for this document');
+      heldResumes.delete(documentId); finish();
+    },
     close: async () => { await context.setOffline(false); await context.close(); server.closeAllConnections();
       await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve())); },
   };
+}
+
+// Hold the first response per document to exercise the arrival-before-read window deterministically.
+// Only a new, rendered history from that completed resume may release persistence.
+async function applyFirstResumeHistory(f: Awaited<ReturnType<typeof fixture>>, previous: 'initial' | 'stop') {
+  const documentId = await f.page.evaluate(() => String(performance.timeOrigin));
+  await expect.poll(() => f.resumeDocuments.filter(id => id === documentId).length, { timeout: 7000 }).toBe(1);
+  const history = f.page.locator('#history-state');
+  await ui(history).toHaveAttribute('data-history-source', previous);
+  await ui(history).toHaveText('running:true');
+  const previousSequence = Number(await history.getAttribute('data-history-sequence'));
+  // The old arrival + running:true barrier already passes here while the response is still held.
+  f.continueResume(documentId);
+  await ui(history).toHaveAttribute('data-history-source', 'resume:1');
+  await ui(history).toHaveText('running:true');
+  expect(Number(await history.getAttribute('data-history-sequence'))).toBeGreaterThan(previousSequence);
+  await ui(history).toHaveAttribute('data-execution-id', executionId);
 }
 
 type Observation = { at: number; height: number; kind: string; text: string; html: string; visible: boolean };
@@ -225,7 +256,7 @@ async function assertTrace(page: Page, name: string) {
 for (const offline of [false, true]) {
   it(offline ? 'C2: one real network outage during saving recovers and survives a page reload'
     : 'C2: a real stop click freezes its capture-phase DOM through delayed persistence', async () => {
-    const f = await fixture(offline ? 390 : 1920);
+    const f = await fixture(offline ? 390 : 1920, false, !offline);
     try {
       await observeAndClick(f.page);
       await ui(f.page.getByText('已停止，正在保存已显示的内容…', { exact: true })).toBeVisible();
@@ -244,8 +275,7 @@ for (const offline of [false, true]) {
         expect(f.resumes).toHaveLength(0);
         expect(f.failures).toContain('/probe');
       } else {
-        await expect.poll(() => f.resumes.length, { timeout: 7000 }).toBe(1);
-        await ui(f.page.locator('#history-state')).toHaveText('running:true');
+        await applyFirstResumeHistory(f, 'stop');
       }
       f.release();
       if (offline) await f.context.setOffline(false);
@@ -308,9 +338,7 @@ for (const keepPrefix of [true, false]) {
       expect(keepPrefix ? ['', before.text] : ['']).toContain(pendingText);
       expect(await f.page.evaluate(() => (window as unknown as { checkpointExposed: boolean }).checkpointExposed)).toBe(false);
       // Bind the follow-up to the new document, not an old request finishing during navigation.
-      const documentId = await f.page.evaluate(() => String(performance.timeOrigin));
-      await expect.poll(() => f.resumeDocuments.includes(documentId), { timeout: 7000 }).toBe(true);
-      await ui(f.page.locator('#history-state')).toHaveText('running:true');
+      await applyFirstResumeHistory(f, 'initial');
       expect(await body.innerText()).toBe(pendingText);
       expect(f.stops).toEqual([{ executionId, stopAt: Array.from(prefix).length, source: 'assistant' }]);
       expect(f.streams()).toBe(1);
