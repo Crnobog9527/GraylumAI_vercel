@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 const tables=['profiles','payment_orders','payment_provider_refs','user_subscriptions','subscription_credit_grants',
- 'credit_transactions','billing_history','tickets','account_erasure_requests','bill2_runs','bill2_calls',
+ 'credit_transactions','billing_history','tickets','ticket_replies','account_erasure_requests','bill2_runs','bill2_calls',
  'runtime_sessions','runtime_executions'];
 export function captureUpgrade(sql){
  return Object.fromEntries(tables.map(table=>[table,JSON.parse(sql(`SELECT coalesce(jsonb_agg(to_jsonb(t)),'[]') FROM public.${table} t;`))]));
@@ -35,6 +35,12 @@ export function seedUpgrade({sql,read,snapshot,report}){
  ('pending',monthly_test.fixture()),('runtime',b2a_test.fixture());
  UPDATE tickets SET attachments=jsonb_build_array(user_id::text||'/legacy.png')
  WHERE id IN (SELECT (f->>'ticket')::uuid FROM monthly_test.upgrade_facts WHERE kind<>'runtime');
+ INSERT INTO ticket_replies(ticket_id,user_id,content,attachments,is_deleted,deleted_at)
+ SELECT (f->>'ticket')::uuid,(f->>'actor')::uuid,'Synthetic',
+  jsonb_build_array((f->>'actor')||'/admin-legacy.png'),'true',clock_timestamp()-interval '40 days'
+ FROM monthly_test.upgrade_facts WHERE kind='closed';
+ UPDATE tickets SET is_deleted='true',deleted_at=clock_timestamp()-interval '40 days'
+ WHERE id=(SELECT (f->>'ticket')::uuid FROM monthly_test.upgrade_facts WHERE kind='closed');
  DO $$ DECLARE f jsonb; c jsonb; BEGIN
   SELECT x.f INTO f FROM monthly_test.upgrade_facts x WHERE kind='pending';
   UPDATE payment_orders SET refund_approval=jsonb_build_object('kind','monthly_first_purchase','id',gen_random_uuid(),
@@ -64,7 +70,7 @@ export async function verifyUpgrade({db,before,sql,snapshot,built,report}){
   }
  }
  const actual=Object.fromEntries(Object.entries(snapshot()).map(([k,v])=>[k,createHash('md5').update(v??'<null>').digest('hex').slice(0,12)]));
- assert.deepEqual(actual,built.objects,'0195 built catalog unchanged; no rewrite');
+ assert.deepEqual(actual,built.objects,'0196 built catalog matches new migration');
  const pending=(await db.query("select f from monthly_test.upgrade_facts where kind='pending'")).rows[0].f;
  const proof=(await db.query('select account_erasure_financial_proof($1) p',[pending.user])).rows[0].p;
  assert.ok(proof.financialPending>0&&proof.manualReview>0,'pre-existing unresolved approval stays pending');
@@ -75,6 +81,6 @@ export async function verifyUpgrade({db,before,sql,snapshot,built,report}){
   await assert.rejects(db.query('select account_erasure_progress_read($1,$2)',[pending.order,'a'.repeat(64)]),/permission denied/);
   await db.query('RESET ROLE');
  }
- report.checks.push('0186 populated upgrade: original rows/money/approval/hash/Runtime dispatch and identities preserved through 0187–0195');
- report.checks.push('0195 catalog exactly matches frozen built; unresolved inherited approval blocks financial completion; public roles denied');
+ report.checks.push('0186 populated upgrade: original rows/money/approval/hash/Runtime dispatch and identities preserved through 0187–0196');
+ report.checks.push('0196 catalog exactly matches updated built; unresolved inherited approval blocks financial completion; public roles denied');
 }

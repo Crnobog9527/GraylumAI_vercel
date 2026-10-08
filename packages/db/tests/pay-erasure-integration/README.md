@@ -10,9 +10,10 @@ concurrency and recovery cases. At migration 0186 it compares the local catalog 
 `staging-fingerprint.json` at its recorded precision (using only the existing
 platform-only exclusions), then seeds synthetic open/closed accounts, attachment
 references, financial rows, an unresolved original approval and a dispatched
-Runtime call. It applies 0187–0195 without changing any migration or built file.
+Runtime call. It applies 0187–0196. The original 0187–0195 migrations remain unchanged; 0196 changes
+only the existing purge function, so built is updated for that actual SQL change.
 Original row fields, cash, approval and dispatch identities must remain intact;
-the final catalog must match the existing 0195 built fingerprint exactly.
+the final catalog must match the current 0196 built fingerprint exactly.
 
 The exact 0752f863 upload handler is evaluated with synthetic framework/Auth/Storage
 transports and real local SQL reads. Open upload and closed denial are checked;
@@ -48,8 +49,8 @@ Frozen inputs: #734 e63cbf9cf38e8f032f03caae73f845b11c02e0d5,
 #740 38eee93d54776567740fe1be2cdf450bb6c9ce0d (UI delta from af52fda1).
 The initial integration imported those inputs byte-for-byte. The follow-up corrects
 refund disclosure in AccountErasureCard and its inherited impact-copy helper, with
-focused browser/unit tests. The other source imports and all SQL/built remain
-unchanged; no new runtime infrastructure is introduced.
+focused browser/unit tests. The other source imports remain unchanged. The manifest/retention follow-up adds 0196 and its built
+fingerprint; no table, queue, host, cron or HTTP endpoint is introduced.
 
 Deployment remains unapproved: 0190 before upload, 0191 before progress, and
 0193–0195 before monthly execution. Old-upload drain, real SDK compatibility,
@@ -59,3 +60,35 @@ The follow-up corrects the outdated refund disclosure to DATA-ERASURE §2 /
 MASTER_PLAN §2.1 item 51. It changes no eligibility, money, execution permissions
 or service logic. Deployed-page validation and the external prerequisites above
 remain outstanding; corrected copy does not authorize real account closure.
+
+The manifest adapter reads only ids, ticket ownership and raw attachment paths,
+including soft-deleted rows and administrator replies, using bounded keyset pages
+and exact remaining counts. Missing pages, malformed references, missing parents,
+query errors or budget exhaustion fail closed. It does not use the display helper,
+which silently filters invalid references. Classification covers both tables across
+all subjects. A shared path remains pending and is never removed by this adapter.
+
+Current rows are not historical completeness proof. The adapter defaults to refusal
+unless a trusted host supplies `verifyRetainedHistory`; no real verifier or host is
+implemented here. The test verifier is valid only for the explicitly created local
+synthetic fixture. It cannot be replaced by a client boolean, empty tables or an
+elapsed-time assumption in deployment. Previously purged administrator references
+cannot be reconstructed; affected real subjects stay unproven. Reference/upload
+quiescence must separately cover inventory, classification and external deletion.
+
+0196 serializes the existing purge with confirmation using profile SHARE locks and
+preserves affected ticket/reply references until the existing Storage-verified
+cleanup removes them. Ordinary non-erasure retention stays unchanged. It does not
+increase the product retention period or preserve ticket bodies as a new purpose;
+the purge clears expired title/description/reply content while keeping the original
+ids/paths. A narrow trigger branch permits only this monotonic body erasure, with
+all other fields identical; existing grants remain unchanged and still deny direct
+client/service body writes. Refilling body or changing attachments is refused. Synthetic tests exercise
+public/service permissions, aged references upgraded from 0186, exact real SDK with
+mock HTTP, cleanup order and two-connection closure/purge contention. Reapplying
+0196 is safe; recovery is a forward correction preserving original references.
+Do not restore the older purge while pending erasure references exist or claim that
+rolling back code can recover already-purged history.
+
+Deployment preparation must now enumerate 0187–0196, not reuse the old nine-file
+manifest or 0195 built fingerprint. No remote migration or effect was executed.

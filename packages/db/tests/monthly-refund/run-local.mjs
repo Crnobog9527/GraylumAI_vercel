@@ -14,6 +14,7 @@ import {runService} from './service-cases.mjs';
 import {runConcurrency} from './concurrency.mjs';
 import {seedUpgrade,verifyUpgrade} from '../pay-erasure-integration/upgrade.mjs';
 import {runCombined} from '../pay-erasure-integration/combined.mjs';
+import {runManifest} from '../pay-erasure-integration/manifest.mjs';
 
 const args=process.argv.slice(2).join(' ');
 const modes=['--local-only','--local-only --development','--local-only --from-0186','--local-only --from-0186 --development'];
@@ -103,6 +104,9 @@ try {
  await runService({db:client,service,webhook,report});
  if(integrated){
   const module=async name=>import(pathToFileURL(compile(resolve(root,'packages/api/src/services/accountErasure/'+name+'.ts'))).href);
+  await runManifest({db:client,Client,connectionString,report,require,read,
+   ...(await module('manifest')),...(await module('storage')),...(await module('storageTransport')),...(await module('authAdapter')),
+   ...(await module('processor'))});
   await runCombined({db:client,service,webhook,report,require,ts,run,root,
    ...(await module('processor')),...(await module('storage')),...(await module('storageTransport')),...(await module('authAdapter'))});
  }

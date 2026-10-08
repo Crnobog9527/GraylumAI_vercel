@@ -30,6 +30,8 @@ export function transport(client) {
    const q={select(value){selected=value;return q;},
     eq(key,value){values.push(value);filters.push(col(key)+'=$'+values.length);return q;},
     in(key,value){values.push(value);filters.push(col(key)+'=ANY($'+values.length+')');return q;},
+    gt(key,value){values.push(value);filters.push(col(key)+'>$'+values.length);return q;},
+    abortSignal(signal){if(signal.aborted)return Promise.reject(new Error('TEST_ABORTED'));return q;},
     order(){return q;},range(a,b){offset=a;limit=b-a+1;return q;},limit(n){limit=n;return q;},
     single(){single=true;return q;},maybeSingle(){single=true;return q;},then(resolve,reject){return run().then(resolve,reject);}};
    return q;
