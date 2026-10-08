@@ -5,7 +5,7 @@ import {transport} from '../monthly-refund/adapter.mjs';
 import {syntheticSdk} from './sdk.mjs';
 export async function runManifest(input){
  const {db,Client,connectionString,report,require,createErasureAttachmentManifest,
-  createErasureStorageAdapter,createErasureStorageTransport,createErasureAuthAdapter,processAccountErasure}=input;
+  createErasureStorageAdapter,createErasureStorageTransport,createErasureAuthAdapter,processAccountErasure,createAccountErasureHost}=input;
  const fixture=async(adminReply=true)=>{
   const actor=randomUUID(),admin=randomUUID(),other=randomUUID(),ticket=randomUUID(),open=randomUUID();
   await db.query('insert into profiles(id) values($1),($2),($3)',[actor,admin,other]);
@@ -57,15 +57,55 @@ export async function runManifest(input){
   authAdapter:createErasureAuthAdapter(sdk.client,f.actor),budget:{deadline:Date.now()+30000,operationTimeoutMs:5000}});
  assert.notEqual(result.stage,'completed');assert.equal(sdk.objects.has(f.admin+'/reply.png'),true);assert.equal(sdk.authDeletes(),0);
  assert.equal((await db.query('select count(*)::int n from tickets where id=$1',[f.ticket])).rows[0].n,1);
- const own=await fixture(false);await db.query('select account_erasure_confirm($1,$2)',[own.actor,randomUUID()]);
- const ownSdk=syntheticSdk(require('@supabase/supabase-js').createClient,own.actor);
- const ownManifest=createErasureAttachmentManifest({client:database,limits:{timeoutMs:5000},
-  verifyRetainedHistory:async profile=>{assert.equal(profile,own.actor);}});
- const done=await processAccountErasure({profileId:own.actor,database:{rpc},
-  storageAdapter:createErasureStorageAdapter({manifest:ownManifest,storage:createErasureStorageTransport(ownSdk.client)}),
-  authAdapter:createErasureAuthAdapter(ownSdk.client,own.actor),budget:{deadline:Date.now()+30000,operationTimeoutMs:5000}});
- assert.equal(done.stage,'completed',JSON.stringify(done));assert.equal(ownSdk.objects.size,0);assert.equal(ownSdk.authDeletes(),1);
- assert.equal((await db.query('select count(*)::int n from tickets where id=$1',[own.ticket])).rows[0].n,0);
+ const hostDb=new Client({connectionString});await hostDb.connect();
+ try{
+  await hostDb.query('SET ROLE service_role');const hostClient=transport(hostDb);
+  const make=async()=>{
+   const f=await fixture(false),requestId=randomUUID();
+   await db.query('select account_erasure_confirm($1,$2)',[f.actor,requestId]);
+   const sdk=syntheticSdk(require('@supabase/supabase-js').createClient,f.actor);
+   const config={profileId:f.actor,requestId,client:hostClient,
+    storage:createErasureStorageTransport(sdk.client),auth:createErasureAuthAdapter(sdk.client,f.actor),operationTimeoutMs:5000,
+    // This test owns creation and all writers for this synthetic subject, never real history proof.
+    verifyRetainedHistory:async profile=>{assert.equal(profile,f.actor);},
+    verifyQuiescence:async profile=>{assert.equal(profile,f.actor);}};
+   return {f,sdk,config};
+  };
+  const adminRequest=(await db.query('select request_id from account_erasure_requests where profile_id=$1',[f.actor])).rows[0].request_id;
+  const adminHost=createAccountErasureHost({profileId:f.actor,requestId:adminRequest,client:hostClient,
+   storage:createErasureStorageTransport(sdk.client),auth:createErasureAuthAdapter(sdk.client,f.actor),operationTimeoutMs:5000,
+   verifyRetainedHistory:async profile=>{assert.equal(profile,f.actor);},verifyQuiescence:async profile=>{assert.equal(profile,f.actor);}});
+  assert.notEqual((await adminHost.run()).stage,'completed');assert.equal(sdk.authDeletes(),0);
+  assert.equal(sdk.objects.has(f.admin+'/reply.png'),true);
+  const own=await make();
+  for(const config of [{...own.config,requestId:randomUUID()},
+   {...own.config,verifyRetainedHistory:undefined},{...own.config,verifyQuiescence:undefined}]){
+   assert.notEqual((await createAccountErasureHost(config).run()).stage,'completed');
+   assert.equal(own.sdk.storageDeletes(),0);assert.equal(own.sdk.authDeletes(),0);
+  }
+  for(const role of ['anon','authenticated']){
+   await hostDb.query('SET ROLE '+role);
+   assert.notEqual((await createAccountErasureHost(own.config).run()).stage,'completed');
+   assert.equal(own.sdk.storageDeletes(),0);assert.equal(own.sdk.authDeletes(),0);
+  }
+  await hostDb.query('SET ROLE service_role');
+  const done=await createAccountErasureHost(own.config).run();
+  assert.equal(done.stage,'completed',JSON.stringify(done));assert.equal(own.sdk.objects.size,0);assert.equal(own.sdk.authDeletes(),1);
+  assert.equal((await db.query('select count(*)::int n from tickets where id=$1',[own.f.ticket])).rows[0].n,0);
+  const lost=await make();const originalRemove=lost.config.storage.remove;let sent=0;
+  lost.config.storage.remove=async args=>{sent++;await originalRemove(args);throw new Error('synthetic lost removal response');};
+  const lostHost=createAccountErasureHost(lost.config);
+  assert.notEqual((await lostHost.run()).stage,'completed');assert.equal(lost.sdk.authDeletes(),0);
+  assert.equal((await lostHost.run()).stage,'completed');assert.equal(sent,1);
+  const unknown=await make();unknown.sdk.setMode('auth_unknown');
+  const unknownHost=createAccountErasureHost(unknown.config);
+  assert.notEqual((await unknownHost.run()).stage,'completed');assert.equal(unknown.sdk.authDeletes(),1);
+  unknown.sdk.setAuth('present');
+  const resumed=createAccountErasureHost({...unknown.config,auth:createErasureAuthAdapter(unknown.sdk.client,unknown.f.actor)});
+  assert.notEqual((await resumed.run()).stage,'completed');assert.equal(unknown.sdk.authDeletes(),1);
+  unknown.sdk.setAuth('absent');assert.equal((await resumed.run()).stage,'completed');assert.equal(unknown.sdk.authDeletes(),1);
+ }finally{await hostDb.end();}
+ report.checks.push('unwired host: service-only original request; anon/auth denied; missing history/quiescence denied; lost Storage response and durable Auth intent recover without duplicate deletion');
  const related=await fixture();
  await db.query(`insert into ticket_replies(ticket_id,user_id,content) values($1,$2,'Sibling fresh body')`,[related.ticket,related.other]);
  await db.query('select account_erasure_confirm($1,$2)',[related.admin,randomUUID()]);

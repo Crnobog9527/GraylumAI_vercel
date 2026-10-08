@@ -33,8 +33,8 @@ capability and return only stage/time/review state. The web browser tests separa
 exercise the real UI/Provider/tRPC with synthetic HTTP/Auth; this is layered local
 proof, not a real provider or complete deployed end-to-end acceptance.
 
-The test manifest/classification and HTTP bodies are synthetic. There is no real
-manifest host, deletion entry point, account, credential or network call. The
+The test manifest/classification and HTTP bodies are synthetic. The injected host is invoked only by local tests. There is no real
+manifest verifier, deletion entry point, account, credential or network call. The
 runner accepts only the local Unix Docker socket and pinned PG17 digest, rejects
 CI/remote URLs, removes its container and temporary compiled files, and reports
 failures without silently continuing. `--development` after `--from-0186` skips
@@ -52,7 +52,7 @@ The initial integration imported those inputs byte-for-byte. The follow-up corre
 refund disclosure in AccountErasureCard and its inherited impact-copy helper, with
 focused browser/unit tests. The other source imports remain unchanged. The
 manifest/retention follow-up adds 0196 and its built
-fingerprint; no table, queue, host, cron or HTTP endpoint is introduced.
+fingerprint; no table, queue, cron or HTTP endpoint is introduced.
 
 Deployment remains unapproved: 0190 before upload, 0191 before progress, and
 0193–0195 before monthly execution. Old-upload drain, real SDK compatibility,
@@ -74,7 +74,7 @@ removed by this adapter, even when a retained administrator reply appears exclus
 to the subject. This is the current authorized conservative boundary.
 
 Current rows are not historical completeness proof. The adapter defaults to refusal
-unless a trusted host supplies `verifyRetainedHistory`; no real verifier or host is
+unless a trusted caller supplies `verifyRetainedHistory`; no real verifier or execution entry is
 implemented here. The test verifier is valid only for the explicitly created local
 synthetic fixture. It cannot be replaced by a client boolean, empty tables or an
 elapsed-time assumption in deployment. Previously purged administrator references
@@ -100,3 +100,27 @@ rolling back code can recover already-purged history.
 
 Deployment preparation must now enumerate 0187–0196, not reuse the old nine-file
 manifest or 0195 built fingerprint. No remote migration or effect was executed.
+
+The follow-up `host.ts` exports only injected single-subject composition. It reads
+the service-only request with the same client used for the complete raw manifest,
+checks the original subject/request pair and binds the processor inventory to it.
+Missing history or quiescence proof refuses before processor work. These callbacks
+are trusted test dependencies, not new evidence formats or client authorization.
+Quiescence must remain true through all I/O settlement; the fixture owns all writers.
+Neither a new account nor 0196 deployment proves historical completeness, since
+ordinary open-account ticket purging is unchanged.
+
+The host reuses Storage observation and the persisted Auth intent. Its per-instance
+latch retains outstanding I/O after timeout and seals later operations, but is not
+a cross-instance lock or a guarantee that a remote request was cancelled. Durable
+error state is not overwritten: original errors retain priority in an incomplete
+result, and the host does not write `account_erasure_note_error` from a stale read.
+A future actual caller must define safe concurrency and persistent diagnostics;
+this test-only composition does not authorize that caller or a scheduled entry.
+
+Combined tests use actual local service-role reads/RPCs and the pinned SDK with
+synthetic HTTP: anon/authenticated and wrong request are denied; absent proof
+removes nothing; a lost Storage success is observed before continuing; a fresh
+host/Auth adapter observes an existing deletion intent without resending.
+No SQL/built, role grants, dependencies, route, cron, CLI, credentials or default SDK
+construction change in this host slice.

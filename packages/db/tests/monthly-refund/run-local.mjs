@@ -105,7 +105,7 @@ try {
  if(integrated){
   const module=async name=>import(pathToFileURL(compile(resolve(root,'packages/api/src/services/accountErasure/'+name+'.ts'))).href);
   await runManifest({db:client,Client,connectionString,report,require,read,
-   ...(await module('manifest')),...(await module('storage')),...(await module('storageTransport')),...(await module('authAdapter')),
+   ...(await module('host')),...(await module('manifest')),...(await module('storage')),...(await module('storageTransport')),...(await module('authAdapter')),
    ...(await module('processor'))});
   await runCombined({db:client,service,webhook,report,require,ts,run,root,
    ...(await module('processor')),...(await module('storage')),...(await module('storageTransport')),...(await module('authAdapter'))});
