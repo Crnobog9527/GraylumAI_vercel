@@ -24,7 +24,7 @@
   "keys": []
  },
  "pendingOnStaging": {
-  "_why": "Objects of migrations merged but not yet applied to staging (group or object keys). Empty whenever staging is up to date; list them only while comparing across such a gap.",
+  "_why": "Objects of migrations merged but not yet applied to staging (group or object keys). Empty whenever staging is up to date; list them only while comparing across such a gap. The 2026-10-09 snapshot verifies staging through 0196 (ledger 20261008092108); no pending objects remain for that boundary.",
   "keys": []
  }
 }

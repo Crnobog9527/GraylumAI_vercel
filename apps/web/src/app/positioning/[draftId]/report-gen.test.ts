@@ -25,6 +25,8 @@ describe("reportStartRefusal", () => {
   it("offers membership only for the membership refusal", () => {
     expect(reportStartRefusal(new Error("REPORT_MEMBERSHIP_REQUIRED")).membership).toBe(true);
     expect(reportStartRefusal(new Error("REPORT_ENTITLEMENTS_UNAVAILABLE")).membership).toBeUndefined();
+    // A round whose Skill has no report manifest is refused before membership (#755): never a paywall.
+    expect(reportStartRefusal(new Error("REPORT_MANIFEST_REQUIRED"))).toEqual({ text: "这个定位流程暂时不支持生成完整报告。" });
   });
   it("hides the entry when the switch turned off", () => {
     expect(reportStartRefusal(new Error("REPORT_DISABLED"))).toEqual({ text: REPORT_DISABLED_NOTICE, hideEntry: true });

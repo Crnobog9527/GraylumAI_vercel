@@ -11,16 +11,13 @@ const base = {
 };
 
 describe('buildErasureImpactLines', () => {
-  it('states irreversibility, credit forfeiture, refund eligibility and exceptions and financial retention', () => {
+  it('states only the consequences of confirming, never refund rules', () => {
     const text = buildErasureImpactLines(base).map((line) => line.text).join('\n');
     expect(text).toContain('不能撤销');
     expect(text).toContain('剩余 40 积分将作废');
-    expect(text).not.toContain('默认不退款');
-    expect(text).toContain('从这次付款起整个账户没有任何积分消耗');
-    expect(text).toContain('不受上述 7 天和未消耗条件限制');
-    expect(text).toContain('无故终止账号还退没用完的已购积分');
-    expect(text).toContain('人工审批后原渠道执行，法律允许时扣 6%');
+    expect(text).toContain('私有内容将被清除');
     expect(text).toContain('3 年');
+    expect(text).not.toMatch(/退款|手续费|工单/);
     expect(buildErasureImpactLines(base).some((line) => line.tone === 'block')).toBe(false);
   });
 

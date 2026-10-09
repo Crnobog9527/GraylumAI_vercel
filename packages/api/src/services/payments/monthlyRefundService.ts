@@ -5,6 +5,7 @@ import { monthlyRefundTermsSchema, monthlyRefundVersion, prepareMonthlyRefundQuo
 import { readSubscriptionRefundFacts, type SubscriptionRefundPreviewRequest } from './subscriptionRefundPreview';
 import { planMonthlyRefundStep, type MonthlyRefundIntent, type MonthlyRefundObservation } from './subscriptionRefundExecution';
 import { evidence, objectId, readMonthlyProvider, refundFact, stageKey, type MonthlyStripe } from './monthlyRefundProvider';
+import { monthlyRefundPolicyReason } from './monthlyRefundError';
 import { resolveStripeScope } from './stripeCheckoutPersistence';
 
 export type MonthlyDb = Pick<SupabaseClient, 'from' | 'rpc'>;
@@ -14,7 +15,7 @@ type StoredIntent = MonthlyRefundIntent & {
 const started = () => ({ stop_renewal: null, refund: null, cancel: null, restore_renewal: null });
 async function rpc(db: MonthlyDb, name: string, args: Record<string, unknown>) {
   const result = await db.rpc(name, args);
-  if (result.error || !result.data) throw new Error('PAY_MONTHLY_TRANSACTION_FAILED');
+  if (result.error || !result.data) throw new Error('PAY_MONTHLY_TRANSACTION_FAILED', { cause: result.error });
   return result.data;
 }
 export async function readMonthlyRefundStatus(db: MonthlyDb, orderId: string): Promise<StoredIntent> {
@@ -47,7 +48,7 @@ export async function quoteMonthlyRefund(
     credits: f.evidence.grants.filter(g => g.source_order_id === f.order.id).reduce((n, g) => n + g.credits_granted, 0),
     feeEvidence: input.feeEvidence, snapshot: f.order.purchase_snapshot,
   });
-  evidence(prepared.status === 'eligible');
+  if (prepared.status !== 'eligible') throw new Error(monthlyRefundPolicyReason(prepared.reason));
   const provisional: MonthlyRefundIntent = { ...prepared.quote, id: approved?.id ?? '00000000-0000-4000-8000-000000000000',
     claimedAt: null, started: started(), recordedRefund: null };
   const seen = await readMonthlyProvider(stripe, provisional);
