@@ -13,6 +13,7 @@ import {
   REPORT_ACTION, REPORT_INTRO, REPORT_TITLE, REPORT_WRITING_NOTICE, reportView,
 } from "./report-gen";
 import { useReportGen } from "./use-report-gen";
+import { useReportPaywallMemory } from "./report-paywall-memory";
 import { STOP_SAVING_NOTICE, STOP_UNCONFIRMED_NOTICE } from "./stop-reply";
 
 type Props = { draftId: string; sessionId: string; projectId: string; roundId: string; confirmed: boolean; busy: boolean };
@@ -32,10 +33,11 @@ function RoundReportEntry(props: Props) {
   const canGenerate = props.confirmed && available.data?.enabled === true;
   const report = useReportGen({ ...props, canGenerate: canGenerate });
   const [open, setOpen] = useState(false);
+  // A first start refused for membership opens the paywall (design v25 scene 1), also after leaving
+  // and coming back in this tab. A saved report of this round keeps its own dialog.
+  const paywall = useReportPaywallMemory({ draftId: props.draftId, roundId: props.roundId,
+    refusedForMembership: Boolean(report.refusal?.membership), hasReport: Boolean(report.executionId) });
   if (!report.executionId && (!canGenerate || report.refusal?.hideEntry)) return null;
-  // A first start refused for membership opens the paywall (design v25 scene 1). A saved report of
-  // this round keeps its own dialog, where a later membership refusal stays a notice.
-  const paywall = Boolean(report.refusal?.membership && !report.executionId);
   return (
     <>
       <Button variant="outline" disabled={props.busy} onClick={() => setOpen(true)}>

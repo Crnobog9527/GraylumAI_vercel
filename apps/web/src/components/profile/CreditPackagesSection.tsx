@@ -48,6 +48,16 @@ export const CreditPackagesSection = memo(function CreditPackagesSection({
         </div>
         <h3 className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>积分加油包</h3>
       </div>
+      {entitlement.status === 'error' && (
+        <div data-testid="profile-credit-packages-entitlement-error" role="alert"
+          className="mb-4 flex flex-wrap items-center gap-3 text-sm" style={{ color: 'var(--text-secondary)' }}>
+          <span>暂时无法确认会员状态，积分包现在不能购买。</span>
+          <Button type="button" variant="outline" size="sm" disabled={entitlements.isFetching}
+            onClick={() => { void entitlements.refetch(); }}>
+            {entitlements.isFetching ? '重试中...' : '重试'}
+          </Button>
+        </div>
+      )}
       {entitlement.status === 'ready' && !isPaidMember(entitlement) && (
         <p data-testid="profile-credit-packages-members-only" className="mb-4 text-sm" style={{ color: 'var(--text-secondary)' }}>
           {PACK_MEMBERS_ONLY_NOTICE}

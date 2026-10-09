@@ -22,6 +22,12 @@ beforeAll(async () => {
     const q = value => ({data: value, isLoading: false, isError: false});
     export const trpc = {
       runtime: {reportAvailable: {useQuery: () => q({enabled: true})}},
+      user: {getEntitlements: {useQuery: (_input, options) => {
+        if (options?.enabled) window.entitlementReads = (window.entitlementReads ?? 0) + 1;
+        const fresh = window.entitlementsFresh !== false;
+        return {...q(options?.enabled ? window.entitlements : undefined), isSuccess: Boolean(options?.enabled),
+          isFetchedAfterMount: Boolean(options?.enabled) && fresh, isFetching: Boolean(options?.enabled) && !fresh};
+      }}},
       settings: {getMembershipPlans: {useQuery: () => window.plansFail ? {data: window.stalePlans, isLoading: false, isError: true}
         : q(window.plans)}},
       payments: {
@@ -42,7 +48,8 @@ beforeAll(async () => {
   `;
   const reportMock = `
     export function useReportGen() {
-      return {...window.report, payg: {turnNotices: () => []}, start: () => {}, restart: () => {}, stop: () => {},
+      return {...window.report, payg: {turnNotices: () => []}, start: () => { window.starts = (window.starts ?? 0) + 1; },
+        restart: () => {}, stop: () => {},
         retryStop: () => {}};
     }
   `;
@@ -87,9 +94,12 @@ async function open(setup: Record<string, unknown>, width = 1280) {
   const page = await browser.newPage({ viewport: { width, height: 900 } });
   const errors: string[] = [];
   page.on('pageerror', error => errors.push(error.message));
-  await page.route('**/*', route => route.abort());
-  await page.setContent('<div id="root"></div>');
+  // A real origin, so the page can use sessionStorage; every other request is blocked.
+  await page.route('**/*', route => route.request().url() === 'http://paywall.test/'
+    ? route.fulfill({ contentType: 'text/html', body: '<!doctype html><div id="root"></div>' }) : route.abort());
+  await page.goto('http://paywall.test/');
   await page.evaluate(value => { Object.assign(window, value); }, { plans: PLANS, matrix: MATRIX, report: MEMBERSHIP, ...setup });
+  if (setup.sessionFlag) await page.evaluate(() => sessionStorage.setItem('opc-report-paywall:d:r', 'membership'));
   await page.addScriptTag({ content: code });
   await page.getByRole('button', { name: '生成完整报告' }).click();
   return { page, errors };
@@ -211,6 +221,54 @@ it('does not promise follower-count stages the report does not use', async () =>
     const text = await page.getByTestId('report-paywall').innerText();
     expect(text).toContain('满足什么条件再进入下一步');
     expect(text).not.toMatch(/粉丝到多少|粉丝量/);
+    expect(errors).toEqual([]);
+  } finally { await page.close(); }
+}, 20000);
+
+it('coming back to the page after a membership refusal shows the paywall again without a new start', async () => {
+  // A fresh page load (e.g. browser back from checkout): no refusal in memory, only this tab's flag.
+  const { page, errors } = await open({ sessionFlag: true, entitlements: { level: 'free' },
+    report: { executionId: null, refusal: null, offer: 'start' } });
+  try {
+    await browserExpect(page.getByTestId('report-paywall')).toBeVisible();
+    expect(await page.evaluate('window.starts ?? 0')).toBe(0);
+    expect(errors).toEqual([]);
+  } finally { await page.close(); }
+}, 20000);
+
+it('drops the remembered paywall once the server reports a paid member', async () => {
+  const { page, errors } = await open({ sessionFlag: true, entitlements: { level: 'pro' },
+    report: { executionId: null, refusal: null, offer: 'start' } });
+  try {
+    await browserExpect(page.getByRole('dialog', { name: '完整运营策略报告' })).toBeVisible();
+    await browserExpect(page.getByTestId('report-paywall')).toHaveCount(0);
+    expect(await page.evaluate(() => sessionStorage.getItem('opc-report-paywall:d:r'))).toBeNull();
+    expect(errors).toEqual([]);
+  } finally { await page.close(); }
+}, 20000);
+
+it('remembers a membership refusal in this tab, and never reads membership without one', async () => {
+  const { page, errors } = await open({});
+  try {
+    await browserExpect(page.getByTestId('report-paywall')).toBeVisible();
+    expect(await page.evaluate(() => sessionStorage.getItem('opc-report-paywall:d:r'))).toBe('membership');
+    await page.close();
+    const second = await open({ report: { executionId: null, refusal: null, offer: 'start' } });
+    expect(await second.page.evaluate('window.entitlementReads ?? 0')).toBe(0);
+    await browserExpect(second.page.getByTestId('report-paywall')).toHaveCount(0);
+    expect([...errors, ...second.errors]).toEqual([]);
+    await second.page.close();
+  } finally { if (!page.isClosed()) await page.close(); }
+}, 30000);
+
+it('keeps the remembered paywall while only a cached paid level is known', async () => {
+  // A cached `pro` from before an expiry, while the fresh read is still running: must not clear the flag.
+  const { page, errors } = await open({ sessionFlag: true, entitlements: { level: 'pro' }, entitlementsFresh: false,
+    report: { executionId: null, refusal: null, offer: 'start' } });
+  try {
+    await browserExpect(page.getByTestId('report-paywall')).toBeVisible();
+    expect(await page.evaluate(() => sessionStorage.getItem('opc-report-paywall:d:r'))).toBe('membership');
+    expect(await page.evaluate('window.starts ?? 0')).toBe(0);
     expect(errors).toEqual([]);
   } finally { await page.close(); }
 }, 20000);

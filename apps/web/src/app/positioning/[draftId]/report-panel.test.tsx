@@ -10,6 +10,7 @@ const state = vi.hoisted(() => ({
 vi.mock("@/trpc/client", () => {
   const mutation = () => ({ mutateAsync: vi.fn(), isPending: false });
   return { trpc: {
+    user: { getEntitlements: { useQuery: () => ({ data: undefined }) } },
     useUtils: () => ({ client: { runtime: { executeStream: { mutate: vi.fn() } } }, credits: { getBalance: { invalidate: vi.fn() } } }),
     runtime: {
       reportAvailable: { useQuery: (_input: unknown, options: { enabled: boolean }) => {
