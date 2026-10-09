@@ -101,11 +101,14 @@ export function createAccountErasureHost(input: {
       const manifest = input.scopedManifest ? createScopedErasureManifest({ verify, requestId: input.requestId, token: input.executorToken,
         read: (name, args, signal) => track(() => input.client.rpc(name, args).abortSignal(signal)),
       }) : createErasureAttachmentManifest({ client: metadata, limits: { timeoutMs: timeout }, verifyRetainedHistory: verify });
+      // A pass contains many individually bounded reads; checkpoint one object at a time.
+      const storageBudget = input.scopedManifest ? 8000 : timeout;
       const storage = createErasureStorageAdapter({ manifest, storage: {
         listPrefix: args => track(() => input.storage.listPrefix(args)),
         getState: args => track(() => input.storage.getState(args)),
         remove: args => track(() => input.storage.remove(args)),
-      }, limits: { requestTimeoutMs: timeout, totalTimeoutMs: timeout } });
+      }, limits: { requestTimeoutMs: timeout, totalTimeoutMs: storageBudget,
+        ...(input.scopedManifest ? { pageSize: 1, maxPages: 100 } : {}) } });
       const result = await processAccountErasure({ profileId: input.profileId,
         database: { rpc: (name, args) => track(async () => {
           const response = await input.client.rpc(name, args);
@@ -115,7 +118,7 @@ export function createAccountErasureHost(input: {
         }) },
         storageAdapter: storage,
         authAdapter: { getState: id => track(() => input.auth.getState(id)), remove: id => track(() => input.auth.remove(id)) },
-        budget: { operationTimeoutMs: timeout, deadline: input.deadline },
+        budget: { operationTimeoutMs: timeout, storagePassTimeoutMs: storageBudget, deadline: input.deadline },
       });
       // Do not use note_error here: a stale read/late host must not overwrite a
       // newer AUTH_BAN_FAILED or billing diagnostic. Keep original error priority in output.

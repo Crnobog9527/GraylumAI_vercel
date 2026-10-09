@@ -41,13 +41,14 @@ export async function runExecutor({db,Client,connectionString,require,runAccount
   await runAccountErasureExecutor(first.client);assert.equal(first.sdk.authDeletes(),1,'completed identity is not dispatched again');
 
   const lost=await fixture();await lost.close();
-  const remove=lost.client.storage.from.bind(lost.client.storage);let sends=0;
+  const remove=lost.client.storage.from.bind(lost.client.storage);let sends=0;const sentPaths=[];
   lost.client.storage={from(bucket){const api=remove(bucket);const original=api.remove.bind(api);
-   api.remove=async paths=>{sends++;await original(paths);throw new Error('synthetic lost success');};return api;}};
+   api.remove=async paths=>{sends++;sentPaths.push(...paths);const value=await original(paths);
+    if(sends===1)throw new Error('synthetic lost success');return value;};return api;}};
   const partial=await runAccountErasureExecutor(lost.client);assert.ok(partial.pending>0);assert.equal(lost.sdk.authDeletes(),0);
   assert.equal((await lost.row()).stage,'erasing');assert.ok((await lost.row()).executor_error_codes.includes('ERASURE_STORAGE_PENDING'));
   await lost.retry();const resumed=await runAccountErasureExecutor(lost.client);
-  assert.equal(resumed.completed,1,JSON.stringify(resumed));assert.equal(sends,1,'read absence before any repeated remove');
+  assert.equal(resumed.completed,1,JSON.stringify(resumed));assert.equal(sends,3);assert.equal(new Set(sentPaths).size,sentPaths.length,'read absence before any repeated remove');
 
   const barrier=await fixture();await barrier.close();
   const blocker=new Client({connectionString});await blocker.connect();
@@ -60,9 +61,9 @@ export async function runExecutor({db,Client,connectionString,require,runAccount
   await barrier.retry();assert.equal((await runAccountErasureExecutor(barrier.client)).completed,1);
 
   const slow=await fixture();await slow.close();
-  const slowFrom=slow.client.storage.from.bind(slow.client.storage);
+  const slowFrom=slow.client.storage.from.bind(slow.client.storage);let delayedOnce=false;
   slow.client.storage={from(bucket){const api=slowFrom(bucket);const original=api.remove.bind(api);
-   api.remove=async paths=>{const value=await original(paths);await new Promise(resolve=>setTimeout(resolve,2200));return value;};return api;}};
+   api.remove=async paths=>{const value=await original(paths);if(!delayedOnce){delayedOnce=true;await new Promise(resolve=>setTimeout(resolve,2200));}return value;};return api;}};
   const delayed=await runAccountErasureExecutor(slow.client);
   assert.ok(delayed.pending>0);assert.equal((await slow.row()).executor_token,null,'late settled I/O releases the original claim');
   assert.equal(slow.sdk.authDeletes(),0);await slow.retry();
@@ -78,9 +79,22 @@ export async function runExecutor({db,Client,connectionString,require,runAccount
   const saved=await many.row();assert.ok(saved.storage_manifest_cursor);assert.equal(saved.storage_manifest_done,false);
   assert.match(saved.storage_manifest_cursor,/^[01]:[0-9a-f-]{36}:[0-9]{10}$/,'progress contains row IDs, not filenames');
   assert.equal(many.sdk.authDeletes(),0);await many.retry();
-  const lastPage=await runAccountErasureExecutor(many.client);assert.equal(lastPage.completed,1,JSON.stringify(lastPage));
+  let lastPage;for(let pass=0;pass<5;pass++){await many.retry();lastPage=await runAccountErasureExecutor(many.client);if(lastPage.completed)break;}
+  assert.equal(lastPage.completed,1,JSON.stringify(lastPage));
   assert.equal(many.sdk.objects.size,0);assert.equal((await many.row()).storage_manifest_done,true);
   assert.equal(many.sdk.authDeletes(),1);
+
+  const latency=await fixture();
+  const latencyPaths=Array.from({length:8},(_,index)=>uploader+'/latency-'+index+'.png');
+  await db.query("insert into ticket_replies(ticket_id,user_id,content,attachments) values($1,$2,'synthetic',$3)",
+   [latency.ticket,uploader,JSON.stringify(latencyPaths)]);
+  for(const path of latencyPaths)latency.sdk.objects.add(path);
+  const latencyFrom=latency.client.storage.from.bind(latency.client.storage);
+  latency.client.storage={from(bucket){const api=latencyFrom(bucket);const original=api.listV2.bind(api);
+   api.listV2=async args=>{await new Promise(resolve=>setTimeout(resolve,150));return original(args);};return api;}};
+  await latency.close();const began=Date.now();const delayedPage=await runAccountErasureExecutor(latency.client);
+  assert.ok(Date.now()-began>2000,'normal serial reads exceed a single-request timeout');
+  assert.equal(delayedPage.completed,1,JSON.stringify(delayedPage));assert.equal(latency.sdk.objects.size,0);
 
   const history=await fixture();
   await db.query('delete from tickets where id=$1',[history.ticket]);
@@ -117,6 +131,6 @@ export async function runExecutor({db,Client,connectionString,require,runAccount
    }
   }
   await service.query('SET ROLE service_role');
-  report.checks.push('wired executor with 5001 unrelated tickets and replies + local service SQL + locked SDK synthetic HTTP: success, repeat, barrier/new transaction retry, lost/slow Storage response, 251-path resumable manifest, history refusal with independent cleanup, durable claim/CAS and denied roles');
+  report.checks.push('wired executor with 5001 unrelated tickets and replies + local service SQL + locked SDK synthetic HTTP: success, repeat, barrier/new transaction retry, lost/slow Storage response, 251-path resumable manifest, serial network latency exceeding two seconds, history refusal with independent cleanup, durable claim/CAS and denied roles');
  } finally {await service.end();}
 }

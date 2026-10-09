@@ -20,7 +20,7 @@ export type ErasureProcessResult = {
 type Input = {
   profileId: string; database: BillingRpc; storageAdapter: ErasureStorageAdapter; authAdapter: ErasureAuthAdapter;
   /** Local execution bounds only. There is no scheduler, provider adapter, or production entry point. */
-  budget?: { now?: () => number; deadline?: number; maxPages?: number; operationTimeoutMs?: number };
+  budget?: { now?: () => number; deadline?: number; maxPages?: number; operationTimeoutMs?: number; storagePassTimeoutMs?: number };
 };
 class ProcessorFault extends Error {}
 
@@ -31,20 +31,22 @@ export async function processAccountErasure(input: Input): Promise<ErasureProces
   const deadline = input.budget?.deadline ?? now() + 30_000;
   const pages = input.budget?.maxPages ?? 4;
   const timeout = input.budget?.operationTimeoutMs ?? 2_000;
+  const storageTimeout = input.budget?.storagePassTimeoutMs ?? timeout;
   const error = (code: string) => { if (!report.errorCodes.includes(code)) report.errorCodes.push(code); };
   if (!z.string().uuid().safeParse(input.profileId).success || !Number.isFinite(deadline)
+    || !Number.isInteger(storageTimeout) || storageTimeout < 1 || storageTimeout > 55_000
     || !Number.isInteger(pages) || pages < 1 || pages > 4 || !Number.isInteger(timeout) || timeout < 1 || timeout > 5_000) {
     error('ERASURE_INVALID_INPUT'); report.remaining = 1; return report;
   }
   let calls = 0;
   let databaseUncertain = false;
   let requestId: string | undefined;
-  const bounded = async <T>(operation: () => PromiseLike<T>): Promise<T> => {
+  const bounded = async <T>(operation: () => PromiseLike<T>, operationBudget = timeout): Promise<T> => {
     if (++calls > 600 || now() >= deadline) throw new ProcessorFault('ERASURE_BUDGET_EXHAUSTED');
     let timer: ReturnType<typeof setTimeout> | undefined;
     try {
       return await Promise.race([Promise.resolve().then(operation), new Promise<never>((_, reject) => {
-        timer = setTimeout(() => reject(new ProcessorFault('ERASURE_OPERATION_TIMEOUT')), Math.min(timeout, deadline - now()));
+        timer = setTimeout(() => reject(new ProcessorFault('ERASURE_OPERATION_TIMEOUT')), Math.min(operationBudget, deadline - now()));
       })]);
     } finally { if (timer) clearTimeout(timer); }
   };
@@ -162,7 +164,7 @@ export async function processAccountErasure(input: Input): Promise<ErasureProces
     await attempt(async () => {
       const admission = storageReadySchema.parse(await rpc('account_erasure_storage_ready', actor));
       if (!admission.ready) { report.remaining++; error('ERASURE_STORAGE_PENDING'); return; }
-      const storage = storageSchema.parse(await bounded(() => input.storageAdapter.cleanSubject(input.profileId)));
+      const storage = storageSchema.parse(await bounded(() => input.storageAdapter.cleanSubject(input.profileId), storageTimeout));
       storageVerified = storage.complete && storage.remaining === 0 && storage.manualReview === 0;
       report.remaining += storage.remaining; report.manualReview += storage.manualReview;
       if (!storageVerified) { report.remaining = Math.max(1, report.remaining); error('ERASURE_STORAGE_PENDING'); }

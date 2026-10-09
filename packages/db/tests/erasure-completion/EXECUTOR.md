@@ -59,7 +59,11 @@ read-only erasure RPCs plus an original-claim checkpoint are the smallest missin
 capability, with tickets/replies
 remaining authoritative. Verified manifest pages persist their row/ordinal cursor,
 so more than 200 references make progress across invocations without retaining
-filenames in progress columns. A 251-attachment fixture proves this continuation.
+filenames in progress columns. A 251-attachment fixture proves this continuation. Production checkpoints each
+verified object and allows an eight-second Storage pass while each request remains
+bounded to two seconds; cumulative normal network latency therefore makes progress
+instead of repeatedly losing a 50-object page. The processor enforces the same
+separate pass budget and its overall deadline.
 A 5,001-row unrelated ticket and reply fixture cannot
 block a small subject or get deleted by its cleanup. No staging account has been closed and no remote DB was accessed.
 No progress capability is issued, read or exposed; the retired query page stays out
