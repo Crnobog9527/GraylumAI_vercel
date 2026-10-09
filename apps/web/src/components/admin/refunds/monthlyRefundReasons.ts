@@ -2,9 +2,11 @@
 
 /**
  * Plain-Chinese text for the reason codes `admin.quoteMonthlyRefund` returns since #750
- * (packages/api/src/services/payments/monthlyRefundError.ts). `ineligible` marks a refund rule
- * that was checked and failed, where rejecting the request is the normal next step; the rest are
- * evidence or state problems that need checking first. Unknown codes fall back to the generic text.
+ * (packages/api/src/services/payments/monthlyRefundError.ts). `ineligible` is only for codes that
+ * mean exactly one checked-and-failed refund rule (refundPolicy's `rejected` outcomes, or a refund or
+ * dispute the provider reports), where rejecting is the normal next step. A code that can also come
+ * from missing or mismatched evidence (checked against migrations 0193–0195) needs checking first.
+ * Unknown codes fall back to the generic text.
  */
 type Reason = { text: string; ineligible?: true };
 
@@ -13,12 +15,14 @@ const CHECK = (text: string): Reason => ({ text });
 
 const REASONS: Record<string, Reason> = {
   PAY_REFUND_OUTSIDE_WINDOW: RULE('已超过付款后 7 天的退款期限'),
-  PAY_REFUND_WINDOW: RULE('已超过付款后 7 天的退款期限'),
+  // 0193: also missing, future or mismatched payment/ticket times, not only a late request.
+  PAY_REFUND_WINDOW: CHECK('付款或工单时间不在 7 天范围内，或者时间记录缺失、对不上'),
   PAY_REFUND_CREDITS_CONSUMED: RULE('从这次付款起，这个账户用过积分'),
   PAY_REFUND_NOT_FIRST_PURCHASE: RULE('不是第一次购买会员'),
   PAY_REFUND_RENEWAL: RULE('这是续费，续费不退款'),
   PAY_REFUND_PRIOR_REFUND_OR_DISPUTE: RULE('这笔付款已经有退款或争议（拒付）记录，不能再退'),
-  PAY_REFUND_MONTHLY_SCOPE_REQUIRED: RULE('这笔订单不是 Pro 或 Gold 月付首购，这里不能处理'),
+  // monthlyRefundApproval: also channel, mode, refund reason or account state, not only the product.
+  PAY_REFUND_MONTHLY_SCOPE_REQUIRED: CHECK('这笔订单可能不是 Pro 或 Gold 月付首购，或者渠道、模式、账户状态不符合'),
   PAY_MONTHLY_SCOPE_OR_STATE: CHECK('这笔订单不是 Pro 或 Gold 月付首购，或者订单、订阅状态不允许退款'),
   PAY_REFUND_SCOPE_MISMATCH: CHECK('订单的退款范围和这里处理的不一致'),
   PAY_REFUND_TEST_SUBSCRIPTION_ONLY: CHECK('目前只能处理测试模式（Stripe 沙盒）的订阅'),
@@ -64,6 +68,9 @@ const REASONS: Record<string, Reason> = {
   PAY_REFUND_PAYMENT_ORDER_UNRESOLVED: CHECK('付款和订单的对应关系无法确认'),
   PAY_REFUND_PAYMENT_TIME_UNRESOLVED: CHECK('付款时间无法确认'),
 };
+
+/** Codes that alone prove a refund rule failed; everything else needs a person to check first. */
+export const INELIGIBLE_REFUND_CODES = Object.keys(REASONS).filter(code => REASONS[code].ineligible).sort();
 
 export type QuoteRefusal = { text: string; specific: boolean; ineligible: boolean };
 
