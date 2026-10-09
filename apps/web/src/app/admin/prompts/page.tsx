@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { ModuleSkillEditor, emptySkillForm, skillPublicationFields, type SkillForm } from './module-skill-editor';
+import { ModuleSkillEditor, ReportModelSetting, emptySkillForm, skillPublicationFields, syncModuleVersion, type SkillForm } from './module-skill-editor';
 import type { ElementType } from 'react';
 import { trpc } from '@/trpc/client';
 import { toast } from 'sonner';
@@ -192,6 +192,7 @@ export default function AdminPromptsPage() {
   const editorSession = useRef(0);
   const currentEditorSession = editorSession.current;
   const utils = trpc.useUtils();
+  const syncVersion = () => syncModuleVersion<FeatureModule>(refetch, editingModule?.id, setEditingModule);
   const saveSkill = trpc.skills.saveModule.useMutation({ onSuccess: async () => { await refetch(); editorSession.current++; setDialogOpen(false); setEditingModule(null); setSkillIdentity(null); setFormData(createEmptyForm()); } });
   const resetSkill = (module?: FeatureModule) => {
     editorSession.current++; setSkillReading(false); setSkillLoading(false);
@@ -213,7 +214,6 @@ export default function AdminPromptsPage() {
     icon: BATCH_NO_CHANGE,
     isFeatured: BATCH_NO_CHANGE,
   });
-
   const { data: dashboard, isLoading, error, refetch } = trpc.admin.getPromptsDashboard.useQuery({
     limit: 50,
     category: categoryFilter === 'all' ? undefined : categoryFilter,
@@ -977,7 +977,7 @@ export default function AdminPromptsPage() {
                 setSkillReading(reading);
                 if (reading) setSkillForm(value => ({ ...value, reviewed: false }));
               }} disabled={saveSkill.isPending || skillLoading} />}
-
+            {mode === 'skill' && <ReportModelSetting moduleId={editingModule?.id} hasReport={!!skillForm.reportGeneration} onSaved={syncVersion} />}
             <div className="space-y-2">
               <Label style={{ color: 'var(--text-secondary)' }}>卡片描述</Label>
               <Input
