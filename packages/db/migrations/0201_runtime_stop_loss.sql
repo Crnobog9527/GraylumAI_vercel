@@ -9,8 +9,11 @@ BEGIN
  SELECT value INTO v FROM system_settings WHERE key='runtime_stop_loss';
  IF v IS NULL THEN RETURN jsonb_build_object('version',1,'userDailyUsd',NULL,
   'siteDailyUsd',NULL,'siteAlertUsd',NULL,'providerBalanceAlertUsd',NULL,'notificationChannel',NULL);END IF;
- IF jsonb_typeof(v)='string' THEN v:=(v#>>'{}')::jsonb;END IF;
- IF jsonb_typeof(v)<>'object' OR v->>'version' IS DISTINCT FROM '1'
+ IF jsonb_typeof(v)='string' THEN
+  BEGIN v:=(v#>>'{}')::jsonb;
+  EXCEPTION WHEN invalid_text_representation THEN RAISE EXCEPTION 'RUNTIME_STOP_LOSS_CONFIG_INVALID';END;
+ END IF;
+ IF jsonb_typeof(v)<>'object' OR v->'version' IS DISTINCT FROM '1'::jsonb
   OR EXISTS(SELECT 1 FROM jsonb_object_keys(v) x WHERE x NOT IN
    ('version','userDailyUsd','siteDailyUsd','siteAlertUsd','providerBalanceAlertUsd','notificationChannel'))
  THEN RAISE EXCEPTION 'RUNTIME_STOP_LOSS_CONFIG_INVALID';END IF;
@@ -21,7 +24,9 @@ BEGIN
  END LOOP;
  IF NOT v ? 'notificationChannel' OR (v->'notificationChannel'<>'null'::jsonb AND
   (jsonb_typeof(v->'notificationChannel')<>'string' OR length(v->>'notificationChannel')>100
-   OR v->>'notificationChannel' ~ '^[[:space:]]*$'))
+   OR length(btrim(v->>'notificationChannel',
+    U&'\0009\000A\000B\000C\000D\0020\00A0\1680\2000\2001\2002\2003\2004\2005\2006\2007'
+    ||U&'\2008\2009\200A\2028\2029\202F\205F\3000\FEFF'))=0))
  THEN RAISE EXCEPTION 'RUNTIME_STOP_LOSS_CONFIG_INVALID';END IF;
  RETURN v;
 END $$;
@@ -49,7 +54,10 @@ BEGIN
  -- No run/profile locks are acquired after this lock by these helpers.
  PERFORM pg_advisory_xact_lock(201,1);
  SELECT value INTO s FROM system_settings WHERE key='runtime_rate_limits';
- IF jsonb_typeof(s)='string' THEN s:=(s#>>'{}')::jsonb;END IF;
+ IF jsonb_typeof(s)='string' THEN
+  BEGIN s:=(s#>>'{}')::jsonb;
+  EXCEPTION WHEN invalid_text_representation THEN RAISE EXCEPTION 'RUNTIME_STOP_LOSS_CONFIG_INVALID';END;
+ END IF;
  IF s IS NOT NULL AND (jsonb_typeof(s)<>'object' OR jsonb_typeof(s->'stopNewCalls') IS DISTINCT FROM 'boolean')
  THEN RAISE EXCEPTION 'RUNTIME_STOP_LOSS_CONFIG_INVALID';END IF;
  IF s->>'stopNewCalls'='true' THEN RAISE EXCEPTION 'RUNTIME_NEW_CALLS_STOPPED';END IF;

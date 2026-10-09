@@ -48,6 +48,15 @@ BEGIN
  UPDATE system_settings SET value=jsonb_set(cfg,'{notificationChannel}','"   "') WHERE key='runtime_stop_loss';
  BEGIN PERFORM runtime_stop_loss_assert(a,true);RAISE EXCEPTION 'expected invalid channel denial';
  EXCEPTION WHEN raise_exception THEN IF SQLERRM<>'RUNTIME_STOP_LOSS_CONFIG_INVALID' THEN RAISE;END IF;END;
+ UPDATE system_settings SET value='"not-json"'::jsonb WHERE key='runtime_stop_loss';
+ BEGIN PERFORM runtime_stop_loss_assert(a,true);RAISE EXCEPTION 'expected invalid JSON denial';
+ EXCEPTION WHEN raise_exception THEN IF SQLERRM<>'RUNTIME_STOP_LOSS_CONFIG_INVALID' THEN RAISE;END IF;END;
+ UPDATE system_settings SET value=jsonb_set(cfg,'{version}','"1"') WHERE key='runtime_stop_loss';
+ BEGIN PERFORM runtime_stop_loss_assert(a,true);RAISE EXCEPTION 'expected invalid version denial';
+ EXCEPTION WHEN raise_exception THEN IF SQLERRM<>'RUNTIME_STOP_LOSS_CONFIG_INVALID' THEN RAISE;END IF;END;
+ UPDATE system_settings SET value=jsonb_set(cfg,'{notificationChannel}',to_jsonb(chr(65279))) WHERE key='runtime_stop_loss';
+ BEGIN PERFORM runtime_stop_loss_assert(a,true);RAISE EXCEPTION 'expected unicode whitespace denial';
+ EXCEPTION WHEN raise_exception THEN IF SQLERRM<>'RUNTIME_STOP_LOSS_CONFIG_INVALID' THEN RAISE;END IF;END;
  DELETE FROM system_settings WHERE key='runtime_stop_loss';
  PERFORM runtime_stop_loss_assert(a,true);
  INSERT INTO system_settings(key,value) VALUES('runtime_rate_limits','{"stopNewCalls":true}')

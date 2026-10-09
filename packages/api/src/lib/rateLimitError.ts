@@ -23,9 +23,10 @@ export function rateLimitErrorFormatter({ shape, error }: {
   shape: TRPCDefaultErrorShape;
   error: TRPCError;
 }) {
+  const limit = error instanceof RateLimitError ? error : error.cause instanceof RateLimitError ? error.cause : undefined;
   return {
     ...shape,
-    data: { ...shape.data, ...(error instanceof RateLimitError ? { retryAfter: error.retryAfter,
-      ...(error.businessCode ? { businessCode: error.businessCode } : {}) } : {}) },
+    data: { ...shape.data, ...(limit ? { retryAfter: limit.retryAfter,
+      ...(limit.businessCode ? { businessCode: limit.businessCode } : {}) } : {}) },
   };
 }

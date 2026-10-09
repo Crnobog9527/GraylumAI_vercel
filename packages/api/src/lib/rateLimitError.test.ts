@@ -27,3 +27,18 @@ it('does not serialize arbitrary internal cause data', async () => {
   expect(body.error.data.retryAfter).toBeUndefined();
   expect(body.error.data.secret).toBeUndefined();
 });
+
+it.each([false, true])('keeps the stop code through a public error wrapper=%s', async wrapped => {
+  const testRouter = router({ probe: publicProcedure.mutation(() => {
+    const stopped = new RateLimitError('unavailable', 60, 'paused');
+    if (wrapped) throw new TRPCError({ code: 'BAD_REQUEST', message: 'REPORT_UNAVAILABLE', cause: stopped });
+    throw stopped;
+  }) });
+  const response = await fetchRequestHandler({ endpoint: '/trpc', router: testRouter, createContext: () => ({} as never),
+    req: new Request('http://localhost/trpc/probe', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' }),
+  });
+  const body = await response.json();
+  expect(body.error.data.businessCode).toBe('RUNTIME_NEW_CALLS_STOPPED');
+  expect(body.error.data.retryAfter).toBe(60);
+  expect(body.error.data.cause).toBeUndefined();
+});
