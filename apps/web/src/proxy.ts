@@ -89,10 +89,8 @@ function isSentryTunnelPath(pathname: string): boolean {
 }
 
 function createPublicPricingRedirect(request: NextRequest): NextResponse {
-  const pricingUrl = request.nextUrl.clone();
-  pricingUrl.pathname = '/landing';
-  pricingUrl.hash = 'pricing';
-  return NextResponse.redirect(pricingUrl);
+  // The public pricing page (PAYWALL); query parameters such as ?domain=www are kept.
+  return NextResponse.redirect(new URL(`/landing/pricing${request.nextUrl.search}`, request.url));
 }
 
 // 判断是否需要速率限制

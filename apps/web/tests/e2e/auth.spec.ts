@@ -184,8 +184,8 @@ test.describe('Authentication', () => {
         steps.push(`Open ${route}`);
         await gotoWithBypass(page, route);
 
-        await expect(page).toHaveURL(/\/landing\?domain=www#pricing/);
-        await expect(page.getByRole('heading', { name: /选择适合你的.*套餐/ })).toBeVisible();
+        await expect(page).toHaveURL(/\/landing\/pricing\?domain=www$/);
+        await expect(page.getByRole('heading', { name: '选一个适合你的方案' })).toBeVisible();
       }
 
       monitor.removeIssues((issue) =>
@@ -208,7 +208,7 @@ test.describe('Authentication', () => {
           title: 'public-pricing-plans-routes',
           role: 'public',
           route: '/pricing,/plans',
-          expected: 'Public pricing and plans routes land on the public pricing section without entering the login-required app route.',
+          expected: 'Public pricing and plans routes land on the public pricing page without entering the login-required app route.',
         },
         actual,
         steps,

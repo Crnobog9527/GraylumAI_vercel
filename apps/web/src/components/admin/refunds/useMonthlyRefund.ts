@@ -4,6 +4,7 @@
 import { useRef, useState } from 'react';
 import { trpc } from '@/trpc/client';
 import { getSafeErrorMessage } from '@/lib/safe-error-message';
+import { monthlyRefundQuoteRefusal, type QuoteRefusal } from './monthlyRefundReasons';
 import {
   EMPTY_MONTHLY_REFUND_FORM, validateMonthlyRefundForm, validateRefundFields,
   type MonthlyRefundForm, type MonthlyRefundRequest, type RefundFormScope, type RejectReason,
@@ -25,7 +26,7 @@ export function useMonthlyRefund() {
   const [errors, setErrors] = useState<Partial<Record<keyof MonthlyRefundForm, string>>>({});
   const [quoted, setQuoted] = useState<{ request: MonthlyRefundRequest; quote: Quote } | null>(null);
   const [quoting, setQuoting] = useState(false);
-  const [quoteError, setQuoteError] = useState<string | null>(null);
+  const [quoteError, setQuoteError] = useState<QuoteRefusal | null>(null);
   const [intent, setIntent] = useState<MonthlyRefundIntent | null>(null);
   const [executeResult, setExecuteResult] = useState<MonthlyRefundIntent | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -89,7 +90,7 @@ export function useMonthlyRefund() {
     } catch (error) {
       if (!current(started)) return;
       setQuoted(null);
-      setQuoteError(getSafeErrorMessage(error, FALLBACK));
+      setQuoteError(monthlyRefundQuoteRefusal(error, FALLBACK));
     } finally {
       setQuoting(false);
     }
