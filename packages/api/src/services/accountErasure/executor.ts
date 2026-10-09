@@ -91,11 +91,11 @@ async function runOne(client: SupabaseClient, deadline: number, drainDeadline: n
   return summary;
 }
 
-/** Use the five-minute cron schedule. Process bounded subjects until the cron deadline;
+/** Process ready subjects until the cron deadline, without a fixed daily subject cap;
  * unresolved claims and storage/billing failures remain visible on every invocation. */
 export async function runAccountErasureExecutor(client: SupabaseClient, deadline = Date.now() + 45_000) {
   const summary: ErasureExecutorSummary = { processed: 0, completed: 0, pending: 0, failed: 0 };
-  for (let index = 0; index < 20 && Date.now() + 5_000 < deadline; index++) {
+  while (Date.now() + 5_000 < deadline) {
     const result = await runOne(client, Math.min(deadline - 3_000, Date.now() + 10_000), deadline - 3_000);
     summary.processed += result.processed;
     summary.completed += result.completed;

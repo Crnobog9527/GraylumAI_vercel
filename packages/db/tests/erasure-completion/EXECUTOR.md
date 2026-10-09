@@ -1,11 +1,12 @@
 # DATA-ERASURE PR-C executor
 
 `/api/cron/account-erasure` runs the existing processor with the existing cron
-authentication and service client, every five minutes. The billing route remains
+authentication and service client, daily at 05:00 UTC for staging Hobby. The billing route remains
 at 04:00 UTC. Sharing its 60-second invocation would either run conflicting DB
 work against the transaction barrier or reduce the existing financial recovery
 budget. This separate path reuses Vercel cron; it is not a new scheduler.
-Each invocation processes at most 20 subjects with a 45-second work budget,
+Each invocation processes ready subjects until its 45-second work budget is nearly exhausted,
+without a fixed 20-subject cap,
 plus bounded reconciliation reads within the route's 60-second limit, using fresh
 RPC transactions. `transactions_pending`, unknown uploads/history, partial failures,
 unresolved financial evidence and remaining rows report pending, never completed.
@@ -60,15 +61,31 @@ The executor's diagnostic columns do not overwrite financial/Auth diagnostics.
 An uncertain idle-claim release reads the original request first; only a still-owned
 claim can retry the same CAS release, while an already released claim is not resent.
 
-A five-minute cadence reserves retry opportunities before the 24-hour objective;
-20 subjects and the work budget bound each invocation (at most 5,760 attempts/day).
-The known staging Hobby plan cannot deploy this cadence. **Deployment is blocked
-until the separately approved environment supports it**; do not silently replace
-it with a daily schedule or claim the time objective passed. No plan upgrade or
-remote scheduling/configuration was performed. The existing production plan calls
-for Pro, but actual availability still needs deployment verification. Backlog,
-large subjects, unresolved financial/manual cases and legacy upload/history proof
-still require operational acceptance; the product deadline is unchanged.
+The temporary daily schedule follows the approved 2026-10-10 staging decision
+recorded in [the PR](https://github.com/Crnobog9527/GraylumAI_vercel/pull/748#issuecomment-6085271741).
+05:00 UTC avoids the existing 02:00, 03:00, 04:00 and 10:00 schedules. It meets the
+Hobby once-daily frequency restriction; actual deployment is not performed here.
+Daily operation does **not** establish the 24-hour deletion objective: backlog,
+large subjects, retries and manual recovery can span multiple days. Staging's
+24-hour acceptance is deferred by that decision, not recorded as passed.
+
+The function still has a 60-second limit. New claims stop with five seconds left
+in the 45-second work budget; each subject gets at most ten seconds of work,
+with actual-I/O draining bounded to three seconds before that budget ends.
+The remaining function time covers original-token finish observation/CAS and
+pending-count reads. SQL chooses least-recently-attempted requests; its five-minute
+cooldown prevents a failed subject from spinning in the same invocation and has
+expired by the next daily run. Persisted manifest/prefix checkpoints survive the
+daily gap. Pending work continues next time; unknown in-flight I/O still requires
+the protected recovery below. A simulated 60-subject test consumes 40 one-second
+subjects in the first invocation and the remaining 20 the next day. This verifies
+budget/continuation behavior, not a production throughput guarantee.
+
+**Before launch (REL-1): upgrade Vercel to Pro, change this cron back to every five
+minutes (`*/5 * * * *`), verify deployment and actual invocation, and validate
+"online content cleared within 24 hours" with backlog/retry cases.** Coordinate
+that launch check with the runtime-recovery minute-level cron. No plan upgrade,
+remote scheduling configuration or production acceptance was performed here.
 
 The former full-table manifest read is retained only for injected legacy tests.
 The executor now uses service-only subject keyset pages and candidate-path

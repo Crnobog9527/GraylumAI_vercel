@@ -123,3 +123,28 @@ it.each([false, true])('observes an uncertain finish before retrying its origina
   expect((await runAccountErasureExecutor(database as never)).failed).toBe(0);
   expect(database.rpc.mock.calls.filter(([name]) => name === 'account_erasure_executor_finish')).toHaveLength(committed ? 1 : 2);
 });
+
+it('uses available daily budget beyond 20 subjects and resumes remaining work next invocation', async () => {
+  let now = 0, remaining = 60;
+  const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
+  const database = client();
+  database.rpc.mockImplementation(name => {
+    let data: unknown = { recorded: true };
+    if (name === 'account_erasure_executor_claim') data = remaining > 0
+      ? { claimed: true, profileId: actor, requestId: request } : { claimed: false };
+    if (name === 'account_erasure_executor_pending') data = remaining;
+    const promise = Promise.resolve({ data, error: null });
+    return Object.assign(promise, { abortSignal: () => promise });
+  });
+  mocks.run.mockImplementation(async () => {
+    now += 1000; remaining--;
+    return { stage: 'completed', retry: false, errorCodes: [] };
+  });
+  try {
+    expect(await runAccountErasureExecutor(database as never)).toEqual({ processed: 40, completed: 40, pending: 20, failed: 0 });
+    expect(now).toBe(40_000);
+    now += 24 * 60 * 60 * 1000;
+    expect(await runAccountErasureExecutor(database as never)).toEqual({ processed: 20, completed: 20, pending: 0, failed: 0 });
+    expect(remaining).toBe(0);
+  } finally { clock.mockRestore(); }
+});

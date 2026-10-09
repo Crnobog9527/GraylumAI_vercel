@@ -43,8 +43,9 @@ it('reports cleanup retry as pending rather than success', async () => {
   expect(response.status).toBe(500);
   expect(await response.json()).toEqual({ success: false, processed: 1, completed: 0, pending: 1, failed: 0 });
 });
-it('uses five-minute cleanup cadence without changing financial recovery scheduling', () => {
+it('uses daily 05:00 UTC cleanup without overlapping existing cron schedules', () => {
   const config = JSON.parse(readFileSync('vercel.json', 'utf8'));
-  expect(config.crons).toContainEqual({ path: '/api/cron/account-erasure', schedule: '*/5 * * * *' });
-  expect(config.crons).toContainEqual({ path: '/api/cron/billing-reconcile', schedule: '0 4 * * *' });
+  expect(config.crons).toContainEqual({ path: '/api/cron/account-erasure', schedule: '0 5 * * *' });
+  expect(config.crons.filter((cron: { path: string }) => cron.path !== '/api/cron/account-erasure')
+    .map((cron: { schedule: string }) => cron.schedule)).toEqual(['0 2 * * *', '0 3 * * *', '0 4 * * *', '0 10 * * *']);
 });
