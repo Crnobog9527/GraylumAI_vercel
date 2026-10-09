@@ -645,6 +645,11 @@ it('BILL2: RUNTIME-PROD actual settled USD, paused completion, exact cap and ato
   await expect(db.query('select runtime_stop_loss_assert($1,true)',[f.actor])).rejects.toThrow('RUNTIME_USER_DAILY_USD_LIMIT');
   await db.query('select runtime_stop_loss_assert($1,false)',[f.actor]); // existing freeze remains dispatchable
   await conservation(f.actor);
+  const refunded=await fixture();const refundRun=await refunded.prepare();const refundCall=await call(refunded.actor,refundRun.id);
+  await receipt(refunded.actor,refundRun.id,refundCall,'0.001');await close(refunded.actor,refundRun.id,'confirmed_failure');
+  await sqlRpc('bill2_finalize',[refunded.actor,refundRun.id]);
+  expect((await sqlRpc('runtime_stop_loss_usage',[refunded.actor])).userUsd).toBe('0.001');
+  expect((await conservation(refunded.actor)).credits).toBe(100);
   // Two independent transactions: admission waits for a setting transaction and sees its committed cap.
   await client.connect();await db.query('begin');
   await setting('runtime_stop_loss',{...cfg,userDailyUsd:null,siteDailyUsd:'0'});
