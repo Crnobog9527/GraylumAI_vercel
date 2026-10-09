@@ -16,9 +16,9 @@ export async function loadStagingPolicy(database:BillingRpc,actorId:string,env:R
  const windowId=stagingRuntimeWindow(env);
  const response=await database.rpc('runtime_test_policy',{p_actor_id:z.string().uuid().parse(actorId),p_window_id:windowId});
  if(response.error)stagingRpcFailure(response.error,'RUNTIME_TEST_WINDOW_DENIED','RUNTIME_STAGING_POLICY_DENIED');
- return parsePolicy(response.data,windowId);
+ return parseStagingPolicy(response.data,windowId);
 }
-function parsePolicy(value:unknown,windowId?:string):StagingPolicy{
+export function parseStagingPolicy(value:unknown,windowId?:string):StagingPolicy{
  const parsed=schema.safeParse(value);
  if(!parsed.success)throw new StagingAccessError('RUNTIME_STAGING_POLICY_INVALID');
  const policy=parsed.data;
@@ -48,5 +48,5 @@ export async function loadStagingRecoveryPolicy(database:BillingRpc,actorId:stri
  stagingRuntimeWindow(env,true);
  const r=await database.rpc('runtime_test_recovery_policy',{p_actor_id:z.string().uuid().parse(actorId),p_execution_id:z.string().uuid().parse(executionId)});
  if(r.error)stagingRpcFailure(r.error,'RUNTIME_TEST_RECOVERY_DENIED','RUNTIME_STAGING_RECOVERY_DENIED');
- return parsePolicy(r.data);
+ return parseStagingPolicy(r.data);
 }

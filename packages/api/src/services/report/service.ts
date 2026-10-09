@@ -1,4 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import { reportModelErrorCode } from './modelErrors';
 import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
 import type { SupabaseClient } from '@supabase/supabase-js';
@@ -28,8 +29,9 @@ export function reportBlocksNewStart(saved: { state?: string; result?: { body?: 
 }
 export function reportError(error: unknown): never {
   const message = error instanceof Error ? error.message : typeof error === 'object' && error && 'message' in error ? error.message : null;
+  const modelCode = reportModelErrorCode(message);
   throw new TRPCError({ code: message === 'REPORT_MEMBERSHIP_REQUIRED' ? 'FORBIDDEN' : 'BAD_REQUEST',
-    cause: error, message: typeof message === 'string' && reportCodes.has(message) ? message : 'REPORT_UNAVAILABLE' });
+    cause: error, message: modelCode ?? (typeof message === 'string' && reportCodes.has(message) ? message : 'REPORT_UNAVAILABLE') });
 }
 /** The server switch: only a strict `{enabled:true}` setting enables NEW report admission. */
 export async function reportEnabled(admin: SupabaseClient) {

@@ -1,3 +1,4 @@
+import { reportModelRouter } from './routers/reportModel';
 import { opcRouter } from './routers/opc';
 import { runtimeRouter } from './routers/runtime';
 import { workbenchRouter } from './routers/workbench';
@@ -41,6 +42,7 @@ export const appRouter = router({
   modelPricing: modelPricingRouter,
   billingReport: billingReportRouter,
   mentorBudget: mentorBudgetRouter,
+  reportModel: reportModelRouter,
   runtimeRateLimits: runtimeRateLimitsRouter,
   invitation: invitationRouter,
   checkin: checkinRouter,
