@@ -69,7 +69,7 @@ AGENT-CORE 是「新交互」本身：Agent 带着走流程、提问卡、右侧
 | 内容 | 状态 | 证据 | 还剩什么 |
 | --- | --- | --- | --- |
 | 后台整理（CDC B1/B2、开场整理） | 部分 | #593、#675、#694、#704、#713、#717；Owner 放宽 B2 合格线的原话见 [#675 c6013300627](https://github.com/Crnobog9527/GraylumAI_vercel/pull/675#issuecomment-6013300627) | 写回质量 V2 为 77/100，V3（目标 90/100）在 #763 方案、#768 实现；第 3.5 节「整理 10 秒内出现，20 次里 18 次」没有找到测量记录 |
-| 并发机制选型（方案 A / B） | 实际采用 B，未补 Owner 确认 | `CONVERSATION_CAPTURE_PLAN.md` 第 60 行附近、`AGENT_TURN_ENABLE_PLAN.md`；AGENT-CORE.md 要求选 B 时请 Owner 确认 | 第 5 节决定 1；实施说明要求逐项写明 17 条必测项在 B 下为什么不适用，没有找到这份说明 |
+| 并发机制选型（方案 A / B） | 实际采用 B，未补 Owner 确认 | `CONVERSATION_CAPTURE_PLAN.md` 第 60 行附近、`AGENT_TURN_ENABLE_PLAN.md`；AGENT-CORE.md 要求选 B 时请 Owner 确认 | 第 5 节决定 1；17 条必测项的适用性说明和适用项测试没有找到，列为 R13 |
 | Skill 整理模板 | 部分 | `workflowManifest.ts` 只有报告模板（`reportGeneration`）；字段说明来自 #717 | `workflow.yaml` 的整理模板路径和旧版本用的通用模板（自由对话、其他 Skill 需要） |
 | 右侧面板（定位流程） | 完成（仅定位） | F1 #688、#707、#709、#715、#718、#720；[联合验收 c6037691095](https://github.com/Crnobog9527/GraylumAI_vercel/issues/716#issuecomment-6037691095)（B8 跳过） | 其他 Skill 和自由对话见 AC-4 |
 | 定位会话查询工具（第 31 项） | 未做 | Master Plan 第 3.3 节写明「待 AC-2 / LIB-DOCS」 | 和 LIB-4 共用 `read_source` 冻结和删除检查做法（见 [LIB-DOCS 方案](LIB_DOCS_PLAN.md) 第 6 节） |
@@ -83,7 +83,7 @@ AGENT-CORE 是「新交互」本身：Agent 带着走流程、提问卡、右侧
 | 模型写完整报告（REPORT-GEN） | 部分 | #667、#672、#678、#712、#714、#762、#767；[#678 完整报告 PASS](https://github.com/Crnobog9527/GraylumAI_vercel/pull/678#issuecomment-6032688753) | 刷新、另一浏览器读回、停止、旧标签页去重（[#672 交接第 6/6b/6c 步](https://github.com/Crnobog9527/GraylumAI_vercel/pull/672#issuecomment-6001514605)）没有跑；[新付费验收包](https://github.com/Crnobog9527/GraylumAI_vercel/issues/716#issuecomment-6040587182)未获批 |
 | 报告定稿（手改标记、成为正式定位） | 未做 | `report-panel.tsx` 没有编辑和定稿；只有 #422 旧的「确认正式定位」 | 定稿接口 + 界面；截断的报告不能定稿（REPORT-GEN 已定规则） |
 | 承接第一周选题 | 部分（旧路径） | 旧流程「确认正式定位」后进 `/positioning/[draftId]/topics` 可用 | 接到新的报告定稿之后 |
-| 评审修订稿的字段同步 | 未做 | 依赖 FUSION-REVIEW，未开始 | 评审模式上线时一起做；评审模式关闭上线时不适用 |
+| 评审修订稿的字段同步 | 未做 | 依赖 FUSION-REVIEW，未开始 | R14 |
 | 对标步骤「取不到数据就明说」 | 不确定 | 规则应在定位 Skill 包里，仓库没有这份包；宿主代码里没有 | 只读核对已发布 Skill 文字；缺了就改 Skill 并按实际影响审查 |
 
 ### AC-4 通用工作区
@@ -137,6 +137,8 @@ AGENT-CORE 是「新交互」本身：Agent 带着走流程、提问卡、右侧
 | R10 数据使用同意（D5） | 同意状态表、个人中心的勾选和撤回、服务端统一过滤函数：**只用于团队改进用途的读取**（案例视图、导出、后台分析），未同意的记录在这些读取里一律读不到；用户自己读自己的对话和成果不受影响 | Codex 后端 + Claude 前端 | high | 1 | #766 后；按第 5 节决定 2 的范围 | 否 | 是（允许和拒绝两种） |
 | R11 对标规则核对 | 只读核对已发布定位 Skill 的对标说明；缺了就改 Skill | Claude 核对，Skill 改动按实际影响审查 | — | 0 | 无 | 否 | 否 |
 | R12 完整验收 | 第 3.5 节全部项目在 staging 走一遍 | Codex（浏览器） | — | 0 | R2、R5 完成；R8b 完成后补「其他 Skill」一项 | 是，需批准的预算（决定 3） | 是 |
+| R13 方案 B 必测项对照 | 按 AGENT-CORE.md 要求，17 条必测项逐条写明在方案 B 下是否适用；适用的（例如整理与手动编辑并发、确认时重查版本、整理失败或超时的运行单收尾和退款、积分释放与结算交错）补自动测试 | Codex | high | 0 | #768 合并后（同改整理写回） | 否 | 否 |
+| R14 评审修订稿字段同步 | 评审稿被采用时列出和已确认字段的差异，用户确认后同步并生成新确认版本；不确认时标明「选题和写作仍用原定位」（第 3.3 节） | Codex 后端 + Claude 前端 | high | 0–1 | FUSION-REVIEW 的评审能力 | 随 FUSION-REVIEW | 是 |
 
 迁移合计 3–4 个，编号由总控分配。所有数据库 PR 共用 `built-fingerprint.json`，按合并顺序重建。
 
@@ -150,19 +152,20 @@ AGENT-CORE 是「新交互」本身：Agent 带着走流程、提问卡、右侧
 ## 3. 建议顺序
 
 1. 现在可以做、不和在途冲突的：R6、R11。
-2. #768 合并后：R3。#764 合并后：R1、R4。两者都合并后：R2。
+2. #768 合并后：R3、R13。#764 合并后：R1、R4。两者都合并后：R2。
 3. #766 合并后：R5、R9、R10。
 4. R7 在 R1 之后；R12 在 R2、R5 之后。付费部分等第 5 节决定 3。
-5. R8a 跟 CONTENT-CONVERSATION-DRIVEN 的排期走，由 Owner 选批次；R8b 在 R3 之后，和 R8a 先后改同一工作区页面。
+5. R14 跟 FUSION-REVIEW 一起做。
+6. R8a 跟 CONTENT-CONVERSATION-DRIVEN 的排期走，由 Owner 选批次；R8b 在 R3 之后，和 R8a 先后改同一工作区页面。
 
-AGENT-CORE 挡 RUNTIME-PROD 的部分，建议按「定位流程能从头走到定稿」为界：R1、R2、R5、R6、R7、R12 完成即可解除对 RUNTIME-PROD 的阻塞；
-R8a、R8b（通用工作区）和 R9、R10（数据基础和同意）仍须在公开上线前完成，但不必挡 RUNTIME-PROD 的正式准入工作。这个界线是建议，由总控定。
+AGENT-CORE 挡 RUNTIME-PROD 的部分，建议按「定位流程能从头走到定稿」为界：R1、R2、R5、R6、R7、R12、R13 完成即可解除对 RUNTIME-PROD 的阻塞；
+R8a、R8b（通用工作区）、R9、R10（数据基础和同意）和 R14（评审同步）仍须在公开上线前完成，但不必挡 RUNTIME-PROD 的正式准入工作。这个界线是建议，由总控定。
 
 ## 4. 不需要 Owner 决定、由 AI 处理的
 
 - 3 秒首字：先从美国位置实测（R7，预算见第 5 节决定 3），不达标再出调整方案；不先改标准。
 - TEXT-CONFIRM 没进任务表：建议在 Master Plan 第 7.1 节的 AGENT-CORE 行写明 AC-3 含文字确认（见第 6 节），不新建任务。
-- 评审修订稿字段同步：随 FUSION-REVIEW 做；评审模式关闭上线时不适用。
+- 评审修订稿字段同步：列为 R14，和 FUSION-REVIEW 一起做；AGENT-CORE 要等它完成才能标完成。如果评审模式最终关闭上线，要把这一项挪出 AGENT-CORE 必须另请 Owner 同意，不能自行标「不适用」。
 
 ## 5. 需要 Owner 决定的事
 
@@ -197,9 +200,9 @@ R8a、R8b（通用工作区）和 R9、R10（数据基础和同意）仍须在�
 ## 6. 建议：Master Plan 第 7.1 节之后怎么标（只是建议，本 PR 不改 Master Plan）
 
 - AGENT-CORE 行：现在**不标「完成」**。说明里加一句「AC-3 含文字确认（D10）」；如果 Owner 同意第 5 节决定 2，把 AC-5 的
-  「去身份信息、案例视图」挪到 LEARN-1 行；如果总控同意第 3 节的界线，在依赖列写明 RUNTIME-PROD 只等 R1、R2、R5、R6、R7、R12。
+  「去身份信息、案例视图」挪到 LEARN-1 行；如果总控同意第 3 节的界线，在依赖列写明 RUNTIME-PROD 只等 R1、R2、R5、R6、R7、R12、R13。
   证据链接加上本清单。
-- R1–R12（含 R8a、R8b）全部验收后标「完成」。R8a 由 CONTENT-CONVERSATION-DRIVEN 交付，但其他带步骤 Skill 的工作区（R8b）必须单独验收，不能因为 R8a 完成就标 AC-4 完成。
+- R1–R14（含 R8a、R8b）全部验收后标「完成」。R8a 由 CONTENT-CONVERSATION-DRIVEN 交付，但其他带步骤 Skill 的工作区（R8b）必须单独验收，不能因为 R8a 完成就标 AC-4 完成。
 - AGENT-CORE-UI 行：**暂不标完成**。旧入口改指向新工作区是这一行明确列出的内容，要等 R8a/R8b 的工作区出来后完成；在那之前可以在说明里写明「卡片、流式、右侧面板布局已验收（c6037691095）」。如果想把旧入口改指挪到 LEGACY-CLOSE，需要另请 Owner 同意。
 - 规划改动按 AGENTS 第 6 节走单独的 `docs(plan)` PR。
 
