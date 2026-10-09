@@ -2253,7 +2253,7 @@
   "fn:opc_account_ui_change(uuid,uuid,uuid,bigint,text)": "472f1f7d682d",
   "fn:opc_adopt_topics(uuid,uuid,uuid,bigint,uuid,jsonb,jsonb)": "baad10c4223e",
   "fn:opc_business_context(uuid,uuid,uuid)": "811b8a077f73",
-  "fn:opc_capture_apply(uuid,uuid,uuid)": "f942c4c63021",
+  "fn:opc_capture_apply(uuid,uuid,uuid)": "92e70d6ad495",
   "fn:opc_capture_resolve(uuid,uuid,uuid,text,text,uuid,text,text,integer)": "1fed6443a5b6",
   "fn:opc_content_allowed(uuid,uuid)": "62694ac9fe45",
   "fn:opc_content_from_execution(uuid,uuid,uuid,bigint,text,text,uuid,uuid)": "09aaeb7982b2",
