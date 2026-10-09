@@ -1,5 +1,4 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { createHash } from 'node:crypto';
 import type { SupabaseClient, User } from '@supabase/supabase-js';
 
 const limit = vi.hoisted(() => ({ check: vi.fn(), close: vi.fn() }));
@@ -22,7 +21,6 @@ function authClient(claims: Record<string, unknown> | null, error: unknown = nul
 function adminClient(options: {
   confirm?: { data?: unknown; error?: { message: string; code?: string } | null };
   banError?: { status?: number } | null;
-  progressIssued?: boolean;
 } = {}) {
   const rpc = vi.fn(async (name: string) => {
     if (name === 'account_erasure_confirm_with_digests') {
@@ -33,7 +31,6 @@ function adminClient(options: {
         error: options.confirm?.error ?? null,
       };
     }
-    if (name === 'account_erasure_progress_issue') return { data: { issued: options.progressIssued ?? true }, error: null };
     return { data: null, error: null };
   });
   const updateUserById = vi.fn().mockResolvedValue({ error: options.banError ?? null });
@@ -78,21 +75,6 @@ describe('account erasure confirm', () => {
     await expect(confirm(admin, auth)).resolves.toMatchObject({ created: true, authRevoked: true });
     expect(limit.close).toHaveBeenCalledTimes(1);
     expect(admin.rpc.mock.calls.filter(([name]) => name === 'account_erasure_confirm_with_digests')).toHaveLength(1);
-  });
-  it('issues only a hash after confirmation and before Auth ban, then returns the bearer once', async () => {
-    const admin = adminClient();
-    const response = await confirm(admin, authClient({ sub: USER, amr: [{ method: 'password', timestamp: NOW_S - 60 }] }));
-    expect(response.progressToken).toMatch(/^[A-Za-z0-9_-]{43}$/);
-    expect(admin.rpc).toHaveBeenCalledWith('account_erasure_progress_issue', {
-      p_profile_id: USER, p_request_id: REQUEST,
-      p_token_hash: createHash('sha256').update(response.progressToken!).digest('hex'),
-    });
-    const issueIndex = admin.rpc.mock.calls.findIndex(([name]) => name === 'account_erasure_progress_issue');
-    expect(admin.rpc.mock.invocationCallOrder[issueIndex]).toBeLessThan(admin.auth.admin.updateUserById.mock.invocationCallOrder[0]!);
-    expect(JSON.stringify(admin.rpc.mock.calls)).not.toContain(response.progressToken);
-    expect(response).not.toHaveProperty('tokenHash');
-    const repeated = adminClient({ progressIssued: false });
-    expect((await confirm(repeated, authClient({ sub: USER, amr: [{ method: 'password', timestamp: NOW_S - 60 }] }))).progressToken).toBeNull();
   });
 
   it('accepts an email-code sign-in and passes a Bearer token to claim verification', async () => {

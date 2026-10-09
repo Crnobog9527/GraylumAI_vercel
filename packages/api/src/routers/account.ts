@@ -1,8 +1,7 @@
 import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
-import { protectedProcedure, publicProcedure, router } from '../trpc';
+import { protectedProcedure, router } from '../trpc';
 import { confirmAccountErasure, loadAccountErasurePreview } from '../services/accountErasure/service';
-import { readAccountErasureProgress } from '../services/accountErasure/progress';
 
 function requireServiceRole(hasSupabaseAdminPrivileges: boolean) {
   if (!hasSupabaseAdminPrivileges) {
@@ -11,11 +10,6 @@ function requireServiceRole(hasSupabaseAdminPrivileges: boolean) {
 }
 
 export const accountRouter = router({
-  // Validation stays inside the service so malformed, expired and unknown credentials all return NOT_FOUND.
-  erasureProgress: publicProcedure.input(z.unknown()).mutation(async ({ ctx, input }) => {
-    requireServiceRole(ctx.hasSupabaseAdminPrivileges);
-    return readAccountErasureProgress(ctx.supabaseAdmin, input);
-  }),
   erasurePreview: protectedProcedure.query(async ({ ctx }) => {
     requireServiceRole(ctx.hasSupabaseAdminPrivileges);
     return loadAccountErasurePreview(ctx.supabaseAdmin, ctx.profileId);

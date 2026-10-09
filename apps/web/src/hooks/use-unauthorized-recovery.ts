@@ -3,7 +3,6 @@
 import { useCallback, useRef, useState } from 'react';
 import type { QueryClient } from '@tanstack/react-query';
 import type { createClient } from '@/lib/supabase';
-import { isErasureHandoffActive } from '@/lib/erasure-progress';
 import {
   buildLoginPath,
   decideUnauthorizedAction,
@@ -24,14 +23,10 @@ export function useUnauthorizedRecovery(
   const sessionRefreshUsedRef = useRef(false);
 
   const handleUnauthorized = useCallback(async () => {
-    if (isErasureHandoffActive()) return;
     if (lockedRef.current) return;
     lockedRef.current = true;
 
     const { data } = await supabase.auth.getUser().catch(() => ({ data: { user: null } }));
-    // A confirmation can close the account while this Auth lookup is in flight.
-    // Preserve the one-time bearer display; explicit signout still works and APIs remain closed.
-    if (isErasureHandoffActive()) { lockedRef.current = false; return; }
     const now = Date.now();
     const action = decideUnauthorizedAction({
       pathname: window.location.pathname,

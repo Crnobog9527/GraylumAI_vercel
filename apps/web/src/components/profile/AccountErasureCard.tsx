@@ -17,7 +17,6 @@ import { DialogCaptcha } from '@/components/auth/DialogCaptcha';
 import { keepDialogOpenForCaptcha } from '@/lib/dialogCaptcha';
 import { buildErasureImpactLines, type ImpactLine } from '@/lib/account-erasure';
 import { useAccountErasure } from '@/hooks/use-account-erasure';
-import { ProgressCredential } from '@/components/account-erasure/ProgressCredential';
 
 const TONE_COLOR: Record<ImpactLine['tone'], string> = {
   block: '#fca5a5',
@@ -41,7 +40,7 @@ export function AccountErasureCard({ user }: { user: { email?: string; auth_prov
   const onOpenChange = (next: boolean) => {
     if (erasure.busy) return;
     if (erasure.step === 'done') {
-      void erasure.finish();
+      window.location.assign('/');
       return;
     }
     setAcknowledged(false);
@@ -68,13 +67,13 @@ export function AccountErasureCard({ user }: { user: { email?: string; auth_prov
         <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-lg" style={panelStyle} onInteractOutside={keepDialogOpenForCaptcha}>
           <DialogHeader>
             <DialogTitle style={{ color: 'var(--text-primary)' }}>
-              {erasure.step === 'done' ? (erasure.handoff?.closed ? '账号已关闭' : '注销结果待确认') : '注销账号'}
+              {erasure.step === 'done' ? '账号已注销' : '注销账号'}
             </DialogTitle>
             <DialogDescription style={{ color: 'var(--text-secondary)' }}>
               {erasure.step === 'impact' && '请先确认注销会带来的影响。'}
               {erasure.step === 'verify' && (usesPassword ? '请输入当前密码验证身份。' : '我们会向你的邮箱发送验证码。')}
               {erasure.step === 'confirm' && '这是最后一步，确认后立即生效。'}
-              {erasure.step === 'done' && '请先保存查询凭证，再退出本机登录。'}
+              {erasure.step === 'done' && '账号已关闭，你已退出登录。'}
             </DialogDescription>
           </DialogHeader>
 
@@ -125,15 +124,6 @@ export function AccountErasureCard({ user }: { user: { email?: string; auth_prov
 
           {erasure.error && <p className="text-sm" role="alert" style={{ color: TONE_COLOR.block }}>{erasure.error}</p>}
 
-          {erasure.step === 'done' && <div className="space-y-3 text-sm">
-            {erasure.handoff?.credential ? <ProgressCredential credential={erasure.handoff.credential} /> : <p role="status">
-              {erasure.handoff?.closed ? '账号已关闭，当前无法查询进度。'
-                : '未收到注销确认结果，账号可能已关闭，当前无法查询进度。请勿再次申请注销。'}
-            </p>}
-            {!erasure.handoffStored && <p role="alert">浏览器无法保存会话副本，请在离开前自行保存凭证。</p>}
-            <p>凭证在待处理期间有效，注销完成后 30 天失效。遗失或未收到凭证时，不提供找回或重新签发。</p>
-          </div>}
-
           <DialogFooter>
             {erasure.step !== 'done' && (
               <Button variant="outline" disabled={erasure.busy} onClick={() => onOpenChange(false)} style={ghostStyle}>取消</Button>
@@ -156,7 +146,7 @@ export function AccountErasureCard({ user }: { user: { email?: string; auth_prov
               </Button>
             )}
             {erasure.step === 'done' && (
-              <Button disabled={erasure.busy} onClick={() => void erasure.finish()} style={dangerStyle}>退出登录并查看进度</Button>
+              <Button onClick={() => window.location.assign('/')} style={dangerStyle}>返回首页</Button>
             )}
           </DialogFooter>
         </DialogContent>
