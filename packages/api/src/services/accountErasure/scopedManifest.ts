@@ -6,6 +6,7 @@ type Read = (name: string, args: Record<string, unknown>, signal: AbortSignal) =
   data: unknown; error: unknown;
 }>;
 const cursorSchema = z.string().regex(/^[01]:[0-9a-f-]{36}:[0-9]{10}$/).nullable();
+const prefixSchema = z.object({ cursor: z.string().nullable(), done: z.boolean(), review: z.boolean() }).strict();
 const progressSchema = z.object({ cursor: cursorSchema, done: z.boolean(), review: z.boolean() }).strict();
 const pageSchema = z.object({
   items: z.array(z.object({ path: z.string(), uploaderId: z.union([z.string().uuid(), z.literal('')]), subjectId: z.string().uuid() }).strict()),
@@ -21,9 +22,30 @@ export function createScopedErasureManifest(input: {
 }): ErasureAttachmentManifest {
   let current: string | null = null;
   let retainedReview = false;
+  let prefixCurrent: string | null = null;
   let expectedNext: string | null | undefined;
   const binding = (profileId: string) => ({ p_profile_id: profileId, p_request_id: input.requestId, p_token: input.token });
   return {
+    async prefixState({ profileId, signal }) {
+      await input.verify(profileId, signal);
+      const result = await input.read('account_erasure_attachment_checkpoint', { ...binding(profileId), p_prefix: true }, signal);
+      if (result.error || signal.aborted) throw failure();
+      const state = prefixSchema.parse(result.data);
+      if (state.cursor !== null && (!isCanonicalErasureAttachment(state.cursor) || !state.cursor.startsWith(`${profileId}/`))) throw failure();
+      prefixCurrent = state.cursor;
+      return state;
+    },
+    async checkpointPrefix({ profileId, nextCursor, review, signal }) {
+      await input.verify(profileId, signal);
+      if (nextCursor !== null && (!isCanonicalErasureAttachment(nextCursor) || !nextCursor.startsWith(`${profileId}/`))) throw failure();
+      const result = await input.read('account_erasure_attachment_checkpoint', {
+        ...binding(profileId), p_prefix: true, p_after: prefixCurrent, p_next: nextCursor, p_commit: true, p_review: review,
+      }, signal);
+      if (result.error || signal.aborted) throw failure();
+      const state = prefixSchema.parse(result.data);
+      if (state.cursor !== nextCursor || state.done !== (nextCursor === null && !state.review)) throw failure();
+      prefixCurrent = state.cursor;
+    },
     async list({ profileId, cursor, limit, signal }) {
       await input.verify(profileId, signal);
       if (signal.aborted || !Number.isInteger(limit) || limit < 1 || limit > 100) throw failure();

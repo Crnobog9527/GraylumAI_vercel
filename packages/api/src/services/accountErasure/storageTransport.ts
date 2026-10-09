@@ -32,7 +32,10 @@ export function createErasureStorageTransport(client: Client, options: { bounded
     const identities = new Set<string>();
     const cursors = new Set<string>();
     let cursor: string | undefined;
-    for (let page = 0; page < maxPages; page++) {
+    let previousKey: string | undefined;
+    const started = Date.now();
+    for (let page = 0; take !== undefined || page < maxPages; page++) {
+      if (Date.now() - started >= readTimeoutMs) throw failure();
       check(bucket, signal);
       const result = await client.storage.from(bucket).listV2({
         prefix, limit: pageSize, with_delimiter: false, sortBy: { column: 'name', order: 'asc' },
@@ -46,6 +49,13 @@ export function createErasureStorageTransport(client: Client, options: { bounded
       for (const row of parsed.data.objects) {
         if (!row.key.startsWith(prefix) || !isCanonicalErasureAttachment(row.key)
           || paths.has(row.key) || identities.has(row.id)) throw failure();
+        if (take) {
+          if (previousKey !== undefined && row.key <= previousKey) throw failure();
+          previousKey = row.key;
+          // A persisted key may be beyond many retained pages. Skip them without
+          // materializing their keys; the read deadline still bounds the scan.
+          if (take.after !== null && row.key <= take.after) continue;
+        }
         paths.add(row.key);
         identities.add(row.id);
       }

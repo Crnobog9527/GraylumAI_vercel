@@ -24,6 +24,8 @@ export type ErasureStorageTransport = {
   getState(input: Scoped & { path: string }): Promise<unknown>;
 };
 export type ErasureAttachmentManifest = {
+  prefixState?(input: { profileId: string; signal: AbortSignal }): Promise<{ cursor: string | null; done: boolean; review: boolean }>;
+  checkpointPrefix?(input: { profileId: string; nextCursor: string | null; review: boolean; signal: AbortSignal }): Promise<void>;
   /** Trusted original attachment ownership, including administrator replies. Must survive
    * business-body cleanup until storage verification completes. Not supplied by the client.
    * Stable cursor over this manifest, unaffected by deleting storage objects. */
@@ -117,8 +119,13 @@ export function createErasureStorageAdapter(input: {
       }
     };
     try {
-      let afterPath: string | null = null;
-      do {
+      const progress = input.manifest.prefixState ? await call(signal => input.manifest.prefixState!({ profileId, signal })) : null;
+      let afterPath: string | null = progress?.cursor ?? null;
+      if (afterPath !== null && progress?.review) manualReview++;
+      let prefixPages = 0;
+      const prefixBudget = progress ? Math.max(1, Math.floor(limits.maxPages / 2)) : limits.maxPages;
+      if (!progress?.done) do {
+        if (++prefixPages > prefixBudget) { incomplete = true; break; }
         nextPage();
         const page = pageSchema.parse(await call(signal => input.storage.listPrefix({
           bucket, prefix: `${profileId}/`, afterPath, limit: limits.pageSize, signal,
@@ -128,11 +135,15 @@ export function createErasureStorageAdapter(input: {
           || (page.nextAfterPath !== null && (!page.paths.length || page.nextAfterPath !== page.paths.at(-1)))) {
           throw new Error('ERASURE_STORAGE_PAGE_INVALID');
         }
+        let prefixReview = false;
         const candidates = page.paths.filter(path => {
           if (isCanonicalErasureAttachment(path) && path.startsWith(`${profileId}/`)) return true;
-          manualReview++; return false;
+          manualReview++; prefixReview = true; return false;
         });
         await process(candidates.map(path => ({ path, fromManifest: false })));
+        if (input.manifest.checkpointPrefix) await call(signal => input.manifest.checkpointPrefix!({
+          profileId, nextCursor: page.nextAfterPath, review: prefixReview || page.paths.some(path => unresolved.has(path)), signal,
+        }));
         afterPath = page.nextAfterPath;
       } while (afterPath !== null);
 

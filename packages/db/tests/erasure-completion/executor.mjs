@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {randomUUID} from 'node:crypto';
 import {transport} from '../monthly-refund/adapter.mjs';
 import {syntheticSdk} from '../pay-erasure-integration/sdk.mjs';
+import {recoverErasureClaim} from '../../../api/scripts/erasure-recovery.mjs';
 export async function runExecutor({db,Client,connectionString,require,runAccountErasureExecutor,report}) {
  const service=new Client({connectionString});await service.connect();await service.query('SET ROLE service_role');
  const base=transport(service);
@@ -168,7 +169,16 @@ export async function runExecutor({db,Client,connectionString,require,runAccount
   assert.equal((await base.rpc('account_erasure_executor_finish',finish)).data.recorded,true);
   await locked.retry();assert.equal((await base.rpc('account_erasure_executor_claim',{p_token:randomUUID()})).data.claimed,false,'unsettled claim never expires');
   assert.equal((await base.rpc('account_erasure_executor_finish',{...finish,p_token:randomUUID(),p_release:true})).data.recorded,false);
-  assert.equal((await base.rpc('account_erasure_executor_finish',{...finish,p_release:true})).data.recorded,true);
+  const receipt={profileId:locked.actor,requestId:locked.request,token,evidence:{workerStopped:true,ioSettled:true,
+   workerEvidenceHash:'a'.repeat(64),ioEvidenceHash:'b'.repeat(64),authNeverDispatched:false}};
+  await assert.rejects(recoverErasureClaim(locked.client,{...receipt,evidence:{...receipt.evidence,workerStopped:false}}));
+  await assert.rejects(recoverErasureClaim(locked.client,{...receipt,token:randomUUID()}),/NOT_CLAIMED/);
+  await db.query('BEGIN');await db.query('select 1');
+  await assert.rejects(recoverErasureClaim(locked.client,receipt),/RECOVERY_UNKNOWN/);await db.query('ROLLBACK');
+  assert.equal((await locked.row()).executor_token,token,'failed recovery leaves original claim untouched');
+  assert.equal((await recoverErasureClaim(locked.client,receipt)).recovered,true);
+  assert.equal((await recoverErasureClaim(locked.client,receipt)).recovered,true,'repeat observes recorded receipt');
+  assert.equal((await locked.row()).executor_recovery_evidence.token,token);
   assert.equal((await runAccountErasureExecutor(locked.client)).completed,1);
 
   const shared=await fixture();
@@ -197,10 +207,26 @@ export async function runExecutor({db,Client,connectionString,require,runAccount
   await large.retry();await runAccountErasureExecutor(large.client);assert.ok(large.sdk.objects.size<left);
   assert.equal(large.sdk.authDeletes(),0);
 
+  const prefixShared=await fixture();
+  const held=Array.from({length:125},(_,n)=>prefixShared.actor+'/000-'+String(n).padStart(3,'0')+'.png');
+  const later=Array.from({length:60},(_,n)=>prefixShared.actor+'/zzz-'+n+'.png');
+  const laterManifest=Array.from({length:10},(_,n)=>uploader+'/prefix-independent-'+n+'.png');
+  await db.query("insert into tickets(user_id,title,description,attachments) values($1,'other','keep',$2)",[unrelated,JSON.stringify(held)]);
+  await db.query("insert into ticket_replies(ticket_id,user_id,content,attachments) values($1,$2,'private',$3)",
+   [prefixShared.ticket,uploader,JSON.stringify(laterManifest)]);
+  for(const path of [...held,...later,...laterManifest])prefixShared.sdk.objects.add(path);
+  await prefixShared.close();await runAccountErasureExecutor(prefixShared.client);
+  assert.ok((await prefixShared.row()).storage_prefix_cursor);assert.equal((await prefixShared.row()).storage_prefix_review,true);
+  for(let pass=0;pass<5;pass++){await prefixShared.retry();assert.ok((await runAccountErasureExecutor(prefixShared.client)).pending>0);}
+  assert.ok([...later,...laterManifest].every(path=>!prefixShared.sdk.objects.has(path)));
+  assert.ok(held.every(path=>prefixShared.sdk.objects.has(path)));assert.equal(prefixShared.sdk.authDeletes(),0);
+
   for(const role of ['anon','authenticated']) {
    await service.query('SET ROLE '+role);
    for(const [name,args] of [['account_erasure_executor_claim',{p_token:randomUUID()}],
     ['account_erasure_executor_pending',{}],
+    ['account_erasure_executor_recover',{p_profile_id:locked.actor,p_request_id:locked.request,p_token:token,
+     p_evidence:receipt.evidence,p_auth_state:'present'}],
     ['account_erasure_attachment_page',{p_profile_id:locked.actor}],
     ['account_erasure_attachment_checkpoint',{p_profile_id:locked.actor,p_request_id:locked.request,p_token:token}],
     ['account_erasure_attachment_classify',{p_profile_id:locked.actor,p_paths:[]}],['account_erasure_executor_finish',finish],

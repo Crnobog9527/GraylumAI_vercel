@@ -14,7 +14,9 @@ prepares or dispatches a model call, creates a refund, or cancels a subscription
 
 Migration 0197 is required before this application code. It reuses `profiles` for
 an attachment-history completeness bit and `account_erasure_requests` for a claim,
-attempt time, sanitized errors and a verified-page checkpoint (row ID/ordinal only). Existing rows/references alone cannot prove lost
+attempt time, sanitized errors and bounded scan positions. Manifest positions are
+row IDs/ordinals; the prefix position retains only its last object key until the
+scan finishes, then clears it. These service-only request fields are never public. Existing rows/references alone cannot prove lost
 attachment history, and the old host latch cannot exclude another server instance;
 these are the smallest missing capabilities. No queue, scheduler system, balance,
 manifest table or alternative authority is introduced.
@@ -55,7 +57,7 @@ An uncertain idle-claim release reads the original request first; only a still-o
 claim can retry the same CAS release, while an already released claim is not resent.
 
 A five-minute cadence reserves retry opportunities before the 24-hour objective;
-20 subjects/45 seconds bounds each invocation (at most 5,760 attempts/day).
+20 subjects and the work budget bound each invocation (at most 5,760 attempts/day).
 The known staging Hobby plan cannot deploy this cadence. **Deployment is blocked
 until the separately approved environment supports it**; do not silently replace
 it with a daily schedule or claim the time objective passed. No plan upgrade or
@@ -80,7 +82,9 @@ separate pass budget and its overall deadline.
 A 5,001-row unrelated ticket and reply fixture cannot
 block a small subject or get deleted by its cleanup. Storage prefix enumeration
 also exposes bounded sorted pages before exhausting the whole prefix, so 5,001
-objects can make progress. Reads restart after deletion; provider cursors are not
+objects can make progress. Prefix progress and unresolved state also persist;
+125 retained prefix objects cannot starve later exclusive objects or manifest work.
+Each invocation reserves half its page budget for the manifest. Reads restart after deletion; provider cursors are not
 reused across mutations. Shared/unknown manifest entries retain a durable review bit while the scan proceeds
 to later exclusive objects. At scan end an unresolved manifest restarts from the
 beginning on a later pass; its cursor cannot turn missing absence proof into
@@ -89,6 +93,40 @@ ticket/reply body scrubbing proceeds independently and rejects body refill. No s
 No progress capability is issued, read or exposed; the retired query page stays out
 of scope. Retained financial rows and the inaccessible original profile ID remain
 subject to the existing three-year rule; expiry cleanup is not added here.
+
+## Abandoned-worker recovery (protected operator action)
+
+The cron never takes over an expired claim. After a crash or I/O beyond the route
+budget, use `packages/api/scripts/erasure-recovery.mjs` only in an approved recovery
+window. First independently verify that the original invocation has stopped and
+**all** its original DB/Storage/Auth operations have settled. Inspect invocation
+logs and original external identities; elapsed time, a lost response, or an Auth
+identity still being present is not settlement proof. If evidence is missing, stop.
+
+Keep the reviewed evidence outside the public repository. The receipt file has
+`profileId`, `requestId`, `token` and an `evidence` object with `workerStopped: true`,
+`ioSettled: true`, `workerEvidenceHash` and `ioEvidenceHash` (SHA-256 references to
+that reviewed evidence), plus `authNeverDispatched` (normally false; true requires
+explicit trace proof that no Auth deletion was invoked). These are privileged
+operator attestations, not machine-verifiable proof created by writing JSON.
+The protected action's approval must cover releasing this original claim.
+
+With the already-authorized target service environment, run:
+
+```sh
+node packages/api/scripts/erasure-recovery.mjs --apply-reviewed-recovery /protected/reviewed-receipt.json
+```
+
+The command validates the receipt, reads the original request and Auth identity,
+and invokes a service-only RPC that rechecks the transaction barrier and original
+request/token. It records the evidence hashes before releasing the claim. It never
+deletes an Auth user/object itself, changes financial identity, or clears an
+unknown Auth dispatch on a timeout. A repeated receipt observes the stored result;
+an uncertain response is read back, never blindly retried. It outputs only a
+sanitized status. `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` must be supplied by
+the approved execution environment; this task did not read them or run the command
+against any remote system. Local synthetic tests cover invalid/stale receipts,
+an active transaction, successful recovery, duplicate recovery and denied roles.
 
 ## Local validation and migration recovery
 
@@ -120,8 +158,8 @@ Auth identities, objects or body data. Do not drop proof columns, reset unknown
 history to true, expire a live claim, or restore a purge that loses references.
 
 0196 built SHA-256: `06b95b0bb78bc9345e9d531519fe43ab9516c5db78deab1f66cfced48aa5bce8`.
-0197 final built SHA-256: `593f00fb0b8538a20f5cdcb50d4b9a74b598681983dfb8ff03473d20d7685952`.
-The exact final local delta is 33 added catalog entries and three changed
+0197 final built SHA-256: `5d9ed38d3508799c2cc5e546c2fd998f314ee69914ba5a35579c04219ccce224`.
+The exact final local delta is 39 added catalog entries and three changed
 functions `account_erasure_local_cleanup(uuid,boolean)`, `account_erasure_ticket_guard()`
 and `account_erasure_auth_begin(uuid,uuid)`; no catalog entries were
 removed. The additions include subject-scoped attachment RPCs and two GIN indexes.
