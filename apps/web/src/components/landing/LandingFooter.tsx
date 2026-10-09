@@ -7,7 +7,7 @@ const footerLinks = {
     title: '产品',
     links: [
       { label: '功能介绍', href: '/landing#features' },
-      { label: '定价方案', href: '/landing#pricing' },
+      { label: '定价方案', href: '/landing/pricing' },
     ],
   },
   company: {

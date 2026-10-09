@@ -76,6 +76,9 @@ export default function PricingSection({
           <p className="mx-auto max-w-3xl text-lg text-[#B0B0B0]">
             套餐价格与权益直接同步后台会员配置。按月或按年订阅，不同等级对应不同积分额度和导出能力。
           </p>
+          <Link href="/landing/pricing" className="mt-4 inline-flex text-sm font-semibold text-[#FFD700] hover:underline">
+            查看完整价格、积分包和常见问题 →
+          </Link>
         </div>
 
         {status === 'unavailable' ? (
