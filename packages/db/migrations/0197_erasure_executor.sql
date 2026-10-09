@@ -6,6 +6,7 @@ ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS erasure_history_complete bo
 ALTER TABLE public.account_erasure_requests
  ADD COLUMN IF NOT EXISTS auth_delete_claim_token uuid,
  ADD COLUMN IF NOT EXISTS auth_delete_dispatch_ready boolean NOT NULL DEFAULT false,
+ ADD COLUMN IF NOT EXISTS storage_manifest_review boolean NOT NULL DEFAULT false,
  ADD COLUMN IF NOT EXISTS storage_manifest_cursor text,
  ADD COLUMN IF NOT EXISTS storage_manifest_done boolean NOT NULL DEFAULT false,
  ADD COLUMN IF NOT EXISTS executor_token uuid,
@@ -199,26 +200,28 @@ BEGIN
   'nextCursor',next_cursor);
 END $$;
 CREATE OR REPLACE FUNCTION public.account_erasure_attachment_checkpoint(
- p_profile_id uuid,p_request_id uuid,p_token uuid,p_after text DEFAULT NULL,p_next text DEFAULT NULL,p_commit boolean DEFAULT false
+ p_profile_id uuid,p_request_id uuid,p_token uuid,p_after text DEFAULT NULL,p_next text DEFAULT NULL,p_commit boolean DEFAULT false,p_review boolean DEFAULT false
 ) RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
-DECLARE r public.account_erasure_requests;
+DECLARE r public.account_erasure_requests; needs_review boolean;
 BEGIN
  PERFORM account_erasure_assert_closed(p_profile_id);
  SELECT * INTO r FROM account_erasure_requests WHERE profile_id=p_profile_id FOR UPDATE;
  IF p_token IS NULL OR r.executor_token IS DISTINCT FROM p_token OR r.request_id IS DISTINCT FROM p_request_id THEN
   RAISE EXCEPTION 'ERASURE_EXECUTOR_NOT_CLAIMED' USING ERRCODE='42501';
  END IF;
- IF p_commit IS NULL THEN RAISE EXCEPTION 'ERASURE_CHECKPOINT_INVALID'; END IF;
+ IF p_commit IS NULL OR p_review IS NULL THEN RAISE EXCEPTION 'ERASURE_CHECKPOINT_INVALID'; END IF;
  IF p_commit THEN
   IF r.storage_manifest_done OR r.storage_manifest_cursor IS DISTINCT FROM p_after
    OR p_next IS NOT NULL AND (p_next!~'^[01]:[0-9a-f-]{36}:[0-9]{10}$'
     OR p_after IS NOT NULL AND p_next COLLATE "C"<=p_after COLLATE "C") THEN
    RAISE EXCEPTION 'ERASURE_CHECKPOINT_INVALID';
   END IF;
-  UPDATE account_erasure_requests SET storage_manifest_cursor=p_next,storage_manifest_done=p_next IS NULL
+  needs_review:=p_review OR (p_after IS NOT NULL AND r.storage_manifest_review);
+  UPDATE account_erasure_requests SET storage_manifest_cursor=p_next,storage_manifest_review=needs_review,
+   storage_manifest_done=p_next IS NULL AND NOT needs_review
    WHERE profile_id=p_profile_id RETURNING * INTO r;
  END IF;
- RETURN jsonb_build_object('cursor',r.storage_manifest_cursor,'done',r.storage_manifest_done);
+ RETURN jsonb_build_object('cursor',r.storage_manifest_cursor,'done',r.storage_manifest_done,'review',r.storage_manifest_review);
 END $$;
 CREATE OR REPLACE FUNCTION public.account_erasure_attachment_classify(p_profile_id uuid,p_paths text[])
 RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
@@ -244,7 +247,7 @@ BEGIN
   'account_erasure_executor_claim(uuid)','account_erasure_executor_proof(uuid,uuid,uuid)',
   'account_erasure_executor_pending()',
   'account_erasure_attachment_page(uuid,text,integer)','account_erasure_attachment_classify(uuid,text[])',
-  'account_erasure_attachment_checkpoint(uuid,uuid,uuid,text,text,boolean)',
+  'account_erasure_attachment_checkpoint(uuid,uuid,uuid,text,text,boolean,boolean)',
   'account_erasure_executor_finish(uuid,uuid,uuid,text[],boolean,boolean)'] LOOP
   EXECUTE 'REVOKE ALL ON FUNCTION public.'||signature||' FROM PUBLIC,anon,authenticated,service_role';
   IF signature LIKE 'account_erasure_executor_%' OR signature LIKE 'account_erasure_attachment_%' THEN

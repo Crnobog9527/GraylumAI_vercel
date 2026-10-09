@@ -175,7 +175,16 @@ export async function runExecutor({db,Client,connectionString,require,runAccount
   await db.query("insert into tickets(user_id,title,description,attachments) values($1,'unrelated','keep',$2)",
    [unrelated,JSON.stringify([shared.actor+'/a.png'])]);
   await db.query("insert into ticket_replies(ticket_id,user_id,content) values($1,$2,'private reply')",[shared.ticket,shared.actor]);
+  const retained=uploader+'/shared.png';const independent=Array.from({length:150},(_,n)=>uploader+'/independent-'+n+'.png');
+  await db.query("insert into ticket_replies(ticket_id,user_id,content,attachments) values($1,$2,'private with attachments',$3)",
+   [shared.ticket,uploader,JSON.stringify([retained,...independent])]);
+  await db.query("insert into tickets(user_id,title,description,attachments) values($1,'other','keep',$2)",[unrelated,JSON.stringify([retained])]);
+  for(const path of [retained,...independent])shared.sdk.objects.add(path);
   await shared.close();assert.ok((await runAccountErasureExecutor(shared.client)).pending>0);
+  assert.equal((await shared.row()).storage_manifest_review,true);
+  for(let pass=0;pass<3;pass++){await shared.retry();assert.ok((await runAccountErasureExecutor(shared.client)).pending>0);}
+  assert.ok(independent.every(path=>!shared.sdk.objects.has(path)),'retained entries do not starve later exclusive attachments');
+  assert.ok(shared.sdk.objects.has(retained));assert.equal((await shared.row()).storage_manifest_done,false);
   assert.ok(shared.sdk.objects.has(shared.actor+'/a.png'));assert.equal(shared.sdk.authDeletes(),0);
   const scrubbed=(await db.query('select title,description,attachments from tickets where id=$1',[shared.ticket])).rows[0];
   assert.equal(scrubbed.title,'');assert.equal(scrubbed.description,'');assert.deepEqual(scrubbed.attachments,[shared.actor+'/a.png']);

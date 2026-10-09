@@ -81,7 +81,10 @@ A 5,001-row unrelated ticket and reply fixture cannot
 block a small subject or get deleted by its cleanup. Storage prefix enumeration
 also exposes bounded sorted pages before exhausting the whole prefix, so 5,001
 objects can make progress. Reads restart after deletion; provider cursors are not
-reused across mutations. Shared objects/references remain for review, while bounded
+reused across mutations. Shared/unknown manifest entries retain a durable review bit while the scan proceeds
+to later exclusive objects. At scan end an unresolved manifest restarts from the
+beginning on a later pass; its cursor cannot turn missing absence proof into
+completion. Shared objects/references remain for review, while bounded
 ticket/reply body scrubbing proceeds independently and rejects body refill. No staging account has been closed and no remote DB was accessed.
 No progress capability is issued, read or exposed; the retired query page stays out
 of scope. Retained financial rows and the inaccessible original profile ID remain
@@ -117,8 +120,8 @@ Auth identities, objects or body data. Do not drop proof columns, reset unknown
 history to true, expire a live claim, or restore a purge that loses references.
 
 0196 built SHA-256: `06b95b0bb78bc9345e9d531519fe43ab9516c5db78deab1f66cfced48aa5bce8`.
-0197 final built SHA-256: `c69853fc6ee2238c86a3daa1b22c20b7e5e7b760937d03f6c002aaa2d8de699f`.
-The exact final local delta is 32 added catalog entries and three changed
+0197 final built SHA-256: `593f00fb0b8538a20f5cdcb50d4b9a74b598681983dfb8ff03473d20d7685952`.
+The exact final local delta is 33 added catalog entries and three changed
 functions `account_erasure_local_cleanup(uuid,boolean)`, `account_erasure_ticket_guard()`
 and `account_erasure_auth_begin(uuid,uuid)`; no catalog entries were
 removed. The additions include subject-scoped attachment RPCs and two GIN indexes.
