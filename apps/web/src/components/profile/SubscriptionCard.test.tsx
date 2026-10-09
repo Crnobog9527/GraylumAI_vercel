@@ -25,7 +25,7 @@ vi.mock('@/trpc/client', () => {
   return {
     trpc: {
       useUtils: () => ({
-        user: { getUserProfile: { invalidate } },
+        user: { getUserProfile: { invalidate }, getEntitlements: { invalidate } },
         payments: {
           getMembershipEligibilityMatrix: { invalidate },
           listBillingRecords: { invalidate },
@@ -217,10 +217,11 @@ describe('SubscriptionCard catalog availability', () => {
   it('shows a member the discounted price they pay, with the real list price struck through', () => {
     componentState.packagesQuery = queryState({ data: [{ id: 'package', name: '积分包', credits: 100, bonus_credits: 0, price: 1, checkout_ready: true }] });
     componentState.plansQuery = queryState({ data: [{ ...plan, discount: 0.1 }, { ...plan, id: 'plan-gold', level: 'gold', discount: 0.2 }] });
-    const member = renderToStaticMarkup(createElement(CreditPackagesSection, { membershipLevel: 'pro' }));
+    const member = renderToStaticMarkup(createElement(CreditPackagesSection, {}));
     expect(member).toMatch(/data-testid="profile-credit-package-price"[^>]*>\$0\.90<del/);
     expect(member).toContain('<span class="sr-only">原价</span>$1.00</del>');
-    const free = renderToStaticMarkup(createElement(CreditPackagesSection, { membershipLevel: 'free' }));
+    componentState.entitlementsQuery = { data: { level: 'free' }, isError: false };
+    const free = renderToStaticMarkup(createElement(CreditPackagesSection, {}));
     expect(free).toMatch(/data-testid="profile-credit-package-price"[^>]*>\$1\.00<\/div>/);
     expect(free).not.toContain('<del');
   });
@@ -229,16 +230,22 @@ describe('SubscriptionCard catalog availability', () => {
     componentState.packagesQuery = queryState({ data: [{ id: 'package', name: '积分包', credits: 990, bonus_credits: 0, price: 9.9,
       checkout_ready: true }] });
     componentState.entitlementsQuery = { data: { level: 'free' }, isError: false };
-    const free = renderToStaticMarkup(createElement(CreditPackagesSection, { membershipLevel: 'free' }));
+    const free = renderToStaticMarkup(createElement(CreditPackagesSection, {}));
     expect(free).toContain('开通会员后可购买');
     expect(free).toContain('data-testid="profile-credit-packages-members-only"');
     expect(free).toContain('disabled=""');
     componentState.entitlementsQuery = { data: undefined, isError: true };
     expect(renderToStaticMarkup(createElement(CreditPackagesSection, {}))).toContain('暂时无法确认会员状态');
     componentState.entitlementsQuery = { data: { level: 'gold' }, isError: false };
-    const gold = renderToStaticMarkup(createElement(CreditPackagesSection, { membershipLevel: 'gold' }));
+    const gold = renderToStaticMarkup(createElement(CreditPackagesSection, {}));
     expect(gold).toContain('>购买<');
     expect(gold).not.toContain('profile-credit-packages-members-only');
+    // A refunded member whose profile still says pro is free on the server: no member discount shown.
+    componentState.packagesQuery = queryState({ data: [{ id: 'package', name: '积分包', credits: 100, bonus_credits: 0, price: 1,
+      checkout_ready: true }] });
+    componentState.plansQuery = queryState({ data: [{ ...plan, discount: 0.1 }] });
+    componentState.entitlementsQuery = { data: { level: 'free' }, isError: false };
+    expect(renderToStaticMarkup(createElement(CreditPackagesSection, {}))).not.toContain('<del');
   });
 
   it.each([null, 'waffo'])('renders but disables purchase when the selected channel is %j', (paymentChannel) => {
@@ -280,7 +287,7 @@ it('runs the actual upgrade preview, explicit confirmation and drift-reconfirmat
   const mock = `
     const state = window.__pay1 = { previews: [], changes: [], checkouts: [], invalidations: 0, drift: true, previewMode: 'quote' };
     const inv = { invalidate: async () => { state.invalidations++; } };
-    const utils = { user: { getUserProfile: inv }, credits: { getBalance: inv, getCreditsSummary: inv },
+    const utils = { user: { getUserProfile: inv, getEntitlements: inv }, credits: { getBalance: inv, getCreditsSummary: inv },
       payments: { getMembershipEligibilityMatrix: inv, listBillingRecords: inv, getSubscriptionManagement: inv } };
     const plan = { id: 'plan-gold', name: 'Gold', level: 'gold', price: { monthly: 29.9, yearly: 299 }, features: [], checkoutReady: { monthly: true, yearly: true } };
     const query = data => ({ data, isLoading: false, isError: false, isFetching: false });

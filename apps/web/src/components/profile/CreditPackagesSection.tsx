@@ -11,10 +11,10 @@ import { PACK_MEMBERS_ONLY_NOTICE, creditPackBuyState, isPaidMember, type PackEn
 
 // 积分加油包区块
 export const CreditPackagesSection = memo(function CreditPackagesSection({
-  onBuyClick, pendingPackageId, membershipLevel,
+  onBuyClick, pendingPackageId,
 }: {
   onBuyClick?: (pkg: { id: string; name?: string; credits: number; bonus_credits: number; price: number; checkout_ready?: boolean }) => void;
-  pendingPackageId?: string | null; membershipLevel?: string | null;
+  pendingPackageId?: string | null;
 }) {
   // 从 API 获取积分加油包数据
   const {
@@ -27,6 +27,8 @@ export const CreditPackagesSection = memo(function CreditPackagesSection({
   const entitlements = trpc.user.getEntitlements.useQuery(undefined, { staleTime: 30_000 });
   const entitlement: PackEntitlement = entitlements.isError ? { status: 'error' }
     : entitlements.data ? { status: 'ready', level: entitlements.data.level } : { status: 'loading' };
+  // The discount follows the same server level as the buy button; until it is known, list prices only.
+  const priceLevel = entitlement.status === 'ready' ? entitlement.level : null;
 
   return (
     <div
@@ -105,7 +107,7 @@ export const CreditPackagesSection = memo(function CreditPackagesSection({
                 +{pkg.bonus_credits} 赠送
               </div>
             )}
-            <CreditPackagePriceTag listUsd={pkg.price} membershipLevel={membershipLevel} />
+            <CreditPackagePriceTag listUsd={pkg.price} membershipLevel={priceLevel} />
             <div
               data-testid="profile-credit-package-name"
               className="text-sm font-medium mb-3"

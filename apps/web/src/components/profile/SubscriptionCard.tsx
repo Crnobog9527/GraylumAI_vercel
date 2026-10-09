@@ -833,8 +833,7 @@ export const CreditStatsCard = memo(function CreditStatsCard({ user }: { user: M
 
       {/* 积分加油包 */}
       {hasVerifiedBalance && (
-        <CreditPackagesSection onBuyClick={handlePackageBuy} pendingPackageId={pendingCheckoutPackageId}
-          membershipLevel={user?.subscription_tier} />
+        <CreditPackagesSection onBuyClick={handlePackageBuy} pendingPackageId={pendingCheckoutPackageId} />
       )}
 
       {pendingCheckoutPackageId && (
