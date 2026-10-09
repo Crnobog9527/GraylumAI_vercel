@@ -44,6 +44,12 @@ claim or invents evidence that an in-flight transaction stopped. Do not clear it
 original Auth/object states and prove the old worker cannot continue before any
 approved release. Unknown Auth deletion retains the existing once-only intent;
 subsequent passes only read the original identity and do not send another delete.
+The request also retains the original Auth intent owner token and an undispatched
+flag. Only the matching idle worker can attest it never invoked Auth and reopen
+dispatch of that same intent (without changing its start time). A preflight read
+failure or lost DB intent response can thus recover; any attempted Auth deletion
+keeps dispatch closed. These fields are facts on the existing request, not a new
+queue or replacement intent. Crashed/unsettled workers still require observation.
 The executor's diagnostic columns do not overwrite financial/Auth diagnostics.
 An uncertain idle-claim release reads the original request first; only a still-owned
 claim can retry the same CAS release, while an already released claim is not resent.
@@ -111,9 +117,10 @@ Auth identities, objects or body data. Do not drop proof columns, reset unknown
 history to true, expire a live claim, or restore a purge that loses references.
 
 0196 built SHA-256: `06b95b0bb78bc9345e9d531519fe43ab9516c5db78deab1f66cfced48aa5bce8`.
-0197 final built SHA-256: `b7f83e2da709d6b42a8d99d83124114c842baefc7f47e6dba9d10bf2f435adb0`.
-The exact final local delta is 30 added catalog entries and two changed
-functions `account_erasure_local_cleanup(uuid,boolean)` and `account_erasure_ticket_guard()`; no catalog entries were
+0197 final built SHA-256: `c69853fc6ee2238c86a3daa1b22c20b7e5e7b760937d03f6c002aaa2d8de699f`.
+The exact final local delta is 32 added catalog entries and three changed
+functions `account_erasure_local_cleanup(uuid,boolean)`, `account_erasure_ticket_guard()`
+and `account_erasure_auth_begin(uuid,uuid)`; no catalog entries were
 removed. The additions include subject-scoped attachment RPCs and two GIN indexes.
 Final canonical replay and completion runner each passed 200/200 build steps,
 131 historical repeat checks and container cleanup. These are local fingerprints,

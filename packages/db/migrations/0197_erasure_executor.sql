@@ -4,6 +4,8 @@ BEGIN;
 SET LOCAL lock_timeout = '5s';
 ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS erasure_history_complete boolean NOT NULL DEFAULT false;
 ALTER TABLE public.account_erasure_requests
+ ADD COLUMN IF NOT EXISTS auth_delete_claim_token uuid,
+ ADD COLUMN IF NOT EXISTS auth_delete_dispatch_ready boolean NOT NULL DEFAULT false,
  ADD COLUMN IF NOT EXISTS storage_manifest_cursor text,
  ADD COLUMN IF NOT EXISTS storage_manifest_done boolean NOT NULL DEFAULT false,
  ADD COLUMN IF NOT EXISTS executor_token uuid,
@@ -97,6 +99,22 @@ $patch$||needle);
  END IF;
 END $$;
 
+-- A released worker may prove it never invoked Auth. Reuse that original intent;
+-- a dispatched/uncertain external deletion never receives another dispatch claim.
+DO $$
+DECLARE source text; needle text;
+BEGIN
+ source:=pg_get_functiondef('public.account_erasure_auth_begin(uuid,uuid)'::regprocedure);
+ needle:='IF ready AND request.auth_delete_started_at IS NULL THEN';
+ IF position('auth_delete_dispatch_ready' IN source)=0 THEN
+  IF position(needle IN source)=0 THEN RAISE EXCEPTION 'ERASURE_AUTH_SOURCE_MISMATCH'; END IF;
+  source:=replace(source,needle,'IF ready AND (request.auth_delete_started_at IS NULL OR request.auth_delete_dispatch_ready) THEN');
+  source:=replace(source,'SET auth_delete_started_at=clock_timestamp(),',
+   'SET auth_delete_started_at=coalesce(auth_delete_started_at,clock_timestamp()),auth_delete_claim_token=executor_token,auth_delete_dispatch_ready=false,');
+  EXECUTE source;
+ END IF;
+END $$;
+
 CREATE OR REPLACE FUNCTION public.account_erasure_executor_claim(p_token uuid)
 RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
 DECLARE r public.account_erasure_requests;
@@ -128,15 +146,18 @@ BEGIN
      CROSS JOIN LATERAL jsonb_array_elements_text(coalesce(r.attachments,'[]'::jsonb)) path WHERE t.user_id=p_profile_id)));
 END $$;
 CREATE OR REPLACE FUNCTION public.account_erasure_executor_finish(
- p_profile_id uuid,p_request_id uuid,p_token uuid,p_codes text[],p_release boolean
+ p_profile_id uuid,p_request_id uuid,p_token uuid,p_codes text[],p_release boolean,p_auth_not_dispatched boolean DEFAULT false
 ) RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
 DECLARE n integer;
 BEGIN
- IF p_codes IS NULL OR cardinality(p_codes)>20 OR p_release IS NULL
+ IF p_codes IS NULL OR cardinality(p_codes)>20 OR p_release IS NULL OR p_auth_not_dispatched IS NULL
   OR EXISTS(SELECT 1 FROM unnest(p_codes) c WHERE c IS NULL OR c!~'^[A-Z0-9_]{1,64}$') THEN
   RAISE EXCEPTION 'ERASURE_EXECUTOR_INVALID';
  END IF;
  UPDATE account_erasure_requests SET executor_error_codes=p_codes,
+  auth_delete_dispatch_ready=CASE WHEN p_release AND p_auth_not_dispatched
+   AND auth_delete_claim_token=p_token AND auth_delete_started_at IS NOT NULL AND auth_deleted_at IS NULL
+   THEN true ELSE auth_delete_dispatch_ready END,
   executor_token=CASE WHEN p_release THEN NULL ELSE executor_token END,
   executor_started_at=CASE WHEN p_release THEN NULL ELSE executor_started_at END
  WHERE profile_id=p_profile_id AND request_id=p_request_id AND executor_token=p_token AND p_token IS NOT NULL;
@@ -224,7 +245,7 @@ BEGIN
   'account_erasure_executor_pending()',
   'account_erasure_attachment_page(uuid,text,integer)','account_erasure_attachment_classify(uuid,text[])',
   'account_erasure_attachment_checkpoint(uuid,uuid,uuid,text,text,boolean)',
-  'account_erasure_executor_finish(uuid,uuid,uuid,text[],boolean)'] LOOP
+  'account_erasure_executor_finish(uuid,uuid,uuid,text[],boolean,boolean)'] LOOP
   EXECUTE 'REVOKE ALL ON FUNCTION public.'||signature||' FROM PUBLIC,anon,authenticated,service_role';
   IF signature LIKE 'account_erasure_executor_%' OR signature LIKE 'account_erasure_attachment_%' THEN
    EXECUTE 'GRANT EXECUTE ON FUNCTION public.'||signature||' TO service_role';

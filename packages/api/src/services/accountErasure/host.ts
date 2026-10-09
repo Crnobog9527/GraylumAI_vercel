@@ -28,9 +28,10 @@ export function createAccountErasureHost(input: {
   deferStorageProof?: boolean; scopedManifest?: boolean; executorToken?: string;
 }) {
   let active = false;
+  let authDispatched = false;
   const idleWaiters = new Set<() => void>();
   const becameIdle = () => { active = false; for (const notify of idleWaiters) notify(); };
-  return { isIdle: () => !active,
+  return { isIdle: () => !active, didDispatchAuth: () => authDispatched,
     waitForIdle: (timeoutMs: number) => new Promise<boolean>(resolve => {
       if (!active) { resolve(true); return; }
       const done = () => { clearTimeout(timer); idleWaiters.delete(done); resolve(true); };
@@ -45,7 +46,7 @@ export function createAccountErasureHost(input: {
     const timeout = input.operationTimeoutMs ?? 2000;
     if (!uuid.safeParse(input.profileId).success || !uuid.safeParse(input.requestId).success
       || !Number.isInteger(timeout) || timeout < 1 || timeout > 5000) return denied('ERASURE_INVALID_INPUT');
-    active = true;
+    active = true; authDispatched = false;
     let sealed = false;
     let pending = 0;
     let previous: string | null = null;
@@ -117,7 +118,8 @@ export function createAccountErasureHost(input: {
           return response;
         }) },
         storageAdapter: storage,
-        authAdapter: { getState: id => track(() => input.auth.getState(id)), remove: id => track(() => input.auth.remove(id)) },
+        authAdapter: { getState: id => track(() => input.auth.getState(id)),
+          remove: id => track(() => { authDispatched = true; return input.auth.remove(id); }) },
         budget: { operationTimeoutMs: timeout, storagePassTimeoutMs: storageBudget, deadline: input.deadline },
       });
       // Do not use note_error here: a stale read/late host must not overwrite a

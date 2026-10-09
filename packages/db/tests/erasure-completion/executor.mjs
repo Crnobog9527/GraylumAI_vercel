@@ -68,6 +68,30 @@ export async function runExecutor({db,Client,connectionString,require,runAccount
    assert.equal((await finished.row()).executor_token,null);assert.equal(finished.sdk.authDeletes(),1);
   }
 
+  const preflight=await fixture();await preflight.close();preflight.sdk.setAuth('unknown');
+  assert.ok((await runAccountErasureExecutor(preflight.client)).pending>0);
+  assert.ok((await preflight.row()).auth_delete_started_at);assert.equal((await preflight.row()).auth_delete_dispatch_ready,true);assert.equal(preflight.sdk.authDeletes(),0);
+  preflight.sdk.setAuth('present');await preflight.retry();assert.equal((await runAccountErasureExecutor(preflight.client)).completed,1);
+  for(const delayed of [false,true]){
+   const intent=await fixture();await intent.close();let lostBegin=false;
+   const beginRpc=intent.client.rpc.bind(intent.client);
+   intent.client.rpc=(name,args)=>{const promise=(async()=>{const response=await beginRpc(name,args);
+    if(name==='account_erasure_auth_begin'&&!lostBegin){lostBegin=true;
+     if(delayed)await new Promise(resolve=>setTimeout(resolve,2200));
+     return {data:null,error:{message:'synthetic lost Auth begin'}};}
+    return response;})();promise.abortSignal=()=>promise;return promise;};
+   assert.ok((await runAccountErasureExecutor(intent.client)).pending>0);assert.equal(intent.sdk.authDeletes(),0);
+   const before=await intent.row();assert.equal(before.auth_delete_dispatch_ready,true);assert.equal(before.executor_token,null);
+   await intent.retry();assert.equal((await runAccountErasureExecutor(intent.client)).completed,1);
+   assert.equal(intent.sdk.authDeletes(),1);assert.equal((await intent.row()).auth_delete_started_at.getTime(),before.auth_delete_started_at.getTime());
+  }
+  const uncertainAuth=await fixture();await uncertainAuth.close();uncertainAuth.sdk.setMode('auth_unknown');
+  assert.ok((await runAccountErasureExecutor(uncertainAuth.client)).pending>0);assert.equal(uncertainAuth.sdk.authDeletes(),1);
+  assert.equal((await uncertainAuth.row()).auth_delete_dispatch_ready,false);
+  uncertainAuth.sdk.setAuth('present');await uncertainAuth.retry();
+  assert.ok((await runAccountErasureExecutor(uncertainAuth.client)).pending>0);assert.equal(uncertainAuth.sdk.authDeletes(),1);
+  uncertainAuth.sdk.setAuth('absent');await uncertainAuth.retry();assert.equal((await runAccountErasureExecutor(uncertainAuth.client)).completed,1);
+
   const lost=await fixture();await lost.close();
   const remove=lost.client.storage.from.bind(lost.client.storage);let sends=0;const sentPaths=[];
   lost.client.storage={from(bucket){const api=remove(bucket);const original=api.remove.bind(api);

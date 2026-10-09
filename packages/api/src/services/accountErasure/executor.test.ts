@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { beforeEach, expect, it, vi } from 'vitest';
-const mocks = vi.hoisted(() => ({ create: vi.fn(), run: vi.fn(), idle: vi.fn(), drain: vi.fn() }));
+const mocks = vi.hoisted(() => ({ create: vi.fn(), run: vi.fn(), idle: vi.fn(), drain: vi.fn(), dispatched: vi.fn() }));
 vi.mock('./host', () => ({ createAccountErasureHost: mocks.create }));
 vi.mock('./authAdapter', () => ({ createErasureAuthAdapter: vi.fn() }));
 vi.mock('./storageTransport', () => ({ createErasureStorageTransport: vi.fn() }));
@@ -26,8 +26,8 @@ function client() {
 }
 beforeEach(() => {
   vi.resetAllMocks();
-  mocks.create.mockReturnValue({ run: mocks.run, isIdle: mocks.idle, waitForIdle: mocks.drain });
-  mocks.idle.mockReturnValue(true);
+  mocks.create.mockReturnValue({ run: mocks.run, isIdle: mocks.idle, waitForIdle: mocks.drain, didDispatchAuth: mocks.dispatched });
+  mocks.idle.mockReturnValue(true); mocks.dispatched.mockReturnValue(false);
   mocks.drain.mockResolvedValue(false);
   mocks.run.mockResolvedValue({ stage: 'erasing', retry: true, remaining: 1, manualReview: 0,
     errorCodes: ['ERASURE_CONTENT_PENDING'] });
@@ -40,7 +40,7 @@ it('persists a barrier retry and uses the original request and claimed token', a
   const claim = calls.find(([name]) => name === 'account_erasure_executor_claim')![1];
   expect(calls.find(([name]) => name === 'account_erasure_executor_finish')![1]).toEqual({
     p_profile_id: actor, p_request_id: request, p_token: claim.p_token,
-    p_codes: ['ERASURE_CONTENT_PENDING'], p_release: true,
+    p_codes: ['ERASURE_CONTENT_PENDING'], p_release: true, p_auth_not_dispatched: true,
   });
 });
 it('does not release a claim when underlying I/O is still in flight', async () => {

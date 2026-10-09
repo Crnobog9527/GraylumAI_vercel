@@ -32,7 +32,7 @@ async function claimWithObservation(client: SupabaseClient, token: string) {
 }
 
 async function finishWithObservation(client: SupabaseClient, args: {
-  p_profile_id: string; p_request_id: string; p_token: string; p_codes: string[]; p_release: boolean;
+  p_profile_id: string; p_request_id: string; p_token: string; p_codes: string[]; p_release: boolean; p_auth_not_dispatched: boolean;
 }) {
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
@@ -85,6 +85,7 @@ async function runOne(client: SupabaseClient, deadline: number, drainDeadline: n
     const codes = idle ? result.errorCodes : [...result.errorCodes, 'ERASURE_EXECUTOR_IO_PENDING'];
     await finishWithObservation(client, {
       ...binding, p_codes: [...new Set(codes)].slice(0, 20), p_release: idle,
+      p_auth_not_dispatched: !host.didDispatchAuth(),
     });
   } catch { summary.failed++; }
   return summary;
