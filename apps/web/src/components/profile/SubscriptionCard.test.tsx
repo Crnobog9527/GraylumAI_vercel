@@ -234,8 +234,12 @@ describe('SubscriptionCard catalog availability', () => {
     expect(free).toContain('开通会员后可购买');
     expect(free).toContain('data-testid="profile-credit-packages-members-only"');
     expect(free).toContain('disabled=""');
-    componentState.entitlementsQuery = { data: undefined, isError: true };
-    expect(renderToStaticMarkup(createElement(CreditPackagesSection, {}))).toContain('暂时无法确认会员状态');
+    componentState.entitlementsQuery = { data: undefined, isError: true, isFetching: false, refetch: () => undefined };
+    const failed = renderToStaticMarkup(createElement(CreditPackagesSection, {}));
+    expect(failed).toContain('暂时无法确认会员状态');
+    // The read failure can be retried in place, without reloading the profile page.
+    expect(failed).toContain('data-testid="profile-credit-packages-entitlement-error"');
+    expect(failed).toMatch(/<button[^>]*>重试<\/button>/);
     componentState.entitlementsQuery = { data: { level: 'gold' }, isError: false };
     const gold = renderToStaticMarkup(createElement(CreditPackagesSection, {}));
     expect(gold).toContain('>购买<');
