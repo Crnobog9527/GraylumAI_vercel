@@ -78,20 +78,20 @@ export function reportService(user: SupabaseClient, admin: SupabaseClient, polic
         const replay = await rpc('runtime_admission_replay', { p_request_id: input.requestId, p_request: { reportStart: input } });
         if (replay) return replay;
         if (!await reportEnabled(admin)) throw new Error('REPORT_DISABLED');
-        // Entry check. The second check is inside the SQL call reservation transaction.
-        await rpc('report_membership_check', {});
         const source = await rpc('report_source', {
           p_session_id: input.sessionId, p_project_id: input.projectId, p_round_id: input.roundId,
         });
+        const workflow = workflowSchema.parse(source.workflow);
+        if (!workflow.reportGeneration) throw new Error('REPORT_MANIFEST_REQUIRED');
+        const manifest = workflow.reportGeneration;
+        // Check support before membership; the second membership check remains in SQL call reservation.
+        await rpc('report_membership_check', {});
         // One paid report per round: a stale tab or device with a new requestId gets the existing one.
         // After report_source, so ownership and source refusals keep their own codes.
         // Simultaneous starts are already serialized by the session's active-execution lock.
         const existing = await findLatest(input);
         if (existing && reportBlocksNewStart(existing.saved)) throw new Error('REPORT_ALREADY_EXISTS');
         const snapshot = snapshotSchema.parse(source.snapshot);
-        const workflow = workflowSchema.parse(source.workflow);
-        if (!workflow.reportGeneration) throw new Error('REPORT_MANIFEST_REQUIRED');
-        const manifest = workflow.reportGeneration;
         const facts = confirmedReportFacts(snapshot);
         const reportGeneration = frozenReport.parse({ version: 1, projectId: input.projectId, roundId: input.roundId,
           evidenceIds: [...new Set(Object.values(snapshot.steps).flatMap(step => [...step.evidenceIds, ...step.provenanceIds]))],
