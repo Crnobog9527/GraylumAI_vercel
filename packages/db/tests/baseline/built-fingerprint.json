@@ -2017,7 +2017,7 @@
   "ext:uuid-ossp": "2ac737d240fc",
   "fn:account_erasure_activity_safe(text,text,timestamp with time zone,xid,xid,timestamp with time zone)": "db5d3d433b38",
   "fn:account_erasure_assert_closed(uuid)": "70f8f535b0b7",
-  "fn:account_erasure_attachment_checkpoint(uuid,uuid,uuid,text,text,boolean,boolean,boolean)": "30bd9fd27ce0",
+  "fn:account_erasure_attachment_checkpoint(uuid,uuid,uuid,text,text,boolean,boolean,boolean)": "f6f549562fba",
   "fn:account_erasure_attachment_classify(uuid,text[])": "172fea6012fb",
   "fn:account_erasure_attachment_page(uuid,text,integer)": "ac0c8821e654",
   "fn:account_erasure_auth_begin(uuid,uuid)": "ed836c14ad64",

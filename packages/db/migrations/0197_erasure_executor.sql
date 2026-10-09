@@ -286,8 +286,8 @@ BEGIN
   IF finished OR current_cursor IS DISTINCT FROM p_after OR p_next IS NOT NULL AND (
    (NOT p_prefix AND p_next!~'^[01]:[0-9a-f-]{36}:[0-9]{10}$')
    OR (p_prefix AND (p_next NOT LIKE p_profile_id::text||'/%' OR position('..' IN p_next)>0
-    OR p_next!~'^[0-9a-f-]{36}/[A-Za-z0-9][A-Za-z0-9._-]{0,254}$'))
-   OR p_after IS NOT NULL AND p_next COLLATE "C"<=p_after COLLATE "C") THEN
+    OR length(p_next)>17000 OR p_next!~'^[0-9a-f-]{36}/[A-Za-z0-9][A-Za-z0-9._-]{0,254}[|][^|]+$'))
+   OR p_after IS NOT NULL AND split_part(p_next,'|',1) COLLATE "C"<=split_part(p_after,'|',1) COLLATE "C") THEN
    RAISE EXCEPTION 'ERASURE_CHECKPOINT_INVALID';
   END IF;
   needs_review:=p_review OR (p_after IS NOT NULL AND needs_review);

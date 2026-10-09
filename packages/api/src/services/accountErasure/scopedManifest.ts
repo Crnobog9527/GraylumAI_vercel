@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { z } from 'zod';
-import { isCanonicalErasureAttachment, type ErasureAttachmentManifest } from './storage';
+import { erasurePrefixCursor, isCanonicalErasureAttachment, type ErasureAttachmentManifest } from './storage';
 
 type Read = (name: string, args: Record<string, unknown>, signal: AbortSignal) => PromiseLike<{
   data: unknown; error: unknown;
@@ -31,13 +31,15 @@ export function createScopedErasureManifest(input: {
       const result = await input.read('account_erasure_attachment_checkpoint', { ...binding(profileId), p_prefix: true }, signal);
       if (result.error || signal.aborted) throw failure();
       const state = prefixSchema.parse(result.data);
-      if (state.cursor !== null && (!isCanonicalErasureAttachment(state.cursor) || !state.cursor.startsWith(`${profileId}/`))) throw failure();
+      if (state.cursor !== null && (!isCanonicalErasureAttachment(erasurePrefixCursor(state.cursor).path)
+        || !state.cursor.startsWith(`${profileId}/`))) throw failure();
       prefixCurrent = state.cursor;
       return state;
     },
     async checkpointPrefix({ profileId, nextCursor, review, signal }) {
       await input.verify(profileId, signal);
-      if (nextCursor !== null && (!isCanonicalErasureAttachment(nextCursor) || !nextCursor.startsWith(`${profileId}/`))) throw failure();
+      if (nextCursor !== null && (!isCanonicalErasureAttachment(erasurePrefixCursor(nextCursor).path)
+        || !nextCursor.startsWith(`${profileId}/`))) throw failure();
       const result = await input.read('account_erasure_attachment_checkpoint', {
         ...binding(profileId), p_prefix: true, p_after: prefixCurrent, p_next: nextCursor, p_commit: true, p_review: review,
       }, signal);

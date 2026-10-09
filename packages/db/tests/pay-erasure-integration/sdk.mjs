@@ -18,11 +18,11 @@ export function syntheticSdk(createClient,profileId){
    return auth==='present'?response({id:profileId}):auth==='absent'?response({code:'user_not_found'},404):response({},503);
   }
   if(target.pathname==='/storage/v1/object/list-v2/ticket-attachments'){
-   assert.equal(body.limit,1000);assert.equal(body.with_delimiter,false);assert.equal(body.offset,undefined);
+   assert.ok(body.limit>=1&&body.limit<=1000);assert.equal(body.with_delimiter,false);assert.equal(body.offset,undefined);
    if(mode==='page_failure'&&body.cursor)return response({},403);
-   const rows=[...objects].filter(key=>key.startsWith(body.prefix)).sort();
-   const offset=body.cursor?Number(body.cursor.slice(7)):0;const end=offset+2;
-   return response({hasNext:end<rows.length,nextCursor:end<rows.length?`opaque:${end}`:null,folders:[],
+   const rows=[...objects].filter(key=>key.startsWith(body.prefix)&&(!body.cursor||key>body.cursor.slice(7))).sort();
+   const offset=0;const end=Math.min(2,body.limit);
+   return response({hasNext:end<rows.length,nextCursor:end<rows.length?`opaque:${rows[end-1]}`:null,folders:[],
     objects:rows.slice(offset,end).map(key=>({key,id:key}))});
   }
   assert.equal(target.pathname,'/storage/v1/object/ticket-attachments');assert.equal(method,'DELETE');

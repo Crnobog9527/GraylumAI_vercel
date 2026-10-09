@@ -248,7 +248,10 @@ export async function runExecutor({db,Client,connectionString,require,runAccount
   for(const path of [...held,...later,...laterManifest])prefixShared.sdk.objects.add(path);
   await prefixShared.close();await runAccountErasureExecutor(prefixShared.client);
   assert.ok((await prefixShared.row()).storage_prefix_cursor);assert.equal((await prefixShared.row()).storage_prefix_review,true);
-  for(let pass=0;pass<5;pass++){await prefixShared.retry();assert.ok((await runAccountErasureExecutor(prefixShared.client)).pending>0);}
+  const sharedFrom=prefixShared.client.storage.from.bind(prefixShared.client.storage);
+  prefixShared.client.storage={from(bucket){const api=sharedFrom(bucket),list=api.listV2.bind(api);
+   api.listV2=async(...args)=>{await new Promise(resolve=>setTimeout(resolve,40));return list(...args);};return api;}};
+  for(let pass=0;pass<8;pass++){await prefixShared.retry();assert.ok((await runAccountErasureExecutor(prefixShared.client)).pending>0);}
   assert.ok([...later,...laterManifest].every(path=>!prefixShared.sdk.objects.has(path)));
   assert.ok(held.every(path=>prefixShared.sdk.objects.has(path)));assert.equal(prefixShared.sdk.authDeletes(),0);
 

@@ -15,7 +15,7 @@ prepares or dispatches a model call, creates a refund, or cancels a subscription
 Migration 0197 is required before this application code. It reuses `profiles` for
 an attachment-history completeness bit and `account_erasure_requests` for a claim,
 attempt time, sanitized errors and bounded scan positions. Manifest positions are
-row IDs/ordinals; the prefix position retains only its last object key until the
+row IDs/ordinals; the prefix position retains its last object key and opaque provider continuation until the
 scan finishes, then clears it. These service-only request fields are never public. Existing rows/references alone cannot prove lost
 attachment history, and the old host latch cannot exclude another server instance;
 these are the smallest missing capabilities. No queue, scheduler system, balance,
@@ -88,8 +88,9 @@ block a small subject or get deleted by its cleanup. Storage prefix enumeration
 also exposes bounded sorted pages before exhausting the whole prefix, so 5,001
 objects can make progress. Prefix progress and unresolved state also persist;
 125 retained prefix objects cannot starve later exclusive objects or manifest work.
-Each invocation reserves half its page budget for the manifest. Reads restart after deletion; provider cursors are not
-reused across mutations. Shared/unknown manifest entries retain a durable review bit while the scan proceeds
+Each invocation reserves half its page budget for the manifest. Production resumes the original opaque listV2 continuation with name ordering, including across deletion;
+the provider uses a key boundary, so retained pages are not downloaded again. No cursor is invented or decoded.
+Exact-object absence reads remain complete bounded inventories. Shared/unknown manifest entries retain a durable review bit while the scan proceeds
 to later exclusive objects. At scan end an unresolved manifest restarts from the
 beginning on a later pass; its cursor cannot turn missing absence proof into
 completion. Shared objects/references remain for review, while bounded
@@ -162,7 +163,7 @@ Auth identities, objects or body data. Do not drop proof columns, reset unknown
 history to true, expire a live claim, or restore a purge that loses references.
 
 0196 built SHA-256: `06b95b0bb78bc9345e9d531519fe43ab9516c5db78deab1f66cfced48aa5bce8`.
-0197 final built SHA-256: `d8cb933e547e5f40c7ce437283e98f392d6ce41edadffaf334a7b540ae189d30`.
+0197 final built SHA-256: `30cf92518feea26f531c7fff06f179c0c40fe6d88132f6a5e1c6d549cec9b3e9`.
 The exact final local delta is 39 added catalog entries and four changed
 functions `account_erasure_local_cleanup(uuid,boolean)`, `account_erasure_ticket_guard()`,
 `account_erasure_auth_begin(uuid,uuid)` and `purge_deleted_records(integer)`; no catalog entries were

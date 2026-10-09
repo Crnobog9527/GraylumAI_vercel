@@ -15,8 +15,16 @@ const referencesSchema = z.array(z.object({
 const stateSchema = z.enum(['present', 'absent', 'unknown']);
 type Scoped = { bucket: typeof bucket; signal: AbortSignal };
 
+/** Service-owned checkpoint: original key plus opaque provider continuation, never decoded. */
+export function erasurePrefixCursor(value: string): { path: string; cursor?: string } {
+  const [path, token, extra] = value.split('|');
+  if (!isCanonicalErasureAttachment(path) || extra !== undefined || value.length > 17000
+    || token !== undefined && !token) throw new Error('ERASURE_STORAGE_CURSOR_INVALID');
+  return { path, ...(token === undefined ? {} : { cursor: decodeURIComponent(token) }) };
+}
+
 export type ErasureStorageTransport = {
-  /** Full paths, strictly increasing ASCII order. Cursor is the last path, never an offset.
+  /** Full paths, strictly increasing ASCII order. Cursor binds the last path and optional opaque provider continuation, never an offset.
    * A non-null cursor means more work; null means this prefix enumeration is exhausted. */
   listPrefix(input: Scoped & { prefix: string; afterPath: string | null; limit: number }): Promise<unknown>;
   remove(input: Scoped & { paths: string[] }): Promise<unknown>;
@@ -131,8 +139,8 @@ export function createErasureStorageAdapter(input: {
           bucket, prefix: `${profileId}/`, afterPath, limit: limits.pageSize, signal,
         })));
         if (page.paths.length > limits.pageSize || page.paths.some((path, index) =>
-          (index > 0 && path <= page.paths[index - 1]) || (afterPath !== null && path <= afterPath))
-          || (page.nextAfterPath !== null && (!page.paths.length || page.nextAfterPath !== page.paths.at(-1)))) {
+          (index > 0 && path <= page.paths[index - 1]) || (afterPath !== null && path <= erasurePrefixCursor(afterPath).path))
+          || (page.nextAfterPath !== null && (!page.paths.length || erasurePrefixCursor(page.nextAfterPath).path !== page.paths.at(-1)))) {
           throw new Error('ERASURE_STORAGE_PAGE_INVALID');
         }
         let prefixReview = false;
