@@ -137,8 +137,18 @@ export function useMonthlyRefund() {
       const data = await execute.mutateAsync({ orderId, intentId: intent.id }) as MonthlyRefundIntent;
       if (!current(started)) return;
       setExecuteResult(data);
-      // A finished pass returns the stored intent; a stopped pass returns only a reason.
-      if (data && 'terms' in data) setIntent(data);
+      // A finished pass returns the stored intent; a stopped pass returns only a reason, while the
+      // stored intent may have moved on (claimed, stages started), so re-read it before any next step.
+      if (data && 'terms' in data) {
+        setIntent(data);
+        return;
+      }
+      try {
+        const fresh = await utils.admin.getMonthlyRefundStatus.fetch({ orderId }, { staleTime: 0, retry: false });
+        if (current(started) && fresh) setIntent(fresh as MonthlyRefundIntent);
+      } catch {
+        if (current(started)) setStatusError('执行已停止，但没能重新读取进度，请点"查看进度"');
+      }
     } catch (error) {
       if (current(started)) setActionError(getSafeErrorMessage(error, FALLBACK));
     }

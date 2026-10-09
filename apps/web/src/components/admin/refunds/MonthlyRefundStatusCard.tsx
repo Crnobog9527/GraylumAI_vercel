@@ -5,7 +5,7 @@ import { formatMinorAmount } from '@/lib/payment-display';
 import { ConfirmRefundAction } from './ConfirmRefundAction';
 import type { MonthlyRefundIntent } from './useMonthlyRefund';
 import {
-  canExecuteMonthlyRefund, executeReasonLabel, formatRefundTime, monthlyRefundHoldLabel, monthlyRefundStages,
+  canExecuteMonthlyRefund, executeReasonLabel, stoppedExecutionReason, formatRefundTime, monthlyRefundHoldLabel, monthlyRefundStages,
   monthlyRefundStatusLabel, rejectReasonLabel,
 } from './monthlyRefundView';
 
@@ -26,7 +26,7 @@ export function MonthlyRefundStatusCard({ intent, executeResult, executing, disa
   const claimed = typeof intent.claimedAt === 'string';
   const stopped = executeResult && !('terms' in executeResult) ? executeResult : null;
   // A recorded cash mismatch is terminal for this screen: no further attempt until someone reconciles it.
-  const conflict = !!intent.terminalConflict || stopped?.reason === 'recorded_cash_conflict';
+  const conflict = !!intent.terminalConflict || stoppedExecutionReason(stopped) === 'recorded_cash_conflict';
   return (
     <section data-testid="monthly-refund-status" className="space-y-4 rounded-xl border p-4"
       style={{ background: 'var(--bg-secondary)', borderColor: 'var(--border-primary)' }}>
@@ -75,7 +75,7 @@ export function MonthlyRefundStatusCard({ intent, executeResult, executing, disa
       ) : null}
       {stopped && !conflict ? (
         <p data-testid="monthly-refund-execute-stopped" role="status" className="text-sm" style={{ color: 'var(--warning)' }}>
-          {executeReasonLabel(stopped.reason)}
+          {executeReasonLabel(stoppedExecutionReason(stopped))}
         </p>
       ) : null}
       {canExecuteMonthlyRefund(intent) && !conflict ? (

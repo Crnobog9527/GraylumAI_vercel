@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { describe, expect, it } from 'vitest';
 import {
-  canExecuteMonthlyRefund, canRejectMonthlyRefund, executeReasonLabel, monthlyRefundStages, monthlyRefundStatusLabel,
+  canExecuteMonthlyRefund, canRejectMonthlyRefund, executeReasonLabel, stoppedExecutionReason, monthlyRefundStages, monthlyRefundStatusLabel,
   validateMonthlyRefundForm, validateRefundFields,
 } from './monthlyRefundView';
 
@@ -43,6 +43,14 @@ describe('intent presentation', () => {
     expect(monthlyRefundStatusLabel('something_new')).toBe('未知状态');
     expect(executeReasonLabel('bounded_reconciliation')).toContain('继续执行');
     expect(executeReasonLabel(undefined)).toBe('需要人工核对，请先查看进度');
+    expect(executeReasonLabel('stage_order_invalid')).toContain('原因代码 stage_order_invalid');
+  });
+
+  it('reads the stop reason at the top level or inside the planner decision', () => {
+    expect(stoppedExecutionReason({ reason: 'recorded_cash_conflict' })).toBe('recorded_cash_conflict');
+    expect(stoppedExecutionReason({ decision: { kind: 'review_required', reason: 'amount_mismatch' } })).toBe('amount_mismatch');
+    expect(stoppedExecutionReason({ decision: { kind: 'pending', refundId: 're_1' } })).toBe('refund_pending');
+    expect(stoppedExecutionReason(null)).toBeUndefined();
   });
 
   it('lists every stage in order and marks unstarted ones', () => {

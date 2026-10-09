@@ -96,6 +96,15 @@ const EXECUTE_REASON_LABELS: Record<string, string> = {
   recorded_cash_conflict: '支付商的退款记录和本地记录对不上，已停止自动处理，需要人工核对',
   bounded_reconciliation: '这一轮没有处理完，可以稍后再点一次"继续执行"',
   monthly_refund_requires_reconciliation: '执行中遇到不确定的结果，已停止自动处理；请先查看进度，再决定是否继续执行',
+  refund_pending: '支付商的退款还在处理中，稍后再点"继续执行"查看结果',
+  post_retry_window_elapsed: '自动重试的时间已经过了，需要人工到支付商后台核对后处理',
+  fresh_observation_required: '支付商状态读取得太早或太晚，请再点一次"继续执行"重新读取',
+  admin_required: '当前账号不再是有效的管理员，不能继续执行',
+  amount_mismatch: '金额和批准时不一致，已停止，需要人工核对',
+  approval_changed: '批准后订单或工单有变化，已停止，需要重新获取报价',
+  original_identity_changed: '原订单或订阅的身份有变化，已停止，需要人工核对',
+  account_unresolved: '用户账号状态不明确（可能已注销或停用），需要人工核对',
+  application_window_invalid: '退款申请已不在 7 天内，不能继续执行',
 };
 
 export const PLAN_LABELS: Record<string, string> = { pro: 'Pro', gold: 'Gold' };
@@ -114,7 +123,18 @@ export function rejectReasonLabel(reason: unknown) {
 
 export function executeReasonLabel(reason: unknown) {
   if (typeof reason === 'string' && EXECUTE_REASON_LABELS[reason]) return EXECUTE_REASON_LABELS[reason];
+  // An unmapped server reason is kept as a reference code for whoever reconciles it.
+  if (typeof reason === 'string' && /^[a-z_]{1,64}$/.test(reason)) return `需要人工核对，请先查看进度（原因代码 ${reason}）`;
   return '需要人工核对，请先查看进度';
+}
+
+/** The stop reason of an execute answer: top-level, or the planner's nested decision. */
+export function stoppedExecutionReason(result: unknown): string | undefined {
+  if (!result || typeof result !== 'object') return undefined;
+  const record = result as { reason?: unknown; decision?: { kind?: unknown; reason?: unknown } };
+  if (typeof record.reason === 'string') return record.reason;
+  if (typeof record.decision?.reason === 'string') return record.decision.reason;
+  return record.decision?.kind === 'pending' ? 'refund_pending' : undefined;
 }
 
 /** Ordered stage list for the status card; a stage without a timestamp has not started. */

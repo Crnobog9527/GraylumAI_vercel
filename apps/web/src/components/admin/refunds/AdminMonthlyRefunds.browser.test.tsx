@@ -127,8 +127,10 @@ it('shows the server refusal in plain Chinese with likely causes and no approve 
 }, 20000);
 
 it('approves only after confirmation, pinned to the displayed quote, then executes separately once', async () => {
-  const { page, errors } = await open({ quote, approve: approved,
-    execute: { status: 'review_required', intentId: INTENT, reason: 'bounded_reconciliation' } });
+  const claimed = { ...approved, status: 'review_required', claimedAt: '2026-10-09T00:00:00Z', hold: 'held',
+    started: { ...approved.started, stop_renewal: '2026-10-09T00:00:01Z' } };
+  const { page, errors } = await open({ quote, approve: approved, status: claimed,
+    execute: { status: 'review_required', intentId: INTENT, decision: { kind: 'review_required', reason: 'amount_mismatch' } } });
   try {
     await fill(page);
     await page.getByTestId('monthly-refund-quote-button').click();
@@ -152,12 +154,17 @@ it('approves only after confirmation, pinned to the displayed quote, then execut
     await page.getByTestId('monthly-refund-execute').click();
     await browserExpect(page.getByRole('alertdialog')).toContainText('$64.86');
     await page.getByTestId('monthly-refund-execute-confirm').click();
-    await browserExpect(page.getByTestId('monthly-refund-execute-stopped')).toContainText('继续执行');
+    await browserExpect(page.getByTestId('monthly-refund-execute-stopped')).toContainText('金额和批准时不一致');
+    // The stored intent moved on (claimed, a stage started): the card shows the re-read state.
+    await browserExpect(page.getByTestId('monthly-refund-status-label')).toHaveText('执行中或需要人工核对');
+    await browserExpect(page.getByTestId('monthly-refund-execute')).toHaveText('继续执行');
+    await browserExpect(page.getByTestId('monthly-refund-status')).toContainText('已开始');
     expect(await calls(page)).toEqual([
       ['quote', { orderId: ORDER, ticketId: TICKET, feePermitted: 'confirmed', feeEvidence: 'legal:us-ca:2026-10' }],
       ['approve', { orderId: ORDER, ticketId: TICKET, feePermitted: 'confirmed', feeEvidence: 'legal:us-ca:2026-10',
         versionHash: quote.versionHash, localVersion: quote.localVersion }],
       ['execute', { orderId: ORDER, intentId: INTENT }],
+      ['status', { orderId: ORDER }],
     ]);
     expect(errors).toEqual([]);
   } finally { await page.close(); }
@@ -222,7 +229,8 @@ it('reads progress with only an order id and hides execute after a recorded cash
     await page.getByTestId('monthly-refund-execute-confirm').click();
     await browserExpect(page.getByTestId('monthly-refund-conflict')).toBeVisible();
     await browserExpect(page.getByTestId('monthly-refund-execute')).toHaveCount(0);
-    expect(await calls(page)).toEqual([['status', { orderId: ORDER }], ['execute', { orderId: ORDER, intentId: INTENT }]]);
+    expect(await calls(page)).toEqual([['status', { orderId: ORDER }], ['execute', { orderId: ORDER, intentId: INTENT }],
+      ['status', { orderId: ORDER }]]);
     expect(errors).toEqual([]);
   } finally { await page.close(); }
 }, 20000);
