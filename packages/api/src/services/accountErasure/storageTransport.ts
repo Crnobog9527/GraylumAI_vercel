@@ -27,7 +27,7 @@ export function createErasureStorageTransport(client: Client, options: { bounded
     const identities = new Set<string>();
     const cursors = new Set<string>();
     let cursor: string | undefined;
-    
+
     const started = Date.now();
     for (let page = 0; page < maxPages; page++) {
       if (Date.now() - started >= readTimeoutMs) throw failure();
