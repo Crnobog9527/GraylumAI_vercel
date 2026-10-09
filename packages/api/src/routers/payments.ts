@@ -46,9 +46,9 @@ import { STRIPE_MANAGED_ACTIVE_SUBSCRIPTION_STATUSES } from '../services/subscri
 import { addUtcCalendarMonthsClamped } from '../services/subscriptionCreditGrants';
 import { findStripeReference, resolveStripeOrderIds, loadCurrentStripeSubscription } from '../services/payments/stripeReferences';
 import { loadCurrentStripePrices } from '../services/payments/stripeCatalog';
+import { assertCreditPackageMembership } from '../services/payments/creditPackageMembership';
 import { mapPurchaseCheckoutError } from '../services/payments/purchaseCheckoutError';
 import { createDurableStripeCheckout, resolveStripeScope } from '../services/payments/stripeCheckoutPersistence';
-
 const createCheckoutInput = z.discriminatedUnion('kind', [
   z.object({
     kind: z.literal('credit_package'),
@@ -60,7 +60,6 @@ const createCheckoutInput = z.discriminatedUnion('kind', [
     billingCycle: z.enum(['monthly', 'yearly']),
   }),
 ]);
-
 const syncCheckoutInput = z.object({
   sessionId: z.string().min(1),
   checkoutState: z.enum(['success', 'canceled', 'cancelled']).optional(),
@@ -1292,6 +1291,7 @@ export const paymentsRouter = router({
         throw createSafeServiceUnavailableError(error, '会员状态暂不可用，请稍后重试');
       }
       if (!eligibility.allowed) throwMembershipEligibilityError(eligibility);
+      if (input.kind === 'credit_package') await assertCreditPackageMembership(ctx.supabaseAdmin, ctx.profileId);
       await assertCheckoutRateLimit(ctx.profileId, ctx.headers);
       await assertCheckoutChannel(ctx.supabaseAdmin, ctx.profileId, input.kind);
       try {
