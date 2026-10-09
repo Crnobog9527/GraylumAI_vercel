@@ -14,6 +14,9 @@ function createInvalidationUtils() {
       getUserProfile: {
         invalidate: vi.fn().mockResolvedValue(undefined),
       },
+      getEntitlements: {
+        invalidate: vi.fn().mockResolvedValue(undefined),
+      },
     },
     credits: {
       getBalance: {
@@ -41,6 +44,7 @@ describe('invalidatePostCheckoutMembershipQueries', () => {
     await invalidatePostCheckoutMembershipQueries(utils);
 
     expect(utils.user.getUserProfile.invalidate).toHaveBeenCalledTimes(1);
+    expect(utils.user.getEntitlements.invalidate).toHaveBeenCalledTimes(1);
     expect(utils.credits.getBalance.invalidate).toHaveBeenCalledTimes(1);
     expect(utils.credits.getCreditsSummary.invalidate).toHaveBeenCalledTimes(1);
     expect(utils.payments.getMembershipEligibilityMatrix.invalidate).toHaveBeenCalledTimes(1);
