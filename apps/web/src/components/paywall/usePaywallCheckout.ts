@@ -47,8 +47,11 @@ export function usePaywallCheckout() {
     return { ...state, disabled: state.disabled || !state.canCreateCheckout };
   }
 
+  // A failed catalog refetch keeps the old data; never sell from a price the server no longer confirms.
+  const catalogFailed = plansQuery.isError || (!plansQuery.isLoading && plans.length === 0);
+
   async function startCheckout(plan: PaywallPlan, billing: PaywallBilling) {
-    if (inFlight.current || !buttonState(plan, billing).canCreateCheckout) return;
+    if (inFlight.current || catalogFailed || !buttonState(plan, billing).canCreateCheckout) return;
     inFlight.current = true;
     setError(null);
     try {
@@ -62,7 +65,7 @@ export function usePaywallCheckout() {
   }
 
   return {
-    plans, loading: plansQuery.isLoading, catalogFailed: plansQuery.isError || (!plansQuery.isLoading && plans.length === 0),
+    plans, loading: plansQuery.isLoading, catalogFailed,
     pending: createCheckout.isPending, error, buttonState, startCheckout,
   };
 }

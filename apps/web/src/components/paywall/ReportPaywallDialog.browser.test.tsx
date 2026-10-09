@@ -22,7 +22,7 @@ beforeAll(async () => {
     const q = value => ({data: value, isLoading: false, isError: false});
     export const trpc = {
       runtime: {reportAvailable: {useQuery: () => q({enabled: true})}},
-      settings: {getMembershipPlans: {useQuery: () => window.plansFail ? {data: undefined, isLoading: false, isError: true}
+      settings: {getMembershipPlans: {useQuery: () => window.plansFail ? {data: window.stalePlans, isLoading: false, isError: true}
         : q(window.plans)}},
       payments: {
         getMembershipEligibilityMatrix: {useQuery: () => q(window.matrix)},
@@ -179,6 +179,16 @@ it('without a membership refusal the normal report dialog opens, not the paywall
   try {
     await browserExpect(page.getByRole('dialog', { name: '完整运营策略报告' })).toBeVisible();
     await browserExpect(page.getByTestId('report-paywall')).toHaveCount(0);
+    expect(errors).toEqual([]);
+  } finally { await page.close(); }
+}, 20000);
+
+it('hides the pay button when a catalog refetch failed, even with older prices still cached', async () => {
+  const { page, errors } = await open({ plansFail: true, stalePlans: PLANS });
+  try {
+    await browserExpect(page.getByText('暂时读不到会员方案，请稍后再试。', { exact: false })).toBeVisible();
+    await browserExpect(page.getByTestId('report-paywall-pay')).toHaveCount(0);
+    expect(await checkouts(page)).toEqual([]);
     expect(errors).toEqual([]);
   } finally { await page.close(); }
 }, 20000);

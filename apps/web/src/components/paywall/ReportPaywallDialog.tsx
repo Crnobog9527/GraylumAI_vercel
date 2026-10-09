@@ -100,7 +100,7 @@ export function ReportPaywallView({ checkout, onClose }: { checkout: PaywallChec
                 </>
               )}
 
-          {plan && quote && state ? (
+          {plan && quote && state && !checkout.loading && !checkout.catalogFailed ? (
             <div className="grid gap-2">
               <Button data-testid="report-paywall-pay" size="lg" className="h-auto flex-col gap-0.5 py-3" disabled={state.disabled}
                 onClick={() => void checkout.startCheckout(plan, billing)}>
