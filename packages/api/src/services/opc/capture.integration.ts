@@ -31,7 +31,7 @@ const patch = (value = 'A', stepId = 'step-0', fieldId = 'goal') =>
   ({ stepId, fieldId, value, status: 'provisional', nature: 'fact', basis: 'user_statement' });
 const output = (patches = [patch()]) => JSON.stringify({ inputKind: 'answer', patches, notes: [] });
 // Older capture tests reload 0159/0182 definitions; reapply the V3 patches afterwards (marker makes reruns no-ops).
-const withdrawMigration = () => db.query(readFileSync(resolve(import.meta.dirname, '../../../../db/migrations/0200_opc_suggestion_withdraw.sql'), 'utf8'));
+const withdrawMigration = () => db.query(readFileSync(resolve(import.meta.dirname, '../../../../db/migrations/0199_opc_suggestion_withdraw.sql'), 'utf8'));
 
 async function fixture(extraFields = 0, informationCounts?: number[], allRequired = false, proposalField = false) {
   const owner = randomUUID(), model = randomUUID(), moduleId = randomUUID();

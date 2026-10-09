@@ -1,9 +1,9 @@
 -- Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved.
--- Reverts 0200_opc_suggestion_withdraw. Requires separate authorization remotely.
+-- Reverts 0199_opc_suggestion_withdraw. Requires separate authorization remotely.
 -- Remove the API withdraw/dismiss callers first. Pending suggestions, values, versions and history are untouched.
 -- Withdrawn suggestion records are derived, user-dismissible text; the old opc_query would return them
 -- without the history-availability filter, so they are discarded here.
--- Only definitions carrying the 0200 marker are reverted; drift or an already reverted state is rejected.
+-- Only definitions carrying the 0199 marker are reverted; drift or an already reverted state is rejected.
 BEGIN;
 DO $$
 DECLARE marker text:='-- v3 suggestion withdraw';
