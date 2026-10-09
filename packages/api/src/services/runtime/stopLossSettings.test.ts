@@ -29,3 +29,13 @@ it('hides internal errors from all read paths', async () => {
     await expect(call(db)).rejects.toMatchObject({ message: 'RUNTIME_STOP_LOSS_UNAVAILABLE' });
   }
 });
+
+it('counts channel labels by Unicode code points like PostgreSQL after trimming', () => {
+  for (const notificationChannel of ['a'.repeat(100), '😀'.repeat(100), ' a ' + ' '.repeat(100)]) {
+    expect(stopLossConfigSchema.parse({ ...DEFAULT_STOP_LOSS, notificationChannel }).notificationChannel)
+      .toBe(notificationChannel.trim());
+  }
+  for (const notificationChannel of ['a'.repeat(101), '😀'.repeat(101), '\uFEFF']) {
+    expect(stopLossConfigSchema.safeParse({ ...DEFAULT_STOP_LOSS, notificationChannel }).success).toBe(false);
+  }
+});

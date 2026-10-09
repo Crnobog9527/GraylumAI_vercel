@@ -11,7 +11,7 @@ export const stopLossConfigSchema = z.object({
   siteDailyUsd: usdThreshold,
   siteAlertUsd: usdThreshold,
   providerBalanceAlertUsd: usdThreshold,
-  notificationChannel: z.string().trim().min(1).max(100).nullable(),
+  notificationChannel: z.string().trim().min(1).refine(value => [...value].length <= 100, 'Maximum 100 Unicode characters').nullable(),
 }).strict();
 export type StopLossConfig = z.infer<typeof stopLossConfigSchema>;
 export const DEFAULT_STOP_LOSS: StopLossConfig = {

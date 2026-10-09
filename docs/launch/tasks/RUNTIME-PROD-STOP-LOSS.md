@@ -38,7 +38,7 @@
 
 配置对象：`{version:1,userDailyUsd:null,siteDailyUsd:null,siteAlertUsd:null,
 providerBalanceAlertUsd:null,notificationChannel:null}`。
-四个金额字段为十进制字符串或 null。notificationChannel 只存管理员提供的渠道标签，
+四个金额字段为十进制字符串或 null。notificationChannel 为去除首尾空白后 1–100 个 Unicode 字符的渠道标签，
 本切片不发送外部通知、不存 webhook 密钥。
 
 稳定业务码：`RUNTIME_NEW_CALLS_STOPPED`、`RUNTIME_USER_DAILY_USD_LIMIT`、
