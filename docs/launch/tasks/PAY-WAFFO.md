@@ -96,6 +96,8 @@ Waffo 必须使用服务端 API Key 鉴权，或官方确认同样支持约束�
 禁止 Store Slug 创建会话，因为[官方结账契约](https://docs.waffo.ai/api-reference/endpoints/orders/create-checkout-session)说明它会忽略
 付款方式限制、metadata、orderMerchantExternalId 及过期时间。测试须核对这些字段实际生效，未生效则拒绝启售；本轮只写方案，不读取或配置任何凭据。
 全部商品都需验证匿名、直接链接、旧会话及接口请求不能绕开本人订单、条款与资格校验。
+v25 的银行卡/微信选择及全 Waffo 凭证文案由[设计覆盖项 11](../design/paywall/README.md)取代；
+收款 PR-2 与 PAYWALL 验收三种方式的选择、条款确认、实际渠道、钱包不续费及原渠道凭证。
 创始售罄只停新资格入口，老创始合法续买/续费仍保留；后台下架影响必须先核实。
 
 ## 5. 现有机制与最小改动
