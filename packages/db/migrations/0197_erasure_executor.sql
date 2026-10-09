@@ -45,7 +45,7 @@ BEGIN
  -- A verified erasure removes references only after checking the external objects.
  UPDATE profiles SET erasure_history_complete=false WHERE (id IN (subject,OLD.user_id) OR id::text IN
    (SELECT split_part(path,'/',1) FROM jsonb_array_elements_text(OLD.attachments) path))
-  AND NOT EXISTS(SELECT 1 FROM account_erasure_requests e WHERE e.profile_id=subject
+  AND NOT EXISTS(SELECT 1 FROM account_erasure_requests e WHERE e.profile_id IN (subject,OLD.user_id)
    AND e.storage_verified_at IS NOT NULL)
   AND NOT EXISTS(SELECT 1 FROM account_erasure_requests e WHERE e.profile_id=profiles.id
    AND e.storage_verified_at IS NOT NULL);
@@ -79,6 +79,8 @@ BEGIN
  needle:=' -- The service-only retention function';
  IF position('-- executor body scrub' IN source)=0 THEN
   IF position(needle IN source)=0 THEN RAISE EXCEPTION 'ERASURE_GUARD_SOURCE_MISMATCH'; END IF;
+  source:=replace(source,'JOIN account_erasure_requests e ON e.profile_id=t.user_id WHERE coalesce(r.attachments',
+   'JOIN account_erasure_requests e ON (e.profile_id=t.user_id OR e.profile_id=r.user_id) WHERE coalesce(r.attachments');
   EXECUTE replace(source,needle,$patch$ -- executor body scrub
  IF TG_OP='UPDATE' AND (EXISTS(SELECT 1 FROM account_erasure_requests WHERE profile_id=subject)
   OR EXISTS(SELECT 1 FROM account_erasure_requests WHERE profile_id=OLD.user_id)) THEN
@@ -87,6 +89,9 @@ BEGIN
   ELSE
    IF NEW.content='' AND to_jsonb(NEW)-'content'=to_jsonb(OLD)-'content' THEN RETURN NEW; END IF;
   END IF;
+ END IF;
+ IF TG_TABLE_NAME='ticket_replies' AND EXISTS(SELECT 1 FROM account_erasure_requests WHERE profile_id=NEW.user_id) THEN
+  RAISE EXCEPTION 'ACCOUNT_ERASURE_TICKET_CLOSED' USING ERRCODE='42501';
  END IF;
 $patch$||needle);
  END IF;
@@ -148,7 +153,7 @@ BEGIN
     SELECT split_part(path,'/',1) FROM tickets t CROSS JOIN LATERAL
      jsonb_array_elements_text(coalesce(t.attachments,'[]'::jsonb)) path WHERE t.user_id=p_profile_id
     UNION SELECT split_part(path,'/',1) FROM ticket_replies r JOIN tickets t ON t.id=r.ticket_id
-     CROSS JOIN LATERAL jsonb_array_elements_text(coalesce(r.attachments,'[]'::jsonb)) path WHERE t.user_id=p_profile_id)));
+     CROSS JOIN LATERAL jsonb_array_elements_text(coalesce(r.attachments,'[]'::jsonb)) path WHERE t.user_id=p_profile_id OR r.user_id=p_profile_id)));
 END $$;
 CREATE OR REPLACE FUNCTION public.account_erasure_executor_finish(
  p_profile_id uuid,p_request_id uuid,p_token uuid,p_codes text[],p_release boolean,p_auth_not_dispatched boolean DEFAULT false
@@ -228,7 +233,7 @@ BEGIN
    '1:'||r.id::text||':'||lpad(ord::text,10,'0')
    FROM tickets t JOIN ticket_replies r ON r.ticket_id=t.id
    CROSS JOIN LATERAL jsonb_array_elements_text(coalesce(r.attachments,'[]')) WITH ORDINALITY a(path,ord)
-   WHERE t.user_id=p_profile_id
+   WHERE t.user_id=p_profile_id OR r.user_id=p_profile_id
  ), page AS (SELECT * FROM refs WHERE p_after IS NULL OR cursor COLLATE "C">p_after COLLATE "C"
   ORDER BY cursor COLLATE "C" LIMIT p_limit+1)
  SELECT coalesce(jsonb_agg(jsonb_build_object('path',path,'uploaderId',uploader,'subjectId',p_profile_id)
@@ -281,10 +286,10 @@ BEGIN
  SELECT coalesce(jsonb_agg(jsonb_build_object('path',path,'state',CASE
   WHEN EXISTS(SELECT 1 FROM tickets WHERE attachments ? path AND user_id IS DISTINCT FROM p_profile_id)
    OR EXISTS(SELECT 1 FROM ticket_replies r JOIN tickets t ON t.id=r.ticket_id
-    WHERE r.attachments ? path AND t.user_id IS DISTINCT FROM p_profile_id) THEN 'shared'
+    WHERE r.attachments ? path AND t.user_id IS DISTINCT FROM p_profile_id AND r.user_id IS DISTINCT FROM p_profile_id) THEN 'shared'
   WHEN EXISTS(SELECT 1 FROM tickets WHERE attachments ? path AND user_id=p_profile_id)
    OR EXISTS(SELECT 1 FROM ticket_replies r JOIN tickets t ON t.id=r.ticket_id
-    WHERE r.attachments ? path AND t.user_id=p_profile_id) THEN 'exclusive'
+    WHERE r.attachments ? path AND (t.user_id=p_profile_id OR r.user_id=p_profile_id)) THEN 'exclusive'
   WHEN split_part(path,'/',1)=p_profile_id::text THEN 'unreferenced' ELSE 'unknown' END)),'[]')
  INTO result FROM unnest(p_paths) path;
  RETURN result;

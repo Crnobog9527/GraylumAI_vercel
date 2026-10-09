@@ -31,6 +31,9 @@ cleanup, but does not permit Storage/Auth completion. Original ticket/reply rows
 remain the attachment authority. Exclusive administrator attachments can be
 removed after checking their uploader's outstanding intents as well; shared or
 unknown references remain pending. Attachment-free system replies need no uploader.
+Reply authorship is an erasure subject even on another account's ticket. The
+scoped manifest, shared/exclusive classification, upload proof and reference
+write guard use that same ownership rule; the parent owner's body/history survives.
 The deployed upload path must be the existing intent-based implementation from
 0190/#741; old outstanding external uploads cannot be certified by this migration.
 
@@ -158,7 +161,7 @@ Auth identities, objects or body data. Do not drop proof columns, reset unknown
 history to true, expire a live claim, or restore a purge that loses references.
 
 0196 built SHA-256: `06b95b0bb78bc9345e9d531519fe43ab9516c5db78deab1f66cfced48aa5bce8`.
-0197 final built SHA-256: `5d9ed38d3508799c2cc5e546c2fd998f314ee69914ba5a35579c04219ccce224`.
+0197 final built SHA-256: `2a6acdba3cb08976f79b029c0dc4f3559b98fb2e20cbfcac1da1de7d2bb1b646`.
 The exact final local delta is 39 added catalog entries and three changed
 functions `account_erasure_local_cleanup(uuid,boolean)`, `account_erasure_ticket_guard()`
 and `account_erasure_auth_begin(uuid,uuid)`; no catalog entries were

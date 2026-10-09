@@ -48,6 +48,19 @@ export async function runExecutor({db,Client,connectionString,require,runAccount
   const adminDone=await runAccountErasureExecutor({...first.client,storage:adminSdk.client.storage,auth:adminSdk.client.auth});
   assert.equal(adminDone.completed,1,JSON.stringify(adminDone));assert.equal(adminSdk.authDeletes(),1);
 
+  const writer=await fixture();const foreignPath=unrelated+'/foreign-reply.png';writer.sdk.objects.add(foreignPath);
+  await db.query("insert into ticket_replies(ticket_id,user_id,content,attachments) values($1,$2,'writer private',$3)",
+   [parent,writer.actor,JSON.stringify([foreignPath])]);
+  await writer.close();
+  await assert.rejects(db.query("insert into tickets(user_id,title,description,attachments) values($1,'new','new',$2)",
+   [unrelated,JSON.stringify([foreignPath])]),/ACCOUNT_ERASURE_ATTACHMENT_CLOSED/);
+  await assert.rejects(db.query("insert into ticket_replies(ticket_id,user_id,content) values($1,$2,'late')",[parent,writer.actor]),/ACCOUNT_ERASURE_TICKET_CLOSED/);
+  assert.equal((await runAccountErasureExecutor(writer.client)).completed,1);
+  assert.ok(!writer.sdk.objects.has(foreignPath));
+  assert.equal((await db.query('select title from tickets where id=$1',[parent])).rows[0].title,'synthetic');
+  assert.equal((await db.query('select erasure_history_complete v from profiles where id=$1',[unrelated])).rows[0].v,true);
+  assert.equal((await db.query('select count(*)::int n from ticket_replies where ticket_id=$1 and user_id=$2',[parent,writer.actor])).rows[0].n,0);
+
   const claimed=await fixture();await claimed.close();let lostClaim=false;
   const claimRpc=claimed.client.rpc.bind(claimed.client);
   claimed.client.rpc=(name,args)=>{const promise=(async()=>{const response=await claimRpc(name,args);
