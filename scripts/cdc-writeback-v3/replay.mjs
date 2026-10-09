@@ -14,14 +14,17 @@ const synthetic = (slot, model, content) => JSON.stringify({ id: 'gen-offline-' 
   choices: [{ index: 0, message: { role: 'assistant', content }, finish_reason: 'stop' }],
   usage: { prompt_tokens: 100, completion_tokens: 10, total_tokens: 110, cost: 0.001 } });
 // The real mentor stream carries plain message text; the host wraps it into agent-turn.v1 itself.
-// Re-wrapping the frozen envelope was the A12 replay defect (SPECIAL_FROZEN_STATE_MISMATCH).
-export function mentorStream(tail, slot, model) {
+// Re-wrapping the frozen envelope was one A12 defect; a stream without provider identity and usage
+// was the other (the execution stayed cost_pending). Reuse a recorded stream's frames, replacing only the text.
+export function mentorStream(tail, template) {
   const envelope = JSON.parse(tail.slice(marker.length));
   assert(envelope.format === 'agent-turn.v1' && typeof envelope.message === 'string' && envelope.card === null, 'V3_MENTOR_ENVELOPE');
-  const chunk = JSON.parse(synthetic(slot, model, ''));
-  chunk.object = 'chat.completion.chunk';
-  chunk.choices = [{ index: 0, delta: { role: 'assistant', content: envelope.message }, finish_reason: 'stop' }];
-  return 'data: ' + JSON.stringify(chunk) + '\n\ndata: [DONE]\n\n';
+  const frames = template.split('\n').filter(line => line.startsWith('data: ') && line !== 'data: [DONE]').map(line => JSON.parse(line.slice(6)));
+  const final = frames.filter(f => f.choices?.[0]?.finish_reason === 'stop');
+  assert(frames.length > 2 && final.length >= 1 && final.at(-1).usage && frames[0].choices[0].finish_reason === null, 'V3_MENTOR_TEMPLATE');
+  const first = structuredClone(frames[0]);
+  first.choices[0].delta = { ...first.choices[0].delta, content: envelope.message };
+  return [first, ...final].map(f => 'data: ' + JSON.stringify(f)).join('\n\n') + '\n\ndata: [DONE]\n\n';
 }
 
 /** Batches: R1-R3 and S12 replay V3 paid outputs; A12-reference replays the already-paid A12 outputs at no cost. */
@@ -80,15 +83,15 @@ export async function main(batch, dry = false) {
   const { variants, responsesHash } = dry ? { variants: undefined, responsesHash: null } : paidVariants(batch, source);
   const output = join(paths.root, (dry ? 'dry-' : 'replay-') + batch);
   assert(!existsSync(output), 'V3_REPLAY_EXISTS');
-  const mentors = runs.includes(batch) ? readFileSync(join(paths.baseline, 'mentor-responses.jsonl'), 'utf8').trim().split('\n')
-    .map(line => JSON.parse(line)) : null;
+  const recorded = readFileSync(join(paths.baseline, 'mentor-responses.jsonl'), 'utf8').trim().split('\n').map(line => JSON.parse(line));
+  const mentors = runs.includes(batch) ? recorded : null, template = recorded.find(m => m.slot === 'C001').body;
   await runHost(built.plan, output, async input => {
     const row = source.rows.find(r => r.slot === input.slot);
     assert(row, 'V3_REPLAY_SLOT');
     const model = JSON.parse(input.raw).model;
     if (input.role === 'mentor') {
       if (mentors) { const found = mentors.find(m => m.slot === input.slot); assert(found, 'V3_MENTOR_MISSING'); return found.body; }
-      return mentorStream(splitRequest(row.raw).tail, input.slot, model);
+      return mentorStream(splitRequest(row.raw).tail, template);
     }
     assert(sameUserContent(input.raw, row.raw), 'V3_REPLAY_FROZEN_STATE_MISMATCH');
     return synthetic(input.slot, model, '{"inputKind":"answer","patches":[],"notes":[]}');

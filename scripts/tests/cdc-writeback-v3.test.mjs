@@ -50,9 +50,15 @@ test('V3 replay compares normalized organizer payloads and unwraps the frozen me
   body.messages = [{ role: 'system', content: 'host system differs' }, { role: 'user', content: JSON.stringify(reordered) + tail }];
   strict.equal(sameUserContent(JSON.stringify(body), frozen), true);
   strict.equal(sameUserContent(source('B'), frozen), false);
-  const stream = mentorStream(tail, 'P01', 'model');
+  const frame = (content, finish, usage) => 'data: ' + JSON.stringify({ id: 'gen-1', provider: 'Anthropic',
+    choices: [{ index: 0, delta: { role: 'assistant', content }, finish_reason: finish }], ...(usage ? { usage } : {}) });
+  const template = [frame('原', null), frame('文', null), frame('', 'stop'), frame('', 'stop', { cost: 0.01 }), 'data: [DONE]'].join('\n\n');
+  const stream = mentorStream(tail, template);
   strict.match(stream, /"content":"好的，我记下了。"/);
-  strict.doesNotMatch(stream, /agent-turn\.v1/);
+  strict.doesNotMatch(stream, /agent-turn\.v1|原|文/);
+  strict.match(stream, /"provider":"Anthropic"/);
+  strict.match(stream, /"usage":\{"cost":0\.01\}/);
+  strict.throws(() => mentorStream(tail, frame('x', null)), /V3_MENTOR_TEMPLATE/);
 });
 
 test('V3 response validation stops on malformed withdrawals but accepts absent or valid lists', () => {
