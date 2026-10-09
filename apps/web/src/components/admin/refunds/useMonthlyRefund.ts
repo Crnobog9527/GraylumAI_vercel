@@ -31,6 +31,7 @@ export function useMonthlyRefund() {
   const [actionError, setActionError] = useState<string | null>(null);
   const [statusError, setStatusError] = useState<string | null>(null);
   const [loadingStatus, setLoadingStatus] = useState(false);
+  const [rejectReason, setRejectReason] = useState<RejectReason | ''>('');
 
   const approve = trpc.admin.approveMonthlyRefund.useMutation();
   const execute = trpc.admin.executeMonthlyRefund.useMutation();
@@ -59,6 +60,8 @@ export function useMonthlyRefund() {
     setExecuteResult(null);
     setActionError(null);
     setStatusError(null);
+    // A reason picked for one request must never carry over to another.
+    setRejectReason('');
   }
 
   function validated() {
@@ -163,6 +166,7 @@ export function useMonthlyRefund() {
       if (!current(started)) return;
       setIntent(data as MonthlyRefundIntent);
       setQuoted(null);
+      setRejectReason('');
     } catch (error) {
       if (current(started)) setActionError(getSafeErrorMessage(error, FALLBACK));
     }
@@ -171,6 +175,6 @@ export function useMonthlyRefund() {
   return {
     form, errors, updateForm, quoted, quoting, quoteError, intent, executeResult, actionError, statusError,
     loadingStatus, busy, approving: approve.isPending, executing: execute.isPending, rejecting: reject.isPending,
-    requestQuote, loadStatus, approveQuote, executeIntent, rejectRequest,
+    rejectReason, setRejectReason, requestQuote, loadStatus, approveQuote, executeIntent, rejectRequest,
   };
 }

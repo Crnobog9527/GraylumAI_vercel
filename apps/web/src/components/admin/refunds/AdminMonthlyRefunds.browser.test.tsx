@@ -250,3 +250,19 @@ it('rejects with only the order and ticket filled in', async () => {
     expect(errors).toEqual([]);
   } finally { await page.close(); }
 }, 20000);
+
+it('clears a picked rejection reason as soon as the order or ticket changes', async () => {
+  const { page, errors } = await open();
+  try {
+    await page.getByLabel('订单编号').fill(ORDER);
+    await page.getByLabel('工单编号').fill(TICKET);
+    await page.getByLabel('拒绝原因').click();
+    await page.getByRole('option', { name: '不符合退款条件' }).click();
+    await browserExpect(page.getByTestId('monthly-refund-reject-button')).toBeEnabled();
+    await page.getByLabel('工单编号').fill('44444444-4444-4444-8444-444444444444');
+    await browserExpect(page.getByTestId('monthly-refund-reject-button')).toBeDisabled();
+    await browserExpect(page.getByLabel('拒绝原因')).toContainText('选择拒绝原因');
+    expect(await calls(page)).toEqual([]);
+    expect(errors).toEqual([]);
+  } finally { await page.close(); }
+}, 20000);

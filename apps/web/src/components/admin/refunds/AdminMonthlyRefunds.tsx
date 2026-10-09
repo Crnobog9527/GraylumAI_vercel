@@ -1,7 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 'use client';
 
-import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -33,8 +32,7 @@ function Field({ id, label, hint, error, children }: {
 /** 后台月付首购退款（PAY-COMMON）：按工单人工审批，报价、批准、执行分三步，规则全部由服务端判断。 */
 export function AdminMonthlyRefunds() {
   const refund = useMonthlyRefund();
-  const [rejectReason, setRejectReason] = useState<RejectReason | ''>('');
-  const { form, errors } = refund;
+  const { form, errors, rejectReason, setRejectReason } = refund;
 
   return (
     <div className="space-y-6 p-4 md:p-8">
