@@ -13,7 +13,7 @@ prepares or dispatches a model call, creates a refund, or cancels a subscription
 
 Migration 0197 is required before this application code. It reuses `profiles` for
 an attachment-history completeness bit and `account_erasure_requests` for a claim,
-attempt time and sanitized errors. Existing rows/references alone cannot prove lost
+attempt time, sanitized errors and a verified-page checkpoint (row ID/ordinal only). Existing rows/references alone cannot prove lost
 attachment history, and the old host latch cannot exclude another server instance;
 these are the smallest missing capabilities. No queue, scheduler system, balance,
 manifest table or alternative authority is introduced.
@@ -33,7 +33,8 @@ The deployed upload path must be the existing intent-based implementation from
 The durable claim has **no expiry or automatic takeover**. It prevents a second
 worker from deleting concurrently while the first may still have external I/O.
 When actual I/O has settled, only the original subject/request/token can release
-it. A crash or unresolved underlying I/O leaves the claim with its original
+it. After a request timeout the invocation waits within its remaining budget for
+actual I/O to settle before releasing the original claim. A crash or unresolved underlying I/O leaves the claim with its original
 identity for manual observation/recovery. Do not clear it on a timer. Read the
 original Auth/object states and prove the old worker cannot continue before any
 approved release. Unknown Auth deletion retains the existing once-only intent;
@@ -54,8 +55,12 @@ The former full-table manifest read is retained only for injected legacy tests.
 The executor now uses service-only subject keyset pages and candidate-path
 classification against indexed current references. Existing SDK queries cannot
 express this union and cross-subject proof as one bounded response; two narrow
-read-only erasure RPCs are the smallest missing capability, with tickets/replies
-remaining authoritative. A 5,001-row unrelated ticket and reply fixture cannot
+read-only erasure RPCs plus an original-claim checkpoint are the smallest missing
+capability, with tickets/replies
+remaining authoritative. Verified manifest pages persist their row/ordinal cursor,
+so more than 200 references make progress across invocations without retaining
+filenames in progress columns. A 251-attachment fixture proves this continuation.
+A 5,001-row unrelated ticket and reply fixture cannot
 block a small subject or get deleted by its cleanup. No staging account has been closed and no remote DB was accessed.
 No progress capability is issued, read or exposed; the retired query page stays out
 of scope. Retained financial rows and the inaccessible original profile ID remain
@@ -71,7 +76,7 @@ node packages/db/tests/run-db-baseline-replay.mjs --local-only --write-built
 The first command builds the full schema in disposable local PG17 and composes the
 actual executor/host/processor with real service-role SQL and the pinned SDK over
 synthetic HTTP only. It covers completion, duplicate execution, a held transaction
-and later retry, a lost Storage response, unknown history with independent cleanup,
+and later retry, slow I/O draining, multi-pass attachment completion, a lost Storage response, unknown history with independent cleanup,
 Auth uncertainty, concurrent claims, incorrect tokens, denied anon/authenticated
 roles, retained money, and snapshots before messages. `--development` skips the
 historical repeat checks and is never final evidence.
@@ -91,8 +96,8 @@ Auth identities, objects or body data. Do not drop proof columns, reset unknown
 history to true, expire a live claim, or restore a purge that loses references.
 
 0196 built SHA-256: `06b95b0bb78bc9345e9d531519fe43ab9516c5db78deab1f66cfced48aa5bce8`.
-0197 final built SHA-256: `7dcf0f4db985d0a548ba7f22f3239388950984ac22e0ab72d4915917c56bbf52`.
-The exact final local delta is 26 added catalog entries and one changed
+0197 final built SHA-256: `f926bc5159e485f42fecfbcdec5e529c78edb3f313f929381a6d5bbbde8a91ee`.
+The exact final local delta is 30 added catalog entries and one changed
 function `account_erasure_local_cleanup(uuid,boolean)`; no catalog entries were
 removed. The additions include subject-scoped attachment RPCs and two GIN indexes.
 Final canonical replay and completion runner each passed 200/200 build steps,

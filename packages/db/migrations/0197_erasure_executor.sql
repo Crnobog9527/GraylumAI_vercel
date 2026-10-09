@@ -4,6 +4,8 @@ BEGIN;
 SET LOCAL lock_timeout = '5s';
 ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS erasure_history_complete boolean NOT NULL DEFAULT false;
 ALTER TABLE public.account_erasure_requests
+ ADD COLUMN IF NOT EXISTS storage_manifest_cursor text,
+ ADD COLUMN IF NOT EXISTS storage_manifest_done boolean NOT NULL DEFAULT false,
  ADD COLUMN IF NOT EXISTS executor_token uuid,
  ADD COLUMN IF NOT EXISTS executor_started_at timestamptz,
  ADD COLUMN IF NOT EXISTS executor_attempted_at timestamptz,
@@ -116,25 +118,51 @@ CREATE INDEX IF NOT EXISTS erasure_reply_paths ON public.ticket_replies USING gi
 CREATE OR REPLACE FUNCTION public.account_erasure_attachment_page(
  p_profile_id uuid,p_after text DEFAULT NULL,p_limit integer DEFAULT 50
 ) RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
-DECLARE items jsonb;
+DECLARE items jsonb; next_cursor text;
 BEGIN
  PERFORM account_erasure_assert_closed(p_profile_id);
  IF p_limit IS NULL OR p_limit<1 OR p_limit>100 THEN RAISE EXCEPTION 'ERASURE_BATCH_LIMIT_INVALID'; END IF;
- SELECT coalesce(jsonb_agg(jsonb_build_object('path',path,'uploaderId',uploader,'subjectId',p_profile_id) ORDER BY path COLLATE "C"),'[]')
- INTO items FROM (
-  SELECT path,min(uploader) uploader FROM (
-   SELECT path,CASE WHEN split_part(path,'/',1)=t.user_id::text THEN t.user_id::text ELSE '' END uploader
-    FROM tickets t CROSS JOIN LATERAL jsonb_array_elements_text(coalesce(t.attachments,'[]')) path
-    WHERE t.user_id=p_profile_id
-   UNION ALL
-   SELECT path,CASE WHEN split_part(path,'/',1) IN (t.user_id::text,r.user_id::text) THEN split_part(path,'/',1) ELSE '' END
-    FROM tickets t JOIN ticket_replies r ON r.ticket_id=t.id
-    CROSS JOIN LATERAL jsonb_array_elements_text(coalesce(r.attachments,'[]')) path WHERE t.user_id=p_profile_id
-  ) refs WHERE p_after IS NULL OR path COLLATE "C">p_after COLLATE "C"
-  GROUP BY path ORDER BY path COLLATE "C" LIMIT p_limit+1
- ) page;
+ -- Cursor contains only source row identity and array ordinal, never a filename or body.
+ WITH refs AS (
+  SELECT path,CASE WHEN split_part(path,'/',1)=t.user_id::text THEN t.user_id::text ELSE '' END uploader,
+   '0:'||t.id::text||':'||lpad(ord::text,10,'0') cursor
+   FROM tickets t CROSS JOIN LATERAL jsonb_array_elements_text(coalesce(t.attachments,'[]')) WITH ORDINALITY a(path,ord)
+   WHERE t.user_id=p_profile_id
+  UNION ALL
+  SELECT path,CASE WHEN split_part(path,'/',1) IN (t.user_id::text,r.user_id::text) THEN split_part(path,'/',1) ELSE '' END,
+   '1:'||r.id::text||':'||lpad(ord::text,10,'0')
+   FROM tickets t JOIN ticket_replies r ON r.ticket_id=t.id
+   CROSS JOIN LATERAL jsonb_array_elements_text(coalesce(r.attachments,'[]')) WITH ORDINALITY a(path,ord)
+   WHERE t.user_id=p_profile_id
+ ), page AS (SELECT * FROM refs WHERE p_after IS NULL OR cursor COLLATE "C">p_after COLLATE "C"
+  ORDER BY cursor COLLATE "C" LIMIT p_limit+1)
+ SELECT coalesce(jsonb_agg(jsonb_build_object('path',path,'uploaderId',uploader,'subjectId',p_profile_id)
+  ORDER BY cursor COLLATE "C"),'[]'),CASE WHEN count(*)>p_limit THEN
+   (array_agg(cursor ORDER BY cursor COLLATE "C"))[p_limit] ELSE NULL END INTO items,next_cursor FROM page;
  RETURN jsonb_build_object('items',CASE WHEN jsonb_array_length(items)>p_limit THEN items-p_limit ELSE items END,
-  'nextCursor',CASE WHEN jsonb_array_length(items)>p_limit THEN items->(p_limit-1)->>'path' ELSE NULL END);
+  'nextCursor',next_cursor);
+END $$;
+CREATE OR REPLACE FUNCTION public.account_erasure_attachment_checkpoint(
+ p_profile_id uuid,p_request_id uuid,p_token uuid,p_after text DEFAULT NULL,p_next text DEFAULT NULL,p_commit boolean DEFAULT false
+) RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
+DECLARE r public.account_erasure_requests;
+BEGIN
+ PERFORM account_erasure_assert_closed(p_profile_id);
+ SELECT * INTO r FROM account_erasure_requests WHERE profile_id=p_profile_id FOR UPDATE;
+ IF p_token IS NULL OR r.executor_token IS DISTINCT FROM p_token OR r.request_id IS DISTINCT FROM p_request_id THEN
+  RAISE EXCEPTION 'ERASURE_EXECUTOR_NOT_CLAIMED' USING ERRCODE='42501';
+ END IF;
+ IF p_commit IS NULL THEN RAISE EXCEPTION 'ERASURE_CHECKPOINT_INVALID'; END IF;
+ IF p_commit THEN
+  IF r.storage_manifest_done OR r.storage_manifest_cursor IS DISTINCT FROM p_after
+   OR p_next IS NOT NULL AND (p_next!~'^[01]:[0-9a-f-]{36}:[0-9]{10}$'
+    OR p_after IS NOT NULL AND p_next COLLATE "C"<=p_after COLLATE "C") THEN
+   RAISE EXCEPTION 'ERASURE_CHECKPOINT_INVALID';
+  END IF;
+  UPDATE account_erasure_requests SET storage_manifest_cursor=p_next,storage_manifest_done=p_next IS NULL
+   WHERE profile_id=p_profile_id RETURNING * INTO r;
+ END IF;
+ RETURN jsonb_build_object('cursor',r.storage_manifest_cursor,'done',r.storage_manifest_done);
 END $$;
 CREATE OR REPLACE FUNCTION public.account_erasure_attachment_classify(p_profile_id uuid,p_paths text[])
 RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
@@ -160,6 +188,7 @@ BEGIN
   'account_erasure_executor_claim(uuid)','account_erasure_executor_proof(uuid,uuid,uuid)',
   'account_erasure_executor_pending()',
   'account_erasure_attachment_page(uuid,text,integer)','account_erasure_attachment_classify(uuid,text[])',
+  'account_erasure_attachment_checkpoint(uuid,uuid,uuid,text,text,boolean)',
   'account_erasure_executor_finish(uuid,uuid,uuid,text[],boolean)'] LOOP
   EXECUTE 'REVOKE ALL ON FUNCTION public.'||signature||' FROM PUBLIC,anon,authenticated,service_role';
   IF signature LIKE 'account_erasure_executor_%' OR signature LIKE 'account_erasure_attachment_%' THEN

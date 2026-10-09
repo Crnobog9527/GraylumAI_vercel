@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { beforeEach, expect, it, vi } from 'vitest';
-const mocks = vi.hoisted(() => ({ create: vi.fn(), run: vi.fn(), idle: vi.fn() }));
+const mocks = vi.hoisted(() => ({ create: vi.fn(), run: vi.fn(), idle: vi.fn(), drain: vi.fn() }));
 vi.mock('./host', () => ({ createAccountErasureHost: mocks.create }));
 vi.mock('./authAdapter', () => ({ createErasureAuthAdapter: vi.fn() }));
 vi.mock('./storageTransport', () => ({ createErasureStorageTransport: vi.fn() }));
@@ -23,8 +23,9 @@ function client() {
 }
 beforeEach(() => {
   vi.resetAllMocks();
-  mocks.create.mockReturnValue({ run: mocks.run, isIdle: mocks.idle });
+  mocks.create.mockReturnValue({ run: mocks.run, isIdle: mocks.idle, waitForIdle: mocks.drain });
   mocks.idle.mockReturnValue(true);
+  mocks.drain.mockResolvedValue(false);
   mocks.run.mockResolvedValue({ stage: 'erasing', retry: true, remaining: 1, manualReview: 0,
     errorCodes: ['ERASURE_CONTENT_PENDING'] });
 });
@@ -76,4 +77,11 @@ it('requires both historical proof and upload quiescence from service SQL', asyn
     });
     await expect(proof(actor, new AbortController().signal)).rejects.toThrow('ERASURE_STORAGE_UNPROVEN');
   }
+});
+
+it('releases the original claim after slow I/O actually drains within the cron budget', async () => {
+  const database = client(); mocks.idle.mockReturnValue(false); mocks.drain.mockResolvedValue(true);
+  await runAccountErasureExecutor(database as never);
+  expect(mocks.drain).toHaveBeenCalledOnce();
+  expect(database.rpc).toHaveBeenCalledWith('account_erasure_executor_finish', expect.objectContaining({ p_release: true }));
 });

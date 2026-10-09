@@ -28,6 +28,8 @@ export type ErasureAttachmentManifest = {
    * business-body cleanup until storage verification completes. Not supplied by the client.
    * Stable cursor over this manifest, unaffected by deleting storage objects. */
   list(input: { profileId: string; cursor: string | null; limit: number; signal: AbortSignal }): Promise<unknown>;
+  /** Persist a verified manifest page only after every object in it was observed absent. */
+  checkpoint?(input: { profileId: string; nextCursor: string | null; signal: AbortSignal }): Promise<void>;
   /** Complete cross-subject reference check for every requested path. exclusive means only
    * this subject; unreferenced means an orphan; missing/incomplete evidence means unknown.
    * The host must exclude concurrent reference writes across this check and deletion. */
@@ -148,6 +150,10 @@ export function createErasureStorageAdapter(input: {
           manualReview++; return false;
         });
         await process(candidates.map(item => ({ path: item.path, fromManifest: true })));
+        if (incomplete || manualReview > 0) break;
+        if (input.manifest.checkpoint) await call(signal => input.manifest.checkpoint!({
+          profileId, nextCursor: page.nextCursor, signal,
+        }));
         cursor = page.nextCursor;
         if (cursor !== null) cursors.add(cursor);
       } while (cursor !== null);

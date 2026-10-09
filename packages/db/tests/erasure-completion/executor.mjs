@@ -59,6 +59,29 @@ export async function runExecutor({db,Client,connectionString,require,runAccount
   } finally {await blocker.query('ROLLBACK');await blocker.end();}
   await barrier.retry();assert.equal((await runAccountErasureExecutor(barrier.client)).completed,1);
 
+  const slow=await fixture();await slow.close();
+  const slowFrom=slow.client.storage.from.bind(slow.client.storage);
+  slow.client.storage={from(bucket){const api=slowFrom(bucket);const original=api.remove.bind(api);
+   api.remove=async paths=>{const value=await original(paths);await new Promise(resolve=>setTimeout(resolve,2200));return value;};return api;}};
+  const delayed=await runAccountErasureExecutor(slow.client);
+  assert.ok(delayed.pending>0);assert.equal((await slow.row()).executor_token,null,'late settled I/O releases the original claim');
+  assert.equal(slow.sdk.authDeletes(),0);await slow.retry();
+  assert.equal((await runAccountErasureExecutor(slow.client)).completed,1);
+
+  const many=await fixture();const uploader=randomUUID();await db.query('insert into profiles(id) values($1)',[uploader]);
+  const paths=Array.from({length:251},(_,index)=>uploader+'/'+index+'.png');
+  await db.query("insert into ticket_replies(ticket_id,user_id,content,attachments) values($1,$2,'synthetic',$3)",
+   [many.ticket,uploader,JSON.stringify(paths)]);
+  for(const path of paths)many.sdk.objects.add(path);
+  await many.close();
+  const firstPage=await runAccountErasureExecutor(many.client);assert.ok(firstPage.pending>0);
+  const saved=await many.row();assert.ok(saved.storage_manifest_cursor);assert.equal(saved.storage_manifest_done,false);
+  assert.match(saved.storage_manifest_cursor,/^[01]:[0-9a-f-]{36}:[0-9]{10}$/,'progress contains row IDs, not filenames');
+  assert.equal(many.sdk.authDeletes(),0);await many.retry();
+  const lastPage=await runAccountErasureExecutor(many.client);assert.equal(lastPage.completed,1,JSON.stringify(lastPage));
+  assert.equal(many.sdk.objects.size,0);assert.equal((await many.row()).storage_manifest_done,true);
+  assert.equal(many.sdk.authDeletes(),1);
+
   const history=await fixture();
   await db.query('delete from tickets where id=$1',[history.ticket]);
   assert.equal((await db.query('select erasure_history_complete v from profiles where id=$1',[history.actor])).rows[0].v,false);
@@ -87,12 +110,13 @@ export async function runExecutor({db,Client,connectionString,require,runAccount
    for(const [name,args] of [['account_erasure_executor_claim',{p_token:randomUUID()}],
     ['account_erasure_executor_pending',{}],
     ['account_erasure_attachment_page',{p_profile_id:locked.actor}],
+    ['account_erasure_attachment_checkpoint',{p_profile_id:locked.actor,p_request_id:locked.request,p_token:token}],
     ['account_erasure_attachment_classify',{p_profile_id:locked.actor,p_paths:[]}],['account_erasure_executor_finish',finish],
     ['account_erasure_executor_proof',{p_profile_id:locked.actor,p_request_id:locked.request,p_token:token}]]) {
     assert.ok((await base.rpc(name,args)).error,role+' cannot execute '+name);
    }
   }
   await service.query('SET ROLE service_role');
-  report.checks.push('wired executor with 5001 unrelated tickets and replies + local service SQL + locked SDK synthetic HTTP: success, repeat, barrier/new transaction retry, lost Storage response, history refusal with independent cleanup, durable claim/CAS and denied roles');
+  report.checks.push('wired executor with 5001 unrelated tickets and replies + local service SQL + locked SDK synthetic HTTP: success, repeat, barrier/new transaction retry, lost/slow Storage response, 251-path resumable manifest, history refusal with independent cleanup, durable claim/CAS and denied roles');
  } finally {await service.end();}
 }

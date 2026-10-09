@@ -154,3 +154,14 @@ it('clears unrelated content while deferred storage history is unproven', async 
   expect(f.auth.remove).not.toHaveBeenCalled(); expect(f.storage.remove).not.toHaveBeenCalled();
   expect(host.isIdle()).toBe(true);
 });
+
+it('notifies a waiting executor when ignored-abort I/O really settles', async () => {
+  const f = fixture(); let release!: () => void;
+  const proof = new Promise<void>(resolve => { release = resolve; });
+  const host = createAccountErasureHost({ ...f.input, operationTimeoutMs: 5, verifyRetainedHistory: () => proof });
+  expect((await host.run()).errorCodes).toContain('ERASURE_HOST_TIMEOUT');
+  expect(await host.waitForIdle(5)).toBe(false);
+  const drained = host.waitForIdle(100);
+  release(); expect(await drained).toBe(true); expect(host.isIdle()).toBe(true);
+  expect(f.rpc).not.toHaveBeenCalled(); expect(f.auth.remove).not.toHaveBeenCalled();
+});

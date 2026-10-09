@@ -25,10 +25,18 @@ export function createAccountErasureHost(input: {
   verifyRetainedHistory?: Proof; verifyQuiescence?: Proof;
   operationTimeoutMs?: number; deadline?: number;
   /** Proof may be deferred to Storage so unrelated content still clears. */
-  deferStorageProof?: boolean; scopedManifest?: boolean;
+  deferStorageProof?: boolean; scopedManifest?: boolean; executorToken?: string;
 }) {
   let active = false;
-  return { isIdle: () => !active, async run(): Promise<ErasureProcessResult> {
+  const idleWaiters = new Set<() => void>();
+  const becameIdle = () => { active = false; for (const notify of idleWaiters) notify(); };
+  return { isIdle: () => !active,
+    waitForIdle: (timeoutMs: number) => new Promise<boolean>(resolve => {
+      if (!active) { resolve(true); return; }
+      const done = () => { clearTimeout(timer); idleWaiters.delete(done); resolve(true); };
+      const timer = setTimeout(() => { idleWaiters.delete(done); resolve(false); }, Math.max(0, timeoutMs));
+      idleWaiters.add(done);
+    }), async run(): Promise<ErasureProcessResult> {
     const denied = (code: string, previous: string | null = null): ErasureProcessResult => ({
       stage: 'erasing', retry: true, remaining: 1, manualReview: 0,
       errorCodes: [...new Set([...(previous ? [previous] : []), code])],
@@ -47,7 +55,7 @@ export function createAccountErasureHost(input: {
       if (sealed) throw new Error('ERASURE_HOST_CLOSED');
       pending++;
       try { return await operation(); }
-      finally { pending--; if (sealed && pending === 0) active = false; }
+      finally { pending--; if (sealed && pending === 0) becameIdle(); }
     };
     const controller = new AbortController();
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -90,7 +98,7 @@ export function createAccountErasureHost(input: {
         await track(() => input.verifyRetainedHistory!(profileId, signal));
         await track(() => input.verifyQuiescence!(profileId, signal));
       };
-      const manifest = input.scopedManifest ? createScopedErasureManifest({ verify,
+      const manifest = input.scopedManifest ? createScopedErasureManifest({ verify, requestId: input.requestId, token: input.executorToken,
         read: (name, args, signal) => track(() => input.client.rpc(name, args).abortSignal(signal)),
       }) : createErasureAttachmentManifest({ client: metadata, limits: { timeoutMs: timeout }, verifyRetainedHistory: verify });
       const storage = createErasureStorageAdapter({ manifest, storage: {
@@ -117,7 +125,7 @@ export function createAccountErasureHost(input: {
       return denied(controller.signal.aborted ? 'ERASURE_HOST_TIMEOUT' : 'ERASURE_HOST_UNVERIFIED', previous);
     } finally {
       clearTimeout(timer); controller.abort(); sealed = true;
-      if (pending === 0) active = false;
+      if (pending === 0) becameIdle();
     }
   } };
 }
