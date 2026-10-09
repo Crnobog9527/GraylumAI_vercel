@@ -125,7 +125,8 @@ it('CDC_EVAL: freeze or execute exactly the approved roster through local OPC an
     if(frozen.providerRequestFormat!==profiles.mentor.format||frozen.reasoning?.effort!=='low'||
      turn.organize&&frozen.attachedOrganizer?.reasoning?.parameter!=='none')throw new Error('CDC_FROZEN_FORMAT');
     const result=await runtimeExecutor({database:f.admin,actor:async()=>f.actor,adapter,callGate:allowTestCalls}).execute(currentExecution);
-    if(result.state!=='completed'||phase!==(turn.organize?2:1))throw new Error('CDC_EXECUTION_INCOMPLETE');
+    if(result.state!=='completed'||phase!==(turn.organize?2:1))throw new Error('CDC_EXECUTION_INCOMPLETE:'+[turn.slot,result.state,
+     'code' in result?result.code:'',phase].join(':'));
     if(plan.reasoningReplay&&turn.organize)reasoningResults.push(...await replayReasoning(f,plan.reasoningReplay,turn.slot,
      draft.draftId,currentExecution,rows.at(-1)!.raw));
     const capture=turn.organize?await f.service.capturePending({draftId:draft.draftId}):null;
