@@ -188,9 +188,9 @@ staging 一天一次的 cron 只影响这两种少见情况；上线环境每 5 
 
 **账号注销**：
 
-- 3 张新表加入 `erasure_business_owner`、`account_erasure_prune_business` 和 `*_remaining`（0192 的做法）；
+- 文件表和分段表加入 `erasure_business_owner`、`account_erasure_prune_business` 和 `*_remaining`（0192 的做法）；**占用表不进通用清理数组**，只计入 `*_remaining`，未结束的占用行由资料库清理按第 3 节第 6 步收尾（签名失效 + 宽限期 + 两次确认无对象）后才删除；
 - 存储删除从「只认工单桶」扩成两个桶，清单从文件表和占用表生成（包括未完成、失败、删除中的行），按前缀扫描只做核对；
-- 资料库占用表照 `ticket_upload_intents` 加入注销完成证明：未确认删除的对象不允许宣告注销完成（必测项 6）。
+- 资料库占用表照 `ticket_upload_intents` 加入注销完成证明：只要还有未结束的占用行（包括签名还可能晚到的清理壳），注销就不能宣告完成、不能删除账号，即使此刻按前缀扫描是空的（必测项 6）。
 - 加一个测试：所有带 `actor_id` / `profile_id` 列的新表都必须出现在注销所有者映射里，防以后漏接。
 
 **串行依赖**
