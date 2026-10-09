@@ -5,6 +5,29 @@ import {provider} from './provider.mjs';
 export async function runService({db,service,webhook,report}) {
  const client=transport(db);
  const fixture=async()=> (await db.query('select monthly_test.fixture() f')).rows[0].f;
+ // The missing-order rejection must never enter the mutating RPC. A read-only
+ // transaction proves both paths work without SQL writes against the real schema.
+ {
+  const f=await fixture(),unknown='00000000-0000-4000-8000-000000000000';
+  const noRpc={...client,rpc(){throw new Error('UNEXPECTED_RPC');}};
+  await db.query('BEGIN READ ONLY');
+  try {
+   assert.equal(await service.monthlyRefundStatus(noRpc,f.order),null);
+   await assert.rejects(service.monthlyRefundStatus(noRpc,unknown),/PAY_REFUND_ORDER_UNKNOWN/);
+   for(let n=0;n<2;n++) {
+    await assert.rejects(service.rejectMonthlyRefund(noRpc,f.actor,
+     {orderId:unknown,ticketId:f.ticket,reason:'ineligible'}),/PAY_REFUND_ORDER_UNKNOWN/);
+   }
+   assert.equal((await db.query('select refund_approval from payment_orders where id=$1',[f.order])).rows[0].refund_approval,null);
+  } finally {await db.query('ROLLBACK');}
+  const input={orderId:f.order,ticketId:f.ticket,reason:'ineligible'};
+  const rejected=await service.rejectMonthlyRefund(client,f.actor,input);
+  assert.equal(rejected.status,'rejected');
+  assert.deepEqual(await service.rejectMonthlyRefund(client,f.actor,input),rejected);
+  assert.deepEqual(await service.monthlyRefundStatus(client,f.order),rejected);
+  report.checks.push('status null and unknown-order rejection in READ ONLY transaction; no RPC; existing rejection remains idempotent');
+ }
+
  for(const failure of [null,'stop','refund','cancel','failed','closed','db_result','conflict']) {
   const f=await fixture(),remote=provider(f);
   const input={orderId:f.order,ticketId:f.ticket,feePermitted:'confirmed',feeEvidence:'fixture:law'};
