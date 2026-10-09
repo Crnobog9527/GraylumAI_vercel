@@ -8,7 +8,8 @@ import {secondRound} from '../../../../../scripts/cdc-b2-eval/secondRound';
 import {EXPIRES,quote} from '../../../../../scripts/cdc-b2-eval/policy';
 import {openRouterBound} from '../bill2/openRouterPolicy';
 it('serial sender settles a known cost and stops permanently on unknown cost without retry',async()=>{
- const clock=vi.spyOn(Date,'now').mockReturnValue(Date.parse(EXPIRES)-60_000);
+ // The bridge refuses requests after the frozen evaluation window; pin the clock inside it.
+ vi.useFakeTimers({toFake:['Date']});vi.setSystemTime(Date.parse(EXPIRES)-60_000);
  const dir=mkdtempSync(join(tmpdir(),'cdc-bridge-test-')),realFetch=globalThis.fetch;
  let sends=0;vi.stubGlobal('fetch',async(url:Parameters<typeof fetch>[0],init:Parameters<typeof fetch>[1])=>{
   if(String(url)!=='https://openrouter.ai/api/v1/chat/completions')return realFetch(url,init);
@@ -25,5 +26,5 @@ it('serial sender settles a known cost and stops permanently on unknown cost wit
   expect((await send(2,'b')).status).toBe(409);
   expect(JSON.parse(readFileSync(dir+'/ledger.json','utf8'))).toMatchObject({pending:true,calls:{organizer:2}});
   expect((await send(2,'b')).status).toBe(409);expect(sends).toBe(2);
- }finally{await sender.close();clock.mockRestore();vi.unstubAllGlobals();rmSync(dir,{recursive:true,force:true});}
+ }finally{await sender.close();vi.unstubAllGlobals();vi.useRealTimers();rmSync(dir,{recursive:true,force:true});}
 });
