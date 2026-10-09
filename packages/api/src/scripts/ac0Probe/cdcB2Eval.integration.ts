@@ -18,6 +18,7 @@ vi.mock('../../services/runtime/newWorkGate',async original=>({
  ...(await import('../../services/__tests__/fixtures/runtimeGates')).testAdmissionGates,
 }));
 
+const turnSlot=(group:{turns:Array<{slot:string}>})=>group.turns[0]?.slot??'';
 it('CDC_EVAL: freeze or execute exactly the approved roster through local OPC and Runtime',async()=>{
  const path=process.env.V3_REAL_SKILL_INPUT!;assertOutsideRepository(path);
  const plan=JSON.parse(readFileSync(path,'utf8'));assertOutsideRepository(plan.output);
@@ -98,8 +99,11 @@ it('CDC_EVAL: freeze or execute exactly the approved roster through local OPC an
     const seeded=await f.service.read(draft.draftId);
     for(const step of checklist){
      if(Boolean(seeded.snapshot.steps[step.id].valid)!==step.confirmed)throw new Error('SPECIAL_CONFIRMATION_MISMATCH');
-     for(const field of step.fields)if((seeded.information[step.id].values?.[field.id]?.value??'')!==field.value||
-      seeded.information[step.id].meta?.[field.id]?.protected!==field.protected)throw new Error('SPECIAL_INITIAL_MISMATCH');
+     for(const field of step.fields){
+      const actual=seeded.information[step.id],value=actual.values?.[field.id]?.value??'',flag=actual.meta?.[field.id]?.protected;
+      if(value!==field.value||flag!==field.protected)throw new Error(['SPECIAL_INITIAL_MISMATCH',turnSlot(group),step.id,field.id,
+       value===field.value,String(flag),String(field.protected)].join(':'));
+     }
     }
    }
    for(const turn of group.turns){
