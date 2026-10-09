@@ -252,7 +252,7 @@
     {
       "id": "paywall",
       "name": "付费墙和会员",
-      "plain": "用户能用 Waffo 买会员和积分包；免费用户能做到报告前一步，生成报告需要会员。",
+      "plain": "银行卡订阅用 Waffo，微信和支付宝单笔会员与积分包用 Stripe；生成报告需要会员。",
       "tasks": [
         {
           "name": "ENTITLEMENTS",
@@ -264,7 +264,23 @@
         },
         {
           "name": "PAY-WAFFO",
-          "plain": "接入 Waffo 收款：银行卡订阅、微信一次性会员、创始会员名额。"
+          "plain": "接通银行卡订阅与钱包单笔付款，复用订单、会员积分和人工退款。"
+        },
+        {
+          "name": "PAY-FOUNDER",
+          "plain": "创始社群、展示墙和徽章，独立交付。"
+        },
+        {
+          "name": "PAY-NOTIFY",
+          "plain": "续费与到期事务提醒，独立交付。"
+        },
+        {
+          "name": "PAY-EVIDENCE",
+          "plain": "付款 IP 和设备证据及到期清理，独立交付。"
+        },
+        {
+          "name": "PAY-DISPUTE-GUARD",
+          "plain": "上线前拒付通知、可撤回冻结和停续费，独立交付。"
         },
         {
           "name": "PAYWALL",
@@ -278,7 +294,7 @@
       "waitingForOwner": [
         {
           "task": "PAY-WAFFO",
-          "text": "等你：开通 Waffo 商户，并在 Waffo 后台建好会员和积分包产品（实际配置前会再请你确认）。"
+          "text": "等供应商能力核实和最小核心待定事项；商品配置及钱包大额真实付款、退款另行批准。"
         }
       ]
     },
