@@ -9,7 +9,8 @@ DECLARE source text:=pg_get_functiondef('public.opc_capture_apply(uuid,uuid,uuid
  needles text[]:=ARRAY[
   $n$protected boolean;material_changed boolean;seq jsonb;suggestion jsonb;remaining integer;patch_index integer:=0;$n$,
   $n$  ELSIF jsonb_array_length(output->'patches')>12 THEN code:='invalid_output';END IF;$n$,
-  $n$    THEN meta:=meta||jsonb_build_object('suggestion',suggestion);END IF;$n$,
+  $n$    IF meta->'suggestion' IS NULL OR ((meta#>>'{suggestion,seq,0}')::timestamptz,(meta#>>'{suggestion,seq,1}')::uuid) < (e.created_at,e.id)
+    THEN meta:=meta||jsonb_build_object('suggestion',suggestion);END IF;$n$,
   $n$  FOR step_id IN SELECT jsonb_object_keys(changed) LOOP$n$,
   $n$ response:=jsonb_build_object('executionId',e.id,'result',code,'ruleVersion',1,'versions',versions,'fields',fields,'discarded',discarded);$n$];
  replacements text[]:=ARRAY[
@@ -18,7 +19,11 @@ DECLARE source text:=pg_get_functiondef('public.opc_capture_apply(uuid,uuid,uuid
   $r$  ELSIF jsonb_array_length(output->'patches')>12 THEN code:='invalid_output';
   ELSIF output ? 'withdrawals' AND jsonb_typeof(output->'withdrawals') IS DISTINCT FROM 'array' THEN code:='invalid_output';
   ELSIF jsonb_array_length(coalesce(output->'withdrawals','[]'))>12 THEN code:='invalid_output';END IF;$r$,
-  $r$    THEN meta:=(meta-'withdrawnSuggestion')||jsonb_build_object('suggestion',suggestion);END IF;$r$,
+  $r$    -- v3: a turn older than the user's withdrawal can neither revive advice nor erase the withdrawn record.
+    IF (meta->'suggestion' IS NULL OR ((meta#>>'{suggestion,seq,0}')::timestamptz,(meta#>>'{suggestion,seq,1}')::uuid) < (e.created_at,e.id))
+     AND (meta->'withdrawnSuggestion' IS NULL OR ((meta#>>'{withdrawnSuggestion,withdrawnSeq,0}')::timestamptz,
+      (meta#>>'{withdrawnSuggestion,withdrawnSeq,1}')::uuid) < (e.created_at,e.id))
+    THEN meta:=(meta-'withdrawnSuggestion')||jsonb_build_object('suggestion',suggestion);END IF;$r$,
   $r$  -- v3 suggestion withdraw: a real user turn may clear a pending suggestion older than this turn.
   -- The record moves to withdrawnSuggestion so the page can show it; information is never read or written.
   organizer_input:=(e.payload#>>'{attachedOrganizer,input}')::jsonb;
@@ -41,7 +46,8 @@ DECLARE source text:=pg_get_functiondef('public.opc_capture_apply(uuid,uuid,uuid
    ELSE withdraw_reason:=NULL;END IF;
    IF withdraw_reason IS NOT NULL THEN
     discarded:=discarded||jsonb_build_array(jsonb_build_object('withdrawal',withdraw_index,'reason',withdraw_reason));CONTINUE;END IF;
-   meta:=(meta-'suggestion')||jsonb_build_object('withdrawnSuggestion',(meta->'suggestion')||jsonb_build_object('withdrawnBy',e.id));
+   meta:=(meta-'suggestion')||jsonb_build_object('withdrawnSuggestion',(meta->'suggestion')||jsonb_build_object('withdrawnBy',e.id,
+    'withdrawnSeq',jsonb_build_array(e.created_at,e.id)));
    r.steps:=jsonb_set(r.steps,ARRAY[step_id,'fieldMeta',field_id],meta);
    withdrawn:=jsonb_set(withdrawn,ARRAY[step_id],coalesce(withdrawn->step_id,'[]')||to_jsonb(field_id));
   END LOOP;

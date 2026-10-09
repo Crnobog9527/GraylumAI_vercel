@@ -1144,7 +1144,8 @@ it('RUNTIME: V3 withdrawal moves only an older pending suggestion and leaves con
   expect(after.information).toEqual(before.information);
   expect(after.version).toBe(before.version);
   expect(after.fieldMeta.goal.suggestion).toBeUndefined();
-  expect(after.fieldMeta.goal.withdrawnSuggestion).toEqual({ ...before.fieldMeta.goal.suggestion, withdrawnBy: id });
+  expect(after.fieldMeta.goal.withdrawnSuggestion).toEqual({ ...before.fieldMeta.goal.suggestion, withdrawnBy: id,
+    withdrawnSeq: [expect.any(String), id] });
   expect(await f.apply(id)).toEqual(response);
   const read = (await db.query('select opc_query($1,$2) v', [f.actor, f.draft.draftId])).rows[0].v;
   expect(read.information['step-0'].meta.goal).toMatchObject({ withdrawnSuggestion: { value: 'Pending goal suggestion', executionId: source } });
@@ -1187,6 +1188,15 @@ it('RUNTIME: V3 withdrawal refuses host turns, newer suggestions and malformed l
   expect(await f.apply(replaced)).toMatchObject({ discarded: [{ withdrawal: 1, reason: 'not_shown' }] });
   expect((await goal()).suggestion.value).toBe('Newest suggestion');
   expect((await goal()).withdrawnSuggestion).toBeUndefined();
+});
+
+it('RUNTIME: V3 a deferred turn older than the withdrawal cannot revive advice or erase the withdrawn record', async () => {
+  const { f } = await suggestedFixture();
+  const deferred = await f.seed(output([patch('Older deferred suggestion')]));
+  await f.apply(await userTurn(await f.seed(withdrawOutput([{ stepId: 'step-0', fieldId: 'goal' }]))));
+  const withdrawn = (await f.steps())['step-0'].fieldMeta.goal;
+  expect(await f.apply(deferred)).toMatchObject({ result: 'suggested' });
+  expect((await f.steps())['step-0'].fieldMeta.goal).toEqual(withdrawn);
 });
 
 it('RUNTIME: V3 a new suggestion replaces the withdrawn record, which reads hide after revocation', async () => {
