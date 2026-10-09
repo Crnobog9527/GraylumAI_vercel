@@ -38,7 +38,7 @@ async function runOne(client: SupabaseClient, deadline: number) {
     const host = createAccountErasureHost({
       profileId: claim.profileId, requestId: claim.requestId, client, deadline,
       storage: createErasureStorageTransport(client), auth: createErasureAuthAdapter(client, claim.profileId),
-      verifyRetainedHistory: proof, verifyQuiescence: proof, deferStorageProof: true, allowOtherUploaders: true,
+      verifyRetainedHistory: proof, verifyQuiescence: proof, deferStorageProof: true, scopedManifest: true,
     });
     const result = await host.run();
     if (result.stage === 'completed' && !result.retry) summary.completed++;
@@ -55,7 +55,7 @@ async function runOne(client: SupabaseClient, deadline: number) {
   return summary;
 }
 
-/** Keep the existing daily schedule. Process bounded subjects until the cron deadline;
+/** Use the five-minute cron schedule. Process bounded subjects until the cron deadline;
  * unresolved claims and storage/billing failures remain visible on every invocation. */
 export async function runAccountErasureExecutor(client: SupabaseClient, deadline = Date.now() + 45_000) {
   const summary: ErasureExecutorSummary = { processed: 0, completed: 0, pending: 0, failed: 0 };

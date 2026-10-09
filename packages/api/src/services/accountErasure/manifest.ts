@@ -22,7 +22,6 @@ type Reference = { path: string; uploaderId: string; subjectId: string };
 export function createErasureAttachmentManifest(input: {
   client: Pick<SupabaseClient, 'from'>;
   verifyRetainedHistory?: (profileId: string, signal: AbortSignal) => Promise<void>;
-  allowOtherUploaders?: boolean;
   limits?: { pageSize?: number; maxRows?: number; timeoutMs?: number };
 }): ErasureAttachmentManifest {
   const limits = limitsSchema.parse({ pageSize: 100, maxRows: 5000, timeoutMs: 2000, ...input.limits });
@@ -112,10 +111,10 @@ export function createErasureAttachmentManifest(input: {
       const refs = await inventory(profileId, signal);
       return paths.map(path => {
         const owners = new Set(refs.filter(row => row.path === path).map(row => row.subjectId));
-        // Other-uploader deletion is enabled only by the executor with retained-history
-        // and uploader-drain proof; legacy injected callers remain conservative.
+        // Legacy injected callers remain conservative; the wired executor uses
+        // scopedManifest.ts with SQL-backed history and uploader-drain proof.
         const state = owners.size > 0 && (owners.size > 1 || !owners.has(profileId)) ? 'shared'
-          : !path.startsWith(`${profileId}/`) && !input.allowOtherUploaders ? 'unknown'
+          : !path.startsWith(`${profileId}/`) ? 'unknown'
             : owners.size === 0 ? 'unreferenced' : 'exclusive';
         return { path, state };
       });

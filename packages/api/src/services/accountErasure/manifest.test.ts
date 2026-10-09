@@ -130,14 +130,3 @@ it('supports attachment-free system replies without inventing an uploader', asyn
   f.data.ticket_replies[1].attachments = [`${other}/unproven.png`];
   await expect(list(f)).rejects.toThrow('ERASURE_MANIFEST_UNKNOWN');
 });
-it('allows only exclusive other-uploader paths when the executor supplies full proof', async () => {
-  const f = setup();
-  const manifest = createErasureAttachmentManifest({ client: f.client, allowOtherUploaders: true,
-    verifyRetainedHistory: async () => {} });
-  expect(await manifest.classify({ profileId: actor, paths: [path], signal: signal() }))
-    .toEqual([{ path, state: 'exclusive' }]);
-  f.data.tickets.push({ id: second, user_id: other, attachments: [] });
-  f.data.ticket_replies.push({ id: second, ticket_id: second, user_id: admin, attachments: [path] });
-  expect(await manifest.classify({ profileId: actor, paths: [path], signal: signal() }))
-    .toEqual([{ path, state: 'shared' }]);
-});

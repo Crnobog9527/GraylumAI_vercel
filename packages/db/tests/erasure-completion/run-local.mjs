@@ -78,7 +78,7 @@ try {
  // Compile the exact production composition, with only external HTTP replaced in tests.
  const ts=require('typescript');
  compiled=mkdtempSync(resolve(root,'packages/api/.erasure-processor-test-'));
- for(const file of ['processorContracts','processor','host','manifest','storage','storageTransport','authAdapter','executor']){
+ for(const file of ['processorContracts','processor','host','manifest','storage','storageTransport','authAdapter','scopedManifest','executor']){
   const source=read(`packages/api/src/services/accountErasure/${file}.ts`);
   const code=ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ES2022}}).outputText
    .replace(/from '(\.\/[A-Za-z]+)'/g,"from '$1.mjs'");

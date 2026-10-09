@@ -1,7 +1,7 @@
 # DATA-ERASURE PR-C executor
 
 `/api/cron/account-erasure` runs the existing processor with the existing cron
-authentication and service client, daily at 05:00 UTC. The billing route remains
+authentication and service client, every five minutes. The billing route remains
 at 04:00 UTC. Sharing its 60-second invocation would either run conflicting DB
 work against the transaction barrier or reduce the existing financial recovery
 budget. This separate path reuses Vercel cron; it is not a new scheduler.
@@ -40,11 +40,23 @@ approved release. Unknown Auth deletion retains the existing once-only intent;
 subsequent passes only read the original identity and do not send another delete.
 The executor's diagnostic columns do not overwrite financial/Auth diagnostics.
 
-A daily bounded fallback does **not prove the 24-hour completion objective** under
-backlog, transaction barriers, large accounts or failures. This PR does not change
-that product requirement. More frequent deployment scheduling/operational capacity,
-legacy upload drain and historical attachment investigation remain deployment
-acceptance work. No staging account has been closed and no remote DB was accessed.
+A five-minute cadence reserves retry opportunities before the 24-hour objective;
+20 subjects/45 seconds bounds each invocation (at most 5,760 attempts/day).
+The known staging Hobby plan cannot deploy this cadence. **Deployment is blocked
+until the separately approved environment supports it**; do not silently replace
+it with a daily schedule or claim the time objective passed. No plan upgrade or
+remote scheduling/configuration was performed. The existing production plan calls
+for Pro, but actual availability still needs deployment verification. Backlog,
+large subjects, unresolved financial/manual cases and legacy upload/history proof
+still require operational acceptance; the product deadline is unchanged.
+
+The former full-table manifest read is retained only for injected legacy tests.
+The executor now uses service-only subject keyset pages and candidate-path
+classification against indexed current references. Existing SDK queries cannot
+express this union and cross-subject proof as one bounded response; two narrow
+read-only erasure RPCs are the smallest missing capability, with tickets/replies
+remaining authoritative. A 5,001-row unrelated ticket and reply fixture cannot
+block a small subject or get deleted by its cleanup. No staging account has been closed and no remote DB was accessed.
 No progress capability is issued, read or exposed; the retired query page stays out
 of scope. Retained financial rows and the inaccessible original profile ID remain
 subject to the existing three-year rule; expiry cleanup is not added here.
@@ -79,11 +91,10 @@ Auth identities, objects or body data. Do not drop proof columns, reset unknown
 history to true, expire a live claim, or restore a purge that loses references.
 
 0196 built SHA-256: `06b95b0bb78bc9345e9d531519fe43ab9516c5db78deab1f66cfced48aa5bce8`.
-0197 built SHA-256: `2ba001e9671de3d5b62df2a5639ef574fe6f883a900f5377affe71f76cde93be`.
-The exact local delta is 20 added catalog entries (five columns, six functions,
-six function ACLs, three triggers), one changed function
-`account_erasure_local_cleanup(uuid,boolean)`, and no removed entries.
-Both canonical replay and completion runner passed 200/200 build steps and
-131 historical repeat checks. The completion runner also passed all behavioral
-cases and removed its disposable container. These hashes describe local file-built
-schemas, not a fresh remote fingerprint.
+0197 final built SHA-256: `7dcf0f4db985d0a548ba7f22f3239388950984ac22e0ab72d4915917c56bbf52`.
+The exact final local delta is 26 added catalog entries and one changed
+function `account_erasure_local_cleanup(uuid,boolean)`; no catalog entries were
+removed. The additions include subject-scoped attachment RPCs and two GIN indexes.
+Final canonical replay and completion runner each passed 200/200 build steps,
+131 historical repeat checks and container cleanup. These are local fingerprints,
+not fresh remote snapshots.

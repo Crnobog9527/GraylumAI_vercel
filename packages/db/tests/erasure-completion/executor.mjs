@@ -21,6 +21,10 @@ export async function runExecutor({db,Client,connectionString,require,runAccount
   return {actor,request,ticket,sdk,client,close,retry,row};
  };
  try {
+  const unrelated=randomUUID();await db.query('insert into profiles(id) values($1)',[unrelated]);
+  await db.query("insert into tickets(user_id,title,description) select $1,'synthetic','unrelated' from generate_series(1,5001)",[unrelated]);
+  const parent=(await db.query('select id from tickets where user_id=$1 limit 1',[unrelated])).rows[0].id;
+  await db.query("insert into ticket_replies(ticket_id,content) select $1,'unrelated' from generate_series(1,5001)",[parent]);
   const first=await fixture();
   const admin=randomUUID();await db.query('insert into profiles(id) values($1)',[admin]);
   await db.query("insert into ticket_replies(ticket_id,user_id,content,attachments) values($1,$2,'synthetic',$3),($1,null,'system','[]')",
@@ -28,7 +32,10 @@ export async function runExecutor({db,Client,connectionString,require,runAccount
   first.sdk.objects.add(admin+'/reply.png');await first.close();
   const done=await runAccountErasureExecutor(first.client);
   assert.equal(done.completed,1,JSON.stringify(done));assert.equal(done.failed,0);
-  assert.equal((await first.row()).stage,'completed');assert.equal(first.sdk.objects.size,0);assert.equal(first.sdk.authDeletes(),1);
+  assert.equal((await first.row()).stage,'completed');assert.equal(first.sdk.objects.size,0);
+  assert.equal((await db.query('select count(*)::int n from tickets where user_id=$1',[unrelated])).rows[0].n,5001);
+  assert.equal((await db.query('select count(*)::int n from ticket_replies where ticket_id=$1',[parent])).rows[0].n,5001);
+  assert.equal((await db.query('select erasure_history_complete v from profiles where id=$1',[first.actor])).rows[0].v,true);assert.equal(first.sdk.authDeletes(),1);
   assert.equal((await db.query('select credits from profiles where id=$1',[first.actor])).rows[0].credits,37);
   assert.equal((await db.query('select count(*)::int n from tickets where id=$1',[first.ticket])).rows[0].n,0);
   await runAccountErasureExecutor(first.client);assert.equal(first.sdk.authDeletes(),1,'completed identity is not dispatched again');
@@ -78,12 +85,14 @@ export async function runExecutor({db,Client,connectionString,require,runAccount
   for(const role of ['anon','authenticated']) {
    await service.query('SET ROLE '+role);
    for(const [name,args] of [['account_erasure_executor_claim',{p_token:randomUUID()}],
-    ['account_erasure_executor_pending',{}],['account_erasure_executor_finish',finish],
+    ['account_erasure_executor_pending',{}],
+    ['account_erasure_attachment_page',{p_profile_id:locked.actor}],
+    ['account_erasure_attachment_classify',{p_profile_id:locked.actor,p_paths:[]}],['account_erasure_executor_finish',finish],
     ['account_erasure_executor_proof',{p_profile_id:locked.actor,p_request_id:locked.request,p_token:token}]]) {
     assert.ok((await base.rpc(name,args)).error,role+' cannot execute '+name);
    }
   }
   await service.query('SET ROLE service_role');
-  report.checks.push('wired executor + local service SQL + locked SDK synthetic HTTP: success, repeat, barrier/new transaction retry, lost Storage response, history refusal with independent cleanup, durable claim/CAS and denied roles');
+  report.checks.push('wired executor with 5001 unrelated tickets and replies + local service SQL + locked SDK synthetic HTTP: success, repeat, barrier/new transaction retry, lost Storage response, history refusal with independent cleanup, durable claim/CAS and denied roles');
  } finally {await service.end();}
 }

@@ -34,7 +34,8 @@ BEGIN
  IF TG_TABLE_NAME='tickets' THEN subject:=OLD.user_id;
  ELSE SELECT user_id INTO subject FROM tickets WHERE id=OLD.ticket_id; END IF;
  -- A verified erasure removes references only after checking the external objects.
- UPDATE profiles SET erasure_history_complete=false WHERE id IN (subject,OLD.user_id)
+ UPDATE profiles SET erasure_history_complete=false WHERE (id IN (subject,OLD.user_id) OR id::text IN
+   (SELECT split_part(path,'/',1) FROM jsonb_array_elements_text(OLD.attachments) path))
   AND NOT EXISTS(SELECT 1 FROM account_erasure_requests e WHERE e.profile_id=profiles.id
    AND e.storage_verified_at IS NOT NULL);
  IF TG_OP='DELETE' THEN RETURN OLD; END IF;
@@ -109,15 +110,59 @@ CREATE OR REPLACE FUNCTION public.account_erasure_executor_pending()
 RETURNS jsonb LANGUAGE sql STABLE SECURITY DEFINER SET search_path=public,pg_temp AS $$
  SELECT to_jsonb(count(*)) FROM account_erasure_requests WHERE stage<>'completed';
 $$;
+-- Bounded subject inventory and indexed candidate-path checks avoid a global row cap.
+CREATE INDEX IF NOT EXISTS erasure_ticket_paths ON public.tickets USING gin(attachments);
+CREATE INDEX IF NOT EXISTS erasure_reply_paths ON public.ticket_replies USING gin(attachments);
+CREATE OR REPLACE FUNCTION public.account_erasure_attachment_page(
+ p_profile_id uuid,p_after text DEFAULT NULL,p_limit integer DEFAULT 50
+) RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
+DECLARE items jsonb;
+BEGIN
+ PERFORM account_erasure_assert_closed(p_profile_id);
+ IF p_limit IS NULL OR p_limit<1 OR p_limit>100 THEN RAISE EXCEPTION 'ERASURE_BATCH_LIMIT_INVALID'; END IF;
+ SELECT coalesce(jsonb_agg(jsonb_build_object('path',path,'uploaderId',uploader,'subjectId',p_profile_id) ORDER BY path COLLATE "C"),'[]')
+ INTO items FROM (
+  SELECT path,min(uploader) uploader FROM (
+   SELECT path,CASE WHEN split_part(path,'/',1)=t.user_id::text THEN t.user_id::text ELSE '' END uploader
+    FROM tickets t CROSS JOIN LATERAL jsonb_array_elements_text(coalesce(t.attachments,'[]')) path
+    WHERE t.user_id=p_profile_id
+   UNION ALL
+   SELECT path,CASE WHEN split_part(path,'/',1) IN (t.user_id::text,r.user_id::text) THEN split_part(path,'/',1) ELSE '' END
+    FROM tickets t JOIN ticket_replies r ON r.ticket_id=t.id
+    CROSS JOIN LATERAL jsonb_array_elements_text(coalesce(r.attachments,'[]')) path WHERE t.user_id=p_profile_id
+  ) refs WHERE p_after IS NULL OR path COLLATE "C">p_after COLLATE "C"
+  GROUP BY path ORDER BY path COLLATE "C" LIMIT p_limit+1
+ ) page;
+ RETURN jsonb_build_object('items',CASE WHEN jsonb_array_length(items)>p_limit THEN items-p_limit ELSE items END,
+  'nextCursor',CASE WHEN jsonb_array_length(items)>p_limit THEN items->(p_limit-1)->>'path' ELSE NULL END);
+END $$;
+CREATE OR REPLACE FUNCTION public.account_erasure_attachment_classify(p_profile_id uuid,p_paths text[])
+RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
+DECLARE result jsonb;
+BEGIN
+ PERFORM account_erasure_assert_closed(p_profile_id);
+ IF p_paths IS NULL OR cardinality(p_paths)>100 THEN RAISE EXCEPTION 'ERASURE_BATCH_LIMIT_INVALID'; END IF;
+ SELECT coalesce(jsonb_agg(jsonb_build_object('path',path,'state',CASE
+  WHEN EXISTS(SELECT 1 FROM tickets WHERE attachments ? path AND user_id IS DISTINCT FROM p_profile_id)
+   OR EXISTS(SELECT 1 FROM ticket_replies r JOIN tickets t ON t.id=r.ticket_id
+    WHERE r.attachments ? path AND t.user_id IS DISTINCT FROM p_profile_id) THEN 'shared'
+  WHEN EXISTS(SELECT 1 FROM tickets WHERE attachments ? path AND user_id=p_profile_id)
+   OR EXISTS(SELECT 1 FROM ticket_replies r JOIN tickets t ON t.id=r.ticket_id
+    WHERE r.attachments ? path AND t.user_id=p_profile_id) THEN 'exclusive'
+  WHEN split_part(path,'/',1)=p_profile_id::text THEN 'unreferenced' ELSE 'unknown' END)),'[]')
+ INTO result FROM unnest(p_paths) path;
+ RETURN result;
+END $$;
 DO $$
 DECLARE signature text;
 BEGIN
  FOREACH signature IN ARRAY ARRAY['erasure_history_guard()','erasure_history_lost()',
   'account_erasure_executor_claim(uuid)','account_erasure_executor_proof(uuid,uuid,uuid)',
   'account_erasure_executor_pending()',
+  'account_erasure_attachment_page(uuid,text,integer)','account_erasure_attachment_classify(uuid,text[])',
   'account_erasure_executor_finish(uuid,uuid,uuid,text[],boolean)'] LOOP
   EXECUTE 'REVOKE ALL ON FUNCTION public.'||signature||' FROM PUBLIC,anon,authenticated,service_role';
-  IF signature LIKE 'account_erasure_executor_%' THEN
+  IF signature LIKE 'account_erasure_executor_%' OR signature LIKE 'account_erasure_attachment_%' THEN
    EXECUTE 'GRANT EXECUTE ON FUNCTION public.'||signature||' TO service_role';
   END IF;
  END LOOP;

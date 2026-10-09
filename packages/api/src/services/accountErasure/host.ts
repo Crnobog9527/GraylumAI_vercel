@@ -1,6 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { z } from 'zod';
+import { createScopedErasureManifest } from './scopedManifest';
 import { createErasureAttachmentManifest } from './manifest';
 import { processAccountErasure, type ErasureAuthAdapter, type ErasureProcessResult } from './processor';
 import { createErasureStorageAdapter, type ErasureStorageTransport } from './storage';
@@ -24,7 +25,7 @@ export function createAccountErasureHost(input: {
   verifyRetainedHistory?: Proof; verifyQuiescence?: Proof;
   operationTimeoutMs?: number; deadline?: number;
   /** Proof may be deferred to Storage so unrelated content still clears. */
-  deferStorageProof?: boolean; allowOtherUploaders?: boolean;
+  deferStorageProof?: boolean; scopedManifest?: boolean;
 }) {
   let active = false;
   return { isIdle: () => !active, async run(): Promise<ErasureProcessResult> {
@@ -85,12 +86,13 @@ export function createAccountErasureHost(input: {
         };
         return page;
       } }; } } as unknown as Pick<SupabaseClient, 'from'>;
-      const manifest = createErasureAttachmentManifest({ client: metadata, allowOtherUploaders: input.allowOtherUploaders, limits: { timeoutMs: timeout },
-        verifyRetainedHistory: async (profileId, signal) => {
-          await track(() => input.verifyRetainedHistory!(profileId, signal));
-          await track(() => input.verifyQuiescence!(profileId, signal));
-        },
-      });
+      const verify = async (profileId: string, signal: AbortSignal) => {
+        await track(() => input.verifyRetainedHistory!(profileId, signal));
+        await track(() => input.verifyQuiescence!(profileId, signal));
+      };
+      const manifest = input.scopedManifest ? createScopedErasureManifest({ verify,
+        read: (name, args, signal) => track(() => input.client.rpc(name, args).abortSignal(signal)),
+      }) : createErasureAttachmentManifest({ client: metadata, limits: { timeoutMs: timeout }, verifyRetainedHistory: verify });
       const storage = createErasureStorageAdapter({ manifest, storage: {
         listPrefix: args => track(() => input.storage.listPrefix(args)),
         getState: args => track(() => input.storage.getState(args)),
