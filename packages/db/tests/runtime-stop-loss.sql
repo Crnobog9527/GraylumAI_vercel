@@ -51,6 +51,12 @@ BEGIN
  UPDATE system_settings SET value='"not-json"'::jsonb WHERE key='runtime_stop_loss';
  BEGIN PERFORM runtime_stop_loss_assert(a,true);RAISE EXCEPTION 'expected invalid JSON denial';
  EXCEPTION WHEN raise_exception THEN IF SQLERRM<>'RUNTIME_STOP_LOSS_CONFIG_INVALID' THEN RAISE;END IF;END;
+ UPDATE system_settings SET value='"1e1000000"'::jsonb WHERE key='runtime_stop_loss';
+ BEGIN PERFORM runtime_stop_loss_assert(a,true);RAISE EXCEPTION 'expected JSON overflow denial';
+ EXCEPTION WHEN raise_exception THEN IF SQLERRM<>'RUNTIME_STOP_LOSS_CONFIG_INVALID' THEN RAISE;END IF;END;
+ UPDATE system_settings SET value=jsonb_set(cfg,'{notificationChannel}',to_jsonb('a'||repeat(' ',100)))
+  WHERE key='runtime_stop_loss';
+ PERFORM runtime_stop_loss_config();
  UPDATE system_settings SET value=jsonb_set(cfg,'{version}','"1"') WHERE key='runtime_stop_loss';
  BEGIN PERFORM runtime_stop_loss_assert(a,true);RAISE EXCEPTION 'expected invalid version denial';
  EXCEPTION WHEN raise_exception THEN IF SQLERRM<>'RUNTIME_STOP_LOSS_CONFIG_INVALID' THEN RAISE;END IF;END;

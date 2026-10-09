@@ -4,14 +4,14 @@ BEGIN;
 
 CREATE OR REPLACE FUNCTION public.runtime_stop_loss_config() RETURNS jsonb
 LANGUAGE plpgsql STABLE SET search_path=public,pg_temp AS $$
-DECLARE v jsonb;k text;
+DECLARE v jsonb;k text;channel text;
 BEGIN
  SELECT value INTO v FROM system_settings WHERE key='runtime_stop_loss';
  IF v IS NULL THEN RETURN jsonb_build_object('version',1,'userDailyUsd',NULL,
   'siteDailyUsd',NULL,'siteAlertUsd',NULL,'providerBalanceAlertUsd',NULL,'notificationChannel',NULL);END IF;
  IF jsonb_typeof(v)='string' THEN
   BEGIN v:=(v#>>'{}')::jsonb;
-  EXCEPTION WHEN invalid_text_representation THEN RAISE EXCEPTION 'RUNTIME_STOP_LOSS_CONFIG_INVALID';END;
+  EXCEPTION WHEN OTHERS THEN RAISE EXCEPTION 'RUNTIME_STOP_LOSS_CONFIG_INVALID';END;
  END IF;
  IF jsonb_typeof(v)<>'object' OR v->'version' IS DISTINCT FROM '1'::jsonb
   OR EXISTS(SELECT 1 FROM jsonb_object_keys(v) x WHERE x NOT IN
@@ -22,11 +22,11 @@ BEGIN
    OR v->>k !~ '^(0|[1-9][0-9]{0,11})(\.[0-9]{1,12})?$'))
   THEN RAISE EXCEPTION 'RUNTIME_STOP_LOSS_CONFIG_INVALID';END IF;
  END LOOP;
+ channel:=btrim(v->>'notificationChannel',
+  U&'\0009\000A\000B\000C\000D\0020\00A0\1680\2000\2001\2002\2003\2004\2005\2006\2007'
+  ||U&'\2008\2009\200A\2028\2029\202F\205F\3000\FEFF');
  IF NOT v ? 'notificationChannel' OR (v->'notificationChannel'<>'null'::jsonb AND
-  (jsonb_typeof(v->'notificationChannel')<>'string' OR length(v->>'notificationChannel')>100
-   OR length(btrim(v->>'notificationChannel',
-    U&'\0009\000A\000B\000C\000D\0020\00A0\1680\2000\2001\2002\2003\2004\2005\2006\2007'
-    ||U&'\2008\2009\200A\2028\2029\202F\205F\3000\FEFF'))=0))
+  (jsonb_typeof(v->'notificationChannel')<>'string' OR length(channel)>100 OR length(channel)=0))
  THEN RAISE EXCEPTION 'RUNTIME_STOP_LOSS_CONFIG_INVALID';END IF;
  RETURN v;
 END $$;
@@ -56,7 +56,7 @@ BEGIN
  SELECT value INTO s FROM system_settings WHERE key='runtime_rate_limits';
  IF jsonb_typeof(s)='string' THEN
   BEGIN s:=(s#>>'{}')::jsonb;
-  EXCEPTION WHEN invalid_text_representation THEN RAISE EXCEPTION 'RUNTIME_STOP_LOSS_CONFIG_INVALID';END;
+  EXCEPTION WHEN OTHERS THEN RAISE EXCEPTION 'RUNTIME_STOP_LOSS_CONFIG_INVALID';END;
  END IF;
  IF s IS NOT NULL AND (jsonb_typeof(s)<>'object' OR jsonb_typeof(s->'stopNewCalls') IS DISTINCT FROM 'boolean')
  THEN RAISE EXCEPTION 'RUNTIME_STOP_LOSS_CONFIG_INVALID';END IF;
