@@ -12,6 +12,8 @@ import {runCases} from './cases.mjs';
 import {runArtifacts} from './artifacts.mjs';
 import {runDependencies} from './dependencies.mjs';
 import {runPayg} from './payg.mjs';
+import {cases as runAccountFinancial} from '../erasure-b2a/cases.mjs';
+import {runCases as runAccountBinding} from '../erasure-binding/cases.mjs';
 import {runConcurrency} from './concurrency.mjs';
 const development=process.argv.slice(2).join(' ')==='--local-only --development';
 if ((!development && process.argv.slice(2).join(' ') !== '--local-only') || process.env.CI) throw new Error('Require --local-only');
@@ -65,6 +67,8 @@ try {
  await runDependencies(client,report);
  await runPayg(client,report);
  await runConcurrency({db:client,Client,connectionString,report});
+ await runAccountFinancial(client,report);
+ await runAccountBinding(client,report);
  const audits=ok(sql(read('packages/db/tests/account-open-policy-audit.sql')));
  assert.equal(audits,'');report.checks.push('account-open policy audit unchanged');
 } catch(error) {report.failed=String(error.stack??error);process.exitCode=1;}

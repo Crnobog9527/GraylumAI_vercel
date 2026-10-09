@@ -1,4 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import {throwIfContentErased} from '../accountErasure/content';
 import type {SupabaseClient} from '@supabase/supabase-js';
 import {z} from 'zod';
 import {isEmailVerified} from '../../lib/auth';
@@ -38,6 +39,7 @@ export function databaseArtifactStore(options:{userClient:SupabaseClient;private
  async function call(actorId:string,action:string,projectId:string,roundId:string,requestId:string|null,payload:Record<string,unknown>){
   const {data,error}=await privateClient!.rpc('artifact_transition',{p_actor_id:actorId,p_module_id:moduleId,p_skill_id:skillId,p_action:action,p_project_id:projectId,p_round_id:roundId,p_request_id:requestId,p_payload:payload}).abortSignal(AbortSignal.timeout(10000));
   if(error){
+   throwIfContentErased(error);
    if(action==='start' && error.code==='23505' && error.message.includes('artifact_social_account'))throw new Error('ARTIFACT_ACCOUNT_CONFLICT');
    if(error.code==='42501')throw new Error('ARTIFACT_DENIED');
    if(action==='save' && error.message==='round closed')throw new Error('ARTIFACT_SAVE_ROUND_CLOSED');

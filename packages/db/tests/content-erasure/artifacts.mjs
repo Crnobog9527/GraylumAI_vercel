@@ -32,7 +32,13 @@ export async function runArtifacts(db,report){
  VALUES($1,$3,$4,'script',2,'final','DELETE_ALL_SCRIPT_VERSIONS',$5,$6),
  ($2,$3,$4,'storyboard',1,'final','KEEP_INDEPENDENT_STORYBOARD',$7,$1)`,
  [second,third,g.actor,g.workItem,randomUUID(),g.content,randomUUID()]);
+ await db.query(`INSERT INTO runtime_scope_material(session_id,revision,request_id,request,content,content_hash)
+  VALUES($1,1,$2,'{}','{"brief":"DELETE_COPIED_MATERIAL"}',$3)`,[g.session,g.content,'a'.repeat(64)]);
+ await db.query('INSERT INTO opc_library_requests(actor_id,request_id,payload,result) VALUES($1,$2,$3,$4)',
+  [g.actor,randomUUID(),{}, {id:g.content,body:'DELETE_CACHED_BODY'}]);
  assert.equal((await erase(db,g,'content',g.content)).status,'deleted');
+ assert.equal((await db.query('SELECT content FROM runtime_scope_material WHERE session_id=$1',[g.session])).rows[0].content,null);
+ assert.equal((await db.query('SELECT result FROM opc_library_requests WHERE actor_id=$1',[g.actor])).rows[0].result,null);
  assert.equal((await db.query('SELECT count(*) n FROM opc_content_versions WHERE id=ANY($1::uuid[]) AND body IS NULL AND erased_at IS NOT NULL',[[g.content,second]])).rows[0].n,'2');
  assert.equal((await db.query('SELECT body FROM opc_content_versions WHERE id=$1',[third])).rows[0].body,'KEEP_INDEPENDENT_STORYBOARD');
  assert.equal(await rpc(db,'opc_content_allowed',g.actor,third),false,'source ancestry invalidated');
