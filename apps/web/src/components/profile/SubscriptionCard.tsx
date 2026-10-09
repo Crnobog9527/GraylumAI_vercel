@@ -26,8 +26,8 @@ import { invalidatePostCheckoutMembershipQueries } from './checkoutSyncInvalidat
 import { formatUsd, getCreditPackagePrice } from './creditPackagePrice';
 import { ProfileCatalogState, emptyStateCardStyle } from './ProfileCatalogState';
 import { CreditPackagesSection } from './CreditPackagesSection';
-export { ProfileCatalogState } from './ProfileCatalogState';
-export { CreditPackagesSection } from './CreditPackagesSection';
+import { packCheckoutRefusal } from './creditPackageGate';
+export { ProfileCatalogState, CreditPackagesSection };
 
 interface MockUser {
   subscription_tier?: 'free' | 'basic' | 'pro' | 'enterprise';
@@ -763,7 +763,7 @@ export const CreditStatsCard = memo(function CreditStatsCard({ user }: { user: M
       setPurchaseIntent({
         kind: 'package',
         title: pkg.name || `${pkg.credits.toLocaleString()} 积分包`,
-        summary: getSafeErrorMessage(error, '创建支付会话失败，请稍后重试。'),
+        summary: packCheckoutRefusal(error) ?? getSafeErrorMessage(error, '创建支付会话失败，请稍后重试。'),
       });
     } finally {
       setPendingCheckoutPackageId(null);

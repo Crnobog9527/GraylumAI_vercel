@@ -3,8 +3,8 @@
 /**
  * Credit packs are for paying members only (MASTER_PLAN §2.1 item 50; subscription and WeChat
  * one-time members count alike). Membership is the server's `user.getEntitlements` level, which
- * is already `free` for a lapsed or refunded member. This is display only: the server-side refusal
- * for non-members is a separate backend task, so the button must never be the only guard.
+ * is already `free` for a lapsed or refunded member. The button is a convenience: checkout itself
+ * refuses non-members on the server (#750), and that refusal is shown with the texts below.
  */
 export type PackEntitlement = { status: 'loading' } | { status: 'error' } | { status: 'ready'; level: string | null | undefined };
 
@@ -24,4 +24,15 @@ export function creditPackBuyState(input: {
   if (input.entitlement.status === 'error') return { disabled: true, label: '暂时无法确认会员状态' };
   if (!isPaidMember(input.entitlement)) return { disabled: true, label: '开通会员后可购买' };
   return { disabled: false, label: '购买' };
+}
+
+const PACK_CHECKOUT_REFUSALS: Record<string, string> = {
+  PAYWALL_MEMBERSHIP_REQUIRED: '积分包只对付费会员开放。你当前不是有效会员，开通会员后就能购买。',
+  PAYWALL_MEMBERSHIP_UNAVAILABLE: '暂时无法确认会员状态，这次没有发起购买，请稍后再试。',
+};
+
+/** Plain text for the server's credit-pack refusal codes; null for anything else. */
+export function packCheckoutRefusal(error: unknown): string | null {
+  const message = error && typeof error === 'object' && 'message' in error ? String(error.message) : '';
+  return PACK_CHECKOUT_REFUSALS[message] ?? null;
 }

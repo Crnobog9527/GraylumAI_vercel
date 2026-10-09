@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { describe, expect, it } from 'vitest';
-import { creditPackBuyState, isPaidMember } from './creditPackageGate';
+import { creditPackBuyState, isPaidMember, packCheckoutRefusal } from './creditPackageGate';
 
 const ready = (level: string | null) => ({ status: 'ready' as const, level });
 const base = { price: 9.9, checkoutReady: true, pending: false };
@@ -24,5 +24,14 @@ describe('creditPackBuyState', () => {
   it('treats only a ready pro or gold level as paid', () => {
     expect(isPaidMember(ready('gold'))).toBe(true);
     expect(isPaidMember({ status: 'loading' })).toBe(false);
+  });
+});
+
+describe('packCheckoutRefusal', () => {
+  it('turns the server membership refusals into plain Chinese and leaves other errors alone', () => {
+    expect(packCheckoutRefusal(new Error('PAYWALL_MEMBERSHIP_REQUIRED'))).toContain('开通会员后就能购买');
+    expect(packCheckoutRefusal({ message: 'PAYWALL_MEMBERSHIP_UNAVAILABLE' })).toContain('暂时无法确认会员状态');
+    expect(packCheckoutRefusal(new Error('something else'))).toBeNull();
+    expect(packCheckoutRefusal(null)).toBeNull();
   });
 });
