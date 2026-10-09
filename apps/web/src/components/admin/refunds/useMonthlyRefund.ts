@@ -152,13 +152,15 @@ export function useMonthlyRefund() {
       } catch {
         if (!current(started)) return;
         setIntent(null);
+        setQuoted(null);
         setStatusError('执行已停止，但没能重新读取进度，请点"查看进度"');
       }
     } catch (error) {
       if (!current(started)) return;
-      // The request may have reached the server: drop the old intent so nothing can be executed
-      // again until "查看进度" reads where the refund actually is.
+      // The request may have reached the server: drop the old intent and quote so nothing can be
+      // approved or executed again until "查看进度" reads where the refund actually is.
       setIntent(null);
+      setQuoted(null);
       setExecuteResult(null);
       setActionError(getSafeErrorMessage(error, FALLBACK));
     }

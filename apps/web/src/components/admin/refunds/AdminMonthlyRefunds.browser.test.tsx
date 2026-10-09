@@ -300,3 +300,22 @@ it('after an execute request with an uncertain result, offers nothing to execute
     expect(errors).toEqual([]);
   } finally { await page.close(); }
 }, 20000);
+
+it('after an uncertain execute in the same session, neither approve nor execute stays clickable', async () => {
+  const { page, errors } = await open({ quote, approve: approved, status: approved });
+  try {
+    await fill(page);
+    await page.getByTestId('monthly-refund-quote-button').click();
+    await page.getByTestId('monthly-refund-approve').click();
+    await page.getByTestId('monthly-refund-approve-confirm').click();
+    await browserExpect(page.getByTestId('monthly-refund-status-label')).toHaveText('已批准，等待执行');
+    await page.evaluate(() => { (window as unknown as { mode: Record<string, string> }).mode.execute = 'fail'; });
+    await page.getByTestId('monthly-refund-execute').click();
+    await page.getByTestId('monthly-refund-execute-confirm').click();
+    await browserExpect(page.getByTestId('monthly-refund-action-error')).toBeVisible();
+    await browserExpect(page.getByTestId('monthly-refund-approve')).toHaveCount(0);
+    await browserExpect(page.getByTestId('monthly-refund-execute')).toHaveCount(0);
+    expect((await calls(page)).map(([name]) => name)).toEqual(['quote', 'approve', 'execute']);
+    expect(errors).toEqual([]);
+  } finally { await page.close(); }
+}, 30000);
