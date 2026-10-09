@@ -17,8 +17,9 @@ it.each(['[]','null','{}','```json\n{}\n```',raw(Array(13).fill(patch)),
 });
 it('mirrors withdrawals: keeps declared fields, drops unknown entries, rejects a malformed list',()=>{
  const output=(withdrawals:unknown)=>JSON.stringify({inputKind:'answer',patches:[],notes:[],withdrawals});
- expect(readCaptureOutput(output([{stepId:'first',fieldId:'goal'},{stepId:'unknown',fieldId:'goal'},'x']),fields)!.withdrawals)
-  .toEqual([{stepId:'first',fieldId:'goal'}]);
- expect(readCaptureOutput(raw([]),fields)!.withdrawals).toEqual([]);
+ const parsed=readCaptureOutput(output([{stepId:'first',fieldId:'goal'},{stepId:'unknown',fieldId:'goal'},'x']),fields)!;
+ expect(parsed.withdrawals).toEqual([{stepId:'first',fieldId:'goal'}]);
+ expect(parsed.invalidWithdrawals).toEqual([2,3]);
+ expect(readCaptureOutput(raw([]),fields)).toMatchObject({withdrawals:[],invalidWithdrawals:[]});
  for (const bad of [null,{},Array(13).fill({stepId:'first',fieldId:'goal'})]) expect(readCaptureOutput(output(bad),fields)).toBeNull();
 });
