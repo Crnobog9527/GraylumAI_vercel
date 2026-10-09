@@ -5,10 +5,10 @@
 ## 1. 本次证据范围
 
 - 授权：#716 中 2026-10-10 的字体商用只读核对；本任务明确要求提交 docs PR 并在审查后停止。
-- 观察时间：2026-10-10 02:10–02:16（Asia/Shanghai）。域名：`auth-staging.graylum.com`。
-- Vercel 项目：`prj_N9BO48YSAYBQ5Nrvzd3WA9wrQEpC`；READY 部署：`dpl_4VEnRgR4HKFx7aPRgBm3R9UoBGwT`。
-- 部署源码与初始 staging：`986c01c6cc4dc0231d84efc95eceb6d31a050399`；下文源码均指此版本。
-- 域名在资源比对前后均指向上述部署。API 中的 `target=production` 是独立 staging 项目的部署槽，不是正式站授权。
+- 最终资源复核：2026-10-10 02:20–02:22（Asia/Shanghai）。域名：`auth-staging.graylum.com`。
+- Vercel 项目：`prj_N9BO48YSAYBQ5Nrvzd3WA9wrQEpC`；READY 部署：`dpl_64TZ3rJuS7dLRGXomppg1xH7rKWf`。
+- 最终部署源码与观察时 staging：`4c66637ae638733d99bf5c13d01992bbb5eb335a`；下文源码均指此版本。
+- 初次观察的旧部署在期间被后台报告模型界面更新替换；字体路径、依赖及政策无变化。本记录对新部署重新完成资源核对，最终复核前后别名一致。API 中的 `target=production` 是独立 staging 项目的部署槽，不是正式站授权。
 - 全程未启动浏览器；未登录业务账号、访问数据库、读取密钥、改平台配置或触发部署。公开 HTTP GET 不执行网页脚本。
 
 ## 2. 实际部署资源
@@ -21,7 +21,7 @@
 | 其他交付文件 | **PASS**：CSS、manifest、NOTICE、PDF 均为 HTTP 200，逐字节匹配仓库；连同字体共 **172/172**。摘要见下表。 |
 | 编译后入口 | **PASS（局部）**：`/landing`、`/login` HTTP 200；两页引用的 18 个不同静态产物（17 JS、1 CSS）均已读取。JS `35_9cg2-6k1y9.js` 含加载同源 MiSans CSS 的代码；全局 CSS 含 MiSans 字体栈，未含额外 `@font-face`。 |
 | 页面声明 | **PASS（HTTP 内容）**：`/landing` 的 HTML 包含“本网站使用 MiSans 字体，版权归小米所有。”及 `/fonts/misans/LICENSE.pdf` 链接，对应 [LandingFooter.tsx:103–107][footer]。不代表浏览器可见性已验收。 |
-| 全量排除其他部署字体 | **未证实**：上述是已知资源及两页引用产物核对，不能枚举未知静态文件、所有懒加载包或第三方动态响应。固定部署域名直接 GET 返回 302，未登录或绕过保护；资源比对使用已确认绑定的公开 staging 别名。 |
+| 全量排除其他部署字体 | **未证实**：上述是已知资源及两页引用产物核对，不能枚举未知静态文件、所有懒加载包或第三方动态响应。初次固定部署域名探测直接 GET 返回 302，未登录或绕过保护；资源比对使用已确认绑定的公开 staging 别名。 |
 
 全部摘要为 SHA-256；文件路径均在 `/fonts/misans/`：
 
@@ -32,7 +32,7 @@
 | `NOTICE.txt` | 432 | `2e8cea073a64727bb77ff9602e73f096dff1cd9345c89bd6716a2682e5ffd9cd` |
 | `LICENSE.pdf` | 79535 | `4a93a27cd2bd81b3b5ecfd0a853144a876fa26938a93a68443c67d74172fcb86` |
 
-复核方法：冻结上述源码，读取 manifest 的每个 `file/bytes/sha256`，GET 同源文件并比较完整响应字节；校验 CSS 引用集合与磁盘集合相等。按文件名排序拼接 UTF-8 的 `file + 空格 + bytes + 空格 + sha256 + LF`，168 项汇总摘要为 `0ffb969d7f13e40816404f2d076dc61e791ea5f71557d0ba622640a040557fbe`。此摘要固定清单，不代替每项线上请求结果。
+复核方法：冻结上述源码，读取 manifest 的每个 `file/bytes/sha256`，GET 同源文件并比较完整响应字节；校验 CSS 引用集合与磁盘集合相等。按文件名排序拼接 UTF-8 的 `file + 空格 + bytes + 空格 + sha256 + LF`，168 项汇总摘要为 `0ffb969d7f13e40816404f2d076dc61e791ea5f71557d0ba622640a040557fbe`。此摘要固定清单，不代替每项线上请求结果。新部署复核中一个字体请求遇 TLS EOF，保留失败后改用串行 curl HTTP/1.1 定点读取并确认一致；编译资源读取同样改用串行 HTTP/1.1 后 18 项全部成功。
 
 ## 3. 仓库授权文件逐条核对
 
@@ -75,17 +75,17 @@
 4. **验证**：172 项 HTTP 字节核对、CSS/manifest/磁盘集合核对、18 个公开构建资源读取及本地代码大小检查 PASS；完整输出枚举 BLOCKED；浏览器计算样式/实际字形、登录后及第三方控件运行时 NOT_RUN（本任务禁止浏览器）。CI 与独立审查的最终状态记录在本 PR，不能由本记录预先宣布通过。
 5. **交接**：只新增本文，风险 ordinary（事实记录，不改变规则、产品承诺或运行行为）。将 PR 转为可审查，读取独立结论、修正文档中的 P0/P1 后停止；不合并、不部署、不把字体核对扩大为 UI-FINISH 整体完成。
 
-[manifest]: https://github.com/Crnobog9527/GraylumAI_vercel/blob/986c01c6cc4dc0231d84efc95eceb6d31a050399/apps/web/public/fonts/misans/manifest.json
-[license]: https://github.com/Crnobog9527/GraylumAI_vercel/blob/986c01c6cc4dc0231d84efc95eceb6d31a050399/apps/web/public/fonts/misans/LICENSE.pdf
-[notice]: https://github.com/Crnobog9527/GraylumAI_vercel/blob/986c01c6cc4dc0231d84efc95eceb6d31a050399/apps/web/public/fonts/misans/NOTICE.txt
-[footer]: https://github.com/Crnobog9527/GraylumAI_vercel/blob/986c01c6cc4dc0231d84efc95eceb6d31a050399/apps/web/src/components/landing/LandingFooter.tsx#L103-L107
-[layout]: https://github.com/Crnobog9527/GraylumAI_vercel/blob/986c01c6cc4dc0231d84efc95eceb6d31a050399/apps/web/src/app/layout.tsx
-[loader]: https://github.com/Crnobog9527/GraylumAI_vercel/blob/986c01c6cc4dc0231d84efc95eceb6d31a050399/apps/web/src/components/misans-font.tsx#L7-L20
-[globals]: https://github.com/Crnobog9527/GraylumAI_vercel/blob/986c01c6cc4dc0231d84efc95eceb6d31a050399/apps/web/src/app/globals.css#L41-L42
-[captcha]: https://github.com/Crnobog9527/GraylumAI_vercel/blob/986c01c6cc4dc0231d84efc95eceb6d31a050399/apps/web/src/lib/authCaptcha.ts#L1
-[dialog-captcha]: https://github.com/Crnobog9527/GraylumAI_vercel/blob/986c01c6cc4dc0231d84efc95eceb6d31a050399/apps/web/src/lib/dialogCaptcha.ts#L16-L29
-[search-frame]: https://github.com/Crnobog9527/GraylumAI_vercel/blob/986c01c6cc4dc0231d84efc95eceb6d31a050399/apps/web/src/app/chat/search-status.tsx#L10
-[config]: https://github.com/Crnobog9527/GraylumAI_vercel/blob/986c01c6cc4dc0231d84efc95eceb6d31a050399/apps/web/next.config.ts#L14-L31
+[manifest]: https://github.com/Crnobog9527/GraylumAI_vercel/blob/4c66637ae638733d99bf5c13d01992bbb5eb335a/apps/web/public/fonts/misans/manifest.json
+[license]: https://github.com/Crnobog9527/GraylumAI_vercel/blob/4c66637ae638733d99bf5c13d01992bbb5eb335a/apps/web/public/fonts/misans/LICENSE.pdf
+[notice]: https://github.com/Crnobog9527/GraylumAI_vercel/blob/4c66637ae638733d99bf5c13d01992bbb5eb335a/apps/web/public/fonts/misans/NOTICE.txt
+[footer]: https://github.com/Crnobog9527/GraylumAI_vercel/blob/4c66637ae638733d99bf5c13d01992bbb5eb335a/apps/web/src/components/landing/LandingFooter.tsx#L103-L107
+[layout]: https://github.com/Crnobog9527/GraylumAI_vercel/blob/4c66637ae638733d99bf5c13d01992bbb5eb335a/apps/web/src/app/layout.tsx
+[loader]: https://github.com/Crnobog9527/GraylumAI_vercel/blob/4c66637ae638733d99bf5c13d01992bbb5eb335a/apps/web/src/components/misans-font.tsx#L7-L20
+[globals]: https://github.com/Crnobog9527/GraylumAI_vercel/blob/4c66637ae638733d99bf5c13d01992bbb5eb335a/apps/web/src/app/globals.css#L41-L42
+[captcha]: https://github.com/Crnobog9527/GraylumAI_vercel/blob/4c66637ae638733d99bf5c13d01992bbb5eb335a/apps/web/src/lib/authCaptcha.ts#L1
+[dialog-captcha]: https://github.com/Crnobog9527/GraylumAI_vercel/blob/4c66637ae638733d99bf5c13d01992bbb5eb335a/apps/web/src/lib/dialogCaptcha.ts#L16-L29
+[search-frame]: https://github.com/Crnobog9527/GraylumAI_vercel/blob/4c66637ae638733d99bf5c13d01992bbb5eb335a/apps/web/src/app/chat/search-status.tsx#L10
+[config]: https://github.com/Crnobog9527/GraylumAI_vercel/blob/4c66637ae638733d99bf5c13d01992bbb5eb335a/apps/web/next.config.ts#L14-L31
 [prior]: https://github.com/Crnobog9527/GraylumAI_vercel/issues/716#issuecomment-6039781633
 [faq]: https://hyperos.mi.com/font/zh/faq/
 [files-api]: https://github.com/vercel/sdk/blob/main/docs/sdks/deployments/README.md#listdeploymentfiles
