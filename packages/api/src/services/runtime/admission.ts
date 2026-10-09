@@ -103,7 +103,8 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
    throw new TRPCError({code:'BAD_REQUEST',message:'BILL2_INSUFFICIENT_CREDITS'});
   if(r.error?.message==='RUNTIME_ORGANIZER_PENDING')throw new StagingAccessError('RUNTIME_ORGANIZER_PENDING');
   if(r.error){
-   if(policy.reportGeneration&&(r.error.message.startsWith('REPORT_')||r.error.message==='OPC_CAPTURE_PENDING'))throw new Error(r.error.message);
+   if(policy.reportGeneration&&(r.error.message.startsWith('REPORT_')||
+    ['OPC_CAPTURE_PENDING','RUNTIME_SKILL_MODEL_DENIED'].includes(r.error.message)))throw new Error(r.error.message);
    if(name==='runtime_admit'&&r.error.message==='OPC_ANSWER_SOURCE_DENIED')throw new Error('OPC_ANSWER_SOURCE_DENIED');
    // Preserve SQL business/permission refusals; classify only operational failures.
    if(['P0001','PT400','42501'].includes(r.error.code))throw new Error('RUNTIME_ADMISSION_DENIED',{cause:policy.reportGeneration?r.error:undefined});
@@ -160,9 +161,11 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
    let skillId:string|undefined,moduleId:string|undefined,revisionId:string|undefined;
    if(input.selection.kind==='ordinary'||input.selection.kind==='auto')modelId=input.selection.modelId;
    else if(input.selection.kind==='skill'){
-    const module=await admin.from('modules').select('id,active,skill_id,model_id').eq('id',input.selection.moduleId).single();
+    const module=await admin.from('modules').select('id,active,skill_id,model_id,report_model_id').eq('id',input.selection.moduleId).single();
     if(module.error||module.data?.active!==true)throw new Error('RUNTIME_SKILL_DENIED');
-    moduleId=uuid.parse(module.data.id);skillId=uuid.parse(module.data.skill_id);modelId=uuid.parse(module.data.model_id);revisionId=input.selection.revisionId;
+    moduleId=uuid.parse(module.data.id);skillId=uuid.parse(module.data.skill_id);
+    modelId=uuid.parse(policy.reportGeneration ? module.data.report_model_id ?? module.data.model_id : module.data.model_id);
+    revisionId=input.selection.revisionId;
     // The service-role row above never substitutes for the user-scoped admission
     // the source performs once for this request (AC-0c).
     const source=databaseSkillSource({userClient:user,privateClient:admin,moduleId,skillId,revisionId});

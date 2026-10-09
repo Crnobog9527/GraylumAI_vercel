@@ -4,6 +4,8 @@ import { useState } from 'react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { parseWorkflowManifest, workflowManifestPath, type WorkflowManifest } from '@repo/api/skills/workflowManifest';
+export { ReportModelSetting } from '@/components/admin/ReportModelSetting';
+export { syncModuleVersion } from './module-version-sync';
 
 export type SkillForm = {
   kind: 'document' | 'social'; directoryName: string; files: { path: string; base64: string }[];
