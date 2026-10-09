@@ -283,3 +283,20 @@ it('keeps "继续执行" after a stop the executor can retry by itself', async (
     expect(errors).toEqual([]);
   } finally { await page.close(); }
 }, 20000);
+
+it('after an execute request with an uncertain result, offers nothing to execute until progress is read again', async () => {
+  const { page, errors } = await open({ status: approved });
+  try {
+    await page.getByLabel('订单编号').fill(ORDER);
+    await page.getByTestId('monthly-refund-status-button').click();
+    await page.evaluate(() => { (window as unknown as { mode: Record<string, string> }).mode.execute = 'fail'; });
+    await page.getByTestId('monthly-refund-execute').click();
+    await page.getByTestId('monthly-refund-execute-confirm').click();
+    await browserExpect(page.getByTestId('monthly-refund-action-error')).toContainText('查看进度');
+    await browserExpect(page.getByTestId('monthly-refund-execute')).toHaveCount(0);
+    await page.getByTestId('monthly-refund-status-button').click();
+    await browserExpect(page.getByTestId('monthly-refund-execute')).toBeVisible();
+    expect((await calls(page)).map(([name]) => name)).toEqual(['status', 'execute', 'status']);
+    expect(errors).toEqual([]);
+  } finally { await page.close(); }
+}, 20000);

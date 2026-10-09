@@ -150,10 +150,17 @@ export function useMonthlyRefund() {
         const fresh = await utils.admin.getMonthlyRefundStatus.fetch({ orderId }, { staleTime: 0, retry: false });
         if (current(started) && fresh) setIntent(fresh as MonthlyRefundIntent);
       } catch {
-        if (current(started)) setStatusError('执行已停止，但没能重新读取进度，请点"查看进度"');
+        if (!current(started)) return;
+        setIntent(null);
+        setStatusError('执行已停止，但没能重新读取进度，请点"查看进度"');
       }
     } catch (error) {
-      if (current(started)) setActionError(getSafeErrorMessage(error, FALLBACK));
+      if (!current(started)) return;
+      // The request may have reached the server: drop the old intent so nothing can be executed
+      // again until "查看进度" reads where the refund actually is.
+      setIntent(null);
+      setExecuteResult(null);
+      setActionError(getSafeErrorMessage(error, FALLBACK));
     }
   });
 
