@@ -192,3 +192,25 @@ it('hides the pay button when a catalog refetch failed, even with older prices s
     expect(errors).toEqual([]);
   } finally { await page.close(); }
 }, 20000);
+
+it('a round whose Skill cannot write a report gets the plain refusal, never the paywall', async () => {
+  // #755: the server checks report support before membership, so this round answers REPORT_MANIFEST_REQUIRED.
+  const { page, errors } = await open({ report: { executionId: null,
+    refusal: { text: '这个定位流程暂时不支持生成完整报告。' } } });
+  try {
+    await browserExpect(page.getByRole('dialog', { name: '完整运营策略报告' })).toContainText('这个定位流程暂时不支持生成完整报告。');
+    await browserExpect(page.getByTestId('report-paywall')).toHaveCount(0);
+    expect(await checkouts(page)).toEqual([]);
+    expect(errors).toEqual([]);
+  } finally { await page.close(); }
+}, 20000);
+
+it('does not promise follower-count stages the report does not use', async () => {
+  const { page, errors } = await open({});
+  try {
+    const text = await page.getByTestId('report-paywall').innerText();
+    expect(text).toContain('满足什么条件再进入下一步');
+    expect(text).not.toMatch(/粉丝到多少|粉丝量/);
+    expect(errors).toEqual([]);
+  } finally { await page.close(); }
+}, 20000);
