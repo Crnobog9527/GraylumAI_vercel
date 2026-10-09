@@ -106,23 +106,25 @@ function priorBatch(output, previous) {
 }
 
 // No network/credential access here. CLI supplies the adapter only after approval.
-export async function executeBatch(frozen, batch, approval, executionHead, { preflight, send }) {
+// A later frozen roster may declare its own batch order and response validator; defaults keep the V2 roster.
+export async function executeBatch(frozen, batch, approval, executionHead, { preflight, send, validate = validateResponse }) {
   validateApproval(approval, frozen, executionHead);
-  assert(batches.includes(batch), 'BATCH');
+  const order = frozen.batches ?? batches;
+  assert(order.includes(batch), 'BATCH');
   const output = join(frozen.directory, 'execution');
   mkdirSync(output, { recursive: true, mode: 0o700 });
   const budget = openBudget(output, frozen.carry);
   try {
     const started = join(output, `${batch}.started.json`);
     assert(!existsSync(started), 'NO_RETRY');
-    const index = batches.indexOf(batch);
-    if (index > 0) priorBatch(output, batches[index - 1]);
+    const index = order.indexOf(batch);
+    if (index > 0) priorBatch(output, order[index - 1]);
     durable(started, { executionHead, approval, batch });
     await preflight();
     const selected = frozen.requests.filter(r => r.batch === batch);
     assert(selected.length > 0, 'BATCH_EMPTY');
     // Reserve the full frozen batch allowance, regardless of cheaper earlier results.
-    const allStarted = batches.filter(b => existsSync(join(output, `${b}.started.json`)));
+    const allStarted = order.filter(b => existsSync(join(output, `${b}.started.json`)));
     const reservedTotal = frozen.requests.filter(r => allStarted.includes(r.batch)).reduce((sum, r) => sum + r.reserveNano, 0);
     assert(reservedTotal <= approval.newReserveNano, 'NEW_BUDGET_STOP');
     const responseHashes = [];
@@ -135,13 +137,13 @@ export async function executeBatch(frozen, batch, approval, executionHead, { pre
       assert(digest(frozen.ledgerPath) === frozen.expected.oldLedgerHash, 'OLD_LEDGER_CHANGED');
       assert(digest(join(frozen.directory, 'requests.manifest.json')) === frozen.expected.manifestHash &&
         digest(join(frozen.directory, row.id.replace('/', '-') + '.request.json')) === row.requestHash, 'REQUEST_CHANGED');
-      budget.reserve({ id: row.id, stage: row.stage === 'A' ? 'fields' : 'prompt',
+      budget.reserve({ id: row.id, stage: row.budgetStage ?? (row.stage === 'A' ? 'fields' : 'prompt'),
         requestHash: row.requestHash, nano: row.reserveNano });
       const response = await send(row.raw);
       const responsePath = join(output, row.id.replace('/', '-') + '.response.json');
       durable(responsePath, { id: row.id, requestHash: row.requestHash, ...response });
       // Unknown/invalid results retain the pending reserve, including across restarts.
-      const cost = validateResponse(response);
+      const cost = validate(response);
       budget.settle(row.id, cost);
       responseHashes.push(digest(responsePath));
     }

@@ -76,6 +76,32 @@ it('CDC_EVAL: freeze or execute exactly the approved roster through local OPC an
     for(const stepId of Object.keys(initial.snapshot.steps).filter(id=>id<group.stepId))await f.db.query(
      "update artifact_rounds set steps=jsonb_set(steps,ARRAY[$2,'valid'],'true'::jsonb) where id=$1",[initial.roundId,stepId]);
    }
+   // Special12 historical state from its frozen checklist: protected values via the real manual
+   // operation, confirmed steps via the same local-only valid flag used by capture.integration.ts.
+   if(group.specialFrozenChecklist){
+    if(!/^postgres:\/\/postgres@127\.0\.0\.1:\d+\/v3_disposable$/.test(process.env.V3_LOCAL_DB??''))throw new Error('SPECIAL_LOCAL_ONLY');
+    type Field={id:string;value:string;status:string;nature:string;protected:boolean};
+    type Step={id:string;confirmed:boolean;fields:Field[]};
+    const checklist=group.specialFrozenChecklist as Step[];
+    for(const step of checklist){
+     const nonempty=step.fields.filter(field=>field.value!=='');
+     if(!nonempty.length)continue;
+     if(nonempty.some(field=>!field.protected))throw new Error('SPECIAL_UNSUPPORTED_INITIAL');
+     const state=await f.service.read(draft.draftId);
+     const values=Object.fromEntries(step.fields.map(field=>[field.id,{value:field.value,nature:field.nature,
+      status:field.status==='draft'?'provisional':field.status==='missing'?'unknown':field.status}]));
+     await f.service.information({draftId:draft.draftId,requestId:randomUUID(),stepId:step.id,
+      expectedVersion:state.snapshot.steps[step.id].version,values});
+    }
+    for(const step of checklist)if(step.confirmed)await f.db.query(
+     "update artifact_rounds set steps=jsonb_set(steps,ARRAY[$2,'valid'],'true'::jsonb) where id=$1",[initial.roundId,step.id]);
+    const seeded=await f.service.read(draft.draftId);
+    for(const step of checklist){
+     if(Boolean(seeded.snapshot.steps[step.id].valid)!==step.confirmed)throw new Error('SPECIAL_CONFIRMATION_MISMATCH');
+     for(const field of step.fields)if((seeded.information[step.id].values?.[field.id]?.value??'')!==field.value||
+      seeded.information[step.id].meta?.[field.id]?.protected!==field.protected)throw new Error('SPECIAL_INITIAL_MISMATCH');
+    }
+   }
    for(const turn of group.turns){
     active=turn;phase=0;
     if(turn.pauseBefore&&plan.bridge){
