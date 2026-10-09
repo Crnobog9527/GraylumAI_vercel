@@ -12,7 +12,7 @@ const SIGNUP_HREF = '/login?action=signup';
 
 const NAV_LINKS = [
   { label: '功能', href: '/landing#features' },
-  { label: '定价', href: '/landing#pricing' },
+  { label: '定价', href: '/landing/pricing' },
   { label: '关于', href: '/landing#about' },
 ] as const;
 
