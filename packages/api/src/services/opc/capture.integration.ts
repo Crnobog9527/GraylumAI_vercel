@@ -30,6 +30,8 @@ const tuple = (value = '', status = 'unknown', nature = 'unknown') => ({ value, 
 const patch = (value = 'A', stepId = 'step-0', fieldId = 'goal') =>
   ({ stepId, fieldId, value, status: 'provisional', nature: 'fact', basis: 'user_statement' });
 const output = (patches = [patch()]) => JSON.stringify({ inputKind: 'answer', patches, notes: [] });
+// Older capture tests reload 0159/0182 definitions; reapply the V3 patches afterwards (marker makes reruns no-ops).
+const withdrawMigration = () => db.query(readFileSync(resolve(import.meta.dirname, '../../../../db/migrations/0200_opc_suggestion_withdraw.sql'), 'utf8'));
 
 async function fixture(extraFields = 0, informationCounts?: number[], allRequired = false, proposalField = false) {
   const owner = randomUUID(), model = randomUUID(), moduleId = randomUUID();
@@ -396,7 +398,7 @@ it('RUNTIME: capture rollback rejects a second rollback, preserves values and pr
   const forward = readFileSync(resolve('../db/migrations/0159_opc_capture.sql'), 'utf8');
   // Exercise the historical rollback against its exact 0159 definitions, then restore current migration.
   const latest = readFileSync(resolve('../db/migrations/0182_opc_mentor_checklist.sql'), 'utf8');
-  for (const name of ['opc_information','runtime_work_projection','opc_capture_apply']) {
+  for (const name of ['opc_information','runtime_work_projection','opc_capture_apply','opc_query','opc_capture_resolve']) {
     await db.query(forward.match(new RegExp('CREATE OR REPLACE FUNCTION ' + name + '[\\s\\S]*?END \\$\\$;'))![0]);
   }
   const definitions = async () => (await db.query(`select proname,pg_get_functiondef(oid) body from pg_proc
@@ -414,6 +416,7 @@ it('RUNTIME: capture rollback rejects a second rollback, preserves values and pr
   await db.query(forward);
   expect((await f.steps())['step-0'].information.goal.value).toBe('A');
   await db.query(latest);
+  await withdrawMigration();
 });
 
 it('RUNTIME: capture information byte capacity falls back to suggestions', async () => {
@@ -817,6 +820,7 @@ it('RUNTIME: migration rejects an unexpected previous function definition before
   } finally { await db.query('rollback'); await db.query(original); }
   const latest = readFileSync(resolve('../db/migrations/0182_opc_mentor_checklist.sql'), 'utf8');
   await db.query(latest);
+  await withdrawMigration();
 });
 
 it('RUNTIME: rollback rejects drift in every replaced or removed definition without changing functions', async () => {
@@ -1106,4 +1110,120 @@ it('RUNTIME: user-stated proposal plans cross steps, round-trip descriptions and
  expect(protectedRead.information['step-0'].meta.other.suggestion).toMatchObject({
   value:replacement.value,basis:'user_statement',nature:'decision',status:'provisional',
  });
+});
+
+// CDC-WRITEBACK-V3: withdrawal only moves an older pending suggestion; values, versions and protection never change.
+const withdrawOutput = (withdrawals: unknown, patches: unknown[] = []) =>
+  JSON.stringify({ inputKind: 'answer', patches, notes: [], withdrawals });
+async function userTurn(id: string, organizerInput: Record<string, unknown> = { userInput: '那条建议不对，不要了' },
+  shown: string | null = 'Pending goal suggestion') {
+  const checklist = [{ id: 'step-0', fields: [{ id: 'goal', ...(shown === null ? {} : { pendingSuggestion: { value: shown } }) }] }];
+  await db.query(`update runtime_executions set payload=jsonb_set(payload,'{attachedOrganizer,input}',to_jsonb($2::text)) where id=$1`,
+    [id, JSON.stringify({ captureFormat: 'v2', checklist, ...organizerInput })]);
+  return id;
+}
+async function suggestedFixture() {
+  const f = await fixture();
+  const current = (await f.steps())['step-0'];
+  await f.service.information({ draftId: f.draft.draftId, requestId: randomUUID(), stepId: 'step-0', expectedVersion: current.version,
+    values: { ...current.information, goal: tuple('Confirmed goal', 'confirmed', 'fact') } });
+  const source = await f.seed(output([patch('Pending goal suggestion')]));
+  expect(await f.apply(source)).toMatchObject({ result: 'suggested' });
+  return { f, source };
+}
+
+it('RUNTIME: V3 withdrawal moves only an older pending suggestion and leaves confirmed values byte-identical', async () => {
+  const { f, source } = await suggestedFixture();
+  const before = (await f.steps())['step-0'];
+  const id = await userTurn(await f.seed(withdrawOutput([{ stepId: 'step-0', fieldId: 'goal' },
+    { stepId: 'step-0', fieldId: 'other' }, { stepId: 'missing', fieldId: 'goal' }, 'x'])));
+  const response = await f.apply(id);
+  expect(response).toMatchObject({ result: 'suggested', withdrawn: { 'step-0': ['goal'] }, discarded: [
+    { withdrawal: 2, reason: 'no_suggestion' }, { withdrawal: 3, reason: 'invalid_withdrawal' }, { withdrawal: 4, reason: 'invalid_withdrawal' }] });
+  const after = (await f.steps())['step-0'];
+  expect(after.information).toEqual(before.information);
+  expect(after.version).toBe(before.version);
+  expect(after.fieldMeta.goal.suggestion).toBeUndefined();
+  expect(after.fieldMeta.goal.withdrawnSuggestion).toEqual({ ...before.fieldMeta.goal.suggestion, withdrawnBy: id });
+  expect(await f.apply(id)).toEqual(response);
+  const read = (await db.query('select opc_query($1,$2) v', [f.actor, f.draft.draftId])).rows[0].v;
+  expect(read.information['step-0'].meta.goal).toMatchObject({ withdrawnSuggestion: { value: 'Pending goal suggestion', executionId: source } });
+  expect(read.information['step-0'].meta.goal).not.toHaveProperty('suggestion');
+  const resolve = (action: 'accept' | 'dismiss', hash: string) => f.service.captureResolve({ draftId: f.draft.draftId,
+    requestId: randomUUID(), stepId: 'step-0', fieldId: 'goal', executionId: source, hash, action, expectedVersion: after.version });
+  const hash = after.fieldMeta.goal.withdrawnSuggestion.hash;
+  await expect(resolve('accept', hash)).rejects.toThrow('OPC_SUGGESTION_CHANGED');
+  await expect(resolve('dismiss', 'wrong')).rejects.toThrow('OPC_SUGGESTION_CHANGED');
+  expect(await resolve('dismiss', hash)).toEqual({ version: after.version, result: 'dismiss' });
+  const dismissed = (await f.steps())['step-0'];
+  expect(dismissed.information).toEqual(before.information);
+  expect(dismissed.fieldMeta.goal).not.toHaveProperty('withdrawnSuggestion');
+  expect(dismissed.fieldMeta.goal).toMatchObject({ source: 'user' });
+});
+
+it('RUNTIME: V3 withdrawal refuses host turns, newer suggestions and malformed lists', async () => {
+  const { f } = await suggestedFixture();
+  const goal = () => f.steps().then(steps => steps['step-0'].fieldMeta.goal);
+  const pending = (await goal()).suggestion;
+  const one = [{ stepId: 'step-0', fieldId: 'goal' }];
+  for (const input of [{}, { userInput: '  ' }, { userInput: 'HOST_OPEN_CURRENT_QUESTION' },
+    { userInput: '', hostEvent: { kind: 'checklist_updated', fieldIds: ['goal'] } }]) {
+    const id = await userTurn(await f.seed(withdrawOutput(one)), input);
+    expect(await f.apply(id)).toMatchObject({ discarded: [{ withdrawal: 1, reason: 'no_user_turn' }] });
+    expect((await goal()).suggestion).toEqual(pending);
+  }
+  for (const bad of [{}, null, Array(13).fill(one[0])]) {
+    expect(await f.apply(await userTurn(await f.seed(withdrawOutput(bad))))).toMatchObject({ result: 'invalid_output' });
+  }
+  const unseen = await userTurn(await f.seed(withdrawOutput(one)), undefined, null);
+  expect(await f.apply(unseen)).toMatchObject({ discarded: [{ withdrawal: 1, reason: 'not_shown' }] });
+  const sameText = await userTurn(await f.seed(withdrawOutput(one, [patch('Pending goal suggestion')])));
+  expect(await f.apply(sameText)).toMatchObject({ discarded: [{ withdrawal: 1, reason: 'superseded' }] });
+  const older = await userTurn(await f.seed(withdrawOutput(one)));
+  await f.apply(await f.seed(output([patch('Pending goal suggestion')])));
+  expect(await f.apply(older)).toMatchObject({ discarded: [{ withdrawal: 1, reason: 'superseded' }] });
+  const replaced = await userTurn(await f.seed(withdrawOutput(one)));
+  await f.apply(await f.seed(output([patch('Newest suggestion')])));
+  expect(await f.apply(replaced)).toMatchObject({ discarded: [{ withdrawal: 1, reason: 'not_shown' }] });
+  expect((await goal()).suggestion.value).toBe('Newest suggestion');
+  expect((await goal()).withdrawnSuggestion).toBeUndefined();
+});
+
+it('RUNTIME: V3 a new suggestion replaces the withdrawn record, which reads hide after revocation', async () => {
+  const { f, source } = await suggestedFixture();
+  await f.apply(await userTurn(await f.seed(withdrawOutput([{ stepId: 'step-0', fieldId: 'goal' }]))));
+  const query = async () => (await db.query('select opc_query($1,$2) v', [f.actor, f.draft.draftId])).rows[0].v.information['step-0'].meta.goal;
+  await db.query("update runtime_executions set unavailable_reason='revoked' where id=$1", [source]);
+  expect(await query()).not.toHaveProperty('withdrawnSuggestion');
+  expect((await f.steps())['step-0'].fieldMeta.goal.withdrawnSuggestion.executionId).toBe(source);
+  await f.apply(await f.seed(output([patch('Fresh suggestion')])));
+  const meta = (await f.steps())['step-0'].fieldMeta.goal;
+  expect(meta.suggestion.value).toBe('Fresh suggestion');
+  expect(meta).not.toHaveProperty('withdrawnSuggestion');
+});
+
+it('RUNTIME: V3 migration reruns as a no-op and its rollback restores definitions and strips withdrawn records', async () => {
+  const signatures = ['opc_capture_apply(uuid,uuid,uuid)', 'opc_query(uuid,uuid)',
+    'opc_capture_resolve(uuid,uuid,uuid,text,text,uuid,text,text,integer)'];
+  const definitions = async () => (await db.query(`select sig, pg_get_functiondef(sig::regprocedure) def
+    from unnest($1::text[]) sig order by sig`, [signatures])).rows as { sig: string; def: string }[];
+  const { f } = await suggestedFixture();
+  await f.apply(await userTurn(await f.seed(withdrawOutput([{ stepId: 'step-0', fieldId: 'goal' }]))));
+  const patched = await definitions();
+  await withdrawMigration();
+  expect(await definitions()).toEqual(patched);
+  const rollback = readFileSync(resolve(import.meta.dirname, '../../../../../docs/launch/rollback/CDC_WRITEBACK_V3.sql'), 'utf8');
+  const before = (await f.steps())['step-0'];
+  try {
+    await db.query(rollback);
+    const reverted = await definitions();
+    for (const entry of reverted) expect(entry.def).not.toContain('v3 suggestion withdraw');
+    const after = (await f.steps())['step-0'];
+    expect(after.information).toEqual(before.information);
+    expect(after.fieldMeta.goal).toEqual(Object.fromEntries(Object.entries(before.fieldMeta.goal).filter(([key]) => key !== 'withdrawnSuggestion')));
+    await expect(db.query(rollback)).rejects.toThrow('OPC_WITHDRAW_ROLLBACK_SOURCE_MISMATCH');
+    await db.query('rollback');
+    expect(await definitions()).toEqual(reverted);
+  } finally { await withdrawMigration(); }
+  expect(await definitions()).toEqual(patched);
 });
