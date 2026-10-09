@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { describe, expect, it } from 'vitest';
 import {
-  canExecuteMonthlyRefund, canRejectMonthlyRefund, executeReasonLabel, stoppedExecutionReason, monthlyRefundStages, monthlyRefundStatusLabel,
+  canExecuteMonthlyRefund, canRejectMonthlyRefund, executeReasonLabel, stopAllowsRetry, stoppedExecutionReason, monthlyRefundStages, monthlyRefundStatusLabel,
   validateMonthlyRefundForm, validateRefundFields,
 } from './monthlyRefundView';
 
@@ -51,6 +51,14 @@ describe('intent presentation', () => {
     expect(stoppedExecutionReason({ decision: { kind: 'review_required', reason: 'amount_mismatch' } })).toBe('amount_mismatch');
     expect(stoppedExecutionReason({ decision: { kind: 'pending', refundId: 're_1' } })).toBe('refund_pending');
     expect(stoppedExecutionReason(null)).toBeUndefined();
+  });
+
+  it('offers another pass only for stops the executor can retry', () => {
+    for (const reason of ['refund_pending', 'bounded_reconciliation', 'fresh_observation_required']) {
+      expect(stopAllowsRetry(reason)).toBe(true);
+    }
+    for (const reason of ['amount_mismatch', 'post_retry_window_elapsed', 'approval_changed', 'account_unresolved',
+      'recorded_cash_conflict', 'something_new', undefined]) expect(stopAllowsRetry(reason)).toBe(false);
   });
 
   it('lists every stage in order and marks unstarted ones', () => {

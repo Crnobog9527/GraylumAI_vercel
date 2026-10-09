@@ -157,7 +157,9 @@ it('approves only after confirmation, pinned to the displayed quote, then execut
     await browserExpect(page.getByTestId('monthly-refund-execute-stopped')).toContainText('金额和批准时不一致');
     // The stored intent moved on (claimed, a stage started): the card shows the re-read state.
     await browserExpect(page.getByTestId('monthly-refund-status-label')).toHaveText('执行中或需要人工核对');
-    await browserExpect(page.getByTestId('monthly-refund-execute')).toHaveText('继续执行');
+    // amount_mismatch needs a person: no further execute is offered.
+    await browserExpect(page.getByTestId('monthly-refund-execute')).toHaveCount(0);
+    await browserExpect(page.getByTestId('monthly-refund-execute-stopped')).toContainText('需要人工核对后处理');
     await browserExpect(page.getByTestId('monthly-refund-status')).toContainText('已开始');
     expect(await calls(page)).toEqual([
       ['quote', { orderId: ORDER, ticketId: TICKET, feePermitted: 'confirmed', feeEvidence: 'legal:us-ca:2026-10' }],
@@ -263,6 +265,21 @@ it('clears a picked rejection reason as soon as the order or ticket changes', as
     await browserExpect(page.getByTestId('monthly-refund-reject-button')).toBeDisabled();
     await browserExpect(page.getByLabel('拒绝原因')).toContainText('选择拒绝原因');
     expect(await calls(page)).toEqual([]);
+    expect(errors).toEqual([]);
+  } finally { await page.close(); }
+}, 20000);
+
+it('keeps "继续执行" after a stop the executor can retry by itself', async () => {
+  const claimed = { ...approved, status: 'review_required', claimedAt: '2026-10-09T00:00:00Z', hold: 'held' };
+  const { page, errors } = await open({ status: claimed,
+    execute: { status: 'review_required', intentId: INTENT, decision: { kind: 'pending', refundId: 're_1' } } });
+  try {
+    await page.getByLabel('订单编号').fill(ORDER);
+    await page.getByTestId('monthly-refund-status-button').click();
+    await page.getByTestId('monthly-refund-execute').click();
+    await page.getByTestId('monthly-refund-execute-confirm').click();
+    await browserExpect(page.getByTestId('monthly-refund-execute-stopped')).toContainText('还在处理中');
+    await browserExpect(page.getByTestId('monthly-refund-execute')).toHaveText('继续执行');
     expect(errors).toEqual([]);
   } finally { await page.close(); }
 }, 20000);

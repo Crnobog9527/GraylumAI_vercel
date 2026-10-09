@@ -128,6 +128,15 @@ export function executeReasonLabel(reason: unknown) {
   return '需要人工核对，请先查看进度';
 }
 
+// Stops the executor can make progress on by itself on another pass; every other stop needs a person.
+const RETRYABLE_STOPS = new Set(['refund_pending', 'bounded_reconciliation', 'fresh_observation_required',
+  'monthly_refund_requires_reconciliation']);
+
+/** Whether another "继续执行" may be offered after this stop; an unknown or manual-review reason never is. */
+export function stopAllowsRetry(reason: string | undefined) {
+  return reason !== undefined && RETRYABLE_STOPS.has(reason);
+}
+
 /** The stop reason of an execute answer: top-level, or the planner's nested decision. */
 export function stoppedExecutionReason(result: unknown): string | undefined {
   if (!result || typeof result !== 'object') return undefined;
