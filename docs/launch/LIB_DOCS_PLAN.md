@@ -67,7 +67,7 @@
 | 注销覆盖新表要改三处（没有登记表） | `0192`：`erasure_business_owner`、`account_erasure_prune_business` 表数组、`*_remaining` | 新表照此加入，并加测试防漏 |
 | Runtime 工具结果冻结：`runtime_tool` claim/complete，重放用数据库返回的原字节 | `services/runtime/execute.ts:243-268`；表 `runtime_tool_calls`（`0106`） | LIB-4 扩展 `read_source`，不新建工具总线 |
 | `.docx` 依赖 yauzl 3.4.0 + sax 1.6.1 和 20 个恶意样本测试 | `packages/api/package.json`；`services/__tests__/lib1/` | 线上隔离未证明前 `.docx` 保持关闭（[证据文档](../security/LIB-1-DEPENDENCY-EVIDENCE.md)） |
-| 定时任务全部每天一次（Hobby）；注销 cron `0 5 * * *` | `apps/web/vercel.json`；`apps/web/src/app/api/cron/account-erasure` | 清理挂在注销 cron 上；上线前升级 Pro 后改为每 5 分钟（已在注销执行器的 `EXECUTOR.md` 里计划） |
+| 定时任务全部每天一次（Hobby）；注销 cron `0 5 * * *` | `apps/web/vercel.json`；`apps/web/src/app/api/cron/account-erasure` | 新增独立的资料库清理 cron，复用同样的鉴权和运行记录；上线前升级 Pro 后和注销 cron 一起改为每 5 分钟 |
 | 现有资料库页（已采用选题、稿件、定位版本） | `apps/web/src/app/library/page.tsx`、`routers/opc.ts:207` | 同一页面加「我的文档」标签，不动现有栏目 |
 | 没有文件表、没有签名上传、没有额度检查、没有「来源已删除」标记 | 全仓库检索 | 本方案新增 |
 
@@ -235,7 +235,7 @@ cron 频率本身**不等于**保证：注销执行器的说明也写明积压�
 
 | PR | 内容 | 谁做 | 风险 | 验收（全部在本 PR 对应的版本上） |
 | --- | --- | --- | --- | --- |
-| LIB-2a 后端：存储、额度、清理、txt/md | 迁移（3 表、私有桶、窄 RPC、注销接线）、`services/library`、薄 tRPC、完成/放弃/删除/下载接口、注销 cron 里的清理、Storage 授权回归测试；功能开关默认关 | Codex | high | 本机 PG17 空库建库、新迁移连续执行两次、更新指纹；并发额度测试（独立连接 + 屏障）；必测项 9–15；允许和拒绝（本人、匿名、他人、已注销旧令牌、任意路径）；工单上传回归；注销完成证明覆盖新表和新桶；staging 真实存储验证签名上传、少报大小、晚到对象 |
+| LIB-2a 后端：存储、额度、清理、txt/md | 迁移（3 表、私有桶、窄 RPC、注销接线）、`services/library`、薄 tRPC、完成/放弃/删除/下载接口、独立清理 cron、Storage 授权回归测试、24 小时清完的积压测试脚本（上线前在 Pro 频率下跑）；功能开关默认关 | Codex | high | 本机 PG17 空库建库、新迁移连续执行两次、更新指纹；并发额度测试（独立连接 + 屏障）；必测项 9–15；允许和拒绝（本人、匿名、他人、已注销旧令牌、任意路径）；工单上传回归；注销完成证明覆盖新表和新桶；staging 真实存储验证签名上传、少报大小、晚到对象 |
 | LIB-2b `.docx` 浏览器提取 | 浏览器端解压和文字提取（带上限）、原文件和纯文本两份上传、服务端把纯文本按 `.txt` 处理；解析库选型（新依赖单独审查） | Claude（前端） | high | 必测项 8（在浏览器端）；#549 的恶意样本在浏览器里被拒绝且页面不卡死；正常 Word 样本（中文、标题、表格、页眉脚注、带网页超链接）能提取；服务端从不打开 Word 的测试；浏览器验收交 Codex |
 | LIB-3 前端：我的文档 / 语料库 | `/library` 加标签：上传（选用途）、进度、失败重试、目录和段查看、下载、改用途、空间显示、删除影响确认、「删除中」状态 | Claude | high（删除和私有资料界面） | 单元测试；preview/staging 真实浏览器：上传 → 查看 → 下载 → 删除 → 再下载被拒；超额提示；降级后可看可删不可传；手机和桌面宽度；文件名里的脚本不执行。浏览器验收交 Codex |
 | LIB-4 Agent 分段读取 | `read_source` 文档来源、来源登记列、上限、重放前删除检查、删除传播到执行记录、来源已删除标记 | Codex | high | 必测项 2–5、7；第 9 次读取被拒；同一调用重试拿到同一结果；删文档与读取并发；真实 JSON 容量。需要一次真实模型冒烟（多轮先读目录再读段），估计不到 0.5 美元，实施时另行申请测试预算 |
@@ -277,7 +277,7 @@ VOICE（文风画像，必测项 1、2 的画像部分、10 的「画像继续�
 
 1. `storage.objects`、`storage.buckets` 的属主、RLS、策略数、角色授权；现有桶的 public、大小上限、MIME。
 2. `membership_plans.library_storage_bytes` 三个等级的值，每个等级正好一行。
-3. 注销 cron 近 7 天的 `scheduled_job_runs` 运行记录（证明 staging 的每日 cron 真的在跑）。
+3. 现有 cron 近 7 天的 `scheduled_job_runs` 运行记录（证明 staging 的每日 cron 真的在跑）。
 4. staging Supabase Storage 当前版本的签名上传有效期能否缩短（读官方文档和项目设置，不改设置）。
 
 这些结果只用于 LIB-2a 开工前核对，不代替实现阶段在 staging 上的真实上传和删除验证。
