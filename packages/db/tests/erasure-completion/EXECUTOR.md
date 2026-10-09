@@ -20,7 +20,8 @@ manifest table or alternative authority is introduced.
 
 New profile insertion after the migration starts tracked history. Any subsequent
 removal/change of raw attachment references invalidates that proof unless their
-Storage absence was already verified. Existing profiles remain unproven; the
+Storage absence was already verified. Verified subject cleanup preserves the
+other uploader's history too; an integration case then erases that uploader. Existing profiles remain unproven; the
 migration does not infer completeness from empty tables, creation timestamps,
 0196 being present or time elapsed. Unproven history still permits unrelated body
 cleanup, but does not permit Storage/Auth completion. Original ticket/reply rows
@@ -100,7 +101,7 @@ Auth identities, objects or body data. Do not drop proof columns, reset unknown
 history to true, expire a live claim, or restore a purge that loses references.
 
 0196 built SHA-256: `06b95b0bb78bc9345e9d531519fe43ab9516c5db78deab1f66cfced48aa5bce8`.
-0197 final built SHA-256: `f926bc5159e485f42fecfbcdec5e529c78edb3f313f929381a6d5bbbde8a91ee`.
+0197 final built SHA-256: `b9459fdfef450cb49b138c02cd30d2d2a6291d31b84f5f62a2adfe9960df4247`.
 The exact final local delta is 30 added catalog entries and one changed
 function `account_erasure_local_cleanup(uuid,boolean)`; no catalog entries were
 removed. The additions include subject-scoped attachment RPCs and two GIN indexes.

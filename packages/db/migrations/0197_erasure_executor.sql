@@ -38,6 +38,8 @@ BEGIN
  -- A verified erasure removes references only after checking the external objects.
  UPDATE profiles SET erasure_history_complete=false WHERE (id IN (subject,OLD.user_id) OR id::text IN
    (SELECT split_part(path,'/',1) FROM jsonb_array_elements_text(OLD.attachments) path))
+  AND NOT EXISTS(SELECT 1 FROM account_erasure_requests e WHERE e.profile_id=subject
+   AND e.storage_verified_at IS NOT NULL)
   AND NOT EXISTS(SELECT 1 FROM account_erasure_requests e WHERE e.profile_id=profiles.id
    AND e.storage_verified_at IS NOT NULL);
  IF TG_OP='DELETE' THEN RETURN OLD; END IF;

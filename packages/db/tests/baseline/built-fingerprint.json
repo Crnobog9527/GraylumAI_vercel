@@ -2211,7 +2211,7 @@
   "fn:erasure_envelope_guard()": "30f212fdd94c",
   "fn:erasure_envelope_transition(jsonb,jsonb)": "f89531903c49",
   "fn:erasure_history_guard()": "42571672ec12",
-  "fn:erasure_history_lost()": "551fb066d1aa",
+  "fn:erasure_history_lost()": "952e2ddb55e4",
   "fn:erasure_ledger_guard()": "e97a7071de1e",
   "fn:erasure_ledger_metadata(jsonb)": "9c3feee62511",
   "fn:erasure_ledger_value(jsonb,jsonb)": "1d524091db72",

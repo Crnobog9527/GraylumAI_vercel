@@ -40,6 +40,13 @@ export async function runExecutor({db,Client,connectionString,require,runAccount
   assert.equal((await db.query('select count(*)::int n from tickets where id=$1',[first.ticket])).rows[0].n,0);
   await runAccountErasureExecutor(first.client);assert.equal(first.sdk.authDeletes(),1,'completed identity is not dispatched again');
 
+  assert.equal((await db.query('select erasure_history_complete v from profiles where id=$1',[admin])).rows[0].v,true,
+   'verified subject cleanup preserves the other uploader history');
+  const adminSdk=syntheticSdk(require('@supabase/supabase-js').createClient,admin);
+  await db.query('select account_erasure_confirm($1,$2)',[admin,randomUUID()]);
+  const adminDone=await runAccountErasureExecutor({...first.client,storage:adminSdk.client.storage,auth:adminSdk.client.auth});
+  assert.equal(adminDone.completed,1,JSON.stringify(adminDone));assert.equal(adminSdk.authDeletes(),1);
+
   const lost=await fixture();await lost.close();
   const remove=lost.client.storage.from.bind(lost.client.storage);let sends=0;const sentPaths=[];
   lost.client.storage={from(bucket){const api=remove(bucket);const original=api.remove.bind(api);
