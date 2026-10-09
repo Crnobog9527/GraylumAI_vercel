@@ -344,3 +344,36 @@ it('names the failed refund rule from the server reason code and suggests the ri
     expect(errors).toEqual([]);
   } finally { await page.close(); }
 }, 30000);
+
+it('says plainly when an order has no refund record yet, and names status and reject refusals', async () => {
+  const { page, errors } = await open({ status: null });
+  try {
+    const setMode = (name: string, mode: string) => page.evaluate(([n, value]) => {
+      (window as unknown as { mode: Record<string, string> }).mode[n] = value; }, [name, mode]);
+    await page.getByLabel('订单编号').fill(ORDER);
+    await page.getByTestId('monthly-refund-status-button').click();
+    await browserExpect(page.getByTestId('monthly-refund-status-message')).toHaveText('这个订单还没有月付退款记录');
+    await browserExpect(page.getByTestId('monthly-refund-status')).toHaveCount(0);
+
+    await setMode('status', 'code:PAY_REFUND_STATUS_UNAVAILABLE');
+    await page.getByTestId('monthly-refund-status-button').click();
+    await browserExpect(page.getByTestId('monthly-refund-status-message')).toHaveText('暂时无法读取退款进度，请稍后再试');
+
+    await page.getByLabel('工单编号').fill(TICKET);
+    await setMode('reject', 'code:PAY_REFUND_ALREADY_DISPATCHED');
+    await page.getByLabel('拒绝原因').click();
+    await page.getByRole('option', { name: '不符合退款条件' }).click();
+    await page.getByTestId('monthly-refund-reject-button').click();
+    await page.getByTestId('monthly-refund-reject-button-confirm').click();
+    await browserExpect(page.getByTestId('monthly-refund-action-error')).toContainText('已经开始执行');
+
+    await setMode('reject', 'code:PAY_SOMETHING_NEW');
+    await page.getByLabel('拒绝原因').click();
+    await page.getByRole('option', { name: '用户撤回了申请' }).click();
+    await page.getByTestId('monthly-refund-reject-button').click();
+    await page.getByTestId('monthly-refund-reject-button-confirm').click();
+    await browserExpect(page.getByTestId('monthly-refund-action-error')).toContainText('退款证据不足或状态已变化');
+    await browserExpect(page.getByTestId('monthly-refund-action-error')).not.toContainText('PAY_');
+    expect(errors).toEqual([]);
+  } finally { await page.close(); }
+}, 30000);

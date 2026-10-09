@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { expect, it } from 'vitest';
-import { INELIGIBLE_REFUND_CODES, monthlyRefundQuoteRefusal } from './monthlyRefundReasons';
+import { INELIGIBLE_REFUND_CODES, monthlyRefundCodeText, monthlyRefundQuoteRefusal } from './monthlyRefundReasons';
 
 const FALLBACK = '通用说明';
 
@@ -27,4 +27,14 @@ it('suggests rejecting only for codes that mean one definite failed rule', () =>
   expect(monthlyRefundQuoteRefusal(new Error('PAY_REFUND_WINDOW'), FALLBACK)).toMatchObject({ specific: true, ineligible: false });
   expect(monthlyRefundQuoteRefusal(new Error('PAY_REFUND_MONTHLY_SCOPE_REQUIRED'), FALLBACK).ineligible).toBe(false);
   expect(monthlyRefundQuoteRefusal(new Error('PAY_MONTHLY_SCOPE_OR_STATE'), FALLBACK).ineligible).toBe(false);
+});
+
+it('names the status and reject codes added in #759 and nothing else', () => {
+  expect(monthlyRefundCodeText(new Error('PAY_MONTHLY_REJECTION_INVALID'))).toBe('订单范围、工单或拒绝原因不符合要求，请重新核对');
+  expect(monthlyRefundCodeText(new Error('PAY_REFUND_REJECT_UNAVAILABLE'))).toContain('先查看进度');
+  expect(monthlyRefundCodeText(new Error('PAY_REFUND_ORDER_UNKNOWN'))).toBe('找不到这笔订单，请核对订单编号');
+  expect(monthlyRefundCodeText(new Error('PAY_SOMETHING_NEW'))).toBeNull();
+  expect(monthlyRefundCodeText(null)).toBeNull();
+  // None of them suggests rejecting outright.
+  expect(INELIGIBLE_REFUND_CODES).not.toContain('PAY_REFUND_ALREADY_DISPATCHED');
 });

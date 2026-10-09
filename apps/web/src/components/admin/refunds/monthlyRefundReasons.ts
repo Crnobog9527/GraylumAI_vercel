@@ -54,7 +54,7 @@ const REASONS: Record<string, Reason> = {
   PAY_REFUND_ADMIN_REQUIRED: CHECK('当前账号不是有效的管理员'),
   PAY_REFUND_SUBJECT_UNAVAILABLE: CHECK('用户账号状态不可用（可能已注销或停用）'),
   PAY_REFUND_TICKET_MISMATCH: CHECK('工单不是这位用户的账单类工单'),
-  PAY_REFUND_ORDER_UNKNOWN: CHECK('找不到这笔订单'),
+  PAY_REFUND_ORDER_UNKNOWN: CHECK('找不到这笔订单，请核对订单编号'),
   PAY_REFUND_ORDER_UNAVAILABLE: CHECK('这笔订单现在读不到'),
   PAY_REFUND_MAPPING_UNRESOLVED: CHECK('订单和支付商订阅的对应关系无法确认'),
   PAY_REFUND_PROVIDER_HISTORY_INCOMPLETE: CHECK('支付商的历史记录不完整，暂时无法核对'),
@@ -67,6 +67,11 @@ const REASONS: Record<string, Reason> = {
   PAY_REFUND_CHARGE_MISMATCH: CHECK('扣款记录对不上'),
   PAY_REFUND_PAYMENT_ORDER_UNRESOLVED: CHECK('付款和订单的对应关系无法确认'),
   PAY_REFUND_PAYMENT_TIME_UNRESOLVED: CHECK('付款时间无法确认'),
+  // Status and reject answers since #759 (table in #759 comment 6084918439).
+  PAY_REFUND_STATUS_UNAVAILABLE: CHECK('暂时无法读取退款进度，请稍后再试'),
+  PAY_REFUND_REJECT_UNAVAILABLE: CHECK('暂时无法完成操作，请先查看进度再决定下一步'),
+  PAY_MONTHLY_REJECTION_INVALID: CHECK('订单范围、工单或拒绝原因不符合要求，请重新核对'),
+  PAY_REFUND_ALREADY_DISPATCHED: CHECK('这笔退款已经开始执行，或者已有的退款记录类型不同，不能在这里拒绝'),
 };
 
 /** Codes that alone prove a refund rule failed; everything else needs a person to check first. */
@@ -80,4 +85,10 @@ export function monthlyRefundQuoteRefusal(error: unknown, fallback: string): Quo
   const reason = Object.hasOwn(REASONS, code) ? REASONS[code] : null;
   if (!reason) return { text: fallback, specific: false, ineligible: false };
   return { text: reason.text, specific: true, ineligible: reason.ineligible === true };
+}
+
+/** Plain text for a known code from any refund call (status, reject, quote); null for anything else. */
+export function monthlyRefundCodeText(error: unknown): string | null {
+  const code = error && typeof error === 'object' && 'message' in error ? String(error.message) : '';
+  return Object.hasOwn(REASONS, code) ? REASONS[code].text : null;
 }
