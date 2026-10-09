@@ -7,7 +7,7 @@ import { createErasureStorageAdapter } from './storage';
 const actor = '00000000-0000-4000-8000-000000000001';
 const path = (name: string) => `${actor}/${name}.png`;
 const scope = () => ({ bucket: 'ticket-attachments' as const, signal: new AbortController().signal });
-function setup(names = ['a', 'b', 'c', 'd', 'e'], remotePageSize = 1000) {
+function setup(names = ['a', 'b', 'c', 'd', 'e'], remotePageSize = 1000, boundedPrefix = false) {
   const objects = new Set(names.map(path));
   const fetcher = vi.fn<typeof fetch>(async (url, init) => {
     const body = JSON.parse(String(init?.body));
@@ -32,7 +32,7 @@ function setup(names = ['a', 'b', 'c', 'd', 'e'], remotePageSize = 1000) {
   const client = createClient('https://erasure.invalid', 'synthetic-key', {
     global: { fetch: fetcher }, auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
   });
-  return { fetcher, objects, transport: createErasureStorageTransport(client) };
+  return { fetcher, objects, transport: createErasureStorageTransport(client, { boundedPrefix }) };
 }
 
 afterEach(() => vi.useRealTimers());
@@ -195,4 +195,15 @@ describe('complete bounded remote enumeration before returning candidates', () =
     expect(f.objects.size).toBe(905);
     expect(JSON.parse(String(f.fetcher.mock.calls[start][1]?.body))).not.toHaveProperty('cursor');
   });
+});
+
+it('production prefix pages make progress above 5000 objects without whole-prefix materialization', async () => {
+  const f = setup(names(5001), 1000, true);
+  expect(await f.transport.listPrefix(prefixInput())).toEqual({ paths: names(100).map(path), nextAfterPath: path('n00099') });
+  expect(f.fetcher).toHaveBeenCalledOnce();
+  await f.transport.remove({ ...scope(), paths: names(100).map(path) });
+  expect(await f.transport.listPrefix({ ...prefixInput(), afterPath: path('n00099') })).toEqual({
+    paths: names(200).slice(100).map(path), nextAfterPath: path('n00199'),
+  });
+  expect(f.objects.size).toBe(4901);
 });

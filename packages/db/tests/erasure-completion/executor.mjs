@@ -56,6 +56,18 @@ export async function runExecutor({db,Client,connectionString,require,runAccount
   assert.equal(claimRecovered.completed,1,JSON.stringify(claimRecovered));assert.equal(claimed.sdk.authDeletes(),1);
   assert.equal((await claimed.row()).executor_token,null);
 
+  for(const committed of [false,true]){
+   const finished=await fixture();await finished.close();let lostFinish=false;
+   const finishRpc=finished.client.rpc.bind(finished.client);
+   finished.client.rpc=(name,args)=>{const promise=(async()=>{
+    if(name==='account_erasure_executor_finish'&&!lostFinish){lostFinish=true;if(committed)await finishRpc(name,args);
+     return {data:null,error:{message:'synthetic uncertain finish'}};}
+    return finishRpc(name,args);})();promise.abortSignal=()=>promise;return promise;};
+   const result=await runAccountErasureExecutor(finished.client);
+   assert.equal(result.failed,0,JSON.stringify(result));assert.equal(result.completed,1);
+   assert.equal((await finished.row()).executor_token,null);assert.equal(finished.sdk.authDeletes(),1);
+  }
+
   const lost=await fixture();await lost.close();
   const remove=lost.client.storage.from.bind(lost.client.storage);let sends=0;const sentPaths=[];
   lost.client.storage={from(bucket){const api=remove(bucket);const original=api.remove.bind(api);
@@ -134,6 +146,23 @@ export async function runExecutor({db,Client,connectionString,require,runAccount
   assert.equal((await base.rpc('account_erasure_executor_finish',{...finish,p_token:randomUUID(),p_release:true})).data.recorded,false);
   assert.equal((await base.rpc('account_erasure_executor_finish',{...finish,p_release:true})).data.recorded,true);
   assert.equal((await runAccountErasureExecutor(locked.client)).completed,1);
+
+  const shared=await fixture();
+  await db.query("insert into tickets(user_id,title,description,attachments) values($1,'unrelated','keep',$2)",
+   [unrelated,JSON.stringify([shared.actor+'/a.png'])]);
+  await db.query("insert into ticket_replies(ticket_id,user_id,content) values($1,$2,'private reply')",[shared.ticket,shared.actor]);
+  await shared.close();assert.ok((await runAccountErasureExecutor(shared.client)).pending>0);
+  assert.ok(shared.sdk.objects.has(shared.actor+'/a.png'));assert.equal(shared.sdk.authDeletes(),0);
+  const scrubbed=(await db.query('select title,description,attachments from tickets where id=$1',[shared.ticket])).rows[0];
+  assert.equal(scrubbed.title,'');assert.equal(scrubbed.description,'');assert.deepEqual(scrubbed.attachments,[shared.actor+'/a.png']);
+  assert.equal((await db.query('select content from ticket_replies where ticket_id=$1',[shared.ticket])).rows[0].content,'');
+  await assert.rejects(db.query("update tickets set title='refill' where id=$1",[shared.ticket]),/ACCOUNT_ERASURE/);
+
+  const large=await fixture();for(let n=0;n<5001;n++)large.sdk.objects.add(large.actor+'/large-'+n+'.png');
+  await large.close();assert.ok((await runAccountErasureExecutor(large.client)).pending>0);
+  const left=large.sdk.objects.size;assert.ok(left<5004&&left>0,'large prefix makes bounded deletion progress');
+  await large.retry();await runAccountErasureExecutor(large.client);assert.ok(large.sdk.objects.size<left);
+  assert.equal(large.sdk.authDeletes(),0);
 
   for(const role of ['anon','authenticated']) {
    await service.query('SET ROLE '+role);

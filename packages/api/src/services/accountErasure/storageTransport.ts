@@ -18,13 +18,16 @@ function check(target: string, signal: AbortSignal) {
   if (target !== bucket || signal.aborted) throw failure();
 }
 
-/** The pinned SDK passes nextCursor unchanged to listV2's cursor option. Collect every
+/** Production boundedPrefix exposes a verified sorted page without materializing the
+ * whole prefix; each read restarts after deletion. Exact-key absence still needs a
+ * complete read. The legacy default preserves complete inventory for injected tests.
+ * The pinned SDK passes nextCursor unchanged to listV2's cursor option. Collect every
  * page before exposing candidates: there is no deletion during this transport read.
  * Each subsequent read starts at page one; remote cursors never survive a read/deletion.
  * This is bounded enumeration, NOT a provider snapshot or concurrent-writer exclusion.
  * The host still owns upload/reference quiescence and authoritative classification. */
-export function createErasureStorageTransport(client: Client): ErasureStorageTransport {
-  const collect = async (prefix: string, signal: AbortSignal) => {
+export function createErasureStorageTransport(client: Client, options: { boundedPrefix?: boolean } = {}): ErasureStorageTransport {
+  const collect = async (prefix: string, signal: AbortSignal, take?: { after: string | null; limit: number }) => {
     const paths = new Set<string>();
     const identities = new Set<string>();
     const cursors = new Set<string>();
@@ -52,12 +55,18 @@ export function createErasureStorageTransport(client: Client): ErasureStorageTra
       }
       const next = parsed.data.nextCursor;
       if (!parsed.data.objects.length || !next || cursors.has(next)) throw failure();
+      if (take) {
+        const keys = [...paths];
+        if (keys.some((key, index) => index > 0 && key <= keys[index - 1])) throw failure();
+        const candidates = keys.filter(key => take.after === null || key > take.after);
+        if (candidates.length > take.limit) return candidates.slice(0, take.limit + 1);
+      }
       cursors.add(next);
       cursor = next;
     }
     throw failure();
   };
-  const read = async (prefix: string, signal: AbortSignal) => {
+  const read = async (prefix: string, signal: AbortSignal, take?: { after: string | null; limit: number }) => {
     check(bucket, signal);
     const controller = new AbortController();
     const abort = () => controller.abort();
@@ -68,7 +77,7 @@ export function createErasureStorageTransport(client: Client): ErasureStorageTra
     });
     try {
       // Also bound a transport that ignores abort. A late response cannot advance a page.
-      return await Promise.race([collect(prefix, controller.signal), interrupted]);
+      return await Promise.race([collect(prefix, controller.signal, take), interrupted]);
     } finally {
       clearTimeout(timer);
       signal.removeEventListener('abort', abort);
@@ -83,7 +92,8 @@ export function createErasureStorageTransport(client: Client): ErasureStorageTra
         || afterPath !== null && (!afterPath.startsWith(prefix) || !isCanonicalErasureAttachment(afterPath))) {
         throw failure();
       }
-      const all = (await read(prefix, signal)).filter(path => afterPath === null || path > afterPath);
+      const selected = await read(prefix, signal, options.boundedPrefix ? { after: afterPath, limit } : undefined);
+      const all = selected.filter(path => afterPath === null || path > afterPath);
       const paths = all.slice(0, limit);
       return { paths, nextAfterPath: all.length > paths.length ? paths[paths.length - 1] : null };
     },

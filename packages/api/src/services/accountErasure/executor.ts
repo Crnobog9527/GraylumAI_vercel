@@ -31,6 +31,29 @@ async function claimWithObservation(client: SupabaseClient, token: string) {
   }
 }
 
+async function finishWithObservation(client: SupabaseClient, args: {
+  p_profile_id: string; p_request_id: string; p_token: string; p_codes: string[]; p_release: boolean;
+}) {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const saved = await client.rpc('account_erasure_executor_finish', args).abortSignal(AbortSignal.timeout(2000));
+      if (saved.error || !z.object({ recorded: z.literal(true) }).strict().safeParse(saved.data).success) throw new Error();
+      return;
+    } catch {
+      if (!args.p_release) throw new Error('ERASURE_FINISH_UNKNOWN');
+      const result = await client.from('account_erasure_requests').select('request_id,executor_token', { count: 'exact' })
+        .eq('profile_id', args.p_profile_id).limit(2).abortSignal(AbortSignal.timeout(2000));
+      if (result.error || result.count !== 1) throw new Error('ERASURE_FINISH_UNKNOWN');
+      const [row] = z.array(z.object({ request_id: z.string().uuid(), executor_token: z.string().uuid().nullable() }).strict())
+        .length(1).parse(result.data);
+      if (row.request_id !== args.p_request_id) throw new Error('ERASURE_FINISH_UNKNOWN');
+      if (row.executor_token !== args.p_token) return;
+      // Actual I/O is idle and the original claim is still present. Retry only its CAS release.
+    }
+  }
+  throw new Error('ERASURE_FINISH_UNKNOWN');
+}
+
 /** Called by the existing authenticated cron. Each RPC is a fresh transaction.
  * Claims never expire: after a crashed/unfinished worker, verify its external I/O
  * before releasing the original token. No retry identity or second queue is created. */
@@ -52,7 +75,7 @@ async function runOne(client: SupabaseClient, deadline: number, drainDeadline: n
     };
     const host = createAccountErasureHost({
       profileId: claim.profileId, requestId: claim.requestId, client, deadline,
-      storage: createErasureStorageTransport(client), auth: createErasureAuthAdapter(client, claim.profileId),
+      storage: createErasureStorageTransport(client, { boundedPrefix: true }), auth: createErasureAuthAdapter(client, claim.profileId),
       verifyRetainedHistory: proof, verifyQuiescence: proof, deferStorageProof: true, scopedManifest: true, executorToken: token,
     });
     const result = await host.run();
@@ -60,12 +83,9 @@ async function runOne(client: SupabaseClient, deadline: number, drainDeadline: n
     else summary.pending++;
     const idle = host.isIdle() || await host.waitForIdle(Math.max(0, drainDeadline - Date.now()));
     const codes = idle ? result.errorCodes : [...result.errorCodes, 'ERASURE_EXECUTOR_IO_PENDING'];
-    const saved = await client.rpc('account_erasure_executor_finish', {
+    await finishWithObservation(client, {
       ...binding, p_codes: [...new Set(codes)].slice(0, 20), p_release: idle,
-    }).abortSignal(AbortSignal.timeout(2000));
-    if (saved.error || !z.object({ recorded: z.literal(true) }).strict().safeParse(saved.data).success) {
-      summary.failed++;
-    }
+    });
   } catch { summary.failed++; }
   return summary;
 }

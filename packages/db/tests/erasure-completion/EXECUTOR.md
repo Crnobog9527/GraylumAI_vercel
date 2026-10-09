@@ -5,8 +5,9 @@ authentication and service client, every five minutes. The billing route remains
 at 04:00 UTC. Sharing its 60-second invocation would either run conflicting DB
 work against the transaction barrier or reduce the existing financial recovery
 budget. This separate path reuses Vercel cron; it is not a new scheduler.
-Each invocation processes at most 20 subjects within 45 seconds, using fresh RPC
-transactions. `transactions_pending`, unknown uploads/history, partial failures,
+Each invocation processes at most 20 subjects with a 45-second work budget,
+plus bounded reconciliation reads within the route's 60-second limit, using fresh
+RPC transactions. `transactions_pending`, unknown uploads/history, partial failures,
 unresolved financial evidence and remaining rows report pending, never completed.
 Only the existing financial recovery path queries providers; this executor never
 prepares or dispatches a model call, creates a refund, or cancels a subscription.
@@ -44,6 +45,8 @@ original Auth/object states and prove the old worker cannot continue before any
 approved release. Unknown Auth deletion retains the existing once-only intent;
 subsequent passes only read the original identity and do not send another delete.
 The executor's diagnostic columns do not overwrite financial/Auth diagnostics.
+An uncertain idle-claim release reads the original request first; only a still-owned
+claim can retry the same CAS release, while an already released claim is not resent.
 
 A five-minute cadence reserves retry opportunities before the 24-hour objective;
 20 subjects/45 seconds bounds each invocation (at most 5,760 attempts/day).
@@ -69,7 +72,11 @@ bounded to two seconds; cumulative normal network latency therefore makes progre
 instead of repeatedly losing a 50-object page. The processor enforces the same
 separate pass budget and its overall deadline.
 A 5,001-row unrelated ticket and reply fixture cannot
-block a small subject or get deleted by its cleanup. No staging account has been closed and no remote DB was accessed.
+block a small subject or get deleted by its cleanup. Storage prefix enumeration
+also exposes bounded sorted pages before exhausting the whole prefix, so 5,001
+objects can make progress. Reads restart after deletion; provider cursors are not
+reused across mutations. Shared objects/references remain for review, while bounded
+ticket/reply body scrubbing proceeds independently and rejects body refill. No staging account has been closed and no remote DB was accessed.
 No progress capability is issued, read or exposed; the retired query page stays out
 of scope. Retained financial rows and the inaccessible original profile ID remain
 subject to the existing three-year rule; expiry cleanup is not added here.
@@ -104,9 +111,9 @@ Auth identities, objects or body data. Do not drop proof columns, reset unknown
 history to true, expire a live claim, or restore a purge that loses references.
 
 0196 built SHA-256: `06b95b0bb78bc9345e9d531519fe43ab9516c5db78deab1f66cfced48aa5bce8`.
-0197 final built SHA-256: `b9459fdfef450cb49b138c02cd30d2d2a6291d31b84f5f62a2adfe9960df4247`.
-The exact final local delta is 30 added catalog entries and one changed
-function `account_erasure_local_cleanup(uuid,boolean)`; no catalog entries were
+0197 final built SHA-256: `b7f83e2da709d6b42a8d99d83124114c842baefc7f47e6dba9d10bf2f435adb0`.
+The exact final local delta is 30 added catalog entries and two changed
+functions `account_erasure_local_cleanup(uuid,boolean)` and `account_erasure_ticket_guard()`; no catalog entries were
 removed. The additions include subject-scoped attachment RPCs and two GIN indexes.
 Final canonical replay and completion runner each passed 200/200 build steps,
 131 historical repeat checks and container cleanup. These are local fingerprints,

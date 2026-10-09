@@ -104,3 +104,22 @@ it('reconciles a committed claim after losing its response with the original tok
   expect(database.query.eq).toHaveBeenCalledWith('executor_token', token);
   expect(calls.find(([name]) => name === 'account_erasure_executor_finish')![1].p_token).toBe(token);
 });
+
+it.each([false, true])('observes an uncertain finish before retrying its original idle claim (committed=%s)', async committed => {
+  const database = client(); const original = database.rpc.getMockImplementation()!; let lost = false;
+  database.rpc.mockImplementation(name => {
+    if (name === 'account_erasure_executor_finish' && !lost) {
+      lost = true;
+      const promise = Promise.resolve({ data: null, error: { message: 'synthetic uncertainty' } });
+      return Object.assign(promise, { abortSignal: () => promise }) as never;
+    }
+    return original(name);
+  });
+  database.observed.mockImplementation(async () => {
+    const calls = database.rpc.mock.calls as unknown as Array<[string, Record<string, unknown>]>;
+    const token = calls.find(([name]) => name === 'account_erasure_executor_claim')![1].p_token;
+    return { data: [{ request_id: request, executor_token: committed ? null : token }], count: 1, error: null };
+  });
+  expect((await runAccountErasureExecutor(database as never)).failed).toBe(0);
+  expect(database.rpc.mock.calls.filter(([name]) => name === 'account_erasure_executor_finish')).toHaveLength(committed ? 1 : 2);
+});

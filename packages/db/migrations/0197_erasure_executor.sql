@@ -64,6 +64,39 @@ BEGIN
  END IF;
 END $$;
 
+-- Blank only body fields while preserving attachment authority until absence proof.
+DO $$
+DECLARE source text; needle text;
+BEGIN
+ source:=pg_get_functiondef('public.account_erasure_ticket_guard()'::regprocedure);
+ needle:=' -- The service-only retention function';
+ IF position('-- executor body scrub' IN source)=0 THEN
+  IF position(needle IN source)=0 THEN RAISE EXCEPTION 'ERASURE_GUARD_SOURCE_MISMATCH'; END IF;
+  EXECUTE replace(source,needle,$patch$ -- executor body scrub
+ IF TG_OP='UPDATE' AND (EXISTS(SELECT 1 FROM account_erasure_requests WHERE profile_id=subject)
+  OR EXISTS(SELECT 1 FROM account_erasure_requests WHERE profile_id=OLD.user_id)) THEN
+  IF TG_TABLE_NAME='tickets' THEN
+   IF NEW.title='' AND NEW.description='' AND to_jsonb(NEW)-ARRAY['title','description']=to_jsonb(OLD)-ARRAY['title','description'] THEN RETURN NEW; END IF;
+  ELSE
+   IF NEW.content='' AND to_jsonb(NEW)-'content'=to_jsonb(OLD)-'content' THEN RETURN NEW; END IF;
+  END IF;
+ END IF;
+$patch$||needle);
+ END IF;
+ source:=pg_get_functiondef('public.account_erasure_local_cleanup(uuid,boolean)'::regprocedure);
+ needle:=' IF p_storage_verified AND NOT EXISTS';
+ IF position('-- executor body scrub' IN source)=0 THEN
+  IF position(needle IN source)=0 THEN RAISE EXCEPTION 'ERASURE_CLEANUP_SOURCE_MISMATCH'; END IF;
+  EXECUTE replace(source,needle,$patch$ -- executor body scrub
+ UPDATE tickets SET title='',description='' WHERE ctid IN (SELECT ctid FROM tickets
+  WHERE user_id=p_profile_id AND (title<>'' OR description<>'') LIMIT 100 FOR UPDATE SKIP LOCKED);
+ UPDATE ticket_replies SET content='' WHERE ctid IN (SELECT r.ctid FROM ticket_replies r
+  WHERE content<>'' AND (r.user_id=p_profile_id OR EXISTS(SELECT 1 FROM tickets t WHERE t.id=r.ticket_id AND t.user_id=p_profile_id))
+  LIMIT 100 FOR UPDATE OF r SKIP LOCKED);
+$patch$||needle);
+ END IF;
+END $$;
+
 CREATE OR REPLACE FUNCTION public.account_erasure_executor_claim(p_token uuid)
 RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
 DECLARE r public.account_erasure_requests;
