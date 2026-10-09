@@ -189,3 +189,16 @@ it('the same requestId replays the existing execution before any one-report chec
   expect(await service.start(startInput)).toEqual(replayed);
   expect(rpc).toHaveBeenCalledOnce();
 });
+
+it.each([
+  ['RUNTIME_STAGING_MODEL_NOT_APPROVED', 'REPORT_MODEL_ADMISSION_REQUIRED'],
+  ['RUNTIME_PRICE_SNAPSHOT_MISSING', 'REPORT_MODEL_PRICING_UNAVAILABLE'],
+  ['RUNTIME_PRICE_INCREASED', 'REPORT_MODEL_PRICING_UNAVAILABLE'],
+  ['RUNTIME_MODEL_CAPABILITY_UNVERIFIED', 'REPORT_MODEL_UNAVAILABLE'],
+  ['RUNTIME_PAYG_PROFILE_REQUIRED', 'REPORT_MODEL_ADMISSION_REQUIRED'],
+  ['BILL2_START_THRESHOLD_UNCONFIGURED', 'REPORT_MODEL_ADMISSION_REQUIRED'],
+  ['RUNTIME_REASONING_CONFIG_INVALID', 'REPORT_MODEL_ADMISSION_REQUIRED'],
+  ['private database failure', 'REPORT_UNAVAILABLE'],
+])('report boundary maps %s to a stable public code', (internal, expected) => {
+  expect(() => reportError(new Error(internal))).toThrow(expected);
+});
