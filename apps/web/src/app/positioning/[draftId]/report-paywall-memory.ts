@@ -56,8 +56,12 @@ export function useReportPaywallMemory(input: { draftId: string; roundId: string
       setRemembered(true);
     }
   }, [input.refusedForMembership, input.hasReport, key]);
-  const entitlements = trpc.user.getEntitlements.useQuery(undefined, { enabled: remembered && !input.hasReport, staleTime: 0 });
-  const nowPaid = entitlements.data?.level === "pro" || entitlements.data?.level === "gold";
+  const entitlements = trpc.user.getEntitlements.useQuery(undefined,
+    { enabled: remembered && !input.hasReport, staleTime: 0, refetchOnMount: "always" });
+  // Only a read made after this page opened, and finished, may clear the flag: a cached `pro` from
+  // before an expiry or refund must not undo a refusal the server has just given.
+  const fresh = entitlements.isFetchedAfterMount && !entitlements.isFetching && entitlements.isSuccess;
+  const nowPaid = fresh && (entitlements.data?.level === "pro" || entitlements.data?.level === "gold");
   useEffect(() => {
     if (nowPaid || input.hasReport) {
       writePaywallFlag(sessionStore(), key, false);

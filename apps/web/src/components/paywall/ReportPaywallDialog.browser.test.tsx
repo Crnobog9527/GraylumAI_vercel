@@ -24,7 +24,9 @@ beforeAll(async () => {
       runtime: {reportAvailable: {useQuery: () => q({enabled: true})}},
       user: {getEntitlements: {useQuery: (_input, options) => {
         if (options?.enabled) window.entitlementReads = (window.entitlementReads ?? 0) + 1;
-        return q(options?.enabled ? window.entitlements : undefined);
+        const fresh = window.entitlementsFresh !== false;
+        return {...q(options?.enabled ? window.entitlements : undefined), isSuccess: Boolean(options?.enabled),
+          isFetchedAfterMount: Boolean(options?.enabled) && fresh, isFetching: Boolean(options?.enabled) && !fresh};
       }}},
       settings: {getMembershipPlans: {useQuery: () => window.plansFail ? {data: window.stalePlans, isLoading: false, isError: true}
         : q(window.plans)}},
@@ -258,3 +260,15 @@ it('remembers a membership refusal in this tab, and never reads membership witho
     await second.page.close();
   } finally { if (!page.isClosed()) await page.close(); }
 }, 30000);
+
+it('keeps the remembered paywall while only a cached paid level is known', async () => {
+  // A cached `pro` from before an expiry, while the fresh read is still running: must not clear the flag.
+  const { page, errors } = await open({ sessionFlag: true, entitlements: { level: 'pro' }, entitlementsFresh: false,
+    report: { executionId: null, refusal: null, offer: 'start' } });
+  try {
+    await browserExpect(page.getByTestId('report-paywall')).toBeVisible();
+    expect(await page.evaluate(() => sessionStorage.getItem('opc-report-paywall:d:r'))).toBe('membership');
+    expect(await page.evaluate('window.starts ?? 0')).toBe(0);
+    expect(errors).toEqual([]);
+  } finally { await page.close(); }
+}, 20000);
