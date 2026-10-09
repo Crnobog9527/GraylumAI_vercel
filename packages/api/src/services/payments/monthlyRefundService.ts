@@ -70,12 +70,18 @@ export async function approveMonthlyRefund(db: MonthlyDb, stripe: MonthlyStripe,
 
 export async function rejectMonthlyRefund(db: MonthlyDb, actor: string,
   input: { orderId: string; ticketId: string; reason: string }) {
+  const { data, error } = await db.from('payment_orders').select('id').eq('id', input.orderId).maybeSingle();
+  if (error) throw new Error('PAY_REFUND_REJECT_UNAVAILABLE');
+  if (!data) throw new Error('PAY_REFUND_ORDER_UNKNOWN');
   return rpc(db, 'pay_common_monthly_refund_reject', { p_actor: actor, p_order: input.orderId,
     p_ticket: input.ticketId, p_reason: input.reason });
 }
 export async function monthlyRefundStatus(db: MonthlyDb, orderId: string) {
-  const { data, error } = await db.from('payment_orders').select('refund_approval').eq('id', orderId).single();
-  evidence(!error && data?.refund_approval?.kind === 'monthly_first_purchase');
+  const { data, error } = await db.from('payment_orders').select('refund_approval').eq('id', orderId).maybeSingle();
+  if (error) throw new Error('PAY_REFUND_STATUS_UNAVAILABLE');
+  if (!data) throw new Error('PAY_REFUND_ORDER_UNKNOWN');
+  if (data.refund_approval === null) return null;
+  evidence(data.refund_approval?.kind === 'monthly_first_purchase');
   return data.refund_approval;
 }
 

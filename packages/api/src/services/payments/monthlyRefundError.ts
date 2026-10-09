@@ -44,9 +44,17 @@ function message(error: unknown) {
   return error && typeof error === 'object' && 'message' in error ? error.message : null;
 }
 export function monthlyRefundQuoteError(error: unknown) {
+  return monthlyRefundError(error, 'quote');
+}
+const rejectionCodes = new Set([
+  'PAY_REFUND_ORDER_UNKNOWN', 'PAY_REFUND_ADMIN_REQUIRED',
+  'PAY_MONTHLY_REJECTION_INVALID', 'PAY_REFUND_ALREADY_DISPATCHED',
+]);
+export function monthlyRefundError(error: unknown, operation: 'quote' | 'status' | 'reject') {
   // Unwrap only our own transaction wrapper, never arbitrary nested provider diagnostics.
   const reason = message(error instanceof Error && error.message === 'PAY_MONTHLY_TRANSACTION_FAILED' ? error.cause : error);
-  const known = typeof reason === 'string' && publicCodes.has(reason);
+  const known = typeof reason === 'string' && (operation === 'quote' ? publicCodes.has(reason)
+    : operation === 'reject' ? rejectionCodes.has(reason) : reason === 'PAY_REFUND_ORDER_UNKNOWN');
   return new TRPCError({ code: known ? 'BAD_REQUEST' : 'INTERNAL_SERVER_ERROR',
-    message: known ? reason : 'PAY_REFUND_QUOTE_UNAVAILABLE' });
+    message: known ? reason : `PAY_REFUND_${operation.toUpperCase()}_UNAVAILABLE` });
 }

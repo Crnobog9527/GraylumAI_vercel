@@ -2,7 +2,7 @@
 import { z } from 'zod';
 import { adminProcedure } from '../trpc';
 import { createSafeInternalError } from '../lib/publicError';
-import { monthlyRefundQuoteError } from '../services/payments/monthlyRefundError';
+import { monthlyRefundError } from '../services/payments/monthlyRefundError';
 import { getStripeClient } from '../services/stripe';
 import { quoteMonthlyRefund, approveMonthlyRefund, executeMonthlyRefund, monthlyRefundStatus, rejectMonthlyRefund }
   from '../services/payments/monthlyRefundService';
@@ -13,16 +13,16 @@ import {
 
 const request = z.object({ orderId: z.string().uuid(), ticketId: z.string().uuid(),
   feePermitted: z.enum(['confirmed', 'not_permitted']), feeEvidence: z.string().trim().min(1).max(160) }).strict();
-async function safe<T>(action: () => Promise<T>, quote = false) {
+async function safe<T>(action: () => Promise<T>, operation?: 'quote' | 'status' | 'reject') {
   try { return await action(); } catch (error) {
-    if (quote) throw monthlyRefundQuoteError(error);
+    if (operation) throw monthlyRefundError(error, operation);
     throw createSafeInternalError(error, '退款证据不足或状态已变化，请重新核对订单与工单');
   }
 }
 const monthlyRequest = request.extend({ feeEvidence: z.string().regex(/^[A-Za-z0-9:._/-]{1,160}$/) });
 export const adminRefundProcedures = {
   quoteMonthlyRefund: adminProcedure.input(monthlyRequest).query(({ ctx, input }) =>
-    safe(() => quoteMonthlyRefund(ctx.supabaseAdmin, getStripeClient(), ctx.profileId, input), true)),
+    safe(() => quoteMonthlyRefund(ctx.supabaseAdmin, getStripeClient(), ctx.profileId, input), 'quote')),
   approveMonthlyRefund: adminProcedure.input(monthlyRequest.extend({
     versionHash: z.string().regex(/^[a-f0-9]{64}$/), localVersion: z.string().regex(/^[a-f0-9]{32}$/),
   })).mutation(({ ctx, input }) => safe(() => approveMonthlyRefund(ctx.supabaseAdmin, getStripeClient(), ctx.profileId, input))),
@@ -31,9 +31,9 @@ export const adminRefundProcedures = {
       safe(() => executeMonthlyRefund(ctx.supabaseAdmin, getStripeClient(), ctx.profileId, input.orderId, input.intentId))),
   rejectMonthlyRefund: adminProcedure.input(z.object({ orderId: z.string().uuid(), ticketId: z.string().uuid(),
     reason: z.enum(['ineligible', 'evidence_missing', 'customer_withdrew']),
-  }).strict()).mutation(({ ctx, input }) => safe(() => rejectMonthlyRefund(ctx.supabaseAdmin, ctx.profileId, input))),
+  }).strict()).mutation(({ ctx, input }) => safe(() => rejectMonthlyRefund(ctx.supabaseAdmin, ctx.profileId, input), 'reject')),
   getMonthlyRefundStatus: adminProcedure.input(z.object({ orderId: z.string().uuid() }).strict())
-    .query(({ ctx, input }) => safe(() => monthlyRefundStatus(ctx.supabaseAdmin, input.orderId))),
+    .query(({ ctx, input }) => safe(() => monthlyRefundStatus(ctx.supabaseAdmin, input.orderId), 'status')),
   previewSubscriptionRefund: adminProcedure.input(request.extend({
     feePermitted: z.enum(['confirmed', 'not_permitted', 'unknown']),
   })).query(({ ctx, input }) =>

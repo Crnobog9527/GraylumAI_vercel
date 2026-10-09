@@ -30,6 +30,7 @@ afterEach(() => vi.clearAllMocks());
 async function expectError(action: Promise<unknown>, message: string, status: number) {
   const error = await action.catch(error => error);
   expect(error).toBeInstanceOf(TRPCError);
+  if (!(error instanceof TRPCError)) throw new Error('Expected a tRPC error');
   expect(error.message).toBe(message);
   expect(getHTTPStatusCodeFromError(error)).toBe(status);
   expect(error.cause).toBeUndefined();
@@ -53,4 +54,62 @@ describe('monthly refund status and rejection through real admin route/service',
     expect(f.write).not.toHaveBeenCalled();
     expect(stripeClient).not.toHaveBeenCalled();
   });
+  it('distinguishes an unknown order from an existing order with no record', async () => {
+    const f = setup(null);
+    await expectError(f.caller.getMonthlyRefundStatus({ orderId }), 'PAY_REFUND_ORDER_UNKNOWN', 400);
+    expect(f.rpc).not.toHaveBeenCalled();
+  });
+  it.each(['approved', 'rejected', 'succeeded'])('preserves an existing %s record', async status => {
+    const record = { kind: 'monthly_first_purchase', id: 'intent', status };
+    const f = setup({ id: orderId, refund_approval: record });
+    expect(await f.caller.getMonthlyRefundStatus({ orderId })).toEqual(record);
+    expect(f.write).not.toHaveBeenCalled();
+  });
+  it.each(['read-error', 'thrown-error', 'wrong-kind', 'missing-field'])
+    ('does not turn %s into an empty status', async scenario => {
+      const f = setup({ id: orderId, refund_approval: { kind: 'package' } });
+      if (scenario === 'read-error') f.read.mockResolvedValue({ data: null, error: { message: 'PRIVATE_DIAGNOSTIC' } });
+      if (scenario === 'thrown-error') f.read.mockRejectedValue(new Error('PRIVATE_DIAGNOSTIC'));
+      if (scenario === 'missing-field') f.read.mockResolvedValue({ data: { id: orderId }, error: null });
+      await expectError(f.caller.getMonthlyRefundStatus({ orderId }), 'PAY_REFUND_STATUS_UNAVAILABLE', 500);
+      expect(f.rpc).not.toHaveBeenCalled();
+    });
+  it('does not call rejection RPC when the existence read fails', async () => {
+    const f = setup();
+    f.read.mockResolvedValue({ data: null, error: { message: 'PRIVATE_DIAGNOSTIC' } });
+    await expectError(f.caller.rejectMonthlyRefund(rejection), 'PAY_REFUND_REJECT_UNAVAILABLE', 500);
+    expect(f.rpc).not.toHaveBeenCalled();
+    expect(f.write).not.toHaveBeenCalled();
+  });
+  it.each(['PAY_MONTHLY_REJECTION_INVALID', 'PAY_REFUND_ALREADY_DISPATCHED', 'PAY_REFUND_ADMIN_REQUIRED'])
+    ('preserves the exact transaction refusal %s', async message => {
+      const f = setup();
+      f.rpc.mockResolvedValue({ data: null, error: { message, details: 'PRIVATE_DIAGNOSTIC' } });
+      await expectError(f.caller.rejectMonthlyRefund(rejection), message, 400);
+      expect(f.write).not.toHaveBeenCalled();
+    });
+  it.each(['PRIVATE_DIAGNOSTIC', 'PAY_MONTHLY_REJECTION_INVALID extra'])
+    ('sanitizes unknown transaction failure %s', async message => {
+      const f = setup();
+      f.rpc.mockResolvedValue({ data: null, error: { message } });
+      await expectError(f.caller.rejectMonthlyRefund(rejection), 'PAY_REFUND_REJECT_UNAVAILABLE', 500);
+    });
+  it('preserves the successful rejection transaction and its inputs', async () => {
+    const f = setup();
+    const record = { kind: 'monthly_first_purchase', status: 'rejected' };
+    f.rpc.mockResolvedValue({ data: record, error: null });
+    expect(await f.caller.rejectMonthlyRefund(rejection)).toEqual(record);
+    expect(f.rpc).toHaveBeenCalledExactlyOnceWith('pay_common_monthly_refund_reject', {
+      p_actor: actor, p_order: orderId, p_ticket: rejection.ticketId, p_reason: rejection.reason,
+    });
+    expect(stripeClient).not.toHaveBeenCalled();
+  });
+  it('denies non-admins before reading refund data or invoking RPC', async () => {
+    const f = setup(null, 'user');
+    await expect(f.caller.getMonthlyRefundStatus({ orderId })).rejects.toMatchObject({ code: 'FORBIDDEN' });
+    await expect(f.caller.rejectMonthlyRefund(rejection)).rejects.toMatchObject({ code: 'FORBIDDEN' });
+    expect(f.from).not.toHaveBeenCalled();
+    expect(f.rpc).not.toHaveBeenCalled();
+  });
+
 });
