@@ -18,7 +18,10 @@ function formatDate(value: string): string {
     : date.toLocaleDateString('zh-CN', { year: 'numeric', month: 'long', day: 'numeric' });
 }
 
-/** Factual placeholder copy (DATA-ERASURE §1, §8, E1/E2/E4/E5/E11); the Owner may replace wording. */
+/**
+ * Consequences of confirming only (DATA-ERASURE §1, §8, E1/E2/E4/E5/E11). Refund rules belong in the
+ * terms and FAQ, not in this dialog (Owner 2026-10-09).
+ */
 export function buildErasureImpactLines(preview: AccountErasurePreview): ImpactLine[] {
   const lines: ImpactLine[] = [];
   if (preview.subscriptionRenewing) {
@@ -30,19 +33,6 @@ export function buildErasureImpactLines(preview: AccountErasurePreview): ImpactL
     const until = formatDate(preview.subscriptionActiveUntil);
     lines.push({ tone: 'warn', text: `订阅原本有效至 ${until}，剩余权益随注销失效。` });
   }
-  lines.push({
-    tone: 'info',
-    text: '首次购买会员、积分包或 Pro 升 Gold，购买后 7 天内且从这次付款起整个账户没有任何积分消耗，可以申请退款。',
-  });
-  lines.push({
-    tone: 'info',
-    text: '平台大幅缩减付费功能或无正当理由终止账号的，不受上述 7 天和未消耗条件限制，按剩余时间退款；无故终止账号还退没用完的已购积分。',
-  });
-  lines.push({ tone: 'info', text: '违规被终止账号不退款；除上述范围外，其余情况不退款。' });
-  lines.push({
-    tone: 'info',
-    text: '如需退款，请在注销前通过客服工单申请并先处理；人工审批后原渠道执行，法律允许时扣 6% 手续费。未决账务处理完后，注销才会最终完成。',
-  });
   lines.push({ tone: 'info', text: '对话、定位、稿件等私有内容将被清除；已下载到本机或发给他人的副本不在清除范围内。' });
   lines.push({
     tone: 'info',

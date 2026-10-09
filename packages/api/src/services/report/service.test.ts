@@ -9,6 +9,12 @@ const input = { sessionId: id, projectId: id, roundId: id, requestId: id };
 const user = { auth: { getUser: async () => ({ data: { user: { id, email_confirmed_at: '2026-01-01T00:00:00Z' } } }) } };
 const policy = { account: 'synthetic', costPerCall: '0.1', creditsPerUsd: '100', multiplier: '6',
   maxCalls: 1, maxOutputTokens: 8192, inputBytes: 196608, historyItems: 0 };
+const workflow = (supported = true) => ({ id: 'fixture', version: 1, kind: 'document',
+  steps: [{ id: 'step', title: 'Step', dependsOn: [], resources: ['step.md'], minLength: 1, maxLength: 100,
+    requiresEvidence: false, requiredCapabilities: [] }],
+  report: { id: 'report', version: 1, title: 'Report', sections: [{ title: 'One', stepId: 'step' }] },
+  ...(supported ? { reportGeneration: { resources: ['report.md'], sections: ['One'], maxCharacters: 12000 } } : {}),
+});
 it.each([null, { enabled: false }, { enabled: 'true' }, { enabled: true, extra: true }, 'invalid', '{"enabled":true}'])(
   'default-off flag rejects before membership, source, or billing (%j)', async value => {
     const rpc = vi.fn(async () => ({data:null,error:null}));
@@ -19,14 +25,33 @@ it.each([null, { enabled: false }, { enabled: 'true' }, { enabled: true, extra: 
     expect((rpc.mock.calls as unknown[][])[0]?.[0]).toBe('runtime_admission_replay');
   });
 it('free member is rejected before creating a report run or reading facts', async () => {
-  const rpc = vi.fn(async (name: string) => ({ data: null, error: name === 'runtime_admission_replay' ? null : { message: 'REPORT_MEMBERSHIP_REQUIRED' } }));
+  const rpc = vi.fn(async (name: string) => {
+    if (name === 'runtime_admission_replay') return { data: null, error: null };
+    if (name === 'report_source') return { data: { workflow: workflow(),
+      get snapshot() { throw new Error('FACTS_READ_BEFORE_MEMBERSHIP'); } }, error: null };
+    return { data: null, error: { message: 'REPORT_MEMBERSHIP_REQUIRED' } };
+  });
   const query = { select: () => query, eq: () => query, maybeSingle: async () => ({ data: { value: { enabled: true } }, error: null }) };
   const admin = { from: () => query, rpc } as unknown as SupabaseClient;
   await expect(reportService(user as unknown as SupabaseClient, admin, policy).start(input)).rejects.toMatchObject({
     code: 'FORBIDDEN', message: 'REPORT_MEMBERSHIP_REQUIRED',
   });
-  expect(rpc.mock.calls).toHaveLength(2);
-  expect((rpc.mock.calls as unknown[][])[1]![0]).toBe('report_membership_check');
+  expect(rpc.mock.calls.map(call => call[0])).toEqual(['runtime_admission_replay', 'report_source', 'report_membership_check']);
+});
+it.each([false, true])('missing report manifest precedes membership for paid=%s', async paid => {
+  const rpc = vi.fn(async (name: string) => {
+    if (name === 'runtime_admission_replay') return { data: null, error: null };
+    if (name === 'report_source') return { data: { workflow: workflow(false),
+      get snapshot() { throw new Error('UNEXPECTED_FACTS_READ'); } }, error: null };
+    if (name === 'report_membership_check') return { data: null, error: paid ? null : { message: 'REPORT_MEMBERSHIP_REQUIRED' } };
+    throw new Error('UNEXPECTED_ADMISSION_OR_BILLING');
+  });
+  const query = { select: () => query, eq: () => query, maybeSingle: async () => ({ data: { value: { enabled: true } }, error: null }) };
+  const admin = { from: () => query, rpc } as unknown as SupabaseClient;
+  await expect(reportService(user as unknown as SupabaseClient, admin, policy).start(input)).rejects.toMatchObject({
+    code: 'BAD_REQUEST', message: 'REPORT_MANIFEST_REQUIRED',
+  });
+  expect(rpc.mock.calls.map(call => call[0])).toEqual(['runtime_admission_replay', 'report_source']);
 });
 it('saved reports remain readable without a flag or membership read', async () => {
   const rpc = vi.fn(async () => ({ error: null, data: { state: 'completed', result: { body: '## One\nSaved', completeness: 'complete' },
@@ -121,7 +146,7 @@ function startAdmin(executions: unknown[], saved: Record<string, { state: string
     if (name === 'runtime_view') return { data: { sessionId: id, executions }, error: null };
     if (name === 'runtime_execution') return { data: saved[args.p_execution_id!], error: null };
     // The source read comes first; reading its snapshot means the one-report check let the start through.
-    if (name === 'report_source') return { data: { get snapshot() { past.reached = true; return null; } }, error: null };
+    if (name === 'report_source') return { data: { workflow: workflow(), get snapshot() { past.reached = true; return null; } }, error: null };
     return { data: null, error: { message: 'UNEXPECTED_RPC' } };
   });
   const query = { select: () => query, eq: () => query, maybeSingle: async () => ({ data: { value: { enabled: true } }, error: null }) };

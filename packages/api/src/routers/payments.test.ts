@@ -3159,6 +3159,7 @@ describe('createCheckoutSession catalog fail-closed guards', () => {
     itemResult?: Promise<unknown>;
     factsResult?: Promise<unknown>;
     alipaySubscriptionEnabled?: boolean;
+    membershipError?: string | null;
   }) {
     const sessionCreate = vi.fn();
     const orderInserts: unknown[] = [];
@@ -3168,9 +3169,10 @@ describe('createCheckoutSession catalog fail-closed guards', () => {
 
     const profileResult = options.profileResult ?? Promise.resolve({
       data: {
+        id: 'user-1',
         email: 'user@example.com',
         nickname: 'User',
-        membership_level: 'free',
+        membership_level: options.kind === 'credit_package' ? 'pro' : 'free',
       },
       error: null,
     });
@@ -3222,6 +3224,8 @@ describe('createCheckoutSession catalog fail-closed guards', () => {
         throw new Error(`Unexpected guard table ${table}`);
       },
     };
+    const reportCheck = vi.fn<NonNullable<MembershipFixtureDb['rpc']>>(async () => ({ data: null, error: options.membershipError
+      ? { message: options.membershipError } : null }));
     const supabaseAdmin = {
       from(table: string) {
         if (table === 'profiles') {
@@ -3246,13 +3250,32 @@ describe('createCheckoutSession catalog fail-closed guards', () => {
       },
     };
 
+    const caller = createProtectedCaller({ supabase, supabaseAdmin });
+    const db = supabaseAdmin as unknown as MembershipFixtureDb;
+    const previousRpc = db.rpc!;
+    db.rpc = (name, args) => name === 'report_membership_check'
+      ? reportCheck(name, args) : previousRpc(name, args);
     return {
-      caller: createProtectedCaller({ supabase, supabaseAdmin }),
+      caller,
       sessionCreate,
       orderInserts,
-      supabase, supabaseAdmin,
+      supabase, supabaseAdmin, reportCheck,
     };
   }
+
+  it.each([
+    ['REPORT_MEMBERSHIP_REQUIRED', 'FORBIDDEN', 'PAYWALL_MEMBERSHIP_REQUIRED'],
+    ['REPORT_ENTITLEMENTS_UNAVAILABLE', 'SERVICE_UNAVAILABLE', 'PAYWALL_MEMBERSHIP_UNAVAILABLE'],
+    ['unexpected private diagnostic', 'SERVICE_UNAVAILABLE', 'PAYWALL_MEMBERSHIP_UNAVAILABLE'],
+  ])('blocks package checkout for report gate refusal %s before any writes', async (reason, code, message) => {
+    const harness = createGuardHarness({ kind: 'credit_package', membershipError: reason, profileResult: Promise.resolve({
+      data: { id: 'user-1', email: 'user@example.com', nickname: 'Fixture', membership_level: 'free' }, error: null,
+    }) });
+    await expect(harness.caller.createCheckoutSession({ kind: 'credit_package', packageId }))
+      .rejects.toMatchObject({ code, message });
+    expect(harness.reportCheck).toHaveBeenCalledWith('report_membership_check', { p_actor_id: 'user-1' });
+    expectNoCheckoutWrites(harness);
+  });
 
   it.each(['credit_package', 'membership_plan'] as const)('rejects limited %s requests before customer/session/order side effects', async (kind) => {
     const harness = createGuardHarness({ kind });
