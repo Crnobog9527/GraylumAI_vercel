@@ -90,7 +90,8 @@ export function AdminMonthlyRefunds() {
           </div>
         ) : null}
         {refund.statusError ? (
-          <p role="alert" className="text-sm" style={{ color: 'var(--text-tertiary)' }}>{refund.statusError}</p>
+          <p role="alert" data-testid="monthly-refund-status-message" className="text-sm"
+            style={{ color: 'var(--text-tertiary)' }}>{refund.statusError}</p>
         ) : null}
       </section>
 

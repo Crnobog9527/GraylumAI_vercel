@@ -4,13 +4,14 @@
 import { useRef, useState } from 'react';
 import { trpc } from '@/trpc/client';
 import { getSafeErrorMessage } from '@/lib/safe-error-message';
-import { monthlyRefundQuoteRefusal, type QuoteRefusal } from './monthlyRefundReasons';
+import { monthlyRefundCodeText, monthlyRefundQuoteRefusal, type QuoteRefusal } from './monthlyRefundReasons';
 import {
   EMPTY_MONTHLY_REFUND_FORM, validateMonthlyRefundForm, validateRefundFields,
   type MonthlyRefundForm, type MonthlyRefundRequest, type RefundFormScope, type RejectReason,
 } from './monthlyRefundView';
 
 const FALLBACK = '退款证据不足或状态已变化，请重新核对订单与工单';
+export const NO_RECORD = '这个订单还没有月付退款记录';
 type Quote = Awaited<ReturnType<ReturnType<typeof trpc.useUtils>['admin']['quoteMonthlyRefund']['fetch']>>;
 // The status and execute procedures return the stored intent as untyped JSON.
 export type MonthlyRefundIntent = Record<string, unknown> & { id?: unknown; status?: unknown };
@@ -105,12 +106,18 @@ export function useMonthlyRefund() {
     try {
       const data = await utils.admin.getMonthlyRefundStatus.fetch({ orderId }, { staleTime: 0, retry: false });
       if (!current(started)) return;
-      setIntent(data as MonthlyRefundIntent);
       setExecuteResult(null);
+      // Since #759 an existing order without any refund record answers null, not an error.
+      if (data === null) {
+        setIntent(null);
+        setStatusError(NO_RECORD);
+        return;
+      }
+      setIntent(data as MonthlyRefundIntent);
     } catch (error) {
       if (!current(started)) return;
       setIntent(null);
-      setStatusError(getSafeErrorMessage(error, '这个订单还没有月付退款记录，或读取失败'));
+      setStatusError(monthlyRefundCodeText(error) ?? '暂时无法读取退款进度，请稍后再试');
     } finally {
       setLoadingStatus(false);
     }
@@ -178,7 +185,8 @@ export function useMonthlyRefund() {
       setQuoted(null);
       setRejectReason('');
     } catch (error) {
-      if (current(started)) setActionError(getSafeErrorMessage(error, FALLBACK));
+      // A code without its own text gets the generic sentence, never the raw code.
+      if (current(started)) setActionError(monthlyRefundCodeText(error) ?? FALLBACK);
     }
   });
 
