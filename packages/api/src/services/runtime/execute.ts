@@ -1,5 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-import {billingClaimNotice} from './claimNotice';
+import {billingClaimNotice,claimNoticeFields} from './claimNotice';
 import {stoppedCompletion} from './stoppedCompletion';
 import {NativeSession} from './nativeSession';
 import {NativeProgressProjection} from './nativeProgress';
@@ -202,6 +202,7 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
      const decoded=JSON.parse(raw);
      return selectedPolicy.protocol==='openrouter-chat-v1' ? {usage:{sdkResponse:decoded}} : decoded;
     }catch(error){
+     claimNotice??=billingClaimNotice(error);
      // Retain exact pre-dispatch diagnostics outside SDK wrapping, without private data.
      if(selectedPolicy.protocol==='openrouter-chat-v1'&&error instanceof Error&&preflightCodes.has(error.message))
       {preflightFailure=error.message;logger.error('api','runtime_provider_preflight_failed',{executionId,code:error.message});}
@@ -430,6 +431,7 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
    const completed=await ownerRpc<{state:'completed'|'cost_pending'}>('runtime_execution',{...args,p_action:'complete',p_result:result});
    return {...nativeMetadata(result),body,...(summary!==undefined?{summary}:{}),state:completed.state};
   }catch(error){
+   claimNotice??=billingClaimNotice(error);
    if(nativeProgress&&!accountClosed&&!moderationBlocked){const done=await finishStop(executionId,onProgress,undefined,execution.live);if(done)return done;}
    if(nativeProgress&&execution.live&&projection.text&&!waitPoint){const correction=projection.finish(INVALID_REPLY_NOTICE);if(correction)progress(correction);}
    if(waitPoint){
@@ -441,10 +443,8 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
    }
    if(reportFailure){
     const stopped=await ownerRpc<{state:'cancelled'|'cost_pending'}>('runtime_cancel',args);
-    return {state:stopped.state,code:reportFailure,...(claimNotice?{notice:claimNotice}:{})};
+    return {state:stopped.state,code:reportFailure,...claimNoticeFields(claimNotice)};
    }
-   // The SDK may wrap the error; rely on the latch. Every Runtime write now
-   // refuses this actor, so leave settlement to trusted financial recovery.
    if(accountClosed)return {state:'pending' as const};
    if(moderationBlocked){
     // A cancellation failure propagates; never rewrite a moderation block as pending
@@ -489,10 +489,11 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
    if(failed?.state==='cancelled'){
     const unavailable:GateRejection|'provider_history'|'preflight'|'capacity'|undefined=gateRejection??(preflightFailure?
      preflightFailure==='RUNTIME_PROVIDER_HISTORY_DENIED'?'provider_history':'preflight':capacity?'capacity':undefined);
-    return {state:'cancelled' as const,...(unavailable?{unavailable}:{}),...(claimNotice?{notice:claimNotice}:{})};
+    return {state:'cancelled' as const,...(unavailable?{unavailable}:{}),...claimNoticeFields(claimNotice),
+     ...(unavailable==='paused'?{code:'RUNTIME_NEW_CALLS_STOPPED' as const}:{})};
    }
    await ownerRpc('runtime_execution',{...args,p_action:'interrupt'}).catch(()=>{});
-   return {state:'pending' as const,...(capacity?{unavailable:'capacity' as const}:{}),...(claimNotice?{notice:claimNotice}:{})};
+   return {state:'pending' as const,...(capacity?{unavailable:'capacity' as const}:{}),...claimNoticeFields(claimNotice)};
   }
  }};
 }

@@ -623,3 +623,45 @@ it('BILL2: receipt CHECK accepts exactly 4 MiB and rejects one byte more without
  await expect(sqlRpc('bill2_close',[f.actor,run.id,'delivered',{...result(),body:'x'.repeat(262144)}]))
   .rejects.toThrow();
 });
+
+it('BILL2: RUNTIME-PROD actual settled USD, paused completion, exact cap and atomic concurrent admission', async () => {
+ const f=await fixture();const r=await f.prepare();const c=await call(f.actor,r.id);
+ const cfg={version:1,userDailyUsd:'0.007',siteDailyUsd:null,siteAlertUsd:'0.007',
+  providerBalanceAlertUsd:null,notificationChannel:null};
+ const setting=async(key:string,value:unknown)=>db.query(
+  'insert into system_settings(key,value) values($1,$2) on conflict(key) do update set value=excluded.value',[key,value]);
+ const previous=(await db.query("select key,value from system_settings where key in ('runtime_stop_loss','runtime_rate_limits')")).rows;
+ const client=new pg.Client({connectionString});
+ try {
+  await setting('runtime_stop_loss',cfg);
+  await db.query('select runtime_stop_loss_assert($1,true)',[f.actor]); // frozen dollars are not usage
+  await setting('runtime_rate_limits',{stopNewCalls:true});
+  await receipt(f.actor,r.id,c,'0.007');await close(f.actor,r.id);
+  await sqlRpc('bill2_finalize',[f.actor,r.id]); // stopped calls still finish their original ledger
+  const ledger=(await db.query("select total_cost_usd::text usd from token_stats where bill2_run_id=$1",[r.id])).rows[0];
+  expect(ledger.usd).toBe('0.007');
+  expect((await sqlRpc('runtime_stop_loss_usage',[f.actor])).userUsd).toBe('0.007');
+  await setting('runtime_rate_limits',{stopNewCalls:false});
+  await expect(db.query('select runtime_stop_loss_assert($1,true)',[f.actor])).rejects.toThrow('RUNTIME_USER_DAILY_USD_LIMIT');
+  await db.query('select runtime_stop_loss_assert($1,false)',[f.actor]); // existing freeze remains dispatchable
+  await conservation(f.actor);
+  // Two independent transactions: admission waits for a setting transaction and sees its committed cap.
+  await client.connect();await db.query('begin');
+  await setting('runtime_stop_loss',{...cfg,userDailyUsd:null,siteDailyUsd:'0'});
+  let finished=false;
+  const waiting=client.query('select runtime_stop_loss_assert($1,true)',[f.actor])
+   .then(()=>{finished=true;return 'allowed';},e=>{finished=true;return e.message as string;});
+  const pid=(await db.query('select pg_backend_pid() pid')).rows[0].pid;
+  let blocked=false;
+  for(let attempt=0;attempt<100&&!blocked;attempt++){
+   blocked=(await db.query("select exists(select 1 from pg_stat_activity where $1=any(pg_blocking_pids(pid))) blocked",[pid])).rows[0].blocked;
+   if(!blocked)await new Promise(resolve=>setTimeout(resolve,10));
+  }
+  expect(blocked).toBe(true);expect(finished).toBe(false);
+  await db.query('commit');expect(await waiting).toContain('RUNTIME_SITE_DAILY_USD_LIMIT');
+ } finally {
+  await db.query('rollback');await client.end();
+  await db.query("delete from system_settings where key in ('runtime_stop_loss','runtime_rate_limits')");
+  for(const row of previous)await setting(row.key,row.value);
+ }
+});

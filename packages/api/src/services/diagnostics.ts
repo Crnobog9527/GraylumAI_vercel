@@ -1,14 +1,10 @@
 /**
  * Diagnostics Service
  *
- * 系统诊断服务 - 一键测试所有关键功能
  *
- * 11 项测试功能:
- * - AI 功能 (5项): 智能路由、Token计算、Prompt缓存、上下文压缩、流式响应
- * - 计费功能 (3项): 三段式计费、幂等性检查、余额对账
- * - 安全功能 (3项): 速率限制、消费熔断、RLS数据隔离
  */
 
+import { testRuntimeStopLoss } from './runtime/stopLossMonitor';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { classifyTask, classifyTaskComplexity, selectModel, needsRealtimeData } from './modelRouter';
 import { countTokens, quickEstimate } from './tokenCounter';
@@ -100,6 +96,8 @@ const TEST_DEFINITIONS = [
   { id: 'billing_prededuct', name: '预扣记录只读检查', category: 'billing' as DiagnosticCategory },
   { id: 'billing_idempotency', name: '幂等字段只读检查', category: 'billing' as DiagnosticCategory },
   { id: 'billing_reconcile', name: '余额对账测试', category: 'billing' as DiagnosticCategory },
+
+  { id: 'runtime_stop_loss', name: 'Runtime 成本与余额告警', category: 'billing' as DiagnosticCategory },
 
   // 安全功能测试 (3项)
   { id: 'security_ratelimit', name: '速率限制测试', category: 'security' as DiagnosticCategory },
@@ -992,6 +990,7 @@ export class DiagnosticsService {
       testBillingPrededuct,
       testBillingIdempotency,
       testBillingReconcile,
+      testRuntimeStopLoss,
       testRateLimit,
       testCircuitBreaker,
       testRLSIsolation,
@@ -1041,7 +1040,7 @@ export class DiagnosticsService {
     // 根据类别选择测试
     const testMap: Record<DiagnosticCategory, Array<(ctx: DiagnosticContext) => Promise<DiagnosticTestResult>>> = {
       ai: [testAIRouting, testTokenCalculation, testPromptCache, testContextCompression, testRealtimeKeywords, testAIModelStatus, testAILiveRuntimeProof],
-      billing: [testBillingPrededuct, testBillingIdempotency, testBillingReconcile],
+      billing: [testBillingPrededuct, testBillingIdempotency, testBillingReconcile, testRuntimeStopLoss],
       security: [testRateLimit, testCircuitBreaker, testRLSIsolation],
       performance: [],
       data: [],
@@ -1094,6 +1093,7 @@ export class DiagnosticsService {
       billing_prededuct: testBillingPrededuct,
       billing_idempotency: testBillingIdempotency,
       billing_reconcile: testBillingReconcile,
+      runtime_stop_loss: testRuntimeStopLoss,
       security_ratelimit: testRateLimit,
       security_circuit_breaker: testCircuitBreaker,
       security_rls: testRLSIsolation,

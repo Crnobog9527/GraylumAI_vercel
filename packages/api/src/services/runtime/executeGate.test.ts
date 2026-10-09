@@ -60,7 +60,8 @@ it('requires a gate at construction even through an untyped caller', () => {
 });
 it.each(['call_limited', 'paused', 'limit_unavailable'] as const)('retains %s through SDK wrapping before any claim or dispatch', async reason => {
   const f = fixture(); f.gate.mockResolvedValue({ ok: false, reason, retryAfter: 60 });
-  expect(await runtimeExecutor(f.options).execute(id)).toEqual({ state: 'cancelled', unavailable: reason });
+  expect(await runtimeExecutor(f.options).execute(id)).toEqual({ state: 'cancelled', unavailable: reason,
+    ...(reason === 'paused' ? { code: 'RUNTIME_NEW_CALLS_STOPPED' } : {}) });
   expect(mock.billing.claimCall).not.toHaveBeenCalled(); expect(mock.billing.dispatchOnce).not.toHaveBeenCalled();
   expect(f.database.rpc.mock.calls.some(([, args]) => args.p_action === 'fail_before_dispatch')).toBe(true);
   expect(f.database.rpc.mock.calls.some(([, args]) => args.p_action === 'interrupt')).toBe(false);

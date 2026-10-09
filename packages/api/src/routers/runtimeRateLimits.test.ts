@@ -1,6 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { expect, it, vi } from 'vitest';
 import { runtimeRateLimitsRouter } from './runtimeRateLimits';
+import { DEFAULT_STOP_LOSS } from '../services/runtime/stopLossSettings';
 import { settingsRouter } from './settings';
 import {
   DEFAULT_RUNTIME_RATE_LIMITS as config, RUNTIME_RATE_LIMIT_KEY as key, readRuntimeRateLimits, saveRuntimeRateLimits,
@@ -84,4 +85,19 @@ it.each(['write', 'readback'])('does not report success on %s failure', async ph
     .rejects.toMatchObject({ code: 'SERVICE_UNAVAILABLE', message: '无法读取或保存使用额度，请稍后再试' });
   expect(query.upsert).toHaveBeenCalledTimes(1);
   expect(query.maybeSingle).toHaveBeenCalledTimes(phase === 'write' ? 0 : 1);
+});
+
+it.each(['user', 'anonymous'] as const)('denies %s all stop-loss administration', async role => {
+  const f = harness(role);
+  for (const call of [() => f.caller.stopLossConfig(), () => f.caller.updateStopLoss(DEFAULT_STOP_LOSS),
+    () => f.caller.stopLossStatus(), () => f.caller.stopLossAlerts(),
+    () => f.caller.recordProviderBalance({ provider: 'openrouter', balanceUsd: '0' })]) {
+    await expect(call()).rejects.toMatchObject({ code: role === 'anonymous' ? 'UNAUTHORIZED' : 'FORBIDDEN' });
+  }
+  expect(f.writes).toEqual([]);
+});
+it('admin manages stop-loss config but generic settings cannot bypass validation', async () => {
+  const f = harness('admin');
+  expect((await f.caller.updateStopLoss({ ...DEFAULT_STOP_LOSS, siteDailyUsd: '1.25' })).config.siteDailyUsd).toBe('1.25');
+  await expect(f.generic.updateSystemSettings({ key: 'runtime_stop_loss', value: {} })).rejects.toMatchObject({ code: 'BAD_REQUEST' });
 });
