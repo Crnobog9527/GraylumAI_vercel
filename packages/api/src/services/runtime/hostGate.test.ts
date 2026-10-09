@@ -6,7 +6,8 @@ import { fileURLToPath } from 'node:url';
 import { executeOriginalExecution } from './executionStream';
 import { createRuntimeBudget } from './budget';
 import { denyNewCalls } from './newWorkGate';
-const mock = vi.hoisted(() => ({ factory: vi.fn(), policy: vi.fn(), gate: vi.fn(), recover: vi.fn() }));
+const mock = vi.hoisted(() => ({ factory: vi.fn(), policy: vi.fn(), gate: vi.fn(), recover: vi.fn(), capture: vi.fn() }));
+vi.mock('../opc/capture', () => ({ captureCompleted: mock.capture }));
 vi.mock('./execute', () => ({ runtimeExecutor: mock.factory }));
 vi.mock('./stagingPolicy', () => ({ loadStagingPolicy: mock.policy, loadStagingRecoveryPolicy: async () => ({}) }));
 vi.mock('./stagingTransport', () => ({ stagingTransport: () => ({ lookup: vi.fn() }) }));
@@ -15,7 +16,7 @@ vi.mock('./newWorkGate', async importOriginal => ({
   newWorkGate: (_db: unknown, environment: string) => ({ calls: mock.gate(environment) }),
 }));
 beforeEach(() => {
-  vi.clearAllMocks(); mock.policy.mockResolvedValue({});
+  vi.clearAllMocks(); mock.policy.mockResolvedValue({}); mock.capture.mockResolvedValue(undefined);
   mock.factory.mockReturnValue({ execute: async () => ({ state: 'completed' }), recoverFinancial: mock.recover });
   mock.recover.mockResolvedValue({ state: 'completed' });
   mock.gate.mockImplementation(() => async () => ({ ok: true }));
@@ -99,4 +100,19 @@ it('preserves the original execution failure when erased-waiting maintenance als
  expect(rpc).toHaveBeenCalledExactlyOnceWith('runtime_financial_recovery',{
   p_actor_id:'actor',p_execution_id:'execution',p_finish:false,
  });
+});
+
+
+it('refuses a buffered response when deletion commits during post-execution capture', async () => {
+ let deleted=false;
+ mock.factory.mockReturnValue({execute:async()=>({state:'completed',summary:'PRIVATE_RESPONSE',body:'PRIVATE_BODY'})});
+ mock.capture.mockImplementationOnce(async()=>{deleted=true;});
+ const rpc=vi.fn(async(name:string)=>{
+  expect(name).toBe('content_erasure_visible');
+  return deleted?{data:null,error:{code:'42501',message:'CONTENT_ERASED'}}:{data:true,error:null};
+ });
+ await expect(executeOriginalExecution({admin:{rpc} as never,user:{auth:{}} as never,
+  actorId:'actor',budget:createRuntimeBudget(),maintenanceEndpoint:'http://127.0.0.1:1'},'execution'))
+  .rejects.toMatchObject({code:'PRECONDITION_FAILED',message:'CONTENT_ERASED'});
+ expect(mock.capture).toHaveBeenCalledOnce();
 });

@@ -2215,7 +2215,7 @@
   "fn:bill2_usage_total(uuid,text)": "8adc72892fab",
   "fn:claim_daily_checkin(uuid)": "f94e1da5309b",
   "fn:content_erasure_artifact_readable(uuid,uuid)": "da7d8e80dc10",
-  "fn:content_erasure_capture_steps(jsonb)": "23b7c49d095b",
+  "fn:content_erasure_capture_steps(jsonb)": "ca904a72f1cc",
   "fn:content_erasure_confirm(uuid,text,uuid,text)": "b3ac02ad26c1",
   "fn:content_erasure_execution_guard()": "3adbedaaee4d",
   "fn:content_erasure_financial_allowed(uuid,uuid)": "3c6e64645a80",

@@ -31,7 +31,10 @@ export async function runDependencies(db,report){
  const information={value:'CAPTURE_PRIVATE_BODY',status:'confirmed',nature:'fact'};
  const fp=(await db.query('SELECT artifact_hash($1::jsonb) h',[information])).rows[0].h;
  const steps={s:{version:1,valid:false,information:{captured:information,manual:{value:'KEEP_MANUAL',status:'confirmed'}},
-  fieldMeta:{captured:{source:'capture',executionId:g.execution,fp},manual:{source:'manual'}}}};
+  fieldMeta:{captured:{source:'capture',executionId:g.execution,fp},manual:{source:'manual'}}},
+  manual:{version:4,valid:true,information:{kept:{value:'KEEP_MANUAL_CONFIRMED',status:'confirmed'}},
+   fieldMeta:{kept:{source:'manual',withdrawnSuggestion:{executionId:g.execution,value:'WITHDRAWN_PRIVATE_BODY'},
+    suggestion:{executionId:g.execution,value:'SUGGESTION_PRIVATE_BODY'}}}}};
  await db.query(`INSERT INTO artifact_rounds(id,project_id,revision_id,package_hash,workflow,workflow_hash,template_hash,steps)
   VALUES($1,$2,$3,$4,'{}',$5,$5,$6)`,[round,art.project,art.revision,'b'.repeat(64),'c'.repeat(64),steps]);
  const evidenceId=randomUUID();
@@ -51,6 +54,10 @@ export async function runDependencies(db,report){
  assert.doesNotMatch(JSON.stringify(cleaned),/CAPTURE_PRIVATE_BODY/);
  assert.match(JSON.stringify(cleaned),/KEEP_MANUAL/);
  assert.equal(cleaned.s.version,2);assert.equal(cleaned.s.fieldMeta.captured.executionId,undefined);
+ assert.doesNotMatch(JSON.stringify(cleaned),/WITHDRAWN_PRIVATE_BODY|SUGGESTION_PRIVATE_BODY/);
+ assert.equal(cleaned.manual.version,4);assert.equal(cleaned.manual.valid,true);
+ assert.deepEqual(cleaned.manual.information,steps.manual.information);
+ assert.deepEqual(cleaned.manual.fieldMeta.kept,{source:'manual'});
  const reportView=await rpc(db,'artifact_transition',g.actor,art.module,art.skill,'report',g.execution,g.execution,null,{});
  assert.equal(reportView.available,true);assert.equal(reportView.sourceAvailable,false);
  assert.match(JSON.stringify(reportView),/KEEP_INDEPENDENT_REPORT/);

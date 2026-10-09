@@ -57,9 +57,11 @@ export async function executeOriginalExecution(host:OriginalExecutionHost,execut
     const leave=host.budget?.timing?.enter('host');
     try{await captureCompleted(host.admin,host.actorId,executionId);}finally{leave?.();}
    }
-   if(!['cancelled','cost_pending'].includes(result.state))return withClaimNotice(result);
-   const reason=await retainedOutputReason(host.admin,host.actorId,executionId);
-   return {...result,...(reason?{unavailable:reason}:{})};
+   const retained=['cancelled','cost_pending'].includes(result.state);
+   const reason=retained?await retainedOutputReason(host.admin,host.actorId,executionId):null;
+   // Capture and retained-output reads may overlap a deletion commit.
+   await visible();
+   return retained?{...result,...(reason?{unavailable:reason}:{})}:withClaimNotice(result);
   };
   const financial=inflightFinancialHost({database:host.admin,actorId:host.actorId,executionId,actor,budget:host.budget});
   const base={database:financial.database,budget:host.budget,actor};

@@ -470,21 +470,23 @@ END $$;
 -- value while dropping only its provenance. Non-capture fields stay byte-identical.
 CREATE OR REPLACE FUNCTION public.content_erasure_capture_steps(steps jsonb)
 RETURNS jsonb LANGUAGE plpgsql STABLE SET search_path=public,pg_temp AS $$
-DECLARE st record;f record;v jsonb;meta jsonb;result jsonb:=steps;changed boolean;ids uuid[];
+DECLARE st record;f record;v jsonb;meta jsonb;result jsonb:=steps;changed boolean;information_changed boolean;ids uuid[];
 BEGIN
  ids:=ARRAY(SELECT id FROM runtime_executions WHERE content_deleted_at IS NOT NULL OR erased_at IS NOT NULL);
  IF jsonb_typeof(steps) IS DISTINCT FROM 'object' THEN RETURN steps; END IF;
  FOR st IN SELECT * FROM jsonb_each(steps) LOOP
-  v:=st.value;changed:=false;
+  v:=st.value;changed:=false;information_changed:=false;
   FOR f IN SELECT * FROM jsonb_each(coalesce(v->'fieldMeta','{}')) LOOP
    meta:=f.value;
-   IF meta->>'source'='capture' AND meta->>'executionId'=ANY(ids::text[]) THEN
+   IF meta->>'source'='capture' AND lower(meta->>'executionId')=ANY(ids::text[]) THEN
     IF meta->>'fp'=artifact_hash(v#>ARRAY['information',f.key]) THEN
      v:=jsonb_set(v,ARRAY['information',f.key],'{"value":"","status":"unknown","nature":"unknown"}');
+     information_changed:=true;
     END IF;
     meta:=meta-ARRAY['source','executionId','fp'];changed:=true;
    END IF;
    IF content_erasure_references(meta->'suggestion',ids) THEN meta:=meta-'suggestion';changed:=true; END IF;
+   IF content_erasure_references(meta->'withdrawnSuggestion',ids) THEN meta:=meta-'withdrawnSuggestion';changed:=true; END IF;
    IF content_erasure_references(meta->'suggestions',ids) THEN
     meta:=jsonb_set(meta,'{suggestions}',(SELECT coalesce(jsonb_agg(x),'[]') FROM jsonb_array_elements(meta->'suggestions') x
      WHERE NOT content_erasure_references(x,ids)));changed:=true;
@@ -492,7 +494,9 @@ BEGIN
    v:=jsonb_set(v,ARRAY['fieldMeta',f.key],meta);
   END LOOP;
   IF changed THEN
-   v:=v||jsonb_build_object('valid',false,'version',coalesce((v->>'version')::integer,0)+1);
+   IF information_changed THEN
+    v:=v||jsonb_build_object('valid',false,'version',coalesce((v->>'version')::integer,0)+1);
+   END IF;
    result:=jsonb_set(result,ARRAY[st.key],v);
   END IF;
  END LOOP;
