@@ -82,7 +82,18 @@
 <a id="changes"></a><a id="conflicts"></a>
 ## 2. 本版的新决定和被取代的旧规则
 
-### 2.1 Owner 的新决定（2026-09-27 起，2026-10-09 更新）
+### 2.1 Owner 的新决定（2026-09-27 起，2026-10-10 更新）
+
+**2026-10-10：REPORT-MODEL 报告模型单独设置**
+
+来源：[#716 决定记录](https://github.com/Crnobog9527/GraylumAI_vercel/issues/716#issuecomment-6085743882)。Owner 原话：
+
+> 这个设置现在就要加进我们的开发方案里面去。我现在可以选择不用更强的模型去写报告，但是，我必须要有这个后台功能，去单独指定写最后报告的模型设置。
+
+在现有模块配置上增加可选报告模型；未设置时沿用对话模型，取代“报告只能与导师对话使用同一模型”的限制，
+不改变导师模型决定。管理员只能选择已启用且报价、报告用途准入齐全的模型；报告按实际模型冻结和计费，
+配置失效时明确拒绝，不偷偷换模型。重放及已冻结执行保留原模型。后端先提供管理员接口，后台界面后续接入。
+
 
 
 **2026-10-07：OUTPUT-CAP-RAISE 提前实施，staging 同用 32768**
@@ -1303,6 +1314,7 @@ node scripts/plan-progress.mjs --ref origin/staging
 | | AGENT-CORE-UI | 从 AGENT-CORE 拆出的纯前端部分：提问卡和本步小结卡的显示、流式文字显示、右侧面板和进度条的布局、旧入口链接改指。只改前端，沿用现有接口；需要改接口、工具、数据库或计费的部分一律留在 AGENT-CORE。验收与交接：[卡片/清单联合验收](https://github.com/Crnobog9527/GraylumAI_vercel/issues/716#issuecomment-6037691095)、[手机焦点与长文覆盖 #720](https://github.com/Crnobog9527/GraylumAI_vercel/pull/720)。 | 与对应的 AGENT-CORE 子任务配合 | 普通 | 中 / 3–4 | — |
 | | MENTOR-BUDGET | Owner 2026-09-30 立项（第 2.1 节第 23 项）：导师每一轮的输入和输出预算按用途（交互对话、整理、报告）在后台配置，准入时冻结，不再写死在代码里；放宽我们代码里的单次模型调用超时和每次请求的时间预算（staging 上限受 Vercel Hobby 单次 300 秒约束，正式运营升级 Pro（2026-10-01，第 28 项））；评估提示缓存（已由第 35 项定为上线必做 PROMPT-CACHE）。实施：服务端 [#542](https://github.com/Crnobog9527/GraylumAI_vercel/pull/542)、后台页 [#551](https://github.com/Crnobog9527/GraylumAI_vercel/pull/551)、输出容量 #564；当时交付参数为交互/报告 8192、单次接收 139264 bytes，现由 #714 提高至统一 32768、单次接收 532480 bytes（第 2.1 节 2026-10-07 OUTPUT-CAP-RAISE）；报告入口由 REPORT-GEN 启用 | —（Owner 批准先于 #497） | 高 | 中 / 1–2 | 完成 |
 | | REPORT-GEN | Owner 2026-09-30 立项：所有步骤确认后，由模型根据全部信息写完整报告，结构由各自 Skill 的模板规定（第 2.1 节第 22 项）。先实现定位 Skill（当前 13 个部分、正文最多 12000 字），报告生成能力按通用方式设计，其他带步骤的 Skill 复用同一套能力；无步骤的 Skill 不受影响。收费按第 2.1 节第 25 项：扣费逻辑和正常对话一样，不做运行前预告。方案以 [REPORT_GEN_PLAN.md](REPORT_GEN_PLAN.md)（#547 第八版原文存档，第 54 项）及第 2.1 节后续决定为准：建立在 BILL-PAYG 上，一次调用一冻结、一结算；可用余额低于 L 时停在调用之间，充值后继续。原 D1（报告单独输出上限 24576）改用全站统一 32768（含 staging，2026-10-07 OUTPUT-CAP-RAISE）；首版不自动续写，写满截断按实际用量收费并提示，不能作为候选定稿（2026-10-06 报告前端决定）。FUSION-REVIEW 评审的就是这份报告。验收与交接：[Runtime 验收缺口](https://github.com/Crnobog9527/GraylumAI_vercel/issues/716#issuecomment-6038028506)、[报告实测 #678](https://github.com/Crnobog9527/GraylumAI_vercel/pull/678)。 | MENTOR-BUDGET、CHAT-NATIVE-OUTPUT C0+C1；服务端会员检查随报告后端实施；真实 staging 实测须 BILL-PAYG v2 开启（2026-10-05 后端开工决定），不依赖自动续写 | 高 | 待实施方案细化 | — |
+| | REPORT-MODEL | [后端接口与迁移说明](tasks/REPORT-MODEL.md)。为最终报告单独配置模型；空值沿用对话模型。复用模块配置、Runtime 和 BILL-PAYG，实际报告模型决定报价、准入和冻结；管理员读写接口及后续后台界面，旧执行不重选模型（第 2.1 节 2026-10-10 决定）。 | REPORT-GEN、BILL-PAYG | 高 | 小 / 后端与界面分别交付 | — |
 | | STG-MENTOR-MODEL | 2026-10-01，[方案 #561](https://github.com/Crnobog9527/GraylumAI_vercel/pull/561)：staging 实测 Gemini 3.8 Flash、Claude Sonnet 5.5。**已关闭（2026-10-02，Owner 决定，第 38 项）**：导师模型定为 Sonnet（依据 #582 盲评），#561 不合并关闭，分支保留，不再发真实调用。以后要做导师模型评测，从最新 staging 另开任务 | — | 高 | — | 关闭：Owner 2026-10-02 决定导师模型定为 Sonnet，#561 不合并（第 38 项） |
 | | MENTOR-PROMPT-V2 | 2026-10-02：#497 验收中发现整理器照抄用户原话、写错字段。整理器输入加入已有值和导师回复（#584），宿主出卡规则与双模型重测（#582）。由 #584、#582 实施；出卡分寸问题并入 CONVERSATION-DRIVEN-CAPTURE B2（第 38 项） | #497 | 高 | 小 / 2 | 完成 |
 | | CONVERSATION-DRIVEN-CAPTURE | 右侧信息跟着对话走（方向 B，第 48 项；[方案 #588](https://github.com/Crnobog9527/GraylumAI_vercel/pull/588)）：整理不再按固定题目顺序，由实际聊到的内容填写，最后收齐 Skill 要求的信息。分两步：B1 数据库与写入（#593，迁移 0159）；B2 同时处理 #582 的出卡分寸问题、激活 PROMPT-CACHE-HISTORY H1。验收与交接：[联合验收及延期分支](https://github.com/Crnobog9527/GraylumAI_vercel/issues/716#issuecomment-6037691095)、[CDC-WRITEBACK-V2 工具、私有候选与待批准评测/发布](https://github.com/Crnobog9527/GraylumAI_vercel/issues/716#issuecomment-6038630556)。 | #497（AC1-4）；B2 在 B1 之后 | 高 | 中 / 2（B1、B2） | — |

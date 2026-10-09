@@ -18,8 +18,33 @@ import type { FrozenPaygRun } from '../bill2/service';
 type Fixture = { actor: string; user: SupabaseClient; admin: SupabaseClient; registration: string;
   mentorModel: string; flow: ReturnType<typeof makeWorkflow> };
 export function registerReportTests(db: pg.Client, fixture: () => Promise<Fixture>) {
+  it('RUNTIME: REPORT-MODEL configuration window and column deny non-admin clients', async () => {
+    const f = await fixture();
+    const result = await f.admin.rpc('report_model_window', { p_actor_id: f.actor, p_window_id: randomUUID() });
+    expect(result.error?.message).toBe('REPORT_MODEL_ADMIN_REQUIRED');
+    const windowId = randomUUID();
+    await db.query(`insert into runtime_test_windows(id,enabled,actor_ids,call_policies,credits_per_usd,multiplier,
+      max_cost_usd,max_calls,expires_at) values($1,true,$2,'[{}]',100,6,1,1,now()+interval '1 hour')`,
+      [windowId, [randomUUID()]]);
+    await db.query("update profiles set role='admin' where id=$1", [f.actor]);
+    const allowed = await f.admin.rpc('report_model_window', { p_actor_id: f.actor, p_window_id: windowId });
+    expect(allowed.error).toBeNull(); expect(allowed.data.id).toBe(windowId);
+    const callPermission = await f.admin.rpc('runtime_test_policy', { p_actor_id: f.actor, p_window_id: windowId });
+    expect(callPermission.error?.message).toBe('RUNTIME_TEST_WINDOW_DENIED');
+    await db.query('update runtime_test_windows set enabled=false where id=$1', [windowId]);
+    const disabled = await f.admin.rpc('report_model_window', { p_actor_id: f.actor, p_window_id: windowId });
+    expect(disabled.error?.message).toBe('REPORT_MODEL_ADMISSION_REQUIRED');
+
+    const grants = (await db.query(`select
+      has_column_privilege('authenticated','modules','report_model_id','UPDATE') can_update,
+      has_column_privilege('anon','modules','report_model_id','SELECT') can_read,
+      has_function_privilege('authenticated','report_model_window(uuid,uuid)','EXECUTE') can_execute`)).rows[0];
+    expect(grants).toEqual({ can_update: false, can_read: false, can_execute: false });
+    await db.query('update modules set active=false where id=(select module_id from artifact_workflows where id=$1)', [f.registration]);
+  });
   it.each(['complete', 'length', 'waiting', 'expired', 'free', 'disabled', 'changed', 'equal', 'cancelled', 'off_after', 'missing', 'string_flag', 'foreign', 'waiting_expired',
-    'sonnet_low', 'sonnet_missing_config', 'sonnet_missing_purpose'] as const)(
+    'sonnet_low', 'sonnet_missing_config', 'sonnet_missing_purpose',
+    'override', 'override_changed', 'legacy_changed', 'override_disabled', 'override_no_quote', 'override_waiting', 'override_race', 'sonnet_override', 'sonnet_override_denied'] as const)(
     'RUNTIME: REPORT-GEN real SQL and SDK %s', async scenario => {
       const f = await fixture(), opc = opcService(f.user, f.admin), artifacts = workbenchService(f.user, f.admin);
       const d = await opc.start({ requestId: randomUUID(), registration: f.registration, mode: 'manual' });
@@ -35,10 +60,12 @@ export function registerReportTests(db: pg.Client, fixture: () => Promise<Fixtur
           requestId: randomUUID(), stepId: step.id, expectedVersion: updated.version, expectedReviewVersion: updated.reviewVersion });
       }
       await db.query("update profiles set membership_level=$2 where id=$1", [f.actor, scenario === 'free' ? 'free' : 'pro']);
+      const override = scenario.includes('override'), reportModelId = override ? randomUUID() : f.mentorModel;
+      const waiting = scenario.startsWith('waiting') || scenario === 'override_waiting';
       const real = scenario.startsWith('sonnet_'), windowId = randomUUID();
-      const model = real ? 'anthropic/claude-sonnet-5.5' : 'ac1-mentor';
+      const model = real ? 'anthropic/claude-sonnet-5.5' : override ? 'fixture/report-override' : 'ac1-mentor';
       const endpointTag = real ? 'synthetic/fp8' : 'fixture/report', pricingHash = 'e'.repeat(64);
-      const policy: FrozenPaygRun['callPolicy'][number] = { modelId: f.mentorModel, model, provider: 'fixture', account: 'report-fixture',
+      const policy: FrozenPaygRun['callPolicy'][number] = { modelId: reportModelId, model, provider: 'fixture', account: 'report-fixture',
         protocol: 'fixture-cost-v1', upperUsd: '0.3', multiplier: '6', inputLimit: 196608, outputLimit: 1000,
         automaticRetry: false, hiddenTools: false, lookupSupported: false,
         providerLimits: { providerSlug: endpointTag, contextTokens: 250000, promptUsdPerMillion: '1', completionUsdPerMillion: '1', requestUsd: '0' },
@@ -48,7 +75,7 @@ export function registerReportTests(db: pg.Client, fixture: () => Promise<Fixtur
           nominalPricing: { version: 'nominal-v1', pricingHash, endpointTag,
             tiers: [{ minPromptTokens: 0, prompt: '1', completion: '1', request: '0' }], timeOfDay: [] } } };
       const billingUnit: NonNullable<FrozenPaygRun['rules']['billingUnit']> = { version: 'bill-unit-v2', creditsPerUsd: '100',
-        hash: 'f'.repeat(64), defaultMultiplier: '6', providers: {}, models: { [f.mentorModel]: { multiplier: '6', source: 'global' } } };
+        hash: 'f'.repeat(64), defaultMultiplier: '6', providers: {}, models: { [reportModelId]: { multiplier: '6', source: 'global' } } };
       const settingKeys = ['runtime_report_generation', 'billing_payg_start_thresholds',
         ...(real ? ['billing_credits_per_usd', 'billing_token_price_multiplier'] : [])];
       const previous = (await db.query('select key,value from system_settings where key=any($1)', [settingKeys])).rows;
@@ -57,6 +84,7 @@ export function registerReportTests(db: pg.Client, fixture: () => Promise<Fixtur
         let raw = ''; for await (const chunk of req) raw += chunk;
         calls++;
         const wire = JSON.parse(JSON.parse(raw).input);
+        expect(wire.model).toBe(model);
         expect(wire.messages).toHaveLength(2);
         expect(wire.tools).toBeUndefined();
         expect(wire.max_tokens).toBe(1000);
@@ -78,6 +106,17 @@ export function registerReportTests(db: pg.Client, fixture: () => Promise<Fixtur
           { headers: { 'content-type': 'text/event-stream' } });
       } });
       try {
+        if (override) {
+          await db.query(`insert into ai_models(id,name,model_id,provider,is_active,max_tokens,input_limit)
+            values($1,'Synthetic report model',$2,'fixture',$3,1000,250000)`,
+            [reportModelId, model, scenario === 'override_disabled' ? 'false' : 'true']);
+          await db.query('update modules set report_model_id=$1 where id=(select module_id from artifact_workflows where id=$2)',
+            [reportModelId, f.registration]);
+          // Deliberately different tariff: the dialogue model's prices cannot satisfy this assertion.
+          policy.payg!.nominalPricing.tiers[0]!.prompt = '2';
+          policy.providerLimits!.promptUsdPerMillion = '2';
+          policy.upperUsd = '0.6';
+        }
         if (real) {
           policy.provider = 'openrouter'; policy.protocol = 'openrouter-chat-v1'; policy.lookupSupported = true;
           policy.outputLimit = 8192;
@@ -89,7 +128,7 @@ export function registerReportTests(db: pg.Client, fixture: () => Promise<Fixtur
           config.pricing = pricingConfig(model, endpointTag, '1', '1').pricing;
           if (scenario === 'sonnet_missing_purpose') config.reasoning.purposes = {};
           await db.query("update ai_models set model_id=$2,provider='openrouter',input_limit=250000,max_tokens=8192,config=$3 where id=$1",
-            [f.mentorModel, model, scenario === 'sonnet_missing_config' ? { pricing: config.pricing } : config]);
+            [reportModelId, model, scenario === 'sonnet_missing_config' ? { pricing: config.pricing } : config]);
           for (const [key, value] of [['billing_credits_per_usd', '100'], ['billing_token_price_multiplier', '6']])
             await db.query('insert into system_settings(key,value) values($1,$2) on conflict(key) do update set value=excluded.value',
               [key, JSON.stringify(value)]);
@@ -99,15 +138,21 @@ export function registerReportTests(db: pg.Client, fixture: () => Promise<Fixtur
             [windowId, [f.actor], JSON.stringify([quote])]);
         }
         for (const [key, value] of Object.entries({ runtime_report_generation: scenario === 'string_flag' ? '{"enabled":true}' : { enabled: scenario !== 'disabled' },
-          billing_payg_start_thresholds: { version: 'fixture', thresholds: [{ model, purpose: 'report', credits: scenario.startsWith('waiting') ? 1001 : scenario === 'equal' ? 1000 : 1 }] } })) {
+          billing_payg_start_thresholds: { version: 'fixture', thresholds: [{ model, purpose: 'report', credits: waiting ? 1001 : scenario === 'equal' ? 1000 : 1 }] } })) {
           await db.query('insert into system_settings(key,value) values($1,$2) on conflict(key) do update set value=excluded.value',
             [key, JSON.stringify(value)]);
         }
         if (scenario === 'missing') await db.query("delete from system_settings where key='runtime_report_generation'");
         const service = reportService(f.user, f.admin, { ...(real ? { real: { id: windowId, creditsPerUsd: '100',
-          multiplier: '6', expiresAt: new Date(Date.now() + 7200000).toISOString(), callPolicies: [policy] } } : {}), payg: { callPolicies: [policy], billingUnit }, account: 'report-fixture',
+          multiplier: '6', expiresAt: new Date(Date.now() + 7200000).toISOString(), callPolicies: scenario === 'sonnet_override_denied' ? [] : [policy] } } : {}), payg: { callPolicies: scenario === 'override_no_quote' ? [] : [policy], billingUnit }, account: 'report-fixture',
           costPerCall: '0.3', creditsPerUsd: '100', multiplier: '6', maxCalls: 1, maxOutputTokens: 1000, inputBytes: 196608, historyItems: 0 });
         const input = { sessionId: detail.sessionId, projectId: detail.projectId, roundId: detail.roundId, requestId: randomUUID() };
+        if (scenario === 'override_disabled' || scenario === 'override_no_quote' || scenario === 'sonnet_override_denied') {
+          await expect(service.start(input)).rejects.toThrow(scenario === 'override_disabled'
+            ? 'REPORT_MODEL_UNAVAILABLE' : 'REPORT_MODEL_ADMISSION_REQUIRED');
+          expect((await db.query('select count(*)::int n from runtime_executions where request_id=$1', [input.requestId])).rows[0].n).toBe(0);
+          expect(calls).toBe(0); return;
+        }
         if (['free', 'disabled', 'missing', 'string_flag'].includes(scenario)) {
           await expect(service.start(input)).rejects.toThrow(scenario === 'free' ? 'REPORT_MEMBERSHIP_REQUIRED' : 'REPORT_DISABLED');
           expect((await db.query('select count(*)::int n from runtime_executions where request_id=$1', [input.requestId])).rows[0].n).toBe(0);
@@ -121,15 +166,40 @@ export function registerReportTests(db: pg.Client, fixture: () => Promise<Fixtur
           expect(requests).toHaveLength(0); expect(calls).toBe(0);
           return;
         }
-        const admitted = await service.start(input).catch(error => {
+        const attempt = scenario === 'override_race'
+          ? Promise.all([service.start(input), service.start(input)]).then(results => {
+            expect(results[0].executionId).toBe(results[1].executionId); return results[0];
+          }) : service.start(input);
+        const admitted = await attempt.catch(error => {
           let cause = error; while (cause.cause) cause = cause.cause; throw new Error(cause.message);
         });
+        if (scenario === 'override_race') {
+          const replay = await Promise.all([service.start(input), service.start(input)]);
+          expect(replay.every(r => r.executionId === admitted.executionId)).toBe(true);
+        }
         const frozen = (await db.query('select payload from runtime_executions where id=$1', [admitted.executionId])).rows[0].payload;
+        expect(frozen).toMatchObject({ modelId: reportModelId, model, purposeBudget: { purpose: 'report' } });
+        const billing = (await db.query('select payload from bill2_runs where id=$1', [admitted.runId])).rows[0].payload;
+        expect(billing.modelId).toBe(reportModelId);
+        expect(billing.callPolicy).toHaveLength(1);
+        expect(billing.callPolicy[0].modelId).toBe(reportModelId);
+        if (scenario === 'override') {
+          const forged = structuredClone(billing); forged.input.instructions += ' unpersisted';
+          await expect(db.query('select runtime_direct_billing_allowed_before_opc($1,$2,$3)',
+            [f.actor, forged, admitted.runId])).rejects.toThrow('RUNTIME_SKILL_MODEL_DENIED');
+        }
+        if (scenario === 'override_changed' || scenario === 'legacy_changed' || scenario === 'override_waiting') {
+          await db.query('update modules set report_model_id=$1 where id=(select module_id from artifact_workflows where id=$2)',
+            [scenario === 'legacy_changed' ? null : f.mentorModel, f.registration]);
+          // Also change dialogue binding: retained report checks use the immutable run identity.
+          await db.query('update modules set model_id=null where id=(select module_id from artifact_workflows where id=$1)', [f.registration]);
+          expect(await service.start(input)).toMatchObject({ executionId: admitted.executionId });
+        }
         if (real) {
           expect(frozen).toMatchObject({ role: 'skill', providerRequestFormat: 'agent-turn-v5-stream',
             reasoning: { effort: 'low' }, purposeBudget: { purpose: 'report' } });
           // Execution and replay must use the admitted snapshot, not mutable configuration.
-          await db.query("update ai_models set config=config-'reasoning' where id=$1", [f.mentorModel]);
+          await db.query("update ai_models set config=config-'reasoning' where id=$1", [reportModelId]);
           expect(await service.start(input)).toMatchObject({ executionId: admitted.executionId });
         }
         expect(frozen).not.toHaveProperty('promptCache'); expect(frozen).not.toHaveProperty('scopeMaterial');
@@ -177,6 +247,7 @@ export function registerReportTests(db: pg.Client, fixture: () => Promise<Fixtur
         const endpoint = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
         const run = () => runtimeExecutor({ database: f.admin, actor: async () => f.actor, endpoint, ...(real ? { adapter } : {}),
           callGate: async () => ({ ok: true }) });
+        const contextBefore = await f.admin.rpc('runtime_session_context', { p_actor_id: f.actor, p_session_id: detail.sessionId });
         const historyBefore = (await db.query('select revision from runtime_sessions where id=$1', [detail.sessionId])).rows[0].revision;
         let result = await run().execute(admitted.executionId);
         if (scenario === 'expired' || scenario === 'changed') {
@@ -185,7 +256,7 @@ export function registerReportTests(db: pg.Client, fixture: () => Promise<Fixtur
           expect((await db.query('select count(*)::int n from bill2_calls where run_id=$1', [admitted.runId])).rows[0].n).toBe(0);
           return;
         }
-        if (scenario.startsWith('waiting')) {
+        if (waiting) {
           expect(result).toMatchObject({ state: 'waiting_credits', code: 'RUNTIME_WAITING_CREDITS' }); expect(calls).toBe(0);
           // Fulfillment is represented by a real local grant; do not alter the frozen threshold.
           await db.query(`insert into credit_transactions(user_id,amount,type,ledger_type,reason_code,source_type,idempotency_key,balance_before,balance_after)
@@ -202,12 +273,22 @@ export function registerReportTests(db: pg.Client, fixture: () => Promise<Fixtur
         }
         expect(result).toMatchObject({ state: 'completed', completeness: scenario === 'length' ? 'length_limit' : 'complete' });
         expect(real ? requests.length : calls).toBe(1);
+        const contextAfter = await f.admin.rpc('runtime_session_context', { p_actor_id: f.actor, p_session_id: detail.sessionId });
+        expect(contextAfter.error).toBeNull();
+        expect(contextAfter.data.dialogueModelId).toBe(contextBefore.data.dialogueModelId);
         if (real) {
           expect(requests[0]).toMatchObject({ model, reasoning_effort: 'low', stream: true, max_tokens: 8192 });
           expect(requests[0]).not.toHaveProperty('reasoning'); expect(requests[0]).not.toHaveProperty('tools');
           expect(requests[0]!.messages).toHaveLength(2);
           expect((await db.query('select payload->>\'phase\' phase, metering_exit, metering_missing, budget_conflict from bill2_calls where run_id=$1', [admitted.runId])).rows)
             .toEqual([{ phase: 'report', metering_exit: false, metering_missing: false, budget_conflict: false }]);
+        }
+        if (override && !real) {
+          const billed = (await db.query('select model,upper_usd,reserved_credits,charged_delta from bill2_calls where run_id=$1', [admitted.runId])).rows[0];
+          expect(billed.model).toBe(model);
+          expect(Number(billed.upper_usd)).toBeGreaterThan(0);
+          expect(billed.reserved_credits).toBe(Math.ceil(Number(billed.upper_usd) * 100 * 6));
+          expect(billed.charged_delta).toBe(4); // ceil((3000*2 + 10)/1e6 * 100 * 6)
         }
         if (scenario === 'length') {
           expect((await db.query('select charged_delta from bill2_calls where run_id=$1', [admitted.runId])).rows[0].charged_delta).toBe(2);
