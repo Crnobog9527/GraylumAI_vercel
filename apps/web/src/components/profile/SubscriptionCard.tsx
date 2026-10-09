@@ -2,7 +2,7 @@
 
 import { memo, startTransition, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { Crown, Zap, CheckCircle2, Package } from 'lucide-react';
+import { Crown, Zap, CheckCircle2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -23,7 +23,11 @@ import {
   type MembershipPlanEligibilityEntry,
 } from './subscriptionPlanButtonState';
 import { invalidatePostCheckoutMembershipQueries } from './checkoutSyncInvalidations';
-import { CreditPackagePriceTag, formatUsd, getCreditPackagePrice } from './creditPackagePrice';
+import { formatUsd, getCreditPackagePrice } from './creditPackagePrice';
+import { ProfileCatalogState, emptyStateCardStyle } from './ProfileCatalogState';
+import { CreditPackagesSection } from './CreditPackagesSection';
+export { ProfileCatalogState } from './ProfileCatalogState';
+export { CreditPackagesSection } from './CreditPackagesSection';
 
 interface MockUser {
   subscription_tier?: 'free' | 'basic' | 'pro' | 'enterprise';
@@ -113,177 +117,6 @@ const PurchaseIntentDialog = memo(function PurchaseIntentDialog({
         </DialogFooter>
       </DialogContent>
     </Dialog>
-  );
-});
-
-const emptyStateCardStyle = {
-  borderColor: 'rgba(255,255,255,0.08)',
-  background: 'var(--bg-primary)',
-} as const;
-
-export function ProfileCatalogState({
-  status,
-  onRetry,
-  retrying = false,
-}: {
-  status: 'empty' | 'unavailable';
-  onRetry?: () => void;
-  retrying?: boolean;
-}) {
-  if (status === 'empty') {
-    return (
-      <div
-        data-testid="profile-catalog-empty"
-        className="col-span-4 rounded-xl border px-4 py-6 text-center text-sm"
-        style={emptyStateCardStyle}
-      >
-        <div className="font-medium mb-2" style={{ color: 'var(--text-primary)' }}>
-          当前暂无可用套餐
-        </div>
-        <div style={{ color: 'var(--text-tertiary)' }}>
-          新套餐开放后，这里会自动显示最新价格与权益。
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div
-      data-testid="profile-catalog-unavailable"
-      className="col-span-4 rounded-xl border px-4 py-6 text-center text-sm"
-      style={emptyStateCardStyle}
-    >
-      <div className="font-medium mb-2" style={{ color: 'var(--text-primary)' }}>
-        套餐服务暂不可用
-      </div>
-      <div style={{ color: 'var(--text-tertiary)' }}>
-        当前无法安全读取最新套餐与价格，请稍后重试。
-      </div>
-      {onRetry && (
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          className="mt-4"
-          disabled={retrying}
-          onClick={onRetry}
-        >
-          {retrying ? '重试中...' : '重试'}
-        </Button>
-      )}
-    </div>
-  );
-}
-
-// 积分加油包区块
-export const CreditPackagesSection = memo(function CreditPackagesSection({
-  onBuyClick, pendingPackageId, membershipLevel,
-}: {
-  onBuyClick?: (pkg: { id: string; name?: string; credits: number; bonus_credits: number; price: number; checkout_ready?: boolean }) => void;
-  pendingPackageId?: string | null; membershipLevel?: string | null;
-}) {
-  // 从 API 获取积分加油包数据
-  const {
-    data: packages = [],
-    isLoading,
-    isError,
-    isFetching,
-    refetch,
-  } = trpc.settings.getCreditPackages.useQuery();
-
-  return (
-    <div
-      className="mt-6 rounded-2xl p-6 md:p-8"
-      style={{
-        background: 'var(--bg-secondary)',
-        border: '1px solid var(--border-primary)',
-        boxShadow: '0 4px 20px rgba(0,0,0,0.2)'
-      }}
-    >
-      <div className="flex items-center gap-3 mb-6">
-        <div
-          className="p-2 rounded-lg"
-          style={{ background: 'rgba(139, 92, 246, 0.1)', border: '1px solid rgba(139, 92, 246, 0.2)' }}
-        >
-          <Package className="h-5 w-5" style={{ color: 'rgba(139, 92, 246, 1)' }} />
-        </div>
-        <h3 className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>积分加油包</h3>
-      </div>
-
-      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
-        {isLoading ? (
-          <div className="col-span-4 text-center py-8" style={{ color: 'var(--text-tertiary)' }}>
-            加载中...
-          </div>
-        ) : isError ? (
-          <ProfileCatalogState
-            status="unavailable"
-            retrying={isFetching}
-            onRetry={() => { void refetch(); }}
-          />
-        ) : packages.length === 0 ? (
-          <ProfileCatalogState status="empty" />
-        ) : packages.map((pkg) => (
-          <div
-            key={pkg.id}
-            data-testid={`profile-credit-package-${pkg.id}`}
-            className="relative rounded-xl p-4 text-center transition-colors duration-200"
-            style={{
-              background: 'var(--bg-primary)',
-              border: pkg.is_popular ? '2px solid rgba(59, 130, 246, 0.5)' : '1px solid var(--border-primary)',
-              boxShadow: pkg.is_popular ? '0 0 20px rgba(59, 130, 246, 0.2)' : 'none'
-            }}
-          >
-            {pkg.is_popular && (
-              <div
-                className="absolute -top-3 left-1/2 -translate-x-1/2 px-3 py-1 rounded-full text-xs font-medium"
-                style={{ background: 'rgba(59, 130, 246, 0.2)', color: '#3B82F6', border: '1px solid rgba(59, 130, 246, 0.3)' }}
-              >
-                热门
-              </div>
-            )}
-            <div className="flex items-center justify-center gap-1 mb-2 mt-2">
-              <Zap className="h-5 w-5" style={{ color: 'var(--color-primary)' }} />
-              <span
-                className="text-2xl font-bold"
-                style={{
-                  background: 'linear-gradient(135deg, var(--color-primary) 0%, var(--color-secondary) 100%)',
-                  WebkitBackgroundClip: 'text',
-                  WebkitTextFillColor: 'transparent'
-                }}
-              >
-                {pkg.credits.toLocaleString()}
-              </span>
-            </div>
-            {pkg.bonus_credits > 0 && (
-              <div className="text-xs mb-2" style={{ color: 'var(--success)' }}>
-                +{pkg.bonus_credits} 赠送
-              </div>
-            )}
-            <CreditPackagePriceTag listUsd={pkg.price} membershipLevel={membershipLevel} />
-            <div
-              data-testid="profile-credit-package-name"
-              className="text-sm font-medium mb-3"
-              style={{ color: 'var(--text-primary)' }}
-            >
-              {'name' in pkg && typeof pkg.name === 'string' ? pkg.name : `${pkg.credits.toLocaleString()} 积分包`}
-            </div>
-            <Button
-              onClick={() => onBuyClick?.(pkg)}
-              size="sm"
-              disabled={pendingPackageId === pkg.id || !pkg.checkout_ready || !Number.isFinite(pkg.price) || pkg.price <= 0}
-              className="w-full gap-2"
-              style={{
-                background: 'linear-gradient(135deg, var(--color-primary) 0%, var(--color-secondary) 100%)',
-                color: 'var(--bg-primary)'
-              }}
-            >
-              {pendingPackageId === pkg.id ? '跳转中...' : pkg.checkout_ready && pkg.price > 0 ? '购买' : '暂不可购买'}
-            </Button>
-          </div>
-        ))}
-      </div>
-    </div>
   );
 });
 

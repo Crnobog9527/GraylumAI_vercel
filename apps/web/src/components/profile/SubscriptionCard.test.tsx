@@ -10,6 +10,7 @@ const componentState = vi.hoisted(() => ({
   plansQuery: {} as Record<string, unknown>,
   eligibilityQuery: {} as Record<string, unknown>,
   packagesQuery: {} as Record<string, unknown>,
+  entitlementsQuery: { data: { level: 'pro' }, isError: false } as Record<string, unknown>,
 }));
 
 vi.mock('next/navigation', () => ({
@@ -30,6 +31,7 @@ vi.mock('@/trpc/client', () => {
           listBillingRecords: { invalidate },
         },
       }),
+      user: { getEntitlements: { useQuery: () => componentState.entitlementsQuery } },
       settings: {
         getMembershipPlans: { useQuery: () => componentState.plansQuery },
         getCreditPackages: { useQuery: () => componentState.packagesQuery },
@@ -83,6 +85,7 @@ function renderSubscription() {
 
 describe('SubscriptionCard catalog availability', () => {
   beforeEach(() => {
+    componentState.entitlementsQuery = { data: { level: 'pro' }, isError: false };
     componentState.packagesQuery = queryState();
     componentState.plansQuery = queryState();
     componentState.eligibilityQuery = queryState({ data: { entries: [] } });
@@ -220,6 +223,22 @@ describe('SubscriptionCard catalog availability', () => {
     const free = renderToStaticMarkup(createElement(CreditPackagesSection, { membershipLevel: 'free' }));
     expect(free).toMatch(/data-testid="profile-credit-package-price"[^>]*>\$1\.00<\/div>/);
     expect(free).not.toContain('<del');
+  });
+
+  it('free users see packs but cannot buy them, with the members-only notice', () => {
+    componentState.packagesQuery = queryState({ data: [{ id: 'package', name: '积分包', credits: 990, bonus_credits: 0, price: 9.9,
+      checkout_ready: true }] });
+    componentState.entitlementsQuery = { data: { level: 'free' }, isError: false };
+    const free = renderToStaticMarkup(createElement(CreditPackagesSection, { membershipLevel: 'free' }));
+    expect(free).toContain('开通会员后可购买');
+    expect(free).toContain('data-testid="profile-credit-packages-members-only"');
+    expect(free).toContain('disabled=""');
+    componentState.entitlementsQuery = { data: undefined, isError: true };
+    expect(renderToStaticMarkup(createElement(CreditPackagesSection, {}))).toContain('暂时无法确认会员状态');
+    componentState.entitlementsQuery = { data: { level: 'gold' }, isError: false };
+    const gold = renderToStaticMarkup(createElement(CreditPackagesSection, { membershipLevel: 'gold' }));
+    expect(gold).toContain('>购买<');
+    expect(gold).not.toContain('profile-credit-packages-members-only');
   });
 
   it.each([null, 'waffo'])('renders but disables purchase when the selected channel is %j', (paymentChannel) => {
