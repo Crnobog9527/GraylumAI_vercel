@@ -167,7 +167,7 @@ describe('bounded erasure storage with synthetic adapters only', () => {
     const t = setup([file('a')]);
     t.storage.listPrefix.mockResolvedValue({ paths: [file('a')], nextAfterPath: file('a') });
     expect((await t.clean()).complete).toBe(false); expect(t.storage.remove).toHaveBeenCalledTimes(1);
-    const manifest = setup(); manifest.manifest.list.mockResolvedValue({ items: [entry(file('a', admin))], nextCursor: 'same' });
+    const manifest = setup([], [entry(file('a', admin))]); manifest.manifest.list.mockResolvedValue({ items: [entry(file('a', admin))], nextCursor: 'same' });
     expect((await manifest.clean()).complete).toBe(false); expect(manifest.manifest.list).toHaveBeenCalledTimes(2);
     const oversized = setup([], [], { pageSize: 1 });
     oversized.storage.listPrefix.mockResolvedValue({ paths: [file('a'), file('b')], nextAfterPath: null });

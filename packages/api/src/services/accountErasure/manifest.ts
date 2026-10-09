@@ -5,8 +5,8 @@ import { isCanonicalErasureAttachment, type ErasureAttachmentManifest } from './
 
 const uuid = z.string().uuid();
 const attachments = z.array(z.string()).nullable();
-const ticketSchema = z.object({ id: uuid, user_id: uuid, attachments }).strict();
-const replySchema = z.object({ id: uuid, ticket_id: uuid, user_id: uuid, attachments }).strict();
+const ticketSchema = z.object({ id: uuid, user_id: uuid.nullable(), attachments }).strict();
+const replySchema = z.object({ id: uuid, ticket_id: uuid, user_id: uuid.nullable(), attachments }).strict();
 const limitsSchema = z.object({
   pageSize: z.number().int().min(1).max(1000), maxRows: z.number().int().min(1).max(10000),
   timeoutMs: z.number().int().min(1).max(5000),
@@ -17,7 +17,7 @@ type Reference = { path: string; uploaderId: string; subjectId: string };
 /** Reads current raw references, including soft-deleted tickets and administrator replies.
  * This cannot recover previously purged references or prove historical completeness.
  * A trusted host must supply that independent proof; absence of a verifier fails closed.
- * No credentials, default SDK, persistent snapshot, scheduling or production caller.
+ * No credentials or persistent snapshot; executor.ts supplies the DB-backed proof.
  * Reference/upload quiescence must still cover classification through external deletion. */
 export function createErasureAttachmentManifest(input: {
   client: Pick<SupabaseClient, 'from'>;
@@ -74,11 +74,16 @@ export function createErasureAttachmentManifest(input: {
             refs.push({ path, uploaderId, subjectId });
           }
         };
-        for (const row of tickets) add(row.attachments, row.user_id, [row.user_id]);
+        for (const row of tickets) {
+          if (!row.attachments?.length) continue;
+          if (!row.user_id) throw failure();
+          add(row.attachments, row.user_id, [row.user_id]);
+        }
         for (const row of replies) {
+          if (!row.attachments?.length) continue;
           const owner = owners.get(row.ticket_id);
           if (!owner) throw failure();
-          add(row.attachments, owner, [owner, row.user_id]);
+          add(row.attachments, owner, row.user_id ? [owner, row.user_id] : [owner]);
         }
         return refs;
       };
@@ -106,8 +111,8 @@ export function createErasureAttachmentManifest(input: {
       const refs = await inventory(profileId, signal);
       return paths.map(path => {
         const owners = new Set(refs.filter(row => row.path === path).map(row => row.subjectId));
-        // This slice does not authorize removal of administrator/other-uploader paths,
-        // even when the retained ticket currently appears exclusive to the subject.
+        // Legacy injected callers remain conservative; the wired executor uses
+        // scopedManifest.ts with SQL-backed history and uploader-drain proof.
         const state = owners.size > 0 && (owners.size > 1 || !owners.has(profileId)) ? 'shared'
           : !path.startsWith(`${profileId}/`) ? 'unknown'
             : owners.size === 0 ? 'unreferenced' : 'exclusive';

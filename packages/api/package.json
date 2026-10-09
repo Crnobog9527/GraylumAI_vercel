@@ -51,7 +51,8 @@
     "./services/bill2": "./src/services/bill2/service.ts",
     "./skills/workflowManifest": "./src/services/skills/workflowManifest.ts",
     "./skills/modulePublication": "./src/services/skills/modulePublication.ts",
-    "./src/services/runtime/automaticRecovery": "./src/services/runtime/automaticRecovery.ts"
+    "./src/services/runtime/automaticRecovery": "./src/services/runtime/automaticRecovery.ts",
+    "./src/services/accountErasure/executor": "./src/services/accountErasure/executor.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/client": "2.2.0",

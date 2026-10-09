@@ -37,6 +37,10 @@
     {
       "path": "/api/cron/diagnostics",
       "schedule": "0 10 * * *"
+    },
+    {
+      "path": "/api/cron/account-erasure",
+      "schedule": "0 5 * * *"
     }
   ]
 }

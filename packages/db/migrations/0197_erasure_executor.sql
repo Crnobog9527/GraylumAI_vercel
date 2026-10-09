@@ -1,0 +1,338 @@
+-- Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved.
+-- Reuse the subject and erasure request as authority; no queue or expiring lease.
+BEGIN;
+SET LOCAL lock_timeout = '5s';
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS erasure_history_complete boolean NOT NULL DEFAULT false;
+ALTER TABLE public.account_erasure_requests
+ ADD COLUMN IF NOT EXISTS auth_delete_claim_token uuid,
+ ADD COLUMN IF NOT EXISTS auth_delete_dispatch_ready boolean NOT NULL DEFAULT false,
+ ADD COLUMN IF NOT EXISTS executor_recovery_evidence jsonb,
+ ADD COLUMN IF NOT EXISTS storage_prefix_cursor text,
+ ADD COLUMN IF NOT EXISTS storage_prefix_review boolean NOT NULL DEFAULT false,
+ ADD COLUMN IF NOT EXISTS storage_prefix_done boolean NOT NULL DEFAULT false,
+ ADD COLUMN IF NOT EXISTS storage_manifest_review boolean NOT NULL DEFAULT false,
+ ADD COLUMN IF NOT EXISTS storage_manifest_cursor text,
+ ADD COLUMN IF NOT EXISTS storage_manifest_done boolean NOT NULL DEFAULT false,
+ ADD COLUMN IF NOT EXISTS executor_token uuid,
+ ADD COLUMN IF NOT EXISTS executor_started_at timestamptz,
+ ADD COLUMN IF NOT EXISTS executor_attempted_at timestamptz,
+ ADD COLUMN IF NOT EXISTS executor_error_codes text[] NOT NULL DEFAULT '{}';
+
+-- Only insertion after this guard establishes known history. Existing subjects stay unknown.
+-- Reference loss is rejected until verified cleanup; ordinary purge retains the mapping.
+CREATE OR REPLACE FUNCTION public.erasure_history_guard() RETURNS trigger
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
+BEGIN
+ IF TG_OP='INSERT' THEN NEW.erasure_history_complete:=true;
+ ELSIF NEW.erasure_history_complete AND NOT OLD.erasure_history_complete THEN
+  RAISE EXCEPTION 'ERASURE_HISTORY_CANNOT_BE_ASSERTED' USING ERRCODE='42501';
+ END IF;
+ RETURN NEW;
+END $$;
+DROP TRIGGER IF EXISTS erasure_history_guard ON public.profiles;
+CREATE TRIGGER erasure_history_guard BEFORE INSERT OR UPDATE ON public.profiles
+ FOR EACH ROW EXECUTE FUNCTION public.erasure_history_guard();
+CREATE OR REPLACE FUNCTION public.erasure_history_lost() RETURNS trigger
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
+DECLARE subject uuid;
+BEGIN
+ IF OLD.attachments IS NULL OR OLD.attachments='[]'::jsonb THEN
+  IF TG_OP='DELETE' THEN RETURN OLD; ELSE RETURN NEW; END IF;
+ END IF;
+ IF TG_OP='UPDATE' AND OLD.attachments<@coalesce(NEW.attachments,'[]'::jsonb) THEN RETURN NEW; END IF;
+ IF TG_TABLE_NAME='tickets' THEN subject:=OLD.user_id;
+ ELSE SELECT user_id INTO subject FROM tickets WHERE id=OLD.ticket_id; END IF;
+ IF NOT EXISTS(SELECT 1 FROM account_erasure_requests e WHERE e.profile_id IN (subject,OLD.user_id)
+  AND e.storage_verified_at IS NOT NULL) THEN
+  RAISE EXCEPTION 'ERASURE_ATTACHMENT_HISTORY_REQUIRED' USING ERRCODE='42501';
+ END IF;
+ IF TG_OP='DELETE' THEN RETURN OLD; END IF;
+ RETURN NEW;
+END $$;
+DROP TRIGGER IF EXISTS erasure_history_lost ON public.tickets;
+CREATE TRIGGER erasure_history_lost BEFORE DELETE OR UPDATE OF attachments ON public.tickets
+ FOR EACH ROW EXECUTE FUNCTION public.erasure_history_lost();
+DROP TRIGGER IF EXISTS erasure_history_lost ON public.ticket_replies;
+CREATE TRIGGER erasure_history_lost BEFORE DELETE OR UPDATE OF attachments ON public.ticket_replies
+ FOR EACH ROW EXECUTE FUNCTION public.erasure_history_lost();
+
+-- Stamp the existing proof before reference deletion, in the same transaction.
+DO $$
+DECLARE source text; needle text;
+BEGIN
+ source:=pg_get_functiondef('public.account_erasure_local_cleanup(uuid,boolean)'::regprocedure);
+ needle:='  DELETE FROM ticket_replies WHERE ctid IN';
+ IF position('-- executor storage proof' IN source)=0 THEN
+  IF length(source)-length(replace(source,needle,''))<>length(needle) THEN RAISE EXCEPTION 'ERASURE_EXECUTOR_SOURCE_MISMATCH'; END IF;
+  EXECUTE replace(source,needle,E'  -- executor storage proof\n  UPDATE account_erasure_requests SET storage_verified_at=clock_timestamp() WHERE profile_id=p_profile_id;\n'||needle);
+ END IF;
+END $$;
+
+-- Blank only body fields while preserving attachment authority until absence proof.
+DO $$
+DECLARE source text; needle text;
+BEGIN
+ source:=pg_get_functiondef('public.account_erasure_ticket_guard()'::regprocedure);
+ needle:=' -- The service-only retention function';
+ IF position('-- executor body scrub' IN source)=0 THEN
+  IF position(needle IN source)=0 THEN RAISE EXCEPTION 'ERASURE_GUARD_SOURCE_MISMATCH'; END IF;
+  source:=replace(source,'JOIN account_erasure_requests e ON e.profile_id=t.user_id WHERE coalesce(r.attachments',
+   'JOIN account_erasure_requests e ON (e.profile_id=t.user_id OR e.profile_id=r.user_id) WHERE coalesce(r.attachments');
+  EXECUTE replace(source,needle,$patch$ -- executor body scrub
+ IF TG_OP='UPDATE' AND (EXISTS(SELECT 1 FROM account_erasure_requests WHERE profile_id=subject)
+  OR EXISTS(SELECT 1 FROM account_erasure_requests WHERE profile_id=OLD.user_id)) THEN
+  IF TG_TABLE_NAME='tickets' THEN
+   IF NEW.title='' AND NEW.description='' AND to_jsonb(NEW)-ARRAY['title','description']=to_jsonb(OLD)-ARRAY['title','description'] THEN RETURN NEW; END IF;
+  ELSE
+   IF NEW.content='' AND to_jsonb(NEW)-'content'=to_jsonb(OLD)-'content' THEN RETURN NEW; END IF;
+  END IF;
+ END IF;
+ IF TG_TABLE_NAME='ticket_replies' AND EXISTS(SELECT 1 FROM account_erasure_requests WHERE profile_id=NEW.user_id) THEN
+  RAISE EXCEPTION 'ACCOUNT_ERASURE_TICKET_CLOSED' USING ERRCODE='42501';
+ END IF;
+$patch$||needle);
+ END IF;
+ source:=pg_get_functiondef('public.account_erasure_local_cleanup(uuid,boolean)'::regprocedure);
+ needle:=' IF p_storage_verified AND NOT EXISTS';
+ IF position('-- executor body scrub' IN source)=0 THEN
+  IF position(needle IN source)=0 THEN RAISE EXCEPTION 'ERASURE_CLEANUP_SOURCE_MISMATCH'; END IF;
+  EXECUTE replace(source,needle,$patch$ -- executor body scrub
+ UPDATE tickets SET title='',description='' WHERE ctid IN (SELECT ctid FROM tickets
+  WHERE user_id=p_profile_id AND (title<>'' OR description<>'') LIMIT 100 FOR UPDATE SKIP LOCKED);
+ UPDATE ticket_replies SET content='' WHERE ctid IN (SELECT r.ctid FROM ticket_replies r
+  WHERE content<>'' AND (r.user_id=p_profile_id OR EXISTS(SELECT 1 FROM tickets t WHERE t.id=r.ticket_id AND t.user_id=p_profile_id))
+  LIMIT 100 FOR UPDATE OF r SKIP LOCKED);
+$patch$||needle);
+ END IF;
+END $$;
+
+-- Ordinary expiration clears bodies but retains attachment authority before closure too.
+DO $$
+DECLARE source text; first_pos integer; last_pos integer;
+BEGIN
+ source:=pg_get_functiondef('public.purge_deleted_records(integer)'::regprocedure);
+ IF position('-- executor preclosure retention' IN source)=0 THEN
+  first_pos:=position(' -- Do not extend body retention' IN source);
+  last_pos:=position(' DELETE FROM prompts' IN source);
+  IF first_pos=0 OR last_pos<=first_pos THEN RAISE EXCEPTION 'ERASURE_PURGE_SOURCE_MISMATCH'; END IF;
+  EXECUTE overlay(source PLACING $patch$ -- executor preclosure retention
+ UPDATE ticket_replies r SET content='' WHERE (r.is_deleted='true' AND r.deleted_at<cutoff)
+  OR EXISTS(SELECT 1 FROM tickets t WHERE t.id=r.ticket_id AND t.is_deleted='true' AND t.deleted_at<cutoff);
+ UPDATE tickets t SET title='',description='' WHERE t.is_deleted='true' AND t.deleted_at<cutoff;
+ DELETE FROM ticket_replies r WHERE r.is_deleted='true' AND r.deleted_at<cutoff
+  AND coalesce(r.attachments,'[]'::jsonb)='[]'::jsonb
+  AND NOT EXISTS(SELECT 1 FROM account_erasure_requests e WHERE e.profile_id=r.user_id)
+  AND NOT EXISTS(SELECT 1 FROM tickets t JOIN account_erasure_requests e ON e.profile_id=t.user_id WHERE t.id=r.ticket_id);
+ GET DIAGNOSTICS removed=ROW_COUNT; RETURN QUERY SELECT 'ticket_replies'::text,removed;
+ DELETE FROM tickets t WHERE t.is_deleted='true' AND t.deleted_at<cutoff
+  AND coalesce(t.attachments,'[]'::jsonb)='[]'::jsonb
+  AND NOT EXISTS(SELECT 1 FROM ticket_replies r WHERE r.ticket_id=t.id AND coalesce(r.attachments,'[]'::jsonb)<>'[]'::jsonb)
+  AND NOT EXISTS(SELECT 1 FROM account_erasure_requests e WHERE e.profile_id=t.user_id)
+  AND NOT EXISTS(SELECT 1 FROM ticket_replies r JOIN account_erasure_requests e ON e.profile_id=r.user_id WHERE r.ticket_id=t.id);
+ GET DIAGNOSTICS removed=ROW_COUNT; RETURN QUERY SELECT 'tickets'::text,removed;
+$patch$ FROM first_pos FOR last_pos-first_pos);
+ END IF;
+END $$;
+
+-- A released worker may prove it never invoked Auth. Reuse that original intent;
+-- a dispatched/uncertain external deletion never receives another dispatch claim.
+DO $$
+DECLARE source text; needle text;
+BEGIN
+ source:=pg_get_functiondef('public.account_erasure_auth_begin(uuid,uuid)'::regprocedure);
+ needle:='IF ready AND request.auth_delete_started_at IS NULL THEN';
+ IF position('auth_delete_dispatch_ready' IN source)=0 THEN
+  IF position(needle IN source)=0 THEN RAISE EXCEPTION 'ERASURE_AUTH_SOURCE_MISMATCH'; END IF;
+  source:=replace(source,needle,'IF ready AND (request.auth_delete_started_at IS NULL OR request.auth_delete_dispatch_ready) THEN');
+  source:=replace(source,'SET auth_delete_started_at=clock_timestamp(),',
+   'SET auth_delete_started_at=coalesce(auth_delete_started_at,clock_timestamp()),auth_delete_claim_token=executor_token,auth_delete_dispatch_ready=false,');
+  EXECUTE source;
+ END IF;
+END $$;
+
+CREATE OR REPLACE FUNCTION public.account_erasure_executor_claim(p_token uuid)
+RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
+DECLARE r public.account_erasure_requests;
+BEGIN
+ IF p_token IS NULL THEN RAISE EXCEPTION 'ERASURE_EXECUTOR_INVALID'; END IF;
+ SELECT * INTO r FROM account_erasure_requests WHERE stage<>'completed' AND executor_token IS NULL
+  AND (executor_attempted_at IS NULL OR executor_attempted_at<clock_timestamp()-interval '5 minutes')
+  ORDER BY executor_attempted_at NULLS FIRST,confirmed_at,profile_id LIMIT 1 FOR UPDATE SKIP LOCKED;
+ IF r.profile_id IS NULL THEN RETURN jsonb_build_object('claimed',false); END IF;
+ PERFORM account_erasure_assert_closed(r.profile_id);
+ UPDATE account_erasure_requests SET executor_token=p_token,executor_started_at=clock_timestamp(),
+  executor_attempted_at=clock_timestamp(),executor_error_codes=ARRAY['ERASURE_EXECUTOR_RUNNING'] WHERE profile_id=r.profile_id;
+ RETURN jsonb_build_object('claimed',true,'profileId',r.profile_id,'requestId',r.request_id);
+END $$;
+CREATE OR REPLACE FUNCTION public.account_erasure_executor_proof(p_profile_id uuid,p_request_id uuid,p_token uuid)
+RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
+BEGIN
+ PERFORM account_erasure_assert_closed(p_profile_id);
+ IF NOT EXISTS(SELECT 1 FROM account_erasure_requests WHERE profile_id=p_profile_id
+  AND request_id=p_request_id AND executor_token=p_token AND p_token IS NOT NULL) THEN
+  RAISE EXCEPTION 'ERASURE_EXECUTOR_NOT_CLAIMED' USING ERRCODE='42501';
+ END IF;
+ RETURN jsonb_build_object('historyComplete',(SELECT erasure_history_complete FROM profiles WHERE id=p_profile_id),
+  'quiescent',(account_erasure_storage_ready(p_profile_id)->>'ready')::boolean
+   AND NOT EXISTS(SELECT 1 FROM ticket_upload_intents i WHERE i.profile_id::text IN (
+    SELECT split_part(path,'/',1) FROM tickets t CROSS JOIN LATERAL
+     jsonb_array_elements_text(coalesce(t.attachments,'[]'::jsonb)) path WHERE t.user_id=p_profile_id
+    UNION SELECT split_part(path,'/',1) FROM ticket_replies r JOIN tickets t ON t.id=r.ticket_id
+     CROSS JOIN LATERAL jsonb_array_elements_text(coalesce(r.attachments,'[]'::jsonb)) path WHERE t.user_id=p_profile_id OR r.user_id=p_profile_id)));
+END $$;
+CREATE OR REPLACE FUNCTION public.account_erasure_executor_finish(
+ p_profile_id uuid,p_request_id uuid,p_token uuid,p_codes text[],p_release boolean,p_auth_not_dispatched boolean DEFAULT false
+) RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
+DECLARE n integer;
+BEGIN
+ IF p_codes IS NULL OR cardinality(p_codes)>20 OR p_release IS NULL OR p_auth_not_dispatched IS NULL
+  OR EXISTS(SELECT 1 FROM unnest(p_codes) c WHERE c IS NULL OR c!~'^[A-Z0-9_]{1,64}$') THEN
+  RAISE EXCEPTION 'ERASURE_EXECUTOR_INVALID';
+ END IF;
+ UPDATE account_erasure_requests SET executor_error_codes=p_codes,
+  auth_delete_dispatch_ready=CASE WHEN p_release AND p_auth_not_dispatched
+   AND auth_delete_claim_token=p_token AND auth_delete_started_at IS NOT NULL AND auth_deleted_at IS NULL
+   THEN true ELSE auth_delete_dispatch_ready END,
+  executor_token=CASE WHEN p_release THEN NULL ELSE executor_token END,
+  executor_started_at=CASE WHEN p_release THEN NULL ELSE executor_started_at END
+ WHERE profile_id=p_profile_id AND request_id=p_request_id AND executor_token=p_token AND p_token IS NOT NULL;
+ GET DIAGNOSTICS n=ROW_COUNT;
+ RETURN jsonb_build_object('recorded',n=1);
+END $$;
+-- Manual, service-only recovery after independently reviewed worker/I/O evidence.
+-- These are operator attestations, never a lease expiry or inferred remote outcome.
+CREATE OR REPLACE FUNCTION public.account_erasure_executor_recover(
+ p_profile_id uuid,p_request_id uuid,p_token uuid,p_evidence jsonb,p_auth_state text
+) RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
+DECLARE r public.account_erasure_requests;
+BEGIN
+ PERFORM account_erasure_assert_closed(p_profile_id);
+ IF p_token IS NULL OR p_auth_state NOT IN ('present','absent') OR p_auth_state IS NULL
+  OR p_evidence IS NULL OR jsonb_typeof(p_evidence)<>'object'
+  OR p_evidence-ARRAY['workerStopped','ioSettled','workerEvidenceHash','ioEvidenceHash','authNeverDispatched']<>'{}'::jsonb
+  OR p_evidence->'workerStopped' IS DISTINCT FROM 'true'::jsonb OR p_evidence->'ioSettled' IS DISTINCT FROM 'true'::jsonb
+  OR coalesce(p_evidence->>'workerEvidenceHash','')!~'^[0-9a-f]{64}$'
+  OR coalesce(p_evidence->>'ioEvidenceHash','')!~'^[0-9a-f]{64}$'
+  OR jsonb_typeof(p_evidence->'authNeverDispatched') IS DISTINCT FROM 'boolean' THEN
+  RAISE EXCEPTION 'ERASURE_RECOVERY_EVIDENCE_REQUIRED';
+ END IF;
+ IF NOT account_erasure_barrier() THEN RAISE EXCEPTION 'ERASURE_TRANSACTIONS_PENDING'; END IF;
+ SELECT * INTO r FROM account_erasure_requests WHERE profile_id=p_profile_id FOR UPDATE;
+ IF r.request_id IS DISTINCT FROM p_request_id THEN RAISE EXCEPTION 'ERASURE_IDENTITY_MISMATCH'; END IF;
+ IF r.executor_recovery_evidence=jsonb_build_object('token',p_token,'evidence',p_evidence) THEN
+  RETURN jsonb_build_object('recovered',true);
+ END IF;
+ IF r.executor_token IS DISTINCT FROM p_token THEN RAISE EXCEPTION 'ERASURE_EXECUTOR_NOT_CLAIMED'; END IF;
+ UPDATE account_erasure_requests SET executor_token=NULL,executor_started_at=NULL,
+  executor_recovery_evidence=jsonb_build_object('token',p_token,'evidence',p_evidence),
+  executor_error_codes=ARRAY['ERASURE_EXECUTOR_RECOVERED'],
+  auth_delete_dispatch_ready=CASE WHEN (p_evidence->>'authNeverDispatched')::boolean
+   AND auth_delete_claim_token=p_token AND auth_deleted_at IS NULL AND p_auth_state='present'
+   THEN true ELSE auth_delete_dispatch_ready END
+ WHERE profile_id=p_profile_id;
+ RETURN jsonb_build_object('recovered',true);
+END $$;
+
+CREATE OR REPLACE FUNCTION public.account_erasure_executor_pending()
+RETURNS jsonb LANGUAGE sql STABLE SECURITY DEFINER SET search_path=public,pg_temp AS $$
+ SELECT to_jsonb(count(*)) FROM account_erasure_requests WHERE stage<>'completed';
+$$;
+-- Bounded subject inventory and indexed candidate-path checks avoid a global row cap.
+CREATE INDEX IF NOT EXISTS erasure_ticket_paths ON public.tickets USING gin(attachments);
+CREATE INDEX IF NOT EXISTS erasure_reply_paths ON public.ticket_replies USING gin(attachments);
+CREATE OR REPLACE FUNCTION public.account_erasure_attachment_page(
+ p_profile_id uuid,p_after text DEFAULT NULL,p_limit integer DEFAULT 50
+) RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
+DECLARE items jsonb; next_cursor text;
+BEGIN
+ PERFORM account_erasure_assert_closed(p_profile_id);
+ IF p_limit IS NULL OR p_limit<1 OR p_limit>100 THEN RAISE EXCEPTION 'ERASURE_BATCH_LIMIT_INVALID'; END IF;
+ -- Cursor contains only source row identity and array ordinal, never a filename or body.
+ WITH refs AS (
+  SELECT path,CASE WHEN split_part(path,'/',1)=t.user_id::text THEN t.user_id::text ELSE '' END uploader,
+   '0:'||t.id::text||':'||lpad(ord::text,10,'0') cursor
+   FROM tickets t CROSS JOIN LATERAL jsonb_array_elements_text(coalesce(t.attachments,'[]')) WITH ORDINALITY a(path,ord)
+   WHERE t.user_id=p_profile_id
+  UNION ALL
+  SELECT path,CASE WHEN split_part(path,'/',1) IN (t.user_id::text,r.user_id::text) THEN split_part(path,'/',1) ELSE '' END,
+   '1:'||r.id::text||':'||lpad(ord::text,10,'0')
+   FROM tickets t JOIN ticket_replies r ON r.ticket_id=t.id
+   CROSS JOIN LATERAL jsonb_array_elements_text(coalesce(r.attachments,'[]')) WITH ORDINALITY a(path,ord)
+   WHERE t.user_id=p_profile_id OR r.user_id=p_profile_id
+ ), page AS (SELECT * FROM refs WHERE p_after IS NULL OR cursor COLLATE "C">p_after COLLATE "C"
+  ORDER BY cursor COLLATE "C" LIMIT p_limit+1)
+ SELECT coalesce(jsonb_agg(jsonb_build_object('path',path,'uploaderId',uploader,'subjectId',p_profile_id)
+  ORDER BY cursor COLLATE "C"),'[]'),CASE WHEN count(*)>p_limit THEN
+   (array_agg(cursor ORDER BY cursor COLLATE "C"))[p_limit] ELSE NULL END INTO items,next_cursor FROM page;
+ RETURN jsonb_build_object('items',CASE WHEN jsonb_array_length(items)>p_limit THEN items-p_limit ELSE items END,
+  'nextCursor',next_cursor);
+END $$;
+CREATE OR REPLACE FUNCTION public.account_erasure_attachment_checkpoint(
+ p_profile_id uuid,p_request_id uuid,p_token uuid,p_after text DEFAULT NULL,p_next text DEFAULT NULL,
+ p_commit boolean DEFAULT false,p_review boolean DEFAULT false,p_prefix boolean DEFAULT false
+) RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
+DECLARE r public.account_erasure_requests; needs_review boolean; current_cursor text; finished boolean;
+BEGIN
+ PERFORM account_erasure_assert_closed(p_profile_id);
+ SELECT * INTO r FROM account_erasure_requests WHERE profile_id=p_profile_id FOR UPDATE;
+ IF p_token IS NULL OR r.executor_token IS DISTINCT FROM p_token OR r.request_id IS DISTINCT FROM p_request_id THEN
+  RAISE EXCEPTION 'ERASURE_EXECUTOR_NOT_CLAIMED' USING ERRCODE='42501';
+ END IF;
+ IF p_commit IS NULL OR p_review IS NULL OR p_prefix IS NULL THEN RAISE EXCEPTION 'ERASURE_CHECKPOINT_INVALID'; END IF;
+ current_cursor:=CASE WHEN p_prefix THEN r.storage_prefix_cursor ELSE r.storage_manifest_cursor END;
+ finished:=CASE WHEN p_prefix THEN r.storage_prefix_done ELSE r.storage_manifest_done END;
+ needs_review:=CASE WHEN p_prefix THEN r.storage_prefix_review ELSE r.storage_manifest_review END;
+ IF p_commit THEN
+  IF finished OR current_cursor IS DISTINCT FROM p_after OR p_next IS NOT NULL AND (
+   (NOT p_prefix AND p_next!~'^[01]:[0-9a-f-]{36}:[0-9]{10}$')
+   OR (p_prefix AND (p_next NOT LIKE p_profile_id::text||'/%' OR position('..' IN p_next)>0
+    OR length(p_next)>17000 OR p_next!~'^[0-9a-f-]{36}/[A-Za-z0-9][A-Za-z0-9._-]{0,254}[|][^|]+$'))
+   OR p_after IS NOT NULL AND split_part(p_next,'|',1) COLLATE "C"<=split_part(p_after,'|',1) COLLATE "C") THEN
+   RAISE EXCEPTION 'ERASURE_CHECKPOINT_INVALID';
+  END IF;
+  needs_review:=p_review OR (p_after IS NOT NULL AND needs_review);
+  finished:=p_next IS NULL AND NOT needs_review;current_cursor:=p_next;
+  IF p_prefix THEN
+   UPDATE account_erasure_requests SET storage_prefix_cursor=current_cursor,storage_prefix_review=needs_review,
+    storage_prefix_done=finished WHERE profile_id=p_profile_id;
+  ELSE
+   UPDATE account_erasure_requests SET storage_manifest_cursor=current_cursor,storage_manifest_review=needs_review,
+    storage_manifest_done=finished WHERE profile_id=p_profile_id;
+  END IF;
+ END IF;
+ RETURN jsonb_build_object('cursor',current_cursor,'done',finished,'review',needs_review);
+END $$;
+CREATE OR REPLACE FUNCTION public.account_erasure_attachment_classify(p_profile_id uuid,p_paths text[])
+RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
+DECLARE result jsonb;
+BEGIN
+ PERFORM account_erasure_assert_closed(p_profile_id);
+ IF p_paths IS NULL OR cardinality(p_paths)>100 THEN RAISE EXCEPTION 'ERASURE_BATCH_LIMIT_INVALID'; END IF;
+ SELECT coalesce(jsonb_agg(jsonb_build_object('path',path,'state',CASE
+  WHEN EXISTS(SELECT 1 FROM tickets WHERE attachments ? path AND user_id IS DISTINCT FROM p_profile_id)
+   OR EXISTS(SELECT 1 FROM ticket_replies r JOIN tickets t ON t.id=r.ticket_id
+    WHERE r.attachments ? path AND t.user_id IS DISTINCT FROM p_profile_id AND r.user_id IS DISTINCT FROM p_profile_id) THEN 'shared'
+  WHEN EXISTS(SELECT 1 FROM tickets WHERE attachments ? path AND user_id=p_profile_id)
+   OR EXISTS(SELECT 1 FROM ticket_replies r JOIN tickets t ON t.id=r.ticket_id
+    WHERE r.attachments ? path AND (t.user_id=p_profile_id OR r.user_id=p_profile_id)) THEN 'exclusive'
+  WHEN split_part(path,'/',1)=p_profile_id::text THEN 'unreferenced' ELSE 'unknown' END)),'[]')
+ INTO result FROM unnest(p_paths) path;
+ RETURN result;
+END $$;
+DO $$
+DECLARE signature text;
+BEGIN
+ FOREACH signature IN ARRAY ARRAY['erasure_history_guard()','erasure_history_lost()',
+  'account_erasure_executor_claim(uuid)','account_erasure_executor_proof(uuid,uuid,uuid)',
+  'account_erasure_executor_pending()',
+  'account_erasure_executor_recover(uuid,uuid,uuid,jsonb,text)',
+  'account_erasure_attachment_page(uuid,text,integer)','account_erasure_attachment_classify(uuid,text[])',
+  'account_erasure_attachment_checkpoint(uuid,uuid,uuid,text,text,boolean,boolean,boolean)',
+  'account_erasure_executor_finish(uuid,uuid,uuid,text[],boolean,boolean)'] LOOP
+  EXECUTE 'REVOKE ALL ON FUNCTION public.'||signature||' FROM PUBLIC,anon,authenticated,service_role';
+  IF signature LIKE 'account_erasure_executor_%' OR signature LIKE 'account_erasure_attachment_%' THEN
+   EXECUTE 'GRANT EXECUTE ON FUNCTION public.'||signature||' TO service_role';
+  END IF;
+ END LOOP;
+END $$;
+COMMIT;

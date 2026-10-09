@@ -103,15 +103,22 @@ export async function runLeaves(db,report){
  await db.query(`INSERT INTO token_stats(id,user_id,conversation_id,message_id,model_used,input_tokens,output_tokens,
   total_cost_usd,total_credits,metadata) VALUES($1,$2,$3,$4,'synthetic',3,4,0.000123,1,'{"body":"PRIVATE"}')`,
  [token,chat.actor,chat.conversation,message]);
+ const snapshot=randomUUID();
+ await db.query(`INSERT INTO conversation_context_snapshots(id,conversation_id,snapshot_type,content,
+  source_message_start_id,source_message_end_id) VALUES($1,$2,'rolling_summary','PRIVATE',$3,$3)`,
+  [snapshot,chat.conversation,message]);
  const usage=await insertUsage(db,chat.actor);
  await db.query('UPDATE ai_usage_logs SET conversation_id=$2 WHERE id=$1',[usage,chat.conversation]);
  await closeAccount(db,chat);await scrubRuntime(db,chat);await scrubMoney(db,chat);
+ await assert.rejects(db.query('DELETE FROM messages WHERE id=$1',[message]),/ERASED|ERASURE|immutable/i,
+  'erased snapshot SET NULL must refuse the wrong deletion order');
  const tokenBefore=await row(db,'token_stats',token),usageBefore=await row(db,'ai_usage_logs',usage);
  const chatBalance=(await row(db,'profiles',chat.actor)).credits;
  assert.ok(tokenBefore.content_erased_at);assert.ok(usageBefore.content_erased_at);
  assert.deepEqual(await cleanup(db,chat),{remaining:0,manualReview:0,errors:[]});
  assert.equal(await count(db,'conversations','id',chat.conversation),0);
  assert.equal(await count(db,'messages','id',message),0);
+ assert.equal(await count(db,'conversation_context_snapshots','id',snapshot),0,'snapshot removed before message');
  assert.deepEqual(await row(db,'token_stats',token),{...tokenBefore,conversation_id:null,message_id:null,erased_conversation_id:chat.conversation,erased_message_id:message});
  await assert.rejects(db.query('UPDATE token_stats SET erased_conversation_id=$2 WHERE id=$1',[token,randomUUID()]),/ERASURE_USAGE_IDENTITY_DENIED/);
  await assert.rejects(db.query('UPDATE token_stats SET conversation_id=$2 WHERE id=$1',[token,chat.conversation]),/ERASURE_USAGE_IDENTITY_DENIED/);

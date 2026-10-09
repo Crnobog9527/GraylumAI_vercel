@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { z } from 'zod';
-import { isCanonicalErasureAttachment, type ErasureStorageTransport } from './storage';
+import { erasurePrefixCursor, isCanonicalErasureAttachment, type ErasureStorageTransport } from './storage';
 
 type Client = Pick<SupabaseClient, 'storage'>;
 const bucket = 'ticket-attachments';
@@ -11,25 +11,35 @@ const maxObjects = 5000;
 const readTimeoutMs = 2000;
 const listing = z.object({
   hasNext: z.boolean(), nextCursor: z.string().max(4096).nullish(),
-  folders: z.array(z.unknown()), objects: z.array(z.object({ key: z.string(), id: z.string().min(1) })),
+  folders: z.array(z.unknown()), objects: z.array(z.object({ key: z.string().optional(), name: z.string().optional(), id: z.string().min(1) })),
 });
 const failure = () => new Error('ERASURE_STORAGE_UNKNOWN');
+function objectKey(row: { key?: string; name?: string }, prefix: string): string {
+  const named = row.name === undefined ? undefined : row.name.includes('/') ? row.name
+    : prefix.slice(0, prefix.lastIndexOf('/') + 1) + row.name;
+  const key = row.key ?? named;
+  if (!key || !isCanonicalErasureAttachment(key) || !key.startsWith(prefix)
+    || named !== undefined && named !== key) throw failure();
+  return key;
+}
+
 function check(target: string, signal: AbortSignal) {
   if (target !== bucket || signal.aborted) throw failure();
 }
 
-/** The pinned SDK passes nextCursor unchanged to listV2's cursor option. Collect every
- * page before exposing candidates: there is no deletion during this transport read.
- * Each subsequent read starts at page one; remote cursors never survive a read/deletion.
- * This is bounded enumeration, NOT a provider snapshot or concurrent-writer exclusion.
- * The host still owns upload/reference quiescence and authoritative classification. */
-export function createErasureStorageTransport(client: Client): ErasureStorageTransport {
+/** Production uses the original listV2 continuation with name ordering. Each page is
+ * checkpointed only after classification and deletion observation. Exact absence reads
+ * and legacy inventories remain complete bounded reads. Quiescence is owned by the host. */
+export function createErasureStorageTransport(client: Client, options: { boundedPrefix?: boolean } = {}): ErasureStorageTransport {
   const collect = async (prefix: string, signal: AbortSignal) => {
     const paths = new Set<string>();
     const identities = new Set<string>();
     const cursors = new Set<string>();
     let cursor: string | undefined;
+
+    const started = Date.now();
     for (let page = 0; page < maxPages; page++) {
+      if (Date.now() - started >= readTimeoutMs) throw failure();
       check(bucket, signal);
       const result = await client.storage.from(bucket).listV2({
         prefix, limit: pageSize, with_delimiter: false, sortBy: { column: 'name', order: 'asc' },
@@ -40,7 +50,8 @@ export function createErasureStorageTransport(client: Client): ErasureStorageTra
       const parsed = listing.safeParse(result.data);
       if (!parsed.success || parsed.data.folders.length || parsed.data.objects.length > pageSize
         || paths.size + parsed.data.objects.length > maxObjects) throw failure();
-      for (const row of parsed.data.objects) {
+      for (const object of parsed.data.objects) {
+        const row = { ...object, key: objectKey(object, prefix) };
         if (!row.key.startsWith(prefix) || !isCanonicalErasureAttachment(row.key)
           || paths.has(row.key) || identities.has(row.id)) throw failure();
         paths.add(row.key);
@@ -80,10 +91,29 @@ export function createErasureStorageTransport(client: Client): ErasureStorageTra
       check(target, signal);
       if (!prefix.endsWith('/') || !isCanonicalErasureAttachment(`${prefix}probe`)
         || !Number.isInteger(limit) || limit < 1 || limit > 100
-        || afterPath !== null && (!afterPath.startsWith(prefix) || !isCanonicalErasureAttachment(afterPath))) {
+        || afterPath !== null && (!afterPath.startsWith(prefix) || !isCanonicalErasureAttachment(erasurePrefixCursor(afterPath).path))) {
         throw failure();
       }
-      const all = (await read(prefix, signal)).filter(path => afterPath === null || path > afterPath);
+      if (options.boundedPrefix) {
+        const previous = afterPath === null ? null : erasurePrefixCursor(afterPath);
+        if (previous && !previous.cursor) throw failure();
+        const result = await client.storage.from(bucket).listV2({
+          prefix, limit, with_delimiter: false, sortBy: { column: 'name', order: 'asc' },
+          ...(previous ? { cursor: previous.cursor } : {}),
+        }, { signal, cache: 'no-store' });
+        check(target, signal);
+        if (result.error) throw failure();
+        const data = listing.parse(result.data);
+        const paths = data.objects.map(row => objectKey(row, prefix));
+        if (data.folders.length || paths.length > limit || new Set(data.objects.map(row => row.id)).size !== paths.length
+          || paths.some((path, index) => !path.startsWith(prefix) || !isCanonicalErasureAttachment(path)
+            || index > 0 && path <= paths[index - 1] || previous !== null && path <= previous.path)
+          || data.hasNext && (!paths.length || !data.nextCursor || data.nextCursor === previous?.cursor)
+          || !data.hasNext && data.nextCursor) throw failure();
+        return { paths, nextAfterPath: data.hasNext ? `${paths.at(-1)}|${encodeURIComponent(data.nextCursor!)}` : null };
+      }
+      const selected = await read(prefix, signal);
+      const all = selected.filter(path => afterPath === null || path > afterPath);
       const paths = all.slice(0, limit);
       return { paths, nextAfterPath: all.length > paths.length ? paths[paths.length - 1] : null };
     },

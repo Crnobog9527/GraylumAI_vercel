@@ -122,3 +122,11 @@ it('uses the locked Supabase SDK exact counts and keyset filters over synthetic 
     .toEqual({ items: [{ path, uploaderId: admin, subjectId: actor }], nextCursor: null });
   expect(seen).toEqual(['/rest/v1/tickets', '/rest/v1/tickets', '/rest/v1/ticket_replies']);
 });
+
+it('supports attachment-free system replies without inventing an uploader', async () => {
+  const f = setup();
+  f.data.ticket_replies.push({ id: second, ticket_id: ticket, user_id: null, attachments: [] });
+  await expect(list(f)).resolves.toBeDefined();
+  f.data.ticket_replies[1].attachments = [`${other}/unproven.png`];
+  await expect(list(f)).rejects.toThrow('ERASURE_MANIFEST_UNKNOWN');
+});

@@ -7,19 +7,20 @@ import { createErasureStorageAdapter } from './storage';
 const actor = '00000000-0000-4000-8000-000000000001';
 const path = (name: string) => `${actor}/${name}.png`;
 const scope = () => ({ bucket: 'ticket-attachments' as const, signal: new AbortController().signal });
-function setup(names = ['a', 'b', 'c', 'd', 'e'], remotePageSize = 1000) {
+function setup(names = ['a', 'b', 'c', 'd', 'e'], remotePageSize = 1000, boundedPrefix = false) {
   const objects = new Set(names.map(path));
   const fetcher = vi.fn<typeof fetch>(async (url, init) => {
     const body = JSON.parse(String(init?.body));
     let value: unknown;
     if (String(url).endsWith('/object/list-v2/ticket-attachments')) {
-      expect(body).toMatchObject({ limit: 1000, with_delimiter: false });
+      expect(body).toMatchObject({ with_delimiter: false });
+      expect(body.limit).toBeGreaterThan(0);expect(body.limit).toBeLessThanOrEqual(1000);
       expect(body).not.toHaveProperty('offset');
-      const all = [...objects].filter(key => key.startsWith(body.prefix)).sort();
+      const all = [...objects].filter(key => key.startsWith(body.prefix) && (!body.cursor || key > body.cursor.slice('opaque:'.length))).sort();
       // Synthetic server cursor: the client must pass it verbatim, never interpret it.
-      const start = body.cursor ? Number(body.cursor.slice('opaque:'.length)) : 0;
-      const end = Math.min(start + remotePageSize, all.length);
-      value = { hasNext: end < all.length, nextCursor: end < all.length ? `opaque:${end}` : null, folders: [],
+      const start = 0;
+      const end = Math.min(start + Math.min(remotePageSize, body.limit), all.length);
+      value = { hasNext: end < all.length, nextCursor: end < all.length ? `opaque:${all[end-1]}` : null, folders: [],
         objects: all.slice(start, end).map(key => ({ key, id: key })) };
     } else {
       expect(String(url)).toBe('https://erasure.invalid/storage/v1/object/ticket-attachments');
@@ -32,7 +33,7 @@ function setup(names = ['a', 'b', 'c', 'd', 'e'], remotePageSize = 1000) {
   const client = createClient('https://erasure.invalid', 'synthetic-key', {
     global: { fetch: fetcher }, auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
   });
-  return { fetcher, objects, transport: createErasureStorageTransport(client) };
+  return { fetcher, objects, transport: createErasureStorageTransport(client, { boundedPrefix }) };
 }
 
 afterEach(() => vi.useRealTimers());
@@ -52,7 +53,6 @@ describe('bounded Storage SDK transport', () => {
     { hasNext: true, nextCursor: 'opaque', folders: [], objects: [] },
     { hasNext: false, nextCursor: 'contradiction', folders: [], objects: [] },
     { hasNext: false, folders: [{}], objects: [] },
-    { hasNext: false, folders: [], objects: [{ name: path('a'), id: 'id' }] },
     { hasNext: false, folders: [], objects: [{ key: `${actor}/nested/a.png`, id: 'id' }] },
     { hasNext: false, folders: [], objects: [{ key: path('a'), id: '1' }, { key: path('a'), id: '2' }] },
     { hasNext: false, folders: [], objects: Array.from({ length: 1001 }, (_, i) => ({ key: path(String(i)), id: String(i) })) },
@@ -112,7 +112,7 @@ describe('complete bounded remote enumeration before returning candidates', () =
     const first = await f.transport.listPrefix(prefixInput());
     expect(first).toEqual({ paths: names(100).map(path), nextAfterPath: path('n00099') });
     expect(f.fetcher).toHaveBeenCalledTimes(2);
-    expect(JSON.parse(String(f.fetcher.mock.calls[1][1]?.body)).cursor).toBe('opaque:1000');
+    expect(JSON.parse(String(f.fetcher.mock.calls[1][1]?.body)).cursor).toBe('opaque:'+path('n00999'));
     await f.transport.remove({ ...scope(), paths: names(100).map(path) });
     const start = f.fetcher.mock.calls.length;
     expect(await f.transport.listPrefix({ ...prefixInput(), afterPath: path('n00099') })).toEqual({
@@ -195,4 +195,30 @@ describe('complete bounded remote enumeration before returning candidates', () =
     expect(f.objects.size).toBe(905);
     expect(JSON.parse(String(f.fetcher.mock.calls[start][1]?.body))).not.toHaveProperty('cursor');
   });
+});
+
+it('production prefix resumes original provider boundaries after deletion and retained pages', async () => {
+  const f = setup(names(5001), 1000, true);
+  const first = await f.transport.listPrefix(prefixInput()) as { paths: string[]; nextAfterPath: string };
+  expect(first.paths).toEqual(names(100).map(path));
+  expect(f.fetcher).toHaveBeenCalledOnce();
+  await f.transport.remove({ ...scope(), paths: names(100).map(path) });
+  const second = await f.transport.listPrefix({ ...prefixInput(), afterPath: first.nextAfterPath }) as { paths: string[] };
+  expect(second.paths).toEqual(names(200).slice(100).map(path));
+  const start = f.fetcher.mock.calls.length;
+  const later = await f.transport.listPrefix({ ...prefixInput(), afterPath: `${path('n04999')}|${encodeURIComponent('opaque:'+path('n04999'))}` });
+  expect(later).toEqual({ paths: [path('n05000')], nextAfterPath: null });
+  expect(f.fetcher.mock.calls.length-start).toBe(1);
+});
+
+it.each(['full', 'basename'])('accepts name-only SDK objects (%s) for listing and exact absence proof', async mode => {
+  const f = setup(['a'], 1000, true);
+  f.fetcher.mockResolvedValueOnce(json({ hasNext: false, folders: [], objects: [{
+    name: mode === 'full' ? path('a') : 'a.png', id: 'object',
+  }] }));
+  expect(await f.transport.listPrefix(prefixInput())).toEqual({ paths: [path('a')], nextAfterPath: null });
+  f.fetcher.mockResolvedValueOnce(json({ hasNext: false, folders: [], objects: [{
+    name: mode === 'full' ? path('a') : 'a.png', id: 'object',
+  }] }));
+  expect(await f.transport.getState({ ...scope(), path: path('a') })).toBe('present');
 });

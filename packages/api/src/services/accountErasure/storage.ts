@@ -6,8 +6,8 @@ const subjectPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f
 const subject = z.string().regex(subjectPattern);
 const pageSchema = z.object({ paths: z.array(z.string()), nextAfterPath: z.string().nullable() }).strict();
 const manifestSchema = z.object({
-  items: z.array(z.object({ path: z.string(), uploaderId: subject, subjectId: subject }).strict()),
-  nextCursor: z.string().min(1).max(512).nullable(),
+  items: z.array(z.object({ path: z.string(), uploaderId: subject.nullable(), subjectId: subject }).strict()),
+  nextCursor: z.string().min(1).max(512).nullable(), reviewPending: z.boolean().optional(),
 }).strict();
 const referencesSchema = z.array(z.object({
   path: z.string(), state: z.enum(['exclusive', 'unreferenced', 'shared', 'unknown']),
@@ -15,8 +15,16 @@ const referencesSchema = z.array(z.object({
 const stateSchema = z.enum(['present', 'absent', 'unknown']);
 type Scoped = { bucket: typeof bucket; signal: AbortSignal };
 
+/** Service-owned checkpoint: original key plus opaque provider continuation, never decoded. */
+export function erasurePrefixCursor(value: string): { path: string; cursor?: string } {
+  const [path, token, extra] = value.split('|');
+  if (!isCanonicalErasureAttachment(path) || extra !== undefined || value.length > 17000
+    || token !== undefined && !token) throw new Error('ERASURE_STORAGE_CURSOR_INVALID');
+  return { path, ...(token === undefined ? {} : { cursor: decodeURIComponent(token) }) };
+}
+
 export type ErasureStorageTransport = {
-  /** Full paths, strictly increasing ASCII order. Cursor is the last path, never an offset.
+  /** Full paths, strictly increasing ASCII order. Cursor binds the last path and optional opaque provider continuation, never an offset.
    * A non-null cursor means more work; null means this prefix enumeration is exhausted. */
   listPrefix(input: Scoped & { prefix: string; afterPath: string | null; limit: number }): Promise<unknown>;
   remove(input: Scoped & { paths: string[] }): Promise<unknown>;
@@ -24,10 +32,14 @@ export type ErasureStorageTransport = {
   getState(input: Scoped & { path: string }): Promise<unknown>;
 };
 export type ErasureAttachmentManifest = {
+  prefixState?(input: { profileId: string; signal: AbortSignal }): Promise<{ cursor: string | null; done: boolean; review: boolean }>;
+  checkpointPrefix?(input: { profileId: string; nextCursor: string | null; review: boolean; signal: AbortSignal }): Promise<void>;
   /** Trusted original attachment ownership, including administrator replies. Must survive
    * business-body cleanup until storage verification completes. Not supplied by the client.
    * Stable cursor over this manifest, unaffected by deleting storage objects. */
   list(input: { profileId: string; cursor: string | null; limit: number; signal: AbortSignal }): Promise<unknown>;
+  /** Persist an examined manifest page, retaining unresolved entries as review-required. */
+  checkpoint?(input: { profileId: string; nextCursor: string | null; review: boolean; signal: AbortSignal }): Promise<void>;
   /** Complete cross-subject reference check for every requested path. exclusive means only
    * this subject; unreferenced means an orphan; missing/incomplete evidence means unknown.
    * The host must exclude concurrent reference writes across this check and deletion. */
@@ -64,6 +76,7 @@ export function createErasureStorageAdapter(input: {
     subject.parse(profileId);
     const deadline = performance.now() + limits.totalTimeoutMs;
     const seen = new Set<string>();
+    const unresolved = new Set<string>();
     let pages = 0;
     let manualReview = 0;
     let incomplete = false;
@@ -95,7 +108,7 @@ export function createErasureStorageAdapter(input: {
       for (const candidate of unique) {
         const state = references.find(row => row.path === candidate.path)!.state;
         if (state === 'exclusive' || state === 'unreferenced' && !candidate.fromManifest) deletable.push(candidate.path);
-        else manualReview++;
+        else { manualReview++; unresolved.add(candidate.path); }
       }
       const present: string[] = [];
       for (const path of deletable) {
@@ -103,33 +116,42 @@ export function createErasureStorageAdapter(input: {
         // earlier uncertain result instead of blindly repeating its external mutation.
         const state = stateSchema.parse(await call(signal => input.storage.getState({ bucket, path, signal })));
         if (state === 'present') present.push(path);
-        else if (state === 'unknown') { incomplete = true; manualReview++; }
+        else if (state === 'unknown') { incomplete = true; manualReview++; unresolved.add(path); }
       }
       if (!present.length) return;
       // A timeout may mean deletion succeeded. Stop; the next invocation inventories and verifies afresh.
       await call(signal => input.storage.remove({ bucket, paths: present, signal }));
       for (const path of present) {
         const state = stateSchema.parse(await call(signal => input.storage.getState({ bucket, path, signal })));
-        if (state !== 'absent') { incomplete = true; if (state === 'unknown') manualReview++; }
+        if (state !== 'absent') { incomplete = true; unresolved.add(path); if (state === 'unknown') manualReview++; }
       }
     };
     try {
-      let afterPath: string | null = null;
-      do {
+      const progress = input.manifest.prefixState ? await call(signal => input.manifest.prefixState!({ profileId, signal })) : null;
+      let afterPath: string | null = progress?.cursor ?? null;
+      if (afterPath !== null && progress?.review) manualReview++;
+      let prefixPages = 0;
+      const prefixBudget = progress ? Math.max(1, Math.floor(limits.maxPages / 2)) : limits.maxPages;
+      if (!progress?.done) do {
+        if (++prefixPages > prefixBudget) { incomplete = true; break; }
         nextPage();
         const page = pageSchema.parse(await call(signal => input.storage.listPrefix({
           bucket, prefix: `${profileId}/`, afterPath, limit: limits.pageSize, signal,
         })));
         if (page.paths.length > limits.pageSize || page.paths.some((path, index) =>
-          (index > 0 && path <= page.paths[index - 1]) || (afterPath !== null && path <= afterPath))
-          || (page.nextAfterPath !== null && (!page.paths.length || page.nextAfterPath !== page.paths.at(-1)))) {
+          (index > 0 && path <= page.paths[index - 1]) || (afterPath !== null && path <= erasurePrefixCursor(afterPath).path))
+          || (page.nextAfterPath !== null && (!page.paths.length || erasurePrefixCursor(page.nextAfterPath).path !== page.paths.at(-1)))) {
           throw new Error('ERASURE_STORAGE_PAGE_INVALID');
         }
+        let prefixReview = false;
         const candidates = page.paths.filter(path => {
           if (isCanonicalErasureAttachment(path) && path.startsWith(`${profileId}/`)) return true;
-          manualReview++; return false;
+          manualReview++; prefixReview = true; return false;
         });
         await process(candidates.map(path => ({ path, fromManifest: false })));
+        if (input.manifest.checkpointPrefix) await call(signal => input.manifest.checkpointPrefix!({
+          profileId, nextCursor: page.nextAfterPath, review: prefixReview || page.paths.some(path => unresolved.has(path)), signal,
+        }));
         afterPath = page.nextAfterPath;
       } while (afterPath !== null);
 
@@ -142,12 +164,17 @@ export function createErasureStorageAdapter(input: {
         })));
         if (page.items.length > limits.pageSize || (page.nextCursor !== null &&
           (!page.items.length || cursors.has(page.nextCursor)))) throw new Error('ERASURE_STORAGE_MANIFEST_INVALID');
+        let pageReview = false;
+        if (page.reviewPending) manualReview++;
         const candidates = page.items.filter(item => {
-          if (item.subjectId === profileId && isCanonicalErasureAttachment(item.path)
+          if (item.uploaderId !== null && item.subjectId === profileId && isCanonicalErasureAttachment(item.path)
             && item.path.startsWith(`${item.uploaderId}/`)) return true;
-          manualReview++; return false;
+          manualReview++; pageReview = true; return false;
         });
         await process(candidates.map(item => ({ path: item.path, fromManifest: true })));
+        if (input.manifest.checkpoint) await call(signal => input.manifest.checkpoint!({
+          profileId, nextCursor: page.nextCursor, review: pageReview || page.items.some(item => unresolved.has(item.path)), signal,
+        }));
         cursor = page.nextCursor;
         if (cursor !== null) cursors.add(cursor);
       } while (cursor !== null);
