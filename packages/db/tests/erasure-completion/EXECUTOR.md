@@ -36,7 +36,10 @@ worker from deleting concurrently while the first may still have external I/O.
 When actual I/O has settled, only the original subject/request/token can release
 it. After a request timeout the invocation waits within its remaining budget for
 actual I/O to settle before releasing the original claim. A crash or unresolved underlying I/O leaves the claim with its original
-identity for manual observation/recovery. Do not clear it on a timer. Read the
+identity for manual observation/recovery. A lost claim response first reads the
+existing request by its original token; a confirmed committed claim resumes under
+that token. An absent/failed observation remains unknown and never starts another
+claim or invents evidence that an in-flight transaction stopped. Do not clear it on a timer. Read the
 original Auth/object states and prove the old worker cannot continue before any
 approved release. Unknown Auth deletion retains the existing once-only intent;
 subsequent passes only read the original identity and do not send another delete.

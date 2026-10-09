@@ -47,6 +47,15 @@ export async function runExecutor({db,Client,connectionString,require,runAccount
   const adminDone=await runAccountErasureExecutor({...first.client,storage:adminSdk.client.storage,auth:adminSdk.client.auth});
   assert.equal(adminDone.completed,1,JSON.stringify(adminDone));assert.equal(adminSdk.authDeletes(),1);
 
+  const claimed=await fixture();await claimed.close();let lostClaim=false;
+  const claimRpc=claimed.client.rpc.bind(claimed.client);
+  claimed.client.rpc=(name,args)=>{const promise=(async()=>{const response=await claimRpc(name,args);
+   if(name==='account_erasure_executor_claim'&&!lostClaim&&response.data?.claimed){lostClaim=true;return {data:null,error:{message:'synthetic lost claim'}};}
+   return response;})();promise.abortSignal=()=>promise;return promise;};
+  const claimRecovered=await runAccountErasureExecutor(claimed.client);
+  assert.equal(claimRecovered.completed,1,JSON.stringify(claimRecovered));assert.equal(claimed.sdk.authDeletes(),1);
+  assert.equal((await claimed.row()).executor_token,null);
+
   const lost=await fixture();await lost.close();
   const remove=lost.client.storage.from.bind(lost.client.storage);let sends=0;const sentPaths=[];
   lost.client.storage={from(bucket){const api=remove(bucket);const original=api.remove.bind(api);

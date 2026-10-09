@@ -13,6 +13,24 @@ const claimSchema = z.discriminatedUnion('claimed', [
 const proofSchema = z.object({ historyComplete: z.boolean(), quiescent: z.boolean() }).strict();
 export type ErasureExecutorSummary = { processed: number; completed: number; pending: number; failed: number };
 
+/** A lost claim response is not a failed transaction. Reconcile the same token
+ * through existing service-only request reads; never dispatch another identity. */
+async function claimWithObservation(client: SupabaseClient, token: string) {
+  try {
+    const response = await client.rpc('account_erasure_executor_claim', { p_token: token })
+      .abortSignal(AbortSignal.timeout(2000));
+    if (response.error) throw new Error('ERASURE_CLAIM_UNKNOWN');
+    return claimSchema.parse(response.data);
+  } catch {
+    const observed = await client.from('account_erasure_requests').select('profile_id,request_id', { count: 'exact' })
+      .eq('executor_token', token).limit(2).abortSignal(AbortSignal.timeout(2000));
+    if (observed.error || observed.count !== 1) throw new Error('ERASURE_CLAIM_UNKNOWN');
+    const [row] = z.array(z.object({ profile_id: z.string().uuid(), request_id: z.string().uuid() }).strict())
+      .length(1).parse(observed.data);
+    return claimSchema.parse({ claimed: true, profileId: row.profile_id, requestId: row.request_id });
+  }
+}
+
 /** Called by the existing authenticated cron. Each RPC is a fresh transaction.
  * Claims never expire: after a crashed/unfinished worker, verify its external I/O
  * before releasing the original token. No retry identity or second queue is created. */
@@ -22,10 +40,7 @@ async function runOne(client: SupabaseClient, deadline: number, drainDeadline: n
   // SQL selects least recently attempted requests and excludes unresolved claims.
   const token = randomUUID();
   try {
-    const response = await client.rpc('account_erasure_executor_claim', { p_token: token })
-      .abortSignal(AbortSignal.timeout(2000));
-    if (response.error) throw new Error('ERASURE_CLAIM_FAILED');
-    const claim = claimSchema.parse(response.data);
+    const claim = await claimWithObservation(client, token);
     if (!claim.claimed) return summary;
     summary.processed++;
     const binding = { p_profile_id: claim.profileId, p_request_id: claim.requestId, p_token: token };

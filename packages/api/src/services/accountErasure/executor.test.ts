@@ -19,7 +19,10 @@ function client() {
     const promise = Promise.resolve({ data, error: null });
     return Object.assign(promise, { abortSignal: () => promise });
   });
-  return { rpc };
+  const observed = vi.fn().mockResolvedValue({ data: [], count: 0, error: null });
+  const query = { select: vi.fn(), eq: vi.fn(), limit: vi.fn(), abortSignal: observed };
+  query.select.mockReturnValue(query); query.eq.mockReturnValue(query); query.limit.mockReturnValue(query);
+  return { rpc, from: vi.fn().mockReturnValue(query), observed, query };
 }
 beforeEach(() => {
   vi.resetAllMocks();
@@ -84,4 +87,20 @@ it('releases the original claim after slow I/O actually drains within the cron b
   await runAccountErasureExecutor(database as never);
   expect(mocks.drain).toHaveBeenCalledOnce();
   expect(database.rpc).toHaveBeenCalledWith('account_erasure_executor_finish', expect.objectContaining({ p_release: true }));
+});
+
+it('reconciles a committed claim after losing its response with the original token', async () => {
+  const database = client(); const original = database.rpc.getMockImplementation()!;
+  database.rpc.mockImplementationOnce(name => {
+    original(name);
+    const promise = Promise.resolve({ data: null, error: { message: 'synthetic lost response' } });
+    return Object.assign(promise, { abortSignal: () => promise }) as never;
+  });
+  database.observed.mockResolvedValue({ data: [{ profile_id: actor, request_id: request }], count: 1, error: null });
+  const result = await runAccountErasureExecutor(database as never);
+  expect(result.failed).toBe(0); expect(mocks.run).toHaveBeenCalledOnce();
+  const calls = database.rpc.mock.calls as unknown as Array<[string, Record<string, unknown>]>;
+  const token = calls.find(([name]) => name === 'account_erasure_executor_claim')![1].p_token;
+  expect(database.query.eq).toHaveBeenCalledWith('executor_token', token);
+  expect(calls.find(([name]) => name === 'account_erasure_executor_finish')![1].p_token).toBe(token);
 });
