@@ -13,19 +13,21 @@ const requestSchema = z.object({
 }).strict();
 type Proof = (profileId: string, signal: AbortSignal) => Promise<void>;
 
-/** Unwired, injected single-subject composition. No credentials, SDK construction or caller.
+/** Injected single-subject composition; executor.ts supplies the authenticated cron binding.
  * The same service client reads the service-only request and all subjects' raw references.
  * Proof providers are trusted local dependencies, never client input. Quiescence must hold
  * until all injected I/O settles; checking a timestamp/empty table is not such proof.
- * The per-instance latch is NOT a distributed lease. No actual execution entry is supplied. */
+ * The per-instance latch is NOT a distributed lease; the executor holds a durable DB claim. */
 export function createAccountErasureHost(input: {
   profileId: string; requestId: string; client: Pick<SupabaseClient, 'from' | 'rpc'>;
   storage: ErasureStorageTransport; auth: ErasureAuthAdapter;
   verifyRetainedHistory?: Proof; verifyQuiescence?: Proof;
-  operationTimeoutMs?: number;
+  operationTimeoutMs?: number; deadline?: number;
+  /** Proof may be deferred to Storage so unrelated content still clears. */
+  deferStorageProof?: boolean; allowOtherUploaders?: boolean;
 }) {
   let active = false;
-  return { async run(): Promise<ErasureProcessResult> {
+  return { isIdle: () => !active, async run(): Promise<ErasureProcessResult> {
     const denied = (code: string, previous: string | null = null): ErasureProcessResult => ({
       stage: 'erasing', retry: true, remaining: 1, manualReview: 0,
       errorCodes: [...new Set([...(previous ? [previous] : []), code])],
@@ -60,6 +62,7 @@ export function createAccountErasureHost(input: {
       }
       previous = row.last_error_code;
       if (!input.verifyRetainedHistory || !input.verifyQuiescence) throw new Error('ERASURE_HISTORY_UNKNOWN');
+      if (input.deferStorageProof) return;
       await input.verifyRetainedHistory(input.profileId, controller.signal);
       if (controller.signal.aborted) throw new Error('ERASURE_HOST_TIMEOUT');
       await input.verifyQuiescence(input.profileId, controller.signal);
@@ -82,7 +85,7 @@ export function createAccountErasureHost(input: {
         };
         return page;
       } }; } } as unknown as Pick<SupabaseClient, 'from'>;
-      const manifest = createErasureAttachmentManifest({ client: metadata, limits: { timeoutMs: timeout },
+      const manifest = createErasureAttachmentManifest({ client: metadata, allowOtherUploaders: input.allowOtherUploaders, limits: { timeoutMs: timeout },
         verifyRetainedHistory: async (profileId, signal) => {
           await track(() => input.verifyRetainedHistory!(profileId, signal));
           await track(() => input.verifyQuiescence!(profileId, signal));
@@ -102,7 +105,7 @@ export function createAccountErasureHost(input: {
         }) },
         storageAdapter: storage,
         authAdapter: { getState: id => track(() => input.auth.getState(id)), remove: id => track(() => input.auth.remove(id)) },
-        budget: { operationTimeoutMs: timeout },
+        budget: { operationTimeoutMs: timeout, deadline: input.deadline },
       });
       // Do not use note_error here: a stale read/late host must not overwrite a
       // newer AUTH_BAN_FAILED or billing diagnostic. Keep original error priority in output.

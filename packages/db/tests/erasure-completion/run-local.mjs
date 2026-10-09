@@ -10,6 +10,7 @@ import {resolve} from 'node:path';
 import {POSTGRES_IMAGE} from '../v3/images.mjs';
 import {buildFromFiles,installPgCronStub} from '../baseline/build-from-files.mjs';
 import {runCases} from './cases.mjs';
+import {runExecutor} from './executor.mjs';
 import {runProcessor} from './processor.mjs';
 import {runLeaves} from './leaves.mjs';
 import {runConcurrency} from './concurrency.mjs';
@@ -74,18 +75,20 @@ try {
  client=new Client({connectionString});await client.connect();
  await client.query(read('packages/db/tests/erasure-b2a/fixture.sql'));
  await client.query(read('packages/db/tests/package-refund/fixture.sql'));
+ // Compile the exact production composition, with only external HTTP replaced in tests.
+ const ts=require('typescript');
+ compiled=mkdtempSync(resolve(root,'packages/api/.erasure-processor-test-'));
+ for(const file of ['processorContracts','processor','host','manifest','storage','storageTransport','authAdapter','executor']){
+  const source=read(`packages/api/src/services/accountErasure/${file}.ts`);
+  const code=ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ES2022}}).outputText
+   .replace(/from '(\.\/[A-Za-z]+)'/g,"from '$1.mjs'");
+  writeFileSync(resolve(compiled,file+'.mjs'),code);
+ }
+ const {runAccountErasureExecutor}=await import(pathToFileURL(resolve(compiled,'executor.mjs')).href);
+ await runExecutor({db:client,Client,connectionString,require,runAccountErasureExecutor,report});
  await runCases(client,report);
  await runLeaves(client,report);
  await runConcurrency({db:client,Client,connectionString,report});
- // Execute the actual TS coordinator; only its external Auth/Storage adapters are mocks.
- const ts=require('typescript');
- compiled=mkdtempSync(resolve(root,'packages/api/.erasure-processor-test-'));
- for(const file of ['processorContracts','processor']){
-  const source=read(`packages/api/src/services/accountErasure/${file}.ts`);
-  const code=ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ES2022}}).outputText
-   .replace("'./processorContracts'","'./processorContracts.mjs'");
-  writeFileSync(resolve(compiled,file+'.mjs'),code);
- }
  const {processAccountErasure}=await import(pathToFileURL(resolve(compiled,'processor.mjs')).href);
  await runProcessor(client,processAccountErasure,report);
  const unsafe=sql(read('packages/db/tests/erasure-completion/rollback.sql'));

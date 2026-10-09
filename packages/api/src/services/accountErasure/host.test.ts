@@ -143,3 +143,14 @@ it('tracks a metadata query that ignores abort until the actual query settles', 
   release(value); await new Promise(resolve => setTimeout(resolve, 0));
   expect((await host.run()).stage).toBe('completed');
 });
+
+it('clears unrelated content while deferred storage history is unproven', async () => {
+  const f = fixture();
+  const host = createAccountErasureHost({ ...f.input, deferStorageProof: true,
+    verifyRetainedHistory: async () => { throw new Error('unknown history'); } });
+  expect((await host.run()).errorCodes).toContain('ERASURE_STORAGE_PENDING');
+  expect(f.rpc).toHaveBeenCalledWith('account_erasure_scrub_content', { p_profile_id: actor });
+  expect(f.rpc).toHaveBeenCalledWith('account_erasure_local_cleanup', { p_profile_id: actor, p_storage_verified: false });
+  expect(f.auth.remove).not.toHaveBeenCalled(); expect(f.storage.remove).not.toHaveBeenCalled();
+  expect(host.isIdle()).toBe(true);
+});
