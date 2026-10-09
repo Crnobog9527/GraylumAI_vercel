@@ -1117,7 +1117,8 @@ const withdrawOutput = (withdrawals: unknown, patches: unknown[] = []) =>
   JSON.stringify({ inputKind: 'answer', patches, notes: [], withdrawals });
 async function userTurn(id: string, organizerInput: Record<string, unknown> = { userInput: '那条建议不对，不要了' },
   shown: string | null = 'Pending goal suggestion') {
-  const checklist = [{ id: 'step-0', fields: [{ id: 'goal', ...(shown === null ? {} : { pendingSuggestion: { value: shown } }) }] }];
+  const checklist = [{ id: 'step-0', fields: [{ id: 'goal', ...(shown === null ? {} : {
+    pendingSuggestion: { value: shown, nature: 'fact', basis: 'user_statement' } }) }] }];
   await db.query(`update runtime_executions set payload=jsonb_set(payload,'{attachedOrganizer,input}',to_jsonb($2::text)) where id=$1`,
     [id, JSON.stringify({ captureFormat: 'v2', checklist, ...organizerInput })]);
   return id;
@@ -1183,6 +1184,11 @@ it('RUNTIME: V3 withdrawal refuses host turns, newer suggestions and malformed l
   const older = await userTurn(await f.seed(withdrawOutput(one)));
   await f.apply(await f.seed(output([patch('Pending goal suggestion')])));
   expect(await f.apply(older)).toMatchObject({ discarded: [{ withdrawal: 1, reason: 'superseded' }] });
+  const otherNature = await userTurn(await f.seed(withdrawOutput(one)), undefined, null);
+  await db.query(`update runtime_executions set payload=jsonb_set(payload,'{attachedOrganizer,input}',to_jsonb($2::text)) where id=$1`,
+    [otherNature, JSON.stringify({ captureFormat: 'v2', userInput: '不要了', checklist: [{ id: 'step-0', fields: [{ id: 'goal',
+      pendingSuggestion: { value: 'Pending goal suggestion', nature: 'hypothesis', basis: 'user_statement' } }] }] })]);
+  expect(await f.apply(otherNature)).toMatchObject({ discarded: [{ withdrawal: 1, reason: 'not_shown' }] });
   const replaced = await userTurn(await f.seed(withdrawOutput(one)));
   await f.apply(await f.seed(output([patch('Newest suggestion')])));
   expect(await f.apply(replaced)).toMatchObject({ discarded: [{ withdrawal: 1, reason: 'not_shown' }] });
