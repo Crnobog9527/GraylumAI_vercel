@@ -145,7 +145,7 @@ REVOKE ALL ON FUNCTION public.content_erasure_marker_guard(),public.content_eras
  FROM PUBLIC,anon,authenticated,service_role;
 
 -- IDs are structured references. Free text, titles and substring matches are not
--- provenance. Frozen JSON encoded as a string is visited only when it is an object.
+-- provenance. Frozen JSON encoded as a string is visited only when it is an object/array.
 CREATE OR REPLACE FUNCTION public.content_erasure_references(v jsonb,ids uuid[])
 RETURNS boolean LANGUAGE plpgsql IMMUTABLE SET search_path=public,pg_temp AS $$
 DECLARE x record;
@@ -156,14 +156,14 @@ BEGIN
    IF x.key IN ('executionId','sourceExecutionId','sourceVersionId','sourceContentId','projectId',
     'workItemId','roundId','conversationId','sessionId','dependencyId','source_message_id',
     'sourceScriptId','contentId','draftId')
-    AND x.value#>>'{}'=ANY(ids::text[]) THEN RETURN true; END IF;
+    AND lower(x.value#>>'{}')=ANY(ids::text[]) THEN RETURN true; END IF;
    IF content_erasure_references(x.value,ids) THEN RETURN true; END IF;
   END LOOP;
  ELSIF jsonb_typeof(v)='array' THEN
   FOR x IN SELECT value FROM jsonb_array_elements(v) LOOP
    IF content_erasure_references(x.value,ids) THEN RETURN true; END IF;
   END LOOP;
- ELSIF jsonb_typeof(v)='string' AND (v#>>'{}') IS JSON OBJECT THEN
+ ELSIF jsonb_typeof(v)='string' AND ((v#>>'{}') IS JSON OBJECT OR (v#>>'{}') IS JSON ARRAY) THEN
   RETURN content_erasure_references((v#>>'{}')::jsonb,ids);
  END IF;
  RETURN false;
@@ -262,8 +262,8 @@ GRANT EXECUTE ON FUNCTION public.content_erasure_preview(uuid,text,uuid) TO serv
 CREATE OR REPLACE FUNCTION public.content_erasure_confirm(a uuid,k text,target uuid,expected_hash text)
 RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
 DECLARE scope jsonb; ids uuid[]; sessions uuid[]; projects uuid[]; versions uuid[]; contents uuid[];
- refs uuid[]; rounds uuid[]; stamp timestamptz:=clock_timestamp(); row record; run_id uuid; financial jsonb;
- remaining bigint:=0; q text; deleted boolean;
+ refs uuid[]; rounds uuid[]; stamp timestamptz:=clock_timestamp(); row record; financial jsonb;
+ remaining bigint:=0; deleted boolean;
 BEGIN
  PERFORM bill2_actor(a);
  -- Runtime writers use session -> execution -> run. NOWAIT prevents inverse
@@ -609,7 +609,7 @@ END $$;
 -- No table grants change; these guards also cover an RPC admitted before deletion.
 CREATE OR REPLACE FUNCTION public.content_erasure_parent_guard() RETURNS trigger
 LANGUAGE plpgsql SET search_path=public,pg_temp AS $$
-DECLARE j jsonb:=to_jsonb(NEW);sid uuid;eid uuid;pid uuid;rid uuid;deleted boolean;
+DECLARE j jsonb:=to_jsonb(NEW);sid uuid;eid uuid;pid uuid;deleted boolean;
 BEGIN
  IF TG_TABLE_NAME IN ('runtime_executions','runtime_scope_material','runtime_session_history','runtime_session_batches') THEN
   sid:=(j->>'session_id')::uuid;

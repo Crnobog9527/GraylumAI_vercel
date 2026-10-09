@@ -9,6 +9,9 @@ export async function runDependencies(db,report){
  const rows=(await db.query('SELECT id FROM runtime_executions WHERE session_id=$1 ORDER BY created_at',[f.session])).rows;
  assert.equal((await rpc(db,'runtime_view',f.actor,f.session)).executions.length,3);
  const root=rows[0].id;
+ assert.equal(await rpc(db,'content_erasure_references',{sourceExecutionId:root.toUpperCase()},[root]),true);
+ assert.equal(await rpc(db,'content_erasure_references',{snapshot:JSON.stringify([{sourceExecutionId:root}])},[root]),true);
+ assert.equal(await rpc(db,'content_erasure_references',{text:'User mentions '+root},[root]),false);
  const p=await preview(db,f,'answer',root);assert.equal(p.affectedExecutions,3);
  await erase(db,f,'answer',root,p.previewHash);
  const view=await rpc(db,'runtime_view',f.actor,f.session);
