@@ -139,9 +139,13 @@ staging 一天一次的 cron 只影响这两种少见情况；上线环境每 5 
   1. 用户的浏览器在本机读这份 Word，提取成纯文本。**解析代码不在 Graylum 页面里直接运行**，而是放进一个隔离的沙箱框架：
      `iframe sandbox="allow-scripts"`（不给 allow-same-origin，所以它是不透明来源，拿不到登录 Cookie、本地存储，也不能以用户身份请求 Graylum）；
      沙箱页面的安全策略头设 `default-src 'none'`、`connect-src 'none'`，脚本只允许这一段解析代码的哈希，
-     浏览器会强制拦截里面发起的任何网络请求、图片、表单和跳转。文件以字节通过 postMessage 传进去，只传回纯文本。
+     浏览器会强制拦截里面发起的网络请求、图片和表单。**解析库只在沙箱里的 Web Worker 中运行**：Worker 没有页面、不能改
+     `location` 跳转，它能用的网络途径（fetch、XHR、WebSocket、importScripts）都受 `connect-src 'none'`、`script-src` 约束；
+     沙箱页面本身只有几行受信任的转发代码，不加载解析库，所以被攻破的解析代码没有「让页面跳到外部地址带走数据」的途径。
+     文件以字节通过 postMessage 传进 Worker，只传回纯文本；超时直接 terminate Worker。
      解析库选型（浏览器自带解压和 XML 解析，或经审查的小型解压库）在 LIB-2b 定，新依赖单独审查。
-     验收必须证明：沙箱里的 fetch、XHR、WebSocket、图片、表单提交、跳转全部被拦截；读不到 Cookie 和本地存储；超时能终止。
+     验收必须证明：Worker 里的 fetch、XHR、WebSocket、importScripts 全部被拦截；沙箱页面的 `location` 跳转、链接点击、表单、图片请求
+     都发不出去（用测试页逐项尝试并确认外部地址收不到请求）；读不到 Cookie 和本地存储；超时能终止。
      证明不了就 `.docx` 保持关闭。
   2. 浏览器把原文件和提取出的纯文本各用一个签名地址上传，两者都计入同一个占用。两个路径都由服务端固定生成并记在文件行上
      （`<用户ID>/<文档ID>/original`、`<用户ID>/<文档ID>/text`）；完成、晚到检查、删除、注销清单、两次无对象确认**都要覆盖这两个路径**，
