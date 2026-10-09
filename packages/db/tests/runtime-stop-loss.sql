@@ -37,12 +37,17 @@ BEGIN
  v:=runtime_stop_loss_usage(a);
  IF (v->>'userUsd')::numeric<>1.25 THEN RAISE EXCEPTION 'incorrect exact total: %',v;END IF;
  PERFORM runtime_stop_loss_observe(a);PERFORM runtime_stop_loss_observe(a);
+ IF EXISTS(SELECT 1 FROM diagnostic_results WHERE details ? 'actorId' OR details::text LIKE '%'||a::text||'%')
+ THEN RAISE EXCEPTION 'alert retained an actor identifier';END IF;
  IF (SELECT count(*) FROM diagnostic_results WHERE test_id='runtime_stop_loss_userDailyUsd')<>1
  THEN RAISE EXCEPTION 'duplicate threshold alert';END IF;
  cfg:=jsonb_set(jsonb_set(cfg,'{userDailyUsd}','null'),'{siteDailyUsd}','"1.25"');
  UPDATE system_settings SET value=cfg WHERE key='runtime_stop_loss';
  BEGIN PERFORM runtime_stop_loss_assert(gen_random_uuid(),true);RAISE EXCEPTION 'expected site denial';
  EXCEPTION WHEN raise_exception THEN IF SQLERRM<>'RUNTIME_SITE_DAILY_USD_LIMIT' THEN RAISE;END IF;END;
+ UPDATE system_settings SET value=jsonb_set(cfg,'{notificationChannel}','"   "') WHERE key='runtime_stop_loss';
+ BEGIN PERFORM runtime_stop_loss_assert(a,true);RAISE EXCEPTION 'expected invalid channel denial';
+ EXCEPTION WHEN raise_exception THEN IF SQLERRM<>'RUNTIME_STOP_LOSS_CONFIG_INVALID' THEN RAISE;END IF;END;
  DELETE FROM system_settings WHERE key='runtime_stop_loss';
  PERFORM runtime_stop_loss_assert(a,true);
  INSERT INTO system_settings(key,value) VALUES('runtime_rate_limits','{"stopNewCalls":true}')

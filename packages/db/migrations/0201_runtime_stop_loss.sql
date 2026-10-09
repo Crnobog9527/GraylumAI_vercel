@@ -20,7 +20,8 @@ BEGIN
   THEN RAISE EXCEPTION 'RUNTIME_STOP_LOSS_CONFIG_INVALID';END IF;
  END LOOP;
  IF NOT v ? 'notificationChannel' OR (v->'notificationChannel'<>'null'::jsonb AND
-  (jsonb_typeof(v->'notificationChannel')<>'string' OR length(v->>'notificationChannel')>100))
+  (jsonb_typeof(v->'notificationChannel')<>'string' OR length(v->>'notificationChannel')>100
+   OR v->>'notificationChannel' ~ '^[[:space:]]*$'))
  THEN RAISE EXCEPTION 'RUNTIME_STOP_LOSS_CONFIG_INVALID';END IF;
  RETURN v;
 END $$;
@@ -83,9 +84,9 @@ BEGIN
   threshold:=(v->>k)::numeric;
   IF (k<>'userDailyUsd' OR a IS NOT NULL) AND threshold IS NOT NULL AND (u->>CASE WHEN k='userDailyUsd' THEN 'userUsd' ELSE 'siteUsd' END)::numeric>=threshold THEN
    PERFORM runtime_stop_loss_alert('runtime_stop_loss_'||k,jsonb_build_object(
-    'dedupeKey',(u->>'utcDate')||':'||k||':'||coalesce(CASE WHEN k='userDailyUsd' THEN a::text END,'site')||':'||threshold::text,
+    'dedupeKey',(u->>'utcDate')||':'||k||':'||threshold::text,
     'utcDate',u->>'utcDate','scope',CASE WHEN k='userDailyUsd' THEN 'user' ELSE 'site' END,
-    'actorId',CASE WHEN k='userDailyUsd' THEN a END,'thresholdUsd',threshold::text,
+    'thresholdUsd',threshold::text,
     'actualUsd',u->>CASE WHEN k='userDailyUsd' THEN 'userUsd' ELSE 'siteUsd' END));
   END IF;
  END LOOP;
