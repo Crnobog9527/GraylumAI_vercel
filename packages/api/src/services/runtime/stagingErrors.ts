@@ -5,6 +5,7 @@ import { logger } from '../../lib/logger';
 import { DatabaseReadError } from '../../lib/databaseReadError';
 
 const failures = {
+  CONTENT_ERASED: ['PRECONDITION_FAILED', 'CONTENT_ERASED'],
   RUNTIME_PAYG_CONFIG_UNAVAILABLE: ['SERVICE_UNAVAILABLE', '计费准入设置暂不可用，请稍后重试。'],
   RUNTIME_PAYG_PROFILE_REQUIRED: ['PRECONDITION_FAILED', '当前模型用途尚未完成逐次计费验证，请管理员核对配置；未发起模型调用。'],
   RUNTIME_ORGANIZER_PENDING: ['PRECONDITION_FAILED', 'RUNTIME_ORGANIZER_PENDING：上一轮整理尚未完成，新消息尚未准入，请先处理原任务。'],
@@ -60,6 +61,7 @@ function databaseFailure(error: {code?: string}): StagingAccessError {
   return new StagingAccessError(unavailable ? 'RUNTIME_STAGING_SERVICE_UNAVAILABLE' : 'RUNTIME_STAGING_INTERNAL_ERROR', code);
 }
 export function stagingRpcFailure(error: { code?: string; message?: string }, denial?: string, reason?: StagingFailure): never {
+  if (error.code === '42501' && error.message === 'CONTENT_ERASED') throw new StagingAccessError('CONTENT_ERASED');
   if (reason && denial && error.code === '42501' && error.message === denial) throw new StagingAccessError(reason);
   throw databaseFailure(error);
 }

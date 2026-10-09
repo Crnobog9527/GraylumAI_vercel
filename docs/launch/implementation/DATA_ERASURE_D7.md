@@ -1,68 +1,84 @@
 # DATA-ERASURE D7 后端交接
 
-实施中，风险 high：永久删除、本人权限及账务正文处理。依据 DATA-ERASURE.md 第 5 节、
-MASTER_PLAN D7 / E1–E11；本次只做后端，不改 apps/web，不使用浏览器，不访问远端数据库。
-迁移编号由主窗口分配为 0199。合并、远端迁移均须另行批准，完成后停在主窗口审计。
+实施中，风险 **high**：永久删除、本人权限、数据库和财务正文投影。依据
+[DATA-ERASURE §5](../tasks/DATA-ERASURE.md) 及 MASTER_PLAN D7 / E1–E11。
+本 PR 只改后端；不改前端，不使用浏览器，不访问远端数据库，不合并。
+迁移改用 **0200**（#766 总控最新分配）；最终基线须包含先合并的 #768。
 
 ## 实施拆分
 
-| 选择 | 清理范围 | 保留 |
+| 选择 | 清除 | 保留 |
 | --- | --- | --- |
-| 一条回答 | assistant 正文、流式结果、对应 history/batch、备选匹配、包含正文的执行快照和非财务收据；系统摘要/笔记副本；依赖执行不可重放 | 同轮提问、独立回答、独立保存成果 |
-| 整个会话 | 消息/工具记录、历史批次、附属整理/Fusion、资料快照、排队任务、执行正文及系统衍生副本 | 独立保存成果，返回受影响数量及来源失效提示 |
-| 已保存成果家族 | 手动/正式/历史版本、候选草稿、导出缓存、系统副本与冻结引用；已确认定位版本需列依赖 | 其他独立成果及下游独立正文，来源引用变为不可读 |
+| 回答 `answer` | 原 execution 的回答、匹配结果、复制正文的 history/batch/tool、依赖执行快照、系统 capture 副本、非财务收据正文 | 用户提问、独立回答、独立保存成果 |
+| 会话 `session` | 全部执行及提问、历史、工具、批次、scope/material、系统衍生副本 | 独立保存成果，来源不可再使用 |
+| 成果 `artifact` | artifact project 家族的全部发布版本、round/candidate/confirmation、引用和请求缓存；其成果内容版本 | 其他独立成果和下游已保存正文 |
+| 成果内容 `content` | 指定 opc_content_versions 所属 work_item + kind 家族的全部手动/正式/历史版本和系统快照 | 其他 kind 的独立正文；来源链失效 |
 
-先清复制正文的快照，再清消息，避免外键置空撞上不可变约束。来源传播覆盖外键、JSON
-引用、source_content_id 祖先链、Runtime scope/history；不能把删除一个版本冒充删除成果家族。
-账务只保留现有白名单：金额、币种、用量、原调用/交易编号、冻结报价、幂等和结算证据；
-保留期沿用交易年度结束起三年。删除不退款、不重扣、不修改金额，未知供应商结果仍未知。
+旧 `/chat` 按任务文档明确决定不新增单条删除入口，继续由注销覆盖。若未来物理删除消息，
+仍须先删 context snapshots；本次保留无正文的不可恢复编号壳，不触发 FK SET NULL。
 
-## 最小实现方向
+账务沿用现有 run/call/receipt 和 ledger 的财务白名单，保留金额、币种、用量、原调用/
+交易编号、报价、幂等及结算事实；不退款、不重扣、不把未知结果改成免费或供应商故障。
+必要账务保留期沿用既定规则。无法投影的财务证据返回 `review_required`，不能显示全部清理完成。
 
-复用 erased_at、erasure_update_allowed、既有 BILL2 财务投影与注销执行器，不新建通用删除系统。
-现有整账号清理函数只接受已注销主体，不能直接用于开放账号；0199 增加受限的对象删除边界。
-删除确认、派发和晚到结果写入须共享删除状态；旧请求不能重建正文，后到结果仅走账务收尾。
-本人身份由服务端会话取值；请求不得指定其他用户。重复删除返回同一对象的已删除结果。
+## 复用及安全边界
 
-## 前端交接（接口实现后补充最终签名）
+复用现有单向 `erased_at` 清理、BILL2 财务投影和 `runtime_financial_recovery`。
+`bill2_erasure_closed` 保持原判定；仅原 run 的 `content_deleted_at` 授予受限清理权限。
+内部返回 `contentDeleted`，不会把仍开放的账号错误标为 `accountClosed`。
+四个现有根表增加删除时间；没有新队列、任务系统或账本。回答保留提问，所以其删除标记
+不能直接等同于要求全部正文为空的旧 `erased_at`；整账号注销仍可继续清除提问。
 
-影响预览和明确确认分开。永久删除按钮前展示：
+预览与确认复用同一范围计算。确认锁定所属 profile/session/project 和原执行账务，
+重新核对范围 hash；忙时整笔回滚。来源链、Runtime dependency、结构化 JSON 引用均参与清理。
+读取/重放/派发拒绝已删除对象，父对象触发器阻止晚到子记录；流式返回前重新查删除状态，
+但原调用继续完成财务收尾。不能撤回此前已发到客户端的字节，前端必须同步清缓存。
+
+永久清除没有正文恢复回滚：缺陷采用前向修复，不能通过回退迁移恢复已删除内容。
+在远端执行迁移前需要另行批准；发布必须先具备数据库接口再启用相应应用版本。
+
+## 前端接口
+
+均为已登录本人调用，身份由服务器取得，输入禁止 `actorId` 等额外字段。
+
+- `account.contentErasurePreview` query：`{ kind, id }`。
+- `account.contentErasureConfirm` mutation：`{ kind, id, previewHash, acknowledged: true }`。
+- `kind` 为上表四个值，`id` 为相应 execution/session/project/content UUID。
+- preview：`{ kind, id, alreadyDeleted, affectedExecutions, preservedSavedVersions,
+  affectedSources: [{kind: account|work_item|reference|content, id}], previewHash }`。
+  影响列表只含本人对象编号，前端结合已有项目名称展示；不是私有正文导出接口。
+- confirm：`{ kind, id, status: deleted|review_required, alreadyDeleted,
+  preservedSavedVersions, financialReviewCount }`。
+- 重复确认返回 `alreadyDeleted: true`；不会生成新付费执行。
+
+| message | tRPC code | 展示/动作 |
+| --- | --- | --- |
+| CONTENT_NOT_FOUND | NOT_FOUND | 不存在或无权操作，不区分他人的对象 |
+| CONTENT_ERASED | PRECONDITION_FAILED | 已永久删除，禁止读取和重放 |
+| CONTENT_ERASURE_PREVIEW_CHANGED | CONFLICT | 影响范围变化，重新预览并确认 |
+| CONTENT_ERASURE_BUSY | CONFLICT | 原操作占用中，刷新后重试；本次未部分删除 |
+| CONTENT_ERASURE_UNAVAILABLE | SERVICE_UNAVAILABLE | 状态未确认，不显示成功 |
+
+删除前推荐文案：
 
 - 回答：“永久删除这条回答及系统副本，无法恢复。你的提问和独立保存成果会保留；相关执行不能重放。”
-- 会话：“永久删除此会话及全部消息，无法恢复。独立保存的成果会保留，但来源将不可读，可另行删除。”
+- 会话：“永久删除此会话及全部消息，无法恢复。独立保存成果会保留，但来源将不可读，可另行删除。”
 - 成果：“永久删除这份成果及全部历史版本、候选草稿和系统副本，无法恢复。其他独立成果会保留。”
 - 通用：“删除内容不会退还已产生的费用；必要账务记录按规则保留。”
 
-预览列出保留成果和下游引用数量；前端清除查询缓存及本地临时正文，多标签页刷新删除状态。
-显示“来源已删除，可另行删除”；不能把网络错误或未完成清理显示为删除成功。
-
-## 验证计划
-
-本机 PostgreSQL：成功、重复、越权、读取/重放拒绝、账务白名单及金额不变、与注销并发、
-在途写入/晚到结果、外键及 JSON 来源链、保留独立内容。新迁移重复执行、完整基线指纹；
-API 单元测试、类型/大小检查、必需 CI、安全检查及最新提交的独立审查。
+定位成果先列依赖账号、稿件和引用，说明后续须重新选择来源或复核，允许取消。
+保留成果显示“该成果来源已删除，可另行删除”；`sourceAvailable: false` 不能误作正文丢失。
+收到确认后清除本对象及相关列表/结果缓存、多标签页广播失效、停止显示旧流式缓冲；重连刷新。
+`review_required` 显示“内容已不可读，部分财务证据仍待核对”，不得显示在线清除全部完成。
 
 ## Handoff
 
-已完成：当前 staging 规则、分支保护及现有擦除路径盘点；三类对象清理范围和提示拆分。
-下一步：0199 SQL、薄 API、实际本机测试与前端签名交接。
-阻塞：0199 已分配，但 0198 的分配口径与 #762 实际文件冲突；并行 BILL2 与指纹写入分工待主窗口统一。
-当前仅实施准备，尚无 API 或迁移，不可视为 D7 已实现；保持草稿，不请求最终审查。
-验证：实现测试、CI、独立审查均未运行；无浏览器及远程数据库操作。
+已完成：0200 SQL 和薄 API 的首轮实现；本机开发库九组场景已通过，API 定向 35/35 通过。
+初次空库完整重放 201/201、132 次重复执行通过；最终新增补丁和测试尚待完整链复跑。
+全量 API 首跑 5800 通过、7 失败、12 跳过；失败为新增 RPC 对旧测试桩的影响，已修复并定向通过，
+最终全量重跑尚待完成。类型检查通过；最终 CI、指纹与独立结论尚未完成。
 
-
-## 已核实的复用边界和待协调面
-
-- `0149` / `0150` 的 `erasure_update_allowed` 已提供单向正文擦除，不需要重新实现通用清理框架。
-- `erasure_closed_conversation_guard` 只允许已注销主体写会话擦除标记，需要增加受控的单对象路径。
-- `bill2_erasure_closed` 当前同时检查注销状态和原账务绑定。不能为了单条删除直接放宽账号关闭判断，
-  否则可能改变其他调用的权限；单条删除授权必须限定到原 run，保留现有财务绑定检查。
-- `0183` / `0184` 的 run/call 投影与 `0176` / `0181` 的 receipt 投影可复用；其清理权限目前绑定注销。
-  未决调用仍沿用原身份与结算，不允许把“用户删除”当作供应商失败或零成本。
-- `runtime_history_available`、`runtime_view`、`runtime_session_items`、admission replay、
-  artifact / OPC 来源读取和 `opc_content_allowed` 需一致检查擦除状态；仅清正文不足以证明读取拒绝。
-- 本任务预计涉及 Runtime 历史、artifact / OPC 正文边界以及 BILL2 正文投影权限；#764 涉及 BILL2
-  新调用准入。迁移文件不同不等于数据库写入面隔离，应先明确共享函数/表的串行或拆分责任。
-- #762 当前已包含 `packages/db/migrations/0198_report_model.sql` 和
-  `packages/db/tests/baseline/built-fingerprint.json`；与转达的 CDC 0198 分配口径不一致。
-  本任务不自行修改其他任务编号。指纹应随确定的迁移链串行重建，不能手工拼接两个生成结果。
+下一步：补齐其他读取入口/财务合同回归；#768 合并后同步 staging、在其 `opc_query` /
+`opc_content_allowed` 版本上补丁，生成完整指纹，再推送最终候选并转为可审查。
+阻塞最终基线：#768 当前尚未合并；不阻塞独立实现和本机验证。
+完成后读取当前 head 的独立结论并修复 P0/P1，停下等主窗口审计；不执行合并或远端迁移。

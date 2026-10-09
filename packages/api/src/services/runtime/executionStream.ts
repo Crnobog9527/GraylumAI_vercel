@@ -1,4 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import {contentVisibilityFence} from '../accountErasure/content';
 import {withClaimNotice} from './claimNotice';
 import {NativeTextTransport,type NativeTextDelta} from './nativeProgress';
 import type {ResumeInput} from './paygRuntime';
@@ -47,8 +48,10 @@ export async function executeOriginalExecution(host:OriginalExecutionHost,execut
   const actor=runtimeActor(host.user.auth,host.actorId,host.budget,host.authorization);
   const activateSkill=(candidate:Parameters<typeof activateRuntimeCandidate>[2])=>activateRuntimeCandidate(host.user,host.admin,candidate);
   let erasedWaitingClosed=false;
+  const visible=contentVisibilityFence(host.admin,host.actorId,executionId);
   const outcome=async<T extends {state:AgentTurnOutcome['state']}>(result:T)=>{
    if(erasedWaitingClosed)return {state:result.state};
+   await visible();
    if(result.state==='completed'&&'summary' in result){
     host.budget?.timing?.finishProvider();
     const leave=host.budget?.timing?.enter('host');
@@ -145,7 +148,8 @@ export const TEXT_EVENT_INTERVAL_MS=100;
  * provider evidence: the execution always runs to its own end. Only the latest
  * text and phase are kept; negotiated native events carry queued deltas. */
 export async function* streamOriginalExecution(run:(onProgress:(event:RuntimeProgress)=>void)=>Promise<OriginalExecutionOutcome>,
- timing:RuntimeBudget['timing']|undefined,path:string,now:()=>number=()=>performance.now(),textProtocol?:'textDelta-v1'):AsyncGenerator<ExecutionStreamEvent>{
+ timing:RuntimeBudget['timing']|undefined,path:string,now:()=>number=()=>performance.now(),
+ textProtocol?:'textDelta-v1',visible?:()=>Promise<void>):AsyncGenerator<ExecutionStreamEvent>{
  const transport=new NativeTextTransport();
  let nativePending=false;
  let textEvent:ExecutionStreamEvent|undefined,phaseEvent:ExecutionStreamEvent|undefined,resultEvent:ExecutionStreamEvent|undefined;
@@ -168,11 +172,11 @@ export async function* streamOriginalExecution(run:(onProgress:(event:RuntimePro
     if(wait>0){await idle(wait);continue;}
     const event=nativePending?transport.flush()!:textEvent;nativePending=false;textEvent=undefined;lastText=now();
     if((event.type==='text'||event.type==='textDelta')&&event.text)timing?.mark('firstPublicText');
-    yield event;
+    await visible?.();yield event;
    }
-   else if(cardEvent){const event=cardEvent;cardEvent=undefined;yield event;}
-   else if(phaseEvent){const event=phaseEvent;phaseEvent=undefined;yield event;}
-   else if(resultEvent){const event=resultEvent;resultEvent=undefined;yield event;}
+   else if(cardEvent){const event=cardEvent;cardEvent=undefined;await visible?.();yield event;}
+   else if(phaseEvent){const event=phaseEvent;phaseEvent=undefined;await visible?.();yield event;}
+   else if(resultEvent){const event=resultEvent;resultEvent=undefined;await visible?.();yield event;}
    else await idle();
   }
   if(failure)throw stagingProcedureError(failure,path);

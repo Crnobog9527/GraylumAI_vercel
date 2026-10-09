@@ -24,7 +24,7 @@ afterEach(() => vi.unstubAllEnvs());
 it.each(['local', 'staging', 'recovery'])('wires the %s host gate explicitly', async mode => {
   vi.stubEnv('V3_RUNTIME_STAGING_ENABLED', 'true');
   if (mode === 'recovery') mock.policy.mockRejectedValue(new Error('not enabled'));
-  await executeOriginalExecution({ admin: {rpc:async()=>({data:null,error:null})} as never, user: { auth: {} } as never,
+  await executeOriginalExecution({ admin: {rpc:async(name:string)=>({data:name==='content_erasure_visible'?true:null,error:null})} as never, user: { auth: {} } as never,
     actorId: 'actor', budget: createRuntimeBudget(),
     ...(mode === 'local' ? { maintenanceEndpoint: 'http://127.0.0.1:1' } : {}) }, 'execution');
   const options = mock.factory.mock.calls[0][0];
