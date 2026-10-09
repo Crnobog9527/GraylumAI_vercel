@@ -11,7 +11,8 @@ export function seedUpgrade({sql,read,snapshot,report}){
  assert.equal(JSON.parse(sql("SELECT to_json(to_regprocedure('public.account_erasure_progress_read(uuid,text)') IS NULL);")),true);
  assert.equal(JSON.parse(sql("SELECT to_json(to_regclass('public.ticket_upload_intents') IS NULL);")),true);
  const before=snapshot();
- const saved=JSON.parse(read('packages/db/tests/baseline/staging-fingerprint.json'));
+ // This replay starts at 0186; the current staging snapshot advances after later migrations.
+ const saved=JSON.parse(read('packages/db/tests/pay-erasure-integration/staging-0186-fingerprint.json'));
  const allowed=JSON.parse(read('packages/db/tests/baseline/expected-differences.json')).platformOnlyOnStaging.keys;
  const groups=JSON.parse(sql(read('packages/db/tests/baseline/fingerprint.sql')));
  const differences=[];
