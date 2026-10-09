@@ -61,6 +61,7 @@ export function installPurchaseFixture(user: Db, admin: Db, getStripe: () => Str
     return query as unknown as Query;
   };
   admin.rpc = async (name, args) => {
+    if (name === 'report_membership_check') return previousRpc ? previousRpc(name, args) : { data: null, error: null };
     if (name === 'pay_common_create_purchase') {
       const recurring = args.p_item_type === 'membership_plan';
       const item = (await admin.from(recurring ? 'membership_plans' : 'credit_packages').select().eq('id', args.p_item_id).maybeSingle()).data!;
