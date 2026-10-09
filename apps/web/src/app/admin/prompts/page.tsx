@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { ModuleSkillEditor, emptySkillForm, skillPublicationFields, type SkillForm } from './module-skill-editor';
+import { ModuleSkillEditor, ReportModelSetting, emptySkillForm, skillPublicationFields, type SkillForm } from './module-skill-editor';
 import type { ElementType } from 'react';
 import { trpc } from '@/trpc/client';
 import { toast } from 'sonner';
@@ -977,7 +977,7 @@ export default function AdminPromptsPage() {
                 setSkillReading(reading);
                 if (reading) setSkillForm(value => ({ ...value, reviewed: false }));
               }} disabled={saveSkill.isPending || skillLoading} />}
-
+            {mode === 'skill' && <ReportModelSetting moduleId={editingModule?.id} hasReport={!!skillForm.reportGeneration} />}
             <div className="space-y-2">
               <Label style={{ color: 'var(--text-secondary)' }}>卡片描述</Label>
               <Input
