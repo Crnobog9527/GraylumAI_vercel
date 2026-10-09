@@ -18,12 +18,16 @@ const muted = { color: 'var(--text-tertiary)' };
  * form). Empty means "沿用对话模型". Every save sends the value this page read, so an older page
  * cannot overwrite a newer setting; the server re-validates the model.
  */
-export function ReportModelSetting({ moduleId, hasReport }: { moduleId: string | undefined; hasReport: boolean }) {
+type SavedHook = () => Promise<boolean>;
+
+export function ReportModelSetting({ moduleId, hasReport, onSaved }: {
+  moduleId: string | undefined; hasReport: boolean; onSaved?: SavedHook;
+}) {
   if (!moduleId || !hasReport) return null;
-  return <ReportModelPanel moduleId={moduleId} />;
+  return <ReportModelPanel moduleId={moduleId} onSaved={onSaved} />;
 }
 
-function ReportModelPanel({ moduleId }: { moduleId: string }) {
+function ReportModelPanel({ moduleId, onSaved }: { moduleId: string; onSaved?: SavedHook }) {
   const utils = trpc.useUtils();
   const current = trpc.reportModel.get.useQuery({ moduleId }, { staleTime: 0, retry: false });
   const options = trpc.reportModel.options.useQuery(undefined, { staleTime: 0, retry: false });
@@ -48,7 +52,10 @@ function ReportModelPanel({ moduleId }: { moduleId: string }) {
       const next = await update.mutateAsync({ moduleId, reportModelId: value || null, expectedReportModelId: saved });
       utils.reportModel.get.setData({ moduleId }, next);
       setSelected(null);
-      setNotice({ tone: 'ok', text: '已保存。新开始的报告使用这个设置，已经开始的报告不受影响。' });
+      // Saving moves the module version the form above sends back; let the page pick up the new one.
+      const synced = onSaved ? await onSaved() : true;
+      setNotice(synced ? { tone: 'ok', text: '已保存。新开始的报告使用这个设置，已经开始的报告不受影响。' }
+        : { tone: 'error', text: '报告模型已保存，但模块版本没能刷新。要保存上方其他修改，请先关闭窗口再重新打开。' });
     } catch (error) {
       setNotice({ tone: 'error', text: reportModelErrorText(error), conflict: isReportModelConflict(error) });
     } finally {

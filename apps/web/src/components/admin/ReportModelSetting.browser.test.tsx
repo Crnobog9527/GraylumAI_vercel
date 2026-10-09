@@ -65,8 +65,10 @@ beforeAll(async () => {
       if (id === '\0report-model-trpc') return mock;
       if (id === entry) return `import React from 'react'; import { createRoot } from 'react-dom/client';
         import {ReportModelSetting} from ${JSON.stringify(source)};
+        window.syncs = 0;
         createRoot(document.getElementById('root')).render(React.createElement(ReportModelSetting,
-          {moduleId: window.moduleId, hasReport: window.hasReport}));`;
+          {moduleId: window.moduleId, hasReport: window.hasReport,
+            onSaved: async () => { window.syncs++; return window.syncFails !== true; }}));`;
     } }],
     build: { write: false, minify: false, lib: { entry, name: 'ReportModelTest', formats: ['iife'] } },
   });
@@ -103,6 +105,20 @@ it('shows the dialogue model and that the report follows it by default, then sav
     await browserExpect(page.getByTestId('report-model-notice')).toContainText('已保存');
     await browserExpect(page.getByTestId('report-model-effective')).toHaveText('模型 B');
     expect(await updates(page)).toEqual([{ moduleId: MODULE, reportModelId: REPORT, expectedReportModelId: null }]);
+    // The page refreshes the module version after every successful save.
+    expect(await page.evaluate('window.syncs')).toBe(1);
+    expect(errors).toEqual([]);
+  } finally { await page.close(); }
+}, 20000);
+
+it('asks the admin to reopen the dialog when the module version could not be refreshed', async () => {
+  const { page, errors } = await open({ syncFails: true });
+  try {
+    await page.getByRole('combobox', { name: '写报告用的模型' }).click();
+    await page.getByRole('option', { name: '模型 B' }).click();
+    await page.getByTestId('report-model-save').click();
+    await browserExpect(page.getByTestId('report-model-notice')).toContainText('请先关闭窗口再重新打开');
+    await browserExpect(page.getByTestId('report-model-effective')).toHaveText('模型 B');
     expect(errors).toEqual([]);
   } finally { await page.close(); }
 }, 20000);
@@ -144,6 +160,8 @@ it('explains a server refusal in plain Chinese and never shows the raw code', as
     await page.getByTestId('report-model-save').click();
     await browserExpect(page.getByTestId('report-model-notice')).toContainText('报价缺失或已过期');
     await browserExpect(page.getByTestId('report-model-notice')).not.toContainText('REPORT_');
+    // A refused save changes nothing on the server, so the page keeps its module version.
+    expect(await page.evaluate('window.syncs')).toBe(0);
     expect(errors).toEqual([]);
   } finally { await page.close(); }
 }, 20000);
