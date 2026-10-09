@@ -80,10 +80,12 @@ export function AdminMonthlyRefunds() {
         </div>
         {refund.quoteError ? (
           <div role="alert" data-testid="monthly-refund-quote-error" className="space-y-1 text-sm" style={{ color: 'var(--error)' }}>
-            <p>拿不到报价：{refund.quoteError}</p>
-            <p style={{ color: 'var(--text-tertiary)' }}>
-              常见原因：不是第一次购买或已续费、超过 7 天、积分已经用过、工单不是这位用户的账单工单、订单不是测试模式，
-              或者已经批准或拒绝过。可以点"查看进度"确认；不符合条件时在下面选择拒绝原因。
+            <p>拿不到报价：{refund.quoteError.text}</p>
+            <p data-testid="monthly-refund-quote-next" style={{ color: 'var(--text-tertiary)' }}>
+              {refund.quoteError.ineligible ? '这次申请不符合退款条件，可以在下面选择“不符合退款条件”拒绝。'
+                : refund.quoteError.specific ? '这是证据或状态问题，请先核对订单和工单，或点"查看进度"确认，不要直接拒绝。'
+                  : '常见原因：不是第一次购买或已续费、超过 7 天、积分已经用过、工单不是这位用户的账单工单、订单不是测试模式，'
+                    + '或者已经批准或拒绝过。可以点"查看进度"确认；不符合条件时在下面选择拒绝原因。'}
             </p>
           </div>
         ) : null}

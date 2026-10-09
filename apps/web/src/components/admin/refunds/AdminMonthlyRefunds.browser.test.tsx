@@ -24,6 +24,8 @@ beforeAll(async () => {
     const server = async (name, input) => {
       window.calls.push([name, input]);
       if (window.mode[name] === 'hang') await new Promise(r => { window.release[name] = r; });
+      if (String(window.mode[name] ?? '').startsWith('code:')) throw Object.assign(new Error(window.mode[name].slice(5)),
+        {data:{code:'BAD_REQUEST'}});
       if (window.mode[name] === 'fail') throw Object.assign(new Error('退款证据不足或状态已变化，请重新核对订单与工单'),
         {data:{code:'INTERNAL_SERVER_ERROR'}});
       return window.responses[name];
@@ -316,6 +318,29 @@ it('after an uncertain execute in the same session, neither approve nor execute 
     await browserExpect(page.getByTestId('monthly-refund-approve')).toHaveCount(0);
     await browserExpect(page.getByTestId('monthly-refund-execute')).toHaveCount(0);
     expect((await calls(page)).map(([name]) => name)).toEqual(['quote', 'approve', 'execute']);
+    expect(errors).toEqual([]);
+  } finally { await page.close(); }
+}, 30000);
+
+it('names the failed refund rule from the server reason code and suggests the right next step', async () => {
+  const { page, errors } = await open();
+  try {
+    const setMode = (mode: string) => page.evaluate(value => {
+      (window as unknown as { mode: Record<string, string> }).mode.quote = value; }, mode);
+    await fill(page);
+    await setMode('code:PAY_REFUND_CREDITS_CONSUMED');
+    await page.getByTestId('monthly-refund-quote-button').click();
+    await browserExpect(page.getByTestId('monthly-refund-quote-error')).toContainText('拿不到报价：从这次付款起，这个账户用过积分');
+    await browserExpect(page.getByTestId('monthly-refund-quote-next')).toContainText('选择“不符合退款条件”拒绝');
+    await setMode('code:PAY_REFUND_TICKET_MISMATCH');
+    await page.getByTestId('monthly-refund-quote-button').click();
+    await browserExpect(page.getByTestId('monthly-refund-quote-error')).toContainText('工单不是这位用户的账单类工单');
+    await browserExpect(page.getByTestId('monthly-refund-quote-next')).toContainText('不要直接拒绝');
+    await setMode('code:PAY_REFUND_QUOTE_UNAVAILABLE');
+    await page.getByTestId('monthly-refund-quote-button').click();
+    await browserExpect(page.getByTestId('monthly-refund-quote-error')).toContainText('退款证据不足或状态已变化');
+    await browserExpect(page.getByTestId('monthly-refund-quote-next')).toContainText('常见原因');
+    await browserExpect(page.getByTestId('monthly-refund-quote-error')).not.toContainText('PAY_');
     expect(errors).toEqual([]);
   } finally { await page.close(); }
 }, 30000);
