@@ -31,7 +31,7 @@ export async function replayReasoning(f: Fixture, path: string, slot: string, dr
       const protectedChanges = input.checklist.flatMap((s: { id: string; fields: { id: string; protected: boolean; value: string }[] }) =>
         s.fields.filter(field => field.protected && (after.information[s.id]?.values?.[field.id]?.value ?? '') !== (field.value ?? '')));
       results.push({ slot, effort: variant.effort, summary: variant.summary, after, capture,
-        formatError: variant.finish !== 'stop' || !parsed || parsed.discarded.length > 0,
+        formatError: variant.finish !== 'stop' || !parsed || parsed.discarded.length > 0 || parsed.invalidWithdrawals.length > 0,
         protectedDirectChanged: protectedChanges.length > 0 });
     } finally { await f.db.query('rollback'); }
   }
