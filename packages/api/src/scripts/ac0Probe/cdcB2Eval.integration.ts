@@ -88,6 +88,11 @@ it('CDC_EVAL: freeze or execute exactly the approved roster through local OPC an
      const nonempty=step.fields.filter(field=>field.value!=='');
      if(!nonempty.length)continue;
      if(nonempty.some(field=>!field.protected))throw new Error('SPECIAL_UNSUPPORTED_INITIAL');
+     // A fresh draft has no stored value objects; give untouched siblings their unknown tuple first
+     // (capture.integration.ts does the same) so the manual save marks only the edited fields as user-owned.
+     await f.db.query(`update artifact_rounds set steps=jsonb_set(steps,ARRAY[$2,'information'],
+      (select jsonb_object_agg(x,jsonb_build_object('value','','status','unknown','nature','unknown')) from unnest($3::text[]) x)
+      ||coalesce(steps->$2->'information','{}')) where id=$1`,[initial.roundId,step.id,step.fields.map(field=>field.id)]);
      const state=await f.service.read(draft.draftId);
      const values=Object.fromEntries(step.fields.map(field=>[field.id,{value:field.value,nature:field.nature,
       status:field.status==='draft'?'provisional':field.status==='missing'?'unknown':field.status}]));
