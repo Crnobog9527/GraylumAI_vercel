@@ -19,7 +19,7 @@ ALTER TABLE public.account_erasure_requests
  ADD COLUMN IF NOT EXISTS executor_error_codes text[] NOT NULL DEFAULT '{}';
 
 -- Only insertion after this guard establishes known history. Existing subjects stay unknown.
--- Losing any attachment reference invalidates that proof, including ordinary pre-closure purge.
+-- Reference loss is rejected until verified cleanup; ordinary purge retains the mapping.
 CREATE OR REPLACE FUNCTION public.erasure_history_guard() RETURNS trigger
 LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
 BEGIN
@@ -39,16 +39,13 @@ BEGIN
  IF OLD.attachments IS NULL OR OLD.attachments='[]'::jsonb THEN
   IF TG_OP='DELETE' THEN RETURN OLD; ELSE RETURN NEW; END IF;
  END IF;
- IF TG_OP='UPDATE' AND NEW.attachments IS NOT DISTINCT FROM OLD.attachments THEN RETURN NEW; END IF;
+ IF TG_OP='UPDATE' AND OLD.attachments<@coalesce(NEW.attachments,'[]'::jsonb) THEN RETURN NEW; END IF;
  IF TG_TABLE_NAME='tickets' THEN subject:=OLD.user_id;
  ELSE SELECT user_id INTO subject FROM tickets WHERE id=OLD.ticket_id; END IF;
- -- A verified erasure removes references only after checking the external objects.
- UPDATE profiles SET erasure_history_complete=false WHERE (id IN (subject,OLD.user_id) OR id::text IN
-   (SELECT split_part(path,'/',1) FROM jsonb_array_elements_text(OLD.attachments) path))
-  AND NOT EXISTS(SELECT 1 FROM account_erasure_requests e WHERE e.profile_id IN (subject,OLD.user_id)
-   AND e.storage_verified_at IS NOT NULL)
-  AND NOT EXISTS(SELECT 1 FROM account_erasure_requests e WHERE e.profile_id=profiles.id
-   AND e.storage_verified_at IS NOT NULL);
+ IF NOT EXISTS(SELECT 1 FROM account_erasure_requests e WHERE e.profile_id IN (subject,OLD.user_id)
+  AND e.storage_verified_at IS NOT NULL) THEN
+  RAISE EXCEPTION 'ERASURE_ATTACHMENT_HISTORY_REQUIRED' USING ERRCODE='42501';
+ END IF;
  IF TG_OP='DELETE' THEN RETURN OLD; END IF;
  RETURN NEW;
 END $$;
@@ -106,6 +103,34 @@ $patch$||needle);
   WHERE content<>'' AND (r.user_id=p_profile_id OR EXISTS(SELECT 1 FROM tickets t WHERE t.id=r.ticket_id AND t.user_id=p_profile_id))
   LIMIT 100 FOR UPDATE OF r SKIP LOCKED);
 $patch$||needle);
+ END IF;
+END $$;
+
+-- Ordinary expiration clears bodies but retains attachment authority before closure too.
+DO $$
+DECLARE source text; first_pos integer; last_pos integer;
+BEGIN
+ source:=pg_get_functiondef('public.purge_deleted_records(integer)'::regprocedure);
+ IF position('-- executor preclosure retention' IN source)=0 THEN
+  first_pos:=position(' -- Do not extend body retention' IN source);
+  last_pos:=position(' DELETE FROM prompts' IN source);
+  IF first_pos=0 OR last_pos<=first_pos THEN RAISE EXCEPTION 'ERASURE_PURGE_SOURCE_MISMATCH'; END IF;
+  EXECUTE overlay(source PLACING $patch$ -- executor preclosure retention
+ UPDATE ticket_replies r SET content='' WHERE (r.is_deleted='true' AND r.deleted_at<cutoff)
+  OR EXISTS(SELECT 1 FROM tickets t WHERE t.id=r.ticket_id AND t.is_deleted='true' AND t.deleted_at<cutoff);
+ UPDATE tickets t SET title='',description='' WHERE t.is_deleted='true' AND t.deleted_at<cutoff;
+ DELETE FROM ticket_replies r WHERE r.is_deleted='true' AND r.deleted_at<cutoff
+  AND coalesce(r.attachments,'[]'::jsonb)='[]'::jsonb
+  AND NOT EXISTS(SELECT 1 FROM account_erasure_requests e WHERE e.profile_id=r.user_id)
+  AND NOT EXISTS(SELECT 1 FROM tickets t JOIN account_erasure_requests e ON e.profile_id=t.user_id WHERE t.id=r.ticket_id);
+ GET DIAGNOSTICS removed=ROW_COUNT; RETURN QUERY SELECT 'ticket_replies'::text,removed;
+ DELETE FROM tickets t WHERE t.is_deleted='true' AND t.deleted_at<cutoff
+  AND coalesce(t.attachments,'[]'::jsonb)='[]'::jsonb
+  AND NOT EXISTS(SELECT 1 FROM ticket_replies r WHERE r.ticket_id=t.id AND coalesce(r.attachments,'[]'::jsonb)<>'[]'::jsonb)
+  AND NOT EXISTS(SELECT 1 FROM account_erasure_requests e WHERE e.profile_id=t.user_id)
+  AND NOT EXISTS(SELECT 1 FROM ticket_replies r JOIN account_erasure_requests e ON e.profile_id=r.user_id WHERE r.ticket_id=t.id);
+ GET DIAGNOSTICS removed=ROW_COUNT; RETURN QUERY SELECT 'tickets'::text,removed;
+$patch$ FROM first_pos FOR last_pos-first_pos);
  END IF;
 END $$;
 

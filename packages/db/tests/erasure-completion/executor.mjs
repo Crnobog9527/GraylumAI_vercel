@@ -162,8 +162,26 @@ export async function runExecutor({db,Client,connectionString,require,runAccount
   assert.ok(Date.now()-began>2000,'normal serial reads exceed a single-request timeout');
   assert.equal(delayedPage.completed,1,JSON.stringify(delayedPage));assert.equal(latency.sdk.objects.size,0);
 
+  const expired=await fixture();const oldUploader=randomUUID();await db.query('insert into profiles(id) values($1)',[oldUploader]);
+  const oldPath=oldUploader+'/old-reply.png';expired.sdk.objects.add(oldPath);
+  await db.query("insert into ticket_replies(ticket_id,user_id,content,attachments) values($1,$2,'expired reply',$3)",
+   [expired.ticket,oldUploader,JSON.stringify([oldPath])]);
+  await assert.rejects(db.query("update tickets set attachments='[]' where id=$1",[expired.ticket]),/ERASURE_ATTACHMENT_HISTORY_REQUIRED/);
+  await db.query("update tickets set is_deleted='true',deleted_at=clock_timestamp()-interval '40 days' where id=$1",[expired.ticket]);
+  assert.equal((await base.rpc('purge_deleted_records',{p_days_old:30})).error,null);
+  assert.deepEqual((await db.query('select title,description,attachments from tickets where id=$1',[expired.ticket])).rows[0],
+   {title:'',description:'',attachments:[expired.actor+'/a.png']});
+  assert.deepEqual((await db.query('select content,attachments from ticket_replies where ticket_id=$1',[expired.ticket])).rows[0],
+   {content:'',attachments:[oldPath]});
+  assert.equal((await db.query('select erasure_history_complete v from profiles where id=$1',[expired.actor])).rows[0].v,true);
+  await expired.close();assert.equal((await runAccountErasureExecutor(expired.client)).completed,1);
+  assert.equal(expired.sdk.objects.size,0);assert.equal(expired.sdk.authDeletes(),1);
+  assert.equal((await db.query('select erasure_history_complete v from profiles where id=$1',[oldUploader])).rows[0].v,true);
+
   const history=await fixture();
-  await db.query('delete from tickets where id=$1',[history.ticket]);
+  await assert.rejects(db.query('delete from tickets where id=$1',[history.ticket]),/ERASURE_ATTACHMENT_HISTORY_REQUIRED/);
+  // Synthetic pre-migration history gap; never infer completeness from currently retained rows.
+  await db.query('update profiles set erasure_history_complete=false where id=$1',[history.actor]);
   assert.equal((await db.query('select erasure_history_complete v from profiles where id=$1',[history.actor])).rows[0].v,false);
   await assert.rejects(db.query('update profiles set erasure_history_complete=true where id=$1',[history.actor]),/ERASURE_HISTORY_CANNOT/);
   await history.close();const unknown=await runAccountErasureExecutor(history.client);

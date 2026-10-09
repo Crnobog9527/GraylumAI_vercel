@@ -21,9 +21,10 @@ attachment history, and the old host latch cannot exclude another server instanc
 these are the smallest missing capabilities. No queue, scheduler system, balance,
 manifest table or alternative authority is introduced.
 
-New profile insertion after the migration starts tracked history. Any subsequent
-removal/change of raw attachment references invalidates that proof unless their
-Storage absence was already verified. Verified subject cleanup preserves the
+New profile insertion after the migration starts tracked history. Raw attachment references cannot be removed
+unless their Storage absence was already verified. Ordinary pre-closure expiration
+clears bodies on the existing schedule but retains the original attachment mapping;
+it does not create an unrecoverable history gap. Appending references remains allowed. Verified subject cleanup preserves the
 other uploader's history too; an integration case then erases that uploader. Existing profiles remain unproven; the
 migration does not infer completeness from empty tables, creation timestamps,
 0196 being present or time elapsed. Unproven history still permits unrelated body
@@ -161,10 +162,10 @@ Auth identities, objects or body data. Do not drop proof columns, reset unknown
 history to true, expire a live claim, or restore a purge that loses references.
 
 0196 built SHA-256: `06b95b0bb78bc9345e9d531519fe43ab9516c5db78deab1f66cfced48aa5bce8`.
-0197 final built SHA-256: `2a6acdba3cb08976f79b029c0dc4f3559b98fb2e20cbfcac1da1de7d2bb1b646`.
-The exact final local delta is 39 added catalog entries and three changed
-functions `account_erasure_local_cleanup(uuid,boolean)`, `account_erasure_ticket_guard()`
-and `account_erasure_auth_begin(uuid,uuid)`; no catalog entries were
+0197 final built SHA-256: `d8cb933e547e5f40c7ce437283e98f392d6ce41edadffaf334a7b540ae189d30`.
+The exact final local delta is 39 added catalog entries and four changed
+functions `account_erasure_local_cleanup(uuid,boolean)`, `account_erasure_ticket_guard()`,
+`account_erasure_auth_begin(uuid,uuid)` and `purge_deleted_records(integer)`; no catalog entries were
 removed. The additions include subject-scoped attachment RPCs and two GIN indexes.
 Final canonical replay and completion runner each passed 200/200 build steps,
 131 historical repeat checks and container cleanup. These are local fingerprints,
