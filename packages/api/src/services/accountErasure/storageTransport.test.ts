@@ -53,7 +53,6 @@ describe('bounded Storage SDK transport', () => {
     { hasNext: true, nextCursor: 'opaque', folders: [], objects: [] },
     { hasNext: false, nextCursor: 'contradiction', folders: [], objects: [] },
     { hasNext: false, folders: [{}], objects: [] },
-    { hasNext: false, folders: [], objects: [{ name: path('a'), id: 'id' }] },
     { hasNext: false, folders: [], objects: [{ key: `${actor}/nested/a.png`, id: 'id' }] },
     { hasNext: false, folders: [], objects: [{ key: path('a'), id: '1' }, { key: path('a'), id: '2' }] },
     { hasNext: false, folders: [], objects: Array.from({ length: 1001 }, (_, i) => ({ key: path(String(i)), id: String(i) })) },
@@ -210,4 +209,16 @@ it('production prefix resumes original provider boundaries after deletion and re
   const later = await f.transport.listPrefix({ ...prefixInput(), afterPath: `${path('n04999')}|${encodeURIComponent('opaque:'+path('n04999'))}` });
   expect(later).toEqual({ paths: [path('n05000')], nextAfterPath: null });
   expect(f.fetcher.mock.calls.length-start).toBe(1);
+});
+
+it.each(['full', 'basename'])('accepts name-only SDK objects (%s) for listing and exact absence proof', async mode => {
+  const f = setup(['a'], 1000, true);
+  f.fetcher.mockResolvedValueOnce(json({ hasNext: false, folders: [], objects: [{
+    name: mode === 'full' ? path('a') : 'a.png', id: 'object',
+  }] }));
+  expect(await f.transport.listPrefix(prefixInput())).toEqual({ paths: [path('a')], nextAfterPath: null });
+  f.fetcher.mockResolvedValueOnce(json({ hasNext: false, folders: [], objects: [{
+    name: mode === 'full' ? path('a') : 'a.png', id: 'object',
+  }] }));
+  expect(await f.transport.getState({ ...scope(), path: path('a') })).toBe('present');
 });

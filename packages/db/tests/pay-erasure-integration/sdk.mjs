@@ -23,7 +23,7 @@ export function syntheticSdk(createClient,profileId){
    const rows=[...objects].filter(key=>key.startsWith(body.prefix)&&(!body.cursor||key>body.cursor.slice(7))).sort();
    const offset=0;const end=Math.min(2,body.limit);
    return response({hasNext:end<rows.length,nextCursor:end<rows.length?`opaque:${rows[end-1]}`:null,folders:[],
-    objects:rows.slice(offset,end).map(key=>({key,id:key}))});
+    objects:rows.slice(offset,end).map(key=>({name:key,id:key}))});
   }
   assert.equal(target.pathname,'/storage/v1/object/ticket-attachments');assert.equal(method,'DELETE');
   assert.ok(body.prefixes.length);for(const path of body.prefixes){assert.ok(objects.has(path));objects.delete(path);}

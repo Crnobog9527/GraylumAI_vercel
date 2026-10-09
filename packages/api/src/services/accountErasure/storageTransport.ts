@@ -11,9 +11,18 @@ const maxObjects = 5000;
 const readTimeoutMs = 2000;
 const listing = z.object({
   hasNext: z.boolean(), nextCursor: z.string().max(4096).nullish(),
-  folders: z.array(z.unknown()), objects: z.array(z.object({ key: z.string(), id: z.string().min(1) })),
+  folders: z.array(z.unknown()), objects: z.array(z.object({ key: z.string().optional(), name: z.string().optional(), id: z.string().min(1) })),
 });
 const failure = () => new Error('ERASURE_STORAGE_UNKNOWN');
+function objectKey(row: { key?: string; name?: string }, prefix: string): string {
+  const named = row.name === undefined ? undefined : row.name.includes('/') ? row.name
+    : prefix.slice(0, prefix.lastIndexOf('/') + 1) + row.name;
+  const key = row.key ?? named;
+  if (!key || !isCanonicalErasureAttachment(key) || !key.startsWith(prefix)
+    || named !== undefined && named !== key) throw failure();
+  return key;
+}
+
 function check(target: string, signal: AbortSignal) {
   if (target !== bucket || signal.aborted) throw failure();
 }
@@ -41,7 +50,8 @@ export function createErasureStorageTransport(client: Client, options: { bounded
       const parsed = listing.safeParse(result.data);
       if (!parsed.success || parsed.data.folders.length || parsed.data.objects.length > pageSize
         || paths.size + parsed.data.objects.length > maxObjects) throw failure();
-      for (const row of parsed.data.objects) {
+      for (const object of parsed.data.objects) {
+        const row = { ...object, key: objectKey(object, prefix) };
         if (!row.key.startsWith(prefix) || !isCanonicalErasureAttachment(row.key)
           || paths.has(row.key) || identities.has(row.id)) throw failure();
         paths.add(row.key);
@@ -94,7 +104,7 @@ export function createErasureStorageTransport(client: Client, options: { bounded
         check(target, signal);
         if (result.error) throw failure();
         const data = listing.parse(result.data);
-        const paths = data.objects.map(row => row.key);
+        const paths = data.objects.map(row => objectKey(row, prefix));
         if (data.folders.length || paths.length > limit || new Set(data.objects.map(row => row.id)).size !== paths.length
           || paths.some((path, index) => !path.startsWith(prefix) || !isCanonicalErasureAttachment(path)
             || index > 0 && path <= paths[index - 1] || previous !== null && path <= previous.path)
