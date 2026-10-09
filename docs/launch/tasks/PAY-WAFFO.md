@@ -143,7 +143,7 @@ Waffo 商品事实负责收款，Graylum 冻结报价负责本地权益；不能
 | `payments/orderProjection.ts`、adminOrders.ts、stripeBillingDocument.ts | 同一账单/管理员视图按原渠道加载 Waffo 凭证；保留 unavailable 状态和归属检查。 |
 | `routers/payments.ts` 的 getSubscriptionManagement/createCustomerPortalSession、`apps/web/src/components/profile/SubscriptionCard.tsx` | 当前只识别 Stripe；PR-3 按原渠道提供 Waffo 管理/期末取消，不能只改“available”就沿用 Stripe Portal。 |
 | `apps/web/src/components/profile/TicketsPanel.tsx` 与 subscriptionRefundEvidence.ts、0185 | 页面缺 billing 分类，而退款事务要求 billing；PR-4 在现有客服工单面板补“账单/退款问题”分类及订单绑定，不能让用户只能提交会被拒绝的其他分类。 |
-| 0151 身份摘要机制、DATA-ERASURE 财务保留与清理 | Gold 独立 purpose/资格事实，不复用 opening_grant 的业务含义；具体留存须 N1；本轮不碰清理执行器。 |
+| 0151 身份摘要机制、DATA-ERASURE 财务保留与清理 | Gold 独立 purpose/资格事实，不复用 opening_grant 的业务含义；具体留存须 N1；后续 PR-1 串行交接 DATA-ERASURE 契约及实际清理修订，验证完成前不收集付款 IP/设备证据。本轮只写方案，不碰清理执行器。 |
 | PAY-COMMON §5–6 PR-5 来源通用化依赖 | 在真实 SQL 调用链核对 BILL2 reserve/settle/release、source allocation、退款冻结与年付来源；没有通过该交叉回归前不得开启 Waffo 收费。不能因公共 schema 存在就宣称完成。 |
 
 服务文件均在 `packages/api/src/services/`。
@@ -162,6 +162,11 @@ PAYWALL 负责价格和勾选 UI，DATA-ERASURE 负责清理执行；本方案�
 - 现订单快照缺少独立的、可追加且关联后续自动续费的同意事实；优先按订单增加不可变 consent 记录，
   旧条款全文由版本库保留，付款证据按 N1 独立短期保存。若需独立表，只承载该最小关系，
   不搭通用审计平台；财务字段与可删除 IP/设备字段分开，避免扩大三年财务保留范围。
+  **采集硬依赖**：N1 批准后，PR-1 必须先与 DATA-ERASURE 当前 writer 完成单写入交接，
+  同步修订其保留/删除契约和实际清理代码，再验证期限届满删除、未决争议有限保留、
+  结案后删除、账号注销与财务证据分离。上述契约修订和清理验证未完成前，
+  不开启付款 IP/设备采集（包括测试商户采集），仅用合成数据验证关闭路径。
+  N1 批准本身不解除此依赖，不以“同意记录已实现”替代清理完成证明。
 - 所有新迁移追加且编号在实施时确定；保留原财务 FK、注销封闭和迟到回调隔离。
   旧 schema/代码兼容、幂等回放、权限拒绝路径和恢复都在 PR-1 证明。
 
@@ -324,7 +329,7 @@ D17 复用 `payment_new_purchase_channel` 和版本检查；缺键按既定 Waff
 
 | PR | 最小范围与依赖 | 风险和必须证明 |
 | --- | --- | --- |
-| 1 公共缺口与来源 | 承接 PAY-COMMON PR-5 未完成部分：内部来源联接、一次性会员事实、资格预留、同意记录及事件收件；依赖 N1 | high：迁移/RLS/账务；新旧兼容、迁移重复回放、越权拒绝、退款与消费并发、注销/保留；不提前选号，不接新收款。 |
+| 1 公共缺口与来源 | 承接 PAY-COMMON PR-5 未完成部分：内部来源联接、一次性会员事实、资格预留、同意记录及事件收件；N1 批准后串行承接 DATA-ERASURE 清理契约/代码修订，修订及清理验证完成前禁止 IP/设备采集 | high：迁移/RLS/账务；新旧兼容、迁移重复回放、越权拒绝、退款与消费并发、注销/保留、到期/结案后删除及采集关闭验证；先交接清理 writer，再交付该修订，不提前选号，不接新收款。 |
 | 2 目录报价与结账 | §4、D17、首购/50 名额原子判断、服务端 Waffo 适配；依赖 PR1 和能力确认 | high：少收/重扣/超卖；首月与正价、全部 18 商品永久直购/匿名/Store Slug 入口拒绝、卡会员使用 wechat/微信会员使用 card 的双向拒绝及缺失方式证据、最后一名并发、失败未知恢复、会话权威终止、原渠道冻结。 |
 | 3 回调与会员履约 | §5–6，月/年/微信、升级、原年付 cron、按原渠道订阅管理/期末取消及会员页面入口、创始社群资格/展示墙/徽章；依赖 PR2、N5 | high：双发/漏发/双订阅；验签、乱序/重放、错误店铺环境、零金额、月末闰年、12 期、升级 Pro 保留、退款先到、注销后回调；本人正常取消、越权/模式错误拒绝、取消未知恢复及门户绕过保护；创始权益开通/续期/到期/退款/冻结，公开同意/撤回与社群交付核对。 |
 | 4 Waffo 退款与凭证 | §7，现客服页 billing 分类/本人订单绑定、工单 API 与人工审批；与 #747 管理 UI 串行交接，补齐年付/创始/升级/例外 | high：多退/漏退/错收回；允许与拒绝、6% 与禁扣、消费竞争、超时恢复、部分退款差异、拒付互斥、原渠道凭证归属；普通用户在客服页创建 billing 工单到管理员可审批的完整链路。 |
