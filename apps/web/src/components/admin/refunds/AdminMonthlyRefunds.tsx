@@ -48,16 +48,16 @@ export function AdminMonthlyRefunds() {
       <section className="space-y-4 rounded-xl border p-4" style={cardStyle} data-testid="monthly-refund-form">
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
           <Field id="orderId" label="订单编号" hint='在"支付订单"页每笔订单最下面一行' error={errors.orderId}>
-            <Input id="refund-orderId" value={form.orderId} autoComplete="off" spellCheck={false}
+            <Input id="refund-orderId" value={form.orderId} disabled={refund.busy} autoComplete="off" spellCheck={false}
               onChange={event => refund.updateForm({ orderId: event.target.value })} />
           </Field>
           <Field id="ticketId" label="工单编号" hint="用户提交的账单类退款工单" error={errors.ticketId}>
-            <Input id="refund-ticketId" value={form.ticketId} autoComplete="off" spellCheck={false}
+            <Input id="refund-ticketId" value={form.ticketId} disabled={refund.busy} autoComplete="off" spellCheck={false}
               onChange={event => refund.updateForm({ ticketId: event.target.value })} />
           </Field>
           <Field id="feePermitted" label="能否扣 6% 手续费" hint="按用户所在地法律核对；不确定时先核对，不要猜"
             error={errors.feePermitted}>
-            <Select value={form.feePermitted} onValueChange={value => refund.updateForm({ feePermitted: value as FeePermitted })}>
+            <Select value={form.feePermitted} disabled={refund.busy} onValueChange={value => refund.updateForm({ feePermitted: value as FeePermitted })}>
               <SelectTrigger id="refund-feePermitted"><SelectValue placeholder="请选择" /></SelectTrigger>
               <SelectContent>
                 {(Object.keys(FEE_PERMITTED_LABELS) as FeePermitted[]).map(key => (
@@ -67,7 +67,7 @@ export function AdminMonthlyRefunds() {
             </Select>
           </Field>
           <Field id="feeEvidence" label="手续费核对依据" hint="核对记录的编号，例如 legal:us-ca:2026-10" error={errors.feeEvidence}>
-            <Input id="refund-feeEvidence" value={form.feeEvidence} autoComplete="off" spellCheck={false}
+            <Input id="refund-feeEvidence" value={form.feeEvidence} disabled={refund.busy} autoComplete="off" spellCheck={false}
               onChange={event => refund.updateForm({ feeEvidence: event.target.value })} />
           </Field>
         </div>

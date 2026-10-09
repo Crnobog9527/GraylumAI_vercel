@@ -5,8 +5,8 @@ import { useRef, useState } from 'react';
 import { trpc } from '@/trpc/client';
 import { getSafeErrorMessage } from '@/lib/safe-error-message';
 import {
-  EMPTY_MONTHLY_REFUND_FORM, validateMonthlyRefundForm,
-  type MonthlyRefundForm, type MonthlyRefundRequest, type RejectReason,
+  EMPTY_MONTHLY_REFUND_FORM, validateMonthlyRefundForm, validateRefundFields,
+  type MonthlyRefundForm, type MonthlyRefundRequest, type RefundFormScope, type RejectReason,
 } from './monthlyRefundView';
 
 const FALLBACK = '退款证据不足或状态已变化，请重新核对订单与工单';
@@ -44,7 +44,13 @@ export function useMonthlyRefund() {
     try { await action(); } finally { inFlight.current = false; }
   }
 
+  // Bumped on every edit; a response that started under an older revision is dropped so it can
+  // never show (and then approve) a quote or intent for identifiers no longer on screen.
+  const revision = useRef(0);
+  const current = (started: number) => started === revision.current;
+
   function updateForm(patch: Partial<MonthlyRefundForm>) {
+    revision.current += 1;
     setForm(value => ({ ...value, ...patch }));
     // Any edit invalidates what is shown; approval must match the order and quote on screen.
     setQuoted(null);
@@ -61,16 +67,24 @@ export function useMonthlyRefund() {
     return result.ok ? result.request : null;
   }
 
+  function fieldsOk(scope: RefundFormScope) {
+    const found = validateRefundFields(form, scope);
+    setErrors(found);
+    return Object.keys(found).length === 0;
+  }
+
   const requestQuote = () => once(async () => {
     const request = validated();
     if (!request) return;
+    const started = revision.current;
     setQuoting(true);
     setQuoteError(null);
     setActionError(null);
     try {
       const quote = await utils.admin.quoteMonthlyRefund.fetch(request, { staleTime: 0, retry: false });
-      setQuoted({ request, quote });
+      if (current(started)) setQuoted({ request, quote });
     } catch (error) {
+      if (!current(started)) return;
       setQuoted(null);
       setQuoteError(getSafeErrorMessage(error, FALLBACK));
     } finally {
@@ -79,14 +93,18 @@ export function useMonthlyRefund() {
   });
 
   const loadStatus = () => once(async () => {
-    const request = validated();
-    if (!request) return;
+    if (!fieldsOk('status')) return;
+    const orderId = form.orderId.trim();
+    const started = revision.current;
     setLoadingStatus(true);
     setStatusError(null);
     try {
-      const data = await utils.admin.getMonthlyRefundStatus.fetch({ orderId: request.orderId }, { staleTime: 0, retry: false });
+      const data = await utils.admin.getMonthlyRefundStatus.fetch({ orderId }, { staleTime: 0, retry: false });
+      if (!current(started)) return;
       setIntent(data as MonthlyRefundIntent);
+      setExecuteResult(null);
     } catch (error) {
+      if (!current(started)) return;
       setIntent(null);
       setStatusError(getSafeErrorMessage(error, '这个订单还没有月付退款记录，或读取失败'));
     } finally {
@@ -96,14 +114,16 @@ export function useMonthlyRefund() {
 
   const approveQuote = () => once(async () => {
     if (!quoted) return;
+    const started = revision.current;
     setActionError(null);
     try {
       const data = await approve.mutateAsync({ ...quoted.request,
         versionHash: quoted.quote.versionHash, localVersion: quoted.quote.localVersion });
+      if (!current(started)) return;
       setIntent(data as MonthlyRefundIntent);
       setExecuteResult(null);
     } catch (error) {
-      setActionError(getSafeErrorMessage(error, FALLBACK));
+      if (current(started)) setActionError(getSafeErrorMessage(error, FALLBACK));
     }
   });
 
@@ -111,27 +131,30 @@ export function useMonthlyRefund() {
     const terms = intent?.terms as { orderId?: unknown } | undefined;
     const orderId = typeof terms?.orderId === 'string' ? terms.orderId : form.orderId.trim();
     if (!intent || typeof intent.id !== 'string') return;
+    const started = revision.current;
     setActionError(null);
     try {
       const data = await execute.mutateAsync({ orderId, intentId: intent.id }) as MonthlyRefundIntent;
+      if (!current(started)) return;
       setExecuteResult(data);
       // A finished pass returns the stored intent; a stopped pass returns only a reason.
       if (data && 'terms' in data) setIntent(data);
     } catch (error) {
-      setActionError(getSafeErrorMessage(error, FALLBACK));
+      if (current(started)) setActionError(getSafeErrorMessage(error, FALLBACK));
     }
   });
 
   const rejectRequest = (reason: RejectReason) => once(async () => {
-    const request = validated();
-    if (!request) return;
+    if (!fieldsOk('reject')) return;
+    const started = revision.current;
     setActionError(null);
     try {
-      const data = await reject.mutateAsync({ orderId: request.orderId, ticketId: request.ticketId, reason });
+      const data = await reject.mutateAsync({ orderId: form.orderId.trim(), ticketId: form.ticketId.trim(), reason });
+      if (!current(started)) return;
       setIntent(data as MonthlyRefundIntent);
       setQuoted(null);
     } catch (error) {
-      setActionError(getSafeErrorMessage(error, FALLBACK));
+      if (current(started)) setActionError(getSafeErrorMessage(error, FALLBACK));
     }
   });
 

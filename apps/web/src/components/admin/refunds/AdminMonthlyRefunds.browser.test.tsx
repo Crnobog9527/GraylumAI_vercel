@@ -194,3 +194,51 @@ it('rejects with the chosen reason after confirmation and hides reject once reje
     expect(errors).toEqual([]);
   } finally { await page.close(); }
 }, 20000);
+
+it('locks the form while a quote is pending and shows the quoted identifiers in the confirmation', async () => {
+  const { page, errors } = await open({ quote });
+  try {
+    await page.evaluate(() => { (window as unknown as { mode: Record<string, string> }).mode.quote = 'hang'; });
+    await fill(page);
+    await page.getByTestId('monthly-refund-quote-button').click();
+    await browserExpect(page.getByLabel('订单编号')).toBeDisabled();
+    await browserExpect(page.getByLabel('手续费核对依据')).toBeDisabled();
+    await page.evaluate(() => { (window as unknown as { release: Record<string, () => void> }).release.quote(); });
+    await browserExpect(page.getByTestId('monthly-refund-quote-ids')).toContainText(ORDER);
+    await page.getByTestId('monthly-refund-approve').click();
+    await browserExpect(page.getByRole('alertdialog')).toContainText(TICKET);
+    expect(errors).toEqual([]);
+  } finally { await page.close(); }
+}, 20000);
+
+it('reads progress with only an order id and hides execute after a recorded cash conflict', async () => {
+  const { page, errors } = await open({ status: approved,
+    execute: { status: 'review_required', intentId: INTENT, reason: 'recorded_cash_conflict' } });
+  try {
+    await page.getByLabel('订单编号').fill(ORDER);
+    await page.getByTestId('monthly-refund-status-button').click();
+    await browserExpect(page.getByTestId('monthly-refund-status-label')).toHaveText('已批准，等待执行');
+    await page.getByTestId('monthly-refund-execute').click();
+    await page.getByTestId('monthly-refund-execute-confirm').click();
+    await browserExpect(page.getByTestId('monthly-refund-conflict')).toBeVisible();
+    await browserExpect(page.getByTestId('monthly-refund-execute')).toHaveCount(0);
+    expect(await calls(page)).toEqual([['status', { orderId: ORDER }], ['execute', { orderId: ORDER, intentId: INTENT }]]);
+    expect(errors).toEqual([]);
+  } finally { await page.close(); }
+}, 20000);
+
+it('rejects with only the order and ticket filled in', async () => {
+  const { page, errors } = await open({ reject: { kind: 'monthly_first_purchase', id: INTENT, status: 'rejected',
+    rejectionReason: 'customer_withdrew' } });
+  try {
+    await page.getByLabel('订单编号').fill(ORDER);
+    await page.getByLabel('工单编号').fill(TICKET);
+    await page.getByLabel('拒绝原因').click();
+    await page.getByRole('option', { name: '用户撤回了申请' }).click();
+    await page.getByTestId('monthly-refund-reject-button').click();
+    await page.getByTestId('monthly-refund-reject-button-confirm').click();
+    await browserExpect(page.getByTestId('monthly-refund-status-label')).toHaveText('已拒绝');
+    expect(await calls(page)).toEqual([['reject', { orderId: ORDER, ticketId: TICKET, reason: 'customer_withdrew' }]]);
+    expect(errors).toEqual([]);
+  } finally { await page.close(); }
+}, 20000);

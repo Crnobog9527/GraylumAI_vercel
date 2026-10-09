@@ -25,6 +25,8 @@ export function MonthlyRefundStatusCard({ intent, executeResult, executing, disa
   const refund = intent.recordedRefund as { status?: string } | null | undefined;
   const claimed = typeof intent.claimedAt === 'string';
   const stopped = executeResult && !('terms' in executeResult) ? executeResult : null;
+  // A recorded cash mismatch is terminal for this screen: no further attempt until someone reconciles it.
+  const conflict = !!intent.terminalConflict || stopped?.reason === 'recorded_cash_conflict';
   return (
     <section data-testid="monthly-refund-status" className="space-y-4 rounded-xl border p-4"
       style={{ background: 'var(--bg-secondary)', borderColor: 'var(--border-primary)' }}>
@@ -66,17 +68,17 @@ export function MonthlyRefundStatusCard({ intent, executeResult, executing, disa
           ))}
         </ol>
       ) : null}
-      {intent.terminalConflict ? (
-        <p role="alert" className="text-sm" style={{ color: 'var(--error)' }}>
+      {conflict ? (
+        <p role="alert" data-testid="monthly-refund-conflict" className="text-sm" style={{ color: 'var(--error)' }}>
           支付商的退款记录和本地记录对不上，已停止自动处理，需要人工核对，不要再次执行。
         </p>
       ) : null}
-      {stopped ? (
+      {stopped && !conflict ? (
         <p data-testid="monthly-refund-execute-stopped" role="status" className="text-sm" style={{ color: 'var(--warning)' }}>
           {executeReasonLabel(stopped.reason)}
         </p>
       ) : null}
-      {canExecuteMonthlyRefund(intent) && !intent.terminalConflict ? (
+      {canExecuteMonthlyRefund(intent) && !conflict ? (
         <ConfirmRefundAction testId="monthly-refund-execute" destructive label={claimed ? '继续执行' : '执行退款'}
           pendingLabel="正在执行…" title={claimed ? '继续执行这笔退款？' : '确认执行退款？'}
           confirmLabel={claimed ? '继续执行' : '执行退款'} pending={executing} disabled={disabled} onConfirm={onExecute}>

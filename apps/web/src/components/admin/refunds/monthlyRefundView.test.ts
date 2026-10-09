@@ -2,7 +2,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   canExecuteMonthlyRefund, canRejectMonthlyRefund, executeReasonLabel, monthlyRefundStages, monthlyRefundStatusLabel,
-  validateMonthlyRefundForm,
+  validateMonthlyRefundForm, validateRefundFields,
 } from './monthlyRefundView';
 
 const ORDER = '11111111-1111-4111-8111-111111111111';
@@ -25,6 +25,15 @@ describe('validateMonthlyRefundForm', () => {
     const result = validateMonthlyRefundForm({ orderId: ORDER, ticketId: TICKET, feePermitted: 'not_permitted',
       feeEvidence: 'a'.repeat(161) });
     expect(result.ok).toBe(false);
+  });
+});
+
+describe('validateRefundFields', () => {
+  it('checks only what each action sends', () => {
+    const form = { orderId: ORDER, ticketId: '', feePermitted: '' as const, feeEvidence: '' };
+    expect(validateRefundFields(form, 'status')).toEqual({});
+    expect(Object.keys(validateRefundFields(form, 'reject'))).toEqual(['ticketId']);
+    expect(Object.keys(validateRefundFields(form, 'quote')).sort()).toEqual(['feeEvidence', 'feePermitted', 'ticketId']);
   });
 });
 

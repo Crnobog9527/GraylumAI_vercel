@@ -7,6 +7,7 @@ import { ConfirmRefundAction } from './ConfirmRefundAction';
 import { FEE_PERMITTED_LABELS, MONTHLY_REFUND_RULES, PLAN_LABELS, formatRefundTime } from './monthlyRefundView';
 
 export type MonthlyRefundQuoteTerms = {
+  orderId: string; ticketId: string;
   plan: string; currency: string; paidMinor: number; basisMinor: number; feeMinor: number; netMinor: number;
   credits: number; paidAt: string; submittedAt: string; periodEnd: string; mode: string;
   feePermitted: 'confirmed' | 'not_permitted'; feeEvidence: string; evidenceRefs: string[];
@@ -61,11 +62,15 @@ export function MonthlyRefundQuoteCard({ terms, approving, disabled, onApprove }
           </div>
         ))}
       </dl>
+      <p data-testid="monthly-refund-quote-ids" className="break-all font-mono text-xs" style={{ color: 'var(--text-tertiary)' }}>
+        订单 {terms.orderId} · 工单 {terms.ticketId}
+      </p>
       <p className="break-all text-xs" style={{ color: 'var(--text-disabled)' }}>
         手续费依据 {terms.feeEvidence} · 核对证据 {terms.evidenceRefs.length} 项
       </p>
       <ConfirmRefundAction testId="monthly-refund-approve" label="批准退款" pendingLabel="正在批准…"
         title="确认批准这笔退款？" confirmLabel="批准" pending={approving} disabled={disabled} onConfirm={onApprove}>
+        <p className="break-all">订单 {terms.orderId}<br />工单 {terms.ticketId}</p>
         <p>批准后会锁定这份报价：退回 <strong>{money(terms.netMinor)}</strong>，收回 {terms.credits.toLocaleString()} 积分。</p>
         <p>批准不会马上退款。真正退款要在下面的进度卡片里另外点"执行退款"。</p>
         <p>如果批准前订单或工单有变化，服务端会拒绝，需要重新获取报价。</p>

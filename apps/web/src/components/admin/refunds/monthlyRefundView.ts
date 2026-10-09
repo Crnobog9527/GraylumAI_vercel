@@ -12,23 +12,43 @@ export type RejectReason = 'ineligible' | 'evidence_missing' | 'customer_withdre
 
 export const EMPTY_MONTHLY_REFUND_FORM: MonthlyRefundForm = { orderId: '', ticketId: '', feePermitted: '', feeEvidence: '' };
 
+export type RefundFormScope = 'quote' | 'status' | 'reject';
+type FormErrors = Partial<Record<keyof MonthlyRefundForm, string>>;
+const SCOPE_FIELDS: Record<RefundFormScope, Array<keyof MonthlyRefundForm>> = {
+  quote: ['orderId', 'ticketId', 'feePermitted', 'feeEvidence'],
+  status: ['orderId'],
+  reject: ['orderId', 'ticketId'],
+};
+
+function fieldError(field: keyof MonthlyRefundForm, form: MonthlyRefundForm): string | null {
+  if (field === 'orderId' && !UUID_PATTERN.test(form.orderId.trim())) return '请填写完整的订单编号（支付订单页里的"订单"一行）';
+  if (field === 'ticketId' && !UUID_PATTERN.test(form.ticketId.trim())) return '请填写完整的工单编号（这位用户提交的账单类工单）';
+  if (field === 'feePermitted' && form.feePermitted !== 'confirmed' && form.feePermitted !== 'not_permitted') {
+    return '请先确认当地法律是否允许扣手续费';
+  }
+  if (field === 'feeEvidence' && !FEE_EVIDENCE_PATTERN.test(form.feeEvidence.trim())) {
+    return '请填写核对依据的编号，只能用英文字母、数字和 : . _ / -，最多 160 个字符';
+  }
+  return null;
+}
+
+/** Checks only the fields the chosen action sends; the server's own input checks stay authoritative. */
+export function validateRefundFields(form: MonthlyRefundForm, scope: RefundFormScope): FormErrors {
+  const errors: FormErrors = {};
+  for (const field of SCOPE_FIELDS[scope]) {
+    const error = fieldError(field, form);
+    if (error) errors[field] = error;
+  }
+  return errors;
+}
+
 export function validateMonthlyRefundForm(form: MonthlyRefundForm):
   | { ok: true; request: MonthlyRefundRequest }
-  | { ok: false; errors: Partial<Record<keyof MonthlyRefundForm, string>> } {
-  const orderId = form.orderId.trim();
-  const ticketId = form.ticketId.trim();
-  const feeEvidence = form.feeEvidence.trim();
-  const errors: Partial<Record<keyof MonthlyRefundForm, string>> = {};
-  if (!UUID_PATTERN.test(orderId)) errors.orderId = '请填写完整的订单编号（支付订单页里的"订单"一行）';
-  if (!UUID_PATTERN.test(ticketId)) errors.ticketId = '请填写完整的工单编号（这位用户提交的账单类工单）';
-  if (form.feePermitted !== 'confirmed' && form.feePermitted !== 'not_permitted') {
-    errors.feePermitted = '请先确认当地法律是否允许扣手续费';
-  }
-  if (!FEE_EVIDENCE_PATTERN.test(feeEvidence)) {
-    errors.feeEvidence = '请填写核对依据的编号，只能用英文字母、数字和 : . _ / -，最多 160 个字符';
-  }
+  | { ok: false; errors: FormErrors } {
+  const errors = validateRefundFields(form, 'quote');
   if (Object.keys(errors).length > 0) return { ok: false, errors };
-  return { ok: true, request: { orderId, ticketId, feePermitted: form.feePermitted as FeePermitted, feeEvidence } };
+  return { ok: true, request: { orderId: form.orderId.trim(), ticketId: form.ticketId.trim(),
+    feePermitted: form.feePermitted as FeePermitted, feeEvidence: form.feeEvidence.trim() } };
 }
 
 /** The rules the server checked before it returned a quote; a quote only exists when all pass. */
