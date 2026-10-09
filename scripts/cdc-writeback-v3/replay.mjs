@@ -4,6 +4,7 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { randomUUID } from 'node:crypto';
 import { git } from '../cdc-writeback-v2/source.mjs';
 import { runHost } from '../cdc-writeback-v2/host.mjs';
 import { validateResponse } from '../cdc-writeback-v2/frozen.mjs';
@@ -24,7 +25,9 @@ export function mentorStream(tail, template) {
   assert(frames.length > 2 && final.length >= 1 && final.at(-1).usage && frames[0].choices[0].finish_reason === null, 'V3_MENTOR_TEMPLATE');
   const first = structuredClone(frames[0]);
   first.choices[0].delta = { ...first.choices[0].delta, content: envelope.message };
-  return [first, ...final].map(f => 'data: ' + JSON.stringify(f)).join('\n\n') + '\n\ndata: [DONE]\n\n';
+  // Each synthetic call needs its own generation identity; the runtime records it per provider call.
+  const id = `${frames[0].id}-${randomUUID()}`;
+  return [first, ...final].map(f => 'data: ' + JSON.stringify({ ...f, id })).join('\n\n') + '\n\ndata: [DONE]\n\n';
 }
 
 /** Batches: R1-R3 and S12 replay V3 paid outputs; A12-reference replays the already-paid A12 outputs at no cost. */

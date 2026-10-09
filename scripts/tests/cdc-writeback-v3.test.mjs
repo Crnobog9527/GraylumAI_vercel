@@ -58,6 +58,8 @@ test('V3 replay compares normalized organizer payloads and unwraps the frozen me
   strict.doesNotMatch(stream, /agent-turn\.v1|原|文/);
   strict.match(stream, /"provider":"Anthropic"/);
   strict.match(stream, /"usage":\{"cost":0\.01\}/);
+  const ids = new Set([stream, mentorStream(tail, template)].flatMap(x => [...x.matchAll(/"id":"([^"]+)"/g)].map(m => m[1])));
+  strict.equal(ids.size, 2);
   strict.throws(() => mentorStream(tail, frame('x', null)), /V3_MENTOR_TEMPLATE/);
 });
 
