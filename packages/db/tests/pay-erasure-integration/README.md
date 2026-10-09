@@ -7,8 +7,12 @@ node packages/db/tests/erasure-completion/run-local.mjs --local-only
 
 The first command reuses the monthly runner and its canonical build, permissions,
 concurrency and recovery cases. At migration 0186 it compares the local catalog to
-`staging-fingerprint.json` at its recorded precision (using only the existing
-platform-only exclusions), then seeds synthetic open/closed accounts, attachment
+`staging-0186-fingerprint.json` at its recorded precision (using only the existing
+platform-only exclusions). This immutable fixture is copied byte-for-byte from
+`packages/db/tests/baseline/staging-fingerprint.json` at commit
+`41534c4ae7e650678bf1d4d7b3d73c6ae24c72a6` (the 0186 capture from #725).
+Do not refresh it when the rolling staging snapshot advances. The test then
+seeds synthetic open/closed accounts, attachment
 references, financial rows, an unresolved original approval and a dispatched
 Runtime call. It applies 0187–0196. The original 0187–0195 migrations remain
 unchanged; 0196 changes the existing purge and ticket-guard function bodies, so
