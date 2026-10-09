@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { MessageMarkdown } from "@/components/chat/MessageMarkdown";
 import { CHAT_ACTION, ChatNoticeList, type ChatNotice } from "@/components/chat/ChatInlineNotice";
 import { profileTabHref } from "@/lib/profile-tabs";
+import { ReportPaywallDialog } from "@/components/paywall/ReportPaywallDialog";
 import resultStyles from "@/components/opc/positioning-result.module.css";
 import {
   REPORT_ACTION, REPORT_INTRO, REPORT_TITLE, REPORT_WRITING_NOTICE, reportView,
@@ -32,12 +33,16 @@ function RoundReportEntry(props: Props) {
   const report = useReportGen({ ...props, canGenerate: canGenerate });
   const [open, setOpen] = useState(false);
   if (!report.executionId && (!canGenerate || report.refusal?.hideEntry)) return null;
+  // A first start refused for membership opens the paywall (design v25 scene 1). A saved report of
+  // this round keeps its own dialog, where a later membership refusal stays a notice.
+  const paywall = Boolean(report.refusal?.membership && !report.executionId);
   return (
     <>
       <Button variant="outline" disabled={props.busy} onClick={() => setOpen(true)}>
         {report.executionId ? REPORT_TITLE : REPORT_ACTION.start}
       </Button>
-      {open && <ReportDialog report={report} busy={props.busy} onClose={() => setOpen(false)} />}
+      {open && (paywall ? <ReportPaywallDialog onClose={() => setOpen(false)} />
+        : <ReportDialog report={report} busy={props.busy} onClose={() => setOpen(false)} />)}
     </>
   );
 }
