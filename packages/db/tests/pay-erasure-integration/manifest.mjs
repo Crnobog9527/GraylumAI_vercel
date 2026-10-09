@@ -1,0 +1,140 @@
+/* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import assert from 'node:assert/strict';
+import {randomUUID} from 'node:crypto';
+import {transport} from '../monthly-refund/adapter.mjs';
+import {syntheticSdk} from './sdk.mjs';
+export async function runManifest(input){
+ const {db,Client,connectionString,report,require,createErasureAttachmentManifest,
+  createErasureStorageAdapter,createErasureStorageTransport,createErasureAuthAdapter,processAccountErasure,createAccountErasureHost}=input;
+ const fixture=async(adminReply=true)=>{
+  const actor=randomUUID(),admin=randomUUID(),other=randomUUID(),ticket=randomUUID(),open=randomUUID();
+  await db.query('insert into profiles(id) values($1),($2),($3)',[actor,admin,other]);
+  await db.query(`insert into tickets(id,user_id,title,description,attachments,is_deleted,deleted_at)
+   values($1,$2,'Synthetic','Synthetic',$3,'true',clock_timestamp()-interval '40 days'),
+   ($4,$5,'Synthetic','Synthetic','[]','true',clock_timestamp()-interval '40 days')`,
+   [ticket,actor,JSON.stringify([actor+'/a.png']),open,other]);
+  if(adminReply)await db.query(`insert into ticket_replies(ticket_id,user_id,content,attachments,is_deleted,deleted_at)
+   values($1,$2,'Synthetic',$3,'true',clock_timestamp()-interval '40 days')`,[ticket,admin,JSON.stringify([admin+'/reply.png'])]);
+  return {actor,admin,other,ticket,open};
+ };
+ const f=await fixture();
+ await db.query(`insert into ticket_replies(ticket_id,user_id,content,attachments,is_deleted,deleted_at)
+  values($1,$2,'Fresh reply',$3,'false',null),($1,$2,'Recent soft deletion',$3,'true',clock_timestamp()-interval '1 day')`,
+  [f.ticket,f.admin,JSON.stringify([f.admin+'/fresh.png'])]);
+ const originalReplies=(await db.query('select id,ticket_id,user_id,attachments,is_deleted,deleted_at from ticket_replies where ticket_id=$1 order by id',[f.ticket])).rows;
+ await db.query('select account_erasure_confirm($1,$2)',[f.actor,randomUUID()]);
+ const inherited=(await db.query("select f from monthly_test.upgrade_facts where kind='closed'")).rows[0].f;
+ for(const role of ['anon','authenticated']){
+  await db.query('SET ROLE '+role);await assert.rejects(db.query('select * from purge_deleted_records(30)'),/permission denied/);
+  await db.query('RESET ROLE');
+ }
+ await db.query('SET ROLE service_role');await db.query('select * from purge_deleted_records(30)');await db.query('RESET ROLE');
+ assert.equal((await db.query('select count(*)::int n from tickets where id=$1',[f.open])).rows[0].n,0,'ordinary retention still purges');
+ assert.equal((await db.query('select count(*)::int n from tickets where id=ANY($1)',[[f.ticket,inherited.ticket]])).rows[0].n,2);
+ assert.equal((await db.query('select count(*)::int n from ticket_replies where ticket_id=ANY($1)',[[f.ticket,inherited.ticket]])).rows[0].n,4);
+ assert.deepEqual((await db.query('select title,description from tickets where id=$1',[f.ticket])).rows[0],{title:'',description:''});
+ assert.equal((await db.query("select count(*)::int n from ticket_replies where ticket_id=$1 and content<>''",[f.ticket])).rows[0].n,0);
+ assert.deepEqual((await db.query('select id,ticket_id,user_id,attachments,is_deleted,deleted_at from ticket_replies where ticket_id=$1 order by id',[f.ticket])).rows,originalReplies);
+ await assert.rejects(db.query("update ticket_replies set content='refill' where ticket_id=$1",[f.ticket]),/ACCOUNT_ERASURE/);
+ await assert.rejects(db.query("update ticket_replies set content='',attachments='[]' where ticket_id=$1",[f.ticket]),/ACCOUNT_ERASURE/);
+ await assert.rejects(db.query("update tickets set description='refill' where id=$1",[f.ticket]),/ACCOUNT_ERASURE/);
+ await assert.rejects(db.query("update tickets set description='',attachments='[]' where id=$1",[f.ticket]),/ACCOUNT_ERASURE/);
+ await db.query('SET ROLE service_role');
+ await assert.rejects(db.query("update tickets set description='' where id=$1",[f.ticket]),/permission denied/);
+ await db.query('select * from purge_deleted_records(30)');await db.query('RESET ROLE');
+ const sdk=syntheticSdk(require('@supabase/supabase-js').createClient,f.actor);sdk.objects.add(f.admin+'/reply.png');
+ const database=transport(db);
+ const manifest=createErasureAttachmentManifest({client:database,limits:{pageSize:2,maxRows:10000,timeoutMs:5000},
+  // Synthetic fixture created in this local run with no prior purge; never a deployment claim.
+  verifyRetainedHistory:async profile=>{assert.equal(profile,f.actor);}});
+ const missing=createErasureAttachmentManifest({client:database});
+ assert.equal((await createErasureStorageAdapter({manifest:missing,storage:createErasureStorageTransport(sdk.client)}).cleanSubject(f.actor)).complete,false);
+ assert.equal(sdk.storageDeletes(),0);
+ const rpc=async(name,args)=>{await db.query('SET ROLE service_role');
+  try{return await database.rpc(name,args);}finally{await db.query('RESET ROLE');}};
+ const result=await processAccountErasure({profileId:f.actor,database:{rpc},
+  storageAdapter:createErasureStorageAdapter({manifest,storage:createErasureStorageTransport(sdk.client)}),
+  authAdapter:createErasureAuthAdapter(sdk.client,f.actor),budget:{deadline:Date.now()+30000,operationTimeoutMs:5000}});
+ assert.notEqual(result.stage,'completed');assert.equal(sdk.objects.has(f.admin+'/reply.png'),true);assert.equal(sdk.authDeletes(),0);
+ assert.equal((await db.query('select count(*)::int n from tickets where id=$1',[f.ticket])).rows[0].n,1);
+ const hostDb=new Client({connectionString});await hostDb.connect();
+ try{
+  await hostDb.query('SET ROLE service_role');const hostClient=transport(hostDb);
+  const make=async()=>{
+   const f=await fixture(false),requestId=randomUUID();
+   await db.query('select account_erasure_confirm($1,$2)',[f.actor,requestId]);
+   const sdk=syntheticSdk(require('@supabase/supabase-js').createClient,f.actor);
+   const config={profileId:f.actor,requestId,client:hostClient,
+    storage:createErasureStorageTransport(sdk.client),auth:createErasureAuthAdapter(sdk.client,f.actor),operationTimeoutMs:5000,
+    // This test owns creation and all writers for this synthetic subject, never real history proof.
+    verifyRetainedHistory:async profile=>{assert.equal(profile,f.actor);},
+    verifyQuiescence:async profile=>{assert.equal(profile,f.actor);}};
+   return {f,sdk,config};
+  };
+  const adminRequest=(await db.query('select request_id from account_erasure_requests where profile_id=$1',[f.actor])).rows[0].request_id;
+  const adminHost=createAccountErasureHost({profileId:f.actor,requestId:adminRequest,client:hostClient,
+   storage:createErasureStorageTransport(sdk.client),auth:createErasureAuthAdapter(sdk.client,f.actor),operationTimeoutMs:5000,
+   verifyRetainedHistory:async profile=>{assert.equal(profile,f.actor);},verifyQuiescence:async profile=>{assert.equal(profile,f.actor);}});
+  assert.notEqual((await adminHost.run()).stage,'completed');assert.equal(sdk.authDeletes(),0);
+  assert.equal(sdk.objects.has(f.admin+'/reply.png'),true);
+  const own=await make();
+  for(const config of [{...own.config,requestId:randomUUID()},
+   {...own.config,verifyRetainedHistory:undefined},{...own.config,verifyQuiescence:undefined}]){
+   assert.notEqual((await createAccountErasureHost(config).run()).stage,'completed');
+   assert.equal(own.sdk.storageDeletes(),0);assert.equal(own.sdk.authDeletes(),0);
+  }
+  for(const role of ['anon','authenticated']){
+   await hostDb.query('SET ROLE '+role);
+   assert.notEqual((await createAccountErasureHost(own.config).run()).stage,'completed');
+   assert.equal(own.sdk.storageDeletes(),0);assert.equal(own.sdk.authDeletes(),0);
+  }
+  await hostDb.query('SET ROLE service_role');
+  const done=await createAccountErasureHost(own.config).run();
+  assert.equal(done.stage,'completed',JSON.stringify(done));assert.equal(own.sdk.objects.size,0);assert.equal(own.sdk.authDeletes(),1);
+  assert.equal((await db.query('select count(*)::int n from tickets where id=$1',[own.f.ticket])).rows[0].n,0);
+  const lost=await make();const originalRemove=lost.config.storage.remove;let sent=0;
+  lost.config.storage.remove=async args=>{sent++;await originalRemove(args);throw new Error('synthetic lost removal response');};
+  const lostHost=createAccountErasureHost(lost.config);
+  assert.notEqual((await lostHost.run()).stage,'completed');assert.equal(lost.sdk.authDeletes(),0);
+  assert.equal((await lostHost.run()).stage,'completed');assert.equal(sent,1);
+  const unknown=await make();unknown.sdk.setMode('auth_unknown');
+  const unknownHost=createAccountErasureHost(unknown.config);
+  assert.notEqual((await unknownHost.run()).stage,'completed');assert.equal(unknown.sdk.authDeletes(),1);
+  unknown.sdk.setAuth('present');
+  const resumed=createAccountErasureHost({...unknown.config,auth:createErasureAuthAdapter(unknown.sdk.client,unknown.f.actor)});
+  assert.notEqual((await resumed.run()).stage,'completed');assert.equal(unknown.sdk.authDeletes(),1);
+  unknown.sdk.setAuth('absent');assert.equal((await resumed.run()).stage,'completed');assert.equal(unknown.sdk.authDeletes(),1);
+ }finally{await hostDb.end();}
+ report.checks.push('unwired host: service-only original request; anon/auth denied; missing history/quiescence denied; lost Storage response and durable Auth intent recover without duplicate deletion');
+ const related=await fixture();
+ await db.query(`insert into ticket_replies(ticket_id,user_id,content) values($1,$2,'Sibling fresh body')`,[related.ticket,related.other]);
+ await db.query('select account_erasure_confirm($1,$2)',[related.admin,randomUUID()]);
+ await db.query('select * from purge_deleted_records(30)');
+ assert.equal((await db.query("select count(*)::int n from ticket_replies where ticket_id=$1 and content<>''",[related.ticket])).rows[0].n,0);
+ assert.equal((await db.query('select count(*)::int n from tickets where id=$1',[related.ticket])).rows[0].n,1);
+ const g=await fixture();const closing=new Client({connectionString}),purging=new Client({connectionString});
+ await closing.connect();await purging.connect();
+ try{
+  await closing.query('BEGIN');await closing.query('select account_erasure_confirm($1,$2)',[g.actor,randomUUID()]);
+  const pid=(await purging.query('select pg_backend_pid() pid')).rows[0].pid;
+  const pending=purging.query('select * from purge_deleted_records(30)');
+  let waiting=false;
+  for(let attempt=0;attempt<100&&!waiting;attempt++){
+   waiting=(await db.query("select exists(select 1 from pg_stat_activity where pid=$1 and wait_event_type='Lock') v",[pid])).rows[0].v;
+   if(!waiting)await new Promise(resolve=>setTimeout(resolve,10));
+  }
+  assert.ok(waiting,'purge waits for closure profile lock');await closing.query('COMMIT');await pending;
+  assert.equal((await db.query('select count(*)::int n from tickets where id=$1',[g.ticket])).rows[0].n,1);
+ }finally{await closing.query('ROLLBACK');await closing.end();await purging.end();}
+ const stale=await fixture();const snapshotClient=new Client({connectionString});await snapshotClient.connect();
+ try{
+  await snapshotClient.query('BEGIN ISOLATION LEVEL REPEATABLE READ');
+  await snapshotClient.query('select id from profiles where id=$1',[stale.actor]);
+  await db.query('select account_erasure_confirm($1,$2)',[stale.actor,randomUUID()]);
+  await assert.rejects(snapshotClient.query('select * from purge_deleted_records(30)'),error=>error.code==='40001');
+  await snapshotClient.query('ROLLBACK');
+  assert.equal((await db.query('select count(*)::int n from tickets where id=$1',[stale.ticket])).rows[0].n,1);
+ }finally{await snapshotClient.query('ROLLBACK');await snapshotClient.end();}
+ report.checks.push('0196 populated upgrade retains admin references; ordinary purge unchanged; public denied/service allowed; two-connection closure/purge lock');
+ report.checks.push('real metadata manifest + locked SDK mock HTTP + processor/SQL: unknown history removes nothing; admin references remain pending; own objects clean before references/Auth');
+}

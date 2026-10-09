@@ -3,6 +3,7 @@ import type Stripe from 'stripe';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { getStripeClient } from '../stripe';
 import { recordPackageRefund } from './packageRefund';
+import { recordMonthlyRefund } from './monthlyRefundService';
 
 // Called from the existing verified webhook reconciliation entry, including charge events.
 // Metadata is only a lookup hint; the provider read and atomic result contract verify it.
@@ -13,5 +14,9 @@ export async function reconcileApprovedPackageRefundWebhook(
   if (!refund?.metadata?.refundIntentId || !refund.metadata.orderId) return { handled: false };
   const stripe = getStripeClient();
   const verified = await stripe.refunds.retrieve(refund.id);
-  return { handled: true, result: await recordPackageRefund(db, stripe, refund.metadata.orderId, verified) };
+  const { data, error } = await db.from('payment_orders').select('refund_approval')
+    .eq('id', refund.metadata.orderId).single();
+  if (error || !data) throw new Error('PAY_REFUND_ORDER_UNKNOWN');
+  const record = data.refund_approval?.kind === 'monthly_first_purchase' ? recordMonthlyRefund : recordPackageRefund;
+  return { handled: true, result: await record(db, stripe, refund.metadata.orderId, verified) };
 }

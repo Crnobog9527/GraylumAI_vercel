@@ -3,6 +3,7 @@
  * All rights reserved.
  * This code is proprietary and confidential.
  */
+import { syncMonthlyRefundSubscription, reconcileMonthlyRefundForOrder } from './payments/monthlyRefundWebhook';
 import { reconcileApprovedPackageRefundWebhook } from './payments/packageRefundWebhook';
 import { retrievePaidStripeInvoice, retrieveInvoiceSubscription } from './payments/stripeInvoiceEvidence';
 import { recordStripeInvoiceConflict } from './payments/stripeConflictEvidence';
@@ -76,12 +77,10 @@ type StripeRefundWebhookEvent =
 const STRIPE_LIST_PAGE_SIZE = 100;
 const STRIPE_LIST_MAX_PAGES = 10;
 const STRIPE_LIST_MAX_ITEMS = 1_000;
-
 type StripeListPage<T extends { id?: string | null }> = {
   data: T[];
   has_more?: boolean;
 };
-
 type StripePaginationLimits = {
   maxItems?: number;
   maxPages?: number;
@@ -116,7 +115,6 @@ const STRIPE_FULFILLMENT_ERRORS = {
   subscriptionUpdate: 'Failed to update subscription state',
   canceledProfileDowngrade: 'Failed to downgrade canceled subscription profile',
 } as const;
-
 class StripeFulfillmentError extends Error {
   constructor(
     public readonly stage: string,
@@ -128,21 +126,17 @@ class StripeFulfillmentError extends Error {
     this.name = 'StripeFulfillmentError';
   }
 }
-
 function getFirstRpcRow<T>(data: T[] | null | undefined): T | null {
   return Array.isArray(data) && data.length > 0 ? data[0] : null;
 }
-
 function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value)
     ? value as Record<string, unknown>
     : {};
 }
-
 function asIsoTimestamp(value: number | null | undefined) {
   return value ? new Date(value * 1000).toISOString() : null;
 }
-
 function maskIdentifier(value: string | null | undefined) {
   if (!value) {
     return null;
@@ -1711,6 +1705,9 @@ export async function reconcileSubscriptionRefundFromStripeWebhook(
     paginationLimits?: StripePaginationLimits;
   } = {},
 ) {
+  const approved = await reconcileApprovedPackageRefundWebhook(supabase,
+    event.type === 'charge.refunded' ? { charge: event.data.object } : { refund: event.data.object });
+  if (approved.handled) return approved.result;
   const retrieveCharge = options.retrieveCharge ?? retrieveStripeCharge;
   const retrievePaymentIntent = options.retrievePaymentIntent ?? retrieveStripePaymentIntent;
   const listInvoicePayments = options.listInvoicePayments ?? listStripeInvoicePayments;
@@ -1913,6 +1910,8 @@ export async function reconcileSubscriptionRefundFromStripeWebhook(
     };
   }
 
+  const monthly = await reconcileMonthlyRefundForOrder(supabase, order.id as string, refundIdentityAmbiguous ? null : refundId);
+  if (monthly.handled) return monthly.result;
   if (!refundIdentityAmbiguous && !isRefundReadyForCreditReconciliation({
     eventType: event.type,
     refundStatus,
@@ -2376,6 +2375,7 @@ export async function syncSubscriptionState(
   const stripe = getStripeClient();
   const scope = await resolveStripeScope(stripe);
   const subscription = await stripe.subscriptions.retrieve(eventSubscription.id);
+  if (await syncMonthlyRefundSubscription(supabase, stripe, eventSubscription.id)) return;
   const item = subscription.items.data[0];
   if (subscription.id !== eventSubscription.id || subscription.object !== 'subscription'
     || subscription.livemode !== (scope.mode === 'live') || subscription.items.data.length !== 1) {

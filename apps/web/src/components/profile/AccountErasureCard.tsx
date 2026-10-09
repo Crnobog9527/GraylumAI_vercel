@@ -38,6 +38,7 @@ export function AccountErasureCard({ user }: { user: { email?: string; auth_prov
   const blocked = Boolean(preview?.subscriptionRenewing);
 
   const onOpenChange = (next: boolean) => {
+    if (erasure.busy) return;
     if (erasure.step === 'done') {
       window.location.assign('/');
       return;
@@ -63,7 +64,7 @@ export function AccountErasureCard({ user }: { user: { email?: string; auth_prov
       </div>
 
       <Dialog open={erasure.open} onOpenChange={onOpenChange}>
-        <DialogContent className="sm:max-w-lg" style={panelStyle} onInteractOutside={keepDialogOpenForCaptcha}>
+        <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-lg" style={panelStyle} onInteractOutside={keepDialogOpenForCaptcha}>
           <DialogHeader>
             <DialogTitle style={{ color: 'var(--text-primary)' }}>
               {erasure.step === 'done' ? '账号已注销' : '注销账号'}
@@ -117,7 +118,7 @@ export function AccountErasureCard({ user }: { user: { email?: string; auth_prov
           {erasure.step === 'confirm' && (
             <label className="flex items-start gap-2 py-2 text-sm" style={{ color: 'var(--text-primary)' }}>
               <input type="checkbox" checked={acknowledged} onChange={(event) => setAcknowledged(event.target.checked)} />
-              我已了解：账号立即关闭且不能撤销，剩余积分作废，付费默认不退款。
+              我已了解上述退款规则：如需申请退款，应在注销前通过客服工单处理；确认后账号立即关闭且不能撤销，剩余积分作废。
             </label>
           )}
 
@@ -125,7 +126,7 @@ export function AccountErasureCard({ user }: { user: { email?: string; auth_prov
 
           <DialogFooter>
             {erasure.step !== 'done' && (
-              <Button variant="outline" onClick={() => onOpenChange(false)} style={ghostStyle}>取消</Button>
+              <Button variant="outline" disabled={erasure.busy} onClick={() => onOpenChange(false)} style={ghostStyle}>取消</Button>
             )}
             {erasure.step === 'impact' && blocked && (
               <Button disabled={erasure.busy} onClick={erasure.openPortal} style={dangerStyle}>管理订阅 / 取消续费</Button>
