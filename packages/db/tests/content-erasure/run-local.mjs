@@ -11,6 +11,7 @@ import {buildFromFiles,installPgCronStub} from '../baseline/build-from-files.mjs
 import {runCases} from './cases.mjs';
 import {runVideo} from './video.mjs';
 import {runProducers} from './producers.mjs';
+import {runStrategy} from './strategy.mjs';
 import {runSettings} from './settings.mjs';
 import {runResearch} from './research.mjs';
 import {runArtifacts} from './artifacts.mjs';
@@ -75,6 +76,7 @@ try {
  await runDependencies(client,report);
  await runVideo(client,report);
  await runProducers(client,report);
+ await runStrategy(client,report);
  await runCaptureV3(client,report);
  await runPayg(client,report);
  await runConcurrency({db:client,Client,connectionString,report});

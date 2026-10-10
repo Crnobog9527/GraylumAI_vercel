@@ -155,7 +155,7 @@ BEGIN
   FOR x IN SELECT * FROM jsonb_each(v) LOOP
    IF x.key IN ('executionId','sourceExecutionId','sourceVersionId','sourceContentId','projectId',
     'workItemId','roundId','conversationId','sessionId','dependencyId','source_message_id',
-    'sourceScriptId','contentId','draftId')
+    'sourceScriptId','contentId','draftId','accountProjectId')
     AND lower(x.value#>>'{}')=ANY(ids::text[]) THEN RETURN true; END IF;
    IF content_erasure_references(x.value,ids) THEN RETURN true; END IF;
   END LOOP;
@@ -211,8 +211,12 @@ BEGIN
   SELECT * INTO root_p FROM artifact_projects WHERE id=target AND actor_id=a;
   IF NOT FOUND THEN RAISE EXCEPTION 'CONTENT_NOT_FOUND' USING ERRCODE='42501'; END IF;
   projects:=ARRAY[root_p.id];deleted:=root_p.content_deleted_at IS NOT NULL OR root_p.erased_at IS NOT NULL;
-  versions:=ARRAY(SELECT id FROM artifact_versions WHERE project_id=root_p.id ORDER BY id);
-  content_ids:=ARRAY(SELECT id FROM opc_content_versions WHERE actor_id=a AND work_item_id=root_p.id ORDER BY id);
+  -- Account-specific strategy drafts are private copies in separate projects.
+  projects:=projects||ARRAY(SELECT d.project_id FROM opc_account_strategy_drafts b
+   JOIN opc_drafts d ON d.draft_id=b.draft_id JOIN artifact_projects p ON p.id=d.project_id
+   WHERE b.account_project_id=root_p.id AND b.actor_id=a AND d.actor_id=a AND p.actor_id=a);
+  versions:=ARRAY(SELECT id FROM artifact_versions WHERE project_id=ANY(projects) ORDER BY id);
+  content_ids:=ARRAY(SELECT id FROM opc_content_versions WHERE actor_id=a AND work_item_id=ANY(projects) ORDER BY id);
  ELSIF k='content' THEN
   SELECT * INTO root_c FROM opc_content_versions WHERE id=target AND actor_id=a;
   IF NOT FOUND THEN RAISE EXCEPTION 'CONTENT_NOT_FOUND' USING ERRCODE='42501'; END IF;
@@ -527,6 +531,26 @@ BEGIN
 END $$;
 REVOKE ALL ON FUNCTION public.erasure_closed_conversation_guard() FROM PUBLIC,anon,authenticated,service_role;
 
+-- Serialize account strategy entrypoints with deletion before reads or cached replays.
+DO $$ DECLARE sig text; source text; BEGIN
+ FOREACH sig IN ARRAY ARRAY[
+  'opc_account_strategy_begin(uuid,uuid,uuid)', 'opc_account_strategy_history(uuid,uuid)',
+  'opc_account_strategy_schema(uuid,uuid)', 'opc_account_strategy_save(uuid,uuid,uuid,uuid,uuid,jsonb)',
+  'opc_account_strategy_save_checked(uuid,uuid,uuid,uuid,uuid,text,jsonb,jsonb)'
+ ] LOOP
+  source:=pg_get_functiondef(('public.'||sig)::regprocedure);
+  IF position('-- D7 account strategy boundary' IN source)=0 THEN
+   EXECUTE regexp_replace(source,'\mBEGIN\M',$patch$BEGIN
+ -- D7 account strategy boundary
+ PERFORM 1 FROM artifact_projects WHERE id=p_account_project_id AND actor_id=p_actor_id FOR SHARE;
+ IF EXISTS(SELECT 1 FROM artifact_projects WHERE id=p_account_project_id AND actor_id=p_actor_id
+  AND (erased_at IS NOT NULL OR content_deleted_at IS NOT NULL))
+ THEN RAISE EXCEPTION 'CONTENT_ERASED' USING ERRCODE='42501'; END IF;
+$patch$);
+  END IF;
+ END LOOP;
+END $$;
+
 -- Fail closed before a replay can return an old request/result. These are
 -- narrow guards on existing functions, not duplicate Runtime entry points.
 DO $$
@@ -801,7 +825,7 @@ BEGIN
   SELECT c.project_id INTO pid FROM artifact_chats c JOIN artifact_chat_turns t ON t.conversation_id=c.conversation_id
    WHERE t.request_id=(j->>'turn_id')::uuid;
  ELSIF TG_TABLE_NAME IN ('opc_content_versions','opc_work_ui','opc_publication_ui') THEN pid:=(j->>'work_item_id')::uuid;
- ELSIF TG_TABLE_NAME='opc_account_ui' THEN pid:=(j->>'account_project_id')::uuid;
+ ELSIF TG_TABLE_NAME IN ('opc_account_ui','opc_account_strategy_drafts') THEN pid:=(j->>'account_project_id')::uuid;
  END IF;
  IF pid IS NOT NULL THEN
   SELECT erased_at IS NOT NULL OR content_deleted_at IS NOT NULL INTO deleted FROM artifact_projects WHERE id=pid FOR SHARE;
@@ -823,7 +847,7 @@ DO $$ DECLARE t text; BEGIN
  END LOOP;
 END $$;
 DO $$ DECLARE t text; BEGIN
- FOREACH t IN ARRAY ARRAY['opc_work_ui','opc_account_ui','opc_publication_ui'] LOOP
+ FOREACH t IN ARRAY ARRAY['opc_work_ui','opc_account_ui','opc_publication_ui','opc_account_strategy_drafts'] LOOP
   EXECUTE format('DROP TRIGGER IF EXISTS content_erasure_parent_guard ON public.%I',t);
   EXECUTE format('CREATE TRIGGER content_erasure_parent_guard BEFORE INSERT OR UPDATE ON public.%I FOR EACH ROW EXECUTE FUNCTION content_erasure_parent_guard()',t);
  END LOOP;
