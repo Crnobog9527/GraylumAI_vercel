@@ -122,15 +122,22 @@ export function refreshAfterErasure(utils: ErasureCacheUtils): Promise<unknown> 
   ]);
 }
 
-/** Drops this browser's local drafts and pending requests that name the deleted object. */
-export function forgetLocalCopies(id: string, stores: Array<Storage | null | undefined>) {
+/**
+ * Drops this browser's local drafts and pending requests that name a deleted object, in the key or
+ * inside the stored value (recovery records are often keyed by the owning work item or session).
+ */
+export function forgetLocalCopies(ids: string[], stores: Array<Storage | null | undefined>) {
+  const wanted = ids.filter(Boolean);
+  if (!wanted.length) return;
   for (const store of stores) {
     if (!store) continue;
     try {
       const keys: string[] = [];
       for (let index = 0; index < store.length; index += 1) {
         const key = store.key(index);
-        if (key && key.includes(id)) keys.push(key);
+        if (!key) continue;
+        const value = store.getItem(key) ?? '';
+        if (wanted.some((id) => key.includes(id) || value.includes(id))) keys.push(key);
       }
       keys.forEach((key) => store.removeItem(key));
     } catch {
@@ -142,11 +149,11 @@ export function forgetLocalCopies(id: string, stores: Array<Storage | null | und
 export const ERASURE_CHANNEL = 'graylum-content-erasure';
 
 /** Tells other open tabs to refetch, so deleted content disappears there too. */
-export function announceErasure(target: ContentErasureTarget) {
+export function announceErasure(target: ContentErasureTarget, relatedIds: string[] = []) {
   if (typeof BroadcastChannel === 'undefined') return;
   try {
     const channel = new BroadcastChannel(ERASURE_CHANNEL);
-    channel.postMessage({ kind: target.kind, id: target.id });
+    channel.postMessage({ kind: target.kind, id: target.id, relatedIds });
     channel.close();
   } catch {
     // Other tabs still refetch on focus and on their next poll.

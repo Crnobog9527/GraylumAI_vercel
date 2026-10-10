@@ -96,15 +96,22 @@ describe('cache and local copy invalidation', () => {
     expect(utils.account.contentErasurePreview.invalidate).toHaveBeenCalledOnce();
   });
 
-  it('drops only local drafts and pending requests that name the deleted object', () => {
-    const data = new Map([['opc-runtime-input:' + id, 'draft'], ['opc-runtime-scroll:actor:' + id, '9'], ['other', 'x']]);
+  it('drops local drafts and pending requests that name a deleted id in the key or the stored value', () => {
+    const other = '22222222-2222-4222-8222-222222222222';
+    const data = new Map([
+      ['opc-runtime-input:' + id, 'draft'], ['opc-runtime-scroll:actor:' + id, '9'],
+      ['opc-library-final:work-1', JSON.stringify({ sourceContentId: other, body: 'private text' })],
+      ['opc-video-operation:session-1', JSON.stringify({ script: { executionId: id } })],
+      ['other', JSON.stringify({ sourceContentId: 'unrelated' })],
+    ]);
     const store = {
       get length() { return data.size; },
       key: (index: number) => [...data.keys()][index] ?? null,
+      getItem: (key: string) => data.get(key) ?? null,
       removeItem: (key: string) => { data.delete(key); },
     } as unknown as Storage;
     const broken = { get length(): number { throw new Error('denied'); } } as unknown as Storage;
-    forgetLocalCopies(id, [store, broken, null]);
+    forgetLocalCopies([id, other, ''], [store, broken, null]);
     expect([...data.keys()]).toEqual(['other']);
   });
 });

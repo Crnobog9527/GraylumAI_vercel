@@ -16,13 +16,15 @@ function browserStores(): Array<Storage | null> {
 }
 
 /** Clears every cached view of the deleted object here, in other tabs and in local drafts. */
-export function useAfterContentErasure() {
+export function useAfterContentErasure(relatedIds: string[] = []) {
   const utils = trpc.useUtils();
+  const related = relatedIds.join(',');
   return useCallback(async (target: ContentErasureTarget) => {
-    forgetLocalCopies(target.id, browserStores());
-    announceErasure(target);
+    const others = related ? related.split(',') : [];
+    forgetLocalCopies([target.id, ...others], browserStores());
+    announceErasure(target, others);
     await refreshAfterErasure(utils);
-  }, [utils]);
+  }, [utils, related]);
 }
 
 /** Another tab deleted something: refetch here so it disappears from every list. */
@@ -33,9 +35,15 @@ export function useContentErasureSync(onErased?: (target: ContentErasureTarget) 
   useEffect(() => {
     if (typeof BroadcastChannel === 'undefined') return;
     const channel = new BroadcastChannel(ERASURE_CHANNEL);
-    channel.onmessage = (event: MessageEvent<ContentErasureTarget>) => {
+    channel.onmessage = (event: MessageEvent<ContentErasureTarget & { relatedIds?: unknown }>) => {
+      const data = event.data;
+      if (data && typeof data.id === 'string') {
+        const related = Array.isArray(data.relatedIds) ? data.relatedIds.filter((id) => typeof id === 'string') : [];
+        // sessionStorage is per tab, so each receiving tab clears its own copies too.
+        forgetLocalCopies([data.id, ...related], browserStores());
+      }
       void refreshAfterErasure(utils);
-      if (event.data && typeof event.data.id === 'string') callback.current?.(event.data);
+      if (data && typeof data.id === 'string') callback.current?.({ kind: data.kind, id: data.id });
     };
     return () => channel.close();
   }, [utils]);
@@ -52,8 +60,8 @@ export type ContentErasureState = {
 };
 
 /** Preview, then confirm the exact previewed scope. The caller leaves deleted content when the dialog closes. */
-export function useContentErasure(target: ContentErasureTarget | null) {
-  const afterErasure = useAfterContentErasure();
+export function useContentErasure(target: ContentErasureTarget | null, relatedIds: string[] = []) {
+  const afterErasure = useAfterContentErasure(relatedIds);
   const previewQuery = trpc.account.contentErasurePreview.useQuery(target ?? { kind: 'answer', id: '' }, {
     enabled: Boolean(target), staleTime: 0, gcTime: 0, retry: false, refetchOnWindowFocus: false,
   });

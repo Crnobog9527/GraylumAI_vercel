@@ -53,12 +53,14 @@ export function ContentErasureBody({ target, name, state, onConfirm, onRetry, on
  * Single-item permanent deletion (DATA-ERASURE D7). The confirm button sends the hash of the preview
  * the user just read; `onClose(finished)` tells the caller whether the content is gone.
  */
-export function ContentErasureDialog({ target, name, onClose }: {
+export function ContentErasureDialog({ target, name, relatedIds, onClose }: {
   target: ContentErasureTarget;
   name?: string;
+  /** Other deleted ids (e.g. every version of a content family) whose local copies must go too. */
+  relatedIds?: string[];
   onClose: (finished: boolean) => void;
 }) {
-  const erasure = useContentErasure(target);
+  const erasure = useContentErasure(target, relatedIds);
   const close = () => {
     if (erasure.state.confirming) return;
     onClose(erasure.state.finished);
