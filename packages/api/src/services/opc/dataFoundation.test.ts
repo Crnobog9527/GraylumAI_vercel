@@ -5,7 +5,7 @@ const id = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')
 const item = { id: id(5), platform: 'x', account: 'main', title: '采用的标题', brief: '用户修改后的摘要', day: '2026-10-10' };
 const base = { draftId: id(1), requestId: id(2), expectedVersion: 0, sourceVersionId: id(3), body: [item] };
 const adoption = { ...base, accounts: [{ platform: 'x', account: 'main', expectedRevision: null }] };
-describe('R9 data foundation contracts (not yet routed)', () => {
+describe('R9 data foundation contracts', () => {
   it('preserves the execution identity when saving a topic draft', async () => {
     const rpc = vi.fn().mockResolvedValue({ version: 1 });
     await dataFoundationService(rpc).topicDraft({ ...base, executionId: id(4) });

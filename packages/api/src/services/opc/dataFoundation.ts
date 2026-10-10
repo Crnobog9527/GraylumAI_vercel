@@ -25,11 +25,11 @@ export const contentReaction = z.object({
   reason: z.string().trim().max(1000).optional(),
 }).strict();
 
-type ActorRpc = (name: string, args: Record<string, unknown>) => Promise<unknown>;
+type ActorRpc<T> = (name: string, args: Record<string, unknown>) => Promise<T>;
 
-// Integration into opcService waits for the shared-file writer order and R9 migration.
+// Reuse the OPC service authentication and bounded error mapping.
 // The supplied RPC must authenticate the actor; SQL checks ownership and source visibility.
-export function dataFoundationService(rpc: ActorRpc) {
+export function dataFoundationService<T>(rpc: ActorRpc<T>) {
   return {
     topicDraft(value: unknown) {
       const v = opcTopicDraft.parse(value);
