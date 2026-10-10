@@ -21,7 +21,7 @@ type LibraryList = { usedBytes: number; capacityBytes: number; uploadEnabled: bo
 type LibrarySegment = { ordinal: number; title: string; body: string; bytes: number;
   page_number: number | null; source: 'extracted' | 'recognized' };
 
-type Document = { id: string; format: Format; kind: string; path: string; status: string; guardUntil: string };
+type Document = { filename: string | null; id: string; format: Format; kind: string; path: string; status: string; guardUntil: string };
 export function libraryService(client: SupabaseClient, actorId: string, storage: LibraryStorage = libraryStorage(client)) {
   const read = (documentId: string, ready = true) => libraryRpc<Document>(client, 'library_document_read', {
     a: actorId, did: documentId, require_ready: ready,
@@ -79,7 +79,7 @@ export function libraryService(client: SupabaseClient, actorId: string, storage:
     async signedUrl(documentId: string, preview: boolean) {
       const doc = await read(documentId);
       if (preview && doc.kind !== 'image') throw new TRPCError({ code: 'BAD_REQUEST', message: 'LIBRARY_TYPE' });
-      const url = await storage.signRead(doc.path, !preview);
+      const url = await storage.signRead(doc.path, preview ? false : doc.filename ?? 'download');
       await read(documentId); // Do not return a newly minted link after a concurrent deletion/erasure.
       return { url, expiresIn: 60 };
     },
