@@ -5,6 +5,8 @@ import { isLibraryDocxExtractionEnabled } from '@/lib/library-sandbox/feature-fl
 export const LIBRARY_MAX_BYTES = 10_000_000;
 /** The backend reserves a full 10 MB before issuing an upload link, so less free space blocks uploads. */
 export const LIBRARY_UPLOAD_HEADROOM = 10_000_000;
+/** Word reserves both of its paths up front (original + extracted text), 10 MB each. */
+export const LIBRARY_WORD_HEADROOM = 20_000_000;
 
 export type LibraryPurpose = 'authored' | 'reference';
 export const PURPOSE_LABEL: Record<LibraryPurpose, string> = { authored: '我本人写的', reference: '参考资料' };
@@ -37,7 +39,8 @@ export function extensionOf(filename: string): string {
   return dot < 0 ? '' : filename.slice(dot + 1).toLowerCase();
 }
 
-export function checkLibraryFile(file: { name: string; size: number }): FileCheck {
+/** `freeBytes`, when known, is capacity minus used space; Word needs more of it than other formats. */
+export function checkLibraryFile(file: { name: string; size: number }, freeBytes?: number): FileCheck {
   const extension = extensionOf(file.name);
   if (extension === 'docx' && !isWordUploadReady()) return { ok: false, message: 'Word 文件暂时还不能上传，即将开放。' };
   if (extension === 'pdf') return { ok: false, message: 'PDF 暂时还不能上传，即将开放。' };
@@ -48,6 +51,9 @@ export function checkLibraryFile(file: { name: string; size: number }): FileChec
   if (file.size > LIBRARY_MAX_BYTES) return { ok: false, message: '单个文件不能超过 10 MB，请拆分后再上传。' };
   if (file.name.length > 255 || /[\x00-\x1f\x7f/\\]/.test(file.name)) {
     return { ok: false, message: '文件名太长或含有不能使用的字符，请改名后再上传。' };
+  }
+  if (contentType === WORD_MIME && freeBytes !== undefined && freeBytes < LIBRARY_WORD_HEADROOM) {
+    return { ok: false, message: 'Word 文件上传时原文件和提取的文字各先占 10 MB，需要至少 20 MB 剩余空间。删除部分文件或升级会员后再试。' };
   }
   return { ok: true, contentType };
 }

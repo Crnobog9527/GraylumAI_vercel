@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
 import type { ReactElement } from 'react';
 import type { LibraryDocument } from '@/hooks/use-library-documents';
-import type { UploadItem } from '@/hooks/use-library-uploads';
+import { holdsServerRow, type UploadItem } from '@/hooks/use-library-uploads';
 
 const { state, mutation } = vi.hoisted(() => ({
   state: {
@@ -228,4 +228,13 @@ describe('document reader', () => {
     state.directory = { isPending: false, error: { message: 'LIBRARY_VERSION_CHANGED' } };
     expect(render(<DocumentReader doc={doc()}/>).text).toContain('文件内容已更新');
   });
+});
+
+it('counts failed items that still owe the server a release or re-check as unsettled', () => {
+  const item = (patch: Partial<UploadItem>): UploadItem => ({ key: 'k', filename: 'a.txt', purpose: 'authored', status: 'failed', progress: 0, ...patch });
+  expect(holdsServerRow(item({ attempt: { requestId: 'r', resume: 'begin', releaseFirst: 'old' } }))).toBe(true);
+  expect(holdsServerRow(item({ attempt: { requestId: 'r', resume: 'complete', documentId: 'd' } }))).toBe(true);
+  expect(holdsServerRow(item({ attempt: { requestId: 'r', resume: 'text', documentId: 'd' } }))).toBe(true);
+  expect(holdsServerRow(item({ attempt: { requestId: 'r', resume: 'begin' } }))).toBe(false);
+  expect(holdsServerRow(item({ status: 'rejected' }))).toBe(false);
 });

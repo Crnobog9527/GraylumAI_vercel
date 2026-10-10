@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 'use client';
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { trpc } from '@/trpc/client';
 import {
   checkLibraryFile, libraryErrorCode, libraryErrorMessage, WORD_MIME, type LibraryPurpose, type UploadContentType,
@@ -20,6 +20,11 @@ export type UploadItem = {
   progress: number; message?: string;
   file?: File; contentType?: UploadContentType; attempt?: UploadAttempt; prepared?: PreparedWord;
 };
+
+/** A failed item that still owes the server something (a release, or a re-check of an unknown result). */
+export function holdsServerRow(item: UploadItem): boolean {
+  return item.status === 'failed' && !!(item.attempt?.releaseFirst || item.attempt?.documentId);
+}
 
 type Extracted = { ok: true; prepared: PreparedWord } | { ok: false; message: string };
 async function extractWord(file: File): Promise<Extracted> {
@@ -106,10 +111,10 @@ export function useLibraryUploads(onSettled: () => void, onDisabled: () => void)
     }
   }, [onDisabled, onSettled, runOne, update]);
 
-  const add = useCallback((files: File[], purpose: LibraryPurpose) => {
+  const add = useCallback((files: File[], purpose: LibraryPurpose, freeBytes?: number) => {
     const added: UploadItem[] = files.map((file) => {
       const key = crypto.randomUUID();
-      const check = checkLibraryFile(file);
+      const check = checkLibraryFile(file, freeBytes);
       if (!check.ok) return { key, filename: file.name, purpose, status: 'rejected', progress: 0, message: check.message };
       return {
         key, filename: file.name, purpose, status: 'waiting', progress: 0, file, contentType: check.contentType,
@@ -130,6 +135,13 @@ export function useLibraryUploads(onSettled: () => void, onDisabled: () => void)
     void drain();
   }, [drain, items, update]);
 
+  const settle = useCallback((item: UploadItem) => {
+    const { plain, word } = apiRef.current;
+    return settleFailedAttempt(plain, item.attempt, (documentId) => (item.contentType === WORD_MIME
+      ? word.complete({ documentId, headings: item.prepared?.headings ?? [] })
+      : plain.complete({ documentId })));
+  }, []);
+
   /**
    * A failed item may still hold a server row (a release owed, a Word row waiting for its text, or an
    * unknown completion). Removing it settles that first; if that is not confirmed, the item stays.
@@ -139,11 +151,8 @@ export function useLibraryUploads(onSettled: () => void, onDisabled: () => void)
     if (!item || !['failed', 'rejected', 'done'].includes(item.status)) return;
     if (item.status === 'failed') {
       update(key, { status: 'removing', message: undefined });
-      const { plain, word } = apiRef.current;
       try {
-        await settleFailedAttempt(plain, item.attempt, (documentId) => (item.contentType === WORD_MIME
-          ? word.complete({ documentId, headings: item.prepared?.headings ?? [] })
-          : plain.complete({ documentId })));
+        await settle(item);
       } catch {
         update(key, { status: 'failed', message: '暂时无法确认这次上传的结果，请稍后再点「移除」或「重试」。' });
         return;
@@ -151,8 +160,17 @@ export function useLibraryUploads(onSettled: () => void, onDisabled: () => void)
       onSettled();
     }
     setItems((current) => current.filter((entry) => entry.key !== key));
-  }, [items, onSettled, update]);
+  }, [items, onSettled, settle, update]);
 
-  const busy = items.some((item) => ['waiting', 'extract', 'begin', 'transfer', 'complete', 'removing'].includes(item.status));
+  // Leaving the page in-app (the tab itself stays mounted) settles what failed items still hold,
+  // best effort; anything unconfirmed is left to the server's expiry cleanup.
+  const itemsRef = useRef(items);
+  itemsRef.current = items;
+  useEffect(() => () => {
+    for (const item of itemsRef.current) if (holdsServerRow(item)) void settle(item).catch(() => {});
+  }, [settle]);
+
+  const busy = items.some((item) => holdsServerRow(item)
+    || ['waiting', 'extract', 'begin', 'transfer', 'complete', 'removing'].includes(item.status));
   return { items, add, retry, dismiss, busy };
 }

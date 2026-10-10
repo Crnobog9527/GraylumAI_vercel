@@ -65,7 +65,9 @@ export function MyDocuments() {
     <div className={styles.topRow}>
       <UploadPanel uploadEnabled={ready && library.uploadEnabled} spaceKnown={ready}
         usedBytes={library.usedBytes} capacityBytes={library.capacityBytes}
-        uploads={uploads.items} onAdd={uploads.add} onRetry={uploads.retry} onDismiss={uploads.dismiss}/>
+        uploads={uploads.items}
+        onAdd={(files, purpose) => uploads.add(files, purpose, ready && library.capacityBytes !== undefined && library.usedBytes !== undefined
+          ? library.capacityBytes - library.usedBytes : undefined)} onRetry={uploads.retry} onDismiss={uploads.dismiss}/>
       <SpacePanel usedBytes={ready ? library.usedBytes : undefined} capacityBytes={ready ? library.capacityBytes : undefined}/>
     </div>
     {!!library.error && <p role="alert" className={styles.error}>

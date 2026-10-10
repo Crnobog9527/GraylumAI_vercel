@@ -65,9 +65,11 @@ function ItemCard({item,account,onSaved,focused}:{item:Item;account:Account;onSa
 
 export default function LibraryPage(){
  const [tab,setTab]=useState<LibraryTab>('topics');
- useEffect(()=>{if(new URL(location.href).searchParams.get('tab')==='documents')setTab('documents');},[]);
+ // Once opened, 我的文档 stays mounted (hidden) so switching tabs never drops an upload or its recovery state.
+ const [documentsOpened,setDocumentsOpened]=useState(false);
+ useEffect(()=>{if(new URL(location.href).searchParams.get('tab')==='documents'){setTab('documents');setDocumentsOpened(true);}},[]);
  function chooseTab(next:LibraryTab){
-  setTab(next);const url=new URL(location.href);
+  setTab(next);if(next==='documents')setDocumentsOpened(true);const url=new URL(location.href);
   if(next==='documents')url.searchParams.set('tab','documents');else url.searchParams.delete('tab');
   history.replaceState(history.state,'',url);
  }
@@ -95,7 +97,7 @@ export default function LibraryPage(){
    <button type="button" role="tab" aria-selected={tab==='documents'} onClick={()=>chooseTab('documents')}>我的文档</button>
   </nav>
   <p className={styles.intro}>{tab==='documents'?'上传和管理你自己写的文章和参考资料。':'按平台和账号查看已采用选题、稿件和当前定位。'}</p>
-  {tab==='documents'?<MyDocuments/>:<div className={styles.catalog}>
+  {documentsOpened&&<div hidden={tab!=='documents'}><MyDocuments/></div>}{tab!=='documents'&&<div className={styles.catalog}>
    <nav className={styles.catalogNav} aria-label="资料库平台与账号"><button type="button" aria-current={!selectedProject?'page':undefined} onClick={()=>{setSelectedProject('');setPage(1);}}>全部选题 <span>{count(accounts.reduce((n,a)=>n+a.items.length,0))}</span></button>{[...new Set(accounts.map(account=>account.platform))].map(platform=><div key={platform} className={styles.platform}><strong>{platform}<span>{count(accounts.filter(account=>account.platform===platform).reduce((n,a)=>n+a.items.length,0))}</span></strong>{accounts.filter(account=>account.platform===platform).map(account=><button key={account.projectId} type="button" aria-current={selectedProject===account.projectId?'page':undefined} onClick={()=>{setSelectedProject(account.projectId);setPage(1);}}>{(account.displayName??account.account)}<span>{count(account.items.length)}</span></button>)}</div>)}</nav>
    <div ref={contentRef} className={styles.catalogContent} onScroll={event=>{scroll.current=event.currentTarget.scrollTop;if(hydrated)sessionStorage.setItem('opc-library-view',JSON.stringify({search,selectedProject,statusFilter,sortOrder,page,scrollTop:scroll.current}));}}>
     <div className={styles.scopeHead}><div><h2>{selectedAccount?selectedAccount.platform+' · '+(selectedAccount.displayName??selectedAccount.account):'全部选题'}</h2><p>{count(rows.length)} 个选题 · {count(selectedAccount?1:accounts.length)} 个账号{selectedAccount?' · '+stageLabel[selectedAccount.stage]:''}</p></div>{selectedAccount&&<div className={styles.scopeActions}><button onClick={()=>setStrategyAccount({...selectedAccount,currentVersion:selectedAccount.sourceVersion??undefined})}>修改定位</button><Link href={'/positioning?account='+selectedAccount.projectId}>新建对话</Link><select aria-label={'当前阶段 '+(selectedAccount.displayName??selectedAccount.account)} value={selectedAccount.stage} onChange={event=>updateStage(selectedAccount,event.target.value as Account['stage'])}>{Object.entries(stageLabel).map(([value,label])=><option key={value} value={value}>{label}</option>)}</select></div>}</div>

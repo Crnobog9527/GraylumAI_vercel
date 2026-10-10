@@ -22,6 +22,9 @@ describe('checkLibraryFile', () => {
     expect(checkLibraryFile({ name: '报告.DOCX', size: 10 })).toEqual({ ok: true, contentType: WORD_MIME });
     expect(checkLibraryFile({ name: 'big.docx', size: 10_000_001 })).toMatchObject({ ok: false, message: expect.stringContaining('10 MB') });
     expect(libraryAccept()).toContain('.docx');
+    expect(checkLibraryFile({ name: 'a.docx', size: 10 }, 19_999_999)).toMatchObject({ ok: false, message: expect.stringContaining('20 MB') });
+    expect(checkLibraryFile({ name: 'a.docx', size: 10 }, 20_000_000)).toEqual({ ok: true, contentType: WORD_MIME });
+    expect(checkLibraryFile({ name: 'a.txt', size: 10 }, 10_000_000)).toEqual({ ok: true, contentType: 'text/plain' });
     expect(checkLibraryFile({ name: 'x.svg', size: 1 })).toMatchObject({ message: expect.stringContaining('Word（.docx）') });
   });
   it.each([
