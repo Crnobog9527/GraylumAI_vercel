@@ -45,7 +45,7 @@ test('V3 freeze changes only the system text and the seeded pendingSuggestion, a
   const { body, context: frozen } = splitRequest(raw);
   strict.equal(body.messages[0].content, 'V3 system');
   strict.equal(body.max_tokens, outputTokens);
-  strict.equal(outputTokens, 2048);
+  strict.equal(outputTokens, 4096);
   strict.deepEqual(Object.keys(frozen.checklist[0].fields[0]).at(-1), 'pendingSuggestion');
   strict.deepEqual(frozen.checklist[0].fields[0].pendingSuggestion, initial[0].suggestion);
   strict.equal(frozen.checklist[0].fields[1].pendingSuggestion, undefined);
@@ -55,7 +55,7 @@ test('V3 freeze changes only the system text and the seeded pendingSuggestion, a
   strict.throws(() => freezeRequest({ raw: source('B').replace('"max_tokens":4096', '"max_tokens":2048') }, 'V3', []), /V3_SOURCE_PROFILE/);
   strict.throws(() => withPending(context, [{ ...initial[0], fieldId: 'missing' }]), /V3_PENDING_FIELD/);
   strict.throws(() => freezeRequest({ raw: source('B').replace('那条建议不对', '') }, 'V3', []), /V3_OPENING_UNSUPPORTED/);
-  strict.equal(reserveNano(1000), (1000 + 8192) * 250 + 2048 * 750);
+  strict.equal(reserveNano(1000), (1000 + 8192) * 250 + 4096 * 750);
 });
 
 test('V3 replay compares the complete organizer request and unwraps the frozen mentor envelope once', () => {
@@ -67,7 +67,7 @@ test('V3 replay compares the complete organizer request and unwraps the frozen m
     .filter(([k]) => k !== 'system').reverse()));
   strict.equal(sameOrganizerRequest(host({}), frozen), true);
   strict.equal(sameOrganizerRequest(host({ system: { role: 'system', content: 'V3\nextra rule' } }), frozen), false);
-  strict.equal(sameOrganizerRequest(host({ max_tokens: 4096 }), frozen), false);
+  strict.equal(sameOrganizerRequest(host({ max_tokens: 2048 }), frozen), false);
   strict.equal(sameOrganizerRequest(host({ provider: { ...route, allow_fallbacks: true } }), frozen), false);
   strict.equal(sameOrganizerRequest(host({ reasoning: { effort: 'low' } }), frozen), false);
   strict.equal(sameOrganizerRequest(source('B'), frozen), false);
