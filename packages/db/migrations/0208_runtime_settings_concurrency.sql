@@ -1,6 +1,7 @@
 -- Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved.
--- DRAFT ONLY: pending a migration number from the controlling PR #795 comment.
--- Local disposable database validation only; not in the deployment migration ledger.
+-- Allocation: PR #797 controlling comment dated 2026-10-11; follows #796 / 0207.
+-- Apply before the new backend. Legacy direct writes fail closed; recover forward,
+-- retaining the stop switch and limits. Never restore the old unconditional writer.
 BEGIN;
 SET LOCAL lock_timeout='5s';
 

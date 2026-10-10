@@ -1,10 +1,14 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import assert from 'node:assert/strict';
 import pg from 'pg';
-import { localDb, read } from '../runtime-view-perf/local-db.mjs';
+import { readdirSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { localDb, read, root } from '../runtime-view-perf/local-db.mjs';
 
+assert.ok(readdirSync(resolve(root, 'packages/db/migrations')).some(name => /^0207_.*\.sql$/.test(name)),
+  '0207 predecessor must be merged and synchronized before validating 0208');
 const db = await localDb(), c = db.client;
-const report = { build: db.build, proposalOnly: true, checks: [] };
+const report = { build: db.build, migration: '0208', checks: [] };
 const limits = { admissionPerMinute: 10, admissionPer24Hours: 200, callsPerMinute: 30, callsPer24Hours: 600 };
 const config = { version: 1, userDailyUsd: null, siteDailyUsd: null, siteAlertUsd: null,
   providerBalanceAlertUsd: null, notificationChannel: null };
@@ -45,13 +49,12 @@ async function overlap(first, second, requireWait = true) {
   }
 }
 try {
-  const proposal = read('packages/db/tests/runtime-settings-concurrency/proposed-migration.sql');
-  // No numbered migration has been allocated yet. Never run this against a shared database.
-  await c.query(proposal);
+  const migration = read('packages/db/migrations/0208_runtime_settings_concurrency.sql');
+  // localDb builds the complete committed migration chain before these regression checks.
   const definition = await call(c, "SELECT pg_get_functiondef('runtime_update_stop_loss(jsonb,bigint)'::regprocedure) v");
-  await c.query(proposal);
+  await c.query(migration);
   assert.equal(await call(c, "SELECT pg_get_functiondef('runtime_update_stop_loss(jsonb,bigint)'::regprocedure) v"), definition);
-  report.checks.push('proposal reapplied twice without definition drift');
+  report.checks.push('0208 reapplication preserves function definition');
   await reset();
   for (const role of ['anon', 'authenticated']) {
     for (const signature of ['runtime_set_stop_new_calls(boolean)', 'runtime_update_rate_limits(jsonb)',

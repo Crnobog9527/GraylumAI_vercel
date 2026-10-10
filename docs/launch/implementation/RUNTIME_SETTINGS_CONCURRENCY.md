@@ -26,23 +26,25 @@ PostgREST 的普通更新不能仅修改 JSON 内单字段，所以必须补专�
 
 ## 当前交付边界
 
-迁移编号已在 #795 评论申请，尚未分配。SQL 暂存于
-`packages/db/tests/runtime-settings-concurrency/proposed-migration.sql`，**仅供一次性本地库验证**，
-不在部署迁移目录、不代表迁移已落账。新增 API 在迁移存在前不能部署使用。
-编号分配后将草案移入指定迁移、重跑完整回放并更新 built-fingerprint，重新请求当前 head 审查。
-这之前 PR 保持草稿，不能认定 clean。
+总控于 2026-10-11 为 #797 分配 **0208**：
+`packages/db/migrations/0208_runtime_settings_concurrency.sql`。
+前置 #796／0207 尚未合并；必须等其合并后同步最新 staging，再完整回放并重建 built-fingerprint。
+此前的草案本地验证不代表完整迁移链通过。当前保持草稿，完整链 CI 和新 head 审查完成后
+转为可审查，停下等总控审计。不合并、不应用远端迁移。
 
 部署需数据库迁移和后端接口先到位，再让 #795 接线；不要回滚为旧的整份覆盖写入。
 迁移会拒绝旧后端 service-role 对这两个键的整行直写，避免滚动发布期间覆盖新开关或绕过版本检查。
 三个专用 SECURITY DEFINER 函数明确归属 postgres；写入触发器只允许此身份修改两个受保护键。
 旧实例保存会失败，需刷新到新后端/前端；不能为了兼容旧写入撤掉保护。
-迁移不删除配置或改变已有阈值。必要时停用管理写入口并前向修复，保留现有停止状态。
+迁移不删除配置或改变已有阈值。恢复办法：迁移后旧实例保存失败属于预期，切换到支持专用 RPC 的后端后重新读取再保存。
+若新后端暂不能使用，暂停管理保存操作并前向修复；保留现有停止开关、额度及修订号，
+不回退数据库直写保护，不重新开放旧实例整份覆盖。停止状态的恢复也必须通过专用接口。
 不访问远程数据库、不运行付费模型、不启动浏览器。
 
 ## 验证入口
 
 - `pnpm --filter @repo/api exec vitest run src/routers/runtimeRateLimits.test.ts src/services/runtime/stopLossSettings.test.ts`
 - `node packages/db/tests/runtime-settings-concurrency/run-local.mjs --local-only`
-  创建并销毁本地 PostgreSQL 17，一次性完整建库后应用草案；通过 pg_blocking_pids 证明两个
+  创建并销毁本地 PostgreSQL 17，按正式迁移链一次性完整建库并复验 0208；通过 pg_blocking_pids 证明两个
   真实连接存在锁等待，覆盖停止/恢复与次数额度、美元上限的两种交错顺序，以及两次相同期望
   版本保存的冲突、首次保存、历史 JSON 字符串、ABA、权限和失败回滚。
