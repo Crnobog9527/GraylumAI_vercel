@@ -21,7 +21,9 @@
 文字最多 10 MB、每段最多 8192 字节，总共最多 10,000 段，单行沿用 65,536 字节限制。
 按页分段并保留 `page_number`、`source=extracted`；不跨页拼接、不为无文字页制造正文。
 整份原件、正文分段、每页识别单元在同一发布事务中可用。每页一行 `pdf_page`；
-text: has_text=true/complete，scanned: false/pending，blank: false/complete；本次不执行识别。
+text: has_text=true/complete，blank: false/complete；scanned 按页序前 50 页为 false/pending，
+超过 50 的为 false/over_limit（方案 4.4 初值）。文字页和空白页不占识别名额。本次不执行识别；
+LIB-2d 接入识别时还须落实后台可调上限与执行准入，不能仅凭 pending 状态发起调用。
 重复完成直接返回 ready。无效数据进入既有双路径清理；原件暂未到达可重试第二阶段。
 
 ## 额度与删除

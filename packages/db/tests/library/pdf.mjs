@@ -79,11 +79,28 @@ export async function verifyPdf(admin, one, two) {
   await one.query("SELECT library_pdf_publish($1,$2,5,0,'[]',$3)",[a,empty,JSON.stringify([{page_number:1,status:'scanned'}])]);
   assert.equal(await value(admin,'SELECT count(*)::int v FROM library_document_segments WHERE document_id=$1',[empty]),0);
   assert.equal(await value(admin,'SELECT status v FROM library_recognition_units WHERE document_id=$1',[empty]),'pending');
+  await admin.query("UPDATE membership_plans SET library_storage_bytes=100000000 WHERE level='free'");
+  for(const count of [50,51,498]) {
+    const capped=(await begin(one,a)).documentId;
+    await one.query('SELECT library_pdf_text_begin($1,$2,5)',[a,capped]);
+    const unitPages=['text','blank',...Array(count).fill('scanned')].map((status,i)=>({page_number:i+1,status}));
+    await one.query('SELECT library_pdf_publish($1,$2,5,$3,$4,$5)',[a,capped,5+unitPages.length-1,
+      JSON.stringify(segments),JSON.stringify(unitPages)]);
+    const units=(await admin.query('SELECT position,status FROM library_recognition_units WHERE document_id=$1 ORDER BY position',[capped])).rows;
+    assert.equal(units.length,count+2);
+    assert.deepEqual(units.slice(0,2).map(x=>x.status),['complete','complete']);
+    assert.equal(units.filter(x=>x.status==='pending').length,50);
+    assert.equal(units.filter(x=>x.status==='over_limit').length,count-50);
+    assert.equal(units[51].status,'pending');
+    if(count>50) assert.equal(units[52].status,'over_limit');
+    await one.query('SELECT library_delete($1,$2)',[a,capped]);
+    assert.equal(await value(admin,'SELECT count(*)::int v FROM library_recognition_units WHERE document_id=$1',[capped]),0);
+  }
   for(const role of ['anon','authenticated']) {
     await admin.query('SET ROLE '+role);
     await assert.rejects(admin.query('SELECT public.library_pdf_text_begin($1,$2,5)',[a,empty]),/permission denied/);
     await assert.rejects(admin.query("SELECT public.library_pdf_publish($1,$2,5,0,'[]','[]')",[a,empty]),/permission denied/);
     await admin.query('RESET ROLE');
   }
-  console.log('PASS: PDF grants/quota barriers, metadata, atomic rollback, page units, empty scan, dual holds, deletion, denied roles');
+  console.log('PASS: PDF grants/quota barriers, metadata, atomic rollback, page units/50-page cap, empty scan, dual holds, deletion, denied roles');
 }

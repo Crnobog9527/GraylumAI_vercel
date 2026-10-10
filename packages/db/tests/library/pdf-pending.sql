@@ -59,7 +59,7 @@ END $$;
 CREATE OR REPLACE FUNCTION public.library_pdf_publish(a uuid,did uuid,actual bigint,text_actual bigint,segments jsonb,pages jsonb)
 RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
 DECLARE d library_documents; r library_upload_reservations; s jsonb; p jsonb; total bigint:=0; idx integer:=0;
- count_pages integer; pn integer; last_page integer:=0; result jsonb;
+ scanned_count integer:=0; count_pages integer; pn integer; last_page integer:=0; result jsonb;
 BEGIN
  PERFORM library_actor(a);
  SELECT * INTO d FROM library_documents WHERE id=did AND actor_id=a FOR UPDATE;
@@ -102,10 +102,13 @@ BEGIN
   WHERE ds.document_id=did;
  -- text hold is the actual object size, including the form feeds omitted from segment bodies.
  UPDATE library_documents SET text_bytes=text_actual WHERE id=did;
- INSERT INTO library_recognition_units(document_id,actor_id,unit_kind,position,has_text,status)
- SELECT did,a,'pdf_page',(entry->>'page_number')::integer,entry->>'status'='text',
-  CASE WHEN entry->>'status'='scanned' THEN 'pending' ELSE 'complete' END
- FROM jsonb_array_elements(pages) entry;
+ -- LIB_DOCS_PLAN 4.4: initial per-file recognition limit is 50 scanned pages, not 50 physical pages.
+ FOR p IN SELECT value FROM jsonb_array_elements(pages) LOOP
+  IF p->>'status'='scanned' THEN scanned_count:=scanned_count+1; END IF;
+  INSERT INTO library_recognition_units(document_id,actor_id,unit_kind,position,has_text,status)
+  VALUES(did,a,'pdf_page',(p->>'page_number')::integer,p->>'status'='text',
+   CASE WHEN p->>'status'<>'scanned' THEN 'complete' WHEN scanned_count<=50 THEN 'pending' ELSE 'over_limit' END);
+ END LOOP;
  RETURN result;
 END $$;
 REVOKE ALL ON FUNCTION public.library_pdf_text_begin(uuid,uuid,bigint),
