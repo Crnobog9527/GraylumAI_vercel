@@ -1,4 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import {skillFileBinding} from './skillFile';
 import {frozenReport} from '../report/contract';
 import {z} from 'zod';
 import {promptCachePolicy} from './promptCache';
@@ -21,7 +22,8 @@ export const runtimeContext=z.object({
  providerRequestFormat:z.enum(PROVIDER_REQUEST_FORMATS).optional(),promptCache:promptCachePolicy.optional(),
  questionContract:z.enum([LEGACY_QUESTION_CONTRACT,QUESTION_CONTRACT]).optional(),reasoning:reasoningPolicy.optional(),
  historyItems:z.number().int().min(0).max(1000),purposeBudget:frozenPurposeBudget.optional(),
- tools:z.array(z.enum(['search','read_source',ASK_QUESTION_TOOL])).default([]),maxToolCalls:z.number().int().min(0).max(16).default(0),
+ skillFile:skillFileBinding.optional(),
+ tools:z.array(z.enum(['search','read_source','read_skill_file',ASK_QUESTION_TOOL])).default([]),maxToolCalls:z.number().int().min(0).max(16).default(0),
  modelId:z.string().uuid().optional(),network:z.enum(['deny','allow','require_latest']).optional(),
  attachedOrganizer:z.object({
   modelId:z.string().uuid(),model:z.string().min(1),
@@ -38,6 +40,11 @@ export const runtimeContext=z.object({
    || context.scopeMaterial || context.workspaceContext || context.promptCache || context.hostTurnContext
    || context.historySelection || context.sources?.length || context.purposeBudget?.purpose !== 'report'))
   ctx.addIssue({code:'custom',message:'REPORT_CONTEXT_INVALID'});
+ if(Boolean(context.skillFile)!==context.tools.includes('read_skill_file')||context.skillFile&&
+  (context.role!=='skill'||context.providerRequestFormat!=='agent-turn-v5-stream'||
+   context.skillFile.packageId!==context.skillId||context.skillFile.revisionId!==context.revisionId||
+   !context.moduleId||context.maxTurns!==2||context.maxToolCalls!==1))
+  ctx.addIssue({code:'custom',message:'RUNTIME_SKILL_FILE_CONTEXT_INVALID'});
  const host = context.hostTurnContext !== undefined;
  if (host !== (context.inputSelection === 'scope-projection-v2') || host !== (context.historySelection !== undefined) ||
      host && (context.role !== 'skill' || context.providerRequestFormat !== 'agent-turn-v5-stream') ||

@@ -79,9 +79,9 @@ export function historyGuard(executionId:string,failed:(code:string)=>void) {
   };
 }
 
-export function terminalReplyGuard(active:boolean,allowsCard:boolean,failed:()=>void) {
+export function terminalReplyGuard(active:boolean,allowsCard:boolean,failed:()=>void,allowsSkillFile=false) {
   return (response:unknown,organizer=false)=>{
-    if(active&&terminalAgentReplyFailure(response,organizer,allowsCard)){
+    if(active&&terminalAgentReplyFailure(response,organizer,allowsCard,allowsSkillFile)){
       failed();
       throw new Error('RUNTIME_TERMINAL_REPLY');
     }
