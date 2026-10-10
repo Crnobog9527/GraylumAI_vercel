@@ -13,6 +13,15 @@ const source = JSON.parse(await readFile(sourcePath, 'utf8'));
 if (source.manifest.revisionId !== '78c3d0a4-7c9f-4956-ac2d-028cf293f086' ||
     source.manifest.packageHash !== '17e0d061bba369caf295674579cca7b20b7e816723f0edde02ff16e9dfa2cba2')
   throw new Error('Expected the verified published positioning v11 export');
+// Match loader.packageHashPayload exactly: the copied hash field is not proof of the export's contents.
+const descriptor = source.manifest;
+const canonical = JSON.stringify({packageId: descriptor.packageId, revisionId: descriptor.revisionId,
+  directoryName: descriptor.directoryName,
+  files: [...descriptor.files].sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0)
+    .map(file => [file.path, file.bytes, file.mediaType, file.sha256, [...file.requires].sort()]),
+  tasks: Object.keys(descriptor.tasks).sort().map(key => [key, [...descriptor.tasks[key]].sort()]),
+  requiredCapabilities: [...descriptor.requiredCapabilities].sort()});
+if (hash(canonical) !== descriptor.packageHash) throw new Error('Source package hash mismatch');
 const templatePath = 'assets/organizer-template.md';
 const template = [
   '# 定位信息整理模板',
