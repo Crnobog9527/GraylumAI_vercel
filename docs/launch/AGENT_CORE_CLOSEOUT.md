@@ -190,7 +190,7 @@ Owner 在 [#771 评论](https://github.com/Crnobog9527/GraylumAI_vercel/pull/771
 - AGENT-CORE 行：现在**不标「完成」**。第 10 节 D10 补注「定位流程已由 2026-10-07 整步确认关卡取代：文字同意不确认，只认确认卡」；按第 5 节决定 2 把 AC-5 的
   「去身份信息、案例视图」挪到 LEARN-1 行（LEARN-1 上线前先做完去身份信息）；按决定 4 在依赖列写明 RUNTIME-PROD 只等 R1、R5、R6、R7、R12a、R13、R15、R16，其余上线前完成；AGENT-CORE 实施说明记整理方案 B 已由 Owner 确认。
   证据链接加上本清单。
-- R1–R16（含 R8a、R8b）全部验收后标「完成」。R8a 由 CONTENT-CONVERSATION-DRIVEN 交付，但其他带步骤 Skill 的工作区（R8b）必须单独验收，不能因为 R8a 完成就标 AC-4 完成。
+- R1–R16（含 R8a、R8b）全部验收，并且 CDC-WRITEBACK-V3 在最终代码上的付费复测按 `CONVERSATION_CAPTURE_WRITEBACK_V3.md` 的完成标准达标（目标 90/100、受保护字段零改动；不达标先请 Owner 决定）后标「完成」。该复测由 V3 任务用写回评测剩余预算做，不占第 5 节决定 3 的 5 美元。R8a 由 CONTENT-CONVERSATION-DRIVEN 交付，但其他带步骤 Skill 的工作区（R8b）必须单独验收，不能因为 R8a 完成就标 AC-4 完成。
 - AGENT-CORE-UI 行：**暂不标完成**。旧入口改指向新工作区是这一行明确列出的内容，要等 R8a/R8b 的工作区出来后完成；在那之前可以在说明里写明「卡片、流式、右侧面板布局已验收（c6037691095）」。如果想把旧入口改指挪到 LEGACY-CLOSE，需要另请 Owner 同意。
 - 规划改动按 AGENTS 第 6 节走单独的 `docs(plan)` PR。
 
