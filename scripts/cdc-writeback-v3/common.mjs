@@ -14,19 +14,23 @@ export const paths = Object.freeze({
   baseline: join(home, '.graylum/cdc-writeback-v2-20261006'),
   // 4096 re-run: frozen B requests (77/100), special gold, host plan and the final shared ledger.
   source: join(home, '.graylum/cdc-writeback-v2-4096-20261009'),
-  root: join(home, '.graylum/cdc-writeback-v3-20261010'),
+  // First V3 paid run (2026-10-10, 92.3/100). Its requests lacked ANSWER_CARD_RULE and used max_tokens 4096; kept as evidence only.
+  firstRun: join(home, '.graylum/cdc-writeback-v3-20261010'),
+  // Production-shaped roster: complete organizer system prompt and the production output cap.
+  root: join(home, '.graylum/cdc-writeback-v3-prodshape-20261010'),
 });
 export const pins = Object.freeze({
   casesHash: '8258d5753b4a8626a26234246c37e9e3a9cd3c94f24bf86ea4c96b7303b6f76f',
   sourceManifestHash: '274f1b5d3f8052e773ec7661dde5d35f5a1f45f5a7b58911f7a4af055b848291',
   specialHash: '9c29090a99ff60584c7265f5bfc5eceff7e71d9be334bcbe2527422d9e822c7e',
-  // Stopped 4096 ledger: every earlier settlement and unknown hold is carried, nothing is released.
-  sourceLedgerHash: 'dd162ab6622bcaa142c53388e304bfc316889597866f1365a73d751d8e17bcaa',
-  settledNano: 1_401_249_670, heldNano: 20_799_750, capNano: 5_000_000_000,
+  // Completed first V3 ledger (it carries the stopped 4096 ledger): every settlement and unknown hold is carried.
+  sourceLedgerHash: '2cb3f03026c39b899e71c913b240f26426917caa5bdd0b911ac903354162300a',
+  settledNano: 1_494_127_118, heldNano: 20_799_750, capNano: 5_000_000_000,
 });
 export const runs = Object.freeze(['R1', 'R2', 'R3']);
 export const batches = Object.freeze([...runs, 'S12']);
-export const outputTokens = 4096;
+// Production organizer cap (system_settings v3_summary_max_tokens, mirrored by cdcB2Fixture); replay requires equality.
+export const outputTokens = 2048;
 export const marker = '\n\nPrimary assistant reply:\n';
 
 export const hash = value => createHash('sha256').update(value).digest('hex');
@@ -37,16 +41,35 @@ export const canonical = value => Array.isArray(value) ? value.map(canonical) : 
 // Same conservative bound as the 4096 run: full input bytes plus 8192, full output, no cache discount.
 export const reserveNano = bytes => (bytes + 8192) * 250 + outputTokens * 750;
 
-/** The exact ORGANIZER_INSTRUCTIONS value of a checked-in organizerPrompt.ts source (pure string expression). */
-export function organizerInstructions(source) {
-  const start = source.indexOf('export const ORGANIZER_INSTRUCTIONS = ');
+/** The exact value of a checked-in `export const NAME = <pure string expression>;` constant. */
+export function stringConstant(source, name) {
+  const prefix = `export const ${name} = `, start = source.indexOf(prefix);
   const end = source.indexOf(';\n', start);
   assert(start >= 0 && end > start, 'V3_PROMPT_SOURCE');
-  const expression = source.slice(start + 'export const ORGANIZER_INSTRUCTIONS = '.length, end);
-  // Evaluated with no globals: the checked-in value is a pure string-array expression.
-  const value = runInNewContext('(' + expression + ')', Object.create(null), { timeout: 1000 });
-  assert(typeof value === 'string' && value.includes('pendingSuggestion') && value.includes('withdrawals'), 'V3_PROMPT_VALUE');
+  // Evaluated with no globals: the checked-in value is a pure string(-array) expression.
+  const value = runInNewContext('(' + source.slice(start + prefix.length, end) + ')', Object.create(null), { timeout: 1000 });
+  assert(typeof value === 'string' && value.trim(), 'V3_PROMPT_VALUE');
   return value;
+}
+
+/** The exact ORGANIZER_INSTRUCTIONS value of a checked-in organizerPrompt.ts source. */
+export function organizerInstructions(source) {
+  const value = stringConstant(source, 'ORGANIZER_INSTRUCTIONS');
+  assert(value.includes('pendingSuggestion') && value.includes('withdrawals'), 'V3_PROMPT_VALUE');
+  return value;
+}
+
+// opcService.prepareStep composes the organizer system prompt with these lines; a different composition needs a new freeze.
+export const composition = Object.freeze([
+  'organizerInstructions += "\\n" + ANSWER_CARD_RULE;',
+  'if (organizerInstructions && opening) organizerInstructions += "\\n" + OPENING_EXTRACTION_RULE;',
+]);
+/** The complete system prompt production sends for a non-opening organizer turn (every turn in this roster). */
+export function organizerSystem({ prompt, answerCard, service }) {
+  assert(composition.every(line => service.includes(line)), 'V3_PROMPT_COMPOSITION_CHANGED');
+  const rule = stringConstant(answerCard, 'ANSWER_CARD_RULE');
+  assert(rule.includes('answeredCard'), 'V3_PROMPT_VALUE');
+  return organizerInstructions(prompt) + '\n' + rule;
 }
 
 /** Splits a frozen organizer request; serialization must round-trip byte for byte. */
@@ -80,12 +103,16 @@ export function withoutPending(context) {
   return result;
 }
 
-/** Normalized comparison of the host-built organizer payload with a frozen request (key order is irrelevant). */
-export function sameUserContent(hostRaw, frozenRaw) {
+/** Compares the complete host-built organizer request with a frozen one: every field, system text and output cap
+ * included. Only key order inside the user payload JSON is normalized. */
+export function sameOrganizerRequest(hostRaw, frozenRaw) {
   const read = raw => {
-    const content = JSON.parse(raw).messages.at(-1).content, index = content.indexOf(marker);
+    const body = JSON.parse(raw), last = body.messages.at(-1);
+    assert(typeof last?.content === 'string', 'V3_REPLAY_FORMAT');
+    const index = last.content.indexOf(marker);
     assert(index > 0, 'V3_REPLAY_FORMAT');
-    return JSON.stringify(canonical(JSON.parse(content.slice(0, index)))) + content.slice(index);
+    const content = JSON.stringify(canonical(JSON.parse(last.content.slice(0, index)))) + last.content.slice(index);
+    return JSON.stringify(canonical({ ...body, messages: [...body.messages.slice(0, -1), { ...last, content }] }));
   };
   return read(hostRaw) === read(frozenRaw);
 }

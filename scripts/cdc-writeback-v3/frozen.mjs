@@ -1,9 +1,9 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-// Deterministic V3 roster from the 4096 B requests. Only the system text and seeded pendingSuggestion change.
+// Deterministic V3 roster from the 4096 B requests. Only the system text, the output cap and seeded pendingSuggestion change.
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { budgetState } from '../cdc-writeback-v2/budget.mjs';
-import { paths, pins, runs, hash, assert, readJson, reserveNano, organizerInstructions, splitRequest, withPending,
+import { paths, pins, runs, outputTokens, hash, assert, readJson, reserveNano, organizerSystem, splitRequest, withPending,
   withoutPending } from './common.mjs';
 
 const route = { allow_fallbacks: false, require_parameters: true, only: ['openai'],
@@ -25,7 +25,8 @@ export function sourceInputs(p = paths, expected = pins) {
   return { cases: JSON.parse(casesRaw), special: JSON.parse(specialRaw), sources, specialRaw };
 }
 
-/** One V3 request per source. A1: everything except system and pendingSuggestion stays byte-identical. */
+/** One V3 request per source. A1: everything except system, max_tokens (production cap) and pendingSuggestion stays
+ * byte-identical. `system` must be the complete production organizer system prompt (see promptAt). */
 export function freezeRequest(source, system, initial) {
   const { body, context, tail } = splitRequest(source.raw);
   assert(body.model === 'openai/gpt-6-luna' && body.max_tokens === 4096 && body.stream === false && body.store === false &&
@@ -33,13 +34,17 @@ export function freezeRequest(source, system, initial) {
     JSON.stringify(Object.keys(body).sort()) === JSON.stringify(['max_tokens', 'messages', 'model', 'provider', 'store', 'stream']),
   'V3_SOURCE_PROFILE');
   assert(body.messages[0].role === 'system' && body.messages[1].role === 'user' && body.messages[0].content !== system, 'V3_SOURCE_SYSTEM');
+  // The composed system prompt has no OPENING_EXTRACTION_RULE: every roster turn must be a user answer, never a host opening.
+  assert(typeof context.userInput === 'string' && context.userInput.trim() && context.hostEvent === undefined, 'V3_OPENING_UNSUPPORTED');
   const updated = withPending(context, initial), text = JSON.stringify(updated);
   assert(text.length <= 24000, 'V3_CAPTURE_INPUT_LIMIT');
-  const next = { ...body, messages: [{ ...body.messages[0], content: system }, { ...body.messages[1], content: text + tail }] };
+  const next = { ...body, messages: [{ ...body.messages[0], content: system }, { ...body.messages[1], content: text + tail }],
+    max_tokens: outputTokens };
   const raw = JSON.stringify(next);
-  // Prove the delta: restoring the old system text and removing pendingSuggestion gives the source bytes back.
+  // Prove the delta: restoring the old system text and cap and removing pendingSuggestion gives the source bytes back.
   const back = splitRequest(raw);
-  const restored = { ...back.body, messages: [body.messages[0], { ...back.body.messages[1],
+  assert(back.body.max_tokens === outputTokens, 'V3_DELTA');
+  const restored = { ...back.body, max_tokens: body.max_tokens, messages: [body.messages[0], { ...back.body.messages[1],
     content: JSON.stringify(withoutPending(back.context)) + back.tail }] };
   assert(JSON.stringify(restored) === source.raw && Buffer.byteLength(raw) <= 64000, 'V3_DELTA');
   return raw;
@@ -61,16 +66,18 @@ export function buildRoster(inputs, system) {
   return rows;
 }
 
+/** The complete organizer system prompt the checked-out backend sends for these turns. */
 export function promptAt(repo) {
-  return organizerInstructions(readFileSync(join(repo, 'packages/api/src/services/opc/organizerPrompt.ts'), 'utf8'));
+  const read = file => readFileSync(join(repo, 'packages/api/src/services/opc', file), 'utf8');
+  return organizerSystem({ prompt: read('organizerPrompt.ts'), answerCard: read('answerCard.ts'), service: read('service.ts') });
 }
 
-/** The stopped 4096 ledger is carried whole: its settled amount and every unknown hold. */
+/** The first V3 ledger is carried whole: its settled amount and every unknown hold. It must have nothing pending. */
 export function carry(p = paths, expected = pins) {
-  const path = join(p.source, 'frozen/execution/budget.jsonl'), raw = readFileSync(path, 'utf8');
+  const path = join(p.firstRun, 'frozen/execution/budget.jsonl'), raw = readFileSync(path, 'utf8');
   assert(hash(raw) === expected.sourceLedgerHash, 'V3_LEDGER_CHANGED');
   const state = budgetState(raw.trimEnd().split('\n').map(JSON.parse));
-  assert(state.stopped && !state.pending && state.settledNano === expected.settledNano && state.heldNano === expected.heldNano,
+  assert(!state.pending && state.settledNano === expected.settledNano && state.heldNano === expected.heldNano,
     'V3_LEDGER_STATE');
   return { path, carry: { settledNano: state.settledNano, heldNano: state.heldNano, sourceHash: expected.sourceLedgerHash } };
 }

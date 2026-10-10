@@ -8,8 +8,9 @@ import { validateApproval, executeBatch, validateResponse } from '../cdc-writeba
 import { paths, pins, batches, repo, hash, assert, readJson, validateV3Response } from './common.mjs';
 import { sourceInputs, buildRoster, promptAt, carry, writeRoster, loadRoster, batchReserves } from './frozen.mjs';
 
-// Pinned after the offline freeze of the reviewed V3 prompt; any prompt or source change needs a new freeze and review.
-export const V3_MANIFEST_HASH = '28e2e391dcbee72d072c79634545a5122206a93d0be415c8c18d2ef49593dba2';
+// Production-shaped freeze (complete organizer system prompt, max_tokens 2048) of the reviewed V3 prompt.
+// Any prompt or source change needs a new freeze and review.
+export const V3_MANIFEST_HASH = '161d548645700d132579f3031b9eeddffc5141782c0945792cf5d8e566f0f839';
 const directory = join(paths.root, 'frozen');
 
 export function frozenV3(manifestHash = V3_MANIFEST_HASH) {

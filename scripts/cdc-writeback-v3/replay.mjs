@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 // Offline SQL replay of paid organizer outputs through the real host, 0199 functions and a disposable database.
-// The host must rebuild exactly the frozen organizer payload; the paid summary is then applied and rolled back per case.
+// The host must rebuild exactly the frozen organizer request (system, payload, cap, route); the paid summary is then applied and rolled back per case.
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -8,7 +8,7 @@ import { randomUUID } from 'node:crypto';
 import { git } from '../cdc-writeback-v2/source.mjs';
 import { runHost } from '../cdc-writeback-v2/host.mjs';
 import { validateResponse } from '../cdc-writeback-v2/frozen.mjs';
-import { paths, pins, runs, marker, hash, assert, readJson, splitRequest, sameUserContent, validateV3Response } from './common.mjs';
+import { paths, pins, runs, marker, hash, assert, readJson, splitRequest, sameOrganizerRequest, validateV3Response } from './common.mjs';
 import { frozenV3 } from './run.mjs';
 
 const synthetic = (slot, model, content) => JSON.stringify({ id: 'gen-offline-' + slot, object: 'chat.completion', created: 1, model,
@@ -80,7 +80,7 @@ export function plan(batch, source) {
   return { plan: base, planHash: hash(planRaw) };
 }
 
-/** dry: zero-cost proof that the host rebuilds every frozen payload (synthetic empty outputs, no paid responses read). */
+/** dry: zero-cost proof that the host rebuilds every frozen request (synthetic empty outputs, no paid responses read). */
 export async function main(batch, dry = false) {
   const source = sources(batch), built = plan(batch, source);
   const { variants, responsesHash } = dry ? { variants: undefined, responsesHash: null } : paidVariants(batch, source);
@@ -96,12 +96,12 @@ export async function main(batch, dry = false) {
       if (mentors) { const found = mentors.find(m => m.slot === input.slot); assert(found, 'V3_MENTOR_MISSING'); return found.body; }
       return mentorStream(splitRequest(row.raw).tail, template);
     }
-    assert(sameUserContent(input.raw, row.raw), 'V3_REPLAY_FROZEN_STATE_MISMATCH');
+    assert(sameOrganizerRequest(input.raw, row.raw), 'V3_REPLAY_FROZEN_REQUEST_MISMATCH');
     return synthetic(input.slot, model, '{"inputKind":"answer","patches":[],"notes":[]}');
   }, variants);
   if (dry) {
     const proof = { batch, dry: true, count: source.rows.length, head: git('rev-parse', 'HEAD'), planHash: built.planHash,
-      manifestHash: source.frozen?.expected.manifestHash ?? pins.sourceManifestHash, exactOrganizerUserContent: true, externalModelCalls: 0 };
+      manifestHash: source.frozen?.expected.manifestHash ?? pins.sourceManifestHash, exactOrganizerRequest: true, externalModelCalls: 0 };
     writeFileSync(join(paths.root, 'dry-' + batch + '.proof.json'), JSON.stringify(proof) + '\n', { flag: 'wx', mode: 0o600 });
     return proof;
   }
@@ -112,7 +112,7 @@ export async function main(batch, dry = false) {
   const proof = { batch, count: results.length, head: git('rev-parse', 'HEAD'), planHash: built.planHash,
     manifestHash: source.frozen?.expected.manifestHash ?? pins.sourceManifestHash, paidResponsesHash: responsesHash,
     resultsHash: hash(raw), frozenPrivateHash: hash(readFileSync(join(output, 'frozen-private.json'))),
-    exactOrganizerUserContent: true, externalModelCalls: 0, replay: 'COMPLETED' };
+    exactOrganizerRequest: true, externalModelCalls: 0, replay: 'COMPLETED' };
   writeFileSync(join(paths.root, 'replay-' + batch + '.proof.json'), JSON.stringify(proof) + '\n', { flag: 'wx', mode: 0o600 });
   return proof;
 }

@@ -2,11 +2,12 @@
 import test from 'node:test';
 import strict from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { organizerInstructions, splitRequest, withPending, withoutPending, sameUserContent, validateV3Response, reserveNano,
-  marker } from '../cdc-writeback-v3/common.mjs';
-import { freezeRequest } from '../cdc-writeback-v3/frozen.mjs';
+import { fileURLToPath } from 'node:url';
+import { organizerInstructions, organizerSystem, splitRequest, withPending, withoutPending, sameOrganizerRequest,
+  validateV3Response, reserveNano, outputTokens, marker } from '../cdc-writeback-v3/common.mjs';
+import { freezeRequest, promptAt } from '../cdc-writeback-v3/frozen.mjs';
 import { mentorStream } from '../cdc-writeback-v3/replay.mjs';
-import { criteria, scrub, passes, validateScores } from '../cdc-writeback-v3/blind.mjs';
+import { criteria, scrub, passes, validateScores, scoreFiles, instructions } from '../cdc-writeback-v3/blind.mjs';
 import { validateResponse } from '../cdc-writeback-v2/frozen.mjs';
 
 const route = { allow_fallbacks: false, require_parameters: true, only: ['openai'], max_price: { prompt: 0.25, completion: 0.75, request: 0 } };
@@ -28,10 +29,23 @@ test('V3 prompt extraction evaluates only the checked-in string expression', () 
   strict.throws(() => organizerInstructions('export const ORGANIZER_INSTRUCTIONS = process.exit(1);\n'), /process is not defined/);
 });
 
+test('V3 freezes the complete production organizer system prompt, including the answer-card rule', () => {
+  const opc = file => readFileSync(new URL('../../packages/api/src/services/opc/' + file, import.meta.url), 'utf8');
+  const base = organizerInstructions(opc('organizerPrompt.ts')), full = promptAt(fileURLToPath(new URL('../..', import.meta.url)));
+  strict.ok(full.startsWith(base + '\n') && full.length > base.length + 1);
+  strict.match(full.slice(base.length), /^\nIn answeredCard, selectedOption is the user's choice;.*choice\.$/);
+  const parts = { prompt: opc('organizerPrompt.ts'), answerCard: opc('answerCard.ts'), service: opc('service.ts') };
+  strict.equal(organizerSystem(parts), full);
+  strict.throws(() => organizerSystem({ ...parts, service: parts.service.replace('+= "\\n" + ANSWER_CARD_RULE', '+= ANSWER_CARD_RULE') }),
+    /V3_PROMPT_COMPOSITION_CHANGED/);
+});
+
 test('V3 freeze changes only the system text and the seeded pendingSuggestion, as the last field key', () => {
   const raw = freezeRequest({ raw: source('B system') }, 'V3 system', initial);
   const { body, context: frozen } = splitRequest(raw);
   strict.equal(body.messages[0].content, 'V3 system');
+  strict.equal(body.max_tokens, outputTokens);
+  strict.equal(outputTokens, 2048);
   strict.deepEqual(Object.keys(frozen.checklist[0].fields[0]).at(-1), 'pendingSuggestion');
   strict.deepEqual(frozen.checklist[0].fields[0].pendingSuggestion, initial[0].suggestion);
   strict.equal(frozen.checklist[0].fields[1].pendingSuggestion, undefined);
@@ -40,16 +54,23 @@ test('V3 freeze changes only the system text and the seeded pendingSuggestion, a
   strict.throws(() => freezeRequest({ raw: source('same') }, 'same', []), /V3_SOURCE_SYSTEM/);
   strict.throws(() => freezeRequest({ raw: source('B').replace('"max_tokens":4096', '"max_tokens":2048') }, 'V3', []), /V3_SOURCE_PROFILE/);
   strict.throws(() => withPending(context, [{ ...initial[0], fieldId: 'missing' }]), /V3_PENDING_FIELD/);
-  strict.equal(reserveNano(1000), (1000 + 8192) * 250 + 4096 * 750);
+  strict.throws(() => freezeRequest({ raw: source('B').replace('那条建议不对', '') }, 'V3', []), /V3_OPENING_UNSUPPORTED/);
+  strict.equal(reserveNano(1000), (1000 + 8192) * 250 + 2048 * 750);
 });
 
-test('V3 replay compares normalized organizer payloads and unwraps the frozen mentor envelope once', () => {
+test('V3 replay compares the complete organizer request and unwraps the frozen mentor envelope once', () => {
   const frozen = freezeRequest({ raw: source('B') }, 'V3', initial);
   const body = JSON.parse(frozen), [text] = body.messages[1].content.split(marker);
   const reordered = Object.fromEntries(Object.entries(JSON.parse(text)).reverse());
-  body.messages = [{ role: 'system', content: 'host system differs' }, { role: 'user', content: JSON.stringify(reordered) + tail }];
-  strict.equal(sameUserContent(JSON.stringify(body), frozen), true);
-  strict.equal(sameUserContent(source('B'), frozen), false);
+  const host = changes => JSON.stringify(Object.fromEntries(Object.entries({ ...body, ...changes,
+    messages: [changes.system ?? body.messages[0], { role: 'user', content: JSON.stringify(reordered) + tail }] })
+    .filter(([k]) => k !== 'system').reverse()));
+  strict.equal(sameOrganizerRequest(host({}), frozen), true);
+  strict.equal(sameOrganizerRequest(host({ system: { role: 'system', content: 'V3\nextra rule' } }), frozen), false);
+  strict.equal(sameOrganizerRequest(host({ max_tokens: 4096 }), frozen), false);
+  strict.equal(sameOrganizerRequest(host({ provider: { ...route, allow_fallbacks: true } }), frozen), false);
+  strict.equal(sameOrganizerRequest(host({ reasoning: { effort: 'low' } }), frozen), false);
+  strict.equal(sameOrganizerRequest(source('B'), frozen), false);
   const frame = (content, finish, usage) => 'data: ' + JSON.stringify({ id: 'gen-1', provider: 'Anthropic',
     choices: [{ index: 0, delta: { role: 'assistant', content }, finish_reason: finish }], ...(usage ? { usage } : {}) });
   const template = [frame('原', null), frame('文', null), frame('', 'stop'), frame('', 'stop', { cost: 0.01 }), 'data: [DONE]'].join('\n\n');
@@ -83,4 +104,14 @@ test('V3 scoring hides run identity, keeps every gold condition and lets no scor
   strict.equal(passes({ ...item, protectedDirectChanged: true }, score), false);
   strict.equal(passes(item, { ...score, failureTypes: ['x'] }), false);
   strict.throws(() => validateScores({ items: [item] }, [{ ...score, checks: [] }]), /V3_SCORE_SHAPE/);
+});
+
+test('V3 scorer instructions name the same numbered files that seal and unblind read', () => {
+  strict.deepEqual(scoreFiles('/x/blind-a/packet-2.json'), { scores: 'scores-2.json', lock: 'lock-2.json' });
+  strict.throws(() => scoreFiles('/x/packet.json'), /V3_PACKET_PATH/);
+  for (const text of Object.values(instructions)) {
+    strict.match(text, /scores-N\.json/);
+    strict.match(text, /lock-N\.json/);
+    strict.doesNotMatch(text, /Write scores\.json|then lock\.json/);
+  }
 });
