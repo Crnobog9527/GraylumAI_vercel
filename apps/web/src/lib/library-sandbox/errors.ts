@@ -32,6 +32,11 @@ export const SANDBOX_ERROR_CODES = [
   'XML_ENCODING',
   'XML_MALFORMED',
   'TEXT_TOO_LARGE',
+  'PDF_INVALID',
+  'PDF_ENCRYPTED',
+  'PDF_PAGE_COUNT',
+  'PDF_STREAM_TOO_LARGE',
+  'PDF_UNSUPPORTED',
 ] as const;
 
 export type SandboxErrorCode = (typeof SANDBOX_ERROR_CODES)[number];
@@ -58,6 +63,17 @@ const TOO_LARGE = '文件太大或内容太多，超出了可以处理的上限�
 const UNSUPPORTED = '这个 Word 文件含有不支持的内容（加密、宏或嵌入的压缩文件），请另存为普通 Word 文档后再上传。';
 const DAMAGED = '这个 Word 文件无法读取，可能已损坏或不是真正的 .docx 文件。';
 
+export type SandboxFormat = 'docx' | 'pdf';
+
+const PDF_MESSAGES: Partial<Record<SandboxErrorCode, string>> = {
+  FEATURE_DISABLED: 'PDF 文字提取暂未开放。',
+  PDF_ENCRYPTED: '不支持加密或带密码的 PDF，请去掉密码后再上传。',
+  PDF_PAGE_COUNT: 'PDF 页数超过 500 页的上限，请拆分后再上传。',
+  PDF_STREAM_TOO_LARGE: TOO_LARGE,
+  PDF_UNSUPPORTED: '这个 PDF 使用了暂不支持的压缩方式，请用其他软件另存为 PDF 后再上传。',
+};
+const PDF_DAMAGED = '这个 PDF 无法读取，可能已损坏或不是真正的 PDF 文件。';
+
 const USER_MESSAGES: Partial<Record<SandboxErrorCode, string>> = {
   FEATURE_DISABLED: 'Word 文字提取暂未开放。',
   SANDBOX_UNAVAILABLE: '当前浏览器无法安全地读取这个文件，请换用最新版 Chrome、Edge 或 Safari。',
@@ -78,6 +94,7 @@ const USER_MESSAGES: Partial<Record<SandboxErrorCode, string>> = {
 };
 
 /** Plain-language message for the library page (LIB-3); limits are reported, never silently cut. */
-export function sandboxErrorMessage(code: SandboxErrorCode): string {
+export function sandboxErrorMessage(code: SandboxErrorCode, format: SandboxFormat = 'docx'): string {
+  if (format === 'pdf') return PDF_MESSAGES[code] ?? USER_MESSAGES[code] ?? PDF_DAMAGED;
   return USER_MESSAGES[code] ?? DAMAGED;
 }
