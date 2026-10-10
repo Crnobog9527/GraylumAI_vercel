@@ -564,7 +564,7 @@ function createRefund1bSupabase(
     },
     async rpc(name: string, payload: Row) {
       await options.beforeRpc?.(name, payload, tables);
-      if (name === 'atomic_refund_termination_clawback_fresh') {
+      if (name === 'pay_waffo_atomic_refund_termination_clawback_fresh') {
         return applyFreshRefundTerminationClawbackContract(tables, writes, payload);
       }
       expect(name).toBe('atomic_refund_termination_clawback');
@@ -920,7 +920,7 @@ describe('REFUND-1B refund reconciliation integration', () => {
       credit_transactions: supabase.tables.credit_transactions,
     }, {
       beforeRpc: (name, _payload, tables) => {
-        if (name !== 'atomic_refund_termination_clawback_fresh' || annualGrantCommitted) {
+        if (name !== 'pay_waffo_atomic_refund_termination_clawback_fresh' || annualGrantCommitted) {
           return;
         }
         annualGrantCommitted = true;

@@ -753,7 +753,7 @@ function createMockSupabase(
     },
     async rpc(name: string, payload: Row) {
       await hooks.beforeRpc?.({ name, payload, tables });
-      if (name === 'atomic_refund_termination_clawback_fresh') {
+      if (name === 'pay_waffo_atomic_refund_termination_clawback_fresh') {
         return applyFreshRefundTerminationClawbackContract(tables, payload);
       }
 

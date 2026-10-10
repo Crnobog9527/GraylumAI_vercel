@@ -1690,8 +1690,8 @@ export async function reconcileSubscriptionRefundCreditGrants(
   const terminationReason = `stripe_refund:${input.refundEventType ?? 'refund'}`;
   const userId = order.user_id ?? mirror?.user_id ?? located.grant?.user_id ?? null;
 
-  const clawbackResult = await supabase.rpc('atomic_refund_termination_clawback_fresh', {
-    p_user_id: userId,
+  const clawbackResult = await supabase.rpc('pay_waffo_atomic_refund_termination_clawback_fresh', {
+    p_user_id: userId, p_source_order_id: order.id,
     p_subscription_id: input.subscriptionId,
     p_event_id: canonicalEventId,
     p_refund_created_at: input.refundCreatedAt ?? null,

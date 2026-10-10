@@ -685,3 +685,88 @@ BEGIN
 END $legacy$;
 
 COMMIT;
+
+-- Reuse the existing refund resolver and locked clawback algorithm, with an order-bound
+-- internal subscription identity. Keep legacy signatures for already-deployed callers.
+DO $scoped_refund$
+DECLARE source text; revised text; name text; guard text;
+BEGIN
+  source:=pg_get_functiondef('public.pay_waffo_canonical_grant(public.user_subscriptions,public.subscription_credit_grants)'::regprocedure);
+  source:=replace(source,'public.pay_waffo_canonical_grant(', 'public.pay_waffo_refund_canonical_grant(');
+  source:=replace(source, 'o.payment_status IS DISTINCT FROM ''paid''',
+    '(coalesce(o.payment_status,'''') NOT IN (''paid'',''refunded'',''partially_refunded'',''partial_refunded'') OR o.fulfilled_at IS NULL)');
+  EXECUTE source;
+  guard:=$guard$
+  -- Keep the original profile -> subscription -> grant lock order. The order is
+  -- locked after the profile; every nested call verifies the same source again.
+  PERFORM 1 FROM public.profiles WHERE id=p_user_id FOR UPDATE;
+  SELECT * INTO v_source_order FROM public.payment_orders
+    WHERE id=p_source_order_id AND user_id=p_user_id AND payment_channel='stripe' FOR SHARE;
+  IF NOT FOUND OR v_source_order.subscription_id IS NULL THEN
+    RAISE EXCEPTION 'PAY_WAFFO_REFUND_SOURCE_MISMATCH' USING ERRCODE='23514';
+  END IF;
+  SELECT * INTO v_source_subscription FROM public.user_subscriptions
+    WHERE id=v_source_order.subscription_id AND user_id=p_user_id
+      AND payment_channel=v_source_order.payment_channel
+      AND merchant_namespace=v_source_order.merchant_namespace AND payment_mode=v_source_order.payment_mode FOR UPDATE;
+  IF NOT FOUND OR (v_source_subscription.stripe_subscription_id IS NOT NULL
+    AND v_source_subscription.stripe_subscription_id IS DISTINCT FROM p_subscription_id)
+    OR NOT EXISTS(SELECT 1 FROM public.payment_provider_refs r
+    WHERE r.subscription_id=v_source_subscription.id AND r.channel='stripe' AND r.object_type='subscription'
+      AND r.merchant_namespace=v_source_order.merchant_namespace AND r.mode=v_source_order.payment_mode
+      AND r.external_id=p_subscription_id) THEN
+    RAISE EXCEPTION 'PAY_WAFFO_REFUND_SOURCE_MISMATCH' USING ERRCODE='23514';
+  END IF;
+$guard$;
+  FOREACH name IN ARRAY ARRAY['atomic_refund_termination_clawback','atomic_refund_termination_clawback_fresh'] LOOP
+    SELECT pg_get_functiondef(p.oid) INTO STRICT source FROM pg_proc p
+      WHERE p.pronamespace='public'::regnamespace AND p.proname=name;
+    IF name='atomic_refund_termination_clawback' THEN
+      -- Ledger balances became bigint after this legacy RPC was introduced.
+      -- Its existing integer return contract needs explicit replay casts too.
+      source:=replace(source,'v_existing_transaction.balance_after,','v_existing_transaction.balance_after::integer,');
+      source:=replace(source,'v_existing_transaction.required_amount,','v_existing_transaction.required_amount::integer,');
+      source:=replace(source,'v_existing_transaction.applied_amount,','v_existing_transaction.applied_amount::integer,');
+      source:=replace(source,'v_existing_transaction.shortfall_amount,','v_existing_transaction.shortfall_amount::integer,');
+      EXECUTE source;
+    END IF;
+    revised:=replace(source,'public.'||name||'(', 'public.pay_waffo_'||name||'(');
+    revised:=replace(revised,'(p_user_id uuid,', '(p_source_order_id uuid, p_user_id uuid,');
+    revised:=replace(revised,E'DECLARE\n',E'DECLARE\n  v_source_order public.payment_orders;\n  v_source_subscription public.user_subscriptions;\n');
+    revised:=replace(revised,E'BEGIN\n',E'BEGIN\n'||guard);
+    revised:=replace(revised,'WHERE stripe_subscription_id = p_subscription_id',
+      'WHERE id = v_source_subscription.id');
+    revised:=replace(revised,'WHERE us.stripe_subscription_id = p_subscription_id',
+      'WHERE us.id = v_source_subscription.id');
+    revised:=replace(revised,'g.stripe_subscription_id = p_subscription_id',
+      'g.subscription_id = v_source_subscription.id');
+    revised:=replace(revised,'us.stripe_subscription_id = g.stripe_subscription_id', 'us.id = g.subscription_id');
+    IF name='atomic_refund_termination_clawback_fresh' THEN
+      revised:=regexp_replace(revised,
+        'public.refund_1b_is_canonical_period_identity\([[:space:]]*p_user_id,[^)]*v_grant_stripe_invoice_id[[:space:]]*\)',
+        '(SELECT public.pay_waffo_refund_canonical_grant(v_source_subscription,g) FROM public.subscription_credit_grants g '
+        ||'WHERE g.subscription_id=v_source_subscription.id AND g.grant_period_key=v_period_key)');
+      revised:=replace(revised,E'    p_subscription_id,\n    COALESCE(v_period_key',
+        E'    CASE WHEN v_source_subscription.stripe_subscription_id IS NOT NULL THEN p_subscription_id\n'
+        ||E'      ELSE v_source_subscription.id::text END,\n    COALESCE(v_period_key');
+      revised:=replace(revised,E'FROM public.atomic_refund_termination_clawback(\n    p_user_id,',
+        E'FROM public.pay_waffo_atomic_refund_termination_clawback(\n    p_source_order_id, p_user_id,');
+    ELSE
+      revised:=replace(revised,'''subscriptionId'', p_subscription_id,',
+        '''subscriptionId'', p_subscription_id, ''internalSubscriptionId'', v_source_subscription.id, ''sourceOrderId'', p_source_order_id,');
+    END IF;
+    IF revised=source OR position('p_source_order_id uuid' IN revised)=0
+      OR position('g.stripe_subscription_id = p_subscription_id' IN revised)>0 THEN
+      RAISE EXCEPTION 'PAY_WAFFO_REFUND_PATCH_MISMATCH';
+    END IF;
+    EXECUTE revised;
+  END LOOP;
+END $scoped_refund$;
+REVOKE ALL ON FUNCTION public.pay_waffo_refund_canonical_grant(public.user_subscriptions,public.subscription_credit_grants)
+  FROM PUBLIC,anon,authenticated;
+REVOKE ALL ON FUNCTION public.pay_waffo_atomic_refund_termination_clawback(uuid,uuid,text,text,text,text,text,boolean,text,timestamptz)
+  FROM PUBLIC,anon,authenticated,service_role;
+REVOKE ALL ON FUNCTION public.pay_waffo_atomic_refund_termination_clawback_fresh(uuid,uuid,text,text,timestamptz,text,text,text,timestamptz)
+  FROM PUBLIC,anon,authenticated;
+GRANT EXECUTE ON FUNCTION public.pay_waffo_atomic_refund_termination_clawback_fresh(uuid,uuid,text,text,timestamptz,text,text,text,timestamptz)
+  TO service_role;

@@ -9,6 +9,7 @@ import { admissionCases } from './admission.mjs';
 import { retentionCases } from './retention.mjs';
 import { sourceCases } from './sources.mjs';
 import { scopeCases } from './scopes.mjs';
+import { refundCases } from './refunds.mjs';
 import { POSTGRES_IMAGE } from '../v3/images.mjs';
 import { buildFromFiles, installPgCronStub } from '../baseline/build-from-files.mjs';
 
@@ -82,6 +83,7 @@ try {
   const cases = await admissionCases({admin,service,connect});
   cases.push(...await retentionCases({admin,service}));
   cases.push(...await sourceCases({admin}));
+  cases.push(...await refundCases({admin,service,connect}));
   console.log(JSON.stringify({result:'PASS',replay:report,
     cases:['event-idempotency','event-conflict','test-live-isolation','refund-event-not-payment-dedup',
       'service-only-receipt','durable-lookup-refs-no-contact-data','route-version-cas','route-delete-denied',...scopedCases,...cases]}));

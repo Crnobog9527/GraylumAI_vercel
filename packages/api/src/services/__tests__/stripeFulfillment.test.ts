@@ -734,7 +734,7 @@ function createRefundWebhookSupabase(
         }
         return { data: true, error: null };
       }
-      if (name === 'atomic_refund_termination_clawback_fresh') {
+      if (name === 'pay_waffo_atomic_refund_termination_clawback_fresh') {
         return applyFreshRefundTerminationClawbackContract(tables, payload);
       }
 
@@ -3766,7 +3766,7 @@ describe('stripe fulfillment helpers', () => {
     const allowAmbiguous = createDeferred();
     const supabase = createConcurrentRefundSupabase({
       onBeforeRpc: async ({ name, payload }) => {
-        if (name !== 'atomic_refund_termination_clawback_fresh') return;
+        if (name !== 'pay_waffo_atomic_refund_termination_clawback_fresh') return;
         if (payload.p_event_id === 'evt-concurrent-precise') {
           preciseReached.resolve();
           await allowPrecise.promise;
@@ -3823,7 +3823,7 @@ describe('stripe fulfillment helpers', () => {
     const allowAmbiguous = createDeferred();
     const supabase = createConcurrentRefundSupabase({
       onBeforeRpc: async ({ name, payload }) => {
-        if (name !== 'atomic_refund_termination_clawback_fresh') return;
+        if (name !== 'pay_waffo_atomic_refund_termination_clawback_fresh') return;
         if (payload.p_event_id === 'evt-concurrent-precise') {
           preciseReached.resolve();
           await allowPrecise.promise;
@@ -3889,7 +3889,7 @@ describe('stripe fulfillment helpers', () => {
     let rpcCall = 0;
     const supabase = createConcurrentRefundSupabase({
       onBeforeRpc: async ({ name }) => {
-        if (name !== 'atomic_refund_termination_clawback_fresh') return;
+        if (name !== 'pay_waffo_atomic_refund_termination_clawback_fresh') return;
         rpcCall += 1;
         if (rpcCall === 1) {
           firstReached.resolve();
@@ -3940,7 +3940,7 @@ describe('stripe fulfillment helpers', () => {
     let rpcCall = 0;
     const supabase = createConcurrentRefundSupabase({
       onBeforeRpc: async ({ name }) => {
-        if (name !== 'atomic_refund_termination_clawback_fresh') return;
+        if (name !== 'pay_waffo_atomic_refund_termination_clawback_fresh') return;
         rpcCall += 1;
         if (rpcCall === 1) {
           firstReached.resolve();
