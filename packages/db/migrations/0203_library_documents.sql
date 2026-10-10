@@ -1,5 +1,5 @@
 -- Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved.
--- LIB-2a, default closed. Shared erasure hooks follow #766; do not enable before that wiring.
+-- LIB-2a, default closed; public erasure hooks extend the merged predecessor chain.
 BEGIN;
 SET LOCAL lock_timeout = '5s';
 CREATE TABLE IF NOT EXISTS public.library_documents (
@@ -266,7 +266,7 @@ BEGIN
  DELETE FROM library_documents WHERE id=did;
  RETURN true;
 END $$;
--- Domain-only erasure proof. Shared account_erasure_* wiring must be rebased after #766 merges.
+-- Includes live-token cleanup shells; an empty bucket alone never proves completion.
 CREATE OR REPLACE FUNCTION public.library_erasure_remaining(a uuid) RETURNS bigint
 LANGUAGE sql SECURITY DEFINER SET search_path=public,pg_temp AS $$
  SELECT (SELECT count(*) FROM library_documents WHERE actor_id=a)
@@ -310,4 +310,60 @@ DO $$ DECLARE f regprocedure; BEGIN
    EXECUTE format('GRANT EXECUTE ON FUNCTION %s TO service_role',f); END IF;
  END LOOP;
 END $$;
+-- Reuse the original request's completion proof. Ticket progress remains independent.
+ALTER TABLE public.account_erasure_requests ADD COLUMN IF NOT EXISTS library_storage_verified_at timestamptz;
+CREATE OR REPLACE FUNCTION public.library_erasure_proof(a uuid,rid uuid,token uuid,verified boolean DEFAULT false)
+RETURNS boolean LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
+DECLARE r account_erasure_requests;
+BEGIN
+ PERFORM account_erasure_assert_closed(a);
+ PERFORM 1 FROM profiles WHERE id=a FOR UPDATE;
+ SELECT * INTO r FROM account_erasure_requests WHERE profile_id=a FOR UPDATE;
+ IF token IS NULL OR r.executor_token IS DISTINCT FROM token OR r.request_id IS DISTINCT FROM rid THEN
+  RAISE EXCEPTION 'ERASURE_EXECUTOR_NOT_CLAIMED' USING ERRCODE='42501'; END IF;
+ IF verified IS NULL THEN RAISE EXCEPTION 'ERASURE_INVALID_STORAGE_PROOF'; END IF;
+ IF verified THEN
+  IF library_erasure_remaining(a)<>0 THEN RAISE EXCEPTION 'ERASURE_LIBRARY_PENDING'; END IF;
+  UPDATE account_erasure_requests SET library_storage_verified_at=clock_timestamp() WHERE profile_id=a;
+  RETURN true;
+ END IF;
+ RETURN r.library_storage_verified_at IS NOT NULL AND library_erasure_remaining(a)=0;
+END $$;
+REVOKE ALL ON FUNCTION public.library_erasure_proof(uuid,uuid,uuid,boolean) FROM PUBLIC,anon,authenticated;
+GRANT EXECUTE ON FUNCTION public.library_erasure_proof(uuid,uuid,uuid,boolean) TO service_role;
+
+-- Extend merged 0192/0197 functions in place, retaining predecessor modifications.
+-- Unique anchors fail closed on source drift; markers make repeat application stable.
+DO $$
+DECLARE source text; needle text; replacement text; sig text;
+BEGIN
+ FOR sig,needle,replacement IN SELECT * FROM (VALUES
+  ('erasure_business_owner(text,jsonb)', E' CASE\n', E' CASE\n WHEN t IN (''library_documents'',''library_document_segments'',\n  ''library_upload_reservations'',''library_recognition_units'') THEN RETURN (j->>''actor_id'')::uuid;\n'),
+  ('account_erasure_prune_business(uuid,integer)', E' FOREACH t IN ARRAY ARRAY[\n',
+   E' FOREACH t IN ARRAY ARRAY[\n  ''library_document_segments'',''library_recognition_units'',''library_documents'',\n'),
+  ('account_erasure_business_remaining(uuid)', ' SELECT (SELECT count(*) FROM runtime_sessions',
+   E' SELECT public.library_erasure_remaining(p_profile_id)\n +(SELECT count(*) FROM account_erasure_requests WHERE profile_id=p_profile_id\n  AND stage<>''completed'' AND library_storage_verified_at IS NULL)\n +(SELECT count(*) FROM runtime_sessions'),
+  ('account_erasure_local_cleanup(uuid,boolean)', ' IF p_storage_verified AND NOT EXISTS',
+   E' IF p_storage_verified AND EXISTS(SELECT 1 FROM account_erasure_requests\n  WHERE profile_id=p_profile_id AND library_storage_verified_at IS NOT NULL)\n  AND library_erasure_remaining(p_profile_id)=0 AND NOT EXISTS')
+ ) changes(signature,anchor,patch) LOOP
+  source:=pg_get_functiondef(('public.'||sig)::regprocedure);
+  IF position('-- LIB-2a public erasure' IN source)=0 THEN
+   IF length(source)-length(replace(source,needle,''))<>length(needle) THEN
+    RAISE EXCEPTION 'LIBRARY_ERASURE_SOURCE_MISMATCH: %',sig; END IF;
+   source:=replace(source,needle,E' -- LIB-2a public erasure\n'||replacement);
+   -- Never prune reservations, their parents, or unsettled recognition identities.
+   IF sig='account_erasure_prune_business(uuid,integer)' THEN
+    needle:='   IF item.body ? ''erased_at''';
+    IF position(needle IN source)=0 THEN RAISE EXCEPTION 'LIBRARY_ERASURE_PRUNE_MISMATCH'; END IF;
+    source:=replace(source,needle,$patch$   IF t LIKE 'library_%' AND (
+     EXISTS(SELECT 1 FROM library_upload_reservations WHERE actor_id=p_profile_id)
+     OR EXISTS(SELECT 1 FROM library_recognition_units WHERE actor_id=p_profile_id AND bill2_request_id IS NOT NULL)
+    ) THEN CONTINUE; END IF;
+$patch$||needle);
+   END IF;
+   EXECUTE source;
+  END IF;
+ END LOOP;
+END $$;
+
 COMMIT;

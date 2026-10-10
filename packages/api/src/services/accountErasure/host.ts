@@ -3,7 +3,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { z } from 'zod';
 import { createScopedErasureManifest } from './scopedManifest';
 import { createErasureAttachmentManifest } from './manifest';
-import { processAccountErasure, type ErasureAuthAdapter, type ErasureProcessResult } from './processor';
+import { processAccountErasure, type ErasureAuthAdapter, type ErasureProcessResult, type ErasureStorageAdapter } from './processor';
 import { createErasureStorageAdapter, type ErasureStorageTransport } from './storage';
 
 const uuid = z.string().uuid();
@@ -22,6 +22,7 @@ type Proof = (profileId: string, signal: AbortSignal) => Promise<void>;
 export function createAccountErasureHost(input: {
   profileId: string; requestId: string; client: Pick<SupabaseClient, 'from' | 'rpc'>;
   storage: ErasureStorageTransport; auth: ErasureAuthAdapter;
+  additionalStorage?: ErasureStorageAdapter;
   verifyRetainedHistory?: Proof; verifyQuiescence?: Proof;
   operationTimeoutMs?: number; deadline?: number;
   /** Proof may be deferred to Storage so unrelated content still clears. */
@@ -117,7 +118,13 @@ export function createAccountErasureHost(input: {
             && response.data?.requestId !== input.requestId) throw new Error('ERASURE_IDENTITY_CHANGED');
           return response;
         }) },
-        storageAdapter: storage,
+        storageAdapter: { async cleanSubject(profileId) {
+          const ticket = await storage.cleanSubject(profileId);
+          if (!ticket.complete || !input.additionalStorage) return ticket;
+          // Track all library I/O until it really settles, including a processor timeout.
+          // A failed second bucket never invalidates the ticket checkpoint or permits Auth deletion.
+          return track(() => input.additionalStorage!.cleanSubject(profileId));
+        } },
         authAdapter: { getState: id => track(() => input.auth.getState(id)),
           remove: id => track(() => { authDispatched = true; return input.auth.remove(id); }) },
         budget: { operationTimeoutMs: timeout, storagePassTimeoutMs: storageBudget, deadline: input.deadline },

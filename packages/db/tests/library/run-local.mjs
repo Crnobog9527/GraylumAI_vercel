@@ -5,6 +5,7 @@ import { resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import assert from 'node:assert/strict';
 import pg from 'pg';
+import { verifyErasure } from './erasure.mjs';
 import { POSTGRES_IMAGE } from '../v3/images.mjs';
 import { buildFromFiles, installPgCronStub } from '../baseline/build-from-files.mjs';
 
@@ -162,12 +163,13 @@ try {
   assert.equal(buckets.length,2); assert.ok(buckets.every(b=>b.public===false));
   assert.equal(Number(buckets.find(b=>b.id==='library-documents').file_size_limit),10000000);
   assert.equal((await admin.query("SELECT count(*) AS n FROM pg_policies WHERE schemaname='storage'")).rows[0].n,'0');
+  await verifyErasure(admin, one);
   console.log(JSON.stringify({result:'PASS',steps:report.passed,newMigrationRepeated:true,
     cases:['default-off','concurrent-quota-barrier','idempotent-no-new-token','cross-user-denial','actual-size',
       'atomic-publication','downgrade-read-delete','delete-private-fields','delete-publish-denial','live-token-hold',
       'late-object-resets-proof','two-absence-release','domain-erasure-proof','anonymous-authenticated-denied',
       'raw-service-table-denied','disabled-banned-retention','stale-expiry-publication','live-expiry-recheck','ticket-upload-regression','closed-account','private-bucket-policy']}));
-  console.log('NOT_RUN: shared erasure completion/two-bucket restart (#766 dependency); real Storage; final post-dependency fingerprint');
+  console.log('NOT_RUN: real staging Storage (local SQL and transport mocks do not prove provider behavior)');
 } finally {
   await Promise.all(clients.map(c=>c.end()));
   try {docker(['rm','-f',name]);} catch { /* preserve original failure */ }
