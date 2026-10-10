@@ -220,6 +220,12 @@ export function concat(chunks: Uint8Array[], size: number): Uint8Array {
   return out;
 }
 
+/** Inflates one already-checked member again (bounded by its verified size). */
+export async function inflateMember(member: ZipMember): Promise<Uint8Array> {
+  const chunks = member.method === 0 ? [member.raw] : await inflateRaw(member.raw, member.size);
+  return concat(chunks, member.size);
+}
+
 const XML_PART = /\.(?:xml|rels)$/i;
 const ZIP_MAGIC = [0x50, 0x4b, 0x03, 0x04];
 

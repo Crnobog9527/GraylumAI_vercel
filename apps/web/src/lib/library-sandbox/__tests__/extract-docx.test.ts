@@ -5,7 +5,7 @@ import { extractDocx } from '../docx/extract-docx';
 import { inspectZip } from '../docx/zip-guard';
 import { rebuildZip } from '../docx/zip-rewrite';
 import {
-  buildDocx, footnoteRef, hyperlink, para, picture, run, table, TINY_PNG, zipFixture,
+  buildDocx, docxParts, footnoteRef, hyperlink, para, picture, run, table, TINY_PNG, zipFixture,
 } from './docx-fixture';
 
 const extract = (bytes: Buffer) => extractDocx(new Uint8Array(bytes));
@@ -158,6 +158,18 @@ describe('extractDocx: rejects unsafe or broken input before the parser runs', (
     expect(await code(zipFixture([{ name: 'word/document.xml', body: '<!DOCTYPE x SYSTEM "https://example.invalid/x"><x/>' }])))
       .toBe('XML_DTD');
     expect(await code(zipFixture([{ name: 'word/document.xml', body: '<x/>' }]))).toBe('DOCX_INVALID');
+  });
+
+  it('applies the XML guard to parts mammoth parses under another extension', async () => {
+    const renamed = (target: string, body: string) => docxParts({ body: para('x') }).map((entry) =>
+      entry.name === 'word/_rels/document.xml.rels' ? { ...entry, body: String(entry.body).replace('Target="styles.xml"', `Target="${target}"`) } : entry)
+      .concat([{ name: `word/${target}`, body }]);
+    expect(await code(zipFixture(renamed('styles.dat', '<!DOCTYPE x [<!ENTITY a "1">]><w:styles/>')))).toBe('XML_DTD');
+    expect(await code(zipFixture(renamed('styles.bin', '<a>'.repeat(65) + '</a>'.repeat(65))))).toBe('XML_DEPTH');
+    const main = docxParts({ body: para('正文') }).map((entry) => entry.name === '_rels/.rels'
+      ? { ...entry, body: String(entry.body).replace('Target="word/document.xml"', 'Target="word/main.dat"') } : entry)
+      .map((entry) => entry.name === 'word/document.xml' ? { ...entry, name: 'word/main.dat', body: `<!DOCTYPE x SYSTEM "x">${entry.body}` } : entry);
+    expect(await code(zipFixture(main))).toBe('XML_DTD');
   });
 
   it('reports text over 10,000,000 UTF-8 bytes instead of truncating', async () => {

@@ -5,7 +5,8 @@ import { SANDBOX_LIMITS } from '../limits';
 import { documentText, type DocxDocument, type DocxExtraction } from './document-text';
 import { headerFooterText } from './header-footer';
 import { checkXmlPart } from './xml-guard';
-import { inspectZip } from './zip-guard';
+import { parserXmlParts } from './package-parts';
+import { inflateMember, inspectZip } from './zip-guard';
 import { rebuildZip, unwrapSimpleFields } from './zip-rewrite';
 
 /**
@@ -53,11 +54,17 @@ export async function extractDocx(input: Uint8Array): Promise<DocxExtraction> {
   const zip = await inspectZip(input);
   const parts = new Map<string, string>();
   for (const [name, bytes] of zip.xmlParts) parts.set(name, checkXmlPart(bytes));
+  // Parts mammoth parses as XML under another extension get exactly the same check.
+  const { main, xml } = parserXmlParts(parts, new Set(zip.names));
+  for (const name of xml.filter((part) => !parts.has(part))) {
+    const member = zip.members.find((item) => item.name === name);
+    if (member) parts.set(name, checkXmlPart(await inflateMember(member)));
+  }
   checkPackage(zip.names, parts);
   const fields = new Map<string, string>();
   for (const [name, xml] of parts) {
     if (name.startsWith('word/') && xml.includes('<w:fldSimple')) fields.set(name, unwrapSimpleFields(xml));
   }
   const document = await readDocument(fields.size ? rebuildZip(zip.members, fields) : input);
-  return documentText(document, headerFooterText(parts));
+  return documentText(document, headerFooterText(parts, main));
 }

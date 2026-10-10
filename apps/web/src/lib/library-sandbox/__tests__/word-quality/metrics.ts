@@ -40,13 +40,12 @@ export function characterAccuracy(extracted: string, gold: string): { errors: nu
   return { errors, length, accuracy: length ? Math.max(0, 1 - errors / length) : 1 };
 }
 
-type Heading = { level: number; text: string };
+/** Lines with spaces folded but tabs (table cells) kept; empty lines dropped. */
+function structuralLines(text: string): string[] {
+  return text.normalize('NFC').split('\n').map((line) => line.replace(/[^\S\t]+/gu, ' ').trim()).filter(Boolean);
+}
 
-/** Share of reference headings found with the same level, in the same relative order (LCS). */
-export function headingOrder(extracted: Heading[], gold: Heading[]): { matched: number; total: number } {
-  const key = (heading: Heading) => `${heading.level}|${normalize(heading.text)}`;
-  const a = extracted.map(key);
-  const b = gold.map(key);
+function lcs(a: string[], b: string[]): number {
   let previous = new Array<number>(b.length + 1).fill(0);
   for (let i = 1; i <= a.length; i += 1) {
     const current = new Array<number>(b.length + 1).fill(0);
@@ -55,5 +54,22 @@ export function headingOrder(extracted: Heading[], gold: Heading[]): { matched: 
     }
     previous = current;
   }
-  return { matched: previous[b.length], total: b.length };
+  return previous[b.length];
+}
+
+/**
+ * Structure check the character score cannot see: reference lines (paragraphs, list items, table
+ * rows with their tab-separated cells) found exactly, in order, in the extracted text.
+ */
+export function lineStructure(extracted: string, gold: string): { matched: number; total: number } {
+  const reference = structuralLines(gold);
+  return { matched: lcs(structuralLines(extracted), reference), total: reference.length };
+}
+
+type Heading = { level: number; text: string };
+
+/** Share of reference headings found with the same level, in the same relative order (LCS). */
+export function headingOrder(extracted: Heading[], gold: Heading[]): { matched: number; total: number } {
+  const key = (heading: Heading) => `${heading.level}|${normalize(heading.text)}`;
+  return { matched: lcs(extracted.map(key), gold.map(key)), total: gold.length };
 }
