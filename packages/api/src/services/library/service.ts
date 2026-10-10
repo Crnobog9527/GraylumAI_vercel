@@ -8,6 +8,16 @@ import { cleanupLibrary } from './cleanup';
 import { libraryRpc } from './rpc';
 import { libraryStorage, type LibraryStorage } from './storage';
 
+type LibraryItem = {
+  id: string; kind: 'document' | 'image' | 'audio' | 'video'; format: string | null;
+  purpose: 'authored' | 'reference' | null; filename: string | null;
+  status: 'uploading' | 'processing' | 'ready' | 'failed' | 'deleting';
+  original_bytes: number; text_bytes: number; content_version: number; created_at: string;
+};
+type LibraryList = { usedBytes: number; capacityBytes: number; documents: LibraryItem[] };
+type LibrarySegment = { ordinal: number; title: string; body: string; bytes: number;
+  page_number: number | null; source: 'extracted' | 'recognized' };
+
 type Document = { id: string; format: Format; kind: string; path: string; status: string; guardUntil: string };
 export function libraryService(client: SupabaseClient, actorId: string, storage: LibraryStorage = libraryStorage(client)) {
   const read = (documentId: string, ready = true) => libraryRpc<Document>(client, 'library_document_read', {
@@ -50,7 +60,7 @@ export function libraryService(client: SupabaseClient, actorId: string, storage:
         if (file.contentType !== formats[doc.format]) throw new Error('LIBRARY_TYPE');
         verifyHeader(doc.format, file.bytes);
         const segments = doc.kind === 'document' ? textSegments(file.bytes) : [];
-        return await libraryRpc(client, 'library_publish', { a: actorId, did: documentId, actual: file.size, segments });
+        return await libraryRpc<{ documentId: string; status: 'ready' }>(client, 'library_publish', { a: actorId, did: documentId, actual: file.size, segments });
       } catch (error) {
         await remove(documentId, true);
         const message = error instanceof Error && /^LIBRARY_[A-Z_]+$/.test(error.message)
@@ -68,15 +78,15 @@ export function libraryService(client: SupabaseClient, actorId: string, storage:
     },
     async list(afterId?: string) {
       // Authorize before cleanup so an old session cannot trigger scoped work.
-      const result = await libraryRpc(client, 'library_list', { a: actorId, after_id: afterId ?? null });
+      const result = await libraryRpc<LibraryList>(client, 'library_list', { a: actorId, after_id: afterId ?? null });
       await sweep();
       return result;
     },
     segments(documentId: string, version: number, start: number) {
-      return libraryRpc(client, 'library_segments', { a: actorId, did: documentId, ver: version, start_at: start });
+      return libraryRpc<LibrarySegment[]>(client, 'library_segments', { a: actorId, did: documentId, ver: version, start_at: start });
     },
     purpose(documentId: string, purpose: 'authored' | 'reference') {
-      return libraryRpc(client, 'library_purpose', { a: actorId, did: documentId, p: purpose });
+      return libraryRpc<null>(client, 'library_purpose', { a: actorId, did: documentId, p: purpose });
     },
   };
 }
