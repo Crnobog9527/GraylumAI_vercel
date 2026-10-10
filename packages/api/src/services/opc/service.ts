@@ -219,7 +219,7 @@ export function opcService(user: SupabaseClient, admin: SupabaseClient, real?:St
         costPerCall: "0.02",
         creditsPerUsd: "1000",
         multiplier: "1",
-        maxCalls: organizeAfter ? 2 : 1,
+        maxCalls: (organizeAfter ? 2 : 1) + (v.purpose === "mentor" && !opening ? 1 : 0),
         organizeOpening: opening,
         purposeBudgets: true, maxOutputTokens: 1000,
         inputBytes: 64000,
@@ -228,7 +228,7 @@ export function opcService(user: SupabaseClient, admin: SupabaseClient, real?:St
         expectedMaterialRevision: material.revision,
         opcTurnToken: material.turnToken,
         ...(answeredCard ? { answeredCard: {...v.answerSource!, card: answeredCard.card}, resolvedInput: v.input } : {}),
-        mentorStream: v.purpose === "mentor", stepStream: v.purpose === "step",
+        mentorStream: v.purpose === "mentor", skillFileRead: v.purpose === "mentor", stepStream: v.purpose === "step",
         skillResources:
           v.purpose === "plan" && resolved.data.workflow.planResources
             ? resolved.data.workflow.planResources

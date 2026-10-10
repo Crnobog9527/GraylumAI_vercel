@@ -1,3 +1,4 @@
+import { PAYMENT_METHOD_ROUTES_KEY, paymentMethodRoutesSchema, readPaymentMethodRoutes } from '../services/payments/methodRouting';
 import { PAYMENT_CHANNEL_KEY, paymentChannelSettingSchema, readPaymentChannel } from '../services/payments/channelSettings';
 import { validatePaygAdminSetting } from '../services/adminSettings';
 import {
@@ -86,6 +87,9 @@ const systemSettingInputSchema = z.object({
 }).superRefine((setting, ctx) => {
   if (['billing_platform_absorb_alert', 'billing_platform_absorb_ack'].includes(setting.key)) {
     ctx.addIssue({ code: 'custom', path: ['key'], message: '平台承担提醒请通过专用接口保存' });
+  }
+  if (setting.key === PAYMENT_METHOD_ROUTES_KEY && !paymentMethodRoutesSchema.safeParse(setting.value).success) {
+    ctx.addIssue({ code: 'custom', path: ['value'], message: '付款方式配置或版本无效，请刷新后重试' });
   }
   if (setting.key === PAYMENT_CHANNEL_KEY && !paymentChannelSettingSchema.safeParse(setting.value).success) {
     ctx.addIssue({ code: 'custom', path: ['value'], message: '支付渠道或版本无效，请刷新后重试' });
@@ -212,6 +216,9 @@ function throwSettingsWriteError(error: { code?: string }, fallback: string) {
 }
 
 export const settingsRouter = router({
+  getPaymentMethodRoutes: adminProcedure.query(({ ctx }) => readPaymentMethodRoutes(ctx.supabase).catch(error => {
+    throw createSafeServiceUnavailableError(error, '付款方式配置暂时无法读取，请稍后重试');
+  })),
   getPaymentChannel: adminProcedure.query(({ ctx }) => readPaymentChannel(ctx.supabase)),
   getRoutingModels: adminProcedure.query(async ({ ctx }) => {
     const { data, error } = await ctx.supabase.from('ai_models')

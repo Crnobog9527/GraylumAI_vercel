@@ -5,8 +5,9 @@ import pg from 'pg';
 import {saveModuleSkill,type ModuleSkillInput} from '../services/skills/modulePublication.ts';
 import {opcService} from '../services/opc/service.ts';
 import {pricingConfig} from '../services/__tests__/fixtures/runtimePricing.ts';
-import {profiles,quote,type Role} from '../../../../scripts/cdc-b2-eval/policy.ts';
-export async function fixture(input:ModuleSkillInput){
+import {outputCap,profiles,quote,type Role} from '../../../../scripts/cdc-b2-eval/policy.ts';
+// organizerOutput: optional live organizer cap for V3 hosts; omitted keeps the B2 profile (2048).
+export async function fixture(input:ModuleSkillInput,organizerOutput?:number){
  const connectionString=process.env.V3_LOCAL_DB!;
  if(!/^postgres:\/\/postgres@127\.0\.0\.1:\d+\/v3_disposable$/.test(connectionString)||
   !process.env.V3_LOCAL_REST?.startsWith('http://127.0.0.1:'))throw new Error('CDC_DISPOSABLE_ONLY');
@@ -28,14 +29,15 @@ export async function fixture(input:ModuleSkillInput){
   config.reasoning.purposes=role==='mentor'?{interactive:{mode:'effort',effort:'low',wire:'reasoning_effort'}}:{organize:{mode:'provider_default'}};
   await db.query(`insert into ai_models(id,name,model_id,provider,is_active,api_key,api_endpoint,max_tokens,input_limit,config)
    values($1,'CDC local model',$2,'openai','true','LOCAL_BOUNDARY_ONLY','https://openrouter.ai/api/v1',$3,$4,$5)`,
-   [ids[role],p.model,p.output,p.context,config]);
+   [ids[role],p.model,outputCap(role,organizerOutput),p.context,config]);
  }
- const settings={v3_summary_model_id:ids.organizer,v3_summary_max_tokens:2048,billing_credits_per_usd:'100',billing_token_price_multiplier:'3',
+ const settings={v3_summary_model_id:ids.organizer,v3_summary_max_tokens:outputCap('organizer',organizerOutput),
+  billing_credits_per_usd:'100',billing_token_price_multiplier:'3',
   runtime_purpose_budgets:{version:2,interactive:{inputBytes:90000,historyItems:100},organize:{inputBytes:64000,historyItems:0},
    report:{inputBytes:196608,historyItems:0}}};
  for(const [key,value] of Object.entries(settings))await db.query(
   'insert into system_settings(key,value) values($1,$2) on conflict(key) do update set value=excluded.value',[key,JSON.stringify(value)]);
- const policies=(['mentor','organizer'] as Role[]).map(role=>({...quote(role,ids[role]),multiplier:'3'}));
+ const policies=(['mentor','organizer'] as Role[]).map(role=>({...quote(role,ids[role],organizerOutput),multiplier:'3'}));
  const window=randomUUID();
  // Disposable database only: a short window from now. The shared EXPIRES still gates the old paid B2 bridge.
  const expiresAt=new Date(Date.now()+6*3600_000).toISOString();

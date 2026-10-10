@@ -1506,7 +1506,7 @@ export async function upsertPaymentOrderBySession(
   const authoritative = await stripe.checkout.sessions.retrieve(session.id);
   if (authoritative.id !== session.id) throw new Error('PAY_COMMON_ATTEMPT_IDENTITY_MISMATCH');
   const mapped = await supabase.from('payment_provider_refs').select('order_id, mode')
-    .eq('channel', 'stripe').eq('merchant_namespace', scope.merchant)
+    .eq('channel', 'stripe').eq('merchant_namespace', scope.merchant).eq('mode', scope.mode)
     .eq('object_type', 'checkout').eq('external_id', authoritative.id).maybeSingle();
   if (mapped.error) throw new Error('PAY_COMMON_MAPPING_READ_FAILED', { cause: mapped.error });
   if (mapped.data && mapped.data.mode !== scope.mode) throw new Error('PAY_COMMON_ATTEMPT_IDENTITY_MISMATCH');
@@ -1581,11 +1581,11 @@ export async function fulfillCreditPackageOrder(
     return;
   }
 
-  // The original RPC owns lookup, profile/order locks and fulfillment deduplication. A
-  // read-before-write shortcut here could hide incomplete transactional recovery.
+  const scope = await resolveStripeScope(getStripeClient());
+  if (session.livemode !== (scope.mode === 'live')) throw new Error('PAY_COMMON_RECEIPT_MISMATCH');
   const { data, error } = await supabase.rpc('atomic_fulfill_credit_package', {
-    p_checkout_session_id: session.id,
-    p_payment_status: session.payment_status ?? 'paid',
+    p_checkout_session_id: session.id, p_payment_status: session.payment_status ?? 'paid',
+    p_merchant_namespace: scope.merchant, p_payment_mode: scope.mode,
   });
 
   if (error) {

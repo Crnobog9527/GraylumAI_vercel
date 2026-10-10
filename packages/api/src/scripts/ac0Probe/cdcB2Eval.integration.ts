@@ -23,7 +23,8 @@ it('CDC_EVAL: freeze or execute exactly the approved roster through local OPC an
  const path=process.env.V3_REAL_SKILL_INPUT!;assertOutsideRepository(path);
  const plan=JSON.parse(readFileSync(path,'utf8'));assertOutsideRepository(plan.output);
  if(plan.reasoningReplay)assertOutsideRepository(plan.reasoningReplay);
- const f=await fixture(plan.moduleSkill),rows:Array<ReturnType<typeof measure>&{ordinal:number;category:string;role:Role;raw:string}>=[],results:unknown[]=[];
+ const organizerOutput:number|undefined=plan.organizerOutputTokens;
+ const f=await fixture(plan.moduleSkill,organizerOutput),rows:Array<ReturnType<typeof measure>&{ordinal:number;category:string;role:Role;raw:string}>=[],results:unknown[]=[];
  const reasoningResults:unknown[]=[];
  if(plan.writebackV2)await f.db.query('update runtime_test_windows set max_calls=1000,max_cost_usd=100 where id=$1',
   [process.env.V3_RUNTIME_STAGING_WINDOW_ID]);
@@ -32,7 +33,7 @@ it('CDC_EVAL: freeze or execute exactly the approved roster through local OPC an
   if(String(url)!=='https://openrouter.ai/api/v1/chat/completions')throw new Error('CDC_NO_LOOKUP_OR_RETRY');
   const raw=String(init?.body),body=JSON.parse(raw),role:Role=phase++===0?'mentor':'organizer';
   if(phase>2||role==='organizer'&&!active.organize)throw new Error('CDC_UNEXPECTED_CALL');
-  const measured=measure(raw,role);rows.push({ordinal:++ordinal,category:active.category,role,...measured,raw});
+  const measured=measure(raw,role,organizerOutput);rows.push({ordinal:++ordinal,category:active.category,role,...measured,raw});
   if(plan.bridge){
    const response=await fetch(plan.bridge.url,{method:'POST',headers:{'content-type':'application/json',authorization:plan.bridge.secret},
     body:JSON.stringify({role,ordinal,slot:active.slot,raw})});

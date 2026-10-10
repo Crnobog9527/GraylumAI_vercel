@@ -734,7 +734,7 @@ function createRefundWebhookSupabase(
         }
         return { data: true, error: null };
       }
-      if (name === 'atomic_refund_termination_clawback_fresh') {
+      if (name === 'pay_waffo_atomic_refund_termination_clawback_fresh') {
         return applyFreshRefundTerminationClawbackContract(tables, payload);
       }
 
@@ -1477,9 +1477,18 @@ describe('stripe fulfillment helpers', () => {
     const rpc = vi.fn().mockResolvedValue({ data: [{ already_fulfilled: true, granted_credits: 0,
       fulfilled_at: '2026-03-12T16:01:26.787Z' }], error: null });
     const from = vi.fn(() => { throw new Error('No application read/write bypass of the atomic grant'); });
-    await fulfillCreditPackageOrder({ from, rpc }, { id: 'cs_test_credit_replay', mode: 'payment', payment_status: 'paid', metadata: { userId: 'user-1', itemId: 'package-1', itemType: 'credit_package' } } as Stripe.Checkout.Session);
-    expect(rpc).toHaveBeenCalledWith('atomic_fulfill_credit_package', { p_checkout_session_id: 'cs_test_credit_replay', p_payment_status: 'paid' });
+    await fulfillCreditPackageOrder({ from, rpc }, { id: 'cs_test_credit_replay', livemode: false, mode: 'payment', payment_status: 'paid', metadata: { userId: 'user-1', itemId: 'package-1', itemType: 'credit_package' } } as Stripe.Checkout.Session);
+    expect(rpc).toHaveBeenCalledWith('atomic_fulfill_credit_package', { p_checkout_session_id: 'cs_test_credit_replay', p_payment_status: 'paid', p_merchant_namespace: 'acct_fixture', p_payment_mode: 'test' });
     expect(from).not.toHaveBeenCalled();
+  });
+
+  it('rejects a package session from a different mode before its atomic grant', async () => {
+    const rpc = vi.fn();
+    await expect(fulfillCreditPackageOrder({ rpc }, {
+      id: 'cs_wrong_mode', livemode: true, mode: 'payment', payment_status: 'paid',
+      metadata: { userId: 'user-1', itemId: 'package-1', itemType: 'credit_package' },
+    } as Stripe.Checkout.Session)).rejects.toThrow('PAY_COMMON_RECEIPT_MISMATCH');
+    expect(rpc).not.toHaveBeenCalled();
   });
 
   it('persists subscription identity through the checkout transaction before fulfillment', async () => {
@@ -2236,6 +2245,22 @@ describe('stripe fulfillment helpers', () => {
     // This fixture exposes no update/insert path. SQL checkout-persistence covers terminal-state retention.
   });
 
+  it('records the exact checkout when its external ID exists in both modes', async () => {
+    const { session, rpc, order } = checkoutReceiptFixture();
+    const refs = ['test', 'live'].map(mode => ({ order_id: mode === 'test' ? order.id : 'other-order', mode,
+      channel: 'stripe', merchant_namespace: 'acct_fixture', object_type: 'checkout', external_id: session.id }));
+    const filters: Record<string, unknown> = {};
+    const query = { select: () => query, eq: (key: string, value: unknown) => { filters[key] = value; return query; },
+      maybeSingle: async () => {
+        const matches = refs.filter(ref => Object.entries(filters).every(([key, value]) => ref[key as keyof typeof ref] === value));
+        return matches.length === 1 ? { data: matches[0], error: null } : { data: null, error: { code: 'PGRST116' } };
+      } };
+    await upsertPaymentOrderBySession({ from: () => query, rpc }, session);
+    expect(rpc).toHaveBeenCalledExactlyOnceWith('pay_common_record_checkout', expect.objectContaining({
+      p_order_id: order.id, p_payment_mode: 'test',
+    }));
+  });
+
   it('closes expired checkout only through the protected closure transaction without fulfillment', async () => {
     const { session, rpc, supabase, order } = checkoutReceiptFixture('expired');
     providerState.checkout.mockClear();
@@ -2329,7 +2354,7 @@ describe('stripe fulfillment helpers', () => {
     await fulfillCreditPackageOrder(
       supabase,
       {
-        id: 'cs_test_credit_atomic',
+        id: 'cs_test_credit_atomic', livemode: false,
         metadata: {
           userId: 'user-atomic',
           itemType: 'credit_package',
@@ -2343,7 +2368,7 @@ describe('stripe fulfillment helpers', () => {
 
     expect(rpc).toHaveBeenCalledWith('atomic_fulfill_credit_package', {
       p_checkout_session_id: 'cs_test_credit_atomic',
-      p_payment_status: 'paid',
+      p_payment_status: 'paid', p_merchant_namespace: 'acct_fixture', p_payment_mode: 'test',
     });
   });
 
@@ -3741,7 +3766,7 @@ describe('stripe fulfillment helpers', () => {
     const allowAmbiguous = createDeferred();
     const supabase = createConcurrentRefundSupabase({
       onBeforeRpc: async ({ name, payload }) => {
-        if (name !== 'atomic_refund_termination_clawback_fresh') return;
+        if (name !== 'pay_waffo_atomic_refund_termination_clawback_fresh') return;
         if (payload.p_event_id === 'evt-concurrent-precise') {
           preciseReached.resolve();
           await allowPrecise.promise;
@@ -3798,7 +3823,7 @@ describe('stripe fulfillment helpers', () => {
     const allowAmbiguous = createDeferred();
     const supabase = createConcurrentRefundSupabase({
       onBeforeRpc: async ({ name, payload }) => {
-        if (name !== 'atomic_refund_termination_clawback_fresh') return;
+        if (name !== 'pay_waffo_atomic_refund_termination_clawback_fresh') return;
         if (payload.p_event_id === 'evt-concurrent-precise') {
           preciseReached.resolve();
           await allowPrecise.promise;
@@ -3864,7 +3889,7 @@ describe('stripe fulfillment helpers', () => {
     let rpcCall = 0;
     const supabase = createConcurrentRefundSupabase({
       onBeforeRpc: async ({ name }) => {
-        if (name !== 'atomic_refund_termination_clawback_fresh') return;
+        if (name !== 'pay_waffo_atomic_refund_termination_clawback_fresh') return;
         rpcCall += 1;
         if (rpcCall === 1) {
           firstReached.resolve();
@@ -3915,7 +3940,7 @@ describe('stripe fulfillment helpers', () => {
     let rpcCall = 0;
     const supabase = createConcurrentRefundSupabase({
       onBeforeRpc: async ({ name }) => {
-        if (name !== 'atomic_refund_termination_clawback_fresh') return;
+        if (name !== 'pay_waffo_atomic_refund_termination_clawback_fresh') return;
         rpcCall += 1;
         if (rpcCall === 1) {
           firstReached.resolve();
@@ -5260,7 +5285,7 @@ describe('PAY-1 card and Alipay fulfillment compatibility', () => {
       if (name === 'pay_common_record_checkout') return recordCheckoutFixture(tables, params);
       if (tables.payment_orders[0].fulfilled_at) return { data: [{ fulfilled_at: tables.payment_orders[0].fulfilled_at }], error: null };
       expect(name).toBe('atomic_fulfill_credit_package');
-      expect(params).toEqual({ p_checkout_session_id: 'cs_test_pay1', p_payment_status: 'paid' });
+      expect(params).toEqual({ p_checkout_session_id: 'cs_test_pay1', p_payment_status: 'paid', p_merchant_namespace: 'acct_fixture', p_payment_mode: 'test' });
       tables.payment_orders[0].fulfilled_at = '2026-09-04T00:00:00Z';
       tables.payment_orders[0].status = 'completed';
       tables.payment_orders[0].metadata.grantedCredits = 100;
