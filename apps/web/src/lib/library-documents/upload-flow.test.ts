@@ -80,4 +80,25 @@ describe('runLibraryUpload', () => {
     await expect(run({ requestId: 'req-0', documentId: 'gone', resume: 'complete' })).resolves.toEqual({ documentId: 'doc-1' });
     expect(api.begin).toHaveBeenCalledWith(expect.objectContaining({ requestId: 'req-1' }));
   });
+  it('does not start a replacement until an unconfirmed release succeeds', async () => {
+    const abandon = vi.fn().mockRejectedValueOnce(new Error('Failed to fetch')).mockRejectedValueOnce(new Error('Failed to fetch'))
+      .mockResolvedValue({ status: 'deleting' });
+    const { api, run } = setup({ abandon, put: vi.fn(async () => { throw new Error('UPLOAD_NETWORK'); }) });
+    const first = await fail(run());
+    expect(first.retry).toEqual({ requestId: 'req-1', resume: 'begin', releaseFirst: 'doc-1' });
+    const second = await fail(run(first.retry));
+    expect(second.retry).toEqual(first.retry);
+    expect(api.begin).toHaveBeenCalledTimes(1);
+    await fail(run(first.retry));
+    expect(abandon).toHaveBeenLastCalledWith({ documentId: 'doc-1' });
+    expect(api.begin).toHaveBeenLastCalledWith(expect.objectContaining({ requestId: 'req-1' }));
+  });
+  it('keeps the unreleased row when a link cannot be re-sent and its release fails', async () => {
+    const { api, run } = setup({
+      begin: vi.fn(async () => ({ documentId: 'old', status: 'uploading', upload: null })),
+      abandon: vi.fn(async () => { throw new Error('Failed to fetch'); }),
+    });
+    expect((await fail(run())).retry).toEqual({ requestId: 'req-1', resume: 'begin', releaseFirst: 'old' });
+    expect(api.begin).toHaveBeenCalledTimes(1);
+  });
 });

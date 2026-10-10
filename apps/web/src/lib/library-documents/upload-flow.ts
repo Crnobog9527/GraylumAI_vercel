@@ -18,8 +18,12 @@ export type UploadApi = {
 };
 
 export type UploadStage = 'begin' | 'transfer' | 'complete';
-/** Where a retry should resume. `complete` only after an unknown (network) result of complete. */
-export type UploadAttempt = { requestId: string; documentId?: string; resume: 'begin' | 'complete' };
+/**
+ * Where a retry should resume. `complete` only after an unknown (network) result of complete.
+ * `releaseFirst`: an earlier row whose release was not confirmed; it is released before any new request,
+ * so failed releases never stack up 10 MB reservations or unfinished-upload slots.
+ */
+export type UploadAttempt = { requestId: string; documentId?: string; resume: 'begin' | 'complete'; releaseFirst?: string };
 export class UploadFailure extends Error {
   constructor(readonly cause: unknown, readonly retry: UploadAttempt) {
     super('LIBRARY_UPLOAD_FAILED');
@@ -31,12 +35,27 @@ type Input = {
   attempt: UploadAttempt; newId: () => string; onStage: (stage: UploadStage, progress?: number) => void;
 };
 
-async function abandonQuietly(api: UploadApi, documentId: string) {
-  try { await api.abandon({ documentId }); } catch { /* The server's cleanup sweep also reclaims it. */ }
+/** Releases an unfinished row. If the release is not confirmed, the retry releases it first. */
+async function release(api: UploadApi, documentId: string, cause: unknown, newId: () => string) {
+  try {
+    await api.abandon({ documentId });
+  } catch {
+    throw new UploadFailure(cause, { requestId: newId(), resume: 'begin', releaseFirst: documentId });
+  }
 }
 
 export async function runLibraryUpload(api: UploadApi, input: Input): Promise<{ documentId: string }> {
-  const { file, attempt, newId, onStage } = input;
+  const { file, newId, onStage } = input;
+  let attempt = input.attempt;
+  if (attempt.releaseFirst) {
+    onStage('begin');
+    try {
+      await api.abandon({ documentId: attempt.releaseFirst });
+    } catch (error) {
+      throw new UploadFailure(error, attempt);
+    }
+    attempt = { requestId: attempt.requestId, resume: 'begin' };
+  }
   if (attempt.resume === 'complete' && attempt.documentId) {
     onStage('complete');
     try {
@@ -65,14 +84,14 @@ export async function runLibraryUpload(api: UploadApi, input: Input): Promise<{ 
   if (grant.status === 'ready') return { documentId: grant.documentId };
   if (!grant.upload) {
     // An earlier attempt got the link; it cannot be re-sent. Release that row and start again.
-    await abandonQuietly(api, grant.documentId);
+    await release(api, grant.documentId, new Error('LIBRARY_UPLOAD_UNAVAILABLE'), newId);
     return runLibraryUpload(api, { ...input, attempt: { requestId: newId(), resume: 'begin' } });
   }
   onStage('transfer', 0);
   try {
     await api.put(grant.upload.signedUrl, file, input.contentType, (fraction) => onStage('transfer', fraction));
   } catch (error) {
-    await abandonQuietly(api, grant.documentId);
+    await release(api, grant.documentId, error, newId);
     throw new UploadFailure(error, { requestId: newId(), resume: 'begin' });
   }
   onStage('complete');
