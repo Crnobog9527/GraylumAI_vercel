@@ -35,7 +35,10 @@ DECLARE source text;
 BEGIN
  source:=pg_get_functiondef('public.pay_common_create_purchase(uuid,text,uuid,text,text,text,text)'::regprocedure);
  IF position('r.package_tier' IN source)=0 THEN
-  source:=replace(source,'AND r.offer_kind=''standard''','AND r.offer_kind=''standard'' AND r.package_tier=''legacy''');
+  IF position('ELSE r.credit_package_id=p_item_id END' IN source)=0 THEN
+   RAISE EXCEPTION 'PAY_WAFFO_LEGACY_PRICE_PATCH_MISSING'; END IF;
+  source:=replace(source,'ELSE r.credit_package_id=p_item_id END',
+   'ELSE r.credit_package_id=p_item_id AND r.package_tier=''legacy'' END');
   EXECUTE source;
  END IF;
 END $legacy_price$;

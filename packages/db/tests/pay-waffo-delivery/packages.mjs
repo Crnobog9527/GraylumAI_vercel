@@ -31,5 +31,20 @@ export async function packageCases({admin,service}) {
   await admin.query('UPDATE payment_provider_refs SET is_current=true WHERE id=$1',[refs[tier]]);
   const order=await buy();assert.equal(order.price_ref_id,refs[tier]);assert.equal(order.amount_total,tier==='pro'?940:890);
  }
- return ['package-pro-price-95','package-gold-price-90','package-no-other-tier-fallback','package-tier-immutable'];
+ // Legacy protocol before method activation must still see exactly its original price.
+ await admin.query('BEGIN');
+ try {
+// Disposable fixture only: restore pre-activation settings; never relax the trigger during the RPC.
+  await admin.query("ALTER TABLE system_settings DISABLE TRIGGER pay_waffo_routes_guard");
+  await admin.query("DELETE FROM system_settings WHERE key='payment_method_routes'");
+  await admin.query("ALTER TABLE system_settings ENABLE TRIGGER pay_waffo_routes_guard");
+  await admin.query(`INSERT INTO system_settings(key,value) VALUES('payment_new_purchase_channel',
+   '{"channel":"stripe","version":1}') ON CONFLICT(key) DO UPDATE SET value=excluded.value`);
+  const user=randomUUID();await admin.query('INSERT INTO profiles(id) VALUES($1)',[user]);
+  await admin.query('SET LOCAL ROLE service_role');
+  const legacy=(await admin.query("SELECT o.* FROM pay_common_create_purchase($1,'credit_package',$2,'one_time','fixture','test','free') o",
+   [user,pack])).rows[0];
+  assert.equal(legacy.price_ref_id,refs.legacy);assert.equal(legacy.amount_total,990);
+ } finally {await admin.query('ROLLBACK');}
+ return ['package-pro-price-95','package-gold-price-90','package-no-other-tier-fallback','package-tier-immutable','legacy-package-three-mappings'];
 }
