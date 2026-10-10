@@ -100,64 +100,73 @@ export async function dispatchStripeCheckoutIntent(input: {
   closeBeforeDispatch?: () => Promise<void>;
 }) {
   const { stripe, intent, scope } = input;
-  checkoutIdempotencyKey(intent.id);
-  if (intent.scope.merchant !== scope.merchant || intent.scope.mode !== scope.mode
-    || intent.request.metadata?.orderId !== intent.id || intent.request.metadata?.userId !== intent.userId
-    || intent.request.client_reference_id !== intent.userId) throw new Error('PAY_COMMON_ATTEMPT_IDENTITY_MISMATCH');
-  if (intent.walletMethod && (scope.mode !== 'test'
-    || intent.request.payment_method_types?.length !== 1
-    || intent.request.payment_method_types[0] !== intent.walletMethod)) throw new Error('PAY_WAFFO_METHOD_DENIED');
-  const snapshot = freezePurchaseSnapshot(intent.snapshot);
-  const item = intent.request.line_items?.[0];
-  const discounted = majorToCents(snapshot.discount) !== 0;
-  if (intent.request.mode !== (snapshot.item_type === 'membership_plan' && !intent.walletMethod ? 'subscription' : 'payment')
-    || intent.request.metadata?.itemId !== snapshot.item_id || intent.request.metadata?.itemType !== snapshot.item_type
-    || intent.request.metadata?.billingCycle !== snapshot.billing_cycle || intent.request.metadata?.priceId !== intent.priceId
-    || intent.request.line_items?.length !== 1 || item?.quantity !== 1
-    || (discounted ? item.price_data?.unit_amount !== snapshotAmountDue(snapshot)
-      || item.price_data.currency !== snapshot.currency || Boolean(item.price)
-      : item.price !== intent.priceId || Boolean(item.price_data))) {
-    throw new Error('PAY_COMMON_CHECKOUT_REQUEST_INVALID');
-  }
-  let session: Stripe.Checkout.Session;
-  if (intent.sessionId) {
-    session = await stripe.checkout.sessions.retrieve(intent.sessionId);
-  } else {
-    // Stripe may prune idempotency keys after 24h. A persisted absolute expiry prevents an old
-    // attempt from becoming a fresh charge after that window, even after process restart.
-    const now = input.now ?? Math.floor(Date.now() / 1000);
-    const recovered = intent.recover || input.createIfMissing === false || (intent.request.expires_at ?? 0) <= now
-      ? await findOriginalCheckout(stripe, intent) : null;
-    if (recovered) session = recovered;
-    else {
-      if (Number.isSafeInteger(intent.request.expires_at)
-        && now >= intent.request.expires_at! + CHECKOUT_ABSENCE_GRACE_SECONDS && input.closeNeverCreated) {
-        await input.closeNeverCreated();
-        return null;
-      }
-      if (input.createIfMissing === false || !Number.isSafeInteger(intent.request.expires_at) || intent.request.expires_at! <= now) {
-        throw new Error('PAY_COMMON_CHECKOUT_RECONCILIATION_REQUIRED');
-      }
-      const price = await stripe.prices.retrieve(intent.priceId);
-      assertStripePurchasePrice({ price, priceId: intent.priceId, snapshot: intent.snapshot, scope, walletMethod: intent.walletMethod });
-      if (intent.walletMethod && input.closeBeforeDispatch
-        && intent.request.expires_at! - Math.floor(Date.now() / 1000) < 30 * 60 + 15) {
-        await input.closeBeforeDispatch();
-        return null;
-      }
-      session = await stripe.checkout.sessions.create(intent.request, { idempotencyKey: checkoutIdempotencyKey(intent.id),
-        ...(intent.walletMethod ? { timeout: 10000, maxNetworkRetries: 0 } : {}),
-      });
+  let mayAbort = input.createIfMissing === true && !intent.recover && !intent.sessionId && Boolean(input.closeBeforeDispatch);
+  try {
+    checkoutIdempotencyKey(intent.id);
+    if (intent.scope.merchant !== scope.merchant || intent.scope.mode !== scope.mode
+      || intent.request.metadata?.orderId !== intent.id || intent.request.metadata?.userId !== intent.userId
+      || intent.request.client_reference_id !== intent.userId) throw new Error('PAY_COMMON_ATTEMPT_IDENTITY_MISMATCH');
+    if (intent.walletMethod && (scope.mode !== 'test'
+      || intent.request.payment_method_types?.length !== 1
+      || intent.request.payment_method_types[0] !== intent.walletMethod)) throw new Error('PAY_WAFFO_METHOD_DENIED');
+    const snapshot = freezePurchaseSnapshot(intent.snapshot);
+    const item = intent.request.line_items?.[0];
+    const discounted = majorToCents(snapshot.discount) !== 0;
+    if (intent.request.mode !== (snapshot.item_type === 'membership_plan' && !intent.walletMethod ? 'subscription' : 'payment')
+      || intent.request.metadata?.itemId !== snapshot.item_id || intent.request.metadata?.itemType !== snapshot.item_type
+      || intent.request.metadata?.billingCycle !== snapshot.billing_cycle || intent.request.metadata?.priceId !== intent.priceId
+      || intent.request.line_items?.length !== 1 || item?.quantity !== 1
+      || (discounted ? item.price_data?.unit_amount !== snapshotAmountDue(snapshot)
+        || item.price_data.currency !== snapshot.currency || Boolean(item.price)
+        : item.price !== intent.priceId || Boolean(item.price_data))) {
+      throw new Error('PAY_COMMON_CHECKOUT_REQUEST_INVALID');
     }
+    let session: Stripe.Checkout.Session;
+    if (intent.sessionId) {
+      session = await stripe.checkout.sessions.retrieve(intent.sessionId);
+    } else {
+      // Stripe may prune idempotency keys after 24h. A persisted absolute expiry prevents an old
+      // attempt from becoming a fresh charge after that window, even after process restart.
+      const now = input.now ?? Math.floor(Date.now() / 1000);
+      const recovered = intent.recover || input.createIfMissing === false || (intent.request.expires_at ?? 0) <= now
+        ? await findOriginalCheckout(stripe, intent) : null;
+      if (recovered) { mayAbort = false; session = recovered; }
+      else {
+        if (Number.isSafeInteger(intent.request.expires_at)
+          && now >= intent.request.expires_at! + CHECKOUT_ABSENCE_GRACE_SECONDS && input.closeNeverCreated) {
+          mayAbort = false;
+          await input.closeNeverCreated();
+          return null;
+        }
+        if (input.createIfMissing === false || !Number.isSafeInteger(intent.request.expires_at) || intent.request.expires_at! <= now) {
+          throw new Error('PAY_COMMON_CHECKOUT_RECONCILIATION_REQUIRED');
+        }
+        const price = await stripe.prices.retrieve(intent.priceId);
+        assertStripePurchasePrice({ price, priceId: intent.priceId, snapshot: intent.snapshot, scope, walletMethod: intent.walletMethod });
+        if (intent.walletMethod && input.closeBeforeDispatch
+          && intent.request.expires_at! - Math.floor(Date.now() / 1000) < 30 * 60 + 15) {
+          mayAbort = false;
+          await input.closeBeforeDispatch();
+          return null;
+        }
+        mayAbort = false; // Any failure from this point may have created a provider Session.
+        session = await stripe.checkout.sessions.create(intent.request, { idempotencyKey: checkoutIdempotencyKey(intent.id),
+          ...(intent.walletMethod ? { timeout: 10000, maxNetworkRetries: 0 } : {}),
+        });
+      }
+    }
+    if (session.object !== 'checkout.session' || session.livemode !== (scope.mode === 'live')
+      || session.metadata?.orderId !== intent.id || session.metadata?.userId !== intent.userId
+      || session.client_reference_id !== intent.userId || (intent.sessionId && session.id !== intent.sessionId)) {
+      throw new Error('PAY_COMMON_ATTEMPT_IDENTITY_MISMATCH');
+    }
+    assertPurchaseReceipt({ snapshot, amount: session.amount_total, currency: session.currency,
+      livemode: session.livemode, scope });
+    if (session.mode !== intent.request.mode) throw new Error('PAY_COMMON_RECEIPT_MISMATCH');
+    await input.persistSession(session);
+    return session;
+  } catch (error) {
+    if (mayAbort && input.closeBeforeDispatch) await input.closeBeforeDispatch();
+    throw error;
   }
-  if (session.object !== 'checkout.session' || session.livemode !== (scope.mode === 'live')
-    || session.metadata?.orderId !== intent.id || session.metadata?.userId !== intent.userId
-    || session.client_reference_id !== intent.userId || (intent.sessionId && session.id !== intent.sessionId)) {
-    throw new Error('PAY_COMMON_ATTEMPT_IDENTITY_MISMATCH');
-  }
-  assertPurchaseReceipt({ snapshot, amount: session.amount_total, currency: session.currency,
-    livemode: session.livemode, scope });
-  if (session.mode !== intent.request.mode) throw new Error('PAY_COMMON_RECEIPT_MISMATCH');
-  await input.persistSession(session);
-  return session;
 }

@@ -45,6 +45,19 @@ describe('durable Stripe checkout dispatch', () => {
       }
     } finally { vi.useRealTimers(); }
   });
+  it.each(['read-failed', 'invalid-price'])('releases the fresh claim on pre-create price %s', async (failure) => {
+    const t = fixture(); const closeBeforeDispatch = vi.fn().mockResolvedValue(undefined);
+    if (failure === 'read-failed') t.prices.retrieve.mockRejectedValue(new Error('price read timeout'));
+    else t.prices.retrieve.mockResolvedValue({ id: 'wrong' });
+    await expect(dispatchStripeCheckoutIntent({ ...t.args, createIfMissing: true, closeBeforeDispatch })).rejects.toThrow();
+    expect(closeBeforeDispatch).toHaveBeenCalledTimes(1); expect(t.sessions.create).not.toHaveBeenCalled();
+  });
+  it('does not repeat an ambiguous abort transaction when persistence fails', async () => {
+    const t = fixture(); const closeBeforeDispatch = vi.fn().mockRejectedValue(new Error('database timeout'));
+    t.prices.retrieve.mockRejectedValue(new Error('price read failed'));
+    await expect(dispatchStripeCheckoutIntent({ ...t.args, createIfMissing: true, closeBeforeDispatch })).rejects.toThrow('database timeout');
+    expect(closeBeforeDispatch).toHaveBeenCalledTimes(1); expect(t.sessions.create).not.toHaveBeenCalled();
+  });
   it('never treats a Session-create timeout as a pre-dispatch abort', async () => {
     vi.useFakeTimers(); vi.setSystemTime(new Date(1000 * 1000));
     try {

@@ -793,8 +793,8 @@ BEGIN
   purchase_closed_at=coalesce(purchase_closed_at,clock_timestamp()),
   method_review_reason='verified_checkout_absent' WHERE id=o.id;
 END $$;
--- The fresh claim owner calls this only before Session-create was invoked, after the final
--- local expiry check. It is NOT an absence assertion for a timed-out provider request.
+-- The fresh claim owner calls this only before Session-create was invoked, after local
+-- preflight fails. It is NOT an absence assertion for a timed-out provider request.
 CREATE OR REPLACE FUNCTION public.pay_waffo_abort_before_dispatch(
  p_user uuid,p_order uuid,p_merchant text,p_expected timestamptz
 ) RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
@@ -811,7 +811,7 @@ BEGIN
  IF o.qualification_state='released' AND o.qualification_closed_ref='never_dispatched:'||o.id THEN RETURN; END IF;
  IF o.qualification_state IS DISTINCT FROM 'reserved' THEN RAISE EXCEPTION 'PAY_WAFFO_CLOSE_DENIED'; END IF;
  UPDATE payment_orders SET qualification_state='released',qualification_closed_ref='never_dispatched:'||o.id,
-  purchase_closed_at=clock_timestamp(),method_review_reason='checkout_dispatch_window_exhausted' WHERE id=o.id;
+  purchase_closed_at=clock_timestamp(),method_review_reason='checkout_not_dispatched' WHERE id=o.id;
 END $$;
 DO $$ DECLARE f record; BEGIN
  FOR f IN SELECT oid::regprocedure sig FROM pg_proc WHERE pronamespace='public'::regnamespace AND proname IN (

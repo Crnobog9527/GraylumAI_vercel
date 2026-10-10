@@ -17,7 +17,7 @@ function fixture(dispatch = true) {
   const input = { db, stripe: {} as Stripe, userId: id, appUrl: 'https://test.invalid', termsVersion: 'terms-test',
     purchase: { itemType: 'membership_plan' as const, itemId: id, billingCycle: 'monthly' as const,
       method: 'alipay' as const, offer: 'standard' as const, acceptedTerms: true as const, routingVersion: 1 } };
-  return { input, rpc };
+  return { input, rpc, chain };
 }
 describe('durable wallet checkout', () => {
   beforeEach(() => {
@@ -57,6 +57,15 @@ describe('durable wallet checkout', () => {
     expect((await createWalletCheckout(f.input)).state).toBe('recovery_required');
     expect(f.rpc).toHaveBeenCalledWith('pay_waffo_abort_before_dispatch', { p_user: id, p_order: id,
       p_merchant: 'fixture', p_expected: new Date(expires * 1000).toISOString() });
+  });
+  it.each([true, false])('releases a failed mapping read only for the fresh claim: %s', async (dispatch) => {
+    const f = fixture(dispatch); const expires = Math.floor(Date.now() / 1000) + 31 * 60;
+    f.rpc.mockResolvedValueOnce({ data: { dispatch, request: { providerRequest: { expires_at: expires } } }, error: null });
+    f.chain.maybeSingle.mockReset().mockResolvedValueOnce({ data: { external_id: 'price_1' }, error: null })
+      .mockRejectedValueOnce(new Error('mapping read unavailable'));
+    await expect(createWalletCheckout(f.input)).rejects.toThrow('CHECKOUT_UNAVAILABLE');
+    expect(mocks.dispatch).not.toHaveBeenCalled();
+    expect(f.rpc.mock.calls.filter(([name]) => name === 'pay_waffo_abort_before_dispatch')).toHaveLength(dispatch ? 1 : 0);
   });
   it('does not call the provider after claim failure or live scope', async () => {
     const f = fixture(); f.rpc.mockResolvedValue({ error: { message: 'unavailable' }, data: null });

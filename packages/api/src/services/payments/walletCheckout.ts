@@ -30,18 +30,23 @@ export async function createWalletCheckout(input: {
   if (claimed.error || typeof claimed.data?.dispatch !== 'boolean' || !claimed.data?.request?.providerRequest) {
     throw new Error('PAY_WAFFO_CHECKOUT_UNAVAILABLE');
   }
+  const closeBeforeDispatch = claimed.data.dispatch ? async () => {
+    const closed = await db.rpc('pay_waffo_abort_before_dispatch', { p_user: userId, p_order: order.id,
+      p_merchant: scope.merchant, p_expected: new Date(claimed.data.request.providerRequest.expires_at * 1000).toISOString() });
+    if (closed.error) throw new Error('PAY_WAFFO_CHECKOUT_UNAVAILABLE');
+  } : undefined;
   const mapped = await db.from('payment_provider_refs').select('external_id').eq('order_id', order.id).eq('object_type', 'checkout')
-    .eq('channel', 'stripe').eq('merchant_namespace', scope.merchant).eq('mode', 'test').maybeSingle();
-  if (mapped.error) throw new Error('PAY_WAFFO_CHECKOUT_UNAVAILABLE');
+    .eq('channel', 'stripe').eq('merchant_namespace', scope.merchant).eq('mode', 'test').maybeSingle().then(
+      result => result, () => ({ data: null, error: new Error('PAY_WAFFO_PERSISTENCE_UNAVAILABLE') }));
+  if (mapped.error) {
+    if (closeBeforeDispatch) await closeBeforeDispatch();
+    throw new Error('PAY_WAFFO_CHECKOUT_UNAVAILABLE');
+  }
   const session = await dispatchStripeCheckoutIntent({ stripe, scope, createIfMissing: claimed.data.dispatch,
     intent: { id: order.id, userId, scope, snapshot: order.purchase_snapshot, priceId: price.data.external_id,
       request: claimed.data.request.providerRequest, sessionId: mapped.data?.external_id ?? null,
       walletMethod: purchase.method, recover: !claimed.data.dispatch },
-    closeBeforeDispatch: claimed.data.dispatch ? async () => {
-      const closed = await db.rpc('pay_waffo_abort_before_dispatch', { p_user: userId, p_order: order.id,
-        p_merchant: scope.merchant, p_expected: new Date(claimed.data.request.providerRequest.expires_at * 1000).toISOString() });
-      if (closed.error) throw new Error('PAY_WAFFO_CHECKOUT_UNAVAILABLE');
-    } : undefined,
+    closeBeforeDispatch,
     closeNeverCreated: async () => {
       const closed = await db.rpc('pay_waffo_close_uncreated', { p_user: userId, p_order: order.id, p_merchant: scope.merchant });
       if (closed.error) throw new Error('PAY_WAFFO_CHECKOUT_UNAVAILABLE');
