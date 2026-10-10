@@ -12,9 +12,12 @@ export const DOCX_WORKER_PATH = '/library-sandbox/docx-worker.js';
 let workerSource: Promise<string> | null = null;
 
 function loadWorkerSource(): Promise<string> {
-  workerSource ??= fetch(DOCX_WORKER_PATH, { credentials: 'omit', cache: 'no-cache' })
+  // The site proxy guards this path like any page (signed-in users only), so the session cookie is
+  // sent; a redirect (e.g. to /login) or a non-script response is refused rather than run.
+  workerSource ??= fetch(DOCX_WORKER_PATH, { credentials: 'same-origin', cache: 'no-cache', redirect: 'error' })
     .then((response) => {
-      if (!response.ok) throw new SandboxError('SANDBOX_UNAVAILABLE');
+      const type = response.headers.get('content-type') ?? '';
+      if (!response.ok || !/javascript/i.test(type)) throw new SandboxError('SANDBOX_UNAVAILABLE');
       return response.text();
     })
     .catch((error: unknown) => {

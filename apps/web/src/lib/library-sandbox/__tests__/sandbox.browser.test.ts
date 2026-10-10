@@ -121,6 +121,22 @@ describe('must-test 8 in the browser: #549 malicious samples', () => {
   }, 60_000);
 });
 
+describe('worker bundle loading', () => {
+  it.each(['login-redirect', 'html'] as const)('refuses a %s answer instead of running it', async (mode) => {
+    harness.samples.set('good:tiny', buildDocx({ body: para('x') }));
+    harness.workerResponse = mode;
+    const fresh = await harness.open();
+    try {
+      const outcome = await fresh.evaluate(() => (window as unknown as { sandboxTest: { extractSample(n: string): Promise<unknown> } })
+        .sandboxTest.extractSample('good:tiny'));
+      expect(outcome).toMatchObject({ ok: false, code: 'SANDBOX_UNAVAILABLE' });
+    } finally {
+      harness.workerResponse = 'script';
+      await fresh.close();
+    }
+  }, 30_000);
+});
+
 describe('normal Word file through the production bundle', () => {
   it('extracts text, headings, table, header, footer, footnote and image bytes; follows no link', async () => {
     const body = [

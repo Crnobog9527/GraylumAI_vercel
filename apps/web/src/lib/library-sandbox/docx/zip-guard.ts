@@ -25,10 +25,14 @@ type CentralEntry = {
   localOffset: number;
 };
 
+/** A checked member: its stored (possibly compressed) bytes, exactly as in the archive. */
+export type ZipMember = { name: string; nameBytes: Uint8Array; method: number; crc: number; size: number; raw: Uint8Array };
+
 export type InspectedZip = {
   /** Inflated bytes of `.xml` and `.rels` members, keyed by exact member name. */
   xmlParts: Map<string, Uint8Array>;
   names: string[];
+  members: ZipMember[];
   totalInflatedBytes: number;
 };
 
@@ -201,7 +205,7 @@ export async function inflateRaw(data: Uint8Array, cap: number): Promise<Uint8Ar
   return chunks;
 }
 
-function concat(chunks: Uint8Array[], size: number): Uint8Array {
+export function concat(chunks: Uint8Array[], size: number): Uint8Array {
   const out = new Uint8Array(size);
   let offset = 0;
   for (const chunk of chunks) {
@@ -222,6 +226,7 @@ export async function inspectZip(bytes: Uint8Array): Promise<InspectedZip> {
   const { entries, centralOffset } = readCentralDirectory(bytes, view);
   const located = locateData(bytes, view, entries, centralOffset);
   const xmlParts = new Map<string, Uint8Array>();
+  const members: ZipMember[] = [];
   let totalInflatedBytes = 0;
   for (const { entry, start, end } of located) {
     const raw = bytes.subarray(start, end);
@@ -234,6 +239,7 @@ export async function inspectZip(bytes: Uint8Array): Promise<InspectedZip> {
     const head = concat(chunks, Math.min(actual, ZIP_MAGIC.length));
     if (ZIP_MAGIC.every((byte, index) => head[index] === byte)) fail('DOCX_NESTED_ARCHIVE');
     if (XML_PART.test(entry.name)) xmlParts.set(entry.name, concat(chunks, actual));
+    members.push({ name: entry.name, nameBytes: entry.nameBytes, method: entry.method, crc: entry.crc, size: entry.size, raw });
   }
-  return { xmlParts, names: entries.map((entry) => entry.name), totalInflatedBytes };
+  return { xmlParts, names: entries.map((entry) => entry.name), members, totalInflatedBytes };
 }

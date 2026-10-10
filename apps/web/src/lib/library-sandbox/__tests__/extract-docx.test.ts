@@ -2,6 +2,8 @@
 import { describe, expect, it } from 'vitest';
 import { SandboxError } from '../errors';
 import { extractDocx } from '../docx/extract-docx';
+import { inspectZip } from '../docx/zip-guard';
+import { rebuildZip } from '../docx/zip-rewrite';
 import {
   buildDocx, footnoteRef, hyperlink, para, picture, run, table, TINY_PNG, zipFixture,
 } from './docx-fixture';
@@ -78,6 +80,26 @@ describe('extractDocx: text, structure and images', () => {
       body: [item(1, '甲'), item(1, '乙'), para('间隔'), item(1, '丙'), item(2, '点')].join(''), numbering,
     }));
     expect(result.text).toBe('1. 甲\n2. 乙\n间隔\n1. 丙\n• 点');
+  });
+});
+
+describe('simple fields', () => {
+  it('keeps the displayed result of w:fldSimple and never evaluates the instruction', async () => {
+    const body = `<w:p>${run('日期：')}<w:fldSimple w:instr=" DATE \\@ &quot;yyyy>MM&quot; ">${run('2026-10-10')}</w:fldSimple>`
+      + `<w:fldSimple w:instr="PAGE"/>${run('。')}</w:p>${para('后文')}`;
+    const result = await extract(buildDocx({ body, images: [TINY_PNG], footnotes: ['注'] }));
+    expect(result.text).toBe('日期：2026-10-10。\n后文');
+  });
+
+  it('rebuilds a package the guard accepts with identical untouched members', async () => {
+    const bytes = new Uint8Array(buildDocx({ body: para('x'), images: [TINY_PNG] }));
+    const zip = await inspectZip(bytes);
+    const rebuilt = rebuildZip(zip.members, new Map([['word/document.xml', '<w:document/>']]));
+    const again = await inspectZip(rebuilt);
+    expect(again.names).toEqual(zip.names);
+    expect(new TextDecoder().decode(again.xmlParts.get('word/document.xml'))).toBe('<w:document/>');
+    const image = (z: typeof zip) => z.members.find((member) => member.name.endsWith('.png'))!.raw;
+    expect(Buffer.from(image(again))).toEqual(Buffer.from(image(zip)));
   });
 });
 

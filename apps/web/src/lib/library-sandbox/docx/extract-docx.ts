@@ -6,6 +6,7 @@ import { documentText, type DocxDocument, type DocxExtraction } from './document
 import { headerFooterText } from './header-footer';
 import { checkXmlPart } from './xml-guard';
 import { inspectZip } from './zip-guard';
+import { rebuildZip, unwrapSimpleFields } from './zip-rewrite';
 
 /**
  * `.docx` → plain text inside the sandbox Worker (LIB_DOCS_PLAN §4.1). Order matters: size limits,
@@ -53,6 +54,10 @@ export async function extractDocx(input: Uint8Array): Promise<DocxExtraction> {
   const parts = new Map<string, string>();
   for (const [name, bytes] of zip.xmlParts) parts.set(name, checkXmlPart(bytes));
   checkPackage(zip.names, parts);
-  const document = await readDocument(input);
+  const fields = new Map<string, string>();
+  for (const [name, xml] of parts) {
+    if (name.startsWith('word/') && xml.includes('<w:fldSimple')) fields.set(name, unwrapSimpleFields(xml));
+  }
+  const document = await readDocument(fields.size ? rebuildZip(zip.members, fields) : input);
   return documentText(document, headerFooterText(parts));
 }

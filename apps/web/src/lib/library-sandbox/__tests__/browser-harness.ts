@@ -20,6 +20,8 @@ export type Harness = {
   outsideRequests: string[];
   samples: Map<string, Buffer>;
   workerSource: string;
+  /** How server A answers the worker bundle request: normally, or like a signed-out visitor / an error page. */
+  workerResponse: 'script' | 'login-redirect' | 'html';
   open(): Promise<Page>;
   close(): Promise<void>;
 };
@@ -56,7 +58,11 @@ export async function startHarness(): Promise<Harness> {
     if (url === '/') return send('text/html; charset=utf-8', PAGE);
     if (url === '/favicon.ico') return response.writeHead(204).end();
     if (url === '/harness.js') return send('text/javascript', harnessCode);
-    if (url === '/library-sandbox/docx-worker.js') return send('text/javascript', docx.code);
+    if (url === '/library-sandbox/docx-worker.js') {
+      if (harness.workerResponse === 'login-redirect') return response.writeHead(307, { location: '/login' }).end();
+      if (harness.workerResponse === 'html') return send('text/html; charset=utf-8', PAGE);
+      return send('text/javascript', docx.code);
+    }
     const sample = url.startsWith('/sample/') ? samples.get(decodeURIComponent(url.slice(8))) : undefined;
     if (sample) return send('application/octet-stream', sample);
     unexpected.push(`${request.method} ${url}`);
@@ -78,8 +84,8 @@ export async function startHarness(): Promise<Harness> {
   const [origin, outside] = await Promise.all([listen(graylum), listen(outsideServer)]);
   const chrome = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
   const browser = await chromium.launch({ executablePath: existsSync(chrome) ? chrome : undefined, headless: true });
-  return {
-    browser, origin, outside, unexpected, outsideRequests, samples, workerSource: docx.code,
+  const harness: Harness = {
+    browser, origin, outside, unexpected, outsideRequests, samples, workerSource: docx.code, workerResponse: 'script',
     async open() {
       const page = await browser.newPage();
       await page.goto(`${origin}/`);
@@ -92,4 +98,5 @@ export async function startHarness(): Promise<Harness> {
       await Promise.all([graylum, outsideServer].map((server) => new Promise((resolve) => server.close(resolve))));
     },
   };
+  return harness;
 }

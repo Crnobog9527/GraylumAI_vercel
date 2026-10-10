@@ -16,7 +16,7 @@ export const W_NS = 'http://schemas.openxmlformats.org/wordprocessingml/2006/mai
 const R_NS = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships';
 const REL = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships';
 const PKG_REL = 'http://schemas.openxmlformats.org/package/2006/relationships';
-const XML_HEAD = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>';
+export const XML_HEAD = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>';
 
 export const esc = (text: string) => text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 export const run = (text: string) => `<w:r><w:t xml:space="preserve">${esc(text)}</w:t></w:r>`;
@@ -37,6 +37,10 @@ export type DocxParts = {
   extra?: ZipEntry[];
   contentTypesExtra?: string;
   numbering?: string;
+  /** Replaces the default styles part (heading 1–3 and Title). */
+  styles?: string;
+  /** Extra header part with the same text as the default one, referenced as the first-page header. */
+  firstHeader?: string;
 };
 
 export function docxParts(parts: DocxParts): ZipEntry[] {
@@ -47,6 +51,11 @@ export function docxParts(parts: DocxParts): ZipEntry[] {
     rels.push(`<Relationship Id="rH1" Type="${REL}/header" Target="header1.xml"/>`);
     sect.push('<w:headerReference w:type="default" r:id="rH1"/>');
     entries.push({ name: 'word/header1.xml', body: `${XML_HEAD}<w:hdr xmlns:w="${W_NS}">${para(parts.header)}</w:hdr>` });
+  }
+  if (parts.firstHeader !== undefined) {
+    rels.push(`<Relationship Id="rH2" Type="${REL}/header" Target="header2.xml"/>`);
+    sect.push('<w:headerReference w:type="first" r:id="rH2"/>');
+    entries.push({ name: 'word/header2.xml', body: `${XML_HEAD}<w:hdr xmlns:w="${W_NS}">${para(parts.firstHeader)}</w:hdr>` });
   }
   if (parts.footer !== undefined) {
     rels.push(`<Relationship Id="rF1" Type="${REL}/footer" Target="footer1.xml"/>`);
@@ -82,7 +91,7 @@ export function docxParts(parts: DocxParts): ZipEntry[] {
       + `<Relationship Id="rId1" Type="${REL}/officeDocument" Target="word/document.xml"/></Relationships>` },
     { name: 'word/document.xml', body: document, deflate: true },
     { name: 'word/_rels/document.xml.rels', body: `${XML_HEAD}<Relationships xmlns="${PKG_REL}">${rels.join('')}</Relationships>` },
-    { name: 'word/styles.xml', body: STYLES },
+    { name: 'word/styles.xml', body: parts.styles ?? STYLES },
     ...entries,
     ...(parts.extra ?? []),
   ];

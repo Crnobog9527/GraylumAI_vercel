@@ -1,0 +1,60 @@
+/* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+// LIB_DOCS_PLAN §4.5 Word quality test, run through the production worker bundle in real Chromium.
+// Thresholds (initial values from the plan): character accuracy ≥ 99%, heading order ≥ 95%, no timeouts.
+// Set WORD_QUALITY_REPORT=<file> to write the per-sample table as JSON.
+import { readFileSync, writeFileSync } from 'node:fs';
+import type { Page } from '@playwright/test';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { startHarness, type Harness } from './browser-harness';
+import { characterAccuracy, headingOrder } from './word-quality/metrics';
+
+type Gold = { id: string; producer: string; text: string; headings: { level: number; text: string }[] };
+type Extracted = { ok: boolean; code?: string; elapsedMs: number; maxGapMs: number;
+  value?: { text: string; headings: { level: number; text: string }[] } };
+
+const gold = JSON.parse(readFileSync(new URL('./word-quality/gold.json', import.meta.url), 'utf8')) as Gold[];
+let harness: Harness;
+let page: Page;
+
+beforeAll(async () => {
+  harness = await startHarness();
+  for (const sample of gold) {
+    harness.samples.set(`word:${sample.id}`, readFileSync(new URL(`./word-quality/fixtures/${sample.id}.docx`, import.meta.url)));
+  }
+  page = await harness.open();
+}, 120_000);
+afterAll(async () => { await harness?.close(); }, 30_000);
+
+describe('Word quality corpus (20 fixed CN/EN samples)', () => {
+  it('meets the §4.5 thresholds', async () => {
+    expect(gold).toHaveLength(20);
+    const rows = [];
+    for (const sample of gold) {
+      const outcome = await page.evaluate((name) =>
+        (window as unknown as { sandboxTest: { extractSample(n: string): Promise<unknown> } }).sandboxTest.extractSample(name),
+      `word:${sample.id}`) as Extracted;
+      const text = outcome.value?.text ?? '';
+      const chars = characterAccuracy(text, sample.text);
+      const headings = headingOrder(outcome.value?.headings ?? [], sample.headings);
+      rows.push({ id: sample.id, producer: sample.producer, ok: outcome.ok, code: outcome.code ?? null,
+        characters: chars.length, errors: chars.errors, accuracy: Number(chars.accuracy.toFixed(4)),
+        headings: `${headings.matched}/${headings.total}`, matchedHeadings: headings.matched, totalHeadings: headings.total,
+        elapsedMs: Math.round(outcome.elapsedMs), maxGapMs: Math.round(outcome.maxGapMs) });
+    }
+    const characters = rows.reduce((sum, row) => sum + row.characters, 0);
+    const errors = rows.reduce((sum, row) => sum + row.errors, 0);
+    const matched = rows.reduce((sum, row) => sum + row.matchedHeadings, 0);
+    const total = rows.reduce((sum, row) => sum + row.totalHeadings, 0);
+    const summary = { samples: rows.length, characters, errors, accuracy: 1 - errors / characters, headingOrder: matched / total,
+      headings: `${matched}/${total}`, timeouts: rows.filter((row) => row.code === 'SANDBOX_TIMEOUT').length,
+      failures: rows.filter((row) => !row.ok).length, slowestMs: Math.max(...rows.map((row) => row.elapsedMs)) };
+    console.table(rows.map((row) => ({ id: row.id, accuracy: row.accuracy, errors: row.errors, headings: row.headings,
+      elapsedMs: row.elapsedMs, maxGapMs: row.maxGapMs })));
+    console.log(JSON.stringify(summary));
+    if (process.env.WORD_QUALITY_REPORT) writeFileSync(process.env.WORD_QUALITY_REPORT, JSON.stringify({ summary, rows }, null, 1));
+    expect(summary.failures).toBe(0);
+    expect(summary.timeouts).toBe(0);
+    expect(summary.accuracy).toBeGreaterThanOrEqual(0.99);
+    expect(summary.headingOrder).toBeGreaterThanOrEqual(0.95);
+  }, 300_000);
+});
