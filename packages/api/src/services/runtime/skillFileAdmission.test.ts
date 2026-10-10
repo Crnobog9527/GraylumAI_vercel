@@ -64,3 +64,17 @@ it('rejects required input that leaves no room for the frozen continuation befor
   .prepare({...f.input,input:'x'.repeat(4000)})).rejects.toThrow('RUNTIME_REQUIRED_CONTEXT_EXCEEDS_CAPACITY');
  expect(f.rpc.mock.calls.some(([name])=>name==='runtime_admit')).toBe(false);
 });
+
+it('summary freezes only the file tool, refuses contradictory context and replays unchanged',async()=>{
+ const f=fixture();
+ const host={stepId:'first',opening:false,checklist:[],stepSummary:{kind:'step_summary' as const,missingRequiredFieldIds:['goal']}};
+ const service=runtimeAdmissionService(f.user,f.admin,{...f.policy,hostTurnContext:host});
+ const input={...f.input,input:'HOST_STEP_SUMMARY:v1'};
+ const admitted=await service.prepare(input),context=runtimeContext.parse(admitted.context);
+ expect(context.tools).toEqual(['read_skill_file']);expect(context.maxToolCalls).toBe(1);
+ expect(context.attachedOrganizer).toBeUndefined();
+ expect(context.instructions).not.toContain('then answer or show a question card');
+ expect(runtimeContext.safeParse({...context,tools:['ask_question','read_skill_file']}).success).toBe(false);
+ expect(runtimeContext.safeParse({...context,input:'ordinary speech'}).success).toBe(false);
+ expect(await service.prepare(input)).toEqual(admitted);
+});

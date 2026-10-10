@@ -1,5 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import {z} from 'zod';
+import {stepSummaryNoticeSchema} from '../../shared/opcStepSummary';
 import {stepConfirmationSchema} from '../../shared/opcStepConfirmation';
 import {GROUNDED_CARD_CONTRACT} from './groundedCard';
 import {HISTORY_MARKER_RESERVE_BYTES} from './promptCache';
@@ -13,6 +14,7 @@ export const hostTurnContextSchema = z.object({
   stepId: z.string().min(1).max(128),
   opening: z.boolean(),
   confirmation: stepConfirmationSchema.optional(),
+  stepSummary: stepSummaryNoticeSchema.optional(),
   updatedFieldIds: z.array(z.string().min(1).max(64)).max(100).optional(),
   checklist: z.array(z.object({
     id: z.string().min(1).max(128), title: z.string().max(256),
