@@ -2497,7 +2497,7 @@
   "fn:pay_common_record_checkout(uuid,text,text,jsonb)": "6dfc448a55ab",
   "fn:pay_common_record_failed_invoice(uuid,text,text,jsonb)": "dba99a7ed962",
   "fn:pay_common_ref_guard()": "632b117307dd",
-  "fn:pay_common_save_catalog(text,uuid,jsonb,jsonb,text,text,text)": "a03347861a0e",
+  "fn:pay_common_save_catalog(text,uuid,jsonb,jsonb,text,text,text)": "571306ec554c",
   "fn:pay_common_snapshot_valid(jsonb)": "9e5d4a71a09c",
   "fn:pay_common_sync_subscription(text,text,jsonb)": "edea711ac065",
   "fn:pay_waffo_atomic_refund_termination_clawback(uuid,uuid,text,text,text,text,text,boolean,text,timestamp with time zone)": "fd1e786132b8",

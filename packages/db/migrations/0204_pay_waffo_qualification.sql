@@ -684,7 +684,6 @@ BEGIN
   END IF;
 END $legacy$;
 
-COMMIT;
 
 -- Reuse the existing refund resolver and locked clawback algorithm, with an order-bound
 -- internal subscription identity. Keep legacy signatures for already-deployed callers.
@@ -770,3 +769,18 @@ REVOKE ALL ON FUNCTION public.pay_waffo_atomic_refund_termination_clawback_fresh
   FROM PUBLIC,anon,authenticated;
 GRANT EXECUTE ON FUNCTION public.pay_waffo_atomic_refund_termination_clawback_fresh(uuid,uuid,text,text,timestamptz,text,text,text,timestamptz)
   TO service_role;
+
+-- Existing admin catalog APIs edit standard prices only, never retire or adopt offer variants.
+DO $standard_catalog$
+DECLARE source text;
+BEGIN
+  source:=pg_get_functiondef('public.pay_common_save_catalog(text,uuid,jsonb,jsonb,text,text,text)'::regprocedure);
+  IF position('old_ref.offer_kind' IN source)=0 THEN
+    source:=replace(source,'IF FOUND AND (old_ref.mode<>p_payment_mode',
+      'IF FOUND AND (old_ref.offer_kind<>''standard'' OR old_ref.mode<>p_payment_mode');
+    source:=replace(source,'AND mode=p_payment_mode AND object_type=''price'' AND billing_cycle=cycle',
+      'AND mode=p_payment_mode AND object_type=''price'' AND offer_kind=''standard'' AND billing_cycle=cycle');
+    EXECUTE source;
+  END IF;
+END $standard_catalog$;
+COMMIT;

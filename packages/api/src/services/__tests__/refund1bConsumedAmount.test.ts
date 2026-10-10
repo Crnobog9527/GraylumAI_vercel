@@ -7,7 +7,7 @@
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import { describe, expect, it } from 'vitest';
-import { seedPaymentCommonFixture } from './paymentCommonFixture';
+import { seedPaymentCommonFixture, paymentFixtureScope } from './paymentCommonFixture';
 import {
   computePreDeductPeriodBinding,
   computeSettleAllocation,
@@ -1503,7 +1503,7 @@ describe('REFUND-1B refund operator preview', () => {
     }
   });
 
-  it('is read-only and reports current period, other credits, future releases, termination, and in-flight reservations', async () => {
+  it.each(['none', 'mode', 'merchant'])('previews the original source read-only with %s collisions', async collision => {
     const supabase = createRefund1bSupabase({
       payment_orders: [{
         id: 'order-preview',
@@ -1620,7 +1620,25 @@ describe('REFUND-1B refund operator preview', () => {
       ],
     });
 
+    if (collision !== 'none') {
+      const tables = supabase.tables;
+      const sub = tables.user_subscriptions[0];
+      tables.user_subscriptions.push({ ...sub, id: 'other-source', stripe_subscription_id: null,
+        payment_mode: collision === 'mode' ? 'live' : 'test',
+        merchant_namespace: collision === 'merchant' ? 'other-merchant' : paymentFixtureScope.merchant });
+      for (const ref of [...tables.payment_provider_refs]) {
+        tables.payment_provider_refs.push({ ...ref, id: `other-${ref.id}`,
+          subscription_id: ref.subscription_id ? 'other-source' : null,
+          order_id: ref.order_id ? `other-${ref.order_id}` : null,
+          mode: collision === 'mode' ? 'live' : 'test',
+          merchant_namespace: collision === 'merchant' ? 'other-merchant' : paymentFixtureScope.merchant });
+      }
+      tables.subscription_credit_grants.push({ ...tables.subscription_credit_grants[0],
+        id: 'other-grant', subscription_id: 'other-source', source_order_id: 'other-order-preview',
+        stripe_subscription_id: null, credits_granted: 9999 });
+    }
     const preview = await getSubscriptionRefundOperatorPreview(supabase, {
+      scope: paymentFixtureScope,
       subscriptionId: 'sub_preview',
       now: '2026-02-15T00:00:00.000Z',
     });
@@ -1672,6 +1690,7 @@ describe('REFUND-1B refund operator preview', () => {
       subscription_credit_grants: [],
     });
     await expect(getSubscriptionRefundOperatorPreview(zero, {
+      scope: paymentFixtureScope,
       subscriptionId: 'sub-preview-classification',
       now: '2027-02-15T00:00:00.000Z',
     })).resolves.toMatchObject({
@@ -1702,6 +1721,7 @@ describe('REFUND-1B refund operator preview', () => {
       ],
     });
     await expect(getSubscriptionRefundOperatorPreview(overlapping, {
+      scope: paymentFixtureScope,
       subscriptionId: 'sub-preview-classification',
       now: '2027-02-15T00:00:00.000Z',
     })).resolves.toMatchObject({
@@ -1722,6 +1742,7 @@ describe('REFUND-1B refund operator preview', () => {
       }],
     });
     await expect(getSubscriptionRefundOperatorPreview(noncanonical, {
+      scope: paymentFixtureScope,
       subscriptionId: 'sub-preview-classification',
       now: '2027-01-15T00:00:00.000Z',
     })).resolves.toMatchObject({
@@ -1742,6 +1763,7 @@ describe('REFUND-1B refund operator preview', () => {
       }],
     });
     await expect(getSubscriptionRefundOperatorPreview(unexpectedStatus, {
+      scope: paymentFixtureScope,
       subscriptionId: 'sub-preview-classification',
       now: '2027-01-15T00:00:00.000Z',
     })).resolves.toMatchObject({
@@ -1765,6 +1787,7 @@ describe('REFUND-1B refund operator preview', () => {
       }],
     });
     await expect(getSubscriptionRefundOperatorPreview(accountingReview, {
+      scope: paymentFixtureScope,
       subscriptionId: 'sub-preview-classification',
       now: '2027-01-15T00:00:00.000Z',
     })).resolves.toMatchObject({
@@ -1792,6 +1815,7 @@ describe('REFUND-1B refund operator preview', () => {
       }],
     });
     await expect(getSubscriptionRefundOperatorPreview(malformedMonthly, {
+      scope: paymentFixtureScope,
       subscriptionId: 'sub-preview-classification',
       now: '2027-02-15T00:00:00.000Z',
     })).resolves.toMatchObject({

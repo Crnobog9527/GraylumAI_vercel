@@ -2627,9 +2627,9 @@ function resolveCanonicalPreviewCurrentPeriod(input: {
 
 async function loadSubscriptionMirrorForPreview(
   supabase: SupabaseLikeClient,
-  subscriptionId: string,
+  subscriptionId: string, scope: StripeScope,
 ): Promise<SubscriptionRow | null> {
-  const ref = await findStripeReference(supabase, 'subscription', subscriptionId);
+  const ref = await findStripeReference(supabase, 'subscription', subscriptionId, scope);
   if (!ref?.subscription_id) return null;
   const result = await supabase
     .from('user_subscriptions')
@@ -2713,12 +2713,12 @@ async function loadInFlightReservationsForPreview(input: {
 
 export async function getSubscriptionRefundOperatorPreview(
   supabase: SupabaseLikeClient,
-  input: { subscriptionId: string; now?: string },
+  input: { subscriptionId: string; scope: StripeScope; now?: string },
 ): Promise<SubscriptionRefundOperatorPreview> {
   const nowMs = input.now ? Date.parse(input.now) : Date.now();
-  const subscription = await loadSubscriptionMirrorForPreview(supabase, input.subscriptionId);
+  const subscription = await loadSubscriptionMirrorForPreview(supabase, input.subscriptionId, input.scope);
   const grants = await loadAllSubscriptionCreditGrants(supabase, {
-    subscriptionId: input.subscriptionId,
+    subscriptionId: input.subscriptionId, scope: input.scope,
   });
 
   const grantedGrants = grants.filter((grant) => grant.status === 'granted');
