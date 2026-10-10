@@ -33,7 +33,7 @@ const sql=input=>docker(['exec','-i',name,'psql','-X','-qAt','-U','postgres','-d
 const fp=read('packages/db/tests/baseline/fingerprint.sql');
 const objectSql=fp.slice(0,fp.indexOf('-- FINAL'))+'SELECT jsonb_object_agg(k,d ORDER BY k) FROM grouped;';
 const snapshot=()=>JSON.parse(ok(sql(objectSql)));
-const migrationPath='packages/db/migrations/0200_content_erasure.sql';
+const migrationPath='packages/db/migrations/0201_content_erasure.sql';
 const migration=read(migrationPath);
 const report={development,build:null,checks:[],failed:null};
 let client;
@@ -54,8 +54,8 @@ try {
  assert.equal(report.build.failed,null);
  const finalCatalog=snapshot();
  ok(sql(migration));
- assert.deepEqual(snapshot(),finalCatalog,'repeat 0200 preserves the complete final catalog');
- report.checks.push('0200 reapplication with all later migrations preserves full catalog');
+ assert.deepEqual(snapshot(),finalCatalog,'repeat 0201 preserves the complete final catalog');
+ report.checks.push('0201 reapplication with all later migrations preserves full catalog');
  const require=createRequire(resolve(root,'packages/api/package.json'));
  const {Client}=require('pg');
  const address=ok(docker(['port',name,'5432/tcp']));assert.match(address,/^127\.0\.0\.1:\d+$/);
