@@ -8,6 +8,7 @@ import pg from 'pg';
 import { admissionCases } from './admission.mjs';
 import { retentionCases } from './retention.mjs';
 import { sourceCases } from './sources.mjs';
+import { scopeCases } from './scopes.mjs';
 import { POSTGRES_IMAGE } from '../v3/images.mjs';
 import { buildFromFiles, installPgCronStub } from '../baseline/build-from-files.mjs';
 
@@ -54,8 +55,12 @@ try {
   const service = await connect();
   await service.query('SET ROLE service_role');
   const receive = (mode, type='subscription.payment_succeeded', digest='a'.repeat(64)) => service.query(
-    'SELECT pay_waffo_receive_event($1,$2,$3,$4,$5) AS id', ['fixture',mode,type,'event-1',digest]);
+    'SELECT pay_waffo_receive_event($1,$2,$3,$4,$5,$6) AS id', ['fixture',mode,type,'event-1',digest,{paymentId:'payment-1',subscriptionId:'subscription-1'}]);
   const first = (await receive('test')).rows[0].id;
+  assert.deepEqual((await service.query('SELECT resource_refs FROM waffo_event_receipts WHERE id=$1',[first])).rows[0].resource_refs,
+    {paymentId:'payment-1',subscriptionId:'subscription-1'});
+  await assert.rejects(()=>service.query('SELECT pay_waffo_receive_event($1,$2,$3,$4,$5,$6)',
+    ['fixture','test','order.completed','invalid','a'.repeat(64),{email:'private@example.invalid'}]),/RESOURCE_INVALID/);
   assert.equal((await receive('test')).rows[0].id, first);
   assert.notEqual((await receive('live')).rows[0].id, first);
   assert.notEqual((await receive('test','refund.succeeded')).rows[0].id, first);
@@ -66,6 +71,7 @@ try {
     await assert.rejects(()=>service.query('SELECT * FROM waffo_event_receipts'),/permission denied/);
   }
   await service.query('SET ROLE service_role');
+  const scopedCases=await scopeCases({admin});
   const routes = {version:1,card:{enabled:false},wechat_pay:{enabled:false,annualVerified:false},
     alipay:{enabled:false,annualVerified:false}};
   await admin.query("INSERT INTO system_settings(key,value) VALUES('payment_method_routes',$1)",[routes]);
@@ -78,7 +84,7 @@ try {
   cases.push(...await sourceCases({admin}));
   console.log(JSON.stringify({result:'PASS',replay:report,
     cases:['event-idempotency','event-conflict','test-live-isolation','refund-event-not-payment-dedup',
-      'service-only-receipt','route-version-cas','route-delete-denied',...cases]}));
+      'service-only-receipt','durable-lookup-refs-no-contact-data','route-version-cas','route-delete-denied',...scopedCases,...cases]}));
 } finally {
   await Promise.all(clients.map(c=>c.query('ROLLBACK').catch(()=>{})));
   await Promise.all(clients.map(c=>c.end()));

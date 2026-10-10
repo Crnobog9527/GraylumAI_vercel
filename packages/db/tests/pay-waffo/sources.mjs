@@ -21,9 +21,9 @@ export async function sourceCases({admin}) {
     [sub,user,plan,cycle,channel,snap,start,termEnd]);
     await admin.query(`INSERT INTO payment_orders(id,user_id,item_type,item_id,billing_cycle,mode,status,payment_status,
       payment_channel,merchant_namespace,payment_mode,purchase_request_id,purchase_payload_hash,purchase_membership_level,
-      purchase_snapshot,amount_total,currency,fulfilled_at,subscription_id,qualification_state)
-      VALUES($1,$2,'membership_plan',$3,$4,$5,'completed','paid',$6,'fixture','test',$7,$8,'gold',$9,6900,'usd',now(),$10,'sold')`,
-    [order,user,plan,cycle,channel==='waffo'?'subscription':'payment',channel,randomUUID(),'a'.repeat(64),snap,sub]);
+      purchase_snapshot,amount_total,currency,fulfilled_at,subscription_id,qualification_state,entitlement_start,entitlement_end)
+      VALUES($1,$2,'membership_plan',$3,$4,$5,'completed','paid',$6,'fixture','test',$7,$8,'gold',$9,6900,'usd',now(),$10,'sold',$11,$12)`,
+    [order,user,plan,cycle,channel==='waffo'?'subscription':'payment',channel,randomUUID(),'a'.repeat(64),snap,sub,start,termEnd]);
     await admin.query(`INSERT INTO credit_transactions(id,user_id,amount,type,ledger_type,source_type,source_order_id,
       idempotency_key,balance_before,balance_after) VALUES($1,$2,100,'purchase','grant','payment_order',$3,$4,0,100)`,
     [tx,user,order,`grant:${order}`]);
@@ -32,6 +32,8 @@ export async function sourceCases({admin}) {
       source_order_id,grant_snapshot,accounting_state,accounting_review_reason,period_index,total_periods)
       VALUES($1,$2,$3,$4,$5,$6,$11,$12,100,$6,$7,$8,$9,$10,'trusted',NULL,$13,$14)`,
     [grant,user,plan,cycle,cycle==='yearly'?'annual_monthly_release':'monthly_invoice',`payment:${order}:01`,tx,sub,order,snap,start,monthEnd,cycle==='yearly'?1:null,cycle==='yearly'?12:1]);
+    await assert.rejects(()=>admin.query('UPDATE subscription_credit_grants SET credits_granted=101 WHERE id=$1',[grant]),
+      /INTERNAL_SOURCE_MISMATCH/);
     const draft=await rpc('bill2_create_draft',[user]);
     const payload={contractVersion:'bill2.v1',mode:'isolated',scope:{kind:'positioning_draft',draftId:draft},
       operation:'question',modelId:model,sourceHash:hash('source'),input:{text:'synthetic'},
@@ -59,9 +61,18 @@ export async function sourceCases({admin}) {
     await rpc('bill2_finalize',[user,released.id]);
     assert.equal(await consumed(),7);
     assert.equal((await admin.query('SELECT credits FROM profiles WHERE id=$1',[user])).rows[0].credits,93);
+    await admin.query("UPDATE profiles SET membership_level='gold' WHERE id=$1",[user]);
+    const pack=(await admin.query(`INSERT INTO credit_packages(name,price,credits_amount,bonus_credits,active)
+      VALUES('Fixture',990,990,0,'true') RETURNING id`)).rows[0].id;
+    await admin.query(`INSERT INTO payment_provider_refs(channel,merchant_namespace,mode,object_type,external_id,
+      credit_package_id,billing_cycle,is_current) VALUES('stripe','fixture','test','price',$1,$2,'one_time',true)`,
+      [`price_${pack}`,pack]);
+    const quoted=(await admin.query(`SELECT o.* FROM pay_waffo_create_purchase($1,'credit_package',$2,'one_time',
+      'alipay','standard','fixture','test',3,'terms-v1',NULL) o`,[user,pack])).rows[0];
+    assert.equal(quoted.amount_total,890);
     await admin.query("UPDATE subscription_credit_grants SET accounting_state='review_required',accounting_review_reason='refund review' WHERE id=$1",[grant]);
     await assert.rejects(()=>rpc('bill2_prepare',[user,randomUUID(),payload]));
   }
   return ['waffo-month-bill2-reserve-settle-release','waffo-year-bill2-reserve-settle-release',
-    'wallet-year-bill2-reserve-settle-release','source-refund-review-isolation'];
+    'wallet-year-bill2-reserve-settle-release','source-refund-review-isolation','internal-member-wallet-pack-eligibility','frozen-source-amount-guard'];
 }

@@ -1581,11 +1581,11 @@ export async function fulfillCreditPackageOrder(
     return;
   }
 
-  // The original RPC owns lookup, profile/order locks and fulfillment deduplication. A
-  // read-before-write shortcut here could hide incomplete transactional recovery.
+  const scope = await resolveStripeScope(getStripeClient());
+  if (session.livemode !== (scope.mode === 'live')) throw new Error('PAY_COMMON_RECEIPT_MISMATCH');
   const { data, error } = await supabase.rpc('atomic_fulfill_credit_package', {
-    p_checkout_session_id: session.id,
-    p_payment_status: session.payment_status ?? 'paid',
+    p_checkout_session_id: session.id, p_payment_status: session.payment_status ?? 'paid',
+    p_merchant_namespace: scope.merchant, p_payment_mode: scope.mode,
   });
 
   if (error) {

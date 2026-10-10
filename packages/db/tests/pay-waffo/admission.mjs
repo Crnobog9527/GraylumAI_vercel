@@ -32,6 +32,13 @@ export async function admissionCases({ admin, service, connect }) {
   await admin.query('UPDATE membership_plans SET monthly_price=3900 WHERE id=$1',[plan]);
   await assert.rejects(()=>buy(service,buyer),/CATALOG_NOT_READY/);
   await admin.query('UPDATE membership_plans SET monthly_price=6900 WHERE id=$1',[plan]);
+  for(const paid of [false,true]) {
+    const historical=await makeUser();
+    await admin.query(`INSERT INTO payment_orders(user_id,item_type,item_id,billing_cycle,mode,status,payment_status)
+      VALUES($1,'membership_plan',$2,'monthly','subscription','failed',$3)`,[historical,plan,paid?'paid':'unpaid']);
+    if(paid) await assert.rejects(()=>buy(service,historical,{offer:'standard',digest:'a'.repeat(64)}),/PURCHASE_PENDING/);
+    else assert.ok((await buy(service,historical,{offer:'standard',digest:'b'.repeat(64)})).rows[0].id);
+  }
   const a=await makeUser(),b=await makeUser();
   const one=await connect(),two=await connect();
   await one.query('SET ROLE service_role'); await two.query('SET ROLE service_role');
@@ -96,7 +103,7 @@ export async function admissionCases({ admin, service, connect }) {
   assert.equal(final.filter(r=>r.status==='fulfilled').length,1,final.map(r=>r.reason?.message).join(';'));
   assert.match(final.find(r=>r.status==='rejected').reason.message,/FOUNDER_SOLD_OUT/);
   assert.equal((await admin.query("SELECT count(*)::int n FROM payment_orders WHERE offer_kind='founder'")).rows[0].n,50);
-  return ['default-off','live-denied','stale-version','wallet-annual-gate','old-catalog-denied',
+  return ['legacy-terminal-unpaid-unblocks','legacy-terminal-paid-still-blocks','default-off','live-denied','stale-version','wallet-annual-gate','old-catalog-denied',
     'first-gold-identity-concurrency','wallet-days30','pending-method-switch-denied','protected-reservation',
     'reference-mode-and-merchant-isolation','verified-release','late-payment-review','founder-50-concurrency'];
 }

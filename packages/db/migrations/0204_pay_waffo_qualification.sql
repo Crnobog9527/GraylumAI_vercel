@@ -21,6 +21,49 @@ BEGIN
   END IF;
 END $patch$;
 
+-- Derived checkout IDs keep their scope too; unmapped historical rows retain their own uniqueness.
+ALTER TABLE public.payment_orders DROP CONSTRAINT IF EXISTS payment_orders_stripe_checkout_session_id_key;
+DROP INDEX IF EXISTS public.payment_orders_stripe_checkout_session_id_key;
+CREATE UNIQUE INDEX IF NOT EXISTS pay_waffo_scoped_checkout ON public.payment_orders
+  (payment_channel,merchant_namespace,payment_mode,stripe_checkout_session_id) WHERE payment_channel IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS pay_waffo_legacy_checkout ON public.payment_orders
+  (stripe_checkout_session_id) WHERE payment_channel IS NULL;
+DO $scope$
+DECLARE source text;
+BEGIN
+  source:=pg_get_functiondef('public.pay_common_record_checkout(uuid,text,text,jsonb)'::regprocedure);
+  source:=replace(source,E'\n    AND object_type=''checkout'' AND external_id=session_id;',
+    E'\n    AND mode=p_payment_mode AND object_type=''checkout'' AND external_id=session_id;');
+  EXECUTE source;
+  -- Preserve the existing atomic fulfillment body and locks, adding the trusted connection scope.
+  IF to_regprocedure('public.atomic_fulfill_credit_package(text,text,text,text)') IS NULL THEN
+    source:=pg_get_functiondef('public.atomic_fulfill_credit_package(text,text)'::regprocedure);
+    source:=regexp_replace(source,'p_payment_status text DEFAULT [^)]*',
+      'p_payment_status text, p_merchant_namespace text, p_payment_mode text');
+    source:=replace(source,'AND external_id=p_checkout_session_id)',
+      'AND merchant_namespace=p_merchant_namespace AND mode=p_payment_mode AND external_id=p_checkout_session_id)');
+    source:=replace(source,'AND r.external_id=p_checkout_session_id',
+      'AND r.merchant_namespace=p_merchant_namespace AND r.mode=p_payment_mode AND r.external_id=p_checkout_session_id');
+    EXECUTE source;
+  END IF;
+END $scope$;
+REVOKE ALL ON FUNCTION public.atomic_fulfill_credit_package(text,text,text,text) FROM PUBLIC,anon,authenticated;
+GRANT EXECUTE ON FUNCTION public.atomic_fulfill_credit_package(text,text,text,text) TO service_role;
+-- Old callers remain compatible only when the external identifier is unambiguous.
+CREATE OR REPLACE FUNCTION public.atomic_fulfill_credit_package(
+  p_checkout_session_id text,p_payment_status text DEFAULT 'paid'
+) RETURNS TABLE(order_id uuid,user_id uuid,granted_credits integer,fulfilled_at timestamptz,already_fulfilled boolean)
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
+DECLARE ref public.payment_provider_refs;
+BEGIN
+  IF (SELECT count(*) FROM payment_provider_refs WHERE channel='stripe' AND object_type='checkout'
+    AND external_id=p_checkout_session_id)<>1 THEN RAISE EXCEPTION 'PAY_COMMON_CHECKOUT_MAPPING_UNKNOWN'; END IF;
+  SELECT * INTO ref FROM payment_provider_refs WHERE channel='stripe' AND object_type='checkout'
+    AND external_id=p_checkout_session_id;
+  RETURN QUERY SELECT * FROM public.atomic_fulfill_credit_package(
+    p_checkout_session_id,p_payment_status,ref.merchant_namespace,ref.mode);
+END $$;
+
 CREATE OR REPLACE FUNCTION public.pay_waffo_routes_guard() RETURNS trigger
 LANGUAGE plpgsql SET search_path=public,pg_temp AS $$
 DECLARE v jsonb; m text; prior bigint;
@@ -136,6 +179,7 @@ CREATE TABLE IF NOT EXISTS public.waffo_event_receipts (
   event_type text NOT NULL CHECK(event_type ~ '^[a-z_]+[.][a-z_]+$'),
   event_id text NOT NULL CHECK(length(event_id) BETWEEN 1 AND 160),
   payload_digest text NOT NULL CHECK(payload_digest ~ '^[0-9a-f]{64}$'),
+  resource_refs jsonb NOT NULL,
   received_at timestamptz NOT NULL DEFAULT clock_timestamp(),
   status text NOT NULL DEFAULT 'received' CHECK(status IN ('received','applied','review')),
   UNIQUE(merchant_namespace,mode,event_type,event_id)
@@ -144,21 +188,27 @@ ALTER TABLE public.waffo_event_receipts ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON public.waffo_event_receipts FROM PUBLIC,anon,authenticated,service_role;
 GRANT SELECT ON public.waffo_event_receipts TO service_role;
 CREATE OR REPLACE FUNCTION public.pay_waffo_receive_event(
-  p_merchant text,p_mode text,p_type text,p_id text,p_digest text
+  p_merchant text,p_mode text,p_type text,p_id text,p_digest text,p_refs jsonb
 ) RETURNS uuid LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
 DECLARE receipt public.waffo_event_receipts;
 BEGIN
-  INSERT INTO waffo_event_receipts(merchant_namespace,mode,event_type,event_id,payload_digest)
-    VALUES(p_merchant,p_mode,p_type,p_id,p_digest) ON CONFLICT DO NOTHING;
+  IF jsonb_typeof(p_refs) IS DISTINCT FROM 'object' OR p_refs='{}'::jsonb
+    OR (p_refs-ARRAY['paymentId','subscriptionId','refundId','orderId','checkoutId'])<>'{}'::jsonb
+    OR EXISTS(SELECT 1 FROM jsonb_each(p_refs) e WHERE jsonb_typeof(e.value)<>'string'
+      OR (e.value#>>'{}') !~ '^[A-Za-z0-9_:-]{1,160}$') THEN
+    RAISE EXCEPTION 'PAY_WAFFO_EVENT_RESOURCE_INVALID' USING ERRCODE='23514';
+  END IF;
+  INSERT INTO waffo_event_receipts(merchant_namespace,mode,event_type,event_id,payload_digest,resource_refs)
+    VALUES(p_merchant,p_mode,p_type,p_id,p_digest,p_refs) ON CONFLICT DO NOTHING;
   SELECT * INTO STRICT receipt FROM waffo_event_receipts WHERE merchant_namespace=p_merchant
     AND mode=p_mode AND event_type=p_type AND event_id=p_id FOR UPDATE;
-  IF receipt.payload_digest IS DISTINCT FROM p_digest THEN
+  IF receipt.payload_digest IS DISTINCT FROM p_digest OR receipt.resource_refs IS DISTINCT FROM p_refs THEN
     RAISE EXCEPTION 'PAY_WAFFO_EVENT_CONFLICT' USING ERRCODE='23514';
   END IF;
   RETURN receipt.id;
 END $$;
-REVOKE ALL ON FUNCTION public.pay_waffo_receive_event(text,text,text,text,text) FROM PUBLIC,anon,authenticated;
-GRANT EXECUTE ON FUNCTION public.pay_waffo_receive_event(text,text,text,text,text) TO service_role;
+REVOKE ALL ON FUNCTION public.pay_waffo_receive_event(text,text,text,text,text,jsonb) FROM PUBLIC,anon,authenticated;
+GRANT EXECUTE ON FUNCTION public.pay_waffo_receive_event(text,text,text,text,text,jsonb) TO service_role;
 
 -- Shared identity locks serialize first-Gold purchases even across re-registered accounts.
 CREATE OR REPLACE FUNCTION public.pay_waffo_lock_identities(p_digests jsonb,p_mode text)
@@ -287,7 +337,9 @@ BEGIN
   -- Any unresolved method/provider blocks switching; returning a new identity would risk a second charge.
   SELECT * INTO intent FROM payment_orders WHERE user_id=p_user AND fulfilled_at IS NULL
     AND purchase_closed_at IS NULL AND (purchase_action='checkout' OR payment_channel IS NULL)
-    AND status NOT IN ('refunded','partially_refunded') ORDER BY created_at LIMIT 1 FOR UPDATE;
+    AND status NOT IN ('refunded','partially_refunded')
+    AND (payment_channel IS NOT NULL OR status NOT IN ('failed','canceled','cancelled','expired')
+      OR payment_status='paid') ORDER BY created_at LIMIT 1 FOR UPDATE;
   IF FOUND THEN
     IF intent.item_id=p_item AND intent.item_type=p_item_type AND intent.billing_cycle=p_cycle
       AND intent.payment_method=p_method AND intent.offer_kind=p_offer
@@ -381,13 +433,30 @@ BEGIN
     IF p_offer<>'standard' OR actor.membership_level NOT IN ('pro','gold') THEN
       RAISE EXCEPTION 'PAY_WAFFO_MEMBERSHIP_REQUIRED' USING ERRCODE='23514';
     END IF;
-    PERFORM pay_common_assert_purchase_facts(p_user,p_item_type,actor.membership_level);
+    IF EXISTS(SELECT 1 FROM user_subscriptions WHERE user_id=p_user AND stripe_subscription_id IS NULL) THEN
+      IF NOT EXISTS(SELECT 1 FROM user_subscriptions sub JOIN membership_plans plan ON plan.id=sub.membership_plan_id
+        JOIN payment_orders paid ON paid.subscription_id=sub.id AND paid.user_id=sub.user_id
+        WHERE sub.user_id=p_user AND sub.payment_mode=p_mode AND sub.stripe_subscription_id IS NULL
+          AND sub.current_period_start<=now() AND sub.current_period_end>now()
+          AND sub.status IN ('active','canceled','cancelled') AND plan.level=actor.membership_level
+          AND paid.payment_mode=p_mode AND paid.payment_channel=sub.payment_channel
+          AND paid.merchant_namespace=sub.merchant_namespace AND paid.payment_status='paid'
+          AND paid.status='completed' AND paid.fulfilled_at IS NOT NULL AND paid.qualification_state='sold'
+          AND paid.entitlement_start<=now() AND paid.entitlement_end>now()) THEN
+        RAISE EXCEPTION 'PAY_WAFFO_MEMBERSHIP_REQUIRED' USING ERRCODE='23514';
+      END IF;
+    ELSE
+      PERFORM pay_common_assert_purchase_facts(p_user,p_item_type,actor.membership_level);
+    END IF;
     SELECT to_jsonb(p) INTO product FROM credit_packages p WHERE id=p_item AND active='true' FOR SHARE;
     IF product IS NULL THEN RAISE EXCEPTION 'PAY_WAFFO_PRODUCT_UNAVAILABLE' USING ERRCODE='23514'; END IF;
     discount:=CASE actor.membership_level WHEN 'pro' THEN 95 ELSE 90 END;
     cents:=floor((product->>'price')::numeric*discount/100/10)::integer*10;
     credits:=(product->>'credits_amount')::integer;
     bonus:=coalesce((product->>'bonus_credits')::integer,0);
+    IF ((product->>'price')::integer,credits,bonus) NOT IN ((990,990,0),(2990,2990,0),(9990,9990,1000)) THEN
+      RAISE EXCEPTION 'PAY_WAFFO_CATALOG_NOT_READY' USING ERRCODE='23514';
+    END IF;
   END IF;
   FOR ref IN SELECT * FROM payment_provider_refs r WHERE r.channel=selected_channel AND r.merchant_namespace=p_merchant
     AND r.mode=p_mode AND r.object_type='price' AND r.billing_cycle=p_cycle AND r.offer_kind=p_offer AND r.is_current
@@ -489,7 +558,8 @@ BEGIN
   IF NEW.stripe_subscription_id IS NOT NULL THEN RETURN NEW; END IF;
   IF TG_OP='UPDATE' AND NEW.subscription_id IS NOT DISTINCT FROM OLD.subscription_id
     AND NEW.source_order_id IS NOT DISTINCT FROM OLD.source_order_id
-    AND NEW.grant_snapshot IS NOT DISTINCT FROM OLD.grant_snapshot THEN RETURN NEW; END IF;
+    AND NEW.grant_snapshot IS NOT DISTINCT FROM OLD.grant_snapshot
+    AND NEW.credits_granted IS NOT DISTINCT FROM OLD.credits_granted THEN RETURN NEW; END IF;
   IF EXISTS(SELECT 1 FROM account_erasure_requests WHERE profile_id=NEW.user_id) THEN
     RAISE EXCEPTION 'PAY_WAFFO_ACCOUNT_CLOSED' USING ERRCODE='42501';
   END IF;
