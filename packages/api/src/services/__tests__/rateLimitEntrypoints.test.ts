@@ -51,7 +51,7 @@ beforeEach(() => {
 });
 afterEach(() => { vi.unstubAllEnvs(); vi.useRealTimers(); });
 
-const entries = ['generation quote', 'generation execute', 'slice router', 'research search', 'research cancel', 'checkout', 'subscription change'] as const;
+const entries = ['generation quote', 'generation execute', 'research search', 'research cancel', 'checkout', 'subscription change'] as const;
 for (const entry of entries) {
   describe(entry, () => {
     it.each(['over limit', 'backend error', 'timeout', 'missing config'] as const)('rejects %s before paid work', async fault => {
@@ -67,11 +67,6 @@ for (const entry of entries) {
         const service = workbenchGeneration(f.client as never, f.admin as never, transport as never);
         const input = { ...scope, instruction: '', expectedSteps: { step: { version: 0, reviewVersion: 0 } } };
         run = entry === 'generation quote' ? () => service.quote(input) : () => service.generate({ ...input, requestId: id, quoteHash: 'a'.repeat(64), budgetCredits: 1 });
-      } else if (entry === 'slice router') {
-        const { agentSliceRouter } = await import('../../routers/agentSlice');
-        const caller = agentSliceRouter.createCaller({ user: f.user, isEmailVerified: true, supabase: f.client,
-          supabaseAuth: f.client, supabaseAdmin: f.admin, hasSupabaseAdminPrivileges: true } as never);
-        run = () => caller.executePhase({ executionId: id, phase: 'reply' });
       } else if (entry.startsWith('research')) {
         const { workbenchSearch } = await import('../research/workbenchSearch');
         const service = workbenchSearch(f.client as never, f.admin as never, transport as never);

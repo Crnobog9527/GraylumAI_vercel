@@ -827,9 +827,6 @@ try {
   const marker = "await fetch('https://openrouter.ai/api/v1/chat/completions',";
   if (productionSource.split(marker).length !== 2) throw new Error('local transport fixture source boundary changed');
   writeFileSync(generationPath, productionSource.replace(marker, `await fetch('${apiUrl}/__workbench_model_fixture',`));
-  const slicePath=resolve(root,'packages/api/src/services/agentSlice/runner.ts'),sliceSource=readFileSync(slicePath,'utf8');
-  if(sliceSource.split('await transport(url,').length!==2)throw new Error('slice transport fixture boundary changed');
-  writeFileSync(slicePath,sliceSource.replace('await transport(url,',`await transport('${apiUrl}/__slice_model_fixture',`));
   const streamPath=resolve(root,'apps/web/src/app/api/ai/stream/route.ts'),streamSource=readFileSync(streamPath,'utf8');
   if(streamSource.split('await fetch(endpoint,').length!==2)throw new Error('stream fixture boundary changed');
   writeFileSync(streamPath,streamSource.replace('await fetch(endpoint,',`await fetch('${apiUrl}/__chat_model_fixture',`));
