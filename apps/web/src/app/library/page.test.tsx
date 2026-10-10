@@ -45,3 +45,9 @@ it('retains successful populated counts and existing item rendering',()=>{
 it('offers the 我的文档 tab next to the topics view, topics first',()=>{
  const {html}=render();expect(html).toContain('aria-selected="true">选题与稿件</button>');expect(html).toContain('aria-selected="false">我的文档</button>');
 });
+it('lets the kept-mounted documents pane fill and scroll, and hides it with [hidden]',async()=>{
+ const {readFileSync}=await import('node:fs');
+ const css=readFileSync(new URL('./library.module.css',import.meta.url),'utf8');
+ expect(css).toMatch(/\.documentsPane\{display:flex;flex-direction:column;flex:1;min-height:0\}/);
+ expect(css).toContain('.documentsPane[hidden]{display:none}');
+});

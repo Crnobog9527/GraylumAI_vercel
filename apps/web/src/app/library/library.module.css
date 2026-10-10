@@ -39,3 +39,5 @@
 .tabs button[aria-selected=true]{border-bottom-color:#242424;color:#242424;font-weight:550}
 .tabs+.intro{min-height:0;padding:14px 0}
 @media(max-width:780px){.tabs{margin:0 14px}}
+/* Fills the remaining height so 我的文档 scrolls inside it; [hidden] must win over display:flex. */
+.documentsPane{display:flex;flex-direction:column;flex:1;min-height:0}.documentsPane[hidden]{display:none}
