@@ -5,6 +5,7 @@ import type { z } from 'zod';
 import { checkRateLimitAsync } from '../../middleware/securityChecks';
 import { beginInput, formatFor, formats, textSegments, verifyHeader, type Format } from './content';
 import { cleanupLibrary } from './cleanup';
+import { pdfUpload } from './pdfUpload';
 import { wordUpload } from './wordUpload';
 import { libraryRpc } from './rpc';
 import { libraryStorage, type LibraryStorage } from './storage';
@@ -34,6 +35,7 @@ export function libraryService(client: SupabaseClient, actorId: string, storage:
   };
   return {
     ...wordUpload(client, actorId, storage),
+    ...pdfUpload(client, actorId, storage),
     async begin(raw: z.infer<typeof beginInput>) {
       const input = beginInput.parse(raw);
       const format = formatFor(input.filename, input.contentType);

@@ -50,13 +50,14 @@ export function libraryStorage(client: SupabaseClient) {
       url.searchParams.set('download', filename.trim() ? filename : 'download');
       return url.toString();
     },
-    async inspect(path: string, full: boolean) {
+    async inspect(path: string, full: boolean, allowEmpty = false) {
       check(path);
+      if (allowEmpty && (!full || !path.endsWith('/text'))) throw failure();
       const info = await bucket.info(path);
       if (info.error || !info.data) throw failure();
       const size = info.data.size;
       const contentType = info.data.contentType;
-      if (typeof size !== 'number' || !Number.isSafeInteger(size) || size < 1 || size > MAX_BYTES) throw new Error('LIBRARY_SIZE');
+      if (typeof size !== 'number' || !Number.isSafeInteger(size) || size < (allowEmpty ? 0 : 1) || size > MAX_BYTES) throw new Error('LIBRARY_SIZE');
       const signed = await bucket.createSignedUrl(path, 60);
       if (signed.error || !signed.data) throw failure();
       // Only a service-created URL is fetched. No user URL, redirects, parser, or image decoder.

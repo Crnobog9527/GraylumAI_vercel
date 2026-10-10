@@ -102,3 +102,14 @@ it('encodes the download name exactly once through the real Storage SDK',async()
  expect(String(fetch.mock.calls[0][0])).toBe('https://storage.test/storage/v1/object/sign/library-documents/'+path);
  expect(JSON.parse(String(fetch.mock.calls[0][1]?.body))).toEqual({expiresIn:60});
 });
+
+it('allows an empty PDF text object only on the full text path, never an original', async()=>{
+ const {store,bucket}=setup();
+ bucket.info.mockResolvedValue({data:{size:0,contentType:'text/plain'}});
+ bucket.createSignedUrl.mockResolvedValue({data:{signedUrl:'https://storage.test/private'}});
+ vi.stubGlobal('fetch',vi.fn(async()=>new Response(new Uint8Array(0))));
+ const textPath=path.replace('/original','/text');
+ expect((await store.inspect(textPath,true,true)).bytes.length).toBe(0);
+ await expect(store.inspect(textPath,true)).rejects.toThrow('LIBRARY_SIZE');
+ await expect(store.inspect(path,true,true)).rejects.toThrow('LIBRARY_STORAGE_UNAVAILABLE');
+});
