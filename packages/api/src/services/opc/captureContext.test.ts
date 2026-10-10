@@ -87,3 +87,23 @@ it('counts descriptions toward the existing organizer input limit without trunca
  const host=captureHostContext(steps,described,'first',false);
  expect(()=>captureOrganizerInput(host,described,{},'x'.repeat(16000))).toThrow('OPC_CAPTURE_INPUT_LIMIT');
 });
+
+it('gives the organizer only live suggestion text for frozen pending fields; mentor context stays text-free',async()=>{
+ const {captureFrozenInformation}=await import('./captureContext');
+ const live={first:{...information.first!,meta:{goal:{suggestion:{value:'每周六小时，不露脸',nature:'fact',basis:'user_statement'}},
+  audience:{suggestion:{value:'Stale live text',nature:'fact',basis:'user_statement'}}}},later:information.later!};
+ const frozen={first:{information:{goal:{value:'每周两小时',status:'confirmed'}},
+  fieldMeta:{goal:{protected:true,hasPendingSuggestion:true},audience:{protected:true,hasPendingSuggestion:false}},notes:[]},
+  later:{information:{},fieldMeta:{},notes:[]}};
+ const selected=captureFrozenInformation(live,frozen);
+ const host=captureHostContext(steps,selected,'first',false);
+ expect(JSON.stringify(host)).not.toContain('每周六小时');
+ expect(JSON.stringify(host)).not.toContain('pendingSuggestion');
+ const input=JSON.parse(captureOrganizerInput(host,selected,{},'改成只能周日'));
+ expect(input.checklist[0].fields[0]).toMatchObject({id:'goal',value:'每周两小时',
+  pendingSuggestion:{value:'每周六小时，不露脸',nature:'fact',basis:'user_statement'}});
+ expect(input.checklist[0].fields[1]).not.toHaveProperty('pendingSuggestion');
+ expect(JSON.stringify(input)).not.toContain('Stale live text');
+ const missing=captureFrozenInformation(information,frozen);
+ expect(JSON.parse(captureOrganizerInput(host,missing,{},'x')).checklist[0].fields[0]).not.toHaveProperty('pendingSuggestion');
+});
