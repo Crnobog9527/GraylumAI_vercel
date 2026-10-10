@@ -11,3 +11,4 @@
 @media(max-width:900px){.transcript{padding-block:24px 30px}}
 @media(max-width:650px){.workHead{padding:0 52px 0 14px;gap:10px}.workMeta span{display:none}.workMeta{gap:9px}.conversation{--chat-gutter:12px}.transcript{padding-block:22px 28px}.userMessage{max-width:90%;margin-bottom:37px;font-size:14px}.reply{font-size:15px}.proposalHead strong{font-size:17px}}
 .videoResults{border-top:1px solid #e9e9e9;padding-top:18px;font-size:12px}.videoResults h2{font-size:13px;font-weight:600;margin-bottom:10px}.videoResults details{border:1px solid #e9e9e9;border-radius:8px;margin:8px 0;padding:10px}.videoResults summary{cursor:pointer}.videoResults p{white-space:pre-wrap;line-height:1.7;margin-top:8px}.videoResults a{display:inline-block;margin-top:10px;color:#666;text-decoration:underline}
+.agentMessage .eraseAnswer{display:block;margin-top:12px;padding:0;background:none;color:#9a9a9a;font-size:12px}.agentMessage .eraseAnswer:hover{color:#dc2626}

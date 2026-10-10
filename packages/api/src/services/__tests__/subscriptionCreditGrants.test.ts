@@ -753,7 +753,7 @@ function createMockSupabase(
     },
     async rpc(name: string, payload: Row) {
       await hooks.beforeRpc?.({ name, payload, tables });
-      if (name === 'atomic_refund_termination_clawback_fresh') {
+      if (name === 'pay_waffo_atomic_refund_termination_clawback_fresh') {
         return applyFreshRefundTerminationClawbackContract(tables, payload);
       }
 
@@ -1096,6 +1096,29 @@ describe('annual release isolates malformed individual contracts', () => {
     return supabase;
   }
 
+  it.each(['mode', 'merchant'])('releases exactly once when external IDs collide across %s', async collision => {
+    const supabase = annualFixture();
+    const refs = supabase.tables.payment_provider_refs;
+    for (const original of [...refs].filter(row => ['subscription', 'invoice'].includes(row.object_type))) {
+      refs.push({ ...original, id: `shadow-${original.id}`, subscription_id: `shadow-${original.subscription_id}`,
+        order_id: original.order_id ? `shadow-${original.order_id}` : null,
+        mode: collision === 'mode' ? 'live' : original.mode,
+        merchant_namespace: collision === 'merchant' ? 'other-merchant' : original.merchant_namespace });
+    }
+    // Another scope's refund must neither block this scope nor contaminate its credit source.
+    supabase.tables.payment_orders.push({ id: 'shadow-refund', subscription_id: 'shadow-mirror_healthy',
+      status: 'refunded', payment_status: 'refunded' });
+    const before = supabase.tables.credit_transactions.length;
+    const result = await releaseDueAnnualSubscriptionCredits(supabase, { now: new Date('2026-02-15T00:00:00Z') });
+    expect(result).toMatchObject({ anomalies: [], scannedSubscriptions: 2, releasedGrantCount: 2, releasedCredits: 20 });
+    expect(supabase.tables.profiles.map(row => row.credits)).toEqual([20, 20]);
+    expect(supabase.tables.subscription_credit_grants.every(row => !row.subscription_id?.startsWith('shadow-'))).toBe(true);
+    expect(supabase.tables.credit_transactions).toHaveLength(before + 2);
+    const replay = await releaseDueAnnualSubscriptionCredits(supabase, { now: new Date('2026-02-15T00:00:00Z') });
+    expect(replay.releasedGrantCount).toBe(0);
+    expect(supabase.tables.credit_transactions).toHaveLength(before + 2);
+  });
+
   it.each(['zero', 'multiple', 'snapshot-null', 'snapshot-schema', 'snapshot-product', 'mapping-zero', 'mapping-multiple'])(
     'skips %s anomaly first, alerts, and releases the later healthy subscription exactly once', async anomaly => {
       const alarm = vi.spyOn(logger, 'error').mockImplementation(() => {});
@@ -1413,20 +1436,35 @@ describe('subscription credit grants', () => {
       .toMatchObject({ status: 'refunded', payment_status: 'refunded' });
   });
 
-  it('CASE B: lets a committed subscription invoice grant be observed and reversed by a later refund', async () => {
+  it.each(['none', 'mode', 'merchant'])('CASE B: reconciles and replays refund despite %s identity collisions', async collision => {
     const supabase = createInvoiceAdmissionRaceHarness({});
     const fulfillment = await fulfillMembershipInvoiceWithSubscriptionCreditGrants(supabase, {
       invoiceId: 'in_v6_case_b_grant_first', subscriptionId: 'sub_v6_race', stripeCustomerId: 'cus_v6_race', amountTotal: 9900, currency: 'usd',
       paymentStatus: 'paid', periodStart: '2026-08-01T00:00:00.000Z',
       periodEnd: '2026-09-01T00:00:00.000Z', now: '2026-08-01T00:00:01.000Z',
     });
-    const refund = await reconcileSubscriptionRefundCreditGrants(supabase, {
+    if (collision !== 'none') {
+      const refs = supabase.tables.payment_provider_refs;
+      for (const ref of [...refs].filter(row => ['subscription', 'invoice'].includes(row.object_type))) {
+        refs.push({ ...ref, id: `shadow-${ref.id}`, subscription_id: `shadow-${ref.subscription_id}`,
+          order_id: ref.order_id ? `shadow-${ref.order_id}` : null,
+          mode: collision === 'mode' ? 'live' : ref.mode,
+          merchant_namespace: collision === 'merchant' ? 'other-merchant' : ref.merchant_namespace });
+      }
+    }
+    const refundInput = {
       orderId: fulfillment.invoiceOrderId!, subscriptionId: 'sub_v6_race', stripeCustomerId: 'cus_v6_race',
       invoiceId: 'in_v6_case_b_grant_first', refundId: 're_v6_case_b', eventId: 'evt_v6_case_b',
       refundEventType: 'charge.refunded', refundStatus: 'succeeded', refundAmount: 9900,
       refundCurrency: 'usd', isFullRefund: true, refundCreatedAt: '2026-08-02T00:00:00.000Z',
       now: '2026-08-02T00:00:01.000Z',
-    });
+    };
+    const refund = await reconcileSubscriptionRefundCreditGrants(supabase, refundInput);
+    const afterRefund = structuredClone(supabase.tables);
+    const replay = await reconcileSubscriptionRefundCreditGrants(supabase, refundInput);
+    expect(replay.alreadyReconciled).toBe(true);
+    expect(supabase.tables.credit_transactions).toEqual(afterRefund.credit_transactions);
+    expect(supabase.tables.user_subscriptions[0].credit_release_terminated_at).toBeTruthy();
 
     expect(fulfillment.grantedCredits).toBe(100);
     expect(refund).toMatchObject({ reviewRequired: false, reversedGrantCount: 1, clawbackAmount: 100 });

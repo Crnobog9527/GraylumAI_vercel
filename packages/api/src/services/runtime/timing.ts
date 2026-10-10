@@ -42,11 +42,16 @@ export function createRequestTiming(now:()=>number=()=>performance.now()){
  const origin=now();
  const phases=new Map<TimingPhase,PhaseTally>(),labels=new Map<string,Tally>();
  const marks:Partial<Record<TimingMark,number>>={},executions=new Set<string>();
+ let skillFileRead=false;
+ const afterSkillFile:Partial<Record<TimingMark,number>>={};
  let procedures:string[]=[],phase:TimingPhase='prelude',since=origin,holds=1,emitted=false;
  const slot=(p:TimingPhase)=>{let s=phases.get(p);if(!s){s={rt:0,rtMs:0,ms:0};phases.set(p,s);}return s;};
  const safe=(fn:()=>void)=>{try{fn();}catch{/* measurement only */}};
  const switchTo=(next:TimingPhase)=>{const t=now();slot(phase).ms+=t-since;since=t;phase=next;};
- const mark=(name:TimingMark)=>safe(()=>{if(marks[name]===undefined)marks[name]=now()-origin;});
+ const mark=(name:TimingMark)=>safe(()=>{
+  if(marks[name]===undefined)marks[name]=now()-origin;
+  if(skillFileRead&&afterSkillFile[name]===undefined)afterSkillFile[name]=now()-origin;
+ });
  const ms=(value:number)=>Math.max(0,Math.round(value));
  function summary(){
   const end=now(),current=slot(phase);
@@ -56,6 +61,8 @@ export function createRequestTiming(now:()=>number=()=>performance.now()){
   let rt=0,rtMs=0;for(const s of phases.values()){rt+=s.rt;rtMs+=s.rtMs;}
   return {
    procedures:[...procedures],executionIds:[...executions],totalMs:ms(end-origin),rt,rtMs:ms(rtMs),phases:phaseRows,
+   ...(skillFileRead?{skillFileRead:true,afterSkillFileMarks:Object.fromEntries(
+    TIMING_MARKS.filter(m=>afterSkillFile[m]!==undefined).map(m=>[m+'Ms',ms(afterSkillFile[m]!)]))}:{}),
    labels:Object.fromEntries([...labels].map(([label,s])=>[label,{rt:s.rt,rtMs:ms(s.rtMs)}])),
    marks:Object.fromEntries(TIMING_MARKS.filter(m=>marks[m]!==undefined).map(m=>[m+'Ms',ms(marks[m]!)])),
   };
@@ -86,6 +93,8 @@ export function createRequestTiming(now:()=>number=()=>performance.now()){
   // Durable execution completion ends provider timing before post-processing.
   finishProvider:()=>safe(()=>{if(phase==='provider')switchTo('host');}),
   mark,
+  // Fixed category only: no Skill identity, paths, contents or user input.
+  tagSkillFileRead:()=>safe(()=>{skillFileRead=true;}),
   tagExecution:(id:unknown)=>safe(()=>{if(typeof id==='string'&&UUID.test(id)&&executions.size<8)executions.add(id.toLowerCase());}),
   setProcedures:(paths:readonly unknown[])=>safe(()=>{
    procedures=paths.filter((p):p is string=>typeof p==='string'&&PROCEDURE.test(p)).slice(0,8);
