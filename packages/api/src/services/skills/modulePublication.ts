@@ -1,4 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import { validateOrganizerTemplate } from './organizerTemplate';
 import { reportManifest } from '../report/contract';
 import { z } from 'zod';
 import { isDeepStrictEqual } from 'node:util';
@@ -42,7 +43,12 @@ export function prepareModuleSkill(value: ModuleSkillInput) {
     let manifestText: string;
     try { manifestText = new TextDecoder('utf-8',{fatal:true}).decode(Buffer.from(manifestFile.base64,'base64')); }
     catch { throw new Error('workflow.yaml 必须使用 UTF-8 编码'); }
-    const declared = parseWorkflowManifest(manifestText);
+    const {organizerTemplate, ...declared} = parseWorkflowManifest(manifestText);
+    if (organizerTemplate !== undefined) {
+      const file = input.files.find(item => item.path === organizerTemplate);
+      if (!file) throw new Error('SKILL_ORGANIZER_TEMPLATE_INVALID');
+      validateOrganizerTemplate(organizerTemplate, Buffer.from(file.base64, 'base64'));
+    }
     if (!isDeepStrictEqual(declared,JSON.parse(JSON.stringify({kind:input.kind,steps:input.steps,
       planResources:input.planResources,reportGeneration:input.reportGeneration}))))
       throw new Error('workflow.yaml 与提交的步骤或问题不一致，请重新导入 Skill 文件夹');

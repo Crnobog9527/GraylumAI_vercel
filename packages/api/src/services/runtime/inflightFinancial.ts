@@ -49,8 +49,8 @@ export async function finishErasedWaiting(input: {
       && inspected.error.message === 'RUNTIME_EXECUTION_STILL_ALLOWED') return undefined;
     throw new Error('ERASURE_FINANCIAL_BINDING_OR_STORAGE_FAILED');
   }
-  const state = inspected.data as { state?: string; billing?: { accountClosed?: boolean; contractVersion?: string } };
-  if (state?.billing?.accountClosed !== true || state.billing.contractVersion !== 'bill2.v2'
+  const state = inspected.data as { state?: string; billing?: { accountClosed?: boolean; contentDeleted?: boolean; contractVersion?: string } };
+  if (!(state?.billing?.accountClosed || state?.billing?.contentDeleted) || state.billing.contractVersion !== 'bill2.v2'
     || !['waiting_credits', 'waiting_resume'].includes(state.state ?? '')) return undefined;
   const result = await finishOriginalFinancial(input);
   const stateName = result.state;
@@ -82,7 +82,7 @@ export function inflightFinancialHost(input: {
         calls.add(args.p_call_id);
       }
       if (name === 'bill2_record' && args.p_run_id === runId && calls.has(String(args.p_call_id))
-        && data?.accountClosed === true) accountClosed = true;
+        && (data?.accountClosed === true || data?.contentDeleted === true)) accountClosed = true;
       return response;
       };
       const pending = Promise.resolve(query).then(observe);
@@ -98,9 +98,10 @@ export function inflightFinancialHost(input: {
       if (!runId) return undefined;
       try {
         const result = await finishOriginalFinancial({ ...input, adapter });
-        const view = result as { billing?: { accountClosed?: boolean } };
-        if (view.billing?.accountClosed) {
+        const view = result as { billing?: { accountClosed?: boolean; contentDeleted?: boolean } };
+        if (view.billing?.accountClosed || view.billing?.contentDeleted) {
           accountClosed = true;
+          if (view.billing.accountClosed) {
           const inventory = await input.database.rpc('account_erasure_financial_batch', {
             p_limit: 1, p_profile_id: input.actorId, p_after_run_id: null,
           });
@@ -110,6 +111,7 @@ export function inflightFinancialHost(input: {
               : Object.keys(summary.reasons).find(key => key !== 'BILLING_PENDING') ?? 'BILLING_PENDING';
             await input.database.rpc('account_erasure_note_error', { p_profile_id: input.actorId, p_code: code });
           }
+        }
         }
         return result;
       } catch (error) {
