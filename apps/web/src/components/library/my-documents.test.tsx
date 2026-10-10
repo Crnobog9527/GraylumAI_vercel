@@ -221,6 +221,14 @@ describe('document reader', () => {
     expect(html).toContain('&lt;b&gt;第二章&lt;/b&gt;');
     expect(html).not.toContain('<b>');
   });
+  it('never shows an earlier range under a newly selected one while it loads', () => {
+    state.directory = { isPending: false, data: [{ ordinal: 0, title: '一' }, { ordinal: 1, title: '二' }] };
+    state.segments = { isPending: true, data: undefined };
+    const { html, text } = render(<DocumentReader doc={doc()}/>);
+    expect(html).toContain('aria-label="目录"');
+    expect(text).toContain('正在读取内容…');
+    expect(html).not.toContain('<section');
+  });
   it('hides the directory when the document has no headings, and reports read errors', () => {
     state.directory = { isPending: false, data: [{ ordinal: 0, title: '' }] };
     state.segments = { isPending: false, data: [{ ordinal: 0, title: '', body: '纯文字' }] };

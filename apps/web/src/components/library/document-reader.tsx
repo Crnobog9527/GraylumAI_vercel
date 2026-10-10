@@ -26,16 +26,14 @@ export function DocumentReader({ doc }: { doc: LibraryDocument }) {
   const [start, setStart] = useState(0);
   const input = { documentId: doc.id, version: doc.content_version };
   const directory = trpc.library.directory.useQuery(input, { staleTime: 60_000, retry: false });
-  const page = trpc.library.segments.useQuery({ ...input, start, count: READER_PAGE }, {
-    staleTime: 30_000, retry: false, placeholderData: (previous) => previous,
-  });
+  const page = trpc.library.segments.useQuery({ ...input, start, count: READER_PAGE }, { staleTime: 30_000, retry: false });
   const chapters = useMemo(() => chaptersOf(directory.data ?? []), [directory.data]);
   const starts = useMemo(() => new Set(chapters.map((chapter) => chapter.ordinal)), [chapters]);
   const total = directory.data?.length;
 
   const error = directory.error ?? page.error;
   if (error) return <p role="alert" className={styles.error}>{libraryErrorMessage(error)}</p>;
-  if (directory.isPending || page.isPending) return <p className={styles.hint}>正在读取内容…</p>;
+  if (directory.isPending) return <p className={styles.hint}>正在读取内容…</p>;
   if (!total) return <p className={styles.hint}>这个文件没有可显示的文字。</p>;
   const segments = page.data ?? [];
   const last = Math.min(total, start + READER_PAGE);
@@ -53,6 +51,7 @@ export function DocumentReader({ doc }: { doc: LibraryDocument }) {
     </nav>}
     <div className={styles.readerBody}>
       <p className={styles.hint}>第 {start + 1}–{last} 段，共 {total} 段{current ? ' · ' + current.title : ''}</p>
+      {page.isPending && <p className={styles.hint}>正在读取内容…</p>}
       {segments.map((segment) => <section key={segment.ordinal} className={styles.segment} aria-label={'第 ' + (segment.ordinal + 1) + ' 段'}>
         {starts.has(segment.ordinal) && <h4>{segment.title}</h4>}
         {segment.body}
