@@ -45,6 +45,8 @@ export function classificationSamples(): ClassificationSample[] {
       statuses: ['text'], text: /^Annual Review$/ },
     { name: 'section page with three characters', bytes: textDocument({ pages: [{ content: cnLine('第二章', 420) }] }),
       statuses: ['text'], text: /^第二章$/ },
+    { name: 'full-page image drawn through a tiny clipping rectangle', bytes: imagePage(`q 10 10 20 20 re W n ${draw('Im1', 595, 842)}Q\n`),
+      statuses: ['blank'] },
     { name: 'small logo, no text', bytes: imagePage(draw('Im1', 120, 60, 40, 760)), statuses: ['blank'] },
     { name: 'empty page', bytes: textDocument({ pages: [{ content: '' }] }), statuses: ['blank'] },
     { name: 'scan with an invisible OCR text layer', bytes: imagePage(`${draw('Im1', 595, 842)}BT 3 Tr /F1 12 Tf 72 760 Td `

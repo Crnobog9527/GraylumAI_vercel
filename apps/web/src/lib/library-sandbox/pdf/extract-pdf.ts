@@ -2,6 +2,7 @@
 import { AnnotationMode, getDocument, OPS, PasswordException, type PDFDocumentProxy } from 'pdfjs-dist/legacy/build/pdf.mjs';
 import { SandboxError, type SandboxErrorCode } from '../errors';
 import { PDF_LIMITS, SANDBOX_LIMITS } from '../limits';
+import { PDF_DOCUMENT_OPTIONS } from './document-options';
 import { EmbeddedDataFactory } from './embedded-data';
 import type { PdfGuard } from './guard';
 import { imageCoverage } from './image-coverage';
@@ -16,22 +17,7 @@ import { PAGE_SEPARATOR, type PdfExtraction, type PdfPage } from './types';
  * layer are classified as scanned (mostly images) or blank for later recognition (LIB-2d).
  */
 
-const DOCUMENT_OPTIONS = {
-  BinaryDataFactory: EmbeddedDataFactory,
-  useWorkerFetch: false,
-  useSystemFonts: false,
-  disableFontFace: true,
-  useWasm: false,
-  isOffscreenCanvasSupported: false,
-  isImageDecoderSupported: false,
-  // With the build patch every image is recorded (position and size) instead of being decoded.
-  maxImageSize: 0,
-  enableXfa: false,
-  disableRange: true,
-  disableStream: true,
-  disableAutoFetch: true,
-  verbosity: 0,
-} as const;
+const DOCUMENT_OPTIONS = { ...PDF_DOCUMENT_OPTIONS, BinaryDataFactory: EmbeddedDataFactory };
 
 function failure(guard: PdfGuard, error: unknown, fallback: SandboxErrorCode): SandboxError {
   if (guard.hit) return new SandboxError(guard.hit);

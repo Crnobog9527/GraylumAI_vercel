@@ -8,6 +8,7 @@ import { PDFJS_PATCHES, PDFJS_WORKER_BUILD, patchPdfjsWorker } from '../../../..
 import { sandboxErrorMessage } from '../errors';
 import { isLibraryPdfExtractionEnabled } from '../feature-flag';
 import { normalizeCjkRadicals } from '../pdf/cjk-radicals';
+import { PDF_DOCUMENT_OPTIONS } from '../pdf/document-options';
 import { extractPdfInBrowser } from '../pdf/client';
 import { imageCoverage, type CoverageOps } from '../pdf/image-coverage';
 import { hasTextLayer, pageText } from '../pdf/page-text';
@@ -66,6 +67,14 @@ describe('pdf.js build patches', () => {
     expect(patched.startsWith('function __graylumCountObjects(count)')).toBe(true);
   });
 
+  it('leave no eval path: no dynamic code in the bundled parser, and eval is switched off anyway', () => {
+    const patched = patchPdfjsWorker(readFileSync(PDFJS_WORKER_BUILD, 'utf8'));
+    expect(patched).not.toMatch(/new Function\s*\(|\beval\s*\(/);
+    expect(patched).not.toContain('isEvalSupported');
+    expect(PDF_DOCUMENT_OPTIONS).toMatchObject({ isEvalSupported: false, disableFontFace: true, useSystemFonts: false, useWasm: false,
+      useWorkerFetch: false, enableXfa: false, maxImageSize: 0 });
+  });
+
   it('refuse to build when pdf.js no longer matches', () => {
     expect(() => patchPdfjsWorker('nothing to patch')).toThrow(/matched 0 times/);
     const source = readFileSync(PDFJS_WORKER_BUILD, 'utf8');
@@ -117,7 +126,9 @@ describe('page text', () => {
 
 describe('image coverage', () => {
   const OPS: CoverageOps = { save: 10, restore: 11, transform: 12, paintFormXObjectBegin: 74, paintFormXObjectEnd: 75,
-    paintImageXObject: 85, paintImageMaskXObject: 83, paintInlineImageXObject: 86, paintImageXObjectRepeat: 88 };
+    paintImageXObject: 85, paintImageMaskXObject: 83, paintInlineImageXObject: 86, paintImageXObjectRepeat: 88,
+    clip: 29, eoClip: 30, constructPath: 91 };
+  const fullPage = [595, 0, 0, 842, 0, 0];
   const view = [0, 0, 595, 842];
   const image = ['graylum:skipped-image', 100, 100];
 
@@ -134,6 +145,24 @@ describe('image coverage', () => {
     const args = [[], [595, 0, 0, 842, 0, 0], [], [[595, 0, 0, 842, 0, 0], [0, 0, 1, 1]], [], image];
     expect(imageCoverage(fns, args, view, OPS)).toBeLessThan(0.01);
     expect(imageCoverage([OPS.paintFormXObjectBegin, OPS.paintImageXObject], [[[595, 0, 0, 842, 0, 0], null], image], view, OPS)).toBe(1);
+  });
+
+  it('cuts images to the clipping area and restores it with the graphics state', () => {
+    // q 10 10 20 20 re W n  595 0 0 842 0 0 cm /Im1 Do Q, then the same image unclipped.
+    const clipped = [OPS.save, OPS.clip, OPS.constructPath, OPS.transform, OPS.paintImageXObject, OPS.restore];
+    const clippedArgs = [[], [], [OPS.save, [null], [10, 10, 30, 30]], fullPage, image, []];
+    expect(imageCoverage(clipped, clippedArgs, view, OPS)).toBeLessThan(0.01);
+    expect(imageCoverage([...clipped, OPS.transform, OPS.paintImageXObject], [...clippedArgs, fullPage, image], view, OPS)).toBe(1);
+    expect(imageCoverage([OPS.eoClip, OPS.constructPath, OPS.transform, OPS.paintImageXObject], [[], [0, [null], null], fullPage, image],
+      view, OPS)).toBe(0);
+    // A path that is not a clip does not cut anything.
+    expect(imageCoverage([OPS.constructPath, OPS.transform, OPS.paintImageXObject], [[0, [null], [0, 0, 1, 1]], fullPage, image],
+      view, OPS)).toBe(1);
+  });
+
+  it('cuts images to a form bounding box', () => {
+    const fns = [OPS.paintFormXObjectBegin, OPS.transform, OPS.paintImageXObject, OPS.paintFormXObjectEnd];
+    expect(imageCoverage(fns, [[[1, 0, 0, 1, 0, 0], [0, 0, 595, 100]], fullPage, image, []], view, OPS)).toBeLessThan(0.15);
   });
 
   it('counts repeated images and overlapping images once', () => {
