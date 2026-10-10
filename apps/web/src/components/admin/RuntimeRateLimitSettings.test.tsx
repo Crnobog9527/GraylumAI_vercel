@@ -25,7 +25,7 @@ beforeAll(async () => {
     export const trpc = {
       useUtils: () => ({runtimeRateLimits:{get:{setData:(_,v)=>{data=v;listeners.forEach(fn=>fn())},
         // A fresh read may carry a pause set elsewhere (window.serverConfig).
-        fetch:async()=>{data={...data,config:{...data.config,...window.serverConfig}};listeners.forEach(fn=>fn());return data}}}}),
+        fetch:async()=>{if(window.holdFetch)await new Promise(r=>{window.releaseFetch=r});data={...data,config:{...data.config,...window.serverConfig}};listeners.forEach(fn=>fn());return data}}}}),
       runtimeRateLimits: {
         get:{useQuery:()=>({data:useSyncExternalStore(subscribe,()=>data),error:null,refetch:async()=>({data})})},
         update:{useMutation:options=>{
@@ -127,8 +127,12 @@ it('shows wired protection, keeps the pause switch elsewhere and never undoes a 
     const minute = page.getByLabel('新消息（每轮消息）：每分钟', {exact:true});
     await minute.fill('9');
     // Someone paused new calls after this page loaded; saving limits must keep that pause.
-    await page.evaluate('window.serverConfig={stopNewCalls:true}');
+    await page.evaluate('window.serverConfig={stopNewCalls:true}; window.holdFetch=true');
     await page.getByRole('button', {name:'保存额度配置'}).click();
+    // While the fresh read is in flight, nothing can be edited or saved twice.
+    await browserExpect(minute).toBeDisabled();
+    await browserExpect(page.getByRole('button', {name:'保存中…'})).toBeDisabled();
+    await page.evaluate('window.holdFetch=false; window.releaseFetch()');
     await browserExpect.poll(() => page.evaluate('window.savedLimits.length')).toBe(1);
     await page.evaluate('window.finishSave()');
     expect(await page.evaluate('window.savedLimits[0]')).toMatchObject({ admissionPerMinute:9, stopNewCalls:true });

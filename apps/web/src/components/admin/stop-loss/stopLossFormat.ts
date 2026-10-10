@@ -36,11 +36,15 @@ export function reachedLimit(actual: string, limit: string) {
   try { return scaled(actual) >= scaled(limit); } catch { return false; }
 }
 
-/** Display an amount with at most 4 decimals, truncated (never rounded up), as $X. */
+/**
+ * Display an amount with at most 4 decimals, truncated (never rounded up), as $X.
+ * A nonzero amount below $0.0001 shows as "<$0.0001", never as the special zero limit.
+ */
 export function formatUsd(value: unknown) {
   if (typeof value !== 'string' || !/^\d+(\.\d+)?$/.test(value)) return '—';
   const [whole, fraction = ''] = value.split('.');
   const cut = fraction.slice(0, 4).replace(/0+$/, '');
+  if (/^0+$/.test(whole!) && !cut && /[1-9]/.test(fraction)) return '<$0.0001';
   return `$${whole}${cut ? `.${cut}` : ''}`;
 }
 

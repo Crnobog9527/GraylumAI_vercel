@@ -24,6 +24,9 @@ describe('stop-loss amounts', () => {
     expect(formatUsd('12.345678')).toBe('$12.3456');
     expect(formatUsd('3.000000')).toBe('$3');
     expect(formatUsd('0')).toBe('$0');
+    expect(formatUsd('0.000')).toBe('$0');
+    expect(formatUsd('0.000000000001')).toBe('<$0.0001');
+    expect(formatUsd('1.00000001')).toBe('$1');
     expect(formatUsd(null)).toBe('—');
     expect(formatUsd('-1')).toBe('—');
   });
