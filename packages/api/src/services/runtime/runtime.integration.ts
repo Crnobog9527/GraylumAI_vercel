@@ -1031,14 +1031,16 @@ it('RUNTIME: AC-0 router round trips per phase stay fixed for admission, Skill l
   expect(counts,JSON.stringify(Object.fromEntries(Object.entries(all).map(([name,m])=>[name,m.summary])))).toEqual({
    start:{prelude:2,policy:0,host:1},
    ordinary:{prelude:2,policy:0,host:0,admission:6,rateLimit:0},
-   stream:{prelude:2,policy:0,host:0,execute:6,provider:5,rateLimit:0},
+   stream:{prelude:2,policy:0,host:0,execute:7,provider:9,rateLimit:0},
    skill:{prelude:2,policy:0,host:0,admission:13,rateLimit:0},
-   execute:{prelude:2,policy:0,host:0,execute:6,provider:5,rateLimit:0},
+   execute:{prelude:2,policy:0,host:0,execute:6,provider:7,rateLimit:0},
    skillWarm:{prelude:2,policy:0,host:0,admission:11,rateLimit:0},
   });
   // AC-0c: Auth verifies once per invocation and credential, plus once again
   // after the provider response (AC-0 baseline was 2/6/9/12/9).
   const label=(name:string)=>Object.fromEntries(Object.entries(all).map(([key,m])=>[key,m.summary.labels[name]?.rt??0]));
+  // D7 checks before buffered output and on both sides of post-execution capture.
+  expect(label('rpc/content_erasure_visible')).toEqual({start:0,ordinary:0,stream:5,skill:0,execute:2,skillWarm:0});
   expect(label('auth/v1/user')).toEqual({start:1,ordinary:1,stream:2,skill:1,execute:2,skillWarm:1});
   // AC-0c: one service-role and one user-scoped (RLS) module read per request
   // (AC-0 baseline 7 for the Skill prepare); package checks before use and
@@ -1176,15 +1178,17 @@ it('RUNTIME: AC-1 opc.mentorTurnStream admits and streams a mentor turn in one i
    // C2 adds one read-only stop-intent check after the provider response, before completion.
    // The first prepare of this new package misses the Skill file cache (AC-0c).
    oldPrepareOpening:{prelude:2,policy:0,host:9,admission:16,rateLimit:0},
-   oldStreamOpening:{prelude:2,policy:0,host:1,execute:6,provider:14,rateLimit:0},
+   oldStreamOpening:{prelude:2,policy:0,host:3,execute:7,provider:18,rateLimit:0},
    oldPrepareAnswer:{prelude:2,policy:0,host:8,admission:12,rateLimit:0},
-   oldStreamAnswer:{prelude:2,policy:0,host:1,execute:6,provider:14,rateLimit:0},
+   oldStreamAnswer:{prelude:2,policy:0,host:3,execute:7,provider:18,rateLimit:0},
    // One invocation: one prelude instead of two; admission and execution unchanged.
-   opening:{prelude:2,policy:0,host:10,admission:12,execute:6,provider:14,rateLimit:0},
-   answer:{prelude:2,policy:0,host:9,admission:12,execute:6,provider:14,rateLimit:0},
+   opening:{prelude:2,policy:0,host:12,admission:12,execute:7,provider:18,rateLimit:0},
+   answer:{prelude:2,policy:0,host:11,admission:12,execute:7,provider:18,rateLimit:0},
   });
   // Empty backlog: exactly one pre-admission RPC and one completion capture RPC.
   const label=(name:string)=>Object.fromEntries(Object.entries(all).map(([key,m])=>[key,m.summary.labels[name]?.rt??0]));
+  // D7's seven visibility checks are additional reads, not replacement auth/package checks.
+  expect(label('rpc/content_erasure_visible')).toEqual({oldPrepareOpening:0,oldStreamOpening:7,oldPrepareAnswer:0,oldStreamAnswer:7,opening:7,answer:7});
   expect(label('rpc/opc_capture_apply')).toEqual({oldPrepareOpening:1,oldStreamOpening:1,oldPrepareAnswer:1,oldStreamAnswer:1,opening:2,answer:2});
   expect(label('rpc/runtime_session_context')).toEqual({oldPrepareOpening:3,oldStreamOpening:0,oldPrepareAnswer:3,oldStreamAnswer:0,opening:3,answer:3});
   // Auth verifies once per invocation, and again after each provider response.
