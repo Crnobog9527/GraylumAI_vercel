@@ -9,6 +9,7 @@ import { admissionCases } from './admission.mjs';
 import { retentionCases } from './retention.mjs';
 import { sourceCases } from './sources.mjs';
 import { scopeCases } from './scopes.mjs';
+import { invoiceCases } from './invoices.mjs';
 import { catalogCases } from './catalog.mjs';
 import { refundCases } from './refunds.mjs';
 import { POSTGRES_IMAGE } from '../v3/images.mjs';
@@ -74,6 +75,7 @@ try {
   }
   await service.query('SET ROLE service_role');
   const scopedCases=await scopeCases({admin});
+  scopedCases.push(...await invoiceCases({admin}));
   const routes = {version:1,card:{enabled:false},wechat_pay:{enabled:false,annualVerified:false},
     alipay:{enabled:false,annualVerified:false}};
   await admin.query("INSERT INTO system_settings(key,value) VALUES('payment_method_routes',$1)",[routes]);

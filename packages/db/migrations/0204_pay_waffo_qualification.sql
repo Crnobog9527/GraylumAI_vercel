@@ -28,6 +28,44 @@ CREATE UNIQUE INDEX IF NOT EXISTS pay_waffo_scoped_checkout ON public.payment_or
   (payment_channel,merchant_namespace,payment_mode,stripe_checkout_session_id) WHERE payment_channel IS NOT NULL;
 CREATE UNIQUE INDEX IF NOT EXISTS pay_waffo_legacy_checkout ON public.payment_orders
   (stripe_checkout_session_id) WHERE payment_channel IS NULL;
+-- Compatibility columns are derived; uniqueness must match the authoritative refs.
+ALTER TABLE public.payment_orders DROP CONSTRAINT IF EXISTS payment_orders_stripe_invoice_id_key;
+DROP INDEX IF EXISTS public.payment_orders_stripe_invoice_id_key;
+CREATE UNIQUE INDEX IF NOT EXISTS pay_waffo_scoped_invoice ON public.payment_orders
+  (payment_channel,merchant_namespace,payment_mode,stripe_invoice_id) WHERE payment_channel IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS pay_waffo_legacy_invoice ON public.payment_orders(stripe_invoice_id) WHERE payment_channel IS NULL;
+ALTER TABLE public.user_subscriptions DROP CONSTRAINT IF EXISTS user_subscriptions_stripe_subscription_id_key;
+DROP INDEX IF EXISTS public.user_subscriptions_stripe_subscription_id_key;
+CREATE UNIQUE INDEX IF NOT EXISTS pay_waffo_scoped_subscription ON public.user_subscriptions
+  (payment_channel,merchant_namespace,payment_mode,stripe_subscription_id) WHERE payment_channel IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS pay_waffo_legacy_subscription ON public.user_subscriptions(stripe_subscription_id)
+  WHERE payment_channel IS NULL;
+ALTER TABLE public.subscription_credit_grants DROP CONSTRAINT IF EXISTS subscription_credit_grants_subscription_period_key_key;
+CREATE UNIQUE INDEX IF NOT EXISTS pay_waffo_scoped_grant_period ON public.subscription_credit_grants(subscription_id,grant_period_key)
+  WHERE subscription_id IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS pay_waffo_legacy_grant_period ON public.subscription_credit_grants(stripe_subscription_id,grant_period_key)
+  WHERE subscription_id IS NULL;
+-- Retain the two proven grant algorithms and their source/period replay checks.
+-- New ledger keys carry the immutable source order; existing grants replay by internal period.
+DO $grant_keys$
+DECLARE source text; name text;
+BEGIN
+  FOREACH name IN ARRAY ARRAY['atomic_grant_subscription_invoice_credits','atomic_grant_annual_subscription_credits'] LOOP
+    SELECT pg_get_functiondef(p.oid) INTO STRICT source FROM pg_proc p
+      WHERE p.pronamespace='public'::regnamespace AND p.proname=name;
+    IF position('pay_waffo:' IN source)=0 THEN
+      IF name='atomic_grant_subscription_invoice_credits' THEN
+        source:=replace(source,'  v_source_status:=v_source.status;',
+          E'  p_idempotency_key:=''pay_waffo:''||v_source.id::text||'':''||p_idempotency_key;\n  v_source_status:=v_source.status;');
+      ELSE
+        source:=replace(source,'  SELECT s.id,s.membership_plan_id,s.billing_cycle,',
+          E'  p_idempotency_key:=''pay_waffo:''||v_source.id::text||'':''||p_idempotency_key;\n  SELECT s.id,s.membership_plan_id,s.billing_cycle,');
+      END IF;
+      IF position('pay_waffo:' IN source)=0 THEN RAISE EXCEPTION 'PAY_WAFFO_GRANT_PATCH_MISMATCH'; END IF;
+      EXECUTE source;
+    END IF;
+  END LOOP;
+END $grant_keys$;
 DO $scope$
 DECLARE source text;
 BEGIN
@@ -591,6 +629,9 @@ CREATE OR REPLACE FUNCTION public.pay_waffo_canonical_grant(s public.user_subscr
 RETURNS boolean LANGUAGE plpgsql STABLE SET search_path=public,pg_temp AS $$
 DECLARE o public.payment_orders; start_at timestamptz; end_at timestamptz; idx integer;
 BEGIN
+  IF g.subscription_id IS NOT NULL AND g.subscription_id IS DISTINCT FROM s.id THEN RETURN false; END IF;
+  IF g.subscription_id IS NULL AND (SELECT count(*) FROM user_subscriptions
+    WHERE user_id=g.user_id AND stripe_subscription_id=g.stripe_subscription_id)>1 THEN RETURN false; END IF;
   IF g.stripe_subscription_id IS NOT NULL THEN
     RETURN public.refund_1b_is_canonical_period_identity(s.user_id,s.stripe_subscription_id,s.membership_plan_id,
       s.billing_cycle,s.current_period_start,s.current_period_end,g.user_id,g.stripe_subscription_id,g.membership_plan_id,
@@ -631,18 +672,22 @@ BEGIN
     'atomic_pre_deduct','bill2_legacy_settle','bill2_legacy_refund','bill2_legacy_abort_settle',
     'bill2_legacy_finalize_success','bill2_legacy_finalize_failure','bill2_legacy_finalize_abort') LOOP
     source:=pg_get_functiondef(f.oid);
-    revised:=replace(source,'ON us.stripe_subscription_id = g.stripe_subscription_id',
-      'ON (us.stripe_subscription_id = g.stripe_subscription_id OR (g.stripe_subscription_id IS NULL AND us.id = g.subscription_id))');
-    -- The terminated_us alias needs the same internal-ID resolution.
-    revised:=replace(revised,'terminated_us.stripe_subscription_id = g.stripe_subscription_id',
-      '(terminated_us.stripe_subscription_id = g.stripe_subscription_id OR (g.stripe_subscription_id IS NULL AND terminated_us.id = g.subscription_id))');
+    revised:=replace(source,
+      '(us.stripe_subscription_id = g.stripe_subscription_id OR (g.stripe_subscription_id IS NULL AND us.id = g.subscription_id))',
+      '(us.id = g.subscription_id OR (g.subscription_id IS NULL AND us.stripe_subscription_id = g.stripe_subscription_id))');
+    revised:=replace(revised,'ON us.stripe_subscription_id = g.stripe_subscription_id',
+      'ON (us.id = g.subscription_id OR (g.subscription_id IS NULL AND us.stripe_subscription_id = g.stripe_subscription_id))');
+    revised:=replace(revised,
+      '(terminated_us.stripe_subscription_id = g.stripe_subscription_id OR (g.stripe_subscription_id IS NULL AND terminated_us.id = g.subscription_id))',
+      '(terminated_us.id = g.subscription_id OR (g.subscription_id IS NULL AND terminated_us.stripe_subscription_id = g.stripe_subscription_id))');
+    IF position('g.subscription_id IS NULL AND terminated_us.stripe_subscription_id' IN revised)=0 THEN
+      revised:=replace(revised,'terminated_us.stripe_subscription_id = g.stripe_subscription_id',
+        '(terminated_us.id = g.subscription_id OR (g.subscription_id IS NULL AND terminated_us.stripe_subscription_id = g.stripe_subscription_id))');
+    END IF;
     revised:=regexp_replace(revised,
       'public.refund_1b_is_canonical_period_identity\([[:space:]]*us.user_id,[^)]*g.stripe_invoice_id[[:space:]]*\)',
       'public.pay_waffo_canonical_grant(us,g)','g');
-    -- Idempotent replacement: a prior patch has already expanded these joins.
-    IF position('g.stripe_subscription_id IS NULL AND us.id = g.subscription_id' IN source)=0 THEN
-      EXECUTE revised;
-    END IF;
+    IF source IS DISTINCT FROM revised THEN EXECUTE revised; END IF;
   END LOOP;
 END $bill2$;
 
@@ -689,6 +734,9 @@ END $legacy$;
 -- internal subscription identity. Keep legacy signatures for already-deployed callers.
 DO $scoped_refund$
 DECLARE source text; revised text; name text; guard text;
+  legacy_guard text:=E'  PERFORM 1 FROM profiles WHERE id=p_user_id FOR UPDATE;\n'
+    ||E'  IF (SELECT count(*) FROM user_subscriptions WHERE user_id=p_user_id AND stripe_subscription_id=p_subscription_id)>1 THEN\n'
+    ||E'    RAISE EXCEPTION ''PAY_WAFFO_REFUND_SCOPE_REQUIRED'';\n  END IF;\n';
 BEGIN
   source:=pg_get_functiondef('public.pay_waffo_canonical_grant(public.user_subscriptions,public.subscription_credit_grants)'::regprocedure);
   source:=replace(source,'public.pay_waffo_canonical_grant(', 'public.pay_waffo_refund_canonical_grant(');
@@ -720,6 +768,7 @@ $guard$;
   FOREACH name IN ARRAY ARRAY['atomic_refund_termination_clawback','atomic_refund_termination_clawback_fresh'] LOOP
     SELECT pg_get_functiondef(p.oid) INTO STRICT source FROM pg_proc p
       WHERE p.pronamespace='public'::regnamespace AND p.proname=name;
+    source:=replace(source,legacy_guard,'');
     IF name='atomic_refund_termination_clawback' THEN
       -- Ledger balances became bigint after this legacy RPC was introduced.
       -- Its existing integer return contract needs explicit replay casts too.
@@ -746,7 +795,9 @@ $guard$;
         '(SELECT public.pay_waffo_refund_canonical_grant(v_source_subscription,g) FROM public.subscription_credit_grants g '
         ||'WHERE g.subscription_id=v_source_subscription.id AND g.grant_period_key=v_period_key)');
       revised:=replace(revised,E'    p_subscription_id,\n    COALESCE(v_period_key',
-        E'    CASE WHEN v_source_subscription.stripe_subscription_id IS NOT NULL THEN p_subscription_id\n'
+        E'    CASE WHEN v_source_subscription.stripe_subscription_id IS NOT NULL\n'
+        ||E'      AND NOT EXISTS(SELECT 1 FROM subscription_credit_grants identity_grant WHERE identity_grant.subscription_id=v_source_subscription.id\n'
+        ||E'        AND identity_grant.idempotency_key LIKE ''pay_waffo:%'') THEN p_subscription_id\n'
         ||E'      ELSE v_source_subscription.id::text END,\n    COALESCE(v_period_key');
       revised:=replace(revised,E'FROM public.atomic_refund_termination_clawback(\n    p_user_id,',
         E'FROM public.pay_waffo_atomic_refund_termination_clawback(\n    p_source_order_id, p_user_id,');
@@ -759,6 +810,7 @@ $guard$;
       RAISE EXCEPTION 'PAY_WAFFO_REFUND_PATCH_MISMATCH';
     END IF;
     EXECUTE revised;
+    EXECUTE replace(source,E'BEGIN\n',E'BEGIN\n'||legacy_guard);
   END LOOP;
 END $scoped_refund$;
 REVOKE ALL ON FUNCTION public.pay_waffo_refund_canonical_grant(public.user_subscriptions,public.subscription_credit_grants)
