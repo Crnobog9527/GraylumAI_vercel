@@ -115,6 +115,8 @@ BEGIN
  IF NOT runtime_history_available(eid) THEN RAISE EXCEPTION 'REPORT_SOURCE_CONFLICT'; END IF;
  SELECT evidence_id INTO ev FROM opc_result_links WHERE execution_id=eid AND round_id=rid AND step_id='report-final';
  IF ev IS NULL THEN
+  IF (SELECT count(*) FROM artifact_evidence WHERE project_id=pid)>=128 THEN
+   RAISE EXCEPTION 'REPORT_EVIDENCE_CAPACITY'; END IF;
   ev:=gen_random_uuid();
   INSERT INTO artifact_evidence(id,project_id,kind,payload,content_hash)
    VALUES(ev,pid,'user',jsonb_build_object('executionId',eid),source->>'bodyHash');
@@ -137,7 +139,8 @@ BEGIN
   IF position(needle IN definition)=0 THEN RAISE EXCEPTION 'REPORT_PUBLISH_TARGET_MISMATCH'; END IF;
   EXECUTE replace(definition,needle,'snap:=report_final_snapshot(p_actor_id,p.id,r.id,p_payload,snap); '
    ||'IF snap#>>''{generatedReport,evidenceId}'' IS NOT NULL THEN '
-   ||'all_ids:=all_ids||jsonb_build_array(snap#>''{generatedReport,evidenceId}''); END IF; '||needle);
+   ||'all_ids:=all_ids||jsonb_build_array(snap#>''{generatedReport,evidenceId}''); '
+   ||'IF jsonb_array_length(all_ids)>128 THEN RAISE EXCEPTION ''REPORT_EVIDENCE_CAPACITY''; END IF; END IF; '||needle);
  END IF;
 END $$;
 

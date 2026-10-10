@@ -6,7 +6,7 @@ import {erase} from '../content-erasure/cases.mjs';
 const hash=body=>createHash('sha256').update(body).digest('hex');
 const original='## One\nOriginal confirmed facts.\n## Two\nKnown limitations.';
 const edited='## One\nR5_MANUAL_PRIVATE_BODY\n## Two\nManually retained limitations.';
-async function seed(db,completeness='complete') {
+async function seed(db,completeness='complete',evidenceCount=0) {
  const base=await fixture(db);
  const f=(await db.query('SELECT d7_test.artifacts($1) v',[base.actor])).rows[0].v;
  const project=randomUUID(),round=randomUUID(),confirmation=randomUUID(),execution=randomUUID();
@@ -16,14 +16,20 @@ async function seed(db,completeness='complete') {
   resources:[],minLength:1,maxLength:20000,requiresEvidence:false,requiredCapabilities:[],information:[]}],
   report:{id:'report',version:1,title:'Positioning',sections:[{title:'Facts',stepId:'s'}]},
   planResources:['report.md'],reportGeneration:{resources:['report.md'],sections:['One','Two'],maxCharacters:12000}};
+ const sourceIds=Array.from({length:evidenceCount},()=>randomUUID()).sort();
  const steps={s:{body:'CONFIRMED_FIELDS_UNCHANGED',version:1,reviewVersion:0,valid:true,
-  confirmationId:confirmation,evidenceIds:[],provenanceIds:[],information:{}}};
+  confirmationId:confirmation,evidenceIds:sourceIds,provenanceIds:sourceIds,information:{}}};
  await db.query('INSERT INTO artifact_projects(id,actor_id,module_id,skill_id,account) VALUES($1,$2,$3,$4,$5)',
   [project,f.actor,f.module,f.skill,'r5-'+project]);
+ for(const id of sourceIds) {
+  await db.query(`INSERT INTO artifact_evidence(id,project_id,kind,payload,content_hash)
+   VALUES($1,$2,'user','{"body":"fixed source"}',repeat('a',64))`,[id,project]);
+  await db.query('INSERT INTO artifact_evidence_restrictions(evidence_id) VALUES($1)',[id]);
+ }
  await db.query(`INSERT INTO artifact_rounds(id,project_id,revision_id,package_hash,workflow,workflow_hash,template_hash,state,steps)
   VALUES($1,$2,$3,repeat('b',64),$4,repeat('c',64),repeat('d',64),'draft',$5)`,[round,project,f.revision,workflow,steps]);
  await db.query(`INSERT INTO artifact_confirmations(id,round_id,step_id,version,review_version,body,evidence_ids)
-  VALUES($1,$2,'s',1,0,'CONFIRMED_FIELDS_UNCHANGED','[]')`,[confirmation,round]);
+  VALUES($1,$2,'s',1,0,'CONFIRMED_FIELDS_UNCHANGED',$3)`,[confirmation,round,JSON.stringify(sourceIds)]);
  await db.query(`INSERT INTO runtime_sessions(id,actor_id,scope,start_request_id,start_payload)
   VALUES($1,$2,$3,$4,'{}')`,[session,f.actor,{kind:'positioning_draft',draftId:draft},randomUUID()]);
  await db.query(`INSERT INTO opc_drafts(draft_id,actor_id,project_id,round_id,session_id,request_id,registration,mode)
@@ -134,6 +140,18 @@ export async function runCases({db,Client,connectionString,report}) {
  assert.doesNotMatch(JSON.stringify((await db.query('SELECT payload FROM artifact_requests WHERE project_id=$1',
   [independent.project])).rows),/R5_MANUAL_PRIVATE_BODY/);
  report.checks.push('deleting the report execution preserves the independent formal body but revokes its source and clears edit copies');
+ const atLimit=await seed(db,'complete',128);
+ assert.equal((await read(db,atLimit)).candidate,true);
+ await assert.rejects(finalize(db,atLimit),/REPORT_EVIDENCE_CAPACITY/);
+ assert.equal((await db.query('SELECT count(*) n FROM artifact_versions WHERE project_id=$1',[atLimit.project])).rows[0].n,'0');
+ assert.equal((await db.query('SELECT count(*) n FROM artifact_evidence WHERE project_id=$1',[atLimit.project])).rows[0].n,'128');
+ assert.equal((await db.query('SELECT state FROM artifact_rounds WHERE id=$1',[atLimit.round])).rows[0].state,'draft');
+ const fits=await seed(db,'complete',127);const fitsFinal=await finalize(db,fits);
+ assert.equal((await db.query('SELECT jsonb_array_length(evidence_ids) n FROM artifact_versions WHERE id=$1',
+  [fitsFinal.versionId])).rows[0].n,128);
+ assert.equal(await rpc(db,'opc_source_allowed',fits.actor,fitsFinal.versionId),true);
+ assert.equal((await rpc(db,'opc_topic_consent',fits.actor,fits.draft,fitsFinal.versionId)).bound,true);
+ report.checks.push('127 source records finalize into 128 with usable topic handoff; 128 rejects and atomically rolls back every publication write');
  const closed=await seed(db);await save(db,closed);await finalize(db,closed,edited,1);
  await closeAccount(db,closed.base);
  await rpc(db,'account_erasure_scrub_content',closed.actor);

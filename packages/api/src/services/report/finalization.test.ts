@@ -41,7 +41,7 @@ it('rejects unverified identity before any privileged call', async () => {
   expect(f.rpc).not.toHaveBeenCalled();
 });
 it.each(['REPORT_NOT_COMPLETE', 'REPORT_BODY_INVALID', 'REPORT_VERSION_CONFLICT', 'REPORT_REQUEST_CONFLICT',
-  'REPORT_ALREADY_FINALIZED', 'CONTENT_ERASED', 'REPORT_SOURCE_CONFLICT'])(
+  'REPORT_ALREADY_FINALIZED', 'REPORT_EVIDENCE_CAPACITY', 'CONTENT_ERASED', 'REPORT_SOURCE_CONFLICT'])(
   'preserves stable database refusal %s', async message => {
     const f = fixture({ message });
     await expect(reportFinalizationService(user(), f.admin).read({ executionId })).rejects.toMatchObject({ message });
