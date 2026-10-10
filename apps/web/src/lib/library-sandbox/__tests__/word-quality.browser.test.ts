@@ -1,8 +1,11 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 // LIB_DOCS_PLAN §4.5 Word quality test, run through the production worker bundle in real Chromium.
 // Thresholds (initial values from the plan): character accuracy ≥ 99%, heading order ≥ 95%, no timeouts.
-// Set WORD_QUALITY_REPORT=<file> to write the per-sample table as JSON.
-import { readFileSync, writeFileSync } from 'node:fs';
+// Set WORD_QUALITY_REPORT=<file> to write the per-sample table as JSON. For a manual spot check with
+// real Word files (never user data), set WORD_SPOT_CHECK_DIR=<folder of .docx>; the extracted text of
+// each file is written to <folder>/<name>.extracted.txt for a person to compare. Nothing is asserted.
+import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import path from 'node:path';
 import type { Page } from '@playwright/test';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { startHarness, type Harness } from './browser-harness';
@@ -56,5 +59,18 @@ describe('Word quality corpus (20 fixed CN/EN samples)', () => {
     expect(summary.timeouts).toBe(0);
     expect(summary.accuracy).toBeGreaterThanOrEqual(0.99);
     expect(summary.headingOrder).toBeGreaterThanOrEqual(0.95);
+  }, 300_000);
+
+  it.runIf(Boolean(process.env.WORD_SPOT_CHECK_DIR))('writes spot-check extractions for real Word files', async () => {
+    const folder = process.env.WORD_SPOT_CHECK_DIR!;
+    for (const file of readdirSync(folder).filter((name) => name.toLowerCase().endsWith('.docx'))) {
+      harness.samples.set(`spot:${file}`, readFileSync(path.join(folder, file)));
+      const outcome = await page.evaluate((name) =>
+        (window as unknown as { sandboxTest: { extractSample(n: string): Promise<unknown> } }).sandboxTest.extractSample(name),
+      `spot:${file}`) as Extracted;
+      const headings = (outcome.value?.headings ?? []).map((heading) => `${'#'.repeat(heading.level)} ${heading.text}`);
+      const body = outcome.ok ? `${headings.join('\n')}\n\n---\n\n${outcome.value?.text ?? ''}` : `FAILED: ${outcome.code}`;
+      writeFileSync(path.join(folder, `${file}.extracted.txt`), `${body}\n\n(${Math.round(outcome.elapsedMs)} ms)\n`);
+    }
   }, 300_000);
 });
