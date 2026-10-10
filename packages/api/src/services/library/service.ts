@@ -60,7 +60,9 @@ export function libraryService(client: SupabaseClient, actorId: string, storage:
         if (file.contentType !== formats[doc.format]) throw new Error('LIBRARY_TYPE');
         verifyHeader(doc.format, file.bytes);
         const segments = doc.kind === 'document' ? textSegments(file.bytes) : [];
-        return await libraryRpc<{ documentId: string; status: 'ready' }>(client, 'library_publish', { a: actorId, did: documentId, actual: file.size, segments });
+        return await libraryRpc<{ documentId: string; status: 'ready' }>(client, 'library_publish', {
+          a: actorId, did: documentId, actual: file.size, segments,
+        });
       } catch (error) {
         await remove(documentId, true);
         const message = error instanceof Error && /^LIBRARY_[A-Z_]+$/.test(error.message)
