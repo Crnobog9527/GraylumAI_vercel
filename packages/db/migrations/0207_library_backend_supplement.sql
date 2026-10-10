@@ -1,5 +1,5 @@
 -- Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved.
--- LIB-2a supplement. No settings or bucket changes. Apply after assigned 0205-0207.
+-- LIB-2a supplement. No settings or bucket changes. Apply after 0206; assigned 0207 by control on 2026-10-11.
 BEGIN;
 SET LOCAL lock_timeout = '5s';
 CREATE INDEX IF NOT EXISTS library_documents_actor_created ON public.library_documents(actor_id,created_at DESC,id DESC);

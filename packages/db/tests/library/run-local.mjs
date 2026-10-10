@@ -40,12 +40,12 @@ try {
   assert.equal(report.failed, null, JSON.stringify(report));
   // Repeat new migration at its own position; the baseline replay command additionally compares structure.
   sql(readFileSync(resolve(root, 'packages/db/migrations/0203_library_documents.sql'), 'utf8'));
-  const supplement = readFileSync(resolve(root, 'packages/db/migrations/0208_library_backend_supplement.sql'), 'utf8');
+  const supplement = readFileSync(resolve(root, 'packages/db/migrations/0207_library_backend_supplement.sql'), 'utf8');
   sql(supplement);
   const catalog = () => sql(readFileSync(resolve(root, 'packages/db/tests/baseline/fingerprint.sql'), 'utf8'));
   const beforeSupplementRepeat = catalog();
   sql(supplement);
-  assert.equal(catalog(), beforeSupplementRepeat, '0208 repeat must not change schema/permissions');
+  assert.equal(catalog(), beforeSupplementRepeat, '0207 repeat must not change schema/permissions');
   const port = Number(docker(['port', name, '5432/tcp']).split(':').at(-1));
   const connect = async () => {
     const c = new pg.Client({ host: '127.0.0.1', port, database: 'lib2a', user: 'postgres', password: 'local-test-only' });
