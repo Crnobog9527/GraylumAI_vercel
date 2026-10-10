@@ -15,6 +15,7 @@ export type StripeCheckoutIntent = {
   request: Stripe.Checkout.SessionCreateParams;
   sessionId: string | null;
   recover?: boolean;
+  walletMethod?: 'wechat_pay' | 'alipay';
 };
 
 export function buildStripeCheckoutRequest(input: {
@@ -25,10 +26,11 @@ export function buildStripeCheckoutRequest(input: {
   productName: string;
   appUrl: string;
   expiresAt: number;
+  walletMethod?: 'wechat_pay' | 'alipay';
 }): Stripe.Checkout.SessionCreateParams {
   const snapshot = freezePurchaseSnapshot(input.snapshot);
   const amount = snapshotAmountDue(snapshot);
-  const recurring = snapshot.item_type === 'membership_plan';
+  const recurring = snapshot.item_type === 'membership_plan' && !input.walletMethod;
   if (recurring && majorToCents(snapshot.discount) !== 0) {
     throw new Error('PAY_COMMON_SUBSCRIPTION_DISCOUNT_UNSUPPORTED');
   }
@@ -45,7 +47,8 @@ export function buildStripeCheckoutRequest(input: {
       product_data: { name: input.productName } }, quantity: 1 };
   return {
     mode: recurring ? 'subscription' : 'payment',
-    payment_method_types: recurring ? ['card'] : ['card', 'alipay'],
+    payment_method_types: input.walletMethod ? [input.walletMethod] : recurring ? ['card'] : ['card', 'alipay'],
+    ...(input.walletMethod === 'wechat_pay' ? { payment_method_options: { wechat_pay: { client: 'web' as const } } } : {}),
     ...(recurring ? {} : { customer_creation: 'always' }),
     client_reference_id: input.userId,
     line_items: [lineItem],
@@ -99,10 +102,13 @@ export async function dispatchStripeCheckoutIntent(input: {
   if (intent.scope.merchant !== scope.merchant || intent.scope.mode !== scope.mode
     || intent.request.metadata?.orderId !== intent.id || intent.request.metadata?.userId !== intent.userId
     || intent.request.client_reference_id !== intent.userId) throw new Error('PAY_COMMON_ATTEMPT_IDENTITY_MISMATCH');
+  if (intent.walletMethod && (scope.mode !== 'test'
+    || intent.request.payment_method_types?.length !== 1
+    || intent.request.payment_method_types[0] !== intent.walletMethod)) throw new Error('PAY_WAFFO_METHOD_DENIED');
   const snapshot = freezePurchaseSnapshot(intent.snapshot);
   const item = intent.request.line_items?.[0];
   const discounted = majorToCents(snapshot.discount) !== 0;
-  if (intent.request.mode !== (snapshot.item_type === 'membership_plan' ? 'subscription' : 'payment')
+  if (intent.request.mode !== (snapshot.item_type === 'membership_plan' && !intent.walletMethod ? 'subscription' : 'payment')
     || intent.request.metadata?.itemId !== snapshot.item_id || intent.request.metadata?.itemType !== snapshot.item_type
     || intent.request.metadata?.billingCycle !== snapshot.billing_cycle || intent.request.metadata?.priceId !== intent.priceId
     || intent.request.line_items?.length !== 1 || item?.quantity !== 1
@@ -131,7 +137,7 @@ export async function dispatchStripeCheckoutIntent(input: {
         throw new Error('PAY_COMMON_CHECKOUT_RECONCILIATION_REQUIRED');
       }
       const price = await stripe.prices.retrieve(intent.priceId);
-      assertStripePurchasePrice({ price, priceId: intent.priceId, snapshot: intent.snapshot, scope });
+      assertStripePurchasePrice({ price, priceId: intent.priceId, snapshot: intent.snapshot, scope, walletMethod: intent.walletMethod });
       session = await stripe.checkout.sessions.create(intent.request, { idempotencyKey: checkoutIdempotencyKey(intent.id) });
     }
   }
