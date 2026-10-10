@@ -94,6 +94,17 @@ describe('extractDocx: text, structure and images', () => {
     expect(result.images.map((image) => result.text.slice(0, image.offset))).toEqual(['页眉99999999\n正文']);
   });
 
+  it('bounds the bytes of returned images when one picture is referenced many times', async () => {
+    let seed = 3;
+    const noise = Buffer.from(Array.from({ length: 3_000_000 }, () => (seed = (seed * 1_103_515_245 + 12_345) % 2_147_483_648) & 0xff));
+    const body = Array.from({ length: 30 }, () => `<w:p>${picture(1)}</w:p>`).join('') + para('end');
+    const result = await extract(buildDocx({ body, images: [noise] }));
+    expect(result.imageCount).toBe(30);
+    expect(result.images).toHaveLength(16);
+    expect(result.images.reduce((sum, image) => sum + image.bytes.byteLength, 0)).toBeLessThanOrEqual(50_000_000);
+    expect(result.warnings).toContain('IMAGE_LIMIT');
+  });
+
   it('numbers contiguous list items and keeps unordered bullets', async () => {
     const level = (format: string) => `<w:lvl w:ilvl="0"><w:numFmt w:val="${format}"/></w:lvl>`;
     const numbering = `<w:abstractNum w:abstractNumId="0">${level('decimal')}</w:abstractNum>`

@@ -83,15 +83,37 @@ describe('XML guard', () => {
 });
 
 describe('header and footer text', () => {
+  const REL = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships';
+  const rels = (ids: string[]) => `<Relationships>${ids.map((id) =>
+    `<Relationship Id="${id}" Type="${REL}/${id.startsWith('f') ? 'footer' : 'header'}" Target="${id}.xml"/>`).join('')}</Relationships>`;
+  const packageRels = `<Relationships><Relationship Id="r1" Type="${REL}/officeDocument" Target="word/document.xml"/></Relationships>`;
+  const part = (text: string) => `<w:hdr><w:p><w:r><w:t>${text}</w:t></w:r></w:p></w:hdr>`;
+
   it('reads w:t, tabs and breaks, decodes entities, skips deleted text and field codes, dedupes', () => {
     const header = '<w:hdr><w:p><w:r><w:t>A&amp;B</w:t><w:tab/><w:t>&#x4E2D;</w:t></w:r>'
       + '<w:r><w:delText>gone</w:delText><w:instrText>PAGE</w:instrText></w:r></w:p></w:hdr>';
     const parts = new Map([
-      ['word/header2.xml', header], ['word/header1.xml', header],
-      ['word/footer1.xml', '<w:ftr><w:p><w:r><w:t>页脚</w:t><w:br/><w:t>2</w:t></w:r></w:p></w:ftr>'],
-      ['word/document.xml', '<w:p><w:r><w:t>body</w:t></w:r></w:p>'],
+      ['_rels/.rels', packageRels], ['word/_rels/document.xml.rels', rels(['h1', 'h2', 'f1'])],
+      ['word/document.xml', '<w:body><w:sectPr><w:headerReference w:type="default" r:id="h1"/>'
+        + '<w:footerReference w:type="default" r:id="f1"/></w:sectPr><w:sectPr><w:headerReference w:type="default" r:id="h2"/></w:sectPr></w:body>'],
+      ['word/h1.xml', header], ['word/h2.xml', header],
+      ['word/f1.xml', '<w:ftr><w:p><w:r><w:t>页脚</w:t><w:br/><w:t>2</w:t></w:r></w:p></w:ftr>'],
     ]);
     expect(headerFooterText(parts)).toEqual({ headers: ['A&B\t中'], footers: ['页脚\n2'] });
+  });
+
+  it('ignores orphaned parts and first/even-page parts the document does not turn on', () => {
+    const document = (titlePg: string) => '<w:body><w:sectPr><w:headerReference w:type="default" r:id="h1"/>'
+      + `<w:headerReference w:type="first" r:id="h2"/><w:headerReference w:type="even" r:id="h3"/>${titlePg}</w:sectPr></w:body>`;
+    const base = (doc: string, settings = '') => new Map([
+      ['_rels/.rels', packageRels], ['word/_rels/document.xml.rels', rels(['h1', 'h2', 'h3'])], ['word/document.xml', doc],
+      ['word/settings.xml', settings], ['word/h1.xml', part('默认')], ['word/h2.xml', part('首页')], ['word/h3.xml', part('偶数页')],
+      ['word/header9.xml', part('旧的已删除页眉')],
+    ]);
+    expect(headerFooterText(base(document(''))).headers).toEqual(['默认']);
+    expect(headerFooterText(base(document('<w:titlePg w:val="0"/>'))).headers).toEqual(['默认']);
+    expect(headerFooterText(base(document('<w:titlePg/>'), '<w:settings><w:evenAndOddHeaders/></w:settings>')).headers)
+      .toEqual(['默认', '首页', '偶数页']);
   });
 });
 

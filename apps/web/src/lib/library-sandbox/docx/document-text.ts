@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { SandboxError } from '../errors';
-import { MAX_EMBEDDED_IMAGES, MAX_HEADING_CHARS, MAX_HEADINGS, SANDBOX_LIMITS } from '../limits';
+import { MAX_EMBEDDED_IMAGES, MAX_HEADING_CHARS, MAX_HEADINGS, MAX_IMAGE_BYTES_TOTAL, SANDBOX_LIMITS } from '../limits';
 import type { HeaderFooterText } from './header-footer';
 
 /**
@@ -260,15 +260,26 @@ function copyBytes(value: ArrayBuffer | Uint8Array): ArrayBuffer {
 async function readImages(builder: TextBuilder, offsets: number[], warnings: Set<DocxWarning>): Promise<DocxImage[]> {
   if (builder.imageCount > MAX_EMBEDDED_IMAGES) warnings.add('IMAGE_LIMIT');
   const images: DocxImage[] = [];
+  let total = 0;
   for (const [position, node] of builder.pendingImages.entries()) {
+    let bytes: ArrayBuffer | Uint8Array | undefined;
     try {
-      const bytes = await node.readAsArrayBuffer?.();
-      if (!bytes) throw new Error('missing');
-      const offset = offsets[position] ?? 0;
-      images.push({ index: images.length, contentType: node.contentType || 'application/octet-stream', bytes: copyBytes(bytes), offset });
+      bytes = await node.readAsArrayBuffer?.();
     } catch {
-      warnings.add('EXTERNAL_IMAGE');
+      bytes = undefined;
     }
+    if (!bytes) {
+      warnings.add('EXTERNAL_IMAGE');
+      continue;
+    }
+    // One media part can be referenced many times; the reply as a whole stays bounded.
+    total += bytes.byteLength;
+    if (total > MAX_IMAGE_BYTES_TOTAL) {
+      warnings.add('IMAGE_LIMIT');
+      break;
+    }
+    const contentType = node.contentType || 'application/octet-stream';
+    images.push({ index: images.length, contentType, bytes: copyBytes(bytes), offset: offsets[position] ?? 0 });
   }
   return images;
 }

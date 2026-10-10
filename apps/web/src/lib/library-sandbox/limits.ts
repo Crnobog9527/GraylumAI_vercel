@@ -33,6 +33,8 @@ export const XML_LIMITS = {
 
 /** Recognition units per file (LIB_DOCS_PLAN §4.1: Word images and PDF pages share the 50 cap). */
 export const MAX_EMBEDDED_IMAGES = 50;
+/** Bytes of all returned images together (the same media part may be referenced many times). */
+export const MAX_IMAGE_BYTES_TOTAL = 50_000_000;
 export const MAX_HEADINGS = 10_000;
 export const MAX_HEADING_CHARS = 1_000;
 export const MAX_WARNINGS = 50;

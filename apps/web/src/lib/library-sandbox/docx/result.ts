@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { SandboxError } from '../errors';
-import { MAX_EMBEDDED_IMAGES, MAX_HEADING_CHARS, MAX_HEADINGS, MAX_WARNINGS, SANDBOX_LIMITS } from '../limits';
+import { MAX_EMBEDDED_IMAGES, MAX_HEADING_CHARS, MAX_HEADINGS, MAX_IMAGE_BYTES_TOTAL, MAX_WARNINGS, SANDBOX_LIMITS } from '../limits';
 import { isRecord } from '../protocol';
 import type { DocxExtraction, DocxHeading, DocxImage, DocxWarning } from './document-text';
 
@@ -27,7 +27,7 @@ function heading(value: unknown, textLength: number): DocxHeading {
 function image(value: unknown, index: number, textLength: number): DocxImage {
   if (!isRecord(value) || value.index !== index || !isIndex(value.offset, textLength)) return reject();
   if (typeof value.contentType !== 'string' || !CONTENT_TYPE.test(value.contentType)) return reject();
-  if (!(value.bytes instanceof ArrayBuffer) || value.bytes.byteLength > SANDBOX_LIMITS.maxInputBytes * 5) return reject();
+  if (!(value.bytes instanceof ArrayBuffer) || value.bytes.byteLength > MAX_IMAGE_BYTES_TOTAL) return reject();
   return { index, contentType: value.contentType, bytes: value.bytes, offset: value.offset };
 }
 
@@ -41,10 +41,12 @@ export function validateDocxExtraction(value: unknown): DocxExtraction {
   if (!isIndex(imageCount, Number.MAX_SAFE_INTEGER) || imageCount < images.length) return reject();
   if (!Array.isArray(warnings) || warnings.length > MAX_WARNINGS) return reject();
   if (!warnings.every((warning) => WARNINGS.has(warning as DocxWarning))) return reject();
+  const checkedImages = images.map((item, index) => image(item, index, text.length));
+  if (checkedImages.reduce((sum, item) => sum + item.bytes.byteLength, 0) > MAX_IMAGE_BYTES_TOTAL) return reject();
   return {
     text,
     headings: headings.map((item) => heading(item, text.length)),
-    images: images.map((item, index) => image(item, index, text.length)),
+    images: checkedImages,
     imageCount,
     warnings: [...warnings] as DocxWarning[],
   };
