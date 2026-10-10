@@ -46,3 +46,10 @@ it('guided Skill chat reads expose the explicit deletion refusal',async()=>{
  await expect(skillChatService(user as never,database as never).stats())
   .rejects.toMatchObject({code:'PRECONDITION_FAILED',message:'CONTENT_ERASED'});
 });
+
+it('research replay exposes the explicit deletion refusal',async()=>{
+ const {databaseResearchStore}=await import('../research/store');
+ const database={rpc:async()=>({data:null,error:{code:'42501',message:'CONTENT_ERASED'}})};
+ await expect(databaseResearchStore(database as never,actor).get(actor,actor))
+  .rejects.toMatchObject({code:'PRECONDITION_FAILED',message:'CONTENT_ERASED'});
+});

@@ -225,6 +225,8 @@ BEGIN
   UNION SELECT c.id FROM opc_content_versions c JOIN descendants d ON c.source_content_id=d.id WHERE c.actor_id=a
  ) SELECT coalesce(array_agg(id ORDER BY id),'{}') INTO refs FROM descendants;
  refs:=refs||executions||sessions||projects||versions||content_ids||
+  ARRAY(SELECT id FROM artifact_evidence WHERE project_id=ANY(projects))||
+  ARRAY(SELECT operation_id FROM artifact_evidence WHERE project_id=ANY(projects) AND operation_id IS NOT NULL)||
   ARRAY(SELECT draft_id FROM opc_drafts WHERE actor_id=a AND project_id=ANY(projects))||
   ARRAY(SELECT conversation_id FROM artifact_chats WHERE project_id=ANY(projects))||
   ARRAY(SELECT work_item_id FROM opc_items WHERE source_version_id=ANY(versions))||
@@ -287,7 +289,7 @@ GRANT EXECUTE ON FUNCTION public.content_erasure_preview(uuid,text,uuid) TO serv
 CREATE OR REPLACE FUNCTION public.content_erasure_confirm(a uuid,k text,target uuid,expected_hash text)
 RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
 DECLARE scope jsonb; ids uuid[]; sessions uuid[]; projects uuid[]; versions uuid[]; contents uuid[];
- refs uuid[]; rounds uuid[]; chats uuid[]; stamp timestamptz:=clock_timestamp(); row record; financial jsonb;
+ refs uuid[]; rounds uuid[]; chats uuid[]; research_ids uuid[]; research_plan_ids uuid[]; stamp timestamptz:=clock_timestamp(); row record; financial jsonb;
  remaining bigint:=0; deleted boolean;
 BEGIN
  PERFORM bill2_actor(a);
@@ -311,6 +313,17 @@ BEGIN
  chats:=ARRAY(SELECT c.conversation_id FROM artifact_chats c JOIN conversations v ON v.id=c.conversation_id
   WHERE c.project_id=ANY(projects) AND v.user_id=a);
  PERFORM id FROM conversations WHERE id=ANY(chats) ORDER BY id FOR UPDATE NOWAIT;
+ research_ids:=ARRAY(SELECT DISTINCT o.id FROM research_operations o JOIN research_plans p ON p.id=o.plan_id
+  JOIN artifact_evidence e ON e.operation_id=o.id WHERE p.actor_id=a AND
+   (e.project_id=ANY(projects) OR e.id IN (SELECT evidence_id FROM opc_result_links WHERE execution_id=ANY(ids))));
+ research_plan_ids:=ARRAY(SELECT DISTINCT plan_id FROM research_operations WHERE id=ANY(research_ids));
+ -- Research RPCs serialize on the plan. NOWAIT avoids their plan -> project lock inversion.
+ PERFORM id FROM research_plans WHERE id=ANY(research_plan_ids) ORDER BY id FOR UPDATE NOWAIT;
+ PERFORM id FROM research_operations WHERE id=ANY(research_ids) ORDER BY id FOR UPDATE NOWAIT;
+ IF EXISTS(SELECT 1 FROM research_operations WHERE id=ANY(research_ids) AND erased_at IS NULL AND
+   (state NOT IN ('succeeded','failed','cancelled') OR (pre_deduct_id IS NOT NULL AND charged_credits IS NULL))) THEN
+  RAISE EXCEPTION 'CONTENT_ERASURE_BUSY' USING ERRCODE='55P03';
+ END IF;
  SELECT coalesce(array_agg(v::uuid),'{}') INTO refs FROM jsonb_array_elements_text(scope->'references') v;
  refs:=refs||ids||sessions||projects||versions||contents||rounds;
  PERFORM id FROM runtime_executions WHERE id=ANY(ids) ORDER BY id FOR UPDATE NOWAIT;
@@ -409,6 +422,17 @@ BEGIN
  UPDATE artifact_versions SET report=NULL,report_hash=NULL,erased_at=stamp WHERE project_id=ANY(projects) AND erased_at IS NULL;
  UPDATE artifact_candidates SET body=NULL,erased_at=stamp WHERE round_id=ANY(rounds) AND erased_at IS NULL;
  UPDATE artifact_confirmations SET body=NULL,erased_at=stamp WHERE round_id=ANY(rounds) AND erased_at IS NULL;
+ -- Same terminal-result cost projection as account erasure; original amounts and charge IDs stay intact.
+ UPDATE research_operations o SET erased_at=stamp,
+  result=(SELECT jsonb_object_agg(e.key,e.value) FROM jsonb_each(
+   CASE WHEN jsonb_typeof(o.result)='object' THEN o.result ELSE '{}'::jsonb END) e WHERE e.key='cost')
+ WHERE o.id=ANY(research_ids) AND o.erased_at IS NULL;
+ -- Plans contain approved operation IDs/hashes/quote ceilings, never query text. Preserve
+ -- mixed plans for unrelated operations; clear only when every approved operation is erased.
+ UPDATE research_plans p SET operations=NULL,erased_at=stamp WHERE p.id=ANY(research_plan_ids)
+  AND p.erased_at IS NULL AND NOT EXISTS(SELECT 1 FROM jsonb_array_elements(p.operations) item
+   WHERE NOT EXISTS(SELECT 1 FROM research_operations o WHERE o.plan_id=p.id
+    AND o.id::text=item->>'operationId' AND o.erased_at IS NOT NULL));
  UPDATE artifact_evidence SET payload=NULL,content_hash=NULL,erased_at=stamp WHERE erased_at IS NULL AND
   (project_id=ANY(projects) OR id IN (SELECT evidence_id FROM opc_result_links WHERE execution_id=ANY(ids)));
  UPDATE artifact_requests SET payload=(SELECT jsonb_object_agg(key,value) FROM jsonb_each(coalesce(payload,'{}'))
@@ -677,6 +701,21 @@ $patch$);
    E' -- D7 scope tombstones\n SELECT NOT EXISTS(SELECT 1 FROM artifact_projects p WHERE p.actor_id=a AND p.erased_at IS NOT NULL\n AND (p.id::text=s->>''projectId'' OR p.id::text=s->>''workItemId''\n OR p.id IN (SELECT project_id FROM opc_drafts WHERE draft_id::text=s->>''draftId'')))\n AND (bill2_scope_allowed_before_topic');
  END IF;
 END $$;
+-- Check research tombstones only after the authoritative plan lock and ownership check.
+-- Unsettled terminal charges are refused above so this never interrupts their original recovery.
+DO $$ DECLARE source text; sig text; needle text; BEGIN
+ FOREACH sig IN ARRAY ARRAY['research_transition(text,uuid,uuid,uuid,jsonb)','research_lookup(uuid,uuid,uuid)'] LOOP
+  source:=pg_get_functiondef(('public.'||sig)::regprocedure);
+  IF position('-- D7 research tombstones' IN source)=0 THEN
+   needle:=CASE WHEN sig LIKE 'research_transition%' THEN
+    'IF NOT FOUND OR p.actor_id<>p_actor_id THEN RAISE EXCEPTION ''research denied'' USING ERRCODE=''42501''; END IF;'
+    ELSE 'IF p.actor_id<>p_actor_id THEN RAISE EXCEPTION ''research denied'' USING ERRCODE=''42501''; END IF;' END;
+   IF position(needle IN source)=0 THEN RAISE EXCEPTION 'D7 research boundary mismatch'; END IF;
+   EXECUTE replace(source,needle,needle||E'\n -- D7 research tombstones\n IF p.erased_at IS NOT NULL OR EXISTS(SELECT 1 FROM research_operations WHERE id=p_operation_id AND plan_id=p.id AND erased_at IS NOT NULL) THEN RAISE EXCEPTION ''CONTENT_ERASED'' USING ERRCODE=''42501''; END IF;');
+  END IF;
+ END LOOP;
+END $$;
+
 -- Serialize late child inserts with the same parent rows locked by confirmation.
 -- No table grants change; these guards also cover an RPC admitted before deletion.
 CREATE OR REPLACE FUNCTION public.content_erasure_parent_guard() RETURNS trigger

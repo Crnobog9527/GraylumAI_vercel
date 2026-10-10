@@ -9,6 +9,7 @@ import {resolve} from 'node:path';
 import {POSTGRES_IMAGE} from '../v3/images.mjs';
 import {buildFromFiles,installPgCronStub} from '../baseline/build-from-files.mjs';
 import {runCases} from './cases.mjs';
+import {runResearch} from './research.mjs';
 import {runArtifacts} from './artifacts.mjs';
 import {runDependencies} from './dependencies.mjs';
 import {runCaptureV3} from './capture-v3.mjs';
@@ -64,6 +65,7 @@ try {
  await client.query(read('packages/db/tests/content-erasure/fixture.sql'));
  await runCases(client,report);
  await runArtifacts(client,report);
+ await runResearch({db:client,Client,connectionString,report});
  await client.query(read('packages/db/tests/runtime-view-perf/fixture.sql'));
  await runDependencies(client,report);
  await runCaptureV3(client,report);
