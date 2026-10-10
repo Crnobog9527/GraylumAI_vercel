@@ -88,3 +88,27 @@ it('reaches an orphan behind retained objects without 99 sequential ownership ca
   expect(rpc).toHaveBeenCalledTimes(1);
   expect(storage.remove).toHaveBeenCalledWith(paths[99]);
 });
+
+it('does not remove storage when an expired snapshot has already published successfully',async()=>{
+  rpc.mockImplementation(async(name:string)=>{
+    if(name==='library_cleanup_candidates') return {data:[{...row,status:'uploading',cleanup:false,
+      original_guard_until:new Date(Date.now()-1000).toISOString()}]};
+    if(name==='library_delete') return {data:{status:'ready'}};
+    if(name==='library_cleanup_backlog') return {data:{pending:0,overdue:0,oldestDeletedAt:null}};
+    return {data:false};
+  });
+  await cleanupLibrary(client,{actorId:a,storage});
+  expect(rpc).toHaveBeenCalledWith('library_delete',{a,did:id,closed:true,unfinished_only:true,expiry_only:true});
+  expect(storage.remove).not.toHaveBeenCalled();
+  expect(storage.absent).not.toHaveBeenCalled();
+});
+it('only explicit erasure candidates use unconditional deletion',async()=>{
+  rpc.mockImplementation(async(name:string)=>{
+    if(name==='library_cleanup_candidates') return {data:[{...row,status:'ready',closed:true,cleanup:false}]};
+    if(name==='library_delete') return {data:{status:'deleting'}};
+    if(name==='library_cleanup_backlog') return {data:{pending:1,overdue:0,oldestDeletedAt:null}};
+    return {data:false};
+  });
+  await cleanupLibrary(client,{actorId:a,storage});
+  expect(rpc).toHaveBeenCalledWith('library_delete',{a,did:id,closed:true,unfinished_only:false,expiry_only:false});
+});

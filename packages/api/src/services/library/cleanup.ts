@@ -26,8 +26,12 @@ export async function cleanupLibrary(client: SupabaseClient, options: {
       const expired = Date.now() > Math.max(Date.parse(row.original_guard_until),
         row.text_guard_until ? Date.parse(row.text_guard_until) : 0);
       if (row.closed || row.status === 'uploading' && expired) {
-        await libraryRpc(client, 'library_delete', { a: row.actor_id, did: row.document_id, closed: true });
-        row.cleanup = true;
+        const deletion = await libraryRpc<{ status: string }>(client, 'library_delete', {
+          a: row.actor_id, did: row.document_id, closed: true, unfinished_only: !row.closed, expiry_only: !row.closed,
+        });
+        // A stale uploading candidate may already have published. The locked RPC decides;
+        // never touch Storage unless that transaction actually marked it for deletion.
+        row.cleanup = deletion.status === 'deleting';
       }
       let absent = false;
       if (row.cleanup) {

@@ -178,7 +178,7 @@ BEGIN
  UPDATE library_documents SET status='ready',original_bytes=actual,text_bytes=total WHERE id=did;
  RETURN jsonb_build_object('status','ready','documentId',did);
 END $$;
-CREATE OR REPLACE FUNCTION public.library_delete(a uuid,did uuid,closed boolean DEFAULT false,unfinished_only boolean DEFAULT false)
+CREATE OR REPLACE FUNCTION public.library_delete(a uuid,did uuid,closed boolean DEFAULT false,unfinished_only boolean DEFAULT false,expiry_only boolean DEFAULT false)
 RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
 DECLARE d library_documents;
 BEGIN
@@ -186,6 +186,9 @@ BEGIN
  SELECT * INTO d FROM library_documents WHERE id=did AND actor_id=a FOR UPDATE;
  IF d.id IS NULL THEN RETURN jsonb_build_object('status','deleted'); END IF;
  IF unfinished_only AND d.status='ready' THEN RETURN jsonb_build_object('status','ready'); END IF;
+ IF expiry_only AND clock_timestamp()<=(SELECT greatest(original_guard_until,text_guard_until)
+  FROM library_upload_reservations WHERE document_id=did) THEN
+  RETURN jsonb_build_object('status',d.status); END IF;
  UPDATE library_documents SET status='deleting',deleted_at=coalesce(deleted_at,clock_timestamp()),
   filename=NULL,purpose=NULL,format=NULL,original_bytes=0,text_bytes=0 WHERE id=did;
  DELETE FROM library_document_segments WHERE document_id=did;
@@ -227,11 +230,11 @@ BEGIN
  IF current_setting('role',true) IS DISTINCT FROM 'service_role' OR n NOT BETWEEN 1 AND 100 THEN
   RAISE EXCEPTION 'LIBRARY_FORBIDDEN'; END IF;
  RETURN (SELECT coalesce(jsonb_agg(to_jsonb(x)),'[]') FROM (SELECT r.*,d.status,
-  (p.status IS DISTINCT FROM 'active' OR p.is_deleted::text IS DISTINCT FROM 'false'
+  (p.is_deleted::text='true'
    OR EXISTS(SELECT 1 FROM account_erasure_requests WHERE profile_id=r.actor_id)) AS closed
   FROM library_upload_reservations r JOIN library_documents d ON d.id=r.document_id JOIN profiles p ON p.id=r.actor_id
   WHERE (a IS NULL OR r.actor_id=a) AND (did IS NULL OR r.document_id=did)
-  AND (r.cleanup OR p.status IS DISTINCT FROM 'active' OR p.is_deleted::text IS DISTINCT FROM 'false'
+  AND (r.cleanup OR p.is_deleted::text='true'
    OR EXISTS(SELECT 1 FROM account_erasure_requests WHERE profile_id=r.actor_id)
    OR (r.original_guard_until<clock_timestamp() AND (d.status='uploading'
     OR (d.status='ready' AND r.original_hold<>d.original_bytes))))
@@ -292,7 +295,7 @@ LANGUAGE sql SECURITY DEFINER SET search_path=public,pg_temp AS $$
  FROM library_upload_reservations r JOIN library_documents d ON d.id=r.document_id
  JOIN profiles p ON p.id=r.actor_id WHERE (a IS NULL OR r.actor_id=a) AND
  (r.cleanup OR (d.status='uploading' AND r.original_guard_until<clock_timestamp())
-  OR p.status IS DISTINCT FROM 'active' OR p.is_deleted::text IS DISTINCT FROM 'false'
+  OR p.is_deleted::text='true'
   OR EXISTS(SELECT 1 FROM account_erasure_requests WHERE profile_id=r.actor_id))
 $$;
 

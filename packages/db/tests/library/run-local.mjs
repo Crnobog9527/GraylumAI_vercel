@@ -125,6 +125,28 @@ try {
   await one.query('SELECT library_delete($1,$2,false,true)',[b,image.documentId]);
   assert.equal((await one.query('SELECT library_document_read($1,$2) AS value',[b,image.documentId])).rows[0].value.status,'ready');
   await admin.query("UPDATE membership_plans SET library_storage_bytes=50000000 WHERE level='free'");
+  // Disabled/banned are reversible access states, never erasure requests.
+  await admin.query("UPDATE library_upload_reservations SET original_guard_until=now()-interval '1 minute' WHERE document_id=$1",[image.documentId]);
+  for(const state of ['disabled','banned']) {
+    await admin.query('UPDATE profiles SET status=$2 WHERE id=$1',[b,state]);
+    await expectError(()=>one.query('SELECT library_document_read($1,$2)',[b,image.documentId]),'LIBRARY_ACCOUNT_CLOSED');
+    const candidates=(await one.query('SELECT library_cleanup_candidates($1) AS value',[b])).rows[0].value;
+    assert.ok(candidates.every(row=>row.closed===false));
+    assert.equal((await one.query('SELECT library_cleanup_backlog($1) AS value',[b])).rows[0].value.pending,0);
+  }
+  await admin.query("UPDATE profiles SET status='active' WHERE id=$1",[b]);
+  assert.equal((await one.query('SELECT library_document_read($1,$2) AS value',[b,image.documentId])).rows[0].value.status,'ready');
+  // Deterministic stale-candidate race: observe expiry, then publication commits, then cleanup takes its lock.
+  const racing=randomUUID(); await admin.query('INSERT INTO profiles(id) VALUES($1)',[racing]);
+  const raceDoc=(await begin(one,racing)).rows[0].value.documentId;
+  assert.equal((await one.query('SELECT library_delete($1,$2,true,true,true) AS value',
+    [racing,raceDoc])).rows[0].value.status,'uploading');
+  await admin.query("UPDATE library_upload_reservations SET original_guard_until=now()-interval '1 minute' WHERE document_id=$1",[raceDoc]);
+  const stale=(await one.query('SELECT library_cleanup_candidates($1) AS value',[racing])).rows[0].value;
+  assert.equal(stale[0].status,'uploading');
+  await two.query('SELECT library_publish($1,$2,5,$3)',[racing,raceDoc,JSON.stringify([{title:'',body:'hello'}])]);
+  assert.equal((await one.query('SELECT library_delete($1,$2,true,true,true) AS value',[racing,raceDoc])).rows[0].value.status,'ready');
+  assert.equal((await one.query('SELECT library_segments($1,$2,1) AS value',[racing,raceDoc])).rows[0].value[0].body,'hello');
   // File-count protection is independent of membership; deleted shells still consume a slot until cleaned.
   const many=randomUUID(); await admin.query('INSERT INTO profiles(id) VALUES($1)',[many]);
   await admin.query(`INSERT INTO library_documents(actor_id,request_id,kind,status)
@@ -144,7 +166,7 @@ try {
     cases:['default-off','concurrent-quota-barrier','idempotent-no-new-token','cross-user-denial','actual-size',
       'atomic-publication','downgrade-read-delete','delete-private-fields','delete-publish-denial','live-token-hold',
       'late-object-resets-proof','two-absence-release','domain-erasure-proof','anonymous-authenticated-denied',
-      'raw-service-table-denied','ticket-upload-regression','closed-account','private-bucket-policy']}));
+      'raw-service-table-denied','disabled-banned-retention','stale-expiry-publication','live-expiry-recheck','ticket-upload-regression','closed-account','private-bucket-policy']}));
   console.log('NOT_RUN: shared erasure completion/two-bucket restart (#766 dependency); real Storage; final post-dependency fingerprint');
 } finally {
   await Promise.all(clients.map(c=>c.end()));
