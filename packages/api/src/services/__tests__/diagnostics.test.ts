@@ -273,7 +273,7 @@ describe('diagnostics routed client contract', () => {
 });
 
 describe('billing diagnostic service uses only real read paths', () => {
-  it.each(['healthy', 'query failure', 'mismatch'] as const)('runs all three probes: %s', async mode => {
+  it.each(['healthy', 'query failure', 'mismatch'] as const)('keeps three read-only probes and reports the unavailable stop-loss monitor: %s', async mode => {
     const writes: string[] = [];
     const rpc = vi.fn(async (name: string) => {
       if (name !== 'research_billing_summary') throw new Error('Mutating RPC is forbidden');
@@ -295,8 +295,9 @@ describe('billing diagnostic service uses only real read paths', () => {
     const service = new DiagnosticsService({ supabase: { from, rpc } as never,
       supabaseAdmin: { from, rpc: adminRpc } as never, userId: 'synthetic-admin' });
     const result = await service.runCategoryTests('billing');
-    expect(result.results.map(r => r.status)).toEqual(mode === 'query failure'
+    expect(result.results.filter(r => r.testId !== 'runtime_stop_loss').map(r => r.status)).toEqual(mode === 'query failure'
       ? ['failed', 'failed', 'failed'] : ['warning', 'warning', mode === 'mismatch' ? 'failed' : 'passed']);
+    expect(result.results.find(r => r.testId === 'runtime_stop_loss')?.status).toBe('error');
     expect(adminRpc).not.toHaveBeenCalled();
     expect(rpc.mock.calls.map(([name]) => name)).toEqual(['research_billing_summary']);
     expect(writes).toEqual(['diagnostic_results']);

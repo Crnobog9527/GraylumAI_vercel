@@ -61,7 +61,8 @@ async function fixture() {
 it.each(['call_limited', 'paused', 'limit_unavailable'] as const)('RUNTIME: %s before first claim refunds fully and releases the session', async reason => {
   const f = await fixture(), execution = await f.admit();
   const gate = vi.fn<RuntimeCallGate>().mockResolvedValue({ ok: false, reason, retryAfter: 60 });
-  expect(await f.host(gate).execute(execution.executionId)).toEqual({ state: 'cancelled', unavailable: reason });
+  expect(await f.host(gate).execute(execution.executionId)).toEqual({ state: 'cancelled', unavailable: reason,
+    ...(reason === 'paused' ? { code: 'RUNTIME_NEW_CALLS_STOPPED' } : {}) });
   expect(gate).toHaveBeenCalledExactlyOnceWith(f.actorId, 2, 'bill2.v1'); expect(f.transport).not.toHaveBeenCalled();
   expect((await db.query('select count(*)::int n from bill2_calls where run_id=$1', [execution.runId])).rows[0].n).toBe(0);
   expect((await db.query('select credits from profiles where id=$1', [f.actorId])).rows[0].credits).toBe(100);

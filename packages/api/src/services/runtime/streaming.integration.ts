@@ -1201,7 +1201,8 @@ it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true').each(['call_limited','pau
  const gate=vi.fn(async()=>({ok:false as const,reason,retryAfter:60}));
  const host=()=>runtimeExecutor({database:admin,actor:async()=>f.actorId,adapter,callGate:gate});
  const result=await host().execute(f.execution.executionId,event=>events.push(event));
- expect(result).toEqual({state:'cancelled',unavailable:reason});
+ expect(result).toEqual({state:'cancelled',unavailable:reason,
+   ...(reason==='paused'?{code:'RUNTIME_NEW_CALLS_STOPPED'}:{})});
  expect(events.filter(event=>event.type==='text')).toEqual([]);
  expect(await host().execute(f.execution.executionId)).toMatchObject({state:'cancelled'});
  expect(posts).toBe(0);expect(gate).toHaveBeenCalledTimes(1);

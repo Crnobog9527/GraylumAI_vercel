@@ -4,6 +4,7 @@ import { runtimeGateMessages, type RuntimeGateMessage } from '../shared/runtimeG
 /** Safe public rejection shared by the service and its transport adapters. */
 export class RateLimitError extends TRPCError {
   readonly retryAfter: number;
+  readonly businessCode?: 'RUNTIME_NEW_CALLS_STOPPED';
   constructor(reason: 'unavailable' | 'rate_limited', retryAfter = 60, message?: RuntimeGateMessage) {
     const seconds = Number.isSafeInteger(retryAfter) && retryAfter > 0 ? retryAfter : 60;
     super({
@@ -13,6 +14,7 @@ export class RateLimitError extends TRPCError {
       cause: { retryAfter: seconds },
     });
     this.retryAfter = seconds;
+    this.businessCode = message === 'paused' ? 'RUNTIME_NEW_CALLS_STOPPED' : undefined;
   }
 }
 
@@ -21,8 +23,10 @@ export function rateLimitErrorFormatter({ shape, error }: {
   shape: TRPCDefaultErrorShape;
   error: TRPCError;
 }) {
+  const limit = error instanceof RateLimitError ? error : error.cause instanceof RateLimitError ? error.cause : undefined;
   return {
     ...shape,
-    data: { ...shape.data, ...(error instanceof RateLimitError ? { retryAfter: error.retryAfter } : {}) },
+    data: { ...shape.data, ...(limit ? { retryAfter: limit.retryAfter,
+      ...(limit.businessCode ? { businessCode: limit.businessCode } : {}) } : {}) },
   };
 }

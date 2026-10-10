@@ -4,6 +4,8 @@ import { logger } from '../../lib/logger';
 // Exact SQL exception messages only. Never log database detail, hints, payloads,
 // actor identifiers or an arbitrary upstream message.
 const claimRejections = new Set([
+  'RUNTIME_NEW_CALLS_STOPPED', 'RUNTIME_USER_DAILY_USD_LIMIT',
+  'RUNTIME_SITE_DAILY_USD_LIMIT', 'RUNTIME_STOP_LOSS_CONFIG_INVALID',
   'BILL2_START_THRESHOLD_UNCONFIGURED', 'BILL2_PAYG_QUOTE_INVALID',
   'BILL2_PAYG_BOUND_MISMATCH', 'BILL2_NOMINAL_BOUND_MISMATCH',
   'BILL2_NOMINAL_PRICING_INVALID', 'BILL2_PAYG_METERING_BLOCKED',

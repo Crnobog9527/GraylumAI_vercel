@@ -95,7 +95,7 @@ export function authoritativeBilling(deps: { budget?:RuntimeBudget; admin: Billi
     const remaining=Math.max(1,Math.floor(deps.budget?.remainingPersistence()??10_000));
     const result=await (financialNames.has(name)&&query.abortSignal ? query.abortSignal(AbortSignal.timeout(Math.min(10_000,remaining))) : query);
     if (result.error) {
-      if (name === 'bill2_claim') throw claimFailure(result.error);
+      if (name === 'bill2_claim' || name === 'bill2_dispatch') throw claimFailure(result.error);
       throw new Error('BILL2_DATABASE_UNAVAILABLE');
     }
     return result.data as T;
