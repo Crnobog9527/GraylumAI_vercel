@@ -7,6 +7,7 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { releaseDueAnnualSubscriptionCredits } from '@repo/api/src/services/subscriptionCreditGrants';
+import { releaseMethodMembershipCredits } from '@repo/api/src/services/payments/methodMaintenance';
 import { logger } from '@repo/api/src/services';
 import { reportAnnualReleaseAnomalies } from '@/lib/payment-alert.mjs';
 import { validateCronRequest } from '@/lib/cron-auth';
@@ -36,8 +37,10 @@ export async function GET(request: Request) {
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
     logger.system.cronJob('release-subscription-credits', 'started');
     const result = await releaseDueAnnualSubscriptionCredits(supabase);
+    const methodResult = await releaseMethodMembershipCredits(supabase);
     reportAnnualReleaseAnomalies(result.anomalies);
     const summary = {
+      methodResult,
       scannedSubscriptions: result.scannedSubscriptions,
       releasedGrantCount: result.releasedGrantCount,
       skippedSubscriptions: result.skippedSubscriptions,

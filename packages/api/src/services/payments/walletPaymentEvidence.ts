@@ -11,6 +11,7 @@ export async function readWalletPaymentEvidence(input: {
   order: { id: string; user_id: string; purchase_snapshot: unknown; payment_method: 'wechat_pay' | 'alipay';
     payment_channel: string; merchant_namespace: string; payment_mode: string };
   sessionId: string;
+  onValidatedSession?: (session: Stripe.Checkout.Session) => void;
 }) {
   const { stripe, scope, order } = input;
   if (scope.mode !== 'test') throw new Error('PAY_WAFFO_LIVE_DISABLED');
@@ -23,6 +24,7 @@ export async function readWalletPaymentEvidence(input: {
     || session.payment_method_types[0] !== order.payment_method) throw new Error('PAY_WAFFO_PAYMENT_CONFLICT');
   assertPurchaseReceipt({ snapshot: order.purchase_snapshot, scope, amount: session.amount_total,
     currency: session.currency, livemode: session.livemode });
+  input.onValidatedSession?.(session);
   if (session.payment_status !== 'paid') return null;
   const intentId = id(session.payment_intent);
   if (!intentId) throw new Error('PAY_WAFFO_PAYMENT_CONFLICT');

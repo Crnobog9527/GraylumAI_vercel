@@ -31,7 +31,9 @@ export async function deliveryCases({admin,service,connect}) {
   await one.query('SET ROLE service_role'); await two.query('SET ROLE service_role');
   for(const [cycle,method,offer] of [['monthly','alipay','standard'],['yearly','alipay','standard'],['monthly','card','gold_first30']]) {
     const {o,user,checkout}=await fixture(cycle,method,offer);
-    const start=new Date(Math.floor(Date.now()/1000)*1000),end=new Date(start);
+    const start=new Date(Math.floor(Date.now()/1000)*1000);
+    if(method==='card') { start.setUTCDate(start.getUTCDate()-32); await admin.query('UPDATE payment_orders SET created_at=$2 WHERE id=$1',[o.id,start]); }
+    const end=new Date(start);
     if(offer==='gold_first30') end.setUTCDate(end.getUTCDate()+30);
     else if(cycle==='yearly') end.setUTCFullYear(end.getUTCFullYear()+1);
     else end.setUTCMonth(end.getUTCMonth()+1);
@@ -44,6 +46,16 @@ export async function deliveryCases({admin,service,connect}) {
     assert.equal((await admin.query('SELECT count(*)::int n FROM subscription_credit_grants WHERE source_order_id=$1',[o.id])).rows[0].n,1);
     await service.query('SELECT pay_waffo_release_due(100)');
     assert.equal((await admin.query('SELECT credits FROM profiles WHERE id=$1',[user])).rows[0].credits,8970);
+    if(method==='card') {
+      const subscription=results[0].subscriptionId ?? results[1].subscriptionId;
+      const renewalEnd=new Date(end);renewalEnd.setUTCMonth(renewalEnd.getUTCMonth()+1);
+      const payment=`renew_${o.id}`,paid=new Date(Math.floor(Date.now()/1000)*1000);
+      const renew=async(db)=>(await db.query(`SELECT pay_waffo_renew_subscription($1,'fixture',$2,6900,'usd',$3,$4,$5) v`,
+        [subscription,payment,paid,end,renewalEnd])).rows[0].v;
+      const recurring=await Promise.all([renew(one),renew(two)]);
+      assert.equal(recurring.filter(r=>r.duplicate===false).length,1);
+      assert.equal((await admin.query('SELECT credits FROM profiles WHERE id=$1',[user])).rows[0].credits,17940);
+    }
   }
   for(const closed of [false,true]) {
     const {o,user,checkout}=await fixture();
@@ -63,5 +75,5 @@ export async function deliveryCases({admin,service,connect}) {
     await assert.rejects(()=>service.query('SELECT pay_waffo_release_due(100)'),/permission denied/);
   }
   return ['schema-idempotency','checkout-one-dispatch','cross-user-denied','cross-merchant-denied','wrong-amount-denied',
-    'concurrent-payment-one-grant','wallet-month-delivery','wallet-year-first-grant','card-first30-delivery','release-idempotency','client-rpc-denied','late-released-payment-no-entitlement','closed-account-financial-only'];
+    'concurrent-payment-one-grant','wallet-month-delivery','wallet-year-first-grant','card-first30-delivery','card-renewal-69-after-49','card-renewal-payment-dedup','release-idempotency','client-rpc-denied','late-released-payment-no-entitlement','closed-account-financial-only'];
 }

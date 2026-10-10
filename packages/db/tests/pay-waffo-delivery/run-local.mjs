@@ -5,6 +5,10 @@ import { resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import assert from 'node:assert/strict';
 import pg from 'pg';
+import { calendarCases } from './calendar.mjs';
+import { upgradeCases } from './upgrade.mjs';
+import { transitionCases } from './transitions.mjs';
+import { controlCases } from './controls.mjs';
 import { deliveryCases } from './delivery.mjs';
 import { POSTGRES_IMAGE } from '../v3/images.mjs';
 import { buildFromFiles, installPgCronStub } from '../baseline/build-from-files.mjs';
@@ -48,6 +52,11 @@ try {
   const service = await connect();
   await service.query('SET ROLE service_role');
   const cases = await deliveryCases({admin,service,connect});
+  await service.query('SET ROLE service_role');
+  cases.push(...await transitionCases({admin,service}));
+  cases.push(...await upgradeCases({admin,service}));
+  cases.push(...await calendarCases({admin,service}));
+  cases.push(...await controlCases({admin,service}));
   console.log(JSON.stringify({result:'PASS',replay:report,cases}));
 } finally {
   await Promise.all(clients.map(c=>c.query('ROLLBACK').catch(()=>{})));

@@ -29,7 +29,8 @@ export async function handleStripeWebhookEvent(
   supabase: ReturnType<typeof createServiceRoleSupabaseClient>,
   event: StripeWebhookEvent,
 ) {
-  if (event.type === 'checkout.session.completed' || event.type === 'checkout.session.async_payment_succeeded') {
+  if (event.type === 'checkout.session.completed' || event.type === 'checkout.session.async_payment_succeeded'
+    || event.type === 'checkout.session.expired' || event.type === 'checkout.session.async_payment_failed') {
     if (await recoverWalletCheckout(supabase, getStripeClient(), event.data.object.id)) return;
   }
   switch (event.type) {

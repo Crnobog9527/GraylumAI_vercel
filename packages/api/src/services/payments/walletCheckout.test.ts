@@ -1,0 +1,48 @@
+/* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import type Stripe from 'stripe';
+import type { SupabaseClient } from '@supabase/supabase-js';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+const mocks = vi.hoisted(() => ({ scope: vi.fn(), prepare: vi.fn(), build: vi.fn(), dispatch: vi.fn() }));
+vi.mock('./methodPurchase', () => ({ prepareMethodPurchase: mocks.prepare }));
+vi.mock('./stripeCheckoutPersistence', () => ({ resolveStripeScope: mocks.scope }));
+vi.mock('./stripeCheckoutIntent', () => ({ buildStripeCheckoutRequest: mocks.build, dispatchStripeCheckoutIntent: mocks.dispatch }));
+import { createWalletCheckout } from './walletCheckout';
+const id = '00000000-0000-4000-8000-000000000001';
+function fixture(dispatch = true) {
+  const rpc = vi.fn().mockResolvedValue({ data: { dispatch, request: { providerRequest: { original: true } } }, error: null });
+  const chain = { select: vi.fn(() => chain), eq: vi.fn(() => chain), maybeSingle: vi.fn()
+    .mockResolvedValueOnce({ data: { external_id: 'price_1' }, error: null })
+    .mockResolvedValueOnce({ data: null, error: null }) };
+  const db = { from: vi.fn(() => chain), rpc } as unknown as SupabaseClient;
+  const input = { db, stripe: {} as Stripe, userId: id, appUrl: 'https://test.invalid', termsVersion: 'terms-test',
+    purchase: { itemType: 'membership_plan' as const, itemId: id, billingCycle: 'monthly' as const,
+      method: 'alipay' as const, offer: 'standard' as const, acceptedTerms: true as const, routingVersion: 1 } };
+  return { input, rpc };
+}
+describe('durable wallet checkout', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.scope.mockResolvedValue({ merchant: 'fixture', mode: 'test' });
+    mocks.prepare.mockResolvedValue({ id, price_ref_id: id, purchase_snapshot: {} });
+    mocks.build.mockReturnValue({ proposed: true });
+    mocks.dispatch.mockResolvedValue({ id: 'cs_1', status: 'open', url: 'https://checkout.stripe.com/c/pay/test' });
+  });
+  it('dispatches only after persistent claim and recovers the frozen request on retry', async () => {
+    const f = fixture(false); await createWalletCheckout(f.input);
+    expect(mocks.dispatch).toHaveBeenCalledWith(expect.objectContaining({ createIfMissing: false,
+      intent: expect.objectContaining({ id, recover: true, walletMethod: 'alipay', request: { original: true } }) }));
+  });
+  it('does not call the provider after claim failure or live scope', async () => {
+    const f = fixture(); f.rpc.mockResolvedValue({ error: { message: 'unavailable' }, data: null });
+    await expect(createWalletCheckout(f.input)).rejects.toThrow('CHECKOUT_UNAVAILABLE');
+    expect(mocks.dispatch).not.toHaveBeenCalled();
+    mocks.scope.mockResolvedValue({ merchant: 'fixture', mode: 'live' });
+    await expect(createWalletCheckout(f.input)).rejects.toThrow('LIVE_DISABLED');
+    expect(mocks.dispatch).not.toHaveBeenCalled();
+  });
+  it('propagates uncertain results without retrying', async () => {
+    const f = fixture(); mocks.dispatch.mockRejectedValue(new Error('timeout'));
+    await expect(createWalletCheckout(f.input)).rejects.toThrow('timeout');
+    expect(mocks.dispatch).toHaveBeenCalledTimes(1);
+  });
+});

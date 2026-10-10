@@ -7,15 +7,15 @@ vi.mock('./stripeCheckoutPersistence', () => ({ resolveStripeScope: mocks.scope 
 vi.mock('./walletPaymentEvidence', () => ({ readWalletPaymentEvidence: mocks.cash }));
 import { recoverWalletCheckout } from './walletWebhook';
 function fixture(overrides = {}) {
-  const order = { id: 'order', user_id: 'user', payment_method: 'alipay', item_type: 'membership_plan',
+  const order = { referenceMissing: false, id: 'order', user_id: 'user', payment_method: 'alipay', item_type: 'membership_plan',
     entitlement_term: 'month', ...overrides };
   const db = { rpc: vi.fn().mockResolvedValue({ data: { state: 'fulfilled' }, error: null }),
     from: vi.fn((table: string) => {
       const chain = { select: vi.fn(() => chain), eq: vi.fn(() => chain),
-        maybeSingle: vi.fn().mockResolvedValue({ data: table === 'payment_orders' ? order : { order_id: 'order' }, error: null }) };
+        maybeSingle: vi.fn().mockResolvedValue({ data: table === 'payment_orders' ? order : order.referenceMissing ? null : { order_id: 'order' }, error: null }) };
       return chain;
     }) };
-  return { db, run: () => recoverWalletCheckout(db as unknown as SupabaseClient, {} as Stripe, 'cs_wallet') };
+  return { db, run: (stripe = {} as Stripe) => recoverWalletCheckout(db as unknown as SupabaseClient, stripe, 'cs_wallet') };
 }
 describe('wallet callback/recovery', () => {
   beforeEach(() => {
@@ -35,6 +35,24 @@ describe('wallet callback/recovery', () => {
     mocks.cash.mockRejectedValue(new Error('timeout')); await expect(f.run()).rejects.toThrow('timeout');
     expect(f.db.rpc).not.toHaveBeenCalled();
     mocks.scope.mockResolvedValue({ mode: 'live', merchant: 'fixture' }); await expect(f.run()).rejects.toThrow('PAY_WAFFO_PAYMENT_CONFLICT');
+  });
+  it('recovers a successful provider session when the original mapping write was lost', async () => {
+    const originalId = '00000000-0000-4000-8000-000000000001';
+    const f = fixture({ id: originalId, referenceMissing: true });
+    const stripe = { checkout: { sessions: { retrieve: vi.fn().mockResolvedValue({ id: 'cs_wallet', object: 'checkout.session',
+      metadata: { orderId: originalId }, expires_at: 2000000000 }) } } } as unknown as Stripe;
+    expect(await f.run(stripe)).toBe(true);
+    expect(f.db.rpc.mock.calls[0]).toEqual(['pay_waffo_bind_checkout', expect.objectContaining({ p_order: originalId, p_checkout: 'cs_wallet' })]);
+    expect(f.db.rpc.mock.calls[1]?.[0]).toBe('pay_waffo_fulfill_payment');
+  });
+  it('releases reservations only after validated original session is expired and unpaid', async () => {
+    mocks.cash.mockImplementation(async (input) => {
+      input.onValidatedSession({ status: 'expired', payment_status: 'unpaid' }); return null;
+    });
+    const f = fixture(); expect(await f.run()).toBe(true);
+    expect(f.db.rpc).toHaveBeenCalledWith('pay_waffo_observe_qualification', expect.objectContaining({
+      p_state: 'closed_unpaid', p_checkout: 'cs_wallet', p_payment: null, p_amount: 0,
+    }));
   });
   it('leaves legacy orders to their existing handler', async () => {
     const f = fixture({ payment_method: null }); expect(await f.run()).toBe(false);
