@@ -6,6 +6,20 @@ import {erase} from './cases.mjs';
 export async function runArtifacts(db,report){
  const seed=async()=>{const f=await fixture(db);return (await db.query('SELECT d7_test.artifacts($1) v',[f.actor])).rows[0].v;};
  const f=await seed();
+ const conversation=randomUUID(),turn=randomUUID(),unrelated=randomUUID();
+ await db.query("INSERT INTO conversations(id,user_id,title) VALUES($1,$2,'KEEP_OTHER_CONVERSATION')",[unrelated,f.actor]);
+ await assert.rejects(db.query('UPDATE conversations SET title=NULL,summary=NULL,summary_metadata=NULL,erased_at=now() WHERE id=$1',
+  [unrelated]),/ACCOUNT_ERASURE_NOT_CLOSED/);
+ await db.query(`INSERT INTO conversations(id,user_id,title,summary,summary_metadata,skill_mode,module_id)
+  VALUES($1,$2,'GUIDED_PRIVATE_TITLE','GUIDED_PRIVATE_SUMMARY','{"text":"GUIDED_PRIVATE_METADATA"}',true,$3)`,
+  [conversation,f.actor,f.module]);
+ await db.query("INSERT INTO artifact_chats VALUES($1,$2,$3,'s')",[conversation,f.project,f.round]);
+ await db.query(`INSERT INTO artifact_chat_turns(request_id,conversation_id,step_id,body,evidence_ids)
+  VALUES($1,$2,'s','GUIDED_PRIVATE_TURN','[]')`,[turn,conversation]);
+ await db.query(`INSERT INTO conversation_context_snapshots(conversation_id,snapshot_type,content,metadata)
+  VALUES($1,'rolling_summary','GUIDED_PRIVATE_SNAPSHOT','{"text":"GUIDED_PRIVATE_METADATA"}')`,[conversation]);
+ assert.match(JSON.stringify(await rpc(db,'artifact_chat',f.actor,'stats',null,{})),new RegExp(conversation));
+
  assert.equal(await rpc(db,'opc_source_allowed',f.actor,f.version),true);
  assert.equal(await rpc(db,'opc_content_allowed',f.actor,f.content),true);
  assert.match(JSON.stringify(await rpc(db,'opc_library',f.actor,'',null,null)),/D7_INDEPENDENT_SAVED_BODY/);
@@ -14,6 +28,22 @@ export async function runArtifacts(db,report){
   'independent saved content stays listed without a live session join');
  assert.equal((await erase(db,f,'artifact',f.project)).status,'deleted');
  assert.equal((await erase(db,f,'artifact',f.project)).alreadyDeleted,true);
+ const guided=(await db.query('SELECT title,summary,summary_metadata,erased_at,is_deleted FROM conversations WHERE id=$1',[conversation])).rows[0];
+ assert.equal((await db.query('SELECT title FROM conversations WHERE id=$1',[unrelated])).rows[0].title,'KEEP_OTHER_CONVERSATION');
+ assert.equal(guided.title,null);assert.equal(guided.summary,null);assert.equal(guided.summary_metadata,null);
+ assert.ok(guided.erased_at);assert.equal(guided.is_deleted,'true');
+ const chatTurn=(await db.query('SELECT body,erased_at FROM artifact_chat_turns WHERE request_id=$1',[turn])).rows[0];
+ assert.equal(chatTurn.body,null);assert.ok(chatTurn.erased_at);
+ const snapshot=(await db.query('SELECT content,metadata,erased_at FROM conversation_context_snapshots WHERE conversation_id=$1',[conversation])).rows[0];
+ assert.equal(snapshot.content,null);assert.equal(snapshot.metadata,null);assert.ok(snapshot.erased_at);
+ assert.doesNotMatch(JSON.stringify(await rpc(db,'artifact_chat',f.actor,'stats',null,{})),new RegExp(conversation));
+ for(const action of ['read','context','submit','attach'])
+  await assert.rejects(rpc(db,'artifact_chat',f.actor,action,conversation,{projectId:f.project,roundId:f.round}),/CONTENT_ERASED/);
+ await assert.rejects(db.query(`INSERT INTO artifact_chat_turns(request_id,conversation_id,step_id,body,evidence_ids)
+  VALUES($1,$2,'s','LATE_GUIDED_BODY','[]')`,[randomUUID(),conversation]),/CONTENT_ERASED/);
+ await assert.rejects(db.query("UPDATE conversations SET is_deleted='false' WHERE id=$1",[conversation]));
+ report.checks.push('guided artifact chats scrub turns/snapshots/conversation text, disappear from stats, and deny read/replay/late insert/restore');
+
  await assert.rejects(rpc(db,'artifact_query',f.actor,'read',f.project,f.round),/CONTENT_ERASED/);
  assert.equal(await rpc(db,'opc_source_allowed',f.actor,f.version),false);
  assert.equal(await rpc(db,'opc_content_allowed',f.actor,f.content),false);

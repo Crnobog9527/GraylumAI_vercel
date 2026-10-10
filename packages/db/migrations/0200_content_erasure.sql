@@ -226,6 +226,7 @@ BEGIN
  ) SELECT coalesce(array_agg(id ORDER BY id),'{}') INTO refs FROM descendants;
  refs:=refs||executions||sessions||projects||versions||content_ids||
   ARRAY(SELECT draft_id FROM opc_drafts WHERE actor_id=a AND project_id=ANY(projects))||
+  ARRAY(SELECT conversation_id FROM artifact_chats WHERE project_id=ANY(projects))||
   ARRAY(SELECT work_item_id FROM opc_items WHERE source_version_id=ANY(versions))||
   ARRAY(SELECT session_id FROM opc_topic_workspaces WHERE actor_id=a AND source_version_id=ANY(versions))||ARRAY(SELECT id FROM artifact_rounds WHERE project_id=ANY(projects));
  executions:=ARRAY(SELECT DISTINCT ex.id FROM runtime_executions ex WHERE ex.actor_id=a AND
@@ -286,7 +287,7 @@ GRANT EXECUTE ON FUNCTION public.content_erasure_preview(uuid,text,uuid) TO serv
 CREATE OR REPLACE FUNCTION public.content_erasure_confirm(a uuid,k text,target uuid,expected_hash text)
 RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
 DECLARE scope jsonb; ids uuid[]; sessions uuid[]; projects uuid[]; versions uuid[]; contents uuid[];
- refs uuid[]; rounds uuid[]; stamp timestamptz:=clock_timestamp(); row record; financial jsonb;
+ refs uuid[]; rounds uuid[]; chats uuid[]; stamp timestamptz:=clock_timestamp(); row record; financial jsonb;
  remaining bigint:=0; deleted boolean;
 BEGIN
  PERFORM bill2_actor(a);
@@ -307,6 +308,9 @@ BEGIN
  SELECT coalesce(array_agg(v::uuid),'{}') INTO versions FROM jsonb_array_elements_text(scope->'versions') v;
  SELECT coalesce(array_agg(v::uuid),'{}') INTO contents FROM jsonb_array_elements_text(scope->'contents') v;
  rounds:=ARRAY(SELECT id FROM artifact_rounds WHERE project_id=ANY(projects));
+ chats:=ARRAY(SELECT c.conversation_id FROM artifact_chats c JOIN conversations v ON v.id=c.conversation_id
+  WHERE c.project_id=ANY(projects) AND v.user_id=a);
+ PERFORM id FROM conversations WHERE id=ANY(chats) ORDER BY id FOR UPDATE NOWAIT;
  SELECT coalesce(array_agg(v::uuid),'{}') INTO refs FROM jsonb_array_elements_text(scope->'references') v;
  refs:=refs||ids||sessions||projects||versions||contents||rounds;
  PERFORM id FROM runtime_executions WHERE id=ANY(ids) ORDER BY id FOR UPDATE NOWAIT;
@@ -394,6 +398,14 @@ BEGIN
  UPDATE opc_item_edits SET title=NULL,brief=NULL,erased_at=stamp WHERE erased_at IS NULL AND work_item_id=ANY(projects);
  UPDATE opc_items SET brief=NULL,erased_at=stamp WHERE erased_at IS NULL AND work_item_id=ANY(projects);
  UPDATE opc_accounts SET account_key='erased:'||project_id,erased_at=stamp WHERE erased_at IS NULL AND project_id=ANY(projects);
+ -- Guided Skill chats belong to the selected artifact family. Clear snapshots
+ -- before message bodies and retain content-free identity shells for accounting.
+ UPDATE conversation_context_snapshots SET content=NULL,metadata=NULL,erased_at=stamp
+  WHERE conversation_id=ANY(chats) AND erased_at IS NULL;
+ UPDATE messages SET content=NULL,erased_at=stamp WHERE conversation_id=ANY(chats) AND erased_at IS NULL;
+ UPDATE artifact_chat_turns SET body=NULL,erased_at=stamp WHERE conversation_id=ANY(chats) AND erased_at IS NULL;
+ UPDATE conversations SET is_deleted='true',deleted_at=stamp WHERE id=ANY(chats) AND erased_at IS NULL;
+ UPDATE conversations SET title=NULL,summary=NULL,summary_metadata=NULL,erased_at=stamp WHERE id=ANY(chats) AND erased_at IS NULL;
  UPDATE artifact_versions SET report=NULL,report_hash=NULL,erased_at=stamp WHERE project_id=ANY(projects) AND erased_at IS NULL;
  UPDATE artifact_candidates SET body=NULL,erased_at=stamp WHERE round_id=ANY(rounds) AND erased_at IS NULL;
  UPDATE artifact_confirmations SET body=NULL,erased_at=stamp WHERE round_id=ANY(rounds) AND erased_at IS NULL;
@@ -439,6 +451,23 @@ END $$;
 REVOKE ALL ON FUNCTION public.content_erasure_visible(uuid,uuid) FROM PUBLIC,anon,authenticated;
 GRANT EXECUTE ON FUNCTION public.content_erasure_visible(uuid,uuid) TO service_role;
 
+-- Only the selected, already-marked artifact may extend the existing closed-account
+-- conversation guard. Ordinary open-account conversations keep the original denial.
+CREATE OR REPLACE FUNCTION public.erasure_closed_conversation_guard() RETURNS trigger
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
+BEGIN
+ IF TG_OP='INSERT' AND NEW.erased_at IS NOT NULL THEN
+  RAISE EXCEPTION 'ERASURE_INSERT_DENIED' USING ERRCODE='42501';
+ END IF;
+ IF NEW.erased_at IS NOT NULL
+  AND NOT EXISTS(SELECT 1 FROM account_erasure_requests WHERE profile_id=NEW.user_id)
+  AND NOT EXISTS(SELECT 1 FROM artifact_chats c JOIN artifact_projects p ON p.id=c.project_id
+   WHERE c.conversation_id=NEW.id AND p.actor_id=NEW.user_id AND p.content_deleted_at IS NOT NULL)
+ THEN RAISE EXCEPTION 'ACCOUNT_ERASURE_NOT_CLOSED' USING ERRCODE='42501'; END IF;
+ RETURN NEW;
+END $$;
+REVOKE ALL ON FUNCTION public.erasure_closed_conversation_guard() FROM PUBLIC,anon,authenticated,service_role;
+
 -- Fail closed before a replay can return an old request/result. These are
 -- narrow guards on existing functions, not duplicate Runtime entry points.
 DO $$
@@ -447,6 +476,8 @@ BEGIN
  FOR sig,guard IN SELECT * FROM (VALUES
   ('runtime_start(uuid,uuid,jsonb)',
    'IF EXISTS(SELECT 1 FROM runtime_sessions WHERE actor_id=p_actor_id AND start_request_id=p_request_id AND (erased_at IS NOT NULL OR content_deleted_at IS NOT NULL)) THEN RAISE EXCEPTION ''CONTENT_ERASED'' USING ERRCODE=''42501''; END IF;'),
+  ('artifact_chat(uuid,text,uuid,jsonb)',
+   'IF EXISTS(SELECT 1 FROM artifact_projects deleted_project WHERE deleted_project.actor_id=p_actor_id AND deleted_project.erased_at IS NOT NULL AND (deleted_project.id=(p_payload->>''projectId'')::uuid OR deleted_project.id IN (SELECT project_id FROM artifact_chats WHERE conversation_id=p_conversation_id))) THEN RAISE EXCEPTION ''CONTENT_ERASED'' USING ERRCODE=''42501''; END IF;'),
   ('opc_query(uuid,uuid)',
    'IF EXISTS(SELECT 1 FROM opc_drafts d JOIN artifact_projects p ON p.id=d.project_id WHERE d.actor_id=p_actor_id AND d.draft_id=p_draft_id AND p.erased_at IS NOT NULL) THEN RAISE EXCEPTION ''CONTENT_ERASED'' USING ERRCODE=''42501''; END IF;'),
   ('runtime_response(uuid,uuid,integer,text)',
@@ -479,6 +510,12 @@ BEGIN
    EXECUTE regexp_replace(source,'\mBEGIN\M',E'BEGIN\n -- D7 read boundary\n '||guard);
   END IF;
  END LOOP;
+ -- Navigation must not continue listing a tombstoned guided conversation.
+ source:=pg_get_functiondef('public.artifact_chat(uuid,text,uuid,jsonb)'::regprocedure);
+ IF position('WHERE ap.actor_id=p_actor_id AND ap.erased_at IS NULL);' IN source)=0 THEN
+  IF position('WHERE ap.actor_id=p_actor_id);' IN source)=0 THEN RAISE EXCEPTION 'CONTENT_ERASURE_SOURCE_MISMATCH: artifact_chat stats'; END IF;
+  EXECUTE replace(source,'WHERE ap.actor_id=p_actor_id);','WHERE ap.actor_id=p_actor_id AND ap.erased_at IS NULL);');
+ END IF;
  -- Every ancestor, not only the initial selected content, must be available.
  source:=pg_get_functiondef('public.opc_content_allowed(uuid,uuid)'::regprocedure);
  IF position('IF NOT FOUND OR c.erased_at IS NOT NULL' IN source)=0 THEN
@@ -660,10 +697,15 @@ BEGIN
   SELECT erased_at IS NOT NULL OR content_deleted_at IS NOT NULL INTO deleted FROM runtime_executions WHERE id=(j->>'dependency_id')::uuid FOR SHARE;
   IF deleted THEN RAISE EXCEPTION 'CONTENT_ERASED' USING ERRCODE='42501'; END IF;
  END IF;
- IF TG_TABLE_NAME IN ('artifact_rounds','artifact_versions','artifact_requests','artifact_evidence','artifact_generations') THEN
+ IF TG_TABLE_NAME IN ('artifact_rounds','artifact_versions','artifact_requests','artifact_evidence','artifact_generations','artifact_chats') THEN
   pid:=(j->>'project_id')::uuid;
  ELSIF TG_TABLE_NAME IN ('artifact_candidates','artifact_confirmations') THEN
   SELECT project_id INTO pid FROM artifact_rounds WHERE id=(j->>'round_id')::uuid;
+ ELSIF TG_TABLE_NAME='artifact_chat_turns' THEN
+  SELECT project_id INTO pid FROM artifact_chats WHERE conversation_id=(j->>'conversation_id')::uuid;
+ ELSIF TG_TABLE_NAME='artifact_chat_summaries' THEN
+  SELECT c.project_id INTO pid FROM artifact_chats c JOIN artifact_chat_turns t ON t.conversation_id=c.conversation_id
+   WHERE t.request_id=(j->>'turn_id')::uuid;
  ELSIF TG_TABLE_NAME='opc_content_versions' THEN pid:=(j->>'work_item_id')::uuid;
  END IF;
  IF pid IS NOT NULL THEN
@@ -679,7 +721,7 @@ END $$;
 REVOKE ALL ON FUNCTION public.content_erasure_parent_guard() FROM PUBLIC,anon,authenticated,service_role;
 DO $$ DECLARE t text; BEGIN
  FOREACH t IN ARRAY ARRAY['runtime_executions','runtime_scope_material','runtime_session_history','runtime_session_batches',
-  'runtime_tool_calls','runtime_history_dependencies','artifact_rounds','artifact_versions','artifact_requests','artifact_evidence',
+  'runtime_tool_calls','runtime_history_dependencies','artifact_chats','artifact_chat_turns','artifact_chat_summaries','artifact_rounds','artifact_versions','artifact_requests','artifact_evidence',
   'artifact_generations','artifact_candidates','artifact_confirmations','opc_content_versions'] LOOP
   EXECUTE format('DROP TRIGGER IF EXISTS content_erasure_parent_guard ON public.%I',t);
   EXECUTE format('CREATE TRIGGER content_erasure_parent_guard BEFORE INSERT ON public.%I FOR EACH ROW EXECUTE FUNCTION content_erasure_parent_guard()',t);

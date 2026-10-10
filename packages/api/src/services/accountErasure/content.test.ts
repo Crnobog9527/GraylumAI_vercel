@@ -37,3 +37,12 @@ describe('content erasure API boundary',()=>{
   expect(db.rpc).toHaveBeenCalledTimes(3);
  });
 });
+
+
+it('guided Skill chat reads expose the explicit deletion refusal',async()=>{
+ const {skillChatService}=await import('../artifacts/chat');
+ const user={auth:{getUser:async()=>({data:{user:{id:actor,email_confirmed_at:'2026-01-01'}},error:null})}};
+ const database={rpc:()=>({abortSignal:async()=>({data:null,error:{code:'42501',message:'CONTENT_ERASED'}})})};
+ await expect(skillChatService(user as never,database as never).stats())
+  .rejects.toMatchObject({code:'PRECONDITION_FAILED',message:'CONTENT_ERASED'});
+});
