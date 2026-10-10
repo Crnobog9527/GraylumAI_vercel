@@ -6,7 +6,7 @@ import { logger } from '../../lib/logger';
 export const capturePendingInput = z.object({ draftId: z.string().uuid() }).strict();
 export const captureResolveInput = capturePendingInput.extend({
   requestId: z.string().uuid(), stepId: z.string().min(1).max(64), fieldId: z.string().min(1).max(64),
-  executionId: z.string().uuid(), hash: z.string().min(1).max(128), action: z.enum(['accept', 'ignore']),
+  executionId: z.string().uuid(), hash: z.string().min(1).max(128), action: z.enum(['accept', 'ignore', 'dismiss']),
   expectedVersion: z.number().int().nonnegative(),
 }).strict();
 const batchResult = z.object({

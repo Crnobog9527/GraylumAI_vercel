@@ -5,7 +5,9 @@ export type CapturePatch = {stepId: string; fieldId: string; value: string;
   status: 'provisional'|'unclear'; nature: 'fact'|'decision'|'hypothesis'|'unknown';
   basis: 'user_statement'|'agent_proposal'};
 export type CaptureInputKind = 'answer'|'acknowledgement'|'uncertainty'|'request'|'revision_request';
-export type CaptureOutput = {inputKind: CaptureInputKind; patches: CapturePatch[]; discarded: number[]};
+export type CaptureWithdrawal = {stepId: string; fieldId: string};
+export type CaptureOutput = {inputKind: CaptureInputKind; patches: CapturePatch[]; discarded: number[];
+  withdrawals: CaptureWithdrawal[]; invalidWithdrawals: number[]};
 const object = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === 'object' && !Array.isArray(value);
 export function readCaptureOutput(raw: string | null | undefined, fields: CaptureFields): CaptureOutput | null {
@@ -14,6 +16,15 @@ export function readCaptureOutput(raw: string | null | undefined, fields: Captur
   if (!object(output) || typeof output.inputKind !== 'string' ||
       !['answer','acknowledgement','uncertainty','request','revision_request'].includes(output.inputKind) ||
       !Array.isArray(output.patches) || output.patches.length > 12 || !Array.isArray(output.notes)) return null;
+  // SQL rejects a malformed list as a whole and screens each entry again; this only mirrors the shape.
+  if (output.withdrawals !== undefined && (!Array.isArray(output.withdrawals) || output.withdrawals.length > 12)) return null;
+  // Same 1-based indexes SQL records as invalid_withdrawal; they are format errors, not semantic refusals.
+  const withdrawals: CaptureWithdrawal[] = [], invalidWithdrawals: number[] = [];
+  ((output.withdrawals ?? []) as unknown[]).forEach((item, index) => {
+    if (object(item) && typeof item.stepId === 'string' && typeof item.fieldId === 'string' && Object.hasOwn(fields, item.stepId) &&
+        fields[item.stepId]!.schema.some(field => field.id === item.fieldId)) withdrawals.push({stepId: item.stepId, fieldId: item.fieldId});
+    else invalidWithdrawals.push(index + 1);
+  });
   const patches: CapturePatch[] = [], discarded: number[] = [];
   output.patches.forEach((patch: unknown, index: number) => {
     // PostgreSQL char_length counts code points; btrim without a character set removes ASCII spaces only.
@@ -29,5 +40,5 @@ export function readCaptureOutput(raw: string | null | undefined, fields: Captur
       status: patch.status as CapturePatch['status'], nature: patch.nature as CapturePatch['nature'],
       basis: patch.basis as CapturePatch['basis']});
   });
-  return {inputKind: output.inputKind as CaptureInputKind, patches, discarded};
+  return {inputKind: output.inputKind as CaptureInputKind, patches, discarded, withdrawals, invalidWithdrawals};
 }

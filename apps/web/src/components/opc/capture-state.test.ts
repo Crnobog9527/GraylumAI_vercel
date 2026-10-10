@@ -38,6 +38,14 @@ describe("fieldMeta", () => {
     expect(fieldMeta({ ...info(), meta: { goal: ["x"] } }, "goal")).toEqual({});
     expect(fieldMeta(undefined, "goal")).toEqual({});
   });
+  it("reads a withdrawn update separately, never as pending, and drops a malformed one", () => {
+    const withdrawn = { ...update, withdrawnBy: "e2", withdrawnSeq: ["t", "e2"] };
+    const read = fieldMeta({ ...info(), meta: { goal: { source: "user", withdrawnSuggestion: withdrawn } } }, "goal");
+    expect(read).toEqual({ source: "user", withdrawn: { executionId: "e1", hash: "h1", value: "先试运营一个月", status: "provisional",
+      nature: "decision" } });
+    expect(stepProgress({ ...info(), meta: { goal: { withdrawnSuggestion: withdrawn } } }).updates).toBe(0);
+    expect(fieldMeta({ ...info(), meta: { goal: { withdrawnSuggestion: { ...withdrawn, hash: "" } } } }, "goal")).toEqual({});
+  });
 });
 
 describe("field and step states", () => {

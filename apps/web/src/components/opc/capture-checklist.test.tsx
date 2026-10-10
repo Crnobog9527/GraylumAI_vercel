@@ -149,3 +149,27 @@ describe("highlight", () => {
     expect(marked(props({ highlight: { stepId: "s1", fieldIds: ["goal"] }, valid: { s1: true, s2: false, s3: false } }))).toBe(0);
   });
 });
+
+describe("CaptureChecklist withdrawn updates (CDC-WRITEBACK-V3)", () => {
+  const withdrawn = { ...update, value: "全国退休老人", withdrawnBy: "e2", withdrawnSeq: ["t", "e2"] };
+  const withMeta = (goal: Record<string, unknown>) => props({ information: { ...information,
+    s1: { ...information.s1, meta: { ...information.s1.meta, goal } } } });
+  it("shows a withdrawn update as no longer pending, with the unchanged content and a dismissal", () => {
+    const p = withMeta({ source: "user", protected: true, withdrawnSuggestion: withdrawn });
+    const html = render(p);
+    expect(html).toContain("导师已撤回建议");
+    expect(html).toContain("全国退休老人");
+    expect(html).toContain("正式内容没有改动");
+    expect(html).not.toContain("根据对话整理的更新");
+    expect(button(p, "采用")).toEqual([]);
+    const [dismiss] = button(p, "知道了");
+    dismiss!.click();
+    expect(p.onResolve).toHaveBeenCalledWith("s1", "goal", expect.objectContaining({ executionId: "e1", hash: "h1" }), "dismiss");
+  });
+  it("lets a newer pending update replace the withdrawn notice and keeps the dismissal locked while busy", () => {
+    const both = withMeta({ source: "user", protected: true, suggestion: update, withdrawnSuggestion: withdrawn });
+    expect(render(both)).not.toContain("导师已撤回建议");
+    const busy = { ...withMeta({ source: "user", protected: true, withdrawnSuggestion: withdrawn }), locked: true };
+    expect(button(busy, "知道了")[0]!.disabled).toBe(true);
+  });
+});
