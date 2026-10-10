@@ -79,10 +79,10 @@ export const PDFJS_PATCHES = [
   },
   {
     name: 'no self-started message loop',
-    target: `    if (typeof window === "undefined" && !isNodeJS && typeof self !== "undefined" && typeof self.postMessage === "function" && "onmessage" in self) {
-      this.initializeFromPort(self);
-    }
-`,
+    target: '    if (typeof window === "undefined" && !isNodeJS && typeof self !== "undefined" '
+      + '&& typeof self.postMessage === "function" && "onmessage" in self) {\n'
+      + '      this.initializeFromPort(self);\n'
+      + '    }\n',
     replacement: `    if (false) {
       this.initializeFromPort(self);
     }
