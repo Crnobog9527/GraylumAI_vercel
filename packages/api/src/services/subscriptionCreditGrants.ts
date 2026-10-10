@@ -1372,9 +1372,9 @@ function locateRefundPeriodGrant(input: {
  */
 async function loadSubscriptionMirrorForRefund(
   supabase: SupabaseLikeClient,
-  input: { subscriptionId: string },
+  input: { subscriptionId: string; scope?: StripeScope },
 ): Promise<SubscriptionRow | null> {
-  const ref = await findStripeReference(supabase, 'subscription', input.subscriptionId);
+  const ref = await findStripeReference(supabase, 'subscription', input.subscriptionId, input.scope);
   if (!ref?.subscription_id) return null;
   const result = await supabase
     .from('user_subscriptions')
@@ -1652,6 +1652,7 @@ export async function reconcileSubscriptionRefundCreditGrants(
 ): Promise<SubscriptionRefundCreditGrantReconciliationResult> {
   const now = input.now ?? new Date().toISOString();
   const order = await getSubscriptionRefundOrder(supabase, input);
+  const scope: StripeScope = { merchant: order.merchant_namespace!, mode: order.payment_mode as 'test' | 'live' };
   const invoiceScope = getRefundInvoiceScope(order, input);
   const scopedRefund = invoiceScope.invoiceId && invoiceScope.invoiceId !== input.invoiceId
     ? { ...input, invoiceId: invoiceScope.invoiceId }
@@ -1660,15 +1661,14 @@ export async function reconcileSubscriptionRefundCreditGrants(
   // R1: order/payment metadata is audit/cache evidence only. The canonical
   // event + subscription + period barrier in the transaction RPC is the sole
   // authority for replay and later-event behavior.
-
   // REFUND-1B (R4): this application read is only a non-authoritative hint for
   // diagnostics. The refund transaction below must
   // resolve the period again after taking its database locks.
   const grants = await loadAllSubscriptionCreditGrants(supabase, {
-    subscriptionId: input.subscriptionId,
+    subscriptionId: input.subscriptionId, scope,
   });
   const mirror = await loadSubscriptionMirrorForRefund(supabase, {
-    subscriptionId: input.subscriptionId,
+    subscriptionId: input.subscriptionId, scope,
   });
   const located = locateRefundPeriodGrant({
     grants,
@@ -1745,7 +1745,7 @@ export async function reconcileSubscriptionRefundCreditGrants(
   // this process is replaying after a post-commit crash.
   const freshOrder = await getSubscriptionRefundOrder(supabase, scopedRefund);
   const freshMirror = await loadSubscriptionMirrorForRefund(supabase, {
-    subscriptionId: input.subscriptionId,
+    subscriptionId: input.subscriptionId, scope,
   });
 
   const locatedPeriodKey = clawbackRow.resolved_period_key ?? null;
