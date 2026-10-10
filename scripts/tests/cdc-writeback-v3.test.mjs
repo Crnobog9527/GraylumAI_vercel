@@ -1,0 +1,120 @@
+/* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import test from 'node:test';
+import strict from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { organizerInstructions, organizerSystem, splitRequest, withPending, withoutPending, sameOrganizerRequest,
+  sameOrganizerUserContent, validateV3Response, reserveNano, outputTokens, marker } from '../cdc-writeback-v3/common.mjs';
+import { freezeRequest, promptAt } from '../cdc-writeback-v3/frozen.mjs';
+import { mentorStream } from '../cdc-writeback-v3/replay.mjs';
+import { criteria, scrub, passes, validateScores, scoreFiles, instructions } from '../cdc-writeback-v3/blind.mjs';
+import { validateResponse } from '../cdc-writeback-v2/frozen.mjs';
+
+const route = { allow_fallbacks: false, require_parameters: true, only: ['openai'], max_price: { prompt: 0.25, completion: 0.75, request: 0 } };
+const context = { captureFormat: 'v2', userInput: '那条建议不对', checklist: [{ id: 'step-1', title: 'One', fields: [
+  { id: 'goal', title: 'Goal', required: true, role: 'user_fact', status: 'draft', protected: true, elicit: 'user_fact',
+    value: '每周两小时', nature: 'fact' },
+  { id: 'track', title: 'Track', required: true, role: 'user_fact', status: 'missing', protected: true, elicit: 'user_fact',
+    value: '', nature: 'unknown' }] }] };
+const tail = marker + JSON.stringify({ format: 'agent-turn.v1', message: '好的，我记下了。', card: null });
+const source = system => JSON.stringify({ model: 'openai/gpt-6-luna', messages: [{ role: 'system', content: system },
+  { role: 'user', content: JSON.stringify(context) + tail }], max_tokens: 4096, stream: false, store: false, provider: route });
+const initial = [{ stepId: 'step-1', fieldId: 'goal', value: '每周两小时', protected: true,
+  suggestion: { value: '每周六小时，不露脸', nature: 'fact', basis: 'user_statement' } }];
+
+test('V3 prompt extraction evaluates only the checked-in string expression', () => {
+  const real = organizerInstructions(readFileSync(new URL('../../packages/api/src/services/opc/organizerPrompt.ts', import.meta.url), 'utf8'));
+  strict.match(real, /withdrawals: \[\{stepId,fieldId\}\]/);
+  strict.throws(() => organizerInstructions('export const ORGANIZER_INSTRUCTIONS = "no rules";\n'), /V3_PROMPT_VALUE/);
+  strict.throws(() => organizerInstructions('export const ORGANIZER_INSTRUCTIONS = process.exit(1);\n'), /process is not defined/);
+});
+
+test('V3 freezes the complete production organizer system prompt, including the answer-card rule', () => {
+  const opc = file => readFileSync(new URL('../../packages/api/src/services/opc/' + file, import.meta.url), 'utf8');
+  const base = organizerInstructions(opc('organizerPrompt.ts')), full = promptAt(fileURLToPath(new URL('../..', import.meta.url)));
+  strict.ok(full.startsWith(base + '\n') && full.length > base.length + 1);
+  strict.match(full.slice(base.length), /^\nIn answeredCard, selectedOption is the user's choice;.*choice\.$/);
+  const parts = { prompt: opc('organizerPrompt.ts'), answerCard: opc('answerCard.ts'), service: opc('service.ts') };
+  strict.equal(organizerSystem(parts), full);
+  strict.throws(() => organizerSystem({ ...parts, service: parts.service.replace('+= "\\n" + ANSWER_CARD_RULE', '+= ANSWER_CARD_RULE') }),
+    /V3_PROMPT_COMPOSITION_CHANGED/);
+});
+
+test('V3 freeze changes only the system text and the seeded pendingSuggestion, as the last field key', () => {
+  const raw = freezeRequest({ raw: source('B system') }, 'V3 system', initial);
+  const { body, context: frozen } = splitRequest(raw);
+  strict.equal(body.messages[0].content, 'V3 system');
+  strict.equal(body.max_tokens, outputTokens);
+  strict.equal(outputTokens, 2048);
+  strict.deepEqual(Object.keys(frozen.checklist[0].fields[0]).at(-1), 'pendingSuggestion');
+  strict.deepEqual(frozen.checklist[0].fields[0].pendingSuggestion, initial[0].suggestion);
+  strict.equal(frozen.checklist[0].fields[1].pendingSuggestion, undefined);
+  strict.deepEqual(withoutPending(frozen), context);
+  strict.equal(freezeRequest({ raw: source('B system') }, 'V3 system', []).includes('pendingSuggestion'), false);
+  strict.throws(() => freezeRequest({ raw: source('same') }, 'same', []), /V3_SOURCE_SYSTEM/);
+  strict.throws(() => freezeRequest({ raw: source('B').replace('"max_tokens":4096', '"max_tokens":2048') }, 'V3', []), /V3_SOURCE_PROFILE/);
+  strict.throws(() => withPending(context, [{ ...initial[0], fieldId: 'missing' }]), /V3_PENDING_FIELD/);
+  strict.throws(() => freezeRequest({ raw: source('B').replace('那条建议不对', '') }, 'V3', []), /V3_OPENING_UNSUPPORTED/);
+  strict.equal(reserveNano(1000), (1000 + 8192) * 250 + 2048 * 750);
+});
+
+test('V3 replay compares the complete organizer request and unwraps the frozen mentor envelope once', () => {
+  const frozen = freezeRequest({ raw: source('B') }, 'V3', initial);
+  const body = JSON.parse(frozen), [text] = body.messages[1].content.split(marker);
+  const reordered = Object.fromEntries(Object.entries(JSON.parse(text)).reverse());
+  const host = changes => JSON.stringify(Object.fromEntries(Object.entries({ ...body, ...changes,
+    messages: [changes.system ?? body.messages[0], { role: 'user', content: JSON.stringify(reordered) + tail }] })
+    .filter(([k]) => k !== 'system').reverse()));
+  strict.equal(sameOrganizerRequest(host({}), frozen), true);
+  strict.equal(sameOrganizerRequest(host({ system: { role: 'system', content: 'V3\nextra rule' } }), frozen), false);
+  strict.equal(sameOrganizerRequest(host({ max_tokens: 4096 }), frozen), false);
+  strict.equal(sameOrganizerRequest(host({ provider: { ...route, allow_fallbacks: true } }), frozen), false);
+  strict.equal(sameOrganizerRequest(host({ reasoning: { effort: 'low' } }), frozen), false);
+  strict.equal(sameOrganizerRequest(source('B'), frozen), false);
+  // The historical A12 reference compares only the payload, so a different system prompt or cap is tolerated there.
+  strict.equal(sameOrganizerUserContent(host({ system: { role: 'system', content: 'A prompt' }, max_tokens: 4096 }), frozen), true);
+  strict.equal(sameOrganizerUserContent(source('B'), frozen), false);
+  const frame = (content, finish, usage) => 'data: ' + JSON.stringify({ id: 'gen-1', provider: 'Anthropic',
+    choices: [{ index: 0, delta: { role: 'assistant', content }, finish_reason: finish }], ...(usage ? { usage } : {}) });
+  const template = [frame('原', null), frame('文', null), frame('', 'stop'), frame('', 'stop', { cost: 0.01 }), 'data: [DONE]'].join('\n\n');
+  const stream = mentorStream(tail, template);
+  strict.match(stream, /"content":"好的，我记下了。"/);
+  strict.doesNotMatch(stream, /agent-turn\.v1|原|文/);
+  strict.match(stream, /"provider":"Anthropic"/);
+  strict.match(stream, /"usage":\{"cost":0\.01\}/);
+  const ids = new Set([stream, mentorStream(tail, template)].flatMap(x => [...x.matchAll(/"id":"([^"]+)"/g)].map(m => m[1])));
+  strict.equal(ids.size, 2);
+  strict.throws(() => mentorStream(tail, frame('x', null)), /V3_MENTOR_TEMPLATE/);
+});
+
+test('V3 response validation stops on malformed withdrawals but accepts absent or valid lists', () => {
+  const response = output => ({ status: 200, body: JSON.stringify({ provider: 'OpenAI', usage: { cost: 0.0001 },
+    choices: [{ finish_reason: 'stop', message: { content: JSON.stringify({ inputKind: 'answer', patches: [], notes: [], ...output }) } }] }) });
+  strict.equal(validateV3Response(response({}), validateResponse), 0.0001);
+  strict.equal(validateV3Response(response({ withdrawals: [{ stepId: 'step-1', fieldId: 'goal' }] }), validateResponse), 0.0001);
+  for (const bad of [{}, null, ['x'], Array(13).fill({ stepId: 's', fieldId: 'f' })])
+    strict.throws(() => validateV3Response(response({ withdrawals: bad }), validateResponse), /WITHDRAWAL_FORMAT_STOP/);
+});
+
+test('V3 scoring hides run identity, keeps every gold condition and lets no score override technical failures', () => {
+  strict.deepEqual(scrub({ withdrawnSuggestion: { value: 'x', withdrawnBy: 'id', withdrawnSeq: [1, 2], hash: 'h' } }),
+    { withdrawnSuggestion: { value: 'x' } });
+  strict.deepEqual(criteria({ retain: ['a', 'b'], patches: [] }).map(c => c.id), ['expected/retain/0', 'expected/retain/1', 'expected/patches']);
+  const item = { opaqueId: 'o', checks: [{ id: 'c' }], formatError: false, protectedDirectChanged: false };
+  const score = { opaqueId: 'o', checks: [{ id: 'c', pass: true, reason: 'ok' }], unsupportedFact: false, failureTypes: [], notes: '' };
+  validateScores({ items: [item] }, [score]);
+  strict.equal(passes(item, score), true);
+  strict.equal(passes({ ...item, protectedDirectChanged: true }, score), false);
+  strict.equal(passes(item, { ...score, failureTypes: ['x'] }), false);
+  strict.throws(() => validateScores({ items: [item] }, [{ ...score, checks: [] }]), /V3_SCORE_SHAPE/);
+});
+
+test('V3 scorer instructions name the same numbered files that seal and unblind read', () => {
+  strict.deepEqual(scoreFiles('/x/blind-a/packet-2.json'), { scores: 'scores-2.json', lock: 'lock-2.json' });
+  strict.throws(() => scoreFiles('/x/packet.json'), /V3_PACKET_PATH/);
+  for (const text of Object.values(instructions)) {
+    strict.match(text, /scores-N\.json/);
+    strict.match(text, /lock-N\.json/);
+    strict.doesNotMatch(text, /Write scores\.json|then lock\.json/);
+  }
+});
