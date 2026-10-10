@@ -45,7 +45,8 @@ export async function verifySupplement(admin, one, two) {
   const admissions = [begin(one, b), begin(two, b)];
   const settled = Promise.allSettled(admissions);
   let blocked = false;
-  for (let i = 0; i < 100; i++) {
+  for (let i = 0; i < 500; i++) {
+    await admin.query('SELECT pg_stat_clear_snapshot()');
     const n = await value(admin, "SELECT count(*)::int v FROM pg_stat_activity WHERE wait_event_type='Lock' AND query LIKE 'SELECT library_upload_begin%'");
     if (n === 2) { blocked = true; break; }
     await new Promise(r => setTimeout(r, 10));

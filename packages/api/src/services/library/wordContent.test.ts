@@ -10,6 +10,16 @@ describe('Word extracted text boundaries', () => {
     expect(result.map(s => s.body).join('')).toBe(text);
     expect(result.map(s => s.title)).toEqual(['', '第一章', '第一章', '结尾']);
   });
+  it('accepts LIB-2b normalized labels while preserving heading tabs and line breaks', () => {
+    const text = '  一\t二\n三\n正文';
+    const parts = split(text, [{ offset: 0, level: 1, text: '一 二 三' }]);
+    expect(parts.map(s => s.body).join('')).toBe(text);
+    expect(parts[0].title).toBe('一 二 三');
+  });
+  it('escapes regexp metacharacters in labels', () => {
+    expect(split('标题 [.*] (a+)\n正文', [{ offset: 0, level: 1, text: '标题 [.*] (a+)' }])[0].title).toBe('标题 [.*] (a+)');
+    expect(() => split('标题 XXX\n正文', [{ offset: 0, level: 1, text: '标题 .*' }])).toThrow('LIBRARY_HEADINGS');
+  });
   it('preserves BOM bytes and emoji when splitting at 8192 bytes', () => {
     const text = '\ufeff' + '😀'.repeat(6000);
     const parts = split(text);

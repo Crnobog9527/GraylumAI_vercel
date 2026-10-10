@@ -27,11 +27,15 @@ export function wordSegments(bytes: Uint8Array, rawHeadings: z.infer<typeof word
   let end = -1;
   for (const h of parsed.data) {
     if (h.offset < end || h.offset >= text.length || Buffer.byteLength(h.text) > 512
-      || /[\r\n]/.test(h.text) || !h.text.trim() || !h.text.isWellFormed()
-      || text.slice(h.offset, h.offset + h.text.length) !== h.text
-      || h.offset > 0 && text[h.offset - 1] !== '\n'
-      || !['', '\n', '\r'].includes(text[h.offset + h.text.length] ?? '')) throw new Error('LIBRARY_HEADINGS');
-    end = h.offset + h.text.length;
+      || h.text !== h.text.replace(/\s+/g, ' ').trim() || !h.text || !h.text.isWellFormed()
+      || h.offset > 0 && text[h.offset - 1] !== '\n') throw new Error('LIBRARY_HEADINGS');
+    // LIB-2b collapses whitespace in labels, but leaves the original tabs/line breaks in text.
+    // Escape labels: user text never supplies executable regular expressions.
+    const escaped = h.text.split(' ').map(part => part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('\\s+');
+    const match = new RegExp(`^\\s*${escaped}(?=[ \\t]*(?:\\r?\\n|$))`)
+      .exec(text.slice(h.offset, h.offset + 65_537));
+    if (!match || match[0].length > 65_536) throw new Error('LIBRARY_HEADINGS');
+    end = h.offset + match[0].length;
   }
   const segments: Segment[] = [];
   const append = (chunk: string, title: string) => {

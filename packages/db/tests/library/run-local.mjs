@@ -26,10 +26,12 @@ let clients = [];
 try {
   docker(['run', '-d', '--name', name, '-e', 'POSTGRES_PASSWORD=local-test-only', '-e', 'POSTGRES_DB=lib2a',
     '-p', '127.0.0.1::5432', POSTGRES_IMAGE]);
-  for (let attempt = 0; attempt < 50; attempt++) {
-    try { docker(['exec', name, 'pg_isready', '-U', 'postgres']); break; }
+  let ready = false;
+  for (let attempt = 0; attempt < 150; attempt++) {
+    try { docker(['exec', name, 'pg_isready', '-h', '127.0.0.1', '-U', 'postgres']); ready = true; break; }
     catch { await new Promise(r => setTimeout(r, 200)); }
   }
+  assert.ok(ready, 'PostgreSQL TCP listener must be ready');
   installPgCronStub(root, name, (argv, input) => docker(['exec', ...argv], input));
   const apply = input => { try { sql(input); return { ok: true }; } catch (e) { return { ok: false, error: e.message }; } };
   const report = buildFromFiles(root, {
@@ -68,7 +70,8 @@ try {
   await admin.query('BEGIN'); await admin.query('SELECT id FROM profiles WHERE id=$1 FOR UPDATE',[a]);
   const first = begin(one,a); const second = begin(two,a);
   let blocked = false;
-  for(let i=0;i<100;i++) {
+  for(let i=0;i<500;i++) {
+    await admin.query('SELECT pg_stat_clear_snapshot()');
     const wait = await admin.query("SELECT count(*)::int n FROM pg_stat_activity WHERE wait_event_type='Lock' AND query LIKE 'SELECT library_upload_begin%'");
     if(wait.rows[0].n===2) {blocked=true;break;}
     await new Promise(r=>setTimeout(r,10));
