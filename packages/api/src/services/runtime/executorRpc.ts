@@ -1,4 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import {assertPath} from '../skills/loader';
 import {SKILL_FILE_TRACE_BYTES,skillFileParameters} from './skillFile';
 import {throwIfContentErased} from '../accountErasure/content';
 import type {RuntimeProgress} from './progress';
@@ -88,11 +89,17 @@ export function historyGuard(executionId:string,failed:(code:string)=>void) {
 export function terminalReplyGuard(active:boolean,allowsCard:boolean,failed:()=>void,allowsSkillFile=false) {
   let fileRequested=false;
   return (response:unknown,organizer=false)=>{
-    const message=(response as {choices?:Array<{message?:{tool_calls?:Array<{function?:{name?:string;arguments?:string}}>}}>})?.choices?.[0]?.message;
+    const message=(response as {choices?:Array<{message?:{tool_calls?:Array<{id?:string;type?:string;
+      function?:{name?:string;arguments?:string}}>}}>})?.choices?.[0]?.message;
     const readsFile=message?.tool_calls?.[0]?.function?.name==='read_skill_file';
     let invalidFileArguments=false;
-    if(readsFile){try{invalidFileArguments=!skillFileParameters.safeParse(JSON.parse(message!.tool_calls![0]!.function!.arguments!)).success;}
-     catch{invalidFileArguments=true;}}
+    if(readsFile){try{
+      const call=message!.tool_calls![0]!,{path}=skillFileParameters.parse(JSON.parse(call.function!.arguments!));
+      assertPath(path);
+      invalidFileArguments=Buffer.from(path).toString('utf8')!==path||call.type!=='function'||
+        typeof call.id!=='string'||!call.id.length||Array.from(call.id).length>256||call.id.includes('\0')||
+        Buffer.from(call.id).toString('utf8')!==call.id;
+     }catch{invalidFileArguments=true;}}
     const oversized=readsFile&&Buffer.byteLength(JSON.stringify(JSON.stringify(message)))>SKILL_FILE_TRACE_BYTES;
     if(active&&(terminalAgentReplyFailure(response,organizer,allowsCard,allowsSkillFile&&!fileRequested)||oversized||invalidFileArguments)){
       failed();

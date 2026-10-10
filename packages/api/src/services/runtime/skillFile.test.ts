@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import {beforeEach, expect, it, vi} from 'vitest';
 import {clearSkillResourceCache, packageHash, sha256, type SkillSource} from '../skills/loader';
-import {freezeSkillFileBinding, readFrozenSkillFile, SKILL_FILE_MAX_BYTES} from './skillFile';
+import {freezeSkillFileBinding, readFrozenSkillFile, skillFileContinuationBytes, SKILL_FILE_MAX_BYTES} from './skillFile';
 
 function fixture(content = 'Reference text') {
   const base = {
@@ -77,4 +77,15 @@ it('rejects corrupted source bytes and publication revoked during read', async (
     return Buffer.from('Reference text');
   });
   await expect(readFrozenSkillFile({...second, arguments: args, saved: null})).rejects.toThrow('UNAVAILABLE');
+});
+
+it('measures cold and cached files with bounded current permission checks, including revocation at the end',async()=>{
+ const {source,descriptor}=fixture('Sized reference');
+ vi.mocked(source.read).mockImplementation(async identity=>Buffer.from(identity.path==='SKILL.md'?'':'Sized reference'));
+ const first=await skillFileContinuationBytes(source,descriptor);
+ expect(source.state).toHaveBeenCalledTimes(2);expect(source.read).toHaveBeenCalledTimes(2);
+ expect(await skillFileContinuationBytes(source,descriptor)).toBe(first);
+ expect(source.state).toHaveBeenCalledTimes(4);expect(source.read).toHaveBeenCalledTimes(2);
+ vi.mocked(source.state).mockResolvedValueOnce('enabled').mockResolvedValueOnce('revoked');
+ await expect(skillFileContinuationBytes(source,descriptor)).rejects.toThrow('RUNTIME_SKILL_FILE_DENIED');
 });

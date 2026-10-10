@@ -6,7 +6,7 @@ import {createRuntimeBudget} from './budget';
 const billing=vi.hoisted(()=>({claimCall:vi.fn(),dispatchOnce:vi.fn(),recoverRun:vi.fn()}));
 vi.mock('../bill2/service',async original=>({...await original<typeof import('../bill2/service')>(),authoritativeBilling:()=>billing}));
 const id='10000000-0000-4000-8000-000000000001';
-it.each(['answer','repeat','oversized','denied','large','revoked','malformed','transient'] as const)('settles file continuation %s and replays without another dispatch',async outcome=>{
+it.each(['answer','repeat','oversized','denied','large','revoked','malformed','nul','surrogate','badId','transient'] as const)('settles file continuation %s and replays without another dispatch',async outcome=>{
  vi.clearAllMocks();
  clearSkillResourceCache();
  const content='Synthetic reference';
@@ -49,8 +49,8 @@ it.each(['answer','repeat','oversized','denied','large','revoked','malformed','t
  billing.claimCall.mockImplementation(async(_run,sequence)=>({id:String(sequence)}));
  billing.dispatchOnce.mockImplementation(async(callId,request)=>{
   const sequence=Number(callId);requests.push(request);
-  const message=sequence===1||outcome==='repeat'?{role:'assistant',content:outcome==='oversized'?'x'.repeat(9000):null,tool_calls:[{id:'read_1',type:'function',
-   function:{name:'read_skill_file',arguments:outcome==='malformed'?'{':'{"path":"ref.md"}'}}]}:{role:'assistant',content:'Grounded answer'};
+  const message=sequence===1||outcome==='repeat'?{role:'assistant',content:outcome==='oversized'?'x'.repeat(9000):null,tool_calls:[{id:outcome==='badId'?'\0':'read_1',type:'function',
+   function:{name:'read_skill_file',arguments:outcome==='malformed'?'{':JSON.stringify({path:outcome==='nul'?'\0':outcome==='surrogate'?'\ud800':'ref.md'})}}]}:{role:'assistant',content:'Grounded answer'};
   receipts.set(sequence,{hash:sha256(request),rawBody:JSON.stringify({usage:{sdkResponse:{
    id:'fixture',object:'chat.completion',created:1,model:'fixture',
    choices:[{index:0,message,finish_reason:sequence===1?'tool_calls':'stop'}],
@@ -69,7 +69,7 @@ it.each(['answer','repeat','oversized','denied','large','revoked','malformed','t
   expect(await runtimeExecutor({...options,budget:createRuntimeBudget()}).execute(id)).toEqual(first);
   expect(billing.dispatchOnce).toHaveBeenCalledTimes(count);
   expect(database.rpc.mock.calls.filter(([name,args])=>name==='runtime_tool'&&args.p_action==='claim')).toHaveLength(
-   ['oversized','malformed'].includes(outcome)?0:2);
+   ['oversized','malformed','nul','surrogate','badId'].includes(outcome)?0:2);
   expect(database.rpc.mock.calls.some(([name])=>name==='runtime_cancel')).toBe(outcome!=='transient');
   return;
  }

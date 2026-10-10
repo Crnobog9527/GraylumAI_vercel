@@ -7,7 +7,7 @@ import {runtimeContext} from './runtimeContext';
 import {OPENING_INPUT} from '../../shared/opcQuestions';
 vi.mock('./newWorkGate',async original=>({...await original<typeof import('./newWorkGate')>(),
  ...(await import('../__tests__/fixtures/runtimeGates')).testAdmissionGates}));
-vi.mock('../skills/databaseSource',()=>({databaseSkillSource:()=>({list:async()=>[descriptor]})}));
+vi.mock('../skills/databaseSource',()=>({databaseSkillSource:()=>({list:async()=>[descriptor],state:async()=> 'enabled'})}));
 vi.mock('../skills/loader',async original=>({...await original<typeof import('../skills/loader')>(),
  readSkillResource:async()=>'',activateSkill:async()=>({forModel:()=> 'Synthetic Skill'})}));
 const actor='10000000-0000-4000-8000-000000000001';
