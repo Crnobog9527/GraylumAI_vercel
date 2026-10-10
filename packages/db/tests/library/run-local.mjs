@@ -5,6 +5,7 @@ import { resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import assert from 'node:assert/strict';
 import pg from 'pg';
+import { verifySupplement } from './supplement.mjs';
 import { verifyErasure } from './erasure.mjs';
 import { POSTGRES_IMAGE } from '../v3/images.mjs';
 import { buildFromFiles, installPgCronStub } from '../baseline/build-from-files.mjs';
@@ -37,6 +38,12 @@ try {
   assert.equal(report.failed, null, JSON.stringify(report));
   // Repeat new migration at its own position; the baseline replay command additionally compares structure.
   sql(readFileSync(resolve(root, 'packages/db/migrations/0203_library_documents.sql'), 'utf8'));
+  const supplement = readFileSync(resolve(root, 'packages/db/migrations/0208_library_backend_supplement.sql'), 'utf8');
+  sql(supplement);
+  const catalog = () => sql(readFileSync(resolve(root, 'packages/db/tests/baseline/fingerprint.sql'), 'utf8'));
+  const beforeSupplementRepeat = catalog();
+  sql(supplement);
+  assert.equal(catalog(), beforeSupplementRepeat, '0208 repeat must not change schema/permissions');
   const port = Number(docker(['port', name, '5432/tcp']).split(':').at(-1));
   const connect = async () => {
     const c = new pg.Client({ host: '127.0.0.1', port, database: 'lib2a', user: 'postgres', password: 'local-test-only' });
@@ -163,7 +170,9 @@ try {
   assert.equal(buckets.length,2); assert.ok(buckets.every(b=>b.public===false));
   assert.equal(Number(buckets.find(b=>b.id==='library-documents').file_size_limit),10000000);
   assert.equal((await admin.query("SELECT count(*) AS n FROM pg_policies WHERE schemaname='storage'")).rows[0].n,'0');
+  await verifySupplement(admin, one, two);
   await verifyErasure(admin, one);
+  await verifyErasure(admin, one, true);
   console.log(JSON.stringify({result:'PASS',steps:report.passed,newMigrationRepeated:true,
     cases:['default-off','concurrent-quota-barrier','idempotent-no-new-token','cross-user-denial','actual-size',
       'atomic-publication','downgrade-read-delete','delete-private-fields','delete-publish-denial','live-token-hold',
