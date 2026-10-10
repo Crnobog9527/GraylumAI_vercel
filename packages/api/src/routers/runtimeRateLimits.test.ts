@@ -1,38 +1,18 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { expect, it, vi } from 'vitest';
-import { runtimeRateLimitsRouter } from './runtimeRateLimits';
 import { DEFAULT_STOP_LOSS } from '../services/runtime/stopLossSettings';
-import { settingsRouter } from './settings';
 import {
   DEFAULT_RUNTIME_RATE_LIMITS as config, RUNTIME_RATE_LIMIT_KEY as key, readRuntimeRateLimits, saveRuntimeRateLimits,
 } from '../services/runtime/rateLimitSettings';
-function harness(role: 'admin' | 'user' | 'anonymous') {
-  const stored = new Map<string, unknown>();
-  const writes: unknown[] = [];
-  const db = { from(table: string) {
-    if (table === 'profiles') return { select() { return this; }, eq() { return this; },
-      single: async () => ({ data: { id: 'actor', role, status: 'active', credits: 0, nickname: 'Synthetic', email: 'synthetic@example.test' }, error: null }) };
-    if (table !== 'system_settings') throw new Error(table);
-    let key = '';
-    return { select() { return this; }, eq(_field: string, value: string) { key = value; return this; },
-      maybeSingle: async () => ({ data: stored.has(key) ? { key, value: stored.get(key) } : null, error: null }),
-      upsert: async (row: { key: string; value: unknown }) => {
-        writes.push(row); stored.set(row.key, row.value); return { error: null };
-      } };
-  } };
-  const ctx = { headers: new Headers(), user: role === 'anonymous' ? null : {
-    id: 'actor', email: 'synthetic@example.test', app_metadata: { provider: 'email' }, user_metadata: { email_verified: true } },
-    isEmailVerified: true, authProvider: 'email', supabase: db, supabaseAuth: db, supabasePublic: {},
-    supabaseAdmin: db, hasSupabaseAdminPrivileges: true } as never;
-  return { caller: runtimeRateLimitsRouter.createCaller(ctx), generic: settingsRouter.createCaller(ctx), stored, writes, db };
-}
+import { runtimeSettingsHarness as harness } from './runtimeSettingsTestHarness';
 
-it('reads explicit defaults, saves all settings and reads actual stored state back', async () => {
+it('legacy quota save ignores the caller pause flag and returns the committed quota', async () => {
   const f = harness('admin');
   expect(await f.caller.get()).toMatchObject({ source: 'default', config,
     enforcement: { admission: true, calls: true, pause: true } });
-  const changed = { ...config, admissionPerMinute: 9, stopNewCalls: true };
-  expect(await f.caller.update(changed)).toMatchObject({ source: 'configured', config: changed });
+  const changed = { ...config, admissionPerMinute: 9 };
+  const staleInput = { ...changed, stopNewCalls: true };
+  expect(await f.caller.update(staleInput)).toMatchObject({ source: 'configured', config: changed });
   expect((await f.caller.get()).config).toEqual(changed);
   expect(f.writes).toHaveLength(1);
 });
@@ -76,21 +56,17 @@ it('does not cache configuration or hide a database read failure', async () => {
   });
 });
 
-it.each(['write', 'readback'])('does not report success on %s failure', async phase => {
-  const query = { select() { return this; }, eq() { return this; },
-    upsert: vi.fn(async () => ({ error: phase === 'write' ? { message: 'private write detail' } : null })),
-    maybeSingle: vi.fn(async () => ({ data: null, error: { message: 'private read detail' } })),
-  };
-  await expect(saveRuntimeRateLimits({ from: () => query } as never, config))
+it.each([{ code: 'XX000' }, null])('fails closed on an RPC error or invalid result', async error => {
+  const rpc = vi.fn(async () => ({ error, data: null }));
+  await expect(saveRuntimeRateLimits({ rpc } as never, config))
     .rejects.toMatchObject({ code: 'SERVICE_UNAVAILABLE', message: '无法读取或保存使用额度，请稍后再试' });
-  expect(query.upsert).toHaveBeenCalledTimes(1);
-  expect(query.maybeSingle).toHaveBeenCalledTimes(phase === 'write' ? 0 : 1);
+  expect(rpc).toHaveBeenCalledTimes(1);
 });
 
 it.each(['user', 'anonymous'] as const)('denies %s all stop-loss administration', async role => {
   const f = harness(role);
-  for (const call of [() => f.caller.stopLossConfig(), () => f.caller.updateStopLoss(DEFAULT_STOP_LOSS),
-    () => f.caller.stopLossStatus(), () => f.caller.stopLossAlerts(),
+  for (const call of [() => f.caller.stopLossConfig(), () => f.caller.updateStopLoss({ config: DEFAULT_STOP_LOSS, expectedVersion: 0 }),
+    () => f.caller.setStopNewCalls({ stopped: true }), () => f.caller.stopLossStatus(), () => f.caller.stopLossAlerts(),
     () => f.caller.recordProviderBalance({ provider: 'openrouter', balanceUsd: '0' })]) {
     await expect(call()).rejects.toMatchObject({ code: role === 'anonymous' ? 'UNAUTHORIZED' : 'FORBIDDEN' });
   }
@@ -98,6 +74,45 @@ it.each(['user', 'anonymous'] as const)('denies %s all stop-loss administration'
 });
 it('admin manages stop-loss config but generic settings cannot bypass validation', async () => {
   const f = harness('admin');
-  expect((await f.caller.updateStopLoss({ ...DEFAULT_STOP_LOSS, siteDailyUsd: '1.25' })).config.siteDailyUsd).toBe('1.25');
+  expect((await f.caller.updateStopLoss({ config: { ...DEFAULT_STOP_LOSS, siteDailyUsd: '1.25' }, expectedVersion: 0 })).config.siteDailyUsd).toBe('1.25');
   await expect(f.generic.updateSystemSettings({ key: 'runtime_stop_loss', value: {} })).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+});
+
+it('switch and legacy quota edits preserve each other in either order', async () => {
+  const f = harness('admin');
+  await f.caller.setStopNewCalls({ stopped: true });
+  expect((await f.caller.update({ ...config, callsPerMinute: 40 })).config)
+    .toEqual({ ...config, callsPerMinute: 40, stopNewCalls: true });
+  expect((await f.caller.setStopNewCalls({ stopped: false })).config)
+    .toEqual({ ...config, callsPerMinute: 40 });
+  expect(f.writes).toEqual([
+    { name: 'runtime_set_stop_new_calls', args: { p_stopped: true } },
+    { name: 'runtime_update_rate_limits', args: { p_limits: {
+      admissionPerMinute: 10, admissionPer24Hours: 200, callsPerMinute: 40, callsPer24Hours: 600,
+    } } },
+    { name: 'runtime_set_stop_new_calls', args: { p_stopped: false } },
+  ]);
+});
+it('requires a version and reports a stale stop-loss editor as HTTP 409', async () => {
+  const { getHTTPStatusCodeFromError } = await import('@trpc/server/http');
+  const f = harness('admin');
+  const initial = await f.caller.stopLossConfig();
+  expect(initial.revision).toBe(0);
+  const first = await f.caller.updateStopLoss({ config: { ...initial.config, siteDailyUsd: '3' }, expectedVersion: 0 });
+  expect(first.revision).toBe(1);
+  try {
+    await f.caller.updateStopLoss({ config: { ...initial.config, siteDailyUsd: '4' }, expectedVersion: 0 });
+    throw new Error('must conflict');
+  } catch (error) {
+    expect(error).toMatchObject({ code: 'CONFLICT' });
+    expect(getHTTPStatusCodeFromError(error as never)).toBe(409);
+  }
+  expect((await f.caller.stopLossConfig()).config.siteDailyUsd).toBe('3');
+  await expect(f.caller.updateStopLoss(initial.config as never)).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+});
+it('rejects extra switch fields rather than accepting a quota patch', async () => {
+  const f = harness('admin');
+  await expect(f.caller.setStopNewCalls({ stopped: true, callsPerMinute: 2 } as never))
+    .rejects.toMatchObject({ code: 'BAD_REQUEST' });
+  expect(f.writes).toEqual([]);
 });
