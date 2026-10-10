@@ -686,6 +686,13 @@ BEGIN
   EXECUTE replace(source,' SELECT artifact_evidence_allowed_before_opc',
    E' -- D7 source tombstones\n SELECT NOT EXISTS(SELECT 1 FROM artifact_projects WHERE id=project AND erased_at IS NOT NULL)\n AND NOT EXISTS(SELECT 1 FROM artifact_evidence WHERE ids ? id::text AND erased_at IS NOT NULL)\n AND artifact_evidence_allowed_before_opc');
  END IF;
+ source:=pg_get_functiondef('public.artifact_query_before_opc(uuid,text,uuid,uuid)'::regprocedure);
+ IF position('-- D7 project list' IN source)=0 THEN
+  IF position('FROM artifact_projects ap WHERE actor_id=p_actor_id);' IN source)=0 THEN
+   RAISE EXCEPTION 'D7 project list boundary mismatch'; END IF;
+  EXECUTE replace(source,'FROM artifact_projects ap WHERE actor_id=p_actor_id);',
+   E'FROM artifact_projects ap WHERE actor_id=p_actor_id AND ap.erased_at IS NULL AND ap.content_deleted_at IS NULL); -- D7 project list');
+ END IF;
  source:=pg_get_functiondef('public.artifact_query(uuid,text,uuid,uuid)'::regprocedure);
  IF position('-- D7 project read' IN source)=0 THEN
   EXECUTE regexp_replace(source,'\mBEGIN\M',$patch$BEGIN

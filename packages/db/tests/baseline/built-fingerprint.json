@@ -2115,7 +2115,7 @@
   "fn:artifact_observe_generation(uuid,uuid,uuid,uuid,uuid,jsonb)": "2a94ac9f385c",
   "fn:artifact_publish_current(uuid,uuid,uuid,uuid,uuid,uuid,jsonb)": "f42dbc09ed84",
   "fn:artifact_query(uuid,text,uuid,uuid)": "e36d714eb5c6",
-  "fn:artifact_query_before_opc(uuid,text,uuid,uuid)": "71a8a8ce6930",
+  "fn:artifact_query_before_opc(uuid,text,uuid,uuid)": "aab9883fdfb9",
   "fn:artifact_reference_available(uuid)": "5e70e4f05be0",
   "fn:artifact_reference_candidate_guard()": "6f2220583bb0",
   "fn:artifact_reference_choices(uuid,uuid)": "41bd920814e9",

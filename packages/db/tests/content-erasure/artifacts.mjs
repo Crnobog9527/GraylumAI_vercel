@@ -20,6 +20,7 @@ export async function runArtifacts(db,report){
   VALUES($1,'rolling_summary','GUIDED_PRIVATE_SNAPSHOT','{"text":"GUIDED_PRIVATE_METADATA"}')`,[conversation]);
  assert.match(JSON.stringify(await rpc(db,'artifact_chat',f.actor,'stats',null,{})),new RegExp(conversation));
 
+ assert.match(JSON.stringify(await rpc(db,'artifact_query',f.actor,'projects',null,null)),new RegExp(f.project));
  assert.equal(await rpc(db,'opc_source_allowed',f.actor,f.version),true);
  assert.equal(await rpc(db,'opc_content_allowed',f.actor,f.content),true);
  assert.match(JSON.stringify(await rpc(db,'opc_library',f.actor,'',null,null)),/D7_INDEPENDENT_SAVED_BODY/);
@@ -28,6 +29,16 @@ export async function runArtifacts(db,report){
   'independent saved content stays listed without a live session join');
  assert.equal((await erase(db,f,'artifact',f.project)).status,'deleted');
  assert.equal((await erase(db,f,'artifact',f.project)).alreadyDeleted,true);
+ assert.doesNotMatch(JSON.stringify(await rpc(db,'artifact_query',f.actor,'projects',null,null)),new RegExp(f.project));
+ const replacement=randomUUID();
+ await db.query(`INSERT INTO artifact_projects(id,actor_id,module_id,skill_id,account,work_title)
+  VALUES($1,$2,$3,$4,'replacement','NEW_GUIDED_PROJECT')`,[replacement,f.actor,f.module,f.skill]);
+ const projects=await rpc(db,'artifact_query',f.actor,'projects',null,null);
+ const eligible=projects.filter(p=>p.moduleId===f.module&&p.skillId===f.skill);
+ assert.ok(eligible.some(p=>p.projectId===replacement),'replacement remains selectable under the same Skill');
+ assert.ok(eligible.every(p=>p.projectId!==f.project),'Skill re-entry cannot select the erased non-social project');
+ report.checks.push('project listing omits erased guided artifacts and retains a replacement under the same Skill');
+
  const guided=(await db.query('SELECT title,summary,summary_metadata,erased_at,is_deleted FROM conversations WHERE id=$1',[conversation])).rows[0];
  assert.equal((await db.query('SELECT title FROM conversations WHERE id=$1',[unrelated])).rows[0].title,'KEEP_OTHER_CONVERSATION');
  assert.equal(guided.title,null);assert.equal(guided.summary,null);assert.equal(guided.summary_metadata,null);
