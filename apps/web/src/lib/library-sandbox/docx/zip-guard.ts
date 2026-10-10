@@ -119,6 +119,9 @@ function readCentralDirectory(bytes: Uint8Array, view: DataView): { entries: Cen
     const end = p + 46 + nameLength + extraLength + commentLength;
     if (end > eocd) fail('ZIP_INVALID');
     const nameBytes = bytes.subarray(p + 46, p + 46 + nameLength);
+    // Without the UTF-8 flag JSZip would read non-ASCII names as CP437; refuse them so every check
+    // here sees exactly the name the parser sees.
+    if (!(flags & 0x800) && nameBytes.some((byte) => byte >= 0x80)) fail('ZIP_PATH');
     const name = decodeName(nameBytes);
     p = end;
 

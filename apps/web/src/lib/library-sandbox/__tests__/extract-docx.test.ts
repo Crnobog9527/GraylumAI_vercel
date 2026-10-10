@@ -69,6 +69,22 @@ describe('extractDocx: text, structure and images', () => {
     expect(Buffer.from(result.images[0].bytes)).toEqual(TINY_PNG);
   });
 
+  it('records each image at its exact inline position, in tables and list items too', async () => {
+    const numbering = '<w:abstractNum w:abstractNumId="0"><w:lvl w:ilvl="0"><w:numFmt w:val="decimal"/></w:lvl></w:abstractNum>'
+      + '<w:num w:numId="1"><w:abstractNumId w:val="0"/></w:num>';
+    const body = [
+      `<w:p>${run('前')}${picture(1)}${run('中')}${picture(2)}${run('后\uFDD0' + '9\uFDD1')}</w:p>`,
+      para('标题', 'Heading1'),
+      `<w:tbl><w:tr><w:tc>${para('格一')}</w:tc><w:tc><w:p>${run('格二')}${picture(3)}</w:p></w:tc></w:tr></w:tbl>`,
+      `<w:p><w:pPr><w:numPr><w:ilvl w:val="0"/><w:numId w:val="1"/></w:numPr></w:pPr>${run('项')}${picture(4)}</w:p>`,
+    ].join('');
+    const result = await extract(buildDocx({ body, numbering, images: [TINY_PNG, TINY_PNG, TINY_PNG, TINY_PNG] }));
+    expect(result.text).toBe('前中后9\n标题\n格一\t格二\n1. 项');
+    const at = (offset: number) => result.text.slice(0, offset);
+    expect(result.images.map((image) => at(image.offset))).toEqual(['前', '前中', '前中后9\n标题\n格一\t格二', '前中后9\n标题\n格一\t格二\n1. 项']);
+    expect(result.headings).toEqual([{ level: 1, text: '标题', offset: 5 }]);
+  });
+
   it('numbers contiguous list items and keeps unordered bullets', async () => {
     const level = (format: string) => `<w:lvl w:ilvl="0"><w:numFmt w:val="${format}"/></w:lvl>`;
     const numbering = `<w:abstractNum w:abstractNumId="0">${level('decimal')}</w:abstractNum>`

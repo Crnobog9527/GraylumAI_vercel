@@ -66,14 +66,23 @@ function utf8Length(text: string): number {
   return bytes;
 }
 
-type PendingImage = { node: DocxNode; offset: number };
+/**
+ * Images are marked in place while the text is built (`\uFDD0<n>\uFDD1`, noncharacters removed
+ * from document text first), so each image keeps its exact position through list prefixes, table
+ * cells and whitespace folding. The markers are stripped at the end and turned into offsets.
+ */
+const MARK_OPEN = '\uFDD0';
+const MARK_CLOSE = '\uFDD1';
+const MARKER = /\uFDD0(\d+)\uFDD1/g;
+const SENTINELS = /[\uFDD0\uFDD1]/g;
+const visible = (text: string) => text.replace(MARKER, '');
 
 class TextBuilder {
   private parts: string[] = [];
   private length = 0;
   private bytes = 0;
-  readonly headings: DocxHeading[] = [];
-  readonly pendingImages: PendingImage[] = [];
+  private rawHeadings: DocxHeading[] = [];
+  readonly pendingImages: DocxNode[] = [];
   imageCount = 0;
   private notes: DocxNode[] = [];
   private noteNumbers = new Map<string, number>();
@@ -86,15 +95,34 @@ class TextBuilder {
   }
 
   line(text: string) {
-    const value = `${text}\n`;
+    this.append(`${text}\n`);
+  }
+
+  private append(value: string) {
     this.bytes += utf8Length(value);
     if (this.bytes > SANDBOX_LIMITS.maxTextBytes) throw new SandboxError('TEXT_TOO_LARGE');
     this.parts.push(value);
     this.length += value.length;
   }
 
-  text(): string {
-    return this.parts.join('').replace(/\n+$/, '');
+  /** Final text with markers removed; heading offsets shifted and image offsets resolved to match. */
+  finish(): { text: string; headings: DocxHeading[]; imageOffsets: number[] } {
+    const raw = this.parts.join('').replace(/\n+$/, '');
+    const imageOffsets: number[] = [];
+    const removed: { at: number; length: number }[] = [];
+    let text = '';
+    let last = 0;
+    for (const match of raw.matchAll(MARKER)) {
+      text += raw.slice(last, match.index);
+      imageOffsets[Number(match[1])] = text.length;
+      removed.push({ at: match.index, length: match[0].length });
+      last = match.index + match[0].length;
+    }
+    text += raw.slice(last);
+    const shift = (offset: number) => removed.reduce((sum, item) => sum + (item.at < offset ? item.length : 0), 0);
+    const headings = this.rawHeadings.map((heading) =>
+      ({ ...heading, offset: Math.min(heading.offset - shift(heading.offset), text.length) }));
+    return { text, headings, imageOffsets: imageOffsets.map((offset) => Math.min(offset, text.length)) };
   }
 
   blocks(nodes: DocxNode[] | undefined) {
@@ -108,16 +136,19 @@ class TextBuilder {
   private paragraph(node: DocxNode) {
     const start = this.offset;
     const level = headingLevel(node);
-    let text = this.inline(node.children, start).replace(/[ \t]+$/, '');
-    if (!text.trim()) {
+    let text = this.inline(node.children).replace(/[ \t]+$/, '');
+    if (!visible(text).trim()) {
+      // A picture-only paragraph adds no line; its image sits at the start of the next one.
+      const markers = text.match(MARKER);
+      if (markers) this.append(markers.join(''));
       this.listCounters = [];
       return;
     }
     if (level !== null) {
       this.listCounters = [];
-      if (this.headings.length >= MAX_HEADINGS) throw new SandboxError('TEXT_TOO_LARGE');
-      const title = text.replace(/\s+/g, ' ').trim().slice(0, MAX_HEADING_CHARS);
-      this.headings.push({ level, text: title, offset: start });
+      if (this.rawHeadings.length >= MAX_HEADINGS) throw new SandboxError('TEXT_TOO_LARGE');
+      const title = visible(text).replace(/\s+/g, ' ').trim().slice(0, MAX_HEADING_CHARS);
+      this.rawHeadings.push({ level, text: title, offset: start });
     } else if (node.numbering) {
       text = this.listPrefix(node.numbering) + text;
     } else {
@@ -137,31 +168,31 @@ class TextBuilder {
   private table(node: DocxNode) {
     this.listCounters = [];
     for (const row of node.children ?? []) {
-      const start = this.offset;
-      const cells = (row.children ?? []).map((cell) => this.flatten(cell.children, start));
-      const line = cells.join('\t');
-      if (line.trim()) this.line(line);
+      const line = (row.children ?? []).map((cell) => this.flatten(cell.children)).join('\t');
+      const markers = line.match(MARKER);
+      if (visible(line).trim()) this.line(line);
+      else if (markers) this.append(markers.join(''));
     }
   }
 
   /** Paragraphs, nested tables and notes inside one cell or note, on a single line. */
-  private flatten(nodes: DocxNode[] | undefined, offset: number): string {
+  private flatten(nodes: DocxNode[] | undefined): string {
     const pieces: string[] = [];
     for (const node of nodes ?? []) {
-      if (node.type === 'paragraph') pieces.push(this.inline(node.children, offset));
+      if (node.type === 'paragraph') pieces.push(this.inline(node.children));
       else if (node.type === 'table' || node.type === 'tableRow' || node.type === 'tableCell') {
-        pieces.push(this.flatten(node.children, offset));
-      } else pieces.push(this.inline([node], offset));
+        pieces.push(this.flatten(node.children));
+      } else pieces.push(this.inline([node]));
     }
     return pieces.map((piece) => piece.replace(/\s+/g, ' ').trim()).filter(Boolean).join(' ');
   }
 
-  private inline(nodes: DocxNode[] | undefined, offset: number): string {
+  private inline(nodes: DocxNode[] | undefined): string {
     let text = '';
     for (const node of nodes ?? []) {
       switch (node.type) {
         case 'text':
-          text += node.value ?? '';
+          text += (node.value ?? '').replace(SENTINELS, '');
           break;
         case 'tab':
           text += '\t';
@@ -177,14 +208,17 @@ class TextBuilder {
           break;
         case 'image':
           this.imageCount += 1;
-          if (this.pendingImages.length < MAX_EMBEDDED_IMAGES) this.pendingImages.push({ node, offset });
+          if (this.pendingImages.length < MAX_EMBEDDED_IMAGES) {
+            text += `${MARK_OPEN}${this.pendingImages.length}${MARK_CLOSE}`;
+            this.pendingImages.push(node);
+          }
           break;
         case 'paragraph':
         case 'table':
-          text += ` ${this.flatten([node], offset)} `;
+          text += ` ${this.flatten([node])} `;
           break;
         default:
-          text += this.inline(node.children, offset);
+          text += this.inline(node.children);
       }
     }
     return text;
@@ -205,9 +239,9 @@ class TextBuilder {
 
   noteLines() {
     for (let i = 0; i < this.notes.length; i += 1) {
-      const start = this.offset;
-      const body = this.flatten(this.notes[i].body, start);
-      if (body) this.line(`[${i + 1}] ${body}`);
+      const body = this.flatten(this.notes[i].body);
+      if (visible(body)) this.line(`[${i + 1}] ${body}`);
+      else if (body) this.append(body);
     }
   }
 }
@@ -217,13 +251,14 @@ function copyBytes(value: ArrayBuffer | Uint8Array): ArrayBuffer {
   return view.slice().buffer;
 }
 
-async function readImages(builder: TextBuilder, warnings: Set<DocxWarning>): Promise<DocxImage[]> {
+async function readImages(builder: TextBuilder, offsets: number[], warnings: Set<DocxWarning>): Promise<DocxImage[]> {
   if (builder.imageCount > MAX_EMBEDDED_IMAGES) warnings.add('IMAGE_LIMIT');
   const images: DocxImage[] = [];
-  for (const { node, offset } of builder.pendingImages) {
+  for (const [position, node] of builder.pendingImages.entries()) {
     try {
       const bytes = await node.readAsArrayBuffer?.();
       if (!bytes) throw new Error('missing');
+      const offset = offsets[position] ?? 0;
       images.push({ index: images.length, contentType: node.contentType || 'application/octet-stream', bytes: copyBytes(bytes), offset });
     } catch {
       warnings.add('EXTERNAL_IMAGE');
@@ -239,6 +274,7 @@ export async function documentText(document: DocxDocument, pageText: HeaderFoote
   builder.noteLines();
   for (const line of pageText.footers) builder.line(line);
   const warnings = new Set<DocxWarning>();
-  const images = await readImages(builder, warnings);
-  return { text: builder.text(), headings: builder.headings, images, imageCount: builder.imageCount, warnings: [...warnings] };
+  const { text, headings, imageOffsets } = builder.finish();
+  const images = await readImages(builder, imageOffsets, warnings);
+  return { text, headings, images, imageCount: builder.imageCount, warnings: [...warnings] };
 }

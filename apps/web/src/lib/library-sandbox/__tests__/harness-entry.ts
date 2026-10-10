@@ -48,6 +48,15 @@ const api = {
   runWorker(workerSource: string, timeoutMs: number) {
     return measured(() => runSandboxedWorker({ workerSource, input: new ArrayBuffer(8), timeoutMs }));
   },
+  /** Cancels while the relay hash is still being computed (before any frame exists). */
+  runCancelledEarly() {
+    const controller = new AbortController();
+    return measured(async () => {
+      const run = runSandboxedWorker({ workerSource: 'for (;;) {}', input: new ArrayBuffer(8), timeoutMs: 30_000, signal: controller.signal });
+      controller.abort();
+      return run;
+    });
+  },
   runRelay(relayScript: string, timeoutMs: number) {
     return measured(() => runSandboxedWorker({ workerSource: '', input: new ArrayBuffer(0), timeoutMs, relayScript }));
   },

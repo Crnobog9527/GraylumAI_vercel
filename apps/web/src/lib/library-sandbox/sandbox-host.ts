@@ -39,6 +39,8 @@ export async function runSandboxedWorker(options: SandboxRunOptions): Promise<un
   const script = options.relayScript ?? RELAY_SCRIPT;
   const token = randomToken();
   const hash = await scriptHashSource(script);
+  // The signal may fire while hashing; its listener is only attached below.
+  if (options.signal?.aborted) throw new SandboxError('SANDBOX_TIMEOUT');
   const frame = document.createElement('iframe');
   for (const [name, value] of Object.entries(SANDBOX_FRAME_ATTRIBUTES)) frame.setAttribute(name, value);
   frame.style.display = 'none';

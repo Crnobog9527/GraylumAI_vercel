@@ -42,6 +42,11 @@ describe('ZIP guard (#549 samples)', () => {
     expect(zip.totalInflatedBytes).toBeGreaterThan(0);
   });
 
+  it('refuses non-ASCII member names unless the UTF-8 flag is set', async () => {
+    expect(await zipCode(zipFixture([{ name: 'word/wörd.xml', body: '<x/>' }]))).toBe('ZIP_PATH');
+    expect(await zipCode(zipFixture([{ name: 'word/wörd.xml', body: '<x/>', flags: 0x800 }]))).toBe('ACCEPTED');
+  });
+
   it('stops inflating as soon as the cap is passed', async () => {
     const bomb = deflateRawSync(Buffer.alloc(5_000_000));
     await expect(inflateRaw(new Uint8Array(bomb), 1_000)).rejects.toMatchObject({ code: 'ZIP_SIZE_MISMATCH' });

@@ -17,6 +17,7 @@ type Api = {
     images: { contentType: string; byteLength: number; base64: string }[]; imageCount: number }>>;
   runWorker(source: string, timeoutMs: number): Promise<Outcome<Record<string, string>>>;
   runRelay(script: string, timeoutMs: number): Promise<Outcome<Record<string, string>>>;
+  runCancelledEarly(): Promise<Outcome<unknown>>;
   frameCount(): number;
 };
 type Call = <K extends keyof Api>(name: K, ...args: Parameters<Api[K]>) => ReturnType<Api[K]>;
@@ -93,6 +94,17 @@ describe('sandbox isolation (Chromium)', () => {
     expect(await call('frameCount')).toBe(0);
     expect(closed.length).toBeGreaterThan(0);
     await Promise.all(closed);
+  }, 30_000);
+
+  it('honours a cancellation that arrives before the frame exists', async () => {
+    const workers: string[] = [];
+    page.on('worker', (worker) => workers.push(worker.url()));
+    const outcome = await call('runCancelledEarly');
+    expect(outcome).toMatchObject({ ok: false, code: 'SANDBOX_TIMEOUT' });
+    expect(outcome.elapsedMs).toBeLessThan(1_000);
+    await page.waitForTimeout(300);
+    expect(workers).toEqual([]);
+    expect(await call('frameCount')).toBe(0);
   }, 30_000);
 
   it.each([
