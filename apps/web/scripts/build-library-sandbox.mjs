@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-// Bundles the library sandbox parser Workers (LIB-2b) into public/library-sandbox/ so they are served
+// Bundles the library sandbox parser Workers (LIB-2b Word, LIB-2c PDF) into public/library-sandbox/ so they are served
 // from Graylum's own origin, never a CDN. The page fetches the bundle text and starts it from a blob
 // inside the sandboxed frame. Third-party license texts go into a file next to each bundle.
 
@@ -9,12 +9,17 @@ import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { pdfjsSandboxPlugin } from './library-sandbox-pdfjs.mjs';
 
 const webRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 export const SANDBOX_WORKERS = {
   'docx-worker': 'src/lib/library-sandbox/docx/worker-entry.ts',
+  'pdf-worker': 'src/lib/library-sandbox/pdf/worker-entry.ts',
 };
+
+/** Extra license files for data bundled from a package (pdf.js ships Adobe's CMaps under their own terms). */
+const BUNDLED_DATA_LICENSES = { 'pdfjs-dist': ['cmaps/LICENSE'] };
 
 /** Package roots (directories holding package.json) of every node_modules input in the bundle. */
 function packageRoots(inputs) {
@@ -55,7 +60,9 @@ async function licenseText(root) {
   const manifest = JSON.parse(await readFile(path.join(root, 'package.json'), 'utf8'));
   const file = (await readdir(root)).find((name) => /^(?:license|licence|copying)(?:\.|$)/i.test(name));
   const text = file ? await readFile(path.join(root, file), 'utf8') : '(no license file shipped in the package)';
-  return `${manifest.name}@${manifest.version} — ${manifest.license ?? 'UNKNOWN'}\n\n${text.trim()}\n`;
+  const extra = await Promise.all((BUNDLED_DATA_LICENSES[manifest.name] ?? []).map(async (name) =>
+    `\n${manifest.name}/${name}\n\n${(await readFile(path.join(root, name), 'utf8')).trim()}\n`));
+  return `${manifest.name}@${manifest.version} — ${manifest.license ?? 'UNKNOWN'}\n\n${text.trim()}\n${extra.join('')}`;
 }
 
 /**
@@ -81,6 +88,7 @@ export async function buildLibrarySandbox({ outdir = path.join(webRoot, 'public/
       logLevel: 'warning',
       define: { 'process.env.NODE_ENV': '"production"' },
       banner: { js: `/* Graylum library sandbox worker. Third-party licenses: ${name}.licenses.txt */` },
+      plugins: [pdfjsSandboxPlugin()],
     });
     const roots = await withDependencies(packageRoots(Object.keys(output.metafile.inputs)));
     const licenses = (await Promise.all(roots.map(licenseText))).join('\n---\n\n');

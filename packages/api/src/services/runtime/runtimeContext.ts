@@ -1,4 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import {STEP_SUMMARY_INPUT} from '../../shared/opcStepSummary';
 import {skillFileBinding} from './skillFile';
 import {frozenReport} from '../report/contract';
 import {z} from 'zod';
@@ -46,6 +47,9 @@ export const runtimeContext=z.object({
    context.skillFile.packageId!==context.skillId||context.skillFile.revisionId!==context.revisionId||
    !context.moduleId||context.maxTurns!==2||context.maxToolCalls!==1))
   ctx.addIssue({code:'custom',message:'RUNTIME_SKILL_FILE_CONTEXT_INVALID'});
+ if(context.hostTurnContext?.stepSummary&&(context.input!==STEP_SUMMARY_INPUT||context.hostTurnContext.opening||
+   context.tools.includes(ASK_QUESTION_TOOL)||context.attachedOrganizer))
+  ctx.addIssue({code:'custom',message:'RUNTIME_STEP_SUMMARY_CONTEXT_INVALID'});
  const host = context.hostTurnContext !== undefined;
  if (host !== (context.inputSelection === 'scope-projection-v2') || host !== (context.historySelection !== undefined) ||
      host && (context.role !== 'skill' || context.providerRequestFormat !== 'agent-turn-v5-stream') ||

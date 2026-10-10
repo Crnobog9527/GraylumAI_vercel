@@ -1,12 +1,13 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import {expect,it,vi} from 'vitest';
+import {freezeHistorySelection} from './hostTurn';
 import {runtimeExecutor} from './execute';
 import {packageHash,sha256,clearSkillResourceCache} from '../skills/loader';
 import {createRuntimeBudget} from './budget';
 const billing=vi.hoisted(()=>({claimCall:vi.fn(),dispatchOnce:vi.fn(),recoverRun:vi.fn()}));
 vi.mock('../bill2/service',async original=>({...await original<typeof import('../bill2/service')>(),authoritativeBilling:()=>billing}));
 const id='10000000-0000-4000-8000-000000000001';
-it.each(['answer','repeat','oversized','denied','large','revoked','malformed','nul','surrogate','badId','transient'] as const)('settles file continuation %s and replays without another dispatch',async outcome=>{
+it.each(['answer','summary','repeat','oversized','denied','large','revoked','malformed','nul','surrogate','badId','transient'] as const)('settles file continuation %s and replays without another dispatch',async outcome=>{
  vi.clearAllMocks();
  clearSkillResourceCache();
  const content='Synthetic reference';
@@ -20,6 +21,9 @@ it.each(['answer','repeat','oversized','denied','large','revoked','malformed','n
   network:'deny',providerRequestFormat:'agent-turn-v5-stream',reasoning:{parameter:'none'},
   inputSelection:'scope-projection-v1',nativeOutput:'native-output-v1',mentorText:'append-card-v1',
   moduleId:id,skillId:id,revisionId:id,skillFile:{packageId:id,revisionId:id,packageHash:descriptor.packageHash}};
+ if(outcome==='summary')Object.assign(context,{input:'HOST_STEP_SUMMARY:v1',tools:['read_skill_file'],
+  inputSelection:'scope-projection-v2',historySelection:freezeHistorySelection(),hostTurnContext:{stepId:'first',opening:false,
+   checklist:[],stepSummary:{kind:'step_summary',missingRequiredFieldIds:['goal']}}});
  const policy={model:'fixture',provider:'fixture',account:'test',protocol:'fixture-cost-v1',upperUsd:'0.01',inputLimit:64000,outputLimit:1000};
  let live=true,saved:unknown=null,result:unknown;
  const receipts=new Map<number,{rawBody:string;hash:string}>(),requests:string[]=[],history:unknown[]=[];
@@ -61,8 +65,8 @@ it.each(['answer','repeat','oversized','denied','large','revoked','malformed','n
  const options={database,actor:async()=>id,callGate:vi.fn(async()=>({ok:true as const})),
   budget,adapter:{dispatch:vi.fn()} as never};
  const first=await runtimeExecutor(options).execute(id);
- const count=['answer','repeat'].includes(outcome)?2:1;
- if(outcome!=='answer'){
+ const count=['answer','summary','repeat'].includes(outcome)?2:1;
+ if(outcome!=='answer'&&outcome!=='summary'){
   expect(first.state).toBe(outcome==='transient'?'pending':'cancelled');
   expect(history).toEqual([]);
   live=false;
@@ -74,6 +78,7 @@ it.each(['answer','repeat','oversized','denied','large','revoked','malformed','n
   return;
  }
  expect(first.state).toBe('completed');
+ if(outcome==='summary')expect(requests.every(value=>!value.includes('ask_question'))).toBe(true);
  expect(JSON.stringify(result)).toContain('Grounded answer');
  expect(JSON.stringify(result)).not.toContain(content);
  expect(requests[1]).toContain(content);

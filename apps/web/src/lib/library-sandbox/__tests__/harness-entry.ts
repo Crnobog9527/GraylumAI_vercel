@@ -2,6 +2,7 @@
 // Page-side test entry, bundled by browser-harness.ts with the feature flag on. Exposes the real
 // production entry points plus a main-thread responsiveness probe.
 import { extractDocxInBrowser } from '../docx/client';
+import { extractPdfInBrowser } from '../pdf/client';
 import { SandboxError } from '../errors';
 import { runSandboxedWorker } from '../sandbox-host';
 
@@ -46,6 +47,12 @@ const api = {
         ({ contentType, offset, byteLength: bytes.byteLength, base64: base64(bytes) }));
       return { ...result, images };
     });
+  },
+  async extractPdfSample(name: string, options: { timeoutMs?: number; abortAfterMs?: number } = {}) {
+    const blob = await (await fetch(`/sample/${encodeURIComponent(name)}`)).blob();
+    const controller = new AbortController();
+    if (options.abortAfterMs !== undefined) setTimeout(() => controller.abort(), options.abortAfterMs);
+    return measured(() => extractPdfInBrowser(blob, { timeoutMs: options.timeoutMs, signal: controller.signal }));
   },
   runWorker(workerSource: string, timeoutMs: number) {
     return measured(() => runSandboxedWorker({ workerSource, input: new ArrayBuffer(8), timeoutMs }));
