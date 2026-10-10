@@ -219,6 +219,10 @@ BEGIN
   content_ids:=ARRAY(SELECT id FROM opc_content_versions WHERE actor_id=a AND work_item_id=root_c.work_item_id AND kind=root_c.kind);
   deleted:=NOT EXISTS(SELECT 1 FROM opc_content_versions WHERE id=ANY(content_ids) AND erased_at IS NULL);
  ELSE RAISE EXCEPTION 'CONTENT_TARGET_INVALID' USING ERRCODE='22023'; END IF;
+ -- The original producing execution predates the saved content UUID. Follow its
+ -- persisted identity for the selected family only, not independent descendants.
+ executions:=executions||ARRAY(SELECT execution_id FROM opc_content_versions
+  WHERE actor_id=a AND id=ANY(content_ids) AND execution_id IS NOT NULL);
  -- Independent saved descendants stay intact, while their copied source contexts are invalidated.
  WITH RECURSIVE descendants(id) AS (
   SELECT id FROM opc_content_versions WHERE id=ANY(content_ids)

@@ -2227,7 +2227,7 @@
   "fn:content_erasure_references(jsonb,uuid[])": "97193ea1b7a1",
   "fn:content_erasure_runtime_check(uuid,uuid)": "844fdce868e9",
   "fn:content_erasure_saved_readable(uuid,uuid)": "8a2f4ad2f940",
-  "fn:content_erasure_scope(uuid,text,uuid)": "03f5715a04f8",
+  "fn:content_erasure_scope(uuid,text,uuid)": "3a7782054624",
   "fn:content_erasure_visible(uuid,uuid)": "1911501257a1",
   "fn:current_account_is_closed()": "6b52c34956bb",
   "fn:enforce_skill_package_kind()": "ed67bc5f26db",
