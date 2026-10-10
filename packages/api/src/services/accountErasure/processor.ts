@@ -1,5 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { z } from 'zod';
+import { erasureRpcDiagnostic } from './rpcDiagnostics';
 import type { BillingRpc } from '../bill2/service';
 import {
   batchSchema, beginSchema, contentRemaining, detachSchema, financialSchema, localSchema,
@@ -55,11 +56,19 @@ export async function processAccountErasure(input: Input): Promise<ErasureProces
     let sent = false;
     try {
       const response = await bounded(() => { sent = true; return input.database.rpc(name, args); });
-      if (!response || response.error) throw new ProcessorFault('ERASURE_RPC_FAILED');
+      if (!response || response.error) {
+        error(erasureRpcDiagnostic(name, response?.error));
+        throw new ProcessorFault('ERASURE_RPC_FAILED');
+      }
       return response.data;
     } catch (caught) {
       // A transport rejection (including SDK error results) may arrive after commit. No further DB/Auth mutation this pass.
-      if (sent) databaseUncertain = true;
+      if (sent) {
+        databaseUncertain = true;
+        if (!(caught instanceof ProcessorFault) || caught.message === 'ERASURE_OPERATION_TIMEOUT') {
+          error(erasureRpcDiagnostic(name, null, caught instanceof ProcessorFault ? 'timeout' : 'transport'));
+        }
+      }
       throw caught instanceof ProcessorFault ? caught : new ProcessorFault('ERASURE_RPC_UNCERTAIN');
     }
   };
