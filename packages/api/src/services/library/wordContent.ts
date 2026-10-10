@@ -32,7 +32,7 @@ export function wordSegments(bytes: Uint8Array, rawHeadings: z.infer<typeof word
     // LIB-2b collapses whitespace in labels, but leaves the original tabs/line breaks in text.
     // Escape labels: user text never supplies executable regular expressions.
     const escaped = h.text.split(' ').map(part => part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('\\s+');
-    const match = new RegExp(`^\\s*${escaped}(?=[ \\t]*(?:\\r?\\n|$))`)
+    const match = new RegExp(`^\\s*${escaped}(?=[^\\S\\r\\n]*(?:\\r?\\n|$))`)
       .exec(text.slice(h.offset, h.offset + 65_537));
     if (!match || match[0].length > 65_536) throw new Error('LIBRARY_HEADINGS');
     end = h.offset + match[0].length;

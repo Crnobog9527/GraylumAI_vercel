@@ -116,3 +116,14 @@ it('completion before text stage cannot publish or discard the first-stage uploa
   expect(storage.inspect).not.toHaveBeenCalled();
   expect(rpc.mock.calls.some(c => c[0] === 'library_delete')).toBe(false);
 });
+
+it.each(['LIBRARY_TYPE', 'LIBRARY_SIZE'])('discards definitively invalid original: %s', async code => {
+  doc.textGuardUntil = null;
+  if (code === 'LIBRARY_TYPE') {
+    vi.mocked(storage.inspect).mockResolvedValue({ size: 4, contentType: WORD_MIME, bytes: Buffer.from('<xml') });
+  } else vi.mocked(storage.inspect).mockRejectedValue(new Error(code));
+  await expect(libraryService(client, a, storage).beginWordText(id)).rejects.toThrow(code);
+  expect(rpc).toHaveBeenCalledWith('library_delete', { a, did: id, unfinished_only: true });
+  expect(rpc).toHaveBeenCalledWith('library_cleanup_candidates', { a, did: id, n: 1 });
+  expect(storage.signUpload).not.toHaveBeenCalled();
+});

@@ -57,3 +57,10 @@ describe('Word extracted text boundaries', () => {
     for (const name of ['a.pdf', 'a.doc', '../a.docx', 'a\0.docx']) expect(() => wordFilename(name)).toThrow('LIBRARY_TYPE');
   });
 });
+
+it.each(['\u3000', '\u00a0', '\u2003'])('matches extractor trimming of trailing Unicode whitespace %j', space => {
+  const text = `标题${space}\n正文`;
+  const parts = split(text, [{ offset: 0, level: 1, text: '标题' }]);
+  expect(parts.map(s => s.body).join('')).toBe(text);
+  expect(parts[0].title).toBe('标题');
+});

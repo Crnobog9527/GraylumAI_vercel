@@ -58,7 +58,14 @@ export function wordUpload(client: SupabaseClient, actorId: string, storage: Lib
       if (doc.textGuardUntil || doc.status === 'ready') return { documentId, status: doc.status, upload: null };
       // Successful original inspection is required before the atomic second-stage grant.
       // A missing/in-flight original can be retried; no text token or extra hold has been issued yet.
-      const file = await original(doc.path);
+      let file: Awaited<ReturnType<typeof original>>;
+      try { file = await original(doc.path); }
+      catch (error) {
+        const message = error instanceof Error && /^LIBRARY_[A-Z_]+$/.test(error.message)
+          ? error.message : 'LIBRARY_UPLOAD_UNAVAILABLE';
+        if (message === 'LIBRARY_TYPE' || message === 'LIBRARY_SIZE') await discard(documentId);
+        throw new TRPCError({ code: 'BAD_REQUEST', message });
+      }
       const started = Date.now();
       const grant = await libraryRpc<Grant>(client, 'library_word_text_begin', { a: actorId, did: documentId, actual: file.size });
       return dispatch(grant, started);
