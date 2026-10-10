@@ -21,10 +21,11 @@ node summarize.mjs results-rescored/tess.json results-rescored/paddle-tiny+deske
 
 需要 Node 24 和 macOS 的中文系统字体（苹方、宋体、冬青黑体、华文黑体），否则生成的图片和标准文本会不同
 （`gen.mjs` 会对照 `data/ground-truth.json` 报告差异）。报告用的是 Chrome for Testing 153.0.8010.12，
-可以用 `CHROME_PATH` 指定；不指定就用 playwright 自带的浏览器。
+可以用 `CHROME_PATH` 指定；不指定时要先运行 `npx playwright install chromium` 安装 playwright 1.64.0 对应的浏览器。
 
 ```bash
 npm ci --ignore-scripts   # 按提交的 package-lock.json 安装，依赖树和报告一致
+npx playwright install chromium   # 没设 CHROME_PATH 时必需：npm ci 不会下载浏览器
 npm run assets        # 下载模型和语言数据到 assets/，按 SHA-256 校验；Node 走代理时加 NODE_USE_ENV_PROXY=1
 npm run build         # 把两个识别 Worker 打包到 dist/
 npm run gen           # 生成 set/ 里的 54 页图片和标准文本（固定随机种子）
