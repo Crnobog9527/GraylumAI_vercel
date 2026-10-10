@@ -32,9 +32,10 @@ async function main() {
 let releasePreviewLease;
 try {
 const initialArgs = process.argv.slice(2);
-if (initialArgs.includes('--agent-slice-only')) throw new Error('--agent-slice-only retired by LEGACY-CLOSE');
 const previewOptions = parsePreviewOptions(initialArgs);
 const lifecycle = previewDecision(previewOptions);
+if (!lifecycle.controlOnly && initialArgs.includes('--agent-slice-only'))
+  throw new Error('--agent-slice-only retired by LEGACY-CLOSE');
 let previewState;
 if (previewOptions.persistent) {
   releasePreviewLease = acquirePreviewLease(previewOptions.id, source);
@@ -44,8 +45,10 @@ if (previewOptions.persistent) {
   } else previewState = readPreviewState(previewOptions.id);
 }
 // Resume defaults to the original schema/mode; it never guesses a new bootstrap.
-const args = previewState && !lifecycle.bootstrap && !structuralPreviewArgs(initialArgs).length
+const restoredArgs = previewState && !lifecycle.bootstrap && !structuralPreviewArgs(initialArgs).length
   ? [...initialArgs, ...previewState.structuralArgs] : initialArgs;
+// Retired previews remain removable; no retired test or resume mode is allowed.
+const args = lifecycle.controlOnly ? restoredArgs.filter(arg => arg !== '--agent-slice-only') : restoredArgs;
 if(args.some(arg=>!arg.startsWith('--legacy-ref=')&&!arg.startsWith('--case-pattern=')&&!arg.startsWith('--preview-id=')&&!arg.startsWith('--preview-action=')&&!arg.startsWith('--confirm-destroy=')&&!['--cdc-b2-eval','--staging-host','--with-staging-schema','--with-opc-schema','--opc-only','--runtime-upgrade-only','--with-runtime-schema','--runtime-only','--bill2-upgrade-only','--with-bill2-schema','--bill2-compat-only','--bill2-core-only','--without-app','--bill2-only','--workbench-restart-only','--ordinary-only','--reuse-only','--ai-only','--chat-only','--chat-reliability-only','--research-only','--admin-only','--settings-only','--usage-only','--real-skill-only','--serve','--schema-from-files'].includes(arg))||new Set(args).size!==args.length||args.filter(arg=>arg.endsWith('-only')).length>1)throw new Error('use --ai-only, --chat-only, --research-only, --admin-only or --settings-only, optionally --serve');
 if (lifecycle.controlOnly) { controlPreview(previewOptions, previewState, docker); return; }
 if (previewState && !lifecycle.bootstrap) validateResumeState(previewState, structuralPreviewArgs(args));
