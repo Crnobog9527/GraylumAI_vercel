@@ -28,9 +28,9 @@ PostgREST 的普通更新不能仅修改 JSON 内单字段，所以必须补专�
 
 总控于 2026-10-11 为 #797 分配 **0208**：
 `packages/db/migrations/0208_runtime_settings_concurrency.sql`。
-前置 #796／0207 尚未合并；必须等其合并后同步最新 staging，再完整回放并重建 built-fingerprint。
-此前的草案本地验证不代表完整迁移链通过。当前保持草稿，完整链 CI 和新 head 审查完成后
-转为可审查，停下等总控审计。不合并、不应用远端迁移。
+前置 #796／0207 已合并，本任务已同步 staging `21854dbc`，使用截至 0208 的正式完整迁移链。
+指纹由完整回放生成，不手工拼接。完整链 CI 和当前 head 机器人审查通过后转为可审查，
+停下等总控审计。不合并、不应用远端迁移。
 
 部署需数据库迁移和后端接口先到位，再让 #795 接线；不要回滚为旧的整份覆盖写入。
 迁移会拒绝旧后端 service-role 对这两个键的整行直写，避免滚动发布期间覆盖新开关或绕过版本检查。
@@ -42,6 +42,8 @@ PostgREST 的普通更新不能仅修改 JSON 内单字段，所以必须补专�
 不访问远程数据库、不运行付费模型、不启动浏览器。
 
 ## 验证入口
+
+- `node packages/db/tests/run-db-baseline-replay.mjs --local-only --write-built`：正式完整链、逐位置重复迁移及结构指纹。
 
 - `pnpm --filter @repo/api exec vitest run src/routers/runtimeRateLimits.test.ts src/services/runtime/stopLossSettings.test.ts`
 - `node packages/db/tests/runtime-settings-concurrency/run-local.mjs --local-only`
