@@ -1,5 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-import {validateDescriptor, sameIdentity, type SkillSource} from '../skills/loader';
+import {validateDescriptor, sameIdentity, type SkillSource, SkillLoadError} from '../skills/loader';
 import {readFrozenSkillFile, skillFileTool, type SkillFileBinding} from './skillFile';
 import type {RequestTiming} from './timing';
 export type ToolRpc = <T>(name: string, args: Record<string, unknown>) => Promise<T>;
@@ -7,9 +7,15 @@ export type ToolRpc = <T>(name: string, args: Record<string, unknown>) => Promis
 /** The execution-owned tool claim precedes private reads; the SQL reader rechecks publication access. */
 export function executionSkillFileTool(options: {
   executionId: string; moduleId: string; binding: SkillFileBinding;
-  rpc: ToolRpc; assertCanStart: () => void; timing?: RequestTiming;
+  rpc: ToolRpc; assertCanStart: () => void; timing?: RequestTiming; onRefused?: () => void;
 }) {
-  const {rpc, binding} = options;
+  const {binding} = options;
+  const rpc: ToolRpc = async (name,args) => {
+    try {return await options.rpc(name,args);} catch(error) {
+      if(error instanceof Error&&error.message==='RUNTIME_SKILL_FILE_REFUSED')options.onRefused?.();
+      throw error;
+    }
+  };
   const read = <T>(path: string | null, maxBytes = 2097152) => rpc<T>('read_skill_package', {
     p_module_id: options.moduleId, p_skill_id: binding.packageId,
     p_revision_id: binding.revisionId, p_package_hash: binding.packageHash,
@@ -32,6 +38,7 @@ export function executionSkillFileTool(options: {
     options.assertCanStart();
     const args = {p_execution_id: options.executionId, p_call_id: callId,
       p_name: 'read_skill_file', p_arguments: arguments_};
+    try {
     const saved = await rpc<{result: unknown | null}>('runtime_tool', {...args, p_action: 'claim'});
     const result = await readFrozenSkillFile({source, binding, arguments: arguments_, saved: saved.result});
     // Persisted JSONB key order is used both initially and on replay.
@@ -42,5 +49,10 @@ export function executionSkillFileTool(options: {
     const committed = await rpc<{result: unknown}>('runtime_tool', {...args, p_action: 'complete', p_result: result});
     options.timing?.tagSkillFileRead();
     return JSON.stringify(committed.result);
+    } catch(error) {
+      if(error instanceof SkillLoadError&&error.code!=='SOURCE_FAILURE'||
+        error instanceof Error&&/^RUNTIME_SKILL_FILE_(DENIED|TOO_LARGE|CONFLICT|INVALID)$/.test(error.message))options.onRefused?.();
+      throw error;
+    }
   });
 }
