@@ -8,7 +8,7 @@ import { libraryErrorMessage, type LibraryPurpose } from '@/lib/library-document
 
 type ListOutput = inferRouterOutputs<AppRouter>['library']['list'];
 export type LibraryDocument = ListOutput['documents'][number];
-const PAGE = 50;
+type Cursor = NonNullable<ListOutput['nextCursor']>;
 
 /**
  * The upload switch (system setting `library_upload_enabled`) is reported by the list response as
@@ -18,45 +18,52 @@ export function readUploadEnabled(data: unknown): boolean {
   return !!data && typeof data === 'object' && (data as { uploadEnabled?: unknown }).uploadEnabled === true;
 }
 
+/**
+ * Pages come in the server's order (upload time, then id, newest first) and are shown in that order;
+ * the page never re-sorts, so "load more" only appends older files. A new file appears on reload.
+ */
+export function mergePages(pages: Array<{ documents: LibraryDocument[] }>): LibraryDocument[] {
+  const seen = new Set<string>();
+  return pages.flatMap((page) => page.documents).filter((item) => !seen.has(item.id) && !!seen.add(item.id));
+}
+
 export function useLibraryDocuments() {
-  const list = trpc.library.list.useQuery({}, { refetchOnMount: 'always', refetchOnWindowFocus: true });
+  const [more, setMore] = useState<Array<{ documents: LibraryDocument[]; nextCursor: Cursor | null }>>([]);
+  // While older pages are shown, a background refetch of page one could move rows across the page edge,
+  // so focus refetch is off then; every change on this page reloads from the first page instead.
+  const list = trpc.library.list.useQuery({}, { refetchOnMount: 'always', refetchOnWindowFocus: !more.length });
   const utils = trpc.useUtils();
-  const [more, setMore] = useState<LibraryDocument[]>([]);
-  const [moreState, setMoreState] = useState<{ loading: boolean; exhausted: boolean; error: string }>({
-    loading: false, exhausted: false, error: '',
-  });
+  const [moreState, setMoreState] = useState<{ loading: boolean; error: string }>({ loading: false, error: '' });
   const [disabledByServer, setDisabledByServer] = useState(false);
   const remove = trpc.library.delete.useMutation();
   const setPurpose = trpc.library.setPurpose.useMutation();
   const [deleting, setDeleting] = useState<Set<string>>(() => new Set());
+  const [purposes, setPurposes] = useState<Record<string, LibraryPurpose>>({});
 
   const { refetch } = list;
   const reload = useCallback(async () => {
     setMore([]);
-    setMoreState({ loading: false, exhausted: false, error: '' });
+    setPurposes({});
+    setMoreState({ loading: false, error: '' });
     await refetch();
   }, [refetch]);
 
-  const firstPage = useMemo(() => list.data?.documents ?? [], [list.data]);
   const markDisabled = useCallback(() => setDisabledByServer(true), []);
-  const raw = useMemo(() => {
-    const seen = new Set<string>();
-    return [...firstPage, ...more].filter((item) => !seen.has(item.id) && !!seen.add(item.id));
-  }, [firstPage, more]);
-  const hasMore = !moreState.exhausted && (more.length ? more.length % PAGE === 0 : firstPage.length === PAGE);
+  const raw = useMemo(() => (list.data ? mergePages([list.data, ...more]) : []), [list.data, more]);
+  const cursor = (more.length ? more.at(-1)!.nextCursor : list.data?.nextCursor) ?? null;
 
   const loadMore = useCallback(async () => {
-    const last = raw.at(-1);
-    if (!last || moreState.loading) return;
-    setMoreState((state) => ({ ...state, loading: true, error: '' }));
+    if (!cursor || moreState.loading) return;
+    setMoreState({ loading: true, error: '' });
     try {
-      const page = await utils.library.list.fetch({ afterId: last.id });
-      setMore((current) => [...current, ...page.documents]);
-      setMoreState({ loading: false, exhausted: page.documents.length < PAGE, error: '' });
+      // The cursor goes back exactly as the server sent it (microsecond time, never rewritten via Date).
+      const page = await utils.library.list.fetch({ cursor });
+      setMore((current) => [...current, { documents: page.documents, nextCursor: page.nextCursor }]);
+      setMoreState({ loading: false, error: '' });
     } catch (error) {
-      setMoreState((state) => ({ ...state, loading: false, error: libraryErrorMessage(error) }));
+      setMoreState({ loading: false, error: libraryErrorMessage(error) });
     }
-  }, [moreState.loading, raw, utils]);
+  }, [cursor, moreState.loading, utils]);
 
   const deleteDocument = useCallback(async (documentId: string) => {
     setDeleting((current) => new Set(current).add(documentId));
@@ -78,21 +85,25 @@ export function useLibraryDocuments() {
   const changePurpose = useCallback(async (documentId: string, purpose: LibraryPurpose) => {
     try {
       await setPurpose.mutateAsync({ documentId, purpose });
-      await reload();
+      // Patched in place so the loaded pages stay; the next reload reads it from the server.
+      setPurposes((current) => ({ ...current, [documentId]: purpose }));
       return { ok: true as const };
     } catch (error) {
       return { ok: false as const, message: libraryErrorMessage(error) };
     }
-  }, [reload, setPurpose]);
+  }, [setPurpose]);
 
   const documents = useMemo(
-    () => raw.map((item) => (deleting.has(item.id) ? { ...item, status: 'deleting' as const } : item))
-      .sort((a, b) => b.created_at.localeCompare(a.created_at)),
-    [deleting, raw],
+    () => raw.map((item) => ({
+      ...item,
+      purpose: purposes[item.id] ?? item.purpose,
+      status: deleting.has(item.id) ? 'deleting' as const : item.status,
+    })),
+    [deleting, purposes, raw],
   );
   return {
     ready: list.isSuccess && !list.error, pending: list.isPending, error: list.error as unknown,
-    documents, reload, loadMore, hasMore, moreState, deleteDocument, changePurpose,
+    documents, reload, loadMore, hasMore: !!cursor, moreState, deleteDocument, changePurpose,
     usedBytes: list.data?.usedBytes, capacityBytes: list.data?.capacityBytes,
     uploadEnabled: readUploadEnabled(list.data) && !disabledByServer,
     markDisabled,

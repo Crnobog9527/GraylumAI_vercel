@@ -5,7 +5,7 @@ import { FileText, Image as ImageIcon, Upload } from 'lucide-react';
 import type { LibraryDocument } from '@/hooks/use-library-documents';
 import type { UploadItem } from '@/hooks/use-library-uploads';
 import {
-  formatBytes, LIBRARY_ACCEPT, PURPOSE_LABEL, spaceState, type LibraryPurpose,
+  isWordUploadReady, formatBytes, libraryAccept, PURPOSE_LABEL, spaceState, supportedText, type LibraryPurpose,
 } from '@/lib/library-documents/format';
 import styles from './my-documents.module.css';
 
@@ -13,14 +13,14 @@ const STATUS_LABEL: Record<LibraryDocument['status'], string> = {
   uploading: '上传未完成', processing: '处理中', ready: '可用', failed: '上传失败', deleting: '删除中，空间暂未释放',
 };
 const QUEUE_LABEL: Record<UploadItem['status'], string> = {
-  waiting: '等待上传', begin: '准备上传…', transfer: '上传中', complete: '正在核对文件…',
-  failed: '上传失败', rejected: '不能上传', done: '已上传',
+  waiting: '等待上传', extract: '正在本机读取 Word 内容…', begin: '准备上传…', transfer: '上传中', complete: '正在核对文件…',
+  failed: '上传失败', removing: '正在移除…', rejected: '不能上传', done: '已上传',
 };
 
 export type UploadPanelProps = {
   uploadEnabled: boolean; spaceKnown: boolean; usedBytes?: number; capacityBytes?: number;
   uploads: UploadItem[]; onAdd: (files: File[], purpose: LibraryPurpose) => void;
-  onRetry: (key: string) => void; onDismiss: (key: string) => void;
+  onRetry: (key: string) => void; onDismiss: (key: string) => void | Promise<void>;
 };
 
 export function UploadPanel(props: UploadPanelProps) {
@@ -30,8 +30,11 @@ export function UploadPanel(props: UploadPanelProps) {
   return <section className={styles.panel} aria-label="上传文件">
     <h2>上传文件</h2>
     <p className={styles.hint}>
-      支持 txt、md 文本和 jpg、png、webp 图片，单个文件不超过 10 MB。Word 和 PDF 即将支持。
+      支持{supportedText()}，单个文件不超过 10 MB。{isWordUploadReady() ? 'PDF 即将支持。' : 'Word 和 PDF 即将支持。'}
     </p>
+    {isWordUploadReady() && <p className={styles.hint}>
+      Word 的文字在你自己的浏览器里读取，不扣积分；文中的图片暂不识别。
+    </p>}
     {!props.uploadEnabled && <p className={styles.closed} role="status">
       上传暂未开放。已上传的文件仍可查看、下载和删除。
     </p>}
@@ -51,7 +54,7 @@ export function UploadPanel(props: UploadPanelProps) {
       </div>
       <label className={styles.pick} aria-disabled={!purpose}>
         <Upload size={15}/>{purpose ? '选择文件' : '先选择用途'}
-        <input type="file" multiple accept={LIBRARY_ACCEPT} disabled={!purpose} aria-label="选择要上传的文件"
+        <input type="file" multiple accept={libraryAccept()} disabled={!purpose} aria-label="选择要上传的文件"
           onChange={(event) => {
             const files = [...(event.currentTarget.files ?? [])];
             event.currentTarget.value = '';
@@ -67,7 +70,7 @@ export function UploadPanel(props: UploadPanelProps) {
           {item.status === 'failed' && item.file && <button type="button" className={styles.linkButton}
             onClick={() => props.onRetry(item.key)}>重试</button>}
           {['failed', 'rejected', 'done'].includes(item.status) && <button type="button" className={styles.linkButton}
-            onClick={() => props.onDismiss(item.key)}>移除</button>}
+            onClick={() => { void props.onDismiss(item.key); }}>移除</button>}
         </span>
         {item.status === 'transfer' && <div className={styles.progress} role="progressbar" aria-label={item.filename + ' 上传进度'}
           aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(item.progress * 100)}>

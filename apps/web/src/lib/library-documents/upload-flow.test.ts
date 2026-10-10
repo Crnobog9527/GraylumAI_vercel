@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { describe, expect, it, vi } from 'vitest';
-import { runLibraryUpload, UploadFailure, type UploadApi, type UploadAttempt } from './upload-flow';
+import { runLibraryUpload, settleFailedAttempt, UploadFailure, type UploadApi, type UploadAttempt } from './upload-flow';
 
 const file = new Blob(['hello']);
 function setup(overrides: Partial<UploadApi> = {}) {
@@ -100,5 +100,47 @@ describe('runLibraryUpload', () => {
     });
     expect((await fail(run())).retry).toEqual({ requestId: 'req-1', resume: 'begin', releaseFirst: 'old' });
     expect(api.begin).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('settleFailedAttempt (removing a failed upload keeps its recovery work)', () => {
+  const abandonOk = () => vi.fn(async () => ({ status: 'deleted' }));
+  it('does the release a retry still owed before the item can go', async () => {
+    const abandon = abandonOk();
+    const recheck = vi.fn();
+    await settleFailedAttempt({ abandon }, { requestId: 'r', resume: 'begin', releaseFirst: 'old' }, recheck);
+    expect(abandon).toHaveBeenCalledWith({ documentId: 'old' });
+    expect(recheck).not.toHaveBeenCalled();
+  });
+  it('keeps the item (throws) when that release is not confirmed', async () => {
+    const abandon = vi.fn(async () => { throw new Error('Failed to fetch'); });
+    await expect(settleFailedAttempt({ abandon }, { requestId: 'r', resume: 'begin', releaseFirst: 'old' }, vi.fn()))
+      .rejects.toThrow('Failed to fetch');
+  });
+  it('re-checks an unknown completion instead of releasing a row that may be ready', async () => {
+    const abandon = abandonOk();
+    const recheck = vi.fn(async () => ({ status: 'ready' }));
+    await settleFailedAttempt({ abandon }, { requestId: 'r', documentId: 'd', resume: 'complete' }, recheck);
+    expect(recheck).toHaveBeenCalledWith('d');
+    expect(abandon).not.toHaveBeenCalled();
+  });
+  it('releases after a definite re-check rejection, and keeps the item while still unknown', async () => {
+    const abandon = abandonOk();
+    await settleFailedAttempt({ abandon }, { requestId: 'r', documentId: 'd', resume: 'complete' },
+      vi.fn(async () => { throw definite('LIBRARY_TYPE'); }));
+    expect(abandon).toHaveBeenCalledWith({ documentId: 'd' });
+    await expect(settleFailedAttempt({ abandon }, { requestId: 'r', documentId: 'd', resume: 'complete' },
+      vi.fn(async () => { throw new Error('Failed to fetch'); }))).rejects.toThrow('Failed to fetch');
+  });
+  it('releases a Word row still waiting for its text', async () => {
+    const abandon = abandonOk();
+    await settleFailedAttempt({ abandon }, { requestId: 'r', documentId: 'w', resume: 'text' }, vi.fn());
+    expect(abandon).toHaveBeenCalledWith({ documentId: 'w' });
+  });
+  it('has nothing to settle for a plain begin failure', async () => {
+    const abandon = abandonOk();
+    await settleFailedAttempt({ abandon }, { requestId: 'r', resume: 'begin' }, vi.fn());
+    await settleFailedAttempt({ abandon }, undefined, vi.fn());
+    expect(abandon).not.toHaveBeenCalled();
   });
 });

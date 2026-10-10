@@ -9,19 +9,24 @@ export const LIBRARY_UPLOAD_HEADROOM = 10_000_000;
 export type LibraryPurpose = 'authored' | 'reference';
 export const PURPOSE_LABEL: Record<LibraryPurpose, string> = { authored: '我本人写的', reference: '参考资料' };
 
-export type UploadContentType = 'text/plain' | 'text/markdown' | 'image/jpeg' | 'image/png' | 'image/webp';
+export const WORD_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+export type UploadContentType = 'text/plain' | 'text/markdown' | 'image/jpeg' | 'image/png' | 'image/webp' | typeof WORD_MIME;
 
 /** Formats the backend accepts today. The content type comes from the extension, never from the browser. */
 const READY_FORMATS: Record<string, UploadContentType> = {
   txt: 'text/plain', md: 'text/markdown', jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp',
 };
-export const LIBRARY_ACCEPT = Object.keys(READY_FORMATS).map((extension) => '.' + extension).join(',');
 
 /**
- * Word needs the two-part upload agreed in #778 (original + extracted UTF-8 text + heading metadata).
- * That server endpoint does not exist yet, so Word stays closed even when the LIB-2b extraction flag is on.
+ * Word uses the two-object upload from #796 (original + browser-extracted UTF-8 text + headings), so it
+ * opens only with the LIB-2b extraction build flag. PDF stays closed until the server has a PDF upload API.
  */
-export const LIBRARY_DOCX_UPLOAD_READY = false;
+export function isWordUploadReady(): boolean {
+  return isLibraryDocxExtractionEnabled();
+}
+export function libraryAccept(): string {
+  return [...Object.keys(READY_FORMATS), ...(isWordUploadReady() ? ['docx'] : [])].map((extension) => '.' + extension).join(',');
+}
 
 export type FileCheck =
   | { ok: true; contentType: UploadContentType }
@@ -34,20 +39,22 @@ export function extensionOf(filename: string): string {
 
 export function checkLibraryFile(file: { name: string; size: number }): FileCheck {
   const extension = extensionOf(file.name);
-  if (extension === 'docx') {
-    const ready = LIBRARY_DOCX_UPLOAD_READY && isLibraryDocxExtractionEnabled();
-    if (!ready) return { ok: false, message: 'Word 文件暂时还不能上传，即将开放。' };
-  }
+  if (extension === 'docx' && !isWordUploadReady()) return { ok: false, message: 'Word 文件暂时还不能上传，即将开放。' };
   if (extension === 'pdf') return { ok: false, message: 'PDF 暂时还不能上传，即将开放。' };
   if (extension === 'heic' || extension === 'heif') return { ok: false, message: '不支持 HEIC 图片，请导出为 JPG 后再上传。' };
-  const contentType = READY_FORMATS[extension];
-  if (!contentType) return { ok: false, message: '不支持这种文件。目前可以上传 txt、md 和 jpg、png、webp 图片。' };
+  const contentType = extension === 'docx' ? WORD_MIME : READY_FORMATS[extension];
+  if (!contentType) return { ok: false, message: '不支持这种文件。目前可以上传' + supportedText() + '。' };
   if (file.size <= 0) return { ok: false, message: '文件是空的。' };
   if (file.size > LIBRARY_MAX_BYTES) return { ok: false, message: '单个文件不能超过 10 MB，请拆分后再上传。' };
   if (file.name.length > 255 || /[\x00-\x1f\x7f/\\]/.test(file.name)) {
     return { ok: false, message: '文件名太长或含有不能使用的字符，请改名后再上传。' };
   }
   return { ok: true, contentType };
+}
+
+/** The formats line shown in the upload panel and in the unsupported-file message. */
+export function supportedText(): string {
+  return (isWordUploadReady() ? ' txt、md、Word（.docx）' : ' txt、md ') + '文本和 jpg、png、webp 图片';
 }
 
 /** Decimal units, matching how membership space is defined (1 MB = 1,000,000 bytes). */
@@ -85,6 +92,11 @@ const MESSAGES: Record<string, string> = {
   LIBRARY_VERSION_CHANGED: '文件内容已更新，请重新打开。',
   LIBRARY_ACCOUNT_CLOSED: '账号当前不可用，不能使用资料库。',
   LIBRARY_FORBIDDEN: '没有权限访问这个文件。',
+  LIBRARY_HEADINGS: 'Word 文件的标题结构无法识别，已拒绝。请另存为普通 Word 文档后再上传。',
+  LIBRARY_UPLOAD_INCOMPLETE: '文件还没有传完整，请重试。',
+  LIBRARY_UPLOAD_UNAVAILABLE: '暂时无法上传，请稍后重试。',
+  LIBRARY_UPLOAD_EXPIRED: '上传准备超时，请重试。',
+  LIBRARY_INVALID_CURSOR: '列表已经变化，请刷新后再加载。',
 };
 const FALLBACK = '暂时无法完成，请稍后重试。';
 

@@ -5,6 +5,7 @@ import { trpc } from '@/trpc/client';
 import type { LibraryDocument } from '@/hooks/use-library-documents';
 import { libraryErrorMessage } from '@/lib/library-documents/format';
 import { isSignedStorageUrl } from '@/lib/library-documents/signed-url';
+import { DocumentReader } from './document-reader';
 import styles from './my-documents.module.css';
 
 function Dialog({ label, title, onClose, closable = true, children }: {
@@ -51,7 +52,7 @@ export function DeleteConfirmDialog({ doc, pending, error, onConfirm, onClose }:
 export function DocumentDetailDialog({ doc, onClose }: { doc: LibraryDocument; onClose: () => void }) {
   const name = doc.filename ?? '文件';
   return <Dialog label="查看文件" title={name} onClose={onClose}>
-    {doc.kind === 'image' ? <ImagePreview doc={doc}/> : <SegmentViewer doc={doc}/>}
+    {doc.kind === 'image' ? <ImagePreview doc={doc}/> : <DocumentReader doc={doc}/>}
   </Dialog>;
 }
 
@@ -73,24 +74,4 @@ function ImagePreview({ doc }: { doc: LibraryDocument }) {
   if (!url) return <p className={styles.hint}>正在加载预览…</p>;
   // Private signed URL on the storage origin; plain <img>, no image optimizer or server decoding.
   return <img className={styles.image} src={url} alt={doc.filename ?? '图片预览'} referrerPolicy="no-referrer"/>;
-}
-
-function SegmentViewer({ doc }: { doc: LibraryDocument }) {
-  const [start, setStart] = useState(0);
-  const input = { documentId: doc.id, version: doc.content_version };
-  const current = trpc.library.segments.useQuery({ ...input, start }, { staleTime: 30_000, retry: false });
-  const next = trpc.library.segments.useQuery({ ...input, start: start + 1 }, { staleTime: 30_000, retry: false });
-  const segment = current.data?.[0];
-  if (current.error) return <p role="alert" className={styles.error}>{libraryErrorMessage(current.error)}</p>;
-  if (current.isPending) return <p className={styles.hint}>正在读取内容…</p>;
-  if (!segment) return <p className={styles.hint}>{start === 0 ? '这个文件没有可显示的文字。' : '没有更多内容了。'}</p>;
-  return <>
-    <p className={styles.hint}>第 {start + 1} 段{segment.title ? ' · ' + segment.title : ''}</p>
-    <div className={styles.segment}>{segment.body}</div>
-    <nav className={styles.segmentNav} aria-label="分段翻页">
-      <button type="button" disabled={start === 0} onClick={() => setStart(start - 1)}>上一段</button>
-      <span>{next.data && !next.data.length ? '已是最后一段' : ''}</span>
-      <button type="button" disabled={!next.data?.length} onClick={() => setStart(start + 1)}>下一段</button>
-    </nav>
-  </>;
 }

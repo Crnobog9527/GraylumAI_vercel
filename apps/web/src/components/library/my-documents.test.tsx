@@ -1,12 +1,17 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
 import type { ReactElement } from 'react';
 import type { LibraryDocument } from '@/hooks/use-library-documents';
 import type { UploadItem } from '@/hooks/use-library-uploads';
 
 const { state, mutation } = vi.hoisted(() => ({
-  state: { list: {} as Record<string, unknown> },
+  state: {
+    list: {} as Record<string, unknown>,
+    directory: { isPending: true } as Record<string, unknown>,
+    segments: { isPending: true } as Record<string, unknown>,
+    segmentInputs: [] as unknown[],
+  },
   mutation: () => ({ mutateAsync: () => Promise.resolve(), isPending: false }),
 }));
 vi.mock('@/trpc/client', () => ({
@@ -14,8 +19,11 @@ vi.mock('@/trpc/client', () => ({
     useUtils: () => ({ library: { list: { fetch: vi.fn() } } }),
     library: {
       list: { useQuery: () => state.list },
-      segments: { useQuery: () => ({ isPending: true }) },
+      directory: { useQuery: () => state.directory },
+      segments: { useQuery: (input: unknown) => { state.segmentInputs.push(input); return state.segments; } },
       beginUpload: { useMutation: mutation }, completeUpload: { useMutation: mutation },
+      beginWordUpload: { useMutation: mutation }, beginWordTextUpload: { useMutation: mutation },
+      completeWordUpload: { useMutation: mutation },
       abandonUpload: { useMutation: mutation }, delete: { useMutation: mutation },
       setPurpose: { useMutation: mutation }, download: { useMutation: mutation }, preview: { useMutation: mutation },
     },
@@ -26,6 +34,10 @@ vi.mock('sonner', () => ({ toast: { error: vi.fn() } }));
 import { DocumentList, UploadPanel, type UploadPanelProps } from './my-documents-view';
 import { DeleteConfirmDialog } from './document-dialogs';
 import { MyDocuments } from './my-documents';
+import { chaptersOf, DocumentReader } from './document-reader';
+import { mergePages } from '@/hooks/use-library-documents';
+
+afterEach(() => vi.unstubAllEnvs());
 
 const render = (element: ReactElement) => {
   const html = renderToStaticMarkup(element);
@@ -82,6 +94,26 @@ describe('upload panel', () => {
     expect(text).toContain('上传失败 · 参考资料：剩余空间不足');
     expect(text).toContain('重试');
     expect(text).toContain('不能上传 · 参考资料：PDF 暂时还不能上传');
+  });
+  it('opens Word only with the extraction flag, with the browser-reading note and no credit estimate', () => {
+    vi.stubEnv('NEXT_PUBLIC_LIBRARY_DOCX_EXTRACTION', 'true');
+    const { html, text } = panel();
+    expect(html).toContain('accept=".txt,.md,.jpg,.jpeg,.png,.webp,.docx"');
+    expect(text).toContain('Word（.docx）');
+    expect(text).toContain('PDF 即将支持');
+    expect(text).not.toContain('Word 和 PDF 即将支持');
+    expect(text).toContain('在你自己的浏览器里读取，不扣积分');
+    expect(text).not.toMatch(/预计|约\s*\d+\s*积分/);
+  });
+  it('shows the Word reading and removing states without action buttons', () => {
+    const { html, text } = panel({ uploads: [
+      { key: 'w', filename: 'w.docx', purpose: 'authored', status: 'extract', progress: 0 },
+      { key: 'r', filename: 'r.txt', purpose: 'authored', status: 'removing', progress: 0, file: new File(['x'], 'r.txt') },
+    ] });
+    expect(text).toContain('正在本机读取 Word 内容…');
+    expect(text).toContain('正在移除…');
+    expect(text).not.toContain('重试');
+    expect(html).not.toContain('>移除</button>');
   });
 });
 
@@ -143,11 +175,57 @@ describe('my documents container', () => {
     state.list = { ...state.list, data: { ...(state.list.data as object), uploadEnabled: true } };
     expect(render(<MyDocuments/>).html).toContain('type="file"');
   });
+  it('offers "load more" only while the server returns a next cursor', () => {
+    expect(render(<MyDocuments/>).text).not.toContain('加载更多');
+    state.list = { ...state.list, data: { ...(state.list.data as object),
+      nextCursor: { createdAt: '2026-10-10T00:00:00.123456+00:00', id: doc().id } } };
+    expect(render(<MyDocuments/>).text).toContain('加载更多');
+  });
   it('shows a read failure without claiming the library is empty', () => {
     state.list = { isSuccess: false, isPending: false, error: { message: 'LIBRARY_ACCOUNT_CLOSED' }, data: undefined, refetch: vi.fn() };
     const { text } = render(<MyDocuments/>);
     expect(text).toContain('账号当前不可用');
     expect(text).not.toContain('还没有文件');
     expect(text).toContain('已用 — / 共 —');
+  });
+});
+
+describe('paging order', () => {
+  it('keeps the server order across pages and drops repeats, never re-sorting', () => {
+    const a = doc({ id: 'a', created_at: '2026-10-10T00:00:03Z' });
+    const b = doc({ id: 'b', created_at: '2026-10-10T00:00:02Z' });
+    const c = doc({ id: 'c', created_at: '2026-10-10T00:00:09Z' });
+    expect(mergePages([{ documents: [a, b] }, { documents: [b, c] }]).map((item) => item.id)).toEqual(['a', 'b', 'c']);
+  });
+});
+
+describe('document reader', () => {
+  beforeEach(() => { state.segmentInputs = []; });
+  it('builds one directory entry per heading', () => {
+    expect(chaptersOf([{ ordinal: 0, title: '' }, { ordinal: 1, title: '一' }, { ordinal: 2, title: '一' }, { ordinal: 3, title: '二' }]))
+      .toEqual([{ ordinal: 1, title: '一' }, { ordinal: 3, title: '二' }]);
+  });
+  it('shows the whole directory and reads a range of segments', () => {
+    state.directory = { isPending: false, data: [
+      { ordinal: 0, title: '第一章' }, { ordinal: 1, title: '第一章' }, { ordinal: 2, title: '<b>第二章</b>' },
+    ] };
+    state.segments = { isPending: false, data: [
+      { ordinal: 0, title: '第一章', body: '甲' }, { ordinal: 1, title: '第一章', body: '乙' }, { ordinal: 2, title: '<b>第二章</b>', body: '丙' },
+    ] };
+    const { html, text } = render(<DocumentReader doc={doc()}/>);
+    expect(state.segmentInputs[0]).toMatchObject({ documentId: doc().id, version: 1, start: 0, count: 5 });
+    expect(html).toContain('aria-label="目录"');
+    expect(text).toContain('第 1–3 段，共 3 段 · 第一章');
+    expect(text).toContain('已到最后');
+    expect(html.match(/<h4>/g)).toHaveLength(2);
+    expect(html).toContain('&lt;b&gt;第二章&lt;/b&gt;');
+    expect(html).not.toContain('<b>');
+  });
+  it('hides the directory when the document has no headings, and reports read errors', () => {
+    state.directory = { isPending: false, data: [{ ordinal: 0, title: '' }] };
+    state.segments = { isPending: false, data: [{ ordinal: 0, title: '', body: '纯文字' }] };
+    expect(render(<DocumentReader doc={doc()}/>).html).not.toContain('aria-label="目录"');
+    state.directory = { isPending: false, error: { message: 'LIBRARY_VERSION_CHANGED' } };
+    expect(render(<DocumentReader doc={doc()}/>).text).toContain('文件内容已更新');
   });
 });

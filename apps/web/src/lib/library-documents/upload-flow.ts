@@ -1,6 +1,9 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { isSignedStorageUrl } from './signed-url';
-import { libraryErrorCode, type LibraryPurpose, type UploadContentType } from './format';
+import { libraryErrorCode, type LibraryPurpose, type UploadContentType, type WORD_MIME } from './format';
+
+/** Single-object uploads; Word goes through word-upload-flow. */
+export type PlainContentType = Exclude<UploadContentType, typeof WORD_MIME>;
 
 /**
  * One library upload (LIB-2a contract, #778): begin → direct PUT to the private bucket → complete.
@@ -10,7 +13,7 @@ import { libraryErrorCode, type LibraryPurpose, type UploadContentType } from '.
 export type BeginResult = { documentId: string; status: string; upload: { signedUrl: string } | null };
 export type UploadApi = {
   begin(input: {
-    requestId: string; filename: string; contentType: UploadContentType; bytes: number; purpose: LibraryPurpose;
+    requestId: string; filename: string; contentType: PlainContentType; bytes: number; purpose: LibraryPurpose;
   }): Promise<BeginResult>;
   complete(input: { documentId: string }): Promise<unknown>;
   abandon(input: { documentId: string }): Promise<unknown>;
@@ -19,11 +22,14 @@ export type UploadApi = {
 
 export type UploadStage = 'begin' | 'transfer' | 'complete';
 /**
- * Where a retry should resume. `complete` only after an unknown (network) result of complete.
+ * Where a retry should resume. `complete` only after an unknown (network) result of complete;
+ * `text` (Word only) after an unknown result of the second-stage grant, once the original is stored.
  * `releaseFirst`: an earlier row whose release was not confirmed; it is released before any new request,
  * so failed releases never stack up 10 MB reservations or unfinished-upload slots.
  */
-export type UploadAttempt = { requestId: string; documentId?: string; resume: 'begin' | 'complete'; releaseFirst?: string };
+export type UploadAttempt = {
+  requestId: string; documentId?: string; resume: 'begin' | 'text' | 'complete'; releaseFirst?: string;
+};
 export class UploadFailure extends Error {
   constructor(readonly cause: unknown, readonly retry: UploadAttempt) {
     super('LIBRARY_UPLOAD_FAILED');
@@ -31,12 +37,16 @@ export class UploadFailure extends Error {
 }
 
 type Input = {
-  file: Blob; filename: string; contentType: UploadContentType; purpose: LibraryPurpose;
+  file: Blob; filename: string; contentType: PlainContentType; purpose: LibraryPurpose;
   attempt: UploadAttempt; newId: () => string; onStage: (stage: UploadStage, progress?: number) => void;
 };
 
-/** Releases an unfinished row. If the release is not confirmed, the retry releases it first. */
-async function release(api: UploadApi, documentId: string, cause: unknown, newId: () => string) {
+type Abandon = Pick<UploadApi, 'abandon'>;
+/**
+ * Releases an unfinished row (abandon is idempotent: an already removed row reports `deleted`).
+ * If the release is not confirmed, the retry releases it first. Never call it for a row that may be ready.
+ */
+export async function release(api: Abandon, documentId: string, cause: unknown, newId: () => string) {
   try {
     await api.abandon({ documentId });
   } catch {
@@ -44,18 +54,47 @@ async function release(api: UploadApi, documentId: string, cause: unknown, newId
   }
 }
 
+/** A retry that still owes a release does it before anything else; the attempt then starts fresh. */
+export async function releasePending(api: Abandon, attempt: UploadAttempt): Promise<UploadAttempt> {
+  if (!attempt.releaseFirst) return attempt;
+  try {
+    await api.abandon({ documentId: attempt.releaseFirst });
+  } catch (error) {
+    throw new UploadFailure(error, attempt);
+  }
+  return { requestId: attempt.requestId, resume: 'begin' };
+}
+
+/**
+ * Before a failed item leaves the page, settle the server row it may still hold, so removing it never
+ * drops recovery work: a pending release is done now; a Word row waiting for its text is released;
+ * an unknown completion is re-checked (it may already be ready, so it is never released blindly).
+ * Throws when the outcome is still unknown; the caller keeps the item so the user can try again.
+ */
+export async function settleFailedAttempt(
+  api: Abandon, attempt: UploadAttempt | undefined, recheck: (documentId: string) => Promise<unknown>,
+): Promise<void> {
+  if (!attempt) return;
+  if (attempt.releaseFirst) await api.abandon({ documentId: attempt.releaseFirst });
+  if (!attempt.documentId) return;
+  if (attempt.resume === 'text') {
+    await api.abandon({ documentId: attempt.documentId });
+    return;
+  }
+  if (attempt.resume !== 'complete') return;
+  try {
+    await recheck(attempt.documentId);
+  } catch (error) {
+    if (!libraryErrorCode(error)) throw error;
+    // A definite rejection means it is not ready; make sure nothing is left holding space.
+    await api.abandon({ documentId: attempt.documentId });
+  }
+}
+
 export async function runLibraryUpload(api: UploadApi, input: Input): Promise<{ documentId: string }> {
   const { file, newId, onStage } = input;
-  let attempt = input.attempt;
-  if (attempt.releaseFirst) {
-    onStage('begin');
-    try {
-      await api.abandon({ documentId: attempt.releaseFirst });
-    } catch (error) {
-      throw new UploadFailure(error, attempt);
-    }
-    attempt = { requestId: attempt.requestId, resume: 'begin' };
-  }
+  if (input.attempt.releaseFirst) onStage('begin');
+  const attempt = await releasePending(api, input.attempt);
   if (attempt.resume === 'complete' && attempt.documentId) {
     onStage('complete');
     try {

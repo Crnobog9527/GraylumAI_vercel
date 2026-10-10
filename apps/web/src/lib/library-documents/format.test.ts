@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { checkLibraryFile, formatBytes, libraryErrorMessage, spaceState } from './format';
+import { checkLibraryFile, formatBytes, libraryAccept, libraryErrorMessage, spaceState, WORD_MIME } from './format';
 
 afterEach(() => vi.unstubAllEnvs());
 
@@ -11,10 +11,18 @@ describe('checkLibraryFile', () => {
     expect(checkLibraryFile({ name: 'p.jpg', size: 10 })).toEqual({ ok: true, contentType: 'image/jpeg' });
     expect(checkLibraryFile({ name: 'p.webp', size: 10_000_000 })).toEqual({ ok: true, contentType: 'image/webp' });
   });
-  it('keeps Word closed even with the extraction flag on, and PDF unsupported for now', () => {
-    vi.stubEnv('NEXT_PUBLIC_LIBRARY_DOCX_EXTRACTION', 'true');
+  it('keeps Word closed without the extraction flag, and PDF closed either way', () => {
     expect(checkLibraryFile({ name: 'a.docx', size: 10 })).toMatchObject({ ok: false, message: expect.stringContaining('Word') });
+    expect(libraryAccept()).toBe('.txt,.md,.jpg,.jpeg,.png,.webp');
+    vi.stubEnv('NEXT_PUBLIC_LIBRARY_DOCX_EXTRACTION', 'true');
     expect(checkLibraryFile({ name: 'a.pdf', size: 10 })).toMatchObject({ ok: false, message: expect.stringContaining('PDF') });
+  });
+  it('opens Word with the extraction flag, typed as the Word MIME by extension', () => {
+    vi.stubEnv('NEXT_PUBLIC_LIBRARY_DOCX_EXTRACTION', 'true');
+    expect(checkLibraryFile({ name: '报告.DOCX', size: 10 })).toEqual({ ok: true, contentType: WORD_MIME });
+    expect(checkLibraryFile({ name: 'big.docx', size: 10_000_001 })).toMatchObject({ ok: false, message: expect.stringContaining('10 MB') });
+    expect(libraryAccept()).toContain('.docx');
+    expect(checkLibraryFile({ name: 'x.svg', size: 1 })).toMatchObject({ message: expect.stringContaining('Word（.docx）') });
   });
   it.each([
     [{ name: 'x.svg', size: 1 }, '不支持'], [{ name: 'x.heic', size: 1 }, 'JPG'], [{ name: 'x.gif', size: 1 }, '不支持'],
