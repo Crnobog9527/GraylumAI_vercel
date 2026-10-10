@@ -11,6 +11,7 @@ import {buildFromFiles,installPgCronStub} from '../baseline/build-from-files.mjs
 import {runCases} from './cases.mjs';
 import {runArtifacts} from './artifacts.mjs';
 import {runDependencies} from './dependencies.mjs';
+import {runCaptureV3} from './capture-v3.mjs';
 import {runPayg} from './payg.mjs';
 import {cases as runAccountFinancial} from '../erasure-b2a/cases.mjs';
 import {runCases as runAccountBinding} from '../erasure-binding/cases.mjs';
@@ -65,6 +66,7 @@ try {
  await runArtifacts(client,report);
  await client.query(read('packages/db/tests/runtime-view-perf/fixture.sql'));
  await runDependencies(client,report);
+ await runCaptureV3(client,report);
  await runPayg(client,report);
  await runConcurrency({db:client,Client,connectionString,report});
  await runAccountFinancial(client,report);

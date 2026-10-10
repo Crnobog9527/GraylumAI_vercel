@@ -24,8 +24,12 @@ export type CaptureSuggestion = {
   status: FieldStatus;
   nature: FieldNature;
 };
-/** `basis` is recorded with each capture since #702; older captures have none. */
-export type FieldMeta = { source?: "capture" | "user"; basis?: "user_statement" | "agent_proposal"; protected?: boolean; suggestion?: CaptureSuggestion };
+/** `basis` is recorded with each capture since #702; older captures have none.
+ * `withdrawn` is an update the mentor withdrew after the user rejected it (CDC-WRITEBACK-V3); it is never pending. */
+export type FieldMeta = {
+  source?: "capture" | "user"; basis?: "user_statement" | "agent_proposal"; protected?: boolean;
+  suggestion?: CaptureSuggestion; withdrawn?: CaptureSuggestion;
+};
 export type StepInformation = {
   schema: ChecklistField[];
   values?: Record<string, FieldValue>;
@@ -48,12 +52,16 @@ export function fieldMeta(info: StepInformation | undefined, fieldId: string): F
   if (raw.source === "capture" || raw.source === "user") meta.source = raw.source;
   if (typeof raw.protected === "boolean") meta.protected = raw.protected;
   if (raw.basis === "user_statement" || raw.basis === "agent_proposal") meta.basis = raw.basis;
-  const s = raw.suggestion;
-  if (isObject(s) && typeof s.executionId === "string" && typeof s.hash === "string" && s.hash &&
-      typeof s.value === "string" && s.value.trim() && statuses.has(String(s.status)) && natures.has(String(s.nature)))
-    meta.suggestion = { executionId: s.executionId, hash: s.hash, value: s.value,
-      status: s.status as FieldStatus, nature: s.nature as FieldNature };
+  const suggestion = readSuggestion(raw.suggestion), withdrawn = readSuggestion(raw.withdrawnSuggestion);
+  if (suggestion) meta.suggestion = suggestion;
+  if (withdrawn) meta.withdrawn = withdrawn;
   return meta;
+}
+
+function readSuggestion(s: unknown): CaptureSuggestion | undefined {
+  if (!isObject(s) || typeof s.executionId !== "string" || typeof s.hash !== "string" || !s.hash ||
+      typeof s.value !== "string" || !s.value.trim() || !statuses.has(String(s.status)) || !natures.has(String(s.nature))) return undefined;
+  return { executionId: s.executionId, hash: s.hash, value: s.value, status: s.status as FieldStatus, nature: s.nature as FieldNature };
 }
 
 export function hasContent(value: FieldValue | undefined) {

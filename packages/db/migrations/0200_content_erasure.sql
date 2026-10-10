@@ -170,6 +170,27 @@ BEGIN
 END $$;
 REVOKE ALL ON FUNCTION public.content_erasure_references(jsonb,uuid[]) FROM PUBLIC,anon,authenticated,service_role;
 
+-- V3 includes complete pending suggestions in organizer input without their source ID.
+-- Match structured field identity and the complete original proposal, never text substrings.
+CREATE OR REPLACE FUNCTION public.content_erasure_capture_copy(payload jsonb,result jsonb)
+RETURNS boolean LANGUAGE plpgsql IMMUTABLE SET search_path=public,pg_temp AS $$
+DECLARE input jsonb;output jsonb;
+BEGIN
+ IF NOT coalesce((payload#>>'{attachedOrganizer,input}') IS JSON OBJECT,false)
+  OR NOT coalesce((result->>'summary') IS JSON OBJECT,false) THEN RETURN false; END IF;
+ input:=(payload#>>'{attachedOrganizer,input}')::jsonb;output:=(result->>'summary')::jsonb;
+ RETURN EXISTS(SELECT 1
+  FROM jsonb_array_elements(CASE WHEN jsonb_typeof(input->'checklist')='array' THEN input->'checklist' ELSE '[]' END) step,
+   jsonb_array_elements(CASE WHEN jsonb_typeof(step->'fields')='array' THEN step->'fields' ELSE '[]' END) field,
+   jsonb_array_elements(CASE WHEN jsonb_typeof(output->'patches')='array' THEN output->'patches' ELSE '[]' END) patch
+  WHERE step->>'id'=patch->>'stepId' AND field->>'id'=patch->>'fieldId'
+   AND jsonb_typeof(field->'pendingSuggestion')='object'
+   AND jsonb_typeof(patch->'value')='string'
+   AND jsonb_strip_nulls(field->'pendingSuggestion')=jsonb_strip_nulls(jsonb_build_object(
+    'value',patch->'value','nature',patch->'nature','basis',patch->'basis')));
+END $$;
+REVOKE ALL ON FUNCTION public.content_erasure_capture_copy(jsonb,jsonb) FROM PUBLIC,anon,authenticated,service_role;
+
 CREATE OR REPLACE FUNCTION public.content_erasure_scope(a uuid,k text,target uuid)
 RETURNS jsonb LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path=public,pg_temp AS $$
 DECLARE sessions uuid[]:='{}'; executions uuid[]:='{}'; projects uuid[]:='{}'; versions uuid[]:='{}';
@@ -217,7 +238,10 @@ BEGIN
   n:=cardinality(executions);
   more:=ARRAY(SELECT DISTINCT ex.id FROM runtime_executions ex WHERE ex.actor_id=a AND
    (EXISTS(SELECT 1 FROM runtime_history_dependencies d WHERE d.execution_id=ex.id AND d.dependency_id=ANY(executions))
-    OR content_erasure_references(ex.payload,executions)));
+    OR content_erasure_references(ex.payload,executions)
+    OR EXISTS(SELECT 1 FROM runtime_executions src WHERE src.id=ANY(executions)
+     AND src.actor_id=a AND src.session_id=ex.session_id AND src.created_at<ex.created_at
+     AND content_erasure_capture_copy(ex.payload,src.result))));
   executions:=ARRAY(SELECT DISTINCT x FROM unnest(executions||more) x ORDER BY x);
   EXIT WHEN cardinality(executions)=n;
  END LOOP;
@@ -292,6 +316,13 @@ BEGIN
   AND (g.project_id=ANY(projects) OR content_erasure_references(g.input,refs))) THEN
   RAISE EXCEPTION 'CONTENT_ERASURE_BUSY' USING ERRCODE='55P03';
  END IF;
+ -- Keep only source IDs in the existing dependency graph before clearing copies.
+ -- Repeated deletion/financial cleanup must find the same original dependent runs.
+ INSERT INTO runtime_history_dependencies(execution_id,dependency_id)
+ SELECT ex.id,src.id FROM runtime_executions ex JOIN runtime_executions src ON src.session_id=ex.session_id
+ WHERE ex.id=ANY(ids) AND src.id=ANY(ids) AND ex.actor_id=a AND src.actor_id=a
+  AND src.created_at<ex.created_at AND content_erasure_capture_copy(ex.payload,src.result)
+ ON CONFLICT DO NOTHING;
  UPDATE runtime_sessions SET content_deleted_at=stamp WHERE id=ANY(sessions) AND content_deleted_at IS NULL;
  UPDATE artifact_projects SET content_deleted_at=stamp WHERE id=ANY(projects) AND content_deleted_at IS NULL;
  UPDATE bill2_runs SET content_deleted_at=stamp WHERE actor_id=a AND content_deleted_at IS NULL
