@@ -20,6 +20,31 @@ describe('test-only Waffo operations', () => {
     expect(api.cancelSubscription).toHaveBeenCalledTimes(1);
     expect(api.readSubscription).toHaveBeenCalledWith('ORD_original');
   });
+  it('re-dispatches once only after an active read and a successful database CAS', async () => {
+    const api = provider();
+    api.readSubscription.mockResolvedValue({ orderId: 'ORD_original', status: 'active' });
+    api.cancelSubscription.mockResolvedValue({ orderId: 'ORD_original', status: 'canceling' });
+    const intent = { subscriptionId: sub, providerId: 'ORD_original', merchant: 'fixture', mode: 'test',
+      dispatch: false, dispatchedAt: '2026-01-01T00:00:00Z' };
+    for (const won of [false, true]) {
+      const rpc = vi.fn().mockResolvedValueOnce({ data: intent, error: null })
+        .mockResolvedValueOnce({ data: won, error: null }).mockResolvedValueOnce({ error: null });
+      expect(await cancelWaffoMembership({ rpc }, api, sub, sub)).toEqual({ state: won ? 'confirmed' : 'pending' });
+      expect(rpc).toHaveBeenCalledWith('pay_waffo_retry_cancel', { p_user: sub, p_subscription: sub,
+        p_merchant: 'fixture', p_provider: 'ORD_original', p_expected: intent.dispatchedAt });
+    }
+    expect(api.cancelSubscription).toHaveBeenCalledTimes(1);
+  });
+  it('does not re-dispatch on an unknown or failed recovery read', async () => {
+    const api = provider();
+    const rpc = vi.fn().mockResolvedValue({ data: { subscriptionId: sub, providerId: 'ORD_original',
+      merchant: 'fixture', mode: 'test', dispatch: false, dispatchedAt: '2026-01-01T00:00:00Z' }, error: null });
+    api.readSubscription.mockResolvedValueOnce({ orderId: 'ORD_original', status: 'unknown' })
+      .mockRejectedValueOnce(new Error('read timeout'));
+    expect(await cancelWaffoMembership({ rpc }, api, sub, sub)).toEqual({ state: 'pending' });
+    await expect(cancelWaffoMembership({ rpc }, api, sub, sub)).rejects.toThrow('read timeout');
+    expect(api.cancelSubscription).not.toHaveBeenCalled(); expect(rpc).toHaveBeenCalledTimes(2);
+  });
   it('uses product status only; timeout recovery never cancels existing subscribers', async () => {
     const api = provider(); api.readProduct.mockResolvedValue({ id: 'PROD_original', status: 'active' });
     api.setProductStatus.mockRejectedValue(new Error('timeout'));

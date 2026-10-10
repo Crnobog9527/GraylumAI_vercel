@@ -11,7 +11,7 @@ export type WaffoTestOperations = {
   setProductStatus: (productId: string, status: 'inactive' | 'active') => Promise<{ id: string; status: string }>;
   readProduct: (productId: string) => Promise<{ id: string; status: string }>;
 };
-const cancelIntent = z.object({ dispatch: z.boolean(), subscriptionId: z.uuid(), providerId: z.string(),
+const cancelIntent = z.object({ dispatch: z.boolean(), dispatchedAt: z.string().optional(), subscriptionId: z.uuid(), providerId: z.string(),
   merchant: z.string(), mode: z.literal('test') });
 const controlIntent = z.object({ operationId: z.uuid(), productId: z.string(), merchant: z.string(), mode: z.literal('test'),
   state: z.enum(['blocking', 'blocked', 'restoring', 'active']), version: z.number() });
@@ -23,9 +23,16 @@ export async function cancelWaffoMembership(db: Db, provider: WaffoTestOperation
   if (result.error) throw new Error('PAY_WAFFO_CANCEL_UNAVAILABLE');
   const intent = cancelIntent.parse(result.data);
   scope(provider, intent.merchant);
-  // A timeout leaves the durable intent intact. Subsequent calls only query the original subscription.
-  const observed = await (intent.dispatch ? provider.cancelSubscription(intent.providerId) : provider.readSubscription(intent.providerId));
+  // A timeout leaves the intent intact. Recover the original subscription before any conditional retry.
+  let observed = await (intent.dispatch ? provider.cancelSubscription(intent.providerId) : provider.readSubscription(intent.providerId));
   if (observed.orderId !== intent.providerId) throw new Error('PAY_WAFFO_OPERATION_SCOPE');
+  if (!intent.dispatch && observed.status === 'active' && intent.dispatchedAt) {
+    const retry = await db.rpc('pay_waffo_retry_cancel', { p_user: userId, p_subscription: intent.subscriptionId,
+      p_merchant: intent.merchant, p_provider: intent.providerId, p_expected: intent.dispatchedAt });
+    if (retry.error) throw new Error('PAY_WAFFO_CANCEL_UNAVAILABLE');
+    if (retry.data === true) observed = await provider.cancelSubscription(intent.providerId);
+    if (observed.orderId !== intent.providerId) throw new Error('PAY_WAFFO_OPERATION_SCOPE');
+  }
   if (!['canceling', 'canceled'].includes(observed.status)) return { state: 'pending' as const };
   const saved = await db.rpc('pay_waffo_cancel_result', { p_subscription: intent.subscriptionId,
     p_merchant: intent.merchant, p_provider: observed.orderId, p_state: observed.status });

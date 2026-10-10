@@ -17,6 +17,29 @@ ALTER TABLE public.waffo_event_receipts
  ADD COLUMN IF NOT EXISTS resolution jsonb,
  ADD COLUMN IF NOT EXISTS resolved_at timestamptz;
 
+-- Pack prices are distinct provider objects for Pro (95%) and Gold (90%).
+-- Existing generic references stay legacy; never infer a provider price's discounted amount.
+ALTER TABLE public.payment_provider_refs ADD COLUMN IF NOT EXISTS package_tier text NOT NULL DEFAULT 'legacy'
+ CHECK(package_tier IN ('legacy','pro','gold') AND
+   (package_tier='legacy' OR (object_type='price' AND credit_package_id IS NOT NULL AND offer_kind='standard')));
+DROP INDEX IF EXISTS public.pay_common_current_package_price;
+CREATE UNIQUE INDEX pay_common_current_package_price ON public.payment_provider_refs
+ (channel,merchant_namespace,mode,credit_package_id,billing_cycle,package_tier)
+ WHERE object_type='price' AND is_current AND credit_package_id IS NOT NULL;
+DROP TRIGGER IF EXISTS pay_waffo_package_tier_freeze ON public.payment_provider_refs;
+CREATE TRIGGER pay_waffo_package_tier_freeze BEFORE UPDATE ON public.payment_provider_refs
+ FOR EACH ROW EXECUTE FUNCTION public.pay_common_frozen_guard('package_tier');
+-- Old checkout callers can select only their old generic mappings.
+DO $legacy_price$
+DECLARE source text;
+BEGIN
+ source:=pg_get_functiondef('public.pay_common_create_purchase(uuid,text,uuid,text,text,text,text)'::regprocedure);
+ IF position('r.package_tier' IN source)=0 THEN
+  source:=replace(source,'AND r.offer_kind=''standard''','AND r.offer_kind=''standard'' AND r.package_tier=''legacy''');
+  EXECUTE source;
+ END IF;
+END $legacy_price$;
+
 -- All additions use existing authorities. These helpers are service-only, never client RPCs.
 CREATE OR REPLACE FUNCTION public.pay_waffo_assert_actor(p_user uuid) RETURNS void
 LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
@@ -353,8 +376,29 @@ BEGIN
  IF ref.id IS NULL THEN RAISE EXCEPTION 'PAY_WAFFO_CANCEL_SCOPE'; END IF;
  dispatch:=s.method_cancel_dispatched_at IS NULL;
  UPDATE user_subscriptions SET method_cancel_requested_at=coalesce(method_cancel_requested_at,clock_timestamp()),
-  method_cancel_dispatched_at=coalesce(method_cancel_dispatched_at,clock_timestamp()) WHERE id=s.id;
- RETURN jsonb_build_object('dispatch',dispatch,'subscriptionId',s.id,'providerId',ref.external_id,'merchant',s.merchant_namespace,'mode','test');
+  method_cancel_dispatched_at=coalesce(method_cancel_dispatched_at,clock_timestamp()) WHERE id=s.id RETURNING * INTO s;
+ RETURN jsonb_build_object('dispatch',dispatch,'dispatchedAt',s.method_cancel_dispatched_at,'subscriptionId',s.id,'providerId',ref.external_id,'merchant',s.merchant_namespace,'mode','test');
+END $$;
+
+-- Only after the server has read the original subscription as active may it reclaim a stale dispatch.
+-- The exact observed dispatch timestamp is a CAS token; concurrent recoveries cannot both send.
+CREATE OR REPLACE FUNCTION public.pay_waffo_retry_cancel(
+ p_user uuid,p_subscription uuid,p_merchant text,p_provider text,p_expected timestamptz
+) RETURNS boolean LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
+DECLARE s user_subscriptions;
+BEGIN
+ PERFORM pay_waffo_assert_actor(p_user);
+ SELECT * INTO s FROM user_subscriptions WHERE id=p_subscription AND user_id=p_user FOR UPDATE;
+ IF s.id IS NULL OR s.payment_channel IS DISTINCT FROM 'waffo' OR s.payment_mode IS DISTINCT FROM 'test'
+  OR s.merchant_namespace IS DISTINCT FROM p_merchant OR s.method_cancel_requested_at IS NULL
+  OR NOT EXISTS(SELECT 1 FROM payment_provider_refs WHERE subscription_id=s.id AND channel='waffo'
+   AND mode='test' AND merchant_namespace=p_merchant AND object_type='subscription' AND external_id=p_provider) THEN
+  RAISE EXCEPTION 'PAY_WAFFO_CANCEL_DENIED'; END IF;
+ IF s.method_cancel_confirmed_at IS NOT NULL OR p_expected IS NULL
+  OR s.method_cancel_dispatched_at IS DISTINCT FROM p_expected
+  OR s.method_cancel_dispatched_at>clock_timestamp()-interval '1 minute' THEN RETURN false; END IF;
+ UPDATE user_subscriptions SET method_cancel_dispatched_at=clock_timestamp() WHERE id=s.id;
+ RETURN true;
 END $$;
 
 CREATE OR REPLACE FUNCTION public.pay_waffo_cancel_result(p_subscription uuid,p_merchant text,p_provider text,p_state text)
@@ -584,7 +628,7 @@ BEGIN
   END IF;
   FOR ref IN SELECT * FROM payment_provider_refs r WHERE r.channel=selected_channel AND r.merchant_namespace=p_merchant
     AND r.mode=p_mode AND r.object_type='price' AND r.billing_cycle=p_cycle AND r.offer_kind=(CASE p_offer WHEN 'founder_renewal' THEN 'founder' ELSE p_offer END) AND r.is_current
-    AND CASE p_item_type WHEN 'membership_plan' THEN r.membership_plan_id=p_item ELSE r.credit_package_id=p_item END
+    AND CASE p_item_type WHEN 'membership_plan' THEN r.membership_plan_id=p_item ELSE r.credit_package_id=p_item AND r.package_tier=actor.membership_level END
     FOR SHARE LOOP ref_count:=ref_count+1; END LOOP;
   IF ref_count<>1 THEN RAISE EXCEPTION 'PAY_WAFFO_PRICE_MAPPING_MISSING' USING ERRCODE='23514'; END IF;
   IF p_item_type='membership_plan' AND p_cycle='yearly' THEN credits:=credits*12; END IF;
@@ -711,7 +755,7 @@ DO $$ DECLARE f record; BEGIN
   'pay_waffo_assert_actor','pay_waffo_claim_checkout','pay_waffo_bind_checkout','pay_waffo_grant_period',
   'pay_waffo_fulfill_payment','pay_waffo_release_due','pay_waffo_resolve_receipt','pay_waffo_record_offsite',
   'pay_waffo_product_control','pay_waffo_product_control_result','pay_waffo_product_block_guard',
-  'pay_waffo_close_uncreated','pay_waffo_cancel_intent','pay_waffo_cancel_result','pay_waffo_renew_subscription','pay_waffo_admit_purchase','pay_waffo_create_transition','pay_waffo_founder_deadline') LOOP
+  'pay_waffo_close_uncreated','pay_waffo_cancel_intent','pay_waffo_cancel_result','pay_waffo_retry_cancel','pay_waffo_renew_subscription','pay_waffo_admit_purchase','pay_waffo_create_transition','pay_waffo_founder_deadline') LOOP
   EXECUTE format('REVOKE ALL ON FUNCTION %s FROM PUBLIC,anon,authenticated,service_role',f.sig);
   IF f.sig::text NOT LIKE '%pay_waffo_assert_actor(%' AND f.sig::text NOT LIKE '%pay_waffo_product_block_guard(%' AND f.sig::text NOT LIKE '%pay_waffo_admit_purchase(%' THEN
    EXECUTE format('GRANT EXECUTE ON FUNCTION %s TO service_role',f.sig);

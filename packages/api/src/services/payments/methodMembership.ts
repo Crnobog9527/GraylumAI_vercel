@@ -2,6 +2,9 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { readPaymentMethodRoutes } from './methodRouting';
 
+// Keep public purchase admission closed until the complete delivery/recovery path is accepted.
+export const METHOD_CHECKOUT_READY = false;
+
 /** Read-only member-page projection. Orders remain the authority for paid access; a pending
  * checkout or provider subscription status alone cannot grant membership. Founder capacity is
  * shared across merchants/methods in the same mode, matching 0204's atomic reservation. */
@@ -32,7 +35,7 @@ export async function readMethodMembership(db: SupabaseClient, userId: string, n
   if (occupied > 50) throw new Error('PAY_WAFFO_FOUNDER_CAPACITY_CONFLICT');
   return { mode: 'test' as const, routes,
     // Still closed at the application boundary until fulfillment and step 3 are complete.
-    checkoutReady: false,
+    checkoutReady: METHOD_CHECKOUT_READY,
     founder: { total: 50, sold, reserved: occupied - sold, available: 50 - occupied },
     memberships: orders.data,
   };

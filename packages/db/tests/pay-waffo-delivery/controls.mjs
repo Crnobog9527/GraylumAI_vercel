@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import assert from 'node:assert/strict';
 import {randomUUID} from 'node:crypto';
-export async function controlCases({admin,service}) {
+export async function controlCases({admin,service,connect}) {
  const actor=randomUUID(),other=randomUUID();
  await admin.query("INSERT INTO profiles(id,role) VALUES($1,'admin'),($2,'user')",[actor,other]);
  const absentUser=randomUUID();await admin.query('INSERT INTO profiles(id) VALUES($1)',[absentUser]);
@@ -44,10 +44,19 @@ export async function controlCases({admin,service}) {
  const intent=async(user)=>(await service.query('SELECT pay_waffo_cancel_intent($1,$2) v',[user,sub.id])).rows[0].v;
  await assert.rejects(()=>intent(other),/CANCEL_DENIED/);
  const original=await intent(sub.user_id);assert.equal(original.dispatch,true);assert.equal((await intent(sub.user_id)).dispatch,false);
+ const retry=async(db,expected,user=sub.user_id)=>(await db.query(
+  'SELECT pay_waffo_retry_cancel($1,$2,$3,$4,$5) v',[user,sub.id,'fixture',original.providerId,expected])).rows[0].v;
+ assert.equal(await retry(service,original.dispatchedAt),false,'in-flight first dispatch retains its lease');
+ await admin.query("UPDATE user_subscriptions SET method_cancel_dispatched_at=now()-interval '2 minutes' WHERE id=$1",[sub.id]);
+ const stale=await intent(sub.user_id);
+ await assert.rejects(()=>retry(service,stale.dispatchedAt,other),/CANCEL_DENIED/);
+ const parallel=await connect();await parallel.query('SET ROLE service_role');
+ assert.equal((await Promise.all([retry(service,stale.dispatchedAt),retry(parallel,stale.dispatchedAt)])).filter(Boolean).length,1);
+ assert.equal(await retry(service,stale.dispatchedAt),false,'stale recoveries cannot re-dispatch');
  await assert.rejects(()=>service.query('SELECT pay_waffo_cancel_result($1,$2,$3,$4)',[sub.id,'other',original.providerId,'canceling']),/CANCEL_CONFLICT/);
  await service.query('SELECT pay_waffo_cancel_result($1,$2,$3,$4)',[sub.id,'fixture',original.providerId,'canceling']);
  const result=(await admin.query('SELECT cancel_at_period_end,credit_release_terminated_at FROM user_subscriptions WHERE id=$1',[sub.id])).rows[0];
  assert.equal(result.cancel_at_period_end,'true');assert.equal(result.credit_release_terminated_at,null);
  return ['absence-grace-denied','verified-absence-releases-once','offsite-no-entitlement','offsite-dedup-counter','offsite-threshold-alert','admin-only-unpublish','unpublish-original-intent-recovery',
-  'local-purchase-block','restore-outage-history','cancel-cross-user-denied','cancel-once-dispatch','cancel-wrong-scope-denied','cancel-preserves-paid-grants'];
+  'local-purchase-block','restore-outage-history','cancel-cross-user-denied','cancel-once-dispatch','cancel-retry-lease','cancel-retry-concurrent-cas','cancel-retry-cross-user','cancel-wrong-scope-denied','cancel-preserves-paid-grants'];
 }
