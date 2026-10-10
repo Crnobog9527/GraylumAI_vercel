@@ -24,7 +24,7 @@ node summarize.mjs results-rescored/tess.json results-rescored/paddle-tiny+deske
 可以用 `CHROME_PATH` 指定；不指定就用 playwright 自带的浏览器。
 
 ```bash
-npm install --ignore-scripts
+npm ci --ignore-scripts   # 按提交的 package-lock.json 安装，依赖树和报告一致
 npm run assets        # 下载模型和语言数据到 assets/，按 SHA-256 校验；Node 走代理时加 NODE_USE_ENV_PROXY=1
 npm run build         # 把两个识别 Worker 打包到 dist/
 npm run gen           # 生成 set/ 里的 54 页图片和标准文本（固定随机种子）
