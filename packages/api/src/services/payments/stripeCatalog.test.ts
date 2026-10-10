@@ -94,6 +94,26 @@ describe('Stripe catalog authority', () => {
     }));
     expect(mocks.retrieve).not.toHaveBeenCalled();
   });
+  it('keeps standard catalog prices separate from current promotional offers', async () => {
+    const rows = ['standard', 'gold_first30', 'founder'].map(offer => ({
+      channel: 'stripe', merchant_namespace: 'acct_fixture', mode: 'test', object_type: 'price',
+      offer_kind: offer, is_current: true, membership_plan_id: 'fixture_plan',
+      billing_cycle: 'monthly', external_id: `price_${offer}`,
+    }));
+    let selected = rows;
+    const query = {
+      select: () => query,
+      eq: (key: string, value: unknown) => {
+        selected = selected.filter(row => row[key as keyof typeof row] === value); return query;
+      },
+      in: async () => ({ data: selected, error: null }),
+    };
+    const prices = await loadCurrentStripePrices({
+      db: { from: () => query } as unknown as Parameters<typeof loadCurrentStripePrices>[0]['db'],
+      kind: 'membership_plan', scope: { merchant: 'acct_fixture', mode: 'test' }, ids: ['fixture_plan'],
+    });
+    expect([...prices]).toEqual([['fixture_plan:monthly', 'price_standard']]);
+  });
   it('returns no current mapping for a missing price and refuses ambiguous or unreadable maps', async () => {
     type Query = { select: () => Query; eq: () => Query; in: ReturnType<typeof vi.fn> };
     const query: Query = { select: () => query, eq: () => query, in: vi.fn() };

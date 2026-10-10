@@ -12,7 +12,7 @@ export function seedPaymentCommonFixture(tables: Tables) {
     let ref = refs.find(row => row.object_type === kind && row.external_id === external);
     if (!ref) {
       ref = { id: `fixture-ref-${refs.length + 1}`, channel: 'stripe', merchant_namespace: scope.merchant_namespace,
-        mode: 'test', object_type: kind, external_id: external, ...target };
+        mode: 'test', offer_kind: 'standard', object_type: kind, external_id: external, ...target };
       refs.push(ref);
     }
     return ref.id;

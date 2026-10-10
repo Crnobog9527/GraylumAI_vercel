@@ -1,4 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import {assertPath} from '../skills/loader';
+import {SKILL_FILE_TRACE_BYTES,skillFileParameters} from './skillFile';
 import {throwIfContentErased} from '../accountErasure/content';
 import type {RuntimeProgress} from './progress';
 import {createHash} from 'node:crypto';
@@ -28,6 +30,11 @@ export function executorRpc(options:{database:SessionRpc;actor:()=>Promise<strin
    if(name==='runtime_response'&&typeof result.error==='object'&&'message' in result.error
     &&result.error.message==='RUNTIME_RESPONSE_CONFLICT')throw new Error('RUNTIME_RESPONSE_CONFLICT');
    const message=typeof result.error==='object'&&'message' in result.error?result.error.message:undefined;
+   if((name==='runtime_tool'&&args.p_name==='read_skill_file'||name==='read_skill_package')&&
+    typeof message==='string'&&['Skill unavailable','resource unavailable','RUNTIME_SKILL_FILE_DENIED',
+     'RUNTIME_SKILL_FILE_TOO_LARGE','RUNTIME_SKILL_FILE_CONFLICT','RUNTIME_TOOL_DENIED','RUNTIME_TOOL_CLOSED',
+     'RUNTIME_TOOL_LIMIT','RUNTIME_TOOL_CONFLICT','RUNTIME_TOOL_RESULT_CONFLICT'].includes(message))
+    throw new Error('RUNTIME_SKILL_FILE_REFUSED');
    if(message==='RUNTIME_TEST_WINDOW_DENIED'||message==='RUNTIME_TEST_MODEL_DENIED')
     throw new StagingAccessError('RUNTIME_PRICE_CONFIGURATION_PENDING');
    if(typeof message==='string'&&['RUNTIME_RESUME_CONFLICT','RUNTIME_RESUME_SOURCE_CHANGED',
@@ -79,11 +86,25 @@ export function historyGuard(executionId:string,failed:(code:string)=>void) {
   };
 }
 
-export function terminalReplyGuard(active:boolean,allowsCard:boolean,failed:()=>void) {
+export function terminalReplyGuard(active:boolean,allowsCard:boolean,failed:()=>void,allowsSkillFile=false) {
+  let fileRequested=false;
   return (response:unknown,organizer=false)=>{
-    if(active&&terminalAgentReplyFailure(response,organizer,allowsCard)){
+    const message=(response as {choices?:Array<{message?:{tool_calls?:Array<{id?:string;type?:string;
+      function?:{name?:string;arguments?:string}}>}}>})?.choices?.[0]?.message;
+    const readsFile=message?.tool_calls?.[0]?.function?.name==='read_skill_file';
+    let invalidFileArguments=false;
+    if(readsFile){try{
+      const call=message!.tool_calls![0]!,{path}=skillFileParameters.parse(JSON.parse(call.function!.arguments!));
+      assertPath(path);
+      invalidFileArguments=Buffer.from(path).toString('utf8')!==path||call.type!=='function'||
+        typeof call.id!=='string'||!call.id.length||Array.from(call.id).length>256||call.id.includes('\0')||
+        Buffer.from(call.id).toString('utf8')!==call.id;
+     }catch{invalidFileArguments=true;}}
+    const oversized=readsFile&&Buffer.byteLength(JSON.stringify(JSON.stringify(message)))>SKILL_FILE_TRACE_BYTES;
+    if(active&&(terminalAgentReplyFailure(response,organizer,allowsCard,allowsSkillFile&&!fileRequested)||oversized||invalidFileArguments)){
       failed();
       throw new Error('RUNTIME_TERMINAL_REPLY');
     }
+    if(active&&!organizer&&readsFile)fileRequested=true;
   };
 }

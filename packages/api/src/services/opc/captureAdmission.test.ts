@@ -81,7 +81,7 @@ it('explicit checklist notification uses ordinary request identity and no organi
  const input=checklistUpdatedInput(['goal']);
  await fixture().service.prepareStep({...request,input});
  expect(captured.request).toMatchObject({requestId,input,organizeAfter:true});
- expect(captured.policy).toMatchObject({maxCalls:2,inputBytes:64000,hostTurnContext:{updatedFieldIds:['goal']}});
+ expect(captured.policy).toMatchObject({maxCalls:3,inputBytes:64000,hostTurnContext:{updatedFieldIds:['goal']}});
  const organizer=JSON.parse(captured.policy!.organizerInput!);
  expect(organizer).toMatchObject({userInput:'',hostEvent:{kind:'checklist_updated',fieldIds:['goal']}});
  expect(captured.policy!.additionalInstructions).not.toContain(input);
