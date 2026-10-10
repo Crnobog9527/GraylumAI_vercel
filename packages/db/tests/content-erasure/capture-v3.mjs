@@ -23,7 +23,7 @@ export async function runCaptureV3(db,report){
  const hash=(await db.query("SELECT encode(sha256(convert_to($1::jsonb::text,'UTF8')),'hex') h",[material])).rows[0].h;
  await db.query(`INSERT INTO runtime_scope_material(session_id,revision,request_id,request,content,content_hash)
   VALUES($1,1,$2,'{}',$3,$4)`,[f.session,randomUUID(),material,hash]);
- const executions=Array.from({length:2},()=>({id:randomUUID(),request_id:randomUUID()}));
+ const executions=Array.from({length:2},()=>({id:randomUUID(),request_id:randomUUID()})).sort((a,b)=>a.id.localeCompare(b.id));
  const suggestion={value:'V3_PRIVATE_SUGGESTION',nature:'fact',basis:'user_statement'};
  for(let i=0;i<executions.length;i++){
   const e=executions[i],token=randomUUID();
@@ -39,7 +39,7 @@ export async function runCaptureV3(db,report){
   const run=await rpc(db,'bill2_prepare',f.actor,randomUUID(),billing);
   await db.query(`INSERT INTO runtime_executions(id,actor_id,session_id,request_id,payload,billing_run_id,history_revision,state,result,created_at)
    VALUES($1,$2,$3,$4,$5,$6,0,'completed',$7,$8)`,
-   [e.id,f.actor,f.session,e.request_id,payload,run.id,{...outcome,summary:JSON.stringify(output)},new Date(1767225600000+i*1000)]);
+   [e.id,f.actor,f.session,e.request_id,payload,run.id,{...outcome,summary:JSON.stringify(output)},new Date(1767225600000)]);
   await db.query('UPDATE bill2_runs SET session_ref=$2 WHERE id=$1',[run.id,f.session]);
   await db.query('SELECT runtime_billing_allowed($1,$2,$3)',[f.actor,billing,run.id]);
   const applied=await rpc(db,'opc_capture_apply',f.actor,f.draft,e.id);

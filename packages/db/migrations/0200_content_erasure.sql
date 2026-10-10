@@ -240,7 +240,7 @@ BEGIN
    (EXISTS(SELECT 1 FROM runtime_history_dependencies d WHERE d.execution_id=ex.id AND d.dependency_id=ANY(executions))
     OR content_erasure_references(ex.payload,executions)
     OR EXISTS(SELECT 1 FROM runtime_executions src WHERE src.id=ANY(executions)
-     AND src.actor_id=a AND src.session_id=ex.session_id AND src.created_at<ex.created_at
+     AND src.actor_id=a AND src.session_id=ex.session_id AND (src.created_at,src.id)<(ex.created_at,ex.id)
      AND content_erasure_capture_copy(ex.payload,src.result))));
   executions:=ARRAY(SELECT DISTINCT x FROM unnest(executions||more) x ORDER BY x);
   EXIT WHEN cardinality(executions)=n;
@@ -321,7 +321,7 @@ BEGIN
  INSERT INTO runtime_history_dependencies(execution_id,dependency_id)
  SELECT ex.id,src.id FROM runtime_executions ex JOIN runtime_executions src ON src.session_id=ex.session_id
  WHERE ex.id=ANY(ids) AND src.id=ANY(ids) AND ex.actor_id=a AND src.actor_id=a
-  AND src.created_at<ex.created_at AND content_erasure_capture_copy(ex.payload,src.result)
+  AND (src.created_at,src.id)<(ex.created_at,ex.id) AND content_erasure_capture_copy(ex.payload,src.result)
  ON CONFLICT DO NOTHING;
  UPDATE runtime_sessions SET content_deleted_at=stamp WHERE id=ANY(sessions) AND content_deleted_at IS NULL;
  UPDATE artifact_projects SET content_deleted_at=stamp WHERE id=ANY(projects) AND content_deleted_at IS NULL;
