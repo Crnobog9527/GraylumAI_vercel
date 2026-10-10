@@ -56,6 +56,14 @@ describe('stripe webhook route', () => {
     expect(stripeFulfillmentMocks.upsertPaymentOrderBySession).not.toHaveBeenCalled();
   });
 
+  it('passes the verified asynchronous failure event into wallet reconciliation', async () => {
+    const event = { type: 'checkout.session.async_payment_failed', data: { object: { id: 'cs_failed' } } } as Stripe.Event;
+    walletMocks.recover.mockResolvedValue(true);
+    await handleStripeWebhookEvent({} as never, event);
+    expect(walletMocks.recover).toHaveBeenCalledWith({}, undefined, 'cs_failed', 'checkout.session.async_payment_failed');
+    expect(stripeFulfillmentMocks.upsertPaymentOrderBySession).not.toHaveBeenCalled();
+  });
+
   it.each(['PAY_COMMON_RECEIPT_MISMATCH', 'PAY_COMMON_ATTEMPT_IDENTITY_MISMATCH'])(
     'reports signed payment evidence conflict %s through existing logs and Sentry', async (reason) => {
       const event = { type: 'checkout.session.completed', data: { object: { id: 'cs_fixture' } } };

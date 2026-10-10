@@ -19,8 +19,8 @@ export async function createWalletCheckout(input: {
   const price = await db.from('payment_provider_refs').select('external_id').eq('id', order.price_ref_id)
     .eq('channel', 'stripe').eq('merchant_namespace', scope.merchant).eq('mode', 'test').eq('object_type', 'price').maybeSingle();
   if (price.error || !price.data) throw new Error('PAY_WAFFO_PRICE_UNAVAILABLE');
-  // Stripe requires at least 30 minutes. Keep a one-minute dispatch allowance, frozen on first claim.
-  const expiresAt = Math.floor(Date.now() / 1000) + 31 * 60;
+  // Freeze the 30-minute checkout deadline before dispatch; the database also checks the upgrade cutoff.
+  const expiresAt = Math.floor(Date.now() / 1000) + 30 * 60;
   const proposed = buildStripeCheckoutRequest({ orderId: order.id, userId, snapshot: order.purchase_snapshot,
     priceId: price.data.external_id, productName: 'Membership / Credits', appUrl: input.appUrl, expiresAt, walletMethod: purchase.method });
   const claimed = await db.rpc('pay_waffo_claim_checkout', { p_user: userId, p_order: order.id, p_merchant: scope.merchant,

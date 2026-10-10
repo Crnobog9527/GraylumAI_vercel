@@ -6,7 +6,11 @@ ALTER TABLE public.payment_orders
  ADD COLUMN IF NOT EXISTS method_checkout_expires_at timestamptz,
  ADD COLUMN IF NOT EXISTS method_transition text CHECK(method_transition IN ('upgrade','founder_renewal')),
  ADD COLUMN IF NOT EXISTS method_prior_subscription uuid REFERENCES public.user_subscriptions(id),
- ADD COLUMN IF NOT EXISTS method_review_reason text;
+ ADD COLUMN IF NOT EXISTS method_review_reason text,
+ ADD COLUMN IF NOT EXISTS method_upgrade_charge_at timestamptz;
+DROP TRIGGER IF EXISTS pay_waffo_upgrade_charge_freeze ON public.payment_orders;
+CREATE TRIGGER pay_waffo_upgrade_charge_freeze BEFORE UPDATE ON public.payment_orders
+ FOR EACH ROW EXECUTE FUNCTION public.pay_common_frozen_guard('method_upgrade_charge_at');
 ALTER TABLE public.user_subscriptions
  ADD COLUMN IF NOT EXISTS method_cancel_requested_at timestamptz,
  ADD COLUMN IF NOT EXISTS method_cancel_dispatched_at timestamptz,
@@ -43,6 +47,33 @@ BEGIN
  END IF;
 END $legacy_price$;
 
+-- The old admin API validates one generic price, not three discounted provider objects.
+-- Same-price mapping maintenance preserves tiers; amount changes need a tier-aware operation.
+DO $tier_catalog$
+DECLARE source text; guard text;
+BEGIN
+ source:=pg_get_functiondef('public.pay_common_save_catalog(text,uuid,jsonb,jsonb,text,text,text)'::regprocedure);
+ IF position('PAY_WAFFO_TIER_PRICE_UPDATE_REQUIRED' IN source)=0 THEN
+  IF position('  IF current_row IS NOT NULL THEN' IN source)=0
+   OR position('IF FOUND AND (' IN source)=0
+   OR position('UPDATE payment_provider_refs SET is_current=false WHERE' IN source)=0 THEN
+   RAISE EXCEPTION 'PAY_WAFFO_CATALOG_PATCH_MISSING'; END IF;
+  guard:=$guard$
+  IF p_kind='credit_package' AND current_row IS NOT NULL AND p_values ? 'price'
+    AND p_values->'price' IS DISTINCT FROM current_row->'price'
+    AND EXISTS(SELECT 1 FROM payment_provider_refs WHERE credit_package_id=target
+      AND object_type='price' AND is_current AND package_tier IN ('pro','gold')) THEN
+    RAISE EXCEPTION 'PAY_WAFFO_TIER_PRICE_UPDATE_REQUIRED' USING ERRCODE='23514';
+  END IF;
+$guard$;
+  source:=replace(source,'  IF current_row IS NOT NULL THEN',guard||'  IF current_row IS NOT NULL THEN');
+  source:=replace(source,'IF FOUND AND (','IF FOUND AND (old_ref.package_tier<>''legacy'' OR ');
+  source:=replace(source,'UPDATE payment_provider_refs SET is_current=false WHERE',
+   'UPDATE payment_provider_refs SET is_current=false WHERE package_tier=''legacy'' AND');
+  EXECUTE source;
+ END IF;
+END $tier_catalog$;
+
 -- All additions use existing authorities. These helpers are service-only, never client RPCs.
 CREATE OR REPLACE FUNCTION public.pay_waffo_assert_actor(p_user uuid) RETURNS void
 LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
@@ -67,6 +98,9 @@ BEGIN
  IF o.method_dispatched_at IS NOT NULL THEN
   RETURN jsonb_build_object('dispatch',false,'request',o.checkout_request,'expiresAt',o.method_checkout_expires_at);
  END IF;
+ IF o.method_transition='upgrade' AND (p_expires>clock_timestamp()+interval '30 minutes'
+   OR o.method_upgrade_charge_at IS NOT NULL AND p_expires>=o.method_upgrade_charge_at-interval '48 hours') THEN
+  RAISE EXCEPTION 'PAY_WAFFO_UPGRADE_WAIT'; END IF;
  IF o.payment_method='card' AND EXISTS(SELECT 1 FROM system_settings WHERE key='waffo_test_product_'||o.price_ref_id
   AND value->>'state' IN ('blocking','blocked','restoring')) THEN RAISE EXCEPTION 'PAY_WAFFO_PRODUCT_PAUSED'; END IF;
  IF p_expires IS NULL OR p_expires<=clock_timestamp() OR p_expires>clock_timestamp()+interval '31 minutes'
@@ -173,6 +207,11 @@ BEGIN
    OR EXISTS(SELECT 1 FROM account_erasure_requests WHERE profile_id=actor.id) THEN
   UPDATE payment_orders SET method_review_reason='account_closed' WHERE id=o.id;
   RETURN jsonb_build_object('state','review','reason','account_closed');
+ END IF;
+ IF o.method_transition='upgrade' AND o.method_upgrade_charge_at IS NOT NULL
+   AND p_paid_at>=o.method_upgrade_charge_at-interval '48 hours' THEN
+  UPDATE payment_orders SET method_review_reason='upgrade_payment_after_cutoff' WHERE id=o.id;
+  RETURN jsonb_build_object('state','review','reason','upgrade_payment_after_cutoff');
  END IF;
  IF o.item_type='credit_package' THEN
   IF o.payment_method='card' OR p_subscription IS NOT NULL THEN RAISE EXCEPTION 'PAY_WAFFO_PAYMENT_CONFLICT'; END IF;
@@ -489,7 +528,7 @@ BEGIN
           AND purchase_membership_level='gold' AND payment_status='paid' AND entitlement_end>now())
         OR (prior.auto_renew AND (old_sub.status<>'active' OR old_sub.cancel_at_period_end<>'false'
           OR old_sub.method_cancel_requested_at IS NOT NULL OR old_sub.method_observed_at IS NULL
-          OR old_sub.method_observed_at<now()-interval '5 minutes' OR old_sub.current_period_end<=now()+interval '48 hours')) THEN
+          OR old_sub.method_observed_at<now()-interval '5 minutes' OR old_sub.current_period_end<=now()+interval '48 hours 30 minutes')) THEN
         RAISE EXCEPTION 'PAY_WAFFO_UPGRADE_WAIT'; END IF;
     ELSE
       IF p_offer<>'founder_renewal' OR p_cycle<>'yearly' OR p_item<>prior.item_id
@@ -642,12 +681,13 @@ BEGIN
   INSERT INTO payment_orders(user_id,item_type,item_id,billing_cycle,amount_total,currency,mode,status,payment_status,
     payment_channel,merchant_namespace,payment_mode,purchase_request_id,purchase_payload_hash,purchase_snapshot,
     price_ref_id,purchase_action,purchase_membership_level,payment_method,auto_renew,entitlement_term,routing_version,
-    terms_version,terms_accepted_at,offer_kind,qualification_state,gold_identity_digests,method_transition,method_prior_subscription,source_order_id)
+    terms_version,terms_accepted_at,offer_kind,qualification_state,gold_identity_digests,method_transition,method_prior_subscription,source_order_id,method_upgrade_charge_at)
   VALUES(p_user,p_item_type,p_item,p_cycle,cents,'usd',CASE p_method WHEN 'card' THEN 'subscription' ELSE 'payment' END,
     'pending','unpaid',selected_channel,p_merchant,p_mode,gen_random_uuid(),
     encode(extensions.digest(concat_ws(':',snapshot::text,p_method,p_offer,p_terms,ref.id::text),'sha256'),'hex'),
     snapshot,ref.id,'checkout',product->>'level',p_method,p_method='card',term,p_version,p_terms,clock_timestamp(),
-    p_offer,'reserved',CASE WHEN product->>'level'='gold' THEN gold END,p_transition,p_prior,prior.id) RETURNING * INTO intent;
+    p_offer,'reserved',CASE WHEN product->>'level'='gold' THEN gold END,p_transition,p_prior,prior.id,
+    CASE WHEN p_transition='upgrade' AND prior.auto_renew THEN old_sub.current_period_end END) RETURNING * INTO intent;
   RETURN intent;
 END $$;
 CREATE OR REPLACE FUNCTION public.pay_waffo_create_purchase(

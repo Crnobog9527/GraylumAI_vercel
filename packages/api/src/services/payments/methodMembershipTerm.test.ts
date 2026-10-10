@@ -38,10 +38,10 @@ describe('method membership terms', () => {
     ] })).toBe('2027-01-27T00:00:00.000Z');
   });
   it('blocks upgrades within 48h, retries, unknown state and excessive session life', () => {
-    const input = { now: '2027-01-01T00:00:00Z', nextChargeAt: '2027-01-03T00:00:01Z',
+    const input = { now: '2027-01-01T00:00:00Z', nextChargeAt: '2027-01-03T00:30:01Z',
       retrying: false, stateKnown: true, checkoutExpiresAt: '2027-01-01T00:30:00Z' };
     expect(() => assertProUpgradeWindow(input)).not.toThrow();
-    for (const change of [{ nextChargeAt: '2027-01-03T00:00:00Z' }, { retrying: true }, { stateKnown: false },
+    for (const change of [{ nextChargeAt: '2027-01-03T00:30:00Z' }, { nextChargeAt: '2027-01-03T00:00:00Z' }, { retrying: true }, { stateKnown: false },
       { nextChargeAt: null }, { checkoutExpiresAt: '2027-01-02T00:00:00Z' }]) {
       expect(() => assertProUpgradeWindow({ ...input, ...change })).toThrow('PAY_WAFFO_UPGRADE_WAIT');
     }

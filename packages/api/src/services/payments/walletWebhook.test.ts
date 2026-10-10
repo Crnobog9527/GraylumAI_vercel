@@ -15,7 +15,7 @@ function fixture(overrides = {}) {
         maybeSingle: vi.fn().mockResolvedValue({ data: table === 'payment_orders' ? order : order.referenceMissing ? null : { order_id: 'order' }, error: null }) };
       return chain;
     }) };
-  return { db, run: (stripe = {} as Stripe) => recoverWalletCheckout(db as unknown as SupabaseClient, stripe, 'cs_wallet') };
+  return { db, run: (stripe = {} as Stripe, eventType?: string) => recoverWalletCheckout(db as unknown as SupabaseClient, stripe, 'cs_wallet', eventType) };
 }
 describe('wallet callback/recovery', () => {
   beforeEach(() => {
@@ -53,6 +53,21 @@ describe('wallet callback/recovery', () => {
     expect(f.db.rpc).toHaveBeenCalledWith('pay_waffo_observe_qualification', expect.objectContaining({
       p_state: 'closed_unpaid', p_checkout: 'cs_wallet', p_payment: null, p_amount: 0,
     }));
+  });
+  it('releases a complete/unpaid session only for the verified asynchronous failure event', async () => {
+    mocks.cash.mockImplementation(async (input) => {
+      input.onValidatedSession({ status: 'complete', payment_status: 'unpaid' }); return null;
+    });
+    const f = fixture();
+    await f.run(); expect(f.db.rpc).not.toHaveBeenCalled();
+    await f.run({} as Stripe, 'checkout.session.completed'); expect(f.db.rpc).not.toHaveBeenCalled();
+    await f.run({} as Stripe, 'checkout.session.async_payment_failed');
+    expect(f.db.rpc).toHaveBeenCalledWith('pay_waffo_observe_qualification', expect.objectContaining({ p_state: 'closed_unpaid' }));
+  });
+  it('does not let a late failure event undo a verified successful payment', async () => {
+    const f = fixture(); await f.run({} as Stripe, 'checkout.session.async_payment_failed');
+    expect(f.db.rpc).toHaveBeenCalledWith('pay_waffo_fulfill_payment', expect.anything());
+    expect(f.db.rpc).not.toHaveBeenCalledWith('pay_waffo_observe_qualification', expect.anything());
   });
   it('leaves legacy orders to their existing handler', async () => {
     const f = fixture({ payment_method: null }); expect(await f.run()).toBe(false);

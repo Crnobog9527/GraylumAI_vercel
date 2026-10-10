@@ -31,6 +31,18 @@ export async function packageCases({admin,service}) {
   await admin.query('UPDATE payment_provider_refs SET is_current=true WHERE id=$1',[refs[tier]]);
   const order=await buy();assert.equal(order.price_ref_id,refs[tier]);assert.equal(order.amount_total,tier==='pro'?940:890);
  }
+ const save=(values,external,amount=990)=>service.query(
+  "SELECT pay_common_save_catalog('credit_package',$1,$2,$3,'fixture','test',NULL)",
+  [pack,values,{one_time:{external_id:external,unit_amount:amount,currency:'usd',mode:'test',billing_cycle:'one_time'}}]);
+ const tiers=async()=>(await admin.query("SELECT id FROM payment_provider_refs WHERE credit_package_id=$1 AND is_current AND package_tier<>'legacy' ORDER BY id",
+  [pack])).rows.map(r=>r.id);
+ const original=await tiers();
+ await assert.rejects(()=>save({price:1990},'price_changed',1990),/TIER_PRICE_UPDATE_REQUIRED/);
+ assert.deepEqual(await tiers(),original);
+ assert.equal((await admin.query('SELECT price FROM credit_packages WHERE id=$1',[pack])).rows[0].price,990);
+ await assert.rejects(()=>save({},'price_pack_pro'),/PRICE_MAPPING_CONFLICT/);
+ await save({price:990},'price_pack_legacy_replaced');assert.deepEqual(await tiers(),original);
+ refs.legacy=(await admin.query("SELECT id FROM payment_provider_refs WHERE external_id='price_pack_legacy_replaced'")).rows[0].id;
  // Legacy protocol before method activation must still see exactly its original price.
  await admin.query('BEGIN');
  try {
@@ -46,5 +58,5 @@ export async function packageCases({admin,service}) {
    [user,pack])).rows[0];
   assert.equal(legacy.price_ref_id,refs.legacy);assert.equal(legacy.amount_total,990);
  } finally {await admin.query('ROLLBACK');}
- return ['package-pro-price-95','package-gold-price-90','package-no-other-tier-fallback','package-tier-immutable','legacy-package-three-mappings'];
+ return ['package-pro-price-95','package-gold-price-90','package-no-other-tier-fallback','package-tier-immutable','legacy-package-three-mappings','catalog-preserves-tier-prices','catalog-denies-unvalidated-tier-amount-change','catalog-denies-tier-adoption'];
 }

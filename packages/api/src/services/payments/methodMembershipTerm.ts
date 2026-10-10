@@ -77,6 +77,6 @@ export function assertProUpgradeWindow(input: {
   const now = instant(input.now), expiry = instant(input.checkoutExpiresAt);
   if (!input.stateKnown || input.retrying || !input.nextChargeAt) throw new Error('PAY_WAFFO_UPGRADE_WAIT');
   const charge = instant(input.nextChargeAt);
-  if (charge - now <= 48 * 3600000 || expiry <= now || expiry >= charge
+  if (charge - now <= 48 * 3600000 || expiry <= now || expiry >= charge - 48 * 3600000
     || expiry - now > 30 * 60000) throw new Error('PAY_WAFFO_UPGRADE_WAIT');
 }

@@ -28,7 +28,8 @@ describe('durable wallet checkout', () => {
     mocks.dispatch.mockResolvedValue({ id: 'cs_1', status: 'open', url: 'https://checkout.stripe.com/c/pay/test' });
   });
   it('dispatches only after persistent claim and recovers the frozen request on retry', async () => {
-    const f = fixture(false); await createWalletCheckout(f.input);
+    const f = fixture(false); const before = Math.floor(Date.now() / 1000); await createWalletCheckout(f.input);
+    expect(mocks.build.mock.calls[0]?.[0].expiresAt).toBeLessThanOrEqual(before + 30 * 60);
     expect(mocks.dispatch).toHaveBeenCalledWith(expect.objectContaining({ createIfMissing: false,
       intent: expect.objectContaining({ id, recover: true, walletMethod: 'alipay', request: { original: true } }) }));
   });

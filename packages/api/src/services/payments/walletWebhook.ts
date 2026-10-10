@@ -7,7 +7,8 @@ import { walletMembershipTerm } from './methodMembershipTerm';
 
 /** Resolve ownership from the original checkout mapping. Event metadata cannot choose an account.
  * The same entry supports callback retry and original-session recovery after a timeout. */
-export async function recoverWalletCheckout(db: SupabaseClient, stripe: Stripe, sessionId: string) {
+export async function recoverWalletCheckout(db: SupabaseClient, stripe: Stripe, sessionId: string,
+  verifiedEventType?: string) {
   const scope = await resolveStripeScope(stripe);
   const refs = await db.from('payment_provider_refs').select('order_id').eq('channel', 'stripe')
     .eq('merchant_namespace', scope.merchant).eq('mode', scope.mode).eq('object_type', 'checkout').eq('external_id', sessionId).maybeSingle();
@@ -38,7 +39,8 @@ export async function recoverWalletCheckout(db: SupabaseClient, stripe: Stripe, 
   }
   const validated = observed as { status: string | null; payment_status: string } | null;
   if (!cash) {
-    if (validated?.status === 'expired' && validated.payment_status === 'unpaid') {
+    if (validated?.payment_status === 'unpaid' && (validated.status === 'expired'
+      || validated.status === 'complete' && verifiedEventType === 'checkout.session.async_payment_failed')) {
       const closed = await db.rpc('pay_waffo_observe_qualification', { p_order: order.id, p_merchant: scope.merchant,
         p_mode: 'test', p_checkout: sessionId, p_state: 'closed_unpaid', p_payment: null, p_amount: 0, p_currency: 'usd', p_paid_at: null });
       if (closed.error) throw new Error('PAY_WAFFO_CHECKOUT_UNAVAILABLE');
