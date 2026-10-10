@@ -97,6 +97,45 @@
 取代：第 51 项“Gold 新用户首月 $49”的自然月口径（银行卡和钱包首购都改为 30 天）；记录 P 的“创始续费按届时 Gold 月价 6 折、不写死”；
 第一条中站外付款“人工核对后可能开通”的部分由第二条取代。做法见 [PAY-WAFFO](tasks/PAY-WAFFO.md) 第二版。
 
+**2026-10-10：AI 识别中途用户删除照常扣费；资料库上传先默认关闭**
+
+来源：[#770 决定记录](https://github.com/Crnobog9527/GraylumAI_vercel/pull/770#issuecomment-6096367310)。Owner 原话：
+
+> 同意：AI 识别过程中用户自己删除文件导致结果被丢弃的，照常按实际费用扣积分；只有系统故障或注销清理导致结果丢弃时才退回积分。同意：资料库上传先默认关闭，等 Agent 能读文档后再一起打开。
+
+- AI **识别**的调用已发出后，用户自己删除文件导致结果被丢弃：照常按实际费用扣积分、不退；系统故障或注销清理导致丢弃：按这次请求退回积分（只退一次）。
+  这条只覆盖识别；Word / PDF 的 AI **提取**后备遇到同样情况时先按退回处理，要改需 Owner 另行决定。
+- 资料库上传入口代码合进 staging 后后台开关默认关闭，等 Agent 能读文档（LIB-4）后一起打开，同时价格页开始显示资料库容量。
+- Word 里的内嵌图片按 [LIB-DOCS 实施方案](LIB_DOCS_PLAN.md) 第 4.1 节只用免费的浏览器识别、不自动用 AI 扣费；
+  上一条决定的「自动按页扣积分」只适用于扫描件 PDF 的页，Word 图片是否也用 AI 扣费需 Owner 另行决定。
+- 取代：LIB-DOCS 方案早先「删除导致结果丢弃一律退回积分」的写法；以及「上传入口何时打开」这一待定事项。
+
+**2026-10-10：资料库文字提取和扫描件识别改为浏览器优先，扫描件上传后自动识别**
+
+来源：[#770 决定记录](https://github.com/Crnobog9527/GraylumAI_vercel/pull/770#issuecomment-6096250309)。Owner 原话：
+
+> 同意：Word 和 PDF 先用用户浏览器提取文字，不扣积分；效果测试不达标时改用 OpenRouter 的 AI 提取，按实际花费扣积分。同意扫描件上传后自动识别：先测试浏览器识别，准确率达标就用浏览器识别、不扣积分；不达标就用 OpenRouter 的 AI 识别、自动按页扣积分，每个文件最多 50 页，余额不够就暂停、充值后继续。同意上传区域显示一句固定说明，不写预计扣多少积分。
+
+- Word 和 PDF 的文字先在用户浏览器里提取、不扣积分；固定样本效果测试不达标时才改用 OpenRouter AI 提取，按实际花费扣积分。
+- 扫描件上传后自动识别：浏览器识别准确率达标就用它、不扣积分；不达标才用 OpenRouter AI 逐页识别、自动扣积分，每个文件最多 50 页，
+  余额不足暂停、充值后继续。上传区域显示一句固定说明，不写预计扣多少积分。效果测试结果先报 Owner 再定每种格式的方案。
+- 取代：下一条（同日）里「扫描件 PDF 用现有 OpenRouter 模型识别」以及第 10 节 D6 里同样的说法——OpenRouter 改为不达标时的后备，
+  不再是默认。细节见 [LIB-DOCS 实施方案](LIB_DOCS_PLAN.md) 第 4.4、4.5 节。
+
+**2026-10-10：资料库上线前支持图片和 PDF（含扫描件识别），发布媒体不进资料库**
+
+来源：[#770 决定记录](https://github.com/Crnobog9527/GraylumAI_vercel/pull/770#issuecomment-6095169943)。Owner 原话：
+
+> 同意资料库上线前支持图片（jpg、png、webp）和 PDF；扫描件 PDF 也在上线前支持识别文字，用现有 OpenRouter 模型识别，按实际花费从用户积分里扣，和对话一样。同意发布用的视频和发布图片不进资料库、不占会员空间：用户浏览器直接上传到 Post for Me，我们只保存发布记录；用户想留存的图片才放进资料库。
+
+- 资料库第一版支持 `.txt`、`.md`、`.docx`、`.pdf`、`.jpg`/`.jpeg`、`.png`、`.webp`，单个文件仍不超过 10 MB；音频、视频仍在上线后（第 10 节 D6）。
+- 扫描件 PDF 的识别走现有 OpenRouter 模型和 BILL-PAYG 边用边扣，按实际花费扣积分，不另建计费；识别模型后台配置。
+  第一版 Agent 不看图片。实施细节见 [LIB-DOCS 实施方案](LIB_DOCS_PLAN.md)。
+- 发布用的视频和图片由用户浏览器直传 Post for Me，不进资料库、不占会员空间，只保存发布记录，归 PUBLISH-MONITOR。
+- 取代：D6 原「PDF 等其他格式上线后再加」；以及 D1、第 0 节第 6 点、本节第 3、7 项、第 2.2 节 UI-C 图片一行、第 5 节（上传和类型字段）、
+  第 9 节 §6.3–6.4 一行里「资料库图片和音频放到上线后 / 不存图片 / 只放行文档」中关于资料库存图片和 PDF 的部分
+  （Agent 看图、音频、视频仍在上线后，UI-C 第一版仍只附有文字的文档）；LIB-EXT 去掉 PDF 和图片。这些旧说法不逐处改，以本条为准。
+
 **2026-10-10：REPORT-MODEL 报告模型单独设置**
 
 来源：[#716 决定记录](https://github.com/Crnobog9527/GraylumAI_vercel/issues/716#issuecomment-6085743882)。Owner 原话：
@@ -1379,7 +1418,7 @@ node scripts/plan-progress.mjs --ref origin/staging
 | **5 上线后** | INTEGRATION-BASE → V3-FEISHU、SOCIAL-SYNC | 沿用 v11 §8（C1 套餐式自动追踪已确认） | REL-1 上线 | 高 | 大 | — |
 | | CHARGEBACK | 方向（Owner 2026-10-04，第 2.1 节第 51 项，[记录 W](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5981381009)、[记录 X](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5981808905)；**上线后任务，不阻塞上线**）：拒付最终判定输了，按商品分别处理：订阅按退款规则处理这一期（扣掉还没用完的积分、终止这份订阅以后的积分发放，是创始会员的立即结束创始身份，名额不放回）；微信一次性会员结束这一期，1 年期的终止以后按月发放的积分、扣掉这一期还没用完的积分（是创始会员的同样结束创始身份）；订阅和微信一次性会员被冻结的已发积分判输扣回、判赢解冻，不动其他来源（[记录 AC](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5982525998)）；积分包扣回这个包里没用完的积分、判赢解冻，不动其他来源的积分（[记录 Z](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5982115736)）；所有拒付都不自动接受，由 Owner 人工处理（[记录 Y](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5982111397)）；赢了就解除 PAY-DISPUTE-GUARD 的冻结、恢复，按幂等处理（拒付期间被暂停的按月积分，判赢后按原发放日逐期补发，幂等，不改变原会员期限和发放日期，不延到原到期日之后）；订阅判赢后不自动恢复扣费，提醒用户自己重新订阅；判输时订阅终止（[记录 AD](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5982615688)），具体由 CHARGEBACK 方案提出、Owner 批准；一键导出申诉材料（用 PAY-WAFFO 的同意记录及 PAY-EVIDENCE 的付款证据）；限制同一人反复拒付；信用卡账单商户名（由 Waffo 控制）。续费和到期提醒归 PAY-NOTIFY，拒付事件接收和可撤回冻结归 PAY-DISPUTE-GUARD，上线前完成（2026-10-09 拆分）。拒付通知方式、举证截止日和手续费（每笔 $25）已由 [Waffo 2026-10-10 答复](https://github.com/Crnobog9527/GraylumAI_vercel/pull/752#issuecomment-6095292601)；开工前仍须向 Waffo 核实要交的材料和账单商户名 | PAY-WAFFO、PAY-NOTIFY、PAY-EVIDENCE、PAY-DISPUTE-GUARD；Waffo 核实结果 | 高 | 待实施方案细化 | — |
 | | LEARN-1、LEARN-2 | 第 6.3 节：读取用户数据、依赖数据使用同意 | 有真实用户 / SOCIAL-SYNC | 高 | 中 | — |
-| | LIB-EXT（资料库扩展） | PDF 等其他格式、全文检索或 pgvector、图片和音频、Google Drive / Notion 导入 | LIB-DOCS | 高 | 大 | — |
+| | LIB-EXT（资料库扩展） | 全文检索或 pgvector、音频和视频、Agent 看图、Google Drive / Notion 导入（PDF 和图片已于 2026-10-10 移入 LIB-DOCS，第 2.1 节，[#770 决定记录](https://github.com/Crnobog9527/GraylumAI_vercel/pull/770#issuecomment-6095169943)） | LIB-DOCS | 高 | 大 | — |
 
 ### 7.2 依赖简图
 
@@ -1672,7 +1711,7 @@ Owner 于 2026-09-27 确认 D1–D17（D6 在 Fable 评估后改为不含 PDF；
 | D3 | 对比模式最多几个模型 | 4 个（后台可调，系统上限 8 个） |
 | D4 | 各会员等级的默认权限和资料库额度 | 免费：不能用 Fusion，资料库总空间 50 MB；Pro：不能用 Fusion（2026-10-04 修订，第 2.1 节第 51 项；原为"评审和对比两种模式都能用"），500 MB；Gold：评审和对比两种模式都能用，2 GB。资料库只限制总空间，不限制文件数量；另有一个系统级文件数量保护上限，只防滥用、不作为权益展示。定位档案数：免费 1、Pro 3、Gold 6（2026-10-04，第 2.1 节第 51 项）。后台随时可改 |
 | D5 | 用户数据使用同意 | 允许 Graylum 团队查看去除身份信息后的使用记录，用来人工改进产品；默认不参与，用户主动勾选才参与。现在不会用来训练模型，也不会自动修改 Skill。以后改进机制设计出来、用途发生变化时，必须重新征求用户同意。文风画像和个人偏好只服务用户本人，不需要额外同意 |
-| D6 | 资料库支持的文件 | 第一版支持 `.txt`、`.md`、`.docx`，单个文件不超过 10 MB；PDF 等其他格式上线后再加 |
+| D6 | 资料库支持的文件 | 第一版支持 `.txt`、`.md`、`.docx`，单个文件不超过 10 MB；PDF 等其他格式上线后再加。**2026-10-10 变更**（第 2.1 节，[#770 决定记录](https://github.com/Crnobog9527/GraylumAI_vercel/pull/770#issuecomment-6095169943)）：上线前另加 `.pdf` 和图片（`.jpg`/`.jpeg`、`.png`、`.webp`），单个文件仍不超过 10 MB；扫描件 PDF 用现有 OpenRouter 模型识别文字，按实际花费扣积分；音频、视频仍在上线后；发布媒体不进资料库。**同日补充**（[决定记录](https://github.com/Crnobog9527/GraylumAI_vercel/pull/770#issuecomment-6096250309)）：Word、PDF 提取和扫描件识别都先用浏览器、不扣积分，效果测试不达标才用 OpenRouter AI 按实际花费扣积分；扫描件上传后自动识别，每个文件最多 50 页 |
 | D7 | 删除资料库文档时，已完成的对话回答和已保存成果是否一起清除 | 不自动清除（它们是用户自己的内容，可单独删除），只清除文档和系统派生数据；账号注销时全部清除 |
 | D8 | 封闭内测 | **2026-10-03 取消**（第 2.1 节第 50 项）：不做封闭内测，按 D1 范围完成后直接公开上线售卖。原决定：上线基础（N2）完成后先邀请 5–10 位真实用户封闭内测 |
 | D9 | 自由对话是否自动整理 | 默认不自动整理；带步骤的 Skill 每轮自动整理。（2026-10-03：方向已由第 2.1 节第 45 项改为用户手动触发"整理纪要"，方案待写；实施前现行行为不变） |
