@@ -14,23 +14,27 @@ export const paths = Object.freeze({
   baseline: join(home, '.graylum/cdc-writeback-v2-20261006'),
   // 4096 re-run: frozen B requests (77/100), special gold, host plan and the final shared ledger.
   source: join(home, '.graylum/cdc-writeback-v2-4096-20261009'),
-  // First V3 paid run (2026-10-10, 92.3/100). Its requests lacked ANSWER_CARD_RULE and used max_tokens 4096; kept as evidence only.
+  // First V3 paid run (2026-10-10, 92.3/100). Its requests lacked ANSWER_CARD_RULE; kept as evidence only.
   firstRun: join(home, '.graylum/cdc-writeback-v3-20261010'),
-  // Production-shaped roster: complete organizer system prompt and the production output cap.
-  root: join(home, '.graylum/cdc-writeback-v3-prodshape-20261010'),
+  // Halted 2026-10-10 run: frozen with a stale 2048 cap, stopped at R1/C063 (truncated). Invalid; only its ledger is carried.
+  haltedRun: join(home, '.graylum/cdc-writeback-v3-prodshape-20261010'),
+  // Production-shaped roster: complete organizer system prompt and the live output cap.
+  root: join(home, '.graylum/cdc-writeback-v3-prodshape4096-20261010'),
 });
 export const pins = Object.freeze({
   casesHash: '8258d5753b4a8626a26234246c37e9e3a9cd3c94f24bf86ea4c96b7303b6f76f',
   sourceManifestHash: '274f1b5d3f8052e773ec7661dde5d35f5a1f45f5a7b58911f7a4af055b848291',
   specialHash: '9c29090a99ff60584c7265f5bfc5eceff7e71d9be334bcbe2527422d9e822c7e',
-  // Completed first V3 ledger (it carries the stopped 4096 ledger): every settlement and unknown hold is carried.
-  sourceLedgerHash: '2cb3f03026c39b899e71c913b240f26426917caa5bdd0b911ac903354162300a',
-  settledNano: 1_494_127_118, heldNano: 20_799_750, capNano: 5_000_000_000,
+  // Halted V3 ledger (it carries the first V3 ledger): every settlement, every unknown hold and its open R1/C063 reserve.
+  sourceLedgerHash: '8cd0cad2db307dac487afe731adacca1290078326b9f55fae22c153c4aa82661',
+  settledNano: 1_520_396_213, heldNano: 28_668_750, capNano: 5_000_000_000,
 });
 export const runs = Object.freeze(['R1', 'R2', 'R3']);
 export const batches = Object.freeze([...runs, 'S12']);
-// Production organizer cap (system_settings v3_summary_max_tokens, mirrored by cdcB2Fixture); replay requires equality.
-export const outputTokens = 2048;
+// Live organizer cap: staging system_settings v3_summary_max_tokens = 4096 (read-only check 2026-10-10; Owner raised it from
+// 2048 on 2026-10-09; settings.ts allows at most 4096). Offline tooling cannot read the live value: change this constant and
+// re-freeze if the setting changes. The replay host is configured from this constant and must emit the identical request.
+export const outputTokens = 4096;
 export const marker = '\n\nPrimary assistant reply:\n';
 
 export const hash = value => createHash('sha256').update(value).digest('hex');

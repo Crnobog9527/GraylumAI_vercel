@@ -72,14 +72,16 @@ export function promptAt(repo) {
   return organizerSystem({ prompt: read('organizerPrompt.ts'), answerCard: read('answerCard.ts'), service: read('service.ts') });
 }
 
-/** The first V3 ledger is carried whole: its settled amount and every unknown hold. It must have nothing pending. */
+/** The halted V3 ledger is carried whole: its settled amount, every unknown hold and its unsettled reserve (never released).
+ * An open reserve is accepted only behind a recorded stop. */
 export function carry(p = paths, expected = pins) {
-  const path = join(p.firstRun, 'frozen/execution/budget.jsonl'), raw = readFileSync(path, 'utf8');
+  const path = join(p.haltedRun, 'frozen/execution/budget.jsonl'), raw = readFileSync(path, 'utf8');
   assert(hash(raw) === expected.sourceLedgerHash, 'V3_LEDGER_CHANGED');
   const state = budgetState(raw.trimEnd().split('\n').map(JSON.parse));
-  assert(!state.pending && state.settledNano === expected.settledNano && state.heldNano === expected.heldNano,
+  const heldNano = state.heldNano + (state.pending?.nano ?? 0);
+  assert((!state.pending || state.stopped) && state.settledNano === expected.settledNano && heldNano === expected.heldNano,
     'V3_LEDGER_STATE');
-  return { path, carry: { settledNano: state.settledNano, heldNano: state.heldNano, sourceHash: expected.sourceLedgerHash } };
+  return { path, carry: { settledNano: state.settledNano, heldNano, sourceHash: expected.sourceLedgerHash } };
 }
 
 export function writeRoster(directory, rows, specialRaw) {
