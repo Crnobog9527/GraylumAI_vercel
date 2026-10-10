@@ -9,6 +9,7 @@ import {resolve} from 'node:path';
 import {POSTGRES_IMAGE} from '../v3/images.mjs';
 import {buildFromFiles,installPgCronStub} from '../baseline/build-from-files.mjs';
 import {runCases} from './cases.mjs';
+import {runSettings} from './settings.mjs';
 import {runResearch} from './research.mjs';
 import {runArtifacts} from './artifacts.mjs';
 import {runDependencies} from './dependencies.mjs';
@@ -27,7 +28,8 @@ const ok=r=>{if(r.status!==0||r.error)throw new Error((r.stderr||String(r.error)
 const endpoint=ok(run('docker',['context','inspect','--format','{{.Endpoints.docker.Host}}']));
 assert.ok(endpoint.startsWith('unix:///')&&!endpoint.includes('\n'),'only local Docker socket');
 const docker=(args,input)=>run('docker',['--host',endpoint,...args],input);
-ok(docker(['image','inspect',POSTGRES_IMAGE]));
+const image=POSTGRES_IMAGE.replace(/:[^/@]+@/, '@'); // Same pinned digest; match the account-erasure runner.
+ok(docker(['image','inspect',image]));
 const name=`graylum-content-erasure-${randomUUID().slice(0,8)}`;
 const sql=input=>docker(['exec','-i',name,'psql','-X','-qAt','-U','postgres','-d','b2a','-v','ON_ERROR_STOP=1'],input);
 const fp=read('packages/db/tests/baseline/fingerprint.sql');
@@ -39,7 +41,7 @@ const report={development,build:null,checks:[],failed:null};
 let client;
 try {
  ok(docker(['run','-d','--pull=never','--name',name,'-p','127.0.0.1::5432',
-  '-e','POSTGRES_DB=b2a','-e','POSTGRES_HOST_AUTH_METHOD=trust',POSTGRES_IMAGE]));
+  '-e','POSTGRES_DB=b2a','-e','POSTGRES_HOST_AUTH_METHOD=trust',image]));
  let ready=false;
  for(let i=0;i<300&&!ready;i++){
   ready=docker(['exec',name,'pg_isready','-h','127.0.0.1','-U','postgres','-d','b2a']).status===0;
@@ -66,6 +68,7 @@ try {
  await runCases(client,report);
  await runArtifacts(client,report);
  await runResearch({db:client,Client,connectionString,report});
+ await runSettings({db:client,Client,connectionString,report});
  await client.query(read('packages/db/tests/runtime-view-perf/fixture.sql'));
  await runDependencies(client,report);
  await runCaptureV3(client,report);

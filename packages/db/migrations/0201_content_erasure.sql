@@ -263,6 +263,13 @@ BEGIN
   UNION SELECT 'content',c.id FROM opc_content_versions c WHERE c.actor_id=a AND NOT c.id=ANY(content_ids)
    AND (c.execution_id=ANY(executions) OR c.id=ANY(refs))
  ) affected;
+ -- Canonical sets make the preview hash independent of query plans and physical row order.
+ SELECT coalesce(array_agg(DISTINCT id ORDER BY id),'{}') INTO sessions FROM unnest(sessions) id WHERE id IS NOT NULL;
+ SELECT coalesce(array_agg(DISTINCT id ORDER BY id),'{}') INTO executions FROM unnest(executions) id WHERE id IS NOT NULL;
+ SELECT coalesce(array_agg(DISTINCT id ORDER BY id),'{}') INTO projects FROM unnest(projects) id WHERE id IS NOT NULL;
+ SELECT coalesce(array_agg(DISTINCT id ORDER BY id),'{}') INTO versions FROM unnest(versions) id WHERE id IS NOT NULL;
+ SELECT coalesce(array_agg(DISTINCT id ORDER BY id),'{}') INTO content_ids FROM unnest(content_ids) id WHERE id IS NOT NULL;
+ SELECT coalesce(array_agg(DISTINCT id ORDER BY id),'{}') INTO refs FROM unnest(refs) id WHERE id IS NOT NULL;
  RETURN jsonb_build_object('kind',k,'id',target,'alreadyDeleted',deleted,
   'sessions',to_jsonb(sessions),'executions',to_jsonb(executions),'projects',to_jsonb(projects),
   'versions',to_jsonb(versions),'contents',to_jsonb(content_ids),'references',to_jsonb(refs),
@@ -309,6 +316,12 @@ BEGIN
  SELECT coalesce(array_agg(v::uuid),'{}') INTO projects FROM jsonb_array_elements_text(scope->'projects') v;
  SELECT coalesce(array_agg(v::uuid),'{}') INTO versions FROM jsonb_array_elements_text(scope->'versions') v;
  SELECT coalesce(array_agg(v::uuid),'{}') INTO contents FROM jsonb_array_elements_text(scope->'contents') v;
+ -- Existing UI writers lock their item/account before updating private settings.
+ PERFORM work_item_id FROM opc_items WHERE work_item_id=ANY(projects) ORDER BY work_item_id FOR UPDATE NOWAIT;
+ PERFORM project_id FROM opc_accounts WHERE project_id=ANY(projects) ORDER BY project_id FOR UPDATE NOWAIT;
+ PERFORM work_item_id FROM opc_work_ui WHERE actor_id=a AND work_item_id=ANY(projects) ORDER BY work_item_id FOR UPDATE NOWAIT;
+ PERFORM account_project_id FROM opc_account_ui WHERE actor_id=a AND account_project_id=ANY(projects) ORDER BY account_project_id FOR UPDATE NOWAIT;
+ PERFORM work_item_id FROM opc_publication_ui WHERE actor_id=a AND work_item_id=ANY(projects) ORDER BY work_item_id FOR UPDATE NOWAIT;
  rounds:=ARRAY(SELECT id FROM artifact_rounds WHERE project_id=ANY(projects));
  chats:=ARRAY(SELECT c.conversation_id FROM artifact_chats c JOIN conversations v ON v.id=c.conversation_id
   WHERE c.project_id=ANY(projects) AND v.user_id=a);
@@ -408,6 +421,10 @@ BEGIN
  UPDATE opc_topic_openings SET input=NULL,erased_at=stamp WHERE erased_at IS NULL AND draft_id IN
   (SELECT draft_id FROM opc_drafts WHERE actor_id=a AND (session_id=ANY(sessions) OR project_id=ANY(projects)));
  UPDATE opc_plans SET request=NULL,body=NULL,erased_at=stamp WHERE erased_at IS NULL AND source_version_id=ANY(versions);
+ -- Same private-setting removal as account erasure, restricted to the selected family.
+ DELETE FROM opc_work_ui WHERE actor_id=a AND work_item_id=ANY(projects);
+ DELETE FROM opc_account_ui WHERE actor_id=a AND account_project_id=ANY(projects);
+ DELETE FROM opc_publication_ui WHERE actor_id=a AND work_item_id=ANY(projects);
  UPDATE opc_item_edits SET title=NULL,brief=NULL,erased_at=stamp WHERE erased_at IS NULL AND work_item_id=ANY(projects);
  UPDATE opc_items SET brief=NULL,erased_at=stamp WHERE erased_at IS NULL AND work_item_id=ANY(projects);
  UPDATE opc_accounts SET account_key='erased:'||project_id,erased_at=stamp WHERE erased_at IS NULL AND project_id=ANY(projects);
@@ -765,7 +782,8 @@ BEGIN
  ELSIF TG_TABLE_NAME='artifact_chat_summaries' THEN
   SELECT c.project_id INTO pid FROM artifact_chats c JOIN artifact_chat_turns t ON t.conversation_id=c.conversation_id
    WHERE t.request_id=(j->>'turn_id')::uuid;
- ELSIF TG_TABLE_NAME='opc_content_versions' THEN pid:=(j->>'work_item_id')::uuid;
+ ELSIF TG_TABLE_NAME IN ('opc_content_versions','opc_work_ui','opc_publication_ui') THEN pid:=(j->>'work_item_id')::uuid;
+ ELSIF TG_TABLE_NAME='opc_account_ui' THEN pid:=(j->>'account_project_id')::uuid;
  END IF;
  IF pid IS NOT NULL THEN
   SELECT erased_at IS NOT NULL OR content_deleted_at IS NOT NULL INTO deleted FROM artifact_projects WHERE id=pid FOR SHARE;
@@ -784,6 +802,12 @@ DO $$ DECLARE t text; BEGIN
   'artifact_generations','artifact_candidates','artifact_confirmations','opc_content_versions'] LOOP
   EXECUTE format('DROP TRIGGER IF EXISTS content_erasure_parent_guard ON public.%I',t);
   EXECUTE format('CREATE TRIGGER content_erasure_parent_guard BEFORE INSERT ON public.%I FOR EACH ROW EXECUTE FUNCTION content_erasure_parent_guard()',t);
+ END LOOP;
+END $$;
+DO $$ DECLARE t text; BEGIN
+ FOREACH t IN ARRAY ARRAY['opc_work_ui','opc_account_ui','opc_publication_ui'] LOOP
+  EXECUTE format('DROP TRIGGER IF EXISTS content_erasure_parent_guard ON public.%I',t);
+  EXECUTE format('CREATE TRIGGER content_erasure_parent_guard BEFORE INSERT OR UPDATE ON public.%I FOR EACH ROW EXECUTE FUNCTION content_erasure_parent_guard()',t);
  END LOOP;
 END $$;
 -- Read-only saved-result availability is separate from permission to reuse a source.
