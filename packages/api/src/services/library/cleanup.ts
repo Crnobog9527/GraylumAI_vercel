@@ -49,6 +49,24 @@ export async function cleanupLibrary(client: SupabaseClient, options: {
   return { checked, released, failed, ...backlog, budgetExhausted: checked < rows.length };
 }
 
+/** Batch ownership lookup means retained/claimed objects never consume one network round trip each.
+ * On a partial page, every processed orphan is removed, so rescanning makes forward progress. */
+export async function cleanupOrphanPage(client: SupabaseClient, storage: LibraryStorage,
+  page: { paths: string[]; cursor: string | null }, started: number) {
+  const paths = page.paths.filter(canonicalPath);
+  const claimed = new Set(await libraryRpc<string[]>(client, 'library_paths_claimed', { paths }));
+  let orphans = 0;
+  let complete = true;
+  for (const path of paths) {
+    if (claimed.has(path)) continue;
+    if (Date.now() - started > 45_000) { complete = false; break; }
+    if (!await storage.absent(path)) await storage.remove(path);
+    if (!await storage.absent(path)) throw new Error('LIBRARY_STORAGE_UNAVAILABLE');
+    orphans++;
+  }
+  return { orphans, unknownPaths: page.paths.length - paths.length, complete };
+}
+
 export async function runLibraryCleanup(client: SupabaseClient) {
   const started = Date.now();
   const runId = await startScheduledJobRun({ supabase: client, jobKey: 'library_cleanup', triggerSource: 'cron' });
@@ -61,20 +79,9 @@ export async function runLibraryCleanup(client: SupabaseClient) {
     const cursor = previous.data?.summary?.scanCursor;
     const storage = libraryStorage(client);
     const page = await storage.scan('', typeof cursor === 'string' ? cursor : undefined);
-    let orphans = 0; let unknownPaths = 0;
-    let scanned = 0;
-    for (const path of page.paths) {
-      if (Date.now() - started > 45_000) break;
-      scanned++;
-      if (!canonicalPath(path)) { unknownPaths++; continue; }
-      const claimed = await libraryRpc<boolean>(client, 'library_path_claimed', { path });
-      if (!claimed) {
-        if (!await storage.absent(path)) await storage.remove(path);
-        if (!await storage.absent(path)) throw new Error('LIBRARY_STORAGE_UNAVAILABLE');
-        orphans++;
-      }
-    }
-    const summary = { ...result, orphans, unknownPaths, scanCursor: scanned === page.paths.length ? page.cursor : (cursor ?? null) };
+    const orphanResult = await cleanupOrphanPage(client, storage, page, started);
+    const { orphans, unknownPaths, complete } = orphanResult;
+    const summary = { ...result, orphans, unknownPaths, scanCursor: complete ? page.cursor : (cursor ?? null) };
     await finishScheduledJobRun({ supabase: client, runId, status: result.failed || unknownPaths ? 'error' : 'success', summary });
     return summary;
   } catch {

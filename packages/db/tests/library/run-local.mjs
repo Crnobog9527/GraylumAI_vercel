@@ -72,6 +72,9 @@ try {
   assert.match(admissions.find(r=>r.status==='rejected').reason.message,/LIBRARY_SPACE/);
   const doc=admissions.find(r=>r.status==='fulfilled').value.rows[0].value.documentId;
   assert.equal((await admin.query('SELECT sum(original_hold) AS n FROM library_upload_reservations WHERE actor_id=$1',[a])).rows[0].n,'10000000');
+  const originalPath=`${a}/${doc}/original`;
+  const claimed=(await one.query('SELECT library_paths_claimed($1) AS paths',[[originalPath,`${a}/${randomUUID()}/original`]])).rows[0].paths;
+  assert.deepEqual(claimed,[originalPath]);
   const request=(await admin.query('SELECT request_id FROM library_documents WHERE id=$1',[doc])).rows[0].request_id;
   assert.equal((await begin(one,a,request)).rows[0].value.dispatch,false);
   await expectError(()=>one.query('SELECT library_document_read($1,$2,false)',[b,doc]),'LIBRARY_NOT_FOUND');

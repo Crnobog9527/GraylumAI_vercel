@@ -278,9 +278,11 @@ BEGIN
  PERFORM library_actor(a,true);
  UPDATE library_upload_reservations SET checked_at=clock_timestamp() WHERE document_id=did AND actor_id=a;
 END $$;
-CREATE OR REPLACE FUNCTION public.library_path_claimed(path text) RETURNS boolean
+CREATE OR REPLACE FUNCTION public.library_paths_claimed(paths text[]) RETURNS text[]
 LANGUAGE sql SECURITY DEFINER SET search_path=public,pg_temp AS $$
- SELECT EXISTS(SELECT 1 FROM library_upload_reservations WHERE original_path=path OR text_path=path)
+ SELECT coalesce(array_agg(x.path),'{}'::text[]) FROM unnest(paths) x(path)
+ WHERE cardinality(paths)<=100 AND EXISTS(SELECT 1 FROM library_upload_reservations
+  WHERE original_path=x.path OR text_path=x.path)
 $$;
 
 CREATE OR REPLACE FUNCTION public.library_cleanup_backlog(a uuid DEFAULT NULL) RETURNS jsonb
@@ -299,7 +301,7 @@ DO $$ DECLARE f regprocedure; BEGIN
  FOR f IN SELECT p.oid::regprocedure FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
   WHERE n.nspname='public' AND p.proname IN ('library_actor','library_capacity','library_usage','library_upload_begin',
    'library_document_read','library_publish','library_delete','library_list','library_segments','library_purpose',
-   'library_cleanup_candidates','library_cleanup_observe','library_erasure_remaining','library_path_claimed','library_cleanup_touch','library_cleanup_backlog') LOOP
+   'library_cleanup_candidates','library_cleanup_observe','library_erasure_remaining','library_paths_claimed','library_cleanup_touch','library_cleanup_backlog') LOOP
   EXECUTE format('REVOKE ALL ON FUNCTION %s FROM PUBLIC,anon,authenticated,service_role',f);
   IF split_part(f::text,'(',1) NOT IN ('library_actor','library_capacity','library_usage') THEN
    EXECUTE format('GRANT EXECUTE ON FUNCTION %s TO service_role',f); END IF;

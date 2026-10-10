@@ -2,7 +2,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { libraryService } from './service';
-import { cleanupLibrary } from './cleanup';
+import { cleanupLibrary, cleanupOrphanPage } from './cleanup';
 import type { LibraryStorage } from './storage';
 vi.mock('../../middleware/securityChecks',()=>({checkRateLimitAsync:vi.fn()}));
 const a='11111111-1111-4111-8111-111111111111';
@@ -67,4 +67,24 @@ describe('library service boundaries',()=>{
     const result=await libraryService(client,a,storage).begin({requestId:id,filename:'a.png',contentType:'image/png',bytes:8,purpose:'reference'});
     expect(result.upload).toBeNull(); expect(storage.signUpload).not.toHaveBeenCalled();
   });
+});
+
+it('advances a full claimed page with one ownership RPC even when the time budget is exhausted',async()=>{
+  const paths=Array.from({length:100},(_,i)=>`${a}/22222222-2222-4222-8222-${String(i).padStart(12,'0')}/original`);
+  rpc.mockResolvedValue({data:paths});
+  const result=await cleanupOrphanPage(client,storage,{paths,cursor:'next-page'},Date.now()-46000);
+  expect(result.complete).toBe(true);
+  expect(rpc).toHaveBeenCalledTimes(1);
+  expect(rpc).toHaveBeenCalledWith('library_paths_claimed',{paths});
+  expect(storage.remove).not.toHaveBeenCalled();
+});
+
+it('reaches an orphan behind retained objects without 99 sequential ownership calls',async()=>{
+  const paths=Array.from({length:100},(_,i)=>`${a}/22222222-2222-4222-8222-${String(i).padStart(12,'0')}/original`);
+  rpc.mockResolvedValue({data:paths.slice(0,99)});
+  vi.mocked(storage.absent).mockResolvedValueOnce(false).mockResolvedValueOnce(true);
+  const result=await cleanupOrphanPage(client,storage,{paths,cursor:'next-page'},Date.now()-40000);
+  expect(result).toMatchObject({complete:true,orphans:1});
+  expect(rpc).toHaveBeenCalledTimes(1);
+  expect(storage.remove).toHaveBeenCalledWith(paths[99]);
 });
