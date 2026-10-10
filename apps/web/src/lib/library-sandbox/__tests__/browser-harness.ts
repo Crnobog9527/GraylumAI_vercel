@@ -21,7 +21,7 @@ export type Harness = {
   samples: Map<string, Buffer>;
   workerSource: string;
   /** How server A answers the worker bundle request: normally, or like a signed-out visitor / an error page. */
-  workerResponse: 'script' | 'login-redirect' | 'html';
+  workerResponse: 'script' | 'login-redirect' | 'html' | 'stall';
   open(): Promise<Page>;
   close(): Promise<void>;
 };
@@ -61,6 +61,7 @@ export async function startHarness(): Promise<Harness> {
     if (url === '/library-sandbox/docx-worker.js') {
       if (harness.workerResponse === 'login-redirect') return response.writeHead(307, { location: '/login' }).end();
       if (harness.workerResponse === 'html') return send('text/html; charset=utf-8', PAGE);
+      if (harness.workerResponse === 'stall') return;
       return send('text/javascript', docx.code);
     }
     const sample = url.startsWith('/sample/') ? samples.get(decodeURIComponent(url.slice(8))) : undefined;

@@ -85,6 +85,15 @@ describe('extractDocx: text, structure and images', () => {
     expect(result.headings).toEqual([{ level: 1, text: '标题', offset: 5 }]);
   });
 
+  it('treats marker-like characters in headers and footers as text, not as image positions', async () => {
+    const fake = '\uFDD0' + '99999999' + '\uFDD1';
+    const result = await extract(buildDocx({
+      body: `<w:p>${run('正文')}${picture(1)}</w:p>`, header: `页眉${fake}`, footer: `${fake}页脚`, images: [TINY_PNG],
+    }));
+    expect(result.text).toBe('页眉99999999\n正文\n99999999页脚');
+    expect(result.images.map((image) => result.text.slice(0, image.offset))).toEqual(['页眉99999999\n正文']);
+  });
+
   it('numbers contiguous list items and keeps unordered bullets', async () => {
     const level = (format: string) => `<w:lvl w:ilvl="0"><w:numFmt w:val="${format}"/></w:lvl>`;
     const numbering = `<w:abstractNum w:abstractNumId="0">${level('decimal')}</w:abstractNum>`

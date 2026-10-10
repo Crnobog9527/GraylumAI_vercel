@@ -149,6 +149,27 @@ describe('worker bundle loading', () => {
   }, 30_000);
 });
 
+describe('deadline covers loading the bundle', () => {
+  it.each([
+    ['times out', { timeoutMs: 1_000 }],
+    ['is cancelled', { abortAfterMs: 300 }],
+  ])('a stalled bundle request %s within the run budget', async (_name, options) => {
+    harness.samples.set('good:tiny', buildDocx({ body: para('x') }));
+    harness.workerResponse = 'stall';
+    const fresh = await harness.open();
+    try {
+      const outcome = await fresh.evaluate((input) => (window as unknown as {
+        sandboxTest: { extractSample(n: string, o: object): Promise<{ ok: boolean; code?: string; elapsedMs: number }> } })
+        .sandboxTest.extractSample('good:tiny', input), options);
+      expect(outcome).toMatchObject({ ok: false, code: 'SANDBOX_TIMEOUT' });
+      expect(outcome.elapsedMs).toBeLessThan(3_000);
+    } finally {
+      harness.workerResponse = 'script';
+      await fresh.close();
+    }
+  }, 30_000);
+});
+
 describe('normal Word file through the production bundle', () => {
   it('extracts text, headings, table, header, footer, footnote and image bytes; follows no link', async () => {
     const body = [

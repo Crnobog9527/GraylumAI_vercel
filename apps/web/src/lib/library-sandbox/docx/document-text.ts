@@ -98,6 +98,11 @@ class TextBuilder {
     this.append(`${text}\n`);
   }
 
+  /** A line from outside the document tree (page header/footer): marker characters are removed. */
+  externalLine(text: string) {
+    this.line(text.replace(SENTINELS, ''));
+  }
+
   private append(value: string) {
     this.bytes += utf8Length(value);
     if (this.bytes > SANDBOX_LIMITS.maxTextBytes) throw new SandboxError('TEXT_TOO_LARGE');
@@ -114,7 +119,8 @@ class TextBuilder {
     let last = 0;
     for (const match of raw.matchAll(MARKER)) {
       text += raw.slice(last, match.index);
-      imageOffsets[Number(match[1])] = text.length;
+      const index = Number(match[1]);
+      if (index < this.pendingImages.length) imageOffsets[index] = text.length;
       removed.push({ at: match.index, length: match[0].length });
       last = match.index + match[0].length;
     }
@@ -269,10 +275,10 @@ async function readImages(builder: TextBuilder, offsets: number[], warnings: Set
 
 export async function documentText(document: DocxDocument, pageText: HeaderFooterText): Promise<DocxExtraction> {
   const builder = new TextBuilder(document);
-  for (const line of pageText.headers) builder.line(line);
+  for (const line of pageText.headers) builder.externalLine(line);
   builder.blocks(document.children);
   builder.noteLines();
-  for (const line of pageText.footers) builder.line(line);
+  for (const line of pageText.footers) builder.externalLine(line);
   const warnings = new Set<DocxWarning>();
   const { text, headings, imageOffsets } = builder.finish();
   const images = await readImages(builder, imageOffsets, warnings);

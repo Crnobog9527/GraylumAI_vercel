@@ -36,10 +36,12 @@ function base64(bytes: ArrayBuffer): string {
 }
 
 const api = {
-  async extractSample(name: string) {
+  async extractSample(name: string, options: { timeoutMs?: number; abortAfterMs?: number } = {}) {
     const blob = await (await fetch(`/sample/${encodeURIComponent(name)}`)).blob();
+    const controller = new AbortController();
+    if (options.abortAfterMs !== undefined) setTimeout(() => controller.abort(), options.abortAfterMs);
     return measured(async () => {
-      const result = await extractDocxInBrowser(blob);
+      const result = await extractDocxInBrowser(blob, { timeoutMs: options.timeoutMs, signal: controller.signal });
       const images = result.images.map(({ contentType, bytes, offset }) =>
         ({ contentType, offset, byteLength: bytes.byteLength, base64: base64(bytes) }));
       return { ...result, images };
