@@ -3,8 +3,9 @@
 Risk: **high** (erasure/database and preservation of unresolved financial facts).
 Scope: repair the daily executor failure, persist redacted RPC diagnostics, and make
 unresolved financial review visible. No new table, RPC, queue, provider call, refund,
-role grant, environment change, remote migration, or merge. Migration **0203** was
-assigned by the coordinator through the Owner on 2026-10-10.
+role grant, environment change, remote migration, or merge. Migration **0200** was
+reassigned by the coordinator on 2026-10-10 so this repair can ship first.
+The former 0203 allocation is superseded by the latest PR coordination comment.
 
 ## Root cause and evidence
 
@@ -32,7 +33,7 @@ the real library instead. Direct admin SQL without the library did not reproduce
 
 ## Change and recovery
 
-0203 replaces only the temporary scope reset with `TRUNCATE TABLE pg_temp.erasure_scope`.
+0200 replaces only the temporary scope reset with `TRUNCATE TABLE pg_temp.erasure_scope`.
 This clears the connection-private working set, not a persistent user table. It
 keeps safeupdate enabled, preserves the existing ownership predicates and grants,
 and guards the function-source replacement against an unexpected predecessor.
@@ -61,7 +62,7 @@ review list/date were empty. Calling this a free account does not prove zero cos
   evidence establishes cost/terminal outcome. It uses the original run/call and
   pre-deduction; never a new dispatch, replacement identity or duplicate refund.
 - A dispatched call without ID/cost, contradictory evidence or unresolved payment
-  facts remains `billing_pending`. 0203 gives even a fully scrubbed financial-pending
+  facts remains `billing_pending`. 0200 gives even a fully scrubbed financial-pending
   subject `ERASURE_FINANCIAL_PENDING_REVIEW` and the existing 30-day review cadence.
   Daily retries preserve the original date. It is not an automatic write-off date.
 - Independent content cleanup continues. Missing financial facts do not permit
@@ -119,22 +120,23 @@ without this option must not be reported as proof of safeupdate coverage.
 
 ## Handoff
 
-- Done: local root-cause reproduction, minimal 0203 fix, durable diagnostic code,
+- Done: local root-cause reproduction, minimal 0200 fix, durable diagnostic code,
   unknown-finance review/date regression.
 - Validation: full API 5832 PASS / 12 SKIPPED; erasure unit suite 184 PASS;
   actual-safeupdate complete local integration PASS; migration replay 203/203,
   134 historical repeats, unchanged reapply; only the two expected function
   fingerprints changed. API type/lint/size and CI workflow 9 tests / 341 assertions PASS.
-  Local safeguards FAIL/BLOCKED at the missing 0200, 0201, 0202 ledger prerequisite;
-  this is not a passing final delivery. Required remote checks/review are tracked on the PR.
-- Dependencies: 0200 belongs to #766, 0201 to #764, 0202 is reserved by the coordinator.
-  Never add placeholder migrations to bypass the contiguous ledger check.
+  The earlier ledger failure from the superseded 0203 allocation is historical.
+  Renumbering validation and final remote checks/review are tracked on the PR.
+- Order: this repair uses 0200; #766 now uses 0201 and #764 uses 0202.
+  The production baseline has no reserved number and takes the next available number
+  when needed. Never add placeholder migrations to bypass the contiguous ledger check.
   Current #766 does not directly replace either of the two functions changed here;
   it shares `built-fingerprint.json` and changes related erasure guard interactions.
   The later merger must integrate the earlier merged version and rebuild the full
   fingerprint through the standard runner. No manual fingerprint edits.
-- Next: coordinator arranges migration order, exact final-base checks and required
-  Owner approval. This task does not merge or apply 0203 remotely.
+- Next: complete exact final-version checks and review, then coordinator obtains
+  required Owner approval. This task does not merge or apply 0200 remotely.
 - After approved migration and deployment, the next daily run should no longer fail
   at the temp reset. The fresh test subject with complete history and no unresolved
   finance should remove its ticket/object, delete Auth last, and reach `completed`.

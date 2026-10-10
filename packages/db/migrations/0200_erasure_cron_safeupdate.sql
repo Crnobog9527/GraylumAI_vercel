@@ -1,5 +1,5 @@
 -- Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved.
--- Coordinator-assigned 0203: safeupdate-compatible temporary scope reset and financial review.
+-- Coordinator-assigned 0200: safeupdate-compatible temporary scope reset and financial review.
 -- No persistent rows, money, role grants, or provider configuration are changed.
 BEGIN;
 DO $$
