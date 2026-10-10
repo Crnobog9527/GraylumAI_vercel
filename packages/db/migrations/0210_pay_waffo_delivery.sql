@@ -793,12 +793,32 @@ BEGIN
   purchase_closed_at=coalesce(purchase_closed_at,clock_timestamp()),
   method_review_reason='verified_checkout_absent' WHERE id=o.id;
 END $$;
+-- The fresh claim owner calls this only before Session-create was invoked, after the final
+-- local expiry check. It is NOT an absence assertion for a timed-out provider request.
+CREATE OR REPLACE FUNCTION public.pay_waffo_abort_before_dispatch(
+ p_user uuid,p_order uuid,p_merchant text,p_expected timestamptz
+) RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
+DECLARE o payment_orders;
+BEGIN
+ PERFORM pay_waffo_assert_actor(p_user);
+ SELECT * INTO o FROM payment_orders WHERE id=p_order AND user_id=p_user FOR UPDATE;
+ IF o.id IS NULL OR o.payment_mode IS DISTINCT FROM 'test' OR o.payment_channel IS DISTINCT FROM 'stripe'
+  OR o.merchant_namespace IS DISTINCT FROM p_merchant OR o.payment_method NOT IN ('alipay','wechat_pay')
+  OR o.method_dispatched_at IS NULL OR p_expected IS NULL OR o.method_checkout_expires_at IS DISTINCT FROM p_expected
+  OR o.payment_status IS DISTINCT FROM 'unpaid' OR o.fulfilled_at IS NOT NULL
+  OR EXISTS(SELECT 1 FROM payment_provider_refs WHERE order_id=o.id AND object_type IN ('checkout','payment')) THEN
+  RAISE EXCEPTION 'PAY_WAFFO_CLOSE_DENIED'; END IF;
+ IF o.qualification_state='released' AND o.qualification_closed_ref='never_dispatched:'||o.id THEN RETURN; END IF;
+ IF o.qualification_state IS DISTINCT FROM 'reserved' THEN RAISE EXCEPTION 'PAY_WAFFO_CLOSE_DENIED'; END IF;
+ UPDATE payment_orders SET qualification_state='released',qualification_closed_ref='never_dispatched:'||o.id,
+  purchase_closed_at=clock_timestamp(),method_review_reason='checkout_dispatch_window_exhausted' WHERE id=o.id;
+END $$;
 DO $$ DECLARE f record; BEGIN
  FOR f IN SELECT oid::regprocedure sig FROM pg_proc WHERE pronamespace='public'::regnamespace AND proname IN (
   'pay_waffo_assert_actor','pay_waffo_claim_checkout','pay_waffo_bind_checkout','pay_waffo_grant_period',
   'pay_waffo_fulfill_payment','pay_waffo_release_due','pay_waffo_resolve_receipt','pay_waffo_record_offsite',
   'pay_waffo_product_control','pay_waffo_product_control_result','pay_waffo_product_block_guard',
-  'pay_waffo_close_uncreated','pay_waffo_cancel_intent','pay_waffo_cancel_result','pay_waffo_retry_cancel','pay_waffo_renew_subscription','pay_waffo_admit_purchase','pay_waffo_create_transition','pay_waffo_founder_deadline') LOOP
+  'pay_waffo_close_uncreated','pay_waffo_abort_before_dispatch','pay_waffo_cancel_intent','pay_waffo_cancel_result','pay_waffo_retry_cancel','pay_waffo_renew_subscription','pay_waffo_admit_purchase','pay_waffo_create_transition','pay_waffo_founder_deadline') LOOP
   EXECUTE format('REVOKE ALL ON FUNCTION %s FROM PUBLIC,anon,authenticated,service_role',f.sig);
   IF f.sig::text NOT LIKE '%pay_waffo_assert_actor(%' AND f.sig::text NOT LIKE '%pay_waffo_product_block_guard(%' AND f.sig::text NOT LIKE '%pay_waffo_admit_purchase(%' THEN
    EXECUTE format('GRANT EXECUTE ON FUNCTION %s TO service_role',f.sig);

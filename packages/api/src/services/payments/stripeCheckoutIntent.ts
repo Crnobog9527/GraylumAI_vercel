@@ -96,6 +96,8 @@ export async function dispatchStripeCheckoutIntent(input: {
   now?: number;
   createIfMissing?: boolean;
   closeNeverCreated?: () => Promise<void>;
+  // Only the fresh claim owner may prove no Session-create request has been sent.
+  closeBeforeDispatch?: () => Promise<void>;
 }) {
   const { stripe, intent, scope } = input;
   checkoutIdempotencyKey(intent.id);
@@ -138,7 +140,14 @@ export async function dispatchStripeCheckoutIntent(input: {
       }
       const price = await stripe.prices.retrieve(intent.priceId);
       assertStripePurchasePrice({ price, priceId: intent.priceId, snapshot: intent.snapshot, scope, walletMethod: intent.walletMethod });
-      session = await stripe.checkout.sessions.create(intent.request, { idempotencyKey: checkoutIdempotencyKey(intent.id) });
+      if (intent.walletMethod && input.closeBeforeDispatch
+        && intent.request.expires_at! - Math.floor(Date.now() / 1000) < 30 * 60 + 15) {
+        await input.closeBeforeDispatch();
+        return null;
+      }
+      session = await stripe.checkout.sessions.create(intent.request, { idempotencyKey: checkoutIdempotencyKey(intent.id),
+        ...(intent.walletMethod ? { timeout: 10000, maxNetworkRetries: 0 } : {}),
+      });
     }
   }
   if (session.object !== 'checkout.session' || session.livemode !== (scope.mode === 'live')

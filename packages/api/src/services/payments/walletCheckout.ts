@@ -37,6 +37,11 @@ export async function createWalletCheckout(input: {
     intent: { id: order.id, userId, scope, snapshot: order.purchase_snapshot, priceId: price.data.external_id,
       request: claimed.data.request.providerRequest, sessionId: mapped.data?.external_id ?? null,
       walletMethod: purchase.method, recover: !claimed.data.dispatch },
+    closeBeforeDispatch: claimed.data.dispatch ? async () => {
+      const closed = await db.rpc('pay_waffo_abort_before_dispatch', { p_user: userId, p_order: order.id,
+        p_merchant: scope.merchant, p_expected: new Date(claimed.data.request.providerRequest.expires_at * 1000).toISOString() });
+      if (closed.error) throw new Error('PAY_WAFFO_CHECKOUT_UNAVAILABLE');
+    } : undefined,
     closeNeverCreated: async () => {
       const closed = await db.rpc('pay_waffo_close_uncreated', { p_user: userId, p_order: order.id, p_merchant: scope.merchant });
       if (closed.error) throw new Error('PAY_WAFFO_CHECKOUT_UNAVAILABLE');

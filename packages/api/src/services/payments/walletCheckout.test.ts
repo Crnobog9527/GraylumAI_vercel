@@ -31,7 +31,7 @@ describe('durable wallet checkout', () => {
     const f = fixture(false); const before = Math.floor(Date.now() / 1000); await createWalletCheckout(f.input);
     expect(mocks.build.mock.calls[0]?.[0].expiresAt).toBeLessThanOrEqual(before + 31 * 60);
     expect(mocks.dispatch).toHaveBeenCalledWith(expect.objectContaining({ createIfMissing: false,
-      intent: expect.objectContaining({ id, recover: true, walletMethod: 'alipay', request: { original: true } }) }));
+      closeBeforeDispatch: undefined, intent: expect.objectContaining({ id, recover: true, walletMethod: 'alipay', request: { original: true } }) }));
   });
   it('retains Stripe minimum expiry after a delayed database claim', async () => {
     vi.useFakeTimers(); vi.setSystemTime(new Date('2028-01-01T00:00:00Z'));
@@ -49,6 +49,14 @@ describe('durable wallet checkout', () => {
       });
       await createWalletCheckout(f.input);
     } finally { vi.useRealTimers(); }
+  });
+  it('closes the original claim when the adapter proves it stopped before Session creation', async () => {
+    const f = fixture(); const expires = Math.floor(Date.now() / 1000) + 31 * 60;
+    f.rpc.mockResolvedValueOnce({ data: { dispatch: true, request: { providerRequest: { expires_at: expires } } }, error: null });
+    mocks.dispatch.mockImplementation(async (input) => { await input.closeBeforeDispatch(); return null; });
+    expect((await createWalletCheckout(f.input)).state).toBe('recovery_required');
+    expect(f.rpc).toHaveBeenCalledWith('pay_waffo_abort_before_dispatch', { p_user: id, p_order: id,
+      p_merchant: 'fixture', p_expected: new Date(expires * 1000).toISOString() });
   });
   it('does not call the provider after claim failure or live scope', async () => {
     const f = fixture(); f.rpc.mockResolvedValue({ error: { message: 'unavailable' }, data: null });

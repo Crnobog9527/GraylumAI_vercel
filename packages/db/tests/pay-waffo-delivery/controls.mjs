@@ -18,6 +18,13 @@ export async function controlCases({admin,service,connect}) {
  await close();await close();assert.notEqual((await purchase()).id,absent.id);
  assert.match((await admin.query('SELECT qualification_closed_ref FROM payment_orders WHERE id=$1',[absent.id])).rows[0].qualification_closed_ref,
   /^verified_absent:/);
+ const retryOrder=await purchase(),retryExpiry=new Date(Date.now()+30*60000);
+ await service.query("SELECT pay_waffo_claim_checkout($1,$2,'fixture',$3,$4)",
+  [absentUser,retryOrder.id,{orderId:retryOrder.id,userId:absentUser,method:'alipay',merchant:'fixture',mode:'test',providerRequest:{fixture:true}},retryExpiry]);
+ const abort=(user=absentUser,expiry=retryExpiry)=>service.query("SELECT pay_waffo_abort_before_dispatch($1,$2,'fixture',$3)",[user,retryOrder.id,expiry]);
+ await assert.rejects(()=>abort(other),/CLOSE_DENIED/);
+ await assert.rejects(()=>abort(absentUser,new Date(retryExpiry.getTime()+1000)),/CLOSE_DENIED/);
+ await abort();await abort();assert.notEqual((await purchase()).id,retryOrder.id,'no provider call: a new checkout is immediately allowed');
  for(let i=0;i<5;i++) {
   const receipt=(await service.query("SELECT pay_waffo_receive_event('fixture','test','subscription.payment_succeeded',$1,$2,$3) id",
    [`offsite-${i}`,'a'.repeat(64),{paymentId:`PAY_offsite${i}`,...(i%2?{}:{subscriptionId:`ORD_offsite${i}`}),orderId:`ORD_offsite${i}`}])).rows[0].id;
@@ -57,6 +64,6 @@ export async function controlCases({admin,service,connect}) {
  await service.query('SELECT pay_waffo_cancel_result($1,$2,$3,$4)',[sub.id,'fixture',original.providerId,'canceling']);
  const result=(await admin.query('SELECT cancel_at_period_end,credit_release_terminated_at FROM user_subscriptions WHERE id=$1',[sub.id])).rows[0];
  assert.equal(result.cancel_at_period_end,'true');assert.equal(result.credit_release_terminated_at,null);
- return ['absence-grace-denied','verified-absence-releases-once','offsite-no-entitlement','offsite-dedup-counter','offsite-threshold-alert','admin-only-unpublish','unpublish-original-intent-recovery',
+ return ['absence-grace-denied','pre-dispatch-abort-scope-cas','pre-dispatch-abort-releases-once','verified-absence-releases-once','offsite-no-entitlement','offsite-dedup-counter','offsite-threshold-alert','admin-only-unpublish','unpublish-original-intent-recovery',
   'local-purchase-block','restore-outage-history','cancel-cross-user-denied','cancel-once-dispatch','cancel-retry-lease','cancel-retry-concurrent-cas','cancel-retry-cross-user','cancel-wrong-scope-denied','cancel-preserves-paid-grants'];
 }

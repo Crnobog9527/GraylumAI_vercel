@@ -26,6 +26,36 @@ function fixture() {
 }
 
 describe('durable Stripe checkout dispatch', () => {
+  it.each([8, 45, 60, 90, 299])('checks the minimum expiry after %s seconds of pre-create work', async (delay) => {
+    vi.useFakeTimers(); vi.setSystemTime(new Date(1000 * 1000));
+    try {
+      const t = fixture(); t.args.intent.walletMethod = 'alipay';
+      t.args.intent.request.payment_method_types = ['alipay']; t.args.intent.request.expires_at = 1000 + 31 * 60;
+      const price = await t.prices.retrieve();
+      t.prices.retrieve.mockImplementation(async () => { vi.setSystemTime(new Date((1000 + delay) * 1000)); return price; });
+      const closeBeforeDispatch = vi.fn().mockResolvedValue(undefined);
+      const result = await dispatchStripeCheckoutIntent({ ...t.args, createIfMissing: true, closeBeforeDispatch });
+      if (delay > 45) {
+        expect(result).toBeNull(); expect(closeBeforeDispatch).toHaveBeenCalledTimes(1);
+        expect(t.sessions.create).not.toHaveBeenCalled(); expect(t.persistSession).not.toHaveBeenCalled();
+      } else {
+        expect(result).toEqual(t.session); expect(closeBeforeDispatch).not.toHaveBeenCalled();
+        expect(t.sessions.create).toHaveBeenCalledWith(t.args.intent.request,
+          { idempotencyKey: `pay-common:checkout:${orderId}`, timeout: 10000, maxNetworkRetries: 0 });
+      }
+    } finally { vi.useRealTimers(); }
+  });
+  it('never treats a Session-create timeout as a pre-dispatch abort', async () => {
+    vi.useFakeTimers(); vi.setSystemTime(new Date(1000 * 1000));
+    try {
+      const t = fixture(); t.args.intent.walletMethod = 'alipay';
+      t.args.intent.request.payment_method_types = ['alipay']; t.args.intent.request.expires_at = 1000 + 31 * 60;
+      t.sessions.create.mockRejectedValue(new Error('network timeout'));
+      const closeBeforeDispatch = vi.fn();
+      await expect(dispatchStripeCheckoutIntent({ ...t.args, createIfMissing: true, closeBeforeDispatch })).rejects.toThrow('network timeout');
+      expect(t.sessions.create).toHaveBeenCalledTimes(1); expect(closeBeforeDispatch).not.toHaveBeenCalled();
+    } finally { vi.useRealTimers(); }
+  });
   it('checks provider list price before dispatch and reuses the exact persisted request/key after a write failure', async () => {
     const t = fixture();
     t.persistSession.mockRejectedValueOnce(new Error('database unavailable'));
