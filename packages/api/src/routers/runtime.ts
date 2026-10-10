@@ -1,4 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import {contentVisibilityFence} from '../services/accountErasure/content';
 import {reportEnabled,reportLocate,reportService} from '../services/report/service';
 import {reportStart} from '../services/report/contract';
 import {readNativeRuntimeView} from '../services/runtime/nativeView';
@@ -126,7 +127,8 @@ export const runtimeRouter=router({
  executeStream:executionProcedure.mutation(async function*(options){
   // The route returns before this stream ends; release this stream's reference.
   const timing=options.ctx.runtimeBudget?.timing;
-  try{yield* streamOriginalExecution(onProgress=>executeOriginal(options,onProgress),timing,'runtime.executeStream',undefined,options.input.textProtocol);}
+  try{yield* streamOriginalExecution(onProgress=>executeOriginal(options,onProgress),timing,'runtime.executeStream',undefined,options.input.textProtocol,
+   contentVisibilityFence(options.ctx.supabaseAdmin!,options.ctx.user.id,options.input.executionId));}
   finally{timing?.release();}
  }),
  view:maintenanceProcedure.input(z.object({sessionId:z.string().uuid()}).strict()).query(async({ctx,input})=>{

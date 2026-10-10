@@ -1,3 +1,4 @@
+import { throwIfContentErased } from '../accountErasure/content';
 import { parseSearchSurcharge } from '../searchPricing';
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import type { SupabaseClient } from '@supabase/supabase-js';
@@ -39,6 +40,7 @@ export function workbenchSearch(userClient:SupabaseClient,privateClient:Supabase
  async function resolve(input:Input,id:string){
   if(await actor()!==id)throw new Error('ARTIFACT_DENIED');
   const fixed=await privateClient!.rpc('artifact_query',{p_actor_id:id,p_project_id:input.projectId,p_round_id:input.roundId,p_action:'resolve'});
+  throwIfContentErased(fixed.error);
   if(fixed.error)throw new Error('ARTIFACT_DENIED');
   const binding=z.object({moduleId:uuid,skillId:uuid,revisionId:uuid,workflow:workflowSchema}).parse(fixed.data);
   if(!binding.workflow.steps.some(step=>step.id===input.stepId))throw new Error('RESEARCH_SCOPE_UNAVAILABLE');
@@ -47,6 +49,7 @@ export function workbenchSearch(userClient:SupabaseClient,privateClient:Supabase
  async function admission(input:Input,id:string){
   const binding=await resolve(input,id);
   const read=await privateClient!.rpc('artifact_query',{p_actor_id:id,p_project_id:input.projectId,p_round_id:input.roundId,p_action:'read'});
+  throwIfContentErased(read.error);
   if(read.error)throw new Error('ARTIFACT_DENIED');
   const snapshot=snapshotSchema.parse(read.data),step=binding.workflow.steps.find(s=>s.id===input.stepId);
   if(!step||snapshot.state!=='draft')throw new Error('RESEARCH_SCOPE_UNAVAILABLE');
@@ -62,6 +65,7 @@ export function workbenchSearch(userClient:SupabaseClient,privateClient:Supabase
    const store=databaseBilledResearchStore(privateClient!,id);
    const identityHash=researchIdentity(tavilyCapabilities[0],parameters(input.query),{projectId:input.projectId,roundId:input.roundId,stepId:input.stepId});
    const lookup=await privateClient!.rpc('research_lookup',{p_actor_id:id,p_plan_id:input.requestId,p_operation_id:input.requestId});
+   throwIfContentErased(lookup.error);
    if(lookup.error)throw new Error('RESEARCH_STATE_UNAVAILABLE');
    if(lookup.data&&lookup.data.identityHash!==identityHash)throw new Error('RESEARCH_IDENTITY_CONFLICT');
    if(!lookup.data)await checkRateLimitAsync(id,'ai');
@@ -80,6 +84,7 @@ export function workbenchSearch(userClient:SupabaseClient,privateClient:Supabase
    // Lookup never creates an intent. Only an exact existing terminal request
    // may recover without consuming the new-provider-call rate allowance.
    const lookup=await privateClient!.rpc('research_lookup',{p_actor_id:id,p_plan_id:input.requestId,p_operation_id:input.requestId});
+   throwIfContentErased(lookup.error);
    if(lookup.error)throw new Error('RESEARCH_STATE_UNAVAILABLE');
    const existing=lookup.data as OperationRecord|null;
    if(existing&&existing.identityHash!==identityHash)throw new Error('RESEARCH_IDENTITY_CONFLICT');

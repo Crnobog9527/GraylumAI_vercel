@@ -178,7 +178,7 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
       if(!dispatch.dispatched){if(isPayg)pause('waiting_resume');throw new Error('RUNTIME_RESPONSE_PENDING');}
       // The receipt was stored as a financial projection only. Never read back
       // provider content or hand it to the SDK, Session or stream.
-      if(dispatch.accountClosed)closed();
+      if(dispatch.accountClosed||dispatch.contentDeleted)closed();
       if(dispatch.pendingReceipt){
        // Inspect the original call first; only confirmed missing receipts permit bounded replay.
        const pending=dispatch.pendingReceipt;
@@ -189,7 +189,7 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
         let saved;
         try{saved=await billing.recordReceipt(pending.runId,pending.callId,pending.evidence);}
         catch{if(attempt===1)throw new Error('RUNTIME_RECEIPT_STORAGE_UNAVAILABLE');continue;}
-        if(saved.accountClosed)closed();
+        if(saved.accountClosed||saved.contentDeleted)closed();
         break;
        }
       }
