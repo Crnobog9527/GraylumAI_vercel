@@ -5,7 +5,7 @@ const snapshot = { version: 1, item_type: 'membership_plan', item_id: '00000000-
   item_updated_at: '2026-10-01T00:00:00.000Z', billing_cycle: 'monthly', currency: 'usd', unit: 'major',
   price: '49.00', discount: '0.00', tax_behavior: 'inclusive', credits: 8970, bonus_credits: 0 };
 const input = { order: { id: '00000000-0000-4000-8000-000000000002', user_id: '00000000-0000-4000-8000-000000000003',
-  payment_mode: 'test' as const, payment_channel: 'waffo', payment_method: 'card', offer_kind: 'gold_first30', purchase_snapshot: snapshot },
+  merchant_namespace: 'fixture', payment_mode: 'test' as const, payment_channel: 'waffo', payment_method: 'card', offer_kind: 'gold_first30', purchase_snapshot: snapshot },
   productId: 'PROD_test', merchantNamespace: 'fixture', appUrl: 'https://app.example.invalid' };
 const now = Date.parse('2026-10-11T00:00:00Z');
 const validation = { createdAfter: now, latestExpiry: now + 1800000, allowedCheckoutOrigin: 'https://checkout.waffo.ai' };
@@ -23,6 +23,9 @@ describe('Waffo checkout intent', () => {
   it('blocks live and changed founder prices', () => {
     expect(() => buildWaffoCheckoutRequest({ ...input, order: { ...input.order, payment_mode: 'live' } })).toThrow();
     expect(() => buildWaffoCheckoutRequest({ ...input, order: { ...input.order, offer_kind: 'founder' } })).toThrow();
+  });
+  it('rejects a checkout client from a different merchant before constructing a request', () => {
+    expect(() => buildWaffoCheckoutRequest({ ...input, merchantNamespace: 'other-account' })).toThrow('PAY_WAFFO_CHECKOUT_INVALID');
   });
   it('rejects unbounded expiry and external redirect', () => {
     expect(validateWaffoCheckoutSession(session, validation)).toEqual(session);

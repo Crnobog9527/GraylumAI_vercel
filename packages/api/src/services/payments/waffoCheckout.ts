@@ -10,7 +10,7 @@ const sessionSchema = z.object({
 });
 export type WaffoCheckoutOrder = {
   id: string; user_id: string; payment_mode: 'test' | 'live'; payment_channel: string;
-  payment_method: string; offer_kind: string; purchase_snapshot: unknown;
+  merchant_namespace: string; payment_method: string; offer_kind: string; purchase_snapshot: unknown;
 };
 
 export function buildWaffoCheckoutRequest(input: {
@@ -19,7 +19,8 @@ export function buildWaffoCheckoutRequest(input: {
   const { order } = input;
   const snapshot = freezePurchaseSnapshot(order.purchase_snapshot);
   const origin = new URL(input.appUrl);
-  if (order.payment_mode !== 'test' || order.payment_channel !== 'waffo' || order.payment_method !== 'card'
+  if (order.merchant_namespace !== input.merchantNamespace || order.payment_mode !== 'test'
+    || order.payment_channel !== 'waffo' || order.payment_method !== 'card'
     || snapshot.item_type !== 'membership_plan' || snapshot.currency !== 'usd'
     || origin.protocol !== 'https:' || origin.username || origin.password
     || !/^PROD_[A-Za-z0-9]+$/.test(input.productId) || !z.string().uuid().safeParse(order.id).success
