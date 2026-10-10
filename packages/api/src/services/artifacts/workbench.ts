@@ -1,4 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import {throwIfContentErased} from '../accountErasure/content';
 import { z } from "zod";
 import { DatabaseReadError } from "../../lib/databaseReadError";
 import type { SupabaseClient } from "@supabase/supabase-js";
@@ -92,6 +93,7 @@ export function workbenchService(
         p_round_id: roundId ?? null,
       })
       .abortSignal(AbortSignal.timeout(10000));
+    throwIfContentErased(error);
     if (error)
       throw new DatabaseReadError(
         error.code === "42501" ? "ARTIFACT_DENIED" : "ARTIFACT_UNAVAILABLE", error.code,

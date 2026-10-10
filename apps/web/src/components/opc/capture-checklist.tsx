@@ -11,7 +11,7 @@ import {
 
 type Step = { id: string; title: string };
 export type ConfirmationState = "none" | "valid" | "malformed";
-export type ResolveAction = "accept" | "ignore";
+export type ResolveAction = "accept" | "ignore" | "dismiss";
 
 export type CaptureChecklistProps = {
   steps: readonly Step[];
@@ -75,6 +75,23 @@ function SuggestionBox({ props, step, fieldId, current, suggestion }: {
   );
 }
 
+/** The mentor withdrew a pending update after the user rejected it; the field's own content never changed. */
+function WithdrawnBox({ props, step, fieldId, withdrawn }: {
+  props: CaptureChecklistProps; step: Step; fieldId: string; withdrawn: CaptureSuggestion;
+}) {
+  const busy = props.locked || !props.editable || props.resolving === step.id + ":" + fieldId;
+  return (
+    <div className={styles.update} data-withdrawn role="group" aria-label="导师已撤回建议">
+      <p className={styles.updateTitle}>导师已撤回建议</p>
+      <p className={styles.withdrawnValue}>{withdrawn.value}</p>
+      <p className={styles.note}>你在对话里否定了这条建议，正式内容没有改动。</p>
+      <div className={styles.updateActions}>
+        <Button variant="outline" disabled={busy} onClick={() => props.onResolve(step.id, fieldId, withdrawn, "dismiss")}>知道了</Button>
+      </div>
+    </div>
+  );
+}
+
 function StepFields({ props, step }: { props: CaptureChecklistProps; step: Step }) {
   const info = props.information[step.id];
   const edits = props.edits[step.id];
@@ -106,6 +123,7 @@ function StepFields({ props, step }: { props: CaptureChecklistProps; step: Step 
               onCompositionEnd={() => props.onComposition(step.id, false)}
               onChange={event => props.onEdit(step.id, field.id, event.target.value)}/>
             {meta.suggestion && <SuggestionBox props={props} step={step} fieldId={field.id} current={value} suggestion={meta.suggestion}/>}
+            {!meta.suggestion && meta.withdrawn && <WithdrawnBox props={props} step={step} fieldId={field.id} withdrawn={meta.withdrawn}/>}
           </div>
         );
       })}

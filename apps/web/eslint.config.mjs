@@ -14,6 +14,7 @@ export default tseslint.config(
       "test-results/**",
       "playwright-report/**",
       "**/*.d.ts",
+      "public/library-sandbox/**",
     ],
   },
   {

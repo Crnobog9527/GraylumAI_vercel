@@ -1,4 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import {throwIfContentErased} from '../accountErasure/content';
 import { TRPCError } from '@trpc/server';
 import { DatabaseReadError } from '../../lib/databaseReadError';
 
@@ -10,6 +11,7 @@ export function throwIfContentBindingRefused(error: { code?: string; message?: s
 }
 
 export function throwOpcRpcError(error: { code?: string; message: string }): never {
+  throwIfContentErased(error);
   throwIfContentBindingRefused(error);
   // Retain the other bounded business codes used by existing request recovery.
   if (/^(?:OPC|RUNTIME)_[A-Z_]+$/.test(error.message)) throw new Error(error.message);

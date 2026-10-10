@@ -5,6 +5,10 @@ const configuration = '计费配置待处理，暂时无法继续，请稍后重
 const conflict = '当前任务状态已变化，暂时无法继续，请刷新后查看原任务。';
 const denied = '当前任务暂时无法继续，请检查账号状态或联系管理员。';
 const notices: Readonly<Record<string, string>> = {
+  RUNTIME_NEW_CALLS_STOPPED: 'AI 服务已暂停新调用，请稍后继续。',
+  RUNTIME_USER_DAILY_USD_LIMIT: '今日使用额度已达上限，请在下一个 UTC 日继续。',
+  RUNTIME_SITE_DAILY_USD_LIMIT: '今日全站费用已达上限，暂时停止新调用。',
+  RUNTIME_STOP_LOSS_CONFIG_INVALID: '止损配置暂不可用，新的收费调用已暂停。',
   BILL2_START_THRESHOLD_UNCONFIGURED: configuration,
   BILL2_PAYG_QUOTE_INVALID: configuration,
   BILL2_PAYG_BOUND_MISMATCH: configuration,
@@ -40,4 +44,12 @@ export function billingClaimNotice(error: unknown): string | undefined {
 export function withClaimNotice<T extends { state: string; unavailable?: unknown; notice?: string }>(result: T): T & { notice?: string } {
   if (result.notice || result.unavailable || result.state !== 'waiting_credits') return result;
   return { ...result, notice: '余额不足，任务已暂停，请补充积分后继续。' };
+}
+
+export function claimNoticeFields(notice: string | undefined) {
+  if (!notice) return {};
+  const codes = ['RUNTIME_NEW_CALLS_STOPPED', 'RUNTIME_USER_DAILY_USD_LIMIT',
+    'RUNTIME_SITE_DAILY_USD_LIMIT', 'RUNTIME_STOP_LOSS_CONFIG_INVALID'] as const;
+  const code = codes.find(value => notices[value] === notice);
+  return { notice, ...(code ? { code } : {}) };
 }

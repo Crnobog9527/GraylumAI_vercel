@@ -20,6 +20,9 @@
 # production
 /build
 
+# generated library sandbox worker bundles (scripts/build-library-sandbox.mjs)
+/public/library-sandbox/
+
 # misc
 .DS_Store
 *.pem

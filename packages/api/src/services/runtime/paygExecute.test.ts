@@ -177,3 +177,14 @@ it('unknown claim errors never become public notices', async () => {
   expect(JSON.stringify(result)).not.toContain('private SQL');
   expect(mock.billing.dispatchOnce).not.toHaveBeenCalled();
 });
+
+it.each(['RUNTIME_NEW_CALLS_STOPPED', 'RUNTIME_USER_DAILY_USD_LIMIT', 'RUNTIME_SITE_DAILY_USD_LIMIT'])(
+  'returns stable stop-loss code through SDK wrapping: %s', async reason => {
+    const f = fixture(); f.fund();
+    const { BillingClaimRejection } = await import('../bill2/claimFailure');
+    mock.billing.claimPaygCall.mockRejectedValue(new BillingClaimRejection(reason));
+    const result = await runtimeExecutor(f.options).execute(id);
+    expect(result).toMatchObject({ code: reason });
+    expect(result).toMatchObject({ notice: expect.stringMatching(/[\u4e00-\u9fff]/) });
+    expect(mock.billing.dispatchOnce).not.toHaveBeenCalled();
+  });

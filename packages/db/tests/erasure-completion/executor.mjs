@@ -4,8 +4,10 @@ import {randomUUID} from 'node:crypto';
 import {transport} from '../monthly-refund/adapter.mjs';
 import {syntheticSdk} from '../pay-erasure-integration/sdk.mjs';
 import {recoverErasureClaim} from '../../../api/scripts/erasure-recovery.mjs';
-export async function runExecutor({db,Client,connectionString,require,runAccountErasureExecutor,report}) {
- const service=new Client({connectionString});await service.connect();await service.query('SET ROLE service_role');
+export async function runExecutor({db,Client,connectionString,require,runAccountErasureExecutor,report,safeupdate=false}) {
+ const service=new Client({connectionString});await service.connect();
+ if(safeupdate)await service.query("LOAD 'safeupdate'");
+ await service.query('SET ROLE service_role');
  const base=transport(service);
  const fixture=async()=>{
   const actor=randomUUID(),request=randomUUID(),ticket=randomUUID();
@@ -31,6 +33,16 @@ export async function runExecutor({db,Client,connectionString,require,runAccount
   await db.query("insert into ticket_replies(ticket_id,user_id,content,attachments) values($1,$2,'synthetic',$3),($1,null,'system','[]')",
    [first.ticket,admin,JSON.stringify([admin+'/reply.png'])]);
   first.sdk.objects.add(admin+'/reply.png');await first.close();
+  if(safeupdate){
+   await service.query('CREATE TEMP TABLE erasure_safeupdate_probe(id integer)');
+   await assert.rejects(service.query('DELETE FROM erasure_safeupdate_probe'),error=>
+    error.code==='21000' && error.message==='DELETE requires a WHERE clause');
+   await service.query('DROP TABLE erasure_safeupdate_probe');
+   // Use a fresh transaction, as the real PostgREST worker does after confirmation.
+   // Calling the RPC directly keeps its SQLSTATE/context visible on regression failure.
+   await service.query('select account_erasure_scrub_content($1)',[first.actor]);
+   report.checks.push('safeupdate enabled: production scrub_content accepts fresh RPC transaction');
+  }
   const done=await runAccountErasureExecutor(first.client);
   assert.equal(done.completed,1,JSON.stringify(done));assert.equal(done.failed,0);
   assert.equal((await first.row()).stage,'completed');assert.equal(first.sdk.objects.size,0);

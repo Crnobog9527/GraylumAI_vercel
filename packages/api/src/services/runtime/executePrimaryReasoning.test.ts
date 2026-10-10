@@ -39,7 +39,8 @@ it.each(['report', 'mentor', 'step', 'organizer'].flatMap(kind =>
       return 'unreachable';
     });
     const result = await runtimeExecutor({ database, actor: async () => id, callGate: gate, endpoint: 'http://127.0.0.1:9' }).execute(id);
-    expect(result).toEqual({ state: 'cancelled', unavailable: wire === 'low' ? 'paused' : 'preflight' });
+    expect(result).toEqual({ state: 'cancelled', unavailable: wire === 'low' ? 'paused' : 'preflight',
+      ...(wire === 'low' ? { code: 'RUNTIME_NEW_CALLS_STOPPED' } : {}) });
     if (wire === 'low') expect(gate).toHaveBeenCalledExactlyOnceWith(id, 1, 'bill2.v1');
     else expect(gate).not.toHaveBeenCalled();
     expect(database.rpc.mock.calls.some(([name]) => name.startsWith('bill2_'))).toBe(false);

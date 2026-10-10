@@ -1,4 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import { throwIfContentErased } from "../accountErasure/content";
 import { z } from "zod";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { isEmailVerified } from "../../lib/auth";
@@ -70,6 +71,7 @@ export function skillChatService(
         p_payload: payload,
       })
       .abortSignal(AbortSignal.timeout(10000));
+    throwIfContentErased(result.error);
     if (result.error)
       throw new Error(
         result.error.code === "42501"

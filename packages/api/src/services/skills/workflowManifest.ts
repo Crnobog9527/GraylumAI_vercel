@@ -14,6 +14,7 @@ const informationSchema = z.object({
 const manifestSchema = z.object({
   kind: z.enum(['document','social']),
   reportGeneration: reportManifest.optional(),
+  organizerTemplate: path.optional(),
   planResources: z.array(path).min(1).max(64).optional(),
   steps: z.array(z.object({
     title: label,
