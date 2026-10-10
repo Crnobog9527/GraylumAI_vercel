@@ -48,4 +48,18 @@ describe("resolveCaptureUpdate", () => {
     const unreadable = { ...io(shown).io, refetch: async () => ({ error: new Error("x") }) };
     expect(await resolveCaptureUpdate(unreadable, "goal", "goal", shown, "accept")).toBe(RESOLVE_FAILED_NOTICE);
   });
+  it("dismisses exactly the withdrawn record the user saw, never a pending update", async () => {
+    const read = (meta: Record<string, unknown>) => {
+      const t = io(undefined);
+      const data = { information: { goal: { schema: [{ id: "goal", title: "目标", required: true }], meta: { goal: meta } } },
+        snapshot: { steps: { goal: { version: 7 } } } };
+      return { ...t, io: { ...t.io, refetch: async () => ({ data }) } };
+    };
+    const ok = read({ source: "user", withdrawnSuggestion: { ...shown, withdrawnBy: "e2" } });
+    expect(await resolveCaptureUpdate(ok.io, "goal", "goal", shown, "dismiss")).toBeNull();
+    expect(ok.resolve.mock.calls[0]![0]).toMatchObject({ action: "dismiss", executionId: shown.executionId, hash: "h1" });
+    const pendingOnly = read({ source: "user", suggestion: shown });
+    expect(await resolveCaptureUpdate(pendingOnly.io, "goal", "goal", shown, "dismiss")).toBe(RESOLVE_STALE_NOTICE);
+    expect(pendingOnly.resolve).not.toHaveBeenCalled();
+  });
 });
