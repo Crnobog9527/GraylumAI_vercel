@@ -29,9 +29,26 @@ describe('durable wallet checkout', () => {
   });
   it('dispatches only after persistent claim and recovers the frozen request on retry', async () => {
     const f = fixture(false); const before = Math.floor(Date.now() / 1000); await createWalletCheckout(f.input);
-    expect(mocks.build.mock.calls[0]?.[0].expiresAt).toBeLessThanOrEqual(before + 30 * 60);
+    expect(mocks.build.mock.calls[0]?.[0].expiresAt).toBeLessThanOrEqual(before + 31 * 60);
     expect(mocks.dispatch).toHaveBeenCalledWith(expect.objectContaining({ createIfMissing: false,
       intent: expect.objectContaining({ id, recover: true, walletMethod: 'alipay', request: { original: true } }) }));
+  });
+  it('retains Stripe minimum expiry after a delayed database claim', async () => {
+    vi.useFakeTimers(); vi.setSystemTime(new Date('2028-01-01T00:00:00Z'));
+    try {
+      const f = fixture();
+      mocks.build.mockImplementation((input) => ({ expires_at: input.expiresAt }));
+      f.rpc.mockImplementation(async (_name, args) => {
+        vi.setSystemTime(new Date(Date.now() + 8000));
+        return { data: { dispatch: true, request: args.p_request }, error: null };
+      });
+      mocks.dispatch.mockImplementation(async ({ intent }) => {
+        expect(intent.request.expires_at - Math.floor(Date.now() / 1000)).toBe(31 * 60 - 8);
+        expect(intent.request.expires_at - Math.floor(Date.now() / 1000)).toBeGreaterThanOrEqual(30 * 60);
+        return { id: 'cs_1', status: 'open', url: 'https://checkout.stripe.com/c/pay/test' };
+      });
+      await createWalletCheckout(f.input);
+    } finally { vi.useRealTimers(); }
   });
   it('does not call the provider after claim failure or live scope', async () => {
     const f = fixture(); f.rpc.mockResolvedValue({ error: { message: 'unavailable' }, data: null });

@@ -26,7 +26,7 @@ export async function cancelWaffoMembership(db: Db, provider: WaffoTestOperation
   // A timeout leaves the intent intact. Recover the original subscription before any conditional retry.
   let observed = await (intent.dispatch ? provider.cancelSubscription(intent.providerId) : provider.readSubscription(intent.providerId));
   if (observed.orderId !== intent.providerId) throw new Error('PAY_WAFFO_OPERATION_SCOPE');
-  if (!intent.dispatch && observed.status === 'active' && intent.dispatchedAt) {
+  if (!intent.dispatch && ['active', 'pending', 'past_due'].includes(observed.status) && intent.dispatchedAt) {
     const retry = await db.rpc('pay_waffo_retry_cancel', { p_user: userId, p_subscription: intent.subscriptionId,
       p_merchant: intent.merchant, p_provider: intent.providerId, p_expected: intent.dispatchedAt });
     if (retry.error) throw new Error('PAY_WAFFO_CANCEL_UNAVAILABLE');

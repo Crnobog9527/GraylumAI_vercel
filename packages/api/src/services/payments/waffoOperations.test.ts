@@ -20,9 +20,9 @@ describe('test-only Waffo operations', () => {
     expect(api.cancelSubscription).toHaveBeenCalledTimes(1);
     expect(api.readSubscription).toHaveBeenCalledWith('ORD_original');
   });
-  it('re-dispatches once only after an active read and a successful database CAS', async () => {
+  it.each(['active', 'pending', 'past_due'])('re-dispatches once only after a cancellable %s read and database CAS', async (status) => {
     const api = provider();
-    api.readSubscription.mockResolvedValue({ orderId: 'ORD_original', status: 'active' });
+    api.readSubscription.mockResolvedValue({ orderId: 'ORD_original', status });
     api.cancelSubscription.mockResolvedValue({ orderId: 'ORD_original', status: 'canceling' });
     const intent = { subscriptionId: sub, providerId: 'ORD_original', merchant: 'fixture', mode: 'test',
       dispatch: false, dispatchedAt: '2026-01-01T00:00:00Z' };

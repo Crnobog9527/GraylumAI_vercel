@@ -29,15 +29,15 @@ export async function upgradeCases({admin,service}) {
  await admin.query('UPDATE user_subscriptions SET method_observed_at=now() WHERE id=$1',[initial.subscriptionId]);
  await admin.query('BEGIN');
  try {
-  await admin.query("UPDATE user_subscriptions SET current_period_end=now()+interval '48 hours 29 minutes' WHERE id=$1",[initial.subscriptionId]);
+  await admin.query("UPDATE user_subscriptions SET current_period_end=now()+interval '48 hours 30 minutes' WHERE id=$1",[initial.subscriptionId]);
   await admin.query('SET LOCAL ROLE service_role');
   await assert.rejects(()=>upgrade(user,admin),/UPGRADE_WAIT/);
  } finally {await admin.query('ROLLBACK');}
  const fresh=await upgrade();
  const request={orderId:fresh.id,userId:user,method:'card',merchant:'fixture',mode:'test',providerRequest:{fixture:true}};
- await assert.rejects(()=>service.query("SELECT pay_waffo_claim_checkout($1,$2,'fixture',$3,now()+interval '31 minutes')",
+ await assert.rejects(()=>service.query("SELECT pay_waffo_claim_checkout($1,$2,'fixture',$3,now()+interval '32 minutes')",
   [user,fresh.id,request]),/UPGRADE_WAIT/);
- await service.query("SELECT pay_waffo_claim_checkout($1,$2,'fixture',$3,now()+interval '30 minutes')",[user,fresh.id,request]);
+ await service.query("SELECT pay_waffo_claim_checkout($1,$2,'fixture',$3,now()+interval '31 minutes')",[user,fresh.id,request]);
  assert.ok(fresh.method_upgrade_charge_at,'next charge is frozen independently of moving subscription periods');
 
  // Historical admitted fixture: time passed before an asynchronous payment settled.
@@ -67,6 +67,6 @@ export async function upgradeCases({admin,service}) {
  assert.equal((await admin.query('SELECT credits,membership_level FROM profiles WHERE id=$1',[user])).rows[0].credits,12450);
  const cancel=(await service.query('SELECT pay_waffo_cancel_intent($1,$2) v',[user,initial.subscriptionId])).rows[0].v;
  assert.equal(cancel.dispatch,true,'confirmed upgrade queues first cancellation instead of swallowing its dispatch');
- return ['upgrade-cross-user-denied','upgrade-full-ttl-before-48h','upgrade-session-max30','upgrade-late-cash-review-no-grant','upgrade-unknown-state-denied','unpaid-upgrade-preserves-pro','paid-upgrade-full-gold-credits',
+ return ['upgrade-cross-user-denied','upgrade-full-ttl-before-48h','upgrade-session-max31','upgrade-late-cash-review-no-grant','upgrade-unknown-state-denied','unpaid-upgrade-preserves-pro','paid-upgrade-full-gold-credits',
   'upgrade-preserves-pro-annual-source','upgrade-durable-first-cancel'];
 }

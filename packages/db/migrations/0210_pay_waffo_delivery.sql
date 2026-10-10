@@ -98,7 +98,7 @@ BEGIN
  IF o.method_dispatched_at IS NOT NULL THEN
   RETURN jsonb_build_object('dispatch',false,'request',o.checkout_request,'expiresAt',o.method_checkout_expires_at);
  END IF;
- IF o.method_transition='upgrade' AND (p_expires>clock_timestamp()+interval '30 minutes'
+ IF o.method_transition='upgrade' AND (p_expires>clock_timestamp()+interval '31 minutes'
    OR o.method_upgrade_charge_at IS NOT NULL AND p_expires>=o.method_upgrade_charge_at-interval '48 hours') THEN
   RAISE EXCEPTION 'PAY_WAFFO_UPGRADE_WAIT'; END IF;
  IF o.payment_method='card' AND EXISTS(SELECT 1 FROM system_settings WHERE key='waffo_test_product_'||o.price_ref_id
@@ -422,7 +422,7 @@ BEGIN
  RETURN jsonb_build_object('dispatch',dispatch,'dispatchedAt',s.method_cancel_dispatched_at,'subscriptionId',s.id,'providerId',ref.external_id,'merchant',s.merchant_namespace,'mode','test');
 END $$;
 
--- Only after the server has read the original subscription as active may it reclaim a stale dispatch.
+-- Only after the server has read the original subscription as cancellable may it reclaim a stale dispatch.
 -- The exact observed dispatch timestamp is a CAS token; concurrent recoveries cannot both send.
 CREATE OR REPLACE FUNCTION public.pay_waffo_retry_cancel(
  p_user uuid,p_subscription uuid,p_merchant text,p_provider text,p_expected timestamptz
@@ -528,7 +528,7 @@ BEGIN
           AND purchase_membership_level='gold' AND payment_status='paid' AND entitlement_end>now())
         OR (prior.auto_renew AND (old_sub.status<>'active' OR old_sub.cancel_at_period_end<>'false'
           OR old_sub.method_cancel_requested_at IS NOT NULL OR old_sub.method_observed_at IS NULL
-          OR old_sub.method_observed_at<now()-interval '5 minutes' OR old_sub.current_period_end<=now()+interval '48 hours 30 minutes')) THEN
+          OR old_sub.method_observed_at<now()-interval '5 minutes' OR old_sub.current_period_end<=now()+interval '48 hours 31 minutes')) THEN
         RAISE EXCEPTION 'PAY_WAFFO_UPGRADE_WAIT'; END IF;
     ELSE
       IF p_offer<>'founder_renewal' OR p_cycle<>'yearly' OR p_item<>prior.item_id
