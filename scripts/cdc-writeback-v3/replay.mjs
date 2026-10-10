@@ -8,7 +8,7 @@ import { randomUUID } from 'node:crypto';
 import { git } from '../cdc-writeback-v2/source.mjs';
 import { runHost } from '../cdc-writeback-v2/host.mjs';
 import { validateResponse } from '../cdc-writeback-v2/frozen.mjs';
-import { paths, pins, runs, marker, hash, assert, readJson, splitRequest, sameOrganizerRequest, sameOrganizerUserContent,
+import { paths, pins, runs, marker, outputTokens, hash, assert, readJson, splitRequest, sameOrganizerRequest, sameOrganizerUserContent,
   validateV3Response } from './common.mjs';
 import { frozenV3 } from './run.mjs';
 
@@ -67,6 +67,8 @@ export function paidVariants(batch, source) {
 
 export function plan(batch, source) {
   const planRaw = readFileSync(join(paths.source, 'host-plan.json')), base = JSON.parse(planRaw);
+  // The local host emits the live organizer cap; the full-request comparison then proves the frozen cap matches it.
+  base.organizerOutputTokens = outputTokens;
   if (runs.includes(batch)) {
     assert(base.writebackV2 === true && base.groups.length === 100 &&
       JSON.stringify(base.groups.map(g => g.turns[0].slot)) === JSON.stringify(source.rows.map(r => r.slot)), 'V3_PLAN_ROSTER');
