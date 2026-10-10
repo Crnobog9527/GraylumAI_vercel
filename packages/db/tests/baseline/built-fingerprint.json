@@ -2565,7 +2565,7 @@
   "fn:runtime_test_policy(uuid,uuid)": "5193e8a9f8b0",
   "fn:runtime_test_recovery_policy(uuid,uuid)": "b11f1066ff1d",
   "fn:runtime_test_window_allowed(uuid,jsonb)": "4c8f063a4287",
-  "fn:runtime_tool(uuid,uuid,text,text,jsonb,text,jsonb)": "771f5ebb7e59",
+  "fn:runtime_tool(uuid,uuid,text,text,jsonb,text,jsonb)": "010a89091282",
   "fn:runtime_view(uuid,uuid)": "364917b22a71",
   "fn:runtime_work_projection(uuid,uuid,uuid)": "1489db983982",
   "fn:runtime_work_projection_before_opc(uuid,uuid,uuid)": "96650f24836b",
