@@ -1,7 +1,7 @@
 -- Synthetic local-only boundary checks. Never apply to a remote database.
 BEGIN;
 DO $$
-DECLARE a uuid:=gen_random_uuid();r uuid:=gen_random_uuid();c uuid:=gen_random_uuid();v jsonb;cfg jsonb;conversation uuid:=gen_random_uuid();
+DECLARE a uuid:=gen_random_uuid();r uuid:=gen_random_uuid();c uuid:=gen_random_uuid();v jsonb;cfg jsonb;channel text;conversation uuid:=gen_random_uuid();
 BEGIN
  INSERT INTO profiles(id,credits) VALUES(a,100);
  INSERT INTO conversations(id,user_id,title) VALUES(conversation,a,'Synthetic stop-loss');
@@ -45,9 +45,22 @@ BEGIN
  UPDATE system_settings SET value=cfg WHERE key='runtime_stop_loss';
  BEGIN PERFORM runtime_stop_loss_assert(gen_random_uuid(),true);RAISE EXCEPTION 'expected site denial';
  EXCEPTION WHEN raise_exception THEN IF SQLERRM<>'RUNTIME_SITE_DAILY_USD_LIMIT' THEN RAISE;END IF;END;
- UPDATE system_settings SET value=jsonb_set(cfg,'{notificationChannel}','"   "') WHERE key='runtime_stop_loss';
- BEGIN PERFORM runtime_stop_loss_assert(a,true);RAISE EXCEPTION 'expected invalid channel denial';
- EXCEPTION WHEN raise_exception THEN IF SQLERRM<>'RUNTIME_STOP_LOSS_CONFIG_INVALID' THEN RAISE;END IF;END;
+ -- SQL and the admin schema share trimmed Unicode code-point limits.
+ FOREACH channel IN ARRAY ARRAY['', '   ', repeat('a',101), repeat('😀',101)] LOOP
+  UPDATE system_settings SET value=jsonb_set(cfg,'{notificationChannel}',to_jsonb(channel))
+   WHERE key='runtime_stop_loss';
+  BEGIN
+   PERFORM runtime_stop_loss_config();
+   RAISE EXCEPTION 'expected invalid channel denial';
+  EXCEPTION WHEN raise_exception THEN
+   IF SQLERRM<>'RUNTIME_STOP_LOSS_CONFIG_INVALID' THEN RAISE;END IF;
+  END;
+ END LOOP;
+ FOREACH channel IN ARRAY ARRAY[repeat('a',100), repeat('😀',100), ' a '||repeat(' ',100)] LOOP
+  UPDATE system_settings SET value=jsonb_set(cfg,'{notificationChannel}',to_jsonb(channel))
+   WHERE key='runtime_stop_loss';
+  PERFORM runtime_stop_loss_config();
+ END LOOP;
  UPDATE system_settings SET value='"not-json"'::jsonb WHERE key='runtime_stop_loss';
  BEGIN PERFORM runtime_stop_loss_assert(a,true);RAISE EXCEPTION 'expected invalid JSON denial';
  EXCEPTION WHEN raise_exception THEN IF SQLERRM<>'RUNTIME_STOP_LOSS_CONFIG_INVALID' THEN RAISE;END IF;END;

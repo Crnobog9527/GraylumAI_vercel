@@ -35,7 +35,7 @@ it('counts channel labels by Unicode code points like PostgreSQL after trimming'
     expect(stopLossConfigSchema.parse({ ...DEFAULT_STOP_LOSS, notificationChannel }).notificationChannel)
       .toBe(notificationChannel.trim());
   }
-  for (const notificationChannel of ['a'.repeat(101), '😀'.repeat(101), '\uFEFF']) {
+  for (const notificationChannel of ['', '   ', 'a'.repeat(101), '😀'.repeat(101), '\uFEFF']) {
     expect(stopLossConfigSchema.safeParse({ ...DEFAULT_STOP_LOSS, notificationChannel }).success).toBe(false);
   }
 });
