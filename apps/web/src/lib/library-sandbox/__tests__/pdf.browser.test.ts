@@ -65,7 +65,7 @@ describe('PDF Worker bundle in the sandbox', () => {
       decompressionStream: typeof DecompressionStream, guard: JSON.stringify(globalThis.__graylumPdfGuard),
       pdfjsWorker: typeof (globalThis.pdfjsWorker && globalThis.pdfjsWorker.WorkerMessageHandler) } });`, 30_000);
     expect(outcome).toMatchObject({ ok: true, value: {
-      decompressionStream: 'undefined', guard: '{"maxStreamBytes":50000000,"hit":null}', pdfjsWorker: 'function' } });
+      decompressionStream: 'undefined', guard: '{"maxStreamBytes":50000000,"maxObjects":500000,"objects":0,"hit":null}', pdfjsWorker: 'function' } });
   }, 30_000);
 
   it('extracts Chinese (predefined CMaps) and English text page by page with no request', async () => {
@@ -118,7 +118,7 @@ describe('must-test 18: hostile and malformed PDFs', () => {
   it.each([
     ['open password', 'encrypted-open-password.pdf', (text: string) => text],
     ['permissions password only', 'encrypted-permissions-only.pdf', (text: string) => text],
-    // `/Encr#79pt` is the same name written with an escape: the byte check misses it, pdf.js does not.
+    // `/Encr#79pt` is the same name written with an escape: a byte search misses it, pdf.js does not.
     ['open password, escaped name', 'encrypted-open-password.pdf', (text: string) => text.replace('/Encrypt', '/Encr#79pt')],
     ['permissions only, escaped name', 'encrypted-permissions-only.pdf', (text: string) => text.replace('/Encrypt', '/Encr#79pt')],
   ])('refuses an encrypted PDF (%s)', async (_name, file, edit) => {

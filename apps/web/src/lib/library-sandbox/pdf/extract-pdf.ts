@@ -6,7 +6,7 @@ import { EmbeddedDataFactory } from './embedded-data';
 import type { PdfGuard } from './guard';
 import { imageCoverage } from './image-coverage';
 import { hasTextLayer, pageText } from './page-text';
-import { precheckPdf } from './precheck';
+import { mentionsEncryption, precheckPdf } from './precheck';
 import { PAGE_SEPARATOR, type PdfExtraction, type PdfPage } from './types';
 
 /**
@@ -44,6 +44,13 @@ function checkGuard(guard: PdfGuard) {
   if (guard.hit) throw new SandboxError(guard.hit);
 }
 
+/** Encrypted with or without an open password: pdf.js parsed an encryption dictionary from the trailer. */
+async function isEncrypted(document: PDFDocumentProxy): Promise<boolean> {
+  if ((await document.getPermissions()) !== null) return true;
+  const { info } = await document.getMetadata();
+  return Boolean((info as { EncryptFilterName?: unknown } | null)?.EncryptFilterName);
+}
+
 async function readPage(document: PDFDocumentProxy, number: number, guard: PdfGuard): Promise<{ text: string; page: PdfPage }> {
   const page = await document.getPage(number);
   try {
@@ -67,15 +74,19 @@ export async function extractPdf(input: Uint8Array, guard: PdfGuard): Promise<Pd
   if (input.byteLength > SANDBOX_LIMITS.maxInputBytes) throw new SandboxError('INPUT_TOO_LARGE');
   precheckPdf(input);
   guard.hit = null;
+  guard.objects = 0;
   const task = getDocument({ ...DOCUMENT_OPTIONS, data: input.slice() });
   try {
     let document: PDFDocumentProxy;
     try {
       document = await task.promise;
     } catch (error) {
-      throw failure(guard, error, 'PDF_INVALID');
+      const code = failure(guard, error, 'PDF_INVALID');
+      throw code.code === 'PDF_INVALID' && mentionsEncryption(input) ? new SandboxError('PDF_ENCRYPTED') : code;
     }
-    if ((await document.getPermissions()) !== null) throw new SandboxError('PDF_ENCRYPTED');
+    // pdf.js may have recovered from a limit (e.g. by rebuilding the cross-reference table): still refuse.
+    checkGuard(guard);
+    if (await isEncrypted(document)) throw new SandboxError('PDF_ENCRYPTED');
     const pageCount = document.numPages;
     if (!Number.isInteger(pageCount) || pageCount < 1) throw new SandboxError('PDF_INVALID');
     if (pageCount > PDF_LIMITS.maxPages) throw new SandboxError('PDF_PAGE_COUNT');

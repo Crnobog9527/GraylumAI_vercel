@@ -13,4 +13,4 @@ try {
   // Non-configurable in some engine: the fallback is then unused and only the time limit applies.
 }
 
-export const pdfGuard = installPdfGuard(PDF_LIMITS.maxStreamBytes);
+export const pdfGuard = installPdfGuard(PDF_LIMITS.maxStreamBytes, PDF_LIMITS.maxObjects);

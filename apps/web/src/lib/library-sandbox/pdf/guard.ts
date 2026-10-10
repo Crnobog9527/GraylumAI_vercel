@@ -7,14 +7,20 @@ import type { SandboxErrorCode } from '../errors';
  * swallow the exception a limit throws, so a limit also records itself here and the extractor fails
  * the whole file instead of returning partial text.
  */
-export type PdfGuard = { maxStreamBytes: number; hit: SandboxErrorCode | null };
+export type PdfGuard = {
+  maxStreamBytes: number;
+  /** Cross-reference entries and parsed object-stream members, counted by the patched pdf.js. */
+  maxObjects: number;
+  objects: number;
+  hit: SandboxErrorCode | null;
+};
 
 declare global {
   var __graylumPdfGuard: PdfGuard | undefined;
 }
 
-export function installPdfGuard(maxStreamBytes: number): PdfGuard {
-  const guard: PdfGuard = { maxStreamBytes, hit: null };
+export function installPdfGuard(maxStreamBytes: number, maxObjects: number): PdfGuard {
+  const guard: PdfGuard = { maxStreamBytes, maxObjects, objects: 0, hit: null };
   Object.defineProperty(globalThis, '__graylumPdfGuard', { value: guard, writable: false, configurable: false });
   return guard;
 }

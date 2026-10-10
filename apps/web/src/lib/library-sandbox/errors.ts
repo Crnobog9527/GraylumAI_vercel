@@ -36,6 +36,7 @@ export const SANDBOX_ERROR_CODES = [
   'PDF_ENCRYPTED',
   'PDF_PAGE_COUNT',
   'PDF_STREAM_TOO_LARGE',
+  'PDF_OBJECT_COUNT',
   'PDF_UNSUPPORTED',
 ] as const;
 
@@ -70,6 +71,7 @@ const PDF_MESSAGES: Partial<Record<SandboxErrorCode, string>> = {
   PDF_ENCRYPTED: '不支持加密或带密码的 PDF，请去掉密码后再上传。',
   PDF_PAGE_COUNT: 'PDF 页数超过 500 页的上限，请拆分后再上传。',
   PDF_STREAM_TOO_LARGE: TOO_LARGE,
+  PDF_OBJECT_COUNT: TOO_LARGE,
   PDF_UNSUPPORTED: '这个 PDF 使用了暂不支持的压缩方式，请用其他软件另存为 PDF 后再上传。',
 };
 const PDF_DAMAGED = '这个 PDF 无法读取，可能已损坏或不是真正的 PDF 文件。';

@@ -3,7 +3,7 @@
 //
 // 1. `graylum:pdf-cmaps` is a virtual module holding every packed CMap shipped with pdfjs-dist, so
 //    Chinese/Japanese/Korean text can be decoded without any download (the sandbox has no network).
-// 2. Four exact source edits to the pinned pdf.js worker build. Each target must occur exactly once
+// 2. Exact source edits to the pinned pdf.js worker build. Each target must occur the expected number of times
 //    or the build fails, so a pdfjs-dist upgrade cannot silently drop a guard:
 //    - every decoded stream (Flate, LZW, RunLength, ASCII85/Hex, predictors, decryption) is capped at
 //      the limit the sandbox sets in `globalThis.__graylumPdfGuard` (fails closed when it is unset);
@@ -11,7 +11,9 @@
 //      (size and position only), which the scanned-page check measures;
 //    - BrotliDecode streams are refused (its decoder has no output cap);
 //    - pdf.js does not start its own message loop on the Worker global: it runs as an in-Worker
-//      library ("fake worker") and only our one-shot reply is ever posted.
+//      library ("fake worker") and only our one-shot reply is ever posted;
+//    - cross-reference entries (tables, streams, rebuilt tables) and object-stream members are counted
+//      against `maxObjects` before pdf.js stores or allocates them.
 
 import { readdir, readFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
@@ -88,17 +90,60 @@ export const PDFJS_PATCHES = [
     }
 `,
   },
+  {
+    name: 'object count: cross-reference table and stream entries',
+    count: 2,
+    target: `        this.#entries[first + i] ??= entry;
+`,
+    replacement: `        __graylumCountObjects(1);
+        this.#entries[first + i] ??= entry;
+`,
+  },
+  {
+    name: 'object count: rebuilt cross-reference entries',
+    target: `        if (updateEntries) {
+          this.#entries[num] = {
+`,
+    replacement: `        if (updateEntries) {
+          __graylumCountObjects(1);
+          this.#entries[num] = {
+`,
+  },
+  {
+    name: 'object count: object stream members, before allocation',
+    target: `    const nums = new Array(n);
+    const offsets = new Array(n);
+`,
+    replacement: `    __graylumCountObjects(n);
+    const nums = new Array(n);
+    const offsets = new Array(n);
+`,
+  },
 ];
 
-/** Applies every patch exactly once; throws if pdf.js no longer matches. */
+/** Shared by the object-count edits; fails closed when the sandbox guard is missing. */
+const PRELUDE = `function __graylumCountObjects(count) {
+  const guard = ${GUARD};
+  if (guard) guard.objects += Math.max(0, count);
+  if (!guard || !(guard.objects <= guard.maxObjects)) {
+    if (guard) guard.hit ??= "PDF_OBJECT_COUNT";
+    throw new Error("graylum: object count limit");
+  }
+}
+`;
+
+/** Applies every patch the expected number of times; throws if pdf.js no longer matches. */
 export function patchPdfjsWorker(source) {
   let output = source;
   for (const patch of PDFJS_PATCHES) {
+    const expected = patch.count ?? 1;
     const count = output.split(patch.target).length - 1;
-    if (count !== 1) throw new Error(`pdf.js patch "${patch.name}" matched ${count} times; review the pdfjs-dist upgrade`);
-    output = output.replace(patch.target, () => patch.replacement);
+    if (count !== expected) {
+      throw new Error(`pdf.js patch "${patch.name}" matched ${count} times, expected ${expected}; review the pdfjs-dist upgrade`);
+    }
+    output = output.replaceAll(patch.target, () => patch.replacement);
   }
-  return output;
+  return `${PRELUDE}${output}`;
 }
 
 async function cmapModule() {

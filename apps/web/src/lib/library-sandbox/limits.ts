@@ -19,6 +19,11 @@ export const PDF_LIMITS = {
   maxPages: 500,
   /** One decoded stream (content, font, CMap, object stream...), enforced inside pdf.js. */
   maxStreamBytes: 50_000_000,
+  /**
+   * Cross-reference entries plus object-stream members read for one file, enforced inside pdf.js.
+   * Large real documents have tens of thousands; this bounds parser memory for hostile ones.
+   */
+  maxObjects: 500_000,
   /** A page with no text layer counts as scanned when images cover at least this share of it. */
   scannedImageCoverage: 0.5,
 } as const;

@@ -11,7 +11,7 @@ import { normalizeCjkRadicals } from '../pdf/cjk-radicals';
 import { extractPdfInBrowser } from '../pdf/client';
 import { imageCoverage, type CoverageOps } from '../pdf/image-coverage';
 import { hasTextLayer, pageText } from '../pdf/page-text';
-import { precheckPdf } from '../pdf/precheck';
+import { mentionsEncryption, precheckPdf } from '../pdf/precheck';
 import { validatePdfExtraction } from '../pdf/result';
 import { normalizePdfText, pageInReadingOrder, pdfCharacterAccuracy } from './pdf-quality/metrics';
 
@@ -58,17 +58,18 @@ describe('pdf.js build patches', () => {
     const source = readFileSync(PDFJS_WORKER_BUILD, 'utf8');
     const patched = patchPdfjsWorker(source);
     for (const patch of PDFJS_PATCHES) {
-      expect(patched.split(patch.replacement).length - 1, patch.name).toBe(1);
-      expect(patched.includes(patch.target), patch.name).toBe(false);
+      expect(patched.split(patch.replacement).length - 1, patch.name).toBe((patch as { count?: number }).count ?? 1);
+      if (!patch.replacement.includes(patch.target)) expect(patched.includes(patch.target), patch.name).toBe(false);
     }
     expect(patched).toContain('graylum: decoded stream limit');
     expect(patched).toContain('"graylum:skipped-image"');
+    expect(patched.startsWith('function __graylumCountObjects(count)')).toBe(true);
   });
 
   it('refuse to build when pdf.js no longer matches', () => {
     expect(() => patchPdfjsWorker('nothing to patch')).toThrow(/matched 0 times/);
     const source = readFileSync(PDFJS_WORKER_BUILD, 'utf8');
-    expect(() => patchPdfjsWorker(source + PDFJS_PATCHES[0].target)).toThrow(/matched 2 times/);
+    expect(() => patchPdfjsWorker(source + PDFJS_PATCHES[0].target)).toThrow(/matched 2 times, expected 1/);
   });
 
   it('fail closed: without the sandbox guard every decoded stream is refused', () => {
@@ -161,12 +162,13 @@ describe('byte checks before pdf.js', () => {
     'trailer << /Root 1 0 R /Encrypt 9 0 R >>',
     'trailer << /Encrypt<< /Filter /Standard >> >>',
     '<< /Type /XRef /Encrypt\n%comment\n12 0 R >>',
-  ])('refuses an encryption dictionary: %s', (trailer) => {
-    expect(() => precheckPdf(bytes(`%PDF-1.7\n${trailer}`))).toThrow(expect.objectContaining({ code: 'PDF_ENCRYPTED' }));
+  ])('recognises an encryption dictionary for the error wording only: %s', (trailer) => {
+    expect(mentionsEncryption(bytes(`%PDF-1.7\n${trailer}`))).toBe(true);
+    expect(() => precheckPdf(bytes(`%PDF-1.7\n${trailer}`))).not.toThrow();
   });
 
   it('does not mistake the word in text for an encryption dictionary', () => {
-    expect(() => precheckPdf(bytes('%PDF-1.7\nBT (How /Encrypt works) Tj ET'))).not.toThrow();
+    expect(mentionsEncryption(bytes('%PDF-1.7\nBT (How /Encrypt works) Tj ET'))).toBe(false);
   });
 });
 

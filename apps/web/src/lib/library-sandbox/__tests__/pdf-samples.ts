@@ -106,6 +106,40 @@ function linksFormsAndAttachments(outside: string): Buffer {
   });
 }
 
+/**
+ * Objects 1..n written in order, then a cross-reference *stream* (object n + 1) declaring `size`
+ * entries: real offsets for 1..n, `compressed[num] = [objectStream, index]` entries, the rest free.
+ */
+function xrefStreamPdf(objects: string[], size: number, compressed: Record<number, [number, number]> = {}): Buffer {
+  const parts = [Buffer.from('%PDF-1.7\n', 'latin1')];
+  const offsets = [0];
+  let length = parts[0].length;
+  objects.forEach((body, index) => {
+    offsets.push(length);
+    const chunk = Buffer.from(`${index + 1} 0 obj\n${body}\nendobj\n`, 'latin1');
+    parts.push(chunk);
+    length += chunk.length;
+  });
+  const xrefNum = objects.length + 1;
+  offsets.push(length);
+  const rows = Buffer.alloc(size * 7);
+  for (let num = 0; num < size; num += 1) {
+    const at = num * 7;
+    if (num >= 1 && num <= xrefNum) {
+      rows[at] = 1;
+      rows.writeUInt32BE(offsets[num], at + 1);
+    } else if (compressed[num]) {
+      rows[at] = 2;
+      rows.writeUInt32BE(compressed[num][0], at + 1);
+      rows.writeUInt16BE(compressed[num][1], at + 5);
+    } else rows.writeUInt16BE(num === 0 ? 0xffff : 0, at + 5);
+  }
+  const data = deflateSync(rows);
+  parts.push(Buffer.from(`${xrefNum} 0 obj\n<< /Type /XRef /Size ${size} /W [1 4 2] /Root 1 0 R /Filter /FlateDecode /Length ${data.length} >>\nstream\n`,
+    'latin1'), data, Buffer.from(`\nendstream\nendobj\nstartxref\n${length}\n%%EOF\n`, 'latin1'));
+  return Buffer.concat(parts);
+}
+
 export function hostileSamples(outside: string): HostileSample[] {
   const valid = textDocument({ pages: [{ content: line('Valid text survives') }] });
   // ~21 KB of visible text per page (300 short lines inside the page box; pdf.js skips text drawn off the page).
@@ -151,6 +185,14 @@ export function hostileSamples(outside: string): HostileSample[] {
     { name: 'gigantic image dimensions (never decoded)', bytes: imagePage(draw('Im1', 595, 842), {}, image(1_000_000_000, 1_000_000_000)),
       expect: { ok: true } },
     { name: 'JBIG2 image (never decoded)', bytes: imagePage(draw('Im1', 595, 842), {}, image(800, 800, '/JBIG2Decode')), expect: { ok: true } },
+    { name: '600,000 cross-reference entries', bytes: xrefStreamPdf(['<< /Type /Catalog /Pages 2 0 R >>',
+      '<< /Type /Pages /Kids [3 0 R] /Count 1 >>', `${PAGE} >>`], 600_000), expect: { code: 'PDF_OBJECT_COUNT' } },
+    { name: 'object stream claiming 600,000 members', bytes: xrefStreamPdf(['<< /Type /Catalog /Pages 2 0 R >>',
+      '<< /Type /Pages /Kids [3 0 R] /Count 1 >>', `${PAGE} /Contents 6 0 R >>`,
+      '<< /Type /ObjStm /N 600000 /First 4 /Length 8 >>\nstream\n6 0 [ ]\n\nendstream'], 8, { 6: [4, 0] }),
+    expect: { code: 'PDF_OBJECT_COUNT' } },
+    { name: 'ordinary PDF whose text mentions /Encrypt 12 0 R', bytes: textDocument({ pages: [{ content: `${line('About encryption')}`
+      + '% /Encrypt 12 0 R\n' }], extraObjects: () => ['(/Encrypt 12 0 R)'] }), expect: { ok: true, text: /^About encryption$/ } },
     { name: 'encryption dictionary in the trailer', bytes: textDocument({ pages: [{ content: line('locked') }],
       build: { trailer: '/Encrypt << /Filter /Standard /V 2 /R 3 /Length 128 /P -4 /O <00> /U <00> >>' } }), expect: { code: 'PDF_ENCRYPTED' } },
   ];
