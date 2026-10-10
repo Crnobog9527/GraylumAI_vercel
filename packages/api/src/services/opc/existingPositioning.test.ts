@@ -3,6 +3,7 @@ import {expect, it} from 'vitest';
 import {captureHostContext, captureOrganizerInput} from './captureContext';
 import {existingPositioningInstructions} from './existingPositioning';
 import {agentTurnInstructions} from './agentTurnPrompt';
+import {freezeHostPromptCache} from '../runtime/promptCache';
 import type {HostTurnContext} from '../runtime/hostTurn';
 
 const steps = [{id: 'first', title: 'First'}, {id: 'later', title: 'Later'}];
@@ -68,4 +69,22 @@ it('preserves the stable prefix and fits the existing purpose-budget instruction
   // OPC mentor admission enables purposeBudgets and a 64000-byte input budget.
   expect(Buffer.byteLength(complete)).toBeLessThan(64000);
   expect(prompt(context()).length).toBeLessThan(1000);
+});
+
+it.each([true, false])('keeps the existing cache contract for opening=%s', opening => {
+  const additionalInstructions = agentTurnInstructions() + prompt(context(opening));
+  const skill = 'Pinned Skill';
+  const instructions = skill + '\n' + additionalInstructions;
+  const input = {real: true, role: 'skill', model: 'anthropic/test', cacheWriteUsdPerMillion: '2.5',
+    instructions, skillChars: skill.length, mentor: true, additionalInstructions, historyMarker: !opening};
+  expect(freezeHostPromptCache({...input, stableAdditionalPrefix: agentTurnInstructions()})).toBeUndefined();
+  expect(freezeHostPromptCache({...input, stableAdditionalPrefix: additionalInstructions}))
+    .toMatchObject({version: 'prompt-cache-v2', systemPrefixChars: instructions.length, historyMarker: !opening});
+});
+it('keeps review instructions identical across changing notes and confirmation readiness', () => {
+  const before = context(false);
+  const after = context(false, 'later');
+  after.checklist[1]!.fields[0]!.value = 'New user material';
+  after.confirmation!.stepReady = true;
+  expect(prompt(before)).toBe(prompt(after));
 });

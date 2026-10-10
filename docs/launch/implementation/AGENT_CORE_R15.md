@@ -21,7 +21,9 @@
 
 1. 同步 staging，在 `prepareStep` 的新 mentor admission 中，将 helper 返回值附加到
    `agentTurnInstructions()` 后；mode 来自 `opc_query` 的 d.mode，context 来自原冻结材料。
-   stableAdditionalInstructions 继续使用原稳定前缀；回放路径保持返回既有 execution。
+   additionalInstructions 与 stableAdditionalInstructions 都使用拼接后的完整字符串，
+   满足现有 freezeHostPromptCache 的相等契约；回放路径保持返回既有 execution。
+   helper 仅返回两种固定指令（接收/核对），不插入用户数据；核对阶段保持相同缓存前缀。
 2. 补服务级测试：manual/mentor 分支、开场、已有各步资料、确认卡、跨步整理、重复请求、
    越权和被删除草稿。验证完整 admission 预算与缓存结构，不能仅以字符串长度证明运行通过。
 3. 在包含候选的非生产环境做少量接口真实模型冒烟；先查共享 5 美元预算消耗，

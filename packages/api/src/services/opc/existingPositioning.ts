@@ -15,6 +15,7 @@ const INTAKE = [
 
 /** `mode` must come from the actor-scoped opc_query, never a turn input or user text.
  * Add the result after the stable mentor prefix, only for newly admitted mentor turns.
+ * Use the complete composed string for both additionalInstructions and stableAdditionalInstructions.
  * This does not write fields, grant confirmation, select a Skill or create a second session.
  */
 export function existingPositioningInstructions(mode: unknown, host: HostTurnContext): string {
