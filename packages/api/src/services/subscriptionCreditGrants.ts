@@ -1109,11 +1109,11 @@ async function getMembershipPlan(
 
 async function hasSubscriptionFullRefund(
   supabase: SupabaseLikeClient,
-  input: { subscriptionId: string; invoiceId?: string | null },
+  input: { subscriptionId: string; invoiceId?: string | null; scope?: StripeScope },
 ): Promise<boolean> {
   const subscriptionId = input.subscriptionId;
   const invoiceId = input.invoiceId?.trim() || null;
-  const ref = await findStripeReference(supabase, 'subscription', subscriptionId);
+  const ref = await findStripeReference(supabase, 'subscription', subscriptionId, input.scope);
   if (!ref?.subscription_id) throw new Error('PAY_COMMON_SUBSCRIPTION_MAPPING_MISSING');
   const invoiceRef = invoiceId ? await findStripeReference(supabase, 'invoice', invoiceId,
     { merchant: ref.merchant_namespace, mode: ref.mode as 'test' | 'live' }) : null;
@@ -1372,9 +1372,9 @@ function locateRefundPeriodGrant(input: {
  */
 async function loadSubscriptionMirrorForRefund(
   supabase: SupabaseLikeClient,
-  input: { subscriptionId: string },
+  input: { subscriptionId: string; scope?: StripeScope },
 ): Promise<SubscriptionRow | null> {
-  const ref = await findStripeReference(supabase, 'subscription', input.subscriptionId);
+  const ref = await findStripeReference(supabase, 'subscription', input.subscriptionId, input.scope);
   if (!ref?.subscription_id) return null;
   const result = await supabase
     .from('user_subscriptions')
@@ -1536,9 +1536,9 @@ async function getProfileCreditBalance(
 
 async function loadAllSubscriptionCreditGrants(
   supabase: SupabaseLikeClient,
-  input: { subscriptionId: string },
+  input: { subscriptionId: string; scope?: StripeScope },
 ): Promise<SubscriptionCreditGrantRow[]> {
-  const ref = await findStripeReference(supabase, 'subscription', input.subscriptionId);
+  const ref = await findStripeReference(supabase, 'subscription', input.subscriptionId, input.scope);
   if (!ref?.subscription_id) throw new Error('PAY_COMMON_SUBSCRIPTION_MAPPING_MISSING');
   const result = await supabase
     .from('subscription_credit_grants')
@@ -1652,6 +1652,7 @@ export async function reconcileSubscriptionRefundCreditGrants(
 ): Promise<SubscriptionRefundCreditGrantReconciliationResult> {
   const now = input.now ?? new Date().toISOString();
   const order = await getSubscriptionRefundOrder(supabase, input);
+  const scope: StripeScope = { merchant: order.merchant_namespace!, mode: order.payment_mode as 'test' | 'live' };
   const invoiceScope = getRefundInvoiceScope(order, input);
   const scopedRefund = invoiceScope.invoiceId && invoiceScope.invoiceId !== input.invoiceId
     ? { ...input, invoiceId: invoiceScope.invoiceId }
@@ -1660,15 +1661,14 @@ export async function reconcileSubscriptionRefundCreditGrants(
   // R1: order/payment metadata is audit/cache evidence only. The canonical
   // event + subscription + period barrier in the transaction RPC is the sole
   // authority for replay and later-event behavior.
-
   // REFUND-1B (R4): this application read is only a non-authoritative hint for
   // diagnostics. The refund transaction below must
   // resolve the period again after taking its database locks.
   const grants = await loadAllSubscriptionCreditGrants(supabase, {
-    subscriptionId: input.subscriptionId,
+    subscriptionId: input.subscriptionId, scope,
   });
   const mirror = await loadSubscriptionMirrorForRefund(supabase, {
-    subscriptionId: input.subscriptionId,
+    subscriptionId: input.subscriptionId, scope,
   });
   const located = locateRefundPeriodGrant({
     grants,
@@ -1690,8 +1690,8 @@ export async function reconcileSubscriptionRefundCreditGrants(
   const terminationReason = `stripe_refund:${input.refundEventType ?? 'refund'}`;
   const userId = order.user_id ?? mirror?.user_id ?? located.grant?.user_id ?? null;
 
-  const clawbackResult = await supabase.rpc('atomic_refund_termination_clawback_fresh', {
-    p_user_id: userId,
+  const clawbackResult = await supabase.rpc('pay_waffo_atomic_refund_termination_clawback_fresh', {
+    p_user_id: userId, p_source_order_id: order.id,
     p_subscription_id: input.subscriptionId,
     p_event_id: canonicalEventId,
     p_refund_created_at: input.refundCreatedAt ?? null,
@@ -1745,7 +1745,7 @@ export async function reconcileSubscriptionRefundCreditGrants(
   // this process is replaying after a post-commit crash.
   const freshOrder = await getSubscriptionRefundOrder(supabase, scopedRefund);
   const freshMirror = await loadSubscriptionMirrorForRefund(supabase, {
-    subscriptionId: input.subscriptionId,
+    subscriptionId: input.subscriptionId, scope,
   });
 
   const locatedPeriodKey = clawbackRow.resolved_period_key ?? null;
@@ -2430,7 +2430,8 @@ export async function releaseDueAnnualSubscriptionCredits(
       summary.skippedSubscriptions += 1;
       continue;
     }
-    const existingGrants = await loadAllSubscriptionCreditGrants(supabase, { subscriptionId });
+    const scope: StripeScope = { merchant: subscription.merchant_namespace!, mode: subscription.payment_mode as 'test' | 'live' };
+    const existingGrants = await loadAllSubscriptionCreditGrants(supabase, { subscriptionId, scope });
     if (existingGrants.some((grant) =>
       grant.accounting_state !== undefined && grant.accounting_state !== 'trusted'
     )) {
@@ -2442,8 +2443,7 @@ export async function releaseDueAnnualSubscriptionCredits(
     const { openingGrant, plan } = contract;
     const invoiceId = openingGrant.stripe_invoice_id;
     const hasFullRefund = await hasSubscriptionFullRefund(supabase, {
-      subscriptionId,
-      invoiceId,
+      subscriptionId, invoiceId, scope,
     });
     if (!shouldReleaseAnnualSubscriptionCredits({
       billingCycle: subscription.billing_cycle,
@@ -2627,9 +2627,9 @@ function resolveCanonicalPreviewCurrentPeriod(input: {
 
 async function loadSubscriptionMirrorForPreview(
   supabase: SupabaseLikeClient,
-  subscriptionId: string,
+  subscriptionId: string, scope: StripeScope,
 ): Promise<SubscriptionRow | null> {
-  const ref = await findStripeReference(supabase, 'subscription', subscriptionId);
+  const ref = await findStripeReference(supabase, 'subscription', subscriptionId, scope);
   if (!ref?.subscription_id) return null;
   const result = await supabase
     .from('user_subscriptions')
@@ -2713,12 +2713,12 @@ async function loadInFlightReservationsForPreview(input: {
 
 export async function getSubscriptionRefundOperatorPreview(
   supabase: SupabaseLikeClient,
-  input: { subscriptionId: string; now?: string },
+  input: { subscriptionId: string; scope: StripeScope; now?: string },
 ): Promise<SubscriptionRefundOperatorPreview> {
   const nowMs = input.now ? Date.parse(input.now) : Date.now();
-  const subscription = await loadSubscriptionMirrorForPreview(supabase, input.subscriptionId);
+  const subscription = await loadSubscriptionMirrorForPreview(supabase, input.subscriptionId, input.scope);
   const grants = await loadAllSubscriptionCreditGrants(supabase, {
-    subscriptionId: input.subscriptionId,
+    subscriptionId: input.subscriptionId, scope: input.scope,
   });
 
   const grantedGrants = grants.filter((grant) => grant.status === 'granted');

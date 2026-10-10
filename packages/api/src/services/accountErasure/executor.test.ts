@@ -158,3 +158,14 @@ it('persists the processor SQLSTATE diagnostic on the existing request and relea
     p_codes: ['ERASURE_RPC_SCRUB_CONTENT_21000', 'ERASURE_RPC_FAILED', 'ERASURE_RPC_UNCERTAIN'], p_release: true,
   }));
 });
+
+it('cleans expired Gold digests through the existing cron and reports cleanup failure', async () => {
+  const database = client();
+  const original = database.rpc.getMockImplementation()!;
+  database.rpc.mockImplementation(name => name === 'pay_waffo_expire_gold_identities'
+    ? { abortSignal: () => Promise.resolve({ data: null, error: { code: 'XX000' } }) } as never
+    : original(name));
+  const result = await runAccountErasureExecutor(database as never);
+  expect(result.failed).toBe(1);
+  expect(database.rpc).toHaveBeenCalledWith('pay_waffo_expire_gold_identities', {});
+});

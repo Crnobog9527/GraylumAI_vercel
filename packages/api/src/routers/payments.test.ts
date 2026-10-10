@@ -346,7 +346,7 @@ function createSubscriptionChangeGuardHarness(options: {
   function mappingBuilder() {
     const filters: Array<[string, unknown]> = [];
     const result = () => {
-      const common = { channel: 'stripe', merchant_namespace: 'acct_fixture', mode: 'test' };
+      const common = { channel: 'stripe', merchant_namespace: 'acct_fixture', mode: 'test', offer_kind: 'standard' };
       const refs = [
         { ...common, id: 'ref-subscription', object_type: 'subscription', subscription_id: local.id, external_id: local.stripe_subscription_id },
         { ...common, id: 'ref-old-price', object_type: 'price', external_id: 'price_test_old' },
