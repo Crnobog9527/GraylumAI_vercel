@@ -1,7 +1,7 @@
 # AGENT-CORE 收口核对清单
 
 > 状态：核对清单（仅核对，不含代码）；第 5 节四项 Owner 已于 2026-10-10 决定。日期：2026-10-10。依据：`origin/staging` `4c66637a` 和截至当天已合并的 PR、验收记录；#768、#773 合并后按 `e7ecc0f8` 更新了排队关系。
-> 保留为仓库文件，是为了按 AGENTS 第 12 节让任务能只靠 GitHub 接续。
+> 保留为仓库文件，是为了按 AGENTS 第 8 节（窗口和交接）让后续执行窗口能从 GitHub 接续；Owner 已在 #771 对本清单的 4 项决定作出批准（见第 5 节）。
 > 授权：Owner 2026-10-10 在 [#716](https://github.com/Crnobog9527/GraylumAI_vercel/issues/716#issuecomment-6086544461) 的原话
 > 「同意开工：①资料库先出方案、②核心体验收口核对出清单、③字体商用核对，全部交给 Codex，只出方案和核对，不写代码。」
 > 随后[改了分工](https://github.com/Crnobog9527/GraylumAI_vercel/issues/716#issuecomment-6086596098)，原话
