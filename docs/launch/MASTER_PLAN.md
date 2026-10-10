@@ -645,7 +645,7 @@ Bright Data 等）各自在其平台设置硬上限（预付余额或平台限�
         - **不对应开发任务**：价格和产品的实际配置（staging、正式环境、Waffo 后台）执行前另获批准；限流待观察；工作室版团队功能在上线后另立任务。
 
     - **方案必须先解决的事项**（Owner 2026-10-04 批准合并 #626 时接受，[总控记录](https://github.com/Crnobog9527/GraylumAI_vercel/pull/626#issuecomment-5976838440)；相关实施 PR 在解决前不得合并）：
-        1. Gold 首购身份摘要（`gold_first_purchase`）在账号注销后的保留期限和清理契约：现行 DATA-ERASURE 规则只允许保留开户赠送的 HMAC 事实且有到期时间，财务记录保留 3 年（[DATA-ERASURE 实施说明](tasks/DATA-ERASURE.md)）。PAY-WAFFO 方案要定义这条事实的保留和到期，并同步修改 DATA-ERASURE 的清理契约。**Gold 购买记录的保留期限由 Owner 在方案阶段确认。**
+        1. Gold 首购身份摘要（`gold_first_purchase`）在账号注销后的保留期限和清理契约：现行 DATA-ERASURE 规则只允许保留开户赠送的 HMAC 事实且有到期时间，财务记录保留 3 年（[DATA-ERASURE 实施说明](tasks/DATA-ERASURE.md)）。PAY-WAFFO 方案要定义这条事实的保留和到期，并同步修改 DATA-ERASURE 的清理契约。**Gold 购买记录的保留期限由 Owner 在方案阶段确认。****已确认（[Owner 2026-10-09 批准](https://github.com/Crnobog9527/GraylumAI_vercel/pull/752#issuecomment-6084936526)）：保留至最后一笔 Gold 交易年度结束后 1 年，到期删除；DATA-ERASURE 清理契约由 PAY-WAFFO 实施 PR-1 同步。**
         2. ~~创始会员名额只在合约确认取消后才放回~~：**已由 [记录 V](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5981192614) 取代**，已售出的名额在任何情况下都不放回。验收改为确认退款、取消、续费失败都不会让名额放回，并且并发时不会超过 50 个。
         3. 工作室版"由 Owner 手动接单并调高单个客户的档案上限"，需要按客户单独覆盖上限（有上限范围）和后台入口；或者在工作室任务交付这个能力之前，"联系我们"只收集意向，不承诺额度。由 PAYWALL 方案确定。
 
