@@ -4,6 +4,7 @@ import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState, 
 import * as Dialog from '@radix-ui/react-dialog';
 import { trpc } from '@/trpc/client';
 import { VersionCompare } from './version-compare';
+import { ContentErasureDialog } from './content-erasure-dialog';
 import styles from './content-editor.module.css';
 
 export type ContentVersion={id:string;kind:string;version:number;status:string;title?:string|null;body:string|null;contentAvailable?:boolean;sourceContentId:string|null;executionId:string|null;requestId:string};
@@ -21,7 +22,7 @@ export const ContentEditor=forwardRef<ContentEditorHandle,{item:EditableItem;onS
  const key='opc-content-draft:'+item.workItemId+':'+kind;
  const pendingKey='opc-content-save:'+item.workItemId+':'+kind;
  const [draft,setDraft]=useState<Draft|null>(null),[pending,setPending]=useState(false),[error,setError]=useState(''),[saved,setSaved]=useState('');
- const [history,setHistory]=useState(false),[expanded,setExpanded]=useState(false);
+ const [history,setHistory]=useState(false),[expanded,setExpanded]=useState(false),[erasing,setErasing]=useState<{id:string;name:string}|null>(null);
  const expandedTrigger=useRef<HTMLButtonElement>(null),historyTrigger=useRef<HTMLButtonElement>(null);
  const mounted=useRef(false),expandedOpen=useRef(false);
  expandedOpen.current=expanded;
@@ -137,12 +138,18 @@ export const ContentEditor=forwardRef<ContentEditorHandle,{item:EditableItem;onS
      {pending&&<button onClick={()=>save('draft')} disabled={saveMutation.isPending}>恢复草稿同步</button>}
      <button ref={expandedTrigger} onClick={openExpanded}>展开编辑</button>
      <button ref={historyTrigger} onClick={()=>setHistory(true)}>历史版本</button>
+     {latest&&<button onClick={()=>setErasing({id:latest.id,name:(latest.title||item.title)+' · 全部版本'})}>永久删除稿件</button>}
     </div>
     {children}
    </>}
   </div>
   <footer><button className={styles.primary} onClick={()=>save('final')} disabled={pending||saveMutation.isPending||!item.sourceAvailable}>确认定稿{contentLabel}</button><p>修改会自动同步为草稿；定稿会另存正式版本，不等于发布。</p></footer>
   {expanded&&expandedDraft&&<Dialog.Root open onOpenChange={setExpanded}><Dialog.Overlay className={styles.backdrop}><Dialog.Content aria-label="编辑标题与正文" aria-describedby={undefined} className={styles.modal} onCloseAutoFocus={event=>{event.preventDefault();expandedTrigger.current?.focus();}}><header><Dialog.Title asChild><h2>编辑标题与正文</h2></Dialog.Title><button aria-label="关闭编辑" onClick={()=>setExpanded(false)}>×</button></header><div className={styles.modalFields}><label>稿件标题<input aria-label="展开编辑标题" value={expandedDraft.title} maxLength={160} onChange={event=>setExpandedDraft({...expandedDraft,title:event.target.value})}/></label><label>{contentLabel+'正文'}<textarea aria-label="展开编辑正文" value={expandedDraft.body} maxLength={20000} onChange={event=>setExpandedDraft({...expandedDraft,body:event.target.value})}/></label></div><footer><p>确认修改后会自动同步为草稿。</p><div><button onClick={()=>setExpanded(false)}>取消</button><button className={styles.primary} onClick={()=>{change(expandedDraft);setExpanded(false);}}>确认修改</button></div></footer></Dialog.Content></Dialog.Overlay></Dialog.Root>}
+  {erasing&&<ContentErasureDialog target={{kind:'content',id:erasing.id}} name={erasing.name}
+   onClose={finished=>{setErasing(null);if(!finished)return;
+    // The whole kind family is gone; local unsaved text must not recreate it.
+    try{localStorage.removeItem(key);localStorage.removeItem(pendingKey);}catch{/* Storage may be unavailable. */}
+    setDraft({baseVersion:0,sourceContentId:null,title:item.title,body:''});setSaved('');setError('');}}/>}
   {history&&<VersionCompare returnFocusRef={historyTrigger} versions={versions} onClose={()=>setHistory(false)}/>}
  </div>;
 });
