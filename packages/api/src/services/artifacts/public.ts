@@ -59,7 +59,7 @@ export const snapshotSchema = z.object({
       id: uuid,
       kind: z.string(),
       supersedes: uuid.nullable(),
-      hash: z.string(),
+      hash: z.string().nullable(),
       createdAt: z.string(),
       available: z.boolean(),
       payload: z.json(),
@@ -111,6 +111,7 @@ export const roundSchema = z.object({
 export type ArtifactProject = z.infer<typeof projectSchema>;
 export type ArtifactRound = z.infer<typeof roundSchema>;
 export const reportSchema = z.object({
+  sourceAvailable: z.boolean().optional(),
   available: z.boolean(),
   reason: z.string().optional(),
   version: z.number().optional(),

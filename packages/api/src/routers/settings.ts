@@ -90,7 +90,7 @@ const systemSettingInputSchema = z.object({
   if (setting.key === PAYMENT_CHANNEL_KEY && !paymentChannelSettingSchema.safeParse(setting.value).success) {
     ctx.addIssue({ code: 'custom', path: ['value'], message: '支付渠道或版本无效，请刷新后重试' });
   }
-  if (setting.key === RUNTIME_RATE_LIMIT_KEY) {
+  if ([RUNTIME_RATE_LIMIT_KEY, 'runtime_stop_loss'].includes(setting.key)) {
     ctx.addIssue({ code: 'custom', path: ['key'], message: '使用额度请通过专用管理接口保存' });
   }
   if (setting.key === PROVIDER_PRICES_KEY) {

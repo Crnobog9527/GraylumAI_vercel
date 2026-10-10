@@ -1,3 +1,4 @@
+import { throwIfContentErased } from '../accountErasure/content';
 import type { SupabaseClient } from '@supabase/supabase-js';
 export type OperationState = 'prepared'|'dispatched'|'succeeded'|'failed'|'unknown'|'cancelled';
 export interface OperationRecord {
@@ -26,6 +27,7 @@ export interface ResearchStore {
 export function databaseResearchStore(db:SupabaseClient, actorId:string):ResearchStore {
   const call=async(action:string,planId:string,operationId:string|null,payload:Record<string,unknown>={})=>{
     const {data,error}=await db.rpc('research_transition',{p_action:action,p_plan_id:planId,p_actor_id:actorId,p_operation_id:operationId,p_payload:payload});
+    throwIfContentErased(error);
     if(error)throw new Error('RESEARCH_STATE_UNAVAILABLE');
     return data;
   };
