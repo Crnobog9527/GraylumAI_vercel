@@ -213,3 +213,20 @@ export async function activateSkill(source: SkillSource, selection: PackageIdent
   await enabled(source, p);
   return new LoadedSkill(context, [...paths].map(path => ({ ...identityOf(p), path })), { packageId: p.packageId, revisionId: p.revisionId, ...metadata });
 }
+
+/** Read one host-selected resource without exposing the rest of the private Skill to another model. */
+export async function readSkillResource(source: SkillSource, selection: PackageIdentity,
+  path: string, maxBytes: number): Promise<string> {
+  if (!identitySchema.safeParse(selection).success) fail('INVALID_IDENTITY');
+  assertPath(path);
+  if (!Number.isSafeInteger(maxBytes) || maxBytes < 1 || maxBytes > 2 * 1024 * 1024) fail('CAPACITY_EXCEEDED');
+  const p = (await inventory(source)).find(candidate => sameIdentity(candidate, selection));
+  if (!p) fail('UNAVAILABLE');
+  await enabled(source, p);
+  const file = p.files.find(item => item.path === path);
+  if (!file) fail('RESOURCE_MISSING');
+  if (file.bytes > maxBytes) fail('CAPACITY_EXCEEDED');
+  const text = await readVerified(source, p, path);
+  await enabled(source, p);
+  return text;
+}
