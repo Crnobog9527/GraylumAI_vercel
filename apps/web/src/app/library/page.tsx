@@ -10,7 +10,10 @@ import { WorkspaceFrame } from '@/components/opc/workspace-frame';
 import { ContentEditor } from '@/components/opc/content-editor';
 import { VersionCompare } from '@/components/opc/version-compare';
 import { StrategyOverviewDialog } from '@/components/opc/strategy-overview-dialog';
+import { MyDocuments } from '@/components/library/my-documents';
 import styles from './library.module.css';
+
+type LibraryTab='topics'|'documents';
 
 type ContentVersion={id:string;title?:string|null;kind:'brief'|'script'|'storyboard'|'editing';version:number;status:'draft'|'final';body:string|null;contentAvailable:boolean;sourceContentId:string|null;executionId:string|null;requestId:string;createdAt:string};
 type Item={contentType?:string;workItemId:string;title:string;brief:string|null;day:string;createdAt?:string;lastActivityAt?:string;revision:number;sessionId:string;sourceAvailable:boolean;content:ContentVersion[];publication?:{revision:number;plannedDate:string|null;status:'unpublished'|'published';publishedDate:string|null;publishedVersion:number|null}};
@@ -61,6 +64,13 @@ function ItemCard({item,account,onSaved,focused}:{item:Item;account:Account;onSa
 }
 
 export default function LibraryPage(){
+ const [tab,setTab]=useState<LibraryTab>('topics');
+ useEffect(()=>{if(new URL(location.href).searchParams.get('tab')==='documents')setTab('documents');},[]);
+ function chooseTab(next:LibraryTab){
+  setTab(next);const url=new URL(location.href);
+  if(next==='documents')url.searchParams.set('tab','documents');else url.searchParams.delete('tab');
+  history.replaceState(history.state,'',url);
+ }
  const [search,setSearch]=useState(''),[selectedProject,setSelectedProject]=useState(''),[statusFilter,setStatusFilter]=useState<'all'|'new'|'draft'|'final'|'published'>('all'),[sortOrder,setSortOrder]=useState<'updated'|'created'|'scheduled'>('updated'),[page,setPage]=useState(1),[error,setError]=useState(''),[returnHref,setReturnHref]=useState('/positioning'),[focusedItemId,setFocusedItemId]=useState(''),[hydrated,setHydrated]=useState(false);
  const [strategyAccount,setStrategyAccount]=useState<(Account&{currentVersion?:number;profile?:Record<string,{label?:string;value?:string;status?:string}>|null})|null>(null);
  const scroll=useRef(0),contentRef=useRef<HTMLDivElement>(null);
@@ -80,8 +90,12 @@ export default function LibraryPage(){
  const pages=Math.max(1,Math.ceil(rows.length/15));const currentPage=Math.min(page,pages);const pagedRows=rows.slice((currentPage-1)*15,currentPage*15);
  return <WorkspaceFrame area="library"><main className={styles.page}>
   <header className={styles.header}><h1>资料库</h1><Link aria-label="返回当前工作" href={returnHref}>返回当前工作 →</Link></header>
-  <p className={styles.intro}>按平台和账号查看已采用选题、稿件和当前定位。</p>
-  <div className={styles.catalog}>
+  <nav className={styles.tabs} role="tablist" aria-label="资料库分类">
+   <button type="button" role="tab" aria-selected={tab==='topics'} onClick={()=>chooseTab('topics')}>选题与稿件</button>
+   <button type="button" role="tab" aria-selected={tab==='documents'} onClick={()=>chooseTab('documents')}>我的文档</button>
+  </nav>
+  <p className={styles.intro}>{tab==='documents'?'上传和管理你自己写的文章和参考资料。':'按平台和账号查看已采用选题、稿件和当前定位。'}</p>
+  {tab==='documents'?<MyDocuments/>:<div className={styles.catalog}>
    <nav className={styles.catalogNav} aria-label="资料库平台与账号"><button type="button" aria-current={!selectedProject?'page':undefined} onClick={()=>{setSelectedProject('');setPage(1);}}>全部选题 <span>{count(accounts.reduce((n,a)=>n+a.items.length,0))}</span></button>{[...new Set(accounts.map(account=>account.platform))].map(platform=><div key={platform} className={styles.platform}><strong>{platform}<span>{count(accounts.filter(account=>account.platform===platform).reduce((n,a)=>n+a.items.length,0))}</span></strong>{accounts.filter(account=>account.platform===platform).map(account=><button key={account.projectId} type="button" aria-current={selectedProject===account.projectId?'page':undefined} onClick={()=>{setSelectedProject(account.projectId);setPage(1);}}>{(account.displayName??account.account)}<span>{count(account.items.length)}</span></button>)}</div>)}</nav>
    <div ref={contentRef} className={styles.catalogContent} onScroll={event=>{scroll.current=event.currentTarget.scrollTop;if(hydrated)sessionStorage.setItem('opc-library-view',JSON.stringify({search,selectedProject,statusFilter,sortOrder,page,scrollTop:scroll.current}));}}>
     <div className={styles.scopeHead}><div><h2>{selectedAccount?selectedAccount.platform+' · '+(selectedAccount.displayName??selectedAccount.account):'全部选题'}</h2><p>{count(rows.length)} 个选题 · {count(selectedAccount?1:accounts.length)} 个账号{selectedAccount?' · '+stageLabel[selectedAccount.stage]:''}</p></div>{selectedAccount&&<div className={styles.scopeActions}><button onClick={()=>setStrategyAccount({...selectedAccount,currentVersion:selectedAccount.sourceVersion??undefined})}>修改定位</button><Link href={'/positioning?account='+selectedAccount.projectId}>新建对话</Link><select aria-label={'当前阶段 '+(selectedAccount.displayName??selectedAccount.account)} value={selectedAccount.stage} onChange={event=>updateStage(selectedAccount,event.target.value as Account['stage'])}>{Object.entries(stageLabel).map(([value,label])=><option key={value} value={value}>{label}</option>)}</select></div>}</div>
@@ -96,6 +110,6 @@ export default function LibraryPage(){
     <footer className={styles.pagination}><span>显示 {count(rows.length?(currentPage-1)*15+1:0)}–{count(Math.min(currentPage*15,rows.length))} / {count(rows.length)} 条</span><div><button disabled={!libraryReady||currentPage<=1} onClick={()=>setPage(currentPage-1)}>上一页</button><span>{count(currentPage)} / {count(pages)}</span><button disabled={!libraryReady||currentPage>=pages} onClick={()=>setPage(currentPage+1)}>下一页</button></div></footer>
     <p className={styles.catalogNote}>“已发布”独立于稿件状态；修订草稿不会改变旧版的发布记录。预计日期不代表自动发布。</p>
    </div>
-  </div>
+  </div>}
  </main>{strategyAccount?.strategyDraftId&&strategyAccount.sourceVersionId&&<StrategyOverviewDialog account={{projectId:strategyAccount.projectId,platform:strategyAccount.platform,account:(strategyAccount.displayName??strategyAccount.account),strategyDraftId:strategyAccount.strategyDraftId,pendingStrategyDraftId:strategyAccount.pendingStrategyDraftId,sourceVersionId:strategyAccount.sourceVersionId,currentVersion:strategyAccount.currentVersion,profile:strategyAccount.profile}} onSaved={async()=>{const fresh=await library.refetch();const updated=(fresh.data?.businesses??[] as Business[]).flatMap((business:Business)=>business.accounts).find((account:Account)=>account.projectId===strategyAccount.projectId);if(updated)setStrategyAccount({...updated,currentVersion:updated.sourceVersion??undefined});}} onClose={()=>setStrategyAccount(null)}/>}</WorkspaceFrame>;
 }

@@ -42,3 +42,6 @@ it('retains successful populated counts and existing item rendering',()=>{
  expect(text).toContain('1 个选题 · 1 个账号');expect(text).toContain('显示 1–1 / 1 条');
  expect(html).toContain('待创作 <span>1</span>');expect(text).toContain('合成保存选题');expect(text).toContain('测试账号');
 });
+it('offers the 我的文档 tab next to the topics view, topics first',()=>{
+ const {html}=render();expect(html).toContain('aria-selected="true">选题与稿件</button>');expect(html).toContain('aria-selected="false">我的文档</button>');
+});
