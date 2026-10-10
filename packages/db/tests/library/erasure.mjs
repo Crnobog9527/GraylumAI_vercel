@@ -6,6 +6,7 @@ export async function verifyErasure(admin, service, word = false) {
   await admin.query('INSERT INTO profiles(id,credits) VALUES($1,73)', [actor]);
   const doc = (await service.query("SELECT library_upload_begin($1,$2,$3,$4,'reference',5) v",
     [actor, randomUUID(), word ? 'private.docx' : 'private.txt', word ? 'docx' : 'txt'])).rows[0].v.documentId;
+  if (word) await service.query('SELECT library_word_text_begin($1,$2,5)', [actor,doc]);
   await service.query(word ? 'SELECT library_word_publish($1,$2,5,5,$3)' : 'SELECT library_publish($1,$2,5,$3)', [actor, doc, JSON.stringify([{ title: '', body: 'hello' }])]);
   // Establish actual closed-account state without bypassing any guards/FKs.
   await admin.query("UPDATE profiles SET status='deleted',is_deleted='true' WHERE id=$1", [actor]);

@@ -24,9 +24,12 @@ Word 原文件与 UTF-8 纯文本分别直传，标题元数据由服务端校�
 - `library.segments({ documentId, version, start, count? })` 从零基序号 start 起返回最多 count 段，
   默认 1，最大 50；越过末尾返回空数组。旧版本返回 `LIBRARY_VERSION_CHANGED`。
 - `library.beginWordUpload({ requestId, filename, contentType, bytes, purpose })`：contentType 固定 Word MIME，
-  filename 必须 `.docx`。返回 `uploads: { original, text } | null`，每项沿用签名上传返回结构。
-  两路径均先占 10,000,000 字节；同请求重试仅返回状态，不重签令牌。`uploads=null` 时不能另发直传。
-- 浏览器将原 docx 直传 original（Word MIME），提取后的 UTF-8 字节直传 text（`text/plain`）。
+  filename 必须 `.docx`。只返回原文件的 `upload`（沿用签名上传结构），不同时发放 text 地址。
+  两路径均先占 10,000,000 字节；同请求重试仅返回状态，不重签令牌。`upload=null` 时不能另发直传。
+- 浏览器先将原 docx 直传 original（Word MIME），再调用 `library.beginWordTextUpload({ documentId })`。
+  服务端核验原件 ZIP 头/MIME/大小后，在锁内仅授予一次 text 路径；并发或重复调用不重签。
+  浏览器用第二步返回的 `upload` 将 UTF-8 字节直传 text（`text/plain`），再调用完成接口。
+  原件此时已存在，旧原件令牌因禁止覆盖不能改写它；其保护占用仍保留到期限结束，不声称撤销令牌。
   两个对象均限制 1–10,000,000 字节；纯文本不能包含 NUL，不接受文件 URL 或 HTML/XML 对象载荷。
   正文中的字面标记按普通文字保留，不解析、不执行。
 - `library.completeWordUpload({ documentId, headings: [{ offset, level, text }] })`：offset 是解码后 UTF-16
@@ -35,6 +38,7 @@ Word 原文件与 UTF-8 纯文本分别直传，标题元数据由服务端校�
   原文件只核对 MIME/大小/ZIP 头；只有 text 路径被完整读回，服务端不调用 Word 解析器。
   分段每段最多 8192 字节、总计最多 10,000,000 字节、最多 10,000 段，单行上限沿用 txt 的 65,536 字节。
 - 两对象和分段发布复用同一事务、用户锁和文档锁。标题随分段保存，不另建私有元数据存储。
+  申请前执行有界的本用户过期清理；第二阶段用现有 text_guard_until 原子认领，无新状态表。
   上传占用仍按可能写入上限保留；分段额外占用按现有规则检查；降级不允许扩大占用。
   成功发布的重复完成不读取 Storage；失败先标不可读，再走双路径清理。结果不明时沿用相同请求/文档 ID。
   旧 `completeUpload({documentId})` 不支持 Word，必须使用新完成接口。

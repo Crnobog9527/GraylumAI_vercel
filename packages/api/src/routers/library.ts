@@ -14,6 +14,7 @@ const procedure = protectedProcedure.use(async ({ ctx, next }) => {
 const document = z.object({ documentId: z.string().uuid() }).strict();
 export const libraryRouter = router({
   beginWordUpload: procedure.input(wordBeginInput).mutation(({ ctx, input }) => ctx.library.beginWord(input)),
+  beginWordTextUpload: procedure.input(document).mutation(({ ctx, input }) => ctx.library.beginWordText(input.documentId)),
   completeWordUpload: procedure.input(wordCompleteInput).mutation(({ ctx, input }) => ctx.library.completeWord(input)),
   beginUpload: procedure.input(beginInput).mutation(({ ctx, input }) => ctx.library.begin(input)),
   completeUpload: procedure.input(document).mutation(({ ctx, input }) => ctx.library.complete(input.documentId)),

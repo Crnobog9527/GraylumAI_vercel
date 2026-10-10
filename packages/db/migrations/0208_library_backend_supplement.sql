@@ -93,7 +93,7 @@ BEGIN
  VALUES(d.id,a,10000000,clock_timestamp()+interval '3 hours 5 minutes',path);
  IF f='docx' THEN
   UPDATE library_upload_reservations SET text_hold=10000000,text_path=a::text||'/'||d.id::text||'/text',
-   text_guard_until=original_guard_until WHERE document_id=d.id;
+   text_guard_until=NULL WHERE document_id=d.id;
  END IF;
  RETURN jsonb_build_object('documentId',d.id,'dispatch',true,'path',path,'textPath',CASE WHEN f='docx' THEN a::text||'/'||d.id::text||'/text' END,'status',d.status);
 END $$;
@@ -107,7 +107,31 @@ BEGIN
  IF d.id IS NULL OR d.deleted_at IS NOT NULL OR d.status IN ('deleting','failed')
   OR (require_ready AND d.status<>'ready') THEN RAISE EXCEPTION 'LIBRARY_NOT_FOUND'; END IF;
  SELECT * INTO r FROM library_upload_reservations WHERE document_id=did;
- RETURN to_jsonb(d)||jsonb_build_object('path',r.original_path,'guardUntil',r.original_guard_until,'textPath',r.text_path);
+ RETURN to_jsonb(d)||jsonb_build_object('path',r.original_path,'guardUntil',r.original_guard_until,'textPath',r.text_path,'textGuardUntil',r.text_guard_until);
+END $$;
+
+-- Stage two: one caller may dispatch text, only after the service has inspected the uploaded original.
+-- The already-existing original cannot be overwritten by its old upsert=false token.
+CREATE OR REPLACE FUNCTION public.library_word_text_begin(a uuid,did uuid,actual bigint)
+RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
+DECLARE d library_documents; r library_upload_reservations;
+BEGIN
+ PERFORM library_actor(a);
+ SELECT * INTO d FROM library_documents WHERE id=did AND actor_id=a FOR UPDATE;
+ IF d.id IS NULL OR d.deleted_at IS NOT NULL OR d.status NOT IN ('uploading','ready')
+  THEN RAISE EXCEPTION 'LIBRARY_NOT_FOUND'; END IF;
+ IF d.format IS DISTINCT FROM 'docx' THEN RAISE EXCEPTION 'LIBRARY_TYPE'; END IF;
+ SELECT * INTO r FROM library_upload_reservations WHERE document_id=did FOR UPDATE;
+ IF d.status='ready' OR r.text_guard_until IS NOT NULL THEN
+  RETURN jsonb_build_object('documentId',did,'status',d.status,'dispatch',false); END IF;
+ IF NOT EXISTS(SELECT 1 FROM system_settings WHERE key='library_upload_enabled' AND value::jsonb='true'::jsonb)
+  THEN RAISE EXCEPTION 'LIBRARY_DISABLED'; END IF;
+ IF actual IS NULL OR actual NOT BETWEEN 1 AND 10000000 OR r.text_path IS NULL OR r.text_hold<>10000000
+  THEN RAISE EXCEPTION 'LIBRARY_INVALID'; END IF;
+ UPDATE library_documents SET original_bytes=actual WHERE id=did;
+ UPDATE library_upload_reservations SET text_guard_until=clock_timestamp()+interval '3 hours 5 minutes'
+  WHERE document_id=did;
+ RETURN jsonb_build_object('documentId',did,'status',d.status,'dispatch',true,'path',r.text_path);
 END $$;
 
 -- Only the trusted service supplies validated UTF-8 segments; both objects remain fully held while writable.
@@ -178,9 +202,11 @@ END $$;
 
 -- Explicit permissions for every new RPC, including on repeat application.
 REVOKE ALL ON FUNCTION public.library_list_page(uuid,timestamptz,uuid),public.library_directory(uuid,uuid,integer),
- public.library_segments_range(uuid,uuid,integer,integer,integer),public.library_word_publish(uuid,uuid,bigint,bigint,jsonb)
+ public.library_segments_range(uuid,uuid,integer,integer,integer),public.library_word_publish(uuid,uuid,bigint,bigint,jsonb),
+ public.library_word_text_begin(uuid,uuid,bigint)
  FROM PUBLIC,anon,authenticated,service_role;
 GRANT EXECUTE ON FUNCTION public.library_list_page(uuid,timestamptz,uuid),public.library_directory(uuid,uuid,integer),
- public.library_segments_range(uuid,uuid,integer,integer,integer),public.library_word_publish(uuid,uuid,bigint,bigint,jsonb)
+ public.library_segments_range(uuid,uuid,integer,integer,integer),public.library_word_publish(uuid,uuid,bigint,bigint,jsonb),
+ public.library_word_text_begin(uuid,uuid,bigint)
  TO service_role;
 COMMIT;

@@ -68,6 +68,32 @@ export async function verifySupplement(admin, one, two) {
   const publish = (actor = b, total = bytes) => value(one, 'SELECT library_word_publish($1,$2,4,$3,$4) v', [actor, did, total, JSON.stringify(segments)]);
   await assert.rejects(publish(a), /LIBRARY_NOT_FOUND/);
   await assert.rejects(publish(b, bytes - 1), /LIBRARY_INVALID/);
+  await assert.rejects(publish(), /LIBRARY_INVALID/, 'cannot complete before the text grant');
+  assert.equal(await value(admin, 'SELECT text_guard_until v FROM library_upload_reservations WHERE document_id=$1', [did]), null);
+  await assert.rejects(one.query('SELECT library_word_text_begin($1,$2,4)', [a,did]), /LIBRARY_NOT_FOUND/);
+  await admin.query("UPDATE system_settings SET value='false' WHERE key='library_upload_enabled'");
+  await assert.rejects(one.query('SELECT library_word_text_begin($1,$2,4)', [b,did]), /LIBRARY_DISABLED/);
+  await admin.query("UPDATE system_settings SET value='true' WHERE key='library_upload_enabled'");
+  await admin.query('BEGIN');
+  await admin.query('SELECT id FROM profiles WHERE id=$1 FOR UPDATE', [b]);
+  const textGrants = Promise.all([
+    value(one, 'SELECT library_word_text_begin($1,$2,4) v', [b,did]),
+    value(two, 'SELECT library_word_text_begin($1,$2,4) v', [b,did]),
+  ]);
+  let textBlocked = false;
+  for (let i=0; i<500; i++) {
+    await admin.query('SELECT pg_stat_clear_snapshot()');
+    const n=await value(admin, "SELECT count(*)::int v FROM pg_stat_activity WHERE wait_event_type='Lock' AND query LIKE 'SELECT library_word_text_begin%'");
+    if(n===2) { textBlocked=true; break; }
+    await new Promise(r=>setTimeout(r,10));
+  }
+  assert.ok(textBlocked);
+  await admin.query('COMMIT');
+  const granted = await textGrants;
+  assert.equal(granted.filter(g=>g.dispatch).length,1, 'concurrent text stage issues exactly one grant');
+  assert.equal(granted.find(g=>g.dispatch).path, grant.textPath);
+  assert.equal((await value(one,'SELECT library_word_text_begin($1,$2,4) v',[b,did])).dispatch,false);
+  assert.equal(await value(admin,'SELECT library_usage($1) v',[b]),'20000000', 'text grant consumes pre-reserved hold');
   await admin.query("UPDATE membership_plans SET library_storage_bytes=20000000 WHERE level='free'");
   await assert.rejects(publish(), /LIBRARY_SPACE/);
   assert.equal(await value(admin, 'SELECT count(*)::int v FROM library_document_segments WHERE document_id=$1', [did]), 0);
@@ -108,6 +134,7 @@ export async function verifySupplement(admin, one, two) {
   await one.query('SELECT library_delete($1,$2)', [b,did]);
   await assert.rejects(one.query('SELECT library_directory($1,$2,1)', [b,did]), /LIBRARY_NOT_FOUND/);
   await assert.rejects(publish(), /LIBRARY_NOT_FOUND/);
+  await assert.rejects(one.query('SELECT library_word_text_begin($1,$2,4)', [b,did]), /LIBRARY_NOT_FOUND/);
   assert.equal(await value(one, 'SELECT library_cleanup_observe($1,$2,true) v', [b,did]), false);
   assert.equal(await value(admin, 'SELECT count(*)::int v FROM library_document_segments WHERE document_id=$1', [did]), 0);
   await admin.query("UPDATE library_upload_reservations SET text_guard_until=now()-interval '1 minute' WHERE document_id=$1", [did]);
@@ -119,7 +146,7 @@ export async function verifySupplement(admin, one, two) {
   assert.equal(await value(admin, 'SELECT library_usage($1) v', [b]), '0');
   for (const role of ['anon', 'authenticated']) {
     await two.query(`SET ROLE ${role}`);
-    for (const call of ['library_list_page($1)', 'library_directory($1,$2,1)',
+    for (const call of ['library_list_page($1)', 'library_word_text_begin($1,$2,4)', 'library_directory($1,$2,1)',
       'library_segments_range($1,$2,1)', "library_word_publish($1,$2,4,1,'[]')"]) {
       await assert.rejects(two.query(`SELECT ${call}`, call.includes('$2') ? [a,did] : [a]), /permission denied/);
     }

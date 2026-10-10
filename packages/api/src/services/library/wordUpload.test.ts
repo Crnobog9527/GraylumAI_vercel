@@ -12,12 +12,13 @@ const begin = { requestId: id, filename: 'a.docx', contentType: WORD_MIME, bytes
 let rpc: ReturnType<typeof vi.fn>;
 let client: SupabaseClient;
 let storage: LibraryStorage;
-let doc: { format: string; status: string; path: string; textPath: string };
+let doc: { format: string; status: string; path: string; textPath: string; textGuardUntil: string | null };
 beforeEach(() => {
-  doc = { format: 'docx', status: 'uploading', path, textPath };
+  doc = { format: 'docx', status: 'uploading', path, textPath, textGuardUntil: new Date().toISOString() };
   rpc = vi.fn(async (name: string) => {
     if (name === 'library_document_read') return { data: doc };
     if (name === 'library_upload_begin') return { data: { documentId: id, dispatch: true, status: 'uploading', path, textPath } };
+    if (name === 'library_word_text_begin') return { data: { documentId: id, dispatch: true, status: 'uploading', path: textPath } };
     if (name === 'library_cleanup_candidates') return { data: [] };
     return { data: { documentId: id, status: 'ready' } };
   });
@@ -29,16 +30,20 @@ beforeEach(() => {
     absent: vi.fn(), remove: vi.fn(), scan: vi.fn(), signRead: vi.fn(),
   } as unknown as LibraryStorage;
 });
-it('holds both paths before signing and returns named original/text uploads', async () => {
+it('reserves both paths but only signs original after bounded cleanup', async () => {
   const result = await libraryService(client, a, storage).beginWord(begin);
   expect(rpc).toHaveBeenCalledWith('library_upload_begin', { a, r: id, n: 'a.docx', f: 'docx', p: 'reference', declared: 4 });
   expect(storage.signUpload).toHaveBeenNthCalledWith(1, path);
-  expect(storage.signUpload).toHaveBeenNthCalledWith(2, textPath);
-  expect(result.uploads?.text.path).toBe(textPath);
+  expect(storage.signUpload).toHaveBeenCalledTimes(1);
+  expect(result.upload?.path).toBe(path);
+  expect(rpc.mock.calls.findIndex(c => c[0] === 'library_cleanup_candidates')).toBeLessThan(
+    rpc.mock.calls.findIndex(c => c[0] === 'library_upload_begin'));
+  expect(rpc).toHaveBeenCalledWith('library_cleanup_candidates', { a, did: null, n: 4 });
 });
 it('never reissues either token on repeat admission', async () => {
-  rpc.mockResolvedValue({ data: { documentId: id, status: 'uploading', dispatch: false } });
-  expect((await libraryService(client, a, storage).beginWord(begin)).uploads).toBeNull();
+  rpc.mockImplementation(async (name: string) => ({ data: name === 'library_cleanup_candidates' ? []
+    : { documentId: id, status: 'uploading', dispatch: false } }));
+  expect((await libraryService(client, a, storage).beginWord(begin)).upload).toBeNull();
   expect(storage.signUpload).not.toHaveBeenCalled();
 });
 it('partial signing failure marks both paths for guarded cleanup', async () => {
@@ -83,4 +88,31 @@ it('binds all read interfaces to actor/version and preserves timestamp cursor pr
   expect(rpc).toHaveBeenCalledWith('library_list_page', { a, after_id: id, after_created_at: '2026-10-10T12:00:00.123456+00:00' });
   expect(rpc).toHaveBeenCalledWith('library_directory', { a, did: id, ver: 2 });
   expect(rpc).toHaveBeenCalledWith('library_segments_range', { a, did: id, ver: 2, start_at: 50, count_limit: 20 });
+});
+
+it('issues text only after original inspection, using an independently guarded atomic grant', async () => {
+  doc.textGuardUntil = null;
+  const result = await libraryService(client, a, storage).beginWordText(id);
+  expect(storage.inspect).toHaveBeenCalledWith(path, false);
+  expect(rpc).toHaveBeenCalledWith('library_word_text_begin', { a, did: id, actual: 400 });
+  expect(storage.signUpload).toHaveBeenCalledExactlyOnceWith(textPath);
+  expect(result.upload?.path).toBe(textPath);
+});
+it('does not grant text for missing/invalid original and allows a later retry', async () => {
+  doc.textGuardUntil = null;
+  vi.mocked(storage.inspect).mockRejectedValueOnce(new Error('LIBRARY_STORAGE_UNAVAILABLE'));
+  await expect(libraryService(client, a, storage).beginWordText(id)).rejects.toThrow('LIBRARY_STORAGE_UNAVAILABLE');
+  expect(storage.signUpload).not.toHaveBeenCalled();
+  expect(rpc.mock.calls.some(c => c[0] === 'library_word_text_begin' || c[0] === 'library_delete')).toBe(false);
+});
+it('second-stage retry never remints a text token', async () => {
+  expect((await libraryService(client, a, storage).beginWordText(id)).upload).toBeNull();
+  expect(storage.inspect).not.toHaveBeenCalled();
+  expect(storage.signUpload).not.toHaveBeenCalled();
+});
+it('completion before text stage cannot publish or discard the first-stage upload', async () => {
+  doc.textGuardUntil = null;
+  await expect(libraryService(client, a, storage).completeWord({ documentId: id, headings: [] })).rejects.toThrow('LIBRARY_UPLOAD_INCOMPLETE');
+  expect(storage.inspect).not.toHaveBeenCalled();
+  expect(rpc.mock.calls.some(c => c[0] === 'library_delete')).toBe(false);
 });
