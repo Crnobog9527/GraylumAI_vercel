@@ -70,9 +70,30 @@ export async function sourceCases({admin}) {
     const quoted=(await admin.query(`SELECT o.* FROM pay_waffo_create_purchase($1,'credit_package',$2,'one_time',
       'alipay','standard','fixture','test',3,'terms-v1',NULL) o`,[user,pack])).rows[0];
     assert.equal(quoted.amount_total,890);
+    if(channel==='waffo' && cycle==='monthly') for(const externalMode of ['test','live',null]) {
+      const returning=randomUUID(),stale=randomUUID(),external=randomUUID();
+      await admin.query("INSERT INTO profiles(id,membership_level) VALUES($1,'gold')",[returning]);
+      await admin.query(`INSERT INTO user_subscriptions(id,user_id,membership_plan_id,billing_cycle,status,
+        current_period_start,current_period_end,payment_channel,merchant_namespace,payment_mode,contract_snapshot)
+        VALUES($1,$2,$3,'monthly','canceled',now()-interval '2 months',now()-interval '1 month','waffo','fixture','test',$4)`,
+        [stale,returning,plan,snap]);
+      if(externalMode) {
+        await admin.query(`INSERT INTO user_subscriptions(id,user_id,membership_plan_id,stripe_subscription_id,status,
+          current_period_start,current_period_end,payment_channel,merchant_namespace,payment_mode,contract_snapshot)
+          VALUES($1,$2,$3,$4,'active',now()-interval '1 day',now()+interval '1 month','stripe','fixture',$5,$6)`,
+          [external,returning,plan,`sub_${external}`,externalMode,snap]);
+        await admin.query(`INSERT INTO payment_provider_refs(channel,merchant_namespace,mode,object_type,external_id,subscription_id)
+          VALUES('stripe','fixture',$1,'subscription',$2,$3)`,[externalMode,`sub_${external}`,external]);
+      }
+      const purchase=()=>admin.query(`SELECT o.* FROM pay_waffo_create_purchase($1,'credit_package',$2,'one_time',
+        'alipay','standard','fixture','test',3,'terms-v1',NULL) o`,[returning,pack]);
+      if(externalMode==='test') assert.equal((await purchase()).rows[0].amount_total,890);
+      else await assert.rejects(purchase,/MEMBERSHIP_REQUIRED/);
+    }
     await admin.query("UPDATE subscription_credit_grants SET accounting_state='review_required',accounting_review_reason='refund review' WHERE id=$1",[grant]);
     await assert.rejects(()=>rpc('bill2_prepare',[user,randomUUID(),payload]));
   }
   return ['waffo-month-bill2-reserve-settle-release','waffo-year-bill2-reserve-settle-release',
-    'wallet-year-bill2-reserve-settle-release','source-refund-review-isolation','internal-member-wallet-pack-eligibility','frozen-source-amount-guard'];
+    'wallet-year-bill2-reserve-settle-release','source-refund-review-isolation','internal-member-wallet-pack-eligibility','frozen-source-amount-guard',
+    'external-member-after-internal-expiry','stale-internal-only-denied','cross-mode-membership-denied'];
 }

@@ -433,8 +433,7 @@ BEGIN
     IF p_offer<>'standard' OR actor.membership_level NOT IN ('pro','gold') THEN
       RAISE EXCEPTION 'PAY_WAFFO_MEMBERSHIP_REQUIRED' USING ERRCODE='23514';
     END IF;
-    IF EXISTS(SELECT 1 FROM user_subscriptions WHERE user_id=p_user AND stripe_subscription_id IS NULL) THEN
-      IF NOT EXISTS(SELECT 1 FROM user_subscriptions sub JOIN membership_plans plan ON plan.id=sub.membership_plan_id
+    IF NOT EXISTS(SELECT 1 FROM user_subscriptions sub JOIN membership_plans plan ON plan.id=sub.membership_plan_id
         JOIN payment_orders paid ON paid.subscription_id=sub.id AND paid.user_id=sub.user_id
         WHERE sub.user_id=p_user AND sub.payment_mode=p_mode AND sub.stripe_subscription_id IS NULL
           AND sub.current_period_start<=now() AND sub.current_period_end>now()
@@ -443,9 +442,14 @@ BEGIN
           AND paid.merchant_namespace=sub.merchant_namespace AND paid.payment_status='paid'
           AND paid.status='completed' AND paid.fulfilled_at IS NOT NULL AND paid.qualification_state='sold'
           AND paid.entitlement_start<=now() AND paid.entitlement_end>now()) THEN
+      -- Historical internal rows do not hide a valid membership from the original Stripe source.
+      IF NOT EXISTS(SELECT 1 FROM user_subscriptions sub JOIN membership_plans plan ON plan.id=sub.membership_plan_id
+        WHERE sub.user_id=p_user AND sub.payment_channel='stripe' AND sub.payment_mode=p_mode
+          AND sub.stripe_subscription_id IS NOT NULL AND plan.level=actor.membership_level
+          AND sub.current_period_start<=now() AND sub.current_period_end>now()
+          AND sub.status IN ('active','trialing')) THEN
         RAISE EXCEPTION 'PAY_WAFFO_MEMBERSHIP_REQUIRED' USING ERRCODE='23514';
       END IF;
-    ELSE
       PERFORM pay_common_assert_purchase_facts(p_user,p_item_type,actor.membership_level);
     END IF;
     SELECT to_jsonb(p) INTO product FROM credit_packages p WHERE id=p_item AND active='true' FOR SHARE;

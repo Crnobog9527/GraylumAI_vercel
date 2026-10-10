@@ -2245,6 +2245,22 @@ describe('stripe fulfillment helpers', () => {
     // This fixture exposes no update/insert path. SQL checkout-persistence covers terminal-state retention.
   });
 
+  it('records the exact checkout when its external ID exists in both modes', async () => {
+    const { session, rpc, order } = checkoutReceiptFixture();
+    const refs = ['test', 'live'].map(mode => ({ order_id: mode === 'test' ? order.id : 'other-order', mode,
+      channel: 'stripe', merchant_namespace: 'acct_fixture', object_type: 'checkout', external_id: session.id }));
+    const filters: Record<string, unknown> = {};
+    const query = { select: () => query, eq: (key: string, value: unknown) => { filters[key] = value; return query; },
+      maybeSingle: async () => {
+        const matches = refs.filter(ref => Object.entries(filters).every(([key, value]) => ref[key as keyof typeof ref] === value));
+        return matches.length === 1 ? { data: matches[0], error: null } : { data: null, error: { code: 'PGRST116' } };
+      } };
+    await upsertPaymentOrderBySession({ from: () => query, rpc }, session);
+    expect(rpc).toHaveBeenCalledExactlyOnceWith('pay_common_record_checkout', expect.objectContaining({
+      p_order_id: order.id, p_payment_mode: 'test',
+    }));
+  });
+
   it('closes expired checkout only through the protected closure transaction without fulfillment', async () => {
     const { session, rpc, supabase, order } = checkoutReceiptFixture('expired');
     providerState.checkout.mockClear();

@@ -1506,7 +1506,7 @@ export async function upsertPaymentOrderBySession(
   const authoritative = await stripe.checkout.sessions.retrieve(session.id);
   if (authoritative.id !== session.id) throw new Error('PAY_COMMON_ATTEMPT_IDENTITY_MISMATCH');
   const mapped = await supabase.from('payment_provider_refs').select('order_id, mode')
-    .eq('channel', 'stripe').eq('merchant_namespace', scope.merchant)
+    .eq('channel', 'stripe').eq('merchant_namespace', scope.merchant).eq('mode', scope.mode)
     .eq('object_type', 'checkout').eq('external_id', authoritative.id).maybeSingle();
   if (mapped.error) throw new Error('PAY_COMMON_MAPPING_READ_FAILED', { cause: mapped.error });
   if (mapped.data && mapped.data.mode !== scope.mode) throw new Error('PAY_COMMON_ATTEMPT_IDENTITY_MISMATCH');
