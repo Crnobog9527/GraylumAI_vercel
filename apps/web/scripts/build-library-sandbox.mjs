@@ -6,6 +6,7 @@
 
 import { build } from 'esbuild';
 import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
+import { createRequire } from 'node:module';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
@@ -26,6 +27,28 @@ function packageRoots(inputs) {
     roots.add(path.resolve(webRoot, parts.slice(0, index + 1 + size).join('/')));
   }
   return [...roots].sort();
+}
+
+/**
+ * Adds every production dependency of the bundled packages: some ship prebuilt files that already
+ * contain their dependencies (JSZip's dist includes pako), so their notices must be listed too.
+ */
+async function withDependencies(roots) {
+  const all = new Set(roots);
+  const queue = [...roots];
+  while (queue.length) {
+    const root = queue.pop();
+    const manifest = JSON.parse(await readFile(path.join(root, 'package.json'), 'utf8'));
+    const require = createRequire(path.join(root, 'package.json'));
+    for (const name of Object.keys(manifest.dependencies ?? {})) {
+      const dependency = path.dirname(require.resolve(`${name}/package.json`));
+      if (!all.has(dependency)) {
+        all.add(dependency);
+        queue.push(dependency);
+      }
+    }
+  }
+  return [...all].sort((a, b) => path.basename(a).localeCompare(path.basename(b)));
 }
 
 async function licenseText(root) {
@@ -59,7 +82,7 @@ export async function buildLibrarySandbox({ outdir = path.join(webRoot, 'public/
       define: { 'process.env.NODE_ENV': '"production"' },
       banner: { js: `/* Graylum library sandbox worker. Third-party licenses: ${name}.licenses.txt */` },
     });
-    const roots = packageRoots(Object.keys(output.metafile.inputs));
+    const roots = await withDependencies(packageRoots(Object.keys(output.metafile.inputs)));
     const licenses = (await Promise.all(roots.map(licenseText))).join('\n---\n\n');
     results[name] = { code: output.outputFiles[0].text, licenses };
     if (outdir) {
