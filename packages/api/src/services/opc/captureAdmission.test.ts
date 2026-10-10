@@ -118,3 +118,26 @@ it('uses frozen step validity rather than the earlier snapshot and preserves leg
   .service.prepareStep(request);
  expect(captured.policy!.hostTurnContext!.confirmation).toMatchObject({stepConfirmed:true,stepReady:false});
 });
+
+it('summary freezes missing fields and preserves confirmation without an extractor or writes',async()=>{
+ const f=fixture(null,null,{valid:false,information:{}});
+ await f.service.prepareStep({...request,input:'HOST_STEP_SUMMARY:v1',questionId:undefined,organizeAfter:false});
+ expect(captured.policy!.hostTurnContext).toMatchObject({stepSummary:{kind:'step_summary',missingRequiredFieldIds:['goal','audience']},
+  confirmation:{requiredComplete:false,stepConfirmed:false}});
+ expect(captured.policy!.additionalInstructions).toContain('write the step summary now');
+ expect(captured.policy!.additionalInstructions!.length).toBeLessThanOrEqual(8000);
+ expect(captured.policy!.organizerInstructions).toBeUndefined();expect(captured.policy!.maxCalls).toBe(2);
+ for(const name of ['artifact_transition','opc_information'])expect(f.reads).not.toContain(name);
+ const replay=fixture(null,{executionId:sourceId});
+ expect(await replay.service.prepareStep({...request,input:'HOST_STEP_SUMMARY:v1',questionId:undefined,organizeAfter:false}))
+  .toEqual({executionId:sourceId});
+ expect(replay.reads).not.toContain('opc_capture_apply');
+});
+it('summary mixed with organizer or answer identity fails before any database admission',async()=>{
+ for(const change of [{organizeAfter:true},{questionId:'goal'},{purpose:'step'}]){
+  const f=fixture();
+  await expect(f.service.prepareStep({...request,input:'HOST_STEP_SUMMARY:v1',questionId:undefined,organizeAfter:false,...change}))
+   .rejects.toThrow('OPC_STEP_SUMMARY_INVALID');
+  expect(f.reads).toEqual([]);
+ }
+});
