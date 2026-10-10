@@ -106,6 +106,27 @@ BEGIN
  RETURN v;
 END $$;
 
+-- The deployment may temporarily contain old service-role API instances. Reject their
+-- direct full-row writes before acquiring the admission lock. Only postgres-owned
+-- SECURITY DEFINER RPCs can mutate these keys; role grants alone cannot bypass this.
+CREATE OR REPLACE FUNCTION public.runtime_stop_loss_settings_guard() RETURNS trigger
+LANGUAGE plpgsql SET search_path=public,pg_temp AS $$
+BEGIN
+ IF (TG_OP<>'INSERT' AND OLD.key IN ('runtime_stop_loss','runtime_rate_limits'))
+  OR (TG_OP<>'DELETE' AND NEW.key IN ('runtime_stop_loss','runtime_rate_limits')) THEN
+  IF current_user<>'postgres' THEN
+   RAISE EXCEPTION 'RUNTIME_SETTINGS_DEDICATED_WRITE_REQUIRED' USING ERRCODE='42501';
+  END IF;
+  PERFORM pg_advisory_xact_lock(201,1);
+ END IF;
+ IF TG_OP='DELETE' THEN RETURN OLD;END IF;
+ RETURN NEW;
+END $$;
+-- Bind the approved writer identity explicitly, independent of the migration session role.
+ALTER FUNCTION public.runtime_set_stop_new_calls(boolean) OWNER TO postgres;
+ALTER FUNCTION public.runtime_update_rate_limits(jsonb) OWNER TO postgres;
+ALTER FUNCTION public.runtime_update_stop_loss(jsonb,bigint) OWNER TO postgres;
+
 REVOKE ALL ON FUNCTION public.runtime_rate_limits_patch(jsonb),
  public.runtime_set_stop_new_calls(boolean),public.runtime_update_rate_limits(jsonb),
  public.runtime_update_stop_loss(jsonb,bigint) FROM PUBLIC,anon,authenticated,service_role;

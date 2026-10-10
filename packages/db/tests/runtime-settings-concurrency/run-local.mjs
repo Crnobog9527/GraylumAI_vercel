@@ -16,7 +16,7 @@ const setting = key => call(c, 'SELECT value v FROM system_settings WHERE key=$1
 const reset = () => c.query("DELETE FROM system_settings WHERE key IN ('runtime_rate_limits','runtime_stop_loss')");
 
 /** Prove overlap by observing the second backend blocked by the first, not a timing guess. */
-async function overlap(first, second) {
+async function overlap(first, second, requireWait = true) {
   const a = new pg.Client(c.connectionParameters), b = new pg.Client(c.connectionParameters);
   await a.connect(); await b.connect();
   let pending;
@@ -28,12 +28,13 @@ async function overlap(first, second) {
     assert.notEqual(pa, pb);
     pending = second(b).then(value => ({ value }), error => ({ error }));
     let blocked = false;
-    for (let i = 0; i < 150; i++) {
+    for (let i = 0; requireWait && i < 150; i++) {
       const row = (await c.query('SELECT pg_blocking_pids($1) blockers', [pb])).rows[0];
       if (row.blockers.includes(pa)) { blocked = true; break; }
       await new Promise(resolve => setTimeout(resolve, 10));
     }
-    assert.equal(blocked, true, 'second connection must wait on the first');
+    if (requireWait) assert.equal(blocked, true, 'second connection must wait on the first');
+    else assert.equal((await pending).error?.code, '42501', 'old writer must be rejected before lock acquisition');
     const value = await first(a);
     await a.query('COMMIT');
     return { value, other: await pending };
@@ -117,6 +118,31 @@ try {
     await c.query('SELECT runtime_stop_loss_assert(NULL,false)');
   }
   report.checks.push('stop and dollar cap overlap in both orders; existing runtime gate blocks and resumes');
+  // Rolling deployment: an old API instance uses service-role full-row upsert.
+  // Its stale snapshot must never undo a stop/resume or bypass stop-loss revision checks.
+  for (const key of ['runtime_rate_limits', 'runtime_stop_loss']) {
+    for (const exists of [false, true]) {
+      await reset();
+      if (exists) await (key === 'runtime_rate_limits' ? quota(c) : save(c, config, 0));
+      const stale = key === 'runtime_rate_limits' ? { version: 1, ...limits, stopNewCalls: false } : config;
+      const result = await overlap(key === 'runtime_rate_limits' ? a => stop(a, true)
+        : a => save(a, { ...config, siteDailyUsd: '7' }, exists ? 1 : 0), async b => {
+        await b.query('SET ROLE service_role');
+        return b.query('INSERT INTO system_settings(key,value) VALUES($1,$2) ON CONFLICT(key) DO UPDATE SET value=excluded.value',
+          [key, JSON.stringify(stale)]);
+      }, false);
+      assert.equal(result.other.error?.code, '42501');
+      if (key === 'runtime_rate_limits') assert.equal((await setting(key)).stopNewCalls, true);
+      else assert.equal((await setting(key)).siteDailyUsd, '7');
+    }
+  }
+  await c.query('SET ROLE service_role');
+  await assert.rejects(c.query("UPDATE system_settings SET key='renamed_setting' WHERE key='runtime_stop_loss'"),
+    error => error.code === '42501');
+  await c.query('RESET ROLE');
+  report.checks.push('rolling deployment: old service-role full upserts/renames denied; stop and revision survive');
+  await reset();
+  await save(c, config, 0);
   const before = await setting('runtime_stop_loss');
   await assert.rejects(save(c, { ...config, siteDailyUsd: '-1' }, 1), /INVALID/);
   assert.deepEqual(await setting('runtime_stop_loss'), before);
