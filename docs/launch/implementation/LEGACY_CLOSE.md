@@ -1,7 +1,8 @@
 # LEGACY-CLOSE 删除与功能对照
 
 状态：部分实施，**未完成 LEGACY-CLOSE，不合并**。
-基线 staging `c91c526d3c43fb5e0b28c2a0a1942b457590fa3a`。
+初始基线 staging `c91c526d3c43fb5e0b28c2a0a1942b457590fa3a`；
+按总控 2026-10-11 通知同步至 `ea5a693c8b7b99463ede5fd41588c4dec4ef118c`（#784 已合并）。
 授权：[#771 总控派发](https://github.com/Crnobog9527/GraylumAI_vercel/pull/771#issuecomment-6099912595)
 及本任务 Owner 指令；候选与交接以 #792 为准。
 风险 high：删除旧 API/代码及失效测试，需保留安全边界和新功能引用。
@@ -72,18 +73,18 @@
 ## 并行边界与阻塞
 
 - 未修改 runtime/execute.ts、opc/service.ts、在途 #782/#783/#784/#785/#788/#789 的文件。
-- `scripts/code-size-baseline.json` 与 #784 实际重叠：删除后基线必需缩减，已请求总控排顺序，尚未修改。
-  当前大小检查因此 FAIL；不是允许忽略的检查。
+- #784 已合并；按总控排定顺序同步 staging 后，删除 28 个失效大小基线条目并降低 workbench.ts 的 1 个条目，未提高限制。大小检查已通过。
+- 新开放 #794 与本 PR 已有的 apps/web/package.json 重叠；本 PR 仅删除 critical 测试脚本中的 chat.spec.ts，不再改该文件，合并顺序交总控安排。
 - billing.test.ts 的旧 stream 源码断言已在 PR 说明，待总控安排；未绕过断言。
 - modelRouter/旧 workbench/内容过滤仍有活跃引用，需总控安排后续退役；功能等价差异也未闭合。
 
 ## Handoff
 
 - 已完成：独立 worktree 及草稿 PR；删除上述独占旧实现/测试；记录保留引用、功能差异和数据库候选清单。
-- 下一步：总控安排共享基线及旧计费测试；决定活跃旧接口退役顺序与功能差异归属；继续删除受阻部分并刷新 CI/审查。
-- 已运行 PASS：API 全量 5931 通过/13 既有跳过（313 文件通过、2 文件跳过）；新增路由契约 1/1；
+- 下一步：本次同步与基线修复后刷新 CI/机器人复审；活跃旧接口、受限计费测试及功能差异仍由总控安排，不扩大本轮范围。
+- 前轮已运行 PASS（非本轮最终版本）：API 全量 5931 通过/13 既有跳过（313 文件通过、2 文件跳过）；新增路由契约 1/1；
   Web 定向 37/37；Web/API typecheck 与 ESLint；Playwright `--list` 收集 140 项（不运行浏览器）。
 - 本机无凭据 HTTP smoke：`/chat` 及旧参数均 307 到 positioning；stream 请求在限流层因无 Redis 配置返回 503，
   因此 HTTP 410 验证 BLOCKED；原生产关闭契约单测已在 API 全量内通过。
-- FAIL：代码大小基线需缩减；远端最终 CI/机器人审查结果以 PR 交接评论为准。
+- 本轮：代码大小检查 PASS；完整验证及机器人复审结果以 PR 最新交接评论为准。
 - NOT_RUN：本机浏览器、真实模型、远程数据库、生产、合并；无产品验收声明。
