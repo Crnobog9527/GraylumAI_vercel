@@ -6,7 +6,8 @@ import {createRuntimeBudget} from './budget';
 const billing=vi.hoisted(()=>({claimCall:vi.fn(),dispatchOnce:vi.fn(),recoverRun:vi.fn()}));
 vi.mock('../bill2/service',async original=>({...await original<typeof import('../bill2/service')>(),authoritativeBilling:()=>billing}));
 const id='10000000-0000-4000-8000-000000000001';
-it('executes read then answer through the actual Runtime/SDK and replays without another paid dispatch',async()=>{
+it.each(['answer','repeat','oversized'] as const)('settles file continuation %s and replays without another dispatch',async outcome=>{
+ vi.clearAllMocks();
  clearSkillResourceCache();
  const content='Synthetic reference';
  const base={packageId:id,revisionId:id,directoryName:'fixture',tasks:{},requiredCapabilities:[],files:[
@@ -37,13 +38,14 @@ it('executes read then answer through the actual Runtime/SDK and replays without
    if(args.p_action==='complete')saved=Object.fromEntries(Object.entries(args.p_result as object).reverse());
    data={result:saved};
   }else if(name==='read_skill_package')data=args.p_path===null?descriptor:args.p_path===''?true:Buffer.from(content).toString('base64');
+  else if(name==='runtime_cancel')data={state:'cancelled'};
   else if(name==='runtime_execution'&&args.p_action==='complete'){result=args.p_result;data={state:'completed'};}
   return {data,error:null};
  })};
  billing.claimCall.mockImplementation(async(_run,sequence)=>({id:String(sequence)}));
  billing.dispatchOnce.mockImplementation(async(callId,request)=>{
   const sequence=Number(callId);requests.push(request);
-  const message=sequence===1?{role:'assistant',content:null,tool_calls:[{id:'read_1',type:'function',
+  const message=sequence===1||outcome==='repeat'?{role:'assistant',content:outcome==='oversized'?'x'.repeat(9000):null,tool_calls:[{id:'read_1',type:'function',
    function:{name:'read_skill_file',arguments:'{"path":"ref.md"}'}}]}:{role:'assistant',content:'Grounded answer'};
   receipts.set(sequence,{hash:sha256(request),rawBody:JSON.stringify({usage:{sdkResponse:{
    id:'fixture',object:'chat.completion',created:1,model:'fixture',
@@ -55,6 +57,17 @@ it('executes read then answer through the actual Runtime/SDK and replays without
  const options={database,actor:async()=>id,callGate:vi.fn(async()=>({ok:true as const})),
   budget,adapter:{dispatch:vi.fn()} as never};
  const first=await runtimeExecutor(options).execute(id);
+ const count=outcome==='oversized'?1:2;
+ if(outcome!=='answer'){
+  expect(first.state).toBe('cancelled');
+  expect(history).toEqual([]);
+  live=false;
+  expect(await runtimeExecutor({...options,budget:createRuntimeBudget()}).execute(id)).toEqual(first);
+  expect(billing.dispatchOnce).toHaveBeenCalledTimes(count);
+  expect(database.rpc.mock.calls.filter(([name,args])=>name==='runtime_tool'&&args.p_action==='claim')).toHaveLength(
+   outcome==='oversized'?0:2);
+  return;
+ }
  expect(first.state).toBe('completed');
  expect(JSON.stringify(result)).toContain('Grounded answer');
  expect(JSON.stringify(result)).not.toContain(content);

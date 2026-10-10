@@ -7,6 +7,19 @@ import {
 import type {RuntimeTool} from './runner';
 
 export const SKILL_FILE_MAX_BYTES = 16000;
+export const SKILL_FILE_TRACE_BYTES = 8192;
+/** Measure immutable declared resources, reusing the verified loader cache. This
+ * avoids rejecting normal Skills using worst-case JSON escaping multipliers. */
+export async function skillFileContinuationBytes(source: SkillSource, descriptor: PackageDescriptor): Promise<number> {
+  const binding = freezeSkillFileBinding(descriptor);
+  let largest = 0;
+  for (const file of descriptor.files.filter(file => file.bytes <= SKILL_FILE_MAX_BYTES)) {
+    const content = await readSkillResource(source, binding, file.path, SKILL_FILE_MAX_BYTES);
+    const result = {...binding, path: file.path, sha256: file.sha256, content};
+    largest = Math.max(largest, Buffer.byteLength(JSON.stringify(JSON.stringify(result))));
+  }
+  return largest + 4096 + SKILL_FILE_TRACE_BYTES;
+}
 export const skillFileBinding = z.object({
   packageId: z.string().uuid(), revisionId: z.string().uuid(),
   packageHash: z.string().regex(/^[a-f0-9]{64}$/),

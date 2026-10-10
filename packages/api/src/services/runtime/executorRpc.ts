@@ -1,4 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import {SKILL_FILE_TRACE_BYTES} from './skillFile';
 import {throwIfContentErased} from '../accountErasure/content';
 import type {RuntimeProgress} from './progress';
 import {createHash} from 'node:crypto';
@@ -80,10 +81,15 @@ export function historyGuard(executionId:string,failed:(code:string)=>void) {
 }
 
 export function terminalReplyGuard(active:boolean,allowsCard:boolean,failed:()=>void,allowsSkillFile=false) {
+  let fileRequested=false;
   return (response:unknown,organizer=false)=>{
-    if(active&&terminalAgentReplyFailure(response,organizer,allowsCard,allowsSkillFile)){
+    const message=(response as {choices?:Array<{message?:{tool_calls?:Array<{function?:{name?:string}}>}}>})?.choices?.[0]?.message;
+    const readsFile=message?.tool_calls?.[0]?.function?.name==='read_skill_file';
+    const oversized=readsFile&&Buffer.byteLength(JSON.stringify(JSON.stringify(message)))>SKILL_FILE_TRACE_BYTES;
+    if(active&&(terminalAgentReplyFailure(response,organizer,allowsCard,allowsSkillFile&&!fileRequested)||oversized)){
       failed();
       throw new Error('RUNTIME_TERMINAL_REPLY');
     }
+    if(active&&!organizer&&readsFile)fileRequested=true;
   };
 }

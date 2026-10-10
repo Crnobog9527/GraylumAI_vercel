@@ -23,6 +23,7 @@ export const runtimeContext=z.object({
  questionContract:z.enum([LEGACY_QUESTION_CONTRACT,QUESTION_CONTRACT]).optional(),reasoning:reasoningPolicy.optional(),
  historyItems:z.number().int().min(0).max(1000),purposeBudget:frozenPurposeBudget.optional(),
  skillFile:skillFileBinding.optional(),
+ skillFileReserve:z.number().int().min(12288).max(131072).optional(),
  tools:z.array(z.enum(['search','read_source','read_skill_file',ASK_QUESTION_TOOL])).default([]),maxToolCalls:z.number().int().min(0).max(16).default(0),
  modelId:z.string().uuid().optional(),network:z.enum(['deny','allow','require_latest']).optional(),
  attachedOrganizer:z.object({

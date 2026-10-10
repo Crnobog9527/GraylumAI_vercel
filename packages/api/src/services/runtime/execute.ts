@@ -293,7 +293,7 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
      logger.warn('api','runtime_history_prefix_omitted',{executionId,omittedItems:originalCount-history.length});
     }
     const selectionOptions={instructions:effective.instructions,inputBytes:Math.min(primaryPolicy.inputLimit,context.purposeBudget?.inputBytes??Infinity),
-     historyItems:context.historyItems,toolBytes,...sizing,
+     historyItems:context.historyItems,toolBytes:toolBytes+(context.skillFileReserve??0),...sizing,
      projectHistoryItem:(item:unknown)=>context.hostTurnContext?
       projectHostTurnItem(item,context.scopeMaterial,preserveHistoricalMaterial,projectSupersededScopeItem):
       legacyInput||preserveHistoricalMaterial?item:projectSupersededScopeItem(item,context.scopeMaterial)};

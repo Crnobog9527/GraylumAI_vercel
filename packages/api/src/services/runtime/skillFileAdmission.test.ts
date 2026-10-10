@@ -9,7 +9,7 @@ vi.mock('./newWorkGate',async original=>({...await original<typeof import('./new
  ...(await import('../__tests__/fixtures/runtimeGates')).testAdmissionGates}));
 vi.mock('../skills/databaseSource',()=>({databaseSkillSource:()=>({list:async()=>[descriptor]})}));
 vi.mock('../skills/loader',async original=>({...await original<typeof import('../skills/loader')>(),
- activateSkill:async()=>({forModel:()=> 'Synthetic Skill'})}));
+ readSkillResource:async()=>'',activateSkill:async()=>({forModel:()=> 'Synthetic Skill'})}));
 const actor='10000000-0000-4000-8000-000000000001';
 const model='10000000-0000-4000-8000-000000000002';
 const revision='10000000-0000-4000-8000-000000000003';
@@ -37,7 +37,7 @@ function fixture(){
   maxOutputTokens:100,inputBytes:32000,historyItems:0,mentorStream:true,skillFileRead:true,opcTurnToken:actor};
  const input={sessionId:actor,requestId:model,input:'Please explain the reference.',network:'deny',
   selection:{kind:'skill',moduleId:module,revisionId:revision}};
- return {user,admin,policy,input};
+ return {user,admin,policy,input,rpc};
 }
 it('freezes package identity, one tool read and two model calls; reuses original admission',async()=>{
  const f=fixture(),service=runtimeAdmissionService(f.user,f.admin,f.policy);
@@ -56,4 +56,11 @@ it('host openings offer no file tool',async()=>{
   .prepare({...f.input,input:OPENING_INPUT});
  expect(admitted.context.tools).toEqual([]);
  expect(admitted.context.skillFile).toBeUndefined();
+});
+
+it('rejects required input that leaves no room for the frozen continuation before admission',async()=>{
+ const f=fixture();
+ await expect(runtimeAdmissionService(f.user,f.admin,{...f.policy,inputBytes:14000})
+  .prepare({...f.input,input:'x'.repeat(4000)})).rejects.toThrow('RUNTIME_REQUIRED_CONTEXT_EXCEEDS_CAPACITY');
+ expect(f.rpc.mock.calls.some(([name])=>name==='runtime_admit')).toBe(false);
 });
