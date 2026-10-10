@@ -18,11 +18,13 @@ vi.mock('../../services/runtime/newWorkGate',async original=>({
  ...(await import('../../services/__tests__/fixtures/runtimeGates')).testAdmissionGates,
 }));
 
+const turnSlot=(group:{turns:Array<{slot:string}>})=>group.turns[0]?.slot??'';
 it('CDC_EVAL: freeze or execute exactly the approved roster through local OPC and Runtime',async()=>{
  const path=process.env.V3_REAL_SKILL_INPUT!;assertOutsideRepository(path);
  const plan=JSON.parse(readFileSync(path,'utf8'));assertOutsideRepository(plan.output);
  if(plan.reasoningReplay)assertOutsideRepository(plan.reasoningReplay);
- const f=await fixture(plan.moduleSkill),rows:Array<ReturnType<typeof measure>&{ordinal:number;category:string;role:Role;raw:string}>=[],results:unknown[]=[];
+ const organizerOutput:number|undefined=plan.organizerOutputTokens;
+ const f=await fixture(plan.moduleSkill,organizerOutput),rows:Array<ReturnType<typeof measure>&{ordinal:number;category:string;role:Role;raw:string}>=[],results:unknown[]=[];
  const reasoningResults:unknown[]=[];
  if(plan.writebackV2)await f.db.query('update runtime_test_windows set max_calls=1000,max_cost_usd=100 where id=$1',
   [process.env.V3_RUNTIME_STAGING_WINDOW_ID]);
@@ -31,7 +33,7 @@ it('CDC_EVAL: freeze or execute exactly the approved roster through local OPC an
   if(String(url)!=='https://openrouter.ai/api/v1/chat/completions')throw new Error('CDC_NO_LOOKUP_OR_RETRY');
   const raw=String(init?.body),body=JSON.parse(raw),role:Role=phase++===0?'mentor':'organizer';
   if(phase>2||role==='organizer'&&!active.organize)throw new Error('CDC_UNEXPECTED_CALL');
-  const measured=measure(raw,role);rows.push({ordinal:++ordinal,category:active.category,role,...measured,raw});
+  const measured=measure(raw,role,organizerOutput);rows.push({ordinal:++ordinal,category:active.category,role,...measured,raw});
   if(plan.bridge){
    const response=await fetch(plan.bridge.url,{method:'POST',headers:{'content-type':'application/json',authorization:plan.bridge.secret},
     body:JSON.stringify({role,ordinal,slot:active.slot,raw})});
@@ -76,6 +78,40 @@ it('CDC_EVAL: freeze or execute exactly the approved roster through local OPC an
     for(const stepId of Object.keys(initial.snapshot.steps).filter(id=>id<group.stepId))await f.db.query(
      "update artifact_rounds set steps=jsonb_set(steps,ARRAY[$2,'valid'],'true'::jsonb) where id=$1",[initial.roundId,stepId]);
    }
+   // Special12 historical state from its frozen checklist: protected values via the real manual
+   // operation, confirmed steps via the same local-only valid flag used by capture.integration.ts.
+   if(group.specialFrozenChecklist){
+    if(!/^postgres:\/\/postgres@127\.0\.0\.1:\d+\/v3_disposable$/.test(process.env.V3_LOCAL_DB??''))throw new Error('SPECIAL_LOCAL_ONLY');
+    type Field={id:string;value:string;status:string;nature:string;protected:boolean};
+    type Step={id:string;confirmed:boolean;fields:Field[]};
+    const checklist=group.specialFrozenChecklist as Step[];
+    for(const step of checklist){
+     const nonempty=step.fields.filter(field=>field.value!=='');
+     if(!nonempty.length)continue;
+     if(nonempty.some(field=>!field.protected))throw new Error('SPECIAL_UNSUPPORTED_INITIAL');
+     // A fresh draft has no stored value objects; give untouched siblings their unknown tuple first
+     // (capture.integration.ts does the same) so the manual save marks only the edited fields as user-owned.
+     await f.db.query(`update artifact_rounds set steps=jsonb_set(steps,ARRAY[$2,'information'],
+      (select jsonb_object_agg(x,jsonb_build_object('value','','status','unknown','nature','unknown')) from unnest($3::text[]) x)
+      ||coalesce(steps->$2->'information','{}')) where id=$1`,[initial.roundId,step.id,step.fields.map(field=>field.id)]);
+     const state=await f.service.read(draft.draftId);
+     const values=Object.fromEntries(step.fields.map(field=>[field.id,{value:field.value,nature:field.nature,
+      status:field.status==='draft'?'provisional':field.status==='missing'?'unknown':field.status}]));
+     await f.service.information({draftId:draft.draftId,requestId:randomUUID(),stepId:step.id,
+      expectedVersion:state.snapshot.steps[step.id].version,values});
+    }
+    for(const step of checklist)if(step.confirmed)await f.db.query(
+     "update artifact_rounds set steps=jsonb_set(steps,ARRAY[$2,'valid'],'true'::jsonb) where id=$1",[initial.roundId,step.id]);
+    const seeded=await f.service.read(draft.draftId);
+    for(const step of checklist){
+     if(Boolean(seeded.snapshot.steps[step.id].valid)!==step.confirmed)throw new Error('SPECIAL_CONFIRMATION_MISMATCH');
+     for(const field of step.fields){
+      const actual=seeded.information[step.id],value=actual.values?.[field.id]?.value??'',flag=actual.meta?.[field.id]?.protected;
+      if(value!==field.value||flag!==field.protected)throw new Error(['SPECIAL_INITIAL_MISMATCH',turnSlot(group),step.id,field.id,
+       value===field.value,String(flag),String(field.protected)].join(':'));
+     }
+    }
+   }
    for(const turn of group.turns){
     active=turn;phase=0;
     if(turn.pauseBefore&&plan.bridge){
@@ -99,7 +135,8 @@ it('CDC_EVAL: freeze or execute exactly the approved roster through local OPC an
     if(frozen.providerRequestFormat!==profiles.mentor.format||frozen.reasoning?.effort!=='low'||
      turn.organize&&frozen.attachedOrganizer?.reasoning?.parameter!=='none')throw new Error('CDC_FROZEN_FORMAT');
     const result=await runtimeExecutor({database:f.admin,actor:async()=>f.actor,adapter,callGate:allowTestCalls}).execute(currentExecution);
-    if(result.state!=='completed'||phase!==(turn.organize?2:1))throw new Error('CDC_EXECUTION_INCOMPLETE');
+    if(result.state!=='completed'||phase!==(turn.organize?2:1))throw new Error('CDC_EXECUTION_INCOMPLETE:'+[turn.slot,result.state,
+     'code' in result?result.code:'',phase].join(':'));
     if(plan.reasoningReplay&&turn.organize)reasoningResults.push(...await replayReasoning(f,plan.reasoningReplay,turn.slot,
      draft.draftId,currentExecution,rows.at(-1)!.raw));
     const capture=turn.organize?await f.service.capturePending({draftId:draft.draftId}):null;

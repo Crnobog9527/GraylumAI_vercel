@@ -71,7 +71,7 @@ export async function loadCurrentStripePrices(input: {
   const column = input.kind === 'credit_package' ? 'credit_package_id' : 'membership_plan_id';
   const result = await input.db.from('payment_provider_refs').select('external_id, credit_package_id, membership_plan_id, billing_cycle')
     .eq('channel', 'stripe').eq('merchant_namespace', input.scope.merchant).eq('mode', input.scope.mode)
-    .eq('object_type', 'price').eq('is_current', true).in(column, input.ids);
+    .eq('object_type', 'price').eq('offer_kind', 'standard').eq('is_current', true).in(column, input.ids);
   if (result.error || !Array.isArray(result.data)) throw new Error('PAY_COMMON_MAPPING_READ_FAILED', { cause: result.error });
   for (const ref of result.data) {
     const key = `${ref[column]}:${ref.billing_cycle}`;

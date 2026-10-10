@@ -5,8 +5,9 @@ import pg from 'pg';
 import {saveModuleSkill,type ModuleSkillInput} from '../services/skills/modulePublication.ts';
 import {opcService} from '../services/opc/service.ts';
 import {pricingConfig} from '../services/__tests__/fixtures/runtimePricing.ts';
-import {EXPIRES,profiles,quote,type Role} from '../../../../scripts/cdc-b2-eval/policy.ts';
-export async function fixture(input:ModuleSkillInput){
+import {outputCap,profiles,quote,type Role} from '../../../../scripts/cdc-b2-eval/policy.ts';
+// organizerOutput: optional live organizer cap for V3 hosts; omitted keeps the B2 profile (2048).
+export async function fixture(input:ModuleSkillInput,organizerOutput?:number){
  const connectionString=process.env.V3_LOCAL_DB!;
  if(!/^postgres:\/\/postgres@127\.0\.0\.1:\d+\/v3_disposable$/.test(connectionString)||
   !process.env.V3_LOCAL_REST?.startsWith('http://127.0.0.1:'))throw new Error('CDC_DISPOSABLE_ONLY');
@@ -28,17 +29,20 @@ export async function fixture(input:ModuleSkillInput){
   config.reasoning.purposes=role==='mentor'?{interactive:{mode:'effort',effort:'low',wire:'reasoning_effort'}}:{organize:{mode:'provider_default'}};
   await db.query(`insert into ai_models(id,name,model_id,provider,is_active,api_key,api_endpoint,max_tokens,input_limit,config)
    values($1,'CDC local model',$2,'openai','true','LOCAL_BOUNDARY_ONLY','https://openrouter.ai/api/v1',$3,$4,$5)`,
-   [ids[role],p.model,p.output,p.context,config]);
+   [ids[role],p.model,outputCap(role,organizerOutput),p.context,config]);
  }
- const settings={v3_summary_model_id:ids.organizer,v3_summary_max_tokens:2048,billing_credits_per_usd:'100',billing_token_price_multiplier:'3',
+ const settings={v3_summary_model_id:ids.organizer,v3_summary_max_tokens:outputCap('organizer',organizerOutput),
+  billing_credits_per_usd:'100',billing_token_price_multiplier:'3',
   runtime_purpose_budgets:{version:2,interactive:{inputBytes:90000,historyItems:100},organize:{inputBytes:64000,historyItems:0},
    report:{inputBytes:196608,historyItems:0}}};
  for(const [key,value] of Object.entries(settings))await db.query(
   'insert into system_settings(key,value) values($1,$2) on conflict(key) do update set value=excluded.value',[key,JSON.stringify(value)]);
- const policies=(['mentor','organizer'] as Role[]).map(role=>({...quote(role,ids[role]),multiplier:'3'}));
+ const policies=(['mentor','organizer'] as Role[]).map(role=>({...quote(role,ids[role],organizerOutput),multiplier:'3'}));
  const window=randomUUID();
+ // Disposable database only: a short window from now. The shared EXPIRES still gates the old paid B2 bridge.
+ const expiresAt=new Date(Date.now()+6*3600_000).toISOString();
  await db.query(`insert into runtime_test_windows(id,enabled,actor_ids,call_policies,credits_per_usd,multiplier,
-  max_cost_usd,max_calls,expires_at) values($1,true,$2,$3,100,3,9,100,$4)`,[window,[actor],JSON.stringify(policies),EXPIRES]);
+  max_cost_usd,max_calls,expires_at) values($1,true,$2,$3,100,3,9,100,$4)`,[window,[actor],JSON.stringify(policies),expiresAt]);
  // Only this disposable process; the loopback clients above remain the sole database transports.
  Object.assign(process.env,{V3_RUNTIME_STAGING_PROJECT_ID:'cdc-local',VERCEL_PROJECT_ID:'cdc-local',VERCEL:'1',
   VERCEL_PROJECT_PRODUCTION_URL:'auth-staging.graylum.com',VERCEL_GIT_COMMIT_REF:'staging',VERCEL_GIT_REPO_OWNER:'Crnobog9527',
@@ -48,6 +52,6 @@ export async function fixture(input:ModuleSkillInput){
   expectedUpdatedAt:null,expectedVersion:0,module:{...input.module,model_id:ids.mentor}};
  await saveModuleSkill(admin,actor,module);
  const registration=(await db.query('select id from artifact_workflows where module_id=$1',[module.moduleId])).rows[0].id;
- const real={id:window,callPolicies:policies,creditsPerUsd:'100',multiplier:'3',expiresAt:EXPIRES};
+ const real={id:window,callPolicies:policies,creditsPerUsd:'100',multiplier:'3',expiresAt};
  return {db,admin,user,actor,registration,module,service:opcService(user,admin,real)};
 }

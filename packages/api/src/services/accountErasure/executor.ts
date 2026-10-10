@@ -1,4 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import { createLibraryErasureAdapter } from '../library/erasure';
 import { randomUUID } from 'node:crypto';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { z } from 'zod';
@@ -75,6 +76,7 @@ async function runOne(client: SupabaseClient, deadline: number, drainDeadline: n
     };
     const host = createAccountErasureHost({
       profileId: claim.profileId, requestId: claim.requestId, client, deadline,
+      additionalStorage: createLibraryErasureAdapter(client, { profileId: claim.profileId, requestId: claim.requestId, token }),
       storage: createErasureStorageTransport(client, { boundedPrefix: true }), auth: createErasureAuthAdapter(client, claim.profileId),
       verifyRetainedHistory: proof, verifyQuiescence: proof, deferStorageProof: true, scopedManifest: true, executorToken: token,
     });
@@ -102,6 +104,10 @@ export async function runAccountErasureExecutor(client: SupabaseClient, deadline
     summary.failed += result.failed;
     if (!result.processed || result.failed) break;
   }
+  try {
+    const expired = await client.rpc('pay_waffo_expire_gold_identities', {}).abortSignal(AbortSignal.timeout(2000));
+    if (expired.error) throw new Error('GOLD_IDENTITY_EXPIRY_FAILED');
+  } catch { summary.failed++; }
   try {
     const result = await client.rpc('account_erasure_executor_pending', {}).abortSignal(AbortSignal.timeout(2000));
     if (result.error) throw new Error('ERASURE_PENDING_UNKNOWN');
