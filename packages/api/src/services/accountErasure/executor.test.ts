@@ -148,3 +148,13 @@ it('uses available daily budget beyond 20 subjects and resumes remaining work ne
     expect(remaining).toBe(0);
   } finally { clock.mockRestore(); }
 });
+
+it('persists the processor SQLSTATE diagnostic on the existing request and releases only idle I/O', async () => {
+  const database = client();
+  mocks.run.mockResolvedValue({ stage: 'erasing', retry: true, remaining: 1, manualReview: 0,
+    errorCodes: ['ERASURE_RPC_SCRUB_CONTENT_21000', 'ERASURE_RPC_FAILED', 'ERASURE_RPC_UNCERTAIN'] });
+  await runAccountErasureExecutor(database as never);
+  expect(database.rpc).toHaveBeenCalledWith('account_erasure_executor_finish', expect.objectContaining({
+    p_codes: ['ERASURE_RPC_SCRUB_CONTENT_21000', 'ERASURE_RPC_FAILED', 'ERASURE_RPC_UNCERTAIN'], p_release: true,
+  }));
+});
