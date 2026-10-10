@@ -1,4 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import { createLibraryErasureAdapter } from '../library/erasure';
 import { randomUUID } from 'node:crypto';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { z } from 'zod';
@@ -75,6 +76,7 @@ async function runOne(client: SupabaseClient, deadline: number, drainDeadline: n
     };
     const host = createAccountErasureHost({
       profileId: claim.profileId, requestId: claim.requestId, client, deadline,
+      additionalStorage: createLibraryErasureAdapter(client, { profileId: claim.profileId, requestId: claim.requestId, token }),
       storage: createErasureStorageTransport(client, { boundedPrefix: true }), auth: createErasureAuthAdapter(client, claim.profileId),
       verifyRetainedHistory: proof, verifyQuiescence: proof, deferStorageProof: true, scopedManifest: true, executorToken: token,
     });

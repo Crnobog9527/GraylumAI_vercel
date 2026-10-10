@@ -1,3 +1,4 @@
+import { libraryRouter } from './routers/library';
 import { reportModelRouter } from './routers/reportModel';
 import { opcRouter } from './routers/opc';
 import { runtimeRouter } from './routers/runtime';
@@ -58,6 +59,7 @@ export const appRouter = router({
   runtime: runtimeRouter,
   opc: opcRouter,
   account: accountRouter,
+  library: libraryRouter,
 });
 
 /**

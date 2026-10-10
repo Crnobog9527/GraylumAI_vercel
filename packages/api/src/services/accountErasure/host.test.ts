@@ -165,3 +165,19 @@ it('notifies a waiting executor when ignored-abort I/O really settles', async ()
   release(); expect(await drained).toBe(true); expect(host.isIdle()).toBe(true);
   expect(f.rpc).not.toHaveBeenCalled(); expect(f.auth.remove).not.toHaveBeenCalled();
 });
+
+it('resumes between ticket and library buckets and never dispatches Auth after second-bucket failure', async () => {
+  const f = fixture();
+  const cleanSubject = vi.fn().mockRejectedValueOnce(new Error('storage interrupted'))
+    .mockResolvedValueOnce({ complete: false, remaining: 1, manualReview: 0 })
+    .mockResolvedValue({ complete: true, remaining: 0, manualReview: 0 });
+  const input = { ...f.input, additionalStorage: { cleanSubject } };
+  expect((await createAccountErasureHost(input).run()).retry).toBe(true);
+  expect(f.auth.remove).not.toHaveBeenCalled();
+  expect(f.storage.remove).toHaveBeenCalledOnce();
+  expect((await createAccountErasureHost(input).run()).retry).toBe(true);
+  expect(f.auth.remove).not.toHaveBeenCalled();
+  expect((await createAccountErasureHost(input).run()).retry).toBe(false);
+  expect(f.storage.remove).toHaveBeenCalledOnce();
+  expect(f.auth.remove).toHaveBeenCalledOnce();
+});
