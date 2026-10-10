@@ -6,7 +6,7 @@ import { fieldMeta, type CaptureSuggestion, type StepInformation } from "@/compo
 type ResolveRead = { information: Record<string, StepInformation>; snapshot: { state?: string; steps: Record<string, { version: number }> } };
 export type ResolveInput = {
   draftId: string; requestId: string; stepId: string; fieldId: string;
-  executionId: string; hash: string; action: "accept" | "ignore"; expectedVersion: number;
+  executionId: string; hash: string; action: "accept" | "ignore" | "dismiss"; expectedVersion: number;
 };
 export type CaptureResolveDeps = {
   draftId: string;
@@ -30,13 +30,14 @@ export const RESOLVE_FAILED_NOTICE = "这次处理的结果暂未确认，页面
  * null on success. A refusal that proves nothing was written refreshes the draft.
  */
 export async function resolveCaptureUpdate(io: Pick<CaptureResolveDeps, "draftId" | "refetch" | "flush" | "resolve">,
-  stepId: string, fieldId: string, suggestion: CaptureSuggestion, action: "accept" | "ignore") {
+  stepId: string, fieldId: string, suggestion: CaptureSuggestion, action: "accept" | "ignore" | "dismiss") {
   try {
     // Save the user's own edits first, so the server version is the one they see.
     await io.flush(stepId);
     const read = await io.refetch();
     if (read.error || !read.data) throw new Error("OPC_UNAVAILABLE");
-    const shown = fieldMeta(read.data.information[stepId], fieldId).suggestion;
+    // A dismissal is bound to the withdrawn record the user saw, adopt/ignore to the pending update.
+    const meta = fieldMeta(read.data.information[stepId], fieldId), shown = action === "dismiss" ? meta.withdrawn : meta.suggestion;
     if (shown?.executionId !== suggestion.executionId || shown.hash !== suggestion.hash) return RESOLVE_STALE_NOTICE;
     await io.resolve({ draftId: io.draftId, requestId: crypto.randomUUID(), stepId, fieldId,
       executionId: suggestion.executionId, hash: suggestion.hash, action,
@@ -74,7 +75,7 @@ export function useCaptureResolve(deps: CaptureResolveDeps) {
     }).catch(() => undefined);
   }, [active, draftId]);
 
-  async function resolve(stepId: string, fieldId: string, suggestion: CaptureSuggestion, action: "accept" | "ignore") {
+  async function resolve(stepId: string, fieldId: string, suggestion: CaptureSuggestion, action: "accept" | "ignore" | "dismiss") {
     if (resolving) return;
     setResolving(stepId + ":" + fieldId);
     deps.setError("");

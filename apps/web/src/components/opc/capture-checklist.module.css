@@ -20,6 +20,8 @@
 .update dt{color:#999}
 .update dd{margin:0;color:#333;white-space:pre-wrap;overflow-wrap:anywhere}
 .updateActions{display:flex;flex-wrap:wrap;gap:8px}
+.update[data-withdrawn]{background:#fff;border-style:dashed}
+.withdrawnValue{margin:0;color:#999;font-size:13px;line-height:1.6;white-space:pre-wrap;overflow-wrap:anywhere;text-decoration:line-through}
 .updateActions button,.stepFooter button,.alert button{height:auto;min-height:32px;padding:6px 12px;border-radius:8px;font-size:12px;line-height:18px;white-space:normal}
 .stepFooter{display:grid;gap:8px;padding-top:12px;border-top:1px solid #f0f0f0}
 .stepFooter p{margin:0;color:#666;font-size:12px;line-height:19px}
