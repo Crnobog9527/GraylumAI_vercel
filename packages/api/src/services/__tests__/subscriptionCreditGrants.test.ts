@@ -1096,6 +1096,29 @@ describe('annual release isolates malformed individual contracts', () => {
     return supabase;
   }
 
+  it.each(['mode', 'merchant'])('releases exactly once when external IDs collide across %s', async collision => {
+    const supabase = annualFixture();
+    const refs = supabase.tables.payment_provider_refs;
+    for (const original of [...refs].filter(row => ['subscription', 'invoice'].includes(row.object_type))) {
+      refs.push({ ...original, id: `shadow-${original.id}`, subscription_id: `shadow-${original.subscription_id}`,
+        order_id: original.order_id ? `shadow-${original.order_id}` : null,
+        mode: collision === 'mode' ? 'live' : original.mode,
+        merchant_namespace: collision === 'merchant' ? 'other-merchant' : original.merchant_namespace });
+    }
+    // Another scope's refund must neither block this scope nor contaminate its credit source.
+    supabase.tables.payment_orders.push({ id: 'shadow-refund', subscription_id: 'shadow-mirror_healthy',
+      status: 'refunded', payment_status: 'refunded' });
+    const before = supabase.tables.credit_transactions.length;
+    const result = await releaseDueAnnualSubscriptionCredits(supabase, { now: new Date('2026-02-15T00:00:00Z') });
+    expect(result).toMatchObject({ anomalies: [], scannedSubscriptions: 2, releasedGrantCount: 2, releasedCredits: 20 });
+    expect(supabase.tables.profiles.map(row => row.credits)).toEqual([20, 20]);
+    expect(supabase.tables.subscription_credit_grants.every(row => !row.subscription_id?.startsWith('shadow-'))).toBe(true);
+    expect(supabase.tables.credit_transactions).toHaveLength(before + 2);
+    const replay = await releaseDueAnnualSubscriptionCredits(supabase, { now: new Date('2026-02-15T00:00:00Z') });
+    expect(replay.releasedGrantCount).toBe(0);
+    expect(supabase.tables.credit_transactions).toHaveLength(before + 2);
+  });
+
   it.each(['zero', 'multiple', 'snapshot-null', 'snapshot-schema', 'snapshot-product', 'mapping-zero', 'mapping-multiple'])(
     'skips %s anomaly first, alerts, and releases the later healthy subscription exactly once', async anomaly => {
       const alarm = vi.spyOn(logger, 'error').mockImplementation(() => {});

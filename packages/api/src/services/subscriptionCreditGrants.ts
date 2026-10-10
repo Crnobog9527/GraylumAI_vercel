@@ -1109,11 +1109,11 @@ async function getMembershipPlan(
 
 async function hasSubscriptionFullRefund(
   supabase: SupabaseLikeClient,
-  input: { subscriptionId: string; invoiceId?: string | null },
+  input: { subscriptionId: string; invoiceId?: string | null; scope?: StripeScope },
 ): Promise<boolean> {
   const subscriptionId = input.subscriptionId;
   const invoiceId = input.invoiceId?.trim() || null;
-  const ref = await findStripeReference(supabase, 'subscription', subscriptionId);
+  const ref = await findStripeReference(supabase, 'subscription', subscriptionId, input.scope);
   if (!ref?.subscription_id) throw new Error('PAY_COMMON_SUBSCRIPTION_MAPPING_MISSING');
   const invoiceRef = invoiceId ? await findStripeReference(supabase, 'invoice', invoiceId,
     { merchant: ref.merchant_namespace, mode: ref.mode as 'test' | 'live' }) : null;
@@ -1536,9 +1536,9 @@ async function getProfileCreditBalance(
 
 async function loadAllSubscriptionCreditGrants(
   supabase: SupabaseLikeClient,
-  input: { subscriptionId: string },
+  input: { subscriptionId: string; scope?: StripeScope },
 ): Promise<SubscriptionCreditGrantRow[]> {
-  const ref = await findStripeReference(supabase, 'subscription', input.subscriptionId);
+  const ref = await findStripeReference(supabase, 'subscription', input.subscriptionId, input.scope);
   if (!ref?.subscription_id) throw new Error('PAY_COMMON_SUBSCRIPTION_MAPPING_MISSING');
   const result = await supabase
     .from('subscription_credit_grants')
@@ -2430,7 +2430,8 @@ export async function releaseDueAnnualSubscriptionCredits(
       summary.skippedSubscriptions += 1;
       continue;
     }
-    const existingGrants = await loadAllSubscriptionCreditGrants(supabase, { subscriptionId });
+    const scope: StripeScope = { merchant: subscription.merchant_namespace!, mode: subscription.payment_mode as 'test' | 'live' };
+    const existingGrants = await loadAllSubscriptionCreditGrants(supabase, { subscriptionId, scope });
     if (existingGrants.some((grant) =>
       grant.accounting_state !== undefined && grant.accounting_state !== 'trusted'
     )) {
@@ -2442,8 +2443,7 @@ export async function releaseDueAnnualSubscriptionCredits(
     const { openingGrant, plan } = contract;
     const invoiceId = openingGrant.stripe_invoice_id;
     const hasFullRefund = await hasSubscriptionFullRefund(supabase, {
-      subscriptionId,
-      invoiceId,
+      subscriptionId, invoiceId, scope,
     });
     if (!shouldReleaseAnnualSubscriptionCredits({
       billingCycle: subscription.billing_cycle,
