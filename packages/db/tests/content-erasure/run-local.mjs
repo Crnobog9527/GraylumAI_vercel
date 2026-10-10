@@ -9,6 +9,7 @@ import {resolve} from 'node:path';
 import {POSTGRES_IMAGE} from '../v3/images.mjs';
 import {buildFromFiles,installPgCronStub} from '../baseline/build-from-files.mjs';
 import {runCases} from './cases.mjs';
+import {runVideo} from './video.mjs';
 import {runSettings} from './settings.mjs';
 import {runResearch} from './research.mjs';
 import {runArtifacts} from './artifacts.mjs';
@@ -71,6 +72,7 @@ try {
  await runSettings({db:client,Client,connectionString,report});
  await client.query(read('packages/db/tests/runtime-view-perf/fixture.sql'));
  await runDependencies(client,report);
+ await runVideo(client,report);
  await runCaptureV3(client,report);
  await runPayg(client,report);
  await runConcurrency({db:client,Client,connectionString,report});

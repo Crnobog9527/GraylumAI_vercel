@@ -234,7 +234,12 @@ BEGIN
  executions:=ARRAY(SELECT DISTINCT ex.id FROM runtime_executions ex WHERE ex.actor_id=a AND
   (ex.id=ANY(executions) OR ex.session_id=ANY(sessions) OR content_erasure_references(ex.payload,refs)
    OR EXISTS(SELECT 1 FROM runtime_sessions rs WHERE rs.id=ex.session_id AND content_erasure_references(rs.scope,refs))
-   OR EXISTS(SELECT 1 FROM runtime_scope_material mat WHERE mat.request_id=ANY(refs)
+   OR EXISTS(SELECT 1 FROM opc_video_material_bindings b WHERE b.actor_id=a AND b.source_script_id=ANY(refs)
+    AND b.session_id=ex.session_id AND b.request_id=ex.request_id)
+   OR EXISTS(SELECT 1 FROM runtime_scope_material mat WHERE
+    (mat.request_id=ANY(refs) OR content_erasure_references(mat.request,refs) OR content_erasure_references(mat.content,refs)
+     OR EXISTS(SELECT 1 FROM opc_video_material_bindings b WHERE b.actor_id=a AND b.session_id=mat.session_id
+      AND b.material_revision=mat.revision AND b.source_script_id=ANY(refs)))
     AND mat.session_id::text=ex.payload#>>'{scopeMaterial,sessionId}' AND mat.revision::text=ex.payload#>>'{scopeMaterial,revision}')));
  -- Exact dependency closure; UNION bounds malformed cycles.
  LOOP
@@ -352,6 +357,15 @@ BEGIN
  SELECT ex.id,src.id FROM runtime_executions ex JOIN runtime_executions src ON src.session_id=ex.session_id
  WHERE ex.id=ANY(ids) AND src.id=ANY(ids) AND ex.actor_id=a AND src.actor_id=a
   AND (src.created_at,src.id)<(ex.created_at,ex.id) AND content_erasure_capture_copy(ex.payload,src.result)
+ ON CONFLICT DO NOTHING;
+ -- Retain only binding identities for later cleanup/recovery after frozen material is gone.
+ INSERT INTO runtime_history_dependencies(execution_id,dependency_id)
+ SELECT ex.id,src.id FROM opc_video_material_bindings b JOIN runtime_executions src
+  ON src.actor_id=b.actor_id AND src.session_id=b.session_id AND src.request_id=b.request_id
+ JOIN runtime_executions ex ON ex.actor_id=b.actor_id AND ex.session_id=b.session_id AND ex.id<>src.id
+ WHERE b.actor_id=a AND src.id=ANY(ids) AND ex.id=ANY(ids)
+  AND ex.payload#>>'{scopeMaterial,sessionId}'=b.session_id::text
+  AND ex.payload#>>'{scopeMaterial,revision}'=b.material_revision::text
  ON CONFLICT DO NOTHING;
  UPDATE runtime_sessions SET content_deleted_at=stamp WHERE id=ANY(sessions) AND content_deleted_at IS NULL;
  UPDATE artifact_projects SET content_deleted_at=stamp WHERE id=ANY(projects) AND content_deleted_at IS NULL;
