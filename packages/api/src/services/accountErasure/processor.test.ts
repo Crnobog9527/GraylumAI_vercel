@@ -195,8 +195,23 @@ describe('unwired account erasure processor', () => {
   it('an explicit RPC error cannot be hidden by an otherwise clean inventory', async () => {
     const f = setup(); f.rpc.mockResolvedValueOnce({ data: null, error: { message: 'SECRET_BODY', code: 'XX000' } } as never);
     const result = await processAccountErasure(f.input);
-    expect(result.errorCodes).toEqual(['ERASURE_RPC_FAILED']); expect(JSON.stringify(result)).not.toContain('SECRET_BODY');
+    expect(result.errorCodes).toEqual(['ERASURE_RPC_WORK_BATCH_XX000', 'ERASURE_RPC_FAILED']); expect(JSON.stringify(result)).not.toContain('SECRET_BODY');
     expect(f.authAdapter.remove).not.toHaveBeenCalled();
+  });
+  it('records the exact safeupdate failure and stops all subsequent database and external I/O', async () => {
+    const f = setup();
+    const original = f.rpc.getMockImplementation()!;
+    f.rpc.mockImplementation(async (name, args) => name === 'account_erasure_scrub_content'
+      ? { data: null, error: { code: '21000', message: 'DELETE requires a WHERE clause PRIVATE', details: 'SECRET' } } as never
+      : original(name, args));
+    const result = await processAccountErasure(f.input);
+    expect(result.errorCodes).toContain('ERASURE_RPC_SCRUB_CONTENT_21000');
+    expect(result.errorCodes).toContain('ERASURE_RPC_FAILED');
+    const names = f.rpc.mock.calls.map(([name]) => name);
+    expect(names.at(-1)).toBe('account_erasure_scrub_content');
+    expect(f.storageAdapter.cleanSubject).not.toHaveBeenCalled();
+    expect(f.authAdapter.remove).not.toHaveBeenCalled();
+    expect(JSON.stringify(result)).not.toMatch(/PRIVATE|SECRET|DELETE/);
   });
   it('rejects request drift and contradictory Auth claims before adapter calls', async () => {
     for (const begin of [

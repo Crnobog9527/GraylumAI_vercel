@@ -15,6 +15,8 @@ import {runProcessor} from './processor.mjs';
 import {runLeaves} from './leaves.mjs';
 import {runConcurrency} from './concurrency.mjs';
 
+const safeupdateLibrary=process.env.ERASURE_SAFEUPDATE_LIBRARY;
+if(safeupdateLibrary && !safeupdateLibrary.startsWith('/'))throw new Error('Require absolute local safeupdate library path');
 const development=process.argv.slice(2).join(' ')==='--local-only --development';
 if ((!development && process.argv.slice(2).join(' ') !== '--local-only') || process.env.CI) throw new Error('Require --local-only');
 const root=resolve(import.meta.dirname,'../../../..');
@@ -32,7 +34,7 @@ const sql=input=>docker(['exec','-i',name,'psql','-X','-qAt','-U','postgres','-d
 const fp=read('packages/db/tests/baseline/fingerprint.sql');
 const objectSql=fp.slice(0,fp.indexOf('-- FINAL'))+'SELECT jsonb_object_agg(k,d ORDER BY k) FROM grouped;';
 const snapshot=()=>JSON.parse(ok(sql(objectSql)));
-const report={development,build:null,checks:[],failed:null};
+const report={development,safeupdate:Boolean(safeupdateLibrary),build:null,checks:[],failed:null};
 let client;let compiled;
 try {
  ok(docker(['run','-d','--pull=never','--name',name,'-p','127.0.0.1::5432',
@@ -43,6 +45,7 @@ try {
   if(!ready)await new Promise(resolve=>setTimeout(resolve,200));
  }
  assert.ok(ready,'local postgres ready');
+ if(safeupdateLibrary)ok(docker(['cp',safeupdateLibrary,name+':/usr/local/lib/postgresql/safeupdate.so']));
  installPgCronStub(root,name,(argv,input)=>ok(docker(['exec',...argv],input)));
  const outcome=r=>({ok:r.status===0&&!r.error,error:r.stderr});
  let before;let checked=false;let beforeLeaves;let checkedLeaves=false;
@@ -78,14 +81,14 @@ try {
  // Compile the exact production composition, with only external HTTP replaced in tests.
  const ts=require('typescript');
  compiled=mkdtempSync(resolve(root,'packages/api/.erasure-processor-test-'));
- for(const file of ['processorContracts','processor','host','manifest','storage','storageTransport','authAdapter','scopedManifest','executor']){
+ for(const file of ['rpcDiagnostics','processorContracts','processor','host','manifest','storage','storageTransport','authAdapter','scopedManifest','executor']){
   const source=read(`packages/api/src/services/accountErasure/${file}.ts`);
   const code=ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ES2022}}).outputText
    .replace(/from '(\.\/[A-Za-z]+)'/g,"from '$1.mjs'");
   writeFileSync(resolve(compiled,file+'.mjs'),code);
  }
  const {runAccountErasureExecutor}=await import(pathToFileURL(resolve(compiled,'executor.mjs')).href);
- await runExecutor({db:client,Client,connectionString,require,runAccountErasureExecutor,report});
+ await runExecutor({db:client,Client,connectionString,require,runAccountErasureExecutor,report,safeupdate:Boolean(safeupdateLibrary)});
  await runCases(client,report);
  await runLeaves(client,report);
  await runConcurrency({db:client,Client,connectionString,report});

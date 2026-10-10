@@ -35,10 +35,23 @@ export async function runProcessor(db,processAccountErasure,report){
  assert.equal((await db.query('SELECT count(*)::int n FROM runtime_sessions WHERE actor_id=$1',[normal.actor])).rows[0].n,0);
  assert.equal((await db.query('SELECT session_ref,erased_execution_id FROM bill2_runs WHERE id=$1',[normal.run])).rows[0].erased_execution_id,normal.execution);
  assert.equal(removes,2);
- const unknown=await fixture(db);await call(db,unknown);await closeAccount(db,unknown);
+ const unknown=await fixture(db);const unknownCall=await call(db,unknown);await closeAccount(db,unknown);
+ const originalBalance=(await db.query('SELECT credits FROM profiles WHERE id=$1',[unknown.actor])).rows[0].credits;
  const pending=await processAccountErasure({profileId:unknown.actor,...adapters});
  assert.equal(pending.retry,true);assert.notEqual(pending.stage,'completed');assert.ok(pending.remaining>0||pending.manualReview>0);
  assert.equal(removes,2,'unknown finance cannot reach Auth removal');
+ const review=(await db.query('SELECT stage,review_codes,next_review_at FROM account_erasure_requests WHERE profile_id=$1',
+  [unknown.actor])).rows[0];
+ assert.equal(review.stage,'billing_pending');
+ assert.ok(review.review_codes.includes('ERASURE_FINANCIAL_PENDING_REVIEW'),JSON.stringify(review));
+ assert.ok(review.next_review_at,'missing provider/cost receives a durable review date');
+ const callState=(await db.query('SELECT provider_id,selected_cost_usd FROM bill2_calls WHERE id=$1',[unknownCall.id])).rows[0];
+ assert.equal(callState.provider_id,null);assert.equal(callState.selected_cost_usd,null);
+ assert.equal((await db.query('SELECT credits FROM profiles WHERE id=$1',[unknown.actor])).rows[0].credits,originalBalance);
+ await processAccountErasure({profileId:unknown.actor,...adapters});
+ const retryReview=(await db.query('SELECT next_review_at FROM account_erasure_requests WHERE profile_id=$1',[unknown.actor])).rows[0];
+ assert.equal(retryReview.next_review_at.getTime(),review.next_review_at.getTime(),'daily retries cannot postpone review');
+ report.checks.push('missing provider/cost: original money/identity retained, durable review and fixed due date, no Auth deletion');
  const uncertain={actor:randomUUID()};
  await db.query('INSERT INTO profiles(id,credits) VALUES($1,19)',[uncertain.actor]);await closeAccount(db,uncertain);
  let uncertainRemoves=0,state='present';
