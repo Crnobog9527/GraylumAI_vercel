@@ -20,11 +20,24 @@
 
 ## 交接
 
-- 已完成：核对 origin/staging 规则、方案、#770 最新总控评论；创建独立任务分支。
-- 下一步：独立资料库迁移、服务与测试。
-- 依赖阻塞：#766、#764 尚未合并。0203 排在 0201/0202 后；合并后同步 staging，
-  以 #766 注销函数原文补接线，再重放和生成指纹。此前不改共享指纹或公共注销函数。
-- 实际验证：尚未运行；当前不是可验收版本。
+- 已完成：0203 四张资料库表、私有桶、最小 RPC 权限、默认关闭开关；10 MB 原子占用、txt/md 严格 UTF-8 分段、原图文件头验证；上传/完成/放弃/删除/下载/预览/列表/分段/改用途接口；即时清理、每日 cron 及运行/积压记录；只读积压监测脚本。
+- 下一步：机器人审查及 CI；#766/#764 合并后同步 staging，基于注销函数原文接入新表/两个桶，重放并生成最终指纹。
+- 依赖阻塞：#766、#764 仍未合并。没有修改公共注销函数或共享指纹；没有宣称完整注销或 LIB-2a 全部验收。
+- 待 LIB-2b/2c 接口接线：目前只开放 txt/md/图片白名单（总开关也关闭）。docx/pdf 的两路径分步上传与纯文本发布尚未实现；现有表保留 text 路径与识别单元，但不能据此认为 Word/PDF 可用。
+- 实际通过：本机 PG17 空库 204/204 步、135 个迁移连续执行结构相同（开发阶段 `--out`，不是最终指纹）；本机独立连接+锁屏障额度测试、允许/拒绝、真实大小上限、幂等不重发、降级后读删、在途占用/两次不存在确认、资料库领域注销计数、工单上传登记回归；资料库单元 18/18；API 类型与 ESLint。
+- 未完成：最终完整 API 回归/网站类型结果、远程 CI/审查结论；完整注销完成证明、两桶中断恢复；真实 Storage、工单真实签名读取；24 小时上线承诺证明。以 PR 最新交接评论更新结果。
+
+## 接口与运行
+
+`library.beginUpload` 接收 requestId、filename、contentType、bytes、purpose（authored/reference），返回 documentId 与 upload。
+重试同 requestId 不重发令牌，返回 upload=null；未知结果应查询列表或放弃，不能当成成功上传。
+`completeUpload`、`abandonUpload`、`delete`、`download`、`preview` 只接收 documentId；不收用户 ID 或路径。
+`segments` 使用 documentId/version/start；`setPurpose` 使用 documentId/purpose；`list` 使用 afterId 分页。
+删除失败显示 deleting，保留最大写入占用。下载/预览 60 秒签名不写数据库和日志，原图不转换、不发模型。
+服务端临时读取签名仅用于受限文件头/纯文本读取，不跟随重定向或外部文档链接。
+
+本机验证：`node packages/db/tests/library/run-local.mjs`；`pnpm --filter @repo/api exec vitest run src/services/library`。
+完整回放（等依赖后最终更新）：`node packages/db/tests/run-db-baseline-replay.mjs --local-only --write-built`。
 
 ## staging 真实存储验证（由总控安排，未运行）
 
