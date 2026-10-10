@@ -7,7 +7,7 @@ import { createServer, type IncomingMessage, type Server } from 'node:http';
 import type { AddressInfo, Socket } from 'node:net';
 import { fileURLToPath } from 'node:url';
 import { build } from 'esbuild';
-import { chromium, type Browser, type Page } from '@playwright/test';
+import { chromium, firefox, webkit, type Browser, type Page } from '@playwright/test';
 import { buildLibrarySandbox } from '../../../../scripts/build-library-sandbox.mjs';
 
 export type Harness = {
@@ -20,6 +20,7 @@ export type Harness = {
   outsideRequests: string[];
   samples: Map<string, Buffer>;
   workerSource: string;
+  pdfWorkerSource: string;
   /** How server A answers the worker bundle request: normally, or like a signed-out visitor / an error page. */
   workerResponse: 'script' | 'login-redirect' | 'html' | 'stall';
   open(): Promise<Page>;
@@ -32,7 +33,11 @@ async function bundleHarness(): Promise<string> {
   const entry = fileURLToPath(new URL('./harness-entry.ts', import.meta.url));
   const output = await build({
     entryPoints: [entry], bundle: true, platform: 'browser', format: 'iife', target: ['es2022'], write: false,
-    logLevel: 'silent', define: { 'process.env.NEXT_PUBLIC_LIBRARY_DOCX_EXTRACTION': '"true"', 'process.env.NODE_ENV': '"test"' },
+    logLevel: 'silent', define: {
+      'process.env.NEXT_PUBLIC_LIBRARY_DOCX_EXTRACTION': '"true"',
+      'process.env.NEXT_PUBLIC_LIBRARY_PDF_EXTRACTION': '"true"',
+      'process.env.NODE_ENV': '"test"',
+    },
   });
   return output.outputFiles[0].text;
 }
@@ -44,7 +49,10 @@ function listen(server: Server): Promise<string> {
 }
 
 export async function startHarness(): Promise<Harness> {
-  const [{ 'docx-worker': docx }, harnessCode] = await Promise.all([buildLibrarySandbox({ outdir: null }), bundleHarness()]);
+  const [{ 'docx-worker': docx, 'pdf-worker': pdf }, harnessCode] = await Promise.all([
+    buildLibrarySandbox({ outdir: null }), bundleHarness(),
+  ]);
+  const bundles: Record<string, string> = { '/library-sandbox/docx-worker.js': docx.code, '/library-sandbox/pdf-worker.js': pdf.code };
   const samples = new Map<string, Buffer>();
   const unexpected: string[] = [];
   const outsideRequests: string[] = [];
@@ -58,11 +66,11 @@ export async function startHarness(): Promise<Harness> {
     if (url === '/') return send('text/html; charset=utf-8', PAGE);
     if (url === '/favicon.ico') return response.writeHead(204).end();
     if (url === '/harness.js') return send('text/javascript', harnessCode);
-    if (url === '/library-sandbox/docx-worker.js') {
+    if (Object.hasOwn(bundles, url)) {
       if (harness.workerResponse === 'login-redirect') return response.writeHead(307, { location: '/login' }).end();
       if (harness.workerResponse === 'html') return send('text/html; charset=utf-8', PAGE);
       if (harness.workerResponse === 'stall') return;
-      return send('text/javascript', docx.code);
+      return send('text/javascript', bundles[url]);
     }
     const sample = url.startsWith('/sample/') ? samples.get(decodeURIComponent(url.slice(8))) : undefined;
     if (sample) return send('application/octet-stream', sample);
@@ -84,9 +92,14 @@ export async function startHarness(): Promise<Harness> {
   });
   const [origin, outside] = await Promise.all([listen(graylum), listen(outsideServer)]);
   const chrome = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
-  const browser = await chromium.launch({ executablePath: existsSync(chrome) ? chrome : undefined, headless: true });
+  // Local cross-engine check only (CI installs Chromium): LIBRARY_SANDBOX_BROWSER=webkit|firefox.
+  const engine = process.env.LIBRARY_SANDBOX_BROWSER;
+  const browser = engine === 'webkit' || engine === 'firefox'
+    ? await (engine === 'webkit' ? webkit : firefox).launch({ headless: true })
+    : await chromium.launch({ executablePath: existsSync(chrome) ? chrome : undefined, headless: true });
   const harness: Harness = {
-    browser, origin, outside, unexpected, outsideRequests, samples, workerSource: docx.code, workerResponse: 'script',
+    browser, origin, outside, unexpected, outsideRequests, samples, workerSource: docx.code, pdfWorkerSource: pdf.code,
+    workerResponse: 'script',
     async open() {
       const page = await browser.newPage();
       await page.goto(`${origin}/`);
