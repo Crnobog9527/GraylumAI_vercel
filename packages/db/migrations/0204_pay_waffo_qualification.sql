@@ -646,6 +646,25 @@ BEGIN
   END LOOP;
 END $bill2$;
 
+-- A stale internal status is not an effective second membership for package eligibility.
+-- Keep external active subscriptions and the membership-purchase duplicate-renewal guard unchanged.
+DO $membership_history$
+DECLARE source text; needle text;
+BEGIN
+  source:=pg_get_functiondef('public.pay_common_assert_purchase_facts(uuid,text,text)'::regprocedure);
+  needle:='IF (SELECT count(*) FROM user_subscriptions WHERE user_id=p_user_id AND status IN (''active'',''trialing'',''past_due'',''incomplete'',''unpaid''))>1 THEN';
+  IF position(needle IN source)>0 THEN
+    source:=replace(source,needle,E'IF (SELECT count(*) FROM user_subscriptions WHERE user_id=p_user_id
+'
+      ||E'    AND status IN (''active'',''trialing'',''past_due'',''incomplete'',''unpaid'')
+'
+      ||E'    AND (p_item_type<>''credit_package'' OR stripe_subscription_id IS NOT NULL
+'
+      ||E'      OR current_period_end IS NULL OR current_period_end>now()))>1 THEN');
+    EXECUTE source;
+  END IF;
+END $membership_history$;
+
 -- New protocol activation never lets an old caller bypass method/terms/qualification checks.
 -- The old global setting is retained only for legacy test callers before activation.
 DO $legacy$
