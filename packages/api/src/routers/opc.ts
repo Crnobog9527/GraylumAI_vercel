@@ -1,3 +1,4 @@
+import {contentVisibilityFence} from '../services/accountErasure/content';
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import type { AgentTurnEvent } from "../shared/agentTurn";
 import { capturePendingInput, captureResolveInput } from "../services/opc/capture";
@@ -113,7 +114,8 @@ export const opcRouter = router({
         yield* streamOriginalExecution((onProgress) => executeOriginalExecution({
           admin: ctx.supabaseAdmin, user: ctx.userScopedSupabase, actorId: ctx.user.id, budget: ctx.runtimeBudget,
           authorization: ctx.headers?.get("Authorization"), maintenanceEndpoint,
-        }, admitted.executionId, onProgress), timing, path, undefined, input.textProtocol);
+        }, admitted.executionId, onProgress), timing, path, undefined, input.textProtocol,
+          contentVisibilityFence(ctx.supabaseAdmin, ctx.user.id, admitted.executionId));
       } finally {
         timing?.release();
       }

@@ -148,3 +148,15 @@ it('streams the fixed claim notice without losing the original state or precedin
   expect(events[1]).toHaveProperty('result.notice',result.notice);
  }
 });
+
+it('discards buffered output after deletion while original financial work completes',async()=>{
+ const c=controlled();let checks=0;
+ const stream=streamOriginalExecution(c.run,undefined,'runtime.executeStream',()=>0,undefined,async()=>{
+  checks++;throw new TRPCError({code:'PRECONDITION_FAILED',message:'CONTENT_ERASED'});
+ });
+ const pending=stream.next();const rejection=expect(pending).rejects.toMatchObject({message:'CONTENT_ERASED'});
+ c.emit({type:'text',text:'DELETED_PRIVATE_BODY'});await tick();
+ expect(c.settled()).toBe(false);
+ c.finish({state:'cost_pending'});await rejection;
+ expect(checks).toBe(1);expect(c.settled()).toBe(true);
+});

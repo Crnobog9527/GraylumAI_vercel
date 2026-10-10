@@ -59,3 +59,9 @@ it.each(['bill2.v1', 'bill2.v2'])('passes %s userStopPending through without rel
   expect(await readNativeRuntimeView(f.db, actor, session)).toEqual(f.view);
   expect(f.rpc).toHaveBeenCalledOnce();
 });
+
+it('returns an explicit tombstone refusal instead of an empty successful view',async()=>{
+ const db={rpc:async()=>({data:null,error:{code:'42501',message:'CONTENT_ERASED'}})};
+ await expect(readNativeRuntimeView(db as unknown as SupabaseClient,actor,session))
+  .rejects.toMatchObject({code:'PRECONDITION_FAILED',message:'CONTENT_ERASED'});
+});

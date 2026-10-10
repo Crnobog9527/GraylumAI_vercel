@@ -48,7 +48,7 @@ const call = z.object({ runtimeEpoch: z.number().int().positive().optional(), pa
   billingUnit: z.object({ modelId: uuid, multiplier: z.string().regex(MULTIPLIER_PATTERN), source: z.enum(['model', 'provider', 'global']) })
     .strict().optional() }).strict();
 export type FrozenCall = z.infer<typeof call>;
-export type RunView = { executionId?: string|null; accountClosed?: boolean; id: string; state: 'prepared' | 'dispatched' | 'unknown' | 'cost_pending' | 'settled' | 'refunded';
+export type RunView = { executionId?: string|null; accountClosed?: boolean; contentDeleted?: boolean; id: string; state: 'prepared' | 'dispatched' | 'unknown' | 'cost_pending' | 'settled' | 'refunded';
   contractVersion?: string; calls?: Array<{preDeductId?: string; chargedCredits?: number;}>;
   preDeductId: string; closed: boolean; conflict: boolean; reservedCredits: number; chargedCredits: number | null; outcome: string | null };
 type RpcResult={data:unknown;error:unknown};
@@ -262,6 +262,7 @@ export function authoritativeBilling(deps: { budget?:RuntimeBudget; admin: Billi
       try {
         const saved = await recordReceipt(capability.runId, callId, evidence);
         if (saved.accountClosed) return { dispatched: true, accountClosed: true as const };
+        if (saved.contentDeleted) return { dispatched: true, contentDeleted: true as const };
         if ('evidenceKind' in evidence && evidence.evidenceKind === 'provider_rejection_pending') {
           // Only this strict refusal gets a bounded immediate lookup; never retry generation.
           await recoverReceipts(capability.runId, {callId, timeoutMs: 1_500, immediate: true});

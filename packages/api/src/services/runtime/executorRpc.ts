@@ -1,4 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import {throwIfContentErased} from '../accountErasure/content';
 import type {RuntimeProgress} from './progress';
 import {createHash} from 'node:crypto';
 import {terminalAgentReplyFailure} from './terminalAgentReply';
@@ -21,6 +22,7 @@ export function executorRpc(options:{database:SessionRpc;actor:()=>Promise<strin
  return async function rpc<T>(name:string,args:Record<string,unknown>,database=options.database):Promise<T>{
   const result=await database.rpc(name,{...args,p_actor_id:z.string().uuid().parse(await options.actor())});
   if(result.error){
+   throwIfContentErased(result.error);
    // A private, exact identity mismatch permits only the bounded legacy replay
    // below. Authorization, storage and all other failures never trigger it.
    if(name==='runtime_response'&&typeof result.error==='object'&&'message' in result.error
