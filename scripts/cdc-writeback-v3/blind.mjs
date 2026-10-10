@@ -50,7 +50,8 @@ export function bundle(batch) {
   const proofRaw = readFileSync(join(paths.root, `replay-${batch}.proof.json`)), proof = JSON.parse(proofRaw);
   const resultsRaw = readFileSync(join(paths.root, `replay-${batch}`, 'reasoning-results.json'));
   const originalRaw = readFileSync(join(paths.root, `replay-${batch}`, 'frozen-private.json'));
-  assert(proof.replay === 'COMPLETED' && proof.batch === batch && proof.externalModelCalls === 0 && proof.exactOrganizerRequest &&
+  const exact = batch === 'A12-reference' ? proof.exactOrganizerUserContent : proof.exactOrganizerRequest;
+  assert(proof.replay === 'COMPLETED' && proof.batch === batch && proof.externalModelCalls === 0 && exact === true &&
     hash(resultsRaw) === proof.resultsHash && hash(originalRaw) === proof.frozenPrivateHash, 'V3_SCORE_REPLAY_CHANGED');
   const goldRaw = readFileSync(special(batch) ? join(paths.source, 'frozen/special12.json') : join(paths.baseline, 'cases.json'));
   assert(hash(goldRaw) === (special(batch) ? pins.specialHash : pins.casesHash), 'V3_SCORE_GOLD_CHANGED');

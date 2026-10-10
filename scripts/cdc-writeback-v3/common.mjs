@@ -105,17 +105,23 @@ export function withoutPending(context) {
 
 /** Compares the complete host-built organizer request with a frozen one: every field, system text and output cap
  * included. Only key order inside the user payload JSON is normalized. */
+const normalized = raw => {
+  const body = JSON.parse(raw), last = body.messages.at(-1);
+  assert(typeof last?.content === 'string', 'V3_REPLAY_FORMAT');
+  const index = last.content.indexOf(marker);
+  assert(index > 0, 'V3_REPLAY_FORMAT');
+  const content = JSON.stringify(canonical(JSON.parse(last.content.slice(0, index)))) + last.content.slice(index);
+  return { body, content };
+};
 export function sameOrganizerRequest(hostRaw, frozenRaw) {
   const read = raw => {
-    const body = JSON.parse(raw), last = body.messages.at(-1);
-    assert(typeof last?.content === 'string', 'V3_REPLAY_FORMAT');
-    const index = last.content.indexOf(marker);
-    assert(index > 0, 'V3_REPLAY_FORMAT');
-    const content = JSON.stringify(canonical(JSON.parse(last.content.slice(0, index)))) + last.content.slice(index);
-    return JSON.stringify(canonical({ ...body, messages: [...body.messages.slice(0, -1), { ...last, content }] }));
+    const { body, content } = normalized(raw);
+    return JSON.stringify(canonical({ ...body, messages: [...body.messages.slice(0, -1), { ...body.messages.at(-1), content }] }));
   };
   return read(hostRaw) === read(frozenRaw);
 }
+/** Only for the historical A12 reference: its paid requests used the A-group prompt, so only the payload can match. */
+export const sameOrganizerUserContent = (hostRaw, frozenRaw) => normalized(hostRaw).content === normalized(frozenRaw).content;
 
 /** Stops on any output the host could not apply as a whole; withdrawals mirror the 0199 SQL shape check. */
 export function validateV3Response(response, base) {

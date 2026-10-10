@@ -4,7 +4,7 @@ import strict from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { organizerInstructions, organizerSystem, splitRequest, withPending, withoutPending, sameOrganizerRequest,
-  validateV3Response, reserveNano, outputTokens, marker } from '../cdc-writeback-v3/common.mjs';
+  sameOrganizerUserContent, validateV3Response, reserveNano, outputTokens, marker } from '../cdc-writeback-v3/common.mjs';
 import { freezeRequest, promptAt } from '../cdc-writeback-v3/frozen.mjs';
 import { mentorStream } from '../cdc-writeback-v3/replay.mjs';
 import { criteria, scrub, passes, validateScores, scoreFiles, instructions } from '../cdc-writeback-v3/blind.mjs';
@@ -71,6 +71,9 @@ test('V3 replay compares the complete organizer request and unwraps the frozen m
   strict.equal(sameOrganizerRequest(host({ provider: { ...route, allow_fallbacks: true } }), frozen), false);
   strict.equal(sameOrganizerRequest(host({ reasoning: { effort: 'low' } }), frozen), false);
   strict.equal(sameOrganizerRequest(source('B'), frozen), false);
+  // The historical A12 reference compares only the payload, so a different system prompt or cap is tolerated there.
+  strict.equal(sameOrganizerUserContent(host({ system: { role: 'system', content: 'A prompt' }, max_tokens: 4096 }), frozen), true);
+  strict.equal(sameOrganizerUserContent(source('B'), frozen), false);
   const frame = (content, finish, usage) => 'data: ' + JSON.stringify({ id: 'gen-1', provider: 'Anthropic',
     choices: [{ index: 0, delta: { role: 'assistant', content }, finish_reason: finish }], ...(usage ? { usage } : {}) });
   const template = [frame('原', null), frame('文', null), frame('', 'stop'), frame('', 'stop', { cost: 0.01 }), 'data: [DONE]'].join('\n\n');

@@ -8,7 +8,8 @@ import { randomUUID } from 'node:crypto';
 import { git } from '../cdc-writeback-v2/source.mjs';
 import { runHost } from '../cdc-writeback-v2/host.mjs';
 import { validateResponse } from '../cdc-writeback-v2/frozen.mjs';
-import { paths, pins, runs, marker, hash, assert, readJson, splitRequest, sameOrganizerRequest, validateV3Response } from './common.mjs';
+import { paths, pins, runs, marker, hash, assert, readJson, splitRequest, sameOrganizerRequest, sameOrganizerUserContent,
+  validateV3Response } from './common.mjs';
 import { frozenV3 } from './run.mjs';
 
 const synthetic = (slot, model, content) => JSON.stringify({ id: 'gen-offline-' + slot, object: 'chat.completion', created: 1, model,
@@ -39,11 +40,14 @@ export function sources(batch) {
     const rows = JSON.parse(manifest).filter(r => r.stage === 'A' && r.group === 'source12')
       .map(r => ({ ...r, raw: readFileSync(join(paths.source, 'frozen', r.id.replace('/', '-') + '.request.json'), 'utf8') }));
     rows.forEach(r => assert(hash(r.raw) === r.requestHash, 'V3_SOURCE_REQUEST_CHANGED'));
-    return { rows, execution: join(paths.source, 'frozen/execution'), completedName: 'A12', validate: validateResponse };
+    // Historical reference only: A12 was paid with the A-group prompt, so the request check is limited to the payload.
+    return { rows, execution: join(paths.source, 'frozen/execution'), completedName: 'A12', validate: validateResponse,
+      same: sameOrganizerUserContent, check: { exactOrganizerUserContent: true } };
   }
   const frozen = frozenV3();
   return { rows: frozen.requests.filter(r => r.batch === batch), execution: join(frozen.directory, 'execution'),
-    completedName: batch, validate: response => validateV3Response(response, validateResponse), frozen };
+    completedName: batch, validate: response => validateV3Response(response, validateResponse), frozen,
+    same: sameOrganizerRequest, check: { exactOrganizerRequest: true } };
 }
 
 export function paidVariants(batch, source) {
@@ -96,12 +100,12 @@ export async function main(batch, dry = false) {
       if (mentors) { const found = mentors.find(m => m.slot === input.slot); assert(found, 'V3_MENTOR_MISSING'); return found.body; }
       return mentorStream(splitRequest(row.raw).tail, template);
     }
-    assert(sameOrganizerRequest(input.raw, row.raw), 'V3_REPLAY_FROZEN_REQUEST_MISMATCH');
+    assert(source.same(input.raw, row.raw), 'V3_REPLAY_FROZEN_REQUEST_MISMATCH');
     return synthetic(input.slot, model, '{"inputKind":"answer","patches":[],"notes":[]}');
   }, variants);
   if (dry) {
     const proof = { batch, dry: true, count: source.rows.length, head: git('rev-parse', 'HEAD'), planHash: built.planHash,
-      manifestHash: source.frozen?.expected.manifestHash ?? pins.sourceManifestHash, exactOrganizerRequest: true, externalModelCalls: 0 };
+      manifestHash: source.frozen?.expected.manifestHash ?? pins.sourceManifestHash, ...source.check, externalModelCalls: 0 };
     writeFileSync(join(paths.root, 'dry-' + batch + '.proof.json'), JSON.stringify(proof) + '\n', { flag: 'wx', mode: 0o600 });
     return proof;
   }
@@ -112,7 +116,7 @@ export async function main(batch, dry = false) {
   const proof = { batch, count: results.length, head: git('rev-parse', 'HEAD'), planHash: built.planHash,
     manifestHash: source.frozen?.expected.manifestHash ?? pins.sourceManifestHash, paidResponsesHash: responsesHash,
     resultsHash: hash(raw), frozenPrivateHash: hash(readFileSync(join(output, 'frozen-private.json'))),
-    exactOrganizerRequest: true, externalModelCalls: 0, replay: 'COMPLETED' };
+    ...source.check, externalModelCalls: 0, replay: 'COMPLETED' };
   writeFileSync(join(paths.root, 'replay-' + batch + '.proof.json'), JSON.stringify(proof) + '\n', { flag: 'wx', mode: 0o600 });
   return proof;
 }
