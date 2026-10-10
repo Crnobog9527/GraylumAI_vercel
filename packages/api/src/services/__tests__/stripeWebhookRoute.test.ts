@@ -7,6 +7,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import Stripe from 'stripe';
 
+const walletMocks = vi.hoisted(() => ({ recover: vi.fn() }));
+vi.mock('@repo/api/src/services/payments/walletWebhook', () => ({ recoverWalletCheckout: walletMocks.recover }));
+
 const alertMocks = vi.hoisted(() => ({ captureMessage: vi.fn(), logServerError: vi.fn() }));
 vi.mock('../../../../../apps/web/node_modules/@sentry/nextjs', () => ({ captureMessage: alertMocks.captureMessage }));
 
@@ -36,9 +39,21 @@ import { handleStripeWebhookEvent, POST } from '../../../../../apps/web/src/app/
 
 describe('stripe webhook route', () => {
   beforeEach(() => {
+    walletMocks.recover.mockReset().mockResolvedValue(false);
     Object.values(alertMocks).forEach((mock) => mock.mockReset());
     Object.values(stripeServiceMocks).forEach((mock) => mock.mockReset());
     Object.values(stripeFulfillmentMocks).forEach((mock) => mock.mockReset());
+  });
+
+  it('routes method wallet delivery once and never falls through on recovery timeout', async () => {
+    const event = { type: 'checkout.session.async_payment_succeeded', data: { object: { id: 'cs_wallet' } } } as Stripe.Event;
+    walletMocks.recover.mockResolvedValue(true);
+    await handleStripeWebhookEvent({} as never, event);
+    expect(stripeFulfillmentMocks.fulfillCreditPackageOrder).not.toHaveBeenCalled();
+    expect(stripeFulfillmentMocks.upsertPaymentOrderBySession).not.toHaveBeenCalled();
+    walletMocks.recover.mockRejectedValue(new Error('timeout'));
+    await expect(handleStripeWebhookEvent({} as never, event)).rejects.toThrow('timeout');
+    expect(stripeFulfillmentMocks.upsertPaymentOrderBySession).not.toHaveBeenCalled();
   });
 
   it.each(['PAY_COMMON_RECEIPT_MISMATCH', 'PAY_COMMON_ATTEMPT_IDENTITY_MISMATCH'])(
