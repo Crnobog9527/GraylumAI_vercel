@@ -23,7 +23,9 @@ beforeAll(async () => {
     window.savedLimits = [];
     window.failSave = false;
     export const trpc = {
-      useUtils: () => ({runtimeRateLimits:{get:{setData:(_,v)=>{data=v;listeners.forEach(fn=>fn())}}}}),
+      useUtils: () => ({runtimeRateLimits:{get:{setData:(_,v)=>{data=v;listeners.forEach(fn=>fn())},
+        // A fresh read may carry a pause set elsewhere (window.serverConfig).
+        fetch:async()=>{data={...data,config:{...data.config,...window.serverConfig}};listeners.forEach(fn=>fn());return data}}}}),
       runtimeRateLimits: {
         get:{useQuery:()=>({data:useSyncExternalStore(subscribe,()=>data),error:null,refetch:async()=>({data})})},
         update:{useMutation:options=>{
@@ -85,7 +87,6 @@ it('validates, preserves in-flight edits, reads back saves and never implies enf
   const { page, errors } = await openCard(false);
   try {
     await browserExpect(page.getByText('保护尚未接线：当前只能准备配置，保存不会启用限流或暂停模型调用。')).toBeVisible();
-    await browserExpect(page.getByRole('button', {name:'一键暂停（待接线）'})).toBeDisabled();
     const minute = page.getByLabel('新消息（每轮消息）：每分钟', {exact:true});
     const save = page.getByRole('button', {name:'保存额度配置'});
     await minute.fill('0');
@@ -102,6 +103,7 @@ it('validates, preserves in-flight edits, reads back saves and never implies enf
     await minute.fill('7');
     await page.evaluate('window.failSave=true');
     await save.click();
+    await browserExpect.poll(() => page.evaluate('window.savedLimits.length')).toBe(2);
     await page.evaluate('window.finishSave()');
     await browserExpect(page.getByRole('alert')).toHaveText('保存或回读失败，请重新读取核对；未确认保存成功。');
     await browserExpect(page.getByText('配置已保存并回读；保护仍未接线。')).toHaveCount(0);
@@ -110,7 +112,7 @@ it('validates, preserves in-flight edits, reads back saves and never implies enf
   } finally { await page.close(); }
 }, 15000);
 
-it('shows wired protection, pauses with the read-back value and keeps unsaved limit edits', async () => {
+it('shows wired protection, keeps the pause switch elsewhere and never undoes a pause when saving limits', async () => {
   const { page, errors } = await openCard(true);
   try {
     await browserExpect(page.getByText('已接线：保存后，下一条新消息或新一轮的第一次模型调用就按新配置检查。')).toBeVisible();
@@ -119,26 +121,22 @@ it('shows wired protection, pauses with the read-back value and keeps unsaved li
       .toBeVisible();
     await browserExpect(page.getByText('都不能低于单轮最多调用数（当前 3）', {exact:false})).toBeVisible();
     await browserExpect(page.getByText('暂停设置：未暂停')).toBeVisible();
+    // The switch moved to the stop-loss tab, which has a confirm step.
+    await browserExpect(page.getByRole('button', {name:/一键暂停|恢复新调用|停止新调用/})).toHaveCount(0);
+    await browserExpect(page.getByText('停止或恢复新调用请到“成本止损”页操作，那里有确认步骤。')).toBeVisible();
     const minute = page.getByLabel('新消息（每轮消息）：每分钟', {exact:true});
     await minute.fill('9');
-    const pause = page.getByRole('button', {name:'一键暂停'});
-    await browserExpect(pause).toBeEnabled();
-    await pause.click();
+    // Someone paused new calls after this page loaded; saving limits must keep that pause.
+    await page.evaluate('window.serverConfig={stopNewCalls:true}');
+    await page.getByRole('button', {name:'保存额度配置'}).click();
+    await browserExpect.poll(() => page.evaluate('window.savedLimits.length')).toBe(1);
     await page.evaluate('window.finishSave()');
-    // Only the pause flag is submitted; the unsaved limit edit is not saved and stays in the form.
-    expect(await page.evaluate('window.savedLimits[0]')).toMatchObject({ admissionPerMinute:10, stopNewCalls:true });
+    expect(await page.evaluate('window.savedLimits[0]')).toMatchObject({ admissionPerMinute:9, stopNewCalls:true });
     await browserExpect(page.getByText('暂停设置：已暂停新调用')).toBeVisible();
-    await browserExpect(page.getByText('已暂停新调用（已回读）。已经开始的一轮会跑完。')).toBeVisible();
-    await browserExpect(minute).toHaveValue('9');
-    // A save that the server reads back as not paused must show not paused.
-    await page.evaluate('window.readBack={stopNewCalls:false}');
-    await page.getByRole('button', {name:'恢复新调用'}).click();
-    await page.evaluate('window.finishSave()');
-    await browserExpect(page.getByText('暂停设置：未暂停')).toBeVisible();
-    await browserExpect(page.getByText('已恢复新调用（已回读）。')).toBeVisible();
     // Saving limits displays the read-back value, not the submitted one.
     await page.evaluate('window.readBack={admissionPerMinute:7}');
     await page.getByRole('button', {name:'保存额度配置'}).click();
+    await browserExpect.poll(() => page.evaluate('window.savedLimits.length')).toBe(2);
     await page.evaluate('window.finishSave()');
     await browserExpect(page.getByText('配置已保存并回读。', {exact:true})).toBeVisible();
     await browserExpect(minute).toHaveValue('7');

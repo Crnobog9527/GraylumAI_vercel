@@ -18,6 +18,7 @@ import { DEFAULT_SITE_NAME, DEFAULT_SUPPORT_EMAIL } from '@/lib/site-config';
 import { getSafeErrorMessage } from '@/lib/safe-error-message';
 import AdminSettingsLoadError from '@/components/admin/AdminErrorState';
 import { RuntimeRateLimitSettings, RuntimeRateLimitTabTrigger } from '@/components/admin/RuntimeRateLimitSettings';
+import { RuntimeStopLossSettings, RuntimeStopLossTabTrigger } from '@/components/admin/stop-loss/RuntimeStopLossSettings';
 import { MentorBudgetTabContent, MentorBudgetTabTrigger } from '@/components/admin/MentorBudgetSettings';
 import { changedSettings, mergeReadSettings } from './changedSettings';
 import { MembershipPlanPermissions } from '@/components/admin/MembershipPlanPermissions';
@@ -328,6 +329,7 @@ export default function AdminSettingsPage() {
           </TabsTrigger>
           <MentorBudgetTabTrigger />
           <RuntimeRateLimitTabTrigger />
+          <RuntimeStopLossTabTrigger />
         </TabsList>
 
         {/* General Tab */}
@@ -485,6 +487,7 @@ export default function AdminSettingsPage() {
         </TabsContent>
         <MentorBudgetTabContent onOpenFeatures={() => setTab('features')} />
         <RuntimeRateLimitSettings />
+        <RuntimeStopLossSettings />
       </Tabs>
     </div>
   );

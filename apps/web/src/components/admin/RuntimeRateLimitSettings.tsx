@@ -28,7 +28,8 @@ export function RuntimeRateLimitSettings() {
   const view = trpc.runtimeRateLimits.get.useQuery(undefined, { refetchOnMount: 'always' });
   // This component is outside the unmounting TabsContent, preserving edits and save state.
   const [draft, setDraft] = useState<Draft | null>(null);
-  const [saved, setSaved] = useState<'limits' | 'pause' | null>(null);
+  const [saved, setSaved] = useState<'limits' | null>(null);
+  const [readFailed, setReadFailed] = useState(false);
   // Every successful save shows the server read-back, never the submitted value.
   const update = trpc.runtimeRateLimits.update.useMutation({
     onSuccess: data => { utils.runtimeRateLimits.get.setData(undefined, data); },
@@ -75,6 +76,7 @@ export function RuntimeRateLimitSettings() {
                 onChange={event => {
                   setDraft({ ...current, [key]: event.target.value });
                   setSaved(null);
+                  setReadFailed(false);
                   update.reset();
                 }} />
               <p className="text-xs">可填 1–{max} 次，日限额不能低于分钟限额。</p>
@@ -89,27 +91,24 @@ export function RuntimeRateLimitSettings() {
           </p>}
           {wired ? <p>暂停设置：{config.stopNewCalls ? '已暂停新调用' : '未暂停'}</p>
             : <p>暂停设置：{config.stopNewCalls ? '已保存暂停意向，尚未生效' : '未暂停（保护尚未接线）'}</p>}
-          {wired ? <Button variant={config.stopNewCalls ? 'outline' : 'destructive'} disabled={update.isPending}
-            onClick={() => {
-              setSaved(null);
-              // Toggle only the read-back pause flag; unsaved limit edits stay in the form.
-              update.mutate({ ...config, stopNewCalls: !config.stopNewCalls }, { onSuccess: () => setSaved('pause') });
-            }}>{config.stopNewCalls ? '恢复新调用' : '一键暂停'}</Button>
-            : <Button disabled title="路由与恢复安全接线完成后开放此操作">一键暂停（待接线）</Button>}
+          <p className="text-sm">停止或恢复新调用请到“成本止损”页操作，那里有确认步骤。</p>
           <Button disabled={update.isPending || !valid} onClick={() => {
             setSaved(null);
-            update.mutate({ ...config,
-              admissionPerMinute: Number(current.admissionPerMinute),
-              admissionPer24Hours: Number(current.admissionPer24Hours),
-              callsPerMinute: Number(current.callsPerMinute),
-              callsPer24Hours: Number(current.callsPer24Hours),
-            }, { onSuccess: () => { setDraft(null); setSaved('limits'); } });
+            setReadFailed(false);
+            // Re-read the pause flag first: saving limits must never undo a stop set elsewhere.
+            void utils.runtimeRateLimits.get.fetch(undefined, { staleTime: 0 }).then(fresh => {
+              update.mutate({ ...fresh.config,
+                admissionPerMinute: Number(current.admissionPerMinute),
+                admissionPer24Hours: Number(current.admissionPer24Hours),
+                callsPerMinute: Number(current.callsPerMinute),
+                callsPer24Hours: Number(current.callsPer24Hours),
+              }, { onSuccess: () => { setDraft(null); setSaved('limits'); } });
+            }, () => { setReadFailed(true); });
           }}>{update.isPending ? '保存中…' : '保存额度配置'}</Button>
         </>}
-        {update.error && <p role="alert">保存或回读失败，请重新读取核对；未确认保存成功。</p>}
+        {(update.error || readFailed) && <p role="alert">保存或回读失败，请重新读取核对；未确认保存成功。</p>}
         {saved && !view.error && !update.error && config && <p role="status">
-          {saved === 'pause' ? (config.stopNewCalls ? '已暂停新调用（已回读）。已经开始的一轮会跑完。' : '已恢复新调用（已回读）。')
-            : wired ? '配置已保存并回读。' : '配置已保存并回读；保护仍未接线。'}
+          {wired ? '配置已保存并回读。' : '配置已保存并回读；保护仍未接线。'}
         </p>}
         <p className="text-sm">
           Redis 不可用时，{wired ? '新消息和新一轮的第一次模型调用都会被拒绝' : '接线后的新请求将被拒绝'}。运维日志事件
