@@ -4,14 +4,15 @@ import { describe, it, expect, vi } from 'vitest';
 import { readMethodMembership } from './methodMembership';
 function fixture(counts: Array<number | null> = [40, 3, 2]) {
   const results = [{ data: null, error: null }, { data: [], error: null },
-    ...counts.map(count => ({ count, data: null, error: null }))];
+    { data: counts.some(n => n === null) ? null : counts.flatMap((n, i) =>
+      Array.from({ length: n! }, () => ({ qualification_state: ['sold', 'reserved', 'review'][i] }))), error: null }];
   const queries: Array<{ eq: ReturnType<typeof vi.fn>; not: ReturnType<typeof vi.fn> }> = [];
   const from = vi.fn(() => {
     const result = results.shift();
-    const query = { select: vi.fn(), eq: vi.fn(), not: vi.fn(), gt: vi.fn(), is: vi.fn(), order: vi.fn(), limit: vi.fn(),
+    const query = { select: vi.fn(), eq: vi.fn(), not: vi.fn(), gt: vi.fn(), or: vi.fn(), is: vi.fn(), order: vi.fn(), limit: vi.fn(),
       maybeSingle: vi.fn().mockResolvedValue(result),
       then: (resolve: (value: unknown) => unknown) => Promise.resolve(result).then(resolve) };
-    for (const method of ['select', 'eq', 'not', 'gt', 'is', 'order', 'limit'] as const) query[method].mockReturnValue(query);
+    for (const method of ['select', 'eq', 'not', 'gt', 'or', 'is', 'order', 'limit'] as const) query[method].mockReturnValue(query);
     queries.push(query); return query;
   });
   return { db: { from } as unknown as SupabaseClient, queries };

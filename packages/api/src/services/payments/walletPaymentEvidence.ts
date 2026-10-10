@@ -8,11 +8,14 @@ const id = (value: string | { id: string } | null) => typeof value === 'string' 
  * Async Checkout completion alone is not a successful payment. */
 export async function readWalletPaymentEvidence(input: {
   stripe: Pick<Stripe, 'checkout' | 'paymentIntents' | 'charges'>; scope: StripeScope;
-  order: { id: string; user_id: string; purchase_snapshot: unknown; payment_method: 'wechat_pay' | 'alipay' };
+  order: { id: string; user_id: string; purchase_snapshot: unknown; payment_method: 'wechat_pay' | 'alipay';
+    payment_channel: string; merchant_namespace: string; payment_mode: string };
   sessionId: string;
 }) {
   const { stripe, scope, order } = input;
   if (scope.mode !== 'test') throw new Error('PAY_WAFFO_LIVE_DISABLED');
+  if (order.payment_channel !== 'stripe' || order.payment_mode !== scope.mode
+    || order.merchant_namespace !== scope.merchant) throw new Error('PAY_WAFFO_PAYMENT_CONFLICT');
   const session = await stripe.checkout.sessions.retrieve(input.sessionId);
   if (session.object !== 'checkout.session' || session.id !== input.sessionId || session.mode !== 'payment' || session.livemode
     || session.client_reference_id !== order.user_id || session.metadata?.userId !== order.user_id

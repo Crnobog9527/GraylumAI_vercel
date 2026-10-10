@@ -7,7 +7,7 @@ import { assertStripePurchasePrice } from './stripePurchaseEvidence';
 const snapshot = { version: 1, item_type: 'membership_plan', item_id: '00000000-0000-4000-8000-000000000001',
   item_updated_at: '2026-10-01T00:00:00.000Z', billing_cycle: 'yearly', currency: 'usd', unit: 'major',
   price: '496.00', discount: '0.00', tax_behavior: 'inclusive', credits: 107640, bonus_credits: 0 };
-const order = { id: 'order-1', user_id: 'user-1', payment_method: 'wechat_pay' as const, purchase_snapshot: snapshot };
+const order = { payment_channel: 'stripe', merchant_namespace: 'fixture', payment_mode: 'test', id: 'order-1', user_id: 'user-1', payment_method: 'wechat_pay' as const, purchase_snapshot: snapshot };
 function fixture() {
   const metadata = { orderId: order.id, userId: order.user_id };
   const session = { object: 'checkout.session', id: 'cs_1', mode: 'payment', livemode: false, client_reference_id: order.user_id, metadata,
@@ -49,6 +49,14 @@ describe('wallet one-time evidence', () => {
     if (reason === 'pending') f.intent.status = 'processing';
     await expect(f.run()).rejects.toThrow();
   });
+  it.each([{ payment_channel: 'waffo' }, { merchant_namespace: 'other-account' }, { payment_mode: 'live' }])(
+    'rejects persisted scope mismatch before querying Stripe', async change => {
+      const f = fixture();
+      await expect(readWalletPaymentEvidence({ stripe: f.stripe as unknown as Stripe,
+        scope: { merchant: 'fixture', mode: 'test' }, order: { ...order, ...change }, sessionId: 'cs_1' })).rejects.toThrow();
+      expect(f.stripe.checkout.sessions.retrieve).not.toHaveBeenCalled();
+    },
+  );
   it('propagates lookup timeout without interpreting it as unpaid', async () => {
     const f = fixture(); f.stripe.charges.retrieve.mockRejectedValue(new Error('timeout'));
     await expect(f.run()).rejects.toThrow('timeout');

@@ -40,6 +40,11 @@ describe('Waffo authenticated durable receipt', () => {
     rpc.mockResolvedValueOnce({ data: null, error: new Error('unavailable') });
     await expect(receiveWaffoWebhook(input)).rejects.toThrow('WAFFO_RECEIPT_UNAVAILABLE');
   });
+  it.each(['subscription.past_due', 'subscription.recovered'])('accepts timestamped %s event IDs', type => {
+    const id = 'ORD_5dXBtmF2HLlHfbPNm0Wcnz:2026-05-10T08:31:00.000Z';
+    const receipt = verifyWaffoReceipt(fixture({ ...event, eventType: type, eventId: id }));
+    expect(receipt.id).toBe(id);
+  });
   it('keeps refund events distinct from payment fulfillment', async () => {
     const payment = verifyWaffoReceipt(fixture());
     const refund = verifyWaffoReceipt(fixture({ ...event, eventType: 'refund.succeeded', eventId: 'REF_1',

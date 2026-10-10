@@ -5,7 +5,7 @@ import { z } from 'zod';
 
 const resourceId = z.string().regex(/^[A-Za-z0-9_:-]{1,160}$/);
 const envelope = z.object({
-  eventType: z.string().regex(/^[a-z_]+\.[a-z_]+$/), eventId: resourceId,
+  eventType: z.string().regex(/^[a-z_]+\.[a-z_]+$/), eventId: z.string().regex(/^[A-Za-z0-9_.:-]{1,160}$/),
   storeId: resourceId, mode: z.enum(['test', 'prod']),
   data: z.object({ orderId: resourceId, paymentId: resourceId.optional(),
     subscriptionId: resourceId.optional(), refundId: resourceId.optional(), checkoutId: resourceId.optional() }),
