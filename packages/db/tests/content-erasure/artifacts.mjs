@@ -86,4 +86,14 @@ export async function runArtifacts(db,report){
  assert.equal(await rpc(db,'content_erasure_saved_readable',g.actor,third),true,'independent saved descendant remains readable');
  assert.equal((await erase(db,g,'content',second)).alreadyDeleted,true);
  report.checks.push('whole saved-kind family clears every version; independent downstream body retained with source unavailable');
+ const items=library=>library.businesses.flatMap(b=>b.accounts.flatMap(a=>a.items));
+ const remaining=items(await rpc(db,'opc_library',g.actor,'',null,null)).find(i=>i.workItemId===g.workItem);
+ assert.ok(remaining);assert.deepEqual(remaining.content.map(c=>c.id),[third]);
+ assert.equal(remaining.content[0].body,'KEEP_INDEPENDENT_STORYBOARD');
+ assert.equal(remaining.content[0].sourceAvailable,false);
+ await erase(db,g,'artifact',g.workItem);
+ for(const search of ['', 'independent'])
+  assert.ok(items(await rpc(db,'opc_library',g.actor,search,null,null)).every(i=>i.workItemId!==g.workItem));
+ report.checks.push('library filters erased content versions/work-item roots in refresh and search, retaining live descendants with erased sources');
+
 }

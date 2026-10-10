@@ -652,6 +652,19 @@ DO $$ DECLARE source text; BEGIN
   IF position('JOIN runtime_sessions s' IN source)=0 THEN RAISE EXCEPTION 'CONTENT_ERASURE_SOURCE_MISMATCH: library session';END IF;
   EXECUTE replace(source,'JOIN runtime_sessions s','LEFT JOIN runtime_sessions s');
  END IF;
+ source:=pg_get_functiondef('public.opc_library_before_workspace_ui(uuid,text,date,date)'::regprocedure);
+ IF position('-- D7 library roots' IN source)=0 THEN
+  IF position('WHERE version.work_item_id=i.work_item_id)' IN source)=0 OR
+   position('WHERE i.account_project_id=a.project_id AND' IN source)=0 THEN
+   RAISE EXCEPTION 'D7 library roots boundary mismatch'; END IF;
+  source:=replace(source,'WHERE version.work_item_id=i.work_item_id)',
+   'WHERE version.work_item_id=i.work_item_id AND version.erased_at IS NULL)');
+  source:=replace(source,'WHERE i.account_project_id=a.project_id AND',
+   E'WHERE i.erased_at IS NULL AND p.erased_at IS NULL AND p.content_deleted_at IS NULL\n -- D7 library roots\n AND i.account_project_id=a.project_id AND');
+  source:=replace(source,'FROM opc_accounts a WHERE a.actor_id=p_actor_id',
+   'FROM opc_accounts a WHERE a.erased_at IS NULL AND a.actor_id=p_actor_id');
+  EXECUTE source;
+ END IF;
 END $$;
 
 CREATE OR REPLACE FUNCTION public.content_erasure_ledger_owned(j jsonb)
