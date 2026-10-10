@@ -37,3 +37,15 @@ describe('module Skill publication payload', () => {
     expect(prepareModuleSkill(input).workflow.reportGeneration).toBeUndefined();
   });
 });
+
+it('imports and publishes an organizer template through the unchanged editor payload', async () => {
+  const input = await payload(steps + 'organizerTemplate: references/report.md\n');
+  const prepared = prepareModuleSkill(input);
+  expect(prepared.files.find(file => file.path === 'workflow.yaml')).toBeDefined();
+  expect(prepared.workflow.steps).toHaveLength(1);
+  expect(prepared.workflow).not.toHaveProperty('organizerTemplate'); // Package manifest remains authoritative.
+});
+it('rejects a declared organizer template missing from the imported package', async () => {
+  const input = await payload(steps + 'organizerTemplate: missing.md\n');
+  expect(() => prepareModuleSkill(input)).toThrow('SKILL_ORGANIZER_TEMPLATE_INVALID');
+});
