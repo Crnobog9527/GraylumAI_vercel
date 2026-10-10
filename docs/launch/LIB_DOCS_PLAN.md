@@ -447,5 +447,5 @@ AI 识别的单页上限初值、AI 识别的页面图片由浏览器渲染、�
 - 不做文风画像（VOICE）、输入框引用和附件（UI-B、UI-C）、头像上传修复。
 - 不改 AGENTS.md、ENGINEERING.md。
 - **Master Plan 只改这几处**，依据 Owner 2026-10-10 的两条决定（[第一条](https://github.com/Crnobog9527/GraylumAI_vercel/pull/770#issuecomment-6095169943)、
-  [第二条](https://github.com/Crnobog9527/GraylumAI_vercel/pull/770#issuecomment-6096250309)）：第 2.1 节加两条带日期的决定；第 10 节 D6 一行改为支持 PDF 和图片（含扫描件识别）；第 7 节 LIB-EXT 一行去掉 PDF 和图片。
+  [第二条](https://github.com/Crnobog9527/GraylumAI_vercel/pull/770#issuecomment-6096250309)）：第 2.1 节加三条带日期的决定（第三条见 [决定记录](https://github.com/Crnobog9527/GraylumAI_vercel/pull/770#issuecomment-6096367310)）；第 10 节 D6 一行改为支持 PDF 和图片（含扫描件识别）；第 7 节 LIB-EXT 一行去掉 PDF 和图片。
   D1 一行里「图片放到上线后」等旧说法不逐处改，由第 2.1 节新条目写明取代范围。
