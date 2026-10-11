@@ -3,6 +3,7 @@ import { expect, it, vi } from 'vitest';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { runtimeAdmissionService } from './admission';
 import { pricingConfig } from '../__tests__/fixtures/runtimePricing';
+import { configuredReasoning } from '../__tests__/fixtures/runtimeReasoning';
 import { openRouterBound } from '../bill2/openRouterPolicy';
 const mocks=vi.hoisted(()=>({host:vi.fn(),freeze:vi.fn()}));
 vi.mock('./paygHostPolicy',()=>({readPaygHostPolicies:mocks.host}));
@@ -15,7 +16,7 @@ vi.mock('./billingUnitAdmission',async original=>({
     models:{},providers:{},hash:'f'.repeat(64)}),
 }));
 const id=(n:number)=>`10000000-0000-4000-8000-${String(n).padStart(12,'0')}`;
-it('real host admits v2, replays original admission across switch-off, then admits new requests as v1',async()=>{
+it('real host admits v2 free chat (v6 + low), replays original admission across switch-off, then admits new requests as v1',async()=>{
   const model='anthropic/claude-sonnet-5.5',tag='anthropic';
   const providerLimits={providerSlug:tag,contextTokens:250000,promptUsdPerMillion:'1',completionUsdPerMillion:'1',requestUsd:'0'};
   const quote={modelId:id(3),model,provider:'openrouter',account:'synthetic',protocol:'openrouter-chat-v1' as const,
@@ -40,8 +41,10 @@ it('real host admits v2, replays original admission across switch-off, then admi
     }
     throw new Error(name);
   });
+  const reasoning=configuredReasoning(model,{mode:'effort',effort:'low',wire:'reasoning_effort'}).reasoning;
   const modelRow={id:id(3),model_id:model,provider:'openrouter',is_active:'true',input_limit:250000,max_tokens:8192,
-    config:pricingConfig(model,tag,'1','1')};
+    config:{...pricingConfig(model,tag,'1','1'),reasoning:{...reasoning,route:tag,
+      catalog:{...reasoning.catalog!,endpoints:reasoning.catalog!.endpoints.map(e=>({...e,tag}))}}}};
   const q={select:()=>q,eq:()=>q,single:async()=>({data:modelRow,error:null}),in:async()=>({data:[modelRow],error:null})};
   const admin={rpc,from:()=>q} as unknown as SupabaseClient;
   const user={auth:{getUser:async()=>({data:{user:{id:id(1),email_confirmed_at:'2026-01-01'}},error:null})}} as unknown as SupabaseClient;
@@ -53,7 +56,7 @@ it('real host admits v2, replays original admission across switch-off, then admi
   expect(first).toMatchObject({billing:{contractVersion:'bill2.v2',limits:{credits:0}}});
   expect(mocks.host).toHaveBeenCalledTimes(1);
   expect(mocks.host.mock.calls[0][3]).toEqual([{modelId:id(3),phase:'ordinary',outputLimit:8192,
-    requestFormat:'serial-tools-v2',reasoning:undefined}]);
+    requestFormat:'serial-tools-v6-reasoning',reasoning:{effort:'low'}}]);
   mocks.host.mockResolvedValue(undefined);
   expect(await runtimeAdmissionService(user,admin,policy).prepare(request)).toEqual(first);
   expect(mocks.host).toHaveBeenCalledTimes(1);

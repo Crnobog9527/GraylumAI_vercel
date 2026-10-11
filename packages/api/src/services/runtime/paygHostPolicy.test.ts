@@ -82,6 +82,19 @@ it('one model/route admits ordinary and configured reasoning with independent ou
  await expect(readPaygHostPolicies(f.db as unknown as SupabaseClient,f.window,[f.policy],requirements,env))
   .rejects.toThrow('RUNTIME_PAYG_PROFILE_REQUIRED');
 });
+it('staging-shaped profile (no v2) rejects old free chat and admits v6 + low; unknown models stay denied',async()=>{
+ const f=fixture();
+ f.profile.requestFormats=['agent-turn-v5-stream','serial-tools-v4-stream','serial-tools-v6-reasoning'];
+ f.profile.purposes=['skill','report','ordinary','skill_matching'];
+ f.profile.reasoningVariants.push({...f.profile.reasoningVariants[0],reasoning:{effort:'low'}});
+ const read=(requestFormat:string,reasoning?:{effort:'low'},policy=f.policy)=>readPaygHostPolicies(f.db as unknown as SupabaseClient,
+  f.window,[policy],[{modelId:id,phase:'ordinary',outputLimit:8192,requestFormat,reasoning}],env);
+ await expect(read('serial-tools-v2')).rejects.toThrow('RUNTIME_PAYG_PROFILE_REQUIRED');
+ expect(await read('serial-tools-v6-reasoning',{effort:'low'})).toHaveLength(1);
+ // A model without an evidenced route profile (e.g. gpt-6.1-sol) is still refused.
+ await expect(read('serial-tools-v6-reasoning',{effort:'low'},{...f.policy,model:'openai/gpt-6.1-sol',
+  providerLimits:{...f.policy.providerLimits!,providerSlug:'openai'}})).rejects.toThrow('RUNTIME_PAYG_PROFILE_REQUIRED');
+});
 it('requires profile validity through the frozen execution deadline',async()=>{
  const f=fixture();f.profile.expiresAt='2098-01-01T00:00:00Z';
  await expect(f.run()).rejects.toThrow('RUNTIME_PAYG_PROFILE_REQUIRED');

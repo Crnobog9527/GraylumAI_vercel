@@ -78,7 +78,10 @@ it.each([
  }else expect((await f.service.prepare(f.input)).context).not.toHaveProperty('promptCache');
 });
 it('ordinary role is never marked even on Anthropic with a write price',async()=>{
- const f=fixture();const result=await f.service.prepare({...f.input,selection:{kind:'ordinary',modelId}});
+ const f=fixture();
+ const reasoning=configuredReasoning(f.row.model_id).reasoning;
+ f.row.config.reasoning={...reasoning,catalog:reasoning.catalog!,route:reasoning.route!};
+ const result=await f.service.prepare({...f.input,selection:{kind:'ordinary',modelId}});
  expect(result.context).not.toHaveProperty('promptCache');
 });
 it('reserves marker bytes during admission at the input capacity boundary',async()=>{
