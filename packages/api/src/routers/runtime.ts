@@ -20,6 +20,7 @@ import {runtimeActor} from '../services/runtime/actor';
 import { databaseSkillSource, userVisibleModules } from '../services/skills/databaseSource';
 import { discoverSkills } from '../services/skills/loader';
 import { activateRuntimeCandidate } from '../services/runtime/matching';
+import { defaultModelFirst, freeChatModels } from '../services/runtime/defaultModel';
 import {executeOriginalExecution,runtimeLocalEndpoint,streamOriginalExecution} from '../services/runtime/executionStream';
 
 // Viewing original state, cancellation and receipt maintenance do not admit
@@ -88,7 +89,7 @@ export const runtimeRouter=router({
 
   // Loopback advertises the curated ordinary model. Free-chat skills must use
   // that same model, excluding fault/organizer fixtures without name matching.
-  const modelQuery=ctx.supabaseAdmin!.from('ai_models').select('id,name').eq('is_active','true');
+  const modelQuery=ctx.supabaseAdmin!.from('ai_models').select('id,name,model_id,config').eq('is_active','true');
   const models=await (ctx.real?modelQuery.in('id',ctx.real.callPolicies.map(q=>q.modelId)):modelQuery.eq('provider','fixture').eq('name','Runtime local'));
   if(models.error)throw new Error('RUNTIME_MODELS_UNAVAILABLE');
   const visible=await userVisibleModules(ctx.userScopedSupabase,{limit:64});
@@ -110,7 +111,9 @@ export const runtimeRouter=router({
     skills.push({moduleId:m.id,revisionId:s.public.revisionId,name:m.title});
    }
   }catch{/* unavailable packages are not advertised as runnable */}}
-  return {models:models.data,skills,defaultSkill:skills.find(skill=>skill.moduleId===workModuleId)??null,mode:ctx.real?'staging_test' as const:'isolated' as const};
+  // Staging hides models a free-chat turn is certain to be refused with; the administrator's default comes first.
+  const offered=ctx.real?await freeChatModels(ctx.supabaseAdmin!,ctx.real,models.data):models.data.map(({id,name})=>({id,name}));
+  return {models:await defaultModelFirst(ctx.supabaseAdmin!,offered),skills,defaultSkill:skills.find(skill=>skill.moduleId===workModuleId)??null,mode:ctx.real?'staging_test' as const:'isolated' as const};
  }),
  start:procedure.input(z.object({requestId:z.string().uuid(),scope:z.unknown()}).strict()).mutation(({ctx,input})=>ctx.admission.start(input.requestId,input.scope)),
  saveMaterial:procedure.input(runtimeMaterialInput).mutation(({ctx,input})=>ctx.admission.saveMaterial(input)),
