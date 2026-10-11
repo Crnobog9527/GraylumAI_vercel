@@ -59,6 +59,7 @@
     "./src/services/payments/waffoPaymentDelivery": "./src/services/payments/waffoPaymentDelivery.ts",
     "./src/services/payments/waffoReconciliation": "./src/services/payments/waffoReconciliation.ts",
     "./src/services/payments/waffoTestOperationsClient": "./src/services/payments/waffoTestOperationsClient.ts",
+    "./src/services/payments/waffoFailure": "./src/services/payments/waffoFailure.ts",
     "./src/services/payments/walletWebhook": "./src/services/payments/walletWebhook.ts",
     "./src/services/payments/methodMaintenance": "./src/services/payments/methodMaintenance.ts"
   },

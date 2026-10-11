@@ -11,20 +11,35 @@ import { protectedProcedure, adminProcedure } from '../trpc';
 import { createSafeServiceUnavailableError } from '../lib/publicError';
 import { readMethodMembership } from '../services/payments/methodMembership';
 import { assertMethodCheckoutEnvironment } from '../services/payments/methodCheckoutGate';
+import { describeWaffoFailure } from '../services/payments/waffoFailure';
+import { logger } from '../lib/logger';
+
+/** The client only sees a generic 503; this keeps the secret-free reason (#815 checkout had none).
+ * Categorised provider/key/database failures are errors; expected gates (closed switch, stale route) are warnings. */
+function logMethodPaymentFailure(operation: string, userId: string, error: unknown, context: Record<string, unknown> = {}) {
+  const reason = describeWaffoFailure(error);
+  logger[reason.category ? 'error' : 'warn']('billing', 'pay_waffo_method_failed', { operation, userId, ...context, ...reason });
+}
 
 export const methodPaymentProcedures = {
   methodCancel: protectedProcedure.input(z.object({ subscriptionId: z.uuid() }).strict()).mutation(async ({ ctx, input }) => {
     try {
       if (!ctx.hasSupabaseAdminPrivileges) throw new Error('PAY_WAFFO_PERSISTENCE_UNAVAILABLE');
       return await cancelWaffoMembership(ctx.supabaseAdmin, getWaffoTestOperationsClient(), ctx.profileId, input.subscriptionId);
-    } catch (error) { throw createSafeServiceUnavailableError(error, '停止续费结果待核对，请稍后查看原订阅状态'); }
+    } catch (error) {
+      logMethodPaymentFailure('method_cancel', ctx.profileId, error);
+      throw createSafeServiceUnavailableError(error, '停止续费结果待核对，请稍后查看原订阅状态');
+    }
   }),
   methodProductControl: adminProcedure.input(z.object({ priceRefId: z.uuid(), blocked: z.boolean(),
     expectedVersion: z.number().int().nonnegative().max(9999999999) }).strict()).mutation(async ({ ctx, input }) => {
     try {
       if (!ctx.hasSupabaseAdminPrivileges) throw new Error('PAY_WAFFO_PERSISTENCE_UNAVAILABLE');
       return await controlWaffoProduct(ctx.supabaseAdmin, getWaffoTestOperationsClient(), { ...input, actorId: ctx.profileId });
-    } catch (error) { throw createSafeServiceUnavailableError(error, '产品状态待核对，本站暂停新购期间请勿重复操作'); }
+    } catch (error) {
+      logMethodPaymentFailure('method_product_control', ctx.profileId, error);
+      throw createSafeServiceUnavailableError(error, '产品状态待核对，本站暂停新购期间请勿重复操作');
+    }
   }),
   methodCheckout: protectedProcedure.input(methodPurchaseInputSchema).mutation(async ({ ctx, input }) => {
     try {
@@ -47,7 +62,10 @@ export const methodPaymentProcedures = {
       }
       return await createWalletCheckout({ db: ctx.supabaseAdmin, stripe: getStripeClient(), userId: ctx.profileId,
         appUrl: getStripeAppUrl(), termsVersion: terms.data.value.version, purchase: input });
-    } catch (error) { throw createSafeServiceUnavailableError(error, '暂时无法创建付款，请稍后查看原订单状态'); }
+    } catch (error) {
+      logMethodPaymentFailure('method_checkout', ctx.profileId, error, { method: input.method });
+      throw createSafeServiceUnavailableError(error, '暂时无法创建付款，请稍后查看原订单状态');
+    }
   }),
   methodMembership: protectedProcedure.query(async ({ ctx }) => {
     if (!ctx.hasSupabaseAdminPrivileges) throw createSafeServiceUnavailableError(

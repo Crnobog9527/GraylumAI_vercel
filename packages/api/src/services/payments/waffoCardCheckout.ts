@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { prepareMethodPurchase, methodPurchaseInputSchema } from './methodPurchase';
 import { buildWaffoCheckoutRequest, dispatchWaffoCheckout, WAFFO_CHECKOUT_TTL_SECONDS, type WaffoCheckoutOrder } from './waffoCheckout';
 import type { WaffoCheckoutCreate } from './waffoTestOperationsClient';
+import { WaffoFailure } from './waffoFailure';
 
 /** The database admits a checkout window up to 31 minutes; the session itself lives 30. */
 const CLAIM_WINDOW_MS = (WAFFO_CHECKOUT_TTL_SECONDS + 60) * 1000;
@@ -28,6 +29,13 @@ export async function closeExpiredWaffoCheckouts(db: Pick<SupabaseClient, 'from'
     else if (!/PAY_WAFFO_CLOSE_DENIED/.test(result.error.message ?? '')) throw new Error('PAY_WAFFO_PERSISTENCE_UNAVAILABLE');
   }
   return closed;
+}
+
+/** Checkout-path database failure with its stage and database reason (no row data) for logs. */
+function databaseFailure(stage: string, error: { code?: string; message?: string } | null) {
+  return new WaffoFailure('PAY_WAFFO_CHECKOUT_UNAVAILABLE', { category: 'database', stage,
+    ...(error?.code ? { errorCode: String(error.code).slice(0, 40) } : {}),
+    providerErrors: error?.message ? [{ layer: 'database', message: String(error.message).slice(0, 200) }] : undefined });
 }
 
 export async function createWaffoCardCheckout(input: {
@@ -57,7 +65,7 @@ export async function createWaffoCardCheckout(input: {
       if (error instanceof Error && error.message === 'PAY_WAFFO_PROVIDER_REJECTED') {
         const closed = await db.rpc('pay_waffo_close_card_checkout', { p_user: userId, p_order: order.id,
           p_merchant: provider.merchant, p_rejected: true });
-        if (closed.error) throw new Error('PAY_WAFFO_CHECKOUT_UNAVAILABLE');
+        if (closed.error) throw databaseFailure('close_rejected', closed.error);
       }
       throw error;
     }
@@ -69,7 +77,7 @@ export async function createWaffoCardCheckout(input: {
         p_expires: new Date(latestExpiry).toISOString(), p_request: { orderId: order.id, userId, method: 'card',
           merchant: provider.merchant, mode: 'test', providerRequest } });
       if (claimed.error || typeof claimed.data?.dispatch !== 'boolean' || !claimed.data?.request?.providerRequest) {
-        throw new Error('PAY_WAFFO_CHECKOUT_UNAVAILABLE');
+        throw databaseFailure('claim', claimed.error);
       }
       stored = claimed.data.request.providerRequest;
       claimExpiry = Date.parse(claimed.data.expiresAt);
@@ -81,7 +89,7 @@ export async function createWaffoCardCheckout(input: {
     persist: async (result) => {
       const bound = await db.rpc('pay_waffo_bind_checkout', { p_user: userId, p_order: order.id, p_merchant: provider.merchant,
         p_checkout: result.sessionId, p_expires: result.expiresAt });
-      if (bound.error) throw new Error('PAY_WAFFO_CHECKOUT_UNAVAILABLE');
+      if (bound.error) throw databaseFailure('bind', bound.error);
     },
     createdAfter: Date.now(), latestExpiry, allowedCheckoutOrigin: input.checkoutOrigin,
   }).catch((error: unknown) => {
