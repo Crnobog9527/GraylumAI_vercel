@@ -327,7 +327,7 @@ export default function TopicWorkspacePage() {
             setNotice('已采用所选内容并保存到资料库。');
           } else if (op.kind === 'draft') {
             const result = await saveDraft.mutateAsync(op.request);
-            editCandidate({ body: result.body as PlanItem[], requestId: op.request.requestId });
+            editCandidate({ body: result.body as PlanItem[], requestId: result.draftVersionId });
           } else {
             const result = await adoptTopics.mutateAsync(op.request);
             await queryUtils.opc.library.invalidate();
