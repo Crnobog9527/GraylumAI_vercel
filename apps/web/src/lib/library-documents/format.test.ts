@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { checkLibraryFile, formatBytes, libraryAccept, libraryErrorMessage, spaceState, WORD_MIME } from './format';
+import { checkLibraryFile, formatBytes, libraryAccept, libraryErrorMessage, PDF_MIME, spaceState, WORD_MIME } from './format';
 
 afterEach(() => vi.unstubAllEnvs());
 
@@ -11,11 +11,25 @@ describe('checkLibraryFile', () => {
     expect(checkLibraryFile({ name: 'p.jpg', size: 10 })).toEqual({ ok: true, contentType: 'image/jpeg' });
     expect(checkLibraryFile({ name: 'p.webp', size: 10_000_000 })).toEqual({ ok: true, contentType: 'image/webp' });
   });
-  it('keeps Word closed without the extraction flag, and PDF closed either way', () => {
+  it('keeps Word and PDF closed without their extraction flags, each independently', () => {
     expect(checkLibraryFile({ name: 'a.docx', size: 10 })).toMatchObject({ ok: false, message: expect.stringContaining('Word') });
+    expect(checkLibraryFile({ name: 'a.pdf', size: 10 })).toMatchObject({ ok: false, message: expect.stringContaining('PDF') });
     expect(libraryAccept()).toBe('.txt,.md,.jpg,.jpeg,.png,.webp');
     vi.stubEnv('NEXT_PUBLIC_LIBRARY_DOCX_EXTRACTION', 'true');
     expect(checkLibraryFile({ name: 'a.pdf', size: 10 })).toMatchObject({ ok: false, message: expect.stringContaining('PDF') });
+    vi.unstubAllEnvs();
+    vi.stubEnv('NEXT_PUBLIC_LIBRARY_PDF_EXTRACTION', 'true');
+    expect(checkLibraryFile({ name: 'a.docx', size: 10 })).toMatchObject({ ok: false, message: expect.stringContaining('Word') });
+  });
+  it('opens PDF with its extraction flag, typed by extension and needing 20 MB free', () => {
+    vi.stubEnv('NEXT_PUBLIC_LIBRARY_PDF_EXTRACTION', 'true');
+    expect(checkLibraryFile({ name: '扫描件.PDF', size: 10 })).toEqual({ ok: true, contentType: PDF_MIME });
+    expect(libraryAccept()).toBe('.txt,.md,.jpg,.jpeg,.png,.webp,.pdf');
+    expect(checkLibraryFile({ name: 'big.pdf', size: 10_000_001 })).toMatchObject({ ok: false, message: expect.stringContaining('10 MB') });
+    expect(checkLibraryFile({ name: 'a.pdf', size: 10 }, 19_999_999))
+      .toMatchObject({ ok: false, message: expect.stringMatching(/^PDF .*20 MB/) });
+    expect(checkLibraryFile({ name: 'a.pdf', size: 10 }, 20_000_000)).toEqual({ ok: true, contentType: PDF_MIME });
+    expect(checkLibraryFile({ name: 'x.svg', size: 1 })).toMatchObject({ message: expect.stringContaining('PDF') });
   });
   it('opens Word with the extraction flag, typed as the Word MIME by extension', () => {
     vi.stubEnv('NEXT_PUBLIC_LIBRARY_DOCX_EXTRACTION', 'true');
@@ -52,6 +66,7 @@ it('reports space: ok, low (< 10 MB free blocks upload), over (downgrade)', () =
 it('maps only stable codes and never shows raw messages', () => {
   expect(libraryErrorMessage({ message: 'LIBRARY_SPACE' })).toContain('剩余空间不足');
   expect(libraryErrorMessage({ message: 'LIBRARY_DISABLED' })).toBe('上传暂未开放。');
+  expect(libraryErrorMessage({ message: 'LIBRARY_PAGES' })).toContain('PDF 的页面信息');
   expect(libraryErrorMessage({ message: 'relation "x" does not exist' })).toBe('暂时无法完成，请稍后重试。');
   expect(libraryErrorMessage({ message: 'x', data: { code: 'TOO_MANY_REQUESTS' } })).toContain('频繁');
 });

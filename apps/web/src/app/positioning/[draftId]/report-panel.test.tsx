@@ -28,7 +28,7 @@ vi.mock("@/trpc/client", () => {
 });
 import { ReportEntry } from "./report-panel";
 
-const props = { draftId: "d", sessionId: "s", projectId: "p", roundId: "r", busy: false };
+const props = { draftId: "d", sessionId: "s", projectId: "p", roundId: "r", busy: false, onTopics: () => {} };
 const existing = () => {
   state.latest = { isSuccess: true, isError: false, data: { executionId: saved } };
   state.status = { executionId: saved, state: "completed", body: "## A\nx", completeness: "complete", candidate: true };

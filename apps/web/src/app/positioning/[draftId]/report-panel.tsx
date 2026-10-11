@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 "use client";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { X } from "lucide-react";
 import { trpc } from "@/trpc/client";
 import { Button } from "@/components/ui/button";
@@ -15,8 +15,14 @@ import {
 import { useReportGen } from "./use-report-gen";
 import { useReportPaywallMemory } from "./report-paywall-memory";
 import { STOP_SAVING_NOTICE, STOP_UNCONFIRMED_NOTICE } from "./stop-reply";
+import { ReportDocumentPanel } from "./report-document-panel";
+import { REPORT_DOC_TEXT } from "./report-document";
 
-type Props = { draftId: string; sessionId: string; projectId: string; roundId: string; confirmed: boolean; busy: boolean };
+type Props = {
+  draftId: string; sessionId: string; projectId: string; roundId: string; confirmed: boolean; busy: boolean;
+  /** After 定稿: refresh the page and ask, explicitly, whether to start the first-week topics. */
+  onTopics: () => void;
+};
 
 /**
  * The report entry of the positioning footer. A saved report of this round stays readable whatever
@@ -44,12 +50,18 @@ function RoundReportEntry(props: Props) {
         {report.executionId ? REPORT_TITLE : REPORT_ACTION.start}
       </Button>
       {open && (paywall ? <ReportPaywallDialog onClose={() => setOpen(false)} />
-        : <ReportDialog report={report} busy={props.busy} onClose={() => setOpen(false)} />)}
+        : <ReportDialog report={report} busy={props.busy} onClose={() => setOpen(false)}
+          onTopics={() => { setOpen(false); props.onTopics(); }} />)}
     </>
   );
 }
 
-function ReportDialog({ report, busy, onClose }: { report: ReturnType<typeof useReportGen>; busy: boolean; onClose: () => void }) {
+function ReportDialog({ report, busy, onClose, onTopics }:
+  { report: ReturnType<typeof useReportGen>; busy: boolean; onClose: () => void; onTopics: () => void }) {
+  // Unsaved report edits live in the panel: closing asks first instead of dropping them silently.
+  const unsaved = useRef(false);
+  const [trackUnsaved] = useState(() => (value: boolean) => { unsaved.current = value; });
+  const close = () => { if (!unsaved.current || window.confirm(REPORT_DOC_TEXT.closeUnsaved)) onClose(); };
   const status = report.status;
   const view = status ? reportView(status) : null;
   const working = report.starting || report.streaming;
@@ -73,17 +85,21 @@ function ReportDialog({ report, busy, onClose }: { report: ReturnType<typeof use
   const first = !report.executionId;
   return (
     <div role="dialog" aria-modal="true" aria-label={REPORT_TITLE} tabIndex={-1}
-      onKeyDown={event => { if (event.key === "Escape") onClose(); }}
+      onKeyDown={event => { if (event.key === "Escape") close(); }}
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
       <div className={`${resultStyles.consentCard} !max-w-3xl`}>
         <header>
           <h2>{REPORT_TITLE}</h2>
-          <Button className={resultStyles.consentClose} variant="ghost" aria-label={"关闭" + REPORT_TITLE} onClick={onClose}>
+          <Button className={resultStyles.consentClose} variant="ghost" aria-label={"关闭" + REPORT_TITLE} onClick={close}>
             <X size={18} aria-hidden="true" />
           </Button>
         </header>
         {first && !working && <p>{REPORT_INTRO}</p>}
-        {body && <MessageMarkdown className="mt-4" text={body} streaming={Boolean(report.live && !report.live.stopped)} />}
+        {/* A finished report (R5): its current version, editing and 定稿. While writing: the live text. */}
+        {view?.kind === "report" && !report.live && report.executionId
+          ? <ReportDocumentPanel key={report.executionId} executionId={report.executionId} fallbackBody={view.body}
+            generatedComplete={view.candidate} busy={busy || working} onTopics={onTopics} onUnsaved={trackUnsaved} />
+          : body && <MessageMarkdown className="mt-4" text={body} streaming={Boolean(report.live && !report.live.stopped)} />}
         <ChatNoticeList className="mt-4" notices={notices} />
         {report.offer && !report.refusal?.hideEntry && (
           <div className={resultStyles.consentActions}>
