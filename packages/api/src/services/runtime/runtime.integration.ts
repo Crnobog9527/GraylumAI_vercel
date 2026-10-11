@@ -10,6 +10,7 @@ import { PostgresSession } from './session';
 import {assertLongSessionPerformance} from './runtimePerformance.integration';
 import { runRuntime } from './runner';
 import {readRuntimeView,retainedOutputReason} from './view';
+import {readNativeRuntimeView} from './nativeView';
 import { runtimeExecutor } from './execute';
 import './promptCache.integration';
 import './payg.integration';
@@ -666,6 +667,13 @@ it('RUNTIME: rejected binding rolls back reservation and excludes wrong actor/se
  const g=await fixture();await expect(rpc('runtime_admit',{...f.admit,p_actor_id:g.actorId})).rejects.toThrow('DENIED');
 });
 
+it('RUNTIME: native view serves the owner and one indistinguishable not-found for a foreign or missing session',async()=>{
+ const f=await fixture(),g=await fixture();
+ await expect(readNativeRuntimeView(admin,f.actorId,f.s.sessionId)).resolves.toMatchObject({sessionId:f.s.sessionId,executions:[]});
+ const foreign=await readNativeRuntimeView(admin,g.actorId,f.s.sessionId).catch((e:unknown)=>e);
+ const missing=await readNativeRuntimeView(admin,f.actorId,randomUUID()).catch((e:unknown)=>e);
+ for(const refusal of [foreign,missing])expect(refusal).toMatchObject({code:'NOT_FOUND',message:'RUNTIME_SESSION_NOT_FOUND'});
+});
 it('RUNTIME: official SDK uses bound PostgreSQL Session and persists input/output after local HTTP',async()=>{
  const f=await fixture(),e=await rpc('runtime_admit',f.admit);
  const session=new PostgresSession(admin,{actorId:f.actorId,sessionId:f.s.sessionId,executionId:e.executionId});

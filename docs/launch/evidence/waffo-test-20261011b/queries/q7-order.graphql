@@ -1,0 +1,12 @@
+query($storeId:String!) {
+ subscriptionOrder(id:"ORD_1ug9i0Dp6bc09NM9KSVebH") {
+ id storeId status testMode orderMerchantExternalId metadata willRenew isInTrial billingPeriod
+ currentPeriodNumber currentPeriodStart currentPeriodEnd currentPeriod {start end}
+ activateAt canceledAt supersededByOrderId createdAt updatedAt
+ payments {id status periodNumber createdAt pspAmountDetails {amount currency}
+   settlementInfo {paymentSuccessTime settledAt settlementDate}}
+ }
+ subscriptionOrders(storeId:$storeId,filter:{orderMerchantExternalId:{eq:"graylum-waffo-20261011-monthly69"}}) {
+ id status metadata willRenew canceledAt currentPeriodEnd updatedAt
+ }
+}

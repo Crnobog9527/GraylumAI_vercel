@@ -3,6 +3,8 @@ type QueryError = { message?: string; data?: { code?: string } | null };
 export function workspaceErrorMessage(error: QueryError | null | undefined): string {
   switch (error?.data?.code) {
     case 'UNAUTHORIZED': return '登录已失效，请重新登录后重试。';
+    // Another account's link and a missing item get the same reply on purpose.
+    case 'NOT_FOUND': return '找不到这项内容，或你没有查看权限。请确认链接是否正确，或使用自己账号下的内容。';
     case 'FORBIDDEN':
     case 'PRECONDITION_FAILED':
     case 'SERVICE_UNAVAILABLE': return error.message || '当前工作空间暂不可用，请稍后重试。';
