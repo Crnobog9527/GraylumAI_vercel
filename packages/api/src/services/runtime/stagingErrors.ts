@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { TRPCError } from '@trpc/server';
 import { logger } from '../../lib/logger';
 import { DatabaseReadError } from '../../lib/databaseReadError';
+import { RUNTIME_INPUT_TOO_LONG_MESSAGE } from '../../shared/runtimeInputMessages';
 
 const failures = {
   CONTENT_ERASED: ['PRECONDITION_FAILED', 'CONTENT_ERASED'],
@@ -17,6 +18,7 @@ const failures = {
   RUNTIME_CHECKPOINT_PENDING: ['PRECONDITION_FAILED', 'RUNTIME_CHECKPOINT_PENDING：原调用尚待确认，请保留原任务，不能重复发起调用。'],
   RUNTIME_CALL_LIMIT_REACHED: ['PRECONDITION_FAILED', 'RUNTIME_CALL_LIMIT_REACHED：本次操作已达到原调用次数上限。'],
   RUNTIME_FROZEN_PAYLOAD_TOO_LARGE: ['BAD_REQUEST', 'RUNTIME_FROZEN_PAYLOAD_TOO_LARGE：本轮内容超过可保存的容量，请缩短本轮输入后重试；未发起模型调用或扣费。'],
+  RUNTIME_INPUT_TOO_LONG: ['PRECONDITION_FAILED', RUNTIME_INPUT_TOO_LONG_MESSAGE],
   RUNTIME_FROZEN_PAYLOAD_INVALID: ['BAD_REQUEST', 'RUNTIME_FROZEN_PAYLOAD_INVALID：本轮内容包含无法保存的字符，请检查输入；未发起模型调用或扣费。'],
   RUNTIME_BUDGET_CONFIG_UNAVAILABLE: ['SERVICE_UNAVAILABLE', '暂时无法读取用途预算，请稍后重试。'],
   RUNTIME_BUDGET_CONFIG_INVALID: ['PRECONDITION_FAILED', '用途预算配置无效，请管理员检查设置。'],

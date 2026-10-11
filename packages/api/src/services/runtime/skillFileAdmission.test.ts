@@ -4,11 +4,15 @@ import type {SupabaseClient} from '@supabase/supabase-js';
 import {packageHash,sha256} from '../skills/loader';
 import {runtimeAdmissionService} from './admission';
 import {runtimeContext} from './runtimeContext';
+import {StagingAccessError,stagingProcedureError} from './stagingErrors';
+import {RUNTIME_INPUT_TOO_LONG_MESSAGE} from '../../shared/runtimeInputMessages';
 import {OPENING_INPUT} from '../../shared/opcQuestions';
 vi.mock('./newWorkGate',async original=>({...await original<typeof import('./newWorkGate')>(),
  ...(await import('../__tests__/fixtures/runtimeGates')).testAdmissionGates}));
 vi.mock('../skills/databaseSource',()=>({databaseSkillSource:()=>({list:async()=>[descriptor],state:async()=> 'enabled'})}));
 const skill=vi.hoisted(()=>({instructions:'Synthetic Skill',file:''}));
+const matching=vi.hoisted(()=>({candidates:[] as unknown[]}));
+vi.mock('./matching',async original=>({...await original<typeof import('./matching')>(),discoverRuntimeCandidates:async()=>matching.candidates}));
 vi.mock('../skills/loader',async original=>({...await original<typeof import('../skills/loader')>(),
  readSkillResource:async()=>skill.file,activateSkill:async()=>({forModel:()=>skill.instructions})}));
 const actor='10000000-0000-4000-8000-000000000001';
@@ -20,7 +24,7 @@ const base={packageId:module,revisionId:revision,directoryName:'test',files:[{
 }],tasks:{},requiredCapabilities:[]};
 const descriptor={...base,packageHash:packageHash(base)};
 function fixture(){
- skill.instructions='Synthetic Skill';skill.file='';
+ skill.instructions='Synthetic Skill';skill.file='';matching.candidates=[];
  let saved:unknown=null;
  const rpc=vi.fn(async(name:string,args:Record<string,unknown>)=>{
   if(name==='runtime_session_context')return {data:{scope:{kind:'positioning_draft',draftId:actor}},error:null};
@@ -73,10 +77,35 @@ it('admits without the optional file tool when only its continuation reserve doe
  expect(f.rpc.mock.calls.filter(([name])=>name==='runtime_admit')).toHaveLength(1);
 });
 
-it('rejects required input that does not fit even without the file tool before admission',async()=>{
+it('refuses user input that does not fit even without the file tool as a typed refusal before admission',async()=>{
  const f=fixture();
- await expect(runtimeAdmissionService(f.user,f.admin,{...f.policy,inputBytes:14000})
-  .prepare({...f.input,input:'x'.repeat(14000)})).rejects.toThrow('RUNTIME_REQUIRED_CONTEXT_EXCEEDS_CAPACITY');
+ const refused=runtimeAdmissionService(f.user,f.admin,{...f.policy,inputBytes:14000}).prepare({...f.input,input:'中'.repeat(8000)});
+ await expect(refused).rejects.toBeInstanceOf(StagingAccessError);
+ await expect(refused).rejects.toThrow('RUNTIME_INPUT_TOO_LONG');
+ expect(f.rpc.mock.calls.some(([name])=>name==='runtime_admit')).toBe(false);
+});
+
+it('refuses too-long input during automatic Skill matching with the same typed refusal',async()=>{
+ const f=fixture();
+ matching.candidates=[{key:'candidate-1',name:'Synthetic',description:'Synthetic skill',moduleId:module,skillId:module,packageId:module,
+  revisionId:revision,packageHash:descriptor.packageHash,modelId:model,model:'fixture',inputLimit:14000,outputLimit:100,requiresTask:false}];
+ const refused=runtimeAdmissionService(f.user,f.admin,{...f.policy,inputBytes:14000,mentorStream:false,skillFileRead:false,opcTurnToken:undefined})
+  .prepare({...f.input,input:'中'.repeat(8000),selection:{kind:'auto',modelId:model}});
+ await expect(refused).rejects.toThrow('RUNTIME_INPUT_TOO_LONG');
+ expect(f.rpc.mock.calls.some(([name])=>name==='runtime_admit')).toBe(false);
+});
+
+it('maps too-long input to a fixed refusal without a diagnostic identifier',()=>{
+ const error=stagingProcedureError(new StagingAccessError('RUNTIME_INPUT_TOO_LONG'),'opc.mentorTurnStream');
+ expect(error.code).toBe('PRECONDITION_FAILED');expect(error.message).toBe(RUNTIME_INPUT_TOO_LONG_MESSAGE);
+ expect(error.message).not.toContain('诊断编号');
+});
+
+it('keeps an overflow that does not depend on user input an untyped server failure',async()=>{
+ const f=fixture();skill.instructions='S'.repeat(20000);
+ const refused=runtimeAdmissionService(f.user,f.admin,{...f.policy,inputBytes:14000}).prepare(f.input);
+ await expect(refused).rejects.toThrow('RUNTIME_REQUIRED_CONTEXT_EXCEEDS_CAPACITY');
+ await expect(refused).rejects.not.toBeInstanceOf(StagingAccessError);
  expect(f.rpc.mock.calls.some(([name])=>name==='runtime_admit')).toBe(false);
 });
 

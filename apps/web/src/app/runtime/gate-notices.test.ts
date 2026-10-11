@@ -1,6 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { describe, expect, it } from 'vitest';
 import { runtimeGateMessages } from '../../../../../packages/api/src/shared/runtimeGateMessages';
+import { RUNTIME_INPUT_TOO_LONG_MESSAGE } from '../../../../../packages/api/src/shared/runtimeInputMessages';
 import {
   OUTPUT_TRUNCATED_NOTICE, rememberUserStop, runtimeAdmissionNotice, runtimeExecutionNotice, userStopIds, videoGateError, videoGateNotice,
 } from './gate-notices';
@@ -140,4 +141,11 @@ it('shows the host notice first and only otherwise the gate notice (#698)', () =
   expect(runtimeExecutionNotice({ state: 'cancelled', notice })).toBe(notice);
   expect(runtimeExecutionNotice({ state: 'waiting_credits', notice: '余额不足，任务已暂停，请补充积分后继续。' })).toBeNull();
   expect(runtimeExecutionNotice({ state: 'cancelled', unavailable: 'provider_history' })).toBe(runtimeExecutionNotice({ unavailable: 'provider_history' }));
+});
+
+it('too-long input refused by runtime.prepare asks to split it instead of saying the status is unconfirmed', () => {
+  expect(runtimeAdmissionNotice(prepareRefusal('PRECONDITION_FAILED', RUNTIME_INPUT_TOO_LONG_MESSAGE))).toBe(RUNTIME_INPUT_TOO_LONG_MESSAGE);
+  expect(runtimeAdmissionNotice(prepareRefusal('INTERNAL_SERVER_ERROR', RUNTIME_INPUT_TOO_LONG_MESSAGE))).toBeNull();
+  expect(runtimeAdmissionNotice(Object.assign(new Error(RUNTIME_INPUT_TOO_LONG_MESSAGE),
+    { data: { code: 'PRECONDITION_FAILED', path: 'runtime.execute' } }))).toBeNull();
 });

@@ -247,7 +247,7 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
    const admissionToolBytes=(file:boolean)=>(mentorStream&&!stepSummary?cardBytes:policy.searchEnabled?2048:0)+
     (file?skillFileToolBytes()+skillFileReserve:0)+
     (historySelection?.markerReserveBytes??(promptCache?PROMPT_CACHE_OVERHEAD_BYTES:0));
-   const requireCapacity=(text:string,file:boolean)=>selectRuntimeHistory([], [{role:'user',content:currentInput}],
+   const requireCapacity=(text:string,file:boolean,content=currentInput)=>selectRuntimeHistory([], [{role:'user',content}],
     {instructions:text,inputBytes:inputLimit,historyItems:0,toolBytes:admissionToolBytes(file)});
    const skillFileInstructions='\nYou may read at most one declared Skill file in this turn with read_skill_file, '+
     (stepSummary?'then write the step summary. ':'then answer or show a question card. ')+
@@ -280,8 +280,19 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
    }
    const primaryTurns=maxCalls-(attachedOrganizer?1:0)-(searchAllowed?1:0)-(candidates.length?1:0);
    if(primaryTurns<(searchAllowed||input.sources.length||workspaceContext?2:1))throw new Error('RUNTIME_CALL_BUDGET');
-   if(candidates.length)selectRuntimeHistory([],[{role:'user',content:matchingInput(input.input,candidates)}],{instructions:MATCH_INSTRUCTIONS,inputBytes:inputLimit,historyItems:0,toolBytes:0});
-   requireCapacity(instructions,Boolean(skillFile));
+   // Splitting only helps when a modest message still fits; otherwise this is a configuration failure (500).
+   const refuseLongInput=(check:(text:string)=>void)=>{
+    try{check(input.input);}
+    catch(error){
+     if(!(error instanceof Error)||error.message!=='RUNTIME_REQUIRED_CONTEXT_EXCEEDS_CAPACITY')throw error;
+     check('x'.repeat(SPLIT_INPUT_BYTES));
+     throw new StagingAccessError('RUNTIME_INPUT_TOO_LONG');
+    }
+   };
+   if(candidates.length)refuseLongInput(text=>selectRuntimeHistory([],[{role:'user',content:matchingInput(text,candidates)}],
+    {instructions:MATCH_INSTRUCTIONS,inputBytes:inputLimit,historyItems:0,toolBytes:0}));
+   refuseLongInput(text=>requireCapacity(instructions,Boolean(skillFile),
+    runtimeScopeInput(text,policy.reportGeneration?undefined:session.scopeMaterial,hostTurnContext)));
    // New mentor turns use the interactive format; replays returned before this branch.
    // A host-opened mentor turn (the user has not spoken) never gets a question card.
    const opening=Boolean(mentorStream&&isOpeningInput(input.input));
@@ -391,6 +402,8 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
   }),
  };
 }
+/** A part of a split message that admission must still fit before calling the input too long. */
+const SPLIT_INPUT_BYTES=2048;
 /** AC-0 measurement: admission and Skill loading form their own timing phase. */
 async function timedAdmission<T>(run:()=>Promise<T>):Promise<T>{
  const timing=currentRequestTiming(),leave=timing?.enter('admission');
