@@ -15,6 +15,7 @@ import {
 import { useReportGen } from "./use-report-gen";
 import { useReportPaywallMemory } from "./report-paywall-memory";
 import { STOP_SAVING_NOTICE, STOP_UNCONFIRMED_NOTICE } from "./stop-reply";
+export { REPORT_FLOW_TEXT, reportPublishes } from "./report-publish";
 
 type Props = { draftId: string; sessionId: string; projectId: string; roundId: string; confirmed: boolean; busy: boolean };
 
