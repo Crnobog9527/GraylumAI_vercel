@@ -12,10 +12,12 @@ const order = { id, user_id: user, payment_mode: 'test', payment_channel: 'waffo
   offer_kind: 'standard', price_ref_id: 'ref-1', purchase_snapshot: { version: 1, item_type: 'membership_plan', item_id: id,
     item_updated_at: '2026-10-01T00:00:00.000Z', billing_cycle: 'monthly', currency: 'usd', unit: 'major',
     price: '69.00', discount: '0.00', tax_behavior: 'inclusive', credits: 8970, bonus_credits: 0 } };
+let claimLeft = 600_000;
 function setup(dispatch: boolean, session: unknown = {
   sessionId, checkoutUrl: `https://pay.test.invalid/checkout/${sessionId}`, expiresAt: new Date(Date.now() + 1_800_000).toISOString() }) {
   const rpc = vi.fn(async (fn: string, args: Record<string, unknown>) => (fn === 'pay_waffo_claim_checkout'
-    ? { data: { dispatch, request: dispatch ? args.p_request : { providerRequest: { stored: true } } }, error: null }
+    ? { data: { dispatch, request: dispatch ? args.p_request : { providerRequest: { stored: true } },
+      expiresAt: dispatch ? args.p_expires : new Date(Date.now() + claimLeft).toISOString() }, error: null }
     : { data: null, error: null }));
   const db = fakeDb({ payment_provider_refs: [{ id: 'ref-1', channel: 'waffo', merchant_namespace: 'fixture', mode: 'test',
     object_type: 'price', external_id: 'PROD_gold' }] }, rpc);
@@ -27,7 +29,7 @@ function setup(dispatch: boolean, session: unknown = {
   return { rpc, provider, run };
 }
 describe('Waffo card checkout (normal path)', () => {
-  beforeEach(() => { vi.clearAllMocks(); mocks.prepare.mockResolvedValue(order); });
+  beforeEach(() => { vi.clearAllMocks(); claimLeft = 600_000; mocks.prepare.mockResolvedValue(order); });
   it('claims once, creates with a per-order idempotency key and binds the session', async () => {
     const f = setup(true);
     expect(await f.run()).toEqual({ orderId: id, state: 'open', url: `https://pay.test.invalid/checkout/${sessionId}` });
@@ -53,5 +55,21 @@ describe('Waffo card checkout (normal path)', () => {
     const foreign = setup(true, { sessionId, checkoutUrl: `https://evil.invalid/checkout/${sessionId}`,
       expiresAt: new Date(Date.now() + 1_800_000).toISOString() });
     expect((await foreign.run()).state).toBe('recovery_required');
+  });
+  it('never POSTs again once the original checkout window has passed', async () => {
+    claimLeft = 30_000;
+    const f = setup(false);
+    expect(await f.run()).toEqual({ orderId: id, state: 'recovery_required', url: null });
+    expect(f.provider.createCheckout).not.toHaveBeenCalled();
+  });
+  it('releases the order at once when Waffo definitively rejects the create request', async () => {
+    const f = setup(true);
+    f.provider.createCheckout.mockRejectedValue(new Error('PAY_WAFFO_PROVIDER_REJECTED'));
+    await expect(f.run()).rejects.toThrow('PROVIDER_REJECTED');
+    expect(f.rpc).toHaveBeenCalledWith('pay_waffo_close_card_checkout', { p_user: user, p_order: id, p_merchant: 'fixture', p_rejected: true });
+    const timeout = setup(true);
+    timeout.provider.createCheckout.mockRejectedValue(new Error('PAY_WAFFO_PROVIDER_UNAVAILABLE'));
+    await expect(timeout.run()).rejects.toThrow('PROVIDER_UNAVAILABLE');
+    expect(timeout.rpc).not.toHaveBeenCalledWith('pay_waffo_close_card_checkout', expect.objectContaining({ p_rejected: true }));
   });
 });

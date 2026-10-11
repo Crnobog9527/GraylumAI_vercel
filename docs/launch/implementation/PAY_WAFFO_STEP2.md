@@ -60,7 +60,10 @@ Owner 原话：「同意收款方案收窄：正常流程自动处理，少见�
 **自动处理（正常流程）**：卡首次付款、续费、升级、取消；防重复发放、并发保护、金额核对（以本站订单记录的应付金额为准）保留。
 - 卡结账：`payments.methodCheckout` 的 card 分支调用 `waffoCardCheckout.ts`，复用 0210 的一次派发抢占与会话绑定；
   每个订单固定一个 `X-Idempotency-Key`，建会话超时后按原请求同键重放取回原会话（#802 实测同键返回原会话）。
-  重放得到已过期或不符的会话时不再新建，订单留给对账。结账页来源需配置 `WAFFO_TEST_CHECKOUT_ORIGIN`，缺失即关闭。
+  重放只在原结账窗口内进行（远小于 Waffo 24 小时幂等期），窗口过后不再发建会话请求；得到已过期或不符的会话时不再新建，订单留给对账。
+  Waffo 明确拒绝建会话（4xx，不含 408/409/425/429）时，用 `pay_waffo_close_card_checkout` 立即释放该订单（此时没有会话产生）。
+  用户放弃付款后订单的超时释放属于已定设计（§6 只在供应商确认关闭/过期后释放）的实质改动，待 Owner 决定，本版本不做。
+  结账页来源需配置 `WAFFO_TEST_CHECKOUT_ORIGIN`（测试模式实测为 `https://pancake.waffo.ai`），缺失即关闭。
 - 回调：收件落库后，`waffoPaymentDelivery.ts` 用实测字段查 `payment(id)`，核对 succeeded、test、店铺、card、
   `amount` 与 `pspAmountDetails` 一致、无退款，再调用既有 `pay_waffo_fulfill_payment`（第 1 期，按本站订单号）或
   `pay_waffo_renew_subscription`（后续期，按已绑定的订阅映射）。只有 `periodNumber` 等于订阅 `currentPeriodNumber` 时，
@@ -77,7 +80,7 @@ Owner 原话：「同意收款方案收窄：正常流程自动处理，少见�
 **每日对账（最小兜底）**：复用现有 `billing-reconcile` cron（每天 04:00 UTC），不新增表或定时任务。
 `waffoReconciliation.ts` 分页读取测试店铺的 Waffo 付款，与本站付款映射和订单交付对比，结果写入 cron 日志和返回值，
 不自动补发、退款或取消。分类：已付未发放、已付待核对（取消后仍被续费、注销、释放后迟到款标“退款候选”）、
-站外付款待退款、Waffo 已退款需人工、本站已发放但 Waffo 无成功付款；扫描超过 20 页时报告“未扫完”并跳过反向核对。
+站外付款待退款（含回调没到、但外部订单号不是本站订单的付款）、Waffo 已退款需人工、本站已发放但 Waffo 无成功付款；扫描超过 20 页时报告“未扫完”并跳过反向核对。
 
 按 #802 同范围修正：`readProduct` 原用 `$storeId: ID!`，真实接口报 `Unknown type "ID"`；
 现改用实测通过的 `String!`、`store(id)` 核对店铺归属，并经店铺范围的顶层 `subscriptionProducts` 按 id 过滤读取。

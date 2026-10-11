@@ -51,6 +51,10 @@ export async function reconcileWaffoPayments(db: Db, provider: Provider) {
     .eq('mode', 'test').eq('resolution->>kind', 'offsite');
   if (offsite.error) throw new Error('PAY_WAFFO_RECONCILIATION_UNAVAILABLE');
   const offsitePaid = new Set((offsite.data ?? []).map(r => (r.resolution as { cash?: { paymentId?: string } } | null)?.cash?.paymentId));
+  // A payment whose site order id is not ours is offsite even if its webhook never arrived.
+  const unmatched = paid.filter(p => !orderOf.has(p.id) && !offsitePaid.has(p.id)).map(p => p.orderMerchantExternalId)
+    .filter((value): value is string => typeof value === 'string' && /^[0-9a-f-]{36}$/i.test(value));
+  const siteOrders = new Set((await readOrders([...new Set(unmatched)])).map(o => o.id));
   for (const payment of paid) {
     const orderId = orderOf.get(payment.id);
     const order = orderId ? orderById.get(orderId) : undefined;
@@ -63,7 +67,7 @@ export async function reconcileWaffoPayments(db: Db, provider: Provider) {
       findings.push({ kind: 'paid_in_review', paymentId: payment.id, orderId, reason: order.method_review_reason ?? order.qualification_state ?? undefined,
         // A cancelled-then-renewed charge, a closed account or a late payment after release all need a refund decision.
         refundCandidate: Boolean(order.method_review_reason) || ['review', 'released'].includes(order.qualification_state ?? '') });
-    } else if (offsitePaid.has(payment.id)) {
+    } else if (offsitePaid.has(payment.id) || !siteOrders.has(payment.orderMerchantExternalId ?? '')) {
       findings.push({ kind: 'offsite_refund_due', paymentId: payment.id, refundCandidate: true });
     } else {
       findings.push({ kind: 'paid_not_delivered', paymentId: payment.id, refundCandidate: false });

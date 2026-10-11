@@ -28,6 +28,11 @@ export function createWaffoTestOperationsClient(config: {
       signal: AbortSignal.timeout(8000), headers: { 'Content-Type': 'application/json',
         'X-Merchant-Id': config.merchantId, 'X-Timestamp': timestamp, 'X-Signature': signature,
         ...(idempotencyKey ? { 'X-Idempotency-Key': idempotencyKey } : {}) } });
+    // A definitive 4xx creates nothing and does not occupy the idempotency key; timeouts, conflicts
+    // (request still in flight), rate limits and 5xx stay unknown.
+    if (response.status >= 400 && response.status < 500 && ![408, 409, 425, 429].includes(response.status)) {
+      throw new Error('PAY_WAFFO_PROVIDER_REJECTED');
+    }
     if (!response.ok) throw new Error('PAY_WAFFO_PROVIDER_UNAVAILABLE');
     const result = await response.json();
     if (!result || typeof result !== 'object' || result.errors?.length || !result.data) throw new Error('PAY_WAFFO_PROVIDER_UNAVAILABLE');

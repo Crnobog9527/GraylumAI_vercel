@@ -7,6 +7,8 @@ import type { WaffoCheckoutCreate } from './waffoTestOperationsClient';
 
 /** The database admits a checkout window up to 31 minutes; the session itself lives 30. */
 const CLAIM_WINDOW_MS = (WAFFO_CHECKOUT_TTL_SECONDS + 60) * 1000;
+/** Replay only while the original session can still be open: far inside Waffo's 24-hour key window. */
+const REPLAY_MARGIN_MS = 60 * 1000;
 
 export async function createWaffoCardCheckout(input: {
   db: SupabaseClient; provider: WaffoCheckoutCreate & { merchant: string; mode: 'test' }; userId: string;
@@ -25,9 +27,20 @@ export async function createWaffoCardCheckout(input: {
     merchantNamespace: provider.merchant, appUrl: input.appUrl });
   const latestExpiry = Date.now() + CLAIM_WINDOW_MS;
   let stored: Record<string, unknown> = providerRequest;
+  let claimExpiry = latestExpiry;
   // Waffo replays the original session for the same key (measured). The key is fixed per order, so a
   // timed-out create is recovered by repeating the exact stored request, never by a second checkout.
   const idempotencyKey = `graylum-checkout-${order.id}`;
+  const create = async (request: Record<string, unknown>) => {
+    try { return await provider.createCheckout(request, idempotencyKey); } catch (error) {
+      if (error instanceof Error && error.message === 'PAY_WAFFO_PROVIDER_REJECTED') {
+        const closed = await db.rpc('pay_waffo_close_card_checkout', { p_user: userId, p_order: order.id,
+          p_merchant: provider.merchant, p_rejected: true });
+        if (closed.error) throw new Error('PAY_WAFFO_CHECKOUT_UNAVAILABLE');
+      }
+      throw error;
+    }
+  };
   const session = await dispatchWaffoCheckout({
     request: providerRequest,
     claimDispatch: async () => {
@@ -38,10 +51,12 @@ export async function createWaffoCardCheckout(input: {
         throw new Error('PAY_WAFFO_CHECKOUT_UNAVAILABLE');
       }
       stored = claimed.data.request.providerRequest;
+      claimExpiry = Date.parse(claimed.data.expiresAt);
       return claimed.data.dispatch;
     },
-    create: request => provider.createCheckout(request, idempotencyKey),
-    recover: () => provider.createCheckout(stored, idempotencyKey),
+    create,
+    // After the window the original session is expired anyway; never POST again (the order stays for manual handling).
+    recover: async () => (Date.now() < claimExpiry - REPLAY_MARGIN_MS ? create(stored) : null),
     persist: async (result) => {
       const bound = await db.rpc('pay_waffo_bind_checkout', { p_user: userId, p_order: order.id, p_merchant: provider.merchant,
         p_checkout: result.sessionId, p_expires: result.expiresAt });
@@ -50,7 +65,7 @@ export async function createWaffoCardCheckout(input: {
     createdAfter: Date.now(), latestExpiry, allowedCheckoutOrigin: input.checkoutOrigin,
   }).catch((error: unknown) => {
     // An expired or mismatched replay is not a new purchase; the order stays for reconciliation.
-    if (error instanceof Error && error.message === 'PAY_WAFFO_CHECKOUT_CONFLICT') return null;
+    if (error instanceof Error && ['PAY_WAFFO_CHECKOUT_CONFLICT', 'PAY_WAFFO_RECONCILIATION_REQUIRED'].includes(error.message)) return null;
     throw error;
   });
   if (!session) return { orderId: order.id, state: 'recovery_required' as const, url: null };

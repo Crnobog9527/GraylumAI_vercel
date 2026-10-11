@@ -7,7 +7,7 @@ type Row = Record<string, unknown>;
 const field = (row: Row, column: string) => column.includes('->>')
   ? (row[column.split('->>')[0]!] as Row | null)?.[column.split('->>')[1]!] : row[column];
 
-/** Minimal in-memory PostgREST stand-in: select/eq/in/maybeSingle and awaiting a list. */
+/** Minimal in-memory PostgREST stand-in: select/eq/in/is/limit/maybeSingle and awaiting a list. */
 export function fakeDb(tables: Record<string, Row[]>, rpc: (fn: string, args: Row) => unknown) {
   const from = (table: string) => {
     let rows = [...(tables[table] ?? [])];
@@ -15,6 +15,8 @@ export function fakeDb(tables: Record<string, Row[]>, rpc: (fn: string, args: Ro
       select: () => query,
       eq: (column: string, value: unknown) => { rows = rows.filter(row => field(row, column) === value); return query; },
       in: (column: string, values: unknown[]) => { rows = rows.filter(row => values.includes(field(row, column))); return query; },
+      is: (column: string, value: null) => { rows = rows.filter(row => (field(row, column) ?? null) === value); return query; },
+      limit: (count: number) => { rows = rows.slice(0, count); return query; },
       maybeSingle: async () => ({ data: rows[0] ?? null, error: null }),
       then: (resolve: (value: unknown) => unknown, reject?: (error: unknown) => unknown) =>
         Promise.resolve({ data: rows, error: null }).then(resolve, reject),

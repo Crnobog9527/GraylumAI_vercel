@@ -9,14 +9,15 @@ describe('Waffo daily reconciliation (report only)', () => {
   it('lists paid-but-undelivered, refund candidates and delivered-without-payment; grants nothing', async () => {
     const rows = [payment({ id: 'PAY_ok' }), payment({ id: 'PAY_missing' }), payment({ id: 'PAY_renewal_after_cancel' }),
       payment({ id: 'PAY_offsite' }), payment({ id: 'PAY_refunded', refundStatus: 'succeeded', refundedAmount: { amount: '6900', currency: 'USD' } }),
-      payment({ id: 'PAY_failed', status: 'failed' })];
+      payment({ id: 'PAY_failed', status: 'failed' }), payment({ id: 'PAY_unseen_offsite', orderMerchantExternalId: 'not-a-site-order' })];
     const rpc = vi.fn();
     const db = fakeDb({
       payment_provider_refs: [ref('PAY_ok', 'o-ok'), ref('PAY_renewal_after_cancel', 'o-review'), ref('PAY_refunded', 'o-refunded'),
         ref('PAY_ghost', 'o-ghost')],
       payment_orders: [{ id: 'o-ok', fulfilled_at: '2026-10-11T06:00:00Z' },
         { id: 'o-review', fulfilled_at: null, qualification_state: 'review', method_review_reason: 'unexpected_renewal' },
-        { id: 'o-refunded', fulfilled_at: '2026-10-11T06:00:00Z' }, { id: 'o-ghost', fulfilled_at: '2026-10-11T06:00:00Z' }],
+        { id: 'o-refunded', fulfilled_at: '2026-10-11T06:00:00Z' }, { id: 'o-ghost', fulfilled_at: '2026-10-11T06:00:00Z' },
+        { id: '00000000-0000-4000-8000-000000000001', fulfilled_at: null }],
       waffo_event_receipts: [{ merchant_namespace: 'fixture', mode: 'test', resolution: { kind: 'offsite', cash: { paymentId: 'PAY_offsite' } } }],
     }, rpc);
     const listPayments = vi.fn().mockResolvedValue({ rows, complete: true });
@@ -27,6 +28,7 @@ describe('Waffo daily reconciliation (report only)', () => {
       { kind: 'paid_in_review', paymentId: 'PAY_renewal_after_cancel', orderId: 'o-review', reason: 'unexpected_renewal', refundCandidate: true },
       { kind: 'offsite_refund_due', paymentId: 'PAY_offsite', refundCandidate: true },
       { kind: 'refund_observed', paymentId: 'PAY_refunded', orderId: 'o-refunded', refundCandidate: false },
+      { kind: 'offsite_refund_due', paymentId: 'PAY_unseen_offsite', refundCandidate: true },
       { kind: 'delivered_without_payment', paymentId: 'PAY_ghost', orderId: 'o-ghost', refundCandidate: false },
     ]);
     expect(rpc).not.toHaveBeenCalled();

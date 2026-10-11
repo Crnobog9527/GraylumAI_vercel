@@ -59,6 +59,12 @@ describe('Pancake test operation transport', () => {
     expect(url).toBe('https://api.waffo.ai/v1/actions/checkout/create-session');
     expect(init.headers['X-Idempotency-Key']).toBe('graylum-checkout-fixture');
     await expect(client.createCheckout({}, 'x')).rejects.toThrow('CHECKOUT_INVALID');
+    request.mockResolvedValue(new Response('{}', { status: 400 }));
+    await expect(client.createCheckout({}, 'graylum-checkout-fixture')).rejects.toThrow('PROVIDER_REJECTED');
+    for (const status of [409, 429, 503]) {
+      request.mockResolvedValue(new Response('{}', { status }));
+      await expect(client.createCheckout({}, 'graylum-checkout-fixture')).rejects.toThrow('PROVIDER_UNAVAILABLE');
+    }
   });
   it('does not load a provider binding until explicitly enabled in test configuration', () => {
     vi.stubEnv('WAFFO_TEST_OPERATIONS_ENABLED', 'false');

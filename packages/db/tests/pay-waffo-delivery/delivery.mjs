@@ -70,6 +70,32 @@ export async function deliveryCases({admin,service,connect}) {
     else await assert.rejects(call,/TERM_INVALID/);
     assert.equal((await admin.query('SELECT credits FROM profiles WHERE id=$1',[user])).rows[0].credits,ok?8970:0);
   }
+  // Card checkout close only for a definitive provider rejection before any session is bound; the account can buy again.
+  // Expiry-based release is not part of this version (pending Owner decision).
+  {
+    const user=randomUUID(); await admin.query('INSERT INTO profiles(id,credits) VALUES($1,0)',[user]);
+    const create=async()=>(await service.query(`SELECT o.* FROM pay_waffo_create_purchase($1,'membership_plan',$2,'monthly','card',
+      'gold_first30','fixture','test',1,'terms-v1',$3) o`,[user,plan,JSON.stringify([{kind:'email',key_version:'test-v1',
+      digest:user.replaceAll('-','').repeat(2)}])])).rows[0];
+    const close=(o,rejected)=>service.query('SELECT pay_waffo_close_card_checkout($1,$2,$3,$4)',[user,o.id,'fixture',rejected]);
+    const claim=o=>service.query('SELECT pay_waffo_claim_checkout($1,$2,$3,$4,$5)',[user,o.id,'fixture',
+      {orderId:o.id,userId:user,method:'card',merchant:'fixture',mode:'test',providerRequest:{fixture:true}},new Date(Date.now()+1800000)]);
+    const first=await create();
+    await assert.rejects(()=>close(first,true),/CLOSE_DENIED/);
+    await claim(first); await close(first,true); await close(first,true);
+    assert.equal((await admin.query('SELECT qualification_state s FROM payment_orders WHERE id=$1',[first.id])).rows[0].s,'released');
+    const second=await create(); assert.notEqual(second.id,first.id);
+    await claim(second);
+    const checkout=`checkout_${second.id}`,expiry=new Date(Date.now()+1700000);
+    await service.query('SELECT pay_waffo_bind_checkout($1,$2,$3,$4,$5)',[user,second.id,'fixture',checkout,expiry]);
+    await assert.rejects(()=>close(second,true),/CLOSE_DENIED/);
+    await assert.rejects(()=>close(second,false),/CLOSE_DENIED/);
+    for(const role of ['anon','authenticated']) {
+      await service.query(`SET ROLE ${role}`);
+      await assert.rejects(()=>close(second,true),/permission denied/);
+    }
+    await service.query('SET ROLE service_role');
+  }
   for(const closed of [false,true]) {
     const {o,user,checkout}=await fixture();
     const start=new Date(Math.floor(Date.now()/1000)*1000),end=new Date(start);
@@ -89,5 +115,6 @@ export async function deliveryCases({admin,service,connect}) {
   }
   return ['schema-idempotency','checkout-one-dispatch','cross-user-denied','cross-merchant-denied','wrong-amount-denied',
     'concurrent-payment-one-grant','wallet-month-delivery','wallet-year-first-grant','card-first30-delivery','card-renewal-69-after-49','card-renewal-payment-dedup','release-idempotency','client-rpc-denied','late-released-payment-no-entitlement','closed-account-financial-only',
-    'card-delayed-processing-delivered','card-time-tolerance-review'];
+    'card-delayed-processing-delivered','card-time-tolerance-review',
+    'card-rejected-create-closes','card-bound-or-unrejected-close-denied'];
 }

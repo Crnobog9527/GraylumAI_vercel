@@ -813,12 +813,36 @@ BEGIN
  UPDATE payment_orders SET qualification_state='released',qualification_closed_ref='never_dispatched:'||o.id,
   purchase_closed_at=clock_timestamp(),method_review_reason='checkout_not_dispatched' WHERE id=o.id;
 END $$;
+-- Close a Waffo card order whose create request the provider definitively rejected: a non-2xx creates
+-- no session and does not occupy the idempotency key. Expiry-based release waits for an Owner decision.
+-- A later payment would still land as cash-only review (observe_qualification).
+CREATE OR REPLACE FUNCTION public.pay_waffo_close_card_checkout(p_user uuid,p_order uuid,p_merchant text,p_rejected boolean)
+RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
+DECLARE o payment_orders;
+BEGIN
+ PERFORM 1 FROM profiles WHERE id=p_user FOR UPDATE;
+ SELECT * INTO o FROM payment_orders WHERE id=p_order AND user_id=p_user FOR UPDATE;
+ IF o.id IS NULL OR o.payment_channel IS DISTINCT FROM 'waffo' OR o.payment_method IS DISTINCT FROM 'card'
+  OR o.payment_mode IS DISTINCT FROM 'test' OR o.merchant_namespace IS DISTINCT FROM p_merchant
+  OR o.payment_status IS DISTINCT FROM 'unpaid' OR o.fulfilled_at IS NOT NULL OR p_rejected IS DISTINCT FROM true
+  OR EXISTS(SELECT 1 FROM payment_provider_refs WHERE order_id=o.id AND object_type='payment') THEN
+  RAISE EXCEPTION 'PAY_WAFFO_CLOSE_DENIED'; END IF;
+ IF o.qualification_state='released' AND o.purchase_closed_at IS NOT NULL THEN RETURN; END IF;
+ IF o.qualification_state IS DISTINCT FROM 'reserved' OR o.purchase_closed_at IS NOT NULL
+  OR o.method_dispatched_at IS NULL
+  OR EXISTS(SELECT 1 FROM payment_provider_refs WHERE order_id=o.id AND object_type='checkout') THEN
+  RAISE EXCEPTION 'PAY_WAFFO_CLOSE_DENIED'; END IF;
+ UPDATE payment_orders SET qualification_state='released',
+  qualification_closed_ref='provider_rejected:'||o.id,
+  purchase_closed_at=clock_timestamp(),
+  method_review_reason='card_checkout_rejected' WHERE id=o.id;
+END $$;
 DO $$ DECLARE f record; BEGIN
  FOR f IN SELECT oid::regprocedure sig FROM pg_proc WHERE pronamespace='public'::regnamespace AND proname IN (
   'pay_waffo_assert_actor','pay_waffo_claim_checkout','pay_waffo_bind_checkout','pay_waffo_grant_period',
   'pay_waffo_fulfill_payment','pay_waffo_release_due','pay_waffo_resolve_receipt','pay_waffo_record_offsite',
   'pay_waffo_product_control','pay_waffo_product_control_result','pay_waffo_product_block_guard',
-  'pay_waffo_close_uncreated','pay_waffo_abort_before_dispatch','pay_waffo_cancel_intent','pay_waffo_cancel_result','pay_waffo_retry_cancel','pay_waffo_renew_subscription','pay_waffo_admit_purchase','pay_waffo_create_transition','pay_waffo_founder_deadline') LOOP
+  'pay_waffo_close_uncreated','pay_waffo_abort_before_dispatch','pay_waffo_close_card_checkout','pay_waffo_cancel_intent','pay_waffo_cancel_result','pay_waffo_retry_cancel','pay_waffo_renew_subscription','pay_waffo_admit_purchase','pay_waffo_create_transition','pay_waffo_founder_deadline') LOOP
   EXECUTE format('REVOKE ALL ON FUNCTION %s FROM PUBLIC,anon,authenticated,service_role',f.sig);
   IF f.sig::text NOT LIKE '%pay_waffo_assert_actor(%' AND f.sig::text NOT LIKE '%pay_waffo_product_block_guard(%' AND f.sig::text NOT LIKE '%pay_waffo_admit_purchase(%' THEN
    EXECUTE format('GRANT EXECUTE ON FUNCTION %s TO service_role',f.sig);
