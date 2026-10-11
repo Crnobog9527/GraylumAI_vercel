@@ -222,7 +222,11 @@ it('RUNTIME: capture complete callback persists and new projection strips privat
   await f.save('user');
   await f.apply(await f.seed(output([patch('suggestion')])));
   const projection = (await db.query('select runtime_work_projection($1,$2,$3) v', [f.actor, f.d.sessionId, f.d.roundId])).rows[0].v;
-  expect(projection.steps['step-0'].fieldMeta.goal).toEqual({protected:true,source:'user',basis:'user_statement',hasPendingSuggestion:true});
+  expect(projection.steps['step-0'].fieldMeta.goal).toEqual({
+    protected:true,source:'user',basis:'user_statement',hasPendingSuggestion:true,
+    executionId:null,origin:{basis:'user_statement',executionId:id},createdAt:expect.any(String),
+  });
+  expect(Number.isFinite(Date.parse(projection.steps['step-0'].fieldMeta.goal.createdAt))).toBe(true);
   expect(projection.steps['step-0'].information.goal.value).toBe('user');
   const view = await f.read();
   expect(view.information['step-0'].meta.goal.suggestion.value).toBe('suggestion');
@@ -1242,4 +1246,22 @@ it('RUNTIME: V3 migration reruns as a no-op and its rollback restores definition
     expect(await definitions()).toEqual(reverted);
   } finally { await withdrawMigration(); }
   expect(await definitions()).toEqual(patched);
+});
+
+it('RUNTIME: R16 summary admission freezes missing fields and cannot confirm or extract host speech',async()=>{
+ const f=await fixture();
+ const before=await f.steps();
+ const request={draftId:f.draft.draftId,requestId:randomUUID(),stepId:'step-0',purpose:'mentor',input:'HOST_STEP_SUMMARY:v1'};
+ const admitted=await f.service.prepareStep(request);
+ const frozen=(await db.query('select payload from runtime_executions where id=$1',[admitted.executionId])).rows[0].payload;
+ expect(frozen.hostTurnContext.stepSummary).toEqual({kind:'step_summary',missingRequiredFieldIds:['goal']});
+ expect(frozen.hostTurnContext.confirmation.stepConfirmed).toBe(false);
+ expect(frozen.tools).toEqual(['read_skill_file']);expect(frozen.attachedOrganizer).toBeUndefined();
+ expect(frozen.instructions).toContain('write the step summary now');
+ expect(await f.steps()).toEqual(before);
+ expect((await f.service.prepareStep(request)).executionId).toBe(admitted.executionId);
+ const other=await fixture();
+ await expect(other.service.prepareStep({...request,requestId:randomUUID()})).rejects.toThrow();
+ await rpc('runtime_cancel',{p_actor_id:f.actor,p_execution_id:admitted.executionId});
+ expect(await f.steps()).toEqual(before);
 });

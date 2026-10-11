@@ -6,8 +6,7 @@ import type {RuntimeTool} from './runner';
 
 /** Interactive Agent turn tools (AC-1). Only the `agent-turn-v5-stream`
  * request format may carry them, and only when its frozen context lists them.
- * `read_skill_file` is named here for the provider and history allowlists;
- * its implementation arrives with AC1-5 and no context may list it yet. */
+ * `read_skill_file` is available only with a frozen package binding and bounded continuation. */
 export const READ_SKILL_FILE_TOOL='read_skill_file';
 export const AGENT_TOOL_NAMES:ReadonlySet<string>=new Set([ASK_QUESTION_TOOL,READ_SKILL_FILE_TOOL]);
 /** The only tool of the older formats. */

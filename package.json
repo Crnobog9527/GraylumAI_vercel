@@ -55,7 +55,10 @@
       "browserslist": "4.28.7",
       "@opentelemetry/instrumentation-http>@opentelemetry/core": "2.8.0",
       "@modelcontextprotocol/client": "2.2.0"
-    }
+    },
+    "ignoredOptionalDependencies": [
+      "@napi-rs/canvas"
+    ]
   },
   "devDependencies": {
     "dotenv": "^17.4.2",

@@ -23,9 +23,10 @@ beforeAll(async () => {
     window.savedLimits = [];
     window.failSave = false;
     export const trpc = {
-      useUtils: () => ({runtimeRateLimits:{get:{setData:(_,v)=>{data=v;listeners.forEach(fn=>fn())}}}}),
+      useUtils: () => ({runtimeRateLimits:{get:{setData:(_,v)=>{data=v;listeners.forEach(fn=>fn())},
+        invalidate:async()=>{window.invalidated=(window.invalidated??0)+1}}}}),
       runtimeRateLimits: {
-        get:{useQuery:()=>({data:useSyncExternalStore(subscribe,()=>data),error:null,refetch:async()=>({data})})},
+        get:{useQuery:()=>({data:useSyncExternalStore(subscribe,()=>data),error:window.getError??null,refetch:async()=>({data})})},
         update:{useMutation:options=>{
           const [isPending,setPending]=useState(false),[error,setError]=useState(null);
           return {isPending,error,reset:()=>setError(null),mutate:(input,call)=>{
@@ -68,7 +69,7 @@ beforeAll(async () => {
 }, 30000);
 afterAll(async () => { await browser?.close(); });
 
-async function openCard(enforcement: boolean) {
+async function openCard(enforcement: boolean, getError: unknown = null) {
   const page = await browser.newPage();
   const errors: string[] = [];
   page.on('pageerror', error => errors.push(error.message));
@@ -77,6 +78,7 @@ async function openCard(enforcement: boolean) {
   await page.evaluate(value => {
     (window as unknown as {fixtureEnforcement: unknown}).fixtureEnforcement = value;
   }, {admission:enforcement,calls:enforcement,pause:enforcement});
+  await page.evaluate(value => { (window as unknown as {getError: unknown}).getError = value; }, getError);
   await page.addScriptTag({ content: code });
   return { page, errors };
 }
@@ -85,7 +87,6 @@ it('validates, preserves in-flight edits, reads back saves and never implies enf
   const { page, errors } = await openCard(false);
   try {
     await browserExpect(page.getByText('保护尚未接线：当前只能准备配置，保存不会启用限流或暂停模型调用。')).toBeVisible();
-    await browserExpect(page.getByRole('button', {name:'一键暂停（待接线）'})).toBeDisabled();
     const minute = page.getByLabel('新消息（每轮消息）：每分钟', {exact:true});
     const save = page.getByRole('button', {name:'保存额度配置'});
     await minute.fill('0');
@@ -110,7 +111,7 @@ it('validates, preserves in-flight edits, reads back saves and never implies enf
   } finally { await page.close(); }
 }, 15000);
 
-it('shows wired protection, pauses with the read-back value and keeps unsaved limit edits', async () => {
+it('shows wired protection, keeps the pause switch elsewhere and saves limits without touching the pause', async () => {
   const { page, errors } = await openCard(true);
   try {
     await browserExpect(page.getByText('已接线：保存后，下一条新消息或新一轮的第一次模型调用就按新配置检查。')).toBeVisible();
@@ -119,23 +120,21 @@ it('shows wired protection, pauses with the read-back value and keeps unsaved li
       .toBeVisible();
     await browserExpect(page.getByText('都不能低于单轮最多调用数（当前 3）', {exact:false})).toBeVisible();
     await browserExpect(page.getByText('暂停设置：未暂停')).toBeVisible();
+    // The switch moved to the stop-loss tab, which has a confirm step.
+    await browserExpect(page.getByRole('button', {name:/一键暂停|恢复新调用|停止新调用/})).toHaveCount(0);
+    await browserExpect(page.getByText('停止或恢复新调用只能在“成本止损”页操作', {exact:false})).toBeVisible();
     const minute = page.getByLabel('新消息（每轮消息）：每分钟', {exact:true});
     await minute.fill('9');
-    const pause = page.getByRole('button', {name:'一键暂停'});
-    await browserExpect(pause).toBeEnabled();
-    await pause.click();
+    // Someone stopped new calls meanwhile; the server keeps that stop when limits are saved.
+    await page.evaluate('window.readBack={stopNewCalls:true}');
+    await page.getByRole('button', {name:'保存额度配置'}).click();
+    await browserExpect(minute).toBeDisabled();
     await page.evaluate('window.finishSave()');
-    // Only the pause flag is submitted; the unsaved limit edit is not saved and stays in the form.
-    expect(await page.evaluate('window.savedLimits[0]')).toMatchObject({ admissionPerMinute:10, stopNewCalls:true });
+    // The limits save always sends false, which the server treats as "limits only, never resume".
+    expect(await page.evaluate('window.savedLimits[0]')).toMatchObject({ admissionPerMinute:9, stopNewCalls:false });
     await browserExpect(page.getByText('暂停设置：已暂停新调用')).toBeVisible();
-    await browserExpect(page.getByText('已暂停新调用（已回读）。已经开始的一轮会跑完。')).toBeVisible();
-    await browserExpect(minute).toHaveValue('9');
-    // A save that the server reads back as not paused must show not paused.
-    await page.evaluate('window.readBack={stopNewCalls:false}');
-    await page.getByRole('button', {name:'恢复新调用'}).click();
-    await page.evaluate('window.finishSave()');
-    await browserExpect(page.getByText('暂停设置：未暂停')).toBeVisible();
-    await browserExpect(page.getByText('已恢复新调用（已回读）。')).toBeVisible();
+    // Every successful save re-reads the shared config so the latest stop state wins.
+    expect(await page.evaluate('window.invalidated')).toBe(1);
     // Saving limits displays the read-back value, not the submitted one.
     await page.evaluate('window.readBack={admissionPerMinute:7}');
     await page.getByRole('button', {name:'保存额度配置'}).click();
@@ -144,6 +143,16 @@ it('shows wired protection, pauses with the read-back value and keeps unsaved li
     await browserExpect(minute).toHaveValue('7');
     await page.getByLabel('模型调用：每分钟', {exact:true}).fill('2');
     await browserExpect(page.getByText('当前“模型调用：每分钟”低于 3，/runtime 的每一轮都会被拒绝。')).toBeVisible();
+    expect(errors).toEqual([]);
+  } finally { await page.close(); }
+}, 15000);
+
+it('keeps the quota editor when a background re-read fails after data was loaded', async () => {
+  const { page, errors } = await openCard(true, { message: 'x' });
+  try {
+    await browserExpect(page.getByText('最新数据暂时读取失败', {exact:false})).toBeVisible();
+    await browserExpect(page.getByLabel('新消息（每轮消息）：每分钟', {exact:true})).toBeEnabled();
+    await browserExpect(page.getByText('无法读取使用额度，请稍后重试。', {exact:false})).toHaveCount(0);
     expect(errors).toEqual([]);
   } finally { await page.close(); }
 }, 15000);

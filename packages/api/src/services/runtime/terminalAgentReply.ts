@@ -9,7 +9,7 @@ const terminalFinishes=new Set(['stop','length','tool_calls','content_filter']);
  * Missing/unknown finish reasons remain pending; replay cannot repair a known
  * terminal response whose message has a malformed protocol shape. A mentor
  * turn offered no card tool (a host-opened turn) cannot run any tool call. */
-export function terminalAgentReplyFailure(response:unknown,organizer=false,cardOffered=true):boolean {
+export function terminalAgentReplyFailure(response:unknown,organizer=false,cardOffered=true,skillFileOffered=false):boolean {
   if(!object(response)||!Array.isArray(response.choices)||response.choices.length!==1)return false;
   const choice=response.choices[0];
   if(!object(choice)||typeof choice.finish_reason!=='string'||!terminalFinishes.has(choice.finish_reason))return false;
@@ -20,7 +20,8 @@ export function terminalAgentReplyFailure(response:unknown,organizer=false,cardO
   const calls=message.tool_calls;
   // v5 deliberately keeps only the first call. Later calls are ignored by the
   // runner, so an unknown later name must not invalidate an accepted first one.
-  if(Array.isArray(calls)&&calls.length)return organizer||!cardOffered||calls[0]?.function?.name!==ASK_QUESTION_TOOL;
+  if(Array.isArray(calls)&&calls.length)return organizer||
+    !(cardOffered&&calls[0]?.function?.name===ASK_QUESTION_TOOL||skillFileOffered&&calls[0]?.function?.name==='read_skill_file');
   return organizer&&choice.finish_reason==='stop'&&
     (message.content===null||typeof message.content==='string'&&!message.content.trim());
 }

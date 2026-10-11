@@ -370,7 +370,7 @@
   },
   "src/services/__tests__/workbench.integration.ts": {
     "@typescript-eslint/no-explicit-any": {
-      "count": 21
+      "count": 17
     },
     "@typescript-eslint/no-unused-vars": {
       "count": 1
@@ -387,19 +387,6 @@
   "src/services/adminUserAccess.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 2
-    }
-  },
-  "src/services/agentSlice/runner.test.ts": {
-    "@typescript-eslint/no-explicit-any": {
-      "count": 9
-    }
-  },
-  "src/services/agentSlice/runner.ts": {
-    "@typescript-eslint/no-explicit-any": {
-      "count": 2
-    },
-    "prefer-const": {
-      "count": 1
     }
   },
   "src/services/artifacts/generation.ts": {

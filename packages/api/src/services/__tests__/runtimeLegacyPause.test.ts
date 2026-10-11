@@ -1,6 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { expect, it, vi } from 'vitest';
-import { sliceAdmission } from '../agentSlice/admission';
 import { workbenchGeneration } from '../artifacts/generation';
 import { DEFAULT_RUNTIME_RATE_LIMITS as defaults } from '../runtime/rateLimitSettings';
 import { runtimeGateMessages } from '../../shared/runtimeGateMessages';
@@ -21,20 +20,6 @@ function fixture(replay = false, paused = true) {
   const admin = { rpc, from: vi.fn(() => settings) };
   return { user, admin, record };
 }
-it('blocks a new legacy slice before models, reservation or admission', async () => {
-  const f = fixture();
-  await expect(sliceAdmission(f.user as never, f.admin as never).begin({ ...scope,
-    conversationId: id, requestId: id, pairId: 'pair', body: 'synthetic', preferenceRefs: [],
-  })).rejects.toMatchObject({ code: 'SERVICE_UNAVAILABLE', message: runtimeGateMessages.paused });
-  expect(f.admin.rpc.mock.calls.map(([name]) => name)).toEqual(['agent_slice_admission_replay']);
-});
-it('keeps a legacy slice replay available without even reading the pause setting', async () => {
-  const f = fixture(true);
-  expect(await sliceAdmission(f.user as never, f.admin as never).begin({ ...scope,
-    conversationId: id, requestId: id, pairId: 'pair', body: 'synthetic', preferenceRefs: [],
-  })).toEqual(f.record);
-  expect(f.admin.from).not.toHaveBeenCalled();
-});
 it('blocks new workbench generation before reservation or provider transport', async () => {
   const f = fixture();
   const transport = vi.fn();

@@ -1,0 +1,927 @@
+[
+ {
+  "id": "p01",
+  "cat": "clean",
+  "font": "Songti SC",
+  "w": 1654,
+  "h": 2339,
+  "degrade": {
+   "rot": 0,
+   "blur": 0,
+   "noise": 4,
+   "sp": 0,
+   "light": 0,
+   "scale": 1,
+   "q": 0.9
+  },
+  "gtChars": 990
+ },
+ {
+  "id": "p02",
+  "cat": "clean",
+  "font": "Hiragino Sans GB",
+  "w": 1654,
+  "h": 2339,
+  "degrade": {
+   "rot": 0,
+   "blur": 0,
+   "noise": 4,
+   "sp": 0,
+   "light": 0,
+   "scale": 1,
+   "q": 0.9
+  },
+  "gtChars": 985
+ },
+ {
+  "id": "p03",
+  "cat": "clean",
+  "font": "STHeiti",
+  "w": 1654,
+  "h": 2339,
+  "degrade": {
+   "rot": 0,
+   "blur": 0,
+   "noise": 4,
+   "sp": 0,
+   "light": 0,
+   "scale": 1,
+   "q": 0.9
+  },
+  "gtChars": 1022
+ },
+ {
+  "id": "p04",
+  "cat": "clean",
+  "font": "PingFang SC",
+  "w": 1654,
+  "h": 2339,
+  "degrade": {
+   "rot": 0,
+   "blur": 0,
+   "noise": 4,
+   "sp": 0,
+   "light": 0,
+   "scale": 1,
+   "q": 0.9
+  },
+  "gtChars": 960
+ },
+ {
+  "id": "p05",
+  "cat": "clean",
+  "font": "Songti SC",
+  "w": 1654,
+  "h": 2339,
+  "degrade": {
+   "rot": 0,
+   "blur": 0,
+   "noise": 4,
+   "sp": 0,
+   "light": 0,
+   "scale": 1,
+   "q": 0.9
+  },
+  "gtChars": 1080
+ },
+ {
+  "id": "p06",
+  "cat": "clean",
+  "font": "Hiragino Sans GB",
+  "w": 1654,
+  "h": 2339,
+  "degrade": {
+   "rot": 0,
+   "blur": 0,
+   "noise": 4,
+   "sp": 0,
+   "light": 0,
+   "scale": 1,
+   "q": 0.9
+  },
+  "gtChars": 1076
+ },
+ {
+  "id": "p07",
+  "cat": "clean",
+  "font": "STHeiti",
+  "w": 1654,
+  "h": 2339,
+  "degrade": {
+   "rot": 0,
+   "blur": 0,
+   "noise": 4,
+   "sp": 0,
+   "light": 0,
+   "scale": 1,
+   "q": 0.9
+  },
+  "gtChars": 1142
+ },
+ {
+  "id": "p08",
+  "cat": "clean",
+  "font": "PingFang SC",
+  "w": 1654,
+  "h": 2339,
+  "degrade": {
+   "rot": 0,
+   "blur": 0,
+   "noise": 4,
+   "sp": 0,
+   "light": 0,
+   "scale": 1,
+   "q": 0.9
+  },
+  "gtChars": 1070
+ },
+ {
+  "id": "p09",
+  "cat": "rotated",
+  "font": "Songti SC",
+  "w": 1654,
+  "h": 2339,
+  "degrade": {
+   "rot": -2.944,
+   "blur": 0,
+   "noise": 5,
+   "sp": 0,
+   "light": 0,
+   "scale": 1,
+   "q": 0.85
+  },
+  "gtChars": 1014
+ },
+ {
+  "id": "p10",
+  "cat": "rotated",
+  "font": "Hiragino Sans GB",
+  "w": 1654,
+  "h": 2339,
+  "degrade": {
+   "rot": 1.261,
+   "blur": 0,
+   "noise": 5,
+   "sp": 0,
+   "light": 0,
+   "scale": 1,
+   "q": 0.85
+  },
+  "gtChars": 843
+ },
+ {
+  "id": "p11",
+  "cat": "rotated",
+  "font": "STHeiti",
+  "w": 1654,
+  "h": 2339,
+  "degrade": {
+   "rot": 2.998,
+   "blur": 0,
+   "noise": 5,
+   "sp": 0,
+   "light": 0,
+   "scale": 1,
+   "q": 0.85
+  },
+  "gtChars": 967
+ },
+ {
+  "id": "p12",
+  "cat": "rotated",
+  "font": "PingFang SC",
+  "w": 1654,
+  "h": 2339,
+  "degrade": {
+   "rot": 1.505,
+   "blur": 0,
+   "noise": 5,
+   "sp": 0,
+   "light": 0,
+   "scale": 1,
+   "q": 0.85
+  },
+  "gtChars": 1163
+ },
+ {
+  "id": "p13",
+  "cat": "rotated",
+  "font": "Songti SC",
+  "w": 1654,
+  "h": 2339,
+  "degrade": {
+   "rot": -1.093,
+   "blur": 0,
+   "noise": 5,
+   "sp": 0,
+   "light": 0,
+   "scale": 1,
+   "q": 0.85
+  },
+  "gtChars": 1122
+ },
+ {
+  "id": "p14",
+  "cat": "rotated",
+  "font": "Hiragino Sans GB",
+  "w": 1654,
+  "h": 2339,
+  "degrade": {
+   "rot": 1.884,
+   "blur": 0,
+   "noise": 5,
+   "sp": 0,
+   "light": 0,
+   "scale": 1,
+   "q": 0.85
+  },
+  "gtChars": 1024
+ },
+ {
+  "id": "p15",
+  "cat": "blur",
+  "font": "STHeiti",
+  "w": 1250,
+  "h": 1767,
+  "degrade": {
+   "rot": 0,
+   "blur": 1.357,
+   "noise": 4,
+   "sp": 0,
+   "light": 0,
+   "scale": 0.756,
+   "q": 0.8
+  },
+  "gtChars": 964
+ },
+ {
+  "id": "p16",
+  "cat": "blur",
+  "font": "PingFang SC",
+  "w": 1398,
+  "h": 1976,
+  "degrade": {
+   "rot": 0,
+   "blur": 1.387,
+   "noise": 4,
+   "sp": 0,
+   "light": 0,
+   "scale": 0.845,
+   "q": 0.8
+  },
+  "gtChars": 1009
+ },
+ {
+  "id": "p17",
+  "cat": "blur",
+  "font": "Songti SC",
+  "w": 1335,
+  "h": 1888,
+  "degrade": {
+   "rot": 0,
+   "blur": 1.253,
+   "noise": 4,
+   "sp": 0,
+   "light": 0,
+   "scale": 0.807,
+   "q": 0.8
+  },
+  "gtChars": 1028
+ },
+ {
+  "id": "p18",
+  "cat": "blur",
+  "font": "Hiragino Sans GB",
+  "w": 1307,
+  "h": 1849,
+  "degrade": {
+   "rot": 0,
+   "blur": 1.467,
+   "noise": 4,
+   "sp": 0,
+   "light": 0,
+   "scale": 0.79,
+   "q": 0.8
+  },
+  "gtChars": 1064
+ },
+ {
+  "id": "p19",
+  "cat": "blur",
+  "font": "STHeiti",
+  "w": 1326,
+  "h": 1875,
+  "degrade": {
+   "rot": 0,
+   "blur": 1.455,
+   "noise": 4,
+   "sp": 0,
+   "light": 0,
+   "scale": 0.801,
+   "q": 0.8
+  },
+  "gtChars": 1076
+ },
+ {
+  "id": "p20",
+  "cat": "noise_jpeg",
+  "font": "PingFang SC",
+  "w": 1654,
+  "h": 2339,
+  "degrade": {
+   "rot": -0.372,
+   "blur": 0,
+   "noise": 18.367,
+   "sp": 0.003,
+   "light": 0,
+   "scale": 1,
+   "q": 0.544
+  },
+  "gtChars": 1085
+ },
+ {
+  "id": "p21",
+  "cat": "noise_jpeg",
+  "font": "Songti SC",
+  "w": 1654,
+  "h": 2339,
+  "degrade": {
+   "rot": 0.155,
+   "blur": 0,
+   "noise": 23.884,
+   "sp": 0.003,
+   "light": 0,
+   "scale": 1,
+   "q": 0.535
+  },
+  "gtChars": 1020
+ },
+ {
+  "id": "p22",
+  "cat": "noise_jpeg",
+  "font": "Hiragino Sans GB",
+  "w": 1654,
+  "h": 2339,
+  "degrade": {
+   "rot": -0.136,
+   "blur": 0,
+   "noise": 21.659,
+   "sp": 0.003,
+   "light": 0,
+   "scale": 1,
+   "q": 0.41
+  },
+  "gtChars": 1003
+ },
+ {
+  "id": "p23",
+  "cat": "noise_jpeg",
+  "font": "STHeiti",
+  "w": 1654,
+  "h": 2339,
+  "degrade": {
+   "rot": -0.014,
+   "blur": 0,
+   "noise": 25.708,
+   "sp": 0.003,
+   "light": 0,
+   "scale": 1,
+   "q": 0.452
+  },
+  "gtChars": 1031
+ },
+ {
+  "id": "p24",
+  "cat": "noise_jpeg",
+  "font": "PingFang SC",
+  "w": 1654,
+  "h": 2339,
+  "degrade": {
+   "rot": -0.459,
+   "blur": 0,
+   "noise": 26.988,
+   "sp": 0.003,
+   "light": 0,
+   "scale": 1,
+   "q": 0.489
+  },
+  "gtChars": 1093
+ },
+ {
+  "id": "p25",
+  "cat": "noise_jpeg",
+  "font": "Songti SC",
+  "w": 1654,
+  "h": 2339,
+  "degrade": {
+   "rot": 0.196,
+   "blur": 0,
+   "noise": 24.733,
+   "sp": 0.003,
+   "light": 0,
+   "scale": 1,
+   "q": 0.464
+  },
+  "gtChars": 1067
+ },
+ {
+  "id": "p26",
+  "cat": "phone_photo",
+  "font": "Hiragino Sans GB",
+  "w": 1128,
+  "h": 1596,
+  "degrade": {
+   "rot": 1.17,
+   "blur": 0.967,
+   "noise": 10,
+   "sp": 0,
+   "light": 0.54,
+   "scale": 0.682,
+   "q": 0.7,
+   "tint": true
+  },
+  "gtChars": 1011
+ },
+ {
+  "id": "p27",
+  "cat": "phone_photo",
+  "font": "STHeiti",
+  "w": 1216,
+  "h": 1720,
+  "degrade": {
+   "rot": 1.662,
+   "blur": 0.934,
+   "noise": 10,
+   "sp": 0,
+   "light": 0.41,
+   "scale": 0.735,
+   "q": 0.7,
+   "tint": true
+  },
+  "gtChars": 1098
+ },
+ {
+  "id": "p28",
+  "cat": "phone_photo",
+  "font": "PingFang SC",
+  "w": 1197,
+  "h": 1693,
+  "degrade": {
+   "rot": 3.696,
+   "blur": 0.966,
+   "noise": 10,
+   "sp": 0,
+   "light": 0.508,
+   "scale": 0.724,
+   "q": 0.7,
+   "tint": true
+  },
+  "gtChars": 950
+ },
+ {
+  "id": "p29",
+  "cat": "phone_photo",
+  "font": "Songti SC",
+  "w": 1168,
+  "h": 1652,
+  "degrade": {
+   "rot": 2.251,
+   "blur": 0.963,
+   "noise": 10,
+   "sp": 0,
+   "light": 0.549,
+   "scale": 0.706,
+   "q": 0.7,
+   "tint": true
+  },
+  "gtChars": 1073
+ },
+ {
+  "id": "p30",
+  "cat": "phone_photo",
+  "font": "Hiragino Sans GB",
+  "w": 1181,
+  "h": 1669,
+  "degrade": {
+   "rot": -3.145,
+   "blur": 0.835,
+   "noise": 10,
+   "sp": 0,
+   "light": 0.406,
+   "scale": 0.714,
+   "q": 0.7,
+   "tint": true
+  },
+  "gtChars": 1031
+ },
+ {
+  "id": "p31",
+  "cat": "phone_photo",
+  "font": "STHeiti",
+  "w": 1239,
+  "h": 1752,
+  "degrade": {
+   "rot": -2.653,
+   "blur": 0.733,
+   "noise": 10,
+   "sp": 0,
+   "light": 0.47,
+   "scale": 0.749,
+   "q": 0.7,
+   "tint": true
+  },
+  "gtChars": 1087
+ },
+ {
+  "id": "p32",
+  "cat": "phone_photo",
+  "font": "PingFang SC",
+  "w": 1149,
+  "h": 1625,
+  "degrade": {
+   "rot": 3.611,
+   "blur": 0.601,
+   "noise": 10,
+   "sp": 0,
+   "light": 0.425,
+   "scale": 0.695,
+   "q": 0.7,
+   "tint": true
+  },
+  "gtChars": 989
+ },
+ {
+  "id": "p33",
+  "cat": "two_column",
+  "font": "Songti SC",
+  "w": 1654,
+  "h": 2339,
+  "degrade": {
+   "rot": 0.184,
+   "blur": 0,
+   "noise": 8,
+   "sp": 0,
+   "light": 0,
+   "scale": 1,
+   "q": 0.8
+  },
+  "gtChars": 1226
+ },
+ {
+  "id": "p34",
+  "cat": "two_column",
+  "font": "Hiragino Sans GB",
+  "w": 1654,
+  "h": 2339,
+  "degrade": {
+   "rot": -0.405,
+   "blur": 0,
+   "noise": 8,
+   "sp": 0,
+   "light": 0,
+   "scale": 1,
+   "q": 0.8
+  },
+  "gtChars": 1167
+ },
+ {
+  "id": "p35",
+  "cat": "two_column",
+  "font": "STHeiti",
+  "w": 1654,
+  "h": 2339,
+  "degrade": {
+   "rot": -0.046,
+   "blur": 0,
+   "noise": 8,
+   "sp": 0,
+   "light": 0,
+   "scale": 1,
+   "q": 0.8
+  },
+  "gtChars": 1223
+ },
+ {
+  "id": "p36",
+  "cat": "two_column",
+  "font": "PingFang SC",
+  "w": 1654,
+  "h": 2339,
+  "degrade": {
+   "rot": 0.194,
+   "blur": 0,
+   "noise": 8,
+   "sp": 0,
+   "light": 0,
+   "scale": 1,
+   "q": 0.8
+  },
+  "gtChars": 1258
+ },
+ {
+  "id": "p37",
+  "cat": "two_column",
+  "font": "Songti SC",
+  "w": 1654,
+  "h": 2339,
+  "degrade": {
+   "rot": 0.079,
+   "blur": 0,
+   "noise": 8,
+   "sp": 0,
+   "light": 0,
+   "scale": 1,
+   "q": 0.8
+  },
+  "gtChars": 1137
+ },
+ {
+  "id": "p38",
+  "cat": "two_column",
+  "font": "Hiragino Sans GB",
+  "w": 1654,
+  "h": 2339,
+  "degrade": {
+   "rot": 0.491,
+   "blur": 0,
+   "noise": 8,
+   "sp": 0,
+   "light": 0,
+   "scale": 1,
+   "q": 0.8
+  },
+  "gtChars": 1224
+ },
+ {
+  "id": "p39",
+  "cat": "table",
+  "font": "STHeiti",
+  "w": 1654,
+  "h": 2339,
+  "degrade": {
+   "rot": 0.511,
+   "blur": 0,
+   "noise": 8,
+   "sp": 0,
+   "light": 0,
+   "scale": 1,
+   "q": 0.8
+  },
+  "gtChars": 370
+ },
+ {
+  "id": "p40",
+  "cat": "table",
+  "font": "PingFang SC",
+  "w": 1654,
+  "h": 2339,
+  "degrade": {
+   "rot": 0.304,
+   "blur": 0,
+   "noise": 8,
+   "sp": 0,
+   "light": 0,
+   "scale": 1,
+   "q": 0.8
+  },
+  "gtChars": 474
+ },
+ {
+  "id": "p41",
+  "cat": "table",
+  "font": "Songti SC",
+  "w": 1654,
+  "h": 2339,
+  "degrade": {
+   "rot": -0.326,
+   "blur": 0,
+   "noise": 8,
+   "sp": 0,
+   "light": 0,
+   "scale": 1,
+   "q": 0.8
+  },
+  "gtChars": 368
+ },
+ {
+  "id": "p42",
+  "cat": "table",
+  "font": "Hiragino Sans GB",
+  "w": 1654,
+  "h": 2339,
+  "degrade": {
+   "rot": -0.188,
+   "blur": 0,
+   "noise": 8,
+   "sp": 0,
+   "light": 0,
+   "scale": 1,
+   "q": 0.8
+  },
+  "gtChars": 444
+ },
+ {
+  "id": "p43",
+  "cat": "table",
+  "font": "STHeiti",
+  "w": 1654,
+  "h": 2339,
+  "degrade": {
+   "rot": -0.557,
+   "blur": 0,
+   "noise": 8,
+   "sp": 0,
+   "light": 0,
+   "scale": 1,
+   "q": 0.8
+  },
+  "gtChars": 447
+ },
+ {
+  "id": "p44",
+  "cat": "table",
+  "font": "PingFang SC",
+  "w": 1654,
+  "h": 2339,
+  "degrade": {
+   "rot": 0.25,
+   "blur": 0,
+   "noise": 8,
+   "sp": 0,
+   "light": 0,
+   "scale": 1,
+   "q": 0.8
+  },
+  "gtChars": 450
+ },
+ {
+  "id": "p45",
+  "cat": "mixed_zh_en",
+  "font": "Songti SC",
+  "w": 1654,
+  "h": 2339,
+  "degrade": {
+   "rot": -0.392,
+   "blur": 0,
+   "noise": 8,
+   "sp": 0,
+   "light": 0,
+   "scale": 1,
+   "q": 0.8
+  },
+  "gtChars": 1288
+ },
+ {
+  "id": "p46",
+  "cat": "mixed_zh_en",
+  "font": "Hiragino Sans GB",
+  "w": 1654,
+  "h": 2339,
+  "degrade": {
+   "rot": 0.015,
+   "blur": 0,
+   "noise": 8,
+   "sp": 0,
+   "light": 0,
+   "scale": 1,
+   "q": 0.8
+  },
+  "gtChars": 1173
+ },
+ {
+  "id": "p47",
+  "cat": "mixed_zh_en",
+  "font": "STHeiti",
+  "w": 1654,
+  "h": 2339,
+  "degrade": {
+   "rot": 0.46,
+   "blur": 0,
+   "noise": 8,
+   "sp": 0,
+   "light": 0,
+   "scale": 1,
+   "q": 0.8
+  },
+  "gtChars": 1070
+ },
+ {
+  "id": "p48",
+  "cat": "mixed_zh_en",
+  "font": "PingFang SC",
+  "w": 1654,
+  "h": 2339,
+  "degrade": {
+   "rot": -0.479,
+   "blur": 0,
+   "noise": 8,
+   "sp": 0,
+   "light": 0,
+   "scale": 1,
+   "q": 0.8
+  },
+  "gtChars": 1356
+ },
+ {
+  "id": "p49",
+  "cat": "mixed_zh_en",
+  "font": "Songti SC",
+  "w": 1654,
+  "h": 2339,
+  "degrade": {
+   "rot": 0.205,
+   "blur": 0,
+   "noise": 8,
+   "sp": 0,
+   "light": 0,
+   "scale": 1,
+   "q": 0.8
+  },
+  "gtChars": 1399
+ },
+ {
+  "id": "p50",
+  "cat": "mixed_zh_en",
+  "font": "Hiragino Sans GB",
+  "w": 1654,
+  "h": 2339,
+  "degrade": {
+   "rot": 0.356,
+   "blur": 0,
+   "noise": 8,
+   "sp": 0,
+   "light": 0,
+   "scale": 1,
+   "q": 0.8
+  },
+  "gtChars": 1185
+ },
+ {
+  "id": "v01",
+  "cat": "vocab",
+  "font": "Songti SC",
+  "w": 1654,
+  "h": 2339,
+  "degrade": {
+   "rot": -0.38,
+   "blur": 0,
+   "noise": 8,
+   "sp": 0,
+   "light": 0,
+   "scale": 1,
+   "q": 0.8
+  },
+  "gtChars": 901
+ },
+ {
+  "id": "v02",
+  "cat": "vocab",
+  "font": "Hiragino Sans GB",
+  "w": 1654,
+  "h": 2339,
+  "degrade": {
+   "rot": 0.11,
+   "blur": 0,
+   "noise": 8,
+   "sp": 0,
+   "light": 0,
+   "scale": 1,
+   "q": 0.8
+  },
+  "gtChars": 968
+ },
+ {
+  "id": "v03",
+  "cat": "vocab",
+  "font": "STHeiti",
+  "w": 1654,
+  "h": 2339,
+  "degrade": {
+   "rot": -0.024,
+   "blur": 0,
+   "noise": 8,
+   "sp": 0,
+   "light": 0,
+   "scale": 1,
+   "q": 0.8
+  },
+  "gtChars": 1027
+ },
+ {
+  "id": "v04",
+  "cat": "vocab",
+  "font": "PingFang SC",
+  "w": 1654,
+  "h": 2339,
+  "degrade": {
+   "rot": -0.461,
+   "blur": 0,
+   "noise": 8,
+   "sp": 0,
+   "light": 0,
+   "scale": 1,
+   "q": 0.8
+  },
+  "gtChars": 928
+ }
+]

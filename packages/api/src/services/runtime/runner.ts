@@ -27,7 +27,7 @@ export type RuntimeRunnerInput = {
   onText?: (delta:string)=>void;
   /** v5 only: a successfully completed empty reply is handled by the host fallback. */
   allowEmptyResult?: boolean;
-  /** v5 one-call turn only: discard SDK input-only writes when replay is still pending. */
+  /** v5 bounded turn only: discard SDK input-only writes when replay is still pending. */
   commitSessionOnSuccess?: boolean;
   /** Explicit-input attached organizer only; Session output persistence is unchanged. */
   readSessionHistory?: boolean;
@@ -83,7 +83,8 @@ export function emptyTruncatedResponse(decoded:unknown):boolean{
 
 /** One official SDK loop for all roles. No SDK trace, remote Session, fallback or retry. */
 export async function runRuntime(input: RuntimeRunnerInput) {
-  if(input.commitSessionOnSuccess&&(!input.firstToolCallOnly||input.maxTurns!==1))
+  if(input.commitSessionOnSuccess&&(!input.firstToolCallOnly||
+    input.maxTurns!==1&&!(input.maxTurns===2&&input.tools.some(tool=>tool.name==='read_skill_file'))))
     throw new Error('RUNTIME_CONTEXT_INVALID');
   const sessionWrites:AgentInputItem[][]=[];
   // Keep the frozen history objects and the original append batch boundaries.

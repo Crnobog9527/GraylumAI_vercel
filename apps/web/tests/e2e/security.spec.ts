@@ -147,12 +147,12 @@ test.describe('Security', () => {
   test.describe('Authentication Security', () => {
     test.skip(!hasAuthRuntime, 'Authentication checks require a live Supabase runtime');
 
-    test('should protect chat page from unauthenticated access', async ({ page }) => {
+    test('should protect positioning workspace from unauthenticated access', async ({ page }) => {
       await gotoWithBypass(page, '/login');
       await clearBrowserAuthState(page);
 
       // Try to access protected route
-      await gotoWithBypass(page, '/chat');
+      await gotoWithBypass(page, '/positioning');
 
       // Should redirect to login or landing
       await page.waitForURL(/\/(login|landing)/, { timeout: 5000 });
