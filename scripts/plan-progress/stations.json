@@ -271,6 +271,10 @@
           "plain": "接通银行卡订阅与钱包单笔付款，复用订单、会员积分和人工退款。"
         },
         {
+          "name": "PAY-STRIPE-CARD-FALLBACK",
+          "plain": "Waffo 出问题时，可手动把新的银行卡购买切到 Stripe 的备选通道。"
+        },
+        {
           "name": "PAY-FOUNDER",
           "plain": "创始社群、展示墙和徽章，独立交付。"
         },
