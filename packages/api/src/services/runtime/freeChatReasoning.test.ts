@@ -8,6 +8,7 @@ import {runtimeContext} from './runtimeContext';
 import {openRouterRequestBody} from './providerRequest';
 import {frozenReasoningFields,type ReasoningPolicy} from './reasoningPolicy';
 import {openRouterBound} from '../bill2/openRouterPolicy';
+import type {ReasoningConfig} from '../../shared/modelReasoning';
 vi.mock('./billingUnitAdmission', async (original) => ({
   ...(await original<typeof import('./billingUnitAdmission')>()),
   freezeWindowBillingUnit: async () => ({ version: 'bill-unit-v2', creditsPerUsd: '1000', defaultMultiplier: '1', models: {}, providers: {}, hash: 'f'.repeat(64) }),
@@ -25,13 +26,16 @@ const dialogue='10000000-0000-4000-8000-000000000003',unset='10000000-0000-4000-
 const organizer='10000000-0000-4000-8000-000000000005',requestId='10000000-0000-4000-8000-000000000006';
 const nextId='10000000-0000-4000-8000-000000000007';
 const low={mode:'effort',effort:'low',wire:'reasoning_effort'} as const;
+type ModelConfig={pricing:unknown;reasoning?:ReasoningConfig};
+type Admitted={executionId:string;context:Record<string,unknown>;billing:Record<string,unknown>};
 function fixture(real=true){
- const models=[{id:dialogue,model_id:'synthetic/dialogue',config:configuredReasoning('synthetic/dialogue',low) as Record<string,any>},
-  {id:unset,model_id:'synthetic/unset',config:{pricing:configuredReasoning('synthetic/unset').pricing} as Record<string,any>},
-  {id:organizer,model_id:'synthetic/organizer',config:configuredReasoning('synthetic/organizer',{mode:'off',wire:'reasoning'},'organize') as Record<string,any>}]
-  .map(m=>({...m,provider:real?'openrouter':'fixture',is_active:'true',max_tokens:8192,input_limit:32000}));
- const frozen=new Map<string,any>();let reads=0;
- const rpc=vi.fn(async(name:string,args:any)=>{
+ const models:Array<{id:string;model_id:string;config:ModelConfig}>=[
+  {id:dialogue,model_id:'synthetic/dialogue',config:configuredReasoning('synthetic/dialogue',low)},
+  {id:unset,model_id:'synthetic/unset',config:{pricing:configuredReasoning('synthetic/unset').pricing}},
+  {id:organizer,model_id:'synthetic/organizer',config:configuredReasoning('synthetic/organizer',{mode:'off',wire:'reasoning'},'organize')}];
+ for(const m of models)Object.assign(m,{provider:real?'openrouter':'fixture',is_active:'true',max_tokens:8192,input_limit:32000});
+ const frozen=new Map<string,Admitted>();let reads=0;
+ const rpc=vi.fn(async(name:string,args:{p_request_id:string;p_payload:Record<string,unknown>;p_billing:Admitted['billing']})=>{
   if(name==='runtime_session_context')return {data:{scope:{kind:'positioning_draft',draftId:sessionId},
    dialogueModelId:dialogue,dialogueModel:'synthetic/dialogue'},error:null};
   if(name==='runtime_admission_replay')return {data:frozen.get(args.p_request_id)??null,error:null};
@@ -85,7 +89,7 @@ it('real free chat freezes v6 with the configured interactive reasoning and bind
 it('real free chat fails closed before any reservation when interactive reasoning is unset or on another route',async()=>{
  const f=fixture();
  await expect(f.service.prepare({...f.input,selection:{kind:'ordinary',modelId:unset}})).rejects.toThrow('RUNTIME_REASONING_NOT_CONFIGURED');
- f.models[0]!.config.reasoning.route='synthetic/fp16';
+ f.models[0]!.config.reasoning!.route='synthetic/fp16';
  await expect(f.service.prepare({...f.input,requestId:nextId})).rejects.toThrow('RUNTIME_REASONING_ROUTE_MISMATCH');
  expect(f.rpc.mock.calls.some(([name])=>name==='runtime_admit')).toBe(false);
 });
