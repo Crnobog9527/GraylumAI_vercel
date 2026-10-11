@@ -1,6 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import type { AgentTurnEvent, AgentTurnOutcome, QuestionAnswerSource } from "@repo/api/src/shared/agentTurn";
 import { OPENING_INPUT, openingRequestId } from "@repo/api/src/shared/opcQuestions";
+import { STEP_SUMMARY_PREFIX, SUMMARY_REFUSALS } from "./step-summary";
 import { gateResultNotice, PROVIDER_HISTORY_NOTICE } from "@/lib/runtime-gate-notice";
 import { blockedAdmission, hostNotice, type PaygViewFields } from "@/lib/payg-wait";
 
@@ -265,8 +266,11 @@ export function isAnswerSourceDenied(error: unknown): boolean {
 
 /** A definite pre-admission refusal releases only its own envelope, never an unknown outcome. */
 export function releaseRejectedAnswer(storage: EnvelopeStorage, key: string, requestId: string, error: unknown): boolean {
-  if (!isAnswerSourceDenied(error)) return false;
   const raw = storage.getItem(key);
-  if (raw && parseStepEnvelope(raw)?.request.requestId === requestId) storage.removeItem(key);
+  const request = raw ? parseStepEnvelope(raw)?.request : undefined;
+  // Any version of the marker: the server refuses all but the current one, so a stale retained one is released too.
+  const summaryRefused = error instanceof Error && SUMMARY_REFUSALS.has(error.message) && Boolean(request?.input.startsWith(STEP_SUMMARY_PREFIX));
+  if (!isAnswerSourceDenied(error) && !summaryRefused) return false;
+  if (request?.requestId === requestId) storage.removeItem(key);
   return true;
 }

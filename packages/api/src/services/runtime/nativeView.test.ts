@@ -65,3 +65,9 @@ it('returns an explicit tombstone refusal instead of an empty successful view',a
  await expect(readNativeRuntimeView(db as unknown as SupabaseClient,actor,session))
   .rejects.toMatchObject({code:'PRECONDITION_FAILED',message:'CONTENT_ERASED'});
 });
+
+it('answers another actor\'s, missing or out-of-scope sessions with one indistinguishable not-found',async()=>{
+ const db={rpc:vi.fn(async()=>({data:null,error:{code:'P0001',message:'RUNTIME_SCOPE_DENIED'}}))};
+ await expect(readNativeRuntimeView(db as unknown as SupabaseClient,actor,session))
+  .rejects.toMatchObject({code:'NOT_FOUND',message:'RUNTIME_SESSION_NOT_FOUND'});
+});
