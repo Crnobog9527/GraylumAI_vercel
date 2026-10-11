@@ -38,7 +38,8 @@ export async function projectionCases({admin,service}) {
  await admin.query("UPDATE user_subscriptions SET credit_release_terminated_at=NULL WHERE id=$1",[active.subscription_id]);
  await admin.query("UPDATE profiles SET is_deleted='true' WHERE id=$1",[active.user_id]);await check(active.user_id,'free',true);
  await admin.query("UPDATE profiles SET is_deleted='false' WHERE id=$1",[active.user_id]);
- // Expired founder in a grace window has no unpaid access. Early successor is not yet active.
+ // Expired founder in its 7-day renewal-eligibility window has no unpaid access (that window is about the founder
+ // price, not membership; 0214's 24-hour card renewal grace is tested separately below). Early successor is not yet active.
  const expired=(await admin.query(`SELECT o.user_id FROM payment_orders o WHERE o.offer_kind='founder'
   AND o.entitlement_end BETWEEN now()-interval '9 days' AND now() AND NOT EXISTS
   (SELECT 1 FROM payment_orders x WHERE x.user_id=o.user_id AND x.entitlement_end>now()) LIMIT 1`)).rows[0];
@@ -73,6 +74,33 @@ export async function projectionCases({admin,service}) {
  await service.query(`SELECT pay_waffo_fulfill_payment($1,'fixture',$2,$3,6900,'usd',$4,NULL,$4,$5)`,
   [order.id,checkout,`paid_${order.id}`,dates.start,dates.finish]);
  await admin.query("UPDATE profiles SET membership_level='gold' WHERE id=$1",[elapsed]);await check(elapsed,'free');
+ // 0214 renewal grace (Owner 2026-10-12): 24 hours of access, no credits, only for a still-renewing card subscription.
+ const card=async(hoursAgo)=>{
+  const user=randomUUID();await admin.query('INSERT INTO profiles(id) VALUES($1)',[user]);
+  const o=(await service.query(`SELECT o.* FROM pay_waffo_create_purchase($1,'membership_plan',$2,'monthly','card',
+   'standard','fixture','test',1,'terms-v1',$3) o`,[user,active.item_id,
+   JSON.stringify([{kind:'email',key_version:'test-v1',digest:user.replaceAll('-','').repeat(2)}])])).rows[0];
+  const t=(await admin.query(`SELECT now()-interval '1 month'-make_interval(hours=>$1) AS start`,[hoursAgo])).rows[0];
+  t.finish=(await admin.query("SELECT (($1::timestamptz AT TIME ZONE 'UTC')+interval '1 month') AT TIME ZONE 'UTC' AS v",[t.start])).rows[0].v;
+  await admin.query('UPDATE payment_orders SET created_at=$2 WHERE id=$1',[o.id,t.start]);
+  await admin.query(`INSERT INTO payment_provider_refs(channel,merchant_namespace,mode,object_type,external_id,order_id)
+   VALUES('waffo','fixture','test','checkout',$1,$2)`,[`grace_${o.id}`,o.id]);
+  const v=(await service.query(`SELECT pay_waffo_fulfill_payment($1,'fixture',$2,$3,6900,'usd',$4,$5,$4,$6) v`,
+   [o.id,`grace_${o.id}`,`paid_${o.id}`,t.start,`ORD_${o.id}`,t.finish])).rows[0].v;
+  assert.equal(v.state,'fulfilled');
+  return {user,subscription:v.subscriptionId};
+ };
+ const inGrace=await card(1);
+ const credits=(await admin.query('SELECT credits FROM profiles WHERE id=$1',[inGrace.user])).rows[0].credits;
+ await check(inGrace.user,'gold');
+ assert.ok((await facts(inGrace.user)).internal_membership.renewal_grace_until,'grace end is exposed');
+ assert.equal((await admin.query('SELECT credits FROM profiles WHERE id=$1',[inGrace.user])).rows[0].credits,credits,'grace grants no credits');
+ await check((await card(25)).user,'free');
+ await admin.query("UPDATE user_subscriptions SET cancel_at_period_end='true',method_cancel_confirmed_at=now() WHERE id=$1",[inGrace.subscription]);
+ await check(inGrace.user,'free');
+ const requested=await card(1);
+ await admin.query('UPDATE user_subscriptions SET method_cancel_requested_at=now() WHERE id=$1',[requested.subscription]);
+ await check(requested.user,'free');
  // Owner-only facts and legacy/manual users retain the prior branch.
  const legacy=randomUUID();await admin.query("INSERT INTO profiles(id,membership_level) VALUES($1,'pro')",[legacy]);
  assert.equal((await facts(legacy)).internal_membership,null);
@@ -82,5 +110,6 @@ export async function projectionCases({admin,service}) {
  finally {await admin.query('RESET ROLE');}
  return ['ordinary-wallet-expiry','internal-paid-wallet-permissions','paid-order-not-profile-or-provider-period','refunded-and-review-denied',
   'terminated-and-deleted-denied','expired-grace-no-access','early-founder-keeps-current-period',
-  'upgrade-gold-priority-and-refund-pro-fallback','manual-authority-preserved','cross-user-facts-denied'];
+  'upgrade-gold-priority-and-refund-pro-fallback','manual-authority-preserved','cross-user-facts-denied',
+  'card-renewal-grace-24h-no-credits','card-renewal-grace-expired','stopped-renewal-no-grace','stop-requested-no-grace'];
 }

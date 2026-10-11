@@ -8,7 +8,7 @@ const ref = (external_id: string, order_id: string) => ({ external_id, order_id,
 describe('Waffo daily reconciliation (report only)', () => {
   it('lists paid-but-undelivered, refund candidates and delivered-without-payment; grants nothing', async () => {
     const rows = [payment({ id: 'PAY_ok' }), payment({ id: 'PAY_missing' }), payment({ id: 'PAY_renewal_after_cancel' }),
-      payment({ id: 'PAY_offsite' }), payment({ id: 'PAY_refunded', refundStatus: 'succeeded', refundedAmount: { amount: '6900', currency: 'USD' } }),
+      payment({ id: 'PAY_offsite' }, { status: 'canceling' }), payment({ id: 'PAY_refunded', refundStatus: 'succeeded', refundedAmount: { amount: '6900', currency: 'USD' } }),
       payment({ id: 'PAY_failed', status: 'failed' }), payment({ id: 'PAY_unseen_offsite', orderMerchantExternalId: 'not-a-site-order' }),
       payment({ id: 'PAY_dashes', orderMerchantExternalId: '-'.repeat(36) }),
       payment({ id: 'PAY_stripe_order', orderMerchantExternalId: '00000000-0000-4000-8000-000000000009' }),
@@ -33,16 +33,18 @@ describe('Waffo daily reconciliation (report only)', () => {
     expect(result.success).toBe(false);
     expect(result.findings).toEqual([
       { kind: 'paid_not_delivered', paymentId: 'PAY_missing', refundCandidate: false },
-      { kind: 'paid_in_review', paymentId: 'PAY_renewal_after_cancel', orderId: 'o-review', reason: 'unexpected_renewal', refundCandidate: true },
+      { kind: 'paid_in_review', paymentId: 'PAY_renewal_after_cancel', orderId: 'o-review', reason: 'unexpected_renewal', refundCandidate: true,
+        renewalActive: true },
       { kind: 'offsite_refund_due', paymentId: 'PAY_offsite', refundCandidate: true },
       { kind: 'refund_observed', paymentId: 'PAY_refunded', orderId: 'o-refunded', refundCandidate: false },
-      { kind: 'offsite_refund_due', paymentId: 'PAY_unseen_offsite', refundCandidate: true },
-      { kind: 'offsite_refund_due', paymentId: 'PAY_dashes', refundCandidate: true },
-      { kind: 'offsite_refund_due', paymentId: 'PAY_stripe_order', refundCandidate: true },
+      { kind: 'offsite_refund_due', paymentId: 'PAY_unseen_offsite', refundCandidate: true, renewalActive: true },
+      { kind: 'offsite_refund_due', paymentId: 'PAY_dashes', refundCandidate: true, renewalActive: true },
+      { kind: 'offsite_refund_due', paymentId: 'PAY_stripe_order', refundCandidate: true, renewalActive: true },
       { kind: 'paid_in_review', paymentId: 'PAY_after_timeout', orderId: '00000000-0000-4000-8000-00000000000a',
-        reason: 'card_checkout_expired', refundCandidate: true },
+        reason: 'card_checkout_expired', refundCandidate: true, renewalActive: true },
       { kind: 'delivered_without_payment', paymentId: 'PAY_ghost', orderId: 'o-ghost', refundCandidate: false },
     ]);
+    // Already stopped (PAY_offsite is canceling) is not flagged; a non-candidate is never flagged.
     expect(rpc).not.toHaveBeenCalled();
   });
   it('reports an incomplete scan and skips the reverse check instead of guessing', async () => {

@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { processWaffoReceipt } from './waffoPaymentDelivery';
 import { readPaymentFacts, type WaffoPayment } from './waffoPayments';
 import { fakeDb, payment } from './waffoTestHarness';
+import { logger } from '../../lib/logger';
 
 const orderId = '00000000-0000-4000-8000-000000000001';
 const receipt = { id: 'receipt-1', merchant: 'fixture', refs: { paymentId: 'PAY_fixture1', orderId: 'ORD_fixture1' } };
@@ -19,7 +20,9 @@ function setup(found: WaffoPayment | null, rpcResult: unknown = { data: { state:
     ...extra,
   }, rpc);
   const provider = { merchant: 'fixture', mode: 'test' as const, storeId: 'STO_fixture',
-    readPayment: vi.fn().mockResolvedValue(found), listPayments: vi.fn() };
+    readPayment: vi.fn().mockResolvedValue(found), listPayments: vi.fn(),
+    cancelSubscription: vi.fn(async (id: string) => ({ orderId: id, status: 'canceling' })),
+    readSubscription: vi.fn(async (id: string) => ({ orderId: id, status: 'canceling' })) };
   return { db, rpc, provider, run: () => processWaffoReceipt(db, provider, receipt) };
 }
 const resolved = (rpc: ReturnType<typeof setup>['rpc']) => rpc.mock.calls.find(([fn]) => fn === 'pay_waffo_resolve_receipt')?.[1];
@@ -88,5 +91,41 @@ describe('Waffo receipt delivery', () => {
     expect(await done.run()).toEqual({ state: 'ignored', reason: 'already_resolved' });
     expect(done.provider.readPayment).not.toHaveBeenCalled();
     expect(await setup(payment({ status: 'failed' })).run()).toEqual({ state: 'ignored', reason: 'not_paid' });
+  });
+});
+
+describe('Waffo renewal stop for undelivered cash', () => {
+  it('stops and confirms the renewal of a first payment that arrived after the 40-minute release', async () => {
+    const f = setup(payment(), { data: { state: 'review' }, error: null });
+    expect(await f.run()).toEqual({ state: 'review', reason: 'review' });
+    expect(f.provider.cancelSubscription).toHaveBeenCalledWith('ORD_fixture1');
+    expect(f.provider.readSubscription).not.toHaveBeenCalled();
+  });
+  it('stops offsite and database-refused first payments too, but never a delivered or mapped renewal', async () => {
+    const offsite = setup(payment({ orderMerchantExternalId: 'someone-else' }), { data: { alert: false }, error: null });
+    await offsite.run(); expect(offsite.provider.cancelSubscription).toHaveBeenCalledWith('ORD_fixture1');
+    const refused = setup(payment(), { data: null, error: { message: 'PAY_WAFFO_TERM_INVALID' } });
+    await refused.run(); expect(refused.provider.cancelSubscription).toHaveBeenCalledTimes(1);
+    const delivered = setup(payment());
+    await delivered.run(); expect(delivered.provider.cancelSubscription).not.toHaveBeenCalled();
+    const renewal = setup(payment({ orderId: 'ORD_renewing', periodNumber: 2 }, { id: 'ORD_renewing', currentPeriodNumber: 2,
+      currentPeriodStart: '2026-11-11T05:59:47.000Z', currentPeriodEnd: '2026-12-11T05:59:47.000Z' }),
+    { data: { state: 'review', reason: 'unexpected_renewal' }, error: null });
+    await renewal.run(); expect(renewal.provider.cancelSubscription).not.toHaveBeenCalled();
+  });
+  it('reads back an unconfirmed stop and logs, without failing the already-resolved receipt', async () => {
+    const error = vi.spyOn(logger, 'error').mockImplementation(() => undefined);
+    const f = setup(payment(), { data: { state: 'review' }, error: null });
+    f.provider.cancelSubscription.mockResolvedValueOnce({ orderId: 'ORD_fixture1', status: 'active' });
+    f.provider.readSubscription.mockResolvedValueOnce({ orderId: 'ORD_fixture1', status: 'active' });
+    expect((await f.run()).state).toBe('review');
+    expect(f.provider.readSubscription).toHaveBeenCalledWith('ORD_fixture1');
+    expect(error).toHaveBeenCalledWith('billing', 'pay_waffo_renewal_stop_unconfirmed', { waffoOrderId: 'ORD_fixture1', status: 'active' });
+    const g = setup(payment(), { data: { state: 'review' }, error: null });
+    g.provider.cancelSubscription.mockRejectedValueOnce(new Error('PAY_WAFFO_PROVIDER_UNAVAILABLE'));
+    expect((await g.run()).state).toBe('review');
+    expect(error).toHaveBeenCalledWith('billing', 'pay_waffo_renewal_stop_failed', expect.objectContaining({
+      waffoOrderId: 'ORD_fixture1', code: 'PAY_WAFFO_PROVIDER_UNAVAILABLE' }));
+    error.mockRestore();
   });
 });

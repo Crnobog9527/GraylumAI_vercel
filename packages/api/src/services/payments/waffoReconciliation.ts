@@ -11,7 +11,10 @@ export type WaffoFinding = {
   paymentId?: string; orderId?: string; reason?: string;
   /** Marks a payment a person should consider refunding; nothing is refunded automatically. */
   refundCandidate: boolean;
+  /** Undelivered cash whose Waffo subscription still renews: its renewal must be stopped by hand. */
+  renewalActive?: boolean;
 };
+const RENEWING = ['active', 'trialing', 'past_due'];
 const MAX_PAGES = 20;
 const CHUNK = 100;
 
@@ -83,6 +86,11 @@ export async function reconcileWaffoPayments(db: Db, provider: Provider) {
           reason: site.method_review_reason ?? site.qualification_state ?? undefined, refundCandidate: true }
         : { kind: 'paid_not_delivered', paymentId: payment.id, refundCandidate: false });
     }
+  }
+  // Delivery stops these renewals automatically; anything still renewing here is the manual backstop.
+  for (const finding of findings) {
+    const status = finding.refundCandidate ? paid.find(p => p.id === finding.paymentId)?.subscriptionOrder?.status : undefined;
+    if (status && RENEWING.includes(status)) finding.renewalActive = true;
   }
   if (complete) {
     const paidIds = new Set(paid.filter(p => !refunded(p)).map(p => p.id));

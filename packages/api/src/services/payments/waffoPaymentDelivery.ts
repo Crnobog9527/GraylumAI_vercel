@@ -2,9 +2,13 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { z } from 'zod';
 import { readPaymentFacts, type PaymentFacts, type WaffoTestPayments } from './waffoPayments';
+import type { WaffoTestOperations } from './waffoOperations';
+import { describeWaffoFailure } from './waffoFailure';
+import { logger } from '../../lib/logger';
 
 type Db = Pick<SupabaseClient, 'rpc' | 'from'>;
-type Provider = WaffoTestPayments & { merchant: string; mode: 'test' };
+type Provider = WaffoTestPayments & Pick<WaffoTestOperations, 'cancelSubscription' | 'readSubscription'>
+  & { merchant: string; mode: 'test' };
 export type WaffoReceipt = { id: string; merchant: string; refs: { paymentId?: string; orderId?: string; subscriptionId?: string } };
 export type ReceiptOutcome = { state: 'applied' | 'review' | 'ignored'; reason: string };
 
@@ -77,6 +81,22 @@ async function offsite(db: Db, provider: Provider, receipt: WaffoReceipt, facts:
   return { state: 'review', reason: 'offsite' };
 }
 
+const STOPPED = ['canceling', 'canceled'];
+/** Cash we did not deliver (late after the 40-minute release, closed account, offsite, unprovable facts)
+ * leaves a Waffo subscription with no site subscription behind it, so the next period would be charged
+ * with nothing delivered. Stop its renewal now and confirm by reading it back; the payment itself stays
+ * with manual refund handling. A failure is logged and the daily reconciliation keeps reporting it. */
+async function stopUnmappedRenewal(provider: Provider, waffoOrderId: string) {
+  try {
+    let observed = await provider.cancelSubscription(waffoOrderId);
+    if (observed.orderId === waffoOrderId && !STOPPED.includes(observed.status)) observed = await provider.readSubscription(waffoOrderId);
+    if (observed.orderId === waffoOrderId && STOPPED.includes(observed.status)) return;
+    logger.error('billing', 'pay_waffo_renewal_stop_unconfirmed', { waffoOrderId, status: observed.status });
+  } catch (error) {
+    logger.error('billing', 'pay_waffo_renewal_stop_failed', { waffoOrderId, ...describeWaffoFailure(error) });
+  }
+}
+
 /** Normal path only: first payment and renewal of our own card orders. Every other situation is left
  * as review for the daily reconciliation and manual handling; nothing is inferred or retried here. */
 export async function processWaffoReceipt(db: Db, provider: Provider, receipt: WaffoReceipt): Promise<ReceiptOutcome> {
@@ -97,8 +117,11 @@ export async function processWaffoReceipt(db: Db, provider: Provider, receipt: W
   if (reading.kind === 'not_paid') return { state: 'ignored', reason: 'not_paid' };
   if (reading.kind === 'unknown') return resolve(db, receipt, 'review', reading.reason);
   const { facts } = reading;
-  const outcome = facts.periodNumber === 1
+  const mapped = facts.periodNumber === 1
     ? await firstPayment(db, provider, receipt, facts)
     : await renewal(db, provider, receipt, facts);
-  return outcome ?? offsite(db, provider, receipt, facts);
+  const outcome = mapped ?? await offsite(db, provider, receipt, facts);
+  // A renewal of a mapped subscription in review was already stopped by its own cancel flow.
+  if (outcome.state === 'review' && (facts.periodNumber === 1 || !mapped)) await stopUnmappedRenewal(provider, facts.waffoOrderId);
+  return outcome;
 }
