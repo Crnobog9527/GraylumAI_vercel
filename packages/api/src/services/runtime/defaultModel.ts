@@ -5,6 +5,7 @@ import { admitReasoning } from './reasoningAdmission';
 import { FREE_CHAT_REQUEST_FORMAT } from './providerRequest';
 import { StagingAccessError } from './stagingErrors';
 import type { StagingPolicy } from './stagingPolicy';
+import { admissionDeadline, admittedOutputLimit } from './admissionLimits';
 
 /**
  * Free chat uses the first offered model by default, so the administrator's default
@@ -17,25 +18,29 @@ export async function defaultModelFirst<T extends { id: string }>(admin: Supabas
   return [...models].sort((a, b) => Number(b.id === primaryId) - Number(a.id === primaryId));
 }
 
-type ModelRow = { id: string; name: string; model_id: string; config?: unknown };
+type ModelRow = { id: string; name: string; model_id: string; max_tokens?: unknown; config?: unknown };
 
 /**
  * Staging free chat offers only models a new free-chat turn can be admitted with: the same
  * interactive reasoning and per-call billing profile checks admission runs (ordinary purpose,
- * free-chat request format). Admission still rechecks every request; this only hides models
- * that are certain to be refused (e.g. one without a billing profile). With per-call billing
+ * free-chat request format, admission's output ceiling and deadline). Admission still rechecks
+ * every request; this only hides models certain to be refused (e.g. one without a billing
+ * profile). With per-call billing
  * off or its setting unreadable nothing is hidden, and admission reports the real reason.
  */
 export async function freeChatModels(admin: SupabaseClient, window: StagingPolicy, rows: readonly ModelRow[],
   env: Record<string, string | undefined> = process.env): Promise<Array<{ id: string; name: string }>> {
   const offered: Array<{ id: string; name: string }> = [];
+  const deadline = admissionDeadline(window.expiresAt);
   for (const row of rows) {
     const policy = window.callPolicies.find(p => p.modelId === row.id && p.model === row.model_id);
     if (!policy?.providerLimits) continue;
     try {
-      const reasoning = admitReasoning(row, 'interactive', policy.providerLimits.providerSlug, policy.outputLimit);
+      const outputLimit = admittedOutputLimit(policy.outputLimit, row.max_tokens);
+      if (!Number.isSafeInteger(outputLimit) || outputLimit < 1) continue;
+      const reasoning = admitReasoning(row, 'interactive', policy.providerLimits.providerSlug, outputLimit);
       const admitted = await readPaygHostPolicies(admin, window, [policy],
-        [{ modelId: row.id, phase: 'ordinary', outputLimit: 1, requestFormat: FREE_CHAT_REQUEST_FORMAT, reasoning }], env);
+        [{ modelId: row.id, phase: 'ordinary', outputLimit, requestFormat: FREE_CHAT_REQUEST_FORMAT, reasoning }], env, deadline);
       if (!admitted) return rows.map(({ id, name }) => ({ id, name }));
     } catch (cause) {
       if (cause instanceof StagingAccessError && cause.reason === 'RUNTIME_PAYG_CONFIG_UNAVAILABLE')

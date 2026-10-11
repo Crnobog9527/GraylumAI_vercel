@@ -61,7 +61,7 @@ function staging(settingValue: unknown, settingError: unknown = null) {
   const keys = ['sol', 'luna', 'sonnet', 'gemini'] as const;
   const rows = keys.map(key => {
     const reasoning = configuredReasoning(routes[key][0], { mode: 'effort', effort: 'low', wire: 'reasoning_effort' }).reasoning;
-    return { id: key, name: key, model_id: routes[key][0], config: { reasoning: { ...reasoning, route: routes[key][1],
+    return { id: key, name: key, model_id: routes[key][0], max_tokens: 8192, config: { reasoning: { ...reasoning, route: routes[key][1],
       catalog: { ...reasoning.catalog!, endpoints: reasoning.catalog!.endpoints.map(e => ({ ...e, tag: routes[key][1] })) } } } };
   });
   const window: StagingPolicy = { id: windowId, creditsPerUsd: '100', multiplier: '6', expiresAt: '2099-01-01T00:00:00Z',
@@ -95,4 +95,21 @@ it.each([
 ])('hides nothing when %s; admission decides and reports the reason', async (_case, value, error) => {
   const f = staging(value, error);
   expect((await freeChatModels(f.client, f.window, f.rows, env)).map(m => m.id)).toEqual(['sol', 'luna', 'sonnet', 'gemini']);
+});
+
+it('uses admission\'s output ceiling: a quote above the evidenced profile hides the model unless the model row caps it', async () => {
+  const f = staging(config);
+  const sonnet = f.window.callPolicies.find(p => p.modelId === 'sonnet')!;
+  sonnet.outputLimit = 32768;f.rows[2]!.max_tokens = 64000;
+  expect((await freeChatModels(f.client, f.window, f.rows, env)).map(m => m.id)).toEqual(['gemini']);
+  f.rows[2]!.max_tokens = 8192;
+  expect((await freeChatModels(f.client, f.window, f.rows, env)).map(m => m.id)).toEqual(['sonnet', 'gemini']);
+});
+
+it('uses admission\'s deadline: a profile valid for the next hour stays offered even if it ends before the window', async () => {
+  const soon = new Date(Date.now() + 2 * 3600000).toISOString();
+  const f = staging({ ...config, profiles: config.profiles.map(p => ({ ...p, expiresAt: soon })) });
+  expect((await freeChatModels(f.client, f.window, f.rows, env)).map(m => m.id)).toEqual(['sonnet', 'gemini']);
+  const g = staging({ ...config, profiles: config.profiles.map(p => ({ ...p, expiresAt: new Date(Date.now() + 1800000).toISOString() })) });
+  expect(await freeChatModels(g.client, g.window, g.rows, env)).toEqual([]);
 });

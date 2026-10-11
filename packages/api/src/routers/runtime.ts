@@ -89,7 +89,7 @@ export const runtimeRouter=router({
 
   // Loopback advertises the curated ordinary model. Free-chat skills must use
   // that same model, excluding fault/organizer fixtures without name matching.
-  const modelQuery=ctx.supabaseAdmin!.from('ai_models').select('id,name,model_id,config').eq('is_active','true');
+  const modelQuery=ctx.supabaseAdmin!.from('ai_models').select('id,name,model_id,max_tokens,config').eq('is_active','true');
   const models=await (ctx.real?modelQuery.in('id',ctx.real.callPolicies.map(q=>q.modelId)):modelQuery.eq('provider','fixture').eq('name','Runtime local'));
   if(models.error)throw new Error('RUNTIME_MODELS_UNAVAILABLE');
   const visible=await userVisibleModules(ctx.userScopedSupabase,{limit:64});
