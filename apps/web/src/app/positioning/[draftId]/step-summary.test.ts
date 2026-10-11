@@ -2,7 +2,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { OPENING_INPUT } from "@repo/api/src/shared/opcQuestions";
 import { readFileSync } from "node:fs";
-import { isStepSummaryInput, offersStepSummary, STEP_SUMMARY_INPUT, STEP_SUMMARY_LABEL, stepSummaryRequest, summaryShown } from "./step-summary";
+import { isStepSummaryInput, offersStepSummary, STEP_SUMMARY_INPUT, STEP_SUMMARY_LABEL, stepSummaryRequest, summaryRefusal, summaryShown } from "./step-summary";
 import { isHostAction, refusedTurn, shownInput } from "./checklist-nudge";
 import { releaseRejectedAnswer } from "./mentor-turn";
 import { admissionMessage } from "./admission-message";
@@ -83,11 +83,17 @@ describe("这一步先到这里 (R16)", () => {
     }
   });
 
-  it("explains the refusals without promising a confirmation or a charge", () => {
+  it("explains a released summary refusal; an ordinary turn's refusal keeps its own notice", () => {
     for (const code of ["OPC_STEP_SUMMARY_INVALID", "OPC_CAPTURE_INPUT_LIMIT"]) {
-      const text = admissionMessage(new Error(code));
+      const marked = summaryRefusal(stepSummaryRequest("d1", "s1", "r1"), new Error(code));
+      const text = admissionMessage(marked);
       expect(text).toContain("没有扣费");
       expect(text).not.toMatch(/积分|已确认/);
+      const ordinary = new Error(code);
+      expect(summaryRefusal({ input: "你好" }, ordinary)).toBe(ordinary);
+      expect(admissionMessage(ordinary)).toBeNull();
     }
+    const other = new Error("RUNTIME_REQUEST_CONFLICT");
+    expect(summaryRefusal(stepSummaryRequest("d1", "s1", "r1"), other)).toBe(other);
   });
 });

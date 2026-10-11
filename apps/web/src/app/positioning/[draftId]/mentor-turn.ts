@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import type { AgentTurnEvent, AgentTurnOutcome, QuestionAnswerSource } from "@repo/api/src/shared/agentTurn";
 import { OPENING_INPUT, openingRequestId } from "@repo/api/src/shared/opcQuestions";
-import { STEP_SUMMARY_INPUT } from "./step-summary";
+import { STEP_SUMMARY_INPUT, SUMMARY_REFUSALS } from "./step-summary";
 import { gateResultNotice, PROVIDER_HISTORY_NOTICE } from "@/lib/runtime-gate-notice";
 import { blockedAdmission, hostNotice, type PaygViewFields } from "@/lib/payg-wait";
 
@@ -263,9 +263,6 @@ export function sameRequest(a: unknown, b: unknown): boolean {
 export function isAnswerSourceDenied(error: unknown): boolean {
   return error instanceof Error && error.message === "OPC_ANSWER_SOURCE_DENIED";
 }
-
-/** R16 refusals raised before admission and payment: replaying the same summary request would only fail again. */
-const SUMMARY_REFUSALS = new Set(["OPC_STEP_SUMMARY_INVALID", "OPC_CAPTURE_INPUT_LIMIT"]);
 
 /** A definite pre-admission refusal releases only its own envelope, never an unknown outcome. */
 export function releaseRejectedAnswer(storage: EnvelopeStorage, key: string, requestId: string, error: unknown): boolean {

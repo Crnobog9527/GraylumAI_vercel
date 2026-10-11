@@ -13,6 +13,19 @@ export const STEP_SUMMARY_INPUT = "HOST_STEP_SUMMARY:v1";
 
 export const isStepSummaryInput = (input: string | null | undefined) => input === STEP_SUMMARY_INPUT;
 
+/** R16 refusals raised before admission and payment: replaying the same summary request would only fail again. */
+export const SUMMARY_REFUSALS = new Set(["OPC_STEP_SUMMARY_INVALID", "OPC_CAPTURE_INPUT_LIMIT"]);
+export const STEP_SUMMARY_REFUSED = "OPC_STEP_SUMMARY_REFUSED";
+
+/**
+ * A summary request's definite refusal, marked so its notice can say the click was released. Any other request
+ * or error is returned unchanged: an ordinary turn keeps its retained request and its existing notice.
+ */
+export function summaryRefusal(request: Pick<MentorRequest, "input">, cause: unknown): unknown {
+  if (!isStepSummaryInput(request.input) || !(cause instanceof Error) || !SUMMARY_REFUSALS.has(cause.message)) return cause;
+  return Object.assign(new Error(STEP_SUMMARY_REFUSED), { code: cause.message });
+}
+
 /**
  * The host request. It answers no card and names no field, and it never runs the organizer: the click is not a
  * new fact. A retry reuses this request id (the retained envelope), so the same click is never charged twice.

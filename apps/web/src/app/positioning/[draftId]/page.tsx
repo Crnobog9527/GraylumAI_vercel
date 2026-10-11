@@ -32,7 +32,8 @@ import { useAutoStepRecovery, useHistoryPolling } from "./use-step-recovery";
 import { useLiveReply } from "./use-live-reply";
 import { ReportEntry } from "./report-panel";
 import { InformationExport } from "./InformationExport";
-import { isStepSummaryInput, offersStepSummary, STEP_SUMMARY_INPUT, STEP_SUMMARY_LABEL, stepSummaryRequest, summaryShown } from "./step-summary";
+import { isStepSummaryInput, offersStepSummary, STEP_SUMMARY_INPUT, STEP_SUMMARY_LABEL, stepSummaryRequest, summaryRefusal,
+  summaryShown } from "./step-summary";
 import { sameRequest, releaseRejectedAnswer, openingRequest, parseStepEnvelope, type MentorRequest,
   retainExecution, settleEnvelope, TEXT_PROTOCOL, turnResultNotice, type MentorTurn, type MentorExecution } from "./mentor-turn";
 import { openOrganizer, usePaygResume } from "@/lib/use-payg-resume";
@@ -624,7 +625,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
           setPendingBubble(old => old?.requestId === request.requestId ? null : old); live.clear();
           await Promise.all([read.refetch(), history.refetch()]);
         }
-        throw cause;
+        throw summaryRefusal(request, cause);
       });
     // Read the turn binding and its execution together while the retained
     // envelope still blocks automatic opening. Clearing the envelope first
@@ -1277,8 +1278,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
                     const turn = mentorTurns.get(execution.executionId);
                     return turn?.stepId === step.id && (!Object.hasOwn(turn, "roundId") || turn.roundId === d.roundId);
                   })) && <div className="flex flex-wrap items-center gap-2">
-                    <Button variant="outline" size="sm" disabled={sendLocked} onClick={() => void ask(step, STEP_SUMMARY_INPUT)}>
-                      {STEP_SUMMARY_LABEL}</Button>
+                    <Button variant="outline" size="sm" disabled={sendLocked} onClick={() => void ask(step, STEP_SUMMARY_INPUT)}>{STEP_SUMMARY_LABEL}</Button>
                     <span className="text-xs text-[var(--text-secondary)]">让导师先整理这一步的小结，还缺什么会如实列出；确认仍由你来点。</span>
                   </div>}
                   <WorkComposer value={mentorInput} onChange={setMentorInput} label="给导师的回复" placeholder={OTHER_PLACEHOLDER} attachment={dock} maxLength={8000} disabled={snap.state!=="draft"} sendDisabled={sendLocked} onSend={skill=>{if(skill)void free.send(mentorInput,skill);else void ask(step);}}/>
