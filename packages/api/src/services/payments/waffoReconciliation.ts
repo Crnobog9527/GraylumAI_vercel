@@ -14,7 +14,8 @@ export type WaffoFinding = {
   /** Undelivered cash whose Waffo subscription still renews: its renewal must be stopped by hand. */
   renewalActive?: boolean;
 };
-const RENEWING = ['active', 'trialing', 'past_due'];
+// Same set the cancel flow retries (cancelWaffoMembership): pending can still charge.
+const RENEWING = ['active', 'trialing', 'past_due', 'pending'];
 const MAX_PAGES = 20;
 const CHUNK = 100;
 

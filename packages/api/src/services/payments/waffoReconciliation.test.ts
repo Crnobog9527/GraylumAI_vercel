@@ -10,7 +10,7 @@ describe('Waffo daily reconciliation (report only)', () => {
     const rows = [payment({ id: 'PAY_ok' }), payment({ id: 'PAY_missing' }), payment({ id: 'PAY_renewal_after_cancel' }),
       payment({ id: 'PAY_offsite' }, { status: 'canceling' }), payment({ id: 'PAY_refunded', refundStatus: 'succeeded', refundedAmount: { amount: '6900', currency: 'USD' } }),
       payment({ id: 'PAY_failed', status: 'failed' }), payment({ id: 'PAY_unseen_offsite', orderMerchantExternalId: 'not-a-site-order' }),
-      payment({ id: 'PAY_dashes', orderMerchantExternalId: '-'.repeat(36) }),
+      payment({ id: 'PAY_dashes', orderMerchantExternalId: '-'.repeat(36) }, { status: 'pending' }),
       payment({ id: 'PAY_stripe_order', orderMerchantExternalId: '00000000-0000-4000-8000-000000000009' }),
       payment({ id: 'PAY_after_timeout', orderMerchantExternalId: '00000000-0000-4000-8000-00000000000a' })];
     const rpc = vi.fn();

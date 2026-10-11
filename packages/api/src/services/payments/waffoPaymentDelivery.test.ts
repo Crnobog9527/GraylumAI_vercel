@@ -113,20 +113,41 @@ describe('Waffo renewal stop for undelivered cash', () => {
     { data: { state: 'review', reason: 'unexpected_renewal' }, error: null });
     await renewal.run(); expect(renewal.provider.cancelSubscription).not.toHaveBeenCalled();
   });
-  it('reads back an unconfirmed stop and logs, without failing the already-resolved receipt', async () => {
+  it('keeps the receipt open for redelivery until the stop is confirmed, stopping before it is resolved', async () => {
     const error = vi.spyOn(logger, 'error').mockImplementation(() => undefined);
     const f = setup(payment(), { data: { state: 'review' }, error: null });
     f.provider.cancelSubscription.mockResolvedValueOnce({ orderId: 'ORD_fixture1', status: 'active' });
     f.provider.readSubscription.mockResolvedValueOnce({ orderId: 'ORD_fixture1', status: 'active' });
-    expect((await f.run()).state).toBe('review');
+    await expect(f.run()).rejects.toThrow('PAY_WAFFO_RENEWAL_STOP_PENDING');
     expect(f.provider.readSubscription).toHaveBeenCalledWith('ORD_fixture1');
+    expect(resolved(f.rpc)).toBeUndefined();
     expect(error).toHaveBeenCalledWith('billing', 'pay_waffo_renewal_stop_unconfirmed', { waffoOrderId: 'ORD_fixture1', status: 'active' });
     const g = setup(payment(), { data: { state: 'review' }, error: null });
     g.provider.cancelSubscription.mockRejectedValueOnce(new Error('PAY_WAFFO_PROVIDER_UNAVAILABLE'));
-    expect((await g.run()).state).toBe('review');
+    await expect(g.run()).rejects.toThrow('PAY_WAFFO_RENEWAL_STOP_PENDING');
+    expect(resolved(g.rpc)).toBeUndefined();
     expect(error).toHaveBeenCalledWith('billing', 'pay_waffo_renewal_stop_failed', expect.objectContaining({
       waffoOrderId: 'ORD_fixture1', code: 'PAY_WAFFO_PROVIDER_UNAVAILABLE' }));
+    // Offsite: the offsite RPC (which resolves the receipt) is not reached until the stop holds.
+    const offsite = setup(payment({ orderMerchantExternalId: 'someone-else' }), { data: { alert: false }, error: null });
+    offsite.provider.cancelSubscription.mockRejectedValueOnce(new Error('timeout'));
+    await expect(offsite.run()).rejects.toThrow('PAY_WAFFO_RENEWAL_STOP_PENDING');
+    expect(offsite.rpc).not.toHaveBeenCalledWith('pay_waffo_record_offsite', expect.anything());
+    // Unknown facts: same order, stop before the review resolution.
+    const unknown = setup(payment({ pspAmountDetails: { amount: '49.00', currency: 'USD' } }));
+    unknown.provider.cancelSubscription.mockRejectedValueOnce(new Error('timeout'));
+    await expect(unknown.run()).rejects.toThrow('PAY_WAFFO_RENEWAL_STOP_PENDING');
+    expect(resolved(unknown.rpc)).toBeUndefined();
     error.mockRestore();
+  });
+  it('resolves the receipt only after a confirmed stop', async () => {
+    const f = setup(payment(), { data: { state: 'review' }, error: null });
+    const order: string[] = [];
+    f.provider.cancelSubscription.mockImplementationOnce(async (id: string) => { order.push('stop'); return { orderId: id, status: 'canceling' }; });
+    const rpc = f.rpc.getMockImplementation()!;
+    f.rpc.mockImplementation(async (...call: [string, Record<string, unknown>]) => { order.push(call[0]); return rpc(...call); });
+    await f.run();
+    expect(order).toEqual(['pay_waffo_fulfill_payment', 'stop', 'pay_waffo_resolve_receipt']);
   });
   it('stops an unmapped renewal when the paid record cannot be proven, but never another store or a mapped subscriber', async () => {
     const unproven = setup(payment({ pspAmountDetails: { amount: '49.00', currency: 'USD' } }));
