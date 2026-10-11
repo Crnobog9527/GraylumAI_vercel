@@ -3,7 +3,7 @@ import { z } from 'zod';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { databaseSkillSource, userVisibleModules } from '../skills/databaseSource';
 import { activateSkill, discoverSkills } from '../skills/loader';
-import { fixtureInputCapacity } from './context';
+import { fixtureInputCapacity, selectRuntimeHistory } from './context';
 
 export const matchCandidate=z.object({
  key:z.string().regex(/^candidate-[0-9]+$/),name:z.string().min(1),description:z.string(),
@@ -60,4 +60,21 @@ export async function activateRuntimeCandidate(user:SupabaseClient,admin:Supabas
  const source=databaseSkillSource({userClient:user,privateClient:admin,moduleId:c.moduleId,skillId:c.skillId,revisionId:c.revisionId});
  const loaded=await activateSkill(source,{packageId:c.packageId,revisionId:c.revisionId,packageHash:c.packageHash},{maxContextBytes:c.inputLimit});
  return loaded.forModel();
+}
+/** A selected Skill runs with its own model capacity: never pay for a match whose selection cannot run.
+ * The input alone is a lower bound, so a candidate that cannot hold it is dropped without loading its Skill. */
+export async function fittingCandidates(candidates:MatchCandidate[],activate:(candidate:MatchCandidate)=>Promise<string>,
+ sizing:{input:string;inputBytes:number;toolBytes:number;instructions:(skill:string)=>string}){
+ const fits=(candidate:MatchCandidate,instructions:string)=>{
+  try{selectRuntimeHistory([],[{role:'user',content:sizing.input}],
+   {instructions,inputBytes:Math.min(candidate.inputLimit,sizing.inputBytes),historyItems:0,toolBytes:sizing.toolBytes});return true;}
+  catch(error){if(error instanceof Error&&error.message==='RUNTIME_REQUIRED_CONTEXT_EXCEEDS_CAPACITY')return false;throw error;}
+ };
+ const kept:MatchCandidate[]=[];
+ for(const candidate of candidates){
+  if(!fits(candidate,sizing.instructions('')))continue;
+  // A task-requiring Skill is refused at activation either way; its handling is unchanged here.
+  if(candidate.requiresTask||fits(candidate,sizing.instructions(await activate(candidate))))kept.push(candidate);
+ }
+ return kept;
 }
