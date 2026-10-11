@@ -8,8 +8,9 @@ import {OPENING_INPUT} from '../../shared/opcQuestions';
 vi.mock('./newWorkGate',async original=>({...await original<typeof import('./newWorkGate')>(),
  ...(await import('../__tests__/fixtures/runtimeGates')).testAdmissionGates}));
 vi.mock('../skills/databaseSource',()=>({databaseSkillSource:()=>({list:async()=>[descriptor],state:async()=> 'enabled'})}));
+const skill=vi.hoisted(()=>({instructions:'Synthetic Skill',file:''}));
 vi.mock('../skills/loader',async original=>({...await original<typeof import('../skills/loader')>(),
- readSkillResource:async()=>'',activateSkill:async()=>({forModel:()=> 'Synthetic Skill'})}));
+ readSkillResource:async()=>skill.file,activateSkill:async()=>({forModel:()=>skill.instructions})}));
 const actor='10000000-0000-4000-8000-000000000001';
 const model='10000000-0000-4000-8000-000000000002';
 const revision='10000000-0000-4000-8000-000000000003';
@@ -19,6 +20,7 @@ const base={packageId:module,revisionId:revision,directoryName:'test',files:[{
 }],tasks:{},requiredCapabilities:[]};
 const descriptor={...base,packageHash:packageHash(base)};
 function fixture(){
+ skill.instructions='Synthetic Skill';skill.file='';
  let saved:unknown=null;
  const rpc=vi.fn(async(name:string,args:Record<string,unknown>)=>{
   if(name==='runtime_session_context')return {data:{scope:{kind:'positioning_draft',draftId:actor}},error:null};
@@ -58,10 +60,23 @@ it('host openings offer no file tool',async()=>{
  expect(admitted.context.skillFile).toBeUndefined();
 });
 
-it('rejects required input that leaves no room for the frozen continuation before admission',async()=>{
+it('admits without the optional file tool when only its continuation reserve does not fit',async()=>{
+ // Staging step-2 shape: large step resources plus a near-limit declared file overflow the interactive cap.
+ const f=fixture();skill.instructions='S'.repeat(13000);skill.file='y'.repeat(15000);
+ const admitted=await runtimeAdmissionService(f.user,f.admin,{...f.policy,inputBytes:32000})
+  .prepare({...f.input,input:'这一步先到这里'}),context=runtimeContext.parse(admitted.context);
+ expect(context.tools).toEqual(['ask_question']);
+ expect(context.skillFile).toBeUndefined();expect(context.skillFileReserve).toBeUndefined();
+ expect(context.instructions).not.toContain('read_skill_file');expect(context.maxToolCalls).toBe(1);
+ // The runner only accepts two committed turns with the file tool; its continuation call is dropped too.
+ expect(context.maxTurns).toBe(1);expect(admitted.billing.limits.maxCalls).toBe(1);
+ expect(f.rpc.mock.calls.filter(([name])=>name==='runtime_admit')).toHaveLength(1);
+});
+
+it('rejects required input that does not fit even without the file tool before admission',async()=>{
  const f=fixture();
  await expect(runtimeAdmissionService(f.user,f.admin,{...f.policy,inputBytes:14000})
-  .prepare({...f.input,input:'x'.repeat(4000)})).rejects.toThrow('RUNTIME_REQUIRED_CONTEXT_EXCEEDS_CAPACITY');
+  .prepare({...f.input,input:'x'.repeat(14000)})).rejects.toThrow('RUNTIME_REQUIRED_CONTEXT_EXCEEDS_CAPACITY');
  expect(f.rpc.mock.calls.some(([name])=>name==='runtime_admit')).toBe(false);
 });
 
