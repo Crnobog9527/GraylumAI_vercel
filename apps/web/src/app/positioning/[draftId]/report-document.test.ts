@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { describe, expect, it } from "vitest";
-import { askedVersion, canFinalize, canSave, finalizedNotice, REPORT_DOC_UNAVAILABLE, reportDocumentError, reportLength, requestFor } from "./report-document";
+import { askedVersion, canFinalize, savedAs, canSave, finalizedNotice, REPORT_DOC_UNAVAILABLE, reportDocumentError, reportLength, requestFor } from "./report-document";
 
 const doc = { body: "## 定位\n原文", finalized: false, candidate: true };
 
@@ -57,6 +57,11 @@ describe("report document (R5)", () => {
     expect(askedVersion(asked, { revision: 2, bodyHash: "b" })).toBeNull();
     expect(askedVersion(asked, { revision: 1, bodyHash: "b" })).toBeNull();
     expect(askedVersion(null, { revision: 1, bodyHash: "a" })).toBeNull();
+  });
+
+  it("keeps the draft when a replayed save answers with another tab's newer text", () => {
+    expect(savedAs({ body: "我的修改", manuallyEdited: true }, "我的修改")).toBe(true);
+    expect(savedAs({ body: "别处的修改", manuallyEdited: true }, "我的修改")).toBe(false);
   });
 
   it("names the official version after 定稿", () => {

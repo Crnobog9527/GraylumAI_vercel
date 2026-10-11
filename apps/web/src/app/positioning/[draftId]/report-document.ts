@@ -91,3 +91,8 @@ export function requestFor(previous: PendingRequest | null, intent: unknown[], n
 export function askedVersion(asked: { revision: number; bodyHash: string } | null, doc: Pick<ReportDocument, "revision" | "bodyHash">) {
   return asked && asked.revision === doc.revision && asked.bodyHash === doc.bodyHash ? asked : null;
 }
+
+/** The save answer is this text. A replay after a lost answer returns the current version, which may be newer. */
+export function savedAs(saved: Pick<ReportDocument, "body" | "manuallyEdited">, text: string) {
+  return saved.manuallyEdited && saved.body === text;
+}

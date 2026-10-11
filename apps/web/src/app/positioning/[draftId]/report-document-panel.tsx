@@ -8,7 +8,7 @@ import { MessageMarkdown } from "@/components/chat/MessageMarkdown";
 import { ChatNoticeList, type ChatNotice } from "@/components/chat/ChatInlineNotice";
 import resultStyles from "@/components/opc/positioning-result.module.css";
 import {
-  askedVersion, canFinalize, canSave, finalizedNotice, REPORT_DOC_TEXT, REPORT_MAX_CHARACTERS, reportDocumentError, reportLength, requestFor,
+  askedVersion, canFinalize, canSave, savedAs, finalizedNotice, REPORT_DOC_TEXT, REPORT_MAX_CHARACTERS, reportDocumentError, reportLength, requestFor,
   type PendingRequest, type ReportDocument,
 } from "./report-document";
 
@@ -73,8 +73,12 @@ export function ReportDocumentPanel({ executionId, fallbackBody, generatedComple
     const { text, revision } = draft;
     const request = pending.current = requestFor(pending.current, [executionId, "save", revision, text], () => crypto.randomUUID());
     try {
-      settle(await save.mutateAsync({ executionId, requestId: request.requestId, expectedRevision: revision, body: text }) as ReportDocument);
-      setDraft(null);
+      const saved = await save.mutateAsync({ executionId, requestId: request.requestId, expectedRevision: revision, body: text }) as ReportDocument;
+      settle(saved);
+      // A replayed save answers with the current version; if that is not this text, another tab saved since: keep it.
+      if (savedAs(saved, text)) setDraft(null);
+      else { setProblem(reportDocumentError(new Error("REPORT_VERSION_CONFLICT")).text);
+        setDraft(old => old && { ...old, revision: saved.revision, rebased: true }); }
     } catch (cause) { await fail(cause); }
   };
   // The question is for the version on screen when it opened; a newer version closes it.
