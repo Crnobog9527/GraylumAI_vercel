@@ -45,6 +45,9 @@ async function fixture(resourceBytes: number, worst = false, budgets?: PurposeBu
         scope: { kind: 'positioning_draft', draftId: id(2) }, dialogueModelId: id(3), dialogueModel: 'fixture/mentor',
       }, error: null };
       if (name === 'runtime_admission_replay') return { data: replay, error: null };
+      // Payload sizing only; the brand identity's own sizing is covered in promptCacheAdmission.test.ts.
+      if (name === 'model_identity_guard_config') return { data: { version: 1, enabled: false, revision: 0,
+        updatedBy: null, updatedAt: null }, error: null };
       if (name === 'runtime_admit') { writes.push(name); captured = args; return { data: { executionId: id(7) }, error: null }; }
       throw new Error(name);
     },

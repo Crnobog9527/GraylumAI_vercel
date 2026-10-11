@@ -9,7 +9,11 @@ import {configuredReasoning} from '../__tests__/fixtures/runtimeReasoning';
 import {pricingConfig} from '../__tests__/fixtures/runtimePricing';
 import {agentTurnInstructions,AGENT_TURN_STABLE_PREFIX,AGENT_TURN_STABLE_PREFIX_CHARS} from '../opc/agentTurnPrompt';
 import {PROMPT_CACHE_OVERHEAD_BYTES} from './promptCache';
+import {BRAND_IDENTITY_INSTRUCTIONS} from '../modelIdentity/brandIdentity';
 const skill='Pinned skill 正文';
+// MODEL-IDENTITY-GUARD: the switch defaults on, so the brand identity leads the frozen system text.
+const brand=BRAND_IDENTITY_INSTRUCTIONS+'\n';
+let guardEnabled=true;
 vi.mock('../skills/databaseSource',()=>({databaseSkillSource:()=>({list:async()=>[{revisionId:'10000000-0000-4000-8000-000000000003'}]})}));
 vi.mock('../skills/loader',()=>({identityOf:(value:unknown)=>value,activateSkill:async()=>({forModel:()=>skill})}));
 vi.mock('./billingUnitAdmission',async original=>({
@@ -29,6 +33,7 @@ function fixture(model='anthropic/test',write:string|undefined='2.5',real=true,i
   config:pricingConfig(model,'synthetic/fp8','2','0')};
  const configReads=vi.fn();let saved:unknown=null;
  const rpc=vi.fn(async(name:string,args:Record<string,unknown>)=>{
+  if(name==='model_identity_guard_config')return {data:{version:1,enabled:guardEnabled,revision:0,updatedBy:null,updatedAt:null},error:null};
   if(name==='runtime_session_context')return {data:{scope:{kind:'positioning_draft',draftId:actor}},error:null};
   if(name==='runtime_admission_replay')return {data:saved,error:null};
   if(name==='runtime_admit'){
@@ -52,7 +57,7 @@ function fixture(model='anthropic/test',write:string|undefined='2.5',real=true,i
 it('freezes actual Skill + host prefix, excludes mutable content, and replays before current configuration',async()=>{
  const f=fixture(),result=await f.service.prepare(f.input);
  const context=runtimeContext.parse(result.context);
- const prefix=skill+'\n'+host().slice(0,AGENT_TURN_STABLE_PREFIX_CHARS);
+ const prefix=brand+skill+'\n'+host().slice(0,AGENT_TURN_STABLE_PREFIX_CHARS);
  expect(AGENT_TURN_STABLE_PREFIX_CHARS).toBeGreaterThan(0);
  expect(prefix.endsWith(AGENT_TURN_STABLE_PREFIX)).toBe(true);expect(prefix).not.toContain('private-step');
  expect(context.promptCache).toEqual({version:'prompt-cache-v1',systemPrefixChars:prefix.length,
@@ -85,7 +90,7 @@ it('ordinary role is never marked even on Anthropic with a write price',async()=
  expect(result.context).not.toHaveProperty('promptCache');
 });
 it('reserves marker bytes during admission at the input capacity boundary',async()=>{
- const instructions=skill+'\n'+host();
+ const instructions=brand+skill+'\n'+host();
  const oldLimit=Buffer.byteLength(JSON.stringify({instructions,messages:[{role:'user',content:'user facts'}]}))+1024;
  const f=fixture('anthropic/test','2.5',true,oldLimit);
  await expect(f.service.prepare(f.input)).rejects.toThrow('RUNTIME_REQUIRED_CONTEXT_EXCEEDS_CAPACITY');
@@ -101,9 +106,9 @@ it('mentor v5 freezes the host prefix before the question contract',async()=>{
  const service=runtimeAdmissionService(f.user,f.admin,{...f.policy,opcTurnToken:requestId,mentorStream:true});
  const result=await service.prepare(f.input);
  expect(result.context.providerRequestFormat).toBe('agent-turn-v5-stream');
- expect(result.context.promptCache.systemPrefixChars).toBe(skill.length+1+AGENT_TURN_STABLE_PREFIX_CHARS);
+ expect(result.context.promptCache.systemPrefixChars).toBe(brand.length+skill.length+1+AGENT_TURN_STABLE_PREFIX_CHARS);
  expect(result.context.instructions.slice(0,result.context.promptCache.systemPrefixChars))
-  .toBe(skill+'\n'+host().slice(0,AGENT_TURN_STABLE_PREFIX_CHARS));
+  .toBe(brand+skill+'\n'+host().slice(0,AGENT_TURN_STABLE_PREFIX_CHARS));
  expect(result.context.instructions).toContain('complete public prose in message');
 });
 it.each(['prepend','same-length-change','truncated'] as const)('admits without a marker when host text mismatches (%s)',async mode=>{
@@ -113,7 +118,7 @@ it.each(['prepend','same-length-change','truncated'] as const)('admits without a
  const service=runtimeAdmissionService(f.user,f.admin,{...f.policy,additionalInstructions});
  const result=await service.prepare(f.input);
  expect(result.context).not.toHaveProperty('promptCache');
- expect(result.context.instructions).toBe(skill+'\n'+additionalInstructions);
+ expect(result.context.instructions).toBe(brand+skill+'\n'+additionalInstructions);
  expect(f.rpc.mock.calls.filter(([name])=>name==='runtime_admit')).toHaveLength(1);
  expect(result.billing.sourceHash).toBe(createHash('sha256').update(JSON.stringify(result.context)).digest('hex'));
 });
@@ -121,9 +126,24 @@ it('keeps ordinary Skill caching without host rules and derives current prefix l
  const f=fixture();
  const result=await runtimeAdmissionService(f.user,f.admin,{...f.policy,additionalInstructions:'Dynamic text',
   stableAdditionalInstructions:undefined}).prepare(f.input);
- expect(result.context.promptCache.systemPrefixChars).toBe(skill.length);
+ expect(result.context.promptCache.systemPrefixChars).toBe(brand.length+skill.length);
  expect(AGENT_TURN_STABLE_PREFIX_CHARS).toBe(AGENT_TURN_STABLE_PREFIX.length);
  expect(AGENT_TURN_STABLE_PREFIX).toBe(host().slice(0,AGENT_TURN_STABLE_PREFIX_CHARS));
+});
+it('switch off: no brand identity and the cached prefix is the Skill text alone',async()=>{
+ guardEnabled=false;
+ try{
+  const f=fixture(),result=await f.service.prepare(f.input);
+  const prefix=skill+'\n'+host().slice(0,AGENT_TURN_STABLE_PREFIX_CHARS);
+  expect(result.context.instructions.startsWith(skill)).toBe(true);
+  expect(result.context.instructions).not.toContain('Identity (host rule');
+  expect(result.context.promptCache.systemPrefixChars).toBe(prefix.length);
+ }finally{guardEnabled=true;}
+});
+it('switch on: the identity leads the cached prefix and carries the Owner-approved reply',async()=>{
+ const f=fixture(),result=await f.service.prepare(f.input);
+ expect(result.context.instructions.startsWith(BRAND_IDENTITY_INSTRUCTIONS+'\n'+skill)).toBe(true);
+ expect(result.context.instructions).toContain('我是 Graylum 的 AI 社媒策略师');
 });
 
 vi.mock('./newWorkGate', async importOriginal => ({

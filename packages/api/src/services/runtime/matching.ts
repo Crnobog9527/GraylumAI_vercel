@@ -4,6 +4,8 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { databaseSkillSource, userVisibleModules } from '../skills/databaseSource';
 import { activateSkill, discoverSkills, SkillLoadError } from '../skills/loader';
 import { fixtureInputCapacity, selectRuntimeHistory } from './context';
+import { withBrandIdentity } from '../modelIdentity/brandIdentity';
+import { modelIdentityGuardEnabled } from '../modelIdentity/guardSetting';
 
 export const matchCandidate=z.object({
  key:z.string().regex(/^candidate-[0-9]+$/),name:z.string().min(1),description:z.string(),
@@ -59,7 +61,8 @@ export async function activateRuntimeCandidate(user:SupabaseClient,admin:Supabas
  if(c.requiresTask)throw new Error('RUNTIME_SKILL_TASK_REQUIRED');
  const source=databaseSkillSource({userClient:user,privateClient:admin,moduleId:c.moduleId,skillId:c.skillId,revisionId:c.revisionId});
  const loaded=await activateSkill(source,{packageId:c.packageId,revisionId:c.revisionId,packageHash:c.packageHash},{maxContextBytes:c.inputLimit});
- return loaded.forModel();
+ // MODEL-IDENTITY-GUARD layer 1: a matched Skill speaks with the same brand identity.
+ return withBrandIdentity(loaded.forModel(),await modelIdentityGuardEnabled(admin));
 }
 /** A selected Skill runs with its own model capacity: never pay for a match whose selection cannot run.
  * The input alone is a lower bound, so a candidate that cannot hold it is dropped without loading its Skill. */

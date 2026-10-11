@@ -15,6 +15,8 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { isEmailVerified } from '../../lib/auth';
 import { databaseSkillSource } from '../skills/databaseSource';
 import { activateSkill, identityOf } from '../skills/loader';
+import { BRAND_IDENTITY_INSTRUCTIONS, withBrandIdentity } from '../modelIdentity/brandIdentity';
+import { modelIdentityGuardEnabled } from '../modelIdentity/guardSetting';
 import { summaryPolicy, assertSeparateSummaryModel } from '../artifacts/summaryPolicy';
 import { aggregateCredits, decimal } from '../bill2/decimal';
 import type {StagingPolicy} from './stagingPolicy';
@@ -200,6 +202,12 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
     const summary=modelConfiguration(()=>summaryPolicy(Object.fromEntries(rows.data.map(row=>[row.key,row.value])),session.dialogueModelId));
     modelId=summary.modelId;organizerOutput=summary.maxTokens;
     instructions='Organize the provided current-session material. Preserve source references and uncertainties. Do not create new facts.';
+   }
+   // MODEL-IDENTITY-GUARD layer 1: the brand identity leads the single system message and is
+   // frozen with this admission; a Skill's cached prefix grows by the same fixed text.
+   if(await modelIdentityGuardEnabled(admin)){
+    instructions=withBrandIdentity(instructions,true);
+    if(skillChars)skillChars+=BRAND_IDENTITY_INSTRUCTIONS.length+1;
    }
    const row=await admin.from('ai_models').select('id,model_id,provider,is_active,max_tokens,input_limit,config').eq('id',modelId).single();
    // Match the actual administrator model to the enabled protocol and exact quote. Never substitute a default model.

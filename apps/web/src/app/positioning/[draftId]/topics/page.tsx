@@ -566,7 +566,7 @@ export default function TopicWorkspacePage() {
                   <div className={topicStyles.assistantTurn}>
                     <img className={topicStyles.agentAvatar} src="/graylum-logo.png" alt="" />
                     <div className={topicStyles.assistantMessage}>
-                      <span className={topicStyles.agentName}>Graylum · 增长顾问</span>
+                      <span className={topicStyles.agentName}>Graylum · AI 社媒策略师</span>
                       {!((topicRejectedTurn(e) || isPaygWaiting(e.state)) && !(e.body ?? e.primaryBody)) && <MessageMarkdown className={topicStyles.reply}
                         text={e.contentAvailable ? replyProse(e.body ?? e.primaryBody) : '来源已不可用，暂不展示此内容。'} />}
                       <ChatNoticeList notices={[openTurnNotice(e), ...payg.turnNotices(e, busy)]} />
