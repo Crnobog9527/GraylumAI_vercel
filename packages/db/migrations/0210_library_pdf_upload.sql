@@ -1,5 +1,5 @@
 -- Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved.
--- LIB-DOCS PDF upload; assigned 0211 by control on 2026-10-11, after 0208/0209/0210.
+-- LIB-DOCS PDF upload; renumbered 0210 by control on 2026-10-11 (ahead of #791), after 0208/0209.
 BEGIN;
 SET LOCAL lock_timeout='5s';
 CREATE OR REPLACE FUNCTION public.library_upload_begin(a uuid,r uuid,n text,f text,p text,declared bigint)
