@@ -1,5 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-import {isAnswerSourceDenied} from "./mentor-turn";
+import {isAnswerSourceDenied,isInputTooLong} from "./mentor-turn";
 import {STEP_SUMMARY_REFUSED} from "./step-summary";
 import {gateAdmissionNotice} from "@/lib/runtime-gate-notice";
 import {isOrganizerPendingError,ORGANIZER_PENDING_NOTICE} from "@/lib/payg-wait";
@@ -26,6 +26,6 @@ export function admissionMessage(cause:unknown):string|null {
  if(data.code==='SERVICE_UNAVAILABLE')return '服务暂时不可用，请稍后再试。'+retained;
  if(!['PRECONDITION_FAILED','FORBIDDEN'].includes(String(data.code)))return null;
  // Too-long input is not a retained request waiting for a condition: ask the user to split it.
- if(data.code==='PRECONDITION_FAILED'&&cause.message===RUNTIME_INPUT_TOO_LONG_MESSAGE)return RUNTIME_INPUT_TOO_LONG_MESSAGE;
+ if(isInputTooLong(cause))return RUNTIME_INPUT_TOO_LONG_MESSAGE;
  return cause.message+retained;
 }

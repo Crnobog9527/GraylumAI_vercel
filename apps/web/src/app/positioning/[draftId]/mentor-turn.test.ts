@@ -309,7 +309,8 @@ describe("turnResultNotice", () => {
   });
 });
 
-import {sameRequest,releaseRejectedAnswer} from './mentor-turn';
+import {sameRequest,releaseRejectedAnswer,isInputTooLong} from './mentor-turn';
+import {RUNTIME_INPUT_TOO_LONG_MESSAGE} from '../../../../../../packages/api/src/shared/runtimeInputMessages';
 it('matches a stopped request structurally including nested answerSource, retaining all identity differences',()=>{
  const request={requestId:'a',input:'乙',answerSource:{executionId:'source',optionIndex:1}};
  expect(sameRequest(request,JSON.parse(JSON.stringify(request)))).toBe(true);
@@ -328,5 +329,19 @@ it('definite source rejection releases its own envelope, unknown errors and othe
  expect(releaseRejectedAnswer(storage,'key','b',new Error('OPC_ANSWER_SOURCE_DENIED'))).toBe(true);
  expect(storage.getItem('key')).toBe(raw);
  expect(releaseRejectedAnswer(storage,'key','a',new Error('OPC_ANSWER_SOURCE_DENIED'))).toBe(true);
+ expect(storage.getItem('key')).toBeNull();
+});
+it('a too-long refusal releases its own envelope so the user can split the text; same text without the code does not',()=>{
+ const values=new Map<string,string>();
+ const storage={getItem:(key:string)=>values.get(key)??null,setItem:(key:string,value:string)=>{values.set(key,value);},removeItem:(key:string)=>{values.delete(key);}};
+ const raw=JSON.stringify({request:{draftId:'d',stepId:'s',requestId:'a',input:'很长的粘贴'}});
+ values.set('key',raw);
+ const tooLong=(code:string)=>Object.assign(new Error(RUNTIME_INPUT_TOO_LONG_MESSAGE),{data:{code,path:'opc.mentorTurnStream'}});
+ expect(isInputTooLong(new Error(RUNTIME_INPUT_TOO_LONG_MESSAGE))).toBe(false);
+ expect(releaseRejectedAnswer(storage,'key','a',tooLong('INTERNAL_SERVER_ERROR'))).toBe(false);
+ expect(storage.getItem('key')).toBe(raw);
+ expect(releaseRejectedAnswer(storage,'key','b',tooLong('PRECONDITION_FAILED'))).toBe(true);
+ expect(storage.getItem('key')).toBe(raw);
+ expect(releaseRejectedAnswer(storage,'key','a',tooLong('PRECONDITION_FAILED'))).toBe(true);
  expect(storage.getItem('key')).toBeNull();
 });
