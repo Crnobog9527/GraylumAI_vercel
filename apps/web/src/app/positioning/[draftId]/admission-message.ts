@@ -12,6 +12,10 @@ const retained=' 原请求与输入已保留；条件恢复后可继续核对同
 export function admissionMessage(cause:unknown):string|null {
  if(isAnswerSourceDenied(cause))return '这张卡已经过期，请看最新的回复。';
  if(isOrganizerPendingError(cause))return ORGANIZER_PENDING_NOTICE;
+ if(cause instanceof Error&&cause.message==='OPC_CAPTURE_INPUT_LIMIT')
+  return '这一步要带给导师的内容超出了单次能处理的长度，这次没有发送，也没有扣费。可以直接在右侧清单核对后确认。';
+ if(cause instanceof Error&&cause.message==='OPC_STEP_SUMMARY_INVALID')
+  return '这次“这一步先到这里”没有被接受，没有扣费。可以继续和导师聊，或稍后再点一次。';
  const gate=gateAdmissionNotice(cause,admissionPaths);
  if(gate)return gate;
  if(!(cause instanceof Error)||!('data' in cause)||!cause.data||typeof cause.data!=='object')return null;

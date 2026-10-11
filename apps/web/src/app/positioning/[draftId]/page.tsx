@@ -32,13 +32,15 @@ import { useAutoStepRecovery, useHistoryPolling } from "./use-step-recovery";
 import { useLiveReply } from "./use-live-reply";
 import { ReportEntry } from "./report-panel";
 import { InformationExport } from "./InformationExport";
+import { isStepSummaryInput, offersStepSummary, STEP_SUMMARY_INPUT, STEP_SUMMARY_LABEL, stepSummaryRequest } from "./step-summary";
 import { sameRequest, releaseRejectedAnswer, openingRequest, parseStepEnvelope, type MentorRequest,
   retainExecution, settleEnvelope, TEXT_PROTOCOL, turnResultNotice, type MentorTurn, type MentorExecution } from "./mentor-turn";
 import { openOrganizer, usePaygResume } from "@/lib/use-payg-resume";
 import { checklistUpdatedInput, isOpeningInput, openingEntryKey } from "@repo/api/src/shared/opcQuestions";
-import { clearSavedFields, isChecklistUpdate, noteSavedFields, nudgeNotice, refusedTurn, savedFields, shownInput } from "./checklist-nudge";
+import { clearSavedFields, isHostAction, noteSavedFields, nudgeNotice, refusedTurn, savedFields, shownInput } from "./checklist-nudge";
 type Step = { id: string; title: string; dependsOn?: string[] };
-import { isRecord, type Information, type Item, type StepEnvelope } from "./confirm-envelope";
+import { type Information, type Item, type StepEnvelope } from "./confirm-envelope";
+import { handoffIntent, readRetainedHandoff } from "./handoff-envelope";
 /**
  * Provably definite rollbacks of the `opc_handoff` SQL function. Every code
  * below is raised before that function's single durable write, so an exception
@@ -238,7 +240,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
     return ((history.data?.executions ?? []) as MentorExecution[])
       .filter(execution => turns.get(execution.executionId)?.stepId === stepId)
       .map(execution => readWorkflowMentorExecution(execution.body ?? execution.primaryBody, execution.summary, stepId,
-        d.information).inputKind === "answer" || isChecklistUpdate(execution.input) ? "" : execution.input ?? "")
+        d.information).inputKind === "answer" || isHostAction(execution.input) ? "" : execution.input ?? "")
       .filter(Boolean);
   }
   const confirmation = useStepConfirmation({
@@ -665,13 +667,14 @@ function PositioningDraftContent({draftId}:{draftId:string}){
     if(running||openingInFlight.current.size||history.data?.activeExecution)return;
     const input=(inputOverride??mentorInput).trim();if(!input)return;
     const latest = mentorExecutions.at(-1), sourceTurn = latest && mentorTurns.get(latest.executionId);
+    const summary = isStepSummaryInput(input); // R16: the host request answers no card and names no field.
     // Typing instead of choosing still answers the newest card of this step and round.
-    if (!answerSource && !isChecklistUpdate(input) && latest?.state === "completed" && sourceTurn && sourceTurn.roundId === d.roundId &&
+    if (!answerSource && !isHostAction(input) && latest?.state === "completed" && sourceTurn && sourceTurn.roundId === d.roundId &&
       sourceTurn.stepId === step.id && readAgentTurnBody(latest.body).card)
       answerSource = { executionId: latest.executionId };
     const questionId = focusField(d.information[step.id]);
-    const fixed:StepEnvelope={request:{...(answerSource ? {answerSource} : {}),draftId,stepId:step.id,
-      purpose:'mentor',requestId:crypto.randomUUID(),input,questionId,organizeAfter:true}};
+    const fixed:StepEnvelope={request:summary?stepSummaryRequest(draftId,step.id,crypto.randomUUID()):{...(answerSource ? {answerSource} : {}),
+      draftId,stepId:step.id,purpose:'mentor',requestId:crypto.randomUUID(),input,questionId,organizeAfter:true}};
     sessionStorage.setItem(key,JSON.stringify(fixed));
     mentorSendInFlight.current=true;
     setPendingBubble(fixed.request);if(inputOverride===undefined)setMentorInput('');
@@ -899,92 +902,6 @@ function PositioningDraftContent({draftId}:{draftId:string}){
       persistPlanCandidate(candidate.body, candidate.sourceRoundId, request.requestId);
       setPlanRecovery("idle");
   }
-  /**
-   * The retained handoff request, or null when there is none or it cannot be
-   * read. An unreadable value is archived verbatim before the current intent
-   * replaces it, so the per-draft key can never become a local dead end.
-   */
-  function readRetainedHandoff(): {
-    draftId: string;
-    planId: string;
-    requestId: string;
-    accounts: Array<{
-      platform: string;
-      account: string;
-      expectedRevision: number | null;
-    }>;
-  } | null {
-    const raw = sessionStorage.getItem("opc-confirm:" + draftId);
-    if (!raw) return null;
-    try {
-      const parsed: unknown = JSON.parse(raw);
-      if (!isRecord(parsed)) throw new Error("unreadable");
-      const { draftId: draft, planId, requestId } = parsed as Record<
-        string,
-        unknown
-      >;
-      if (
-        typeof draft !== "string" ||
-        typeof planId !== "string" ||
-        typeof requestId !== "string" ||
-        !Array.isArray(parsed.accounts)
-      )
-        throw new Error("unreadable");
-      // Only the fields the strict handoff contract accepts are carried over,
-      // so a hand-edited value cannot turn into a permanent schema rejection.
-      const accounts = (parsed.accounts as unknown[]).map((entry) => {
-        if (!isRecord(entry)) throw new Error("unreadable");
-        const { platform, account, expectedRevision } = entry as Record<
-          string,
-          unknown
-        >;
-        if (typeof platform !== "string" || typeof account !== "string")
-          throw new Error("unreadable");
-        if (expectedRevision !== null && typeof expectedRevision !== "number")
-          throw new Error("unreadable");
-        return {
-          platform,
-          account,
-          expectedRevision: expectedRevision as number | null,
-        };
-      });
-      return { draftId: draft, planId, requestId, accounts };
-    } catch {
-      try {
-        sessionStorage.setItem(
-          "opc-confirm-archive:" + draftId + ":" + Date.now(),
-          raw,
-        );
-      } catch {
-        /* The archive is evidence only; it never gates the next confirmation. */
-      }
-      return null;
-    }
-  }
-  /**
-   * The business intent one handoff request owns: the draft, the plan version
-   * and the normalized platform/account set. `expectedRevision` is an
-   * optimistic concurrency guard, so it is deliberately not part of it.
-   */
-  function handoffIntent(value: {
-    draftId: string;
-    planId: string;
-    accounts: readonly unknown[];
-  }) {
-    return JSON.stringify([
-      value.draftId,
-      value.planId,
-      value.accounts
-        .map((entry) => {
-          const account = entry as { platform?: unknown; account?: unknown };
-          return [
-            typeof account.platform === "string" ? account.platform : "",
-            typeof account.account === "string" ? account.account : "",
-          ];
-        })
-        .sort(),
-    ]);
-  }
   async function confirmPlan() {
     await run(async () => {
       if (
@@ -1014,7 +931,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
       );
       const payload = { draftId, planId: latest.planId, accounts };
       const key = "opc-confirm:" + draftId;
-      const retained = readRetainedHandoff();
+      const retained = readRetainedHandoff(sessionStorage, draftId);
       // The retained request is replayed verbatim — same request id and its own
       // frozen expected revisions — only for the exact business intent it was
       // frozen with. That is what makes a lost reply idempotent, and it must
@@ -1295,6 +1212,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
                       const turnLabel = turnStep ? ` · ${turnStep.title}` : "";
                       const parsed = readWorkflowMentorExecution(execution.body ?? execution.primaryBody, execution.summary, turn?.stepId ?? step.id, d.information);
                       const openingTurn = turn?.kind === "opening" || isOpeningInput(execution.input);
+                      const summaryTurn = isStepSummaryInput(execution.input);
                       const live = liveReply?.executionId === execution.executionId ? liveReply : null;
                       const reply = mentorReplyDisplay({ ...execution, body: execution.body ?? execution.primaryBody,
                         legacyMessage: parsed.message, liveText: live?.text, liveCard: live?.card, stopLocal: stopLocal(execution.executionId),
@@ -1320,9 +1238,14 @@ function PositioningDraftContent({draftId}:{draftId:string}){
                                 {shownInput(execution.input) ?? "内容暂不可用"}</p>
                             </div>
                           )}
-                          {reply.text && <div data-message-role="assistant" className="mr-4 rounded-xl border border-[var(--border-primary)] p-3">
-                            <span className={resultStyles.agentIdentity}><img src="/graylum-logo.png" alt=""/>{openingTurn ? "导师主动引导" : "导师"}{turnLabel}</span>
+                          {reply.text && <div data-message-role="assistant" data-step-summary={summaryTurn || undefined}
+                            aria-label={summaryTurn ? "本步小结卡" : undefined}
+                            className={`mr-4 rounded-xl border border-[var(--border-primary)] p-3${summaryTurn ? " bg-[var(--bg-secondary)]" : ""}`}>
+                            <span className={resultStyles.agentIdentity}><img src="/graylum-logo.png" alt=""/>
+                              {summaryTurn ? "本步小结" : openingTurn ? "导师主动引导" : "导师"}{turnLabel}</span>
                             <MentorMarkdown className={`mt-1 ${resultStyles.messageBody}`} text={reply.text} live={Boolean(live)} result={execution}/>
+                            {summaryTurn && !next && !s.valid && turn?.stepId === step.id && execution.state === "completed" &&
+                              <p className="mt-2 text-xs text-[var(--text-secondary)]">小结不会自动确认这一步；请在下方确认卡核对后再点确认。</p>}
                           </div>}
                           {/* Answered: gone. Open: docked. Folded: one line. */reply.card && !status.answered && foldedCard === execution.executionId
                             && <OpenQuestionRecord card={reply.card} onShow={() => setFoldedCard("")}/>}
@@ -1350,6 +1273,14 @@ function PositioningDraftContent({draftId}:{draftId:string}){
                     stepId={step.id} canConfirm={confirmableStep(step)} disabled={busy || hasPendingStepRequest} signal={d.stepConfirmation?.[step.id]}
                     onConfirm={settled => confirmation.confirmNow(step.id, d.information[step.id], infoEdits[step.id], snap.steps, settled)}
                     onEdit={highlightFields(step.id)} onReview={() => openReview(step.id)}/>}
+                  {!manualEntry && snap.state === "draft" && !s.valid && offersStepSummary(mentorExecutions.filter(execution => {
+                    const turn = mentorTurns.get(execution.executionId);
+                    return turn?.stepId === step.id && (!Object.hasOwn(turn, "roundId") || turn.roundId === d.roundId);
+                  })) && <div className="flex flex-wrap items-center gap-2">
+                    <Button variant="outline" size="sm" disabled={sendLocked} onClick={() => void ask(step, STEP_SUMMARY_INPUT)}>
+                      {STEP_SUMMARY_LABEL}</Button>
+                    <span className="text-xs text-[var(--text-secondary)]">让导师先整理这一步的小结，还缺什么会如实列出；确认仍由你来点。</span>
+                  </div>}
                   <WorkComposer value={mentorInput} onChange={setMentorInput} label="给导师的回复" placeholder={OTHER_PLACEHOLDER} attachment={dock} maxLength={8000} disabled={snap.state!=="draft"} sendDisabled={sendLocked} onSend={skill=>{if(skill)void free.send(mentorInput,skill);else void ask(step);}}/>
                   <p className="text-xs text-[var(--text-secondary)]">
                     同一账号的步骤共用这条对话，未确认内容保留在草稿中。{d?.runtimeMode==='staging_test'?'当前使用真实模型，仅处理你提供的资料。':'当前为隔离模拟，不调用真实模型。'}
