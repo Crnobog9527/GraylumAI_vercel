@@ -1,0 +1,5 @@
+query($storeId:String!) {
+ subscriptionProducts(storeId:$storeId,filter:{id:{in:["PROD_6bacQZwfKBSKqsuRzGmYaN", "PROD_3FNIDuKdkVgvIfd0O4vUzZ", "PROD_0ZleshD5LEYuTruuiVEBNs", "PROD_25Zmm7PVC68mtzM2XkZZAC", "PROD_3JKZPZdJtcSdu9dXdNuJQT", "PROD_2qOnkXjXAGhsxLrbTGsUSb"]}},limit:100,offset:0) {
+ id name billingPeriod status hasProdVersion prices {currency priceInfo {amount trialAmount taxCategory}} metadata
+ }
+}

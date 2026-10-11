@@ -42,6 +42,7 @@ export const opcTopicTurn = z
   .strict();
 export const opcTopicDraft = opcPlan.extend({ executionId: uuid }).strict();
 export const opcAdoptTopics = opcPlan.extend({
+  sourceDraftVersionId: uuid.optional(),
   accounts: opcHandoff.shape.accounts,
 }).strict();
 export const opcLibraryEdit = z.object({

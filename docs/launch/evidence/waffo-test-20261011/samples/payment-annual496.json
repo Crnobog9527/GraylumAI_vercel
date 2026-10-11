@@ -1,0 +1,60 @@
+{
+  "capturedFileAt": "2026-10-11T06:03:48.603163+00:00",
+  "sdkResponse": {
+    "data": {
+      "payment": {
+        "id": "PAY_071PeDItrucBBqpv1ouMnp",
+        "orderId": "ORD_0kMpCMwurwRpZDwbgKGoxu",
+        "status": "succeeded",
+        "testMode": true,
+        "orderMerchantExternalId": "graylum-waffo-20261011-annual496",
+        "periodNumber": 1,
+        "createdAt": "2026-10-11T06:01:36.292Z",
+        "amount": {
+          "amount": "49600",
+          "currency": "USD",
+          "display": "496.00"
+        },
+        "refundedAmount": {
+          "amount": "0",
+          "currency": "USD",
+          "display": "0.00"
+        },
+        "refundStatus": "none",
+        "isFullyRefunded": false,
+        "pspAmountDetails": {
+          "amount": "496.00",
+          "currency": "USD",
+          "settlementAmount": "496.00",
+          "settlementCurrency": "USD"
+        },
+        "snapshotAmountDetails": {
+          "total": "496.00",
+          "subtotal": "496.00",
+          "taxAmount": "0.00",
+          "currency": "USD"
+        },
+        "paymentMethod": {
+          "type": "card",
+          "cardBrand": "[REDACTED]"
+        },
+        "settlementInfo": null,
+        "subscriptionOrder": {
+          "id": "ORD_0kMpCMwurwRpZDwbgKGoxu",
+          "storeId": "[WAFFO_STORE_ID]",
+          "status": "active",
+          "willRenew": true,
+          "isInTrial": false,
+          "billingPeriod": "yearly",
+          "currentPeriodNumber": 1,
+          "currentPeriodStart": "2026-10-11T06:01:36.000Z",
+          "currentPeriodEnd": "2027-10-11T06:01:36.000Z",
+          "canceledAt": null,
+          "testMode": true,
+          "orderMerchantExternalId": "graylum-waffo-20261011-annual496",
+          "metadata": null
+        }
+      }
+    }
+  }
+}

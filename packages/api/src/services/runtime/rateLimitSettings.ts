@@ -3,6 +3,7 @@ import { z } from 'zod';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { TRPCError } from '@trpc/server';
 import { logger } from '../../lib/logger';
+import { writeRuntimeSetting } from './settingsWrites';
 
 export const RUNTIME_RATE_LIMIT_KEY = 'runtime_rate_limits';
 export const runtimeRateLimitsSchema = z.object({
@@ -41,14 +42,22 @@ export async function readRuntimeRateLimits(db: SupabaseClient) {
   } catch { return unavailable('invalid'); }
 }
 
+/** Legacy true means stop only; false never resumes calls from a stale quota form. */
 export async function saveRuntimeRateLimits(db: SupabaseClient, input: RuntimeRateLimits) {
   const config = runtimeRateLimitsSchema.parse(input);
-  let result;
-  try {
-    result = await db.from('system_settings').upsert({
-      key: RUNTIME_RATE_LIMIT_KEY, value: JSON.stringify(config),
-    }, { onConflict: 'key' });
-  } catch { return unavailable('write_failed'); }
-  if (result.error) return unavailable('write_failed');
-  return readRuntimeRateLimits(db);
+  if (config.stopNewCalls) return setStopNewCalls(db, true);
+  const limits = {
+    admissionPerMinute: config.admissionPerMinute, admissionPer24Hours: config.admissionPer24Hours,
+    callsPerMinute: config.callsPerMinute, callsPer24Hours: config.callsPer24Hours,
+  };
+  return writeRateLimits(db, 'runtime_update_rate_limits', { p_limits: limits });
+}
+export async function setStopNewCalls(db: SupabaseClient, stopped: boolean) {
+  return writeRateLimits(db, 'runtime_set_stop_new_calls', { p_stopped: z.boolean().parse(stopped) });
+}
+async function writeRateLimits(db: SupabaseClient, name: string, args: Record<string, unknown>) {
+  const result = await writeRuntimeSetting(db, name, args);
+  const parsed = runtimeRateLimitsSchema.safeParse(result);
+  if (!parsed.success) return unavailable('write_failed');
+  return { config: parsed.data, source: 'configured' as const };
 }

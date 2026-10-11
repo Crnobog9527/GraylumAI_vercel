@@ -1,0 +1,35 @@
+{
+  "capturedFileAt": "2026-10-11T06:08:35.077426+00:00",
+  "sdkResponse": {
+    "data": {
+      "payment": {
+        "id": "PAY_0FDFISR4GFv3PBTEO5KP0e",
+        "status": "succeeded",
+        "testMode": true,
+        "refundStatus": "pending",
+        "refundedAmount": {
+          "amount": "0",
+          "currency": "USD",
+          "display": "0.00"
+        },
+        "isFullyRefunded": false,
+        "refunds": []
+      },
+      "refundTickets": [
+        {
+          "id": "TKT_2knvdNCFjn5IQbwbBPUDpJ",
+          "status": "processing",
+          "refundTicketMerchantExternalId": "graylum-waffo-20261011-refund49",
+          "executedAt": null,
+          "createdAt": "2026-10-11T06:00:36.891Z",
+          "versionData": {
+            "requestedAmount": {
+              "amount": "49.00",
+              "currency": "USD"
+            }
+          }
+        }
+      ]
+    }
+  }
+}
