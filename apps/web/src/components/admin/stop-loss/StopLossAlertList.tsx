@@ -2,6 +2,7 @@
 'use client';
 import { trpc } from '@/trpc/client';
 import { Button } from '@/components/ui/button';
+import { StaleDataNotice } from './StaleDataNotice';
 import { STOP_LOSS_QUERY_OPTIONS, describeAlert, formatTime, stopLossErrorMessage, type StopLossAlert } from './stopLossFormat';
 
 /** Read-only list of the latest stop-loss alerts (aggregates only, no user identifiers). */
@@ -16,7 +17,8 @@ export function StopLossAlertList() {
       </Button>
     </div>
     <p className="text-sm">外部通知（邮件、消息等）还没有接入，告警只显示在这里。</p>
-    {alerts.error ? <p role="alert">{stopLossErrorMessage(alerts.error, 'read')}</p>
+    {alerts.error && alerts.data && <StaleDataNotice onRetry={() => { void alerts.refetch(); }} />}
+    {alerts.error && !alerts.data ? <p role="alert">{stopLossErrorMessage(alerts.error, 'read')}</p>
       : !alerts.data ? <p>读取中…</p>
         : rows.length === 0 ? <p data-testid="stop-loss-alerts-empty">暂无止损告警。</p>
           : <ul className="divide-y" data-testid="stop-loss-alerts">

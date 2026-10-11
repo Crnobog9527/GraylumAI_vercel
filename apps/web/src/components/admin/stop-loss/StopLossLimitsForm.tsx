@@ -5,6 +5,7 @@ import { trpc } from '@/trpc/client';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { StaleDataNotice } from './StaleDataNotice';
 import { STOP_LOSS_QUERY_OPTIONS, formatUsd, parseUsdInput, reachedLimit, stopLossErrorMessage } from './stopLossFormat';
 
 const AMOUNT_FIELDS = [
@@ -103,7 +104,8 @@ export function StopLossLimitsForm() {
   return <section aria-labelledby="stop-loss-limits-title" className="space-y-3 rounded-md border p-4">
     <h3 id="stop-loss-limits-title" className="font-medium">每日美元上限</h3>
     <p className="text-sm">留空表示不设置、不拦截。填 0 表示当天不允许任何新的计费调用。最多 12 位小数。</p>
-    {status.error ? <div role="alert" className="space-y-2">
+    {status.error && config && <StaleDataNotice onRetry={() => { void status.refetch(); }} />}
+    {status.error && !config ? <div role="alert" className="space-y-2">
       <p>{stopLossErrorMessage(status.error, 'read')}</p>
       <Button variant="outline" onClick={reload}>重新读取</Button>
     </div> : !config || !current ? <p>读取中…</p> : <>

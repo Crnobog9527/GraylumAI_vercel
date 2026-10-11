@@ -32,8 +32,10 @@ const mock = `
     return {useQuery:()=>{
       useSyncExternalStore(subscribe,()=>window.version);
       let data, error=null;
-      try { data = name in cache ? cache[name] : (cache[name]=read(name)); } catch (e) { error=e; }
-      return {data,error,isFetching:false,refetch:async()=>{delete cache[name];notify();}};
+      // A failed re-read keeps the previous data, like TanStack Query does.
+      try { data = name in cache && !window.refetchFail ? cache[name] : (cache[name]=read(name)); }
+      catch (e) { error=e; data=cache[name]; }
+      return {data,error,isFetching:false,refetch:async()=>{if(!window.refetchFail)delete cache[name];notify();}};
     }};
   }
   function mutation(name, apply){
@@ -206,6 +208,31 @@ it('keeps an unsaved limit draft when switching to another settings tab and back
     await browserExpect(page.getByLabel('全站每日上限（美元）')).toBeHidden();
     await page.getByRole('tab', { name: '成本止损' }).click();
     await browserExpect(page.getByLabel('全站每日上限（美元）')).toHaveValue('7');
+    await page.getByRole('button', { name: '保存止损设置' }).click();
+    await browserExpect(page.getByText('止损设置已保存（已回读确认）。')).toBeVisible();
+    expect(errors).toEqual([]);
+  } finally { await page.close(); }
+}, 20000);
+
+it('keeps the editor and the draft when a background re-read fails', async () => {
+  const { page, errors } = await open({});
+  try {
+    await page.getByLabel('全站每日上限（美元）').fill('6');
+    await page.evaluate(() => {
+      const w = window as unknown as { refetchFail: boolean; fail: Record<string, unknown> };
+      w.refetchFail = true;
+      w.fail = { stopLossStatus: { message: 'x', data: { code: 'SERVICE_UNAVAILABLE' } } };
+    });
+    await page.getByRole('button', { name: '刷新' }).click();
+    await browserExpect(page.getByText('最新数据暂时读取失败', { exact: false })).toBeVisible();
+    await browserExpect(page.getByLabel('全站每日上限（美元）')).toHaveValue('6');
+    await page.getByRole('button', { name: '重试读取' }).click();
+    await browserExpect(page.getByLabel('全站每日上限（美元）')).toHaveValue('6');
+    await page.evaluate(() => {
+      const w = window as unknown as { refetchFail: boolean; fail: Record<string, unknown> };
+      w.refetchFail = false;
+      w.fail = {};
+    });
     await page.getByRole('button', { name: '保存止损设置' }).click();
     await browserExpect(page.getByText('止损设置已保存（已回读确认）。')).toBeVisible();
     expect(errors).toEqual([]);

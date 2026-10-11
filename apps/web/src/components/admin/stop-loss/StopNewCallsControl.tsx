@@ -7,6 +7,7 @@ import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription,
   AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
+import { StaleDataNotice } from './StaleDataNotice';
 import { STOP_LOSS_QUERY_OPTIONS, stopLossErrorMessage } from './stopLossFormat';
 
 /**
@@ -48,7 +49,8 @@ export function StopNewCallsControl() {
       停止后，全站新的模型调用都会被拒绝，用户会看到“AI 服务已暂停新调用”的提示；
       已经发出的调用照常结算，不会被取消。恢复需要在这里手动操作。
     </p>
-    {view.error ? <div role="alert" className="space-y-2">
+    {view.error && stopped !== undefined && <StaleDataNotice onRetry={() => { void view.refetch(); }} />}
+    {view.error && stopped === undefined ? <div role="alert" className="space-y-2">
       <p>{stopLossErrorMessage(view.error, 'read')}</p>
       <Button variant="outline" onClick={() => { void view.refetch(); }}>重新读取</Button>
     </div> : stopped === undefined ? <p>读取中…</p> : <>
