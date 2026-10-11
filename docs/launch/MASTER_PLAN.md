@@ -84,6 +84,18 @@
 
 ### 2.1 Owner 的新决定（2026-09-27 起，2026-10-11 更新）
 
+**2026-10-11：staging 自由对话恢复（方案 B）**
+
+Owner 原话（2026-10-11，总控窗口对话）：
+
+> 同意按方案 B 恢复 staging 自由对话：改为已测格式加低思考强度，不另外补测；staging 自由对话默认模型改为 Sonnet 5.5，Sol 暂不用于自由对话；合并前 staging 实测花费上限 1 美元。
+
+以下是落实范围，不是原话：
+
+- 自由对话不再使用未经 PAYG 实测的旧请求格式 serial-tools-v2，改用已有实测证据覆盖的 v6-reasoning 格式，并使用后台为各模型配置的交互思考强度（low）；不为旧格式补测，不改 PAYG 计费配置。
+- staging 自由对话默认模型由 GPT-6.1 Sol 改为 Sonnet 5.5；Sol 没有 PAYG 实测证据，暂不用于自由对话。
+- 合并前在 staging 实测自由对话，花费上限 1 美元（OpenRouter 现有测试余额，不充值）。正式环境沿用同一套实测证据（2026-10-07 决定：换模型或线路才重测）。
+
 **2026-10-11：放弃付款的结账超时 40 分钟自动释放（修订 PAY-WAFFO 第 6 节释放条件）**
 
 Owner 原话（2026-10-11，总控窗口对话）：
@@ -1488,7 +1500,7 @@ Runtime 主线：
   #611 注销在途收尾 ─→ BILL-PAYG PR-A ─→ BILL-PAYG PR-B2 ─→ CHAT-NATIVE-OUTPUT C0+C1 ─→ REPORT-GEN
   BILL-PAYG PR-B 的前置：PROMPT-CACHE-HISTORY H1 先写 execute.ts（#610）
   CHAT-NATIVE-OUTPUT：C0+C1 在 PAYG PR-B2 #632 之后，C2（停止保存）在 C0+C1 之后；自动续写在上线后第二版
-独立售前任务：PAY-WAFFO ─→ PAY-FOUNDER + PAY-NOTIFY + PAY-EVIDENCE + PAY-DISPUTE-GUARD ─→ V3-M3 ─→ REL-1
+独立售前任务：PAY-WAFFO ─→ PAY-FOUNDER + PAY-NOTIFY + PAY-EVIDENCE + PAY-DISPUTE-GUARD + PAY-STRIPE-CARD-FALLBACK ─→ V3-M3 ─→ REL-1
 
 钱路线（与主线并行，第 46 项）：ENTITLEMENTS ─→ PAY-COMMON ─→ PAY-WAFFO
 右侧整理：CONVERSATION-DRIVEN-CAPTURE B1 ─→ B2（处理出卡分寸、激活 PROMPT-CACHE-HISTORY H1）
@@ -1529,7 +1541,7 @@ AC-4 + UI-MODEL + UI-B + UI-C + UI-FINISH + 功能对照检查 ─→ LEGACY-CLO
 | N1c 完整定位流程 | DATA-ERASURE 删除规则设计、AC-2（含 CONVERSATION-DRIVEN-CAPTURE B1/B2）、AC-3、AC-5 及其对应的 AGENT-CORE-UI 部分（本步小结卡、右侧面板和进度条）；CHAT-NATIVE-OUTPUT、REPORT-GEN（暂列，待 Owner 选定批次） | Owner 从进入到定稿完整走通并验收 |
 | N1d 推广 | AC-4 及其对应的 AGENT-CORE-UI 部分；CONTENT-CONVERSATION-DRIVEN（暂列，待 Owner 选定批次）；DEBT-QUICK、CI-TRUST 其余部分 | 自由对话和其他 Skill 用上新工作区；检查线的任务并行，不阻塞前面的验收 |
 | N2 上线基础 | RUNTIME-PROD（含 BILL-UNIT、BILL-PAYG）、PROMPT-CACHE、PROMPT-CACHE-HISTORY、RATE-LIMIT 接线（含默认放行的 MODERATION-HOOK）、DB-BASELINE、RESEARCH-TOOLS、ENTITLEMENTS、SEC-RATELIMIT、PII-REGEX、DATA-ERASURE 实现、COST-REPORT、PAY-COMMON。钱路线已由 Owner 批准并行开工（第 46 项） | 上线基础完成。原定此后先做 5–10 人封闭内测（D8），2026-10-03 已取消（第 2.1 节第 50 项），按 D1 范围完成后直接公开上线售卖 |
-| N3 差异化功能 | 先 FUSION-REVIEW、LIB-DOCS、VOICE；再 UI-A、UI-MODEL、FUSION-COMPARE、UI-B、UI-C、UI-FINISH；PAY-WAFFO（Waffo 银行卡订阅、Stripe 微信/支付宝一次性会员及积分包）；PAY-FOUNDER、PAY-NOTIFY、PAY-EVIDENCE、PAY-DISPUTE-GUARD（独立售前任务）；PAYWALL（依赖 REPORT-GEN、BILL-PAYG、PAY-COMMON、PAY-WAFFO、ENTITLEMENTS 和已入库的付费墙设计定稿 v25，须在 REL-1 之前完成）；EXPERT-CONSULT（依赖 PAYWALL、DATA-ERASURE，须在 REL-1 之前完成）；PUBLISH-MONITOR（依赖 RESEARCH-TOOLS 和 Post for Me 实测、条款核对，须在 REL-1 之前完成，D1 范围变更） | 差异化功能完成（对比模式对钱路核心改动最大，放在后面） |
+| N3 差异化功能 | 先 FUSION-REVIEW、LIB-DOCS、VOICE；再 UI-A、UI-MODEL、FUSION-COMPARE、UI-B、UI-C、UI-FINISH；PAY-WAFFO（Waffo 银行卡订阅、Stripe 微信/支付宝一次性会员及积分包）；PAY-FOUNDER、PAY-NOTIFY、PAY-EVIDENCE、PAY-DISPUTE-GUARD、PAY-STRIPE-CARD-FALLBACK（独立售前任务；备选通道平时关闭，税务核实前不得启用）；PAYWALL（依赖 REPORT-GEN、BILL-PAYG、PAY-COMMON、PAY-WAFFO、ENTITLEMENTS 和已入库的付费墙设计定稿 v25，须在 REL-1 之前完成）；EXPERT-CONSULT（依赖 PAYWALL、DATA-ERASURE，须在 REL-1 之前完成）；PUBLISH-MONITOR（依赖 RESEARCH-TOOLS 和 Post for Me 实测、条款核对，须在 REL-1 之前完成，D1 范围变更） | 差异化功能完成（对比模式对钱路核心改动最大，放在后面） |
 | N4 收口 | LEGACY-CLOSE、V3-M3；公开上线前请 Owner 决定 MODERATION 正式实现时间 | 完整验收；REL-1 和生产另行批准 |
 
 每批由 Owner 选定后开工，批次内由 Agent 自主排序、测试、修复，完成后停下，不自动开始下一批（AGENTS.md 第 2 节）。
@@ -1772,7 +1784,7 @@ Owner 于 2026-09-27 确认 D1–D17（D6 在 Fable 评估后改为不含 PDF；
 | D14 | 搜索费用 | 用户承担，所有计价先换成美元；官方用量、自家点数按冻结单价换算，按次线路按官方单价；TikHub 官方标价计成本、阶梯折扣归平台。2026-10-01 取代固定保底积分直扣，按第 32–34 项与 D16 统一计算；搜索前不预告，限制次数、展示每次扣费，低于 L 时提示充值 |
 | D15 | 对标研究 | 只基于真实取到的数据，禁止编造；指标由代码计算，表格数字只能由取数结果填入；取不到数据就明说，不给示例账号（第 3.7 节） |
 | D16 | 收费公式（2026-10-01 修订） | 应收 `C = ceil(q × Σ(U_i × m_i))`；所有成本先换美元，q=100、默认 m=3（2026-10-03 改为默认 m=6，第 2.1 节第 50 项），模型/线路未设置倍数才用默认值；调用冻结有效倍数，旧执行不重算，最终只进位一次；实际扣费按余额封顶（第 26、32–34 项），固定保底积分直扣已被取代 |
-| D17 | 支付渠道 | 按付款方式分流新购买：银行卡订阅走 Waffo；微信和支付宝一次性会员及积分包走 Stripe 单笔。管理员分别启停，钱包年期可售范围由真实大额检查结果控制；未验证/失败时只卖月期和积分包，年付走银行卡。取代“全局默认 Waffo、Stripe 仅备用”；不自动故障切换，同一订单不跨渠道重试，未知结果先核对，旧订单、续费、退款和凭证保持原渠道（第 2.1 节 2026-10-09 决定）。 |
+| D17 | 支付渠道 | 按付款方式分流新购买：银行卡订阅走 Waffo；微信和支付宝一次性会员及积分包走 Stripe 单笔。管理员分别启停，钱包年期可售范围由真实大额检查结果控制；未验证/失败时只卖月期和积分包，年付走银行卡。取代“全局默认 Waffo、Stripe 仅备用”；不自动故障切换，同一订单不跨渠道重试，未知结果先核对，旧订单、续费、退款和凭证保持原渠道（第 2.1 节 2026-10-09 决定）。2026-10-11 补充：银行卡新增 Stripe 订阅作为备选，平时关闭，Waffo 出问题时由管理员手动把新的银行卡购买切到 Stripe；只有确认原 Waffo 订阅已停止续费后才提醒改绑；Stripe 收款税务核实完成前不得启用（第 2.1 节 2026-10-11 决定，任务 PAY-STRIPE-CARD-FALLBACK）。 |
 
 **2026-09-28—30 的新决定**记在第 2.1 节第 13–25 项；2026-10-01—03 的记在第 26–50 项；2026-10-04 的定价和付费墙细则记在第 51 项。
 
