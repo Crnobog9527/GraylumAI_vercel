@@ -23,7 +23,8 @@ beforeAll(async () => {
     window.savedLimits = [];
     window.failSave = false;
     export const trpc = {
-      useUtils: () => ({runtimeRateLimits:{get:{setData:(_,v)=>{data=v;listeners.forEach(fn=>fn())}}}}),
+      useUtils: () => ({runtimeRateLimits:{get:{setData:(_,v)=>{data=v;listeners.forEach(fn=>fn())},
+        invalidate:async()=>{window.invalidated=(window.invalidated??0)+1}}}}),
       runtimeRateLimits: {
         get:{useQuery:()=>({data:useSyncExternalStore(subscribe,()=>data),error:null,refetch:async()=>({data})})},
         update:{useMutation:options=>{
@@ -131,6 +132,8 @@ it('shows wired protection, keeps the pause switch elsewhere and saves limits wi
     // The limits save always sends false, which the server treats as "limits only, never resume".
     expect(await page.evaluate('window.savedLimits[0]')).toMatchObject({ admissionPerMinute:9, stopNewCalls:false });
     await browserExpect(page.getByText('暂停设置：已暂停新调用')).toBeVisible();
+    // Every successful save re-reads the shared config so the latest stop state wins.
+    expect(await page.evaluate('window.invalidated')).toBe(1);
     // Saving limits displays the read-back value, not the submitted one.
     await page.evaluate('window.readBack={admissionPerMinute:7}');
     await page.getByRole('button', {name:'保存额度配置'}).click();

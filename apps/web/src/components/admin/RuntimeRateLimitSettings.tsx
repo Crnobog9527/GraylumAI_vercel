@@ -31,7 +31,12 @@ export function RuntimeRateLimitSettings() {
   const [saved, setSaved] = useState<'limits' | null>(null);
   // Every successful save shows the server read-back, never the submitted value.
   const update = trpc.runtimeRateLimits.update.useMutation({
-    onSuccess: data => { utils.runtimeRateLimits.get.setData(undefined, data); },
+    onSuccess: data => {
+      utils.runtimeRateLimits.get.setData(undefined, data);
+      // The stop switch shares this cache; a re-read lets the latest database state win
+      // even if a stop/resume from the stop-loss tab finished while this save was in flight.
+      void utils.runtimeRateLimits.get.invalidate();
+    },
   });
   const saving = update.isPending;
   const config = view.data?.config;
