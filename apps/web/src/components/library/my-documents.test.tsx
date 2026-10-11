@@ -24,6 +24,8 @@ vi.mock('@/trpc/client', () => ({
       beginUpload: { useMutation: mutation }, completeUpload: { useMutation: mutation },
       beginWordUpload: { useMutation: mutation }, beginWordTextUpload: { useMutation: mutation },
       completeWordUpload: { useMutation: mutation },
+      beginPdfUpload: { useMutation: mutation }, beginPdfTextUpload: { useMutation: mutation },
+      completePdfUpload: { useMutation: mutation },
       abandonUpload: { useMutation: mutation }, delete: { useMutation: mutation },
       setPurpose: { useMutation: mutation }, download: { useMutation: mutation }, preview: { useMutation: mutation },
     },
@@ -34,7 +36,7 @@ vi.mock('sonner', () => ({ toast: { error: vi.fn() } }));
 import { DocumentList, UploadPanel, type UploadPanelProps } from './my-documents-view';
 import { DeleteConfirmDialog } from './document-dialogs';
 import { MyDocuments } from './my-documents';
-import { chaptersOf, DocumentReader } from './document-reader';
+import { bodyWithoutHeading, chaptersOf, DocumentReader } from './document-reader';
 import { mergePages } from '@/hooks/use-library-documents';
 
 afterEach(() => vi.unstubAllEnvs());
@@ -104,6 +106,29 @@ describe('upload panel', () => {
     expect(text).not.toContain('Word 和 PDF 即将支持');
     expect(text).toContain('在你自己的浏览器里读取，不扣积分');
     expect(text).not.toMatch(/预计|约\s*\d+\s*积分/);
+  });
+  it('opens PDF only with its extraction flag, with the pending-recognition note and no credit estimate', () => {
+    vi.stubEnv('NEXT_PUBLIC_LIBRARY_PDF_EXTRACTION', 'true');
+    const { html, text } = panel();
+    expect(html).toContain('accept=".txt,.md,.jpg,.jpeg,.png,.webp,.pdf"');
+    expect(text).toContain('txt、md、PDF文本');
+    expect(text).toContain('Word 即将支持');
+    expect(text).toContain('PDF 的文字在你自己的浏览器里读取，不扣积分');
+    expect(text).toContain('待识别');
+    expect(text).not.toMatch(/预计|约\s*\d+\s*积分/);
+    vi.stubEnv('NEXT_PUBLIC_LIBRARY_DOCX_EXTRACTION', 'true');
+    const both = panel();
+    expect(both.html).toContain('accept=".txt,.md,.jpg,.jpeg,.png,.webp,.docx,.pdf"');
+    expect(both.text).toContain('txt、md、Word（.docx）、PDF文本');
+    expect(both.text).not.toContain('即将支持');
+  });
+  it('shows the PDF reading state and the scanned-page result line', () => {
+    const { text } = panel({ uploads: [
+      { key: 'p', filename: '扫描.PDF', purpose: 'reference', status: 'extract', progress: 0 },
+      { key: 'd', filename: 'd.pdf', purpose: 'reference', status: 'done', progress: 1, message: '共 3 页，其中 2 页是扫描页，待识别' },
+    ] });
+    expect(text).toContain('正在本机读取 PDF 内容…');
+    expect(text).toContain('已上传 · 参考资料：共 3 页，其中 2 页是扫描页，待识别');
   });
   it('shows the Word reading and removing states without action buttons', () => {
     const { html, text } = panel({ uploads: [
@@ -228,6 +253,30 @@ describe('document reader', () => {
     expect(html).toContain('aria-label="目录"');
     expect(text).toContain('正在读取内容…');
     expect(html).not.toContain('<section');
+  });
+  it('shows a Word or Markdown heading once, not again as the first body line', () => {
+    expect(bodyWithoutHeading('  第一章\n正文', '第一章')).toBe('正文');
+    expect(bodyWithoutHeading('第一章 \t 开始\r\n正文', '第一章 开始')).toBe('正文');
+    expect(bodyWithoutHeading('# 标题\n\n正文', '# 标题')).toBe('\n正文');
+    expect(bodyWithoutHeading('只有标题', '只有标题')).toBe('');
+    expect(bodyWithoutHeading('正文第一行\n第二行', '第一章')).toBe('正文第一行\n第二行');
+    expect(bodyWithoutHeading('正文', '')).toBe('正文');
+    state.directory = { isPending: false, data: [{ ordinal: 0, title: '第一章' }, { ordinal: 1, title: '第一章' }] };
+    state.segments = { isPending: false, data: [
+      { ordinal: 0, title: '第一章', body: '第一章\n甲' }, { ordinal: 1, title: '第一章', body: '第一章 是乙' },
+    ] };
+    const { text } = render(<DocumentReader doc={doc({ format: 'docx', filename: 'a.docx' })}/>);
+    expect(text.match(/第一章/g)).toHaveLength(4); // directory, position line, heading, and the next segment's own text
+    expect(text).toContain('第一章甲');
+  });
+  it('keeps PDF page text as is under page titles, and explains a PDF without readable text', () => {
+    state.directory = { isPending: false, data: [{ ordinal: 0, title: '第 1 页' }] };
+    state.segments = { isPending: false, data: [{ ordinal: 0, title: '第 1 页', body: '第 1 页\n页眉', page_number: 1 }] };
+    const pdf = doc({ format: 'pdf', filename: 'a.pdf' });
+    expect(render(<DocumentReader doc={pdf}/>).text).toContain('第 1 页第 1 页\n页眉');
+    state.directory = { isPending: false, data: [] };
+    expect(render(<DocumentReader doc={pdf}/>).text).toContain('扫描页需要识别后才能显示');
+    expect(render(<DocumentReader doc={doc()}/>).text).toContain('这个文件没有可显示的文字');
   });
   it('hides the directory when the document has no headings, and reports read errors', () => {
     state.directory = { isPending: false, data: [{ ordinal: 0, title: '' }] };
