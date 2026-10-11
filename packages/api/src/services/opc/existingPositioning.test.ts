@@ -66,7 +66,7 @@ it('preserves the stable prefix and fits the existing purpose-budget instruction
   const stable = agentTurnInstructions();
   const complete = stable + prompt(context());
   expect(complete.startsWith(stable)).toBe(true);
-  // OPC mentor admission enables purposeBudgets and a 64000-byte input budget.
+  // Requires configured runtime_purpose_budgets: the legacy 8000-character fallback is too small (see AGENT_CORE_R15.md).
   expect(Buffer.byteLength(complete)).toBeLessThan(64000);
   expect(prompt(context()).length).toBeLessThan(1000);
 });

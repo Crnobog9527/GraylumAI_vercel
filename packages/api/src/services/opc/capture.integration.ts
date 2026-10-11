@@ -33,7 +33,8 @@ const output = (patches = [patch()]) => JSON.stringify({ inputKind: 'answer', pa
 // Older capture tests reload 0159/0182 definitions; reapply the V3 patches afterwards (marker makes reruns no-ops).
 const withdrawMigration = () => db.query(readFileSync(resolve(import.meta.dirname, '../../../../db/migrations/0199_opc_suggestion_withdraw.sql'), 'utf8'));
 
-async function fixture(extraFields = 0, informationCounts?: number[], allRequired = false, proposalField = false) {
+async function fixture(extraFields = 0, informationCounts?: number[], allRequired = false, proposalField = false,
+  mode: 'mentor' | 'manual' = 'mentor') {
   const owner = randomUUID(), model = randomUUID(), moduleId = randomUUID();
   const email = randomUUID() + '@example.test', password = 'Local-' + randomUUID() + '!';
   const made = await admin.auth.admin.createUser({ email, password, email_confirm: true });
@@ -60,7 +61,7 @@ async function fixture(extraFields = 0, informationCounts?: number[], allRequire
   const login = await user.auth.signInWithPassword({ email, password });
   if (login.error) throw login.error;
   const service = opcService(user, admin);
-  const draft = await service.start({ requestId: randomUUID(), registration, mode: 'mentor' });
+  const draft = await service.start({ requestId: randomUUID(), registration, mode });
   await db.query(`update artifact_rounds r set steps=(select jsonb_object_agg(s.key,
     s.value || jsonb_build_object('information',(select jsonb_object_agg(f->>'id',
       jsonb_build_object('value','','status','unknown','nature','unknown'))
@@ -1265,3 +1266,122 @@ it('RUNTIME: R16 summary admission freezes missing fields and cannot confirm or 
  await rpc('runtime_cancel',{p_actor_id:f.actor,p_execution_id:admitted.executionId});
  expect(await f.steps()).toEqual(before);
 });
+
+// R15: "I already have positioning" reuses the manual draft, the same Agent session and the existing organizer.
+const R15_INTAKE = 'ask the user to paste or describe their existing positioning';
+const R15_REVIEW = 'Existing-positioning entry: review the supplied positioning';
+const frozenPayload = async (id: string) =>
+  (await db.query('select payload from runtime_executions where id=$1', [id])).rows[0].payload;
+// Mentor host text plus R15 exceeds the legacy 8000-character fallback; R15 needs configured purpose budgets (staging shape).
+async function withPurposeBudgets(run: () => Promise<void>) {
+  const previous = (await db.query("select value from system_settings where key='runtime_purpose_budgets'")).rows[0];
+  await db.query(`insert into system_settings(key,value) values('runtime_purpose_budgets',$1::jsonb)
+    on conflict(key) do update set value=excluded.value`, [JSON.stringify({version: 2,
+    interactive: {inputBytes: 90000, historyItems: 100}, organize: {inputBytes: 64000, historyItems: 0},
+    report: {inputBytes: 196608, historyItems: 0}})]);
+  try { await run(); } finally {
+    if (previous) await db.query("update system_settings set value=$1 where key='runtime_purpose_budgets'", [previous.value]);
+    else await db.query("delete from system_settings where key='runtime_purpose_budgets'");
+  }
+}
+it('RUNTIME: R15 without configured purpose budgets refuses manual mentor turns before any write', async () => {
+  const {OPENING_INPUT} = await import('./questions');
+  const f = await fixture(0, undefined, false, false, 'manual');
+  const before = await f.steps();
+  await expect(f.service.prepareStep({draftId: f.draft.draftId, requestId: randomUUID(), stepId: 'step-0',
+    purpose: 'mentor', questionId: 'goal', input: OPENING_INPUT})).rejects.toThrow();
+  expect((await db.query('select count(*)::int n from runtime_executions where session_id=$1', [f.d.sessionId])).rows[0].n).toBe(0);
+  expect(await f.steps()).toEqual(before);
+});
+it('RUNTIME: R15 manual opening asks for existing positioning; mentor drafts keep the normal opening', () => withPurposeBudgets(async () => {
+  const {OPENING_INPUT} = await import('./questions');
+  const {agentTurnInstructions} = await import('./agentTurnPrompt');
+  for (const mode of ['manual', 'mentor'] as const) {
+    const f = await fixture(0, undefined, false, false, mode);
+    expect(f.d.mode).toBe(mode);
+    const request = {draftId: f.draft.draftId, requestId: randomUUID(), stepId: 'step-0', purpose: 'mentor',
+      questionId: 'goal', input: OPENING_INPUT};
+    const opened = await f.service.prepareStep(request);
+    const payload = await frozenPayload(opened.executionId);
+    expect(payload.hostTurnContext.opening).toBe(true);
+    expect(payload.instructions).toContain(agentTurnInstructions());
+    if (mode === 'manual') {
+      expect(payload.instructions).toContain(R15_INTAKE);
+      expect(payload.instructions).toContain(R15_REVIEW);
+    } else {
+      expect(payload.instructions).not.toContain(R15_REVIEW);
+    }
+    // The host opening never writes information or confirms a step.
+    expect((await f.read()).stepConfirmation['step-0'].stepConfirmed).toBe(false);
+    await rpc('runtime_cancel', {p_actor_id: f.actor, p_execution_id: opened.executionId});
+    expect(await f.service.prepareStep({...request, requestId: randomUUID()}))
+      .toMatchObject({executionId: opened.executionId});
+  }
+}));
+
+it('RUNTIME: R15 pasted positioning organizes across steps and only the confirmation write confirms', () => withPurposeBudgets(async () => {
+  const f = await fixture(0, undefined, false, false, 'manual');
+  const pasted = '我的定位：面向摄影新手分享入门经验，先做免费图文，之后再考虑课程。';
+  const turn = await f.service.prepareStep({draftId: f.draft.draftId, requestId: randomUUID(), stepId: 'step-0',
+    purpose: 'mentor', input: pasted, organizeAfter: true});
+  const payload = await frozenPayload(turn.executionId);
+  expect(payload.instructions).toContain(R15_REVIEW);
+  expect(payload.instructions).not.toContain(R15_INTAKE);
+  expect(payload.instructions).not.toContain(pasted);
+  const organizer = JSON.parse(payload.attachedOrganizer.input);
+  expect(organizer.userInput).toBe(pasted);
+  expect(organizer.checklist.map((step: {id: string}) => step.id)).toEqual(['step-0', 'step-1', 'step-2']);
+  await rpc('runtime_cancel', {p_actor_id: f.actor, p_execution_id: turn.executionId});
+  const captured = await f.seed(output([patch('面向摄影新手分享入门经验'), patch('之后再考虑课程', 'step-2')]));
+  expect(await f.apply(captured)).toMatchObject({result: 'applied'});
+  const before = await f.read();
+  expect(before.information['step-0'].values.goal).toMatchObject({value: '面向摄影新手分享入门经验', status: 'provisional'});
+  expect(before.information['step-2'].values.goal.value).toBe('之后再考虑课程');
+  expect(before.stepConfirmation['step-0']).toMatchObject({stepConfirmed: false, stepReady: true});
+  // Verbal assent in the existing-positioning entry is only another mentor turn.
+  const assent = await f.service.prepareStep({draftId: f.draft.draftId, requestId: randomUUID(), stepId: 'step-0',
+    purpose: 'mentor', input: '都对，确认，直接下一步'});
+  const assentPayload = await frozenPayload(assent.executionId);
+  expect(assentPayload.instructions).toContain('Never treat supplied positioning or verbal assent as confirmation');
+  expect(assentPayload.instructions).not.toContain(R15_INTAKE);
+  await rpc('runtime_cancel', {p_actor_id: f.actor, p_execution_id: assent.executionId});
+  expect((await f.read()).snapshot.steps).toEqual(before.snapshot.steps);
+  expect((await f.read()).stepConfirmation['step-0'].stepConfirmed).toBe(false);
+  // The confirmation card writes through the versioned information API; a stale version is refused.
+  const current = (await f.steps())['step-0'];
+  const confirmed = {...current.information, goal: tuple('面向摄影新手分享入门经验', 'confirmed', 'fact')};
+  await expect(f.service.information({draftId: f.draft.draftId, requestId: randomUUID(), stepId: 'step-0',
+    expectedVersion: current.version - 1, values: confirmed})).rejects.toThrow();
+  await f.service.information({draftId: f.draft.draftId, requestId: randomUUID(), stepId: 'step-0',
+    expectedVersion: current.version, values: confirmed});
+  const after = await f.read();
+  expect(after.information['step-0'].values.goal.status).toBe('confirmed');
+  expect(after.information['step-2'].values.goal.status).toBe('provisional');
+}));
+
+it('RUNTIME: R15 recorded material resumes review and other actors cannot use the manual draft', () => withPurposeBudgets(async () => {
+  const {OPENING_INPUT} = await import('./questions');
+  const f = await fixture(0, undefined, false, false, 'manual');
+  const captured = await f.seed(output([patch('Existing later goal', 'step-1')]));
+  await f.apply(captured);
+  const request = {draftId: f.draft.draftId, requestId: randomUUID(), stepId: 'step-0', purpose: 'mentor',
+    questionId: 'goal', input: OPENING_INPUT};
+  const resumed = await f.service.prepareStep(request);
+  const payload = await frozenPayload(resumed.executionId);
+  expect(payload.instructions).toContain(R15_REVIEW);
+  expect(payload.instructions).not.toContain(R15_INTAKE);
+  await rpc('runtime_cancel', {p_actor_id: f.actor, p_execution_id: resumed.executionId});
+  const other = await fixture(0, undefined, false, false, 'manual');
+  const before = await f.steps();
+  for (const input of [OPENING_INPUT, 'Use my positioning']) {
+    await expect(other.service.prepareStep({...request, requestId: randomUUID(), input,
+      ...(input === OPENING_INPUT ? {} : {questionId: undefined})})).rejects.toThrow();
+  }
+  const anonymous = createClient(process.env.V3_LOCAL_REST!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    {auth: {persistSession: false}});
+  await expect(opcService(anonymous, admin).prepareStep({...request, requestId: randomUUID()}))
+    .rejects.toThrow('OPC_AUTH_REQUIRED');
+  await expect(other.service.information({draftId: f.draft.draftId, requestId: randomUUID(), stepId: 'step-0',
+    expectedVersion: before['step-0'].version, values: before['step-0'].information})).rejects.toThrow();
+  expect(await f.steps()).toEqual(before);
+}));

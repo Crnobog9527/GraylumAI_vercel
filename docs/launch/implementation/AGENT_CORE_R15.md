@@ -1,7 +1,8 @@
 # AGENT-CORE R15：已有定位入口（后端）
 
-当前为独立模块准备，**未接线、R15 未完成**。依据 `AGENT_CORE_CLOSEOUT.md` R15 和
+后端已接线（Claude 2026-10-11 接手 Codex 的准备切片）。依据 `AGENT_CORE_CLOSEOUT.md` R15 和
 [#771 总控派发](https://github.com/Crnobog9527/GraylumAI_vercel/pull/771#issuecomment-6099912595)。
+前端入口（不经资料库、manual 草稿启用 Agent）由 Claude 在后端合并后另做，本 PR 不改界面。
 
 ## 最小实现
 
@@ -14,23 +15,27 @@
 原话仍走现有串行整理器，按冻结 Skill 字段映射到各步，不硬编码步骤或关键词判断意图。
 确认仍走现有带快照/版本检查的整步确认接口，不能把粘贴或口头同意当成确认。
 
-## 等待接线
+## 接线（已完成）
 
-`opc/service.ts` 按 R1 #784 → R16 #785 → R9 #782 → R15 排队。
-在 R9 释放前不修改该文件。之后：
+`opc/service.ts` 的 `prepareStep` 在新导师回合里，把 helper 返回值接在 `agentTurnInstructions()` 之后；
+mode 取自按当前用户查询的 `opc_query` 的 `d.mode`，context 是本回合冻结材料生成的 hostTurnContext。
+additionalInstructions 与 stableAdditionalInstructions 仍是同一个完整字符串，满足 freezeHostPromptCache 的相等契约；
+重放路径在接线点之前返回，旧执行不变。mentor 模式草稿得到空字符串，行为与之前完全相同。
 
-1. 同步 staging，在 `prepareStep` 的新 mentor admission 中，将 helper 返回值附加到
-   `agentTurnInstructions()` 后；mode 来自 `opc_query` 的 d.mode，context 来自原冻结材料。
-   additionalInstructions 与 stableAdditionalInstructions 都使用拼接后的完整字符串，
-   满足现有 freezeHostPromptCache 的相等契约；回放路径保持返回既有 execution。
-   helper 仅返回两种固定指令（接收/核对），不插入用户数据；核对阶段保持相同缓存前缀。
-2. 补服务级测试：manual/mentor 分支、开场、已有各步资料、确认卡、跨步整理、重复请求、
-   越权和被删除草稿。验证完整 admission 预算与缓存结构，不能仅以字符串长度证明运行通过。
-3. 在包含候选的非生产环境做少量接口真实模型冒烟；先查共享 5 美元预算消耗，
-   按 staging 账本实际美元和 executionId 在 PR 记账。不充值、不超预算、不使用浏览器。
-4. 请求最终机器人审查。本任务不合并。前端在后端合并后由 Claude 接入。
+前提：环境必须配置 `system_settings.runtime_purpose_budgets`（staging 已配置，交互 90000 字节）。
+没配置时 Runtime 沿用旧的额外指令 8000 字符上限；导师固定指令约 7700 字符，加上 R15 约 730 字符会超限，
+manual 草稿的导师回合会在写入前被拒绝（集成测试覆盖），mentor 草稿不受影响。正式环境上线前须确认该设置存在（列入 RUNTIME-PROD 核对）。
 
-## 前端接口（沿用，R15 行为尚未接线）
+验证：
+- 单元测试（`existingPositioning.test.ts`）：模式判断、只在空的第一步开场请用户粘贴、已有资料时改为核对、不插入用户数据、缓存契约。
+- 集成测试（`capture.integration.ts` 的 `RUNTIME: R15 …` 三项，CI 的 Runtime 必需检查会跑）：
+  manual 开场冻结接收指令、mentor 草稿不受影响、开场重放；粘贴原话进入现有跨步整理（原话只在整理输入里，不进指令），
+  整理写入第一步和第三步；口头「确认」只是普通导师回合，不改步骤状态；确认卡走带版本的 information 写入，过期版本被拒；
+  已有资料时恢复为核对；其他用户和未登录用户被拒、数据不变。
+- 真实模型冒烟：见 PR 记账。用 staging 已冻结的真实定位 Skill 提示词加 R15 指令直接调 OpenRouter，不经过 staging 服务；
+  只证明模型会遵循这段指令，不代替 R12a 的 staging 浏览器验收。
+
+## 前端接口（沿用）
 
 - `opc.start`：`{requestId, registration, mode:"manual", businessId?:uuid|null, businessName?:string}`；
   返回 `draftId/projectId/roundId/sessionId/businessId/businessName`。用同一 requestId 恢复重试。
@@ -47,6 +52,5 @@
 
 ## 验证边界与恢复
 
-独立模块测试只证明宿主选择和数据边界，不证明模型遵循指令或运行链路已经接通。
-准备切片未被生产服务引用，可直接撤回本切片。后续接线不得改写历史草稿/冻结执行。
-付费调用未运行，本切片新增费用为 0 美元；不是整个收口预算余额的声明。
+没有迁移、新表或新状态；撤回本 PR 即恢复原导师行为，历史草稿和冻结执行不需要改写。
+浏览器验收由 Codex 在 R12a 做。
