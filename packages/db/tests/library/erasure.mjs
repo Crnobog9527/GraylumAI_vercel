@@ -4,10 +4,20 @@ import { randomUUID } from 'node:crypto';
 export async function verifyErasure(admin, service, word = false) {
   const actor = randomUUID(), request = randomUUID(), token = randomUUID();
   await admin.query('INSERT INTO profiles(id,credits) VALUES($1,73)', [actor]);
+  const format = word === 'pdf' ? 'pdf' : word ? 'docx' : 'txt';
   const doc = (await service.query("SELECT library_upload_begin($1,$2,$3,$4,'reference',5) v",
-    [actor, randomUUID(), word ? 'private.docx' : 'private.txt', word ? 'docx' : 'txt'])).rows[0].v.documentId;
-  if (word) await service.query('SELECT library_word_text_begin($1,$2,5)', [actor,doc]);
-  await service.query(word ? 'SELECT library_word_publish($1,$2,5,5,$3)' : 'SELECT library_publish($1,$2,5,$3)', [actor, doc, JSON.stringify([{ title: '', body: 'hello' }])]);
+    [actor, randomUUID(), `private.${format}`, format])).rows[0].v.documentId;
+  if (format === 'pdf') {
+    await service.query('SELECT library_pdf_text_begin($1,$2,5)', [actor,doc]);
+    await service.query('SELECT library_pdf_publish($1,$2,5,7,$3,$4)', [actor,doc,
+      JSON.stringify([{title:'page',body:'hello',page_number:1}]),
+      JSON.stringify(['text','scanned','blank'].map((status,i)=>({page_number:i+1,status})))]);
+    assert.equal((await admin.query('SELECT count(*)::int n FROM library_recognition_units WHERE document_id=$1',[doc])).rows[0].n,3);
+  } else {
+    if (word) await service.query('SELECT library_word_text_begin($1,$2,5)', [actor,doc]);
+    await service.query(word ? 'SELECT library_word_publish($1,$2,5,5,$3)' : 'SELECT library_publish($1,$2,5,$3)',
+      [actor, doc, JSON.stringify([{ title: '', body: 'hello' }])]);
+  }
   // Establish actual closed-account state without bypassing any guards/FKs.
   await admin.query("UPDATE profiles SET status='deleted',is_deleted='true' WHERE id=$1", [actor]);
   await admin.query(`INSERT INTO account_erasure_requests(profile_id,request_id,executor_token,confirmed_at)

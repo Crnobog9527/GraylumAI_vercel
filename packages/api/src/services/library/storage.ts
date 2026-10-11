@@ -38,19 +38,26 @@ export function libraryStorage(client: SupabaseClient) {
       if (error || !data || Date.now() - started > 60_000) throw failure();
       return { signedUrl: data.signedUrl, token: data.token, path };
     },
-    async signRead(path: string, download: boolean) {
+    async signRead(path: string, download: string | false) {
       check(path);
-      const { data, error } = await bucket.createSignedUrl(path, 60, download ? { download: true } : undefined);
+      const { data, error } = await bucket.createSignedUrl(path, 60);
       if (error || !data) throw failure();
-      return data.signedUrl;
+      if (download === false) return data.signedUrl;
+      // Add the filename once via URLSearchParams: the SDK double-encodes its download option.
+      // Never assemble a Content-Disposition header or concatenate untrusted URL parameters.
+      const filename = download.replace(/[\x00-\x1f\x7f-\x9f/\\]/g, '_');
+      const url = new URL(data.signedUrl);
+      url.searchParams.set('download', filename.trim() ? filename : 'download');
+      return url.toString();
     },
-    async inspect(path: string, full: boolean) {
+    async inspect(path: string, full: boolean, allowEmpty = false) {
       check(path);
+      if (allowEmpty && (!full || !path.endsWith('/text'))) throw failure();
       const info = await bucket.info(path);
       if (info.error || !info.data) throw failure();
       const size = info.data.size;
       const contentType = info.data.contentType;
-      if (typeof size !== 'number' || !Number.isSafeInteger(size) || size < 1 || size > MAX_BYTES) throw new Error('LIBRARY_SIZE');
+      if (typeof size !== 'number' || !Number.isSafeInteger(size) || size < (allowEmpty ? 0 : 1) || size > MAX_BYTES) throw new Error('LIBRARY_SIZE');
       const signed = await bucket.createSignedUrl(path, 60);
       if (signed.error || !signed.data) throw failure();
       // Only a service-created URL is fetched. No user URL, redirects, parser, or image decoder.
