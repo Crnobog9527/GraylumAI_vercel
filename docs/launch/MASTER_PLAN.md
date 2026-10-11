@@ -84,6 +84,19 @@
 
 ### 2.1 Owner 的新决定（2026-09-27 起，2026-10-12 更新）
 
+**2026-10-12：定位前置检查（新任务 POSITIONING-GATE）**
+
+Owner 原话（2026-10-12，总控窗口对话）：
+
+> 同意新增"定位前置检查"任务：Skill 后台加"与社交媒体相关"勾选；涉及社交媒体的对话（含自由对话按语义判断、无关 Skill 中途转到社媒）在用户没有定位时不继续，引导先做定位或通过"我已有定位"导入；有定位指走完并确认定位流程或通过"我已有定位"导入。
+
+以下是落实范围，不是原话：
+
+- 后台创建或编辑 Skill 时手动勾选“与社交媒体相关”。
+- 用户没有定位时：勾选了社媒相关的 Skill 不继续，引导先走定位分析或通过“我已有定位”导入；未勾选的 Skill 可以正常使用，但对话中途转到社交媒体话题时同样不继续；不选 Skill 的自由对话按语义判断，涉及社媒运营、选题、涨粉、变现等时不继续，其他问题正常回答。
+- “有定位”指：走完并确认定位流程，或通过“我已有定位”导入。资料库里普通文件不算。
+- 语义判断由模型完成，不用关键词或正则（docs/ENGINEERING.md 第 6 节）；是否采用 OpenAI Decisions API 等分类接口在任务方案中评估，涉及新供应商或密钥另行批准。
+
 **2026-10-12：模型身份保护（新任务 MODEL-IDENTITY-GUARD）**
 
 Owner 原话（2026-10-12，总控窗口对话）：
@@ -109,6 +122,12 @@ Owner 补充原话（2026-10-12）：
 > 开关关闭时，网页和服务器之间传的数据里，不恢复显示真实模型名，只恢复页面上的显示，数据里继续隐藏。
 
 - 开关只控制身份指令、输入与输出拦截和页面显示；网络响应中隐藏真实模型名始终生效（Fusion 例外除外）。
+
+Owner 补充原话（2026-10-12）：
+
+> 身份保护去掉输入拦截，只做身份说明和回答替换
+
+- 依 docs/ENGINEERING.md 第 6 节“不用关键词或正则判断用户意图”，不做输入侧规则拦截；用户询问身份时照常调用模型，由身份说明和回答替换保证用户看到品牌话术。
 
 **2026-10-12：系统原因导致回答失败时自动退回本轮积分**
 
@@ -1562,6 +1581,7 @@ node scripts/plan-progress.mjs --ref origin/staging
 | | EXPERT-CONSULT | 真人专家诊断的预约入口（第 2.1 节第 51 项，[记录 L](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5972732100)、[记录 Q](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5980762284)、[记录 R](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5980780017)）：放在报告末尾、价格页和工作室版联系入口；只面向已有数据基础的账号，卡片写"预约咨询，免费询价"，不写价格；用户填写需求和联系方式，提交后通知 Owner，由 Owner 线下跟进。不做"同意专家查看报告"的授权开关，资料由用户自己导出后发来；授权查看功能上线时不做。咨询费不进产品结账流程（Stripe 或线下收款，税务由 Owner 处理）。联系方式按个人数据处理，接入账号注销和数据保留规则 | PAYWALL（入口位置）、DATA-ERASURE | 高 | 小 / 1–2 | — |
 | | PUBLISH-MONITOR | 方向（Owner 2026-10-04，第 2.1 节第 51、52 项，[记录 Q](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5980762284)）：上线前接入 Post for Me，提供多平台发布和数据监控，海外 9 个平台（TikTok、Instagram、YouTube、Facebook、X、Threads、LinkedIn、Pinterest、Bluesky），用户授权自己的账号。Pro：一键发布 + 自己作品近 30 天数据；Gold：另加对标账号监控、90 天趋势、每周自动复盘；两档都按积分计费、不限条数。**D1 范围变更**：这两项原不在上线范围（第 10 节 D1）。Post for Me 实测和条款核对通过之前，相关功能和说法不上线。验收与交接：[Post for Me 平台、费用、数据窗口与许可待核对项](https://github.com/Crnobog9527/GraylumAI_vercel/issues/716#issuecomment-6038093010)。 | RESEARCH-TOOLS；Post for Me 实测和条款核对（第 52 项）；其余依赖由方案定 | 高 | 待实施方案细化 | — |
 | | LEGACY-CLOSE | 关入口由 #507 提前实施（2026-09-29）：`/chat` 临时跳转 `/positioning`，`/api/ai/stream` 对新请求返回 410，8 处入口改指或禁用；本任务剩余工作是删除旧代码（`/chat` 页面与组件、`/api/ai/stream`、`modelRouter`、`contextManager`、`agentSlice`、旧 `workbench` 接口等；自研内容检查 `contentModerator.ts`、`aiOutputFilter.ts`、`streamingOutput.ts`，以及它们在 `agentSlice` 和旧 `workbench` 生成里的调用，不单独开任务）和功能对照检查记录。旧检查文件随 LEGACY-CLOSE 删除；删除前核实必要的凭证保护和用户数据隔离不受影响，不要求迁移旧的通用 PII 正则过滤。按 Owner 2026-09-29 决定不再提供旧对话只读查看入口（staging 和正式环境都没有真实用户，上线前清空数据），旧链接直接跳到 `/positioning`；旧对话不迁移、不删除 | AC-4 接管自由对话；入口改指（#507）；UI-MODEL、UI-B、UI-C、UI-FINISH 交付；并完成一次功能对照检查（旧 `/chat` 的模型选择、引用、附件和常用操作在新工作区都有对应，或明确记录为不再提供） | 高 | 中 / 3–4 | — |
+| | POSITIONING-GATE | 定位前置检查（第 2.1 节 2026-10-12 决定）：Skill 后台“与社交媒体相关”勾选；无定位用户的社媒相关对话（含自由对话语义判断、无关 Skill 中途转社媒）不继续并引导定位或“我已有定位”导入。语义判断用模型完成。 | MODEL-IDENTITY-GUARD（与之排队改同一块 runtime） | 高 | 中 / 2–3 | — |
 | | MODEL-IDENTITY-GUARD | 模型身份保护（第 2.1 节 2026-10-12 决定，Fusion 评审团例外、后台一键开关）：身份指令、身份询问与越狱的输入侧拦截、自我介绍式泄露的输出侧检查、界面与接口去除真实模型名；品牌话术由 Owner 确认，不声称自研。上线前完成。 | RUNTIME-PROD（与在途 runtime 执行改动排队） | 高 | 中 / 3–4 | — |
 | | PAY-STRIPE-CARD-FALLBACK | Stripe 银行卡订阅备选（第 2.1 节 2026-10-11 决定）：与 Waffo 银行卡同价同权益，平时关闭，Waffo 出问题时管理员手动把新的银行卡购买切到 Stripe；不自动故障切换，旧订单保持原渠道；只有确认原 Waffo 订阅已停止续费（已取消并核实或续费失败）后才提醒改绑，Waffo 仍可扣款的照常续费、不提醒。复用现有 Stripe 订阅代码和 PAY-COMMON 订单/回调/积分。税务核实完成前不得启用；测试模式验收，正式配置另获批准。 | PAY-WAFFO 第 2 步 | 高 | 中 / 2–3 | — |
 | | PAY-FOUNDER | 创始社群、展示墙、徽章独立交付，复用 PAY-WAFFO 资格；按第 51 项 Q/R/V 处理公开同意、到期/退款撤销和社群人工办理。运营流程在开工前再定；不并入收款 PR，正式售卖前完成。 | PAY-WAFFO | 高 | 待实施方案细化 | — |
