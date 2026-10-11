@@ -260,6 +260,23 @@ it('sends the revision the edit started from and turns a 409 into a reload promp
   } finally { await page.close(); }
 }, 20000);
 
+it('warns that cached usage may be stale when a usage re-read fails', async () => {
+  const { page, errors } = await open({ usage: { utcDate: '2026-10-11', userUsd: '0', siteUsd: '1.5' } });
+  try {
+    const usage = page.getByTestId('stop-loss-usage');
+    await browserExpect(usage).toContainText('$1.5');
+    await page.evaluate(() => {
+      const w = window as unknown as { refetchFail: boolean; fail: Record<string, unknown> };
+      w.refetchFail = true;
+      w.fail = { stopLossStatus: { message: 'x', data: { code: 'SERVICE_UNAVAILABLE' } } };
+    });
+    await page.getByRole('button', { name: '刷新' }).click();
+    await browserExpect(usage).toContainText('最新用量暂时读取失败');
+    await browserExpect(usage).toContainText('$1.5');
+    expect(errors).toEqual([]);
+  } finally { await page.close(); }
+}, 20000);
+
 it('keeps the limits editable when only the usage aggregate fails', async () => {
   const { page, errors } = await open({}, { stopLossStatus: { message: 'x', data: { code: 'SERVICE_UNAVAILABLE' } } });
   try {

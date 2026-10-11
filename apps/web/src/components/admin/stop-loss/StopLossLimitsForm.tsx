@@ -26,7 +26,7 @@ const toDraft = (config: Config): Draft => ({
 const sameConfig = (a: Config, b: Config) => JSON.stringify(toDraft(a)) === JSON.stringify(toDraft(b));
 
 type Usage = { utcDate?: unknown; siteUsd?: unknown };
-function UsageSummary({ config, usage }: { config: Config; usage: Usage | null }) {
+function UsageSummary({ config, usage, stale }: { config: Config; usage: Usage | null; stale: boolean }) {
   if (!usage) {
     return <p className="text-sm" role="status" data-testid="stop-loss-usage">
       今天的实际成本暂时读取失败（会自动重试）；下面的上限设置仍可修改和保存。
@@ -39,6 +39,7 @@ function UsageSummary({ config, usage }: { config: Config; usage: Usage | null }
     return <p>{label}：{formatUsd(limit)}{reached ? '（已达到）' : ''}</p>;
   };
   return <div className="space-y-1 text-sm" data-testid="stop-loss-usage">
+    {stale && <p role="status">最新用量暂时读取失败（会自动重试），下面是上一次读取的数字，可能不是最新。</p>}
     <p>今天（UTC {typeof usage.utcDate === 'string' ? usage.utcDate : '—'}）全站实际成本：{formatUsd(site)}</p>
     {line(config.siteDailyUsd, '全站每日上限')}
     {line(config.siteAlertUsd, '全站每日提醒线')}
@@ -123,7 +124,8 @@ export function StopLossLimitsForm() {
       <p>{stopLossErrorMessage(settings.error, 'read')}</p>
       <Button variant="outline" onClick={reload}>重新读取</Button>
     </div> : !config || !current ? <p>读取中…</p> : <>
-      <UsageSummary config={config} usage={status.data ? (status.data.usage as Usage) : status.error ? null : {}} />
+      <UsageSummary config={config} stale={Boolean(status.error && status.data)}
+        usage={status.data ? (status.data.usage as Usage) : status.error ? null : {}} />
       <p className="text-sm">设置来源：{settings.data?.source === 'configured' ? '已保存的设置' : '默认（全部未设置）'}</p>
       <div className="grid gap-4 sm:grid-cols-2">
         {AMOUNT_FIELDS.map(([key, label, hint]) => {
