@@ -74,7 +74,7 @@ payment.refunds 会一起变化，可以用这些字段查回最终结果。处�
 但到期后它是否保持不变、canceled 状态何时写入，要等 2026-11-11 之后再查，或由 Waffo 说明。
 `settlementInfo` 不能当作"付款时间"的来源，因为它可能长时间为空。
 
-**还要问 Waffo：** "付到哪天"和"真实付款时间"并入第 5 节唯一必须问的题；canceled 何时写入按 Owner 决定不再追问。
+**还要问 Waffo：** "付到哪天"和"真实付款时间"并入第 5 节第 1 题；canceled 何时写入按 Owner 决定不再追问。
 
 **后续可以再查一次：** 2026-11-11 05:59 UTC 之后，用同一个 [q7-order.graphql](queries/q7-order.graphql)
 只读再查，就能看到终态（是否执行按当时规则另行确认）。
@@ -108,17 +108,17 @@ payment.refunds 会一起变化，可以用这些字段查回最终结果。处�
 ## 5. 精简后的待问清单（给 Owner 转问 Waffo）
 
 Owner 2026-10-11 已定收款方案：**正常流程（首次付款、续费、升级、取消）自动处理，少见情况靠每天对账加人工处理，
-Waffo 只问必须问的问题。** 按这个标准，只保留"不问就做不了正常流程或每天对账"的问题。结果只剩 1 题。
+Waffo 只问必须问的问题。** 按这个标准，只保留"不问就做不了正常流程或每天对账"的问题。结果剩 2 题。
 
-### 必须问（1 题）
+### 必须问（2 题）
 
-**中文：** 续费和每天对账时，我们要知道每笔付款"什么时候扣的、管哪段会员期"。请确认：
+**第 1 题 中文：** 续费和每天对账时，我们要知道每笔付款"什么时候扣的、管哪段会员期"。请确认：
 (a) 付款的 `createdAt` 是否就是扣款成功时间？`settlementInfo` 在付款 5 小时后仍为空，它什么时候才有值？
 (b) 一笔续费付款覆盖的会员期起止，是否等于这笔付款成功时订阅的 `currentPeriodStart`/`currentPeriodEnd`？
 事后（比如下一期已扣款后）还能按付款编号查回这一期的起止吗？
 (c) 用户取消后，`currentPeriodEnd` 是否就是"已付到期日"，到期前会不会再变？
 
-**English:** For renewals and daily reconciliation we need to know, for each payment, when it was charged
+**Question 1, English:** For renewals and daily reconciliation we need to know, for each payment, when it was charged
 and which service period it covers. Please confirm:
 (a) Is `payment.createdAt` the time the charge succeeded? `settlementInfo` was still null 5 hours after a
 test payment — when is it populated?
@@ -130,12 +130,25 @@ period has been charged?
 为什么必须问：续费到账后要按这一期的起止给会员时长，每天对账要按扣款时间和金额核对；
 现在接口里没有付款对应的账期字段，结算信息又长时间为空，只能靠推断。
 
+**第 2 题 中文：** 用户打开结账页后没付款就离开，我们的服务端怎样确认这个结账会话已经过期或关闭、之后不可能再付款成功？
+有没有按会话编号（或我们传入的 `orderMerchantExternalId`）查会话状态的接口？如果过期时刚好有一笔付款在处理中，最终会怎样？
+
+**Question 2, English:** When a buyer opens a checkout session and leaves without paying, how can our server
+confirm that the session is expired or closed and can no longer result in a successful payment? Is there an API
+to read a checkout session's status by session ID (or by the `orderMerchantExternalId` we supplied)?
+If a payment is in progress at the moment the session expires, what is the final outcome?
+
+为什么必须问：[PAY-WAFFO 任务文档第 6 节](../../tasks/PAY-WAFFO.md)规定，创始和 Gold 名额的预留
+"只在供应商确认会话关闭/过期且未付后释放"。用户放弃付款是正常流程，而 #802 已确认当前公开接口没有会话状态查询。
+（机器人审查指出，见 #808。）如果 Waffo 答复没有这种接口，是否改成"过期时间过后查不到订单就释放、迟到付款转人工"，
+属于对已定设计的改动，要由 Owner 决定，本 PR 不替 Owner 定。
+
 ### 按 Owner 决定不再追问
 
 | #802 原题 | 处理 |
 | --- | --- |
 | 1 历史账期和实际付款时间 | 只保留续费和对账必需的部分，并入上面这一题；月底、闰年等样例不再要 |
-| 2 结账会话查询、过期后迟到付款 | 不再追问；少见情况靠每天对账加人工处理 |
+| 2 结账会话查询、过期后迟到付款 | 会话状态确认是名额预留释放的前提，保留为第 2 题；其余细节不再追问 |
 | 3 幂等键范围、分页一致性、写后多久可查 | 不再追问，也不实测；对账按已过去的时间段查，避开写入中的数据 |
 | 4 退款为什么卡在 processing | 已有答案：约 30 分钟后自动成功（见第 1 节）；退款走人工 |
 | 5 嵌套 metadata 为 null | 不再追问；直接查订单或用 `orderMerchantExternalId` 关联（见第 3 节） |
