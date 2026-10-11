@@ -68,6 +68,8 @@ it('admits without the optional file tool when only its continuation reserve doe
  expect(context.tools).toEqual(['ask_question']);
  expect(context.skillFile).toBeUndefined();expect(context.skillFileReserve).toBeUndefined();
  expect(context.instructions).not.toContain('read_skill_file');expect(context.maxToolCalls).toBe(1);
+ // The runner only accepts two committed turns with the file tool; its continuation call is dropped too.
+ expect(context.maxTurns).toBe(1);expect(admitted.billing.limits.maxCalls).toBe(1);
  expect(f.rpc.mock.calls.filter(([name])=>name==='runtime_admit')).toHaveLength(1);
 });
 
