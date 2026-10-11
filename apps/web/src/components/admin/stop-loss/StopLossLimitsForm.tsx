@@ -5,7 +5,7 @@ import { trpc } from '@/trpc/client';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { formatUsd, parseUsdInput, reachedLimit, stopLossErrorMessage } from './stopLossFormat';
+import { STOP_LOSS_QUERY_OPTIONS, formatUsd, parseUsdInput, reachedLimit, stopLossErrorMessage } from './stopLossFormat';
 
 const AMOUNT_FIELDS = [
   ['userDailyUsd', '每位用户每日上限（美元）', '某位用户当天实际成本达到后，该用户的新调用被拒绝。'],
@@ -46,7 +46,7 @@ function UsageSummary({ config, usage }: { config: Config; usage: { utcDate?: un
 /** Daily USD limits, alert thresholds and the notification label; empty = not set. */
 export function StopLossLimitsForm() {
   const utils = trpc.useUtils();
-  const status = trpc.runtimeRateLimits.stopLossStatus.useQuery(undefined, { refetchOnMount: 'always' });
+  const status = trpc.runtimeRateLimits.stopLossStatus.useQuery(undefined, STOP_LOSS_QUERY_OPTIONS);
   const save = trpc.runtimeRateLimits.updateStopLoss.useMutation();
   const [draft, setDraft] = useState<Draft | null>(null);
   // Revision the edit started from; the server rejects the save if it has moved on.

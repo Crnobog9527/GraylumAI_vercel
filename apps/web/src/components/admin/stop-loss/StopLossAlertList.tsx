@@ -2,11 +2,11 @@
 'use client';
 import { trpc } from '@/trpc/client';
 import { Button } from '@/components/ui/button';
-import { describeAlert, formatTime, stopLossErrorMessage, type StopLossAlert } from './stopLossFormat';
+import { STOP_LOSS_QUERY_OPTIONS, describeAlert, formatTime, stopLossErrorMessage, type StopLossAlert } from './stopLossFormat';
 
 /** Read-only list of the latest stop-loss alerts (aggregates only, no user identifiers). */
 export function StopLossAlertList() {
-  const alerts = trpc.runtimeRateLimits.stopLossAlerts.useQuery(undefined, { refetchOnMount: 'always' });
+  const alerts = trpc.runtimeRateLimits.stopLossAlerts.useQuery(undefined, STOP_LOSS_QUERY_OPTIONS);
   const rows = (alerts.data?.alerts ?? []) as StopLossAlert[];
   return <section aria-labelledby="stop-loss-alerts-title" className="space-y-3 rounded-md border p-4">
     <div className="flex flex-wrap items-center justify-between gap-2">

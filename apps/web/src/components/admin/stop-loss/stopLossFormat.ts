@@ -5,6 +5,14 @@
 /** Same shape the server accepts (packages/api stopLossSettings usdThreshold). */
 export const USD_PATTERN = /^(0|[1-9]\d{0,11})(\.\d{1,12})?$/;
 
+/**
+ * The tab stays mounted (to keep drafts), so mount-time refetch alone would go stale on a
+ * long-lived page; every stop-loss query also re-reads once a minute and on window focus.
+ */
+export const STOP_LOSS_QUERY_OPTIONS = {
+  refetchOnMount: 'always', refetchOnWindowFocus: true, refetchInterval: 60_000,
+} as const;
+
 export const PROVIDERS = [
   ['openrouter', 'OpenRouter'],
   ['tikhub', 'TikHub'],

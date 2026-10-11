@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { describe, expect, it } from 'vitest';
-import { describeAlert, formatUsd, parseUsdInput, reachedLimit, stopLossErrorMessage } from './stopLossFormat';
+import { STOP_LOSS_QUERY_OPTIONS, describeAlert, formatUsd, parseUsdInput, reachedLimit, stopLossErrorMessage } from './stopLossFormat';
 
 describe('stop-loss amounts', () => {
   it('treats empty as not set and accepts only the server amount format', () => {
@@ -63,5 +63,11 @@ describe('stop-loss alerts', () => {
       details: { code: 'X' } }).title).toBe('止损检查暂时无法读取设置');
     expect(describeAlert({ id: '6', test_id: 'runtime_stop_loss_other', created_at: at, details: null }).title)
       .toBe('其他止损告警');
+  });
+});
+
+describe('stop-loss refresh', () => {
+  it('re-reads server data periodically because the tab stays mounted', () => {
+    expect(STOP_LOSS_QUERY_OPTIONS).toEqual({ refetchOnMount: 'always', refetchOnWindowFocus: true, refetchInterval: 60_000 });
   });
 });

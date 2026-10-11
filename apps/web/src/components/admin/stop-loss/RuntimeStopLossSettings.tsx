@@ -26,7 +26,7 @@ export function RuntimeStopLossSettings() {
       <CardHeader>
         <CardTitle>成本止损</CardTitle>
         <CardDescription>
-          本页每一块单独保存，页面的“保存所有设置”不包含这里。金额都是供应商实际美元成本，按 UTC 日统计。
+          本页每一块单独保存，页面的“保存所有设置”不包含这里。金额都是供应商实际美元成本，按 UTC 日统计；数据每分钟自动刷新。
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">

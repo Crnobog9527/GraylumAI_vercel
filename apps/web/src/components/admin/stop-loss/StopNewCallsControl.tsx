@@ -7,7 +7,7 @@ import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription,
   AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
-import { stopLossErrorMessage } from './stopLossFormat';
+import { STOP_LOSS_QUERY_OPTIONS, stopLossErrorMessage } from './stopLossFormat';
 
 /**
  * Site-wide emergency stop for new model calls (runtime_rate_limits.stopNewCalls).
@@ -16,7 +16,7 @@ import { stopLossErrorMessage } from './stopLossFormat';
  */
 export function StopNewCallsControl() {
   const utils = trpc.useUtils();
-  const view = trpc.runtimeRateLimits.get.useQuery(undefined, { refetchOnMount: 'always' });
+  const view = trpc.runtimeRateLimits.get.useQuery(undefined, STOP_LOSS_QUERY_OPTIONS);
   const setStop = trpc.runtimeRateLimits.setStopNewCalls.useMutation();
   const [confirming, setConfirming] = useState<boolean | null>(null);
   const [busy, setBusy] = useState(false);
