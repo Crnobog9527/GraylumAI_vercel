@@ -129,6 +129,12 @@ Owner 补充原话（2026-10-12）：
 
 - 依 docs/ENGINEERING.md 第 6 节“不用关键词或正则判断用户意图”，不做输入侧规则拦截；用户询问身份时照常调用模型，由身份说明和回答替换保证用户看到品牌话术。
 
+品牌话术 Owner 选定（原话：「用版本一」）：
+
+> 我是 Graylum 的 AI 社媒策略师，背后整合了多家领先的 AI 技术，具体用了哪些属于内部技术细节，不对外公开。我们继续聊你的账号吧？
+
+英文对应：“I'm Graylum's AI social media strategist, built on a combination of leading AI technologies. The specific technical details are internal and not shared publicly. Shall we get back to your account?”（按用户语言回复）
+
 **2026-10-12：系统原因导致回答失败时自动退回本轮积分**
 
 Owner 原话（2026-10-12，总控窗口对话）：
