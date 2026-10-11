@@ -1,0 +1,117 @@
+{
+  "capturedFileAt": "2026-10-11T06:04:14.593128+00:00",
+  "sdkResponse": {
+    "data": {
+      "subscriptionProducts": [
+        {
+          "id": "PROD_2qOnkXjXAGhsxLrbTGsUSb",
+          "name": "[Test 1011] Pro yearly USD279",
+          "billingPeriod": "yearly",
+          "status": "active",
+          "hasProdVersion": false,
+          "prices": [
+            {
+              "currency": "USD",
+              "priceInfo": {
+                "amount": "279.00",
+                "trialAmount": null,
+                "taxCategory": "saas"
+              }
+            }
+          ],
+          "metadata": "{\"evidenceRun\":\"graylum-waffo-20261011\"}"
+        },
+        {
+          "id": "PROD_3JKZPZdJtcSdu9dXdNuJQT",
+          "name": "[Test 1011] Pro monthly USD29",
+          "billingPeriod": "monthly",
+          "status": "active",
+          "hasProdVersion": false,
+          "prices": [
+            {
+              "currency": "USD",
+              "priceInfo": {
+                "amount": "29.00",
+                "trialAmount": null,
+                "taxCategory": "saas"
+              }
+            }
+          ],
+          "metadata": "{\"evidenceRun\":\"graylum-waffo-20261011\"}"
+        },
+        {
+          "id": "PROD_25Zmm7PVC68mtzM2XkZZAC",
+          "name": "[Test 1011] Founder yearly USD496",
+          "billingPeriod": "yearly",
+          "status": "active",
+          "hasProdVersion": false,
+          "prices": [
+            {
+              "currency": "USD",
+              "priceInfo": {
+                "amount": "496.00",
+                "trialAmount": null,
+                "taxCategory": "saas"
+              }
+            }
+          ],
+          "metadata": "{\"evidenceRun\":\"graylum-waffo-20261011\"}"
+        },
+        {
+          "id": "PROD_0ZleshD5LEYuTruuiVEBNs",
+          "name": "[Test 1011] Gold yearly USD621",
+          "billingPeriod": "yearly",
+          "status": "active",
+          "hasProdVersion": false,
+          "prices": [
+            {
+              "currency": "USD",
+              "priceInfo": {
+                "amount": "621.00",
+                "trialAmount": null,
+                "taxCategory": "saas"
+              }
+            }
+          ],
+          "metadata": "{\"evidenceRun\":\"graylum-waffo-20261011\"}"
+        },
+        {
+          "id": "PROD_3FNIDuKdkVgvIfd0O4vUzZ",
+          "name": "[Test 1011] Gold monthly USD69",
+          "billingPeriod": "monthly",
+          "status": "active",
+          "hasProdVersion": false,
+          "prices": [
+            {
+              "currency": "USD",
+              "priceInfo": {
+                "amount": "69.00",
+                "trialAmount": null,
+                "taxCategory": "saas"
+              }
+            }
+          ],
+          "metadata": "{\"evidenceRun\":\"graylum-waffo-20261011\"}"
+        },
+        {
+          "id": "PROD_6bacQZwfKBSKqsuRzGmYaN",
+          "name": "[Test 1011] Gold monthly first 30 days USD49 then USD69",
+          "billingPeriod": "monthly",
+          "status": "active",
+          "hasProdVersion": false,
+          "prices": [
+            {
+              "currency": "USD",
+              "priceInfo": {
+                "amount": "69.00",
+                "trialAmount": "49.00",
+                "taxCategory": "saas"
+              }
+            }
+          ],
+          "metadata": "{\"trialDays\":30,\"evidenceRun\":\"graylum-waffo-20261011\"}"
+        }
+      ]
+    }
+  }
+}

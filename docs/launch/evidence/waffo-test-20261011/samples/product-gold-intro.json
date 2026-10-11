@@ -1,0 +1,48 @@
+{
+  "time": "2026-10-11T05:55:28.862Z",
+  "path": "/v1/actions/subscription-product/create-product",
+  "httpStatus": 200,
+  "request": {
+    "storeId": "[WAFFO_STORE_ID]",
+    "name": "[Test 1011] Gold monthly first 30 days USD49 then USD69",
+    "billingPeriod": "monthly",
+    "prices": {
+      "USD": {
+        "amount": "69.00",
+        "taxCategory": "saas",
+        "trialAmount": "49.00"
+      }
+    },
+    "metadata": {
+      "evidenceRun": "graylum-waffo-20261011",
+      "trialDays": 30
+    }
+  },
+  "response": {
+    "data": {
+      "product": {
+        "id": "PROD_6bacQZwfKBSKqsuRzGmYaN",
+        "storeId": "[WAFFO_STORE_ID]",
+        "name": "[Test 1011] Gold monthly first 30 days USD49 then USD69",
+        "description": null,
+        "billingPeriod": "monthly",
+        "prices": {
+          "USD": {
+            "amount": "69.00",
+            "taxCategory": "saas",
+            "trialAmount": "49.00"
+          }
+        },
+        "media": [],
+        "successUrl": null,
+        "metadata": {
+          "trialDays": 30,
+          "evidenceRun": "graylum-waffo-20261011"
+        },
+        "status": "active",
+        "createdAt": "2026-10-11T05:55:28.498Z",
+        "updatedAt": "2026-10-11T05:55:28.498Z"
+      }
+    }
+  }
+}

@@ -1,0 +1,3 @@
+query {
+ __schema { queryType { name } types { kind name fields { name args { name type { kind name ofType { kind name ofType { kind name } } } } type { kind name ofType { kind name ofType { kind name } } } } inputFields { name type { kind name ofType { kind name } } } } }
+}

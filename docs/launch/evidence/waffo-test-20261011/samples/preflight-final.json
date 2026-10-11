@@ -1,0 +1,29 @@
+{
+  "capturedFileAt": "2026-10-11T05:54:24.227518+00:00",
+  "sdkResponse": {
+    "data": {
+      "store": {
+        "id": "[WAFFO_STORE_ID]",
+        "status": "active",
+        "prodEnabled": false,
+        "isLive": false,
+        "payinEnable": true
+      },
+      "storeWebhooksCount": 0,
+      "subscriptionProducts": [
+        {
+          "id": "PROD_4eiCIm2rEGeNy71n1gFDZy",
+          "name": "gold 会员",
+          "status": "active",
+          "metadata": "{}"
+        },
+        {
+          "id": "PROD_7BjmIQi7OL1Pv8IIL1Qd7Y",
+          "name": "Pro 会员",
+          "status": "active",
+          "metadata": "{}"
+        }
+      ]
+    }
+  }
+}

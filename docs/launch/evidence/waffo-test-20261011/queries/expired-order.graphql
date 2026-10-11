@@ -1,0 +1,4 @@
+query($storeId:String!){
+ subscriptionOrders(storeId:$storeId,filter:{orderMerchantExternalId:{eq:"graylum-waffo-20261011-expired"}},limit:10,offset:0){id status testMode}
+ payments(filter:{storeId:{eq:$storeId},orderMerchantExternalId:{eq:"graylum-waffo-20261011-expired"}},limit:10,offset:0){id status testMode}
+}
