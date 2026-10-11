@@ -22,7 +22,7 @@ function setup(found: WaffoPayment | null, rpcResult: unknown = { data: { state:
   const provider = { merchant: 'fixture', mode: 'test' as const, storeId: 'STO_fixture',
     readPayment: vi.fn().mockResolvedValue(found), listPayments: vi.fn(),
     cancelSubscription: vi.fn(async (id: string) => ({ orderId: id, status: 'canceling' })),
-    readSubscription: vi.fn(async (id: string) => ({ orderId: id, status: 'canceling' })) };
+    readSubscription: vi.fn(async (id: string) => ({ orderId: id, status: 'active' })) };
   return { db, rpc, provider, run: () => processWaffoReceipt(db, provider, receipt) };
 }
 const resolved = (rpc: ReturnType<typeof setup>['rpc']) => rpc.mock.calls.find(([fn]) => fn === 'pay_waffo_resolve_receipt')?.[1];
@@ -98,8 +98,14 @@ describe('Waffo renewal stop for undelivered cash', () => {
   it('stops and confirms the renewal of a first payment that arrived after the 40-minute release', async () => {
     const f = setup(payment(), { data: { state: 'review' }, error: null });
     expect(await f.run()).toEqual({ state: 'review', reason: 'review' });
+    expect(f.provider.readSubscription).toHaveBeenCalledWith('ORD_fixture1');
     expect(f.provider.cancelSubscription).toHaveBeenCalledWith('ORD_fixture1');
-    expect(f.provider.readSubscription).not.toHaveBeenCalled();
+  });
+  it('reads first on redelivery: an already stopped subscription is not cancelled again', async () => {
+    const f = setup(payment(), { data: { state: 'review' }, error: null });
+    f.provider.readSubscription.mockResolvedValueOnce({ orderId: 'ORD_fixture1', status: 'canceling' });
+    expect(await f.run()).toEqual({ state: 'review', reason: 'review' });
+    expect(f.provider.cancelSubscription).not.toHaveBeenCalled();
   });
   it('stops offsite and database-refused first payments too, but never a delivered or mapped renewal', async () => {
     const offsite = setup(payment({ orderMerchantExternalId: 'someone-else' }), { data: { alert: false }, error: null });
@@ -117,9 +123,8 @@ describe('Waffo renewal stop for undelivered cash', () => {
     const error = vi.spyOn(logger, 'error').mockImplementation(() => undefined);
     const f = setup(payment(), { data: { state: 'review' }, error: null });
     f.provider.cancelSubscription.mockResolvedValueOnce({ orderId: 'ORD_fixture1', status: 'active' });
-    f.provider.readSubscription.mockResolvedValueOnce({ orderId: 'ORD_fixture1', status: 'active' });
     await expect(f.run()).rejects.toThrow('PAY_WAFFO_RENEWAL_STOP_PENDING');
-    expect(f.provider.readSubscription).toHaveBeenCalledWith('ORD_fixture1');
+    expect(f.provider.readSubscription).toHaveBeenCalledTimes(2);
     expect(resolved(f.rpc)).toBeUndefined();
     expect(error).toHaveBeenCalledWith('billing', 'pay_waffo_renewal_stop_unconfirmed', { waffoOrderId: 'ORD_fixture1', status: 'active' });
     const g = setup(payment(), { data: { state: 'review' }, error: null });

@@ -91,8 +91,12 @@ const STOPPED = ['canceling', 'canceled'];
  * stays open for provider redelivery; the daily reconciliation reports any subscription still renewing. */
 async function stopRenewal(provider: Provider, waffoOrderId: string) {
   try {
-    let observed = await provider.cancelSubscription(waffoOrderId);
-    if (observed.orderId === waffoOrderId && !STOPPED.includes(observed.status)) observed = await provider.readSubscription(waffoOrderId);
+    // Start from the authoritative read: an earlier attempt may have stopped it before its response was lost.
+    let observed = await provider.readSubscription(waffoOrderId);
+    if (observed.orderId === waffoOrderId && !STOPPED.includes(observed.status)) {
+      observed = await provider.cancelSubscription(waffoOrderId);
+      if (observed.orderId === waffoOrderId && !STOPPED.includes(observed.status)) observed = await provider.readSubscription(waffoOrderId);
+    }
     if (observed.orderId === waffoOrderId && STOPPED.includes(observed.status)) return;
     logger.error('billing', 'pay_waffo_renewal_stop_unconfirmed', { waffoOrderId, status: observed.status });
   } catch (error) {
