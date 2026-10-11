@@ -249,7 +249,7 @@ it('sends the revision the edit started from and turns a 409 into a reload promp
     await browserExpect(page.getByText('设置已被其他人修改', { exact: false })).toBeVisible();
     expect((await calls(page)).find(c => c[0] === 'updateStopLoss')?.[1]).toMatchObject({ expectedVersion: 4 });
     await browserExpect(page.getByText('止损设置已保存', { exact: false })).toHaveCount(0);
-    await page.getByRole('button', { name: '重新读取' }).click();
+    await page.getByRole('button', { name: '放弃修改并重新读取' }).click();
     await browserExpect(page.getByLabel('全站每日上限（美元）')).toHaveValue('15');
     await page.getByLabel('全站每日上限（美元）').fill('12');
     await page.getByRole('button', { name: '保存止损设置' }).click();

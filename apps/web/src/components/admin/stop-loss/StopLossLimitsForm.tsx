@@ -54,7 +54,7 @@ export function StopLossLimitsForm() {
   const [baseRevision, setBaseRevision] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
-  const [failure, setFailure] = useState<string | null>(null);
+  const [failure, setFailure] = useState<{ text: string; conflict: boolean } | null>(null);
   const config = status.data?.config as Config | undefined;
   const revision = status.data?.revision;
   const current = draft ?? (config ? toDraft(config) : null);
@@ -89,7 +89,10 @@ export function StopLossLimitsForm() {
       setNotice(sameConfig(result.config as Config, next) ? '止损设置已保存（已回读确认）。'
         : '已保存，但回读到的设置和填写的不同，请核对下方显示的当前设置。');
     } catch (error) {
-      setFailure(stopLossErrorMessage(error as Parameters<typeof stopLossErrorMessage>[0], 'save'));
+      const err = error as Parameters<typeof stopLossErrorMessage>[0];
+      const conflict = err?.data?.code === 'CONFLICT' || err?.data?.httpStatus === 409;
+      setFailure({ text: conflict ? stopLossErrorMessage(err, 'save')
+        : '保存没有确认成功。你的修改还在，可以点“重新读取当前设置”核对后再保存。', conflict });
     } finally { setBusy(false); }
   }
 
@@ -140,8 +143,11 @@ export function StopLossLimitsForm() {
     </>}
     {notice && !failure && <p role="status">{notice}</p>}
     {failure && <div role="alert" className="space-y-2">
-      <p>{failure}</p>
-      <Button variant="outline" onClick={reload}>重新读取</Button>
+      <p>{failure.text}</p>
+      {/* A conflict means the draft is based on an old version; other failures keep the draft and
+          its base version, so a save that did commit still surfaces as a conflict next time. */}
+      {failure.conflict ? <Button variant="outline" onClick={reload}>放弃修改并重新读取</Button>
+        : <Button variant="outline" onClick={() => { setFailure(null); void status.refetch(); }}>重新读取当前设置</Button>}
     </div>}
   </section>;
 }
