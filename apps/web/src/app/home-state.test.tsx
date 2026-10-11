@@ -16,6 +16,11 @@ it('shows loading without claiming an empty directory or a new user',()=>{
  expect(html).toContain('正在读取账号与资料');
  expect(html).not.toContain('暂无已发布');expect(html).not.toContain('开始新手引导');
 });
+it('starts 我已有定位 in the Agent workspace, not the library (R15)',()=>{
+ const html=renderToStaticMarkup(<HomePage/>);
+ expect(html).toMatch(/<a href="\/positioning">我已有定位<\/a>/);
+ expect(html).not.toMatch(/<a href="\/library">我已有定位/);
+});
 it('offers onboarding to a new user without any alert',()=>{
  const html=renderToStaticMarkup(<HomePage/>);
  expect(html).toContain('开始新手引导');expect(html).toContain('我已有定位');expect(html).not.toContain('role="alert"');
