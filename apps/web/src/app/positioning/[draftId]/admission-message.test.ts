@@ -1,6 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import {expect,it} from 'vitest';
 import {admissionMessage} from './admission-message';
+import {RUNTIME_INPUT_TOO_LONG_MESSAGE} from '../../../../../../packages/api/src/shared/runtimeInputMessages';
 const message='本次操作所需模型尚未获准用于当前测试窗口，请联系管理员。';
 it.each(['PRECONDITION_FAILED','FORBIDDEN'].flatMap(code=>['opc.prepareStep','opc.mentorTurnStream'].map(path=>[code,path])))('presents a structured %s admission refusal from %s while retaining the same request',(code,path)=>{
  const result=admissionMessage(Object.assign(new Error(message),{data:{code,path}}));
@@ -46,4 +47,10 @@ it.each(['工作空间服务暂不可用，请稍后重试。（诊断编号：1
 });
 it('ignores 429 from other procedures',()=>{
  expect(admissionMessage(Object.assign(new Error(gateNotices.minute),{data:{code:'TOO_MANY_REQUESTS',path:'runtime.execute'}}))).toBeNull();
+});
+
+it.each(['opc.prepareStep','opc.mentorTurnStream','runtime.prepare'])('asks to split too-long input without the retained-request suffix (%s)',path=>{
+ const result=admissionMessage(Object.assign(new Error(RUNTIME_INPUT_TOO_LONG_MESSAGE),{data:{code:'PRECONDITION_FAILED',path}}));
+ expect(result).toBe(RUNTIME_INPUT_TOO_LONG_MESSAGE);expect(result).toContain('请分几次发送');expect(result).toContain('没有扣费');
+ expect(result).not.toContain('原请求与输入已保留');expect(result).not.toContain('诊断编号');
 });

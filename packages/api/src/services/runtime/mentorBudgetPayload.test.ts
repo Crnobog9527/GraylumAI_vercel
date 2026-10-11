@@ -104,7 +104,8 @@ it('worst allowed composition fits at the exact input hard cap with 8KiB storage
   expect(postgresJsonbBytes(captured.p_payload)).toBeLessThanOrEqual(262144 - 8192);
   expect(postgresJsonbBytes(captured.p_billing)).toBeLessThanOrEqual(262144 - 8192);
   const over = await fixture(resourceSize + 1, true, config);
-  await expect(over.run()).rejects.toThrow('RUNTIME_REQUIRED_CONTEXT_EXCEEDS_CAPACITY');
+  // The 8000-character user message is what can be split, so this is the typed refusal.
+  await expect(over.run()).rejects.toThrow('RUNTIME_INPUT_TOO_LONG');
   expect(over.writes).toEqual([]);
   if (process.env.MENTOR_PAYLOAD_PREFLIGHT_DIR) {
     writeFileSync(`${process.env.MENTOR_PAYLOAD_PREFLIGHT_DIR}/configured-worst.json`, JSON.stringify(captured));
@@ -149,7 +150,7 @@ it('standalone organization fits at its exact input cap and rejects one more byt
   purposeBudget:{purpose:'organize',inputBytes:112000,historyItems:1000}});
  expect(postgresJsonbBytes(f.captured().p_billing)).toBeLessThan(262144-8192);
  const over=await fixture(0,true,config,extra+1);
- await expect(over.run(request)).rejects.toThrow('RUNTIME_REQUIRED_CONTEXT_EXCEEDS_CAPACITY');
+ await expect(over.run(request)).rejects.toThrow('RUNTIME_INPUT_TOO_LONG');
  expect(over.writes).toEqual([]);
  if(process.env.MENTOR_PAYLOAD_PREFLIGHT_DIR)writeFileSync(
   `${process.env.MENTOR_PAYLOAD_PREFLIGHT_DIR}/organize-worst.json`,JSON.stringify(f.captured()));

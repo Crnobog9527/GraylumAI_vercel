@@ -3,6 +3,7 @@ import {isAnswerSourceDenied} from "./mentor-turn";
 import {STEP_SUMMARY_REFUSED} from "./step-summary";
 import {gateAdmissionNotice} from "@/lib/runtime-gate-notice";
 import {isOrganizerPendingError,ORGANIZER_PENDING_NOTICE} from "@/lib/payg-wait";
+import {RUNTIME_INPUT_TOO_LONG_MESSAGE} from "../../../../../../packages/api/src/shared/runtimeInputMessages";
 const admissionPaths=['opc.prepareStep','opc.mentorTurnStream','runtime.prepare'];
 const retained=' 原请求与输入已保留；条件恢复后可继续核对同一请求。';
 /** Only an explicit admission response can replace the unknown-outcome notice.
@@ -24,5 +25,7 @@ export function admissionMessage(cause:unknown):string|null {
  if(!admissionPaths.includes(String(data.path)))return null;
  if(data.code==='SERVICE_UNAVAILABLE')return '服务暂时不可用，请稍后再试。'+retained;
  if(!['PRECONDITION_FAILED','FORBIDDEN'].includes(String(data.code)))return null;
+ // Too-long input is not a retained request waiting for a condition: ask the user to split it.
+ if(data.code==='PRECONDITION_FAILED'&&cause.message===RUNTIME_INPUT_TOO_LONG_MESSAGE)return RUNTIME_INPUT_TOO_LONG_MESSAGE;
  return cause.message+retained;
 }

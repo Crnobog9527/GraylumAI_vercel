@@ -4,6 +4,8 @@ import type {SupabaseClient} from '@supabase/supabase-js';
 import {packageHash,sha256} from '../skills/loader';
 import {runtimeAdmissionService} from './admission';
 import {runtimeContext} from './runtimeContext';
+import {StagingAccessError,stagingProcedureError} from './stagingErrors';
+import {RUNTIME_INPUT_TOO_LONG_MESSAGE} from '../../shared/runtimeInputMessages';
 import {OPENING_INPUT} from '../../shared/opcQuestions';
 vi.mock('./newWorkGate',async original=>({...await original<typeof import('./newWorkGate')>(),
  ...(await import('../__tests__/fixtures/runtimeGates')).testAdmissionGates}));
@@ -73,10 +75,25 @@ it('admits without the optional file tool when only its continuation reserve doe
  expect(f.rpc.mock.calls.filter(([name])=>name==='runtime_admit')).toHaveLength(1);
 });
 
-it('rejects required input that does not fit even without the file tool before admission',async()=>{
+it('refuses user input that does not fit even without the file tool as a typed refusal before admission',async()=>{
  const f=fixture();
- await expect(runtimeAdmissionService(f.user,f.admin,{...f.policy,inputBytes:14000})
-  .prepare({...f.input,input:'x'.repeat(14000)})).rejects.toThrow('RUNTIME_REQUIRED_CONTEXT_EXCEEDS_CAPACITY');
+ const refused=runtimeAdmissionService(f.user,f.admin,{...f.policy,inputBytes:14000}).prepare({...f.input,input:'中'.repeat(8000)});
+ await expect(refused).rejects.toBeInstanceOf(StagingAccessError);
+ await expect(refused).rejects.toThrow('RUNTIME_INPUT_TOO_LONG');
+ expect(f.rpc.mock.calls.some(([name])=>name==='runtime_admit')).toBe(false);
+});
+
+it('maps too-long input to a fixed refusal without a diagnostic identifier',()=>{
+ const error=stagingProcedureError(new StagingAccessError('RUNTIME_INPUT_TOO_LONG'),'opc.mentorTurnStream');
+ expect(error.code).toBe('PRECONDITION_FAILED');expect(error.message).toBe(RUNTIME_INPUT_TOO_LONG_MESSAGE);
+ expect(error.message).not.toContain('诊断编号');
+});
+
+it('keeps an overflow that does not depend on user input an untyped server failure',async()=>{
+ const f=fixture();skill.instructions='S'.repeat(20000);
+ const refused=runtimeAdmissionService(f.user,f.admin,{...f.policy,inputBytes:14000}).prepare(f.input);
+ await expect(refused).rejects.toThrow('RUNTIME_REQUIRED_CONTEXT_EXCEEDS_CAPACITY');
+ await expect(refused).rejects.not.toBeInstanceOf(StagingAccessError);
  expect(f.rpc.mock.calls.some(([name])=>name==='runtime_admit')).toBe(false);
 });
 
