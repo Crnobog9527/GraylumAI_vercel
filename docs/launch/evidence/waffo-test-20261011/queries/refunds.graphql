@@ -1,0 +1,11 @@
+query {
+ payment(id:"PAY_0FDFISR4GFv3PBTEO5KP0e") {
+ id status testMode refundStatus refundedAmount {amount currency display} isFullyRefunded
+ refunds {id paymentId ticketId status amount {amount currency display} pspAmountDetails {amount currency}
+ orderMerchantExternalId refundTicketMerchantExternalId createdAt}
+ }
+ refundTickets(filter:{subjectId:{eq:"PAY_0FDFISR4GFv3PBTEO5KP0e"}}) {
+ id status refundTicketMerchantExternalId executedAt createdAt
+ versionData {requestedAmount {amount currency}}
+ }
+}

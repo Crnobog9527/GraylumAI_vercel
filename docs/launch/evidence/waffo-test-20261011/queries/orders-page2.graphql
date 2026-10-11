@@ -1,0 +1,7 @@
+query($storeId:String!) {
+ subscriptionOrders(storeId:$storeId,filter:{orderMerchantExternalId:{in:["graylum-waffo-20261011-intro49","graylum-waffo-20261011-monthly69","graylum-waffo-20261011-annual496"]}},limit:1,offset:2) {
+ id storeId status testMode orderMerchantExternalId metadata willRenew isInTrial billingPeriod currentPeriodNumber
+ currentPeriodStart currentPeriodEnd canceledAt createdAt updatedAt payments {id status periodNumber}
+ }
+ subscriptionOrdersCount(storeId:$storeId,filter:{orderMerchantExternalId:{in:["graylum-waffo-20261011-intro49","graylum-waffo-20261011-monthly69","graylum-waffo-20261011-annual496"]}})
+}

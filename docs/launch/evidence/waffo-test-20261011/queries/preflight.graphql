@@ -1,0 +1,5 @@
+query($storeId: String!) {
+ store(id: $storeId) { id status prodEnabled isLive payinEnable }
+ storeWebhooksCount(storeId: $storeId)
+ subscriptionProducts(storeId: $storeId, limit: 100) { id name status metadata }
+}

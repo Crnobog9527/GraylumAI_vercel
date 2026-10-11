@@ -1,0 +1,44 @@
+{
+  "time": "2026-10-11T05:55:33.495Z",
+  "path": "/v1/actions/subscription-product/create-product",
+  "httpStatus": 200,
+  "request": {
+    "storeId": "[WAFFO_STORE_ID]",
+    "name": "[Test 1011] Pro monthly USD29",
+    "billingPeriod": "monthly",
+    "prices": {
+      "USD": {
+        "amount": "29.00",
+        "taxCategory": "saas"
+      }
+    },
+    "metadata": {
+      "evidenceRun": "graylum-waffo-20261011"
+    }
+  },
+  "response": {
+    "data": {
+      "product": {
+        "id": "PROD_3JKZPZdJtcSdu9dXdNuJQT",
+        "storeId": "[WAFFO_STORE_ID]",
+        "name": "[Test 1011] Pro monthly USD29",
+        "description": null,
+        "billingPeriod": "monthly",
+        "prices": {
+          "USD": {
+            "amount": "29.00",
+            "taxCategory": "saas"
+          }
+        },
+        "media": [],
+        "successUrl": null,
+        "metadata": {
+          "evidenceRun": "graylum-waffo-20261011"
+        },
+        "status": "active",
+        "createdAt": "2026-10-11T05:55:33.120Z",
+        "updatedAt": "2026-10-11T05:55:33.120Z"
+      }
+    }
+  }
+}

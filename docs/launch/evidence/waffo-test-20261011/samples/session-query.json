@@ -1,0 +1,17 @@
+{
+  "capturedFileAt": "2026-10-11T06:03:00.352593+00:00",
+  "sdkResponse": {
+    "data": null,
+    "errors": [
+      {
+        "message": "Cannot query field \"checkoutSession\" on type \"Query\".",
+        "locations": [
+          {
+            "line": 2,
+            "column": 2
+          }
+        ]
+      }
+    ]
+  }
+}
