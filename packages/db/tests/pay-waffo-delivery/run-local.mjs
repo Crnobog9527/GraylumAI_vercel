@@ -43,7 +43,7 @@ try {
   });
   assert.equal(report.failed, null, JSON.stringify(report));
   const before = fingerprint();
-  sql(readFileSync(resolve(root, 'packages/db/migrations/0210_pay_waffo_delivery.sql'),'utf8'));
+  sql(readFileSync(resolve(root, 'packages/db/migrations/0211_pay_waffo_delivery.sql'),'utf8'));
   assert.deepEqual(fingerprint(),before,'new migration repeat preserves structure');
   const port = Number(docker(['port', name, '5432/tcp']).split(':').at(-1));
   const connect = async () => {
