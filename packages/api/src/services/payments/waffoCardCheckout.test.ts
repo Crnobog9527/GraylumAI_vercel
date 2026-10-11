@@ -80,9 +80,12 @@ describe('expired card checkout release', () => {
       ? { data: null, error: { message: 'PAY_WAFFO_CLOSE_DENIED' } } : { data: null, error: null }));
     const base = { payment_channel: 'waffo', payment_method: 'card', payment_mode: 'test', merchant_namespace: 'fixture',
       qualification_state: 'reserved', payment_status: 'unpaid', purchase_closed_at: null, user_id: user };
-    const db = fakeDb({ payment_orders: [{ ...base, id: 'old' }, { ...base, id: 'early' }, { ...base, id: 'wallet', payment_method: 'alipay' },
-      { ...base, id: 'closed', purchase_closed_at: '2026-10-11T00:00:00Z' }] }, rpc);
+    const ago = (minutes: number) => new Date(Date.now() - minutes * 60_000).toISOString();
+    const db = fakeDb({ payment_orders: [{ ...base, id: 'recent', created_at: ago(5) }, { ...base, id: 'early', created_at: ago(45) },
+      { ...base, id: 'old', created_at: ago(90) }, { ...base, id: 'wallet', payment_method: 'alipay', created_at: ago(90) },
+      { ...base, id: 'closed', purchase_closed_at: '2026-10-11T00:00:00Z', created_at: ago(90) }] }, rpc);
     expect(await closeExpiredWaffoCheckouts(db, 'fixture')).toBe(1);
+    // Recent rows never take a slot in the capped batch; oldest first.
     expect(rpc.mock.calls.map(c => c[1].p_order)).toEqual(['old', 'early']);
     rpc.mockResolvedValue({ data: null, error: { message: 'connection reset' } });
     await expect(closeExpiredWaffoCheckouts(db, 'fixture')).rejects.toThrow('PERSISTENCE_UNAVAILABLE');

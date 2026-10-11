@@ -15,7 +15,9 @@ const REPLAY_MARGIN_MS = 60 * 1000;
 export async function closeExpiredWaffoCheckouts(db: Pick<SupabaseClient, 'from' | 'rpc'>, merchant: string, userId?: string) {
   let query = db.from('payment_orders').select('id,user_id').eq('payment_channel', 'waffo').eq('payment_method', 'card')
     .eq('payment_mode', 'test').eq('merchant_namespace', merchant).eq('qualification_state', 'reserved')
-    .eq('payment_status', 'unpaid').is('purchase_closed_at', null);
+    .eq('payment_status', 'unpaid').is('purchase_closed_at', null)
+    // Only rows old enough can qualify (dispatch never precedes creation); oldest first so the cap never starves them.
+    .lt('created_at', new Date(Date.now() - 40 * 60 * 1000).toISOString()).order('created_at', { ascending: true });
   if (userId) query = query.eq('user_id', userId);
   const due = await query.limit(100);
   if (due.error) throw new Error('PAY_WAFFO_PERSISTENCE_UNAVAILABLE');

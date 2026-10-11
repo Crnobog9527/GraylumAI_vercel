@@ -56,9 +56,9 @@ export async function reconcileWaffoPayments(db: Db, provider: Provider) {
   // Only real UUIDs reach the uuid column, and only orders of this Waffo card binding count as ours.
   const unmatched = paid.filter(p => !orderOf.has(p.id) && !offsitePaid.has(p.id)).map(p => p.orderMerchantExternalId)
     .filter((value): value is string => z.uuid().safeParse(value).success);
-  const siteOrders = new Set((await chunked([...new Set(unmatched)], part => db.from('payment_orders').select('id')
-    .eq('payment_channel', 'waffo').eq('payment_method', 'card').eq('merchant_namespace', provider.merchant)
-    .eq('payment_mode', 'test').in('id', part))).map(o => o.id));
+  const siteOrders = new Map((await chunked([...new Set(unmatched)], part => db.from('payment_orders')
+    .select('id,qualification_state,method_review_reason').eq('payment_channel', 'waffo').eq('payment_method', 'card')
+    .eq('merchant_namespace', provider.merchant).eq('payment_mode', 'test').in('id', part))).map(o => [o.id!, o]));
   for (const payment of paid) {
     const orderId = orderOf.get(payment.id);
     const order = orderId ? orderById.get(orderId) : undefined;
@@ -74,7 +74,14 @@ export async function reconcileWaffoPayments(db: Db, provider: Provider) {
     } else if (offsitePaid.has(payment.id) || !siteOrders.has(payment.orderMerchantExternalId ?? '')) {
       findings.push({ kind: 'offsite_refund_due', paymentId: payment.id, refundCandidate: true });
     } else {
-      findings.push({ kind: 'paid_not_delivered', paymentId: payment.id, refundCandidate: false });
+      // Its webhook never applied. A site order already released (e.g. after the 40-minute timeout) or under
+      // review means this is late cash: refund candidate. Otherwise it is an ordinary undelivered payment.
+      const site = siteOrders.get(payment.orderMerchantExternalId!)!;
+      const late = site.qualification_state === 'released' || site.qualification_state === 'review' || Boolean(site.method_review_reason);
+      findings.push(late
+        ? { kind: 'paid_in_review', paymentId: payment.id, orderId: site.id!,
+          reason: site.method_review_reason ?? site.qualification_state ?? undefined, refundCandidate: true }
+        : { kind: 'paid_not_delivered', paymentId: payment.id, refundCandidate: false });
     }
   }
   if (complete) {
