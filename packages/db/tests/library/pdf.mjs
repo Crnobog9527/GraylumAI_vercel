@@ -57,7 +57,7 @@ export async function verifyPdf(admin, one, two) {
   await admin.query('DROP TRIGGER pdf_test_fail ON library_recognition_units; DROP FUNCTION public.pdf_test_fail()');
   assert.equal((await publish()).status,'ready');
   assert.equal((await publish()).status,'ready');
-  assert.equal(await value(admin,'SELECT library_usage($1) v',[a]),'20000005');
+  assert.equal(await value(admin,'SELECT library_usage($1) v',[a]),'17','0213: published PDF counts actual bytes');
   assert.deepEqual((await admin.query('SELECT position,has_text,status FROM library_recognition_units WHERE document_id=$1 ORDER BY position',[did])).rows,
     [{position:1,has_text:true,status:'complete'},{position:2,has_text:false,status:'pending'},{position:3,has_text:false,status:'complete'}]);
   assert.equal(await value(admin,'SELECT text_bytes v FROM library_documents WHERE id=$1',[did]),'7');

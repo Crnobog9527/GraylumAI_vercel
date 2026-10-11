@@ -8,6 +8,7 @@ import pg from 'pg';
 import { verifyPdf } from './pdf.mjs';
 import { verifySupplement } from './supplement.mjs';
 import { verifyErasure } from './erasure.mjs';
+import { verifyReadyUsage } from './ready-usage.mjs';
 import { POSTGRES_IMAGE } from '../v3/images.mjs';
 import { buildFromFiles, installPgCronStub } from '../baseline/build-from-files.mjs';
 
@@ -52,6 +53,11 @@ try {
   const beforePdfRepeat = catalog();
   sql(pdf);
   assert.equal(catalog(), beforePdfRepeat, '0210 repeat must not change schema/permissions');
+  const readyUsage = readFileSync(resolve(root, 'packages/db/migrations/0213_library_ready_usage.sql'), 'utf8');
+  sql(readyUsage);
+  const beforeUsageRepeat = catalog();
+  sql(readyUsage);
+  assert.equal(catalog(), beforeUsageRepeat, '0213 repeat must not change schema/permissions');
   const port = Number(docker(['port', name, '5432/tcp']).split(':').at(-1));
   const connect = async () => {
     const c = new pg.Client({ host: '127.0.0.1', port, database: 'lib2a', user: 'postgres', password: 'local-test-only' });
@@ -184,11 +190,12 @@ try {
   await verifyErasure(admin, one, true);
   await verifyPdf(admin, one, two);
   await verifyErasure(admin, one, 'pdf');
+  await verifyReadyUsage(admin, one);
   console.log(JSON.stringify({result:'PASS',steps:report.passed,newMigrationRepeated:true,
     cases:['default-off','concurrent-quota-barrier','idempotent-no-new-token','cross-user-denial','actual-size',
       'atomic-publication','downgrade-read-delete','delete-private-fields','delete-publish-denial','live-token-hold',
       'late-object-resets-proof','two-absence-release','domain-erasure-proof','anonymous-authenticated-denied',
-      'raw-service-table-denied','disabled-banned-retention','stale-expiry-publication','live-expiry-recheck','ticket-upload-regression','closed-account','private-bucket-policy']}));
+      'raw-service-table-denied','disabled-banned-retention','stale-expiry-publication','live-expiry-recheck','ticket-upload-regression','closed-account','private-bucket-policy','ready-actual-usage']}));
   console.log('NOT_RUN: real staging Storage (local SQL and transport mocks do not prove provider behavior)');
 } finally {
   await Promise.all(clients.map(c=>c.end()));
