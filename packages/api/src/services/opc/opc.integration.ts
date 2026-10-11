@@ -734,9 +734,9 @@ it("OPC: browser manual positioning publishes, defers topic generation and recov
       .toBe(1);
     expect(await page.getByRole("button", { name: "保存信息状态" }).count()).toBe(0);
     expect(await page.getByRole("button", { name: "确认所填信息并整理成果" }).count()).toBe(0);
-    await page.getByText("直接填写完整策略", { exact: true }).waitFor();
-    expect(await page.getByRole("button", { name: "信息不够，让 Agent 帮我补齐", exact: true }).count()).toBe(1);
-    expect(Number((await sql.query("select count(*)::int n from runtime_executions where actor_id=$1", [f.actor])).rows[0].n)).toBe(0);
+    // R15: a manual draft (我已有定位) is the same Agent workspace; the mentor opens and asks for the existing positioning.
+    await page.getByRole("heading", { name: "核对已有定位", exact: true }).waitFor();
+    expect(await page.getByText("直接填写完整策略", { exact: true }).count()).toBe(0);
     let firstInformation = true,
       informationArrived!: () => void;
     const heldInformation = new Promise<void>((resolve) => {
@@ -9756,19 +9756,25 @@ it('OPC: positioning entry creates a new business or edits only the selected exi
   await page.goto(process.env.V3_LOCAL_APP+'/positioning');
   const draftCount=Number((await sql.query('select count(*)::int n from opc_drafts where actor_id=$1',[f.actor])).rows[0].n);
   await page.getByRole('button',{name:'梳理账号定位',exact:true}).first().click();
-  await page.getByRole('dialog',{name:'梳理账号定位',exact:true}).getByRole('button',{name:'整理另一份已有定位',exact:true}).click();
+  // R15: 我已有定位 starts a manual draft in the Agent workspace instead of sending the user to the library.
+  await page.getByRole('dialog',{name:'梳理账号定位',exact:true}).getByRole('button',{name:'我已有定位',exact:true}).click();
   expect(await page.getByLabel('业务名称',{exact:true}).count()).toBe(0);
   expect(await page.getByLabel('定位方法',{exact:true}).count()).toBe(0);
-  await page.waitForURL(url=>url.pathname==='/library');
+  await page.waitForURL(url=>/^\/positioning\/[0-9a-f-]+$/.test(url.pathname));
+  const existingDraft=new URL(page.url()).pathname.split('/').at(-1)!;
+  expect((await sql.query('select mode from opc_drafts where draft_id=$1',[existingDraft])).rows[0].mode).toBe('manual');
+  const afterExisting=Number((await sql.query('select count(*)::int n from opc_drafts where actor_id=$1',[f.actor])).rows[0].n);
+  expect(afterExisting).toBe(draftCount+1);
+  await page.goto(process.env.V3_LOCAL_APP+'/library');
   expect(await page.getByRole('combobox',{name:'已有定位',exact:true}).count()).toBe(0);
-  expect(Number((await sql.query('select count(*)::int n from opc_drafts where actor_id=$1',[f.actor])).rows[0].n)).toBe(draftCount);
+  expect(Number((await sql.query('select count(*)::int n from opc_drafts where actor_id=$1',[f.actor])).rows[0].n)).toBe(afterExisting);
   expect(await readAccounts()).toEqual(before);
   await page.getByRole('navigation',{name:'资料库平台与账号'}).getByRole('button',{name:/^entry-account-a/}).click();
   await page.getByRole('button',{name:'修改定位',exact:true}).click();
   const dialog=page.getByRole('dialog',{name:'定位详情',exact:true});
   await dialog.getByRole('button',{name:'修改定位',exact:true}).click();
   await dialog.getByRole('heading',{name:'修改定位',exact:true}).waitFor();
-  expect(Number((await sql.query('select count(*)::int n from opc_drafts where actor_id=$1',[f.actor])).rows[0].n)).toBe(draftCount);
+  expect(Number((await sql.query('select count(*)::int n from opc_drafts where actor_id=$1',[f.actor])).rows[0].n)).toBe(afterExisting);
   await dialog.locator('textarea').first().fill('只修订账号A的定位');
   await dialog.getByRole('button',{name:'确认保存',exact:true}).click();
   await dialog.getByRole('status').filter({hasText:'已保存到此账号的待确认定位草稿'}).waitFor();

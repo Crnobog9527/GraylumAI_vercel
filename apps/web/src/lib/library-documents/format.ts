@@ -1,18 +1,21 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-import { isLibraryDocxExtractionEnabled } from '@/lib/library-sandbox/feature-flag';
+import { isLibraryDocxExtractionEnabled, isLibraryPdfExtractionEnabled } from '@/lib/library-sandbox/feature-flag';
 
 /** Same limits as the LIB-2a backend (packages/api/src/services/library/content.ts). */
 export const LIBRARY_MAX_BYTES = 10_000_000;
 /** The backend reserves a full 10 MB before issuing an upload link, so less free space blocks uploads. */
 export const LIBRARY_UPLOAD_HEADROOM = 10_000_000;
-/** Word reserves both of its paths up front (original + extracted text), 10 MB each. */
-export const LIBRARY_WORD_HEADROOM = 20_000_000;
+/** Word and PDF reserve both of their paths up front (original + extracted text), 10 MB each. */
+export const LIBRARY_EXTRACTED_HEADROOM = 20_000_000;
 
 export type LibraryPurpose = 'authored' | 'reference';
 export const PURPOSE_LABEL: Record<LibraryPurpose, string> = { authored: '我本人写的', reference: '参考资料' };
 
 export const WORD_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
-export type UploadContentType = 'text/plain' | 'text/markdown' | 'image/jpeg' | 'image/png' | 'image/webp' | typeof WORD_MIME;
+export const PDF_MIME = 'application/pdf';
+/** Formats uploaded as original + browser-extracted text (word-upload-flow, pdf-upload-flow). */
+export type ExtractedContentType = typeof WORD_MIME | typeof PDF_MIME;
+export type UploadContentType = 'text/plain' | 'text/markdown' | 'image/jpeg' | 'image/png' | 'image/webp' | ExtractedContentType;
 
 /** Formats the backend accepts today. The content type comes from the extension, never from the browser. */
 const READY_FORMATS: Record<string, UploadContentType> = {
@@ -20,14 +23,18 @@ const READY_FORMATS: Record<string, UploadContentType> = {
 };
 
 /**
- * Word uses the two-object upload from #796 (original + browser-extracted UTF-8 text + headings), so it
- * opens only with the LIB-2b extraction build flag. PDF stays closed until the server has a PDF upload API.
+ * Word (#796) and PDF (#800) use the two-object upload (original + browser-extracted UTF-8 text +
+ * headings or pages), so each opens only with its extraction build flag (LIB-2b, LIB-2c).
  */
 export function isWordUploadReady(): boolean {
   return isLibraryDocxExtractionEnabled();
 }
+export function isPdfUploadReady(): boolean {
+  return isLibraryPdfExtractionEnabled();
+}
 export function libraryAccept(): string {
-  return [...Object.keys(READY_FORMATS), ...(isWordUploadReady() ? ['docx'] : [])].map((extension) => '.' + extension).join(',');
+  return [...Object.keys(READY_FORMATS), ...(isWordUploadReady() ? ['docx'] : []), ...(isPdfUploadReady() ? ['pdf'] : [])]
+    .map((extension) => '.' + extension).join(',');
 }
 
 export type FileCheck =
@@ -39,28 +46,36 @@ export function extensionOf(filename: string): string {
   return dot < 0 ? '' : filename.slice(dot + 1).toLowerCase();
 }
 
-/** `freeBytes`, when known, is capacity minus used space; Word needs more of it than other formats. */
+/** `freeBytes`, when known, is capacity minus used space; Word and PDF need more of it than other formats. */
 export function checkLibraryFile(file: { name: string; size: number }, freeBytes?: number): FileCheck {
   const extension = extensionOf(file.name);
   if (extension === 'docx' && !isWordUploadReady()) return { ok: false, message: 'Word 文件暂时还不能上传，即将开放。' };
-  if (extension === 'pdf') return { ok: false, message: 'PDF 暂时还不能上传，即将开放。' };
+  if (extension === 'pdf' && !isPdfUploadReady()) return { ok: false, message: 'PDF 暂时还不能上传，即将开放。' };
   if (extension === 'heic' || extension === 'heif') return { ok: false, message: '不支持 HEIC 图片，请导出为 JPG 后再上传。' };
-  const contentType = extension === 'docx' ? WORD_MIME : READY_FORMATS[extension];
+  const contentType = extension === 'docx' ? WORD_MIME : extension === 'pdf' ? PDF_MIME : READY_FORMATS[extension];
   if (!contentType) return { ok: false, message: '不支持这种文件。目前可以上传' + supportedText() + '。' };
   if (file.size <= 0) return { ok: false, message: '文件是空的。' };
   if (file.size > LIBRARY_MAX_BYTES) return { ok: false, message: '单个文件不能超过 10 MB，请拆分后再上传。' };
   if (file.name.length > 255 || /[\x00-\x1f\x7f/\\]/.test(file.name)) {
     return { ok: false, message: '文件名太长或含有不能使用的字符，请改名后再上传。' };
   }
-  if (contentType === WORD_MIME && freeBytes !== undefined && freeBytes < LIBRARY_WORD_HEADROOM) {
-    return { ok: false, message: 'Word 文件上传时原文件和提取的文字各先占 10 MB，需要至少 20 MB 剩余空间。删除部分文件或升级会员后再试。' };
+  if ((contentType === WORD_MIME || contentType === PDF_MIME) && freeBytes !== undefined && freeBytes < LIBRARY_EXTRACTED_HEADROOM) {
+    const label = contentType === PDF_MIME ? 'PDF' : 'Word';
+    return { ok: false, message: label + ' 文件上传时原文件和提取的文字各先占 10 MB，需要至少 20 MB 剩余空间。删除部分文件或升级会员后再试。' };
   }
   return { ok: true, contentType };
 }
 
 /** The formats line shown in the upload panel and in the unsupported-file message. */
 export function supportedText(): string {
-  return (isWordUploadReady() ? ' txt、md、Word（.docx）' : ' txt、md ') + '文本和 jpg、png、webp 图片';
+  const documents = ['txt', 'md', ...(isWordUploadReady() ? ['Word（.docx）'] : []), ...(isPdfUploadReady() ? ['PDF'] : [])];
+  return ' ' + documents.join('、') + (documents.length > 2 ? '' : ' ') + '文本和 jpg、png、webp 图片';
+}
+
+/** The "coming soon" line for document formats not open in this build; empty when both are open. */
+export function comingSoonText(): string {
+  const closed = [...(isWordUploadReady() ? [] : ['Word']), ...(isPdfUploadReady() ? [] : ['PDF'])];
+  return closed.length ? closed.join(' 和 ') + ' 即将支持。' : '';
 }
 
 /** Decimal units, matching how membership space is defined (1 MB = 1,000,000 bytes). */
@@ -99,6 +114,7 @@ const MESSAGES: Record<string, string> = {
   LIBRARY_ACCOUNT_CLOSED: '账号当前不可用，不能使用资料库。',
   LIBRARY_FORBIDDEN: '没有权限访问这个文件。',
   LIBRARY_HEADINGS: 'Word 文件的标题结构无法识别，已拒绝。请另存为普通 Word 文档后再上传。',
+  LIBRARY_PAGES: 'PDF 的页面信息和读取到的文字对不上，已拒绝。请重新上传，或用其他软件另存为 PDF 后再试。',
   LIBRARY_UPLOAD_INCOMPLETE: '文件还没有传完整，请重试。',
   LIBRARY_UPLOAD_UNAVAILABLE: '暂时无法上传，请稍后重试。',
   LIBRARY_UPLOAD_EXPIRED: '上传准备超时，请重试。',

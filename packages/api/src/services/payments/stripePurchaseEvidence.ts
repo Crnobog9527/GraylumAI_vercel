@@ -8,10 +8,12 @@ export function assertStripePurchasePrice(input: {
   priceId: string;
   snapshot: unknown;
   scope: StripeScope;
+  walletMethod?: 'wechat_pay' | 'alipay';
 }) {
   const snapshot = freezePurchaseSnapshot(input.snapshot);
   const price = input.price;
-  const recurring = snapshot.billing_cycle !== 'one_time';
+  const recurring = snapshot.billing_cycle !== 'one_time' && !input.walletMethod;
+  if (input.walletMethod && input.scope.mode !== 'test') throw new Error('PAY_WAFFO_LIVE_DISABLED');
   if (price.id !== input.priceId || price.object !== 'price' || !price.active
     || price.livemode !== (input.scope.mode === 'live') || price.currency !== snapshot.currency
     || price.unit_amount !== majorToCents(snapshot.price) || price.billing_scheme !== 'per_unit'

@@ -5,7 +5,8 @@ import { FileText, Image as ImageIcon, Upload } from 'lucide-react';
 import type { LibraryDocument } from '@/hooks/use-library-documents';
 import type { UploadItem } from '@/hooks/use-library-uploads';
 import {
-  isWordUploadReady, formatBytes, libraryAccept, PURPOSE_LABEL, spaceState, supportedText, type LibraryPurpose,
+  comingSoonText, extensionOf, isPdfUploadReady, isWordUploadReady, formatBytes, libraryAccept, PURPOSE_LABEL, spaceState,
+  supportedText, type LibraryPurpose,
 } from '@/lib/library-documents/format';
 import styles from './my-documents.module.css';
 
@@ -13,9 +14,16 @@ const STATUS_LABEL: Record<LibraryDocument['status'], string> = {
   uploading: '上传未完成', processing: '处理中', ready: '可用', failed: '上传失败', deleting: '删除中，空间暂未释放',
 };
 const QUEUE_LABEL: Record<UploadItem['status'], string> = {
-  waiting: '等待上传', extract: '正在本机读取 Word 内容…', begin: '准备上传…', transfer: '上传中', complete: '正在核对文件…',
+  waiting: '等待上传', extract: '正在本机读取文件内容…', begin: '准备上传…', transfer: '上传中', complete: '正在核对文件…',
   failed: '上传失败', removing: '正在移除…', rejected: '不能上传', done: '已上传',
 };
+
+/** The extract step names the format being read in the user's own browser. */
+function queueLabel(item: UploadItem): string {
+  if (item.status !== 'extract') return QUEUE_LABEL[item.status];
+  const extension = extensionOf(item.filename);
+  return extension === 'pdf' ? '正在本机读取 PDF 内容…' : extension === 'docx' ? '正在本机读取 Word 内容…' : QUEUE_LABEL.extract;
+}
 
 export type UploadPanelProps = {
   uploadEnabled: boolean; spaceKnown: boolean; usedBytes?: number; capacityBytes?: number;
@@ -30,10 +38,13 @@ export function UploadPanel(props: UploadPanelProps) {
   return <section className={styles.panel} aria-label="上传文件">
     <h2>上传文件</h2>
     <p className={styles.hint}>
-      支持{supportedText()}，单个文件不超过 10 MB。{isWordUploadReady() ? 'PDF 即将支持。' : 'Word 和 PDF 即将支持。'}
+      支持{supportedText()}，单个文件不超过 10 MB。{comingSoonText()}
     </p>
     {isWordUploadReady() && <p className={styles.hint}>
       Word 的文字在你自己的浏览器里读取，不扣积分；文中的图片暂不识别。
+    </p>}
+    {isPdfUploadReady() && <p className={styles.hint}>
+      PDF 的文字在你自己的浏览器里读取，不扣积分；扫描页（没有可选中文字的页）会标为待识别，识别功能即将开放。
     </p>}
     {!props.uploadEnabled && <p className={styles.closed} role="status">
       上传暂未开放。已上传的文件仍可查看、下载和删除。
@@ -77,7 +88,7 @@ export function UploadPanel(props: UploadPanelProps) {
           <span style={{ width: Math.round(item.progress * 100) + '%' }}/>
         </div>}
         <small>
-          {QUEUE_LABEL[item.status]}{item.status === 'transfer' ? ' ' + Math.round(item.progress * 100) + '%' : ''}
+          {queueLabel(item)}{item.status === 'transfer' ? ' ' + Math.round(item.progress * 100) + '%' : ''}
           {' · '}{PURPOSE_LABEL[item.purpose]}{item.message ? '：' + item.message : ''}
         </small>
       </li>)}

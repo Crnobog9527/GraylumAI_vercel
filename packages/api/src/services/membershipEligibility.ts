@@ -6,6 +6,7 @@
 
 import { STRIPE_MANAGED_ACTIVE_SUBSCRIPTION_STATUSES } from './subscriptionOverrides';
 import { isRefundPaymentOrderStatus } from './paymentOrderStatus';
+import { internalMembershipState } from './internalMembershipProjection';
 
 export type MembershipLevel = 'free' | 'pro' | 'gold';
 export type EligibilityLevel = MembershipLevel | 'unknown';
@@ -53,7 +54,7 @@ export type MembershipEligibilityResult = {
   allowed: boolean;
   state: EntitlementState;
   level: EligibilityLevel;
-  source: 'profile' | 'stripe_subscription' | 'payment_order' | 'admin_override' | 'none' | 'conflict';
+  source: 'profile' | 'stripe_subscription' | 'internal_membership' | 'payment_order' | 'admin_override' | 'none' | 'conflict';
   action: MembershipEligibilityNextAction;
   reasonCode: MembershipEligibilityReasonCode;
   safeMessage: string;
@@ -74,6 +75,7 @@ type MembershipPlanSnapshot = {
 };
 
 type SubscriptionRow = {
+  membership_level?: string | null;
   id?: string | null;
   membership_plan_id?: string | null;
   payment_channel?: string | null;
@@ -157,13 +159,8 @@ function asRecord(value: unknown): Record<string, unknown> {
 }
 
 function maskIdentifier(value: string | null | undefined) {
-  if (!value) {
-    return null;
-  }
-
-  if (value.length <= 12) {
-    return `${value.slice(0, 4)}...`;
-  }
+  if (!value) return null;
+  if (value.length <= 12) return `${value.slice(0, 4)}...`;
 
   return `${value.slice(0, 8)}...${value.slice(-6)}`;
 }
@@ -366,6 +363,8 @@ export function getState(input: {
   latestMembershipOrder: PaymentOrderRow | null;
 }): EntitlementSnapshot {
   const { profileLevel, latestSubscription, latestMembershipOrder } = input;
+  const internal = internalMembershipState(latestSubscription);
+  if (internal) return internal;
   const diagnostics = buildDiagnostics(latestSubscription, latestMembershipOrder);
 
   if (hasFullRefundSignal(latestMembershipOrder)) {
@@ -483,7 +482,8 @@ export async function loadLatestMembershipFacts(supabase: SupabaseLikeClient, us
   const facts = asRecord(result.data);
   const valid = Array.isArray(facts.subscriptions) && Object.hasOwn(facts, 'latest_order');
   return {
-    latestSubscription: valid ? selectEntitlementSubscription(normalizeSubscriptionRows(facts.subscriptions)) : null,
+    latestSubscription: valid ? (facts.internal_membership as SubscriptionRow | null)
+      ?? selectEntitlementSubscription(normalizeSubscriptionRows(facts.subscriptions)) : null,
     latestMembershipOrder: valid ? facts.latest_order as PaymentOrderRow | null : null,
     error: result.error ?? (valid ? null : new Error('PAY_COMMON_MEMBERSHIP_FACTS_UNKNOWN')),
   };

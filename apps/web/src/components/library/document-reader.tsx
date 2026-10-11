@@ -21,6 +21,18 @@ export function chaptersOf(directory: Array<{ ordinal: number; title: string }>)
   return chapters;
 }
 
+const collapse = (text: string) => text.replace(/\s+/g, ' ').trim();
+/**
+ * A chapter's first segment starts with its own heading line (Word headings, Markdown `#` lines), which
+ * the reader already shows as the section title: drop that one line so the heading is not shown twice.
+ * PDF titles are page labels ("第 N 页"), not text from the page, so PDF bodies are left as they are.
+ */
+export function bodyWithoutHeading(body: string, title: string): string {
+  const match = /^\s*([^\n]*)(?:\n|$)/.exec(body);
+  if (!match || !title || collapse(match[1]) !== collapse(title)) return body;
+  return body.slice(match[0].length);
+}
+
 /** Text documents: the whole directory once (titles only), then the body a few segments at a time. */
 export function DocumentReader({ doc }: { doc: LibraryDocument }) {
   const [start, setStart] = useState(0);
@@ -34,7 +46,11 @@ export function DocumentReader({ doc }: { doc: LibraryDocument }) {
   const error = directory.error ?? page.error;
   if (error) return <p role="alert" className={styles.error}>{libraryErrorMessage(error)}</p>;
   if (directory.isPending) return <p className={styles.hint}>正在读取内容…</p>;
-  if (!total) return <p className={styles.hint}>这个文件没有可显示的文字。</p>;
+  if (!total) {
+    return <p className={styles.hint}>{doc.format === 'pdf'
+      ? '这个 PDF 没有可以直接读取的文字。扫描页需要识别后才能显示，识别功能即将开放。'
+      : '这个文件没有可显示的文字。'}</p>;
+  }
   const segments = page.data ?? [];
   const last = Math.min(total, start + READER_PAGE);
   const current = [...chapters].reverse().find((chapter) => chapter.ordinal <= start);
@@ -54,7 +70,7 @@ export function DocumentReader({ doc }: { doc: LibraryDocument }) {
       {page.isPending && <p className={styles.hint}>正在读取内容…</p>}
       {segments.map((segment) => <section key={segment.ordinal} className={styles.segment} aria-label={'第 ' + (segment.ordinal + 1) + ' 段'}>
         {starts.has(segment.ordinal) && <h4>{segment.title}</h4>}
-        {segment.body}
+        {starts.has(segment.ordinal) && doc.format !== 'pdf' ? bodyWithoutHeading(segment.body, segment.title) : segment.body}
       </section>)}
       <nav className={styles.segmentNav} aria-label="分段翻页">
         <button type="button" disabled={start === 0} onClick={() => setStart(Math.max(0, start - READER_PAGE))}>上一页</button>

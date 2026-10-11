@@ -1,3 +1,4 @@
+import { methodPaymentProcedures } from './methodPayments';
 import { createStripeBillingDocumentLoader } from '../services/payments/stripeBillingDocument';
 import { listAdminPaymentOrders } from '../services/payments/adminOrders';
 import { projectOrderPayment, type BillingRecord, type PaymentOrderBillingRow } from '../services/payments/orderProjection';
@@ -7,7 +8,6 @@ import { assertCheckoutChannel } from '../services/payments/channelSettings';
  * All rights reserved.
  * This code is proprietary and confidential.
  */
-
 import { createHash, createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
 import { TRPCError } from '@trpc/server';
 import type Stripe from 'stripe';
@@ -64,7 +64,6 @@ const syncCheckoutInput = z.object({
   sessionId: z.string().min(1),
   checkoutState: z.enum(['success', 'canceled', 'cancelled']).optional(),
 });
-
 const changeSubscriptionPlanInput = z.object({
   planId: z.string().uuid(),
   billingCycle: z.enum(['monthly', 'yearly']),
@@ -1013,6 +1012,7 @@ function shouldListBillingOrder(order: PaymentOrderBillingRow) {
 }
 
 export const paymentsRouter = router({
+  ...methodPaymentProcedures,
   listAdminOrders: adminProcedure.input(z.object({
     offset: z.number().int().min(0).max(100000).default(0), limit: z.number().int().min(1).max(50).default(20),
   }).default({ offset: 0, limit: 20 })).query(async ({ ctx, input }) => {

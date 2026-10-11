@@ -8,12 +8,16 @@ import { accountDisplayName, membershipText } from '@/lib/account-presentation';
 import styles from './home.module.css';
 import { QueryNotice } from '@/components/opc/query-notice';
 import { HOME_STEP_LABELS, HOME_STEPS } from './home-steps';
+import { startEntryHref, type StartMode } from './positioning/start-entry';
 
 type HomeAccount={strategyDraftId?:string|null};
 type HomeBusiness={accounts:HomeAccount[]};
 
 export default function HomePage(){
  const startIntent=useRef<string|null>(null);
+ // One click starts one draft: the intent id is the start request id (从头分析, or 我已有定位 for R15).
+ const startOnce=(event:{preventDefault:()=>void},mode:StartMode)=>{event.preventDefault();if(startIntent.current)return;
+  startIntent.current=crypto.randomUUID();location.assign(startEntryHref(mode,startIntent.current));};
  const profile=trpc.user.getUserProfile.useQuery();
  const library=trpc.opc.library.useQuery({search:'',from:null,to:null},{retry:false});
  const credits=useCreditsBalance();
@@ -36,7 +40,7 @@ export default function HomePage(){
      </li>)}
     </ol>
    </section>
-   <section className={styles.entry}><div><Link className={styles.primary} href="/positioning" onClick={event=>{if(libraryReady&&!hasStrategy){event.preventDefault();if(startIntent.current)return;startIntent.current=crypto.randomUUID();location.assign('/positioning?start=mentor&intent='+startIntent.current);}}}>{!libraryReady||hasStrategy?'进入对话':'开始新手引导'}</Link><Link href={!libraryReady||hasStrategy?'/library':'/positioning'}>{!libraryReady?'查看资料库':hasStrategy?'查看正式定位':'我已有定位'}</Link></div><QueryNotice error={library.error} loading={library.isPending} label="账号与资料" retry={()=>library.refetch()}/>{libraryReady&&<p>{hasStrategy?'已有定位和工作会保留；你可以继续原对话。':'先一起确认定位，再开展选题和内容创作。已有资料可以直接带入。'}</p>}</section>
+   <section className={styles.entry}><div><Link className={styles.primary} href="/positioning" onClick={event=>{if(libraryReady&&!hasStrategy)startOnce(event,'mentor');}}>{!libraryReady||hasStrategy?'进入对话':'开始新手引导'}</Link><Link href={!libraryReady||hasStrategy?'/library':'/positioning'} onClick={event=>{if(libraryReady&&!hasStrategy)startOnce(event,'manual');}}>{!libraryReady?'查看资料库':hasStrategy?'查看正式定位':'我已有定位'}</Link></div><QueryNotice error={library.error} loading={library.isPending} label="账号与资料" retry={()=>library.refetch()}/>{libraryReady&&<p>{hasStrategy?'已有定位和工作会保留；你可以继续原对话。':'先一起确认定位，再开展选题和内容创作。已有资料可以直接带入。'}</p>}</section>
    <section className={styles.capabilities}><h2>从策略，继续走向实际创作</h2><div>{[['AI 对话','持续讨论，获得建议'],['内容创作','选题、起草、修改与定稿'],['功能广场','探索工具与方法'],['个人成长','回看自己的创作历程']].map(([title,description])=><article key={title}><h3>{title}</h3><p>{description}</p></article>)}</div></section>
   </main>
  </div>;
