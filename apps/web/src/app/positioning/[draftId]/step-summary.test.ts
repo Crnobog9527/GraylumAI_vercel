@@ -56,6 +56,9 @@ describe("这一步先到这里 (R16)", () => {
       { ...summary, unavailableReason: "provider_rejected" }])
       expect(offersStepSummary([talk, failed])).toBe(true);
     expect(summaryShown({ ...summary, primaryBody: "x", body: null })).toBe(true);
+    // Still settling its charge, but readable: asking again would pay twice.
+    expect(offersStepSummary([talk, { ...summary, state: "cost_pending" }])).toBe(false);
+    expect(offersStepSummary([talk, { ...summary, state: "cost_pending", stopped: true }])).toBe(true);
     expect(summaryShown({ ...summary, input: "我做职场内容" })).toBe(false);
   });
 

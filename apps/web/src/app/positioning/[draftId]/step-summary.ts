@@ -39,9 +39,13 @@ type SummaryTurn = {
   completeness?: string; stopped?: boolean; unavailableReason?: string | null;
 };
 
-/** A summary reply the user can actually read: finished, whole, with a body. Anything else may be asked again. */
+/**
+ * A summary reply the user can actually read: finished, whole, with a body. `cost_pending` is such a reply whose
+ * charge is still settling; asking again would pay for a second summary. Anything else may be asked again.
+ */
 export function summaryShown(turn: SummaryTurn) {
-  return isStepSummaryInput(turn.input) && turn.state === "completed" && !turn.stopped && !turn.unavailableReason &&
+  return isStepSummaryInput(turn.input) && (turn.state === "completed" || turn.state === "cost_pending") && !turn.stopped &&
+    !turn.unavailableReason &&
     turn.completeness !== "length_limit" && turn.completeness !== "stopped" && Boolean((turn.body ?? turn.primaryBody ?? "").trim());
 }
 
