@@ -7,7 +7,7 @@ function fixture() {
   const database = { rpc: vi.fn(async () => ({ data: [], error: null })) };
   return { database, owner: paygOwnerDatabase(database, { executionId: id, epoch: 7 }) };
 }
-it.each(['fail_before_dispatch', 'interrupt', 'checkpoint_match', 'checkpoint_primary', 'check_latest', 'complete'])(
+it.each(['fail_before_dispatch', 'fail_platform', 'interrupt', 'checkpoint_match', 'checkpoint_primary', 'check_latest', 'complete'])(
   'carries the observed epoch on %s without mutating the saved value', async action => {
     const f = fixture(), value = { body: 'saved' };
     await f.owner.rpc('runtime_execution', { p_actor_id: id, p_execution_id: id, p_action: action, p_result: value });

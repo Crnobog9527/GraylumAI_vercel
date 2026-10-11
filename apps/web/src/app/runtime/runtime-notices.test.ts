@@ -82,6 +82,12 @@ describe("runtimeTailNotices", () => {
   });
 });
 
+it('uses the persisted platform-failure reason after reload', () => {
+ const notices=runtimeTurnNotices(turn({state:'cancelled',unavailableReason:'preflight'}),ctx());
+ expect(notices).toHaveLength(1);
+ expect(notices[0].text).toContain('本轮不扣积分');
+});
+
 it('uses the persisted history reason after reload, ahead of a stale local stop marker', () => {
  for (const context of [ctx(),ctx({userStopped:true}),ctx({gateStop:'stale gate'})]) {
   const notices=runtimeTurnNotices(turn({state:'cancelled',unavailableReason:'provider_history'}),context);
