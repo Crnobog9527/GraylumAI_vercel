@@ -2,7 +2,7 @@
 import { z } from 'zod';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { databaseSkillSource, userVisibleModules } from '../skills/databaseSource';
-import { activateSkill, discoverSkills } from '../skills/loader';
+import { activateSkill, discoverSkills, SkillLoadError } from '../skills/loader';
 import { fixtureInputCapacity, selectRuntimeHistory } from './context';
 
 export const matchCandidate=z.object({
@@ -74,7 +74,12 @@ export async function fittingCandidates(candidates:MatchCandidate[],activate:(ca
  for(const candidate of candidates){
   if(!fits(candidate,sizing.instructions('')))continue;
   // A task-requiring Skill is refused at activation either way; its handling is unchanged here.
-  if(candidate.requiresTask||fits(candidate,sizing.instructions(await activate(candidate))))kept.push(candidate);
+  if(candidate.requiresTask){kept.push(candidate);continue;}
+  let skill:string;
+  // A Skill too large for its own model can never run: drop it, keep the other candidates and the ordinary fallback.
+  try{skill=await activate(candidate);}
+  catch(error){if(error instanceof SkillLoadError&&error.code==='CAPACITY_EXCEEDED')continue;throw error;}
+  if(fits(candidate,sizing.instructions(skill)))kept.push(candidate);
  }
  return kept;
 }

@@ -10,11 +10,12 @@ import {OPENING_INPUT} from '../../shared/opcQuestions';
 vi.mock('./newWorkGate',async original=>({...await original<typeof import('./newWorkGate')>(),
  ...(await import('../__tests__/fixtures/runtimeGates')).testAdmissionGates}));
 vi.mock('../skills/databaseSource',()=>({databaseSkillSource:()=>({list:async()=>[descriptor],state:async()=> 'enabled'})}));
-const skill=vi.hoisted(()=>({instructions:'Synthetic Skill',file:'',activations:0}));
+const skill=vi.hoisted(()=>({instructions:'Synthetic Skill',file:'',activations:0,tooLarge:false}));
 const matching=vi.hoisted(()=>({candidates:[] as unknown[]}));
 vi.mock('./matching',async original=>({...await original<typeof import('./matching')>(),discoverRuntimeCandidates:async()=>matching.candidates}));
-vi.mock('../skills/loader',async original=>({...await original<typeof import('../skills/loader')>(),
- readSkillResource:async()=>skill.file,activateSkill:async()=>{skill.activations++;return {forModel:()=>skill.instructions};}}));
+vi.mock('../skills/loader',async original=>{const real=await original<typeof import('../skills/loader')>();return {...real,
+ readSkillResource:async()=>skill.file,activateSkill:async()=>{skill.activations++;
+  if(skill.tooLarge)throw new real.SkillLoadError('CAPACITY_EXCEEDED');return {forModel:()=>skill.instructions};}};});
 const actor='10000000-0000-4000-8000-000000000001';
 const model='10000000-0000-4000-8000-000000000002';
 const revision='10000000-0000-4000-8000-000000000003';
@@ -24,7 +25,7 @@ const base={packageId:module,revisionId:revision,directoryName:'test',files:[{
 }],tasks:{},requiredCapabilities:[]};
 const descriptor={...base,packageHash:packageHash(base)};
 function fixture(){
- skill.instructions='Synthetic Skill';skill.file='';skill.activations=0;matching.candidates=[];
+ skill.instructions='Synthetic Skill';skill.file='';skill.activations=0;skill.tooLarge=false;matching.candidates=[];
  let saved:unknown=null;
  const rpc=vi.fn(async(name:string,args:Record<string,unknown>)=>{
   if(name==='runtime_session_context')return {data:{scope:{kind:'positioning_draft',draftId:actor}},error:null};
@@ -110,6 +111,14 @@ it('skips the paid match and admits an ordinary turn when no candidate can hold 
  expect(admitted.context.maxTurns).toBe(2);
  expect(admitted.billing.callPolicy.map((p:{modelId:string})=>p.modelId)).toEqual([model]);
  // The 2000-byte candidate cannot hold the input alone, so only the other one loaded its Skill.
+ expect(skill.activations).toBe(1);
+});
+
+it('drops a candidate whose Skill is too large for its own model instead of failing the turn',async()=>{
+ const f=fixture();skill.tooLarge=true;matching.candidates=[autoCandidate(0,14000)];
+ const admitted=await runtimeAdmissionService(f.user,f.admin,{...f.policy,...autoPolicy})
+  .prepare({...f.input,...autoInput,input:'x'.repeat(3000)});
+ expect(admitted.context.matching).toBeUndefined();expect(admitted.context.role).toBe('ordinary');
  expect(skill.activations).toBe(1);
 });
 
