@@ -83,7 +83,7 @@ type SubscriptionRow = {
   status?: string | null;
   cancel_at_period_end?: string | boolean | null;
   billing_cycle?: string | null;
-  current_period_end?: string | null;
+  current_period_end?: string | null; renewal_grace_until?: string | null;
   metadata?: unknown;
 };
 

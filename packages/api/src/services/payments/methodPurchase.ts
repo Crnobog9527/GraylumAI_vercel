@@ -3,6 +3,7 @@ import { z } from 'zod';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { loadOpeningGrantDigests } from '../accountErasure/openingGrantIdentity';
 import { paymentMethodSchema } from './methodRouting';
+import { admissionError } from './methodPurchaseError';
 
 export const methodPurchaseInputSchema = z.object({
   itemType: z.enum(['membership_plan', 'credit_package']),
@@ -39,7 +40,8 @@ export async function prepareMethodPurchase(input: {
       p_version: args.p_version, p_terms: args.p_terms, p_digests: args.p_digests,
       p_transition: purchase.transition, p_prior: purchase.priorSubscriptionId })
     : await input.admin.rpc('pay_waffo_create_purchase', args);
-  if (result.error) throw new Error('PAY_WAFFO_PURCHASE_DENIED', { cause: result.error });
+  // Keep the database's own refusal code so expected business answers are not reported as outages.
+  if (result.error) throw admissionError(result.error.message, result.error);
   if (!result.data?.id || result.data.user_id !== input.userId) throw new Error('PAY_WAFFO_PURCHASE_UNAVAILABLE');
   return result.data;
 }
