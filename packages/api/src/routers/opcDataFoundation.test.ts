@@ -49,7 +49,7 @@ it.each([{authenticated:false},{verified:false},{status:'deleted'},{status:'disa
 it('rejects forged actor and invalid actions before RPC', async () => {
   const f = fixture();
   await expect(f.caller.recordContentReaction({...event,actorId:id(8)} as typeof event)).rejects.toMatchObject({code:'BAD_REQUEST'});
-  await expect(f.caller.recordContentReaction({...event,action:'implicit'} as typeof event)).rejects.toMatchObject({code:'BAD_REQUEST'});
+  await expect(f.caller.recordContentReaction({...event,action:'implicit'} as unknown as typeof event)).rejects.toMatchObject({code:'BAD_REQUEST'});
   expect(f.rpc).not.toHaveBeenCalled();
 });
 it.each(['OPC_DATA_SOURCE_DENIED','OPC_REQUEST_CONFLICT'])('preserves bounded SQL refusal %s', async error => {
