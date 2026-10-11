@@ -3,6 +3,9 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { readPaymentMethodRoutes } from './methodRouting';
 import { methodCardCheckoutReady } from './methodCheckoutGate';
 
+type PaidMembership = { id: string; subscription_id: string; purchase_membership_level: string; payment_method: string;
+  auto_renew: boolean | null; entitlement_start: string; entitlement_end: string; offer_kind: string; billing_cycle: string };
+
 /** Read-only member-page projection. Orders remain the authority for paid access; a pending
  * checkout or provider subscription status alone cannot grant membership. Founder capacity is
  * shared across merchants/methods in the same mode, matching 0204's atomic reservation. */
@@ -28,6 +31,17 @@ export async function readMethodMembership(db: SupabaseClient, userId: string, n
     || founderOrders.data.some(row => !['sold', 'reserved', 'review'].includes(row.qualification_state))) {
     throw new Error('PAY_WAFFO_MEMBERSHIP_UNAVAILABLE');
   }
+  // auto_renew on the order is what was bought; a confirmed stop (methodCancel) only flips the
+  // subscription's cancel_at_period_end, the same flag getEntitlements reads. Report the effective value.
+  const paid = orders.data as unknown as PaidMembership[];
+  const subscriptionIds = [...new Set(paid.map(row => row.subscription_id).filter(Boolean))];
+  const subscriptions = subscriptionIds.length === 0 ? { data: [], error: null }
+    : await db.from('user_subscriptions').select('id,cancel_at_period_end').eq('user_id', userId).in('id', subscriptionIds);
+  if (subscriptions.error || !Array.isArray(subscriptions.data)) throw new Error('PAY_WAFFO_MEMBERSHIP_UNAVAILABLE');
+  const stopped = new Map(subscriptions.data.map(row => [row.id, String(row.cancel_at_period_end) === 'true']));
+  if (paid.some(row => !stopped.has(row.subscription_id))) throw new Error('PAY_WAFFO_MEMBERSHIP_UNAVAILABLE');
+  const memberships = paid.map(row => ({ ...row, cancel_at_period_end: stopped.get(row.subscription_id) === true,
+    auto_renew: row.auto_renew === true && stopped.get(row.subscription_id) === false }));
   // Historical sold slots never return to the pool, including refunds and cancellation.
   const occupied = founderOrders.data.length;
   const sold = founderOrders.data.filter(row => row.qualification_state === 'sold').length;
@@ -36,6 +50,6 @@ export async function readMethodMembership(db: SupabaseClient, userId: string, n
     // Card only, staging test mode with the default-off route switch; wallets stay closed.
     checkoutReady: methodCardCheckoutReady(env, routes),
     founder: { total: 50, sold, reserved: occupied - sold, available: 50 - occupied },
-    memberships: orders.data,
+    memberships,
   };
 }
