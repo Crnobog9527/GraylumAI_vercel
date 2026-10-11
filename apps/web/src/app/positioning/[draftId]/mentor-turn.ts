@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import type { AgentTurnEvent, AgentTurnOutcome, QuestionAnswerSource } from "@repo/api/src/shared/agentTurn";
 import { OPENING_INPUT, openingRequestId } from "@repo/api/src/shared/opcQuestions";
-import { STEP_SUMMARY_INPUT, SUMMARY_REFUSALS } from "./step-summary";
+import { STEP_SUMMARY_PREFIX, SUMMARY_REFUSALS } from "./step-summary";
 import { gateResultNotice, PROVIDER_HISTORY_NOTICE } from "@/lib/runtime-gate-notice";
 import { blockedAdmission, hostNotice, type PaygViewFields } from "@/lib/payg-wait";
 
@@ -268,7 +268,8 @@ export function isAnswerSourceDenied(error: unknown): boolean {
 export function releaseRejectedAnswer(storage: EnvelopeStorage, key: string, requestId: string, error: unknown): boolean {
   const raw = storage.getItem(key);
   const request = raw ? parseStepEnvelope(raw)?.request : undefined;
-  const summaryRefused = error instanceof Error && SUMMARY_REFUSALS.has(error.message) && request?.input === STEP_SUMMARY_INPUT;
+  // Any version of the marker: the server refuses all but the current one, so a stale retained one is released too.
+  const summaryRefused = error instanceof Error && SUMMARY_REFUSALS.has(error.message) && Boolean(request?.input.startsWith(STEP_SUMMARY_PREFIX));
   if (!isAnswerSourceDenied(error) && !summaryRefused) return false;
   if (request?.requestId === requestId) storage.removeItem(key);
   return true;

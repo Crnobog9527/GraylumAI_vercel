@@ -11,6 +11,7 @@ export const STEP_SUMMARY_LABEL = "这一步先到这里";
 /** The server's versioned marker (packages/api/src/shared/opcStepSummary.ts, not exported to the web package). */
 export const STEP_SUMMARY_INPUT = "HOST_STEP_SUMMARY:v1";
 
+export const STEP_SUMMARY_PREFIX = "HOST_STEP_SUMMARY";
 export const isStepSummaryInput = (input: string | null | undefined) => input === STEP_SUMMARY_INPUT;
 
 /** R16 refusals raised before admission and payment: replaying the same summary request would only fail again. */
@@ -22,7 +23,7 @@ export const STEP_SUMMARY_REFUSED = "OPC_STEP_SUMMARY_REFUSED";
  * or error is returned unchanged: an ordinary turn keeps its retained request and its existing notice.
  */
 export function summaryRefusal(request: Pick<MentorRequest, "input">, cause: unknown): unknown {
-  if (!isStepSummaryInput(request.input) || !(cause instanceof Error) || !SUMMARY_REFUSALS.has(cause.message)) return cause;
+  if (!request.input.startsWith(STEP_SUMMARY_PREFIX) || !(cause instanceof Error) || !SUMMARY_REFUSALS.has(cause.message)) return cause;
   return Object.assign(new Error(STEP_SUMMARY_REFUSED), { code: cause.message });
 }
 

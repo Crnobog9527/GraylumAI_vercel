@@ -79,6 +79,10 @@ describe("这一步先到这里 (R16)", () => {
     expect(releaseRejectedAnswer(storage, "k", "r1", new Error("network timeout"))).toBe(false);
     expect(releaseRejectedAnswer(storage, "k", "r1", new Error("RUNTIME_REQUEST_CONFLICT"))).toBe(false);
     expect(storage.getItem("k")).toBe(summary);
+    const stale = JSON.stringify({ request: { ...stepSummaryRequest("d1", "s1", "r1"), input: "HOST_STEP_SUMMARY:v2" } });
+    storage.setItem("k", stale);
+    expect(releaseRejectedAnswer(storage, "k", "r1", new Error("OPC_STEP_SUMMARY_INVALID"))).toBe(true);
+    expect(storage.getItem("k")).toBeNull();
     for (const code of ["OPC_STEP_SUMMARY_INVALID", "OPC_CAPTURE_INPUT_LIMIT"]) {
       storage.setItem("k", summary);
       expect(releaseRejectedAnswer(storage, "k", "r1", new Error(code))).toBe(true);
