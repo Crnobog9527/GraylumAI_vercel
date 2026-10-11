@@ -8,7 +8,7 @@ const index=(db,a,sid)=>rpc(db,'runtime_workspace_source',a,sid,'');
 const read=(db,a,sid,id)=>rpc(db,'runtime_workspace_source',a,sid,id);
 const denied=async(promise,code)=>{await assert.rejects(promise,error=>String(error.message).includes(code));};
 // oldDefinition: 0131's runtime_workspace_source, executed inside a rolled-back transaction.
-export async function runCases({db,report,oldDefinition,oldErasureScope}) {
+export async function runCases({db,Client,connectionString,report,oldDefinition,oldErasureScope}) {
  const a=await one(db,'SELECT ws_test.actor() v');
  const sid=await one(db,'SELECT ws_test.free_session($1) v',[a]);
  const main=await one(db,'SELECT ws_test.positioning($1,$2,$3) v',[a,'Tea studio','POSITIONING_CANARY_A']);
@@ -69,6 +69,19 @@ export async function runCases({db,report,oldDefinition,oldErasureScope}) {
   return id;
  };
  const copied=await execution([[{},await index(db,d,dSid)],[{query:deleted.business},await read(db,d,dSid,deleted.business)]]);
+ // A read already in flight: claimed (result NULL) before deletion, completed after it.
+ const inFlightBody=await read(db,d,dSid,deleted.business);
+ const inFlight=await execution([[{query:deleted.business},null]]);
+ const complete=()=>db.query("UPDATE runtime_tool_calls SET result=$2 WHERE execution_id=$1 AND call_id='call-0'",[inFlight,inFlightBody]);
+ const eraser=new Client({connectionString});await eraser.connect();
+ try {
+  await eraser.query('BEGIN');
+  await eraser.query('SELECT id FROM artifact_projects WHERE actor_id=$1 ORDER BY id FOR UPDATE',[d]);
+  await db.query('BEGIN');await db.query("SET LOCAL lock_timeout='300ms'");
+  await assert.rejects(complete(),error=>error.code==='55P03');
+  await db.query('ROLLBACK');
+  report.checks.push('completing a workspace read waits while an erasure holds the source project');
+ } finally {await eraser.query('ROLLBACK');await eraser.end();}
  const unrelated=await execution([]);
  const scoped=async()=>(await rpc(db,'content_erasure_scope',d,'artifact',deleted.project)).executions;
  await db.query('BEGIN');
@@ -85,6 +98,9 @@ export async function runCases({db,report,oldDefinition,oldErasureScope}) {
  assert.equal((await one(db,'SELECT content_deleted_at IS NULL AND erased_at IS NULL v FROM runtime_executions WHERE id=$1',[unrelated])),true);
  assert.deepEqual((await index(db,d,dSid)).entries,[]);
  assert.equal((await read(db,d,dSid,deleted.business)).kind,'unavailable');
+ await denied(complete(),'RUNTIME_WORKSPACE_SOURCE_REVOKED');
+ assert.equal(await one(db,"SELECT result IS NULL v FROM runtime_tool_calls WHERE execution_id=$1 AND call_id='call-0'",[inFlight]),true);
+ report.checks.push('a read completed after the deletion cannot store the deleted body');
  report.checks.push('after fix: deleting the positioning clears copied read_source results, keeps unrelated answers, and removes it from the index');
 
  const closing=await one(db,'SELECT ws_test.actor() v');

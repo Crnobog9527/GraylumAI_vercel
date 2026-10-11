@@ -56,4 +56,26 @@ BEGIN
  END IF;
 END $$;
 REVOKE ALL ON FUNCTION public.content_erasure_scope(uuid,text,uuid) FROM PUBLIC,anon,authenticated,service_role;
+-- A read_source result is written after the source was read. Erasure locks the actor's
+-- projects (NOWAIT) before computing its scope; taking the same rows here in share mode
+-- either makes that erasure report busy or waits for it and then rejects the now
+-- deleted source, so a copy can never be stored after its deletion was scoped.
+-- runtime_tool already holds the execution; execution -> project matches report reads.
+CREATE OR REPLACE FUNCTION runtime_workspace_tool_guard() RETURNS trigger
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
+DECLARE a uuid;dep uuid;
+BEGIN
+ IF NEW.name<>'read_source' OR NEW.result IS NULL OR NEW.result->>'kind' NOT IN ('workspace_index','workspace_source') THEN RETURN NEW;END IF;
+ SELECT actor_id INTO a FROM runtime_executions WHERE id=NEW.execution_id;
+ PERFORM p.id FROM artifact_projects p JOIN artifact_versions v ON v.project_id=p.id
+  WHERE p.actor_id=a AND v.id::text IN (SELECT jsonb_array_elements_text(NEW.result->'dependencies')) ORDER BY p.id FOR SHARE OF p;
+ FOR dep IN SELECT jsonb_array_elements_text(NEW.result->'dependencies')::uuid LOOP
+  IF NOT opc_source_allowed(a,dep) THEN RAISE EXCEPTION 'RUNTIME_WORKSPACE_SOURCE_REVOKED';END IF;
+ END LOOP;
+ RETURN NEW;
+END $$;
+REVOKE ALL ON FUNCTION runtime_workspace_tool_guard() FROM PUBLIC,anon,authenticated,service_role;
+DROP TRIGGER IF EXISTS runtime_workspace_tool_guard ON runtime_tool_calls;
+CREATE TRIGGER runtime_workspace_tool_guard BEFORE INSERT OR UPDATE OF result ON runtime_tool_calls
+ FOR EACH ROW EXECUTE FUNCTION runtime_workspace_tool_guard();
 COMMIT;
