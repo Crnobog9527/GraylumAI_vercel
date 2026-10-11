@@ -1,4 +1,5 @@
 import { adminSettingsRowSchema, genericAdminSettingsRows } from '../services/adminSettings';
+import { withRealModelUsedResult } from '../services/modelIdentity/usageAliases';
 import { modelPriceView } from '../shared/modelPriceView';
 import { adminRefundProcedures } from './adminRefunds';
 import { membershipPlanMutations } from './adminMembershipPlans';
@@ -2164,11 +2165,10 @@ export const adminRouter = router({
         'conversations',
       );
 
-      const { data: tokenStats, error: tokenStatsError } = await readAllReportRows((from, to) => ctx.supabase
-        .from('token_stats')
-        .select('model_used, total_credits, total_cost_usd, cached_tokens, created_at')
-        .order('id').range(from, to));
-
+      // MODEL-IDENTITY-GUARD: token_stats stores aliases; reports use the real model.
+      const { data: tokenStats, error: tokenStatsError } = await withRealModelUsedResult(ctx.supabase,
+        readAllReportRows((from, to) => ctx.supabase.from('token_stats')
+          .select('model_used, total_credits, total_cost_usd, cached_tokens, created_at').order('id').range(from, to)));
       if (tokenStatsError) {
         throw createAdminOperationError('读取财务统计', tokenStatsError);
       }
@@ -2517,10 +2517,10 @@ export const adminRouter = router({
         ctx.supabase
           .from('ai_models')
           .select('id, name, model_id, provider, config, is_active'),
-        readAllReportRows((from, to) => ctx.supabase
-          .from('token_stats')
+        withRealModelUsedResult(ctx.supabase, readAllReportRows((from, to) => ctx.supabase
+          .from('token_stats') // MODEL-IDENTITY-GUARD: stored as aliases; joined and priced by the real model
           .select('model_used, total_credits, total_cost_usd, input_tokens, output_tokens, cached_tokens, cache_creation_tokens, created_at')
-          .gte('created_at', rangeStartIso).order('id').range(from, to)),
+          .gte('created_at', rangeStartIso).order('id').range(from, to))),
         ctx.supabase
           .from('ai_usage_logs')
           .select('status, latency_ms, created_at')
