@@ -77,7 +77,7 @@ payment.refunds 会一起变化，可以用这些字段查回最终结果。处�
 **还要问 Waffo：** "付到哪天"和"真实付款时间"并入第 5 节第 1 题；canceled 何时写入按 Owner 决定不再追问。
 
 **后续可以再查一次：** 2026-11-11 05:59 UTC 之后，用同一个 [q7-order.graphql](queries/q7-order.graphql)
-只读再查，就能看到终态（是否执行按当时规则另行确认）。
+只读再查，看是否已经出现终态（到期后状态何时变化未知，可能仍是 canceling；是否执行按当时规则另行确认）。
 
 ## 3. 第 5 题：metadata 从哪条路径能稳定拿到（只根据已有样例）
 
@@ -150,7 +150,7 @@ If a payment is in progress at the moment the session expires, what is the final
 | 1 历史账期和实际付款时间 | 只保留续费和对账必需的部分，并入上面这一题；月底、闰年等样例不再要 |
 | 2 结账会话查询、过期后迟到付款 | 会话状态确认是名额预留释放的前提，保留为第 2 题；其余细节不再追问 |
 | 3 幂等键范围、分页一致性、写后多久可查 | 不再追问，也不实测；对账按已过去的时间段查，避开写入中的数据 |
-| 4 退款为什么卡在 processing | 已有答案：约 30 分钟后自动成功（见第 1 节）；退款走人工 |
+| 4 退款为什么卡在 processing | 按 Owner 决定不再追问，退款走人工。观察：这一张工单约 30 分钟后变成 succeeded（见第 1 节），这只是一次样例，不是处理时长的答案 |
 | 5 嵌套 metadata 为 null | 不再追问；直接查订单或用 `orderMerchantExternalId` 关联（见第 3 节） |
 | 6 SDK 何时补齐、文档示例不一致 | 不再追问；不影响正常流程 |
 | 7 取消后何时写 canceled、付款时间字段 | "付到哪天"和"付款时间"并入上面这一题；canceled 何时写入不再追问，2026-11-11 后可自己只读查一次 |
@@ -159,7 +159,7 @@ If a payment is in progress at the moment the session expires, what is the final
 
 - 全额退款不会自动取消订阅（测试模式观察）。#791 的月付退款流程已经设计了"停止续费→退款→取消"
   分开的步骤，和观察一致；本 PR 不改 #791，只提醒 #791 不要假设退款会顺带关闭订阅。
-- 退款成功要约 30 分钟，期间工单是 processing、付款是 pending。业务上查回时要把 processing/pending
+- 这次退款约 30 分钟后才变成成功（一次样例，不是承诺的时长），期间工单是 processing、付款是 pending。业务上查回时要把 processing/pending
   当作"未完成"，不能当作失败去重复发起退款。
 - `settlementInfo` 付款后 5 小时仍为 null；#791 若用它当付款时间会拿不到值。
-- 月付订阅 `ORD_1ug9i0Dp6bc09NM9KSVebH` 的终态要 2026-11-11 之后才能看到。
+- 月付订阅 `ORD_1ug9i0Dp6bc09NM9KSVebH` 最早要 2026-11-11 之后才可能看到终态，具体何时变化未知。
