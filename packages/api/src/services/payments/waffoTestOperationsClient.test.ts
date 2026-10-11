@@ -25,8 +25,21 @@ describe('Pancake test operation transport', () => {
     const request = vi.fn().mockResolvedValue(Response.json({ data: { store: { id: 'STO_wrong', subscriptionProducts: [] } } }));
     const client = createWaffoTestOperationsClient(config, request);
     await expect(client.readProduct('PROD_1')).rejects.toThrow('OPERATION_SCOPE');
+    request.mockResolvedValue(Response.json({ data: { store: { id: 'STO_fixture' },
+      subscriptionProducts: [{ id: 'PROD_1', status: 'active' }, { id: 'PROD_1', status: 'inactive' }] } }));
+    await expect(client.readProduct('PROD_1')).rejects.toThrow('OPERATION_SCOPE');
     request.mockResolvedValue(Response.json({ data: { subscriptionOrders: [] }, errors: [{ message: 'scope error' }] }));
     await expect(client.readSubscription('ORD_original')).rejects.toThrow('PROVIDER_UNAVAILABLE');
+  });
+  it('reads one product with the measured String-typed, store-scoped query (no ID scalar)', async () => {
+    const request = vi.fn().mockResolvedValue(Response.json({ data: { store: { id: 'STO_fixture' },
+      subscriptionProducts: [{ id: 'PROD_1', status: 'inactive' }] } }));
+    expect(await createWaffoTestOperationsClient(config, request).readProduct('PROD_1')).toEqual({ id: 'PROD_1', status: 'inactive' });
+    const sent = JSON.parse(request.mock.calls[0]![1].body);
+    expect(sent.query).not.toMatch(/\bID!/);
+    expect(sent.query).toMatch(/\$storeId: String!/);
+    expect(sent.query).toMatch(/subscriptionProducts\(storeId: \$storeId, filter: \{ id: \{ in: \[\$id\] \} \}/);
+    expect(sent.variables).toEqual({ storeId: 'STO_fixture', id: 'PROD_1' });
   });
   it('does not load a provider binding until explicitly enabled in test configuration', () => {
     vi.stubEnv('WAFFO_TEST_OPERATIONS_ENABLED', 'false');

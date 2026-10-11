@@ -28,6 +28,9 @@ export function createWaffoTestOperationsClient(config: {
   const product = z.object({ id: z.string(), status: z.enum(['active', 'inactive']) });
   return {
     merchant: config.merchant, mode: 'test',
+    // Order identity comes from the standalone subscriptionOrders query only. Measured (#802):
+    // nested payment.subscriptionOrder.metadata is null while this path returns metadata as a JSON
+    // string, so a nested null must never be read as "no site order" or substituted.
     async readSubscription(orderId) {
       const data = await post('/v1/graphql', { query: `query($storeId: String!, $id: String!) {
         subscriptionOrders(storeId: $storeId, filter: { id: { eq: $id } }) { id status }
@@ -41,12 +44,15 @@ export function createWaffoTestOperationsClient(config: {
         await post('/v1/actions/subscription-order/cancel-order', { orderId }));
     },
     async readProduct(id) {
-      const data = await post('/v1/graphql', { query: `query($storeId: ID!) {
-        store(id: $storeId) { id subscriptionProducts { id status } }
-      }`, variables: { storeId: config.storeId } });
-      const store = z.object({ id: z.string(), subscriptionProducts: z.array(product) }).parse(data.store);
+      // Shapes measured against the test store (#802 evidence): the schema has no `ID` scalar, and
+      // products are read through the top-level store-scoped list, not a nested Store field.
+      const data = await post('/v1/graphql', { query: `query($storeId: String!, $id: String!) {
+        store(id: $storeId) { id }
+        subscriptionProducts(storeId: $storeId, filter: { id: { in: [$id] } }, limit: 2, offset: 0) { id status }
+      }`, variables: { storeId: config.storeId, id } });
+      const store = z.object({ id: z.string() }).parse(data.store);
       if (store.id !== config.storeId) throw new Error('PAY_WAFFO_OPERATION_SCOPE');
-      const rows = store.subscriptionProducts.filter(row => row.id === id);
+      const rows = z.array(product).parse(data.subscriptionProducts).filter(row => row.id === id);
       if (rows.length !== 1) throw new Error('PAY_WAFFO_OPERATION_SCOPE');
       return rows[0]!;
     },
