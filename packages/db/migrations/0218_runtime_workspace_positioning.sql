@@ -6,7 +6,8 @@
 -- opc_source_allowed check (owned, published, not erased, draft not revoked), 40-entry
 -- index, 4000-character body and dependency recheck apply; erased businesses are skipped. Unpublished
 -- rounds never have a version, so drafts stay unreadable. Positioning is listed
--- first so many topics cannot push it out of the index.
+-- first so many topics cannot push it out of the index; the confirmation time tells
+-- apart profiles that still carry the default name.
 BEGIN;
 CREATE OR REPLACE FUNCTION runtime_workspace_source(p_actor_id uuid,p_session_id uuid,p_query text DEFAULT '') RETURNS jsonb
 LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
@@ -16,8 +17,8 @@ BEGIN
  IF length(coalesce(p_query,''))>2000 THEN RAISE EXCEPTION 'RUNTIME_WORKSPACE_QUERY_DENIED';END IF;
  -- Metadata is requested by the model, not loaded into every conversation.
  SELECT coalesce(jsonb_agg(x.entry ORDER BY x.rank,x.id),'[]') INTO entries FROM (
-  SELECT 0 rank,b.id::text id,jsonb_build_object('id',b.id,'kind','positioning','name',b.name,'sourceVersionId',b.current_source_version_id) entry
-  FROM opc_businesses b WHERE b.actor_id=p_actor_id AND b.erased_at IS NULL AND b.current_source_version_id IS NOT NULL
+  SELECT 0 rank,b.id::text id,jsonb_build_object('id',b.id,'kind','positioning','name',b.name,'confirmedAt',v.created_at,'sourceVersionId',b.current_source_version_id) entry
+  FROM opc_businesses b JOIN artifact_versions v ON v.id=b.current_source_version_id WHERE b.actor_id=p_actor_id AND b.erased_at IS NULL AND b.current_source_version_id IS NOT NULL
    AND opc_source_allowed(p_actor_id,b.current_source_version_id)
   UNION ALL
   SELECT 1,ac.project_id::text,jsonb_build_object('id',ac.project_id,'kind','strategy','platform',ac.platform,'account',coalesce((SELECT display_name FROM opc_account_ui WHERE actor_id=p_actor_id AND account_project_id=ac.project_id),ac.account_key),'sourceVersionId',ac.source_version_id)

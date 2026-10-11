@@ -20,7 +20,10 @@ export async function runCases({db,report,oldDefinition}) {
  } finally {await db.query('ROLLBACK');}
 
  const listed=await index(db,a,sid);
- assert.deepEqual(listed.entries,[{id:main.business,kind:'positioning',name:'Tea studio',sourceVersionId:main.version}]);
+ assert.equal(listed.entries.length,1);
+ const {confirmedAt,...identity}=listed.entries[0];
+ assert.deepEqual(identity,{id:main.business,kind:'positioning',name:'Tea studio',sourceVersionId:main.version});
+ assert.ok(!Number.isNaN(Date.parse(confirmedAt)));
  assert.deepEqual(listed.dependencies,[main.version]);
  const body=await read(db,a,sid,main.business);
  assert.equal(body.kind,'workspace_source');assert.equal(body.identity.kind,'positioning');
