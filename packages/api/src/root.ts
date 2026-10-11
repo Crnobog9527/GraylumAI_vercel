@@ -25,6 +25,7 @@ import { costsRouter } from './routers/costs';
 import { paymentsRouter } from './routers/payments';
 import { skillsRouter } from './routers/skills';
 import { accountRouter } from './routers/account';
+import { dataUseRouter } from './routers/dataUse';
 
 /**
  * 主路由器
@@ -57,6 +58,7 @@ export const appRouter = router({
   runtime: runtimeRouter,
   opc: opcRouter,
   account: accountRouter,
+  dataUse: dataUseRouter,
   library: libraryRouter,
 });
 

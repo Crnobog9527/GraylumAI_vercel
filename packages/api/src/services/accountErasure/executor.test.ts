@@ -16,6 +16,7 @@ function client() {
       selected = true;
     }
     if (name === 'account_erasure_executor_pending') data = 1;
+    if (name === 'data_use_consent_expire') data = 0;
     const promise = Promise.resolve({ data, error: null });
     return Object.assign(promise, { abortSignal: () => promise });
   });
@@ -133,6 +134,7 @@ it('uses available daily budget beyond 20 subjects and resumes remaining work ne
     if (name === 'account_erasure_executor_claim') data = remaining > 0
       ? { claimed: true, profileId: actor, requestId: request } : { claimed: false };
     if (name === 'account_erasure_executor_pending') data = remaining;
+    if (name === 'data_use_consent_expire') data = 0;
     const promise = Promise.resolve({ data, error: null });
     return Object.assign(promise, { abortSignal: () => promise });
   });
@@ -168,4 +170,14 @@ it('cleans expired Gold digests through the existing cron and reports cleanup fa
   const result = await runAccountErasureExecutor(database as never);
   expect(result.failed).toBe(1);
   expect(database.rpc).toHaveBeenCalledWith('pay_waffo_expire_gold_identities', {});
+});
+it('expires the D5 consent audit through the same cron and reports expiry failure', async () => {
+  const database = client();
+  await runAccountErasureExecutor(database as never);
+  expect(database.rpc).toHaveBeenCalledWith('data_use_consent_expire', {});
+  const original = database.rpc.getMockImplementation()!;
+  database.rpc.mockImplementation(name => name === 'data_use_consent_expire'
+    ? { abortSignal: () => Promise.resolve({ data: null, error: { code: 'XX000' } }) } as never
+    : original(name));
+  expect((await runAccountErasureExecutor(database as never)).failed).toBe(1);
 });

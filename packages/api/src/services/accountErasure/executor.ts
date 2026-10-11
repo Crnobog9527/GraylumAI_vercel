@@ -1,5 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { createLibraryErasureAdapter } from '../library/erasure';
+import { expireDataUseConsentAudit } from '../dataUse/consent';
 import { randomUUID } from 'node:crypto';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { z } from 'zod';
@@ -108,6 +109,8 @@ export async function runAccountErasureExecutor(client: SupabaseClient, deadline
     const expired = await client.rpc('pay_waffo_expire_gold_identities', {}).abortSignal(AbortSignal.timeout(2000));
     if (expired.error) throw new Error('GOLD_IDENTITY_EXPIRY_FAILED');
   } catch { summary.failed++; }
+  // D5 consent audit is kept one year after revocation (including erasure), then removed.
+  try { await expireDataUseConsentAudit(client, AbortSignal.timeout(2000)); } catch { summary.failed++; }
   try {
     const result = await client.rpc('account_erasure_executor_pending', {}).abortSignal(AbortSignal.timeout(2000));
     if (result.error) throw new Error('ERASURE_PENDING_UNKNOWN');
