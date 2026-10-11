@@ -121,6 +121,24 @@ describe('remote staging admission and HTTP error boundary', () => {
     expect(mocks.start).not.toHaveBeenCalled();
     expect(mocks.library).not.toHaveBeenCalled();
   });
+  it('answers runtime.view with 200 for the owner and a plain 404 for a foreign or missing session', async () => {
+    const owned = { sessionId: actor, scope: { kind: 'positioning_draft' }, activeExecution: null, executions: [] };
+    const view = async (denied: boolean) => {
+      rpc.mockImplementation(async (name: string) => ({ data: name === 'runtime_test_policy' ? policy : name === 'runtime_test_actor_access' ? true
+        : name === 'runtime_view' && !denied ? owned : null, error: name === 'runtime_view' && denied ? { code: 'P0001', message: 'RUNTIME_SCOPE_DENIED' } : null }));
+      const url = 'http://localhost/api/trpc/runtime.view?input=' + encodeURIComponent(JSON.stringify({ sessionId: actor }));
+      return fetchRequestHandler({ endpoint: '/api/trpc', req: new Request(url), router: app, createContext: () => context() });
+    };
+    const allowed = await view(false);
+    expect(allowed.status).toBe(200);
+    expect((await allowed.json()).result.data).toMatchObject({ sessionId: actor, mode: 'staging_test' });
+    const refused = await view(true);
+    expect(refused.status).toBe(404);
+    const body = await refused.json();
+    expect(body.error.data.code).toBe('NOT_FOUND');
+    expect(JSON.stringify(body)).not.toMatch(/RUNTIME_SCOPE_DENIED|诊断编号/);
+    expect(mocks.error).not.toHaveBeenCalled();
+  });
   it('keeps unexpected internal errors at 500 with a safe correlatable diagnostic', async () => {
     mocks.library.mockRejectedValueOnce(new Error('secret business SQL body'));
     await expect(app.createCaller(context()).opc.library(libraryInput)).rejects.toMatchObject({code:'INTERNAL_SERVER_ERROR',message:expect.stringContaining('诊断编号')});
