@@ -53,7 +53,10 @@
     "./skills/modulePublication": "./src/services/skills/modulePublication.ts",
     "./src/services/runtime/automaticRecovery": "./src/services/runtime/automaticRecovery.ts",
     "./src/services/accountErasure/executor": "./src/services/accountErasure/executor.ts",
-    "./src/services/library/cleanup": "./src/services/library/cleanup.ts"
+    "./src/services/library/cleanup": "./src/services/library/cleanup.ts",
+    "./src/services/payments/waffoWebhookHttp": "./src/services/payments/waffoWebhookHttp.ts",
+    "./src/services/payments/walletWebhook": "./src/services/payments/walletWebhook.ts",
+    "./src/services/payments/methodMaintenance": "./src/services/payments/methodMaintenance.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/client": "2.2.0",
