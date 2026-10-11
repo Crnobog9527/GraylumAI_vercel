@@ -16,9 +16,12 @@ export function RuntimeStopLossTabTrigger() {
   </TabsTrigger>;
 }
 
-/** Admin card for RUNTIME-PROD daily stop-loss; every block saves on its own. */
+/**
+ * Admin card for RUNTIME-PROD daily stop-loss; every block saves on its own.
+ * Kept mounted while another tab is open so an unsaved limit draft and its base revision survive.
+ */
 export function RuntimeStopLossSettings() {
-  return <TabsContent value={STOP_LOSS_TAB}>
+  return <TabsContent value={STOP_LOSS_TAB} forceMount className="data-[state=inactive]:hidden">
     <Card>
       <CardHeader>
         <CardTitle>成本止损</CardTitle>

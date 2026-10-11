@@ -86,10 +86,12 @@ beforeAll(async () => {
     }, load(id: string) {
       if (id === '\0stop-loss-trpc') return mock;
       if (id === entry) return `import React from 'react'; import { createRoot } from 'react-dom/client';
-        import {RuntimeStopLossSettings,STOP_LOSS_TAB} from ${JSON.stringify(source)};
-        import {Tabs} from '@/components/ui/tabs';
-        createRoot(document.getElementById('root')).render(React.createElement(Tabs,
-          {defaultValue:STOP_LOSS_TAB},React.createElement(RuntimeStopLossSettings)));`;
+        import {RuntimeStopLossSettings,RuntimeStopLossTabTrigger,STOP_LOSS_TAB} from ${JSON.stringify(source)};
+        import {Tabs,TabsList,TabsTrigger,TabsContent} from '@/components/ui/tabs';
+        const h=React.createElement;
+        createRoot(document.getElementById('root')).render(h(Tabs,{defaultValue:STOP_LOSS_TAB},
+          h(TabsList,null,h(RuntimeStopLossTabTrigger),h(TabsTrigger,{value:'other'},'其他设置')),
+          h(TabsContent,{value:'other'},'other tab'),h(RuntimeStopLossSettings)));`;
     } }],
     build: { write: false, minify: false, lib: { entry, name: 'StopLossTest', formats: ['iife'] } },
   });
@@ -110,7 +112,9 @@ async function open(server: Record<string, unknown>, fail: Record<string, unknow
   const errors: string[] = [];
   page.on('pageerror', error => errors.push(error.message));
   await page.route('**/*', route => route.abort());
-  await page.setContent('<div id="root"></div>');
+  // The bundle has no Tailwind build; this one rule stands in for the inactive-tab utility class.
+  await page.setContent('<style>[data-state="inactive"].data-\\[state\\=inactive\\]\\:hidden{display:none}</style>'
+    + '<div id="root"></div>');
   await page.evaluate(([s, f]) => {
     Object.assign(window, { server: s, fail: f });
   }, [{ limits, stopLoss: emptyStopLoss, revision: 0, source: 'default', usage: { utcDate: '2026-10-11', userUsd: '0', siteUsd: '0' },
@@ -190,6 +194,20 @@ it('shows empty limits as not blocking, saves the full config and reads it back'
       userDailyUsd: '0.5', siteDailyUsd: '3', siteAlertUsd: null, providerBalanceAlertUsd: null, notificationChannel: '运营群' } });
     await browserExpect(usage).toContainText('全站每日上限：$3（已达到）');
     await browserExpect(page.getByText('设置来源：已保存的设置')).toBeVisible();
+    expect(errors).toEqual([]);
+  } finally { await page.close(); }
+}, 20000);
+
+it('keeps an unsaved limit draft when switching to another settings tab and back', async () => {
+  const { page, errors } = await open({});
+  try {
+    await page.getByLabel('全站每日上限（美元）').fill('7');
+    await page.getByRole('tab', { name: '其他设置' }).click();
+    await browserExpect(page.getByLabel('全站每日上限（美元）')).toBeHidden();
+    await page.getByRole('tab', { name: '成本止损' }).click();
+    await browserExpect(page.getByLabel('全站每日上限（美元）')).toHaveValue('7');
+    await page.getByRole('button', { name: '保存止损设置' }).click();
+    await browserExpect(page.getByText('止损设置已保存（已回读确认）。')).toBeVisible();
     expect(errors).toEqual([]);
   } finally { await page.close(); }
 }, 20000);
