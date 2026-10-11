@@ -118,7 +118,7 @@ BEGIN
 END $$;
 CREATE OR REPLACE FUNCTION public.opc_adopt_topics_with_source(
  p_actor_id uuid,p_draft_id uuid,p_request_id uuid,p_expected_version bigint,p_source_version_id uuid,
- p_body jsonb,p_accounts jsonb,p_sources jsonb DEFAULT NULL) RETURNS jsonb
+ p_body jsonb,p_accounts jsonb,p_sources jsonb DEFAULT NULL,p_source_draft_version_id uuid DEFAULT NULL) RETURNS jsonb
 LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
 DECLARE item jsonb;original jsonb;eid uuid;ids uuid[];project uuid;result jsonb;bound jsonb:='[]';prior opc_data_events;
 BEGIN
@@ -139,22 +139,22 @@ BEGIN
   SELECT * INTO prior FROM opc_data_events WHERE actor_id=p_actor_id AND request_id=p_request_id AND item_key=item->>'id';
   IF p_sources IS NOT NULL THEN
    SELECT (x->>'executionId')::uuid INTO eid FROM jsonb_array_elements(p_sources) x WHERE x->>'itemId'=item->>'id';
-  ELSIF prior.request_id IS NOT NULL THEN eid:=prior.execution_id;
+  ELSIF p_source_draft_version_id IS NULL AND prior.request_id IS NOT NULL THEN eid:=prior.execution_id;
   ELSE
-   -- The shipped client displays the highest persisted draft version, not all history.
-   -- Bind through that version's immutable request identity; never infer by timestamp.
-   WITH latest AS (
+   -- Bind the submitted immutable draft identity even after another tab saves a revision.
+   -- Old requests without identity must prove a unique source across history or fail closed.
+   WITH submitted AS (
     SELECT * FROM opc_topic_draft_versions WHERE actor_id=p_actor_id AND draft_id=p_draft_id
-    ORDER BY version DESC LIMIT 1
+     AND (p_source_draft_version_id IS NULL OR id=p_source_draft_version_id)
    )
    SELECT array_agg(DISTINCT candidate.id) INTO ids FROM (
-    SELECT event.execution_id AS id FROM latest v JOIN opc_data_events event ON event.request_id=v.request_id
+    SELECT event.execution_id AS id FROM submitted v JOIN opc_data_events event ON event.request_id=v.request_id
     WHERE event.actor_id=p_actor_id AND event.project_id=project AND event.source_version_id=p_source_version_id
      AND event.action='topic_draft' AND v.erased_at IS NULL AND v.source_version_id=p_source_version_id
      AND EXISTS(SELECT 1 FROM jsonb_array_elements(v.body) o WHERE o->>'id'=item->>'id')
     UNION
     -- Before R9 the client already used execution UUID as its save request UUID.
-    SELECT e.id FROM latest v JOIN runtime_executions e ON e.id=v.request_id
+    SELECT e.id FROM submitted v JOIN runtime_executions e ON e.id=v.request_id
      JOIN opc_topic_workspaces w ON w.draft_id=v.draft_id AND w.session_id=e.session_id
     WHERE e.actor_id=p_actor_id AND v.source_version_id=p_source_version_id
      AND v.erased_at IS NULL AND e.state='completed' AND runtime_history_available(e.id)

@@ -46,7 +46,7 @@ type CandidateSnapshot = { body: PlanItem[]; requestId: string };
 type SaveRequest = { draftId: string; requestId: string; expectedVersion: number; sourceVersionId: string; body: PlanItem[] };
 type AdoptRequest = { draftId: string; requestId: string; planId: string; accounts: Array<{ platform: string; account: string; expectedRevision: number | null }> };
 type DraftRequest = SaveRequest & { executionId: string };
-type AdoptTopicsRequest = SaveRequest & { accounts: Array<{ platform: string; account: string; expectedRevision: number | null }> };
+type AdoptTopicsRequest = SaveRequest & { sourceDraftVersionId?: string; accounts: AdoptRequest['accounts'] };
 type Operation = { kind: 'chat'; request: ChatRequest; candidateAtSend?: CandidateSnapshot | null } | { kind: 'save'; request: SaveRequest } | { kind: 'adopt'; request: AdoptRequest } | { kind: 'draft'; request: DraftRequest } | { kind: 'adoptTopics'; request: AdoptTopicsRequest };
 // Only transaction-level definite rejections release a request. Unknown replies
 // and identity conflicts retain the whole original envelope, never just its ID.
@@ -395,13 +395,13 @@ export default function TopicWorkspacePage() {
     }
   }
 
-  function adoptionRequest(body: PlanItem[], itemIds: string[], requestId = crypto.randomUUID()): AdoptTopicsRequest | null {
+  function adoptionRequest(snapshot: CandidateSnapshot, itemIds: string[], requestId = crypto.randomUUID()): AdoptTopicsRequest | null {
     if (accountList.isFetching || accountList.error || !accountList.data) return null;
-    const chosen = body.filter(item => itemIds.includes(item.id));
+    const chosen = snapshot.body.filter(item => itemIds.includes(item.id));
     const unique = new Map(chosen.map(item => [item.platform + '::' + item.account, item]));
     if (!chosen.length || !unique.size) return null;
     return {
-      draftId, requestId, expectedVersion: nextVersion,
+      draftId, requestId, expectedVersion: nextVersion, sourceDraftVersionId: snapshot.requestId,
       sourceVersionId: workspace.data?.sourceVersionId ?? '', body: chosen,
       accounts: [...unique.values()].map(item => ({
         platform: item.platform, account: item.account,
@@ -413,7 +413,7 @@ export default function TopicWorkspacePage() {
   async function adoptCurrent(itemIds: string[], requestId?: string) {
     if (!candidate || pending) return;
     const remaining = itemIds.filter(id => !adoptedItemIds.has(id));
-    const request = adoptionRequest(candidate.body, remaining, requestId);
+    const request = adoptionRequest(candidate, remaining, requestId);
     if (!request) {
       setError(itemIds.some(id => adoptedItemIds.has(id))
         ? '所选选题已经采用并保存在资料库中，请选择尚未采用的选题。'
@@ -470,7 +470,7 @@ export default function TopicWorkspacePage() {
     }
     const consented = consentedTopicIds(action.input, frozen.body.map(item => item.id));
     if (!consented || consented.length !== ids.length || consented.some(id => !ids.includes(id))) return;
-    const request = adoptionRequest(frozen.body, ids.filter(id => !adoptedItemIds.has(id)), action.executionId);
+    const request = adoptionRequest(frozen, ids.filter(id => !adoptedItemIds.has(id)), action.executionId);
     if (!request) return;
     adoptedExecution.current = action.executionId;
     void perform({ kind: 'adoptTopics', request });

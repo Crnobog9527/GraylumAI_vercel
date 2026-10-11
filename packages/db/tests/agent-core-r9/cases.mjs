@@ -69,7 +69,7 @@ async function testTopics(db,report,legacy=false){
  const save=()=>legacy
   ?rpc(db,'opc_topic_draft_save',f.actor,d.draft_id,saveId,0,art.version,JSON.stringify([saved]))
   :rpc(db,'opc_topic_draft_from_execution',f.actor,d.draft_id,saveId,0,art.version,f.execution,JSON.stringify([saved]));
- assert.equal((await save()).version,1);assert.equal((await save()).version,1);
+ const firstDraft=await save();assert.equal(firstDraft.version,1);assert.equal((await save()).version,1);
  const stored=(await db.query('SELECT * FROM opc_data_events WHERE actor_id=$1 AND request_id=$2',[f.actor,saveId])).rows[0];
  if(legacy)assert.equal(stored,undefined);
  else {
@@ -78,7 +78,7 @@ async function testTopics(db,report,legacy=false){
  }
  await assert.rejects(rpc(db,'opc_topic_draft_from_execution',f.actor,d.draft_id,randomUUID(),1,art.version,f.execution,
   JSON.stringify([{...saved,id:randomUUID()}])),/OPC_TOPIC_SOURCE_INVALID/);
- // Revising a proposal retains its item UUID, but must adopt the newest persisted source.
+ // Freeze version 1, then another tab revises the same UUID before this adoption is sent.
  const revised= randomUUID(),revisedSave=legacy?revised:randomUUID();
  const revisedRun=await rpc(db,'bill2_prepare',f.actor,randomUUID(),f.payload);
  await db.query(`INSERT INTO runtime_executions(id,actor_id,session_id,request_id,payload,history_revision,state,result,billing_run_id)
@@ -95,12 +95,27 @@ async function testTopics(db,report,legacy=false){
   :await rpc(db,'opc_topic_draft_from_execution',f.actor,d.draft_id,revisedSave,1,art.version,revised,revisedBody);
  assert.equal(revision.version,2);
  const adoptId=randomUUID(),accounts=[{platform:account.platform,account:account.account_key,expectedRevision:account.revision}];
- const adopt=()=>rpc(db,'opc_adopt_topics_with_source',f.actor,d.draft_id,adoptId,1,art.version,JSON.stringify([saved]),JSON.stringify(accounts),null);
+ const adopt=()=>rpc(db,'opc_adopt_topics_with_source',f.actor,d.draft_id,adoptId,1,art.version,JSON.stringify([saved]),JSON.stringify(accounts),null,firstDraft.draftVersionId);
  await assert.rejects(rpc(db,'opc_adopt_topics_with_source',f.actor,d.draft_id,randomUUID(),1,art.version,
   JSON.stringify([saved]),JSON.stringify(accounts),'[]'),/OPC_TOPIC_SOURCE_INVALID/);
+ await assert.rejects(rpc(db,'opc_adopt_topics_with_source',f.actor,d.draft_id,randomUUID(),1,art.version,
+  JSON.stringify([saved]),JSON.stringify(accounts),null),/OPC_TOPIC_SOURCE_REQUIRED/);
+ await assert.rejects(rpc(db,'opc_adopt_topics_with_source',f.actor,d.draft_id,randomUUID(),1,art.version,
+  JSON.stringify([saved]),JSON.stringify(accounts),null,randomUUID()),/OPC_TOPIC_SOURCE_REQUIRED/);
+ // The new version also binds correctly when explicitly submitted; roll back this branch
+ // so the same fixture can then prove the delayed version-1 request independently.
+ await db.query('BEGIN');
+ const newestRequest=randomUUID();
+ await rpc(db,'opc_adopt_topics_with_source',f.actor,d.draft_id,newestRequest,1,art.version,
+  revisedBody,JSON.stringify(accounts),null,revision.draftVersionId);
+ const newest=(await db.query('SELECT * FROM opc_data_events WHERE actor_id=$1 AND request_id=$2',
+  [f.actor,newestRequest])).rows[0];
+ assert.equal(newest.execution_id,revised);assert.equal(newest.original.title,'R9_REVISED');
+ assert.equal(newest.adopted.title,'R9_REVISED_USER_EDIT');
+ await db.query('ROLLBACK');
  const adopted=await adopt();assert.ok(adopted.planId);assert.deepEqual(await adopt(),adopted);
  const event=(await db.query("SELECT * FROM opc_data_events WHERE actor_id=$1 AND action='topic_adoption'",[f.actor])).rows[0];
- assert.equal(event.execution_id,revised);assert.equal(event.original.title,'R9_REVISED');
+ assert.equal(event.execution_id,f.execution);assert.equal(event.original.title,'R9_AI_ORIGINAL');
  assert.equal(event.adopted.title,'R9_USER_EDIT');assert.ok(event.target_project_id);
  await erase(db,f);
  await erase(db,{...f,execution:revised});
@@ -108,5 +123,5 @@ async function testTopics(db,report,legacy=false){
  assert.equal((await db.query('SELECT body FROM opc_topic_draft_versions WHERE request_id=$1',[saveId])).rows[0].body,null);
  assert.equal((await db.query('SELECT brief FROM opc_items WHERE work_item_id=$1',[event.target_project_id])).rows[0].brief,'R9_AI_BRIEF');
  await assert.rejects(adopt(),/OPC_TOPIC_SOURCE|OPC_DATA_SOURCE/);
- report.checks.push((legacy?'legacy request/execution binding: ':'new snapshot binding: ')+'revision with same item ID adopts newest persisted source, user edits distinct, foreign IDs denied, adoption and replay, D7 removes source copies but preserves saved work');
+ report.checks.push((legacy?'legacy request/execution binding: ':'new snapshot binding: ')+'frozen old draft survives newer revision with same item ID; missing or invalid identity denied, user edits distinct, foreign IDs denied, adoption and replay, D7 removes source copies but preserves saved work');
 }

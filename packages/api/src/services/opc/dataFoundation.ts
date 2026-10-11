@@ -61,6 +61,7 @@ export function dataFoundationService<T>(rpc: ActorRpc<T>) {
         p_body: v.body,
         p_accounts: v.accounts,
         p_sources: v.sources ?? null,
+        p_source_draft_version_id: v.sourceDraftVersionId ?? null,
       });
     },
     recordReaction(value: unknown) {

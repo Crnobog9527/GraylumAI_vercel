@@ -30,8 +30,8 @@ it('routes topic saves and adoption through authenticated source binding RPCs', 
     p_actor_id:id(9), p_execution_id:id(4), p_body:[item],
   }));
   const sources = [{itemId:id(5), executionId:id(4)}];
-  await f.caller.adoptTopics({...draft, sources, accounts:[{platform:'x', account:'main', expectedRevision:null}]});
-  expect(f.rpc).toHaveBeenLastCalledWith('opc_adopt_topics_with_source', expect.objectContaining({p_sources:sources,p_actor_id:id(9)}));
+  await f.caller.adoptTopics({...draft, sources, sourceDraftVersionId:id(7), accounts:[{platform:'x', account:'main', expectedRevision:null}]});
+  expect(f.rpc).toHaveBeenLastCalledWith('opc_adopt_topics_with_source', expect.objectContaining({p_sources:sources,p_source_draft_version_id:id(7),p_actor_id:id(9)}));
 });
 it.each(['rewrite','abandon'] as const)('records explicit %s without invoking Runtime', async action => {
   const f = fixture();
