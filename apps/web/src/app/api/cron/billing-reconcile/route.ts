@@ -10,6 +10,7 @@ import { reconcileWaffoPayments } from '@repo/api/src/services/payments/waffoRec
 import { getWaffoTestOperationsClient } from '@repo/api/src/services/payments/waffoTestOperationsClient';
 import { closeExpiredWaffoCheckouts } from '@repo/api/src/services/payments/waffoCardCheckout';
 import { describeWaffoFailure } from '@repo/api/src/services/payments/waffoFailure';
+import { findStaleChargedRounds } from '@repo/api/src/services/runtime/staleChargedRounds';
 import { validateCronRequest } from '@/lib/cron-auth';
 
 export const runtime = 'nodejs';
@@ -17,6 +18,12 @@ export const maxDuration = 60;
 
 const CRON_FAILURE_MESSAGE = 'Billing reconciliation failed';
 const CRON_CONFIG_ERROR_MESSAGE = 'Server configuration error';
+
+/** Stale charged rounds: report-only; an operator verifies and refunds each one (Owner 2026-10-12). */
+async function runStaleRoundReconciliation(supabase: SupabaseClient) {
+  try { return await findStaleChargedRounds(supabase); }
+  catch { return { success: false, findings: [], truncated: false, scanFailed: true }; }
+}
 
 /** Waffo daily backstop: report-only. Off until the test operations binding is explicitly enabled. */
 async function runWaffoReconciliation(supabase: SupabaseClient) {
@@ -50,13 +57,15 @@ export async function GET(request: Request) {
 
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
     logger.system.cronJob('billing-reconcile', 'started');
-    const [result, readinessAudit, erasureFinancial, waffo] = await Promise.all([
+    const [result, readinessAudit, erasureFinancial, waffo, staleRounds] = await Promise.all([
       runDailyBillingReconciliation(supabase),
       runBillingEngineV15ReadinessAudit(supabase),
       runErasureFinancialReconciliation(supabase),
       runWaffoReconciliation(supabase),
+      runStaleRoundReconciliation(supabase),
     ]);
-    const success = result.success && readinessAudit.success && erasureFinancial.success && waffo.success;
+    const success = result.success && readinessAudit.success && erasureFinancial.success && waffo.success
+      && staleRounds.success;
 
     if (!success) {
       logger.system.cronJob(
@@ -65,10 +74,12 @@ export async function GET(request: Request) {
         Date.now() - startedAt,
         [...result.mismatches, ...readinessAudit.findings.map((finding) => finding.message),
           ...(erasureFinancial.success ? [] : ['Erasure financial recovery pending']),
-          ...(waffo.success ? [] : [`Waffo payments need manual review: ${waffo.findings.length}`])].join(' | '),
+          ...(waffo.success ? [] : [`Waffo payments need manual review: ${waffo.findings.length}`]),
+          ...(staleRounds.success ? [] : [`Stale charged rounds need manual review: ${staleRounds.findings.length}`])].join(' | '),
         {
           erasureFinancial,
           waffo,
+          staleRounds,
           mismatches: result.mismatches,
           summary: result.summary,
           readinessAudit: {
@@ -104,6 +115,7 @@ export async function GET(request: Request) {
       readinessAudit,
       erasureFinancial,
       waffo,
+      staleRounds,
       timestamp: new Date().toISOString(),
     }, { status: success ? 200 : 500 });
   } catch (error) {

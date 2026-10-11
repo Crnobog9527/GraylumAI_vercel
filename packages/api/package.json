@@ -52,6 +52,7 @@
     "./skills/workflowManifest": "./src/services/skills/workflowManifest.ts",
     "./skills/modulePublication": "./src/services/skills/modulePublication.ts",
     "./src/services/runtime/automaticRecovery": "./src/services/runtime/automaticRecovery.ts",
+    "./src/services/runtime/staleChargedRounds": "./src/services/runtime/staleChargedRounds.ts",
     "./src/services/accountErasure/executor": "./src/services/accountErasure/executor.ts",
     "./src/services/library/cleanup": "./src/services/library/cleanup.ts",
     "./src/services/payments/waffoWebhookHttp": "./src/services/payments/waffoWebhookHttp.ts",
