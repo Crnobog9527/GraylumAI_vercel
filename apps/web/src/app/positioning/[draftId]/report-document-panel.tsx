@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 "use client";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { trpc } from "@/trpc/client";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -21,6 +21,8 @@ type Props = {
   busy: boolean;
   /** 定稿 succeeded with a next step: the page asks, explicitly, whether to start the first-week topics. */
   onTopics: () => void;
+  /** Unsaved text or a save in flight: closing the dialog would lose it, so the dialog asks first. */
+  onUnsaved?: (unsaved: boolean) => void;
 };
 
 /** Codes after which the shown document is out of date: read it again, keep the user's text. */
@@ -30,7 +32,7 @@ const REREAD = new Set(["REPORT_VERSION_CONFLICT", "REPORT_ALREADY_FINALIZED", "
  * The finished report (R5): read the current version, edit it as a manual version, and 定稿 it into the
  * official positioning version. Nothing here calls a model or charges; the server checks every step.
  */
-export function ReportDocumentPanel({ executionId, fallbackBody, generatedComplete, busy, onTopics }: Props) {
+export function ReportDocumentPanel({ executionId, fallbackBody, generatedComplete, busy, onTopics, onUnsaved }: Props) {
   const utils = trpc.useUtils();
   const read = trpc.runtime.reportDocument.useQuery({ executionId }, { retry: 1 });
   const save = trpc.runtime.reportSave.useMutation();
@@ -46,6 +48,9 @@ export function ReportDocumentPanel({ executionId, fallbackBody, generatedComple
   const pending = useRef<PendingRequest | null>(null);
   const doc = read.data as ReportDocument | undefined;
   const working = save.isPending || finalize.isPending;
+  const unsaved = working || (draft !== null && draft.text !== doc?.body);
+  useEffect(() => { onUnsaved?.(unsaved); }, [unsaved, onUnsaved]);
+  useEffect(() => () => onUnsaved?.(false), [onUnsaved]);
 
   if (!doc) return <>
     <MessageMarkdown className="mt-4" text={fallbackBody} />

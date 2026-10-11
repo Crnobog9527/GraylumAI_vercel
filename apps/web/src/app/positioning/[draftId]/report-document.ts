@@ -20,6 +20,7 @@ export const REPORT_DOC_TEXT = {
   topics: "继续生成第一周选题",
   newerElsewhere: "这份报告在别处有了更新的版本。保存时会提示冲突，不会覆盖那边的修改。",
   showLatest: "查看最新保存的内容",
+  closeUnsaved: "报告的修改还没有保存，关闭后会丢失。确定关闭吗？",
   loadFailed: "暂时无法读取报告的最新版本，下面显示的是生成时的内容，暂时不能修改或定稿；请稍后重新打开。",
 } as const;
 
