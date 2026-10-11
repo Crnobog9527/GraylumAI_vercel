@@ -47,11 +47,11 @@ try {
   const beforeSupplementRepeat = catalog();
   sql(supplement);
   assert.equal(catalog(), beforeSupplementRepeat, '0207 repeat must not change schema/permissions');
-  const pdf = readFileSync(resolve(root, 'packages/db/tests/library/pdf-pending.sql'), 'utf8');
+  const pdf = readFileSync(resolve(root, 'packages/db/migrations/0211_library_pdf_upload.sql'), 'utf8');
   sql(pdf);
   const beforePdfRepeat = catalog();
   sql(pdf);
-  assert.equal(catalog(), beforePdfRepeat, 'PDF repeat must not change schema/permissions');
+  assert.equal(catalog(), beforePdfRepeat, '0211 repeat must not change schema/permissions');
   const port = Number(docker(['port', name, '5432/tcp']).split(':').at(-1));
   const connect = async () => {
     const c = new pg.Client({ host: '127.0.0.1', port, database: 'lib2a', user: 'postgres', password: 'local-test-only' });

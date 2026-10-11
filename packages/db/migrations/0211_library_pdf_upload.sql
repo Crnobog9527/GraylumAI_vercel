@@ -1,5 +1,5 @@
 -- Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved.
--- Draft migration pending control assignment. Local fixture only; never deployed.
+-- LIB-DOCS PDF upload; assigned 0211 by control on 2026-10-11, after 0208/0209/0210.
 BEGIN;
 SET LOCAL lock_timeout='5s';
 CREATE OR REPLACE FUNCTION public.library_upload_begin(a uuid,r uuid,n text,f text,p text,declared bigint)
