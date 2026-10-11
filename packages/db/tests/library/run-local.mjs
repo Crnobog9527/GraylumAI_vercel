@@ -5,6 +5,7 @@ import { resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import assert from 'node:assert/strict';
 import pg from 'pg';
+import { verifyPdf } from './pdf.mjs';
 import { verifySupplement } from './supplement.mjs';
 import { verifyErasure } from './erasure.mjs';
 import { POSTGRES_IMAGE } from '../v3/images.mjs';
@@ -46,6 +47,11 @@ try {
   const beforeSupplementRepeat = catalog();
   sql(supplement);
   assert.equal(catalog(), beforeSupplementRepeat, '0207 repeat must not change schema/permissions');
+  const pdf = readFileSync(resolve(root, 'packages/db/migrations/0211_library_pdf_upload.sql'), 'utf8');
+  sql(pdf);
+  const beforePdfRepeat = catalog();
+  sql(pdf);
+  assert.equal(catalog(), beforePdfRepeat, '0211 repeat must not change schema/permissions');
   const port = Number(docker(['port', name, '5432/tcp']).split(':').at(-1));
   const connect = async () => {
     const c = new pg.Client({ host: '127.0.0.1', port, database: 'lib2a', user: 'postgres', password: 'local-test-only' });
@@ -176,6 +182,8 @@ try {
   await verifySupplement(admin, one, two);
   await verifyErasure(admin, one);
   await verifyErasure(admin, one, true);
+  await verifyPdf(admin, one, two);
+  await verifyErasure(admin, one, 'pdf');
   console.log(JSON.stringify({result:'PASS',steps:report.passed,newMigrationRepeated:true,
     cases:['default-off','concurrent-quota-barrier','idempotent-no-new-token','cross-user-denial','actual-size',
       'atomic-publication','downgrade-read-delete','delete-private-fields','delete-publish-denial','live-token-hold',

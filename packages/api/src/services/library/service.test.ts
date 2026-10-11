@@ -18,7 +18,7 @@ beforeEach(()=>{
   deleted=false;
   rpc=vi.fn(async(name:string)=>{
     if(name==='library_document_read') return deleted ? {error:{message:'LIBRARY_NOT_FOUND'}}
-      : {data:{id,kind:'image',format:'png',path,status:'uploading'}};
+      : {data:{id,filename:'原文件.png',kind:'image',format:'png',path,status:'uploading'}};
     if(name==='library_delete') {deleted=true;return {data:{status:'deleting'}};}
     if(name==='library_cleanup_candidates') return {data:[row]};
     if(name==='library_cleanup_backlog') return {data:{pending:1,overdue:0,oldestDeletedAt:null}};
@@ -124,4 +124,21 @@ it('requires successful absence of BOTH Word paths before reporting a release ob
   await cleanupLibrary(client, { actorId: a, storage });
   expect(storage.remove).toHaveBeenCalledWith(textPath);
   expect(rpc).toHaveBeenCalledWith('library_cleanup_observe', { a, did: id, absent: false });
+});
+
+it('uses the stored filename for downloads and leaves preview inline',async()=>{
+  const service=libraryService(client,a,storage);
+  await expect(service.signedUrl(id,false)).resolves.toEqual({url:'signed-private-url',expiresIn:60});
+  expect(storage.signRead).toHaveBeenLastCalledWith(path,'原文件.png');
+  await service.signedUrl(id,true);
+  expect(storage.signRead).toHaveBeenLastCalledWith(path,false);
+});
+it('does not sign a download when ownership or deletion checks deny the document',async()=>{
+  deleted=true;
+  await expect(libraryService(client,a,storage).signedUrl(id,false)).rejects.toThrow('LIBRARY_NOT_FOUND');
+  expect(storage.signRead).not.toHaveBeenCalled();
+});
+it('does not return a download link after concurrent deletion',async()=>{
+  vi.mocked(storage.signRead).mockImplementation(async()=>{deleted=true;return 'must-not-escape';});
+  await expect(libraryService(client,a,storage).signedUrl(id,false)).rejects.toThrow('LIBRARY_NOT_FOUND');
 });
