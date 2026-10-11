@@ -44,6 +44,14 @@ function previousDisplay(s: MentorReplySource) {
 }
 
 describe("mentorReplyDisplay: new envelope", () => {
+  it("shows a deleted answer as unavailable, never incomplete or as stale streamed content", () => {
+    for (const extra of [{}, { liveText: "已删除的旧正文", liveCard: card, busy: true, active: true }]) {
+      expect(mentorReplyDisplay(source(null, { contentDeleted: true, ...extra }))).toEqual({
+        text: "来源已不可用，暂不展示此内容。", card: null,
+      });
+    }
+  });
+
   it("shows the message and the card", () => {
     const shown = mentorReplyDisplay(source(agentTurnBody("先聊聊你的读者。", card)));
     expect(shown).toEqual({ text: "先聊聊你的读者。", card });

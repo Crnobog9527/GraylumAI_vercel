@@ -3,7 +3,6 @@ import { reportModelRouter } from './routers/reportModel';
 import { opcRouter } from './routers/opc';
 import { runtimeRouter } from './routers/runtime';
 import { workbenchRouter } from './routers/workbench';
-import { agentSliceRouter } from './routers/agentSlice';
 import { router } from './trpc';
 import { runtimeRateLimitsRouter } from './routers/runtimeRateLimits';
 import { mentorBudgetRouter } from './routers/mentorBudget';
@@ -55,7 +54,6 @@ export const appRouter = router({
   payments: paymentsRouter,
   skills: skillsRouter,
   workbench: workbenchRouter,
-  agentSlice: agentSliceRouter,
   runtime: runtimeRouter,
   opc: opcRouter,
   account: accountRouter,

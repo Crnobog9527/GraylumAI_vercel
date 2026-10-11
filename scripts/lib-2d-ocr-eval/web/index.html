@@ -1,0 +1,58 @@
+<!doctype html><meta charset="utf-8"><title>ocr harness</title>
+<script>
+let frame = null, waiters = [], events = [];
+addEventListener('message', (ev) => {
+  if (!frame || ev.source !== frame.contentWindow) return;
+  const m = ev.data; events.push(m);
+  const i = waiters.findIndex((w) => w.match(m));
+  if (i >= 0) waiters.splice(i, 1)[0].resolve(m);
+});
+const wait = (match, ms = 600000) => new Promise((resolve, reject) => {
+  waiters.push({ match, resolve });
+  setTimeout(() => reject(new Error('timeout')), ms);
+});
+const bytes = async (u) => (await fetch(u)).arrayBuffer();
+window.harness = {
+  events: () => events,
+  async boot(engine, cspVariant) {
+    events = [];
+    if (frame) frame.remove();
+    frame = document.createElement('iframe');
+    frame.setAttribute('sandbox', 'allow-scripts');
+    frame.src = '/sandbox.html?csp=' + cspVariant;
+    await new Promise((r) => { frame.onload = r; document.body.appendChild(frame); });
+    const code = await (await fetch('/dist/' + engine + '-worker.js')).text();
+    frame.contentWindow.postMessage({ type: 'boot', code, module: false }, '*');
+    const b = await wait((m) => m.type === 'booted' || m.type === 'error');
+    return b;
+  },
+  async init(msg, transfer) {
+    frame.contentWindow.postMessage({ ...msg, type: 'init', transfer }, '*', transfer);
+    return wait((m) => m.type === 'ready' || m.type === 'error', 90000).catch((e) => ({ type: 'error', msg: 'init ' + e.message }));
+  },
+  async initTess(dataset) {
+    const wasm = await bytes('/nm/tesseract.js-core/tesseract-core-relaxedsimd-lstm.wasm');
+    const langs = [];
+    for (const [code, p] of dataset) langs.push({ code, data: await bytes(p) });
+    return this.init({ wasm, langs, params: { tessedit_pageseg_mode: '3', preserve_interword_spaces: '1' } }, [wasm, ...langs.map((l) => l.data)]);
+  },
+  async initPaddle(tier, extra) {
+    const wasm = await bytes('/nm/onnxruntime-web/dist/ort-wasm-simd-threaded.wasm');
+    const det = await bytes(`/a/PP-OCRv6_${tier}_det.ort`), rec = await bytes(`/a/PP-OCRv6_${tier}_rec.ort`);
+    const dict = await bytes(tier === 'tiny' ? '/a/ppocrv6_tiny_dict.txt' : '/a/ppocrv6_dict.txt');
+    return this.init({ wasm, det, rec, dict, ...(extra || {}) }, [wasm, det, rec, dict]);
+  },
+  async ocr(id, deskew, columns) {
+    const b = await bytes('/set/' + id + '.jpg');
+    frame.contentWindow.postMessage({ type: 'ocr', id, bytes: b, deskew: !!deskew, columns: !!columns, transfer: [b] }, '*', [b]);
+    return wait((m) => (m.type === 'result' || m.type === 'error') && (m.id === id || m.type === 'error'));
+  },
+  async probe(base) {
+    frame.contentWindow.postMessage({ type: 'probe', base }, '*');
+    const w = await wait((m) => m.type === 'probe' || m.type === 'error');
+    frame.contentWindow.postMessage({ type: 'page-probe', base }, '*');
+    const p = await wait((m) => m.type === 'page-probe');
+    return { worker: w.result || w, sandboxPage: p.result };
+  },
+};
+</script><body></body>
