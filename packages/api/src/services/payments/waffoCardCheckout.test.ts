@@ -2,7 +2,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({ prepare: vi.fn() }));
 vi.mock('./methodPurchase', async (original) => ({ ...await original<typeof import('./methodPurchase')>(), prepareMethodPurchase: mocks.prepare }));
-import { createWaffoCardCheckout } from './waffoCardCheckout';
+import { closeExpiredWaffoCheckouts, createWaffoCardCheckout } from './waffoCardCheckout';
 import { fakeDb } from './waffoTestHarness';
 
 const id = '00000000-0000-4000-8000-000000000001';
@@ -71,5 +71,20 @@ describe('Waffo card checkout (normal path)', () => {
     timeout.provider.createCheckout.mockRejectedValue(new Error('PAY_WAFFO_PROVIDER_UNAVAILABLE'));
     await expect(timeout.run()).rejects.toThrow('PROVIDER_UNAVAILABLE');
     expect(timeout.rpc).not.toHaveBeenCalledWith('pay_waffo_close_card_checkout', expect.objectContaining({ p_rejected: true }));
+  });
+});
+
+describe('expired card checkout release', () => {
+  it('asks the database to close only this merchant\'s open unpaid card orders and tolerates early denials', async () => {
+    const rpc = vi.fn(async (...call: [string, Record<string, unknown>]) => (call[1].p_order === 'early'
+      ? { data: null, error: { message: 'PAY_WAFFO_CLOSE_DENIED' } } : { data: null, error: null }));
+    const base = { payment_channel: 'waffo', payment_method: 'card', payment_mode: 'test', merchant_namespace: 'fixture',
+      qualification_state: 'reserved', payment_status: 'unpaid', purchase_closed_at: null, user_id: user };
+    const db = fakeDb({ payment_orders: [{ ...base, id: 'old' }, { ...base, id: 'early' }, { ...base, id: 'wallet', payment_method: 'alipay' },
+      { ...base, id: 'closed', purchase_closed_at: '2026-10-11T00:00:00Z' }] }, rpc);
+    expect(await closeExpiredWaffoCheckouts(db, 'fixture')).toBe(1);
+    expect(rpc.mock.calls.map(c => c[1].p_order)).toEqual(['old', 'early']);
+    rpc.mockResolvedValue({ data: null, error: { message: 'connection reset' } });
+    await expect(closeExpiredWaffoCheckouts(db, 'fixture')).rejects.toThrow('PERSISTENCE_UNAVAILABLE');
   });
 });

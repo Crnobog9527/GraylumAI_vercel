@@ -813,9 +813,10 @@ BEGIN
  UPDATE payment_orders SET qualification_state='released',qualification_closed_ref='never_dispatched:'||o.id,
   purchase_closed_at=clock_timestamp(),method_review_reason='checkout_not_dispatched' WHERE id=o.id;
 END $$;
--- Close a Waffo card order whose create request the provider definitively rejected: a non-2xx creates
--- no session and does not occupy the idempotency key. Expiry-based release waits for an Owner decision.
--- A later payment would still land as cash-only review (observe_qualification).
+-- Normal-path close for a Waffo card order that never got paid: either the provider definitively
+-- rejected the create request (non-2xx never creates a session nor occupies the idempotency key), or
+-- 40 minutes have passed since checkout started (session lives 30; Owner 2026-10-11 revision of §6).
+-- A later payment still lands as cash-only review (observe_qualification).
 CREATE OR REPLACE FUNCTION public.pay_waffo_close_card_checkout(p_user uuid,p_order uuid,p_merchant text,p_rejected boolean)
 RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
 DECLARE o payment_orders;
@@ -824,18 +825,19 @@ BEGIN
  SELECT * INTO o FROM payment_orders WHERE id=p_order AND user_id=p_user FOR UPDATE;
  IF o.id IS NULL OR o.payment_channel IS DISTINCT FROM 'waffo' OR o.payment_method IS DISTINCT FROM 'card'
   OR o.payment_mode IS DISTINCT FROM 'test' OR o.merchant_namespace IS DISTINCT FROM p_merchant
-  OR o.payment_status IS DISTINCT FROM 'unpaid' OR o.fulfilled_at IS NOT NULL OR p_rejected IS DISTINCT FROM true
+  OR o.payment_status IS DISTINCT FROM 'unpaid' OR o.fulfilled_at IS NOT NULL OR p_rejected IS NULL
   OR EXISTS(SELECT 1 FROM payment_provider_refs WHERE order_id=o.id AND object_type='payment') THEN
   RAISE EXCEPTION 'PAY_WAFFO_CLOSE_DENIED'; END IF;
  IF o.qualification_state='released' AND o.purchase_closed_at IS NOT NULL THEN RETURN; END IF;
  IF o.qualification_state IS DISTINCT FROM 'reserved' OR o.purchase_closed_at IS NOT NULL
-  OR o.method_dispatched_at IS NULL
-  OR EXISTS(SELECT 1 FROM payment_provider_refs WHERE order_id=o.id AND object_type='checkout') THEN
+  OR (p_rejected AND (o.method_dispatched_at IS NULL
+    OR EXISTS(SELECT 1 FROM payment_provider_refs WHERE order_id=o.id AND object_type='checkout')))
+  OR (NOT p_rejected AND NOT (coalesce(o.method_dispatched_at,o.created_at)<clock_timestamp()-interval '40 minutes')) THEN
   RAISE EXCEPTION 'PAY_WAFFO_CLOSE_DENIED'; END IF;
  UPDATE payment_orders SET qualification_state='released',
-  qualification_closed_ref='provider_rejected:'||o.id,
+  qualification_closed_ref=CASE WHEN p_rejected THEN 'provider_rejected:' ELSE 'expired_unpaid:' END||o.id,
   purchase_closed_at=clock_timestamp(),
-  method_review_reason='card_checkout_rejected' WHERE id=o.id;
+  method_review_reason=CASE WHEN p_rejected THEN 'card_checkout_rejected' ELSE 'card_checkout_expired' END WHERE id=o.id;
 END $$;
 DO $$ DECLARE f record; BEGIN
  FOR f IN SELECT oid::regprocedure sig FROM pg_proc WHERE pronamespace='public'::regnamespace AND proname IN (

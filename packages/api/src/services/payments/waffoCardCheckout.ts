@@ -10,6 +10,24 @@ const CLAIM_WINDOW_MS = (WAFFO_CHECKOUT_TTL_SECONDS + 60) * 1000;
 /** Replay only while the original session can still be open: far inside Waffo's 24-hour key window. */
 const REPLAY_MARGIN_MS = 60 * 1000;
 
+/** Release unpaid card orders 40 minutes after checkout started (Owner decision 2026-10-11), so an abandoned
+ * checkout does not block the next purchase or hold a founder seat. The database enforces timing. */
+export async function closeExpiredWaffoCheckouts(db: Pick<SupabaseClient, 'from' | 'rpc'>, merchant: string, userId?: string) {
+  let query = db.from('payment_orders').select('id,user_id').eq('payment_channel', 'waffo').eq('payment_method', 'card')
+    .eq('payment_mode', 'test').eq('merchant_namespace', merchant).eq('qualification_state', 'reserved')
+    .eq('payment_status', 'unpaid').is('purchase_closed_at', null);
+  if (userId) query = query.eq('user_id', userId);
+  const due = await query.limit(100);
+  if (due.error) throw new Error('PAY_WAFFO_PERSISTENCE_UNAVAILABLE');
+  let closed = 0;
+  for (const row of (due.data ?? []) as { id: string; user_id: string }[]) {
+    const result = await db.rpc('pay_waffo_close_card_checkout', { p_user: row.user_id, p_order: row.id, p_merchant: merchant, p_rejected: false });
+    if (!result.error) closed += 1;
+    else if (!/PAY_WAFFO_CLOSE_DENIED/.test(result.error.message ?? '')) throw new Error('PAY_WAFFO_PERSISTENCE_UNAVAILABLE');
+  }
+  return closed;
+}
+
 export async function createWaffoCardCheckout(input: {
   db: SupabaseClient; provider: WaffoCheckoutCreate & { merchant: string; mode: 'test' }; userId: string;
   appUrl: string; termsVersion: string; checkoutOrigin: string | undefined;
@@ -18,6 +36,7 @@ export async function createWaffoCardCheckout(input: {
   const { db, provider, userId, purchase } = input;
   if (purchase.method !== 'card' || purchase.itemType !== 'membership_plan') throw new Error('PAY_WAFFO_METHOD_DENIED');
   if (provider.mode !== 'test' || !input.checkoutOrigin) throw new Error('PAY_WAFFO_TEST_CONFIG_UNAVAILABLE');
+  await closeExpiredWaffoCheckouts(db, provider.merchant, userId);
   const order = await prepareMethodPurchase({ admin: db, userId, purchase,
     merchantNamespace: provider.merchant, paymentMode: 'test', termsVersion: input.termsVersion });
   const product = await db.from('payment_provider_refs').select('external_id').eq('id', order.price_ref_id)
@@ -55,7 +74,7 @@ export async function createWaffoCardCheckout(input: {
       return claimed.data.dispatch;
     },
     create,
-    // After the window the original session is expired anyway; never POST again (the order stays for manual handling).
+    // After the window the original session is expired anyway; never POST again (the order is released later).
     recover: async () => (Date.now() < claimExpiry - REPLAY_MARGIN_MS ? create(stored) : null),
     persist: async (result) => {
       const bound = await db.rpc('pay_waffo_bind_checkout', { p_user: userId, p_order: order.id, p_merchant: provider.merchant,
@@ -64,7 +83,7 @@ export async function createWaffoCardCheckout(input: {
     },
     createdAfter: Date.now(), latestExpiry, allowedCheckoutOrigin: input.checkoutOrigin,
   }).catch((error: unknown) => {
-    // An expired or mismatched replay is not a new purchase; the order stays for reconciliation.
+    // An expired or mismatched replay is not a new purchase; the order is released after its window.
     if (error instanceof Error && ['PAY_WAFFO_CHECKOUT_CONFLICT', 'PAY_WAFFO_RECONCILIATION_REQUIRED'].includes(error.message)) return null;
     throw error;
   });

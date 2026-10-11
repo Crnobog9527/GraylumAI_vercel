@@ -8,6 +8,7 @@ import { logger } from '@repo/api/src/services';
 import { runErasureFinancialReconciliation } from '@repo/api/src/services/accountErasure/financialRecovery';
 import { reconcileWaffoPayments } from '@repo/api/src/services/payments/waffoReconciliation';
 import { getWaffoTestOperationsClient } from '@repo/api/src/services/payments/waffoTestOperationsClient';
+import { closeExpiredWaffoCheckouts } from '@repo/api/src/services/payments/waffoCardCheckout';
 import { validateCronRequest } from '@/lib/cron-auth';
 
 export const runtime = 'nodejs';
@@ -20,7 +21,10 @@ const CRON_CONFIG_ERROR_MESSAGE = 'Server configuration error';
 async function runWaffoReconciliation(supabase: SupabaseClient) {
   if (process.env.WAFFO_TEST_OPERATIONS_ENABLED !== 'true') return { success: true, skipped: true, findings: [] };
   try {
-    return { ...await reconcileWaffoPayments(supabase, getWaffoTestOperationsClient()), skipped: false };
+    const provider = getWaffoTestOperationsClient();
+    // Lifecycle only: release unpaid card orders past their checkout window (late cash stays review).
+    const closedExpired = await closeExpiredWaffoCheckouts(supabase, provider.merchant);
+    return { ...await reconcileWaffoPayments(supabase, provider), closedExpired, skipped: false };
   } catch {
     return { success: false, skipped: false, findings: [{ kind: 'scan_failed', refundCandidate: false }] };
   }
