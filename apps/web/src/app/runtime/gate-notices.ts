@@ -2,6 +2,7 @@
 import { OUTPUT_TRUNCATED_NOTICE, PROVIDER_HISTORY_NOTICE, gateAdmissionNotice, gateResultNotice, isRuntimeGateReason } from '@/lib/runtime-gate-notice';
 import { hostNotice, isPaygWaiting } from '@/lib/payg-wait';
 import { RUNTIME_INPUT_TOO_LONG_MESSAGE } from '../../../../../packages/api/src/shared/runtimeInputMessages';
+import { RUNTIME_PAYG_PROFILE_REQUIRED_MESSAGE } from '../../../../../packages/api/src/shared/runtimeAdmissionMessages';
 
 export { OUTPUT_TRUNCATED_NOTICE };
 const videoGatePrefix = 'OPC_CONTENT_GATE_';
@@ -12,6 +13,9 @@ export function runtimeAdmissionNotice(cause: unknown): string | null {
   const data = cause instanceof Error ? (cause as { data?: { code?: unknown; path?: unknown } }).data : undefined;
   if (cause instanceof Error && cause.message === RUNTIME_INPUT_TOO_LONG_MESSAGE && data?.code === 'PRECONDITION_FAILED' &&
     data.path === 'runtime.prepare') return RUNTIME_INPUT_TOO_LONG_MESSAGE;
+  // The model has no per-call billing profile: refused before any call or charge, so say so instead of "pending".
+  if (cause instanceof Error && cause.message === RUNTIME_PAYG_PROFILE_REQUIRED_MESSAGE && data?.code === 'PRECONDITION_FAILED' &&
+    data.path === 'runtime.prepare') return RUNTIME_PAYG_PROFILE_REQUIRED_MESSAGE;
   return gateAdmissionNotice(cause, ['runtime.prepare']);
 }
 

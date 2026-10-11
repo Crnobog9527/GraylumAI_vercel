@@ -38,6 +38,8 @@ import {assertFrozenPayloads} from './payloadSize';
 import {freezeWindowBillingUnit} from './billingUnitAdmission';
 import {newWorkGate,readNewWorkSettings,requireNewWork} from './newWorkGate';
 import {requireAllowedInput} from './moderation';
+import {FREE_CHAT_REQUEST_FORMAT} from './providerRequest';
+import {admissionDeadline,admittedOutputLimit} from './admissionLimits';
 import {admitPricing} from './pricingAdmission';
 import {freezeStagingPaygPricing} from './paygPricing';
 import {freezePaygMessageBudget} from './paygMessageBudget';
@@ -91,8 +93,8 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
  // Only new admissions use current limits. Replays return their frozen context above.
  // The local fixture default is not an additional ceiling on an approved real quote.
  function outputCapacity(row:Record<string,unknown>,organizerLimit=Infinity,configuredOutput?:number){
-  return Math.min(policy.real?realModel(row).outputLimit:configuredOutput??policy.maxOutputTokens,
-   Number(row.max_tokens),organizerLimit,PURPOSE_OUTPUT_CAP);
+  return admittedOutputLimit(policy.real?realModel(row).outputLimit:configuredOutput??policy.maxOutputTokens,
+   row.max_tokens,organizerLimit);
  }
  function inputCapacity(row:Record<string,unknown>,output:number,bytes=policy.inputBytes){
   return policy.real?Math.min(bytes,realModel(row).inputLimit):fixtureInputCapacity(Number(row.input_limit),output,bytes);
@@ -316,7 +318,7 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
     reasoning=admitReasoning(row.data,organize?'organize':'interactive',realModel(row.data).providerLimits!.providerSlug,maxOutputTokens);
    const organizerFormat=Boolean(policy.real&&!mentorStream&&(organize||attachedOrganizer));
    if(organizerFormat&&!reasoning)reasoning={parameter:'none'};
-   const providerRequestFormat=mentorStream||policy.reportGeneration?'agent-turn-v5-stream':stepStream?'serial-tools-v4-stream':organizerFormat||freeChat?'serial-tools-v6-reasoning':'serial-tools-v2';
+   const providerRequestFormat=mentorStream||policy.reportGeneration?'agent-turn-v5-stream':stepStream?'serial-tools-v4-stream':organizerFormat?'serial-tools-v6-reasoning':freeChat?FREE_CHAT_REQUEST_FORMAT:'serial-tools-v2';
    const context={version:'runtime.v1',sdkVersion:'0.18.0',inputSelection:hostTurnContext?'scope-projection-v2':'scope-projection-v1',
     ...(hostTurnContext?{hostTurnContext,historySelection}:{}),
     ...(policy.reportGeneration?{reportGeneration:policy.reportGeneration}:{}),
@@ -348,7 +350,7 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
     ...(revisionId?{moduleId,skillId,revisionId}:{}),sourceHash:createHash('sha256').update(JSON.stringify(context)).digest('hex'),input:context,
     callPolicy:[{modelId,provider:'fixture',account:policy.account,model:row.data.model_id,protocol:'fixture-cost-v1',upperUsd:policy.costPerCall,inputLimit,outputLimit:maxOutputTokens,automaticRetry:false,hiddenTools:false,lookupSupported:true}],
     rules:{version:policy.real?'runtime-staging-v1':'runtime-local-v1',quoteVersion:policy.real?.id??'runtime-local-v1',creditsPerUsd:policy.creditsPerUsd,multiplier:policy.multiplier,fx:{}},
-    limits:{costUsd:cost,credits,maxPreDeduct:credits,maxCalls,deadline:new Date(Math.min(Date.now()+3600000,policy.real?Date.parse(policy.real.expiresAt):Infinity)).toISOString()}};
+    limits:{costUsd:cost,credits,maxPreDeduct:credits,maxCalls,deadline:admissionDeadline(policy.real?.expiresAt)}};
    if(attachedOrganizer)billing.callPolicy.push({...billing.callPolicy[0],modelId:attachedOrganizer.modelId,model:attachedOrganizer.model,inputLimit:attachedInputLimit!,outputLimit:attachedOrganizer.maxOutputTokens});
    for(const candidate of candidates){
     if(attachedOrganizer)modelConfiguration(()=>assertSeparateSummaryModel(candidate.model,attachedOrganizer!.model));

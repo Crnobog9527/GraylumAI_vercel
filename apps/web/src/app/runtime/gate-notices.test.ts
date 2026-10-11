@@ -2,6 +2,7 @@
 import { describe, expect, it } from 'vitest';
 import { runtimeGateMessages } from '../../../../../packages/api/src/shared/runtimeGateMessages';
 import { RUNTIME_INPUT_TOO_LONG_MESSAGE } from '../../../../../packages/api/src/shared/runtimeInputMessages';
+import { RUNTIME_PAYG_PROFILE_REQUIRED_MESSAGE } from '../../../../../packages/api/src/shared/runtimeAdmissionMessages';
 import {
   OUTPUT_TRUNCATED_NOTICE, rememberUserStop, runtimeAdmissionNotice, runtimeExecutionNotice, userStopIds, videoGateError, videoGateNotice,
 } from './gate-notices';
@@ -147,5 +148,14 @@ it('too-long input refused by runtime.prepare asks to split it instead of saying
   expect(runtimeAdmissionNotice(prepareRefusal('PRECONDITION_FAILED', RUNTIME_INPUT_TOO_LONG_MESSAGE))).toBe(RUNTIME_INPUT_TOO_LONG_MESSAGE);
   expect(runtimeAdmissionNotice(prepareRefusal('INTERNAL_SERVER_ERROR', RUNTIME_INPUT_TOO_LONG_MESSAGE))).toBeNull();
   expect(runtimeAdmissionNotice(Object.assign(new Error(RUNTIME_INPUT_TOO_LONG_MESSAGE),
+    { data: { code: 'PRECONDITION_FAILED', path: 'runtime.execute' } }))).toBeNull();
+});
+
+it('a model without a per-call billing profile shows the real reason instead of saying the status is unconfirmed', () => {
+  expect(runtimeAdmissionNotice(prepareRefusal('PRECONDITION_FAILED', RUNTIME_PAYG_PROFILE_REQUIRED_MESSAGE)))
+    .toBe(RUNTIME_PAYG_PROFILE_REQUIRED_MESSAGE);
+  expect(runtimeAdmissionNotice(prepareRefusal('INTERNAL_SERVER_ERROR', RUNTIME_PAYG_PROFILE_REQUIRED_MESSAGE))).toBeNull();
+  expect(runtimeAdmissionNotice(prepareRefusal('PRECONDITION_FAILED', '其他未知原因'))).toBeNull();
+  expect(runtimeAdmissionNotice(Object.assign(new Error(RUNTIME_PAYG_PROFILE_REQUIRED_MESSAGE),
     { data: { code: 'PRECONDITION_FAILED', path: 'runtime.execute' } }))).toBeNull();
 });
