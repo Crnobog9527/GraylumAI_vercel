@@ -9,6 +9,7 @@ import { capturePending, capturePendingInput, captureResolveInput } from "./capt
 import { opcInformation } from "./information";
 export { opcInformation } from "./information";
 import { z } from "zod";
+import {dataFoundationService} from "./dataFoundation";
 import {readChecklistUpdatedInput} from "../../shared/opcQuestions";
 import { DatabaseReadError } from "../../lib/databaseReadError";
 import type { SupabaseClient } from "@supabase/supabase-js";
@@ -23,7 +24,7 @@ import {captureHostContext, captureFocus, captureOrganizerInput, captureFrozenIn
 import {withStepConfirmation} from '../../shared/opcStepConfirmation';
 import {readStepSummaryRequest,STEP_SUMMARY_INSTRUCTIONS} from './stepSummary';
 import {captureAdmissionReplay} from './captureReplay';
-import { planItem, opcPlan, opcHandoff, opcTopicTurn, opcTopicDraft, opcAdoptTopics, opcLibraryEdit, opcContentFromExecution, opcContentManualSave, opcVideoPackage, opcVideoResults, opcVideoExecutionCheck, opcVideoMaterialPrepare } from "../../shared/opcRequests";
+import { planItem, opcPlan, opcHandoff, opcTopicTurn, opcLibraryEdit, opcContentFromExecution, opcContentManualSave, opcVideoPackage, opcVideoResults, opcVideoExecutionCheck, opcVideoMaterialPrepare } from "../../shared/opcRequests";
 export { planItem, opcPlan, opcHandoff, opcTopicTurn, opcTopicDraft, opcAdoptTopics, opcLibraryEdit, opcContentFromExecution, opcContentManualSave, opcVideoPackage, opcVideoResults, opcVideoExecutionCheck, opcVideoMaterialPrepare } from "../../shared/opcRequests";
 import { opcGenerate, ANSWER_CARD_RULE, resolveAnswerCard, } from "./answerCard";
 export { opcGenerate } from "./answerCard";
@@ -43,6 +44,7 @@ export function opcService(user: SupabaseClient, admin: SupabaseClient, real?:St
     return r.data;
   }
   return {
+    ...dataFoundationService(rpc),
     capturePending: (value: unknown) => capturePending(rpc, capturePendingInput.parse(value).draftId),
     captureResolve: (value: unknown) => {
       const v = captureResolveInput.parse(value);
@@ -410,28 +412,7 @@ export function opcService(user: SupabaseClient, admin: SupabaseClient, real?:St
         p_business_name: v.businessName ?? null,
       });
     },
-    topicDraft: async (value: unknown) => {
-      const v = opcTopicDraft.parse(value);
-      return rpc("opc_topic_draft_save", {
-        p_draft_id: v.draftId,
-        p_request_id: v.requestId,
-        p_expected_version: v.expectedVersion,
-        p_source_version_id: v.sourceVersionId,
-        p_body: v.body,
-      });
-    },
     topicDraftRead: (draftId: string) => rpc("opc_topic_draft_read", { p_draft_id: uuid.parse(draftId) }),
-    adoptTopics: async (value: unknown) => {
-      const v = opcAdoptTopics.parse(value);
-      return rpc("opc_adopt_topics", {
-        p_draft_id: v.draftId,
-        p_request_id: v.requestId,
-        p_expected_version: v.expectedVersion,
-        p_source_version_id: v.sourceVersionId,
-        p_body: v.body,
-        p_accounts: v.accounts,
-      });
-    },
     library: (value: unknown) => {
       const v = z.object({
         search: z.string().max(160).default(""),
