@@ -163,3 +163,20 @@ If a payment is in progress at the moment the session expires, what is the final
   当作"未完成"，不能当作失败去重复发起退款。
 - `settlementInfo` 付款后 5 小时仍为 null；#791 若用它当付款时间会拿不到值。
 - 月付订阅 `ORD_1ug9i0Dp6bc09NM9KSVebH` 最早要 2026-11-11 之后才可能看到终态，具体何时变化未知。
+
+## 7. 结账链接形状（为 #791 浏览器验收做的只读核对）
+
+总控追加的核对，不新建任何东西、不发 Waffo 请求：读取 #802 实测时保存在仓库外私有目录的 4 个结账会话创建响应
+（intro49、monthly69、annual496、expired），脚本只输出链接的结构，不输出完整链接。仓库里 #802 的
+[session-*.json](../waffo-test-20261011/samples/session-intro49.json) 已把 checkoutUrl 整体遮盖。
+
+- **路径形状：** 4 个链接全部是 `https://pancake.waffo.ai/store/<店铺链接名>/checkout/<sessionId>`，
+  共 4 段路径，**都以 `/checkout/<sessionId>` 结尾**，没有 query，没有 `#` 片段，不含账号密码。
+  这和 #791 `validateWaffoCheckoutSession` 的结尾检查一致。
+- **sessionId：** 4 个都是 `cs_` 加 36 位小写十六进制和连字符，符合 #791 的格式校验；`expiresAt` 都是合法时间。
+- **域名（origin）：** `https://pancake.waffo.ai`，是 Waffo 公开的结账域名，可以写出。#791 的 `allowedCheckoutOrigin`
+  在测试模式下应配置为这个值（只根据测试模式样例；正式环境的结账域名没有核对）。
+- **敏感信息：** `<店铺链接名>` 是这家店铺专属的标识（不是店铺编号 STO_…，也不含商户编号 MER_…），
+  所以在证据里打码。#791 的检查只看 origin 和路径结尾，不依赖这一段。
+
+能不能当契约用：只是 2026-10-11 测试模式 4 个样例的现象；路径格式和域名没有供应商书面承诺，正式模式未核对。
