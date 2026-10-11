@@ -2,6 +2,10 @@
   "kind": "LOCAL_SYNTHETIC_NOT_PROVIDER_WEBHOOK",
   "pr791Head": "d931f0302647dde634facec7bea77b1d6f91176d",
   "sdk": "0.26.0",
+  "sourceBlobs": {
+    "pr791-client.ts": "cbe7f2584256bbc391a274a4799d1981eaaddcc5",
+    "pr791-webhook.ts": "4a87b23fd3021cb01f8524c3152d0340d237b94a"
+  },
   "testCases": 6,
   "results": [
     {

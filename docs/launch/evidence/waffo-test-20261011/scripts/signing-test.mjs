@@ -1,11 +1,20 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { homedir } from 'node:os';
-import { generateKeyPairSync, createSign } from 'node:crypto';
+import { generateKeyPairSync, createSign, createHash } from 'node:crypto';
 import { WaffoPancake, verifyWebhook } from '@waffo/pancake-ts';
-import { createWaffoTestOperationsClient } from './pr791-client.ts';
-import { verifyWaffoReceipt } from './pr791-webhook.ts';
+const sourceBlobs = {
+  'pr791-client.ts': 'cbe7f2584256bbc391a274a4799d1981eaaddcc5',
+  'pr791-webhook.ts': '4a87b23fd3021cb01f8524c3152d0340d237b94a',
+};
+// Check immutable GitHub blobs BEFORE importing or attributing any test result.
+for (const [name, expected] of Object.entries(sourceBlobs)) {
+  const content = fs.readFileSync(new URL(name, import.meta.url));
+  const actual = createHash('sha1').update(`blob ${content.length}\0`).update(content).digest('hex');
+  assert.equal(actual, expected, 'Compared source does not match the attributed GitHub blob');
+}
+const { createWaffoTestOperationsClient } = await import('./pr791-client.ts');
+const { verifyWaffoReceipt } = await import('./pr791-webhook.ts');
 const {privateKey,publicKey}=generateKeyPairSync('rsa',{modulusLength:2048,
  privateKeyEncoding:{type:'pkcs8',format:'pem'},publicKeyEncoding:{type:'spki',format:'pem'}});
 const now=Date.now(); const originalNow=Date.now; Date.now=()=>now;
@@ -40,6 +49,6 @@ assert.equal(results[3].pr791.requiresLookup,true);assert.equal(results[3].sdk.a
 assert.equal(results[4].pr791.accepted,false);assert.equal(results[4].sdk.accepted,false);
 assert.equal(results[5].pr791.accepted,false);assert.equal(results[5].sdk.accepted,true);
 const output={kind:'LOCAL_SYNTHETIC_NOT_PROVIDER_WEBHOOK',pr791Head:'d931f0302647dde634facec7bea77b1d6f91176d',
- sdk:'0.26.0',testCases:6,results};
+ sdk:'0.26.0',sourceBlobs,testCases:6,results};
 fs.writeFileSync(new URL('signing-test.json',import.meta.url),JSON.stringify(output,null,2)+'\n');
 console.log(JSON.stringify(output,null,2));

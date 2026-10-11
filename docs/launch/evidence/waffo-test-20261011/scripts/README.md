@@ -19,7 +19,7 @@
   结果先脱敏再输出和保存。GraphQL errors 要人工检查，HTTP 成功不代表查询成功。
 - `signing-test.mjs`：**完全离线**，临时生成密钥只留内存，不读取 Waffo 密钥或发网络请求。
   它需要同目录的 `pr791-client.ts`、`pr791-webhook.ts`；从 GitHub 读取下述精确版本原文件，
-  不使用当前分支或更新后的代码替代。本 PR 不重复提交这两份实现。
+  不使用当前分支或更新后的代码替代。脚本在 import 前核对两个固定 Git blob SHA；不匹配立即失败，不输出 PASS。本 PR 不重复提交这两份实现。
 
 比较文件版本：`d931f0302647dde634facec7bea77b1d6f91176d`：
 `packages/api/src/services/payments/waffoTestOperationsClient.ts` 和 `waffoWebhook.ts`。
