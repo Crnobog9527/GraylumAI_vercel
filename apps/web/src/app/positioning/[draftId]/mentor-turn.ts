@@ -272,13 +272,17 @@ export function isInputTooLong(error: unknown): boolean {
   return Boolean(data && typeof data === "object" && data.code === "PRECONDITION_FAILED");
 }
 
-/** A definite pre-admission refusal releases only its own envelope, never an unknown outcome. */
-export function releaseRejectedAnswer(storage: EnvelopeStorage, key: string, requestId: string, error: unknown): boolean {
+/** A definite pre-admission refusal releases only its own envelope, never an unknown outcome.
+ * A too-long refusal also hands the original text back so the user can shorten or split it. */
+export function releaseRejectedAnswer(storage: EnvelopeStorage, key: string, requestId: string, error: unknown,
+  restoreInput?: (input: string) => void): boolean {
   const raw = storage.getItem(key);
   const request = raw ? parseStepEnvelope(raw)?.request : undefined;
   // Any version of the marker: the server refuses all but the current one, so a stale retained one is released too.
   const summaryRefused = error instanceof Error && SUMMARY_REFUSALS.has(error.message) && Boolean(request?.input.startsWith(STEP_SUMMARY_PREFIX));
   if (!isAnswerSourceDenied(error) && !summaryRefused && !isInputTooLong(error)) return false;
-  if (request?.requestId === requestId) storage.removeItem(key);
+  if (request?.requestId !== requestId) return true;
+  storage.removeItem(key);
+  if (isInputTooLong(error)) restoreInput?.(request.input);
   return true;
 }
