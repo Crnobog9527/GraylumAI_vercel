@@ -101,7 +101,7 @@ Owner 原话：「同意收款方案收窄：正常流程自动处理，少见�
 
 [总控 2026-10-11 单一负责安排](https://github.com/Crnobog9527/GraylumAI_vercel/pull/791#issuecomment-6105117676)：
 本 PR 修改既有 `pay_common_membership_facts`、`membershipEligibility.ts`、报告会员检查和资料库配额的会员判断；
-#800 使用 0211，不修改这些函数。资料库其他规则和前端未改。
+#800 已先合并并使用 0210（`0210_library_pdf_upload.sql`），不修改这些函数；本 PR 使用 0211。资料库其他规则和前端未改。
 0211 在原事实接口补 `internal_membership`：以本站原订单、同用户/同渠道/商户/模式的内部订阅、已付期、付款引用、
 履约与退款/核对状态选取当前最高有效等级；不以缓存 profile、供应商当前周期或最新一笔未来续买作为权限依据。
 Gold 已付升级优先于仍在发积分的 Pro；Gold 退款后可读取仍有效的 Pro 原已付期，不恢复扣款。
@@ -139,6 +139,11 @@ Gold 已付升级优先于仍在发积分的 Pro；Gold 退款后可读取仍有
 [付款查询](https://docs.waffo.ai/api-reference/endpoints/graphql/orders-and-payments)。
 
 ## 本阶段验证
+
+- **最终版本（迁移 0211，#800 合并后）**：完整链 214 步空库回放、`0211_pay_waffo_delivery.sql` 在自身位置重复执行结构不变、
+  共享 built-fingerprint 重建无差异；0211 本地事务 74 类、资料库本地事务（含会员容量补丁）、CI 同款九个 pay-common 套件回放、
+  API 6236 通过 / 13 跳过、cron/PAY-1 前端/proxy、safeguards、CI 契约、ledger、lint/类型/代码大小全部 PASS。
+- 以下为改号前各阶段的历史记录（当时迁移号为 0210、链长 208 步），保留作审计，不代表最终版本：
 
 - 当前共享投影：本地 PostgreSQL 208 步/70 类、0210 重复结构一致 PASS；API 6038 PASS / 13 SKIPPED；
   会员针对性 134 项、API/Web 类型、相关 lint PASS。资料库权限通过实际 `library_list` 服务入口验证，未运行浏览器。
