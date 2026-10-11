@@ -32,7 +32,7 @@ describe('Waffo daily reconciliation (report only)', () => {
     const result = await reconcileWaffoPayments(db, { merchant: 'fixture', mode: 'test', listPayments });
     expect(result.success).toBe(false);
     expect(result.findings).toEqual([
-      { kind: 'paid_not_delivered', paymentId: 'PAY_missing', refundCandidate: false },
+      { kind: 'paid_not_delivered', paymentId: 'PAY_missing', refundCandidate: false, renewalActive: true },
       { kind: 'paid_in_review', paymentId: 'PAY_renewal_after_cancel', orderId: 'o-review', reason: 'unexpected_renewal', refundCandidate: true,
         renewalActive: true },
       { kind: 'offsite_refund_due', paymentId: 'PAY_offsite', refundCandidate: true },

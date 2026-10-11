@@ -128,4 +128,16 @@ describe('Waffo renewal stop for undelivered cash', () => {
       waffoOrderId: 'ORD_fixture1', code: 'PAY_WAFFO_PROVIDER_UNAVAILABLE' }));
     error.mockRestore();
   });
+  it('stops an unmapped renewal when the paid record cannot be proven, but never another store or a mapped subscriber', async () => {
+    const unproven = setup(payment({ pspAmountDetails: { amount: '49.00', currency: 'USD' } }));
+    expect(await unproven.run()).toEqual({ state: 'review', reason: 'amount_unproven' });
+    expect(unproven.provider.cancelSubscription).toHaveBeenCalledWith('ORD_fixture1');
+    const otherStore = setup(payment({}, { storeId: 'STO_other' }));
+    await otherStore.run(); expect(otherStore.provider.cancelSubscription).not.toHaveBeenCalled();
+    const live = setup(payment({ testMode: false }));
+    await live.run(); expect(live.provider.cancelSubscription).not.toHaveBeenCalled();
+    const mapped = setup(payment({ orderId: 'ORD_renewing', periodNumber: 3 }, { id: 'ORD_renewing', currentPeriodNumber: 2 }));
+    expect(await mapped.run()).toEqual({ state: 'review', reason: 'period_not_current' });
+    expect(mapped.provider.cancelSubscription).not.toHaveBeenCalled();
+  });
 });

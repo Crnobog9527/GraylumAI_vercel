@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { z } from 'zod';
-import { readPaymentFacts, type PaymentFacts, type WaffoTestPayments } from './waffoPayments';
+import { readPaymentFacts, type PaymentFacts, type WaffoPayment, type WaffoTestPayments } from './waffoPayments';
 import type { WaffoTestOperations } from './waffoOperations';
 import { describeWaffoFailure } from './waffoFailure';
 import { logger } from '../../lib/logger';
@@ -97,6 +97,18 @@ async function stopUnmappedRenewal(provider: Provider, waffoOrderId: string) {
   }
 }
 
+/** A paid record we cannot prove can never be delivered automatically. When it is provably this test
+ * store's own subscription and no site subscription maps to it, stop the renewal as for other undelivered
+ * cash. A mapped subscriber is left alone: its renewal and cancel flow belong to the normal path. */
+async function stopUnknownRenewal(db: Db, provider: Provider, payment: WaffoPayment, reason: string) {
+  const order = payment.subscriptionOrder;
+  if (['test_mode_unproven', 'store_scope'].includes(reason) || !payment.testMode || !order?.testMode
+    || order.storeId !== provider.storeId || order.id !== payment.orderId) return;
+  const mapped = await single(db.from('payment_provider_refs').select('subscription_id').eq('object_type', 'subscription')
+    .eq('external_id', payment.orderId).eq('channel', 'waffo').eq('merchant_namespace', provider.merchant).eq('mode', 'test').maybeSingle());
+  if (!mapped) await stopUnmappedRenewal(provider, payment.orderId);
+}
+
 /** Normal path only: first payment and renewal of our own card orders. Every other situation is left
  * as review for the daily reconciliation and manual handling; nothing is inferred or retried here. */
 export async function processWaffoReceipt(db: Db, provider: Provider, receipt: WaffoReceipt): Promise<ReceiptOutcome> {
@@ -115,7 +127,11 @@ export async function processWaffoReceipt(db: Db, provider: Provider, receipt: W
   if (!payment) throw new Transient('PAY_WAFFO_PAYMENT_NOT_VISIBLE');
   const reading = readPaymentFacts(payment, provider.storeId);
   if (reading.kind === 'not_paid') return { state: 'ignored', reason: 'not_paid' };
-  if (reading.kind === 'unknown') return resolve(db, receipt, 'review', reading.reason);
+  if (reading.kind === 'unknown') {
+    const outcome = await resolve(db, receipt, 'review', reading.reason);
+    await stopUnknownRenewal(db, provider, payment, reading.reason);
+    return outcome;
+  }
   const { facts } = reading;
   const mapped = facts.periodNumber === 1
     ? await firstPayment(db, provider, receipt, facts)

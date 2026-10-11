@@ -89,7 +89,8 @@ export async function reconcileWaffoPayments(db: Db, provider: Provider) {
   }
   // Delivery stops these renewals automatically; anything still renewing here is the manual backstop.
   for (const finding of findings) {
-    const status = finding.refundCandidate ? paid.find(p => p.id === finding.paymentId)?.subscriptionOrder?.status : undefined;
+    const undelivered = finding.refundCandidate || finding.kind === 'paid_not_delivered';
+    const status = undelivered ? paid.find(p => p.id === finding.paymentId)?.subscriptionOrder?.status : undefined;
     if (status && RENEWING.includes(status)) finding.renewalActive = true;
   }
   if (complete) {
