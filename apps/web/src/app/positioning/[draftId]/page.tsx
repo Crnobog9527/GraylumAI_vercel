@@ -1455,8 +1455,8 @@ function PositioningDraftContent({draftId}:{draftId:string}){
       )}
       {!planView && read.data?.sessionId && <ReportEntry draftId={draftId} sessionId={read.data.sessionId}
         projectId={d.projectId} roundId={d.roundId} busy={busy || hasUnsavedInformation || hasPendingStepRequest}
-        confirmed={!hasUnconfirmedRequired && !hasPendingConfirmation &&
-        !(d.accountRevision ? nextReviewStep : steps.some((step) => !snap.steps[step.id].valid))} />}
+        onTopics={() => void run(() => read.refetch()).then(failure => { if (!failure) setConsentOpen(true); })}
+        confirmed={!hasUnconfirmedRequired && !hasPendingConfirmation && !(d.accountRevision ? nextReviewStep : steps.some(x => !snap.steps[x.id].valid))} />}
       </div><p>确认后保存为正式定位；生成选题将在下一步单独确认。</p>
       {d.report?.available && <Link href={`/positioning/${draftId}/topics`}>进入选题工作对话 →</Link>}
       </footer>}

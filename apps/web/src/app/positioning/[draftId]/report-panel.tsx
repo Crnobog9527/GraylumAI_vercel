@@ -15,8 +15,13 @@ import {
 import { useReportGen } from "./use-report-gen";
 import { useReportPaywallMemory } from "./report-paywall-memory";
 import { STOP_SAVING_NOTICE, STOP_UNCONFIRMED_NOTICE } from "./stop-reply";
+import { ReportDocumentPanel } from "./report-document-panel";
 
-type Props = { draftId: string; sessionId: string; projectId: string; roundId: string; confirmed: boolean; busy: boolean };
+type Props = {
+  draftId: string; sessionId: string; projectId: string; roundId: string; confirmed: boolean; busy: boolean;
+  /** After 定稿: refresh the page and ask, explicitly, whether to start the first-week topics. */
+  onTopics: () => void;
+};
 
 /**
  * The report entry of the positioning footer. A saved report of this round stays readable whatever
@@ -44,12 +49,14 @@ function RoundReportEntry(props: Props) {
         {report.executionId ? REPORT_TITLE : REPORT_ACTION.start}
       </Button>
       {open && (paywall ? <ReportPaywallDialog onClose={() => setOpen(false)} />
-        : <ReportDialog report={report} busy={props.busy} onClose={() => setOpen(false)} />)}
+        : <ReportDialog report={report} busy={props.busy} onClose={() => setOpen(false)}
+          onTopics={() => { setOpen(false); props.onTopics(); }} />)}
     </>
   );
 }
 
-function ReportDialog({ report, busy, onClose }: { report: ReturnType<typeof useReportGen>; busy: boolean; onClose: () => void }) {
+function ReportDialog({ report, busy, onClose, onTopics }:
+  { report: ReturnType<typeof useReportGen>; busy: boolean; onClose: () => void; onTopics: () => void }) {
   const status = report.status;
   const view = status ? reportView(status) : null;
   const working = report.starting || report.streaming;
@@ -83,7 +90,11 @@ function ReportDialog({ report, busy, onClose }: { report: ReturnType<typeof use
           </Button>
         </header>
         {first && !working && <p>{REPORT_INTRO}</p>}
-        {body && <MessageMarkdown className="mt-4" text={body} streaming={Boolean(report.live && !report.live.stopped)} />}
+        {/* A finished report (R5): its current version, editing and 定稿. While writing: the live text. */}
+        {view?.kind === "report" && !report.live && report.executionId
+          ? <ReportDocumentPanel key={report.executionId} executionId={report.executionId} fallbackBody={view.body}
+            generatedComplete={view.candidate} busy={busy || working} onTopics={onTopics} />
+          : body && <MessageMarkdown className="mt-4" text={body} streaming={Boolean(report.live && !report.live.stopped)} />}
         <ChatNoticeList className="mt-4" notices={notices} />
         {report.offer && !report.refusal?.hideEntry && (
           <div className={resultStyles.consentActions}>
