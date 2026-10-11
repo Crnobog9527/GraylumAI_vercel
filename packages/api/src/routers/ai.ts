@@ -6,7 +6,7 @@ import { parseProviderUsage } from '../services/providerUsage';
  * 包括: 发送消息、流式响应、对话管理
  */
 
-import { router, protectedProcedure } from '../trpc';
+import { router, protectedProcedure, adminProcedure } from '../trpc';
 import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
 import { type TokenUsage } from '../types/ai';
@@ -261,7 +261,8 @@ export const aiRouter = router({
   /**
    * 估算消息成本 (不实际调用 AI)
    */
-  estimateCost: protectedProcedure
+  // MODEL-IDENTITY-GUARD: returns real model names/ids, so administrators only (no user page calls it).
+  estimateCost: adminProcedure
     .input(z.object({
       message: z.string(),
       conversationId: z.string().uuid().optional(),
@@ -328,7 +329,8 @@ export const aiRouter = router({
   /**
    * 获取可用模型列表
    */
-  getAvailableModels: protectedProcedure
+  // MODEL-IDENTITY-GUARD: returns real model names/ids, so administrators only (no user page calls it).
+  getAvailableModels: adminProcedure
     .query(async ({ ctx }) => {
       const models = await getAvailableModels(ctx.supabase);
       return models.map((m) => ({
@@ -378,7 +380,8 @@ export const aiRouter = router({
   /**
    * 获取 Token 使用统计
    */
-  getTokenStats: protectedProcedure
+  // MODEL-IDENTITY-GUARD: returns real model names/ids, so administrators only (no user page calls it).
+  getTokenStats: adminProcedure
     .input(z.object({
       period: z.enum(['day', 'week', 'month']).default('week'),
     }))

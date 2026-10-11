@@ -41,3 +41,19 @@ describe('validation issue arrays', () => {
     expect(getSafeErrorMessage({ message: unsafe }, 'fallback')).toBe('fallback');
   });
 });
+
+describe('model identity (MODEL-IDENTITY-GUARD)', () => {
+  it.each([
+    '模型价格未配置: anthropic/claude-sonnet-5.5',
+    'Gemini 3.8 Flash is overloaded',
+    'provider deepinfra/fp8 rejected the request',
+    'GPT-6 context length exceeded',
+    'OpenRouter returned an error',
+  ])('hides %s', message => {
+    expect(getSafeErrorMessage({ message }, 'fallback')).toBe('fallback');
+  });
+
+  it.each(['余额不足，请充值后继续', '这条消息太长，请分几次发送', '请先选择平台：YouTube 或 TikTok'])('keeps ordinary text %s', message => {
+    expect(getSafeErrorMessage({ message }, 'fallback')).toBe(message);
+  });
+});

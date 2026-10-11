@@ -21,6 +21,8 @@ import { databaseSkillSource, userVisibleModules } from '../services/skills/data
 import { discoverSkills } from '../services/skills/loader';
 import { activateRuntimeCandidate } from '../services/runtime/matching';
 import { defaultModelFirst, freeChatModels } from '../services/runtime/defaultModel';
+import { publicModelChoices } from '../services/modelIdentity/display';
+import { modelIdentityGuardEnabled } from '../services/modelIdentity/guardSetting';
 import {executeOriginalExecution,runtimeLocalEndpoint,streamOriginalExecution} from '../services/runtime/executionStream';
 
 // Viewing original state, cancellation and receipt maintenance do not admit
@@ -113,7 +115,10 @@ export const runtimeRouter=router({
   }catch{/* unavailable packages are not advertised as runnable */}}
   // Staging hides models a free-chat turn is certain to be refused with; the administrator's default comes first.
   const offered=ctx.real?await freeChatModels(ctx.supabaseAdmin!,ctx.real,models.data):models.data.map(({id,name})=>({id,name}));
-  return {models:await defaultModelFirst(ctx.supabaseAdmin!,offered),skills,defaultSkill:skills.find(skill=>skill.moduleId===workModuleId)??null,mode:ctx.real?'staging_test' as const:'isolated' as const};
+  // MODEL-IDENTITY-GUARD: opaque id plus display label only; never model_id or provider.
+  const ordered=await defaultModelFirst(ctx.supabaseAdmin!,offered);
+  const choices=publicModelChoices(ordered,{guardEnabled:await modelIdentityGuardEnabled(ctx.supabaseAdmin!),surface:'user'});
+  return {models:choices,skills,defaultSkill:skills.find(skill=>skill.moduleId===workModuleId)??null,mode:ctx.real?'staging_test' as const:'isolated' as const};
  }),
  start:procedure.input(z.object({requestId:z.string().uuid(),scope:z.unknown()}).strict()).mutation(({ctx,input})=>ctx.admission.start(input.requestId,input.scope)),
  saveMaterial:procedure.input(runtimeMaterialInput).mutation(({ctx,input})=>ctx.admission.saveMaterial(input)),
