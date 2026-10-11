@@ -9,7 +9,8 @@ import { cancelWaffoMembership, controlWaffoProduct } from '../services/payments
 import { getWaffoTestOperationsClient } from '../services/payments/waffoTestOperationsClient';
 import { protectedProcedure, adminProcedure } from '../trpc';
 import { createSafeServiceUnavailableError } from '../lib/publicError';
-import { METHOD_CHECKOUT_READY, readMethodMembership } from '../services/payments/methodMembership';
+import { readMethodMembership } from '../services/payments/methodMembership';
+import { assertMethodCheckoutEnvironment } from '../services/payments/methodCheckoutGate';
 
 export const methodPaymentProcedures = {
   methodCancel: protectedProcedure.input(z.object({ subscriptionId: z.uuid() }).strict()).mutation(async ({ ctx, input }) => {
@@ -27,7 +28,8 @@ export const methodPaymentProcedures = {
   }),
   methodCheckout: protectedProcedure.input(methodPurchaseInputSchema).mutation(async ({ ctx, input }) => {
     try {
-      if (!METHOD_CHECKOUT_READY) throw new Error('PAY_WAFFO_STEP2_NOT_READY');
+      // Staging card test only; card.enabled in the versioned routes is the default-off switch below.
+      assertMethodCheckoutEnvironment(process.env, input.method);
       if (!ctx.hasSupabaseAdminPrivileges) throw new Error('PAY_WAFFO_PERSISTENCE_UNAVAILABLE');
       const routes = await readPaymentMethodRoutes(ctx.supabaseAdmin);
       assertPaymentMethodRoute({ routes, expectedVersion: input.routingVersion, method: input.method,
