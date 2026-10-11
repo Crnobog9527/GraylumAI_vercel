@@ -8,7 +8,7 @@ import { MessageMarkdown } from "@/components/chat/MessageMarkdown";
 import { ChatNoticeList, type ChatNotice } from "@/components/chat/ChatInlineNotice";
 import resultStyles from "@/components/opc/positioning-result.module.css";
 import {
-  canFinalize, canSave, finalizedNotice, REPORT_DOC_TEXT, REPORT_MAX_CHARACTERS, reportDocumentError, reportLength, requestFor,
+  askedVersion, canFinalize, canSave, finalizedNotice, REPORT_DOC_TEXT, REPORT_MAX_CHARACTERS, reportDocumentError, reportLength, requestFor,
   type PendingRequest, type ReportDocument,
 } from "./report-document";
 
@@ -35,9 +35,13 @@ export function ReportDocumentPanel({ executionId, fallbackBody, generatedComple
   const read = trpc.runtime.reportDocument.useQuery({ executionId }, { retry: 1 });
   const save = trpc.runtime.reportSave.useMutation();
   const finalize = trpc.runtime.reportFinalize.useMutation();
-  /** The text being edited; null while reading. Kept on every failure. */
-  const [draft, setDraft] = useState<string | null>(null);
-  const [asking, setAsking] = useState(false);
+  /**
+   * The text being edited and the revision it is based on, frozen when editing starts: a background re-read
+   * must never turn a stale edit into a save over another tab's version. Null while reading; kept on failure.
+   */
+  const [draft, setDraft] = useState<{ text: string; revision: number; rebased?: true } | null>(null);
+  /** The exact version the user is asked to 定稿, frozen when the question opens. */
+  const [asking, setAsking] = useState<{ revision: number; bodyHash: string } | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
   const pending = useRef<PendingRequest | null>(null);
   const doc = read.data as ReportDocument | undefined;
@@ -58,27 +62,34 @@ export function ReportDocumentPanel({ executionId, fallbackBody, generatedComple
     // The server answered: this request is over, the next click is a new one. Unknown: retry the same request.
     if (error.known) pending.current = null;
     setProblem(error.text);
-    if (REREAD.has(error.code)) await read.refetch();
+    if (!REREAD.has(error.code)) return;
+    const latest = (await read.refetch()).data as ReportDocument | undefined;
+    // A conflict was explained and the latest version is shown beside the editor: the next 保存 is the user's choice.
+    if (latest && error.code === "REPORT_VERSION_CONFLICT")
+      setDraft(old => old && { ...old, revision: latest.revision, rebased: true });
   };
   const submitSave = async () => {
-    if (draft === null || !canSave(doc, draft) || working) return;
-    const request = pending.current = requestFor(pending.current, [executionId, "save", doc.revision, draft], () => crypto.randomUUID());
+    if (draft === null || !canSave(doc, draft.text) || working) return;
+    const { text, revision } = draft;
+    const request = pending.current = requestFor(pending.current, [executionId, "save", revision, text], () => crypto.randomUUID());
     try {
-      settle(await save.mutateAsync({ executionId, requestId: request.requestId, expectedRevision: doc.revision, body: draft }) as ReportDocument);
+      settle(await save.mutateAsync({ executionId, requestId: request.requestId, expectedRevision: revision, body: text }) as ReportDocument);
       setDraft(null);
     } catch (cause) { await fail(cause); }
   };
+  // The question is for the version on screen when it opened; a newer version closes it.
+  const askingNow = askedVersion(asking, doc);
   const submitFinalize = async () => {
-    if (!canFinalize(doc, draft !== null) || working) return;
-    const request = pending.current = requestFor(pending.current, [executionId, "finalize", doc.revision, doc.bodyHash],
-      () => crypto.randomUUID());
+    if (!askingNow || !canFinalize(doc, draft !== null) || working) return;
+    const { revision, bodyHash } = askingNow;
+    const request = pending.current = requestFor(pending.current, [executionId, "finalize", revision, bodyHash], () => crypto.randomUUID());
     try {
-      const next = await finalize.mutateAsync({ executionId, requestId: request.requestId, expectedRevision: doc.revision,
-        expectedBodyHash: doc.bodyHash }) as ReportDocument;
+      const next = await finalize.mutateAsync({ executionId, requestId: request.requestId, expectedRevision: revision,
+        expectedBodyHash: bodyHash }) as ReportDocument;
       settle(next);
-      setAsking(false);
+      setAsking(null);
       if (next.next) onTopics();
-    } catch (cause) { setAsking(false); await fail(cause); }
+    } catch (cause) { setAsking(null); await fail(cause); }
   };
 
   const notices: ChatNotice[] = [];
@@ -89,27 +100,32 @@ export function ReportDocumentPanel({ executionId, fallbackBody, generatedComple
   if (!doc.finalized && !doc.candidate && generatedComplete && draft === null)
     notices.push({ id: "report-not-final", tone: "warning", text: REPORT_DOC_TEXT.notFinalizable });
   if (problem) notices.push({ id: "report-doc-problem", tone: "warning", text: problem });
-  const length = draft === null ? 0 : reportLength(draft);
+  const length = draft === null ? 0 : reportLength(draft.text);
   return <>
     {draft === null ? <MessageMarkdown className="mt-4" text={doc.body} />
       : <div className="mt-4 space-y-1">
-        <Textarea aria-label="报告正文" rows={18} value={draft} disabled={working} onChange={event => setDraft(event.target.value)} />
+        <Textarea aria-label="报告正文" rows={18} value={draft.text} disabled={working}
+          onChange={event => { const text = event.target.value; setDraft(old => old && { ...old, text }); }} />
         <p className="text-xs text-[var(--text-secondary)]" aria-live="polite">
           {length} / {REPORT_MAX_CHARACTERS} 字{length > REPORT_MAX_CHARACTERS ? "，超出上限，删减后才能保存" : ""}</p>
+        {doc.revision !== draft.revision && <p className="text-xs">{REPORT_DOC_TEXT.newerElsewhere}</p>}
+        {draft.rebased && doc.revision === draft.revision && <details>
+          <summary className="text-xs">{REPORT_DOC_TEXT.showLatest}</summary><MessageMarkdown className="mt-2" text={doc.body} /></details>}
       </div>}
     <ChatNoticeList className="mt-4" notices={notices} />
     {!doc.finalized && <div className={resultStyles.consentActions}>
-      {asking ? <>
+      {askingNow ? <>
         <p>{REPORT_DOC_TEXT.finalizeAsk}</p>
         <Button disabled={busy || working} onClick={() => void submitFinalize()}>{REPORT_DOC_TEXT.finalizeConfirm}</Button>
-        <Button variant="outline" disabled={working} onClick={() => setAsking(false)}>{REPORT_DOC_TEXT.finalizeBack}</Button>
+        <Button variant="outline" disabled={working} onClick={() => setAsking(null)}>{REPORT_DOC_TEXT.finalizeBack}</Button>
       </> : draft !== null ? <>
-        <Button disabled={busy || working || !canSave(doc, draft)} onClick={() => void submitSave()}>{REPORT_DOC_TEXT.save}</Button>
+        <Button disabled={busy || working || !canSave(doc, draft.text)} onClick={() => void submitSave()}>{REPORT_DOC_TEXT.save}</Button>
         <Button variant="outline" disabled={working} onClick={() => { setDraft(null); setProblem(null); }}>{REPORT_DOC_TEXT.cancel}</Button>
       </> : <>
-        <Button disabled={busy || working || !canFinalize(doc, false)} onClick={() => { setProblem(null); setAsking(true); }}>
+        <Button disabled={busy || working || !canFinalize(doc, false)}
+          onClick={() => { setProblem(null); setAsking({ revision: doc.revision, bodyHash: doc.bodyHash }); }}>
           {REPORT_DOC_TEXT.finalize}</Button>
-        <Button variant="outline" disabled={busy || working} onClick={() => { setProblem(null); setDraft(doc.body); }}>
+        <Button variant="outline" disabled={busy || working} onClick={() => { setProblem(null); setDraft({ text: doc.body, revision: doc.revision }); }}>
           {REPORT_DOC_TEXT.edit}</Button>
       </>}
     </div>}

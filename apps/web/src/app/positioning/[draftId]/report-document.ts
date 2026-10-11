@@ -18,6 +18,8 @@ export const REPORT_DOC_TEXT = {
   editedScope: "手动修改只改报告正文，不改动各步已确认的内容；选题和写作仍按各步确认的内容进行。",
   notFinalizable: "这份报告不完整（被截断、停止，或缺少报告要求的部分），不能定稿。",
   topics: "继续生成第一周选题",
+  newerElsewhere: "这份报告在别处有了更新的版本。保存时会提示冲突，不会覆盖那边的修改。",
+  showLatest: "查看最新保存的内容",
   loadFailed: "暂时无法读取报告的最新版本，下面显示的是生成时的内容，暂时不能修改或定稿；请稍后重新打开。",
 } as const;
 
@@ -80,4 +82,12 @@ export type PendingRequest = { intent: string; requestId: string };
 export function requestFor(previous: PendingRequest | null, intent: unknown[], newId: () => string): PendingRequest {
   const key = JSON.stringify(intent);
   return previous?.intent === key ? previous : { intent: key, requestId: newId() };
+}
+
+/**
+ * The 定稿 question names the version on screen when it opened. A newer version (another tab, a re-read) closes
+ * it, so one click can never finalize text the user did not look at; the server's hash check backs this up.
+ */
+export function askedVersion(asked: { revision: number; bodyHash: string } | null, doc: Pick<ReportDocument, "revision" | "bodyHash">) {
+  return asked && asked.revision === doc.revision && asked.bodyHash === doc.bodyHash ? asked : null;
 }

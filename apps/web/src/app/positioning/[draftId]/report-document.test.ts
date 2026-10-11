@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { describe, expect, it } from "vitest";
-import { canFinalize, canSave, finalizedNotice, REPORT_DOC_UNAVAILABLE, reportDocumentError, reportLength, requestFor } from "./report-document";
+import { askedVersion, canFinalize, canSave, finalizedNotice, REPORT_DOC_UNAVAILABLE, reportDocumentError, reportLength, requestFor } from "./report-document";
 
 const doc = { body: "## 定位\n原文", finalized: false, candidate: true };
 
@@ -49,6 +49,14 @@ describe("report document (R5)", () => {
 
   it("keeps the user's text on a version conflict", () => {
     expect(reportDocumentError(new Error("REPORT_VERSION_CONFLICT")).text).toContain("修改仍保留");
+  });
+
+  it("closes the 定稿 question when another version appears", () => {
+    const asked = { revision: 1, bodyHash: "a" };
+    expect(askedVersion(asked, { revision: 1, bodyHash: "a" })).toBe(asked);
+    expect(askedVersion(asked, { revision: 2, bodyHash: "b" })).toBeNull();
+    expect(askedVersion(asked, { revision: 1, bodyHash: "b" })).toBeNull();
+    expect(askedVersion(null, { revision: 1, bodyHash: "a" })).toBeNull();
   });
 
   it("names the official version after 定稿", () => {
