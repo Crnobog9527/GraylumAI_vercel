@@ -1241,7 +1241,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
                           )}
                           {reply.text && <div data-message-role="assistant" data-step-summary={summaryTurn || undefined}
                             aria-label={summaryTurn ? "本步小结卡" : undefined}
-                            className={`mr-4 rounded-xl border border-[var(--border-primary)] p-3${summaryTurn ? " bg-[var(--bg-secondary)]" : ""}`}>
+                            className="mr-4 rounded-xl border border-[var(--border-primary)] p-3">
                             <span className={resultStyles.agentIdentity}><img src="/graylum-logo.png" alt=""/>
                               {summaryTurn ? "本步小结" : openingTurn ? "导师主动引导" : "导师"}{turnLabel}</span>
                             <MentorMarkdown className={`mt-1 ${resultStyles.messageBody}`} text={reply.text} live={Boolean(live)} result={execution}/>
@@ -1376,8 +1376,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
         确认正式定位
       </Button>}
       {!planView && snap.state === "published" && (
-        <Button
-          variant="outline"
+        <Button variant="outline"
           disabled={busy || hasUnsavedInformation || hasPendingStepRequest}
           onClick={() => setConsentOpen(true)}
         >
@@ -1386,8 +1385,9 @@ function PositioningDraftContent({draftId}:{draftId:string}){
       )}
       {!planView && read.data?.sessionId && <ReportEntry draftId={draftId} sessionId={read.data.sessionId}
         projectId={d.projectId} roundId={d.roundId} busy={busy || hasUnsavedInformation || hasPendingStepRequest}
-        confirmed={!hasUnconfirmedRequired && !hasPendingConfirmation &&
-        !(d.accountRevision ? nextReviewStep : steps.some((step) => !snap.steps[step.id].valid))} />}
+        onTopics={() => void run(async () => { if ((await read.refetch()).isError) throw new Error("OPC_UNAVAILABLE"); })
+          .then(failure => { if (!failure) setConsentOpen(true); })} // Only with the finalized version read back.
+        confirmed={!hasUnconfirmedRequired && !hasPendingConfirmation && !(d.accountRevision ? nextReviewStep : steps.some(x => !snap.steps[x.id].valid))} />}
       </div><p>{reportPublishes(snap.workflow) ? REPORT_FLOW_TEXT.footnote : "确认后保存为正式定位；生成选题将在下一步单独确认。"}</p>
       {d.report?.available && <Link href={`/positioning/${draftId}/topics`}>进入选题工作对话 →</Link>}
       </footer>}
