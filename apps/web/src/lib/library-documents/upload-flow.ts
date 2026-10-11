@@ -1,9 +1,9 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { isSignedStorageUrl } from './signed-url';
-import { libraryErrorCode, type LibraryPurpose, type UploadContentType, type WORD_MIME } from './format';
+import { libraryErrorCode, type ExtractedContentType, type LibraryPurpose, type UploadContentType } from './format';
 
-/** Single-object uploads; Word goes through word-upload-flow. */
-export type PlainContentType = Exclude<UploadContentType, typeof WORD_MIME>;
+/** Single-object uploads; Word and PDF go through extracted-upload-flow. */
+export type PlainContentType = Exclude<UploadContentType, ExtractedContentType>;
 
 /**
  * One library upload (LIB-2a contract, #778): begin → direct PUT to the private bucket → complete.
@@ -23,7 +23,7 @@ export type UploadApi = {
 export type UploadStage = 'begin' | 'transfer' | 'complete';
 /**
  * Where a retry should resume. `complete` only after an unknown (network) result of complete;
- * `text` (Word only) after an unknown result of the second-stage grant, once the original is stored.
+ * `text` (Word and PDF only) after an unknown result of the second-stage grant, once the original is stored.
  * `releaseFirst`: an earlier row whose release was not confirmed; it is released before any new request,
  * so failed releases never stack up 10 MB reservations or unfinished-upload slots.
  */
@@ -67,7 +67,7 @@ export async function releasePending(api: Abandon, attempt: UploadAttempt): Prom
 
 /**
  * Before a failed item leaves the page, settle the server row it may still hold, so removing it never
- * drops recovery work: a pending release is done now; a Word row waiting for its text is released;
+ * drops recovery work: a pending release is done now; a Word or PDF row waiting for its text is released;
  * an unknown completion is re-checked (it may already be ready, so it is never released blindly).
  * Throws when the outcome is still unknown; the caller keeps the item so the user can try again.
  */
