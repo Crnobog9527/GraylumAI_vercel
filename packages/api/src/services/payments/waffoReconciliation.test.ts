@@ -9,7 +9,9 @@ describe('Waffo daily reconciliation (report only)', () => {
   it('lists paid-but-undelivered, refund candidates and delivered-without-payment; grants nothing', async () => {
     const rows = [payment({ id: 'PAY_ok' }), payment({ id: 'PAY_missing' }), payment({ id: 'PAY_renewal_after_cancel' }),
       payment({ id: 'PAY_offsite' }), payment({ id: 'PAY_refunded', refundStatus: 'succeeded', refundedAmount: { amount: '6900', currency: 'USD' } }),
-      payment({ id: 'PAY_failed', status: 'failed' }), payment({ id: 'PAY_unseen_offsite', orderMerchantExternalId: 'not-a-site-order' })];
+      payment({ id: 'PAY_failed', status: 'failed' }), payment({ id: 'PAY_unseen_offsite', orderMerchantExternalId: 'not-a-site-order' }),
+      payment({ id: 'PAY_dashes', orderMerchantExternalId: '-'.repeat(36) }),
+      payment({ id: 'PAY_stripe_order', orderMerchantExternalId: '00000000-0000-4000-8000-000000000009' })];
     const rpc = vi.fn();
     const db = fakeDb({
       payment_provider_refs: [ref('PAY_ok', 'o-ok'), ref('PAY_renewal_after_cancel', 'o-review'), ref('PAY_refunded', 'o-refunded'),
@@ -17,7 +19,10 @@ describe('Waffo daily reconciliation (report only)', () => {
       payment_orders: [{ id: 'o-ok', fulfilled_at: '2026-10-11T06:00:00Z' },
         { id: 'o-review', fulfilled_at: null, qualification_state: 'review', method_review_reason: 'unexpected_renewal' },
         { id: 'o-refunded', fulfilled_at: '2026-10-11T06:00:00Z' }, { id: 'o-ghost', fulfilled_at: '2026-10-11T06:00:00Z' },
-        { id: '00000000-0000-4000-8000-000000000001', fulfilled_at: null }],
+        { id: '00000000-0000-4000-8000-000000000001', fulfilled_at: null, payment_channel: 'waffo', payment_method: 'card',
+          merchant_namespace: 'fixture', payment_mode: 'test' },
+        { id: '00000000-0000-4000-8000-000000000009', fulfilled_at: null, payment_channel: 'stripe', payment_method: 'alipay',
+          merchant_namespace: 'fixture', payment_mode: 'test' }],
       waffo_event_receipts: [{ merchant_namespace: 'fixture', mode: 'test', resolution: { kind: 'offsite', cash: { paymentId: 'PAY_offsite' } } }],
     }, rpc);
     const listPayments = vi.fn().mockResolvedValue({ rows, complete: true });
@@ -29,6 +34,8 @@ describe('Waffo daily reconciliation (report only)', () => {
       { kind: 'offsite_refund_due', paymentId: 'PAY_offsite', refundCandidate: true },
       { kind: 'refund_observed', paymentId: 'PAY_refunded', orderId: 'o-refunded', refundCandidate: false },
       { kind: 'offsite_refund_due', paymentId: 'PAY_unseen_offsite', refundCandidate: true },
+      { kind: 'offsite_refund_due', paymentId: 'PAY_dashes', refundCandidate: true },
+      { kind: 'offsite_refund_due', paymentId: 'PAY_stripe_order', refundCandidate: true },
       { kind: 'delivered_without_payment', paymentId: 'PAY_ghost', orderId: 'o-ghost', refundCandidate: false },
     ]);
     expect(rpc).not.toHaveBeenCalled();

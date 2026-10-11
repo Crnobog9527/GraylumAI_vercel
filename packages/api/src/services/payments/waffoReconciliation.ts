@@ -1,5 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { z } from 'zod';
 import type { WaffoPayment, WaffoTestPayments } from './waffoPayments';
 
 type Db = Pick<SupabaseClient, 'from'>;
@@ -52,9 +53,12 @@ export async function reconcileWaffoPayments(db: Db, provider: Provider) {
   if (offsite.error) throw new Error('PAY_WAFFO_RECONCILIATION_UNAVAILABLE');
   const offsitePaid = new Set((offsite.data ?? []).map(r => (r.resolution as { cash?: { paymentId?: string } } | null)?.cash?.paymentId));
   // A payment whose site order id is not ours is offsite even if its webhook never arrived.
+  // Only real UUIDs reach the uuid column, and only orders of this Waffo card binding count as ours.
   const unmatched = paid.filter(p => !orderOf.has(p.id) && !offsitePaid.has(p.id)).map(p => p.orderMerchantExternalId)
-    .filter((value): value is string => typeof value === 'string' && /^[0-9a-f-]{36}$/i.test(value));
-  const siteOrders = new Set((await readOrders([...new Set(unmatched)])).map(o => o.id));
+    .filter((value): value is string => z.uuid().safeParse(value).success);
+  const siteOrders = new Set((await chunked([...new Set(unmatched)], part => db.from('payment_orders').select('id')
+    .eq('payment_channel', 'waffo').eq('payment_method', 'card').eq('merchant_namespace', provider.merchant)
+    .eq('payment_mode', 'test').in('id', part))).map(o => o.id));
   for (const payment of paid) {
     const orderId = orderOf.get(payment.id);
     const order = orderId ? orderById.get(orderId) : undefined;
