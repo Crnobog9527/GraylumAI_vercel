@@ -2045,6 +2045,29 @@ describe('adminRouter lightweight admin dashboards', () => {
     expect(adminQueries).toEqual(['system_settings', 'membership_plans']);
   });
 
+  it.each(['999', null])('loads the settings dashboard after saving stop-loss alert %s', async (siteAlertUsd) => {
+    const stopLoss = {
+      version: 1, revision: 2, userDailyUsd: null, siteDailyUsd: null,
+      siteAlertUsd, providerBalanceAlertUsd: null, notificationChannel: null,
+    };
+    const adminSupabase = {
+      from(table: string) {
+        return createAwaitableQueryBuilder(Promise.resolve({
+          data: table === 'system_settings' ? [
+            { key: 'site_name', value: 'Graylum AI' },
+            { key: 'runtime_stop_loss', value: stopLoss },
+          ] : [],
+          error: null,
+        }));
+      },
+    };
+
+    await expect(createAdminCaller(adminSupabase).getSettingsDashboard()).resolves.toEqual({
+      systemSettings: { site_name: 'Graylum AI' },
+      membershipPlans: [],
+    });
+  });
+
   it('fails the settings dashboard instead of rendering defaults when either query fails', async () => {
     const adminSupabase = {
       from(table: string) {

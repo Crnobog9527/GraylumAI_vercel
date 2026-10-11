@@ -8,3 +8,11 @@
 export function isLibraryDocxExtractionEnabled(): boolean {
   return process.env.NEXT_PUBLIC_LIBRARY_DOCX_EXTRACTION === 'true';
 }
+
+/**
+ * LIB-2c, same staging rule: browser PDF text extraction runs only when the build sets
+ * `NEXT_PUBLIC_LIBRARY_PDF_EXTRACTION=true`. Nothing in the app calls it yet.
+ */
+export function isLibraryPdfExtractionEnabled(): boolean {
+  return process.env.NEXT_PUBLIC_LIBRARY_PDF_EXTRACTION === 'true';
+}

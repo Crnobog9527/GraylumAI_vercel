@@ -1,4 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import { reportDocumentInput, reportEditInput, reportFinalizeInput,
+  reportFinalizationService } from '../services/report/finalization';
 import {contentVisibilityFence} from '../services/accountErasure/content';
 import {reportEnabled,reportLocate,reportService} from '../services/report/service';
 import {reportStart} from '../services/report/contract';
@@ -65,6 +67,12 @@ function executeOriginal({ctx,input}:inferProcedureBuilderResolverOptions<typeof
   authorization:ctx.headers?.get('Authorization'),maintenanceEndpoint:ctx.maintenanceEndpoint},input.executionId,onProgress);
 }
 export const runtimeRouter=router({
+ reportDocument:maintenanceProcedure.input(reportDocumentInput).query(({ctx,input})=>
+  reportFinalizationService(ctx.userScopedSupabase,ctx.supabaseAdmin!).read(input)),
+ reportSave:maintenanceProcedure.input(reportEditInput).mutation(({ctx,input})=>
+  reportFinalizationService(ctx.userScopedSupabase,ctx.supabaseAdmin!).save(input)),
+ reportFinalize:maintenanceProcedure.input(reportFinalizeInput).mutation(({ctx,input})=>
+  reportFinalizationService(ctx.userScopedSupabase,ctx.supabaseAdmin!).finalize(input)),
  reportStart:procedure.input(reportStart).mutation(({ctx,input})=>ctx.report.start(input)),
  // Display only: whether the report entry is shown. reportStart checks the same switch again.
  reportAvailable:maintenanceProcedure.query(async({ctx})=>({enabled:await reportEnabled(ctx.supabaseAdmin!).catch(()=>false)})),

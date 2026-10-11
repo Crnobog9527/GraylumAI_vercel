@@ -1,7 +1,7 @@
 'use client';
 
 import { MutationCache, QueryCache, QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { httpBatchLink, httpBatchStreamLink, httpLink, splitLink } from '@trpc/client';
+import { httpBatchLink, httpBatchStreamLink, splitLink } from '@trpc/client';
 import React, { useEffect, useRef, useState } from 'react';
 import { trpc } from '@/trpc/client';
 import { createClient } from '@/lib/supabase';
@@ -101,16 +101,9 @@ export default function Provider({ children }: { children: React.ReactNode }) {
       onToken: token => { accessTokenRef.current = token; sessionPromiseRef.current = Promise.resolve(token); },
     });
     return trpc.createClient({ links: [sessionRefreshLink(session), splitLink({
-      // Entry must not wait for unrelated sidebar statistics in the same batch.
-      condition: op => op.path === 'workbench.chatLocate' || op.path === 'workbench.chatOpen',
-      true: httpLink(options),
-      // Streamed procedures deliver events as they happen; one mentor turn is
-      // one streamed request (admission, then execution progress).
-      false: splitLink({
-        condition: op => op.path === 'runtime.executeStream' || op.path === 'opc.mentorTurnStream',
-        true: httpBatchStreamLink(options),
-        false: httpBatchLink(options),
-      }),
+      condition: op => op.path === 'runtime.executeStream' || op.path === 'opc.mentorTurnStream',
+      true: httpBatchStreamLink(options),
+      false: httpBatchLink(options),
     })] });
   });
 

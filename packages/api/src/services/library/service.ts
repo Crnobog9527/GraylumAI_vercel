@@ -5,6 +5,7 @@ import type { z } from 'zod';
 import { checkRateLimitAsync } from '../../middleware/securityChecks';
 import { beginInput, formatFor, formats, textSegments, verifyHeader, type Format } from './content';
 import { cleanupLibrary } from './cleanup';
+import { wordUpload } from './wordUpload';
 import { libraryRpc } from './rpc';
 import { libraryStorage, type LibraryStorage } from './storage';
 
@@ -14,7 +15,9 @@ type LibraryItem = {
   status: 'uploading' | 'processing' | 'ready' | 'failed' | 'deleting';
   original_bytes: number; text_bytes: number; content_version: number; created_at: string;
 };
-type LibraryList = { usedBytes: number; capacityBytes: number; documents: LibraryItem[] };
+export type LibraryCursor = { createdAt: string; id: string };
+type LibraryList = { usedBytes: number; capacityBytes: number; uploadEnabled: boolean;
+  documents: LibraryItem[]; nextCursor: LibraryCursor | null };
 type LibrarySegment = { ordinal: number; title: string; body: string; bytes: number;
   page_number: number | null; source: 'extracted' | 'recognized' };
 
@@ -30,6 +33,7 @@ export function libraryService(client: SupabaseClient, actorId: string, storage:
     return result;
   };
   return {
+    ...wordUpload(client, actorId, storage),
     async begin(raw: z.infer<typeof beginInput>) {
       const input = beginInput.parse(raw);
       const format = formatFor(input.filename, input.contentType);
@@ -54,6 +58,7 @@ export function libraryService(client: SupabaseClient, actorId: string, storage:
     async complete(documentId: string) {
       await checkRateLimitAsync(actorId, 'api');
       const doc = await read(documentId, false);
+      if (!(doc.format in formats)) throw new TRPCError({ code: 'BAD_REQUEST', message: 'LIBRARY_TYPE' });
       if (doc.status === 'ready') return { documentId, status: 'ready' };
       try {
         const file = await storage.inspect(doc.path, doc.kind === 'document');
@@ -78,14 +83,24 @@ export function libraryService(client: SupabaseClient, actorId: string, storage:
       await read(documentId); // Do not return a newly minted link after a concurrent deletion/erasure.
       return { url, expiresIn: 60 };
     },
-    async list(afterId?: string) {
+    async list(afterId?: string, cursor?: LibraryCursor) {
       // Authorize before cleanup so an old session cannot trigger scoped work.
-      const result = await libraryRpc<LibraryList>(client, 'library_list', { a: actorId, after_id: afterId ?? null });
+      const result = cursor
+        ? await libraryRpc<LibraryList>(client, 'library_list_page', { a: actorId,
+          after_id: cursor.id, after_created_at: cursor.createdAt })
+        : await libraryRpc<LibraryList>(client, 'library_list', { a: actorId, after_id: afterId ?? null });
       await sweep();
       return result;
     },
-    segments(documentId: string, version: number, start: number) {
-      return libraryRpc<LibrarySegment[]>(client, 'library_segments', { a: actorId, did: documentId, ver: version, start_at: start });
+    segments(documentId: string, version: number, start: number, count = 1) {
+      return libraryRpc<LibrarySegment[]>(client, 'library_segments_range', {
+        a: actorId, did: documentId, ver: version, start_at: start, count_limit: count,
+      });
+    },
+    directory(documentId: string, version: number) {
+      return libraryRpc<Pick<LibrarySegment, 'ordinal' | 'title'>[]>(client, 'library_directory', {
+        a: actorId, did: documentId, ver: version,
+      });
     },
     purpose(documentId: string, purpose: 'authored' | 'reference') {
       return libraryRpc<null>(client, 'library_purpose', { a: actorId, did: documentId, p: purpose });

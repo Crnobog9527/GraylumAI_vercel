@@ -1,0 +1,1314 @@
+{
+  "source": "Actual SDK GraphQL introspection, schema.graphql; selected excerpt",
+  "sessionQueryFound": false,
+  "schema": {
+    "PspAmountDetails": {
+      "fields": [
+        {
+          "name": "currency",
+          "args": [],
+          "type": {
+            "kind": "NON_NULL",
+            "name": null,
+            "ofType": {
+              "kind": "SCALAR",
+              "name": "String",
+              "ofType": null
+            }
+          }
+        },
+        {
+          "name": "amount",
+          "args": [],
+          "type": {
+            "kind": "NON_NULL",
+            "name": null,
+            "ofType": {
+              "kind": "SCALAR",
+              "name": "String",
+              "ofType": null
+            }
+          }
+        },
+        {
+          "name": "settlementCurrency",
+          "args": [],
+          "type": {
+            "kind": "SCALAR",
+            "name": "String",
+            "ofType": null
+          }
+        },
+        {
+          "name": "settlementAmount",
+          "args": [],
+          "type": {
+            "kind": "SCALAR",
+            "name": "String",
+            "ofType": null
+          }
+        }
+      ],
+      "inputFields": null
+    },
+    "SettlementInfo": {
+      "fields": [
+        {
+          "name": "batchId",
+          "args": [],
+          "type": {
+            "kind": "NON_NULL",
+            "name": null,
+            "ofType": {
+              "kind": "SCALAR",
+              "name": "String",
+              "ofType": null
+            }
+          }
+        },
+        {
+          "name": "settlementDate",
+          "args": [],
+          "type": {
+            "kind": "NON_NULL",
+            "name": null,
+            "ofType": {
+              "kind": "SCALAR",
+              "name": "String",
+              "ofType": null
+            }
+          }
+        },
+        {
+          "name": "mainSettlementDate",
+          "args": [],
+          "type": {
+            "kind": "NON_NULL",
+            "name": null,
+            "ofType": {
+              "kind": "SCALAR",
+              "name": "String",
+              "ofType": null
+            }
+          }
+        },
+        {
+          "name": "resourceDetailRefId",
+          "args": [],
+          "type": {
+            "kind": "NON_NULL",
+            "name": null,
+            "ofType": {
+              "kind": "SCALAR",
+              "name": "String",
+              "ofType": null
+            }
+          }
+        },
+        {
+          "name": "orderAmount",
+          "args": [],
+          "type": {
+            "kind": "NON_NULL",
+            "name": null,
+            "ofType": {
+              "kind": "SCALAR",
+              "name": "String",
+              "ofType": null
+            }
+          }
+        },
+        {
+          "name": "orderCurrency",
+          "args": [],
+          "type": {
+            "kind": "NON_NULL",
+            "name": null,
+            "ofType": {
+              "kind": "SCALAR",
+              "name": "String",
+              "ofType": null
+            }
+          }
+        },
+        {
+          "name": "orderAmountSettlement",
+          "args": [],
+          "type": {
+            "kind": "NON_NULL",
+            "name": null,
+            "ofType": {
+              "kind": "SCALAR",
+              "name": "String",
+              "ofType": null
+            }
+          }
+        },
+        {
+          "name": "settlementAmount",
+          "args": [],
+          "type": {
+            "kind": "NON_NULL",
+            "name": null,
+            "ofType": {
+              "kind": "SCALAR",
+              "name": "String",
+              "ofType": null
+            }
+          }
+        },
+        {
+          "name": "settlementCurrency",
+          "args": [],
+          "type": {
+            "kind": "NON_NULL",
+            "name": null,
+            "ofType": {
+              "kind": "SCALAR",
+              "name": "String",
+              "ofType": null
+            }
+          }
+        },
+        {
+          "name": "feeAmount",
+          "args": [],
+          "type": {
+            "kind": "NON_NULL",
+            "name": null,
+            "ofType": {
+              "kind": "SCALAR",
+              "name": "String",
+              "ofType": null
+            }
+          }
+        },
+        {
+          "name": "feeAmountSettlement",
+          "args": [],
+          "type": {
+            "kind": "NON_NULL",
+            "name": null,
+            "ofType": {
+              "kind": "SCALAR",
+              "name": "String",
+              "ofType": null
+            }
+          }
+        },
+        {
+          "name": "feeCurrency",
+          "args": [],
+          "type": {
+            "kind": "NON_NULL",
+            "name": null,
+            "ofType": {
+              "kind": "SCALAR",
+              "name": "String",
+              "ofType": null
+            }
+          }
+        },
+        {
+          "name": "paymentSuccessTime",
+          "args": [],
+          "type": {
+            "kind": "NON_NULL",
+            "name": null,
+            "ofType": {
+              "kind": "SCALAR",
+              "name": "String",
+              "ofType": null
+            }
+          }
+        },
+        {
+          "name": "settledAt",
+          "args": [],
+          "type": {
+            "kind": "NON_NULL",
+            "name": null,
+            "ofType": {
+              "kind": "SCALAR",
+              "name": "String",
+              "ofType": null
+            }
+          }
+        }
+      ],
+      "inputFields": null
+    },
+    "Money": {
+      "fields": [
+        {
+          "name": "amount",
+          "args": [],
+          "type": {
+            "kind": "NON_NULL",
+            "name": null,
+            "ofType": {
+              "kind": "SCALAR",
+              "name": "String",
+              "ofType": null
+            }
+          }
+        },
+        {
+          "name": "currency",
+          "args": [],
+          "type": {
+            "kind": "NON_NULL",
+            "name": null,
+            "ofType": {
+              "kind": "SCALAR",
+              "name": "String",
+              "ofType": null
+            }
+          }
+        },
+        {
+          "name": "display",
+          "args": [],
+          "type": {
+            "kind": "NON_NULL",
+            "name": null,
+            "ofType": {
+              "kind": "SCALAR",
+              "name": "String",
+              "ofType": null
+            }
+          }
+        }
+      ],
+      "inputFields": null
+    },
+    "PaymentFilter": {
+      "fields": null,
+      "inputFields": [
+        {
+          "name": "id",
+          "type": {
+            "kind": "INPUT_OBJECT",
+            "name": "StringFilter",
+            "ofType": null
+          }
+        },
+        {
+          "name": "orderId",
+          "type": {
+            "kind": "INPUT_OBJECT",
+            "name": "StringFilter",
+            "ofType": null
+          }
+        },
+        {
+          "name": "orderType",
+          "type": {
+            "kind": "INPUT_OBJECT",
+            "name": "OrderTypeFilter",
+            "ofType": null
+          }
+        },
+        {
+          "name": "productId",
+          "type": {
+            "kind": "INPUT_OBJECT",
+            "name": "StringFilter",
+            "ofType": null
+          }
+        },
+        {
+          "name": "status",
+          "type": {
+            "kind": "INPUT_OBJECT",
+            "name": "StringFilter",
+            "ofType": null
+          }
+        },
+        {
+          "name": "testMode",
+          "type": {
+            "kind": "INPUT_OBJECT",
+            "name": "BooleanFilter",
+            "ofType": null
+          }
+        },
+        {
+          "name": "refundStatus",
+          "type": {
+            "kind": "INPUT_OBJECT",
+            "name": "RefundStatusFilter",
+            "ofType": null
+          }
+        },
+        {
+          "name": "paymentMethodType",
+          "type": {
+            "kind": "INPUT_OBJECT",
+            "name": "StringFilter",
+            "ofType": null
+          }
+        },
+        {
+          "name": "cardBrand",
+          "type": {
+            "kind": "INPUT_OBJECT",
+            "name": "StringFilter",
+            "ofType": null
+          }
+        },
+        {
+          "name": "isFullyRefunded",
+          "type": {
+            "kind": "INPUT_OBJECT",
+            "name": "BooleanFilter",
+            "ofType": null
+          }
+        },
+        {
+          "name": "hasSettlement",
+          "type": {
+            "kind": "INPUT_OBJECT",
+            "name": "BooleanFilter",
+            "ofType": null
+          }
+        },
+        {
+          "name": "settlementDate",
+          "type": {
+            "kind": "INPUT_OBJECT",
+            "name": "DateTimeFilter",
+            "ofType": null
+          }
+        },
+        {
+          "name": "amount",
+          "type": {
+            "kind": "INPUT_OBJECT",
+            "name": "AmountFilter",
+            "ofType": null
+          }
+        },
+        {
+          "name": "currency",
+          "type": {
+            "kind": "INPUT_OBJECT",
+            "name": "StringFilter",
+            "ofType": null
+          }
+        },
+        {
+          "name": "storeId",
+          "type": {
+            "kind": "INPUT_OBJECT",
+            "name": "StringFilter",
+            "ofType": null
+          }
+        },
+        {
+          "name": "buyerEmail",
+          "type": {
+            "kind": "INPUT_OBJECT",
+            "name": "StringFilter",
+            "ofType": null
+          }
+        },
+        {
+          "name": "pspPaymentId",
+          "type": {
+            "kind": "INPUT_OBJECT",
+            "name": "StringFilter",
+            "ofType": null
+          }
+        },
+        {
+          "name": "orderMerchantExternalId",
+          "type": {
+            "kind": "INPUT_OBJECT",
+            "name": "StringFilter",
+            "ofType": null
+          }
+        },
+        {
+          "name": "createdAt",
+          "type": {
+            "kind": "INPUT_OBJECT",
+            "name": "DateTimeFilter",
+            "ofType": null
+          }
+        }
+      ]
+    },
+    "Payment": {
+      "fields": [
+        {
+          "name": "id",
+          "args": [],
+          "type": {
+            "kind": "NON_NULL",
+            "name": null,
+            "ofType": {
+              "kind": "SCALAR",
+              "name": "String",
+              "ofType": null
+            }
+          }
+        },
+        {
+          "name": "orderId",
+          "args": [],
+          "type": {
+            "kind": "NON_NULL",
+            "name": null,
+            "ofType": {
+              "kind": "SCALAR",
+              "name": "String",
+              "ofType": null
+            }
+          }
+        },
+        {
+          "name": "status",
+          "args": [],
+          "type": {
+            "kind": "NON_NULL",
+            "name": null,
+            "ofType": {
+              "kind": "ENUM",
+              "name": "PaymentStatus",
+              "ofType": null
+            }
+          }
+        },
+        {
+          "name": "amount",
+          "args": [],
+          "type": {
+            "kind": "NON_NULL",
+            "name": null,
+            "ofType": {
+              "kind": "OBJECT",
+              "name": "Money",
+              "ofType": null
+            }
+          }
+        },
+        {
+          "name": "refundedAmount",
+          "args": [],
+          "type": {
+            "kind": "NON_NULL",
+            "name": null,
+            "ofType": {
+              "kind": "OBJECT",
+              "name": "Money",
+              "ofType": null
+            }
+          }
+        },
+        {
+          "name": "isFullyRefunded",
+          "args": [],
+          "type": {
+            "kind": "NON_NULL",
+            "name": null,
+            "ofType": {
+              "kind": "SCALAR",
+              "name": "Boolean",
+              "ofType": null
+            }
+          }
+        },
+        {
+          "name": "testMode",
+          "args": [],
+          "type": {
+            "kind": "NON_NULL",
+            "name": null,
+            "ofType": {
+              "kind": "SCALAR",
+              "name": "Boolean",
+              "ofType": null
+            }
+          }
+        },
+        {
+          "name": "failureReason",
+          "args": [],
+          "type": {
+            "kind": "SCALAR",
+            "name": "String",
+            "ofType": null
+          }
+        },
+        {
+          "name": "periodNumber",
+          "args": [],
+          "type": {
+            "kind": "SCALAR",
+            "name": "Int",
+            "ofType": null
+          }
+        },
+        {
+          "name": "paymentMethod",
+          "args": [],
+          "type": {
+            "kind": "OBJECT",
+            "name": "PaymentMethod",
+            "ofType": null
+          }
+        },
+        {
+          "name": "snapshotAmountDetails",
+          "args": [],
+          "type": {
+            "kind": "NON_NULL",
+            "name": null,
+            "ofType": {
+              "kind": "OBJECT",
+              "name": "SnapshotAmountDetails",
+              "ofType": null
+            }
+          }
+        },
+        {
+          "name": "pspAmountDetails",
+          "args": [],
+          "type": {
+            "kind": "NON_NULL",
+            "name": null,
+            "ofType": {
+              "kind": "OBJECT",
+              "name": "PspAmountDetails",
+              "ofType": null
+            }
+          }
+        },
+        {
+          "name": "pspPaymentId",
+          "args": [],
+          "type": {
+            "kind": "SCALAR",
+            "name": "String",
+            "ofType": null
+          }
+        },
+        {
+          "name": "cardInfo",
+          "args": [],
+          "type": {
+            "kind": "OBJECT",
+            "name": "CardInfo",
+            "ofType": null
+          }
+        },
+        {
+          "name": "invoiceToken",
+          "args": [],
+          "type": {
+            "kind": "SCALAR",
+            "name": "String",
+            "ofType": null
+          }
+        },
+        {
+          "name": "orderMerchantExternalId",
+          "args": [],
+          "type": {
+            "kind": "SCALAR",
+            "name": "String",
+            "ofType": null
+          }
+        },
+        {
+          "name": "createdAt",
+          "args": [],
+          "type": {
+            "kind": "NON_NULL",
+            "name": null,
+            "ofType": {
+              "kind": "SCALAR",
+              "name": "String",
+              "ofType": null
+            }
+          }
+        },
+        {
+          "name": "onetimeOrder",
+          "args": [],
+          "type": {
+            "kind": "OBJECT",
+            "name": "OnetimeOrder",
+            "ofType": null
+          }
+        },
+        {
+          "name": "subscriptionOrder",
+          "args": [],
+          "type": {
+            "kind": "OBJECT",
+            "name": "SubscriptionOrder",
+            "ofType": null
+          }
+        },
+        {
+          "name": "refundStatus",
+          "args": [],
+          "type": {
+            "kind": "NON_NULL",
+            "name": null,
+            "ofType": {
+              "kind": "ENUM",
+              "name": "PaymentRefundStatus",
+              "ofType": null
+            }
+          }
+        },
+        {
+          "name": "refunds",
+          "args": [],
+          "type": {
+            "kind": "NON_NULL",
+            "name": null,
+            "ofType": {
+              "kind": "LIST",
+              "name": null,
+              "ofType": {
+                "kind": "NON_NULL",
+                "name": null
+              }
+            }
+          }
+        },
+        {
+          "name": "settlementInfo",
+          "args": [],
+          "type": {
+            "kind": "OBJECT",
+            "name": "SettlementInfo",
+            "ofType": null
+          }
+        },
+        {
+          "name": "settlementBatch",
+          "args": [],
+          "type": {
+            "kind": "OBJECT",
+            "name": "SettlementBatch",
+            "ofType": null
+          }
+        }
+      ],
+      "inputFields": null
+    },
+    "SubscriptionPeriod": {
+      "fields": [
+        {
+          "name": "start",
+          "args": [],
+          "type": {
+            "kind": "SCALAR",
+            "name": "String",
+            "ofType": null
+          }
+        },
+        {
+          "name": "end",
+          "args": [],
+          "type": {
+            "kind": "SCALAR",
+            "name": "String",
+            "ofType": null
+          }
+        }
+      ],
+      "inputFields": null
+    },
+    "SubscriptionOrderFilter": {
+      "fields": null,
+      "inputFields": [
+        {
+          "name": "id",
+          "type": {
+            "kind": "INPUT_OBJECT",
+            "name": "StringFilter",
+            "ofType": null
+          }
+        },
+        {
+          "name": "storeId",
+          "type": {
+            "kind": "INPUT_OBJECT",
+            "name": "StringFilter",
+            "ofType": null
+          }
+        },
+        {
+          "name": "buyerEmail",
+          "type": {
+            "kind": "INPUT_OBJECT",
+            "name": "StringFilter",
+            "ofType": null
+          }
+        },
+        {
+          "name": "merchantProvidedBuyerIdentity",
+          "type": {
+            "kind": "INPUT_OBJECT",
+            "name": "StringFilter",
+            "ofType": null
+          }
+        },
+        {
+          "name": "orderMerchantExternalId",
+          "type": {
+            "kind": "INPUT_OBJECT",
+            "name": "StringFilter",
+            "ofType": null
+          }
+        },
+        {
+          "name": "status",
+          "type": {
+            "kind": "INPUT_OBJECT",
+            "name": "StringFilter",
+            "ofType": null
+          }
+        },
+        {
+          "name": "total",
+          "type": {
+            "kind": "INPUT_OBJECT",
+            "name": "AmountFilter",
+            "ofType": null
+          }
+        },
+        {
+          "name": "country",
+          "type": {
+            "kind": "INPUT_OBJECT",
+            "name": "StringFilter",
+            "ofType": null
+          }
+        },
+        {
+          "name": "hasRefund",
+          "type": {
+            "kind": "INPUT_OBJECT",
+            "name": "BooleanFilter",
+            "ofType": null
+          }
+        },
+        {
+          "name": "productId",
+          "type": {
+            "kind": "INPUT_OBJECT",
+            "name": "StringFilter",
+            "ofType": null
+          }
+        },
+        {
+          "name": "billingPeriod",
+          "type": {
+            "kind": "INPUT_OBJECT",
+            "name": "StringFilter",
+            "ofType": null
+          }
+        },
+        {
+          "name": "canceledAt",
+          "type": {
+            "kind": "INPUT_OBJECT",
+            "name": "DateTimeFilter",
+            "ofType": null
+          }
+        },
+        {
+          "name": "currency",
+          "type": {
+            "kind": "INPUT_OBJECT",
+            "name": "StringFilter",
+            "ofType": null
+          }
+        },
+        {
+          "name": "createdAt",
+          "type": {
+            "kind": "INPUT_OBJECT",
+            "name": "DateTimeFilter",
+            "ofType": null
+          }
+        },
+        {
+          "name": "updatedAt",
+          "type": {
+            "kind": "INPUT_OBJECT",
+            "name": "DateTimeFilter",
+            "ofType": null
+          }
+        }
+      ]
+    },
+    "SubscriptionOrder": {
+      "fields": [
+        {
+          "name": "id",
+          "args": [],
+          "type": {
+            "kind": "NON_NULL",
+            "name": null,
+            "ofType": {
+              "kind": "SCALAR",
+              "name": "String",
+              "ofType": null
+            }
+          }
+        },
+        {
+          "name": "storeId",
+          "args": [],
+          "type": {
+            "kind": "NON_NULL",
+            "name": null,
+            "ofType": {
+              "kind": "SCALAR",
+              "name": "String",
+              "ofType": null
+            }
+          }
+        },
+        {
+          "name": "buyerEmail",
+          "args": [],
+          "type": {
+            "kind": "NON_NULL",
+            "name": null,
+            "ofType": {
+              "kind": "SCALAR",
+              "name": "String",
+              "ofType": null
+            }
+          }
+        },
+        {
+          "name": "buyerIp",
+          "args": [],
+          "type": {
+            "kind": "NON_NULL",
+            "name": null,
+            "ofType": {
+              "kind": "SCALAR",
+              "name": "String",
+              "ofType": null
+            }
+          }
+        },
+        {
+          "name": "status",
+          "args": [],
+          "type": {
+            "kind": "NON_NULL",
+            "name": null,
+            "ofType": {
+              "kind": "ENUM",
+              "name": "SubscriptionOrderStatus",
+              "ofType": null
+            }
+          }
+        },
+        {
+          "name": "isInTrial",
+          "args": [],
+          "type": {
+            "kind": "NON_NULL",
+            "name": null,
+            "ofType": {
+              "kind": "SCALAR",
+              "name": "Boolean",
+              "ofType": null
+            }
+          }
+        },
+        {
+          "name": "willRenew",
+          "args": [],
+          "type": {
+            "kind": "NON_NULL",
+            "name": null,
+            "ofType": {
+              "kind": "SCALAR",
+              "name": "Boolean",
+              "ofType": null
+            }
+          }
+        },
+        {
+          "name": "currentPeriod",
+          "args": [],
+          "type": {
+            "kind": "OBJECT",
+            "name": "SubscriptionPeriod",
+            "ofType": null
+          }
+        },
+        {
+          "name": "currency",
+          "args": [],
+          "type": {
+            "kind": "NON_NULL",
+            "name": null,
+            "ofType": {
+              "kind": "SCALAR",
+              "name": "String",
+              "ofType": null
+            }
+          }
+        },
+        {
+          "name": "testMode",
+          "args": [],
+          "type": {
+            "kind": "NON_NULL",
+            "name": null,
+            "ofType": {
+              "kind": "SCALAR",
+              "name": "Boolean",
+              "ofType": null
+            }
+          }
+        },
+        {
+          "name": "merchantProvidedBuyerIdentity",
+          "args": [],
+          "type": {
+            "kind": "NON_NULL",
+            "name": null,
+            "ofType": {
+              "kind": "SCALAR",
+              "name": "String",
+              "ofType": null
+            }
+          }
+        },
+        {
+          "name": "orderMerchantExternalId",
+          "args": [],
+          "type": {
+            "kind": "SCALAR",
+            "name": "String",
+            "ofType": null
+          }
+        },
+        {
+          "name": "metadata",
+          "args": [],
+          "type": {
+            "kind": "SCALAR",
+            "name": "String",
+            "ofType": null
+          }
+        },
+        {
+          "name": "productVersionId",
+          "args": [],
+          "type": {
+            "kind": "SCALAR",
+            "name": "String",
+            "ofType": null
+          }
+        },
+        {
+          "name": "productVersion",
+          "args": [],
+          "type": {
+            "kind": "OBJECT",
+            "name": "SubscriptionProductVersion",
+            "ofType": null
+          }
+        },
+        {
+          "name": "billingPeriod",
+          "args": [],
+          "type": {
+            "kind": "SCALAR",
+            "name": "String",
+            "ofType": null
+          }
+        },
+        {
+          "name": "priceSnapshot",
+          "args": [],
+          "type": {
+            "kind": "OBJECT",
+            "name": "SubscriptionPriceSnapshot",
+            "ofType": null
+          }
+        },
+        {
+          "name": "billingDetail",
+          "args": [],
+          "type": {
+            "kind": "NON_NULL",
+            "name": null,
+            "ofType": {
+              "kind": "OBJECT",
+              "name": "BillingDetail",
+              "ofType": null
+            }
+          }
+        },
+        {
+          "name": "currentPeriodStart",
+          "args": [],
+          "type": {
+            "kind": "SCALAR",
+            "name": "String",
+            "ofType": null
+          }
+        },
+        {
+          "name": "currentPeriodEnd",
+          "args": [],
+          "type": {
+            "kind": "SCALAR",
+            "name": "String",
+            "ofType": null
+          }
+        },
+        {
+          "name": "currentPeriodNumber",
+          "args": [],
+          "type": {
+            "kind": "SCALAR",
+            "name": "Int",
+            "ofType": null
+          }
+        },
+        {
+          "name": "activateAt",
+          "args": [],
+          "type": {
+            "kind": "SCALAR",
+            "name": "String",
+            "ofType": null
+          }
+        },
+        {
+          "name": "canceledAt",
+          "args": [],
+          "type": {
+            "kind": "SCALAR",
+            "name": "String",
+            "ofType": null
+          }
+        },
+        {
+          "name": "supersededByOrderId",
+          "args": [],
+          "type": {
+            "kind": "SCALAR",
+            "name": "String",
+            "ofType": null
+          }
+        },
+        {
+          "name": "changeOriginOrderId",
+          "args": [],
+          "type": {
+            "kind": "SCALAR",
+            "name": "String",
+            "ofType": null
+          }
+        },
+        {
+          "name": "pspSubscriptionId",
+          "args": [],
+          "type": {
+            "kind": "SCALAR",
+            "name": "String",
+            "ofType": null
+          }
+        },
+        {
+          "name": "createdAt",
+          "args": [],
+          "type": {
+            "kind": "NON_NULL",
+            "name": null,
+            "ofType": {
+              "kind": "SCALAR",
+              "name": "String",
+              "ofType": null
+            }
+          }
+        },
+        {
+          "name": "updatedAt",
+          "args": [],
+          "type": {
+            "kind": "NON_NULL",
+            "name": null,
+            "ofType": {
+              "kind": "SCALAR",
+              "name": "String",
+              "ofType": null
+            }
+          }
+        },
+        {
+          "name": "store",
+          "args": [],
+          "type": {
+            "kind": "OBJECT",
+            "name": "Store",
+            "ofType": null
+          }
+        },
+        {
+          "name": "payments",
+          "args": [],
+          "type": {
+            "kind": "NON_NULL",
+            "name": null,
+            "ofType": {
+              "kind": "LIST",
+              "name": null,
+              "ofType": {
+                "kind": "NON_NULL",
+                "name": null
+              }
+            }
+          }
+        },
+        {
+          "name": "subscriptionProduct",
+          "args": [],
+          "type": {
+            "kind": "OBJECT",
+            "name": "SubscriptionProduct",
+            "ofType": null
+          }
+        },
+        {
+          "name": "cancelActions",
+          "args": [],
+          "type": {
+            "kind": "NON_NULL",
+            "name": null,
+            "ofType": {
+              "kind": "LIST",
+              "name": null,
+              "ofType": {
+                "kind": "NON_NULL",
+                "name": null
+              }
+            }
+          }
+        }
+      ],
+      "inputFields": null
+    },
+    "queryNames": [
+      "orderStatistics",
+      "paymentStatistics",
+      "productStatistics",
+      "trendAnalysis",
+      "distributionAnalysis",
+      "customerAnalysis",
+      "deliveryAnalysis",
+      "payoutAnalysis",
+      "refundTicketAnalysis",
+      "settlementAnalysis",
+      "subscriptionAnalysis",
+      "taxAnalysis",
+      "chargeback",
+      "chargebacks",
+      "chargebacksCount",
+      "customers",
+      "customersCount",
+      "domainBindings",
+      "domainBinding",
+      "domainChallenges",
+      "domainChallenge",
+      "emailBindings",
+      "emailBinding",
+      "emailDeliveriesAggregate",
+      "emailDeliveries",
+      "emailDeliveriesCount",
+      "kybTicket",
+      "kybTickets",
+      "kybTicketsCount",
+      "merchants",
+      "merchantsCount",
+      "merchant",
+      "apiKeys",
+      "apiKeysCount",
+      "apiKey",
+      "merchantSubjects",
+      "merchantSubjectsCount",
+      "onetimeOrdersAggregate",
+      "onetimeOrders",
+      "onetimeOrdersCount",
+      "onetimeOrder",
+      "onetimeProducts",
+      "onetimeProductsCount",
+      "onetimeProduct",
+      "onetimeProductVersions",
+      "paymentsAggregate",
+      "refundsAggregate",
+      "payments",
+      "paymentsCount",
+      "payment",
+      "refunds",
+      "refundsCount",
+      "refund",
+      "payoutAccounts",
+      "payoutAccountsCount",
+      "payoutAccount",
+      "payoutTicketsAggregate",
+      "payoutTicket",
+      "payoutTickets",
+      "payoutTicketsCount",
+      "rate",
+      "refundTicket",
+      "refundTickets",
+      "refundTicketsCount",
+      "settlementBatchesAggregate",
+      "settlementBatches",
+      "settlementBatchesCount",
+      "settlementBatch",
+      "stores",
+      "storesCount",
+      "store",
+      "storeMerchants",
+      "storeMerchantsCount",
+      "storeMerchant",
+      "storeMerchantInvitations",
+      "storeMerchantInvitationsCount",
+      "storeNotificationRecipients",
+      "storeNotificationRecipientsCount",
+      "storeWebhooks",
+      "storeWebhooksCount",
+      "subscriptionCancelReasonsAggregate",
+      "subscriptionCancelReasons",
+      "subscriptionCancelReasonsCount",
+      "subscriptionOrdersAggregate",
+      "subscriptionOrders",
+      "subscriptionOrdersCount",
+      "subscriptionOrder",
+      "subscriptionProducts",
+      "subscriptionProductsCount",
+      "subscriptionProduct",
+      "subscriptionProductVersions",
+      "subscriptionProductGroups",
+      "subscriptionProductGroupsCount",
+      "subscriptionProductGroup",
+      "me",
+      "myPendingStoreInvitations",
+      "webhookDeliveriesAggregate",
+      "webhookDeliveries",
+      "webhookDeliveriesCount"
+    ]
+  }
+}

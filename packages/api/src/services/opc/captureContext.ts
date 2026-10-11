@@ -1,4 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import {buildStepSummaryNotice} from './stepSummary';
 import {stepConfirmation} from '../../shared/opcStepConfirmation';
 import {fieldElicitation, type MethodInformationField} from '../../shared/opcMethodPolicy';
 import {GROUNDED_CARD_CONTRACT} from '../runtime/groundedCard';
@@ -15,8 +16,9 @@ export type CaptureState = {
 type Step = {id: string; title: string};
 type PendingSuggestion = {value: string; nature: unknown; basis: unknown};
 export function captureHostContext(steps: readonly Step[], information: Record<string, CaptureState>,
-  stepId: string, opening: boolean, updatedFieldIds?: string[], confirmed: Record<string, boolean> = {}): HostTurnContext {
+  stepId: string, opening: boolean, updatedFieldIds?: string[], confirmed: Record<string, boolean> = {}, summary = false): HostTurnContext {
   const context: HostTurnContext = {cardContract: GROUNDED_CARD_CONTRACT, stepId, opening,
+    ...(summary ? {stepSummary: buildStepSummaryNotice(information[stepId]!)} : {}),
     confirmation: stepConfirmation(information[stepId], confirmed[stepId] === true),
     ...(updatedFieldIds ? {updatedFieldIds} : {}), checklist: steps.map(step => ({
     id: step.id, title: step.title,

@@ -1,0 +1,11 @@
+query($storeId: String!) {
+ payments(filter:{storeId:{eq:$storeId},orderMerchantExternalId:{in:["graylum-waffo-20261011-intro49","graylum-waffo-20261011-monthly69","graylum-waffo-20261011-annual496"]}},limit:100,offset:0) {
+ id orderId status testMode orderMerchantExternalId periodNumber createdAt
+ amount { amount currency display } refundedAmount { amount currency display } refundStatus isFullyRefunded
+ pspAmountDetails { amount currency settlementAmount settlementCurrency }
+ snapshotAmountDetails {total subtotal taxAmount currency}
+ paymentMethod {type cardBrand} settlementInfo { paymentSuccessTime settledAt settlementDate }
+ subscriptionOrder { id storeId status willRenew isInTrial billingPeriod currentPeriodNumber
+ currentPeriodStart currentPeriodEnd canceledAt testMode orderMerchantExternalId metadata }
+ }
+}

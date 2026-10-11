@@ -42,3 +42,12 @@ it('retains successful populated counts and existing item rendering',()=>{
  expect(text).toContain('1 个选题 · 1 个账号');expect(text).toContain('显示 1–1 / 1 条');
  expect(html).toContain('待创作 <span>1</span>');expect(text).toContain('合成保存选题');expect(text).toContain('测试账号');
 });
+it('offers the 我的文档 tab next to the topics view, topics first',()=>{
+ const {html}=render();expect(html).toContain('aria-selected="true">选题与稿件</button>');expect(html).toContain('aria-selected="false">我的文档</button>');
+});
+it('lets the kept-mounted documents pane fill and scroll, and hides it with [hidden]',async()=>{
+ const {readFileSync}=await import('node:fs');
+ const css=readFileSync(new URL('./library.module.css',import.meta.url),'utf8');
+ expect(css).toMatch(/\.documentsPane\{display:flex;flex-direction:column;flex:1;min-height:0\}/);
+ expect(css).toContain('.documentsPane[hidden]{display:none}');
+});

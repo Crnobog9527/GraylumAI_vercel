@@ -1,0 +1,44 @@
+{
+  "time": "2026-10-11T05:55:30.774Z",
+  "path": "/v1/actions/subscription-product/create-product",
+  "httpStatus": 200,
+  "request": {
+    "storeId": "[WAFFO_STORE_ID]",
+    "name": "[Test 1011] Gold yearly USD621",
+    "billingPeriod": "yearly",
+    "prices": {
+      "USD": {
+        "amount": "621.00",
+        "taxCategory": "saas"
+      }
+    },
+    "metadata": {
+      "evidenceRun": "graylum-waffo-20261011"
+    }
+  },
+  "response": {
+    "data": {
+      "product": {
+        "id": "PROD_0ZleshD5LEYuTruuiVEBNs",
+        "storeId": "[WAFFO_STORE_ID]",
+        "name": "[Test 1011] Gold yearly USD621",
+        "description": null,
+        "billingPeriod": "yearly",
+        "prices": {
+          "USD": {
+            "amount": "621.00",
+            "taxCategory": "saas"
+          }
+        },
+        "media": [],
+        "successUrl": null,
+        "metadata": {
+          "evidenceRun": "graylum-waffo-20261011"
+        },
+        "status": "active",
+        "createdAt": "2026-10-11T05:55:30.167Z",
+        "updatedAt": "2026-10-11T05:55:30.167Z"
+      }
+    }
+  }
+}

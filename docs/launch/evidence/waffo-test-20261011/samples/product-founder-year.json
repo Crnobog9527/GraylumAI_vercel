@@ -1,0 +1,44 @@
+{
+  "time": "2026-10-11T05:55:32.356Z",
+  "path": "/v1/actions/subscription-product/create-product",
+  "httpStatus": 200,
+  "request": {
+    "storeId": "[WAFFO_STORE_ID]",
+    "name": "[Test 1011] Founder yearly USD496",
+    "billingPeriod": "yearly",
+    "prices": {
+      "USD": {
+        "amount": "496.00",
+        "taxCategory": "saas"
+      }
+    },
+    "metadata": {
+      "evidenceRun": "graylum-waffo-20261011"
+    }
+  },
+  "response": {
+    "data": {
+      "product": {
+        "id": "PROD_25Zmm7PVC68mtzM2XkZZAC",
+        "storeId": "[WAFFO_STORE_ID]",
+        "name": "[Test 1011] Founder yearly USD496",
+        "description": null,
+        "billingPeriod": "yearly",
+        "prices": {
+          "USD": {
+            "amount": "496.00",
+            "taxCategory": "saas"
+          }
+        },
+        "media": [],
+        "successUrl": null,
+        "metadata": {
+          "evidenceRun": "graylum-waffo-20261011"
+        },
+        "status": "active",
+        "createdAt": "2026-10-11T05:55:31.478Z",
+        "updatedAt": "2026-10-11T05:55:31.478Z"
+      }
+    }
+  }
+}

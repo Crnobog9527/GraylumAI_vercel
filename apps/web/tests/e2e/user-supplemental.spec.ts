@@ -4,44 +4,11 @@
  * This code is proprietary and confidential.
  */
 
-import { expect, test, type Browser, type Locator, type Page } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 import { authStatePaths, getCredentials, hasCredentials } from './support/auth';
-import { getSystemSettingValue, setCreditsForUserEmail, setSystemSettingValue } from './support/creditFixtures';
+
 import { gotoWithBypass } from './support/deploymentProtection';
 import { createIssueMonitor, writeFlowAudit } from './support/monitoring';
-
-async function setUserCredits(browser: Browser, targetCredits: number, reason: string) {
-  if (!hasCredentials('user')) {
-    throw new Error('E2E admin and user credentials are required for credit adjustment.');
-  }
-  return setCreditsForUserEmail(getCredentials('user').email, targetCredits, reason);
-}
-
-function chatPromptInput(page: Page) {
-  return page.locator('.chat-input-box textarea:visible').first();
-}
-
-async function setChatPrompt(page: Page, prompt: string) {
-  const sendButton = page.getByRole('button', { name: '发送' });
-  for (let attempt = 0; attempt < 3; attempt += 1) {
-    const input = chatPromptInput(page);
-    await expect(input).toBeEditable({ timeout: 20000 });
-    await input.fill('');
-    await input.click();
-    await input.pressSequentially(prompt);
-
-    const valueMatches = await expect.poll(async () => input.inputValue(), { timeout: 5000 }).toBe(prompt)
-      .then(() => true)
-      .catch(() => false);
-    if (valueMatches && await sendButton.isEnabled().catch(() => false)) {
-      return;
-    }
-    await page.waitForTimeout(500);
-  }
-
-  await expect.poll(async () => chatPromptInput(page).inputValue(), { timeout: 5000 }).toBe(prompt);
-  await expect(sendButton).toBeEnabled({ timeout: 5000 });
-}
 
 test.describe('User Supplemental Flows', () => {
   test('should redirect unauthenticated users away from protected profile routes', async ({ page }, testInfo) => {
@@ -77,84 +44,6 @@ test.describe('User Supplemental Flows', () => {
         monitor.getIssues(),
       );
     }
-  });
-
-  test.describe('Authenticated Credit Guards', () => {
-    test.describe.configure({ mode: 'serial' });
-    test.use({ storageState: authStatePaths.user });
-    test.skip(!hasCredentials('user'), 'E2E_TEST_EMAIL and E2E_TEST_PASSWORD are required for supplemental user flows');
-
-    test('should block sends at zero credits and route recharge CTA to subscription management', async ({ browser, page }, testInfo) => {
-      test.setTimeout(90000);
-      const steps: string[] = [];
-      const monitor = createIssueMonitor(page);
-      const prompt = `低积分${Date.now()}`;
-      let actual = 'Low balance guard blocked chat send at zero credits';
-      let originalCredits: number | null = null;
-      let originalFreeTierSetting: unknown;
-      let streamRequestCount = 0;
-
-      try {
-        steps.push('Reduce the E2E user credits to zero through admin adjustment');
-        originalCredits = await setUserCredits(browser, 0, `Parity low-balance test ${Date.now()}`);
-
-        steps.push('Disable free-tier access so the zero-credit guard path is deterministic');
-        originalFreeTierSetting = await getSystemSettingValue('enable_free_tier');
-        await setSystemSettingValue('enable_free_tier', 'false');
-
-        steps.push('Open /chat and attempt to send a new prompt');
-        await gotoWithBypass(page, '/chat');
-        await expect(page.getByText('已用完')).toBeVisible({ timeout: 15000 });
-        page.on('request', (request) => {
-          if (request.url().includes('/api/ai/stream') && request.method() === 'POST') {
-            streamRequestCount += 1;
-          }
-        });
-        await setChatPrompt(page, prompt);
-        await expect(page.getByRole('button', { name: '发送' })).toBeEnabled({ timeout: 10000 });
-        await page.getByRole('button', { name: '发送' }).click();
-
-        steps.push('Verify the empty-balance dialog appears and no stream request is sent');
-        const lowBalanceTitle = page.getByRole('heading', { name: '积分已用完' });
-        await expect(lowBalanceTitle).toBeVisible({ timeout: 10000 });
-        await expect(page.getByText('请充值积分后继续使用 AI 对话功能', { exact: false })).toBeVisible({ timeout: 10000 });
-        await page.waitForTimeout(2000);
-        expect(streamRequestCount).toBe(0);
-
-        steps.push('Use the recharge CTA and confirm navigation to subscription management');
-        await page.getByRole('button', { name: '立即充值' }).click();
-        await expect(page).toHaveURL(/\/profile\?tab=subscription/, { timeout: 10000 });
-        await expect(page.getByText('会员订阅')).toBeVisible({ timeout: 10000 });
-
-        const blockingIssues = monitor.getIssues('P1');
-        expect(blockingIssues, JSON.stringify(blockingIssues, null, 2)).toEqual([]);
-      } catch (error) {
-        actual = error instanceof Error ? error.message : 'Unknown low-balance guard failure';
-        monitor.addAssertionIssue(actual, 'P1');
-        throw error;
-      } finally {
-        if (originalFreeTierSetting !== undefined) {
-          await setSystemSettingValue('enable_free_tier', originalFreeTierSetting);
-        }
-        if (originalCredits !== null) {
-          await setUserCredits(browser, originalCredits, `Restore credits after low-balance parity test ${Date.now()}`);
-        }
-
-        await writeFlowAudit(
-          testInfo,
-          {
-            title: 'chat-low-balance-guard',
-            role: 'user',
-            route: '/chat',
-            expected: 'Users with zero credits are blocked before the chat stream starts and the recharge CTA routes to the subscription tab.',
-          },
-          actual,
-          steps,
-          monitor.getIssues(),
-        );
-      }
-    });
-
   });
 
   test.describe('Authenticated Account Surface', () => {

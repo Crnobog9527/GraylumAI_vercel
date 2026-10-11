@@ -11,7 +11,6 @@ import {
   startSchema,
   webCommandSchema,
 } from "../services/artifacts/workbench";
-import { skillChatService, chatScope, chatEntry, chatTurnInput } from '../services/artifacts/chat';
 import { artifactReuse, createWorkInput, workSourceScope } from "../services/artifacts/reuse";
 const scope = z
   .object({ projectId: z.string().uuid(), roundId: z.string().uuid() })
@@ -21,7 +20,6 @@ const procedure = protectedProcedure.use(async ({ ctx, next }) => {
   const result = await next({
     ctx: {
       ...ctx,
-      skillChat: skillChatService(ctx.userScopedSupabase, ctx.hasSupabaseAdminPrivileges ? ctx.supabaseAdmin : null),
       generation: workbenchGeneration(ctx.userScopedSupabase, ctx.hasSupabaseAdminPrivileges ? ctx.supabaseAdmin : null),
       workbench: workbenchService(
         ctx.userScopedSupabase,
@@ -100,32 +98,8 @@ export const workbenchRouter = router({
   createWork: procedure.input(createWorkInput).mutation(({ctx,input})=>artifactReuse(ctx.userScopedSupabase,ctx.hasSupabaseAdminPrivileges?ctx.supabaseAdmin:null).create(input)),
   workSource: procedure.input(workSourceScope).query(({ctx,input})=>artifactReuse(ctx.userScopedSupabase,ctx.hasSupabaseAdminPrivileges?ctx.supabaseAdmin:null).source(input)),
   referenceChoices: procedure.input(z.object({sourceVersionId:z.string().uuid()}).strict()).query(({ctx,input})=>artifactReuse(ctx.userScopedSupabase,ctx.hasSupabaseAdminPrivileges?ctx.supabaseAdmin:null).choices(input.sourceVersionId)),
-  // Route one owned conversation without loading history-wide message/credit
-  // statistics. The subsequent Skill/ordinary reads retain their own gates.
-  chatLocate: procedure.input(chatScope).query(async ({ ctx, input }) => {
-    const { data, error } = await ctx.userScopedSupabase.from('conversations')
-      .select('id,module_id,skill_mode,agent_slice_mode').eq('id',input.conversationId)
-      .eq('user_id',ctx.profileId).eq('is_deleted','false').single();
-    if (error || !data) throw new Error('ARTIFACT_DENIED');
-    return z.object({id:z.string().uuid(),module_id:z.string().uuid().nullable(),skill_mode:z.boolean().nullable(),agent_slice_mode:z.boolean()}).parse(data);
-  }),
   cancelSearch: procedure.input(workbenchSearchInput).mutation(({ctx,input})=>workbenchSearch(ctx.userScopedSupabase,ctx.hasSupabaseAdminPrivileges?ctx.supabaseAdmin:null).cancel(input)),
   search: procedure.input(workbenchSearchInput).mutation(({ctx,input})=>workbenchSearch(ctx.userScopedSupabase,ctx.hasSupabaseAdminPrivileges?ctx.supabaseAdmin:null).search(input)),
-  chatMode: procedure.input(z.object({moduleId:z.string().uuid()}).strict()).query(({ctx,input})=>ctx.skillChat.mode(input.moduleId)),
-  chatEnter: procedure.input(chatEntry).mutation(({ ctx, input }) => ctx.skillChat.enter(input)),
-  chatDismissSummary: procedure.input(chatScope.extend({candidateId:z.string().uuid()})).mutation(({ctx,input}) => ctx.skillChat.dismissSummary(input)),
-  chatSummary: procedure.input(chatScope.extend({requestId: z.string().uuid()})).mutation(({ctx,input}) => ctx.skillChat.summary(input)),
-  chatRead: procedure.input(chatScope).query(({ ctx, input }) => ctx.skillChat.read(input)),
-  chatOpen: procedure.input(chatScope).query(async ({ ctx, input }) => {
-    const chat = await ctx.skillChat.read(input);
-    const [snapshot, rounds] = await Promise.all([
-      ctx.workbench.read(chat.binding.projectId, chat.binding.roundId),
-      ctx.workbench.rounds(chat.binding.projectId),
-    ]);
-    return { chat, snapshot, rounds };
-  }),
-  chatSelect: procedure.input(chatScope.extend({stepId:z.string().regex(/^[a-z][a-z0-9_-]{0,63}$/)}).strict()).mutation(({ ctx, input }) => ctx.skillChat.select(input)),
-  chatSubmit: procedure.input(chatTurnInput).mutation(({ ctx, input }) => ctx.skillChat.submit(input)),
   generationQuote: procedure.input(generationQuoteInput).mutation(({ ctx, input }) => ctx.generation.quote(input)),
   generate: procedure.input(generationInput).mutation(({ ctx, input }) => ctx.generation.generate(input)),
   generations: procedure.input(generationScope).query(({ ctx, input }) => ctx.generation.list(input)),

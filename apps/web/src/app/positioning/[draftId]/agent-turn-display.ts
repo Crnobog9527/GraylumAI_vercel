@@ -125,6 +125,8 @@ export type MentorReplySource = {
   liveText?: string;
   liveCard?: QuestionCard | null;
   state: string;
+  /** Server-confirmed permanent deletion takes precedence over cached reply text. */
+  contentDeleted?: boolean;
   unavailableReason?: string | null;
   historyOmitted?: boolean;
   /** Result metadata of a native-output execution, when the history carries it. */
@@ -191,6 +193,8 @@ function envelopeText(raw: string | null | undefined, body: ReturnType<typeof re
  * output truncation is always that one notice, shown once under the turn.
  */
 export function mentorReplyDisplay(source: MentorReplySource): { text: string; card: QuestionCard | null; notice?: ReplyNotice } {
+  if (source.contentDeleted)
+    return { text: "来源已不可用，暂不展示此内容。", card: null };
   if (source.unavailableReason === "provider_history")
     return { text: "", card: null, notice: { tone: "warning", text: PROVIDER_HISTORY_NOTICE } };
   const historyNotice: ReplyNotice | undefined = source.historyOmitted

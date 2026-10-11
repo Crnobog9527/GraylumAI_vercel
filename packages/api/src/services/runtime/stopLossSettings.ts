@@ -1,5 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { z } from 'zod';
+import { writeRuntimeSetting } from './settingsWrites';
 import { TRPCError } from '@trpc/server';
 import type { SupabaseClient } from '@supabase/supabase-js';
 
@@ -13,6 +14,17 @@ export const stopLossConfigSchema = z.object({
   providerBalanceAlertUsd: usdThreshold,
   notificationChannel: z.string().trim().min(1).refine(value => [...value].length <= 100, 'Maximum 100 Unicode characters').nullable(),
 }).strict();
+export const stopLossVersionSchema = z.number().int().min(0).max(9999999998);
+export const stopLossUpdateSchema = z.object({
+  config: stopLossConfigSchema, expectedVersion: stopLossVersionSchema,
+}).strict();
+const storedStopLossSchema = stopLossConfigSchema.extend({
+  revision: z.number().int().min(0).max(9999999999).default(0),
+});
+function snapshot(raw: unknown) {
+  const { revision, ...config } = storedStopLossSchema.parse(raw);
+  return { config, revision };
+}
 export type StopLossConfig = z.infer<typeof stopLossConfigSchema>;
 export const DEFAULT_STOP_LOSS: StopLossConfig = {
   version: 1, userDailyUsd: null, siteDailyUsd: null, siteAlertUsd: null,
@@ -25,18 +37,17 @@ export async function readStopLoss(db: SupabaseClient) {
   try {
     const { data, error } = await db.from('system_settings').select('value').eq('key', STOP_LOSS_KEY).maybeSingle();
     if (error) return unavailable();
-    const config = data ? stopLossConfigSchema.parse(typeof data.value === 'string' ? JSON.parse(data.value) : data.value)
-      : { ...DEFAULT_STOP_LOSS };
-    return { config, source: data ? 'configured' as const : 'default' as const };
+    const state = snapshot(data ? (typeof data.value === 'string' ? JSON.parse(data.value) : data.value) : DEFAULT_STOP_LOSS);
+    return { ...state, source: data ? 'configured' as const : 'default' as const };
   } catch { return unavailable(); }
 }
-export async function saveStopLoss(db: SupabaseClient, input: StopLossConfig) {
-  const config = stopLossConfigSchema.parse(input);
-  try {
-    const { error } = await db.from('system_settings').upsert({ key: STOP_LOSS_KEY, value: config }, { onConflict: 'key' });
-    if (error) return unavailable();
-    return await readStopLoss(db);
-  } catch { return unavailable(); }
+export async function saveStopLoss(db: SupabaseClient, input: z.infer<typeof stopLossUpdateSchema>) {
+  const { config, expectedVersion } = stopLossUpdateSchema.parse(input);
+  const raw = await writeRuntimeSetting(db, 'runtime_update_stop_loss', {
+    p_config: config, p_expected_version: expectedVersion,
+  });
+  try { return { ...snapshot(raw), source: 'configured' as const }; }
+  catch { return unavailable(); }
 }
 export async function stopLossStatus(db: SupabaseClient) {
   try {
