@@ -289,11 +289,14 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
    let reasoning:ReasoningPolicy|undefined;
    const organize=input.selection.kind==='organizer';
    if((mentorStream||stepStream||policy.reportGeneration)&&!policy.real)reasoning={parameter:'none'};
-   if(policy.real&&(mentorStream||stepStream||organize||policy.reportGeneration))
+   // Real free chat freezes the administrator's interactive reasoning (fail closed when unset).
+   // Skill matching ('auto') stays on its original format: a matched Skill may use another model.
+   const freeChat=Boolean(policy.real&&input.selection.kind==='ordinary'&&!mentorStream&&!stepStream&&!policy.reportGeneration);
+   if(policy.real&&(mentorStream||stepStream||organize||policy.reportGeneration||freeChat))
     reasoning=admitReasoning(row.data,organize?'organize':'interactive',realModel(row.data).providerLimits!.providerSlug,maxOutputTokens);
    const organizerFormat=Boolean(policy.real&&!mentorStream&&(organize||attachedOrganizer));
    if(organizerFormat&&!reasoning)reasoning={parameter:'none'};
-   const providerRequestFormat=mentorStream||policy.reportGeneration?'agent-turn-v5-stream':stepStream?'serial-tools-v4-stream':organizerFormat?'serial-tools-v6-reasoning':'serial-tools-v2';
+   const providerRequestFormat=mentorStream||policy.reportGeneration?'agent-turn-v5-stream':stepStream?'serial-tools-v4-stream':organizerFormat||freeChat?'serial-tools-v6-reasoning':'serial-tools-v2';
    const context={version:'runtime.v1',sdkVersion:'0.18.0',inputSelection:hostTurnContext?'scope-projection-v2':'scope-projection-v1',
     ...(hostTurnContext?{hostTurnContext,historySelection}:{}),
     ...(policy.reportGeneration?{reportGeneration:policy.reportGeneration}:{}),
