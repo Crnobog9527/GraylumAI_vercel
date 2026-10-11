@@ -54,5 +54,5 @@ export async function receiveWaffoWebhook(input: Parameters<typeof verifyWaffoRe
     p_id: receipt.id, p_digest: receipt.digest, p_refs: receipt.refs,
   });
   if (result.error || typeof result.data !== 'string' || !result.data) throw new Error('WAFFO_RECEIPT_UNAVAILABLE');
-  return { receiptId: result.data, requiresLookup: receipt.requiresLookup };
+  return { receiptId: result.data, requiresLookup: receipt.requiresLookup, merchant: receipt.merchant, refs: receipt.refs };
 }

@@ -57,6 +57,19 @@ export async function deliveryCases({admin,service,connect}) {
       assert.equal((await admin.query('SELECT credits FROM profiles WHERE id=$1',[user])).rows[0].credits,17940);
     }
   }
+  // Normal-path timing: Waffo's record time may sit a few minutes around the period start; beyond the
+  // database tolerance the payment is rejected (the worker then marks it for reconciliation).
+  for(const [offsetMinutes,ok] of [[3,true],[-4,true],[-6,false]]) {
+    const {o,user,checkout}=await fixture('monthly','card','gold_first30');
+    const start=new Date(Math.floor(Date.now()/1000)*1000-2*3600000),end=new Date(start);end.setUTCDate(end.getUTCDate()+30);
+    await admin.query('UPDATE payment_orders SET created_at=$2 WHERE id=$1',[o.id,new Date(start.getTime()-3600000)]);
+    const paid=new Date(start.getTime()+offsetMinutes*60000);
+    const call=()=>service.query('SELECT pay_waffo_fulfill_payment($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) v',
+      [o.id,'fixture',checkout,`payment_${o.id}`,o.amount_total,'usd',paid,`sub_${o.id}`,start,end]);
+    if(ok) assert.equal((await call()).rows[0].v.state,'fulfilled');
+    else await assert.rejects(call,/TERM_INVALID/);
+    assert.equal((await admin.query('SELECT credits FROM profiles WHERE id=$1',[user])).rows[0].credits,ok?8970:0);
+  }
   for(const closed of [false,true]) {
     const {o,user,checkout}=await fixture();
     const start=new Date(Math.floor(Date.now()/1000)*1000),end=new Date(start);
@@ -75,5 +88,6 @@ export async function deliveryCases({admin,service,connect}) {
     await assert.rejects(()=>service.query('SELECT pay_waffo_release_due(100)'),/permission denied/);
   }
   return ['schema-idempotency','checkout-one-dispatch','cross-user-denied','cross-merchant-denied','wrong-amount-denied',
-    'concurrent-payment-one-grant','wallet-month-delivery','wallet-year-first-grant','card-first30-delivery','card-renewal-69-after-49','card-renewal-payment-dedup','release-idempotency','client-rpc-denied','late-released-payment-no-entitlement','closed-account-financial-only'];
+    'concurrent-payment-one-grant','wallet-month-delivery','wallet-year-first-grant','card-first30-delivery','card-renewal-69-after-49','card-renewal-payment-dedup','release-idempotency','client-rpc-denied','late-released-payment-no-entitlement','closed-account-financial-only',
+    'card-delayed-processing-delivered','card-time-tolerance-review'];
 }

@@ -21,6 +21,20 @@ describe('Waffo HTTP boundary', () => {
     rpc.mockResolvedValue({ data: null, error: { message: 'unavailable' } });
     expect((await handleWaffoWebhookHttp(request(), deps)).status).toBe(503);
   });
+  it('runs normal-path delivery only after a durable receipt and asks for redelivery when it fails', async () => {
+    const rpc = vi.fn().mockResolvedValue({ data: 'receipt-1', error: null });
+    const process = vi.fn().mockResolvedValue({ state: 'applied' });
+    const deps = { config: () => config, database: () => ({ rpc }), process };
+    expect((await handleWaffoWebhookHttp(request(), deps)).status).toBe(200);
+    expect(process).toHaveBeenCalledWith(expect.objectContaining({ receiptId: 'receipt-1', merchant: 'fixture',
+      refs: { orderId: 'order-1', paymentId: 'payment-1' } }));
+    process.mockRejectedValue(new Error('PAY_WAFFO_PAYMENT_NOT_VISIBLE'));
+    expect((await handleWaffoWebhookHttp(request(), deps)).status).toBe(503);
+    rpc.mockResolvedValue({ data: null, error: { message: 'unavailable' } });
+    process.mockClear();
+    expect((await handleWaffoWebhookHttp(request(), deps)).status).toBe(503);
+    expect(process).not.toHaveBeenCalled();
+  });
   it('fails closed without configuration; never invokes persistence for invalid or large bodies', async () => {
     const database = vi.fn();
     expect((await handleWaffoWebhookHttp(request(), { config: () => null, database })).status).toBe(503);

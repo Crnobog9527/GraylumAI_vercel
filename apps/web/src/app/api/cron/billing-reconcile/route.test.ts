@@ -8,7 +8,12 @@ const mocks = vi.hoisted(() => ({
   runBillingEngineV15ReadinessAudit: vi.fn(),
   validateCronRequest: vi.fn(),
   cronJob: vi.fn(),
+  waffo: vi.fn(),
+  waffoClient: vi.fn(),
 }));
+
+vi.mock('@repo/api/src/services/payments/waffoReconciliation', () => ({ reconcileWaffoPayments: mocks.waffo }));
+vi.mock('@repo/api/src/services/payments/waffoTestOperationsClient', () => ({ getWaffoTestOperationsClient: mocks.waffoClient }));
 
 vi.mock('@supabase/supabase-js', () => ({
   createClient: mocks.createClient,
@@ -153,6 +158,25 @@ describe('/api/cron/billing-reconcile', () => {
       expect.stringContaining('BLOCKED'),
       expect.any(Object),
     );
+  });
+
+  it('runs the report-only Waffo reconciliation only when the test binding is enabled', async () => {
+    vi.stubEnv('WAFFO_TEST_OPERATIONS_ENABLED', 'false');
+    expect((await GET(new Request('https://graylum.test/api/cron/billing-reconcile'))).status).toBe(200);
+    expect(mocks.waffo).not.toHaveBeenCalled();
+    vi.stubEnv('WAFFO_TEST_OPERATIONS_ENABLED', 'true');
+    mocks.waffoClient.mockReturnValue({ merchant: 'fixture' });
+    mocks.waffo.mockResolvedValue({ success: false, complete: true, checkedPayments: 1,
+      findings: [{ kind: 'paid_not_delivered', paymentId: 'PAY_1', refundCandidate: false }] });
+    const response = await GET(new Request('https://graylum.test/api/cron/billing-reconcile'));
+    expect(response.status).toBe(500);
+    expect(await response.json()).toMatchObject({ waffo: { findings: [{ kind: 'paid_not_delivered' }] } });
+    expect(mocks.cronJob).toHaveBeenCalledWith('billing-reconcile', 'failed', expect.any(Number),
+      expect.stringContaining('Waffo payments need manual review: 1'), expect.any(Object));
+    mocks.waffo.mockRejectedValue(new Error('PAY_WAFFO_PROVIDER_UNAVAILABLE'));
+    expect(await (await GET(new Request('https://graylum.test/api/cron/billing-reconcile'))).json())
+      .toMatchObject({ success: false, waffo: { findings: [{ kind: 'scan_failed' }] } });
+    vi.unstubAllEnvs();
   });
 
   it('registers one daily UTC reconciliation cron', () => {

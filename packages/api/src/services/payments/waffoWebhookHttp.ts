@@ -4,6 +4,8 @@ import { receiveWaffoWebhook, WAFFO_MAX_BODY_BYTES } from './waffoWebhook';
 type Dependencies = {
   config: () => { publicKey: string; storeId: string; merchantNamespace: string } | null;
   database: () => Parameters<typeof receiveWaffoWebhook>[0]['db'];
+  /** Normal-path delivery after the receipt is durable. Throwing asks the provider to redeliver. */
+  process?: (receipt: Awaited<ReturnType<typeof receiveWaffoWebhook>>) => Promise<unknown>;
 };
 
 /** Streaming limit applies even when Content-Length is absent or dishonest. */
@@ -29,7 +31,11 @@ export async function handleWaffoWebhookHttp(request: Request, deps: Dependencie
   } catch { return new Response('Invalid webhook', { status: 400 }); }
   finally { reader.releaseLock(); }
   try {
-    await receiveWaffoWebhook({ ...config, signature, body: Buffer.concat(parts), db: deps.database() });
+    const receipt = await receiveWaffoWebhook({ ...config, signature, body: Buffer.concat(parts), db: deps.database() });
+    if (deps.process) {
+      try { await deps.process(receipt); }
+      catch { return new Response('Webhook processing deferred', { status: 503 }); }
+    }
     return Response.json({ received: true });
   } catch (error) {
     if (error instanceof Error && (error.message === 'WAFFO_SIGNATURE_INVALID' || error.message === 'WAFFO_SCOPE_MISMATCH'
