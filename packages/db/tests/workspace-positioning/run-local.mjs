@@ -62,7 +62,12 @@ try {
  const start=before.indexOf('CREATE OR REPLACE FUNCTION runtime_workspace_source(');
  const oldDefinition=before.slice(start,before.indexOf('END $$;',start)+'END $$;'.length);
  assert.ok(start>0&&oldDefinition.includes('opc_accounts'));
- await runCases({db:client,report,oldDefinition});
+ const erasure=read('packages/db/migrations/0201_content_erasure.sql');
+ const scopeStart=erasure.indexOf('CREATE OR REPLACE FUNCTION public.content_erasure_scope(');
+ const oldErasureScope=erasure.slice(scopeStart,erasure.indexOf('END $$;',scopeStart)+'END $$;'.length);
+ assert.ok(scopeStart>0&&oldErasureScope.includes('content_erasure_references(rs.scope,refs)'));
+ await client.query(read('packages/db/tests/content-erasure/fixture.sql'));
+ await runCases({db:client,report,oldDefinition,oldErasureScope});
  const audits=ok(sql(read('packages/db/tests/account-open-policy-audit.sql')));
  assert.equal(audits,'');report.checks.push('account-open policy audit unchanged');
 } catch(error) {report.failed=String(error.stack??error);process.exitCode=1;}

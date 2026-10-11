@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 -- RUNTIME-PROD: free conversations can read the user's own confirmed positioning
--- before any social account is bound. Only 0131's runtime_workspace_source changes:
+-- before any social account is bound. 0131's runtime_workspace_source is rebuilt:
 -- each business's current published positioning (opc_businesses.current_source_version_id)
 -- is listed beside account strategies and topics. The same owner/session gate,
 -- opc_source_allowed check (owned, published, not erased, draft not revoked), 40-entry
@@ -41,4 +41,19 @@ BEGIN
 END $$;
 REVOKE ALL ON FUNCTION runtime_workspace_source(uuid,uuid,text) FROM PUBLIC,anon,authenticated,service_role;
 GRANT EXECUTE ON FUNCTION runtime_workspace_source(uuid,uuid,text) TO service_role;
+-- Deleting a source must also delete the free-conversation answers whose read_source
+-- results copied it (index metadata or body). 0201 found copies through execution
+-- payloads and session scopes only; tool results carry the same sourceVersionId keys.
+DO $$ DECLARE definition text;needle text;
+BEGIN
+ definition:=pg_get_functiondef('public.content_erasure_scope(uuid,text,uuid)'::regprocedure);
+ IF position('-- 0218 workspace tool copies' IN definition)=0 THEN
+  needle:='   OR EXISTS(SELECT 1 FROM runtime_sessions rs WHERE rs.id=ex.session_id AND content_erasure_references(rs.scope,refs))';
+  IF (length(definition)-length(replace(definition,needle,'')))/length(needle)<>1 THEN
+   RAISE EXCEPTION 'CONTENT_ERASURE_SOURCE_MISMATCH: content_erasure_scope'; END IF;
+  EXECUTE replace(definition,needle,needle||E'\n   -- 0218 workspace tool copies\n'||
+   '   OR EXISTS(SELECT 1 FROM runtime_tool_calls tc WHERE tc.execution_id=ex.id AND tc.name=''read_source'' AND content_erasure_references(tc.result,refs))');
+ END IF;
+END $$;
+REVOKE ALL ON FUNCTION public.content_erasure_scope(uuid,text,uuid) FROM PUBLIC,anon,authenticated,service_role;
 COMMIT;

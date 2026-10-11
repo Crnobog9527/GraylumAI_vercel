@@ -1,12 +1,14 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import assert from 'node:assert/strict';
+import {randomUUID} from 'node:crypto';
 import {rpc,closeAccount} from '../erasure-b2a/cases.mjs';
+import {erase} from '../content-erasure/cases.mjs';
 const one=async(db,text,args=[])=>(await db.query(text,args)).rows[0].v;
 const index=(db,a,sid)=>rpc(db,'runtime_workspace_source',a,sid,'');
 const read=(db,a,sid,id)=>rpc(db,'runtime_workspace_source',a,sid,id);
 const denied=async(promise,code)=>{await assert.rejects(promise,error=>String(error.message).includes(code));};
 // oldDefinition: 0131's runtime_workspace_source, executed inside a rolled-back transaction.
-export async function runCases({db,report,oldDefinition}) {
+export async function runCases({db,report,oldDefinition,oldErasureScope}) {
  const a=await one(db,'SELECT ws_test.actor() v');
  const sid=await one(db,'SELECT ws_test.free_session($1) v',[a]);
  const main=await one(db,'SELECT ws_test.positioning($1,$2,$3) v',[a,'Tea studio','POSITIONING_CANARY_A']);
@@ -54,6 +56,36 @@ export async function runCases({db,report,oldDefinition}) {
  assert.equal((await read(db,a,sid,main.business)).kind,'unavailable');
  assert.deepEqual((await index(db,a,sid)).entries,[]);
  report.checks.push('revoked positioning draft and erased business are no longer readable');
+
+ const d=await one(db,'SELECT ws_test.actor() v');
+ const dSid=await one(db,'SELECT ws_test.free_session($1) v',[d]);
+ const deleted=await one(db,'SELECT ws_test.positioning($1,$2,$3) v',[d,'Deleted','DELETED_CANARY']);
+ const execution=async calls=>{
+  const id=randomUUID();
+  await db.query(`INSERT INTO runtime_executions(id,actor_id,session_id,request_id,payload,history_revision,state)
+   VALUES($1,$2,$3,$4,'{}',0,'interrupted')`,[id,d,dSid,randomUUID()]);
+  for(const [n,[args,result]] of calls.entries())await db.query(`INSERT INTO runtime_tool_calls(execution_id,call_id,name,arguments,result)
+   VALUES($1,$2,'read_source',$3,$4)`,[id,'call-'+n,args,result]);
+  return id;
+ };
+ const copied=await execution([[{},await index(db,d,dSid)],[{query:deleted.business},await read(db,d,dSid,deleted.business)]]);
+ const unrelated=await execution([]);
+ const scoped=async()=>(await rpc(db,'content_erasure_scope',d,'artifact',deleted.project)).executions;
+ await db.query('BEGIN');
+ try {
+  await db.query(oldErasureScope);
+  assert.ok(!(await scoped()).includes(copied));
+  report.checks.push('before fix (0201 scope): deleting the positioning misses the answer that copied it via read_source');
+ } finally {await db.query('ROLLBACK');}
+ const covered=await scoped();
+ assert.ok(covered.includes(copied));assert.ok(!covered.includes(unrelated));
+ await erase(db,{actor:d},'artifact',deleted.project);
+ const left=await db.query('SELECT count(*)::int n FROM runtime_tool_calls WHERE execution_id=$1 AND (result IS NOT NULL OR erased_at IS NULL)',[copied]);
+ assert.equal(left.rows[0].n,0);
+ assert.equal((await one(db,'SELECT content_deleted_at IS NULL AND erased_at IS NULL v FROM runtime_executions WHERE id=$1',[unrelated])),true);
+ assert.deepEqual((await index(db,d,dSid)).entries,[]);
+ assert.equal((await read(db,d,dSid,deleted.business)).kind,'unavailable');
+ report.checks.push('after fix: deleting the positioning clears copied read_source results, keeps unrelated answers, and removes it from the index');
 
  const closing=await one(db,'SELECT ws_test.actor() v');
  const closingSid=await one(db,'SELECT ws_test.free_session($1) v',[closing]);
