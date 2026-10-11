@@ -80,7 +80,7 @@ describe('/api/cron/billing-reconcile', () => {
     mocks.createClient.mockReturnValue({ client: 'service-role' });
     mocks.runDailyBillingReconciliation.mockResolvedValue(dailySuccess);
     mocks.runBillingEngineV15ReadinessAudit.mockResolvedValue(readinessSuccess);
-    mocks.staleRounds.mockResolvedValue({ success: true, findings: [], truncated: false });
+    mocks.staleRounds.mockResolvedValue({ success: true, findings: [], total: 0, truncated: false });
   });
 
   it('rejects unauthorized invocation before creating a privileged client', async () => {
@@ -193,7 +193,7 @@ describe('/api/cron/billing-reconcile', () => {
   it('reports stale charged rounds for manual review without failing the other audits', async () => {
     const finding = { kind: 'stale_charged_round', executionId: 'e-1', runId: 'r-1', chargedCredits: 1,
       since: '2026-10-11T18:02:00.000Z', refundMarker: 'stale-round:r-1' };
-    mocks.staleRounds.mockResolvedValue({ success: false, findings: [finding], truncated: false });
+    mocks.staleRounds.mockResolvedValue({ success: false, findings: [finding], total: 1, truncated: false });
     const response = await GET(new Request('https://graylum.test/api/cron/billing-reconcile'));
     expect(response.status).toBe(500);
     expect(await response.json()).toMatchObject({ staleRounds: { findings: [finding] }, summary: {} });

@@ -14,7 +14,7 @@ export const WITHOUT_APP_SUITES = {
     files: ['src/services/runtime/runtime.integration.ts', 'src/services/runtime/streaming.integration.ts',
       'src/services/runtime/terminalReply.integration.ts', 'src/services/runtime/historyCache.integration.ts',
       'src/services/opc/capture.integration.ts', 'src/services/opc/agentCorePlanB.integration.ts',
-      'src/services/bill2/agentCorePlanB.integration.ts'],
+      'src/services/bill2/agentCorePlanB.integration.ts', 'src/services/runtime/staleChargedRounds.integration.ts'],
     prefix: 'RUNTIME: ',
     excluded: [
       {

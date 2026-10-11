@@ -22,7 +22,7 @@ const CRON_CONFIG_ERROR_MESSAGE = 'Server configuration error';
 /** Stale charged rounds: report-only; an operator verifies and refunds each one (Owner 2026-10-12). */
 async function runStaleRoundReconciliation(supabase: SupabaseClient) {
   try { return await findStaleChargedRounds(supabase); }
-  catch { return { success: false, findings: [], truncated: false, scanFailed: true }; }
+  catch { return { success: false, findings: [], total: 0, truncated: false, scanFailed: true }; }
 }
 
 /** Waffo daily backstop: report-only. Off until the test operations binding is explicitly enabled. */
@@ -75,7 +75,7 @@ export async function GET(request: Request) {
         [...result.mismatches, ...readinessAudit.findings.map((finding) => finding.message),
           ...(erasureFinancial.success ? [] : ['Erasure financial recovery pending']),
           ...(waffo.success ? [] : [`Waffo payments need manual review: ${waffo.findings.length}`]),
-          ...(staleRounds.success ? [] : [`Stale charged rounds need manual review: ${staleRounds.findings.length}`])].join(' | '),
+          ...(staleRounds.success ? [] : [`Stale charged rounds need manual review: ${staleRounds.total}`])].join(' | '),
         {
           erasureFinancial,
           waffo,
