@@ -15,6 +15,7 @@ import {
 import { useReportGen } from "./use-report-gen";
 import { useReportPaywallMemory } from "./report-paywall-memory";
 import { STOP_SAVING_NOTICE, STOP_UNCONFIRMED_NOTICE } from "./stop-reply";
+export { PublishFootnote, PublishNext, reportPublishes } from "./report-publish";
 import { ReportDocumentPanel } from "./report-document-panel";
 import { REPORT_DOC_TEXT } from "./report-document";
 

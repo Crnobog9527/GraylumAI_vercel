@@ -30,7 +30,7 @@ import { useMentorLogScroll } from "./use-mentor-log-scroll";
 import { mentorTailNotices, mentorTurnNotice, RETRY_PENDING_NOTICE, turnNeedsRetry } from "./mentor-notices";
 import { useAutoStepRecovery, useHistoryPolling } from "./use-step-recovery";
 import { useLiveReply } from "./use-live-reply";
-import { ReportEntry } from "./report-panel";
+import { PublishFootnote, PublishNext, ReportEntry, reportPublishes } from "./report-panel";
 import { InformationExport } from "./InformationExport";
 import { EXISTING_WELCOME } from "../start-entry";
 import { isStepSummaryInput, offersStepSummary, STEP_SUMMARY_INPUT, STEP_SUMMARY_LABEL, stepSummaryRequest, summaryRefusal,
@@ -1227,7 +1227,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
                           )}
                           {reply.text && <div data-message-role="assistant" data-step-summary={summaryTurn || undefined}
                             aria-label={summaryTurn ? "本步小结卡" : undefined}
-                            className={`mr-4 rounded-xl border border-[var(--border-primary)] p-3${summaryTurn ? " bg-[var(--bg-secondary)]" : ""}`}>
+                            className="mr-4 rounded-xl border border-[var(--border-primary)] p-3">
                             <span className={resultStyles.agentIdentity}><img src="/graylum-logo.png" alt=""/>
                               {summaryTurn ? "本步小结" : openingTurn ? "导师主动引导" : "导师"}{turnLabel}</span>
                             <MentorMarkdown className={`mt-1 ${resultStyles.messageBody}`} text={reply.text} live={Boolean(live)} result={execution}/>
@@ -1281,7 +1281,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
                       ? "定位版本已发布。你可以在下方进入第一周计划，或修订定位并保留原版本；历史版本与对话保持不变。"
                       : hasUnconfirmedRequired
                         ? "暂缓内容已保留，但必需信息仍需回来确认，才能发布正式定位。"
-                        : "下一步是确认正式定位：发布定位本身不会调用模型；发布后你会被明确询问是否继续生成第一周选题，只有你选择继续时才会调用模型并按额度计费。"}
+                        : <PublishNext workflow={snap.workflow}/>}
                   </p>
                 </div>
               )}
@@ -1326,7 +1326,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
           核对修改：{nextReviewStep.title}
         </Button>
       </div>}
-      {!planView && <Button
+      {!planView && !reportPublishes(snap.workflow) && <Button
         disabled={
           busy ||
           hasUnsavedInformation ||
@@ -1374,7 +1374,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
         onTopics={() => void run(async () => { if ((await read.refetch()).isError) throw new Error("OPC_UNAVAILABLE"); })
           .then(failure => { if (!failure) setConsentOpen(true); })} // Only with the finalized version read back.
         confirmed={!hasUnconfirmedRequired && !hasPendingConfirmation && !(d.accountRevision ? nextReviewStep : steps.some(x => !snap.steps[x.id].valid))} />}
-      </div><p>确认后保存为正式定位；生成选题将在下一步单独确认。</p>
+      </div><p><PublishFootnote workflow={snap.workflow}/></p>
       {d.report?.available && <Link href={`/positioning/${draftId}/topics`}>进入选题工作对话 →</Link>}
       </footer>}
       {consentOpen && (

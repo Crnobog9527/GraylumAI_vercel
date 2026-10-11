@@ -5,6 +5,12 @@ export const publicWorkflowSchema = z.object({
   id: z.string(),
   version: z.number(),
   kind: z.enum(["social", "document"]),
+  /**
+   * Read-only flag: the flow writes a full report that is finalized into the official version (REPORT-GEN, R5).
+   * Only whether it is configured; the manifest itself (sections, resources, limits) is never exposed.
+   * Accepts the stored manifest or an already projected flag, so projecting twice keeps the answer.
+   */
+  reportGeneration: z.unknown().transform(value => value === true || (typeof value === "object" && value !== null)),
   steps: z.array(
     z.object({
       id: z.string(),
