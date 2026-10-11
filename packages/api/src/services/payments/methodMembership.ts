@@ -1,14 +1,13 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { readPaymentMethodRoutes } from './methodRouting';
-
-// Keep public purchase admission closed until the complete delivery/recovery path is accepted.
-export const METHOD_CHECKOUT_READY = false;
+import { methodCardCheckoutReady } from './methodCheckoutGate';
 
 /** Read-only member-page projection. Orders remain the authority for paid access; a pending
  * checkout or provider subscription status alone cannot grant membership. Founder capacity is
  * shared across merchants/methods in the same mode, matching 0204's atomic reservation. */
-export async function readMethodMembership(db: SupabaseClient, userId: string, now = Date.now()) {
+export async function readMethodMembership(db: SupabaseClient, userId: string, now = Date.now(),
+  env: Record<string, string | undefined> = process.env) {
   const [routes, orders, founderOrders] = await Promise.all([
     readPaymentMethodRoutes(db),
     db.from('payment_orders').select([
@@ -34,8 +33,8 @@ export async function readMethodMembership(db: SupabaseClient, userId: string, n
   const sold = founderOrders.data.filter(row => row.qualification_state === 'sold').length;
   if (occupied > 50) throw new Error('PAY_WAFFO_FOUNDER_CAPACITY_CONFLICT');
   return { mode: 'test' as const, routes,
-    // Still closed at the application boundary until fulfillment and step 3 are complete.
-    checkoutReady: METHOD_CHECKOUT_READY,
+    // Card only, staging test mode with the default-off route switch; wallets stay closed.
+    checkoutReady: methodCardCheckoutReady(env, routes),
     founder: { total: 50, sold, reserved: occupied - sold, available: 50 - occupied },
     memberships: orders.data,
   };
