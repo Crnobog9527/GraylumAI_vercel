@@ -668,7 +668,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
     if(running||openingInFlight.current.size||history.data?.activeExecution)return;
     const input=(inputOverride??mentorInput).trim();if(!input)return;
     const latest = mentorExecutions.at(-1), sourceTurn = latest && mentorTurns.get(latest.executionId);
-    const summary = isStepSummaryInput(input); // R16: the host request answers no card and names no field.
+    const summary = inputOverride === STEP_SUMMARY_INPUT; // R16: only the button, never typed text; no card, no field.
     // Typing instead of choosing still answers the newest card of this step and round.
     if (!answerSource && !isHostAction(input) && latest?.state === "completed" && sourceTurn && sourceTurn.roundId === d.roundId &&
       sourceTurn.stepId === step.id && readAgentTurnBody(latest.body).card)
