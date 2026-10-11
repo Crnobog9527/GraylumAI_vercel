@@ -34,3 +34,10 @@
 @media(max-width:680px){.publicationFields{grid-template-columns:1fr}.scopeActions{flex-wrap:wrap;justify-content:flex-end}.dialogHead{min-height:66px;padding:0 15px}.detailIntro{margin-bottom:16px;padding-bottom:16px}}
 .topicOverview{display:flex;align-items:center;justify-content:space-between;gap:15px;flex:none;margin:10px 20px 0;padding:12px 14px;border:1px solid #e7e7e7;border-radius:10px;background:#fafafa;color:#333;text-align:left;cursor:pointer}.topicOverview:hover{border-color:#cfcfcf;background:#f7f7f7}.topicOverview>span:first-child{min-width:0}.topicOverview strong,.topicOverview small{display:block}.topicOverview strong{font-size:13px;font-weight:600}.topicOverview small{max-width:540px;margin-top:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#777;font-size:11px}.topicOverview>span:last-child{flex:none;color:#666;font-size:11px}.topicPage{min-height:0;overflow:auto;padding:14px 24px 24px}.topicPage>.back{margin:0 0 18px;padding:0;border:0;background:none;color:#666;font-size:12px}.topicPage .metaForm{max-width:640px}.metaForm h3{font-size:17px;font-weight:550}.saveTopic{justify-self:start;min-height:39px;padding:7px 16px;border:0;border-radius:8px;background:#242424;color:#fff;font-size:12px}
 .success{margin:10px 20px;padding:9px 12px;border-radius:8px;background:#eef8f0;color:#28623b;font-size:12px}
+.tabs{display:flex;gap:4px;flex:none;margin:0 24px;border-bottom:1px solid #eee}
+.tabs button{min-height:38px;padding:8px 14px;border:0;border-bottom:2px solid transparent;background:none;color:#888;font-size:13px;cursor:pointer}
+.tabs button[aria-selected=true]{border-bottom-color:#242424;color:#242424;font-weight:550}
+.tabs+.intro{min-height:0;padding:14px 0}
+@media(max-width:780px){.tabs{margin:0 14px}}
+/* Fills the remaining height so 我的文档 scrolls inside it; [hidden] must win over display:flex. */
+.documentsPane{display:flex;flex-direction:column;flex:1;min-height:0}.documentsPane[hidden]{display:none}

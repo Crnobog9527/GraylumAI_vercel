@@ -112,3 +112,16 @@ it('only explicit erasure candidates use unconditional deletion',async()=>{
   await cleanupLibrary(client,{actorId:a,storage});
   expect(rpc).toHaveBeenCalledWith('library_delete',{a,did:id,closed:true,unfinished_only:false,expiry_only:false});
 });
+
+it('requires successful absence of BOTH Word paths before reporting a release observation', async () => {
+  const textPath = `${a}/${id}/text`;
+  rpc.mockImplementation(async (name: string) => {
+    if (name === 'library_cleanup_candidates') return { data: [{ ...row, text_path: textPath }] };
+    if (name === 'library_cleanup_backlog') return { data: { pending: 1, overdue: 0, oldestDeletedAt: null } };
+    return { data: false };
+  });
+  vi.mocked(storage.absent).mockImplementation(async p => p === path);
+  await cleanupLibrary(client, { actorId: a, storage });
+  expect(storage.remove).toHaveBeenCalledWith(textPath);
+  expect(rpc).toHaveBeenCalledWith('library_cleanup_observe', { a, did: id, absent: false });
+});
