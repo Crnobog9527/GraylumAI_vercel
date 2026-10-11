@@ -222,7 +222,11 @@ it('RUNTIME: capture complete callback persists and new projection strips privat
   await f.save('user');
   await f.apply(await f.seed(output([patch('suggestion')])));
   const projection = (await db.query('select runtime_work_projection($1,$2,$3) v', [f.actor, f.d.sessionId, f.d.roundId])).rows[0].v;
-  expect(projection.steps['step-0'].fieldMeta.goal).toEqual({protected:true,source:'user',basis:'user_statement',hasPendingSuggestion:true});
+  expect(projection.steps['step-0'].fieldMeta.goal).toEqual({
+    protected:true,source:'user',basis:'user_statement',hasPendingSuggestion:true,
+    executionId:null,origin:{basis:'user_statement',executionId:id},createdAt:expect.any(String),
+  });
+  expect(Number.isFinite(Date.parse(projection.steps['step-0'].fieldMeta.goal.createdAt))).toBe(true);
   expect(projection.steps['step-0'].information.goal.value).toBe('user');
   const view = await f.read();
   expect(view.information['step-0'].meta.goal.suggestion.value).toBe('suggestion');
