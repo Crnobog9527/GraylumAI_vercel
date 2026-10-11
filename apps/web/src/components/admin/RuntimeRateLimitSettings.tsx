@@ -29,14 +29,11 @@ export function RuntimeRateLimitSettings() {
   // This component is outside the unmounting TabsContent, preserving edits and save state.
   const [draft, setDraft] = useState<Draft | null>(null);
   const [saved, setSaved] = useState<'limits' | null>(null);
-  const [readFailed, setReadFailed] = useState(false);
-  // The pre-save re-read counts as saving, so no edit can slip in and be discarded.
-  const [rereading, setRereading] = useState(false);
   // Every successful save shows the server read-back, never the submitted value.
   const update = trpc.runtimeRateLimits.update.useMutation({
     onSuccess: data => { utils.runtimeRateLimits.get.setData(undefined, data); },
   });
-  const saving = update.isPending || rereading;
+  const saving = update.isPending;
   const config = view.data?.config;
   const enforcement = view.data?.enforcement;
   const wired = Boolean(enforcement?.admission && enforcement.calls && enforcement.pause);
@@ -79,7 +76,6 @@ export function RuntimeRateLimitSettings() {
                 onChange={event => {
                   setDraft({ ...current, [key]: event.target.value });
                   setSaved(null);
-                  setReadFailed(false);
                   update.reset();
                 }} />
               <p className="text-xs">可填 1–{max} 次，日限额不能低于分钟限额。</p>
@@ -94,24 +90,21 @@ export function RuntimeRateLimitSettings() {
           </p>}
           {wired ? <p>暂停设置：{config.stopNewCalls ? '已暂停新调用' : '未暂停'}</p>
             : <p>暂停设置：{config.stopNewCalls ? '已保存暂停意向，尚未生效' : '未暂停（保护尚未接线）'}</p>}
-          <p className="text-sm">停止或恢复新调用请到“成本止损”页操作，那里有确认步骤。</p>
+          <p className="text-sm">
+            停止或恢复新调用只能在“成本止损”页操作（有确认步骤）。在这里保存额度不会改变停止开关。
+          </p>
           <Button disabled={saving || !valid} onClick={() => {
             setSaved(null);
-            setReadFailed(false);
-            setRereading(true);
-            // Re-read the pause flag first: saving limits must never undo a stop set elsewhere.
-            void utils.runtimeRateLimits.get.fetch(undefined, { staleTime: 0 }).then(fresh => {
-              setRereading(false);
-              update.mutate({ ...fresh.config,
-                admissionPerMinute: Number(current.admissionPerMinute),
-                admissionPer24Hours: Number(current.admissionPer24Hours),
-                callsPerMinute: Number(current.callsPerMinute),
-                callsPer24Hours: Number(current.callsPer24Hours),
-              }, { onSuccess: () => { setDraft(null); setSaved('limits'); } });
-            }, () => { setRereading(false); setReadFailed(true); });
+            // stopNewCalls:false saves only the four limits; the server never resumes calls from it.
+            update.mutate({ ...config, stopNewCalls: false,
+              admissionPerMinute: Number(current.admissionPerMinute),
+              admissionPer24Hours: Number(current.admissionPer24Hours),
+              callsPerMinute: Number(current.callsPerMinute),
+              callsPer24Hours: Number(current.callsPer24Hours),
+            }, { onSuccess: () => { setDraft(null); setSaved('limits'); } });
           }}>{saving ? '保存中…' : '保存额度配置'}</Button>
         </>}
-        {(update.error || readFailed) && <p role="alert">保存或回读失败，请重新读取核对；未确认保存成功。</p>}
+        {update.error && <p role="alert">保存或回读失败，请重新读取核对；未确认保存成功。</p>}
         {saved && !view.error && !update.error && config && <p role="status">
           {wired ? '配置已保存并回读。' : '配置已保存并回读；保护仍未接线。'}
         </p>}

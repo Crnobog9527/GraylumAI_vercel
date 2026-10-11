@@ -22,8 +22,8 @@ const mock = `
     if (fail(name)) throw fail(name);
     const s = window.server;
     if (name==='get') return {config:s.limits,source:'configured',enforcement:{admission:true,calls:true,pause:true}};
-    if (name==='stopLossConfig') return {config:s.stopLoss,source:s.source};
-    if (name==='stopLossStatus') return {config:s.stopLoss,source:s.source,usage:s.usage,basis:'settled_provider_usd',
+    if (name==='stopLossConfig') return {config:s.stopLoss,revision:s.revision,source:s.source};
+    if (name==='stopLossStatus') return {config:s.stopLoss,revision:s.revision,source:s.source,usage:s.usage,basis:'settled_provider_usd',
       timezone:'UTC',externalNotifications:'not_connected'};
     if (name==='stopLossAlerts') return {alerts:s.alerts,limit:100};
   };
@@ -52,16 +52,19 @@ const mock = `
   }
   export const trpc = {
     useUtils: () => ({runtimeRateLimits:{
-      get:{fetch:async()=>{window.calls.push(['fetch:get']);const v=read('get');cache.get=v;notify();return v},
-        setData:(_,v)=>{cache.get=v;notify()}},
-      stopLossConfig:{fetch:async()=>{window.calls.push(['fetch:stopLossConfig']);return read('stopLossConfig')}},
+      get:{setData:(_,v)=>{cache.get=typeof v==='function'?v(cache.get):v;notify()},
+        invalidate:async()=>{delete cache.get;notify()}},
       stopLossStatus:{invalidate:async()=>{delete cache.stopLossStatus;notify()}},
     }}),
     runtimeRateLimits: {
       get:query('get'), stopLossStatus:query('stopLossStatus'), stopLossAlerts:query('stopLossAlerts'),
-      update:mutation('update',input=>{window.server.limits={...input,...window.readBack};return read('get')}),
-      updateStopLoss:mutation('updateStopLoss',input=>{window.server.stopLoss=input;window.server.source='configured';
-        return read('stopLossConfig')}),
+      // Mirrors the dedicated endpoint: only the flag changes; window.readBack can override the result.
+      setStopNewCalls:mutation('setStopNewCalls',input=>{const s=window.server;
+        s.limits={...s.limits,stopNewCalls:input.stopped,...window.readBack};return {config:s.limits,source:'configured'}}),
+      // Mirrors the server compare-and-write: a stale expectedVersion is a 409 conflict.
+      updateStopLoss:mutation('updateStopLoss',input=>{const s=window.server;
+        if(input.expectedVersion!==s.revision)throw {message:'conflict',data:{code:'CONFLICT',httpStatus:409}};
+        s.stopLoss=input.config;s.revision++;s.source='configured';return read('stopLossConfig')}),
       recordProviderBalance:mutation('recordProviderBalance',input=>({...input,observedAt:'2026-10-11T03:00:00.000Z',
         source:'admin_observation'})),
     },
@@ -110,7 +113,7 @@ async function open(server: Record<string, unknown>, fail: Record<string, unknow
   await page.setContent('<div id="root"></div>');
   await page.evaluate(([s, f]) => {
     Object.assign(window, { server: s, fail: f });
-  }, [{ limits, stopLoss: emptyStopLoss, source: 'default', usage: { utcDate: '2026-10-11', userUsd: '0', siteUsd: '0' },
+  }, [{ limits, stopLoss: emptyStopLoss, revision: 0, source: 'default', usage: { utcDate: '2026-10-11', userUsd: '0', siteUsd: '0' },
     alerts: [], ...server }, fail] as const);
   await page.addScriptTag({ content: code });
   return { page, errors };
@@ -124,17 +127,18 @@ it('stops and resumes new calls only after confirmation, using the fresh read-ba
     await page.getByRole('button', { name: '停止新调用' }).click();
     await browserExpect(page.getByRole('alertdialog')).toContainText('确认停止全站新的模型调用？');
     await page.getByRole('button', { name: '取消' }).click();
-    expect((await calls(page)).filter(c => c[0] === 'update')).toEqual([]);
-    // Someone changed the limits after this page loaded; the toggle must keep their limits.
-    await page.evaluate('window.server.limits={...window.server.limits,callsPerMinute:12}');
+    expect((await calls(page)).filter(c => c[0] === 'setStopNewCalls')).toEqual([]);
     await page.getByRole('button', { name: '停止新调用' }).click();
     await page.getByRole('button', { name: '确认停止' }).click();
     await browserExpect(page.getByTestId('stop-new-calls-state')).toHaveText('当前状态：已停止新调用');
     await browserExpect(page.getByText('已停止新的模型调用（已回读确认）', { exact: false })).toBeVisible();
-    expect((await calls(page)).find(c => c[0] === 'update')?.[1]).toMatchObject({ callsPerMinute: 12, stopNewCalls: true });
+    // Only the dedicated flag endpoint is used; the rate limits are never sent.
+    expect((await calls(page)).filter(c => c[0] !== 'setStopNewCalls')).toEqual([]);
+    expect((await calls(page)).find(c => c[0] === 'setStopNewCalls')?.[1]).toEqual({ stopped: true });
     // The server read-back decides what is shown.
     await page.evaluate('window.readBack={stopNewCalls:true}');
     await page.getByRole('button', { name: '恢复新调用' }).click();
+    // (The read-back below still says stopped, so the page must keep showing stopped.)
     await browserExpect(page.getByRole('alertdialog')).toContainText('确认恢复新的模型调用？');
     await page.getByRole('button', { name: '确认恢复' }).click();
     await browserExpect(page.getByText('已停止新的模型调用（已回读确认）', { exact: false })).toBeVisible();
@@ -144,7 +148,7 @@ it('stops and resumes new calls only after confirmation, using the fresh read-ba
 }, 20000);
 
 it('shows friendly errors for a failed toggle and a forbidden read', async () => {
-  const { page, errors } = await open({}, { update: { message: 'raw db failure', data: { code: 'INTERNAL_SERVER_ERROR' } } });
+  const { page, errors } = await open({}, { setStopNewCalls: { message: 'raw db failure', data: { code: 'INTERNAL_SERVER_ERROR' } } });
   try {
     await page.getByRole('button', { name: '停止新调用' }).click();
     await page.getByRole('button', { name: '确认停止' }).click();
@@ -182,34 +186,30 @@ it('shows empty limits as not blocking, saves the full config and reads it back'
     await page.getByLabel('通知渠道备注').fill('  运营群  ');
     await save.click();
     await browserExpect(page.getByText('止损设置已保存（已回读确认）。')).toBeVisible();
-    expect((await calls(page)).find(c => c[0] === 'updateStopLoss')?.[1]).toEqual({ version: 1, userDailyUsd: '0.5',
-      siteDailyUsd: '3', siteAlertUsd: null, providerBalanceAlertUsd: null, notificationChannel: '运营群' });
+    expect((await calls(page)).find(c => c[0] === 'updateStopLoss')?.[1]).toEqual({ expectedVersion: 0, config: { version: 1,
+      userDailyUsd: '0.5', siteDailyUsd: '3', siteAlertUsd: null, providerBalanceAlertUsd: null, notificationChannel: '运营群' } });
     await browserExpect(usage).toContainText('全站每日上限：$3（已达到）');
     await browserExpect(page.getByText('设置来源：已保存的设置')).toBeVisible();
     expect(errors).toEqual([]);
   } finally { await page.close(); }
 }, 20000);
 
-it('refuses to overwrite settings someone else saved meanwhile and offers a reload', async () => {
-  const { page, errors } = await open({ stopLoss: { ...emptyStopLoss, siteDailyUsd: '10' }, source: 'configured' });
+it('sends the revision the edit started from and turns a 409 into a reload prompt', async () => {
+  const { page, errors } = await open({ stopLoss: { ...emptyStopLoss, siteDailyUsd: '10' }, revision: 4, source: 'configured' });
   try {
     await page.getByLabel('全站每日上限（美元）').fill('20');
-    await page.evaluate('window.server.stopLoss={...window.server.stopLoss,siteDailyUsd:"15"}');
+    // Another administrator saves meanwhile, so the server revision moves to 5.
+    await page.evaluate('window.server.stopLoss={...window.server.stopLoss,siteDailyUsd:"15"}; window.server.revision=5');
     await page.getByRole('button', { name: '保存止损设置' }).click();
     await browserExpect(page.getByText('设置已被其他人修改', { exact: false })).toBeVisible();
-    expect((await calls(page)).filter(c => c[0] === 'updateStopLoss')).toEqual([]);
+    expect((await calls(page)).find(c => c[0] === 'updateStopLoss')?.[1]).toMatchObject({ expectedVersion: 4 });
+    await browserExpect(page.getByText('止损设置已保存', { exact: false })).toHaveCount(0);
     await page.getByRole('button', { name: '重新读取' }).click();
     await browserExpect(page.getByLabel('全站每日上限（美元）')).toHaveValue('15');
-    expect(errors).toEqual([]);
-  } finally { await page.close(); }
-}, 20000);
-
-it('maps a server-side conflict to the reload prompt', async () => {
-  const { page, errors } = await open({}, { updateStopLoss: { message: 'x', data: { code: 'CONFLICT', httpStatus: 409 } } });
-  try {
-    await page.getByLabel('全站每日提醒线（美元）').fill('8');
+    await page.getByLabel('全站每日上限（美元）').fill('12');
     await page.getByRole('button', { name: '保存止损设置' }).click();
-    await browserExpect(page.getByText('设置已被其他人修改', { exact: false })).toBeVisible();
+    await browserExpect(page.getByText('止损设置已保存（已回读确认）。')).toBeVisible();
+    expect((await calls(page)).filter(c => c[0] === 'updateStopLoss').at(-1)?.[1]).toMatchObject({ expectedVersion: 5 });
     expect(errors).toEqual([]);
   } finally { await page.close(); }
 }, 20000);

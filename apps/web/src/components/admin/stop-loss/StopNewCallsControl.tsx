@@ -11,13 +11,13 @@ import { stopLossErrorMessage } from './stopLossFormat';
 
 /**
  * Site-wide emergency stop for new model calls (runtime_rate_limits.stopNewCalls).
- * The switch is saved together with the rate limits, so a toggle re-reads the latest saved
- * limits first and only flips the flag; a stale page can never overwrite someone else's limits.
+ * The dedicated endpoint changes only the flag in one database transaction, so it never
+ * touches the rate limits. Resuming is only possible here.
  */
 export function StopNewCallsControl() {
   const utils = trpc.useUtils();
   const view = trpc.runtimeRateLimits.get.useQuery(undefined, { refetchOnMount: 'always' });
-  const update = trpc.runtimeRateLimits.update.useMutation();
+  const setStop = trpc.runtimeRateLimits.setStopNewCalls.useMutation();
   const [confirming, setConfirming] = useState<boolean | null>(null);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
@@ -30,10 +30,9 @@ export function StopNewCallsControl() {
     setNotice(null);
     setFailure(null);
     try {
-      const fresh = await utils.runtimeRateLimits.get.fetch(undefined, { staleTime: 0 });
-      const result = fresh.config.stopNewCalls === target ? fresh
-        : await update.mutateAsync({ ...fresh.config, stopNewCalls: target });
-      utils.runtimeRateLimits.get.setData(undefined, result);
+      const result = await setStop.mutateAsync({ stopped: target });
+      utils.runtimeRateLimits.get.setData(undefined, prev => prev && { ...prev, ...result });
+      void utils.runtimeRateLimits.get.invalidate();
       // The message always follows the server read-back, never the requested value.
       setNotice(result.config.stopNewCalls
         ? '已停止新的模型调用（已回读确认）。已经开始的调用会按原流程结算。'

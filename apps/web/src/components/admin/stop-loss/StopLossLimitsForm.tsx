@@ -49,11 +49,13 @@ export function StopLossLimitsForm() {
   const status = trpc.runtimeRateLimits.stopLossStatus.useQuery(undefined, { refetchOnMount: 'always' });
   const save = trpc.runtimeRateLimits.updateStopLoss.useMutation();
   const [draft, setDraft] = useState<Draft | null>(null);
-  const [base, setBase] = useState<Config | null>(null);
+  // Revision the edit started from; the server rejects the save if it has moved on.
+  const [baseRevision, setBaseRevision] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
   const config = status.data?.config as Config | undefined;
+  const revision = status.data?.revision;
   const current = draft ?? (config ? toDraft(config) : null);
   const parsed = current ? AMOUNT_FIELDS.map(([key]) => [key, parseUsdInput(current[key])] as const) : [];
   const channel = current?.notificationChannel.trim() ?? '';
@@ -63,14 +65,15 @@ export function StopLossLimitsForm() {
 
   function edit(key: keyof Draft, value: string) {
     if (!current || !config) return;
-    if (!draft) setBase(config);
+    if (!draft) setBaseRevision(revision ?? null);
     setDraft({ ...current, [key]: value });
     setNotice(null);
     setFailure(null);
   }
 
   async function submit() {
-    if (!current || !config || !valid) return;
+    const expectedVersion = baseRevision ?? revision;
+    if (!current || !config || !valid || expectedVersion === undefined) return;
     const next: Config = { version: 1, notificationChannel: channel === '' ? null : channel,
       userDailyUsd: null, siteDailyUsd: null, siteAlertUsd: null, providerBalanceAlertUsd: null };
     for (const [key, result] of parsed) if (result.ok) next[key] = result.value;
@@ -78,15 +81,9 @@ export function StopLossLimitsForm() {
     setNotice(null);
     setFailure(null);
     try {
-      // Edits are based on the config read when editing began; refuse to overwrite a newer save.
-      const fresh = await utils.runtimeRateLimits.stopLossConfig.fetch(undefined, { staleTime: 0 });
-      if (!sameConfig(fresh.config as Config, base ?? config)) {
-        setFailure(stopLossErrorMessage({ data: { code: 'CONFLICT' } }, 'save'));
-        return;
-      }
-      const result = await save.mutateAsync(next);
+      const result = await save.mutateAsync({ config: next, expectedVersion });
       setDraft(null);
-      setBase(null);
+      setBaseRevision(null);
       await utils.runtimeRateLimits.stopLossStatus.invalidate();
       setNotice(sameConfig(result.config as Config, next) ? '止损设置已保存（已回读确认）。'
         : '已保存，但回读到的设置和填写的不同，请核对下方显示的当前设置。');
@@ -97,7 +94,7 @@ export function StopLossLimitsForm() {
 
   function reload() {
     setDraft(null);
-    setBase(null);
+    setBaseRevision(null);
     setFailure(null);
     setNotice(null);
     void status.refetch();

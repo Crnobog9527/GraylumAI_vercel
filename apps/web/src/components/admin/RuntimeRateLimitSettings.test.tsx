@@ -23,9 +23,7 @@ beforeAll(async () => {
     window.savedLimits = [];
     window.failSave = false;
     export const trpc = {
-      useUtils: () => ({runtimeRateLimits:{get:{setData:(_,v)=>{data=v;listeners.forEach(fn=>fn())},
-        // A fresh read may carry a pause set elsewhere (window.serverConfig).
-        fetch:async()=>{if(window.holdFetch)await new Promise(r=>{window.releaseFetch=r});data={...data,config:{...data.config,...window.serverConfig}};listeners.forEach(fn=>fn());return data}}}}),
+      useUtils: () => ({runtimeRateLimits:{get:{setData:(_,v)=>{data=v;listeners.forEach(fn=>fn())}}}}),
       runtimeRateLimits: {
         get:{useQuery:()=>({data:useSyncExternalStore(subscribe,()=>data),error:null,refetch:async()=>({data})})},
         update:{useMutation:options=>{
@@ -103,7 +101,6 @@ it('validates, preserves in-flight edits, reads back saves and never implies enf
     await minute.fill('7');
     await page.evaluate('window.failSave=true');
     await save.click();
-    await browserExpect.poll(() => page.evaluate('window.savedLimits.length')).toBe(2);
     await page.evaluate('window.finishSave()');
     await browserExpect(page.getByRole('alert')).toHaveText('保存或回读失败，请重新读取核对；未确认保存成功。');
     await browserExpect(page.getByText('配置已保存并回读；保护仍未接线。')).toHaveCount(0);
@@ -112,7 +109,7 @@ it('validates, preserves in-flight edits, reads back saves and never implies enf
   } finally { await page.close(); }
 }, 15000);
 
-it('shows wired protection, keeps the pause switch elsewhere and never undoes a pause when saving limits', async () => {
+it('shows wired protection, keeps the pause switch elsewhere and saves limits without touching the pause', async () => {
   const { page, errors } = await openCard(true);
   try {
     await browserExpect(page.getByText('已接线：保存后，下一条新消息或新一轮的第一次模型调用就按新配置检查。')).toBeVisible();
@@ -123,24 +120,20 @@ it('shows wired protection, keeps the pause switch elsewhere and never undoes a 
     await browserExpect(page.getByText('暂停设置：未暂停')).toBeVisible();
     // The switch moved to the stop-loss tab, which has a confirm step.
     await browserExpect(page.getByRole('button', {name:/一键暂停|恢复新调用|停止新调用/})).toHaveCount(0);
-    await browserExpect(page.getByText('停止或恢复新调用请到“成本止损”页操作，那里有确认步骤。')).toBeVisible();
+    await browserExpect(page.getByText('停止或恢复新调用只能在“成本止损”页操作', {exact:false})).toBeVisible();
     const minute = page.getByLabel('新消息（每轮消息）：每分钟', {exact:true});
     await minute.fill('9');
-    // Someone paused new calls after this page loaded; saving limits must keep that pause.
-    await page.evaluate('window.serverConfig={stopNewCalls:true}; window.holdFetch=true');
+    // Someone stopped new calls meanwhile; the server keeps that stop when limits are saved.
+    await page.evaluate('window.readBack={stopNewCalls:true}');
     await page.getByRole('button', {name:'保存额度配置'}).click();
-    // While the fresh read is in flight, nothing can be edited or saved twice.
     await browserExpect(minute).toBeDisabled();
-    await browserExpect(page.getByRole('button', {name:'保存中…'})).toBeDisabled();
-    await page.evaluate('window.holdFetch=false; window.releaseFetch()');
-    await browserExpect.poll(() => page.evaluate('window.savedLimits.length')).toBe(1);
     await page.evaluate('window.finishSave()');
-    expect(await page.evaluate('window.savedLimits[0]')).toMatchObject({ admissionPerMinute:9, stopNewCalls:true });
+    // The limits save always sends false, which the server treats as "limits only, never resume".
+    expect(await page.evaluate('window.savedLimits[0]')).toMatchObject({ admissionPerMinute:9, stopNewCalls:false });
     await browserExpect(page.getByText('暂停设置：已暂停新调用')).toBeVisible();
     // Saving limits displays the read-back value, not the submitted one.
     await page.evaluate('window.readBack={admissionPerMinute:7}');
     await page.getByRole('button', {name:'保存额度配置'}).click();
-    await browserExpect.poll(() => page.evaluate('window.savedLimits.length')).toBe(2);
     await page.evaluate('window.finishSave()');
     await browserExpect(page.getByText('配置已保存并回读。', {exact:true})).toBeVisible();
     await browserExpect(minute).toHaveValue('7');
