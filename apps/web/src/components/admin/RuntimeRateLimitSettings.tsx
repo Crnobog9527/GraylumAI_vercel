@@ -7,6 +7,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { TabsContent, TabsTrigger } from '@/components/ui/tabs';
+import { StaleDataNotice } from './stop-loss/StaleDataNotice';
 
 const fields = [
   ['admissionPerMinute', '新消息（每轮消息）：每分钟', 60],
@@ -68,7 +69,8 @@ export function RuntimeRateLimitSettings() {
           模型调用：每轮开始时按这一轮最多可用的调用数一次性预扣（导师 1–2 次，/runtime 3 次），
           实际用得少也不退回。已发生的调用费用不受这些配置改变。
         </p>
-        {view.error ? <div role="alert">
+        {view.error && config && <StaleDataNotice onRetry={() => { void view.refetch(); }} />}
+        {view.error && !config ? <div role="alert">
           无法读取使用额度，请稍后重试。
           <Button onClick={() => { void view.refetch(); }}>重新读取</Button>
         </div> : !config || !current ? <p>读取中…</p> : <>

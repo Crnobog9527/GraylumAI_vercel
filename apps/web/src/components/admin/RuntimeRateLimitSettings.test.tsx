@@ -26,7 +26,7 @@ beforeAll(async () => {
       useUtils: () => ({runtimeRateLimits:{get:{setData:(_,v)=>{data=v;listeners.forEach(fn=>fn())},
         invalidate:async()=>{window.invalidated=(window.invalidated??0)+1}}}}),
       runtimeRateLimits: {
-        get:{useQuery:()=>({data:useSyncExternalStore(subscribe,()=>data),error:null,refetch:async()=>({data})})},
+        get:{useQuery:()=>({data:useSyncExternalStore(subscribe,()=>data),error:window.getError??null,refetch:async()=>({data})})},
         update:{useMutation:options=>{
           const [isPending,setPending]=useState(false),[error,setError]=useState(null);
           return {isPending,error,reset:()=>setError(null),mutate:(input,call)=>{
@@ -69,7 +69,7 @@ beforeAll(async () => {
 }, 30000);
 afterAll(async () => { await browser?.close(); });
 
-async function openCard(enforcement: boolean) {
+async function openCard(enforcement: boolean, getError: unknown = null) {
   const page = await browser.newPage();
   const errors: string[] = [];
   page.on('pageerror', error => errors.push(error.message));
@@ -78,6 +78,7 @@ async function openCard(enforcement: boolean) {
   await page.evaluate(value => {
     (window as unknown as {fixtureEnforcement: unknown}).fixtureEnforcement = value;
   }, {admission:enforcement,calls:enforcement,pause:enforcement});
+  await page.evaluate(value => { (window as unknown as {getError: unknown}).getError = value; }, getError);
   await page.addScriptTag({ content: code });
   return { page, errors };
 }
@@ -142,6 +143,16 @@ it('shows wired protection, keeps the pause switch elsewhere and saves limits wi
     await browserExpect(minute).toHaveValue('7');
     await page.getByLabel('模型调用：每分钟', {exact:true}).fill('2');
     await browserExpect(page.getByText('当前“模型调用：每分钟”低于 3，/runtime 的每一轮都会被拒绝。')).toBeVisible();
+    expect(errors).toEqual([]);
+  } finally { await page.close(); }
+}, 15000);
+
+it('keeps the quota editor when a background re-read fails after data was loaded', async () => {
+  const { page, errors } = await openCard(true, { message: 'x' });
+  try {
+    await browserExpect(page.getByText('最新数据暂时读取失败', {exact:false})).toBeVisible();
+    await browserExpect(page.getByLabel('新消息（每轮消息）：每分钟', {exact:true})).toBeEnabled();
+    await browserExpect(page.getByText('无法读取使用额度，请稍后重试。', {exact:false})).toHaveCount(0);
     expect(errors).toEqual([]);
   } finally { await page.close(); }
 }, 15000);

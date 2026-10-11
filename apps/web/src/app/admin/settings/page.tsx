@@ -19,6 +19,7 @@ import { getSafeErrorMessage } from '@/lib/safe-error-message';
 import AdminSettingsLoadError from '@/components/admin/AdminErrorState';
 import { RuntimeRateLimitSettings, RuntimeRateLimitTabTrigger } from '@/components/admin/RuntimeRateLimitSettings';
 import { RuntimeStopLossSettings, RuntimeStopLossTabTrigger } from '@/components/admin/stop-loss/RuntimeStopLossSettings';
+import { SettingsLoadFailure } from '@/components/admin/stop-loss/SettingsLoadFailure';
 import { MentorBudgetTabContent, MentorBudgetTabTrigger } from '@/components/admin/MentorBudgetSettings';
 import { changedSettings, mergeReadSettings } from './changedSettings';
 import { MembershipPlanPermissions } from '@/components/admin/MembershipPlanPermissions';
@@ -256,10 +257,7 @@ export default function AdminSettingsPage() {
   // Only a failed first load replaces the page; a failed re-read keeps the editors (and their state).
   if (dashboardError && !dashboard) {
     return (
-      <AdminSettingsLoadError
-        error={dashboardError}
-        onRetry={() => { void refetchDashboard(); }}
-      />
+      <SettingsLoadFailure error={dashboardError} onRetry={() => { void refetchDashboard(); }} />
     );
   }
 
