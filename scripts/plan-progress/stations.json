@@ -301,6 +301,10 @@
       ],
       "waitingForOwner": [
         {
+          "task": "PAY-STRIPE-CARD-FALLBACK",
+          "text": "启用前须完成 Stripe 收款的税务核实（Graylum 是卖方）；正式配置另行批准。"
+        },
+        {
           "task": "PAY-WAFFO",
           "text": "等供应商能力核实和最小核心待定事项；商品配置及钱包大额真实付款、退款另行批准。"
         }
