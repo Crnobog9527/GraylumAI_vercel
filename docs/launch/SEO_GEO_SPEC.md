@@ -3,7 +3,7 @@
 > 版本：2026-10-12 第 1 版（规划窗口起草）。
 > 适用：所有不需要登录就能看到的页面（首页、功能页、关键词页、博客、价格页、法律页、About）。登录后的 `/app` 和 `/admin` 一律不索引，不适用第 4–12 节。
 > 以后每个新增或改动公开页的 PR 都必须按本文执行，并在 PR 描述里过第 13 节的检查单。
-> 决定状态：第 2 节（单主机）和第 11 节（博客）是 Owner 2026-10-12 已批准的决定；第 3 节的语言路径、首页核心词和第一批页面**待 Owner 在 A / B 中选择**，两种选项下的规则本文都写清楚，选定前不开工公开页。
+> 决定状态：第 2 节（单主机）、第 3 节（中文优先的语言路径）和第 14 节（博客）是 Owner 2026-10-12 已批准的决定；首页核心词等 Owner 导出中文搜索量后再定（第 3.3 节）。
 > 缩写第一次出现时的解释：DR = 域名权重（Ahrefs 口径，0–100）；KD = 关键词难度（哥飞版，0–100，越低越好）；GSC = Google Search Console；SERP = 谷歌搜索结果第一页；ISR = Next.js 的增量静态再生成。
 
 ## 1. 原则
@@ -29,39 +29,43 @@ Owner 2026-10-12 决定：应用合并到 `www.graylum.com` 单主机，登录�
 
 迁移的技术清单见第 14 节；开发由总控另派，本文不含代码改动。
 
-## 3. 语言与路径（待 Owner 在 A / B 中选择）
+## 3. 语言与路径（已批准：中文优先）
 
-背景：Owner 2026-10-03 决定"主要面向华人中文、也做英文版"；本窗口 2026-10-12 讨论中 Owner 表示美国市场同等重要。两者的差别只在**谁占根路径**，其余规则相同。
+Owner 2026-10-12 在"A 中文优先 / B 英文优先"中选 A（原话「选 A。」）：网站默认中文，简体在根路径，繁体 `/zh-tw`，英文 `/en` 等产品有英文界面后再上；第一批内容先做简体和繁体（繁体竞争松，先出排名）；首页核心词等 Owner 用 Google Ads 规划师导出中文搜索量后再定；英文关键词研究保留为附录 A，作为后备。
 
-### 3.1 两种选项
+### 3.1 路径规则
 
-| 项目 | 选项 A · 中文优先 | 选项 B · 英文优先 |
-| --- | --- | --- |
-| 根路径 `/` | 简体中文首页 | 英文首页 |
-| 简体中文 | `/`（根） | `/zh/...` |
-| 繁体中文 | `/zh-tw/...` | `/zh-tw/...` |
-| 英文 | `/en/...`（有英文界面后再做） | `/`（根） |
-| 日语（将来） | `/ja/...` | `/ja/...` |
-| `x-default` | 指向根（简体） | 指向根（英文） |
-| `<html lang>` 根路径 | `zh-Hans` | `en` |
-| 首页核心词 | 中文词，待规划师数据后在"AI 社媒教练 / 自媒体定位 / 小红书起号"等里定 | 推荐 `social media coach`（月搜 320，KD 49.9，盘面里 DR 20 的首页排第 4）；备选 `ai social media manager`（720，KD 47.1，但盘面是排程工具） |
-| 第一批公开页 | 中文 4–6 页（附录 B 的候选，等搜索量数据定）；英文第一批延后 | 英文 8 页（附录 A 第 1 批）；中文第一批随规划师数据跟上 |
+| 项目 | 规则 |
+| --- | --- |
+| 根路径 `/` | 简体中文首页 |
+| 简体中文页 | 根路径下，不加前缀（`/xiaohongshu-qihao`） |
+| 繁体中文页 | `/zh-tw/...` |
+| 英文页 | `/en/...`，有英文界面后再做；在此之前不建 `/en` 目录，也不写指向它的 hreflang |
+| 日语（将来） | `/ja/...` |
+| `x-default` | 指向根路径（简体） |
+| `<html lang>` | 根路径 `zh-Hans`；`/zh-tw` 下 `zh-Hant`；`/en` 下 `en` |
+| `openGraph.locale` | `zh_CN` / `zh_TW` / `en_US` |
+| sitemap | 一个 `sitemap.xml`，按语言分组，每条带 `alternates` |
 
-两种选项共同的规则：
+共同规则：
 - 不按浏览器语言自动跳转（爬虫会被跳走）；可在页顶放语言提示条。
 - 不用 `?lang=` 参数，不用子域名做语言。
-- 每个有对应语言版本的页都写全 `hreflang`：`zh-Hans`、`zh-Hant`、`en`（有才写）+ `x-default`；不能指向不存在的页。
-- 中文页不是英文页的翻译：词、平台（小红书 / 抖音 / Threads / IG）、第一页对手都不同，各按各的 SERP 写；简体和繁体也各写各的。
-- 简体面向美国、新加坡、马来西亚的大陆背景华人（Google `gl=us`、`hl=zh-CN` 口径）；繁体面向台湾、香港（`gl=tw`）。
+- 每个有对应语言版本的页都写全 `hreflang`：`zh-Hans`、`zh-Hant`（+ 将来的 `en`）+ `x-default`；只在确实有翻译版时写，不能指向不存在的页。
+- 简体和繁体不是互译：词、平台（小红书 / 抖音 vs IG / Threads）、第一页对手都不同，各按各的 SERP 写。简体面向美国、新加坡、马来西亚的大陆背景华人（Google `gl=us`、`hl=zh-CN` 口径）；繁体面向台湾、香港（`gl=tw`）。
+- 英文页上线时同样不是中文页的翻译，按附录 A 的英文词另做。
 
-### 3.2 选定后要改的地方
+### 3.2 第一批公开页
 
-根 layout 的 `lang`、`generateMetadata` 的 `locale`、sitemap 的分语言、首页核心词、第一批页面清单。其余章节不变。
+第一批只做简体和繁体，候选见附录 B：简体 6 页、繁体 7 页，最终取舍和先后顺序在 Owner 导出规划师搜索量后定（剔除月搜 < 50 的，按"量 × 盘面弱度"排序）。在此之前实施任务可以先做与词无关的地基（单主机、元数据组件、sitemap、robots、JSON-LD、About）。
+
+### 3.3 首页核心词
+
+待定。候选来自规划师数据到达后的中文词（方向：定位类"自媒体定位 / 账号定位"、类目类"AI 社媒教练"、平台类"小红书起号"），按哥飞"一个站只做一个核心词"的原则选一个能代表整站的词，所有内页回链它。英文首页词（`social media coach`，附录 A）只在 `/en` 上线时用于英文首页。
 
 ## 4. 地址（URL）规则
 
-1. slug 只用小写字母、数字、连字符，就是目标词本身，例如 `/what-to-post-on-instagram`、`/find-your-niche`。不加日期、分类前缀、`.html`、尾斜杠。
-2. 中文页的 slug 用拼音或英文（`/zh-tw/ig-jingying`、`/zh/xiaohongshu-qihao`），不用汉字（分享时会变成百分号编码）。
+1. slug 只用小写字母、数字、连字符，就是目标词本身，例如 `/zh-tw/ig-jingying`、`/en/find-your-niche`。不加日期、分类前缀、`.html`、尾斜杠。
+2. 中文页的 slug 用拼音或英文（`/xiaohongshu-qihao`、`/zh-tw/ig-jingying`），不用汉字（分享时会变成百分号编码）。
 3. 地址定了不改；必须改时 301 并更新 sitemap 和内链，不留重定向链。
 4. 同一内容只有一个地址：根路径直接渲染首页，不再保留 `/landing` 作为第二地址（`/landing` 301 到 `/`）。
 5. 分页、筛选、排序参数一律 `noindex` 或 canonical 回主地址；`utm_*` 参数不进 canonical。
@@ -74,7 +78,7 @@ Owner 2026-10-12 决定：应用合并到 `www.graylum.com` 单主机，登录�
 | `title` | 核心词放最前；英文 ≤ 60 字符，中文 ≤ 30 个汉字；格式 `核心词 – 一句话承诺 \| Graylum`；首页 `Graylum – <核心词>...` |
 | `description` | 含核心词 + 用户得到什么 + 行动引导；英文 120–155 字符，中文 60–80 字 |
 | `alternates.canonical` | 绝对地址，自己指向自己 |
-| `alternates.languages` | 见第 3 节 hreflang 规则 |
+| `alternates.languages` | 见第 3.1 节 hreflang 规则 |
 | `openGraph` | `title`、`description`、`url`、`siteName: Graylum`、`type: website`（博客 `article`）、`locale`（`zh_CN` / `zh_TW` / `en_US`）、一张 1200×630 图 |
 | `twitter` | `card: summary_large_image` |
 | `robots` | 公开页 `index, follow`；`/app /admin /api /auth` `noindex, nofollow`，响应头和 meta 双保险 |
@@ -148,7 +152,7 @@ sitemap：`app/sitemap.ts` 生成，分语言、含 `lastModified`、只含可�
 AI 搜索引用的来源主要是：① 谷歌/必应里本来就排得上的页面；② 高权威第三方页面里对品牌的描述。所以：
 
 1. 先做好搜索排名，再谈 GEO。
-2. 全站统一一句话定义（出现在首页、About、`Organization.description`、所有第三方目录简介）。英文：`Graylum is an AI social media coach that helps beginners find their positioning, decide what to post each week, and write the content.` 中文版由落地页文案任务定稿后同样固定。
+2. 全站统一一句话定义（出现在首页、About、`Organization.description`、所有第三方目录简介）。中文版由落地页文案任务定稿后固定；英文版（`/en` 上线时用）：`Graylum is an AI social media coach that helps beginners find their positioning, decide what to post each week, and write the content.`
 3. 每页首屏结论段写成"问题 → 直接答案 → 可核对的要点"，用数字、步骤、清单。
 4. 引用可靠来源（平台官方帮助页、公开报告）并标出处。
 5. About 页写清公司（Grayscale Luminary LLC，怀俄明州）、创始人、联系方式；法律页齐全（条款文字由 Owner 用第三方软件生成）。
@@ -171,7 +175,7 @@ AI 搜索引用的来源主要是：① 谷歌/必应里本来就排得上的页
 
 Owner 2026-10-12 决定：博客用仓库内文章实现，不接外部系统。
 
-- 文章是仓库里的 Markdown/MDX 文件，路径 `/blog/<slug>`（中文按第 3 节加语言前缀），由同一个 Next.js 应用静态生成。
+- 文章是仓库里的 Markdown/MDX 文件，路径 `/blog/<slug>`（简体）、`/zh-tw/blog/<slug>`（繁体），由同一个 Next.js 应用静态生成。
 - 每篇文章遵守第 4–10 节（`BlogPosting`、一个 H1、canonical、OG 图）。
 - 文章的任务是给关键词页和产品页引流，不是自己承接核心词。
 - 不加 CMS、数据库表或新服务（AGENTS.md 第 5 节）。
@@ -195,11 +199,11 @@ Owner 2026-10-12 决定：博客用仓库内文章实现，不接外部系统。
 
 ---
 
-## 附录 A · 英文关键词数据（2026-10-12 核实；搜索量 = Google Ads 规划师美国口径 2025-09～2026-08 月均；KD = 哥飞版，10-11/12 计算）
+## 附录 A · 英文关键词数据（后备，`/en` 上线时用；2026-10-12 核实；搜索量 = Google Ads 规划师美国口径 2025-09～2026-08 月均；KD = 哥飞版，10-11/12 计算）
 
-**首页核心词候选**（只在选项 B 下作为首页词；选项 A 下作为英文版首页词）：`social media coach` 320 / KD 49.9（第 4 名 thesocialmediacoach.com.au 是 DR 20 首页，体验分 0）；`ai social media manager` 720 / 47.1（socialbee、ocoya 首页占位，意图偏"替我发帖"）；`ai social media coach` 未收录；`social media strategy for beginners` 10（不用）。
+**英文首页核心词候选**（`/en` 首页用）：`social media coach` 320 / KD 49.9（第 4 名 thesocialmediacoach.com.au 是 DR 20 首页，体验分 0）；`ai social media manager` 720 / 47.1（socialbee、ocoya 首页占位，意图偏"替我发帖"）；`ai social media coach` 未收录；`social media strategy for beginners` 10（不用）。
 
-**第 1 批（8 页）**
+**英文第 1 批（8 页，地址都在 `/en` 下）**
 
 | 地址 | 目标词（合并的同义表达） | 月搜 | KD | 盘面最弱占位 | 功能 |
 | --- | --- | --- | --- | --- | --- |
@@ -218,23 +222,23 @@ Owner 2026-10-12 决定：博客用仓库内文章实现，不接外部系统。
 
 **不做**：instagram captions 67.5；best time to post on instagram 61.1；hook generator 59.1；social media post ideas 55；personal brand statement 50.3；brand voice 67.8；social media strategy template 61.3；brand positioning 61.3；positioning statement 58.5；niche marketing 57.5；content pillars 57.1；content strategy template（意图跑偏）；niche finder 全族（YouTube 数据工具词）；social media scheduler / planner 类目词。
 
-## 附录 B · 中文盘面（无搜索量；哥飞工具不支持中文词；DR 为 2026-10-11 实测）
+## 附录 B · 中文盘面（第一批候选；无搜索量；哥飞工具不支持中文词；DR 为 2026-10-11 实测）
 
 搜索量由 Owner 用 Google Ads 关键字规划师导出（地理位置分别选美国 / 台湾 / 香港 / 新加坡 / 马来西亚；语言选中文简体或繁体；过去 12 个月；下载 CSV）。种子词清单见规划窗口交给 Owner 的 `SEO_GEO_PLAN_2026-10-12.md` 第 6.4 节（不入库）。
 
-**简体候选（gl=us）**
+**简体候选（gl=us；根路径）**
 
 | 地址（建议） | 目标词 | 盘面 | 判断 |
 | --- | --- | --- | --- |
-| `/zh/xiaohongshu-qihao` | 小红书起号 / 小红书新手怎么做 | reditorapp.com DR 20 排第 1、3；yanghao.app DR 2.6；jingpinwen DR 0.8 | 可做 |
-| `/zh/xiaohongshu-wenan-shengchengqi` | 小红书文案生成器 | Kimi、ai.xiaohongshu.live DR 28、reditorapp DR 20、qingsongsha DR 10 | 可做，工具页 |
-| `/zh/zimeiti-zenme-zuo` | 自媒体怎么做 | YouTube 课程、woshipm DR 75、知乎、posty.tw DR 2.1 | 可做；"自媒体"热度在回落 |
-| `/zh/zimeiti-xuanti` | 自媒体选题 | woshipm、B 站、飞书、知乎、Notion 模板 | 可做 |
-| `/zh/geren-ip-dazao` | 个人IP打造 | rogerwustudio DR 0.6 排第 1、36kr、kolr DR 46 | 可做 |
-| `/zh/geren-pinpai` | 个人品牌怎么打造 | woshipm、Shopify 中文、Reddit、sarawithyou DR 3.6 | 中等；相关搜索偏"自创品牌" |
+| `/xiaohongshu-qihao` | 小红书起号 / 小红书新手怎么做 | reditorapp.com DR 20 排第 1、3；yanghao.app DR 2.6；jingpinwen DR 0.8 | 可做 |
+| `/xiaohongshu-wenan-shengchengqi` | 小红书文案生成器 | Kimi、ai.xiaohongshu.live DR 28、reditorapp DR 20、qingsongsha DR 10 | 可做，工具页 |
+| `/zimeiti-zenme-zuo` | 自媒体怎么做 | YouTube 课程、woshipm DR 75、知乎、posty.tw DR 2.1 | 可做；"自媒体"热度在回落 |
+| `/zimeiti-xuanti` | 自媒体选题 | woshipm、B 站、飞书、知乎、Notion 模板 | 可做 |
+| `/geren-ip-dazao` | 个人IP打造 | rogerwustudio DR 0.6 排第 1、36kr、kolr DR 46 | 可做 |
+| `/geren-pinpai` | 个人品牌怎么打造 | woshipm、Shopify 中文、Reddit、sarawithyou DR 3.6 | 中等；相关搜索偏"自创品牌" |
 | 不单独做 | 自媒体定位 | 第一页被解析成"媒体 + 定位"，结果混乱 | 并入其他页的 H2 |
 
-**繁体候选（gl=tw）**
+**繁体候选（gl=tw；`/zh-tw`）**
 
 | 地址（建议） | 目标词 | 盘面 | 判断 |
 | --- | --- | --- | --- |
@@ -252,11 +256,11 @@ Owner 2026-10-12 决定：博客用仓库内文章实现，不接外部系统。
 
 | 阶段 | 时间 | 做什么 | 完成标志 |
 | --- | --- | --- | --- |
-| 0 地基 | 上线前 2–4 周 | 单主机迁移；语言路径 + hreflang；统一元数据 / JSON-LD / sitemap / robots；公开页去 force-dynamic；首页 + 第一批页面；About；OG 图；GSC / Bing 验证 | 全部页面过第 13 节检查单 |
+| 0 地基 | 上线前 2–4 周 | 单主机迁移；语言路径 + hreflang；统一元数据 / JSON-LD / sitemap / robots；公开页去 force-dynamic；中文首页 + 简体、繁体第一批页面；About；OG 图；GSC / Bing 验证 | 全部页面过第 13 节检查单 |
 | 1 收录 | 上线第 1–4 周 | 撤 noindex 和临时 307；提交 sitemap；GSC 每天请求编入索引 ≤ 10 个；AI 目录站 10–20 个；创始人社媒上线帖 | `site:www.graylum.com` 能搜到全部公开页 |
-| 2 铺内页 | 第 5–12 周 | 第 2 批页面；博客每周 1 篇；按"有曝光无点击"改 title；首批外链 20–40 个引用域 | KD < 30 的词进前 30；DR 10–15 |
-| 3 见排名 | 第 4–6 个月 | 复测盘面；补内容和内链；第 3 批里 KD < 45 的词开做；AI 引用月检 | 3–5 个词进前 10；500–2000 访问/月；DR 15–25 |
-| 4 扩张 | 第 7–12 个月 | 第 3 批大词；工具页；按注册转化调整 | 10 个以上词进前 10；2000–8000 访问/月 |
+| 2 铺内页 | 第 5–12 周 | 中文第 2 批页面；博客每周 1 篇；按"有曝光无点击"改 title；首批外链 20–40 个引用域 | KD < 30 的词进前 30；DR 10–15 |
+| 3 见排名 | 第 4–6 个月 | 复测盘面；补内容和内链；第二批中文页；AI 引用月检；视英文界面进度决定 `/en` | 3–5 个词进前 10；500–2000 访问/月；DR 15–25 |
+| 4 扩张 | 第 7–12 个月 | 中文大词和工具页；`/en` 第一批（附录 A）；按注册转化调整 | 10 个以上词进前 10；2000–8000 访问/月 |
 
 依据：哥飞 2023-12-29 群聊"用 6 个月的时间把排名做上去"；社群帖（袁锐钦 2026-04-05）"前 3 个月大部分悄无声息，第 4 个月才有流量"。
 
@@ -264,7 +268,7 @@ Owner 2026-10-12 决定：博客用仓库内文章实现，不接外部系统。
 
 ## 附录 D · 待定与存疑
 
-- 待 Owner 选择：第 3 节 A / B；选定后再定首页核心词和第一批页面。
+- 已定 A（中文优先）；待定：首页核心词和第一批页面的取舍（等规划师中文搜索量）。
 - 公开页免登录试用：暂缓（Owner 2026-10-12）。
 - 中文搜索量：等 Owner 的规划师导出；附录 B 的"可做"只说明竞争弱。
 - 香港繁体词汇未查；日语只预留路径。
