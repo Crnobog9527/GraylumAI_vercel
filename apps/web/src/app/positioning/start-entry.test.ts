@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { expect, it } from "vitest";
-import { readStartEntry, START_TEXT, startEntryHref } from "./start-entry";
+import { readStartEntry, retainedMatches, START_TEXT, startEntryHref } from "./start-entry";
 
 const intent = "11111111-2222-4333-8444-555555555555";
 
@@ -21,4 +21,13 @@ it("ignores other or missing modes and unusable intents", () => {
 it("names the existing-positioning entry without sending the user to the library", () => {
   expect(START_TEXT.manual.action).toBe("我已有定位");
   expect(START_TEXT.manual.title).toBe("核对已有定位");
+});
+
+it("never resumes a retained start of the other kind", () => {
+  expect(retainedMatches("manual", "manual")).toBe(true);
+  expect(retainedMatches("mentor", "manual")).toBe(false);
+  expect(retainedMatches("manual", "mentor")).toBe(false);
+  // A start retained before modes existed was a from-scratch start.
+  expect(retainedMatches(undefined, "mentor")).toBe(true);
+  expect(START_TEXT.manual.otherPending).toContain("恢复上次开始请求");
 });

@@ -10,7 +10,7 @@ import { QueryNotice } from '@/components/opc/query-notice';
 import { WorkspaceFrame } from "@/components/opc/workspace-frame";
 import styles from './start-work.module.css';
 import { WorkComposer, useFreeConversation } from '@/components/opc/work-composer';
-import { readStartEntry, START_TEXT, type StartMode } from './start-entry';
+import { readStartEntry, retainedMatches, START_TEXT, type StartMode } from './start-entry';
 type StartOperation={actorId:string;requestId:string;registration:string;mode:StartMode;businessId:string|null;businessName?:string};
 type StartAccount={projectId:string;platform:string;account:string;businessName:string;strategyDraftId?:string|null;sourceVersionId?:string|null;pendingStrategyDraftId?:string|null;sourceVersion?:number;displayName?:string;profile?:Record<string,{value?:string;label?:string;status?:string}>|null;items:Array<{workItemId:string;sessionId:string;title:string}>};
 const startOperationKey="opc-start-operation";
@@ -18,7 +18,8 @@ export default function PositioningHome() {
   const startLock=useRef(false);
   const autoIntent=useRef<string|null>(null);
   const [directEntry,setDirectEntry]=useState<StartMode|null>(null);
-  useEffect(()=>{setDirectEntry(readStartEntry(location.search)?.mode??null);},[]);
+  // Only a complete entry (mode and intent) auto-starts; anything else shows the ordinary start page.
+  useEffect(()=>{const entry=readStartEntry(location.search);setDirectEntry(entry?.intent?entry.mode:null);},[]);
   const free = useFreeConversation();
   const [skillId,setSkillId]=useState('');
   const catalog = trpc.opc.catalog.useQuery(undefined,{retry:false}),
@@ -64,7 +65,10 @@ export default function PositioningHome() {
     if(!entry||!intentId||autoIntent.current===actorId+intentId)return;
     autoIntent.current=actorId+intentId;
     const raw=sessionStorage.getItem(startOperationKey+':'+actorId);
-    if(raw){try{const op:StartOperation=JSON.parse(raw);if(op.actorId===actorId){void runStart(op);return;}}catch{/* retained error is shown by hydration */}return;}
+    if(raw){try{const op:StartOperation=JSON.parse(raw);if(op.actorId===actorId){
+      // A retained start of the other kind is never resumed as this one: the user recovers it explicitly first.
+      if(!retainedMatches(op.mode,entry.mode)){setError(START_TEXT[entry.mode].otherPending);return;}
+      void runStart(op);return;}}catch{/* retained error is shown by hydration */}return;}
     void runStart({actorId,requestId:intentId,registration:catalog.data[0]!.id,mode:entry.mode,businessId:null});
   },[actorId,catalog.data]);
   const accounts:StartAccount[]=(library.data?.businesses??[]).flatMap((business:{name:string;accounts:Array<Omit<StartAccount,'businessName'>>})=>business.accounts.map(account=>({...account,businessName:business.name})));

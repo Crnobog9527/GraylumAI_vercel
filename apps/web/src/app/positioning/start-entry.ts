@@ -23,10 +23,14 @@ export function readStartEntry(search: string): { mode: StartMode; intent: strin
   return { mode, intent: intent && INTENT.test(intent) ? intent : null };
 }
 
+const OTHER_PENDING = "上次还有一个没完成的开始请求，方式和这次不同。请先点「恢复上次开始请求」完成它，再选择其他方式。";
 export const START_TEXT = {
-  mentor: { title: "开始定位分析", action: "从头分析新定位" },
-  manual: { title: "核对已有定位", action: "我已有定位" },
+  mentor: { title: "开始定位分析", action: "从头分析新定位", otherPending: OTHER_PENDING },
+  manual: { title: "核对已有定位", action: "我已有定位", otherPending: OTHER_PENDING },
 } as const;
+
+/** A retained start may be resumed by an entry only when it is the same kind of start. */
+export const retainedMatches = (retained: StartMode | undefined, chosen: StartMode) => (retained ?? "mentor") === chosen;
 
 /** Shown in a 我已有定位 workspace until the mentor's own opening arrives. */
 export const EXISTING_WELCOME =
