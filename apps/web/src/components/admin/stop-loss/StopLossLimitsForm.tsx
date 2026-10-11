@@ -95,6 +95,8 @@ export function StopLossLimitsForm() {
       const result = await save.mutateAsync({ config: next, expectedVersion });
       setDraft(null);
       setBaseRevision(null);
+      // Show the saved read-back even if the follow-up re-read fails.
+      utils.runtimeRateLimits.stopLossConfig.setData(undefined, result);
       await Promise.all([utils.runtimeRateLimits.stopLossConfig.invalidate(),
         utils.runtimeRateLimits.stopLossStatus.invalidate()]);
       setNotice(sameConfig(result.config as Config, next) ? '止损设置已保存（已回读确认）。'

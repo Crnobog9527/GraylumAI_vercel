@@ -57,7 +57,8 @@ const mock = `
       get:{setData:(_,v)=>{cache.get=typeof v==='function'?v(cache.get):v;notify()},
         invalidate:async()=>{delete cache.get;notify()}},
       stopLossStatus:{invalidate:async()=>{delete cache.stopLossStatus;notify()}},
-      stopLossConfig:{invalidate:async()=>{delete cache.stopLossConfig;notify()}},
+      stopLossConfig:{invalidate:async()=>{if(!window.refetchFail)delete cache.stopLossConfig;notify()},
+        setData:(_,v)=>{cache.stopLossConfig=v;notify()}},
     }}),
     runtimeRateLimits: {
       get:query('get'), stopLossConfig:query('stopLossConfig'), stopLossStatus:query('stopLossStatus'), stopLossAlerts:query('stopLossAlerts'),
@@ -256,6 +257,18 @@ it('sends the revision the edit started from and turns a 409 into a reload promp
     await page.getByRole('button', { name: '保存止损设置' }).click();
     await browserExpect(page.getByText('止损设置已保存（已回读确认）。')).toBeVisible();
     expect((await calls(page)).filter(c => c[0] === 'updateStopLoss').at(-1)?.[1]).toMatchObject({ expectedVersion: 5 });
+    expect(errors).toEqual([]);
+  } finally { await page.close(); }
+}, 20000);
+
+it('shows the saved read-back even when the re-read after saving fails', async () => {
+  const { page, errors } = await open({});
+  try {
+    await page.getByLabel('全站每日上限（美元）').fill('8');
+    await page.evaluate(() => { (window as unknown as { refetchFail: boolean }).refetchFail = true; });
+    await page.getByRole('button', { name: '保存止损设置' }).click();
+    await browserExpect(page.getByText('止损设置已保存（已回读确认）。')).toBeVisible();
+    await browserExpect(page.getByLabel('全站每日上限（美元）')).toHaveValue('8');
     expect(errors).toEqual([]);
   } finally { await page.close(); }
 }, 20000);
