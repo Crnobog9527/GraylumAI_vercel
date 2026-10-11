@@ -25,7 +25,13 @@ const toDraft = (config: Config): Draft => ({
 });
 const sameConfig = (a: Config, b: Config) => JSON.stringify(toDraft(a)) === JSON.stringify(toDraft(b));
 
-function UsageSummary({ config, usage }: { config: Config; usage: { utcDate?: unknown; siteUsd?: unknown } }) {
+type Usage = { utcDate?: unknown; siteUsd?: unknown };
+function UsageSummary({ config, usage }: { config: Config; usage: Usage | null }) {
+  if (!usage) {
+    return <p className="text-sm" role="status" data-testid="stop-loss-usage">
+      今天的实际成本暂时读取失败（会自动重试）；下面的上限设置仍可修改和保存。
+    </p>;
+  }
   const site = typeof usage.siteUsd === 'string' ? usage.siteUsd : null;
   const line = (limit: string | null, label: string) => {
     if (limit === null) return <p>{label}：未设置，不拦截。</p>;
@@ -47,6 +53,9 @@ function UsageSummary({ config, usage }: { config: Config; usage: { utcDate?: un
 /** Daily USD limits, alert thresholds and the notification label; empty = not set. */
 export function StopLossLimitsForm() {
   const utils = trpc.useUtils();
+  // Editable config and revision come from their own query, so a failing usage aggregate
+  // never blocks tightening a cap; the status query only feeds the usage summary.
+  const settings = trpc.runtimeRateLimits.stopLossConfig.useQuery(undefined, STOP_LOSS_QUERY_OPTIONS);
   const status = trpc.runtimeRateLimits.stopLossStatus.useQuery(undefined, STOP_LOSS_QUERY_OPTIONS);
   const save = trpc.runtimeRateLimits.updateStopLoss.useMutation();
   const [draft, setDraft] = useState<Draft | null>(null);
@@ -55,8 +64,8 @@ export function StopLossLimitsForm() {
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [failure, setFailure] = useState<{ text: string; conflict: boolean } | null>(null);
-  const config = status.data?.config as Config | undefined;
-  const revision = status.data?.revision;
+  const config = settings.data?.config as Config | undefined;
+  const revision = settings.data?.revision;
   const current = draft ?? (config ? toDraft(config) : null);
   const parsed = current ? AMOUNT_FIELDS.map(([key]) => [key, parseUsdInput(current[key])] as const) : [];
   const channel = current?.notificationChannel.trim() ?? '';
@@ -85,7 +94,8 @@ export function StopLossLimitsForm() {
       const result = await save.mutateAsync({ config: next, expectedVersion });
       setDraft(null);
       setBaseRevision(null);
-      await utils.runtimeRateLimits.stopLossStatus.invalidate();
+      await Promise.all([utils.runtimeRateLimits.stopLossConfig.invalidate(),
+        utils.runtimeRateLimits.stopLossStatus.invalidate()]);
       setNotice(sameConfig(result.config as Config, next) ? '止损设置已保存（已回读确认）。'
         : '已保存，但回读到的设置和填写的不同，请核对下方显示的当前设置。');
     } catch (error) {
@@ -101,19 +111,20 @@ export function StopLossLimitsForm() {
     setBaseRevision(null);
     setFailure(null);
     setNotice(null);
+    void settings.refetch();
     void status.refetch();
   }
 
   return <section aria-labelledby="stop-loss-limits-title" className="space-y-3 rounded-md border p-4">
     <h3 id="stop-loss-limits-title" className="font-medium">每日美元上限</h3>
     <p className="text-sm">留空表示不设置、不拦截。填 0 表示当天不允许任何新的计费调用。最多 12 位小数。</p>
-    {status.error && config && <StaleDataNotice onRetry={() => { void status.refetch(); }} />}
-    {status.error && !config ? <div role="alert" className="space-y-2">
-      <p>{stopLossErrorMessage(status.error, 'read')}</p>
+    {settings.error && config && <StaleDataNotice onRetry={() => { void settings.refetch(); }} />}
+    {settings.error && !config ? <div role="alert" className="space-y-2">
+      <p>{stopLossErrorMessage(settings.error, 'read')}</p>
       <Button variant="outline" onClick={reload}>重新读取</Button>
     </div> : !config || !current ? <p>读取中…</p> : <>
-      <UsageSummary config={config} usage={status.data?.usage ?? {}} />
-      <p className="text-sm">设置来源：{status.data?.source === 'configured' ? '已保存的设置' : '默认（全部未设置）'}</p>
+      <UsageSummary config={config} usage={status.data ? (status.data.usage as Usage) : status.error ? null : {}} />
+      <p className="text-sm">设置来源：{settings.data?.source === 'configured' ? '已保存的设置' : '默认（全部未设置）'}</p>
       <div className="grid gap-4 sm:grid-cols-2">
         {AMOUNT_FIELDS.map(([key, label, hint]) => {
           const bad = !parseUsdInput(current[key]).ok;
@@ -147,7 +158,7 @@ export function StopLossLimitsForm() {
       {/* A conflict means the draft is based on an old version; other failures keep the draft and
           its base version, so a save that did commit still surfaces as a conflict next time. */}
       {failure.conflict ? <Button variant="outline" onClick={reload}>放弃修改并重新读取</Button>
-        : <Button variant="outline" onClick={() => { setFailure(null); void status.refetch(); }}>重新读取当前设置</Button>}
+        : <Button variant="outline" onClick={() => { setFailure(null); void settings.refetch(); }}>重新读取当前设置</Button>}
     </div>}
   </section>;
 }

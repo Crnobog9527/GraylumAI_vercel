@@ -19,7 +19,7 @@ import { getSafeErrorMessage } from '@/lib/safe-error-message';
 import AdminSettingsLoadError from '@/components/admin/AdminErrorState';
 import { RuntimeRateLimitSettings, RuntimeRateLimitTabTrigger } from '@/components/admin/RuntimeRateLimitSettings';
 import { RuntimeStopLossSettings, RuntimeStopLossTabTrigger } from '@/components/admin/stop-loss/RuntimeStopLossSettings';
-import { SettingsLoadFailure } from '@/components/admin/stop-loss/SettingsLoadFailure';
+import { SettingsLoadFailure, SettingsLoading } from '@/components/admin/stop-loss/SettingsLoadFailure';
 import { MentorBudgetTabContent, MentorBudgetTabTrigger } from '@/components/admin/MentorBudgetSettings';
 import { changedSettings, mergeReadSettings } from './changedSettings';
 import { MembershipPlanPermissions } from '@/components/admin/MembershipPlanPermissions';
@@ -247,11 +247,7 @@ export default function AdminSettingsPage() {
   };
 
   if (isLoading) {
-    return (
-      <div className="flex-1 flex items-center justify-center p-8">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[var(--color-primary)]"></div>
-      </div>
-    );
+    return <SettingsLoading />;
   }
 
   // Only a failed first load replaces the page; a failed re-read keeps the editors (and their state).

@@ -57,9 +57,10 @@ const mock = `
       get:{setData:(_,v)=>{cache.get=typeof v==='function'?v(cache.get):v;notify()},
         invalidate:async()=>{delete cache.get;notify()}},
       stopLossStatus:{invalidate:async()=>{delete cache.stopLossStatus;notify()}},
+      stopLossConfig:{invalidate:async()=>{delete cache.stopLossConfig;notify()}},
     }}),
     runtimeRateLimits: {
-      get:query('get'), stopLossStatus:query('stopLossStatus'), stopLossAlerts:query('stopLossAlerts'),
+      get:query('get'), stopLossConfig:query('stopLossConfig'), stopLossStatus:query('stopLossStatus'), stopLossAlerts:query('stopLossAlerts'),
       // Mirrors the dedicated endpoint: only the flag changes; window.readBack can override the result.
       setStopNewCalls:mutation('setStopNewCalls',input=>{const s=window.server;
         s.limits={...s.limits,stopNewCalls:input.stopped,...window.readBack};return {config:s.limits,source:'configured'}}),
@@ -163,7 +164,7 @@ it('shows friendly errors for a failed toggle and a forbidden read', async () =>
     await browserExpect(page.getByTestId('stop-new-calls-state')).toHaveText('当前状态：正常运行');
   } finally { await page.close(); }
   const denied = { message: 'FORBIDDEN', data: { code: 'FORBIDDEN' } };
-  const forbidden = await open({}, { get: denied, stopLossStatus: denied, stopLossAlerts: denied });
+  const forbidden = await open({}, { get: denied, stopLossConfig: denied, stopLossStatus: denied, stopLossAlerts: denied });
   try {
     await browserExpect(forbidden.page.getByText('只有管理员可以查看和修改成本止损设置。')).toHaveCount(3);
     await browserExpect(forbidden.page.getByRole('button', { name: '停止新调用' })).toHaveCount(0);
@@ -221,7 +222,7 @@ it('keeps the editor and the draft when a background re-read fails', async () =>
     await page.evaluate(() => {
       const w = window as unknown as { refetchFail: boolean; fail: Record<string, unknown> };
       w.refetchFail = true;
-      w.fail = { stopLossStatus: { message: 'x', data: { code: 'SERVICE_UNAVAILABLE' } } };
+      w.fail = { stopLossConfig: { message: 'x', data: { code: 'SERVICE_UNAVAILABLE' } } };
     });
     await page.getByRole('button', { name: '刷新' }).click();
     await browserExpect(page.getByText('最新数据暂时读取失败', { exact: false })).toBeVisible();
@@ -255,6 +256,17 @@ it('sends the revision the edit started from and turns a 409 into a reload promp
     await page.getByRole('button', { name: '保存止损设置' }).click();
     await browserExpect(page.getByText('止损设置已保存（已回读确认）。')).toBeVisible();
     expect((await calls(page)).filter(c => c[0] === 'updateStopLoss').at(-1)?.[1]).toMatchObject({ expectedVersion: 5 });
+    expect(errors).toEqual([]);
+  } finally { await page.close(); }
+}, 20000);
+
+it('keeps the limits editable when only the usage aggregate fails', async () => {
+  const { page, errors } = await open({}, { stopLossStatus: { message: 'x', data: { code: 'SERVICE_UNAVAILABLE' } } });
+  try {
+    await browserExpect(page.getByTestId('stop-loss-usage')).toContainText('今天的实际成本暂时读取失败');
+    await page.getByLabel('全站每日上限（美元）').fill('4');
+    await page.getByRole('button', { name: '保存止损设置' }).click();
+    await browserExpect(page.getByText('止损设置已保存（已回读确认）。')).toBeVisible();
     expect(errors).toEqual([]);
   } finally { await page.close(); }
 }, 20000);

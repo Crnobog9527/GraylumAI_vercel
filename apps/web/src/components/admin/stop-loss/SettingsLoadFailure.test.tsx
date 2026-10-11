@@ -13,7 +13,7 @@ vi.mock('@/trpc/client', () => ({
   },
 }));
 
-import { SettingsLoadFailure } from './SettingsLoadFailure';
+import { SettingsLoadFailure, SettingsLoading } from './SettingsLoadFailure';
 
 describe('settings load failure', () => {
   it('still offers the emergency stop when the settings dashboard cannot load', () => {
@@ -23,6 +23,13 @@ describe('settings load failure', () => {
     expect(markup).toContain('读取系统设置失败，请稍后重试');
     expect(markup).toContain('紧急停止新的模型调用');
     expect(markup).toContain('当前状态：正常运行');
+    expect(markup).toContain('停止新调用');
+  });
+
+  it('offers the emergency stop while the settings dashboard is still loading', () => {
+    const markup = renderToStaticMarkup(createElement(SettingsLoading));
+    expect(markup).toContain('animate-spin');
+    expect(markup).toContain('紧急停止新的模型调用');
     expect(markup).toContain('停止新调用');
   });
 });
