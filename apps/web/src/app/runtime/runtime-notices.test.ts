@@ -88,6 +88,13 @@ it('uses the persisted platform-failure reason after reload', () => {
  expect(notices[0].text).toContain('本轮不扣积分');
 });
 
+it('never claims "not charged" for a round whose cost is still being verified', () => {
+ for (const unavailableReason of ['preflight','provider_history']) {
+  const notices=runtimeTurnNotices(turn({state:'cost_pending',unavailableReason}),ctx());
+  expect(notices.some(notice=>String(notice.text).includes('本轮不扣积分'))).toBe(false);
+ }
+});
+
 it('uses the persisted history reason after reload, ahead of a stale local stop marker', () => {
  for (const context of [ctx(),ctx({userStopped:true}),ctx({gateStop:'stale gate'})]) {
   const notices=runtimeTurnNotices(turn({state:'cancelled',unavailableReason:'provider_history'}),context);

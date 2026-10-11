@@ -39,9 +39,10 @@ export function runtimeTurnNotices(turn: RuntimeTurn, ctx: {
   const notices: ChatNotice[] = [];
   const skipped = organizerSkipped(turn);
   if (turn.primaryBody && !turn.organizerComplete && !skipped) notices.push({ id: id('organizer'), tone: 'status', text: '主回复已保存，附属整理未完成。' });
-  if (turn.unavailableReason === 'provider_history')
+  // Both reasons say "not charged"; only a finished (cancelled) round may show them.
+  if (turn.unavailableReason === 'provider_history' && turn.state === 'cancelled')
     return [{ id: id('history'), tone: 'warning', text: PROVIDER_HISTORY_NOTICE }];
-  if (turn.unavailableReason === 'preflight')
+  if (turn.unavailableReason === 'preflight' && turn.state === 'cancelled')
     return [{ id: id('platform'), tone: 'warning', text: PLATFORM_FAILURE_NOTICE }];
   if (turn.historyOmitted)
     notices.push({ id: id('history-omitted'), tone: 'status', text: HISTORY_OMITTED_NOTICE });

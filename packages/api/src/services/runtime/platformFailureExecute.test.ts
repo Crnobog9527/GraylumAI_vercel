@@ -45,7 +45,8 @@ function round(contractVersion:'bill2.v2'|'bill2.v1',platform:'cancelled'|'cost_
  return {execute,actions};
 }
 
-it.each([['cancelled',{state:'cancelled',unavailable:'provider_history'}],['cost_pending',{state:'cost_pending',unavailable:'provider_history'}]] as const)(
+// A cost-pending round is not refunded yet, so it carries no "not charged" reason.
+it.each([['cancelled',{state:'cancelled',unavailable:'provider_history'}],['cost_pending',{state:'cost_pending'}]] as const)(
  'a PAYG round failing on our side ends through fail_platform (%s) and never interrupts',async(platform,expected)=>{
  const r=round('bill2.v2',platform);
  expect(await r.execute()).toEqual(expected);

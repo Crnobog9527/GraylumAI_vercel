@@ -478,7 +478,8 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
     const ended=await ownerRpc<{state:string}>('runtime_execution',{...args,p_action:'fail_platform',
      p_result:{unavailable_reason:platformReason}}).catch(()=>null);
     if(ended?.state==='cancelled')return {state:'cancelled' as const,unavailable:platformReason};
-    if(ended?.state==='cost_pending')return {state:'cost_pending' as const,unavailable:platformReason};
+    // Not refunded yet: keep the normal cost-verification result, never the "not charged" reason.
+    if(ended?.state==='cost_pending')return {state:'cost_pending' as const};
    }
    await ownerRpc('runtime_execution',{...args,p_action:'interrupt'}).catch(()=>{});
    return {state:'pending' as const,...(capacity?{unavailable:'capacity' as const}:{}),...claimNoticeFields(claimNotice)};

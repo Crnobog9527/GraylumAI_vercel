@@ -9,7 +9,7 @@ DO $migration$
 DECLARE definition text; source_md5 text; patched text;
 BEGIN
  definition:=pg_get_functiondef('public.runtime_execution(uuid,uuid,text,jsonb)'::regprocedure);source_md5:=md5(definition);
- IF source_md5='d27a86a1790e2acc7fb7aedf09373236' THEN RETURN;END IF;
+ IF source_md5='3312aaac174e973ac33c29ff2c75dd20' THEN RETURN;END IF;
  IF source_md5<>'0aff2bcc606bee432509e1eebfcfca43' THEN RAISE EXCEPTION 'PLATFORM_FAILURE_SOURCE_MISMATCH: runtime_execution(uuid,uuid,text,jsonb)';END IF;
  IF (length(definition)-length(replace(definition,$a1$ IF b.paused_reason='user_stop' AND p_action IN ('payg_wait','payg_resume','checkpoint_primary','checkpoint_match','check_latest',
   'fail_before_dispatch','interrupt','owner_cancel','owner_session','owner_tool') THEN$a1$,'')))<>length($a1$ IF b.paused_reason='user_stop' AND p_action IN ('payg_wait','payg_resume','checkpoint_primary','checkpoint_match','check_latest',
@@ -44,8 +44,11 @@ $a3$,$b3$ ELSIF p_action='fail_platform' THEN
     'evidenceRef','runtime:'||e.id||':'||(p_result->>'unavailable_reason'),
     'evidenceHash',encode(sha256(convert_to('runtime:'||e.id||':'||(p_result->>'unavailable_reason'),'UTF8')),'hex')));
    v:=bill2_finalize(p_actor_id,b.id);
+   -- The reason (and its "not charged" notice) is recorded only once the refund is final;
+   -- a cost-pending round keeps the normal cost-verification view until recovery settles it.
    UPDATE runtime_executions SET state=CASE WHEN v->>'state' IN ('settled','refunded') THEN 'cancelled' ELSE 'cost_pending' END,
-    unavailable_reason=coalesce(e.unavailable_reason,p_result->>'unavailable_reason')
+    unavailable_reason=CASE WHEN v->>'state' IN ('settled','refunded')
+     THEN coalesce(e.unavailable_reason,p_result->>'unavailable_reason') ELSE e.unavailable_reason END
    WHERE id=e.id RETURNING * INTO e;
    IF e.state='cancelled' THEN UPDATE runtime_sessions SET active_execution=NULL WHERE id=s.id AND active_execution=e.id;END IF;
   END IF;
@@ -53,6 +56,6 @@ $a3$,$b3$ ELSIF p_action='fail_platform' THEN
 $b3$);
  EXECUTE definition;
  patched:=md5(pg_get_functiondef('public.runtime_execution(uuid,uuid,text,jsonb)'::regprocedure));
- IF patched<>'d27a86a1790e2acc7fb7aedf09373236' THEN RAISE EXCEPTION 'PLATFORM_FAILURE_TARGET_MISMATCH: %',patched;END IF;
+ IF patched<>'3312aaac174e973ac33c29ff2c75dd20' THEN RAISE EXCEPTION 'PLATFORM_FAILURE_TARGET_MISMATCH: %',patched;END IF;
 END $migration$;
 COMMIT;
