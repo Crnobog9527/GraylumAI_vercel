@@ -9,17 +9,16 @@ import { CalendarDays, ChartNoAxesColumnIncreasing, Sparkles, Target, X } from '
 import { QueryNotice } from '@/components/opc/query-notice';
 import { WorkspaceFrame } from "@/components/opc/workspace-frame";
 import styles from './start-work.module.css';
-import { useRouter } from "next/navigation";
 import { WorkComposer, useFreeConversation } from '@/components/opc/work-composer';
-type StartOperation={actorId:string;requestId:string;registration:string;mode:"mentor"|"manual";businessId:string|null;businessName?:string};
+import { readStartEntry, START_TEXT, type StartMode } from './start-entry';
+type StartOperation={actorId:string;requestId:string;registration:string;mode:StartMode;businessId:string|null;businessName?:string};
 type StartAccount={projectId:string;platform:string;account:string;businessName:string;strategyDraftId?:string|null;sourceVersionId?:string|null;pendingStrategyDraftId?:string|null;sourceVersion?:number;displayName?:string;profile?:Record<string,{value?:string;label?:string;status?:string}>|null;items:Array<{workItemId:string;sessionId:string;title:string}>};
 const startOperationKey="opc-start-operation";
 export default function PositioningHome() {
-  const router = useRouter();
   const startLock=useRef(false);
   const autoIntent=useRef<string|null>(null);
-  const [directEntry,setDirectEntry]=useState(false);
-  useEffect(()=>{setDirectEntry(new URL(location.href).searchParams.get("start")==="mentor");},[]);
+  const [directEntry,setDirectEntry]=useState<StartMode|null>(null);
+  useEffect(()=>{setDirectEntry(readStartEntry(location.search)?.mode??null);},[]);
   const free = useFreeConversation();
   const [skillId,setSkillId]=useState('');
   const catalog = trpc.opc.catalog.useQuery(undefined,{retry:false}),
@@ -52,21 +51,21 @@ export default function PositioningHome() {
       sessionStorage.removeItem(key);setPendingStart(null);location.href="/positioning/"+d.draftId;
     } catch { setError("未能建立定位草稿。完整的原开始请求已保留，请恢复该请求。"); } finally {startLock.current=false;}
   }
-  async function begin() {
+  async function begin(mode:StartMode) {
     if(pendingStart){setError("请先恢复上次开始请求；恢复完成后再选择其他业务。");return;}
     const registration = catalog.data?.[0]?.id;
     if (!registration) return;
     if(!actorId)return;
-    await runStart({actorId,requestId:crypto.randomUUID(),registration,mode:"mentor",businessId:null});
+    await runStart({actorId,requestId:crypto.randomUUID(),registration,mode,businessId:null});
   }
   useEffect(()=>{
     if(!actorId||!catalog.data?.length)return;
-    const url=new URL(location.href),intentId=url.searchParams.get('intent');
-    if(url.searchParams.get('start')!=='mentor'||!intentId||!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(intentId)||autoIntent.current===actorId+intentId)return;
+    const entry=readStartEntry(location.search),intentId=entry?.intent;
+    if(!entry||!intentId||autoIntent.current===actorId+intentId)return;
     autoIntent.current=actorId+intentId;
     const raw=sessionStorage.getItem(startOperationKey+':'+actorId);
     if(raw){try{const op:StartOperation=JSON.parse(raw);if(op.actorId===actorId){void runStart(op);return;}}catch{/* retained error is shown by hydration */}return;}
-    void runStart({actorId,requestId:intentId,registration:catalog.data[0]!.id,mode:'mentor',businessId:null});
+    void runStart({actorId,requestId:intentId,registration:catalog.data[0]!.id,mode:entry.mode,businessId:null});
   },[actorId,catalog.data]);
   const accounts:StartAccount[]=(library.data?.businesses??[]).flatMap((business:{name:string;accounts:Array<Omit<StartAccount,'businessName'>>})=>business.accounts.map(account=>({...account,businessName:business.name})));
   const topicAccounts=accounts.flatMap(account=>{
@@ -79,7 +78,7 @@ export default function PositioningHome() {
   });
   function chooseTopics(){setIntent('topics');setShowSource(true);if(!startInput.trim()){const value='请基于当前账号定位，帮我策划下一批选题。';setStartInput(value);sessionStorage.setItem('opc-new-task-input',value);}}
   function choosePosition(){setMethodDialog(true);setIntent('position');setShowSource(false);if(!startInput.trim()){const value='我想梳理一个账号的定位，请从需要确认的问题开始。';setStartInput(value);sessionStorage.setItem('opc-new-task-input',value);}}
-  if(directEntry)return <WorkspaceFrame area="start"><main className={styles.page}><section className={styles.selection} aria-label="正在进入定位流程"><h1>开始定位分析</h1><p role="status">{start.isPending?'正在建立定位草稿…':'正在读取定位方法…'}</p><QueryNotice error={catalog.error} loading={catalog.isPending} label="定位方法" retry={()=>catalog.refetch()}/>{catalog.isSuccess&&!catalog.data?.length&&<p>当前没有已发布的定位方法。</p>}{error&&<p role="alert">{error}</p>}{error&&pendingStart&&<Button disabled={start.isPending} onClick={()=>void runStart(pendingStart)}>恢复上次开始请求</Button>}<Link href="/positioning" onClick={()=>setDirectEntry(false)}>返回对话入口</Link></section></main></WorkspaceFrame>;
+  if(directEntry)return <WorkspaceFrame area="start"><main className={styles.page}><section className={styles.selection} aria-label="正在进入定位流程"><h1>{START_TEXT[directEntry].title}</h1><p role="status">{start.isPending?'正在建立定位草稿…':'正在读取定位方法…'}</p><QueryNotice error={catalog.error} loading={catalog.isPending} label="定位方法" retry={()=>catalog.refetch()}/>{catalog.isSuccess&&!catalog.data?.length&&<p>当前没有已发布的定位方法。</p>}{error&&<p role="alert">{error}</p>}{error&&pendingStart&&<Button disabled={start.isPending} onClick={()=>void runStart(pendingStart)}>恢复上次开始请求</Button>}<Link href="/positioning" onClick={()=>setDirectEntry(null)}>返回对话入口</Link></section></main></WorkspaceFrame>;
   return (
     <WorkspaceFrame area="start"><main className={styles.page}><header className={styles.startTop}><strong>我的增长工作</strong>{workReturn&&<Link href={workReturn}>返回当前工作 →</Link>}</header><div className={styles.content}>
       <header className={styles.hero}><h1>今天，想推进什么？</h1></header>
@@ -101,7 +100,7 @@ export default function PositioningHome() {
       <QueryNotice error={catalog.error} loading={catalog.isPending} label="定位方法" retry={()=>catalog.refetch()}/>
       <QueryNotice error={library.error||list.error} loading={library.isPending||list.isPending} label="账号与资料" retry={()=>Promise.all([library.refetch(),list.refetch()])}/>
       {pendingStart&&!start.isPending&&<section className={styles.selection} aria-label="待恢复的开始请求"><p>上次开始定位的结果尚未确认。先恢复同一请求，避免把草稿绑定到另一个业务。</p><Button onClick={()=>runStart(pendingStart)}>恢复上次开始请求</Button></section>}
-      {methodDialog&&<div className={styles.modalScrim} role="presentation"><section className={styles.methodDialog} role="dialog" aria-modal="true" aria-label="梳理账号定位"><header><h2>梳理账号定位</h2><button autoFocus aria-label="关闭窗口" onClick={()=>setMethodDialog(false)}><X size={17}/></button></header><p>开始新账号的定位分析，或选择一份已有定位继续修改。</p><div className={styles.methodActions}><button disabled={!actorId||!catalog.data?.length||start.isPending||Boolean(pendingStart)} onClick={()=>{setMethodDialog(false);void begin();}}>从头分析新定位</button><button onClick={()=>{setMethodDialog(false);router.push('/library');}}>整理另一份已有定位</button></div></section></div>}
+      {methodDialog&&<div className={styles.modalScrim} role="presentation"><section className={styles.methodDialog} role="dialog" aria-modal="true" aria-label="梳理账号定位"><header><h2>梳理账号定位</h2><button autoFocus aria-label="关闭窗口" onClick={()=>setMethodDialog(false)}><X size={17}/></button></header><p>开始新账号的定位分析；已经有定位的，选「我已有定位」，把它粘贴或描述给导师，再逐步核对确认。</p><div className={styles.methodActions}><button disabled={!actorId||!catalog.data?.length||start.isPending||Boolean(pendingStart)} onClick={()=>{setMethodDialog(false);void begin('mentor');}}>{START_TEXT.mentor.action}</button><button disabled={!actorId||!catalog.data?.length||start.isPending||Boolean(pendingStart)} onClick={()=>{setMethodDialog(false);void begin('manual');}}>{START_TEXT.manual.action}</button></div></section></div>}
       {error && <p role="alert">{error}</p>}
     </div></main></WorkspaceFrame>
   );
