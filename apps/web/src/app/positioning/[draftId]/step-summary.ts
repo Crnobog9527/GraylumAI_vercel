@@ -21,11 +21,23 @@ export function stepSummaryRequest(draftId: string, stepId: string, requestId: s
   return { draftId, stepId, purpose: "mentor", requestId, input: STEP_SUMMARY_INPUT };
 }
 
+type SummaryTurn = {
+  input: string | null; state?: string; body?: string | null; primaryBody?: string | null;
+  completeness?: string; stopped?: boolean; unavailableReason?: string | null;
+};
+
+/** A summary reply the user can actually read: finished, whole, with a body. Anything else may be asked again. */
+export function summaryShown(turn: SummaryTurn) {
+  return isStepSummaryInput(turn.input) && turn.state === "completed" && !turn.stopped && !turn.unavailableReason &&
+    turn.completeness !== "length_limit" && turn.completeness !== "stopped" && Boolean((turn.body ?? turn.primaryBody ?? "").trim());
+}
+
 /**
  * Offer the button once the user has talked about this step in this round, unless the newest turn of the step
- * already is its summary: then the summary card is on screen and a second click would only pay for it again.
+ * is a readable summary: then the summary card is on screen and a second click would only pay for it again.
+ * A summary that was stopped, cut off, refused or failed does not count. While one is running, sending is locked.
  */
-export function offersStepSummary(turns: ReadonlyArray<{ input: string | null }>) {
+export function offersStepSummary(turns: ReadonlyArray<SummaryTurn>) {
   const latest = turns.at(-1);
-  return Boolean(latest) && !isStepSummaryInput(latest!.input) && turns.some(turn => !isOpeningInput(turn.input));
+  return Boolean(latest) && !summaryShown(latest!) && turns.some(turn => !isOpeningInput(turn.input));
 }

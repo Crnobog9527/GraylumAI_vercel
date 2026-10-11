@@ -32,7 +32,7 @@ import { useAutoStepRecovery, useHistoryPolling } from "./use-step-recovery";
 import { useLiveReply } from "./use-live-reply";
 import { ReportEntry } from "./report-panel";
 import { InformationExport } from "./InformationExport";
-import { isStepSummaryInput, offersStepSummary, STEP_SUMMARY_INPUT, STEP_SUMMARY_LABEL, stepSummaryRequest } from "./step-summary";
+import { isStepSummaryInput, offersStepSummary, STEP_SUMMARY_INPUT, STEP_SUMMARY_LABEL, stepSummaryRequest, summaryShown } from "./step-summary";
 import { sameRequest, releaseRejectedAnswer, openingRequest, parseStepEnvelope, type MentorRequest,
   retainExecution, settleEnvelope, TEXT_PROTOCOL, turnResultNotice, type MentorTurn, type MentorExecution } from "./mentor-turn";
 import { openOrganizer, usePaygResume } from "@/lib/use-payg-resume";
@@ -1244,7 +1244,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
                             <span className={resultStyles.agentIdentity}><img src="/graylum-logo.png" alt=""/>
                               {summaryTurn ? "本步小结" : openingTurn ? "导师主动引导" : "导师"}{turnLabel}</span>
                             <MentorMarkdown className={`mt-1 ${resultStyles.messageBody}`} text={reply.text} live={Boolean(live)} result={execution}/>
-                            {summaryTurn && !next && !s.valid && turn?.stepId === step.id && execution.state === "completed" &&
+                            {summaryTurn && !next && !s.valid && turn?.stepId === step.id && summaryShown(execution) &&
                               <p className="mt-2 text-xs text-[var(--text-secondary)]">小结不会自动确认这一步；请在下方确认卡核对后再点确认。</p>}
                           </div>}
                           {/* Answered: gone. Open: docked. Folded: one line. */reply.card && !status.answered && foldedCard === execution.executionId

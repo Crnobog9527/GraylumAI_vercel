@@ -2,7 +2,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { OPENING_INPUT } from "@repo/api/src/shared/opcQuestions";
 import { readFileSync } from "node:fs";
-import { isStepSummaryInput, offersStepSummary, STEP_SUMMARY_INPUT, STEP_SUMMARY_LABEL, stepSummaryRequest } from "./step-summary";
+import { isStepSummaryInput, offersStepSummary, STEP_SUMMARY_INPUT, STEP_SUMMARY_LABEL, stepSummaryRequest, summaryShown } from "./step-summary";
 import { isHostAction, refusedTurn, shownInput } from "./checklist-nudge";
 import { releaseRejectedAnswer } from "./mentor-turn";
 import { admissionMessage } from "./admission-message";
@@ -39,12 +39,24 @@ describe("这一步先到这里 (R16)", () => {
     expect(isHostAction("我想做小红书")).toBe(false);
   });
 
-  it("offers the button after the user has talked in the step, and not right after a summary", () => {
+  it("offers the button after the user has talked in the step, and not right after a readable summary", () => {
+    const shown = { input: STEP_SUMMARY_INPUT, state: "completed", completeness: "complete", body: "本步小结" };
     expect(offersStepSummary([])).toBe(false);
     expect(offersStepSummary([{ input: OPENING_INPUT }])).toBe(false);
     expect(offersStepSummary([{ input: OPENING_INPUT }, { input: "我做职场内容" }])).toBe(true);
-    expect(offersStepSummary([{ input: "我做职场内容" }, { input: STEP_SUMMARY_INPUT }])).toBe(false);
-    expect(offersStepSummary([{ input: STEP_SUMMARY_INPUT }, { input: "补充一下预算" }])).toBe(true);
+    expect(offersStepSummary([{ input: "我做职场内容" }, shown])).toBe(false);
+    expect(offersStepSummary([shown, { input: "补充一下预算" }])).toBe(true);
+  });
+
+  it("offers it again after a summary that was stopped, cut off, refused or failed", () => {
+    const talk = { input: "我做职场内容" };
+    const summary = { input: STEP_SUMMARY_INPUT, state: "completed", completeness: "complete", body: "本步小结" };
+    for (const failed of [{ ...summary, state: "cancelled" }, { ...summary, state: "failed" }, { ...summary, stopped: true },
+      { ...summary, completeness: "length_limit" }, { ...summary, completeness: "stopped" }, { ...summary, body: "" },
+      { ...summary, unavailableReason: "provider_rejected" }])
+      expect(offersStepSummary([talk, failed])).toBe(true);
+    expect(summaryShown({ ...summary, primaryBody: "x", body: null })).toBe(true);
+    expect(summaryShown({ ...summary, input: "我做职场内容" })).toBe(false);
   });
 
   it("puts nothing back into the message box when the server does not admit the click", () => {
