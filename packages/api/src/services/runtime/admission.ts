@@ -280,15 +280,19 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
    }
    const primaryTurns=maxCalls-(attachedOrganizer?1:0)-(searchAllowed?1:0)-(candidates.length?1:0);
    if(primaryTurns<(searchAllowed||input.sources.length||workspaceContext?2:1))throw new Error('RUNTIME_CALL_BUDGET');
-   if(candidates.length)selectRuntimeHistory([],[{role:'user',content:matchingInput(input.input,candidates)}],{instructions:MATCH_INSTRUCTIONS,inputBytes:inputLimit,historyItems:0,toolBytes:0});
-   try{requireCapacity(instructions,Boolean(skillFile));}
-   catch(error){
-    // Splitting only helps when a modest message still fits; otherwise this is a configuration failure (500).
-    if(!(error instanceof Error)||error.message!=='RUNTIME_REQUIRED_CONTEXT_EXCEEDS_CAPACITY')throw error;
-    requireCapacity(instructions,Boolean(skillFile),runtimeScopeInput('x'.repeat(SPLIT_INPUT_BYTES),
-     policy.reportGeneration?undefined:session.scopeMaterial,hostTurnContext));
-    throw new StagingAccessError('RUNTIME_INPUT_TOO_LONG');
-   }
+   // Splitting only helps when a modest message still fits; otherwise this is a configuration failure (500).
+   const refuseLongInput=(check:(text:string)=>void)=>{
+    try{check(input.input);}
+    catch(error){
+     if(!(error instanceof Error)||error.message!=='RUNTIME_REQUIRED_CONTEXT_EXCEEDS_CAPACITY')throw error;
+     check('x'.repeat(SPLIT_INPUT_BYTES));
+     throw new StagingAccessError('RUNTIME_INPUT_TOO_LONG');
+    }
+   };
+   if(candidates.length)refuseLongInput(text=>selectRuntimeHistory([],[{role:'user',content:matchingInput(text,candidates)}],
+    {instructions:MATCH_INSTRUCTIONS,inputBytes:inputLimit,historyItems:0,toolBytes:0}));
+   refuseLongInput(text=>requireCapacity(instructions,Boolean(skillFile),
+    runtimeScopeInput(text,policy.reportGeneration?undefined:session.scopeMaterial,hostTurnContext)));
    // New mentor turns use the interactive format; replays returned before this branch.
    // A host-opened mentor turn (the user has not spoken) never gets a question card.
    const opening=Boolean(mentorStream&&isOpeningInput(input.input));
