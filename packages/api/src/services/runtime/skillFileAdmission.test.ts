@@ -5,6 +5,9 @@ import {packageHash,sha256} from '../skills/loader';
 import {runtimeAdmissionService} from './admission';
 import {runtimeContext} from './runtimeContext';
 import {StagingAccessError,stagingProcedureError} from './stagingErrors';
+import {sourceToolBytes} from './sourceRuntimeTool';
+import {withPrimaryAddenda} from './primaryInstructions';
+import {PROMPT_CACHE_OVERHEAD_BYTES} from './promptCache';
 import {RUNTIME_INPUT_TOO_LONG_MESSAGE} from '../../shared/runtimeInputMessages';
 import {OPENING_INPUT} from '../../shared/opcQuestions';
 vi.mock('./newWorkGate',async original=>({...await original<typeof import('./newWorkGate')>(),
@@ -31,6 +34,7 @@ function fixture(){
   if(name==='runtime_session_context')return {data:{scope:{kind:'positioning_draft',draftId:actor}},error:null};
   if(name==='runtime_admission_replay')return {data:saved,error:null};
   if(name==='runtime_admit'){saved={context:args.p_payload,billing:args.p_billing};return {data:saved,error:null};}
+  if(name==='runtime_workspace_session')return {data:true,error:null};
   throw new Error(name);
  });
  const admin={rpc,from:(table:string)=>{
@@ -120,6 +124,19 @@ it('drops a candidate whose Skill is too large for its own model instead of fail
   .prepare({...f.input,...autoInput,input:'x'.repeat(3000)});
  expect(admitted.context.matching).toBeUndefined();expect(admitted.context.role).toBe('ordinary');
  expect(skill.activations).toBe(1);
+});
+
+it('sizes candidates with the workspace read_source description the executor will send, to the exact byte',async()=>{
+ skill.instructions='S'.repeat(9000);const input='x'.repeat(3000);
+ const admit=async(limit:number)=>{const f=fixture();skill.instructions='S'.repeat(9000);matching.candidates=[autoCandidate(0,limit)];
+  return runtimeAdmissionService(f.user,f.admin,{...f.policy,...autoPolicy,workspaceContext:true,maxCalls:3}).prepare({...f.input,...autoInput,input});};
+ const probe=await admit(31000);
+ expect(probe.context.tools).toEqual(['read_source']);expect(probe.context.matching.candidates).toHaveLength(1);
+ const instructions=withPrimaryAddenda(skill.instructions,{workspaceContext:true,network:'deny'});
+ const required=Buffer.byteLength(JSON.stringify({instructions,messages:[{role:'user',content:input}]}))+1024+
+  sourceToolBytes(['read_source'],true)+(probe.context.promptCache?PROMPT_CACHE_OVERHEAD_BYTES:0);
+ expect((await admit(required)).context.matching.candidates).toHaveLength(1);
+ expect((await admit(required-1)).context.matching).toBeUndefined();
 });
 
 it('refuses before admission when neither a candidate nor the ordinary turn can hold the input',async()=>{

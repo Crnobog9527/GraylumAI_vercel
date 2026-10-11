@@ -24,6 +24,7 @@ import {frozenCallPolicy, type FrozenPaygRun, type FrozenRun} from '../bill2/ser
 import { selectRuntimeHistory, fixtureInputCapacity, runtimeScopeInput } from './context';
 import { activateRuntimeCandidate, discoverRuntimeCandidates, fittingCandidates, matchingInput, MATCH_INSTRUCTIONS } from './matching';
 import { withPrimaryAddenda } from './primaryInstructions';
+import { sourceToolBytes } from './sourceRuntimeTool';
 import { type ReasoningPolicy } from './reasoningPolicy';
 import { admitReasoning } from './reasoningAdmission';
 import type {AnsweredCard} from '../opc/answerCard';
@@ -280,8 +281,11 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
     workspaceContext=!capability.error&&capability.data===true;
    }
    // All dropped: no paid match; the turn is admitted exactly as an ordinary selection.
+   const sourceTools=[...(searchAllowed?['search']:[]),...(input.sources.length||workspaceContext?['read_source']:[])];
+   // The executor sizes a selected Skill with these exact tool descriptions plus the same cache/marker overhead.
    if(candidates.length)candidates=await fittingCandidates(candidates,candidate=>activateRuntimeCandidate(user,admin,candidate),
-    {input:currentInput,inputBytes,toolBytes:admissionToolBytes(false),
+    {input:currentInput,inputBytes,toolBytes:sourceToolBytes(sourceTools,workspaceContext)+
+     (historySelection?.markerReserveBytes??(promptCache?PROMPT_CACHE_OVERHEAD_BYTES:0)),
      instructions:skill=>withPrimaryAddenda(skill,{workspaceContext,network:input.network})});
    const primaryTurns=maxCalls-(attachedOrganizer?1:0)-(searchAllowed?1:0)-(candidates.length?1:0);
    if(primaryTurns<(searchAllowed||input.sources.length||workspaceContext?2:1))throw new Error('RUNTIME_CALL_BUDGET');
@@ -328,7 +332,7 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
     ...(budgets||policy.reportGeneration?{purposeBudget:{purpose,inputBytes,historyItems}}:{}),
     ...(skillFile?{skillFile,skillFileReserve}:{}),
     tools:mentorStream?(opening?[]:[...(stepSummary?[]:[ASK_QUESTION_TOOL]),...(skillFile?['read_skill_file']:[])]):
-     [...(searchAllowed?['search']:[]),...(input.sources.length||workspaceContext?['read_source']:[])],
+     sourceTools,
     maxToolCalls:mentorStream?(opening||stepSummary&&!skillFile?0:1):
      (searchAllowed?1:0)+(workspaceContext?Math.min(2,primaryTurns-1):input.sources.length),
     request,...(policy.answeredCard?{answeredCard:policy.answeredCard}:{}),...(revisionId?{moduleId,skillId,revisionId}:{}),sources:input.sources};
