@@ -7,6 +7,7 @@ import { parseProviderUsage } from '../services/providerUsage';
  */
 
 import { router, protectedProcedure, adminProcedure } from '../trpc';
+import { withRealModelUsed } from '../services/modelIdentity/usageAliases';
 import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
 import { type TokenUsage } from '../types/ai';
@@ -401,11 +402,13 @@ export const aiRouter = router({
           break;
       }
 
-      const { data: stats } = await ctx.supabase
+      const { data: aliasedStats } = await ctx.supabase
         .from('token_stats')
         .select('input_tokens, output_tokens, cached_tokens, total_credits, total_cost_usd, model_used')
         .eq('user_id', ctx.profileId)
         .gte('created_at', startDate.toISOString());
+      // MODEL-IDENTITY-GUARD: token_stats stores aliases; this admin view shows real models.
+      const stats = aliasedStats ? await withRealModelUsed(ctx.supabase, aliasedStats) : aliasedStats;
 
       if (!stats || stats.length === 0) {
         return {
