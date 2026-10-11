@@ -86,7 +86,7 @@ const STOPPED = ['canceling', 'canceled'];
  * leaves a Waffo subscription with no site subscription behind it, so the next period would be charged
  * with nothing delivered. Stop its renewal now and confirm by reading it back; the payment itself stays
  * with manual refund handling. A failure is logged and the daily reconciliation keeps reporting it. */
-async function stopUnmappedRenewal(provider: Provider, waffoOrderId: string) {
+async function stopRenewal(provider: Provider, waffoOrderId: string) {
   try {
     let observed = await provider.cancelSubscription(waffoOrderId);
     if (observed.orderId === waffoOrderId && !STOPPED.includes(observed.status)) observed = await provider.readSubscription(waffoOrderId);
@@ -106,7 +106,7 @@ async function stopUnknownRenewal(db: Db, provider: Provider, payment: WaffoPaym
     || order.storeId !== provider.storeId || order.id !== payment.orderId) return;
   const mapped = await single(db.from('payment_provider_refs').select('subscription_id').eq('object_type', 'subscription')
     .eq('external_id', payment.orderId).eq('channel', 'waffo').eq('merchant_namespace', provider.merchant).eq('mode', 'test').maybeSingle());
-  if (!mapped) await stopUnmappedRenewal(provider, payment.orderId);
+  if (!mapped) await stopRenewal(provider, payment.orderId);
 }
 
 /** Normal path only: first payment and renewal of our own card orders. Every other situation is left
@@ -137,7 +137,21 @@ export async function processWaffoReceipt(db: Db, provider: Provider, receipt: W
     ? await firstPayment(db, provider, receipt, facts)
     : await renewal(db, provider, receipt, facts);
   const outcome = mapped ?? await offsite(db, provider, receipt, facts);
-  // A renewal of a mapped subscription in review was already stopped by its own cancel flow.
-  if (outcome.state === 'review' && (facts.periodNumber === 1 || !mapped)) await stopUnmappedRenewal(provider, facts.waffoOrderId);
+  if (outcome.state !== 'review') return outcome;
+  if (facts.periodNumber === 1 || !mapped || await mappedRenewalStillOpen(db, provider, outcome, facts)) {
+    await stopRenewal(provider, facts.waffoOrderId);
+  }
   return outcome;
+}
+
+/** pay_waffo_renew_subscription records a charge it must not deliver (closed or erasing account, terminated
+ * credit release) as plain review. Unless the customer's own stop is already in its cancel flow, nothing
+ * else stops the next charge. Term conflicts (other reasons) stay manual: they may be a paying subscriber. */
+async function mappedRenewalStillOpen(db: Db, provider: Provider, outcome: ReceiptOutcome, facts: PaymentFacts) {
+  if (outcome.reason !== 'review') return false;
+  const ref = await single(db.from('payment_provider_refs').select('subscription_id').eq('object_type', 'subscription')
+    .eq('external_id', facts.waffoOrderId).eq('channel', 'waffo').eq('merchant_namespace', provider.merchant).eq('mode', 'test').maybeSingle());
+  if (!ref?.subscription_id) return false;
+  const sub = await single(db.from('user_subscriptions').select('method_cancel_requested_at').eq('id', ref.subscription_id).maybeSingle());
+  return Boolean(sub) && !sub!.method_cancel_requested_at;
 }

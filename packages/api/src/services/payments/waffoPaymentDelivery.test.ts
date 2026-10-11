@@ -140,4 +140,18 @@ describe('Waffo renewal stop for undelivered cash', () => {
     expect(await mapped.run()).toEqual({ state: 'review', reason: 'period_not_current' });
     expect(mapped.provider.cancelSubscription).not.toHaveBeenCalled();
   });
+  it('stops a mapped renewal the database refused to deliver, unless the customer already asked to stop or it is a term conflict', async () => {
+    const renewing = payment({ orderId: 'ORD_renewing', periodNumber: 2 }, { id: 'ORD_renewing', currentPeriodNumber: 2,
+      currentPeriodStart: '2026-11-11T05:59:47.000Z', currentPeriodEnd: '2026-12-11T05:59:47.000Z' });
+    const refused = { data: { state: 'review', orderId: 'o-2', refundRequired: true }, error: null };
+    const closed = setup(renewing, refused, { user_subscriptions: [{ id: 'sub-1', method_cancel_requested_at: null }] });
+    expect(await closed.run()).toEqual({ state: 'review', reason: 'review' });
+    expect(closed.provider.cancelSubscription).toHaveBeenCalledWith('ORD_renewing');
+    const stopping = setup(renewing, refused, { user_subscriptions: [{ id: 'sub-1', method_cancel_requested_at: '2026-11-01T00:00:00Z' }] });
+    await stopping.run(); expect(stopping.provider.cancelSubscription).not.toHaveBeenCalled();
+    const conflict = setup(renewing, { data: null, error: { message: 'PAY_WAFFO_RENEW_CONFLICT' } },
+      { user_subscriptions: [{ id: 'sub-1', method_cancel_requested_at: null }] });
+    expect(await conflict.run()).toEqual({ state: 'review', reason: 'pay_waffo_renew_conflict' });
+    expect(conflict.provider.cancelSubscription).not.toHaveBeenCalled();
+  });
 });
