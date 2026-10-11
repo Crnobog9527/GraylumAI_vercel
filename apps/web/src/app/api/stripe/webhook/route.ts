@@ -16,6 +16,7 @@ import {
 } from '@repo/api/src/services/stripeFulfillment';
 import { reportPaymentEvidenceConflict } from '@/lib/payment-alert.mjs';
 import { PAYMENT_EVIDENCE_CONFLICT, stripeWebhookErrorCode } from '@repo/api/src/services/payments/stripeWebhookError';
+import { recoverWalletCheckout } from '@repo/api/src/services/payments/walletWebhook';
 import { logServerError } from '@/lib/server-log';
 
 export const runtime = 'nodejs';
@@ -28,6 +29,10 @@ export async function handleStripeWebhookEvent(
   supabase: ReturnType<typeof createServiceRoleSupabaseClient>,
   event: StripeWebhookEvent,
 ) {
+  if (event.type === 'checkout.session.completed' || event.type === 'checkout.session.async_payment_succeeded'
+    || event.type === 'checkout.session.expired' || event.type === 'checkout.session.async_payment_failed') {
+    if (await recoverWalletCheckout(supabase, getStripeClient(), event.data.object.id, event.type)) return;
+  }
   switch (event.type) {
     case 'checkout.session.completed': {
       const session = await upsertPaymentOrderBySession(supabase, event.data.object, {
