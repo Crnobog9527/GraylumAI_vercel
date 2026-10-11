@@ -10,6 +10,7 @@ import { upgradeCases } from './upgrade.mjs';
 import { transitionCases } from './transitions.mjs';
 import { packageCases } from './packages.mjs';
 import { controlCases } from './controls.mjs';
+import { projectionCases } from './projection.mjs';
 import { deliveryCases } from './delivery.mjs';
 import { POSTGRES_IMAGE } from '../v3/images.mjs';
 import { buildFromFiles, installPgCronStub } from '../baseline/build-from-files.mjs';
@@ -59,6 +60,7 @@ try {
   cases.push(...await calendarCases({admin,service}));
   cases.push(...await controlCases({admin,service,connect}));
   cases.push(...await packageCases({admin,service}));
+  cases.push(...await projectionCases({admin,service}));
   console.log(JSON.stringify({result:'PASS',replay:report,cases}));
 } finally {
   await Promise.all(clients.map(c=>c.query('ROLLBACK').catch(()=>{})));
