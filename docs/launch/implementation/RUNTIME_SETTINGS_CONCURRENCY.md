@@ -6,8 +6,10 @@
 
 - `runtimeRateLimits.setStopNewCalls({ stopped: boolean })`：数据库事务内只改停止字段；
   返回 `{ config, source }` 是该次事务写入结果，不在服务层先读后整份覆盖。
-- `runtimeRateLimits.update(config)`：兼容原参数形状，但忽略输入 `stopNewCalls`，
-  只更新四个次数额度字段。旧额度页面不能清除新设置的停止开关。
+- `runtimeRateLimits.update(config)`：兼容原参数形状。`stopNewCalls: true` 表示停止意图，
+  转到原子停止接口，只设置停止开关，不写随请求携带的额度。`false` 只更新四个次数额度字段，
+  不能清除停止开关；旧页面的一键暂停继续生效。旧协议无法区分恢复意图与过期额度表单，
+  因此恢复调用必须使用专用接口；停止期间旧页面保存额度也只会保持停止，待 #795 接线后分开操作。
 - `runtimeRateLimits.stopLossConfig()`：返回 `{ config, revision, source }`。
   历史配置和未配置状态的 revision 都为 0；config.version=1 仍是结构版本。
 - `runtimeRateLimits.updateStopLoss({ config, expectedVersion: revision })`：必需期望版本。

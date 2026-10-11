@@ -42,9 +42,10 @@ export async function readRuntimeRateLimits(db: SupabaseClient) {
   } catch { return unavailable('invalid'); }
 }
 
-/** Legacy callers still send stopNewCalls; only the four quota fields may be persisted here. */
+/** Legacy true means stop only; false never resumes calls from a stale quota form. */
 export async function saveRuntimeRateLimits(db: SupabaseClient, input: RuntimeRateLimits) {
   const config = runtimeRateLimitsSchema.parse(input);
+  if (config.stopNewCalls) return setStopNewCalls(db, true);
   const limits = {
     admissionPerMinute: config.admissionPerMinute, admissionPer24Hours: config.admissionPer24Hours,
     callsPerMinute: config.callsPerMinute, callsPer24Hours: config.callsPer24Hours,

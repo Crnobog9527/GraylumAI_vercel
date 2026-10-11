@@ -6,15 +6,29 @@ import {
 } from '../services/runtime/rateLimitSettings';
 import { runtimeSettingsHarness as harness } from './runtimeSettingsTestHarness';
 
-it('legacy quota save ignores the caller pause flag and returns the committed quota', async () => {
+it.each([false, true])('legacy pause preserves quotas when already stopped=%s', async stopped => {
   const f = harness('admin');
-  expect(await f.caller.get()).toMatchObject({ source: 'default', config,
-    enforcement: { admission: true, calls: true, pause: true } });
-  const changed = { ...config, admissionPerMinute: 9 };
-  const staleInput = { ...changed, stopNewCalls: true };
-  expect(await f.caller.update(staleInput)).toMatchObject({ source: 'configured', config: changed });
-  expect((await f.caller.get()).config).toEqual(changed);
-  expect(f.writes).toHaveLength(1);
+  const current = { ...config, callsPerMinute: 55, stopNewCalls: stopped };
+  f.stored.set(key, current);
+  // The old button sends a full, possibly stale config with the pause flag flipped to true.
+  const result = await f.caller.update({ ...config, stopNewCalls: true });
+  expect(result).toMatchObject({ source: 'configured', config: { ...current, stopNewCalls: true } });
+  expect((await f.caller.get()).config).toEqual({ ...current, stopNewCalls: true });
+  expect(f.writes).toEqual([{ name: 'runtime_set_stop_new_calls', args: { p_stopped: true } }]);
+});
+it.each([true, false])('legacy pause and stale quota save preserve both intents: pauseFirst=%s', async pauseFirst => {
+  const f = harness('admin');
+  const pause = () => f.caller.update({ ...config, stopNewCalls: true });
+  const quota = () => f.caller.update({ ...config, callsPerMinute: 40 });
+  if (pauseFirst) { await pause(); await quota(); }
+  else { await quota(); await pause(); }
+  expect((await f.caller.get()).config).toEqual({ ...config, callsPerMinute: 40, stopNewCalls: true });
+});
+it('legacy pause fails visibly if the atomic stop write fails', async () => {
+  const rpc = vi.fn(async () => ({ error: { code: 'XX000' }, data: null }));
+  await expect(saveRuntimeRateLimits({ rpc } as never, { ...config, stopNewCalls: true }))
+    .rejects.toMatchObject({ code: 'SERVICE_UNAVAILABLE' });
+  expect(rpc).toHaveBeenCalledExactlyOnceWith('runtime_set_stop_new_calls', { p_stopped: true });
 });
 it.each(['user', 'anonymous'] as const)('denies %s both read and write', async role => {
   const f = harness(role);
