@@ -1,0 +1,59 @@
+{
+  "kind": "LOCAL_SYNTHETIC_NOT_PROVIDER_WEBHOOK",
+  "pr791Head": "d931f0302647dde634facec7bea77b1d6f91176d",
+  "sdk": "0.26.0",
+  "testCases": 6,
+  "results": [
+    {
+      "case": "request signature exact-byte parity (ephemeral fixture key)",
+      "passed": true
+    },
+    {
+      "case": "valid",
+      "pr791": {
+        "accepted": true,
+        "requiresLookup": false
+      },
+      "sdk": {
+        "accepted": true
+      }
+    },
+    {
+      "case": "tampered",
+      "pr791": {
+        "accepted": false
+      },
+      "sdk": {
+        "accepted": false
+      }
+    },
+    {
+      "case": "old46min",
+      "pr791": {
+        "accepted": true,
+        "requiresLookup": true
+      },
+      "sdk": {
+        "accepted": false
+      }
+    },
+    {
+      "case": "future61sec",
+      "pr791": {
+        "accepted": false
+      },
+      "sdk": {
+        "accepted": false
+      }
+    },
+    {
+      "case": "spacedHeader",
+      "pr791": {
+        "accepted": false
+      },
+      "sdk": {
+        "accepted": true
+      }
+    }
+  ]
+}

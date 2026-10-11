@@ -1,0 +1,34 @@
+{
+  "capturedFileAt": "2026-10-11T06:03:49.800201+00:00",
+  "sdkResponse": {
+    "data": {
+      "subscriptionOrders": [
+        {
+          "id": "ORD_0kMpCMwurwRpZDwbgKGoxu",
+          "storeId": "[WAFFO_STORE_ID]",
+          "status": "active",
+          "testMode": true,
+          "orderMerchantExternalId": "graylum-waffo-20261011-annual496",
+          "metadata": "{\"orderId\":\"graylum-waffo-20261011-annual496\"}",
+          "willRenew": true,
+          "isInTrial": false,
+          "billingPeriod": "yearly",
+          "currentPeriodNumber": 1,
+          "currentPeriodStart": "2026-10-11T06:01:36.000Z",
+          "currentPeriodEnd": "2027-10-11T06:01:36.000Z",
+          "canceledAt": null,
+          "createdAt": "2026-10-11T06:00:50.224Z",
+          "updatedAt": "2026-10-11T06:01:38.022Z",
+          "payments": [
+            {
+              "id": "PAY_071PeDItrucBBqpv1ouMnp",
+              "status": "succeeded",
+              "periodNumber": 1
+            }
+          ]
+        }
+      ],
+      "subscriptionOrdersCount": 3
+    }
+  }
+}

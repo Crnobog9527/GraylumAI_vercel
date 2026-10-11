@@ -1,0 +1,14 @@
+{
+  "time": "2026-10-11T06:00:42.516Z",
+  "path": "/v1/actions/subscription-order/cancel-order",
+  "httpStatus": 200,
+  "request": {
+    "orderId": "ORD_1ug9i0Dp6bc09NM9KSVebH"
+  },
+  "response": {
+    "data": {
+      "orderId": "ORD_1ug9i0Dp6bc09NM9KSVebH",
+      "status": "canceling"
+    }
+  }
+}

@@ -1,0 +1,78 @@
+{
+  "time": "2026-10-11T06:00:38.789Z",
+  "path": "/v1/actions/refund-ticket/create-ticket",
+  "httpStatus": 200,
+  "request": {
+    "paymentId": "PAY_0FDFISR4GFv3PBTEO5KP0e",
+    "reason": "Owner-authorized test-mode evidence refund",
+    "requestedAmount": {
+      "amount": "49.00",
+      "currency": "USD"
+    },
+    "refundTicketMerchantExternalId": "graylum-waffo-20261011-refund49"
+  },
+  "response": {
+    "data": {
+      "ticket": {
+        "id": "TKT_2knvdNCFjn5IQbwbBPUDpJ",
+        "type": "refund",
+        "status": "processing",
+        "subjectId": "PAY_0FDFISR4GFv3PBTEO5KP0e",
+        "submitterId": "[REDACTED]",
+        "submitterType": "[REDACTED]",
+        "currentVersionId": "TVER_51ex6CF0xyNS4h9Gewb7A3",
+        "reviewerId": null,
+        "reviewedAt": "2026-10-11T06:00:36.986Z",
+        "reviewNote": null,
+        "rejectReason": null,
+        "executedAt": null,
+        "metadata": {
+          "orderId": "f6b65055-031e-40ef-903e-d3bc2a3d1857",
+          "testMode": true,
+          "orderType": "subscription",
+          "canceledAt": null,
+          "orderStatus": "active",
+          "refundReason": "requested_by_customer",
+          "billingPeriod": "monthly",
+          "currentPeriodEnd": "2026-11-10T05:58:32.000Z",
+          "isAmountMismatch": null,
+          "pspAmountDetails": {
+            "amount": 4900,
+            "currency": "USD",
+            "settlementAmount": 4900,
+            "settlementCurrency": "USD"
+          },
+          "resourcePaymentId": "8f9104fd-2f97-41fc-bb9c-66468882a9a6",
+          "currentPeriodStart": "2026-10-11T05:58:32.000Z",
+          "paymentMethodDetails": {
+            "type": "card",
+            "brand": "visa",
+            "last4": "0110"
+          },
+          "snapshotAmountDetails": {
+            "phase": "special",
+            "total": 4900,
+            "taxName": "None",
+            "taxRate": 0,
+            "currency": "USD",
+            "subtotal": 4900,
+            "taxAmount": 0,
+            "taxCategory": "saas"
+          },
+          "resourceSubscriptionId": "97d75ee6-2b5e-42bd-8e02-28bdc37c8093"
+        },
+        "createdAt": "2026-10-11T06:00:36.891Z",
+        "updatedAt": "2026-10-11T06:00:37.034Z",
+        "versionNumber": 1,
+        "versionData": {
+          "reason": "Owner-authorized test-mode evidence refund",
+          "requestedAmount": {
+            "amount": "49.00",
+            "currency": "USD"
+          }
+        },
+        "refundTicketMerchantExternalId": "graylum-waffo-20261011-refund49"
+      }
+    }
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "name": "@waffo/pancake-ts",
+  "version": "0.26.0",
+  "license": "MIT",
+  "node": ">=20.0.0",
+  "runtimeDependencies": {},
+  "publishedAt": "2026-10-10T06:45:04.439Z",
+  "gitHead": "800e01025473a11b868e7c2f4681dd1f234cff94",
+  "distIntegrity": "sha512-3exK093SGBYmbhEF40jRF+BiCQZRLLThxsADZ3s3vJs/JPDqRSICAmUiIUhu0/gtDe1hB0VzrduLSYRS9YAMhg==",
+  "repository": "https://github.com/waffo-com/waffo-pancake-sdk-ts",
+  "repositoryArchived": false,
+  "repositoryPushedAt": "2026-10-10T06:43:13Z",
+  "openIssuesAtInspection": 0
+}

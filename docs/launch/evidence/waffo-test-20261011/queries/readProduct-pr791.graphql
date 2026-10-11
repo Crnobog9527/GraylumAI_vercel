@@ -1,0 +1,3 @@
+query($storeId: ID!) {
+ store(id: $storeId) { id subscriptionProducts { id status } }
+}

@@ -1,0 +1,23 @@
+{
+  "time": "2026-10-11T05:55:41.636Z",
+  "path": "/v1/actions/checkout/create-session",
+  "httpStatus": 200,
+  "request": {
+    "productId": "PROD_3JKZPZdJtcSdu9dXdNuJQT",
+    "currency": "USD",
+    "buyerEmail": "[REDACTED]",
+    "withTrial": false,
+    "expiresInSeconds": 60,
+    "orderMerchantExternalId": "graylum-waffo-20261011-expired",
+    "metadata": {
+      "orderId": "graylum-waffo-20261011-expired"
+    }
+  },
+  "response": {
+    "data": {
+      "sessionId": "cs_283abba8-86b4-99c4-a56b-aeb1eaaeffff",
+      "checkoutUrl": "[REDACTED_CHECKOUT_URL]",
+      "expiresAt": "2026-10-11T05:56:40.873Z"
+    }
+  }
+}
