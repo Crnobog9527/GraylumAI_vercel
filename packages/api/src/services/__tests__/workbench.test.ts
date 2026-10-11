@@ -82,6 +82,17 @@ describe("workbench browser boundary", () => {
       /resources|references|Capabilities/,
     );
   });
+  it("projects only whether report generation is configured", () => {
+    const manifest = { sections: [{ id: "secret-section" }], resources: ["skills/report.md"], maxCharacters: 12000 };
+    const configured = publicWorkflowSchema.parse({ ...makeWorkflow(2, true), reportGeneration: manifest });
+    expect(configured.reportGeneration).toBe(true);
+    expect(JSON.stringify(configured)).not.toMatch(/secret-section|skills\/report|maxCharacters/);
+    expect(publicWorkflowSchema.parse(makeWorkflow(2, true)).reportGeneration).toBe(false);
+    expect(publicWorkflowSchema.parse({ ...makeWorkflow(2, true), reportGeneration: null }).reportGeneration).toBe(false);
+    // Re-projecting an already projected workflow keeps the flag.
+    expect(publicWorkflowSchema.parse(configured).reportGeneration).toBe(true);
+    expect(publicWorkflowSchema.parse(publicWorkflowSchema.parse(makeWorkflow(2, true))).reportGeneration).toBe(false);
+  });
   it("exports literal confirmed text and never exports unavailable cached content", () => {
     const report = {
       available: true,

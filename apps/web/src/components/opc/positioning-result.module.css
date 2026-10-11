@@ -107,3 +107,5 @@
 .stepNavigation>button:hover:not(:disabled){background:#f7f7f7;border-color:#ccc;color:#262626}
 .stepNavigation>button:disabled{background:#fafafa;color:#aaa;opacity:1}
 @media(max-width:700px){.stepNavigation>button{height:44px;padding:12px 14px}}
+/* 本步小结卡 (R16): stands apart from ordinary replies; more specific than the assistant reset above. */
+.mentorChat [data-message-role=assistant][data-step-summary]{background:var(--bg-secondary);border:1px solid var(--border-primary,#e8e8e8);border-radius:12px;padding:12px 14px}
