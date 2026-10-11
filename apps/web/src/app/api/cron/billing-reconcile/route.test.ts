@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   waffo: vi.fn(),
   waffoClient: vi.fn(),
   closeExpired: vi.fn(),
+  logError: vi.fn(),
 }));
 
 vi.mock('@repo/api/src/services/payments/waffoReconciliation', () => ({ reconcileWaffoPayments: mocks.waffo }));
@@ -35,6 +36,7 @@ vi.mock('@repo/api/src/services', () => ({
     system: {
       cronJob: mocks.cronJob,
     },
+    error: mocks.logError,
   },
 }));
 
@@ -180,6 +182,8 @@ describe('/api/cron/billing-reconcile', () => {
     mocks.waffo.mockRejectedValue(new Error('PAY_WAFFO_PROVIDER_UNAVAILABLE'));
     expect(await (await GET(new Request('https://graylum.test/api/cron/billing-reconcile'))).json())
       .toMatchObject({ success: false, waffo: { findings: [{ kind: 'scan_failed' }] } });
+    expect(mocks.logError).toHaveBeenCalledWith('billing', 'pay_waffo_reconciliation_failed',
+      { code: 'PAY_WAFFO_PROVIDER_UNAVAILABLE', errorName: 'Error' });
     vi.unstubAllEnvs();
   });
 

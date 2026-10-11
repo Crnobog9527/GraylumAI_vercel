@@ -18,8 +18,9 @@ describe('Pancake test operation transport', () => {
     const digest = createHash('sha256').update(init.body).digest('base64');
     const canonical = `POST\n/v1/actions/subscription-order/cancel-order\n${init.headers['X-Timestamp']}\n${digest}`;
     expect(createVerify('RSA-SHA256').update(canonical).verify(keys.publicKey, init.headers['X-Signature'], 'base64')).toBe(true);
-    request.mockRejectedValue(new Error('timeout'));
-    await expect(client.cancelSubscription('ORD_original')).rejects.toThrow('timeout');
+    request.mockRejectedValue(new DOMException('aborted', 'TimeoutError'));
+    await expect(client.cancelSubscription('ORD_original')).rejects.toMatchObject({ message: 'PAY_WAFFO_PROVIDER_UNAVAILABLE',
+      detail: { category: 'timeout', path: '/v1/actions/subscription-order/cancel-order' } });
     expect(request).toHaveBeenCalledTimes(2);
   });
   it('checks product store ownership and fails closed on GraphQL partial errors', async () => {
@@ -65,6 +66,50 @@ describe('Pancake test operation transport', () => {
       request.mockResolvedValue(new Response('{}', { status }));
       await expect(client.createCheckout({}, 'graylum-checkout-fixture')).rejects.toThrow('PROVIDER_UNAVAILABLE');
     }
+  });
+  it('signs with a key pasted as one line with literal \\n, and rejects an unusable key before any request', async () => {
+    const request = vi.fn().mockResolvedValue(Response.json({ data: { orderId: 'ORD_original', status: 'canceling' } }));
+    await createWaffoTestOperationsClient({ ...config, privateKey: config.privateKey.replace(/\n/g, '\\n') }, request)
+      .cancelSubscription('ORD_original');
+    const [, init] = request.mock.calls[0]!;
+    const digest = createHash('sha256').update(init.body).digest('base64');
+    const canonical = `POST\n/v1/actions/subscription-order/cancel-order\n${init.headers['X-Timestamp']}\n${digest}`;
+    expect(createVerify('RSA-SHA256').update(canonical).verify(keys.publicKey, init.headers['X-Signature'], 'base64')).toBe(true);
+    request.mockClear();
+    expect(() => createWaffoTestOperationsClient({ ...config, privateKey: 'pasted-wrong-value' }, request))
+      .toThrow('PAY_WAFFO_TEST_CONFIG_INVALID');
+    expect(request).not.toHaveBeenCalled();
+  });
+  it('classifies provider failures for logs while keeping the control-flow codes', async () => {
+    const request = vi.fn();
+    const client = createWaffoTestOperationsClient(config, request);
+    const cases: [Response | Error, string, Record<string, unknown>][] = [
+      [Response.json({ data: null, errors: [{ message: 'Invalid signature', layer: 'gateway' }] }, { status: 401 }),
+        'PAY_WAFFO_PROVIDER_REJECTED', { category: 'http_status', httpStatus: 401,
+          providerErrors: [{ layer: 'gateway', message: 'Invalid signature' }] }],
+      [new Response('<html>', { status: 502 }), 'PAY_WAFFO_PROVIDER_UNAVAILABLE', { category: 'http_status', httpStatus: 502 }],
+      [new Response('<html>', { status: 200 }), 'PAY_WAFFO_PROVIDER_UNAVAILABLE', { category: 'non_json', httpStatus: 200 }],
+      [Response.json({ data: null, errors: [{ message: 'x'.repeat(500), layer: 'checkout' }] }), 'PAY_WAFFO_PROVIDER_UNAVAILABLE',
+        { category: 'provider_errors', providerErrors: [{ layer: 'checkout', message: 'x'.repeat(200) }] }],
+      [Response.json({ data: null }), 'PAY_WAFFO_PROVIDER_UNAVAILABLE', { category: 'empty_data' }],
+      [Object.assign(new TypeError('fetch failed'), { cause: { code: 'ENOTFOUND' } }), 'PAY_WAFFO_PROVIDER_UNAVAILABLE',
+        { category: 'network', errorCode: 'ENOTFOUND' }],
+    ];
+    for (const [outcome, message, detail] of cases) {
+      if (outcome instanceof Response) request.mockResolvedValueOnce(outcome); else request.mockRejectedValueOnce(outcome);
+      await expect(client.createCheckout({}, 'graylum-checkout-fixture')).rejects.toMatchObject({ message,
+        detail: { path: '/v1/actions/checkout/create-session', ...detail } });
+    }
+  });
+  it('gives checkout creation a longer timeout than reads', async () => {
+    const timeout = vi.spyOn(AbortSignal, 'timeout');
+    const request = vi.fn().mockResolvedValue(Response.json({ data: { sessionId: 'cs_x' } }));
+    const client = createWaffoTestOperationsClient(config, request);
+    await client.createCheckout({}, 'graylum-checkout-fixture');
+    request.mockResolvedValue(Response.json({ data: { orderId: 'ORD_original', status: 'canceling' } }));
+    await client.cancelSubscription('ORD_original');
+    expect(timeout.mock.calls.map(([ms]) => ms)).toEqual([20000, 8000]);
+    timeout.mockRestore();
   });
   it('does not load a provider binding until explicitly enabled in test configuration', () => {
     vi.stubEnv('WAFFO_TEST_OPERATIONS_ENABLED', 'false');

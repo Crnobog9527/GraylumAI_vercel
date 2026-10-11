@@ -38,6 +38,14 @@ describe('Waffo card checkout (normal path)', () => {
     expect(key).toBe(`graylum-checkout-${id}`);
     expect(f.rpc).toHaveBeenCalledWith('pay_waffo_bind_checkout', expect.objectContaining({ p_checkout: sessionId }));
   });
+  it('reports which database step failed after Waffo created the session', async () => {
+    const f = setup(true);
+    f.rpc.mockImplementation((async (fn: string, args: Record<string, unknown>) => (fn === 'pay_waffo_claim_checkout'
+      ? { data: { dispatch: true, request: args.p_request, expiresAt: args.p_expires }, error: null }
+      : { data: null, error: { code: 'P0001', message: 'PAY_WAFFO_CHECKOUT_CONFLICT' } })) as never);
+    await expect(f.run()).rejects.toMatchObject({ message: 'PAY_WAFFO_CHECKOUT_UNAVAILABLE', detail: { category: 'database',
+      stage: 'bind', errorCode: 'P0001', providerErrors: [{ layer: 'database', message: 'PAY_WAFFO_CHECKOUT_CONFLICT' }] } });
+  });
   it('recovers a timed-out create by replaying the stored request with the same key', async () => {
     const f = setup(false);
     await f.run();

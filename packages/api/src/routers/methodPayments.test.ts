@@ -3,6 +3,8 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { inferRouterContext } from '@trpc/server';
 import { router as createTRPCRouter } from '../trpc';
 import { methodPaymentProcedures } from './methodPayments';
+import { logger } from '../lib/logger';
+import { WaffoFailure } from '../services/payments/waffoFailure';
 const mocks = vi.hoisted(() => ({ cancel: vi.fn(), provider: vi.fn(), card: vi.fn(), wallet: vi.fn() }));
 vi.mock('../services/payments/waffoTestOperationsClient', () => ({ getWaffoTestOperationsClient: mocks.provider }));
 vi.mock('../services/payments/waffoCardCheckout', () => ({ createWaffoCardCheckout: mocks.card }));
@@ -98,4 +100,15 @@ it('does not open Stripe wallets through the card test switch', async () => {
     .rejects.toMatchObject({ code: 'SERVICE_UNAVAILABLE' });
   expect(f.from.mock.calls.every(([table]) => table === 'profiles')).toBe(true);
   expect(mocks.wallet).not.toHaveBeenCalled();
+});
+it('logs the secret-free failure reason that the generic 503 hides', async () => {
+  stubStaging();
+  const error = vi.spyOn(logger, 'error').mockImplementation(() => undefined);
+  mocks.card.mockRejectedValueOnce(new WaffoFailure('PAY_WAFFO_PROVIDER_UNAVAILABLE', { category: 'timeout',
+    path: '/v1/actions/checkout/create-session', errorName: 'TimeoutError' }));
+  await expect(fixture('user', settings(true)).caller.methodCheckout(card))
+    .rejects.toMatchObject({ code: 'SERVICE_UNAVAILABLE', message: '暂时无法创建付款，请稍后查看原订单状态' });
+  expect(error).toHaveBeenCalledWith('billing', 'pay_waffo_method_failed', { operation: 'method_checkout', userId, method: 'card',
+    code: 'PAY_WAFFO_PROVIDER_UNAVAILABLE', category: 'timeout', path: '/v1/actions/checkout/create-session', errorName: 'TimeoutError' });
+  error.mockRestore();
 });
