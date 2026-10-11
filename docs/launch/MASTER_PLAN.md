@@ -97,6 +97,13 @@ Owner 原话（2026-10-12，总控窗口对话）：
 - 常见问题中“Graylum 和 ChatGPT 的区别”属于我方主动对比，可以保留；隐私政策按法律列出数据处理方，不在本任务范围。
 - 不能保证百分之百拦截所有越狱，目标是让泄露很难且很少发生。
 
+Owner 补充原话（2026-10-12）：
+
+> 纠正一下，用户只有在 Fusion 这个多模型评审团这个地方可以看到真实的模型品牌和型号选择。  而且，这个身份保护的功能，我希望在后台能有开关，我可以一键控制。
+
+- 例外：Fusion 多模型评审团（及其模型选择）可以向用户显示真实模型品牌和型号；其他所有地方仍按上述规则隐藏。
+- 后台提供一键开关控制身份保护（开启/关闭），默认开启；开关变更记录操作人和时间。
+
 **2026-10-12：系统原因导致回答失败时自动退回本轮积分**
 
 Owner 原话（2026-10-12，总控窗口对话）：
@@ -1549,7 +1556,7 @@ node scripts/plan-progress.mjs --ref origin/staging
 | | EXPERT-CONSULT | 真人专家诊断的预约入口（第 2.1 节第 51 项，[记录 L](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5972732100)、[记录 Q](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5980762284)、[记录 R](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5980780017)）：放在报告末尾、价格页和工作室版联系入口；只面向已有数据基础的账号，卡片写"预约咨询，免费询价"，不写价格；用户填写需求和联系方式，提交后通知 Owner，由 Owner 线下跟进。不做"同意专家查看报告"的授权开关，资料由用户自己导出后发来；授权查看功能上线时不做。咨询费不进产品结账流程（Stripe 或线下收款，税务由 Owner 处理）。联系方式按个人数据处理，接入账号注销和数据保留规则 | PAYWALL（入口位置）、DATA-ERASURE | 高 | 小 / 1–2 | — |
 | | PUBLISH-MONITOR | 方向（Owner 2026-10-04，第 2.1 节第 51、52 项，[记录 Q](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5980762284)）：上线前接入 Post for Me，提供多平台发布和数据监控，海外 9 个平台（TikTok、Instagram、YouTube、Facebook、X、Threads、LinkedIn、Pinterest、Bluesky），用户授权自己的账号。Pro：一键发布 + 自己作品近 30 天数据；Gold：另加对标账号监控、90 天趋势、每周自动复盘；两档都按积分计费、不限条数。**D1 范围变更**：这两项原不在上线范围（第 10 节 D1）。Post for Me 实测和条款核对通过之前，相关功能和说法不上线。验收与交接：[Post for Me 平台、费用、数据窗口与许可待核对项](https://github.com/Crnobog9527/GraylumAI_vercel/issues/716#issuecomment-6038093010)。 | RESEARCH-TOOLS；Post for Me 实测和条款核对（第 52 项）；其余依赖由方案定 | 高 | 待实施方案细化 | — |
 | | LEGACY-CLOSE | 关入口由 #507 提前实施（2026-09-29）：`/chat` 临时跳转 `/positioning`，`/api/ai/stream` 对新请求返回 410，8 处入口改指或禁用；本任务剩余工作是删除旧代码（`/chat` 页面与组件、`/api/ai/stream`、`modelRouter`、`contextManager`、`agentSlice`、旧 `workbench` 接口等；自研内容检查 `contentModerator.ts`、`aiOutputFilter.ts`、`streamingOutput.ts`，以及它们在 `agentSlice` 和旧 `workbench` 生成里的调用，不单独开任务）和功能对照检查记录。旧检查文件随 LEGACY-CLOSE 删除；删除前核实必要的凭证保护和用户数据隔离不受影响，不要求迁移旧的通用 PII 正则过滤。按 Owner 2026-09-29 决定不再提供旧对话只读查看入口（staging 和正式环境都没有真实用户，上线前清空数据），旧链接直接跳到 `/positioning`；旧对话不迁移、不删除 | AC-4 接管自由对话；入口改指（#507）；UI-MODEL、UI-B、UI-C、UI-FINISH 交付；并完成一次功能对照检查（旧 `/chat` 的模型选择、引用、附件和常用操作在新工作区都有对应，或明确记录为不再提供） | 高 | 中 / 3–4 | — |
-| | MODEL-IDENTITY-GUARD | 模型身份保护（第 2.1 节 2026-10-12 决定）：身份指令、身份询问与越狱的输入侧拦截、自我介绍式泄露的输出侧检查、界面与接口去除真实模型名；品牌话术由 Owner 确认，不声称自研。上线前完成。 | RUNTIME-PROD（与在途 runtime 执行改动排队） | 高 | 中 / 3–4 | — |
+| | MODEL-IDENTITY-GUARD | 模型身份保护（第 2.1 节 2026-10-12 决定，Fusion 评审团例外、后台一键开关）：身份指令、身份询问与越狱的输入侧拦截、自我介绍式泄露的输出侧检查、界面与接口去除真实模型名；品牌话术由 Owner 确认，不声称自研。上线前完成。 | RUNTIME-PROD（与在途 runtime 执行改动排队） | 高 | 中 / 3–4 | — |
 | | PAY-STRIPE-CARD-FALLBACK | Stripe 银行卡订阅备选（第 2.1 节 2026-10-11 决定）：与 Waffo 银行卡同价同权益，平时关闭，Waffo 出问题时管理员手动把新的银行卡购买切到 Stripe；不自动故障切换，旧订单保持原渠道；只有确认原 Waffo 订阅已停止续费（已取消并核实或续费失败）后才提醒改绑，Waffo 仍可扣款的照常续费、不提醒。复用现有 Stripe 订阅代码和 PAY-COMMON 订单/回调/积分。税务核实完成前不得启用；测试模式验收，正式配置另获批准。 | PAY-WAFFO 第 2 步 | 高 | 中 / 2–3 | — |
 | | PAY-FOUNDER | 创始社群、展示墙、徽章独立交付，复用 PAY-WAFFO 资格；按第 51 项 Q/R/V 处理公开同意、到期/退款撤销和社群人工办理。运营流程在开工前再定；不并入收款 PR，正式售卖前完成。 | PAY-WAFFO | 高 | 待实施方案细化 | — |
 | | PAY-NOTIFY | 事务邮件提醒独立交付：年付扣款、钱包创始到期、恢复 Pro/拒付后重订，沿第 51 项 X/AB/AD；时间、渠道、费用开工前再定。上线前已定部分须在正式售卖前完成。 | PAY-WAFFO | 高 | 待实施方案细化 | — |
