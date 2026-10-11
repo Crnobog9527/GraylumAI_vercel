@@ -2460,7 +2460,7 @@
   "fn:opc_account_strategy_schema(uuid,uuid)": "cd713756afcf",
   "fn:opc_account_ui_change(uuid,uuid,uuid,bigint,text)": "472f1f7d682d",
   "fn:opc_adopt_topics(uuid,uuid,uuid,bigint,uuid,jsonb,jsonb)": "baad10c4223e",
-  "fn:opc_adopt_topics_with_source(uuid,uuid,uuid,bigint,uuid,jsonb,jsonb,jsonb)": "bf3a12be709a",
+  "fn:opc_adopt_topics_with_source(uuid,uuid,uuid,bigint,uuid,jsonb,jsonb,jsonb)": "ffb91a5bd404",
   "fn:opc_business_context(uuid,uuid,uuid)": "811b8a077f73",
   "fn:opc_capture_apply(uuid,uuid,uuid)": "1bc6636cc043",
   "fn:opc_capture_resolve(uuid,uuid,uuid,text,text,uuid,text,text,integer)": "99b3d9b7c72a",

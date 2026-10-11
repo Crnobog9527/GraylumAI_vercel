@@ -57,3 +57,11 @@ it.each(['OPC_DATA_SOURCE_DENIED','OPC_REQUEST_CONFLICT'])('preserves bounded SQ
   await expect(f.caller.recordContentReaction(event)).rejects.toMatchObject({message:error});
   expect(f.rpc).toHaveBeenCalledTimes(1);
 });
+
+it.each(['OPC_DATA_SOURCE_DENIED','OPC_TOPIC_SOURCE_INVALID','OPC_TOPIC_SOURCE_REQUIRED'])
+('makes permanent topic source refusal actionable for existing clients: %s', async error => {
+  const f = fixture({error});
+  await expect(f.caller.saveTopicDraft({...draft,executionId:id(4)})).rejects.toMatchObject({message:'OPC_SOURCE_DENIED'});
+  await expect(f.caller.adoptTopics({...draft,accounts:[{platform:'x',account:'main',expectedRevision:null}]}))
+    .rejects.toMatchObject({message:'OPC_SOURCE_DENIED'});
+});

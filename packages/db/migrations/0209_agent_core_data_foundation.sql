@@ -141,19 +141,23 @@ BEGIN
    SELECT (x->>'executionId')::uuid INTO eid FROM jsonb_array_elements(p_sources) x WHERE x->>'itemId'=item->>'id';
   ELSIF prior.request_id IS NOT NULL THEN eid:=prior.execution_id;
   ELSE
-   -- Legacy clients are accepted only when durable source records prove one execution.
+   -- The shipped client displays the highest persisted draft version, not all history.
+   -- Bind through that version's immutable request identity; never infer by timestamp.
+   WITH latest AS (
+    SELECT * FROM opc_topic_draft_versions WHERE actor_id=p_actor_id AND draft_id=p_draft_id
+    ORDER BY version DESC LIMIT 1
+   )
    SELECT array_agg(DISTINCT candidate.id) INTO ids FROM (
-    SELECT event.execution_id AS id FROM opc_data_events event
+    SELECT event.execution_id AS id FROM latest v JOIN opc_data_events event ON event.request_id=v.request_id
     WHERE event.actor_id=p_actor_id AND event.project_id=project AND event.source_version_id=p_source_version_id
-     AND event.action='topic_draft' AND EXISTS(SELECT 1 FROM jsonb_array_elements(event.original) o WHERE o->>'id'=item->>'id')
+     AND event.action='topic_draft' AND v.erased_at IS NULL AND v.source_version_id=p_source_version_id
+     AND EXISTS(SELECT 1 FROM jsonb_array_elements(v.body) o WHERE o->>'id'=item->>'id')
     UNION
-    -- The shipped topic client used the execution UUID as its draft-save request UUID.
-    -- Verify the same owned workspace and actual execution output below; never infer by time.
-    SELECT e.id FROM opc_topic_draft_versions v JOIN runtime_executions e ON e.id=v.request_id
+    -- Before R9 the client already used execution UUID as its save request UUID.
+    SELECT e.id FROM latest v JOIN runtime_executions e ON e.id=v.request_id
      JOIN opc_topic_workspaces w ON w.draft_id=v.draft_id AND w.session_id=e.session_id
-    WHERE v.actor_id=p_actor_id AND e.actor_id=p_actor_id AND v.draft_id=p_draft_id
-     AND v.source_version_id=p_source_version_id AND v.erased_at IS NULL AND e.state='completed'
-     AND runtime_history_available(e.id)
+    WHERE e.actor_id=p_actor_id AND v.source_version_id=p_source_version_id
+     AND v.erased_at IS NULL AND e.state='completed' AND runtime_history_available(e.id)
      AND EXISTS(SELECT 1 FROM jsonb_array_elements(v.body) o WHERE o->>'id'=item->>'id')
    ) candidate;
    IF cardinality(ids) IS DISTINCT FROM 1 THEN RAISE EXCEPTION 'OPC_TOPIC_SOURCE_REQUIRED';END IF;

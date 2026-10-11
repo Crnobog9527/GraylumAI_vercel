@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import assert from 'node:assert/strict';
 import {randomUUID} from 'node:crypto';
-import {rpc,fixture,closeAccount} from '../erasure-b2a/cases.mjs';
+import {rpc,fixture,closeAccount,call,evidence,outcome} from '../erasure-b2a/cases.mjs';
 import {runtimeFixture,erase,preview} from '../content-erasure/cases.mjs';
 const count=async(db,a)=>(await db.query('SELECT count(*)::int n FROM opc_data_events WHERE actor_id=$1',[a])).rows[0].n;
 const reaction=(db,f,rid=randomUUID(),action='rewrite',reason='R9_PRIVATE_REASON')=>
@@ -78,18 +78,35 @@ async function testTopics(db,report,legacy=false){
  }
  await assert.rejects(rpc(db,'opc_topic_draft_from_execution',f.actor,d.draft_id,randomUUID(),1,art.version,f.execution,
   JSON.stringify([{...saved,id:randomUUID()}])),/OPC_TOPIC_SOURCE_INVALID/);
+ // Revising a proposal retains its item UUID, but must adopt the newest persisted source.
+ const revised= randomUUID(),revisedSave=legacy?revised:randomUUID();
+ const revisedRun=await rpc(db,'bill2_prepare',f.actor,randomUUID(),f.payload);
+ await db.query(`INSERT INTO runtime_executions(id,actor_id,session_id,request_id,payload,history_revision,state,result,billing_run_id)
+  VALUES($1,$2,$3,$4,'{}',0,'completed',$5,$6)`,
+ [revised,f.actor,f.session,randomUUID(),{kind:'usable_result',body:JSON.stringify([{...original[0],title:'R9_REVISED'}])},revisedRun.id]);
+ await db.query('UPDATE bill2_runs SET session_ref=$2 WHERE id=$1',[revisedRun.id,f.session]);
+ const revisedCall=await call(db,{...f,run:revisedRun.id});
+ await rpc(db,'bill2_record',f.actor,revisedRun.id,revisedCall.id,evidence(revisedCall));
+ await rpc(db,'bill2_close',f.actor,revisedRun.id,'delivered',outcome);
+ await rpc(db,'bill2_finalize',f.actor,revisedRun.id);
+ const revisedBody=JSON.stringify([{...saved,title:'R9_REVISED_USER_EDIT'}]);
+ const revision=legacy
+  ?await rpc(db,'opc_topic_draft_save',f.actor,d.draft_id,revisedSave,1,art.version,revisedBody)
+  :await rpc(db,'opc_topic_draft_from_execution',f.actor,d.draft_id,revisedSave,1,art.version,revised,revisedBody);
+ assert.equal(revision.version,2);
  const adoptId=randomUUID(),accounts=[{platform:account.platform,account:account.account_key,expectedRevision:account.revision}];
  const adopt=()=>rpc(db,'opc_adopt_topics_with_source',f.actor,d.draft_id,adoptId,1,art.version,JSON.stringify([saved]),JSON.stringify(accounts),null);
  await assert.rejects(rpc(db,'opc_adopt_topics_with_source',f.actor,d.draft_id,randomUUID(),1,art.version,
   JSON.stringify([saved]),JSON.stringify(accounts),'[]'),/OPC_TOPIC_SOURCE_INVALID/);
  const adopted=await adopt();assert.ok(adopted.planId);assert.deepEqual(await adopt(),adopted);
  const event=(await db.query("SELECT * FROM opc_data_events WHERE actor_id=$1 AND action='topic_adoption'",[f.actor])).rows[0];
- assert.equal(event.execution_id,f.execution);assert.equal(event.original.title,'R9_AI_ORIGINAL');
+ assert.equal(event.execution_id,revised);assert.equal(event.original.title,'R9_REVISED');
  assert.equal(event.adopted.title,'R9_USER_EDIT');assert.ok(event.target_project_id);
  await erase(db,f);
+ await erase(db,{...f,execution:revised});
  assert.equal(await count(db,f.actor),0);
  assert.equal((await db.query('SELECT body FROM opc_topic_draft_versions WHERE request_id=$1',[saveId])).rows[0].body,null);
  assert.equal((await db.query('SELECT brief FROM opc_items WHERE work_item_id=$1',[event.target_project_id])).rows[0].brief,'R9_AI_BRIEF');
  await assert.rejects(adopt(),/OPC_TOPIC_SOURCE|OPC_DATA_SOURCE/);
- report.checks.push((legacy?'legacy request/execution binding: ':'new snapshot binding: ')+'topic source server extraction, user edits distinct, foreign IDs denied, adoption and replay, D7 removes source copies but preserves saved work');
+ report.checks.push((legacy?'legacy request/execution binding: ':'new snapshot binding: ')+'revision with same item ID adopts newest persisted source, user edits distinct, foreign IDs denied, adoption and replay, D7 removes source copies but preserves saved work');
 }
