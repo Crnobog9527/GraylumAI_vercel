@@ -1,0 +1,15 @@
+{
+  "capturedFileAt": "2026-10-11T11:08:57Z",
+  "sdkResponse": {
+    "data": {
+      "store": {
+        "id": "[WAFFO_STORE_ID]",
+        "status": "active",
+        "prodEnabled": false,
+        "isLive": false,
+        "payinEnable": true
+      },
+      "storeWebhooksCount": 0
+    }
+  }
+}
