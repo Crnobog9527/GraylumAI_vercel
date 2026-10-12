@@ -21,7 +21,7 @@ Owner 2026-10-12 决定：应用合并到 `www.graylum.com` 单主机，登录�
 | 规则 | 内容 |
 | --- | --- |
 | 正式主机 | 只有 `https://www.graylum.com` |
-| 其他主机 | `graylum.com`、`app.graylum.com`、`http://` 一律 301 到对应的 www 地址；`app.graylum.com/x` → `www.graylum.com/app/x`，重定向长期保留 |
+| 其他主机 | `graylum.com`、`app.graylum.com`、`http://` 一律 301 到 www。`app.graylum.com` 上**只有搬进 `/app` 的界面路由**加前缀（`app.graylum.com/positioning` → `www.graylum.com/app/positioning`）；`/auth/*`、`/api/*`、`/admin/*`、`/_next/*` 保持原路径只换主机（`app.graylum.com/auth/callback` → `www.graylum.com/auth/callback`），在途的登录链接和支付回调不能落到不存在的 `/app/auth`、`/app/api`。重定向长期保留 |
 | 登录后页面 | 全部在 `/app/...`；`/admin/...` 保持；`/api/...`、`/auth/callback` 位置不变 |
 | 索引范围 | `/app`、`/admin`、`/api`、`/auth` 永远 `noindex`（响应头 + robots Disallow），不受 `SITE_INDEXING` 开关影响；开关只控制公开页 |
 | Cookie | 单主机后登录 Cookie 改为 host-only，不再用 `.graylum.com` 共享域 |
@@ -188,7 +188,7 @@ Owner 2026-10-12 决定：博客用仓库内文章实现，不接外部系统。
 | `apps/web/src/lib/site-config.ts` | `PUBLIC_SITE_HOSTS / SHARED_COOKIE_HOSTS / DEFAULT_AUTH_APP_URL / normalizeAppOrigin` 简化为单主机；Cookie 改 host-only；`buildAuthHref / buildAppHref` 加 `/app` | 登录态 |
 | `apps/web/src/lib/public-paths.ts` | 公开为默认，`/app` `/admin` 需登录 | 权限 |
 | 路由目录 | `positioning / runtime / profile / library / marketplace / workbench / login / register / verify-email / forgot-password / reset-password` 移到 `src/app/app/`；全仓约 45 处内链、21 个文件改前缀（不含测试） | 面广 |
-| `next.config.ts` | `redirects()` 加 `has: host = app.graylum.com` 的 301；`X-Robots-Tag noindex` 改为只对 `/app` `/admin` `/api` `/auth` | ordinary |
+| `next.config.ts` | `redirects()` 加 `has: host = app.graylum.com` 的 301：界面路由加 `/app` 前缀，`/auth` `/api` `/admin` `/_next` 只换主机不加前缀（第 2 节）；`X-Robots-Tag noindex` 改为只对 `/app` `/admin` `/api` `/auth` | ordinary |
 | 环境变量 | `NEXT_PUBLIC_APP_URL`、`NEXT_PUBLIC_AUTH_APP_URL` = `https://www.graylum.com` | 正式环境改值属 AGENTS §1 |
 | 支付回调 | `waffoCheckout.ts`、`stripeCheckoutIntent.ts` 的 successUrl 从请求 origin 拼，自动跟随；Waffo / Stripe 后台 webhook 主机要改（路径不变） | 正式环境属 §1；staging 由 AI 改 |
 | Supabase Auth | Site URL 改 www；Redirect URLs 加 `https://www.graylum.com/**`、删 app 域；邮件模板不改；Google OAuth 不改 | 正式环境属 §1；staging 由 AI 改 |
@@ -203,18 +203,18 @@ Owner 2026-10-12 决定：博客用仓库内文章实现，不接外部系统。
 
 **英文首页核心词候选**（`/en` 首页用）：`social media coach` 320 / KD 49.9（第 4 名 thesocialmediacoach.com.au 是 DR 20 首页，体验分 0）；`ai social media manager` 720 / 47.1（socialbee、ocoya 首页占位，意图偏"替我发帖"）；`ai social media coach` 未收录；`social media strategy for beginners` 10（不用）。
 
-**英文第 1 批（8 页，地址都在 `/en` 下）**
+**英文第 1 批（8 页，地址在 `/en` 下；`/en` 上线前这些地址不存在，不写进 sitemap 或 hreflang）**
 
 | 地址 | 目标词（合并的同义表达） | 月搜 | KD | 盘面最弱占位 | 功能 |
 | --- | --- | --- | --- | --- | --- |
-| `/what-to-post-on-instagram` | what to post on instagram（+ what should i post on instagram 170） | 880 | 26.9（品牌词口径） | 第 3 名 DR 8 | 选题 |
-| `/what-to-post` | what to post（+ what to post on social media 70） | 170，近半年涨到 390 | 18.7 | 第 2 名 DR 8 | 选题总页 |
-| `/how-to-become-a-content-creator` | how to become a content creator with no experience（远期升级 how to become a content creator 2900 / 45.8） | 260 | 15 | 第 3 名 DR 1、第 10 名 DR 2 | 定位 |
-| `/social-media-strategy-for-small-business` | social media strategy for small business | 110 | 16.5 | 第 8 名 DR 8；出价 $3.4–19 | 定位 |
-| `/how-to-grow-on-instagram` | how to grow on instagram | 590 | 27.7 | 第 1 名 reddit 帖；第 7 名 DR 27 | 策略 |
-| `/find-your-niche` | find your niche + finding your niche + how to find your niche | 320+170+260 | 35.9 / 32 / 37.9 | 第 4 名 DR 17 | 定位 |
-| `/content-pillar-examples` | content pillar examples | 320 | 28.1 | 第 7 名 DR 33 | 选题 |
-| `/personal-brand-coach` | personal brand coach + personal branding coach | 110+140 | 27.6 / 34.5 | 第 2 名 DR 2 | 转化页 |
+| `/en/what-to-post-on-instagram` | what to post on instagram（+ what should i post on instagram 170） | 880 | 26.9（品牌词口径） | 第 3 名 DR 8 | 选题 |
+| `/en/what-to-post` | what to post（+ what to post on social media 70） | 170，近半年涨到 390 | 18.7 | 第 2 名 DR 8 | 选题总页 |
+| `/en/how-to-become-a-content-creator` | how to become a content creator with no experience（远期升级 how to become a content creator 2900 / 45.8） | 260 | 15 | 第 3 名 DR 1、第 10 名 DR 2 | 定位 |
+| `/en/social-media-strategy-for-small-business` | social media strategy for small business | 110 | 16.5 | 第 8 名 DR 8；出价 $3.4–19 | 定位 |
+| `/en/how-to-grow-on-instagram` | how to grow on instagram | 590 | 27.7 | 第 1 名 reddit 帖；第 7 名 DR 27 | 策略 |
+| `/en/find-your-niche` | find your niche + finding your niche + how to find your niche | 320+170+260 | 35.9 / 32 / 37.9 | 第 4 名 DR 17 | 定位 |
+| `/en/content-pillar-examples` | content pillar examples | 320 | 28.1 | 第 7 名 DR 33 | 选题 |
+| `/en/personal-brand-coach` | personal brand coach + personal branding coach | 110+140 | 27.6 / 34.5 | 第 2 名 DR 2 | 转化页 |
 
 **第 2 批（上线后 6–12 周）**：personal brand strategy（+ personal branding strategy）210+110 / 31.2；how to grow on tiktok 390 / 36.9（品牌词口径）；what to post on tiktok 480 / 39；what to post on facebook 140 / 32.3；how to get followers on instagram 4400 / 37.3；how to monetize social media 170 / 36.8；instagram growth strategy 720（波动大）/ 23.8；social media content strategy 390 / 41.4。
 
