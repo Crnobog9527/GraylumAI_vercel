@@ -135,9 +135,14 @@ try {
   assert.equal(restored.model_used, 'anthropic/claude-test');
   assert.equal(restored.metadata.pricing.providerModel, 'google/gemini-x');
   assert.equal(restored.metadata.modelId, 'google/gemini-x');
+  // Review P1: recovery walks the whole JSON; only the two documented counter labels stay normalised.
+  const restored11 = (await c.query('SELECT model_used,metadata FROM token_stats WHERE input_tokens=11')).rows[0];
+  assert.equal(restored11.model_used, 'google/gemini-2.5-flash');
+  assert.deepEqual(restored11.metadata, { ...legacyMeta, count_source: 'provider_usage', preflight_count_source: 'provider_usage' });
+  assert.doesNotMatch(JSON.stringify((await c.query('SELECT metadata FROM token_stats')).rows), /"m_[0-9a-f]{16}"/);
   await c.query(read(migrationPath));
   assert.match((await c.query('SELECT model_used FROM token_stats WHERE input_tokens=7')).rows[0].model_used, alias);
-  report.checks.push('rollback restores real strings from the map; re-applying 0217 aliases them again');
+  report.checks.push('rollback restores every aliased value at any depth (only the two documented counter labels stay normalised); re-applying 0217 aliases them again');
 
   console.log(JSON.stringify(report, null, 2));
 } finally { await db.close(); }

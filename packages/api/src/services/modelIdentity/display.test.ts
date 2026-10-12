@@ -7,20 +7,20 @@ const models = [
   { id: 'b2', name: 'Gemini 3.8 Flash', model_id: 'google/gemini-3.8-flash', provider: 'google' },
 ];
 
-it('switch on: only opaque ids and A/B labels leave the server', () => {
-  const result = publicModelChoices(models, { guardEnabled: true, surface: 'user' });
+it('only opaque ids and A/B labels leave the server', () => {
+  const result = publicModelChoices(models, { surface: 'user' });
   expect(result).toEqual([{ id: 'a1', label: '模型 A' }, { id: 'b2', label: '模型 B' }]);
   expect(JSON.stringify(result)).not.toMatch(/claude|gemini|anthropic|google/i);
 });
 
-it('switch off: label is the admin-entered name, technical id and provider still omitted', () => {
-  const result = publicModelChoices(models, { guardEnabled: false, surface: 'user' });
-  expect(result).toEqual([{ id: 'a1', label: 'claude-sonnet-5.5' }, { id: 'b2', label: 'Gemini 3.8 Flash' }]);
-  expect(JSON.stringify(result)).not.toMatch(/anthropic\/|google\/|"provider"|model_id/);
+it('the response type has no switch input: real names never reach users outside Fusion (review P1)', () => {
+  // @ts-expect-error the guard switch must not influence server-browser data
+  publicModelChoices(models, { guardEnabled: false, surface: 'user' });
+  expect(JSON.stringify(publicModelChoices(models, { surface: 'user' }))).not.toMatch(/claude|gemini/i);
 });
 
-it('Fusion review is the explicit whitelist and shows real names even when the switch is on', () => {
-  expect(publicModelChoices(models, { guardEnabled: true, surface: FUSION_REVIEW_SURFACE }).map(m => m.label))
+it('Fusion review is the explicit whitelist and shows real names', () => {
+  expect(publicModelChoices(models, { surface: FUSION_REVIEW_SURFACE }).map(m => m.label))
     .toEqual(['claude-sonnet-5.5', 'Gemini 3.8 Flash']);
 });
 

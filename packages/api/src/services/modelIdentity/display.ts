@@ -2,9 +2,9 @@
 /**
  * MODEL-IDENTITY-GUARD layer 4: what a user-facing response may say about a model.
  *
- * Responses carry only the opaque ai_models.id and a display label, never model_id,
- * provider or route tags. With the switch on the label is "模型 A/B/C…" in list order;
- * with it off (Owner 2026-10-12) the label is the administrator-entered ai_models.name.
+ * Responses carry only the opaque ai_models.id and a "模型 A/B/C…" label in list order, never
+ * a real name, model_id, provider or route tag. Owner 2026-10-12: hiding real names in
+ * server-browser data always applies, whatever the switch (the switch governs layers 1-3).
  *
  * Whitelist: the Fusion multi-model review panel (评审团) may always show real names.
  * A Fusion procedure must pass FUSION_REVIEW_SURFACE explicitly; nothing else may.
@@ -17,7 +17,7 @@ export function modelAlias(index: number) {
 }
 
 export function publicModelChoices(models: ReadonlyArray<{ id: string; name: string }>,
-  options: { guardEnabled: boolean; surface: ModelSurface }) {
-  const real = options.surface === FUSION_REVIEW_SURFACE || !options.guardEnabled;
+  options: { surface: ModelSurface }) {
+  const real = options.surface === FUSION_REVIEW_SURFACE;
   return models.map((model, index) => ({ id: model.id, label: real ? model.name : modelAlias(index) }));
 }
