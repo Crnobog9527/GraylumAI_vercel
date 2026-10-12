@@ -33,18 +33,12 @@ export const APP_SEGMENTS = new Set(['about', 'acceptable-use', 'access-denied',
   'skills', 'stream', 'stripe', 'terms', 'tickets', 'topics', 'transactions', 'trpc', 'tutorials', 'upload', 'users',
   'verify-email', 'waffo', 'webhook', 'workbench', 'zh-tw', 'zimeiti-jingying', 'zimeiti-kecheng',
   '_next', 'static', 'chunks', 'app', 'pages', 'css', 'media']);
-const TRPC_PROCEDURES = /^[a-zA-Z][a-zA-Z0-9]*(?:\.[a-zA-Z][a-zA-Z0-9]*)+(?:,[a-zA-Z][a-zA-Z0-9]*(?:\.[a-zA-Z][a-zA-Z0-9]*)+)*$/;
 const OWN_HOST = /(^|\.)graylum\.com$|\.vercel\.app$|^localhost$|^127\.0\.0\.1$/;
-const BUNDLE_FILE = /^[A-Za-z0-9_.-]+\.(?:js|mjs|cjs|css|map)$/;
 
+/** Only listed static segments survive. tRPC procedure names and bundle file names come from the
+ * request, so they are templated like any other value (`:param`). */
 function templatePath(path: string): string {
-  const segments = path.split('/');
-  return segments.map((segment, index) => {
-    if (segment === '' || APP_SEGMENTS.has(segment)) return segment;
-    if (segments[index - 1] === 'trpc' && TRPC_PROCEDURES.test(segment)) return segment;
-    if (index === segments.length - 1 && segments.includes('_next') && BUNDLE_FILE.test(segment)) return segment;
-    return ':param';
-  }).join('/');
+  return path.split('/').map((segment) => (segment === '' || APP_SEGMENTS.has(segment) ? segment : ':param')).join('/');
 }
 
 /**
@@ -65,7 +59,7 @@ export function scrubUrl(value: string): string {
   return method ? method.trim() : '[text]';
 }
 
-/** Code locations keep their file and line; bundle URLs lose queries. */
+/** Code locations (stack frames, debug images) come from the build, not the request; they only lose queries. */
 function scrubFrameFile(value: string): string {
   return value.replace(/[?#][\s\S]*$/, '');
 }
@@ -150,6 +144,16 @@ function scrubCommon(event: Event): Event {
 
 export function scrubErrorEvent(event: ErrorEvent): ErrorEvent {
   const out = scrubCommon(event) as ErrorEvent;
+  // Debug ids let uploaded source maps match minified frames; they identify build files, not people.
+  const images = event.debug_meta?.images;
+  if (Array.isArray(images)) {
+    out.debug_meta = { images: images.map((image) => {
+      const kept = pick(image, ['type', 'debug_id']) ?? {};
+      const file = (image as unknown as AnyRecord).code_file;
+      if (typeof file === 'string') kept.code_file = scrubFrameFile(file);
+      return kept;
+    }) as unknown as NonNullable<ErrorEvent['debug_meta']>['images'] };
+  }
   if (event.exception?.values) {
     out.exception = { values: event.exception.values.map((exception) => ({
       type: exception.type,

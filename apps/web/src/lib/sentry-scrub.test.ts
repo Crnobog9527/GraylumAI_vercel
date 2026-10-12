@@ -35,10 +35,10 @@ describe('sentry allowlist scrub', () => {
       .toBe('https://auth-staging.graylum.com/positioning/:param');
     expect(scrubUrl('GET /positioning/LiLeiPrivatePlan')).toBe('GET /positioning/:param');
     expect(scrubUrl('/api/trpc/payments.createCheckout,admin.searchUsers?input=%7B%22q%22%3A%22lilei%22%7D'))
-      .toBe('/api/trpc/payments.createCheckout,admin.searchUsers');
+      .toBe('/api/trpc/:param');
+    expect(scrubUrl('/api/trpc/LiLei.PrivatePlan')).toBe('/api/trpc/:param');
+    expect(scrubUrl('/_next/static/chunks/LiLeiPrivatePlan.js')).toBe('/_next/static/chunks/:param');
     expect(scrubUrl('GET https://api.stripe.com/v1/subscriptions/sub_1PqR2sT3uVwXyZ')).toBe('GET https://api.stripe.com');
-    expect(scrubUrl('https://auth-staging.graylum.com/_next/static/chunks/main-abc123.js?v=1'))
-      .toBe('https://auth-staging.graylum.com/_next/static/chunks/main-abc123.js');
     expect(scrubUrl('李雷的计划')).toBe('[text]');
   });
 
@@ -56,6 +56,7 @@ describe('sentry allowlist scrub', () => {
       exception: { values: [{ type: 'Error', value: `Profile ${ID} rejected a@b.co`,
         mechanism: { type: 'generic', handled: true, data: { x: 1 } },
         stacktrace: { frames: [{ filename: 'app:///_next/static/chunks/a.js?v=1', function: 'save', lineno: 3, vars: { input: 'secret' } }] } }] },
+      debug_meta: { images: [{ type: 'sourcemap', code_file: 'app:///_next/static/chunks/a.js?v=1', debug_id: 'd-1', extra: 'x' }] },
       breadcrumbs: [{ category: 'console', message: 'user typed: secret' },
         { category: 'fetch', level: 'info', data: { method: 'GET', url: '/positioning/LiLeiPrivatePlan?q=1', status_code: 200, body: 'x' } }],
     } as unknown as ErrorEvent;
@@ -67,6 +68,7 @@ describe('sentry allowlist scrub', () => {
       message: '[text]', logentry: { message: '[text]' }, tags: { runtime: 'node' },
       contexts: { trace: { trace_id: 't', span_id: 's' }, os: { name: 'macOS', version: '15' } },
       breadcrumbs: [{ category: 'fetch', level: 'info', data: { method: 'GET', status_code: 200, url: '/positioning/:param' } }],
+      debug_meta: { images: [{ type: 'sourcemap', debug_id: 'd-1', code_file: 'app:///_next/static/chunks/a.js' }] },
       exception: { values: [{ type: 'Error', value: '[text]', mechanism: { type: 'generic', handled: true },
         stacktrace: { frames: [{ function: 'save', lineno: 3, filename: 'app:///_next/static/chunks/a.js', abs_path: undefined }] } }] },
     });
