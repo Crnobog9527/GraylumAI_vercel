@@ -54,7 +54,8 @@
 | `charge.dispute.funds_withdrawn` / `funds_reinstated` | 在资金流水里各记一行（金额、时间、结算交易编号，按事件编号去重），不改冻结 |
 | `charge.dispute.closed`（`won` / `lost` / `warning_closed`） | 记结果并告警；冻结和停续费还没做的先补做；**冻结保持**，等管理员处理：赢了由管理员点"撤回冻结"（本任务提供），输了的扣回等 CHARGEBACK（上线前由 Owner 人工按记录 Z/AC 处理） |
 
-- 去重：拒付记录按 Stripe 拒付编号唯一；每个动作按"拒付编号 + 动作"做幂等键（沿用 `credit_transactions.idempotency_key` 的做法），重复或乱序到达不会冻两次。
+- 去重分两层：**事件**按 Stripe 事件编号 `event.id` 去重（同一拒付的多次 `updated` 是不同事件，都会被处理），并保存每个拒付最后合并到的事件时间，
+  用于单调合并；**副作用**（冻结、停续费、告警）按"拒付编号 + 动作"做幂等键（沿用 `credit_transactions.idempotency_key` 的做法），重复或乱序到达不会冻两次。
   任何一个拒付事件先到，都会先补建记录并执行"确保已冻结、已停续费"这一步（已做过就跳过），不依赖 `created` 一定送达。
 - 串行化：拒付处理和这笔付款的发放（首次付款、续费）在**同一个付款编号**上用同一把锁——事务开头按 Stripe 付款编号取
   `pg_advisory_xact_lock`。锁键必须两边一致：一律先把各自手上的编号（拒付给的 charge、续费给的 invoice、首次付款给的结账会话）
@@ -142,14 +143,14 @@ PAY-WAFFO 方案原定每天用 GraphQL `chargebacks` 查询，但：Waffo 已�
 
 ### 4.7 新表
 
-`payment_disputes`：`id`、`provider`、`provider_dispute_id`（唯一）、`provider_charge_id`、`provider_payment_intent_id`、`provider_invoice_id`（能取到的都存；付款级锁、付款回调认领和每日重查都用这几个编号对上，不靠金额）、`order_id`、`subscription_id`、`amount`、`currency`、`reason`、`status`、
+`payment_disputes`：`id`、`provider`、`provider_dispute_id`（和 `merchant_namespace`、`mode` 一起唯一）、`merchant_namespace`、`mode`、`payment_key`（规范付款键 = 命名空间 + 模式 + PaymentIntent 编号，加索引；付款级锁、付款回调认领、每日重查都只用它）、`provider_charge_id`、`provider_payment_intent_id`、`provider_invoice_id`（原始编号留作核对）、`last_event_at`（单调合并用）、`order_id`、`subscription_id`、`amount`、`currency`、`reason`、`status`、
 `evidence_due_by`、`opened_at`、`closed_at`、`outcome`、`freeze_state`（冻结中 / 已撤回 / 已被退款取代）、`renewal_stop_state`。
 资金动作另记一张流水 `payment_dispute_fund_events`（每个事件一行）：拒付编号、动作（被银行扣回 / 返还）、金额、币种、发生时间、
 Stripe 的结算交易编号和事件编号（唯一，防重复）。`funds_withdrawn` 和 `funds_reinstated` 都写这里，不覆盖拒付主记录，三年后仍能说清钱是怎么走的。
 **为什么要新表**（AGENTS 第 5 节）：现在没有任何地方记拒付；冻结要能撤回，就必须有一条能对上"冻了谁、冻了多少、撤回没有"的记录。
 这是账务记录，按 3 年保留，只存白名单字段（不存原始事件全文、不存原因描述以外的自由文本）。
 - **到期清理**：两张表加入账务记录的 3 年到期清理（从交易年度结束起算，和其他账务记录一起做，按 2026-10-12 决定这项清理在上线后实施）；
-  先删资金流水、再删拒付主记录；还没结案的拒付不删，结案后再按 3 年算。
+  先删资金流水、再删拒付主记录；还没结案的拒付只是暂停删除，结案后仍按原来的交易年度期限算（已经过期的就在下一次清理时删），不重新起算 3 年。
 - **注销**：两张表只有内部编号、金额、时间和 Stripe 编号，没有个人内容，注销时按账务记录保留（和 `payment_orders` 同样处理）；
   PR-D1 同时把这两张表加进 DATA-ERASURE 的财务字段白名单（文档同步）。
 
@@ -180,7 +181,8 @@ Stripe 的结算交易编号和事件编号（唯一，防重复）。`funds_wit
 - **并发**：拒付和续费发票（`invoice.paid`）、拒付和 Link 代退款（`charge.refunded`）同时到达 → 不重复扣、不漏冻，按 4.5 的结果；
   用户正在消耗积分时同时冻结、同时撤回 → 冻结量等于当时真实剩余、撤回不会还回已消耗的部分，余额前后能对上。
 - **在途调用**：调用先预扣（绑定到这个来源）→ 拒付冻结 → 调用失败退回 / 少扣结算 → 退回的积分回到原来源并计入冻结额，其他来源不变、总数对得上。
-- **到期清理**：把时间推过 3 年 → 已结案的两张表记录按先流水后主记录的顺序被删除；未结案的保留。
+- **到期清理**：把时间推过 3 年 → 已结案的两张表记录按先流水后主记录的顺序被删除；未结案的保留；原期限已过才结案的，结案后下一次清理就删（不重新起算）。
+- **多次 `updated`**：同一拒付先后收到两条不同的 `updated` → 两条都处理，最后状态和截止日以较新的一条为准。
 - **资金扣回和返还**：先 `funds_withdrawn` 再 `funds_reinstated`、重复投递 → 流水里正好两行，金额和时间都对。
 - **外部退款和拒付同时处理**：`charge.refunded` 和 `charge.dispute.created` 同时到达 → 无论先后，同一笔积分只收回一次，冻结账目和退款扣回不重复。
 - **退款中途来拒付**：人工退款已 claim → 拒付到达 → Stripe 退款失败、执行恢复 → 来源变成冻结中，积分不变成可用。
