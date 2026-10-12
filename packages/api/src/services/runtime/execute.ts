@@ -250,7 +250,8 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
    const tools:RuntimeTool[]=context.tools.map(name=>name===ASK_QUESTION_TOOL?questionTool:
     name==='read_skill_file'?executionSkillFileTool({executionId,moduleId:context.moduleId!,binding:context.skillFile!,
      rpc:ownerRpc,assertCanStart:()=>budget.assertCanStart(),timing:budget.timing,onRefused:()=>{terminalReplyFailure=true;}}):
-    name===READ_HISTORY_TOOL?executionMentorHistoryTool({executionId,rpc:ownerRpc,assertCanStart:()=>budget.assertCanStart()}):
+    name===READ_HISTORY_TOOL?executionMentorHistoryTool({executionId,rpc:ownerRpc,assertCanStart:()=>budget.assertCanStart(),
+     onRefused:()=>{terminalReplyFailure=true;}}):
     sourceRuntimeTool({name,context,args,ownerRpc,budget,execution,exchange}));
    const toolBytes=(agentTurn?(grounded?groundedCardToolBytes():askQuestionToolBytes(fiveFields)):
     Buffer.byteLength(JSON.stringify(tools.map(t=>({name:t.name,description:t.description})))))+

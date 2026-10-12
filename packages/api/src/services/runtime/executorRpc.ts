@@ -37,6 +37,12 @@ export function executorRpc(options:{database:SessionRpc;actor:()=>Promise<strin
      'RUNTIME_SKILL_FILE_TOO_LARGE','RUNTIME_SKILL_FILE_CONFLICT','RUNTIME_TOOL_DENIED','RUNTIME_TOOL_CLOSED',
      'RUNTIME_TOOL_LIMIT','RUNTIME_TOOL_CONFLICT','RUNTIME_TOOL_RESULT_CONFLICT'].includes(message))
     throw new Error('RUNTIME_SKILL_FILE_REFUSED');
+   // R4: a permanent history-read refusal ends the turn; any other failure stays retryable.
+   if((name==='runtime_tool'&&args.p_name===READ_HISTORY_TOOL||name==='runtime_mentor_history')&&
+    typeof message==='string'&&['RUNTIME_MENTOR_HISTORY_DENIED','RUNTIME_MENTOR_HISTORY_REVOKED',
+     'RUNTIME_MENTOR_HISTORY_TOO_LARGE','RUNTIME_TOOL_DENIED','RUNTIME_TOOL_CLOSED','RUNTIME_TOOL_LIMIT',
+     'RUNTIME_TOOL_CONFLICT','RUNTIME_TOOL_RESULT_CONFLICT'].includes(message))
+    throw new Error('RUNTIME_HISTORY_READ_REFUSED');
    if(message==='RUNTIME_TEST_WINDOW_DENIED'||message==='RUNTIME_TEST_MODEL_DENIED')
     throw new StagingAccessError('RUNTIME_PRICE_CONFIGURATION_PENDING');
    if(typeof message==='string'&&['RUNTIME_RESUME_CONFLICT','RUNTIME_RESUME_SOURCE_CHANGED',

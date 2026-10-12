@@ -15,7 +15,7 @@ const earlier={kind:'mentor_history',segment:'segment-1',segments:[{id:'segment-
  items:[{turn:1,executionId:id,text:'EARLY_USER_WORDS'}],truncated:false};
 
 // R4: the mentor turn may read the user's earlier messages once, through the same claim/complete freeze as files.
-it.each(['answer','twice','malformed','notOffered'] as const)('mentor history read %s',async outcome=>{
+it.each(['answer','twice','malformed','notOffered','denied','revoked','transient'] as const)('mentor history read %s',async outcome=>{
  vi.clearAllMocks();
  const offered=outcome!=='notOffered';
  const context={version:'runtime.v1',sdkVersion:'0.18.0',role:'skill',input:'What did I say at the start?',
@@ -35,8 +35,15 @@ it.each(['answer','twice','malformed','notOffered'] as const)('mentor history re
    context,billing:{contractVersion:'bill2.v1',callPolicy:[policy],rules:{},limits:{maxCalls:2}}};
   else if(name==='runtime_session_items')data=args.p_action==='read'?[]:{};
   else if(name==='runtime_response')data=receipts.get(Number(args.p_sequence))??null;
-  else if(name==='runtime_tool'){if(args.p_action==='complete')saved=args.p_result;data={result:saved};}
-  else if(name==='runtime_mentor_history')data=earlier;
+  else if(name==='runtime_tool'){
+   if(outcome==='revoked'&&args.p_action==='complete')return {data:null,error:{message:'RUNTIME_MENTOR_HISTORY_REVOKED'}};
+   if(args.p_action==='complete')saved=args.p_result;data={result:saved};
+  }
+  else if(name==='runtime_mentor_history'){
+   if(outcome==='denied')return {data:null,error:{message:'RUNTIME_MENTOR_HISTORY_DENIED'}};
+   if(outcome==='transient')return {data:null,error:{message:'connection reset'}};
+   data=earlier;
+  }
   else if(name==='runtime_cancel')data={state:'cancelled'};
   else if(name==='runtime_execution'&&args.p_action==='complete')data={state:'completed'};
   return {data,error:null};
@@ -57,8 +64,9 @@ it.each(['answer','twice','malformed','notOffered'] as const)('mentor history re
   budget:createRuntimeBudget(),adapter:{dispatch:vi.fn()} as never}).execute(id);
  const reads=database.rpc.mock.calls.filter(([name])=>name==='runtime_mentor_history');
  if(outcome!=='answer'){
-  expect(result.state).toBe('cancelled');
-  expect(reads).toHaveLength(outcome==='twice'?1:0);
+  // Permanent refusals cancel the turn; a transient database failure stays retryable.
+  expect(result.state).toBe(outcome==='transient'?'pending':'cancelled');
+  expect(reads).toHaveLength(['twice','denied','revoked','transient'].includes(outcome)?1:0);
   return;
  }
  expect(result.state).toBe('completed');

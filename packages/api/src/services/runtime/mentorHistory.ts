@@ -36,16 +36,22 @@ export function mentorHistoryToolBytes():number {
 }
 
 /** The execution-owned claim precedes the private read; replay returns the frozen result. */
-export function executionMentorHistoryTool(options:{executionId:string;rpc:ToolRpc;assertCanStart:()=>void}):RuntimeTool {
+export function executionMentorHistoryTool(options:{executionId:string;rpc:ToolRpc;assertCanStart:()=>void;onRefused?:()=>void}):RuntimeTool {
  return mentorHistoryTool(async(arguments_,callId)=>{
   options.assertCanStart();
   const {query}=mentorHistoryParameters.parse(arguments_);
   const args={p_execution_id:options.executionId,p_call_id:callId,p_name:READ_HISTORY_TOOL,p_arguments:arguments_};
-  const saved=await options.rpc<{result:unknown}>('runtime_tool',{...args,p_action:'claim'});
-  if(saved.result!==null)return JSON.stringify(saved.result);
-  const result=await options.rpc<unknown>('runtime_mentor_history',{p_execution_id:options.executionId,p_query:query??''});
-  // Persisted JSONB key order is used both initially and on replay.
-  const committed=await options.rpc<{result:unknown}>('runtime_tool',{...args,p_action:'complete',p_result:result});
-  return JSON.stringify(committed.result);
+  try {
+   const saved=await options.rpc<{result:unknown}>('runtime_tool',{...args,p_action:'claim'});
+   if(saved.result!==null)return JSON.stringify(saved.result);
+   const result=await options.rpc<unknown>('runtime_mentor_history',{p_execution_id:options.executionId,p_query:query??''});
+   // Persisted JSONB key order is used both initially and on replay.
+   const committed=await options.rpc<{result:unknown}>('runtime_tool',{...args,p_action:'complete',p_result:result});
+   return JSON.stringify(committed.result);
+  } catch(error) {
+   // A revoked or deleted source never becomes readable again: end the turn instead of retrying forever.
+   if(error instanceof Error&&error.message==='RUNTIME_HISTORY_READ_REFUSED')options.onRefused?.();
+   throw error;
+  }
  });
 }
