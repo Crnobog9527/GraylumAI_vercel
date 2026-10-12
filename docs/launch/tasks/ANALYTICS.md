@@ -51,8 +51,10 @@
   | `purchase` | **服务器**在 Stripe webhook 履约成功后用 Measurement Protocol 上报 | `transaction_id`=我方订单编号、`currency`、`value`、`items[].item_id` |
 
 - **付款成功只记一次**：只在这次 webhook 调用**真正把订单从未履约改为已履约**的那个分支里上报（重放、重复 webhook 走“已履约”分支，不再上报）；`transaction_id` 用 `payment_orders.id`，GA4 自己也按同一用户同一交易号去重（只对网页数据流有效）。上报失败只记日志、不重试、不影响履约——统计少一笔不动钱，金额以数据库报表为准。**不新建表**。
-- **服务器上报怎么对上访客**：结账前浏览器把 GA 的 `client_id`（`_ga` Cookie 里的随机编号）和当前会话编号 `session_id`（`_ga_<衡量 ID>` Cookie 里）随创建结账请求带上，存进 Stripe 会话的 metadata，`purchase` 上报时一起带上，这样付款能归到发起结账那次访问的来源和渠道（Google 要求带 `session_id`，且在会话开始后 24 小时内发送；超过 24 小时才付款成功的，来源可能显示为“未分配”，金额仍以数据库为准）；**只有访客同意了统计才会有这个值**。没有 `client_id` 的订单不上报 GA（不编造编号，避免违背同意规则）。
+- **服务器上报怎么对上访客**：结账前浏览器把 GA 的 `client_id`（`_ga` Cookie 里的随机编号）和当前会话编号 `session_id`（`_ga_<衡量 ID>` Cookie 里）随创建结账请求带上，`purchase` 上报时一起带上，这样付款能归到发起结账那次访问的来源和渠道（Google 要求带 `session_id`，且在会话开始后 24 小时内发送；超过 24 小时才付款成功的，来源可能显示为“未分配”，金额仍以数据库为准）；**只有访客同意了统计才会有这个值**。没有 `client_id` 的订单不上报 GA（不编造编号，避免违背同意规则）。
+- **这两个编号存哪里、多久删**：**不放进 Stripe metadata**，也不放进会被持久化的结账请求（现有链路会把整份请求存进 `payment_orders.checkout_request`、并把 metadata 复制到 Stripe 的订阅或付款记录，这些按账务期限保留，注销也不删）。改为在 `payment_orders` 新增两个可空列 `ga_client_id`、`ga_session_id`，只写在我们库里、不发给 Stripe：`purchase` 上报后（成功或失败）立即置空；没付款的订单由现有每日清理任务在 72 小时后置空；注销清理也置空。迁移和 PR-3 的首次来源迁移合在一起。
 - **不发个人信息**：不发邮箱、昵称、用户编号、订单正文；不开 GA4 的 User-ID 和“用户提供的数据”；不开 Google 信号（Google Signals）。
+- **动态路径去编号**：应用里带实例编号的路径（例如 `/positioning/[draftId]`、对话、资料库文档、分享页）不能把编号发出去。关键事件的 `page_location` 一律改成**路由模板**（如 `/positioning/[draftId]`），不发真实路径；Vercel Analytics 的 `beforeSend` 对非公开页同样把网址换成路由模板，或直接丢弃这些页面的访问记录（二选一在 PR-2 定，以不发编号为准）。
 - **网址去参数**：所有上报都手动设置 `page_location` 和 `page_referrer`，去掉 `#` 片段和查询参数（`page_location` 保留 `utm_*`）。`page_referrer` **保留协议、域名和路径**（GA4 靠它的域名判断来源，“AI 推荐”渠道也靠它），只去掉查询参数和片段；站内页面之间跳转时的 referrer 同样只留协议、域名和路径，所以 `?code=`、`?email=` 不会带出去；应用页本来就不记页面浏览，双保险。
 - **自定义渠道“AI 推荐”**：在 GA4 后台建自定义渠道组（Owner 操作或当次批准后由 AI 操作），来源正则匹配 `chatgpt.com|chat.openai.com|perplexity.ai|claude.ai|gemini.google.com|copilot.microsoft.com|chat.deepseek.com|kimi.moonshot.cn|kimi.com|doubao.com|yuanbao.tencent.com|grok.com|meta.ai`，排在“自然搜索”“引荐”前面。名单写在仓库里（`docs/` 一份），以后增减按名单改。
 - **staging 和正式用不同的 GA4 媒体资源**（两个衡量 ID），staging 数据不混进正式报表。
@@ -131,7 +133,7 @@ GA4 在大陆收不到数据，和 Owner“大陆用 Vercel Analytics”的决�
 
 | 接收方 | 收到什么 | 保留期（开工时按官方资料核对） | 删除渠道 | 我们这边 |
 | --- | --- | --- | --- | --- |
-| Google（GA4） | 随机 client_id、页面路径、来源、设备和大致地区、四个关键事件、订单号和金额（无个人信息） | GA4 后台可设 2 或 14 个月，建议设 2 个月（第 9 节 O6） | GA4 后台“用户删除”按 client_id 删除；或调短保留期 | 不存 GA 数据；注销后该用户的 client_id 我们本来就没有，不能按用户删，如实写进隐私条款 |
+| Google（GA4） | 随机 client_id、页面路径（应用页只发路由模板）、来源、设备和大致地区、四个关键事件、订单号和金额（无个人信息） | GA4 后台可设 2 或 14 个月，建议设 2 个月（第 9 节 O6） | GA4 后台“用户删除”按 client_id 删除；或调短保留期 | 只在 `payment_orders` 临时存 GA 编号用于付款上报，上报后、72 小时后或注销时置空，不进 Stripe、不进账务保留的结账请求；注销后该用户的 client_id 我们本来就没有，不能按用户删，如实写进隐私条款 |
 | Termly | 访客的同意记录（同意编号、时间、选择、IP 和浏览器信息） | 按 Termly 政策，开账号后核对 | Termly 后台和支持渠道 | 同意记录是合规证据，按 Termly 规则保留 |
 | Vercel（Web Analytics） | 页面路径（已去参数）、来源、国家、设备；不用 Cookie | 访客识别哈希 24 小时；报表窗口按套餐（Pro 12 个月） | 等待过期 | 不放个人信息，不需要按用户删除 |
 | Meta（第二步） | 像素事件、CAPI 转化（哈希后的联系信息另需 Owner 定） | 第二步开工时核对 | — | 第二步方案再补 |
@@ -143,8 +145,8 @@ GA4 在大陆收不到数据，和 Owner“大陆用 Vercel Analytics”的决�
 | PR | 内容 | 风险 | staging 验收 |
 | --- | --- | --- | --- |
 | PR-1 Termly + Consent Mode | 按 O1 选定的方式加载 Termly；Consent Mode 默认值；页脚“Cookie 设置”入口；PR 检查单加“新第三方脚本要标 Termly 分类” | 普通 | 用浏览器开发者工具模拟欧盟访问（Termly 的地区预览或欧洲出口网络）：同意前没有 `_ga` 等统计 Cookie、没有发往 google-analytics 的请求；点同意后才出现；模拟美国访问能看到“不要出售或分享”入口；大陆网络下首屏不等 Termly（含一次晚高峰实测完整下载时间）；公开页仍是静态 |
-| PR-2 GA4 + Vercel Analytics | gtag 按分类加载；公开页页面浏览、网址去参数；`sign_up`、`positioning_complete`、`begin_checkout` 三个浏览器事件；`<Analytics />` 和 `beforeSend` 去参数 | 普通 | GA4 实时报告看到页面浏览和三个事件；打开带 `?code=`、`?email=` 的地址后，网络面板里发往 GA 和 Vercel 的请求都不含这些参数；应用页没有 `page_view`；从 chatgpt.com 等来源（不带 utm）点进来的访问在 GA4 里归到“AI 推荐”渠道；如果 O5 归为“统计”：模拟欧盟访问时，拒绝或尚未选择前网络面板里没有任何 `/_vercel/insights/*` 请求，同意后才出现；用中国大陆真实网络访问一次包含本改动的 preview 页面，确认该项目的 Vercel Web Analytics 报表里出现这次访问（不只是脚本能下载）；Lighthouse 下降在第 5 节限度内 |
-| PR-3 首次来源 + 付款上报 | 迁移：`profiles.signup_attribution` 加列、接入注销清理；注册时写入；结账带 client_id 进 Stripe metadata；webhook 履约成功分支用 Measurement Protocol 上报 `purchase`；后台统计页按来源分组 | 高（数据库、注销、计费链路） | 迁移按 ENGINEERING 要求验证（兼容、可重复执行、指纹）；带 utm 和 AI 来源的注册在资料里写对、超长和非白名单字段被丢弃；注销后该列为空；Stripe 测试模式付款一次，GA4 实时报告只出现一笔 `purchase`，且归到发起结账那次访问的来源；重放同一 webhook 不再出现；集成测试里**并发**投递同一事件两次、以及同一订单的 `checkout.session.completed` 和 `invoice.paid` 同时到达，断言履约和 `purchase` 上报都恰好一次（上报只挂在原子履约返回“本次新履约”的那一个调用上）；没同意统计的访客付款不上报且履约正常；上报失败不影响履约 |
+| PR-2 GA4 + Vercel Analytics | gtag 按分类加载；公开页页面浏览、网址去参数；`sign_up`、`positioning_complete`、`begin_checkout` 三个浏览器事件；`<Analytics />` 和 `beforeSend` 去参数 | 普通 | GA4 实时报告看到页面浏览和三个事件；打开带 `?code=`、`?email=` 的地址和带编号的动态应用路径（如某个定位草稿页）后，网络面板里发往 GA 和 Vercel 的请求都不含这些参数和编号（只出现路由模板或不发）；应用页没有 `page_view`；从 chatgpt.com 等来源（不带 utm）点进来的访问在 GA4 里归到“AI 推荐”渠道；如果 O5 归为“统计”：模拟欧盟访问时，拒绝或尚未选择前网络面板里没有任何 `/_vercel/insights/*` 请求，同意后才出现；用中国大陆真实网络访问一次包含本改动的 preview 页面，确认该项目的 Vercel Web Analytics 报表里出现这次访问（不只是脚本能下载）；Lighthouse 下降在第 5 节限度内 |
+| PR-3 首次来源 + 付款上报 | 迁移：`profiles.signup_attribution` 加列、`payment_orders.ga_client_id/ga_session_id` 加列，都接入注销清理，GA 编号接入每日清理；注册时写入；结账带 client_id 进 Stripe metadata；webhook 履约成功分支用 Measurement Protocol 上报 `purchase`；后台统计页按来源分组 | 高（数据库、注销、计费链路） | 迁移按 ENGINEERING 要求验证（兼容、可重复执行、指纹）；带 utm 和 AI 来源的注册在资料里写对、超长和非白名单字段被丢弃；注销后这些列为空；Stripe 结账请求、`checkout_request` 和 Stripe 订阅/付款记录里查不到 GA 编号；上报后和 72 小时后 GA 编号被置空；Stripe 测试模式付款一次，GA4 实时报告只出现一笔 `purchase`，且归到发起结账那次访问的来源；重放同一 webhook 不再出现；集成测试里**并发**投递同一事件两次、以及同一订单的 `checkout.session.completed` 和 `invoice.paid` 同时到达，断言履约和 `purchase` 上报都恰好一次（上报只挂在原子履约返回“本次新履约”的那一个调用上）；没同意统计的访客付款不上报且履约正常；上报失败不影响履约 |
 | 后台配置（不是代码） | GA4“AI 推荐”自定义渠道组、数据保留期、关闭 Google 信号；Termly 地区规则、Consent Mode 开关、GPC | — | Owner 操作，或在当次对话批准后由 AI 按清单操作；正式环境逐项另批 |
 
 **第二步（Owner 投广告前）**：META——Meta 像素按 Termly“广告”分类加载、CAPI 由服务器在同一个“真正履约”分支上报，按事件编号和浏览器端去重。开工前另出方案。
