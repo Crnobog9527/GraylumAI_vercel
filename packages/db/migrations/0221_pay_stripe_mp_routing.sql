@@ -14,7 +14,8 @@ ALTER TABLE public.payment_orders DROP CONSTRAINT IF EXISTS payment_orders_payme
 ALTER TABLE public.payment_orders ADD CONSTRAINT payment_orders_payment_method_check
   CHECK(payment_method IN ('card','card_cn','wechat_pay','alipay'));
 ALTER TABLE public.payment_orders DROP CONSTRAINT IF EXISTS pay_waffo_method_contract;
-ALTER TABLE public.payment_orders ADD CONSTRAINT pay_waffo_method_contract CHECK(payment_method IS NULL OR (
+-- coalesce(...,false): an unknown (NULL) comparison must fail, never pass, in every 0221 contract.
+ALTER TABLE public.payment_orders ADD CONSTRAINT pay_waffo_method_contract CHECK(coalesce(payment_method IS NULL OR (
   payment_channel IS NOT NULL AND routing_version IS NOT NULL AND routing_version>0 AND terms_version IS NOT NULL AND terms_accepted_at IS NOT NULL
   AND auto_renew IS NOT NULL AND offer_kind IS NOT NULL AND qualification_state IS NOT NULL
   AND ((payment_method='card' AND payment_channel='waffo' AND mode='subscription' AND auto_renew AND stripe_managed_payments IS NULL)
@@ -26,7 +27,7 @@ ALTER TABLE public.payment_orders ADD CONSTRAINT pay_waffo_method_contract CHECK
       AND stripe_managed_payments IS NULL))
   AND (item_type<>'membership_plan' OR entitlement_term IS NOT NULL)
   AND ((entitlement_start IS NULL AND entitlement_end IS NULL) OR
-    (entitlement_start IS NOT NULL AND entitlement_end IS NOT NULL AND entitlement_end>entitlement_start))));
+    (entitlement_start IS NOT NULL AND entitlement_end IS NOT NULL AND entitlement_end>entitlement_start))),false));
 DROP TRIGGER IF EXISTS pay_waffo_order_freeze ON public.payment_orders;
 CREATE TRIGGER pay_waffo_order_freeze BEFORE UPDATE ON public.payment_orders FOR EACH ROW
   EXECUTE FUNCTION public.pay_common_frozen_guard('payment_method','auto_renew','entitlement_term',
@@ -42,7 +43,7 @@ ALTER TABLE public.payment_provider_refs DROP CONSTRAINT IF EXISTS payment_provi
 ALTER TABLE public.payment_provider_refs ADD CONSTRAINT payment_provider_refs_object_type_check
   CHECK(object_type IN ('price','coupon','checkout','invoice','payment','subscription','refund'));
 ALTER TABLE public.payment_provider_refs DROP CONSTRAINT IF EXISTS pay_common_ref_target;
-ALTER TABLE public.payment_provider_refs ADD CONSTRAINT pay_common_ref_target CHECK(
+ALTER TABLE public.payment_provider_refs ADD CONSTRAINT pay_common_ref_target CHECK(coalesce(
   (object_type='price' AND num_nonnulls(membership_plan_id,credit_package_id)=1
     AND order_id IS NULL AND subscription_id IS NULL AND billing_cycle IS NOT NULL
     AND ((credit_package_id IS NOT NULL AND billing_cycle='one_time')
@@ -52,13 +53,13 @@ ALTER TABLE public.payment_provider_refs ADD CONSTRAINT pay_common_ref_target CH
   OR (object_type IN ('checkout','invoice','payment','refund') AND order_id IS NOT NULL
     AND num_nonnulls(membership_plan_id,credit_package_id,subscription_id,billing_cycle)=0)
   OR (object_type='subscription' AND subscription_id IS NOT NULL
-    AND num_nonnulls(membership_plan_id,credit_package_id,order_id,billing_cycle)=0));
+    AND num_nonnulls(membership_plan_id,credit_package_id,order_id,billing_cycle)=0),false));
 ALTER TABLE public.payment_provider_refs DROP CONSTRAINT IF EXISTS pay_stripe_mp_price_usage;
-ALTER TABLE public.payment_provider_refs ADD CONSTRAINT pay_stripe_mp_price_usage CHECK(
+ALTER TABLE public.payment_provider_refs ADD CONSTRAINT pay_stripe_mp_price_usage CHECK(coalesce(
   (object_type NOT IN ('price','coupon') AND price_usage IS NULL)
   OR (object_type='price' AND credit_package_id IS NOT NULL AND price_usage='package')
   OR (object_type='price' AND membership_plan_id IS NOT NULL AND price_usage IN ('subscription','one_time'))
-  OR (object_type='coupon' AND channel='stripe' AND price_usage='subscription' AND offer_kind='gold_first30'));
+  OR (object_type='coupon' AND channel='stripe' AND price_usage='subscription' AND offer_kind='gold_first30'),false));
 -- Old catalog writers do not know the column: prices they insert keep their pre-0221 meaning.
 CREATE OR REPLACE FUNCTION public.pay_stripe_mp_price_usage_default() RETURNS trigger
 LANGUAGE plpgsql SET search_path=public,pg_temp AS $$

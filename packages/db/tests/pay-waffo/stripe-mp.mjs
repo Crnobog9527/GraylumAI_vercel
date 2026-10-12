@@ -22,6 +22,13 @@ export async function stripeMpCases({admin,service,connect}) {
     VALUES($1,'mp_fixture','test','coupon',$2,$3,'monthly',true,$4,'subscription')`,[channel,external,plan,offer]);
   await assert.rejects(()=>coupon('coupon_std','standard'),/pay_stripe_mp_price_usage/);
   await assert.rejects(()=>coupon('coupon_waffo','gold_first30','waffo'),/pay_stripe_mp_price_usage/);
+  // Omitted fields are unknown (NULL) and must fail the contract, not pass it.
+  await assert.rejects(()=>admin.query(`INSERT INTO payment_provider_refs(channel,merchant_namespace,mode,object_type,external_id,
+    membership_plan_id,billing_cycle,is_current,offer_kind) VALUES('stripe','mp_fixture','test','coupon','coupon_no_usage',$1,
+    'monthly',true,'gold_first30')`,[plan]),/pay_stripe_mp_price_usage/);
+  await assert.rejects(()=>admin.query(`INSERT INTO payment_provider_refs(channel,merchant_namespace,mode,object_type,external_id,
+    membership_plan_id,is_current,offer_kind,price_usage) VALUES('stripe','mp_fixture','test','coupon','coupon_no_cycle',$1,
+    true,'gold_first30','subscription')`,[plan]),/pay_common_ref_target/);
   await coupon('coupon_first','gold_first30');
   await assert.rejects(()=>coupon('coupon_first_2','gold_first30'),/pay_stripe_mp_current_coupon/);
   // Double submit and parallel submit of the same card purchase reserve one order; switching method waits.
@@ -61,6 +68,6 @@ export async function stripeMpCases({admin,service,connect}) {
   const late=randomUUID(); await admin.query('INSERT INTO profiles(id) VALUES($1)',[late]);
   await assert.rejects(()=>service.query(`SELECT pay_waffo_create_purchase($1,'membership_plan',$2,'monthly','card','standard',
     'fixture','test',$3,'terms-v1',NULL)`,[late,plan,current.version+2]),/SALES_DISABLED/);
-  return ['stripe-mp-route-shape','stripe-mp-method-contract','stripe-mp-price-usage-frozen','stripe-mp-coupon-first-month-only',
+  return ['stripe-mp-route-shape','stripe-mp-method-contract','stripe-mp-price-usage-frozen','stripe-mp-coupon-first-month-only','stripe-mp-coupon-omitted-field-denied',
     'stripe-mp-concurrent-card-one-order','stripe-mp-method-switch-waits','stripe-mp-switch-off-denies'];
 }
