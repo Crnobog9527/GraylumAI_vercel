@@ -92,6 +92,8 @@
    顺序和验证（第二轮审查 P1）：B1 是页面改动，**在包含 B1 这个版本的 preview 上做完浏览器验收再合并**，不拿合并后的 B1+R 状态补验。
    B1 本身不调用视频准备，所以它的 preview 不依赖 R；R 是纯数据库改动，按第 4 节用数据库和集成测试验证（含"旧会话最新材料带视频正文，迁移后不再带"），
    在 B1 合并后尽快合并。R 合并后再对 B1 的保存和衍生流程做一次冒烟复验，复验发现问题从新分支修。
+   **回退顺序**（第三轮审查 P2，修订 #621 第 12 节"前端可以单独回退"）：R 合并之后，B1 不能再单独回退——旧页面要调用视频准备，而 R 让它直接报错。
+   要回退 B1，必须先（或同一次）合并一个追加迁移恢复视频准备的原函数体，再回退 B1 页面；R 合并之前，B1 仍可按 #621 第 12 节单独回退。
 6. 选题讨论工作区（0113）、定位会话的写入方不改。
 
 ### 2.4 正文按需注入（A2，迁移 X2）——修订 #621 第 4.3 节
@@ -183,7 +185,7 @@
 - **X2（A2）**：`runtime_executions.injected_source`（`ADD COLUMN IF NOT EXISTS`）；`runtime_execution` 的 `checkpoint_source` 动作；
   `runtime_context_allowed` 的 `injected_source` 分支；D7 删除闭包的 `injected_source` 条件；`opc_content_from_execution` 放开 `storyboard`、`editing`；
   只读的"当前来源"函数。
-- **X3（A3）**：见第 4 节的提议规则（`runtime_admit` 校验、`runtime_view` 带 `role` 和 `signal`）。
+- **X3（A3）**：见第 4 节的提议规则（`runtime_admit` 校验、`runtime_view` 带 `role`、`signal`、`offerState`；`runtime_executions.dialogue_role` 列、准入时写入、回填）。
 - **X4（P2-A）**、**X5（R）**：见第 6 节。
 - 每个迁移：本机连续执行两次结构不变；更新 `built-fingerprint.json`；旧代码（迁移后、新代码部署前）仍能正常保存和对话（新列可空、
   函数签名不变、`brief`/`script` 行为不变）；回退靠追加迁移恢复原函数体，`injected_source` 列保留不删（可空、无写入即无影响）。
@@ -209,6 +211,11 @@
 - **已消耗**：S 里存在任何一次 (created_at, id) 排在 E 之后的**对话执行**（冻结角色 `ordinary` 或 `skill`）。
   只看"有没有被准入过"（`runtime_executions` 里有这一行），**不看**它的状态（prepared / running / interrupted / cost_pending / completed / cancelled）、
   不看它现在是否可用、是否被删除内容。整理（`organizer`）执行不算。
+- **角色要存在不会被删除抹掉的地方**（第三轮审查 P1）：D7 删除内容时把执行的 `payload` 换成只剩 `input`（0201:405），冻结的 `role` 随之消失；
+  只按载荷里的角色判断，被删的后续执行会被漏掉、旧提议复活。做法：X3 给 `runtime_executions` 加一列 `dialogue_role text`
+  （只取 `ordinary` / `skill` / `organizer` 等角色名，不含任何用户内容，D7 不清空它），由准入时写入、之后不可改；
+  迁移时用 `payload->>'role'` 回填已有行。**角色未知的行（载荷已被抹、回填不到）一律算作对话执行、会消耗提议**——
+  宁可让旧提议失效（用户再说一次即可），也不让它复活去发起付费生成。消耗判断只读这一列和 (created_at, id)，不读载荷。
 - **可以展示 / 接受**：没被消耗，并且 E 本身已完成、`runtime_history_available(E)` 为真、没有被删除内容。可用性**只在这一步**检查。
 - **回应**："好" / "先不用"按钮各自是一次对话执行，请求 id 由 E 的 id 确定性推出，冻结 `offerResponse`；它被准入的同时提议就按上面的规则被消耗。
   打字回复"好"时，`pendingOffer` 只在提议仍可展示时放进匹配输入（#621 第 3.5 节其余规则不变）。
@@ -229,7 +236,8 @@
 
 ### 4.3 必测（A3）
 
-- 提议之后：下一次对话执行完成 / 失败 / 停止 / 准入后被取消 / 完成后来源被撤销而不可用 / 被删除内容，六种情况刷新后 `offerState` 都是 `consumed`，点"好"都返回 `RUNTIME_OFFER_CONSUMED`，不产生运行单、不收费。
+- 提议之后：下一次对话执行完成 / 失败 / 停止 / 准入后被取消 / 完成后来源被撤销而不可用 / 被删除内容，六种情况刷新后 `offerState` 都是 `consumed`，点"好"都返回 `RUNTIME_OFFER_CONSUMED`，不产生运行单、不收费；
+  "被删除内容"一项要真的跑 D7 删除（载荷被换成只剩 `input`）后再断言；载荷被抹且回填不到角色的旧行同样算消耗；后续只有整理执行（角色列为 `organizer`）时不消耗。
 - 提议之后只做了一次整理纪要：提议仍是 `pending`，点"好"正常准入、不发匹配调用。
 - 提议所在执行变成不可用（没有后续执行）：`offerState=unavailable`，按钮不显示，接受被拒。
 - 两个标签页同时点"好"：只有一次准入、一笔运行单；同一请求 id 重放返回同一执行。
