@@ -5,7 +5,7 @@ import type {SupabaseClient} from '@supabase/supabase-js';
 import {clearSkillResourceCache, packageHash, sha256, type PackageDescriptor, type SkillSource} from '../skills/loader';
 const source = vi.hoisted(() => ({current: undefined as SkillSource | undefined}));
 vi.mock('../skills/databaseSource', () => ({databaseSkillSource: () => source.current, userVisibleModules: vi.fn()}));
-const {activateRuntimeCandidate} = await import('./matching');
+const {activateRuntimeCandidate, sizeRuntimeCandidate} = await import('./matching');
 
 const id = (n: number) => `20000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
 function install(workflow: string | null) {
@@ -31,4 +31,13 @@ it('appends the declared steps of a matched non-positioning Skill', async () => 
 });
 it('leaves a Skill without workflow.yaml unchanged', async () => {
   expect(await activateRuntimeCandidate(db, db, install(null))).not.toContain('Work guide');
+});
+it('sizes candidates before matching from SKILL.md alone, without reading workflow.yaml', async () => {
+  const candidate = install('kind: document\nsteps:\n - title: 找开头\n   resources: [SKILL.md]\n');
+  const reads: string[] = [];
+  const inner = source.current!;
+  source.current = {...inner, read: async (identity, maxBytes) => { reads.push(identity.path); return inner.read(identity, maxBytes); }};
+  const text = await sizeRuntimeCandidate(db, db, candidate);
+  expect(text).not.toContain('Work guide');
+  expect(reads).not.toContain('workflow.yaml');
 });
