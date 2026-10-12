@@ -1,10 +1,12 @@
 import { libraryRouter } from './routers/library';
 import { reportModelRouter } from './routers/reportModel';
+import { socialMediaFlagRouter } from './routers/socialMediaFlag';
 import { opcRouter } from './routers/opc';
 import { runtimeRouter } from './routers/runtime';
 import { workbenchRouter } from './routers/workbench';
 import { router } from './trpc';
 import { runtimeRateLimitsRouter } from './routers/runtimeRateLimits';
+import { modelIdentityRouter } from './routers/modelIdentity';
 import { mentorBudgetRouter } from './routers/mentorBudget';
 import { chatRouter } from './routers/chat';
 import { userRouter } from './routers/user';
@@ -44,7 +46,9 @@ export const appRouter = router({
   billingReport: billingReportRouter,
   mentorBudget: mentorBudgetRouter,
   reportModel: reportModelRouter,
+  socialMediaFlag: socialMediaFlagRouter,
   runtimeRateLimits: runtimeRateLimitsRouter,
+  modelIdentity: modelIdentityRouter,
   invitation: invitationRouter,
   checkin: checkinRouter,
   admin: adminRouter,

@@ -21,7 +21,7 @@ import { isOpeningInput, openingRequestId, questionTask } from "./questions";
 import { agentTurnInstructions, OPENING_EXTRACTION_RULE } from "./agentTurnPrompt";
 import { ORGANIZER_INSTRUCTIONS } from "./organizerPrompt";
 import {captureHostContext, captureFocus, captureOrganizerInput, captureFrozenInformation} from './captureContext';
-import {withStepConfirmation} from '../../shared/opcStepConfirmation';
+import {withStepConfirmation} from '../../shared/opcStepConfirmation';import {withReportFlag} from './reportFlag';
 import {readStepSummaryRequest,STEP_SUMMARY_INSTRUCTIONS} from './stepSummary';
 import {captureAdmissionReplay} from './captureReplay';
 import {existingPositioningInstructions} from './existingPositioning';
@@ -31,6 +31,7 @@ import { opcGenerate, ANSWER_CARD_RULE, resolveAnswerCard, } from "./answerCard"
 export { opcGenerate } from "./answerCard";
 const uuid = z.string().uuid();
 import {opcStart, opcTopicBind} from './start';
+import {isPositioningWorkflow} from './positioningWorkflow';
 export {opcStart, opcTopicBind} from './start';
 export function opcService(user: SupabaseClient, admin: SupabaseClient, real?:StagingPolicy, resumeWaitingOrganizer?:ResumeWaitingOrganizer) {
   async function rpc(name: string, args: Record<string, unknown>) {
@@ -287,14 +288,7 @@ export function opcService(user: SupabaseClient, admin: SupabaseClient, real?:St
       });
       if (raw.error) throw new DatabaseReadError("OPC_UNAVAILABLE", raw.error.code);
       return catalog.filter((c) =>
-        raw.data.some(
-          (r: any) =>
-            r.id === c.id &&
-            r.workflow.steps.every((s: any) => s.information?.length) &&
-            r.workflow.steps.some((s: any) =>
-              s.information.some((f: any) => f.profileKey),
-            ),
-        ),
+        raw.data.some((r: any) => r.id === c.id && isPositioningWorkflow(r.workflow)),
       );
     },
     list: () => rpc("opc_query", {}),
@@ -400,8 +394,8 @@ export function opcService(user: SupabaseClient, admin: SupabaseClient, real?:St
         searchEnabled: false,
       }).prepare(runtimeRequest);
     },
-    read: async (draftId: string) =>
-      ({...withStepConfirmation(await rpc("opc_query", {p_draft_id: uuid.parse(draftId)})),runtimeMode:real?"staging_test":"isolated"}),
+    read: async (draftId: string) => ({...withStepConfirmation(await withReportFlag(await rpc("opc_query", {p_draft_id: uuid.parse(draftId)}), rpc)),
+      runtimeMode:real?"staging_test":"isolated"}),
     start: async (value: unknown) => {
       const v = opcStart.parse(value);
       return rpc("opc_start_b1", {

@@ -1,0 +1,72 @@
+{
+  "mode": "text",
+  "model": "anthropic/claude-haiku-5.5",
+  "at": "2026-10-12T12:21:36.033Z",
+  "results": [
+    {
+      "i": 0,
+      "status": 200,
+      "ms": 29297,
+      "cost": 0.0029212,
+      "finish": "stop",
+      "provider": "Claude Platform on AWS",
+      "out_tokens": 5321,
+      "ok": true,
+      "errs": [],
+      "error": null,
+      "report_chars": 2043
+    },
+    {
+      "i": 1,
+      "status": 200,
+      "ms": 27501,
+      "cost": 0.0032082,
+      "finish": "stop",
+      "provider": "Claude Platform on AWS",
+      "out_tokens": 5895,
+      "ok": true,
+      "errs": [],
+      "error": null,
+      "report_chars": 1851
+    },
+    {
+      "i": 2,
+      "status": 200,
+      "ms": 25138,
+      "cost": 0.0029092,
+      "finish": "stop",
+      "provider": "Claude Platform on AWS",
+      "out_tokens": 5297,
+      "ok": true,
+      "errs": [],
+      "error": null,
+      "report_chars": 1655
+    },
+    {
+      "i": 3,
+      "status": 200,
+      "ms": 25986,
+      "cost": 0.0030842,
+      "finish": "stop",
+      "provider": "Claude Platform on AWS",
+      "out_tokens": 5647,
+      "ok": true,
+      "errs": [],
+      "error": null,
+      "report_chars": 1639
+    },
+    {
+      "i": 4,
+      "status": 200,
+      "ms": 22163,
+      "cost": 0.0028022,
+      "finish": "stop",
+      "provider": "Claude Platform on AWS",
+      "out_tokens": 5083,
+      "ok": true,
+      "errs": [],
+      "error": null,
+      "report_chars": 1562
+    }
+  ]
+}

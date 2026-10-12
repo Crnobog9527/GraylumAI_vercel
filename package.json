@@ -54,7 +54,11 @@
       "rollup": "4.59.0",
       "browserslist": "4.28.7",
       "@opentelemetry/instrumentation-http>@opentelemetry/core": "2.8.0",
-      "@modelcontextprotocol/client": "2.2.0"
+      "@modelcontextprotocol/client": "2.2.0",
+      "@tiptap/extension-bubble-menu": "3.31.3",
+      "@tiptap/extension-floating-menu": "3.31.3",
+      "@tiptap/react>fast-equals": "5.4.3",
+      "@tiptap/pm>prosemirror-history": "1.5.0"
     },
     "ignoredOptionalDependencies": [
       "@napi-rs/canvas"
@@ -62,20 +66,20 @@
   },
   "devDependencies": {
     "dotenv": "^17.4.2",
-    "drizzle-kit": "^0.31.10",
+    "drizzle-kit": "^0.31.11",
     "pg": "^8.20.0",
     "turbo": "^2.9.14"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.105.4",
-    "@tanstack/react-query": "^5.100.10",
-    "@trpc/client": "^11.17.0",
-    "@trpc/next": "^11.17.0",
-    "@trpc/react-query": "^11.17.0",
-    "@trpc/server": "^11.17.0",
+    "@tanstack/react-query": "^5.104.2",
+    "@trpc/client": "^11.19.0",
+    "@trpc/next": "^11.19.0",
+    "@trpc/react-query": "^11.19.0",
+    "@trpc/server": "^11.19.0",
     "@upstash/ratelimit": "^2.0.8",
-    "@upstash/redis": "^1.36.1",
-    "drizzle-orm": "^0.45.2",
+    "@upstash/redis": "^1.39.0",
+    "drizzle-orm": "^0.45.4",
     "postgres": "^3.4.9",
     "zod": "^4.3.6"
   }

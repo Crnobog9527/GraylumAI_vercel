@@ -7,14 +7,14 @@
 import MarketingShell from '@/components/landing/MarketingShell';
 import PublicPageHero from '@/components/landing/PublicPageHero';
 import { tutorials } from '@/lib/landing-content';
-import { buildPublicPageMetadata } from '@/lib/public-site';
+import { buildPageMetadata } from '@/lib/seo/metadata';
 
-export async function generateMetadata() {
-  return buildPublicPageMetadata(
-    '使用教程',
-    '查看适合新用户的社媒增长使用教程，从账号审计到内容优化快速建立上手路径。',
-    ['使用教程', '账号审计', '受众研究', '内容策略']
-  );
+export function generateMetadata() {
+  return buildPageMetadata({
+    title: '使用教程',
+    description: '查看适合新用户的社媒增长使用教程，从账号审计到内容优化快速建立上手路径。',
+    path: '/tutorials',
+  });
 }
 
 export default function TutorialsPage() {

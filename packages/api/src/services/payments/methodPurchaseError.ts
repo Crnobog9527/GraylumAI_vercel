@@ -14,6 +14,8 @@ const REJECTIONS: Record<string, Rejection> = {
     message: 'Gold 首 30 天优惠仅限首次购买 Gold 的账号，你的账号不符合条件。' },
   PAY_WAFFO_PURCHASE_PENDING: { code: 'CONFLICT',
     message: '你有一笔付款还在处理中，请先完成它，或等它超时关闭后再试。' },
+  PAY_WAFFO_CHECKOUT_OPEN: { code: 'CONFLICT',
+    message: '这笔订单的付款页面已经打开过，请回到原页面完成付款；如果已经关掉，请等约 40 分钟订单自动关闭后再重新购买。' },
   PAY_WAFFO_FOUNDER_SOLD_OUT: { code: 'CONFLICT', message: '创始会员名额已售完。' },
   PAY_WAFFO_FOUNDER_RENEWAL_REQUIRED: { code: 'PRECONDITION_FAILED',
     message: '你已购买过创始会员，请通过创始会员续费入口操作。' },
