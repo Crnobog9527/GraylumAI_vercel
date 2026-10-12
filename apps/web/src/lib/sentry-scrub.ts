@@ -91,6 +91,10 @@ function scrubCommon<T extends Event>(event: T): T {
   }
   if (event.transaction) event.transaction = scrubUrl(event.transaction);
   if (event.message) event.message = scrubText(event.message);
+  // Sentry.parameterize stores the template and the interpolated values here instead of `message`.
+  if (event.logentry) {
+    event.logentry = { message: event.logentry.message ? scrubText(event.logentry.message) : undefined };
+  }
   if (event.extra) event.extra = scrubRecord(event.extra);
   if (event.contexts) event.contexts = redactRecord(event.contexts);
   if (event.tags) event.tags = redactRecord(event.tags);
