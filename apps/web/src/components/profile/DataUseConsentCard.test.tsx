@@ -9,6 +9,8 @@ const state = vi.hoisted(() => ({
   isPending: false,
   setData: vi.fn(),
   reset: vi.fn(),
+  cancel: vi.fn(),
+  getData: vi.fn(),
   onCheckedChange: undefined as undefined | ((next: boolean) => void),
 }));
 
@@ -20,7 +22,7 @@ vi.mock('@/components/ui/switch', () => ({
 }));
 vi.mock('@/trpc/client', () => ({
   trpc: {
-    useUtils: () => ({ dataUse: { consent: { setData: state.setData, reset: state.reset } } }),
+    useUtils: () => ({ dataUse: { consent: { setData: state.setData, reset: state.reset, cancel: state.cancel, getData: state.getData } } }),
     dataUse: {
       consent: { useQuery: () => state.query },
       setConsent: { useMutation: () => ({ mutateAsync: state.mutateAsync, isPending: state.isPending }) },
@@ -46,6 +48,8 @@ beforeEach(() => {
   state.isPending = false;
   state.setData = vi.fn();
   state.reset = vi.fn();
+  state.cancel = vi.fn();
+  state.getData = vi.fn();
   state.onCheckedChange = undefined;
   refetch.mockReset();
 });
@@ -70,6 +74,8 @@ describe('data-use consent card', () => {
     expect(state.mutateAsync).toHaveBeenCalledWith({ granted: true, version: 'd5-v1' });
     expect(refetch).not.toHaveBeenCalled();
     expect(state.reset).not.toHaveBeenCalled();
+    // An older read in flight is cancelled before saving, so it cannot overwrite the saved state.
+    expect(state.cancel.mock.invocationCallOrder[0]).toBeLessThan(state.mutateAsync.mock.invocationCallOrder[0]);
   });
 
   it('shows a current grant as on, with when it was given', () => {

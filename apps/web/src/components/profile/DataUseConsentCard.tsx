@@ -11,6 +11,7 @@ import {
   consentStatus,
   consentStatusText,
   grantedToOtherCopy,
+  reconcileFailedSave,
   type DataUseConsentState,
 } from './dataUseConsent';
 
@@ -107,6 +108,8 @@ export function DataUseConsentCard() {
   const onChange = async (granted: boolean) => {
     if (mutation.isPending) return;
     setError(null);
+    // A read started before the click must not land after the save and put the old choice back.
+    await utils.dataUse.consent.cancel();
     const result = await changeConsent(granted, (input) => mutation.mutateAsync(input));
     if (result.state) {
       utils.dataUse.consent.setData(undefined, result.state);
@@ -115,7 +118,10 @@ export function DataUseConsentCard() {
     setError(result.error);
     // The save may have landed even though it failed here. Drop the cached answer and read again, so the card
     // shows "reading" (no switch) until the server says what it holds, not what it held before the save.
-    void utils.dataUse.consent.reset();
+    setError(await reconcileFailedSave(granted, result.error, async () => {
+      await utils.dataUse.consent.reset();
+      return utils.dataUse.consent.getData();
+    }));
   };
 
   return (

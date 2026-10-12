@@ -87,3 +87,16 @@ export async function changeConsent(granted: boolean, setConsent: SetConsent): P
     return { error: consentErrorMessage(error) };
   }
 }
+
+/**
+ * After a save that failed here, re-read what the server holds (the save may have landed with its answer lost).
+ * The error stays only while the server does not hold the requested choice, or cannot be read.
+ */
+export async function reconcileFailedSave(
+  granted: boolean,
+  error: string,
+  reread: () => Promise<DataUseConsentState | undefined>,
+): Promise<string | null> {
+  const fresh = await reread().catch(() => undefined);
+  return fresh?.granted === granted ? null : error;
+}
