@@ -1,5 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { NextRequest } from 'next/server';
 
 const getUser = vi.fn();
@@ -25,6 +25,13 @@ const LOGGED_IN = ['/profile', '/positioning', '/library'];
 describe('PUBLIC-SITE pages without login', () => {
   beforeEach(() => {
     getUser.mockResolvedValue({ data: { user: null } });
+    // Fix the app host so the redirect target does not depend on the caller's shell.
+    vi.stubEnv('NEXT_PUBLIC_AUTH_APP_URL', '');
+    vi.stubEnv('NEXT_PUBLIC_APP_URL', '');
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
   });
 
   it('serves About and the Taiwan pages on the public host', async () => {
