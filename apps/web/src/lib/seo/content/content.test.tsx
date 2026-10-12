@@ -5,6 +5,7 @@ import { SITE_CHROME } from '@/components/public-site/site-chrome';
 import type { ArticleContent } from '../article';
 import { PUBLIC_PAGES } from '../public-pages';
 import { ABOUT_ZH_HANS, ABOUT_ZH_TW } from './about';
+import { ZH_TW_GLOSSARY } from './zh-tw/glossary';
 import { ZH_TW_HUB } from './zh-tw/hub';
 
 vi.mock('next/link', () => ({
@@ -70,5 +71,14 @@ describe.each(ARTICLES.map(content => [content.path, content] as const))('public
   it.runIf(content.locale === 'zh-TW')('uses Traditional characters only', () => {
     const text = JSON.stringify(content) + JSON.stringify(SITE_CHROME['zh-TW']);
     expect(text.match(SIMPLIFIED_ONLY)?.[0]).toBeUndefined();
+  });
+
+  it.runIf(content.locale === 'zh-TW')('uses the Taiwan wording from the glossary', () => {
+    const text = JSON.stringify(content) + JSON.stringify(SITE_CHROME['zh-TW']);
+    for (const entry of ZH_TW_GLOSSARY) {
+      for (const word of entry.avoid) {
+        expect(text.includes(word), `${word} → ${entry.taiwan}`).toBe(false);
+      }
+    }
   });
 });
