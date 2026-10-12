@@ -1,6 +1,8 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { reportDocumentInput, reportEditInput, reportFinalizeInput,
   reportFinalizationService } from '../services/report/finalization';
+import {reportRevisionService,revisionApplyInput,revisionDeclineInput,revisionLatestInput,revisionProposeInput,
+  revisionReadInput} from '../services/report/revisionSync';
 import {contentVisibilityFence} from '../services/accountErasure/content';
 import {reportEnabled,reportLocate,reportService} from '../services/report/service';
 import {reportStart} from '../services/report/contract';
@@ -74,6 +76,17 @@ export const runtimeRouter=router({
   reportFinalizationService(ctx.userScopedSupabase,ctx.supabaseAdmin!).save(input)),
  reportFinalize:maintenanceProcedure.input(reportFinalizeInput).mutation(({ctx,input})=>
   reportFinalizationService(ctx.userScopedSupabase,ctx.supabaseAdmin!).finalize(input)),
+ // R14: sync an adopted review revision back to the confirmed fields. No model call, no charge.
+ reportRevisionPropose:maintenanceProcedure.input(revisionProposeInput).mutation(({ctx,input})=>
+  reportRevisionService(ctx.userScopedSupabase,ctx.supabaseAdmin!).propose(input)),
+ reportRevisionRead:maintenanceProcedure.input(revisionReadInput).query(({ctx,input})=>
+  reportRevisionService(ctx.userScopedSupabase,ctx.supabaseAdmin!).read(input)),
+ reportRevisionLatest:maintenanceProcedure.input(revisionLatestInput).query(({ctx,input})=>
+  reportRevisionService(ctx.userScopedSupabase,ctx.supabaseAdmin!).latest(input)),
+ reportRevisionApply:maintenanceProcedure.input(revisionApplyInput).mutation(({ctx,input})=>
+  reportRevisionService(ctx.userScopedSupabase,ctx.supabaseAdmin!).apply(input)),
+ reportRevisionDecline:maintenanceProcedure.input(revisionDeclineInput).mutation(({ctx,input})=>
+  reportRevisionService(ctx.userScopedSupabase,ctx.supabaseAdmin!).decline(input)),
  reportStart:procedure.input(reportStart).mutation(({ctx,input})=>ctx.report.start(input)),
  // Display only: whether the report entry is shown. reportStart checks the same switch again.
  reportAvailable:maintenanceProcedure.query(async({ctx})=>({enabled:await reportEnabled(ctx.supabaseAdmin!).catch(()=>false)})),

@@ -49,10 +49,15 @@ Skill 流程里声明过的，否则拒绝。
 
 | 动作 | 输入 | 结果 |
 | --- | --- | --- |
-| `propose` | `draftId, requestId, sourceVersionId, revision` | 登记修订稿（不可变记录），返回差异和 `diffHash` |
-| `apply` | `draftId, requestId(=propose 的), expectedDiffHash` | 生成新确认版本，返回新版本和 `next`（第一周选题） |
-| `decline` | `draftId, requestId(=propose 的)` | 字段不变，修订稿只作报告文本，返回 `fieldsSynced=false` |
-| `read` | `draftId, requestId` | 当前状态（待决定 / 已同步 / 只作文本）和差异 |
+| `propose` | `draftId, requestId, sourceVersionId, body, fields` | 登记修订稿（不可变记录），返回 `revisionId`、差异和 `diffHash` |
+| `apply` | `draftId, revisionId, requestId, expectedDiffHash` | 生成新确认版本，返回新版本和 `next`（第一周选题） |
+| `decline` | `draftId, revisionId, requestId` | 字段不变，修订稿只作报告文本，返回 `fieldsSynced=false` |
+| `read` | `draftId, revisionId` | 当前状态（待决定 / 已同步 / 只作文本）和差异 |
+| `latest` | `draftId, sourceVersionId` | 针对这一版最新的修订稿状态；没有时返回空 |
+
+差异分两部分：`changes` 是修订稿改动的字段（步骤名、字段名、原值和原状态、新值）；`cascade` 是依赖这些步骤、
+会被一起确认的后续步骤，逐个字段列出（值不变，新旧值相同）。**FUSION 接入时的确认界面必须把 `cascade` 明白地
+展示给用户**（总控-7 要求，作为那个 PR 的验收项）。
 
 - `sourceVersionId` 必须是项目当前的正式版本，而且是 R5 定稿出来的（有 `generatedReport`）。不是当前版本就拒绝，
   要求重新生成差异。
@@ -77,8 +82,8 @@ Skill 流程里声明过的，否则拒绝。
 
 ### 4. 不确认
 
-只把修订稿记录标为"只作文本"。正式版本、字段、业务当前定位都不动。R5 的报告读取在这一版上附带最新的
-"只作文本"修订稿（正文、时间、`fieldsSynced=false`），页面据此显示提示。
+只记一条"不同步"的决定。正式版本、字段、业务当前定位都不动。页面用 `latest`（按正式版本取最新修订稿）读到
+修订稿全文和 `fieldsSynced=false`，据此显示提示。R5 的报告读取不改。
 
 ### 5. 删除和注销
 
@@ -90,13 +95,13 @@ Skill 流程里声明过的，否则拒绝。
 - 新函数 `report_revision(...)`（服务角色）和几个私有辅助函数。
 - 修补 `report_final_snapshot`：加上只认同一事务标记的修订稿分支（用 `pg_get_functiondef` 找到原文替换，和 0206 同一种做法，
   找不到原文就报错，不会悄悄失效）。
-- 修补 R5 的 `report_document_source`：读取时附带"只作文本"的修订稿。
 - 可重复执行；不改已有数据；回退应用代码不需要回退数据库（新函数没人调用就不生效）。需要撤回时按 staging 当时的定义写恢复迁移。
 
 ## API
 
 `packages/api/src/services/report/revisionSync.ts`（新文件），tRPC 挂在现有 `runtime` 路由下：
-`runtime.reportRevisionPropose / reportRevisionApply / reportRevisionDecline / reportRevisionRead`。
+`runtime.reportRevisionPropose / reportRevisionApply / reportRevisionDecline / reportRevisionRead / reportRevisionLatest`。
+`artifacts/public.ts` 的报告结构接受修订稿这种 `generatedReport`（`source='review_revision'`），导出时标"评审修订稿（字段已同步）"。
 错误码沿用 R5 的写法（稳定错误码作为 message 返回，内部细节不外传）。不改 `opc/service.ts`，避开 #831。
 
 ## 验证

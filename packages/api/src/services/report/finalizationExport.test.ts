@@ -19,6 +19,17 @@ it('exports the authoritative final report rather than the original field assemb
   expect(text).not.toContain('<script>');
   expect(text).not.toContain('![image]');
 });
+it('exports an adopted review revision with its own label and still escapes it', () => {
+  const revision = { source: 'review_revision', revisionId: randomUUID(), sourceVersionId: randomUUID(),
+    body: '## One\nRevised <b>body</b>', bodyHash: 'b'.repeat(64), manuallyEdited: false, fieldsSynced: true };
+  const text = reportMarkdown(reportSchema.parse({ ...legacy, report: { ...legacy.report, generatedReport: revision } }));
+  expect(text).toContain('Revised &lt;b&gt;body&lt;/b&gt;');
+  expect(text).toContain('评审修订稿（字段已同步）');
+  expect(text).not.toContain('Confirmed fields');
+  // A revision variant cannot claim a manual edit or unsynced fields.
+  expect(reportSchema.safeParse({ ...legacy, report: { ...legacy.report,
+    generatedReport: { ...revision, fieldsSynced: false } } }).success).toBe(false);
+});
 it('preserves the existing export of historical reports', () => {
   const text = reportMarkdown(reportSchema.parse(legacy));
   expect(text).toContain('Confirmed fields');
