@@ -98,7 +98,7 @@ export const HOW_IT_WORKS = {
   ] as readonly GatedText[],
   timelineTitle: '什么时候拿到什么',
   timeline: [
-    { text: '第一次聊完就有你确认过的定位' },
+    { text: '第一次聊完就有你确认过的定位', needs: ['coach'] },
     { text: '开通会员当天拿到报告和第一个 30 天计划', needs: ['report'] },
     { text: '发了内容以后，每周有复盘', needs: ['publish'] },
   ] as readonly GatedText[],
@@ -130,8 +130,8 @@ export const PRICE_COMPARE = {
 export const RISK_REVERSAL = {
   title: '先聊后买',
   points: [
-    { text: '先免费和教练聊一次：注册送 500 积分，足够把你的情况聊透、把定位整理出来。觉得有用，再开通。', needs: ['signupGrant'] },
-    { text: '聊出来的内容随时能看、能导出，不会收回。' },
+    { text: '先免费和教练聊一次：注册送 500 积分，足够把你的情况聊透、把定位整理出来。觉得有用，再开通。', needs: ['coach', 'signupGrant'] },
+    { text: '聊出来的内容随时能看、能导出，不会收回。', needs: ['coach'] },
     { text: '积分永不过期；会员到期后，已生成的报告仍然可以看、可以导出。', needs: ['report'] },
     { text: '随时取消，用到当期结束。' },
   ] as readonly GatedText[],
