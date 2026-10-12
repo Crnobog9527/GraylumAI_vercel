@@ -6,7 +6,9 @@ import { BRAND_IDENTITY_INSTRUCTIONS, frozenBrandIdentity, withBrandIdentity } f
 
 // MODEL-IDENTITY-GUARD: admission sizes candidates with activateRuntimeCandidate(…, frozen flag);
 // execute.ts wraps options.activateSkill with the flag frozen into the admitted instructions.
-vi.mock('../skills/databaseSource', () => ({ databaseSkillSource: () => ({}) }));
+const listed = vi.hoisted(() => ({ descriptors: [] as unknown[] }));
+vi.mock('../skills/databaseSource', () => ({ databaseSkillSource: () => ({ list: async () => listed.descriptors }) }));
+vi.mock('../skills/stepGuide', () => ({ activateFreeChatSkill: async () => ({ instructions: 'Guided Skill text' }) }));
 vi.mock('../skills/loader', async original => ({
   ...await original<typeof import('../skills/loader')>(),
   activateSkill: async () => ({ forModel: () => 'Matched Skill text' }),
@@ -27,6 +29,15 @@ it('a matched Skill runs with the brand identity first when it was frozen on at 
 it('a matched Skill runs unchanged when the switch was off (and by default for old callers)', async () => {
   expect(await activateRuntimeCandidate({} as SupabaseClient, admin, candidate, false)).toBe('Matched Skill text');
   expect(await activateRuntimeCandidate({} as SupabaseClient, admin, candidate)).toBe('Matched Skill text');
+});
+
+it('a known matched Skill activated with its step guide (R8b) gets the same frozen identity', async () => {
+  listed.descriptors = [{ packageId: candidate.packageId, revisionId: candidate.revisionId, packageHash: candidate.packageHash }];
+  try {
+    expect(await activateRuntimeCandidate({} as SupabaseClient, admin, candidate, true))
+      .toBe(BRAND_IDENTITY_INSTRUCTIONS + '\nGuided Skill text');
+    expect(await activateRuntimeCandidate({} as SupabaseClient, admin, candidate, false)).toBe('Guided Skill text');
+  } finally { listed.descriptors = []; }
 });
 
 it('the executor derives the frozen decision from the admitted instructions without another read', () => {
