@@ -93,6 +93,14 @@ MP 只在官方列出的 80 多个国家代收代缴税（具体国家清单以�
 
 如果 Owner 想彻底避免这部分风险，可以改成"只卖给 MP 负责税务的国家"：建会话前按用户选的国家拦截，但用户可以填别的国家，所以拦不严。这是产品决定，由总控向 Owner 确认，本方案默认不做。
 
+### 2.5 实施时必须处理的代码细节（审查发现）
+
+这些是按代码核对出的具体改动点，相应的 PR 必须处理并测试，不能只改方案里提到的那一行：
+
+1. **首次付款不能发两次**（PR-3）：MP 首次付款会同时产生 `checkout.session.completed` 和首张发票的 `invoice.paid` / `invoice.payment_succeeded`（证据 `02d`）。首次付款只由结账完成事件走 `pay_waffo_fulfill_payment`；新的续费处理只认 `billing_reason=subscription_cycle` 的发票，`subscription_create` 的发票只做核对、不发放；`invoice.paid` 和 `invoice.payment_succeeded` 按发票 ID 去重；`subscription_update`（我们不用原地升级，正常不会出现）出现时转人工，不自动发放。测试要覆盖"两个事件都到、到达顺序不同、重复投递"。
+2. **"税另外加"要改整条金额计算**（PR-2）：`purchaseFacts.ts:39-45` 的 `snapshotAmountDue()` 现在遇到 `tax_behavior='exclusive'` 会直接报错，建结账请求、派发和发票核对都会用到它。要定义一个"税前应收金额"的计算方式，并把建请求、派发核对、首次付款核对、续费发票核对都改成一致的口径，不能只改 `purchaseFacts.ts:56` 那一处。
+3. **派发核对要认得服务端选定的优惠券**（PR-2）：`dispatchStripeCheckoutIntent` 现在把所有打折订单都当成内联 `price_data`，看到 `line_items[0].price` 就报 `PAY_COMMON_CHECKOUT_REQUEST_INVALID`。要允许"订阅价格 + `discounts:[{coupon}]`"这一种形状，并核对优惠券就是价格映射表里这个套餐当前的首月优惠券，其他任何折扣仍然拒绝。
+
 ## 三、规则怎么对应到 Stripe
 
 | 规则 | 现在（Waffo） | 改为（Stripe MP / 大陆通道） |
