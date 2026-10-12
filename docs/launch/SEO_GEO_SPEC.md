@@ -164,9 +164,11 @@ robots.txt 由 `app/robots.ts` 生成，上线（`SITE_INDEXING=public`）后的
 - 说明：拒绝 `GPTBot` 不影响 ChatGPT 搜索引用（那是 `OAI-SearchBot`）；拒绝 `Google-Extended` 不影响谷歌搜索和 AI Overviews（那用 Googlebot）。
 - `SITE_INDEXING` 不是 `public` 时仍然整站 `Disallow: /`，**同时所有响应保留 `X-Robots-Tag: noindex, nofollow`**（staging 和预览永不索引；被外链指向时也不进结果）。
 
-sitemap：`app/sitemap.ts` 生成，分语言、含 `lastModified`、只含可索引的公开页、不含重定向地址；上线当天提交 GSC 和 Bing Webmaster。
+sitemap：`app/sitemap.ts` 生成，分语言、含 `lastModified`、只含可索引的公开页、不含重定向地址；上线当天提交 GSC 和 Bing Webmaster（对外账号操作，见下方"对外操作"规则）。
 
 `llms.txt`：可选，放站点一句话简介和主要页面列表；不作为指标（社群里的"AI 流量暴涨"案例未经哥飞本人验证，Google 公开表示未使用该文件）。
+
+**对外操作规则（AGENTS §1）**：凡是用外部账号提交、验证、登记或发布内容的事——GSC / Bing Webmaster 站点验证（含为验证改 DNS 或 Vercel 设置）、提交 sitemap、请求收录、AI 工具目录和 Product Hunt 登记、外链和投稿、在 Reddit / Quora / Threads / 小红书 / YouTube 等平台发帖——都由 Owner 本人操作，或在当前对话里取得 Owner 对这一次操作的明确同意后再由 AI 执行。AI 只准备清单、文案和要填的值。本文其他地方提到这些动作时都按这条执行。
 
 ## 12. GEO（被 AI 搜索引用）
 
@@ -177,7 +179,7 @@ AI 搜索引用的来源主要是：① 谷歌/必应里本来就排得上的页
 3. 每页首屏结论段写成"问题 → 直接答案 → 可核对的要点"，用数字、步骤、清单。
 4. 引用可靠来源（平台官方帮助页、公开报告）并标出处。
 5. About 页写清公司（Grayscale Luminary LLC，怀俄明州）、创始人、联系方式；法律页齐全（条款文字由 Owner 用第三方软件生成）。
-6. 第三方提及由 Owner 配合：AI 工具目录、Product Hunt、Reddit / Quora / Threads / 小红书上的真实讨论、创始人社媒账号；简介统一用第 2 条的句子。
+6. 第三方提及由 Owner 本人操作（见第 11 节对外操作规则）：AI 工具目录、Product Hunt、Reddit / Quora / Threads / 小红书上的真实讨论、创始人社媒账号；简介统一用第 2 条的句子。
 7. 每月用 5 个固定问题问 ChatGPT / Perplexity / Google AI 模式，记录是否出现 Graylum。
 8. 中文定位句不用"海外华人自媒体"这类说法（美国谷歌里该词的第一页全是时政评论频道）。
 
@@ -296,9 +298,9 @@ Owner 2026-10-12 决定：博客用仓库内文章实现，不接外部系统。
 
 | 阶段 | 时间 | 做什么 | 完成标志 |
 | --- | --- | --- | --- |
-| 0 地基 | 上线前 2–4 周 | 单主机迁移；语言路径 + hreflang；统一元数据 / JSON-LD / sitemap / robots；公开页去 force-dynamic；简体首页 + 台湾繁体第一批 6 页；About；OG 图；GSC / Bing 验证 | 全部页面过第 13 节检查单 |
+| 0 地基 | 上线前 2–4 周 | 单主机迁移；语言路径 + hreflang；统一元数据 / JSON-LD / sitemap / robots；公开页去 force-dynamic；简体首页 + 台湾繁体第一批 6 页；About；OG 图；GSC / Bing 站点验证（Owner 本人操作或当次批准，见第 11 节对外操作规则） | 全部页面过第 13 节检查单 |
 | 1 收录 | 上线第 1–4 周 | 撤 noindex 和临时 307（正式环境设置，Owner 批准后执行，见第 15 节切换顺序）；提交 sitemap、GSC 请求编入索引（每天 ≤ 10 个）；AI 目录站 10–20 个；创始人社媒上线帖。**这些都是用外部账号提交或发布内容，属于 AGENTS §1：由 Owner 本人操作，或在当前对话里取得 Owner 明确同意后再由 AI 执行；AI 只准备清单和文案** | `site:www.graylum.com` 能搜到全部公开页 |
-| 2 铺内页 | 第 5–12 周 | 中文第 2 批页面；博客每周 1 篇；按"有曝光无点击"改 title；首批外链 20–40 个引用域 | KD < 30 的词进前 30；DR 10–15 |
+| 2 铺内页 | 第 5–12 周 | 中文第 2 批页面；博客每周 1 篇；按"有曝光无点击"改 title；首批外链 20–40 个引用域（Owner 本人操作或当次批准，见第 11 节对外操作规则） | KD < 30 的词进前 30；DR 10–15 |
 | 3 见排名 | 第 4–6 个月 | 复测盘面；补内容和内链；第二批中文页；AI 引用月检；视英文界面进度决定 `/en` | 3–5 个词进前 10；500–2000 访问/月；DR 15–25 |
 | 4 扩张 | 第 7–12 个月 | 中文大词和工具页；`/en` 第一批（附录 A）；按注册转化调整 | 10 个以上词进前 10；2000–8000 访问/月 |
 
