@@ -45,7 +45,7 @@
   "apps/web/src/components/opc/strategy-overview-dialog.tsx": {"longLines":16},
   "apps/web/src/components/opc/use-scroll-position.ts": {"longLines":1},
   "apps/web/src/components/opc/version-compare.tsx": {"longLines":6},
-  "apps/web/src/components/opc/work-composer.tsx": {"longLines":9},
+  "apps/web/src/components/opc/work-composer.tsx": {"longLines":8},
   "apps/web/src/components/opc/workspace-frame.tsx": {"longLines":46},
   "apps/web/src/components/profile/PersonalInfoCard.tsx": {"lines":988,"longLines":4},
   "apps/web/src/components/profile/ProfileSidebar.tsx": {"longLines":2},

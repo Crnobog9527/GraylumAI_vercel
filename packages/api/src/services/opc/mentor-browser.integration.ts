@@ -61,7 +61,7 @@ it.runIf(process.env.V3_LOCAL_STAGING_HOST==='true').each(['normal','refresh','p
    return {panelWidth:panel.width,panelBottom:panel.bottom,left:box.left-panel.left,right:panel.right-box.right,logTop:box.top,
     overflowY:getComputedStyle(node).overflowY,scrolls:node.scrollHeight>node.clientHeight,
     messages:[...node.querySelectorAll('[data-message-role=assistant]')].map(rect),current:rect(node.querySelector('[aria-label="本步小结"]')),
-    composer:rect([...chat.children].find(child=>child.querySelector('textarea[aria-label="给导师的回复"]'))),notes:rect(chat.lastElementChild),
+    composer:rect([...chat.children].find(child=>child.querySelector('[role="textbox"][aria-label="给导师的回复"]'))),notes:rect(chat.lastElementChild),
     steps:rect(main.querySelector('nav[aria-label="定位步骤"]')),footer:rect(main.querySelector(':scope>div>footer')),
     pageFits:document.documentElement.scrollWidth<=innerWidth,logFits:node.scrollWidth<=node.clientWidth};
   });
@@ -105,7 +105,7 @@ it.runIf(process.env.V3_LOCAL_STAGING_HOST==='true').each(['normal','refresh','p
    await poll(()=>page.getByText(openingValue.value,{exact:true}).count()).toBeGreaterThan(0);
   }
   else expect(openingValue?.value??'').toBe('');
-  expect(await composer.inputValue()).toBe('下一条仍可编辑的草稿');
+  expect(await composer.textContent()).toBe('下一条仍可编辑的草稿');
   const openingProgress=await page.evaluate(()=>(window as unknown as {mentorTextSamples:Array<{at:number;text:string}>}).mentorTextSamples);
   expect(openingProgress.length).toBeGreaterThanOrEqual(3);
   expect(openingProgress[1]!.text.length).toBeGreaterThan(openingProgress[0]!.text.length);
@@ -118,13 +118,13 @@ it.runIf(process.env.V3_LOCAL_STAGING_HOST==='true').each(['normal','refresh','p
   await page.evaluate(text=>{const started=performance.now();(window as unknown as {mentorTiming:unknown}).mentorTiming={started};const observer=new MutationObserver(()=>{const bubbles=[...document.querySelectorAll('[data-message-role="user"][data-request-id]')];if(bubbles.some(b=>b.textContent?.includes(text))){(window as unknown as {mentorTiming:unknown}).mentorTiming={started,bubble:performance.now()};observer.disconnect();}});observer.observe(document.body,{subtree:true,childList:true,characterData:true});},input);
   await send.evaluate(button=>{(button as HTMLButtonElement).click();(button as HTMLButtonElement).click();});
   await poll(()=>page.getByText(input,{exact:true}).count()).toBeGreaterThan(0);
-  const feedback=await page.evaluate(()=>(window as unknown as {mentorTiming:{started:number;bubble:number}}).mentorTiming);timings.clickToBubbleMs=feedback.bubble-feedback.started;expect(timings.clickToBubbleMs).toBeLessThan(200);expect(await page.getByText('发送中 · 等待服务器确认',{exact:true}).isVisible()).toBe(true);expect(await page.getByText('上一条发给导师的内容仍在核对。请先点“重试”恢复，不会重复发送。',{exact:true}).count()).toBe(0);expect(await composer.inputValue()).toBe('');await composer.fill('这是下一条尚未发送的新草稿');releasePrepare();
+  const feedback=await page.evaluate(()=>(window as unknown as {mentorTiming:{started:number;bubble:number}}).mentorTiming);timings.clickToBubbleMs=feedback.bubble-feedback.started;expect(timings.clickToBubbleMs).toBeLessThan(200);expect(await page.getByText('发送中 · 等待服务器确认',{exact:true}).isVisible()).toBe(true);expect(await page.getByText('上一条发给导师的内容仍在核对。请先点“重试”恢复，不会重复发送。',{exact:true}).count()).toBe(0);expect(await composer.textContent()).toBe('');await composer.fill('这是下一条尚未发送的新草稿');releasePrepare();
   await poll(async()=>(await control()).length).toBe(3);
   const second=(await control())[2]!;expect(second.finishedAt).toBeNull();expect([turnRequests,prepareRequests,streamRequests]).toEqual([2,0,0]);
   await page.screenshot({path:process.env.V3_WORKBENCH_OUTPUT+'/mentor-user-incremental-'+scenario+'.png',fullPage:true});
   expect(await page.getByText('DISCARDED_SEPARATE_ASSISTANT_TEXT',{exact:true}).count()).toBe(0);
   await control(3);await poll(async()=>(await control()).length).toBe(4);
-  expect((await control())[3]!.finishedAt).toBeNull();expect(await composer.isEditable()).toBe(true);expect(await composer.inputValue()).toBe('这是下一条尚未发送的新草稿');
+  expect((await control())[3]!.finishedAt).toBeNull();expect(await composer.isEditable()).toBe(true);expect(await composer.textContent()).toBe('这是下一条尚未发送的新草稿');
   await poll(()=>page.getByText(/本地流式导师正文：/).count()).toBeGreaterThan(1);
   await page.screenshot({path:process.env.V3_WORKBENCH_OUTPUT+'/mentor-organizer-pending-'+scenario+'.png',fullPage:true});
   if(scenario==='refresh'){
@@ -132,7 +132,7 @@ it.runIf(process.env.V3_LOCAL_STAGING_HOST==='true').each(['normal','refresh','p
    const executions=(await sql.query('select id,request_id from runtime_executions where actor_id=$1 order by created_at',[f.actor])).rows;
    // The first history reads after the reload fail: the compact retry line is the entry until reads work again.
    const historyRead=(url:URL)=>url.pathname.includes('runtime.view');await page.route(historyRead,route=>route.abort());
-   await page.reload();await poll(()=>composer.isEditable()).toBe(true);expect(await composer.inputValue()).toBe('这是下一条尚未发送的新草稿');expect((await control()).length).toBe(4);
+   await page.reload();await poll(()=>composer.isEditable()).toBe(true);expect(await composer.textContent()).toBe('这是下一条尚未发送的新草稿');expect((await control()).length).toBe(4);
    expect(await page.evaluate(id=>sessionStorage.getItem('opc-step:'+id+':step-0'),d.draftId)).toBe(envelope);
    const recoveryCard=page.getByRole('status',{name:'待恢复的导师请求'}),retryLine=page.getByRole('status',{name:'恢复提示'});
    await poll(()=>retryLine.isVisible()).toBe(true);expect(await retryLine.getByRole('button',{name:'重试',exact:true}).isEnabled()).toBe(true);
@@ -159,7 +159,7 @@ it.runIf(process.env.V3_LOCAL_STAGING_HOST==='true').each(['normal','refresh','p
    await poll(async()=>(await sql.query("select count(t.id)::int n from runtime_executions e join credit_transactions t on t.bill2_run_id=e.billing_run_id and t.reason_code='bill2_spend' where e.id=$1",[refreshed.id])).rows[0].n).toBe(1);
    await page.screenshot({path:process.env.V3_WORKBENCH_OUTPUT+'/mentor-refresh-auto-recovered.png',fullPage:true});
   }else await control(4);
-  await poll(()=>send.isEnabled()).toBe(true);expect(await composer.inputValue()).toBe('这是下一条尚未发送的新草稿');
+  await poll(()=>send.isEnabled()).toBe(true);expect(await composer.textContent()).toBe('这是下一条尚未发送的新草稿');
   const source=(await sql.query('select id,result from runtime_executions where actor_id=$1 order by created_at',[f.actor])).rows.at(-1);
   const saved=JSON.parse(source.result.body);
   expect(saved.message).toContain('本地流式导师正文：');
@@ -182,7 +182,7 @@ it.runIf(process.env.V3_LOCAL_STAGING_HOST==='true').each(['normal','refresh','p
   }
   expect(await page.getByRole('button',{name:/我不确定/}).count()).toBe(0);
   expect(await composer.getAttribute('placeholder')).toBe('其他：自己补充');
-  expect(await composer.inputValue()).toBe('这是下一条尚未发送的新草稿');
+  expect(await composer.textContent()).toBe('这是下一条尚未发送的新草稿');
   await page.reload();await poll(()=>send.isEnabled()).toBe(true);
   // B2 renders the canonical numbered message as an HTML list. Compare the
   // entire persisted body, removing only Markdown's list markers and whitespace.

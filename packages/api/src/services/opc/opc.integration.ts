@@ -1906,7 +1906,7 @@ it("OPC: one mentor conversation persists across steps, refresh and original Ses
     await page.reload();
     await expect
       .poll(() =>
-        page.getByRole("textbox", { name: "给导师的回复" }).inputValue(),
+        page.getByRole("textbox", { name: "给导师的回复" }).textContent(),
       )
       .toBe("我想先明确我的受众");
     let loseFirstReply = true;
@@ -1944,7 +1944,7 @@ it("OPC: one mentor conversation persists across steps, refresh and original Ses
     expect(
       await page
         .getByRole("textbox", { name: "给导师的回复", exact: true })
-        .inputValue(),
+        .textContent(),
     ).toBe("恢复期间另写的未发送内容");
     const d = await f.service.read(draftId);
     expect(d.sessionId).toBeTruthy();
@@ -2043,7 +2043,7 @@ it("OPC: one mentor conversation persists across steps, refresh and original Ses
     expect(
       await page
         .getByRole("textbox", { name: "给导师的回复", exact: true })
-        .inputValue(),
+        .textContent(),
     ).toBe("跨步骤保留的未发送内容");
     await page
       .getByRole("textbox", { name: "给导师的回复" })
@@ -2737,7 +2737,7 @@ it("OPC: question-by-question confirmation keeps mentor, receipt recovery and hi
         informationWrites.push(r.postData()??"");
       }
     });
-    async function send(text:string){await composer().fill(text);await page.getByRole("button",{name:"发送",exact:true}).click();try{await expect.poll(()=>composer().inputValue(),{timeout:30000}).toBe("");}catch(error){console.info('QUESTION_SEND_FAILURE',{alerts:await page.getByRole('alert').allTextContents(),admissions:admissions.length});await page.screenshot({path:process.env.V3_WORKBENCH_OUTPUT+'/question-send-failure.png'});throw error;}}
+    async function send(text:string){await composer().fill(text);await page.getByRole("button",{name:"发送",exact:true}).click();try{await expect.poll(()=>composer().textContent(),{timeout:30000}).toBe("");}catch(error){console.info('QUESTION_SEND_FAILURE',{alerts:await page.getByRole('alert').allTextContents(),admissions:admissions.length});await page.screenshot({path:process.env.V3_WORKBENCH_OUTPUT+'/question-send-failure.png'});throw error;}}
     await send("我做 AI 赛道");
     await expect.poll(()=>first().inputValue(),{timeout:30000}).toBe("我做 AI 赛道");
     // Autosave includes a 700ms debounce plus a fresh read and the write.
@@ -7307,7 +7307,7 @@ it("OPC: U2 browser adopts only second topic, edits a server version and returns
     await page.getByLabel('消息',{exact:true}).fill('这条问题先不要发送');
     await page.getByLabel('文章正文').fill('未保存的下一次修改');
     await page.reload();
-    await expect.poll(()=>page.getByLabel('消息',{exact:true}).inputValue()).toBe('这条问题先不要发送');
+    await expect.poll(()=>page.getByLabel('消息',{exact:true}).textContent()).toBe('这条问题先不要发送');
     await expect.poll(()=>page.getByLabel('文章正文').inputValue()).toBe('未保存的下一次修改');
     await page.getByRole('button',{name:'历史版本',exact:true}).click();
     await page.getByText('修改后的正文：补充前后对照案例。').waitFor();
@@ -7323,7 +7323,7 @@ it("OPC: U2 browser adopts only second topic, edits a server version and returns
     await page.getByRole('button',{name:'登录',exact:true}).last().click();
     await page.waitForURL(url=>url.pathname==='/runtime');
     await expect.poll(()=>page.getByLabel('文章正文').inputValue()).toBe('未保存的下一次修改');
-    await expect.poll(()=>page.getByLabel('消息',{exact:true}).inputValue()).toBe('这条问题先不要发送');
+    await expect.poll(()=>page.getByLabel('消息',{exact:true}).textContent()).toBe('这条问题先不要发送');
   }catch(error){console.info('U4_CORE_FAILURE',error instanceof Error?error.stack:'unknown');throw error;}finally{console.info('U4_CORE_CLOSE_START');await browser.close();console.info('U4_CORE_CLOSED');}
 },300000);
 
@@ -8902,7 +8902,7 @@ it("OPC: topic invalid messages and legacy invalid pending records remain recove
     await input.fill('a'.repeat(8001));
     // The shared composer bounds typed input before dispatch; backend schema
     // validation still protects restored legacy requests below.
-    expect((await input.inputValue()).length).toBe(8000);
+    expect((await input.textContent())?.length).toBe(8000);
     expect(await topicIdentity(f.actor)).toEqual(identity);
     expect(await input.isEnabled()).toBe(true);
     // A record frozen by the earlier UI before its schema rejection is equally
@@ -9649,7 +9649,7 @@ it("OPC: library finalization closes only on success and account discussion swit
    if(name==='ux-account-a'&&destinations.length===1)await page.getByLabel('给导师的回复',{exact:true}).fill('只属于账号 A 的未发送消息');
   }
   expect(destinations[0]).not.toBe(destinations[1]);expect(destinations[2]).toBe(destinations[0]);
-  expect(await page.getByLabel('给导师的回复',{exact:true}).inputValue()).toBe('只属于账号 A 的未发送消息');
+  expect(await page.getByLabel('给导师的回复',{exact:true}).textContent()).toBe('只属于账号 A 的未发送消息');
   const accounts=(await f.service.library({search:'',from:null,to:null})).businesses[0].accounts;
   expect(accounts.every((account:{sourceVersionId:string})=>account.sourceVersionId===f.sourceVersionId)).toBe(true);
  }finally{await browser.close();}
@@ -10103,7 +10103,7 @@ it.each(['true','omitted','false'] as const)('OPC: stopped pending cost unlocks 
   await composer.fill('New business answer after the stopped request');
   await page.getByRole('button',{name:'发送',exact:true}).click();
   await expect.poll(async()=>(await sql.query('select count(*)::int n from runtime_executions where session_id=$1',[draft.sessionId])).rows[0].n,{timeout:30000}).toBe(2);
-  await expect.poll(()=>composer.inputValue(),{timeout:30000}).toBe('');
+  await expect.poll(()=>composer.textContent(),{timeout:30000}).toBe('');
   expect((await sql.query('select to_jsonb(r) row from bill2_runs r where id=(select billing_run_id from runtime_executions where id=$1)',[prepared.executionId])).rows).toEqual(original);
   expect(posts).toBe(1);
   await expect.poll(async()=>(await f.service.read(draft.draftId)).information['step-0'].values[field.id]?.value,{timeout:15000}).toBe('New business answer after the stopped request');
