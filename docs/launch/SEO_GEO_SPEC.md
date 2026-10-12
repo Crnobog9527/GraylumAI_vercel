@@ -57,12 +57,13 @@ Owner 2026-10-12 在"A 中文优先 / B 英文优先"中选 A（原话「选 A�
 
 ### 3.2 第一批公开页（已批准）
 
-Owner 2026-10-12 原话：「同意：根路径简体，首页 H1 用"AI 自媒体教练"；/zh-tw 核心词自媒體；第一批繁体 7 页 + 简体 4 页按附录 B」。
+Owner 2026-10-12 先批准过 11 页的版本（原话：「同意：根路径简体，首页 H1 用"AI 自媒体教练"；/zh-tw 核心词自媒體；第一批繁体 7 页 + 简体 4 页按附录 B」）。同日 Owner 用 Google Ads 关键字规划师导出了三地中文搜索量，交叉核对后改为下面 7 页，Owner 原话：「按这份清单改规范」。取代 11 页版本。
 
-第一批 11 页，地址和目标词见附录 B：
-- 繁体 7 页（`/zh-tw/`）：台湾 5——自媒體經營（含 如何經營自媒體）、IG 經營、短影音行銷、個人品牌、Threads 經營；香港 2——社交媒體營銷、如何成為 KOL。
-- 简体 4 页（根路径）：社交媒体、自媒体、小红书运营、小红书运营 Skill。
-- 英文 8 页（附录 A）等 `/en` 上线。
+中文第一批 7 页（地址、目标词和依据见附录 B）：
+- 台湾 6 页：`/zh-tw/`（枢纽页，自媒體）、`/zh-tw/zimeiti-jingying`（如何經營自媒體 + 自媒體經營 + 經營自媒體）、`/zh-tw/shequn-xingxiao`（社群行銷）、`/zh-tw/shequn-jingying`（社群經營）、`/zh-tw/ig-jingying`（IG 經營 + 如何經營 IG）、`/zh-tw/zimeiti-kecheng`（自媒體課程，转化页）。
+- 香港 1 页：`/zh-tw/kol`（KOL，页内回答如何成為 KOL、KOL 如何賺錢、KOL 報價）。
+- 简体 0 页：根路径只做首页；简体获客靠 YouTube / 小红书，见附录 C。
+- 英文按附录 A 的第 1 批 8 页，等 `/en` 上线。
 
 地基（单主机、元数据组件、sitemap、robots、JSON-LD、About）与页面并行，先做地基。
 
@@ -71,13 +72,13 @@ Owner 2026-10-12 原话：「同意：根路径简体，首页 H1 用"AI 自媒�
 - 简体首页 `/`：
   - Title（给搜索引擎）：`Graylum – AI 自媒体工具：定位、选题、写内容的 AI 自媒体陪跑教练`，一次覆盖"自媒体 / AI 自媒体 / 自媒体 AI 工具"三种真实写法。
   - H1（给用户）：`你的 AI 自媒体陪跑教练`（Owner 2026-10-12 选定）。
-  - "自媒体"（美国 590/月，难度 59.7）是长期词，自然出现在 Title 和首屏；流量靠内页。
-- 繁体枢纽页 `/zh-tw/`：按"第二个首页"做，核心词 **自媒體**（台湾 2,400、香港 590 共同用词）。Title 带"AI 自媒體"和"自媒體經營"；H1 `你的 AI 自媒體陪跑教練`。所有繁体内页用"自媒體經營"做锚文本回链它。首页只用两地共同的词，"社群"（台湾）和"社交媒體"（香港）只出现在各自的内页。
+  - "自媒体"（美国规划师 100–1K/月，难度 59.7，维基和百度百科占前两位）只作长期词自然出现在 Title 和首屏，不指望早期排名。
+- 繁体枢纽页 `/zh-tw/`：按"第二个首页"做，核心词 **自媒體**（规划师：台湾 1K–10K、香港 100–1K，两地共同用词），页内回答"自媒體是什麼"（台湾 1K–10K）。Title 带"自媒體"和"AI 自媒體"；H1 `你的 AI 自媒體陪跑教練`。所有繁体内页用"自媒體"做锚文本回链它。"自媒體經營"一族归 `/zh-tw/zimeiti-jingying`，枢纽页不抢这个词，避免两页争同一个词。首页只用两地共同的词，"社群"（台湾）和"KOL / 社交媒體"（香港）只出现在各自的内页。
 - 用词依据（2026-10-12 实测）：
   - "AI 自媒体教练 / 自媒体教练 / 自媒體教練"三地都没有搜索量，自动补全只有一个人名——"教练"在中文里不是搜索词，只作差异化说法放在 H1。
   - "AI 自媒体 / AI 自媒體"Semrush 未收录，但两地自动补全都有长尾（课程、工具、创业系统、事务所），是正在冒头的词，放 Title。
   - "社交媒体策略 / 策略师 / 社媒策略 / 社群策略 / 社交媒體策略"三地都没有搜索量、自动补全为空，是英文 social media strategy 的直译，**中文页不用**。品牌定位句"AI 社媒策略师"只用于英文版和品牌介绍。
-  - "陪跑"见附录 B 的"陪跑"一族：没有搜索量，但它是华人创作者圈卖真人服务的通用说法（陪跑营、陪跑计划，价格从几万到 20 万台币），H1 用它借这个心智做价格对比。
+  - "陪跑"见附录 B：规划师在美国简体里"自媒体陪跑 / 陪跑教练"不到 10 次，台湾"自媒體陪跑 / 陪跑教練 / 陪跑課程"10–100 次；它是华人创作者圈卖真人服务的说法（价格从几万到 20 万台币），只作 H1 和文案用词，不作搜索目标。
 - 英文首页词（`social media coach`，附录 A）只在 `/en` 上线时用于英文首页。
 - 中文市场的流量预期和获客分工见附录 C：YouTube 中文频道是主引擎，SEO 页是承接层。
 
@@ -218,118 +219,89 @@ Owner 2026-10-12 决定：博客用仓库内文章实现，不接外部系统。
 
 ---
 
-## 附录 A · 英文关键词数据（后备，`/en` 上线时用；2026-10-12 核实；搜索量 = Google Ads 规划师美国口径 2025-09～2026-08 月均；KD = 哥飞版，10-11/12 计算）
+## 附录 A · 英文关键词数据（后备，`/en` 上线时用；2026-10-12 核实）
 
-**英文首页核心词候选**（`/en` 首页用）：`social media coach` 320 / KD 49.9（第 4 名 thesocialmediacoach.com.au 是 DR 20 首页，体验分 0）；`ai social media manager` 720 / 47.1（socialbee、ocoya 首页占位，意图偏"替我发帖"）；`ai social media coach` 未收录；`social media strategy for beginners` 10（不用）。
+口径：搜索量以 Google Ads 规划师美国口径（2025-09～2026-08 月均）为准，Semrush（美国库，2026-10-12）作交叉核对；KD = 哥飞版难度（10-11/12 计算），Semrush KD 另列。两种难度不是同一口径，不比大小。
+
+**英文首页核心词**（`/en` 首页用）：`social media coach`——规划师 320，Semrush 390；哥飞 KD 49.9，Semrush KD 29；第 4 名 thesocialmediacoach.com.au 是 DR 20 首页。备选 `ai social media manager`（720 / 880，哥飞 47.1，Semrush 27，盘面是排程工具首页）。`social media strategy for beginners` 两边都只有 10–20，不用。
 
 **英文第 1 批（8 页，地址在 `/en` 下；`/en` 上线前这些地址不存在，不写进 sitemap 或 hreflang）**
 
-| 地址 | 目标词（合并的同义表达） | 月搜 | KD | 盘面最弱占位 | 功能 |
+| 地址 | 目标词（合并的同义表达） | 规划师 / Semrush | 哥飞 KD / Semrush KD | 盘面最弱占位 | 功能 |
 | --- | --- | --- | --- | --- | --- |
-| `/en/what-to-post-on-instagram` | what to post on instagram（+ what should i post on instagram 170） | 880 | 26.9（品牌词口径） | 第 3 名 DR 8 | 选题 |
-| `/en/what-to-post` | what to post（+ what to post on social media 70） | 170，近半年涨到 390 | 18.7 | 第 2 名 DR 8 | 选题总页 |
-| `/en/how-to-become-a-content-creator` | how to become a content creator with no experience（远期升级 how to become a content creator 2900 / 45.8） | 260 | 15 | 第 3 名 DR 1、第 10 名 DR 2 | 定位 |
-| `/en/social-media-strategy-for-small-business` | social media strategy for small business | 110 | 16.5 | 第 8 名 DR 8；出价 $3.4–19 | 定位 |
-| `/en/how-to-grow-on-instagram` | how to grow on instagram | 590 | 27.7 | 第 1 名 reddit 帖；第 7 名 DR 27 | 策略 |
-| `/en/find-your-niche` | find your niche + finding your niche + how to find your niche | 320+170+260 | 35.9 / 32 / 37.9 | 第 4 名 DR 17 | 定位 |
-| `/en/content-pillar-examples` | content pillar examples | 320 | 28.1 | 第 7 名 DR 33 | 选题 |
-| `/en/personal-brand-coach` | personal brand coach + personal branding coach | 110+140 | 27.6 / 34.5 | 第 2 名 DR 2 | 转化页 |
+| `/en/what-to-post-on-instagram` | what to post on instagram（+ what should i post on instagram） | 880 / 480 | 26.9 / 22 | 第 3 名 DR 8 | 选题 |
+| `/en/what-to-post` | what to post（+ what to post on social media） | 170（近半年涨到 390）/ 70 | 18.7 / 3 | 第 2 名 DR 8 | 选题总页 |
+| `/en/how-to-become-a-content-creator` | how to become a content creator with no experience（远期升级 how to become a content creator 2,400–2,900） | 260 / 210 | 15 / 29 | 第 3 名 DR 1 | 定位 |
+| `/en/social-media-strategy-for-small-business` | social media strategy for small business | 110 / 210 | 16.5 / 46 | 第 8 名 DR 8 | 定位；Semrush 认为更难，盯盘面 |
+| `/en/how-to-grow-on-instagram` | how to grow on instagram + how to grow followers on instagram organically | 590 + 880 / 720 + 12.1K（Semrush 虚高，以规划师为准） | 27.7 / 33、21 | 第 1 名 reddit 帖 | 策略 |
+| `/en/find-your-niche` | find your niche + finding your niche + how to find your niche | 320 + 170 + 260 / 390 + 140 + 590 | 32–37.9 / 35–43 | 第 4 名 DR 17 | 定位 |
+| `/en/content-pillar-examples` | content pillar examples | 320 / 170 | 28.1 / 27 | 第 7 名 DR 33 | 选题 |
+| `/en/personal-brand-coach` | personal brand coach + personal branding coach | 110 + 140 / 110 + 210 | 27.6、34.5 / 3、10 | 第 2 名 DR 2 | 转化页 |
 
-**第 2 批（上线后 6–12 周）**：personal brand strategy（+ personal branding strategy）210+110 / 31.2；how to grow on tiktok 390 / 36.9（品牌词口径）；what to post on tiktok 480 / 39；what to post on facebook 140 / 32.3；how to get followers on instagram 4400 / 37.3；how to monetize social media 170 / 36.8；instagram growth strategy 720（波动大）/ 23.8；social media content strategy 390 / 41.4。
+**第 2 批（`/en` 上线后 6–12 周）**：how to grow on tiktok（390 / 590，哥飞 36.9，Semrush 38）；what to post on tiktok（480 / 320，39 / 24）；what to post on facebook（140 / 210，32.3 / 30）；how to monetize social media（170 / 170，36.8 / 33）；instagram growth strategy（720 波动大 / 210，23.8 / 22）；instagram post ideas（1,300 / 1,600，哥飞 47.8 / Semrush 26，Semrush 认为容易，从第 3 批提上来）。
 
-**第 3 批（DR ≥ 25 后）**：instagram post ideas 1300 / 47.8；social media content plan 720 / 44.1；how to build a personal brand 590 / 47.5；personal brand examples 1300 / 48；linkedin content strategy 210 / 40.7、what to post on linkedin 320 / 41.9；ai social media manager 720 / 47.1；instagram caption generator 2900 / 46（免费工具页）；social media audit 880 / 56.1（半年后）；content strategy 3600 / 57。
+**第 3 批（DR ≥ 25 后）**：personal brand strategy（210 / 170，Semrush KD 50）；how to get followers on instagram（4,400 / 3,600，Semrush KD 55）；social media content strategy（390 / 1.3K，Semrush KD 62）；how to build a personal brand（590 / 2.9K，43）；personal brand examples（1,300 / 1.0K，33）；what to post on linkedin（320 / 720，37）、linkedin content strategy（210 / 390，42）；ai social media manager（720 / 880）；instagram caption generator（2,900 / 6.6K，46，做成工具页）；social media audit（880 / 2.4K，45；另有 audit template 1.3K / 35）；content strategy（3,600，57）。
 
-**不做**：instagram captions 67.5；best time to post on instagram 61.1；hook generator 59.1；social media post ideas 55；personal brand statement 50.3；brand voice 67.8；social media strategy template 61.3；brand positioning 61.3；positioning statement 58.5；niche marketing 57.5；content pillars 57.1；content strategy template（意图跑偏）；niche finder 全族（YouTube 数据工具词）；social media scheduler / planner 类目词。
+**不做**：social media content plan（720 / 1.0K，Semrush KD 64）；instagram captions 67.5；best time to post on instagram 61.1；hook generator 59.1；social media post ideas 55；personal brand statement 50.3；brand voice 67.8；social media strategy template 61.3；brand positioning 61.3；positioning statement 58.5；niche marketing 57.5；content pillars 57.1；content strategy template（意图跑偏）；niche finder 全族（YouTube 数据工具词）；social media scheduler / planner 类目词。
 
-## 附录 B · 中文盘面与搜索量（第一批候选；搜索量 = Semrush 2026-10-12 查询，KD 为 Semrush 口径；DR 为 2026-10-11 实测）
+## 附录 B · 中文关键词数据与第一批依据（2026-10-12）
 
-**三地用语先分清（2026-10-12 用谷歌自动补全和 Semrush 核对）**：台湾说"自媒體 / 社群 / 小編 / 短影音 / 網紅 / IG 經營"；香港说"社交媒體 / KOL / 數碼營銷 / 網上推廣 / IG"；美国华人说"社交媒体 / 自媒体 / 运营"。三套词各自成族，不能互译。Owner 2026-10-12 补充：海外华人创作者的主要平台是 YouTube、TikTok、Instagram，简体页的平台词按这三家写。
+**数据来源和读法**：
+- **主数据：Google Ads 关键字规划师**（Owner 2026-10-12 导出，2025-09～2026-08 月均）。免费账号只给区间：CSV 里的 50 = 10–100，500 = 100–1K，5000 = 1K–10K，空白 = 不到 10。
+- 哥飞版 KD：难度，只说明竞争，不说明有人搜。
+- 谷歌下拉提示：谷歌只提示有一定搜索量的词，作为"有人搜"的独立信号。
+- 谷歌第一页：用来判断意图（搜的人是不是想自己做自媒体）。
+- Semrush 中文估算只作参考：它的中文库按分词存（"自 媒體 經營"有数、"自媒體經營"没有），和规划师常有出入。
+- 谷歌趋势**不用**于这批中文词：它们热度低到接近谷歌统计下限，5 年对比里几乎每周都是 0，小数是取整噪音。
+- 入选规则：规划师 ≥ 100–1K，或"规划师 10–100 + 下拉提示 + 第一页有专门页"；且意图对、难度可接受。上线后用 GSC 真实数据决定加码或停止（第 8 周规则见附录 C）。
 
-**搜索量与难度（Semrush 月搜 2026-10-12；"哥飞 KD"= 哥飞版难度，对中文词可用，2026-10-12 实测；Semrush KD 另列）**
+**三地用语**：台湾说"自媒體 / 社群 / 小編 / 短影音 / IG 經營"；香港说"社交媒體 / KOL / 數碼營銷 / 網上推廣"；美国华人说"社交媒体 / 自媒体 / 运营"。三套词不能互译。
 
-| 市场 | 词 | 月搜 | 哥飞 KD | Semrush KD | 盘面最弱占位 |
+**市场总量（这批词规划师区间代表值合计）**：台湾约 28,400 / 月；香港约 17,750 / 月（大头是导航词和"KOL"本词）；美国简体约 2,150 / 月（30 个词只有 2 个过 100）。
+
+### 台湾（gl=tw，中文繁体）
+
+| 页面 | 目标词 | 规划师 | 哥飞 KD | 依据 / 盘面 | 批次 |
 | --- | --- | --- | --- | --- | --- |
-| 台湾 | 自媒體 | 2,400 | — | 22 | — |
-| 台湾 | 自媒體是什麼 | 1,000 | 20.7 | 23 | 第 7 名 DR 2 |
-| 台湾 | 自媒體課程 | 590 | — | 10 | — |
-| 台湾 | 自媒體經營 | 480 | 20.4 | 15 | 第 10 名 DR 2 |
-| 台湾 | 如何經營自媒體 / 經營自媒體 | 140 / 110 | **6.6** | 9 / 8 | 第 9 名 DR 12 |
-| 台湾 | 短影音 / 短影音行銷 / 短影音趨勢 | 2,900 / 390 / 210 | 17.4（行銷） | 29 / 10 / 20 | 第 3 名 DR 5 |
-| 台湾 | IG 經營 / 如何經營 IG / 經營 IG | 260 / 140 / 110 | **9.6** | 20 / 20 / 15 | 第 1 名 DR 10、第 3 名 DR 2 |
-| 台湾 | 個人品牌 / 個人品牌經營 | 260 / 40 | 29.7 | 35 / 9 | 第 5 名 DR 4 |
-| 台湾 | Threads 經營 | Semrush 无数据（自动补全有 技巧/策略/課程/怎麼經營） | 32.6 | — | 第 7 名 DR 8 |
-| 台湾 | 社群小編 / 小編工作內容 | 260 / 210 | — | 21 / 22 | — |
-| 台湾 | 網紅行銷 | 320 | — | 22 | —（"網紅"本身 5,400 但一半是八卦，不用） |
-| 台湾 | 社群經營、自媒體定位 | Semrush 无数据（谷歌第一页有十几个专营站） | 定位：盘面见下表 | — | — |
-| 香港 | 社交媒體 / 社交媒體營銷 / 社交媒體營銷課程 | 1,000 / 20 / 110 | 31.1（營銷） | 36 / — / 9 | 第 4 名 DR 18 |
-| 香港 | KOL / KOL marketing / 香港 KOL / 如何成為 KOL | 4,400 / 390 / 320 / 90 | 28.1（如何成為） | 28 / 14 / 12 / 12 | 第 7 名 DR 0 |
-| 香港 | 數碼營銷 / 數碼營銷課程 | 480 / 140 | 36.3 | 15 / 10 | 第 1 名 DR 36 |
-| 香港 | 自媒體 / 自媒體定義 | 590 / 110 | — | 22 / 21 | — |
-| 香港 | 網上推廣 / IG 推廣有用嗎 | 110 / 30 | — | 13 / 7 | — |
-| 美国 | 社交媒体 | 1,000 | — | 41 | — |
-| 美国 | 自媒体 | 590 | 59.7 | 18 | 第 7 名 DR 54 首页（维基、百度百科占前两位） |
-| 美国 | 小红书运营 | 210 | — | 5 | — |
-| 美国 | TikTok 运营 | 50（出价 $12.69） | 43.8 | 11 | 第 4 名 DR 0 |
-| 美国 | youtube 中文 | 590 | — | 53 | 导航词，不用 |
-| 美国 | youtube 中文频道怎么做 | — | 57.4（4 席是 YouTube 自己） | — | 不用 |
-| 美国 | 自媒体怎么做 / 运营 / 赚钱、小红书起号 / 引流 / 推广、代运营、海外推广、Instagram 运营、YouTube 运营 | 各 10–30 或无数据 | — | — | — |
-| 新加坡 | 自媒体 | 140 | — | 20 | — |
+| `/zh-tw/`（枢纽页） | 自媒體；页内回答 自媒體是什麼 | 1K–10K；1K–10K | 30.8；20.7 | 两地共同用词；第一页有 DR 2 的站 | **第一批，本市场唯一必做** |
+| `/zh-tw/zimeiti-jingying` | 如何經營自媒體 + 自媒體經營 + 經營自媒體 | 各 100–1K（如何經營近 3 个月 +900%） | 6.1–20.4 | 同一需求合一页；第一页有 DR 2 的站 | 第一批 |
+| `/zh-tw/shequn-xingxiao` | 社群行銷 | 1K–10K（同比 +900%） | 15.6 | 第 1 名 DR 20，前十有 DR 2–3 | 第一批 |
+| `/zh-tw/shequn-jingying` | 社群經營 | 100–1K | 7.1 | 第一页十几个专门页，有 DR 2 | 第一批 |
+| `/zh-tw/ig-jingying` | IG 經營 + 如何經營 IG（技巧、課程放页内） | 各 100–1K | 9.6 | 第 1 名 DR 10，第 3 名 DR 2；下拉有 起步 / 教學 / 技巧 / 賺錢 | 第一批 |
+| `/zh-tw/zimeiti-kecheng` | 自媒體課程（转化页：AI 陪跑 vs 上课；陪跑 / 陪跑教練 / 陪跑課程放页内） | 100–1K（陪跑一族 10–100） | 9.6 | 搜的人准备付钱学；第一页有 DR 3 | 第一批 |
+| `/zh-tw/duanyingyin-xingxiao` | 短影音行銷 | 100–1K | 17.4 | 第 3 名 DR 5 | 第二批 |
+| `/zh-tw/duanyingyin-jiaoben` | 短影音腳本 | 100–1K | 开工前补查 | 和产品"写口播稿"对口 | 第二批 |
+| `/zh-tw/geren-pinpai` | 個人品牌 | 100–1K | 29.7 | 第 5 名 DR 4 | 第二批 |
+| `/zh-tw/zimeiti-shouru` | 自媒體收入（變現、賺錢放页内） | 100–1K（變現、賺錢 10–100） | 18.5（變現） | — | 第二批 |
+| `/zh-tw/ai-shequn-xingxiao` | AI 社群行銷 | 100–1K | 30.6 | 第一页多是政府课程，最弱 DR 32 | 第二批 |
 
-**长尾（谷歌自动补全 2026-10-12，只列有行动意义的）**：
-- 美国简体："小红书运营 skill / agent / 工具 / 教程 / 手册 / 助手"、"小红书文案 skill / 生成器 / 提示词 / 检测"、"社媒运营 skill"、"小红书引流到微信 / 引流话术"、"小红书推广价格"、"自媒体怎么做 / 怎么开始 / 怎么变现"、"tiktok运营教程 / 技巧"、"instagram 运营技巧 / 教程 / 代运营"、"华人在美国做什么生意"。其中 **"小红书运营 skill"一族是 2026 年新出现的词**（第一页全是 GitHub 技能包、知乎教程、explainx.ai），搜索量工具还没收录；Graylum 本身就是带 Skill 的 AI 社媒教练，这一族要单独做页（见下）。
-- 台湾繁体："ig 經營 起步 / 課程推薦 / 教學 / 技巧 / 策略 / 賺錢"、"threads 經營 技巧 / 策略 / 課程 / 怎麼經營"、"自媒體 怎麼做 / 怎麼賺錢 / 經營課程 / 變現方式"、"ai 社群 行銷 / 貼文 / 小編 / 經營"、"youtube 經營 初期 / 教學 / 策略"、"短影音 腳本 / 製作 / 課程"、"個人品牌 經營 / 成功案例"。
-- 香港繁体："kol 如何賺錢 / 如何報價 / 如何成為 / 如何做"、"ig 經營 起步 / 課程 / 技巧"、"ig 推廣 費用 / 有用嗎 / 教學"、"數碼營銷 策略 / ai 數碼營銷"、"開 ig 店"。
+不做：自媒體顧問、陪跑顧問、自媒體怎麼開始（规划师都不到 10）；社群小編（100–1K 但是求职意图）；網紅行銷（100–1K 但是品牌方找网红）；自媒體行銷（100–1K 但近 3 个月 -90%）；自媒體平台、自媒體教學（10–100，意图不对）。Threads 經營、自媒體定位、YouTube 經營、小紅書經營、AI 自媒體（各 10–100）等 GSC 出现相关查询再考虑。
 
-**读法**：
-1. 繁体（台湾）是中文里唯一有像样搜索量的市场："自媒體"一族每月约 5,000 次，短影音一族 3,500 次，难度 6–30；香港 KOL / 社交媒體 / 數碼營銷 三族各几百到几千，难度 28–36。
-2. 简体在谷歌（美国、新加坡）只有"社交媒体""自媒体""小红书运营"过 100，平台词（YouTube / TikTok / Instagram + 运营）几乎没有中文搜索量。美国华人商家找代运营、学 TikTok 获客，主要在微信群、小红书、抖音里问，或者用英文搜；谷歌中文不是他们的主入口。简体页因此只做核心词 + "skill"词族，其余简体获客靠小红书 / 微信内容本身。
-3. Semrush 没有数据的词（社群經營、Threads 經營、自媒體定位）不等于没人搜，谷歌第一页有专营站、自动补全有长尾；用哥飞 KD 和盘面判断。
+### 香港（gl=hk，中文繁体；页面同在 `/zh-tw`，用香港用语写）
 
-**"陪跑"一族（2026-10-12 实测）**：
-- 搜索量：Semrush 在美国、新加坡、台湾都查不到"陪跑 / 自媒体陪跑"（台湾的"陪跑"全是马拉松等无关词）。
-- 自动补全有长尾：美国 / 新加坡"陪跑教练、陪跑课程、陪跑营、陪跑是什么意思、创业陪跑、ai陪跑、ai 陪跑教练、ai agent 陪跑大课"；台湾"陪跑教練、陪跑課程、自媒體 陪跑"。
-- 谷歌第一页（"自媒体陪跑"，美国口径）：10 条里 8 条是台湾的真人陪跑计划（个人品牌陪跑、自媒體陪跑教練、21 天實戰營），Threads 上有人提到陪跑收 20 万台币，知乎有"自媒体创业真的要花钱加入陪跑营吗？太贵了"。"ai 陪跑教练"第一页是台湾的 AI 导入陪跑顾问。
-- 读法："陪跑"是卖方用语，买家不主动搜，所以没量；但它准确描述了一类已经存在、而且很贵的服务。不做 SEO 目标页的核心词，用作首页 H1、YouTube / 小红书定位文案。
-- 后备页（不在第一批）：`/zimeiti-peipao` "AI 自媒体陪跑 vs 真人陪跑营"对比页，承接"陪跑营值不值得 / 陪跑收费 / 陪跑是什么意思"这类犹豫中的人，等 Search Console 出现相关查询再上。
+| 页面 | 目标词 | 规划师 | 哥飞 KD | 依据 / 盘面 | 批次 |
+| --- | --- | --- | --- | --- | --- |
+| `/zh-tw/kol` | KOL；页内回答 如何成為 KOL、KOL 如何賺錢、KOL 報價 | 1K–10K；三个长尾各 10–100 | 37.6；28.1（如何成為） | 第 2 名 DR 0、第 5 名 DR 1；第 1 名是 reddit 帖 | **第一批，本市场唯一必做** |
+| 待查 | 社交媒體 | 1K–10K | — | 拓出来的词偏学术（對中學生的影響、焦慮、好處）；做之前人工看第一页意图 | 待查 |
 
-**繁体枢纽页**：`/zh-tw/` 本身按"第二个首页"做，核心词用台湾和香港共同的说法 **自媒體**（台湾 2,400、香港 590），Title / H1 围绕"自媒體經營"；所有繁体内页用"自媒體經營"做锚文本回链 `/zh-tw/`。首页只用两地共同的词，"社群"（台湾）和"社交媒體"（香港）只出现在各自的内页。
+不做：數碼營銷（100–1K，第一页是课程和招聘）；香港 KOL（100–1K，品牌方找网红名单）；小紅書香港、Threads 香港（导航词）；社交媒體營銷 / 推廣 / 營銷課程、網上推廣、IG 經營、IG 推廣（各 10–100）。
 
-**第一批取舍（Owner 2026-10-12 已批准，见第 3.2 节）**：
-- 繁体第一批 7 页：台湾 5（`/zh-tw/zimeiti-jingying` 自媒體經營+如何經營自媒體；`/zh-tw/ig-jingying` IG 經營；`/zh-tw/duanyingyin-xingxiao` 短影音行銷；`/zh-tw/geren-pinpai` 個人品牌；`/zh-tw/threads-jingying` Threads 經營）+ 香港 2（`/zh-tw/shejiao-meiti-yingxiao` 社交媒體營銷；`/zh-tw/ruhe-chengwei-kol` 如何成為 KOL）。香港页和台湾页同在 `/zh-tw`，hreflang 都是 zh-Hant，各写各的词。
-- 简体第一批 4 页：`/shejiao-meiti` 社交媒体、`/zimeiti` 自媒体（难度 59.7，当长期词，首屏讲"海外华人怎么做自媒体"）、`/xiaohongshu-yunying` 小红书运营、`/xiaohongshu-yunying-skill` 小红书运营 Skill（承接 skill / agent / 工具 一族，页面本身给出可用的 Skill）。
-- 首页写法已定（第 3.3 节）：简体首页 H1"你的 AI 自媒体陪跑教练"，Title 用"AI 自媒体工具"承接搜索；繁体枢纽页核心词 自媒體，H1"你的 AI 自媒體陪跑教練"。
+### 美国（gl=us，中文简体）
 
-**简体候选（gl=us；根路径）**
-
-| 地址（建议） | 目标词 | 盘面 | 判断 |
+| 词 | 规划师 | 哥飞 KD | 判断 |
 | --- | --- | --- | --- |
-| `/xiaohongshu-qihao` | 小红书起号 / 小红书新手怎么做 | reditorapp.com DR 20 排第 1、3；yanghao.app DR 2.6；jingpinwen DR 0.8 | 可做 |
-| `/xiaohongshu-wenan-shengchengqi` | 小红书文案生成器 | Kimi、ai.xiaohongshu.live DR 28、reditorapp DR 20、qingsongsha DR 10 | 可做，工具页 |
-| `/zimeiti-zenme-zuo` | 自媒体怎么做 | YouTube 课程、woshipm DR 75、知乎、posty.tw DR 2.1 | 可做；"自媒体"热度在回落 |
-| `/zimeiti-xuanti` | 自媒体选题 | woshipm、B 站、飞书、知乎、Notion 模板 | 可做 |
-| `/geren-ip-dazao` | 个人IP打造 | rogerwustudio DR 0.6 排第 1、36kr、kolr DR 46 | 可做 |
-| `/geren-pinpai` | 个人品牌怎么打造 | woshipm、Shopify 中文、Reddit、sarawithyou DR 3.6 | 中等；相关搜索偏"自创品牌" |
-| 不单独做 | 自媒体定位 | 第一页被解析成"媒体 + 定位"，结果混乱 | 并入其他页的 H2 |
+| 自媒体 | 100–1K | 59.7 | 维基、百度百科占前两位；只作首页文案 |
+| 社交媒体 | 100–1K | — | 意图未知，不做 |
+| 小红书运营、小红书起号、小红书文案生成器、自媒体怎么做 / 选题 / 变现 / 运营 / 是什么、TikTok / YouTube / Instagram 运营、个人 IP、个人品牌、海外自媒体 | 各 10–100 | 小红书运营 5、自媒体怎么做 11.9 | 不做 SEO 页 |
+| 自媒体定位、自媒体陪跑、陪跑教练、自媒体怎么开始 | 不到 10 | 自媒体定位 20.2 | 不做 |
 
-**繁体候选（gl=tw；`/zh-tw`）**
-
-| 地址（建议） | 目标词 | 盘面 | 判断 |
-| --- | --- | --- | --- |
-| `/zh-tw/ig-jingying` | IG 經營 / IG 經營教學 | ig-hero.com DR 9 排第 1；henrywen DR 21；portaly DR 76；2fish DR 12 | 可做 |
-| `/zh-tw/zimeiti-zenme-kaishi` | 自媒體怎麼開始 | 換日線；soler DR 24；eleanorfilm DR 18；storyofdream DR 6 | 可做 |
-| `/zh-tw/zimeiti-dingwei` | 自媒體定位 | 2017 年老文第 1；posty DR 2.1；lessismore DR 14；dir-beck DR 3；design-lab DR 1.3 | 极易 |
-| `/zh-tw/geren-pinpai-jingying` | 個人品牌怎麼經營 | sarawithyou DR 3.6 排第 1；chouamy DR 19；shacho DR 2.1；henrywen DR 21 | 可做 |
-| `/zh-tw/shequn-jingying` | 社群經營教學 | vgvasia DR 20；shacho DR 2.1；kufu DR 2.9；posty DR 2.1 | 极易；趋势里最冷 |
-| `/zh-tw/threads-jingying` | Threads 經營 | lw-marketing DR 52；domyweb DR 17；2fish DR 12；shiningmktg DR 8 | 可做；英文 threads strategy 只有 10/月，中文独有 |
-| `/zh-tw/zimeiti-bianxian` | 自媒體變現 | inawang DR 35；henrywen DR 21；eleanorfilm DR 18；2fish DR 12 | 可做，偏后期 |
-
-谷歌趋势相对热度（不是量）：美国简体 自媒体 ≫ 小红书运营（0.42×）> 个人品牌（0.28×）> 个人IP（0.19×）；台湾繁体 自媒體 ≫ 個人品牌 > 內容行銷 > 社群行銷 > 社群經營。
+**简体结论**：第一批不做内页，根路径只做首页。`/xiaohongshu-yunying`（小红书运营，难度 5）和"小红书运营 Skill"页（2026 年新出现的下拉词，第一页全是 GitHub 技能包）留作后备，等有 YouTube / 小红书社交流量时当落地页用，不当 SEO 页。
 
 ## 附录 C · 排期与评估指标（预期区间，不是承诺）
 
 | 阶段 | 时间 | 做什么 | 完成标志 |
 | --- | --- | --- | --- |
-| 0 地基 | 上线前 2–4 周 | 单主机迁移；语言路径 + hreflang；统一元数据 / JSON-LD / sitemap / robots；公开页去 force-dynamic；中文首页 + 简体、繁体第一批页面；About；OG 图；GSC / Bing 验证 | 全部页面过第 13 节检查单 |
+| 0 地基 | 上线前 2–4 周 | 单主机迁移；语言路径 + hreflang；统一元数据 / JSON-LD / sitemap / robots；公开页去 force-dynamic；简体首页 + 繁体第一批 7 页；About；OG 图；GSC / Bing 验证 | 全部页面过第 13 节检查单 |
 | 1 收录 | 上线第 1–4 周 | 撤 noindex 和临时 307；提交 sitemap；GSC 每天请求编入索引 ≤ 10 个；AI 目录站 10–20 个；创始人社媒上线帖 | `site:www.graylum.com` 能搜到全部公开页 |
 | 2 铺内页 | 第 5–12 周 | 中文第 2 批页面；博客每周 1 篇；按"有曝光无点击"改 title；首批外链 20–40 个引用域 | KD < 30 的词进前 30；DR 10–15 |
 | 3 见排名 | 第 4–6 个月 | 复测盘面；补内容和内链；第二批中文页；AI 引用月检；视英文界面进度决定 `/en` | 3–5 个词进前 10；500–2000 访问/月；DR 15–25 |
@@ -337,14 +309,17 @@ Owner 2026-10-12 决定：博客用仓库内文章实现，不接外部系统。
 
 依据：哥飞 2023-12-29 群聊"用 6 个月的时间把排名做上去"；社群帖（袁锐钦 2026-04-05）"前 3 个月大部分悄无声息，第 4 个月才有流量"。
 
-**中文市场的流量上限（按附录 B 的搜索量算，2026-10-12）**：繁体第一批词每月合计约 5,000 次搜索，做到前三名也只分到 20–30%，第 4–6 个月乐观估计每月 300–800 次访问、十几到三十个注册；简体在谷歌上可搜的词每月合计不到 2,000 次，第 4–6 个月每月几十到一两百次访问、注册个位数。上表第 3、4 阶段的访问数在 `/en` 上线前要按这个口径下调。**结论：中文市场不能纯靠 SEO 获客**——华人创作者学运营、找工具的入口是 YouTube、小红书、微信群、Threads，不是谷歌中文。中文获客以 Owner 的 YouTube 中文频道为主引擎（小红书、Threads 同步），SEO 页作为承接层：视频和帖子里的链接落到对应的关键词页，页面负责把人送进产品；频道带来的外链、品牌搜索和第三方提及同时服务 SEO 和 GEO（第 12 节）。英文（`/en`）才是搜索量大的那一边（附录 A 第一批合计约 4,000/月），等英文界面上线后启动。
+**中文市场的流量上限（按附录 B 的规划师区间算，2026-10-12）**：台湾第一批 6 页的目标词每月合计在数千到一万多次之间（区间数据，只能到量级），做到前三名也只分到 20–30%，第 4–6 个月乐观估计每月几百到一千多次访问；香港 KOL 页同量级上限更低；美国简体这批词合计约 2,000 次，所以第一批不做简体内页。上表第 3、4 阶段的访问数在 `/en` 上线前要按这个口径下调。**结论：中文市场不能纯靠 SEO 获客**——华人创作者学运营、找工具的入口是 YouTube、小红书、微信群、Threads，不是谷歌中文。中文获客以 Owner 的 YouTube 中文频道为主引擎（小红书、Threads 同步），SEO 页作为承接层：视频和帖子里的链接落到对应的关键词页，页面负责把人送进产品；频道带来的外链、品牌搜索和第三方提及同时服务 SEO 和 GEO（第 12 节）。英文（`/en`）才是搜索量大的那一边（附录 A 第一批合计约 4,000/月），等英文界面上线后启动。
+
+**每页的验证规则**：第 2–4 周确认收录（`site:` 能搜到）；第 8 周看 GSC 里这一页的展示和点击——展示为 0 判定没人搜、停止投入；有展示且平均排名在 20 名以内就加码（补内容、加内链、在 YouTube 视频里放链接）；有点击就看注册转化。转化页（自媒體課程）主要看点击到注册的比例。枢纽页在 GSC 里实际带来展示的查询词，是下一批的选词来源。
 
 每月看 6 个数：已收录页数（GSC 索引）；曝光 / 点击 / 平均排名（GSC 效果）；目标词排名（GSC 查询 + 每月 SERP 复测）；DR（Ahrefs 免费检查器）；AI 引用（5 个固定问题）；自然流量注册数（后台加来源标记）。
 
 ## 附录 D · 待定与存疑
 
-- 已定：A（中文优先）、首页写法、繁体枢纽页核心词、第一批 11 页（第 3.2、3.3 节）。
+- 已定：A（中文优先）、首页写法、繁体枢纽页核心词、中文第一批 7 页（第 3.2、3.3 节，取代 11 页版本）。
 - 公开页免登录试用：暂缓（Owner 2026-10-12）。
-- 中文搜索量已用 Semrush 补上（附录 B）；Semrush 无数据的词只有盘面判断。
-- 香港繁体词汇未查；日语只预留路径。
+- 中文搜索量以 Google Ads 规划师区间为准（附录 B），Semrush 只作参考；短影音腳本的难度、香港"社交媒體"的意图，开工前补查。
+- 2026-10-12 另有一份网页版哥飞 Agent（DeepSeek）生成的"中文词机会表"，用谷歌趋势小数做裁决；经规划师核对多处不成立（例如"如何經營自媒體"实为 100–1K 且在涨，"自媒體顧問 / 陪跑顧問 / 简体自媒体定位"实为不到 10），本文不采用其裁决。
+- 日语只预留路径。
 - 对哥飞资料库的存疑：llms.txt 效果（第 11 节）；HowTo 结构化数据已过时（第 10 节）；"301 不用 308"不作为规则（谷歌两者都当永久跳转；本文反而要求 308，因为它保留 POST）。
