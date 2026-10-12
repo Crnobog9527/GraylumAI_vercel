@@ -43,7 +43,7 @@ beforeAll(async () => {
           doc('d4','月报.pdf'),doc('d5','周报 第2周.md')]};
         function Host({references}){
           const [value,setValue]=React.useState('');
-          window.value=value;
+          window.value=value; window.setValue=setValue;
           return React.createElement(WorkComposer,{value,onChange:setValue,label:'消息',placeholder:'写点什么',references,
             onSend:()=>{window.sent.push(value);setValue('');}});
         }
@@ -142,4 +142,14 @@ it('does not open for an e-mail address, and with no match Enter still sends', (
   await ui(menu(page)).toContainText('没有匹配的已就绪文档');
   await page.keyboard.press('Enter');
   expect(await read<string[]>(page, 'sent')).toEqual(['me@example @不存在']);
+}));
+
+it('keeps a reference when the host appends text, as adding a file does', () => open(true, async page => {
+  await page.keyboard.type('@月');
+  await page.keyboard.press('Enter');
+  await page.evaluate(() => (window as unknown as { setValue: (f: (v: string) => string) => void })
+    .setValue(v => v + '\n\n附件资料\n第一行'));
+  await ui(box(page).locator('p')).toHaveCount(4);
+  await ui(box(page).locator('[data-library-reference="d4"]')).toHaveCount(1);
+  expect(await read<string>(page, 'value')).toBe('@月报.pdf \n\n附件资料\n第一行');
 }));

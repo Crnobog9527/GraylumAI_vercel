@@ -141,10 +141,18 @@ export function ComposerEditor(props: Props) {
 
   useEffect(() => {
     if (!editor || value === emitted.current) return;
+    const previous = emitted.current;
     emitted.current = value;
+    // Text appended by the parent (e.g. a file added) goes after what is there, so references stay intact.
+    const appended = previous !== '' && value.startsWith(previous) ? value.slice(previous.length) : null;
     editor.chain().setMeta(EXTERNAL, true).setMeta('addToHistory', false)
-      .setContent(textToDoc(value), { emitUpdate: false })
-      .command(({ tr }) => {
+      .command(({ tr, state }) => {
+        if (appended === null) {
+          tr.replaceWith(0, tr.doc.content.size, state.schema.nodeFromJSON(textToDoc(value)).content);
+        } else {
+          const end = Selection.atEnd(tr.doc).from;
+          tr.replace(end, end, textToSlice(state.schema, appended));
+        }
         tr.setSelection(Selection.atEnd(tr.doc));
         return true;
       }).run();
