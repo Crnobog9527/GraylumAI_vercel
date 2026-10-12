@@ -81,8 +81,9 @@ export async function reconcileWaffoPayments(db: Db, provider: Provider) {
       // Its webhook never applied. A site order already released (e.g. after the 40-minute timeout) or under
       // review means this is late cash: refund candidate. Otherwise it is an ordinary undelivered payment.
       const site = siteOrders.get(payment.orderMerchantExternalId!)!;
-      // The order was already delivered by another payment: a second first payment (Waffo checkout has no idempotency).
-      if (site.fulfilled_at) {
+      // The order was already delivered by another payment: a second FIRST payment (Waffo checkout has no
+      // idempotency). A renewal carries the same order id and stays on the undelivered path below.
+      if (site.fulfilled_at && payment.periodNumber === 1) {
         findings.push({ kind: 'paid_in_review', paymentId: payment.id, orderId: site.id!, reason: 'duplicate_order_payment', refundCandidate: true });
         continue;
       }

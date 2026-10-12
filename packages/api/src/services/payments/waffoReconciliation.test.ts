@@ -13,7 +13,8 @@ describe('Waffo daily reconciliation (report only)', () => {
       payment({ id: 'PAY_dashes', orderMerchantExternalId: '-'.repeat(36) }, { status: 'pending' }),
       payment({ id: 'PAY_stripe_order', orderMerchantExternalId: '00000000-0000-4000-8000-000000000009' }),
       payment({ id: 'PAY_after_timeout', orderMerchantExternalId: '00000000-0000-4000-8000-00000000000a' }),
-      payment({ id: 'PAY_second_for_order', orderMerchantExternalId: '00000000-0000-4000-8000-00000000000b' }, { status: 'canceling' })];
+      payment({ id: 'PAY_second_for_order', orderMerchantExternalId: '00000000-0000-4000-8000-00000000000b' }, { status: 'canceling' }),
+      payment({ id: 'PAY_renewal_lost_webhook', orderMerchantExternalId: '00000000-0000-4000-8000-00000000000b', periodNumber: 2 })];
     const rpc = vi.fn();
     const db = fakeDb({
       payment_provider_refs: [ref('PAY_ok', 'o-ok'), ref('PAY_renewal_after_cancel', 'o-review'), ref('PAY_refunded', 'o-refunded'),
@@ -53,6 +54,8 @@ describe('Waffo daily reconciliation (report only)', () => {
         reason: 'card_checkout_expired', refundCandidate: true, renewalActive: true },
       { kind: 'paid_in_review', paymentId: 'PAY_second_for_order', orderId: '00000000-0000-4000-8000-00000000000b',
         reason: 'duplicate_order_payment', refundCandidate: true },
+      // A renewal whose webhook was lost is undelivered cash, never a refund candidate.
+      { kind: 'paid_not_delivered', paymentId: 'PAY_renewal_lost_webhook', refundCandidate: false, renewalActive: true },
       { kind: 'receipt_unprocessed', receiptId: 'rcpt-stale', refundCandidate: false },
       { kind: 'delivered_without_payment', paymentId: 'PAY_ghost', orderId: 'o-ghost', refundCandidate: false },
     ]);
