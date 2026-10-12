@@ -215,6 +215,14 @@ async function extra() {
   console.log('extra done', session.error ? 'error' : 'ok');
 }
 
+async function status() {
+  for (const [k, v] of Object.entries(state.scenarios ?? {})) {
+    if (!v.session) continue;
+    const cs = await stripe('GET', `/checkout/sessions/${v.session}`);
+    console.log(k, cs.status, cs.payment_status);
+  }
+}
+
 function urls() {
   for (const [k, v] of Object.entries(state.scenarios ?? {})) console.log(k, v.url ?? v.error?.message);
 }
@@ -293,7 +301,7 @@ async function advance(key, days) {
   const s = state.scenarios?.[key];
   if (!s?.clock) throw new Error(`no clock for ${key}`);
   const clock = await stripe('GET', `/test_helpers/test_clocks/${s.clock}`);
-  const target = clock.frozen_time + Number(days) * DAY;
+  const target = clock.frozen_time + Math.round(Number(days) * DAY);
   const res = await stripe('POST', `/test_helpers/test_clocks/${s.clock}/advance`, { frozen_time: target });
   for (let i = 0; i < 60; i++) {
     const c = await stripe('GET', `/test_helpers/test_clocks/${s.clock}`);
@@ -342,6 +350,6 @@ async function ops() {
 }
 
 const [cmd, a, b] = process.argv.slice(2);
-const run = { setup, extra, urls, inspect, ops, advance: () => advance(a, b) }[cmd];
+const run = { setup, extra, status, urls, inspect, ops, advance: () => advance(a, b) }[cmd];
 if (!run) { console.error('commands: setup | urls | inspect | advance <scenario> <days> | ops'); process.exit(1); }
 await run();
