@@ -26,13 +26,13 @@ export function generateMetadata() {
  * Section order is fixed by the Owner: hero, sticky notes, how the coach works, price, FAQ, final action.
  */
 export default async function LandingPage() {
-  const { supportEmail, membershipPlans, membershipPlansStatus } = await getPublicSiteSettings();
+  const { siteName, supportEmail, membershipPlans, membershipPlansStatus } = await getPublicSiteSettings();
   const plans = membershipPlansStatus === 'available' ? membershipPlans : [];
   // The Gold first-month price and founder seats have no public server answer yet, so no offers are passed.
   const data = buildLandingPageData(resolveLandingFlags(), plans);
 
   return (
-    <SiteShell locale="zh-Hans" supportEmail={supportEmail}>
+    <SiteShell locale="zh-Hans" supportEmail={supportEmail} siteName={siteName}>
       <JsonLd data={[
         softwareApplicationJsonLd({ description: HOME_DESCRIPTION, offers: data.offerList }),
         ...(data.faqItems.length > 0 ? [faqPageJsonLd(data.faqItems)] : []),

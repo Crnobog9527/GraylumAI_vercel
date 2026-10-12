@@ -17,7 +17,7 @@ Existing `verified` rows below describe the 2026-04-28 baseline, not a fresh ful
 | --- | --- | --- | --- | --- | --- |
 | `primary_model_id`, `assistant_model_id` | `/admin/settings` | `chatRuntime.ts` routing configuration | Select an active `ai_models.id` UUID; empty string clears the override | Real local full-form save/read-back, invalid batch atomicity, 401/403 in `workbench.integration.ts`; downstream provider effect not re-run | `partial` |
 | `v3_summary_model_id`, `v3_summary_max_tokens` | `/admin/settings` | Step artifact summarization | Independently eligible model record; output cap 128–4096; unavailable/unconfigured summarizer preserves the original artifact | Local full-form persistence plus existing summary tests; not a fresh deployed provider run | `partial` |
-| `site_name` | `/admin/settings` | landing title, layout metadata, header/footer/admin sidebar | Brand/title updates after save | `admin-config.spec.ts` | `verified` |
+| `site_name` | `/admin/settings` | layout metadata, landing header brand, header/footer/admin sidebar (the landing `<title>` is the fixed home title from SEO_GEO_SPEC 3.3) | Brand/title updates after save | `admin-config.spec.ts` | `verified` |
 | `support_email` | `/admin/settings` | landing footer, maintenance page | Support contact changes after save | `admin-config.spec.ts` | `verified` |
 | `maintenance_mode` | `/admin/settings` | `/login`, `/maintenance`, admin bypass | Public users redirected; admins remain allowed | `admin-config.spec.ts` | `verified` |
 | `chat_show_model_selector` | `/admin/settings` | `/chat` | Model selector show/hide | `admin-config.spec.ts` | `verified` |
