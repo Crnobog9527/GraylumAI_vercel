@@ -30,9 +30,11 @@ BEGIN
    e.payload->>'model' model,e.state execution_state,e.unavailable_reason,
    coalesce(e.payload->>'providerRequestFormat','') IN ('serial-tools-v3-stream','serial-tools-v4-stream','agent-turn-v5-stream') streamed,
    (SELECT count(*) FROM bill2_calls c WHERE c.run_id=r.id AND c.dispatched_at IS NOT NULL)::integer calls,
+   -- Display only (settlement stays on final evidence): a non-final response receipt still shows
+   -- generated output when the cost was recovered later from a lookup without token counts.
    (SELECT coalesce(sum((SELECT max(CASE WHEN rec.payload->'usage'->>'outputTokens' ~ '^[0-9]{1,12}$'
       THEN (rec.payload->'usage'->>'outputTokens')::bigint END) FROM bill2_receipts rec
-      WHERE rec.call_id=c.id AND NOT rec.conflict AND rec.payload->>'final'='true')),0)
+      WHERE rec.call_id=c.id AND NOT rec.conflict AND (rec.payload->>'final'='true' OR rec.payload->>'source'='response'))),0)
     FROM bill2_calls c WHERE c.run_id=r.id)::bigint output_tokens,
    length(coalesce(e.result->>'body',e.primary_result->>'body',''))::integer saved_reply_chars,
    (SELECT max(c.settled_at) FROM bill2_calls c WHERE c.run_id=r.id) last_activity,
