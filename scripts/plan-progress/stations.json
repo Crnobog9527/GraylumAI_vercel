@@ -393,7 +393,7 @@
         },
         {
           "task": "REL-1",
-          "text": "等你：上线前升级 Vercel Pro、准备客服邮箱、生成隐私条款和服务条款，最后批准上线。"
+          "text": "等你：上线前升级 Vercel Pro、准备客服邮箱、生成隐私条款和服务条款，在 OpenRouter 账号和各 workspace 关闭“允许用于训练”，批准开启 Stripe Tax 门槛监控，最后批准上线。"
         }
       ]
     },

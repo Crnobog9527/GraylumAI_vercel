@@ -84,6 +84,22 @@
 
 ### 2.1 Owner 的新决定（2026-09-27 起，2026-10-12 更新）
 
+**2026-10-12：对标不允许跳过（R11）、数据不用于训练改为账号层面关闭、MP 不覆盖税务的国家照常卖**
+
+Owner 原话（2026-10-12，经总控转达）：
+
+> R11 ：不允许临时跳过。且搜索功能肯定是我们现在全部上线之后，生产环境才会上线的，所以用户到时候这一步是不会卡在半路的，按这个规则执行，现在顶多是我在做测试的时候会卡在半路。
+
+> 不用于训练选 A
+
+> MP 不覆盖的国家选 A
+
+以下是落实范围，不是原话：
+
+- 对标（R11）：保持“凑够 3 个合格对标账号才出报告”，不提供“跳过”。取代第 3.7 节和 RESEARCH-TOOLS 实施说明里“取不到数据时请用户粘贴链接或跳过”中的“跳过”（粘贴链接保留）。前提：RESEARCH-TOOLS 必须在正式上线前完成（它在第 7.1 节 V3-M3 → REL-1 之前，由“以上全部”和第 7.2 节 D1 清单挡住）。
+- 数据不用于训练（选项 A 原文：“在 OpenRouter 账号层面统一关掉‘允许用于训练’，代码不强制 data_collection: deny”）：Owner 在 OpenRouter 账号和各 workspace 的隐私设置里关闭训练，上线前核对；代码不强制 `data_collection: deny`。取代 RUNTIME-PROD ⑦“服务端强制”、VOICE 前置条件里的“服务端强制”和第 10 节对应的待确认事项。8 条线排期 ① 线去掉“⑦ 服务端强制 deny”这一步，改为上线前核对 OpenRouter 设置的检查项。
+- MP 不覆盖税务的国家（选项 A 原文：“所有国家照常卖，上线前开启 Stripe Tax 门槛监控，接近某国纳税门槛时提醒再处理”）：写进 PAY-STRIPE-MP 和 REL-1 上线清单；Stripe 正式环境设置仍需 Owner 批准。
+
 **2026-10-12：数据使用同意开关上线先隐藏**
 
 Owner 原话（2026-10-12，经总控转达）：
@@ -104,7 +120,7 @@ Owner 原话（2026-10-12，总控窗口对话）：
 以下是落实范围（总控提出、Owner 同意的排期），不是原话：
 
 - 同一条线内排队，不同线可以并行：
-  1. AI 核心：#829 → #845 → RUNTIME-PROD ⑦（服务端强制 `data_collection: deny`）→ POSITIONING-GATE PR2 → SKILL-I18N-HOOK；其中 ⑦ 是否保留仍是第 10 节待确认事项，开工前先请 Owner 确认，未确认时跳过 ⑦ 继续后面的项；
+  1. AI 核心：#829 → #845 → POSITIONING-GATE PR2 → SKILL-I18N-HOOK（原排的“RUNTIME-PROD ⑦ 服务端强制 `data_collection: deny`”已由同日“数据不用于训练选 A”取代，改为上线前核对 OpenRouter 设置的检查项）；
   2. 读资料：#830 → AGENT-CORE R4 → LIB-4；
   3. 收款：#847 → PAY-STRIPE-MP PR-1…6 → PAYWALL 接线 → PAY-FOUNDER / PAY-NOTIFY / PAY-EVIDENCE / PAY-DISPUTE-GUARD；
   4. 输入框：UI-A 编辑器依赖 PR → 新输入框 → UI-B / UI-C → UI-FINISH → LEGACY-CLOSE；
@@ -516,7 +532,7 @@ Bright Data 等）各自在其平台设置硬上限（预付余额或平台限�
 6. **D1–D7 按推荐确认**：上线范围、Fusion 计费、对比模型上限、会员默认权限和资料库额度、数据使用同意、文件类型、删除文档时保留用户已有的回答和成果（第 10 节）。
 7. **评估后的补充决定**（Fable 5.1 评估之后，第 10 节 D6、D8–D12）：资料库第一版只支持 `.txt`、`.md`、`.docx`；上线基础完成后先做封闭内测；自由对话默认不自动整理；文字表达的明确同意等同于点击确认；后台可以读取并按模型自定义思考强度；Fusion 只用 Graylum 自己开发的，评审和对比两种模式都保留（D12 已于 2026-09-30 修订：评审模式不联网，用专用 workspace 里的 OpenRouter Fusion，实测不通过评审模式保持关闭上线；对比模式仍自己开发）。
 8. **正式环境没有真实用户**（Owner 2026-09-27 确认的事实，不是 Agent 核实的结论）：正式环境（`main` 对应的生产项目）没有任何真实用户数据。发布因此不需要保护旧数据，按第 9.3 节执行。
-9. **条款由 Owner 另行生成**：隐私条款、服务条款、数据使用政策以及页面上的相关提示文字，由 Owner 用第三方专业软件生成。本规划和各实施说明只规定产品行为和技术保证（例如服务端强制不用于训练、删除和同意的功能），不规定条款文字；规划审查和实施审查都不审计条款文字。
+9. **条款由 Owner 另行生成**：隐私条款、服务条款、数据使用政策以及页面上的相关提示文字，由 Owner 用第三方专业软件生成。本规划和各实施说明只规定产品行为和技术保证（例如不用于训练的设置（2026-10-12 起为 OpenRouter 账号层面关闭，见第 2.1 节）、删除和同意的功能），不规定条款文字；规划审查和实施审查都不审计条款文字。
 10. **第三方搜索和对标研究**（D13–D15）：接入第三方普通搜索和社媒数据 API，统一接口层；供应商已按 RESEARCH-0 的结果确定（2026-09-28 修订 D13）：社媒数据 TikHub，网页搜索 Parallel，网页抓取 Firecrawl；搜索费用由用户承担；对标分析只基于真实取到的数据（第 3.7 节）。
 11. **收费公式**（D16，2026-10-01 修订，原话与来源见第 32–34 项）：所有成本先统一为美元；应收积分 `C = ceil(q × Σ(U_i × m_i))`，其中 `U_i` 是每次调用的美元成本，`q=100`，`m_i` 是本次模型或供应商线路的有效倍数，未单独配置时用默认 `m=6`（2026-10-01 定为 3，2026-10-03 由第 50 项改为 6）。一次收费操作最终只向上取整一次；q 和有效倍数在后台配置并冻结，修改不重算已冻结的执行。实际向用户扣取还受第 26 项余额封顶约束。第三方自家积分、人民币或美元计价均先换成美元，不直接当成 Graylum 积分；旧“固定保底积分直接扣除、不再乘倍数”被取代，由 BILL-UNIT 统一成本口径。TikHub 仍按官方标价计成本，阶梯折扣归平台（D14）。
 12. **支付渠道**（D17，2026-10-09 更新）：银行卡订阅走 Waffo，微信和支付宝一次性会员及积分包走 Stripe。取代原先全局默认 Waffo、Stripe 手动备用的安排；按付款方式启停新购买，不自动故障切换。同一笔订单不跨渠道重试，未知结果先核对；旧订单、续费、退款和凭证始终走原渠道。钱包大额验证与兜底见本节 2026-10-09 决定。**2026-10-12 已被取代**：银行卡订阅改走 Stripe Managed Payments，中国大陆用户可选微信/支付宝单笔或普通 Stripe 银行卡订阅，Waffo 停用新购（本节 2026-10-12 决定）。
@@ -1402,7 +1418,7 @@ Owner 2026-09-27 决定（D13–D15）：Agent 自带的联网搜索不够用，
 - **准入要求**（Owner 2026-09-28）：供应商条款必须写明允许商用、允许二次分发给用户使用，并且能提高并发。上表三家的公开条款都没有完全写明第一条（Firecrawl 的公开条款还写着"未经明确授权不得用于商业目的"）。**Owner 2026-09-28 决定：暂不申请，等网站用户使用量大了，再由 Owner 向供应商申请企业定制授权；在此之前按各家公开条款使用。这是 Owner 知情后接受的风险。** 以后增加或更换供应商，也按这两条准入。
 - **不采用**：monid（中间商，公开条款只允许内部使用且禁止系统性取数）、TinyFish（许可只限内部业务用途）、AIsa（中国平台数据是转售 TikHub）、SocialCrawl（价格高，并发不能提高）、Tavily（Owner 决定不用，网页搜索改用 Parallel）、AgentKey（价格高）。
 - **2026-10-04 更新（第 2.1 节第 52 项）**：Owner 定 Bright Data 作为备用渠道，主要覆盖海外平台，Facebook 公开数据由它抓取；接入前先小额实测（预算另批）、核对条款原文，密钥由 Owner 自己配置。接入前下面这条仍然适用。
-- **每类目前只有一家，没有备用线路**：确认失败时如实告诉用户取不到数据，并请用户粘贴链接或跳过（D15），不切换到别家。规则表的"首选 / 备用"结构保留，以后增加供应商时使用。
+- **每类目前只有一家，没有备用线路**：确认失败时如实告诉用户取不到数据，并请用户粘贴链接（D15；不提供“跳过”，凑够 3 个合格对标账号才出报告，Owner 2026-10-12 R11 决定），不切换到别家。规则表的"首选 / 备用"结构保留，以后增加供应商时使用。
 - 测试结论、各接口的可用情况和成本字段见 [实施说明](tasks/RESEARCH-TOOLS.md) 的"RESEARCH-0 结论"。
 
 **必须保证的结果（RESEARCH-TOOLS）**
@@ -1424,7 +1440,7 @@ Owner 2026-09-27 决定（D13–D15）：Agent 自带的联网搜索不够用，
 - 用户没有对标：Agent 生成 3–5 个关键词并请用户确认；按关键词搜近期作品，从作品反推作者；由代码筛选并分为头部参考、同量级可模仿、近期起号快三类，剔除 30 天未更新的账号；展示 8–12 个候选让用户挑 3–5 个；再对选中的账号取数。
 - 播放中位数、互动率、更新频率等指标由代码计算，模型只负责解读。
 - 对标表格里的数字栏目只能由取数结果填入，模型没有写入权限。
-- 取不到数据时必须明说，并请用户粘贴链接或跳过；不允许给示例账号。
+- 取不到数据时必须明说，并请用户粘贴链接；不提供“跳过”，凑够 3 个合格对标账号才出报告（Owner 2026-10-12 R11 决定，取代原“或跳过”）；不允许给示例账号。
 - RESEARCH-TOOLS 完成前，对标这一步按"取不到数据就明说"处理。
 
 <a id="fusion"></a>
@@ -1474,7 +1490,7 @@ v10.2 的"Gold 多模型智囊团"（任务 `V3-GOLD`）由本节取代，任务
 1. 禁用联网是否生效。官方文档（2026-09-30 读取）写明评审团和分析模型固定开启 `web_search` 和 `web_fetch`，`max_tool_calls` 范围是 1–16、不能设 0；workspace 的 Server Tools 页面只写了搜索引擎列表、允许和屏蔽的域名、锁定和默认两种模式，没写能不能把整个工具设为禁用；Fusion 内部调用是否遵守 workspace 设置、禁用后是照常评审还是报错，文档也都没写。**通过条件**：评审团和分析模型都没有发生搜索和抓取（用量里 `web_search_requests` 为 0，也没有抓取记录），整次调用正常返回，评审质量可用。
 2. 官方文档没有写系统提示是否传给评审团模型，也没写评审团和分析模型拿到的是完整对话还是外层模型写的工具调用参数。评审提示词写进请求内容，实测每个模型是否都按它评审；并实测评审团和分析模型是否拿到完整报告原文（而不是外层模型改写或缩写后的内容），拿不到就算实测不通过，评审模式保持关闭。
 3. 计费：确认响应里有没有每个模型的成本，还是只有一个总成本。只有总成本时，按 BILL2 技术契约的 Fusion 覆盖组规则（契约第 71 行）用官方总成本一次结算，不自行拆分（这里指成本记账；向用户的收费基准按 BILL-PAYG 名义费用规则，细则随 FUSION-REVIEW 方案定）。
-4. 数据：确认 `data_collection: deny` 等数据设置是否作用到评审团和分析模型（第 7 节 RUNTIME-PROD ⑦）。
+4. 数据：确认 OpenRouter 账号和各 workspace（含评审团专用 workspace）已关闭“允许用于训练”（第 7 节 RUNTIME-PROD ⑦，2026-10-12 改为账号层面设置）。
 5. 现有适配器拒绝 `openrouter/` 开头的元模型，并要求返回的模型等于请求的模型；服务端工具不是元模型，实施时核对这两条检查和工具调用的兼容性。
 
 **实测不通过：评审模式保持关闭上线，不做自研**
@@ -1682,7 +1698,7 @@ node scripts/plan-progress.mjs --ref origin/staging
 | | RESEARCH-0 | 由 #457、#465、#466 实施（2026-09-28）。第三方搜索供应商对比测试：同一组查询测每一家，记录平台覆盖、新鲜度、字段完整度、速度、单次成本、失败率、是否返回每次调用的官方成本；Owner 据此确定了供应商（第 3.7 节、D13，结论见 [实施说明](tasks/RESEARCH-TOOLS.md)） | —（可与 AC-0 同期） | 高（真实付费调用） | 小 / 0–1 | 完成 |
 | | CI-TRUST | 其余部分：ESLint 覆盖 TS/TSX；网站单测统一入口；API 独立类型检查；删除 `@repo/ui` 空壳和未接入的 ESLint 配置包；依赖升级机器人改发到 staging 并清理指向 `main` 的旧升级 PR（第 8.4 节第 1–3 项）。由 #511、#512、#523 实施 | — | 高 | 中 / 3–4 | 完成 |
 | | DEBT-QUICK | 第 8.3 节第 2 项的快速清理（只含普通改动）；关闭已解决和已废弃的问题单（第 8.4 节第 4–5 项）。由 #482、#483、#558、#607（诊断结论修正、删除旧 `services/promptCache.ts`）、#634（删除 `costCalculator.ts`、`streamHandler.ts`）实施；第 8.4 节第 4–5 项的问题单已核对为关闭状态 | — | 普通 | 小 | 完成 |
-| **2 上线基础** | RUNTIME-PROD | 正式环境真实调用模型：① 模型报价的审批和开放机制；② BILL-UNIT 落实 q=100、默认倍数（2026-10-03 起为 m=6，第 50 项；BILL-UNIT 交付时为 3）与按模型/线路倍数，美元统一成本、调用时冻结（第 11、32–34 项、D16）；③ 后台界面；④ 由 BILL-PAYG 实现逐次冻结与实际结算（第 2.1 节第 26–27 项），可用余额低于按模型/用途配置的 L 时在两步之间暂停、充值续接、余额不为负，超出本次冻结额由平台承担；收费模型准入及超额对账见同两项；普通调用和 Fusion 共用基础机制，Fusion 多模型上界定义前不放行，评审运行前预告保持不变；⑤ 止损：每个用户每日上限、全站每日成本上限和告警、供应商余额告警、一键停止新调用的开关；⑥ 理清 `provider` 字段语义；⑦ 数据不用于训练由服务端强制：正式环境所有模型调用都发送 OpenRouter 的 `data_collection: deny`，只批准支持该设置的供应商线路，准入时拒绝不满足的线路；是否额外要求零数据保留（`zdr`）在实施时核对供应商能力后决定（DATA-ERASURE E10 已决定非 ZDR 线路可以启用；第 ⑦ 项本身是否保留待 Owner 确认，见第 10 节"待确认事项"）。验收包括一次有上限的真实小额对账。分工：② 由 BILL-UNIT 交付；① 的价格读取与准入检查由 MODEL-PRICING-SYNC 交付，正式环境按第 40 项价格全自动；④ 由 BILL-PAYG 交付（收费基准为名义费用，第 41 项）；⑤ 中"一键停止新调用的开关"由 RATE-LIMIT 交付，其余止损项在本任务做 | ④ 按 BILL-PAYG 行提前实施；其余项依赖 AGENT-CORE 稳定 | 高 | 大 / 4–6 | — |
+| **2 上线基础** | RUNTIME-PROD | 正式环境真实调用模型：① 模型报价的审批和开放机制；② BILL-UNIT 落实 q=100、默认倍数（2026-10-03 起为 m=6，第 50 项；BILL-UNIT 交付时为 3）与按模型/线路倍数，美元统一成本、调用时冻结（第 11、32–34 项、D16）；③ 后台界面；④ 由 BILL-PAYG 实现逐次冻结与实际结算（第 2.1 节第 26–27 项），可用余额低于按模型/用途配置的 L 时在两步之间暂停、充值续接、余额不为负，超出本次冻结额由平台承担；收费模型准入及超额对账见同两项；普通调用和 Fusion 共用基础机制，Fusion 多模型上界定义前不放行，评审运行前预告保持不变；⑤ 止损：每个用户每日上限、全站每日成本上限和告警、供应商余额告警、一键停止新调用的开关；⑥ 理清 `provider` 字段语义；⑦ 数据不用于训练（Owner 2026-10-12 选 A，第 2.1 节）：Owner 在 OpenRouter 账号和各 workspace 的隐私设置里关闭“允许用于训练”，上线前核对；代码不强制 `data_collection: deny`。原写法“服务端强制：所有调用发送 `data_collection: deny`、准入拒绝不满足的线路”已被取代。验收包括一次有上限的真实小额对账。分工：② 由 BILL-UNIT 交付；① 的价格读取与准入检查由 MODEL-PRICING-SYNC 交付，正式环境按第 40 项价格全自动；④ 由 BILL-PAYG 交付（收费基准为名义费用，第 41 项）；⑤ 中"一键停止新调用的开关"由 RATE-LIMIT 交付，其余止损项在本任务做 | ④ 按 BILL-PAYG 行提前实施；其余项依赖 AGENT-CORE 稳定 | 高 | 大 / 4–6 | — |
 | | BILL-UNIT | （[#565](https://github.com/Crnobog9527/GraylumAI_vercel/pull/565)，迁移 0157）：所有成本统一美元，q=100、交付时默认 m=3（2026-10-03 默认改为 6，第 50 项；修改配置须另获 Owner 批准）；后台按模型设置倍数，未设用默认值；逐调用冻结有效倍数后合计只进位一次（第 32–34 项）。staging 已按 Owner 批准改为 q=100、m=3（第 39 项）。套餐价格和每月积分已由第 51 项定下；开户赠送 500 积分和积分包三档已先定（第 51 项，记录 S、T），邀请奖励按 m=6 复核 | #497、#550 | 高 | 中 / 1 | 完成 |
 | | PROMPT-CACHE | **上线必做**（Owner 2026-10-01，第 35 项）。方案 #572、实施 #591（冻结前缀与请求缓存）。付费验收 PASS（2026-10-02，v3 测试窗口，八轮 Sonnet 导师对话：缓存标记被 OpenRouter 和 Anthropic 接受，命中轮比不用缓存省 35–56%，八轮合计省 30.8%；执行记录 [5956489014](https://github.com/Crnobog9527/GraylumAI_vercel/pull/591#issuecomment-5956489014)、[5956779675](https://github.com/Crnobog9527/GraylumAI_vercel/pull/591#issuecomment-5956779675)，总控审计 [5956577683](https://github.com/Crnobog9527/GraylumAI_vercel/pull/591#issuecomment-5956577683)、[5956865557](https://github.com/Crnobog9527/GraylumAI_vercel/pull/591#issuecomment-5956865557)）。逐轮扣费当时因财务页问题 BLOCKED，之后由总控在数据库里只读逐轮核对：每个运行单只有一笔消费，等于 ceil(实际费用 × 100 × 3)（[#565 总控审计](https://github.com/Crnobog9527/GraylumAI_vercel/pull/565#issuecomment-5957431423)）。用户收费按名义费用（第 41 项），缓存节省不让给用户 | #497 | 高（Runtime 调用路径和费用上界） | 中 / 2 | 完成 |
 | | PROMPT-CACHE-HISTORY | 对话历史也加缓存（Owner 2026-10-03，第 43 项；方案 #601）：H1 机制 #610（默认不激活），由 CONVERSATION-DRIVEN-CAPTURE B2 激活；这次不做 1 小时缓存；付费实测复用 B2 评测和 B2+F1 验证的预算。验收与交接：[H1 实际费用与联合验收缺口](https://github.com/Crnobog9527/GraylumAI_vercel/issues/716#issuecomment-6038028506)。 | #594；激活随 CONVERSATION-DRIVEN-CAPTURE B2 | 高 | 小 / 1（激活随 B2） | — |
@@ -1695,7 +1711,7 @@ node scripts/plan-progress.mjs --ref origin/staging
 | | MODERATION | **暂缓**（Owner 2026-10-01，第 19 项）：不再是封闭内测前提；正式功能何时实现，公开上线前再请 Owner 决定。此前不接 OpenAI Moderation、不需密钥、不核实价格。MODERATION-HOOK 的输入/输出检查点随 RATE-LIMIT 接线（#594），默认放行；拦截后的不收费、独立终止状态与日志以后正式实现时补齐 | 正式功能待 Owner 决定 | 高 | 待定 | 阻塞：Owner 2026-10-01 决定暂缓（第 19 项），公开上线前再请 Owner 决定 |
 | | MODEL-REASONING | ① 添加或编辑模型时，从 OpenRouter 公开模型目录读取该模型支持的思考档位、默认档位、能否关闭，保存快照并可"重新读取"；② 管理员按模型和用途（交互对话、整理、评审、写作）选择思考强度，选项只来自该模型支持的档位，外加"关闭"（允许时）和"用供应商默认"；③ 保存前检查所选供应商线路支持这个参数；④ 准入时把所选档位冻结进执行记录，重放用原值；⑤ 档位和回复长度上限联动校验；⑥ "试一次"按钮，用固定短问题真实调用一次，显示首字时间和是否有正文，费用由平台承担。取代 PR #446 里写死的对照表。**按 Owner 2026-09-28 决定，MODEL-REASONING 提前到 N1b，在 AC1-4 之前完成**（Owner 要求模型在后台随时切换、不绑在代码里）。由 #480、#494、#495 实施 | P0-1（和 RUNTIME-PROD 由同一个 writer 完成，同一个后台模型页） | 高 | 中 / 2–3 | 完成 |
 | | ENTITLEMENTS | 会员权限配置：Fusion 两种模式的开关和上限、资料库总存储空间；服务端检查（系统级文件数量保护上限不属于会员权益，不在这里配置）。PR-1 #540（迁移 0153）、PR-2 后台会员权限与 Fusion 数量设置界面 #609（Owner 2026-10-03 批准合并）；合并后的 staging 冒烟由总控另行安排。2026-10-04 起 Fusion 默认只给 Gold、新增定位档案上限（第 51 项），由 PAYWALL 实施，本任务不重开 | —（和 PAY-COMMON 由同一条钱路线先后完成） | 高 | 中 / 2 | 完成 |
-| | RESEARCH-TOOLS | 第三方搜索统一接口层和对标研究（第 3.7 节，见 [实施说明](tasks/RESEARCH-TOOLS.md)）：规则表和已验证平台清单、统一返回格式、美元成本接入 BILL2、确认失败时如实告知取不到数据（以后经批准增加备用线路后才换备用；2026-10-04 Owner 定 Bright Data 为备用渠道、Facebook 由它抓取，接入前实测和条款核对，第 52 项）、证据进资料库并接入账号注销、打开真实模型的搜索开关、对标流程的代码计算和表格写入限制。在封闭内测之前完成。验收与交接：[Bright Data 公开资料、账户与实测证据边界](https://github.com/Crnobog9527/GraylumAI_vercel/issues/716#issuecomment-6038239994)。 | RESEARCH-0、AC-1、RUNTIME-PROD、DATA-ERASURE | 高 | 大 / 3–5 | — |
+| | RESEARCH-TOOLS | 第三方搜索统一接口层和对标研究（第 3.7 节，见 [实施说明](tasks/RESEARCH-TOOLS.md)）：规则表和已验证平台清单、统一返回格式、美元成本接入 BILL2、确认失败时如实告知取不到数据（以后经批准增加备用线路后才换备用；2026-10-04 Owner 定 Bright Data 为备用渠道、Facebook 由它抓取，接入前实测和条款核对，第 52 项）、证据进资料库并接入账号注销、打开真实模型的搜索开关、对标流程的代码计算和表格写入限制。在封闭内测之前完成（封闭内测已取消；2026-10-12 R11 决定以它在正式上线前完成为前提，对标不提供跳过）。验收与交接：[Bright Data 公开资料、账户与实测证据边界](https://github.com/Crnobog9527/GraylumAI_vercel/issues/716#issuecomment-6038239994)。 | RESEARCH-0、AC-1、RUNTIME-PROD、DATA-ERASURE | 高 | 大 / 3–5 | — |
 | | RATE-LIMIT | 方案 #573、准备切片 #562、后端 #590 与前端 #594 联合候选（#590 并入 #594）；一轮只在第一次新调用前检查、按冻结的最多调用数一次性预扣；同一写入方留 MODERATION-HOOK 两个检查点，默认放行。初始新对话 10/分钟、200/天，模型调用 30/分钟、600/天（第 30 项）。B 段 staging 冒烟全部 PASS（8 次真实调用，0.22676 美元）。初始值按每条新消息计（第 49 项）。正式环境 Upstash 在封闭内测前配置并核对容量 | #497、#550 | 高 | 中 / 3（正式环境 Upstash 见第 7.6 节） | 完成：不含正式环境 Upstash 配置和容量核对（第 7.6 节，公开上线前做） |
 | | INVITE-ABUSE | （#560，迁移 0154）：首次正金额开户赠送的新账号才获邀请奖励、每账号仅绑定一次；不开消费返利；接受不同身份同一人无法识别（第 29 项） | #538 开户赠送资格 | 高 | 小 / 1 | 完成 |
 | | SEC-RATELIMIT | 限流 fail-closed、Redis 超时放行、诊断计费探针。（#488，本机预览 #492） | — | 高 | 小 / 1–2 | 完成 |
@@ -1706,7 +1722,7 @@ node scripts/plan-progress.mjs --ref origin/staging
 | | PII-REGEX | 接手 PR #333（邮箱类个人信息匹配的性能加固，改的是安全过滤规则）：基于最新 staging 更新后重新审查，按 AGENTS.md 第 4 节验证、审查后合入 staging（第 8.4 节第 6 项）。由 #500 在最新 staging 上重新实现，#333 关闭 | — | 高 | 小 / 1 | 完成 |
 | **3 差异化功能** | FUSION-REVIEW | 定稿报告多模型评审（第 4 节，见 [实施说明](tasks/FUSION.md)）；结果接入账号注销。对外名称"多模型专家评审团"，上线默认只给 Gold（第 51 项） | AC-3、REPORT-GEN、RUNTIME-PROD、ENTITLEMENTS、DATA-ERASURE | 高 | 大 / 3–4 | — |
 | | LIB-DOCS | 资料库上传、"我的文档 / 语料库"、真正删除、按会员等级的总存储空间和系统级文件数量保护上限（见 [实施说明](tasks/LIBRARY-VOICE.md)）；接入账号注销；设计上传权限时一并整理共享 Storage 的授权（第 8.5 节）。第一步是 LIB-1 依赖及安全夹具（#549）；与 AC-2 设计定位导师查询工具（第 31 项） | ENTITLEMENTS、DATA-ERASURE | 高 | 大 / 3–4 | — |
-| | VOICE | 文风画像生成、确认和写作注入；接入账号注销 | LIB-DOCS、AGENT-CORE、DATA-ERASURE、RUNTIME-PROD（资料内容发给模型前，"不用于训练"已由服务端强制） | 高 | 中 / 2–3 | — |
+| | VOICE | 文风画像生成、确认和写作注入；接入账号注销 | LIB-DOCS、AGENT-CORE、DATA-ERASURE、RUNTIME-PROD（资料内容发给模型前，OpenRouter 账号和 workspace 已关闭训练并核对过；2026-10-12 前写的是“服务端强制”） | 高 | 中 / 2–3 | — |
 | | UI-A | 输入框编辑内核（沿用 v11 §6.3，属于 `V3-OPC-UI`，不新建任务名）。需要编辑器依赖时（例如 Tiptap，先核实版本、许可和构建），第一个 PR 只引入这个依赖，按 AGENTS.md 第 4 节验证、审查后合入 staging；之后的 PR 只改前端并沿用现有请求接口 | 编辑器依赖 PR 无前置。新输入框要改共用的 `work-composer.tsx` 和它在自由对话页、定位页（`runtime/page.tsx`、`positioning/[draftId]/page.tsx`）的调用处，与 R8a/R8b 的工作区页面改动排队、不同时改（同改这两页的模型身份说明 PR 也一样）（2026-10-12 由名义上的依赖 AGENT-CORE 改为实际冲突） | 高 | 中 / 3–4 | — |
 | | UI-MODEL | 输入框里的模型位置（Owner 2026-10-03，第 50 项）：保留位置，只显示 Auto，用户暂时不能切换；实际模型按用途由后台配置决定，不按会员档位区分 | UI-A、ENTITLEMENTS | 高 | 小 / 1–2 | — |
 | | FUSION-COMPARE | 输入框里的多模型对比；结果接入账号注销。每次打开默认勾选管理员在后台设定的一组模型；用户可以取消勾选、自己搭配，范围受管理员允许列表和会员权限限制；后台新增参数"每次对比最少要勾选几个模型"，由 Owner 调整，前端和服务端都按它校验，取值范围是 2 ≤ 最少勾选数 ≤ D3 的当前最多模型数，后台可调但不能低于 2（Owner 2026-10-03，第 50 项）。同步 [FUSION 实施说明](tasks/FUSION.md) 的对比模式描述。上线默认只给 Gold（第 51 项） | UI-A、FUSION-REVIEW、DATA-ERASURE（多模型勾选器属于本任务，不依赖 UI-MODEL） | 高 | 中 / 2–3 | — |
@@ -1721,13 +1737,13 @@ node scripts/plan-progress.mjs --ref origin/staging
 | | POSITIONING-GATE | 定位前置检查（第 2.1 节 2026-10-12 决定）：Skill 后台“与社交媒体相关”勾选；无定位用户为自己账号做社媒运营的请求（含自由对话语义判断、无关 Skill 中途转社媒；社媒常识问答等照常回答）不继续并引导定位或“我已有定位”导入。语义判断用模型完成：Decisions 先判断、主模型兜底；被拦的回合（含主模型兜底判为拦截）不扣用户积分，由 Graylum 承担。 | MODEL-IDENTITY-GUARD（与之排队改同一块 runtime） | 高 | 中 / 2–3 | — |
 | | MODEL-IDENTITY-GUARD | 模型身份保护（第 2.1 节 2026-10-12 决定，Fusion 评审团例外、后台一键开关）：身份说明（指令）、自我介绍式泄露的回答替换、界面与接口去除真实模型名；不做输入侧拦截，身份询问照常调用模型（Owner 2026-10-12 补充）；品牌话术由 Owner 确认，不声称自研。上线前完成。 | RUNTIME-PROD（与在途 runtime 执行改动排队） | 高 | 中 / 3–4 | — |
 | | SKILL-I18N-HOOK | Skill 多语言对照接口（第 2.1 节 2026-10-12 多语言决定）：Skill 内核保持简体中文唯一原版；后台可为用户可见文字（步骤名、字段名、提问卡选项、报告标题）配英文对照；AI 按用户语言回答。产品界面英文化、语言提示条归上线后的 I18N-EN。 | MODEL-IDENTITY-GUARD、POSITIONING-GATE（同改 Skill 编辑器与 AI 指令，排在其后） | 高 | 小 / 1–2 | — |
-| | PAY-STRIPE-MP | 银行卡订阅迁到 Stripe Managed Payments（第 2.1 节 2026-10-12 决定，取代 PAY-STRIPE-CARD-FALLBACK）：国际银行卡/Apple Pay/Google Pay 走 MP（按会话启用），中国大陆用户在选择页自选微信/支付宝单笔或中国大陆银行卡订阅（普通 Stripe）；Gold 首月 49 美元（自然月，一次性优惠券，钱包同步）；会员可用 MP 买积分包；价格税另计；创始 496 锁价、名额由我方系统管理；Pro→Gold 另开 Gold 结账+Pro 期末停；24 小时宽限与创始 7 天配合 Stripe 重试；Link 代退款/用户在 Link 取消/删数据取消订阅按外部事实处理；Waffo 停用新购、代码保留。方案与验证证据见 PR #847，迁移 0221/0222，6 个 PR；正式平台操作逐项另获批准。 | #847 迁移方案合并后开工；复用已合并的公共订单、人工退款和每日对账（PAY-COMMON 已交付的部分，不等它整体标完成） | 高 | 大 / 6 | — |
+| | PAY-STRIPE-MP | 银行卡订阅迁到 Stripe Managed Payments（第 2.1 节 2026-10-12 决定，取代 PAY-STRIPE-CARD-FALLBACK）：国际银行卡/Apple Pay/Google Pay 走 MP（按会话启用），中国大陆用户在选择页自选微信/支付宝单笔或中国大陆银行卡订阅（普通 Stripe）；Gold 首月 49 美元（自然月，一次性优惠券，钱包同步）；会员可用 MP 买积分包；价格税另计；创始 496 锁价、名额由我方系统管理；Pro→Gold 另开 Gold 结账+Pro 期末停；24 小时宽限与创始 7 天配合 Stripe 重试；Link 代退款/用户在 Link 取消/删数据取消订阅按外部事实处理；Waffo 停用新购、代码保留；MP 不代办税务的国家照常卖，上线前开启 Stripe Tax 门槛监控，接近某国纳税门槛时提醒再处理（Owner 2026-10-12 选 A）。方案与验证证据见 PR #847，迁移 0221/0222，6 个 PR；正式平台操作逐项另获批准。 | #847 迁移方案合并后开工；复用已合并的公共订单、人工退款和每日对账（PAY-COMMON 已交付的部分，不等它整体标完成） | 高 | 大 / 6 | — |
 | | PAY-FOUNDER | 创始社群、展示墙、徽章独立交付，复用已有的创始资格和名额计数（PAY-WAFFO 时实现，PAY-STRIPE-MP 沿用）；按第 51 项 Q/R/V 处理公开同意、到期/退款撤销和社群人工办理。运营流程在开工前再定；不并入收款 PR，正式售卖前完成。 | PAY-STRIPE-MP | 高 | 待实施方案细化 | — |
 | | PAY-NOTIFY | 事务邮件提醒独立交付：年付扣款、钱包创始到期、恢复 Pro/拒付后重订，沿第 51 项 X/AB/AD；时间、渠道、费用开工前再定。上线前已定部分须在正式售卖前完成。 | PAY-STRIPE-MP | 高 | 待实施方案细化 | — |
 | | PAY-EVIDENCE | 付款 IP/设备证据与清理独立交付，沿第 51 项 W；Owner 定留存后同步 DATA-ERASURE 契约和实际清理，完成前不采集。条款版本和订单同意仍归收款核心。正式售卖前完成已定证据要求。 | PAY-STRIPE-MP、DATA-ERASURE | 高 | 待实施方案细化 | — |
 | | PAY-DISPUTE-GUARD | 第 51 项 X/AC/AD 已定的上线前拒付通知接收、可撤回冻结及停止续费，从收款 PR 拆出独立交付。**2026-10-12 起新订单走 Stripe（第 2.1 节 2026-10-12 决定），方向改为按 Stripe 拒付事件（`charge.dispute.*`）处理**：Stripe Managed Payments 订单由 Stripe 作为记录商户处理拒付，本任务接收它的拒付事件做通知记录、可撤回冻结和停止续费；中国大陆银行卡订阅和微信/支付宝单笔（普通 Stripe，Graylum 是卖家）的拒付由我们自己处理，同样从 Stripe 拒付事件接收。PAY-STRIPE-MP 只保证这些事件不报错（[#847 迁移方案](https://github.com/Crnobog9527/GraylumAI_vercel/pull/847)）。MP 与普通 Stripe 各自的事件、到冻结的对应和人工替代，实施时由方案细化。Waffo 的每日 GraphQL `chargebacks` 查询和邮件（[Waffo 2026-10-10 答复](https://github.com/Crnobog9527/GraylumAI_vercel/pull/752#issuecomment-6095292601)，PAY-WAFFO §3、§8）只保留给已有 Waffo 旧订单。最终判定、申诉等扩展仍归上线后 CHARGEBACK，不扩大本任务。 | PAY-STRIPE-MP | 高 | 待实施方案细化 | — |
 | | PUBLIC-SITE | 公开站上线准备（第 2.1 节 2026-10-12 域名合并、中文优先、风格统一、落地页方向决定）：app.graylum.com 并入 www.graylum.com、应用放 /app；SEO/GEO 规范与基础设置；公开页面（落地页、定价、常见问题、教程）按对话页风格重做；新落地页按全部完工后的产品来写、未验收的能力不写。具体拆分待 SEO/GEO 规范文档和域名方案定稿后细化；正式环境平台设置逐项另获 Owner 批准。 | 落地页须等 D1 范围功能完成；域名合并的正式环境设置另行批准 | 高 | 待实施方案细化 | — |
-| | V3-M3 → REL-1 | 完整验收和发布（第 9.3 节；正式环境没有真实用户，按新建环境发布，不做旧数据兼容和迁移） | 以上全部；PAY-FOUNDER、PAY-NOTIFY、PAY-EVIDENCE、PAY-DISPUTE-GUARD | 高；生产另行批准 | 大 | V3-M3：阻塞：等第 0–4 阶段的 D1 范围全部完成（依赖"以上全部"） |
+| | V3-M3 → REL-1 | 完整验收和发布（第 9.3 节；正式环境没有真实用户，按新建环境发布，不做旧数据兼容和迁移）。上线清单（2026-10-12 补充，第 2.1 节）：开启 Stripe Tax 门槛监控（Stripe 正式环境设置须 Owner 批准）；核对 OpenRouter 账号和各 workspace 已关闭“允许用于训练”。 | 以上全部；PAY-FOUNDER、PAY-NOTIFY、PAY-EVIDENCE、PAY-DISPUTE-GUARD | 高；生产另行批准 | 大 | V3-M3：阻塞：等第 0–4 阶段的 D1 范围全部完成（依赖"以上全部"） |
 | **5 上线后** | INTEGRATION-BASE → V3-FEISHU、SOCIAL-SYNC | 沿用 v11 §8（C1 套餐式自动追踪已确认） | REL-1 上线 | 高 | 大 | — |
 | | CHARGEBACK | 方向（Owner 2026-10-04，第 2.1 节第 51 项，[记录 W](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5981381009)、[记录 X](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5981808905)；**上线后任务，不阻塞上线**）：拒付最终判定输了，按商品分别处理：订阅按退款规则处理这一期（扣掉还没用完的积分、终止这份订阅以后的积分发放，是创始会员的立即结束创始身份，名额不放回）；微信一次性会员结束这一期，1 年期的终止以后按月发放的积分、扣掉这一期还没用完的积分（是创始会员的同样结束创始身份）；订阅和微信一次性会员被冻结的已发积分判输扣回、判赢解冻，不动其他来源（[记录 AC](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5982525998)）；积分包扣回这个包里没用完的积分、判赢解冻，不动其他来源的积分（[记录 Z](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5982115736)）；所有拒付都不自动接受，由 Owner 人工处理（[记录 Y](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5982111397)）；赢了就解除 PAY-DISPUTE-GUARD 的冻结、恢复，按幂等处理（拒付期间被暂停的按月积分，判赢后按原发放日逐期补发，幂等，不改变原会员期限和发放日期，不延到原到期日之后）；订阅判赢后不自动恢复扣费，提醒用户自己重新订阅；判输时订阅终止（[记录 AD](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5982615688)），具体由 CHARGEBACK 方案提出、Owner 批准；一键导出申诉材料（用收款核心的同意记录，原写 PAY-WAFFO，及 PAY-EVIDENCE 的付款证据）；限制同一人反复拒付；信用卡账单商户名（由 Waffo 控制）。续费和到期提醒归 PAY-NOTIFY，拒付事件接收和可撤回冻结归 PAY-DISPUTE-GUARD，上线前完成（2026-10-09 拆分）。拒付通知方式、举证截止日和手续费（每笔 $25）已由 [Waffo 2026-10-10 答复](https://github.com/Crnobog9527/GraylumAI_vercel/pull/752#issuecomment-6095292601)；开工前仍须向 Waffo 核实要交的材料和账单商户名。2026-10-12 补充：新订单改走 Stripe（MP 订单由 Stripe 作为记录商户处理拒付，大陆通道和钱包单笔由我们处理），上文 Waffo 的通知方式、手续费、材料和账单商户名只适用于旧 Waffo 订单；按 Stripe 的做法实施时由方案细化 | PAY-STRIPE-MP、PAY-NOTIFY、PAY-EVIDENCE、PAY-DISPUTE-GUARD；拒付材料和账单商户名核实（旧 Waffo 订单仍向 Waffo 核实） | 高 | 待实施方案细化 | — |
 | | LEARN-1、LEARN-2 | 第 6.3 节：读取用户数据、依赖数据使用同意（2026-10-12：同意开关上线先隐藏，LEARN-1 做问题案例分析时再定开关方案，第 2.1 节） | 有真实用户 / SOCIAL-SYNC | 高 | 中 | — |
@@ -1798,7 +1814,7 @@ AC-4 + UI-MODEL + UI-B + UI-C + UI-FINISH + 功能对照检查 ─→ LEGACY-CLO
 | N2 上线基础 | RUNTIME-PROD（含 BILL-UNIT、BILL-PAYG、RUNTIME-FAILURE-RECONCILE）、DEP-BATCH-A（Owner 2026-10-12 已选中）、PROMPT-CACHE、PROMPT-CACHE-HISTORY、RATE-LIMIT 接线（含默认放行的 MODERATION-HOOK）、DB-BASELINE、RESEARCH-TOOLS、ENTITLEMENTS、SEC-RATELIMIT、PII-REGEX、DATA-ERASURE 实现、COST-REPORT、PAY-COMMON。钱路线已由 Owner 批准并行开工（第 46 项） | 上线基础完成。原定此后先做 5–10 人封闭内测（D8），2026-10-03 已取消（第 2.1 节第 50 项），按 D1 范围完成后直接公开上线售卖 |
 | N3 差异化功能 | 先 FUSION-REVIEW、LIB-DOCS、VOICE；再 UI-A、UI-MODEL、FUSION-COMPARE、UI-B、UI-C、UI-FINISH；收款按第 2.1 节 2026-10-12 决定：#847 迁移方案合并后做 PAY-STRIPE-MP（PR-1 起；国际银行卡、Apple Pay、Google Pay 走 Stripe Managed Payments，中国大陆用户自选微信/支付宝单笔或普通 Stripe 银行卡订阅；正式平台操作逐项另获批准），再 PAYWALL 接线，再 PAY-FOUNDER、PAY-NOTIFY、PAY-EVIDENCE、PAY-DISPUTE-GUARD（独立售前任务）；PAY-WAFFO 已于 2026-10-12 冻结（停用新购、代码保留，旧 Waffo 订单沿原渠道），不再排期；MODEL-IDENTITY-GUARD → POSITIONING-GATE（上线前完成，排在在途 runtime 改动之后）；PAYWALL（依赖 REPORT-GEN、BILL-PAYG、PAY-COMMON、PAY-STRIPE-MP、ENTITLEMENTS 和已入库的付费墙设计定稿 v25，须在 REL-1 之前完成）；EXPERT-CONSULT（依赖 PAYWALL、DATA-ERASURE，须在 REL-1 之前完成）；PUBLISH-MONITOR（依赖 RESEARCH-TOOLS 和 Post for Me 实测、条款核对，须在 REL-1 之前完成，D1 范围变更） | 差异化功能完成（对比模式对钱路核心改动最大，放在后面） |
 | N4 收口 | PUBLIC-SITE（域名合并、公开页面风格、新落地页；正式环境设置另行批准）、LEGACY-CLOSE、V3-M3；公开上线前请 Owner 决定 MODERATION 正式实现时间 | 完整验收；REL-1 和生产另行批准 |
-| **当前批次：8 条线并行（Owner 2026-10-12 选定，第 2.1 节）** | 同一条线内排队，不同线并行：① AI 核心：#829 → #845 → RUNTIME-PROD ⑦（服务端强制 `data_collection: deny`；⑦ 是否保留仍是第 10 节待确认事项，开工前先请 Owner 确认，未确认就跳过）→ POSITIONING-GATE PR2 → SKILL-I18N-HOOK；② 读资料：#830 → AGENT-CORE R4 → LIB-4（R4 和 LIB-4 都改 `read_source`）；③ 收款：#847 → PAY-STRIPE-MP PR-1…6 → PAYWALL 接线 → PAY-FOUNDER / PAY-NOTIFY / PAY-EVIDENCE / PAY-DISPUTE-GUARD；④ 输入框：UI-A 编辑器依赖 PR → 新输入框（与 R8a/R8b 工作区页面排队）→ UI-B / UI-C → UI-FINISH → LEGACY-CLOSE；⑤ 定位流程：#818（已合并）→ R14 → R8b；⑥ 官网：PUBLIC-SITE 第一段 + 台湾 6 页，`/app` 路由搬迁放在冻结窗口最后做，正式域名切换上线前逐项批准；⑦ 数据库改动：0217 #828 → 0218 #830 → 0219 #831 → 0220 #832 → 0221/0222 PAY-STRIPE-MP，按合并顺序重建指纹；⑧ 不写代码：DATA-ERASURE 收尾梳理、Fusion 实测、R11。Codex 浏览器验收同一测试账号一次一个，按顺序排。跨线的真实依赖仍按第 7.1 节（例如 UI-B/UI-C 还要等 LIB-DOCS 和 RUNTIME-PROD） | 每条线做完自己的最后一项就停；合并到 `main`、正式环境和平台设置仍按 AGENTS.md 第 1 节逐项批准 |
+| **当前批次：8 条线并行（Owner 2026-10-12 选定，第 2.1 节）** | 同一条线内排队，不同线并行：① AI 核心：#829 → #845 → POSITIONING-GATE PR2 → SKILL-I18N-HOOK（⑦ 改为上线前核对 OpenRouter 账号和各 workspace 已关闭训练，代码不强制，第 2.1 节）；② 读资料：#830 → AGENT-CORE R4 → LIB-4（R4 和 LIB-4 都改 `read_source`）；③ 收款：#847 → PAY-STRIPE-MP PR-1…6 → PAYWALL 接线 → PAY-FOUNDER / PAY-NOTIFY / PAY-EVIDENCE / PAY-DISPUTE-GUARD；④ 输入框：UI-A 编辑器依赖 PR → 新输入框（与 R8a/R8b 工作区页面排队）→ UI-B / UI-C → UI-FINISH → LEGACY-CLOSE；⑤ 定位流程：#818（已合并）→ R14 → R8b；⑥ 官网：PUBLIC-SITE 第一段 + 台湾 6 页，`/app` 路由搬迁放在冻结窗口最后做，正式域名切换上线前逐项批准；⑦ 数据库改动：0217 #828 → 0218 #830 → 0219 #831 → 0220 #832 → 0221/0222 PAY-STRIPE-MP，按合并顺序重建指纹；⑧ 不写代码：DATA-ERASURE 收尾梳理、Fusion 实测、R11。Codex 浏览器验收同一测试账号一次一个，按顺序排。跨线的真实依赖仍按第 7.1 节（例如 UI-B/UI-C 还要等 LIB-DOCS 和 RUNTIME-PROD） | 每条线做完自己的最后一项就停；合并到 `main`、正式环境和平台设置仍按 AGENTS.md 第 1 节逐项批准 |
 
 每批由 Owner 选定后开工，批次内由 Agent 自主排序、测试、修复，完成后停下，不自动开始下一批（AGENTS.md 第 2 节）。
 
@@ -2049,7 +2065,7 @@ Owner 于 2026-09-27 确认 D1–D17（D6 在 Fable 评估后改为不含 PDF；
 | 事项 | 现状 | 何时需要定案 |
 | --- | --- | --- |
 | MODERATION 正式实现时间 | Owner 2026-10-01 决定暂缓，只留接口；MODERATION-HOOK 随 RATE-LIMIT 接线默认放行，不作为已实现内容审核（第 19 项及[总控记录](https://github.com/Crnobog9527/GraylumAI_vercel/pull/566#issuecomment-5930126786)） | 公开上线前再请 Owner 决定；不阻塞封闭内测 |
-| 正式环境是否强制"数据不用于训练"（RUNTIME-PROD 第 ⑦ 项、第 2.1 节第 9 项的举例、VOICE 的前置条件） | Owner 2026-09-28 表示，除非违反 GDPR 等法律，请求不需要强制 `data_collection: deny`；合法性尚未核实，规划里仍是"强制" | RUNTIME-PROD 开工前 |
+| 正式环境是否强制"数据不用于训练"（RUNTIME-PROD 第 ⑦ 项、第 2.1 节第 9 项的举例、VOICE 的前置条件） | **已定**（Owner 2026-10-12 选 A，第 2.1 节）：在 OpenRouter 账号和各 workspace 隐私设置统一关闭“允许用于训练”，代码不强制 `data_collection: deny`；上线前核对 | 已定 |
 | 删除规则 E5"付费默认不退款、Owner 逐笔批准手动退款"（2026-10-05 已由第 51 项退款规则取代，[记录 Y](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5982111397)）与现有退款代码和 v11 退款规则（REFUND-1B 等）的衔接 | **已定**（Owner 2026-10-03，第 2.1 节第 47 项）：PAY-COMMON 方案 #608 第 8 节 P1；退款功能按 PAY-COMMON 实施调整；2026-10-05 起退款规则按第 51 项（记录 Y、AA），积分包退款的执行能力已纳入 [PAY-COMMON 实施说明](tasks/PAY-COMMON.md) PR-4 | 已定；实施随 PAY-COMMON PR-4 |
 | staging 服务商回调地址（2026-10-01） | 旧域名已删除（第 37 项）；Stripe / Waffo 沙箱回调和 Supabase Site URL 待 Owner 自行检查确认 | 支付或邮件回调相关的 staging 验证前（建议） |
 | 上线前配置与产品数值复核（2026-10-01，2026-10-03 更新） | 正式环境 Upstash 上线前配置，Vercel Pro 已决定升级但仍待执行；staging 的 q=100/m=3 已按 Owner 批准修改（第 39 项）；套餐价格和每月积分已定（Pro $29 / 3,480、Gold $69 / 8,970，年付 $279 / $621，第 51 项），积分包比例已定（第 50 项），需要单独批准的只是实际写入配置；积分包会员折扣已定（Pro 9.5 折、Gold 9 折，第 51 项）；开户赠送 500 积分和积分包三档已先定（第 51 项，实测后可能调整），邀请奖励 50/30 按 m=6 复核 | 具体执行前批准；上线前完成（第 7.6 节） |
