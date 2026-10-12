@@ -193,3 +193,19 @@ it('removes expired log rows through the same cron and reports a cleanup failure
     : original(name));
   expect((await runAccountErasureExecutor(database as never)).failed).toBe(1);
 });
+it('keeps draining a log backlog within ten batches and reports what is left', async () => {
+  const database = client();
+  const original = database.rpc.getMockImplementation()!;
+  let calls = 0;
+  const reply = (more: boolean) => {
+    const promise = Promise.resolve({ data: { applicationLogs: 5000, diagnosticResults: 0, scheduledJobRuns: 0, more }, error: null });
+    return Object.assign(promise, { abortSignal: () => promise });
+  };
+  database.rpc.mockImplementation(name => name === 'log_retention_cleanup' ? reply(++calls < 3) as never : original(name));
+  expect((await runAccountErasureExecutor(database as never)).failed).toBe(0);
+  expect(calls).toBe(3);
+  calls = 0;
+  database.rpc.mockImplementation(name => name === 'log_retention_cleanup' ? (calls++, reply(true)) as never : original(name));
+  expect((await runAccountErasureExecutor(database as never)).failed).toBe(1);
+  expect(calls).toBe(10);
+});

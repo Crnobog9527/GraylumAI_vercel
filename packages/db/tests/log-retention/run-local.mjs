@@ -34,9 +34,12 @@ try {
       VALUES('fixture','fixture','ai','passed',now()-$1::interval)`, [age]);
     await c.query(`INSERT INTO scheduled_job_runs(job_key,started_at,created_at) VALUES('job_a',now()-$1::interval,now()-$1::interval)`, [age]);
   }
-  // A job that has not run for 40 days keeps its newest run (library cleanup resumes from its summary).
-  await c.query(`INSERT INTO scheduled_job_runs(job_key,started_at,summary) VALUES
-    ('job_b',now()-interval '45 days','{}'),('job_b',now()-interval '40 days','{"scanCursor":"c"}')`);
+  // A job that has not finished for 40 days keeps its newest finished run (library cleanup resumes from its
+  // summary) and its newest run, even when that newest run is an abandoned 'running' row.
+  await c.query(`INSERT INTO scheduled_job_runs(job_key,started_at,finished_at,status,summary) VALUES
+    ('job_b',now()-interval '45 days',now()-interval '45 days','success','{}'),
+    ('job_b',now()-interval '40 days',now()-interval '40 days','success','{"scanCursor":"c"}'),
+    ('job_b',now()-interval '35 days',NULL,'running','{}')`);
   const audit = await count('user_activity_logs');
   await c.query(`INSERT INTO user_activity_logs(action,action_type,created_at) VALUES('fixture','credit_adjustment',now()-interval '90 days')`);
 
@@ -47,7 +50,8 @@ try {
     assert.equal(await count(table, "WHERE created_at>=now()-interval '29 days'"), 2, table);
   }
   assert.equal(await count('scheduled_job_runs', "WHERE job_key='job_a'"), 2);
-  assert.deepEqual((await c.query("SELECT summary FROM scheduled_job_runs WHERE job_key='job_b'")).rows, [{ summary: { scanCursor: 'c' } }]);
+  assert.deepEqual((await c.query("SELECT status,summary FROM scheduled_job_runs WHERE job_key='job_b' ORDER BY started_at")).rows,
+    [{ status: 'success', summary: { scanCursor: 'c' } }, { status: 'running', summary: {} }]);
   assert.equal(await count('user_activity_logs'), audit + 1, 'admin audit is not touched');
   report.checks.push('deletes rows older than 29 days, keeps newer rows, the newest run of each job and admin audit');
 

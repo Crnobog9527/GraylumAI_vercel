@@ -18,10 +18,13 @@ BEGIN
  DELETE FROM diagnostic_results WHERE id IN
   (SELECT id FROM diagnostic_results WHERE created_at<cutoff ORDER BY created_at LIMIT p_limit);
  GET DIAGNOSTICS n_diag=ROW_COUNT;
- -- The newest run of each job is kept whatever its age: library cleanup resumes from its summary cursor.
+ -- Per job, the newest run and the newest finished run are kept whatever their age: library cleanup
+ -- resumes from the summary cursor of the latest finished run, even after an abandoned 'running' row.
  DELETE FROM scheduled_job_runs WHERE id IN
   (SELECT r.id FROM scheduled_job_runs r WHERE r.started_at<cutoff
     AND r.id<>(SELECT l.id FROM scheduled_job_runs l WHERE l.job_key=r.job_key ORDER BY l.started_at DESC,l.id DESC LIMIT 1)
+    AND r.id IS DISTINCT FROM (SELECT f.id FROM scheduled_job_runs f WHERE f.job_key=r.job_key AND f.finished_at IS NOT NULL
+      ORDER BY f.started_at DESC,f.id DESC LIMIT 1)
    ORDER BY r.started_at LIMIT p_limit);
  GET DIAGNOSTICS n_jobs=ROW_COUNT;
  RETURN jsonb_build_object('applicationLogs',n_app,'diagnosticResults',n_diag,'scheduledJobRuns',n_jobs,
