@@ -59,7 +59,7 @@ Redis 键名：`graylum:erasure-manifest:<kind>:<目标编号>`，值是上面�
    node scripts/erasure-manifest-export.mjs --since <备份时间，ISO 格式> --write erasure-manifest.json
    ```
 
-   脚本只用 `SCAN` 和 `MGET`，不会改 Redis。读不完整、发现格式不对的条目、或者没有凭证，都会以非零状态退出。
+   脚本只用 `SCAN` 和 `MGET`，不会改 Redis。读不完整（包括读取途中有键刚好过期）、发现格式不对的条目、或者没有凭证，都会以非零状态退出，这时重新导出一次。
    **读不出清单就不能开放服务。** 文件用完即删，不要提交到仓库、不要贴到 PR。
 3. **导入并按顺序重放**（在隔离项目里，用 service_role，逐条执行；文件里已经排好序：先账号，再按确认时间）：
    - `account`：走产品同样的注销路径——`account_erasure_confirm_with_digests`（防刷摘要用

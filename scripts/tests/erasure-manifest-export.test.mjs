@@ -2,9 +2,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { spawnSync } from 'node:child_process';
-import {
-  PREFIX, credentials, orderForReplay, parseArgs, parseEntry, readManifest, restClient, summarize,
-} from '../erasure-manifest-export.mjs';
+import { PREFIX, credentials, orderForReplay, parseArgs, parseEntry, readManifest, restClient, summarize, exportProblem } from '../erasure-manifest-export.mjs';
 
 const a = '00000000-0000-4000-8000-00000000000a';
 const b = '00000000-0000-4000-8000-00000000000b';
@@ -76,4 +74,10 @@ test('missing credentials fail closed with a non-zero exit and no network access
   });
   assert.equal(result.status, 2);
   assert.match(result.stderr, /credentials are missing/);
+});
+
+test('an export with any invalid or vanished key is refused', () => {
+  assert.equal(exportProblem({ invalid: 0, vanished: 0 }), null);
+  assert.match(exportProblem({ invalid: 1, vanished: 0 }), /Invalid/);
+  assert.match(exportProblem({ invalid: 0, vanished: 1 }), /incomplete/);
 });

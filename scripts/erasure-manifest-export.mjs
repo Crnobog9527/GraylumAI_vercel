@@ -105,13 +105,21 @@ export function summarize({ entries, scanned, invalid, vanished }) {
     earliest: times[0] ?? null, latest: times.at(-1) ?? null };
 }
 
+/** Any key that cannot be read as a valid entry makes the export incomplete: never replay a partial list. */
+export function exportProblem({ invalid, vanished }) {
+  if (invalid) return 'Invalid manifest entries found; investigate before replay';
+  if (vanished) return 'Manifest keys disappeared between SCAN and MGET; export is incomplete, run it again';
+  return null;
+}
+
 async function main() {
   const options = parseArgs(process.argv.slice(2));
   const result = await readManifest(restClient(credentials(process.env)), options);
   const summary = { mode: options.write ? 'write' : 'dry-run', since: options.since, ...summarize(result) };
-  if (result.invalid) {
+  const problem = exportProblem(result);
+  if (problem) {
     console.log(JSON.stringify(summary, null, 2));
-    throw new Error('Invalid manifest entries found; investigate before replay');
+    throw new Error(problem);
   }
   if (options.write) {
     if (existsSync(options.write)) throw new Error('Output file already exists; refusing to overwrite');
