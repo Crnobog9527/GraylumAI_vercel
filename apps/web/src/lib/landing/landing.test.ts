@@ -63,7 +63,7 @@ describe('landing price cards', () => {
     expect(founder.missingNote.monthly).toBe('（创始会员只有年付）');
     expect(founder.quotes.yearly).toMatchObject({
       price: '$496', strike: '$828', tag: '创始会员 · 终身 6 折', saving: '比按月付省 $332 · 相当于 $41.33/月',
-      renewal: '首年 $496，之后每年按当时 Gold 月付×12 的 6 折续费，可随时取消',
+      renewal: '首年 $496，之后每年按当时 Gold 月付×12 的 6 折续费，调价会提前通知，可随时取消',
     });
   });
 
