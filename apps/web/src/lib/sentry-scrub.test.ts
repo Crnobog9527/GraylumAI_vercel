@@ -1,16 +1,22 @@
 import { describe, expect, it } from 'vitest';
 import type { ErrorEvent, Event } from '@sentry/nextjs';
-import { scrubBreadcrumb, scrubErrorEvent, scrubText, scrubTransactionEvent, scrubUrl } from './sentry-scrub';
+import { redactText, scrubBreadcrumb, scrubErrorEvent, scrubText, scrubTransactionEvent, scrubUrl } from './sentry-scrub';
 
 const ID = '2d0cb10b-7a62-428d-967f-b049ef5b484d';
 
 describe('sentry scrub', () => {
-  it('redacts emails, ids, tokens, keys and long numbers, and truncates long text', () => {
-    const text = scrubText(`user a.b+c@example.com ${ID} Bearer abc.def.ghi sk-or-v1-0123456789abcdef phone +86 138 0013 8000`);
+  it('keeps only a leading error code from free text; names and prose never pass', () => {
+    expect(scrubText('为李雷保存并购计划失败')).toBe('[text]');
+    expect(scrubText('Cannot save plan for Li Lei')).toBe('[text]');
+    expect(scrubText('ACCOUNT_ERASURE_FAILED: 李雷的账号')).toBe('ACCOUNT_ERASURE_FAILED');
+  });
+
+  it('redacts emails, ids, tokens, keys and long numbers in metadata, and truncates long text', () => {
+    const text = redactText(`user a.b+c@example.com ${ID} Bearer abc.def.ghi sk-or-v1-0123456789abcdef phone +86 138 0013 8000`);
     expect(text).not.toMatch(/example\.com|2d0cb10b|abc\.def|0123456789abcdef|138/);
     expect(text).toContain('[email]');
     expect(text).toContain('[id]');
-    expect(scrubText('x'.repeat(1000)).length).toBeLessThanOrEqual(301);
+    expect(redactText('x'.repeat(1000)).length).toBeLessThanOrEqual(301);
   });
 
   it('drops query strings and fragments from urls and redacts ids in the path', () => {
@@ -36,6 +42,8 @@ describe('sentry scrub', () => {
     expect(out.user).toBeUndefined();
     expect(out.request).toEqual({ method: 'POST', url: 'https://x.test/api' });
     expect(out.extra).toMatchObject({ prompt: '[removed]', count: 3, nested: { content: '[removed]', url: 'https://x.test/p' } });
+    expect(out.message).toBe('[text]');
+    expect(out.exception?.values?.[0]?.value).toBe('[text]');
     expect(out.breadcrumbs).toEqual([{ category: 'fetch', data: { url: 'https://x.test/a', body: '[removed]' } }]);
     expect(out.exception?.values?.[0]?.stacktrace?.frames?.[0]?.vars).toBeUndefined();
   });

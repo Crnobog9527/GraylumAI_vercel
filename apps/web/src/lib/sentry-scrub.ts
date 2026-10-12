@@ -17,23 +17,33 @@ const REDACTIONS: Array<[RegExp, string]> = [
 ];
 const SECRET_KEY = /pass|secret|token|auth|cookie|session|key|email|phone|prompt|content|body|message|text|input|query/i;
 
-export function scrubText(value: string): string {
+/** For SDK-generated metadata (urls, tags, contexts): known identifier formats are masked. */
+export function redactText(value: string): string {
   let text = value;
   for (const [pattern, replacement] of REDACTIONS) text = text.replace(pattern, replacement);
   return text.length > MAX_TEXT ? `${text.slice(0, MAX_TEXT)}…` : text;
 }
 
+const ERROR_CODE = /^[A-Z][A-Z0-9_]{2,63}\b/;
+/**
+ * For free text (messages, exception values, breadcrumbs, extra): pattern masking cannot catch a
+ * name or a sentence, so only a leading stable error code (e.g. `ACCOUNT_ERASURE_FAILED`) is kept.
+ */
+export function scrubText(value: string): string {
+  return value.match(ERROR_CODE)?.[0] ?? '[text]';
+}
+
 /** Keeps scheme, host and path (ids redacted); drops query string and fragment. */
 export function scrubUrl(value: string): string {
   const cut = value.search(/[?#]/);
-  return scrubText(cut === -1 ? value : value.slice(0, cut));
+  return redactText(cut === -1 ? value : value.slice(0, cut));
 }
 
-function scrubValue(value: unknown, depth: number): unknown {
-  if (typeof value === 'string') return scrubText(value);
+function scrubValue(value: unknown, depth: number, text: (value: string) => string): unknown {
+  if (typeof value === 'string') return text(value);
   if (value === null || typeof value !== 'object') return value;
   if (depth >= MAX_DEPTH) return '[truncated]';
-  if (Array.isArray(value)) return value.slice(0, 20).map((item) => scrubValue(item, depth + 1));
+  if (Array.isArray(value)) return value.slice(0, 20).map((item) => scrubValue(item, depth + 1, text));
   const out: Record<string, unknown> = {};
   for (const [key, item] of Object.entries(value)) {
     if (SECRET_KEY.test(key) && item !== null && typeof item !== 'boolean' && typeof item !== 'number') {
@@ -41,14 +51,20 @@ function scrubValue(value: unknown, depth: number): unknown {
     } else if (/url|href|path|uri/i.test(key) && typeof item === 'string') {
       out[key] = scrubUrl(item);
     } else {
-      out[key] = scrubValue(item, depth + 1);
+      out[key] = scrubValue(item, depth + 1, text);
     }
   }
   return out;
 }
 
+/** Free text: extra and breadcrumb data. */
 function scrubRecord<T>(value: T): T {
-  return scrubValue(value, 0) as T;
+  return scrubValue(value, 0, scrubText) as T;
+}
+
+/** SDK metadata: contexts, tags and span data. */
+function redactRecord<T>(value: T): T {
+  return scrubValue(value, 0, redactText) as T;
 }
 
 export function scrubBreadcrumb(breadcrumb: Breadcrumb): Breadcrumb | null {
@@ -72,8 +88,8 @@ function scrubCommon<T extends Event>(event: T): T {
   if (event.transaction) event.transaction = scrubUrl(event.transaction);
   if (event.message) event.message = scrubText(event.message);
   if (event.extra) event.extra = scrubRecord(event.extra);
-  if (event.contexts) event.contexts = scrubRecord(event.contexts);
-  if (event.tags) event.tags = scrubRecord(event.tags);
+  if (event.contexts) event.contexts = redactRecord(event.contexts);
+  if (event.tags) event.tags = redactRecord(event.tags);
   if (event.breadcrumbs) {
     event.breadcrumbs = event.breadcrumbs.map(scrubBreadcrumb).filter((item: Breadcrumb | null): item is Breadcrumb => item !== null);
   }
@@ -95,7 +111,7 @@ export function scrubTransactionEvent<T extends Event>(event: T): T {
   scrubCommon(event);
   for (const span of event.spans ?? []) {
     if (span.description) span.description = scrubUrl(span.description);
-    if (span.data) span.data = scrubRecord(span.data);
+    if (span.data) span.data = redactRecord(span.data);
   }
   return event;
 }

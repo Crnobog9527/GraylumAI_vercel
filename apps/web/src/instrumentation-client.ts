@@ -22,9 +22,10 @@ Sentry.init({
   // Setting this option to true will print useful information to the console while you're setting up Sentry.
   debug: false,
 
-  // Replay configuration for session replay
-  replaysOnErrorSampleRate: 1.0,
-  replaysSessionSampleRate: process.env.NODE_ENV === "production" ? 0.1 : 0,
+  // Session Replay stays off: its recording metadata carries the full page URL (draft ids, query
+  // strings), which beforeSend cannot scrub. DATA-ERASURE E7.
+  replaysOnErrorSampleRate: 0,
+  replaysSessionSampleRate: 0,
 
   // Filter out noisy errors
   ignoreErrors: [
@@ -61,15 +62,6 @@ Sentry.init({
     /^chrome-extension:\/\//i,
     // Firefox extensions
     /^moz-extension:\/\//i,
-  ],
-
-  // Add integrations
-  integrations: [
-    Sentry.replayIntegration({
-      // Additional Replay configuration
-      maskAllText: true,
-      blockAllMedia: true,
-    }),
   ],
 
   // DATA-ERASURE E7: never send personal data or user content (see lib/sentry-scrub.ts).
