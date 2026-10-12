@@ -41,10 +41,14 @@ export function scrubText(value: string): string {
   return value.match(ERROR_CODE)?.[0] ?? '[text]';
 }
 
-/** Keeps scheme, host and path (ids redacted); drops query string and fragment. */
+// Opaque identifiers in paths: provider ids (sub_..., cus_..., pi_..., cs_...), draft ids, tokens.
+// Any segment of 8+ characters that contains a digit is treated as an identifier.
+const PATH_ID = /(?<=\/)(?=[A-Za-z0-9_-]{8,}(?=[/\s]|$))[A-Za-z_-]*\d[A-Za-z0-9_-]*/g;
+
+/** Keeps scheme, host and path (identifier segments redacted); drops query string and fragment. */
 export function scrubUrl(value: string): string {
   const cut = value.search(/[?#]/);
-  return redactText(cut === -1 ? value : value.slice(0, cut));
+  return redactText((cut === -1 ? value : value.slice(0, cut)).replace(PATH_ID, '[id]'));
 }
 
 function scrubValue(value: unknown, depth: number, text: (value: string) => string): unknown {

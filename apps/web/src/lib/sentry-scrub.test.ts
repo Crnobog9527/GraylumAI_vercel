@@ -25,6 +25,10 @@ describe('sentry scrub', () => {
   it('drops query strings and fragments from urls and redacts ids in the path', () => {
     expect(scrubUrl(`https://auth-staging.graylum.com/positioning/${ID}?email=a@b.co&code=123#frag`))
       .toBe('https://auth-staging.graylum.com/positioning/[id]');
+    expect(scrubUrl('GET https://api.stripe.com/v1/subscriptions/sub_1PqR2sT3uVwXyZ/items'))
+      .toBe('GET https://api.stripe.com/v1/subscriptions/[id]/items');
+    expect(scrubUrl('https://api.stripe.com/v1/customers/cus_Q8a7Bc9De0')).toBe('https://api.stripe.com/v1/customers/[id]');
+    expect(scrubUrl('https://x.test/api/trpc/payments.createCheckout')).toBe('https://x.test/api/trpc/payments.createCheckout');
   });
 
   it('removes user, request bodies, headers, cookies and local variables from error events', () => {
