@@ -6,14 +6,15 @@ import {erase} from '../content-erasure/cases.mjs';
 const hash=body=>createHash('sha256').update(body).digest('hex');
 const original='## One\nOriginal confirmed facts.\n## Two\nKnown limitations.';
 const edited='## One\nR5_MANUAL_PRIVATE_BODY\n## Two\nManually retained limitations.';
-async function seed(db,completeness='complete',evidenceCount=0) {
+export async function seed(db,completeness='complete',evidenceCount=0) {
  const base=await fixture(db);
  const f=(await db.query('SELECT d7_test.artifacts($1) v',[base.actor])).rows[0].v;
  const project=randomUUID(),round=randomUUID(),confirmation=randomUUID(),execution=randomUUID();
  const draft=await rpc(db,'bill2_create_draft',f.actor);
  const session=randomUUID();
  const workflow={id:'r5-fixture',version:1,kind:'document',steps:[{id:'s',title:'Facts',dependsOn:[],
-  resources:[],minLength:1,maxLength:20000,requiresEvidence:false,requiredCapabilities:[],information:[]}],
+  resources:[],minLength:1,maxLength:20000,requiresEvidence:false,requiredCapabilities:[],
+  information:[{id:'facts',title:'Facts',required:false,profileKey:'facts'}]}],
   report:{id:'report',version:1,title:'Positioning',sections:[{title:'Facts',stepId:'s'}]},
   planResources:['report.md'],reportGeneration:{resources:['report.md'],sections:['One','Two'],maxCharacters:12000}};
  const sourceIds=Array.from({length:evidenceCount},()=>randomUUID()).sort();
@@ -58,7 +59,7 @@ async function seed(db,completeness='complete',evidenceCount=0) {
 }
 const read=(db,f)=>rpc(db,'report_document',f.actor,f.execution,'read',null,null,null,null);
 const save=(db,f,body=edited,revision=0,request=randomUUID())=>rpc(db,'report_document',f.actor,f.execution,'save',request,revision,body,null);
-const finalize=(db,f,body=original,revision=0,request=randomUUID())=>rpc(db,'report_document',f.actor,f.execution,'finalize',request,revision,null,hash(body));
+export const finalize=(db,f,body=original,revision=0,request=randomUUID())=>rpc(db,'report_document',f.actor,f.execution,'finalize',request,revision,null,hash(body));
 export async function runCases({db,Client,connectionString,report}) {
  for(const role of ['anon','authenticated']) {
   await db.query('SET ROLE '+role);

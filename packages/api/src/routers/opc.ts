@@ -9,6 +9,7 @@ import {executeOriginalExecution,runtimeLocalEndpoint,streamOriginalExecution} f
 import {StagingAccessError,stagingProcedureError,stagingRpcFailure} from '../services/runtime/stagingErrors';
 import {contentReaction, topicAdoptionWithSource} from "../services/opc/dataFoundation";
 import { dedupeHandoffResults } from "../services/opc/handoff-view";
+import { stepSkillCatalog } from "../services/opc/stepSkill";
 import {
   opcService,
   opcStart,
@@ -165,6 +166,9 @@ export const opcRouter = router({
     .query(({ ctx, input }) => ctx.opc.workResults(input.sessionId)),
   catalog: procedure.query(async ({ ctx, path }) => {
     try { return await ctx.opc.catalog(); } catch (cause) { throw stagingProcedureError(cause, path); }
+  }),
+  stepCatalog: procedure.query(async ({ ctx, path }) => {
+    try { return await stepSkillCatalog(ctx.userScopedSupabase, ctx.supabaseAdmin!); } catch (cause) { throw stagingProcedureError(cause, path); }
   }),
   list: readProcedure.query(({ ctx }) => ctx.opc.list()),
   conversations: readProcedure.query(async ({ ctx }) => {

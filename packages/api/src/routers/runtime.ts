@@ -3,6 +3,7 @@ import { reportDocumentInput, reportEditInput, reportFinalizeInput,
   reportFinalizationService } from '../services/report/finalization';
 import {contentVisibilityFence} from '../services/accountErasure/content';
 import {reportEnabled,reportLocate,reportService} from '../services/report/service';
+import {stepFlowModuleIds} from '../services/opc/stepSkill';
 import {reportStart} from '../services/report/contract';
 import {readNativeRuntimeView} from '../services/runtime/nativeView';
 import {resumeInput} from '../services/runtime/paygRuntime';
@@ -100,7 +101,9 @@ export const runtimeRouter=router({
   const modules=visible.data.length?await ctx.supabaseAdmin!.from('modules').select('id,skill_id,title,model_id').in('id',visible.data.map(m=>m.id)).eq('active',true):{data:[],error:null};
   if(modules.error)throw new Error('RUNTIME_SKILLS_UNAVAILABLE');
   const skills:Array<{moduleId:string;revisionId:string;name:string}>=[];
-  for(const m of modules.data){if(!m.skill_id||(ctx.real&&!ctx.real.callPolicies.some(q=>q.modelId===m.model_id)))continue;try{
+  // AGENT-CORE R8b: step flows (positioning and step Skills) start only from their own entry, never as a flat Skill here.
+  const stepFlows=modules.data.length?await stepFlowModuleIds(ctx.supabaseAdmin!):new Set<string>();
+  for(const m of modules.data){if(!m.skill_id||stepFlows.has(m.id)||(ctx.real&&!ctx.real.callPolicies.some(q=>q.modelId===m.model_id)))continue;try{
    // AC-0c: reuse this request's user-scoped (RLS) read above, never the service-role row.
    const userVisibleModule=visible.data.find(v=>v.id===m.id);
    const source=databaseSkillSource({userClient:ctx.userScopedSupabase,privateClient:ctx.supabaseAdmin,moduleId:m.id,skillId:m.skill_id,userVisibleModule,...(m.id===workModuleId&&workRevisionId?{revisionId:workRevisionId}:{})});
