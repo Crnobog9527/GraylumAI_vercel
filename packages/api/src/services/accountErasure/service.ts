@@ -6,6 +6,7 @@ import { checkRateLimitOrThrow } from '../redisRateLimiter';
 import { assertRecentAuthTime, readVerifiedAuthTime } from './reauth';
 import { loadOpeningGrantDigests } from './openingGrantIdentity';
 import { closeErasedAccountFinancials } from './financialRecovery';
+import { scheduleErasureManifestSync } from './offdbManifest';
 
 type Client = SupabaseClient;
 
@@ -93,6 +94,7 @@ export async function confirmAccountErasure(input: {
     logger.error('auth', 'account_erasure_confirm_invalid_shape');
     throw unavailable();
   }
+  scheduleErasureManifestSync(input.admin);
 
   // The DB marker already closed the account; Auth revocation is best effort and retried later.
   const authRevoked = await revokeAuthAccess(input.admin, input.userId);

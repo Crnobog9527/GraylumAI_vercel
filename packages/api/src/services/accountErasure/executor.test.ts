@@ -17,6 +17,8 @@ function client() {
     }
     if (name === 'account_erasure_executor_pending') data = 1;
     if (name === 'data_use_consent_expire') data = 0;
+    if (name === 'erasure_manifest_pending') data = [];
+    if (name === 'erasure_manifest_cleanup') data = 0;
     const promise = Promise.resolve({ data, error: null });
     return Object.assign(promise, { abortSignal: () => promise });
   });
@@ -135,6 +137,8 @@ it('uses available daily budget beyond 20 subjects and resumes remaining work ne
       ? { claimed: true, profileId: actor, requestId: request } : { claimed: false };
     if (name === 'account_erasure_executor_pending') data = remaining;
     if (name === 'data_use_consent_expire') data = 0;
+    if (name === 'erasure_manifest_pending') data = [];
+    if (name === 'erasure_manifest_cleanup') data = 0;
     const promise = Promise.resolve({ data, error: null });
     return Object.assign(promise, { abortSignal: () => promise });
   });
@@ -179,5 +183,15 @@ it('expires the D5 consent audit through the same cron and reports expiry failur
   database.rpc.mockImplementation(name => name === 'data_use_consent_expire'
     ? { abortSignal: () => Promise.resolve({ data: null, error: { code: 'XX000' } }) } as never
     : original(name));
+  expect((await runAccountErasureExecutor(database as never)).failed).toBe(1);
+});
+it('syncs the off-database erasure manifest and its 35-day cleanup in the same cron, reporting failure', async () => {
+  const database = client();
+  await runAccountErasureExecutor(database as never);
+  expect(database.rpc).toHaveBeenCalledWith('erasure_manifest_pending', { n: 100 });
+  expect(database.rpc).toHaveBeenCalledWith('erasure_manifest_cleanup', {});
+  const original = database.rpc.getMockImplementation()!;
+  database.rpc.mockImplementation(name => name === 'erasure_manifest_cleanup'
+    ? Promise.resolve({ data: null, error: { code: 'XX000' } }) as never : original(name));
   expect((await runAccountErasureExecutor(database as never)).failed).toBe(1);
 });
