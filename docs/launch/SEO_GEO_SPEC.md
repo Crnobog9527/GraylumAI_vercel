@@ -208,7 +208,7 @@ Owner 2026-10-12 决定：博客用仓库内文章实现，不接外部系统。
 | `apps/web/src/proxy.ts` | 去掉按主机名分流；改成按路径：`/app/*`、`/admin/*` 需登录，其余公开；登录入口页和 `/auth/callback` 留在根路径且公开；根路径直接渲染首页 | 登录和权限，high |
 | `apps/web/src/lib/site-config.ts` | `PUBLIC_SITE_HOSTS / SHARED_COOKIE_HOSTS / DEFAULT_AUTH_APP_URL / normalizeAppOrigin` 简化为单主机；Cookie 改 host-only，并按第 2 节迁移 / 过期 `.graylum.com` 旧 Cookie（`legacyParentCookieNames` 在正式主机上也生效）；`buildAuthHref` **不加前缀**（登录、注册、验证邮箱、找回密码都留在根路径）；`buildAppHref` 只给搬进 `/app` 的应用路由加前缀，公开地址不加；现在退出登录后跳 `/landing` 的调用方（`AppHeader`、`ProfileSidebar`、`workspace-frame`）改成跳 `/` | 登录态，high |
 | `apps/web/src/lib/public-paths.ts` | 公开为默认，`/app` `/admin` 需登录 | 权限 |
-| 旧应用路径跳转 | www 和 staging 主机上，旧的应用路径 `/positioning`、`/runtime`、`/profile`、`/library`、`/marketplace`、`/workbench`（含子路径）308 到 `/app/` 下同一路径，保留参数；登录回调里的 `next` / `redirect` 目标经 `sanitizeRedirectTarget` 时把这些旧路径换成 `/app/...`，默认目标从 `/profile` 改成 `/app/profile`；`next=/` 登录后去 `/app`（`/` 现在是公开首页）。实测：切换前发出的验证邮件 / OAuth 链接在切换后点开，落到 `/app` 下正确页面 | 登录态，high |
+| 旧应用路径跳转 | www 和 staging 主机上，旧的应用路径 `/positioning`、`/runtime`、`/profile`、`/library`、`/marketplace`、`/workbench`（含子路径）308 到 `/app/` 下同一路径，保留参数；`next.config.ts` 里现有的 `/chat` → `/positioning` 临时跳转直接改成 `/chat` → `/app/positioning`，不留跳转链，并纳入跳转测试；登录回调里的 `next` / `redirect` 目标经 `sanitizeRedirectTarget` 时把这些旧路径换成 `/app/...`，默认目标从 `/profile` 改成 `/app/profile`；`next=/` 登录后去 `/app`（`/` 现在是公开首页）。实测：切换前发出的验证邮件 / OAuth 链接在切换后点开，落到 `/app` 下正确页面 | 登录态，high |
 | 路由目录 | 根路径已登录首页 `src/app/page.tsx`（及同目录的 `home.module.css`、`home-steps`）移到 `src/app/app/page.tsx`；`positioning / runtime / profile / library / marketplace / workbench` 移到 `src/app/app/`；`login / register / verify-email / forgot-password / reset-password / auth / admin / api` 不动；全仓约 45 处内链、21 个文件改前缀（不含测试） | 面广 |
 | `next.config.ts` | `redirects()` 加 `has: host = app.graylum.com` 的 `permanent: true`（308，保留 POST 方法和请求体）：界面路由加 `/app` 前缀，`app.graylum.com/` 到 `/app`，`/auth` `/api` `/admin` `/_next` 和登录入口页只换主机不加前缀（第 2 节）；加 `has: host = graylum.com` 到 www 的 308（保留路径和参数），或改用 Vercel 设置（见第 2 节）；`X-Robots-Tag noindex`：`SITE_INDEXING` 不是 `public` 时**整个环境保留**；是 `public` 时只对 `/app` `/admin` `/auth`、登录入口页、`/maintenance`、`/access-denied`，这些路径不进 robots Disallow。测试覆盖：裸域跳转保留路径和参数；非 public 环境任意路径都带 noindex；public 环境下上述路径带 noindex、公开页不带 | ordinary |
 | 环境变量 | 仅正式环境：`NEXT_PUBLIC_APP_URL`、`NEXT_PUBLIC_AUTH_APP_URL` = `https://www.graylum.com`。staging 保持 `https://auth-staging.graylum.com` | 正式环境改值属 AGENTS §1 |
@@ -216,7 +216,8 @@ Owner 2026-10-12 决定：博客用仓库内文章实现，不接外部系统。
 | Supabase Auth | 仅正式项目：Site URL 改 www；Redirect URLs 加 `https://www.graylum.com/**`、删 app 域；邮件模板不改；Google OAuth 不改。staging 项目保持 `auth-staging.graylum.com`，只需确认 Redirect URLs 覆盖新的 `/app/**` 路径 | 正式环境属 §1；staging 只核对，不改主机 |
 | Vercel | 两个域名已在同一项目；撤掉 Owner 手动加的 `www → app` 临时 307（第 8.5 节、#614） | 正式环境属 §1 |
 | 正式切换顺序 | 两条跳转方向相反，同时存在会无限循环。顺序必须是：① 取得 Owner 对正式环境设置的批准；② 撤掉 Vercel 的 `www → app` 307，并实测 `www.graylum.com` 不再跳到 app；③ 之后才让 `app → www` 和裸域 → www 的 308 在正式环境生效。代码里的这两条跳转用开关控制（默认关闭），确认第 ② 步完成后再打开；staging 不受影响，可先开着测 | 正式环境属 §1 |
-| 测试 | `proxy-hostname / proxy-auth / proxy-auth-landing / proxy-pricing / site-config / authLanding.gotrue` 6 个单测和 `production-stripe-smoke.spec.ts` | ordinary |
+| 测试 | `proxy-hostname / proxy-auth / proxy-auth-landing / proxy-pricing / site-config / authLanding.gotrue` 6 个单测按新路径规则更新，合并前在 staging / 预览验证 | ordinary |
+| 正式环境冒烟测试 | `production-stripe-smoke.spec.ts` 只对正式域名生效、会做登录后的结账操作，属于测试正式环境（AGENTS §1）。合并前不跑；只在 Owner 批准正式切换后，作为切换后的检查运行。合并前用 staging / 预览的等价检查代替 | 正式环境属 §1 |
 
 建议拆两个 PR：① proxy / site-config / 路由前缀（high）；② robots / noindex / redirect / sitemap（ordinary）。
 
