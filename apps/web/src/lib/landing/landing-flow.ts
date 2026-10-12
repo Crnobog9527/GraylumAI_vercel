@@ -4,7 +4,7 @@ import type { LandingFeature } from './landing-flags';
 /**
  * Module 3a: the nine steps after sign-up, in the order the product runs them (offer one-page, table 3a).
  * `title` and `demo` are the "动画演示" cell split at its first colon; `note` is the "为什么不是正确的废话"
- * cell. All verbatim. Every note maps to a real mechanism; a step whose capability is not accepted is
+ * cell. All verbatim. Every note maps to a real mechanism; a step whose capability is switched off is
  * hidden as a whole. The animations show the real screen layout with neutral placeholder lines: no
  * invented accounts, numbers or report text (those come only from demo accounts, offer brief section 12).
  */
