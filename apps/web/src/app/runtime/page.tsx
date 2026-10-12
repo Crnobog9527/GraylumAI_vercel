@@ -153,7 +153,7 @@ function RuntimeWorkspace({routeSession,routeModule}:{routeSession:string;routeM
   const url=new URL(location.href),requestId=url.searchParams.get('request')??crypto.randomUUID();url.searchParams.set('request',requestId);history.replaceState(null,'',url);
   const submitted=input;if(!scriptRequest)setOutgoing({text:submitted});
   // Only the visible box empties now; the saved draft stays until the server stores the message.
-  restoreInput=clearForSend(setInput,submitted);
+  restoreInput=clearForSend(setInput,submitted,text=>localStorage.setItem('opc-runtime-input:'+sessionId,text));
   const admitted=await prepare.mutateAsync({sessionId,requestId,input:scriptRequest?'[OPC_SCRIPT_V1] 请基于当前选题简报讨论并给出可修改的口播稿。'+(submitted.trim()||'先给我一版口播稿。'):submitted,selection:selected,network:'deny',sources:[]});
   if(!alive.current)return;
   // Q1: the previous organizer answered instead; this message was not stored. Input and request id stay.
