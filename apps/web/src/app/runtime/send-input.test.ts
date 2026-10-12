@@ -25,9 +25,10 @@ it('keeps both the failed message and a draft typed while it was pending, and sa
   expect(saved).toEqual(['第一条消息\n\n新的草稿']);
 });
 
-it('does not repeat the failed message when the box already starts with it', () => {
-  expect(restoredDraft('第一条消息 再补一句', '第一条消息')).toBe('第一条消息 再补一句');
+it('restores the failed message even when the new draft happens to begin with it', () => {
+  expect(restoredDraft('好的，我再补充一点', '好')).toBe('好\n\n好的，我再补充一点');
   expect(restoredDraft('', '第一条消息')).toBe('第一条消息');
+  expect(restoredDraft('第一条消息', '第一条消息')).toBe('第一条消息');
 });
 
 it('drops the saved draft only while it is still the sent message', () => {

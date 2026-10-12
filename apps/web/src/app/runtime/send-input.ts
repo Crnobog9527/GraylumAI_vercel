@@ -6,8 +6,8 @@ type SetInput = (update: (current: string) => string) => void;
  * and a new draft the user started meanwhile is kept after it (neither is lost).
  */
 export function restoredDraft(current: string, submitted: string) {
+  // The box was emptied on send, so anything in it now is new typing, even if it begins like the failed text.
   if (current === '' || current === submitted) return submitted;
-  if (current.startsWith(submitted)) return current;
   return submitted + '\n\n' + current;
 }
 
