@@ -103,7 +103,7 @@ describe('data-use consent card', () => {
 
   it('does not offer a grant when the server has moved to a newer text, but still allows revoking', () => {
     state.query = loaded({ ...base, currentVersion: 'd5-v2', version: 'd5-v1', grantedAt: '2026-10-11T08:00:00Z' });
-    let html = render();
+    const html = render();
     expect(html).toContain('disabled=""');
     expect(html).toContain('之前的同意已失效');
   });
