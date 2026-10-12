@@ -181,3 +181,24 @@ describe('Waffo renewal stop for undelivered cash', () => {
     expect(conflict.provider.cancelSubscription).not.toHaveBeenCalled();
   });
 });
+
+describe('Waffo second first payment for one order (no checkout idempotency)', () => {
+  const delivered = { payment_orders: [{ id: orderId, payment_channel: 'waffo', payment_method: 'card', merchant_namespace: 'fixture',
+    payment_mode: 'test', fulfilled_at: '2026-10-11T06:00:00Z', subscription_id: 'sub-1' }] };
+  it('turns a different payment of another Waffo subscription into review and stops that subscription', async () => {
+    const f = setup(payment({ id: 'PAY_second', orderId: 'ORD_second' }, { id: 'ORD_second' }), undefined, delivered);
+    expect(await f.run()).toEqual({ state: 'review', reason: 'duplicate_order_payment' });
+    expect(f.rpc).not.toHaveBeenCalledWith('pay_waffo_fulfill_payment', expect.anything());
+    expect(f.provider.cancelSubscription).toHaveBeenCalledWith('ORD_second');
+  });
+  it('still treats a redelivery of the delivered payment as the same delivery', async () => {
+    const f = setup(payment({ orderId: 'ORD_renewing' }, { id: 'ORD_renewing' }), { data: { state: 'fulfilled', duplicate: true }, error: null }, {
+      ...delivered, payment_provider_refs: [
+        { order_id: orderId, object_type: 'checkout', channel: 'waffo', merchant_namespace: 'fixture', mode: 'test', external_id: 'cs_1' },
+        { order_id: orderId, object_type: 'payment', channel: 'waffo', merchant_namespace: 'fixture', mode: 'test', external_id: 'PAY_fixture1' },
+        { subscription_id: 'sub-1', object_type: 'subscription', channel: 'waffo', merchant_namespace: 'fixture', mode: 'test',
+          external_id: 'ORD_renewing' }] });
+    expect(await f.run()).toEqual({ state: 'applied', reason: 'delivered' });
+    expect(f.provider.cancelSubscription).not.toHaveBeenCalled();
+  });
+});

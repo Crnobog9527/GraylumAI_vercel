@@ -5,10 +5,11 @@ import { prepareMethodPurchase, methodPurchaseInputSchema } from './methodPurcha
 import { buildWaffoCheckoutRequest, dispatchWaffoCheckout, WAFFO_CHECKOUT_TTL_SECONDS, type WaffoCheckoutOrder } from './waffoCheckout';
 import type { WaffoCheckoutCreate } from './waffoTestOperationsClient';
 import { WaffoFailure } from './waffoFailure';
+import { MethodPurchaseRejected } from './methodPurchaseError';
 
 /** The database admits a checkout window up to 31 minutes; the session itself lives 30. */
 const CLAIM_WINDOW_MS = (WAFFO_CHECKOUT_TTL_SECONDS + 60) * 1000;
-/** Replay only while the original session can still be open: far inside Waffo's 24-hour key window. */
+/** Recreate only while the claim window is still open. */
 const REPLAY_MARGIN_MS = 60 * 1000;
 
 /** Release unpaid card orders 40 minutes after checkout started (Owner decision 2026-10-11), so an abandoned
@@ -57,8 +58,10 @@ export async function createWaffoCardCheckout(input: {
   const latestExpiry = Date.now() + CLAIM_WINDOW_MS;
   let stored: Record<string, unknown> = providerRequest;
   let claimExpiry = latestExpiry;
-  // Waffo replays the original session for the same key (measured). The key is fixed per order, so a
-  // timed-out create is recovered by repeating the exact stored request, never by a second checkout.
+  // Waffo has no checkout idempotency (official answer 2026-10-12): every create is a new, independently
+  // payable session and a lost response cannot be looked up by our order id. The header is harmless but not
+  // relied on. Only one session is ever bound and returned per order (bind refuses a second), so the buyer
+  // can only reach one payment page; a duplicate first payment is still caught at delivery.
   const idempotencyKey = `graylum-checkout-${order.id}`;
   const create = async (request: Record<string, unknown>) => {
     try { return await provider.createCheckout(request, idempotencyKey); } catch (error) {
@@ -84,8 +87,15 @@ export async function createWaffoCardCheckout(input: {
       return claimed.data.dispatch;
     },
     create,
-    // After the window the original session is expired anyway; never POST again (the order is released later).
-    recover: async () => (Date.now() < claimExpiry - REPLAY_MARGIN_MS ? create(stored) : null),
+    // A session already bound to this order is the buyer's page: never create another one for it.
+    // Only an unbound dispatch (lost create response, no URL ever returned) is recreated, inside the window.
+    recover: async () => {
+      const bound = await db.from('payment_provider_refs').select('external_id').eq('order_id', order.id)
+        .eq('object_type', 'checkout').eq('channel', 'waffo').eq('merchant_namespace', provider.merchant).eq('mode', 'test').maybeSingle();
+      if (bound.error) throw databaseFailure('bound_read', bound.error);
+      if (bound.data) throw new MethodPurchaseRejected('PAY_WAFFO_CHECKOUT_OPEN');
+      return Date.now() < claimExpiry - REPLAY_MARGIN_MS ? create(stored) : null;
+    },
     persist: async (result) => {
       const bound = await db.rpc('pay_waffo_bind_checkout', { p_user: userId, p_order: order.id, p_merchant: provider.merchant,
         p_checkout: result.sessionId, p_expires: result.expiresAt });
