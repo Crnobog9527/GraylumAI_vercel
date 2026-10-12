@@ -334,12 +334,15 @@ async function advance(key, days) {
   const clock = await stripe('GET', `/test_helpers/test_clocks/${s.clock}`);
   const target = clock.frozen_time + Math.round(Number(days) * DAY);
   const res = await stripe('POST', `/test_helpers/test_clocks/${s.clock}/advance`, { frozen_time: target });
+  if (res.error) throw new Error(`${key} clock advance rejected: ${res.error.message}`);
   for (let i = 0; i < 60; i++) {
     const c = await stripe('GET', `/test_helpers/test_clocks/${s.clock}`);
-    if (c.status === 'ready') { console.log(`${key} clock ready at +${days}d`); return; }
+    // Only report success once the clock actually stands at the requested instant.
+    if (c.status === 'ready' && c.frozen_time === target) { console.log(`${key} clock ready at +${days}d`); return; }
+    if (c.status === 'ready' && c.frozen_time !== target) throw new Error(`${key} clock ready at the wrong time`);
     await new Promise((r) => setTimeout(r, 3000));
   }
-  console.log(`${key} clock still advancing`, res.error ?? '');
+  throw new Error(`${key} clock still advancing; evidence not recorded`);
 }
 
 async function ops() {
