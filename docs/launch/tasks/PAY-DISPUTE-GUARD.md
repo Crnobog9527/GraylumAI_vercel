@@ -132,7 +132,7 @@ PAY-WAFFO 方案原定每天用 GraphQL `chargebacks` 查询，但：Waffo 已�
 
 ### 4.7 新表
 
-`payment_disputes`：`id`、`provider`、`provider_dispute_id`（唯一）、`order_id`、`subscription_id`、`amount`、`currency`、`reason`、`status`、
+`payment_disputes`：`id`、`provider`、`provider_dispute_id`（唯一）、`provider_charge_id`、`provider_payment_intent_id`、`provider_invoice_id`（能取到的都存；付款级锁、付款回调认领和每日重查都用这几个编号对上，不靠金额）、`order_id`、`subscription_id`、`amount`、`currency`、`reason`、`status`、
 `evidence_due_by`、`opened_at`、`closed_at`、`outcome`、`freeze_state`（冻结中 / 已撤回 / 已被退款取代）、`renewal_stop_state`。
 **为什么要新表**（AGENTS 第 5 节）：现在没有任何地方记拒付；冻结要能撤回，就必须有一条能对上"冻了谁、冻了多少、撤回没有"的记录。
 这是账务记录，按 3 年保留，只存白名单字段（不存原始事件全文、不存原因描述以外的自由文本）。
@@ -167,6 +167,7 @@ PAY-WAFFO 方案原定每天用 GraphQL `chargebacks` 查询，但：Waffo 已�
 - **按月发放和冻结同时发生**：发放任务已选中某一期、同时拒付冻结 → 这一期不发出，或发出后计入冻结额，不会变成可用余额。
 - **整轮补偿**：预扣并结算 → 拒付冻结 → 整轮确认失败走 PAYG 补偿 → 补偿成功、不报 `BILL2_COMPENSATION_GRANT_UNRESOLVED`，补回的积分计入冻结额。
 - **付款和拒付同时处理**：两个事务同时开始 → 无论谁先提交，最后都是冻结状态。
+- **多笔同额付款**：同一用户两笔同金额付款，其中一笔先被拒付（待匹配）→ 只有那一笔的付款回调认领到它，另一笔正常开通。
 - **只收到 `closed`**：`created` 没送达、直接收到 `closed` → 冻结和停续费照样补上。
 - **超额结算**：预扣 → 冻结 → 实际用量大于预扣量 → 冻结额相应减少、其他来源不变，撤回后总数对得上。
 - **先拒付后付款**：拒付事件先到、付款回调后到 → 付款回调提交时已经是冻结状态，用户从没拿到可用的权益和积分。
