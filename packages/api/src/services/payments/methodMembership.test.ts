@@ -36,13 +36,12 @@ describe('method membership read projection', () => {
       expect(q.eq).not.toHaveBeenCalledWith('payment_status', expect.anything());
     }
   });
-  it('shows card checkout ready only in staging test mode with the card route switch on', async () => {
-    expect((await readMethodMembership(fixture(undefined, routes(true)).db, 'actor', 0, staging)).checkoutReady).toBe(true);
-    expect((await readMethodMembership(fixture(undefined, routes(false)).db, 'actor', 0, staging)).checkoutReady).toBe(false);
-    expect((await readMethodMembership(fixture(undefined, routes(true)).db, 'actor', 0,
-      { ...staging, VERCEL_PROJECT_PRODUCTION_URL: 'app.graylum.com' })).checkoutReady).toBe(false);
-    expect((await readMethodMembership(fixture(undefined, routes(true)).db, 'actor', 0,
-      { ...staging, WAFFO_TEST_OPERATIONS_ENABLED: undefined })).checkoutReady).toBe(false);
+  it('keeps card checkout not ready everywhere until the Stripe card checkout lands (PAY-STRIPE-MP PR-1)', async () => {
+    for (const env of [staging, { ...staging, VERCEL_PROJECT_PRODUCTION_URL: 'app.graylum.com' }]) {
+      for (const enabled of [true, false]) {
+        expect((await readMethodMembership(fixture(undefined, routes(enabled)).db, 'actor', 0, env)).checkoutReady).toBe(false);
+      }
+    }
   });
   it('does not present missing count as zero or hide oversold state', async () => {
     await expect(readMethodMembership(fixture([null, 0, 0]).db, 'actor')).rejects.toThrow('PAY_WAFFO_MEMBERSHIP_UNAVAILABLE');

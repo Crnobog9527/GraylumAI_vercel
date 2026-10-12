@@ -12,6 +12,7 @@ import { packageCases } from './packages.mjs';
 import { controlCases } from './controls.mjs';
 import { projectionCases } from './projection.mjs';
 import { deliveryCases } from './delivery.mjs';
+import { seedLegacyWaffo, verifyAfterStripeRouting } from './compat.mjs';
 import { POSTGRES_IMAGE } from '../v3/images.mjs';
 import { buildFromFiles, installPgCronStub } from '../baseline/build-from-files.mjs';
 
@@ -38,8 +39,15 @@ try {
   installPgCronStub(root, name, (argv, input) => docker(['exec', ...argv], input));
   const apply = input => { try { sql(input); return { ok: true }; } catch (e) { return { ok: false, error: e.message }; } };
   const fingerprint = () => JSON.parse(sql(readFileSync(resolve(root, 'packages/db/tests/baseline/fingerprint.sql'), 'utf8')));
+  // These cases create new Waffo card orders, which 0221 (PAY-STRIPE-MP) ends: build up to 0220, run them,
+  // then apply 0221 onward over that Waffo data and check old orders still work.
+  const deferred = [];
   const report = buildFromFiles(root, {
-    applyFile: path => apply(readFileSync(resolve(root, path), 'utf8')), applyServerOnly: apply, fingerprint: process.argv.includes('--quick') ? undefined : fingerprint,
+    applyFile: path => {
+      if (/\/(\d{4})_/.test(path) && Number(path.match(/\/(\d{4})_/)[1]) >= 221) { deferred.push(path); return { ok: true }; }
+      return apply(readFileSync(resolve(root, path), 'utf8'));
+    },
+    applyServerOnly: apply, fingerprint: process.argv.includes('--quick') ? undefined : fingerprint,
   });
   assert.equal(report.failed, null, JSON.stringify(report));
   const before = fingerprint();
@@ -64,6 +72,15 @@ try {
   cases.push(...await controlCases({admin,service,connect}));
   cases.push(...await packageCases({admin,service}));
   cases.push(...await projectionCases({admin,service}));
+  const legacy = await seedLegacyWaffo({admin,service});
+  assert.ok(deferred.length > 0, 'PAY-STRIPE-MP migrations were deferred');
+  for (const path of deferred) {
+    sql(readFileSync(resolve(root, path), 'utf8'));
+    const once = fingerprint();
+    sql(readFileSync(resolve(root, path), 'utf8'));
+    assert.deepEqual(fingerprint(), once, `${path} repeat over Waffo data preserves structure`);
+  }
+  cases.push(...await verifyAfterStripeRouting({admin,service},legacy));
   console.log(JSON.stringify({result:'PASS',replay:report,cases}));
 } finally {
   await Promise.all(clients.map(c=>c.query('ROLLBACK').catch(()=>{})));

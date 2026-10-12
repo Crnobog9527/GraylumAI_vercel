@@ -5,9 +5,15 @@ import { router as createTRPCRouter } from '../trpc';
 import { methodPaymentProcedures } from './methodPayments';
 import { logger } from '../lib/logger';
 import { WaffoFailure } from '../services/payments/waffoFailure';
-const mocks = vi.hoisted(() => ({ cancel: vi.fn(), provider: vi.fn(), card: vi.fn(), wallet: vi.fn() }));
+const mocks = vi.hoisted(() => ({ cancel: vi.fn(), provider: vi.fn(), wallet: vi.fn(), gateOpen: { value: false } }));
 vi.mock('../services/payments/waffoTestOperationsClient', () => ({ getWaffoTestOperationsClient: mocks.provider }));
-vi.mock('../services/payments/waffoCardCheckout', () => ({ createWaffoCardCheckout: mocks.card }));
+// Every new checkout is closed in code during PR-1; the error-mapping tests open the gate explicitly.
+vi.mock('../services/payments/methodCheckoutGate', async (load) => {
+  const real = await load<typeof import('../services/payments/methodCheckoutGate')>();
+  return { ...real, assertMethodCheckoutEnvironment: (env: Record<string, string | undefined>, method: 'card') => {
+    if (!mocks.gateOpen.value) real.assertMethodCheckoutEnvironment(env, method);
+  } };
+});
 vi.mock('../services/payments/walletCheckout', () => ({ createWalletCheckout: mocks.wallet }));
 vi.mock('../services/stripe', () => ({ assertCheckoutRateLimit: vi.fn(), getStripeAppUrl: () => 'https://auth-staging.graylum.com',
   getStripeClient: vi.fn() }));
@@ -38,7 +44,8 @@ function fixture(role = 'user', settings?: Record<string, unknown>) {
 }
 afterEach(() => { vi.unstubAllEnvs(); });
 beforeEach(() => {
-  mocks.card.mockReset().mockResolvedValue({ url: 'https://pancake.waffo.ai/store/s/checkout/c' }); mocks.wallet.mockReset();
+  mocks.wallet.mockReset().mockResolvedValue({ orderId: 'order', state: 'open', url: 'https://checkout.stripe.com/c/pay/x' });
+  mocks.gateOpen.value = false;
   mocks.cancel.mockReset().mockResolvedValue({ orderId: 'ORD_original', status: 'canceling' });
   mocks.provider.mockReset().mockReturnValue({ merchant: 'fixture', mode: 'test', cancelSubscription: mocks.cancel });
 });
@@ -64,67 +71,76 @@ it('rejects ordinary-user product controls before provider access', async () => 
 });
 const card = { itemType: 'membership_plan', itemId: subscriptionId, billingCycle: 'monthly', method: 'card',
   offer: 'gold_first30', acceptedTerms: true, routingVersion: 4, termsVersion: 'terms-test' } as const;
-const routes = (enabled: boolean) => ({ version: 4, card: { enabled },
-  wechat_pay: { enabled: true, annualVerified: true }, alipay: { enabled: true, annualVerified: true } });
+const wallet = { ...card, method: 'wechat_pay', offer: 'standard' } as const;
+const routes = (enabled: boolean) => ({ version: 4, card: { enabled }, card_cn: { enabled },
+  wechat_pay: { enabled, annualVerified: true }, alipay: { enabled, annualVerified: true } });
 const settings = (enabled: boolean) => ({ payment_method_routes: routes(enabled), payment_terms_version: { version: 'terms-test' } });
 function stubStaging(production = 'auth-staging.graylum.com') {
   vi.stubEnv('VERCEL', '1'); vi.stubEnv('VERCEL_PROJECT_PRODUCTION_URL', production);
   vi.stubEnv('WAFFO_TEST_OPERATIONS_ENABLED', 'true');
 }
-it('keeps card checkout closed in production even with every switch on', async () => {
-  stubStaging('app.graylum.com');
-  const f = fixture('user', settings(true));
-  await expect(f.caller.methodCheckout(card)).rejects.toMatchObject({ code: 'SERVICE_UNAVAILABLE' });
-  expect(f.from.mock.calls.every(([table]) => table === 'profiles')).toBe(true);
-  expect(mocks.card).not.toHaveBeenCalled(); expect(mocks.provider).not.toHaveBeenCalled();
+it('keeps every card checkout closed in production and staging even with every switch on', async () => {
+  for (const host of ['app.graylum.com', 'auth-staging.graylum.com']) {
+    stubStaging(host);
+    for (const method of ['card', 'card_cn'] as const) {
+      const f = fixture('user', settings(true));
+      await expect(f.caller.methodCheckout({ ...card, method })).rejects.toMatchObject({ code: 'SERVICE_UNAVAILABLE' });
+      expect(f.from.mock.calls.every(([table]) => table === 'profiles')).toBe(true);
+      expect(f.rpc).not.toHaveBeenCalled();
+    }
+  }
+  expect(mocks.wallet).not.toHaveBeenCalled(); expect(mocks.provider).not.toHaveBeenCalled();
 });
-it('keeps staging card checkout closed while the card route switch is off', async () => {
-  stubStaging();
-  const f = fixture('user', settings(false));
-  await expect(f.caller.methodCheckout(card)).rejects.toMatchObject({ code: 'SERVICE_UNAVAILABLE' });
-  expect(mocks.card).not.toHaveBeenCalled(); expect(mocks.provider).not.toHaveBeenCalled();
+it('never sends a card purchase to Waffo or the wallet checkout, even past the environment gate', async () => {
+  stubStaging(); mocks.gateOpen.value = true;
+  for (const method of ['card', 'card_cn'] as const) {
+    await expect(fixture('user', settings(true)).caller.methodCheckout({ ...card, method }))
+      .rejects.toMatchObject({ code: 'SERVICE_UNAVAILABLE' });
+  }
+  expect(mocks.wallet).not.toHaveBeenCalled(); expect(mocks.provider).not.toHaveBeenCalled();
 });
-it('opens staging test card checkout only with the current route version', async () => {
-  stubStaging();
-  await expect(fixture('user', settings(true)).caller.methodCheckout({ ...card, routingVersion: 3 }))
+it('checks the route switch and version before the wallet checkout', async () => {
+  stubStaging(); mocks.gateOpen.value = true;
+  await expect(fixture('user', settings(false)).caller.methodCheckout(wallet)).rejects.toMatchObject({ code: 'SERVICE_UNAVAILABLE' });
+  await expect(fixture('user', settings(true)).caller.methodCheckout({ ...wallet, routingVersion: 3 }))
     .rejects.toMatchObject({ code: 'SERVICE_UNAVAILABLE' });
-  expect(mocks.card).not.toHaveBeenCalled();
-  await expect(fixture('user', settings(true)).caller.methodCheckout(card))
-    .resolves.toEqual({ url: 'https://pancake.waffo.ai/store/s/checkout/c' });
-  expect(mocks.card).toHaveBeenCalledWith(expect.objectContaining({ userId, termsVersion: 'terms-test', purchase: card }));
+  expect(mocks.wallet).not.toHaveBeenCalled();
+  await expect(fixture('user', settings(true)).caller.methodCheckout(wallet))
+    .resolves.toEqual({ orderId: 'order', state: 'open', url: 'https://checkout.stripe.com/c/pay/x' });
+  expect(mocks.wallet).toHaveBeenCalledWith(expect.objectContaining({ userId, termsVersion: 'terms-test', purchase: wallet }));
 });
-it('does not open Stripe wallets through the card test switch', async () => {
+it('does not open Stripe wallets while the code gate is closed', async () => {
   stubStaging();
   const f = fixture('user', settings(true));
-  await expect(f.caller.methodCheckout({ ...card, method: 'wechat_pay', offer: 'standard' }))
-    .rejects.toMatchObject({ code: 'SERVICE_UNAVAILABLE' });
+  await expect(f.caller.methodCheckout(wallet)).rejects.toMatchObject({ code: 'SERVICE_UNAVAILABLE' });
   expect(f.from.mock.calls.every(([table]) => table === 'profiles')).toBe(true);
   expect(mocks.wallet).not.toHaveBeenCalled();
 });
 it('logs the secret-free failure reason that the generic 503 hides', async () => {
-  stubStaging();
+  stubStaging(); mocks.gateOpen.value = true;
   const error = vi.spyOn(logger, 'error').mockImplementation(() => undefined);
-  mocks.card.mockRejectedValueOnce(new WaffoFailure('PAY_WAFFO_PROVIDER_UNAVAILABLE', { category: 'timeout',
-    path: '/v1/actions/checkout/create-session', errorName: 'TimeoutError' }));
-  await expect(fixture('user', settings(true)).caller.methodCheckout(card))
+  mocks.wallet.mockRejectedValueOnce(new WaffoFailure('PAY_WAFFO_PROVIDER_UNAVAILABLE', { category: 'timeout',
+    path: '/v1/checkout/sessions', errorName: 'TimeoutError' }));
+  await expect(fixture('user', settings(true)).caller.methodCheckout(wallet))
     .rejects.toMatchObject({ code: 'SERVICE_UNAVAILABLE', message: '暂时无法创建付款，请稍后查看原订单状态' });
-  expect(error).toHaveBeenCalledWith('billing', 'pay_waffo_method_failed', { operation: 'method_checkout', userId, method: 'card',
-    code: 'PAY_WAFFO_PROVIDER_UNAVAILABLE', category: 'timeout', path: '/v1/actions/checkout/create-session', errorName: 'TimeoutError' });
+  expect(error).toHaveBeenCalledWith('billing', 'pay_waffo_method_failed', { operation: 'method_checkout', userId,
+    method: 'wechat_pay', code: 'PAY_WAFFO_PROVIDER_UNAVAILABLE', category: 'timeout', path: '/v1/checkout/sessions',
+    errorName: 'TimeoutError' });
   error.mockRestore();
 });
 it('answers an expected admission refusal with a typed error and plain message, not a 503', async () => {
-  stubStaging();
+  stubStaging(); mocks.gateOpen.value = true;
   const { MethodPurchaseRejected } = await import('../services/payments/methodPurchaseError');
   const warn = vi.spyOn(logger, 'warn').mockImplementation(() => undefined);
-  mocks.card.mockRejectedValueOnce(new MethodPurchaseRejected('PAY_WAFFO_MEMBERSHIP_TRANSITION_REQUIRED'));
-  await expect(fixture('user', settings(true)).caller.methodCheckout(card)).rejects.toMatchObject({
+  mocks.wallet.mockRejectedValueOnce(new MethodPurchaseRejected('PAY_WAFFO_MEMBERSHIP_TRANSITION_REQUIRED'));
+  await expect(fixture('user', settings(true)).caller.methodCheckout(wallet)).rejects.toMatchObject({
     code: 'PRECONDITION_FAILED', message: '你已有生效中的会员，不能重复购买。会员到期前无需再次付款。' });
-  mocks.card.mockRejectedValueOnce(new MethodPurchaseRejected('PAY_WAFFO_GOLD_FIRST_INELIGIBLE'));
-  await expect(fixture('user', settings(true)).caller.methodCheckout(card)).rejects.toMatchObject({
-    code: 'PRECONDITION_FAILED', message: expect.stringContaining('首 30 天优惠仅限首次购买') });
+  mocks.wallet.mockRejectedValueOnce(new MethodPurchaseRejected('PAY_WAFFO_GOLD_FIRST_INELIGIBLE'));
+  await expect(fixture('user', settings(true)).caller.methodCheckout(wallet)).rejects.toMatchObject({
+    code: 'PRECONDITION_FAILED', message: expect.stringContaining('首月优惠仅限首次购买') });
   // The same code text without the admission marker (e.g. a server fault) is still a 503.
-  mocks.card.mockRejectedValueOnce(new Error('PAY_WAFFO_MEMBERSHIP_TRANSITION_REQUIRED'));
-  await expect(fixture('user', settings(true)).caller.methodCheckout(card)).rejects.toMatchObject({ code: 'SERVICE_UNAVAILABLE' });
+  mocks.wallet.mockRejectedValueOnce(new Error('PAY_WAFFO_MEMBERSHIP_TRANSITION_REQUIRED'));
+  await expect(fixture('user', settings(true)).caller.methodCheckout(wallet)).rejects.toMatchObject({ code: 'SERVICE_UNAVAILABLE' });
   expect(warn).toHaveBeenCalledWith('billing', 'pay_waffo_method_failed', expect.objectContaining({
     operation: 'method_checkout', code: 'PAY_WAFFO_MEMBERSHIP_TRANSITION_REQUIRED' }));
   warn.mockRestore();

@@ -9,12 +9,13 @@ export async function admissionCases({ admin, service, connect }) {
   const plan = (await admin.query(`INSERT INTO membership_plans(name,level,monthly_price,yearly_price,monthly_credits,yearly_credits,
     allow_fusion_review,allow_fusion_compare,library_storage_bytes) VALUES('Gold','gold',6900,62100,8970,107640,false,false,0)
     ON CONFLICT(level) DO UPDATE SET monthly_price=6900,yearly_price=62100,monthly_credits=8970,yearly_credits=107640 RETURNING id`)).rows[0].id;
-  for (const channel of ['stripe','waffo']) for (const [offer,cycle] of [
+  // Stripe holds both wallet one-time prices and card subscription prices (0221 price_usage).
+  for (const [channel,usage] of [['stripe','subscription'],['stripe','one_time'],['waffo','subscription']]) for (const [offer,cycle] of [
     ['standard','monthly'],['gold_first30','monthly'],['founder','yearly'],
   ]) {
     await admin.query(`INSERT INTO payment_provider_refs(channel,merchant_namespace,mode,object_type,external_id,
-      membership_plan_id,billing_cycle,is_current,offer_kind) VALUES($1,'fixture','test','price',$2,$3,$4,true,$5)`,
-    [channel,`price_${channel}_${offer}`,plan,cycle,offer]);
+      membership_plan_id,billing_cycle,is_current,offer_kind,price_usage) VALUES($1,'fixture','test','price',$2,$3,$4,true,$5,$6)`,
+    [channel,`price_${channel}_${usage}_${offer}`,plan,cycle,offer,usage]);
   }
   const digests = (digest = 'c'.repeat(64)) => [{kind:'email',key_version:'test-v1',digest}];
   const buy = (db,user,opts={}) => db.query(`SELECT o.* FROM pay_waffo_create_purchase(
@@ -23,7 +24,7 @@ export async function admissionCases({ admin, service, connect }) {
     opts.mode??'test',opts.version??3,JSON.stringify(digests(opts.digest))]);
   const buyer=await makeUser();
   await assert.rejects(()=>buy(service,buyer),/SALES_DISABLED/);
-  const routes={version:3,card:{enabled:true},wechat_pay:{enabled:true,annualVerified:false},
+  const routes={version:3,card:{enabled:true},card_cn:{enabled:true},wechat_pay:{enabled:true,annualVerified:false},
     alipay:{enabled:true,annualVerified:true}};
   await admin.query("UPDATE system_settings SET value=$1 WHERE key='payment_method_routes'",[routes]);
   await assert.rejects(()=>buy(service,buyer,{mode:'live'}),/LIVE_DISABLED/);
@@ -60,7 +61,10 @@ export async function admissionCases({ admin, service, connect }) {
   assert.match(results.find(r=>r.status==='rejected').reason.message,/GOLD_FIRST_INELIGIBLE/);
   const order=results.find(r=>r.status==='fulfilled').value.rows[0];
   assert.equal(order.amount_total,4900); assert.equal(order.mode,'payment'); assert.equal(order.auto_renew,false);
-  assert.equal(order.entitlement_term,'days30'); assert.equal(order.stripe_subscription_id,null);
+  // Owner 2026-10-12: the first Gold period is one calendar month for wallets too.
+  assert.equal(order.entitlement_term,'month'); assert.equal(order.stripe_subscription_id,null);
+  assert.equal(order.payment_channel,'stripe'); assert.equal(order.stripe_managed_payments,null);
+  assert.equal(order.purchase_snapshot.tax_behavior,'exclusive');
   assert.equal((await buy(service,order.user_id)).rows[0].id,order.id);
   await assert.rejects(()=>buy(service,order.user_id,{method:'card'}),/PURCHASE_PENDING/);
   await assert.rejects(()=>service.query('UPDATE payment_orders SET qualification_state=\'released\' WHERE id=$1',[order.id]),
@@ -83,7 +87,7 @@ export async function admissionCases({ admin, service, connect }) {
   // Fifty cross-method historical slots; refund/status edits do not return a sold slot.
   for(let n=0;n<49;n++) {
     const user=await makeUser();
-    await buy(service,user,{method:n%2?'card':'alipay',offer:'founder',cycle:'yearly',digest:n.toString(16).padStart(64,'0')});
+    await buy(service,user,{method:['card','card_cn','alipay'][n%3],offer:'founder',cycle:'yearly',digest:n.toString(16).padStart(64,'0')});
   }
   await admin.query('BEGIN'); await admin.query('SELECT pg_advisory_xact_lock(7063,3)');
   const c=await makeUser(),d=await makeUser();
@@ -104,6 +108,6 @@ export async function admissionCases({ admin, service, connect }) {
   assert.match(final.find(r=>r.status==='rejected').reason.message,/FOUNDER_SOLD_OUT/);
   assert.equal((await admin.query("SELECT count(*)::int n FROM payment_orders WHERE offer_kind='founder'")).rows[0].n,50);
   return ['legacy-terminal-unpaid-unblocks','legacy-terminal-paid-still-blocks','default-off','live-denied','stale-version','wallet-annual-gate','old-catalog-denied',
-    'first-gold-identity-concurrency','wallet-days30','pending-method-switch-denied','protected-reservation',
+    'first-gold-identity-concurrency','wallet-first-month-calendar','pending-method-switch-denied','protected-reservation',
     'reference-mode-and-merchant-isolation','verified-release','late-payment-review','founder-50-concurrency'];
 }

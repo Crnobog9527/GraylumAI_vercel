@@ -2,8 +2,7 @@
 import { assertCheckoutRateLimit, getStripeAppUrl, getStripeClient } from '../services/stripe';
 import { methodPurchaseInputSchema } from '../services/payments/methodPurchase';
 import { createWalletCheckout } from '../services/payments/walletCheckout';
-import { createWaffoCardCheckout } from '../services/payments/waffoCardCheckout';
-import { readPaymentMethodRoutes, assertPaymentMethodRoute, paymentRoute } from '../services/payments/methodRouting';
+import { readPaymentMethodRoutes, assertPaymentMethodRoute, isCardMethod } from '../services/payments/methodRouting';
 import { z } from 'zod';
 import { cancelWaffoMembership, controlWaffoProduct } from '../services/payments/waffoOperations';
 import { getWaffoTestOperationsClient } from '../services/payments/waffoTestOperationsClient';
@@ -44,7 +43,7 @@ export const methodPaymentProcedures = {
   }),
   methodCheckout: protectedProcedure.input(methodPurchaseInputSchema).mutation(async ({ ctx, input }) => {
     try {
-      // Staging card test only; card.enabled in the versioned routes is the default-off switch below.
+      // Staging card test only; card/card_cn.enabled in the versioned routes is the default-off switch below.
       assertMethodCheckoutEnvironment(process.env, input.method);
       if (!ctx.hasSupabaseAdminPrivileges) throw new Error('PAY_WAFFO_PERSISTENCE_UNAVAILABLE');
       const routes = await readPaymentMethodRoutes(ctx.supabaseAdmin);
@@ -55,12 +54,9 @@ export const methodPaymentProcedures = {
         throw new Error('PAY_WAFFO_TERMS_UNAVAILABLE');
       }
       await assertCheckoutRateLimit(ctx.profileId, ctx.headers);
-      // Channel choice stays in methodRouting; the checkout adapter follows it.
-      if (paymentRoute(input.method).channel === 'waffo') {
-        return await createWaffoCardCheckout({ db: ctx.supabaseAdmin, provider: getWaffoTestOperationsClient(), userId: ctx.profileId,
-          appUrl: getStripeAppUrl(), termsVersion: terms.data.value.version, purchase: input,
-          checkoutOrigin: process.env.WAFFO_TEST_CHECKOUT_ORIGIN });
-      }
+      // Channel choice stays in methodRouting. New card purchases are Stripe; the Stripe card
+      // checkout adapter arrives in PAY-STRIPE-MP PR-2 (the environment gate keeps this closed).
+      if (isCardMethod(input.method)) throw new Error('PAY_WAFFO_STEP2_NOT_READY');
       return await createWalletCheckout({ db: ctx.supabaseAdmin, stripe: getStripeClient(), userId: ctx.profileId,
         appUrl: getStripeAppUrl(), termsVersion: terms.data.value.version, purchase: input });
     } catch (error) {

@@ -11,7 +11,7 @@ export async function createWalletCheckout(input: {
   purchase: z.infer<typeof methodPurchaseInputSchema>;
 }) {
   const { db, stripe, userId, purchase } = input;
-  if (purchase.method === 'card') throw new Error('PAY_WAFFO_METHOD_DENIED');
+  if (purchase.method === 'card' || purchase.method === 'card_cn') throw new Error('PAY_WAFFO_METHOD_DENIED');
   const scope = await resolveStripeScope(stripe);
   if (scope.mode !== 'test') throw new Error('PAY_WAFFO_LIVE_DISABLED');
   const order = await prepareMethodPurchase({ admin: db, userId, purchase,
