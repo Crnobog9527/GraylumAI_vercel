@@ -1188,7 +1188,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
                   <div ref={attachChatScroll} onScroll={onChatScroll} role="log" aria-label="完整导师消息" aria-live="polite"
                     className="max-h-[55vh] min-h-56 space-y-3 overflow-y-auto overscroll-contain pr-2">
                     {mentorExecutions.length===0&&<div className="mr-4 rounded-xl border border-[var(--border-primary)] p-3">
-                      <span className={resultStyles.agentIdentity}><img src="/graylum-logo.png" alt=""/>Graylum · AI 社媒策略师</span>
+                      <span className={resultStyles.agentIdentity}><img src="/graylum-logo.png" alt=""/>Graylum · AI 自媒体陪跑教练</span>
                       <p className={`mt-1 whitespace-pre-wrap break-words ${resultStyles.messageBody}`}>
                         {existingEntry ? EXISTING_WELCOME : d.accountRevision ? "已保留原正式定位的全部步骤。请选择需要修改的部分；未变化且已确认的内容无需重新填写。修改保存为草稿，核对后可更新正式版本。" : "我会在同一个对话里陪你完成全部步骤。你聊到的信息会自动记到右侧清单的对应栏目，每一步齐了以后由你核对并确认一次。"}
                       </p>
