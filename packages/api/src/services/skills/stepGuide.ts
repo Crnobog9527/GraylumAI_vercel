@@ -53,13 +53,23 @@ export async function loadStepWork(source: SkillSource, descriptor: PackageDescr
 export async function activateFreeChatSkill(source: SkillSource, descriptor: PackageDescriptor,
   options: {task?: string; maxContextBytes: number}): Promise<{loaded: LoadedSkill; instructions: string}> {
   const work = options.task === undefined ? await loadStepWork(source, descriptor) : undefined;
-  let loaded: LoadedSkill | undefined;
-  if (work?.resources.length) {
-    // The steps' files may use at most half the budget, leaving room for the guide, the input and tools.
-    const budget = Math.max(1, Math.floor(options.maxContextBytes / 2));
-    try { loaded = await activateSkill(source, identityOf(descriptor), {resources: work.resources, maxContextBytes: budget}); }
-    catch (error) { if (!String((error as Error)?.message).includes('CAPACITY_EXCEEDED')) throw error; }
+  const capacity = (error: unknown) => String((error as Error)?.message).includes('CAPACITY_EXCEEDED');
+  if (work) {
+    // The guide is appended after loading, so its bytes come out of the budget first.
+    const rest = options.maxContextBytes - Buffer.byteLength('\n' + work.guide, 'utf8');
+    const attempts = [
+      // The steps' files may use at most half of what remains, leaving room for the input and tools.
+      ...(work.resources.length ? [{resources: work.resources, maxContextBytes: Math.floor(rest / 2)}] : []),
+      {maxContextBytes: rest},
+    ].filter(attempt => attempt.maxContextBytes >= 1);
+    for (const attempt of attempts) {
+      try {
+        const loaded = await activateSkill(source, identityOf(descriptor), attempt);
+        return {loaded, instructions: loaded.forModel() + '\n' + work.guide};
+      } catch (error) { if (!capacity(error)) throw error; }
+    }
   }
-  loaded ??= await activateSkill(source, identityOf(descriptor), options);
-  return {loaded, instructions: work ? loaded.forModel() + '\n' + work.guide : loaded.forModel()};
+  // No guide, or not even SKILL.md and the guide fit: load exactly as before.
+  const loaded = await activateSkill(source, identityOf(descriptor), options);
+  return {loaded, instructions: loaded.forModel()};
 }

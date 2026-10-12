@@ -86,3 +86,11 @@ it('leaves room for the rest of the request: files over half the budget fall bac
   expect(instructions).not.toContain('xxxxx');
   expect(instructions).toContain('1. 找开头');
 });
+it('reserves the guide\'s bytes: loaded files plus the guide stay within the budget', async () => {
+  const f = fixture(script, 'x'.repeat(600));
+  for (const budget of [900, 1500, 3000, 100000]) {
+    const {instructions} = await activateFreeChatSkill(f.source, f.descriptor, {maxContextBytes: budget});
+    // Below what SKILL.md plus the guide need, the Skill loads exactly as before, without the guide.
+    expect(Buffer.byteLength(instructions, 'utf8') <= budget || !instructions.includes('Work guide')).toBe(true);
+  }
+});
