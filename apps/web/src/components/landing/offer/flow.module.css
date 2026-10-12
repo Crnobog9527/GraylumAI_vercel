@@ -1,0 +1,125 @@
+/*
+ * Module 3a walk-through animations. The server HTML shows every mock in its finished state; PlayOnView
+ * sets data-play="ready" (hidden) on mount and "on" when the mock scrolls into view. Without JavaScript or
+ * with reduced motion nothing is hidden and nothing moves.
+ */
+
+.window {
+  border: 1px solid #2a2a2a;
+  border-radius: 16px;
+  background: #121212;
+  overflow: hidden;
+}
+
+.bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border-bottom: 1px solid #222;
+  padding: 10px 14px;
+}
+
+.dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: #333;
+}
+
+/* Placeholder text line: shows where real text sits without inventing any. */
+.line {
+  display: block;
+  height: 8px;
+  border-radius: 999px;
+  background: #2e2e2e;
+}
+
+.lineGold {
+  background: rgba(255, 215, 0, 0.35);
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border-radius: 999px;
+  padding: 2px 10px;
+  font-size: 12px;
+  line-height: 20px;
+  white-space: nowrap;
+}
+
+.stage[data-play='ready'] .seq {
+  opacity: 0;
+}
+
+.stage[data-play='on'] .seq {
+  animation: flow-in 0.5s ease-out both;
+  animation-delay: var(--d, 0s);
+}
+
+.stage[data-play='on'] .pick {
+  animation: flow-pick 0.6s ease-out both;
+  animation-delay: var(--d, 0s);
+}
+
+.stage[data-play='on'] .strike {
+  animation: flow-strike 0.6s ease-out both;
+  animation-delay: var(--d, 0s);
+}
+
+.stage[data-play='on'] .pulse {
+  animation: flow-in 0.5s ease-out both, flow-pulse 1.2s ease-in-out 2;
+  animation-delay: var(--d, 0s), calc(var(--d, 0s) + 0.5s);
+}
+
+.picked {
+  border-color: rgba(255, 215, 0, 0.7) !important;
+  background: rgba(255, 215, 0, 0.12) !important;
+}
+
+.struck {
+  opacity: 0.45;
+  text-decoration: line-through;
+}
+
+@keyframes flow-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes flow-pick {
+  from {
+    border-color: #2a2a2a;
+    background: transparent;
+  }
+}
+
+@keyframes flow-strike {
+  from {
+    opacity: 1;
+  }
+}
+
+@keyframes flow-pulse {
+  50% {
+    box-shadow: 0 0 0 6px rgba(255, 215, 0, 0.18);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .stage[data-play] .seq,
+  .stage[data-play] .pick,
+  .stage[data-play] .strike,
+  .stage[data-play] .pulse {
+    opacity: 1;
+    animation: none;
+  }
+}
