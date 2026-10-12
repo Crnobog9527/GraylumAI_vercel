@@ -5,7 +5,7 @@
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { reserve, keyFor, fusionWorstCaseUsd } from './budget.mjs';
+import { reserve, keyFor, fusionWorstCaseUsd, REQUEST_TIMEOUT_MS } from './budget.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 // 密钥只能按账本登记的变量名取；PROBE_KEY_FILE 只能选账本里登记过的密钥文件
@@ -45,7 +45,7 @@ const body = {
 await reserve(KEY_FILE, await fusionWorstCaseUsd(body));
 const t0 = Date.now();
 const ctrl = new AbortController();
-const timer = setTimeout(() => ctrl.abort(), scenario === 'client_timeout' ? 20000 : 600000);
+const timer = setTimeout(() => ctrl.abort(), scenario === 'client_timeout' ? 20000 : REQUEST_TIMEOUT_MS);
 let status = null; let json = null; let error = null;
 try {
   const r = await fetch('https://openrouter.ai/api/v1/responses', {

@@ -7,7 +7,7 @@
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { reserve, keyFor, fusionWorstCaseUsd } from './budget.mjs';
+import { reserve, keyFor, fusionWorstCaseUsd, REQUEST_TIMEOUT_MS } from './budget.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const API = 'https://openrouter.ai/api/v1';
@@ -133,7 +133,7 @@ async function main() {
   // 按请求体里的模型和长度上限，用模型目录单价算最坏费用后预留
   await reserve(KEY_FILE, await fusionWorstCaseUsd(body));
   const ctrl = new AbortController();
-  const timeoutMs = name === 'client_timeout' ? 20000 : 600000;
+  const timeoutMs = name === 'client_timeout' ? 20000 : REQUEST_TIMEOUT_MS;
   const timer = setTimeout(() => ctrl.abort(), timeoutMs);
   const t0 = Date.now();
   let status = null;

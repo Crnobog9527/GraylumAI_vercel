@@ -3,7 +3,8 @@
 // - 已花费用 = 各密钥"当前累计用量 - 基线"之和，每次都从 OpenRouter /key 现查，不依赖本机文件，
 //   所以换工作副本或删掉本机文件都不会忘记已花的钱。密钥上别的任务的花费也会算进来，只会更保守。
 // - 必须显式设 PROBE_ALLOW_SPEND=1 才会发出任何付费请求。
-// - 正在进行、还没反映到用量里的调用，按"最坏估算"登记预留额，15 分钟后过期（调用最长 10 分钟）。
+// - 正在进行、还没反映到用量里的调用，按"最坏估算"登记预留额，15 分钟后过期。
+//   所有付费请求都带 10 分钟的中止信号（REQUEST_TIMEOUT_MS），所以预留过期时请求一定已经结束。
 // - 已花 + 未过期预留 + 本次估算超过上限就拒绝。读取、核对、写入都在跨进程锁内完成。
 // - 脚本只能用账本里为该密钥文件登记的变量名取密钥（keyFor），不能另选别的密钥。
 // - 账本 closed=true 时一律拒绝：本任务实测已结束，再跑须先有新的预算批准。
@@ -14,10 +15,13 @@ import { fileURLToPath } from 'node:url';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const LEDGER = join(HERE, 'budget-ledger.json');
-const SESSION = join(HERE, 'runs', '.session.json');
-const LOCK = join(HERE, 'runs', '.session.lock');
+// 锁和进行中预留放在用户目录下（不在工作副本里），同一台机器上所有工作副本共用一份。
+const STATE_DIR = join(homedir(), '.graylum', 'state', 'fusion-review-probe');
+const SESSION = join(STATE_DIR, 'session.json');
+const LOCK = join(STATE_DIR, 'session.lock');
 const API = 'https://openrouter.ai/api/v1';
 const RESERVATION_TTL_MS = 15 * 60 * 1000;
+export const REQUEST_TIMEOUT_MS = 10 * 60 * 1000;
 
 // 按账本登记的变量名取密钥。脚本发请求和预算核对用的是同一把密钥。
 export function keyFor(file) {

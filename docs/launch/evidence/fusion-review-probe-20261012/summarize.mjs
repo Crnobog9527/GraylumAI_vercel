@@ -5,7 +5,7 @@
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { reserve, keyFor, worstCaseUsd } from './budget.mjs';
+import { reserve, keyFor, worstCaseUsd, REQUEST_TIMEOUT_MS } from './budget.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 // 密钥只能按账本登记的变量名取；PROBE_KEY_FILE 只能选账本里登记过的密钥文件
@@ -112,6 +112,7 @@ async function once(mode, model, i) {
   const t0 = Date.now();
   const r = await fetch('https://openrouter.ai/api/v1/chat/completions', {
     method: 'POST', headers: { Authorization: `Bearer ${KEY}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
   });
   const j = await r.json();
   const content = j?.choices?.[0]?.message?.content ?? '';
@@ -125,6 +126,7 @@ async function once(mode, model, i) {
 }
 
 const [mode, model, nStr] = process.argv.slice(2);
+if (mode !== 'schema' && mode !== 'text') throw new Error('mode must be schema or text');
 const n = Number(nStr ?? 3);
 if (!Number.isInteger(n) || n < 1 || n > 5) throw new Error('count must be 1–5');
 // 按所选模型的目录单价算最坏费用（输入字符数 + max_tokens 用满），逐次预留；全部预留成功后才并发发出
