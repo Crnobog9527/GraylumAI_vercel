@@ -84,6 +84,10 @@ async function setup() {
   const account = await stripe('GET', '/account');
   const balance = await stripe('GET', '/balance');
   if (balance.livemode !== false) throw new Error('STOP: balance not in test mode');
+  // The expected sandbox id is passed in by the operator so it never lands in the repo.
+  if (process.env.MP_EXPECT_ACCOUNT && account.id !== process.env.MP_EXPECT_ACCOUNT) {
+    throw new Error('STOP: key belongs to a different Stripe account than the MP sandbox');
+  }
   state.account = { country: account.country, default_currency: account.default_currency,
     business_type: account.business_type, error: account.error };
 
@@ -199,6 +203,16 @@ async function setup() {
         amount_total: v.amount_total, payment_method_types: v.payment_method_types, test_clock: Boolean(v.clock) }])),
     probes: state.probes }));
   console.log('setup done; see 01-setup.json');
+}
+
+// Item 5/6: one more MP session where the tester enters a mainland China billing address (restricted country).
+async function extra() {
+  const session = await stripe('POST', '/checkout/sessions', { success_url: SUCCESS, cancel_url: CANCEL,
+    mode: 'subscription', managed_payments: { enabled: true }, metadata: { mp_probe: '20261012' },
+    line_items: [{ price: state.prices.gold_month, quantity: 1 }] });
+  state.scenarios.s8_cn_address = { session: session.id, url: session.url, error: session.error };
+  save();
+  console.log('extra done', session.error ? 'error' : 'ok');
 }
 
 function urls() {
@@ -328,6 +342,6 @@ async function ops() {
 }
 
 const [cmd, a, b] = process.argv.slice(2);
-const run = { setup, urls, inspect, ops, advance: () => advance(a, b) }[cmd];
+const run = { setup, extra, urls, inspect, ops, advance: () => advance(a, b) }[cmd];
 if (!run) { console.error('commands: setup | urls | inspect | advance <scenario> <days> | ops'); process.exit(1); }
 await run();
