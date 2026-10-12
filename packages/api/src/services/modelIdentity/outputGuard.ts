@@ -1,5 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-import { BRAND_REPLY_EN, BRAND_REPLY_ZH } from './brandIdentity';
+import { BRAND_REPLY_EN, BRAND_REPLY_ZH, BRAND_REPLY_ZH_HANT } from './brandIdentity';
 
 /**
  * MODEL-IDENTITY-GUARD layer 3: replace a model's first-person self-identification
@@ -53,8 +53,12 @@ export function leaksModelIdentity(text: string) {
   return PATTERNS.some(pattern => pattern.test(text));
 }
 
+// Common characters that differ between the scripts; the side with more hits decides.
+const HANT = /[們這個為說會對時來後體學們國語開關係發將與還從進過員書車問題東話樣處點傳訊練經營帳號範圖應實現電網誰嗎麼]/gu;
+const HANS = /[们这个为说会对时来后体学国语开关系发将与还从进过员书车问题东话样处点传讯练经营帐号范图应实现电网谁吗么]/gu;
 function brandReplyFor(sentence: string) {
-  return /[㐀-鿿]/u.test(sentence) ? BRAND_REPLY_ZH : BRAND_REPLY_EN;
+  if (!/[\u3400-\u9fff]/u.test(sentence)) return BRAND_REPLY_EN;
+  return (sentence.match(HANT)?.length ?? 0) > (sentence.match(HANS)?.length ?? 0) ? BRAND_REPLY_ZH_HANT : BRAND_REPLY_ZH;
 }
 
 /** Replace every self-identifying sentence; the brand reply appears at most once. */

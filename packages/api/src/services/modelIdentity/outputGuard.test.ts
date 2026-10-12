@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { describe, expect, it } from 'vitest';
-import { BRAND_REPLY_EN, BRAND_REPLY_ZH } from './brandIdentity';
+import { BRAND_REPLY_EN, BRAND_REPLY_ZH, BRAND_REPLY_ZH_HANT } from './brandIdentity';
 import { leaksModelIdentity, redactIdentityBody, redactModelIdentity, streamingRedaction } from './outputGuard';
 
 // Leaks: what a model may say about itself after a direct question or a jailbreak.
@@ -51,8 +51,17 @@ const SAFE = [
   'My suggestion is to post on Meta platforms twice a week.',
   'Anthropic, OpenAI and Google all publish creator guides.',
   BRAND_REPLY_ZH,
+  BRAND_REPLY_ZH_HANT,
   BRAND_REPLY_EN,
 ];
+
+it.each([
+  ['我是由 Google 訓練的大型語言模型，這是我們的設定。', BRAND_REPLY_ZH_HANT],
+  ['我是 Claude，由 Anthropic 開發的 AI 助手。', BRAND_REPLY_ZH_HANT],
+  ['我是由 Google 训练的大型语言模型，这是我们的设定。', BRAND_REPLY_ZH],
+])('traditional or simplified leaks get the matching script: %s', (text, reply) => {
+  expect(redactModelIdentity(text)).toBe(reply);
+});
 
 describe('jailbreak and identity leaks are replaced', () => {
   it.each(LEAKS_ZH)('zh: %s', text => {
