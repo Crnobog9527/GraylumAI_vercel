@@ -24,7 +24,7 @@ const report = z.object({
     evidence: z.object({ model: z.string().nullable(), streamed: z.boolean(), executionState: z.string(),
       unavailableReason: z.string().nullable(), calls: z.number().int().nonnegative(),
       outputTokens: z.number().int().nonnegative(), savedReplyChars: z.number().int().nonnegative(),
-      lastActivityAt: z.string().nullable() }).strict(),
+      lastActivityAt: z.string().nullable(), lastFinishReason: z.string().max(64).nullable() }).strict(),
   }).strict()).max(STALE_ROUND_REPORT_LIMIT),
 }).strict();
 export type StaleChargedRound = z.infer<typeof report>['rounds'][number] & { kind: 'stale_charged_round' };

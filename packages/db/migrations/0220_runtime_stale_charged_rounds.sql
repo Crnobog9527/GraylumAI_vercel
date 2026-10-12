@@ -35,7 +35,12 @@ BEGIN
       WHERE rec.call_id=c.id AND NOT rec.conflict AND rec.payload->>'final'='true')),0)
     FROM bill2_calls c WHERE c.run_id=r.id)::bigint output_tokens,
    length(coalesce(e.result->>'body',e.primary_result->>'body',''))::integer saved_reply_chars,
-   (SELECT max(c.settled_at) FROM bill2_calls c WHERE c.run_id=r.id) last_activity
+   (SELECT max(c.settled_at) FROM bill2_calls c WHERE c.run_id=r.id) last_activity,
+   -- How the last answered call ended; `tool_calls` with no later call means the next request never
+   -- went out (an unclassified Graylum failure, or content beyond capacity, which is not refunded).
+   (SELECT left(rec.payload->'usage'->'sdkResponse'->'choices'->0->>'finish_reason',64) FROM bill2_calls c
+     JOIN bill2_receipts rec ON rec.call_id=c.id WHERE c.run_id=r.id AND NOT rec.conflict AND rec.payload->>'final'='true'
+     ORDER BY c.sequence DESC,rec.created_at DESC,rec.id DESC LIMIT 1) last_finish_reason
   FROM runtime_executions e JOIN bill2_runs r ON r.id=e.billing_run_id
   -- cost_pending: receipt recovery settled the last unknown call but the round was never closed.
   WHERE e.state IN ('prepared','running','interrupted','cost_pending') AND e.created_at<p_cutoff
@@ -57,7 +62,7 @@ BEGIN
    'executionId',execution_id,'runId',run_id,'chargedCredits',credits,'since',since,
    'evidence',jsonb_build_object('model',model,'streamed',streamed,'executionState',execution_state,
     'unavailableReason',unavailable_reason,'calls',calls,'outputTokens',output_tokens,
-    'savedReplyChars',saved_reply_chars,'lastActivityAt',last_activity)) ORDER BY n)
+    'savedReplyChars',saved_reply_chars,'lastActivityAt',last_activity,'lastFinishReason',last_finish_reason)) ORDER BY n)
    FILTER (WHERE n<=p_limit),'[]'::jsonb)) INTO result FROM found;
  RETURN result;
 END $function$;

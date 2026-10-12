@@ -13,7 +13,7 @@ vi.mock('@/trpc/client', () => ({ trpc: {
 
 const { AdminStaleRounds, compensationMessage, reviewCaution } = await import('./AdminStaleRounds');
 const evidence = { model: 'anthropic/claude-sonnet-5.5', streamed: false, executionState: 'interrupted', unavailableReason: null,
-  calls: 1, outputTokens: 46, savedReplyChars: 0, lastActivityAt: '2026-10-11T18:02:31Z' };
+  calls: 1, outputTokens: 46, savedReplyChars: 0, lastActivityAt: '2026-10-11T18:02:31Z', lastFinishReason: 'stop' };
 const round = { kind: 'stale_charged_round', executionId: 'exec-1', runId: 'run-1', chargedCredits: 3, since: '2026-10-11T18:02:00Z', evidence };
 
 describe('admin stale-round compensation section', () => {
@@ -21,7 +21,9 @@ describe('admin stale-round compensation section', () => {
 
   it('says when nothing needs handling', () => {
     state.list = { isLoading: false, error: null, data: { findings: [], total: 0, truncated: false } };
-    expect(renderToStaticMarkup(<AdminStaleRounds />)).toContain('目前没有需要处理的回合');
+    const html = renderToStaticMarkup(<AdminStaleRounds />);
+    expect(html).toContain('目前没有需要处理的回合');
+    expect(html).toContain('超出内容容量（用户材料过长）的回合不应补偿');
   });
 
   it('lists each reported round with its charge and a confirm-first action, and notes a truncated page', () => {
@@ -34,6 +36,9 @@ describe('admin stale-round compensation section', () => {
     expect(html).toContain('anthropic/claude-sonnet-5.5');
     expect(html).toContain('模型输出 46 token');
     expect(html).toContain('已保存回复 0 字');
+    expect(html).toContain('最后一次调用结束原因 stop');
+    // The known limit is always in front of the operator (content beyond capacity is never refunded).
+    expect(html).toContain('超出内容容量');
     expect(state.mutate).not.toHaveBeenCalled();
   });
 
@@ -64,6 +69,7 @@ describe('review caution', () => {
     [{ ...evidence, streamed: true, outputTokens: 0 }, null],
     [{ ...evidence, streamed: true, outputTokens: 120 }, '可能已看到部分回答'],
     [{ ...evidence, savedReplyChars: 300 }, '一般不应补偿'],
+    [{ ...evidence, lastFinishReason: 'tool_calls' }, '也可能是用户材料超出容量'],
   ] as const)('%j', (facts, text) => {
     const caution = reviewCaution(facts);
     if (text === null) expect(caution).toBeNull(); else expect(caution).toContain(text);

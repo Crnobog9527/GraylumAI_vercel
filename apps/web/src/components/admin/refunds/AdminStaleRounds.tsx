@@ -12,13 +12,17 @@ const refusals: Readonly<Record<string, string>> = {
 };
 
 type Evidence = { model: string | null; streamed: boolean; executionState: string; unavailableReason: string | null;
-  calls: number; outputTokens: number; savedReplyChars: number; lastActivityAt: string | null };
+  calls: number; outputTokens: number; savedReplyChars: number; lastActivityAt: string | null; lastFinishReason: string | null };
+/** Known limit (Owner 2026-10-13, option B): content beyond capacity leaves no server trace, so the operator decides. */
+export const CAPACITY_RULE = '超出内容容量（用户材料过长）的回合不应补偿；用户反馈过内容太长时不要补偿。';
 const stateLabels: Readonly<Record<string, string>> = { prepared: '未开始', running: '进行中', interrupted: '中断', cost_pending: '费用已核实、未收口' };
 
 /** Content-free review facts; a streamed round that produced output may already have been seen. */
 export function reviewCaution(evidence: Evidence): string | null {
   if (evidence.savedReplyChars > 0) return '这一轮已保存了回复内容，用户很可能已经拿到答案，一般不应补偿。';
   if (evidence.streamed && evidence.outputTokens > 0) return '这一轮是边生成边显示的，模型已输出内容，用户可能已看到部分回答，请谨慎核对。';
+  if (evidence.lastFinishReason === 'tool_calls')
+    return '最后一次调用要求继续调用工具，但之后没有新的调用：可能是系统异常，也可能是用户材料超出容量，请结合用户反馈判断。';
   return null;
 }
 
@@ -52,6 +56,7 @@ export function AdminStaleRounds() {
         <p className="mt-1 text-sm" style={{ color: 'var(--text-tertiary)' }}>
           已扣积分、超过 24 小时仍未结束、也没有结果未知调用的对话回合。先核对这一轮确实没有给出回答、且不是用户自己的原因，再补偿。
         </p>
+        <p className="mt-1 text-sm" style={{ color: 'var(--text-secondary)' }}>{CAPACITY_RULE}</p>
       </div>
       {message ? <p role="status" className="text-sm" style={{ color: 'var(--text-secondary)' }}>{message}</p> : null}
       {report.isLoading ? <p className="text-sm" style={{ color: 'var(--text-tertiary)' }}>正在读取…</p>
@@ -70,6 +75,7 @@ export function AdminStaleRounds() {
                     {round.evidence.unavailableReason ? `（${round.evidence.unavailableReason}）` : ''} ·
                     调用 {round.evidence.calls} 次 · 模型输出 {round.evidence.outputTokens} token ·
                     已保存回复 {round.evidence.savedReplyChars} 字
+                    {round.evidence.lastFinishReason ? ` · 最后一次调用结束原因 ${round.evidence.lastFinishReason}` : ''}
                     {round.evidence.lastActivityAt ? ` · 最后活动 ${new Date(round.evidence.lastActivityAt).toLocaleString('zh-CN')}` : ''}
                   </p>
                   {reviewCaution(round.evidence)
@@ -82,6 +88,7 @@ export function AdminStaleRounds() {
                   <p>将结束这一轮，并把它已扣的 {round.chargedCredits} 积分全部退回给用户。补偿只会发生一次。</p>
                   <p>请确认这一轮确实没有给出回答（已保存回复 {round.evidence.savedReplyChars} 字、模型输出 {round.evidence.outputTokens} token），而且不是用户侧原因。</p>
                   {reviewCaution(round.evidence) ? <p>{reviewCaution(round.evidence)}</p> : null}
+                  <p>{CAPACITY_RULE}</p>
                 </ConfirmRefundAction>
               </li>
             ))}

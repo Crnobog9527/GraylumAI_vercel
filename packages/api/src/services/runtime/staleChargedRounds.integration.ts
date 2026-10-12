@@ -111,7 +111,7 @@ it('RUNTIME: service_role reads stale charged rounds only through the report fun
   // Content-free review evidence: the fixture's primary call returned 4 output tokens and saved its reply.
   expect(report.rounds.find(round => round.runId === stale.runId)).toMatchObject({ evidence: {
     streamed: false, executionState: 'interrupted', unavailableReason: null, calls: 1, outputTokens: 4,
-    savedReplyChars: 'Primary result'.length } });
+    savedReplyChars: 'Primary result'.length, lastFinishReason: 'stop' } });
   expect(ids(report)).not.toContain(recent.runId);
   const live = await findStaleChargedRounds(service);
   expect(live.findings).toContainEqual(expect.objectContaining({ kind: 'stale_charged_round', runId: stale.runId, chargedCredits: 3 }));
