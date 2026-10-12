@@ -3,7 +3,7 @@
 任务：PAY-WAFFO（收款渠道调整的前置验证）。只在 Owner 的 Stripe 沙盒（测试模式）里做，没有碰正式模式。
 
 - 脚本：[`mp-probe.mjs`](mp-probe.mjs)。密钥只从 `~/.graylum/secrets/stripe-test.env` 读取，必须是 `sk_test_` 开头，还会核对账户编号，不会打印密钥。
-- 证据：`01-setup.json`（建会话和参数兼容性）、`02a`（付款后）、`02b`（第一次续费后）、`02c`（续费失败和第二期后）的订阅、发票、手续费、事件，`03-ops-upgrade-cancel-refund.json`（升级、取消、退款）。这些文件已经脱敏：账户号、邮箱、姓名、地址、链接、卡尾号都去掉了。
+- 证据：`01-setup.json`（建会话和参数兼容性）、`02a`（付款后）、`02b`（第一次续费后）、`02c`（续费失败和第二期后）的订阅、发票、手续费、事件，`03-ops-upgrade-cancel-refund.json`（升级、取消、退款）、`04-trial-wording-probes.json`（试用措辞能否修改）。这些文件已经脱敏：账户号、邮箱、姓名、地址、链接、卡尾号都去掉了。
 - 浏览器付款由 Codex 完成，过程和截图说明见 [PR #847 的验收记录](https://github.com/Crnobog9527/GraylumAI_vercel/pull/847#issuecomment-6120815623)。
 
 ## 给 Owner 的结论（大白话）
@@ -68,6 +68,16 @@
 | 精确的 `trial_end`（正好 30 天） | 接受（只建了会话，没付款） | 效果应该和上一种一样 |
 | 30 天账单锚点 + `proration_behavior=none` + 一次性 49 | **拒绝**："You cannot set `proration_behavior` to `none` in a Checkout Session with one-time prices." | — |
 | 促销码（`allow_promotion_codes`） | 接受 | 没付款测试 |
+
+**用户看到的效果对比（Codex 截取的页面原文）：**
+- 优惠券做法（s2）：「1 个月优惠 US$20.00」「然后从下个月开始每月 US$69.00」，今日 49 美元。没有"试用""免费"字样，用户看得懂是"首月便宜 20"。
+- 试用加 49 做法（s3）：「试用 MP probe Gold」「30 天免费」「US$69.00 / 月以后」，另外单列一行「MP probe Gold first 30 days US$49.00」，按钮是「支付并开始试用」。页面一边写"30 天免费"、一边今天收 49，容易让人觉得被骗，也给拒付留了理由。
+
+**能不能把 s3 的"免费"字样改掉**（证据：`04-trial-wording-probes.json`）：
+- `custom_text`（提交按钮旁说明、条款说明）：**MP 下不允许**，实测报 "You cannot use custom_text with Managed Payments."
+- `subscription_data.description`：可以建会话，但它是订阅和发票上的描述，不是结账页上"30 天免费"那一行，改不掉那几个字（结账页显示没有用浏览器复核）。
+- 改产品名：只能把"试用 MP probe Gold"里的产品名部分改掉，"试用""30 天免费""开始试用"是 Stripe 自动生成的文字。
+- 结论：**在 MP 下改不掉"免费 / 试用"字样**。Stripe 还会照常发"试用开始 / 试用即将结束"的邮件。所以推荐优惠券做法，口径改为"首月 49 美元"。
 
 另外：官方文档说 MP 不支持 `automatic_tax`，但实测带上这个参数也能建会话。以官方文档为准，迁移时不要传。
 
