@@ -10,19 +10,22 @@ const plan = (level: string, monthly: number, yearly: number) => ({
 });
 const CATALOG = [plan('free', 0, 0), plan('pro', 29, 279), plan('gold', 69, 621)];
 const ALL_ON = Object.fromEntries(Object.keys(LANDING_FEATURES).map(key => [key, true])) as LandingFlags;
+// Only the positioning chat live: used to check that switching a capability off hides its blocks.
+const CORE_ONLY = Object.fromEntries(Object.keys(LANDING_FEATURES).map(key => [key, key === 'coach'])) as LandingFlags;
 
 describe('landing flags', () => {
-  it('shows only accepted capabilities by default', () => {
+  it('shows the finished product by default, except sample reports that are not generated yet (Owner 2026-10-13)', () => {
     const flags = resolveLandingFlags({});
     for (const [key, feature] of Object.entries(LANDING_FEATURES)) {
-      expect(flags[key as keyof LandingFlags]).toBe(feature.accepted);
+      expect(flags[key as keyof LandingFlags]).toBe(feature.show);
     }
+    expect(Object.entries(flags).filter(([, on]) => !on).map(([key]) => key)).toEqual(['sampleReports']);
   });
 
-  it('lets staging and previews show hidden blocks, never the indexed production page', () => {
-    expect(resolveLandingFlags({ LANDING_PREVIEW_FEATURES: 'research, publish' }).research).toBe(true);
-    expect(resolveLandingFlags({ LANDING_PREVIEW_FEATURES: 'all' }).fusion).toBe(true);
-    expect(resolveLandingFlags({ LANDING_PREVIEW_FEATURES: 'all', SITE_INDEXING: 'public' }).fusion).toBe(false);
+  it('lets staging and previews show blocks that are off, never the indexed production page', () => {
+    expect(resolveLandingFlags({ LANDING_PREVIEW_FEATURES: 'sampleReports' }).sampleReports).toBe(true);
+    expect(resolveLandingFlags({ LANDING_PREVIEW_FEATURES: 'all' }).sampleReports).toBe(true);
+    expect(resolveLandingFlags({ LANDING_PREVIEW_FEATURES: 'all', SITE_INDEXING: 'public' }).sampleReports).toBe(false);
   });
 });
 
@@ -92,8 +95,8 @@ describe('landing price cards', () => {
 });
 
 describe('landing page data', () => {
-  it('hides every block whose capability is not accepted', () => {
-    const data = buildLandingPageData(resolveLandingFlags({}), CATALOG);
+  it('hides every block whose capability is switched off', () => {
+    const data = buildLandingPageData(CORE_ONLY, CATALOG);
     expect(data.notes.map(note => note.id)).toEqual(['p2', 'p5']);
     expect(data.faqItems).toHaveLength(5);
     expect(data.compareRows.map(row => row.sourceId)).toEqual(['consultant']);
@@ -103,7 +106,19 @@ describe('landing page data', () => {
     expect(data.showResult).toEqual({ pro: false, gold: false });
   });
 
-  it('shows the full page once everything is accepted', () => {
+  it('shows the finished-product page by default, still without invented founder or first-month prices', () => {
+    const data = buildLandingPageData(resolveLandingFlags({}), CATALOG);
+    expect(data.notes).toHaveLength(7);
+    expect(data.faqItems).toHaveLength(16);
+    expect(data.compareRows).toHaveLength(4);
+    expect(data.heroNote).toContain('注册送 500 积分');
+    // No public price answer yet: no founder card, no seats, Gold monthly stays at the catalog price.
+    expect(data.pricing.cards.map(card => card.key)).toEqual(['pro', 'gold']);
+    expect(data.founderSeats).toBeNull();
+    expect(data.pricing.cards[1].quotes.monthly?.price).toBe('$69');
+  });
+
+  it('shows the full page when everything is on', () => {
     const data = buildLandingPageData(ALL_ON, CATALOG, { goldFirstMonth: 49, founder: { price: 496, total: 50, available: 12 } });
     expect(data.notes).toHaveLength(7);
     expect(data.faqItems).toHaveLength(16);
