@@ -21,9 +21,10 @@ Owner 2026-10-12 决定：应用合并到 `www.graylum.com` 单主机，登录�
 | 规则 | 内容 |
 | --- | --- |
 | 正式主机 | 只有 `https://www.graylum.com` |
-| 其他主机 | `graylum.com`、`app.graylum.com`、`http://` 一律 301 到 www。`app.graylum.com` 上**只有搬进 `/app` 的界面路由**加前缀（`app.graylum.com/positioning` → `www.graylum.com/app/positioning`）；`/auth/*`、`/api/*`、`/admin/*`、`/_next/*` 保持原路径只换主机（`app.graylum.com/auth/callback` → `www.graylum.com/auth/callback`），在途的登录链接和支付回调不能落到不存在的 `/app/auth`、`/app/api`。重定向长期保留 |
-| 登录后页面 | 全部在 `/app/...`；`/admin/...` 保持；`/api/...`、`/auth/callback` 位置不变 |
-| 索引范围 | `/app`、`/admin`、`/api`、`/auth` 永远 `noindex`（响应头 + robots Disallow），不受 `SITE_INDEXING` 开关影响；开关只控制公开页 |
+| 其他主机 | `graylum.com`、`app.graylum.com`、`http://` 一律**永久跳转（308，Next.js `permanent: true` 的默认值，保留请求方法和请求体；谷歌把 301 和 308 同等视为永久）**到 www。`app.graylum.com` 上**只有搬进 `/app` 的界面路由**加前缀（`app.graylum.com/positioning` → `www.graylum.com/app/positioning`）；`/auth/*`、`/api/*`、`/admin/*`、`/_next/*` 和登录入口页（`/login` 等，见下一行）保持原路径只换主机（`app.graylum.com/auth/callback` → `www.graylum.com/auth/callback`），在途的登录链接和支付回调不能落到不存在的 `/app/auth`、`/app/api`。支付回调的 `POST` 不能依赖跳转：切换前先在 Waffo / Stripe 后台把 webhook 主机改成 www，跳转只是兜底，并用带请求体的 `POST` 实测跳转后方法和内容不变。重定向长期保留 |
+| 登录后页面 | 需要登录的界面全部在 `/app/...`；`/admin/...` 保持；`/api/...`、`/auth/callback` 位置不变 |
+| 登录入口页 | `/login`、`/register`、`/verify-email`、`/forgot-password`、`/reset-password` 留在根路径，**不进 `/app`**：未登录也能打开，邮件里的验证和找回链接才能用；它们 `noindex`。实现时同时测“未登录能打开登录页”和“未登录打不开 `/app/*`、被送到 `/login`”两种情况 |
+| 索引范围 | `/app`、`/admin`、`/auth`、登录入口页永远 `noindex`（响应头 + meta），不受 `SITE_INDEXING` 开关影响；开关只控制公开页。**robots.txt 不 Disallow 这些 HTML 路径**：谷歌要读到 `noindex` 才能不收录，被 robots 挡住反而可能只收地址不收内容（Google 文档 block-indexing）。robots 只 Disallow `/api/` 和 `/_next/` 这类不该抓的接口 |
 | Cookie | 单主机后登录 Cookie 改为 host-only，不再用 `.graylum.com` 共享域 |
 | staging | `auth-staging.graylum.com` 本来就是单主机，套用同一套按路径的规则 |
 
@@ -66,7 +67,7 @@ Owner 2026-10-12 在"A 中文优先 / B 英文优先"中选 A（原话「选 A�
 
 1. slug 只用小写字母、数字、连字符，就是目标词本身，例如 `/zh-tw/ig-jingying`、`/en/find-your-niche`。不加日期、分类前缀、`.html`、尾斜杠。
 2. 中文页的 slug 用拼音或英文（`/xiaohongshu-qihao`、`/zh-tw/ig-jingying`），不用汉字（分享时会变成百分号编码）。
-3. 地址定了不改；必须改时 301 并更新 sitemap 和内链，不留重定向链。
+3. 地址定了不改；必须改时用永久跳转（308）并更新 sitemap 和内链，不留重定向链。
 4. 同一内容只有一个地址：根路径直接渲染首页，不再保留 `/landing` 作为第二地址（`/landing` 301 到 `/`）。
 5. 分页、筛选、排序参数一律 `noindex` 或 canonical 回主地址；`utm_*` 参数不进 canonical。
 6. 404 返回真实 404 状态码，不软 404。
@@ -81,7 +82,7 @@ Owner 2026-10-12 在"A 中文优先 / B 英文优先"中选 A（原话「选 A�
 | `alternates.languages` | 见第 3.1 节 hreflang 规则 |
 | `openGraph` | `title`、`description`、`url`、`siteName: Graylum`、`type: website`（博客 `article`）、`locale`（`zh_CN` / `zh_TW` / `en_US`）、一张 1200×630 图 |
 | `twitter` | `card: summary_large_image` |
-| `robots` | 公开页 `index, follow`；`/app /admin /api /auth` `noindex, nofollow`，响应头和 meta 双保险 |
+| `robots` | 公开页 `index, follow`；`/app`、`/admin`、`/auth`、登录入口页 `noindex, nofollow`，响应头和 meta 都写，并且**不在 robots.txt 里 Disallow**（见第 11 节） |
 | `keywords` | **不写**（哥飞《从 TDK 到 TDH》2024-04-06）；现有代码里的删除 |
 | `<html lang>` | 按页面语言 `zh-Hans` / `zh-Hant` / `en`，不写死 |
 
@@ -138,7 +139,7 @@ robots.txt 由 `app/robots.ts` 生成，上线（`SITE_INDEXING=public`）后的
 
 - 放行（搜索和 AI 问答类）：`Googlebot`、`Bingbot`、`OAI-SearchBot`、`ChatGPT-User`、`Claude-SearchBot`、`Claude-User`、`PerplexityBot`、`Perplexity-User`、`DuckAssistBot`、`Applebot`、`*`。
 - 拒绝（模型训练类，Owner 2026-10-03 决定）：`GPTBot`、`ClaudeBot`、`anthropic-ai`、`CCBot`、`Google-Extended`、`Applebot-Extended`、`Bytespider`、`Meta-ExternalAgent`、`Amazonbot`、`cohere-ai`、`Diffbot`、`omgili`。
-- 所有 UA：`Disallow: /app/`、`/admin/`、`/api/`、`/auth/`。
+- 所有 UA：`Disallow: /api/`、`/_next/`（接口和构建产物）。`/app`、`/admin`、`/auth`、登录入口页**不写 Disallow**，靠 `noindex` 头和 meta 挡索引——谷歌只有抓到页面才能读到 `noindex`。
 - 末尾：`Sitemap: https://www.graylum.com/sitemap.xml`。
 - 说明：拒绝 `GPTBot` 不影响 ChatGPT 搜索引用（那是 `OAI-SearchBot`）；拒绝 `Google-Extended` 不影响谷歌搜索和 AI Overviews（那用 Googlebot）。
 - `SITE_INDEXING` 不是 `public` 时仍然整站 `Disallow: /`（staging 和预览永不索引）。
@@ -168,7 +169,7 @@ AI 搜索引用的来源主要是：① 谷歌/必应里本来就排得上的页
 - [ ] JSON-LD 通过 Google 富媒体测试
 - [ ] 不是 `force-dynamic`；Lighthouse 移动端性能 ≥ 90
 - [ ] 内链 ≥ 3 条，无死链
-- [ ] 进入 sitemap；robots 允许；`/app` 等路径仍被拒绝
+- [ ] 进入 sitemap；robots 允许；`/app`、`/admin`、`/auth`、登录入口页仍返回 `noindex`
 - [ ] 真实浏览器按 AGENTS.md 第 4 节验证过
 
 ## 14. 博客（已批准）
@@ -184,13 +185,13 @@ Owner 2026-10-12 决定：博客用仓库内文章实现，不接外部系统。
 
 | 位置 | 改动 | 风险 |
 | --- | --- | --- |
-| `apps/web/src/proxy.ts` | 去掉按主机名分流；改成按路径：`/app/*`、`/admin/*` 需登录，其余公开；根路径直接渲染首页 | 登录和权限，high |
+| `apps/web/src/proxy.ts` | 去掉按主机名分流；改成按路径：`/app/*`、`/admin/*` 需登录，其余公开；登录入口页和 `/auth/callback` 留在根路径且公开；根路径直接渲染首页 | 登录和权限，high |
 | `apps/web/src/lib/site-config.ts` | `PUBLIC_SITE_HOSTS / SHARED_COOKIE_HOSTS / DEFAULT_AUTH_APP_URL / normalizeAppOrigin` 简化为单主机；Cookie 改 host-only；`buildAuthHref / buildAppHref` 加 `/app` | 登录态 |
 | `apps/web/src/lib/public-paths.ts` | 公开为默认，`/app` `/admin` 需登录 | 权限 |
-| 路由目录 | `positioning / runtime / profile / library / marketplace / workbench / login / register / verify-email / forgot-password / reset-password` 移到 `src/app/app/`；全仓约 45 处内链、21 个文件改前缀（不含测试） | 面广 |
-| `next.config.ts` | `redirects()` 加 `has: host = app.graylum.com` 的 301：界面路由加 `/app` 前缀，`/auth` `/api` `/admin` `/_next` 只换主机不加前缀（第 2 节）；`X-Robots-Tag noindex` 改为只对 `/app` `/admin` `/api` `/auth` | ordinary |
+| 路由目录 | `positioning / runtime / profile / library / marketplace / workbench` 移到 `src/app/app/`；`login / register / verify-email / forgot-password / reset-password / auth / admin / api` 不动；全仓约 45 处内链、21 个文件改前缀（不含测试） | 面广 |
+| `next.config.ts` | `redirects()` 加 `has: host = app.graylum.com` 的 `permanent: true`（308，保留 POST 方法和请求体）：界面路由加 `/app` 前缀，`/auth` `/api` `/admin` `/_next` 和登录入口页只换主机不加前缀（第 2 节）；`X-Robots-Tag noindex` 改为只对 `/app` `/admin` `/auth` 和登录入口页，这些路径不进 robots Disallow | ordinary |
 | 环境变量 | `NEXT_PUBLIC_APP_URL`、`NEXT_PUBLIC_AUTH_APP_URL` = `https://www.graylum.com` | 正式环境改值属 AGENTS §1 |
-| 支付回调 | `waffoCheckout.ts`、`stripeCheckoutIntent.ts` 的 successUrl 从请求 origin 拼，自动跟随；Waffo / Stripe 后台 webhook 主机要改（路径不变） | 正式环境属 §1；staging 由 AI 改 |
+| 支付回调 | `waffoCheckout.ts`、`stripeCheckoutIntent.ts` 的 successUrl 从请求 origin 拼，自动跟随；Waffo / Stripe 后台 webhook 主机**先**改成 www（路径不变），再切域名；用带请求体的 POST 实测 app 域跳转后方法和内容不变 | 正式环境属 §1；staging 由 AI 改 |
 | Supabase Auth | Site URL 改 www；Redirect URLs 加 `https://www.graylum.com/**`、删 app 域；邮件模板不改；Google OAuth 不改 | 正式环境属 §1；staging 由 AI 改 |
 | Vercel | 两个域名已在同一项目；撤掉 Owner 手动加的 `www → app` 临时 307（第 8.5 节、#614） | 正式环境属 §1 |
 | 测试 | `proxy-hostname / proxy-auth / proxy-auth-landing / proxy-pricing / site-config / authLanding.gotrue` 6 个单测和 `production-stripe-smoke.spec.ts` | ordinary |
@@ -317,4 +318,4 @@ Owner 2026-10-12 决定：博客用仓库内文章实现，不接外部系统。
 - 公开页免登录试用：暂缓（Owner 2026-10-12）。
 - 中文搜索量已用 Semrush 补上（附录 B）；Semrush 无数据的词只有盘面判断。首页核心词和第一批取舍仍待 Owner 按附录 B 的结论确认。
 - 香港繁体词汇未查；日语只预留路径。
-- 对哥飞资料库的存疑：llms.txt 效果（第 11 节）；HowTo 结构化数据已过时（第 10 节）；"301 不用 308"不作为规则（谷歌两者都当永久跳转）。
+- 对哥飞资料库的存疑：llms.txt 效果（第 11 节）；HowTo 结构化数据已过时（第 10 节）；"301 不用 308"不作为规则（谷歌两者都当永久跳转；本文反而要求 308，因为它保留 POST）。
