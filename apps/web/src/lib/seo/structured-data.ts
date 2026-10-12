@@ -45,7 +45,15 @@ export function websiteJsonLd(): JsonLdObject {
   };
 }
 
-export function softwareApplicationJsonLd(options: { description: string; path?: string }): JsonLdObject {
+export function softwareApplicationJsonLd(options: {
+  description: string;
+  path?: string;
+  // Prices exactly as the page's price cards show them; without it the entry says "free to start".
+  offers?: { name: string; price: number }[];
+}): JsonLdObject {
+  const offers = options.offers?.length
+    ? options.offers.map(offer => ({ '@type': 'Offer', name: offer.name, price: String(offer.price), priceCurrency: 'USD' }))
+    : { '@type': 'Offer', price: '0', priceCurrency: 'USD' };
   return {
     '@context': 'https://schema.org',
     '@type': 'SoftwareApplication',
@@ -54,8 +62,7 @@ export function softwareApplicationJsonLd(options: { description: string; path?:
     operatingSystem: 'Web',
     url: absoluteUrl(options.path ?? '/'),
     description: options.description,
-    // Free to start; paid plans are listed on the pricing page.
-    offers: { '@type': 'Offer', price: '0', priceCurrency: 'USD' },
+    offers,
     publisher: { '@id': ORGANIZATION_ID },
   };
 }
