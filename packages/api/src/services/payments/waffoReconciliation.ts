@@ -99,12 +99,16 @@ export async function reconcileWaffoPayments(db: Db, provider: Provider) {
     const status = undelivered ? paid.find(p => p.id === finding.paymentId)?.subscriptionOrder?.status : undefined;
     if (status && RENEWING.includes(status)) finding.renewalActive = true;
   }
-  // Waffo stops after 5 failed deliveries and cannot resend. A receipt still unprocessed after a day means
-  // its webhook gave up (or processing is off); its payment, if any, is also listed above.
-  const stale = await db.from('waffo_event_receipts').select('id').eq('merchant_namespace', provider.merchant).eq('mode', 'test')
-    .eq('status', 'received').lt('received_at', new Date(Date.now() - 24 * 3600 * 1000).toISOString()).limit(100);
+  // Waffo stops after 5 failed deliveries and cannot resend. A payment-success receipt still unprocessed after
+  // a day means its webhook gave up (or processing is off); its payment is also listed above. Lifecycle events
+  // (past_due, recovered, ...) are deliberately never resolved and are not counted.
+  const stale = await db.from('waffo_event_receipts').select('id').eq('merchant_namespace', provider.merchant)
+    .eq('mode', 'test').eq('event_type', 'subscription.payment_succeeded').eq('status', 'received')
+    .lt('received_at', new Date(Date.now() - 24 * 3600 * 1000).toISOString()).limit(100);
   if (stale.error) throw new Error('PAY_WAFFO_RECONCILIATION_UNAVAILABLE');
-  for (const row of (stale.data ?? []) as Row[]) findings.push({ kind: 'receipt_unprocessed', receiptId: row.id!, refundCandidate: false });
+  for (const row of (stale.data ?? []) as Row[]) {
+    findings.push({ kind: 'receipt_unprocessed', receiptId: row.id!, refundCandidate: false });
+  }
   if (complete) {
     const paidIds = new Set(paid.filter(p => !refunded(p)).map(p => p.id));
     const all = await paymentRefs();

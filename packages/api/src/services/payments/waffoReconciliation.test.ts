@@ -30,8 +30,12 @@ describe('Waffo daily reconciliation (report only)', () => {
         { id: '00000000-0000-4000-8000-00000000000b', fulfilled_at: '2026-10-11T06:00:00Z', payment_channel: 'waffo', payment_method: 'card',
           merchant_namespace: 'fixture', payment_mode: 'test', qualification_state: 'sold' }],
       waffo_event_receipts: [{ merchant_namespace: 'fixture', mode: 'test', resolution: { kind: 'offsite', cash: { paymentId: 'PAY_offsite' } } },
-        { id: 'rcpt-stale', merchant_namespace: 'fixture', mode: 'test', status: 'received', received_at: '2026-01-01T00:00:00Z' },
-        { id: 'rcpt-fresh', merchant_namespace: 'fixture', mode: 'test', status: 'received', received_at: '2999-01-01T00:00:00Z' }],
+        { id: 'rcpt-stale', event_type: 'subscription.payment_succeeded', merchant_namespace: 'fixture', mode: 'test', status: 'received',
+          received_at: '2026-01-01T00:00:00Z' },
+        { id: 'rcpt-lifecycle', event_type: 'subscription.past_due', merchant_namespace: 'fixture', mode: 'test', status: 'received',
+          received_at: '2026-01-01T00:00:00Z' },
+        { id: 'rcpt-fresh', event_type: 'subscription.payment_succeeded', merchant_namespace: 'fixture', mode: 'test', status: 'received',
+          received_at: '2999-01-01T00:00:00Z' }],
     }, rpc);
     const listPayments = vi.fn().mockResolvedValue({ rows, complete: true });
     const result = await reconcileWaffoPayments(db, { merchant: 'fixture', mode: 'test', listPayments });
