@@ -4,7 +4,7 @@
 const ERRORS: Record<string, string> = {
   SOCIAL_MEDIA_FLAG_UNAVAILABLE: '暂时无法读取或保存这个设置，请稍后再试。',
   SOCIAL_MEDIA_FLAG_MODULE_NOT_FOUND: '找不到这个功能模块，可能已被删除，请刷新页面。',
-  SOCIAL_MEDIA_FLAG_CONFLICT: '这个设置刚被其他人改过。请点“重新读取”看最新设置，再决定是否保存。',
+  SOCIAL_MEDIA_FLAG_CONFLICT: '这个模块在你打开窗口后被改过（可能是这个设置，也可能是其他内容）。请关闭窗口重新打开，看到最新内容后再保存。',
   SOCIAL_MEDIA_FLAG_POSITIONING_SKILL: '这是用户做定位用的 Skill，不能勾选，否则没有定位的用户就没法开始做定位。',
 };
 
@@ -12,10 +12,6 @@ const ERRORS: Record<string, string> = {
 export function socialMediaFlagErrorText(error: unknown) {
   const code = error && typeof error === 'object' && 'message' in error ? String(error.message) : '';
   return Object.hasOwn(ERRORS, code) ? ERRORS[code] : ERRORS.SOCIAL_MEDIA_FLAG_UNAVAILABLE;
-}
-
-export function isSocialMediaFlagConflict(error: unknown) {
-  return Boolean(error && typeof error === 'object' && 'message' in error && error.message === 'SOCIAL_MEDIA_FLAG_CONFLICT');
 }
 
 export function socialMediaFlagSavedText(on: boolean) {

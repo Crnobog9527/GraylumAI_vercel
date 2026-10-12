@@ -16,6 +16,6 @@ export const socialMediaFlagRouter = router({
   get: adminProcedure.input(moduleInput).query(({ ctx, input }) =>
     safe(() => readSocialMediaFlag(ctx.supabase, input.moduleId))),
   update: adminProcedure.input(moduleInput.extend({
-    socialMediaRelated: z.boolean(), expectedSocialMediaRelated: z.boolean(),
+    socialMediaRelated: z.boolean(), expectedSocialMediaRelated: z.boolean(), expectedModuleUpdatedAt: z.string().min(1).max(64),
   }).strict()).mutation(({ ctx, input }) => safe(() => saveSocialMediaFlag(ctx.supabase, input))),
 });

@@ -21,7 +21,7 @@ beforeAll(async () => {
     const listeners = new Set(); const notify = () => listeners.forEach(fn => fn());
     const subscribe = fn => { listeners.add(fn); return () => listeners.delete(fn); };
     window.updates = [];
-    const row = () => ({moduleId: '${MODULE}', socialMediaRelated: window.stored});
+    const row = () => ({moduleId: '${MODULE}', socialMediaRelated: window.stored, moduleUpdatedAt: window.version});
     let snapshot = null; const current = () => snapshot ??= row();
     export const trpc = {
       useUtils: () => ({socialMediaFlag: {get: {setData: (_input, value) => { snapshot = value; notify(); }}}}),
@@ -35,12 +35,10 @@ beforeAll(async () => {
           return {isPending, mutateAsync: async input => {
             window.updates.push(input); setPending(true);
             try {
-              if (window.serverStored !== undefined && input.expectedSocialMediaRelated !== window.serverStored) {
-                window.stored = window.serverStored;
+              if (input.expectedSocialMediaRelated !== window.stored || input.expectedModuleUpdatedAt !== window.version)
                 throw new Error('SOCIAL_MEDIA_FLAG_CONFLICT');
-              }
               if (window.updateFails) throw new Error(window.updateFails);
-              window.stored = input.socialMediaRelated;
+              window.stored = input.socialMediaRelated; window.version = 'v' + window.updates.length;
               return row();
             } finally { setPending(false); }
           }};
@@ -59,9 +57,13 @@ beforeAll(async () => {
       if (id === '\0social-media-flag-trpc') return mock;
       if (id === entry) return `import React from 'react'; import { createRoot } from 'react-dom/client';
         import {SocialMediaFlagSetting} from ${JSON.stringify(source)};
-        window.syncs = 0;
-        createRoot(document.getElementById('root')).render(React.createElement(SocialMediaFlagSetting,
-          {moduleId: window.moduleId, onSaved: async () => { window.syncs++; return window.syncFails !== true; }}));`;
+        window.adopted = [];
+        function Host() {
+          const [opened, setOpened] = React.useState(window.opened);
+          return React.createElement(SocialMediaFlagSetting, {moduleId: window.moduleId, moduleUpdatedAt: opened,
+            onVersion: v => { window.adopted.push(v); setOpened(v); }});
+        }
+        createRoot(document.getElementById('root')).render(React.createElement(Host));`;
     } }],
     build: { write: false, minify: false, lib: { entry, name: 'SocialMediaFlagTest', formats: ['iife'] } },
   });
@@ -78,14 +80,15 @@ async function open(setup: Record<string, unknown>) {
   page.on('pageerror', error => errors.push(error.message));
   await page.route('**/*', route => route.abort());
   await page.setContent('<div id="root"></div>');
-  await page.evaluate(value => { Object.assign(window, value); }, { moduleId: MODULE, stored: false, ...setup });
+  await page.evaluate(value => { Object.assign(window, value); },
+    { moduleId: MODULE, stored: false, version: 'v0', opened: 'v0', ...setup });
   await page.addScriptTag({ content: code });
   return { page, errors };
 }
 const updates = (page: Page) => page.evaluate('window.updates');
 const box = (page: Page) => page.getByRole('checkbox', { name: '与社交媒体相关' });
 
-it('starts unchecked, saves on, then saves off, sending the value it read each time', async () => {
+it('starts unchecked, saves on, then saves off, sending the flag and module version it holds', async () => {
   const { page, errors } = await open({});
   try {
     await browserExpect(box(page)).not.toBeChecked();
@@ -99,36 +102,35 @@ it('starts unchecked, saves on, then saves off, sending the value it read each t
     await page.getByTestId('social-media-flag-save').click();
     await browserExpect(page.getByTestId('social-media-flag-notice')).toContainText('不再要求');
     expect(await updates(page)).toEqual([
-      { moduleId: MODULE, socialMediaRelated: true, expectedSocialMediaRelated: false },
-      { moduleId: MODULE, socialMediaRelated: false, expectedSocialMediaRelated: true },
+      { moduleId: MODULE, socialMediaRelated: true, expectedSocialMediaRelated: false, expectedModuleUpdatedAt: 'v0' },
+      { moduleId: MODULE, socialMediaRelated: false, expectedSocialMediaRelated: true, expectedModuleUpdatedAt: 'v1' },
     ]);
-    expect(await page.evaluate('window.syncs')).toBe(2);
+    // The editor adopts exactly the versions its own saves produced.
+    expect(await page.evaluate('window.adopted')).toEqual(['v1', 'v2']);
     expect(errors).toEqual([]);
   } finally { await page.close(); }
 }, 20000);
 
-it('on a conflict tells the admin to reload, and reload shows the newer setting', async () => {
-  const { page, errors } = await open({ serverStored: true });
+it('when the module changed after the editor opened it, refuses and asks to reopen without adopting anything', async () => {
+  const { page, errors } = await open({ version: 'v9' });
   try {
     await box(page).check();
     await page.getByTestId('social-media-flag-save').click();
-    await browserExpect(page.getByTestId('social-media-flag-notice')).toContainText('刚被其他人改过');
-    await page.getByRole('button', { name: '重新读取' }).click();
-    await browserExpect(box(page)).toBeChecked();
-    await browserExpect(page.getByTestId('social-media-flag-save')).toBeDisabled();
+    await browserExpect(page.getByTestId('social-media-flag-notice')).toContainText('请关闭窗口重新打开');
+    expect(await page.evaluate('window.adopted')).toEqual([]);
     expect(await updates(page)).toHaveLength(1);
     expect(errors).toEqual([]);
   } finally { await page.close(); }
 }, 20000);
 
-it('explains a refusal in plain Chinese, keeps the module version, and renders nothing without a module', async () => {
-  const { page, errors } = await open({ updateFails: 'SOCIAL_MEDIA_FLAG_UNAVAILABLE' });
+it('explains a refusal in plain Chinese, adopts no version, and renders nothing without a module', async () => {
+  const { page, errors } = await open({ updateFails: 'SOCIAL_MEDIA_FLAG_POSITIONING_SKILL' });
   try {
     await box(page).check();
     await page.getByTestId('social-media-flag-save').click();
-    await browserExpect(page.getByTestId('social-media-flag-notice')).toContainText('暂时无法读取或保存');
+    await browserExpect(page.getByTestId('social-media-flag-notice')).toContainText('不能勾选');
     await browserExpect(page.getByTestId('social-media-flag-notice')).not.toContainText('SOCIAL_');
-    expect(await page.evaluate('window.syncs')).toBe(0);
+    expect(await page.evaluate('window.adopted')).toEqual([]);
     await page.close();
     const second = await open({ moduleId: undefined });
     await browserExpect(second.page.getByTestId('social-media-flag-setting')).toHaveCount(0);

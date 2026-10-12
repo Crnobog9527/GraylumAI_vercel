@@ -5,26 +5,30 @@ import { useEffect, useRef, useState } from 'react';
 import { trpc } from '@/trpc/client';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
-import { isSocialMediaFlagConflict, socialMediaFlagErrorText, socialMediaFlagSavedText } from './socialMediaFlagView';
+import { socialMediaFlagErrorText, socialMediaFlagSavedText } from './socialMediaFlagView';
 
 const muted = { color: 'var(--text-tertiary)' };
-type SavedHook = () => Promise<boolean>;
+type VersionHook = (updatedAt: string) => void;
 
 /**
- * POSITIONING-GATE: "与社交媒体相关", saved on its own (not with the module form). Every save sends
- * the value this page read, so an older page cannot overwrite a newer setting.
+ * POSITIONING-GATE: "与社交媒体相关", saved on its own (not with the module form). Every save sends the
+ * flag and the module version this editor opened, so it never overwrites, or hides, a change made elsewhere.
  */
-export function SocialMediaFlagSetting({ moduleId, onSaved }: { moduleId: string | undefined; onSaved?: SavedHook }) {
-  if (!moduleId) return null;
-  return <SocialMediaFlagPanel moduleId={moduleId} onSaved={onSaved} />;
+export function SocialMediaFlagSetting({ moduleId, moduleUpdatedAt, onVersion }: {
+  moduleId: string | undefined; moduleUpdatedAt: string | undefined; onVersion: VersionHook;
+}) {
+  if (!moduleId || !moduleUpdatedAt) return null;
+  return <SocialMediaFlagPanel moduleId={moduleId} moduleUpdatedAt={moduleUpdatedAt} onVersion={onVersion} />;
 }
 
-function SocialMediaFlagPanel({ moduleId, onSaved }: { moduleId: string; onSaved?: SavedHook }) {
+function SocialMediaFlagPanel({ moduleId, moduleUpdatedAt, onVersion }: {
+  moduleId: string; moduleUpdatedAt: string; onVersion: VersionHook;
+}) {
   const utils = trpc.useUtils();
   const current = trpc.socialMediaFlag.get.useQuery({ moduleId }, { staleTime: 0, retry: false });
   const update = trpc.socialMediaFlag.update.useMutation();
   const [selected, setSelected] = useState<boolean | null>(null);
-  const [notice, setNotice] = useState<{ tone: 'ok' | 'error'; text: string; conflict?: boolean } | null>(null);
+  const [notice, setNotice] = useState<{ tone: 'ok' | 'error'; text: string } | null>(null);
   const inFlight = useRef(false);
 
   const saved = current.data?.socialMediaRelated;
@@ -37,24 +41,18 @@ function SocialMediaFlagPanel({ moduleId, onSaved }: { moduleId: string; onSaved
     inFlight.current = true;
     setNotice(null);
     try {
-      const next = await update.mutateAsync({ moduleId, socialMediaRelated: value, expectedSocialMediaRelated: saved });
+      const next = await update.mutateAsync({ moduleId, socialMediaRelated: value, expectedSocialMediaRelated: saved,
+        expectedModuleUpdatedAt: moduleUpdatedAt });
       utils.socialMediaFlag.get.setData({ moduleId }, next);
       setSelected(null);
-      // Saving moves the module version the form above sends back; let the page pick up the new one.
-      const synced = onSaved ? await onSaved() : true;
-      setNotice(synced ? { tone: 'ok', text: socialMediaFlagSavedText(next.socialMediaRelated) }
-        : { tone: 'error', text: '设置已保存，但模块版本没能刷新。要保存上方其他修改，请先关闭窗口再重新打开。' });
+      // Only this save moved the version (it was conditioned on the editor's), so the form above may adopt it.
+      onVersion(next.moduleUpdatedAt);
+      setNotice({ tone: 'ok', text: socialMediaFlagSavedText(next.socialMediaRelated) });
     } catch (error) {
-      setNotice({ tone: 'error', text: socialMediaFlagErrorText(error), conflict: isSocialMediaFlagConflict(error) });
+      setNotice({ tone: 'error', text: socialMediaFlagErrorText(error) });
     } finally {
       inFlight.current = false;
     }
-  }
-
-  async function reload() {
-    setNotice(null);
-    setSelected(null);
-    await current.refetch();
   }
 
   return (
@@ -64,7 +62,7 @@ function SocialMediaFlagPanel({ moduleId, onSaved }: { moduleId: string; onSaved
         : current.isError ? (
           <div role="alert" className="flex flex-wrap items-center gap-2 text-sm" style={{ color: 'var(--error)' }}>
             {socialMediaFlagErrorText(current.error)}
-            <Button type="button" variant="outline" size="sm" onClick={() => void reload()}>重新读取</Button>
+            <Button type="button" variant="outline" size="sm" onClick={() => void current.refetch()}>重新读取</Button>
           </div>
         ) : current.data ? (
           <>
@@ -79,7 +77,6 @@ function SocialMediaFlagPanel({ moduleId, onSaved }: { moduleId: string; onSaved
               <Button type="button" data-testid="social-media-flag-save" disabled={!dirty || update.isPending} onClick={() => void save()}>
                 {update.isPending ? '正在保存…' : '保存这个设置'}
               </Button>
-              {notice?.conflict ? <Button type="button" variant="outline" onClick={() => void reload()}>重新读取</Button> : null}
             </div>
             {notice ? <p role={notice.tone === 'error' ? 'alert' : 'status'} data-testid="social-media-flag-notice" className="text-sm"
               style={{ color: notice.tone === 'error' ? 'var(--error)' : 'var(--success)' }}>{notice.text}</p> : null}
