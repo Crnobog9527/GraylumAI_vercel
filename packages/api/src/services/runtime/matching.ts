@@ -59,9 +59,10 @@ export async function activateRuntimeCandidate(user:SupabaseClient,admin:Supabas
  const c=matchCandidate.parse(candidate);
  if(c.requiresTask)throw new Error('RUNTIME_SKILL_TASK_REQUIRED');
  const source=databaseSkillSource({userClient:user,privateClient:admin,moduleId:c.moduleId,skillId:c.skillId,revisionId:c.revisionId});
+ const identity={packageId:c.packageId,revisionId:c.revisionId,packageHash:c.packageHash};
  const descriptor=(await source.list()).find(d=>d.revisionId===c.revisionId&&d.packageHash===c.packageHash&&d.packageId===c.packageId);
  // An unknown identity keeps the loader's own refusal.
- if(!descriptor)return (await activateSkill(source,{packageId:c.packageId,revisionId:c.revisionId,packageHash:c.packageHash},{maxContextBytes:c.inputLimit})).forModel();
+ if(!descriptor)return (await activateSkill(source,identity,{maxContextBytes:c.inputLimit})).forModel();
  return (await activateFreeChatSkill(source,descriptor,{maxContextBytes:c.inputLimit})).instructions;
 }
 /** A selected Skill runs with its own model capacity: never pay for a match whose selection cannot run.
