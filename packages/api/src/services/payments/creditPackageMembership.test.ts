@@ -7,7 +7,18 @@ describe('credit package membership delegates to report authority', () => {
   it('accepts the SQL void result without introducing channel or subscription requirements', async () => {
     const rpc = vi.fn(async () => ({ data: null, error: null }));
     await expect(assertCreditPackageMembership({ rpc } as unknown as SupabaseClient, 'server-actor')).resolves.toBeUndefined();
-    expect(rpc).toHaveBeenCalledExactlyOnceWith('report_membership_check', { p_actor_id: 'server-actor' });
+    expect(rpc).toHaveBeenNthCalledWith(1, 'report_membership_check', { p_actor_id: 'server-actor' });
+    expect(rpc).toHaveBeenNthCalledWith(2, 'pay_common_membership_facts', { p_user_id: 'server-actor' });
+  });
+  it('refuses packages during the 0214 renewal grace even though member access is kept', async () => {
+    const rpc = vi.fn(async (fn: string) => (fn === 'report_membership_check' ? { data: null, error: null }
+      : { data: { internal_membership: { mapping_state: 'internal_paid', renewal_grace_until: '2026-11-11T16:49:49Z' } }, error: null }));
+    await expect(assertCreditPackageMembership({ rpc } as unknown as SupabaseClient, 'server-actor'))
+      .rejects.toMatchObject({ code: 'FORBIDDEN', message: 'PAYWALL_MEMBERSHIP_REQUIRED' });
+    const unavailable = vi.fn(async (fn: string) => (fn === 'report_membership_check' ? { data: null, error: null }
+      : { data: null, error: { message: 'boom' } }));
+    await expect(assertCreditPackageMembership({ rpc: unavailable } as unknown as SupabaseClient, 'server-actor'))
+      .rejects.toMatchObject({ code: 'SERVICE_UNAVAILABLE' });
   });
   it.each(['returned', 'thrown'])('maps a %s nonmember refusal to the public permission code', async mode => {
     const error = { message: 'REPORT_MEMBERSHIP_REQUIRED', details: 'PRIVATE_DIAGNOSTIC' };

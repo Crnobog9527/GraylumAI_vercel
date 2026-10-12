@@ -1,5 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { paymentAmountFactsSchema } from './contracts';
+import { normalizePaymentOrderStatus, type PaymentOrderStatus } from '../paymentOrderStatus';
 
 type Order = { payment_channel?: string | null; payment_mode?: string | null; payment_amount_facts?: unknown };
 type Documents = { documentStatus?: 'unknown'; invoicePdfUrl: string | null; hostedInvoiceUrl: string | null; receiptUrl: string | null };
@@ -19,6 +20,19 @@ export function projectOrderPayment(order: Order, documents?: Documents) {
       : documents && (documents.invoicePdfUrl || documents.hostedInvoiceUrl || documents.receiptUrl)
         ? 'available' as const : 'unavailable' as const,
   };
+}
+
+type ClosedOrder = { status: string; payment_status?: string | null; fulfilled_at?: string | null;
+  qualification_state?: string | null; purchase_closed_at?: string | null; method_review_reason?: string | null };
+
+/** Display only. A method order whose unpaid checkout was released (0204/0211 close paths) keeps
+ * status=pending in the database so a late payment still lands in manual review; the customer sees
+ * it as closed. Any recorded payment or fulfilment takes the order out of this projection. */
+export function projectBillingStatus(order: ClosedOrder): PaymentOrderStatus {
+  const status = normalizePaymentOrderStatus(order.status);
+  if (status !== 'pending' || order.payment_status !== 'unpaid' || order.fulfilled_at
+    || order.qualification_state !== 'released' || !order.purchase_closed_at) return status;
+  return order.method_review_reason === 'card_checkout_rejected' ? 'failed' : 'expired';
 }
 
 export type BillingRecord = ReturnType<typeof projectOrderPayment> & {
@@ -59,4 +73,7 @@ export type PaymentOrderBillingRow = {
   fulfilled_at: string | null;
   created_at: string;
   metadata?: Record<string, unknown> | null;
+  qualification_state?: string | null;
+  purchase_closed_at?: string | null;
+  method_review_reason?: string | null;
 };

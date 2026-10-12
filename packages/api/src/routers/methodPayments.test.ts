@@ -112,3 +112,20 @@ it('logs the secret-free failure reason that the generic 503 hides', async () =>
     code: 'PAY_WAFFO_PROVIDER_UNAVAILABLE', category: 'timeout', path: '/v1/actions/checkout/create-session', errorName: 'TimeoutError' });
   error.mockRestore();
 });
+it('answers an expected admission refusal with a typed error and plain message, not a 503', async () => {
+  stubStaging();
+  const { MethodPurchaseRejected } = await import('../services/payments/methodPurchaseError');
+  const warn = vi.spyOn(logger, 'warn').mockImplementation(() => undefined);
+  mocks.card.mockRejectedValueOnce(new MethodPurchaseRejected('PAY_WAFFO_MEMBERSHIP_TRANSITION_REQUIRED'));
+  await expect(fixture('user', settings(true)).caller.methodCheckout(card)).rejects.toMatchObject({
+    code: 'PRECONDITION_FAILED', message: '你已有生效中的会员，不能重复购买。会员到期前无需再次付款。' });
+  mocks.card.mockRejectedValueOnce(new MethodPurchaseRejected('PAY_WAFFO_GOLD_FIRST_INELIGIBLE'));
+  await expect(fixture('user', settings(true)).caller.methodCheckout(card)).rejects.toMatchObject({
+    code: 'PRECONDITION_FAILED', message: expect.stringContaining('首 30 天优惠仅限首次购买') });
+  // The same code text without the admission marker (e.g. a server fault) is still a 503.
+  mocks.card.mockRejectedValueOnce(new Error('PAY_WAFFO_MEMBERSHIP_TRANSITION_REQUIRED'));
+  await expect(fixture('user', settings(true)).caller.methodCheckout(card)).rejects.toMatchObject({ code: 'SERVICE_UNAVAILABLE' });
+  expect(warn).toHaveBeenCalledWith('billing', 'pay_waffo_method_failed', expect.objectContaining({
+    operation: 'method_checkout', code: 'PAY_WAFFO_MEMBERSHIP_TRANSITION_REQUIRED' }));
+  warn.mockRestore();
+});

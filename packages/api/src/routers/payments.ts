@@ -1,7 +1,7 @@
 import { methodPaymentProcedures } from './methodPayments';
 import { createStripeBillingDocumentLoader } from '../services/payments/stripeBillingDocument';
 import { listAdminPaymentOrders } from '../services/payments/adminOrders';
-import { projectOrderPayment, type BillingRecord, type PaymentOrderBillingRow } from '../services/payments/orderProjection';
+import { projectBillingStatus, projectOrderPayment, type BillingRecord, type PaymentOrderBillingRow } from '../services/payments/orderProjection';
 import { assertCheckoutChannel } from '../services/payments/channelSettings';
 /*
  * Copyright (c) 2026 Grayscale Luminary LLC.
@@ -1526,7 +1526,7 @@ export const paymentsRouter = router({
           'payment_status',
           'fulfilled_at',
           'created_at',
-          'metadata',
+          'metadata', 'qualification_state', 'purchase_closed_at', 'method_review_reason',
         ].join(','))
         .eq('user_id', ctx.profileId)
         .order('created_at', { ascending: false });
@@ -1556,7 +1556,7 @@ export const paymentsRouter = router({
             const stripeDocuments = await loadBillingDocument(order);
             const itemType: BillingRecord['itemType'] =
               order.item_type === 'membership_plan' ? 'membership_plan' : 'credit_package';
-            const status: PaymentOrderStatus = normalizePaymentOrderStatus(order.status);
+            const status: PaymentOrderStatus = projectBillingStatus(order);
             const title: string = itemType === 'membership_plan'
               ? membershipPlanNames.get(order.item_id) ?? '会员订阅'
               : creditPackageNames.get(order.item_id) ?? '积分加油包';

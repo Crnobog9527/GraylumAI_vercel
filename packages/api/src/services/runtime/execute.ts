@@ -10,7 +10,7 @@ import {nativeVisible,nativeMetadata,prepareNativePrimary,nativeFrameProjection,
  completedOutput,finalizeNativeSummary} from './nativeOutput';
 import {paygOwnerDatabase} from './paygOwner';
 import {executorRpc,historyGuard,terminalReplyGuard,recoverExecutorFinancial,
- preflightCodes,hash,progressEmitter,type RuntimeExecutorOptions} from './executorRpc';
+ preflightCodes,platformFailureReason,hash,progressEmitter,type RuntimeExecutorOptions} from './executorRpc';
 import {fitNativeRequestOutput,runtimePaygCall, type ResumeInput, type PaygWait, type PaygPosition} from './paygRuntime';
 import {beginPaygExecution, type RuntimeExecution} from './paygResume';
 import {PROMPT_CACHE_OVERHEAD_BYTES} from './promptCache';
@@ -66,7 +66,8 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
   const ownerDatabase=isPayg?paygOwnerDatabase(options.database,{executionId,epoch:execution.epoch!}):options.database;
   const ownerRpc=<T>(name:string,value:Record<string,unknown>)=>rpc<T>(name,value,ownerDatabase);
   if(execution.state==='cancelled')return {state:'cancelled' as const,
-   ...(execution.unavailableReason==='provider_history'?{unavailable:'provider_history' as const}:{})};
+   ...(execution.unavailableReason==='provider_history'||execution.unavailableReason==='preflight'
+    ?{unavailable:execution.unavailableReason}:{})};
   if(execution.cancelRequested){
    await billing.recoverReceipts(execution.runId);
    const recovered=await ownerRpc<{state:string}>('runtime_financial_recovery',{...args,p_finish:true});
@@ -469,6 +470,16 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
      preflightFailure==='RUNTIME_PROVIDER_HISTORY_DENIED'?'provider_history':'preflight':capacity?'capacity':undefined);
     return {state:'cancelled' as const,...(unavailable?{unavailable}:{}),...claimNoticeFields(claimNotice),
      ...(unavailable==='paused'?{code:'RUNTIME_NEW_CALLS_STOPPED' as const}:{})};
+   }
+   // Owner 2026-10-12: a Graylum-side failure after a dispatch ends the round and restores its
+   // charged credits (bill2 confirmed_failure compensation). Unknown calls keep normal recovery.
+   const platformReason=platformFailureReason(preflightFailure);
+   if(isPayg&&platformReason){
+    const ended=await ownerRpc<{state:string}>('runtime_execution',{...args,p_action:'fail_platform',
+     p_result:{unavailable_reason:platformReason}}).catch(()=>null);
+    if(ended?.state==='cancelled')return {state:'cancelled' as const,unavailable:platformReason};
+    // Not refunded yet: keep the normal cost-verification result, never the "not charged" reason.
+    if(ended?.state==='cost_pending')return {state:'cost_pending' as const};
    }
    await ownerRpc('runtime_execution',{...args,p_action:'interrupt'}).catch(()=>{});
    return {state:'pending' as const,...(capacity?{unavailable:'capacity' as const}:{}),...claimNoticeFields(claimNotice)};

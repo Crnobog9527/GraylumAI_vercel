@@ -55,6 +55,12 @@ export const preflightCodes=new Set([
  'BILL2_PROVIDER_MODEL_DENIED',
  'BILL2_PROVIDER_QUOTE_REQUIRED',
  'BILL2_PROVIDER_QUOTE_CONFLICT']);
+/** Graylum-side request failures that end the round with its charges restored (Owner 2026-10-12).
+ * Time-budget exhaustion is excluded: that round resumes on the next request. */
+export function platformFailureReason(code:string|undefined):'provider_history'|'preflight'|undefined{
+ if(!code||code==='RUNTIME_TIME_BUDGET_EXHAUSTED'||!preflightCodes.has(code))return undefined;
+ return code==='RUNTIME_PROVIDER_HISTORY_DENIED'?'provider_history':'preflight';
+}
 export const hash=(value:string)=>createHash('sha256').update(value).digest('hex');
 
 export function progressEmitter(onProgress:((event:RuntimeProgress)=>void)|undefined,

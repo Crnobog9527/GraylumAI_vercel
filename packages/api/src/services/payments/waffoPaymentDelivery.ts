@@ -1,10 +1,14 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { z } from 'zod';
-import { readPaymentFacts, type PaymentFacts, type WaffoTestPayments } from './waffoPayments';
+import { readPaymentFacts, type PaymentFacts, type WaffoPayment, type WaffoTestPayments } from './waffoPayments';
+import type { WaffoTestOperations } from './waffoOperations';
+import { describeWaffoFailure } from './waffoFailure';
+import { logger } from '../../lib/logger';
 
 type Db = Pick<SupabaseClient, 'rpc' | 'from'>;
-type Provider = WaffoTestPayments & { merchant: string; mode: 'test' };
+type Provider = WaffoTestPayments & Pick<WaffoTestOperations, 'cancelSubscription' | 'readSubscription'>
+  & { merchant: string; mode: 'test' };
 export type WaffoReceipt = { id: string; merchant: string; refs: { paymentId?: string; orderId?: string; subscriptionId?: string } };
 export type ReceiptOutcome = { state: 'applied' | 'review' | 'ignored'; reason: string };
 
@@ -18,17 +22,19 @@ async function resolve(db: Db, receipt: WaffoReceipt, state: 'applied' | 'review
   return { state, reason };
 }
 
-async function apply(db: Db, receipt: WaffoReceipt, fn: string, args: Record<string, unknown>): Promise<ReceiptOutcome> {
+type Decision = { state: 'applied' | 'review'; reason: string };
+/** The database decision only; the receipt is resolved after any renewal stop it requires. Every RPC
+ * used here is idempotent, so a redelivery after a failed stop reaches the same decision. */
+async function decide(db: Db, fn: string, args: Record<string, unknown>): Promise<Decision> {
   const result = await db.rpc(fn, args);
   if (result.error) {
     const code = BUSINESS.exec(result.error.message ?? '')?.[1];
     if (!code) throw new Transient('PAY_WAFFO_DELIVERY_UNAVAILABLE');
-    return resolve(db, receipt, 'review', code.toLowerCase());
+    return { state: 'review', reason: code.toLowerCase() };
   }
-  const state = result.data?.state;
-  if (state === 'fulfilled') return resolve(db, receipt, 'applied', 'delivered');
+  if (result.data?.state === 'fulfilled') return { state: 'applied', reason: 'delivered' };
   const reason = typeof result.data?.reason === 'string' && /^[a-z_]{1,64}$/.test(result.data.reason) ? result.data.reason : 'review';
-  return resolve(db, receipt, 'review', reason);
+  return { state: 'review', reason };
 }
 
 async function single(query: PromiseLike<{ data: unknown; error: unknown }>) {
@@ -37,27 +43,27 @@ async function single(query: PromiseLike<{ data: unknown; error: unknown }>) {
   return result.data as Record<string, string> | null;
 }
 
-async function firstPayment(db: Db, provider: Provider, receipt: WaffoReceipt, facts: PaymentFacts) {
+async function firstPayment(db: Db, provider: Provider, facts: PaymentFacts): Promise<Decision | null> {
   if (!facts.externalId || !z.uuid().safeParse(facts.externalId).success) return null;
   const order = await single(db.from('payment_orders').select('id').eq('id', facts.externalId).eq('payment_channel', 'waffo')
     .eq('payment_method', 'card').eq('merchant_namespace', provider.merchant).eq('payment_mode', 'test').maybeSingle());
   if (!order) return null;
   const checkout = await single(db.from('payment_provider_refs').select('external_id').eq('order_id', order.id)
     .eq('object_type', 'checkout').eq('channel', 'waffo').eq('merchant_namespace', provider.merchant).eq('mode', 'test').maybeSingle());
-  if (!checkout) return resolve(db, receipt, 'review', 'checkout_unmapped');
-  return apply(db, receipt, 'pay_waffo_fulfill_payment', {
+  if (!checkout) return { state: 'review', reason: 'checkout_unmapped' };
+  return decide(db, 'pay_waffo_fulfill_payment', {
     p_order: order.id, p_merchant: provider.merchant, p_checkout: checkout.external_id, p_payment: facts.paymentId,
     p_amount: facts.amountCents, p_currency: facts.currency, p_paid_at: facts.createdAt, p_subscription: facts.waffoOrderId,
     p_start: facts.periodStart, p_end: facts.periodEnd,
   });
 }
 
-async function renewal(db: Db, provider: Provider, receipt: WaffoReceipt, facts: PaymentFacts) {
+async function renewal(db: Db, provider: Provider, facts: PaymentFacts): Promise<Decision | null> {
   const ref = await single(db.from('payment_provider_refs').select('subscription_id').eq('object_type', 'subscription')
     .eq('external_id', facts.waffoOrderId).eq('channel', 'waffo').eq('merchant_namespace', provider.merchant).eq('mode', 'test').maybeSingle());
   if (!ref?.subscription_id) return null;
   // Amount authority is the database's recorded order price (49 then 69, founder 496), not the catalog.
-  return apply(db, receipt, 'pay_waffo_renew_subscription', {
+  return decide(db, 'pay_waffo_renew_subscription', {
     p_subscription: ref.subscription_id, p_merchant: provider.merchant, p_payment: facts.paymentId, p_amount: facts.amountCents,
     p_currency: facts.currency, p_paid: facts.createdAt, p_start: facts.periodStart, p_end: facts.periodEnd,
   });
@@ -75,6 +81,40 @@ async function offsite(db: Db, provider: Provider, receipt: WaffoReceipt, facts:
   }
   // The offsite transaction itself marks the receipt for refund and renewal stop; nothing is granted.
   return { state: 'review', reason: 'offsite' };
+}
+
+const STOPPED = ['canceling', 'canceled'];
+/** Cash we did not deliver (late after the 40-minute release, closed account, offsite, unprovable facts)
+ * leaves a Waffo subscription with no site subscription behind it, so the next period would be charged
+ * with nothing delivered. Stop its renewal and confirm by reading it back BEFORE the receipt is resolved;
+ * the payment itself stays with manual refund handling. A failed or unconfirmed stop throws so the receipt
+ * stays open for provider redelivery; the daily reconciliation reports any subscription still renewing. */
+async function stopRenewal(provider: Provider, waffoOrderId: string) {
+  try {
+    // Start from the authoritative read: an earlier attempt may have stopped it before its response was lost.
+    let observed = await provider.readSubscription(waffoOrderId);
+    if (observed.orderId === waffoOrderId && !STOPPED.includes(observed.status)) {
+      observed = await provider.cancelSubscription(waffoOrderId);
+      if (observed.orderId === waffoOrderId && !STOPPED.includes(observed.status)) observed = await provider.readSubscription(waffoOrderId);
+    }
+    if (observed.orderId === waffoOrderId && STOPPED.includes(observed.status)) return;
+    logger.error('billing', 'pay_waffo_renewal_stop_unconfirmed', { waffoOrderId, status: observed.status });
+  } catch (error) {
+    logger.error('billing', 'pay_waffo_renewal_stop_failed', { waffoOrderId, ...describeWaffoFailure(error) });
+  }
+  throw new Transient('PAY_WAFFO_RENEWAL_STOP_PENDING');
+}
+
+/** A paid record we cannot prove can never be delivered automatically. When it is provably this test
+ * store's own subscription and no site subscription maps to it, stop the renewal as for other undelivered
+ * cash. A mapped subscriber is left alone: its renewal and cancel flow belong to the normal path. */
+async function stopUnknownRenewal(db: Db, provider: Provider, payment: WaffoPayment, reason: string) {
+  const order = payment.subscriptionOrder;
+  if (['test_mode_unproven', 'store_scope'].includes(reason) || !payment.testMode || !order?.testMode
+    || order.storeId !== provider.storeId || order.id !== payment.orderId) return;
+  const mapped = await single(db.from('payment_provider_refs').select('subscription_id').eq('object_type', 'subscription')
+    .eq('external_id', payment.orderId).eq('channel', 'waffo').eq('merchant_namespace', provider.merchant).eq('mode', 'test').maybeSingle());
+  if (!mapped) await stopRenewal(provider, payment.orderId);
 }
 
 /** Normal path only: first payment and renewal of our own card orders. Every other situation is left
@@ -95,10 +135,31 @@ export async function processWaffoReceipt(db: Db, provider: Provider, receipt: W
   if (!payment) throw new Transient('PAY_WAFFO_PAYMENT_NOT_VISIBLE');
   const reading = readPaymentFacts(payment, provider.storeId);
   if (reading.kind === 'not_paid') return { state: 'ignored', reason: 'not_paid' };
-  if (reading.kind === 'unknown') return resolve(db, receipt, 'review', reading.reason);
+  if (reading.kind === 'unknown') {
+    await stopUnknownRenewal(db, provider, payment, reading.reason);
+    return resolve(db, receipt, 'review', reading.reason);
+  }
   const { facts } = reading;
-  const outcome = facts.periodNumber === 1
-    ? await firstPayment(db, provider, receipt, facts)
-    : await renewal(db, provider, receipt, facts);
-  return outcome ?? offsite(db, provider, receipt, facts);
+  const decision = facts.periodNumber === 1 ? await firstPayment(db, provider, facts) : await renewal(db, provider, facts);
+  if (!decision) {
+    // No site order or subscription: offsite cash. Stop first; the offsite RPC resolves the receipt itself.
+    await stopRenewal(provider, facts.waffoOrderId);
+    return offsite(db, provider, receipt, facts);
+  }
+  if (decision.state === 'review' && (facts.periodNumber === 1 || await mappedRenewalStillOpen(db, provider, decision, facts))) {
+    await stopRenewal(provider, facts.waffoOrderId);
+  }
+  return resolve(db, receipt, decision.state, decision.reason);
+}
+
+/** pay_waffo_renew_subscription records a charge it must not deliver (closed or erasing account, terminated
+ * credit release) as plain review. Unless the customer's own stop is already in its cancel flow, nothing
+ * else stops the next charge. Term conflicts (other reasons) stay manual: they may be a paying subscriber. */
+async function mappedRenewalStillOpen(db: Db, provider: Provider, decision: Decision, facts: PaymentFacts) {
+  if (decision.reason !== 'review') return false;
+  const ref = await single(db.from('payment_provider_refs').select('subscription_id').eq('object_type', 'subscription')
+    .eq('external_id', facts.waffoOrderId).eq('channel', 'waffo').eq('merchant_namespace', provider.merchant).eq('mode', 'test').maybeSingle());
+  if (!ref?.subscription_id) return false;
+  const sub = await single(db.from('user_subscriptions').select('method_cancel_requested_at').eq('id', ref.subscription_id).maybeSingle());
+  return Boolean(sub) && !sub!.method_cancel_requested_at;
 }
