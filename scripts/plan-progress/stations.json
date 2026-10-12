@@ -151,6 +151,10 @@
         {
           "name": "CONTENT-CONVERSATION-DRIVEN",
           "plain": "选题和写作改成自由对话，需要时自动用上对应平台的写作技巧。"
+        },
+        {
+          "name": "POSITIONING-GATE",
+          "plain": "没做定位的用户聊社媒运营时，先引导他做定位或导入已有定位。"
         }
       ]
     },
@@ -271,14 +275,6 @@
           "plain": "接通银行卡订阅与钱包单笔付款，复用订单、会员积分和人工退款。"
         },
         {
-          "name": "POSITIONING-GATE",
-          "plain": "没做定位的用户聊社媒运营时，先引导他做定位或导入已有定位。"
-        },
-        {
-          "name": "MODEL-IDENTITY-GUARD",
-          "plain": "用户看不到真实模型品牌和型号，问到或越狱时统一回复品牌话术。"
-        },
-        {
           "name": "PAY-STRIPE-CARD-FALLBACK",
           "plain": "Waffo 出问题时，可手动把新的银行卡购买切到 Stripe 的备选通道。"
         },
@@ -332,6 +328,27 @@
         {
           "task": "PUBLISH-MONITOR",
           "text": "等你：Post for Me 实测和条款核对通过之前，这项功能不上线。"
+        }
+      ]
+    },
+    {
+      "id": "brand",
+      "name": "官网统一、品牌一致",
+      "plain": "官网合并到 www.graylum.com、中文优先、公开页面换成新风格；用户在对话里看不到真实模型品牌。",
+      "tasks": [
+        {
+          "name": "PUBLIC-SITE",
+          "plain": "域名合并、SEO/GEO 基础设置、公开页面重做和新落地页。"
+        },
+        {
+          "name": "MODEL-IDENTITY-GUARD",
+          "plain": "用户看不到真实模型品牌和型号，问到或越狱时统一回复品牌话术。"
+        }
+      ],
+      "waitingForOwner": [
+        {
+          "task": "PUBLIC-SITE",
+          "text": "首页核心词等你用关键词规划师导出中文搜索量；域名合并涉及的正式环境设置逐项批准；创始人背景措辞由你确认。"
         }
       ]
     },
