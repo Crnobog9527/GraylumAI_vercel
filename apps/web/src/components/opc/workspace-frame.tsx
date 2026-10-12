@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { BookOpen, ChevronDown, Ellipsis, Grid2X2, LogOut, Menu, PanelRightClose, Pencil, Pin, Sparkles, Trash2, UserRound, X } from 'lucide-react';
+import { BookOpen, ChevronDown, Ellipsis, Grid2X2, LogOut, Menu, PanelRightClose, Pencil, Pin, Sparkles, UserRound, X } from 'lucide-react';
 import { trpc } from '@/trpc/client';
 import { useCreditsBalance } from '@/hooks/use-credits';
 import { createClient } from '@/lib/supabase';
@@ -54,6 +54,13 @@ export function WorkspaceFrame({children,right,rightOpen=true,onToggleRight,acti
  },[activeWorkItemId,router]);
  useContentErasureSync(leaveErased);
  function startErasure(kind:ContentErasureTarget['kind'],id:string,name:string){setMenuId('');setErasing({target:{kind,id},name});}
+ /** The row's "⋯" menu opens below its button, kept inside the window (ChatGPT/Claude style). */
+ function openRowMenu(event:{currentTarget:HTMLElement},id:string){
+  const rect=event.currentTarget.getBoundingClientRect();
+  const top=Math.max(8,Math.min(window.innerHeight-236,rect.bottom+4));
+  setMenuPosition({top,left:Math.max(8,Math.min(window.innerWidth-186,rect.right-178))});
+  setMenuId(current=>current===id?'':id);setConfirmDelete('');
+ }
  const pathname=usePathname();
  const [workReturn,setWorkReturn]=useState('');
  useEffect(()=>{
@@ -149,7 +156,7 @@ export function WorkspaceFrame({children,right,rightOpen=true,onToggleRight,acti
  }
  function recordMenu(item:Item){return <div className={styles.threadRow} key={item.workItemId}>
   {renameId===item.workItemId?<div className={styles.renameThread}><input className={styles.inlineRename} autoFocus aria-label="重命名对话" maxLength={160} value={renameValue} onChange={event=>setRenameValue(event.target.value)} onKeyDown={event=>{if(event.key==='Escape')setRenameId('');if(event.key==='Enter'&&renameValue.trim())void changeRecord(item,'rename',renameValue.trim());}}/><small>{item.lastActivityAt?new Date(item.lastActivityAt).toLocaleDateString('zh-CN'):''} · 工作对话</small></div>:<Link className={styles.thread} aria-current={activeWorkItemId===item.workItemId?'page':undefined} href={'/runtime?session='+item.sessionId}><span>{item.pinned&&<Pin size={12} aria-label="已置顶"/>}{item.chatName??item.title}</span><small>{item.lastActivityAt?new Date(item.lastActivityAt).toLocaleDateString('zh-CN'):''} · 工作对话</small></Link>}
-  <button className={styles.more} aria-label={(item.chatName??item.title)+'的更多操作'} aria-expanded={menuId===item.workItemId} onClick={event=>{const rect=event.currentTarget.getBoundingClientRect();setMenuPosition({top:Math.max(8,Math.min(window.innerHeight-236,rect.bottom+4)),left:Math.max(8,Math.min(window.innerWidth-186,rect.right-178))});setMenuId(current=>current===item.workItemId?'':item.workItemId);setConfirmDelete('');}}><Ellipsis size={17}/></button>
+  <button className={styles.more} aria-label={(item.chatName??item.title)+'的更多操作'} aria-expanded={menuId===item.workItemId} onClick={event=>openRowMenu(event,item.workItemId)}><Ellipsis size={17}/></button>
   {menuId===item.workItemId&&<div className={styles.workMenu} style={menuPosition} role="menu"><button role="menuitem" onClick={()=>{setRenameId(item.workItemId);setRenameValue(item.chatName??item.title);setMenuId('');}}>重命名</button>{archiveView?<button role="menuitem" onClick={()=>void changeRecord(item,'restore')}>恢复归档</button>:<><button role="menuitem" onClick={()=>void changeRecord(item,item.pinned?'unpin':'pin')}>{item.pinned?'取消置顶':'置顶'}</button><button role="menuitem" onClick={()=>void changeRecord(item,'archive')}>归档</button></>}<button role="menuitem" className={styles.danger} onClick={()=>{if(confirmDelete===item.workItemId)void changeRecord(item,'delete');else setConfirmDelete(item.workItemId);}}>{confirmDelete===item.workItemId?'确认从列表移除（内容不删除）':'从列表移除'}</button>
    <button role="menuitem" className={styles.danger} onClick={()=>startErasure('session',item.sessionId,(item.chatName??item.title)+' · 对话记录')}>
     永久删除对话记录</button>
@@ -199,8 +206,13 @@ export function WorkspaceFrame({children,right,rightOpen=true,onToggleRight,acti
      })}
      {!archiveView&&<QueryNotice error={conversations.error} loading={conversations.isPending} label="对话记录" retry={()=>conversations.refetch()}/>}
      {!archiveView&&Boolean(conversations.data?.length)&&<details open={groupOpen.conversations??true} onToggle={event=>{const next=event.currentTarget.open;setGroupOpen(current=>current.conversations===next?current:{...current,conversations:next});}}><summary>对话<ChevronDown size={14}/></summary>{conversations.data?.map(conversation=><div className={styles.threadRow} key={conversation.sessionId}><Link className={styles.thread} href={'/runtime?session='+conversation.sessionId}><span>{conversation.title}</span><small>{new Date(conversation.lastActivityAt).toLocaleDateString('zh-CN')} · 对话</small></Link>
-      <button type="button" className={styles.more} aria-label={'永久删除对话 '+conversation.title}
-       onClick={()=>startErasure('session',conversation.sessionId,conversation.title)}><Trash2 size={15}/></button></div>)}</details>}
+      <button type="button" className={styles.more} aria-label={conversation.title+'的更多操作'}
+       aria-expanded={menuId==='conversation:'+conversation.sessionId}
+       onClick={event=>openRowMenu(event,'conversation:'+conversation.sessionId)}><Ellipsis size={17}/></button>
+      {menuId==='conversation:'+conversation.sessionId&&<div className={styles.workMenu} style={menuPosition} role="menu">
+       <button role="menuitem" className={styles.danger}
+        onClick={()=>startErasure('session',conversation.sessionId,conversation.title)}>删除对话</button></div>}
+     </div>)}</details>}
      {!archiveView&&unassigned.length>0&&<details open={groupOpen.unassigned??true} onToggle={event=>{const next=event.currentTarget.open;setGroupOpen(current=>current.unassigned===next?current:{...current,unassigned:next});}}><summary>待归类<ChevronDown size={14}/></summary>{unassigned.map(draft=><Link key={draft.draftId} className={styles.thread} href={'/positioning/'+draft.draftId}><span>{draft.businessName??'新账号'} · 定位分析</span><small>{draft.state==='published'?'已确认':'进行中'}</small></Link>)}</details>}
      <QueryNotice error={library.error||drafts.error} loading={library.isPending||drafts.isPending} label="账号与资料" retry={()=>Promise.all([library.refetch(),drafts.refetch()])}/>
      {library.isSuccess&&drafts.isSuccess&&!library.error&&!drafts.error&&(!archiveView&&!platforms.size&&!unassigned.length||archiveView&&![...platforms.values()].flat().some(account=>account.items.some(item=>item.archived&&!item.deleted)))&&<p className={styles.empty}>{archiveView?'暂无归档记录。':'完成定位并采用选题后，账号工作会出现在这里。'}</p>}
