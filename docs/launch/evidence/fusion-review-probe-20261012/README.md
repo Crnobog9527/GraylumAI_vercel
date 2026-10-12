@@ -209,7 +209,9 @@ node sanitize.mjs                                       # 提交前清除账号�
 - 不设 `PROBE_ALLOW_SPEND=1` 就拒绝运行。
 - 已花费用 = `budget-ledger.json` 里登记的各测试密钥"当前累计用量 - 任务开始时的基线"之和，每次都从 OpenRouter 现查，不需要手动更新。
 - 正在进行的调用按最坏费用预留。已花加预留超过 2 美元就拒绝。
+- 最坏费用按请求里每个模型的目录单价和长度上限计算。不列明评审团（用官方默认的动态评审团）的请求一律拒绝。
+- **本任务实测已结束，账本已标为关闭（`closed: true`），现在运行任何付费脚本都会被拒绝。** 要再跑，须先有新的预算批准，再改账本。
 
-换成评审专用 workspace 的密钥：在命令前加 `PROBE_KEY_FILE=fusion-review.env PROBE_KEY_VAR=OPENROUTER_API_KEY`。`probe.mjs ask_search` 会明确要求评审团联网，用来检验关闭是否生效。
+换成评审专用 workspace 的密钥：在命令前加 `PROBE_KEY_FILE=fusion-review.env`，变量名由账本决定，脚本不能另选别的密钥。`probe.mjs ask_search` 会明确要求评审团联网，用来检验关闭是否生效。
 
 在中国大陆的网络下，Anthropic 模型会被地区限制拦住，所以要设 `NODE_USE_ENV_PROXY=1`，让 Node 走本机代理。

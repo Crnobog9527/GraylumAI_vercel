@@ -3,15 +3,14 @@
 // 用法：node summarize.mjs <模式 schema|text> <模型> <次数>
 // 密钥读取方式同 probe.mjs，不打印、不落盘。
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
-import { homedir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { reserve, worstCaseUsd } from './budget.mjs';
+import { reserve, keyFor, worstCaseUsd } from './budget.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const raw = readFileSync(join(homedir(), '.graylum/secrets', process.env.PROBE_KEY_FILE ?? 'payg-profile.env'), 'utf8');
-const KEY = raw.split('\n').find((l) => l.startsWith(`${process.env.PROBE_KEY_VAR ?? 'GRAYLUM_PAYG_TEST_OPENROUTER_KEY'}=`))
-  .split('=').slice(1).join('=').trim().replace(/^"|"$/g, '');
+// 密钥只能按账本登记的变量名取；PROBE_KEY_FILE 只能选账本里登记过的密钥文件
+const KEY_FILE = process.env.PROBE_KEY_FILE ?? 'payg-profile.env';
+const KEY = keyFor(KEY_FILE);
 
 const REPORT = readFileSync(join(HERE, 'sample-report.md'), 'utf8').replace('{{CANARY}}', 'ZX-7741-LANTERN');
 // 评审意见取自 baseline 实测的合并清单（runs/baseline-1.json 外层回答末尾）
@@ -131,7 +130,7 @@ if (!Number.isInteger(n) || n < 1 || n > 5) throw new Error('count must be 1–5
 // 按所选模型的目录单价算最坏费用（输入字符数 + max_tokens 用满），逐次预留；全部预留成功后才并发发出
 const promptChars = INSTR.length + TEXT_FORMAT.length + REPORT.length + merged.length + 200;
 const est = await worstCaseUsd(model, promptChars, MAX_TOKENS);
-for (let i = 0; i < n; i += 1) await reserve({ Authorization: `Bearer ${KEY}` }, process.env.PROBE_KEY_FILE ?? 'payg-profile.env', est);
+for (let i = 0; i < n; i += 1) await reserve(KEY_FILE, est);
 const results = await Promise.all(Array.from({ length: n }, (_, i) => once(mode, model, i)));
 mkdirSync(join(HERE, 'runs'), { recursive: true });
 const file = join(HERE, 'runs', `summarize-${mode}-${model.replace(/\W+/g, '_')}.json`);

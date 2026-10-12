@@ -2,22 +2,19 @@
 // FUSION-REVIEW 开工前实测脚本（只做实测，不是产品代码）。
 // 用法：NODE_USE_ENV_PROXY=1 node probe.mjs <场景名> [tag]（Chat Completions；PROBE_STREAM=0 改为非流式）
 // 密钥默认从 ~/.graylum/secrets/payg-profile.env 读取（GRAYLUM_PAYG_TEST_OPENROUTER_KEY），
-// 可用 PROBE_KEY_FILE / PROBE_KEY_VAR 换成评审专用 workspace 的密钥文件；
+// 可用 PROBE_KEY_FILE 换成账本里登记的另一个密钥文件（变量名由账本决定）；
 // 不打印、不写入输出文件。输出文件只含请求参数（无密钥）、返回体、计时和费用查询结果。
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
-import { homedir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { reserve } from './budget.mjs';
+import { reserve, keyFor, fusionWorstCaseUsd } from './budget.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const API = 'https://openrouter.ai/api/v1';
 
+const KEY_FILE = process.env.PROBE_KEY_FILE ?? 'payg-profile.env';
 function loadKey() {
-  const raw = readFileSync(join(homedir(), '.graylum/secrets', process.env.PROBE_KEY_FILE ?? 'payg-profile.env'), 'utf8');
-  const line = raw.split('\n').find((l) => l.startsWith(`${process.env.PROBE_KEY_VAR ?? 'GRAYLUM_PAYG_TEST_OPENROUTER_KEY'}=`));
-  if (!line) throw new Error('key not found');
-  return line.slice(line.indexOf('=') + 1).trim().replace(/^"|"$/g, '');
+  return keyFor(KEY_FILE);
 }
 const KEY = loadKey();
 const headers = { Authorization: `Bearer ${KEY}`, 'Content-Type': 'application/json' };
@@ -131,10 +128,10 @@ async function main() {
   mkdirSync(outDir, { recursive: true });
 
   const usageBefore = await getKeyUsage();
-  // 便宜评审团一次实测约 0.003–0.04 美元，按 0.15 美元预留
-  await reserve(headers, process.env.PROBE_KEY_FILE ?? 'payg-profile.env', 0.15);
 
   const body = SCENARIOS[name]();
+  // 按请求体里的模型和长度上限，用模型目录单价算最坏费用后预留
+  await reserve(KEY_FILE, await fusionWorstCaseUsd(body));
   const ctrl = new AbortController();
   const timeoutMs = name === 'client_timeout' ? 20000 : 600000;
   const timer = setTimeout(() => ctrl.abort(), timeoutMs);
