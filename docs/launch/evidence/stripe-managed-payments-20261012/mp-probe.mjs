@@ -47,13 +47,14 @@ function encode(obj, prefix, out = []) {
   return out;
 }
 
-async function stripe(method, path, params) {
+async function stripe(method, path, params, idempotencyKey) {
   const body = params && method !== 'GET' ? encode(params).join('&') : undefined;
   const query = params && method === 'GET' ? `?${encode(params).join('&')}` : '';
   const res = await fetch(`https://api.stripe.com/v1${path}${query}`, {
     method,
     headers: { Authorization: `Bearer ${KEY}`, 'Stripe-Version': API_VERSION,
-      ...(body ? { 'Content-Type': 'application/x-www-form-urlencoded' } : {}) },
+      ...(body ? { 'Content-Type': 'application/x-www-form-urlencoded' } : {}),
+      ...(idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : {}) },
     body,
   });
   const json = await res.json();
@@ -79,15 +80,24 @@ function redact(value) {
   }));
 }
 
-async function setup() {
-  const now = Math.floor(Date.now() / 1000);
+// Every command checks the account before its first write. The expected sandbox id is passed in
+// by the operator (MP_EXPECT_ACCOUNT) so it never lands in the repo; without it nothing runs.
+async function assertAccount() {
+  const expected = process.env.MP_EXPECT_ACCOUNT;
+  if (!expected || !/^acct_[A-Za-z0-9]+$/.test(expected)) {
+    console.error('STOP: set MP_EXPECT_ACCOUNT to the MP sandbox account id. Nothing was called.');
+    process.exit(2);
+  }
   const account = await stripe('GET', '/account');
   const balance = await stripe('GET', '/balance');
   if (balance.livemode !== false) throw new Error('STOP: balance not in test mode');
-  // The expected sandbox id is passed in by the operator so it never lands in the repo.
-  if (process.env.MP_EXPECT_ACCOUNT && account.id !== process.env.MP_EXPECT_ACCOUNT) {
-    throw new Error('STOP: key belongs to a different Stripe account than the MP sandbox');
-  }
+  if (account.id !== expected) throw new Error('STOP: key belongs to a different Stripe account than the MP sandbox');
+  return account;
+}
+
+async function setup() {
+  const now = Math.floor(Date.now() / 1000);
+  const account = await assertAccount();
   state.account = { country: account.country, default_currency: account.default_currency,
     business_type: account.business_type, error: account.error };
 
@@ -207,6 +217,7 @@ async function setup() {
 
 // Item 5/6: one more MP session where the tester enters a mainland China billing address (restricted country).
 async function extra() {
+  await assertAccount();
   const session = await stripe('POST', '/checkout/sessions', { success_url: SUCCESS, cancel_url: CANCEL,
     mode: 'subscription', managed_payments: { enabled: true }, metadata: { mp_probe: '20261012' },
     line_items: [{ price: state.prices.gold_month, quantity: 1 }] });
@@ -242,17 +253,23 @@ async function chargeDetail(chargeId) {
 }
 
 async function inspect() {
+  await assertAccount();
   const report = {};
+  const probeIds = new Set();
+  const track = (...ids) => ids.forEach((id) => { if (typeof id === 'string') probeIds.add(id); });
   for (const [key, s] of Object.entries(state.scenarios ?? {})) {
     if (!s.session) { report[key] = { error: s.error }; continue; }
     const cs = await expandSession(s.session);
     const sub = cs.subscription && typeof cs.subscription === 'object' ? cs.subscription : null;
+    track(cs.id, s.customer, s.clock, typeof cs.customer === 'string' ? cs.customer : cs.customer?.id, sub?.id,
+      typeof cs.payment_intent === 'string' ? cs.payment_intent : cs.payment_intent?.id);
     const invoices = sub ? await stripe('GET', '/invoices', { subscription: sub.id, limit: 10 }) : null;
     const invoiceRows = [];
     for (const inv of invoices?.data ?? []) {
       const pay = await stripe('GET', '/invoice_payments', { invoice: inv.id, limit: 3,
         expand: ['data.payment.payment_intent'] });
       const pi = pay.data?.[0]?.payment?.payment_intent;
+      track(inv.id, typeof pi === 'object' ? pi?.id : pi, typeof pi === 'object' ? pi?.latest_charge : null);
       invoiceRows.push({ id: inv.id, status: inv.status, billing_reason: inv.billing_reason,
         amount_due: inv.amount_due, amount_paid: inv.amount_paid, subtotal: inv.subtotal, total: inv.total,
         total_taxes: inv.total_taxes, total_discount_amounts: inv.total_discount_amounts,
@@ -283,21 +300,35 @@ async function inspect() {
         .then((c) => ({ status: c.status, frozen_time: c.frozen_time })) : null,
     };
   }
-  const events = await stripe('GET', '/events', { limit: 100, created: { gte: state.created_at } });
+  // Read every event since setup, keep only those that belong to the probe's own objects.
   const shapes = {};
-  for (const e of events.data ?? []) {
-    const o = e.data?.object ?? {};
-    const t = `${e.type}`;
-    shapes[t] ??= { count: 0, object: o.object, top_level_keys: Object.keys(o).sort(),
-      managed_payments_field: o.managed_payments ?? null };
-    shapes[t].count++;
+  let total = 0, kept = 0, cursor;
+  for (let page = 0; page < 200; page++) {
+    const list = await stripe('GET', '/events', { limit: 100, created: { gte: state.created_at },
+      ...(cursor ? { starting_after: cursor } : {}) });
+    if (list.error) throw new Error(`events: ${list.error.message}`);
+    for (const e of list.data) {
+      total++;
+      const o = e.data?.object ?? {};
+      const refs = [o.id, o.customer, o.subscription, o.invoice, o.payment_intent, o.charge, o.test_clock,
+        o.parent?.subscription_details?.subscription, o.payment?.payment_intent];
+      if (!refs.some((r) => typeof r === 'string' && probeIds.has(r))) continue;
+      kept++;
+      const mp = o.managed_payments?.enabled;
+      const key = `${e.type}${mp === undefined ? '' : mp ? ' (managed_payments)' : ' (not managed)'}`;
+      shapes[key] ??= { count: 0, object: o.object, top_level_keys: Object.keys(o).sort() };
+      shapes[key].count++;
+    }
+    if (!list.has_more) { report.events = { scanned: total, probe_events: kept, complete: true, shapes }; break; }
+    cursor = list.data.at(-1).id;
   }
-  report.events = { total: events.data?.length, has_more: events.has_more, shapes };
+  if (!report.events) throw new Error('events: pagination limit reached, evidence incomplete');
   out(`02-inspect-${new Date().toISOString().replace(/[:.]/g, '-')}.json`, redact(report));
   console.log('inspect done');
 }
 
 async function advance(key, days) {
+  await assertAccount();
   const s = state.scenarios?.[key];
   if (!s?.clock) throw new Error(`no clock for ${key}`);
   const clock = await stripe('GET', `/test_helpers/test_clocks/${s.clock}`);
@@ -312,13 +343,15 @@ async function advance(key, days) {
 }
 
 async function ops() {
+  await assertAccount();
   const result = {};
   const sub = async (key) => (await expandSession(state.scenarios[key].session)).subscription;
   const pro = await sub('s7_pro_upgrade');
   if (pro?.id) {
     const item = pro.items.data[0];
     result.upgrade_pro_to_gold = redact(await stripe('POST', `/subscriptions/${pro.id}`, {
-      items: [{ id: item.id, price: state.prices.gold_month }], proration_behavior: 'always_invoice' }));
+      items: [{ id: item.id, price: state.prices.gold_month }], proration_behavior: 'always_invoice' },
+    `mp-probe-20261012-upgrade-${pro.id}`));
     result.upgrade_pro_to_gold = { error: result.upgrade_pro_to_gold.error,
       status: result.upgrade_pro_to_gold.status, price: result.upgrade_pro_to_gold.items?.data?.[0]?.price?.id };
     result.upgrade_latest_invoice = await stripe('GET', '/invoices', { subscription: pro.id, limit: 1 })
@@ -336,8 +369,14 @@ async function ops() {
     const inv = await stripe('GET', '/invoices', { subscription: basic.id, limit: 1 });
     const pay = await stripe('GET', '/invoice_payments', { invoice: inv.data[0].id, limit: 1 });
     const piId = pay.data?.[0]?.payment?.payment_intent;
-    const refund = await stripe('POST', '/refunds', { payment_intent: piId, amount: 1000 });
-    result.partial_refund = { error: refund.error, status: refund.status, amount: refund.amount };
+    // Safe to rerun: reuse an existing probe refund, and a stable idempotency key covers a lost response.
+    const existing = await stripe('GET', '/refunds', { payment_intent: piId, limit: 10 });
+    if (existing.error) throw new Error(`refunds: ${existing.error.message}`);
+    const refund = existing.data.find((r) => r.metadata?.mp_probe === '20261012' || r.amount === 1000)
+      ?? await stripe('POST', '/refunds', { payment_intent: piId, amount: 1000, metadata: { mp_probe: '20261012' } },
+        `mp-probe-20261012-refund-${piId}`);
+    result.partial_refund = { error: refund.error, status: refund.status, amount: refund.amount,
+      reused: existing.data.some((r) => r.id === refund.id) };
     if (refund.id) {
       const r = await stripe('GET', `/refunds/${refund.id}`, { expand: ['balance_transaction'] });
       const bt = r.balance_transaction;

@@ -12,7 +12,7 @@
 
 所以：不做 Radar 规则，付款后也不核对账单国家、不自动标记。
 
-本文件只是方案，不写代码。实施前，这些决定要先由总控写进 `docs/launch/MASTER_PLAN.md` 第 2.1 节（AGENTS.md 第 6 节）。
+本文件只是方案，不写代码。Owner 的这些决定由总控在 [#848](https://github.com/Crnobog9527/GraylumAI_vercel/pull/848) 写进 `docs/launch/MASTER_PLAN.md` 第 2.1 节（AGENTS.md 第 6 节），并注明取代了"银行卡订阅走 Waffo"和 #807 的"Stripe 卡备选"。#848 合并以前，这些决定以 #848 的内容为准。
 
 ## 一、大白话总结
 
@@ -48,17 +48,18 @@
   - 默认选中哪一项，按 IP 国家（Vercel 请求头）和浏览器语言给出提示，用户可以改。服务端只认用户的选择，不用 IP 强制。
 - `methodRouting.ts`：
   - `paymentMethodSchema` 增加 `card_cn`。
-  - `paymentRoute()` 改为：`card` → `{channel:'stripe', mode:'subscription', managedPayments:true}`；`card_cn` → `{channel:'stripe', mode:'subscription', managedPayments:false}`；钱包不变。
+  - `paymentRoute()` 改为：`card` 买会员 → `{channel:'stripe', mode:'subscription', managedPayments:true}`；`card` 买积分包 → `{channel:'stripe', mode:'payment', managedPayments:true}`（Owner 已同意会员可以用国际银行卡买积分包）；`card_cn` 只用于会员订阅 → `{channel:'stripe', mode:'subscription', managedPayments:false}`；钱包不变。
   - `payment_method_routes` 设置增加 `card_cn.enabled`；Waffo 银行卡不再作为路由目标，但旧的 Waffo 订单照旧走 Waffo 续费、退款、对账（沿用 D17"旧订单原渠道"的规定）。
   - `PAY_WAFFO_LIVE_DISABLED`（只允许测试模式）这道闸保留，正式开卖另行批准。
 - 数据库（迁移①）：
-  - `pay_waffo_method_contract`（0204:168）：放开"`card` + `stripe` + 订阅"，新增 `card_cn` 同样要求 `stripe` + 订阅。
-  - `payment_orders`、`user_subscriptions`、`payment_provider_refs` 增加 `stripe_managed_payments boolean`。下单时写入，付款后用 Stripe 返回的 `managed_payments.enabled` 核对，两者不一致就转人工。
+  - `pay_waffo_method_contract`（0204:168）：允许"`card` + `stripe` + 会员 + 订阅（自动续费）"和"`card` + `stripe` + 积分包 + 单笔（payment，不续费）"；`card_cn` 只允许"`stripe` + 会员 + 订阅"；旧的"`card` + `waffo` + 订阅"继续有效，用于已有的 Waffo 订单。
+  - `payment_orders` 增加 `stripe_managed_payments boolean`（订阅和价格映射不用加：订阅一定来自某个订单）。下单时写入，付款后用 Stripe 返回的 `managed_payments.enabled` 核对，两者不一致就转人工。
+  - `payment_provider_refs` 增加"一次性 / 订阅 / 积分包"区分字段，并允许保存首月优惠券。原因：同一个 Stripe 账户里会同时存在钱包单笔会员价和银行卡订阅价，按现在的唯一键会冲突，而且优惠券也没有地方存（实施时按代码核对发现，总控 2026-10-12 认可）。
   - `0211` 里 `pay_waffo_admit_purchase` 写死的 `card → waffo`（:570）改为按方法路由。资格判断（首月、创始名额、升级）整段复用，不另写一套。
 - 复用的现有代码：
   - 下单和资格：继续走新的 `methodCheckout` 路径（条款版本、限流、首月和创始资格、名额预留都在这里）。旧的全局 D17 路径 `payments.ts createCheckoutSession` 保持停用，不复活。
   - 建结账会话：`stripeCheckoutIntent.ts` 的幂等派发和找回原会话逻辑都复用，只改生成请求的部分（见 2.2）。
-  - 付款后：Stripe 回调入口 `apps/web/src/app/api/stripe/webhook/route.ts` 和 `stripeFulfillment.ts`、`subscriptionCreditGrants.ts` 里现成的发票发放、年付分期、退款收回、订阅状态同步都复用。验证时实测确认，MP 订阅发出的都是这些标准事件。
+  - 付款后：仍由 Stripe 回调入口 `apps/web/src/app/api/stripe/webhook/route.ts` 接收。**首次付款走 `pay_waffo_fulfill_payment`**，和微信/支付宝单笔用同一套，因为首月资格、创始名额从"预留"变成"已售"、发放窗口都在这套 SQL 里；**续费参照 `pay_waffo_renew_subscription` 另做一个 Stripe 版**。旧的 `stripeFulfillment.ts` 发放路径不复用（实施时按代码核对后修正，总控 2026-10-12 认可）。验证时实测确认，MP 订阅发出的都是标准事件。
   - 退款和对账：复用 PAY-COMMON 的人工退款审批和每日对账入口（04:00）。
 
 ### 2.2 `stripeCheckoutIntent.ts` 的改造点

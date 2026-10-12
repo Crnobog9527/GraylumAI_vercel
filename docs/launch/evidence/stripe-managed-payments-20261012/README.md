@@ -2,7 +2,7 @@
 
 任务：PAY-WAFFO（收款渠道调整的前置验证）。只在 Owner 的 Stripe 沙盒（测试模式）里做，没有碰正式模式。
 
-- 脚本：[`mp-probe.mjs`](mp-probe.mjs)。密钥只从 `~/.graylum/secrets/stripe-test.env` 读取，必须是 `sk_test_` 开头，还会核对账户编号，不会打印密钥。
+- 脚本：[`mp-probe.mjs`](mp-probe.mjs)。密钥只从 `~/.graylum/secrets/stripe-test.env` 读取，必须是 `sk_test_` 开头。每条命令在第一次写入前都会核对账户编号：运行前必须用 `MP_EXPECT_ACCOUNT` 指定沙盒账户编号，没指定就直接停下。脚本不会打印密钥。
 - 证据：`01-setup.json`（建会话和参数兼容性）、`02a`（付款后）、`02b`（第一次续费后）、`02c`（续费失败和第二期后）的订阅、发票、手续费、事件，`03-ops-upgrade-cancel-refund.json`（升级、取消、退款）、`04-trial-wording-probes.json`（试用措辞能否修改）。这些文件已经脱敏：账户号、邮箱、姓名、地址、链接、卡尾号都去掉了。
 - 浏览器付款由 Codex 完成，过程和截图说明见 [PR #847 的验收记录](https://github.com/Crnobog9527/GraylumAI_vercel/pull/847#issuecomment-6120815623)。
 
@@ -53,7 +53,7 @@
 
 - 同一个沙盒（账户编号核对过，就是 Owner 开 MP 的那个）里：MP 订阅会话的 `managed_payments.enabled=true`，可用支付方式由 Stripe 自动决定（这次是 `card`、`cashapp`）；微信/支付宝单笔会话按现有代码的写法建（`payment_method_types:['wechat_pay'|'alipay']`），`managed_payments.enabled=false`。Codex 实测这几种都付款成功。
 - 页面区别：MP 页面底部有 Link 销售说明和 Link 扣款条款；微信/支付宝页面写的是 "Powered by Stripe"，没有 Link。
-- 回调事件：两边都是标准事件（`checkout.session.completed`、`payment_intent.succeeded`、`charge.succeeded`；订阅还有 `invoice.created / finalized / paid / payment_succeeded / payment_failed`、`customer.subscription.updated / deleted / trial_will_end`、`invoice_payment.paid`）。`checkout.session` 和 `payment_intent` 对象上都有 `managed_payments.enabled`，可以用它区分是不是 MP。`charge` 对象上没有这个字段。
+- 回调事件（证据：`02d-inspect-correlated-events.json`。完整翻页读取了验证开始后的 248 个事件，只保留属于本次验证对象的 223 个；`02a`–`02c` 里的事件统计只读了第一页，也没有按对象过滤，以 `02d` 为准）：两边都是标准事件。MP 侧有 `checkout.session.completed`、`customer.subscription.created / updated / deleted / trial_will_end`、`invoice.created / finalized / paid / payment_succeeded / payment_failed / upcoming`、`invoice_payment.paid`、`payment_intent.*`、`charge.*`；退款有 `charge.refunded`、`refund.created / updated`、`charge.refund.updated`。非 MP（微信/支付宝）侧有 `checkout.session.completed`、`payment_intent.created / requires_action / succeeded`。`checkout.session`、`payment_intent`、`subscription`、`setup_intent` 对象上都有 `managed_payments.enabled`，可以用它区分是不是 MP；`charge` 和 `invoice` 对象上没有这个字段。
 - 结算字段（balance transaction）：
   - MP：`fee_details` 有两行，`stripe_fee`（69 美元一笔是 230 美分）和 `withheld_tax`（这次是美国怀俄明州地址，税务判定 `product_exempt`，金额 0）；`type=charge`；账单描述 `LINK.COM* GRAYSCALE LU`。
   - 微信/支付宝：`fee_details` 只有 `stripe_fee`（230 美分），`type=payment`，没有 `withheld_tax`。
