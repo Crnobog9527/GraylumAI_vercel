@@ -36,7 +36,7 @@
 ### 1.1 用户已有对标
 
 1. 用户在对话里给账号主页链接或平台 + 账号名。
-2. 模型调用 `social_account`（第 2 节）。宿主按规则表选 TikHub 线路，取账号资料 + 最近 20–30 条作品。
+2. 模型调用 `social_account`，来源写成用户的这条消息（第 2.1 节，宿主核对账号原文确实出现在用户消息里）。宿主按规则表选 TikHub 线路，取账号资料 + 最近 20–30 条作品。
 3. 代码算指标、判合格、写进对标表（第 1.4 节）。不合格时在对话里说明哪一条不满足（例如"粉丝 35 万，超过 20 万上限，只作参考"）。
 
 ### 1.2 用户没有对标
@@ -57,7 +57,7 @@
    - 近期起号快：在"同量级可模仿"的门槛内，再满足"最早一条可取作品在 N 天内、或近期作品播放中位数 ≥ 粉丝数 × K"（N、K 后台配置，初值由 RT-4 用实测数据定，写进 PR）。
    - 30 天没更新的剔除；粉丝不到 1 万的剔除。
 5. 宿主把 8–12 个候选用**选择卡**（多选）展示，请用户挑 3–5 个；提交后同样保存为宿主记录。
-6. 对选中的账号调用 `social_account` 取最近 20–30 条作品（按选择卡记录核对，不在记录里的账号走第 1.1 节"用户给链接"的路径），
+6. 对选中的账号调用 `social_account`（带候选确认编号，第 2.1 节）取最近 20–30 条作品；不在确认记录里的账号一律被拒；
    代码算指标、写对标表。
 
 ### 1.3 取不到时（R11：不跳过）
@@ -112,7 +112,7 @@ Skill 在 `workflow.yaml` 里声明"生成报告前要求对标表至少 N 个�
 | `propose_keywords` | 不调用供应商 | `keywords`（3–5 个，每个 ≤ 40 字） | 发出关键词选择卡（第 1.6 节），不收费 |
 | `benchmark_discover` | TikHub | `keywordConfirmationId`、`platforms`（已验证清单内，≤ 2 个） | 代码执行整段发现流程，返回分好类的候选并发出候选选择卡（第 1.2 节） |
 | `social_search` | TikHub | `platform`、`keywords`（1–5 个，每个 ≤ 40 字）、`limit`（≤ 30） | 自由对话里按关键词查近期作品；对标流程不用它 |
-| `social_account` | TikHub | `platform`、`account`（主页链接或账号名，≤ 200 字）、`posts`（≤ 30） | 取账号资料 + 最近作品 |
+| `social_account` | TikHub | `platform`、`account`（主页链接或账号名，≤ 200 字）、`posts`（≤ 30）、`source`：`{kind:"candidate", confirmationId}` 或 `{kind:"user_message", messageId}`；自由对话可省略 `source` | 取账号资料 + 最近作品 |
 | `web_search` | Parallel | `query`（≤ 200 字）、`mode`（`fast` / `pro`，默认 `fast`） | 普通网页搜索 |
 | `web_fetch` | Firecrawl | `url`（只收公开 http(s) 链接，不带账号密码） | 抓取一个公开网页的正文 |
 
@@ -120,6 +120,11 @@ Skill 在 `workflow.yaml` 里声明"生成报告前要求对标表至少 N 个�
 - 白名单：`runtimeContext.ts` 的工具枚举、`agentTools.ts` 的 Agent 工具集合和 `MAX_AGENT_TOOLS`、
   `openRouterAdapter.ts` 的请求白名单一起扩；每个 Skill 按需开放（定位 Skill 开 `propose_keywords`、`benchmark_discover`、`social_account`、`web_search`、`web_fetch`；
   其他 Skill 和自由对话默认开 `social_search`、`social_account`、`web_search`、`web_fetch`）。
+- **对标流程里的账号查询必须有授权来源**（定位 Skill 里 `source` 必填）：
+  - `candidate`：宿主核对确认编号属于本用户、本会话，且 `platform + account` 在该候选选择卡的确认条目里；
+  - `user_message`：宿主核对该消息是本会话里用户自己发的，且 `account` 原文出现在消息正文里（精确比对）；
+  - 核对不过返回 `not_confirmed`，**不发出请求、不收费、不进对标表**。只有带合格来源取到的数据才能写进对标表。
+  - 测试：未选中的候选、模型自己编的账号、别的会话 / 别的用户的确认编号或消息编号都被拒，且没有发出请求。
 - 工具描述写清：查询词只写关键词、公开链接或公开账号名，不要写用户的个人信息或对话原文（第 4 节）。
 
 ### 2.2 统一返回结构
