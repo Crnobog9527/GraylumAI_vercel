@@ -14,6 +14,7 @@ import { ContentEditor } from '@/components/opc/content-editor';
 import { ContentErasureDialog } from '@/components/opc/content-erasure-dialog';
 import composerStyles from '@/components/opc/work-composer.module.css';
 import workStyles from './runtime-work.module.css';
+import { clearForSend, forgetSentDraft } from './send-input';
 import { QueryNotice } from '@/components/opc/query-notice';
 import { trpc } from '@/trpc/client';
 import {
@@ -143,24 +144,30 @@ function RuntimeWorkspace({routeSession,routeModule}:{routeSession:string;routeM
   url.search='';url.searchParams.set('session',result.sessionId);history.replaceState(null,'',url);setSession(result.sessionId);
  }catch{setError('建立草稿失败。再次点击会恢复同一次开始请求。');}}
  function requestedVideoChoice(value:string):VideoChoice|'end'|null{const text=value.trim().replace(/[。.!！?？]/g,'');if(/^(暂时结束|先结束|先到这里|暂时不生成)$/.test(text))return'end';if(/^(先做分镜[，,、\s]*再生成剪辑建议|分镜\s*[+＋和与、]\s*剪辑建议都生成|都生成|生成分镜和剪辑建议)$/.test(text))return'both';if(/^(只生成分镜|仅生成分镜|生成分镜)$/.test(text))return'storyboard';if(/^(只生成剪辑建议|仅生成剪辑建议|生成剪辑建议)$/.test(text))return'editing';return null;}
- async function send(scriptRequest=false){if(!workContextReady||!choices.data){setError('正在核对原工作与可用能力，请稍候；输入已保留。');return;}if(scriptRequest&&!isVideo)return;const videoChoice=isVideo&&currentScript?requestedVideoChoice(input):null;if(videoChoice){await chooseVideo(videoChoice);return;}setError('');try{
+ async function send(scriptRequest=false){if(!workContextReady||!choices.data){setError('正在核对原工作与可用能力，请稍候；输入已保留。');return;}if(scriptRequest&&!isVideo)return;const videoChoice=isVideo&&currentScript?requestedVideoChoice(input):null;if(videoChoice){await chooseVideo(videoChoice);return;}setError('');
+  // UI-A fix: the box empties on send; a send that is not stored puts the text back (unless the user typed again).
+  let restoreInput=()=>{},stored=false;
+  try{
   const chosen=choices.data?.skills.find(s=>'skill:'+s.moduleId===activeSelection);
   const selected=chosen?{kind:'skill' as const,moduleId:chosen.moduleId,revisionId:chosen.revisionId}:activeSelection.startsWith('auto:')?{kind:'auto' as const,modelId:activeSelection.slice(5)}:{kind:'ordinary' as const,modelId:activeSelection};
   const url=new URL(location.href),requestId=url.searchParams.get('request')??crypto.randomUUID();url.searchParams.set('request',requestId);history.replaceState(null,'',url);
   const submitted=input;if(!scriptRequest)setOutgoing({text:submitted});
+  // Only the visible box empties now; the saved draft stays until the server stores the message.
+  restoreInput=clearForSend(setInput,submitted);
   const admitted=await prepare.mutateAsync({sessionId,requestId,input:scriptRequest?'[OPC_SCRIPT_V1] 请基于当前选题简报讨论并给出可修改的口播稿。'+(submitted.trim()||'先给我一版口播稿。'):submitted,selection:selected,network:'deny',sources:[]});
   if(!alive.current)return;
   // Q1: the previous organizer answered instead; this message was not stored. Input and request id stay.
-  if(!payg.admitted(admitted)){setOutgoing(null);await view.refetch();return;}
-  setOutgoing(old=>old&&{...old,executionId:admitted.executionId});
+  if(!payg.admitted(admitted)){setOutgoing(null);restoreInput();await view.refetch();return;}
+  stored=true;setOutgoing(old=>old&&{...old,executionId:admitted.executionId});
   void utils.opc.conversations.invalidate();
   sessionStorage.removeItem('opc-runtime-send:'+sessionId);
   url.searchParams.delete('request');history.replaceState(null,'',url);
-  setInput(current=>{if(current===submitted){localStorage.removeItem('opc-runtime-input:'+sessionId);return '';}return current;});
+  forgetSentDraft(localStorage,'opc-runtime-input:'+sessionId,submitted);
   const executed=await execute.mutateAsync({executionId:admitted.executionId});
   if(alive.current){if('unavailable' in executed&&executed.unavailable==='capacity'){markCapacity(admitted.executionId);setError('本次必要材料超过模型输入容量。原请求和已完成内容已保留；请点“停止”后缩短材料再发送。');}await Promise.all([view.refetch(),utils.opc.conversations.invalidate()]);}
  }catch(cause){if(!alive.current)return;const gate=runtimeAdmissionNotice(cause);
-  setOutgoing(old=>old?.executionId?old:null); // Not admitted: the text is still in the box.
+  setOutgoing(old=>old?.executionId?old:null); // Not admitted: the text goes back into the box.
+  if(!stored)restoreInput();
   if(isOrganizerPendingError(cause)){payg.block();await view.refetch();return;}
   setError(gate??'请求状态待核实。请读取原任务状态，不要重新发送相同内容。');await view.refetch();}}
  const initialSend=useRef(false);
