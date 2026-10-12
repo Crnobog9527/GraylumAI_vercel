@@ -104,7 +104,7 @@ Owner 原话（2026-10-12，总控窗口对话）：
 以下是落实范围（总控提出、Owner 同意的排期），不是原话：
 
 - 同一条线内排队，不同线可以并行：
-  1. AI 核心：#829 → #845 → RUNTIME-PROD ⑦（服务端强制 `data_collection: deny`）→ POSITIONING-GATE PR2 → SKILL-I18N-HOOK；
+  1. AI 核心：#829 → #845 → RUNTIME-PROD ⑦（服务端强制 `data_collection: deny`）→ POSITIONING-GATE PR2 → SKILL-I18N-HOOK；其中 ⑦ 是否保留仍是第 10 节待确认事项，开工前先请 Owner 确认，未确认时跳过 ⑦ 继续后面的项；
   2. 读资料：#830 → AGENT-CORE R4 → LIB-4；
   3. 收款：#847 → PAY-STRIPE-MP PR-1…6 → PAYWALL 接线 → PAY-FOUNDER / PAY-NOTIFY / PAY-EVIDENCE / PAY-DISPUTE-GUARD；
   4. 输入框：UI-A 编辑器依赖 PR → 新输入框 → UI-B / UI-C → UI-FINISH → LEGACY-CLOSE；
@@ -824,7 +824,7 @@ Bright Data 等）各自在其平台设置硬上限（预付余额或平台限�
 
         > 同意上线只用 Waffo：银行卡订阅照常；增加用微信一次性购买 1 个月或 1 年会员、不自动续费；不接 Stripe 支付宝。
 
-      当前落实（2026-10-09 取代旧渠道含义；其中银行卡订阅部分 2026-10-12 改走 Stripe Managed Payments，见本节 2026-10-12 决定）：银行卡订阅走 Waffo，微信/支付宝单笔走 Stripe，按付款方式启停。新增微信一次性会员：单笔付款，期限 1 个月或 1 年，不自动续费，到期再买；一次性会员同样算付费会员（可以生成报告、可以买积分包）；积分发放按对应周期的订阅规则（1 年期按 v11 §9.3 分 12 个月发放）；退款按 v11 §9.3 只处理这一期的积分。旧“支付宝用户付不了款”的边界作废；钱包大额未验证/失败按 2026-10-09 的月期和积分包兜底。
+      当前落实（2026-10-12 更新，见本节 2026-10-12 决定；2026-10-09 版写的是“银行卡订阅走 Waffo”，已被取代）：银行卡订阅走 Stripe Managed Payments（中国大陆用户可自选普通 Stripe 银行卡订阅），微信/支付宝单笔走 Stripe，按付款方式启停；Waffo 停用新购，只处理已有 Waffo 订单。新增微信一次性会员：单笔付款，期限 1 个月或 1 年，不自动续费，到期再买；一次性会员同样算付费会员（可以生成报告、可以买积分包）；积分发放按对应周期的订阅规则（1 年期按 v11 §9.3 分 12 个月发放）；退款按 v11 §9.3 只处理这一期的积分。旧“支付宝用户付不了款”的边界作废；钱包大额未验证/失败按 2026-10-09 的月期和积分包兜底。
     - **订阅周期**（Owner 2026-10-03，在定价审查会话中决定，同见[总控记录](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5970044974)）。Owner 原话：
 
         > 可以，只做月付和 年付， 营销优惠等要上线了再说。
@@ -1745,7 +1745,7 @@ REPORT-GEN + BILL-PAYG + PAY-COMMON → PAY-STRIPE-MP + ENTITLEMENTS + 付费墙
 PAYWALL + DATA-ERASURE ─→ EXPERT-CONSULT（第 7.4 节 N3 批次）
 RESEARCH-TOOLS + Post for Me 实测和条款核对 ─→ PUBLISH-MONITOR（第 7.4 节 N3 批次）
 PAY-STRIPE-MP（含付款同意记录）+ PAY-DISPUTE-GUARD ─→ CHARGEBACK（上线后；旧 Waffo 订单另按 Waffo 核实结果处理）
-D1 范围全部完成（第 0–4 阶段：上线基础含 RESEARCH-TOOLS、RUNTIME-FAILURE-RECONCILE；FUSION-REVIEW、LIB-DOCS、VOICE、UI-A—UI-FINISH、FUSION-COMPARE；PAY-COMMON → PAY-STRIPE-MP（PAY-WAFFO 2026-10-12 冻结）、PAYWALL、EXPERT-CONSULT、PUBLISH-MONITOR、POSITIONING-GATE、MODEL-IDENTITY-GUARD、PUBLIC-SITE、LEGACY-CLOSE）─→ V3-M3 ─→ REL-1 ─→ 公开上线售卖（生产另行批准）
+D1 范围全部完成（第 0–4 阶段：上线基础含 RESEARCH-TOOLS、RUNTIME-FAILURE-RECONCILE；FUSION-REVIEW、LIB-DOCS、VOICE、UI-A—UI-FINISH、FUSION-COMPARE；PAY-COMMON → PAY-STRIPE-MP（PAY-WAFFO 2026-10-12 冻结）、PAYWALL、EXPERT-CONSULT、PUBLISH-MONITOR、POSITIONING-GATE、MODEL-IDENTITY-GUARD、SKILL-I18N-HOOK、PUBLIC-SITE、LEGACY-CLOSE）─→ V3-M3 ─→ REL-1 ─→ 公开上线售卖（生产另行批准）
 公开上线前 ─→ Owner 决定 MODERATION 正式实现时间（暂缓；默认放行的检查点随 #594 接线）
 S1 权限修复 ─→ DB-BASELINE ─→ V3-M3 ─→ REL-1
 RUNTIME-PROD ─→ MODEL-IDENTITY-GUARD ─→ POSITIONING-GATE（同一块 runtime，排队写）─→ V3-M3
@@ -1798,7 +1798,7 @@ AC-4 + UI-MODEL + UI-B + UI-C + UI-FINISH + 功能对照检查 ─→ LEGACY-CLO
 | N2 上线基础 | RUNTIME-PROD（含 BILL-UNIT、BILL-PAYG、RUNTIME-FAILURE-RECONCILE）、DEP-BATCH-A（Owner 2026-10-12 已选中）、PROMPT-CACHE、PROMPT-CACHE-HISTORY、RATE-LIMIT 接线（含默认放行的 MODERATION-HOOK）、DB-BASELINE、RESEARCH-TOOLS、ENTITLEMENTS、SEC-RATELIMIT、PII-REGEX、DATA-ERASURE 实现、COST-REPORT、PAY-COMMON。钱路线已由 Owner 批准并行开工（第 46 项） | 上线基础完成。原定此后先做 5–10 人封闭内测（D8），2026-10-03 已取消（第 2.1 节第 50 项），按 D1 范围完成后直接公开上线售卖 |
 | N3 差异化功能 | 先 FUSION-REVIEW、LIB-DOCS、VOICE；再 UI-A、UI-MODEL、FUSION-COMPARE、UI-B、UI-C、UI-FINISH；收款按第 2.1 节 2026-10-12 决定：#847 迁移方案合并后做 PAY-STRIPE-MP（PR-1 起；国际银行卡、Apple Pay、Google Pay 走 Stripe Managed Payments，中国大陆用户自选微信/支付宝单笔或普通 Stripe 银行卡订阅；正式平台操作逐项另获批准），再 PAYWALL 接线，再 PAY-FOUNDER、PAY-NOTIFY、PAY-EVIDENCE、PAY-DISPUTE-GUARD（独立售前任务）；PAY-WAFFO 已于 2026-10-12 冻结（停用新购、代码保留，旧 Waffo 订单沿原渠道），不再排期；MODEL-IDENTITY-GUARD → POSITIONING-GATE（上线前完成，排在在途 runtime 改动之后）；PAYWALL（依赖 REPORT-GEN、BILL-PAYG、PAY-COMMON、PAY-STRIPE-MP、ENTITLEMENTS 和已入库的付费墙设计定稿 v25，须在 REL-1 之前完成）；EXPERT-CONSULT（依赖 PAYWALL、DATA-ERASURE，须在 REL-1 之前完成）；PUBLISH-MONITOR（依赖 RESEARCH-TOOLS 和 Post for Me 实测、条款核对，须在 REL-1 之前完成，D1 范围变更） | 差异化功能完成（对比模式对钱路核心改动最大，放在后面） |
 | N4 收口 | PUBLIC-SITE（域名合并、公开页面风格、新落地页；正式环境设置另行批准）、LEGACY-CLOSE、V3-M3；公开上线前请 Owner 决定 MODERATION 正式实现时间 | 完整验收；REL-1 和生产另行批准 |
-| **当前批次：8 条线并行（Owner 2026-10-12 选定，第 2.1 节）** | 同一条线内排队，不同线并行：① AI 核心：#829 → #845 → RUNTIME-PROD ⑦（服务端强制 `data_collection: deny`）→ POSITIONING-GATE PR2 → SKILL-I18N-HOOK；② 读资料：#830 → AGENT-CORE R4 → LIB-4（R4 和 LIB-4 都改 `read_source`）；③ 收款：#847 → PAY-STRIPE-MP PR-1…6 → PAYWALL 接线 → PAY-FOUNDER / PAY-NOTIFY / PAY-EVIDENCE / PAY-DISPUTE-GUARD；④ 输入框：UI-A 编辑器依赖 PR → 新输入框（与 R8a/R8b 工作区页面排队）→ UI-B / UI-C → UI-FINISH → LEGACY-CLOSE；⑤ 定位流程：#818（已合并）→ R14 → R8b；⑥ 官网：PUBLIC-SITE 第一段 + 台湾 6 页，`/app` 路由搬迁放在冻结窗口最后做，正式域名切换上线前逐项批准；⑦ 数据库改动：0217 #828 → 0218 #830 → 0219 #831 → 0220 #832 → 0221/0222 PAY-STRIPE-MP，按合并顺序重建指纹；⑧ 不写代码：DATA-ERASURE 收尾梳理、Fusion 实测、R11。Codex 浏览器验收同一测试账号一次一个，按顺序排。跨线的真实依赖仍按第 7.1 节（例如 UI-B/UI-C 还要等 LIB-DOCS 和 RUNTIME-PROD） | 每条线做完自己的最后一项就停；合并到 `main`、正式环境和平台设置仍按 AGENTS.md 第 1 节逐项批准 |
+| **当前批次：8 条线并行（Owner 2026-10-12 选定，第 2.1 节）** | 同一条线内排队，不同线并行：① AI 核心：#829 → #845 → RUNTIME-PROD ⑦（服务端强制 `data_collection: deny`；⑦ 是否保留仍是第 10 节待确认事项，开工前先请 Owner 确认，未确认就跳过）→ POSITIONING-GATE PR2 → SKILL-I18N-HOOK；② 读资料：#830 → AGENT-CORE R4 → LIB-4（R4 和 LIB-4 都改 `read_source`）；③ 收款：#847 → PAY-STRIPE-MP PR-1…6 → PAYWALL 接线 → PAY-FOUNDER / PAY-NOTIFY / PAY-EVIDENCE / PAY-DISPUTE-GUARD；④ 输入框：UI-A 编辑器依赖 PR → 新输入框（与 R8a/R8b 工作区页面排队）→ UI-B / UI-C → UI-FINISH → LEGACY-CLOSE；⑤ 定位流程：#818（已合并）→ R14 → R8b；⑥ 官网：PUBLIC-SITE 第一段 + 台湾 6 页，`/app` 路由搬迁放在冻结窗口最后做，正式域名切换上线前逐项批准；⑦ 数据库改动：0217 #828 → 0218 #830 → 0219 #831 → 0220 #832 → 0221/0222 PAY-STRIPE-MP，按合并顺序重建指纹；⑧ 不写代码：DATA-ERASURE 收尾梳理、Fusion 实测、R11。Codex 浏览器验收同一测试账号一次一个，按顺序排。跨线的真实依赖仍按第 7.1 节（例如 UI-B/UI-C 还要等 LIB-DOCS 和 RUNTIME-PROD） | 每条线做完自己的最后一项就停；合并到 `main`、正式环境和平台设置仍按 AGENTS.md 第 1 节逐项批准 |
 
 每批由 Owner 选定后开工，批次内由 Agent 自主排序、测试、修复，完成后停下，不自动开始下一批（AGENTS.md 第 2 节）。
 
