@@ -91,6 +91,13 @@ try {
     { action: 'status_change', action_type: 'status_change', details: {}, ip_address: null, admin_id: admin, erased: true },
   ]);
   assert.doesNotMatch(JSON.stringify(rows), /李雷|lilei|203\.0\.113/);
+  const review = randomUUID(), call = randomUUID(), run = randomUUID();
+  await c.query(`INSERT INTO user_activity_logs(id,user_id,admin_id,action,action_type,details) VALUES($1,$2,$3,'bill2_metering_review','admin',$4)`,
+    [review, otherUser, admin, { callId: call, runId: run, model: 'm', evidenceHash: 'h1', budgetConflict: false,
+      review: { expectedEvidenceHash: 'h1', profileVersion: 'p1', evidenceVersion: 'e1', reviewReference: '李雷 confirmed', humanReviewed: true } }]);
+  assert.deepEqual(await v('SELECT erasure_audit_details(details) v FROM user_activity_logs WHERE id=$1', [review]),
+    { callId: call, runId: run, model: 'm', evidenceHash: 'h1', budgetConflict: false,
+      review: { expectedEvidenceHash: 'h1', profileVersion: 'p1', evidenceVersion: 'e1', humanReviewed: true } });
   assert.equal(await v("SELECT details->>'note' v FROM user_activity_logs WHERE user_id=$1", [otherUser]), 'x');
   assert.equal(await v('SELECT count(*)::int v FROM user_activity_logs WHERE user_id=$1 AND content_erased_at IS NULL', [user]), 0);
   assert.equal(await v("SELECT position('content_erased_at IS NULL' IN pg_get_functiondef('account_erasure_local_remaining(uuid)'::regprocedure))>0 v"),
@@ -101,5 +108,16 @@ try {
   await c.query("INSERT INTO user_activity_logs(user_id,action,action_type) VALUES($1,'late','status_change')", [user]);
   assert.equal(await v('SELECT count(*)::int v FROM user_activity_logs WHERE user_id=$1', [user]), 2, 'closed account still rejects new rows');
   report.checks.push('erasure keeps admin audit rows, removes wording, IP and text details, keeps amounts; other users untouched');
+
+  // Recovery: the rollback restores the pre-0226 definitions (only the added column stays); 0226 reapplies.
+  const after0226 = await v(catalogSql);
+  await c.query(read('packages/db/tests/log-retention/rollback.sql'));
+  assert.equal(await v("SELECT count(*)::int v FROM pg_proc WHERE proname IN ('log_retention_cleanup','erasure_audit_details')"), 0);
+  for (const f of ['account_erasure_local_cleanup(uuid,boolean)', 'account_erasure_local_remaining(uuid)', 'account_erasure_log_guard()']) {
+    assert.doesNotMatch(await v('SELECT pg_get_functiondef($1::regprocedure) v', [f]), /erasure_audit_details|content_erased_at/, f);
+  }
+  await c.query(read(migrationPath));
+  assert.deepEqual(await v(catalogSql), after0226);
+  report.checks.push('rollback restores the earlier erasure and guard definitions; reapplying 0226 restores the catalog');
 } catch (error) { report.failed = String(error.stack ?? error); process.exitCode = 1; }
 finally { await db.close(); console.log(JSON.stringify(report, null, 2)); }

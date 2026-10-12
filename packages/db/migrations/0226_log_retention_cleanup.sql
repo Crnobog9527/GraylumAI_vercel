@@ -39,11 +39,19 @@ GRANT EXECUTE ON FUNCTION public.log_retention_cleanup(integer) TO service_role;
 
 ALTER TABLE public.user_activity_logs ADD COLUMN IF NOT EXISTS content_erased_at timestamptz;
 
--- Audit details keep only top-level numbers and booleans (amounts, balances, flags); any text,
--- such as a reason typed by an admin or a name, is dropped.
+-- Audit details keep numbers and booleans (amounts, balances, flags) and the identifiers that make a
+-- PAYG metering review (0167) still provable: call/run ids, model, evidence hash and versions,
+-- also inside the nested `review` object. Free text (an admin's reason, reviewReference, names) is dropped.
 CREATE OR REPLACE FUNCTION public.erasure_audit_details(d jsonb) RETURNS jsonb
 LANGUAGE sql IMMUTABLE SET search_path=public,pg_temp AS $$
- SELECT coalesce(jsonb_object_agg(e.key,e.value) FILTER (WHERE jsonb_typeof(e.value) IN ('number','boolean')),'{}'::jsonb)
+ SELECT coalesce(jsonb_object_agg(e.key,CASE WHEN jsonb_typeof(e.value)='object' THEN
+   (SELECT coalesce(jsonb_object_agg(i.key,i.value),'{}'::jsonb) FROM jsonb_each(e.value) i
+    WHERE jsonb_typeof(i.value) IN ('number','boolean') OR (jsonb_typeof(i.value)='string' AND i.key IN
+     ('callId','runId','model','evidenceHash','expectedEvidenceHash','profileVersion','evidenceVersion')))
+  ELSE e.value END) FILTER (WHERE jsonb_typeof(e.value) IN ('number','boolean')
+   OR (jsonb_typeof(e.value)='string' AND e.key IN
+    ('callId','runId','model','evidenceHash','expectedEvidenceHash','profileVersion','evidenceVersion'))
+   OR (jsonb_typeof(e.value)='object' AND e.key='review')),'{}'::jsonb)
  FROM jsonb_each(CASE WHEN jsonb_typeof(d)='object' THEN d ELSE '{}'::jsonb END) e
 $$;
 

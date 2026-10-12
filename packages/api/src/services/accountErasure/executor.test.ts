@@ -209,3 +209,16 @@ it('keeps draining a log backlog within ten batches and reports what is left', a
   expect((await runAccountErasureExecutor(database as never)).failed).toBe(1);
   expect(calls).toBe(10);
 });
+it('stops starting log cleanup batches once the work deadline has passed', async () => {
+  const database = client();
+  const original = database.rpc.getMockImplementation()!;
+  let calls = 0;
+  database.rpc.mockImplementation(name => {
+    if (name !== 'log_retention_cleanup') return original(name);
+    calls++;
+    const promise = Promise.resolve({ data: { applicationLogs: 5000, diagnosticResults: 0, scheduledJobRuns: 0, more: true }, error: null });
+    return Object.assign(promise, { abortSignal: () => promise }) as never;
+  });
+  expect((await runAccountErasureExecutor(database as never, Date.now() - 1)).failed).toBe(1);
+  expect(calls).toBe(1);
+});

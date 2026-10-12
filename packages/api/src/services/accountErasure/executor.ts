@@ -115,11 +115,12 @@ export async function runAccountErasureExecutor(client: SupabaseClient, deadline
   } catch { summary.failed++; }
   // D5 consent audit is kept one year after revocation (including erasure), then removed.
   try { await expireDataUseConsentAudit(client, AbortSignal.timeout(2000)); } catch { summary.failed++; }
-  // E7: our own log tables keep at most 30 days (0226). Bounded batches continue while rows remain;
-  // anything left after ten batches is reported as a failure and resumed on the next daily run.
+  // E7: our own log tables keep at most 30 days (0226). Bounded batches continue while rows remain and
+  // the erasure work deadline has not passed (the route's 60 s limit keeps the rest for the reply);
+  // anything left is reported as a failure and resumed on the next daily run.
   try {
     let more = true;
-    for (let batch = 0; more && batch < 10; batch++) {
+    for (let batch = 0; more && batch < 10 && (batch === 0 || Date.now() < deadline); batch++) {
       const logs = await client.rpc('log_retention_cleanup', {}).abortSignal(AbortSignal.timeout(5000));
       if (logs.error) throw new Error('LOG_RETENTION_FAILED');
       more = logRetentionSchema.parse(logs.data).more;

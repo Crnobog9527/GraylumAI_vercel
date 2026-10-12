@@ -2430,7 +2430,7 @@
   "fn:enforce_skill_package_kind()": "ed67bc5f26db",
   "fn:enforce_skill_row_invariants()": "c505aa596426",
   "fn:erased_row_guard()": "9b8b64a3fa24",
-  "fn:erasure_audit_details(jsonb)": "b575bdd20a76",
+  "fn:erasure_audit_details(jsonb)": "f5fda32cd0ec",
   "fn:erasure_business_delete_allowed(text,jsonb)": "9097857fa0cd",
   "fn:erasure_business_owner(text,jsonb)": "ca1b9343ad4f",
   "fn:erasure_closed_conversation_guard()": "df1dde0b054e",
