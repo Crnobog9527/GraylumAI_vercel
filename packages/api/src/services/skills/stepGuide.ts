@@ -1,5 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-import {identityOf, readSkillResource, type SkillSource} from './loader';
+import {activateSkill, identityOf, readSkillResource, type LoadedSkill, type PackageDescriptor, type SkillSource} from './loader';
+import {isPositioningWorkflow} from '../opc/positioningWorkflow';
 import {parseWorkflowManifest, workflowManifestPath, type WorkflowManifest} from './workflowManifest';
 
 /*
@@ -9,13 +10,9 @@ import {parseWorkflowManifest, workflowManifestPath, type WorkflowManifest} from
  */
 export const STEP_GUIDE_MAX_CHARS = 4000;
 
-/** Positioning is the one guided flow: a declared field feeds the positioning profile. */
-export function isGuidedPositioning(manifest: WorkflowManifest): boolean {
-  return manifest.steps.some(step => step.information?.some(field => field.profileKey !== undefined));
-}
-
 export function stepGuideText(manifest: WorkflowManifest): string | undefined {
-  if (isGuidedPositioning(manifest)) return undefined;
+  // Positioning is the one guided flow, by the same rule as the positioning entry (and migration 0219).
+  if (isPositioningWorkflow(manifest)) return undefined;
   const lines = manifest.steps.map((step, index) => {
     const fields = (step.information ?? []).map(field =>
       `   - ${field.title}${field.description ? '：' + field.description : ''}`);
@@ -27,12 +24,34 @@ export function stepGuideText(manifest: WorkflowManifest): string | undefined {
   return text.length > STEP_GUIDE_MAX_CHARS ? text.slice(0, STEP_GUIDE_MAX_CHARS) : text;
 }
 
+/** The step work of a non-positioning Skill: the guide text and the files its steps declare, in order. */
+export type StepWork = {guide: string; resources: string[]};
+
 /** The immutable package, not today's module version, is the authority (same as the R3 organizer template). */
-export async function loadStepGuide(source: SkillSource, revisionId: string): Promise<string | undefined> {
-  const descriptor = (await source.list()).find(item => item.revisionId === revisionId);
-  if (!descriptor) throw new Error('RUNTIME_REVISION_DENIED');
+export async function loadStepWork(source: SkillSource, descriptor: PackageDescriptor): Promise<StepWork | undefined> {
   // Treat a descriptor without a file list as one without workflow.yaml.
   if (!(descriptor.files ?? []).some(item => item.path === workflowManifestPath)) return undefined;
-  return stepGuideText(parseWorkflowManifest(
-    await readSkillResource(source, identityOf(descriptor), workflowManifestPath, 2 * 1024 * 1024)));
+  const manifest = parseWorkflowManifest(await readSkillResource(source, identityOf(descriptor), workflowManifestPath, 2 * 1024 * 1024));
+  const guide = stepGuideText(manifest);
+  if (guide === undefined) return undefined;
+  const resources = [...new Set([...manifest.steps.flatMap(step => step.resources), ...(manifest.planResources ?? [])])]
+    .filter(path => path !== 'SKILL.md').slice(0, 64);
+  return {guide, resources};
+}
+
+/**
+ * Free chat activation of a Skill: SKILL.md, plus for a non-positioning Skill its steps' declared files and the
+ * ordered guide. When those files do not fit the model, fall back to SKILL.md and the guide rather than refusing
+ * the Skill; positioning and packages without workflow.yaml load exactly as before.
+ */
+export async function activateFreeChatSkill(source: SkillSource, descriptor: PackageDescriptor,
+  options: {task?: string; maxContextBytes: number}): Promise<{loaded: LoadedSkill; instructions: string}> {
+  const work = options.task === undefined ? await loadStepWork(source, descriptor) : undefined;
+  let loaded: LoadedSkill | undefined;
+  if (work?.resources.length) {
+    try { loaded = await activateSkill(source, identityOf(descriptor), {resources: work.resources, maxContextBytes: options.maxContextBytes}); }
+    catch (error) { if (!String((error as Error)?.message).includes('CAPACITY_EXCEEDED')) throw error; }
+  }
+  loaded ??= await activateSkill(source, identityOf(descriptor), options);
+  return {loaded, instructions: work ? loaded.forModel() + '\n' + work.guide : loaded.forModel()};
 }

@@ -1,13 +1,13 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import {beforeEach, expect, it} from 'vitest';
 import {clearSkillResourceCache, packageHash, sha256, type PackageDescriptor, type SkillSource} from './loader';
-import {loadStepGuide, STEP_GUIDE_MAX_CHARS, stepGuideText} from './stepGuide';
+import {activateFreeChatSkill, loadStepWork, STEP_GUIDE_MAX_CHARS, stepGuideText} from './stepGuide';
 import {parseWorkflowManifest} from './workflowManifest';
 
 const script = `kind: document
 steps:
  - title: 找开头
-   resources: [SKILL.md]
+   resources: [SKILL.md, references/hook.md]
    information:
     - {id: hook, title: 开头一句, required: true, description: 三秒内抓住注意力}
  - title: 写正文
@@ -20,8 +20,9 @@ steps:
    information:
     - {id: who, title: 目标用户, required: true, profileKey: audience}
 `;
-function fixture(manifest: string | null) {
-  const files: Record<string, string> = {'SKILL.md': 'private method', ...(manifest === null ? {} : {'workflow.yaml': manifest})};
+function fixture(manifest: string | null, hook = 'HOOK_METHOD') {
+  const files: Record<string, string> = {'SKILL.md': '---\nname: sample\ndescription: Sample\n---\nprivate method',
+    'references/hook.md': hook, ...(manifest === null ? {} : {'workflow.yaml': manifest})};
   const descriptor: PackageDescriptor = {packageId: 'skill', revisionId: 'v1', directoryName: 'sample', packageHash: '',
     tasks: {}, requiredCapabilities: [], files: Object.entries(files).map(([path, content]) => ({path,
       bytes: Buffer.byteLength(content), sha256: sha256(content), mediaType: path.endsWith('.md') ? 'text/markdown' : 'text/yaml', requires: []}))};
@@ -29,25 +30,45 @@ function fixture(manifest: string | null) {
   const reads: string[] = [];
   const source: SkillSource = {list: async () => [descriptor], state: async () => 'enabled',
     read: async ({path}) => {reads.push(path); return Buffer.from(files[path]!);}};
-  return {source, reads};
+  return {source, reads, descriptor};
 }
 beforeEach(clearSkillResourceCache);
 
-it('turns a non-positioning Skill\'s steps into an ordered guide with field titles and descriptions', async () => {
+it('turns a non-positioning Skill\'s steps into an ordered guide and lists the files they declare', async () => {
   const f = fixture(script);
-  const guide = await loadStepGuide(f.source, 'v1');
-  expect(guide).toContain('1. 找开头\n   - 开头一句：三秒内抓住注意力\n2. 写正文');
-  expect(guide).toContain('need no confirmation cards');
+  const work = await loadStepWork(f.source, f.descriptor);
+  expect(work!.guide).toContain('1. 找开头\n   - 开头一句：三秒内抓住注意力\n2. 写正文');
+  expect(work!.guide).toContain('need no confirmation cards');
+  expect(work!.resources).toEqual(['references/hook.md']);
   expect(f.reads).toEqual(['workflow.yaml']);
 });
-it('gives positioning no guide: it stays the one guided flow', async () => {
-  expect(await loadStepGuide(fixture(positioning).source, 'v1')).toBeUndefined();
+it('free chat loads SKILL.md, the steps\' files and the guide', async () => {
+  const f = fixture(script);
+  const {instructions} = await activateFreeChatSkill(f.source, f.descriptor, {maxContextBytes: 100000});
+  expect(instructions).toContain('private method');
+  expect(instructions).toContain('HOOK_METHOD');
+  expect(instructions).toContain('Work guide declared by this Skill');
 });
-it('adds nothing for a package without workflow.yaml and never reads another revision', async () => {
+it('when the steps\' files do not fit, keeps the Skill usable with SKILL.md and the guide', async () => {
+  const f = fixture(script, 'x'.repeat(5000));
+  const {instructions} = await activateFreeChatSkill(f.source, f.descriptor, {maxContextBytes: 3000});
+  expect(instructions).not.toContain('xxxxx');
+  expect(instructions).toContain('private method');
+  expect(instructions).toContain('1. 找开头');
+});
+it('gives positioning no guide and no extra files: it stays the one guided flow', async () => {
+  const f = fixture(positioning);
+  expect(await loadStepWork(f.source, f.descriptor)).toBeUndefined();
+  expect((await activateFreeChatSkill(f.source, f.descriptor, {maxContextBytes: 100000})).instructions).not.toContain('HOOK_METHOD');
+});
+it('uses the same positioning rule as the positioning entry: a step without fields makes it a guided Skill', () => {
+  const mixed = parseWorkflowManifest(positioning + ' - title: 资料\n   resources: [SKILL.md]\n');
+  expect(stepGuideText(mixed)).toContain('1. 用户是谁');
+});
+it('adds nothing for a package without workflow.yaml', async () => {
   const f = fixture(null);
-  expect(await loadStepGuide(f.source, 'v1')).toBeUndefined();
+  expect(await loadStepWork(f.source, f.descriptor)).toBeUndefined();
   expect(f.reads).toEqual([]);
-  await expect(loadStepGuide(fixture(script).source, 'v2')).rejects.toThrow('RUNTIME_REVISION_DENIED');
 });
 it('stays within its size cap', () => {
   const steps = Array.from({length: 32}, (_, i) => ({title: '步骤'.repeat(70) + i, resources: ['SKILL.md'],
