@@ -6,7 +6,8 @@ import { findStaleChargedRounds, STALE_ROUND_AGE_MS, STALE_ROUND_REPORT_LIMIT } 
 // Filtering and permissions are exercised against the real database in staleChargedRounds.integration.ts.
 const now = Date.parse('2026-10-13T00:00:00.000Z');
 const round = (n: number) => ({ executionId: `10000000-0000-4000-8000-${String(n).padStart(12, '0')}`,
-  runId: `20000000-0000-4000-8000-${String(n).padStart(12, '0')}`, chargedCredits: 3, since: '2026-10-11T18:02:00+00:00' });
+  runId: `20000000-0000-4000-8000-${String(n).padStart(12, '0')}`, chargedCredits: 3, refundedCredits: 1,
+  outstandingCredits: 2, since: '2026-10-11T18:02:00+00:00' });
 const client = (result: { data: unknown; error: unknown }) => {
   const rpc = vi.fn(async () => result);
   return { rpc, supabase: { rpc } as unknown as SupabaseClient };
@@ -31,6 +32,7 @@ it.each([
   { data: null, error: { code: '42501', message: 'permission denied' } },
   { data: { total: 1 }, error: null },
   { data: { total: 1, rounds: [{ ...round(1), chargedCredits: 0 }] }, error: null },
+  { data: { total: 1, rounds: [{ ...round(1), outstandingCredits: 3 }] }, error: null },
 ])('fails closed on an unreadable or malformed report %#', async result => {
   await expect(findStaleChargedRounds(client(result).supabase, now)).rejects.toThrow('STALE_ROUND_SCAN_FAILED');
 });

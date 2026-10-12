@@ -110,12 +110,17 @@ it('RUNTIME: service_role reads stale charged rounds only through the report fun
     .rejects.toThrow('STALE_ROUND_LIMIT_INVALID');
 }, 60000);
 
-it('RUNTIME: an operator refund marked with the round, or an unknown call, removes it from the report', async () => {
+it('RUNTIME: only marked refunds covering the charge, or an unknown call, remove a round from the report', async () => {
   const refunded = await chargedOpenRound(2 * STALE_ROUND_AGE_MS), unknown = await chargedOpenRound(2 * STALE_ROUND_AGE_MS);
   expect(ids(await reported())).toEqual(expect.arrayContaining([refunded.runId, unknown.runId]));
   // Exactly what admin.adjustUserCredits sends: `[Admin] <reason>`, the reason carrying the marker.
-  await rpc('atomic_apply_credit_ledger_entry', { p_user_id: refunded.actor, p_amount: 3, p_type: 'addition',
-    p_description: '[Admin] stale-round:' + refunded.runId + ' 系统原因未完成回合退款' });
+  const refund = (amount: number) => rpc('atomic_apply_credit_ledger_entry', { p_user_id: refunded.actor, p_amount: amount,
+    p_type: 'addition', p_description: '[Admin] stale-round:' + refunded.runId + ' 系统原因未完成回合退款' });
+  await refund(1);
+  // A partial refund keeps the round reported with what is still owed.
+  expect((await reported()).rounds).toContainEqual(expect.objectContaining({ runId: refunded.runId,
+    chargedCredits: 3, refundedCredits: 1, outstandingCredits: 2 }));
+  await refund(2);
   // A dispatched call without a settlement belongs to financial recovery, not to this report.
   await db.query('update bill2_calls set settled_at=null where run_id=$1', [unknown.runId]);
   const after = ids(await reported());

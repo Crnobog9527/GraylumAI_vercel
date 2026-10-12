@@ -1,8 +1,9 @@
 -- Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved.
 -- Daily backstop (Owner 2026-10-12, fallback A): a read-only report of PAYG rounds still open
--- after the cutoff whose settled calls charged credits, with no call of unknown outcome and no
--- operator refund marked `stale-round:<runId>`. service_role has no direct access to these
--- tables (0105/0106), so the daily reconciliation reads them only through this function.
+-- after the cutoff whose settled calls charged credits, with no call of unknown outcome, until
+-- operator refunds marked `stale-round:<runId>` cover its current uncompensated charges.
+-- service_role has no direct access to these tables (0105/0106), so the daily reconciliation
+-- reads them only through this function.
 -- Every filter runs before the limit; `total` counts all matches so a truncated page is visible.
 -- No data is changed. No remote database use.
 BEGIN;
@@ -20,20 +21,22 @@ BEGIN
  WITH charged AS (
   SELECT e.id execution_id,r.id run_id,e.created_at since,
    (SELECT coalesce(sum(c.charged_delta),0) FROM bill2_calls c WHERE c.run_id=r.id
-     AND c.settled_at IS NOT NULL AND c.compensated_at IS NULL AND c.charged_delta>0)::integer credits
+     AND c.settled_at IS NOT NULL AND c.compensated_at IS NULL AND c.charged_delta>0)::integer credits,
+   -- A partial refund, or a charge settled after it, keeps the round reported.
+   (SELECT coalesce(sum(t.amount),0) FROM credit_transactions t WHERE t.user_id=e.actor_id AND t.amount>0
+     AND (t.idempotency_key LIKE 'admin\_adjustment:%stale-round:'||r.id::text
+      OR t.description LIKE '%stale-round:'||r.id::text||'%'))::integer refunded
   FROM runtime_executions e JOIN bill2_runs r ON r.id=e.billing_run_id
   WHERE e.state IN ('prepared','running','interrupted') AND e.created_at<p_cutoff
    AND r.contract_version='bill2.v2' AND NOT r.closed
    AND NOT EXISTS(SELECT 1 FROM bill2_calls c WHERE c.run_id=r.id
      AND c.dispatched_at IS NOT NULL AND c.settled_at IS NULL AND NOT c.provider_rejected)
-   AND NOT EXISTS(SELECT 1 FROM credit_transactions t WHERE t.user_id=e.actor_id AND t.amount>0
-     AND (t.idempotency_key LIKE 'admin\_adjustment:%stale-round:'||r.id::text
-      OR t.description LIKE '%stale-round:'||r.id::text||'%'))
  ), found AS (
-  SELECT *,row_number() OVER (ORDER BY since,run_id) n FROM charged WHERE credits>0
+  SELECT *,row_number() OVER (ORDER BY since,run_id) n FROM charged WHERE credits>refunded
  )
  SELECT jsonb_build_object('total',count(*),'rounds',coalesce(jsonb_agg(jsonb_build_object(
-   'executionId',execution_id,'runId',run_id,'chargedCredits',credits,'since',since) ORDER BY n)
+   'executionId',execution_id,'runId',run_id,'chargedCredits',credits,'refundedCredits',refunded,
+   'outstandingCredits',credits-refunded,'since',since) ORDER BY n)
    FILTER (WHERE n<=p_limit),'[]'::jsonb)) INTO result FROM found;
  RETURN result;
 END $function$;

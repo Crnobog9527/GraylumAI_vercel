@@ -8,8 +8,9 @@ import { z } from 'zod';
  * Report-only: lists PAYG rounds still open after 24 hours whose settled calls charged
  * credits and that have no call of unknown outcome (those belong to financial recovery).
  * An operator verifies each one and refunds it with the admin credit adjustment, writing
- * `stale-round:<runId>` in its reason (or idempotency key); that refund removes the round from
- * later reports. The billing tables are read only through runtime_stale_charged_rounds (0220).
+ * `stale-round:<runId>` in its reason (or idempotency key). The round stays reported, with the
+ * credits still owed, until such refunds cover its current uncompensated charges.
+ * The billing tables are read only through runtime_stale_charged_rounds (0220).
  */
 export const STALE_ROUND_AGE_MS = 24 * 3600 * 1000;
 export const STALE_ROUND_REPORT_LIMIT = 100;
@@ -18,11 +19,14 @@ export const staleRoundRefundKey = (runId: string) => 'stale-round:' + runId;
 const report = z.object({
   total: z.number().int().nonnegative(),
   rounds: z.array(z.object({ executionId: z.string().uuid(), runId: z.string().uuid(),
-    chargedCredits: z.number().int().positive(), since: z.string() }).strict()).max(STALE_ROUND_REPORT_LIMIT),
+    chargedCredits: z.number().int().positive(), refundedCredits: z.number().int().nonnegative(),
+    outstandingCredits: z.number().int().positive(), since: z.string() }).strict()
+    .refine(round => round.chargedCredits - round.refundedCredits === round.outstandingCredits))
+    .max(STALE_ROUND_REPORT_LIMIT),
 }).strict();
 export type StaleChargedRound = {
   kind: 'stale_charged_round'; executionId: string; runId: string; chargedCredits: number;
-  since: string; refundMarker: string;
+  refundedCredits: number; outstandingCredits: number; since: string; refundMarker: string;
 };
 export type StaleChargedRoundReport = { success: boolean; findings: StaleChargedRound[]; total: number; truncated: boolean };
 
