@@ -28,4 +28,47 @@ LANGUAGE sql STABLE SECURITY DEFINER SET search_path=public,pg_temp AS $$
 $$;
 REVOKE ALL ON FUNCTION public.opc_has_confirmed_positioning(uuid) FROM PUBLIC,anon,authenticated,service_role;
 GRANT EXECUTE ON FUNCTION public.opc_has_confirmed_positioning(uuid) TO service_role;
+-- The positioning Skill can never be flagged, or users without a positioning could not create one.
+-- A positioning workflow is one the positioning entry can start: every step declares information
+-- fields and some field feeds the profile (isPositioningWorkflow in services/opc/positioningWorkflow.ts).
+CREATE OR REPLACE FUNCTION public.opc_is_positioning_workflow(p_workflow jsonb) RETURNS boolean
+LANGUAGE sql IMMUTABLE SET search_path=public,pg_temp AS $$
+ SELECT CASE
+  WHEN coalesce(jsonb_typeof(p_workflow->'steps'),'')<>'array' OR jsonb_array_length(p_workflow->'steps')=0 THEN false
+  WHEN EXISTS(SELECT 1 FROM jsonb_array_elements(p_workflow->'steps') s WHERE CASE
+   WHEN jsonb_typeof(s->'information')='array' THEN jsonb_array_length(s->'information')=0 ELSE true END) THEN false
+  ELSE EXISTS(SELECT 1 FROM jsonb_array_elements(p_workflow->'steps') s,jsonb_array_elements(s->'information') f
+   WHERE jsonb_typeof(f->'profileKey')='string' AND f->>'profileKey'<>'')
+ END;
+$$;
+-- Only the guards below call it, as their owner.
+REVOKE ALL ON FUNCTION public.opc_is_positioning_workflow(jsonb) FROM PUBLIC,anon,authenticated,service_role;
+-- Both sides are checked, so neither "flag then publish" nor "publish then flag" can break it.
+-- Concurrent flag saves and publications serialize on the module row: admin_publish_skill_module locks
+-- it FOR UPDATE before inserting the workflow, and the flag UPDATE takes the same row lock; each check
+-- then reads the other side's committed state.
+CREATE OR REPLACE FUNCTION public.modules_social_media_guard() RETURNS trigger
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
+BEGIN
+ IF NEW.social_media_related AND EXISTS(SELECT 1 FROM artifact_workflows WHERE module_id=NEW.id AND enabled
+  AND opc_is_positioning_workflow(workflow)) THEN
+  RAISE EXCEPTION 'SOCIAL_MEDIA_FLAG_POSITIONING_SKILL' USING ERRCODE='P0001'; END IF;
+ RETURN NEW;
+END $$;
+CREATE OR REPLACE FUNCTION public.artifact_workflows_social_media_guard() RETURNS trigger
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
+BEGIN
+ IF NEW.enabled AND opc_is_positioning_workflow(NEW.workflow)
+  AND EXISTS(SELECT 1 FROM modules WHERE id=NEW.module_id AND social_media_related) THEN
+  RAISE EXCEPTION 'SOCIAL_MEDIA_FLAG_POSITIONING_SKILL' USING ERRCODE='P0001'; END IF;
+ RETURN NEW;
+END $$;
+REVOKE ALL ON FUNCTION public.modules_social_media_guard(),public.artifact_workflows_social_media_guard()
+ FROM PUBLIC,anon,authenticated,service_role;
+DROP TRIGGER IF EXISTS modules_social_media_guard ON public.modules;
+CREATE TRIGGER modules_social_media_guard BEFORE INSERT OR UPDATE OF social_media_related ON public.modules
+ FOR EACH ROW EXECUTE FUNCTION public.modules_social_media_guard();
+DROP TRIGGER IF EXISTS artifact_workflows_social_media_guard ON public.artifact_workflows;
+CREATE TRIGGER artifact_workflows_social_media_guard BEFORE INSERT OR UPDATE OF enabled ON public.artifact_workflows
+ FOR EACH ROW EXECUTE FUNCTION public.artifact_workflows_social_media_guard();
 COMMIT;

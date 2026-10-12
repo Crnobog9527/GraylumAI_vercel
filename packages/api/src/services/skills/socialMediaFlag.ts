@@ -1,6 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { isPositioningWorkflow } from '../opc/positioningWorkflow';
 
 /** POSITIONING-GATE: the administrator's per-Skill "与社交媒体相关" flag, saved on its own. */
 export const SOCIAL_MEDIA_FLAG_ERRORS = ['SOCIAL_MEDIA_FLAG_UNAVAILABLE', 'SOCIAL_MEDIA_FLAG_MODULE_NOT_FOUND',
@@ -19,15 +18,11 @@ export async function saveSocialMediaFlag(db: SupabaseClient, input: {
   moduleId: string; socialMediaRelated: boolean; expectedSocialMediaRelated: boolean;
 }) {
   await readSocialMediaFlag(db, input.moduleId);
-  // The Skill users need to create a positioning can never require one. Turning the flag off is always allowed.
-  if (input.socialMediaRelated) {
-    const workflows = await db.from('artifact_workflows').select('workflow').eq('module_id', input.moduleId).eq('enabled', true);
-    if (workflows.error) throw new Error('SOCIAL_MEDIA_FLAG_UNAVAILABLE');
-    if ((workflows.data ?? []).some(row => isPositioningWorkflow(row.workflow))) throw new Error('SOCIAL_MEDIA_FLAG_POSITIONING_SKILL');
-  }
   const result = await db.from('modules')
     .update({ social_media_related: input.socialMediaRelated, updated_at: new Date().toISOString() })
     .eq('id', input.moduleId).eq('social_media_related', input.expectedSocialMediaRelated).select('id');
+  // The database refuses flagging the positioning Skill (0219 guard); turning the flag off is always allowed.
+  if (result.error?.message === 'SOCIAL_MEDIA_FLAG_POSITIONING_SKILL') throw new Error('SOCIAL_MEDIA_FLAG_POSITIONING_SKILL');
   if (result.error) throw new Error('SOCIAL_MEDIA_FLAG_UNAVAILABLE');
   if (result.data?.length !== 1) throw new Error('SOCIAL_MEDIA_FLAG_CONFLICT');
   return readSocialMediaFlag(db, input.moduleId);

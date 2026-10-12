@@ -43,7 +43,11 @@ function assertResult(error: unknown, data: unknown, message: string): asserts d
 export const skillsRouter = router({
   saveModule: adminProcedure.input(moduleSkillInput).mutation(async ({ ctx, input }) => {
     try { return await saveModuleSkill(ctx.supabase, ctx.profileId, input); }
-    catch { throw new TRPCError({ code: 'BAD_REQUEST', message: 'Skill 发布未完成。请检查文件格式、步骤资料和模型；若模块已被修改，请关闭后重新打开。' }); }
+    catch (cause) {
+      if (cause instanceof Error && cause.message === 'SOCIAL_MEDIA_FLAG_POSITIONING_SKILL')
+        throw new TRPCError({ code: 'BAD_REQUEST', message: '这个模块勾选了“与社交媒体相关”，不能发布成定位 Skill。请先在下方取消勾选并保存，再发布。' });
+      throw new TRPCError({ code: 'BAD_REQUEST', message: 'Skill 发布未完成。请检查文件格式、步骤资料和模型；若模块已被修改，请关闭后重新打开。' });
+    }
   }),
   readModule: adminProcedure.input(idInput).query(async ({ ctx, input }) => {
     const { data, error } = await ctx.supabase.rpc('admin_read_skill_module', { p_actor_id: ctx.profileId, p_module_id: input.id });
