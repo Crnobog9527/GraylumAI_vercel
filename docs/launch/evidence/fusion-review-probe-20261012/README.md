@@ -3,7 +3,7 @@
 > 状态：实测记录，仅文档和脚本，不是产品代码。已包含 Owner 建好评审专用 workspace 之后的补测（第 1.1 节）。
 > 依据：[Master Plan 第 4.3 节](../../MASTER_PLAN.md#fusion)（开工前必须实测的五项）、[FUSION 实施说明](../../tasks/FUSION.md)、
 > Owner 2026-09-30 决定（评审不联网；首选 OpenRouter Fusion 并禁联网，先实测）。
-> 测试账号：现有 OpenRouter 测试密钥（staging 测试预算），以及 Owner 新建的评审专用 workspace 的密钥。本任务上限 2 美元，**实际花费约 0.52 美元**。
+> 测试账号：现有 OpenRouter 测试密钥（staging 测试预算），以及 Owner 新建的评审专用 workspace 的密钥。本任务上限 2 美元，**实际花费约 0.63 美元（旧测试密钥 0.62、专用 workspace 0.01）**。
 > 后台设置由 Owner 本人操作，我没有改 OpenRouter 后台，也没有碰正式环境。
 
 ## 先说结论（给 Owner 的大白话）
