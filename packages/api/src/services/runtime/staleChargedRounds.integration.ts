@@ -197,7 +197,15 @@ it('RUNTIME: a cost-pending round whose last unknown call was settled is reporte
   const round = await chargedOpenRound(2 * STALE_ROUND_AGE_MS);
   // Receipt recovery settled the call, but the process exited before the round was finished.
   await db.query("update runtime_executions set state='cost_pending' where id=$1", [round.executionId]);
-  expect(ids(await reported())).toContain(round.runId);
+  // Its response receipt was not final (the cost came later from a lookup without the response):
+  // the finish reason is still shown to the operator.
+  // Receipts are immutable evidence; only this synthetic shape is rewritten.
+  await db.query('alter table bill2_receipts disable trigger bill2_evidence_immutable');
+  try {
+    await db.query(`update bill2_receipts set payload=jsonb_set(payload,'{final}','false'::jsonb)
+      where call_id in (select id from bill2_calls where run_id=$1) and payload->>'source'='response'`, [round.runId]);
+  } finally { await db.query('alter table bill2_receipts enable trigger bill2_evidence_immutable'); }
+  expect((await reported()).rounds.find(item => item.runId === round.runId)?.evidence).toMatchObject({ lastFinishReason: 'stop' });
   expect(await compensateStaleRound(service, round.runId)).toMatchObject({ state: 'compensated', executionState: 'cancelled' });
   expect(await ledger(round)).toMatchObject({ credits: 100, compensations: 1, run_state: 'refunded' });
 }, 60000);

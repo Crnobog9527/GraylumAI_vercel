@@ -38,8 +38,11 @@ BEGIN
    (SELECT max(c.settled_at) FROM bill2_calls c WHERE c.run_id=r.id) last_activity,
    -- How the last answered call ended; `tool_calls` with no later call means the next request never
    -- went out (an unclassified Graylum failure, or content beyond capacity, which is not refunded).
+   -- Any validated response receipt carries it; a cost recovered later arrives in a lookup receipt
+   -- without the response, so the finish reason is never required to come from the final receipt.
    (SELECT left(rec.payload->'usage'->'sdkResponse'->'choices'->0->>'finish_reason',64) FROM bill2_calls c
-     JOIN bill2_receipts rec ON rec.call_id=c.id WHERE c.run_id=r.id AND NOT rec.conflict AND rec.payload->>'final'='true'
+     JOIN bill2_receipts rec ON rec.call_id=c.id WHERE c.run_id=r.id AND NOT rec.conflict
+     AND rec.payload->>'source'='response' AND rec.payload->'usage'->'sdkResponse'->'choices'->0->>'finish_reason' IS NOT NULL
      ORDER BY c.sequence DESC,rec.created_at DESC,rec.id DESC LIMIT 1) last_finish_reason
   FROM runtime_executions e JOIN bill2_runs r ON r.id=e.billing_run_id
   -- cost_pending: receipt recovery settled the last unknown call but the round was never closed.
