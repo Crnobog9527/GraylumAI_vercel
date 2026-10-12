@@ -18,10 +18,10 @@
 | L4 | 数据库里的日志表 | staging 只读计数（2026-10-12）：`application_logs` 0 行；`user_activity_logs` 22 行，最早 09-26；`diagnostic_results` 390 行，最早 **09-14**；`ai_usage_logs` 309 行，最早 09-26；`scheduled_job_runs`（定时任务执行记录，含错误和任意 `summary`）15 行，最早 09-30 | — | **缺口**：0148 删掉了 `cleanup_old_logs` 以后，没有任何通用的日志定期清理；staging 上 pg_cron、pg_net 都没装。`diagnostic_results` 已经存了 28 天，再过两天就超过 30 天。`user_activity_logs`（管理员访问用户的审计记录）和 `scheduled_job_runs`（0017，只追加、没有任何删除路径）也没有到期清理。`ai_usage_logs` 属于账务，注销时清正文、按 3 年账务保留，不算日志 | 需要新开任务：给日志表加到期清理（复用现有的每日 cron 路由，不新建调度），哪些表算日志、保留多久按 E7 定 |
 | L5 | Supabase Storage 文件的备份 | 未核实 | 数据库备份不含 Storage 文件 [S8]；Storage 自身是否另有备份，公开资料未写 | 未核实。需要问 Supabase 或看套餐说明 | 上线前核对 |
 | L6 | Vercel 运行日志（函数 stdout/stderr） | staging 为 Hobby（EXECUTOR.md 记录）。正式未核实。Log Drains：staging 团队查询返回 404，没有看到已配置的转存 | Hobby 1 小时、Pro 1 天、Enterprise 3 天；Observability Plus 30 天 [S7] | Hobby/Pro 都在 30 天以内。买 Observability Plus 正好 30 天。**以后加 Log Drains 会把日志转到第三方，必须先补那一家的保留期** | 升级 Pro 时确认没有开超过 30 天的附加项 |
-| L7 | Vercel 构建日志 | 每次部署都有 | 构建日志随部署长期保存（Vercel 社区和文档的说法） | **缺口**：E7 没有给构建日志开例外。构建时不读用户数据，内容风险低，但保留期超过 30 天。需要 Owner 决定：给构建日志开明确例外，或者定期删除旧部署 | Owner 决定 |
+| L7 | Vercel 构建日志 | 每次部署都有 | 构建日志随部署长期保存（Vercel 社区和文档的说法） | **Owner 2026-10-12 已定：不含用户数据，不在承诺范围**（构建时不读用户数据） | — |
 | L8 | Vercel Analytics | 是否启用未核实 | 默认聚合，session hash 24 小时 [S11] | 自定义事件里不能放用户正文 | 前端改动时注意 |
 | L8b | Vercel Speed Insights | `apps/web/src/app/layout.tsx` 在 Vercel 的生产模式部署里挂了 `@vercel/speed-insights`，会上报真实用户的性能数据 | 保留期未查到 | 未核实：项目里是否已启用、保留多久、数据里有没有页面完整网址 | 上线前核对 |
-| L9 | Sentry 错误事件、性能追踪、会话回放 | staging 项目设了 `NEXT_PUBLIC_SENTRY_DSN`、`SENTRY_ORG/PROJECT`，所以**staging 已经在上报**。代码：服务端和 edge 的 `beforeSend` 只在开发环境丢弃，**不做脱敏**；浏览器回放 `maskAllText`、`blockAllMedia` 已开；没有设置 `sendDefaultPii`（SDK 默认不带 IP 和 cookie）。还有一个 `SENTRY_OTLP_TRACES_URL` 变量，代码里没找到引用 | 错误事件：Developer 30 天，Team 和 Business 90 天，按上报时的套餐计算 [Sentry 文档]；部分备份最多 90 天 [S11] | **缺口**：Team 及以上的 90 天超过 E7；Developer 是 30 天。错误信息里可能带用户输入（比如异常信息里拼了正文），目前没有统一脱敏。`SENTRY_OTLP_TRACES_URL` 是不是被平台集成读取、发出去的追踪里有没有提示词，未核实 | Owner 决定 Sentry 套餐（超过 30 天要 Owner 决定）；脱敏 `beforeSend` 另开代码任务；OTLP 变量由总控核实用途 |
+| L9 | Sentry 错误事件、性能追踪、会话回放 | staging 项目设了 `NEXT_PUBLIC_SENTRY_DSN`、`SENTRY_ORG/PROJECT`，所以**staging 已经在上报**。代码：服务端和 edge 的 `beforeSend` 只在开发环境丢弃，**不做脱敏**；浏览器回放 `maskAllText`、`blockAllMedia` 已开；没有设置 `sendDefaultPii`（SDK 默认不带 IP 和 cookie）。还有一个 `SENTRY_OTLP_TRACES_URL` 变量，代码里没找到引用 | 错误事件：Developer 30 天，Team 和 Business 90 天，按上报时的套餐计算 [Sentry 文档]；部分备份最多 90 天 [S11] | **缺口**：Team 及以上的 90 天超过 E7；Developer 是 30 天。错误信息里可能带用户输入（比如异常信息里拼了正文），目前没有统一脱敏。`SENTRY_OTLP_TRACES_URL` 是不是被平台集成读取、发出去的追踪里有没有提示词，未核实 | 保留期：**Owner 2026-10-12 已定：第三方例外，写入隐私条款**（原话："保留期选 A：第三方例外写进隐私条款；同意上线前补日志清理、限流统计清理、库外删除清单和 Sentry 脱敏。"）。脱敏 `beforeSend` 上线前补（Owner 已同意）；OTLP 变量由总控核实用途 |
 | L10 | Upstash Redis（限流） | staging 变量里有 `UPSTASH_REDIS_REST_URL/TOKEN` 和 `REDIS_URL`。限流键里带用户编号，比如 `account-erasure:<用户编号>`。`apps/web/src/lib/rateLimit.ts` 和 `packages/api/src/services/redisRateLimiter.ts` 的限流器都开了 `analytics: true` | 限流计数键按窗口过期；但 `@upstash/ratelimit` 2.0.8 的 analytics 会把传入的标识（含用户编号）写进统计桶，库里写死保留 `90d`。Upstash 控制台审计日志记录的是账号操作，免费库 7 天、按量 30 天、Pro 1 年 | **缺口**：analytics 统计里的用户编号保留 90 天，超过 E7，注销也不会删它。需要关掉 analytics，或者改成不带用户编号的标识，或者在 30 天内清掉 | 新开代码任务（见缺口汇总第 6 条） |
 | L11 | 邮件（Resend，作为 Supabase Auth 的 SMTP，Tokyo 区） | 用于验证码和找回密码邮件 | Resend 定价页：各套餐"数据保留 30 天"（2026-10-12 读取） | 在 30 天以内。已经发到用户邮箱的邮件我们删不掉 | — |
 | L12 | 手动导出、本机下载的备份 | 规则禁止 AI 下载正式备份 | — | 有人手动导出过的话必须登记并在 30 天内删除；目前没有登记表 | 总控在运行手册里加一行"导出要登记" |
@@ -49,7 +49,7 @@
 | Stripe（含 MP 和大陆卡） | 付款资料、交易记录 | 可以申请删除个人资料，但监管要求的支付记录会继续保留 [S6] | Stripe Privacy Portal | 同上；不为注销去删商户账号 | 同上 |
 | Resend | 收件邮箱、邮件内容（验证码、通知） | 数据保留 30 天（定价页） | Resend 支持；控制台可查单封邮件 | 注销后不再给该地址发邮件；我们这边不存邮件正文 | 30 天以内自然过期，一般不用单独申请 |
 | Sentry | 错误信息、请求网址、浏览器信息，可能带用户输入 | 30 或 90 天（看套餐） | Sentry 控制台可以删除单个问题和事件；也可以联系支持 | **缺口**：目前没有"按用户删除 Sentry 事件"的步骤，也没有上报前脱敏。先补脱敏，让事件里本来就没有能定位到个人的内容 | 若要删除个别事件，记录事件编号（不记内容） |
-| hCaptcha（人机验证，登录、注册和注销弹窗都会用） | 用户浏览器直接把 IP、浏览器信息和验证数据发给 hCaptcha，不经过我们的服务器 | 隐私政策：IP、浏览器等技术数据尽快丢弃，但最多可保留到 cookie 过期后一年；发现滥用时更久。终端用户的请求要找网站方（我们），hCaptcha 不直接处理（2026-10-12 读取 [hCaptcha Privacy](https://www.hcaptcha.com/privacy)） | 网站方发邮件到 hCaptcha 支持邮箱申请删除，45 天内答复 | 我们这边不保存 hCaptcha 的验证数据；令牌由 Supabase Auth 校验一次 | **缺口**：对方最长保留一年，超过 E7；而且按用户逐个申请删除不现实。需要 Owner 决定：接受并在条款里如实写，还是换方案（Owner 10-01 已决定保留 hCaptcha） |
+| hCaptcha（人机验证，登录、注册和注销弹窗都会用） | 用户浏览器直接把 IP、浏览器信息和验证数据发给 hCaptcha，不经过我们的服务器 | 隐私政策：IP、浏览器等技术数据尽快丢弃，但最多可保留到 cookie 过期后一年；发现滥用时更久。终端用户的请求要找网站方（我们），hCaptcha 不直接处理（2026-10-12 读取 [hCaptcha Privacy](https://www.hcaptcha.com/privacy)） | 网站方发邮件到 hCaptcha 支持邮箱申请删除，45 天内答复 | 我们这边不保存 hCaptcha 的验证数据；令牌由 Supabase Auth 校验一次 | 对方最长保留一年，超过 E7：**Owner 2026-10-12 已定：第三方例外，写入隐私条款**（原话："保留期选 A：第三方例外写进隐私条款；同意上线前补日志清理、限流统计清理、库外删除清单和 Sentry 脱敏。"）；不按用户逐个申请删除 |
 | Upstash | 限流键（含用户编号）、计数 | 键按我们设的过期时间失效 | 我们自己删除键，或等待过期 | 注销后键会按窗口过期；如有不过期的键要补删除 | 不需要对外申请 |
 | Vercel | 运行日志（可能含请求网址和错误） | 1 小时到 3 天，看套餐 [S7] | 等待过期；没有逐条删除 | 日志里不写用户正文、邮箱、完整网址 | 自然过期，不需要申请 |
 | Supabase | 数据库、Storage 文件、Auth 账号、平台日志、备份 | 见清单一 L1–L5 | 我们自己用服务端接口删除；备份等过期 | 注销执行器已删除数据库内容、存储对象和 Auth 账号（staging 10-11 那条已核实） | 执行器在 `account_erasure_requests` 记录时间 |
@@ -69,15 +69,15 @@
 
 ## 发现的缺口汇总（需要另外立项或请 Owner 决定）
 
-1. **日志表没有定期清理**（L4）：`diagnostic_results` 已存 28 天，`user_activity_logs`、`scheduled_job_runs` 也没有到期清理。建议新开一个小任务，复用每日 cron 加日志到期清理。
+1. **日志表没有定期清理**（L4，Owner 已同意上线前补）：`diagnostic_results` 已存 28 天，`user_activity_logs`、`scheduled_job_runs` 也没有到期清理。建议新开一个小任务，复用每日 cron 加日志到期清理。
    注意 cron 每天只跑一次：如果按"超过 30 天就删"写，刚跑完那一刻写入的行最多会留将近 31 天。删除线要设在 29 天（留出一天的运行间隔），或者提高运行频率。
-2. **Sentry**（L9）：服务端上报前不做脱敏；Team 及以上套餐保留 90 天，超过 E7。套餐要 Owner 决定；脱敏是代码任务。`SENTRY_OTLP_TRACES_URL` 的用途待核实。
+2. **Sentry**（L9）：服务端上报前不做脱敏（Owner 已同意上线前补）；90 天保留期 Owner 已定为第三方例外，写入隐私条款。`SENTRY_OTLP_TRACES_URL` 的用途待核实。
 3. **模型线路政策表**还没有（清单二）；旧对话链路的 Google 直连不在 OpenRouter 范围里，LEGACY-CLOSE 删除这条链路之前不得在后台启用。
 4. **正式环境**的 Supabase 套餐、备份、PITR、日志窗口都未核实（L1–L3），等正式库建好后只读核对。
-5. **从备份恢复后重放删除**：缺一份存在数据库以外的最小删除清单（否则备份之后才注销的账号、才删除的对话和文档会被恢复出来；单条删除要记删除类型和目标编号），整个流程也没有演练（T15/T16）。
-6. **Upstash 限流 analytics**（L10）：统计里的用户编号保留 90 天，注销不删。要关掉 analytics、改用不带用户编号的标识，或者 30 天内清掉。
-7. **hCaptcha** 技术数据最长保留一年（清单二），超过 E7，要 Owner 决定怎么处理。
-8. **Vercel 构建日志**长期保存（L7），要 Owner 决定开例外还是定期删旧部署；**Speed Insights**（L8b）未核实。
+5. **从备份恢复后重放删除**（库外删除清单 Owner 已同意上线前补）：缺一份存在数据库以外的最小删除清单（否则备份之后才注销的账号、才删除的对话和文档会被恢复出来；单条删除要记删除类型和目标编号），整个流程也没有演练（T15/T16）。
+6. **Upstash 限流 analytics**（L10，Owner 已同意上线前补）：统计里的用户编号保留 90 天，注销不删。要关掉 analytics、改用不带用户编号的标识，或者 30 天内清掉。
+7. **hCaptcha** 技术数据最长保留一年：Owner 已定为第三方例外，写入隐私条款。
+8. **Vercel 构建日志**（L7）：Owner 已定不含用户数据、不在承诺范围；**Speed Insights**（L8b）未核实。
 
 ## 公开资料补充（2026-10-12 读取）
 
