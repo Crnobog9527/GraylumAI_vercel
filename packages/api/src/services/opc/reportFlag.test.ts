@@ -22,10 +22,9 @@ it.each([
   expect(result.snapshot.workflow).toMatchObject({ id: 'w', version: 8, steps: [] });
 });
 
-it('keeps the read and the old answer when the flag cannot be read', async () => {
-  const result = await withReportFlag(draft(), async () => { throw new Error('artifact denied'); });
-  expect(result.snapshot.workflow.reportGeneration).toBe(false);
-  expect(result.snapshot.state).toBe('draft');
+it('fails the read instead of answering "no report" when the flag cannot be read', async () => {
+  // false would show the legacy confirm action, which report_final_snapshot rejects for a report flow.
+  await expect(withReportFlag(draft(), async () => { throw new Error('statement timeout'); })).rejects.toThrow('statement timeout');
 });
 
 it('leaves a read without a snapshot untouched and makes no extra call', async () => {
