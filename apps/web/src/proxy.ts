@@ -467,9 +467,9 @@ export const config = {
      * - _next/static (static files)
      * - _next/image (image optimization files)
      * - fonts/misans/ (public font binaries and license notices only)
-     * - robots.txt (exact public crawler file)
+     * - robots.txt, sitemap.xml (exact public crawler files)
      * - favicon.ico (favicon file)
      */
-    '/((?!_next/static|_next/image|fonts/misans/|favicon.ico|robots\\.txt$|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
+    '/((?!_next/static|_next/image|fonts/misans/|favicon.ico|robots\\.txt$|sitemap\\.xml$|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
   ],
 };
