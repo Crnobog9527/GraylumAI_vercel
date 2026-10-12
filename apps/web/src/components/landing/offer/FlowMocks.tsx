@@ -97,15 +97,20 @@ function ResearchMock() {
             <Line width="50%" />
             {[0, 1].map(item => (
               <div key={item} className="flex items-center gap-1.5">
-                <span className={cn('flex h-3.5 w-3.5 items-center justify-center rounded-sm border border-[#3A3A3A]',
-                  item === 0 && 'border-[#FFD700] bg-[#FFD700]')}>{item === 0 ? <Check className="h-3 w-3 text-[#0A0A0A]" /> : null}</span>
+                <span className="relative flex h-3.5 w-3.5 rounded-sm border border-[#3A3A3A]">
+                  {/* The visitor's pick appears after the candidate groups, then the table fills in. */}
+                  {item === 0 ? (
+                    <span className={cn(styles.seq, 'absolute -inset-px flex items-center justify-center rounded-sm bg-[#FFD700]')}
+                      style={delay(1.3 + group * 0.2)}><Check className="h-3 w-3 text-[#0A0A0A]" /></span>
+                  ) : null}
+                </span>
                 <Line width="70%" />
               </div>
             ))}
           </Seq>
         ))}
       </div>
-      <Seq at={1.8} className="overflow-hidden rounded-lg border border-[#262626] text-[11px] text-[#B0B0B0]">
+      <Seq at={2.2} className="overflow-hidden rounded-lg border border-[#262626] text-[11px] text-[#B0B0B0]">
         <div className="grid grid-cols-4 gap-2 bg-[#1A1A1A] px-2 py-1.5">
           <span /><span>播放中位数</span><span>互动率</span><span>更新频率</span>
         </div>

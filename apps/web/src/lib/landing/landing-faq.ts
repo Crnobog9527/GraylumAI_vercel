@@ -33,7 +33,7 @@ export const LANDING_FAQ: readonly LandingFaqGroup[] = [
         ],
       },
       {
-        id: 'faq-3', needs: ['content', 'publish'],
+        id: 'faq-3', needs: ['coach', 'content', 'publish'],
         question: '我拍不好、不想出镜，Graylum AI 教练能替我做吗？',
         answer: [
           '拍摄、出镜、录音这几件事得你本人来，这是你的账号，别人替不了。但在那之前的所有事，拍什么、脚本怎么写、标题和封面怎么起、发到哪、发了效果怎么样，都交给教练。你只需要把"你擅长的那部分"做出来。顺便说一句，不想出镜不等于做'
@@ -53,7 +53,7 @@ export const LANDING_FAQ: readonly LandingFaqGroup[] = [
     title: '关于我适不适合',
     items: [
       {
-        id: 'faq-5', needs: ['report', 'publish'],
+        id: 'faq-5', needs: ['coach', 'report', 'publish'],
         question: '多久能看到效果？',
         answer: [
           '分两种。有些东西当场就有：第一次聊完，你手里就有一份 Graylum AI 教练帮你梳理过的定位信息；开通订阅后，完整的策略分析报告和第一个 30 天计划就在你手里。另一些要等你做了才有：发了内容以后，数据会一周一周累积'
@@ -71,7 +71,7 @@ export const LANDING_FAQ: readonly LandingFaqGroup[] = [
         ],
       },
       {
-        id: 'faq-7', needs: ['research', 'publish'],
+        id: 'faq-7', needs: ['coach', 'research', 'publish'],
         question: '我发了几十条都没人看，是我不适合做吗？要换方向吗？',
         answer: [
           '先别下结论。没人看通常不是人的问题，是方向、选题或者表达里有一个环节没对上，而你自己很难看出是哪个。让 Graylum AI 教练用真实数据帮你找出那个环节；如果真的是方向走不通，它会直说，并给你一个能走的。',
@@ -79,7 +79,7 @@ export const LANDING_FAQ: readonly LandingFaqGroup[] = [
         ],
       },
       {
-        id: 'faq-8', needs: ['research', 'publish', 'library'],
+        id: 'faq-8', needs: ['coach', 'research', 'library', 'publish'],
         question: '我已经做了一年多，大概知道该做什么，只是不确定做得对不对。Graylum AI 教练对我有用吗？',
         answer: [
           '比零基础的人更有用。做自媒体这行有个规律：有数据的账号，永远比空白账号好优化。任何运营专家离开了账号数据，都给不出有效的建议；你现在手里有数据，不管之前做得对还是错，反而是最适合用 Graylum AI 教练的时候。',
@@ -91,7 +91,7 @@ export const LANDING_FAQ: readonly LandingFaqGroup[] = [
         ],
       },
       {
-        id: 'faq-9', needs: ['research', 'report', 'voice', 'content', 'publish'],
+        id: 'faq-9', needs: ['coach', 'research', 'report', 'voice', 'content', 'publish'],
         question: '我主要做抖音、小红书，能用吗？',
         answer: [
           '能用，而且 Graylum AI 教练最值钱的部分你都能用：定位、对标研究（以页面上列出的已支持平台为准）、运营策略报告、写内容。只有"一键发布"和"自己作品的数据"这两项，目前只接了 TikTok、Instagram、'
@@ -99,7 +99,7 @@ export const LANDING_FAQ: readonly LandingFaqGroup[] = [
         ],
       },
       {
-        id: 'faq-10', needs: ['content', 'publish'],
+        id: 'faq-10', needs: ['coach', 'content', 'publish'],
         question: '我开着店/上着班，每周要在这上面花多少时间？',
         answer: [
           '这个问题，你直接和 Graylum AI 教练说实话就行。哪怕每周只有 2 个小时、4 个小时，都没关系。它会按你真正能拿出来的时间、精力和资源，给你挑能做得下来的赛道和内容形式，而不是先给你一套理想方案、再让你自己去挤'
@@ -119,7 +119,7 @@ export const LANDING_FAQ: readonly LandingFaqGroup[] = [
         ],
       },
       {
-        id: 'faq-12', needs: ['report', 'voice', 'content', 'publish'],
+        id: 'faq-12', needs: ['coach', 'research', 'report', 'voice', 'content', 'publish'],
         question: '积分怎么用？$29 一个月够不够？',
         answer: [
           '按实际用量扣：对话、生成报告、联网搜索、查数据，用多少扣多少，没用就不扣。Pro 每月 3,480 积分，够你生成运营策略报告、按自己的文风写内容、一键发到各个平台、看自己近 30 天的数据，还能建 3 个定位档案。积分'
@@ -127,7 +127,7 @@ export const LANDING_FAQ: readonly LandingFaqGroup[] = [
         ],
       },
       {
-        id: 'faq-13', needs: ['publish', 'fusion'],
+        id: 'faq-13', needs: ['report', 'content', 'publish', 'fusion'],
         question: '我该选 Pro 还是 Gold？',
         answer: [
           '刚起步、先专心做好一个账号，Pro 就够了。已经在做多个平台的账号，或者想要每周有 Graylum AI 教练替你盯对标、做复盘，想让报告和选题稿件经过多个顶级模型评审团把关，建议选择 Gold 。使用途中随时能从 Pr'
