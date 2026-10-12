@@ -61,6 +61,23 @@ export async function verifyAfterStripeRouting({admin,service},legacy) {
   assert.deepEqual([card.payment_channel,card.mode,card.auto_renew,card.stripe_managed_payments,card.entitlement_term],
     ['stripe','subscription',true,true,'month']);
   assert.equal(card.purchase_snapshot.tax_behavior,'exclusive');
-  return ['0221-closes-waffo-card-switch','0221-keeps-waffo-order-channel','0221-backfills-recurring-price-usage',
+  // Wallet first Gold month is a calendar month (Owner 2026-10-12): Jan 31 -> Feb 28, never 30 days.
+  await admin.query(`INSERT INTO payment_provider_refs(channel,merchant_namespace,mode,object_type,external_id,
+    membership_plan_id,billing_cycle,is_current,offer_kind,price_usage) VALUES('stripe','fixture','test','price',
+    'price_wallet_first_month',$1,'monthly',true,'gold_first30','one_time')`,[legacy.plan]);
+  const walletBuyer=randomUUID(); await admin.query('INSERT INTO profiles(id,credits) VALUES($1,0)',[walletBuyer]);
+  const wallet=(await buy(service,walletBuyer,legacy.plan,'alipay','gold_first30',version)).rows[0];
+  assert.deepEqual([wallet.payment_channel,wallet.mode,wallet.auto_renew,wallet.entitlement_term,wallet.amount_total],
+    ['stripe','payment',false,'month',4900]);
+  const request={orderId:wallet.id,userId:walletBuyer,method:'alipay',merchant:'fixture',mode:'test',providerRequest:{fixture:true}};
+  const expiry=new Date(Date.now()+1800000),checkout=`checkout_${wallet.id}`;
+  await service.query('SELECT pay_waffo_claim_checkout($1,$2,$3,$4,$5)',[walletBuyer,wallet.id,'fixture',request,expiry]);
+  await service.query('SELECT pay_waffo_bind_checkout($1,$2,$3,$4,$5)',[walletBuyer,wallet.id,'fixture',checkout,expiry]);
+  await admin.query("UPDATE payment_orders SET created_at='2025-01-31T11:00:00Z' WHERE id=$1",[wallet.id]);
+  const pay=end=>service.query(`SELECT pay_waffo_fulfill_payment($1,'fixture',$2,$3,4900,'usd','2025-01-31T12:00:00Z',NULL,
+    '2025-01-31T12:00:00Z',$4) v`,[wallet.id,checkout,`payment_${wallet.id}`,end]);
+  await assert.rejects(()=>pay('2025-03-02T12:00:00Z'),/TERM_INVALID/,'30 days is no longer the first Gold period');
+  assert.equal((await pay('2025-02-28T12:00:00Z')).rows[0].v.state,'fulfilled');
+  return ['0221-wallet-first-month-jan31-to-feb28','0221-wallet-first-month-not-30-days','0221-closes-waffo-card-switch','0221-keeps-waffo-order-channel','0221-backfills-recurring-price-usage',
     '0221-waffo-renewal-still-works','0221-waffo-stop-still-works','0221-card-cn-absent-closed','0221-new-card-is-stripe-mp'];
 }
