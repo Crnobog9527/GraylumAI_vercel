@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { describe, expect, it, vi } from 'vitest';
-import { changeConsent, consentErrorMessage, consentStatus, type DataUseConsentState } from './dataUseConsent';
+import { changeConsent, consentErrorMessage, consentStatus, grantedToOtherCopy, type DataUseConsentState } from './dataUseConsent';
 
 const base: DataUseConsentState = {
   purpose: 'team_improvement', currentVersion: 'd5-v1', granted: false, version: null, grantedAt: null, revokedAt: null,
@@ -12,6 +12,15 @@ describe('data-use consent helpers', () => {
     expect(consentStatus({ ...base, granted: true, version: 'd5-v1', grantedAt: 'x' })).toBe('granted');
     expect(consentStatus({ ...base, version: 'd5-v1', grantedAt: 'x', revokedAt: 'y' })).toBe('revoked');
     expect(consentStatus({ ...base, currentVersion: 'd5-v2', version: 'd5-v1', grantedAt: 'x' })).toBe('outdated');
+  });
+
+  it('flags only an active grant to a text other than the one this card shows', () => {
+    const granted = { ...base, granted: true, version: 'd5-v1', grantedAt: 'x' };
+    expect(grantedToOtherCopy(granted)).toBe(false);
+    expect(grantedToOtherCopy({ ...granted, currentVersion: 'd5-v2', version: 'd5-v2' })).toBe(true);
+    expect(grantedToOtherCopy({ ...granted, currentVersion: 'd5-v2', version: null })).toBe(true);
+    expect(grantedToOtherCopy({ ...base, currentVersion: 'd5-v2', version: 'd5-v2', revokedAt: 'y' })).toBe(false);
+    expect(grantedToOtherCopy(base)).toBe(false);
   });
 
   it('maps server error codes to readable messages', () => {

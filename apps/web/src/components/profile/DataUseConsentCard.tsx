@@ -10,6 +10,7 @@ import {
   changeConsent,
   consentStatus,
   consentStatusText,
+  grantedToOtherCopy,
   type DataUseConsentState,
 } from './dataUseConsent';
 
@@ -42,6 +43,8 @@ export function DataUseConsentView({ state, loading, loadFailed, retrying, onRet
   const granted = state ? consentStatus(state) === 'granted' : false;
   // Never shown as "off" when the state is unknown: a failed read hides the switch instead.
   const grantBlocked = state ? !granted && !canGrant(state) : true;
+  // On, but to a newer text than this page carries: keep revoking, never present these words as the agreed terms.
+  const staleCopy = state ? grantedToOtherCopy(state) : false;
 
   return (
     <div className="mt-6 rounded-2xl p-6" style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
@@ -51,7 +54,9 @@ export function DataUseConsentView({ state, loading, loadFailed, retrying, onRet
             帮助改进 Graylum（可选）
           </label>
           <div className="mt-2 space-y-1 text-sm" style={{ color: 'var(--text-tertiary)' }}>
-            {EXPLANATION.map((line) => <p key={line}>{line}</p>)}
+            {staleCopy
+              ? <p role="status">你已同意更新后的说明，这个页面显示的还是旧版本。请刷新页面查看你同意的内容；不想继续参与，可以直接在这里关闭。</p>
+              : EXPLANATION.map((line) => <p key={line}>{line}</p>)}
           </div>
         </div>
         {state && (

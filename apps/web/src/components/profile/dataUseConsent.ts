@@ -31,6 +31,15 @@ export function canGrant(state: DataUseConsentState): boolean {
   return state.currentVersion === DATA_USE_COPY_VERSION;
 }
 
+/**
+ * An active grant to a text other than the one this card shows (e.g. the user agreed to d5-v2 elsewhere while
+ * this build still carries d5-v1). Checked on its own, not through canGrant, because revoking stays allowed:
+ * the card must say its words are not the ones agreed to, instead of showing them beside an "on" switch.
+ */
+export function grantedToOtherCopy(state: DataUseConsentState): boolean {
+  return state.granted && (state.version ?? state.currentVersion) !== DATA_USE_COPY_VERSION;
+}
+
 function formatTime(iso: string | null): string {
   if (!iso) return '';
   const date = new Date(iso);

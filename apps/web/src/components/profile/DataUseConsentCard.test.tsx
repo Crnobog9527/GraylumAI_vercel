@@ -106,10 +106,27 @@ describe('data-use consent card', () => {
     let html = render();
     expect(html).toContain('disabled=""');
     expect(html).toContain('之前的同意已失效');
-    state.query = loaded({ ...grantedState, currentVersion: 'd5-v2', version: 'd5-v2' });
-    html = render();
+  });
+
+  it('on a grant to a newer text than this page carries, says so instead of showing the old text, and still revokes', async () => {
+    const newer = { ...grantedState, currentVersion: 'd5-v2', version: 'd5-v2' };
+    state.query = loaded(newer);
+    const html = render();
     expect(html).toContain('aria-checked="true"');
     expect(html).not.toContain('disabled=""');
+    expect(html).toContain('你已同意更新后的说明，这个页面显示的还是旧版本');
+    expect(html).not.toContain('对话内容和生成的成果');
+    state.mutateAsync.mockResolvedValue({ ...newer, granted: false, revokedAt: '2026-10-12T08:00:00Z' });
+    state.onCheckedChange?.(false);
+    await vi.waitFor(() => expect(state.setData).toHaveBeenCalled());
+    expect(state.mutateAsync).toHaveBeenCalledWith({ granted: false, version: 'd5-v1' });
+  });
+
+  it('keeps the explanation for a current grant', () => {
+    state.query = loaded(grantedState);
+    const html = render();
+    expect(html).toContain('对话内容和生成的成果');
+    expect(html).not.toContain('这个页面显示的还是旧版本');
   });
 
   it('hides the switch rather than showing "off" when the state cannot be read', () => {
