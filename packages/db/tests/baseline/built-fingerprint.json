@@ -2519,7 +2519,7 @@
   "fn:opc_guard_saved_content_type()": "3de8386f8415",
   "fn:opc_handoff(uuid,uuid,uuid,uuid,jsonb)": "60c41d04affc",
   "fn:opc_handoff_b1(uuid,uuid,uuid,uuid,jsonb)": "11d5d6d871dd",
-  "fn:opc_has_confirmed_positioning(uuid)": "fb2ba1612957",
+  "fn:opc_has_confirmed_positioning(uuid)": "e9a926d06201",
   "fn:opc_historical_reach(uuid,uuid,text)": "6daa2d356d8d",
   "fn:opc_information(uuid,uuid,text,uuid,integer,jsonb)": "8748ba268c09",
   "fn:opc_information_schema(jsonb)": "1721ff6b6d4c",

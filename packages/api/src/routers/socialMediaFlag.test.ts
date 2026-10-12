@@ -2,7 +2,9 @@
 import { expect, it } from 'vitest';
 import { socialMediaFlagRouter } from './socialMediaFlag';
 const id = (n: number) => `10000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
-function fixture(role = 'admin', options: { missing?: boolean; readError?: boolean } = {}) {
+const positioning = { steps: [{ information: [{ id: 'a', profileKey: 'audience' }] }, { information: [{ id: 'b' }] }] };
+const ordinary = { steps: [{ resources: ['SKILL.md'] }] };
+function fixture(role = 'admin', options: { missing?: boolean; readError?: boolean; workflows?: unknown[]; workflowError?: boolean } = {}) {
   const module = { id: id(2), social_media_related: false };
   const writes: Record<string, unknown>[] = [];
   const db = { from(table: string) {
@@ -18,6 +20,9 @@ function fixture(role = 'admin', options: { missing?: boolean; readError?: boole
       },
       async single() { return { data: { id: id(1), role, status: 'active', credits: 0 }, error: null }; },
       then(resolve: (v: unknown) => unknown) {
+        if (table === 'artifact_workflows') return Promise.resolve(resolve(options.workflowError
+          ? { data: null, error: { message: 'secret detail' } }
+          : { data: (options.workflows ?? [ordinary]).map(workflow => ({ workflow })), error: null }));
         if (!patch) throw new Error('Unexpected query');
         if (expected !== module.social_media_related) return Promise.resolve(resolve({ data: [], error: null }));
         writes.push(patch); module.social_media_related = patch.social_media_related as boolean;
@@ -71,4 +76,17 @@ it('rejects unknown input fields', async () => {
   const f = fixture();
   await expect(f.caller.update({ moduleId: f.module.id, socialMediaRelated: true, expectedSocialMediaRelated: false,
     extra: 1 } as never)).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+});
+it('refuses to mark the positioning Skill, but always allows turning the flag off', async () => {
+  const f = fixture('admin', { workflows: [positioning] });
+  await expect(f.caller.update({ moduleId: f.module.id, socialMediaRelated: true, expectedSocialMediaRelated: false }))
+    .rejects.toMatchObject({ code: 'BAD_REQUEST', message: 'SOCIAL_MEDIA_FLAG_POSITIONING_SKILL' });
+  expect(f.writes).toEqual([]);
+  f.module.social_media_related = true;
+  expect(await f.caller.update({ moduleId: f.module.id, socialMediaRelated: false, expectedSocialMediaRelated: true }))
+    .toEqual({ moduleId: f.module.id, socialMediaRelated: false });
+  const broken = fixture('admin', { workflowError: true });
+  await expect(broken.caller.update({ moduleId: broken.module.id, socialMediaRelated: true, expectedSocialMediaRelated: false }))
+    .rejects.toMatchObject({ code: 'BAD_REQUEST', message: 'SOCIAL_MEDIA_FLAG_UNAVAILABLE' });
+  expect(broken.writes).toEqual([]);
 });

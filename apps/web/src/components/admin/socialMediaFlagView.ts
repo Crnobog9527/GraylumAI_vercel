@@ -5,6 +5,7 @@ const ERRORS: Record<string, string> = {
   SOCIAL_MEDIA_FLAG_UNAVAILABLE: '暂时无法读取或保存这个设置，请稍后再试。',
   SOCIAL_MEDIA_FLAG_MODULE_NOT_FOUND: '找不到这个功能模块，可能已被删除，请刷新页面。',
   SOCIAL_MEDIA_FLAG_CONFLICT: '这个设置刚被其他人改过。请点“重新读取”看最新设置，再决定是否保存。',
+  SOCIAL_MEDIA_FLAG_POSITIONING_SKILL: '这是用户做定位用的 Skill，不能勾选，否则没有定位的用户就没法开始做定位。',
 };
 
 /** Plain text for the stable codes; never the raw code or server text. */

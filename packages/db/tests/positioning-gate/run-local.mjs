@@ -10,8 +10,22 @@ const report = { build: db.build, migration: '0219', checks: [] };
 const v = async (sql, args = []) => (await c.query(sql, args)).rows[0]?.v;
 const profile = async () => { const a = randomUUID(); await c.query('INSERT INTO profiles(id,credits) VALUES($1,0)', [a]); return a; };
 const has = a => v('SELECT opc_has_confirmed_positioning($1) v', [a]);
-// Fixture only: a business row pointing at a stand-in version id. Foreign keys are skipped for this
-// insert; the real publish path that sets the column is artifact_transition (0117), unchanged here.
+// Fixture only: a published version and its project, stand-ins for the real publish path
+// (artifact_transition, 0117, unchanged here). Foreign keys are skipped for these inserts.
+const published = async (actor, { versionErased = false, projectErased = false } = {}) => {
+  const [project, version] = [randomUUID(), randomUUID()];
+  await c.query('SET session_replication_role=replica');
+  try {
+    await c.query('INSERT INTO artifact_projects(id,actor_id,module_id,skill_id) VALUES($1,$2,$3,$4)',
+      [project, actor, randomUUID(), randomUUID()]);
+    await c.query("INSERT INTO artifact_versions(id,project_id,round_id,version,report,report_hash,evidence_ids)"
+      + " VALUES($1,$2,$3,1,'{}','h','[]')", [version, project, randomUUID()]);
+  } finally { await c.query('SET session_replication_role=DEFAULT'); }
+  // Same column changes as selective content erasure (0201).
+  if (versionErased) await c.query('UPDATE artifact_versions SET report=NULL,report_hash=NULL,erased_at=now() WHERE id=$1', [version]);
+  if (projectErased) await c.query("UPDATE artifact_projects SET work_title=NULL,account='erased:'||id,erased_at=now() WHERE id=$1", [project]);
+  return version;
+};
 const business = async (actor, { version = null, erased = false } = {}) => {
   await c.query('SET session_replication_role=replica');
   try {
@@ -46,17 +60,28 @@ try {
   report.checks.push('clients cannot read or write the flag or call the check; service_role can');
 
   const [none, draftOnly, confirmed, erasedOnly, mixed] = [await profile(), await profile(), await profile(), await profile(), await profile()];
+  const [versionGone, projectGone, foreign] = [await profile(), await profile(), await profile()];
   await business(draftOnly);
-  await business(confirmed, { version: randomUUID() });
-  await business(erasedOnly, { version: randomUUID(), erased: true });
-  await business(mixed); await business(mixed, { version: randomUUID(), erased: true }); await business(mixed, { version: randomUUID() });
+  await business(confirmed, { version: await published(confirmed) });
+  await business(erasedOnly, { version: await published(erasedOnly), erased: true });
+  await business(mixed); await business(mixed, { version: await published(mixed), erased: true });
+  await business(mixed, { version: await published(mixed, { versionErased: true }) });
+  await business(mixed, { version: await published(mixed) });
+  await business(versionGone, { version: await published(versionGone, { versionErased: true }) });
+  await business(projectGone, { version: await published(projectGone, { projectErased: true }) });
+  // A pointer to someone else's live version never counts.
+  await business(foreign, { version: await published(confirmed) });
   assert.equal(await has(none), false, 'no business');
   assert.equal(await has(draftOnly), false, 'unpublished draft business');
   assert.equal(await has(erasedOnly), false, 'erased confirmed business');
+  assert.equal(await has(versionGone), false, 'published version deleted by selective content erasure');
+  assert.equal(await has(projectGone), false, 'positioning project deleted by selective content erasure');
+  assert.equal(await has(foreign), false, 'version owned by another actor');
   assert.equal(await has(confirmed), true, 'one confirmed business');
   assert.equal(await has(mixed), true, 'any one confirmed business among several');
   assert.equal(await has(null), false);
-  report.checks.push('deny: none, draft only, erased only; allow: any one confirmed, non-erased business');
+  report.checks.push('deny: none, draft only, erased business, erased version, erased project, foreign version;'
+    + ' allow: any one confirmed live business');
 
   assert.equal(await has(randomUUID()), false, 'another actor never sees these rows');
   report.checks.push('another actor never sees these rows');

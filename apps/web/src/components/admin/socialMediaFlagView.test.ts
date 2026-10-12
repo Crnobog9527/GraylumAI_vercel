@@ -5,6 +5,7 @@ import { isSocialMediaFlagConflict, socialMediaFlagErrorText, socialMediaFlagSav
 it('maps every stable code to plain text and unknown errors to the generic text', () => {
   expect(socialMediaFlagErrorText(new Error('SOCIAL_MEDIA_FLAG_CONFLICT'))).toContain('重新读取');
   expect(socialMediaFlagErrorText(new Error('SOCIAL_MEDIA_FLAG_MODULE_NOT_FOUND'))).toContain('刷新');
+  expect(socialMediaFlagErrorText(new Error('SOCIAL_MEDIA_FLAG_POSITIONING_SKILL'))).toContain('不能勾选');
   expect(socialMediaFlagErrorText(new Error('raw server text')))
     .toBe(socialMediaFlagErrorText(new Error('SOCIAL_MEDIA_FLAG_UNAVAILABLE')));
   expect(socialMediaFlagErrorText(new Error('toString'))).not.toContain('function');

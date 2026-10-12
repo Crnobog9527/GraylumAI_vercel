@@ -31,6 +31,7 @@ import { opcGenerate, ANSWER_CARD_RULE, resolveAnswerCard, } from "./answerCard"
 export { opcGenerate } from "./answerCard";
 const uuid = z.string().uuid();
 import {opcStart, opcTopicBind} from './start';
+import {isPositioningWorkflow} from './positioningWorkflow';
 export {opcStart, opcTopicBind} from './start';
 export function opcService(user: SupabaseClient, admin: SupabaseClient, real?:StagingPolicy, resumeWaitingOrganizer?:ResumeWaitingOrganizer) {
   async function rpc(name: string, args: Record<string, unknown>) {
@@ -287,14 +288,7 @@ export function opcService(user: SupabaseClient, admin: SupabaseClient, real?:St
       });
       if (raw.error) throw new DatabaseReadError("OPC_UNAVAILABLE", raw.error.code);
       return catalog.filter((c) =>
-        raw.data.some(
-          (r: any) =>
-            r.id === c.id &&
-            r.workflow.steps.every((s: any) => s.information?.length) &&
-            r.workflow.steps.some((s: any) =>
-              s.information.some((f: any) => f.profileKey),
-            ),
-        ),
+        raw.data.some((r: any) => r.id === c.id && isPositioningWorkflow(r.workflow)),
       );
     },
     list: () => rpc("opc_query", {}),
