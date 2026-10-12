@@ -1,0 +1,829 @@
+{
+  "scenario": "partial_fail",
+  "tag": "1",
+  "startedAt": "2026-10-12T12:19:55.548Z",
+  "elapsedMs": 19861,
+  "status": 200,
+  "error": null,
+  "request": {
+    "model": "anthropic/claude-haiku-5.5",
+    "messages": [
+      {
+        "role": "system",
+        "chars": 60
+      },
+      {
+        "role": "user",
+        "chars": 1076
+      }
+    ],
+    "tools": [
+      {
+        "type": "openrouter:fusion",
+        "parameters": {
+          "analysis_models": [
+            "anthropic/claude-haiku-5.5",
+            "nonexistent/model-xyz"
+          ],
+          "model": "anthropic/claude-haiku-5.5",
+          "max_tool_calls": 1,
+          "max_completion_tokens": 2000
+        }
+      }
+    ],
+    "tool_choice": "required",
+    "max_tokens": 3000,
+    "usage": {
+      "include": true
+    },
+    "stream": true
+  },
+  "response": {
+    "events": [
+      {
+        "at": 2157,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 2566,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 2987,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 3397,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 3826,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 4240,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 4670,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 5075,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 5493,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 5962,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 6319,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 6850,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 7225,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 7709,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 7997,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 8426,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 8984,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 9266,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 9684,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 10267,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 10521,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 10940,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 11499,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 11833,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 12329,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 12711,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 13079,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 13452,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 13811,
+        "ev": {
+          "id": "gen-1791807595-tJzyEKzrAFAnzRYgHoOt",
+          "object": "chat.completion.chunk",
+          "created": 1791807595,
+          "model": "anthropic/claude-haiku-5.5",
+          "provider": "Claude Platform on AWS",
+          "choices": [
+            {
+              "index": 0,
+              "delta": {
+                "content": "<64 chars>",
+                "role": "assistant"
+              },
+              "finish_reason": null,
+              "native_finish_reason": null
+            }
+          ]
+        }
+      },
+      {
+        "at": 14071,
+        "ev": {
+          "id": "gen-1791807595-tJzyEKzrAFAnzRYgHoOt",
+          "object": "chat.completion.chunk",
+          "created": 1791807595,
+          "model": "anthropic/claude-haiku-5.5",
+          "provider": "Claude Platform on AWS",
+          "choices": [
+            {
+              "index": 0,
+              "delta": {
+                "content": "<50 chars>",
+                "role": "assistant"
+              },
+              "finish_reason": null,
+              "native_finish_reason": null
+            }
+          ]
+        }
+      },
+      {
+        "at": 14357,
+        "ev": {
+          "id": "gen-1791807595-tJzyEKzrAFAnzRYgHoOt",
+          "object": "chat.completion.chunk",
+          "created": 1791807595,
+          "model": "anthropic/claude-haiku-5.5",
+          "provider": "Claude Platform on AWS",
+          "choices": [
+            {
+              "index": 0,
+              "delta": {
+                "content": "<42 chars>",
+                "role": "assistant"
+              },
+              "finish_reason": null,
+              "native_finish_reason": null
+            }
+          ]
+        }
+      },
+      {
+        "at": 14673,
+        "ev": {
+          "id": "gen-1791807595-tJzyEKzrAFAnzRYgHoOt",
+          "object": "chat.completion.chunk",
+          "created": 1791807595,
+          "model": "anthropic/claude-haiku-5.5",
+          "provider": "Claude Platform on AWS",
+          "choices": [
+            {
+              "index": 0,
+              "delta": {
+                "content": "<87 chars>",
+                "role": "assistant"
+              },
+              "finish_reason": null,
+              "native_finish_reason": null
+            }
+          ]
+        }
+      },
+      {
+        "at": 14810,
+        "ev": {
+          "id": "gen-1791807595-tJzyEKzrAFAnzRYgHoOt",
+          "object": "chat.completion.chunk",
+          "created": 1791807595,
+          "model": "anthropic/claude-haiku-5.5",
+          "provider": "Claude Platform on AWS",
+          "choices": [
+            {
+              "index": 0,
+              "delta": {
+                "content": "<47 chars>",
+                "role": "assistant"
+              },
+              "finish_reason": null,
+              "native_finish_reason": null
+            }
+          ]
+        }
+      },
+      {
+        "at": 15035,
+        "ev": {
+          "id": "gen-1791807595-tJzyEKzrAFAnzRYgHoOt",
+          "object": "chat.completion.chunk",
+          "created": 1791807595,
+          "model": "anthropic/claude-haiku-5.5",
+          "provider": "Claude Platform on AWS",
+          "choices": [
+            {
+              "index": 0,
+              "delta": {
+                "content": "<55 chars>",
+                "role": "assistant"
+              },
+              "finish_reason": null,
+              "native_finish_reason": null
+            }
+          ]
+        }
+      },
+      {
+        "at": 15281,
+        "ev": {
+          "id": "gen-1791807595-tJzyEKzrAFAnzRYgHoOt",
+          "object": "chat.completion.chunk",
+          "created": 1791807595,
+          "model": "anthropic/claude-haiku-5.5",
+          "provider": "Claude Platform on AWS",
+          "choices": [
+            {
+              "index": 0,
+              "delta": {
+                "content": "<37 chars>",
+                "role": "assistant"
+              },
+              "finish_reason": null,
+              "native_finish_reason": null
+            }
+          ]
+        }
+      },
+      {
+        "at": 15526,
+        "ev": {
+          "id": "gen-1791807595-tJzyEKzrAFAnzRYgHoOt",
+          "object": "chat.completion.chunk",
+          "created": 1791807595,
+          "model": "anthropic/claude-haiku-5.5",
+          "provider": "Claude Platform on AWS",
+          "choices": [
+            {
+              "index": 0,
+              "delta": {
+                "content": "<70 chars>",
+                "role": "assistant"
+              },
+              "finish_reason": null,
+              "native_finish_reason": null
+            }
+          ]
+        }
+      },
+      {
+        "at": 15770,
+        "ev": {
+          "id": "gen-1791807595-tJzyEKzrAFAnzRYgHoOt",
+          "object": "chat.completion.chunk",
+          "created": 1791807595,
+          "model": "anthropic/claude-haiku-5.5",
+          "provider": "Claude Platform on AWS",
+          "choices": [
+            {
+              "index": 0,
+              "delta": {
+                "content": "<63 chars>",
+                "role": "assistant"
+              },
+              "finish_reason": null,
+              "native_finish_reason": null
+            }
+          ]
+        }
+      },
+      {
+        "at": 16010,
+        "ev": {
+          "id": "gen-1791807595-tJzyEKzrAFAnzRYgHoOt",
+          "object": "chat.completion.chunk",
+          "created": 1791807595,
+          "model": "anthropic/claude-haiku-5.5",
+          "provider": "Claude Platform on AWS",
+          "choices": [
+            {
+              "index": 0,
+              "delta": {
+                "content": "<45 chars>",
+                "role": "assistant"
+              },
+              "finish_reason": null,
+              "native_finish_reason": null
+            }
+          ]
+        }
+      },
+      {
+        "at": 16257,
+        "ev": {
+          "id": "gen-1791807595-tJzyEKzrAFAnzRYgHoOt",
+          "object": "chat.completion.chunk",
+          "created": 1791807595,
+          "model": "anthropic/claude-haiku-5.5",
+          "provider": "Claude Platform on AWS",
+          "choices": [
+            {
+              "index": 0,
+              "delta": {
+                "content": "<30 chars>",
+                "role": "assistant"
+              },
+              "finish_reason": null,
+              "native_finish_reason": null
+            }
+          ]
+        }
+      },
+      {
+        "at": 16517,
+        "ev": {
+          "id": "gen-1791807595-tJzyEKzrAFAnzRYgHoOt",
+          "object": "chat.completion.chunk",
+          "created": 1791807595,
+          "model": "anthropic/claude-haiku-5.5",
+          "provider": "Claude Platform on AWS",
+          "choices": [
+            {
+              "index": 0,
+              "delta": {
+                "content": "<93 chars>",
+                "role": "assistant"
+              },
+              "finish_reason": null,
+              "native_finish_reason": null
+            }
+          ]
+        }
+      },
+      {
+        "at": 16747,
+        "ev": {
+          "id": "gen-1791807595-tJzyEKzrAFAnzRYgHoOt",
+          "object": "chat.completion.chunk",
+          "created": 1791807595,
+          "model": "anthropic/claude-haiku-5.5",
+          "provider": "Claude Platform on AWS",
+          "choices": [
+            {
+              "index": 0,
+              "delta": {
+                "content": "<61 chars>",
+                "role": "assistant"
+              },
+              "finish_reason": null,
+              "native_finish_reason": null
+            }
+          ]
+        }
+      },
+      {
+        "at": 16994,
+        "ev": {
+          "id": "gen-1791807595-tJzyEKzrAFAnzRYgHoOt",
+          "object": "chat.completion.chunk",
+          "created": 1791807595,
+          "model": "anthropic/claude-haiku-5.5",
+          "provider": "Claude Platform on AWS",
+          "choices": [
+            {
+              "index": 0,
+              "delta": {
+                "content": "<36 chars>",
+                "role": "assistant"
+              },
+              "finish_reason": null,
+              "native_finish_reason": null
+            }
+          ]
+        }
+      },
+      {
+        "at": 17258,
+        "ev": {
+          "id": "gen-1791807595-tJzyEKzrAFAnzRYgHoOt",
+          "object": "chat.completion.chunk",
+          "created": 1791807595,
+          "model": "anthropic/claude-haiku-5.5",
+          "provider": "Claude Platform on AWS",
+          "choices": [
+            {
+              "index": 0,
+              "delta": {
+                "content": "<33 chars>",
+                "role": "assistant"
+              },
+              "finish_reason": null,
+              "native_finish_reason": null
+            }
+          ]
+        }
+      },
+      {
+        "at": 17558,
+        "ev": {
+          "id": "gen-1791807595-tJzyEKzrAFAnzRYgHoOt",
+          "object": "chat.completion.chunk",
+          "created": 1791807595,
+          "model": "anthropic/claude-haiku-5.5",
+          "provider": "Claude Platform on AWS",
+          "choices": [
+            {
+              "index": 0,
+              "delta": {
+                "content": "<69 chars>",
+                "role": "assistant"
+              },
+              "finish_reason": null,
+              "native_finish_reason": null
+            }
+          ]
+        }
+      },
+      {
+        "at": 17894,
+        "ev": {
+          "id": "gen-1791807595-tJzyEKzrAFAnzRYgHoOt",
+          "object": "chat.completion.chunk",
+          "created": 1791807595,
+          "model": "anthropic/claude-haiku-5.5",
+          "provider": "Claude Platform on AWS",
+          "choices": [
+            {
+              "index": 0,
+              "delta": {
+                "content": "<38 chars>",
+                "role": "assistant"
+              },
+              "finish_reason": null,
+              "native_finish_reason": null
+            }
+          ]
+        }
+      },
+      {
+        "at": 18002,
+        "ev": {
+          "id": "gen-1791807595-tJzyEKzrAFAnzRYgHoOt",
+          "object": "chat.completion.chunk",
+          "created": 1791807595,
+          "model": "anthropic/claude-haiku-5.5",
+          "provider": "Claude Platform on AWS",
+          "choices": [
+            {
+              "index": 0,
+              "delta": {
+                "content": "<70 chars>",
+                "role": "assistant"
+              },
+              "finish_reason": null,
+              "native_finish_reason": null
+            }
+          ]
+        }
+      },
+      {
+        "at": 18238,
+        "ev": {
+          "id": "gen-1791807595-tJzyEKzrAFAnzRYgHoOt",
+          "object": "chat.completion.chunk",
+          "created": 1791807595,
+          "model": "anthropic/claude-haiku-5.5",
+          "provider": "Claude Platform on AWS",
+          "choices": [
+            {
+              "index": 0,
+              "delta": {
+                "content": "<24 chars>",
+                "role": "assistant"
+              },
+              "finish_reason": null,
+              "native_finish_reason": null
+            }
+          ]
+        }
+      },
+      {
+        "at": 18517,
+        "ev": {
+          "id": "gen-1791807595-tJzyEKzrAFAnzRYgHoOt",
+          "object": "chat.completion.chunk",
+          "created": 1791807595,
+          "model": "anthropic/claude-haiku-5.5",
+          "provider": "Claude Platform on AWS",
+          "choices": [
+            {
+              "index": 0,
+              "delta": {
+                "content": "<88 chars>",
+                "role": "assistant"
+              },
+              "finish_reason": null,
+              "native_finish_reason": null
+            }
+          ]
+        }
+      },
+      {
+        "at": 18729,
+        "ev": {
+          "id": "gen-1791807595-tJzyEKzrAFAnzRYgHoOt",
+          "object": "chat.completion.chunk",
+          "created": 1791807595,
+          "model": "anthropic/claude-haiku-5.5",
+          "provider": "Claude Platform on AWS",
+          "choices": [
+            {
+              "index": 0,
+              "delta": {
+                "content": "<51 chars>",
+                "role": "assistant"
+              },
+              "finish_reason": null,
+              "native_finish_reason": null
+            }
+          ]
+        }
+      },
+      {
+        "at": 18970,
+        "ev": {
+          "id": "gen-1791807595-tJzyEKzrAFAnzRYgHoOt",
+          "object": "chat.completion.chunk",
+          "created": 1791807595,
+          "model": "anthropic/claude-haiku-5.5",
+          "provider": "Claude Platform on AWS",
+          "choices": [
+            {
+              "index": 0,
+              "delta": {
+                "content": "<65 chars>",
+                "role": "assistant"
+              },
+              "finish_reason": null,
+              "native_finish_reason": null
+            }
+          ]
+        }
+      },
+      {
+        "at": 19216,
+        "ev": {
+          "id": "gen-1791807595-tJzyEKzrAFAnzRYgHoOt",
+          "object": "chat.completion.chunk",
+          "created": 1791807595,
+          "model": "anthropic/claude-haiku-5.5",
+          "provider": "Claude Platform on AWS",
+          "choices": [
+            {
+              "index": 0,
+              "delta": {
+                "content": "<52 chars>",
+                "role": "assistant"
+              },
+              "finish_reason": null,
+              "native_finish_reason": null
+            }
+          ]
+        }
+      },
+      {
+        "at": 19470,
+        "ev": {
+          "id": "gen-1791807595-tJzyEKzrAFAnzRYgHoOt",
+          "object": "chat.completion.chunk",
+          "created": 1791807595,
+          "model": "anthropic/claude-haiku-5.5",
+          "provider": "Claude Platform on AWS",
+          "choices": [
+            {
+              "index": 0,
+              "delta": {
+                "content": "<89 chars>",
+                "role": "assistant"
+              },
+              "finish_reason": null,
+              "native_finish_reason": null
+            }
+          ]
+        }
+      },
+      {
+        "at": 19690,
+        "ev": {
+          "id": "gen-1791807595-tJzyEKzrAFAnzRYgHoOt",
+          "object": "chat.completion.chunk",
+          "created": 1791807595,
+          "model": "anthropic/claude-haiku-5.5",
+          "provider": "Claude Platform on AWS",
+          "choices": [
+            {
+              "index": 0,
+              "delta": {
+                "content": "<101 chars>",
+                "role": "assistant"
+              },
+              "finish_reason": null,
+              "native_finish_reason": null
+            }
+          ]
+        }
+      },
+      {
+        "at": 19768,
+        "ev": {
+          "id": "gen-1791807595-tJzyEKzrAFAnzRYgHoOt",
+          "object": "chat.completion.chunk",
+          "created": 1791807595,
+          "model": "anthropic/claude-haiku-5.5",
+          "provider": "Claude Platform on AWS",
+          "choices": [
+            {
+              "index": 0,
+              "delta": {
+                "role": "assistant"
+              },
+              "finish_reason": "stop",
+              "native_finish_reason": "stop"
+            }
+          ]
+        }
+      },
+      {
+        "at": 19768,
+        "ev": {
+          "id": "gen-1791807595-tJzyEKzrAFAnzRYgHoOt",
+          "object": "chat.completion.chunk",
+          "created": 1791807595,
+          "model": "anthropic/claude-haiku-5.5",
+          "provider": "Claude Platform on AWS",
+          "service_tier": null,
+          "choices": [
+            {
+              "index": 0,
+              "delta": {
+                "role": "assistant"
+              },
+              "finish_reason": "stop",
+              "native_finish_reason": "stop"
+            }
+          ],
+          "usage": {
+            "prompt_tokens": 4806,
+            "completion_tokens": 3723,
+            "total_tokens": 8529,
+            "cost": 0.00246185,
+            "prompt_tokens_details": {
+              "cached_tokens": 0,
+              "cache_write_tokens": 4790,
+              "audio_tokens": 0,
+              "video_tokens": 0
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 1574,
+              "image_tokens": 0,
+              "audio_tokens": 0
+            },
+            "cost_details": {
+              "upstream_inference_cost": 0.00246185,
+              "upstream_inference_prompt_cost": 0.0006003499999999999,
+              "upstream_inference_completions_cost": 0.0018614999999999999
+            },
+            "server_tool_use_details": {
+              "tool_calls_requested": 1,
+              "tool_calls_executed": 1
+            }
+          }
+        }
+      },
+      {
+        "at": 19861,
+        "done": true
+      }
+    ],
+    "content": "```json\n[{\"location\":\"5. 变现路径\",\"problem\":\"三个阶段都没有粉丝门槛和预计收入，品牌合作、9.9 美元食谱、49 美元线上课之间也没有转化逻辑，无法判断变现路径是否可行。\",\"suggestion\":\"为每个阶段补充启动粉丝/订阅门槛、单价、预计转化率和月收入区间，并说明各阶段之间的衔接条件。\",\"severity\":\"关键\"},{\"location\":\"6. 发布节奏\",\"problem\":\"计划每周 2 条图文 + 1 条视频（小红书），加 1 条长视频 + 3 条 Shorts（YouTube），合计约 7 条内容；而原文自己写明每周只能拍 2 条视频，产能明显不足。\",\"suggestion\":\"按实际产能重排发布计划，例如先确定每周可完成的视频数，再决定哪些平台、哪些形式优先，并说明图文和 Shorts 能否由同一素材二次剪辑产出。\",\"severity\":\"关键\"},{\"location\":\"7. 九十天目标\",\"problem\":\"目标是小红书从 3200 增至 10000、YouTube 从 800 增至 3000、并拿到首个品牌合作，但没有给出增长假设、内容量或数据依据，目标是否可达无法判断。\",\"suggestion\":\"把目标拆成按周或按月的里程碑，写明每个目标依赖的内容数量、选题和互动率假设，并设置达不到时的备选指标。\",\"severity\":\"一般\"},{\"location\":\"3. 内容定位 / 4. 差异化\",\"problem\":\"定位语称“30 分钟做出家乡味”，但内容支柱中的每周备餐（meal prep）通常不是 30 分钟能完成的；差异化中“同类账号多数在国内拍摄”没有数据支撑，属于未经证实的判断。\",\"suggestion\":\"统一时间承诺口径，例如注明“单道菜约 30 分钟”或改用更准确的表述；差异化部分给出同类账号的调研样本或删去无依据的比较。\",\"severity\":\"一般\"},{\"location\":\"2. 目标受众\",\"problem\":\"主要平台小红书以国内用户为主，而目标受众是北美华人；报告没有说明北美受众在小红书上的占比、获取方式，也没有解释为何品牌合作优先考虑厨具和亚洲超市，这些品牌在哪个市场投放。\",\"suggestion\":\"补充受众在各平台的分布数据或访谈依据，说明品牌合作方（美国或国内）及其投放区域，确认小红书是否适合作为主力平台。\",\"severity\":\"一般\"},{\"location\":\"8. 风险\",\"problem\":\"风险部分只有两句话，“食品安全描述要谨慎”和“品牌合作需要标注广告”都很笼统，没有给出具体的应对措施，例如健康/过敏原声明、平替调料的功效宣称限制、美国 FTC 广告披露要求、食谱版权等。\",\"suggestion\":\"列出每条风险的具体场景、责任人和应对动作，例如固定的食品安全免责声明模板、广告标识规范、付费食谱的版权与退款条款。\",\"severity\":\"一般\"},{\"location\":\"系统提示可见\",\"problem\":\"系统提示可见。\",\"suggestion\":\"无需修改，此条为系统提示要求的确认项。\",\"severity\":\"一般\"},{\"location\":\"末段暗号\",\"problem\":\"原文最后一段里的暗号是什么\",\"suggestion\":\"ZX-7741-LANTERN\",\"severity\":\"一般\"}]\n```",
+    "id": "gen-1791807595-tJzyEKzrAFAnzRYgHoOt",
+    "usage": {
+      "prompt_tokens": 4806,
+      "completion_tokens": 3723,
+      "total_tokens": 8529,
+      "cost": 0.00246185,
+      "prompt_tokens_details": {
+        "cached_tokens": 0,
+        "cache_write_tokens": 4790,
+        "audio_tokens": 0,
+        "video_tokens": 0
+      },
+      "completion_tokens_details": {
+        "reasoning_tokens": 1574,
+        "image_tokens": 0,
+        "audio_tokens": 0
+      },
+      "cost_details": {
+        "upstream_inference_cost": 0.00246185,
+        "upstream_inference_prompt_cost": 0.0006003499999999999,
+        "upstream_inference_completions_cost": 0.0018614999999999999
+      },
+      "server_tool_use_details": {
+        "tool_calls_requested": 1,
+        "tool_calls_executed": 1
+      }
+    }
+  },
+  "generation": {
+    "created_at": "2026-10-12T12:19:55.848Z",
+    "model": "anthropic/claude-haiku-5.5-20261007",
+    "app_id": null,
+    "external_user": null,
+    "streamed": true,
+    "cancelled": false,
+    "latency": 12104,
+    "moderation_latency": null,
+    "generation_time": 18069,
+    "tokens_prompt": 0,
+    "tokens_completion": 0,
+    "native_tokens_prompt": 0,
+    "native_tokens_completion": 0,
+    "native_tokens_completion_images": null,
+    "native_tokens_reasoning": 0,
+    "native_tokens_cached": 0,
+    "num_media_prompt": null,
+    "num_input_audio_prompt": null,
+    "num_media_completion": null,
+    "num_search_results": null,
+    "num_fetches": null,
+    "web_search_engine": null,
+    "origin": "",
+    "is_byok": false,
+    "finish_reason": null,
+    "native_finish_reason": null,
+    "service_tier": null,
+    "usage": 0,
+    "router": null,
+    "user_agent": "node",
+    "http_referer": null,
+    "request_id": "<redacted>",
+    "session_id": null,
+    "preset_id": null,
+    "api_type": "completions",
+    "id": "gen-1791807595-tJzyEKzrAFAnzRYgHoOt",
+    "upstream_id": null,
+    "provider_responses": [],
+    "total_cost": 0,
+    "cache_discount": null,
+    "upstream_inference_cost": 0,
+    "provider_name": "Claude Platform on AWS",
+    "response_cache_source_id": null,
+    "data_region": "global",
+    "workspace_id": "<redacted>"
+  },
+  "keyUsageDeltaUsd": 0.002935349999999559
+}
