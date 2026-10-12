@@ -17,14 +17,17 @@ REVOKE SELECT (social_media_related), INSERT (social_media_related), UPDATE (soc
 -- A positioning counts once it is published (mentor flow, or the R15 "我已有定位" import after its
 -- step-by-step confirmation): artifact_transition then sets current_source_version_id (0117).
 -- Drafts in progress and erased businesses do not count. Selective content erasure (0201) erases the
--- published version and its project but keeps the business pointer, so both must still be live.
--- Any one confirmed business is enough. The existing UNIQUE(actor_id,id) index (0117) serves the lookup.
+-- published version and its project but keeps the business pointer, so both must still be live; deleting
+-- the positioning session instead revokes its draft. The source must also pass opc_source_allowed, the
+-- same check free conversation uses to read a confirmed positioning (0218), so "has a positioning" here
+-- always means one the conversation can actually read. Any one such business is enough. The existing
+-- UNIQUE(actor_id,id) index (0117) serves the lookup.
 CREATE OR REPLACE FUNCTION public.opc_has_confirmed_positioning(p_actor_id uuid) RETURNS boolean
 LANGUAGE sql STABLE SECURITY DEFINER SET search_path=public,pg_temp AS $$
  SELECT EXISTS(SELECT 1 FROM opc_businesses b
   JOIN artifact_versions v ON v.id=b.current_source_version_id AND v.erased_at IS NULL
   JOIN artifact_projects p ON p.id=v.project_id AND p.erased_at IS NULL AND p.actor_id=p_actor_id
-  WHERE b.actor_id=p_actor_id AND b.erased_at IS NULL);
+  WHERE b.actor_id=p_actor_id AND b.erased_at IS NULL AND opc_source_allowed(p_actor_id,v.id));
 $$;
 REVOKE ALL ON FUNCTION public.opc_has_confirmed_positioning(uuid) FROM PUBLIC,anon,authenticated,service_role;
 GRANT EXECUTE ON FUNCTION public.opc_has_confirmed_positioning(uuid) TO service_role;

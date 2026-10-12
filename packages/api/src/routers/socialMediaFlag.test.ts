@@ -2,7 +2,7 @@
 import { expect, it } from 'vitest';
 import { socialMediaFlagRouter } from './socialMediaFlag';
 const id = (n: number) => `10000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
-function fixture(role = 'admin', options: { missing?: boolean; readError?: boolean; positioningSkill?: boolean } = {}) {
+function fixture(role = 'admin', options: { missing?: boolean; readError?: boolean; positioningSkill?: boolean; racingSave?: boolean } = {}) {
   const module = { id: id(2), social_media_related: false, updated_at: '2026-10-12T00:00:00.000+00:00' };
   const writes: Record<string, unknown>[] = [];
   const db = { from(table: string) {
@@ -26,7 +26,10 @@ function fixture(role = 'admin', options: { missing?: boolean; readError?: boole
           return Promise.resolve(resolve({ data: null, error: { code: 'P0001', message: 'SOCIAL_MEDIA_FLAG_POSITIONING_SKILL' } }));
         if (expected !== module.social_media_related || version !== module.updated_at) return Promise.resolve(resolve({ data: [], error: null }));
         writes.push(patch); module.social_media_related = patch.social_media_related as boolean; module.updated_at = patch.updated_at as string;
-        return Promise.resolve(resolve({ data: [{ id: module.id }], error: null }));
+        const written = { ...module };
+        // Another tab saves right after this write; a later read would see its version, not ours.
+        if (options.racingSave) module.updated_at = '2026-10-12T09:00:00.000+00:00';
+        return Promise.resolve(resolve({ data: [written], error: null }));
       },
     }; return q;
   } };
@@ -94,4 +97,10 @@ it('refuses to mark the positioning Skill, but always allows turning the flag of
   expect(f.writes).toEqual([]);
   f.module.social_media_related = true;
   expect(await f.save(false, true)).toMatchObject({ moduleId: f.module.id, socialMediaRelated: false });
+});
+it('returns the version produced by its own conditional write, even if another save lands right after', async () => {
+  const f = fixture('admin', { racingSave: true });
+  const result = await f.save(true, false);
+  expect(result.moduleUpdatedAt).toBe(f.writes[0]!.updated_at);
+  expect(result.moduleUpdatedAt).not.toBe(f.module.updated_at);
 });

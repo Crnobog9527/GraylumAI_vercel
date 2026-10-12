@@ -25,10 +25,12 @@ export async function saveSocialMediaFlag(db: SupabaseClient, input: {
   const result = await db.from('modules')
     .update({ social_media_related: input.socialMediaRelated, updated_at: new Date().toISOString() })
     .eq('id', input.moduleId).eq('social_media_related', input.expectedSocialMediaRelated)
-    .eq('updated_at', input.expectedModuleUpdatedAt).select('id');
+    .eq('updated_at', input.expectedModuleUpdatedAt).select('id,social_media_related,updated_at');
   // The database refuses flagging the positioning Skill (0219 guard); turning the flag off is always allowed.
   if (result.error?.message === 'SOCIAL_MEDIA_FLAG_POSITIONING_SKILL') throw new Error('SOCIAL_MEDIA_FLAG_POSITIONING_SKILL');
   if (result.error) throw new Error('SOCIAL_MEDIA_FLAG_UNAVAILABLE');
   if (result.data?.length !== 1) throw new Error('SOCIAL_MEDIA_FLAG_CONFLICT');
-  return readSocialMediaFlag(db, input.moduleId);
+  // The version comes from this conditional write itself, never from a later read another save could move.
+  const row = result.data[0]!;
+  return { moduleId: row.id as string, socialMediaRelated: row.social_media_related === true, moduleUpdatedAt: row.updated_at as string };
 }

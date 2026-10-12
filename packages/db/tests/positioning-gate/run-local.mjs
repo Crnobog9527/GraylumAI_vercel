@@ -11,22 +11,10 @@ const report = { build: db.build, migration: '0219', checks: [] };
 const v = async (sql, args = []) => (await c.query(sql, args)).rows[0]?.v;
 const profile = async () => { const a = randomUUID(); await c.query('INSERT INTO profiles(id,credits) VALUES($1,0)', [a]); return a; };
 const has = a => v('SELECT opc_has_confirmed_positioning($1) v', [a]);
-// Fixture only: a published version and its project, stand-ins for the real publish path
-// (artifact_transition, 0117, unchanged here). Foreign keys are skipped for these inserts.
-const published = async (actor, { versionErased = false, projectErased = false } = {}) => {
-  const [project, version] = [randomUUID(), randomUUID()];
-  await c.query('SET session_replication_role=replica');
-  try {
-    await c.query('INSERT INTO artifact_projects(id,actor_id,module_id,skill_id) VALUES($1,$2,$3,$4)',
-      [project, actor, randomUUID(), randomUUID()]);
-    await c.query("INSERT INTO artifact_versions(id,project_id,round_id,version,report,report_hash,evidence_ids)"
-      + " VALUES($1,$2,$3,1,'{}','h','[]')", [version, project, randomUUID()]);
-  } finally { await c.query('SET session_replication_role=DEFAULT'); }
-  // Same column changes as selective content erasure (0201).
-  if (versionErased) await c.query('UPDATE artifact_versions SET report=NULL,report_hash=NULL,erased_at=now() WHERE id=$1', [version]);
-  if (projectErased) await c.query("UPDATE artifact_projects SET work_title=NULL,account='erased:'||id,erased_at=now() WHERE id=$1", [project]);
-  return version;
-};
+// Real published positionings come from the 0218 fixture (ws_test.positioning): owned project, published
+// round, version, revocable draft and business, so they pass opc_source_allowed exactly as in production.
+const positioning = async (actor, published = true) =>
+  v('SELECT ws_test.positioning($1,$2,$3,$4) v', [actor, '测试业务', 'CANARY', published]);
 const business = async (actor, { version = null, erased = false } = {}) => {
   await c.query('SET session_replication_role=replica');
   try {
@@ -82,29 +70,43 @@ try {
   assert.equal(await v("SELECT has_column_privilege('service_role','public.modules','social_media_related','UPDATE') v"), true);
   report.checks.push('clients cannot read or write the flag or call the check; service_role can');
 
-  const [none, draftOnly, confirmed, erasedOnly, mixed] = [await profile(), await profile(), await profile(), await profile(), await profile()];
-  const [versionGone, projectGone, foreign] = [await profile(), await profile(), await profile()];
-  await business(draftOnly);
-  await business(confirmed, { version: await published(confirmed) });
-  await business(erasedOnly, { version: await published(erasedOnly), erased: true });
-  await business(mixed); await business(mixed, { version: await published(mixed), erased: true });
-  await business(mixed, { version: await published(mixed, { versionErased: true }) });
-  await business(mixed, { version: await published(mixed) });
-  await business(versionGone, { version: await published(versionGone, { versionErased: true }) });
-  await business(projectGone, { version: await published(projectGone, { projectErased: true }) });
-  // A pointer to someone else's live version never counts.
-  await business(foreign, { version: await published(confirmed) });
+  await c.query(read('packages/db/tests/workspace-positioning/fixture.sql'));
+  const actor = () => v('SELECT ws_test.actor() v');
+  const [none, draftOnly, confirmed, revoked, versionGone, projectGone, erasedBusiness, mixed, foreign] =
+    [await actor(), await actor(), await actor(), await actor(), await actor(), await actor(), await actor(), await actor(), await actor()];
+  await positioning(draftOnly, false);
+  const live = await positioning(confirmed);
+  const r = await positioning(revoked);
+  await c.query('UPDATE bill2_drafts SET revoked=true WHERE id=$1', [r.draft]);
+  // Same column changes as selective content erasure (0201) and business erasure.
+  const vg = await positioning(versionGone);
+  await c.query('UPDATE artifact_versions SET report=NULL,report_hash=NULL,erased_at=now() WHERE id=$1', [vg.version]);
+  const pg_ = await positioning(projectGone);
+  await c.query("UPDATE artifact_projects SET work_title=NULL,account='erased:'||id,erased_at=now() WHERE id=$1", [pg_.project]);
+  const eb = await positioning(erasedBusiness);
+  await c.query('UPDATE opc_businesses SET erased_at=now(),name=NULL WHERE id=$1', [eb.business]);
+  const m1 = await positioning(mixed); await positioning(mixed);
+  await c.query('UPDATE bill2_drafts SET revoked=true WHERE id=$1', [m1.draft]);
+  // A business pointing at someone else's live version never counts.
+  await business(foreign, { version: live.version });
   assert.equal(await has(none), false, 'no business');
   assert.equal(await has(draftOnly), false, 'unpublished draft business');
-  assert.equal(await has(erasedOnly), false, 'erased confirmed business');
+  assert.equal(await has(revoked), false, 'positioning session deleted: draft revoked');
   assert.equal(await has(versionGone), false, 'published version deleted by selective content erasure');
   assert.equal(await has(projectGone), false, 'positioning project deleted by selective content erasure');
+  assert.equal(await has(erasedBusiness), false, 'erased business');
   assert.equal(await has(foreign), false, 'version owned by another actor');
-  assert.equal(await has(confirmed), true, 'one confirmed business');
-  assert.equal(await has(mixed), true, 'any one confirmed business among several');
+  assert.equal(await has(confirmed), true, 'one readable confirmed positioning');
+  assert.equal(await has(mixed), true, 'any one readable positioning among several');
   assert.equal(await has(null), false);
-  report.checks.push('deny: none, draft only, erased business, erased version, erased project, foreign version;'
-    + ' allow: any one confirmed live business');
+  // Same verdict as free conversation's own read (0218) for every case above.
+  for (const [who, expected] of [[confirmed, true], [revoked, false], [versionGone, false], [projectGone, false]]) {
+    const listed = (await c.query("SELECT count(*)::int n FROM opc_businesses b WHERE b.actor_id=$1 AND b.erased_at IS NULL"
+      + ' AND b.current_source_version_id IS NOT NULL AND opc_source_allowed($1,b.current_source_version_id)', [who])).rows[0].n > 0;
+    assert.equal(listed, expected);
+  }
+  report.checks.push('deny: none, draft only, revoked draft, erased version, erased project, erased business, foreign version;'
+    + ' allow: any one positioning that free conversation can read');
 
   assert.equal(await has(randomUUID()), false, 'another actor never sees these rows');
   report.checks.push('another actor never sees these rows');
@@ -120,8 +122,8 @@ try {
   await flag(plain, true);
   assert.equal(await v('SELECT social_media_related v FROM modules WHERE id=$1', [plain.moduleId]), true);
   report.checks.push('allow: an ordinary Skill can be flagged');
-  const positioning = await skillModule(); await workflow(positioning, POSITIONING);
-  await code(flag(positioning, true), 'SOCIAL_MEDIA_FLAG_POSITIONING_SKILL');
+  const positioningSkill = await skillModule(); await workflow(positioningSkill, POSITIONING);
+  await code(flag(positioningSkill, true), 'SOCIAL_MEDIA_FLAG_POSITIONING_SKILL');
   // A new module has no workflow yet, so it may be created flagged.
   await c.query("INSERT INTO modules(id,title,active,social_media_related) VALUES($1,'x',false,true)", [randomUUID()]);
   await code(workflow(plain, POSITIONING), 'SOCIAL_MEDIA_FLAG_POSITIONING_SKILL');
