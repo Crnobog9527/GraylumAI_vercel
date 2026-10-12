@@ -99,11 +99,19 @@
 
 - 选中的 Skill 在 `workflow.yaml` 里声明 `contentSource: script | storyboard`（`workflowManifest.ts` 扩一个可选字段，旧包没有即不需要来源）。
   没声明的 Skill 和普通对话**不读、不注入任何正文**。
-- 执行器在匹配之后、正文调用之前：用一个只读 SECURITY DEFINER 函数取本人本选题**通过 `opc_content_allowed` 的**最新定稿口播稿或最新分镜
+- 执行器在匹配之后、正文调用之前，经下面的 `checkpoint_source` 取本人本选题**通过 `opc_content_allowed` 的**最新定稿口播稿或最新分镜
   （剪辑建议另核"分镜的 `source_content_id` 等于当前定稿口播稿"，不等就固定提示结束、不派发、不收费，规则同 #621 第 4.3 节）。
-- 注入前先写**一次性**的执行检查点：`runtime_execution` 新增动作 `checkpoint_source`，写入 `runtime_executions` 新增的可空列
-  `injected_source jsonb`，形如 `{"contentId": <uuid>, "kind": "script"}`。写过就不能改（和 `checkpoint_match` 一样，冲突报错）。
-  键名用 `contentId` 是有意的：D7 的 `content_erasure_references` 认这个键。
+- **读取和记录必须是同一个数据库事务**（第一轮审查 P1）：不能先读正文、再另发一次 RPC 写检查点——两次之间用户删掉这份稿件时，
+  D7 的删除闭包算出来时这次执行还没引用它，之后写进去的引用就漏删了，已经读到的正文还会发给模型并留在执行里。做法：
+  - `runtime_execution` 新增动作 `checkpoint_source`，**一次调用里**完成：按 D7 的加锁顺序先锁会话、再锁本次执行、再以 `FOR SHARE`
+    锁住选中的内容版本（以及剪辑建议需要核对的口播稿）；在锁内跑 `opc_content_allowed` 和"分镜来源等于当前口播稿"检查；
+    写入 `runtime_executions` 新增的可空列 `injected_source jsonb`（形如 `{"contentId": <uuid>, "kind": "script"}`）；
+    然后**在同一事务里返回正文**。按钮路径在准入时的计费前预检（2.4 下一条、3.3 X2 的"只读的当前来源函数"）只判断能不能做，不返回正文；
+  - 写过就不能改（和 `checkpoint_match` 一样，冲突报错）。键名用 `contentId` 是有意的：D7 的 `content_erasure_references` 认这个键；
+  - 这样只有两种顺序：删除先拿到锁 → 检查点读不到可用内容，以固定提示结束、不派发；检查点先提交 → 删除闭包能看到 `injected_source`，
+    把这次执行一起抹掉，之后派发前的现有检查（`content_erasure_runtime_check`）拒绝派发和保存结果。正文已在网络上发出后才删除的，
+    和现在任何在途调用一样：结果不保存、执行被抹掉；
+  - 必测：在检查点事务和删除事务之间人为制造两种先后顺序（用两个连接和锁等待），分别断言"不派发"和"执行被抹掉、结果不保存、历史里没有正文"。
 - 按钮直接准入的路径（第 3 节）在准入时就知道 Skill，**在任何计费之前**做同样的读取和检查；放不下（超过该用途 `inputBytes`）同样在计费前拒绝。
 - 容量：放不下只拒绝这次衍生操作（#621 第 4.3 节原规则）。
 
@@ -125,7 +133,7 @@
 - 存一份接近 2 万字的定稿口播稿后，同一窗口里的普通提问：执行载荷的 `scopeMaterial` 里没有正文、模型输入里没有正文，正常完成（#621 第 565 行的必测）。
 - 存稿之后，常驻材料仍有标题、类型、简报（不再被挤掉）；改条目信息后材料更新，正文仍不进入。
 - 旧会话（迁移前最新材料带正文）迁移后最新一版不带正文；迁移连跑两次只追加一次。
-- 选中声明了 `contentSource` 的 Skill 时才注入，并写 `injected_source`；普通对话、没声明的 Skill 不写。
+- 选中声明了 `contentSource` 的 Skill 时才注入，并写 `injected_source`；普通对话、没声明的 Skill 不写；读取正文和写 `injected_source` 在同一事务（2.4 并发必测）。
 - 删除被注入的稿件 → 注入它的执行被抹掉、之后的历史不再含那份正文；删除别的稿件不影响；只删对话时行为不变。
 - 0201 的 D7 守卫在所有被改写的函数里仍在（用 `pg_get_functiondef` 断言标记存在）。
 
