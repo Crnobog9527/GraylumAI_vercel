@@ -175,7 +175,7 @@ sitemap：`app/sitemap.ts` 生成，分语言、含 `lastModified`、只含可�
 AI 搜索引用的来源主要是：① 谷歌/必应里本来就排得上的页面；② 高权威第三方页面里对品牌的描述。所以：
 
 1. 先做好搜索排名，再谈 GEO。
-2. 全站统一一句话定义（出现在首页、About、`Organization.description`、所有第三方目录简介）。中文版由落地页文案任务定稿后固定；英文版（`/en` 上线时用）：`Graylum is an AI social media coach that helps beginners find their positioning, decide what to post each week, and write the content.`
+2. 全站统一一句话定义（出现在首页、About、`Organization.description`、所有第三方目录简介）。中文版由落地页文案任务定稿后固定；英文版（`/en` 上线时用）：`Graylum is an AI social media strategist that helps beginners find their positioning, decide what to post each week, and write the content.`
 3. 每页首屏结论段写成"问题 → 直接答案 → 可核对的要点"，用数字、步骤、清单。
 4. 引用可靠来源（平台官方帮助页、公开报告）并标出处。
 5. About 页写清公司（Grayscale Luminary LLC，怀俄明州）、创始人、联系方式；法律页齐全（条款文字由 Owner 用第三方软件生成）。
