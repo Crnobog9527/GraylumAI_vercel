@@ -21,7 +21,7 @@
 | L7 | Vercel 构建日志 | 每次部署都有 | 构建日志随部署长期保存（Vercel 社区和文档的说法） | **Owner 2026-10-12 已定：不含用户数据，不在承诺范围**（构建时不读用户数据） | — |
 | L8 | Vercel Analytics | 是否启用未核实 | 默认聚合，session hash 24 小时 [S11] | 自定义事件里不能放用户正文 | 前端改动时注意 |
 | L8b | Vercel Speed Insights | `apps/web/src/app/layout.tsx` 在 Vercel 的生产模式部署里挂了 `@vercel/speed-insights`，会上报真实用户的性能数据 | 保留期未查到 | 未核实：项目里是否已启用、保留多久、数据里有没有页面完整网址 | 上线前核对 |
-| L9 | Sentry 错误事件、性能追踪、会话回放 | staging 项目设了 `NEXT_PUBLIC_SENTRY_DSN`、`SENTRY_ORG/PROJECT`，所以**staging 已经在上报**。代码：服务端和 edge 的 `beforeSend` 只在开发环境丢弃，**不做脱敏**；浏览器回放 `maskAllText`、`blockAllMedia` 已开；没有设置 `sendDefaultPii`（SDK 默认不带 IP 和 cookie）。还有一个 `SENTRY_OTLP_TRACES_URL` 变量，代码里没找到引用 | 错误事件：Developer 30 天，Team 和 Business 90 天，按上报时的套餐计算 [Sentry 文档]；部分备份最多 90 天 [S11] | **缺口**：Team 及以上的 90 天超过 E7；Developer 是 30 天。错误信息里可能带用户输入（比如异常信息里拼了正文），目前没有统一脱敏。`SENTRY_OTLP_TRACES_URL` 是不是被平台集成读取、发出去的追踪里有没有提示词，未核实 | 保留期：**Owner 2026-10-12 已定：第三方例外，写入隐私条款**（原话："保留期选 A：第三方例外写进隐私条款；同意上线前补日志清理、限流统计清理、库外删除清单和 Sentry 脱敏。"）。脱敏 `beforeSend` 上线前补（Owner 已同意）；OTLP 变量由总控核实用途 |
+| L9 | Sentry 错误事件、性能追踪、会话回放 | staging 项目设了 `NEXT_PUBLIC_SENTRY_DSN`、`SENTRY_ORG/PROJECT`，所以**staging 已经在上报**。代码：服务端和 edge 的 `beforeSend` 只在开发环境丢弃，**不做脱敏**；浏览器回放 `maskAllText`、`blockAllMedia` 已开；没有设置 `sendDefaultPii`（SDK 默认不带 IP 和 cookie）。还有一个 `SENTRY_OTLP_TRACES_URL` 变量，代码里没找到引用 | 错误事件：Developer 30 天，Team 和 Business 90 天，按上报时的套餐计算 [Sentry 文档]；部分备份最多 90 天 [S11] | **缺口**：Team 及以上的 90 天超过 E7；Developer 是 30 天。错误信息里可能带用户输入（比如异常信息里拼了正文），目前没有统一脱敏。`SENTRY_OTLP_TRACES_URL` 是不是被平台集成读取、发出去的追踪里有没有提示词，未核实 | 保留期：**Owner 2026-10-12 已定：第三方例外，写入隐私条款**（原话："保留期选 A：第三方例外写进隐私条款；同意上线前补日志清理、限流统计清理、库外删除清单和 Sentry 脱敏。"）。脱敏已由 #865 补上，并由后续 PR 改为白名单（事件只保留列出的字段，网址按路由模板输出，其余字段和自由文本一律丢掉）；OTLP 变量由总控核实用途 |
 | L10 | Upstash Redis（限流） | staging 变量里有 `UPSTASH_REDIS_REST_URL/TOKEN` 和 `REDIS_URL`。限流键里带用户编号，比如 `account-erasure:<用户编号>`。`apps/web/src/lib/rateLimit.ts` 和 `packages/api/src/services/redisRateLimiter.ts` 的限流器都开了 `analytics: true` | 限流计数键按窗口过期；但 `@upstash/ratelimit` 2.0.8 的 analytics 会把传入的标识（含用户编号）写进统计桶，库里写死保留 `90d`。Upstash 控制台审计日志记录的是账号操作，免费库 7 天、按量 30 天、Pro 1 年 | **缺口**：analytics 统计里的用户编号保留 90 天，超过 E7，注销也不会删它。需要关掉 analytics，或者改成不带用户编号的标识，或者在 30 天内清掉 | 新开代码任务（见缺口汇总第 6 条） |
 | L11 | 邮件（Resend，作为 Supabase Auth 的 SMTP，Tokyo 区） | 用于验证码和找回密码邮件 | Resend 定价页：各套餐"数据保留 30 天"（2026-10-12 读取） | 在 30 天以内。已经发到用户邮箱的邮件我们删不掉 | — |
 | L12 | 手动导出、本机下载的备份 | 规则禁止 AI 下载正式备份 | — | 有人手动导出过的话必须登记并在 30 天内删除；目前没有登记表 | 总控在运行手册里加一行"导出要登记" |
@@ -71,7 +71,7 @@
 
 1. **日志表没有定期清理**（L4，Owner 已同意上线前补）：`diagnostic_results` 已存 28 天，`user_activity_logs`、`scheduled_job_runs` 也没有到期清理。建议新开一个小任务，复用每日 cron 加日志到期清理。
    注意 cron 每天只跑一次：如果按"超过 30 天就删"写，刚跑完那一刻写入的行最多会留将近 31 天。删除线要设在 29 天（留出一天的运行间隔），或者提高运行频率。
-2. **Sentry**（L9）：服务端上报前不做脱敏（Owner 已同意上线前补）；90 天保留期 Owner 已定为第三方例外，写入隐私条款。`SENTRY_OTLP_TRACES_URL` 的用途待核实。
+2. **Sentry**（L9）：上报前脱敏已由 #865 补上，后续 PR 改为白名单；90 天保留期 Owner 已定为第三方例外，写入隐私条款。`SENTRY_OTLP_TRACES_URL` 的用途待核实。
 3. **模型线路政策表**还没有（清单二）；旧对话链路的 Google 直连不在 OpenRouter 范围里，LEGACY-CLOSE 删除这条链路之前不得在后台启用。
 4. **正式环境**的 Supabase 套餐、备份、PITR、日志窗口都未核实（L1–L3），等正式库建好后只读核对。
 5. **从备份恢复后重放删除**（库外删除清单 Owner 已同意上线前补）：缺一份存在数据库以外的最小删除清单（否则备份之后才注销的账号、才删除的对话和文档会被恢复出来；单条删除要记删除类型和目标编号），整个流程也没有演练（T15/T16）。

@@ -1,140 +1,179 @@
 import type { Breadcrumb, ErrorEvent, Event } from '@sentry/nextjs';
 
 /**
- * DATA-ERASURE E7: Sentry keeps events for up to 90 days (Owner 2026-10-12: third-party exception),
- * so nothing that identifies a person or carries their content may be sent. Runs in browser, Node
- * and Edge; no Node-only APIs.
+ * DATA-ERASURE E7 / L9: Sentry keeps events up to 90 days (Owner 2026-10-12: third-party exception), so
+ * an event is rebuilt from an allowlist instead of patching known leaks: only the fields listed here
+ * leave the process (error codes, templated routes, code locations, model names and counts,
+ * environment and versions). Everything else, including all free text and unknown keys, is dropped.
+ * Runs in browser, Node and Edge; no Node-only APIs.
  */
-const MAX_TEXT = 300;
-const MAX_DEPTH = 6;
-const REDACTIONS: Array<[RegExp, string]> = [
-  [/\bBearer\s+[A-Za-z0-9._~+/=-]+/gi, 'Bearer [token]'],
-  [/\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/g, '[jwt]'],
-  [/\b(?:sk|pk|rk|whsec|sb_secret|sb_publishable)[-_][A-Za-z0-9_-]{8,}/g, '[key]'],
-  [/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g, '[email]'],
-  [/\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi, '[id]'],
-  [/\b(?:\d{1,3}\.){3}\d{1,3}\b/g, '[ip]'],
-  [/\b[0-9a-f]{1,4}(?::[0-9a-f]{0,4}){2,7}\b/gi, '[ip]'],
-  [/\+?\d[\d\s-]{9,}\d/g, '[number]'],
-];
-// Client addresses (http.client_ip, ip_address, x-forwarded-for, ...) are personal data.
-const IP_KEY = /(^|[._-])ip($|[._-])|client_ip|ip_address|forwarded|remote_addr/i;
-// Provider/record identifiers (gen_ai.response.id, conversation ids, customer_id, ...) can locate a person's records.
-const ID_KEY = /(^|[._-])ids?$|_id$|[a-z]Id$/;
-// From AI spans keep only model names, operation and token counts; never messages, ids or tool data.
-const GEN_AI_KEEP = /^gen_ai\.(system|operation\.name|request\.model|response\.model|usage\.[a-z_]+)$/;
-const SECRET_KEY = /pass|secret|token|auth|cookie|session|key|email|phone|prompt|content|body|message|text|input|query/i;
-
-/** For SDK-generated metadata (urls, tags, contexts): known identifier formats are masked. */
-export function redactText(value: string): string {
-  let text = value;
-  for (const [pattern, replacement] of REDACTIONS) text = text.replace(pattern, replacement);
-  return text.length > MAX_TEXT ? `${text.slice(0, MAX_TEXT)}…` : text;
-}
+type AnyRecord = Record<string, unknown>;
 
 /** Domains whose stable error codes the application emits (e.g. `ACCOUNT_ERASURE_FAILED`). */
 const CODE_PREFIXES = ['ACCOUNT', 'AGENT', 'ARTIFACT', 'AUTH', 'BILL2', 'BILLING', 'CAPTURE', 'CONTENT', 'CREDIT',
   'DATA_USE', 'ERASURE', 'LIBRARY', 'MODEL', 'OPC', 'OPENING_GRANT', 'PAY', 'PAYG', 'RATE_LIMIT', 'REPORT', 'RESEARCH',
   'RUNTIME', 'SKILL', 'STRIPE', 'WAFFO'];
 const ERROR_CODE = new RegExp(`^(?:${CODE_PREFIXES.join('|')})_[A-Z0-9_]{2,60}(?=$|[:\\s])`);
-/**
- * For free text (messages, exception values, breadcrumbs, extra): pattern masking cannot catch a
- * name or a sentence, so only a leading error code from a known application domain is kept.
- */
+
+/** Free text keeps only a leading error code from a known application domain. */
 export function scrubText(value: string): string {
   return value.match(ERROR_CODE)?.[0] ?? '[text]';
 }
 
-// Opaque identifiers in paths: provider ids (sub_..., cus_..., pi_..., cs_...), draft ids, tokens.
-// Any segment of 8+ characters that contains a digit is treated as an identifier.
-const PATH_ID = /(?<=\/)(?=[A-Za-z0-9_-]{8,}(?=[/\s]|$))[A-Za-z_-]*\d[A-Za-z0-9_-]*/g;
+/**
+ * Static segments of our own routes (apps/web/src/app) plus Next.js bundle folders. A test keeps the
+ * route list complete; any other segment of one of our URLs is a dynamic value and becomes `:param`.
+ */
+export const APP_SEGMENTS = new Set(['about', 'acceptable-use', 'access-denied', 'account-erasure', 'admin',
+  'agent-first-preview', 'ai', 'announcements', 'api', 'auth', 'auto-close', 'billing-reconcile', 'callback', 'chat',
+  'contact', 'costs', 'cron', 'diagnostics', 'faq', 'finance', 'forgot-password', 'ig-jingying', 'invitations', 'landing',
+  'library', 'library-cleanup', 'login', 'maintenance', 'marketplace', 'models', 'orders', 'packages', 'performance',
+  'plan', 'positioning', 'pricing', 'privacy', 'profile', 'prompts', 'refunds', 'register', 'release-subscription-credits',
+  'requests', 'reset-password', 'runtime', 'runtime-recovery', 'search', 'settings', 'shequn-jingying', 'shequn-xingxiao',
+  'skills', 'stream', 'stripe', 'terms', 'tickets', 'topics', 'transactions', 'trpc', 'tutorials', 'upload', 'users',
+  'verify-email', 'waffo', 'webhook', 'workbench', 'zh-tw', 'zimeiti-jingying', 'zimeiti-kecheng',
+  '_next', 'static', 'chunks', 'app', 'pages', 'css', 'media']);
+const TRPC_PROCEDURES = /^[a-zA-Z][a-zA-Z0-9]*(?:\.[a-zA-Z][a-zA-Z0-9]*)+(?:,[a-zA-Z][a-zA-Z0-9]*(?:\.[a-zA-Z][a-zA-Z0-9]*)+)*$/;
+const OWN_HOST = /(^|\.)graylum\.com$|\.vercel\.app$|^localhost$|^127\.0\.0\.1$/;
+const BUNDLE_FILE = /^[A-Za-z0-9_.-]+\.(?:js|mjs|cjs|css|map)$/;
 
-/** Keeps scheme, host and path (identifier segments redacted); drops query string and fragment. */
-export function scrubUrl(value: string): string {
-  const cut = value.search(/[?#]/);
-  return redactText((cut === -1 ? value : value.slice(0, cut)).replace(PATH_ID, '[id]'));
+function templatePath(path: string): string {
+  const segments = path.split('/');
+  return segments.map((segment, index) => {
+    if (segment === '' || APP_SEGMENTS.has(segment)) return segment;
+    if (segments[index - 1] === 'trpc' && TRPC_PROCEDURES.test(segment)) return segment;
+    if (index === segments.length - 1 && segments.includes('_next') && BUNDLE_FILE.test(segment)) return segment;
+    return ':param';
+  }).join('/');
 }
 
-function scrubValue(value: unknown, depth: number, text: (value: string) => string): unknown {
-  if (typeof value === 'string') return text(value);
-  if (value === null || typeof value !== 'object') return value;
-  if (depth >= MAX_DEPTH) return '[truncated]';
-  if (Array.isArray(value)) return value.slice(0, 20).map((item) => scrubValue(item, depth + 1, text));
-  const out: Record<string, unknown> = {};
-  for (const [key, item] of Object.entries(value)) {
-    if (key.startsWith('gen_ai.')) {
-      out[key] = GEN_AI_KEEP.test(key) && (typeof item === 'number' || typeof item === 'string') ? item : '[removed]';
-    } else if (IP_KEY.test(key) || ID_KEY.test(key) || (SECRET_KEY.test(key) && item !== null && typeof item !== 'boolean')) {
-      // Sensitive keys lose numbers too (a phone number stored as a number is still a phone number).
-      out[key] = '[removed]';
-    } else if (/url|href|path|uri|target/i.test(key) && typeof item === 'string') {
-      out[key] = scrubUrl(item);
-    } else {
-      out[key] = scrubValue(item, depth + 1, text);
-    }
+/**
+ * `[METHOD ]url-or-path` → method plus a route template. Our own URLs keep their templated path;
+ * third-party URLs keep scheme and host only. Query strings and fragments never pass.
+ */
+export function scrubUrl(value: string): string {
+  const match = value.match(/^([A-Z]{3,7} )?([\s\S]*)$/);
+  const method = match?.[1] ?? '';
+  const target = (match?.[2] ?? '').replace(/[?#][\s\S]*$/, '');
+  const absolute = target.match(/^([a-z][a-z0-9+.-]*:\/\/)([^/\s:]+)(:\d+)?(\/.*)?$/i);
+  if (absolute) {
+    const [, scheme, host = '', , path = ''] = absolute;
+    if (!OWN_HOST.test(host.toLowerCase())) return `${method}${scheme}${host}`;
+    return `${method}${scheme}${host}${templatePath(path)}`;
+  }
+  if (target.startsWith('/')) return `${method}${templatePath(target)}`;
+  return method ? method.trim() : '[text]';
+}
+
+/** Code locations keep their file and line; bundle URLs lose queries. */
+function scrubFrameFile(value: string): string {
+  return value.replace(/[?#][\s\S]*$/, '');
+}
+
+function pick(source: unknown, keys: readonly string[]): AnyRecord | undefined {
+  if (!source || typeof source !== 'object') return undefined;
+  const out: AnyRecord = {};
+  for (const key of keys) {
+    const value = (source as AnyRecord)[key];
+    if (value !== undefined && (value === null || ['string', 'number', 'boolean'].includes(typeof value))) out[key] = value;
   }
   return out;
 }
 
-/** Free text: extra and breadcrumb data. */
-function scrubRecord<T>(value: T): T {
-  return scrubValue(value, 0, scrubText) as T;
+const CONTEXT_FIELDS: Record<string, readonly string[]> = {
+  trace: ['trace_id', 'span_id', 'parent_span_id', 'op', 'status', 'origin'],
+  runtime: ['name', 'version'],
+  os: ['name', 'version'],
+  browser: ['name', 'version'],
+  device: ['family', 'model', 'arch'],
+};
+const TAG_FIELDS = ['runtime', 'handled', 'mechanism', 'level', 'environment', 'release'] as const;
+const GEN_AI_FIELD = /^gen_ai\.(system|operation\.name|request\.model|response\.model|usage\.[a-z_]+)$/;
+const SPAN_FIELDS = new Set(['http.method', 'http.request.method', 'http.status_code', 'http.response.status_code',
+  'db.system', 'sentry.op', 'sentry.origin', 'sentry.source', 'sentry.sample_rate']);
+
+function scrubContexts(contexts: unknown): AnyRecord | undefined {
+  if (!contexts || typeof contexts !== 'object') return undefined;
+  const out: AnyRecord = {};
+  for (const [name, fields] of Object.entries(CONTEXT_FIELDS)) {
+    const picked = pick((contexts as AnyRecord)[name], fields);
+    if (picked && Object.keys(picked).length) out[name] = picked;
+  }
+  return out;
 }
 
-/** SDK metadata: contexts, tags and span data. */
-function redactRecord<T>(value: T): T {
-  return scrubValue(value, 0, redactText) as T;
+function scrubSpanData(data: unknown): AnyRecord {
+  const out: AnyRecord = {};
+  if (!data || typeof data !== 'object') return out;
+  for (const [key, value] of Object.entries(data as AnyRecord)) {
+    if (!['string', 'number', 'boolean'].includes(typeof value)) continue;
+    if (SPAN_FIELDS.has(key) || GEN_AI_FIELD.test(key)) out[key] = value;
+  }
+  return out;
 }
 
 export function scrubBreadcrumb(breadcrumb: Breadcrumb): Breadcrumb | null {
   // Console output may echo user content; request/response bodies are never wanted.
   if (breadcrumb.category === 'console') return null;
-  const out: Breadcrumb = { ...breadcrumb };
-  if (out.message) out.message = scrubText(out.message);
-  if (out.data) out.data = scrubRecord(out.data);
+  const data = breadcrumb.data as AnyRecord | undefined;
+  const out: Breadcrumb = { ...pick(breadcrumb, ['type', 'category', 'level', 'timestamp']) };
+  if (breadcrumb.message) out.message = scrubText(breadcrumb.message);
+  if (data) {
+    const kept: AnyRecord = { ...pick(data, ['method', 'status_code']) };
+    for (const key of ['url', 'from', 'to'] as const) {
+      const value = data[key];
+      if (typeof value === 'string') kept[key] = scrubUrl(value);
+    }
+    out.data = kept;
+  }
   return out;
 }
 
-function scrubCommon<T extends Event>(event: T): T {
-  delete event.user;
-  delete event.server_name;
-  if (event.request) {
-    event.request = {
-      method: event.request.method,
-      url: event.request.url ? scrubUrl(event.request.url) : undefined,
-    };
-  }
-  if (event.transaction) event.transaction = scrubUrl(event.transaction);
-  if (event.message) event.message = scrubText(event.message);
-  // Sentry.parameterize stores the template and the interpolated values here instead of `message`.
-  if (event.logentry) {
-    event.logentry = { message: event.logentry.message ? scrubText(event.logentry.message) : undefined };
-  }
-  if (event.extra) event.extra = scrubRecord(event.extra);
-  if (event.contexts) event.contexts = redactRecord(event.contexts);
-  if (event.tags) event.tags = redactRecord(event.tags);
+function scrubCommon(event: Event): Event {
+  const out = {
+    ...pick(event, ['event_id', 'timestamp', 'start_timestamp', 'platform', 'level', 'environment', 'release', 'dist', 'type']),
+  } as Event;
+  if (event.sdk) out.sdk = { name: event.sdk.name, version: event.sdk.version };
+  if (event.transaction) out.transaction = scrubUrl(event.transaction);
+  if (event.message) out.message = scrubText(event.message);
+  if (event.logentry?.message) out.logentry = { message: scrubText(event.logentry.message) };
+  if (event.request) out.request = { method: event.request.method, url: event.request.url ? scrubUrl(event.request.url) : undefined };
+  const contexts = scrubContexts(event.contexts);
+  if (contexts) out.contexts = contexts as Event['contexts'];
+  const tags = pick(event.tags, TAG_FIELDS);
+  if (tags) out.tags = tags as Event['tags'];
   if (event.breadcrumbs) {
-    event.breadcrumbs = event.breadcrumbs.map(scrubBreadcrumb).filter((item: Breadcrumb | null): item is Breadcrumb => item !== null);
+    out.breadcrumbs = event.breadcrumbs.map(scrubBreadcrumb).filter((item: Breadcrumb | null): item is Breadcrumb => item !== null);
   }
-  return event;
+  return out;
 }
 
 export function scrubErrorEvent(event: ErrorEvent): ErrorEvent {
-  scrubCommon(event);
-  for (const exception of event.exception?.values ?? []) {
-    if (exception.value) exception.value = scrubText(exception.value);
-    for (const frame of exception.stacktrace?.frames ?? []) {
-      delete frame.vars;
-    }
+  const out = scrubCommon(event) as ErrorEvent;
+  if (event.exception?.values) {
+    out.exception = { values: event.exception.values.map((exception) => ({
+      type: exception.type,
+      value: exception.value ? scrubText(exception.value) : undefined,
+      mechanism: exception.mechanism ? { type: exception.mechanism.type, handled: exception.mechanism.handled } : undefined,
+      stacktrace: exception.stacktrace?.frames ? { frames: exception.stacktrace.frames.map((frame) => ({
+        ...pick(frame, ['function', 'module', 'lineno', 'colno', 'in_app']),
+        filename: frame.filename ? scrubFrameFile(frame.filename) : undefined,
+        abs_path: frame.abs_path ? scrubFrameFile(frame.abs_path) : undefined,
+      })) } : undefined,
+    })) };
   }
-  return event;
+  return out;
 }
 
 export function scrubTransactionEvent<T extends Event>(event: T): T {
-  scrubCommon(event);
-  for (const span of event.spans ?? []) {
-    if (span.description) span.description = scrubUrl(span.description);
-    if (span.data) span.data = redactRecord(span.data);
+  const out = scrubCommon(event) as T;
+  if (event.measurements) out.measurements = event.measurements;
+  if (event.spans) {
+    out.spans = event.spans.map((span) => ({
+      ...pick(span, ['span_id', 'trace_id', 'parent_span_id', 'op', 'status', 'origin', 'start_timestamp', 'timestamp']),
+      description: span.op?.startsWith('http') && span.description ? scrubUrl(span.description) : span.op,
+      data: scrubSpanData(span.data),
+    })) as Event['spans'];
   }
-  return event;
+  return out;
 }
