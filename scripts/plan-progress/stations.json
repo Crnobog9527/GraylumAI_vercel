@@ -280,7 +280,7 @@
         },
         {
           "name": "PAY-STRIPE-MP",
-          "plain": "银行卡订阅改用 Stripe 代收代缴税；中国大陆用户可选微信、支付宝或大陆银行卡。"
+          "plain": "银行卡订阅改用 Stripe 代收代缴税；中国大陆用户可选微信、支付宝或大陆银行卡。正式开通、税务编码、正式密钥和回调到上线前再逐项请你批准。"
         },
         {
           "name": "PAY-FOUNDER",
@@ -305,12 +305,6 @@
         {
           "name": "EXPERT-CONSULT",
           "plain": "报告末尾加“预约真人专家咨询”的入口。"
-        }
-      ],
-      "waitingForOwner": [
-        {
-          "task": "PAY-STRIPE-MP",
-          "text": "正式开通 Stripe Managed Payments、设置产品税务编码和重试规则、上正式密钥和回调时逐项请你批准。"
         }
       ]
     },
