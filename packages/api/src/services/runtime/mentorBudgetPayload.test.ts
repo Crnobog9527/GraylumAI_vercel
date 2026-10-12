@@ -3,6 +3,7 @@ import { expect, it, vi } from 'vitest';
 import { writeFileSync } from 'node:fs';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { runtimeAdmissionService } from './admission';
+import { testIdentityGuard } from '../__tests__/fixtures/runtimeGates';
 import { postgresJsonbBytes } from './payloadSize';
 import { PURPOSE_INPUT_CAPS, PURPOSE_OUTPUT_CAP, type PurposeBudgets } from './purposeBudgets';
 import { packageHash, sha256, type SkillSource } from '../skills/loader';
@@ -45,9 +46,6 @@ async function fixture(resourceBytes: number, worst = false, budgets?: PurposeBu
         scope: { kind: 'positioning_draft', draftId: id(2) }, dialogueModelId: id(3), dialogueModel: 'fixture/mentor',
       }, error: null };
       if (name === 'runtime_admission_replay') return { data: replay, error: null };
-      // Payload sizing only; the brand identity's own sizing is covered in promptCacheAdmission.test.ts.
-      if (name === 'model_identity_guard_config') return { data: { version: 1, enabled: false, revision: 0,
-        updatedBy: null, updatedAt: null }, error: null };
       if (name === 'runtime_admit') { writes.push(name); captured = args; return { data: { executionId: id(7) }, error: null }; }
       throw new Error(name);
     },
@@ -89,8 +87,12 @@ it('46KB resource fits configured input; overflowing frozen payload is rejected 
   const normal = await fixture(46000, false, config);
   await normal.run();
   expect(postgresJsonbBytes(normal.captured().p_billing)).toBeLessThan(262144 - 8192);
+  // This fixture sits exactly between the input and payload limits; the identity prefix (on by default)
+  // would trip the input limit first, so it is switched off to keep testing the payload guard.
+  testIdentityGuard.enabled = false;
   const oversized = await fixture(162000);
-  await expect(oversized.run()).rejects.toThrow('RUNTIME_FROZEN_PAYLOAD_TOO_LARGE');
+  try { await expect(oversized.run()).rejects.toThrow('RUNTIME_FROZEN_PAYLOAD_TOO_LARGE'); }
+  finally { testIdentityGuard.enabled = true; }
   expect(oversized.writes).toEqual([]);
   expect(oversized.captured()).toBeUndefined();
 });

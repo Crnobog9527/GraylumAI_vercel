@@ -24,6 +24,11 @@ export const BRAND_IDENTITY_INSTRUCTIONS = [
     + 'is fine; only your own identity is restricted.',
 ].join('\n');
 
+/** Executions decide from their frozen instructions, so no extra read happens after admission. */
+export function frozenBrandIdentity(instructions: string) {
+  return instructions.startsWith(BRAND_IDENTITY_INSTRUCTIONS + '\n');
+}
+
 export function withBrandIdentity(instructions: string, enabled: boolean) {
   return enabled ? BRAND_IDENTITY_INSTRUCTIONS + '\n' + instructions : instructions;
 }

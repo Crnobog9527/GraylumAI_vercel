@@ -10,10 +10,10 @@ import {pricingConfig} from '../__tests__/fixtures/runtimePricing';
 import {agentTurnInstructions,AGENT_TURN_STABLE_PREFIX,AGENT_TURN_STABLE_PREFIX_CHARS} from '../opc/agentTurnPrompt';
 import {PROMPT_CACHE_OVERHEAD_BYTES} from './promptCache';
 import {BRAND_IDENTITY_INSTRUCTIONS} from '../modelIdentity/brandIdentity';
+import {testIdentityGuard} from '../__tests__/fixtures/runtimeGates';
 const skill='Pinned skill 正文';
 // MODEL-IDENTITY-GUARD: the switch defaults on, so the brand identity leads the frozen system text.
 const brand=BRAND_IDENTITY_INSTRUCTIONS+'\n';
-let guardEnabled=true;
 vi.mock('../skills/databaseSource',()=>({databaseSkillSource:()=>({list:async()=>[{revisionId:'10000000-0000-4000-8000-000000000003'}]})}));
 vi.mock('../skills/loader',()=>({identityOf:(value:unknown)=>value,activateSkill:async()=>({forModel:()=>skill})}));
 vi.mock('./billingUnitAdmission',async original=>({
@@ -33,7 +33,6 @@ function fixture(model='anthropic/test',write:string|undefined='2.5',real=true,i
   config:pricingConfig(model,'synthetic/fp8','2','0')};
  const configReads=vi.fn();let saved:unknown=null;
  const rpc=vi.fn(async(name:string,args:Record<string,unknown>)=>{
-  if(name==='model_identity_guard_config')return {data:{version:1,enabled:guardEnabled,revision:0,updatedBy:null,updatedAt:null},error:null};
   if(name==='runtime_session_context')return {data:{scope:{kind:'positioning_draft',draftId:actor}},error:null};
   if(name==='runtime_admission_replay')return {data:saved,error:null};
   if(name==='runtime_admit'){
@@ -131,14 +130,14 @@ it('keeps ordinary Skill caching without host rules and derives current prefix l
  expect(AGENT_TURN_STABLE_PREFIX).toBe(host().slice(0,AGENT_TURN_STABLE_PREFIX_CHARS));
 });
 it('switch off: no brand identity and the cached prefix is the Skill text alone',async()=>{
- guardEnabled=false;
+ testIdentityGuard.enabled=false;
  try{
   const f=fixture(),result=await f.service.prepare(f.input);
   const prefix=skill+'\n'+host().slice(0,AGENT_TURN_STABLE_PREFIX_CHARS);
   expect(result.context.instructions.startsWith(skill)).toBe(true);
   expect(result.context.instructions).not.toContain('Identity (host rule');
   expect(result.context.promptCache.systemPrefixChars).toBe(prefix.length);
- }finally{guardEnabled=true;}
+ }finally{testIdentityGuard.enabled=true;}
 });
 it('switch on: the identity leads the cached prefix and carries the Owner-approved reply',async()=>{
  const f=fixture(),result=await f.service.prepare(f.input);

@@ -27,7 +27,9 @@ function fixture() {
     return { data: config === null ? null : { value: config }, error: null };
   });
   const model = { id: id(3), model_id: 'fixture', provider: 'fixture', is_active: 'true', max_tokens: 1000, input_limit: 32000 };
-  const q = { select: () => q, eq: () => q, maybeSingle: read, single: async () => ({ data: model, error: null }) };
+  // The settings read also carries the identity switch (MODEL-IDENTITY-GUARD); same read, same failures.
+  const rows = async () => { const r = await read(); return { data: r.data ? [{ key: 'runtime_rate_limits', value: r.data.value }] : [], error: r.error }; };
+  const q = { select: () => q, eq: () => q, in: rows, maybeSingle: read, single: async () => ({ data: model, error: null }) };
   const admin = { rpc, from: vi.fn(() => q) } as unknown as SupabaseClient;
   const user = { auth: { getUser: async () => ({ data: { user: { id: id(1), email_confirmed_at: '2026-01-01' } }, error: null }) } };
   const policy = { account: 'local', costPerCall: '0.02', creditsPerUsd: '1000', multiplier: '1',

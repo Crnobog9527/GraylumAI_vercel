@@ -4,14 +4,17 @@ import { StagingAccessError } from './stagingErrors';
 import { logger } from '../../lib/logger';
 import { RateLimitError } from '../../lib/rateLimitError';
 import { checkRuntimeRateLimit } from '../redisRateLimiter';
-import { readRuntimeRateLimits, type RuntimeRateLimits } from './rateLimitSettings';
+import { DEFAULT_RUNTIME_RATE_LIMITS, RUNTIME_RATE_LIMIT_KEY, readRuntimeRateLimits, storedRateLimits, type RuntimeRateLimits }
+  from './rateLimitSettings';
+import { identityGuardFromStored, MODEL_IDENTITY_GUARD_KEY } from '../modelIdentity/guardSetting';
 
 export type GateRejection = 'call_limited' | 'paused' | 'limit_unavailable' | 'usage_configuration_required';
 export type NewWorkGateResult = { ok: true } | {
   ok: false; reason: GateRejection; retryAfter: number; window?: 'minute' | 'day';
 };
 export type RuntimeCallGate = (actorId: string, maxCalls: number, contractVersion?: 'bill2.v1' | 'bill2.v2') => Promise<NewWorkGateResult>;
-type SettingsRead = { ok: true; config: RuntimeRateLimits } | { ok: false };
+/** identityGuard: MODEL-IDENTITY-GUARD switch, read in the same query (absent = on). */
+type SettingsRead = { ok: true; config: RuntimeRateLimits; identityGuard?: boolean } | { ok: false };
 const unavailable = (): NewWorkGateResult => ({ ok: false, reason: 'limit_unavailable', retryAfter: 60 });
 export const denyNewCalls: RuntimeCallGate = async () => unavailable();
 
@@ -19,6 +22,18 @@ export const denyNewCalls: RuntimeCallGate = async () => unavailable();
 export async function readNewWorkSettings(admin: SupabaseClient): Promise<SettingsRead> {
   try { return { ok: true, config: (await readRuntimeRateLimits(admin)).config }; }
   catch { return { ok: false }; }
+}
+
+/** Admission's read: the same rate limits plus the MODEL-IDENTITY-GUARD switch, in one round trip. */
+export async function readAdmissionSettings(admin: SupabaseClient): Promise<SettingsRead> {
+  try {
+    const rows = await admin.from('system_settings').select('key,value').in('key', [RUNTIME_RATE_LIMIT_KEY, MODEL_IDENTITY_GUARD_KEY]);
+    if (rows.error || !Array.isArray(rows.data)) return { ok: false };
+    const value = (key: string) => (rows.data as Array<{ key: string; value: unknown }>).find(row => row.key === key)?.value;
+    const limits = value(RUNTIME_RATE_LIMIT_KEY);
+    return { ok: true, config: limits === undefined ? { ...DEFAULT_RUNTIME_RATE_LIMITS } : storedRateLimits(limits),
+      identityGuard: identityGuardFromStored(value(MODEL_IDENTITY_GUARD_KEY)) };
+  } catch { return { ok: false }; }
 }
 
 function pauseResult(settings: SettingsRead, bucket: 'admission' | 'calls' | 'legacy'): NewWorkGateResult {

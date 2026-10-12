@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { beforeEach, expect, it, vi } from 'vitest';
-import { newWorkGate, readNewWorkSettings, requireNewWork, requireLegacyCallsEnabled, denyNewCalls } from './newWorkGate';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { newWorkGate, readAdmissionSettings, readNewWorkSettings, requireNewWork, requireLegacyCallsEnabled, denyNewCalls } from './newWorkGate';
 import { DEFAULT_RUNTIME_RATE_LIMITS as defaults } from './rateLimitSettings';
 import { runtimeGateMessages } from '../../shared/runtimeGateMessages';
 import { RateLimitError } from '../../lib/rateLimitError';
@@ -76,4 +76,27 @@ it.each([undefined, 'bill2.v1'] as const)('keeps the existing public notice for 
   expect(() => requireNewWork(result)).toThrowError(expect.objectContaining({
     code: 'SERVICE_UNAVAILABLE', message: runtimeGateMessages.limit_unavailable,
   }));
+});
+
+describe('MODEL-IDENTITY-GUARD switch rides on the admission settings read', () => {
+  const db = (rows: Array<{ key: string; value: unknown }>) => {
+    const keys: string[][] = [];
+    return { keys, client: { from: () => ({ select: () => ({ in: async (_c: string, k: string[]) => {
+      keys.push(k); return { data: rows, error: null };
+    } }) }) } as never };
+  };
+  it.each([
+    ['absent', [], true],
+    ['on', [{ key: 'model_identity_guard', value: { version: 1, enabled: true, revision: 1, updatedBy: null, updatedAt: null } }], true],
+    ['off', [{ key: 'model_identity_guard', value: { version: 1, enabled: false, revision: 2, updatedBy: null, updatedAt: null } }], false],
+    ['malformed', [{ key: 'model_identity_guard', value: 'nope' }], true],
+  ] as const)('%s', async (_name, rows, expected) => {
+    const f = db([...rows]);
+    const read = await readAdmissionSettings(f.client);
+    expect(read).toMatchObject({ ok: true, config: defaults, identityGuard: expected });
+    expect(f.keys).toEqual([['runtime_rate_limits', 'model_identity_guard']]);
+  });
+  it('malformed rate limits still fail closed', async () => {
+    expect(await readAdmissionSettings(db([{ key: 'runtime_rate_limits', value: { version: 2 } }]).client)).toEqual({ ok: false });
+  });
 });
