@@ -77,7 +77,7 @@
 - 展示条件：`review_state=已通过`、没有撤回、`pay_founder_status` 为 `active` 或 `grace`。身份变成 `ended` 时自动不显示（不删行，用户可看到"身份已结束，卡片已下架"）。
 - 公开页面：`/founders`（具体路径随 PUBLIC-SITE 的 `/app` 搬迁定），只读、服务端渲染、外链加 `rel="nofollow ugc"`；
 - 链接安全：社媒主页和产品链接在**落库前**由服务端校验，只接受规范化后的 `https://` 外部地址，拒绝 `javascript:`、`data:`、带用户名密码的地址和控制字符；
-  复用现有 `packages/api/src/shared/announcementLink.ts` 的 `resolveAnnouncementLink`（只取它的外部链接分支），页面渲染时再校验一次，不把人工审核当作安全防线。
+  复用现有 `packages/api/src/shared/announcementLink.ts` 的 `resolveAnnouncementLink`（只取它的外部链接分支），并在展示墙校验层**另外要求 URL 的用户名和密码都为空**（现有函数不查这一项，`https://a@evil.example/` 会被放过），页面渲染时再校验一次，不把人工审核当作安全防线。
   人数太少时是否先不开放这个页面，是决定项 F6。
 - 注销：`account_erasure_local_cleanup` 删除 `founder_wall_entries` 该用户的行；`data_use_consents` 里的 `founder_wall` 同意按它现有的注销规则标记撤回（`account_erasure`）并保留 1 年。
 
