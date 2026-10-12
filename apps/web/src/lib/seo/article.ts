@@ -40,6 +40,8 @@ export type ArticleContent = {
   // Only questions answered visibly on the page; they also feed FAQPage JSON-LD.
   faq?: { question: string; answer: string }[];
   related: { label: string; href: string; description: string }[];
+  // Official or public sources behind platform facts on the page (spec 12.4); shown as a visible list.
+  sources?: { label: string; href: string }[];
   updated: string;
 };
 

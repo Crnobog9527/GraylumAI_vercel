@@ -44,7 +44,7 @@ export const ZH_TW_HUB: ArticleContent = {
     },
     {
       h2: '經營自媒體要從哪裡開始？',
-      paragraphs: ['多數人一開始就急著拍片或發文，結果做了幾個月不知道問題在哪。比較穩的順序是：'],
+      paragraphs: ['多數人一開始就急著拍片或發文，結果做了幾個月不知道問題在哪。比較穩的順序是（每一步的做法見〈如何經營自媒體〉）：'],
       list: [
         '定位：你要分享什麼主題？你和別人有什麼不一樣？',
         '受眾：你想幫誰解決什麼問題？他們會在哪個平台？',
@@ -95,8 +95,17 @@ export const ZH_TW_HUB: ArticleContent = {
     },
   ],
   related: [
+    { label: '如何經營自媒體？', href: '/zh-tw/zimeiti-jingying', description: '從定位到變現，新手經營自媒體的 6 個步驟。' },
+    { label: 'IG 經營全攻略', href: '/zh-tw/ig-jingying', description: '新手如何經營 IG：帳號設定、內容形式和數據。' },
+    { label: '社群行銷是什麼？', href: '/zh-tw/shequn-xingxiao', description: '個人與小品牌用社群達成名單和銷售的做法。' },
+    { label: '社群經營怎麼做？', href: '/zh-tw/shequn-jingying', description: '從規劃、內容到互動的社群經營流程。' },
+    { label: '自媒體課程怎麼選？', href: '/zh-tw/zimeiti-kecheng', description: '上課、真人陪跑和 AI 陪跑的差別與適合對象。' },
     { label: '關於 Graylum', href: '/zh-tw/about', description: '公司資訊、編輯原則和聯絡方式。' },
     { label: '價格（簡體）', href: '/landing/pricing', description: '免費開始，以及會員和點數包的說明。' },
+  ],
+  sources: [
+    { label: 'Instagram 官方：Instagram Ranking Explained（各版位的排序方式，英文）', href: 'https://about.instagram.com/blog/announcements/instagram-ranking-explained' },
+    { label: 'YouTube 說明：YouTube 合作夥伴計畫總覽與資格條件（廣告收益分潤）', href: 'https://support.google.com/youtube/answer/72851?hl=zh-Hant' },
   ],
   updated: '2026-10-12',
 };

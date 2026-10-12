@@ -26,10 +26,10 @@ export type SiteChrome = {
   languageTitle: string;
   updatedLabel: string;
   authorLabel: string;
-  aboutLabel: string;
   breadcrumbLabel: string;
   faqTitle: string;
   relatedTitle: string;
+  sourcesTitle: string;
   rights: string;
 };
 
@@ -60,15 +60,17 @@ export const SITE_CHROME: Record<SiteLocale, SiteChrome> = {
     languageTitle: '语言',
     updatedLabel: '更新于',
     authorLabel: 'Graylum 编辑团队',
-    aboutLabel: '关于我们',
     breadcrumbLabel: '当前位置',
     faqTitle: '常见问题',
     relatedTitle: '继续阅读',
+    sourcesTitle: '资料来源',
     rights: '版权所有',
   },
   'zh-TW': {
     home: '/zh-tw',
     nav: [
+      { label: '自媒體經營', href: '/zh-tw/zimeiti-jingying' },
+      { label: 'IG 經營', href: '/zh-tw/ig-jingying' },
       { label: '關於我們', href: '/zh-tw/about' },
     ],
     login: '登入',
@@ -88,10 +90,10 @@ export const SITE_CHROME: Record<SiteLocale, SiteChrome> = {
     languageTitle: '語言',
     updatedLabel: '更新於',
     authorLabel: 'Graylum 編輯團隊',
-    aboutLabel: '關於我們',
     breadcrumbLabel: '目前位置',
     faqTitle: '常見問題',
     relatedTitle: '延伸閱讀',
+    sourcesTitle: '資料來源',
     rights: '版權所有',
   },
 };
