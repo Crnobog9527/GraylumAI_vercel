@@ -18,6 +18,7 @@ const plan = (level: string, monthly: number, yearly: number) => ({
 });
 const CATALOG = [plan('pro', 29, 279), plan('gold', 69, 621)];
 const ALL_ON = Object.fromEntries(Object.keys(LANDING_FEATURES).map(key => [key, true])) as LandingFlags;
+const CORE_ONLY = Object.fromEntries(Object.keys(LANDING_FEATURES).map(key => [key, key === 'coach'])) as LandingFlags;
 
 function renderPage(flags: LandingFlags) {
   const data = buildLandingPageData(flags, CATALOG, { goldFirstMonth: 49, founder: { price: 496, total: 50, available: 37 } });
@@ -46,8 +47,8 @@ describe('landing page sections', () => {
     expect(html).toContain('id="how-it-works"');
   });
 
-  it('shows all nine walk-through steps in order once everything is accepted', () => {
-    const html = renderPage(ALL_ON);
+  it('shows all nine walk-through steps in order by default (finished product, Owner 2026-10-13)', () => {
+    const html = renderPage(resolveLandingFlags({}));
     const titles = ['和教练聊', '教练说真话', '找对标', '出报告', '资料库，它记得你', '写内容', '发出去', '看复盘', '多模型评审团（Gold）'];
     const positions = titles.map(title => html.indexOf(`>${title}<`));
     expect(positions.every(position => position >= 0)).toBe(true);
@@ -55,8 +56,8 @@ describe('landing page sections', () => {
     expect(html.match(/为什么不是正确的废话/g)).toHaveLength(9);
   });
 
-  it('shows only the accepted walk-through steps by default, numbered without gaps', () => {
-    const html = renderPage(resolveLandingFlags({}));
+  it('hides walk-through steps whose capability is off, numbered without gaps', () => {
+    const html = renderPage(CORE_ONLY);
     expect(html).toContain('>和教练聊<');
     expect(html).toContain('>教练说真话<');
     expect(html).not.toContain('>找对标<');
@@ -75,7 +76,7 @@ describe('landing page sections', () => {
     expect(html).toContain('>示例<');
   });
 
-  it('renders the full offer with server prices and founder seats when everything is accepted', () => {
+  it('renders the full offer with server prices and founder seats when everything is on', () => {
     const html = renderPage(ALL_ON);
     expect(html).toContain('Graylum AI 自媒体陪跑教练：$29/月起。');
     expect(html).toContain('前 50 位创始会员，招满为止');
@@ -85,14 +86,14 @@ describe('landing page sections', () => {
     expect(html).toContain('HeyOrca 2024 年社媒经理调查');
   });
 
-  it('leaves out unaccepted promises in the default state', () => {
-    const html = renderPage(resolveLandingFlags({}));
+  it('leaves out the promises of capabilities that are switched off', () => {
+    const html = renderPage(CORE_ONLY);
     expect(html).not.toContain('一键发');
     expect(html).not.toContain('每周告诉你哪条有效');
     expect(html).not.toContain('排程工具');
     expect(html).not.toContain('创始会员');
     expect(html).not.toContain('模型 A');
-    // The opening grant is still 100 credits, so the 500-credit promise waits for that change.
+    // With signupGrant off the 500-credit promise is left out.
     expect(html).not.toContain('500 积分');
     expect(html).toContain('免费注册，不用绑卡。聊出来的内容随时能看、能导出，不会收回。');
     expect(html).toContain('不用绑卡 · 聊出来的内容不会收回');
