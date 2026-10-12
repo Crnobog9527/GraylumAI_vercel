@@ -15,6 +15,7 @@ async function conversation(db,name) {
  await exec(db,a,sid,'HOST_OPEN_CURRENT_QUESTION',0);
  for(let i=1;i<=10;i++)messages.push(await exec(db,a,sid,`${name} early message ${i}`,i*10));
  await exec(db,a,sid,'HOST_STEP_SUMMARY:v1',105);
+ await exec(db,a,sid,'HOST_CHECKLIST_UPDATED:["goal"]',104);
  await exec(db,a,sid,`${name} cancelled message`,106,'cancelled');
  await exec(db,a,sid,`${name} organizer input`,107,'completed',false,{role:'organizer'});
  const current=await exec(db,a,sid,'what did I say first?',200,'running',true);
@@ -30,9 +31,9 @@ export async function runCases({db,Client,connectionString,report}) {
  assert.deepEqual(first.segments.map(s=>[s.id,s.turns]),[['segment-1',[1,8]],['segment-2',[9,10]]]);
  assert.equal(first.truncated,false);
  const text=JSON.stringify(first);
- for(const hidden of ['HOST_OPEN','HOST_STEP_SUMMARY','cancelled message','organizer input','later message','what did I say first'])
+ for(const hidden of ['HOST_OPEN','HOST_STEP_SUMMARY','HOST_CHECKLIST_UPDATED','cancelled message','organizer input','later message','what did I say first'])
   assert.ok(!text.includes(hidden),hidden);
- report.checks.push('no query: earliest segment of the user\'s own completed messages, index of segments; host turns, cancelled turns, organizer runs, the current and later turns excluded');
+ report.checks.push('no query: earliest segment of the user\'s own completed messages, index of segments; host turns (opening, step summary, checklist update), cancelled turns, organizer runs, the current and later turns excluded');
  const second=await read(db,c.a,c.current,'segment-2');
  assert.deepEqual(second.items.map(i=>[i.turn,i.text]),[[9,'main early message 9'],[10,'main early message 10']]);
  for(const query of ['segment-3','segment-0','anything','segment-1;drop'])assert.equal((await read(db,c.a,c.current,query)).kind,'unavailable',query);
@@ -44,9 +45,9 @@ export async function runCases({db,Client,connectionString,report}) {
  const longCurrent=await exec(db,long,lp.draftSession,'now',10,'running',true);
  const bounded=await read(db,long,longCurrent);
  assert.equal(bounded.truncated,true);
- assert.ok(bounded.items.reduce((n,i)=>n+[...i.text].length,0)<=3500);
- assert.ok(Buffer.byteLength(JSON.stringify(JSON.stringify(bounded)))<=20480);
- report.checks.push('user text is capped at 3500 characters and the escaped result fits the frozen 20480-byte reserve');
+ assert.ok(bounded.items.reduce((n,i)=>n+[...i.text].length,0)<=2500);
+ assert.ok(Buffer.byteLength(JSON.stringify(JSON.stringify(bounded)))<=14336);
+ report.checks.push('user text is capped at 2500 characters and the escaped result stays within 14336 bytes');
 
  const other=await one(db,'SELECT ws_test.actor() v');
  await denied(read(db,other,c.current),'RUNTIME_MENTOR_HISTORY_DENIED');

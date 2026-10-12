@@ -25,7 +25,7 @@ it.each(['answer','twice','malformed','notOffered'] as const)('mentor history re
   inputSelection:'scope-projection-v2',historySelection:freezeHistorySelection(),
   hostTurnContext:{stepId:'first',opening:false,checklist:[]},nativeOutput:'native-output-v1',mentorText:'append-card-v1',
   opcTurnToken:id,moduleId:id,skillId:id,revisionId:id,skillFile:{packageId:id,revisionId:id,packageHash:descriptor.packageHash},
-  ...(offered?{historyRead:{version:'mentor-history-v1',reserve:20480}}:{})};
+  ...(offered?{historyRead:{version:'mentor-history-v1',reserve:26624}}:{})};
  const policy={model:'fixture',provider:'fixture',account:'test',protocol:'fixture-cost-v1',upperUsd:'0.01',inputLimit:64000,outputLimit:1000};
  let saved:unknown=null;const requests:string[]=[];
  const receipts=new Map<number,{rawBody:string;hash:string}>();

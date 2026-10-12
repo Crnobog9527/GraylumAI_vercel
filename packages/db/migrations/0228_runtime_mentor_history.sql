@@ -21,7 +21,7 @@ BEGIN
 END $$;
 
 -- The user's own completed mentor messages before the reading turn, numbered from 1.
--- Host-generated openings, step summaries and report runs are not the user's words.
+-- Host-generated openings, step summaries, checklist-update markers and report runs are not the user's words.
 CREATE OR REPLACE FUNCTION runtime_mentor_messages(p_actor_id uuid,e runtime_executions)
 RETURNS TABLE(turn bigint,execution_id uuid,at timestamptz,body text)
 LANGUAGE sql STABLE SET search_path=public,pg_temp AS $$
@@ -31,6 +31,7 @@ LANGUAGE sql STABLE SET search_path=public,pg_temp AS $$
   AND x.state='completed' AND x.erased_at IS NULL AND x.content_deleted_at IS NULL
   AND x.payload->>'role'='skill' AND x.payload ? 'opcTurnToken' AND NOT x.payload ? 'reportGeneration'
   AND btrim(coalesce(x.payload->>'input','')) NOT IN ('','HOST_OPEN_CURRENT_QUESTION','HOST_STEP_SUMMARY:v1')
+  AND NOT starts_with(x.payload->>'input','HOST_CHECKLIST_UPDATED:')
 $$;
 
 -- The mentor session of the execution, while its draft, project and session are live.
@@ -65,8 +66,8 @@ BEGIN
  IF wanted>(total+7)/8 THEN
   RETURN jsonb_build_object('kind','unavailable','segments',segments,'messages',total);
  END IF;
- -- 3500 characters of user text fit the frozen 20480-byte continuation reserve even fully escaped.
- FOREACH cap IN ARRAY ARRAY[3500,1000] LOOP
+ -- 2500 characters of user text stay within the 14336-byte result part of the frozen reserve even escaped.
+ FOREACH cap IN ARRAY ARRAY[2500,800] LOOP
   SELECT jsonb_build_object('kind','mentor_history','segment','segment-'||wanted,'segments',segments,'messages',total,
    'items',coalesce(jsonb_agg(jsonb_build_object('turn',m.turn,'at',m.at,'executionId',m.execution_id,'text',m.shown) ORDER BY m.turn),'[]'),
    'truncated',coalesce(bool_or(m.cut),false))
@@ -76,7 +77,7 @@ BEGIN
     coalesce(sum(char_length(x.body)) OVER (ORDER BY x.turn),0)>cap cut
    FROM runtime_mentor_messages(p_actor_id,e) x WHERE (x.turn-1)/8+1=wanted
   ) m;
-  IF octet_length(to_jsonb(result::text)::text)<=20000 THEN RETURN result;END IF;
+  IF octet_length(to_jsonb(result::text)::text)<=14336 THEN RETURN result;END IF;
  END LOOP;
  RAISE EXCEPTION 'RUNTIME_MENTOR_HISTORY_TOO_LARGE';
 END $$;

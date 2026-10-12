@@ -3,6 +3,7 @@ import {z} from 'zod';
 import type {RuntimeTool} from './runner';
 import type {ToolRpc} from './skillFileExecution';
 import {READ_HISTORY_TOOL} from './agentTools';
+import {SKILL_FILE_TRACE_BYTES} from './skillFile';
 
 /** AGENT-CORE R4 (item 31): a positioning mentor turn may look up the user's own
  * earlier messages of this conversation instead of a summary replacing them.
@@ -10,9 +11,10 @@ import {READ_HISTORY_TOOL} from './agentTools';
 export const MENTOR_HISTORY_VERSION='mentor-history-v1';
 /** Strict schemas require every property; null lists segments with the earliest one. */
 export const mentorHistoryParameters=z.object({query:z.string().max(64).nullable()}).strict();
-/** Upper bound of one serialized result: 4000 characters of user text (up to 4
- * UTF-8 bytes each, JSON escaped) plus segment metadata. The SQL reader caps the body. */
-export const MENTOR_HISTORY_RESERVE_BYTES=20480;
+/** The SQL reader keeps one escaped result within this many bytes (2500 characters of user text). */
+export const MENTOR_HISTORY_RESULT_BYTES=14336;
+/** The whole continuation, like the Skill file reserve: result, wrapper allowance and the model's tool-call trace. */
+export const MENTOR_HISTORY_RESERVE_BYTES=MENTOR_HISTORY_RESULT_BYTES+4096+SKILL_FILE_TRACE_BYTES;
 export const MENTOR_HISTORY_INSTRUCTIONS=
  '\nInstead of a Skill file you may read the user\'s own earlier messages of this conversation with read_history. '+
  'With query null it lists the earlier message segments and returns the earliest segment; with query set to a listed '+

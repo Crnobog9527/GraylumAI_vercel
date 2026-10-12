@@ -187,10 +187,10 @@ it('summary freezes only the file tool, refuses contradictory context and replay
 
 it('R4: a host mentor turn shares its single read slot with the user\'s earlier messages',async()=>{
  const f=fixture(),host={stepId:'first',opening:false,checklist:[]};
- const service=runtimeAdmissionService(f.user,f.admin,{...f.policy,hostTurnContext:host});
+ const service=runtimeAdmissionService(f.user,f.admin,{...f.policy,inputBytes:64000,hostTurnContext:host});
  const admitted=await service.prepare(f.input),context=runtimeContext.parse(admitted.context);
  expect(context.tools).toEqual(['ask_question','read_skill_file','read_history']);
- expect(context.historyRead).toEqual({version:'mentor-history-v1',reserve:20480});
+ expect(context.historyRead).toEqual({version:'mentor-history-v1',reserve:26624});
  expect(context.maxTurns).toBe(2);expect(context.maxToolCalls).toBe(1);expect(admitted.billing.limits.maxCalls).toBe(2);
  expect(context.instructions).toContain('earlier messages of this conversation with read_history');
  expect(runtimeContext.safeParse({...context,historyRead:undefined}).success).toBe(false);
