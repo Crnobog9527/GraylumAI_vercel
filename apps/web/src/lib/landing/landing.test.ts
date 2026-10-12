@@ -3,6 +3,7 @@ import { LANDING_FAQ, faqAnswerText } from './landing-faq';
 import { LANDING_FEATURES, resolveLandingFlags, type LandingFlags } from './landing-flags';
 import { buildLandingPageData } from './landing-page-data';
 import { buildLandingPricing, landingOfferList } from './landing-pricing';
+import { allSamplesReady, sampleReady, SAMPLE_REPORTS } from './landing-samples';
 
 const plan = (level: string, monthly: number, yearly: number) => ({
   id: `plan-${level}`, name: level, level, price: { monthly, yearly },
@@ -145,5 +146,27 @@ describe('landing page data', () => {
     expect(data.pricing.cards.map(card => card.key)).toEqual(['pro', 'gold']);
     expect(data.founderSeats).toBeNull();
     expect(data.faqItems.map(item => item.question)).not.toContain('为什么创始会员只有 50 个名额？');
+  });
+});
+
+describe('landing sample reports', () => {
+  it('never lets production show the samples before every report is really generated', () => {
+    // Turn `sampleReports` on only after all four demo reports are filled in and one shows the hard truth.
+    expect(!LANDING_FEATURES.sampleReports.show || allSamplesReady()).toBe(true);
+  });
+
+  it('keeps the four Owner-chosen audiences in order and invents no report text', () => {
+    expect(SAMPLE_REPORTS.map(report => report.audience)).toEqual([
+      '有一门专业、想做知识付费的上班族',
+      '想给店里引流的小店老板',
+      '上班族副业，想多一份收入（不一定有专业，靠平台分成、带货或接广告）',
+      '二十多岁、想靠内容吃饭的年轻人（学生或刚毕业，想从兼职做到全职）',
+    ]);
+    expect(SAMPLE_REPORTS.every(report => !sampleReady(report))).toBe(true);
+    expect(allSamplesReady()).toBe(false);
+  });
+
+  it('is hidden by default', () => {
+    expect(buildLandingPageData(resolveLandingFlags({}), CATALOG).sampleReports).toEqual([]);
   });
 });

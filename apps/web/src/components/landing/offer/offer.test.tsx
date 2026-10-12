@@ -5,6 +5,7 @@ import { LANDING_FEATURES, resolveLandingFlags, type LandingFlags } from '@/lib/
 import { buildLandingPageData } from '@/lib/landing/landing-page-data';
 import { FinalAction } from './FinalAction';
 import { FlowSteps } from './FlowSteps';
+import { SampleReports } from './SampleReports';
 import { HowItWorks } from './HowItWorks';
 import { OfferFaq } from './OfferFaq';
 import { OfferHero } from './OfferHero';
@@ -24,7 +25,8 @@ function renderPage(flags: LandingFlags) {
   return renderToStaticMarkup(createElement(Fragment, null,
     createElement(OfferHero, { note: data.heroNote }),
     createElement(VoiceWall, { notes: data.notes }),
-    createElement(HowItWorks, { promise: data.promise, timeline: data.timeline }, createElement(FlowSteps, { steps: data.flowSteps })),
+    createElement(HowItWorks, { promise: data.promise, timeline: data.timeline },
+      createElement(FlowSteps, { steps: data.flowSteps }), createElement(SampleReports, { reports: data.sampleReports })),
     createElement(PriceSection, { pricing: data.pricing, rows: data.compareRows, risk: data.risk, showResult: data.showResult,
       founderSeats: data.founderSeats, membershipHref: '/profile?tab=subscription' }),
     createElement(OfferFaq, { groups: data.faqGroups }),
@@ -66,6 +68,17 @@ describe('landing page sections', () => {
     expect(html).not.toContain('>找对标<');
     expect(html).not.toContain('模型 A');
     expect(html.match(/为什么不是正确的废话/g)).toHaveLength(2);
+    expect(html).not.toContain('不同人群的样例报告');
+  });
+
+  it('renders the sample-report tabs with the four audiences and three fixed parts when switched on', () => {
+    const html = renderPage(ALL_ON);
+    expect(html).toContain('不同人群的样例报告');
+    expect(html.match(/role="tab"/g)).toHaveLength(4);
+    expect(html).toContain('有一门专业、想做知识付费的上班族');
+    expect(html).toContain('想给店里引流的小店老板');
+    for (const part of ['一句话定位和为什么', '第一个 30 天计划', '变现路线']) expect(html).toContain(part);
+    expect(html).toContain('>示例<');
   });
 
   it('renders the full offer with server prices and founder seats when everything is on', () => {
