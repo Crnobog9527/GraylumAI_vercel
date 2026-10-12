@@ -279,8 +279,8 @@
           "plain": "接通银行卡订阅与钱包单笔付款，复用订单、会员积分和人工退款。"
         },
         {
-          "name": "PAY-STRIPE-CARD-FALLBACK",
-          "plain": "Waffo 出问题时，可手动把新的银行卡购买切到 Stripe 的备选通道。"
+          "name": "PAY-STRIPE-MP",
+          "plain": "银行卡订阅改用 Stripe 代收代缴税；中国大陆用户可选微信、支付宝或大陆银行卡。"
         },
         {
           "name": "PAY-FOUNDER",
@@ -309,8 +309,8 @@
       ],
       "waitingForOwner": [
         {
-          "task": "PAY-STRIPE-CARD-FALLBACK",
-          "text": "启用前须完成 Stripe 收款的税务核实（Graylum 是卖方）；正式配置另行批准。"
+          "task": "PAY-STRIPE-MP",
+          "text": "正式开通 Stripe Managed Payments、设置产品税务编码和重试规则、上正式密钥和回调时逐项请你批准。"
         },
         {
           "task": "PAY-WAFFO",
@@ -345,6 +345,10 @@
           "plain": "域名合并、SEO/GEO 基础设置、公开页面重做和新落地页。"
         },
         {
+          "name": "SKILL-I18N-HOOK",
+          "plain": "为英文用户准备：Skill 界面文字可配英文，AI 按用户语言回答。"
+        },
+        {
           "name": "MODEL-IDENTITY-GUARD",
           "plain": "用户看不到真实模型品牌和型号，问到或越狱时统一回复品牌话术。"
         },
@@ -356,7 +360,7 @@
       "waitingForOwner": [
         {
           "task": "PUBLIC-SITE",
-          "text": "首页核心词等你用关键词规划师导出中文搜索量；域名合并涉及的正式环境设置逐项批准；创始人背景措辞由你确认。"
+          "text": "域名合并涉及的正式环境设置逐项批准；创始人背景措辞由你确认。"
         }
       ]
     },
