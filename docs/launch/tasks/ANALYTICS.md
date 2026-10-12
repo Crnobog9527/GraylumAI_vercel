@@ -53,7 +53,7 @@
 - **付款成功只记一次**：只在这次 webhook 调用**真正把订单从未履约改为已履约**的那个分支里上报（重放、重复 webhook 走“已履约”分支，不再上报）；`transaction_id` 用 `payment_orders.id`，GA4 自己也按同一用户同一交易号去重（只对网页数据流有效）。上报失败只记日志、不重试、不影响履约——统计少一笔不动钱，金额以数据库报表为准。**不新建表**。
 - **服务器上报怎么对上访客**：结账前浏览器把 GA 的 `client_id`（`_ga` Cookie 里的随机编号）随创建结账请求带上，存进 Stripe 会话的 metadata；**只有访客同意了统计才会有这个值**。没有 `client_id` 的订单不上报 GA（不编造编号，避免违背同意规则）。
 - **不发个人信息**：不发邮箱、昵称、用户编号、订单正文；不开 GA4 的 User-ID 和“用户提供的数据”；不开 Google 信号（Google Signals）。
-- **网址去参数**：所有上报都手动设置 `page_location` 和 `page_referrer`，只保留路径和 `utm_*` 参数，去掉其余查询参数和 `#` 片段；应用页本来就不记页面浏览，双保险。
+- **网址去参数**：所有上报都手动设置 `page_location` 和 `page_referrer`，去掉 `#` 片段和查询参数（`page_location` 保留 `utm_*`）。`page_referrer` **保留协议、域名和路径**（GA4 靠它的域名判断来源，“AI 推荐”渠道也靠它），只去掉查询参数和片段；站内页面之间跳转时的 referrer 同样只留协议、域名和路径，所以 `?code=`、`?email=` 不会带出去；应用页本来就不记页面浏览，双保险。
 - **自定义渠道“AI 推荐”**：在 GA4 后台建自定义渠道组（Owner 操作或当次批准后由 AI 操作），来源正则匹配 `chatgpt.com|chat.openai.com|perplexity.ai|claude.ai|gemini.google.com|copilot.microsoft.com|chat.deepseek.com|kimi.moonshot.cn|kimi.com|doubao.com|yuanbao.tencent.com|grok.com|meta.ai`，排在“自然搜索”“引荐”前面。名单写在仓库里（`docs/` 一份），以后增减按名单改。
 - **staging 和正式用不同的 GA4 媒体资源**（两个衡量 ID），staging 数据不混进正式报表。
 
@@ -69,7 +69,7 @@
 
 - 在根布局加 `<Analytics />`，和现有 Speed Insights 一样只在 Vercel 生产模式部署渲染。它不用 Cookie，在 Termly 里登记为“统计”类还是“必要”类由 Owner 在 Termly 后台按 Termly 的分类规则定（第 9 节 O5）。
 - 用 `beforeSend` 去掉网址里的查询参数（保留 `utm_*`），一次性密钥和邮箱不会进 Vercel。
-- 脚本从本站 `/_vercel/insights/script.js` 加载，大陆实测 20/20 可达（第 4 节）。
+- 脚本从本站 `/_vercel/insights/script.js` 加载。第 4 节只测了大陆能从 `vercel.com` 下载同款脚本（20/20），**没有测我们自己的域名和数据上报**；PR-2 验收要用大陆真实网络访问 preview 页面，确认报表里收到这次访问。
 - 自定义事件（Pro 才有）：升级 Pro 后再加 `sign_up` 等同名事件，供大陆对照；升级前只看访问量和来源。
 
 ### 3.4 Termly
@@ -143,13 +143,13 @@ GA4 在大陆收不到数据，和 Owner“大陆用 Vercel Analytics”的决�
 | PR | 内容 | 风险 | staging 验收 |
 | --- | --- | --- | --- |
 | PR-1 Termly + Consent Mode | 按 O1 选定的方式加载 Termly；Consent Mode 默认值；页脚“Cookie 设置”入口；PR 检查单加“新第三方脚本要标 Termly 分类” | 普通 | 用浏览器开发者工具模拟欧盟访问（Termly 的地区预览或欧洲出口网络）：同意前没有 `_ga` 等统计 Cookie、没有发往 google-analytics 的请求；点同意后才出现；模拟美国访问能看到“不要出售或分享”入口；大陆网络下首屏不等 Termly（含一次晚高峰实测完整下载时间）；公开页仍是静态 |
-| PR-2 GA4 + Vercel Analytics | gtag 按分类加载；公开页页面浏览、网址去参数；`sign_up`、`positioning_complete`、`begin_checkout` 三个浏览器事件；`<Analytics />` 和 `beforeSend` 去参数 | 普通 | GA4 实时报告看到页面浏览和三个事件；打开带 `?code=`、`?email=` 的地址后，网络面板里发往 GA 和 Vercel 的请求都不含这些参数；应用页没有 `page_view`；Lighthouse 下降在第 5 节限度内 |
+| PR-2 GA4 + Vercel Analytics | gtag 按分类加载；公开页页面浏览、网址去参数；`sign_up`、`positioning_complete`、`begin_checkout` 三个浏览器事件；`<Analytics />` 和 `beforeSend` 去参数 | 普通 | GA4 实时报告看到页面浏览和三个事件；打开带 `?code=`、`?email=` 的地址后，网络面板里发往 GA 和 Vercel 的请求都不含这些参数；应用页没有 `page_view`；从 chatgpt.com 等来源（不带 utm）点进来的访问在 GA4 里归到“AI 推荐”渠道；用中国大陆真实网络访问一次包含本改动的 preview 页面，确认该项目的 Vercel Web Analytics 报表里出现这次访问（不只是脚本能下载）；Lighthouse 下降在第 5 节限度内 |
 | PR-3 首次来源 + 付款上报 | 迁移：`profiles.signup_attribution` 加列、接入注销清理；注册时写入；结账带 client_id 进 Stripe metadata；webhook 履约成功分支用 Measurement Protocol 上报 `purchase`；后台统计页按来源分组 | 高（数据库、注销、计费链路） | 迁移按 ENGINEERING 要求验证（兼容、可重复执行、指纹）；带 utm 和 AI 来源的注册在资料里写对、超长和非白名单字段被丢弃；注销后该列为空；Stripe 测试模式付款一次，GA4 实时报告只出现一笔 `purchase`，重放同一 webhook 不再出现；没同意统计的访客付款不上报且履约正常；上报失败不影响履约 |
 | 后台配置（不是代码） | GA4“AI 推荐”自定义渠道组、数据保留期、关闭 Google 信号；Termly 地区规则、Consent Mode 开关、GPC | — | Owner 操作，或在当次对话批准后由 AI 按清单操作；正式环境逐项另批 |
 
 **第二步（Owner 投广告前）**：META——Meta 像素按 Termly“广告”分类加载、CAPI 由服务器在同一个“真正履约”分支上报，按事件编号和浏览器端去重。开工前另出方案。
 
-PR-1、PR-2 只改前端、不动钱，按“普通前端 PR 先合并后验收”的做法；PR-3 含迁移和计费链路上的改动，按高风险验证后在 staging 自己合并（AGENTS 第 3、4 节）。上正式环境、往 Vercel 加环境变量走第 1 节逐项批准。
+PR-1、PR-2 只改前端、不动钱，但会改页面脚本、Cookie 弹窗和统计交互，所以按 AGENTS 第 4 节第 3、5 条，**先在包含最终改动的 preview 上用真实浏览器验收通过，再合并**（验收交 Codex，按交互验证分工；改了代码要对新版本重新确认）；PR-3 含迁移和计费链路上的改动，按高风险验证后在 staging 自己合并（AGENTS 第 3、4 节）。上正式环境、往 Vercel 加环境变量走第 1 节逐项批准。
 
 ## 8. Owner 要做的事
 
