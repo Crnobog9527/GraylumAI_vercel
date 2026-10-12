@@ -14,7 +14,7 @@ export const ZH_TW_ZIMEITI_KECHENG: ArticleContent = {
   locale: 'zh-TW',
   path: '/zh-tw/zimeiti-kecheng',
   metaTitle: '自媒體課程怎麼選？上課、真人陪跑、AI 陪跑比較',
-  metaDescription: '自媒體課程怎麼選？比較線上課程、真人陪跑和 AI 陪跑教練的差別、適合對象和挑選重點，幫你在報名前想清楚自己真正需要的是什麼。',
+  metaDescription: '自媒體課程怎麼選？比較線上課程、真人陪跑和 AI 陪跑教練的差別、適合對象和限制，列出報名前該問自己的問題，以及分辨課程值不值得的方法，幫你想清楚自己真正需要什麼。',
   breadcrumb: [ZH_TW_CRUMB, { name: '自媒體課程', path: '/zh-tw/zimeiti-kecheng' }],
   h1: '自媒體課程怎麼選？上課、真人陪跑、AI 陪跑比較',
   lead: '想學自媒體，主要有三條路：線上課程適合打基礎，真人陪跑適合需要有人盯進度的人，AI 陪跑適合想用較低成本、隨時討論自己帳號的人。先看清楚自己卡在哪裡再選。',

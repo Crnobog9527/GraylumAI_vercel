@@ -13,7 +13,7 @@ export const ZH_TW_IG_JINGYING: ArticleContent = {
   locale: 'zh-TW',
   path: '/zh-tw/ig-jingying',
   metaTitle: 'IG 經營全攻略：新手如何經營 IG 帳號',
-  metaDescription: '如何經營 IG？從帳號定位、個人檔案、貼文與 Reels 的分工、更新頻率到洞察報告怎麼看，整理新手 IG 經營的步驟和實用技巧。',
+  metaDescription: '如何經營 IG？從帳號定位、整理個人檔案、分配 Reels 和貼文、固定更新頻率，到怎麼看洞察報告調整內容，一步步整理新手 IG 經營的做法，再加上改了就有差的實用技巧。',
   breadcrumb: [ZH_TW_CRUMB, { name: 'IG 經營', path: '/zh-tw/ig-jingying' }],
   h1: 'IG 經營全攻略：新手如何經營 IG',
   lead: 'IG 經營的關鍵是：定位清楚、個人檔案一眼看懂、Reels 負責觸及新受眾、貼文和限時動態負責建立信任，再用洞察報告每週調整。下面按步驟說明。',

@@ -13,7 +13,7 @@ export const ZH_TW_SHEQUN_XINGXIAO: ArticleContent = {
   locale: 'zh-TW',
   path: '/zh-tw/shequn-xingxiao',
   metaTitle: '社群行銷是什麼？個人與小品牌的 6 步驟做法',
-  metaDescription: '社群行銷是什麼、和社群經營差在哪、怎麼一步步規劃？從目標、受眾、平台、內容到成效指標，整理給個人創作者和小品牌的實戰做法。',
+  metaDescription: '社群行銷是什麼？和社群經營差在哪裡？從設定目標、定義受眾、選平台、規劃內容、經營互動到追蹤成效，整理給個人創作者和小品牌照著做的 6 個步驟，並列出最常見的錯誤。',
   breadcrumb: [ZH_TW_CRUMB, { name: '社群行銷', path: '/zh-tw/shequn-xingxiao' }],
   h1: '社群行銷是什麼？個人與小品牌怎麼做',
   lead: '社群行銷是在 IG、Facebook、Threads、YouTube 等社群平台上，用內容和互動讓目標受眾認識、信任並購買你的產品或服務。做法的核心是：先定目標和受眾，再決定平台和內容。',

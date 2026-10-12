@@ -13,7 +13,7 @@ export const ZH_TW_SHEQUN_JINGYING: ArticleContent = {
   locale: 'zh-TW',
   path: '/zh-tw/shequn-jingying',
   metaTitle: '社群經營怎麼做？從規劃、內容到互動的完整流程',
-  metaDescription: '社群經營怎麼做？整理定位規劃、內容排程、互動回覆、數據檢討的完整流程，以及一個人經營社群時最實用的省時做法和常見問題。',
+  metaDescription: '社群經營怎麼做？整理規劃主題、建立內容排程、回覆與互動、看數據檢討的完整流程，以及小編一個人經營社群時最實用的省時做法，最後回答貼文頻率、負評處理等常見問題。',
   breadcrumb: [ZH_TW_CRUMB, { name: '社群經營', path: '/zh-tw/shequn-jingying' }],
   h1: '社群經營怎麼做？完整流程一次看',
   lead: '社群經營就是持續用內容和互動，讓一群人願意追蹤你、回來看你、和你對話。流程可以拆成四件事：規劃定位、排程內容、經營互動、檢討數據，每週固定做。',

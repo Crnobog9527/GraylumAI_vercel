@@ -13,7 +13,7 @@ export const ZH_TW_ZIMEITI_JINGYING: ArticleContent = {
   locale: 'zh-TW',
   path: '/zh-tw/zimeiti-jingying',
   metaTitle: '如何經營自媒體？新手 6 步驟從定位做到變現',
-  metaDescription: '如何經營自媒體？從定位、受眾、內容支柱、更新節奏、數據檢討到變現，新手照著 6 個步驟做。附常見卡關原因，和用 AI 陪跑省下摸索時間的做法。',
+  metaDescription: '如何經營自媒體？從找定位、描述受眾、定內容支柱、固定更新節奏、看數據檢討到變現，新手照著 6 個步驟做就不會迷路。另附最常卡關的原因，以及用 AI 陪跑省下摸索時間的做法。',
   breadcrumb: [ZH_TW_CRUMB, { name: '如何經營自媒體', path: '/zh-tw/zimeiti-jingying' }],
   h1: '如何經營自媒體？新手 6 步驟',
   lead: '經營自媒體的順序是：先定位、再找受眾、定內容支柱、固定更新、看數據調整，最後才談變現。多數人失敗不是不夠努力，而是一開始方向就沒想清楚。',
