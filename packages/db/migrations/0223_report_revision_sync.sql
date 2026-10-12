@@ -8,11 +8,30 @@
 -- artifact_requests rows, so the existing deletion and account erasure cover them.
 BEGIN;
 
+-- The full information object of one step after the revision: proposed values become confirmed.
+CREATE OR REPLACE FUNCTION public.report_revision_values(step jsonb,st jsonb,proposed jsonb) RETURNS jsonb
+LANGUAGE sql IMMUTABLE SET search_path=public,pg_temp AS $$
+ SELECT coalesce(jsonb_object_agg(i->>'id',CASE WHEN proposed ? (i->>'id') THEN jsonb_build_object('status','confirmed',
+   'nature',coalesce(st->'information'->(i->>'id')->>'nature','unknown'),'value',proposed->>(i->>'id'))
+  ELSE coalesce(st->'information'->(i->>'id'),jsonb_build_object('status','unknown','nature','unknown','value','')) END),'{}')
+ FROM jsonb_array_elements(step->'information') i
+$$;
+REVOKE ALL ON FUNCTION public.report_revision_values(jsonb,jsonb,jsonb) FROM PUBLIC,anon,authenticated,service_role;
+
+-- The same canonical step text the page and account edits save (0135).
+CREATE OR REPLACE FUNCTION public.report_revision_body(step jsonb,vals jsonb) RETURNS text
+LANGUAGE sql IMMUTABLE SET search_path=public,pg_temp AS $$
+ SELECT string_agg((i->>'title')||E'\n'||CASE WHEN vals->(i->>'id')->>'status'='deferred' THEN '（暂缓确认）' ELSE '' END
+   ||(vals->(i->>'id')->>'value'),E'\n\n' ORDER BY ord)
+ FROM jsonb_array_elements(step->'information') WITH ORDINALITY t(i,ord) WHERE coalesce(vals->(i->>'id')->>'value','')<>''
+$$;
+REVOKE ALL ON FUNCTION public.report_revision_body(jsonb,jsonb) FROM PUBLIC,anon,authenticated,service_role;
+
 -- Validate the proposed fields against the round's frozen workflow and list what would change.
 -- cascade: steps that only depend on a changed step; they are confirmed together with it.
 CREATE OR REPLACE FUNCTION public.report_revision_diff(r artifact_rounds,fields jsonb) RETURNS jsonb
 LANGUAGE plpgsql STABLE SET search_path=public,pg_temp AS $$
-DECLARE step jsonb;f jsonb;k text;fid text;proposed jsonb;cur jsonb;
+DECLARE step jsonb;f jsonb;k text;fid text;proposed jsonb;cur jsonb;vals jsonb;
  changes jsonb:='[]';cascade jsonb:='[]';changed text[]:='{}';affected text[];grew boolean:=true;
 BEGIN
  IF jsonb_typeof(fields) IS DISTINCT FROM 'object' OR octet_length(fields::text)>65536 THEN
@@ -37,6 +56,13 @@ BEGIN
     IF NOT k=ANY(changed) THEN changed:=changed||k; END IF;
    END IF;
   END LOOP;
+ END LOOP;
+ -- A proposal must be applicable: the rebuilt step passes the information write (12000 bytes, 0182)
+ -- and its canonical text fits the step, otherwise it would be accepted but never apply.
+ FOR step IN SELECT x FROM jsonb_array_elements(r.workflow->'steps') x WHERE x->>'id'=ANY(changed) LOOP
+  vals:=report_revision_values(step,r.steps->(step->>'id'),fields->(step->>'id'));
+  IF octet_length(vals::text)>12000 OR char_length(coalesce(report_revision_body(step,vals),''))>(step->>'maxLength')::integer THEN
+   RAISE EXCEPTION 'REPORT_REVISION_INVALID'; END IF;
  END LOOP;
  -- Same closure as artifact_invalidate: every step that transitively depends on a changed one.
  affected:=changed;
@@ -123,15 +149,9 @@ BEGIN
   k:=step->>'id';
   IF NOT EXISTS(SELECT 1 FROM jsonb_array_elements(rv.response#>'{diff,changes}') c WHERE c->>'stepId'=k) THEN CONTINUE; END IF;
   SELECT * INTO cur FROM artifact_rounds WHERE id=nr;st:=cur.steps->k;
-  SELECT jsonb_object_agg(i->>'id',CASE WHEN fields->k ? (i->>'id') THEN jsonb_build_object('status','confirmed',
-    'nature',coalesce(st->'information'->(i->>'id')->>'nature','unknown'),'value',fields->k->>(i->>'id'))
-   ELSE coalesce(st->'information'->(i->>'id'),jsonb_build_object('status','unknown','nature','unknown','value','')) END)
-   INTO vals FROM jsonb_array_elements(step->'information') i;
+  vals:=report_revision_values(step,st,coalesce(fields->k,'{}'));
   PERFORM opc_information(a,d.draft_id,k,gen_random_uuid(),(st->>'version')::integer,vals);
-  -- The same canonical step text the page and account edits save (0135).
-  SELECT string_agg((i->>'title')||E'\n'||CASE WHEN vals->(i->>'id')->>'status'='deferred' THEN '（暂缓确认）' ELSE '' END
-    ||(vals->(i->>'id')->>'value'),E'\n\n' ORDER BY ord) INTO body
-   FROM jsonb_array_elements(step->'information') WITH ORDINALITY t(i,ord) WHERE coalesce(vals->(i->>'id')->>'value','')<>'';
+  body:=report_revision_body(step,vals);
   SELECT * INTO cur FROM artifact_rounds WHERE id=nr;st:=cur.steps->k;
   PERFORM artifact_transition(a,p.module_id,p.skill_id,'save',p.id,nr,gen_random_uuid(),
    jsonb_build_object('stepId',k,'body',body,'evidenceIds',coalesce(st->'evidenceIds','[]'),'expectedVersion',st->'version'));

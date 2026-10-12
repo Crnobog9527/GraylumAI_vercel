@@ -173,14 +173,21 @@ export async function runCases({db,Client,connectionString,report}) {
  } finally {await other.end();}
  report.checks.push('superseded version refused; two concurrent applies and apply/decline races yield exactly one decision');
 
- // Step a accepts at most 60 characters: the revised value fits the field limit but not the step.
- const broken=await seed(db,60);const br=await propose(db,broken,{fields:{a:{who:'x'.repeat(80)}}});
+ // Step a accepts at most 60 characters: a value within the field limit but not the step is refused when proposed,
+ // so a revision that could never apply is never offered to the user.
+ const narrow=await seed(db,60);
+ await assert.rejects(propose(db,narrow,{fields:{a:{who:'x'.repeat(80)}}}),/REPORT_REVISION_INVALID/);
+ // A confirmation that fails inside apply (here: the dependent step b can no longer be confirmed) rolls back everything.
+ const broken=await seed(db);const br=await propose(db,broken);
  const brokenBefore=await current(db,broken);
+ await db.query("SET session_replication_role=replica");
+ await db.query(`UPDATE artifact_rounds SET workflow=jsonb_set(workflow,'{steps,1,minLength}','100000') WHERE id=$1`,[brokenBefore.round_id]);
+ await db.query("SET session_replication_role=DEFAULT");
  await assert.rejects(apply(db,broken,br),/REPORT_SOURCE_CONFLICT/);
  assert.deepEqual(await current(db,broken),brokenBefore,'failed apply rolls back every write');
  assert.equal((await db.query('SELECT count(*) n FROM artifact_rounds WHERE project_id=$1',[broken.project])).rows[0].n,'1');
  assert.equal((await call14(db,broken,'read',{revision:br.revisionId})).decision,null,'no decision recorded');
- report.checks.push('a confirmation failure inside apply rolls back the new round and version');
+ report.checks.push('a proposal that cannot apply is refused up front; a confirmation failure inside apply rolls back the new round and version');
 
  await erase(db,f,'artifact',f.project);
  await assert.rejects(call14(db,f,'read',{revision:rv.revisionId}),/CONTENT_ERASED/);
