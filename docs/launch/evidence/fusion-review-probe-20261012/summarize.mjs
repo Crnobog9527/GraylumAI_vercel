@@ -6,7 +6,7 @@ import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { reserve } from './budget.mjs';
+import { reserve, worstCaseUsd } from './budget.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const raw = readFileSync(join(homedir(), '.graylum/secrets', process.env.PROBE_KEY_FILE ?? 'payg-profile.env'), 'utf8');
@@ -19,6 +19,8 @@ const base = JSON.parse(readFileSync(join(HERE, 'runs', 'baseline-1.json'), 'utf
 const merged = base.response.content.slice(base.response.content.lastIndexOf('```json'));
 
 // 合成的步骤字段（模仿定位 Skill 的分步字段，不是正式 Skill 的定义）
+const MAX_TOKENS = 8000;
+
 const STEPS = [
   { id: 'audience', fields: ['primary_audience', 'secondary_audience', 'pain_points'] },
   { id: 'positioning', fields: ['one_liner', 'content_pillars'] },
@@ -106,7 +108,7 @@ function parseText(content) {
 
 async function once(mode, model, i) {
   const user = `${INSTR}\n\n${mode === 'text' ? TEXT_FORMAT : ''}\n\n=== 原报告 ===\n${REPORT}\n\n=== 评审意见（合并清单） ===\n${merged}`;
-  const body = { model, messages: [{ role: 'user', content: user }], max_tokens: 8000, usage: { include: true } };
+  const body = { model, messages: [{ role: 'user', content: user }], max_tokens: MAX_TOKENS, usage: { include: true } };
   if (mode === 'schema') body.response_format = { type: 'json_schema', json_schema: SCHEMA };
   const t0 = Date.now();
   const r = await fetch('https://openrouter.ai/api/v1/chat/completions', {
@@ -126,8 +128,10 @@ async function once(mode, model, i) {
 const [mode, model, nStr] = process.argv.slice(2);
 const n = Number(nStr ?? 3);
 if (!Number.isInteger(n) || n < 1 || n > 5) throw new Error('count must be 1–5');
-// Sonnet 一次约 0.055 美元，按每次 0.1 美元预留；全部预留成功后才并发发出
-for (let i = 0; i < n; i += 1) await reserve({ Authorization: `Bearer ${KEY}` }, process.env.PROBE_KEY_FILE ?? 'payg-profile.env', 0.1);
+// 按所选模型的目录单价算最坏费用（输入字符数 + max_tokens 用满），逐次预留；全部预留成功后才并发发出
+const promptChars = INSTR.length + TEXT_FORMAT.length + REPORT.length + merged.length + 200;
+const est = await worstCaseUsd(model, promptChars, MAX_TOKENS);
+for (let i = 0; i < n; i += 1) await reserve({ Authorization: `Bearer ${KEY}` }, process.env.PROBE_KEY_FILE ?? 'payg-profile.env', est);
 const results = await Promise.all(Array.from({ length: n }, (_, i) => once(mode, model, i)));
 mkdirSync(join(HERE, 'runs'), { recursive: true });
 const file = join(HERE, 'runs', `summarize-${mode}-${model.replace(/\W+/g, '_')}.json`);

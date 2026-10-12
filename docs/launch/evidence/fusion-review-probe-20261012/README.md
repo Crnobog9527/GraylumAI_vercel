@@ -3,7 +3,7 @@
 > 状态：实测记录，仅文档和脚本，不是产品代码。已包含 Owner 建好评审专用 workspace 之后的补测（第 1.1 节）。
 > 依据：[Master Plan 第 4.3 节](../../MASTER_PLAN.md#fusion)（开工前必须实测的五项）、[FUSION 实施说明](../../tasks/FUSION.md)、
 > Owner 2026-09-30 决定（评审不联网；首选 OpenRouter Fusion 并禁联网，先实测）。
-> 测试账号：现有 OpenRouter 测试密钥（staging 测试预算），以及 Owner 新建的评审专用 workspace 的密钥。本任务上限 2 美元，**实际花费约 0.63 美元（旧测试密钥 0.62、专用 workspace 0.01）**。
+> 测试账号：现有 OpenRouter 测试密钥（staging 测试预算），以及 Owner 新建的评审专用 workspace 的密钥。本任务上限 2 美元，**实际花费约 0.76 美元（旧测试密钥 0.62、专用 workspace 0.14）**。
 > 后台设置由 Owner 本人操作，我没有改 OpenRouter 后台，也没有碰正式环境。
 
 ## 先说结论（给 Owner 的大白话）
@@ -19,6 +19,7 @@
    - Owner 新建了评审专用 workspace，在 Tools 页面把 Web Search 和 Web Fetch 关掉，Fusion 保持开启。补测结果：3/3 次评审团的每个模型都被拒绝（403，"web_search 被本 workspace 的策略禁止"），整次 Fusion 失败（`all_panels_failed`）。
    - 原因：Fusion 给每个评审模型的请求固定带着联网工具，联网一关，评审团就一个也跑不起来。
    - 这种情况下，普通对话接口仍然返回"成功"：外层模型自己写了一份评审冒充，费用只有约 0.003 美元。
+   - **第二种配置**（总控补测）：联网工具重新打开，但只允许 Exa、只允许域名 `blocked.invalid`。这样 Fusion 能正常出评审，3/3 次没有任何网页内容。但"有没有发出搜索"仍然看不到，只能当过渡方案，需要 Owner 接受两处差距，见第 1.2 节。
 2. **就算不看联网，Fusion 还有三个硬伤：**
    - 看不到评审团各自联网了几次。用量里只有"调用了 1 次 Fusion"，没有每个模型的搜索次数，所以 Master Plan 要求的"`web_search_requests` 为 0"没法直接证明。
    - 只有整次的总费用，拆不到每个模型。
@@ -64,6 +65,49 @@
 - 联网确实关得掉，但关掉后 Fusion 的评审团不能运行。所以"Fusion + 不联网"这个组合不存在。
 - 文档写的是"评审团和分析模型固定开启联网"，这次实测证实：关不掉，只能整体拒绝。
 - 除非 OpenRouter 以后提供"Fusion 内部不带联网工具"的选项，否则 Fusion 不能满足 D12。
+
+### 1.2 专用 workspace 第二种配置：联网工具打开，但只允许 Exa、只允许域名 `blocked.invalid`
+
+Owner 的设置：
+- 在同一个 workspace 里，把 Web Search 和 Web Fetch 重新打开；
+- 引擎只留 Exa；
+- 允许的域名只有 `blocked.invalid`；
+- 打开 "Prevent overrides"，请求不能改这些设置。
+
+思路是让 Fusion 带联网工具的请求不被 403，但什么也搜不到。
+
+| 记录 | 接口 | 耗时 | 费用 | Fusion 是否真的跑了 | 网页内容 |
+|---|---|---|---|---|---|
+| `runs/responses-ok-exa1.json` | Responses | 213 秒 | 0.033 美元 | 是：`status: completed`，没有 `failure_reason`，3 个模型各有回答，有 `analysis` | 3 个模型的回答里 0 个网址 |
+| `runs/responses-ok-exa2.json` | Responses | 338 秒 | 0.025 美元 | 是（同上） | 0 个网址 |
+| `runs/responses-ok-exa3.json` | Responses | 462 秒 | 0.026 美元 | 是（同上） | 0 个网址 |
+| `runs/ask_search-exa1.json` | Chat Completions，**明确要求评审团联网并附来源** | 366 秒 | 0.047 美元 | 是：输出里有 "Panel responses"，暗号被照抄 | 0 个网页引用、0 个网址；有一个模型主动写了"本次评审未联网核实" |
+
+**怎么判断是真评审，不是外层模型自己编的**：
+- 看 Responses 接口返回的 `openrouter:fusion` 输出项。真评审有每个模型的 `responses` 和 `analysis`，没有 `failure_reason`；第 1.1 节的假评审里这项是 `all_panels_failed`。
+- 再看每个模型的回答里有没有照抄出原文末段的暗号。
+- 3 次 Responses 调用三项都满足（9/9 个模型抄出暗号）。
+
+**还是看不到的**：
+- 评审团有没有**发出**搜索请求、发了几次，接口不告诉我们。我们只能证明"没有搜到、没有用上网页内容"。
+- 如果它们发了搜索，搜索词（可能带有报告里的内容）会被发给 Exa。按 Exa 的价格，每次搜索还可能收约 0.007 美元，这部分无法单独看到。
+- 耗时比第一次在原 workspace 测（Responses 163–204 秒）更长，可能是模型尝试搜索失败后才收尾，没法确认。
+
+**能不能当"先用 Fusion 上线、以后换自研"的过渡方案**：
+
+可以，但有前提。这种配置实际做到了"评审结果不用网上内容"，评审能正常出。和 Master Plan 第 4.3 节的原通过条件比，有两处差距需要 Owner 明确接受：
+
+1. 原条件是"用量里 `web_search_requests` 为 0"。现在只能证明"没有搜到任何内容"，不能证明"没发出搜索"。
+2. 评审团如果发了搜索词，报告里的片段可能被发到 Exa，这会增加一个第三方数据接收方。要写进数据删除的第三方清单（DATA-ERASURE 附录 C）。
+
+另外，过渡期的实现要做到：
+- 只用 Responses 接口；
+- 以 `failure_reason`、缺少 `responses` 或 `analysis` 判定失败；
+- 评审团回答里出现网址时，当作配置被改动，停用评审；
+- Prevent overrides 必须一直开着；
+- 第 4 节其他硬伤仍然存在：只有总费用、超时没法对账、耗时 3–8 分钟。
+
+我仍然推荐最终走自研。过渡期能省掉的，主要是"多模型并行 + 一次汇总"这部分开发量。但 Fusion 的计费、结果未知和对账规则，在 BILL2 里要另外实现一套，换成自研时又要改。所以我的看法是：**如果 FUSION-COMPARE 和评审要在同一批上线，过渡方案省不了多少；如果评审要明显早于对比模式上线，过渡方案才划算。**
 
 ## 2. 格式稳定性、耗时、费用、失败表现
 
