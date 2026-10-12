@@ -8,6 +8,7 @@ const state = vi.hoisted(() => ({
   mutateAsync: vi.fn(),
   isPending: false,
   setData: vi.fn(),
+  reset: vi.fn(),
   onCheckedChange: undefined as undefined | ((next: boolean) => void),
 }));
 
@@ -19,7 +20,7 @@ vi.mock('@/components/ui/switch', () => ({
 }));
 vi.mock('@/trpc/client', () => ({
   trpc: {
-    useUtils: () => ({ dataUse: { consent: { setData: state.setData } } }),
+    useUtils: () => ({ dataUse: { consent: { setData: state.setData, reset: state.reset } } }),
     dataUse: {
       consent: { useQuery: () => state.query },
       setConsent: { useMutation: () => ({ mutateAsync: state.mutateAsync, isPending: state.isPending }) },
@@ -44,6 +45,7 @@ beforeEach(() => {
   state.mutateAsync = vi.fn();
   state.isPending = false;
   state.setData = vi.fn();
+  state.reset = vi.fn();
   state.onCheckedChange = undefined;
   refetch.mockReset();
 });
@@ -67,6 +69,7 @@ describe('data-use consent card', () => {
     await vi.waitFor(() => expect(state.setData).toHaveBeenCalledWith(undefined, grantedState));
     expect(state.mutateAsync).toHaveBeenCalledWith({ granted: true, version: 'd5-v1' });
     expect(refetch).not.toHaveBeenCalled();
+    expect(state.reset).not.toHaveBeenCalled();
   });
 
   it('shows a current grant as on, with when it was given', () => {
@@ -93,11 +96,11 @@ describe('data-use consent card', () => {
     expect(html).toContain('已关闭（2026-10-');
   });
 
-  it('on a failed save, shows an error and re-reads the real state instead of trusting the switch', async () => {
+  it('on a failed save, drops the cached answer and re-reads instead of trusting the switch or the old cache', async () => {
     render();
     state.mutateAsync.mockRejectedValue(new Error('DATA_USE_UNAVAILABLE'));
     state.onCheckedChange?.(true);
-    await vi.waitFor(() => expect(refetch).toHaveBeenCalled());
+    await vi.waitFor(() => expect(state.reset).toHaveBeenCalled());
     expect(state.setData).not.toHaveBeenCalled();
   });
 

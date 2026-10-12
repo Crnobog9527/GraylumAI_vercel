@@ -113,8 +113,9 @@ export function DataUseConsentCard() {
       return;
     }
     setError(result.error);
-    // Show what the server actually holds after a failure, not what the switch was moved to.
-    void query.refetch();
+    // The save may have landed even though it failed here. Drop the cached answer and read again, so the card
+    // shows "reading" (no switch) until the server says what it holds, not what it held before the save.
+    void utils.dataUse.consent.reset();
   };
 
   return (
