@@ -24,10 +24,14 @@ export function redactText(value: string): string {
   return text.length > MAX_TEXT ? `${text.slice(0, MAX_TEXT)}…` : text;
 }
 
-const ERROR_CODE = /^[A-Z][A-Z0-9_]{2,63}\b/;
+/** Domains whose stable error codes the application emits (e.g. `ACCOUNT_ERASURE_FAILED`). */
+const CODE_PREFIXES = ['ACCOUNT', 'AGENT', 'ARTIFACT', 'AUTH', 'BILL2', 'BILLING', 'CAPTURE', 'CONTENT', 'CREDIT',
+  'DATA_USE', 'ERASURE', 'LIBRARY', 'MODEL', 'OPC', 'OPENING_GRANT', 'PAY', 'PAYG', 'RATE_LIMIT', 'REPORT', 'RESEARCH',
+  'RUNTIME', 'SKILL', 'STRIPE', 'WAFFO'];
+const ERROR_CODE = new RegExp(`^(?:${CODE_PREFIXES.join('|')})_[A-Z0-9_]{2,60}(?=$|[:\\s])`);
 /**
  * For free text (messages, exception values, breadcrumbs, extra): pattern masking cannot catch a
- * name or a sentence, so only a leading stable error code (e.g. `ACCOUNT_ERASURE_FAILED`) is kept.
+ * name or a sentence, so only a leading error code from a known application domain is kept.
  */
 export function scrubText(value: string): string {
   return value.match(ERROR_CODE)?.[0] ?? '[text]';

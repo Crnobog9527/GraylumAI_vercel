@@ -9,6 +9,9 @@ describe('sentry scrub', () => {
     expect(scrubText('为李雷保存并购计划失败')).toBe('[text]');
     expect(scrubText('Cannot save plan for Li Lei')).toBe('[text]');
     expect(scrubText('ACCOUNT_ERASURE_FAILED: 李雷的账号')).toBe('ACCOUNT_ERASURE_FAILED');
+    expect(scrubText('RUNTIME_EXECUTION_STILL_ALLOWED')).toBe('RUNTIME_EXECUTION_STILL_ALLOWED');
+    expect(scrubText('ACME merger failed')).toBe('[text]');
+    expect(scrubText('LI_LEI profile failed')).toBe('[text]');
   });
 
   it('redacts emails, ids, tokens, keys and long numbers in metadata, and truncates long text', () => {
