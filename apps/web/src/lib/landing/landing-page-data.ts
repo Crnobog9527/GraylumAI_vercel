@@ -3,6 +3,7 @@ import type { PaywallPlanSource } from '@/components/paywall/paywallPlans';
 import { FINAL_ACTION, HERO, HOW_IT_WORKS, PRICE_COMPARE, RISK_REVERSAL, VOICE_WALL } from './landing-copy';
 import { LANDING_FAQ, faqAnswerText } from './landing-faq';
 import { FLOW_STEPS } from './landing-flow';
+import { SAMPLE_REPORTS } from './landing-samples';
 import { allOn, visibleItems, type LandingFlags } from './landing-flags';
 import { buildLandingPricing, landingOfferList, type LandingOffers } from './landing-pricing';
 
@@ -29,6 +30,7 @@ export function buildLandingPageData(flags: LandingFlags, plans: readonly Paywal
     notes: visibleItems(flags, VOICE_WALL.notes),
     promise: visibleItems(flags, HOW_IT_WORKS.promise),
     flowSteps: visibleItems(flags, FLOW_STEPS),
+    sampleReports: flags.sampleReports ? SAMPLE_REPORTS : [],
     timeline: visibleItems(flags, HOW_IT_WORKS.timeline),
     compareRows: visibleItems(flags, PRICE_COMPARE.rows),
     risk: visibleItems(flags, RISK_REVERSAL.points),
