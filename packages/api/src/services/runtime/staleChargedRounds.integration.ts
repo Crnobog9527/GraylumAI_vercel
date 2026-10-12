@@ -189,6 +189,15 @@ it('RUNTIME: every filter applies before the limit and total counts all matches'
   expect(page.rounds[0]).toEqual(all.rounds[0]);
 }, 60000);
 
+it('RUNTIME: a cost-pending round whose last unknown call was settled is reported and compensated', async () => {
+  const round = await chargedOpenRound(2 * STALE_ROUND_AGE_MS);
+  // Receipt recovery settled the call, but the process exited before the round was finished.
+  await db.query("update runtime_executions set state='cost_pending' where id=$1", [round.executionId]);
+  expect(ids(await reported())).toContain(round.runId);
+  expect(await compensateStaleRound(service, round.runId)).toMatchObject({ state: 'compensated', executionState: 'cancelled' });
+  expect(await ledger(round)).toMatchObject({ credits: 100, compensations: 1, run_state: 'refunded' });
+}, 60000);
+
 it('RUNTIME: a round whose account was later banned can still be compensated', async () => {
   const round = await chargedOpenRound(2 * STALE_ROUND_AGE_MS);
   await db.query("update profiles set status='banned' where id=$1", [round.actor]);

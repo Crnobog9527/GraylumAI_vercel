@@ -48,6 +48,7 @@ describe('admin stale-round compensation section', () => {
 describe('compensation outcome wording', () => {
   it.each([
     [{ state: 'compensated', compensatedCredits: 3 }, '已补偿 3 积分'],
+    [{ state: 'compensated', compensatedCredits: 3, auditRecorded: false }, '日志没有记录成功'],
     [{ state: 'already_compensated', compensatedCredits: 3 }, '没有重复退款'],
     [{ error: 'STALE_ROUND_NOT_ELIGIBLE' }, '没有退款'],
     [{ error: 'STALE_ROUND_NOT_FOUND' }, '找不到这一轮'],

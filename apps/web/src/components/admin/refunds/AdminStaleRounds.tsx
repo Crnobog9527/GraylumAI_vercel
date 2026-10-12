@@ -13,7 +13,7 @@ const refusals: Readonly<Record<string, string>> = {
 
 type Evidence = { model: string | null; streamed: boolean; executionState: string; unavailableReason: string | null;
   calls: number; outputTokens: number; savedReplyChars: number; lastActivityAt: string | null };
-const stateLabels: Readonly<Record<string, string>> = { prepared: '未开始', running: '进行中', interrupted: '中断' };
+const stateLabels: Readonly<Record<string, string>> = { prepared: '未开始', running: '进行中', interrupted: '中断', cost_pending: '费用已核实、未收口' };
 
 /** Content-free review facts; a streamed round that produced output may already have been seen. */
 export function reviewCaution(evidence: Evidence): string | null {
@@ -23,9 +23,13 @@ export function reviewCaution(evidence: Evidence): string | null {
 }
 
 /** The operator-facing sentence for a compensation outcome; an unknown failure never claims a result. */
-export function compensationMessage(outcome: { state: string; compensatedCredits: number } | { error: string }): string {
+export function compensationMessage(outcome: { state: string; compensatedCredits: number; auditRecorded?: boolean } | { error: string }): string {
   if ('error' in outcome) return refusals[outcome.error] ?? '补偿失败，结果未确认。请刷新后查看这一轮的状态，不要重复操作。';
-  return outcome.state === 'already_compensated' ? '这一轮之前已经补偿过，没有重复退款。' : `已补偿 ${outcome.compensatedCredits} 积分。`;
+  if (outcome.state === 'already_compensated') return '这一轮之前已经补偿过，没有重复退款。';
+  // The refund itself is final; only the admin activity entry is missing. Never retry the refund for it.
+  return outcome.auditRecorded === false
+    ? `已补偿 ${outcome.compensatedCredits} 积分，但管理员操作日志没有记录成功，请把这一轮的计费编号报告给技术处理，不要重复补偿。`
+    : `已补偿 ${outcome.compensatedCredits} 积分。`;
 }
 
 /**

@@ -37,7 +37,8 @@ BEGIN
    length(coalesce(e.result->>'body',e.primary_result->>'body',''))::integer saved_reply_chars,
    (SELECT max(c.settled_at) FROM bill2_calls c WHERE c.run_id=r.id) last_activity
   FROM runtime_executions e JOIN bill2_runs r ON r.id=e.billing_run_id
-  WHERE e.state IN ('prepared','running','interrupted') AND e.created_at<p_cutoff
+  -- cost_pending: receipt recovery settled the last unknown call but the round was never closed.
+  WHERE e.state IN ('prepared','running','interrupted','cost_pending') AND e.created_at<p_cutoff
    AND r.contract_version='bill2.v2' AND NOT r.closed AND NOT r.cancel_requested
    -- Any pause (user stop, insufficient credits, a resumable HTTP budget) is user-side or
    -- resumable, never a Graylum failure to refund. Erased accounts belong to erasure recovery.
@@ -84,7 +85,7 @@ BEGIN
  END IF;
  IF b.contract_version<>'bill2.v2' OR b.closed OR b.cancel_requested OR b.paused_reason IS NOT NULL
   OR NOT EXISTS(SELECT 1 FROM profiles p WHERE p.id=e.actor_id AND p.is_deleted='false')
-  OR e.state NOT IN ('prepared','running','interrupted') OR e.created_at>=p_cutoff
+  OR e.state NOT IN ('prepared','running','interrupted','cost_pending') OR e.created_at>=p_cutoff
   OR EXISTS(SELECT 1 FROM bill2_calls c WHERE c.run_id=b.id
    AND c.dispatched_at IS NOT NULL AND c.settled_at IS NULL AND NOT c.provider_rejected)
   OR NOT EXISTS(SELECT 1 FROM bill2_calls c WHERE c.run_id=b.id
