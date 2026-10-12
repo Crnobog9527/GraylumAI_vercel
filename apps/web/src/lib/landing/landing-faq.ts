@@ -119,7 +119,7 @@ export const LANDING_FAQ: readonly LandingFaqGroup[] = [
         ],
       },
       {
-        id: 'faq-12', needs: ['report', 'voice', 'publish'],
+        id: 'faq-12', needs: ['report', 'voice', 'content', 'publish'],
         question: '积分怎么用？$29 一个月够不够？',
         answer: [
           '按实际用量扣：对话、生成报告、联网搜索、查数据，用多少扣多少，没用就不扣。Pro 每月 3,480 积分，够你生成运营策略报告、按自己的文风写内容、一键发到各个平台、看自己近 30 天的数据，还能建 3 个定位档案。积分'
@@ -135,7 +135,7 @@ export const LANDING_FAQ: readonly LandingFaqGroup[] = [
         ],
       },
       {
-        id: 'faq-14', needs: ['coach'],
+        id: 'faq-14', needs: ['coach', 'report'],
         question: '能退款吗？能随时取消吗？到期后我的东西还在吗？',
         answer: [
           '退款：第一次买会员、积分包或者升级，7 天之内，而且从这次付款起账户没有用过积分，通过产品里的客服工单申请，人工审核后原路退回，扣 6% 手续费。',

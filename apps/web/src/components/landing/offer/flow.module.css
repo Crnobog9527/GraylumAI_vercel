@@ -58,8 +58,8 @@
 
   /* Before playing, every animated element sits in its starting state, so nothing jumps from finished to start. */
   .stage[data-play='ready'] .pick {
-    border-color: #2a2a2a !important;
-    background: transparent !important;
+    border-color: #2a2a2a;
+    background: transparent;
   }
 
   .stage[data-play='ready'] .strike {
@@ -88,9 +88,10 @@
   animation-delay: var(--d, 0s), calc(var(--d, 0s) + 0.5s);
 }
 
-.picked {
-  border-color: rgba(255, 215, 0, 0.7) !important;
-  background: rgba(255, 215, 0, 0.12) !important;
+/* Finished selection; no !important, so the flow-pick keyframes can still start from the unselected look. */
+.stage .picked {
+  border-color: rgba(255, 215, 0, 0.7);
+  background: rgba(255, 215, 0, 0.12);
 }
 
 .struck {
