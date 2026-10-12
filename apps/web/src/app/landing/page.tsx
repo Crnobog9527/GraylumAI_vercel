@@ -37,7 +37,7 @@ export default async function LandingPage() {
         softwareApplicationJsonLd({ description: HOME_DESCRIPTION, offers: data.offerList }),
         ...(data.faqItems.length > 0 ? [faqPageJsonLd(data.faqItems)] : []),
       ]} />
-      <OfferHero />
+      <OfferHero note={data.heroNote} />
       <VoiceWall notes={data.notes} />
       <HowItWorks promise={data.promise} timeline={data.timeline} />
       <PriceSection
@@ -49,7 +49,7 @@ export default async function LandingPage() {
         membershipHref={buildAuthHref('/profile?tab=subscription')}
       />
       <OfferFaq groups={data.faqGroups} />
-      <FinalAction showStack={data.showStack} founderSeats={data.founderSeats} />
+      <FinalAction showStack={data.showStack} founderSeats={data.founderSeats} note={data.finalNote} />
     </SiteShell>
   );
 }

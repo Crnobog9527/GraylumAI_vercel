@@ -20,13 +20,13 @@ const ALL_ON = Object.fromEntries(Object.keys(LANDING_FEATURES).map(key => [key,
 function renderPage(flags: LandingFlags) {
   const data = buildLandingPageData(flags, CATALOG, { goldFirstMonth: 49, founder: { price: 496, total: 50, available: 37 } });
   return renderToStaticMarkup(createElement(Fragment, null,
-    createElement(OfferHero),
+    createElement(OfferHero, { note: data.heroNote }),
     createElement(VoiceWall, { notes: data.notes }),
     createElement(HowItWorks, { promise: data.promise, timeline: data.timeline }),
     createElement(PriceSection, { pricing: data.pricing, rows: data.compareRows, risk: data.risk, showResult: data.showResult,
       founderSeats: data.founderSeats, membershipHref: '/profile?tab=subscription' }),
     createElement(OfferFaq, { groups: data.faqGroups }),
-    createElement(FinalAction, { showStack: data.showStack, founderSeats: data.founderSeats }),
+    createElement(FinalAction, { showStack: data.showStack, founderSeats: data.founderSeats, note: data.finalNote }),
   ));
 }
 
@@ -60,6 +60,10 @@ describe('landing page sections', () => {
     expect(html).not.toContain('排程工具');
     expect(html).not.toContain('创始会员');
     expect(html).not.toContain('模型 A');
+    // The opening grant is still 100 credits, so the 500-credit promise waits for that change.
+    expect(html).not.toContain('500 积分');
+    expect(html).toContain('免费注册，不用绑卡。聊出来的内容随时能看、能导出，不会收回。');
+    expect(html).toContain('不用绑卡 · 聊出来的内容不会收回');
     // The page never states income, follower growth or durations.
     expect(html).not.toMatch(/月入|涨粉\d|\d+\s*(分钟|小时内出)/);
   });

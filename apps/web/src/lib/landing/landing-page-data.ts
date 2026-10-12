@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import type { PaywallPlanSource } from '@/components/paywall/paywallPlans';
-import { FINAL_ACTION, HOW_IT_WORKS, PRICE_COMPARE, RISK_REVERSAL, VOICE_WALL } from './landing-copy';
+import { FINAL_ACTION, HERO, HOW_IT_WORKS, PRICE_COMPARE, RISK_REVERSAL, VOICE_WALL } from './landing-copy';
 import { LANDING_FAQ, faqAnswerText } from './landing-faq';
 import { allOn, visibleItems, type LandingFlags } from './landing-flags';
 import { buildLandingPricing, landingOfferList, type LandingOffers } from './landing-pricing';
@@ -23,6 +23,8 @@ export function buildLandingPageData(flags: LandingFlags, plans: readonly Paywal
   const founderSeats = pricing.founderOpen && offers.founder ? offers.founder.available : null;
 
   return {
+    heroNote: visibleItems(flags, HERO.note).map(part => part.text).join(''),
+    finalNote: visibleItems(flags, FINAL_ACTION.note).map(part => part.text).join(' · '),
     notes: visibleItems(flags, VOICE_WALL.notes),
     promise: visibleItems(flags, HOW_IT_WORKS.promise),
     timeline: visibleItems(flags, HOW_IT_WORKS.timeline),

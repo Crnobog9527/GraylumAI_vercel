@@ -7,7 +7,7 @@ import { cn } from '@/lib/utils';
 import styles from './offer.module.css';
 
 /** Closing section (offer section 6): the two paths, the stack summary, founder seats, one button. */
-export function FinalAction({ showStack, founderSeats }: { showStack: boolean; founderSeats: number | null }) {
+export function FinalAction({ showStack, founderSeats, note }: { showStack: boolean; founderSeats: number | null; note: string }) {
   return (
     <section aria-labelledby="final-action-title" className={cn(styles.deferred, 'border-t border-[#1F1F1F] px-4 py-20 sm:px-6 md:py-28 lg:px-8')}>
       <div className="mx-auto max-w-3xl text-center">
@@ -38,7 +38,7 @@ export function FinalAction({ showStack, founderSeats }: { showStack: boolean; f
           {FINAL_ACTION.cta}
           <ArrowRight className="h-5 w-5" aria-hidden="true" />
         </Link>
-        <p className="mt-4 text-sm text-[#9A9A9A]">{FINAL_ACTION.note}</p>
+        <p className="mt-4 text-sm text-[#9A9A9A]">{note}</p>
       </div>
     </section>
   );

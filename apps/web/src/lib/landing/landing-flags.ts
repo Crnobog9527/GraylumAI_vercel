@@ -22,6 +22,8 @@ export const LANDING_FEATURES = {
   content: { task: 'CONTENT-CONVERSATION-DRIVEN', accepted: false },
   publish: { task: 'PUBLISH-MONITOR', accepted: false },
   fusion: { task: 'FUSION-REVIEW', accepted: false },
+  // The page promises 500 sign-up credits; the opening grant is still 100 until that change is deployed.
+  signupGrant: { task: 'PAYWALL（注册赠送 500 积分）', accepted: false },
   // Founder seats and their price need a public server answer (seat count is login-only today).
   founder: { task: 'PAY-FOUNDER', accepted: false },
   // Per-audience sample reports, generated with demo accounts once RESEARCH-TOOLS is live.

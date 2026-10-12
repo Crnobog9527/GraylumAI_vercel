@@ -9,7 +9,7 @@ import { cn } from '@/lib/utils';
  * First screen: the page's only H1, the dream outcome and the two buttons. Server-rendered and
  * not animated, so the largest text paints with the HTML (no fade-in on the LCP element).
  */
-export function OfferHero() {
+export function OfferHero({ note }: { note: string }) {
   return (
     <section className="relative overflow-hidden px-4 pb-20 pt-16 sm:px-6 md:pb-28 md:pt-24 lg:px-8">
       <div
@@ -43,7 +43,7 @@ export function OfferHero() {
             <ArrowDown className="h-5 w-5" aria-hidden="true" />
           </a>
         </div>
-        <p className="mx-auto mt-5 max-w-xl text-sm leading-relaxed text-[#9A9A9A]">{HERO.note}</p>
+        <p className="mx-auto mt-5 max-w-xl text-sm leading-relaxed text-[#9A9A9A]">{note}</p>
       </div>
     </section>
   );

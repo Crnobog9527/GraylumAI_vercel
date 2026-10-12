@@ -114,6 +114,9 @@ describe('landing page data', () => {
     );
     expect(data.founderSeats).toBe(12);
     expect(data.showStack).toBe(true);
+    expect(data.heroNote).toBe('免费注册，不用绑卡。注册送 500 积分。聊出来的内容随时能看、能导出，不会收回。');
+    expect(data.finalNote).toBe('不用绑卡 · 注册送 500 积分 · 聊出来的内容不会收回');
+    expect(data.risk).toHaveLength(4);
   });
 
   it('keeps the founder offer hidden while its switch is off, even if the server sends it', () => {
