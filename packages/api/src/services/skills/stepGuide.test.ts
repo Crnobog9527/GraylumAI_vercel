@@ -70,9 +70,19 @@ it('adds nothing for a package without workflow.yaml', async () => {
   expect(await loadStepWork(f.source, f.descriptor)).toBeUndefined();
   expect(f.reads).toEqual([]);
 });
-it('stays within its size cap', () => {
-  const steps = Array.from({length: 32}, (_, i) => ({title: '步骤'.repeat(70) + i, resources: ['SKILL.md'],
+it('stays within its size cap and never drops a step', () => {
+  const steps = Array.from({length: 32}, (_, i) => ({title: '步'.repeat(150) + i, resources: ['SKILL.md'],
     information: Array.from({length: 24}, (_, j) => ({id: 'f' + j, title: '字段'.repeat(70), required: false, description: '说明'.repeat(190)}))}));
-  const text = stepGuideText(parseWorkflowManifest(JSON.stringify({kind: 'document', steps})));
-  expect(text!.length).toBeLessThanOrEqual(STEP_GUIDE_MAX_CHARS);
+  const text = stepGuideText(parseWorkflowManifest(JSON.stringify({kind: 'document', steps})))!;
+  expect(text.length).toBeLessThanOrEqual(STEP_GUIDE_MAX_CHARS);
+  for (let i = 0; i < 32; i++) expect(text).toContain(`${i + 1}. ${'步'.repeat(150)}${i}`);
+  const short = stepGuideText(parseWorkflowManifest(JSON.stringify({kind: 'document', steps: steps.slice(0, 3).map(step =>
+    ({...step, information: step.information.slice(0, 2)}))})))!;
+  expect(short).toContain('：' + '说明'.repeat(190));
+});
+it('leaves room for the rest of the request: files over half the budget fall back to SKILL.md and the guide', async () => {
+  const f = fixture(script, 'x'.repeat(1800));
+  const {instructions} = await activateFreeChatSkill(f.source, f.descriptor, {maxContextBytes: 3000});
+  expect(instructions).not.toContain('xxxxx');
+  expect(instructions).toContain('1. 找开头');
 });

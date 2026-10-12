@@ -8,20 +8,26 @@ import {parseWorkflowManifest, workflowManifestPath, type WorkflowManifest} from
  * inside free chat, where the steps its workflow.yaml declares are an ordered work guide for the model,
  * not a workspace with confirmations. Without this the steps never reached the model (only SKILL.md did).
  */
-export const STEP_GUIDE_MAX_CHARS = 4000;
+// 32 steps of at most 160-character titles always fit; field details are shortened first.
+export const STEP_GUIDE_MAX_CHARS = 8000;
+const GUIDE_HEADER = 'Work guide declared by this Skill. Follow the steps in order inside the conversation; they are not '
+  + 'separate screens and need no confirmation cards. Ask only for what the current step still needs, '
+  + 'and skip what the user already gave.';
 
 export function stepGuideText(manifest: WorkflowManifest): string | undefined {
   // Positioning is the one guided flow, by the same rule as the positioning entry (and migration 0219).
   if (isPositioningWorkflow(manifest)) return undefined;
-  const lines = manifest.steps.map((step, index) => {
-    const fields = (step.information ?? []).map(field =>
-      `   - ${field.title}${field.description ? '：' + field.description : ''}`);
-    return [`${index + 1}. ${step.title}`, ...fields].join('\n');
-  });
-  const text = 'Work guide declared by this Skill. Follow the steps in order inside the conversation; they are not '
-    + 'separate screens and need no confirmation cards. Ask only for what the current step still needs, '
-    + 'and skip what the user already gave.\n' + lines.join('\n');
-  return text.length > STEP_GUIDE_MAX_CHARS ? text.slice(0, STEP_GUIDE_MAX_CHARS) : text;
+  // Every step stays; when too long, drop field descriptions, then field titles.
+  for (const detail of ['full', 'titles', 'steps'] as const) {
+    const lines = manifest.steps.map((step, index) => {
+      const fields = detail === 'steps' ? [] : (step.information ?? []).map(field =>
+        `   - ${field.title}${detail === 'full' && field.description ? '：' + field.description : ''}`);
+      return [`${index + 1}. ${step.title}`, ...fields].join('\n');
+    });
+    const text = GUIDE_HEADER + '\n' + lines.join('\n');
+    if (text.length <= STEP_GUIDE_MAX_CHARS || detail === 'steps') return text;
+  }
+  return undefined;
 }
 
 /** The step work of a non-positioning Skill: the guide text and the files its steps declare, in order. */
@@ -41,7 +47,7 @@ export async function loadStepWork(source: SkillSource, descriptor: PackageDescr
 
 /**
  * Free chat activation of a Skill: SKILL.md, plus for a non-positioning Skill its steps' declared files and the
- * ordered guide. When those files do not fit the model, fall back to SKILL.md and the guide rather than refusing
+ * ordered guide. When those files do not fit in half the budget, fall back to SKILL.md and the guide rather than refusing
  * the Skill; positioning and packages without workflow.yaml load exactly as before.
  */
 export async function activateFreeChatSkill(source: SkillSource, descriptor: PackageDescriptor,
@@ -49,7 +55,9 @@ export async function activateFreeChatSkill(source: SkillSource, descriptor: Pac
   const work = options.task === undefined ? await loadStepWork(source, descriptor) : undefined;
   let loaded: LoadedSkill | undefined;
   if (work?.resources.length) {
-    try { loaded = await activateSkill(source, identityOf(descriptor), {resources: work.resources, maxContextBytes: options.maxContextBytes}); }
+    // The steps' files may use at most half the budget, leaving room for the guide, the input and tools.
+    const budget = Math.max(1, Math.floor(options.maxContextBytes / 2));
+    try { loaded = await activateSkill(source, identityOf(descriptor), {resources: work.resources, maxContextBytes: budget}); }
     catch (error) { if (!String((error as Error)?.message).includes('CAPACITY_EXCEEDED')) throw error; }
   }
   loaded ??= await activateSkill(source, identityOf(descriptor), options);
