@@ -1,6 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import {allowTestCalls} from '../__tests__/fixtures/runtimeGates';
 import { pricingConfig } from '../__tests__/fixtures/runtimePricing';
+import { configuredReasoning } from '../__tests__/fixtures/runtimeReasoning';
 import { beforeAll, afterAll, it, expect, vi } from 'vitest';
 import {logger} from '../../lib/logger';
 import { randomUUID, createHash } from 'node:crypto';
@@ -612,7 +613,10 @@ it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true').each([10000,1050000])('RU
  const user=createClient(process.env.V3_LOCAL_REST!,process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,{auth:{persistSession:false}});
  const login=await user.auth.signInWithPassword({email,password});if(login.error)throw login.error;
  await db.query("insert into ai_models(id,name,model_id,provider,is_active,max_tokens,input_limit,price_multiplier) values($1,'Synthetic quote','test/admission','openai','true',1000,$2,1)",[model,contextTokens]);
- await db.query('update ai_models set config=$2 where id=$1',[model,pricingConfig('test/admission','synthetic',contextTokens===1050000?'0.4':'2',contextTokens===1050000?'1.8':'0')]);
+ // Real free chat freezes the administrator's interactive reasoning on the quoted route.
+ const reasoning=configuredReasoning('test/admission').reasoning;
+ await db.query('update ai_models set config=$2 where id=$1',[model,{...pricingConfig('test/admission','synthetic',contextTokens===1050000?'0.4':'2',contextTokens===1050000?'1.8':'0'),
+  reasoning:{...reasoning,route:'synthetic',catalog:{...reasoning.catalog!,endpoints:reasoning.catalog!.endpoints.map(e=>({...e,tag:'synthetic'}))}}}]);
  const upperUsd=contextTokens===1050000?'0.4218':'0.02',outputLimit=contextTokens===1050000?1000:100;
  // BILL-UNIT window: each entry carries the model's m_i, equal to the configuration (price_multiplier=1).
  const call={multiplier:'1',modelId:model,provider:'openrouter',account:'synthetic-account',model:'test/admission',protocol:'openrouter-chat-v1',upperUsd,inputLimit:8000,outputLimit,automaticRetry:false,hiddenTools:false,lookupSupported:true,providerLimits:{providerSlug:'synthetic',contextTokens,promptUsdPerMillion:contextTokens===1050000?'0.4':'2',completionUsdPerMillion:contextTokens===1050000?'1.8':'0',requestUsd:'0'}};

@@ -5,16 +5,20 @@ import {packageHash,sha256} from '../skills/loader';
 import {runtimeAdmissionService} from './admission';
 import {runtimeContext} from './runtimeContext';
 import {StagingAccessError,stagingProcedureError} from './stagingErrors';
+import {sourceToolBytes} from './sourceRuntimeTool';
+import {withPrimaryAddenda} from './primaryInstructions';
+import {PROMPT_CACHE_OVERHEAD_BYTES} from './promptCache';
 import {RUNTIME_INPUT_TOO_LONG_MESSAGE} from '../../shared/runtimeInputMessages';
 import {OPENING_INPUT} from '../../shared/opcQuestions';
 vi.mock('./newWorkGate',async original=>({...await original<typeof import('./newWorkGate')>(),
  ...(await import('../__tests__/fixtures/runtimeGates')).testAdmissionGates}));
 vi.mock('../skills/databaseSource',()=>({databaseSkillSource:()=>({list:async()=>[descriptor],state:async()=> 'enabled'})}));
-const skill=vi.hoisted(()=>({instructions:'Synthetic Skill',file:''}));
+const skill=vi.hoisted(()=>({instructions:'Synthetic Skill',file:'',activations:0,tooLarge:false}));
 const matching=vi.hoisted(()=>({candidates:[] as unknown[]}));
 vi.mock('./matching',async original=>({...await original<typeof import('./matching')>(),discoverRuntimeCandidates:async()=>matching.candidates}));
-vi.mock('../skills/loader',async original=>({...await original<typeof import('../skills/loader')>(),
- readSkillResource:async()=>skill.file,activateSkill:async()=>({forModel:()=>skill.instructions})}));
+vi.mock('../skills/loader',async original=>{const real=await original<typeof import('../skills/loader')>();return {...real,
+ readSkillResource:async()=>skill.file,activateSkill:async()=>{skill.activations++;
+  if(skill.tooLarge)throw new real.SkillLoadError('CAPACITY_EXCEEDED');return {forModel:()=>skill.instructions};}};});
 const actor='10000000-0000-4000-8000-000000000001';
 const model='10000000-0000-4000-8000-000000000002';
 const revision='10000000-0000-4000-8000-000000000003';
@@ -24,12 +28,13 @@ const base={packageId:module,revisionId:revision,directoryName:'test',files:[{
 }],tasks:{},requiredCapabilities:[]};
 const descriptor={...base,packageHash:packageHash(base)};
 function fixture(){
- skill.instructions='Synthetic Skill';skill.file='';matching.candidates=[];
+ skill.instructions='Synthetic Skill';skill.file='';skill.activations=0;skill.tooLarge=false;matching.candidates=[];
  let saved:unknown=null;
  const rpc=vi.fn(async(name:string,args:Record<string,unknown>)=>{
   if(name==='runtime_session_context')return {data:{scope:{kind:'positioning_draft',draftId:actor}},error:null};
   if(name==='runtime_admission_replay')return {data:saved,error:null};
   if(name==='runtime_admit'){saved={context:args.p_payload,billing:args.p_billing};return {data:saved,error:null};}
+  if(name==='runtime_workspace_session')return {data:true,error:null};
   throw new Error(name);
  });
  const admin={rpc,from:(table:string)=>{
@@ -81,6 +86,63 @@ it('refuses user input that does not fit even without the file tool as a typed r
  const f=fixture();
  const refused=runtimeAdmissionService(f.user,f.admin,{...f.policy,inputBytes:14000}).prepare({...f.input,input:'中'.repeat(8000)});
  await expect(refused).rejects.toBeInstanceOf(StagingAccessError);
+ await expect(refused).rejects.toThrow('RUNTIME_INPUT_TOO_LONG');
+ expect(f.rpc.mock.calls.some(([name])=>name==='runtime_admit')).toBe(false);
+});
+
+const candidateModel=(n:number)=>`10000000-0000-4000-8000-0000000000${10+n}`;
+const autoCandidate=(n:number,inputLimit:number)=>({key:'candidate-'+n,name:'Synthetic '+n,description:'Synthetic skill',moduleId:module,skillId:module,
+ packageId:module,revisionId:revision,packageHash:descriptor.packageHash,modelId:candidateModel(n),model:'fixture',inputLimit,outputLimit:100,requiresTask:false});
+const autoPolicy={inputBytes:32000,mentorStream:false,skillFileRead:false,opcTurnToken:undefined};
+const autoInput={selection:{kind:'auto',modelId:model}};
+
+it('drops an automatic match candidate whose own capacity cannot run the selected Skill before any charge',async()=>{
+ const f=fixture();skill.instructions='S'.repeat(9000);
+ matching.candidates=[autoCandidate(0,14000),autoCandidate(1,10000)];
+ const admitted=await runtimeAdmissionService(f.user,f.admin,{...f.policy,...autoPolicy})
+  .prepare({...f.input,...autoInput,input:'x'.repeat(3000)});
+ expect(admitted.context.matching.candidates.map((c:{key:string})=>c.key)).toEqual(['candidate-0']);
+ expect(admitted.billing.callPolicy.map((p:{modelId:string})=>p.modelId)).not.toContain(candidateModel(1));
+ expect(admitted.context.maxTurns).toBe(1);
+});
+
+it('skips the paid match and admits an ordinary turn when no candidate can hold the input',async()=>{
+ const f=fixture();skill.instructions='S'.repeat(9000);
+ matching.candidates=[autoCandidate(0,2000),autoCandidate(1,10000)];
+ const admitted=await runtimeAdmissionService(f.user,f.admin,{...f.policy,...autoPolicy})
+  .prepare({...f.input,...autoInput,input:'x'.repeat(3000)});
+ expect(admitted.context.matching).toBeUndefined();expect(admitted.context.role).toBe('ordinary');
+ expect(admitted.context.maxTurns).toBe(2);
+ expect(admitted.billing.callPolicy.map((p:{modelId:string})=>p.modelId)).toEqual([model]);
+ // The 2000-byte candidate cannot hold the input alone, so only the other one loaded its Skill.
+ expect(skill.activations).toBe(1);
+});
+
+it('drops a candidate whose Skill is too large for its own model instead of failing the turn',async()=>{
+ const f=fixture();skill.tooLarge=true;matching.candidates=[autoCandidate(0,14000)];
+ const admitted=await runtimeAdmissionService(f.user,f.admin,{...f.policy,...autoPolicy})
+  .prepare({...f.input,...autoInput,input:'x'.repeat(3000)});
+ expect(admitted.context.matching).toBeUndefined();expect(admitted.context.role).toBe('ordinary');
+ expect(skill.activations).toBe(1);
+});
+
+it('sizes candidates with the workspace read_source description the executor will send, to the exact byte',async()=>{
+ skill.instructions='S'.repeat(9000);const input='x'.repeat(3000);
+ const admit=async(limit:number)=>{const f=fixture();skill.instructions='S'.repeat(9000);matching.candidates=[autoCandidate(0,limit)];
+  return runtimeAdmissionService(f.user,f.admin,{...f.policy,...autoPolicy,workspaceContext:true,maxCalls:3}).prepare({...f.input,...autoInput,input});};
+ const probe=await admit(31000);
+ expect(probe.context.tools).toEqual(['read_source']);expect(probe.context.matching.candidates).toHaveLength(1);
+ const instructions=withPrimaryAddenda(skill.instructions,{workspaceContext:true,network:'deny'});
+ const required=Buffer.byteLength(JSON.stringify({instructions,messages:[{role:'user',content:input}]}))+1024+
+  sourceToolBytes(['read_source'],true)+(probe.context.promptCache?PROMPT_CACHE_OVERHEAD_BYTES:0);
+ expect((await admit(required)).context.matching.candidates).toHaveLength(1);
+ expect((await admit(required-1)).context.matching).toBeUndefined();
+});
+
+it('refuses before admission when neither a candidate nor the ordinary turn can hold the input',async()=>{
+ const f=fixture();matching.candidates=[autoCandidate(0,2000)];
+ const refused=runtimeAdmissionService(f.user,f.admin,{...f.policy,...autoPolicy,inputBytes:14000})
+  .prepare({...f.input,...autoInput,input:'中'.repeat(8000)});
  await expect(refused).rejects.toThrow('RUNTIME_INPUT_TOO_LONG');
  expect(f.rpc.mock.calls.some(([name])=>name==='runtime_admit')).toBe(false);
 });

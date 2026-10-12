@@ -6,7 +6,7 @@
 
 import type Stripe from 'stripe';
 import { isDeepStrictEqual } from 'node:util';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const providerState = vi.hoisted(() => ({
   invoice: vi.fn(), subscription: vi.fn(), checkout: vi.fn(), price: vi.fn(),
@@ -5272,6 +5272,10 @@ describe('stripe fulfillment helpers', () => {
   });
 
 });
+
+// Several tests import the web webhook route on demand. Its first, uncached transform can take
+// longer than the default 5s test timeout (observed 8.5s), so load it once with its own budget.
+beforeAll(async () => { await import('../../../../../apps/web/src/app/api/stripe/webhook/route'); }, 60_000);
 
 describe('PAY-1 card and Alipay fulfillment compatibility', () => {
   it.each(['card', 'alipay'])('completed-paid %s replay and later async success commit credits only once', async (method) => {

@@ -22,7 +22,9 @@ import { throwIfContentBindingRefused } from '../opc/contentBindingError';
 import {StagingAccessError,stagingRpcFailure} from './stagingErrors';
 import {frozenCallPolicy, type FrozenPaygRun, type FrozenRun} from '../bill2/service';
 import { selectRuntimeHistory, fixtureInputCapacity, runtimeScopeInput } from './context';
-import { discoverRuntimeCandidates, matchingInput, MATCH_INSTRUCTIONS } from './matching';
+import { activateRuntimeCandidate, discoverRuntimeCandidates, fittingCandidates, matchingInput, MATCH_INSTRUCTIONS } from './matching';
+import { withPrimaryAddenda } from './primaryInstructions';
+import { sourceToolBytes } from './sourceRuntimeTool';
 import { type ReasoningPolicy } from './reasoningPolicy';
 import { admitReasoning } from './reasoningAdmission';
 import type {AnsweredCard} from '../opc/answerCard';
@@ -36,6 +38,8 @@ import {assertFrozenPayloads} from './payloadSize';
 import {freezeWindowBillingUnit} from './billingUnitAdmission';
 import {newWorkGate,readNewWorkSettings,requireNewWork} from './newWorkGate';
 import {requireAllowedInput} from './moderation';
+import {FREE_CHAT_REQUEST_FORMAT} from './providerRequest';
+import {admissionDeadline,admittedOutputLimit} from './admissionLimits';
 import {admitPricing} from './pricingAdmission';
 import {freezeStagingPaygPricing} from './paygPricing';
 import {freezePaygMessageBudget} from './paygMessageBudget';
@@ -89,8 +93,8 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
  // Only new admissions use current limits. Replays return their frozen context above.
  // The local fixture default is not an additional ceiling on an approved real quote.
  function outputCapacity(row:Record<string,unknown>,organizerLimit=Infinity,configuredOutput?:number){
-  return Math.min(policy.real?realModel(row).outputLimit:configuredOutput??policy.maxOutputTokens,
-   Number(row.max_tokens),organizerLimit,PURPOSE_OUTPUT_CAP);
+  return admittedOutputLimit(policy.real?realModel(row).outputLimit:configuredOutput??policy.maxOutputTokens,
+   row.max_tokens,organizerLimit);
  }
  function inputCapacity(row:Record<string,unknown>,output:number,bytes=policy.inputBytes){
   return policy.real?Math.min(bytes,realModel(row).inputLimit):fixtureInputCapacity(Number(row.input_limit),output,bytes);
@@ -230,7 +234,7 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
    }
    // SDK turns count model requests only. Paid search consumes another BILL2
    // call, and attached organization must remain inside this same frozen run.
-   const candidates=input.selection.kind==='auto'?await discoverRuntimeCandidates(
+   let candidates=input.selection.kind==='auto'?await discoverRuntimeCandidates(
     user,admin,{...policy,inputBytes,maxOutputTokens:configuredOutput??policy.maxOutputTokens,...(policy.real?{resolveCapacity:(row:Record<string,unknown>)=>{const q=realModel(row);return {inputLimit:Math.min(inputBytes,q.inputLimit),outputLimit:outputCapacity(row,Infinity,configuredOutput)};}}:{})}):[];
    if(policy.additionalInstructions)instructions+='\n'+z.string().max(budgets||policy.reportGeneration?inputBytes:8000).parse(policy.additionalInstructions);
    let promptCache=hostTurnContext||policy.reportGeneration?undefined:freezePromptCache({
@@ -278,6 +282,13 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
     if(capability.error&&!['PGRST202','42883'].includes(capability.error.code))throw new Error('RUNTIME_WORKSPACE_UNAVAILABLE');
     workspaceContext=!capability.error&&capability.data===true;
    }
+   // All dropped: no paid match; the turn is admitted exactly as an ordinary selection.
+   const sourceTools=[...(searchAllowed?['search']:[]),...(input.sources.length||workspaceContext?['read_source']:[])];
+   // The executor sizes a selected Skill with these exact tool descriptions plus the same cache/marker overhead.
+   if(candidates.length)candidates=await fittingCandidates(candidates,candidate=>activateRuntimeCandidate(user,admin,candidate),
+    {input:currentInput,inputBytes,toolBytes:sourceToolBytes(sourceTools,workspaceContext)+
+     (historySelection?.markerReserveBytes??(promptCache?PROMPT_CACHE_OVERHEAD_BYTES:0)),
+     instructions:skill=>withPrimaryAddenda(skill,{workspaceContext,network:input.network})});
    const primaryTurns=maxCalls-(attachedOrganizer?1:0)-(searchAllowed?1:0)-(candidates.length?1:0);
    if(primaryTurns<(searchAllowed||input.sources.length||workspaceContext?2:1))throw new Error('RUNTIME_CALL_BUDGET');
    // Splitting only helps when a modest message still fits; otherwise this is a configuration failure (500).
@@ -300,11 +311,14 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
    let reasoning:ReasoningPolicy|undefined;
    const organize=input.selection.kind==='organizer';
    if((mentorStream||stepStream||policy.reportGeneration)&&!policy.real)reasoning={parameter:'none'};
-   if(policy.real&&(mentorStream||stepStream||organize||policy.reportGeneration))
+   // Real free chat freezes the administrator's interactive reasoning (fail closed when unset).
+   // Skill matching ('auto') stays on its original format: a matched Skill may use another model.
+   const freeChat=Boolean(policy.real&&input.selection.kind==='ordinary'&&!mentorStream&&!stepStream&&!policy.reportGeneration);
+   if(policy.real&&(mentorStream||stepStream||organize||policy.reportGeneration||freeChat))
     reasoning=admitReasoning(row.data,organize?'organize':'interactive',realModel(row.data).providerLimits!.providerSlug,maxOutputTokens);
    const organizerFormat=Boolean(policy.real&&!mentorStream&&(organize||attachedOrganizer));
    if(organizerFormat&&!reasoning)reasoning={parameter:'none'};
-   const providerRequestFormat=mentorStream||policy.reportGeneration?'agent-turn-v5-stream':stepStream?'serial-tools-v4-stream':organizerFormat?'serial-tools-v6-reasoning':'serial-tools-v2';
+   const providerRequestFormat=mentorStream||policy.reportGeneration?'agent-turn-v5-stream':stepStream?'serial-tools-v4-stream':organizerFormat?'serial-tools-v6-reasoning':freeChat?FREE_CHAT_REQUEST_FORMAT:'serial-tools-v2';
    const context={version:'runtime.v1',sdkVersion:'0.18.0',inputSelection:hostTurnContext?'scope-projection-v2':'scope-projection-v1',
     ...(hostTurnContext?{hostTurnContext,historySelection}:{}),
     ...(policy.reportGeneration?{reportGeneration:policy.reportGeneration}:{}),
@@ -320,7 +334,7 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
     ...(budgets||policy.reportGeneration?{purposeBudget:{purpose,inputBytes,historyItems}}:{}),
     ...(skillFile?{skillFile,skillFileReserve}:{}),
     tools:mentorStream?(opening?[]:[...(stepSummary?[]:[ASK_QUESTION_TOOL]),...(skillFile?['read_skill_file']:[])]):
-     [...(searchAllowed?['search']:[]),...(input.sources.length||workspaceContext?['read_source']:[])],
+     sourceTools,
     maxToolCalls:mentorStream?(opening||stepSummary&&!skillFile?0:1):
      (searchAllowed?1:0)+(workspaceContext?Math.min(2,primaryTurns-1):input.sources.length),
     request,...(policy.answeredCard?{answeredCard:policy.answeredCard}:{}),...(revisionId?{moduleId,skillId,revisionId}:{}),sources:input.sources};
@@ -336,7 +350,7 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
     ...(revisionId?{moduleId,skillId,revisionId}:{}),sourceHash:createHash('sha256').update(JSON.stringify(context)).digest('hex'),input:context,
     callPolicy:[{modelId,provider:'fixture',account:policy.account,model:row.data.model_id,protocol:'fixture-cost-v1',upperUsd:policy.costPerCall,inputLimit,outputLimit:maxOutputTokens,automaticRetry:false,hiddenTools:false,lookupSupported:true}],
     rules:{version:policy.real?'runtime-staging-v1':'runtime-local-v1',quoteVersion:policy.real?.id??'runtime-local-v1',creditsPerUsd:policy.creditsPerUsd,multiplier:policy.multiplier,fx:{}},
-    limits:{costUsd:cost,credits,maxPreDeduct:credits,maxCalls,deadline:new Date(Math.min(Date.now()+3600000,policy.real?Date.parse(policy.real.expiresAt):Infinity)).toISOString()}};
+    limits:{costUsd:cost,credits,maxPreDeduct:credits,maxCalls,deadline:admissionDeadline(policy.real?.expiresAt)}};
    if(attachedOrganizer)billing.callPolicy.push({...billing.callPolicy[0],modelId:attachedOrganizer.modelId,model:attachedOrganizer.model,inputLimit:attachedInputLimit!,outputLimit:attachedOrganizer.maxOutputTokens});
    for(const candidate of candidates){
     if(attachedOrganizer)modelConfiguration(()=>assertSeparateSummaryModel(candidate.model,attachedOrganizer!.model));

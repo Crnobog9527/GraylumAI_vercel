@@ -16,6 +16,12 @@ const reasoningDetails=z.array(z.union([
   index:z.number().int().nonnegative(),format:z.literal('anthropic-claude-v1'),
   signature:z.string().min(1).max(OPENROUTER_RESPONSE_BYTE_LIMIT),
  }).strict(),
+ // Observed Gemini thought signature (text omitted). Storage-only like Claude's:
+ // dropped from completed text history, never forwarded with a tool continuation.
+ z.object({type:z.literal('reasoning.text'),text:z.string().max(OPENROUTER_RESPONSE_BYTE_LIMIT).optional(),
+  index:z.number().int().nonnegative(),format:z.literal('google-gemini-v1'),
+  signature:z.string().min(1).max(OPENROUTER_RESPONSE_BYTE_LIMIT),
+ }).strict(),
  // OpenRouter's summary schema permits an omitted/null id. Accept only the
  // observed OpenAI format; summaries stay private alongside encrypted data.
  z.object({type:z.literal('reasoning.summary'),format:z.literal('openai-responses-v1'),
@@ -29,8 +35,19 @@ const reasoningDetails=z.array(z.union([
  }).strict(),
 ])).nullish();
 const requiresOriginalReasoning=(details:unknown)=>Array.isArray(details)&&details.some(detail=>
- detail?.type==='reasoning.encrypted'||detail?.type==='reasoning.summary'||detail?.format==='anthropic-claude-v1');
+ detail?.type==='reasoning.encrypted'||detail?.type==='reasoning.summary'||
+ detail?.format==='anthropic-claude-v1'||detail?.format==='google-gemini-v1');
 const reasoning=z.string().nullish();
+/** OpenRouter may number a returned tool call (`index: 0`); SDK 0.18 keeps it in the
+ * call's metadata and replays it. One call per turn is the only shape accepted, so
+ * only index 0 is removed; any other value stays for the strict schemas to reject. */
+function withoutCallIndex(call:unknown):unknown{
+ if(!call||typeof call!=='object'||Array.isArray(call)||!('index' in call)||call.index!==0)return call;
+ const rest={...call as Record<string,unknown>};
+ delete rest.index;
+ return rest;
+}
+const withoutCallIndexes=(calls:unknown)=>Array.isArray(calls)?calls.map(withoutCallIndex):calls;
 const textParts=(toolNames:ReadonlySet<string>)=>z.array(z.object({type:z.literal('text'),text:z.string(),role:z.literal('assistant').optional(),
  // SDK 0.18 streaming always attaches an empty annotations list. Only this
  // empty shape is supported; citations/research metadata remain denied.
@@ -48,18 +65,22 @@ export function normalizeOpenRouterHistory(request:{messages?:unknown},toolNames
  request.messages=request.messages.map(message=>{
   if(!message||typeof message!=='object'||Array.isArray(message)||message.role!=='assistant')return message;
   const normalized={...message};
+  if('tool_calls' in message)normalized.tool_calls=withoutCallIndexes(message.tool_calls);
+  // SDK 0.18 replays the call's extra metadata on the assistant message itself.
+  if(message.index===0&&Array.isArray(message.tool_calls)&&message.tool_calls.length===1)delete normalized.index;
   if(!reasoning.safeParse(message.reasoning).success||!reasoningDetails.safeParse(message.reasoning_details).success)
    throw new Error('RUNTIME_PROVIDER_HISTORY_DENIED');
   let signedReasoning=requiresOriginalReasoning(message.reasoning_details);
   delete normalized.reasoning;delete normalized.reasoning_details;
   if(Array.isArray(message.content)){
-   const parsed=textParts(toolNames).safeParse(message.content);
+   const parsed=textParts(toolNames).safeParse(message.content.map((part:unknown)=>
+    part&&typeof part==='object'&&!Array.isArray(part)&&'tool_calls' in part?{...part,tool_calls:withoutCallIndexes(part.tool_calls)}:part));
    if(!parsed.success)throw new Error('RUNTIME_PROVIDER_HISTORY_DENIED');
    for(const part of parsed.data){
     signedReasoning ||=requiresOriginalReasoning(part.reasoning_details);
     // A duplicated tool field is removable only when the actual top-level calls
     // are identical. Unknown or parallel calls remain for the adapter to reject.
-    if(part.tool_calls?.length&&!isDeepStrictEqual(part.tool_calls,message.tool_calls))
+    if(part.tool_calls?.length&&!isDeepStrictEqual(part.tool_calls,normalized.tool_calls))
      throw new Error('RUNTIME_PROVIDER_HISTORY_DENIED');
    }
    normalized.content=parsed.data.map(part=>part.text).join('');
@@ -94,7 +115,7 @@ export function projectOpenRouterItemsForSizing(items:unknown[],historyCount=0,t
   if(value.type==='function_call'){
    const call={id:value.callId,type:'function',function:{name:value.name,arguments:value.arguments}};
    if(pendingCall||!keys(['id','type','callId','name','arguments','status','providerData'])||!toolCall.safeParse(call).success)return denied();
-   if(value.providerData!==undefined&&!isDeepStrictEqual({...value.providerData as object,id:value.callId},call))return denied();
+   if(value.providerData!==undefined&&!isDeepStrictEqual({...withoutCallIndex(value.providerData) as object,id:value.callId},call))return denied();
    if(expectedCalls&&!isDeepStrictEqual(expectedCalls,[call]))return denied();
    expectedCalls=undefined;pendingCall=value.callId;pendingName=value.name;
    return {role:'assistant',content:null,tool_calls:[call]};
@@ -126,7 +147,7 @@ export function projectOpenRouterItemsForSizing(items:unknown[],historyCount=0,t
   if(value.role!=='assistant')return {role:value.role,content:parts};
   // Reuse the frozen wire projection and require duplicated calls to match the
   // following actual SDK function_call; no unknown/parallel tool can be cut away.
-  expectedCalls=parts.find(part=>Array.isArray(part.tool_calls)&&part.tool_calls.length)?.tool_calls;
+  expectedCalls=withoutCallIndexes(parts.find(part=>Array.isArray(part.tool_calls)&&part.tool_calls.length)?.tool_calls);
   const request={messages:[{role:'assistant',content:parts,...(expectedCalls?{tool_calls:expectedCalls}:{})}]};
   normalizeOpenRouterHistory(request,toolNames);
   return {role:'assistant',content:request.messages[0]!.content};

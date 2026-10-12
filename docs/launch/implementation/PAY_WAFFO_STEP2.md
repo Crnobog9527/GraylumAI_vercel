@@ -18,7 +18,7 @@
   升级仅允许已知正常状态、距 Pro 下次扣费大于 48 小时且结账窗口整体保持在安全线前（Waffo 30 分钟；Stripe 31 分钟含派发余量）。
   这些是纯计算，尚未替代数据库事务校验或产生会员/积分写入。
 - `payments.methodMembership`：认证用户读取本人已履约订单及全渠道真实创始已售/预留/待核对占位。
-  明确返回 `checkoutReady=false`。订单 `auto_renew` 是购买时合同事实，不表示已核对的当前续费状态。
+  `checkoutReady` 跟随服务端新购开关（见下文“测试开关”），默认 false。订单 `auto_renew` 是购买时合同事实，不表示已核对的当前续费状态。
 
 ## 待完成与阻塞
 
@@ -35,8 +35,10 @@ Stripe 原 webhook 已接钱包实付核对及交付分支；原结账恢复调�
 站外付款单独保留现金事实及第 10 天待退款要求、24 小时去重计数/阈值、单产品管理员临时下架与恢复时段。
 已有年付释放 cron 接入内部来源；`payments.methodCheckout` 接入钱包建单和原会话恢复，要求当前路由版本、
 本人身份及与服务端 `payment_terms_version.value.version` 一致的 `termsVersion` 和明确勾选。
-公共结账入口另有 `METHOD_CHECKOUT_READY=false` 的后端关闭状态，与会员读取同源；
-整条交付/恢复/权限链未完成前，即使配置路由开关也不会派发新付款。历史回调、取消和已付年期释放不受此开关影响。
+公共结账入口原有 `METHOD_CHECKOUT_READY=false` 硬关闭，现改为**测试开关**（`methodCheckoutGate.ts`，与会员读取同源）：
+只有同时满足 ① staging 部署（`VERCEL=1` 且 `VERCEL_PROJECT_PRODUCTION_URL` 正好是 `auth-staging.graylum.com`）并且
+`WAFFO_TEST_OPERATIONS_ENABLED=true`，② `payment_method_routes.card.enabled=true`（默认关闭、带版本号），才允许卡新购；
+正式环境不论配置如何都关闭。微信/支付宝经新入口的钱包新购仍在代码里关闭，不跟随卡开关。历史回调、取消和已付年期释放不受此开关影响。
 
 取消/单产品下架已接 `payments.methodCancel` / `payments.methodProductControl` 及 Pancake 签名 HTTP 客户端，
 单次调用超时不盲重试，后续先查原对象；查回 active/pending/past_due 且旧派发超过 1 分钟后，以原派发时间作 CAS 争抢一次重派。
@@ -168,5 +170,5 @@ Gold 已付升级优先于仍在发积分的 Pro；Gold 退款后可读取仍有
 - 已完成：0211 事务、钱包/回调/cron 和共享会员投影接线；同步 staging 并用完整链重建指纹；
   readProduct 类型与嵌套 metadata 差异按 #802 实测修正。
 - 已完成（范围收窄后）：卡结账建会话、回调查付款后自动发放/续费、每日对账（只报告）。
-- 未完成：真实测试卡结账与回调实测（交 Codex）；跨渠道 Pro 取消查回；第 3 步。新销售保持关闭（`checkoutReady=false`）。
+- 未完成：真实测试卡结账与回调实测（交 Codex）；跨渠道 Pro 取消查回；第 3 步。新销售默认关闭（`checkoutReady=false`），staging 验收时按测试开关临时打开。
 - 不合并、不启售；不是完整收款交付。第 3 步另派，未产生远程数据或支付变化。

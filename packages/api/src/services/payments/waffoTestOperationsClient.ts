@@ -2,6 +2,7 @@
 import { createHash, createSign } from 'node:crypto';
 import { z } from 'zod';
 import type { WaffoTestOperations } from './waffoOperations';
+import { normalizeWaffoPrivateKey, providerNotices, WaffoFailure, type WaffoFailureCategory } from './waffoFailure';
 import { WAFFO_PAYMENT_FIELDS, waffoPaymentSchema, type WaffoTestPayments } from './waffoPayments';
 
 export type WaffoCheckoutCreate = {
@@ -10,6 +11,7 @@ export type WaffoCheckoutCreate = {
 };
 export type WaffoTestClient = WaffoTestOperations & WaffoTestPayments & WaffoCheckoutCreate;
 const PAGE = 100;
+const CHECKOUT_TIMEOUT_MS = 20_000;
 
 /** Pancake API-key signing, with no automatic retries. API key determines environment;
  * X-Environment cannot turn a production key into a test key. Only an Owner-configured,
@@ -19,24 +21,39 @@ export function createWaffoTestOperationsClient(config: {
 }, request: typeof fetch = fetch): WaffoTestClient {
   if (!/^[A-Za-z0-9_-]{1,64}$/.test(config.merchant) || !/^MER_[A-Za-z0-9]+$/.test(config.merchantId)
     || !/^STO_[A-Za-z0-9]+$/.test(config.storeId)) throw new Error('PAY_WAFFO_TEST_CONFIG_INVALID');
-  async function post(path: string, data: unknown, idempotencyKey?: string) {
+  // Parsed once, before any order or provider access, so a bad dashboard paste is reported as
+  // configuration rather than surfacing later as an unknown checkout outcome.
+  const privateKey = normalizeWaffoPrivateKey(config.privateKey);
+  async function post(path: string, data: unknown, idempotencyKey?: string, timeoutMs = 8000) {
     const body = JSON.stringify(data);
     const timestamp = Math.floor(Date.now() / 1000).toString();
     const digest = createHash('sha256').update(body).digest('base64');
-    const signature = createSign('RSA-SHA256').update(`POST\n${path}\n${timestamp}\n${digest}`).sign(config.privateKey, 'base64');
-    const response = await request(`https://api.waffo.ai${path}`, { method: 'POST', body, redirect: 'error',
-      signal: AbortSignal.timeout(8000), headers: { 'Content-Type': 'application/json',
-        'X-Merchant-Id': config.merchantId, 'X-Timestamp': timestamp, 'X-Signature': signature,
-        ...(idempotencyKey ? { 'X-Idempotency-Key': idempotencyKey } : {}) } });
+    const signature = createSign('RSA-SHA256').update(`POST\n${path}\n${timestamp}\n${digest}`).sign(privateKey, 'base64');
+    let response: Response;
+    try {
+      response = await request(`https://api.waffo.ai${path}`, { method: 'POST', body, redirect: 'error',
+        signal: AbortSignal.timeout(timeoutMs), headers: { 'Content-Type': 'application/json',
+          'X-Merchant-Id': config.merchantId, 'X-Timestamp': timestamp, 'X-Signature': signature,
+          ...(idempotencyKey ? { 'X-Idempotency-Key': idempotencyKey } : {}) } });
+    } catch (error) {
+      const name = error instanceof Error ? error.name : typeof error;
+      const cause = (error as { cause?: { code?: unknown } } | null)?.cause?.code;
+      throw new WaffoFailure('PAY_WAFFO_PROVIDER_UNAVAILABLE', { category: name === 'TimeoutError' ? 'timeout' : 'network',
+        path, errorName: name, ...(typeof cause === 'string' ? { errorCode: cause.slice(0, 40) } : {}) });
+    }
+    const envelope = await response.json().catch(() => undefined);
+    const fail = (message: string, category: WaffoFailureCategory) => new WaffoFailure(message, { category, path,
+      httpStatus: response.status, providerErrors: providerNotices(envelope) });
     // A definitive 4xx creates nothing and does not occupy the idempotency key; timeouts, conflicts
     // (request still in flight), rate limits and 5xx stay unknown.
     if (response.status >= 400 && response.status < 500 && ![408, 409, 425, 429].includes(response.status)) {
-      throw new Error('PAY_WAFFO_PROVIDER_REJECTED');
+      throw fail('PAY_WAFFO_PROVIDER_REJECTED', 'http_status');
     }
-    if (!response.ok) throw new Error('PAY_WAFFO_PROVIDER_UNAVAILABLE');
-    const result = await response.json();
-    if (!result || typeof result !== 'object' || result.errors?.length || !result.data) throw new Error('PAY_WAFFO_PROVIDER_UNAVAILABLE');
-    return result.data;
+    if (!response.ok) throw fail('PAY_WAFFO_PROVIDER_UNAVAILABLE', 'http_status');
+    if (!envelope || typeof envelope !== 'object') throw fail('PAY_WAFFO_PROVIDER_UNAVAILABLE', 'non_json');
+    if (envelope.errors?.length) throw fail('PAY_WAFFO_PROVIDER_UNAVAILABLE', 'provider_errors');
+    if (!envelope.data) throw fail('PAY_WAFFO_PROVIDER_UNAVAILABLE', 'empty_data');
+    return envelope.data;
   }
   const subscription = z.object({ id: z.string(), status: z.string() });
   const product = z.object({ id: z.string(), status: z.enum(['active', 'inactive']) });
@@ -89,7 +106,9 @@ export function createWaffoTestOperationsClient(config: {
     },
     async createCheckout(body, idempotencyKey) {
       if (!/^[A-Za-z0-9_:-]{8,128}$/.test(idempotencyKey)) throw new Error('PAY_WAFFO_CHECKOUT_INVALID');
-      return post('/v1/actions/checkout/create-session', body, idempotencyKey);
+      // Longer than reads: the buyer is waiting anyway, and a timed-out create leaves the order to the
+      // same-key replay instead of opening checkout.
+      return post('/v1/actions/checkout/create-session', body, idempotencyKey, CHECKOUT_TIMEOUT_MS);
     },
     async setProductStatus(id, status) {
       const data = await post('/v1/actions/subscription-product/update-status', { id, status });
