@@ -26,7 +26,7 @@ Owner 2026-10-12 决定：应用合并到 `www.graylum.com` 单主机，登录�
 | 登录入口页 | `/login`、`/register`、`/verify-email`、`/forgot-password`、`/reset-password` 留在根路径，**不进 `/app`**：未登录也能打开，邮件里的验证和找回链接才能用；它们 `noindex`。实现时同时测“未登录能打开登录页”和“未登录打不开 `/app/*`、被送到 `/login`”两种情况 |
 | 索引范围 | `/app`、`/admin`、`/auth`、登录入口页、`/maintenance`、`/access-denied` 永远 `noindex`（响应头 + meta），不受 `SITE_INDEXING` 开关影响。`SITE_INDEXING` 不是 `public` 时（staging、预览、本地），**整个环境的所有响应都保留 `X-Robots-Tag: noindex, nofollow`**，再加 robots `Disallow: /`——只靠 Disallow 挡不住被外链指向的地址进结果。只有 `SITE_INDEXING=public` 的正式环境才放开公开页。**robots.txt 不 Disallow 这些 HTML 路径**：谷歌要读到 `noindex` 才能不收录，被 robots 挡住反而可能只收地址不收内容（Google 文档 block-indexing）。robots 只 Disallow `/api/`；`/_next/static`、`/_next/image` 是公开页渲染用的 JS / CSS / 图片，**必须允许抓取** |
 | Cookie | 单主机后登录 Cookie 改为 host-only，不再用 `.graylum.com` 共享域。**不能只改作用域**：老浏览器里还留着 `.graylum.com` 上同名的旧 Cookie，和新的 host-only Cookie 并存时浏览器端可能先读到旧的，造成登录状态错乱或循环跳登录（`proxy.ts` 注释已记录这个现象）。切换时要把旧 Cookie 迁移或过期：在 www 上读到 `.graylum.com` 的本项目 Cookie 时，写入 host-only 新值并把旧的设为过期（扩展现有 `legacyParentCookieNames`，让它在正式主机上也生效）。实施时测：已登录的老用户切换后不掉线、不循环、退出后两份都清掉 |
-| staging | `auth-staging.graylum.com` 本来就是单主机，套用同一套按路径的规则 |
+| staging | `auth-staging.graylum.com` 本来就是单主机，只套用同一套按路径的规则（`/app` 前缀、登录入口页、noindex）。**staging 的主机不变**：环境变量、Waffo / Stripe 沙箱 webhook、Supabase staging 项目的 Site URL 和 Redirect URLs 继续指向 `auth-staging.graylum.com`（`docs/DEPLOYMENT.md`、Master Plan 第 37 项），不改成 www |
 
 迁移的技术清单见第 14 节；开发由总控另派，本文不含代码改动。
 
@@ -211,9 +211,9 @@ Owner 2026-10-12 决定：博客用仓库内文章实现，不接外部系统。
 | 旧应用路径跳转 | www 和 staging 主机上，旧的应用路径 `/positioning`、`/runtime`、`/profile`、`/library`、`/marketplace`、`/workbench`（含子路径）308 到 `/app/` 下同一路径，保留参数；登录回调里的 `next` / `redirect` 目标经 `sanitizeRedirectTarget` 时把这些旧路径换成 `/app/...`，默认目标从 `/profile` 改成 `/app/profile`；`next=/` 登录后去 `/app`（`/` 现在是公开首页）。实测：切换前发出的验证邮件 / OAuth 链接在切换后点开，落到 `/app` 下正确页面 | 登录态，high |
 | 路由目录 | 根路径已登录首页 `src/app/page.tsx`（及同目录的 `home.module.css`、`home-steps`）移到 `src/app/app/page.tsx`；`positioning / runtime / profile / library / marketplace / workbench` 移到 `src/app/app/`；`login / register / verify-email / forgot-password / reset-password / auth / admin / api` 不动；全仓约 45 处内链、21 个文件改前缀（不含测试） | 面广 |
 | `next.config.ts` | `redirects()` 加 `has: host = app.graylum.com` 的 `permanent: true`（308，保留 POST 方法和请求体）：界面路由加 `/app` 前缀，`app.graylum.com/` 到 `/app`，`/auth` `/api` `/admin` `/_next` 和登录入口页只换主机不加前缀（第 2 节）；加 `has: host = graylum.com` 到 www 的 308（保留路径和参数），或改用 Vercel 设置（见第 2 节）；`X-Robots-Tag noindex`：`SITE_INDEXING` 不是 `public` 时**整个环境保留**；是 `public` 时只对 `/app` `/admin` `/auth`、登录入口页、`/maintenance`、`/access-denied`，这些路径不进 robots Disallow。测试覆盖：裸域跳转保留路径和参数；非 public 环境任意路径都带 noindex；public 环境下上述路径带 noindex、公开页不带 | ordinary |
-| 环境变量 | `NEXT_PUBLIC_APP_URL`、`NEXT_PUBLIC_AUTH_APP_URL` = `https://www.graylum.com` | 正式环境改值属 AGENTS §1 |
-| 支付回调 | `waffoCheckout.ts`、`stripeCheckoutIntent.ts` 的 successUrl 从请求 origin 拼，自动跟随；Waffo / Stripe 后台 webhook 主机**先**改成 www（路径不变），再切域名；用带请求体的 POST 实测 app 域跳转后方法和内容不变 | 正式环境属 §1；staging 由 AI 改 |
-| Supabase Auth | Site URL 改 www；Redirect URLs 加 `https://www.graylum.com/**`、删 app 域；邮件模板不改；Google OAuth 不改 | 正式环境属 §1；staging 由 AI 改 |
+| 环境变量 | 仅正式环境：`NEXT_PUBLIC_APP_URL`、`NEXT_PUBLIC_AUTH_APP_URL` = `https://www.graylum.com`。staging 保持 `https://auth-staging.graylum.com` | 正式环境改值属 AGENTS §1 |
+| 支付回调 | `waffoCheckout.ts`、`stripeCheckoutIntent.ts` 的 successUrl 从请求 origin 拼，自动跟随；仅正式环境：Waffo / Stripe 后台 webhook 主机**先**改成 www（路径不变），再切域名；用带请求体的 POST 实测 app 域跳转后方法和内容不变。staging 沙箱 webhook 保持 `auth-staging.graylum.com`，只在 staging 验证新路径规则下回调仍然通 | 正式环境属 §1；staging 只做验证，不改主机 |
+| Supabase Auth | 仅正式项目：Site URL 改 www；Redirect URLs 加 `https://www.graylum.com/**`、删 app 域；邮件模板不改；Google OAuth 不改。staging 项目保持 `auth-staging.graylum.com`，只需确认 Redirect URLs 覆盖新的 `/app/**` 路径 | 正式环境属 §1；staging 只核对，不改主机 |
 | Vercel | 两个域名已在同一项目；撤掉 Owner 手动加的 `www → app` 临时 307（第 8.5 节、#614） | 正式环境属 §1 |
 | 正式切换顺序 | 两条跳转方向相反，同时存在会无限循环。顺序必须是：① 取得 Owner 对正式环境设置的批准；② 撤掉 Vercel 的 `www → app` 307，并实测 `www.graylum.com` 不再跳到 app；③ 之后才让 `app → www` 和裸域 → www 的 308 在正式环境生效。代码里的这两条跳转用开关控制（默认关闭），确认第 ② 步完成后再打开；staging 不受影响，可先开着测 | 正式环境属 §1 |
 | 测试 | `proxy-hostname / proxy-auth / proxy-auth-landing / proxy-pricing / site-config / authLanding.gotrue` 6 个单测和 `production-stripe-smoke.spec.ts` | ordinary |
