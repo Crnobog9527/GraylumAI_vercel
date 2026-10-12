@@ -1,6 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 // Local-only DATA-ERASURE 0226 verification: our own log tables keep at most 30 days (E7).
 import assert from 'node:assert/strict';
+import { randomUUID } from 'node:crypto';
 import { localDb, read } from '../runtime-view-perf/local-db.mjs';
 
 const migrationPath = 'packages/db/migrations/0226_log_retention_cleanup.sql';
@@ -65,5 +66,40 @@ try {
   assert.equal((await cleanup(3)).applicationLogs, 2);
   await assert.rejects(cleanup(0), /LOG_RETENTION_LIMIT_INVALID/);
   report.checks.push('bounded batches report more work; invalid limits are rejected');
+
+  // Owner 2026-10-12: admin audit is kept like accounting (3 years); erasure scrubs it instead of deleting.
+  const user = randomUUID(), admin = randomUUID();
+  await c.query('INSERT INTO profiles(id,credits) VALUES($1,0),($2,0)', [user, admin]);
+  await c.query(`INSERT INTO user_activity_logs(user_id,admin_id,action,action_type,details,ip_address) VALUES
+    ($1,$2,'为李雷调整积分 lilei@example.com','credit_adjustment','{"amount":50,"before":0,"after":50,"reason":"李雷说没到账","ok":true}','203.0.113.9'),
+    ($1,$2,'封禁李雷','status_change','{"status":"banned"}',NULL)`, [user, admin]);
+  const otherUser = randomUUID();
+  await c.query('INSERT INTO profiles(id,credits) VALUES($1,0)', [otherUser]);
+  await c.query(`INSERT INTO user_activity_logs(user_id,admin_id,action,action_type,details) VALUES($1,$2,'keep','status_change','{"note":"x"}')`,
+    [otherUser, admin]);
+  await c.query('SELECT account_erasure_confirm($1,$2)', [user, randomUUID()]);
+  await c.query('SET ROLE service_role');
+  try {
+    await c.query('SELECT account_erasure_local_cleanup($1,false)', [user]);
+    assert.equal(await v('SELECT account_erasure_local_cleanup($1,false) IS NOT NULL v', [user]), true, 'repeatable');
+  } finally { await c.query('RESET ROLE'); }
+  const rows = (await c.query(`SELECT action,action_type,details,ip_address,admin_id,content_erased_at IS NOT NULL erased
+    FROM user_activity_logs WHERE user_id=$1 ORDER BY action_type`, [user])).rows;
+  assert.deepEqual(rows, [
+    { action: 'credit_adjustment', action_type: 'credit_adjustment', details: { amount: 50, before: 0, after: 50, ok: true },
+      ip_address: null, admin_id: admin, erased: true },
+    { action: 'status_change', action_type: 'status_change', details: {}, ip_address: null, admin_id: admin, erased: true },
+  ]);
+  assert.doesNotMatch(JSON.stringify(rows), /李雷|lilei|203\.0\.113/);
+  assert.equal(await v("SELECT details->>'note' v FROM user_activity_logs WHERE user_id=$1", [otherUser]), 'x');
+  assert.equal(await v('SELECT count(*)::int v FROM user_activity_logs WHERE user_id=$1 AND content_erased_at IS NULL', [user]), 0);
+  assert.equal(await v("SELECT position('content_erased_at IS NULL' IN pg_get_functiondef('account_erasure_local_remaining(uuid)'::regprocedure))>0 v"),
+    true);
+  await assert.rejects(c.query("UPDATE user_activity_logs SET action='rewrite' WHERE user_id=$1 RETURNING id", [user]).then(r => {
+    if (r.rowCount) throw new Error('changed'); throw new Error('ignored');
+  }), /ignored/);
+  await c.query("INSERT INTO user_activity_logs(user_id,action,action_type) VALUES($1,'late','status_change')", [user]);
+  assert.equal(await v('SELECT count(*)::int v FROM user_activity_logs WHERE user_id=$1', [user]), 2, 'closed account still rejects new rows');
+  report.checks.push('erasure keeps admin audit rows, removes wording, IP and text details, keeps amounts; other users untouched');
 } catch (error) { report.failed = String(error.stack ?? error); process.exitCode = 1; }
 finally { await db.close(); console.log(JSON.stringify(report, null, 2)); }
