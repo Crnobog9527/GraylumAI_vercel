@@ -8,7 +8,7 @@ import type { ReactNode } from 'react';
 import Link from 'next/link';
 import { PUBLIC_PAGES } from '@/lib/seo/public-pages';
 import { SITE_LOCALES, type SiteLocale } from '@/lib/seo/site';
-import { LANGUAGE_NAMES, LOGIN_HREF, SIGNUP_HREF, SITE_CHROME } from './site-chrome';
+import { LANGUAGE_NAMES, LOGIN_HREF, SIGNUP_HREF, SITE_CHROME, visibleHref } from './site-chrome';
 
 const LINK_CLASS = 'text-sm text-[#9A9A9A] transition-colors hover:text-[#FFD700]';
 const LOCALES: SiteLocale[] = ['zh-Hans', 'zh-TW'];
@@ -54,7 +54,7 @@ export function SiteShell({
     .map(page => ({ label: page.footerLabel!, href: page.path }));
   const languageLinks = LOCALES.map(key => ({
     label: LANGUAGE_NAMES[key],
-    href: key === locale ? '' : alternates[key] ?? SITE_CHROME[key].home,
+    href: key === locale ? '' : visibleHref(alternates[key] ?? SITE_CHROME[key].home),
   })).filter(link => link.href);
 
   return (

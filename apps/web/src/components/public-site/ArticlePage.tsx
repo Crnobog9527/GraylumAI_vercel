@@ -9,7 +9,7 @@ import { JsonLd } from '@/components/seo/JsonLd';
 import type { ArticleBlock, ArticleContent } from '@/lib/seo/article';
 import { breadcrumbJsonLd, faqPageJsonLd, webPageJsonLd } from '@/lib/seo/structured-data';
 import { SiteShell } from './SiteShell';
-import { SITE_CHROME } from './site-chrome';
+import { SITE_CHROME, visibleHref } from './site-chrome';
 
 const TEXT = 'text-base leading-8 text-[#C8C8C8]';
 
@@ -58,7 +58,7 @@ export function ArticlePage({ content, supportEmail }: { content: ArticleContent
                 <li key={item.path} className="flex gap-2">
                   {index > 0 ? <span aria-hidden="true">/</span> : null}
                   {index < content.breadcrumb.length - 1
-                    ? <Link href={item.path} className="hover:text-[#FFD700]">{item.name}</Link>
+                    ? <Link href={visibleHref(item.path)} className="hover:text-[#FFD700]">{item.name}</Link>
                     : <span aria-current="page">{item.name}</span>}
                 </li>
               ))}
@@ -124,7 +124,7 @@ export function ArticlePage({ content, supportEmail }: { content: ArticleContent
           <ul className="mt-4 space-y-4">
             {content.related.map(link => (
               <li key={link.href}>
-                <Link href={link.href} className="font-semibold text-[#FFD700] hover:underline">{link.label}</Link>
+                <Link href={visibleHref(link.href)} className="font-semibold text-[#FFD700] hover:underline">{link.label}</Link>
                 <p className="mt-1 text-sm leading-7 text-[#9A9A9A]">{link.description}</p>
               </li>
             ))}

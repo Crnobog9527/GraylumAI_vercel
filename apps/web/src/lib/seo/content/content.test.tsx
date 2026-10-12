@@ -2,7 +2,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 import { ArticlePage } from '@/components/public-site/ArticlePage';
 import { sanitizeRedirectTarget } from '@/lib/auth';
-import { SITE_CHROME } from '@/components/public-site/site-chrome';
+import { SIMPLIFIED_HOME_HREF, SITE_CHROME } from '@/components/public-site/site-chrome';
 import type { ArticleContent } from '../article';
 import { PUBLIC_PAGES } from '../public-pages';
 import { ABOUT_ZH_HANS, ABOUT_ZH_TW } from './about';
@@ -33,6 +33,8 @@ const ARTICLES: ArticleContent[] = [
 
 // Login entry pages are not in the sitemap but are real pages every visitor can open.
 const LOGIN_LINKS = new Set(['/login', SIGNUP_CTA_HREF]);
+// The public Simplified home page until the /app move (site-chrome SIMPLIFIED_HOME_HREF).
+const TEMPORARY_PUBLIC_LINKS = new Set([SIMPLIFIED_HOME_HREF]);
 const PAGE_PATHS = new Set(PUBLIC_PAGES.map(page => page.path));
 
 // Characters that only exist in Simplified Chinese; Taiwan pages must not contain them (spec 3.1).
@@ -63,7 +65,7 @@ describe.each(ARTICLES.map(content => [content.path, content] as const))('public
   it('is in the sitemap and every internal link points at an existing public page', () => {
     expect(PAGE_PATHS.has(content.path)).toBe(true);
     for (const href of internalLinks(content)) {
-      expect(PAGE_PATHS.has(href) || LOGIN_LINKS.has(href), href).toBe(true);
+      expect(PAGE_PATHS.has(href) || LOGIN_LINKS.has(href) || TEMPORARY_PUBLIC_LINKS.has(href), href).toBe(true);
     }
   });
 
@@ -99,6 +101,17 @@ describe.each(ARTICLES.map(content => [content.path, content] as const))('public
     expect(content.breadcrumb[0]).toEqual({ name: '自媒體', path: '/zh-tw' });
     expect(content.related.some(link => link.href === '/zh-tw')).toBe(true);
     expect(content.related.filter(link => link.href.startsWith('/zh-tw/')).length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('never links visitors to "/", which is still the logged-in home before the /app move', () => {
+    const html = renderToStaticMarkup(<ArticlePage content={content} />);
+    expect(html).not.toContain('href="/"');
+    expect(html).not.toContain('href="/?');
+    // Search engines still see the production root as the home page.
+    if (content.breadcrumb[0].path === '/') {
+      expect(html).toContain('"item":"https://www.graylum.com/"');
+      expect(html).toContain(`href="${SIMPLIFIED_HOME_HREF}"`);
+    }
   });
 
   it.runIf(content.locale === 'zh-TW' && content.path !== '/zh-tw/about')('cites at least one visible source (spec 12.4)', () => {
