@@ -126,6 +126,12 @@ describe('user stops', () => {
 it('explains a pre-dispatch history refusal with an actionable next step', () => {
  const notice=runtimeExecutionNotice({state:'cancelled',unavailable:'provider_history'});
  expect(notice).toContain('请新开一个对话');expect(notice).not.toContain('已停止');
+ expect(notice).toContain('本轮不扣积分');
+});
+
+it('a Graylum-side request failure says the round was not charged', () => {
+ const notice=runtimeExecutionNotice({state:'cancelled',unavailable:'preflight'});
+ expect(notice).toContain('系统原因');expect(notice).toContain('本轮不扣积分');
 });
 
 describe('paused rounds', () => {
