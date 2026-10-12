@@ -74,8 +74,8 @@ export function ArticlePage({ content, supportEmail }: { content: ArticleContent
           </ul>
         ) : null}
         <p className="mt-5 text-sm text-[#8A8A8A]">
-          {chrome.authorLabel} · {chrome.updatedLabel} <time dateTime={content.updated}>{content.updated}</time> ·{' '}
-          <Link href={aboutHref} className="underline hover:text-[#FFD700]">{chrome.aboutLabel}</Link>
+          <Link href={aboutHref} rel="author" className="underline hover:text-[#FFD700]">{chrome.authorLabel}</Link>
+          {' · '}{chrome.updatedLabel} <time dateTime={content.updated}>{content.updated}</time>
         </p>
 
         <div className="mt-8 rounded-2xl border border-[#FFD700]/30 bg-[#141414] p-6">

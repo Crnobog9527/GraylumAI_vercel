@@ -73,6 +73,9 @@ describe.each(ARTICLES.map(content => [content.path, content] as const))('public
     const html = renderToStaticMarkup(<ArticlePage content={content} supportEmail="help@graylum.com" />);
     expect(html.match(/<h1[\s>]/g)).toHaveLength(1);
     expect(html).toContain(`href="${content.cta.href}"`);
+    // The author attribution itself links to About (SEO_GEO_SPEC 7.5).
+    expect(html).toContain(`<a href="${SITE_CHROME[content.locale].company[0].href}" rel="author"`);
+    expect(html).toContain(`>${SITE_CHROME[content.locale].authorLabel}</a>`);
     expect(html).toContain(`lang="${content.locale === 'zh-TW' ? 'zh-Hant-TW' : 'zh-Hans'}"`);
     const data = JSON.parse(html.match(/<script type="application\/ld\+json">(.*?)<\/script>/)![1]);
     const faq = data.find((item: { '@type': string }) => item['@type'] === 'FAQPage');
