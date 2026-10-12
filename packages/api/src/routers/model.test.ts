@@ -68,7 +68,7 @@ describe('modelRouter error sanitization', () => {
     vi.unstubAllGlobals();
   });
 
-  it('sanitizes active model query failures for end users', async () => {
+  it('denies the active model list to end users', async () => {
     const supabase = {
       from(table: string) {
         if (table === 'profiles') {
@@ -107,12 +107,10 @@ describe('modelRouter error sanitization', () => {
       },
     };
 
+    // MODEL-IDENTITY-GUARD: end users can no longer list models at all.
     const caller = createProtectedCaller({ supabase });
 
-    await expect(caller.getActiveModels()).rejects.toMatchObject<Partial<TRPCError>>({
-      code: 'INTERNAL_SERVER_ERROR',
-      message: '读取可用模型失败，请稍后重试',
-    });
+    await expect(caller.getActiveModels()).rejects.toMatchObject<Partial<TRPCError>>({ code: 'FORBIDDEN' });
   });
 
   it('sanitizes createModel insert failures', async () => {

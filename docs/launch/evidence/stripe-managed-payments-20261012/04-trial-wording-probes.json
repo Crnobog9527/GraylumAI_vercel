@@ -1,0 +1,30 @@
+{
+  "t1_custom_text_submit": {
+    "accepted": false,
+    "message": "You cannot use custom_text with Managed Payments."
+  },
+  "t2_subscription_description": {
+    "accepted": true,
+    "livemode": false,
+    "custom_text": {
+      "after_submit": null,
+      "shipping_address": null,
+      "submit": null,
+      "terms_of_service_acceptance": null
+    }
+  },
+  "t3_trial_settings_end_behavior": {
+    "accepted": true,
+    "livemode": false,
+    "custom_text": {
+      "after_submit": null,
+      "shipping_address": null,
+      "submit": null,
+      "terms_of_service_acceptance": null
+    }
+  },
+  "t4_custom_text_terms": {
+    "accepted": false,
+    "message": "You cannot use custom_text with Managed Payments."
+  }
+}

@@ -7,14 +7,15 @@
 import MarketingShell from '@/components/landing/MarketingShell';
 import PublicPageHero from '@/components/landing/PublicPageHero';
 import { legalSections } from '@/lib/landing-content';
-import { buildPublicPageMetadata, getPublicSiteSettings } from '@/lib/public-site';
+import { getPublicSiteSettings } from '@/lib/public-site';
+import { buildPageMetadata } from '@/lib/seo/metadata';
 
-export async function generateMetadata() {
-  return buildPublicPageMetadata('使用协议', '查看平台允许与禁止的使用方式，以及异常使用的处理原则。', [
-    '使用协议',
-    'Acceptable Use',
-    '平台规则',
-  ]);
+export function generateMetadata() {
+  return buildPageMetadata({
+    title: '使用协议',
+    description: '查看平台允许与禁止的使用方式，以及异常使用的处理原则。',
+    path: '/acceptable-use',
+  });
 }
 
 export default async function AcceptableUsePage() {
