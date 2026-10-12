@@ -91,7 +91,7 @@ export const LANDING_FAQ: readonly LandingFaqGroup[] = [
         ],
       },
       {
-        id: 'faq-9', needs: ['research', 'report', 'voice', 'publish'],
+        id: 'faq-9', needs: ['research', 'report', 'voice', 'content', 'publish'],
         question: '我主要做抖音、小红书，能用吗？',
         answer: [
           '能用，而且 Graylum AI 教练最值钱的部分你都能用：定位、对标研究（以页面上列出的已支持平台为准）、运营策略报告、写内容。只有"一键发布"和"自己作品的数据"这两项，目前只接了 TikTok、Instagram、'
