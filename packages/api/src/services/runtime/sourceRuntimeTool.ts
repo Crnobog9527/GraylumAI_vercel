@@ -6,7 +6,7 @@ import type {runtimeContext} from './runtimeContext';
 /** Fixed tool descriptions; admission sizes them with the executor's own formula. */
 function sourceToolDescription(name: string, workspaceContext?: boolean): string {
  return name==='search'?'Search current sources through the explicitly enabled local search adapter.':
-  workspaceContext?'Read owned business context only when relevant. Omit query to list account/topic metadata; '+
+  workspaceContext?'Read owned business context only when relevant. Omit query to list positioning/account/topic metadata; '+
    'pass an exact returned id to read that source. Read-only; no internet access.':'Read the selected source only.';
 }
 export function sourceToolBytes(names: string[], workspaceContext?: boolean): number {
