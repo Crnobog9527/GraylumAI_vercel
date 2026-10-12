@@ -7,14 +7,15 @@
 import MarketingShell from '@/components/landing/MarketingShell';
 import PublicPageHero from '@/components/landing/PublicPageHero';
 import { legalSections } from '@/lib/landing-content';
-import { buildPublicPageMetadata, getPublicSiteSettings } from '@/lib/public-site';
+import { getPublicSiteSettings } from '@/lib/public-site';
+import { buildPageMetadata } from '@/lib/seo/metadata';
 
-export async function generateMetadata() {
-  return buildPublicPageMetadata('隐私政策', '查看平台对账户信息、使用数据和安全保护的基础说明。', [
-    '隐私政策',
-    'Privacy Policy',
-    '数据安全',
-  ]);
+export function generateMetadata() {
+  return buildPageMetadata({
+    title: '隐私政策',
+    description: '查看平台对账户信息、使用数据和安全保护的基础说明。',
+    path: '/privacy',
+  });
 }
 
 export default async function PrivacyPage() {
