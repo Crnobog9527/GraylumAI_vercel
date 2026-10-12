@@ -30,7 +30,7 @@
 
 | 工具 | 管什么 | 不管什么 |
 | --- | --- | --- |
-| **GA4** | 海外访客的公开页浏览、来源渠道（含“AI 推荐”）、四个关键事件、转化漏斗 | 中国大陆（实测上报地址被墙，见第 4 节）；应用页的页面浏览；能直接认出是谁的信息（邮箱、姓名、用户编号） |
+| **GA4** | 海外访客的公开页浏览、来源渠道（含“AI 推荐”）、四个关键事件、转化漏斗 | 中国大陆（上报地址可达性不稳定，见第 4 节；大陆数字以 Vercel 为准）；应用页的页面浏览；能直接认出是谁的信息（邮箱、姓名、用户编号） |
 | **Vercel Web Analytics** | 全站访问总量对照（不用 Cookie）、中国大陆的访问量和主要来源 | 自定义事件（需 Vercel Pro，Owner 已决定上线前升级；升级前只看页面访问） |
 | **数据库报表** | 注册数、定位完成数、付款笔数和金额（以这里为准）、按首次来源分组的注册和付费 | 访客浏览行为 |
 | **Termly** | 同意弹窗、按地区的同意规则、Google Consent Mode v2 信号、统计/广告脚本按分类放行 | 统计本身 |
@@ -101,8 +101,8 @@
 | `termly.io` 首页 | 20/20 | 806 / 1521 / 2277 | |
 | `us.consent.api.termly.io`（同意记录上报） | 20/20 | 849 / 975 / 1052 | |
 | `www.googletagmanager.com/gtag/js` | 18/20 | 189 / 450 / 5129 | 2 个节点 TCP 超时 |
-| **`region1.google-analytics.com/g/collect`（GA4 默认上报地址）** | **0/20** | — | **全部 TCP 超时：大陆基本收不到 GA4 数据** |
-| `www.google-analytics.com/g/collect` | 15/20 | 132 / 197 / 900 | |
+| `region1.google-analytics.com/g/collect` | **0/20** | — | 全部 TCP 超时。这是直接请求，没有加载真实 GA 页面，不能证明大陆浏览器实际会用这个地址 |
+| `www.google-analytics.com/g/collect` | 15/20 | 132 / 197 / 900 | 5 个节点 TCP 超时 |
 | `vercel.com/_vercel/insights/script.js`（Vercel Analytics 同款路径） | 20/20 | 278 / 461 / 496 | |
 | ping `app.termly.io` | 20/20 | 往返 150–220 毫秒，19 个节点 0 丢包 | 1 个节点 12.5% 丢包 |
 
@@ -121,7 +121,7 @@
 | B | 按 Termly 默认：自动拦截脚本放 head 最前面同步加载 | 不用逐个标脚本 | 大陆用户首屏多等约 1–2 秒、偶尔 5 秒以上；Lighthouse 会报“阻塞渲染的资源” |
 | C | 中国大陆不加载 Termly：边缘中间件按国家把大陆访客改写到一份不含 Termly 和 GA 的静态页面副本 | 大陆最快 | 每个公开页多一份静态副本，路由更复杂；大陆访客没有同意弹窗，是否符合中国《个人信息保护法》要 Owner 自己确认；改动最大 |
 
-GA4 在大陆收不到数据，和 Owner“大陆用 Vercel Analytics”的决定一致；不需要为大陆另做 GA 代理（自建转发等于自研，不做）。
+GA 在大陆的上报能否稳定到达，这次探测**没有证实**（只直接请求了两个上报地址，一个全不通、一个 3/4 通，没有跑真实的 gtag）。PR-2 验收时用大陆真实网络加载 staging 页面，看实际发出的 collect 请求和 GA 实时报告是否收到，把结论补进本节。无论结果如何，大陆数字以 Vercel Analytics 为准，和 Owner 的决定一致；不需要为大陆另做 GA 代理（自建转发等于自研，不做）。
 
 ## 5. Lighthouse 和性能影响评估
 
@@ -147,7 +147,7 @@ GA4 在大陆收不到数据，和 Owner“大陆用 Vercel Analytics”的决�
 | PR | 内容 | 风险 | staging 验收 |
 | --- | --- | --- | --- |
 | PR-1 Termly + Consent Mode | 按 O1 选定的方式加载 Termly；Consent Mode 默认值；页脚“Cookie 设置”入口；PR 检查单加“新第三方脚本要标 Termly 分类” | 普通 | 用浏览器开发者工具模拟欧盟访问（Termly 的地区预览或欧洲出口网络）：同意前没有 `_ga` 等统计 Cookie、没有发往 google-analytics 的请求；点同意后才出现；模拟美国访问能看到“不要出售或分享”入口；大陆网络下首屏不等 Termly（含一次晚高峰实测完整下载时间）；公开页仍是静态 |
-| PR-2 GA4 + Vercel Analytics | gtag 按分类加载；公开页页面浏览、网址去参数；`sign_up`、`positioning_complete`、`begin_checkout` 三个浏览器事件；`<Analytics />` 和 `beforeSend` 去参数 | 普通 | GA4 实时报告看到页面浏览和三个事件；带未登记的 utm 值（如 `Alice.Smith`、邮箱）访问后，请求里不出现这些值；从 `/verify-email?email=…`、`/auth/callback?code=…` 和带编号的应用页**整页跳转**到另一个页面后，发往 Vercel 的请求和响应头里的 referrer 只有域名；从外站带路径的 referrer 进来时，GA 的 `page_referrer` 只有域名；打开带 `?code=`、`?email=` 的地址和带编号的动态应用路径（如某个定位草稿页）后，网络面板里发往 GA 和 Vercel 的请求都不含这些参数和编号（只出现路由模板或不发）；应用页没有 `page_view`；从 chatgpt.com 等来源（不带 utm）点进来的访问在 GA4 里归到“AI 推荐”渠道；如果 O5 归为“统计”：模拟欧盟访问时，拒绝或尚未选择前网络面板里没有任何 `/_vercel/insights/*` 和 `/_vercel/speed-insights/*` 请求，同意后才出现，在页脚撤回后再翻页又不再出现；Speed Insights 上报的网址同样不含参数和编号；从带编号的应用页跳到公开页时，GA 请求里的 referrer 不含编号；用中国大陆真实网络访问一次包含本改动的 preview 页面，确认该项目的 Vercel Web Analytics 报表里出现这次访问（不只是脚本能下载）；Lighthouse 下降在第 5 节限度内 |
+| PR-2 GA4 + Vercel Analytics | gtag 按分类加载；公开页页面浏览、网址去参数；`sign_up`、`positioning_complete`、`begin_checkout` 三个浏览器事件；`<Analytics />` 和 `beforeSend` 去参数 | 普通 | GA4 实时报告看到页面浏览和三个事件；带未登记的 utm 值（如 `Alice.Smith`、邮箱）访问后，请求里不出现这些值；从 `/verify-email?email=…`、`/auth/callback?code=…` 和带编号的应用页**整页跳转**到另一个页面后，发往 Vercel 的请求和响应头里的 referrer 只有域名；从外站带路径的 referrer 进来时，GA 的 `page_referrer` 只有域名；打开带 `?code=`、`?email=` 的地址和带编号的动态应用路径（如某个定位草稿页）后，网络面板里发往 GA 和 Vercel 的请求都不含这些参数和编号（只出现路由模板或不发）；应用页没有 `page_view`；从 chatgpt.com 等来源（不带 utm）点进来的访问在 GA4 里归到“AI 推荐”渠道；如果 O5 归为“统计”：模拟欧盟访问时，拒绝或尚未选择前网络面板里没有任何 `/_vercel/insights/*` 和 `/_vercel/speed-insights/*` 请求，同意后才出现，在页脚撤回后再翻页又不再出现；Speed Insights 上报的网址同样不含参数和编号；从带编号的应用页跳到公开页时，GA 请求里的 referrer 不含编号；用中国大陆真实网络访问一次包含本改动的 preview 页面，确认该项目的 Vercel Web Analytics 报表里出现这次访问（不只是脚本能下载）；同一次大陆访问记录实际发出的 GA collect 请求地址和是否进了 GA 实时报告，结论补进第 4 节；Lighthouse 下降在第 5 节限度内 |
 | PR-3 首次来源 + 付款上报 | 迁移：`profiles.signup_attribution` 加列、`payment_orders.ga_client_id/ga_session_id` 加列（O10 选 A 时账号上再加“GA 删除编号”列），都接入注销清理，GA 编号接入每日清理；注册时写入；结账时 GA 编号写进 `payment_orders` 的两个新列（不进 Stripe metadata 和结账请求）；webhook 履约成功分支用 Measurement Protocol 上报 `purchase`；后台统计页按来源分组 | 高（数据库、注销、计费链路） | 迁移按 ENGINEERING 要求验证（兼容、可重复执行、指纹）；带 utm 和 AI 来源的注册在资料里写对、超长和非白名单字段被丢弃；`utm_source=someone@example.com`、`utm_campaign=Alice.Smith` 这类未登记的值在 GA、Vercel 请求和账号资料里都不出现，登记过的值正常记录；注销后这些列为空；Stripe 结账请求、`checkout_request` 和 Stripe 订阅/付款记录里查不到 GA 编号；上报后和 72 小时后 `ga_client_id/ga_session_id` 被置空；伪造的 GA 编号（例如邮箱、超长串）被丢弃，不落库也不发给 Google（O10 选 A 时另验：注销时逐个提交删除，GA 接受后才清掉编号，失败的保留并标待重试）；Stripe 测试模式付款一次，单元测试断言上报内容里的 `value` 精确等于换算后的金额（如 17.99），GA4 实时报告只出现一笔 `purchase`，且归到发起结账那次访问的来源；重放同一 webhook 不再出现；集成测试里**并发**投递同一事件两次、以及同一订单的 `checkout.session.completed` 和 `invoice.paid` 同时到达，断言履约和 `purchase` 上报都恰好一次（上报只挂在原子履约返回“本次新履约”的那一个调用上）；没同意统计的访客付款不上报且履约正常；先同意、创建订单、再撤回同意、然后付款，不上报且该订单的 GA 编号已为空；集成测试里让撤回和付款回调**并发**，断言要么不上报、要么只上报一次，结束后两列都为空；上报失败不影响履约 |
 | 后台配置（不是代码） | GA4“AI 推荐”自定义渠道组、数据保留期、关闭 Google 信号；Termly 地区规则、Consent Mode 开关、GPC | — | Owner 操作，或在当次对话批准后由 AI 按清单操作；正式环境逐项另批 |
 
