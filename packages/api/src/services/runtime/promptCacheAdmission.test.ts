@@ -142,7 +142,7 @@ it('switch off: no brand identity and the cached prefix is the Skill text alone'
 it('switch on: the identity leads the cached prefix and carries the Owner-approved reply',async()=>{
  const f=fixture(),result=await f.service.prepare(f.input);
  expect(result.context.instructions.startsWith(BRAND_IDENTITY_INSTRUCTIONS+'\n'+skill)).toBe(true);
- expect(result.context.instructions).toContain('我是 Graylum 的 AI 社媒策略师');
+ expect(result.context.instructions).toContain('我是 Graylum 的 AI 自媒体陪跑教练');
 });
 
 vi.mock('./newWorkGate', async importOriginal => ({

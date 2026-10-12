@@ -3,8 +3,8 @@ import { expect, it } from 'vitest';
 import { BRAND_IDENTITY_INSTRUCTIONS, BRAND_REPLY_EN, BRAND_REPLY_ZH, withBrandIdentity } from './brandIdentity';
 import { buildWorkbenchMessages } from '../artifacts/generation';
 
-it('carries the Owner-approved replies verbatim (版本一, 2026-10-12)', () => {
-  expect(BRAND_REPLY_ZH).toBe('我是 Graylum 的 AI 社媒策略师，背后整合了多家领先的 AI 技术，具体用了哪些属于内部技术细节，不对外公开。我们继续聊你的账号吧？');
+it('carries the Owner-approved replies verbatim (版本一 + 称呼 A, 2026-10-12)', () => {
+  expect(BRAND_REPLY_ZH).toBe('我是 Graylum 的 AI 自媒体陪跑教练，背后整合了多家领先的 AI 技术，具体用了哪些属于内部技术细节，不对外公开。我们继续聊你的账号吧？');
   expect(BRAND_REPLY_EN).toBe("I'm Graylum's AI social media strategist, built on a combination of leading AI technologies. The specific technical details are internal and not shared publicly. Shall we get back to your account?");
   expect(BRAND_IDENTITY_INSTRUCTIONS).toContain(BRAND_REPLY_ZH);
   expect(BRAND_IDENTITY_INSTRUCTIONS).toContain(BRAND_REPLY_EN);
