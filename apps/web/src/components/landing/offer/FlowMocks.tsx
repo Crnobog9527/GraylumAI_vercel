@@ -154,13 +154,16 @@ function LibraryMock() {
 function VoiceMock() {
   return (
     <Frame>
-      <Seq at={0.3} className="flex flex-wrap items-center gap-2 rounded-xl border border-[#2A2A2A] p-3">
+      <Seq at={0.2} className="grid gap-1.5 rounded-xl bg-[#1A1A1A] p-3">
+        <span className="text-xs text-[#B0B0B0]">你写过的东西</span><Line width="85%" /><Line width="70%" />
+      </Seq>
+      <Seq at={0.9} className="flex flex-wrap items-center gap-2 rounded-xl border border-[#2A2A2A] p-3">
         <span className={chipGold}>文风画像</span><Line width="40%" />
-        <span className={cn(styles.pulse, 'rounded-md bg-[#FFD700] px-3 py-1 text-xs font-semibold text-[#0A0A0A]')} style={delay(0.8)}>确认</span>
+        <span className={cn(styles.pulse, 'rounded-md bg-[#FFD700] px-3 py-1 text-xs font-semibold text-[#0A0A0A]')} style={delay(1.3)}>确认</span>
       </Seq>
       <div className="grid grid-cols-2 gap-2">
-        <Seq at={1.4} className="grid gap-1.5 rounded-lg bg-[#1A1A1A] p-2"><Line width="90%" /><Line width="75%" /><Line width="80%" /></Seq>
-        <Seq at={1.8} className="grid gap-1.5 rounded-lg bg-[#FFD700]/5 p-2"><Line width="88%" gold /><Line width="78%" gold /><Line width="70%" gold /></Seq>
+        <Seq at={2.0} className="grid gap-1.5 rounded-lg bg-[#1A1A1A] p-2"><Line width="90%" /><Line width="75%" /><Line width="80%" /></Seq>
+        <Seq at={2.4} className="grid gap-1.5 rounded-lg bg-[#FFD700]/5 p-2"><Line width="88%" gold /><Line width="78%" gold /><Line width="70%" gold /></Seq>
       </div>
     </Frame>
   );
