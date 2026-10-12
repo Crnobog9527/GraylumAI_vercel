@@ -17,8 +17,10 @@ export const HOME_DESCRIPTION =
  */
 export function buildLandingPageData(flags: LandingFlags, plans: readonly PaywallPlanSource[], offers: LandingOffers = {}) {
   const pricing = buildLandingPricing(plans, flags.founder ? offers : { goldFirstMonth: offers.goldFirstMonth });
+  // The founder FAQ promises a price, 50 seats and a live seat count: only while the server says the offer is on sale.
+  const faqFlags = { ...flags, founder: flags.founder && pricing.founderOpen };
   const faqGroups = LANDING_FAQ
-    .map(group => ({ ...group, items: visibleItems(flags, group.items) }))
+    .map(group => ({ ...group, items: visibleItems(faqFlags, group.items) }))
     .filter(group => group.items.length > 0);
   const founderSeats = pricing.founderOpen && offers.founder ? offers.founder.available : null;
 

@@ -98,10 +98,9 @@ describe('landing page data', () => {
   it('hides every block whose capability is switched off', () => {
     const data = buildLandingPageData(CORE_ONLY, CATALOG);
     expect(data.notes.map(note => note.id)).toEqual(['p2', 'p5']);
-    // FAQ 2, 4, 6, 14; FAQ 11 also promises the sign-up credits, so it goes with signupGrant.
+    // FAQ 2, 4, 6; FAQ 11 goes with signupGrant and FAQ 14 (reports kept after expiry) with report.
     expect(data.faqItems.map(item => item.question)).toEqual([
       LANDING_FAQ[0].items[1].question, LANDING_FAQ[0].items[3].question, LANDING_FAQ[1].items[1].question,
-      LANDING_FAQ[2].items[3].question,
     ]);
     expect(data.compareRows.map(row => row.sourceId)).toEqual(['consultant']);
     expect(data.promise.map(part => part.text).join('')).not.toContain('不用自己想选题');
@@ -113,7 +112,9 @@ describe('landing page data', () => {
   it('shows the finished-product page by default, still without invented founder or first-month prices', () => {
     const data = buildLandingPageData(resolveLandingFlags({}), CATALOG);
     expect(data.notes).toHaveLength(7);
-    expect(data.faqItems).toHaveLength(16);
+    // FAQ 15 and 16 promise the founder offer and its live seat count, so they wait for the server answer too.
+    expect(data.faqItems).toHaveLength(14);
+    expect(data.faqItems.map(item => item.question)).not.toContain('为什么创始会员只有 50 个名额？');
     expect(data.compareRows).toHaveLength(4);
     expect(data.heroNote).toContain('注册送 500 积分');
     // No public price answer yet: no founder card, no seats, Gold monthly stays at the catalog price.
