@@ -13,10 +13,10 @@ export const ZH_TW_HUB: ArticleContent = {
   locale: 'zh-TW',
   path: '/zh-tw',
   metaTitle: '自媒體是什麼？AI 自媒體陪跑教練帶你從定位開始',
-  metaDescription: '自媒體是什麼、有哪些平台、怎麼開始和怎麼賺錢，一頁講清楚。用 AI 自媒體陪跑教練免費做定位診斷，找到適合你的帳號方向。',
+  metaDescription: '自媒體是什麼？自媒體有哪些平台、新手該從哪裡開始、經營自媒體怎麼賺錢，這一頁一次講清楚。不知道該經營什麼？用 AI 自媒體陪跑教練免費做定位診斷，找到適合你的帳號方向。',
   breadcrumb: [{ name: '自媒體', path: '/zh-tw' }],
   h1: '你的 AI 自媒體陪跑教練',
-  lead: '自媒體就是自己當媒體：一個人或小團隊在 IG、YouTube、TikTok、Threads 等平台產出內容、累積受眾。新手最容易卡在第一步「要做什麼、做給誰看」，Graylum 用對話陪你把這一步想清楚。',
+  lead: '自媒體就是自己當媒體：一個人或小團隊在 IG、YouTube、TikTok、Threads 等平台產出內容、累積受眾。新手最常卡在「要做什麼、做給誰看」，Graylum 用對話陪你想清楚。',
   keyPoints: [
     '先決定定位和目標受眾，再挑平台和內容形式。',
     '固定節奏更新比偶爾爆紅更重要。',
