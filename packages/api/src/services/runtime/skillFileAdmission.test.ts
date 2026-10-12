@@ -184,3 +184,24 @@ it('summary freezes only the file tool, refuses contradictory context and replay
  expect(runtimeContext.safeParse({...context,input:'ordinary speech'}).success).toBe(false);
  expect(await service.prepare(input)).toEqual(admitted);
 });
+
+it('R4: a host mentor turn shares its single read slot with the user\'s earlier messages',async()=>{
+ const f=fixture(),host={stepId:'first',opening:false,checklist:[]};
+ const service=runtimeAdmissionService(f.user,f.admin,{...f.policy,hostTurnContext:host});
+ const admitted=await service.prepare(f.input),context=runtimeContext.parse(admitted.context);
+ expect(context.tools).toEqual(['ask_question','read_skill_file','read_history']);
+ expect(context.historyRead).toEqual({version:'mentor-history-v1',reserve:20480});
+ expect(context.maxTurns).toBe(2);expect(context.maxToolCalls).toBe(1);expect(admitted.billing.limits.maxCalls).toBe(2);
+ expect(context.instructions).toContain('earlier messages of this conversation with read_history');
+ expect(runtimeContext.safeParse({...context,historyRead:undefined}).success).toBe(false);
+ expect(runtimeContext.safeParse({...context,tools:['ask_question','read_history'],skillFile:undefined,skillFileReserve:undefined}).success).toBe(false);
+ expect(await service.prepare(f.input)).toEqual(admitted);
+});
+
+it('R4: drops only the history read when its larger reserve does not fit, keeping the Skill file',async()=>{
+ const f=fixture();skill.instructions='S'.repeat(13000);
+ const admitted=await runtimeAdmissionService(f.user,f.admin,{...f.policy,inputBytes:32000,
+  hostTurnContext:{stepId:'first',opening:false,checklist:[]}}).prepare(f.input),context=runtimeContext.parse(admitted.context);
+ expect(context.tools).toEqual(['ask_question','read_skill_file']);expect(context.historyRead).toBeUndefined();
+ expect(context.instructions).not.toContain('read_history');expect(context.maxTurns).toBe(2);
+});

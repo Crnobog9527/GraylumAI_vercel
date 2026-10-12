@@ -1,6 +1,8 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import {assertPath} from '../skills/loader';
 import {SKILL_FILE_TRACE_BYTES,skillFileParameters} from './skillFile';
+import {mentorHistoryParameters} from './mentorHistory';
+import {READ_HISTORY_TOOL} from './agentTools';
 import {throwIfContentErased} from '../accountErasure/content';
 import type {RuntimeProgress} from './progress';
 import {createHash} from 'node:crypto';
@@ -92,12 +94,14 @@ export function historyGuard(executionId:string,failed:(code:string)=>void) {
   };
 }
 
-export function terminalReplyGuard(active:boolean,allowsCard:boolean,failed:()=>void,allowsSkillFile=false) {
+export function terminalReplyGuard(active:boolean,allowsCard:boolean,failed:()=>void,allowsSkillFile=false,allowsHistory=false) {
+  // One read per turn: a Skill file or the user's earlier messages (R4), never both.
   let fileRequested=false;
   return (response:unknown,organizer=false)=>{
     const message=(response as {choices?:Array<{message?:{tool_calls?:Array<{id?:string;type?:string;
       function?:{name?:string;arguments?:string}}>}}>})?.choices?.[0]?.message;
     const readsFile=message?.tool_calls?.[0]?.function?.name==='read_skill_file';
+    const readsHistory=message?.tool_calls?.[0]?.function?.name===READ_HISTORY_TOOL;
     let invalidFileArguments=false;
     if(readsFile){try{
       const call=message!.tool_calls![0]!,{path}=skillFileParameters.parse(JSON.parse(call.function!.arguments!));
@@ -106,11 +110,17 @@ export function terminalReplyGuard(active:boolean,allowsCard:boolean,failed:()=>
         typeof call.id!=='string'||!call.id.length||Array.from(call.id).length>256||call.id.includes('\0')||
         Buffer.from(call.id).toString('utf8')!==call.id;
      }catch{invalidFileArguments=true;}}
-    const oversized=readsFile&&Buffer.byteLength(JSON.stringify(JSON.stringify(message)))>SKILL_FILE_TRACE_BYTES;
-    if(active&&(terminalAgentReplyFailure(response,organizer,allowsCard,allowsSkillFile&&!fileRequested)||oversized||invalidFileArguments)){
+    if(readsHistory){try{
+      const call=message!.tool_calls![0]!;mentorHistoryParameters.parse(JSON.parse(call.function!.arguments!));
+      invalidFileArguments=call.type!=='function'||typeof call.id!=='string'||!call.id.length||Array.from(call.id).length>256||
+        call.id.includes('\0')||Buffer.from(call.id).toString('utf8')!==call.id;
+     }catch{invalidFileArguments=true;}}
+    const oversized=(readsFile||readsHistory)&&Buffer.byteLength(JSON.stringify(JSON.stringify(message)))>SKILL_FILE_TRACE_BYTES;
+    if(active&&(terminalAgentReplyFailure(response,organizer,allowsCard,allowsSkillFile&&!fileRequested,allowsHistory&&!fileRequested)||
+      oversized||invalidFileArguments)){
       failed();
       throw new Error('RUNTIME_TERMINAL_REPLY');
     }
-    if(active&&!organizer&&readsFile)fileRequested=true;
+    if(active&&!organizer&&(readsFile||readsHistory))fileRequested=true;
   };
 }
