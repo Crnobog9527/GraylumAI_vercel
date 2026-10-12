@@ -1,6 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import {freezeSkillFileBinding,skillFileToolBytes,skillFileContinuationBytes,type SkillFileBinding} from './skillFile';
 import { GENERIC_ORGANIZER_TEMPLATE, loadOrganizerTemplate } from '../skills/organizerTemplate';
+import {loadStepGuide} from '../skills/stepGuide';
 import {type FrozenReport} from '../report/contract';
 import {finishWaitingOrganizer,type ResumeWaitingOrganizer} from './waitingOrganizer';
 import { TRPCError } from '@trpc/server';
@@ -184,7 +185,10 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
     const descriptors=await source.list();const descriptor=descriptors.find(d=>d.revisionId===revisionId);
     if(!descriptor)throw new Error('RUNTIME_REVISION_DENIED');
     const loaded=await activateSkill(source,identityOf(descriptor),{...(policy.skillResources?{resources:policy.skillResources}:{task:input.selection.task}),maxContextBytes:inputBytes});
-    instructions=loaded.forModel();skillChars=instructions.length;
+    instructions=loaded.forModel();
+    // Free chat (no workflow host resources): a non-positioning Skill's declared steps are an ordered work guide (R8b).
+    if(!policy.skillResources){const guide=await loadStepGuide(source,revisionId);if(guide)instructions+='\n'+guide;}
+    skillChars=instructions.length;
     if(policy.skillFileRead&&mentorStream&&!isOpeningInput(input.input)&&policy.maxCalls-(organizeAfter?1:0)===2){
      skillFile=freezeSkillFileBinding(descriptor);skillFileReserve=await skillFileContinuationBytes(source,descriptor);
     }

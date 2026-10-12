@@ -2,6 +2,7 @@
 import { z } from 'zod';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { databaseSkillSource, userVisibleModules } from '../skills/databaseSource';
+import { loadStepGuide } from '../skills/stepGuide';
 import { activateSkill, discoverSkills, SkillLoadError } from '../skills/loader';
 import { fixtureInputCapacity, selectRuntimeHistory } from './context';
 
@@ -59,7 +60,8 @@ export async function activateRuntimeCandidate(user:SupabaseClient,admin:Supabas
  if(c.requiresTask)throw new Error('RUNTIME_SKILL_TASK_REQUIRED');
  const source=databaseSkillSource({userClient:user,privateClient:admin,moduleId:c.moduleId,skillId:c.skillId,revisionId:c.revisionId});
  const loaded=await activateSkill(source,{packageId:c.packageId,revisionId:c.revisionId,packageHash:c.packageHash},{maxContextBytes:c.inputLimit});
- return loaded.forModel();
+ const guide=await loadStepGuide(source,c.revisionId);
+ return guide?loaded.forModel()+'\n'+guide:loaded.forModel();
 }
 /** A selected Skill runs with its own model capacity: never pay for a match whose selection cannot run.
  * The input alone is a lower bound, so a candidate that cannot hold it is dropped without loading its Skill. */

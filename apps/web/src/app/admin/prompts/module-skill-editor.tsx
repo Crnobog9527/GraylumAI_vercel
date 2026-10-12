@@ -88,7 +88,7 @@ export function ModuleSkillEditor({ value, onChange, error, onError, onReadingCh
     </label>
     {value.files.length > 0 && <details><summary>已载入 {value.files.length} 个文件</summary><ul className="text-xs break-all">{value.files.map(f => <li key={f.path}>{f.path}</li>)}</ul></details>}
     <p className="text-sm text-[var(--text-secondary)]">{declaredWorkflow
-      ? '步骤顺序、名称与问题由 Skill 包中的 workflow.yaml 声明。重新上传并发布后，新定位自动采用新版本。'
+      ? '步骤顺序、名称与问题由 Skill 包中的 workflow.yaml 声明。重新上传并发布后，新定位自动采用新版本。只有定位 Skill（问题带 profileKey）按步骤强引导；其他 Skill 的步骤只作为 AI 在自由对话里的工作顺序，不出现步骤工作区和确认卡。'
       : '当前包没有 workflow.yaml：只重新上传 SKILL.md 不会改变步骤或问题。请在 Skill 包中加入 workflow.yaml；旧包仍可沿用原有手动步骤配置。'}</p>
     {value.steps.map((step, i) => <div key={i} className="space-y-2 rounded border border-[var(--border-primary)] p-3">
       <div className="flex gap-2 items-center"><span>{i + 1}.</span>
