@@ -7,14 +7,14 @@
 import MarketingShell from '@/components/landing/MarketingShell';
 import PublicPageHero from '@/components/landing/PublicPageHero';
 import { faqItems } from '@/lib/landing-content';
-import { buildPublicPageMetadata } from '@/lib/public-site';
+import { buildPageMetadata } from '@/lib/seo/metadata';
 
-export async function generateMetadata() {
-  return buildPublicPageMetadata(
-    '常见问题',
-    '查看产品定位、适用对象、套餐选择、数据安全和支持方式等高频问题。',
-    ['常见问题', 'FAQ', '数据安全', '套餐选择']
-  );
+export function generateMetadata() {
+  return buildPageMetadata({
+    title: '常见问题',
+    description: '查看产品定位、适用对象、套餐选择、数据安全和支持方式等高频问题。',
+    path: '/faq',
+  });
 }
 
 export default function FAQPage() {
