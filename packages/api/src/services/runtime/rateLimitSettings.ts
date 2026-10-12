@@ -35,11 +35,12 @@ export async function readRuntimeRateLimits(db: SupabaseClient) {
   } catch { return unavailable('read_failed'); }
   if (result.error) return unavailable('read_failed');
   if (!result.data) return { config: { ...DEFAULT_RUNTIME_RATE_LIMITS }, source: 'default' as const };
-  try {
-    const raw = result.data.value;
-    const config = runtimeRateLimitsSchema.parse(typeof raw === 'string' ? JSON.parse(raw) : raw);
-    return { config, source: 'configured' as const };
-  } catch { return unavailable('invalid'); }
+  return { config: storedRateLimits(result.data.value), source: 'configured' as const };
+}
+/** Parses a stored runtime_rate_limits value; malformed values fail closed (never the default). */
+export function storedRateLimits(raw: unknown) {
+  try { return runtimeRateLimitsSchema.parse(typeof raw === 'string' ? JSON.parse(raw) : raw); }
+  catch { return unavailable('invalid'); }
 }
 
 /** Legacy true means stop only; false never resumes calls from a stale quota form. */

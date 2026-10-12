@@ -1,17 +1,15 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import type { RuntimeProgress } from '../runtime/progress';
-import { modelIdentityGuardEnabled, type GuardReader } from './guardSetting';
 import { redactIdentityBody, redactModelIdentity, streamingRedaction } from './outputGuard';
 
 type TextEvent = Extract<RuntimeProgress, { type: 'text' }>;
 
 /**
- * MODEL-IDENTITY-GUARD layer 3 for one runtime execution. The switch is read once, so the
- * streamed text and the stored body of this execution follow the same decision. Billing is
- * unaffected: it settles from provider usage receipts, never from the reply text.
+ * MODEL-IDENTITY-GUARD layer 3 for one runtime execution. The decision is the one frozen at
+ * admission (see frozenBrandIdentity), so streamed text and the stored body agree and no extra
+ * database read happens. Billing is unaffected: it settles from provider usage receipts.
  */
-export async function runtimeIdentityGuard(db: GuardReader) {
-  const enabled = await modelIdentityGuardEnabled(db);
+export function runtimeIdentityGuard(enabled: boolean) {
   return {
     enabled,
     body: (body: string) => enabled ? redactIdentityBody(body) : body,
@@ -30,7 +28,7 @@ export function guardedProgress(emit: (event: RuntimeProgress) => void) {
       if (!text && !emitted) return;
       emit({ ...event, text, delta: extend ? text.slice(emitted.length) : text, replace: !extend });
     } else {
-      if (text === emitted) return;
+      if (!text && event.text) return;
       emit({ type: 'text', text });
     }
     emitted = text;

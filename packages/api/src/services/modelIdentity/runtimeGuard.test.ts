@@ -73,9 +73,16 @@ it('a source switch is always sent as a replacement', () => {
   expect(out.at(-1)).toMatchObject({ replace: true, text: '第一段。第二', source: 'message' });
 });
 
-it('switch off passes events and bodies through untouched', async () => {
-  const guard = await runtimeIdentityGuard({ rpc: async () => ({ data: { version: 1, enabled: false, revision: 1,
-    updatedBy: null, updatedAt: null }, error: null }) });
+it('legacy text events are not deduplicated (repeated identical events still reach the client)', () => {
+  const out: RuntimeProgress[] = [];
+  const guarded = guardedProgress(event => out.push(event));
+  guarded({ type: 'text', text: 'Separate assistant text' });
+  guarded({ type: 'text', text: 'Separate assistant text' });
+  expect(out).toHaveLength(2);
+});
+
+it('switch off passes events and bodies through untouched', () => {
+  const guard = runtimeIdentityGuard(false);
   const emit: (event: RuntimeProgress) => void = () => {};
   expect(guard.progress(emit)).toBe(emit);
   expect(guard.body('我是 Claude。')).toBe('我是 Claude。');

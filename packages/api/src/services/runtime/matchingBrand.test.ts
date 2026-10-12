@@ -2,10 +2,10 @@
 import { expect, it, vi } from 'vitest';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { activateRuntimeCandidate } from './matching';
-import { BRAND_IDENTITY_INSTRUCTIONS } from '../modelIdentity/brandIdentity';
+import { BRAND_IDENTITY_INSTRUCTIONS, frozenBrandIdentity, withBrandIdentity } from '../modelIdentity/brandIdentity';
 
-// MODEL-IDENTITY-GUARD: execute.ts activates a matched Skill through options.activateSkill, which
-// executionStream.ts binds to activateRuntimeCandidate; admission sizes candidates with it too.
+// MODEL-IDENTITY-GUARD: admission sizes candidates with activateRuntimeCandidate(…, frozen flag);
+// execute.ts wraps options.activateSkill with the flag frozen into the admitted instructions.
 vi.mock('../skills/databaseSource', () => ({ databaseSkillSource: () => ({}) }));
 vi.mock('../skills/loader', async original => ({
   ...await original<typeof import('../skills/loader')>(),
@@ -17,19 +17,20 @@ const candidate = {
   packageHash: 'a'.repeat(64), modelId: '10000000-0000-4000-8000-000000000004', model: 'fixture',
   inputLimit: 32000, outputLimit: 100, requiresTask: false,
 };
-const admin = (rpc: () => unknown) => ({ rpc: async () => rpc() }) as unknown as SupabaseClient;
-const guard = (enabled: boolean) => () => ({ data: { version: 1, enabled, revision: 0, updatedBy: null, updatedAt: null }, error: null });
+const admin = {} as SupabaseClient;
 
-it('a matched Skill runs with the brand identity first when the switch is on', async () => {
-  expect(await activateRuntimeCandidate({} as SupabaseClient, admin(guard(true)), candidate))
+it('a matched Skill runs with the brand identity first when it was frozen on at admission', async () => {
+  expect(await activateRuntimeCandidate({} as SupabaseClient, admin, candidate, true))
     .toBe(BRAND_IDENTITY_INSTRUCTIONS + '\nMatched Skill text');
 });
 
-it('a matched Skill runs unchanged when the switch is off', async () => {
-  expect(await activateRuntimeCandidate({} as SupabaseClient, admin(guard(false)), candidate)).toBe('Matched Skill text');
+it('a matched Skill runs unchanged when the switch was off (and by default for old callers)', async () => {
+  expect(await activateRuntimeCandidate({} as SupabaseClient, admin, candidate, false)).toBe('Matched Skill text');
+  expect(await activateRuntimeCandidate({} as SupabaseClient, admin, candidate)).toBe('Matched Skill text');
 });
 
-it('an unreadable switch keeps the identity on', async () => {
-  const result = await activateRuntimeCandidate({} as SupabaseClient, admin(() => { throw new Error('down'); }), candidate);
-  expect(result.startsWith(BRAND_IDENTITY_INSTRUCTIONS)).toBe(true);
+it('the executor derives the frozen decision from the admitted instructions without another read', () => {
+  expect(frozenBrandIdentity(withBrandIdentity('Answer', true))).toBe(true);
+  expect(frozenBrandIdentity('Answer')).toBe(false);
+  expect(frozenBrandIdentity(BRAND_IDENTITY_INSTRUCTIONS)).toBe(false);
 });
