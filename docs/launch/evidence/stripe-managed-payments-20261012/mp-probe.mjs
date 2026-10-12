@@ -332,13 +332,23 @@ async function advance(key, days) {
   const s = state.scenarios?.[key];
   if (!s?.clock) throw new Error(`no clock for ${key}`);
   const clock = await stripe('GET', `/test_helpers/test_clocks/${s.clock}`);
-  const target = clock.frozen_time + Math.round(Number(days) * DAY);
-  const res = await stripe('POST', `/test_helpers/test_clocks/${s.clock}/advance`, { frozen_time: target });
+  // A target saved by an earlier run whose result was uncertain is finished first, never re-added.
+  if (s.pendingAdvance && clock.frozen_time >= s.pendingAdvance) {
+    if (clock.frozen_time !== s.pendingAdvance) throw new Error(`${key} clock passed the saved target`);
+    console.log(`${key} earlier advance already reached ${s.pendingAdvance}; rerun without it to move further`);
+    delete s.pendingAdvance; save(); return;
+  }
+  const target = s.pendingAdvance ?? clock.frozen_time + Math.round(Number(days) * DAY);
+  s.pendingAdvance = target; save();
+  const res = clock.status === 'advancing' ? {}
+    : await stripe('POST', `/test_helpers/test_clocks/${s.clock}/advance`, { frozen_time: target });
   if (res.error) throw new Error(`${key} clock advance rejected: ${res.error.message}`);
   for (let i = 0; i < 60; i++) {
     const c = await stripe('GET', `/test_helpers/test_clocks/${s.clock}`);
     // Only report success once the clock actually stands at the requested instant.
-    if (c.status === 'ready' && c.frozen_time === target) { console.log(`${key} clock ready at +${days}d`); return; }
+    if (c.status === 'ready' && c.frozen_time === target) {
+      delete s.pendingAdvance; save(); console.log(`${key} clock ready at ${target}`); return;
+    }
     if (c.status === 'ready' && c.frozen_time !== target) throw new Error(`${key} clock ready at the wrong time`);
     await new Promise((r) => setTimeout(r, 3000));
   }
