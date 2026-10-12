@@ -55,6 +55,10 @@
         {
           "name": "INVITE-ABUSE",
           "plain": "防止用小号反复刷邀请奖励。"
+        },
+        {
+          "name": "DEP-BATCH-A",
+          "plain": "在 staging 上批量做一次低风险依赖升级，大版本升级等上线后再做。"
         }
       ]
     },
@@ -125,6 +129,10 @@
           "name": "BILL-PAYG",
           "plain": "每次调用 AI 前只冻结这一次的费用，用多少扣多少。",
           "doneNote": "约 100 条历史的长对话没有专门测，上线后用真实数据跟踪。"
+        },
+        {
+          "name": "RUNTIME-FAILURE-RECONCILE",
+          "plain": "系统意外出错、付了积分却没拿到回答的回合，靠每日对账和恢复任务退回积分。"
         }
       ]
     },
@@ -151,10 +159,6 @@
         {
           "name": "CONTENT-CONVERSATION-DRIVEN",
           "plain": "选题和写作改成自由对话，需要时自动用上对应平台的写作技巧。"
-        },
-        {
-          "name": "POSITIONING-GATE",
-          "plain": "没做定位的用户聊社媒运营时，先引导他做定位或导入已有定位。"
         }
       ]
     },
@@ -334,7 +338,7 @@
     {
       "id": "brand",
       "name": "官网统一、品牌一致",
-      "plain": "官网合并到 www.graylum.com、中文优先、公开页面换成新风格；用户在对话里看不到真实模型品牌。",
+      "plain": "官网合并到 www.graylum.com、中文优先、公开页面换成新风格；用户在对话里看不到真实模型品牌；没做定位的用户聊社媒运营时先引导做定位。",
       "tasks": [
         {
           "name": "PUBLIC-SITE",
@@ -343,6 +347,10 @@
         {
           "name": "MODEL-IDENTITY-GUARD",
           "plain": "用户看不到真实模型品牌和型号，问到或越狱时统一回复品牌话术。"
+        },
+        {
+          "name": "POSITIONING-GATE",
+          "plain": "没做定位的用户聊社媒运营时，先引导他做定位或导入已有定位。"
         }
       ],
       "waitingForOwner": [
