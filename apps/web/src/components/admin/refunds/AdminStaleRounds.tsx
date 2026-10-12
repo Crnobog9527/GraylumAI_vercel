@@ -69,6 +69,7 @@ export function AdminStaleRounds() {
                 style={{ borderColor: 'var(--border-primary)' }} data-testid="stale-round">
                 <div className="space-y-1 text-sm break-all" style={{ color: 'var(--text-secondary)' }}>
                   <p>已扣 {round.chargedCredits} 积分 · 开始于 {new Date(round.since).toLocaleString('zh-CN')}</p>
+                  <p data-testid="stale-round-user">用户 {round.userEmail ?? '（邮箱未读到）'} · 账号 {round.actorId}</p>
                   <p className="text-xs" style={{ color: 'var(--text-tertiary)' }} data-testid="stale-round-evidence">
                     {round.evidence.model ?? '未知模型'} · {round.evidence.streamed ? '边生成边显示' : '一次性显示'} ·
                     状态 {stateLabels[round.evidence.executionState] ?? round.evidence.executionState}
@@ -85,7 +86,7 @@ export function AdminStaleRounds() {
                 <ConfirmRefundAction testId={`stale-round-compensate-${round.runId}`} label="核对后补偿" pendingLabel="正在补偿…"
                   title="确认补偿这一轮？" confirmLabel="确认补偿" pending={compensate.isPending}
                   onConfirm={() => { setMessage(null); compensate.mutate({ runId: round.runId }); }}>
-                  <p>将结束这一轮，并把它已扣的 {round.chargedCredits} 积分全部退回给用户。补偿只会发生一次。</p>
+                  <p>将结束这一轮，并把它已扣的 {round.chargedCredits} 积分全部退回给用户 {round.userEmail ?? round.actorId}。补偿只会发生一次。</p>
                   <p>请确认这一轮确实没有给出回答（已保存回复 {round.evidence.savedReplyChars} 字、模型输出 {round.evidence.outputTokens} token），而且不是用户侧原因。</p>
                   {reviewCaution(round.evidence) ? <p>{reviewCaution(round.evidence)}</p> : null}
                   <p>{CAPACITY_RULE}</p>

@@ -18,7 +18,7 @@ export const STALE_ROUND_REPORT_LIMIT = 100;
 
 const report = z.object({
   total: z.number().int().nonnegative(),
-  rounds: z.array(z.object({ executionId: z.string().uuid(), runId: z.string().uuid(),
+  rounds: z.array(z.object({ executionId: z.string().uuid(), runId: z.string().uuid(), actorId: z.string().uuid(),
     chargedCredits: z.number().int().positive(), since: z.string(),
     // Content-free evidence for the operator's review; never the conversation itself.
     evidence: z.object({ model: z.string().nullable(), streamed: z.boolean(), executionState: z.string(),

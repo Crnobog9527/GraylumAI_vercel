@@ -14,7 +14,8 @@ vi.mock('@/trpc/client', () => ({ trpc: {
 const { AdminStaleRounds, compensationMessage, reviewCaution } = await import('./AdminStaleRounds');
 const evidence = { model: 'anthropic/claude-sonnet-5.5', streamed: false, executionState: 'interrupted', unavailableReason: null,
   calls: 1, outputTokens: 46, savedReplyChars: 0, lastActivityAt: '2026-10-11T18:02:31Z', lastFinishReason: 'stop' };
-const round = { kind: 'stale_charged_round', executionId: 'exec-1', runId: 'run-1', chargedCredits: 3, since: '2026-10-11T18:02:00Z', evidence };
+const round = { kind: 'stale_charged_round', executionId: 'exec-1', runId: 'run-1', actorId: 'actor-1', userEmail: 'user@example.com',
+  chargedCredits: 3, since: '2026-10-11T18:02:00Z', evidence };
 
 describe('admin stale-round compensation section', () => {
   beforeEach(() => { state.mutate.mockReset(); });
@@ -30,6 +31,8 @@ describe('admin stale-round compensation section', () => {
     state.list = { isLoading: false, error: null, data: { findings: [round], total: 120, truncated: true } };
     const html = renderToStaticMarkup(<AdminStaleRounds />);
     expect(html).toContain('已扣 3 积分');
+    // The operator can match the round to that user's feedback.
+    expect(html).toContain('用户 user@example.com · 账号 actor-1');
     expect(html).toContain('run-1');
     expect(html).toContain('stale-round-compensate-run-1');
     expect(html).toContain('共 120 个回合');

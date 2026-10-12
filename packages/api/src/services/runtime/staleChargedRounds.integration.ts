@@ -107,7 +107,8 @@ it('RUNTIME: service_role reads stale charged rounds only through the report fun
   expect((await service.from('runtime_executions').select('id').limit(1)).error).toBeTruthy();
   expect((await anon.rpc('runtime_stale_charged_rounds', { p_cutoff: new Date().toISOString(), p_limit: 1 })).error).toBeTruthy();
   const report = await reported();
-  expect(report.rounds).toContainEqual(expect.objectContaining({ executionId: stale.executionId, runId: stale.runId, chargedCredits: 3 }));
+  expect(report.rounds).toContainEqual(expect.objectContaining({ executionId: stale.executionId, runId: stale.runId,
+    actorId: stale.actor, chargedCredits: 3 }));
   // Content-free review evidence: the fixture's primary call returned 4 output tokens and saved its reply.
   expect(report.rounds.find(round => round.runId === stale.runId)).toMatchObject({ evidence: {
     streamed: false, executionState: 'interrupted', unavailableReason: null, calls: 1, outputTokens: 4,
@@ -118,7 +119,7 @@ it('RUNTIME: service_role reads stale charged rounds only through the report fun
   expect(live.success).toBe(false);
   await expect(rpc('runtime_stale_charged_rounds', { p_cutoff: new Date(Date.now() + 60000).toISOString(), p_limit: 1 }))
     .rejects.toThrow('STALE_ROUND_CUTOFF_INVALID');
-  await expect(rpc('runtime_stale_charged_rounds', { p_cutoff: new Date().toISOString(), p_limit: 501 }))
+  await expect(rpc('runtime_stale_charged_rounds', { p_cutoff: new Date(Date.now() - 60_000).toISOString(), p_limit: 501 }))
     .rejects.toThrow('STALE_ROUND_LIMIT_INVALID');
 }, 60000);
 

@@ -9,7 +9,7 @@ const cutoff = new Date(now - STALE_ROUND_AGE_MS).toISOString();
 const uuid = (prefix: number, n: number) => `${prefix}0000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
 const evidence = { model: 'synthetic/model', streamed: false, executionState: 'interrupted', unavailableReason: null,
   calls: 1, outputTokens: 4, savedReplyChars: 0, lastActivityAt: '2026-10-11T18:02:31+00:00', lastFinishReason: 'tool_calls' };
-const round = (n: number) => ({ executionId: uuid(1, n), runId: uuid(2, n), chargedCredits: 3,
+const round = (n: number) => ({ executionId: uuid(1, n), runId: uuid(2, n), actorId: uuid(3, n), chargedCredits: 3,
   since: '2026-10-11T18:02:00+00:00', evidence });
 const client = (result: { data: unknown; error: unknown }) => {
   const rpc = vi.fn(async () => result);

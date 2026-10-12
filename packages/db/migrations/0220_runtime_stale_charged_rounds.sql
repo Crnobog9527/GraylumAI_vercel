@@ -24,7 +24,7 @@ BEGIN
  IF p_cutoff IS NULL OR p_cutoff>clock_timestamp() THEN RAISE EXCEPTION 'STALE_ROUND_CUTOFF_INVALID' USING ERRCODE='22023';END IF;
  IF p_limit IS NULL OR p_limit NOT BETWEEN 1 AND 500 THEN RAISE EXCEPTION 'STALE_ROUND_LIMIT_INVALID' USING ERRCODE='22023';END IF;
  WITH charged AS (
-  SELECT e.id execution_id,r.id run_id,e.created_at since,
+  SELECT e.id execution_id,r.id run_id,e.actor_id,e.created_at since,
    (SELECT coalesce(sum(c.charged_delta),0) FROM bill2_calls c WHERE c.run_id=r.id
      AND c.settled_at IS NOT NULL AND c.compensated_at IS NULL AND c.charged_delta>0)::integer credits,
    e.payload->>'model' model,e.state execution_state,e.unavailable_reason,
@@ -64,7 +64,8 @@ BEGIN
   SELECT *,row_number() OVER (ORDER BY since,run_id) n FROM charged WHERE credits>0
  )
  SELECT jsonb_build_object('total',count(*),'rounds',coalesce(jsonb_agg(jsonb_build_object(
-   'executionId',execution_id,'runId',run_id,'chargedCredits',credits,'since',since,
+   -- The account id lets the operator match the round to user feedback; contact details stay out of the report.
+   'executionId',execution_id,'runId',run_id,'actorId',actor_id,'chargedCredits',credits,'since',since,
    'evidence',jsonb_build_object('model',model,'streamed',streamed,'executionState',execution_state,
     'unavailableReason',unavailable_reason,'calls',calls,'outputTokens',output_tokens,
     'savedReplyChars',saved_reply_chars,'lastActivityAt',last_activity,'lastFinishReason',last_finish_reason)) ORDER BY n)

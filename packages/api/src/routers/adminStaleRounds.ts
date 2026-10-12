@@ -8,8 +8,16 @@ import { compensateStaleRound, findStaleChargedRounds, STALE_ROUND_REFUSALS } fr
 /** Admin refunds page: the daily stale-round report and its verified compensation (Owner 2026-10-12). */
 export const adminStaleRoundsRouter = router({
   list: adminProcedure.query(async ({ ctx }) => {
-    try { return await findStaleChargedRounds(ctx.supabase); }
+    let report;
+    try { report = await findStaleChargedRounds(ctx.supabase); }
     catch { throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'STALE_ROUND_SCAN_FAILED' }); }
+    // The operator matches each round to user feedback by account; the email is shown here only, never in cron logs.
+    const actorIds = [...new Set(report.findings.map(round => round.actorId))];
+    const { data } = actorIds.length
+      ? await ctx.supabase.from('profiles').select('id, email').in('id', actorIds)
+      : { data: [] as { id: string; email: string | null }[] };
+    const emails = new Map((data ?? []).map(profile => [profile.id, profile.email]));
+    return { ...report, findings: report.findings.map(round => ({ ...round, userEmail: emails.get(round.actorId) ?? null })) };
   }),
   compensate: adminProcedure.input(z.object({ runId: z.string().uuid() }).strict()).mutation(async ({ ctx, input }) => {
     let result;
