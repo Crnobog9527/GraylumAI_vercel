@@ -132,7 +132,7 @@ export const RISK_REVERSAL = {
   points: [
     { text: '先免费和教练聊一次：注册送 500 积分，足够把你的情况聊透、把定位整理出来。觉得有用，再开通。', needs: ['signupGrant'] },
     { text: '聊出来的内容随时能看、能导出，不会收回。' },
-    { text: '积分永不过期；会员到期后，已生成的报告仍然可以看、可以导出。' },
+    { text: '积分永不过期；会员到期后，已生成的报告仍然可以看、可以导出。', needs: ['report'] },
     { text: '随时取消，用到当期结束。' },
   ] as readonly GatedText[],
 } as const;
