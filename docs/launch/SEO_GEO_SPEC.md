@@ -21,16 +21,18 @@ Owner 2026-10-12 决定：应用合并到 `www.graylum.com` 单主机，登录�
 | 规则 | 内容 |
 | --- | --- |
 | 正式主机 | 只有 `https://www.graylum.com` |
-| 其他主机 | `graylum.com`、`app.graylum.com`、`http://` 一律**永久跳转（308，Next.js `permanent: true` 的默认值，保留请求方法和请求体；谷歌把 301 和 308 同等视为永久）**到 www。`app.graylum.com` 上**只有搬进 `/app` 的界面路由**加前缀（`app.graylum.com/` → `www.graylum.com/app`，`app.graylum.com/positioning` → `www.graylum.com/app/positioning`）；`/auth/*`、`/api/*`、`/admin/*`、`/_next/*` 和登录入口页（`/login` 等，见下一行）保持原路径只换主机（`app.graylum.com/auth/callback` → `www.graylum.com/auth/callback`），在途的登录链接和支付回调不能落到不存在的 `/app/auth`、`/app/api`。支付回调的 `POST` 不能依赖跳转：切换前先在 Waffo / Stripe 后台把 webhook 主机改成 www，跳转只是兜底，并用带请求体的 `POST` 实测跳转后方法和内容不变。重定向长期保留 |
+| 其他主机 | `graylum.com`（裸域）、`app.graylum.com`、`http://` 一律**永久跳转（308，Next.js `permanent: true` 的默认值，保留请求方法和请求体；谷歌把 301 和 308 同等视为永久）**到 www。`app.graylum.com` 上**只有搬进 `/app` 的界面路由**加前缀（`app.graylum.com/` → `www.graylum.com/app`，`app.graylum.com/positioning` → `www.graylum.com/app/positioning`）；`/auth/*`、`/api/*`、`/admin/*`、`/_next/*` 和登录入口页（`/login` 等，见下一行）保持原路径只换主机（`app.graylum.com/auth/callback` → `www.graylum.com/auth/callback`），在途的登录链接和支付回调不能落到不存在的 `/app/auth`、`/app/api`。支付回调的 `POST` 不能依赖跳转：切换前先在 Waffo / Stripe 后台把 webhook 主机改成 www，跳转只是兜底，并用带请求体的 `POST` 实测跳转后方法和内容不变。裸域 `graylum.com/任意路径?参数` → `www.graylum.com/同一路径?同一参数`（保留路径和查询参数）：在 `next.config.ts` 用 `has: host = graylum.com` 实现，或在 Vercel 把裸域设成跳转到 www（正式环境设置属 AGENTS §1）；两者选一并实测。重定向长期保留 |
 | 登录后页面 | 需要登录的界面全部在 `/app/...`，**包括现在根路径的已登录首页**（`src/app/page.tsx`，读个人资料、资料库和积分）——它搬到 `/app`，根路径 `/` 改成公开首页；`/admin/...` 保持；`/api/...`、`/auth/callback` 位置不变 |
 | 登录入口页 | `/login`、`/register`、`/verify-email`、`/forgot-password`、`/reset-password` 留在根路径，**不进 `/app`**：未登录也能打开，邮件里的验证和找回链接才能用；它们 `noindex`。实现时同时测“未登录能打开登录页”和“未登录打不开 `/app/*`、被送到 `/login`”两种情况 |
-| 索引范围 | `/app`、`/admin`、`/auth`、登录入口页永远 `noindex`（响应头 + meta），不受 `SITE_INDEXING` 开关影响；开关只控制公开页。**robots.txt 不 Disallow 这些 HTML 路径**：谷歌要读到 `noindex` 才能不收录，被 robots 挡住反而可能只收地址不收内容（Google 文档 block-indexing）。robots 只 Disallow `/api/`；`/_next/static`、`/_next/image` 是公开页渲染用的 JS / CSS / 图片，**必须允许抓取** |
+| 索引范围 | `/app`、`/admin`、`/auth`、登录入口页、`/maintenance`、`/access-denied` 永远 `noindex`（响应头 + meta），不受 `SITE_INDEXING` 开关影响。`SITE_INDEXING` 不是 `public` 时（staging、预览、本地），**整个环境的所有响应都保留 `X-Robots-Tag: noindex, nofollow`**，再加 robots `Disallow: /`——只靠 Disallow 挡不住被外链指向的地址进结果。只有 `SITE_INDEXING=public` 的正式环境才放开公开页。**robots.txt 不 Disallow 这些 HTML 路径**：谷歌要读到 `noindex` 才能不收录，被 robots 挡住反而可能只收地址不收内容（Google 文档 block-indexing）。robots 只 Disallow `/api/`；`/_next/static`、`/_next/image` 是公开页渲染用的 JS / CSS / 图片，**必须允许抓取** |
 | Cookie | 单主机后登录 Cookie 改为 host-only，不再用 `.graylum.com` 共享域。**不能只改作用域**：老浏览器里还留着 `.graylum.com` 上同名的旧 Cookie，和新的 host-only Cookie 并存时浏览器端可能先读到旧的，造成登录状态错乱或循环跳登录（`proxy.ts` 注释已记录这个现象）。切换时要把旧 Cookie 迁移或过期：在 www 上读到 `.graylum.com` 的本项目 Cookie 时，写入 host-only 新值并把旧的设为过期（扩展现有 `legacyParentCookieNames`，让它在正式主机上也生效）。实施时测：已登录的老用户切换后不掉线、不循环、退出后两份都清掉 |
 | staging | `auth-staging.graylum.com` 本来就是单主机，套用同一套按路径的规则 |
 
 迁移的技术清单见第 14 节；开发由总控另派，本文不含代码改动。
 
 ## 3. 语言与路径（已批准：中文优先）
+
+**目标市场只有三类**（Owner 2026-10-12 原话：「香港放弃不做。集中做简体+台湾繁体+英文，就这 3 个群体。」）：简体中文（海外大陆背景华人，谷歌 `gl=us`、`hl=zh-CN` 口径）、台湾繁体中文（`gl=tw`）、英文（美国）。香港不做目标市场，繁体页一律用台湾用语。
 
 Owner 2026-10-12 在"A 中文优先 / B 英文优先"中选 A（原话「选 A。」）：网站默认中文，简体在根路径，繁体 `/zh-tw`，英文 `/en` 等产品有英文界面后再上；第一批内容先做简体和繁体（繁体竞争松，先出排名）；首页核心词等 Owner 用 Google Ads 规划师导出中文搜索量后再定；英文关键词研究保留为附录 A，作为后备。
 
@@ -44,24 +46,23 @@ Owner 2026-10-12 在"A 中文优先 / B 英文优先"中选 A（原话「选 A�
 | 英文页 | `/en/...`，有英文界面后再做；在此之前不建 `/en` 目录，也不写指向它的 hreflang |
 | 日语（将来） | `/ja/...` |
 | `x-default` | 指向根路径（简体） |
-| `<html lang>` | 根路径 `zh-Hans`；`/zh-tw` 下 `zh-Hant`；`/en` 下 `en` |
+| `<html lang>` | 根路径 `zh-Hans`；`/zh-tw` 下 `zh-Hant-TW`；`/en` 下 `en` |
 | `openGraph.locale` | `zh_CN` / `zh_TW` / `en_US` |
 | sitemap | 一个 `sitemap.xml`，按语言分组，每条带 `alternates` |
 
 共同规则：
 - 不按浏览器语言自动跳转（爬虫会被跳走）；可在页顶放语言提示条。
 - 不用 `?lang=` 参数，不用子域名做语言。
-- 每个有对应语言版本的页都写全 `hreflang`：`zh-Hans`、`zh-Hant`（+ 将来的 `en`）+ `x-default`；只在确实有翻译版时写，不能指向不存在的页。
-- 简体和繁体不是互译：词、平台（小红书 / 抖音 vs IG / Threads）、第一页对手都不同，各按各的 SERP 写。简体面向美国、新加坡、马来西亚的大陆背景华人（Google `gl=us`、`hl=zh-CN` 口径）；繁体面向台湾、香港（`gl=tw`）。
+- 每个有对应语言版本的页都写全 `hreflang`：`zh-Hans`、`zh-TW`（台湾繁体，只面向台湾）（+ 将来的 `en`）+ `x-default`；只在确实有翻译版时写，不能指向不存在的页。
+- 简体和繁体不是互译：词、平台（小红书 / 抖音 vs IG / Threads）、第一页对手都不同，各按各的 SERP 写。简体面向海外大陆背景华人（Google `gl=us`、`hl=zh-CN` 口径）；繁体只面向台湾（`gl=tw`），用台湾用语。
 - 英文页上线时同样不是中文页的翻译，按附录 A 的英文词另做。
 
 ### 3.2 第一批公开页（已批准）
 
-Owner 2026-10-12 先批准过 11 页的版本（原话：「同意：根路径简体，首页 H1 用"AI 自媒体教练"；/zh-tw 核心词自媒體；第一批繁体 7 页 + 简体 4 页按附录 B」）。同日 Owner 用 Google Ads 关键字规划师导出了三地中文搜索量，交叉核对后改为下面 7 页，Owner 原话：「按这份清单改规范」。取代 11 页版本。
+Owner 2026-10-12 先批准过 11 页的版本（原话：「同意：根路径简体，首页 H1 用"AI 自媒体教练"；/zh-tw 核心词自媒體；第一批繁体 7 页 + 简体 4 页按附录 B」）。同日 Owner 用 Google Ads 关键字规划师导出了三地中文搜索量，交叉核对后改为 7 页，Owner 原话：「按这份清单改规范」；随后 Owner 决定放弃香港，最终为下面 6 页。取代 11 页和 7 页版本。
 
-中文第一批 7 页（地址、目标词和依据见附录 B）：
+中文第一批 6 页，全部是台湾繁体（地址、目标词和依据见附录 B）。原清单里的香港 1 页（`/zh-tw/kol`）按 Owner 同日"香港放弃不做"的决定去掉：
 - 台湾 6 页：`/zh-tw/`（枢纽页，自媒體）、`/zh-tw/zimeiti-jingying`（如何經營自媒體 + 自媒體經營 + 經營自媒體）、`/zh-tw/shequn-xingxiao`（社群行銷）、`/zh-tw/shequn-jingying`（社群經營）、`/zh-tw/ig-jingying`（IG 經營 + 如何經營 IG）、`/zh-tw/zimeiti-kecheng`（自媒體課程，转化页）。
-- 香港 1 页：`/zh-tw/kol`（KOL，页内回答如何成為 KOL、KOL 如何賺錢、KOL 報價）。
 - 简体 0 页：根路径只做首页；简体获客靠 YouTube / 小红书，见附录 C。
 - 英文按附录 A 的第 1 批 8 页，等 `/en` 上线。
 
@@ -73,11 +74,11 @@ Owner 2026-10-12 先批准过 11 页的版本（原话：「同意：根路径�
   - Title（给搜索引擎）：`Graylum – AI 自媒体工具：定位、选题、写内容的 AI 自媒体陪跑教练`，一次覆盖"自媒体 / AI 自媒体 / 自媒体 AI 工具"三种真实写法。
   - H1（给用户）：`你的 AI 自媒体陪跑教练`（Owner 2026-10-12 选定）。
   - "自媒体"（美国规划师 100–1K/月，难度 59.7，维基和百度百科占前两位）只作长期词自然出现在 Title 和首屏，不指望早期排名。
-- 繁体枢纽页 `/zh-tw/`：按"第二个首页"做，核心词 **自媒體**（规划师：台湾 1K–10K、香港 100–1K，两地共同用词），页内回答"自媒體是什麼"（台湾 1K–10K）。Title 带"自媒體"和"AI 自媒體"；H1 `你的 AI 自媒體陪跑教練`。所有繁体内页用"自媒體"做锚文本回链它。"自媒體經營"一族归 `/zh-tw/zimeiti-jingying`，枢纽页不抢这个词，避免两页争同一个词。首页只用两地共同的词，"社群"（台湾）和"KOL / 社交媒體"（香港）只出现在各自的内页。
+- 繁体枢纽页 `/zh-tw/`：按"第二个首页"做，核心词 **自媒體**（规划师：台湾 1K–10K），页内回答"自媒體是什麼"（台湾 1K–10K）。Title 带"自媒體"和"AI 自媒體"；H1 `你的 AI 自媒體陪跑教練`。所有繁体内页用"自媒體"做锚文本回链它。"自媒體經營"一族归 `/zh-tw/zimeiti-jingying`，枢纽页不抢这个词，避免两页争同一个词。全部用台湾用语（社群、小編、短影音、IG 經營），不用香港说法（社交媒體、KOL、數碼營銷）。
 - 用词依据（2026-10-12 实测）：
-  - "AI 自媒体教练 / 自媒体教练 / 自媒體教練"三地都没有搜索量，自动补全只有一个人名——"教练"在中文里不是搜索词，只作差异化说法放在 H1。
-  - "AI 自媒体 / AI 自媒體"Semrush 未收录，但两地自动补全都有长尾（课程、工具、创业系统、事务所），是正在冒头的词，放 Title。
-  - "社交媒体策略 / 策略师 / 社媒策略 / 社群策略 / 社交媒體策略"三地都没有搜索量、自动补全为空，是英文 social media strategy 的直译，**中文页不用**。品牌定位句"AI 社媒策略师"只用于英文版和品牌介绍。
+  - "AI 自媒体教练 / 自媒体教练 / 自媒體教練"在简体、台湾都没有搜索量，自动补全只有一个人名——"教练"在中文里不是搜索词，只作差异化说法放在 H1。
+  - "AI 自媒体 / AI 自媒體"Semrush 未收录，但简体和台湾的自动补全都有长尾（课程、工具、创业系统、事务所），是正在冒头的词，放 Title。
+  - "社交媒体策略 / 策略师 / 社媒策略 / 社群策略 / 社交媒體策略"在简体、台湾都没有搜索量、自动补全为空，是英文 social media strategy 的直译，**中文页不用**。品牌定位句"AI 社媒策略师"只用于英文版和品牌介绍。
   - "陪跑"见附录 B：规划师在美国简体里"自媒体陪跑 / 陪跑教练"不到 10 次，台湾"自媒體陪跑 / 陪跑教練 / 陪跑課程"10–100 次；它是华人创作者圈卖真人服务的说法（价格从几万到 20 万台币），只作 H1 和文案用词，不作搜索目标。
 - 英文首页词（`social media coach`，附录 A）只在 `/en` 上线时用于英文首页。
 - 中文市场的流量预期和获客分工见附录 C：YouTube 中文频道是主引擎，SEO 页是承接层。
@@ -103,7 +104,7 @@ Owner 2026-10-12 先批准过 11 页的版本（原话：「同意：根路径�
 | `twitter` | `card: summary_large_image` |
 | `robots` | 公开页 `index, follow`；`/app`、`/admin`、`/auth`、登录入口页 `noindex, nofollow`，响应头和 meta 都写，并且**不在 robots.txt 里 Disallow**（见第 11 节） |
 | `keywords` | **不写**（哥飞《从 TDK 到 TDH》2024-04-06）；现有代码里的删除 |
-| `<html lang>` | 按页面语言 `zh-Hans` / `zh-Hant` / `en`，不写死 |
+| `<html lang>` | 按页面语言 `zh-Hans` / `zh-Hant-TW` / `en`，不写死 |
 
 OG 图：全站一张默认图 + 关键词页可用模板生成（标题 + 品牌），文件放 `public/og/`。
 
@@ -161,7 +162,7 @@ robots.txt 由 `app/robots.ts` 生成，上线（`SITE_INDEXING=public`）后的
 - 所有 UA：只 `Disallow: /api/`。`/_next/static`、`/_next/image` 不能挡——谷歌要用它们渲染公开页（Google robots.txt 指南：不要屏蔽影响页面理解的资源）。`/app`、`/admin`、`/auth`、登录入口页**不写 Disallow**，靠 `noindex` 头和 meta 挡索引——谷歌只有抓到页面才能读到 `noindex`。
 - 末尾：`Sitemap: https://www.graylum.com/sitemap.xml`。
 - 说明：拒绝 `GPTBot` 不影响 ChatGPT 搜索引用（那是 `OAI-SearchBot`）；拒绝 `Google-Extended` 不影响谷歌搜索和 AI Overviews（那用 Googlebot）。
-- `SITE_INDEXING` 不是 `public` 时仍然整站 `Disallow: /`（staging 和预览永不索引）。
+- `SITE_INDEXING` 不是 `public` 时仍然整站 `Disallow: /`，**同时所有响应保留 `X-Robots-Tag: noindex, nofollow`**（staging 和预览永不索引；被外链指向时也不进结果）。
 
 sitemap：`app/sitemap.ts` 生成，分语言、含 `lastModified`、只含可索引的公开页、不含重定向地址；上线当天提交 GSC 和 Bing Webmaster。
 
@@ -208,7 +209,7 @@ Owner 2026-10-12 决定：博客用仓库内文章实现，不接外部系统。
 | `apps/web/src/lib/site-config.ts` | `PUBLIC_SITE_HOSTS / SHARED_COOKIE_HOSTS / DEFAULT_AUTH_APP_URL / normalizeAppOrigin` 简化为单主机；Cookie 改 host-only，并按第 2 节迁移 / 过期 `.graylum.com` 旧 Cookie（`legacyParentCookieNames` 在正式主机上也生效）；`buildAuthHref / buildAppHref` 加 `/app` | 登录态，high |
 | `apps/web/src/lib/public-paths.ts` | 公开为默认，`/app` `/admin` 需登录 | 权限 |
 | 路由目录 | 根路径已登录首页 `src/app/page.tsx`（及同目录的 `home.module.css`、`home-steps`）移到 `src/app/app/page.tsx`；`positioning / runtime / profile / library / marketplace / workbench` 移到 `src/app/app/`；`login / register / verify-email / forgot-password / reset-password / auth / admin / api` 不动；全仓约 45 处内链、21 个文件改前缀（不含测试） | 面广 |
-| `next.config.ts` | `redirects()` 加 `has: host = app.graylum.com` 的 `permanent: true`（308，保留 POST 方法和请求体）：界面路由加 `/app` 前缀，`app.graylum.com/` 到 `/app`，`/auth` `/api` `/admin` `/_next` 和登录入口页只换主机不加前缀（第 2 节）；`X-Robots-Tag noindex` 改为只对 `/app` `/admin` `/auth` 和登录入口页，这些路径不进 robots Disallow | ordinary |
+| `next.config.ts` | `redirects()` 加 `has: host = app.graylum.com` 的 `permanent: true`（308，保留 POST 方法和请求体）：界面路由加 `/app` 前缀，`app.graylum.com/` 到 `/app`，`/auth` `/api` `/admin` `/_next` 和登录入口页只换主机不加前缀（第 2 节）；加 `has: host = graylum.com` 到 www 的 308（保留路径和参数），或改用 Vercel 设置（见第 2 节）；`X-Robots-Tag noindex`：`SITE_INDEXING` 不是 `public` 时**整个环境保留**；是 `public` 时只对 `/app` `/admin` `/auth`、登录入口页、`/maintenance`、`/access-denied`，这些路径不进 robots Disallow。测试覆盖：裸域跳转保留路径和参数；非 public 环境任意路径都带 noindex；public 环境下上述路径带 noindex、公开页不带 | ordinary |
 | 环境变量 | `NEXT_PUBLIC_APP_URL`、`NEXT_PUBLIC_AUTH_APP_URL` = `https://www.graylum.com` | 正式环境改值属 AGENTS §1 |
 | 支付回调 | `waffoCheckout.ts`、`stripeCheckoutIntent.ts` 的 successUrl 从请求 origin 拼，自动跟随；Waffo / Stripe 后台 webhook 主机**先**改成 www（路径不变），再切域名；用带请求体的 POST 实测 app 域跳转后方法和内容不变 | 正式环境属 §1；staging 由 AI 改 |
 | Supabase Auth | Site URL 改 www；Redirect URLs 加 `https://www.graylum.com/**`、删 app 域；邮件模板不改；Google OAuth 不改 | 正式环境属 §1；staging 由 AI 改 |
@@ -255,15 +256,15 @@ Owner 2026-10-12 决定：博客用仓库内文章实现，不接外部系统。
 - 谷歌趋势**不用**于这批中文词：它们热度低到接近谷歌统计下限，5 年对比里几乎每周都是 0，小数是取整噪音。
 - 入选规则：规划师 ≥ 100–1K，或"规划师 10–100 + 下拉提示 + 第一页有专门页"；且意图对、难度可接受。上线后用 GSC 真实数据决定加码或停止（第 8 周规则见附录 C）。
 
-**三地用语**：台湾说"自媒體 / 社群 / 小編 / 短影音 / IG 經營"；香港说"社交媒體 / KOL / 數碼營銷 / 網上推廣"；美国华人说"社交媒体 / 自媒体 / 运营"。三套词不能互译。
+**用语**：台湾说"自媒體 / 社群 / 小編 / 短影音 / IG 經營"；美国华人说"社交媒体 / 自媒体 / 运营"。两套词不能互译。（香港说"社交媒體 / KOL / 數碼營銷"，香港已按 Owner 2026-10-12 决定放弃，不做目标市场。）
 
-**市场总量（这批词规划师区间代表值合计）**：台湾约 28,400 / 月；香港约 17,750 / 月（大头是导航词和"KOL"本词）；美国简体约 2,150 / 月（30 个词只有 2 个过 100）。
+**市场总量（这批词规划师区间代表值合计）**：台湾约 28,400 / 月；美国简体约 2,150 / 月（30 个词只有 2 个过 100）。
 
 ### 台湾（gl=tw，中文繁体）
 
 | 页面 | 目标词 | 规划师 | 哥飞 KD | 依据 / 盘面 | 批次 |
 | --- | --- | --- | --- | --- | --- |
-| `/zh-tw/`（枢纽页） | 自媒體；页内回答 自媒體是什麼 | 1K–10K；1K–10K | 30.8；20.7 | 两地共同用词；第一页有 DR 2 的站 | **第一批，本市场唯一必做** |
+| `/zh-tw/`（枢纽页） | 自媒體；页内回答 自媒體是什麼 | 1K–10K；1K–10K | 30.8；20.7 | 第一页有 DR 2 的站 | **第一批，本市场唯一必做** |
 | `/zh-tw/zimeiti-jingying` | 如何經營自媒體 + 自媒體經營 + 經營自媒體 | 各 100–1K（如何經營近 3 个月 +900%） | 6.1–20.4 | 同一需求合一页；第一页有 DR 2 的站 | 第一批 |
 | `/zh-tw/shequn-xingxiao` | 社群行銷 | 1K–10K（同比 +900%） | 15.6 | 第 1 名 DR 20，前十有 DR 2–3 | 第一批 |
 | `/zh-tw/shequn-jingying` | 社群經營 | 100–1K | 7.1 | 第一页十几个专门页，有 DR 2 | 第一批 |
@@ -276,15 +277,6 @@ Owner 2026-10-12 决定：博客用仓库内文章实现，不接外部系统。
 | `/zh-tw/ai-shequn-xingxiao` | AI 社群行銷 | 100–1K | 30.6 | 第一页多是政府课程，最弱 DR 32 | 第二批 |
 
 不做：自媒體顧問、陪跑顧問、自媒體怎麼開始（规划师都不到 10）；社群小編（100–1K 但是求职意图）；網紅行銷（100–1K 但是品牌方找网红）；自媒體行銷（100–1K 但近 3 个月 -90%）；自媒體平台、自媒體教學（10–100，意图不对）。Threads 經營、自媒體定位、YouTube 經營、小紅書經營、AI 自媒體（各 10–100）等 GSC 出现相关查询再考虑。
-
-### 香港（gl=hk，中文繁体；页面同在 `/zh-tw`，用香港用语写）
-
-| 页面 | 目标词 | 规划师 | 哥飞 KD | 依据 / 盘面 | 批次 |
-| --- | --- | --- | --- | --- | --- |
-| `/zh-tw/kol` | KOL；页内回答 如何成為 KOL、KOL 如何賺錢、KOL 報價 | 1K–10K；三个长尾各 10–100 | 37.6；28.1（如何成為） | 第 2 名 DR 0、第 5 名 DR 1；第 1 名是 reddit 帖 | **第一批，本市场唯一必做** |
-| 待查 | 社交媒體 | 1K–10K | — | 拓出来的词偏学术（對中學生的影響、焦慮、好處）；做之前人工看第一页意图 | 待查 |
-
-不做：數碼營銷（100–1K，第一页是课程和招聘）；香港 KOL（100–1K，品牌方找网红名单）；小紅書香港、Threads 香港（导航词）；社交媒體營銷 / 推廣 / 營銷課程、網上推廣、IG 經營、IG 推廣（各 10–100）。
 
 ### 美国（gl=us，中文简体）
 
@@ -301,7 +293,7 @@ Owner 2026-10-12 决定：博客用仓库内文章实现，不接外部系统。
 
 | 阶段 | 时间 | 做什么 | 完成标志 |
 | --- | --- | --- | --- |
-| 0 地基 | 上线前 2–4 周 | 单主机迁移；语言路径 + hreflang；统一元数据 / JSON-LD / sitemap / robots；公开页去 force-dynamic；简体首页 + 繁体第一批 7 页；About；OG 图；GSC / Bing 验证 | 全部页面过第 13 节检查单 |
+| 0 地基 | 上线前 2–4 周 | 单主机迁移；语言路径 + hreflang；统一元数据 / JSON-LD / sitemap / robots；公开页去 force-dynamic；简体首页 + 台湾繁体第一批 6 页；About；OG 图；GSC / Bing 验证 | 全部页面过第 13 节检查单 |
 | 1 收录 | 上线第 1–4 周 | 撤 noindex 和临时 307；提交 sitemap；GSC 每天请求编入索引 ≤ 10 个；AI 目录站 10–20 个；创始人社媒上线帖 | `site:www.graylum.com` 能搜到全部公开页 |
 | 2 铺内页 | 第 5–12 周 | 中文第 2 批页面；博客每周 1 篇；按"有曝光无点击"改 title；首批外链 20–40 个引用域 | KD < 30 的词进前 30；DR 10–15 |
 | 3 见排名 | 第 4–6 个月 | 复测盘面；补内容和内链；第二批中文页；AI 引用月检；视英文界面进度决定 `/en` | 3–5 个词进前 10；500–2000 访问/月；DR 15–25 |
@@ -309,7 +301,7 @@ Owner 2026-10-12 决定：博客用仓库内文章实现，不接外部系统。
 
 依据：哥飞 2023-12-29 群聊"用 6 个月的时间把排名做上去"；社群帖（袁锐钦 2026-04-05）"前 3 个月大部分悄无声息，第 4 个月才有流量"。
 
-**中文市场的流量上限（按附录 B 的规划师区间算，2026-10-12）**：台湾第一批 6 页的目标词每月合计在数千到一万多次之间（区间数据，只能到量级），做到前三名也只分到 20–30%，第 4–6 个月乐观估计每月几百到一千多次访问；香港 KOL 页同量级上限更低；美国简体这批词合计约 2,000 次，所以第一批不做简体内页。上表第 3、4 阶段的访问数在 `/en` 上线前要按这个口径下调。**结论：中文市场不能纯靠 SEO 获客**——华人创作者学运营、找工具的入口是 YouTube、小红书、微信群、Threads，不是谷歌中文。中文获客以 Owner 的 YouTube 中文频道为主引擎（小红书、Threads 同步），SEO 页作为承接层：视频和帖子里的链接落到对应的关键词页，页面负责把人送进产品；频道带来的外链、品牌搜索和第三方提及同时服务 SEO 和 GEO（第 12 节）。英文（`/en`）才是搜索量大的那一边（附录 A 第一批合计约 4,000/月），等英文界面上线后启动。
+**中文市场的流量上限（按附录 B 的规划师区间算，2026-10-12）**：台湾第一批 6 页的目标词每月合计在数千到一万多次之间（区间数据，只能到量级），做到前三名也只分到 20–30%，第 4–6 个月乐观估计每月几百到一千多次访问；美国简体这批词合计约 2,000 次，所以第一批不做简体内页。上表第 3、4 阶段的访问数在 `/en` 上线前要按这个口径下调。**结论：中文市场不能纯靠 SEO 获客**——华人创作者学运营、找工具的入口是 YouTube、小红书、微信群、Threads，不是谷歌中文。中文获客以 Owner 的 YouTube 中文频道为主引擎（小红书、Threads 同步），SEO 页作为承接层：视频和帖子里的链接落到对应的关键词页，页面负责把人送进产品；频道带来的外链、品牌搜索和第三方提及同时服务 SEO 和 GEO（第 12 节）。英文（`/en`）才是搜索量大的那一边（附录 A 第一批合计约 4,000/月），等英文界面上线后启动。
 
 **每页的验证规则**：第 2–4 周确认收录（`site:` 能搜到）；第 8 周看 GSC 里这一页的展示和点击——展示为 0 判定没人搜、停止投入；有展示且平均排名在 20 名以内就加码（补内容、加内链、在 YouTube 视频里放链接）；有点击就看注册转化。转化页（自媒體課程）主要看点击到注册的比例。枢纽页在 GSC 里实际带来展示的查询词，是下一批的选词来源。
 
@@ -317,9 +309,9 @@ Owner 2026-10-12 决定：博客用仓库内文章实现，不接外部系统。
 
 ## 附录 D · 待定与存疑
 
-- 已定：A（中文优先）、首页写法、繁体枢纽页核心词、中文第一批 7 页（第 3.2、3.3 节，取代 11 页版本）。
+- 已定：目标市场三类（简体、台湾繁体、英文，香港放弃）；A（中文优先）、首页写法、繁体枢纽页核心词、中文第一批 6 页（第 3、3.2、3.3 节，取代 11 页和 7 页版本）。
 - 公开页免登录试用：暂缓（Owner 2026-10-12）。
-- 中文搜索量以 Google Ads 规划师区间为准（附录 B），Semrush 只作参考；短影音腳本的难度、香港"社交媒體"的意图，开工前补查。
+- 中文搜索量以 Google Ads 规划师区间为准（附录 B），Semrush 只作参考；短影音腳本的难度开工前补查。
 - 2026-10-12 另有一份网页版哥飞 Agent（DeepSeek）生成的"中文词机会表"，用谷歌趋势小数做裁决；经规划师核对多处不成立（例如"如何經營自媒體"实为 100–1K 且在涨，"自媒體顧問 / 陪跑顧問 / 简体自媒体定位"实为不到 10），本文不采用其裁决。
 - 日语只预留路径。
 - 对哥飞资料库的存疑：llms.txt 效果（第 11 节）；HowTo 结构化数据已过时（第 10 节）；"301 不用 308"不作为规则（谷歌两者都当永久跳转；本文反而要求 308，因为它保留 POST）。
