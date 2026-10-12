@@ -19,12 +19,12 @@ const flow=[step('a','Audience',[],[field('who','Who'),field('pain','Pain',false
 const initial={a:{who:info('Busy parents'),pain:info('No time','deferred','hypothesis')},b:{offer:info('Meal plans')},c:{voice:info('Warm')}};
 
 /** A positioning round finalized through R5, so its formal version carries a generated report. */
-async function seed(db,maxLength=20000) {
+async function seed(db,maxLength=20000,minLength=1) {
  const base=await fixture(db);
  const f=(await db.query('SELECT d7_test.artifacts($1) v',[base.actor])).rows[0].v;
  const project=randomUUID(),round=randomUUID(),execution=randomUUID(),session=randomUUID();
  const draft=await rpc(db,'bill2_create_draft',f.actor);
- const workflow={id:'r14-fixture',version:1,kind:'document',steps:flow.map(s=>s.id==='a'?{...s,maxLength}:s),
+ const workflow={id:'r14-fixture',version:1,kind:'document',steps:flow.map(s=>s.id==='a'?{...s,maxLength,minLength}:s),
   report:{id:'report',version:1,title:'Positioning',sections:flow.map(s=>({title:s.title,stepId:s.id}))},
   planResources:['report.md'],reportGeneration:{resources:['report.md'],sections:['One','Two'],maxCharacters:12000}};
  const steps={};
@@ -177,6 +177,10 @@ export async function runCases({db,Client,connectionString,report}) {
  // so a revision that could never apply is never offered to the user.
  const narrow=await seed(db,60);
  await assert.rejects(propose(db,narrow,{fields:{a:{who:'x'.repeat(80)}}}),/REPORT_REVISION_INVALID/);
+ // Step a needs at least 25 characters of text: shortening it below that is refused too.
+ const short=await seed(db,20000,25);
+ await assert.rejects(propose(db,short,{fields:{a:{who:'x'}}}),/REPORT_REVISION_INVALID/);
+ assert.equal((await propose(db,short)).decision,null,'the regular proposal still fits');
  // A confirmation that fails inside apply (here: the dependent step b can no longer be confirmed) rolls back everything.
  const broken=await seed(db);const br=await propose(db,broken);
  const brokenBefore=await current(db,broken);

@@ -58,10 +58,11 @@ BEGIN
   END LOOP;
  END LOOP;
  -- A proposal must be applicable: the rebuilt step passes the information write (12000 bytes, 0182)
- -- and its canonical text fits the step, otherwise it would be accepted but never apply.
+ -- and its canonical text fits the step's length bounds (save and confirm), otherwise it would be accepted but never apply.
  FOR step IN SELECT x FROM jsonb_array_elements(r.workflow->'steps') x WHERE x->>'id'=ANY(changed) LOOP
   vals:=report_revision_values(step,r.steps->(step->>'id'),fields->(step->>'id'));
-  IF octet_length(vals::text)>12000 OR char_length(coalesce(report_revision_body(step,vals),''))>(step->>'maxLength')::integer THEN
+  IF octet_length(vals::text)>12000 OR char_length(coalesce(report_revision_body(step,vals),''))>(step->>'maxLength')::integer
+   OR artifact_text_length(coalesce(report_revision_body(step,vals),''))<coalesce((step->>'minLength')::integer,0) THEN
    RAISE EXCEPTION 'REPORT_REVISION_INVALID'; END IF;
  END LOOP;
  -- Same closure as artifact_invalidate: every step that transitively depends on a changed one.

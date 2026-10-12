@@ -2652,7 +2652,7 @@
   "fn:report_revision(uuid,uuid,text,uuid,uuid,uuid,text,jsonb,text)": "511f6dce0469",
   "fn:report_revision_apply_core(uuid,opc_drafts,artifact_projects,artifact_rounds,artifact_requests)": "e0c52b5342e0",
   "fn:report_revision_body(jsonb,jsonb)": "97c6ba11b29f",
-  "fn:report_revision_diff(artifact_rounds,jsonb)": "1f3ee80361f9",
+  "fn:report_revision_diff(artifact_rounds,jsonb)": "9288ee66423f",
   "fn:report_revision_snapshot(uuid,uuid,uuid,jsonb,jsonb)": "362dfbc52f82",
   "fn:report_revision_state(uuid,artifact_requests)": "b992d138b54a",
   "fn:report_revision_values(jsonb,jsonb,jsonb)": "c1429dcbce4d",
