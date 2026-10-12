@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { buildErasureImpactLines, describeErasureError, isAccountClosedError } from './account-erasure';
+import {
+  buildErasureImpactLines, describeErasureError, isAccountClosedError, renewalUsesStripePortal,
+} from './account-erasure';
 
 const base = {
   credits: 40,
@@ -32,6 +34,18 @@ describe('buildErasureImpactLines', () => {
     expect(text).toContain('剩余权益随注销失效');
     expect(text).toContain('2 笔付款');
     expect(text).toContain('1 个 AI 任务');
+  });
+
+  it('points card renewals without a Stripe portal to support, and keeps the portal for legacy Stripe', () => {
+    const card = { ...base, subscriptionRenewing: true, renewalChannels: ['waffo'] };
+    const lines = buildErasureImpactLines(card).filter((line) => line.tone === 'block');
+    expect(lines.map((line) => line.text)).toEqual(['你有银行卡自动续费，目前需联系客服停止续费后，才能申请注销。']);
+    expect(renewalUsesStripePortal(card)).toBe(false);
+
+    const both = { ...base, subscriptionRenewing: true, renewalChannels: ['stripe_portal', 'stripe'] };
+    expect(buildErasureImpactLines(both).filter((line) => line.tone === 'block')).toHaveLength(2);
+    expect(renewalUsesStripePortal(both)).toBe(true);
+    expect(renewalUsesStripePortal({ ...base, subscriptionRenewing: true })).toBe(true);
   });
 });
 

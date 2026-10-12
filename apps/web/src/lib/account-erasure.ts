@@ -3,11 +3,23 @@ import { getErrorMessageText } from '@/lib/safe-error-message';
 export type AccountErasurePreview = {
   credits: number;
   subscriptionRenewing: boolean;
+  /** Cancel entry per renewing subscription (0224): 'stripe_portal', 'waffo', 'stripe' or 'other'. */
+  renewalChannels?: string[];
   subscriptionActiveUntil: string | null;
   pendingPayments: number;
   runsInFlight: number;
   closed: boolean;
 };
+
+/** Only legacy Stripe subscriptions can be stopped in the Stripe portal; older APIs send no channels. */
+export function renewalUsesStripePortal(preview: AccountErasurePreview): boolean {
+  const channels = preview.renewalChannels ?? [];
+  return channels.length === 0 || channels.includes('stripe_portal');
+}
+
+function needsSupportToStop(preview: AccountErasurePreview): boolean {
+  return (preview.renewalChannels ?? []).some((channel) => channel !== 'stripe_portal');
+}
 
 export type ImpactLine = { tone: 'block' | 'warn' | 'info'; text: string };
 
@@ -24,8 +36,11 @@ function formatDate(value: string): string {
  */
 export function buildErasureImpactLines(preview: AccountErasurePreview): ImpactLine[] {
   const lines: ImpactLine[] = [];
-  if (preview.subscriptionRenewing) {
+  if (preview.subscriptionRenewing && renewalUsesStripePortal(preview)) {
     lines.push({ tone: 'block', text: '你有自动续费的订阅，需先在订阅管理中取消自动续费，才能申请注销。' });
+  }
+  if (preview.subscriptionRenewing && needsSupportToStop(preview)) {
+    lines.push({ tone: 'block', text: '你有银行卡自动续费，目前需联系客服停止续费后，才能申请注销。' });
   }
   lines.push({ tone: 'warn', text: '确认后账号立即关闭，不能再登录或使用，也不能撤销；没有冷静期和回收站。' });
   lines.push({ tone: 'warn', text: `剩余 ${preview.credits} 积分将作废，不能再使用。` });

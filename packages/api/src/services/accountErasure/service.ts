@@ -15,6 +15,8 @@ const AUTH_BAN_DURATION = '876000h';
 const previewSchema = z.object({
   credits: z.number(),
   subscriptionRenewing: z.boolean(),
+  // Added by 0224; a database without it still parses (no channel-specific hint then).
+  renewalChannels: z.array(z.string()).default([]),
   subscriptionActiveUntil: z.string().nullable(),
   pendingPayments: z.number(),
   runsInFlight: z.number(),
@@ -29,11 +31,27 @@ const confirmSchema = z.object({
   created: z.boolean(),
 });
 
+const RENEWING = 'ACCOUNT_ERASURE_SUBSCRIPTION_RENEWING';
+
+/**
+ * Where to stop each renewing subscription; channels come from account_erasure_renewal_channels (0224).
+ * Only legacy Stripe subscriptions have a self-service page today; Waffo and Stripe card subscriptions
+ * without a Stripe subscription id have no stop-renewal button yet, so support stops them.
+ */
+const CANCEL_ENTRY: Record<string, string> = {
+  stripe_portal: '在个人中心点“管理订阅 / 取消续费”，到 Stripe 订阅管理里取消',
+  waffo: '银行卡自动续费目前请联系客服停止续费',
+  stripe: '银行卡自动续费目前请联系客服停止续费',
+};
+const FALLBACK_ENTRY = '如果找不到停止续费的入口，请联系客服协助';
+
+export function renewalCancelHint(channels: readonly string[]): string {
+  const entries = [...new Set(channels.map((channel) => CANCEL_ENTRY[channel] ?? FALLBACK_ENTRY))];
+  if (entries.length === 0) entries.push('请先在订阅管理中取消自动续费');
+  return `${RENEWING}: 请先停止自动续费，再申请注销。${entries.join('；')}`;
+}
+
 const DB_ERRORS: Record<string, { code: TRPCError['code']; message: string }> = {
-  ACCOUNT_ERASURE_SUBSCRIPTION_RENEWING: {
-    code: 'PRECONDITION_FAILED',
-    message: 'ACCOUNT_ERASURE_SUBSCRIPTION_RENEWING: 请先在订阅管理中取消自动续费，再申请注销',
-  },
   ACCOUNT_ERASURE_ADMIN_DENIED: {
     code: 'FORBIDDEN',
     message: 'ACCOUNT_ERASURE_ADMIN_DENIED: 管理员账号需先取消管理员权限才能注销',
@@ -83,6 +101,11 @@ export async function confirmAccountErasure(input: {
     p_digests: digests,
   });
   if (error) {
+    if (error.message?.includes(RENEWING)) {
+      const channels = await loadAccountErasurePreview(input.admin, input.userId)
+        .then((preview) => preview.renewalChannels, () => []);
+      throw new TRPCError({ code: 'PRECONDITION_FAILED', message: renewalCancelHint(channels) });
+    }
     const known = Object.keys(DB_ERRORS).find((key) => error.message?.includes(key));
     if (known) throw new TRPCError(DB_ERRORS[known]);
     logger.error('auth', 'account_erasure_confirm_failed', { code: error.code ?? null });
