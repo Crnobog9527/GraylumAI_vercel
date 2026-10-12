@@ -10,7 +10,11 @@ import { Placeholder, UndoRedo } from '@tiptap/extensions';
 import { splitBlock } from '@tiptap/pm/commands';
 import { Plugin, PluginKey, Selection, type EditorState } from '@tiptap/pm/state';
 import { EditorContent, useEditor } from '@tiptap/react';
-import { docToText, fitText, textToDoc, textToSlice } from './composer-text';
+import { docToText, fitText, rangeText, textToDoc, textToSlice } from './composer-text';
+import {
+  findReferenceQuery, LibraryReferenceNode, REFERENCE_NODE, referenceLeafText, referencesIn,
+  type LibraryReference, type ReferenceQuery,
+} from './composer-references';
 
 /** Marks a transaction that mirrors the parent's value; it skips the length filter and the undo history. */
 const EXTERNAL = 'composerExternal';
@@ -36,10 +40,21 @@ const LengthLimit = Extension.create<{ limit: () => number }>({
 
 /** Characters that can still be added when the range from..to is replaced. */
 function roomFor(state: EditorState, from: number, to: number, maxLength: number) {
-  return maxLength - docToText(state.doc).length + state.doc.textBetween(from, to, '\n').length;
+  return maxLength - docToText(state.doc).length + rangeText(state.doc, from, to).length;
 }
 
-export type ComposerEditorHandle = { focus: () => void };
+export type ComposerEditorHandle = {
+  focus: () => void;
+  /** Replace the typed `@query` with a reference and a trailing space. */
+  insertReference: (range: ReferenceQuery, reference: LibraryReference) => void;
+};
+
+/** UI-B: only passed while references are switched on; absent, the box behaves exactly as UI-A. */
+export type ComposerReferenceHooks = {
+  onState: (state: { query: ReferenceQuery | null; references: LibraryReference[] }) => void;
+  /** The open `@` menu gets keys first (after IME); returning true consumes the key. */
+  onMenuKey: (event: KeyboardEvent) => boolean;
+};
 
 type Props = {
   value: string;
@@ -52,6 +67,7 @@ type Props = {
   placeholder: string;
   maxLength: number;
   className?: string;
+  references?: ComposerReferenceHooks;
   ref?: Ref<ComposerEditorHandle>;
 };
 
@@ -60,9 +76,9 @@ type Props = {
  * The parent keeps owning the string value, exactly as with the old textarea.
  */
 export function ComposerEditor(props: Props) {
-  const { value, onChange, onEnter, onEscape, disabled = false, label, placeholder, maxLength, className, ref } = props;
-  const latest = useRef({ onChange, onEnter, onEscape, disabled, label, placeholder, maxLength });
-  latest.current = { onChange, onEnter, onEscape, disabled, label, placeholder, maxLength };
+  const { value, onChange, onEnter, onEscape, disabled = false, label, placeholder, maxLength, className, references, ref } = props;
+  const latest = useRef({ onChange, onEnter, onEscape, disabled, label, placeholder, maxLength, references });
+  latest.current = { onChange, onEnter, onEscape, disabled, label, placeholder, maxLength, references };
   // The text this editor last reported (or was given); a different `value` prop comes from the parent.
   const emitted = useRef(value);
   const editor = useEditor({
@@ -70,7 +86,7 @@ export function ComposerEditor(props: Props) {
     editable: !disabled,
     content: textToDoc(value),
     extensions: [
-      Document, Paragraph, Text, UndoRedo,
+      Document, Paragraph, Text, UndoRedo, LibraryReferenceNode,
       Placeholder.configure({ placeholder: () => latest.current.placeholder }),
       LengthLimit.configure({ limit: () => latest.current.maxLength }),
     ],
@@ -84,6 +100,7 @@ export function ComposerEditor(props: Props) {
       }),
       handleKeyDown(view, event) {
         if (event.isComposing || event.keyCode === 229) return false;
+        if (latest.current.references?.onMenuKey(event)) return true;
         if (event.key === 'Escape') {
           latest.current.onEscape?.();
           return false;
@@ -111,7 +128,7 @@ export function ComposerEditor(props: Props) {
         if (fitted) view.dispatch(state.tr.replaceSelection(textToSlice(state.schema, fitted)).scrollIntoView());
         return true;
       },
-      clipboardTextSerializer: slice => slice.content.textBetween(0, slice.content.size, '\n'),
+      clipboardTextSerializer: slice => slice.content.textBetween(0, slice.content.size, '\n', referenceLeafText),
     },
     onUpdate({ editor: current }) {
       const text = docToText(current.state.doc);
@@ -138,9 +155,27 @@ export function ComposerEditor(props: Props) {
     editor?.setEditable(!disabled, false);
   }, [editor, disabled, label, placeholder]);
 
+  const referencesOn = Boolean(references);
+  useEffect(() => {
+    if (!editor || !referencesOn) return;
+    const report = () => latest.current.references?.onState({
+      query: findReferenceQuery(editor.state), references: referencesIn(editor.state.doc),
+    });
+    report();
+    editor.on('transaction', report);
+    return () => {
+      editor.off('transaction', report);
+    };
+  }, [editor, referencesOn]);
+
   useImperativeHandle(ref, () => ({
     focus: () => {
       editor?.commands.focus(undefined, { scrollIntoView: false });
+    },
+    insertReference: (range, reference) => {
+      editor?.chain().focus().insertContentAt({ from: range.from, to: range.to }, [
+        { type: REFERENCE_NODE, attrs: reference }, { type: 'text', text: ' ' },
+      ]).run();
     },
   }), [editor]);
 
