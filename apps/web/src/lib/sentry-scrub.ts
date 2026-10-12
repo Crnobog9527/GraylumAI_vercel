@@ -62,9 +62,10 @@ function scrubValue(value: unknown, depth: number, text: (value: string) => stri
   if (Array.isArray(value)) return value.slice(0, 20).map((item) => scrubValue(item, depth + 1, text));
   const out: Record<string, unknown> = {};
   for (const [key, item] of Object.entries(value)) {
-    if (SECRET_KEY.test(key) && item !== null && typeof item !== 'boolean' && typeof item !== 'number') {
-      out[key] = '[removed]';
-    } else if (IP_KEY.test(key) || ID_KEY.test(key) || (key.startsWith('gen_ai.') && !GEN_AI_KEEP.test(key))) {
+    if (key.startsWith('gen_ai.')) {
+      out[key] = GEN_AI_KEEP.test(key) && (typeof item === 'number' || typeof item === 'string') ? item : '[removed]';
+    } else if (IP_KEY.test(key) || ID_KEY.test(key) || (SECRET_KEY.test(key) && item !== null && typeof item !== 'boolean')) {
+      // Sensitive keys lose numbers too (a phone number stored as a number is still a phone number).
       out[key] = '[removed]';
     } else if (/url|href|path|uri|target/i.test(key) && typeof item === 'string') {
       out[key] = scrubUrl(item);

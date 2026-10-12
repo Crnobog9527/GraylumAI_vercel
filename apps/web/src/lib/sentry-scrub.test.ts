@@ -39,7 +39,7 @@ describe('sentry scrub', () => {
         headers: { cookie: 'sb=1', authorization: 'Bearer z' }, cookies: { sb: '1' }, query_string: 'token=t' },
       message: 'failed for a@b.co',
       logentry: { message: 'saved plan for %s', params: ['李雷', 'my private prompt'] },
-      extra: { prompt: 'my private idea', count: 3, nested: { content: 'body text', url: 'https://x.test/p?q=1' } },
+      extra: { prompt: 'my private idea', count: 3, phone: 13800138000, verified: true, nested: { content: 'body text', url: 'https://x.test/p?q=1' } },
       tags: { draft: ID },
       exception: { values: [{ value: `Profile ${ID} rejected a@b.co`, stacktrace: { frames: [{ vars: { input: 'x' } }] } }] },
       breadcrumbs: [{ category: 'console', message: 'user typed: secret' }, { category: 'fetch', data: { url: 'https://x.test/a?b=1', body: 'x' } }],
@@ -49,7 +49,7 @@ describe('sentry scrub', () => {
     expect(json).not.toMatch(/李雷|my private prompt|a@b\.co|1\.2\.3\.4|secret plan|my private idea|body text|token=t|sb=1|2d0cb10b|user typed/);
     expect(out.user).toBeUndefined();
     expect(out.request).toEqual({ method: 'POST', url: 'https://x.test/api' });
-    expect(out.extra).toMatchObject({ prompt: '[removed]', count: 3, nested: { content: '[removed]', url: 'https://x.test/p' } });
+    expect(out.extra).toMatchObject({ prompt: '[removed]', count: 3, phone: '[removed]', verified: true, nested: { content: '[removed]', url: 'https://x.test/p' } });
     expect(out.message).toBe('[text]');
     expect(out.logentry).toEqual({ message: '[text]' });
     expect(out.exception?.values?.[0]?.value).toBe('[text]');
