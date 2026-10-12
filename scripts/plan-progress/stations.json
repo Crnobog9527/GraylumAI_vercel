@@ -264,7 +264,7 @@
     {
       "id": "paywall",
       "name": "付费墙和会员",
-      "plain": "银行卡订阅用 Waffo，微信和支付宝单笔会员与积分包用 Stripe；生成报告需要会员。",
+      "plain": "银行卡订阅用 Stripe（国际银行卡由 Stripe 代收代缴税），中国大陆用户可选微信、支付宝单笔或大陆银行卡订阅；生成报告需要会员。",
       "tasks": [
         {
           "name": "ENTITLEMENTS",
@@ -276,7 +276,7 @@
         },
         {
           "name": "PAY-WAFFO",
-          "plain": "接通银行卡订阅与钱包单笔付款，复用订单、会员积分和人工退款。"
+          "plain": "原 Waffo 收款，2026-10-12 起冻结：停用新购、代码保留，改用 Stripe。"
         },
         {
           "name": "PAY-STRIPE-MP",
@@ -296,7 +296,7 @@
         },
         {
           "name": "PAY-DISPUTE-GUARD",
-          "plain": "上线前拒付通知、可撤回冻结和停续费，独立交付。"
+          "plain": "上线前接收 Stripe 拒付通知、可撤回冻结和停续费，独立交付。"
         },
         {
           "name": "PAYWALL",
@@ -311,10 +311,6 @@
         {
           "task": "PAY-STRIPE-MP",
           "text": "正式开通 Stripe Managed Payments、设置产品税务编码和重试规则、上正式密钥和回调时逐项请你批准。"
-        },
-        {
-          "task": "PAY-WAFFO",
-          "text": "等供应商能力核实和最小核心待定事项；商品配置及钱包大额真实付款、退款另行批准。"
         }
       ]
     },
@@ -424,12 +420,6 @@
         {
           "name": "CHARGEBACK",
           "plain": "拒付结果出来后的处理和申诉材料导出。"
-        }
-      ],
-      "waitingForOwner": [
-        {
-          "task": "CHARGEBACK",
-          "text": "等你：向 Waffo 核实拒付怎么通知、要哪些材料、期限和手续费。"
         }
       ]
     },

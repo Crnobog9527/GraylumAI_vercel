@@ -42,7 +42,7 @@
 2. **核心体验重做，分几次给你试**：先用真实模型验证"现在的模型能不能驱动提问卡"，做一个你能亲手试的样片；再做完整定位流程；最后推广到自由对话和其他 Skill。
 3. **上线基础**：正式环境能真实调用模型（含止损和 BILL-PAYG 逐次冻结、按名义费用结算）、后台配置模型思考强度、第三方搜索和对标研究（基于真实数据）、会员权限、限流修复、账号注销和数据删除。不再做封闭内测，按 D1 范围完成后直接公开上线售卖（2026-10-03，第 2.1 节第 50 项）。
 4. **差异化功能**：Fusion 多模型（定稿报告评审、多模型对比），个人资料库和语料库（学习用户文风），输入框的引用和附件。
-5. **收费和上线**：Waffo 支付、下线旧对话链路、完整验收、发布。
+5. **收费和上线**：Stripe 收款（2026-10-12 起银行卡订阅走 Stripe Managed Payments，Waffo 冻结）、下线旧对话链路、完整验收、发布。
 6. **上线后**：飞书等连接器、社媒数据同步、Skill 的后续学习机制、资料库检索和图片音频。
 
 **不重复建设**：计费（BILL2）、Runtime、持久会话、Skill 版本、成果版本都已存在，新功能在它们上面加最小的工具和界面，不新建第二套钱包、执行链、资料库或记忆系统。
@@ -83,6 +83,26 @@
 ## 2. 本版的新决定和被取代的旧规则
 
 ### 2.1 Owner 的新决定（2026-09-27 起，2026-10-12 更新）
+
+**2026-10-12：按 8 条线并行推进，排期和依赖调整**
+
+Owner 原话（2026-10-12，总控窗口对话）：
+
+> 同意按 8 条线并行推进：新开收款（#847 合并后做 MP 第 1 步起）、输入框（先出编辑器依赖 PR）、官网第一段和台湾 6 页、注销收尾梳理和 Fusion 实测四个窗口；Codex 验收按顺序排；排期和依赖调整写进 Master Plan。
+
+以下是落实范围（总控提出、Owner 同意的排期），不是原话：
+
+- 同一条线内排队，不同线可以并行：
+  1. AI 核心：#829 → #845 → RUNTIME-PROD ⑦（服务端强制 `data_collection: deny`）→ POSITIONING-GATE PR2 → SKILL-I18N-HOOK；
+  2. 读资料：#830 → AGENT-CORE R4 → LIB-4；
+  3. 收款：#847 → PAY-STRIPE-MP PR-1…6 → PAYWALL 接线 → PAY-FOUNDER / PAY-NOTIFY / PAY-EVIDENCE / PAY-DISPUTE-GUARD；
+  4. 输入框：UI-A 编辑器依赖 PR → 新输入框 → UI-B / UI-C → UI-FINISH → LEGACY-CLOSE；
+  5. 定位流程：#818（已合并）→ R14 → R8b；
+  6. 官网：PUBLIC-SITE 第一段 + 台湾 6 页；`/app` 路由搬迁放在冻结窗口最后做；正式域名切换上线前逐项批准；
+  7. 数据库改动：0217 #828 → 0218 #830 → 0219 #831 → 0220 #832 → 0221/0222 PAY-STRIPE-MP，按合并顺序重建指纹；
+  8. 不写代码：DATA-ERASURE 收尾梳理、Fusion 实测、R11。
+- Codex 浏览器验收：同一测试账号一次只跑一个，按顺序排。
+- 写进第 7.4 节"当前批次"。第 7.1 节只把名义上的依赖改成代码里的实际冲突（UI-A、PAY-STRIPE-MP 两行），其余依赖不变；合并到 `main`、正式环境和平台设置仍按 AGENTS.md 第 1 节逐项批准。
 
 **2026-10-12：银行卡订阅改走 Stripe Managed Payments（取代 Waffo 主力与“Stripe 银行卡备选”）**
 
@@ -231,7 +251,7 @@ Owner 补充原话（2026-10-12，总控窗口对话，回应 #807 审查意见�
 - 白名单以外的我方未知异常不即时自动退（可能还能免费重试救回，流式回合无法确认用户是否已看到内容，自动退款可被利用）：每日对账列出已扣费、超过 24 小时仍未收口且没有结果未知调用的回合，人工核对后通过补偿路径退回并记账；上线开启恢复定时任务后，超时仍未重试的回合由恢复任务按同样规则自动收口退回。
 - 用户主动停止、余额不足、内容过长等用户侧或已有明确规则的情况不在此列；须防止重复退款。
 
-**2026-10-12：PAY-WAFFO 银行卡续费 24 小时会员宽限；没开通的付款立即停止续费**
+**2026-10-12：PAY-WAFFO 银行卡续费 24 小时会员宽限；没开通的付款立即停止续费**（同日 Waffo 冻结后，Waffo 部分只适用于已有 Waffo 订单；24 小时宽限按 [#847 迁移方案](https://github.com/Crnobog9527/GraylumAI_vercel/pull/847) 扩展到 Stripe 银行卡，由 PAY-STRIPE-MP 实施）
 
 PAY-WAFFO 测试卡验收（[#815](https://github.com/Crnobog9527/GraylumAI_vercel/pull/815)）后的修复 PR [#823](https://github.com/Crnobog9527/GraylumAI_vercel/pull/823) 中，Owner 原话（执行窗口对话，经总控转达后在执行窗口直接确认）：
 
@@ -246,7 +266,7 @@ Owner 补充原话（2026-10-12，总控窗口对话，回应 #807 审查意见�
 
 > 同意：Stripe 银行卡订阅启用后也适用 24 小时续费宽限
 
-- Stripe 银行卡备选订阅（PAY-STRIPE-CARD-FALLBACK）启用后，未停止续费的 Stripe 银行卡订阅同样适用上面的 24 小时会员宽限（不发积分、不放开积分包购买），由该任务实现和验收。
+- Stripe 银行卡备选订阅（PAY-STRIPE-CARD-FALLBACK）启用后，未停止续费的 Stripe 银行卡订阅同样适用上面的 24 小时会员宽限（不发积分、不放开积分包购买），由该任务实现和验收。（已被取代：PAY-STRIPE-CARD-FALLBACK 由 PAY-STRIPE-MP 取代，宽限改由 PAY-STRIPE-MP 实现和验收。）
 
 **2026-10-12：域名合并、博客、中文优先、落地页方向**
 
@@ -302,7 +322,7 @@ Owner 原话（2026-10-11，总控窗口对话）：
 - staging 自由对话默认模型由 GPT-6.1 Sol 改为 Sonnet 5.5；Sol 没有 PAYG 实测证据，暂不用于自由对话。
 - 合并前在 staging 实测自由对话，花费上限 1 美元（OpenRouter 现有测试余额，不充值）。正式环境沿用同一套实测证据（2026-10-07 决定：换模型或线路才重测）。
 
-**2026-10-11：放弃付款的结账超时 40 分钟自动释放（修订 PAY-WAFFO 第 6 节释放条件）**
+**2026-10-11：放弃付款的结账超时 40 分钟自动释放（修订 PAY-WAFFO 第 6 节释放条件）**（2026-10-12 起 Waffo 停用新购，本条只适用于已有 Waffo 订单）
 
 Owner 原话（2026-10-11，总控窗口对话）：
 
@@ -316,7 +336,7 @@ Owner 原话（2026-10-11，总控窗口对话）：
   若这笔迟到付款在 Waffo 建立了自动续费订阅，须按站外付款同样的路径先停止并核实该订阅的续费，再办理退款，防止下期继续扣款（与 [PAY-WAFFO](tasks/PAY-WAFFO.md) 站外付款处理一致）。
 - 已售出名额不放回、并发不超卖等其余规则不变；若 Waffo 之后提供会话状态查询，可改回以其确认为准。
 
-**2026-10-11：Stripe 银行卡备选方案（平时关闭、手动切换）**
+**2026-10-11：Stripe 银行卡备选方案（平时关闭、手动切换）**（已被 2026-10-12 Stripe Managed Payments 决定取代，以下保留作历史）
 
 Owner 原话（2026-10-11，总控窗口对话）：
 
@@ -330,7 +350,7 @@ Owner 原话（2026-10-11，总控窗口对话）：
 - 已有 Waffo 订阅不迁移卡信息，权益用到当期结束。只有在确认该 Waffo 订阅已停止续费（用户或管理员已取消，或订阅已终止，并已核实；一次续费失败不算，见下方补充）之后，
   才提醒用户到 Stripe 重新订阅；Waffo 仍可正常扣款的订阅照常续费、不提醒改绑，避免两边同时扣款。
 - Stripe 收款时 Graylum 是卖方，启用前须完成税务核实（与第 7.6 节"Stripe 钱包启售前核实"同一项），未核实不得打开。
-- 实施任务 PAY-STRIPE-CARD-FALLBACK（第 7.1 节），排在 PAY-WAFFO 第 2 步之后。
+- 实施任务 PAY-STRIPE-CARD-FALLBACK（第 7.1 节），排在 PAY-WAFFO 第 2 步之后。（2026-10-12 起由 PAY-STRIPE-MP 取代，不再排期。）
 
 Owner 补充原话（2026-10-12，总控窗口对话，回应 #807 审查意见）：
 
@@ -338,7 +358,7 @@ Owner 补充原话（2026-10-12，总控窗口对话，回应 #807 审查意见�
 
 - Waffo 续费扣款失败后自己会重试，一次失败时不提醒改绑；只有读回核实订阅状态已取消或终止后才提醒，避免 Waffo 重试成功后两边重复扣款。
 
-**2026-10-11：PAY-WAFFO 收款方案收窄，少见情况靠每天对账加人工处理**
+**2026-10-11：PAY-WAFFO 收款方案收窄，少见情况靠每天对账加人工处理**（2026-10-12 起 Waffo 停用新购，本条只适用于已有 Waffo 订单）
 
 Owner 原话（2026-10-11，总控窗口对话）：
 
@@ -358,7 +378,7 @@ Owner 原话（2026-10-11，总控窗口对话）：
   按此，[#808](evidence/waffo-test-20261011b/README.md) 第 5 节剩下的 2 题暂不发给 Waffo：会话过期已由下方"结账超时 40 分钟自动释放"决定处理；
   付款时间、账期和"付到哪天"以本站自己的订单和账期记录为准，Waffo 字段对不上时进入每天对账由人工处理。每天对账反复出现同类异常时再向 Waffo 询问。
 
-**2026-10-10：PAY-WAFFO 首 30 天、创始续费固定、站外付款一律退款**
+**2026-10-10：PAY-WAFFO 首 30 天、创始续费固定、站外付款一律退款**（“首 30 天 49 美元”已由 2026-10-12 决定改为“首月 49 美元”；Waffo 部分只适用于已有 Waffo 订单）
 
 依据 Waffo 答复（[摘要](https://github.com/Crnobog9527/GraylumAI_vercel/pull/752#issuecomment-6095292601)），Owner 原话三条：
 
@@ -488,7 +508,7 @@ Bright Data 等）各自在其平台设置硬上限（预付余额或平台限�
 9. **条款由 Owner 另行生成**：隐私条款、服务条款、数据使用政策以及页面上的相关提示文字，由 Owner 用第三方专业软件生成。本规划和各实施说明只规定产品行为和技术保证（例如服务端强制不用于训练、删除和同意的功能），不规定条款文字；规划审查和实施审查都不审计条款文字。
 10. **第三方搜索和对标研究**（D13–D15）：接入第三方普通搜索和社媒数据 API，统一接口层；供应商已按 RESEARCH-0 的结果确定（2026-09-28 修订 D13）：社媒数据 TikHub，网页搜索 Parallel，网页抓取 Firecrawl；搜索费用由用户承担；对标分析只基于真实取到的数据（第 3.7 节）。
 11. **收费公式**（D16，2026-10-01 修订，原话与来源见第 32–34 项）：所有成本先统一为美元；应收积分 `C = ceil(q × Σ(U_i × m_i))`，其中 `U_i` 是每次调用的美元成本，`q=100`，`m_i` 是本次模型或供应商线路的有效倍数，未单独配置时用默认 `m=6`（2026-10-01 定为 3，2026-10-03 由第 50 项改为 6）。一次收费操作最终只向上取整一次；q 和有效倍数在后台配置并冻结，修改不重算已冻结的执行。实际向用户扣取还受第 26 项余额封顶约束。第三方自家积分、人民币或美元计价均先换成美元，不直接当成 Graylum 积分；旧“固定保底积分直接扣除、不再乘倍数”被取代，由 BILL-UNIT 统一成本口径。TikHub 仍按官方标价计成本，阶梯折扣归平台（D14）。
-12. **支付渠道**（D17，2026-10-09 更新）：银行卡订阅走 Waffo，微信和支付宝一次性会员及积分包走 Stripe。取代原先全局默认 Waffo、Stripe 手动备用的安排；按付款方式启停新购买，不自动故障切换。同一笔订单不跨渠道重试，未知结果先核对；旧订单、续费、退款和凭证始终走原渠道。钱包大额验证与兜底见本节 2026-10-09 决定。
+12. **支付渠道**（D17，2026-10-09 更新）：银行卡订阅走 Waffo，微信和支付宝一次性会员及积分包走 Stripe。取代原先全局默认 Waffo、Stripe 手动备用的安排；按付款方式启停新购买，不自动故障切换。同一笔订单不跨渠道重试，未知结果先核对；旧订单、续费、退款和凭证始终走原渠道。钱包大额验证与兜底见本节 2026-10-09 决定。**2026-10-12 已被取代**：银行卡订阅改走 Stripe Managed Payments，中国大陆用户可选微信/支付宝单笔或普通 Stripe 银行卡订阅，Waffo 停用新购（本节 2026-10-12 决定）。
 
 
 **2026-09-28—2026-10-02 新增及修订的 Owner 决定**（原话和依据见各 PR 评论）：
@@ -808,7 +828,7 @@ Bright Data 等）各自在其平台设置硬上限（预付余额或平台限�
       含义：UI-MODEL 留在上线范围，输入框的模型位置保留，只显示 Auto，用户暂时不能切换，实际模型按用途由后台配置决定。FUSION-COMPARE 按原计划留在上线范围：每次打开对比，默认勾选管理员在后台设定的一组模型；用户可以取消勾选、自己搭配，范围仍受管理员允许列表和会员权限限制；后台新增参数"每次 Fusion 对比最少要勾选几个模型"，由 Owner 调整，前端和服务端都按它校验，取值范围是 2 ≤ 最少勾选数 ≤ D3 的当前最多模型数（对比至少要两个模型，后台可调但不能低于 2）。
     - **实施分工**（第 7.1 节；每条只由一个任务负责）：
         - **PAYWALL**：报告付费墙；免费用户的报告前信息导出；积分包只卖会员；订阅和积分包的积分比例与最小积分包；按"数值怎么定"重设开户赠送、邀请奖励、套餐和积分包数值；价格页只写积分和会员权益；其他付费提示（免费积分用完只提供开通会员；Pro 升 Gold 提示已于 2026-10-04 取消，第 51 项）。
-        - **PAY-COMMON → PAY-WAFFO**（2026-10-09 更新）：Waffo 银行卡月/年订阅；Stripe 微信/支付宝单笔会员和积分包；按付款方式启停，旧订单沿原渠道。
+        - **PAY-COMMON → PAY-WAFFO**（2026-10-09 更新；2026-10-12 冻结，新收款由 PAY-STRIPE-MP 实施）：Waffo 银行卡月/年订阅；Stripe 微信/支付宝单笔会员和积分包；按付款方式启停，旧订单沿原渠道。
         - **UI-MODEL**：输入框模型位置只显示 Auto、用户不能切换；模型按用途由后台配置、不按会员档位区分。
         - **FUSION-COMPARE**：对比默认勾选、用户可改、最少勾选数参数。
         - **不对应开发任务**：默认 m=6 是后台配置修改，执行前另获 Owner 批准（第 39 项的做法）；会员余额不足时的暂停和继续沿用 BILL-PAYG；积分不过期和退款规则沿用现有规则；取消封闭内测体现在第 7.2、7.4 节的排期里，发布仍走 V3-M3 → REL-1；首发目标用户用于宣传和落地页文案。
@@ -959,12 +979,12 @@ Bright Data 等）各自在其平台设置硬上限（预付余额或平台限�
     - **付款前勾选同意条款和付款证据**（[记录 W](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5981381009)；Owner 同意定价窗口整理的方案）：
         - **A. 上线前完成（high）**：① 付款前有一个确认勾选框，默认不勾，不勾就不能付款，文案"我已阅读并同意《服务条款》和《退款政策》"，两份文件都带链接；付款按钮旁写清价格、扣款周期、是否自动续费、怎么取消，再加一句简短的退款说明；订阅、积分包和微信/支付宝一次性付款都要有。② 每次用户主动结账或授权扣款时，保存一条只能追加、不能修改的同意记录（银行卡续费账单关联原同意记录；微信/支付宝每次主动付款均有新的同意记录；核心不采集 IP/浏览器字段）：用户、时间、条款和退款政策的版本号（旧版原文要能查到）、购买的商品、金额、付款方式、原渠道订单号。③ IP、浏览器和设备信息不在收款核心同意记录中采集；等 PAY-EVIDENCE 留存批准、DATA-ERASURE 契约和实际清理交付后才额外记录，作为反驳"盗刷"类拒付的材料。勾选框和前端展示归 PAYWALL，同意记录和订单绑定归 PAY-WAFFO；付款 IP/设备证据单列 PAY-EVIDENCE，不并入收款 PR。新建同意记录表之前，先按 AGENTS.md 第 5 节说明现有付款记录为什么不够用、权威来源是哪一个。IP 和设备属于个人数据，纳入 [DATA-ERASURE](tasks/DATA-ERASURE.md) 的保留和清理规则：现行 DATA-ERASURE 不把 IP/UA 放进财务保留，所以这些证据的保留期限由 PAY-EVIDENCE 开工前提出（参考卡组织的拒付窗口再加余量），Owner 批准后同步修订 DATA-ERASURE，**修订完成之前不开始收集 IP 和设备证据**（写法同"Gold 购买记录的保留期限"）；隐私政策、服务条款和退款政策的文字由 Owner 准备，不在范围内，产品只负责展示链接、让用户勾选、记录版本号。设计稿 v25 原型没有这个勾选框，开发按本条做。
         - **B. 拒付和提醒**（记录 W 的 B 部分，按 [记录 X](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5981808905) 调整分工）：
-            - **上线前，④归 PAY-NOTIFY、⑤归 PAY-DISPUTE-GUARD（2026-10-09 拆分，不并入收款 PR）**：④ 银行卡年付续费前提醒和微信创始会员到期提醒共用一套机制；⑤ 接收并记录 Waffo 的拒付和争议事件，不能忽略（对齐 [PAY-COMMON 实施说明](tasks/PAY-COMMON.md) 已定的 E5；前提是 Owner 先向 Waffo 核实拒付通知的方式），收到拒付通知后按被拒付的订单先冻结，可以撤回：订阅冻结这份订阅的付费权益、暂停以后的积分发放，并同时取消这份订阅的自动续费（银行卡月付和年付；[记录 AD](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5982615688)），拒付期间不会再扣款；微信一次性会员冻结这一期的会员权益，1 年期的还要暂停以后按月发放的积分（对齐记录 X"冻结会员权益和积分发放"）；订阅和微信一次性会员还要冻结这份付款已发放、还没用完的积分，不动其他来源（[记录 AC](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5982525998)）；积分包冻结这个包里没用完的积分，不动其他来源的积分（[记录 Z](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5982115736)）。
+            - **上线前，④归 PAY-NOTIFY、⑤归 PAY-DISPUTE-GUARD（2026-10-09 拆分，不并入收款 PR）**：④ 银行卡年付续费前提醒和微信创始会员到期提醒共用一套机制；⑤ 接收并记录 Waffo 的拒付和争议事件（2026-10-12 起新订单走 Stripe，改为接收 Stripe 拒付事件，Waffo 只留给旧订单，见第 7.1 节 PAY-DISPUTE-GUARD 行），不能忽略（对齐 [PAY-COMMON 实施说明](tasks/PAY-COMMON.md) 已定的 E5；前提是 Owner 先向 Waffo 核实拒付通知的方式），收到拒付通知后按被拒付的订单先冻结，可以撤回：订阅冻结这份订阅的付费权益、暂停以后的积分发放，并同时取消这份订阅的自动续费（银行卡月付和年付；[记录 AD](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5982615688)），拒付期间不会再扣款；微信一次性会员冻结这一期的会员权益，1 年期的还要暂停以后按月发放的积分（对齐记录 X"冻结会员权益和积分发放"）；订阅和微信一次性会员还要冻结这份付款已发放、还没用完的积分，不动其他来源（[记录 AC](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5982525998)）；积分包冻结这个包里没用完的积分，不动其他来源的积分（[记录 Z](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5982115736)）。
             - **上线后，归 CHARGEBACK（不阻塞上线）**：⑥ 最终判定输了，按商品分别处理：订阅按退款规则处理这一期，扣掉还没用完的积分、终止这份订阅以后的积分发放，是创始会员的立即结束创始身份（名额不放回）；微信一次性会员结束这一期，1 年期的终止以后按月发放的积分、扣掉这一期还没用完的积分（是创始会员的同样结束创始身份）；订阅和微信一次性会员被冻结的已发积分判输扣回、判赢解冻，不动其他来源（[记录 AC](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5982525998)）；积分包扣回这个包里没用完的积分、判赢解冻，不动其他来源的积分（[记录 Z](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5982115736)）；所有拒付都不自动接受，由 Owner 人工处理（[记录 Y](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5982111397)）；赢了就解除冻结、恢复，按幂等处理（拒付期间被暂停的按月积分，判赢后按原发放日逐期补发，幂等，不改变原会员期限和发放日期，不延到原到期日之后）；订阅判赢后不自动恢复扣费，提醒用户自己重新订阅；判输时订阅终止（[记录 AD](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5982615688)）；具体由 CHARGEBACK 方案提出、Owner 批准；⑦ 一键导出申诉材料；⑧ 对同一个人反复拒付加以限制；⑨ 信用卡账单上的商户名要让用户一眼认得出（由 Waffo 控制）。
     - **仍待定**（唯一来源设计稿、记录 V 和 [记录 Q](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5980762284)）：创始人寄语；创始会员退出社群的流程（记录 V 实施注意，还没有设计）；Owner 向 Waffo 核实（记录 W）：拒付通知、举证期限和手续费已于 2026-10-10 [答复](https://github.com/Crnobog9527/GraylumAI_vercel/pull/752#issuecomment-6095292601)（无回调、用 GraphQL 查询和邮件，查询结果含举证截止日，每笔 25 美元从结算扣，无自助举证入口），见 PAY-WAFFO §3；仍待核实：要交什么材料、账单上显示的商户名、Waffo 结账页是否已有自己的条款勾选（避免重复或冲突）。注册赠送和积分包档位已由 [记录 S](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5980831854) 先定，实际写入配置仍须 Owner 批准。其余待定事项见[设计稿 README](design/paywall/README.md)。邀请奖励 50/30 按 m=6 复核（第 50 项）不变。
     - **实施分工**（第 7.1 节；每条只由一个任务负责）：
         - **PAYWALL**：本项的价格展示和弹窗规则（美元显示、年付省多少、续费说明、默认月付、首 30 天优惠（文案“首 30 天 $49，之后每月 $69”）和创始会员的展示、真实剩余名额、只显示已上线功能、评审行跟随开关、对比文案、不提示升级、充值后手动继续、积分包会员折扣、客服时效和 Gold 优先内测的展示）；定位档案上限（会员权益加"定位档案上限"字段、服务端新建业务检查、每个业务每个平台 1 个账号的约束、降级后只读）；Fusion 默认权限按 Gold 专属调整；工作室版"联系我们"入口。设计依据 v25 已入库；代码实施须 Owner 选定批次。
-        - **PAY-WAFFO**（PAY-COMMON 之后）：按 2026-10-09 决定分别建 Waffo 银行卡订阅与 Stripe 钱包单笔产品；首 30 天资格和创始名额的服务端判断与计数；微信/支付宝一次性与银行卡同价；Pro 升 Gold 按记录 Q 实施（不退差价、补发 8,970 积分、立即升级权益）；"前 N 期特价"和创始长期折扣的 Waffo 能力核实。
+        - **PAY-WAFFO**（PAY-COMMON 之后；2026-10-12 冻结，由 PAY-STRIPE-MP 取代）：按 2026-10-09 决定分别建 Waffo 银行卡订阅与 Stripe 钱包单笔产品；首 30 天资格和创始名额的服务端判断与计数；微信/支付宝一次性与银行卡同价；Pro 升 Gold 按记录 Q 实施（不退差价、补发 8,970 积分、立即升级权益）；"前 N 期特价"和创始长期折扣的 Waffo 能力核实。
         - **EXPERT-CONSULT**（新增）：专家诊断预约入口和联系方式的个人数据处理（不做授权查看）。
         - **PUBLISH-MONITOR**（新增，记录 Q）：多平台发布和数据监控，Pro/Gold 分档。
         - **CHARGEBACK**（新增，记录 W、X，上线后）：拒付判输后的处理、申诉材料导出、限制反复拒付、账单商户名。（上线前提醒归 PAY-NOTIFY，拒付事件接收、可撤回冻结和停续费归 PAY-DISPUTE-GUARD。）
@@ -1172,7 +1192,7 @@ Owner 原话（总控转录于 [#716 决定与本轮授权记录](https://github
 原话中的实施许可与禁止事项仅记录该轮授权，不代表合并、启用或真实删除已获批准；
 实施阶段继续按第 7.0 节动态读取对应 PR，不作整项完成标注。
 
-**2026-10-09：PAY-WAFFO 按付款方式分流（取代旧上线渠道规则）**
+**2026-10-09：PAY-WAFFO 按付款方式分流（取代旧上线渠道规则）**（“银行卡订阅走 Waffo”已被 2026-10-12 Stripe Managed Payments 决定取代）
 
 Owner 原话（[#752 渠道批准记录](https://github.com/Crnobog9527/GraylumAI_vercel/pull/752#issuecomment-6083699633)）：
 
@@ -1214,6 +1234,7 @@ Owner 原话（本会话，记录于 [#741](https://github.com/Crnobog9527/Grayl
 | 封闭内测：上线基础完成后先邀请 5–10 人内测，只用赠送积分、不开放付费；以及写作"封闭内测前""内测前提"的安排 | 第 10 节 D8；第 2.1 节第 7、19、30、49 项；第 7.2、7.4、7.6 节 | 由第 2.1 节第 50 项取代：取消封闭内测，按 D1 范围完成后直接公开上线售卖。原写"封闭内测前"的事项（正式环境 Upstash、Vercel Pro 等）改读为"公开上线前"；第 49 项"限流按每条新消息计"不变 |
 | 只持银联单币卡、只用支付宝的用户买不了会员时，可以用支付宝买积分包的兜底；以及只为这条兜底设的支付宝验收（积分包支付宝一笔、生产 canary 的支付宝一笔、live 支付宝方式核对） | [v10.1](Graylum_Master_Plan_v10.1.md) D11 及其边界说明（第 81、567 行）、PAY-1 第 1 条（第 278 行）、G5（第 385 行）、G8（第 388 行）、上线核对第 13 项（第 413 行） | 由第 2.1 节 2026-10-09 渠道决定取代：微信、支付宝均走 Stripe 单笔会员及积分包；积分包仍仅会员可买，不恢复免费用户买包兜底。钱包大额年期真实付款/退款检查须另获批准，失败/未验证则只卖月期与积分包、年付走银行卡。旧“支付宝用户付不了款”的结论作废。 |
 | 新销售默认走 Waffo，Stripe 作为备用渠道保留，管理员可手动把新购买切到 Stripe | 第 2.1 节第 12 项；D17 | 由第 2.1 节 2026-10-09 决定及修订后的 D17 取代：银行卡订阅走 Waffo，微信/支付宝单笔走 Stripe，按付款方式启停新购买；不再用全局渠道开关，也不把 Stripe 仅作备用。原订单/续费/退款/凭证保持原渠道，未知结果不跨渠道重试。 |
+| 银行卡订阅走 Waffo；Stripe 银行卡备选平时关闭、手动切换、税务核实后才启用（PAY-STRIPE-CARD-FALLBACK）；Gold 首购“首 30 天 49 美元” | 第 2.1 节 2026-10-09、2026-10-10、2026-10-11 决定；第 12 项；D17；PAY-WAFFO 行 | 由第 2.1 节 2026-10-12 决定取代：银行卡订阅走 Stripe Managed Payments（中国大陆用户自选微信/支付宝单笔或普通 Stripe 银行卡订阅），Gold 首期改为“首月 49 美元”；PAY-WAFFO 冻结（停用新购、代码保留，旧 Waffo 订单沿原渠道），PAY-STRIPE-CARD-FALLBACK 由 PAY-STRIPE-MP 取代 |
 | 对比模式"对比最少 2 个模型"固定为常量；对比模式只写"用户自己勾选"，没有默认勾选组合 | [ENTITLEMENTS 实施说明](tasks/ENTITLEMENTS.md)第 221 行 P4；[FUSION 实施说明](tasks/FUSION.md)对比模式说明；本文第 4.1 节旧写法 | 由第 2.1 节第 50 项取代（[补充说明记录](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5970264949)）：最少勾选数改为后台参数，由 Owner 调整，前端和服务端都按它校验；每次打开默认勾选管理员设定的一组模型，用户可以改。D3 的最多模型数不变。FUSION.md 和 ENTITLEMENTS.md 由 FUSION-COMPARE 实施 PR 同步，本 PR 不改 |
 | 全站默认加价倍数 m=3 | 第 2.1 节第 11、33、34 项；D16 | 由第 2.1 节第 50 项取代为默认 m=6；按模型/线路配置、冻结和只进位一次的规则不变；实际修改配置须执行前另获 Owner 批准 |
 | D4 "Pro：评审和对比两种模式都能用" | 第 10 节 D4；[ENTITLEMENTS 实施说明](tasks/ENTITLEMENTS.md) 的默认值 | 由第 2.1 节第 51 项取代（[记录 D](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5972065193)）：两种模式只给 Gold，免费和 Pro 都不能用；对外名称"多模型专家评审团"，标"Gold 专属"（[记录 E](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5972167876)）。`allow_fusion_review`、`allow_fusion_compare` 默认值随 PAYWALL 实施调整，实际修改配置前单独批准；ENTITLEMENTS.md 由该实施 PR 同步，本 PR 不改 |
@@ -1675,13 +1696,13 @@ node scripts/plan-progress.mjs --ref origin/staging
 | **3 差异化功能** | FUSION-REVIEW | 定稿报告多模型评审（第 4 节，见 [实施说明](tasks/FUSION.md)）；结果接入账号注销。对外名称"多模型专家评审团"，上线默认只给 Gold（第 51 项） | AC-3、REPORT-GEN、RUNTIME-PROD、ENTITLEMENTS、DATA-ERASURE | 高 | 大 / 3–4 | — |
 | | LIB-DOCS | 资料库上传、"我的文档 / 语料库"、真正删除、按会员等级的总存储空间和系统级文件数量保护上限（见 [实施说明](tasks/LIBRARY-VOICE.md)）；接入账号注销；设计上传权限时一并整理共享 Storage 的授权（第 8.5 节）。第一步是 LIB-1 依赖及安全夹具（#549）；与 AC-2 设计定位导师查询工具（第 31 项） | ENTITLEMENTS、DATA-ERASURE | 高 | 大 / 3–4 | — |
 | | VOICE | 文风画像生成、确认和写作注入；接入账号注销 | LIB-DOCS、AGENT-CORE、DATA-ERASURE、RUNTIME-PROD（资料内容发给模型前，"不用于训练"已由服务端强制） | 高 | 中 / 2–3 | — |
-| | UI-A | 输入框编辑内核（沿用 v11 §6.3，属于 `V3-OPC-UI`，不新建任务名）。需要编辑器依赖时（例如 Tiptap，先核实版本、许可和构建），第一个 PR 只引入这个依赖，按 AGENTS.md 第 4 节验证、审查后合入 staging；之后的 PR 只改前端并沿用现有请求接口 | AGENT-CORE | 高 | 中 / 3–4 | — |
+| | UI-A | 输入框编辑内核（沿用 v11 §6.3，属于 `V3-OPC-UI`，不新建任务名）。需要编辑器依赖时（例如 Tiptap，先核实版本、许可和构建），第一个 PR 只引入这个依赖，按 AGENTS.md 第 4 节验证、审查后合入 staging；之后的 PR 只改前端并沿用现有请求接口 | 编辑器依赖 PR 无前置。新输入框要改共用的 `work-composer.tsx` 和它在自由对话页、定位页（`runtime/page.tsx`、`positioning/[draftId]/page.tsx`）的调用处，与 R8a/R8b 的工作区页面改动排队、不同时改（同改这两页的模型身份说明 PR 也一样）；2026-10-12 由名义上的“依赖 AGENT-CORE”改为实际冲突 | 高 | 中 / 3–4 | — |
 | | UI-MODEL | 输入框里的模型位置（Owner 2026-10-03，第 50 项）：保留位置，只显示 Auto，用户暂时不能切换；实际模型按用途由后台配置决定，不按会员档位区分 | UI-A、ENTITLEMENTS | 高 | 小 / 1–2 | — |
 | | FUSION-COMPARE | 输入框里的多模型对比；结果接入账号注销。每次打开默认勾选管理员在后台设定的一组模型；用户可以取消勾选、自己搭配，范围受管理员允许列表和会员权限限制；后台新增参数"每次对比最少要勾选几个模型"，由 Owner 调整，前端和服务端都按它校验，取值范围是 2 ≤ 最少勾选数 ≤ D3 的当前最多模型数，后台可调但不能低于 2（Owner 2026-10-03，第 50 项）。同步 [FUSION 实施说明](tasks/FUSION.md) 的对比模式描述。上线默认只给 Gold（第 51 项） | UI-A、FUSION-REVIEW、DATA-ERASURE（多模型勾选器属于本任务，不依赖 UI-MODEL） | 高 | 中 / 2–3 | — |
 | | UI-B | 输入框 @ 引用资料库内容：把用户私有资料读进模型上下文，涉及权限和上下文 | UI-A、LIB-DOCS、RUNTIME-PROD | 高 | 中 / 2 | — |
 | | UI-C | 输入框附件 = 上传进资料库再引用（不另建一套上传，只支持 D6 的文档类型） | UI-A、LIB-DOCS、RUNTIME-PROD | 高 | 中 / 2 | — |
 | | UI-FINISH | 导航、响应式、旧链接迁移、界面全验收（沿用 v11）。字体证据见 [MiSans 清单、许可用途核对及线上浏览器验收限制](https://github.com/Crnobog9527/GraylumAI_vercel/issues/716#issuecomment-6039781633)；资源/许可核对不替代线上实际字体请求与计算样式验收。 | UI-B、UI-C | 普通 | 中 / 2–3 | — |
-| **4 收费和上线** | PAY-COMMON → PAY-WAFFO | **2026-10-12 起冻结，不再按本行实施新收款**：银行卡订阅（含 Gold 首月 49 美元自然月、创始年付）和钱包单笔的新购买改由 PAY-STRIPE-MP 实施（第 2.1 节 2026-10-12 决定）；本行只剩 PAY-COMMON 公共部分和已有 Waffo 测试订单按原渠道收尾，Waffo 代码保留、停用新购。以下为冻结前的历史方案，仅供追溯：按第 2.1 节 2026-10-09 决定和 [PAY-WAFFO 方案](tasks/PAY-WAFFO.md)：银行卡订阅（月/年、Gold 首 30 天、创始年付）走 Waffo；微信/支付宝一次性会员与积分包走 Stripe，复用 PAY-COMMON 订单、回调、积分、人工退款及原渠道凭证。钱包会员 1 月或 1 年（Gold 首购为 30 天，[Owner 2026-10-10 决定](https://github.com/Crnobog9527/GraylumAI_vercel/pull/752#issuecomment-6096167484)）、不自动续费；年期积分按月分 12 期；大额年期须另获批准后真实付款/退款验证，失败或未验证则仅月期和积分包、年付用卡。D17 按付款方式控制新销售，旧订单/续费/退款/凭证保持原渠道。价格、首购/创始资格、升级、退款及条款同意沿第 50/51 项有效决定；创始社群/展示墙/徽章、事务邮件、付款 IP/设备证据和拒付扩展拆成独立后续任务，不并入收款 PR，也不自动豁免原上线承诺。Waffo 能力及最小核心待定事项见方案第 3/9 节；只完成方案不代表可以收款或上线。2026-10-12 补充（#823）：未停止续费的银行卡订阅到期后 24 小时内保留会员权益、不发积分；不发放的付款在回调时立即停止 Waffo 续费并核实，每日对账兜底（第 2.1 节）。 | ENTITLEMENTS 之后，同一条钱路线；与 Runtime 主线并行（第 46 项）；Pro 升 Gold 规则已由 Owner 定（[记录 Q](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5980762284)） | 高 | 大 / 7–10 | — |
+| **4 收费和上线** | PAY-COMMON → PAY-WAFFO | **2026-10-12 起冻结，不再按本行实施新收款**：银行卡订阅（含 Gold 首月 49 美元自然月、创始年付）和钱包单笔的新购买改由 PAY-STRIPE-MP 实施（第 2.1 节 2026-10-12 决定）；本行只剩 PAY-COMMON 公共部分和已有 Waffo 测试订单按原渠道收尾，Waffo 代码保留、停用新购。以下为冻结前的历史方案，仅供追溯：按第 2.1 节 2026-10-09 决定和 [PAY-WAFFO 方案](tasks/PAY-WAFFO.md)：银行卡订阅（月/年、Gold 首 30 天、创始年付）走 Waffo；微信/支付宝一次性会员与积分包走 Stripe，复用 PAY-COMMON 订单、回调、积分、人工退款及原渠道凭证。钱包会员 1 月或 1 年（Gold 首购为 30 天，[Owner 2026-10-10 决定](https://github.com/Crnobog9527/GraylumAI_vercel/pull/752#issuecomment-6096167484)）、不自动续费；年期积分按月分 12 期；大额年期须另获批准后真实付款/退款验证，失败或未验证则仅月期和积分包、年付用卡。D17 按付款方式控制新销售，旧订单/续费/退款/凭证保持原渠道。价格、首购/创始资格、升级、退款及条款同意沿第 50/51 项有效决定；创始社群/展示墙/徽章、事务邮件、付款 IP/设备证据和拒付扩展拆成独立后续任务，不并入收款 PR，也不自动豁免原上线承诺。Waffo 能力及最小核心待定事项见方案第 3/9 节；只完成方案不代表可以收款或上线。2026-10-12 补充（#823）：未停止续费的银行卡订阅到期后 24 小时内保留会员权益、不发积分；不发放的付款在回调时立即停止 Waffo 续费并核实，每日对账兜底（第 2.1 节）。 | ENTITLEMENTS 之后，同一条钱路线；与 Runtime 主线并行（第 46 项）；Pro 升 Gold 规则已由 Owner 定（[记录 Q](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5980762284)） | 高 | 大 / 7–10 |PAY-WAFFO：关闭：2026-10-12 冻结，新收款改由 PAY-STRIPE-MP 实施 |
 | | PAYWALL | 第 2.1 节第 50 项的付费墙和积分产品：会员检查只在服务端的报告生成入口和报告调用准入两处；免费用户可以开始带步骤的 Skill，并做完报告前的全部步骤。入口路由（不是付费限制）：带步骤的 Skill 只从自己的入口开始，新对话入口和以后的按意图选 Skill 不加载带步骤的 Skill，参照旧入口的 409；报告模板和写作规则只在报告用途加载，不放进 SKILL.md 和前置步骤资源；积分包只允许会员购买；订阅会员和微信一次性会员都算付费会员（报告门槛和积分包购买一致对待）；开户赠送改为 500 积分（[记录 S](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5980831854)，迁移修改 0151 的固定 100，high，合并前 Owner 批准）；记录付费墙曝光；按第 50、51 项设定套餐和积分包数值；价格页只写积分和会员权益；（原"Pro 一个月买 2 次以上积分包时提示 Gold"已于 2026-10-04 取消，第 51 项）；会员到期后已生成的报告仍可看、可导出；免费用户的报告前信息导出（已确认、已整理的内容，可以看、可以导出，不收回，不检查会员）——旧的报告导出接口 `workbench.export` 依赖"确认正式定位"发布（未发布时返回 NOT_PUBLISHED），不能覆盖部分步骤已确认的情况，也不能代表 REPORT-GEN 之后免费可得的内容。独立的"导出已确认资料"入口读取当前已确认的前置信息，不依赖报告、不检查会员，并在 REPORT-GEN 之后保留。**2026-10-04 补充（第 51 项）**：设计以仓库里导出的 v25 为唯一依据（[`docs/launch/design/paywall/`](design/paywall/README.md)，2026-10-04 入库；文案规则和待定事项见其 README）；报告对外叫"运营策略报告"；年付标签"最高省 40% / 25%"只按创始名额是否卖完切换（记录 V）；只用美元显示，年付写明比月付 × 12 省多少；付款按钮旁写首期价、续费价、周期和取消方式；付费墙用弹窗、默认选中月付；Gold 新用户首 30 天 $49 和创始会员按服务端返回的价格和真实剩余名额展示；不做假原价、会重置的倒计时和 7 天退款保证；买积分包不提示升级会员；余额不足充值后由用户点"继续"、不显示还差多少积分；只显示已上线的功能，"报告评审"跟随 D12 开关；多模型专家评审团标"Gold 专属"并突出优势，Fusion 默认权限改为只给 Gold（实际修改配置前单独批准）；对比文案用 HawkSEM 定稿版；定位档案上限（免费 1 / Pro 3 / Gold 6；会员权益加"定位档案上限"字段，高风险迁移；服务端在新建业务时检查，数量检查和插入在同一个按用户加锁的数据库事务里完成（高风险迁移），验收包括同一用户用不同请求 id 并发新建时不超过上限；每个业务每个平台 1 个账号的约束；降级后超出额度的档案只读、由用户选哪几个继续可用；新增删除或归档定位档案并释放名额的功能，删除遵守 DATA-ERASURE 的保留规则，建议用归档（只读、可导出、不占名额），验收包括删除或归档后能再新建）；价格页放工作室版"联系我们"入口；付款前的条款同意勾选框（默认不勾，不勾不能付款，链接《服务条款》《退款政策》，按钮旁写价格、周期、是否自动续费、怎么取消和简短退款说明，订阅、积分包、微信/支付宝一次性都要有；[记录 W](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5981381009)，上线前，设计稿 v25 没有，按第 51 项做）。积分包会员折扣 Pro 9.5 折、Gold 9 折，客服时效免费 48 / Pro 24 / Gold 工作时间内 2 小时，Gold 优先内测（[记录 Q](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5980762284)）；积分包三档和会员价按第 51 项的表（[记录 S](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5980831854)、[记录 T](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5980843167)），注册赠送 500 积分；创始人寄语仍待定。设计定稿 v25 于 2026-10-04 入库（[记录 N](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5972956845) 的前提）；代码实施须 Owner 选定批次。**方案必须先解决**（[#626 总控记录](https://github.com/Crnobog9527/GraylumAI_vercel/pull/626#issuecomment-5976838440)，解决前实施 PR 不得合并）：工作室版按客户单独覆盖档案上限（有上限范围）和后台入口，或者"联系我们"只收集意向、不承诺额度（第 51 项第 3 条）。验收与交接：[免费前置信息导出切片范围](https://github.com/Crnobog9527/GraylumAI_vercel/issues/716#issuecomment-6039617108)、[#730 页面接入、验证与真实 staging 浏览器限制](https://github.com/Crnobog9527/GraylumAI_vercel/pull/730#issuecomment-6040300455)。 | REPORT-GEN、BILL-PAYG、PAY-COMMON、PAY-STRIPE-MP（服务端选出的首月价、首购资格和创始名额计数由它提供；2026-10-12 前为 PAY-WAFFO）、ENTITLEMENTS；付费墙设计定稿 v25（`docs/launch/design/paywall/`） | 高 | 中 / 2–3 | — |
 | | EXPERT-CONSULT | 真人专家诊断的预约入口（第 2.1 节第 51 项，[记录 L](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5972732100)、[记录 Q](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5980762284)、[记录 R](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5980780017)）：放在报告末尾、价格页和工作室版联系入口；只面向已有数据基础的账号，卡片写"预约咨询，免费询价"，不写价格；用户填写需求和联系方式，提交后通知 Owner，由 Owner 线下跟进。不做"同意专家查看报告"的授权开关，资料由用户自己导出后发来；授权查看功能上线时不做。咨询费不进产品结账流程（Stripe 或线下收款，税务由 Owner 处理）。联系方式按个人数据处理，接入账号注销和数据保留规则 | PAYWALL（入口位置）、DATA-ERASURE | 高 | 小 / 1–2 | — |
 | | PUBLISH-MONITOR | 方向（Owner 2026-10-04，第 2.1 节第 51、52 项，[记录 Q](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5980762284)）：上线前接入 Post for Me，提供多平台发布和数据监控，海外 9 个平台（TikTok、Instagram、YouTube、Facebook、X、Threads、LinkedIn、Pinterest、Bluesky），用户授权自己的账号。Pro：一键发布 + 自己作品近 30 天数据；Gold：另加对标账号监控、90 天趋势、每周自动复盘；两档都按积分计费、不限条数。**D1 范围变更**：这两项原不在上线范围（第 10 节 D1）。Post for Me 实测和条款核对通过之前，相关功能和说法不上线。验收与交接：[Post for Me 平台、费用、数据窗口与许可待核对项](https://github.com/Crnobog9527/GraylumAI_vercel/issues/716#issuecomment-6038093010)。 | RESEARCH-TOOLS；Post for Me 实测和条款核对（第 52 项）；其余依赖由方案定 | 高 | 待实施方案细化 | — |
@@ -1689,15 +1710,15 @@ node scripts/plan-progress.mjs --ref origin/staging
 | | POSITIONING-GATE | 定位前置检查（第 2.1 节 2026-10-12 决定）：Skill 后台“与社交媒体相关”勾选；无定位用户为自己账号做社媒运营的请求（含自由对话语义判断、无关 Skill 中途转社媒；社媒常识问答等照常回答）不继续并引导定位或“我已有定位”导入。语义判断用模型完成：Decisions 先判断、主模型兜底；被拦的回合（含主模型兜底判为拦截）不扣用户积分，由 Graylum 承担。 | MODEL-IDENTITY-GUARD（与之排队改同一块 runtime） | 高 | 中 / 2–3 | — |
 | | MODEL-IDENTITY-GUARD | 模型身份保护（第 2.1 节 2026-10-12 决定，Fusion 评审团例外、后台一键开关）：身份说明（指令）、自我介绍式泄露的回答替换、界面与接口去除真实模型名；不做输入侧拦截，身份询问照常调用模型（Owner 2026-10-12 补充）；品牌话术由 Owner 确认，不声称自研。上线前完成。 | RUNTIME-PROD（与在途 runtime 执行改动排队） | 高 | 中 / 3–4 | — |
 | | SKILL-I18N-HOOK | Skill 多语言对照接口（第 2.1 节 2026-10-12 多语言决定）：Skill 内核保持简体中文唯一原版；后台可为用户可见文字（步骤名、字段名、提问卡选项、报告标题）配英文对照；AI 按用户语言回答。产品界面英文化、语言提示条归上线后的 I18N-EN。 | MODEL-IDENTITY-GUARD、POSITIONING-GATE（同改 Skill 编辑器与 AI 指令，排在其后） | 高 | 小 / 1–2 | — |
-| | PAY-STRIPE-MP | 银行卡订阅迁到 Stripe Managed Payments（第 2.1 节 2026-10-12 决定，取代 PAY-STRIPE-CARD-FALLBACK）：国际银行卡/Apple Pay/Google Pay 走 MP（按会话启用），中国大陆用户在选择页自选微信/支付宝单笔或中国大陆银行卡订阅（普通 Stripe）；Gold 首月 49 美元（自然月，一次性优惠券，钱包同步）；会员可用 MP 买积分包；价格税另计；创始 496 锁价、名额由我方系统管理；Pro→Gold 另开 Gold 结账+Pro 期末停；24 小时宽限与创始 7 天配合 Stripe 重试；Link 代退款/用户在 Link 取消/删数据取消订阅按外部事实处理；Waffo 停用新购、代码保留。方案与验证证据见 PR #847，迁移 0221/0222，6 个 PR；正式平台操作逐项另获批准。 | PAY-COMMON | 高 | 大 / 6 | — |
-| | PAY-FOUNDER | 创始社群、展示墙、徽章独立交付，复用 PAY-WAFFO 资格；按第 51 项 Q/R/V 处理公开同意、到期/退款撤销和社群人工办理。运营流程在开工前再定；不并入收款 PR，正式售卖前完成。 | PAY-STRIPE-MP | 高 | 待实施方案细化 | — |
+| | PAY-STRIPE-MP | 银行卡订阅迁到 Stripe Managed Payments（第 2.1 节 2026-10-12 决定，取代 PAY-STRIPE-CARD-FALLBACK）：国际银行卡/Apple Pay/Google Pay 走 MP（按会话启用），中国大陆用户在选择页自选微信/支付宝单笔或中国大陆银行卡订阅（普通 Stripe）；Gold 首月 49 美元（自然月，一次性优惠券，钱包同步）；会员可用 MP 买积分包；价格税另计；创始 496 锁价、名额由我方系统管理；Pro→Gold 另开 Gold 结账+Pro 期末停；24 小时宽限与创始 7 天配合 Stripe 重试；Link 代退款/用户在 Link 取消/删数据取消订阅按外部事实处理；Waffo 停用新购、代码保留。方案与验证证据见 PR #847，迁移 0221/0222，6 个 PR；正式平台操作逐项另获批准。 | #847 迁移方案合并后开工；复用已合并的公共订单、人工退款和每日对账（PAY-COMMON 已交付的部分，不等它整体标完成） | 高 | 大 / 6 | — |
+| | PAY-FOUNDER | 创始社群、展示墙、徽章独立交付，复用已有的创始资格和名额计数（PAY-WAFFO 时实现，PAY-STRIPE-MP 沿用）；按第 51 项 Q/R/V 处理公开同意、到期/退款撤销和社群人工办理。运营流程在开工前再定；不并入收款 PR，正式售卖前完成。 | PAY-STRIPE-MP | 高 | 待实施方案细化 | — |
 | | PAY-NOTIFY | 事务邮件提醒独立交付：年付扣款、钱包创始到期、恢复 Pro/拒付后重订，沿第 51 项 X/AB/AD；时间、渠道、费用开工前再定。上线前已定部分须在正式售卖前完成。 | PAY-STRIPE-MP | 高 | 待实施方案细化 | — |
 | | PAY-EVIDENCE | 付款 IP/设备证据与清理独立交付，沿第 51 项 W；Owner 定留存后同步 DATA-ERASURE 契约和实际清理，完成前不采集。条款版本和订单同意仍归收款核心。正式售卖前完成已定证据要求。 | PAY-STRIPE-MP、DATA-ERASURE | 高 | 待实施方案细化 | — |
-| | PAY-DISPUTE-GUARD | 第 51 项 X/AC/AD 已定的上线前拒付通知接收、可撤回冻结及停止续费，从收款 PR 拆出独立交付；Waffo 无拒付回调，按 [Waffo 2026-10-10 答复](https://github.com/Crnobog9527/GraylumAI_vercel/pull/752#issuecomment-6095292601) 用既有每日定时入口查询 GraphQL `chargebacks` 并看邮件（见 PAY-WAFFO §3、§8）；人工替代开工前再定。最终判定、申诉等扩展仍归上线后 CHARGEBACK，不扩大本任务。 | PAY-STRIPE-MP | 高 | 待实施方案细化 | — |
+| | PAY-DISPUTE-GUARD | 第 51 项 X/AC/AD 已定的上线前拒付通知接收、可撤回冻结及停止续费，从收款 PR 拆出独立交付。**2026-10-12 起新订单走 Stripe（第 2.1 节 2026-10-12 决定），方向改为按 Stripe 拒付事件（`charge.dispute.*`）处理**：Stripe Managed Payments 订单由 Stripe 作为记录商户处理拒付，本任务接收它的拒付事件做通知记录、可撤回冻结和停止续费；中国大陆银行卡订阅和微信/支付宝单笔（普通 Stripe，Graylum 是卖家）的拒付由我们自己处理，同样从 Stripe 拒付事件接收。PAY-STRIPE-MP 只保证这些事件不报错（[#847 迁移方案](https://github.com/Crnobog9527/GraylumAI_vercel/pull/847)）。MP 与普通 Stripe 各自的事件、到冻结的对应和人工替代，实施时由方案细化。Waffo 的每日 GraphQL `chargebacks` 查询和邮件（[Waffo 2026-10-10 答复](https://github.com/Crnobog9527/GraylumAI_vercel/pull/752#issuecomment-6095292601)，PAY-WAFFO §3、§8）只保留给已有 Waffo 旧订单。最终判定、申诉等扩展仍归上线后 CHARGEBACK，不扩大本任务。 | PAY-STRIPE-MP | 高 | 待实施方案细化 | — |
 | | PUBLIC-SITE | 公开站上线准备（第 2.1 节 2026-10-12 域名合并、中文优先、风格统一、落地页方向决定）：app.graylum.com 并入 www.graylum.com、应用放 /app；SEO/GEO 规范与基础设置；公开页面（落地页、定价、常见问题、教程）按对话页风格重做；新落地页按全部完工后的产品来写、未验收的能力不写。具体拆分待 SEO/GEO 规范文档和域名方案定稿后细化；正式环境平台设置逐项另获 Owner 批准。 | 落地页须等 D1 范围功能完成；域名合并的正式环境设置另行批准 | 高 | 待实施方案细化 | — |
 | | V3-M3 → REL-1 | 完整验收和发布（第 9.3 节；正式环境没有真实用户，按新建环境发布，不做旧数据兼容和迁移） | 以上全部；PAY-FOUNDER、PAY-NOTIFY、PAY-EVIDENCE、PAY-DISPUTE-GUARD | 高；生产另行批准 | 大 | V3-M3：阻塞：等第 0–4 阶段的 D1 范围全部完成（依赖"以上全部"） |
 | **5 上线后** | INTEGRATION-BASE → V3-FEISHU、SOCIAL-SYNC | 沿用 v11 §8（C1 套餐式自动追踪已确认） | REL-1 上线 | 高 | 大 | — |
-| | CHARGEBACK | 方向（Owner 2026-10-04，第 2.1 节第 51 项，[记录 W](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5981381009)、[记录 X](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5981808905)；**上线后任务，不阻塞上线**）：拒付最终判定输了，按商品分别处理：订阅按退款规则处理这一期（扣掉还没用完的积分、终止这份订阅以后的积分发放，是创始会员的立即结束创始身份，名额不放回）；微信一次性会员结束这一期，1 年期的终止以后按月发放的积分、扣掉这一期还没用完的积分（是创始会员的同样结束创始身份）；订阅和微信一次性会员被冻结的已发积分判输扣回、判赢解冻，不动其他来源（[记录 AC](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5982525998)）；积分包扣回这个包里没用完的积分、判赢解冻，不动其他来源的积分（[记录 Z](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5982115736)）；所有拒付都不自动接受，由 Owner 人工处理（[记录 Y](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5982111397)）；赢了就解除 PAY-DISPUTE-GUARD 的冻结、恢复，按幂等处理（拒付期间被暂停的按月积分，判赢后按原发放日逐期补发，幂等，不改变原会员期限和发放日期，不延到原到期日之后）；订阅判赢后不自动恢复扣费，提醒用户自己重新订阅；判输时订阅终止（[记录 AD](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5982615688)），具体由 CHARGEBACK 方案提出、Owner 批准；一键导出申诉材料（用 PAY-WAFFO 的同意记录及 PAY-EVIDENCE 的付款证据）；限制同一人反复拒付；信用卡账单商户名（由 Waffo 控制）。续费和到期提醒归 PAY-NOTIFY，拒付事件接收和可撤回冻结归 PAY-DISPUTE-GUARD，上线前完成（2026-10-09 拆分）。拒付通知方式、举证截止日和手续费（每笔 $25）已由 [Waffo 2026-10-10 答复](https://github.com/Crnobog9527/GraylumAI_vercel/pull/752#issuecomment-6095292601)；开工前仍须向 Waffo 核实要交的材料和账单商户名 | PAY-WAFFO、PAY-NOTIFY、PAY-EVIDENCE、PAY-DISPUTE-GUARD；Waffo 核实结果 | 高 | 待实施方案细化 | — |
+| | CHARGEBACK | 方向（Owner 2026-10-04，第 2.1 节第 51 项，[记录 W](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5981381009)、[记录 X](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5981808905)；**上线后任务，不阻塞上线**）：拒付最终判定输了，按商品分别处理：订阅按退款规则处理这一期（扣掉还没用完的积分、终止这份订阅以后的积分发放，是创始会员的立即结束创始身份，名额不放回）；微信一次性会员结束这一期，1 年期的终止以后按月发放的积分、扣掉这一期还没用完的积分（是创始会员的同样结束创始身份）；订阅和微信一次性会员被冻结的已发积分判输扣回、判赢解冻，不动其他来源（[记录 AC](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5982525998)）；积分包扣回这个包里没用完的积分、判赢解冻，不动其他来源的积分（[记录 Z](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5982115736)）；所有拒付都不自动接受，由 Owner 人工处理（[记录 Y](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5982111397)）；赢了就解除 PAY-DISPUTE-GUARD 的冻结、恢复，按幂等处理（拒付期间被暂停的按月积分，判赢后按原发放日逐期补发，幂等，不改变原会员期限和发放日期，不延到原到期日之后）；订阅判赢后不自动恢复扣费，提醒用户自己重新订阅；判输时订阅终止（[记录 AD](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5982615688)），具体由 CHARGEBACK 方案提出、Owner 批准；一键导出申诉材料（用 PAY-WAFFO 的同意记录及 PAY-EVIDENCE 的付款证据）；限制同一人反复拒付；信用卡账单商户名（由 Waffo 控制）。续费和到期提醒归 PAY-NOTIFY，拒付事件接收和可撤回冻结归 PAY-DISPUTE-GUARD，上线前完成（2026-10-09 拆分）。拒付通知方式、举证截止日和手续费（每笔 $25）已由 [Waffo 2026-10-10 答复](https://github.com/Crnobog9527/GraylumAI_vercel/pull/752#issuecomment-6095292601)；开工前仍须向 Waffo 核实要交的材料和账单商户名。2026-10-12 补充：新订单改走 Stripe（MP 订单由 Stripe 作为记录商户处理拒付，大陆通道和钱包单笔由我们处理），上文 Waffo 的通知方式、手续费、材料和账单商户名只适用于旧 Waffo 订单；按 Stripe 的做法实施时由方案细化 | PAY-STRIPE-MP、PAY-NOTIFY、PAY-EVIDENCE、PAY-DISPUTE-GUARD；拒付材料和账单商户名核实（旧 Waffo 订单仍向 Waffo 核实） | 高 | 待实施方案细化 | — |
 | | LEARN-1、LEARN-2 | 第 6.3 节：读取用户数据、依赖数据使用同意 | 有真实用户 / SOCIAL-SYNC | 高 | 中 | — |
 | | LIB-EXT（资料库扩展） | 全文检索或 pgvector、音频和视频、Agent 看图、Google Drive / Notion 导入（PDF 和图片已于 2026-10-10 移入 LIB-DOCS，第 2.1 节，[#770 决定记录](https://github.com/Crnobog9527/GraylumAI_vercel/pull/770#issuecomment-6095169943)） | LIB-DOCS | 高 | 大 | — |
 | | I18N-EN | 产品英文版（第 2.1 节 2026-10-12 多语言决定）：产品界面英文化、语言切换提示条、英文 Skill 用户可见文字、英文网站页面（/en）；Skill 内核仍以简体中文为唯一原版。上线前只做 SKILL-I18N-HOOK 打底。 | REL-1 上线、SKILL-I18N-HOOK | 高 | 中 | — |
@@ -1712,8 +1733,8 @@ RESEARCH-0 + AC-1 + RUNTIME-PROD + DATA-ERASURE ─→ RESEARCH-TOOLS（原先�
 REPORT-GEN + BILL-PAYG + PAY-COMMON → PAY-STRIPE-MP + ENTITLEMENTS + 付费墙设计定稿 v25 ─→ PAYWALL（第 7.4 节 N3 批次，排在 PAY-STRIPE-MP 之后；PAY-WAFFO 已于 2026-10-12 冻结）
 PAYWALL + DATA-ERASURE ─→ EXPERT-CONSULT（第 7.4 节 N3 批次）
 RESEARCH-TOOLS + Post for Me 实测和条款核对 ─→ PUBLISH-MONITOR（第 7.4 节 N3 批次）
-PAY-WAFFO（含付款同意记录）+ Waffo 核实结果 ─→ CHARGEBACK（上线后）
-D1 范围全部完成（第 0–4 阶段：上线基础含 RESEARCH-TOOLS、RUNTIME-FAILURE-RECONCILE；FUSION-REVIEW、LIB-DOCS、VOICE、UI-A—UI-FINISH、FUSION-COMPARE；PAY-COMMON → PAY-WAFFO、PAYWALL、EXPERT-CONSULT、PUBLISH-MONITOR、POSITIONING-GATE、MODEL-IDENTITY-GUARD、PUBLIC-SITE、LEGACY-CLOSE）─→ V3-M3 ─→ REL-1 ─→ 公开上线售卖（生产另行批准）
+PAY-STRIPE-MP（含付款同意记录）+ PAY-DISPUTE-GUARD ─→ CHARGEBACK（上线后；旧 Waffo 订单另按 Waffo 核实结果处理）
+D1 范围全部完成（第 0–4 阶段：上线基础含 RESEARCH-TOOLS、RUNTIME-FAILURE-RECONCILE；FUSION-REVIEW、LIB-DOCS、VOICE、UI-A—UI-FINISH、FUSION-COMPARE；PAY-COMMON → PAY-STRIPE-MP（PAY-WAFFO 2026-10-12 冻结）、PAYWALL、EXPERT-CONSULT、PUBLISH-MONITOR、POSITIONING-GATE、MODEL-IDENTITY-GUARD、PUBLIC-SITE、LEGACY-CLOSE）─→ V3-M3 ─→ REL-1 ─→ 公开上线售卖（生产另行批准）
 公开上线前 ─→ Owner 决定 MODERATION 正式实现时间（暂缓；默认放行的检查点随 #594 接线）
 S1 权限修复 ─→ DB-BASELINE ─→ V3-M3 ─→ REL-1
 RUNTIME-PROD ─→ MODEL-IDENTITY-GUARD ─→ POSITIONING-GATE（同一块 runtime，排队写）─→ V3-M3
@@ -1735,7 +1756,7 @@ DATA-ERASURE B2a（#550）+ #611 ─→ B2b ─→ PR-C（删除 Auth 账号）�
 REPORT-GEN ─→ AC-3（报告部分）
 RUNTIME-PROD + ENTITLEMENTS + DATA-ERASURE ─→ FUSION-REVIEW
 ENTITLEMENTS + DATA-ERASURE ─→ LIB-DOCS ─→ VOICE（另需 RUNTIME-PROD）
-AGENT-CORE ─→ UI-A ─→ UI-MODEL（只显示 Auto）；UI-A ─→ FUSION-COMPARE（多模型勾选器自带，不依赖 UI-MODEL）
+UI-A（编辑器依赖 PR 先行；新输入框与 R8a/R8b 工作区页面排队，2026-10-12）─→ UI-MODEL（只显示 Auto）；UI-A ─→ FUSION-COMPARE（多模型勾选器自带，不依赖 UI-MODEL）
 LIB-DOCS + UI-A + RUNTIME-PROD ─→ UI-B、UI-C ─→ UI-FINISH
 #543 + #548 + #552 ─→ FORGOT-PASSWORD（#567、#568）─→ Google 账号个人中心改密码（#569）
 STAGING-HOST-CLEANUP 的 stagingEnvironment.ts 名单及相关测试（另开 high PR）
@@ -1764,8 +1785,9 @@ AC-4 + UI-MODEL + UI-B + UI-C + UI-FINISH + 功能对照检查 ─→ LEGACY-CLO
 | N1c 完整定位流程 | DATA-ERASURE 删除规则设计、AC-2（含 CONVERSATION-DRIVEN-CAPTURE B1/B2）、AC-3、AC-5 及其对应的 AGENT-CORE-UI 部分（本步小结卡、右侧面板和进度条）；CHAT-NATIVE-OUTPUT、REPORT-GEN（暂列，待 Owner 选定批次） | Owner 从进入到定稿完整走通并验收 |
 | N1d 推广 | AC-4 及其对应的 AGENT-CORE-UI 部分；CONTENT-CONVERSATION-DRIVEN（暂列，待 Owner 选定批次）；DEBT-QUICK、CI-TRUST 其余部分 | 自由对话和其他 Skill 用上新工作区；检查线的任务并行，不阻塞前面的验收 |
 | N2 上线基础 | RUNTIME-PROD（含 BILL-UNIT、BILL-PAYG、RUNTIME-FAILURE-RECONCILE）、DEP-BATCH-A（Owner 2026-10-12 已选中）、PROMPT-CACHE、PROMPT-CACHE-HISTORY、RATE-LIMIT 接线（含默认放行的 MODERATION-HOOK）、DB-BASELINE、RESEARCH-TOOLS、ENTITLEMENTS、SEC-RATELIMIT、PII-REGEX、DATA-ERASURE 实现、COST-REPORT、PAY-COMMON。钱路线已由 Owner 批准并行开工（第 46 项） | 上线基础完成。原定此后先做 5–10 人封闭内测（D8），2026-10-03 已取消（第 2.1 节第 50 项），按 D1 范围完成后直接公开上线售卖 |
-| N3 差异化功能 | 先 FUSION-REVIEW、LIB-DOCS、VOICE；再 UI-A、UI-MODEL、FUSION-COMPARE、UI-B、UI-C、UI-FINISH；PAY-WAFFO（Waffo 银行卡订阅、Stripe 微信/支付宝一次性会员及积分包）；PAY-FOUNDER、PAY-NOTIFY、PAY-EVIDENCE、PAY-DISPUTE-GUARD、PAY-STRIPE-MP（独立售前任务；备选通道平时关闭，税务核实前不得启用）；MODEL-IDENTITY-GUARD → POSITIONING-GATE（上线前完成，排在在途 runtime 改动之后）；PAYWALL（依赖 REPORT-GEN、BILL-PAYG、PAY-COMMON、PAY-WAFFO、ENTITLEMENTS 和已入库的付费墙设计定稿 v25，须在 REL-1 之前完成）；EXPERT-CONSULT（依赖 PAYWALL、DATA-ERASURE，须在 REL-1 之前完成）；PUBLISH-MONITOR（依赖 RESEARCH-TOOLS 和 Post for Me 实测、条款核对，须在 REL-1 之前完成，D1 范围变更） | 差异化功能完成（对比模式对钱路核心改动最大，放在后面） |
+| N3 差异化功能 | 先 FUSION-REVIEW、LIB-DOCS、VOICE；再 UI-A、UI-MODEL、FUSION-COMPARE、UI-B、UI-C、UI-FINISH；收款按第 2.1 节 2026-10-12 决定：#847 迁移方案合并后做 PAY-STRIPE-MP（PR-1 起；国际银行卡、Apple Pay、Google Pay 走 Stripe Managed Payments，中国大陆用户自选微信/支付宝单笔或普通 Stripe 银行卡订阅；正式平台操作逐项另获批准），再 PAYWALL 接线，再 PAY-FOUNDER、PAY-NOTIFY、PAY-EVIDENCE、PAY-DISPUTE-GUARD（独立售前任务）；PAY-WAFFO 已于 2026-10-12 冻结（停用新购、代码保留，旧 Waffo 订单沿原渠道），不再排期；MODEL-IDENTITY-GUARD → POSITIONING-GATE（上线前完成，排在在途 runtime 改动之后）；PAYWALL（依赖 REPORT-GEN、BILL-PAYG、PAY-COMMON、PAY-STRIPE-MP、ENTITLEMENTS 和已入库的付费墙设计定稿 v25，须在 REL-1 之前完成）；EXPERT-CONSULT（依赖 PAYWALL、DATA-ERASURE，须在 REL-1 之前完成）；PUBLISH-MONITOR（依赖 RESEARCH-TOOLS 和 Post for Me 实测、条款核对，须在 REL-1 之前完成，D1 范围变更） | 差异化功能完成（对比模式对钱路核心改动最大，放在后面） |
 | N4 收口 | PUBLIC-SITE（域名合并、公开页面风格、新落地页；正式环境设置另行批准）、LEGACY-CLOSE、V3-M3；公开上线前请 Owner 决定 MODERATION 正式实现时间 | 完整验收；REL-1 和生产另行批准 |
+| **当前批次：8 条线并行（Owner 2026-10-12 选定，第 2.1 节）** | 同一条线内排队，不同线并行：① AI 核心：#829 → #845 → RUNTIME-PROD ⑦（服务端强制 `data_collection: deny`）→ POSITIONING-GATE PR2 → SKILL-I18N-HOOK；② 读资料：#830 → AGENT-CORE R4 → LIB-4（R4 和 LIB-4 都改 `read_source`）；③ 收款：#847 → PAY-STRIPE-MP PR-1…6 → PAYWALL 接线 → PAY-FOUNDER / PAY-NOTIFY / PAY-EVIDENCE / PAY-DISPUTE-GUARD；④ 输入框：UI-A 编辑器依赖 PR → 新输入框（与 R8a/R8b 工作区页面排队）→ UI-B / UI-C → UI-FINISH → LEGACY-CLOSE；⑤ 定位流程：#818（已合并）→ R14 → R8b；⑥ 官网：PUBLIC-SITE 第一段 + 台湾 6 页，`/app` 路由搬迁放在冻结窗口最后做，正式域名切换上线前逐项批准；⑦ 数据库改动：0217 #828 → 0218 #830 → 0219 #831 → 0220 #832 → 0221/0222 PAY-STRIPE-MP，按合并顺序重建指纹；⑧ 不写代码：DATA-ERASURE 收尾梳理、Fusion 实测、R11。Codex 浏览器验收同一测试账号一次一个，按顺序排。跨线的真实依赖仍按第 7.1 节（例如 UI-B/UI-C 还要等 LIB-DOCS 和 RUNTIME-PROD） | 每条线做完自己的最后一项就停；合并到 `main`、正式环境和平台设置仍按 AGENTS.md 第 1 节逐项批准 |
 
 每批由 Owner 选定后开工，批次内由 Agent 自主排序、测试、修复，完成后停下，不自动开始下一批（AGENTS.md 第 2 节）。
 
@@ -1784,9 +1806,9 @@ AC-4 + UI-MODEL + UI-B + UI-C + UI-FINISH + 功能对照检查 ─→ LEGACY-CLO
 
 | 事项 | 为什么要早 |
 | --- | --- |
-| Waffo 商户开通 | 商户审核、费率和结算条件要对方确认，PAY-WAFFO 依赖它 |
+| Waffo 商户开通（2026-10-12 起不再需要） | 原为 PAY-WAFFO 的前提；PAY-WAFFO 已冻结，银行卡订阅改走 Stripe Managed Payments（第 2.1 节 2026-10-12 决定），MP 正式开通等平台操作逐项另获批准 |
 | 隐私条款、服务条款和数据使用政策 | 由 Owner 用第三方专业软件生成；规划只规定产品行为，不规定条款文字 |
-| Stripe 钱包启售前核实 | 微信和支付宝单笔由 Stripe 收款；Graylum 作为卖家的税务责任、含税最终售价及凭证义务须在钱包启售前确认。不得因付款方式或用户位于中国而假设免税；未完成核实、价格口径批准和结账金额验证，不开启钱包销售。由 PAY-WAFFO 最后一个收款验收 PR 记录结果，正式配置和真钱检查另获批准。 |
+| Stripe 钱包启售前核实 | 微信和支付宝单笔由 Stripe 收款；Graylum 作为卖家的税务责任、含税最终售价及凭证义务须在钱包启售前确认。不得因付款方式或用户位于中国而假设免税；未完成核实、价格口径批准和结账金额验证，不开启钱包销售。由 PAY-STRIPE-MP 的收款验收 PR 记录结果（2026-10-12 前写的是 PAY-WAFFO），正式配置和真钱检查另获批准。 |
 | 第三方搜索服务 | TikHub、Parallel、Firecrawl 已注册并在 RESEARCH-0 中实测。等网站用户使用量大了，再由 Owner 向三家申请企业定制授权（第 3.7 节表格）；需要时向 TikHub 购买更高的每秒请求数；定稿隐私条款时一并咨询抓取类数据的合规问题 |
 | 定价配置与积分产品复核（2026-10-01，2026-10-03 更新） | q=100 已决定；默认 m 2026-10-03 改为 6（第 50 项），staging 现为 m=3（第 39 项），改配置须另获批准。订阅和积分包比例已定（第 50 项）；2026-10-04 实际售价已定（Pro $29、Gold $69、年付 $279 / $621、Gold 新用户首 30 天 $49、创始会员首年 $496/年，续费 2026-10-10 起固定 $496（[Owner 2026-10-10 决定](https://github.com/Crnobog9527/GraylumAI_vercel/pull/752#issuecomment-6096167484)），第 51 项）；套餐价格和每月积分已定（Pro 3,480、Gold 8,970），需要单独批准的只是实际写入配置；开户赠送 500 积分和积分包三档已先定（第 51 项，记录 S、T；积分包会员折扣 Pro 9.5 折、Gold 9 折），实测后可能调整；邀请奖励 50/30 按 m=6 复核；产品数值不因 q/m 变化自动改；面向用户的计费说明要按名义费用和"有分时价的线路按最高时段标价计费"写（第 41 项，条款文字由 Owner 处理） |
 | 正式环境 Upstash（2026-10-01） | staging 已配置；正式环境在公开上线前配置（封闭内测已取消，第 50 项），核对容量、变量名和故障拒绝路径（第 30 项） |
@@ -1991,7 +2013,7 @@ Owner 于 2026-09-27 确认 D1–D17（D6 在 Fable 评估后改为不含 PDF；
 
 | 编号 | 问题 | 已确认的决定 |
 | --- | --- | --- |
-| D1 | 上线范围 | 上线包含阶段 0–4（核心体验、上线基础、Fusion、资料库和文风、Waffo 支付）；连接器、社媒同步、Skill 学习的后续阶段、资料库检索和图片音频放到上线后。**2026-10-04 变更**（第 2.1 节第 51 项，[记录 Q](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5980762284)）：多平台发布和数据监控（PUBLISH-MONITOR）提前到上线前，按 Pro/Gold 分档；其余后续阶段不变 |
+| D1 | 上线范围 | 上线包含阶段 0–4（核心体验、上线基础、Fusion、资料库和文风、Waffo 支付；2026-10-12 起收款改为 Stripe，见第 2.1 节）；连接器、社媒同步、Skill 学习的后续阶段、资料库检索和图片音频放到上线后。**2026-10-04 变更**（第 2.1 节第 51 项，[记录 Q](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5980762284)）：多平台发布和数据监控（PUBLISH-MONITOR）提前到上线前，按 Pro/Gold 分档；其余后续阶段不变 |
 | D2 | Fusion 计费规则 | 按第 4.4 节：对比模式只对成功返回的模型收费，确认失败不向用户收费，结果未知先保留该模型的预扣；评审模式（2026-09-30 修订，OpenRouter Fusion）每次 Fusion 调用作为一个整体结算：整体成功按官方总成本收费，整体确认失败不向用户收费（供应商仍收费时由平台承担），结果未知冻结这一次调用的预扣、核实后再处理；（仅在 Owner 决定自研时适用：自研方案和对比模式一样逐个模型结算）；评审意见和修订稿记在同一次收费操作里，修订稿失败时只收评审意见的费用。（2026-10-03 注：向用户收费的基准已由第 2.1 节第 41 项改为 BILL-PAYG 名义费用；这里"按官方总成本收费"在 Fusion 上怎么套用，细则随 FUSION-REVIEW 方案定） |
 | D3 | 对比模式最多几个模型 | 4 个（后台可调，系统上限 8 个） |
 | D4 | 各会员等级的默认权限和资料库额度 | 免费：不能用 Fusion，资料库总空间 50 MB；Pro：不能用 Fusion（2026-10-04 修订，第 2.1 节第 51 项；原为"评审和对比两种模式都能用"），500 MB；Gold：评审和对比两种模式都能用，2 GB。资料库只限制总空间，不限制文件数量；另有一个系统级文件数量保护上限，只防滥用、不作为权益展示。定位档案数：免费 1、Pro 3、Gold 6（2026-10-04，第 2.1 节第 51 项）。后台随时可改 |
@@ -2007,7 +2029,7 @@ Owner 于 2026-09-27 确认 D1–D17（D6 在 Fable 评估后改为不含 PDF；
 | D14 | 搜索费用 | 用户承担，所有计价先换成美元；官方用量、自家点数按冻结单价换算，按次线路按官方单价；TikHub 官方标价计成本、阶梯折扣归平台。2026-10-01 取代固定保底积分直扣，按第 32–34 项与 D16 统一计算；搜索前不预告，限制次数、展示每次扣费，低于 L 时提示充值 |
 | D15 | 对标研究 | 只基于真实取到的数据，禁止编造；指标由代码计算，表格数字只能由取数结果填入；取不到数据就明说，不给示例账号（第 3.7 节） |
 | D16 | 收费公式（2026-10-01 修订） | 应收 `C = ceil(q × Σ(U_i × m_i))`；所有成本先换美元，q=100、默认 m=3（2026-10-03 改为默认 m=6，第 2.1 节第 50 项），模型/线路未设置倍数才用默认值；调用冻结有效倍数，旧执行不重算，最终只进位一次；实际扣费按余额封顶（第 26、32–34 项），固定保底积分直扣已被取代 |
-| D17 | 支付渠道 | 按付款方式分流新购买：银行卡订阅走 Waffo；微信和支付宝一次性会员及积分包走 Stripe 单笔。管理员分别启停，钱包年期可售范围由真实大额检查结果控制；未验证/失败时只卖月期和积分包，年付走银行卡。取代“全局默认 Waffo、Stripe 仅备用”；不自动故障切换，同一订单不跨渠道重试，未知结果先核对，旧订单、续费、退款和凭证保持原渠道（第 2.1 节 2026-10-09 决定）。2026-10-11 补充：银行卡新增 Stripe 订阅作为备选，平时关闭，Waffo 出问题时由管理员手动把新的银行卡购买切到 Stripe；只有确认原 Waffo 订阅已停止续费后才提醒改绑；Stripe 收款税务核实完成前不得启用（第 2.1 节 2026-10-11 决定，任务 PAY-STRIPE-MP）。 2026-10-12 取代：银行卡订阅改走 Stripe Managed Payments，中国大陆用户可选微信/支付宝单笔或普通 Stripe 银行卡订阅，Waffo 停用新购（第 2.1 节 2026-10-12 决定，任务 PAY-STRIPE-MP）。 |
+| D17 | 支付渠道 | 按付款方式分流新购买：银行卡订阅走 Waffo；微信和支付宝一次性会员及积分包走 Stripe 单笔。管理员分别启停，钱包年期可售范围由真实大额检查结果控制；未验证/失败时只卖月期和积分包，年付走银行卡。取代“全局默认 Waffo、Stripe 仅备用”；不自动故障切换，同一订单不跨渠道重试，未知结果先核对，旧订单、续费、退款和凭证保持原渠道（第 2.1 节 2026-10-09 决定）。2026-10-11 补充：银行卡新增 Stripe 订阅作为备选，平时关闭，Waffo 出问题时由管理员手动把新的银行卡购买切到 Stripe；只有确认原 Waffo 订阅已停止续费后才提醒改绑；Stripe 收款税务核实完成前不得启用（第 2.1 节 2026-10-11 决定，原任务 PAY-STRIPE-CARD-FALLBACK）。 2026-10-12 取代：银行卡订阅改走 Stripe Managed Payments，中国大陆用户可选微信/支付宝单笔或普通 Stripe 银行卡订阅，Waffo 停用新购（第 2.1 节 2026-10-12 决定，任务 PAY-STRIPE-MP）。 |
 
 **2026-09-28—30 的新决定**记在第 2.1 节第 13–25 项；2026-10-01—03 的记在第 26–50 项；2026-10-04 的定价和付费墙细则记在第 51 项。
 
