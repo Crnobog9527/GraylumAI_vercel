@@ -20,6 +20,9 @@ const UNSAFE_ERROR_PATTERNS = [
   /\bnetwork error\b/i,
   /\btimeout\b/i,
   /\bhttp\s*\d{3}\b/i,
+  // MODEL-IDENTITY-GUARD: never surface model vendors, model names or route providers.
+  /\b(anthropic|openai|openrouter|deepinfra|deepseek|mistralai|meta-llama|x-ai|qwen)\b/i,
+  /\b(claude|gemini|gpt-?\d|sonnet|opus|haiku|llama|grok)\b/i,
 ];
 
 export function getErrorMessageText(error: unknown) {
