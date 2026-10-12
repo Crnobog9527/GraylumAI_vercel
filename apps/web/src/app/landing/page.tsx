@@ -1,5 +1,6 @@
 import { JsonLd } from '@/components/seo/JsonLd';
 import { FinalAction } from '@/components/landing/offer/FinalAction';
+import { FlowSteps } from '@/components/landing/offer/FlowSteps';
 import { HowItWorks } from '@/components/landing/offer/HowItWorks';
 import { OfferFaq } from '@/components/landing/offer/OfferFaq';
 import { OfferHero } from '@/components/landing/offer/OfferHero';
@@ -39,7 +40,9 @@ export default async function LandingPage() {
       ]} />
       <OfferHero note={data.heroNote} />
       <VoiceWall notes={data.notes} />
-      <HowItWorks promise={data.promise} timeline={data.timeline} />
+      <HowItWorks promise={data.promise} timeline={data.timeline}>
+        <FlowSteps steps={data.flowSteps} />
+      </HowItWorks>
       <PriceSection
         pricing={data.pricing}
         rows={data.compareRows}

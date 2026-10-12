@@ -1,9 +1,10 @@
 import { createElement, Fragment } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
-import { LANDING_FEATURES, type LandingFlags } from '@/lib/landing/landing-flags';
+import { LANDING_FEATURES, resolveLandingFlags, type LandingFlags } from '@/lib/landing/landing-flags';
 import { buildLandingPageData } from '@/lib/landing/landing-page-data';
 import { FinalAction } from './FinalAction';
+import { FlowSteps } from './FlowSteps';
 import { HowItWorks } from './HowItWorks';
 import { OfferFaq } from './OfferFaq';
 import { OfferHero } from './OfferHero';
@@ -23,7 +24,7 @@ function renderPage(flags: LandingFlags) {
   return renderToStaticMarkup(createElement(Fragment, null,
     createElement(OfferHero, { note: data.heroNote }),
     createElement(VoiceWall, { notes: data.notes }),
-    createElement(HowItWorks, { promise: data.promise, timeline: data.timeline }),
+    createElement(HowItWorks, { promise: data.promise, timeline: data.timeline }, createElement(FlowSteps, { steps: data.flowSteps })),
     createElement(PriceSection, { pricing: data.pricing, rows: data.compareRows, risk: data.risk, showResult: data.showResult,
       founderSeats: data.founderSeats, membershipHref: '/profile?tab=subscription' }),
     createElement(OfferFaq, { groups: data.faqGroups }),
@@ -42,6 +43,29 @@ describe('landing page sections', () => {
     expect(order.every(position => position >= 0)).toBe(true);
     expect([...order].sort((a, b) => a - b)).toEqual(order);
     expect(html).toContain('id="how-it-works"');
+  });
+
+  it('shows all nine walk-through steps in order by default (finished product, Owner 2026-10-13)', () => {
+    const html = renderPage(resolveLandingFlags({}));
+    const titles = ['和教练聊', '教练说真话', '找对标', '出报告', '资料库，它记得你', '写内容', '发出去', '看复盘', '多模型评审团（Gold）'];
+    const positions = titles.map(title => html.indexOf(`>${title}<`));
+    expect(positions.every(position => position >= 0)).toBe(true);
+    expect([...positions].sort((a, b) => a - b)).toEqual(positions);
+    expect(html.match(/为什么不是正确的废话/g)).toHaveLength(9);
+  });
+
+  it('hides the library step when the coach is off, since its note promises the coach answering', () => {
+    const data = buildLandingPageData({ ...ALL_ON, coach: false }, CATALOG);
+    expect(data.flowSteps.map(step => step.id)).not.toContain('step-library');
+  });
+
+  it('hides walk-through steps whose capability is off, numbered without gaps', () => {
+    const html = renderPage(CORE_ONLY);
+    expect(html).toContain('>和教练聊<');
+    expect(html).toContain('>教练说真话<');
+    expect(html).not.toContain('>找对标<');
+    expect(html).not.toContain('模型 A');
+    expect(html.match(/为什么不是正确的废话/g)).toHaveLength(2);
   });
 
   it('renders the full offer with server prices and founder seats when everything is on', () => {
