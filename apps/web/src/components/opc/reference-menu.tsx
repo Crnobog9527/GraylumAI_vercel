@@ -42,13 +42,17 @@ export function useComposerReferences(enabled: boolean, box: RefObject<ComposerE
   // Esc hides the menu for this `@` only; typing a new `@` opens it again.
   const [dismissed, setDismissed] = useState<number | null>(null);
   const [active, setActive] = useState(0);
+  const [notice, setNotice] = useState('');
   const open = enabled && query !== null && query.from !== dismissed;
   const list = trpc.library.list.useQuery({}, { enabled: open, staleTime: 60_000, refetchOnWindowFocus: false });
   const choices = open ? matchingDocuments(list.data?.documents ?? [], query.query) : [];
   const highlighted = choices.length ? Math.min(active, choices.length - 1) : -1;
 
   const pick = (item: ListedDocument) => {
-    if (query) box.current?.insertReference(query, referenceFor(item));
+    if (!query || box.current?.insertReference(query, referenceFor(item))) return;
+    // Did not fit: close this menu so Enter sends again, and say why.
+    setDismissed(query.from);
+    setNotice('加入这个引用会超过字数上限，请先删减内容。');
   };
   const hooks: ComposerReferenceHooks = {
     onState: next => {
@@ -56,7 +60,10 @@ export function useComposerReferences(enabled: boolean, box: RefObject<ComposerE
       if (!sameQuery(previous, next.query)) {
         current.current = next.query;
         setQuery(next.query);
-        if (previous?.query !== next.query?.query) setActive(0);
+        if (previous?.query !== next.query?.query) {
+          setActive(0);
+          setNotice('');
+        }
         if (!next.query) setDismissed(null);
       }
       setReferences(old => sameReferences(old, next.references) ? old : next.references);
@@ -92,7 +99,7 @@ export function useComposerReferences(enabled: boolean, box: RefObject<ComposerE
           </button>)}</div>
           : <p>没有匹配的已就绪文档</p>}
     <small>引用尚未开放：选中的文档暂时不会发送给 AI。</small>
-  </div> : null;
+  </div> : notice ? <p role="alert" className={styles.note}>{notice}</p> : null;
 
   return { hooks: enabled ? hooks : undefined, menu, references };
 }

@@ -41,14 +41,14 @@ beforeAll(async () => {
         window.listData={usedBytes:0,capacityBytes:1,uploadEnabled:false,nextCursor:null,documents:[
           doc('d1','周报 第1周.md'),doc('d2','周报草稿.docx',{status:'processing'}),doc('d3','周报截图.png',{kind:'image'}),
           doc('d4','月报.pdf'),doc('d5','周报 第2周.md')]};
-        function Host({references}){
+        function Host({references,maxLength}){
           const [value,setValue]=React.useState('');
           window.value=value; window.setValue=setValue;
-          return React.createElement(WorkComposer,{value,onChange:setValue,label:'消息',placeholder:'写点什么',references,
+          return React.createElement(WorkComposer,{value,onChange:setValue,label:'消息',placeholder:'写点什么',references,maxLength,
             onSend:()=>{window.sent.push(value);setValue('');}});
         }
         const root=createRoot(document.getElementById('root'));
-        window.mount=references=>root.render(React.createElement(Host,{references}));`;
+        window.mount=(references,maxLength=20000)=>root.render(React.createElement(Host,{references,maxLength}));`;
     } }],
     build: { write: false, minify: false, lib: { entry, name: 'ReferencesTest', formats: ['iife'] } },
   });
@@ -61,7 +61,7 @@ beforeAll(async () => {
 }, 60000);
 afterAll(async () => { await browser?.close(); });
 
-async function open(references: boolean, run: (page: Page) => Promise<void>) {
+async function open(references: boolean, run: (page: Page) => Promise<void>, maxLength = 20000) {
   const page = await browser.newPage();
   try {
     const errors: string[] = [];
@@ -71,7 +71,8 @@ async function open(references: boolean, run: (page: Page) => Promise<void>) {
     await page.setContent('<div id="root" style="padding-top:360px"></div>');
     await page.addStyleTag({ content: css });
     await page.addScriptTag({ content: code });
-    await page.evaluate(on => (window as unknown as { mount: (on: boolean) => void }).mount(on), references);
+    await page.evaluate(([on, max]) => (window as unknown as { mount: (on: boolean, max: number) => void })
+      .mount(on as boolean, max as number), [references, maxLength] as const);
     await ui(box(page)).toBeVisible();
     expect(errors).toEqual([]);
     await box(page).click();
@@ -153,3 +154,14 @@ it('keeps a reference when the host appends text, as adding a file does', () => 
   await ui(box(page).locator('[data-library-reference="d4"]')).toHaveCount(1);
   expect(await read<string>(page, 'value')).toBe('@月报.pdf \n\n附件资料\n第一行');
 }));
+
+it('says so and lets Enter send when a reference does not fit the length limit', () => open(true, async page => {
+  await page.keyboard.type('一二三四五六七八九十@周');
+  await ui(page.getByRole('option')).toHaveCount(2);
+  await page.keyboard.press('Enter');
+  await ui(menu(page)).toHaveCount(0);
+  await ui(page.getByRole('alert')).toHaveText('加入这个引用会超过字数上限，请先删减内容。');
+  await ui(box(page).locator('.library-reference')).toHaveCount(0);
+  await page.keyboard.press('Enter');
+  expect(await read<string[]>(page, 'sent')).toEqual(['一二三四五六七八九十@周']);
+}, 15));

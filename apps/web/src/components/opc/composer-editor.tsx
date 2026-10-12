@@ -45,8 +45,8 @@ function roomFor(state: EditorState, from: number, to: number, maxLength: number
 
 export type ComposerEditorHandle = {
   focus: () => void;
-  /** Replace the typed `@query` with a reference and a trailing space. */
-  insertReference: (range: ReferenceQuery, reference: LibraryReference) => void;
+  /** Replace the typed `@query` with a reference and a trailing space; false when it does not fit the limit. */
+  insertReference: (range: ReferenceQuery, reference: LibraryReference) => boolean;
 };
 
 /** UI-B: only passed while references are switched on; absent, the box behaves exactly as UI-A. */
@@ -181,9 +181,13 @@ export function ComposerEditor(props: Props) {
       editor?.commands.focus(undefined, { scrollIntoView: false });
     },
     insertReference: (range, reference) => {
-      editor?.chain().focus().insertContentAt({ from: range.from, to: range.to }, [
+      if (!editor) return false;
+      const before = editor.state.doc;
+      editor.chain().focus().insertContentAt({ from: range.from, to: range.to }, [
         { type: REFERENCE_NODE, attrs: reference }, { type: 'text', text: ' ' },
       ]).run();
+      // The length filter drops a transaction silently; an unchanged document means it did not fit.
+      return editor.state.doc !== before;
     },
   }), [editor]);
 
