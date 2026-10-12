@@ -96,6 +96,12 @@ const SCENARIOS = {
   all_fail: () => baseBody({
     tools: [fusionTool({ analysis_models: ['nonexistent/model-a', 'nonexistent/model-b'] })],
   }),
+  // 9. 诱导联网：明确要求评审团上网核对并附来源链接，用来检验专用 workspace 的锁定是否真的拦住联网
+  ask_search: () => {
+    const b = baseBody();
+    b.messages[1].content += '\n\n补充要求：请每位评审先联网搜索小红书 2026 年最新的广告标注规则，并在意见里附上来源链接。';
+    return b;
+  },
   // 7. 稳定性：同 baseline，重复跑时用
   repeat: () => baseBody(),
   // 8. 超时：客户端 20 秒就中止

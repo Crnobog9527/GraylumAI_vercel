@@ -1,18 +1,25 @@
 # FUSION-REVIEW 开工前实测（2026-10-12）
 
-> 状态：实测记录，仅文档和脚本，不是产品代码。第 1 项"能否真正关掉联网"**等 Owner 建好评审专用 workspace** 后补测，本文到时更新。
+> 状态：实测记录，仅文档和脚本，不是产品代码。已包含 Owner 建好评审专用 workspace 之后的补测（第 1.1 节）。
 > 依据：[Master Plan 第 4.3 节](../../MASTER_PLAN.md#fusion)（开工前必须实测的五项）、[FUSION 实施说明](../../tasks/FUSION.md)、
 > Owner 2026-09-30 决定（评审不联网；首选 OpenRouter Fusion 并禁联网，先实测）。
-> 测试账号：现有 OpenRouter 测试密钥（staging 测试预算），本任务上限 2 美元，**实际花费约 0.51 美元**。
-> 没有改 OpenRouter 后台、没有新建 workspace，也没有碰正式环境。
+> 测试账号：现有 OpenRouter 测试密钥（staging 测试预算），以及 Owner 新建的评审专用 workspace 的密钥。本任务上限 2 美元，**实际花费约 0.52 美元**。
+> 后台设置由 Owner 本人操作，我没有改 OpenRouter 后台，也没有碰正式环境。
 
 ## 先说结论（给 Owner 的大白话）
 
-1. **按现在的账号设置，关不掉联网。**
-   - 把内部步数上限设成最小值 1、提示词写"不要联网"、请求里加数据设置 `deny`、把搜索域名限制成不存在的域名，四种办法都试了。
-   - 评审团照样联网，每次返回 5–6 个网页引用。
-   - 官方文档没有"关掉联网"的开关。剩下唯一的办法是新建一个评审专用 workspace，用锁定模式把域名限制住。Owner 已同意去建，建好后补测。
-2. **即使联网能关掉，Fusion 还有三个硬伤：**
+1. **Fusion 没法在不联网的情况下工作，按 Master Plan 第 4.3 节算"实测不通过"。**
+   - 在原来的账号里，我在请求层面试了四种办法：
+     - 把内部步数上限设成最小值 1
+     - 提示词写"不要联网"
+     - 请求里加数据设置 `deny`
+     - 把搜索域名限制成不存在的域名
+
+     四种都关不掉，评审团每次照样联网，返回 5–6 个网页引用。
+   - Owner 新建了评审专用 workspace，在 Tools 页面把 Web Search 和 Web Fetch 关掉，Fusion 保持开启。补测结果：3/3 次评审团的每个模型都被拒绝（403，"web_search 被本 workspace 的策略禁止"），整次 Fusion 失败（`all_panels_failed`）。
+   - 原因：Fusion 给每个评审模型的请求固定带着联网工具，联网一关，评审团就一个也跑不起来。
+   - 这种情况下，普通对话接口仍然返回"成功"：外层模型自己写了一份评审冒充，费用只有约 0.003 美元。
+2. **就算不看联网，Fusion 还有三个硬伤：**
    - 看不到评审团各自联网了几次。用量里只有"调用了 1 次 Fusion"，没有每个模型的搜索次数，所以 Master Plan 要求的"`web_search_requests` 为 0"没法直接证明。
    - 只有整次的总费用，拆不到每个模型。
    - 普通对话接口（Chat Completions）看不到 Fusion 的原始结果。评审团配置错了时，外层模型会悄悄自己写一份评审，接口照样返回成功。要改用 Responses 接口，才能看到每个模型的回答和失败原因。
@@ -25,7 +32,10 @@
    - 但 Sonnet 有 3/4 次删掉了原文的"结语"段，需要宿主在拿到结果后检查章节是否齐全。
 5. **我的建议：评审改为自研（Graylum 自己并行调多个模型），复用 FUSION-COMPARE 本来就要做的多模型并行能力。**
    - Master Plan 第 4.3 节写的是"实测不通过就保持关闭，以后是否自研由 Owner 再定"，所以改走自研需要 Owner 点头。
-   - 如果补测证明专用 workspace 能真正关掉联网，Fusion 仍然可以作为备选，理由见第 4 节。
+   - 按第 4.3 节原文，在 Owner 决定之前，评审模式保持关闭，定位分析以报告 v1 结束。
+   - 请 Owner 二选一：
+     - A（推荐）：「同意评审团改为自研，复用对比模式的多模型并行能力。」
+     - B：「评审模式先关着上线，以后再定。」
 
 ## 1. 测了什么、结果如何
 
@@ -34,11 +44,26 @@
 
 | # | Master Plan 4.3 要求 | 测法 | 结果 |
 |---|---|---|---|
-| 1 | 禁用联网是否生效 | ① 基线：`max_tool_calls: 1` + 提示词禁止联网（`runs/baseline-1.json`）② 请求加 `provider.data_collection: deny`（`deny-1.json`）③ 请求里同时声明 `openrouter:web_search`，`allowed_domains` 设成不存在的域名（`web_blocked_domain-1.json`） | **不通过（现有 workspace）**。三次分别返回 6、5、5 个网页引用，说明内部发生了搜索。用量只有 `server_tool_use_details.tool_calls_requested: 1`，没有内部搜索次数。**专用 workspace 锁定域名的办法等 Owner 建好后补测** |
+| 1 | 禁用联网是否生效 | ① 基线：`max_tool_calls: 1` + 提示词禁止联网（`runs/baseline-1.json`）② 请求加 `provider.data_collection: deny`（`deny-1.json`）③ 请求里同时声明 `openrouter:web_search`，`allowed_domains` 设成不存在的域名（`web_blocked_domain-1.json`） | **不通过**。现有 workspace：三次分别返回 6、5、5 个网页引用，说明内部发生了搜索；用量只有 `server_tool_use_details.tool_calls_requested: 1`，没有内部搜索次数。专用 workspace 关掉联网工具后：评审团全部 403，Fusion 整体失败（见第 1.1 节） |
 | 2 | 评审团是否拿到完整原文、是否按评审提示词评审 | 原文最后一段放暗号，要求每个模型照抄；系统提示里放"看得到就多加一条"的检查句 | **通过**。暗号 15/15 被照抄；系统提示检查句在 Haiku、DeepSeek 上生效。注意：评审团收到的是外层模型写的工具调用参数，接口里看不到这段参数，只能用暗号间接证明 |
 | 3 | 费用是每个模型分开还是只有总数 | 看返回的 `usage` 和 `/generation` | **只有总数**。`usage.cost` 是整次费用（含评审团和分析模型），`cost_details.upstream_inference_cost` 只是外层模型那一部分。`/generation` 查询外层请求时费用为 0，没有内部各模型的明细 |
 | 4 | `data_collection: deny` 是否作用到评审团 | 请求带 `deny` 能正常返回 | **无法证明**。请求被接受，但接口不回传内部调用走了哪家供应商，也不回传数据政策 |
 | 5 | 适配器兼容性（拒绝 `openrouter/` 元模型、要求返回模型等于请求模型） | 看返回的 `model` 字段 | Fusion 是工具不是元模型，外层返回的 `model` 等于请求的模型（`anthropic/claude-haiku-5.5`），这两条检查不冲突。另外：外层用 Sonnet 5.5 时 Responses 接口返回 400（`responses-default_panel-sonnet-outer-400.json`），外层模型要逐个实测 |
+
+### 1.1 专用 workspace 补测（Owner 在 Tools 页面关掉 Web Search 和 Web Fetch）
+
+| 记录 | 接口 | 结果 |
+|---|---|---|
+| `runs/responses-ok-ws1.json` | Responses | 11 秒返回。Fusion 输出项 `failure_reason: all_panels_failed`，`failed_models` 里 3 个模型的错误都是 403：`Tool 'openrouter:web_search' is blocked by this workspace's server tool policy`。外层模型如实说明评审团失败 |
+| `runs/baseline-ws1.json` | Chat Completions 流式 | 20 秒返回 HTTP 200，0 个网页引用，没有 "Panel responses"。内容是外层模型自己写的意见清单，调用方看不出 Fusion 失败 |
+| `runs/ask_search-ws1.json` | Chat Completions，明确要求评审团联网并附来源 | 同上：21 秒、0 个引用、Fusion 失败、外层模型自己写 |
+| `runs/summarize-schema-haiku-ws1.json` | 汇总调用（不带工具） | 2/2 结构完整；汇总调用不受联网开关影响 |
+
+结论：
+
+- 联网确实关得掉，但关掉后 Fusion 的评审团不能运行。所以"Fusion + 不联网"这个组合不存在。
+- 文档写的是"评审团和分析模型固定开启联网"，这次实测证实：关不掉，只能整体拒绝。
+- 除非 OpenRouter 以后提供"Fusion 内部不带联网工具"的选项，否则 Fusion 不能满足 D12。
 
 ## 2. 格式稳定性、耗时、费用、失败表现
 
@@ -103,20 +128,21 @@
 
 ## 4. 推荐：Fusion 还是自研
 
-**推荐自研，复用 FUSION-COMPARE 的多模型并行能力。** 理由：
+**推荐自研，复用 FUSION-COMPARE 的多模型并行能力。** 补测之后，Fusion 已经不是备选：一关联网它就跑不起来。理由：
 
-1. **"不联网"能证明。** 自研时每个评审调用都由宿主发出，不带任何工具，从请求本身就能证明不联网。Fusion 即使在专用 workspace 里锁住域名，也只能从"没有引用"间接推断，用量里看不到内部搜索次数。
+1. **"不联网"能证明。** 自研时每个评审调用都由宿主发出，不带任何工具，从请求本身就能证明不联网。Fusion 的评审团固定带联网工具，在专用 workspace 里关掉联网后它直接失败（第 1.1 节）。
 2. **计费符合 D2 原规则。** 自研时每个模型单独结算：成功收费、确认失败不收、结果未知只冻结这一个模型。Fusion 只有整次总费用，Master Plan 只好为它另写一套整体结算规则。
 3. **失败看得见。** Fusion 配错一个模型就整次失败；Chat Completions 下失败还会被外层模型掩盖；客户端超时会收费却没有编号可以对账。
 4. **多出来的工作量不大。** FUSION-COMPARE 本来就要做"多个模型并行、一个运行单、部分结算"。评审自研只是在这个基础上加一个汇总调用和轮数控制。
 5. **Fusion 的优点**是一次请求完成，自带结构化分析，强模型评审团 56 秒。这些自研也能做到：并行调用加一次汇总，耗时取决于最慢的那个模型。
 
-如果 Owner 仍然想优先用 Fusion，最低条件是：
+如果 Owner 愿意放宽 D12、允许评审联网，Fusion 才能用。最低条件：
 
-- 专用 workspace 补测时，3 次都没有网页引用；
 - 改用 Responses 接口；
 - 只用强模型评审团；
-- 接受"只有整次总费用"和"超时后不能对账"这两个限制。
+- 接受"联网次数和单个模型费用看不到"和"超时后不能对账"这两个限制。
+
+这属于推翻已有的产品决定，要 Owner 明确同意。
 
 ## 5. 顺带发现的问题（不在本任务范围，记下来交总控）
 
@@ -134,6 +160,6 @@ NODE_USE_ENV_PROXY=1 node summarize.mjs schema anthropic/claude-haiku-5.5 3
 node sanitize.mjs                                       # 提交前清除账号标识
 ```
 
-换成评审专用 workspace 的密钥：在命令前加 `PROBE_KEY_FILE=fusion-review.env PROBE_KEY_VAR=<变量名>`。
+换成评审专用 workspace 的密钥：在命令前加 `PROBE_KEY_FILE=fusion-review.env PROBE_KEY_VAR=OPENROUTER_API_KEY`。`probe.mjs ask_search` 会明确要求评审团联网，用来检验关闭是否生效。
 
 在中国大陆的网络下，Anthropic 模型会被地区限制拦住，所以要设 `NODE_USE_ENV_PROXY=1`，让 Node 走本机代理。

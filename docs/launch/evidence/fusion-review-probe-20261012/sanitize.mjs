@@ -12,6 +12,8 @@ function scrub(v) {
   if (v && typeof v === 'object') {
     return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, KEYS.has(k) && x ? '<redacted>' : scrub(x)]));
   }
+  // 错误信息字符串里也可能嵌着 OpenRouter 用户编号
+  if (typeof v === 'string') return v.replace(/user_[A-Za-z0-9]{16,}/g, '<redacted>');
   return v;
 }
 

@@ -1,0 +1,33 @@
+{
+  "mode": "schema",
+  "model": "anthropic/claude-haiku-5.5",
+  "at": "2026-10-12T12:40:19.322Z",
+  "results": [
+    {
+      "i": 0,
+      "status": 200,
+      "ms": 22494,
+      "cost": 0.0027486,
+      "finish": "stop",
+      "provider": "Azure",
+      "out_tokens": 4888,
+      "ok": true,
+      "errs": [],
+      "error": null,
+      "report_chars": 1567
+    },
+    {
+      "i": 1,
+      "status": 200,
+      "ms": 28887,
+      "cost": 0.0037976,
+      "finish": "stop",
+      "provider": "Azure",
+      "out_tokens": 6986,
+      "ok": true,
+      "errs": [],
+      "error": null,
+      "report_chars": 1582
+    }
+  ]
+}
