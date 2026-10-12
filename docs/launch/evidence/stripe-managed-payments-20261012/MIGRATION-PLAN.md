@@ -100,6 +100,8 @@ MP 只在官方列出的 80 多个国家代收代缴税（具体国家清单以�
 1. **首次付款不能发两次**（PR-3）：MP 首次付款会同时产生 `checkout.session.completed` 和首张发票的 `invoice.paid` / `invoice.payment_succeeded`（证据 `02d`）。首次付款只由结账完成事件走 `pay_waffo_fulfill_payment`；新的续费处理只认 `billing_reason=subscription_cycle` 的发票，`subscription_create` 的发票只做核对、不发放；`invoice.paid` 和 `invoice.payment_succeeded` 按发票 ID 去重；`subscription_update`（我们不用原地升级，正常不会出现）出现时转人工，不自动发放。测试要覆盖"两个事件都到、到达顺序不同、重复投递"。
 2. **"税另外加"要改整条金额计算**（PR-2）：`purchaseFacts.ts:39-45` 的 `snapshotAmountDue()` 现在遇到 `tax_behavior='exclusive'` 会直接报错，建结账请求、派发和发票核对都会用到它。要定义一个"税前应收金额"的计算方式，并把建请求、派发核对、首次付款核对、续费发票核对都改成一致的口径，不能只改 `purchaseFacts.ts:56` 那一处。
 3. **派发核对要认得服务端选定的优惠券**（PR-2）：`dispatchStripeCheckoutIntent` 现在把所有打折订单都当成内联 `price_data`，看到 `line_items[0].price` 就报 `PAY_COMMON_CHECKOUT_REQUEST_INVALID`。要允许"订阅价格 + `discounts:[{coupon}]`"这一种形状，并核对优惠券就是价格映射表里这个套餐当前的首月优惠券，其他任何折扣仍然拒绝。
+4. **银行卡结账失败或过期要收口**（PR-3）：结账会话过期，或者发出 `checkout.session.async_payment_failed` 时，现在也会落进只支持钱包的 `recoverWalletCheckout`，银行卡订单会报错，而现有的关单 RPC 只认钱包和 Waffo 银行卡。结果是没付钱的订单一直处于"预留"状态：用户再下单会碰到 `PAY_WAFFO_PURCHASE_PENDING`，创始名额也会一直被占着。要给 `card` / `card_cn` 补上失败和过期的关单处理（复用 `pay_waffo_observe_qualification` 的 `closed_unpaid` 口径），并补测试。
+5. **每日对账要真的去 Stripe 核对**（PR-3）：现在 04:00 的对账（`billing-reconcile/route.ts:53-58`）只检查本地账本，只对 Waffo 去供应商那边扫描（`waffoReconciliation.ts:48-49` 写死了 `channel='waffo'`）。如果 MP 付款成功但回调丢了，没有任何地方能发现"付了钱没开通"。要增加一个按页扫描 Stripe 银行卡结账会话和发票的对账，发现已付未开通的订单就补处理或转人工，并补失败场景的测试。注意避开 #832 对同一个对账入口的改动（等它合并后再改）。
 
 ## 三、规则怎么对应到 Stripe
 
