@@ -8,10 +8,10 @@ import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { reserve } from './budget.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const API = 'https://openrouter.ai/api/v1';
-const BUDGET_STOP_USD = 2.0; // 本任务上限
 
 function loadKey() {
   const raw = readFileSync(join(homedir(), '.graylum/secrets', process.env.PROBE_KEY_FILE ?? 'payg-profile.env'), 'utf8');
@@ -131,8 +131,8 @@ async function main() {
   mkdirSync(outDir, { recursive: true });
 
   const usageBefore = await getKeyUsage();
-  const spentSoFar = Number(readFileSync(join(HERE, 'runs', '.spent'), { flag: 'a+' }).toString() || 0);
-  if (spentSoFar >= BUDGET_STOP_USD) throw new Error(`budget reached: ${spentSoFar}`);
+  // 便宜评审团一次实测约 0.003–0.04 美元，按 0.15 美元预留
+  await reserve(headers, process.env.PROBE_KEY_FILE ?? 'payg-profile.env', 0.15);
 
   const body = SCENARIOS[name]();
   const ctrl = new AbortController();
@@ -198,7 +198,6 @@ async function main() {
   await new Promise((res) => setTimeout(res, name === 'client_timeout' ? 90000 : 5000));
   const usageAfter = await getKeyUsage();
   const keyDelta = usageBefore != null && usageAfter != null ? usageAfter - usageBefore : null;
-  writeFileSync(join(HERE, 'runs', '.spent'), String(spentSoFar + (keyDelta ?? 0)));
 
   const requestEcho = { ...body, messages: body.messages.map((m) => ({ role: m.role, chars: m.content.length })) };
   const out = { scenario: name, tag, startedAt: new Date(t0).toISOString(), elapsedMs, status, error,

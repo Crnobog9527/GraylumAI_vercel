@@ -1,0 +1,5 @@
+{
+  "taskLimitUsd": 2,
+  "recordedSpendUsd": 0.63,
+  "note": "FUSION-REVIEW 实测（2026-10-12）。每次补测后把实际花费加到 recordedSpendUsd，再提交。"
+}

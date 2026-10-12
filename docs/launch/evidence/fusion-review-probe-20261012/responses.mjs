@@ -6,6 +6,7 @@ import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { reserve } from './budget.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const raw = readFileSync(join(homedir(), '.graylum/secrets', process.env.PROBE_KEY_FILE ?? 'payg-profile.env'), 'utf8');
@@ -40,6 +41,9 @@ const body = {
   max_output_tokens: 3000,
 };
 
+// 强模型默认评审团一次约 0.14 美元（样例报告），按 0.5 美元预留；便宜评审团按 0.15 美元预留
+const authHeaders = { Authorization: `Bearer ${KEY}` };
+await reserve(authHeaders, process.env.PROBE_KEY_FILE ?? 'payg-profile.env', defaultPanel ? 0.5 : 0.15);
 const t0 = Date.now();
 const ctrl = new AbortController();
 const timer = setTimeout(() => ctrl.abort(), scenario === 'client_timeout' ? 20000 : 600000);

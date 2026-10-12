@@ -6,6 +6,7 @@ import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { reserve } from './budget.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const raw = readFileSync(join(homedir(), '.graylum/secrets', process.env.PROBE_KEY_FILE ?? 'payg-profile.env'), 'utf8');
@@ -124,6 +125,9 @@ async function once(mode, model, i) {
 
 const [mode, model, nStr] = process.argv.slice(2);
 const n = Number(nStr ?? 3);
+if (!Number.isInteger(n) || n < 1 || n > 5) throw new Error('count must be 1–5');
+// Sonnet 一次约 0.055 美元，按每次 0.1 美元预留；全部预留成功后才并发发出
+for (let i = 0; i < n; i += 1) await reserve({ Authorization: `Bearer ${KEY}` }, process.env.PROBE_KEY_FILE ?? 'payg-profile.env', 0.1);
 const results = await Promise.all(Array.from({ length: n }, (_, i) => once(mode, model, i)));
 mkdirSync(join(HERE, 'runs'), { recursive: true });
 const file = join(HERE, 'runs', `summarize-${mode}-${model.replace(/\W+/g, '_')}.json`);
