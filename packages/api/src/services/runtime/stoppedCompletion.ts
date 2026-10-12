@@ -12,6 +12,7 @@ import { executorRpc, type RuntimeExecutorOptions } from './executorRpc';
 import type { authoritativeBilling } from '../bill2/service';
 import type { RuntimeExecution } from './paygResume';
 import type { RuntimeProgress } from './progress';
+import { runtimeIdentityGuard } from '../modelIdentity/runtimeGuard';
 
 type StopCall = {sequence:number;requestHash:string;phase:string;dispatched:boolean;settled:boolean;responsePending?:boolean};
 export type StopExecution = RuntimeExecution & {
@@ -114,6 +115,8 @@ export function stoppedCompletion(options: RuntimeExecutorOptions, billing: Retu
     const summary=organized?.model===context.attachedOrganizer?.model&&organized?.choices?.length===1
       &&organized.choices[0]?.finish_reason==='stop'&&!terminalAgentReplyFailure(organized,true)
       ?organized.choices[0]?.message?.content:undefined;
+    // MODEL-IDENTITY-GUARD: the stop position counts the redacted text the client was shown.
+    body=(await runtimeIdentityGuard(options.database)).body(body);
     let result=valid?stoppedResult({executionId,format:agent?'agent':step?'step':'plain',body,
       appendCard:Boolean(context.mentorText),stopAt:execution.stop!.stopAt,source:execution.stop?.source,expectedSource:source,
       capacityLimited,primaryComplete:choice?.finish_reason!=='length',attachedOrganizer:Boolean(context.attachedOrganizer),

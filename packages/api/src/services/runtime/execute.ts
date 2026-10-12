@@ -42,6 +42,7 @@ import { withPrimaryAddenda } from './primaryInstructions';
 import { callBillingUnit } from './billingUnitAdmission';
 import type {GateRejection} from './newWorkGate';
 import {allowedOutput} from './moderation';
+import {runtimeIdentityGuard} from '../modelIdentity/runtimeGuard';
 export function runtimeExecutor(options:RuntimeExecutorOptions){
  if(typeof options.callGate!=='function')throw new Error('RUNTIME_CALL_GATE_REQUIRED');
  const budget=options.budget??createRuntimeBudget();
@@ -112,7 +113,9 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
   // B2a: once BILL2 reports a confirmed erasure, nothing more reaches the client.
   let accountClosed=false;
   const closed=():never=>{accountClosed=true;throw new Error('RUNTIME_ACCOUNT_CLOSED');};
-  const progress=progressEmitter(onProgress,()=>budget.timing?.mark('firstValidContent'),()=>accountClosed);
+  // MODEL-IDENTITY-GUARD layer 3: self-identification in streamed and stored replies becomes the brand reply.
+  const identity=await runtimeIdentityGuard(options.database);
+  const progress=identity.progress(progressEmitter(onProgress,()=>budget.timing?.mark('firstValidContent'),()=>accountClosed));
   const normalized=context.providerRequestFormat==='serial-tools-v2'||context.providerRequestFormat==='serial-tools-v6-reasoning'||streaming;
   const historyChecked=historyGuard(executionId,code=>{preflightFailure=code;});
   try{
@@ -364,6 +367,7 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
     if(!native&&turn.card)progress({type:'card',card:turn.card});
    }
    let turnMetadata:Record<string,unknown>=turn?{truncated:turn.truncated}:{};
+   body=identity.body(body);
    if(native){
     const fitted=prepareNativePrimary(body,turnMetadata,{envelopeOrder:context.envelopeOrder,appendCard:Boolean(context.mentorText),
       length:primaryLength,attachedOrganizer:Boolean(context.attachedOrganizer),executionId});

@@ -22,21 +22,23 @@ export const modelIdentityGuardUpdateSchema = z.object({
   expectedRevision: z.number().int().min(0).max(9999999998),
 }).strict();
 export type ModelIdentityGuard = z.infer<typeof storedSchema>;
+/** Any client with a Supabase-style rpc (service-role client or the runtime executor database). */
+export type GuardReader = { rpc(name: string, args: Record<string, unknown>): PromiseLike<{ data: unknown; error: unknown }> };
 
 function unavailable(): never {
   throw new TRPCError({ code: 'SERVICE_UNAVAILABLE', message: 'MODEL_IDENTITY_GUARD_UNAVAILABLE' });
 }
 
-export async function readModelIdentityGuard(db: SupabaseClient): Promise<ModelIdentityGuard> {
+export async function readModelIdentityGuard(db: SupabaseClient | GuardReader): Promise<ModelIdentityGuard> {
   try {
-    const { data, error } = await db.rpc('model_identity_guard_config');
+    const { data, error } = await (db as GuardReader).rpc('model_identity_guard_config', {});
     if (error) return unavailable();
     return storedSchema.parse(data);
   } catch { return unavailable(); }
 }
 
 /** For user-facing paths: any read failure keeps the protection on. */
-export async function modelIdentityGuardEnabled(db: SupabaseClient): Promise<boolean> {
+export async function modelIdentityGuardEnabled(db: SupabaseClient | GuardReader): Promise<boolean> {
   try { return (await readModelIdentityGuard(db)).enabled; }
   catch {
     logger.error('security', 'model_identity_guard_read_failed_kept_on', {});
