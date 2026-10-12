@@ -18,8 +18,9 @@
 | L4 | 数据库里的日志表 | staging 只读计数（2026-10-12）：`application_logs` 0 行；`user_activity_logs` 22 行，最早 09-26；`diagnostic_results` 390 行，最早 **09-14**；`ai_usage_logs` 309 行，最早 09-26；`scheduled_job_runs`（定时任务执行记录，含错误和任意 `summary`）15 行，最早 09-30 | — | **缺口**：0148 删掉了 `cleanup_old_logs` 以后，没有任何通用的日志定期清理；staging 上 pg_cron、pg_net 都没装。`diagnostic_results` 已经存了 28 天，再过两天就超过 30 天。`user_activity_logs`（管理员访问用户的审计记录）和 `scheduled_job_runs`（0017，只追加、没有任何删除路径）也没有到期清理。`ai_usage_logs` 属于账务，注销时清正文、按 3 年账务保留，不算日志 | 需要新开任务：给日志表加到期清理（复用现有的每日 cron 路由，不新建调度），哪些表算日志、保留多久按 E7 定 |
 | L5 | Supabase Storage 文件的备份 | 未核实 | 数据库备份不含 Storage 文件 [S8]；Storage 自身是否另有备份，公开资料未写 | 未核实。需要问 Supabase 或看套餐说明 | 上线前核对 |
 | L6 | Vercel 运行日志（函数 stdout/stderr） | staging 为 Hobby（EXECUTOR.md 记录）。正式未核实。Log Drains：staging 团队查询返回 404，没有看到已配置的转存 | Hobby 1 小时、Pro 1 天、Enterprise 3 天；Observability Plus 30 天 [S7] | Hobby/Pro 都在 30 天以内。买 Observability Plus 正好 30 天。**以后加 Log Drains 会把日志转到第三方，必须先补那一家的保留期** | 升级 Pro 时确认没有开超过 30 天的附加项 |
-| L7 | Vercel 构建日志 | 每次部署都有 | 构建日志随部署长期保存（Vercel 社区和文档的说法） | 构建日志里不应有用户数据（构建时不读用户数据）；**未逐条核实**，当作低风险记在这里 | — |
+| L7 | Vercel 构建日志 | 每次部署都有 | 构建日志随部署长期保存（Vercel 社区和文档的说法） | **缺口**：E7 没有给构建日志开例外。构建时不读用户数据，内容风险低，但保留期超过 30 天。需要 Owner 决定：给构建日志开明确例外，或者定期删除旧部署 | Owner 决定 |
 | L8 | Vercel Analytics | 是否启用未核实 | 默认聚合，session hash 24 小时 [S11] | 自定义事件里不能放用户正文 | 前端改动时注意 |
+| L8b | Vercel Speed Insights | `apps/web/src/app/layout.tsx` 在 Vercel 的生产模式部署里挂了 `@vercel/speed-insights`，会上报真实用户的性能数据 | 保留期未查到 | 未核实：项目里是否已启用、保留多久、数据里有没有页面完整网址 | 上线前核对 |
 | L9 | Sentry 错误事件、性能追踪、会话回放 | staging 项目设了 `NEXT_PUBLIC_SENTRY_DSN`、`SENTRY_ORG/PROJECT`，所以**staging 已经在上报**。代码：服务端和 edge 的 `beforeSend` 只在开发环境丢弃，**不做脱敏**；浏览器回放 `maskAllText`、`blockAllMedia` 已开；没有设置 `sendDefaultPii`（SDK 默认不带 IP 和 cookie）。还有一个 `SENTRY_OTLP_TRACES_URL` 变量，代码里没找到引用 | 错误事件：Developer 30 天，Team 和 Business 90 天，按上报时的套餐计算 [Sentry 文档]；部分备份最多 90 天 [S11] | **缺口**：Team 及以上的 90 天超过 E7；Developer 是 30 天。错误信息里可能带用户输入（比如异常信息里拼了正文），目前没有统一脱敏。`SENTRY_OTLP_TRACES_URL` 是不是被平台集成读取、发出去的追踪里有没有提示词，未核实 | Owner 决定 Sentry 套餐（超过 30 天要 Owner 决定）；脱敏 `beforeSend` 另开代码任务；OTLP 变量由总控核实用途 |
 | L10 | Upstash Redis（限流） | staging 变量里有 `UPSTASH_REDIS_REST_URL/TOKEN` 和 `REDIS_URL`。限流键里带用户编号，比如 `account-erasure:<用户编号>`。`apps/web/src/lib/rateLimit.ts` 和 `packages/api/src/services/redisRateLimiter.ts` 的限流器都开了 `analytics: true` | 限流计数键按窗口过期；但 `@upstash/ratelimit` 2.0.8 的 analytics 会把传入的标识（含用户编号）写进统计桶，库里写死保留 `90d`。Upstash 控制台审计日志记录的是账号操作，免费库 7 天、按量 30 天、Pro 1 年 | **缺口**：analytics 统计里的用户编号保留 90 天，超过 E7，注销也不会删它。需要关掉 analytics，或者改成不带用户编号的标识，或者在 30 天内清掉 | 新开代码任务（见缺口汇总第 6 条） |
 | L11 | 邮件（Resend，作为 Supabase Auth 的 SMTP，Tokyo 区） | 用于验证码和找回密码邮件 | Resend 定价页：各套餐"数据保留 30 天"（2026-10-12 读取） | 在 30 天以内。已经发到用户邮箱的邮件我们删不掉 | — |
@@ -40,6 +41,7 @@
 | --- | --- | --- | --- | --- | --- |
 | OpenRouter | 提示词、回答（经它转发给模型供应商） | 默认不记录提示词和回答，但保留用量、延迟等元数据；每个模型线路的政策不同 [S1] | 账号设置里的数据政策；联系 OpenRouter 支持 | 注销清除提示词和回答，账务只留调用编号和费用（已实现） | 每次调用已记供应商编号；对外删除请求按下方模板记录 |
 | 各模型供应商（经 OpenRouter） | 同上 | 各线路自己的保留期，不训练不等于不保存 [S1] | 一般只能经 OpenRouter 申请；直接联系各家需要单独核实 | 同上 | **缺口**：RUNTIME-PROD 要求每个启用线路记官方政策链接、读取日期、保留期和联系渠道，目前还没有这张表 |
+| Google（直连 Gemini） | 旧对话链路（`apps/web/src/app/api/ai/stream/route.ts`）在模型的供应商设为 `google` 时，会绕过 OpenRouter，把完整对话和系统提示直接发给 `generativelanguage.googleapis.com` | 未核实（取决于用的是哪种 Google API 条款） | 未核实 | 同 OpenRouter：注销清除我们这边的提示词和回答 | **缺口**：这条直连线路不在 OpenRouter 的政策范围里。要么在后台禁止启用 `google` 直连供应商，要么先把它的保留期和删除渠道记进模型线路政策表；旧链路按 LEGACY-CLOSE 下线后这一行可以删掉 |
 | TikHub | 查询词、链接 | API 使用日志 12 个月；账号终止后资料 90 天；支付记录 7 年 [S2] | 隐私政策里的联系邮箱 | 注销时删掉查询、链接和返回的证据（研究证据接入注销是 RESEARCH-TOOLS 的验收项） | 12 个月超过 E7，但这是对方保存 Graylum 账号的调用日志，我们只能申请；申请结果记录下来 |
 | Parallel | 搜索的问题和目标 | Search 产品标明零保留、不训练；账号、IP、客服资料另按业务需要保留，没有固定天数 [S3] | 隐私政策联系渠道 | 同上 | 核实我们用的线路是否适用零保留 |
 | Firecrawl | 抓取的网址和结果 | 个人信息一般保留到书面删除请求为止；零保留只在企业版 [S4] | 书面删除请求 | 删掉抓取的网址、结果、截图和缓存 | 普通接口不能当成自动清除 |
@@ -70,11 +72,12 @@
 1. **日志表没有定期清理**（L4）：`diagnostic_results` 已存 28 天，`user_activity_logs`、`scheduled_job_runs` 也没有到期清理。建议新开一个小任务，复用每日 cron 加日志到期清理。
    注意 cron 每天只跑一次：如果按"超过 30 天就删"写，刚跑完那一刻写入的行最多会留将近 31 天。删除线要设在 29 天（留出一天的运行间隔），或者提高运行频率。
 2. **Sentry**（L9）：服务端上报前不做脱敏；Team 及以上套餐保留 90 天，超过 E7。套餐要 Owner 决定；脱敏是代码任务。`SENTRY_OTLP_TRACES_URL` 的用途待核实。
-3. **模型线路政策表**还没有（清单二）。
+3. **模型线路政策表**还没有（清单二）；旧对话链路的 Google 直连也不在 OpenRouter 范围里，要么禁止启用，要么补政策。
 4. **正式环境**的 Supabase 套餐、备份、PITR、日志窗口都未核实（L1–L3），等正式库建好后只读核对。
 5. **从备份恢复后重放删除**：缺一份存在数据库以外的最小删除清单（否则备份之后才注销的账号、才删除的对话和文档会被恢复出来；单条删除要记删除类型和目标编号），整个流程也没有演练（T15/T16）。
 6. **Upstash 限流 analytics**（L10）：统计里的用户编号保留 90 天，注销不删。要关掉 analytics、改用不带用户编号的标识，或者 30 天内清掉。
 7. **hCaptcha** 技术数据最长保留一年（清单二），超过 E7，要 Owner 决定怎么处理。
+8. **Vercel 构建日志**长期保存（L7），要 Owner 决定开例外还是定期删旧部署；**Speed Insights**（L8b）未核实。
 
 ## 公开资料补充（2026-10-12 读取）
 
