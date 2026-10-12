@@ -215,6 +215,7 @@ Owner 2026-10-12 决定：博客用仓库内文章实现，不接外部系统。
 | 支付回调 | `waffoCheckout.ts`、`stripeCheckoutIntent.ts` 的 successUrl 从请求 origin 拼，自动跟随；Waffo / Stripe 后台 webhook 主机**先**改成 www（路径不变），再切域名；用带请求体的 POST 实测 app 域跳转后方法和内容不变 | 正式环境属 §1；staging 由 AI 改 |
 | Supabase Auth | Site URL 改 www；Redirect URLs 加 `https://www.graylum.com/**`、删 app 域；邮件模板不改；Google OAuth 不改 | 正式环境属 §1；staging 由 AI 改 |
 | Vercel | 两个域名已在同一项目；撤掉 Owner 手动加的 `www → app` 临时 307（第 8.5 节、#614） | 正式环境属 §1 |
+| 正式切换顺序 | 两条跳转方向相反，同时存在会无限循环。顺序必须是：① 取得 Owner 对正式环境设置的批准；② 撤掉 Vercel 的 `www → app` 307，并实测 `www.graylum.com` 不再跳到 app；③ 之后才让 `app → www` 和裸域 → www 的 308 在正式环境生效。代码里的这两条跳转用开关控制（默认关闭），确认第 ② 步完成后再打开；staging 不受影响，可先开着测 | 正式环境属 §1 |
 | 测试 | `proxy-hostname / proxy-auth / proxy-auth-landing / proxy-pricing / site-config / authLanding.gotrue` 6 个单测和 `production-stripe-smoke.spec.ts` | ordinary |
 
 建议拆两个 PR：① proxy / site-config / 路由前缀（high）；② robots / noindex / redirect / sitemap（ordinary）。
