@@ -56,6 +56,7 @@ it('does not expose internal database errors', async () => {
 });
 it('validates sizes and forbids a forged actor', () => {
   expect(revisionProposeInput.safeParse({ ...proposal, body: '😀'.repeat(12000) }).success).toBe(true);
+  expect(revisionProposeInput.safeParse({ ...proposal, fields: { a: { who: '😀'.repeat(400) } } }).success).toBe(true);
   for (const change of [{ body: '😀'.repeat(12001) }, { actorId: randomUUID() }, { fields: { a: { who: 'x'.repeat(401) } } },
     { fields: { a: { who: '' } } }, { fields: { a: { who: 1 } } }]) {
     expect(revisionProposeInput.safeParse({ ...proposal, ...change }).success).toBe(false);

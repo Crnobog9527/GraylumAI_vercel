@@ -11,8 +11,9 @@ import { isEmailVerified } from '../../lib/auth';
  */
 const uuid = z.string().uuid();
 const draft = z.object({ draftId: uuid });
-/** stepId -> fieldId -> proposed value. Only fields the revision changes need to be present. */
-const revisionFields = z.record(z.string().min(1).max(128), z.record(z.string().min(1).max(128), z.string().min(1).max(400)));
+/** stepId -> fieldId -> proposed value, at most 400 characters (code points, as the database counts). */
+const revisionFields = z.record(z.string().min(1).max(128), z.record(z.string().min(1).max(128),
+  z.string().min(1).refine(value => [...value].length <= 400)));
 export const revisionProposeInput = draft.extend({
   requestId: uuid,
   sourceVersionId: uuid,
