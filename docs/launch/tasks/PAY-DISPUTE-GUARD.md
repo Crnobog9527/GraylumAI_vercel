@@ -51,7 +51,7 @@
 | --- | --- |
 | `charge.dispute.created` | 找到对应订单（4.2）→ 写拒付记录 → 冻结（4.3）→ 停止续费（4.4）→ Sentry 告警给 Owner（含举证截止日 `evidence_details.due_by`）→ 站内提示用户 |
 | `charge.dispute.updated` | 更新状态和截止日；如果冻结和停续费还没做（例如 `created` 延迟或丢失），先补做同一套冻结和停续费 |
-| `charge.dispute.funds_withdrawn` / `funds_reinstated` | 只记账务事实（钱被银行扣走 / 退回），不改冻结 |
+| `charge.dispute.funds_withdrawn` / `funds_reinstated` | 在资金流水里各记一行（金额、时间、结算交易编号，按事件编号去重），不改冻结 |
 | `charge.dispute.closed`（`won` / `lost` / `warning_closed`） | 记结果并告警；冻结和停续费还没做的先补做；**冻结保持**，等管理员处理：赢了由管理员点"撤回冻结"（本任务提供），输了的扣回等 CHARGEBACK（上线前由 Owner 人工按记录 Z/AC 处理） |
 
 - 去重：拒付记录按 Stripe 拒付编号唯一；每个动作按"拒付编号 + 动作"做幂等键（沿用 `credit_transactions.idempotency_key` 的做法），重复或乱序到达不会冻两次。
@@ -62,6 +62,9 @@
   **人工退款也用这把锁**：`pay_common_monthly_refund_claim`（把来源改成 `reversed`）和退款失败后的恢复 `pay_common_monthly_refund_finish`（0194:152-159，把积分加回、来源改回 `granted`）
   都先取同一把付款级锁，拿到锁后再查有没有拒付：claim 时已有拒付就拒绝退款；退款失败恢复时如果中途来了拒付，就把来源恢复成"拒付冻结中"、
   加回的积分计入冻结额，而不是恢复成可用的 `granted`。
+  **外部退款（Link 代退款、后台直接退款，`charge.refunded` / `refund.*`）也用这把锁**：处理器拿到锁后先查这笔付款是否冻结中；
+  是的话在同一事务里把冻结额直接转成退款扣回（冻结账目标为"已被退款取代"，不再另扣一次），并认得"拒付冻结中"的来源状态、不因此报错。
+  这个处理器由 MP 窗口在 PR-3 写；PR-D1 合并时由本任务把加锁和冻结转换补进去（MP 窗口届时已停写；没停写就请它顺带加）。
 - 找不到对应订单：拒付记录写成"待匹配"并告警，回调返回 200。Stripe 不保证事件顺序（[官方说明](https://docs.stripe.com/webhooks#event-ordering)），
   对应的付款或续费可能还没处理完，所以"待匹配"不是终点：之后每次收到这个拒付的 `updated` / `closed`，以及每天 04:00 的 `billing-reconcile`，
   都重新查找订单，找到后立即补做冻结和停续费（同样按幂等键，不会冻两次）。只有管理员核实确属站外付款（或订单已按退款结束）后才把它标成"已结案"；
@@ -134,6 +137,8 @@ PAY-WAFFO 方案原定每天用 GraphQL `chargebacks` 查询，但：Waffo 已�
 
 `payment_disputes`：`id`、`provider`、`provider_dispute_id`（唯一）、`provider_charge_id`、`provider_payment_intent_id`、`provider_invoice_id`（能取到的都存；付款级锁、付款回调认领和每日重查都用这几个编号对上，不靠金额）、`order_id`、`subscription_id`、`amount`、`currency`、`reason`、`status`、
 `evidence_due_by`、`opened_at`、`closed_at`、`outcome`、`freeze_state`（冻结中 / 已撤回 / 已被退款取代）、`renewal_stop_state`。
+资金动作另记一张流水 `payment_dispute_fund_events`（每个事件一行）：拒付编号、动作（被银行扣回 / 返还）、金额、币种、发生时间、
+Stripe 的结算交易编号和事件编号（唯一，防重复）。`funds_withdrawn` 和 `funds_reinstated` 都写这里，不覆盖拒付主记录，三年后仍能说清钱是怎么走的。
 **为什么要新表**（AGENTS 第 5 节）：现在没有任何地方记拒付；冻结要能撤回，就必须有一条能对上"冻了谁、冻了多少、撤回没有"的记录。
 这是账务记录，按 3 年保留，只存白名单字段（不存原始事件全文、不存原因描述以外的自由文本）。
 
@@ -163,6 +168,8 @@ PAY-WAFFO 方案原定每天用 GraphQL `chargebacks` 查询，但：Waffo 已�
 - **并发**：拒付和续费发票（`invoice.paid`）、拒付和 Link 代退款（`charge.refunded`）同时到达 → 不重复扣、不漏冻，按 4.5 的结果；
   用户正在消耗积分时同时冻结、同时撤回 → 冻结量等于当时真实剩余、撤回不会还回已消耗的部分，余额前后能对上。
 - **在途调用**：调用先预扣（绑定到这个来源）→ 拒付冻结 → 调用失败退回 / 少扣结算 → 退回的积分回到原来源并计入冻结额，其他来源不变、总数对得上。
+- **资金扣回和返还**：先 `funds_withdrawn` 再 `funds_reinstated`、重复投递 → 流水里正好两行，金额和时间都对。
+- **外部退款和拒付同时处理**：`charge.refunded` 和 `charge.dispute.created` 同时到达 → 无论先后，同一笔积分只收回一次，冻结账目和退款扣回不重复。
 - **退款中途来拒付**：人工退款已 claim → 拒付到达 → Stripe 退款失败、执行恢复 → 来源变成冻结中，积分不变成可用。
 - **按月发放和冻结同时发生**：发放任务已选中某一期、同时拒付冻结 → 这一期不发出，或发出后计入冻结额，不会变成可用余额。
 - **整轮补偿**：预扣并结算 → 拒付冻结 → 整轮确认失败走 PAYG 补偿 → 补偿成功、不报 `BILL2_COMPENSATION_GRANT_UNRESOLVED`，补回的积分计入冻结额。
