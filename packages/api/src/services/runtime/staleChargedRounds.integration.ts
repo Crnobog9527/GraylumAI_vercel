@@ -84,9 +84,11 @@ async function chargedOpenRound(ageMs: number) {
     p_request_id: context.request.requestId, p_payload: context, p_billing: billing });
   const host = runtimeExecutor({ database: service, actor: async () => actor, callGate: async () => ({ ok: true as const }), endpoint });
   expect(await host.execute(admitted.executionId)).toMatchObject({ state: 'waiting_credits' });
-  // The round fails on our side and is left interrupted, as an unclassified exception leaves it.
+  // The round fails on our side and is left interrupted, as an unclassified exception leaves it:
+  // no pause of its own (the fixture's credit wait is cleared), an earlier call already charged.
   await db.query("update runtime_executions set state='interrupted',created_at=now()-($2::bigint*interval '1 millisecond') where id=$1",
     [admitted.executionId, ageMs]);
+  await db.query('update bill2_runs set paused_reason=null where id=$1', [admitted.runId]);
   return { actor, host, sessionId: session.sessionId as string, executionId: admitted.executionId as string,
     runId: admitted.runId as string };
 }
@@ -159,12 +161,14 @@ it('RUNTIME: two concurrent compensations refund once', async () => {
 
 it('RUNTIME: compensation refuses rounds that are not eligible and changes nothing', async () => {
   const recent = await chargedOpenRound(0), stopped = await chargedOpenRound(2 * STALE_ROUND_AGE_MS);
-  const unknown = await chargedOpenRound(2 * STALE_ROUND_AGE_MS);
+  const unknown = await chargedOpenRound(2 * STALE_ROUND_AGE_MS), unfunded = await chargedOpenRound(2 * STALE_ROUND_AGE_MS);
   await db.query("update bill2_runs set paused_reason='user_stop' where id=$1", [stopped.runId]);
+  // A balance shortage left before waiting_credits was saved is user-side too.
+  await db.query("update bill2_runs set paused_reason='insufficient_credits' where id=$1", [unfunded.runId]);
   // A dispatched call without a settlement belongs to financial recovery.
   await db.query('update bill2_calls set settled_at=null where run_id=$1', [unknown.runId]);
   const reportIds = ids(await reported());
-  for (const round of [recent, stopped, unknown]) {
+  for (const round of [recent, stopped, unknown, unfunded]) {
     expect(reportIds).not.toContain(round.runId);
     const before = await ledger(round);
     await expect(compensateStaleRound(service, round.runId)).rejects.toThrow('STALE_ROUND_NOT_ELIGIBLE');
@@ -183,4 +187,12 @@ it('RUNTIME: every filter applies before the limit and total counts all matches'
   expect(page.total).toBe(all.total);
   expect(page.rounds).toHaveLength(1);
   expect(page.rounds[0]).toEqual(all.rounds[0]);
+}, 60000);
+
+it('RUNTIME: a round whose account was later banned can still be compensated', async () => {
+  const round = await chargedOpenRound(2 * STALE_ROUND_AGE_MS);
+  await db.query("update profiles set status='banned' where id=$1", [round.actor]);
+  expect(ids(await reported())).toContain(round.runId);
+  expect(await compensateStaleRound(service, round.runId)).toMatchObject({ state: 'compensated', compensatedCredits: 3 });
+  expect(await ledger(round)).toMatchObject({ credits: 100, ledger: 100, compensations: 1, run_state: 'refunded' });
 }, 60000);

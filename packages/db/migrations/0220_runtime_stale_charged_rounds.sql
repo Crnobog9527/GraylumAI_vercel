@@ -39,8 +39,10 @@ BEGIN
   FROM runtime_executions e JOIN bill2_runs r ON r.id=e.billing_run_id
   WHERE e.state IN ('prepared','running','interrupted') AND e.created_at<p_cutoff
    AND r.contract_version='bill2.v2' AND NOT r.closed AND NOT r.cancel_requested
-   -- A round the user stopped is user-side, never a Graylum failure to refund.
-   AND r.paused_reason IS DISTINCT FROM 'user_stop'
+   -- Any pause (user stop, insufficient credits, a resumable HTTP budget) is user-side or
+   -- resumable, never a Graylum failure to refund. Erased accounts belong to erasure recovery.
+   AND r.paused_reason IS NULL
+   AND EXISTS(SELECT 1 FROM profiles p WHERE p.id=e.actor_id AND p.is_deleted='false')
    AND NOT EXISTS(SELECT 1 FROM bill2_calls c WHERE c.run_id=r.id
      AND c.dispatched_at IS NOT NULL AND c.settled_at IS NULL AND NOT c.provider_rejected)
  ), found AS (
@@ -69,7 +71,8 @@ BEGIN
   RAISE EXCEPTION 'STALE_ROUND_CUTOFF_INVALID' USING ERRCODE='22023';END IF;
  SELECT * INTO e FROM runtime_executions WHERE billing_run_id=p_run_id;
  IF e.id IS NULL THEN RAISE EXCEPTION 'STALE_ROUND_NOT_FOUND' USING ERRCODE='P0002';END IF;
- PERFORM bill2_actor(e.actor_id);
+ -- No active-user admission: a later disabled or banned account is still owed its refund;
+ -- bill2_close/bill2_finalize support restricted actors. Erased accounts stay with erasure recovery.
  -- Same lock order as runtime_execution: Session, execution, run.
  SELECT * INTO s FROM runtime_sessions WHERE id=e.session_id FOR UPDATE;
  SELECT * INTO e FROM runtime_executions WHERE id=e.id FOR UPDATE;
@@ -79,7 +82,8 @@ BEGIN
   RETURN jsonb_build_object('state','already_compensated','runId',b.id,'executionId',e.id,'actorId',e.actor_id,
    'executionState',e.state,'compensatedCredits',b.compensation_credits);
  END IF;
- IF b.contract_version<>'bill2.v2' OR b.closed OR b.cancel_requested OR b.paused_reason IS NOT DISTINCT FROM 'user_stop'
+ IF b.contract_version<>'bill2.v2' OR b.closed OR b.cancel_requested OR b.paused_reason IS NOT NULL
+  OR NOT EXISTS(SELECT 1 FROM profiles p WHERE p.id=e.actor_id AND p.is_deleted='false')
   OR e.state NOT IN ('prepared','running','interrupted') OR e.created_at>=p_cutoff
   OR EXISTS(SELECT 1 FROM bill2_calls c WHERE c.run_id=b.id
    AND c.dispatched_at IS NOT NULL AND c.settled_at IS NULL AND NOT c.provider_rejected)
