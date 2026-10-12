@@ -119,9 +119,11 @@ export function DataUseConsentCard() {
 
   return (
     <DataUseConsentView
-      state={query.data}
+      // A failed re-read (e.g. after a save with an unknown outcome) keeps the old cache; that cache is not the
+      // server's answer, so treat the state as unknown instead of showing a switch that may be wrong.
+      state={query.isError ? undefined : query.data}
       loading={query.isLoading}
-      loadFailed={query.isError && !query.data}
+      loadFailed={query.isError}
       retrying={query.isFetching}
       onRetry={() => void query.refetch()}
       saving={mutation.isPending}

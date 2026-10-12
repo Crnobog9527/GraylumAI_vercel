@@ -138,6 +138,15 @@ describe('data-use consent card', () => {
     expect(html).not.toContain('未开启');
   });
 
+  it('treats a failed re-read as unknown even when an older answer is cached', () => {
+    state.query = { data: base, isLoading: false, isError: true, isFetching: false, refetch };
+    const html = render();
+    expect(html).not.toContain('role="switch"');
+    expect(html).not.toContain('未开启');
+    expect(html).toContain('暂时无法读取你的选择');
+    expect(html).toContain('重试');
+  });
+
   it('shows reading, not "off", while loading', () => {
     state.query = { data: undefined, isLoading: true, isError: false, isFetching: true, refetch };
     const html = render();
