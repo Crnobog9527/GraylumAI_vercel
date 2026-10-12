@@ -53,7 +53,7 @@ try {
   const mine = async () => (await c.query('SELECT model_used,metadata FROM token_stats WHERE user_id=$1', [user])).rows[0];
   const stored = await mine();
   assert.match(stored.model_used, alias);
-  assert.match(stored.metadata.pricing.model, /anthropic/, 'unrelated keys are left alone');
+  assert.match(stored.metadata.pricing.model, alias, 'any model-named field is aliased');
   const own = await asUser(user, 'SELECT model_used,metadata,input_tokens,total_credits FROM token_stats');
   assert.equal(own.length, 1, 'RLS still limits a client to its own rows');
   assert.match(own[0].model_used, alias);
@@ -72,13 +72,50 @@ try {
   assert.equal(meta.metadata.pricing.inputPer1M, 1);
   report.checks.push('metadata modelId / pricing.modelId / pricing.providerModel are aliased on insert, prices kept');
 
+  // Review P1: the complete client-visible row, shaped like a legacy chat row, names no vendor.
+  // Model brands and families; the route service name may remain as a key (openRouterCost).
+  const VENDOR = /claude|anthropic|openai|gpt|gemini|google|deepmind|qwen|deepseek|llama|mistral|grok|通义|豆包/i;
+  const legacyMeta = {
+    skillId: 'skill-1', count_method: 'gemini_count_tokens', count_source: 'provider_usage',
+    preflight_count_source: 'anthropic_count_tokens', counter_version: '2026-03-10',
+    provider_usage: { source: 'provider_usage', providerResponseId: 'gen-1', openRouterCost: { totalUsd: 0.0012 }, inputTokens: 10 },
+    routing_decision: { taskType: 'chat', modelRole: 'primary', reasonCodes: ['gemini_long_context'] },
+    pricing: { modelId: 'google/gemini-2.5-flash', inputPer1M: 0.3, pricingSource: 'openrouter_catalog' },
+    tokenizer: 'claude', search_evidence: { results: [{ url: 'https://www.google.com/search?q=x' }] },
+  };
+  await c.query(`INSERT INTO token_stats(user_id,conversation_id,model_used,input_tokens,output_tokens,total_credits,total_cost_usd,metadata)
+    VALUES($1,$2,'google/gemini-2.5-flash',11,11,11,0,$3)`, [user, await conv(user), legacyMeta]);
+  const visible = await asUser(user, 'SELECT * FROM token_stats WHERE input_tokens=11');
+  const { search_evidence: evidence, ...rest } = visible[0].metadata;
+  assert.doesNotMatch(JSON.stringify({ ...visible[0], metadata: rest }), VENDOR, JSON.stringify(visible[0]));
+  assert.deepEqual(evidence, legacyMeta.search_evidence, 'public search provenance is kept as shown to the user');
+  assert.equal(visible[0].metadata.provider_usage.inputTokens, 10);
+  assert.equal(visible[0].metadata.provider_usage.openRouterCost.totalUsd, 0.0012, 'cost evidence keeps its listed key');
+  assert.match(visible[0].metadata.pricing.pricingSource, alias, 'a route-naming value is aliased');
+  assert.equal(visible[0].metadata.pricing.inputPer1M, 0.3);
+  assert.equal(visible[0].metadata.counter_version, '2026-03-10');
+  assert.equal(visible[0].metadata.preflight_count_source, 'provider_usage', 'erasure-listed counter label stays a listed value');
+  const stored11 = (await c.query('SELECT metadata FROM token_stats WHERE input_tokens=11')).rows[0].metadata;
+  // count_method's erasure list (official/estimate) already rejects legacy vendor values before 0217;
+  // the counter-source fields 0217 normalises must still pass the erasure projection.
+  const { count_method: _legacyMethod, ...erasable } = stored11;
+  await c.query('SELECT erasure_ledger_metadata($1) v', [erasable]);
+  report.checks.push('complete client-visible legacy row: every vendor-naming value aliased, keys, numbers and search evidence kept; erasure projection still accepts it');
+
   // Backfill: rows written before 0217 (trigger bypassed), including an erased ledger row.
   await c.query("SET session_replication_role='replica'");
   await c.query(`INSERT INTO token_stats(user_id,model_used,input_tokens,output_tokens,total_credits,total_cost_usd,metadata,
     content_erased_at,erased_conversation_id) VALUES($1,'openai/gpt-legacy',9,9,9,0,'{"pricing":{"modelId":"openai/gpt-legacy"}}',
     now(),gen_random_uuid())`, [user]);
+  await c.query(`INSERT INTO token_stats(user_id,model_used,input_tokens,output_tokens,total_credits,total_cost_usd,metadata,
+    content_erased_at,erased_conversation_id) VALUES($1,'bill2.aggregate',12,12,12,0,$2,now(),gen_random_uuid())`,
+    [user, { runId: '10000000-0000-4000-8000-0000000000aa', count_source: 'gemini_count_tokens' }]);
   await c.query("SET session_replication_role='origin'");
   await c.query(read(migrationPath));
+  const ledger = (await c.query('SELECT metadata FROM token_stats WHERE input_tokens=12')).rows[0].metadata;
+  assert.equal(ledger.runId, '10000000-0000-4000-8000-0000000000aa', 'erasure ledger evidence keys are untouched');
+  assert.equal(ledger.count_source, 'provider_usage');
+  assert.doesNotMatch(JSON.stringify(ledger), VENDOR);
   const legacy = (await c.query('SELECT model_used,metadata FROM token_stats WHERE input_tokens=9')).rows[0];
   assert.match(legacy.model_used, alias);
   assert.equal(legacy.metadata.pricing.modelId, legacy.model_used);

@@ -6,12 +6,14 @@
 --     No client code reads ai_models; the server uses service_role (unchanged).
 --  2. token_stats stays client-readable for own rows (0148 grants table SELECT and must
 --     stay a no-op on re-apply), so its model fields store an opaque alias instead:
---     model_used and metadata modelId / pricing.modelId / pricing.providerModel become
---     "m_<16 hex>". The alias -> model map is server-only; admin reports resolve it.
+--     model_used, every metadata value naming a model vendor/route, and the metadata
+--     model-id fields become "m_<16 hex>". The alias map is server-only; admin reports resolve it.
 --     A BEFORE trigger aliases every write; existing rows are backfilled below.
 -- Re-running is a no-op (aliases are idempotent; the backfill selects unaliased rows only).
 -- Recovery: forward only. To restore real strings, drop the trigger and run
--- packages/db/tests/model-identity-redact/rollback.sql (the map keeps every original).
+-- packages/db/tests/model-identity-redact/rollback.sql (the map keeps every aliased original).
+-- Not restorable: legacy count_source/preflight_count_source vendor values (non-financial counter
+-- labels with no reader) are normalised to provider_usage; token and credit figures are unchanged.
 BEGIN;
 SET LOCAL lock_timeout='5s';
 
@@ -51,19 +53,51 @@ BEGIN
  RETURN a;
 END $$;
 
-CREATE OR REPLACE FUNCTION public.model_usage_metadata(m jsonb) RETURNS jsonb
+-- Every value naming a model vendor, model family or route provider is aliased, anywhere in the
+-- metadata (legacy rows carry e.g. count_method "gemini_count_tokens", tokenizer names, routing
+-- reasons). The known model-id fields are aliased whatever they say. search_evidence is public
+-- search provenance shown to the user by design; it is kept.
+CREATE OR REPLACE FUNCTION public.model_usage_vendor_pattern() RETURNS text
+LANGUAGE sql IMMUTABLE AS $p$
+ SELECT '(claude|anthropic|openai|chat ?gpt|gpt[-_ ]?[0-9]|\mgpt\M|\mo[134](-mini|-pro)?\M|gemini|google|deepmind|bard|'
+  ||'qwen|tongyi|alibaba|deepseek|llama|meta-llama|mistral|mixtral|grok|x-ai|\mxai\M|openrouter|deepinfra|'
+  ||'together|fireworks|groq|novita|azure|bedrock|vertex|moonshot|kimi|zhipu|chatglm|\mglm|z-ai|doubao|'
+  ||'bytedance|baidu|ernie|hunyuan|tencent|minimax|cohere|perplexity|nvidia|nemotron|phi-[0-9]|'
+  ||'通义|千问|文心|豆包|混元|智谱|深度求索|月之暗面)'
+$p$;
+
+CREATE OR REPLACE FUNCTION public.model_usage_jsonb(v jsonb,p_model_field boolean DEFAULT false) RETURNS jsonb
 LANGUAGE plpgsql SET search_path=public,pg_temp AS $$
+DECLARE k text;x jsonb;o jsonb;pattern text:=model_usage_vendor_pattern();
 BEGIN
- IF jsonb_typeof(m) IS DISTINCT FROM 'object' THEN RETURN m;END IF;
- IF jsonb_typeof(m->'modelId')='string' THEN m:=jsonb_set(m,'{modelId}',to_jsonb(model_usage_alias(m->>'modelId')));END IF;
- IF jsonb_typeof(m->'pricing')='object' THEN
-  IF jsonb_typeof(m#>'{pricing,modelId}')='string' THEN
-   m:=jsonb_set(m,'{pricing,modelId}',to_jsonb(model_usage_alias(m#>>'{pricing,modelId}')));END IF;
-  IF jsonb_typeof(m#>'{pricing,providerModel}')='string' THEN
-   m:=jsonb_set(m,'{pricing,providerModel}',to_jsonb(model_usage_alias(m#>>'{pricing,providerModel}')));END IF;
- END IF;
- RETURN m;
+ CASE jsonb_typeof(v)
+ WHEN 'string' THEN
+  IF p_model_field OR (v#>>'{}') ~* pattern THEN RETURN to_jsonb(model_usage_alias(v#>>'{}'));END IF;
+  RETURN v;
+ WHEN 'object' THEN
+  o:='{}'::jsonb;
+  FOR k,x IN SELECT key,value FROM jsonb_each(v) LOOP
+   -- Erasure keeps these two as a fixed list (0188) that names vendors; an alias would make the
+   -- ledger row unerasable, so a vendor-specific counter becomes the neutral listed provider_usage.
+   IF k IN ('count_source','preflight_count_source') AND jsonb_typeof(x)='string' AND (x#>>'{}') ~* pattern THEN
+    o:=o||jsonb_build_object(k,'provider_usage');CONTINUE;
+   END IF;
+   -- Keys stay as written: erasure keeps listed keys (e.g. provider_usage.openRouterCost, a cost
+   -- record) and would drop a renamed one. Keys name the route, never the model.
+   o:=o||jsonb_build_object(k,
+    CASE WHEN k='search_evidence' THEN x ELSE model_usage_jsonb(x,k IN ('modelId','providerModel','model','modelUsed')) END);
+  END LOOP;
+  RETURN o;
+ WHEN 'array' THEN
+  SELECT coalesce(jsonb_agg(model_usage_jsonb(e) ORDER BY n),'[]'::jsonb) INTO o
+  FROM jsonb_array_elements(v) WITH ORDINALITY AS t(e,n);
+  RETURN o;
+ ELSE RETURN v;
+ END CASE;
 END $$;
+
+CREATE OR REPLACE FUNCTION public.model_usage_metadata(m jsonb) RETURNS jsonb
+LANGUAGE sql SET search_path=public,pg_temp AS $$ SELECT model_usage_jsonb(m) $$;
 
 -- Runs between aa_erasure_usage_unlink and zz_erasure_ledger_guard; idempotent on aliased values.
 CREATE OR REPLACE FUNCTION public.token_stats_model_alias() RETURNS trigger
@@ -79,16 +113,15 @@ CREATE TRIGGER mm_token_stats_model_alias BEFORE INSERT OR UPDATE ON public.toke
 
 ALTER FUNCTION public.model_usage_alias(text) OWNER TO postgres;
 REVOKE ALL ON FUNCTION public.model_usage_alias(text),public.model_usage_metadata(jsonb),
+ public.model_usage_jsonb(jsonb,boolean),public.model_usage_vendor_pattern(),
  public.token_stats_model_alias() FROM PUBLIC,anon,authenticated,service_role;
 -- Writers reach these through the trigger; service_role writes token_stats in tests and fallbacks.
-GRANT EXECUTE ON FUNCTION public.model_usage_alias(text),public.model_usage_metadata(jsonb) TO service_role;
+GRANT EXECUTE ON FUNCTION public.model_usage_alias(text),public.model_usage_metadata(jsonb),
+ public.model_usage_jsonb(jsonb,boolean),public.model_usage_vendor_pattern() TO service_role;
 
--- Backfill: the trigger rewrites each touched row. Already-aliased rows are not selected.
+-- Backfill: the trigger rewrites each touched row. Rows already fully aliased are not selected.
 UPDATE public.token_stats SET model_used=model_used
 WHERE (model_used IS NOT NULL AND model_used<>'' AND model_used !~ '^m_[0-9a-f]{16}$')
-   OR (jsonb_typeof(metadata->'modelId')='string' AND metadata->>'modelId' !~ '^m_[0-9a-f]{16}$')
-   OR (jsonb_typeof(metadata#>'{pricing,modelId}')='string' AND metadata#>>'{pricing,modelId}' !~ '^m_[0-9a-f]{16}$')
-   OR (jsonb_typeof(metadata#>'{pricing,providerModel}')='string'
-       AND metadata#>>'{pricing,providerModel}' !~ '^m_[0-9a-f]{16}$');
+   OR (metadata IS NOT NULL AND (metadata - 'search_evidence')::text ~* model_usage_vendor_pattern());
 
 COMMIT;
