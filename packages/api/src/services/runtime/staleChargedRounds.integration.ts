@@ -88,7 +88,11 @@ async function chargedOpenRound(ageMs: number) {
   // no pause of its own (the fixture's credit wait is cleared), an earlier call already charged.
   await db.query("update runtime_executions set state='interrupted',created_at=now()-($2::bigint*interval '1 millisecond') where id=$1",
     [admitted.executionId, ageMs]);
-  await db.query('update bill2_runs set paused_reason=null where id=$1', [admitted.runId]);
+  await db.query('update bill2_runs set paused_reason=null,runtime_dispatch_deadline=null where id=$1', [admitted.runId]);
+  // Its calls happened back then too: the round has been quiet since.
+  await db.query(`update bill2_calls set created_at=created_at-($2::bigint*interval '1 millisecond'),
+    dispatched_at=dispatched_at-($2::bigint*interval '1 millisecond'),settled_at=settled_at-($2::bigint*interval '1 millisecond')
+    where run_id=$1`, [admitted.runId, ageMs]);
   return { actor, host, sessionId: session.sessionId as string, executionId: admitted.executionId as string,
     runId: admitted.runId as string };
 }
@@ -196,6 +200,23 @@ it('RUNTIME: a cost-pending round whose last unknown call was settled is reporte
   expect(ids(await reported())).toContain(round.runId);
   expect(await compensateStaleRound(service, round.runId)).toMatchObject({ state: 'compensated', executionState: 'cancelled' });
   expect(await ledger(round)).toMatchObject({ credits: 100, compensations: 1, run_state: 'refunded' });
+}, 60000);
+
+it('RUNTIME: a retry or call activity just before the operator confirms keeps the round from compensation', async () => {
+  const retried = await chargedOpenRound(2 * STALE_ROUND_AGE_MS), active = await chargedOpenRound(2 * STALE_ROUND_AGE_MS);
+  expect(ids(await reported())).toEqual(expect.arrayContaining([retried.runId, active.runId]));
+  // The user retried: the round runs again under a fresh dispatch lease, before its next call.
+  await db.query("update runtime_executions set state='running' where id=$1", [retried.executionId]);
+  await db.query("update bill2_runs set runtime_dispatch_deadline=now()+interval '5 minutes' where id=$1", [retried.runId]);
+  // Another round just settled a call: it is not quiet any more.
+  await db.query('update bill2_calls set settled_at=now() where run_id=$1', [active.runId]);
+  const reportIds = ids(await reported());
+  for (const round of [retried, active]) {
+    expect(reportIds).not.toContain(round.runId);
+    const before = await ledger(round);
+    await expect(compensateStaleRound(service, round.runId)).rejects.toThrow('STALE_ROUND_NOT_ELIGIBLE');
+    expect(await ledger(round)).toEqual(before);
+  }
 }, 60000);
 
 it('RUNTIME: a round whose account was later banned can still be compensated', async () => {

@@ -44,6 +44,10 @@ BEGIN
    -- resumable, never a Graylum failure to refund. Erased accounts belong to erasure recovery.
    AND r.paused_reason IS NULL
    AND EXISTS(SELECT 1 FROM profiles p WHERE p.id=e.actor_id AND p.is_deleted='false')
+   -- Quiet since the cutoff: no live dispatch lease and no call created, sent or settled since.
+   AND (r.runtime_dispatch_deadline IS NULL OR r.runtime_dispatch_deadline<clock_timestamp())
+   AND NOT EXISTS(SELECT 1 FROM bill2_calls c WHERE c.run_id=r.id AND greatest(c.created_at,
+     coalesce(c.dispatched_at,c.created_at),coalesce(c.settled_at,c.created_at))>=p_cutoff)
    AND NOT EXISTS(SELECT 1 FROM bill2_calls c WHERE c.run_id=r.id
      AND c.dispatched_at IS NOT NULL AND c.settled_at IS NULL AND NOT c.provider_rejected)
  ), found AS (
@@ -85,6 +89,10 @@ BEGIN
  END IF;
  IF b.contract_version<>'bill2.v2' OR b.closed OR b.cancel_requested OR b.paused_reason IS NOT NULL
   OR NOT EXISTS(SELECT 1 FROM profiles p WHERE p.id=e.actor_id AND p.is_deleted='false')
+  -- A retry just before the operator confirmed revives the round: it must still be quiet.
+  OR (b.runtime_dispatch_deadline IS NOT NULL AND b.runtime_dispatch_deadline>=clock_timestamp())
+  OR EXISTS(SELECT 1 FROM bill2_calls c WHERE c.run_id=b.id AND greatest(c.created_at,
+   coalesce(c.dispatched_at,c.created_at),coalesce(c.settled_at,c.created_at))>=p_cutoff)
   OR e.state NOT IN ('prepared','running','interrupted','cost_pending') OR e.created_at>=p_cutoff
   OR EXISTS(SELECT 1 FROM bill2_calls c WHERE c.run_id=b.id
    AND c.dispatched_at IS NOT NULL AND c.settled_at IS NULL AND NOT c.provider_rejected)
