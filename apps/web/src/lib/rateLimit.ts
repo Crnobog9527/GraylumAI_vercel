@@ -98,7 +98,7 @@ function getRateLimiter(type: RateLimitType): Ratelimit | null {
         redis,
         limiter: Ratelimit.slidingWindow(60, '1 m'),
         prefix: 'graylum:middleware:',
-        analytics: true,
+        analytics: false, // DATA-ERASURE E7: analytics keeps identifiers (user ids) with no expiry.
         timeout: 0,
       });
       break;
@@ -108,7 +108,7 @@ function getRateLimiter(type: RateLimitType): Ratelimit | null {
         redis,
         limiter: Ratelimit.slidingWindow(30, '1 m'),
         prefix: 'graylum:ratelimit:ai:',
-        analytics: true,
+        analytics: false,
         timeout: 0, // Disable SDK fail-open timer; use the deadline above.
       });
       break;
@@ -118,7 +118,7 @@ function getRateLimiter(type: RateLimitType): Ratelimit | null {
         redis,
         limiter: Ratelimit.slidingWindow(20, '1 m'),
         prefix: 'graylum:ratelimit:ai_stream:',
-        analytics: true,
+        analytics: false,
         timeout: 0, // Disable SDK fail-open timer; use the deadline above.
       });
       break;
@@ -128,7 +128,7 @@ function getRateLimiter(type: RateLimitType): Ratelimit | null {
         redis,
         limiter: Ratelimit.slidingWindow(100, '1 m'),
         prefix: 'graylum:ratelimit:api:',
-        analytics: true,
+        analytics: false,
         timeout: 0, // Disable SDK fail-open timer; use the deadline above.
       });
       break;
@@ -138,7 +138,7 @@ function getRateLimiter(type: RateLimitType): Ratelimit | null {
         redis,
         limiter: Ratelimit.slidingWindow(5, '5 m'),
         prefix: 'graylum:ratelimit:auth:',
-        analytics: true,
+        analytics: false,
         timeout: 0, // Disable SDK fail-open timer; use the deadline above.
       });
       break;
@@ -148,7 +148,7 @@ function getRateLimiter(type: RateLimitType): Ratelimit | null {
         redis,
         limiter: Ratelimit.slidingWindow(20, '1 m'),
         prefix: 'graylum:ratelimit:anon:',
-        analytics: true,
+        analytics: false,
         timeout: 0, // Disable SDK fail-open timer; use the deadline above.
       });
       break;
