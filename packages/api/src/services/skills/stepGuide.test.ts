@@ -105,3 +105,10 @@ it('keeps the guide within an eighth of the budget, shortening it or leaving it 
   expect(tight.instructions).not.toContain('三秒内抓住注意力');
   expect((await activateFreeChatSkill(f.source, f.descriptor, {maxContextBytes: 1200})).instructions).not.toContain('Work guide');
 });
+it('keeps a task package behind its task: no workflow resources, and a missing task is still refused', async () => {
+  const f = fixture(script);
+  f.descriptor.tasks = {draft: ['SKILL.md']};
+  f.descriptor.packageHash = packageHash(f.descriptor);
+  await expect(activateFreeChatSkill(f.source, f.descriptor, {maxContextBytes: 100000})).rejects.toThrow('INVALID_IDENTITY');
+  expect(f.reads).not.toContain('workflow.yaml');
+});

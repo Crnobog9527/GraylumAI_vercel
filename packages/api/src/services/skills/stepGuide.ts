@@ -56,7 +56,9 @@ export async function activateFreeChatSkill(source: SkillSource, descriptor: Pac
   options: {task?: string; maxContextBytes: number}): Promise<{loaded: LoadedSkill; instructions: string}> {
   // Bounded shares keep room for the user input, history and tools, which are sized later in admission:
   // the guide at most 1/8 of the budget, the steps' files at most 1/4.
-  const work = options.task === undefined
+  // A package with legacy tasks keeps its mandatory task selection: never reach it through workflow resources.
+  const taskPackage = Object.keys(descriptor.tasks ?? {}).length > 0;
+  const work = options.task === undefined && !taskPackage
     ? await loadStepWork(source, descriptor, Math.floor(options.maxContextBytes / 8)) : undefined;
   const capacity = (error: unknown) => String((error as Error)?.message).includes('CAPACITY_EXCEEDED');
   if (work) {
