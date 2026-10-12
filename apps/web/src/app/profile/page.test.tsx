@@ -43,6 +43,8 @@ vi.mock('@/components/profile/UsageHistoryCard', () => ({ UsageHistoryCard: () =
 vi.mock('@/components/profile/SecuritySettingsCard', () => ({ SecuritySettingsCard: () => <p>security-card</p> }));
 vi.mock('@/components/profile/AccountErasureCard', () => ({ AccountErasureCard: () => <p>account-erasure-card</p> }));
 vi.mock('@/components/profile/DataUseConsentCard', () => ({ DataUseConsentCard: () => <p>data-use-consent-card</p> }));
+const consent = vi.hoisted(() => ({ visible: false }));
+vi.mock('@/components/profile/dataUseConsentVisibility', () => ({ get DATA_USE_CONSENT_VISIBLE() { return consent.visible; } }));
 vi.mock('@/components/profile/TicketsPanel', () => ({ default: () => null }));
 
 import ProfilePage from './page';
@@ -87,8 +89,18 @@ describe('profile page', () => {
     const html = renderToStaticMarkup(<ProfilePage />);
     expect(html).toContain('data-active-tab="security"');
     expect(html).toContain('security-card');
-    expect(html).toContain('data-use-consent-card');
     expect(html).toContain('account-erasure-card');
+  });
+
+  it('hides the data-use consent card by default and shows it again when the switch is on', () => {
+    state.params = new URLSearchParams('tab=security');
+    expect(renderToStaticMarkup(<ProfilePage />)).not.toContain('data-use-consent-card');
+    consent.visible = true;
+    try {
+      expect(renderToStaticMarkup(<ProfilePage />)).toContain('data-use-consent-card');
+    } finally {
+      consent.visible = false;
+    }
   });
 
   it('falls back to the profile tab for unknown tabs', () => {
