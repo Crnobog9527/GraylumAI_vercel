@@ -207,8 +207,8 @@ node sanitize.mjs                                       # 提交前清除账号�
 所有付费脚本都经过 `budget.mjs` 的预算闸门：
 
 - 不设 `PROBE_ALLOW_SPEND=1` 就拒绝运行。
-- 每次调用前按最坏费用预留，并用 OpenRouter 的实际用量核对；加上 `budget-ledger.json` 里已记录的花费超过 2 美元就拒绝。
-- 补测完要把实际花费加进 `budget-ledger.json` 再提交。
+- 已花费用 = `budget-ledger.json` 里登记的各测试密钥"当前累计用量 - 任务开始时的基线"之和，每次都从 OpenRouter 现查，不需要手动更新。
+- 正在进行的调用按最坏费用预留。已花加预留超过 2 美元就拒绝。
 
 换成评审专用 workspace 的密钥：在命令前加 `PROBE_KEY_FILE=fusion-review.env PROBE_KEY_VAR=OPENROUTER_API_KEY`。`probe.mjs ask_search` 会明确要求评审团联网，用来检验关闭是否生效。
 
