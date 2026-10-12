@@ -54,3 +54,12 @@ it('admin cost reports give the same result after aliasing as with the real stri
   const priced = [{ model_id: 'openai/example', input_token_cost: 2000000, config: { pricing: { cacheReadPer1M: '0.25' } } }];
   expect(estimateCacheSavings(resolved as never, priced as never)).toEqual(estimateCacheSavings(real as never, priced as never));
 });
+
+it('restores aliased values anywhere in metadata for admin views (routing reasons, counters)', async () => {
+  const f = admin({ [A]: 'gemini_count_tokens', [B]: 'Gemini 适合长上下文' });
+  const [row] = await withRealModelUsed(f.db, [{ model_used: 'openai/legacy', metadata: {
+    count_method: A, routingReason: B, routing_decision: { reasonCodes: [B, 'plain'] }, search_evidence: { q: 'x' },
+  } }]);
+  expect(row.metadata).toEqual({ count_method: 'gemini_count_tokens', routingReason: 'Gemini 适合长上下文',
+    routing_decision: { reasonCodes: ['Gemini 适合长上下文', 'plain'] }, search_evidence: { q: 'x' } });
+});
