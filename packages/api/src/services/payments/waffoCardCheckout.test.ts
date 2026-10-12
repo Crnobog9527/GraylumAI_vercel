@@ -48,10 +48,21 @@ describe('Waffo card checkout (normal path)', () => {
     await expect(f.run()).rejects.toMatchObject({ message: 'PAY_WAFFO_CHECKOUT_UNAVAILABLE', detail: { category: 'database',
       stage: 'bind', errorCode: 'P0001', providerErrors: [{ layer: 'database', message: 'PAY_WAFFO_CHECKOUT_CONFLICT' }] } });
   });
-  it('recovers a timed-out create by replaying the stored request with the same key', async () => {
+  it('recreates an unbound (lost-response) checkout only for the remaining claim lifetime', async () => {
     const f = setup(false);
     await f.run();
-    expect(f.provider.createCheckout).toHaveBeenCalledWith({ stored: true }, `graylum-checkout-${id}`);
+    const [request, key] = f.provider.createCheckout.mock.calls[0]!;
+    expect(key).toBe(`graylum-checkout-${id}`);
+    // 10 minutes left on the claim, minus the one-minute margin: never past the bound expiry.
+    expect(request).toMatchObject({ stored: true });
+    expect(request.expiresInSeconds).toBeGreaterThan(530);
+    expect(request.expiresInSeconds).toBeLessThanOrEqual(540);
+  });
+  it('does not recreate when less than five minutes of the claim remain', async () => {
+    claimLeft = 5 * 60_000;
+    const f = setup(false);
+    expect(await f.run()).toEqual({ orderId: id, state: 'recovery_required', url: null });
+    expect(f.provider.createCheckout).not.toHaveBeenCalled();
   });
   it('does not open a second checkout when the replayed session already expired', async () => {
     const f = setup(false, { sessionId, checkoutUrl: `https://pay.test.invalid/checkout/${sessionId}`,

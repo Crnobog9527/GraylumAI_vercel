@@ -9,8 +9,9 @@ import { MethodPurchaseRejected } from './methodPurchaseError';
 
 /** The database admits a checkout window up to 31 minutes; the session itself lives 30. */
 const CLAIM_WINDOW_MS = (WAFFO_CHECKOUT_TTL_SECONDS + 60) * 1000;
-/** Recreate only while the claim window is still open. */
+/** Recreate only inside the original claim window, keeping a margin before its end. */
 const REPLAY_MARGIN_MS = 60 * 1000;
+const MIN_RECREATE_SECONDS = 5 * 60;
 
 /** Release unpaid card orders 40 minutes after checkout started (Owner decision 2026-10-11), so an abandoned
  * checkout does not block the next purchase or hold a founder seat. The database enforces timing. */
@@ -94,7 +95,10 @@ export async function createWaffoCardCheckout(input: {
         .eq('object_type', 'checkout').eq('channel', 'waffo').eq('merchant_namespace', provider.merchant).eq('mode', 'test').maybeSingle();
       if (bound.error) throw databaseFailure('bound_read', bound.error);
       if (bound.data) throw new MethodPurchaseRejected('PAY_WAFFO_CHECKOUT_OPEN');
-      return Date.now() < claimExpiry - REPLAY_MARGIN_MS ? create(stored) : null;
+      // The claim's expiry is fixed at the first dispatch and bind refuses anything later, so the replacement
+      // gets only the remaining lifetime; too little left means the order is simply released later.
+      const remaining = Math.floor((claimExpiry - REPLAY_MARGIN_MS - Date.now()) / 1000);
+      return remaining >= MIN_RECREATE_SECONDS ? create({ ...stored, expiresInSeconds: remaining }) : null;
     },
     persist: async (result) => {
       const bound = await db.rpc('pay_waffo_bind_checkout', { p_user: userId, p_order: order.id, p_merchant: provider.merchant,
