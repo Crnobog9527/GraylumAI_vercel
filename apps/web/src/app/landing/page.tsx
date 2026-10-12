@@ -7,7 +7,8 @@ import LandingFooter from '@/components/landing/LandingFooter';
 import FeaturedModules from '@/components/marketplace/FeaturedModules';
 import { getPublicSiteSettings } from '@/lib/public-site';
 
-export const dynamic = 'force-dynamic';
+// Static with hourly refresh (SEO_GEO_SPEC section 9); plans and featured modules come from the server catalog.
+export const revalidate = 3600;
 
 export default async function LandingPage() {
   const {

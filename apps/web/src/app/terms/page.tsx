@@ -7,14 +7,15 @@
 import MarketingShell from '@/components/landing/MarketingShell';
 import PublicPageHero from '@/components/landing/PublicPageHero';
 import { legalSections } from '@/lib/landing-content';
-import { buildPublicPageMetadata, getPublicSiteSettings } from '@/lib/public-site';
+import { getPublicSiteSettings } from '@/lib/public-site';
+import { buildPageMetadata } from '@/lib/seo/metadata';
 
-export async function generateMetadata() {
-  return buildPublicPageMetadata('服务条款', '查看平台服务条款、账户责任与服务变更的基础说明。', [
-    '服务条款',
-    'Terms',
-    '账户责任',
-  ]);
+export function generateMetadata() {
+  return buildPageMetadata({
+    title: '服务条款',
+    description: '查看平台服务条款、账户责任与服务变更的基础说明。',
+    path: '/terms',
+  });
 }
 
 export default async function TermsPage() {

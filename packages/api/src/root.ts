@@ -1,5 +1,6 @@
 import { libraryRouter } from './routers/library';
 import { reportModelRouter } from './routers/reportModel';
+import { socialMediaFlagRouter } from './routers/socialMediaFlag';
 import { opcRouter } from './routers/opc';
 import { runtimeRouter } from './routers/runtime';
 import { workbenchRouter } from './routers/workbench';
@@ -45,6 +46,7 @@ export const appRouter = router({
   billingReport: billingReportRouter,
   mentorBudget: mentorBudgetRouter,
   reportModel: reportModelRouter,
+  socialMediaFlag: socialMediaFlagRouter,
   runtimeRateLimits: runtimeRateLimitsRouter,
   modelIdentity: modelIdentityRouter,
   invitation: invitationRouter,

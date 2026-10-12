@@ -1,0 +1,72 @@
+{
+  "mode": "schema",
+  "model": "anthropic/claude-haiku-5.5",
+  "at": "2026-10-12T12:21:06.624Z",
+  "results": [
+    {
+      "i": 0,
+      "status": 200,
+      "ms": 22224,
+      "cost": 0.0026296,
+      "finish": "stop",
+      "provider": "Azure",
+      "out_tokens": 4650,
+      "ok": true,
+      "errs": [],
+      "error": null,
+      "report_chars": 1635
+    },
+    {
+      "i": 1,
+      "status": 200,
+      "ms": 24803,
+      "cost": 0.0031426,
+      "finish": "stop",
+      "provider": "Azure",
+      "out_tokens": 5676,
+      "ok": true,
+      "errs": [],
+      "error": null,
+      "report_chars": 1346
+    },
+    {
+      "i": 2,
+      "status": 200,
+      "ms": 21895,
+      "cost": 0.0028381,
+      "finish": "stop",
+      "provider": "Azure",
+      "out_tokens": 5067,
+      "ok": true,
+      "errs": [],
+      "error": null,
+      "report_chars": 1277
+    },
+    {
+      "i": 3,
+      "status": 200,
+      "ms": 23805,
+      "cost": 0.0031296,
+      "finish": "stop",
+      "provider": "Azure",
+      "out_tokens": 5650,
+      "ok": true,
+      "errs": [],
+      "error": null,
+      "report_chars": 1369
+    },
+    {
+      "i": 4,
+      "status": 200,
+      "ms": 23053,
+      "cost": 0.0030896,
+      "finish": "stop",
+      "provider": "Azure",
+      "out_tokens": 5570,
+      "ok": true,
+      "errs": [],
+      "error": null,
+      "report_chars": 1596
+    }
+  ]
+}

@@ -1,0 +1,56 @@
+{
+  "upgrade_pro_to_gold": {
+    "status": "active",
+    "price": "price_1UPeoc3i2f0AJbrQ7kITsclK"
+  },
+  "upgrade_latest_invoice": {
+    "amount_due": 4000,
+    "amount_paid": 4000,
+    "status": "paid",
+    "billing_reason": "subscription_update",
+    "lines": [
+      {
+        "amount": -2900,
+        "description": "Unused time on MP probe Pro after 12 Oct 2026"
+      },
+      {
+        "amount": 6900,
+        "description": "Remaining time on MP probe Gold after 12 Oct 2026"
+      }
+    ]
+  },
+  "cancel_at_period_end": {
+    "status": "active",
+    "cancel_at_period_end": true,
+    "cancel_at": 1794472954
+  },
+  "update_default_payment_method": {
+    "error": {
+      "status": 400,
+      "type": "invalid_request_error",
+      "code": "resource_missing",
+      "param": "default_payment_method",
+      "message": "No such PaymentMethod: 'pm_card_visa'"
+    },
+    "accepted": false
+  },
+  "partial_refund": {
+    "status": "succeeded",
+    "amount": 1000,
+    "balance_transaction": {
+      "amount": -1000,
+      "fee": 0,
+      "net": -1000,
+      "fee_details": [
+        {
+          "amount": 0,
+          "application": null,
+          "currency": "usd",
+          "description": "Refund of withheld sales tax",
+          "type": "withheld_tax_refund"
+        }
+      ],
+      "reporting_category": "refund"
+    }
+  }
+}

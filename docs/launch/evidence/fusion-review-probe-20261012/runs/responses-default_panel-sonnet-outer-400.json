@@ -1,0 +1,51 @@
+{
+  "scenario": "default_panel",
+  "tag": "1",
+  "elapsedMs": 9123,
+  "status": 400,
+  "error": null,
+  "request": {
+    "model": "anthropic/claude-sonnet-5.5",
+    "input": "<941 chars>",
+    "tools": [
+      {
+        "type": "openrouter:fusion",
+        "parameters": {
+          "model": "anthropic/claude-sonnet-5.5",
+          "max_tool_calls": 1,
+          "max_completion_tokens": 4000
+        }
+      }
+    ],
+    "tool_choice": "required",
+    "max_output_tokens": 3000
+  },
+  "response": {
+    "error": {
+      "message": "Model call failed: invalid request (400)",
+      "code": 400,
+      "metadata": {
+        "provider_name": null,
+        "previous_errors": [
+          {
+            "code": 400,
+            "message": "Model call failed: invalid request (400)"
+          },
+          {
+            "code": 400,
+            "message": "Model call failed: invalid request (400)"
+          },
+          {
+            "code": 400,
+            "message": "Model call failed: invalid request (400)"
+          },
+          {
+            "code": 400,
+            "message": "Model call failed: invalid request (400)"
+          }
+        ]
+      }
+    },
+    "user_id": "<redacted>"
+  }
+}

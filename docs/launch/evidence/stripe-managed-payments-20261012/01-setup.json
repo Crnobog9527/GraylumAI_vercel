@@ -1,0 +1,204 @@
+{
+  "api_version": "2026-04-22.dahlia",
+  "created_at": 1791794554,
+  "account": {
+    "country": "US",
+    "default_currency": "usd",
+    "business_type": "company"
+  },
+  "scenarios": {
+    "s1_gold_basic": {
+      "session_created": true,
+      "managed_payments": {
+        "enabled": true
+      },
+      "amount_total": 6900,
+      "payment_method_types": [
+        "card",
+        "cashapp"
+      ],
+      "test_clock": true
+    },
+    "s2_coupon_once": {
+      "session_created": true,
+      "managed_payments": {
+        "enabled": true
+      },
+      "amount_total": 4900,
+      "payment_method_types": [
+        "card",
+        "cashapp"
+      ],
+      "test_clock": true
+    },
+    "s3_trial30_plus49": {
+      "session_created": true,
+      "managed_payments": {
+        "enabled": true
+      },
+      "amount_total": 4900,
+      "payment_method_types": [
+        "card",
+        "cashapp"
+      ],
+      "test_clock": true
+    },
+    "s4_anchor30_plus49": {
+      "session_created": false,
+      "error": {
+        "status": 400,
+        "type": "invalid_request_error",
+        "message": "You cannot set `proration_behavior` to `none` in a Checkout Session with one-time prices."
+      },
+      "test_clock": true
+    },
+    "s5_renewal_fail": {
+      "session_created": true,
+      "managed_payments": {
+        "enabled": true
+      },
+      "amount_total": 0,
+      "payment_method_types": [
+        "card",
+        "cashapp"
+      ],
+      "test_clock": true
+    },
+    "s6_founder_year": {
+      "session_created": true,
+      "managed_payments": {
+        "enabled": true
+      },
+      "amount_total": 49600,
+      "payment_method_types": [
+        "card",
+        "cashapp"
+      ],
+      "test_clock": true
+    },
+    "s7_pro_upgrade": {
+      "session_created": true,
+      "managed_payments": {
+        "enabled": true
+      },
+      "amount_total": 2900,
+      "payment_method_types": [
+        "card",
+        "cashapp"
+      ],
+      "test_clock": true
+    },
+    "w1_wechat_once": {
+      "session_created": true,
+      "managed_payments": {
+        "enabled": false
+      },
+      "amount_total": 6900,
+      "payment_method_types": [
+        "wechat_pay"
+      ],
+      "test_clock": false
+    },
+    "w2_alipay_once": {
+      "session_created": true,
+      "managed_payments": {
+        "enabled": false
+      },
+      "amount_total": 6900,
+      "payment_method_types": [
+        "alipay"
+      ],
+      "test_clock": false
+    }
+  },
+  "probes": {
+    "n1_mp_with_payment_method_types": {
+      "accepted": false,
+      "error": {
+        "status": 400,
+        "type": "invalid_request_error",
+        "message": "Unsupported parameter: payment_method_types. Managed Payments handles this parameter for you. See https://docs.stripe.com/payments/managed-payments/update-checkout#remove-unsupported-parameters for more details."
+      }
+    },
+    "n2_mp_with_automatic_tax": {
+      "accepted": true,
+      "session": "cs_test_a1zTXhfwpXtl7D6tey9dEOKwHFiXmkZwoiEkcMejDHVF15kjm54e1dbtMd",
+      "managed_payments": {
+        "enabled": true
+      },
+      "payment_method_types": [
+        "card",
+        "cashapp"
+      ],
+      "amount_total": 6900,
+      "subscription_trial_end": null
+    },
+    "n3_mp_product_without_tax_code": {
+      "accepted": false,
+      "error": {
+        "status": 400,
+        "type": "invalid_request_error",
+        "message": "Invalid line_items[0]: the product tax code is missing. Set the product's tax_code field to an eligible product tax code. See https://docs.stripe.com/payments/managed-payments/eligibility#product-tax-code-requirements for more details."
+      }
+    },
+    "n4_mp_trial_end_exact_30d": {
+      "accepted": true,
+      "session": "cs_test_a1aP9WMovMcvjpe9OXASza6uAnxMA0I2Skfo0OKgVx9azy5robM68mzt0H",
+      "managed_payments": {
+        "enabled": true
+      },
+      "payment_method_types": [
+        "card",
+        "cashapp"
+      ],
+      "amount_total": 0,
+      "subscription_trial_end": 1794386554
+    },
+    "n5_mp_allow_promotion_codes": {
+      "accepted": true,
+      "session": "cs_test_b1WBfBeiYJMsfiIndYrTTmYUN6EeC7AtvnJSufQa4KEYsew08v7IgZMmmd",
+      "managed_payments": {
+        "enabled": true
+      },
+      "payment_method_types": [
+        "card",
+        "cashapp"
+      ],
+      "amount_total": 6900,
+      "subscription_trial_end": null
+    },
+    "n6_mp_wallet_one_time": {
+      "accepted": false,
+      "error": {
+        "status": 400,
+        "type": "invalid_request_error",
+        "message": "Unsupported parameter: payment_method_types. Managed Payments handles this parameter for you. See https://docs.stripe.com/payments/managed-payments/update-checkout#remove-unsupported-parameters for more details."
+      }
+    },
+    "n7_mp_payment_mode_card": {
+      "accepted": true,
+      "session": "cs_test_a10jUcU7qZ4PtzpNoFLIKup2le0BXdQyHG3zudlUJAYMldoGx4yweoMDpB",
+      "managed_payments": {
+        "enabled": true
+      },
+      "payment_method_types": [
+        "card",
+        "cashapp"
+      ],
+      "amount_total": 6900,
+      "subscription_trial_end": null
+    },
+    "n8_non_mp_card_subscription": {
+      "accepted": true,
+      "session": "cs_test_a150U9FSgmQanqfKl8pxxcCs2HiN0rt88yCW8RfKLaMxtVk62awxODmS6y",
+      "managed_payments": {
+        "enabled": false
+      },
+      "payment_method_types": [
+        "card"
+      ],
+      "amount_total": 6900,
+      "subscription_trial_end": null
+    }
+  }
+}

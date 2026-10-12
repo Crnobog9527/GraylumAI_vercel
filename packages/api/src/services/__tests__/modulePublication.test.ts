@@ -58,6 +58,14 @@ describe('administrator module publication', () => {
       p_actor_id: actor, p_metadata: input.module, p_expected_updated_at: null, p_request_id: input.requestId,
     }));
   });
+  it('reports the POSITIONING-GATE refusal distinctly and keeps other database failures generic', async () => {
+    const model = {data:{id:'',name:'Qwen',model_id:'qwen/qwen3.8-27b',provider:'openai',is_active:'true',max_tokens:4096,input_limit:800000,api_key:'LOCAL_ONLY',api_endpoint:'',config:configuredReasoning},error:null};
+    const db = (message: string) => ({ from:()=>({select(){return this;},eq(){return this;},single:async()=>model}),
+      rpc: vi.fn().mockResolvedValue({ data: null, error: { code: 'P0001', message } }) });
+    await expect(saveModuleSkill(db('SOCIAL_MEDIA_FLAG_POSITIONING_SKILL') as never, randomUUID(), moduleInput()))
+      .rejects.toThrow(/^SOCIAL_MEDIA_FLAG_POSITIONING_SKILL$/);
+    await expect(saveModuleSkill(db('secret detail') as never, randomUUID(), moduleInput())).rejects.toThrow('Skill 发布未完成');
+  });
   it.each([
     ['no reasoning config', undefined, '请先在模型管理的"思考设置"里设置"交互对话"'],
     ['only an organizer setting', {reasoning:{...configuredReasoning.reasoning,purposes:{organize:{mode:'provider_default'}}}}, '请先在模型管理的"思考设置"里设置"交互对话"'],

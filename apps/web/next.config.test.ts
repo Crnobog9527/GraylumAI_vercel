@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { PHASE_DEVELOPMENT_SERVER, PHASE_PRODUCTION_BUILD } from 'next/constants';
+// The matcher Next.js uses for header sources.
+import { getPathMatch } from 'next/dist/shared/lib/router/utils/path-match';
 
 const { withSentryConfig, validateRedisEnvForBuild } = vi.hoisted(() => ({
   withSentryConfig: vi.fn((config, _options) => config),
@@ -23,8 +25,8 @@ describe('security response headers', () => {
   it('reports resource CSP, denies embedding, and preserves immutable font caching', async () => {
     const config = (await loadConfig())(PHASE_DEVELOPMENT_SERVER);
     const rules = await config.headers!();
-    const globalRule = rules.find(rule => rule.source === '/:path*');
-    const headers = Object.fromEntries(globalRule!.headers.map(({ key, value }) => [key, value]));
+    const globalRules = rules.filter(rule => rule.source === '/:path*');
+    const headers = Object.fromEntries(globalRules.flatMap(rule => rule.headers).map(({ key, value }) => [key, value]));
     expect(headers['X-Content-Type-Options']).toBe('nosniff');
     expect(headers['Referrer-Policy']).toBe('strict-origin-when-cross-origin');
     expect(headers['X-Frame-Options']).toBe('DENY');
@@ -46,6 +48,28 @@ describe('security response headers', () => {
     expect(rules.find(rule => rule.source.startsWith('/fonts/misans/'))?.headers).toEqual([
       { key: 'Cache-Control', value: 'public, max-age=31536000, immutable' },
     ]);
+  });
+
+  it.each([undefined, '', 'true', 'Public', ' public'])('keeps every path noindex when SITE_INDEXING is %j', async value => {
+    vi.stubEnv('SITE_INDEXING', value);
+    const rules = await (await loadConfig())(PHASE_DEVELOPMENT_SERVER).headers!();
+    const robotsRules = rules.filter(rule => rule.headers.some(header => header.key === 'X-Robots-Tag'));
+    expect(robotsRules).toEqual([{ source: '/:path*', headers: [{ key: 'X-Robots-Tag', value: 'noindex, nofollow' }] }]);
+  });
+
+  it('keeps noindex only on logged-in, login and status pages when SITE_INDEXING is public', async () => {
+    vi.stubEnv('SITE_INDEXING', 'public');
+    const rules = await (await loadConfig())(PHASE_DEVELOPMENT_SERVER).headers!();
+    const robotsRules = rules.filter(rule => rule.headers.some(header => header.key === 'X-Robots-Tag'));
+    const noindexed = (path: string) => robotsRules.some(rule => getPathMatch(rule.source)(path) !== false);
+    for (const path of ['/app', '/app/positioning', '/admin', '/admin/users', '/auth/callback', '/login', '/register',
+      '/verify-email', '/forgot-password', '/reset-password', '/maintenance', '/access-denied', '/profile', '/positioning']) {
+      expect(noindexed(path), path).toBe(true);
+    }
+    for (const path of ['/', '/landing', '/landing/pricing', '/faq', '/zh-tw', '/zh-tw/ig-jingying', '/about', '/application',
+      '/login-help', '/sitemap.xml', '/robots.txt']) {
+      expect(noindexed(path), path).toBe(false);
+    }
   });
 
   it('keeps the Redis prerequisite on production builds only', async () => {
