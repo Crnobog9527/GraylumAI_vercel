@@ -1123,6 +1123,18 @@ async function mentorTurnFixture(withTopics=false,withReport=false){
 registerReportTests(db,()=>mentorTurnFixture(true,true));
 registerPaygHostTests(db,()=>mentorTurnFixture(true));
 registerAdmissionGateTests(db,()=>mentorTurnFixture(true),()=>modelId);
+it('RUNTIME: opc.read carries only the read-only report flag of the frozen workflow (R5)',async()=>{
+ for(const withReport of [true,false]){
+  const f=await mentorTurnFixture(false,withReport),{draftId}=await f.draft();
+  const read=async()=>(await opcRouter.createCaller(await f.context()).read({draftId})) as {snapshot:{workflow:Record<string,unknown>}};
+  const first=await read();
+  expect(first.snapshot.workflow.reportGeneration).toBe(withReport);
+  expect(JSON.stringify(first)).not.toMatch(/maxCharacters|"sections":\["One"/);
+  // The round's frozen workflow decides, not the registration changed after start.
+  await db.query("update artifact_workflows set enabled=false where id=$1",[f.registration]);
+  expect((await read()).snapshot.workflow.reportGeneration).toBe(withReport);
+ }
+});
 type ProviderCall={model:string;release:()=>void};
 async function heldProvider(){
  const calls:ProviderCall[]=[];let hold=false;

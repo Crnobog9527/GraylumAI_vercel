@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import type { SessionRpc } from './session';
 const ownerActions = new Set([
-  'fail_before_dispatch', 'interrupt', 'checkpoint_match', 'checkpoint_primary', 'check_latest', 'complete',
+  'fail_before_dispatch', 'fail_platform', 'interrupt', 'checkpoint_match', 'checkpoint_primary', 'check_latest', 'complete',
 ]);
 /** Keep one invocation's epoch on every owner write, including SDK Session writes.
  * SQL validates it while holding the original Session/execution/run locks. */

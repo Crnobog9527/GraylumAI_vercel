@@ -14,13 +14,15 @@ const order = { id, user_id: user, payment_mode: 'test', payment_channel: 'waffo
     price: '69.00', discount: '0.00', tax_behavior: 'inclusive', credits: 8970, bonus_credits: 0 } };
 let claimLeft = 600_000;
 function setup(dispatch: boolean, session: unknown = {
-  sessionId, checkoutUrl: `https://pay.test.invalid/checkout/${sessionId}`, expiresAt: new Date(Date.now() + 1_800_000).toISOString() }) {
+  sessionId, checkoutUrl: `https://pay.test.invalid/checkout/${sessionId}`, expiresAt: new Date(Date.now() + 1_800_000).toISOString() },
+bound = false) {
   const rpc = vi.fn(async (fn: string, args: Record<string, unknown>) => (fn === 'pay_waffo_claim_checkout'
     ? { data: { dispatch, request: dispatch ? args.p_request : { providerRequest: { stored: true } },
       expiresAt: dispatch ? args.p_expires : new Date(Date.now() + claimLeft).toISOString() }, error: null }
     : { data: null, error: null }));
   const db = fakeDb({ payment_provider_refs: [{ id: 'ref-1', channel: 'waffo', merchant_namespace: 'fixture', mode: 'test',
-    object_type: 'price', external_id: 'PROD_gold' }] }, rpc);
+    object_type: 'price', external_id: 'PROD_gold' }, ...(bound ? [{ order_id: id, channel: 'waffo', merchant_namespace: 'fixture',
+    mode: 'test', object_type: 'checkout', external_id: sessionId }] : [])] }, rpc);
   const provider = { merchant: 'fixture', mode: 'test' as const, createCheckout: vi.fn().mockResolvedValue(session) };
   const run = (origin: string | null = 'https://pay.test.invalid') => createWaffoCardCheckout({ db, provider, userId: user,
     appUrl: 'https://app.test.invalid', termsVersion: 'terms-1', checkoutOrigin: origin ?? undefined,
@@ -46,10 +48,21 @@ describe('Waffo card checkout (normal path)', () => {
     await expect(f.run()).rejects.toMatchObject({ message: 'PAY_WAFFO_CHECKOUT_UNAVAILABLE', detail: { category: 'database',
       stage: 'bind', errorCode: 'P0001', providerErrors: [{ layer: 'database', message: 'PAY_WAFFO_CHECKOUT_CONFLICT' }] } });
   });
-  it('recovers a timed-out create by replaying the stored request with the same key', async () => {
+  it('recreates an unbound (lost-response) checkout only for the remaining claim lifetime', async () => {
     const f = setup(false);
     await f.run();
-    expect(f.provider.createCheckout).toHaveBeenCalledWith({ stored: true }, `graylum-checkout-${id}`);
+    const [request, key] = f.provider.createCheckout.mock.calls[0]!;
+    expect(key).toBe(`graylum-checkout-${id}`);
+    // 10 minutes left on the claim, minus the one-minute margin: never past the bound expiry.
+    expect(request).toMatchObject({ stored: true });
+    expect(request.expiresInSeconds).toBeGreaterThan(530);
+    expect(request.expiresInSeconds).toBeLessThanOrEqual(540);
+  });
+  it('does not recreate when less than five minutes of the claim remain', async () => {
+    claimLeft = 5 * 60_000;
+    const f = setup(false);
+    expect(await f.run()).toEqual({ orderId: id, state: 'recovery_required', url: null });
+    expect(f.provider.createCheckout).not.toHaveBeenCalled();
   });
   it('does not open a second checkout when the replayed session already expired', async () => {
     const f = setup(false, { sessionId, checkoutUrl: `https://pay.test.invalid/checkout/${sessionId}`,
@@ -97,5 +110,14 @@ describe('expired card checkout release', () => {
     expect(rpc.mock.calls.map(c => c[1].p_order)).toEqual(['old', 'early']);
     rpc.mockResolvedValue({ data: null, error: { message: 'connection reset' } });
     await expect(closeExpiredWaffoCheckouts(db, 'fixture')).rejects.toThrow('PERSISTENCE_UNAVAILABLE');
+  });
+  it('never creates a second Waffo session for an order whose page was already returned (no provider idempotency)', async () => {
+    const { MethodPurchaseRejected } = await import('./methodPurchaseError');
+    const f = setup(false, undefined, true);
+    const error = await f.run().catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(MethodPurchaseRejected);
+    expect(error).toMatchObject({ message: 'PAY_WAFFO_CHECKOUT_OPEN' });
+    expect(f.provider.createCheckout).not.toHaveBeenCalled();
+    expect(f.rpc).not.toHaveBeenCalledWith('pay_waffo_bind_checkout', expect.anything());
   });
 });

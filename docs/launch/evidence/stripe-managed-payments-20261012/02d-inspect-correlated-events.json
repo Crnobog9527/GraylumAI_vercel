@@ -1,0 +1,3089 @@
+{
+  "s1_gold_basic": {
+    "session": {
+      "status": "complete",
+      "payment_status": "paid",
+      "mode": "subscription",
+      "managed_payments": {
+        "enabled": true
+      },
+      "amount_subtotal": 6900,
+      "amount_total": 6900,
+      "total_details": {
+        "amount_discount": 0,
+        "amount_shipping": 0,
+        "amount_tax": 0
+      },
+      "currency": "usd",
+      "customer_details_country": "US",
+      "payment_method_types": [
+        "card",
+        "cashapp"
+      ]
+    },
+    "subscription": {
+      "status": "canceled",
+      "managed_payments": {
+        "enabled": true
+      },
+      "trial_start": null,
+      "trial_end": null,
+      "billing_cycle_anchor": 1791794554,
+      "start_date": 1791794554,
+      "cancel_at_period_end": true,
+      "canceled_at": 1791794554,
+      "items": [
+        {
+          "price": "price_1UPeoc3i2f0AJbrQ7kITsclK",
+          "unit_amount": 6900,
+          "interval": "month",
+          "current_period_start": 1791794554,
+          "current_period_end": 1794472954
+        }
+      ],
+      "default_payment_method": true
+    },
+    "invoices": [
+      {
+        "id": "in_1UPetV3i2f0AJbrQUxSytT2h",
+        "status": "paid",
+        "billing_reason": "subscription_create",
+        "amount_due": 6900,
+        "amount_paid": 6900,
+        "subtotal": 6900,
+        "total": 6900,
+        "total_taxes": [
+          {
+            "amount": 0,
+            "tax_behavior": "exclusive",
+            "tax_rate_details": {
+              "tax_rate": "txr_1UPetD3i2f0AJbrQQRjQMLWR"
+            },
+            "taxability_reason": "product_exempt",
+            "taxable_amount": 0,
+            "type": "tax_rate_details"
+          }
+        ],
+        "total_discount_amounts": [],
+        "period_start": 1791794554,
+        "period_end": 1791794554,
+        "attempt_count": 0,
+        "next_payment_attempt": null,
+        "lines": [
+          {
+            "amount": 6900,
+            "description": "1 × MP probe Gold (at $69.00 / month)",
+            "period": {
+              "end": 1794472954,
+              "start": 1791794554
+            },
+            "pricing": "price_1UPeoc3i2f0AJbrQ7kITsclK"
+          }
+        ],
+        "charge": {
+          "id": "ch_3UPetW3i2f0AJbrQ1hTiylfV",
+          "amount": 6900,
+          "currency": "usd",
+          "status": "succeeded",
+          "payment_method_type": "card",
+          "statement_descriptor": "LINK.COM* GRAYSCALE LU",
+          "balance_transaction": {
+            "amount": 6900,
+            "fee": 230,
+            "net": 6670,
+            "currency": "usd",
+            "fee_details": [
+              {
+                "amount": 230,
+                "application": null,
+                "currency": "usd",
+                "description": "Stripe processing fees",
+                "type": "stripe_fee"
+              },
+              {
+                "amount": 0,
+                "application": null,
+                "currency": "usd",
+                "description": "Withheld sales tax",
+                "type": "withheld_tax"
+              }
+            ],
+            "reporting_category": "charge",
+            "type": "charge"
+          }
+        }
+      }
+    ],
+    "payment_intent": null,
+    "clock": {
+      "status": "ready",
+      "frozen_time": 1794576634
+    }
+  },
+  "s2_coupon_once": {
+    "session": {
+      "status": "complete",
+      "payment_status": "paid",
+      "mode": "subscription",
+      "managed_payments": {
+        "enabled": true
+      },
+      "amount_subtotal": 6900,
+      "amount_total": 4900,
+      "total_details": {
+        "amount_discount": 2000,
+        "amount_shipping": 0,
+        "amount_tax": 0
+      },
+      "currency": "usd",
+      "customer_details_country": "US",
+      "payment_method_types": [
+        "card",
+        "cashapp"
+      ]
+    },
+    "subscription": {
+      "status": "active",
+      "managed_payments": {
+        "enabled": true
+      },
+      "trial_start": null,
+      "trial_end": null,
+      "billing_cycle_anchor": 1791794554,
+      "start_date": 1791794554,
+      "cancel_at_period_end": false,
+      "canceled_at": null,
+      "items": [
+        {
+          "price": "price_1UPeoc3i2f0AJbrQ7kITsclK",
+          "unit_amount": 6900,
+          "interval": "month",
+          "current_period_start": 1797064954,
+          "current_period_end": 1799743354
+        }
+      ],
+      "default_payment_method": true
+    },
+    "invoices": [
+      {
+        "id": "in_1UPf6z3i2f0AJbrQYMAjO4XD",
+        "status": "paid",
+        "billing_reason": "subscription_cycle",
+        "amount_due": 6900,
+        "amount_paid": 6900,
+        "subtotal": 6900,
+        "total": 6900,
+        "total_taxes": [
+          {
+            "amount": 0,
+            "tax_behavior": "exclusive",
+            "tax_rate_details": {
+              "tax_rate": "txr_1UPetD3i2f0AJbrQQRjQMLWR"
+            },
+            "taxability_reason": "product_exempt",
+            "taxable_amount": 0,
+            "type": "tax_rate_details"
+          }
+        ],
+        "total_discount_amounts": [],
+        "period_start": 1794472954,
+        "period_end": 1797064954,
+        "attempt_count": 1,
+        "next_payment_attempt": null,
+        "lines": [
+          {
+            "amount": 6900,
+            "description": "1 × MP probe Gold (at $69.00 / month)",
+            "period": {
+              "end": 1799743354,
+              "start": 1797064954
+            },
+            "pricing": "price_1UPeoc3i2f0AJbrQ7kITsclK"
+          }
+        ],
+        "charge": {
+          "id": "ch_3UPf7C3i2f0AJbrQ1Dhkut4R",
+          "amount": 6900,
+          "currency": "usd",
+          "status": "succeeded",
+          "payment_method_type": "card",
+          "statement_descriptor": "LINK.COM* GRAYSCALE LU",
+          "balance_transaction": {
+            "amount": 6900,
+            "fee": 230,
+            "net": 6670,
+            "currency": "usd",
+            "fee_details": [
+              {
+                "amount": 0,
+                "application": null,
+                "currency": "usd",
+                "description": "Withheld sales tax",
+                "type": "withheld_tax"
+              },
+              {
+                "amount": 230,
+                "application": null,
+                "currency": "usd",
+                "description": "Stripe processing fees",
+                "type": "stripe_fee"
+              }
+            ],
+            "reporting_category": "charge",
+            "type": "charge"
+          }
+        }
+      },
+      {
+        "id": "in_1UPf303i2f0AJbrQTfk5Xq7f",
+        "status": "paid",
+        "billing_reason": "subscription_cycle",
+        "amount_due": 6900,
+        "amount_paid": 6900,
+        "subtotal": 6900,
+        "total": 6900,
+        "total_taxes": [
+          {
+            "amount": 0,
+            "tax_behavior": "exclusive",
+            "tax_rate_details": {
+              "tax_rate": "txr_1UPetD3i2f0AJbrQQRjQMLWR"
+            },
+            "taxability_reason": "product_exempt",
+            "taxable_amount": 0,
+            "type": "tax_rate_details"
+          }
+        ],
+        "total_discount_amounts": [],
+        "period_start": 1791794554,
+        "period_end": 1794472954,
+        "attempt_count": 1,
+        "next_payment_attempt": null,
+        "lines": [
+          {
+            "amount": 6900,
+            "description": "1 × MP probe Gold (at $69.00 / month)",
+            "period": {
+              "end": 1797064954,
+              "start": 1794472954
+            },
+            "pricing": "price_1UPeoc3i2f0AJbrQ7kITsclK"
+          }
+        ],
+        "charge": {
+          "id": "ch_3UPf553i2f0AJbrQ0ZFZyMrr",
+          "amount": 6900,
+          "currency": "usd",
+          "status": "succeeded",
+          "payment_method_type": "card",
+          "statement_descriptor": "LINK.COM* GRAYSCALE LU",
+          "balance_transaction": {
+            "amount": 6900,
+            "fee": 230,
+            "net": 6670,
+            "currency": "usd",
+            "fee_details": [
+              {
+                "amount": 230,
+                "application": null,
+                "currency": "usd",
+                "description": "Stripe processing fees",
+                "type": "stripe_fee"
+              },
+              {
+                "amount": 0,
+                "application": null,
+                "currency": "usd",
+                "description": "Withheld sales tax",
+                "type": "withheld_tax"
+              }
+            ],
+            "reporting_category": "charge",
+            "type": "charge"
+          }
+        }
+      },
+      {
+        "id": "in_1UPeub3i2f0AJbrQvwdZlUaV",
+        "status": "paid",
+        "billing_reason": "subscription_create",
+        "amount_due": 4900,
+        "amount_paid": 4900,
+        "subtotal": 6900,
+        "total": 4900,
+        "total_taxes": [
+          {
+            "amount": 0,
+            "tax_behavior": "exclusive",
+            "tax_rate_details": {
+              "tax_rate": "txr_1UPetD3i2f0AJbrQQRjQMLWR"
+            },
+            "taxability_reason": "product_exempt",
+            "taxable_amount": 0,
+            "type": "tax_rate_details"
+          }
+        ],
+        "total_discount_amounts": [
+          {
+            "amount": 2000,
+            "discount": "di_1UPeub3i2f0AJbrQ10V4U60u"
+          }
+        ],
+        "period_start": 1791794554,
+        "period_end": 1791794554,
+        "attempt_count": 0,
+        "next_payment_attempt": null,
+        "lines": [
+          {
+            "amount": 6900,
+            "description": "1 × MP probe Gold (at $69.00 / month)",
+            "period": {
+              "end": 1794472954,
+              "start": 1791794554
+            },
+            "pricing": "price_1UPeoc3i2f0AJbrQ7kITsclK"
+          }
+        ],
+        "charge": {
+          "id": "ch_3UPeud3i2f0AJbrQ0dIsFqLh",
+          "amount": 4900,
+          "currency": "usd",
+          "status": "succeeded",
+          "payment_method_type": "card",
+          "statement_descriptor": "LINK.COM* GRAYSCALE LU",
+          "balance_transaction": {
+            "amount": 4900,
+            "fee": 172,
+            "net": 4728,
+            "currency": "usd",
+            "fee_details": [
+              {
+                "amount": 172,
+                "application": null,
+                "currency": "usd",
+                "description": "Stripe processing fees",
+                "type": "stripe_fee"
+              },
+              {
+                "amount": 0,
+                "application": null,
+                "currency": "usd",
+                "description": "Withheld sales tax",
+                "type": "withheld_tax"
+              }
+            ],
+            "reporting_category": "charge",
+            "type": "charge"
+          }
+        }
+      }
+    ],
+    "payment_intent": null,
+    "clock": {
+      "status": "ready",
+      "frozen_time": 1797185914
+    }
+  },
+  "s3_trial30_plus49": {
+    "session": {
+      "status": "complete",
+      "payment_status": "paid",
+      "mode": "subscription",
+      "managed_payments": {
+        "enabled": true
+      },
+      "amount_subtotal": 4900,
+      "amount_total": 4900,
+      "total_details": {
+        "amount_discount": 0,
+        "amount_shipping": 0,
+        "amount_tax": 0
+      },
+      "currency": "usd",
+      "customer_details_country": "US",
+      "payment_method_types": [
+        "card",
+        "cashapp"
+      ]
+    },
+    "subscription": {
+      "status": "active",
+      "managed_payments": {
+        "enabled": true
+      },
+      "trial_start": 1791794554,
+      "trial_end": 1794386554,
+      "billing_cycle_anchor": 1794386554,
+      "start_date": 1791794554,
+      "cancel_at_period_end": false,
+      "canceled_at": null,
+      "items": [
+        {
+          "price": "price_1UPeoc3i2f0AJbrQ7kITsclK",
+          "unit_amount": 6900,
+          "interval": "month",
+          "current_period_start": 1794386554,
+          "current_period_end": 1796978554
+        }
+      ],
+      "default_payment_method": true
+    },
+    "invoices": [
+      {
+        "id": "in_1UPf3P3i2f0AJbrQgoUjW3f3",
+        "status": "paid",
+        "billing_reason": "subscription_cycle",
+        "amount_due": 6900,
+        "amount_paid": 6900,
+        "subtotal": 6900,
+        "total": 6900,
+        "total_taxes": [
+          {
+            "amount": 0,
+            "tax_behavior": "exclusive",
+            "tax_rate_details": {
+              "tax_rate": "txr_1UPetD3i2f0AJbrQQRjQMLWR"
+            },
+            "taxability_reason": "product_exempt",
+            "taxable_amount": 0,
+            "type": "tax_rate_details"
+          }
+        ],
+        "total_discount_amounts": [],
+        "period_start": 1791794554,
+        "period_end": 1794386554,
+        "attempt_count": 1,
+        "next_payment_attempt": null,
+        "lines": [
+          {
+            "amount": 6900,
+            "description": "1 × MP probe Gold (at $69.00 / month)",
+            "period": {
+              "end": 1796978554,
+              "start": 1794386554
+            },
+            "pricing": "price_1UPeoc3i2f0AJbrQ7kITsclK"
+          }
+        ],
+        "charge": {
+          "id": "ch_3UPf3V3i2f0AJbrQ06r88uU1",
+          "amount": 6900,
+          "currency": "usd",
+          "status": "succeeded",
+          "payment_method_type": "card",
+          "statement_descriptor": "LINK.COM* GRAYSCALE LU",
+          "balance_transaction": {
+            "amount": 6900,
+            "fee": 230,
+            "net": 6670,
+            "currency": "usd",
+            "fee_details": [
+              {
+                "amount": 230,
+                "application": null,
+                "currency": "usd",
+                "description": "Stripe processing fees",
+                "type": "stripe_fee"
+              },
+              {
+                "amount": 0,
+                "application": null,
+                "currency": "usd",
+                "description": "Withheld sales tax",
+                "type": "withheld_tax"
+              }
+            ],
+            "reporting_category": "charge",
+            "type": "charge"
+          }
+        }
+      },
+      {
+        "id": "in_1UPevY3i2f0AJbrQNnPRED67",
+        "status": "paid",
+        "billing_reason": "subscription_create",
+        "amount_due": 4900,
+        "amount_paid": 4900,
+        "subtotal": 4900,
+        "total": 4900,
+        "total_taxes": [
+          {
+            "amount": 0,
+            "tax_behavior": "exclusive",
+            "tax_rate_details": {
+              "tax_rate": "txr_1UPetD3i2f0AJbrQQRjQMLWR"
+            },
+            "taxability_reason": "product_exempt",
+            "taxable_amount": 0,
+            "type": "tax_rate_details"
+          }
+        ],
+        "total_discount_amounts": [],
+        "period_start": 1791794554,
+        "period_end": 1791794554,
+        "attempt_count": 0,
+        "next_payment_attempt": null,
+        "lines": [
+          {
+            "amount": 4900,
+            "description": "MP probe Gold first 30 days",
+            "period": {
+              "end": 1794386987,
+              "start": 1791794987
+            },
+            "pricing": "price_1UPeod3i2f0AJbrQGRwkQpga"
+          },
+          {
+            "amount": 0,
+            "description": "Free trial for 1 × MP probe Gold",
+            "period": {
+              "end": 1794386554,
+              "start": 1791794554
+            },
+            "pricing": "price_1UPeoc3i2f0AJbrQ7kITsclK"
+          }
+        ],
+        "charge": {
+          "id": "ch_3UPevZ3i2f0AJbrQ1MAPtJ9G",
+          "amount": 4900,
+          "currency": "usd",
+          "status": "succeeded",
+          "payment_method_type": "card",
+          "statement_descriptor": "LINK.COM* GRAYSCALE LU",
+          "balance_transaction": {
+            "amount": 4900,
+            "fee": 172,
+            "net": 4728,
+            "currency": "usd",
+            "fee_details": [
+              {
+                "amount": 172,
+                "application": null,
+                "currency": "usd",
+                "description": "Stripe processing fees",
+                "type": "stripe_fee"
+              },
+              {
+                "amount": 0,
+                "application": null,
+                "currency": "usd",
+                "description": "Withheld sales tax",
+                "type": "withheld_tax"
+              }
+            ],
+            "reporting_category": "charge",
+            "type": "charge"
+          }
+        }
+      }
+    ],
+    "payment_intent": null,
+    "clock": {
+      "status": "ready",
+      "frozen_time": 1794412474
+    }
+  },
+  "s4_anchor30_plus49": {
+    "error": {
+      "status": 400,
+      "type": "invalid_request_error",
+      "message": "You cannot set `proration_behavior` to `none` in a Checkout Session with one-time prices."
+    }
+  },
+  "s5_renewal_fail": {
+    "session": {
+      "status": "complete",
+      "payment_status": "paid",
+      "mode": "subscription",
+      "managed_payments": {
+        "enabled": true
+      },
+      "amount_subtotal": 0,
+      "amount_total": 0,
+      "total_details": {
+        "amount_discount": 0,
+        "amount_shipping": 0,
+        "amount_tax": 0
+      },
+      "currency": "usd",
+      "customer_details_country": "US",
+      "payment_method_types": [
+        "card",
+        "cashapp"
+      ]
+    },
+    "subscription": {
+      "status": "canceled",
+      "managed_payments": {
+        "enabled": true
+      },
+      "trial_start": 1791794554,
+      "trial_end": 1792053754,
+      "billing_cycle_anchor": 1792053754,
+      "start_date": 1791794554,
+      "cancel_at_period_end": false,
+      "canceled_at": 1792213670,
+      "items": [
+        {
+          "price": "price_1UPeoc3i2f0AJbrQ7kITsclK",
+          "unit_amount": 6900,
+          "interval": "month",
+          "current_period_start": 1792053754,
+          "current_period_end": 1794732154
+        }
+      ],
+      "default_payment_method": true
+    },
+    "invoices": [
+      {
+        "id": "in_1UPf3j3i2f0AJbrQiXLWHHQE",
+        "status": "open",
+        "billing_reason": "subscription_cycle",
+        "amount_due": 6900,
+        "amount_paid": 0,
+        "subtotal": 6900,
+        "total": 6900,
+        "total_taxes": [
+          {
+            "amount": 0,
+            "tax_behavior": "exclusive",
+            "tax_rate_details": {
+              "tax_rate": "txr_1UPetD3i2f0AJbrQQRjQMLWR"
+            },
+            "taxability_reason": "product_exempt",
+            "taxable_amount": 0,
+            "type": "tax_rate_details"
+          }
+        ],
+        "total_discount_amounts": [],
+        "period_start": 1791794554,
+        "period_end": 1792053754,
+        "attempt_count": 2,
+        "next_payment_attempt": null,
+        "lines": [
+          {
+            "amount": 6900,
+            "description": "1 × MP probe Gold (at $69.00 / month)",
+            "period": {
+              "end": 1794732154,
+              "start": 1792053754
+            },
+            "pricing": "price_1UPeoc3i2f0AJbrQ7kITsclK"
+          }
+        ],
+        "charge": {
+          "id": "ch_3UPf3x3i2f0AJbrQ07Fm11Xr",
+          "amount": 6900,
+          "currency": "usd",
+          "status": "failed",
+          "payment_method_type": "card",
+          "statement_descriptor": "LINK.COM* GRAYSCALE LU",
+          "balance_transaction": null
+        }
+      },
+      {
+        "id": "in_1UPewV3i2f0AJbrQpDj2vzI0",
+        "status": "paid",
+        "billing_reason": "subscription_create",
+        "amount_due": 0,
+        "amount_paid": 0,
+        "subtotal": 0,
+        "total": 0,
+        "total_taxes": [
+          {
+            "amount": 0,
+            "tax_behavior": "exclusive",
+            "tax_rate_details": {
+              "tax_rate": "txr_1UPetD3i2f0AJbrQQRjQMLWR"
+            },
+            "taxability_reason": "product_exempt",
+            "taxable_amount": 0,
+            "type": "tax_rate_details"
+          }
+        ],
+        "total_discount_amounts": [],
+        "period_start": 1791794554,
+        "period_end": 1791794554,
+        "attempt_count": 0,
+        "next_payment_attempt": null,
+        "lines": [
+          {
+            "amount": 0,
+            "description": "Free trial for 1 × MP probe Gold",
+            "period": {
+              "end": 1792053754,
+              "start": 1791794554
+            },
+            "pricing": "price_1UPeoc3i2f0AJbrQ7kITsclK"
+          }
+        ],
+        "charge": null
+      }
+    ],
+    "payment_intent": null,
+    "clock": {
+      "status": "ready",
+      "frozen_time": 1794317434
+    }
+  },
+  "s6_founder_year": {
+    "session": {
+      "status": "complete",
+      "payment_status": "paid",
+      "mode": "subscription",
+      "managed_payments": {
+        "enabled": true
+      },
+      "amount_subtotal": 49600,
+      "amount_total": 49600,
+      "total_details": {
+        "amount_discount": 0,
+        "amount_shipping": 0,
+        "amount_tax": 0
+      },
+      "currency": "usd",
+      "customer_details_country": "US",
+      "payment_method_types": [
+        "card",
+        "cashapp"
+      ]
+    },
+    "subscription": {
+      "status": "active",
+      "managed_payments": {
+        "enabled": true
+      },
+      "trial_start": null,
+      "trial_end": null,
+      "billing_cycle_anchor": 1791794554,
+      "start_date": 1791794554,
+      "cancel_at_period_end": false,
+      "canceled_at": null,
+      "items": [
+        {
+          "price": "price_1UPeoc3i2f0AJbrQxWy9wefB",
+          "unit_amount": 49600,
+          "interval": "year",
+          "current_period_start": 1823330554,
+          "current_period_end": 1854952954
+        }
+      ],
+      "default_payment_method": true
+    },
+    "invoices": [
+      {
+        "id": "in_1UPf4J3i2f0AJbrQ7abUz90y",
+        "status": "paid",
+        "billing_reason": "subscription_cycle",
+        "amount_due": 49600,
+        "amount_paid": 49600,
+        "subtotal": 49600,
+        "total": 49600,
+        "total_taxes": [
+          {
+            "amount": 0,
+            "tax_behavior": "exclusive",
+            "tax_rate_details": {
+              "tax_rate": "txr_1UPetD3i2f0AJbrQQRjQMLWR"
+            },
+            "taxability_reason": "product_exempt",
+            "taxable_amount": 0,
+            "type": "tax_rate_details"
+          }
+        ],
+        "total_discount_amounts": [],
+        "period_start": 1791794554,
+        "period_end": 1823330554,
+        "attempt_count": 1,
+        "next_payment_attempt": null,
+        "lines": [
+          {
+            "amount": 49600,
+            "description": "1 × MP probe Founder (at $496.00 / year)",
+            "period": {
+              "end": 1854952954,
+              "start": 1823330554
+            },
+            "pricing": "price_1UPeoc3i2f0AJbrQxWy9wefB"
+          }
+        ],
+        "charge": {
+          "id": "ch_3UPf4R3i2f0AJbrQ0reCMlYu",
+          "amount": 49600,
+          "currency": "usd",
+          "status": "succeeded",
+          "payment_method_type": "card",
+          "statement_descriptor": "LINK.COM* GRAYSCALE LU",
+          "balance_transaction": {
+            "amount": 49600,
+            "fee": 1468,
+            "net": 48132,
+            "currency": "usd",
+            "fee_details": [
+              {
+                "amount": 0,
+                "application": null,
+                "currency": "usd",
+                "description": "Withheld sales tax",
+                "type": "withheld_tax"
+              },
+              {
+                "amount": 1468,
+                "application": null,
+                "currency": "usd",
+                "description": "Stripe processing fees",
+                "type": "stripe_fee"
+              }
+            ],
+            "reporting_category": "charge",
+            "type": "charge"
+          }
+        }
+      },
+      {
+        "id": "in_1UPexS3i2f0AJbrQfSf2paLi",
+        "status": "paid",
+        "billing_reason": "subscription_create",
+        "amount_due": 49600,
+        "amount_paid": 49600,
+        "subtotal": 49600,
+        "total": 49600,
+        "total_taxes": [
+          {
+            "amount": 0,
+            "tax_behavior": "exclusive",
+            "tax_rate_details": {
+              "tax_rate": "txr_1UPetD3i2f0AJbrQQRjQMLWR"
+            },
+            "taxability_reason": "product_exempt",
+            "taxable_amount": 0,
+            "type": "tax_rate_details"
+          }
+        ],
+        "total_discount_amounts": [],
+        "period_start": 1791794554,
+        "period_end": 1791794554,
+        "attempt_count": 0,
+        "next_payment_attempt": null,
+        "lines": [
+          {
+            "amount": 49600,
+            "description": "1 × MP probe Founder (at $496.00 / year)",
+            "period": {
+              "end": 1823330554,
+              "start": 1791794554
+            },
+            "pricing": "price_1UPeoc3i2f0AJbrQxWy9wefB"
+          }
+        ],
+        "charge": {
+          "id": "ch_3UPexU3i2f0AJbrQ1O88tHux",
+          "amount": 49600,
+          "currency": "usd",
+          "status": "succeeded",
+          "payment_method_type": "card",
+          "statement_descriptor": "LINK.COM* GRAYSCALE LU",
+          "balance_transaction": {
+            "amount": 49600,
+            "fee": 1468,
+            "net": 48132,
+            "currency": "usd",
+            "fee_details": [
+              {
+                "amount": 0,
+                "application": null,
+                "currency": "usd",
+                "description": "Withheld sales tax",
+                "type": "withheld_tax"
+              },
+              {
+                "amount": 1468,
+                "application": null,
+                "currency": "usd",
+                "description": "Stripe processing fees",
+                "type": "stripe_fee"
+              }
+            ],
+            "reporting_category": "charge",
+            "type": "charge"
+          }
+        }
+      }
+    ],
+    "payment_intent": null,
+    "clock": {
+      "status": "ready",
+      "frozen_time": 1823434234
+    }
+  },
+  "s7_pro_upgrade": {
+    "session": {
+      "status": "complete",
+      "payment_status": "paid",
+      "mode": "subscription",
+      "managed_payments": {
+        "enabled": true
+      },
+      "amount_subtotal": 2900,
+      "amount_total": 2900,
+      "total_details": {
+        "amount_discount": 0,
+        "amount_shipping": 0,
+        "amount_tax": 0
+      },
+      "currency": "usd",
+      "customer_details_country": "US",
+      "payment_method_types": [
+        "card",
+        "cashapp"
+      ]
+    },
+    "subscription": {
+      "status": "active",
+      "managed_payments": {
+        "enabled": true
+      },
+      "trial_start": null,
+      "trial_end": null,
+      "billing_cycle_anchor": 1791794554,
+      "start_date": 1791794554,
+      "cancel_at_period_end": false,
+      "canceled_at": null,
+      "items": [
+        {
+          "price": "price_1UPeoc3i2f0AJbrQ7kITsclK",
+          "unit_amount": 6900,
+          "interval": "month",
+          "current_period_start": 1794472954,
+          "current_period_end": 1797064954
+        }
+      ],
+      "default_payment_method": true
+    },
+    "invoices": [
+      {
+        "id": "in_1UPf4g3i2f0AJbrQ5K0jzVMJ",
+        "status": "paid",
+        "billing_reason": "subscription_cycle",
+        "amount_due": 6900,
+        "amount_paid": 6900,
+        "subtotal": 6900,
+        "total": 6900,
+        "total_taxes": [
+          {
+            "amount": 0,
+            "tax_behavior": "exclusive",
+            "tax_rate_details": {
+              "tax_rate": "txr_1UPetD3i2f0AJbrQQRjQMLWR"
+            },
+            "taxability_reason": "product_exempt",
+            "taxable_amount": 0,
+            "type": "tax_rate_details"
+          }
+        ],
+        "total_discount_amounts": [],
+        "period_start": 1791794554,
+        "period_end": 1794472954,
+        "attempt_count": 1,
+        "next_payment_attempt": null,
+        "lines": [
+          {
+            "amount": 6900,
+            "description": "1 × MP probe Gold (at $69.00 / month)",
+            "period": {
+              "end": 1797064954,
+              "start": 1794472954
+            },
+            "pricing": "price_1UPeoc3i2f0AJbrQ7kITsclK"
+          }
+        ],
+        "charge": {
+          "id": "ch_3UPf5f3i2f0AJbrQ0WQ5cs3X",
+          "amount": 6900,
+          "currency": "usd",
+          "status": "succeeded",
+          "payment_method_type": "card",
+          "statement_descriptor": "LINK.COM* GRAYSCALE LU",
+          "balance_transaction": {
+            "amount": 6900,
+            "fee": 230,
+            "net": 6670,
+            "currency": "usd",
+            "fee_details": [
+              {
+                "amount": 230,
+                "application": null,
+                "currency": "usd",
+                "description": "Stripe processing fees",
+                "type": "stripe_fee"
+              },
+              {
+                "amount": 0,
+                "application": null,
+                "currency": "usd",
+                "description": "Withheld sales tax",
+                "type": "withheld_tax"
+              }
+            ],
+            "reporting_category": "charge",
+            "type": "charge"
+          }
+        }
+      },
+      {
+        "id": "in_1UPf2E3i2f0AJbrQDb5gy61J",
+        "status": "paid",
+        "billing_reason": "subscription_update",
+        "amount_due": 4000,
+        "amount_paid": 4000,
+        "subtotal": 4000,
+        "total": 4000,
+        "total_taxes": [
+          {
+            "amount": 0,
+            "tax_behavior": "exclusive",
+            "tax_rate_details": {
+              "tax_rate": "txr_1UPetD3i2f0AJbrQQRjQMLWR"
+            },
+            "taxability_reason": "product_exempt",
+            "taxable_amount": 0,
+            "type": "tax_rate_details"
+          }
+        ],
+        "total_discount_amounts": [],
+        "period_start": 1791794554,
+        "period_end": 1791794554,
+        "attempt_count": 1,
+        "next_payment_attempt": null,
+        "lines": [
+          {
+            "amount": -2900,
+            "description": "Unused time on MP probe Pro after 12 Oct 2026",
+            "period": {
+              "end": 1794472954,
+              "start": 1791794554
+            },
+            "pricing": "price_1UPeoc3i2f0AJbrQBobOQOBS"
+          },
+          {
+            "amount": 6900,
+            "description": "Remaining time on MP probe Gold after 12 Oct 2026",
+            "period": {
+              "end": 1794472954,
+              "start": 1791794554
+            },
+            "pricing": "price_1UPeoc3i2f0AJbrQ7kITsclK"
+          }
+        ],
+        "charge": {
+          "id": "ch_3UPf2G3i2f0AJbrQ1bM4RMyF",
+          "amount": 4000,
+          "currency": "usd",
+          "status": "succeeded",
+          "payment_method_type": "card",
+          "statement_descriptor": "LINK.COM* GRAYSCALE LU",
+          "balance_transaction": {
+            "amount": 4000,
+            "fee": 146,
+            "net": 3854,
+            "currency": "usd",
+            "fee_details": [
+              {
+                "amount": 0,
+                "application": null,
+                "currency": "usd",
+                "description": "Withheld sales tax",
+                "type": "withheld_tax"
+              },
+              {
+                "amount": 146,
+                "application": null,
+                "currency": "usd",
+                "description": "Stripe processing fees",
+                "type": "stripe_fee"
+              }
+            ],
+            "reporting_category": "charge",
+            "type": "charge"
+          }
+        }
+      },
+      {
+        "id": "in_1UPeyC3i2f0AJbrQqdxRMRqa",
+        "status": "paid",
+        "billing_reason": "subscription_create",
+        "amount_due": 2900,
+        "amount_paid": 2900,
+        "subtotal": 2900,
+        "total": 2900,
+        "total_taxes": [
+          {
+            "amount": 0,
+            "tax_behavior": "exclusive",
+            "tax_rate_details": {
+              "tax_rate": "txr_1UPetD3i2f0AJbrQQRjQMLWR"
+            },
+            "taxability_reason": "product_exempt",
+            "taxable_amount": 0,
+            "type": "tax_rate_details"
+          }
+        ],
+        "total_discount_amounts": [],
+        "period_start": 1791794554,
+        "period_end": 1791794554,
+        "attempt_count": 0,
+        "next_payment_attempt": null,
+        "lines": [
+          {
+            "amount": 2900,
+            "description": "1 × MP probe Pro (at $29.00 / month)",
+            "period": {
+              "end": 1794472954,
+              "start": 1791794554
+            },
+            "pricing": "price_1UPeoc3i2f0AJbrQBobOQOBS"
+          }
+        ],
+        "charge": {
+          "id": "ch_3UPeyE3i2f0AJbrQ1I1KPhZV",
+          "amount": 2900,
+          "currency": "usd",
+          "status": "succeeded",
+          "payment_method_type": "card",
+          "statement_descriptor": "LINK.COM* GRAYSCALE LU",
+          "balance_transaction": {
+            "amount": 2900,
+            "fee": 114,
+            "net": 2786,
+            "currency": "usd",
+            "fee_details": [
+              {
+                "amount": 0,
+                "application": null,
+                "currency": "usd",
+                "description": "Withheld sales tax",
+                "type": "withheld_tax"
+              },
+              {
+                "amount": 114,
+                "application": null,
+                "currency": "usd",
+                "description": "Stripe processing fees",
+                "type": "stripe_fee"
+              }
+            ],
+            "reporting_category": "charge",
+            "type": "charge"
+          }
+        }
+      }
+    ],
+    "payment_intent": null,
+    "clock": {
+      "status": "ready",
+      "frozen_time": 1794490234
+    }
+  },
+  "w1_wechat_once": {
+    "session": {
+      "status": "complete",
+      "payment_status": "paid",
+      "mode": "payment",
+      "managed_payments": {
+        "enabled": false
+      },
+      "amount_subtotal": 6900,
+      "amount_total": 6900,
+      "total_details": {
+        "amount_discount": 0,
+        "amount_shipping": 0,
+        "amount_tax": 0
+      },
+      "currency": "usd",
+      "customer_details_country": null,
+      "payment_method_types": [
+        "wechat_pay"
+      ]
+    },
+    "subscription": null,
+    "invoices": [],
+    "payment_intent": {
+      "status": "succeeded",
+      "amount": 6900,
+      "managed_payments": {
+        "enabled": false
+      },
+      "charge": {
+        "id": "py_3UPeyi3i2f0AJbrQ05ViXflO",
+        "amount": 6900,
+        "currency": "usd",
+        "status": "succeeded",
+        "payment_method_type": "wechat_pay",
+        "statement_descriptor": null,
+        "balance_transaction": {
+          "amount": 6900,
+          "fee": 230,
+          "net": 6670,
+          "currency": "usd",
+          "fee_details": [
+            {
+              "amount": 230,
+              "application": null,
+              "currency": "usd",
+              "description": "Stripe processing fees",
+              "type": "stripe_fee"
+            }
+          ],
+          "reporting_category": "charge",
+          "type": "payment"
+        }
+      }
+    },
+    "clock": null
+  },
+  "w2_alipay_once": {
+    "session": {
+      "status": "complete",
+      "payment_status": "paid",
+      "mode": "payment",
+      "managed_payments": {
+        "enabled": false
+      },
+      "amount_subtotal": 6900,
+      "amount_total": 6900,
+      "total_details": {
+        "amount_discount": 0,
+        "amount_shipping": 0,
+        "amount_tax": 0
+      },
+      "currency": "usd",
+      "customer_details_country": null,
+      "payment_method_types": [
+        "alipay"
+      ]
+    },
+    "subscription": null,
+    "invoices": [],
+    "payment_intent": {
+      "status": "succeeded",
+      "amount": 6900,
+      "managed_payments": {
+        "enabled": false
+      },
+      "charge": {
+        "id": "py_3UPf023i2f0AJbrQ0cs4xYFc",
+        "amount": 6900,
+        "currency": "usd",
+        "status": "succeeded",
+        "payment_method_type": "alipay",
+        "statement_descriptor": null,
+        "balance_transaction": {
+          "amount": 6900,
+          "fee": 230,
+          "net": 6670,
+          "currency": "usd",
+          "fee_details": [
+            {
+              "amount": 230,
+              "application": null,
+              "currency": "usd",
+              "description": "Stripe processing fees",
+              "type": "stripe_fee"
+            }
+          ],
+          "reporting_category": "charge",
+          "type": "payment"
+        }
+      }
+    },
+    "clock": null
+  },
+  "s8_cn_address": {
+    "session": {
+      "status": "open",
+      "payment_status": "unpaid",
+      "mode": "subscription",
+      "managed_payments": {
+        "enabled": true
+      },
+      "amount_subtotal": 6900,
+      "amount_total": 6900,
+      "total_details": {
+        "amount_discount": 0,
+        "amount_shipping": 0,
+        "amount_tax": 0
+      },
+      "currency": "usd",
+      "customer_details_country": null,
+      "payment_method_types": [
+        "card",
+        "cashapp"
+      ]
+    },
+    "subscription": null,
+    "invoices": [],
+    "payment_intent": null,
+    "clock": null
+  },
+  "events": {
+    "scanned": 248,
+    "probe_events": 223,
+    "complete": true,
+    "shapes": {
+      "test_helpers.test_clock.ready": {
+        "count": 14,
+        "object": "test_helpers.test_clock",
+        "top_level_keys": [
+          "created",
+          "deletes_after",
+          "frozen_time",
+          "id",
+          "livemode",
+          "name",
+          "object",
+          "status",
+          "status_details"
+        ]
+      },
+      "invoice_payment.paid": {
+        "count": 11,
+        "object": "invoice_payment",
+        "top_level_keys": [
+          "amount_paid",
+          "amount_requested",
+          "created",
+          "currency",
+          "id",
+          "invoice",
+          "is_default",
+          "livemode",
+          "object",
+          "payment",
+          "status",
+          "status_transitions"
+        ]
+      },
+      "invoice.payment_succeeded": {
+        "count": 12,
+        "object": "invoice",
+        "top_level_keys": [
+          "account_country",
+          "account_name",
+          "account_tax_ids",
+          "amount_due",
+          "amount_overpaid",
+          "amount_paid",
+          "amount_remaining",
+          "amount_shipping",
+          "application",
+          "attempt_count",
+          "attempted",
+          "auto_advance",
+          "automatic_tax",
+          "automatically_finalizes_at",
+          "billing_reason",
+          "collection_method",
+          "created",
+          "currency",
+          "custom_fields",
+          "customer",
+          "customer_account",
+          "customer_address",
+          "customer_email",
+          "customer_name",
+          "customer_phone",
+          "customer_shipping",
+          "customer_tax_exempt",
+          "customer_tax_ids",
+          "default_payment_method",
+          "default_source",
+          "default_tax_rates",
+          "description",
+          "discounts",
+          "due_date",
+          "effective_at",
+          "ending_balance",
+          "footer",
+          "from_invoice",
+          "hosted_invoice_url",
+          "id",
+          "invoice_pdf",
+          "issuer",
+          "last_finalization_error",
+          "latest_revision",
+          "lines",
+          "livemode",
+          "metadata",
+          "next_payment_attempt",
+          "number",
+          "object",
+          "on_behalf_of",
+          "parent",
+          "payment_settings",
+          "period_end",
+          "period_start",
+          "post_payment_credit_notes_amount",
+          "pre_payment_credit_notes_amount",
+          "receipt_number",
+          "rendering",
+          "shipping_cost",
+          "shipping_details",
+          "starting_balance",
+          "statement_descriptor",
+          "status",
+          "status_transitions",
+          "subtotal",
+          "subtotal_excluding_tax",
+          "test_clock",
+          "total",
+          "total_discount_amounts",
+          "total_excluding_tax",
+          "total_pretax_credit_amounts",
+          "total_taxes",
+          "webhooks_delivered_at"
+        ]
+      },
+      "invoice.paid": {
+        "count": 12,
+        "object": "invoice",
+        "top_level_keys": [
+          "account_country",
+          "account_name",
+          "account_tax_ids",
+          "amount_due",
+          "amount_overpaid",
+          "amount_paid",
+          "amount_remaining",
+          "amount_shipping",
+          "application",
+          "attempt_count",
+          "attempted",
+          "auto_advance",
+          "automatic_tax",
+          "automatically_finalizes_at",
+          "billing_reason",
+          "collection_method",
+          "created",
+          "currency",
+          "custom_fields",
+          "customer",
+          "customer_account",
+          "customer_address",
+          "customer_email",
+          "customer_name",
+          "customer_phone",
+          "customer_shipping",
+          "customer_tax_exempt",
+          "customer_tax_ids",
+          "default_payment_method",
+          "default_source",
+          "default_tax_rates",
+          "description",
+          "discounts",
+          "due_date",
+          "effective_at",
+          "ending_balance",
+          "footer",
+          "from_invoice",
+          "hosted_invoice_url",
+          "id",
+          "invoice_pdf",
+          "issuer",
+          "last_finalization_error",
+          "latest_revision",
+          "lines",
+          "livemode",
+          "metadata",
+          "next_payment_attempt",
+          "number",
+          "object",
+          "on_behalf_of",
+          "parent",
+          "payment_settings",
+          "period_end",
+          "period_start",
+          "post_payment_credit_notes_amount",
+          "pre_payment_credit_notes_amount",
+          "receipt_number",
+          "rendering",
+          "shipping_cost",
+          "shipping_details",
+          "starting_balance",
+          "statement_descriptor",
+          "status",
+          "status_transitions",
+          "subtotal",
+          "subtotal_excluding_tax",
+          "test_clock",
+          "total",
+          "total_discount_amounts",
+          "total_excluding_tax",
+          "total_pretax_credit_amounts",
+          "total_taxes",
+          "webhooks_delivered_at"
+        ]
+      },
+      "invoice.finalized": {
+        "count": 13,
+        "object": "invoice",
+        "top_level_keys": [
+          "account_country",
+          "account_name",
+          "account_tax_ids",
+          "amount_due",
+          "amount_overpaid",
+          "amount_paid",
+          "amount_remaining",
+          "amount_shipping",
+          "application",
+          "attempt_count",
+          "attempted",
+          "auto_advance",
+          "automatic_tax",
+          "automatically_finalizes_at",
+          "billing_reason",
+          "collection_method",
+          "created",
+          "currency",
+          "custom_fields",
+          "customer",
+          "customer_account",
+          "customer_address",
+          "customer_email",
+          "customer_name",
+          "customer_phone",
+          "customer_shipping",
+          "customer_tax_exempt",
+          "customer_tax_ids",
+          "default_payment_method",
+          "default_source",
+          "default_tax_rates",
+          "description",
+          "discounts",
+          "due_date",
+          "effective_at",
+          "ending_balance",
+          "footer",
+          "from_invoice",
+          "hosted_invoice_url",
+          "id",
+          "invoice_pdf",
+          "issuer",
+          "last_finalization_error",
+          "latest_revision",
+          "lines",
+          "livemode",
+          "metadata",
+          "next_payment_attempt",
+          "number",
+          "object",
+          "on_behalf_of",
+          "parent",
+          "payment_settings",
+          "period_end",
+          "period_start",
+          "post_payment_credit_notes_amount",
+          "pre_payment_credit_notes_amount",
+          "receipt_number",
+          "rendering",
+          "shipping_cost",
+          "shipping_details",
+          "starting_balance",
+          "statement_descriptor",
+          "status",
+          "status_transitions",
+          "subtotal",
+          "subtotal_excluding_tax",
+          "test_clock",
+          "total",
+          "total_discount_amounts",
+          "total_excluding_tax",
+          "total_pretax_credit_amounts",
+          "total_taxes",
+          "webhooks_delivered_at"
+        ]
+      },
+      "invoice.updated": {
+        "count": 9,
+        "object": "invoice",
+        "top_level_keys": [
+          "account_country",
+          "account_name",
+          "account_tax_ids",
+          "amount_due",
+          "amount_overpaid",
+          "amount_paid",
+          "amount_remaining",
+          "amount_shipping",
+          "application",
+          "attempt_count",
+          "attempted",
+          "auto_advance",
+          "automatic_tax",
+          "automatically_finalizes_at",
+          "billing_reason",
+          "collection_method",
+          "created",
+          "currency",
+          "custom_fields",
+          "customer",
+          "customer_account",
+          "customer_address",
+          "customer_email",
+          "customer_name",
+          "customer_phone",
+          "customer_shipping",
+          "customer_tax_exempt",
+          "customer_tax_ids",
+          "default_payment_method",
+          "default_source",
+          "default_tax_rates",
+          "description",
+          "discounts",
+          "due_date",
+          "effective_at",
+          "ending_balance",
+          "footer",
+          "from_invoice",
+          "hosted_invoice_url",
+          "id",
+          "invoice_pdf",
+          "issuer",
+          "last_finalization_error",
+          "latest_revision",
+          "lines",
+          "livemode",
+          "metadata",
+          "next_payment_attempt",
+          "number",
+          "object",
+          "on_behalf_of",
+          "parent",
+          "payment_settings",
+          "period_end",
+          "period_start",
+          "post_payment_credit_notes_amount",
+          "pre_payment_credit_notes_amount",
+          "receipt_number",
+          "rendering",
+          "shipping_cost",
+          "shipping_details",
+          "starting_balance",
+          "statement_descriptor",
+          "status",
+          "status_transitions",
+          "subtotal",
+          "subtotal_excluding_tax",
+          "test_clock",
+          "total",
+          "total_discount_amounts",
+          "total_excluding_tax",
+          "total_pretax_credit_amounts",
+          "total_taxes",
+          "webhooks_delivered_at"
+        ]
+      },
+      "payment_intent.created (managed_payments)": {
+        "count": 12,
+        "object": "payment_intent",
+        "top_level_keys": [
+          "allowed_payment_method_types",
+          "amount",
+          "amount_capturable",
+          "amount_details",
+          "amount_received",
+          "application",
+          "application_fee_amount",
+          "automatic_payment_methods",
+          "canceled_at",
+          "cancellation_reason",
+          "capture_method",
+          "client_secret",
+          "confirmation_method",
+          "created",
+          "currency",
+          "customer",
+          "customer_account",
+          "description",
+          "excluded_payment_method_types",
+          "id",
+          "last_payment_error",
+          "latest_charge",
+          "livemode",
+          "managed_payments",
+          "metadata",
+          "next_action",
+          "object",
+          "on_behalf_of",
+          "payment_method",
+          "payment_method_configuration_details",
+          "payment_method_options",
+          "payment_method_types",
+          "payment_record",
+          "processing",
+          "receipt_email",
+          "review",
+          "setup_future_usage",
+          "shared_payment_granted_token",
+          "shipping",
+          "source",
+          "statement_descriptor",
+          "statement_descriptor_suffix",
+          "status",
+          "transfer_data",
+          "transfer_group"
+        ]
+      },
+      "payment_intent.succeeded (managed_payments)": {
+        "count": 11,
+        "object": "payment_intent",
+        "top_level_keys": [
+          "allowed_payment_method_types",
+          "amount",
+          "amount_capturable",
+          "amount_details",
+          "amount_received",
+          "application",
+          "application_fee_amount",
+          "automatic_payment_methods",
+          "canceled_at",
+          "cancellation_reason",
+          "capture_method",
+          "client_secret",
+          "confirmation_method",
+          "created",
+          "currency",
+          "customer",
+          "customer_account",
+          "description",
+          "excluded_payment_method_types",
+          "id",
+          "last_payment_error",
+          "latest_charge",
+          "livemode",
+          "managed_payments",
+          "metadata",
+          "next_action",
+          "object",
+          "on_behalf_of",
+          "payment_details",
+          "payment_method",
+          "payment_method_configuration_details",
+          "payment_method_options",
+          "payment_method_types",
+          "payment_record",
+          "processing",
+          "receipt_email",
+          "review",
+          "setup_future_usage",
+          "shared_payment_granted_token",
+          "shipping",
+          "source",
+          "statement_descriptor",
+          "statement_descriptor_suffix",
+          "status",
+          "transfer_data",
+          "transfer_group"
+        ]
+      },
+      "charge.succeeded": {
+        "count": 13,
+        "object": "charge",
+        "top_level_keys": [
+          "amount",
+          "amount_captured",
+          "amount_refunded",
+          "application",
+          "application_fee",
+          "application_fee_amount",
+          "balance_transaction",
+          "billing_details",
+          "calculated_statement_descriptor",
+          "captured",
+          "created",
+          "currency",
+          "customer",
+          "description",
+          "destination",
+          "dispute",
+          "disputed",
+          "failure_balance_transaction",
+          "failure_code",
+          "failure_message",
+          "fraud_details",
+          "id",
+          "livemode",
+          "metadata",
+          "object",
+          "on_behalf_of",
+          "order",
+          "outcome",
+          "paid",
+          "payment_intent",
+          "payment_method",
+          "payment_method_details",
+          "radar_options",
+          "receipt_email",
+          "receipt_number",
+          "receipt_url",
+          "refunded",
+          "review",
+          "shipping",
+          "source",
+          "source_transfer",
+          "statement_descriptor",
+          "statement_descriptor_suffix",
+          "status",
+          "transfer_data",
+          "transfer_group"
+        ]
+      },
+      "customer.subscription.updated (managed_payments)": {
+        "count": 9,
+        "object": "subscription",
+        "top_level_keys": [
+          "application",
+          "application_fee_percent",
+          "automatic_tax",
+          "billing_cycle_anchor",
+          "billing_cycle_anchor_config",
+          "billing_mode",
+          "billing_thresholds",
+          "cancel_at",
+          "cancel_at_period_end",
+          "canceled_at",
+          "cancellation_details",
+          "collection_method",
+          "created",
+          "currency",
+          "customer",
+          "customer_account",
+          "days_until_due",
+          "default_payment_method",
+          "default_source",
+          "default_tax_rates",
+          "description",
+          "discounts",
+          "ended_at",
+          "id",
+          "invoice_settings",
+          "items",
+          "latest_invoice",
+          "livemode",
+          "managed_payments",
+          "metadata",
+          "next_pending_invoice_item_invoice",
+          "object",
+          "on_behalf_of",
+          "pause_collection",
+          "payment_settings",
+          "pending_invoice_item_interval",
+          "pending_setup_intent",
+          "pending_update",
+          "plan",
+          "quantity",
+          "schedule",
+          "start_date",
+          "status",
+          "test_clock",
+          "transfer_data",
+          "trial_end",
+          "trial_settings",
+          "trial_start"
+        ]
+      },
+      "invoice.created": {
+        "count": 13,
+        "object": "invoice",
+        "top_level_keys": [
+          "account_country",
+          "account_name",
+          "account_tax_ids",
+          "amount_due",
+          "amount_overpaid",
+          "amount_paid",
+          "amount_remaining",
+          "amount_shipping",
+          "application",
+          "attempt_count",
+          "attempted",
+          "auto_advance",
+          "automatic_tax",
+          "automatically_finalizes_at",
+          "billing_reason",
+          "collection_method",
+          "created",
+          "currency",
+          "custom_fields",
+          "customer",
+          "customer_account",
+          "customer_address",
+          "customer_email",
+          "customer_name",
+          "customer_phone",
+          "customer_shipping",
+          "customer_tax_exempt",
+          "customer_tax_ids",
+          "default_payment_method",
+          "default_source",
+          "default_tax_rates",
+          "description",
+          "discounts",
+          "due_date",
+          "effective_at",
+          "ending_balance",
+          "footer",
+          "from_invoice",
+          "hosted_invoice_url",
+          "id",
+          "invoice_pdf",
+          "issuer",
+          "last_finalization_error",
+          "latest_revision",
+          "lines",
+          "livemode",
+          "metadata",
+          "next_payment_attempt",
+          "number",
+          "object",
+          "on_behalf_of",
+          "parent",
+          "payment_settings",
+          "period_end",
+          "period_start",
+          "post_payment_credit_notes_amount",
+          "pre_payment_credit_notes_amount",
+          "receipt_number",
+          "rendering",
+          "shipping_cost",
+          "shipping_details",
+          "starting_balance",
+          "statement_descriptor",
+          "status",
+          "status_transitions",
+          "subtotal",
+          "subtotal_excluding_tax",
+          "test_clock",
+          "total",
+          "total_discount_amounts",
+          "total_excluding_tax",
+          "total_pretax_credit_amounts",
+          "total_taxes",
+          "webhooks_delivered_at"
+        ]
+      },
+      "invoice.upcoming": {
+        "count": 5,
+        "object": "invoice",
+        "top_level_keys": [
+          "account_country",
+          "account_name",
+          "account_tax_ids",
+          "amount_due",
+          "amount_overpaid",
+          "amount_paid",
+          "amount_remaining",
+          "amount_shipping",
+          "application",
+          "attempt_count",
+          "attempted",
+          "automatic_tax",
+          "automatically_finalizes_at",
+          "billing_reason",
+          "collection_method",
+          "created",
+          "currency",
+          "custom_fields",
+          "customer",
+          "customer_account",
+          "customer_address",
+          "customer_email",
+          "customer_name",
+          "customer_phone",
+          "customer_shipping",
+          "customer_tax_exempt",
+          "customer_tax_ids",
+          "default_payment_method",
+          "default_source",
+          "default_tax_rates",
+          "description",
+          "discounts",
+          "due_date",
+          "effective_at",
+          "ending_balance",
+          "footer",
+          "from_invoice",
+          "issuer",
+          "last_finalization_error",
+          "latest_revision",
+          "lines",
+          "livemode",
+          "metadata",
+          "next_payment_attempt",
+          "number",
+          "object",
+          "on_behalf_of",
+          "parent",
+          "payment_settings",
+          "period_end",
+          "period_start",
+          "post_payment_credit_notes_amount",
+          "pre_payment_credit_notes_amount",
+          "receipt_number",
+          "rendering",
+          "shipping_cost",
+          "shipping_details",
+          "starting_balance",
+          "statement_descriptor",
+          "status",
+          "status_transitions",
+          "subtotal",
+          "subtotal_excluding_tax",
+          "test_clock",
+          "total",
+          "total_discount_amounts",
+          "total_excluding_tax",
+          "total_pretax_credit_amounts",
+          "total_taxes",
+          "webhooks_delivered_at"
+        ]
+      },
+      "test_helpers.test_clock.advancing": {
+        "count": 14,
+        "object": "test_helpers.test_clock",
+        "top_level_keys": [
+          "created",
+          "deletes_after",
+          "frozen_time",
+          "id",
+          "livemode",
+          "name",
+          "object",
+          "status",
+          "status_details"
+        ]
+      },
+      "customer.subscription.deleted (managed_payments)": {
+        "count": 2,
+        "object": "subscription",
+        "top_level_keys": [
+          "application",
+          "application_fee_percent",
+          "automatic_tax",
+          "billing_cycle_anchor",
+          "billing_cycle_anchor_config",
+          "billing_mode",
+          "billing_thresholds",
+          "cancel_at",
+          "cancel_at_period_end",
+          "canceled_at",
+          "cancellation_details",
+          "collection_method",
+          "created",
+          "currency",
+          "customer",
+          "customer_account",
+          "days_until_due",
+          "default_payment_method",
+          "default_source",
+          "default_tax_rates",
+          "description",
+          "discounts",
+          "ended_at",
+          "id",
+          "invoice_settings",
+          "items",
+          "latest_invoice",
+          "livemode",
+          "managed_payments",
+          "metadata",
+          "next_pending_invoice_item_invoice",
+          "object",
+          "on_behalf_of",
+          "pause_collection",
+          "payment_settings",
+          "pending_invoice_item_interval",
+          "pending_setup_intent",
+          "pending_update",
+          "plan",
+          "quantity",
+          "schedule",
+          "start_date",
+          "status",
+          "test_clock",
+          "transfer_data",
+          "trial_end",
+          "trial_settings",
+          "trial_start"
+        ]
+      },
+      "invoice.payment_failed": {
+        "count": 2,
+        "object": "invoice",
+        "top_level_keys": [
+          "account_country",
+          "account_name",
+          "account_tax_ids",
+          "amount_due",
+          "amount_overpaid",
+          "amount_paid",
+          "amount_remaining",
+          "amount_shipping",
+          "application",
+          "attempt_count",
+          "attempted",
+          "auto_advance",
+          "automatic_tax",
+          "automatically_finalizes_at",
+          "billing_reason",
+          "collection_method",
+          "created",
+          "currency",
+          "custom_fields",
+          "customer",
+          "customer_account",
+          "customer_address",
+          "customer_email",
+          "customer_name",
+          "customer_phone",
+          "customer_shipping",
+          "customer_tax_exempt",
+          "customer_tax_ids",
+          "default_payment_method",
+          "default_source",
+          "default_tax_rates",
+          "description",
+          "discounts",
+          "due_date",
+          "effective_at",
+          "ending_balance",
+          "footer",
+          "from_invoice",
+          "hosted_invoice_url",
+          "id",
+          "invoice_pdf",
+          "issuer",
+          "last_finalization_error",
+          "latest_revision",
+          "lines",
+          "livemode",
+          "metadata",
+          "next_payment_attempt",
+          "number",
+          "object",
+          "on_behalf_of",
+          "parent",
+          "payment_settings",
+          "period_end",
+          "period_start",
+          "post_payment_credit_notes_amount",
+          "pre_payment_credit_notes_amount",
+          "receipt_number",
+          "rendering",
+          "shipping_cost",
+          "shipping_details",
+          "starting_balance",
+          "statement_descriptor",
+          "status",
+          "status_transitions",
+          "subtotal",
+          "subtotal_excluding_tax",
+          "test_clock",
+          "total",
+          "total_discount_amounts",
+          "total_excluding_tax",
+          "total_pretax_credit_amounts",
+          "total_taxes",
+          "webhooks_delivered_at"
+        ]
+      },
+      "payment_intent.payment_failed (managed_payments)": {
+        "count": 2,
+        "object": "payment_intent",
+        "top_level_keys": [
+          "allowed_payment_method_types",
+          "amount",
+          "amount_capturable",
+          "amount_details",
+          "amount_received",
+          "application",
+          "application_fee_amount",
+          "automatic_payment_methods",
+          "canceled_at",
+          "cancellation_reason",
+          "capture_method",
+          "client_secret",
+          "confirmation_method",
+          "created",
+          "currency",
+          "customer",
+          "customer_account",
+          "description",
+          "excluded_payment_method_types",
+          "id",
+          "last_payment_error",
+          "latest_charge",
+          "livemode",
+          "managed_payments",
+          "metadata",
+          "next_action",
+          "object",
+          "on_behalf_of",
+          "payment_details",
+          "payment_method",
+          "payment_method_configuration_details",
+          "payment_method_options",
+          "payment_method_types",
+          "payment_record",
+          "processing",
+          "receipt_email",
+          "review",
+          "setup_future_usage",
+          "shared_payment_granted_token",
+          "shipping",
+          "source",
+          "statement_descriptor",
+          "statement_descriptor_suffix",
+          "status",
+          "transfer_data",
+          "transfer_group"
+        ]
+      },
+      "charge.failed": {
+        "count": 2,
+        "object": "charge",
+        "top_level_keys": [
+          "amount",
+          "amount_captured",
+          "amount_refunded",
+          "application",
+          "application_fee",
+          "application_fee_amount",
+          "balance_transaction",
+          "billing_details",
+          "calculated_statement_descriptor",
+          "captured",
+          "created",
+          "currency",
+          "customer",
+          "description",
+          "destination",
+          "dispute",
+          "disputed",
+          "failure_balance_transaction",
+          "failure_code",
+          "failure_message",
+          "fraud_details",
+          "id",
+          "livemode",
+          "metadata",
+          "object",
+          "on_behalf_of",
+          "order",
+          "outcome",
+          "paid",
+          "payment_intent",
+          "payment_method",
+          "payment_method_details",
+          "radar_options",
+          "receipt_email",
+          "receipt_number",
+          "receipt_url",
+          "refunded",
+          "review",
+          "shipping",
+          "source",
+          "source_transfer",
+          "statement_descriptor",
+          "statement_descriptor_suffix",
+          "status",
+          "transfer_data",
+          "transfer_group"
+        ]
+      },
+      "customer.updated": {
+        "count": 13,
+        "object": "customer",
+        "top_level_keys": [
+          "address",
+          "balance",
+          "created",
+          "currency",
+          "customer_account",
+          "default_source",
+          "delinquent",
+          "description",
+          "discount",
+          "email",
+          "id",
+          "invoice_prefix",
+          "invoice_settings",
+          "livemode",
+          "metadata",
+          "name",
+          "next_invoice_sequence",
+          "object",
+          "phone",
+          "preferred_locales",
+          "shipping",
+          "tax_exempt",
+          "test_clock"
+        ]
+      },
+      "customer.subscription.trial_will_end (managed_payments)": {
+        "count": 2,
+        "object": "subscription",
+        "top_level_keys": [
+          "application",
+          "application_fee_percent",
+          "automatic_tax",
+          "billing_cycle_anchor",
+          "billing_cycle_anchor_config",
+          "billing_mode",
+          "billing_thresholds",
+          "cancel_at",
+          "cancel_at_period_end",
+          "canceled_at",
+          "cancellation_details",
+          "collection_method",
+          "created",
+          "currency",
+          "customer",
+          "customer_account",
+          "days_until_due",
+          "default_payment_method",
+          "default_source",
+          "default_tax_rates",
+          "description",
+          "discounts",
+          "ended_at",
+          "id",
+          "invoice_settings",
+          "items",
+          "latest_invoice",
+          "livemode",
+          "managed_payments",
+          "metadata",
+          "next_pending_invoice_item_invoice",
+          "object",
+          "on_behalf_of",
+          "pause_collection",
+          "payment_settings",
+          "pending_invoice_item_interval",
+          "pending_setup_intent",
+          "pending_update",
+          "plan",
+          "quantity",
+          "schedule",
+          "start_date",
+          "status",
+          "test_clock",
+          "transfer_data",
+          "trial_end",
+          "trial_settings",
+          "trial_start"
+        ]
+      },
+      "charge.refund.updated": {
+        "count": 1,
+        "object": "refund",
+        "top_level_keys": [
+          "amount",
+          "balance_transaction",
+          "charge",
+          "created",
+          "currency",
+          "customer",
+          "customer_account",
+          "destination_details",
+          "id",
+          "metadata",
+          "object",
+          "payment_intent",
+          "payment_method",
+          "reason",
+          "receipt_number",
+          "source_transfer_reversal",
+          "status",
+          "transfer_reversal"
+        ]
+      },
+      "refund.updated": {
+        "count": 1,
+        "object": "refund",
+        "top_level_keys": [
+          "amount",
+          "balance_transaction",
+          "charge",
+          "created",
+          "currency",
+          "customer",
+          "customer_account",
+          "destination_details",
+          "id",
+          "metadata",
+          "object",
+          "payment_intent",
+          "payment_method",
+          "reason",
+          "receipt_number",
+          "source_transfer_reversal",
+          "status",
+          "transfer_reversal"
+        ]
+      },
+      "charge.refunded": {
+        "count": 1,
+        "object": "charge",
+        "top_level_keys": [
+          "amount",
+          "amount_captured",
+          "amount_refunded",
+          "application",
+          "application_fee",
+          "application_fee_amount",
+          "balance_transaction",
+          "billing_details",
+          "calculated_statement_descriptor",
+          "captured",
+          "created",
+          "currency",
+          "customer",
+          "description",
+          "destination",
+          "dispute",
+          "disputed",
+          "failure_balance_transaction",
+          "failure_code",
+          "failure_message",
+          "fraud_details",
+          "id",
+          "livemode",
+          "metadata",
+          "object",
+          "on_behalf_of",
+          "order",
+          "outcome",
+          "paid",
+          "payment_intent",
+          "payment_method",
+          "payment_method_details",
+          "radar_options",
+          "receipt_email",
+          "receipt_number",
+          "receipt_url",
+          "refunded",
+          "review",
+          "shipping",
+          "source",
+          "source_transfer",
+          "statement_descriptor",
+          "statement_descriptor_suffix",
+          "status",
+          "transfer_data",
+          "transfer_group"
+        ]
+      },
+      "refund.created": {
+        "count": 1,
+        "object": "refund",
+        "top_level_keys": [
+          "amount",
+          "balance_transaction",
+          "charge",
+          "created",
+          "currency",
+          "customer",
+          "customer_account",
+          "destination_details",
+          "id",
+          "metadata",
+          "object",
+          "payment_intent",
+          "payment_method",
+          "reason",
+          "receipt_number",
+          "source_transfer_reversal",
+          "status",
+          "transfer_reversal"
+        ]
+      },
+      "invoiceitem.created": {
+        "count": 3,
+        "object": "invoiceitem",
+        "top_level_keys": [
+          "amount",
+          "currency",
+          "customer",
+          "customer_account",
+          "date",
+          "description",
+          "discountable",
+          "discounts",
+          "frozen_fields",
+          "id",
+          "invoice",
+          "invoicing_rules",
+          "livemode",
+          "metadata",
+          "net_amount",
+          "object",
+          "parent",
+          "period",
+          "pricing",
+          "proration",
+          "proration_details",
+          "quantity",
+          "quantity_decimal",
+          "tax_rates",
+          "test_clock"
+        ]
+      },
+      "charge.updated": {
+        "count": 2,
+        "object": "charge",
+        "top_level_keys": [
+          "amount",
+          "amount_captured",
+          "amount_refunded",
+          "application",
+          "application_fee",
+          "application_fee_amount",
+          "balance_transaction",
+          "billing_details",
+          "calculated_statement_descriptor",
+          "captured",
+          "created",
+          "currency",
+          "customer",
+          "description",
+          "destination",
+          "dispute",
+          "disputed",
+          "failure_balance_transaction",
+          "failure_code",
+          "failure_message",
+          "fraud_details",
+          "id",
+          "livemode",
+          "metadata",
+          "object",
+          "on_behalf_of",
+          "order",
+          "outcome",
+          "paid",
+          "payment_intent",
+          "payment_method",
+          "payment_method_details",
+          "radar_options",
+          "receipt_email",
+          "receipt_number",
+          "receipt_url",
+          "refunded",
+          "review",
+          "shipping",
+          "source",
+          "source_transfer",
+          "statement_descriptor",
+          "statement_descriptor_suffix",
+          "status",
+          "transfer_data",
+          "transfer_group"
+        ]
+      },
+      "checkout.session.completed (not managed)": {
+        "count": 2,
+        "object": "checkout.session",
+        "top_level_keys": [
+          "adaptive_pricing",
+          "after_expiration",
+          "allow_promotion_codes",
+          "allowed_payment_method_types",
+          "amount_subtotal",
+          "amount_total",
+          "automatic_tax",
+          "billing_address_collection",
+          "branding_settings",
+          "cancel_url",
+          "client_reference_id",
+          "client_secret",
+          "collected_information",
+          "consent",
+          "consent_collection",
+          "created",
+          "currency",
+          "currency_conversion",
+          "custom_fields",
+          "custom_text",
+          "customer",
+          "customer_account",
+          "customer_creation",
+          "customer_details",
+          "customer_email",
+          "discounts",
+          "expires_at",
+          "id",
+          "integration_identifier",
+          "invoice",
+          "invoice_creation",
+          "livemode",
+          "locale",
+          "managed_payments",
+          "metadata",
+          "mode",
+          "object",
+          "origin_context",
+          "payment_intent",
+          "payment_link",
+          "payment_method_collection",
+          "payment_method_configuration_details",
+          "payment_method_options",
+          "payment_method_types",
+          "payment_status",
+          "permissions",
+          "phone_number_collection",
+          "recovered_from",
+          "saved_payment_method_options",
+          "setup_intent",
+          "shipping_address_collection",
+          "shipping_cost",
+          "shipping_options",
+          "status",
+          "submit_type",
+          "subscription",
+          "success_url",
+          "total_details",
+          "ui_mode",
+          "url",
+          "wallet_options"
+        ]
+      },
+      "payment_intent.succeeded (not managed)": {
+        "count": 2,
+        "object": "payment_intent",
+        "top_level_keys": [
+          "allowed_payment_method_types",
+          "amount",
+          "amount_capturable",
+          "amount_details",
+          "amount_received",
+          "application",
+          "application_fee_amount",
+          "automatic_payment_methods",
+          "canceled_at",
+          "cancellation_reason",
+          "capture_method",
+          "client_secret",
+          "confirmation_method",
+          "created",
+          "currency",
+          "customer",
+          "customer_account",
+          "description",
+          "excluded_payment_method_types",
+          "id",
+          "last_payment_error",
+          "latest_charge",
+          "livemode",
+          "managed_payments",
+          "metadata",
+          "next_action",
+          "object",
+          "on_behalf_of",
+          "payment_details",
+          "payment_method",
+          "payment_method_configuration_details",
+          "payment_method_options",
+          "payment_method_types",
+          "payment_record",
+          "processing",
+          "receipt_email",
+          "review",
+          "setup_future_usage",
+          "shared_payment_granted_token",
+          "shipping",
+          "source",
+          "statement_descriptor",
+          "statement_descriptor_suffix",
+          "status",
+          "transfer_data",
+          "transfer_group"
+        ]
+      },
+      "payment_intent.requires_action (not managed)": {
+        "count": 2,
+        "object": "payment_intent",
+        "top_level_keys": [
+          "allowed_payment_method_types",
+          "amount",
+          "amount_capturable",
+          "amount_details",
+          "amount_received",
+          "application",
+          "application_fee_amount",
+          "automatic_payment_methods",
+          "canceled_at",
+          "cancellation_reason",
+          "capture_method",
+          "client_secret",
+          "confirmation_method",
+          "created",
+          "currency",
+          "customer",
+          "customer_account",
+          "description",
+          "excluded_payment_method_types",
+          "id",
+          "last_payment_error",
+          "latest_charge",
+          "livemode",
+          "managed_payments",
+          "metadata",
+          "next_action",
+          "object",
+          "on_behalf_of",
+          "payment_details",
+          "payment_method",
+          "payment_method_configuration_details",
+          "payment_method_options",
+          "payment_method_types",
+          "payment_record",
+          "processing",
+          "receipt_email",
+          "review",
+          "setup_future_usage",
+          "shared_payment_granted_token",
+          "shipping",
+          "source",
+          "statement_descriptor",
+          "statement_descriptor_suffix",
+          "status",
+          "transfer_data",
+          "transfer_group"
+        ]
+      },
+      "customer.created": {
+        "count": 8,
+        "object": "customer",
+        "top_level_keys": [
+          "address",
+          "balance",
+          "created",
+          "currency",
+          "customer_account",
+          "default_source",
+          "delinquent",
+          "description",
+          "discount",
+          "email",
+          "id",
+          "invoice_prefix",
+          "invoice_settings",
+          "livemode",
+          "metadata",
+          "name",
+          "next_invoice_sequence",
+          "object",
+          "phone",
+          "preferred_locales",
+          "shipping",
+          "tax_exempt",
+          "test_clock"
+        ]
+      },
+      "payment_intent.created (not managed)": {
+        "count": 2,
+        "object": "payment_intent",
+        "top_level_keys": [
+          "allowed_payment_method_types",
+          "amount",
+          "amount_capturable",
+          "amount_details",
+          "amount_received",
+          "application",
+          "application_fee_amount",
+          "automatic_payment_methods",
+          "canceled_at",
+          "cancellation_reason",
+          "capture_method",
+          "client_secret",
+          "confirmation_method",
+          "created",
+          "currency",
+          "customer",
+          "customer_account",
+          "description",
+          "excluded_payment_method_types",
+          "id",
+          "last_payment_error",
+          "latest_charge",
+          "livemode",
+          "managed_payments",
+          "metadata",
+          "next_action",
+          "object",
+          "on_behalf_of",
+          "payment_method",
+          "payment_method_configuration_details",
+          "payment_method_options",
+          "payment_method_types",
+          "payment_record",
+          "processing",
+          "receipt_email",
+          "review",
+          "setup_future_usage",
+          "shared_payment_granted_token",
+          "shipping",
+          "source",
+          "statement_descriptor",
+          "statement_descriptor_suffix",
+          "status",
+          "transfer_data",
+          "transfer_group"
+        ]
+      },
+      "checkout.session.completed (managed_payments)": {
+        "count": 6,
+        "object": "checkout.session",
+        "top_level_keys": [
+          "adaptive_pricing",
+          "after_expiration",
+          "allow_promotion_codes",
+          "allowed_payment_method_types",
+          "amount_subtotal",
+          "amount_total",
+          "automatic_tax",
+          "billing_address_collection",
+          "branding_settings",
+          "cancel_url",
+          "client_reference_id",
+          "client_secret",
+          "collected_information",
+          "consent",
+          "consent_collection",
+          "created",
+          "currency",
+          "currency_conversion",
+          "custom_fields",
+          "custom_text",
+          "customer",
+          "customer_account",
+          "customer_creation",
+          "customer_details",
+          "customer_email",
+          "discounts",
+          "expires_at",
+          "id",
+          "integration_identifier",
+          "invoice",
+          "invoice_creation",
+          "livemode",
+          "locale",
+          "managed_payments",
+          "metadata",
+          "mode",
+          "object",
+          "origin_context",
+          "payment_intent",
+          "payment_link",
+          "payment_method_collection",
+          "payment_method_configuration_details",
+          "payment_method_options",
+          "payment_method_types",
+          "payment_status",
+          "permissions",
+          "phone_number_collection",
+          "recovered_from",
+          "saved_payment_method_options",
+          "setup_intent",
+          "shipping_address_collection",
+          "shipping_cost",
+          "shipping_options",
+          "status",
+          "submit_type",
+          "subscription",
+          "success_url",
+          "tax_id_collection",
+          "total_details",
+          "ui_mode",
+          "url",
+          "wallet_options"
+        ]
+      },
+      "customer.subscription.created (managed_payments)": {
+        "count": 6,
+        "object": "subscription",
+        "top_level_keys": [
+          "application",
+          "application_fee_percent",
+          "automatic_tax",
+          "billing_cycle_anchor",
+          "billing_cycle_anchor_config",
+          "billing_mode",
+          "billing_thresholds",
+          "cancel_at",
+          "cancel_at_period_end",
+          "canceled_at",
+          "cancellation_details",
+          "collection_method",
+          "created",
+          "currency",
+          "customer",
+          "customer_account",
+          "days_until_due",
+          "default_payment_method",
+          "default_source",
+          "default_tax_rates",
+          "description",
+          "discounts",
+          "ended_at",
+          "id",
+          "invoice_settings",
+          "items",
+          "latest_invoice",
+          "livemode",
+          "managed_payments",
+          "metadata",
+          "next_pending_invoice_item_invoice",
+          "object",
+          "on_behalf_of",
+          "pause_collection",
+          "payment_settings",
+          "pending_invoice_item_interval",
+          "pending_setup_intent",
+          "pending_update",
+          "plan",
+          "quantity",
+          "schedule",
+          "start_date",
+          "status",
+          "test_clock",
+          "transfer_data",
+          "trial_end",
+          "trial_settings",
+          "trial_start"
+        ]
+      },
+      "payment_method.attached": {
+        "count": 6,
+        "object": "payment_method",
+        "top_level_keys": [
+          "allow_redisplay",
+          "billing_details",
+          "card",
+          "created",
+          "customer",
+          "customer_account",
+          "id",
+          "livemode",
+          "metadata",
+          "object",
+          "shared_payment_granted_token",
+          "type"
+        ]
+      },
+      "setup_intent.succeeded (managed_payments)": {
+        "count": 1,
+        "object": "setup_intent",
+        "top_level_keys": [
+          "allowed_payment_method_types",
+          "application",
+          "automatic_payment_methods",
+          "cancellation_reason",
+          "client_secret",
+          "created",
+          "customer",
+          "customer_account",
+          "description",
+          "excluded_payment_method_types",
+          "flow_directions",
+          "id",
+          "last_setup_error",
+          "latest_attempt",
+          "livemode",
+          "managed_payments",
+          "mandate",
+          "metadata",
+          "next_action",
+          "object",
+          "on_behalf_of",
+          "payment_method",
+          "payment_method_configuration_details",
+          "payment_method_options",
+          "payment_method_types",
+          "single_use_mandate",
+          "status",
+          "usage"
+        ]
+      },
+      "setup_intent.created (managed_payments)": {
+        "count": 1,
+        "object": "setup_intent",
+        "top_level_keys": [
+          "allowed_payment_method_types",
+          "application",
+          "automatic_payment_methods",
+          "cancellation_reason",
+          "client_secret",
+          "created",
+          "customer",
+          "customer_account",
+          "description",
+          "excluded_payment_method_types",
+          "flow_directions",
+          "id",
+          "last_setup_error",
+          "latest_attempt",
+          "livemode",
+          "managed_payments",
+          "mandate",
+          "metadata",
+          "next_action",
+          "object",
+          "on_behalf_of",
+          "payment_method",
+          "payment_method_configuration_details",
+          "payment_method_options",
+          "payment_method_types",
+          "single_use_mandate",
+          "status",
+          "usage"
+        ]
+      },
+      "customer.discount.created": {
+        "count": 1,
+        "object": "discount",
+        "top_level_keys": [
+          "checkout_session",
+          "customer",
+          "customer_account",
+          "end",
+          "id",
+          "invoice",
+          "invoice_item",
+          "object",
+          "promotion_code",
+          "source",
+          "start",
+          "subscription",
+          "subscription_item"
+        ]
+      },
+      "test_helpers.test_clock.created": {
+        "count": 6,
+        "object": "test_helpers.test_clock",
+        "top_level_keys": [
+          "created",
+          "deletes_after",
+          "frozen_time",
+          "id",
+          "livemode",
+          "name",
+          "object",
+          "status",
+          "status_details"
+        ]
+      }
+    }
+  }
+}

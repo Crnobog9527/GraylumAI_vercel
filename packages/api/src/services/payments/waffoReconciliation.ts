@@ -7,8 +7,8 @@ type Db = Pick<SupabaseClient, 'from'>;
 type Provider = Pick<WaffoTestPayments, 'listPayments'> & { merchant: string; mode: 'test' };
 export type WaffoFinding = {
   kind: 'paid_not_delivered' | 'paid_in_review' | 'offsite_refund_due' | 'refund_observed'
-    | 'delivered_without_payment' | 'scan_incomplete';
-  paymentId?: string; orderId?: string; reason?: string;
+    | 'delivered_without_payment' | 'scan_incomplete' | 'receipt_unprocessed';
+  paymentId?: string; orderId?: string; reason?: string; receiptId?: string;
   /** Marks a payment a person should consider refunding; nothing is refunded automatically. */
   refundCandidate: boolean;
   /** Undelivered cash whose Waffo subscription still renews: its renewal must be stopped by hand. */
@@ -61,7 +61,7 @@ export async function reconcileWaffoPayments(db: Db, provider: Provider) {
   const unmatched = paid.filter(p => !orderOf.has(p.id) && !offsitePaid.has(p.id)).map(p => p.orderMerchantExternalId)
     .filter((value): value is string => z.uuid().safeParse(value).success);
   const siteOrders = new Map((await chunked([...new Set(unmatched)], part => db.from('payment_orders')
-    .select('id,qualification_state,method_review_reason').eq('payment_channel', 'waffo').eq('payment_method', 'card')
+    .select('id,qualification_state,method_review_reason,fulfilled_at').eq('payment_channel', 'waffo').eq('payment_method', 'card')
     .eq('merchant_namespace', provider.merchant).eq('payment_mode', 'test').in('id', part))).map(o => [o.id!, o]));
   for (const payment of paid) {
     const orderId = orderOf.get(payment.id);
@@ -81,6 +81,12 @@ export async function reconcileWaffoPayments(db: Db, provider: Provider) {
       // Its webhook never applied. A site order already released (e.g. after the 40-minute timeout) or under
       // review means this is late cash: refund candidate. Otherwise it is an ordinary undelivered payment.
       const site = siteOrders.get(payment.orderMerchantExternalId!)!;
+      // The order was already delivered by another payment: a second FIRST payment (Waffo checkout has no
+      // idempotency). A renewal carries the same order id and stays on the undelivered path below.
+      if (site.fulfilled_at && payment.periodNumber === 1) {
+        findings.push({ kind: 'paid_in_review', paymentId: payment.id, orderId: site.id!, reason: 'duplicate_order_payment', refundCandidate: true });
+        continue;
+      }
       const late = site.qualification_state === 'released' || site.qualification_state === 'review' || Boolean(site.method_review_reason);
       findings.push(late
         ? { kind: 'paid_in_review', paymentId: payment.id, orderId: site.id!,
@@ -93,6 +99,16 @@ export async function reconcileWaffoPayments(db: Db, provider: Provider) {
     const undelivered = finding.refundCandidate || finding.kind === 'paid_not_delivered';
     const status = undelivered ? paid.find(p => p.id === finding.paymentId)?.subscriptionOrder?.status : undefined;
     if (status && RENEWING.includes(status)) finding.renewalActive = true;
+  }
+  // Waffo stops after 5 failed deliveries and cannot resend. A payment-success receipt still unprocessed after
+  // a day means its webhook gave up (or processing is off); its payment is also listed above. Lifecycle events
+  // (past_due, recovered, ...) are deliberately never resolved and are not counted.
+  const stale = await db.from('waffo_event_receipts').select('id').eq('merchant_namespace', provider.merchant)
+    .eq('mode', 'test').eq('event_type', 'subscription.payment_succeeded').eq('status', 'received')
+    .lt('received_at', new Date(Date.now() - 24 * 3600 * 1000).toISOString()).limit(100);
+  if (stale.error) throw new Error('PAY_WAFFO_RECONCILIATION_UNAVAILABLE');
+  for (const row of (stale.data ?? []) as Row[]) {
+    findings.push({ kind: 'receipt_unprocessed', receiptId: row.id!, refundCandidate: false });
   }
   if (complete) {
     const paidIds = new Set(paid.filter(p => !refunded(p)).map(p => p.id));

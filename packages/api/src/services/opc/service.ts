@@ -21,7 +21,7 @@ import { isOpeningInput, openingRequestId, questionTask } from "./questions";
 import { agentTurnInstructions, OPENING_EXTRACTION_RULE } from "./agentTurnPrompt";
 import { ORGANIZER_INSTRUCTIONS } from "./organizerPrompt";
 import {captureHostContext, captureFocus, captureOrganizerInput, captureFrozenInformation} from './captureContext';
-import {withStepConfirmation} from '../../shared/opcStepConfirmation';
+import {withStepConfirmation} from '../../shared/opcStepConfirmation';import {withReportFlag} from './reportFlag';
 import {readStepSummaryRequest,STEP_SUMMARY_INSTRUCTIONS} from './stepSummary';
 import {captureAdmissionReplay} from './captureReplay';
 import {existingPositioningInstructions} from './existingPositioning';
@@ -394,8 +394,8 @@ export function opcService(user: SupabaseClient, admin: SupabaseClient, real?:St
         searchEnabled: false,
       }).prepare(runtimeRequest);
     },
-    read: async (draftId: string) =>
-      ({...withStepConfirmation(await rpc("opc_query", {p_draft_id: uuid.parse(draftId)})),runtimeMode:real?"staging_test":"isolated"}),
+    read: async (draftId: string) => ({...withStepConfirmation(await withReportFlag(await rpc("opc_query", {p_draft_id: uuid.parse(draftId)}), rpc)),
+      runtimeMode:real?"staging_test":"isolated"}),
     start: async (value: unknown) => {
       const v = opcStart.parse(value);
       return rpc("opc_start_b1", {
