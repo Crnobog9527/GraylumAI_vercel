@@ -13,8 +13,12 @@ const REDACTIONS: Array<[RegExp, string]> = [
   [/\b(?:sk|pk|rk|whsec|sb_secret|sb_publishable)[-_][A-Za-z0-9_-]{8,}/g, '[key]'],
   [/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g, '[email]'],
   [/\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi, '[id]'],
+  [/\b(?:\d{1,3}\.){3}\d{1,3}\b/g, '[ip]'],
+  [/\b[0-9a-f]{1,4}(?::[0-9a-f]{0,4}){2,7}\b/gi, '[ip]'],
   [/\+?\d[\d\s-]{9,}\d/g, '[number]'],
 ];
+// Client addresses (http.client_ip, ip_address, x-forwarded-for, ...) are personal data.
+const IP_KEY = /(^|[._-])ip($|[._-])|client_ip|ip_address|forwarded|remote_addr/i;
 const SECRET_KEY = /pass|secret|token|auth|cookie|session|key|email|phone|prompt|content|body|message|text|input|query/i;
 
 /** For SDK-generated metadata (urls, tags, contexts): known identifier formats are masked. */
@@ -52,7 +56,9 @@ function scrubValue(value: unknown, depth: number, text: (value: string) => stri
   for (const [key, item] of Object.entries(value)) {
     if (SECRET_KEY.test(key) && item !== null && typeof item !== 'boolean' && typeof item !== 'number') {
       out[key] = '[removed]';
-    } else if (/url|href|path|uri/i.test(key) && typeof item === 'string') {
+    } else if (IP_KEY.test(key)) {
+      out[key] = '[removed]';
+    } else if (/url|href|path|uri|target/i.test(key) && typeof item === 'string') {
       out[key] = scrubUrl(item);
     } else {
       out[key] = scrubValue(item, depth + 1, text);

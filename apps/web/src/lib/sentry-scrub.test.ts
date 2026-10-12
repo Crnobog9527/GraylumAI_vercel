@@ -56,12 +56,16 @@ describe('sentry scrub', () => {
   it('scrubs transaction names and span urls', () => {
     const event = {
       transaction: `GET /positioning/${ID}`,
-      spans: [{ description: `GET https://openrouter.ai/api?key=1`, data: { 'http.url': 'https://x.test/a?b=1', 'http.query': 'b=1' } }],
+      spans: [{ description: `GET https://openrouter.ai/api?key=1`, data: { 'http.url': 'https://x.test/a?b=1', 'http.query': 'b=1',
+        'http.target': '/api/trpc/admin.searchUsers?input=%7B%22q%22%3A%22lilei%40example.com%22%7D', 'http.client_ip': '203.0.113.9',
+        'net.peer.ip': '2001:db8::1' } }],
     } as unknown as Event;
     const out = scrubTransactionEvent(event);
     expect(out.transaction).toBe('GET /positioning/[id]');
     expect(out.spans?.[0]).toMatchObject({ description: 'GET https://openrouter.ai/api',
-      data: { 'http.url': 'https://x.test/a', 'http.query': '[removed]' } });
+      data: { 'http.url': 'https://x.test/a', 'http.query': '[removed]', 'http.target': '/api/trpc/admin.searchUsers',
+        'http.client_ip': '[removed]', 'net.peer.ip': '[removed]' } });
+    expect(redactText('from 203.0.113.9 and 2001:db8::1')).toBe('from [ip] and [ip]');
   });
 
   it('drops console breadcrumbs entirely', () => {
