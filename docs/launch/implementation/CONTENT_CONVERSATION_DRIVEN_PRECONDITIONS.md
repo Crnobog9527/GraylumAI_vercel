@@ -89,7 +89,9 @@
    会话已删除或范围不可用的跳过。正式环境没有真实用户，staging 上的旧会话也照这个规则处理。
 5. 视频准备（0122:260）这个写入方暂时保留：旧的视频按钮流程在 P1-B 上线前还要用它（它靠 `expectedMaterialRevision` 对准材料修订）。
    P1-B 上线、页面不再调用之后，由 **R 小 PR（迁移 X5）** 让它直接报 `OPC_VIDEO_RETIRED`，并对视频准备留下的最新修订再跑一次第 4 条的追加。
-   R 和 P1-B 同一天先后合并，P1-B 的浏览器验收在 R 合并之后做。
+   顺序和验证（第二轮审查 P1）：B1 是页面改动，**在包含 B1 这个版本的 preview 上做完浏览器验收再合并**，不拿合并后的 B1+R 状态补验。
+   B1 本身不调用视频准备，所以它的 preview 不依赖 R；R 是纯数据库改动，按第 4 节用数据库和集成测试验证（含"旧会话最新材料带视频正文，迁移后不再带"），
+   在 B1 合并后尽快合并。R 合并后再对 B1 的保存和衍生流程做一次冒烟复验，复验发现问题从新分支修。
 6. 选题讨论工作区（0113）、定位会话的写入方不改。
 
 ### 2.4 正文按需注入（A2，迁移 X2）——修订 #621 第 4.3 节
@@ -160,7 +162,11 @@
 | 分镜、剪辑建议 | kind `storyboard`、`editing` | 视频 | `opc_content_from_execution` 放开这两个 kind（来源规则见 2.4 和 #621 第 4.3 节）；API schema 同步 |
 
 - **守卫不放宽**：`opc_guard_content_kind` 保持原样。`unknown` 类型的选题保存时，确认框先让用户选"视频 / 文章 / 图文"，
-  同一个请求里先经 `opc_library_edit` 定类型再保存（失败整体回滚）；不让守卫自己猜类型。
+  定类型和保存必须在**同一个数据库事务**里（第二轮审查 P2）：现有 `opc.editLibrary` 和 `opc.saveContentResult` 是两次 RPC，
+  类型改成功、保存因版本或来源冲突失败时，选题会留在新类型上。做法是新增一个组合函数 `opc_content_save_typed`（参数：选题、
+  期望的条目 revision、选定类型，以及原保存函数的全部参数），在一个事务里先按条目 revision 改类型、再调用原保存逻辑，任何一步失败整体回滚；
+  请求重放按同一请求 id 返回同一结果。原有保存函数签名不变，只在 `unknown` 类型时走组合函数。不让守卫自己猜类型。
+  必测：类型修改成功但保存冲突时，选题类型仍是 `unknown`；同一请求重放不改两次类型。
 - **为什么不新增 `body` 之类的 kind**：要么把已有的 `brief` 行改名（版本不可改、请求重放按 kind 匹配、新旧代码部署期间会互相拒绝），
   要么两种 kind 并存（同一篇文章的版本号会分成两串）。两样都比"讲清名字"风险大，而用户可见的两个概念已经各有归处。
   以后真要改名，随 LEGACY-CLOSE 单独做。
@@ -172,7 +178,7 @@
 ### 3.3 迁移设计（编号实施时向总控要）
 
 - **X1（A1）**：`opc_work_material_payload`；`opc_handoff`、`opc_library_edit`、`opc_content_from_execution`、`opc_content_manual_save`
-  的函数体（保留 D7 守卫）；旧会话材料追加（2.3 第 4 条）；`opc_data_events.action` 加 `brief_adoption` 及写入函数；`opc_content_versions.kind` 的说明注释。
+  的函数体（保留 D7 守卫）；组合函数 `opc_content_save_typed`（3.2，A1 支持 `brief`/`script`，A2 扩到 `storyboard`/`editing`）；旧会话材料追加（2.3 第 4 条）；`opc_data_events.action` 加 `brief_adoption` 及写入函数；`opc_content_versions.kind` 的说明注释。
   可重复执行：函数用 `CREATE OR REPLACE` 或带标记的锚点补丁，CHECK 用 `DROP CONSTRAINT IF EXISTS` + `ADD`，追加材料靠确定性请求 id。
 - **X2（A2）**：`runtime_executions.injected_source`（`ADD COLUMN IF NOT EXISTS`）；`runtime_execution` 的 `checkpoint_source` 动作；
   `runtime_context_allowed` 的 `injected_source` 分支；D7 删除闭包的 `injected_source` 条件；`opc_content_from_execution` 放开 `storyboard`、`editing`；
@@ -265,7 +271,7 @@
 | A3 | 意图匹配和提议、信号 | high | #621 第 3 节（当前 Skill、过滤带步骤的 Skill）；`offer_skill` / `save_content` 信号工具和白名单；第 4 节消耗规则；`runtime_view` 带 `role`、`signal`、`offerState` | X3 | A2；POSITIONING-GATE PR2、#829、#845（同改 `admission.ts` / `execute.ts` / `matching.ts`） |
 | S | 首批平台 Skill 包 | 按内容 | 口播稿、分镜、剪辑建议、图文 / 文章；分镜、剪辑建议声明 `contentSource` | — | 和 A1–A3 并行；发布前 Owner 看样例（Q2 已定） |
 | B1 | 内容窗口前端（#621 P1-B） | ordinary | 选题窗口改为对话界面、当前 Skill 标签、回复下的保存按钮和确认、提议按钮、删除固定流程 | — | A1–A3；S 已在 staging 发布；工作区页面排队（第 7 节） |
-| R | 旧视频写入退役 | high | 视频准备报 `OPC_VIDEO_RETIRED`；对视频准备留下的最新材料再追加一版 | X5 | B1 合并后当天 |
+| R | 旧视频写入退役 | high | 视频准备报 `OPC_VIDEO_RETIRED`；对视频准备留下的最新材料再追加一版 | X5 | B1 合并后尽快（B1 先在自己的 preview 上验收，见 2.3 第 5 条） |
 | P2-A | 纪要后端 | high | #621 第 5 节：纪要说明、`request_minutes`、确定性请求 id、整理执行历史 `internal_control`、纪要列表（`runtime_view` 的 `role`/`signal` 已在 A3） | X4 | A3 |
 | P2-B | 纪要前端 | ordinary | 右侧"整理纪要 / 整理本选题"、历史纪要、复制导出、"更新简报" | — | P2-A；B1 |
 | P3-A / P3-B | 选题讨论 | high / ordinary | #621 第 7 节 T2 信封、流式 | — | 和 A 线串行写 `opc/service.ts` |
@@ -279,8 +285,8 @@
   文章 / 图文存"正文"仍写 kind `brief`，资料库显示为"正文"；`brief`/`script` 原有集成用例全过。
 - **A2**：2.6 的后三条；#621 第 11.2 节"衍生内容来源""依赖链"两组必测（按本文 2.4 把 `contentSources` 改成 `injected_source`）。
 - **A3**：4.3 全部；#621 第 11.2 节匹配、`save_content`、"最新执行口径"三组必测；POSITIONING-GATE 拦截时不发匹配调用。
-- **B1、P2-B**：#621 第 11.1 节验收 1–4、7 和 5–6，在包含改动的 staging 上做浏览器验收（按 CLAUDE.md 交给 Codex，同一测试账号一次一个）。
-- **R**：旧视频按钮入口不再存在时，调用视频准备被拒；旧数据仍能在资料库显示。
+- **B1、P2-B**：#621 第 11.1 节验收 1–4、7 和 5–6，**在包含这个版本的 preview 上、合并之前**做浏览器验收（按 CLAUDE.md 交给 Codex，同一测试账号一次一个）。
+- **R**：调用视频准备被拒；旧数据仍能在资料库显示；旧会话最新材料带视频正文的，迁移后追加一版不带正文的材料（数据库和集成测试）；合并后对 B1 做冒烟复验。
 - **全部数据库 PR**：连续执行两次结构不变、指纹更新、0201 守卫标记仍在、本机 without-app 集成用例通过。
 
 ### 6.3 所有改写现有函数的 PR 共同必测
