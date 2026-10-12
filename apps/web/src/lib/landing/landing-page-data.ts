@@ -14,7 +14,7 @@ export const HOME_DESCRIPTION =
   'Graylum 是你的 AI 自媒体陪跑教练：帮你找准账号定位、决定每周发什么、写出能直接发的内容。免费和教练聊聊，一步步把账号做起来。';
 
 /**
- * Everything the landing page shows, after hiding unaccepted capabilities. Pure, so the page, its
+ * Everything the landing page shows, after hiding switched-off capabilities. Pure, so the page, its
  * JSON-LD and the tests read the same filtered content.
  */
 export function buildLandingPageData(flags: LandingFlags, plans: readonly PaywallPlanSource[], offers: LandingOffers = {}) {

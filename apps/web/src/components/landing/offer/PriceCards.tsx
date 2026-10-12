@@ -19,7 +19,7 @@ export function PriceCards({
 }: {
   cards: readonly LandingCard[];
   yearlyBadge: string | null;
-  // Result lines whose capability is accepted, by card key.
+  // Result lines whose capability is on, by card key.
   showResult: Record<string, boolean>;
   membershipHref: string;
 }) {

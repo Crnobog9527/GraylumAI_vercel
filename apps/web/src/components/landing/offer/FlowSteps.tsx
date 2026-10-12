@@ -7,7 +7,7 @@ import { PlayOnView } from './PlayOnView';
 import styles from './flow.module.css';
 
 /**
- * Module 3a: the walk-through after sign-up. Each accepted step shows a screen mock that plays when it
+ * Module 3a: the walk-through after sign-up. Each step that is on shows a screen mock that plays when it
  * scrolls into view, with the "why this is not generic advice" note next to it. Numbering follows the
  * steps that are shown, so a hidden step leaves no gap.
  */

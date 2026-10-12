@@ -10,7 +10,7 @@ import styles from './offer.module.css';
 
 /**
  * Price section (offer section 4): what the same work costs elsewhere (with sources), the cards,
- * then "先聊后买" right next to them. Only rows and promises whose capability is accepted are passed in.
+ * then "先聊后买" right next to them. Only rows and promises whose capability is on are passed in.
  */
 export function PriceSection({
   pricing,

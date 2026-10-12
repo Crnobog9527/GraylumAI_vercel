@@ -4,7 +4,7 @@ import type { LandingFeature } from './landing-flags';
 /**
  * The 16 FAQ answers, verbatim from the Owner's final offer (2026-10-13, section 5). The Owner edited
  * them by hand: do not reword, reorder or merge. Each paragraph is one line of the answer; an answer
- * whose capabilities are not accepted is hidden as a whole (`needs`, see landing-flags.ts).
+ * whose capabilities are switched off is hidden as a whole (`needs`, see landing-flags.ts).
  */
 export type LandingFaqItem = { id: string; question: string; answer: readonly string[]; needs: readonly LandingFeature[] };
 export type LandingFaqGroup = { title: string; items: readonly LandingFaqItem[] };
