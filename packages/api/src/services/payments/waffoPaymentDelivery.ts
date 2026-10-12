@@ -45,9 +45,10 @@ async function single(query: PromiseLike<{ data: unknown; error: unknown }>) {
 
 async function firstPayment(db: Db, provider: Provider, facts: PaymentFacts): Promise<Decision | null> {
   if (!facts.externalId || !z.uuid().safeParse(facts.externalId).success) return null;
-  const order = await single(db.from('payment_orders').select('id').eq('id', facts.externalId).eq('payment_channel', 'waffo')
-    .eq('payment_method', 'card').eq('merchant_namespace', provider.merchant).eq('payment_mode', 'test').maybeSingle());
+  const order = await single(db.from('payment_orders').select('id,fulfilled_at,subscription_id').eq('id', facts.externalId)
+    .eq('payment_channel', 'waffo').eq('payment_method', 'card').eq('merchant_namespace', provider.merchant).eq('payment_mode', 'test').maybeSingle());
   if (!order) return null;
+  if (order.fulfilled_at && await secondFirstPayment(db, provider, order, facts)) return { state: 'review', reason: 'duplicate_order_payment' };
   const checkout = await single(db.from('payment_provider_refs').select('external_id').eq('order_id', order.id)
     .eq('object_type', 'checkout').eq('channel', 'waffo').eq('merchant_namespace', provider.merchant).eq('mode', 'test').maybeSingle());
   if (!checkout) return { state: 'review', reason: 'checkout_unmapped' };
@@ -56,6 +57,21 @@ async function firstPayment(db: Db, provider: Provider, facts: PaymentFacts): Pr
     p_amount: facts.amountCents, p_currency: facts.currency, p_paid_at: facts.createdAt, p_subscription: facts.waffoOrderId,
     p_start: facts.periodStart, p_end: facts.periodEnd,
   });
+}
+
+/** Waffo checkout has no idempotency and orderMerchantExternalId is not unique (official answer 2026-10-12),
+ * so one order could in theory be paid twice through two sessions, each creating its own Waffo subscription.
+ * The database would answer such a payment as a "duplicate delivery"; recognise it here instead, so it becomes
+ * a refund candidate and its own subscription's renewal is stopped. Redelivery of the delivered payment, or a
+ * payment of the delivered subscription itself, is not a second payment. */
+async function secondFirstPayment(db: Db, provider: Provider, order: Record<string, string>, facts: PaymentFacts) {
+  const known = await single(db.from('payment_provider_refs').select('order_id').eq('object_type', 'payment')
+    .eq('external_id', facts.paymentId).eq('channel', 'waffo').eq('merchant_namespace', provider.merchant).eq('mode', 'test').maybeSingle());
+  if (known) return false;
+  const delivered = order.subscription_id ? await single(db.from('payment_provider_refs').select('external_id')
+    .eq('subscription_id', order.subscription_id).eq('object_type', 'subscription').eq('channel', 'waffo')
+    .eq('merchant_namespace', provider.merchant).eq('mode', 'test').maybeSingle()) : null;
+  return delivered?.external_id !== facts.waffoOrderId;
 }
 
 async function renewal(db: Db, provider: Provider, facts: PaymentFacts): Promise<Decision | null> {
