@@ -110,6 +110,17 @@ BEGIN
 END $$;
 REVOKE ALL ON FUNCTION public.report_revision_state(uuid,artifact_requests) FROM PUBLIC,anon,authenticated,service_role;
 
+-- Same guard as the saved-report read: a revision is shown or decided only while the formal version it
+-- belongs to is readable (sources not deleted or expired, Skill revision still readable). Once applied it
+-- belongs to the version it produced; until then, to the version it revises.
+CREATE OR REPLACE FUNCTION public.report_revision_readable(a uuid,pid uuid,rv artifact_requests) RETURNS boolean
+LANGUAGE sql SET search_path=public,pg_temp AS $$
+ SELECT content_erasure_artifact_readable(a,coalesce((SELECT (dec.response->>'versionId')::uuid FROM artifact_requests dec
+  WHERE dec.project_id=pid AND dec.action='report_revision_apply' AND dec.payload->>'revisionId'=rv.request_id::text
+   AND dec.erased_at IS NULL),(rv.payload->>'sourceVersionId')::uuid))
+$$;
+REVOKE ALL ON FUNCTION public.report_revision_readable(uuid,uuid,artifact_requests) FROM PUBLIC,anon,authenticated,service_role;
+
 -- Publication accepts a revision as report text only inside report_revision's own transaction.
 CREATE OR REPLACE FUNCTION public.report_revision_snapshot(a uuid,pid uuid,rid uuid,p_payload jsonb,p_snapshot jsonb) RETURNS jsonb
 LANGUAGE plpgsql SET search_path=public,pg_temp AS $$
@@ -215,7 +226,9 @@ BEGIN
   SELECT * INTO rv FROM artifact_requests WHERE project_id=p.id AND action='report_revision' AND erased_at IS NULL
    AND payload->>'sourceVersionId'=p_source_version_id::text AND payload->>'draftId'=d.draft_id::text
    ORDER BY payload->>'proposedAt' DESC LIMIT 1;
-  RETURN CASE WHEN rv.request_id IS NULL THEN NULL ELSE report_revision_state(p.id,rv) END;
+  IF rv.request_id IS NULL THEN RETURN NULL; END IF;
+  IF NOT report_revision_readable(p_actor_id,p.id,rv) THEN RAISE EXCEPTION 'REPORT_SOURCE_CONFLICT'; END IF;
+  RETURN report_revision_state(p.id,rv);
  END IF;
 
  IF p_action='propose' THEN
@@ -225,6 +238,7 @@ BEGIN
    IF prior.erased_at IS NOT NULL THEN RAISE EXCEPTION 'CONTENT_ERASED'; END IF;
    IF prior.action<>'report_revision' OR prior.payload-'proposedAt'-'roundId' IS DISTINCT FROM request THEN
     RAISE EXCEPTION 'REPORT_REQUEST_CONFLICT'; END IF;
+   IF NOT report_revision_readable(p_actor_id,p.id,prior) THEN RAISE EXCEPTION 'REPORT_SOURCE_CONFLICT'; END IF;
    RETURN report_revision_state(p.id,prior);
   END IF;
   IF p_request_id IS NULL THEN RAISE EXCEPTION 'REPORT_REVISION_INVALID'; END IF;
@@ -245,6 +259,7 @@ BEGIN
  SELECT * INTO rv FROM artifact_requests WHERE project_id=p.id AND request_id=p_revision_id AND action='report_revision';
  IF rv.request_id IS NULL OR rv.payload->>'draftId' IS DISTINCT FROM d.draft_id::text THEN RAISE EXCEPTION 'REPORT_REVISION_REQUIRED'; END IF;
  IF rv.erased_at IS NOT NULL THEN RAISE EXCEPTION 'CONTENT_ERASED'; END IF;
+ IF NOT report_revision_readable(p_actor_id,p.id,rv) THEN RAISE EXCEPTION 'REPORT_SOURCE_CONFLICT'; END IF;
  IF p_action='read' THEN RETURN report_revision_state(p.id,rv); END IF;
 
  IF p_request_id IS NULL THEN RAISE EXCEPTION 'REPORT_REVISION_INVALID'; END IF;

@@ -153,12 +153,21 @@ export async function runCases({db,Client,connectionString,report}) {
  assert.deepEqual(await current(db,g),gBefore,'decline leaves fields, round and version unchanged');
  assert.deepEqual(await call14(db,g,'latest'),declined);
  await assert.rejects(apply(db,g,grv),/REPORT_REVISION_DECIDED/);
- report.checks.push('decline: fields, formal version and round unchanged; revision kept as text with fieldsSynced=false; apply afterwards refused');
+ // The source version becomes unreadable (its report source expires): the revision is no longer shown or decided.
+ const gone=await seed(db);const gr=await propose(db,gone);const declineRequest=randomUUID();await decline(db,gone,gr,{request:declineRequest});
+ const hidden=await seed(db);const hr=await propose(db,hidden);
+ for(const t of [gone,hidden]) await db.query(`UPDATE artifact_evidence_restrictions SET expires_at=clock_timestamp()
+  WHERE evidence_id IN (SELECT jsonb_array_elements_text(evidence_ids)::uuid FROM artifact_versions WHERE id=$1)`,[t.versionId]);
+ for(const attempt of [call14(db,gone,'read',{revision:gr.revisionId}),call14(db,gone,'latest'),
+  decline(db,gone,gr,{request:declineRequest}),call14(db,hidden,'read',{revision:hr.revisionId}),decline(db,hidden,hr),apply(db,hidden,hr)])
+  await assert.rejects(attempt,/REPORT_SOURCE_CONFLICT/);
+ report.checks.push('decline: fields, formal version and round unchanged; revision kept as text with fieldsSynced=false; apply afterwards refused; unreadable source hides and blocks the revision');
 
  const h=await seed(db);
  const first=await propose(db,h),second=await propose(db,h,{fields:{c:{voice:'Direct'}}});
  await apply(db,h,second);
- await assert.rejects(apply(db,h,first),/REPORT_REVISION_STALE/,'a revision of a superseded version cannot apply');
+ // The superseded source is no longer readable after the revision round opened, so the guard refuses first.
+ await assert.rejects(apply(db,h,first),/REPORT_REVISION_STALE|REPORT_SOURCE_CONFLICT/,'a revision of a superseded version cannot apply');
  const race=await seed(db);const rr=await propose(db,race);
  const other=new Client({connectionString});await other.connect();
  try {
