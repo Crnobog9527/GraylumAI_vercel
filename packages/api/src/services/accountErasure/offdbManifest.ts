@@ -98,7 +98,9 @@ export async function syncErasureManifest(database: Database, options: {
         result.synced += done.length;
         result.pending -= done.length;
       }
-      if (!result.ok || done.length < rows.length || rows.length < BATCH || now() > deadline) break;
+      // Stopped by the deadline with rows (possibly) left: the run is incomplete, never a success.
+      if (result.ok && (done.length < rows.length || (rows.length === BATCH && now() > deadline))) result.ok = false;
+      if (!result.ok || rows.length < BATCH) break;
     }
   } catch { result.ok = false; }
   if (options.cleanup) {

@@ -97,4 +97,13 @@ describe('off-database erasure manifest sync', () => {
     await vi.waitFor(() => expect(rejecting.rpc).toHaveBeenCalled());
     expect(manifestRedisFromEnv({})).toBeNull();
   });
+  it('reports a deadline-truncated run as incomplete instead of success', async () => {
+    let clock = now;
+    const db = database([[row(1), row(2)]]);
+    const redis = { set: vi.fn(async () => { clock += 5_000; return 'OK'; }) };
+    const result = await syncErasureManifest(db, { redis, now: () => clock, deadline: now + 1_000 });
+    expect(result.ok).toBe(false);
+    expect(marked(db)).toEqual([row(1).id]);
+    expect(result.pending).toBe(1);
+  });
 });

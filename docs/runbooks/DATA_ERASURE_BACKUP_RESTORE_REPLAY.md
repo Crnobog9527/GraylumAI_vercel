@@ -66,6 +66,9 @@ Redis 键名：`graylum:erasure-manifest:<kind>:<目标编号>`，值是上面�
      `loadOpeningGrantDigests` 从恢复出来的 Auth 用户计算，请求编号用新的 UUID），然后让注销执行器
      （`runAccountErasureExecutor`）在隔离项目里跑到该账号 `stage='completed'`，它会重新删除存储文件和 Auth 账号。
      如果注销被拒绝（例如恢复出来的订阅还在自动续费），停下来报告 Owner，不要绕过检查。
+     先核对账号在恢复出来的库里是否存在：`profiles` 里没有这个编号、Auth 里也没有这个用户编号，
+     说明账号是备份之后才注册又注销的，恢复出来的库里本来就没有它的数据，记为"不存在"，跳过，不算失败。
+     只有其中一边存在（比如有 profile 没有 Auth 用户）时停下来人工核对，不能当成"不存在"。
    - 标了 `supersededByAccount: true` 的单条删除：账号已整体注销，跳过（注销会清掉它）。
    - `answer` / `session` / `artifact` / `content`：先 `content_erasure_preview(账号, kind, 目标)` 拿到
      `previewHash`，再 `content_erasure_confirm(账号, kind, 目标, previewHash)`。
