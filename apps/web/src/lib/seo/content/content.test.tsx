@@ -1,10 +1,12 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 import { ArticlePage } from '@/components/public-site/ArticlePage';
+import { sanitizeRedirectTarget } from '@/lib/auth';
 import { SITE_CHROME } from '@/components/public-site/site-chrome';
 import type { ArticleContent } from '../article';
 import { PUBLIC_PAGES } from '../public-pages';
 import { ABOUT_ZH_HANS, ABOUT_ZH_TW } from './about';
+import { SIGNUP_CTA_HREF } from './shared';
 import { ZH_TW_GLOSSARY } from './zh-tw/glossary';
 import { ZH_TW_HUB } from './zh-tw/hub';
 import { ZH_TW_IG_JINGYING } from './zh-tw/ig-jingying';
@@ -30,7 +32,7 @@ const ARTICLES: ArticleContent[] = [
 ];
 
 // Login entry pages are not in the sitemap but are real pages every visitor can open.
-const LOGIN_LINKS = new Set(['/login', '/login?action=signup']);
+const LOGIN_LINKS = new Set(['/login', SIGNUP_CTA_HREF]);
 const PAGE_PATHS = new Set(PUBLIC_PAGES.map(page => page.path));
 
 // Characters that only exist in Simplified Chinese; Taiwan pages must not contain them (spec 3.1).
@@ -51,6 +53,13 @@ function internalLinks(content: ArticleContent) {
 }
 
 describe.each(ARTICLES.map(content => [content.path, content] as const))('public page %s', (_path, content) => {
+  it('sends the product entry through sign-up to the positioning diagnosis', () => {
+    const url = new URL(content.cta.href, 'https://www.graylum.com');
+    expect(url.pathname).toBe('/login');
+    expect(url.searchParams.get('action')).toBe('signup');
+    expect(sanitizeRedirectTarget(url.searchParams.get('redirect'))).toBe('/positioning');
+  });
+
   it('is in the sitemap and every internal link points at an existing public page', () => {
     expect(PAGE_PATHS.has(content.path)).toBe(true);
     for (const href of internalLinks(content)) {
@@ -72,7 +81,7 @@ describe.each(ARTICLES.map(content => [content.path, content] as const))('public
   it('renders exactly one H1, a product entry, the visible FAQ as FAQPage data, and the page language', () => {
     const html = renderToStaticMarkup(<ArticlePage content={content} supportEmail="help@graylum.com" />);
     expect(html.match(/<h1[\s>]/g)).toHaveLength(1);
-    expect(html).toContain(`href="${content.cta.href}"`);
+    expect(html).toContain(`href="${content.cta.href.replace(/&/g, '&amp;')}"`);
     // The author attribution itself links to About (SEO_GEO_SPEC 7.5).
     expect(html).toContain(`<a href="${SITE_CHROME[content.locale].company[0].href}" rel="author"`);
     expect(html).toContain(`>${SITE_CHROME[content.locale].authorLabel}</a>`);
