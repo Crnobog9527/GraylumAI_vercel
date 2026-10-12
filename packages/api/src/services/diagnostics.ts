@@ -14,6 +14,7 @@ import { buildCachedPrompt } from './promptCacheBuilder';
 import { getChatRuntimeSettings } from './chatRuntime';
 import { getConfiguredProviderApiKeySource } from './providerUtils';
 import { logger } from '../lib/logger';
+import { realModelUsedOrStored } from './modelIdentity/usageAliases';
 import { readDiagnosticSummary, readDiagnosticTestHistory, readLatestDiagnosticResults } from './diagnosticsResults';
 
 // ============================================
@@ -245,7 +246,6 @@ export async function loadLatestRuntimeProof(
   const expectedSearchCount = Number(usageMetadata.webSearchCount ?? 0) || 0;
   const searchExecuted = usageMetadata.webSearchExecuted === true || expectedSearchCount > 0;
   const freeTierUsed = usageMetadata.freeTierUsed === true;
-
   const { data: tokenCandidates } = await supabase
     .from('token_stats')
     .select('id, conversation_id, message_id, model_used, total_credits, web_search_count, total_cost_usd, metadata, created_at')
@@ -253,7 +253,7 @@ export async function loadLatestRuntimeProof(
     .order('created_at', { ascending: false })
     .limit(5);
 
-  const tokenStats = (tokenCandidates ?? []).reduce<Record<string, unknown> | null>((best, row) => {
+  const tokenStats = (await realModelUsedOrStored(supabase, tokenCandidates ?? [])).reduce<Record<string, unknown> | null>((best, row) => {
     if (!row) return best;
     if (best === null) return row;
 
