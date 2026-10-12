@@ -47,9 +47,10 @@ describe.each(ARTICLES.map(content => [content.path, content] as const))('public
   it('keeps the title, description and first-screen answer within the spec limits', () => {
     const cjk = (text: string) => (text.match(/[㐀-鿿]/g) ?? []).length;
     expect(cjk(content.metaTitle)).toBeLessThanOrEqual(30);
-    expect(cjk(content.metaDescription)).toBeGreaterThanOrEqual(45);
-    expect(cjk(content.metaDescription)).toBeLessThanOrEqual(85);
-    expect(content.lead.length).toBeLessThanOrEqual(110);
+    // SEO_GEO_SPEC section 5 (description 60–80 characters) and 7.1 (answer within 100 characters).
+    expect(cjk(content.metaDescription)).toBeGreaterThanOrEqual(60);
+    expect(cjk(content.metaDescription)).toBeLessThanOrEqual(80);
+    expect(content.lead.length).toBeLessThanOrEqual(100);
     expect(content.sections.length).toBeGreaterThanOrEqual(3);
     expect(content.sections.length).toBeLessThanOrEqual(6);
   });
