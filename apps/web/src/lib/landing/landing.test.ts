@@ -146,8 +146,8 @@ describe('landing page data', () => {
 
 describe('landing sample reports', () => {
   it('never lets production show the samples before every report is really generated', () => {
-    // Flip `sampleReports` only after all four demo reports are filled in and one shows the hard truth.
-    expect(!LANDING_FEATURES.sampleReports.accepted || allSamplesReady()).toBe(true);
+    // Turn `sampleReports` on only after all four demo reports are filled in and one shows the hard truth.
+    expect(!LANDING_FEATURES.sampleReports.show || allSamplesReady()).toBe(true);
   });
 
   it('keeps the four Owner-chosen audiences in order and invents no report text', () => {
