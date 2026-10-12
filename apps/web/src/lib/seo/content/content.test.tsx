@@ -92,6 +92,15 @@ describe.each(ARTICLES.map(content => [content.path, content] as const))('public
     expect(content.related.filter(link => link.href.startsWith('/zh-tw/')).length).toBeGreaterThanOrEqual(2);
   });
 
+  it.runIf(content.locale === 'zh-TW' && content.path !== '/zh-tw/about')('cites at least one visible source (spec 12.4)', () => {
+    expect(content.sources?.length).toBeGreaterThan(0);
+    const html = renderToStaticMarkup(<ArticlePage content={content} />);
+    for (const source of content.sources ?? []) {
+      expect(source.href).toMatch(/^https:\/\//);
+      expect(html).toContain(`href="${source.href.replace(/&/g, '&amp;')}"`);
+    }
+  });
+
   it.runIf(content.locale === 'zh-TW')('uses Traditional characters only', () => {
     const text = JSON.stringify(content) + JSON.stringify(SITE_CHROME['zh-TW']);
     expect(text.match(SIMPLIFIED_ONLY)?.[0]).toBeUndefined();

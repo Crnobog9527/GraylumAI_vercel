@@ -91,5 +91,9 @@ export const ZH_TW_SHEQUN_JINGYING: ArticleContent = {
     { label: '社群行銷是什麼？', href: '/zh-tw/shequn-xingxiao', description: '用社群達成品牌認知、名單和銷售的規劃步驟。' },
     { label: '如何經營自媒體？', href: '/zh-tw/zimeiti-jingying', description: '從定位到變現，新手經營自媒體的 6 個步驟。' },
   ],
+  sources: [
+    { label: 'Instagram 說明中心：關於 Instagram 主控板與洞察報告（英文）', href: 'https://help.instagram.com/257516379077270' },
+    { label: 'Instagram 說明中心：隱藏不想看到的留言（英文）', href: 'https://help.instagram.com/700284123459336' },
+  ],
   updated: '2026-10-12',
 };

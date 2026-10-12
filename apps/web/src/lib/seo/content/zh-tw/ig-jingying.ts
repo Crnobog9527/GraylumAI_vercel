@@ -92,5 +92,11 @@ export const ZH_TW_IG_JINGYING: ArticleContent = {
     { label: '如何經營自媒體？', href: '/zh-tw/zimeiti-jingying', description: '從定位到變現，新手經營自媒體的 6 個步驟。' },
     { label: '自媒體課程怎麼選？', href: '/zh-tw/zimeiti-kecheng', description: '上課、真人陪跑和 AI 陪跑的差別與適合對象。' },
   ],
+  sources: [
+    { label: 'Instagram 說明中心：設定專業帳號（英文）', href: 'https://help.instagram.com/502981923235522' },
+    { label: 'Instagram 說明中心：關於 Instagram 主控板與洞察報告（英文）', href: 'https://help.instagram.com/257516379077270' },
+    { label: 'Instagram 官方：Instagram Ranking Explained（各版位的排序方式，英文）', href: 'https://about.instagram.com/blog/announcements/instagram-ranking-explained' },
+    { label: 'Instagram for Creators：Tips for Improving Your Reach（英文）', href: 'https://creators.instagram.com/blog/tips-for-improving-your-reach' },
+  ],
   updated: '2026-10-12',
 };

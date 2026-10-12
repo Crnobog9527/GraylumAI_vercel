@@ -29,6 +29,7 @@ export type SiteChrome = {
   breadcrumbLabel: string;
   faqTitle: string;
   relatedTitle: string;
+  sourcesTitle: string;
   rights: string;
 };
 
@@ -62,6 +63,7 @@ export const SITE_CHROME: Record<SiteLocale, SiteChrome> = {
     breadcrumbLabel: '当前位置',
     faqTitle: '常见问题',
     relatedTitle: '继续阅读',
+    sourcesTitle: '资料来源',
     rights: '版权所有',
   },
   'zh-TW': {
@@ -91,6 +93,7 @@ export const SITE_CHROME: Record<SiteLocale, SiteChrome> = {
     breadcrumbLabel: '目前位置',
     faqTitle: '常見問題',
     relatedTitle: '延伸閱讀',
+    sourcesTitle: '資料來源',
     rights: '版權所有',
   },
 };

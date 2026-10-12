@@ -130,6 +130,21 @@ export function ArticlePage({ content, supportEmail }: { content: ArticleContent
             ))}
           </ul>
         </section>
+
+        {content.sources?.length ? (
+          <aside className="mt-10 border-t border-[#262626] pt-6">
+            <p className="text-sm font-semibold text-white">{chrome.sourcesTitle}</p>
+            <ul className="mt-3 space-y-2 text-sm text-[#9A9A9A]">
+              {content.sources.map(source => (
+                <li key={source.href}>
+                  <a href={source.href} target="_blank" rel="noopener noreferrer" className="underline hover:text-[#FFD700]">
+                    {source.label}
+                  </a>
+                </li>
+              ))}
+            </ul>
+          </aside>
+        ) : null}
       </article>
     </SiteShell>
   );

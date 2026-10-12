@@ -103,5 +103,9 @@ export const ZH_TW_HUB: ArticleContent = {
     { label: '關於 Graylum', href: '/zh-tw/about', description: '公司資訊、編輯原則和聯絡方式。' },
     { label: '價格（簡體）', href: '/landing/pricing', description: '免費開始，以及會員和點數包的說明。' },
   ],
+  sources: [
+    { label: 'Instagram 官方：Instagram Ranking Explained（各版位的排序方式，英文）', href: 'https://about.instagram.com/blog/announcements/instagram-ranking-explained' },
+    { label: 'YouTube 說明：YouTube 合作夥伴計畫總覽與資格條件（廣告收益分潤）', href: 'https://support.google.com/youtube/answer/72851?hl=zh-Hant' },
+  ],
   updated: '2026-10-12',
 };

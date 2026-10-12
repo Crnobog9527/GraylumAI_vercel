@@ -102,5 +102,11 @@ export const ZH_TW_ZIMEITI_KECHENG: ArticleContent = {
     { label: 'IG 經營全攻略', href: '/zh-tw/ig-jingying', description: '新手如何經營 IG：帳號設定、內容形式和數據。' },
     { label: '價格（簡體）', href: '/landing/pricing', description: '免費開始，以及會員和點數包的說明。' },
   ],
+  sources: [
+    {
+      label: '美國聯邦貿易委員會（FTC）：When a Business Offer or Coaching Program Is a Scam（英文）',
+      href: 'https://consumer.ftc.gov/articles/when-business-offer-or-coaching-program-scam',
+    },
+  ],
   updated: '2026-10-12',
 };

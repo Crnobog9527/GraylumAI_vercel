@@ -90,5 +90,9 @@ export const ZH_TW_SHEQUN_XINGXIAO: ArticleContent = {
     { label: '社群經營怎麼做？', href: '/zh-tw/shequn-jingying', description: '行銷之外，怎麼透過互動把粉絲變成社群。' },
     { label: 'IG 經營全攻略', href: '/zh-tw/ig-jingying', description: '把 IG 當主力平台的帳號設定和內容做法。' },
   ],
+  sources: [
+    { label: 'LINE Biz-Solutions：LINE 官方帳號介紹', href: 'https://tw.linebiz.com/service/account-solutions/line-official-account/' },
+    { label: 'Instagram 官方：Instagram Ranking Explained（各版位的排序方式，英文）', href: 'https://about.instagram.com/blog/announcements/instagram-ranking-explained' },
+  ],
   updated: '2026-10-12',
 };

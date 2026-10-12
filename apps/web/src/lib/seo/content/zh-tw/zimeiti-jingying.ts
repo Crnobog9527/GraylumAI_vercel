@@ -108,5 +108,9 @@ export const ZH_TW_ZIMEITI_JINGYING: ArticleContent = {
     { label: 'IG 經營全攻略', href: '/zh-tw/ig-jingying', description: '主力平台選 IG 的話，帳號設定、內容形式和數據怎麼看。' },
     { label: '社群經營怎麼做？', href: '/zh-tw/shequn-jingying', description: '有了受眾之後，怎麼透過互動把粉絲變成社群。' },
   ],
+  sources: [
+    { label: 'Instagram 說明中心：設定專業帳號（英文）', href: 'https://help.instagram.com/502981923235522' },
+    { label: 'Instagram 官方：Instagram Ranking Explained（各版位的排序方式，英文）', href: 'https://about.instagram.com/blog/announcements/instagram-ranking-explained' },
+  ],
   updated: '2026-10-12',
 };
