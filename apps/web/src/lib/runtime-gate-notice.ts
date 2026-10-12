@@ -12,7 +12,11 @@ export const OUTPUT_TRUNCATED_NOTICE = '本次模型调用达到长度上限，�
 
 export const HISTORY_OMITTED_NOTICE = '较早的部分对话记录无法使用，本轮回复未参考它们';
 
-export const PROVIDER_HISTORY_NOTICE = '这条对话的历史记录格式不兼容，本轮无法继续。请新开一个对话，并重新提供需要参考的内容。';
+// A persisted provider_history/preflight reason means the round never charged or was refunded (Owner 2026-10-12).
+export const PROVIDER_HISTORY_NOTICE = '这条对话的历史记录格式不兼容，本轮无法继续，本轮不扣积分。请新开一个对话，并重新提供需要参考的内容。';
+
+/** A Graylum-side request failure ended the round; any credits it charged were restored. */
+export const PLATFORM_FAILURE_NOTICE = '系统原因导致本轮无法完成，本轮不扣积分。请稍后重试，或新开一个对话。';
 
 /** The provider refused the whole turn before any charge; shown live and, after a reload, from the view. */
 export const PROVIDER_REJECTED_NOTICE = '服务暂时不可用，没有扣积分。';
