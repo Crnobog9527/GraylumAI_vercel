@@ -6,20 +6,34 @@ import type { ArticleContent } from '../article';
 import { PUBLIC_PAGES } from '../public-pages';
 import { ABOUT_ZH_HANS, ABOUT_ZH_TW } from './about';
 import { ZH_TW_HUB } from './zh-tw/hub';
+import { ZH_TW_IG_JINGYING } from './zh-tw/ig-jingying';
+import { ZH_TW_SHEQUN_JINGYING } from './zh-tw/shequn-jingying';
+import { ZH_TW_SHEQUN_XINGXIAO } from './zh-tw/shequn-xingxiao';
+import { ZH_TW_ZIMEITI_JINGYING } from './zh-tw/zimeiti-jingying';
+import { ZH_TW_ZIMEITI_KECHENG } from './zh-tw/zimeiti-kecheng';
 
 vi.mock('next/link', () => ({
   default: ({ href, children, ...rest }: { href: string; children: React.ReactNode }) => <a href={href} {...rest}>{children}</a>,
 }));
 
 // Every public content page; keyword pages are added here as they are written.
-export const ARTICLES: ArticleContent[] = [ABOUT_ZH_HANS, ABOUT_ZH_TW, ZH_TW_HUB];
+const ARTICLES: ArticleContent[] = [
+  ABOUT_ZH_HANS,
+  ABOUT_ZH_TW,
+  ZH_TW_HUB,
+  ZH_TW_ZIMEITI_JINGYING,
+  ZH_TW_SHEQUN_XINGXIAO,
+  ZH_TW_SHEQUN_JINGYING,
+  ZH_TW_IG_JINGYING,
+  ZH_TW_ZIMEITI_KECHENG,
+];
 
 // Login entry pages are not in the sitemap but are real pages every visitor can open.
 const LOGIN_LINKS = new Set(['/login', '/login?action=signup']);
 const PAGE_PATHS = new Set(PUBLIC_PAGES.map(page => page.path));
 
 // Characters that only exist in Simplified Chinese; Taiwan pages must not contain them (spec 3.1).
-const SIMPLIFIED_ONLY = /[们这说个发为对时会过还进动么优网户页质视频账号运营信息设计应该经开关题见让从产业务认识讯书写读样实际点热准问]/;
+const SIMPLIFIED_ONLY = /[们这说个发为对时会过还进动么优网户页质视频账号运营设计应该经开关题见让从产业务认识讯书写读样实际点热准问]/;
 
 function internalLinks(content: ArticleContent) {
   const chrome = SITE_CHROME[content.locale];
@@ -65,6 +79,12 @@ describe.each(ARTICLES.map(content => [content.path, content] as const))('public
       expect(html).toContain(item.answer);
     }
     expect(html.match(/<h[1-6][\s>]/g)!.length).toBe(html.match(/<h[1-6][\s>]/g)!.filter(tag => !tag.startsWith('<h4')).length);
+  });
+
+  it.runIf(content.path.startsWith('/zh-tw/') && content.path !== '/zh-tw/about')('links back to the hub with 自媒體 and to two sibling pages', () => {
+    expect(content.breadcrumb[0]).toEqual({ name: '自媒體', path: '/zh-tw' });
+    expect(content.related.some(link => link.href === '/zh-tw')).toBe(true);
+    expect(content.related.filter(link => link.href.startsWith('/zh-tw/')).length).toBeGreaterThanOrEqual(2);
   });
 
   it.runIf(content.locale === 'zh-TW')('uses Traditional characters only', () => {

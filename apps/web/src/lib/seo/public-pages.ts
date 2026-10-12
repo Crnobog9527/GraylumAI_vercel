@@ -33,4 +33,9 @@ export const PUBLIC_PAGES: PublicPage[] = [
   // Traditional Chinese (Taiwan), SEO_GEO_SPEC 3.2 and appendix B.
   { path: '/zh-tw', locale: 'zh-TW', lastModified: '2026-10-12', footerLabel: '自媒體是什麼？' },
   { path: '/zh-tw/about', locale: 'zh-TW', lastModified: '2026-10-12', alternates: { 'zh-Hans': '/about' } },
+  { path: '/zh-tw/zimeiti-jingying', locale: 'zh-TW', lastModified: '2026-10-12', footerLabel: '如何經營自媒體' },
+  { path: '/zh-tw/shequn-xingxiao', locale: 'zh-TW', lastModified: '2026-10-12', footerLabel: '社群行銷' },
+  { path: '/zh-tw/shequn-jingying', locale: 'zh-TW', lastModified: '2026-10-12', footerLabel: '社群經營' },
+  { path: '/zh-tw/ig-jingying', locale: 'zh-TW', lastModified: '2026-10-12', footerLabel: 'IG 經營' },
+  { path: '/zh-tw/zimeiti-kecheng', locale: 'zh-TW', lastModified: '2026-10-12', footerLabel: '自媒體課程' },
 ];

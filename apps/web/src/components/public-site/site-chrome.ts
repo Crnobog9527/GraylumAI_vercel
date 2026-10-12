@@ -69,6 +69,8 @@ export const SITE_CHROME: Record<SiteLocale, SiteChrome> = {
   'zh-TW': {
     home: '/zh-tw',
     nav: [
+      { label: '自媒體經營', href: '/zh-tw/zimeiti-jingying' },
+      { label: 'IG 經營', href: '/zh-tw/ig-jingying' },
       { label: '關於我們', href: '/zh-tw/about' },
     ],
     login: '登入',
