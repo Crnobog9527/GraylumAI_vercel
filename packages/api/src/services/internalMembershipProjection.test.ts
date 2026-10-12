@@ -35,6 +35,16 @@ describe('paid internal membership consumer projection', () => {
     expect(result.level).toBe('free');
     expect(() => assertFusionEntitlement(result, 'compare', 2)).toThrow('ENTITLEMENTS_FUSION_FORBIDDEN');
   });
+  it('keeps access only inside the database-provided renewal grace after the paid end', () => {
+    const ended = { ...paid(), payment_channel: 'waffo', cancel_at_period_end: 'false',
+      current_period_end: new Date(Date.now() - 3_600_000).toISOString() };
+    expect(getState({ profileLevel: 'free', latestMembershipOrder: null, latestSubscription: { ...ended,
+      renewal_grace_until: new Date(Date.now() + 3_600_000).toISOString() } })).toMatchObject({ level: 'gold', state: 'active' });
+    expect(getState({ profileLevel: 'gold', latestMembershipOrder: null, latestSubscription: { ...ended,
+      renewal_grace_until: new Date(Date.now() - 60_000).toISOString() } })).toMatchObject({ level: 'free', state: 'free' });
+    expect(getState({ profileLevel: 'gold', latestMembershipOrder: null, latestSubscription: ended }))
+      .toMatchObject({ level: 'free', state: 'free' });
+  });
   it.each([null, 'bad', '2000-01-01T00:00:00Z'])('fails closed for missing/invalid/expired paid end %s', end => {
     expect(getState({ profileLevel: 'gold', latestSubscription: { ...paid(), current_period_end: end },
       latestMembershipOrder: null })).toMatchObject({ level: 'free', state: 'free' });

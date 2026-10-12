@@ -23,3 +23,15 @@ it('never prepares live sales; uses server scope and authenticated identity for 
     p_user: id, p_merchant: 'fixture', p_mode: 'test', p_terms: 'terms-v1', p_version: 3,
   }));
 });
+it('keeps the admission refusal code: known business refusals are typed, everything else stays an outage', async () => {
+  const { MethodPurchaseRejected } = await import('./methodPurchaseError');
+  const run = (message: string) => prepareMethodPurchase({ admin: { rpc: vi.fn().mockResolvedValue({ data: null,
+    error: { message } }) } as never, userId: id, purchase, merchantNamespace: 'fixture', paymentMode: 'test', termsVersion: 'terms-v1' });
+  const refused = await run('PAY_WAFFO_MEMBERSHIP_TRANSITION_REQUIRED').catch((error: unknown) => error);
+  expect(refused).toBeInstanceOf(MethodPurchaseRejected);
+  expect(refused).toMatchObject({ message: 'PAY_WAFFO_MEMBERSHIP_TRANSITION_REQUIRED' });
+  const fault = await run('PAY_WAFFO_CATALOG_NOT_READY').catch((error: unknown) => error);
+  expect(fault).not.toBeInstanceOf(MethodPurchaseRejected);
+  expect(fault).toMatchObject({ message: 'PAY_WAFFO_CATALOG_NOT_READY' });
+  await expect(run('connection reset')).rejects.toThrow('PAY_WAFFO_PURCHASE_DENIED');
+});

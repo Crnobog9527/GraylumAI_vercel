@@ -6,6 +6,8 @@ type InternalSubscription = {
   membership_level?: string | null;
   billing_cycle?: string | null;
   current_period_end?: string | null;
+  /** Set by 0214 only inside the 24-hour card renewal grace; the paid end stays in current_period_end. */
+  renewal_grace_until?: string | null;
   cancel_at_period_end?: string | boolean | null;
 };
 
@@ -14,7 +16,7 @@ export function internalMembershipState(subscription: InternalSubscription | nul
   const mapping = subscription?.mapping_state;
   if (mapping !== 'internal_paid' && mapping !== 'internal_inactive') return null;
   const level = subscription?.membership_level;
-  const end = Date.parse(subscription?.current_period_end ?? '');
+  const end = Math.max(Date.parse(subscription?.current_period_end ?? ''), Date.parse(subscription?.renewal_grace_until ?? '') || -Infinity);
   const active = mapping === 'internal_paid' && (level === 'pro' || level === 'gold')
     && Number.isFinite(end) && end > Date.now();
   return {

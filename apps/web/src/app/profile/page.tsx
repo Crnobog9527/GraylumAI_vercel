@@ -26,6 +26,7 @@ import { CreditRecordsCard } from '@/components/profile/CreditRecordsCard';
 import { UsageHistoryCard } from '@/components/profile/UsageHistoryCard';
 import { SecuritySettingsCard } from '@/components/profile/SecuritySettingsCard';
 import { AccountErasureCard } from '@/components/profile/AccountErasureCard';
+import { DataUseConsentCard } from '@/components/profile/DataUseConsentCard';
 import TicketsPanel from '@/components/profile/TicketsPanel';
 import { trpc } from '@/trpc/client';
 import { useBanner } from '@/hooks/use-banner';
@@ -257,6 +258,7 @@ function ProfilePageContent() {
             {userProfile && activeTab === 'history' && <UsageHistoryCard user={effectiveUser} />}
 
             {userProfile && activeTab === 'security' && <SecuritySettingsCard user={effectiveUser} />}
+            {userProfile && activeTab === 'security' && <DataUseConsentCard />}
             {userProfile && activeTab === 'security' && <AccountErasureCard user={effectiveUser} />}
 
             {userProfile && activeTab === 'tickets' && (

@@ -43,7 +43,10 @@ try {
   });
   assert.equal(report.failed, null, JSON.stringify(report));
   const before = fingerprint();
-  sql(readFileSync(resolve(root, 'packages/db/migrations/0211_pay_waffo_delivery.sql'),'utf8'));
+  // 0214 replaces 0211's membership facts; replaying 0211 alone would roll that back.
+  for (const file of ['0211_pay_waffo_delivery.sql', '0214_pay_waffo_renewal_grace.sql']) {
+    sql(readFileSync(resolve(root, 'packages/db/migrations', file),'utf8'));
+  }
   assert.deepEqual(fingerprint(),before,'new migration repeat preserves structure');
   const port = Number(docker(['port', name, '5432/tcp']).split(':').at(-1));
   const connect = async () => {

@@ -42,6 +42,7 @@ vi.mock('@/components/profile/CreditRecordsCard', () => ({ CreditRecordsCard: ()
 vi.mock('@/components/profile/UsageHistoryCard', () => ({ UsageHistoryCard: () => null }));
 vi.mock('@/components/profile/SecuritySettingsCard', () => ({ SecuritySettingsCard: () => <p>security-card</p> }));
 vi.mock('@/components/profile/AccountErasureCard', () => ({ AccountErasureCard: () => <p>account-erasure-card</p> }));
+vi.mock('@/components/profile/DataUseConsentCard', () => ({ DataUseConsentCard: () => <p>data-use-consent-card</p> }));
 vi.mock('@/components/profile/TicketsPanel', () => ({ default: () => null }));
 
 import ProfilePage from './page';
@@ -71,7 +72,7 @@ describe('profile page', () => {
     const html = renderToStaticMarkup(<ProfilePage />);
     expect(html).not.toContain('security-card');
     expect(html).not.toContain('account-erasure-card');
-    expect(html).not.toContain('security-card');
+    expect(html).not.toContain('data-use-consent-card');
   });
 
   it('renders real profile data when the read succeeds', () => {
@@ -86,6 +87,7 @@ describe('profile page', () => {
     const html = renderToStaticMarkup(<ProfilePage />);
     expect(html).toContain('data-active-tab="security"');
     expect(html).toContain('security-card');
+    expect(html).toContain('data-use-consent-card');
     expect(html).toContain('account-erasure-card');
   });
 

@@ -12,6 +12,7 @@ import { createSafeServiceUnavailableError } from '../lib/publicError';
 import { readMethodMembership } from '../services/payments/methodMembership';
 import { assertMethodCheckoutEnvironment } from '../services/payments/methodCheckoutGate';
 import { describeWaffoFailure } from '../services/payments/waffoFailure';
+import { mapMethodPurchaseRejection } from '../services/payments/methodPurchaseError';
 import { logger } from '../lib/logger';
 
 /** The client only sees a generic 503; this keeps the secret-free reason (#815 checkout had none).
@@ -64,7 +65,7 @@ export const methodPaymentProcedures = {
         appUrl: getStripeAppUrl(), termsVersion: terms.data.value.version, purchase: input });
     } catch (error) {
       logMethodPaymentFailure('method_checkout', ctx.profileId, error, { method: input.method });
-      throw createSafeServiceUnavailableError(error, '暂时无法创建付款，请稍后查看原订单状态');
+      throw mapMethodPurchaseRejection(error) ?? createSafeServiceUnavailableError(error, '暂时无法创建付款，请稍后查看原订单状态');
     }
   }),
   methodMembership: protectedProcedure.query(async ({ ctx }) => {
