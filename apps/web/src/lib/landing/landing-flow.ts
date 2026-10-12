@@ -47,7 +47,7 @@ export const FLOW_STEPS: readonly FlowStep[] = [
     note: '报告的每一条结论，都来自前面你确认过的信息和真实对标数据，不是模板套出来的。',
   },
   {
-    id: 'step-library', mock: 'library', needs: ['library', 'voice'],
+    id: 'step-library', mock: 'library', needs: ['coach', 'library', 'voice'],
     title: '资料库，它记得你',
     demo: '新开一个窗口直接问"这周发什么"，教练带着你的定位、平台和上传过的资料来回答，不用重新介绍自己；右侧展示资料库里的定位档案、文件、文风画像',
     note: '通用 AI 每开一个新窗口，你就得从头介绍自己。教练不用：你确认过的定位、上传的资料、你的文风，都存在你的资料库里。每一次对话，它都是带着对你账号的了解来的。',

@@ -56,6 +56,11 @@ describe('landing page sections', () => {
     expect(html.match(/为什么不是正确的废话/g)).toHaveLength(9);
   });
 
+  it('hides the library step when the coach is off, since its note promises the coach answering', () => {
+    const data = buildLandingPageData({ ...ALL_ON, coach: false }, CATALOG);
+    expect(data.flowSteps.map(step => step.id)).not.toContain('step-library');
+  });
+
   it('hides walk-through steps whose capability is off, numbered without gaps', () => {
     const html = renderPage(CORE_ONLY);
     expect(html).toContain('>和教练聊<');

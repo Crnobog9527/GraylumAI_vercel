@@ -99,7 +99,11 @@ describe('landing page data', () => {
   it('hides every block whose capability is switched off', () => {
     const data = buildLandingPageData(CORE_ONLY, CATALOG);
     expect(data.notes.map(note => note.id)).toEqual(['p2', 'p5']);
-    expect(data.faqItems).toHaveLength(5);
+    // FAQ 2, 4, 6, 14; FAQ 11 also promises the sign-up credits, so it goes with signupGrant.
+    expect(data.faqItems.map(item => item.question)).toEqual([
+      LANDING_FAQ[0].items[1].question, LANDING_FAQ[0].items[3].question, LANDING_FAQ[1].items[1].question,
+      LANDING_FAQ[2].items[3].question,
+    ]);
     expect(data.compareRows.map(row => row.sourceId)).toEqual(['consultant']);
     expect(data.promise.map(part => part.text).join('')).not.toContain('不用自己想选题');
     expect(data.timeline).toHaveLength(1);
