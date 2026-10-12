@@ -49,8 +49,20 @@
   white-space: nowrap;
 }
 
-.stage[data-play='ready'] .seq {
+.stage[data-play='ready'] .seq,
+.stage[data-play='ready'] .pulse {
   opacity: 0;
+}
+
+/* Before playing, every animated element sits in its starting state, so nothing jumps from finished to start. */
+.stage[data-play='ready'] .pick {
+  border-color: #2a2a2a !important;
+  background: transparent !important;
+}
+
+.stage[data-play='ready'] .strike {
+  opacity: 1;
+  text-decoration: none;
 }
 
 .stage[data-play='on'] .seq {
