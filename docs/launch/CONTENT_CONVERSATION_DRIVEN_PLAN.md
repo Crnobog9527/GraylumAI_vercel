@@ -648,7 +648,7 @@ Owner 2026-10-04 在总控窗口决定，总控转记在 [#621 评论 5971159247
 6. **"先不用"按一次普通对话计费：已定。** Owner 2026-10-04 原话「同意：点"先不用"按一次普通对话计费。」
    （[#621 评论 5971624534](https://github.com/Crnobog9527/GraylumAI_vercel/pull/621#issuecomment-5971624534)），见第 3.5 节。
 
-7. **开工前置设计的 O1–O5：已定（2026-10-13）。** Owner 原话（总控-7 转达）：
+7. **开工前置设计的 O1–O4：已定（2026-10-13）；O5 维持 Q1（Owner 未另作决定）。** Owner 原话（总控-7 转达）：
 > O1 继续用旧定位，O2 单独 3 美元，O3 就是资料库，O4 先不做。
    O5 维持 Q1。详见 [开工前置设计](implementation/CONTENT_CONVERSATION_DRIVEN_PRECONDITIONS.md) 第 8 节；R8a 的 staging 真实模型验收单独 3 美元上限，用 OpenRouter 现有余额，不充值。
 

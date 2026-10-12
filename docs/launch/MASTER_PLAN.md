@@ -110,7 +110,7 @@ Owner 原话（2026-10-13，总控-7 转达）：
 - 选项 A 的含义（总控给 Owner 的原文要点）：右侧变成"本对话成果夹"，只放产出结果（选题清单、脚本、文案等），不放步骤；AI 产出后提议"要不要存进成果夹"，用户确认或在回复上点"保存"才存，存进去可修改、可存入"我的成果"；按成果类型分组、不按 Skill 分组，多个 Skill 一起用也不乱；保留手动"整理纪要"按钮（自由对话不自动整理）。后台只有定位 Skill 能配强引导步骤，其他 Skill 填的步骤只作为给 AI 的工作顺序。
 - 和 2026-10-03 第 45 项"定位之后选题、创作走自由对话 + 按意图加载 Skill"同方向，细化它；"一窗口一选题（提醒式）"和"是否存进资料库由用户决定"不变。
 - 取代：AGENT-CORE R8b"其他带步骤 Skill 专门工作区"（其他 Skill 用定位同款提问卡、每轮自动整理、右侧清单和每步确认）不再做，草稿 #874 关闭；第 3.4 节"同一套提问卡和右侧整理用于其他 Skill"中"其他 Skill"部分；D9 中"带步骤的 Skill 每轮自动整理"只适用于定位。见第 2.2 节。
-- 设计和 PR 拆分见 CONTENT-CONVERSATION-DRIVEN 开工前置设计（[#876](https://github.com/Crnobog9527/GraylumAI_vercel/pull/876)，`docs/launch/implementation/CONTENT_CONVERSATION_DRIVEN_PRECONDITIONS.md` 第 8.1 节）。开工前置设计第 8 节 O1–O5 已由 Owner 同日决定，见本节上一条"CONTENT-CONVERSATION-DRIVEN 开工前置设计的 Owner 决定（O1–O4）"。
+- 设计和 PR 拆分见 CONTENT-CONVERSATION-DRIVEN 开工前置设计（[#876](https://github.com/Crnobog9527/GraylumAI_vercel/pull/876)，`docs/launch/implementation/CONTENT_CONVERSATION_DRIVEN_PRECONDITIONS.md` 第 8.1 节）。开工前置设计第 8 节 O1–O4 已由 Owner 同日决定、O5 维持 2026-10-04 Q1（Owner 未另作决定），见本节上一条"CONTENT-CONVERSATION-DRIVEN 开工前置设计的 Owner 决定（O1–O4）"。
 
 **2026-10-13：用户只能整个删除对话**
 
