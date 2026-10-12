@@ -92,7 +92,7 @@ async function chargedOpenRound(ageMs: number) {
 }
 const reported = async (limit = 100) => rpc('runtime_stale_charged_rounds',
   { p_cutoff: new Date(Date.now() - STALE_ROUND_AGE_MS).toISOString(), p_limit: limit }) as Promise<{
-    total: number; rounds: Array<{ executionId: string; runId: string; chargedCredits: number }> }>;
+    total: number; rounds: Array<{ executionId: string; runId: string; chargedCredits: number; evidence: Record<string, unknown> }> }>;
 const ids = (report: { rounds: Array<{ runId: string }> }) => report.rounds.map(round => round.runId);
 
 it('RUNTIME: service_role reads stale charged rounds only through the report function', async () => {
@@ -102,6 +102,10 @@ it('RUNTIME: service_role reads stale charged rounds only through the report fun
   expect((await anon.rpc('runtime_stale_charged_rounds', { p_cutoff: new Date().toISOString(), p_limit: 1 })).error).toBeTruthy();
   const report = await reported();
   expect(report.rounds).toContainEqual(expect.objectContaining({ executionId: stale.executionId, runId: stale.runId, chargedCredits: 3 }));
+  // Content-free review evidence: the fixture's primary call returned 4 output tokens and saved its reply.
+  expect(report.rounds.find(round => round.runId === stale.runId)).toMatchObject({ evidence: {
+    streamed: false, executionState: 'interrupted', unavailableReason: null, calls: 1, outputTokens: 4,
+    savedReplyChars: 'Primary result'.length } });
   expect(ids(report)).not.toContain(recent.runId);
   const live = await findStaleChargedRounds(service);
   expect(live.findings).toContainEqual(expect.objectContaining({ kind: 'stale_charged_round', runId: stale.runId, chargedCredits: 3 }));

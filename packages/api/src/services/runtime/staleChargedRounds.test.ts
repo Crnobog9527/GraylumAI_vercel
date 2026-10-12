@@ -7,7 +7,10 @@ import { compensateStaleRound, findStaleChargedRounds, STALE_ROUND_AGE_MS, STALE
 const now = Date.parse('2026-10-13T00:00:00.000Z');
 const cutoff = new Date(now - STALE_ROUND_AGE_MS).toISOString();
 const uuid = (prefix: number, n: number) => `${prefix}0000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
-const round = (n: number) => ({ executionId: uuid(1, n), runId: uuid(2, n), chargedCredits: 3, since: '2026-10-11T18:02:00+00:00' });
+const evidence = { model: 'synthetic/model', streamed: false, executionState: 'interrupted', unavailableReason: null,
+  calls: 1, outputTokens: 4, savedReplyChars: 0, lastActivityAt: '2026-10-11T18:02:31+00:00' };
+const round = (n: number) => ({ executionId: uuid(1, n), runId: uuid(2, n), chargedCredits: 3,
+  since: '2026-10-11T18:02:00+00:00', evidence });
 const client = (result: { data: unknown; error: unknown }) => {
   const rpc = vi.fn(async () => result);
   return { rpc, supabase: { rpc } as unknown as SupabaseClient };
@@ -31,6 +34,7 @@ it.each([
   { data: null, error: { code: '42501', message: 'permission denied' } },
   { data: { total: 1 }, error: null },
   { data: { total: 1, rounds: [{ ...round(1), chargedCredits: 0 }] }, error: null },
+  { data: { total: 1, rounds: [{ ...round(1), evidence: { ...evidence, outputTokens: -1 } }] }, error: null },
 ])('fails closed on an unreadable or malformed report %#', async result => {
   await expect(findStaleChargedRounds(client(result).supabase, now)).rejects.toThrow('STALE_ROUND_SCAN_FAILED');
 });

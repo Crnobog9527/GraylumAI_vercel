@@ -11,6 +11,17 @@ const refusals: Readonly<Record<string, string>> = {
   STALE_ROUND_NOT_FOUND: '找不到这一轮，没有退款。请刷新后再看。',
 };
 
+type Evidence = { model: string | null; streamed: boolean; executionState: string; unavailableReason: string | null;
+  calls: number; outputTokens: number; savedReplyChars: number; lastActivityAt: string | null };
+const stateLabels: Readonly<Record<string, string>> = { prepared: '未开始', running: '进行中', interrupted: '中断' };
+
+/** Content-free review facts; a streamed round that produced output may already have been seen. */
+export function reviewCaution(evidence: Evidence): string | null {
+  if (evidence.savedReplyChars > 0) return '这一轮已保存了回复内容，用户很可能已经拿到答案，一般不应补偿。';
+  if (evidence.streamed && evidence.outputTokens > 0) return '这一轮是边生成边显示的，模型已输出内容，用户可能已看到部分回答，请谨慎核对。';
+  return null;
+}
+
 /** The operator-facing sentence for a compensation outcome; an unknown failure never claims a result. */
 export function compensationMessage(outcome: { state: string; compensatedCredits: number } | { error: string }): string {
   if ('error' in outcome) return refusals[outcome.error] ?? '补偿失败，结果未确认。请刷新后查看这一轮的状态，不要重复操作。';
@@ -49,13 +60,24 @@ export function AdminStaleRounds() {
                 style={{ borderColor: 'var(--border-primary)' }} data-testid="stale-round">
                 <div className="space-y-1 text-sm break-all" style={{ color: 'var(--text-secondary)' }}>
                   <p>已扣 {round.chargedCredits} 积分 · 开始于 {new Date(round.since).toLocaleString('zh-CN')}</p>
+                  <p className="text-xs" style={{ color: 'var(--text-tertiary)' }} data-testid="stale-round-evidence">
+                    {round.evidence.model ?? '未知模型'} · {round.evidence.streamed ? '边生成边显示' : '一次性显示'} ·
+                    状态 {stateLabels[round.evidence.executionState] ?? round.evidence.executionState}
+                    {round.evidence.unavailableReason ? `（${round.evidence.unavailableReason}）` : ''} ·
+                    调用 {round.evidence.calls} 次 · 模型输出 {round.evidence.outputTokens} token ·
+                    已保存回复 {round.evidence.savedReplyChars} 字
+                    {round.evidence.lastActivityAt ? ` · 最后活动 ${new Date(round.evidence.lastActivityAt).toLocaleString('zh-CN')}` : ''}
+                  </p>
+                  {reviewCaution(round.evidence)
+                    ? <p role="note" className="text-xs" style={{ color: 'var(--warning, var(--error))' }}>{reviewCaution(round.evidence)}</p> : null}
                   <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>执行 {round.executionId} · 计费 {round.runId}</p>
                 </div>
                 <ConfirmRefundAction testId={`stale-round-compensate-${round.runId}`} label="核对后补偿" pendingLabel="正在补偿…"
                   title="确认补偿这一轮？" confirmLabel="确认补偿" pending={compensate.isPending}
                   onConfirm={() => { setMessage(null); compensate.mutate({ runId: round.runId }); }}>
                   <p>将结束这一轮，并把它已扣的 {round.chargedCredits} 积分全部退回给用户。补偿只会发生一次。</p>
-                  <p>请确认这一轮确实没有给出回答，而且不是用户自己停止或其他用户侧原因。</p>
+                  <p>请确认这一轮确实没有给出回答（已保存回复 {round.evidence.savedReplyChars} 字、模型输出 {round.evidence.outputTokens} token），而且不是用户侧原因。</p>
+                  {reviewCaution(round.evidence) ? <p>{reviewCaution(round.evidence)}</p> : null}
                 </ConfirmRefundAction>
               </li>
             ))}

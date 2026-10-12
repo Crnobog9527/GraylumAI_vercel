@@ -4,7 +4,9 @@
 -- tables (0105/0106), so the reconciliation and the operator action use only these functions.
 --  * runtime_stale_charged_rounds: read-only report of PAYG rounds still open after the cutoff
 --    whose settled calls charged credits, with no call of unknown outcome and not stopped by the
---    user. Every filter runs before the limit; `total` counts all matches.
+--    user. Every filter runs before the limit; `total` counts all matches. Each round carries
+--    content-free review evidence: model, whether its output streamed to the user, execution
+--    state and reason, calls, output tokens from provider receipts, saved reply length.
 --  * runtime_stale_round_compensate: after an operator verified a reported round, closes it as a
 --    confirmed failure and lets bill2_finalize compensate each charged call once (compensated_at),
 --    the same path fail_platform (0215) uses. Idempotent; a closed round can never be refunded again.
@@ -24,7 +26,16 @@ BEGIN
  WITH charged AS (
   SELECT e.id execution_id,r.id run_id,e.created_at since,
    (SELECT coalesce(sum(c.charged_delta),0) FROM bill2_calls c WHERE c.run_id=r.id
-     AND c.settled_at IS NOT NULL AND c.compensated_at IS NULL AND c.charged_delta>0)::integer credits
+     AND c.settled_at IS NOT NULL AND c.compensated_at IS NULL AND c.charged_delta>0)::integer credits,
+   e.payload->>'model' model,e.state execution_state,e.unavailable_reason,
+   coalesce(e.payload->>'providerRequestFormat','') IN ('serial-tools-v3-stream','serial-tools-v4-stream','agent-turn-v5-stream') streamed,
+   (SELECT count(*) FROM bill2_calls c WHERE c.run_id=r.id AND c.dispatched_at IS NOT NULL)::integer calls,
+   (SELECT coalesce(sum((SELECT max(CASE WHEN rec.payload->'usage'->>'outputTokens' ~ '^[0-9]{1,12}$'
+      THEN (rec.payload->'usage'->>'outputTokens')::bigint END) FROM bill2_receipts rec
+      WHERE rec.call_id=c.id AND NOT rec.conflict AND rec.payload->>'final'='true')),0)
+    FROM bill2_calls c WHERE c.run_id=r.id)::bigint output_tokens,
+   length(coalesce(e.result->>'body',e.primary_result->>'body',''))::integer saved_reply_chars,
+   (SELECT max(c.settled_at) FROM bill2_calls c WHERE c.run_id=r.id) last_activity
   FROM runtime_executions e JOIN bill2_runs r ON r.id=e.billing_run_id
   WHERE e.state IN ('prepared','running','interrupted') AND e.created_at<p_cutoff
    AND r.contract_version='bill2.v2' AND NOT r.closed AND NOT r.cancel_requested
@@ -36,7 +47,10 @@ BEGIN
   SELECT *,row_number() OVER (ORDER BY since,run_id) n FROM charged WHERE credits>0
  )
  SELECT jsonb_build_object('total',count(*),'rounds',coalesce(jsonb_agg(jsonb_build_object(
-   'executionId',execution_id,'runId',run_id,'chargedCredits',credits,'since',since) ORDER BY n)
+   'executionId',execution_id,'runId',run_id,'chargedCredits',credits,'since',since,
+   'evidence',jsonb_build_object('model',model,'streamed',streamed,'executionState',execution_state,
+    'unavailableReason',unavailable_reason,'calls',calls,'outputTokens',output_tokens,
+    'savedReplyChars',saved_reply_chars,'lastActivityAt',last_activity)) ORDER BY n)
    FILTER (WHERE n<=p_limit),'[]'::jsonb)) INTO result FROM found;
  RETURN result;
 END $function$;

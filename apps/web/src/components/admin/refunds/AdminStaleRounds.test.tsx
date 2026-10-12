@@ -11,8 +11,10 @@ vi.mock('@/trpc/client', () => ({ trpc: {
   },
 } }));
 
-const { AdminStaleRounds, compensationMessage } = await import('./AdminStaleRounds');
-const round = { kind: 'stale_charged_round', executionId: 'exec-1', runId: 'run-1', chargedCredits: 3, since: '2026-10-11T18:02:00Z' };
+const { AdminStaleRounds, compensationMessage, reviewCaution } = await import('./AdminStaleRounds');
+const evidence = { model: 'anthropic/claude-sonnet-5.5', streamed: false, executionState: 'interrupted', unavailableReason: null,
+  calls: 1, outputTokens: 46, savedReplyChars: 0, lastActivityAt: '2026-10-11T18:02:31Z' };
+const round = { kind: 'stale_charged_round', executionId: 'exec-1', runId: 'run-1', chargedCredits: 3, since: '2026-10-11T18:02:00Z', evidence };
 
 describe('admin stale-round compensation section', () => {
   beforeEach(() => { state.mutate.mockReset(); });
@@ -29,6 +31,9 @@ describe('admin stale-round compensation section', () => {
     expect(html).toContain('run-1');
     expect(html).toContain('stale-round-compensate-run-1');
     expect(html).toContain('共 120 个回合');
+    expect(html).toContain('anthropic/claude-sonnet-5.5');
+    expect(html).toContain('模型输出 46 token');
+    expect(html).toContain('已保存回复 0 字');
     expect(state.mutate).not.toHaveBeenCalled();
   });
 
@@ -49,5 +54,17 @@ describe('compensation outcome wording', () => {
     [{ error: 'INTERNAL_SERVER_ERROR' }, '结果未确认'],
   ] as const)('%j', (outcome, text) => {
     expect(compensationMessage(outcome)).toContain(text);
+  });
+});
+
+describe('review caution', () => {
+  it.each([
+    [{ ...evidence }, null],
+    [{ ...evidence, streamed: true, outputTokens: 0 }, null],
+    [{ ...evidence, streamed: true, outputTokens: 120 }, '可能已看到部分回答'],
+    [{ ...evidence, savedReplyChars: 300 }, '一般不应补偿'],
+  ] as const)('%j', (facts, text) => {
+    const caution = reviewCaution(facts);
+    if (text === null) expect(caution).toBeNull(); else expect(caution).toContain(text);
   });
 });
