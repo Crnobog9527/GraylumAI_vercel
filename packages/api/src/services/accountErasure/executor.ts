@@ -12,6 +12,10 @@ const claimSchema = z.discriminatedUnion('claimed', [
   z.object({ claimed: z.literal(false) }).strict(),
   z.object({ claimed: z.literal(true), profileId: z.string().uuid(), requestId: z.string().uuid() }).strict(),
 ]);
+const logRetentionSchema = z.object({
+  applicationLogs: z.number().int().nonnegative(), diagnosticResults: z.number().int().nonnegative(),
+  scheduledJobRuns: z.number().int().nonnegative(), more: z.boolean(),
+}).strict();
 const proofSchema = z.object({ historyComplete: z.boolean(), quiescent: z.boolean() }).strict();
 export type ErasureExecutorSummary = { processed: number; completed: number; pending: number; failed: number };
 
@@ -111,6 +115,12 @@ export async function runAccountErasureExecutor(client: SupabaseClient, deadline
   } catch { summary.failed++; }
   // D5 consent audit is kept one year after revocation (including erasure), then removed.
   try { await expireDataUseConsentAudit(client, AbortSignal.timeout(2000)); } catch { summary.failed++; }
+  // E7: our own log tables keep at most 30 days (0226); a backlog continues on the next daily run.
+  try {
+    const logs = await client.rpc('log_retention_cleanup', {}).abortSignal(AbortSignal.timeout(5000));
+    if (logs.error) throw new Error('LOG_RETENTION_FAILED');
+    logRetentionSchema.parse(logs.data);
+  } catch { summary.failed++; }
   try {
     const result = await client.rpc('account_erasure_executor_pending', {}).abortSignal(AbortSignal.timeout(2000));
     if (result.error) throw new Error('ERASURE_PENDING_UNKNOWN');

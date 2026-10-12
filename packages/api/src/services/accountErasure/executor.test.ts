@@ -17,6 +17,7 @@ function client() {
     }
     if (name === 'account_erasure_executor_pending') data = 1;
     if (name === 'data_use_consent_expire') data = 0;
+    if (name === 'log_retention_cleanup') data = { applicationLogs: 0, diagnosticResults: 2, scheduledJobRuns: 1, more: false };
     const promise = Promise.resolve({ data, error: null });
     return Object.assign(promise, { abortSignal: () => promise });
   });
@@ -135,6 +136,7 @@ it('uses available daily budget beyond 20 subjects and resumes remaining work ne
       ? { claimed: true, profileId: actor, requestId: request } : { claimed: false };
     if (name === 'account_erasure_executor_pending') data = remaining;
     if (name === 'data_use_consent_expire') data = 0;
+    if (name === 'log_retention_cleanup') data = { applicationLogs: 0, diagnosticResults: 0, scheduledJobRuns: 0, more: false };
     const promise = Promise.resolve({ data, error: null });
     return Object.assign(promise, { abortSignal: () => promise });
   });
@@ -177,6 +179,16 @@ it('expires the D5 consent audit through the same cron and reports expiry failur
   expect(database.rpc).toHaveBeenCalledWith('data_use_consent_expire', {});
   const original = database.rpc.getMockImplementation()!;
   database.rpc.mockImplementation(name => name === 'data_use_consent_expire'
+    ? { abortSignal: () => Promise.resolve({ data: null, error: { code: 'XX000' } }) } as never
+    : original(name));
+  expect((await runAccountErasureExecutor(database as never)).failed).toBe(1);
+});
+it('removes expired log rows through the same cron and reports a cleanup failure', async () => {
+  const database = client();
+  expect((await runAccountErasureExecutor(database as never)).failed).toBe(0);
+  expect(database.rpc).toHaveBeenCalledWith('log_retention_cleanup', {});
+  const original = database.rpc.getMockImplementation()!;
+  database.rpc.mockImplementation(name => name === 'log_retention_cleanup'
     ? { abortSignal: () => Promise.resolve({ data: null, error: { code: 'XX000' } }) } as never
     : original(name));
   expect((await runAccountErasureExecutor(database as never)).failed).toBe(1);
