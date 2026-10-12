@@ -14,6 +14,17 @@ describe('workspace context instructions', () => {
         'pass an exact returned id to read that source. Read-only; no internet access.'}])));
   });
 
+  it('reads positioning without a clarification round unless names tell several apart', () => {
+    const text=withPrimaryAddenda('base',{workspaceContext:true});
+    expect(text).toContain('when one is listed, read it directly');
+    expect(text).toContain('ask which one by name');
+    // 0117 names every business 未命名业务 until the user renames it.
+    expect(text).toContain('share a name or carry the default name 未命名业务, read the most recently confirmed one');
+    expect(text).toContain('by its confirmation date and that the user can switch');
+    expect(text).toContain('Never show source ids to the user');
+    expect(text).not.toContain('intended positioning or account is ambiguous');
+  });
+
   it('adds nothing for conversations without workspace context', () => {
     expect(withPrimaryAddenda('base',{})).toBe('base');
   });
