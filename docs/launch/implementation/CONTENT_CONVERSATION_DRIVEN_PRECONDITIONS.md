@@ -137,6 +137,11 @@
 
 可用性（不删除、只是来源被撤销）走 #621 第七轮已定的做法：`runtime_context_allowed` 加 `injected_source` 分支，跑 `opc_content_allowed`，
 不通过就让这次执行和之后依赖它的历史都不可用（经 `runtime_history_available` 传递）。
+**这个分支必须真的拿到列里的值**（第五轮审查 P1）：现有的单条和批量可用性检查（`runtime_history_available`、`runtime_history_availability`，
+经 `runtime_billing_allowed`）只把执行的 `payload` / 计费载荷传给 `runtime_context_allowed`，看不到单独存放的 `injected_source` 列。
+X2 因此同时改这两条入口：读取每个执行（及其全部祖先）时把 `injected_source` 列一并取出，对非空的跑 `opc_content_allowed`，
+不通过即判为不可用；不靠把它塞回载荷。必测（单条和批量两条路径都测）：不经 D7 删除、只撤销来源——撤销口播稿的生成执行，
+或撤销它的来源定位版本——之后，注入过它的分镜回复在 `runtime_view` 里被遮蔽，不进入之后任何对话执行的历史，不能再被保存。
 注意 #863（开放，0225）也用锚点补丁改 `runtime_context_allowed`：A2 在它之后，基于合并后的定义打补丁。
 
 ### 2.6 验收（前置项 ① 解决的判定）
