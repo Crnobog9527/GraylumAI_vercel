@@ -3253,8 +3253,9 @@ describe('createCheckoutSession catalog fail-closed guards', () => {
     const caller = createProtectedCaller({ supabase, supabaseAdmin });
     const db = supabaseAdmin as unknown as MembershipFixtureDb;
     const previousRpc = db.rpc!;
-    db.rpc = (name, args) => name === 'report_membership_check'
-      ? reportCheck(name, args) : previousRpc(name, args);
+    db.rpc = (name, args) => name === 'report_membership_check' ? reportCheck(name, args)
+      : name === 'pay_common_membership_facts' ? Promise.resolve({ data: { internal_membership: null }, error: null })
+      : previousRpc(name, args);
     return {
       caller,
       sessionCreate,

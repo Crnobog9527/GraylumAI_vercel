@@ -3,6 +3,7 @@ import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
 import { protectedProcedure, router } from '../trpc';
 import { beginInput } from '../services/library/content';
+import { pdfBeginInput, pdfCompleteInput } from '../services/library/pdfContent';
 import { wordBeginInput, wordCompleteInput } from '../services/library/wordContent';
 import { libraryService } from '../services/library/service';
 
@@ -13,6 +14,9 @@ const procedure = protectedProcedure.use(async ({ ctx, next }) => {
 });
 const document = z.object({ documentId: z.string().uuid() }).strict();
 export const libraryRouter = router({
+  beginPdfUpload: procedure.input(pdfBeginInput).mutation(({ ctx, input }) => ctx.library.beginPdf(input)),
+  beginPdfTextUpload: procedure.input(document).mutation(({ ctx, input }) => ctx.library.beginPdfText(input.documentId)),
+  completePdfUpload: procedure.input(pdfCompleteInput).mutation(({ ctx, input }) => ctx.library.completePdf(input)),
   beginWordUpload: procedure.input(wordBeginInput).mutation(({ ctx, input }) => ctx.library.beginWord(input)),
   beginWordTextUpload: procedure.input(document).mutation(({ ctx, input }) => ctx.library.beginWordText(input.documentId)),
   completeWordUpload: procedure.input(wordCompleteInput).mutation(({ ctx, input }) => ctx.library.completeWord(input)),

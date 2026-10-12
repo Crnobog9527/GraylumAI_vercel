@@ -1,6 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import {allowTestCalls} from '../__tests__/fixtures/runtimeGates';
 import { pricingConfig } from '../__tests__/fixtures/runtimePricing';
+import { configuredReasoning } from '../__tests__/fixtures/runtimeReasoning';
 import { beforeAll, afterAll, it, expect, vi } from 'vitest';
 import {logger} from '../../lib/logger';
 import { randomUUID, createHash } from 'node:crypto';
@@ -10,6 +11,7 @@ import { PostgresSession } from './session';
 import {assertLongSessionPerformance} from './runtimePerformance.integration';
 import { runRuntime } from './runner';
 import {readRuntimeView,retainedOutputReason} from './view';
+import {readNativeRuntimeView} from './nativeView';
 import { runtimeExecutor } from './execute';
 import './promptCache.integration';
 import './payg.integration';
@@ -611,7 +613,10 @@ it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true').each([10000,1050000])('RU
  const user=createClient(process.env.V3_LOCAL_REST!,process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,{auth:{persistSession:false}});
  const login=await user.auth.signInWithPassword({email,password});if(login.error)throw login.error;
  await db.query("insert into ai_models(id,name,model_id,provider,is_active,max_tokens,input_limit,price_multiplier) values($1,'Synthetic quote','test/admission','openai','true',1000,$2,1)",[model,contextTokens]);
- await db.query('update ai_models set config=$2 where id=$1',[model,pricingConfig('test/admission','synthetic',contextTokens===1050000?'0.4':'2',contextTokens===1050000?'1.8':'0')]);
+ // Real free chat freezes the administrator's interactive reasoning on the quoted route.
+ const reasoning=configuredReasoning('test/admission').reasoning;
+ await db.query('update ai_models set config=$2 where id=$1',[model,{...pricingConfig('test/admission','synthetic',contextTokens===1050000?'0.4':'2',contextTokens===1050000?'1.8':'0'),
+  reasoning:{...reasoning,route:'synthetic',catalog:{...reasoning.catalog!,endpoints:reasoning.catalog!.endpoints.map(e=>({...e,tag:'synthetic'}))}}}]);
  const upperUsd=contextTokens===1050000?'0.4218':'0.02',outputLimit=contextTokens===1050000?1000:100;
  // BILL-UNIT window: each entry carries the model's m_i, equal to the configuration (price_multiplier=1).
  const call={multiplier:'1',modelId:model,provider:'openrouter',account:'synthetic-account',model:'test/admission',protocol:'openrouter-chat-v1',upperUsd,inputLimit:8000,outputLimit,automaticRetry:false,hiddenTools:false,lookupSupported:true,providerLimits:{providerSlug:'synthetic',contextTokens,promptUsdPerMillion:contextTokens===1050000?'0.4':'2',completionUsdPerMillion:contextTokens===1050000?'1.8':'0',requestUsd:'0'}};
@@ -666,6 +671,13 @@ it('RUNTIME: rejected binding rolls back reservation and excludes wrong actor/se
  const g=await fixture();await expect(rpc('runtime_admit',{...f.admit,p_actor_id:g.actorId})).rejects.toThrow('DENIED');
 });
 
+it('RUNTIME: native view serves the owner and one indistinguishable not-found for a foreign or missing session',async()=>{
+ const f=await fixture(),g=await fixture();
+ await expect(readNativeRuntimeView(admin,f.actorId,f.s.sessionId)).resolves.toMatchObject({sessionId:f.s.sessionId,executions:[]});
+ const foreign=await readNativeRuntimeView(admin,g.actorId,f.s.sessionId).catch((e:unknown)=>e);
+ const missing=await readNativeRuntimeView(admin,f.actorId,randomUUID()).catch((e:unknown)=>e);
+ for(const refusal of [foreign,missing])expect(refusal).toMatchObject({code:'NOT_FOUND',message:'RUNTIME_SESSION_NOT_FOUND'});
+});
 it('RUNTIME: official SDK uses bound PostgreSQL Session and persists input/output after local HTTP',async()=>{
  const f=await fixture(),e=await rpc('runtime_admit',f.admit);
  const session=new PostgresSession(admin,{actorId:f.actorId,sessionId:f.s.sessionId,executionId:e.executionId});

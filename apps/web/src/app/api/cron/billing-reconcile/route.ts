@@ -1,11 +1,15 @@
 import { NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
+import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import {
   runBillingEngineV15ReadinessAudit,
   runDailyBillingReconciliation,
 } from '@repo/api/src/services/billingReconciliation';
 import { logger } from '@repo/api/src/services';
 import { runErasureFinancialReconciliation } from '@repo/api/src/services/accountErasure/financialRecovery';
+import { reconcileWaffoPayments } from '@repo/api/src/services/payments/waffoReconciliation';
+import { getWaffoTestOperationsClient } from '@repo/api/src/services/payments/waffoTestOperationsClient';
+import { closeExpiredWaffoCheckouts } from '@repo/api/src/services/payments/waffoCardCheckout';
+import { describeWaffoFailure } from '@repo/api/src/services/payments/waffoFailure';
 import { validateCronRequest } from '@/lib/cron-auth';
 
 export const runtime = 'nodejs';
@@ -13,6 +17,20 @@ export const maxDuration = 60;
 
 const CRON_FAILURE_MESSAGE = 'Billing reconciliation failed';
 const CRON_CONFIG_ERROR_MESSAGE = 'Server configuration error';
+
+/** Waffo daily backstop: report-only. Off until the test operations binding is explicitly enabled. */
+async function runWaffoReconciliation(supabase: SupabaseClient) {
+  if (process.env.WAFFO_TEST_OPERATIONS_ENABLED !== 'true') return { success: true, skipped: true, findings: [] };
+  try {
+    const provider = getWaffoTestOperationsClient();
+    // Lifecycle only: release unpaid card orders past their checkout window (late cash stays review).
+    const closedExpired = await closeExpiredWaffoCheckouts(supabase, provider.merchant);
+    return { ...await reconcileWaffoPayments(supabase, provider), closedExpired, skipped: false };
+  } catch (error) {
+    logger.error('billing', 'pay_waffo_reconciliation_failed', describeWaffoFailure(error));
+    return { success: false, skipped: false, findings: [{ kind: 'scan_failed', refundCandidate: false }] };
+  }
+}
 
 export async function GET(request: Request) {
   const unauthorizedResponse = validateCronRequest(request, 'billing-reconcile');
@@ -32,12 +50,13 @@ export async function GET(request: Request) {
 
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
     logger.system.cronJob('billing-reconcile', 'started');
-    const [result, readinessAudit, erasureFinancial] = await Promise.all([
+    const [result, readinessAudit, erasureFinancial, waffo] = await Promise.all([
       runDailyBillingReconciliation(supabase),
       runBillingEngineV15ReadinessAudit(supabase),
       runErasureFinancialReconciliation(supabase),
+      runWaffoReconciliation(supabase),
     ]);
-    const success = result.success && readinessAudit.success && erasureFinancial.success;
+    const success = result.success && readinessAudit.success && erasureFinancial.success && waffo.success;
 
     if (!success) {
       logger.system.cronJob(
@@ -45,9 +64,11 @@ export async function GET(request: Request) {
         'failed',
         Date.now() - startedAt,
         [...result.mismatches, ...readinessAudit.findings.map((finding) => finding.message),
-          ...(erasureFinancial.success ? [] : ['Erasure financial recovery pending'])].join(' | '),
+          ...(erasureFinancial.success ? [] : ['Erasure financial recovery pending']),
+          ...(waffo.success ? [] : [`Waffo payments need manual review: ${waffo.findings.length}`])].join(' | '),
         {
           erasureFinancial,
+          waffo,
           mismatches: result.mismatches,
           summary: result.summary,
           readinessAudit: {
@@ -82,6 +103,7 @@ export async function GET(request: Request) {
       summary: result.summary,
       readinessAudit,
       erasureFinancial,
+      waffo,
       timestamp: new Date().toISOString(),
     }, { status: success ? 200 : 500 });
   } catch (error) {

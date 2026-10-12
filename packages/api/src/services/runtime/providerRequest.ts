@@ -16,6 +16,8 @@ export type ProviderRequestFormat=typeof PROVIDER_REQUEST_FORMATS[number];
 export const STREAMING_FORMATS:ReadonlySet<string>=new Set(['serial-tools-v3-stream','serial-tools-v4-stream','agent-turn-v5-stream']);
 /** Formats that must, and alone may, carry a frozen reasoning policy. */
 export const REASONING_FORMATS:ReadonlySet<string>=new Set(['serial-tools-v4-stream','agent-turn-v5-stream','serial-tools-v6-reasoning']);
+/** Format of new real free-chat (ordinary) turns: non-streamed, with frozen interactive reasoning. */
+export const FREE_CHAT_REQUEST_FORMAT='serial-tools-v6-reasoning';
 /** Interactive Agent turn format (AC-1). Used by new mentor admissions. */
 export const AGENT_TURN_REQUEST_FORMAT='agent-turn-v5-stream';
 

@@ -1,7 +1,9 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-import {isAnswerSourceDenied} from "./mentor-turn";
+import {isAnswerSourceDenied,isInputTooLong} from "./mentor-turn";
+import {STEP_SUMMARY_REFUSED} from "./step-summary";
 import {gateAdmissionNotice} from "@/lib/runtime-gate-notice";
 import {isOrganizerPendingError,ORGANIZER_PENDING_NOTICE} from "@/lib/payg-wait";
+import {RUNTIME_INPUT_TOO_LONG_MESSAGE} from "../../../../../../packages/api/src/shared/runtimeInputMessages";
 const admissionPaths=['opc.prepareStep','opc.mentorTurnStream','runtime.prepare'];
 const retained=' 原请求与输入已保留；条件恢复后可继续核对同一请求。';
 /** Only an explicit admission response can replace the unknown-outcome notice.
@@ -12,6 +14,10 @@ const retained=' 原请求与输入已保留；条件恢复后可继续核对同
 export function admissionMessage(cause:unknown):string|null {
  if(isAnswerSourceDenied(cause))return '这张卡已经过期，请看最新的回复。';
  if(isOrganizerPendingError(cause))return ORGANIZER_PENDING_NOTICE;
+ // Only a released summary click (step-summary.ts); an ordinary turn's refusal keeps its retained request.
+ if(cause instanceof Error&&cause.message===STEP_SUMMARY_REFUSED)return (cause as {code?:unknown}).code==='OPC_CAPTURE_INPUT_LIMIT'
+  ? '这一步的内容超出了导师单次能处理的长度，这次小结没有生成，也没有扣费。可以直接在右侧清单核对后确认。'
+  : '这次“这一步先到这里”没有被接受，没有扣费。可以继续和导师聊，或稍后再点一次。';
  const gate=gateAdmissionNotice(cause,admissionPaths);
  if(gate)return gate;
  if(!(cause instanceof Error)||!('data' in cause)||!cause.data||typeof cause.data!=='object')return null;
@@ -19,5 +25,7 @@ export function admissionMessage(cause:unknown):string|null {
  if(!admissionPaths.includes(String(data.path)))return null;
  if(data.code==='SERVICE_UNAVAILABLE')return '服务暂时不可用，请稍后再试。'+retained;
  if(!['PRECONDITION_FAILED','FORBIDDEN'].includes(String(data.code)))return null;
+ // Too-long input is not a retained request waiting for a condition: ask the user to split it.
+ if(isInputTooLong(cause))return RUNTIME_INPUT_TOO_LONG_MESSAGE;
  return cause.message+retained;
 }

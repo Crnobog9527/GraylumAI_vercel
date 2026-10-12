@@ -1,0 +1,79 @@
+{
+  "capturedFileAt": "2026-10-11T11:09:20Z",
+  "sdkResponse": {
+    "data": {
+      "payment": {
+        "id": "PAY_0FDFISR4GFv3PBTEO5KP0e",
+        "status": "succeeded",
+        "testMode": true,
+        "refundStatus": "refunded",
+        "refundedAmount": {
+          "amount": "4900",
+          "currency": "USD",
+          "display": "49.00"
+        },
+        "isFullyRefunded": true,
+        "subscriptionOrder": {
+          "id": "ORD_7VXQfDMnduUc7PPSHThDol",
+          "status": "trialing",
+          "willRenew": true,
+          "isInTrial": true,
+          "currentPeriodStart": "2026-10-11T05:58:32.000Z",
+          "currentPeriodEnd": "2026-11-10T05:58:32.000Z",
+          "canceledAt": null,
+          "updatedAt": "2026-10-11T05:58:33.743Z"
+        },
+        "refunds": [
+          {
+            "id": "REF_6gEPvfDzB3ji1Wz5ksQAtE",
+            "paymentId": "PAY_0FDFISR4GFv3PBTEO5KP0e",
+            "ticketId": "TKT_2knvdNCFjn5IQbwbBPUDpJ",
+            "status": "succeeded",
+            "amount": {
+              "amount": "4900",
+              "currency": "USD",
+              "display": "49.00"
+            },
+            "pspAmountDetails": {
+              "amount": "49.00",
+              "currency": "USD"
+            },
+            "pspRefundId": "[MASKED]",
+            "isPostSettlementRefund": false,
+            "orderMerchantExternalId": "graylum-waffo-20261011-intro49",
+            "refundTicketMerchantExternalId": "graylum-waffo-20261011-refund49",
+            "createdAt": "2026-10-11T06:30:03.160Z"
+          }
+        ]
+      },
+      "refundTicket": {
+        "id": "TKT_2knvdNCFjn5IQbwbBPUDpJ",
+        "status": "succeeded",
+        "subjectId": "PAY_0FDFISR4GFv3PBTEO5KP0e",
+        "currentVersionId": "TVER_51ex6CF0xyNS4h9Gewb7A3",
+        "reviewedAt": "2026-10-11T06:00:36.986Z",
+        "reviewNote": null,
+        "rejectReason": null,
+        "executedAt": "2026-10-11T06:30:03.078Z",
+        "refundTicketMerchantExternalId": "graylum-waffo-20261011-refund49",
+        "createdAt": "2026-10-11T06:00:36.891Z",
+        "updatedAt": "2026-10-11T06:30:03.078Z",
+        "versionNumber": 1,
+        "versionData": {
+          "requestedAmount": {
+            "amount": "49.00",
+            "currency": "USD"
+          }
+        }
+      },
+      "refundTickets": [
+        {
+          "id": "TKT_2knvdNCFjn5IQbwbBPUDpJ",
+          "status": "succeeded",
+          "executedAt": "2026-10-11T06:30:03.078Z",
+          "updatedAt": "2026-10-11T06:30:03.078Z"
+        }
+      ]
+    }
+  }
+}

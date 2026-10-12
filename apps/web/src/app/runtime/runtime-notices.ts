@@ -1,6 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { CHAT_ACTION, type ChatNotice } from '@/components/chat/ChatInlineNotice';
-import { OUTPUT_TRUNCATED_NOTICE, PROVIDER_HISTORY_NOTICE, PROVIDER_REJECTED_NOTICE, HISTORY_OMITTED_NOTICE } from '@/lib/runtime-gate-notice';
+import { OUTPUT_TRUNCATED_NOTICE, PLATFORM_FAILURE_NOTICE, PROVIDER_HISTORY_NOTICE, PROVIDER_REJECTED_NOTICE,
+  HISTORY_OMITTED_NOTICE } from '@/lib/runtime-gate-notice';
 import { isPaygWaiting, organizerSkipped, type PaygViewFields } from '@/lib/payg-wait';
 
 /** A frozen guidance request without its execution, waiting for the user's explicit retry. */
@@ -38,8 +39,11 @@ export function runtimeTurnNotices(turn: RuntimeTurn, ctx: {
   const notices: ChatNotice[] = [];
   const skipped = organizerSkipped(turn);
   if (turn.primaryBody && !turn.organizerComplete && !skipped) notices.push({ id: id('organizer'), tone: 'status', text: '主回复已保存，附属整理未完成。' });
-  if (turn.unavailableReason === 'provider_history')
+  // Both reasons say "not charged"; only a finished (cancelled) round may show them.
+  if (turn.unavailableReason === 'provider_history' && turn.state === 'cancelled')
     return [{ id: id('history'), tone: 'warning', text: PROVIDER_HISTORY_NOTICE }];
+  if (turn.unavailableReason === 'preflight' && turn.state === 'cancelled')
+    return [{ id: id('platform'), tone: 'warning', text: PLATFORM_FAILURE_NOTICE }];
   if (turn.historyOmitted)
     notices.push({ id: id('history-omitted'), tone: 'status', text: HISTORY_OMITTED_NOTICE });
   // The view names a whole-turn provider refusal; the same text the execute result showed live.
