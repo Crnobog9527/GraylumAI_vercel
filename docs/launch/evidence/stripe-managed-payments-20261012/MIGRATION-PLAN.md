@@ -85,7 +85,7 @@
 
 ### 2.4 MP 不负责税务的国家（审查发现，需要 Owner 知道）
 
-MP 只在官方列出的 80 多个国家代收代缴税（[tax-compliance 页](https://docs.stripe.com/payments/managed-payments/tax-compliance)，验证时抄录的清单见 README）。其他国家的买家用 MP 付款时，Stripe 仍然当卖家、处理付款和拒付，**但那个国家的销售税或增值税由 Graylum 负责**：要不要登记、收税、申报，都是我们的事。官方给的做法是开 Stripe Tax（在 MP 交易上不收计算费），用它监控各国门槛，到了门槛再登记。
+MP 只在官方列出的 80 多个国家代收代缴税（具体国家清单以官方 [tax-compliance 页](https://docs.stripe.com/payments/managed-payments/tax-compliance) 为准，例如美国、加拿大、英国、欧盟、台湾、香港、日本、韩国在范围内；中国大陆不能用 MP 付款）。其他国家的买家用 MP 付款时，Stripe 仍然当卖家、处理付款和拒付，**但那个国家的销售税或增值税由 Graylum 负责**：要不要登记、收税、申报，都是我们的事。官方给的做法是开 Stripe Tax（在 MP 交易上不收计算费），用它监控各国门槛，到了门槛再登记。
 
 按 Owner"前期不过度开发"的要求，方案只做下面两件事，不做按国家拦截：
 1. **上线前**，在正式环境开通 Stripe Tax 的门槛监控（后台操作，不写代码，列入第五节需要 Owner 做的平台事项）；
