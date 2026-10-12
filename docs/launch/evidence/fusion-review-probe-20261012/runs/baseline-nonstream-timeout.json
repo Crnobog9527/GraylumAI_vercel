@@ -1,0 +1,44 @@
+{
+  "scenario": "baseline",
+  "tag": "1",
+  "startedAt": "2026-10-12T12:08:26.974Z",
+  "elapsedMs": 300086,
+  "status": 200,
+  "error": "AbortError",
+  "request": {
+    "model": "anthropic/claude-haiku-5.5",
+    "messages": [
+      {
+        "role": "system",
+        "chars": 60
+      },
+      {
+        "role": "user",
+        "chars": 1076
+      }
+    ],
+    "tools": [
+      {
+        "type": "openrouter:fusion",
+        "parameters": {
+          "analysis_models": [
+            "anthropic/claude-haiku-5.5",
+            "deepseek/deepseek-v3.2",
+            "qwen/qwen3.8-flash"
+          ],
+          "model": "anthropic/claude-haiku-5.5",
+          "max_tool_calls": 1,
+          "max_completion_tokens": 2000
+        }
+      }
+    ],
+    "tool_choice": "required",
+    "max_tokens": 3000,
+    "usage": {
+      "include": true
+    }
+  },
+  "response": null,
+  "generation": null,
+  "keyUsageDeltaUsd": 0.016736518999998395
+}
