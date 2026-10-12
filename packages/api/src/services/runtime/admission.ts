@@ -23,7 +23,7 @@ import { throwIfContentBindingRefused } from '../opc/contentBindingError';
 import {StagingAccessError,stagingRpcFailure} from './stagingErrors';
 import {frozenCallPolicy, type FrozenPaygRun, type FrozenRun} from '../bill2/service';
 import { selectRuntimeHistory, fixtureInputCapacity, runtimeScopeInput } from './context';
-import { discoverRuntimeCandidates, fittingCandidates, matchingInput, MATCH_INSTRUCTIONS, sizeRuntimeCandidate } from './matching';
+import { activateRuntimeCandidate, discoverRuntimeCandidates, fittingCandidates, matchingInput, MATCH_INSTRUCTIONS } from './matching';
 import { withPrimaryAddenda } from './primaryInstructions';
 import { sourceToolBytes } from './sourceRuntimeTool';
 import { type ReasoningPolicy } from './reasoningPolicy';
@@ -289,7 +289,7 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
    // All dropped: no paid match; the turn is admitted exactly as an ordinary selection.
    const sourceTools=[...(searchAllowed?['search']:[]),...(input.sources.length||workspaceContext?['read_source']:[])];
    // The executor sizes a selected Skill with these exact tool descriptions plus the same cache/marker overhead.
-   if(candidates.length)candidates=await fittingCandidates(candidates,candidate=>sizeRuntimeCandidate(user,admin,candidate),
+   if(candidates.length)candidates=await fittingCandidates(candidates,candidate=>activateRuntimeCandidate(user,admin,candidate),
     {input:currentInput,inputBytes,toolBytes:sourceToolBytes(sourceTools,workspaceContext)+
      (historySelection?.markerReserveBytes??(promptCache?PROMPT_CACHE_OVERHEAD_BYTES:0)),
      instructions:skill=>withPrimaryAddenda(skill,{workspaceContext,network:input.network})});

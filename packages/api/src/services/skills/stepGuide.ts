@@ -53,7 +53,7 @@ export async function loadStepWork(source: SkillSource, descriptor: PackageDescr
  * the Skill; positioning and packages without workflow.yaml load exactly as before.
  */
 export async function activateFreeChatSkill(source: SkillSource, descriptor: PackageDescriptor,
-  options: {task?: string; maxContextBytes: number}): Promise<{loaded: LoadedSkill; instructions: string}> {
+  options: {task?: string; maxContextBytes: number; withResources?: boolean}): Promise<{loaded: LoadedSkill; instructions: string}> {
   // Bounded shares keep room for the user input, history and tools, which are sized later in admission:
   // the guide at most 1/8 of the budget, the steps' files at most 1/4.
   // A package with legacy tasks keeps its mandatory task selection: never reach it through workflow resources.
@@ -65,7 +65,8 @@ export async function activateFreeChatSkill(source: SkillSource, descriptor: Pac
     // The guide is appended after loading, so its bytes come out of the budget first.
     const rest = options.maxContextBytes - Buffer.byteLength('\n' + work.guide, 'utf8');
     const attempts = [
-      ...(work.resources.length ? [{resources: work.resources, maxContextBytes: Math.floor(options.maxContextBytes / 4)}] : []),
+      ...(work.resources.length && options.withResources !== false
+        ? [{resources: work.resources, maxContextBytes: Math.floor(options.maxContextBytes / 4)}] : []),
       {maxContextBytes: rest},
     ].filter(attempt => attempt.maxContextBytes >= 1);
     for (const attempt of attempts) {
@@ -76,6 +77,6 @@ export async function activateFreeChatSkill(source: SkillSource, descriptor: Pac
     }
   }
   // No guide, or not even SKILL.md and the guide fit: load exactly as before.
-  const loaded = await activateSkill(source, identityOf(descriptor), options);
+  const loaded = await activateSkill(source, identityOf(descriptor), {task: options.task, maxContextBytes: options.maxContextBytes});
   return {loaded, instructions: loaded.forModel()};
 }
