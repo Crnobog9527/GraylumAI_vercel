@@ -22,6 +22,7 @@ import {
 } from '../services/billingReconciliation';
 import { createSafeInternalError, createSafeServiceUnavailableError } from '../lib/publicError';
 import { logger } from '../lib/logger';
+import { MODEL_IDENTITY_GUARD_KEY } from '../services/modelIdentity/guardSetting';
 
 const USER_FACING_SYSTEM_SETTING_KEYS = [
   FUSION_COMPARE_SETTING,
@@ -96,6 +97,9 @@ const systemSettingInputSchema = z.object({
   }
   if ([RUNTIME_RATE_LIMIT_KEY, 'runtime_stop_loss'].includes(setting.key)) {
     ctx.addIssue({ code: 'custom', path: ['key'], message: '使用额度请通过专用管理接口保存' });
+  }
+  if (setting.key === MODEL_IDENTITY_GUARD_KEY) {
+    ctx.addIssue({ code: 'custom', path: ['key'], message: '模型身份保护请通过专用管理接口保存' });
   }
   if (setting.key === PROVIDER_PRICES_KEY) {
     ctx.addIssue({ code: 'custom', path: ['key'], message: '第三方价格请通过专用管理接口保存' });

@@ -18,6 +18,7 @@ import { DEFAULT_SITE_NAME, DEFAULT_SUPPORT_EMAIL } from '@/lib/site-config';
 import { getSafeErrorMessage } from '@/lib/safe-error-message';
 import AdminSettingsLoadError from '@/components/admin/AdminErrorState';
 import { RuntimeRateLimitSettings, RuntimeRateLimitTabTrigger } from '@/components/admin/RuntimeRateLimitSettings';
+import { ModelIdentityGuardControl } from '@/components/admin/ModelIdentityGuardControl';
 import { RuntimeStopLossSettings, RuntimeStopLossTabTrigger } from '@/components/admin/stop-loss/RuntimeStopLossSettings';
 import { SettingsLoadFailure, SettingsLoading } from '@/components/admin/stop-loss/SettingsLoadFailure';
 import { MentorBudgetTabContent, MentorBudgetTabTrigger } from '@/components/admin/MentorBudgetSettings';
@@ -470,6 +471,7 @@ export default function AdminSettingsPage() {
               {renderSettingGroup(settingGroups.features)}
             </CardContent>
           </Card>
+          <div className="mt-6"><ModelIdentityGuardControl /></div>
         </TabsContent>
 
         {/* Membership Tab */}
