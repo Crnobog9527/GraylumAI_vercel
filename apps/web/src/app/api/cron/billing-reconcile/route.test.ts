@@ -192,7 +192,7 @@ describe('/api/cron/billing-reconcile', () => {
 
   it('reports stale charged rounds for manual review without failing the other audits', async () => {
     const finding = { kind: 'stale_charged_round', executionId: 'e-1', runId: 'r-1', chargedCredits: 1,
-      since: '2026-10-11T18:02:00.000Z', refundMarker: 'stale-round:r-1' };
+      since: '2026-10-11T18:02:00.000Z' };
     mocks.staleRounds.mockResolvedValue({ success: false, findings: [finding], total: 1, truncated: false });
     const response = await GET(new Request('https://graylum.test/api/cron/billing-reconcile'));
     expect(response.status).toBe(500);
