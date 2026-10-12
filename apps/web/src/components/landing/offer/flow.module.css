@@ -133,10 +133,14 @@
 
 @media (prefers-reduced-motion: reduce) {
   .stage[data-play] .seq,
-  .stage[data-play] .pick,
-  .stage[data-play] .strike,
   .stage[data-play] .pulse {
     opacity: 1;
+    animation: none;
+  }
+
+  /* Keep their finished look (the struck line stays faded). */
+  .stage[data-play] .pick,
+  .stage[data-play] .strike {
     animation: none;
   }
 }
