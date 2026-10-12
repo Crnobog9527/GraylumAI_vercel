@@ -21,16 +21,38 @@ export async function resolveModelUsageAliases(admin: SupabaseClient, values: It
   return map;
 }
 
-/** Returns the rows with model_used replaced by the real model string (admin reports only). */
-export async function withRealModelUsed<T extends { model_used?: string | null }>(admin: SupabaseClient, rows: T[]): Promise<T[]> {
-  const map = await resolveModelUsageAliases(admin, rows.map(row => row.model_used));
+function collect(value: unknown, out: string[]) {
+  if (typeof value === 'string') out.push(value);
+  else if (Array.isArray(value)) value.forEach(item => collect(item, out));
+  else if (value && typeof value === 'object') {
+    for (const [key, item] of Object.entries(value)) { out.push(key); collect(item, out); }
+  }
+}
+function restore(value: unknown, map: Map<string, string>): unknown {
+  if (typeof value === 'string') return map.get(value) ?? value;
+  if (Array.isArray(value)) return value.map(item => restore(item, map));
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(Object.entries(value).map(([key, item]) => [map.get(key) ?? key, restore(item, map)]));
+  }
+  return value;
+}
+
+/** Returns the rows with model_used and any aliased metadata value or key restored (admin reports only). */
+export async function withRealModelUsed<T extends { model_used?: string | null; metadata?: unknown }>(
+  admin: SupabaseClient, rows: T[]): Promise<T[]> {
+  const values: string[] = [];
+  for (const row of rows) { if (row.model_used) values.push(row.model_used); if (row.metadata) collect(row.metadata, values); }
+  const map = await resolveModelUsageAliases(admin, values);
   if (!map.size) return rows;
-  return rows.map(row => typeof row.model_used === 'string' && map.has(row.model_used)
-    ? { ...row, model_used: map.get(row.model_used)! } : row);
+  return rows.map(row => ({
+    ...row,
+    ...(typeof row.model_used === 'string' && map.has(row.model_used) ? { model_used: map.get(row.model_used)! } : {}),
+    ...(row.metadata ? { metadata: restore(row.metadata, map) } : {}),
+  }));
 }
 
 /** Same as withRealModelUsed for a { data, error } read result; a map failure becomes the result error. */
-export async function withRealModelUsedResult<T extends { model_used?: string | null }, E>(admin: SupabaseClient,
+export async function withRealModelUsedResult<T extends { model_used?: string | null; metadata?: unknown }, E>(admin: SupabaseClient,
   pending: PromiseLike<{ data: T[] | null; error: E | null }>): Promise<{ data: T[] | null; error: E | Error | null }> {
   const result = await pending;
   if (result.error || !result.data) return result;
@@ -39,6 +61,6 @@ export async function withRealModelUsedResult<T extends { model_used?: string | 
 }
 
 /** Diagnostics: best effort, falls back to the stored values when the map cannot be read. */
-export async function realModelUsedOrStored<T extends { model_used?: string | null }>(admin: SupabaseClient, rows: T[]) {
+export async function realModelUsedOrStored<T extends { model_used?: string | null; metadata?: unknown }>(admin: SupabaseClient, rows: T[]) {
   return withRealModelUsed(admin, rows).catch(() => rows);
 }
