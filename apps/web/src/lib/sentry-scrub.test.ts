@@ -62,13 +62,15 @@ describe('sentry scrub', () => {
       transaction: `GET /positioning/${ID}`,
       spans: [{ description: `GET https://openrouter.ai/api?key=1`, data: { 'http.url': 'https://x.test/a?b=1', 'http.query': 'b=1',
         'http.target': '/api/trpc/admin.searchUsers?input=%7B%22q%22%3A%22lilei%40example.com%22%7D', 'http.client_ip': '203.0.113.9',
-        'net.peer.ip': '2001:db8::1' } }],
+        'net.peer.ip': '2001:db8::1', 'gen_ai.response.id': 'gen-synthetic', 'gen_ai.request.model': 'm',
+        'gen_ai.usage.input_tokens': 12, 'gen_ai.request.messages': '[{"role":"user","content":"x"}]', customer_id: 'c1' } }],
     } as unknown as Event;
     const out = scrubTransactionEvent(event);
     expect(out.transaction).toBe('GET /positioning/[id]');
     expect(out.spans?.[0]).toMatchObject({ description: 'GET https://openrouter.ai/api',
       data: { 'http.url': 'https://x.test/a', 'http.query': '[removed]', 'http.target': '/api/trpc/admin.searchUsers',
-        'http.client_ip': '[removed]', 'net.peer.ip': '[removed]' } });
+        'http.client_ip': '[removed]', 'net.peer.ip': '[removed]', 'gen_ai.response.id': '[removed]', 'gen_ai.request.model': 'm',
+        'gen_ai.usage.input_tokens': 12, 'gen_ai.request.messages': '[removed]', customer_id: '[removed]' } });
     expect(redactText('from 203.0.113.9 and 2001:db8::1')).toBe('from [ip] and [ip]');
   });
 

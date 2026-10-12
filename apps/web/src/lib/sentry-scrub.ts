@@ -19,6 +19,10 @@ const REDACTIONS: Array<[RegExp, string]> = [
 ];
 // Client addresses (http.client_ip, ip_address, x-forwarded-for, ...) are personal data.
 const IP_KEY = /(^|[._-])ip($|[._-])|client_ip|ip_address|forwarded|remote_addr/i;
+// Provider/record identifiers (gen_ai.response.id, conversation ids, customer_id, ...) can locate a person's records.
+const ID_KEY = /(^|[._-])ids?$|_id$|[a-z]Id$/;
+// From AI spans keep only model names, operation and token counts; never messages, ids or tool data.
+const GEN_AI_KEEP = /^gen_ai\.(system|operation\.name|request\.model|response\.model|usage\.[a-z_]+)$/;
 const SECRET_KEY = /pass|secret|token|auth|cookie|session|key|email|phone|prompt|content|body|message|text|input|query/i;
 
 /** For SDK-generated metadata (urls, tags, contexts): known identifier formats are masked. */
@@ -60,7 +64,7 @@ function scrubValue(value: unknown, depth: number, text: (value: string) => stri
   for (const [key, item] of Object.entries(value)) {
     if (SECRET_KEY.test(key) && item !== null && typeof item !== 'boolean' && typeof item !== 'number') {
       out[key] = '[removed]';
-    } else if (IP_KEY.test(key)) {
+    } else if (IP_KEY.test(key) || ID_KEY.test(key) || (key.startsWith('gen_ai.') && !GEN_AI_KEEP.test(key))) {
       out[key] = '[removed]';
     } else if (/url|href|path|uri|target/i.test(key) && typeof item === 'string') {
       out[key] = scrubUrl(item);
