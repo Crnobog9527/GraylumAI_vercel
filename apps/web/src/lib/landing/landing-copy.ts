@@ -5,7 +5,7 @@ import type { LandingFeature } from './landing-flags';
  * Landing page wording, copied verbatim from the Owner's final offer (2026-10-13,
  * docs/launch/design/landing/offer-one-page-final-2026-10-13.md and section 13 of the brief).
  * Do not reword here; changes go back to the Owner. `needs` hides a block while its capability
- * is not accepted (landing-flags.ts).
+ * is switched off (landing-flags.ts).
  */
 type Gated = { needs?: readonly LandingFeature[] };
 export type GatedText = Gated & { text: string };
@@ -87,7 +87,7 @@ export const VOICE_WALL = {
 /** Module 3 frame. The nine-step walk-through and the sample reports are added inside it. */
 export const HOW_IT_WORKS = {
   title: 'AI 教练怎么接手你的运营',
-  // One paragraph in the final copy; split only so an unaccepted promise can be left out.
+  // One paragraph in the final copy; split only so a switched-off promise can be left out.
   promise: [
     { text: '你不用再分心研究运营技术，' },
     { text: '不用自己想选题，', needs: ['content'] },
