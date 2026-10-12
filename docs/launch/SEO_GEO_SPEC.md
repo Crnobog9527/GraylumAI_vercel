@@ -159,7 +159,7 @@ robots.txt 由 `app/robots.ts` 生成，上线（`SITE_INDEXING=public`）后的
 
 - 放行（搜索和 AI 问答类）：`Googlebot`、`Bingbot`、`OAI-SearchBot`、`ChatGPT-User`、`Claude-SearchBot`、`Claude-User`、`PerplexityBot`、`Perplexity-User`、`DuckAssistBot`、`Applebot`、`*`。
 - 拒绝（模型训练类，Owner 2026-10-03 决定）：`GPTBot`、`ClaudeBot`、`anthropic-ai`、`CCBot`、`Google-Extended`、`Applebot-Extended`、`Bytespider`、`Meta-ExternalAgent`、`Amazonbot`、`cohere-ai`、`Diffbot`、`omgili`。
-- 所有 UA：只 `Disallow: /api/`。`/_next/static`、`/_next/image` 不能挡——谷歌要用它们渲染公开页（Google robots.txt 指南：不要屏蔽影响页面理解的资源）。`/app`、`/admin`、`/auth`、登录入口页**不写 Disallow**，靠 `noindex` 头和 meta 挡索引——谷歌只有抓到页面才能读到 `noindex`。
+- 上面放行的搜索类爬虫和 `*`：只 `Disallow: /api/`；上面拒绝的训练类爬虫保持 `Disallow: /`，不受这一条影响。`/_next/static`、`/_next/image` 不能挡——谷歌要用它们渲染公开页（Google robots.txt 指南：不要屏蔽影响页面理解的资源）。`/app`、`/admin`、`/auth`、登录入口页**不写 Disallow**，靠 `noindex` 头和 meta 挡索引——谷歌只有抓到页面才能读到 `noindex`。
 - 末尾：`Sitemap: https://www.graylum.com/sitemap.xml`。
 - 说明：拒绝 `GPTBot` 不影响 ChatGPT 搜索引用（那是 `OAI-SearchBot`）；拒绝 `Google-Extended` 不影响谷歌搜索和 AI Overviews（那用 Googlebot）。
 - `SITE_INDEXING` 不是 `public` 时仍然整站 `Disallow: /`，**同时所有响应保留 `X-Robots-Tag: noindex, nofollow`**（staging 和预览永不索引；被外链指向时也不进结果）。
@@ -206,8 +206,9 @@ Owner 2026-10-12 决定：博客用仓库内文章实现，不接外部系统。
 | 位置 | 改动 | 风险 |
 | --- | --- | --- |
 | `apps/web/src/proxy.ts` | 去掉按主机名分流；改成按路径：`/app/*`、`/admin/*` 需登录，其余公开；登录入口页和 `/auth/callback` 留在根路径且公开；根路径直接渲染首页 | 登录和权限，high |
-| `apps/web/src/lib/site-config.ts` | `PUBLIC_SITE_HOSTS / SHARED_COOKIE_HOSTS / DEFAULT_AUTH_APP_URL / normalizeAppOrigin` 简化为单主机；Cookie 改 host-only，并按第 2 节迁移 / 过期 `.graylum.com` 旧 Cookie（`legacyParentCookieNames` 在正式主机上也生效）；`buildAuthHref / buildAppHref` 加 `/app` | 登录态，high |
+| `apps/web/src/lib/site-config.ts` | `PUBLIC_SITE_HOSTS / SHARED_COOKIE_HOSTS / DEFAULT_AUTH_APP_URL / normalizeAppOrigin` 简化为单主机；Cookie 改 host-only，并按第 2 节迁移 / 过期 `.graylum.com` 旧 Cookie（`legacyParentCookieNames` 在正式主机上也生效）；`buildAuthHref` **不加前缀**（登录、注册、验证邮箱、找回密码都留在根路径）；`buildAppHref` 只给搬进 `/app` 的应用路由加前缀，公开地址不加；现在退出登录后跳 `/landing` 的调用方（`AppHeader`、`ProfileSidebar`、`workspace-frame`）改成跳 `/` | 登录态，high |
 | `apps/web/src/lib/public-paths.ts` | 公开为默认，`/app` `/admin` 需登录 | 权限 |
+| 旧应用路径跳转 | www 和 staging 主机上，旧的应用路径 `/positioning`、`/runtime`、`/profile`、`/library`、`/marketplace`、`/workbench`（含子路径）308 到 `/app/` 下同一路径，保留参数；登录回调里的 `next` / `redirect` 目标经 `sanitizeRedirectTarget` 时把这些旧路径换成 `/app/...`，默认目标从 `/profile` 改成 `/app/profile`；`next=/` 登录后去 `/app`（`/` 现在是公开首页）。实测：切换前发出的验证邮件 / OAuth 链接在切换后点开，落到 `/app` 下正确页面 | 登录态，high |
 | 路由目录 | 根路径已登录首页 `src/app/page.tsx`（及同目录的 `home.module.css`、`home-steps`）移到 `src/app/app/page.tsx`；`positioning / runtime / profile / library / marketplace / workbench` 移到 `src/app/app/`；`login / register / verify-email / forgot-password / reset-password / auth / admin / api` 不动；全仓约 45 处内链、21 个文件改前缀（不含测试） | 面广 |
 | `next.config.ts` | `redirects()` 加 `has: host = app.graylum.com` 的 `permanent: true`（308，保留 POST 方法和请求体）：界面路由加 `/app` 前缀，`app.graylum.com/` 到 `/app`，`/auth` `/api` `/admin` `/_next` 和登录入口页只换主机不加前缀（第 2 节）；加 `has: host = graylum.com` 到 www 的 308（保留路径和参数），或改用 Vercel 设置（见第 2 节）；`X-Robots-Tag noindex`：`SITE_INDEXING` 不是 `public` 时**整个环境保留**；是 `public` 时只对 `/app` `/admin` `/auth`、登录入口页、`/maintenance`、`/access-denied`，这些路径不进 robots Disallow。测试覆盖：裸域跳转保留路径和参数；非 public 环境任意路径都带 noindex；public 环境下上述路径带 noindex、公开页不带 | ordinary |
 | 环境变量 | `NEXT_PUBLIC_APP_URL`、`NEXT_PUBLIC_AUTH_APP_URL` = `https://www.graylum.com` | 正式环境改值属 AGENTS §1 |
