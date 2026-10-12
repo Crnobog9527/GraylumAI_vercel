@@ -33,7 +33,7 @@ function FooterColumn({ title, links }: { title: string; links: { label: string;
 
 /**
  * Header and footer for public content pages in one language, server-rendered without client JS. The
- * wrapper carries the page language until the root layout is split per language (SEO_GEO_SPEC 3.1).
+ * wrapper carries the page language until the /app move splits the root layout per language (SEO_GEO_SPEC 15).
  * `alternates` are this page in other languages; the language switch falls back to that language's home.
  */
 export function SiteShell({
