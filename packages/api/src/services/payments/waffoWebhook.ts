@@ -1,5 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { createHash, createVerify } from 'node:crypto';
+import { normalizeWaffoPublicKey } from './waffoFailure';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { z } from 'zod';
 
@@ -30,7 +31,7 @@ export function verifyWaffoReceipt(input: {
   verifier.update(`${parts[1]}.`);
   verifier.update(input.body);
   let valid = false;
-  try { valid = verifier.verify(input.publicKey, parts[2]!, 'base64'); } catch { /* fail closed */ }
+  try { valid = verifier.verify(normalizeWaffoPublicKey(input.publicKey), parts[2]!, 'base64'); } catch { /* fail closed */ }
   if (!valid) throw new Error('WAFFO_SIGNATURE_INVALID');
   const event = envelope.parse(JSON.parse(Buffer.from(input.body).toString('utf8')));
   // Deliberately no production key selection from an untrusted header or body.

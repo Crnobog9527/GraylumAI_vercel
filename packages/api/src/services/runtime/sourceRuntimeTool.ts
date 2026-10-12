@@ -3,15 +3,22 @@ import {z} from 'zod';
 import type {RuntimeTool} from './runner';
 import type {ToolRpc} from './skillFileExecution';
 import type {runtimeContext} from './runtimeContext';
+/** Fixed tool descriptions; admission sizes them with the executor's own formula. */
+function sourceToolDescription(name: string, workspaceContext?: boolean): string {
+ return name==='search'?'Search current sources through the explicitly enabled local search adapter.':
+  workspaceContext?'Read owned business context only when relevant. Omit query to list account/topic metadata; '+
+   'pass an exact returned id to read that source. Read-only; no internet access.':'Read the selected source only.';
+}
+export function sourceToolBytes(names: string[], workspaceContext?: boolean): number {
+ return Buffer.byteLength(JSON.stringify(names.map(name=>({name,description:sourceToolDescription(name,workspaceContext)}))));
+}
 export function sourceRuntimeTool(options: {
  name: string; context: z.infer<typeof runtimeContext>; args: {p_execution_id: string};
  ownerRpc: ToolRpc; budget: {assertCanStart: () => void}; execution: {live?: boolean; sessionId: string};
  exchange: (request: string, phase: string) => Promise<{usage?: {toolResult?: unknown}}>;
 }): RuntimeTool {
  const {name,context,args,ownerRpc,budget,execution,exchange}=options;
- return {name,description:name==='search'?'Search current sources through the explicitly enabled local search adapter.':
-  context.workspaceContext?'Read owned business context only when relevant. Omit query to list account/topic metadata; '+
-   'pass an exact returned id to read that source. Read-only; no internet access.':'Read the selected source only.',
+ return {name,description:sourceToolDescription(name,context.workspaceContext),
     execute:async(arguments_,callId)=>{
      budget.assertCanStart();
      const toolArgs={...args,p_call_id:callId,p_name:name,p_arguments:arguments_};

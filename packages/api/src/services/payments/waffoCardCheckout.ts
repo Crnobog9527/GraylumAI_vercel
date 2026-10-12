@@ -4,11 +4,14 @@ import { z } from 'zod';
 import { prepareMethodPurchase, methodPurchaseInputSchema } from './methodPurchase';
 import { buildWaffoCheckoutRequest, dispatchWaffoCheckout, WAFFO_CHECKOUT_TTL_SECONDS, type WaffoCheckoutOrder } from './waffoCheckout';
 import type { WaffoCheckoutCreate } from './waffoTestOperationsClient';
+import { WaffoFailure } from './waffoFailure';
+import { MethodPurchaseRejected } from './methodPurchaseError';
 
 /** The database admits a checkout window up to 31 minutes; the session itself lives 30. */
 const CLAIM_WINDOW_MS = (WAFFO_CHECKOUT_TTL_SECONDS + 60) * 1000;
-/** Replay only while the original session can still be open: far inside Waffo's 24-hour key window. */
+/** Recreate only inside the original claim window, keeping a margin before its end. */
 const REPLAY_MARGIN_MS = 60 * 1000;
+const MIN_RECREATE_SECONDS = 5 * 60;
 
 /** Release unpaid card orders 40 minutes after checkout started (Owner decision 2026-10-11), so an abandoned
  * checkout does not block the next purchase or hold a founder seat. The database enforces timing. */
@@ -30,6 +33,13 @@ export async function closeExpiredWaffoCheckouts(db: Pick<SupabaseClient, 'from'
   return closed;
 }
 
+/** Checkout-path database failure with its stage and database reason (no row data) for logs. */
+function databaseFailure(stage: string, error: { code?: string; message?: string } | null) {
+  return new WaffoFailure('PAY_WAFFO_CHECKOUT_UNAVAILABLE', { category: 'database', stage,
+    ...(error?.code ? { errorCode: String(error.code).slice(0, 40) } : {}),
+    providerErrors: error?.message ? [{ layer: 'database', message: String(error.message).slice(0, 200) }] : undefined });
+}
+
 export async function createWaffoCardCheckout(input: {
   db: SupabaseClient; provider: WaffoCheckoutCreate & { merchant: string; mode: 'test' }; userId: string;
   appUrl: string; termsVersion: string; checkoutOrigin: string | undefined;
@@ -49,15 +59,17 @@ export async function createWaffoCardCheckout(input: {
   const latestExpiry = Date.now() + CLAIM_WINDOW_MS;
   let stored: Record<string, unknown> = providerRequest;
   let claimExpiry = latestExpiry;
-  // Waffo replays the original session for the same key (measured). The key is fixed per order, so a
-  // timed-out create is recovered by repeating the exact stored request, never by a second checkout.
+  // Waffo has no checkout idempotency (official answer 2026-10-12): every create is a new, independently
+  // payable session and a lost response cannot be looked up by our order id. The header is harmless but not
+  // relied on. Only one session is ever bound and returned per order (bind refuses a second), so the buyer
+  // can only reach one payment page; a duplicate first payment is still caught at delivery.
   const idempotencyKey = `graylum-checkout-${order.id}`;
   const create = async (request: Record<string, unknown>) => {
     try { return await provider.createCheckout(request, idempotencyKey); } catch (error) {
       if (error instanceof Error && error.message === 'PAY_WAFFO_PROVIDER_REJECTED') {
         const closed = await db.rpc('pay_waffo_close_card_checkout', { p_user: userId, p_order: order.id,
           p_merchant: provider.merchant, p_rejected: true });
-        if (closed.error) throw new Error('PAY_WAFFO_CHECKOUT_UNAVAILABLE');
+        if (closed.error) throw databaseFailure('close_rejected', closed.error);
       }
       throw error;
     }
@@ -69,19 +81,29 @@ export async function createWaffoCardCheckout(input: {
         p_expires: new Date(latestExpiry).toISOString(), p_request: { orderId: order.id, userId, method: 'card',
           merchant: provider.merchant, mode: 'test', providerRequest } });
       if (claimed.error || typeof claimed.data?.dispatch !== 'boolean' || !claimed.data?.request?.providerRequest) {
-        throw new Error('PAY_WAFFO_CHECKOUT_UNAVAILABLE');
+        throw databaseFailure('claim', claimed.error);
       }
       stored = claimed.data.request.providerRequest;
       claimExpiry = Date.parse(claimed.data.expiresAt);
       return claimed.data.dispatch;
     },
     create,
-    // After the window the original session is expired anyway; never POST again (the order is released later).
-    recover: async () => (Date.now() < claimExpiry - REPLAY_MARGIN_MS ? create(stored) : null),
+    // A session already bound to this order is the buyer's page: never create another one for it.
+    // Only an unbound dispatch (lost create response, no URL ever returned) is recreated, inside the window.
+    recover: async () => {
+      const bound = await db.from('payment_provider_refs').select('external_id').eq('order_id', order.id)
+        .eq('object_type', 'checkout').eq('channel', 'waffo').eq('merchant_namespace', provider.merchant).eq('mode', 'test').maybeSingle();
+      if (bound.error) throw databaseFailure('bound_read', bound.error);
+      if (bound.data) throw new MethodPurchaseRejected('PAY_WAFFO_CHECKOUT_OPEN');
+      // The claim's expiry is fixed at the first dispatch and bind refuses anything later, so the replacement
+      // gets only the remaining lifetime; too little left means the order is simply released later.
+      const remaining = Math.floor((claimExpiry - REPLAY_MARGIN_MS - Date.now()) / 1000);
+      return remaining >= MIN_RECREATE_SECONDS ? create({ ...stored, expiresInSeconds: remaining }) : null;
+    },
     persist: async (result) => {
       const bound = await db.rpc('pay_waffo_bind_checkout', { p_user: userId, p_order: order.id, p_merchant: provider.merchant,
         p_checkout: result.sessionId, p_expires: result.expiresAt });
-      if (bound.error) throw new Error('PAY_WAFFO_CHECKOUT_UNAVAILABLE');
+      if (bound.error) throw databaseFailure('bind', bound.error);
     },
     createdAfter: Date.now(), latestExpiry, allowedCheckoutOrigin: input.checkoutOrigin,
   }).catch((error: unknown) => {

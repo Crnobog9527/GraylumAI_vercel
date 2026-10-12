@@ -618,7 +618,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
     let executionId = fixed.executionId;
     const result = executionId ? await execute.mutateAsync({ executionId })
       : await mentorTurn(request, id => { executionId = id; retainExecution(sessionStorage, key, request.requestId, id); }).catch(async cause => {
-        if (releaseRejectedAnswer(sessionStorage, key, request.requestId, cause)) {
+        if (releaseRejectedAnswer(sessionStorage, key, request.requestId, cause, text => setMentorInput(old => old.trim() ? old : text))) {
           setPendingBubble(old => old?.requestId === request.requestId ? null : old); live.clear();
           await Promise.all([read.refetch(), history.refetch()]);
         }

@@ -100,7 +100,8 @@ export async function verifySupplement(admin, one, two) {
   await admin.query("UPDATE membership_plans SET library_storage_bytes=30000000 WHERE level='free'");
   assert.equal((await publish()).status, 'ready');
   assert.equal((await publish()).status, 'ready');
-  assert.equal(await value(admin, 'SELECT library_usage($1) v', [b]), String(20000000 + bytes));
+  // 0213: once published, usage is the actual original (4) + text object + segments, not the token holds.
+  assert.equal(await value(admin, 'SELECT library_usage($1) v', [b]), String(4 + bytes * 2));
   const directory = await value(one, 'SELECT library_directory($1,$2,1) v', [b,did]);
   assert.deepEqual(directory, segments.map((s,ordinal) => ({ ordinal, title: s.title })));
   const range = await value(one, 'SELECT library_segments_range($1,$2,1,49,16) v', [b,did]);
