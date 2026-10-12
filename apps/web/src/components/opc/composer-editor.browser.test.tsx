@@ -70,6 +70,7 @@ it('sends on Enter, adds a line on Shift+Enter, and shows the placeholder after 
   expect(await sent(page)).toEqual(['第一行\n第二行']);
   await ui(box(page)).toHaveText('');
   await ui(page.locator('p[data-placeholder="写点什么"]')).toBeVisible();
+  await ui(box(page)).toHaveAttribute('aria-placeholder', '写点什么');
   await ui(box(page)).toBeFocused();
 }));
 

@@ -79,6 +79,7 @@ export function ComposerEditor(props: Props) {
         role: 'textbox',
         'aria-label': latest.current.label,
         'aria-multiline': 'true',
+        'aria-placeholder': latest.current.placeholder,
         'aria-disabled': latest.current.disabled ? 'true' : 'false',
       }),
       handleKeyDown(view, event) {
@@ -133,9 +134,9 @@ export function ComposerEditor(props: Props) {
   }, [editor, value]);
 
   useEffect(() => {
-    // setEditable also re-applies the attributes above, so label and aria-disabled follow the props.
+    // setEditable also re-applies the attributes above, so label, placeholder and aria-disabled follow the props.
     editor?.setEditable(!disabled, false);
-  }, [editor, disabled, label]);
+  }, [editor, disabled, label, placeholder]);
 
   useImperativeHandle(ref, () => ({
     focus: () => {

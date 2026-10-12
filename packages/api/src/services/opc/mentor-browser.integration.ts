@@ -181,7 +181,7 @@ it.runIf(process.env.V3_LOCAL_STAGING_HOST==='true').each(['normal','refresh','p
    await poll(()=>composer.evaluate(element=>element===document.activeElement)).toBe(true);
   }
   expect(await page.getByRole('button',{name:/我不确定/}).count()).toBe(0);
-  expect(await composer.getAttribute('placeholder')).toBe('其他：自己补充');
+  expect(await composer.getAttribute('aria-placeholder')).toBe('其他：自己补充');
   expect(await composer.textContent()).toBe('这是下一条尚未发送的新草稿');
   await page.reload();await poll(()=>send.isEnabled()).toBe(true);
   // B2 renders the canonical numbered message as an HTML list. Compare the
