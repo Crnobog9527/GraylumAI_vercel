@@ -21,7 +21,7 @@ export type PublicPage = {
 
 export const PUBLIC_PAGES: PublicPage[] = [
   // The public host serves the home page at "/" (rewritten to /landing until the single-host move).
-  { path: '/', locale: 'zh-Hans', lastModified: '2026-10-12' },
+  { path: '/', locale: 'zh-Hans', lastModified: '2026-10-13' },
   { path: '/landing/pricing', locale: 'zh-Hans', lastModified: '2026-10-12' },
   { path: '/tutorials', locale: 'zh-Hans', lastModified: '2026-10-12' },
   { path: '/faq', locale: 'zh-Hans', lastModified: '2026-10-12' },
