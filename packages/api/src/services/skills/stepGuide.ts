@@ -14,7 +14,7 @@ const GUIDE_HEADER = 'Work guide declared by this Skill. Follow the steps in ord
   + 'separate screens and need no confirmation cards. Ask only for what the current step still needs, '
   + 'and skip what the user already gave.';
 
-export function stepGuideText(manifest: WorkflowManifest): string | undefined {
+export function stepGuideText(manifest: WorkflowManifest, maxBytes = Number.POSITIVE_INFINITY): string | undefined {
   // Positioning is the one guided flow, by the same rule as the positioning entry (and migration 0219).
   if (isPositioningWorkflow(manifest)) return undefined;
   // Every step stays; when too long, drop field descriptions, then field titles.
@@ -25,8 +25,9 @@ export function stepGuideText(manifest: WorkflowManifest): string | undefined {
       return [`${index + 1}. ${step.title}`, ...fields].join('\n');
     });
     const text = GUIDE_HEADER + '\n' + lines.join('\n');
-    if (text.length <= STEP_GUIDE_MAX_CHARS || detail === 'steps') return text;
+    if (text.length <= STEP_GUIDE_MAX_CHARS && Buffer.byteLength(text, 'utf8') <= maxBytes) return text;
   }
+  // Not even the step titles fit: no guide, the Skill loads as before.
   return undefined;
 }
 
@@ -34,11 +35,12 @@ export function stepGuideText(manifest: WorkflowManifest): string | undefined {
 export type StepWork = {guide: string; resources: string[]};
 
 /** The immutable package, not today's module version, is the authority (same as the R3 organizer template). */
-export async function loadStepWork(source: SkillSource, descriptor: PackageDescriptor): Promise<StepWork | undefined> {
+export async function loadStepWork(source: SkillSource, descriptor: PackageDescriptor,
+  maxGuideBytes = Number.POSITIVE_INFINITY): Promise<StepWork | undefined> {
   // Treat a descriptor without a file list as one without workflow.yaml.
   if (!(descriptor.files ?? []).some(item => item.path === workflowManifestPath)) return undefined;
   const manifest = parseWorkflowManifest(await readSkillResource(source, identityOf(descriptor), workflowManifestPath, 2 * 1024 * 1024));
-  const guide = stepGuideText(manifest);
+  const guide = stepGuideText(manifest, maxGuideBytes);
   if (guide === undefined) return undefined;
   const resources = [...new Set([...manifest.steps.flatMap(step => step.resources), ...(manifest.planResources ?? [])])]
     .filter(path => path !== 'SKILL.md').slice(0, 64);
@@ -47,19 +49,21 @@ export async function loadStepWork(source: SkillSource, descriptor: PackageDescr
 
 /**
  * Free chat activation of a Skill: SKILL.md, plus for a non-positioning Skill its steps' declared files and the
- * ordered guide. When those files do not fit in half the budget, fall back to SKILL.md and the guide rather than refusing
+ * ordered guide. When those files do not fit their share, fall back to SKILL.md and the guide rather than refusing
  * the Skill; positioning and packages without workflow.yaml load exactly as before.
  */
 export async function activateFreeChatSkill(source: SkillSource, descriptor: PackageDescriptor,
   options: {task?: string; maxContextBytes: number}): Promise<{loaded: LoadedSkill; instructions: string}> {
-  const work = options.task === undefined ? await loadStepWork(source, descriptor) : undefined;
+  // Bounded shares keep room for the user input, history and tools, which are sized later in admission:
+  // the guide at most 1/8 of the budget, the steps' files at most 1/4.
+  const work = options.task === undefined
+    ? await loadStepWork(source, descriptor, Math.floor(options.maxContextBytes / 8)) : undefined;
   const capacity = (error: unknown) => String((error as Error)?.message).includes('CAPACITY_EXCEEDED');
   if (work) {
     // The guide is appended after loading, so its bytes come out of the budget first.
     const rest = options.maxContextBytes - Buffer.byteLength('\n' + work.guide, 'utf8');
     const attempts = [
-      // The steps' files may use at most half of what remains, leaving room for the input and tools.
-      ...(work.resources.length ? [{resources: work.resources, maxContextBytes: Math.floor(rest / 2)}] : []),
+      ...(work.resources.length ? [{resources: work.resources, maxContextBytes: Math.floor(options.maxContextBytes / 4)}] : []),
       {maxContextBytes: rest},
     ].filter(attempt => attempt.maxContextBytes >= 1);
     for (const attempt of attempts) {

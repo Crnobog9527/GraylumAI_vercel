@@ -80,9 +80,9 @@ it('stays within its size cap and never drops a step', () => {
     ({...step, information: step.information.slice(0, 2)}))})))!;
   expect(short).toContain('：' + '说明'.repeat(190));
 });
-it('leaves room for the rest of the request: files over half the budget fall back to SKILL.md and the guide', async () => {
-  const f = fixture(script, 'x'.repeat(1800));
-  const {instructions} = await activateFreeChatSkill(f.source, f.descriptor, {maxContextBytes: 3000});
+it('leaves room for the rest of the request: files over a quarter of the budget fall back to SKILL.md and the guide', async () => {
+  const f = fixture(script, 'x'.repeat(1200));
+  const {instructions} = await activateFreeChatSkill(f.source, f.descriptor, {maxContextBytes: 4000});
   expect(instructions).not.toContain('xxxxx');
   expect(instructions).toContain('1. 找开头');
 });
@@ -93,4 +93,15 @@ it('reserves the guide\'s bytes: loaded files plus the guide stay within the bud
     // Below what SKILL.md plus the guide need, the Skill loads exactly as before, without the guide.
     expect(Buffer.byteLength(instructions, 'utf8') <= budget || !instructions.includes('Work guide')).toBe(true);
   }
+});
+it('keeps the guide within an eighth of the budget, shortening it or leaving it out', async () => {
+  const f = fixture(script);
+  const roomy = await activateFreeChatSkill(f.source, f.descriptor, {maxContextBytes: 100000});
+  expect(roomy.instructions).toContain('三秒内抓住注意力');
+  // A budget whose eighth is one byte short of the full guide: the descriptions go, the steps stay.
+  const full = Buffer.byteLength(stepGuideText(parseWorkflowManifest(script))!, 'utf8');
+  const tight = await activateFreeChatSkill(f.source, f.descriptor, {maxContextBytes: 8 * (full - 1)});
+  expect(tight.instructions).toContain('1. 找开头');
+  expect(tight.instructions).not.toContain('三秒内抓住注意力');
+  expect((await activateFreeChatSkill(f.source, f.descriptor, {maxContextBytes: 1200})).instructions).not.toContain('Work guide');
 });
