@@ -54,7 +54,7 @@ export const SITE_CHROME: Record<SiteLocale, SiteChrome> = {
       { label: '关于我们', href: '/about' },
     ],
     login: '登录',
-    signup: '免费开始诊断',
+    signup: '免费和教练聊聊',
     pagesTitle: '内容',
     companyTitle: '公司',
     company: [
@@ -85,7 +85,7 @@ export const SITE_CHROME: Record<SiteLocale, SiteChrome> = {
       { label: '關於我們', href: '/zh-tw/about' },
     ],
     login: '登入',
-    signup: '免費開始診斷',
+    signup: '免費和教練聊聊',
     pagesTitle: '自媒體經營指南',
     companyTitle: '公司',
     company: [

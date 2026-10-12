@@ -9,7 +9,7 @@ import { buildLandingPricing, landingOfferList, type LandingOffers } from './lan
 // serves this page at "/", so that is its canonical address.
 export const HOME_TITLE = 'Graylum – AI 自媒体工具：定位、选题、写内容的 AI 自媒体陪跑教练';
 export const HOME_DESCRIPTION =
-  'Graylum 是你的 AI 自媒体陪跑教练：帮你找准账号定位、决定每周发什么、写出能直接发的内容。免费开始定位诊断，一步步把账号做起来。';
+  'Graylum 是你的 AI 自媒体陪跑教练：帮你找准账号定位、决定每周发什么、写出能直接发的内容。免费和教练聊聊，一步步把账号做起来。';
 
 /**
  * Everything the landing page shows, after hiding unaccepted capabilities. Pure, so the page, its
