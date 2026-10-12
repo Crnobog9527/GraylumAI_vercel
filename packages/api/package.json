@@ -35,7 +35,7 @@
     "@supabase/supabase-js": "^2.105.4",
     "@trpc/server": "^11.17.0",
     "@upstash/ratelimit": "^2.0.8",
-    "@upstash/redis": "^1.36.1",
+    "@upstash/redis": "^1.39.0",
     "dotenv": "^17.4.2",
     "pino": "^10.3.1",
     "pino-pretty": "^13.1.3",
