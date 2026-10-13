@@ -12,8 +12,9 @@ class CIWorkflowsTest < Minitest::Test
     @security = YAML.safe_load(File.read("#{ROOT}/workflows/security.yml"))
   end
   GATES = {'lint-check'=>['Lint & Type Check','lint-and-type'], 'typecheck'=>['TypeScript Check','lint-and-type'],
-           'unit-check'=>['Unit Tests',{'WORK_RESULT'=>'test','INTEGRATION_RESULT'=>'integration'}],
-           'security-unit-tests'=>['Security Unit Tests','test'],
+           'unit-check'=>['Unit Tests',{'WORK_RESULT'=>'test','INTEGRATION_RESULT'=>'integration',
+                                        'LEDGER_RESULT'=>'migration-ledger'}],
+           'security-unit-tests'=>['Security Unit Tests',{'WORK_RESULT'=>'test','LEDGER_RESULT'=>'migration-ledger'}],
            'build'=>['Build Check','build-and-e2e'], 'security-e2e-tests'=>['Security E2E Tests','build-and-e2e']}.freeze
   INTEGRATION_RUNS = ['node packages/db/tests/v3/run-workbench.mjs --bill2-core-only --without-app --schema-from-files',
                       'node packages/db/tests/v3/run-workbench.mjs --runtime-only --with-staging-schema --without-app --schema-from-files',
@@ -215,9 +216,22 @@ class CIWorkflowsTest < Minitest::Test
     end
   end
 
+  def test_migration_ledger_runs_in_its_own_unskippable_worker
+    ledger = 'CI safeguard — check migration ledger'
+    jobs = @ci.fetch('jobs')
+    owners = jobs.select { |_, job| job.fetch('steps').any? { |step| step['name'] == ledger } }.keys
+    assert_equal ['migration-ledger'], owners
+    steps = jobs.fetch('migration-ledger').fetch('steps')
+    assert_equal 0, steps.find { |step| step['name'] == 'Checkout' }.fetch('with').fetch('fetch-depth')
+    steps.each do |step|
+      refute step.key?('if'), step['name']
+      refute step.key?('continue-on-error'), step['name']
+    end
+  end
+
   def test_scheduled_migration_step_executes_trusted_checker_and_rejects_damage
     # Execute the actual workflow shell, not a reimplementation of its routing.
-    step = @ci.fetch('jobs').fetch('test').fetch('steps').find { |s| s['name'] == 'CI safeguard — check migration ledger' }
+    step = @ci.fetch('jobs').fetch('migration-ledger').fetch('steps').find { |s| s['name'] == 'CI safeguard — check migration ledger' }
     repository = File.expand_path('..', ROOT)
     Dir.mktmpdir('ci-schedule-ledger-') do |dir|
       checkout = File.join(dir, 'checkout')
