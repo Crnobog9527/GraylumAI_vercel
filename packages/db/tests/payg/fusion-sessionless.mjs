@@ -50,14 +50,29 @@ export async function fusionSessionlessCases({db,report,createFixture}) {
   assert.equal(verdicts[c0.id],'unjudged_saved');
   assert.equal(verdicts[callOf(g,g.members[1]).id],'no_delivery');
   assert.equal(await charged(db,g.runs),1,'only the call with a saved Fusion output is charged');
-  report.checks.push('unjudged at deadline: saved Fusion output (no runtime execution) bills as unjudged_saved; no output is no_delivery');
+  await assert.rejects(rpc(db,'fusion_call_output_save',g.actor,callOf(g,g.members[1]).id,'too late'),/FUSION_OUTPUT_DENIED/);
+  report.checks.push('unjudged at deadline: saved Fusion output (no runtime execution) bills as unjudged_saved; no output is no_delivery; '+
+    'a body arriving after that settlement is refused');
+
+  // A verdict must match the saved body: body verdicts need it, no_delivery needs its absence.
+  const v = await sessionGroup(db,createFixture,{n:2,credits:18});
+  const [v0,v1] = v.members.map(f=>callOf(v,f));
+  for (const verdict of ['usable','format_invalid','revision_invalid'])
+    await assert.rejects(rpc(db,'fusion_call_verdict',v.actor,v0.id,verdict),/FUSION_VERDICT_DENIED/);
+  await rpc(db,'fusion_call_output_save',v.actor,v1.id,'saved body');
+  await assert.rejects(rpc(db,'fusion_call_verdict',v.actor,v1.id,'no_delivery'),/FUSION_VERDICT_DENIED/);
+  assert.equal(await rpc(db,'fusion_call_verdict',v.actor,v0.id,'no_delivery'),'no_delivery');
+  assert.equal(await rpc(db,'fusion_call_verdict',v.actor,v1.id,'usable'),'usable');
+  report.checks.push('verdicts are checked against the saved output: no body verdict without a body, no no_delivery with one');
 
   // Recovery batch lists grouped runs with unsettled calls only.
   const pending = await sessionGroup(db,createFixture,{n:1,credits:9});
-  const batch = (await db.query('SELECT * FROM fusion_pending_financial_batch(200)')).rows.map(r=>r.run_id);
-  assert.ok(batch.includes(pending.runs[0]));
-  assert.ok(!batch.includes(g.runs[0]),'settled group runs are not listed');
-  report.checks.push('fusion_pending_financial_batch lists sessionless group runs with unsettled calls');
+  const rows = (await db.query('SELECT * FROM fusion_pending_financial_batch(200)')).rows;
+  const listed = rows.find(r=>r.run_id===pending.runs[0]);
+  assert.ok(listed && listed.call_id===pending.calls[0].id && listed.actor_id===pending.actor && listed.dispatched===true);
+  assert.ok(listed.dispatch_deadline instanceof Date && listed.recovery===null,'isolated fixture runs carry no staging binding');
+  assert.ok(!rows.some(r=>r.run_id===g.runs[0]),'settled group runs are not listed');
+  report.checks.push('fusion_pending_financial_batch lists unsettled sessionless group calls with dispatch state, deadline and binding');
 
   // Deleting the source conversation deletes its Fusion outputs, scrubs the runs and leaves no hold.
   const del = await sessionGroup(db,createFixture,{n:2,credits:18});
@@ -70,6 +85,9 @@ export async function fusionSessionlessCases({db,report,createFixture}) {
   await assert.rejects(rpc(db,'fusion_call_output_save',del.actor,callOf(del,del.members[1]).id,'late'),/FUSION_OUTPUT_DENIED/);
   const runs = (await db.query('SELECT content_deleted_at,closed FROM bill2_runs WHERE id=ANY($1::uuid[])',[del.runs])).rows;
   assert.ok(runs.every(r=>r.content_deleted_at!==null && r.closed),'group runs marked and closed');
+  const scrubbed = (await db.query(`SELECT r.content_erased_at run_at,c.content_erased_at call_at FROM bill2_runs r
+    JOIN bill2_calls c ON c.run_id=r.id WHERE r.id=ANY($1::uuid[])`,[del.runs])).rows;
+  assert.ok(scrubbed.length===2 && scrubbed.every(x=>x.run_at && x.call_at),'run and call payloads are scrubbed, even without a receipt');
   // Content deletion cancels the runs: like BILL2 cancel-after-dispatch, a known cost is billed (user_stopped),
   // and a call without a receipt keeps its hold until the late receipt (or recovery) settles it.
   const after = Object.fromEntries((await calls(db,del.runs)).map(c=>[c.id,c]));
