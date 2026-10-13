@@ -2,6 +2,7 @@
 /* Sample G, module 3: the nine scene conversations (ScenesG.tsx). Colors come from g.module.css (--g-*). */
 .scenes {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 16px;
   margin-top: 28px;
 }
@@ -46,7 +47,7 @@
 .tocTitle { white-space: nowrap; }
 
 /* One scene: chat window and its explanation */
-.panel { display: grid; gap: 14px; min-width: 0; }
+.panel { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; min-width: 0; }
 @media (min-width: 1180px) { .panel { grid-template-columns: minmax(0, 1fr) 288px; gap: 20px; align-items: start; } }
 .panel[hidden] { display: none; }
 

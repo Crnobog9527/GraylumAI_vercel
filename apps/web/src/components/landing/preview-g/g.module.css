@@ -86,11 +86,12 @@
 @media (min-width: 900px) { .nav { display: flex; } }
 
 /* First screen: text on two columns, the demo right under it */
-.main { display: grid; gap: clamp(24px, 4vw, 56px); padding-bottom: 24px; }
+.main { display: grid; grid-template-columns: minmax(0, 1fr); gap: clamp(24px, 4vw, 56px); padding-bottom: 24px; }
 .hero {
-  display: grid; gap: 16px; max-width: 1200px; width: 100%; margin: 0 auto;
+  display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; max-width: 1200px; width: 100%; margin: 0 auto;
   padding: clamp(28px, 5vw, 64px) clamp(16px, 3vw, 24px) 0;
 }
+.hero > *, .sectionHead > *, .priceGrid > * { min-width: 0; }
 @media (min-width: 900px) {
   .hero { grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); column-gap: 48px; align-items: end; }
   .heroDemo { grid-column: 1 / -1; }
@@ -113,7 +114,7 @@
 .deferred { content-visibility: auto; contain-intrinsic-size: auto 900px; }
 .sectionHead { display: grid; gap: 10px; }
 @media (min-width: 900px) {
-  .sectionHead { grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: 48px; align-items: end; }
+  .sectionHead { grid-template-columns: minmax(0, 6fr) minmax(0, 6fr); gap: 48px; align-items: end; }
 }
 .promise { margin: 0; color: var(--g-body); font-size: 15.5px; line-height: 1.8; text-wrap: pretty; }
 
@@ -170,9 +171,8 @@
 .founderLine { margin: 0; font-size: 15px; font-weight: 600; }
 .founderLine span { margin-left: 8px; color: var(--g-muted); font-size: 13px; font-weight: 400; }
 .priceGrid { display: grid; gap: 16px; margin-top: 20px; }
-@media (min-width: 1024px) { .priceGrid { grid-template-columns: minmax(0, 4fr) minmax(0, 8fr); gap: 20px; align-items: start; } }
+@media (min-width: 1024px) { .priceGrid { grid-template-columns: minmax(0, 8fr) minmax(0, 4fr); gap: 20px; align-items: start; } }
 .priceSide { display: grid; gap: 12px; }
-@media (min-width: 1024px) { .priceSide { order: 2; } }
 .compare, .risk { padding: 16px 18px; border: 1px solid var(--g-line); border-radius: 18px; background: #fff; }
 .compareLede { margin: 0; font-size: 14.5px; font-weight: 600; }
 .compare ul { margin: 6px 0 0; padding: 0; list-style: none; }

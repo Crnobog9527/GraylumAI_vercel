@@ -34,6 +34,8 @@ export function ScrollBackdrop({ className }: { className?: string }) {
     const media = window.matchMedia?.('(prefers-reduced-motion: reduce)');
     let frame = 0;
     let live = false;
+    // Sections rendered late (content-visibility, lazy demos) change the page height without a scroll event.
+    const resize = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(() => onScroll());
     const update = () => {
       frame = 0;
       const root = document.documentElement;
@@ -47,6 +49,7 @@ export function ScrollBackdrop({ className }: { className?: string }) {
       frame = 0;
       window.removeEventListener('scroll', onScroll);
       window.removeEventListener('resize', onScroll);
+      resize?.disconnect();
       node.style.removeProperty('--scroll');
       delete node.dataset.motion;
     };
@@ -57,6 +60,7 @@ export function ScrollBackdrop({ className }: { className?: string }) {
       update();
       window.addEventListener('scroll', onScroll, { passive: true });
       window.addEventListener('resize', onScroll);
+      resize?.observe(document.body);
     };
     // The visitor can switch reduced motion on while the page is open; the backdrop follows.
     const onPreference = () => (reducedMotion() ? stop() : start());

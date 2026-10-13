@@ -9,9 +9,9 @@ import type { LandingData } from './SampleG';
 import styles from './g.module.css';
 
 /**
- * Section 4 in one screen on desktop: the "if you hired someone" anchors and "先聊后买" in a narrow column beside
- * the plan cards, so the comparison, the prices and the guarantee are read together. Same server data as the
- * landing page; the recommended plan is marked in gold rather than inverted to black.
+ * Section 4 in one screen on desktop: the plan cards first (also first on a phone), then the "if you hired someone"
+ * anchors and "先聊后买" in a narrow column beside them, so prices, comparison and guarantee are read together.
+ * Same server data as the landing page; the recommended plan is marked in gold rather than inverted to black.
  */
 export function PriceG({ data, membershipHref }: { data: LandingData; membershipHref: string }) {
   const { pricing, compareRows: rows } = data;
@@ -28,6 +28,13 @@ export function PriceG({ data, membershipHref }: { data: LandingData; membership
       </div>
 
       <div className={styles.priceGrid}>
+        {pricing.cards.length > 0 ? (
+          <PlanCards cards={pricing.cards} yearlyBadge={pricing.yearlyBadge} showResult={data.showResult} membershipHref={membershipHref} />
+        ) : (
+          <p role="status" className={styles.lede}>
+            会员方案暂时读不到，请稍后刷新，或先看<Link href="/landing/pricing">价格页</Link>。
+          </p>
+        )}
         <div className={styles.priceSide}>
           {rows.length > 0 ? (
             <div className={styles.compare}>
@@ -48,14 +55,6 @@ export function PriceG({ data, membershipHref }: { data: LandingData; membership
             <ul>{data.risk.map(point => <li key={point.text}><Check size={15} aria-hidden="true" />{point.text}</li>)}</ul>
           </div>
         </div>
-
-        {pricing.cards.length > 0 ? (
-          <PlanCards cards={pricing.cards} yearlyBadge={pricing.yearlyBadge} showResult={data.showResult} membershipHref={membershipHref} />
-        ) : (
-          <p role="status" className={styles.lede}>
-            会员方案暂时读不到，请稍后刷新，或先看<Link href="/landing/pricing">价格页</Link>。
-          </p>
-        )}
       </div>
 
       {rows.length > 0 ? (
