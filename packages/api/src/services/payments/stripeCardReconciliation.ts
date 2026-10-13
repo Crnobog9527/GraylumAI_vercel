@@ -13,7 +13,8 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const DAY = 86400;
 
 export type StripeCardFinding = {
-  kind: 'paid_not_delivered' | 'paid_in_review' | 'renewal_not_recorded' | 'refund_not_recorded' | 'repair_failed'
+  kind: 'paid_not_delivered' | 'paid_in_review' | 'renewal_not_recorded' | 'refund_not_recorded' | 'tax_not_recorded'
+    | 'repair_failed'
     | 'scan_incomplete' | 'scan_failed';
   object?: 'checkout' | 'invoice' | 'refund'; externalId?: string; orderId?: string; code?: string;
 };
@@ -58,7 +59,15 @@ export async function reconcileStripeCardPayments(db: SupabaseClient, stripe: St
     const orderId = session.metadata?.orderId;
     if (session.payment_status !== 'paid' || !orderId || !UUID.test(orderId)) return;
     const before = await cardOrder(db, orderId);
-    if (!before || before.fulfilled_at) return;
+    // Delivered and its tax recorded: nothing to do. Delivered without the tax fact (the tax write failed after the
+    // payment): replaying the idempotent recovery records it, so external refunds can be judged against the charge.
+    if (!before || (before.fulfilled_at && hasTax(before))) return;
+    if (before.fulfilled_at) {
+      await recoverMethodCheckout(db, stripe, session.id, 'checkout.session.completed');
+      if (hasTax(await cardOrder(db, orderId))) repaired++;
+      else findings.push({ kind: 'tax_not_recorded', object: 'checkout', externalId: session.id, orderId });
+      return;
+    }
     if (before.method_review_reason) {
       findings.push({ kind: 'paid_in_review', object: 'checkout', externalId: session.id, orderId });
       return;
@@ -74,19 +83,26 @@ export async function reconcileStripeCardPayments(db: SupabaseClient, stripe: St
   await scan('invoice', after => stripe.invoices.list({ created: { gte: since }, status: 'paid', limit: 100,
     ...(after ? { starting_after: after } : {}) }), async invoice => {
     if (invoice.billing_reason !== 'subscription_cycle' || !id(invoice.parent?.subscription_details?.subscription)) return;
-    if (await recorded(db, scope, 'payment', invoice.id)) return;
+    const known = await recordedOrder(db, scope, 'payment', invoice.id);
+    if (known && hasTax(await cardOrder(db, known))) return;
+    // Missing, or recorded without its tax fact: the renewal handler is idempotent and records both.
     if (!await handleCardSubscriptionInvoice(db, stripe, invoice.id, 'invoice.paid', undefined, options.alert)) return;
-    if (await recorded(db, scope, 'payment', invoice.id)) repaired++;
-    else findings.push({ kind: 'renewal_not_recorded', object: 'invoice', externalId: invoice.id });
+    const orderId = await recordedOrder(db, scope, 'payment', invoice.id);
+    if (orderId && hasTax(await cardOrder(db, orderId))) repaired++;
+    else findings.push({ kind: orderId ? 'tax_not_recorded' : 'renewal_not_recorded', object: 'invoice', externalId: invoice.id,
+      ...(orderId ? { orderId } : {}) });
   });
 
   // 3. Succeeded refunds of card orders that are not recorded: the external-refund handler (#941) records them.
   await scan('refund', after => stripe.refunds.list({ created: { gte: since }, limit: 100,
     ...(after ? { starting_after: after } : {}) }), async refund => {
     if (refund.status !== 'succeeded' || refund.metadata?.refundIntentId) return;
-    if (await recorded(db, scope, 'refund', refund.id)) return;
+    // Recorded refunds are replayed too: the handler changes nothing and repeats a pending review alert (partial
+    // refund, refunded pack, still renewing) that a crashed delivery may never have sent; alerts carry a dedupKey.
+    const known = Boolean(await recordedOrder(db, scope, 'refund', refund.id));
     if (!await handleCardRefund(db, stripe, { refundId: refund.id }, options.alert)) return;
-    if (await recorded(db, scope, 'refund', refund.id)) repaired++;
+    if (known) return;
+    if (await recordedOrder(db, scope, 'refund', refund.id)) repaired++;
     else findings.push({ kind: 'refund_not_recorded', object: 'refund', externalId: refund.id });
   });
 
@@ -94,17 +110,23 @@ export async function reconcileStripeCardPayments(db: SupabaseClient, stripe: St
 }
 
 async function cardOrder(db: SupabaseClient, orderId: string) {
-  const result = await db.from('payment_orders').select('payment_channel,payment_method,fulfilled_at,method_review_reason')
+  const result = await db.from('payment_orders')
+    .select('payment_channel,payment_method,fulfilled_at,method_review_reason,payment_amount_facts')
     .eq('id', orderId).maybeSingle();
   if (result.error) throw new Error('PAY_WAFFO_PERSISTENCE_UNAVAILABLE', { cause: result.error });
   const order = result.data as { payment_channel: string; payment_method: string | null; fulfilled_at: string | null;
-    method_review_reason: string | null } | null;
+    method_review_reason: string | null; payment_amount_facts: Array<{ kind?: string }> | null } | null;
   return order?.payment_channel === 'stripe' && (order.payment_method === 'card' || order.payment_method === 'card_cn')
     ? order : null;
 }
 
-async function recorded(db: SupabaseClient, scope: StripeScope, objectType: 'payment' | 'refund', externalId: string) {
-  return Boolean((await findStripeReference(db, objectType, externalId, scope))?.order_id);
+/** The order's tax fact (0237): written after every card payment, 0 without Managed Payments. */
+function hasTax(order: { payment_amount_facts: Array<{ kind?: string }> | null } | null) {
+  return Boolean(order?.payment_amount_facts?.some(fact => fact.kind === 'tax'));
+}
+
+async function recordedOrder(db: SupabaseClient, scope: StripeScope, objectType: 'payment' | 'refund', externalId: string) {
+  return (await findStripeReference(db, objectType, externalId, scope))?.order_id ?? null;
 }
 
 function errorCode(error: unknown) {

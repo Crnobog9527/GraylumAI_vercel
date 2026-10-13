@@ -12,7 +12,8 @@ import { reconcileStripeCardPayments } from './stripeCardReconciliation';
 
 const ORDER = '00000000-0000-4000-8000-000000000001';
 const now = new Date('2026-10-14T04:00:00.000Z');
-type Order = { payment_channel: string; payment_method: string; fulfilled_at: string | null; method_review_reason: string | null };
+type Order = { payment_channel: string; payment_method: string; fulfilled_at: string | null; method_review_reason: string | null;
+  payment_amount_facts: Array<{ kind: string }> };
 
 function fixture(state: { orders?: Record<string, Order>; sessions?: unknown[]; invoices?: unknown[]; refunds?: unknown[];
   recorded?: Set<string> } = {}) {
@@ -34,7 +35,7 @@ function fixture(state: { orders?: Record<string, Order>; sessions?: unknown[]; 
   return { db, stripe, orders, recorded, run };
 }
 const card = (patch: Partial<Order> = {}): Order => ({ payment_channel: 'stripe', payment_method: 'card', fulfilled_at: null,
-  method_review_reason: null, ...patch });
+  method_review_reason: null, payment_amount_facts: [{ kind: 'paid' }, { kind: 'tax' }], ...patch });
 const session = (patch: Record<string, unknown> = {}) => ({ id: 'cs_1', payment_status: 'paid', metadata: { orderId: ORDER }, ...patch });
 
 describe('PAY-STRIPE-MP daily Stripe card reconciliation', () => {
@@ -76,9 +77,17 @@ describe('PAY-STRIPE-MP daily Stripe card reconciliation', () => {
     await expect(stuck.run()).resolves.toMatchObject({ findings: [{ kind: 'repair_failed', object: 'checkout',
       code: 'PAY_COMMON_PAYMENT_EVIDENCE_CONFLICT' }] });
   });
+  it('replays a delivered payment whose tax fact is missing, so refunds can be judged against the charge', async () => {
+    const f = fixture({ orders: { [ORDER]: card({ fulfilled_at: 'x', payment_amount_facts: [{ kind: 'paid' }] }) }, sessions: [session()] });
+    mocks.recover.mockImplementation(async () => { f.orders[ORDER] = card({ fulfilled_at: 'x' }); return { orderId: ORDER }; });
+    await expect(f.run()).resolves.toMatchObject({ success: true, repaired: 1 });
+    const stuck = fixture({ orders: { [ORDER]: card({ fulfilled_at: 'x', payment_amount_facts: [{ kind: 'paid' }] }) }, sessions: [session()] });
+    mocks.recover.mockResolvedValue({ orderId: ORDER });
+    await expect(stuck.run()).resolves.toMatchObject({ findings: [{ kind: 'tax_not_recorded', object: 'checkout', orderId: ORDER }] });
+  });
   it('records a paid renewal whose webhook was lost, and skips recorded or non-card invoices', async () => {
     const renewal = { id: 'in_cycle', billing_reason: 'subscription_cycle', parent: { subscription_details: { subscription: 'sub_1' } } };
-    const f = fixture({ invoices: [renewal, { ...renewal, id: 'in_create', billing_reason: 'subscription_create' },
+    const f = fixture({ orders: { [ORDER]: card({ fulfilled_at: 'x' }) }, invoices: [renewal, { ...renewal, id: 'in_create', billing_reason: 'subscription_create' },
       { ...renewal, id: 'in_done' }, { ...renewal, id: 'in_legacy' }], recorded: new Set(['payment:in_done']) });
     mocks.invoice.mockImplementation(async (_db: unknown, _s: unknown, invoiceId: string) => {
       if (invoiceId === 'in_legacy') return false;
@@ -87,9 +96,15 @@ describe('PAY-STRIPE-MP daily Stripe card reconciliation', () => {
     await expect(f.run()).resolves.toMatchObject({ success: true, repaired: 1 });
     expect(mocks.invoice.mock.calls.map(call => call[2])).toEqual(['in_cycle', 'in_legacy']);
     expect(mocks.invoice).toHaveBeenCalledWith(f.db, f.stripe, 'in_cycle', 'invoice.paid', undefined, undefined);
+    // Recorded but without its tax fact: replayed through the idempotent renewal handler.
+    const untaxed = fixture({ orders: { [ORDER]: card({ fulfilled_at: 'x', payment_amount_facts: [{ kind: 'paid' }] }) },
+      invoices: [renewal], recorded: new Set(['payment:in_cycle']) });
+    mocks.invoice.mockReset().mockImplementation(async () => { untaxed.orders[ORDER] = card({ fulfilled_at: 'x' }); return true; });
+    await expect(untaxed.run()).resolves.toMatchObject({ success: true, repaired: 1 });
   });
   it('records an external refund whose webhook was lost; ours and failed refunds are skipped', async () => {
-    const f = fixture({ refunds: [{ id: 're_lost', status: 'succeeded', metadata: {} },
+    const f = fixture({ recorded: new Set(['refund:re_known']), refunds: [{ id: 're_known', status: 'succeeded', metadata: {} },
+      { id: 're_lost', status: 'succeeded', metadata: {} },
       { id: 're_ours', status: 'succeeded', metadata: { refundIntentId: 'i' } }, { id: 're_failed', status: 'failed', metadata: {} },
       { id: 're_stuck', status: 'succeeded', metadata: {} }] });
     mocks.refund.mockImplementation(async (_db: unknown, _s: unknown, input: { refundId: string }) => {
@@ -98,7 +113,9 @@ describe('PAY-STRIPE-MP daily Stripe card reconciliation', () => {
     });
     await expect(f.run()).resolves.toMatchObject({ success: false, repaired: 1,
       findings: [{ kind: 'refund_not_recorded', object: 'refund', externalId: 're_stuck' }] });
-    expect(mocks.refund.mock.calls.map(call => call[2])).toEqual([{ refundId: 're_lost' }, { refundId: 're_stuck' }]);
+    // A recorded refund is replayed (it may owe a review alert) but is not a repair.
+    expect(mocks.refund.mock.calls.map(call => call[2])).toEqual([{ refundId: 're_known' }, { refundId: 're_lost' },
+      { refundId: 're_stuck' }]);
   });
   it('pages through Stripe and reports an incomplete scan; a Stripe list error fails the scan', async () => {
     const f = fixture();
