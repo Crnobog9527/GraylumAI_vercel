@@ -20,6 +20,7 @@ import {
   VERIFY_REASON_MESSAGES,
 } from '@/lib/authFlow';
 import { Input } from '@/components/ui/input';
+import { clearPendingEmail, rememberPendingEmail, restorePendingEmail } from '@/lib/pendingAuthEmail';
 import { cn } from '@/lib/utils';
 
 type VerifyTone = 'info' | 'success' | 'error';
@@ -42,7 +43,8 @@ function VerifyEmailPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [email, setEmail] = useState('');
-  // The expired-link landing has no email in the URL; the visitor types it to get a new link.
+  // The URL never carries the email: it comes from the session or this tab's storage, and when
+  // neither has it (another device, an expired link) the visitor types it to get a new link.
   const [emailEditable, setEmailEditable] = useState(false);
   const [redirectTarget, setRedirectTarget] = useState('/profile');
   const [checking, setChecking] = useState(true);
@@ -56,7 +58,7 @@ function VerifyEmailPageContent() {
 
   useEffect(() => {
     const boot = async () => {
-      const nextEmail = searchParams.get('email') ?? '';
+      const nextEmail = restorePendingEmail(window);
       const nextRedirect = sanitizeRedirectTarget(searchParams.get('redirect'));
       const reason = parseVerifyReason(searchParams.get('reason'));
 
@@ -76,6 +78,7 @@ function VerifyEmailPageContent() {
       setEmailEditable(!data.user?.email && !nextEmail);
 
       if (isEmailVerified(data.user)) {
+        clearPendingEmail();
         router.replace(nextRedirect);
         return;
       }
@@ -113,6 +116,7 @@ function VerifyEmailPageContent() {
         tone: 'success',
         text: '邮箱已验证，正在进入应用。',
       });
+      clearPendingEmail();
       router.replace(redirectTarget);
       return;
     }
@@ -165,6 +169,7 @@ function VerifyEmailPageContent() {
       return;
     }
 
+    rememberPendingEmail(email); // a typed email survives a refresh of this page
     setMessage({
       tone: 'success',
       text: '验证邮件已重新发送，请检查收件箱和垃圾邮件文件夹。',
@@ -176,7 +181,8 @@ function VerifyEmailPageContent() {
     setSigningOut(true);
     const supabase = createClient();
     await supabase.auth.signOut();
-    router.replace(buildAuthHref(`/login?email=${encodeURIComponent(email)}`));
+    rememberPendingEmail(email);
+    router.replace(buildAuthHref('/login'));
   };
 
   if (checking) {
@@ -316,7 +322,8 @@ function VerifyEmailPageContent() {
               </div>
               <div className="flex shrink-0 flex-wrap items-center gap-3 whitespace-nowrap">
                 <Link
-                  href={buildAuthHref(`/login?email=${encodeURIComponent(email)}`)}
+                  href={buildAuthHref('/login')}
+                  onClick={() => rememberPendingEmail(email)}
                   className="text-[#f2c94c] underline-offset-4 hover:underline"
                 >
                   返回登录页

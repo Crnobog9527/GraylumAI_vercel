@@ -3,12 +3,7 @@
 import Link from 'next/link';
 import { Suspense, useEffect, useState, type FormEvent } from 'react';
 import { useSearchParams } from 'next/navigation';
-import {
-  ArrowRight,
-  Gift,
-  Loader2,
-  ShieldCheck,
-} from 'lucide-react';
+import { ArrowRight, Gift, Loader2, ShieldCheck } from 'lucide-react';
 import { createClient } from '@/lib/supabase';
 import { getSafeErrorMessage } from '@/lib/safe-error-message';
 import {
@@ -26,6 +21,7 @@ import { invisibleCaptchaOptions } from '@/lib/invisibleCaptcha';
 import { AuthStatusBanner, type AuthStatus } from '@/components/auth/AuthStatusBanner';
 import { GoogleIcon } from '@/components/auth/GoogleIcon';
 import { FORGOT_PASSWORD_PATH, PASSWORD_RESET_DONE_MESSAGE } from '@/lib/passwordRecovery';
+import { clearPendingEmail, rememberPendingEmail, restorePendingEmail } from '@/lib/pendingAuthEmail';
 
 type AuthMode = 'login' | 'signup';
 
@@ -68,7 +64,6 @@ function LoginPageContent() {
     const action = searchParams.get('action');
     const redirect = sanitizeRedirectTarget(searchParams.get('redirect'));
     const error = searchParams.get('error');
-    const emailParam = searchParams.get('email');
     const inviteParam = searchParams.get('invite');
     const planParam = searchParams.get('plan');
 
@@ -76,7 +71,8 @@ function LoginPageContent() {
     setRedirectTarget(redirect);
     setSelectedPlan(planParam ?? '');
 
-    if (emailParam) setEmail(emailParam);
+    const knownEmail = restorePendingEmail(window);
+    if (knownEmail) setEmail(knownEmail);
 
     if (inviteParam) {
       setInviteCode(inviteParam);
@@ -94,7 +90,7 @@ function LoginPageContent() {
     const fragment = readAuthFragment(window.location.hash);
     if (fragment) window.history.replaceState(null, '', window.location.pathname + window.location.search);
     if (fragment?.to === 'verify-expired') {
-      window.location.replace(buildAuthHref(buildVerifyEmailPath(emailParam ?? '', redirect, 'expired')));
+      window.location.replace(buildAuthHref(buildVerifyEmailPath(redirect, 'expired')));
       return;
     }
     if (fragment?.to === 'login-error') setStatus({ tone: 'error', message: LOGIN_ERROR_MESSAGES.callback_failed });
@@ -114,6 +110,7 @@ function LoginPageContent() {
       return;
     }
 
+    rememberPendingEmail(email); // read by /verify-email and the resend link, never put in a URL
     const supabase = createClient();
     const { data, error } = await supabase.auth.signInWithPassword({
       email,
@@ -124,7 +121,7 @@ function LoginPageContent() {
     if (error) {
       const failure = classifyLoginError(error, '登录失败，请检查账号信息后重试。');
       if (failure.kind === 'unconfirmed') {
-        window.location.assign(buildAuthHref(buildVerifyEmailPath(email, redirectTarget)));
+        window.location.assign(buildAuthHref(buildVerifyEmailPath(redirectTarget)));
         return;
       }
       setStatus({ tone: 'error', message: failure.message, offerResend: failure.offerResend });
@@ -133,10 +130,11 @@ function LoginPageContent() {
     }
 
     if (!isEmailVerified(data.user)) {
-      window.location.assign(buildAuthHref(buildVerifyEmailPath(email, redirectTarget)));
+      window.location.assign(buildAuthHref(buildVerifyEmailPath(redirectTarget)));
       return;
     }
 
+    clearPendingEmail();
     setStatus({ tone: 'success', message: '登录成功，正在进入应用。' });
     window.location.assign(redirectTarget);
   };
@@ -201,7 +199,8 @@ function LoginPageContent() {
           : '注册成功，验证邮件已发送。请先完成邮箱验证。',
     });
 
-    window.location.assign(buildAuthHref(buildVerifyEmailPath(email, redirectTarget, 'signup')));
+    rememberPendingEmail(email);
+    window.location.assign(buildAuthHref(buildVerifyEmailPath(redirectTarget, 'signup')));
   };
 
   const handleGoogleLogin = async () => {
@@ -468,7 +467,7 @@ function LoginPageContent() {
                     {status && (
                       <AuthStatusBanner
                         status={status}
-                        resendHref={buildAuthHref(buildVerifyEmailPath(email, redirectTarget))}
+                        resendHref={buildAuthHref(buildVerifyEmailPath(redirectTarget))}
                       />
                     )}
 
@@ -496,7 +495,8 @@ function LoginPageContent() {
                     </p>
                     <div className="mt-3 flex flex-wrap items-center gap-3">
                       <Link
-                        href={buildVerifyEmailPath(email, redirectTarget)}
+                        href={buildVerifyEmailPath(redirectTarget)}
+                        onClick={() => rememberPendingEmail(email)}
                         className="text-[#f2c94c] underline-offset-4 hover:underline"
                       >
                         打开验证状态页
