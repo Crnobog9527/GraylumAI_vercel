@@ -56,6 +56,45 @@ async function orderCheckoutSession(db: SupabaseClient, stripe: Stripe, scope: {
   return matches[0]!.id;
 }
 
+/** "Stopped" means no further renewal: cancel_at_period_end, or a cancel_at exactly at the current paid-period end
+ * (a later cancel_at still renews in between, so it is not a stop). */
+function stripeStopState(subscription: Stripe.Subscription) {
+  const item = subscription.items?.data?.length === 1 ? subscription.items.data[0] : null;
+  const stopAtEnd = subscription.cancel_at_period_end === true
+    || (subscription.cancel_at !== null && item !== null && subscription.cancel_at === item.current_period_end);
+  return { stop: stopAtEnd, canceled: subscription.status === 'canceled' || subscription.status === 'incomplete_expired' };
+}
+
+async function readSubscription(stripe: Stripe, subscriptionId: string) {
+  const subscription = await stripe.subscriptions.retrieve(subscriptionId);
+  if (subscription.object !== 'subscription' || subscription.id !== subscriptionId || subscription.livemode) {
+    throw new Error('PAY_WAFFO_PAYMENT_CONFLICT');
+  }
+  return subscription;
+}
+
+async function syncState(db: SupabaseClient, merchant: string, localSubscriptionId: string, subscription: Stripe.Subscription) {
+  const state = stripeStopState(subscription);
+  const result = await db.rpc('pay_stripe_mp_sync_subscription', { p_subscription: localSubscriptionId, p_merchant: merchant,
+    p_cancel_at_period_end: state.stop, p_canceled: state.canceled });
+  if (result.error) throw new Error('PAY_STRIPE_MP_RENEWAL_UNAVAILABLE', { cause: result.error });
+  return state;
+}
+
+/** A renewal kept for review (closed or erasing account, stopped credit release, canceled locally) must not charge
+ * again: stop renewal at Stripe and confirm before acknowledging. A failure throws so Stripe retries the event; the
+ * renewal is deduplicated by invoice, so the retry only repeats this stop. */
+async function stopRenewalAfterReview(db: SupabaseClient, stripe: Stripe, merchant: string, localSubscriptionId: string,
+  subscriptionId: string) {
+  let subscription = await readSubscription(stripe, subscriptionId);
+  if (!stripeStopState(subscription).stop && !stripeStopState(subscription).canceled) {
+    await stripe.subscriptions.update(subscriptionId, { cancel_at_period_end: true });
+    subscription = await readSubscription(stripe, subscriptionId);
+  }
+  const state = await syncState(db, merchant, localSubscriptionId, subscription);
+  if (!state.stop && !state.canceled) throw new Error('PAY_STRIPE_MP_RENEWAL_STOP_UNCONFIRMED');
+}
+
 /** A paid renewal invoice: one line, the next period, pre-tax amount (Managed Payments adds tax on top). */
 function renewalFacts(invoice: Stripe.Invoice, subscriptionId: string, snapshot: unknown) {
   const line = invoice.lines?.data?.length === 1 && !invoice.lines.has_more ? invoice.lines.data[0] : null;
@@ -100,6 +139,7 @@ export async function handleCardSubscriptionInvoice(db: SupabaseClient, stripe: 
     if (result.error) throw new Error('PAY_STRIPE_MP_RENEWAL_UNAVAILABLE', { cause: result.error });
     if (paid && result.data?.state === 'review') {
       logger.error('billing', 'stripe_mp_renewal_review', { orderId: result.data.orderId, reason: 'unexpected_renewal' });
+      await stopRenewalAfterReview(db, stripe, scope.merchant, order.localSubscriptionId, subscriptionId);
     }
     return true;
   }
@@ -119,13 +159,6 @@ export async function handleCardSubscriptionState(db: SupabaseClient, stripe: St
   if (!order) return false;
   // Created before the first payment is recorded: the first payment carries the state.
   if (!order.localSubscriptionId) return true;
-  const subscription = await stripe.subscriptions.retrieve(subscriptionId);
-  if (subscription.object !== 'subscription' || subscription.id !== subscriptionId || subscription.livemode) {
-    throw new Error('PAY_WAFFO_PAYMENT_CONFLICT');
-  }
-  const result = await db.rpc('pay_stripe_mp_sync_subscription', { p_subscription: order.localSubscriptionId,
-    p_merchant: scope.merchant, p_cancel_at_period_end: subscription.cancel_at_period_end === true || subscription.cancel_at !== null,
-    p_canceled: subscription.status === 'canceled' || subscription.status === 'incomplete_expired' });
-  if (result.error) throw new Error('PAY_STRIPE_MP_RENEWAL_UNAVAILABLE', { cause: result.error });
+  await syncState(db, scope.merchant, order.localSubscriptionId, await readSubscription(stripe, subscriptionId));
   return true;
 }

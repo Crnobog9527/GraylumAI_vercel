@@ -112,6 +112,7 @@ CREATE OR REPLACE FUNCTION public.pay_stripe_mp_sync_subscription(
 ) RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
 DECLARE s user_subscriptions;
 BEGIN
+ PERFORM 1 FROM profiles WHERE id=(SELECT user_id FROM user_subscriptions WHERE id=p_subscription) FOR UPDATE;
  SELECT * INTO s FROM user_subscriptions WHERE id=p_subscription FOR UPDATE;
  IF s.id IS NULL OR s.payment_channel IS DISTINCT FROM 'stripe' OR s.payment_mode IS DISTINCT FROM 'test'
   OR s.merchant_namespace IS DISTINCT FROM p_merchant OR s.stripe_subscription_id IS NOT NULL
@@ -124,6 +125,17 @@ BEGIN
  UPDATE user_subscriptions SET status=CASE WHEN p_canceled THEN 'canceled' ELSE status END,
   cancel_at_period_end=CASE WHEN p_canceled OR p_cancel_at_period_end THEN 'true' ELSE 'false' END
   WHERE id=s.id RETURNING * INTO s;
+ -- Final cancellation: the cached level (read by purchase admission) returns to free unless another paid
+ -- membership period is still running or another subscription (legacy Stripe, admin override) is active.
+ IF s.status='canceled' AND NOT EXISTS(SELECT 1 FROM payment_orders o WHERE o.user_id=s.user_id
+    AND o.item_type='membership_plan' AND o.payment_method IS NOT NULL AND o.fulfilled_at IS NOT NULL
+    AND o.payment_status='paid' AND o.status='completed' AND o.entitlement_start<=now() AND o.entitlement_end>now())
+  AND NOT EXISTS(SELECT 1 FROM user_subscriptions x WHERE x.user_id=s.user_id AND x.id<>s.id
+    AND (x.stripe_subscription_id IS NOT NULL OR x.status='admin_override')
+    AND x.status IN ('active','trialing','past_due','unpaid','admin_override')
+    AND (x.current_period_end IS NULL OR x.current_period_end>now())) THEN
+  UPDATE profiles SET membership_level='free' WHERE id=s.user_id AND membership_level<>'free';
+ END IF;
  RETURN jsonb_build_object('status',s.status,'cancelAtPeriodEnd',s.cancel_at_period_end,'duplicate',false);
 END $$;
 

@@ -71,6 +71,29 @@ describe('PAY-STRIPE-MP card subscription webhooks', () => {
       p_start: '2026-11-12T08:42:34.000Z', p_end: '2026-12-12T08:42:34.000Z' });
     expect(mocks.recover).not.toHaveBeenCalled();
   });
+  it('stops renewal at Stripe and confirms it when a renewal is kept for review', async () => {
+    const f = fixture({ subscriptionRef: { subscription_id: 'local_sub' }, order: { ...cardOrder, purchase_snapshot: firstMonth } });
+    Object.assign(f.invoice, renewal({}));
+    f.rpc.mockImplementation(async (name: string) => ({ error: null,
+      data: name === 'pay_stripe_mp_renew_subscription' ? { state: 'review', orderId: 'review_order' } : { status: 'active' } }));
+    const active = { object: 'subscription', id: 'sub_1', livemode: false, status: 'active', cancel_at: null, cancel_at_period_end: false,
+      items: { data: [{ current_period_end: 1797064954 }] } };
+    f.raw.subscriptions.retrieve.mockResolvedValueOnce(active).mockResolvedValueOnce({ ...active, cancel_at_period_end: true });
+    (f.raw.subscriptions as unknown as { update: ReturnType<typeof vi.fn> }).update = vi.fn(async () => ({}));
+    await expect(handleCardSubscriptionInvoice(f.db, f.stripe, 'in_1', 'invoice.paid')).resolves.toBe(true);
+    expect((f.raw.subscriptions as unknown as { update: ReturnType<typeof vi.fn> }).update)
+      .toHaveBeenCalledWith('sub_1', { cancel_at_period_end: true });
+    expect(f.rpc).toHaveBeenLastCalledWith('pay_stripe_mp_sync_subscription', { p_subscription: 'local_sub', p_merchant: 'fixture',
+      p_cancel_at_period_end: true, p_canceled: false });
+    // If Stripe does not show the stop, the event fails so Stripe retries it (the renewal itself is deduplicated).
+    const g = fixture({ subscriptionRef: { subscription_id: 'local_sub' }, order: { ...cardOrder, purchase_snapshot: firstMonth } });
+    Object.assign(g.invoice, renewal({}));
+    g.rpc.mockImplementation(async (name: string) => ({ error: null,
+      data: name === 'pay_stripe_mp_renew_subscription' ? { state: 'review', orderId: 'review_order' } : { status: 'active' } }));
+    g.raw.subscriptions.retrieve.mockResolvedValue(active);
+    (g.raw.subscriptions as unknown as { update: ReturnType<typeof vi.fn> }).update = vi.fn(async () => ({}));
+    await expect(handleCardSubscriptionInvoice(g.db, g.stripe, 'in_1', 'invoice.paid')).rejects.toThrow('STOP_UNCONFIRMED');
+  });
   it.each([
     ['two lines (proration)', { lines: { has_more: false, data: [line, line] } }],
     ['unpaid', { status: 'open' }],
@@ -100,9 +123,12 @@ describe('PAY-STRIPE-MP card subscription webhooks', () => {
   it('copies only stop-at-period-end and the final cancellation; past_due changes nothing', async () => {
     for (const [patch, cancelAt, canceled] of [[{ status: 'active', cancel_at_period_end: true }, true, false],
       [{ status: 'past_due', cancel_at_period_end: false }, false, false], [{ status: 'canceled', cancel_at_period_end: false }, false, true],
-      [{ status: 'active', cancel_at_period_end: false, cancel_at: 1794472954 }, true, false]] as const) {
+      [{ status: 'active', cancel_at_period_end: false, cancel_at: 1794472954 }, true, false],
+      // A cancel_at later than the current period end still renews in between: not a stop.
+      [{ status: 'active', cancel_at_period_end: false, cancel_at: 1797064954 }, false, false]] as const) {
       const f = fixture({ subscriptionRef: { subscription_id: 'local_sub' }, order: cardOrder });
-      f.raw.subscriptions.retrieve.mockResolvedValue({ object: 'subscription', id: 'sub_1', livemode: false, cancel_at: null, ...patch });
+      f.raw.subscriptions.retrieve.mockResolvedValue({ object: 'subscription', id: 'sub_1', livemode: false, cancel_at: null,
+        items: { data: [{ current_period_end: 1794472954 }] }, ...patch });
       await expect(handleCardSubscriptionState(f.db, f.stripe, 'sub_1')).resolves.toBe(true);
       expect(f.rpc).toHaveBeenCalledWith('pay_stripe_mp_sync_subscription', { p_subscription: 'local_sub', p_merchant: 'fixture',
         p_cancel_at_period_end: cancelAt, p_canceled: canceled });
