@@ -60,7 +60,19 @@ export function WorkspaceFrame({children,right,rightOpen=true,onToggleRight,acti
  const [deletingConversation,setDeletingConversation]=useState<{id:string;name:string}|null>(null);
  function startErasure(kind:ContentErasureTarget['kind'],id:string,name:string){setMenuId('');setErasing({target:{kind,id},name});}
  /** The row's "⋯" menu opens below its button, kept inside the window (ChatGPT/Claude style). */
+ const menuTrigger=useRef<HTMLElement|null>(null);
+ // Esc closes an open row menu and returns focus to its "⋯" button.
+ useEffect(()=>{
+  if(!menuId)return;
+  function onEscape(event:KeyboardEvent){
+   if(event.key!=='Escape')return;
+   setMenuId('');menuTrigger.current?.focus();
+  }
+  window.addEventListener('keydown',onEscape);
+  return()=>window.removeEventListener('keydown',onEscape);
+ },[menuId]);
  function openRowMenu(event:{currentTarget:HTMLElement},id:string){
+  menuTrigger.current=event.currentTarget;
   const rect=event.currentTarget.getBoundingClientRect();
   const top=Math.max(8,Math.min(window.innerHeight-236,rect.bottom+4));
   setMenuPosition({top,left:Math.max(8,Math.min(window.innerWidth-186,rect.right-178))});

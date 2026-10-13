@@ -159,6 +159,16 @@ it('cancel keeps the conversation and sends nothing', () => open(1280, async pag
   expect(await held(page)).toEqual([]);
 }));
 
+it('Esc closes the ⋯ menu and puts focus back on the ⋯ button', () => open(1280, async page => {
+  await openMenu(page);
+  await ui(page.getByRole('menu')).toBeVisible();
+  await page.getByRole('menuitem', { name: '删除对话' }).focus();
+  await page.keyboard.press('Escape');
+  await ui(page.getByRole('menu')).toHaveCount(0, { timeout: 1000 });
+  await ui(more(page)).toBeFocused();
+  await ui(more(page)).toHaveAttribute('aria-expanded', 'false');
+}));
+
 it('reaches the ⋯ button with Tab, which makes it visible', () => open(1280, async page => {
   for (let i = 0; i < 60 && !(await more(page).evaluate(el => el === document.activeElement)); i++) {
     await page.keyboard.press('Tab');
