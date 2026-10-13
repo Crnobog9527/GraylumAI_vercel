@@ -25,8 +25,11 @@ const PATTERNS = [
   `我(?:的|背[后後]的)(?:底[层層]|基[础礎]|背[后後])?(?:模型|大模型|架[构構]|技[术術])${ZH_GAP}{0,8}?(?:是|基[于於]|${FROM}|用的是)\\s*${BRAND}`,
   // 我基于 Claude / 我用的是 GPT
   `我(?:基[于於]|背[后後]是|使用的是|用的是|底[层層]是)\\s*${BRAND}`,
-  // I am Claude / I'm ChatGPT / I am a GPT-4 model / I'm an OpenAI language model (review: articles)
-  String.raw`\bI(?:'m|’m|\s+am)\s+(?:called\s+|actually\s+)?(?:an?\s+|the\s+)?${BRAND}\b`,
+  // I am Claude / I'm ChatGPT / I am called Gemini
+  String.raw`\bI(?:'m|’m|\s+am)\s+(?:called\s+|actually\s+)?${BRAND}\b`,
+  // I am a GPT-4 model / I'm an OpenAI language model / I am a Claude-based assistant. An article form needs a
+  // model noun, so copy such as "I am a Google Ads specialist" stays untouched (review P2).
+  String.raw`\bI(?:'m|’m|\s+am)\s+(?:an?|the)\s+${BRAND}[\w.-]*(?:\s+[\w-]+){0,2}?\s+(?:model|AI|assistant|chatbot|LLM)\b`,
   // I am a large language model trained by Google / I'm an AI assistant made by Anthropic
   String.raw`\bI(?:'m|’m|\s+am)\s+(?:an?\s+|the\s+)?(?:[\w-]+\s+){0,4}(?:model|AI|assistant|chatbot|LLM)\b[^.!?\n]{0,40}?\b(?:by|from)\s+${BRAND}`,
   // I was trained by OpenAI / I've been developed by Anthropic
@@ -103,25 +106,32 @@ export function streamingRedaction(text: string) {
 export function redactIdentityBody(body: string) {
   let value: unknown;
   try { value = JSON.parse(body); } catch { return redactModelIdentity(body); }
+  // A bare JSON string is shown as plain reply text after reload (review P1).
+  if (typeof value === 'string') { const text = redactModelIdentity(value); return text === value ? body : JSON.stringify(text); }
   if (!value || typeof value !== 'object' || Array.isArray(value)) return body;
   const record = value as Record<string, unknown>;
   const message = typeof record.message === 'string' ? redactModelIdentity(record.message) : record.message;
   // Card messages are redacted on their own: an appended card's text differs from the combined message,
   // and readers prefer card.message after reload (review P1).
-  const card = record.card as Record<string, unknown> | null | undefined;
-  const cardMessage = card && typeof card === 'object' && typeof card.message === 'string'
-    ? redactModelIdentity(card.message) : undefined;
-  if (message === record.message && (cardMessage === undefined || cardMessage === card!.message)) return body;
-  return JSON.stringify({ ...record, message, ...(cardMessage !== undefined ? { card: { ...card, message: cardMessage } } : {}) });
+  // Every displayed card string (message, question, options, recommendationReason) is redacted on its own:
+  // an appended card's text differs from the combined message and readers prefer it after reload (review P1).
+  const card = record.card && typeof record.card === 'object' ? redactIdentityStrings(record.card) : record.card;
+  if (message === record.message && JSON.stringify(card) === JSON.stringify(record.card)) return body;
+  return JSON.stringify({ ...record, message, ...(record.card !== undefined ? { card } : {}) });
+}
+
+/** Every string inside a JSON value; other values and keys unchanged. */
+export function redactIdentityStrings<T>(value: T): T {
+  const walk = (v: unknown): unknown => typeof v === 'string' ? redactModelIdentity(v)
+    : Array.isArray(v) ? v.map(walk)
+      : v && typeof v === 'object' ? Object.fromEntries(Object.entries(v).map(([k, x]) => [k, walk(x)])) : v;
+  return walk(value) as T;
 }
 
 /** Organizer summaries: plain text, or every string inside a JSON value (review P2). */
 export function redactIdentitySummary(summary: string) {
   let value: unknown;
   try { value = JSON.parse(summary); } catch { return redactModelIdentity(summary); }
-  const walk = (v: unknown): unknown => typeof v === 'string' ? redactModelIdentity(v)
-    : Array.isArray(v) ? v.map(walk)
-      : v && typeof v === 'object' ? Object.fromEntries(Object.entries(v).map(([k, x]) => [k, walk(x)])) : v;
-  const redacted = walk(value);
+  const redacted = redactIdentityStrings(value);
   return JSON.stringify(redacted) === JSON.stringify(value) ? summary : JSON.stringify(redacted);
 }

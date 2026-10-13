@@ -63,6 +63,9 @@ const SAFE = [
   'I am not able to see your Google Analytics data directly.',
   'My suggestion is to post on Meta platforms twice a week.',
   'Anthropic, OpenAI and Google all publish creator guides.',
+  // Review P2: article + brand without a model noun is ordinary copy
+  'I am a Google Ads specialist who can help your account.',
+  "I'm an Anthropic fan, but let's focus on your channel.",
   BRAND_REPLY_ZH,
   BRAND_REPLY_ZH_HANT,
   BRAND_REPLY_EN,
@@ -137,6 +140,14 @@ it('redacts the public message of stored bodies and keeps other fields', () => {
   const parsed = JSON.parse(redactIdentityBody(appended));
   expect(parsed.card.message).toBe(BRAND_REPLY_ZH);
   expect(parsed.message).not.toMatch(/Claude/);
+  // Review P1: every displayed card field, and a bare JSON string body.
+  const fields = JSON.parse(redactIdentityBody(JSON.stringify({ format: 'x', message: '选一个。', card: {
+    message: '选一个。', question: 'I am Claude.', options: ['我是 Gemini。', '普通选项'], recommended: 1, recommendationReason: 'I am GPT-4.',
+  } })));
+  expect(fields.card).toEqual({ message: '选一个。', question: BRAND_REPLY_EN, options: [BRAND_REPLY_ZH, '普通选项'],
+    recommended: 1, recommendationReason: BRAND_REPLY_EN });
+  expect(JSON.parse(redactIdentityBody(JSON.stringify('I am Claude.')))).toBe(BRAND_REPLY_EN);
+  expect(redactIdentityBody(JSON.stringify('继续第二步。'))).toBe(JSON.stringify('继续第二步。'));
   const clean = JSON.stringify({ message: '继续第二步。', card: null });
   expect(redactIdentityBody(clean)).toBe(clean);
   expect(redactIdentityBody('[1,2]')).toBe('[1,2]');

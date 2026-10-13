@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import type { RuntimeProgress } from '../runtime/progress';
-import { redactIdentityBody, redactIdentitySummary, redactModelIdentity, streamingRedaction } from './outputGuard';
+import { redactIdentityBody, redactIdentityStrings, redactIdentitySummary, redactModelIdentity, streamingRedaction } from './outputGuard';
 
 type TextEvent = Extract<RuntimeProgress, { type: 'text' }>;
 
@@ -42,10 +42,9 @@ export function guardedProgress(emit: (event: RuntimeProgress) => void) {
   return (event: RuntimeProgress) => {
     if (event.type !== 'text') {
       flush();
-      if (event.type === 'card' && typeof (event.card as { message?: unknown }).message === 'string') {
-        const card = event.card as typeof event.card & { message: string };
-        emit({ ...event, card: { ...card, message: redactModelIdentity(card.message) } });
-      } else emit(event);
+      // Every displayed card string (question, options, reason, message) is redacted (review P1).
+      if (event.type === 'card') emit({ ...event, card: redactIdentityStrings(event.card) });
+      else emit(event);
       return;
     }
     if ('delta' in event && event.source !== source) { source = event.source; emitted = ''; switched = true; }
