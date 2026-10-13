@@ -52,8 +52,18 @@ describe('post for me client', () => {
     expect(await run(new Response('<html>', { status: 200 }))).toMatchObject({ kind: 'failed', reason: 'RESPONSE_NOT_JSON' });
     expect(await run(new Error('socket'))).toEqual({ kind: 'unknown', reason: 'NETWORK_ERROR' });
     expect(await run(json(408, {}))).toEqual({ kind: 'unknown', reason: 'PROVIDER_TIMEOUT' });
+    expect(await run(new Response('', { status: 408 }))).toEqual({ kind: 'unknown', reason: 'PROVIDER_TIMEOUT' });
+    expect(await run(new Response('<html>', { status: 408 }))).toEqual({ kind: 'unknown', reason: 'PROVIDER_TIMEOUT' });
     const huge = new Response('x'.repeat(2 * 1024 * 1024 + 1), { status: 200 });
     expect(await run(huge)).toMatchObject({ kind: 'failed', reason: 'RESPONSE_TOO_LARGE' });
+  });
+
+  it('never reports a write as failed when it may have taken effect', async () => {
+    for (const r of [json(502, {}), new Response('', { status: 503 }), new Response('<html>', { status: 200 })]) {
+      expect((await deleteAccount(deps([r]).deps, 'spc_1')).kind).toBe('unknown');
+    }
+    expect(await deleteAccount(deps([json(404, {})]).deps, 'spc_1')).toEqual({ kind: 'rejected', status: 404 });
+    expect(await deleteAccount(deps([json(200, { success: true })]).deps, 'spc_1')).toEqual({ kind: 'ok', value: true });
   });
 
   it('refuses malformed identifiers before calling', async () => {

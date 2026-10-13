@@ -43,15 +43,21 @@ function account(raw: z.infer<typeof accountSchema>): PostForMeAccount {
     username: raw.username ?? null };
 }
 
-function classify<T>(result: PostForMeExchange, parse: (json: unknown) => T | null): Outcome<T> {
+function classify<T>(result: PostForMeExchange, parse: (json: unknown) => T | null, write: boolean): Outcome<T> {
+  const outcome = classifyRead(result, parse);
+  // A write that got anything but a definite answer may already have happened at the provider: reconcile, never retry.
+  return write && outcome.kind === 'failed' ? { kind: 'unknown', reason: outcome.reason } : outcome;
+}
+
+function classifyRead<T>(result: PostForMeExchange, parse: (json: unknown) => T | null): Outcome<T> {
   if (result.kind === 'unknown') return { kind: 'unknown', reason: result.reason };
+  if (result.status === 408) return { kind: 'unknown', reason: 'PROVIDER_TIMEOUT' };
   if (result.kind === 'unreadable') {
     if (result.status === 429) return { kind: 'rate_limited', retryAfterSeconds: 60 };
-    return result.status >= 400 && result.status < 500 && result.status !== 408
+    return result.status >= 400 && result.status < 500
       ? { kind: 'rejected', status: result.status } : { kind: 'failed', status: result.status, reason: result.reason };
   }
   if (result.status === 429) return { kind: 'rate_limited', retryAfterSeconds: result.retryAfterSeconds ?? 60 };
-  if (result.status === 408) return { kind: 'unknown', reason: 'PROVIDER_TIMEOUT' };
   if (result.status >= 400 && result.status < 500) return { kind: 'rejected', status: result.status };
   if (result.status < 200 || result.status >= 300) {
     return { kind: 'failed', status: result.status, reason: 'PROVIDER_ERROR' };
@@ -64,7 +70,9 @@ async function call<T>(deps: ClientDeps, request: Parameters<typeof exchange>[0]
   parse: (json: unknown) => T | null): Promise<Outcome<T>> {
   const slot = await deps.limiter.acquire();
   if (!slot.ok) return { kind: 'rate_limited', retryAfterSeconds: slot.retryAfterSeconds };
-  return classify(await exchange(request, deps.apiKey, deps), parse);
+  // Creating a consent link changes nothing the user relies on; account removal/disconnect does.
+  const write = request.method === 'DELETE' || request.path.endsWith('/disconnect');
+  return classify(await exchange(request, deps.apiKey, deps), parse, write);
 }
 
 function assertAccountId(id: string) {
