@@ -35,8 +35,8 @@ const RENEWING = 'ACCOUNT_ERASURE_SUBSCRIPTION_RENEWING';
 
 /**
  * Where to stop each renewing subscription; channels come from account_erasure_renewal_channels (0224).
- * Only legacy Stripe subscriptions have a self-service page today; Waffo and Stripe card subscriptions
- * without a Stripe subscription id have no stop-renewal button yet, so support stops them.
+ * Legacy Stripe and PAY-STRIPE-MP card subscriptions (mapped through their 'subscription' reference) both stop in the
+ * Stripe portal behind "管理订阅 / 取消续费"; Waffo subscriptions have no stop-renewal button yet, so support stops them.
  */
 const CANCEL_ENTRY: Record<string, string> = {
   stripe_portal: '在个人中心点“管理订阅 / 取消续费”，到 Stripe 订阅管理里取消',
