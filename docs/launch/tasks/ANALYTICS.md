@@ -40,7 +40,7 @@
 
 ### 3.1 GA4
 
-- **公开页**：记页面浏览。**应用页**（登录后的对话、定位、资料库、个人中心、后台，以及 `/auth/*`、`/login`、`/register`、`/verify-email`、`/reset-password`、`/forgot-password`）**不记页面浏览**，只记关键事件。用公开页白名单判断（复用 `apps/web/src/lib/seo` 的公开页列表），新页面默认不记。每次 `gtag('config', …)` 都设 `send_page_view: false`（否则首次加载时 gtag 会按真实网址自动发一次），公开页的页面浏览由代码手动发。GA 还有关不掉的自动事件（`session_start`、`first_visit`、`user_engagement`），它们会带上当前网址和页面标题，所以在 `config` **之前**先用 `gtag('set', …)` 全局写入清洗后的 `page_location`、`page_referrer` 和 `page_title`（应用页用模板网址和固定标题，不用含文档名或对话名的真实标题），每次站内跳转后立即更新。
+- **页面浏览**（2026-10-13 按 O2 改：应用页也记，取代原来"应用页不记页面浏览"）：公开页按真实网址记；**应用页**（登录后的对话、定位、资料库、个人中心、后台，以及 `/auth/*`、`/login`、`/register`、`/verify-email`、`/reset-password`、`/forgot-password`）也记页面浏览，但只发**路由模板**（去掉对话、文档、订单等编号）和固定标题；带一次性密钥或个人信息的网址（如验证、重置密码链接里的令牌和邮箱）不记。只对同意统计的访客发送。用公开页白名单判断公开页（复用 `apps/web/src/lib/seo` 的公开页列表），其余页面一律按模板处理，没有模板的新页面默认不记。每次 `gtag('config', …)` 都设 `send_page_view: false`（否则首次加载时 gtag 会按真实网址自动发一次），页面浏览一律由代码手动发。GA 还有关不掉的自动事件（`session_start`、`first_visit`、`user_engagement`），它们会带上当前网址和页面标题，所以在 `config` **之前**先用 `gtag('set', …)` 全局写入清洗后的 `page_location`、`page_referrer` 和 `page_title`（应用页用模板网址和固定标题，不用含文档名或对话名的真实标题），每次站内跳转后立即更新。
 - **关键事件**（GA4 推荐事件名优先）：
 
   | 事件 | 触发点 | 参数（只放这些） |
@@ -55,7 +55,7 @@
 - **这两个编号存哪里、多久删**：**不放进 Stripe metadata**，也不放进会被持久化的结账请求（现有链路会把整份请求存进 `payment_orders.checkout_request`、并把 metadata 复制到 Stripe 的订阅或付款记录，这些按账务期限保留，注销也不删）。改为在 `payment_orders` 新增两个可空列 `ga_client_id`、`ga_session_id`，只写在我们库里、不发给 Stripe：上报前先用一条原子语句**取出并清空**这两列（`UPDATE … SET 两列 = NULL WHERE id = 订单 AND ga_client_id IS NOT NULL RETURNING 原值`），拿到值才上报，所以同一订单最多报一次；访客在页脚撤回统计同意时，浏览器通知服务器把该账号**所有还没取出编号的订单**（不论是否已付款）的这两列置空。撤回和上报谁先改到这一行谁生效：撤回先到就不上报，上报先取走就算撤回前已同意的那次付款，不用另加锁；（如果 O10 选 A，“注销时要删”的编号另存在账号上，见 O10，和这两列分开，所以重复或并发回调不会再上报。）**服务端校验**：这两个值来自浏览器、可以伪造，服务器只收符合 GA 格式的值——`client_id` 必须是“数字.数字”（各不超过 20 位），`session_id` 必须是不超过 20 位的数字，否则整个丢弃、不落库、不外发；没付款的订单由现有每日清理任务在 72 小时后置空；注销清理也置空。迁移和 PR-3 的首次来源迁移合在一起。
 - **不发直接识别身份的信息**：不发邮箱、昵称、用户编号、订单正文。注意：GA 的 `client_id` 是 Cookie 里的假名编号，GA 还会处理 IP、设备和大致位置，这些在欧盟法律下**仍算个人数据**，所以方案和条款都不能写成“不含个人信息”；不开 GA4 的 User-ID 和“用户提供的数据”；不开 Google 信号（Google Signals）。
 - **动态路径去编号**：应用里带实例编号的路径（例如 `/positioning/[draftId]`、对话、资料库文档、分享页）不能把编号发出去。关键事件的 `page_location` 一律改成**完整的模板网址**（如 `https://www.graylum.com/positioning/[draftId]`，GA 要求带协议的完整网址），不发真实路径；Vercel Analytics 的 `beforeSend` 对非公开页同样把网址换成路由模板，或直接丢弃这些页面的访问记录（二选一在 PR-2 定，以不发编号为准）。
-- **网址去参数**：所有上报都手动设置 `page_location` 和 `page_referrer`，去掉 `#` 片段和查询参数（`page_location` 只保留**已登记的** `utm_*` 值，见下一条）。`page_referrer` **外站只留协议和域名**（GA4 靠域名判断来源，“AI 推荐”渠道也只需要域名；外站路径里可能有对方的用户名或编号，一律丢掉）；referrer 是本站地址时，路径换成路由模板（和 `page_location` 一样），所以 `?code=`、`?email=` 和草稿、对话、文档编号都不会带出去；应用页本来就不记页面浏览，双保险。
+- **网址去参数**：所有上报都手动设置 `page_location` 和 `page_referrer`，去掉 `#` 片段和查询参数（`page_location` 只保留**已登记的** `utm_*` 值，见下一条）。`page_referrer` **外站只留协议和域名**（GA4 靠域名判断来源，“AI 推荐”渠道也只需要域名；外站路径里可能有对方的用户名或编号，一律丢掉）；referrer 是本站地址时，路径换成路由模板（和 `page_location` 一样），所以 `?code=`、`?email=` 和草稿、对话、文档编号都不会带出去；应用页的页面浏览也只发路由模板（2026-10-13 O2）。
 - **UTM 值只认我们登记过的**（GA、Vercel 和首次来源共用同一个函数）：只收 `utm_source/medium/campaign/content/term` 五个参数，而且**每个值必须在仓库里的登记表中**（例如 `apps/web/src/lib/analytics/utm-registry.ts`：`utm_source` 是 youtube、xiaohongshu、reddit、newsletter 这类渠道名，`utm_campaign` 是我们自己发链接时起的活动代号）。不在登记表里的值整个丢弃，来源归为“其他”；以后发新推广链接时先在登记表加代号。字符白名单拦不住 `Alice.Smith` 这类名字，所以不接受访客随便带来的值（Google 也要求 campaign 参数里不能有个人信息）。
 - **自定义渠道“AI 推荐”**：在 GA4 后台建自定义渠道组（Owner 操作或当次批准后由 AI 操作），来源正则匹配 `chatgpt.com|chat.openai.com|perplexity.ai|claude.ai|gemini.google.com|copilot.microsoft.com|chat.deepseek.com|kimi.moonshot.cn|kimi.com|doubao.com|yuanbao.tencent.com|grok.com|meta.ai`，排在“自然搜索”“引荐”前面。名单写在仓库里（`docs/` 一份），以后增减按名单改。
 - **staging 和正式用不同的 GA4 媒体资源**（两个衡量 ID），staging 数据不混进正式报表。
@@ -174,7 +174,7 @@ PR-1、PR-2 只改前端、不动钱，但会改页面脚本、Cookie 弹窗和�
 
 ## 9. 需要 Owner 确认的细节
 
-**2026-10-13 Owner 已定**（原话见 Master Plan 第 2.1 节）：O1、O3–O9 按推荐；O2 改为应用内也统计页面浏览（网址去掉编号，按路由模板上报），加上 4 个关键事件；O10 选 B（不保留账号与 GA 编号对应；GA4 数据保留期 2 个月只删除用户级和事件级数据，标准汇总报表中的汇总数据会保留，隐私条款按此如实写明）。O2 的修改需同步第 3 节事件设计和对应 PR 验收。
+**2026-10-13 Owner 已定**（原话见 Master Plan 第 2.1 节）：O1、O3–O9 按推荐；O2 改为应用内也统计页面浏览（网址去掉编号，按路由模板上报），加上 4 个关键事件；O10 选 B（不保留账号与 GA 编号对应；GA4 数据保留期 2 个月只删除用户级和事件级数据，标准汇总报表中的汇总数据会保留，隐私条款按此如实写明）。O2 的修改已同步到第 3.1 节；对应 PR 验收按新做法检查应用页只发路由模板。
 
 | 编号 | 问题 | 推荐 |
 | --- | --- | --- |
