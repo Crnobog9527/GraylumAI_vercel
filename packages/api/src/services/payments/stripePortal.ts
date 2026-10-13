@@ -35,7 +35,18 @@ export async function loadCardPortalSubscription(db: Pick<SupabaseClient, 'from'
   }
   const renewing = candidates.filter(c => c.renewing);
   if (renewing.length > 1) throw new Error('PAY_COMMON_MEMBERSHIP_FACTS_UNKNOWN');
-  const chosen = renewing[0] ?? candidates.sort((a, b) => b.end.localeCompare(a.end))[0];
+  // All stopped: never the subscription a delivered upgrade replaced (its renewal must not be restored), even when it
+  // ends later (an annual Pro upgraded to a monthly Gold); then the latest-ending of the rest.
+  let open = candidates;
+  if (!renewing.length && candidates.length > 1) {
+    const replaced = await db.from('payment_orders').select('method_prior_subscription').eq('user_id', userId)
+      .eq('method_transition', 'upgrade').not('fulfilled_at', 'is', null)
+      .in('method_prior_subscription', candidates.map(c => c.localId)).limit(20);
+    if (replaced.error || !Array.isArray(replaced.data)) throw new Error('PAY_COMMON_MAPPING_READ_FAILED');
+    const gone = new Set(replaced.data.map(row => row.method_prior_subscription as string));
+    open = candidates.filter(c => !gone.has(c.localId));
+  }
+  const chosen = renewing[0] ?? open.sort((a, b) => b.end.localeCompare(a.end))[0];
   return chosen ? { localId: chosen.localId, stripeSubscriptionId: chosen.stripeSubscriptionId, orderIds: chosen.orderIds } : null;
 }
 
