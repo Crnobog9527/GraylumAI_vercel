@@ -36,8 +36,9 @@ export const SUBSCRIPTION_MANAGEMENT_HREF = '/profile?tab=subscription';
  * The server refuses a new purchase while an older subscription still renews but its last charge failed
  * (`resolvePaymentIssue`), so the user is not charged twice. Say that plainly and point to where it is stopped.
  */
-export const OLD_RENEWAL_BLOCKS_PURCHASE =
-  '你还有一个续费中的旧订阅（最近一次自动扣款没有成功）。请先在订阅管理里点"管理订阅 / 取消续费"停止它，再重新购买。';
+export const OLD_RENEWAL_BLOCKS_PURCHASE = '你还有一个续费中的旧订阅（最近一次自动扣款没有成功）。'
+  // Only Stripe subscriptions have the self-service button; a Waffo one is stopped by support.
+  + '请先到订阅管理里停止它，再重新购买；如果那里没有"管理订阅 / 取消续费"按钮，请提交工单，我们帮你停止。';
 
 export function getPlanEligibilityKey(planId: string, billingCycle: 'monthly' | 'yearly') {
   return `${planId}:${billingCycle}`;

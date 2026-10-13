@@ -14,6 +14,7 @@ it('turns an old renewing subscription with a failed charge into a plain message
   expect(state).toMatchObject({ disabled: true, canCreateCheckout: false, canChangeSubscriptionPlan: false,
     label: '请先停止旧订阅', message: OLD_RENEWAL_BLOCKS_PURCHASE, manageSubscription: true });
   expect(OLD_RENEWAL_BLOCKS_PURCHASE).toContain('管理订阅 / 取消续费');
+  expect(OLD_RENEWAL_BLOCKS_PURCHASE).toContain('提交工单'); // Waffo subscriptions have no self-service stop
   expect(SUBSCRIPTION_MANAGEMENT_HREF).toBe('/profile?tab=subscription');
 });
 
