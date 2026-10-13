@@ -48,7 +48,7 @@ import {freezePaygMessageBudget} from './paygMessageBudget';
 import {readPaygHostPolicies} from './paygHostPolicy';
 import {runAutomaticFinancialRecovery} from './automaticRecovery';
 import {hasConfirmedPositioning,judgePositioning,openRouterKey,refusePositioning,type PositioningGatePolicy} from './positioningGate';
-import {POSITIONING_FALLBACK} from './positioningFallback';
+import {POSITIONING_FALLBACK,POSITIONING_FALLBACK_INSTRUCTIONS} from './positioningFallback';
 
 const uuid=z.string().uuid();
 export const runtimeMaterialInput=z.object({sessionId:uuid,requestId:uuid,expectedRevision:z.number().int().nonnegative(),
@@ -239,6 +239,8 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
    // gated turn always keeps the fallback rule, since Decisions does not see earlier turns ("好的，那帮我写三条").
    if(gated)await judgePositioning(policy.positioningGate!,{text:input.input,apiKey});
    const positioningFallback=gated;
+   // The executor appends this rule (withPrimaryAddenda); admission sizes it too, so a fitting turn never fails later.
+   const positioningRule=positioningFallback?POSITIONING_FALLBACK_INSTRUCTIONS:'';
    if(input.selection.kind==='organizer')modelConfiguration(()=>assertSeparateSummaryModel(session.dialogueModel,row.data.model_id));
    let attachedOrganizer:{
     modelId:string;model:string;maxOutputTokens:number;inputBytes?:number;historyItems?:number;reasoning?:ReasoningPolicy;instructions?:string;input?:string
@@ -295,7 +297,7 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
    // Dropping it also drops its continuation call, so the turn is the one-call mentor shape.
    let maxCalls=policy.maxCalls;
    if(skillFile){
-    try{requireCapacity(instructions+skillFileInstructions,true);instructions+=skillFileInstructions;}
+    try{requireCapacity(instructions+skillFileInstructions+positioningRule,true);instructions+=skillFileInstructions;}
     catch(error){
      if(!(error instanceof Error)||error.message!=='RUNTIME_REQUIRED_CONTEXT_EXCEEDS_CAPACITY')throw error;
      skillFile=undefined;skillFileReserve=0;maxCalls--;
@@ -337,7 +339,7 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
    };
    if(candidates.length)refuseLongInput(text=>selectRuntimeHistory([],[{role:'user',content:matchingInput(text,candidates)}],
     {instructions:MATCH_INSTRUCTIONS,inputBytes:inputLimit,historyItems:0,toolBytes:0}));
-   refuseLongInput(text=>requireCapacity(instructions,Boolean(skillFile),
+   refuseLongInput(text=>requireCapacity(instructions+positioningRule,Boolean(skillFile),
     runtimeScopeInput(text,policy.reportGeneration?undefined:session.scopeMaterial,hostTurnContext)));
    // New mentor turns use the interactive format; replays returned before this branch.
    // A host-opened mentor turn (the user has not spoken) never gets a question card.
