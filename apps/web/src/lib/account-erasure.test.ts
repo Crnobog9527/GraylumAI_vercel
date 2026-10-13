@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  buildErasureImpactLines, describeErasureError, isAccountClosedError, renewalUsesStripePortal,
+  buildErasureImpactLines, describeErasureError, isAccountClosedError, isRenewalBlockedError, renewalUsesStripePortal,
 } from './account-erasure';
 
 const base = {
@@ -56,5 +56,7 @@ describe('describeErasureError', () => {
     expect(describeErasureError({ message: 'relation profiles does not exist' })).toBe('注销暂时无法完成，请稍后重试。');
     expect(describeErasureError({ message: 'x', data: { code: 'TOO_MANY_REQUESTS' } })).toContain('频繁');
     expect(isAccountClosedError({ message: 'ACCOUNT_CLOSED: 账号已注销' })).toBe(true);
+    expect(isRenewalBlockedError({ message: 'ACCOUNT_ERASURE_SUBSCRIPTION_RENEWING: x' })).toBe(true);
+    expect(isRenewalBlockedError({ message: 'ACCOUNT_ERASURE_ADMIN_DENIED: x' })).toBe(false);
   });
 });

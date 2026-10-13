@@ -4,7 +4,9 @@ import { useRef, useState } from 'react';
 import { trpc } from '@/trpc/client';
 import { createClient } from '@/lib/supabase';
 import { CAPTCHA_EXPIRED_MESSAGE, captchaOptionsFromToken } from '@/lib/dialogCaptcha';
-import { describeErasureError, isAccountClosedError, type AccountErasurePreview } from '@/lib/account-erasure';
+import {
+  describeErasureError, isAccountClosedError, isRenewalBlockedError, type AccountErasurePreview,
+} from '@/lib/account-erasure';
 
 export type ErasureStep = 'impact' | 'verify' | 'confirm' | 'done';
 const CODE_COOLDOWN_SECONDS = 60;
@@ -81,6 +83,12 @@ export function useAccountErasure(options: { email?: string; usesPassword: boole
     try {
       await confirmMutation.mutateAsync({ requestId: requestId.current ?? crypto.randomUUID(), acknowledged: true });
     } catch (confirmError) {
+      if (isRenewalBlockedError(confirmError)) {
+        // Re-read the facts and go back to the impact step, where the channel-specific cancel entry is shown.
+        await preview.refetch();
+        setStep('impact');
+        return setError(describeErasureError(confirmError));
+      }
       if (!isAccountClosedError(confirmError)) return setError(describeErasureError(confirmError));
     }
     await createClient().auth.signOut({ scope: 'local' }).catch(() => undefined);

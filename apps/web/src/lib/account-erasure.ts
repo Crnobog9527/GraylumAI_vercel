@@ -82,6 +82,11 @@ export function describeErasureError(error: unknown): string {
   return '注销暂时无法完成，请稍后重试。';
 }
 
+/** Renewal turned on after the impact step: the dialog goes back there so the right cancel entry shows. */
+export function isRenewalBlockedError(error: unknown): boolean {
+  return getErrorMessageText(error).includes('ACCOUNT_ERASURE_SUBSCRIPTION_RENEWING');
+}
+
 export function isAccountClosedError(error: unknown): boolean {
   return getErrorMessageText(error).includes('ACCOUNT_CLOSED');
 }
