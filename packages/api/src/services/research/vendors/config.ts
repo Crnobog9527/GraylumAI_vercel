@@ -29,6 +29,14 @@ export const BENCHMARK_RULES = Object.freeze({
   qualifiedMin: 3,
 });
 
+/**
+ * Platforms whose adapter routes can feed a benchmark: an account profile with followers plus account
+ * posts carrying absolute publication times (30-day rule). Others (Douyin, Xiaohongshu, Weibo without
+ * profile routes; YouTube, Instagram without reliable times; Bilibili without followers) need RT-7 first,
+ * and adding one requires a code change here, not an admin setting.
+ */
+export const BENCHMARK_CAPABLE_PLATFORMS: readonly SocialPlatform[] = Object.freeze(['tiktok', 'x']);
+
 /** Run ceiling enforced by bill2_payg_validate_quote (0162); subcalls must fit beside model calls. */
 export const RUN_MAX_CALLS = 32;
 
@@ -76,6 +84,9 @@ export const researchToolsConfigSchema = z.object({
   config.benchmarkPlatforms.forEach((platform, index) => {
     if (!config.verifiedPlatforms.includes(platform)) {
       ctx.addIssue({ code: 'custom', path: ['benchmarkPlatforms', index], message: `${platform} is not a verified platform` });
+    }
+    if (!BENCHMARK_CAPABLE_PLATFORMS.includes(platform)) {
+      ctx.addIssue({ code: 'custom', path: ['benchmarkPlatforms', index], message: `${platform} routes cannot supply benchmark fields yet` });
     }
   });
   const seen = new Set<string>();

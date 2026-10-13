@@ -54,6 +54,8 @@ describe('research_tools_config', () => {
     expect(researchToolsConfigSchema.safeParse({ ...valid(), routes: [valid().routes[0], valid().routes[0]] }).success).toBe(false);
     expect(researchToolsConfigSchema.safeParse({ ...valid(), routes: [{ ...valid().routes[0], maxUnitsPerCall: '100000' }] }).success).toBe(false);
     expect(researchToolsConfigSchema.safeParse({ ...valid(), benchmarkPlatforms: ['x'] }).success).toBe(false);
+    expect(researchToolsConfigSchema.safeParse({ ...valid(), benchmarkPlatforms: ['tiktok', 'instagram'] }).success).toBe(false);
+    expect(researchToolsConfigSchema.safeParse({ ...valid(), verifiedPlatforms: ['tiktok', 'x'], benchmarkPlatforms: ['tiktok', 'x'] }).success).toBe(true);
     expect(researchToolsConfigSchema.safeParse({ ...valid(), limits: { maxSubcallsPerRound: 30, discoverSubcalls: 25 } }).success).toBe(false);
     expect(researchToolsConfigSchema.safeParse({ ...valid(), limits: { maxSubcallsPerRound: 29, discoverSubcalls: 29 } }).success).toBe(true);
     expect(researchToolsConfigSchema.safeParse({ ...valid(), limits: { maxSubcallsPerRound: 12, discoverSubcalls: 30 } }).success).toBe(false);
