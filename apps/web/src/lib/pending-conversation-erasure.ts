@@ -74,13 +74,15 @@ export async function resumeConversationErasure(deps: ResumeDeps, sessionId: str
         deps.afterErased(sessionId);
         return 'deleted' as const;
       }
-      if (getErrorMessageText(error).includes('CONTENT_ERASURE_BUSY')) {
-        if (attempt < BUSY_RETRIES) {
-          await deps.wait(1500);
-          continue;
-        }
-        // Still busy: the request from before the reload may yet commit. The outcome is unknown, so the
-        // row stays hidden and the record stays (it expires after ten minutes, or the next load retries).
+      const text = getErrorMessageText(error);
+      if (text.includes('CONTENT_ERASURE_BUSY') && attempt < BUSY_RETRIES) {
+        await deps.wait(1500);
+        continue;
+      }
+      // Only a definitive refusal puts the row back. Anything else (still busy, network, timeout, rate
+      // limit, sign-in expired) leaves the outcome unknown: the request from before the reload may yet
+      // commit, so the row stays hidden and the record stays (ten-minute expiry; the next load retries).
+      if (!text.includes('CONTENT_NOT_FOUND')) {
         deps.notify({ tone: 'notice', text: '这个对话的删除还在处理中，稍后刷新可查看结果。' });
         return 'pending' as const;
       }

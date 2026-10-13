@@ -68,8 +68,9 @@ describe('resumeConversationErasure', () => {
     expect(d.notify).toHaveBeenCalledWith(expect.objectContaining({ tone: 'error' }));
   });
 
-  it('keeps a still-busy deletion hidden and pending: its outcome is unknown', async () => {
-    const d = deps(vi.fn().mockRejectedValue(new Error('CONTENT_ERASURE_BUSY')));
+  it.each(['CONTENT_ERASURE_BUSY', 'Failed to fetch', 'TOO_MANY_REQUESTS', 'UNAUTHORIZED'])(
+    'keeps the deletion hidden and pending when the outcome is unknown (%s)', async message => {
+    const d = deps(vi.fn().mockRejectedValue(new Error(message)));
     await expect(resumeConversationErasure(d, id)).resolves.toBe('pending');
     expect(d.restore).not.toHaveBeenCalled();
     expect(d.afterErased).not.toHaveBeenCalled();
