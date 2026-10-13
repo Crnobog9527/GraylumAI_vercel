@@ -153,6 +153,8 @@ describe('callFirecrawl', () => {
     const base64 = { success: true, data: { markdown: 'JVBERi0xLjcKJ...', metadata: { statusCode: 200, creditsUsed: 1 } } };
     expect(await callFirecrawl('https://example.com/download', deps(jsonFetch(200, base64))))
       .toMatchObject({ outcome: 'failed', reason: 'PDF_NOT_SUPPORTED', items: [], usage: { units: '1' } });
+    const raw = { success: true, data: { markdown: '%PDF-1.7\n%\u00e2\u00e3', metadata: { statusCode: 200, creditsUsed: 1 } } };
+    expect(await callFirecrawl('https://example.com/raw', deps(jsonFetch(200, raw)))).toMatchObject({ reason: 'PDF_NOT_SUPPORTED' });
     const typed = { success: true, data: { markdown: '', metadata: { contentType: 'application/pdf', creditsUsed: 1 } } };
     expect(await callFirecrawl('https://example.com/d', deps(jsonFetch(200, typed)))).toMatchObject({ reason: 'PDF_NOT_SUPPORTED' });
   });

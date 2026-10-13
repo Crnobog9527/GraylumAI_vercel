@@ -70,10 +70,10 @@ export async function callFirecrawl(rawUrl: string, deps: VendorDeps): Promise<R
   if (targetStatus !== undefined && targetStatus >= 400) {
     return { ...base, outcome: 'failed', reason: `TARGET_HTTP_${targetStatus}`, httpStatus: 200, supplierMayCharge: true, usage };
   }
-  // With parsePDF off a PDF comes back base64-encoded: billed once, but there is no page to give the user.
+  // A PDF comes back base64-encoded (parsePDF off) or as raw `%PDF-` bytes: billed once, but no page for the user.
   const contentType = text(answer.json, ['data.metadata.contentType', 'data.metadata.content-type']) ?? '';
   const markdown = text(answer.json, ['data.markdown']);
-  if (/pdf/i.test(contentType) || markdown?.trimStart().startsWith('JVBERi0')) {
+  if (/pdf/i.test(contentType) || /^(JVBERi0|%PDF-)/.test(markdown?.trimStart() ?? '')) {
     return { ...base, outcome: 'failed', reason: 'PDF_NOT_SUPPORTED', httpStatus: 200, supplierMayCharge: true, usage };
   }
   // No recognizable page body means nothing was delivered, whatever `success` says.
