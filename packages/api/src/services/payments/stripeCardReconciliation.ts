@@ -19,11 +19,12 @@ export type StripeCardFinding = {
   object?: 'checkout' | 'invoice' | 'refund'; externalId?: string; orderId?: string; code?: string;
 };
 type Listed<T> = { data: T[]; has_more: boolean };
-type Options = { expectedMode: StripeScope['mode']; now?: Date; days?: number; maxPages?: number; alert?: () => void };
+type Options = { expectedMode: StripeScope['mode']; now?: Date; days?: number; maxPages?: number; budgetMs?: number;
+  alert?: () => void };
 
 /** PAY-STRIPE-MP daily backstop (04:00 billing-reconcile, #847 2.5-5): if a webhook was lost, a paid card order could
  * stay undelivered with nothing noticing. Scans the last `days` of Stripe checkout sessions, paid renewal invoices and
- * succeeded refunds, and repairs card orders through the same idempotent handlers the webhook uses (first payment,
+ * refund events (so a refund that succeeds long after it was created is still seen), and repairs card orders through the same idempotent handlers the webhook uses (first payment,
  * renewal, external refund). Whatever cannot be repaired, or an incomplete scan, is a finding for manual review.
  * The environment decides whether it runs and in which mode (staging: test keys; production: live keys, off until the
  * Owner approves it at launch). A key whose mode differs from the configured one is refused, never scanned. */
@@ -32,15 +33,23 @@ export async function reconcileStripeCardPayments(db: SupabaseClient, stripe: St
   if (scope.mode !== options.expectedMode) throw new Error('PAY_STRIPE_MP_RECONCILIATION_MODE_MISMATCH');
   const since = Math.floor((options.now ?? new Date()).getTime() / 1000) - (options.days ?? 7) * DAY;
   const maxPages = options.maxPages ?? 10;
+  // Stay well inside the cron's 60-second limit (the other audits run alongside): stop and report an incomplete scan.
+  const deadline = Date.now() + (options.budgetMs ?? 40_000);
   const findings: StripeCardFinding[] = [];
-  let repaired = 0, checked = 0, complete = true;
+  let repaired = 0, checked = 0, complete = true, outOfTime = false;
 
   const scan = async <T extends { id: string }>(object: StripeCardFinding['object'],
     list: (after?: string) => Promise<Listed<T>>, visit: (row: T) => Promise<void>) => {
     let after: string | undefined;
     for (let page = 0; page < maxPages; page++) {
+      if (outOfTime) return;
       const rows = await list(after);
       for (const row of rows.data) {
+        if (Date.now() > deadline) {
+          complete = false; outOfTime = true;
+          findings.push({ kind: 'scan_incomplete', object, code: 'TIME_BUDGET' });
+          return;
+        }
         checked++;
         try { await visit(row); } catch (error) {
           findings.push({ kind: 'repair_failed', object, externalId: row.id, code: errorCode(error) });
@@ -93,17 +102,28 @@ export async function reconcileStripeCardPayments(db: SupabaseClient, stripe: St
       ...(orderId ? { orderId } : {}) });
   });
 
-  // 3. Succeeded refunds of card orders that are not recorded: the external-refund handler (#941) records them.
-  await scan('refund', after => stripe.refunds.list({ created: { gte: since }, limit: 100,
-    ...(after ? { starting_after: after } : {}) }), async refund => {
-    if (refund.status !== 'succeeded' || refund.metadata?.refundIntentId) return;
-    // Recorded refunds are replayed too: the handler changes nothing and repeats a pending review alert (partial
-    // refund, refunded pack, still renewing) that a crashed delivery may never have sent; alerts carry a dedupKey.
-    const known = Boolean(await recordedOrder(db, scope, 'refund', refund.id));
-    if (!await handleCardRefund(db, stripe, { refundId: refund.id }, options.alert)) return;
+  // 3. Refund events of the window, not refunds created in it: a refund can start pending and succeed much later
+  //    (Stripe), and its status change is an event of the day it happened. The external-refund handler (#941)
+  //    re-reads each refund and records it; recorded refunds are replayed too, which changes nothing and repeats a
+  //    pending review alert (partial refund, refunded pack, still renewing) a crashed delivery never sent (dedupKey).
+  const seen = new Set<string>();
+  await scan('refund', after => stripe.events.list({ created: { gte: since }, limit: 100,
+    types: ['refund.created', 'refund.updated', 'charge.refund.updated', 'charge.refunded'],
+    ...(after ? { starting_after: after } : {}) }), async event => {
+    const object = event.data.object as { id: string; object: string; metadata?: Record<string, string> | null };
+    if (seen.has(object.id) || object.metadata?.refundIntentId) return;
+    seen.add(object.id);
+    if (object.object === 'charge') {
+      await handleCardRefund(db, stripe, { chargeId: object.id }, options.alert);
+      return;
+    }
+    const known = Boolean(await recordedOrder(db, scope, 'refund', object.id));
+    if (!await handleCardRefund(db, stripe, { refundId: object.id }, options.alert)) return;
     if (known) return;
-    if (await recordedOrder(db, scope, 'refund', refund.id)) repaired++;
-    else findings.push({ kind: 'refund_not_recorded', object: 'refund', externalId: refund.id });
+    if (await recordedOrder(db, scope, 'refund', object.id)) repaired++;
+    else if ((await stripe.refunds.retrieve(object.id)).status === 'succeeded') {
+      findings.push({ kind: 'refund_not_recorded', object: 'refund', externalId: object.id });
+    }
   });
 
   return { success: findings.length === 0, skipped: false, complete, repaired, checked, findings };

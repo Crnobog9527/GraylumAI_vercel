@@ -28,8 +28,12 @@ function fixture(state: { orders?: Record<string, Order>; sessions?: unknown[]; 
     return chain;
   }) };
   const page = (rows: unknown[] = []) => vi.fn(async () => ({ data: rows, has_more: false }));
+  // Refund events carry the refund (or, for charge.refunded, the charge) as it was then; the scan re-reads it.
+  const refundRows = (state.refunds ?? []) as Array<{ id: string; status: string; object?: string }>;
+  const events = refundRows.map((row, i) => ({ id: `evt_${i}`, type: row.object === 'charge' ? 'charge.refunded' : 'refund.updated',
+    data: { object: { object: 'refund', ...row } } }));
   const stripe = { checkout: { sessions: { list: page(state.sessions) } }, invoices: { list: page(state.invoices) },
-    refunds: { list: page(state.refunds) } };
+    events: { list: page(events) }, refunds: { retrieve: vi.fn(async (refundId: string) => refundRows.find(row => row.id === refundId)) } };
   const run = (options: Record<string, unknown> = {}) => reconcileStripeCardPayments(db as unknown as SupabaseClient,
     stripe as unknown as Stripe, { expectedMode: 'test', now, ...options });
   return { db, stripe, orders, recorded, run };
@@ -102,28 +106,43 @@ describe('PAY-STRIPE-MP daily Stripe card reconciliation', () => {
     mocks.invoice.mockReset().mockImplementation(async () => { untaxed.orders[ORDER] = card({ fulfilled_at: 'x' }); return true; });
     await expect(untaxed.run()).resolves.toMatchObject({ success: true, repaired: 1 });
   });
-  it('records an external refund whose webhook was lost; ours and failed refunds are skipped', async () => {
+  it('records an external refund whose webhook was lost, from the refund events of the window', async () => {
+    // re_late was created long before the window and succeeded inside it: its refund.updated event is in the window.
     const f = fixture({ recorded: new Set(['refund:re_known']), refunds: [{ id: 're_known', status: 'succeeded', metadata: {} },
-      { id: 're_lost', status: 'succeeded', metadata: {} },
+      { id: 're_late', status: 'succeeded', metadata: {} }, { id: 're_late', status: 'succeeded', metadata: {} },
       { id: 're_ours', status: 'succeeded', metadata: { refundIntentId: 'i' } }, { id: 're_failed', status: 'failed', metadata: {} },
-      { id: 're_stuck', status: 'succeeded', metadata: {} }] });
-    mocks.refund.mockImplementation(async (_db: unknown, _s: unknown, input: { refundId: string }) => {
-      if (input.refundId === 're_lost') f.recorded.add('refund:re_lost');
+      { id: 're_stuck', status: 'succeeded', metadata: {} }, { id: 'ch_1', status: 'succeeded', object: 'charge', metadata: {} }] });
+    f.stripe.events.list.mockImplementation(async () => ({ has_more: false, data: [
+      ...['re_known', 're_late', 're_late', 're_ours', 're_failed', 're_stuck'].map((id, i) => ({ id: `evt_${i}`, type: 'refund.updated',
+        data: { object: { object: 'refund', id, metadata: id === 're_ours' ? { refundIntentId: 'i' } : {} } } })),
+      { id: 'evt_charge', type: 'charge.refunded', data: { object: { object: 'charge', id: 'ch_1', metadata: {} } } }] }));
+    mocks.refund.mockImplementation(async (_db: unknown, _s: unknown, input: { refundId?: string }) => {
+      if (input.refundId === 're_late') f.recorded.add('refund:re_late');
       return true;
     });
     await expect(f.run()).resolves.toMatchObject({ success: false, repaired: 1,
       findings: [{ kind: 'refund_not_recorded', object: 'refund', externalId: 're_stuck' }] });
-    // A recorded refund is replayed (it may owe a review alert) but is not a repair.
-    expect(mocks.refund.mock.calls.map(call => call[2])).toEqual([{ refundId: 're_known' }, { refundId: 're_lost' },
-      { refundId: 're_stuck' }]);
+    // Each refund once (re_late had two events); ours are skipped; the failed one is replayed but owes nothing;
+    // a recorded refund is replayed (it may owe a review alert) but is not a repair; a charge event replays the charge.
+    expect(mocks.refund.mock.calls.map(call => call[2])).toEqual([{ refundId: 're_known' }, { refundId: 're_late' },
+      { refundId: 're_failed' }, { refundId: 're_stuck' }, { chargeId: 'ch_1' }]);
+    expect(f.stripe.events.list).toHaveBeenCalledWith({ created: { gte: 1791345600 }, limit: 100,
+      types: ['refund.created', 'refund.updated', 'charge.refund.updated', 'charge.refunded'] });
   });
   it('pages through Stripe and reports an incomplete scan; a Stripe list error fails the scan', async () => {
     const f = fixture();
-    f.stripe.refunds.list = vi.fn(async () => ({ data: [{ id: 're_x', status: 'failed', metadata: {} }], has_more: true }));
+    mocks.refund.mockResolvedValue(false);
+    f.stripe.events.list = vi.fn(async () => ({ data: [{ id: 'evt_x', type: 'refund.updated',
+      data: { object: { object: 'refund', id: `re_${Math.random()}`, metadata: {} } } }], has_more: true }));
     await expect(f.run({ maxPages: 2 })).resolves.toMatchObject({ success: false, complete: false,
       findings: [{ kind: 'scan_incomplete', object: 'refund' }] });
-    expect(f.stripe.refunds.list).toHaveBeenCalledTimes(2);
-    expect(f.stripe.refunds.list).toHaveBeenLastCalledWith({ created: { gte: 1791345600 }, limit: 100, starting_after: 're_x' });
+    expect(f.stripe.events.list).toHaveBeenCalledTimes(2);
+    expect(f.stripe.events.list).toHaveBeenLastCalledWith(expect.objectContaining({ starting_after: 'evt_x' }));
+    // Past the time budget the scan stops (the cron must still return) and reports an incomplete scan.
+    const slow = fixture({ sessions: [session(), session({ id: 'cs_2' })], invoices: [{ id: 'in_1' }] });
+    await expect(slow.run({ budgetMs: -1 })).resolves.toMatchObject({ complete: false, checked: 0,
+      findings: [{ kind: 'scan_incomplete', object: 'checkout', code: 'TIME_BUDGET' }] });
+    expect(slow.stripe.invoices.list).not.toHaveBeenCalled();
     f.stripe.invoices.list = vi.fn(async () => { throw new Error('stripe down'); });
     await expect(f.run()).rejects.toThrow('stripe down');
   });
