@@ -6,15 +6,25 @@
 // (0215, 0233) return only on their own target md5 and refuse anything but their exact source md5, so once a later
 // md5 patch has changed the same function, the earlier one can never run again on the final catalog.
 //
-// Replaying such a superseded patch is skipped only when the migration files prove the chain and the database is at
-// its end: (1) X is an md5 patch with target T; (2) a later md5 patch Y of the same function declares source T, and so
-// on to the chain tail; (3) the function's current md5 equals the tail's target. Otherwise X is replayed (and fails).
-// X's own repeatability is still checked at its historical position by build-from-files.
+// Only the superseded md5 block of such a patch is left out of the replay, and only when the migration files prove the
+// chain and the database is at its end: (1) X is an md5 patch with target T; (2) a later md5 patch Y of the same
+// function declares source T, and so on to the chain tail; (3) the function's current md5 equals the tail's target.
+// Every other statement of X is still replayed. Otherwise X is replayed whole (and fails). X's own repeatability is
+// still checked at its historical position by build-from-files.
 //
 // Convention for future migrations: an md5 patch of a function another md5 patch already changed must declare that
 // patch's target as its source (as 0233 does for 0215), so this chain stays provable.
 
 const PATCH = /pg_get_functiondef\('public\.([^']+)'::regprocedure\);source_md5:=md5\(definition\);\s*IF source_md5='([0-9a-f]{32})' THEN RETURN;END IF;\s*IF source_md5<>'([0-9a-f]{32})' THEN RAISE/;
+
+const BLOCK = /DO \$migration\$[\s\S]*?END \$migration\$;\n?/g;
+
+/** The migration without its single md5-patch DO block, or null when that block cannot be isolated exactly. */
+export function withoutMd5Patch(sql) {
+  const blocks = sql.match(BLOCK) ?? [];
+  if (blocks.length !== 1 || !md5Patch(blocks[0])) return null;
+  return sql.replace(blocks[0], '');
+}
 
 /** The md5 patch a migration declares, or null for any other migration. */
 export function md5Patch(sql) {
@@ -25,11 +35,13 @@ export function md5Patch(sql) {
 /**
  * Whether migration `files[index]` is a superseded md5 patch the database has already moved past.
  * files: [{ name, sql }] in replay order; currentMd5(signature) returns the function's md5 in the database now.
- * Returns { skip: true, reason } only when all three conditions hold, else { skip: false }.
+ * Returns { skip: true, rest, reason } only when all three conditions hold (rest: the migration without that block,
+ * to replay instead), else { skip: false }.
  */
 export async function supersededPatch(files, index, currentMd5) {
   const patch = md5Patch(files[index].sql);
-  if (!patch) return { skip: false };
+  const rest = withoutMd5Patch(files[index].sql);
+  if (!patch || rest === null) return { skip: false };
   const chain = [files[index].name];
   let tail = patch;
   for (const later of files.slice(index + 1)) {
@@ -42,5 +54,6 @@ export async function supersededPatch(files, index, currentMd5) {
   if (chain.length === 1) return { skip: false };
   const current = await currentMd5(patch.signature);
   if (current !== tail.target) return { skip: false };
-  return { skip: true, reason: `${files[index].name}: ${patch.signature} already at chain tail ${tail.target} (${chain.join(' -> ')})` };
+  return { skip: true, rest, reason: `${files[index].name}: md5 patch of ${patch.signature} left out (already at chain tail `
+    + `${tail.target}, ${chain.join(' -> ')}); its other statements replayed` };
 }
