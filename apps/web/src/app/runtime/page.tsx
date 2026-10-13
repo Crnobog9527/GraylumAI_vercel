@@ -165,7 +165,7 @@ function RuntimeWorkspace({routeSession,routeModule}:{routeSession:string;routeM
   url.searchParams.set('request',requestId);history.replaceState(null,'',url);
   if(!scriptRequest)setOutgoing({text:submitted});
   // Only the visible box empties now; the saved draft stays until the server stores the message.
-  rememberPending(localStorage,sessionId,{requestId,text:submitted,input:requestInput});
+  rememberPending(localStorage,sessionId,{requestId,text:submitted,input:requestInput},view.data?.executions as Array<{input:string|null}>|undefined);
   restoreInput=clearForSend(setInput,submitted,text=>{localStorage.setItem('opc-runtime-input:'+sessionId,text);markPendingRestored(localStorage,sessionId);});
   const admitted=await prepare.mutateAsync({sessionId,requestId,input:requestInput,selection:selected,network:'deny',sources:[]});
   if(!alive.current)return;

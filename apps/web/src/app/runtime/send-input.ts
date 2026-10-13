@@ -37,11 +37,20 @@ const pendingKey = (sessionId: string) => 'opc-runtime-pending:' + sessionId;
  * A send not yet confirmed by this page: the box text, the exact request input, its request id and when it left.
  * Kept apart from the draft (which the next keystroke overwrites) until the server history settles it.
  */
-export type PendingSend = { requestId: string; text: string; input: string; at: number; restored?: boolean };
+export type PendingSend = {
+  requestId: string; text: string; input: string; at: number;
+  /** Turns with this same input already in the history when it was sent (null: history not loaded then). */
+  seen: number | null;
+  /** True once the text was put back in front of the draft, so only then may that prefix be removed again. */
+  restored?: boolean;
+};
+type HistoryTurn = { input: string | null; createdAt?: string };
 
 export function rememberPending(storage: DraftStorage, sessionId: string,
-  send: { requestId: string; text: string; input: string }, now = Date.now()) {
-  storage.setItem(pendingKey(sessionId), JSON.stringify({ ...send, at: now }));
+  send: { requestId: string; text: string; input: string }, history: ReadonlyArray<HistoryTurn> | undefined,
+  now = Date.now()) {
+  const seen = history ? history.filter(turn => turn.input === send.input).length : null;
+  storage.setItem(pendingKey(sessionId), JSON.stringify({ ...send, at: now, seen }));
 }
 
 export function forgetPending(storage: DraftStorage, sessionId: string) {
@@ -62,7 +71,7 @@ export function readPending(storage: DraftStorage, sessionId: string): PendingSe
     const value = JSON.parse(storage.getItem(pendingKey(sessionId)) ?? 'null');
     const ok = value && typeof value.requestId === 'string' && typeof value.text === 'string'
       && typeof value.input === 'string' && typeof value.at === 'number';
-    return ok ? value : null;
+    return ok ? { ...value, seen: typeof value.seen === 'number' ? value.seen : null } : null;
   } catch {
     return null;
   }
@@ -74,12 +83,14 @@ export function openingDraft(storage: DraftStorage, sessionId: string) {
 }
 
 /**
- * Did the server store this send? Its history has a turn with the same input from about when it left.
- * (Two minutes of clock slack; an older identical message, such as an earlier "继续", does not count.)
+ * Did the server store this send? Free-chat history carries no request id, so count the turns with the same input:
+ * stored only when there are more than when it was sent. A repeated "继续" therefore cannot vouch for a newer one.
+ * Without a count from send time, fall back to a turn from about when it left (two minutes of clock slack).
  */
-export function pendingWasStored(pending: PendingSend, history: ReadonlyArray<{ input: string | null; createdAt?: string }>) {
-  return history.some(turn => turn.input === pending.input
-    && (!turn.createdAt || Date.parse(turn.createdAt) >= pending.at - 120_000));
+export function pendingWasStored(pending: PendingSend, history: ReadonlyArray<HistoryTurn>) {
+  const same = history.filter(turn => turn.input === pending.input);
+  if (pending.seen !== null) return same.length > pending.seen;
+  return same.some(turn => !turn.createdAt || Date.parse(turn.createdAt) >= pending.at - 120_000);
 }
 
 /** Remove a stored send from the box, keeping anything typed after it. */
@@ -93,16 +104,18 @@ export function withoutSent(current: string, text: string) {
  * Not stored: put it back in front of the draft once, and keep the record so a resend reuses its request id.
  */
 export function settlePending(storage: DraftStorage, sessionId: string,
-  history: ReadonlyArray<{ input: string | null; createdAt?: string }>, setInput: SetInput) {
+  history: ReadonlyArray<HistoryTurn>, setInput: SetInput) {
   const pending = readPending(storage, sessionId);
   if (!pending) return;
   if (pendingWasStored(pending, history)) {
+    // Only text this page put back may be cut from the front; otherwise only an exact leftover copy goes.
+    const clean = (value: string) => pending.restored ? withoutSent(value, pending.text) : value === pending.text ? '' : value;
     // Save the draft without the sent text first; only then is the record (the request id) safe to drop.
-    const saved = withoutSent(storage.getItem(draftKey(sessionId)) ?? '', pending.text);
+    const saved = clean(storage.getItem(draftKey(sessionId)) ?? '');
     if (saved) storage.setItem(draftKey(sessionId), saved);
     else storage.removeItem(draftKey(sessionId));
     forgetPending(storage, sessionId);
-    setInput(current => withoutSent(current, pending.text));
+    setInput(clean);
     return;
   }
   if (pending.restored) return;

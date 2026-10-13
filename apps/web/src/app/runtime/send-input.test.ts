@@ -54,7 +54,7 @@ const at = (ms: number) => new Date(T0 + ms).toISOString();
 
 it('keeps an unconfirmed send across a reload even after the user overwrote the draft with a new one', () => {
   const storage = memoryStorage();
-  rememberPending(storage, 's', { requestId: 'r1', text: '第一条消息', input: '第一条消息' }, T0);
+  rememberPending(storage, 's', { requestId: 'r1', text: '第一条消息', input: '第一条消息' }, [], T0);
   storage.setItem('opc-runtime-input:s', '新的草稿'); // what updateInput does while the send is pending
   // Reload: the page opens with the draft; the server history (not stored) puts the send back in front, once.
   const box = { value: openingDraft(storage, 's') };
@@ -73,7 +73,7 @@ it('keeps an unconfirmed send across a reload even after the user overwrote the 
 it('drops a send the server already stored, so reopening without ?request= cannot run and bill it again', () => {
   const storage = memoryStorage();
   storage.setItem('opc-runtime-input:s', '第一条消息');
-  rememberPending(storage, 's', { requestId: 'r1', text: '第一条消息', input: '第一条消息' }, T0);
+  rememberPending(storage, 's', { requestId: 'r1', text: '第一条消息', input: '第一条消息' }, [], T0);
   const box = { value: openingDraft(storage, 's') };
   settlePending(storage, 's', [{ input: '第一条消息', createdAt: at(800) }], f => { box.value = f(box.value); });
   expect(box.value).toBe('');
@@ -82,12 +82,33 @@ it('drops a send the server already stored, so reopening without ?request= canno
   expect(requestIdFor(null, readPending(storage, 's'), '第一条消息', () => 'fresh')).toBe('fresh');
 });
 
-it('keeps a draft typed after a stored send, and ignores an older identical message', () => {
-  const pending = { requestId: 'r1', text: '继续', input: '继续', at: T0 };
-  expect(pendingWasStored(pending, [{ input: '继续', createdAt: at(-3_600_000) }])).toBe(false);
-  expect(pendingWasStored(pending, [{ input: '继续', createdAt: at(-60_000) }])).toBe(true);
+it('counts identical turns, so an earlier "继续" cannot vouch for a newer one that failed', () => {
+  const storage = memoryStorage();
+  const earlier = [{ input: '继续', createdAt: at(-30_000) }];
+  rememberPending(storage, 's', { requestId: 'r2', text: '继续', input: '继续' }, earlier, T0);
+  expect(readPending(storage, 's')?.seen).toBe(1);
+  const box = { value: '' };
+  const set = (f: (v: string) => string) => { box.value = f(box.value); };
+  settlePending(storage, 's', earlier, set); // still one: the second 继续 was not stored, it comes back
+  expect(box.value).toBe('继续');
+  expect(requestIdFor(null, readPending(storage, 's'), '继续', () => 'fresh')).toBe('r2');
+  settlePending(storage, 's', [...earlier, { input: '继续', createdAt: at(500) }], set); // now two: stored
+  expect(readPending(storage, 's')).toBeNull();
+  // Without a count from send time, only a turn from about then counts.
+  const unknown = { requestId: 'r3', text: '继续', input: '继续', at: T0, seen: null };
+  expect(pendingWasStored(unknown, [{ input: '继续', createdAt: at(-3_600_000) }])).toBe(false);
+  expect(pendingWasStored(unknown, [{ input: '继续', createdAt: at(-60_000) }])).toBe(true);
+});
+
+it('keeps a draft that only happens to begin with the sent text when it was never put back', () => {
+  const storage = memoryStorage();
+  rememberPending(storage, 's', { requestId: 'r1', text: '好', input: '好' }, [], T0);
+  storage.setItem('opc-runtime-input:s', '好\n\n我自己又写了这段');
+  const box = { value: openingDraft(storage, 's') };
+  settlePending(storage, 's', [{ input: '好', createdAt: at(300) }], f => { box.value = f(box.value); });
+  expect(box.value).toBe('好\n\n我自己又写了这段');
+  expect(storage.map.get('opc-runtime-input:s')).toBe('好\n\n我自己又写了这段');
   expect(withoutSent('继续\n\n下一句', '继续')).toBe('下一句');
-  expect(withoutSent('别的内容', '继续')).toBe('别的内容');
 });
 
 it('opens with the plain draft and ignores a broken pending record', () => {
@@ -100,7 +121,7 @@ it('opens with the plain draft and ignores a broken pending record', () => {
 
 it('keeps the request id after an error with an unknown outcome, so a resend from any link replays', () => {
   const storage = memoryStorage();
-  rememberPending(storage, 's', { requestId: 'r1', text: '第一条消息', input: '第一条消息' }, T0);
+  rememberPending(storage, 's', { requestId: 'r1', text: '第一条消息', input: '第一条消息' }, [], T0);
   // prepare failed without an answer (it may have been stored): text back in the box, record kept.
   storage.setItem('opc-runtime-input:s', '第一条消息');
   markPendingRestored(storage, 's');
@@ -114,7 +135,7 @@ it('keeps the request id after an error with an unknown outcome, so a resend fro
 
 it('saves the draft without the sent text before dropping the record when history later shows it stored', () => {
   const storage = memoryStorage();
-  rememberPending(storage, 's', { requestId: 'r1', text: '第一条消息', input: '第一条消息' }, T0);
+  rememberPending(storage, 's', { requestId: 'r1', text: '第一条消息', input: '第一条消息' }, [], T0);
   storage.setItem('opc-runtime-input:s', '新的草稿');
   const box = { value: openingDraft(storage, 's') };
   const set = (f: (v: string) => string) => { box.value = f(box.value); };
