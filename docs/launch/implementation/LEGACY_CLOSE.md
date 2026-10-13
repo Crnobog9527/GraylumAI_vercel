@@ -1,6 +1,6 @@
 # LEGACY-CLOSE 删除与功能对照
 
-状态：部分实施，**未完成 LEGACY-CLOSE，不合并**。
+状态：第一段 #792、第二段 #898 已合并；第三段（旧 `/workbench` 与自研内容检查）见文末。
 初始基线 staging `c91c526d3c43fb5e0b28c2a0a1942b457590fa3a`；
 按总控 2026-10-11 通知同步至 `ea5a693c8b7b99463ede5fd41588c4dec4ef118c`（#784 已合并）。
 授权：[#771 总控派发](https://github.com/Crnobog9527/GraylumAI_vercel/pull/771#issuecomment-6099912595)
@@ -88,3 +88,66 @@
   因此 HTTP 410 验证 BLOCKED；原生产关闭契约单测已在 API 全量内通过。
 - 本轮：代码大小检查 PASS；完整验证及机器人复审结果以 PR 最新交接评论为准。
 - NOT_RUN：本机浏览器、真实模型、远程数据库、生产、合并；无产品验收声明。
+
+## 第二段：旧对话后端（2026-10-13）
+
+范围以 Master Plan 第 7.1 节 LEGACY-CLOSE 一行为准。删除前逐项核对了静态 import、tRPC 客户端调用、测试和本地测试运行器。
+
+| 删除对象 | 核对结果 |
+| --- | --- |
+| `/api/ai/stream`、`/api/ai/requests` 及 `lib/ordinary-chat-request`、`ordinary-chat-access`、`legacy-chat` | 只服务旧 `/chat`；#507 后发送已返回 410，页面已在 #792 删除。删除后旧地址返回 404。限流名单和测试观察器里的旧路径一并去掉。 |
+| `services/contextManager`、`streamingOutput`、`contextSnapshots`、`modelRouter`、`chatRuntime`、`tokenCounter`、`promptCacheBuilder` | 只被上面的旧路由、`routers/ai` 和后台诊断的旧检查调用。`skillRuntime` 仍被 `routers/skills` 使用，保留。 |
+| `routers/ai`（sendMessage、abortRequest、estimateCost、getAvailableModels、getConversationMessages、getTokenStats） | 前端和后台页面都没有调用；整组删除。后台模型管理用的是 `routers/model`，不受影响。 |
+| `routers/chat` 除 `getConversations` 外的 11 个接口（新建、改名、删除、读消息、统计、导出、sendMessage） | 前端只剩个人中心"使用历史"调用 `getConversations`，保留它。 |
+| 后台诊断的 6 项旧检查（智能路由、Token 计算、Prompt 缓存、上下文压缩、实时关键词、旧对话真实运行证据）和诊断页"最新真实运行证据"卡片 | 只读旧对话数据或调用旧路由；第 8 节第 3 条已定随 LEGACY-CLOSE 删除。模型状态、计费、限流、熔断、RLS 检查保留。 |
+| 只测上述代码的测试 | 删除；`workbench.integration.ts` 中驱动已删 `/chat` 页面的 37 个 `CHAT:` 用例和依赖它的 `REAL SKILL`、两个 `REUSE` 用例一并删除（`/chat?module=` 跳转 `/positioning` 的后台用例保留）；`modelColumnGrants.integration.ts` 改为从后台模型页登录、只查保留的模型接口；本地运行器只选这些用例的 `--ordinary-only`、`--chat-only`、`--chat-reliability-only`、`--reuse-only`、`--real-skill-only` 改为报错退役，避免空跑当作通过；`billing.test.ts` 里对旧 stream 源码的断言、凭证边界测试里的旧路由用例、v3 Skill 集成测试里的旧模块提示词用例一并去掉，其余保留。 |
+
+凭证保护和用户数据隔离：
+
+- 删除的代码不被新 Runtime、定位、资料库调用（类型检查验证引用闭合）。新链路的密钥读取、actor 校验、来源工具权限没有改动。
+- 模型密钥边界测试保留后台模型管理、诊断模型状态和非管理员拒绝三组；删除的只是已不存在的旧路由用例。
+- 能按 ID 读旧对话消息的接口全部删除，剩下的 `getConversations` 仍只按当前用户读取。安全 e2e 里的旧对话跨用户用例随接口删除，工单跨用户用例保留。
+- 没有迁移旧的通用 PII 正则过滤（Master Plan 已定不要求）。
+
+未处理、留给后续：
+
+- 后台设置页仍有只服务旧对话的设置项（智能路由、Prompt 缓存等），现在不再生效；是否从设置页移除交总控安排。
+- `packages/db/tests/v3` 的旧版本兼容测试（legacy-runtime、bill2 upgrade）在历史固定版本上运行旧对话代码，保留。
+
+## 第三段：旧 `/workbench` 与自研内容检查（2026-10-13）
+
+| 删除对象 | 核对结果 |
+| --- | --- |
+| `apps/web/src/app/workbench/page.tsx`、`generation-panel.tsx`、`report-work-actions.tsx` | 新工作区没有链接指向旧 `/workbench`；`/workbench` 改为 307 跳到 `/positioning`。`/workbench/marketplace`、`/workbench/search` 是新工作区页面，保留。 |
+| `workbench` 路由的 generationQuote、generate、generations、cancel/abandon/recoverGeneration、search、cancelSearch、createWork、workSource、referenceChoices、projects、rounds、report、export | 只被旧页面调用。保留 catalog、read、start、execute（定位、Runtime、功能详情在用）。 |
+| `services/artifacts/generation.ts`、`services/research/workbenchSearch.ts` | 只被上面的接口使用。 |
+| `services/contentModerator.ts`、`services/aiOutputFilter.ts` | 唯一调用方是旧成果生成。 |
+| 后台设置页 19 项旧对话设置 | 见下表。 |
+
+保留：`services/artifacts/reuse.ts`（Runtime 读资料的 `runtime_source` 和 CI 里的 Runtime 集成测试仍在用旧作品引用；只删了它在旧页面的接口）；`middleware/securityChecks.ts` 的 `checkOutputSecurity` / `sanitizeOutputSecurity`（现在只有自身测试使用，是否删除另议）。
+
+MODERATION 检查点：`services/runtime/moderation.ts` 和 RATE-LIMIT 接线里的 `requireAllowedInput` / `allowedOutput` 调用没有改动，仍默认放行。
+
+凭证保护：新链路的模型密钥只在调用供应商时由服务角色读出（`runtime/stagingTransport.ts`），不进入提示词，模型输出里不会出现；被删的正则输出过滤只作用于旧成果生成。按 Master Plan，不迁移旧的通用 PII 正则过滤。用户数据隔离：保留的 workbench 接口仍经登录、邮箱验证和服务端 actor 校验；删除的只是旧页面接口。
+
+### 删除的后台设置项
+
+依据：在 `packages/api/src`、`apps/web/src` 中，除设置页本身和设置路由的读取名单外，没有任何代码读取这些键（新 Runtime、PROMPT-CACHE、定位都不读）。数据库里已有的值不动。
+
+| 设置键 | 原用途 |
+| --- | --- |
+| `enable_smart_routing`、`smart_routing_min_confidence` | 旧 `modelRouter` 智能路由 |
+| `assistant_model_id` | 旧路由的辅助模型（同时去掉设置保存时对它的校验） |
+| `enable_smart_search_decision`、`search_decision_min_confidence` | 旧对话联网判断 |
+| `enable_prompt_cache` | 旧 `promptCacheBuilder`；Runtime 的提示缓存在 `runtime/promptCache.ts`，不读这个键 |
+| `chat_show_model_selector`、`chat_prompt_text`、`chat_welcome_message`、`chat_billing_hint` | 旧 `/chat` 页面文案和模型下拉框 |
+| `show_token_usage_stats`、`enable_long_text_warning`、`long_text_warning_threshold`、`max_messages_per_conversation` | 旧 `/chat` 页面统计、长文本提示、对话长度 |
+| `enable_free_tier`、`free_tier_messages` | 旧对话免费体验 |
+| `input_credits_per_1k`、`output_credits_per_1k`、`web_search_credits` | 旧对话计价（设置页已标"已退役 / 参考显示"） |
+
+其中 11 项同时从设置路由对用户公开的读取名单里去掉。保留：`primary_model_id`（Runtime 自由对话默认模型）、`v3_summary_*`（Runtime 整理模型）、`search_surcharge_credits`（后台财务和搜索计费）、`home_*`、`max_input_characters`（新输入框正在别的窗口修改，暂不动）、`billing_*` 预扣设置（属计费服务，另议）、`first_purchase_bonus_percent`（不属于旧对话）。
+
+### 测试和本地运行器
+
+- `workbench.integration.ts` 只保留 `ADMIN:` 用例和 4 个搜索计费存储用例；旧页面浏览器流程、旧生成、旧工作台搜索、CONSUMPTION 用例删除。后台用例的登录改走 `/positioning`。
+- 本地运行器退役 `--workbench-restart-only` 和不带 `--opc-only` / `--runtime-only` 的 `--serve`（都依赖已删的旧页面用例），去掉重启阶段和对已删文件的源码替换。

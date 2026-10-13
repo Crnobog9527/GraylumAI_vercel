@@ -58,7 +58,7 @@ export async function GET(request: NextRequest) {
     logServerError('auth', 'auth_callback_link_error');
     if (flow === 'recovery') return recoveryError('expired');
     return linkError.to === 'verify-expired'
-      ? NextResponse.redirect(new URL(buildVerifyEmailPath('', next, 'expired'), authOrigin))
+      ? NextResponse.redirect(new URL(buildVerifyEmailPath(next, 'expired'), authOrigin))
       : loginError();
   }
 
@@ -94,7 +94,7 @@ export async function GET(request: NextRequest) {
   }
 
   if (!isEmailVerified(user)) {
-    return NextResponse.redirect(new URL(buildVerifyEmailPath(user.email ?? '', next), authOrigin));
+    return NextResponse.redirect(new URL(buildVerifyEmailPath(next), authOrigin));
   }
 
   const pendingInviteCode =

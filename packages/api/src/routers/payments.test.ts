@@ -351,7 +351,7 @@ function createSubscriptionChangeGuardHarness(options: {
         { ...common, id: 'ref-subscription', object_type: 'subscription', subscription_id: local.id, external_id: local.stripe_subscription_id },
         { ...common, id: 'ref-old-price', object_type: 'price', external_id: 'price_test_old' },
         ...(['monthly', 'yearly'] as const).map(cycle => ({ ...common, id: `ref-${cycle}`, object_type: 'price',
-          membership_plan_id: plan.id, billing_cycle: cycle, is_current: true,
+          membership_plan_id: plan.id, billing_cycle: cycle, is_current: true, price_usage: 'subscription', package_tier: 'legacy',
           external_id: cycle === 'monthly' ? plan.stripe_monthly_price_id : plan.stripe_yearly_price_id })),
       ].filter(row => typeof row.external_id === 'string' && row.external_id.trim());
       return { data: refs.filter(row => filters.every(([key, value]) => {

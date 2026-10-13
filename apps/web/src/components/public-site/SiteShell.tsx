@@ -40,11 +40,14 @@ export function SiteShell({
   locale,
   alternates = {},
   supportEmail,
+  siteName = 'Graylum',
   children,
 }: {
   locale: SiteLocale;
   alternates?: Partial<Record<SiteLocale, string>>;
   supportEmail?: string | null;
+  // Platform name from admin settings (`site_name`); pages that do not read settings keep the brand default.
+  siteName?: string;
   children: ReactNode;
 }) {
   const chrome = SITE_CHROME[locale];
@@ -63,7 +66,7 @@ export function SiteShell({
         <div className="mx-auto flex h-16 max-w-6xl items-center justify-between gap-4 px-4 sm:px-6 lg:px-8">
           <Link href={chrome.home} className="flex items-center gap-2">
             <img src="/graylum-logo.svg" alt="" aria-hidden="true" width={32} height={32} className="h-8 w-8 rounded-[10px]" />
-            <span className="text-lg font-bold">Graylum</span>
+            <span className="text-lg font-bold">{siteName}</span>
           </Link>
           <nav className="flex items-center gap-4 sm:gap-6">
             {chrome.nav.map(link => (
