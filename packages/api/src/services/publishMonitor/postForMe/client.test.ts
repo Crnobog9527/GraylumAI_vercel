@@ -75,9 +75,21 @@ describe('post for me client', () => {
     expect(() => createAuthUrl(deps([]).deps, { platform: 'instagram', externalId: EXTERNAL, permissions: ['feeds'] }))
       .toThrow('POSTFORME_INSTAGRAM_CONNECTION_TYPE_REQUIRED');
     expect(() => createAuthUrl(deps([]).deps, { platform: 'bluesky', externalId: EXTERNAL, permissions: ['feeds'] }))
-      .toThrow('POSTFORME_BLUESKY_NEEDS_APP_PASSWORD');
+      .toThrow('POSTFORME_BLUESKY_CREDENTIALS_INVALID');
+    expect(() => createAuthUrl(deps([]).deps, { platform: 'bluesky', externalId: EXTERNAL, permissions: ['feeds'],
+      bluesky: { handle: 'me.bsky.social', appPassword: 'my-main-password' } })).toThrow('POSTFORME_BLUESKY_CREDENTIALS_INVALID');
+    const sky = deps([json(201, { url: 'https://bsky.app/ok' })]);
+    await createAuthUrl(sky.deps, { platform: 'bluesky', externalId: EXTERNAL, permissions: ['feeds'],
+      bluesky: { handle: ' Me.bsky.social ', appPassword: 'abcd-efgh-ijkl-mnop' } });
+    expect(JSON.parse(String(sky.calls[0]!.init.body)).platform_data)
+      .toEqual({ bluesky: { handle: 'me.bsky.social', app_password: 'abcd-efgh-ijkl-mnop' } });
     expect(() => createAuthUrl(deps([]).deps, { platform: 'x', externalId: EXTERNAL, permissions: ['posts'] }))
       .toThrow('POSTFORME_PERMISSIONS_INVALID');
+    expect(() => createAuthUrl(deps([]).deps, { platform: 'x', externalId: EXTERNAL, permissions: ['feeds', 'posts'] }))
+      .toThrow('POSTFORME_PUBLISH_NEEDS_REAUTH');
+    const publish = deps([json(201, { url: 'https://x.com/i/oauth2' })]);
+    await createAuthUrl(publish.deps, { platform: 'x', externalId: EXTERNAL, permissions: ['posts', 'feeds'], forceReauth: true });
+    expect(JSON.parse(String(publish.calls[0]!.init.body))).toMatchObject({ permissions: ['feeds', 'posts'], force_reauth: true });
     for (const url of ['http://x.com/a', 'https://127.0.0.1/a', 'https://user:pw@x.com/', 'javascript:alert(1)']) {
       const bad = await createAuthUrl(deps([json(201, { url })]).deps, { platform: 'x', externalId: EXTERNAL, permissions: ['feeds'] });
       expect(bad).toMatchObject({ kind: 'failed', reason: 'RESPONSE_SHAPE' });
@@ -122,5 +134,9 @@ describe('post for me client', () => {
     expect(postForMeApiKey({ POSTFORME_API_KEY: ` ${KEY} ` })).toBe(KEY);
     expect(xSnowflakeTime('123')).toBeNull();
     expect(flattenMetrics({ a: { b: { c: { d: { e: 1 } } } } }).metrics).toEqual({});
+    const arrays = flattenMetrics({ audience_countries: [{ country: 'US', percentage: 0.4 }], retention: [100, 80.5],
+      bad: [{ nested: { x: 1 } }], huge: Array.from({ length: 101 }, () => 1) });
+    expect(arrays.breakdowns).toEqual({ audience_countries: [{ country: 'US', percentage: 0.4 }], retention: [100, 80.5] });
+    expect(arrays.missingFields).toEqual(['bad', 'huge']);
   });
 });

@@ -11,10 +11,15 @@ export type NormalizedPost = {
   url: string | null;
   titleExcerpt: string | null;
   metrics: Record<string, number>;
+  /** Array-valued analytics (audience, retention, activity breakdowns), kept as supplied after size checks. */
+  breakdowns: Record<string, Breakdown>;
   missingFields: string[];
 };
+export type Breakdown = Array<Record<string, string | number | boolean | null> | number | string>;
 
 const MAX_METRIC_KEYS = 200;
+const MAX_BREAKDOWN_ITEMS = 100;
+const MAX_BREAKDOWN_FIELDS = 20;
 const METRIC_KEY = /^[A-Za-z0-9_.]{1,96}$/;
 const TWITTER_EPOCH_MS = 1288834974657n;
 
@@ -42,8 +47,32 @@ export function xSnowflakeTime(id: string): string | null {
 }
 
 /** Flattens nested provider metrics into dotted keys; only finite, non-negative numbers survive. */
-export function flattenMetrics(raw: unknown): { metrics: Record<string, number>; missingFields: string[] } {
+function breakdown(value: unknown[]): Breakdown | null {
+  if (value.length > MAX_BREAKDOWN_ITEMS) return null;
+  const out: Breakdown = [];
+  for (const item of value) {
+    if (typeof item === 'number' && Number.isFinite(item)) { out.push(item); continue; }
+    if (typeof item === 'string' && item.length <= 200) { out.push(item); continue; }
+    if (item === null || typeof item !== 'object' || Array.isArray(item)) return null;
+    const entries = Object.entries(item as Record<string, unknown>);
+    if (entries.length > MAX_BREAKDOWN_FIELDS) return null;
+    const row: Record<string, string | number | boolean | null> = {};
+    for (const [key, field] of entries) {
+      if (!/^[A-Za-z0-9_]{1,64}$/.test(key)) return null;
+      if (field === null || typeof field === 'boolean' || (typeof field === 'number' && Number.isFinite(field))
+        || (typeof field === 'string' && field.length <= 200)) row[key] = field as string | number | boolean | null;
+      else return null;
+    }
+    out.push(row);
+  }
+  return out;
+}
+
+export function flattenMetrics(raw: unknown): {
+  metrics: Record<string, number>; breakdowns: Record<string, Breakdown>; missingFields: string[];
+} {
   const metrics: Record<string, number> = {};
+  const breakdowns: Record<string, Breakdown> = {};
   const missing: string[] = [];
   const walk = (value: unknown, prefix: string, depth: number) => {
     if (Object.keys(metrics).length + missing.length >= MAX_METRIC_KEYS || depth > 3) return;
@@ -54,12 +83,17 @@ export function flattenMetrics(raw: unknown): { metrics: Record<string, number>;
       }
       return;
     }
-    if (!prefix || Array.isArray(value)) return;
+    if (!prefix) return;
+    if (Array.isArray(value)) {
+      const kept = breakdown(value);
+      if (kept) breakdowns[prefix] = kept; else missing.push(prefix);
+      return;
+    }
     if (typeof value === 'number' && Number.isFinite(value) && value >= 0) metrics[prefix] = value;
     else missing.push(prefix);
   };
   walk(raw, '', 0);
-  return { metrics, missingFields: missing.sort() };
+  return { metrics, breakdowns, missingFields: missing.sort() };
 }
 
 function excerpt(caption: unknown): string | null {
@@ -79,7 +113,7 @@ export function normalizePost(raw: unknown, platform: string): NormalizedPost | 
     postedAt = xSnowflakeTime(id);
     postedAtSource = postedAt ? 'x_snowflake' : null;
   }
-  const flat = item.metrics === undefined ? { metrics: {}, missingFields: [] } : flattenMetrics(item.metrics);
+  const flat = item.metrics === undefined ? { metrics: {}, breakdowns: {}, missingFields: [] } : flattenMetrics(item.metrics);
   return { platformPostId: id, postedAt, postedAtSource, url: publicHttpsUrl(item.platform_url),
     titleExcerpt: excerpt(item.caption), ...flat };
 }

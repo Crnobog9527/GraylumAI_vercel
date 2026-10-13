@@ -90,7 +90,11 @@ export function listAccountsByExternalId(deps: ClientDeps, externalId: string): 
 }
 
 export type AuthUrlInput = { platform: PostForMePlatform; externalId: string; permissions: Array<'feeds' | 'posts'>;
-  connectionType?: 'organization' | 'instagram' | 'facebook' };
+  connectionType?: 'organization' | 'instagram' | 'facebook';
+  /** Required when publishing access is being added, so the platform grants it afresh (plan §4.1). */
+  forceReauth?: boolean;
+  /** Bluesky only: the user's handle and app password, forwarded once to the provider, never stored or logged. */
+  bluesky?: { handle: string; appPassword: string } };
 
 /** Consent link for the user's own account. Read-only scope unless publishing consent was given (plan §4.1). */
 export function createAuthUrl(deps: ClientDeps, input: AuthUrlInput): Promise<Outcome<string>> {
@@ -106,9 +110,19 @@ export function createAuthUrl(deps: ClientDeps, input: AuthUrlInput): Promise<Ou
     }
     platformData = { instagram: { connection_type: input.connectionType } };
   }
-  if (platform === 'bluesky') throw new Error('POSTFORME_BLUESKY_NEEDS_APP_PASSWORD');
+  if (platform === 'bluesky') {
+    const handle = input.bluesky?.handle.trim().toLowerCase();
+    const appPassword = input.bluesky?.appPassword.trim();
+    // Bluesky app passwords are xxxx-xxxx-xxxx-xxxx; a main account password is refused here.
+    if (!handle || !/^[a-z0-9.-]{3,253}$/.test(handle) || !appPassword || !/^[a-z0-9]{4}(-[a-z0-9]{4}){3}$/.test(appPassword)) {
+      throw new Error('POSTFORME_BLUESKY_CREDENTIALS_INVALID');
+    }
+    platformData = { bluesky: { handle, app_password: appPassword } };
+  }
+  if (permissions.includes('posts') && input.forceReauth !== true) throw new Error('POSTFORME_PUBLISH_NEEDS_REAUTH');
   return call(deps, { method: 'POST', path: '/social-accounts/auth-url', body: {
     platform, external_id: input.externalId, permissions, ...(platformData ? { platform_data: platformData } : {}),
+    ...(input.forceReauth ? { force_reauth: true } : {}),
   } }, json => {
     const parsed = z.object({ url: z.string() }).passthrough().safeParse(json);
     return parsed.success ? publicHttpsUrl(parsed.data.url, 4096) : null;
