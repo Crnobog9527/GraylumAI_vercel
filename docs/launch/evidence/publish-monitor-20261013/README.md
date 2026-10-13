@@ -70,6 +70,17 @@ Post for Me 是开源的（[DayMoonDevelopment/post-for-me](https://github.com/D
 - 请求限流：每个密钥每秒 5 次、每分钟 40 次（`dashboard/app/lib/.server/unkey.constants.ts`）；超限返回什么、有没有 `Retry-After` 代码里看不到，要实测。
 - 上传的发布素材放在 Post for Me 的公开存储桶，超过 1 天且没有被排期帖子引用的文件每小时清理一次。
 
+### 2.5 后台"Enable"按钮和 Redirect URL（开源代码，2026-10-13 补）
+
+- Quickstart 项目（`is_system`）的平台设置页对每个平台显示"Enable"：点下去只是把 **Post for Me 自己的共享开发者应用**凭证复制到本项目
+  （`dashboard/app/routes/_protected.$teamId.$projectId.setup.system.$provider._index/route.action.ts`，从 `system_social_provider_app_credentials` 复制）。
+  **不需要填我们自己的 client ID/secret，也不需要我们向平台申请审核**；用户授权页显示 Post for Me 的应用。非 Quickstart 项目才显示"Get Started"，要填自己的应用凭证。
+- 列表里的平台：facebook、instagram、instagram_w_facebook、youtube、x、x_oauth2、pinterest、linkedin、threads、tiktok、tiktok_business。
+  Bluesky 不在列表里，因为它不用 OAuth（账号 handle + 应用专用密码），所以显示为已就绪。
+- Redirect URL 留空时，授权完成后停在 Post for Me 后台自己的结果页；填了才跳回我们的地址（`dashboard/app/lib/.server/social-accounts/oauth-callback-response.ts`）。
+  **测试阶段可以留空**；Graylum 实施 PR-2 接回调时再填 staging 地址。
+- 后台有"Accounts → Connect"页面，可以直接连接测试账号并勾选 `feeds` 权限，不必通过 API 生成授权链接。
+
 ## 3. 条款核对（2026-10-13 读取公开页面，转述，不是法律意见）
 
 | 问题 | 公开条款怎么写 | 结论 |
