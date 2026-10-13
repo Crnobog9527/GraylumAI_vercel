@@ -24,7 +24,10 @@ $$;
 -- Only this hint reads the mapping; whether erasure is blocked never depends on it.
 CREATE OR REPLACE FUNCTION public.account_erasure_renewal_channels(p_profile_id uuid) RETURNS jsonb
 LANGUAGE sql STABLE SET search_path=public,pg_temp AS $$
- SELECT coalesce(jsonb_agg(DISTINCT CASE WHEN s.stripe_subscription_id IS NOT NULL
+ -- A paused subscription (e.g. a monthly refund being held, 0193) is not served by the portal loader,
+ -- which only reads active statuses, so it goes to support.
+ SELECT coalesce(jsonb_agg(DISTINCT CASE WHEN lower(s.status)='paused' THEN 'other'
+   WHEN s.stripe_subscription_id IS NOT NULL
    OR s.payment_channel='stripe' AND EXISTS(SELECT 1 FROM payment_provider_refs r WHERE r.subscription_id=s.id
     AND r.channel='stripe' AND r.object_type='subscription') THEN 'stripe_portal'
    WHEN s.payment_channel IN ('stripe','waffo') THEN s.payment_channel ELSE 'other' END),'[]'::jsonb)

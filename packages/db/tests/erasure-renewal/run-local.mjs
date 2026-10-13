@@ -119,6 +119,10 @@ try {
   await subscribe(mixedCard, { channel: 'stripe' });
   await subscribe(mixedCard, { channel: 'stripe', ref: false });
   await expectBlocked(mixedCard, ['stripe', 'stripe_portal']);
+  // A paused (refund-held) Stripe subscription still blocks erasure but cannot use the portal.
+  const paused = await profile();
+  await subscribe(paused, { stripeId: 'sub_paused_' + randomUUID().slice(0, 8), status: 'paused' });
+  await expectBlocked(paused, ['other']);
   report.checks.push('mixed channels: every renewing channel is listed for the cancel hint');
 
   // Non-renewing paid access (wallet annual is inserted with cancel_at_period_end='true') never blocks,
