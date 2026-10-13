@@ -70,7 +70,6 @@ function LoginPageContent() {
     setMode(action === 'signup' ? 'signup' : 'login');
     setRedirectTarget(redirect);
     setSelectedPlan(planParam ?? '');
-
     const knownEmail = restorePendingEmail(window);
     if (knownEmail) setEmail(knownEmail);
 
@@ -110,7 +109,7 @@ function LoginPageContent() {
       return;
     }
 
-    rememberPendingEmail(email); // read by /verify-email and the resend link, never put in a URL
+    rememberPendingEmail(email); // read by /verify-email, never put in a URL
     const supabase = createClient();
     const { data, error } = await supabase.auth.signInWithPassword({
       email,
@@ -468,6 +467,7 @@ function LoginPageContent() {
                       <AuthStatusBanner
                         status={status}
                         resendHref={buildAuthHref(buildVerifyEmailPath(redirectTarget))}
+                        onResendClick={() => rememberPendingEmail(email)}
                       />
                     )}
 
