@@ -58,7 +58,8 @@
 | `atomic_settle`、`atomic_refund`（外壳） | `research_user_charge`（0071，研究计费，`research/store.ts:49` 在用） | **留**（注意：只看 TS 会误判为可删） | — |
 | `atomic_finalize_ai_success/_failure/_abort`、`atomic_abort_settle`（外壳，最新在 0162） | 当前代码里只有 `billing.ts`（无线上调用）和没人调用的 `ordinary_chat_transition`；但它们是旧代码预扣的**唯一结算路径**，`bill2/upgrade.integration.ts` 专门验证"旧代码 + 新结构"下用它们结清旧预扣 | **有条件删**（见下方"兼容窗口"） | 是 |
 | `bill2_legacy_finalize_success/_failure/_abort`、`bill2_legacy_abort_settle` | 只被上面 4 个外壳调用 | **有条件删**（同上） | 是 |
-| `ordinary_chat_claim`、`ordinary_chat_transition` | 无 | **删** | 是 |
+| `ordinary_chat_claim` | 无 | **删** | 是 |
+| `ordinary_chat_transition` | 无代码调用；但它的 `success / failure` 动作是旧对话请求预扣的结算/退款路径（0078:97-120） | **有条件删**：按下方「结算路径门槛」的旧对话请求一条 | 是 |
 | `ordinary_chat_delete_guard`（对话删除触发器） | 触发器仍挂在 `conversations` 上 | **随 `ordinary_chat_requests` 表一起删** | 是 |
 | `agent_slice_*` 中已无调用方的一批（`admit / admission_replay / begin / open / call / record_final / result / conversation / context / selected_source / link / link_read / continue_work / sources / targets / freeze_discussion / stamp_dispatch / preferences_valid / assert_legacy_generation`，及重命名留下的 `*_before_*` 副本）、`agent_preference` | 无 | **有条件删**：其中 `agent_slice_call` / `_record_final` / `_result` 是切片预扣的结算路径（0085），按下方「结算路径门槛」 | 是 |
 | `agent_slice_evidence_allowed`、`artifact_evidence_allowed_before_slice` | 活着：`opc_source_allowed`、`runtime_workspace_tool_guard` → `artifact_evidence_allowed` 链 | **留**（要删得先改这条链，见 5.2） | — |
@@ -68,16 +69,16 @@
 | `soft_delete_conversation`（0147） | 只有集成测试 | **删** | 是 |
 | `purge_deleted_records`（0196/0197） | 没有调用方（pg_cron 已在 0148 移除） | **待定**：它是数据保留任务，不是旧对话专用，需单独决定 |
 
-**结算路径门槛（审查 P1，适用于所有"某类预扣唯一结算/退款路径"的函数和表）**：删除前必须只读确认该类预扣全部已结清（settle）或退款（refund），否则留到下一轮或先迁移到等价的恢复路径。涉及三类：
+**结算路径门槛（审查 P1，适用于所有"某类预扣唯一结算/退款路径"的函数和表）**：删除前必须只读确认该类预扣全部已到终态，即 `billing_history` 里有对应的 `settle`、`refund` 或 `abort_settle` 记录（与 0058 的重复检查一致，这三种都算终态），否则留到下一轮或先迁移到等价的恢复路径。涉及三类：
 - 旧代码预扣：见下方"兼容窗口"；
-- 切片预扣（表本身保留，见 5.2；这里只约束删除它的结算函数）：`agent_slice_calls` 中状态为 `prepared / dispatched / unknown / responded`（未到终态）的行数为 0，且它们的 `pre_deduct_id` 在 `billing_history` 里都有对应的 `settle` 或 `refund`；
-- 旧对话请求：`ordinary_chat_requests` 中状态不是 `succeeded / failed` 的行数为 0，且这些请求的预扣在 `billing_history` 里都已结清或退款。0191 的注销财务证明把未到终态或未清正文的行算作 `financialPending`，删表前必须满足这一条，否则注销会被误判为已清。它的金额证据保存在 `billing_history`（保留），所以满足后删表不丢财务记录；
-- 旧工作台预扣：`artifact_generations` 中状态为 `prepared / dispatched / responded / unknown`（未到终态 `succeeded / refunded`）的行数为 0，且其 `pre_deduct_id` 都已结清或退款。
+- 切片预扣（表本身保留，见 5.2；这里只约束删除它的结算函数）：`agent_slice_calls` 中状态为 `prepared / dispatched / unknown / responded`（未到终态）的行数为 0，且它们的 `pre_deduct_id` 在 `billing_history` 里都有对应的终态记录；
+- 旧对话请求：`ordinary_chat_requests` 中状态不是 `succeeded / failed` 的行数为 0，且这些请求的预扣在 `billing_history` 里都有终态记录。0191 的注销财务证明把未到终态或未清正文的行算作 `financialPending`，删表前必须满足这一条，否则注销会被误判为已清。它的金额证据保存在 `billing_history`（保留），所以满足后删表不丢财务记录；
+- 旧工作台预扣：`artifact_generations` 中状态为 `prepared / dispatched / responded / unknown`（未到终态 `succeeded / refunded`）的行数为 0，且其 `pre_deduct_id` 都有终态记录。
 任一类不满足，对应的函数从 PR-B 移到"待定"。
 
 **兼容窗口（审查 P1）**：上面 8 个旧结算函数是旧部署发起的预扣唯一能结清的路径。只有同时满足以下条件才删，否则留到下一轮：
 1. 所有环境都不再运行旧版本代码（旧对话入口 #898 已删，部署已全部切到新代码）；
-2. 只读确认没有未结清的旧预扣：`billing_history` 里 `operation_type='pre_deduct'`、不属于任何 `bill2_runs`、也没有对应 `settle/refund` 的记录为 0（staging 和正式库分别查；正式库只读查询也要按 AGENTS.md 第 1 节先批准）；
+2. 只读确认没有未结清的旧预扣：`billing_history` 里 `operation_type='pre_deduct'`、不属于任何 `bill2_runs`、也没有对应终态记录（`settle / refund / abort_settle`）的记录为 0（staging 和正式库分别查；正式库只读查询也要按 AGENTS.md 第 1 节先批准）；
 3. `bill2/upgrade.integration.ts`（旧代码→新结构的兼容验证，不在 CI 必需检查里，只在 `--bill2-upgrade-only` 下运行）随之退役或改为验证"无未结旧预扣"，并在 PR 里说明理由，不能悄悄删。
 任一条件不满足，就把这 8 个函数从 PR-B 移到"待定"。
 
@@ -103,7 +104,7 @@
 ## 6. 删除 PR 怎么拆（方案合并后按顺序开）
 
 1. **PR-A（high，无迁移）**：删 `services/billing.ts` 和两个测试、整体导出、`package.json` 子路径、`logger.billing.*`、相关 ESLint/大小基线条目；删 4 个旧预扣设置（后台页面 + staging 种子）；删 `checkOutputSecurity` / `sanitizeOutputSecurity` 及独用辅助函数和测试。`types/billing.ts` 里只服务旧预扣的类型在这个 PR 里逐个确认后删。
-2. **PR-B（high，迁移 0240）**：删第 5.1 节标"删"的 SQL 函数（`ordinary_chat_claim/transition`、`agent_preference`、`soft_delete_conversation` 等无结算职责的死函数）；标"有条件删"的（8 个旧结算函数、切片结算函数、旧工作台生成/退款函数）只在对应门槛满足时才一起删，否则留下；同步改 `check-staging-db-readiness.mjs`；确认 0162 的 md5 固定检查和 0204 重写不受影响；空库建库 + 重放 + 指纹。
+2. **PR-B（high，迁移 0240）**：删第 5.1 节标"删"的 SQL 函数（`ordinary_chat_claim`、`agent_preference`、`soft_delete_conversation` 等无结算职责的死函数）；标"有条件删"的（8 个旧结算函数、`ordinary_chat_transition`、切片结算函数、旧工作台生成/退款函数）只在对应门槛满足时才一起删，否则留下；同步改 `check-staging-db-readiness.mjs`；确认 0162 的 md5 固定检查和 0204 重写不受影响；空库建库 + 重放 + 指纹。
 3. **PR-C（high，迁移，编号再申请）**：删第 5.2 节标"删"的 4 张表（`ordinary_chat_requests`、`conversation_context_snapshots`、`agent_confirmed_preferences`、`agent_preference_requests`；`agent_slice_calls` 作为财务证据保留），同时改所有引用它们的注销函数（含财务证据函数）、`processorContracts.ts`、`schema.ts` 和注销数据库测试。上 staging 前先只读确认这些表的行数；staging 的旧测试数据随删表丢弃（正式环境上线前清空，按第 1 节规则单独批准）。
 4. **待定项**（`agent_slice_executions/links/pairs`、`artifact_chat*`、`prompts`、`purge_deleted_records`、`preAICallSecurityChecks` 一整条链、签名函数）：记入后续，每项需要先改一条活着的链或做产品/保护层面的确认，不在本轮删除。
 
