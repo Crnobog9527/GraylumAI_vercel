@@ -25,8 +25,13 @@ it('runs the bounded recovery through the existing authenticated cron entry', as
   const response = await GET(new Request('https://synthetic.test/api/cron/account-erasure?actorId=ignored'));
   expect(response.status).toBe(200);
   expect(mocks.auth).toHaveBeenCalledWith(expect.any(Request), 'account-erasure');
-  expect(mocks.recover).toHaveBeenCalledWith({ synthetic: true });
-  expect(mocks.sweep).toHaveBeenCalledWith({ synthetic: true });
+  expect(mocks.recover).toHaveBeenCalledWith({ synthetic: true }, expect.any(Number));
+  // One shared deadline: the executor stops 15s before it, the sweep uses the rest.
+  const [, executorDeadline] = mocks.recover.mock.calls[0];
+  const [sweepClient, sweepDeadline] = mocks.sweep.mock.calls[0];
+  expect(sweepClient).toEqual({ synthetic: true });
+  expect(sweepDeadline - executorDeadline).toBe(15_000);
+  expect(sweepDeadline - Date.now()).toBeLessThanOrEqual(52_000);
   expect(await response.json()).toEqual({ success: true, processed: 1, completed: 1, pending: 0, failed: 0,
     conversations: { cleaned: 2, pending: 0, failed: 0, more: false } });
 });

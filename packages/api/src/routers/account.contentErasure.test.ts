@@ -104,21 +104,30 @@ describe('conversation cleanup sweep (cron backstop)', () => {
     const cursor = { afterAt: '2026-10-13T00:00:00Z', afterId: id };
     const rpc = vi.fn().mockResolvedValueOnce(page({ cleaned: 49, pending: 1, more: true, ...cursor }))
       .mockResolvedValueOnce(page({ cleaned: 3, failed: 1 }));
-    await expect(sweepErasedConversations({ rpc } as never)).resolves.toEqual({ cleaned: 52, pending: 1, failed: 1, more: false });
+    await expect(sweepErasedConversations({ rpc } as never, Date.now() + 30_000)).resolves.toEqual({ cleaned: 52, pending: 1, failed: 1, more: false });
     expect(rpc.mock.calls[0][1]).toEqual({ lim: 50, after_at: null, after_id: null });
     expect(rpc.mock.calls[1][1]).toEqual({ lim: 50, after_at: cursor.afterAt, after_id: id });
   });
-  it('stops at the time budget and reports the backlog', async () => {
+  it('stops near the shared deadline, bounds each call by the time left and reports the backlog', async () => {
     const { sweepErasedConversations } = await import('../services/accountErasure/content');
     let clock = 0;
-    const rpc = vi.fn().mockImplementation(async () => { clock += 10_000; return page({ cleaned: 50, more: true,
-      afterAt: '2026-10-13T00:00:00Z', afterId: id }); });
+    const signals: number[] = [];
+    const result = () => { clock += 10_000; return page({ cleaned: 50, more: true, afterAt: '2026-10-13T00:00:00Z', afterId: id }); };
+    const rpc = vi.fn().mockImplementation(() => ({ then: (ok: (v: unknown) => unknown) => ok(result()),
+      abortSignal: async (signal: AbortSignal) => { signals.push(signal.aborted ? 0 : 1); return result(); } }));
     await expect(sweepErasedConversations({ rpc } as never, 25_000, () => clock)).resolves.toMatchObject({ more: true });
     expect(rpc).toHaveBeenCalledTimes(3);
+    expect(signals).toEqual([1, 1, 1]);
+  });
+  it('does not start a page when the deadline has already passed', async () => {
+    const { sweepErasedConversations } = await import('../services/accountErasure/content');
+    const rpc = vi.fn();
+    await expect(sweepErasedConversations({ rpc } as never, Date.now())).resolves.toMatchObject({ more: true });
+    expect(rpc).not.toHaveBeenCalled();
   });
   it('throws a private error when the sweep itself fails', async () => {
     const { sweepErasedConversations } = await import('../services/accountErasure/content');
     const rpc = vi.fn().mockResolvedValue({ data: null, error: { message: 'private detail' } });
-    await expect(sweepErasedConversations({ rpc } as never)).rejects.toThrow('CONTENT_ERASURE_SWEEP_FAILED');
+    await expect(sweepErasedConversations({ rpc } as never, Date.now() + 30_000)).rejects.toThrow('CONTENT_ERASURE_SWEEP_FAILED');
   });
 });

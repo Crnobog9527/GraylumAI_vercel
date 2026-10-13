@@ -101,25 +101,29 @@ const sweepPage = z.object({
   more: z.boolean(), afterAt: z.string().nullable(), afterId: z.string().uuid().nullable(),
 }).strict();
 export type ConversationSweep = { cleaned: number; pending: number; failed: number; more: boolean };
+type SweepDatabase = { rpc(name: string, args: Record<string, unknown>): PromiseLike<{
+  data: unknown; error: { code?: string; message?: string } | null;
+}> & { abortSignal?: (signal: AbortSignal) => PromiseLike<{ data: unknown; error: { message?: string } | null }> } };
 /**
  * Cron backstop (0231): pages through every marked conversation the client did not finish, until the
- * backlog is drained or the time budget ends (`more` then stays true and the run reports it).
- * Busy conversations stay pending for the next run; any other failure is counted as failed.
+ * backlog is drained or the route's shared deadline is near (`more` then stays true and the run
+ * reports it). Each page call is bounded by the time left. Busy conversations stay pending for the
+ * next run; any other failure is counted as failed.
  */
-export async function sweepErasedConversations(database: Database, budgetMs = 25_000, now = () => Date.now()) {
-  const deadline = now() + budgetMs;
-  const total: ConversationSweep = { cleaned: 0, pending: 0, failed: 0, more: false };
+export async function sweepErasedConversations(database: SweepDatabase, deadline: number, now = () => Date.now()) {
+  const total: ConversationSweep = { cleaned: 0, pending: 0, failed: 0, more: true };
   let cursor: { afterAt: string | null; afterId: string | null } = { afterAt: null, afterId: null };
-  do {
-    const response = await database.rpc('content_erasure_sweep_sessions', {
+  while (total.more && deadline - now() > 3_000) {
+    const call = database.rpc('content_erasure_sweep_sessions', {
       lim: 50, after_at: cursor.afterAt, after_id: cursor.afterId,
     });
+    const response = await (call.abortSignal ? call.abortSignal(AbortSignal.timeout(deadline - now())) : call);
     if (response.error) throw new Error('CONTENT_ERASURE_SWEEP_FAILED');
     const page = sweepPage.parse(response.data);
     total.cleaned += page.cleaned; total.pending += page.pending; total.failed += page.failed;
     total.more = page.more;
     cursor = page;
-  } while (total.more && now() < deadline);
+  }
   return total;
 }
 /** Recheck before returning buffered text/results. No positive cache survives a
