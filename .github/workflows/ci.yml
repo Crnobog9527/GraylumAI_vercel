@@ -73,9 +73,6 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Test required-check contracts
-        run: ruby .github/scripts/test-ci-workflows.rb
-
       - name: Setup pnpm
         uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
 
@@ -103,8 +100,25 @@ jobs:
       - name: CI safeguards — migration ledger and database baseline
         run: pnpm test:ci:safeguards
 
-  # Kept outside the test worker so a ledger failure cannot stop the unit and
-  # regression tests from reporting; both gates below still require it.
+  # The contract and ledger workers stay outside the test worker: a queued
+  # migration PR with a numbering gap fails both, and that must not stop the
+  # unit and regression tests from reporting. Both gates below require all three.
+  ci-contracts:
+    name: Test required-check contracts
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Test required-check contracts
+        run: ruby .github/scripts/test-ci-workflows.rb
+
   migration-ledger:
     name: Check migration ledger
     runs-on: ubuntu-latest
@@ -416,7 +430,7 @@ jobs:
 
   unit-check:
     name: Unit Tests
-    needs: [test, integration, migration-ledger]
+    needs: [test, integration, ci-contracts, migration-ledger]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -427,11 +441,12 @@ jobs:
         env:
           WORK_RESULT: ${{ needs.test.result }}
           INTEGRATION_RESULT: ${{ needs.integration.result }}
+          CONTRACTS_RESULT: ${{ needs.ci-contracts.result }}
           LEDGER_RESULT: ${{ needs.migration-ledger.result }}
         run: |
           set -euo pipefail
           if [ "$WORK_RESULT" != success ] || [ "$INTEGRATION_RESULT" != success ] ||
-            [ "$LEDGER_RESULT" != success ]; then
+            [ "$CONTRACTS_RESULT" != success ] || [ "$LEDGER_RESULT" != success ]; then
             echo 'Missing, failed, cancelled, or skipped validation.' >&2
             exit 1
           fi
@@ -439,7 +454,7 @@ jobs:
 
   security-unit-tests:
     name: Security Unit Tests
-    needs: [test, migration-ledger]
+    needs: [test, ci-contracts, migration-ledger]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -449,10 +464,12 @@ jobs:
       - name: Require successful worker validation
         env:
           WORK_RESULT: ${{ needs.test.result }}
+          CONTRACTS_RESULT: ${{ needs.ci-contracts.result }}
           LEDGER_RESULT: ${{ needs.migration-ledger.result }}
         run: |
           set -euo pipefail
-          if [ "$WORK_RESULT" != success ] || [ "$LEDGER_RESULT" != success ]; then
+          if [ "$WORK_RESULT" != success ] || [ "$CONTRACTS_RESULT" != success ] ||
+            [ "$LEDGER_RESULT" != success ]; then
             echo 'Missing, failed, cancelled, or skipped validation.' >&2
             exit 1
           fi

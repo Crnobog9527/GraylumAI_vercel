@@ -13,8 +13,9 @@ class CIWorkflowsTest < Minitest::Test
   end
   GATES = {'lint-check'=>['Lint & Type Check','lint-and-type'], 'typecheck'=>['TypeScript Check','lint-and-type'],
            'unit-check'=>['Unit Tests',{'WORK_RESULT'=>'test','INTEGRATION_RESULT'=>'integration',
-                                        'LEDGER_RESULT'=>'migration-ledger'}],
-           'security-unit-tests'=>['Security Unit Tests',{'WORK_RESULT'=>'test','LEDGER_RESULT'=>'migration-ledger'}],
+                                        'CONTRACTS_RESULT'=>'ci-contracts','LEDGER_RESULT'=>'migration-ledger'}],
+           'security-unit-tests'=>['Security Unit Tests',{'WORK_RESULT'=>'test','CONTRACTS_RESULT'=>'ci-contracts',
+                                                          'LEDGER_RESULT'=>'migration-ledger'}],
            'build'=>['Build Check','build-and-e2e'], 'security-e2e-tests'=>['Security E2E Tests','build-and-e2e']}.freeze
   INTEGRATION_RUNS = ['node packages/db/tests/v3/run-workbench.mjs --bill2-core-only --without-app --schema-from-files',
                       'node packages/db/tests/v3/run-workbench.mjs --runtime-only --with-staging-schema --without-app --schema-from-files',
@@ -117,10 +118,17 @@ class CIWorkflowsTest < Minitest::Test
     steps = @ci['jobs']['test']['steps']
     safeguards = steps.find { |step| step['run'] == 'pnpm test:ci:safeguards' }
     assert_equal 'CI safeguards — migration ledger and database baseline', safeguards.fetch('name')
-    contract_index = steps.index { |step| step['run'] == 'ruby .github/scripts/test-ci-workflows.rb' }
-    install_index = steps.index { |step| step['run'] == 'pnpm install --frozen-lockfile' }
-    refute_nil contract_index
-    assert_operator contract_index, :<, install_index
+    refute_nil steps.index { |step| step['run'] == 'pnpm install --frozen-lockfile' }
+    # The contract worker runs before, and without, any dependency install.
+    contract_steps = @ci['jobs']['ci-contracts']['steps']
+    contract_runs = runs.select { |run| run == 'ruby .github/scripts/test-ci-workflows.rb' }
+    assert_equal 1, contract_runs.length
+    assert_includes contract_steps.map { |step| step['run'] }, 'ruby .github/scripts/test-ci-workflows.rb'
+    contract_steps.each do |step|
+      refute_includes step['run'].to_s, 'pnpm', step['name']
+      refute step.key?('if'), step['name']
+      refute step.key?('continue-on-error'), step['name']
+    end
     assert_equal 'true', @ci['jobs']['build-and-e2e']['env']['SECURITY_E2E_LOCAL_ONLY']
     assert_equal 'false', @ci['jobs']['build-and-e2e']['env']['E2E_ALLOW_DATABASE_FIXTURES']
   end
