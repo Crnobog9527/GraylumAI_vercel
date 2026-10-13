@@ -107,10 +107,22 @@ describe('callTikhub', () => {
     expect(result.items).toHaveLength(30);
   });
 
+  it('keeps a recognized empty list as a successful, billed no-results answer', async () => {
+    const empty = await callTikhub({ platform: 'tiktok', kind: 'keyword_posts', keyword: 'zzzz' },
+      deps(jsonFetch(200, { code: 200, data: { aweme_list: [] } })));
+    expect(empty).toMatchObject({ outcome: 'ok', reason: 'NO_RESULTS', items: [], usage: { units: '1' } });
+    const weibo = await callTikhub({ platform: 'weibo', kind: 'account_posts', account: '1' },
+      deps(jsonFetch(200, { code: 200, data: { data: { statuses: [] } } })));
+    expect(weibo).toMatchObject({ outcome: 'ok', reason: 'NO_RESULTS' });
+  });
+
   it('reports an empty or unrecognized payload as a failed delivery, never as a billable success', async () => {
     const posts = await callTikhub({ platform: 'weibo', kind: 'account_posts', account: '2803301701' },
       deps(jsonFetch(200, { code: 200, data: { something: 'else' } })));
     expect(posts).toMatchObject({ outcome: 'failed', reason: 'EMPTY_OR_UNRECOGNIZED', items: [], supplierMayCharge: true });
+    const shapeless = await callTikhub({ platform: 'tiktok', kind: 'keyword_posts', keyword: 'q' },
+      deps(jsonFetch(200, { code: 200, data: { aweme_list: null } })));
+    expect(shapeless).toMatchObject({ outcome: 'failed', reason: 'EMPTY_OR_UNRECOGNIZED' });
     const profile = await callTikhub({ platform: 'tiktok', kind: 'account_profile', account: 'n' }, deps(jsonFetch(200, { code: 200 })));
     expect(profile).toMatchObject({ outcome: 'failed', reason: 'EMPTY_OR_UNRECOGNIZED' });
   });

@@ -3,7 +3,7 @@
 // Douyin search v5 and Instagram posts v2 failed upstream and are deliberately absent. Responses
 // carry no cost: each successful call is one unit at the frozen official price (RT-2).
 import { exchange } from './http';
-import { normalizeTikhub, tikhubBodyCode } from './tikhubShapes';
+import { hasEmptyPostList, normalizeTikhub, tikhubBodyCode } from './tikhubShapes';
 import type {
   ResearchCallResult, SocialKind, SocialPlatform, VendorDeps, VendorRequest,
 } from './types';
@@ -151,7 +151,11 @@ export async function callTikhub(call: TikhubCall, deps: VendorDeps): Promise<Re
       supplierMayCharge: true, usage: { unit: 'call', units: '1' } };
   }
   const all = normalizeTikhub(answer.json, call.platform, call.kind);
-  // An empty or changed payload is not a delivery: never report it as a successful, billable result.
+  // A recognized empty post list is a real, billed "no results" answer. A missing profile or an
+  // unrecognized payload is not a delivery and is never reported as a successful, billable result.
+  if (all.length === 0 && call.kind !== 'account_profile' && hasEmptyPostList(answer.json, call.platform)) {
+    return { ...base, outcome: 'ok', reason: 'NO_RESULTS', httpStatus: 200, supplierMayCharge: true, usage: { unit: 'call', units: '1' } };
+  }
   if (all.length === 0) {
     return { ...base, outcome: 'failed', reason: 'EMPTY_OR_UNRECOGNIZED', httpStatus: 200,
       supplierMayCharge: true, usage: { unit: 'call', units: '1' } };

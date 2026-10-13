@@ -161,6 +161,21 @@ export function normalizeTikhub(json: unknown, platform: SocialPlatform, kind: S
   }
 }
 
+/** List containers each platform uses for posts; an empty one is a real "no results" answer. */
+const POST_LIST_KEYS: Record<SocialPlatform, readonly string[]> = {
+  douyin: ['aweme_list', 'data'], tiktok: ['aweme_list', 'search_item_list', 'data'], xiaohongshu: ['items', 'notes'],
+  bilibili: [], weibo: ['statuses', 'list'], youtube: ['videos', 'contents', 'items'], x: ['timeline', 'tweets', 'entries'],
+  instagram: ['items', 'edges'],
+};
+
+/** True when the body holds a recognized, empty post list (as opposed to a missing or changed shape). */
+export function hasEmptyPostList(json: unknown, platform: SocialPlatform): boolean {
+  const data = (json as Raw | null)?.data;
+  if (Array.isArray(data)) return data.length === 0;
+  const keys = POST_LIST_KEYS[platform];
+  return findAll(data, o => keys.some(key => Array.isArray(o[key]) && (o[key] as unknown[]).length === 0), 1).length > 0;
+}
+
 /** TikHub reports failures in the body: HTTP 200 with a non-200 `code` is a failure it may still bill. */
 export function tikhubBodyCode(json: unknown): number | undefined {
   const raw = json as Raw | null;
