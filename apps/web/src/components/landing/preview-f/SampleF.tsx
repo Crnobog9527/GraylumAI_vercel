@@ -40,8 +40,8 @@ export function SampleF({ data, siteName, membershipHref }: { data: Data; siteNa
       <p className={styles.sampleBar}><b>不公开的风格样稿 F</b><span>Design 插件 · 参考 ploy.ai 的视觉语言，文案和板块顺序为定稿原文</span></p>
       <header className={styles.header}>
         <div className={cn(styles.wrap, styles.headerInner)}>
-          <Link href="/landing" className={styles.brand}>
-            <img src="/graylum-logo.svg" alt="" aria-hidden="true" width={28} height={28} />{siteName}
+          <Link href="/landing" className={styles.brand} aria-label={siteName}>
+            <img src="/graylum-logo.svg" alt="" aria-hidden="true" width={28} height={28} /><span>{siteName}</span>
           </Link>
           <nav className={styles.nav} aria-label="主导航">
             <span className={styles.navLinks}>{CHROME.nav.map(link => <Link key={link.href} href={link.href}>{link.label}</Link>)}</span>

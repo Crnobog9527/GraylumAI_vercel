@@ -12,8 +12,8 @@ const pad = (value: number) => String(value).padStart(2, '0');
 
 /**
  * Module 3 in sample F: one colored panel. The clickable demo (the #893 component, same modules as the signed-in
- * conversation page) stays in view on wide screens while the walk-through steps scroll past it as stacked cards;
- * then the "what you get when" timeline and the sample reports. Copy and order are the landing page's.
+ * conversation page) at full width, the walk-through steps as stacked cards revealed on scroll, then the "what you
+ * get when" timeline and the sample reports. Copy and order are the landing page's.
  */
 export function FHowItWorks({ promise, steps, timeline, reports }: {
   promise: readonly GatedText[];
