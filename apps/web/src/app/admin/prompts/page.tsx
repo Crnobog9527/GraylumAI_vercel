@@ -975,7 +975,7 @@ export default function AdminPromptsPage() {
                 if (currentEditorSession !== editorSession.current) return;
                 setSkillReading(reading);
                 if (reading) setSkillForm(value => ({ ...value, reviewed: false }));
-              }} disabled={saveSkill.isPending || skillLoading} />}
+              }} disabled={saveSkill.isPending || skillLoading} isNew={!editingModule} />}
             {mode === 'skill' && <ModuleSettings editing={editingModule} setEditing={setEditingModule} refetch={refetch}
               hasReport={!!skillForm.reportGeneration} />}
             <div className="space-y-2">

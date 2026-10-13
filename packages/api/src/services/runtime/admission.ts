@@ -47,6 +47,8 @@ import {freezeStagingPaygPricing} from './paygPricing';
 import {freezePaygMessageBudget} from './paygMessageBudget';
 import {readPaygHostPolicies} from './paygHostPolicy';
 import {runAutomaticFinancialRecovery} from './automaticRecovery';
+import {hasConfirmedPositioning,judgePositioning,refusePositioning,type PositioningGatePolicy} from './positioningGate';
+import {POSITIONING_FALLBACK} from './positioningFallback';
 
 const uuid=z.string().uuid();
 export const runtimeMaterialInput=z.object({sessionId:uuid,requestId:uuid,expectedRevision:z.number().int().nonnegative(),
@@ -72,6 +74,8 @@ export type LocalRuntimePolicy={
  expectedMaterialRevision?:number;opcTurnToken?:string;mentorStream?:boolean;organizeOpening?:boolean;
  additionalInstructions?:string;stableAdditionalInstructions?:string;skillResources?:readonly string[];searchEnabled?:boolean;workspaceContext?:boolean;
  organizerInstructions?:string;organizerInput?:string;answeredCard?:AnsweredCard;resolvedInput?:string;
+ /** POSITIONING-GATE: set only by the free-chat host; OPC turns, reports and organizing are never gated. */
+ positioningGate?:PositioningGatePolicy;
 };
 export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient,policy:LocalRuntimePolicy){
  policy=Object.freeze({...policy,...(policy.real?{real:structuredClone(policy.real),creditsPerUsd:policy.real.creditsPerUsd,multiplier:policy.real.multiplier}:{}),...(policy.skillResources?{skillResources:Object.freeze([...policy.skillResources])}:{})});
@@ -143,6 +147,9 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
    const leaveRateLimit=currentRequestTiming()?.enter('rateLimit');
    try{requireNewWork(await newWorkGate(admin,policy.real?'staging':'local').message(actorId,settings));}
    finally{leaveRateLimit?.();}
+   // POSITIONING-GATE: only users without a confirmed positioning are checked, after the rate limit.
+   const gated=Boolean(policy.positioningGate&&!policy.opcTurnToken&&!policy.reportGeneration&&
+    input.selection.kind!=='organizer')&&!await hasConfirmedPositioning(admin,actorId);
    const mentorStream=Boolean(policy.opcTurnToken&&policy.mentorStream);
    if(policy.organizeOpening&&(!mentorStream||!isOpeningInput(input.input)))throw new Error('RUNTIME_CONTEXT_INVALID');
    const hostParsed=hostTurnContextSchema.safeParse(policy.hostTurnContext);
@@ -175,8 +182,10 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
    let skillId:string|undefined,moduleId:string|undefined,revisionId:string|undefined;
    if(input.selection.kind==='ordinary'||input.selection.kind==='auto')modelId=input.selection.modelId;
    else if(input.selection.kind==='skill'){
-    const module=await admin.from('modules').select('id,active,skill_id,model_id,report_model_id').eq('id',input.selection.moduleId).single();
+    const module=await admin.from('modules').select('id,active,skill_id,model_id,report_model_id,social_media_related')
+     .eq('id',input.selection.moduleId).single();
     if(module.error||module.data?.active!==true)throw new Error('RUNTIME_SKILL_DENIED');
+    if(gated&&module.data.social_media_related===true)refusePositioning();
     moduleId=uuid.parse(module.data.id);skillId=uuid.parse(module.data.skill_id);
     modelId=uuid.parse(policy.reportGeneration ? module.data.report_model_id ?? module.data.model_id : module.data.model_id);
     revisionId=input.selection.revisionId;
@@ -219,6 +228,8 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
    if(policy.real&&row.error){if(row.error.code==='PGRST116')throw unavailableModel();stagingRpcFailure(row.error);}
    if(row.error||row.data?.is_active!=='true'||(!policy.real&&row.data.provider!=='fixture'))throw unavailableModel();
    if(policy.real)realModel(row.data);
+   // Decisions judges every other gated message, including a non-social Skill turning to social media.
+   const positioningFallback=gated&&await judgePositioning(policy.positioningGate!,admin,{text:input.input,modelRowId:modelId});
    if(input.selection.kind==='organizer')modelConfiguration(()=>assertSeparateSummaryModel(session.dialogueModel,row.data.model_id));
    let attachedOrganizer:{
     modelId:string;model:string;maxOutputTokens:number;inputBytes?:number;historyItems?:number;reasoning?:ReasoningPolicy;instructions?:string;input?:string
@@ -248,7 +259,8 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
    // SDK turns count model requests only. Paid search consumes another BILL2
    // call, and attached organization must remain inside this same frozen run.
    let candidates=input.selection.kind==='auto'?await discoverRuntimeCandidates(
-    user,admin,{...policy,inputBytes,maxOutputTokens:configuredOutput??policy.maxOutputTokens,...(policy.real?{resolveCapacity:(row:Record<string,unknown>)=>{const q=realModel(row);return {inputLimit:Math.min(inputBytes,q.inputLimit),outputLimit:outputCapacity(row,Infinity,configuredOutput)};}}:{})}):[];
+    user,admin,{...policy,inputBytes,maxOutputTokens:configuredOutput??policy.maxOutputTokens,excludeSocial:gated,
+     ...(policy.real?{resolveCapacity:(row:Record<string,unknown>)=>{const q=realModel(row);return {inputLimit:Math.min(inputBytes,q.inputLimit),outputLimit:outputCapacity(row,Infinity,configuredOutput)};}}:{})}):[];
    if(policy.additionalInstructions)instructions+='\n'+z.string().max(budgets||policy.reportGeneration?inputBytes:8000).parse(policy.additionalInstructions);
    let promptCache=hostTurnContext||policy.reportGeneration?undefined:freezePromptCache({
     real:Boolean(policy.real),role:input.selection.kind,model:row.data.model_id,
@@ -301,7 +313,8 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
    if(candidates.length)candidates=await fittingCandidates(candidates,candidate=>activateRuntimeCandidate(user,admin,candidate,brandIdentity),
     {input:currentInput,inputBytes,toolBytes:sourceToolBytes(sourceTools,workspaceContext)+
      (historySelection?.markerReserveBytes??(promptCache?PROMPT_CACHE_OVERHEAD_BYTES:0)),
-     instructions:skill=>withPrimaryAddenda(skill,{workspaceContext,network:input.network})});
+     instructions:skill=>withPrimaryAddenda(skill,{workspaceContext,network:input.network,
+      ...(positioningFallback?{positioningGate:POSITIONING_FALLBACK}:{})})});
    const primaryTurns=maxCalls-(attachedOrganizer?1:0)-(searchAllowed?1:0)-(candidates.length?1:0);
    if(primaryTurns<(searchAllowed||input.sources.length||workspaceContext?2:1))throw new Error('RUNTIME_CALL_BUDGET');
    // Splitting only helps when a modest message still fits; otherwise this is a configuration failure (500).
@@ -342,6 +355,7 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
     role:input.selection.kind==='auto'?'ordinary':input.selection.kind,input:input.input,instructions,model:row.data.model_id,
     ...(policy.opcTurnToken?{opcTurnToken:uuid.parse(policy.opcTurnToken)}:{}),...(candidates.length?{matching:{candidates}}:{}),
     ...(!policy.reportGeneration&&session.scopeMaterial?{scopeMaterial:session.scopeMaterial}:{}),...(workspaceContext?{workspaceContext:true}:{}),
+    ...(positioningFallback?{positioningGate:POSITIONING_FALLBACK}:{}),
     modelId,...(attachedOrganizer?{attachedOrganizer}:{}),maxOutputTokens,maxTurns:primaryTurns,historyItems,network:input.network,
     // Freeze the purpose ceiling; each selected model keeps its own call-policy limit.
     ...(budgets||policy.reportGeneration?{purposeBudget:{purpose,inputBytes,historyItems}}:{}),

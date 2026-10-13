@@ -9,6 +9,8 @@ import { validatePublication } from './publication';
 import { validateWorkflow,informationSchema } from '../artifacts/workflow';
 import { RUNTIME_MODEL_COLUMNS, runtimeModelOption } from '../models/runtimeEligibility';
 import { parseWorkflowManifest, workflowManifestPath } from './workflowManifest';
+import { readSocialMediaFlag, saveSocialMediaFlag } from './socialMediaFlag';
+import { isPositioningWorkflow } from '../opc/positioningWorkflow';
 
 const label = z.string().trim().min(1).max(160).regex(/^[^\r\n\x00-\x1f]+$/);
 export const moduleSkillInput = z.object({
@@ -21,6 +23,8 @@ export const moduleSkillInput = z.object({
   planResources:z.array(z.string().max(240)).min(1).max(64).optional(),
   steps: z.array(z.object({ title: label, information:z.array(informationSchema).max(24).optional(), resources: z.array(z.string().max(240)).min(1).max(64) }).strict()).min(1).max(32),
   resourcePlanReviewed: z.literal(true),
+  /** POSITIONING-GATE: required when the module is created, so a new Skill is never enabled before this choice. */
+  socialMediaRelated: z.boolean().optional(),
   module: z.object({
     title: z.string().trim().min(1).max(100), description: z.string().max(500).nullable(),
     full_description: z.string().max(5000).nullable(), model_id: z.string().uuid(),
@@ -82,6 +86,11 @@ export function prepareModuleSkill(value: ModuleSkillInput) {
 
 export async function saveModuleSkill(db: SupabaseClient, actorId: string, value: ModuleSkillInput) {
   const prepared = prepareModuleSkill(value);
+  // POSITIONING-GATE: a new module needs the explicit choice; an existing module ignores it (separate setting card).
+  const isNew = value.expectedUpdatedAt === null;
+  if (isNew && value.socialMediaRelated === undefined) throw new Error('SOCIAL_MEDIA_FLAG_REQUIRED');
+  const flag = isNew && value.socialMediaRelated === true;
+  if (flag && isPositioningWorkflow(prepared.workflow)) throw new Error('SOCIAL_MEDIA_FLAG_POSITIONING_SKILL');
   const model = await db.from('ai_models').select(RUNTIME_MODEL_COLUMNS).eq('id',value.module.model_id).single();
   if(model.error || !model.data) throw new Error('请选择已配置的对话模型');
   const option=runtimeModelOption(model.data,'skill');
@@ -89,12 +98,28 @@ export async function saveModuleSkill(db: SupabaseClient, actorId: string, value
   const { descriptor, files, workflow } = prepared;
   const { data, error } = await db.rpc('admin_publish_skill_module', {
     p_actor_id: actorId, p_module_id: value.moduleId, p_expected_updated_at: value.expectedUpdatedAt,
-    p_metadata: value.module, p_skill_id: value.skillId, p_revision_id: value.revisionId,
+    // A flagged new module is created disabled, flagged, and only then enabled as requested.
+    p_metadata: flag ? { ...value.module, active: false } : value.module, p_skill_id: value.skillId, p_revision_id: value.revisionId,
     p_request_id: value.requestId, p_expected_version: value.expectedVersion,
     p_manifest: descriptor, p_hash_payload: packageHashPayload(descriptor), p_files: files, p_workflow: workflow,
   });
   // POSITIONING-GATE (0219): a module marked social-media related cannot become the positioning Skill.
   if (error?.message === 'SOCIAL_MEDIA_FLAG_POSITIONING_SKILL') throw new Error('SOCIAL_MEDIA_FLAG_POSITIONING_SKILL');
   if (error || !data) throw new Error('Skill 发布未完成，请重新读取模块，检查版本和模型后再发布。');
-  return data as { moduleId: string; revisionId: string; version: number };
+  const published = data as { moduleId: string; revisionId: string; version: number };
+  if (flag) await flagNewModule(db, value.moduleId, value.module.active);
+  return published;
+}
+
+/** Any failure here leaves the new module disabled (never enabled without its flag); the administrator reopens it. */
+async function flagNewModule(db: SupabaseClient, moduleId: string, active: boolean) {
+  try {
+    const opened = await readSocialMediaFlag(db, moduleId);
+    const saved = await saveSocialMediaFlag(db, { moduleId, socialMediaRelated: true, expectedSocialMediaRelated: false,
+      expectedModuleUpdatedAt: opened.moduleUpdatedAt });
+    if (!active) return;
+    const enabled = await db.from('modules').update({ active: true, updated_at: new Date().toISOString() })
+      .eq('id', moduleId).eq('social_media_related', true).eq('updated_at', saved.moduleUpdatedAt).select('id');
+    if (enabled.error || enabled.data?.length !== 1) throw new Error('SOCIAL_MEDIA_FLAG_CONFLICT');
+  } catch { throw new Error('SOCIAL_MEDIA_FLAG_NEW_MODULE_INCOMPLETE'); }
 }

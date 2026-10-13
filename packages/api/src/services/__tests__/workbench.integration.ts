@@ -3615,7 +3615,7 @@ aiTest('AI: research explicit provider failure refunds once while unknown stays 
 function adminModuleInput(): ModuleSkillInput {
   const pack = makePackage();
   return { moduleId: randomUUID(), skillId: pack.id, revisionId: pack.revisionId, requestId: pack.requestId,
-    expectedUpdatedAt: null, expectedVersion: 0, directoryName: 'synthetic-method', kind: 'document',
+    expectedUpdatedAt: null, expectedVersion: 0, directoryName: 'synthetic-method', kind: 'document', socialMediaRelated: false,
     files: [...pack.files, { path: 'assets/state.yaml', base64: Buffer.from('state: draft\n').toString('base64') }],
     steps: [{ title: '需求确认', resources: ['references/step-0.md', 'assets/state.yaml'] }, { title: '定位成果', resources: ['references/step-1.md'] }],
     resourcePlanReviewed: true, module: { title: 'ADMIN synthetic method ' + randomUUID(), description: 'Synthetic admin validation', full_description: null,
@@ -3713,6 +3713,7 @@ it('ADMIN: browser imports a Skill folder, configures steps, publishes the confi
     await page.getByLabel('步骤 2 名称', { exact: true }).fill('定位成果');
     const modelTrigger = page.getByRole('dialog').getByRole('combobox').filter({ hasText: '不限制' });
     await modelTrigger.click(); await page.getByRole('option', { name: 'Browser admin model', exact: true }).click();
+    await page.getByLabel('否', { exact: true }).check();
     await page.getByLabel('我已检查步骤顺序和各步使用的参考文件').check();
     await page.getByTestId('prompt-save').click();
     await expect.poll(() => page.getByRole('dialog').count(), { timeout: 30000 }).toBe(0);
@@ -3951,6 +3952,7 @@ it('ADMIN: re-uploading a declared Skill updates the active steps and questions 
     await page.getByTestId('prompt-name-input').fill(input.module.title);
     const model=page.getByRole('dialog').getByRole('combobox').filter({hasText:'不限制'});
     await model.click();await page.getByRole('option',{name:'Workflow upload fixture',exact:true}).click();
+    await page.getByLabel('否',{exact:true}).check();
     await page.getByLabel('我已检查步骤顺序和各步使用的参考文件').check();
     await page.getByTestId('prompt-save').click();
     await expect.poll(()=>page.getByRole('dialog').count(),{timeout:30000}).toBe(0);
