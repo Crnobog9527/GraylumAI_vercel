@@ -36,25 +36,36 @@ export function checkoutIdempotencyKey(orderId: string): string {
   return `pay-common:checkout:${orderId}`;
 }
 
+/** Pre-tax amount due: price minus discount. For `exclusive` snapshots (PAY-STRIPE-MP) any tax is added
+ * on top by Stripe and never part of this amount; see stripePreTaxAmount for provider totals. */
 export function snapshotAmountDue(snapshot: PurchaseSnapshot): number {
-  if (snapshot.currency !== 'usd' || snapshot.tax_behavior === 'exclusive') {
-    throw new Error('PAY_COMMON_CURRENCY_OR_TAX_UNSUPPORTED');
-  }
+  if (snapshot.currency !== 'usd') throw new Error('PAY_COMMON_CURRENCY_OR_TAX_UNSUPPORTED');
   const result = majorToCents(snapshot.price) - majorToCents(snapshot.discount);
   if (result <= 0) throw new Error('PAY_COMMON_AMOUNT_INVALID');
   return result;
 }
 
+/** Provider total minus the tax Stripe added. Only an `exclusive` snapshot may carry tax; any other
+ * snapshot with tax is a mismatch (the price was not what the order recorded). */
+export function stripePreTaxAmount(snapshot: PurchaseSnapshot, total: number | null, tax: number | null | undefined) {
+  const added = tax ?? 0;
+  if (total === null || !Number.isSafeInteger(total) || !Number.isSafeInteger(added) || added < 0 || added > total
+    || (added > 0 && snapshot.tax_behavior !== 'exclusive')) throw new Error('PAY_COMMON_RECEIPT_MISMATCH');
+  return total - added;
+}
+
 export function assertPurchaseReceipt(input: {
   snapshot: unknown;
   amount: number | null;
+  /** Tax Stripe added on top (Checkout/Invoice total_details); omit for amounts that carry no tax. */
+  tax?: number | null;
   currency: string | null;
   livemode: boolean;
   scope: StripeScope;
 }) {
   const snapshot = freezePurchaseSnapshot(input.snapshot);
   if (input.livemode !== (input.scope.mode === 'live') || input.currency !== snapshot.currency
-    || input.amount !== snapshotAmountDue(snapshot)) {
+    || stripePreTaxAmount(snapshot, input.amount, input.tax) !== snapshotAmountDue(snapshot)) {
     throw new Error('PAY_COMMON_RECEIPT_MISMATCH');
   }
   return snapshot;

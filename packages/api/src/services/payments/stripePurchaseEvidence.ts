@@ -9,9 +9,16 @@ export function assertStripePurchasePrice(input: {
   snapshot: unknown;
   scope: StripeScope;
   walletMethod?: 'wechat_pay' | 'alipay';
+  /** Managed Payments: the price must be retrieved with its product expanded and carry this tax code. */
+  taxCode?: string;
 }) {
   const snapshot = freezePurchaseSnapshot(input.snapshot);
   const price = input.price;
+  if (input.taxCode !== undefined) {
+    const product = typeof price.product === 'object' && price.product && !price.product.deleted ? price.product : null;
+    const code = typeof product?.tax_code === 'string' ? product.tax_code : product?.tax_code?.id;
+    if (!product?.active || code !== input.taxCode) throw new Error('PAY_COMMON_PRICE_MISMATCH');
+  }
   const recurring = snapshot.billing_cycle !== 'one_time' && !input.walletMethod;
   if (input.walletMethod && input.scope.mode !== 'test') throw new Error('PAY_WAFFO_LIVE_DISABLED');
   if (price.id !== input.priceId || price.object !== 'price' || !price.active
