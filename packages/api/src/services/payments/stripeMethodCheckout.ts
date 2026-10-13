@@ -62,7 +62,13 @@ export async function createStripeMethodCheckout(input: Input) {
   const snapshot = isCard && !dispatched ? freezePurchaseSnapshot(order.purchase_snapshot) : null;
   // Only a card subscription can be discounted (0222 first month); the request builder refuses anything else.
   const couponId = snapshot?.item_type === 'membership_plan' && majorToCents(snapshot.discount) !== 0
-    ? await currentFirstMonthCoupon(db, scope.merchant, order) : undefined;
+    ? await currentFirstMonthCoupon(db, scope.merchant, order).catch(async (error: unknown) => {
+      // Never claimed, so nothing reached Stripe: release the reservation instead of blocking every retry.
+      const released = await db.rpc('pay_waffo_abort_before_dispatch', { p_user: userId, p_order: order.id,
+        p_merchant: scope.merchant, p_expected: null });
+      if (released.error) throw new Error('PAY_WAFFO_CHECKOUT_UNAVAILABLE', { cause: released.error });
+      throw error;
+    }) : undefined;
   const cardFor = (coupon: string | undefined): StripeCardCheckout | undefined => isCard
     ? { managedPayments: purchase.method === 'card', ...(coupon ? { couponId: coupon } : {}) } : undefined;
   // Stripe requires 30 minutes after creation: reserve one minute for dispatch.

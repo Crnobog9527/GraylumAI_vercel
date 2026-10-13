@@ -60,9 +60,26 @@ export async function stripeMpCheckoutCases({admin,service,connect}) {
   await service.query('SELECT pay_waffo_bind_checkout($1,$2,$3,$4,$5)',[twice,bound.id,'fixture',`cs_${bound.id}`,expiry]);
   await assert.rejects(()=>service.query('SELECT pay_waffo_abort_before_dispatch($1,$2,$3,$4)',[twice,bound.id,'fixture',expiry]),
     /CLOSE_DENIED/);
+  // Admitted but never claimed, then the coupon mapping disappears: release with no expiry, nothing reached Stripe.
+  const stranded=await user();
+  const unclaimed=(await buy(service,stranded,'card','5'.repeat(64))).rows[0];
+  const release=(expected)=>service.query('SELECT pay_waffo_abort_before_dispatch($1,$2,$3,$4)',
+    [stranded,unclaimed.id,'fixture',expected]);
+  await assert.rejects(()=>release(expiry),/CLOSE_DENIED/,'an unclaimed order has no frozen expiry to match');
+  await admin.query("UPDATE payment_provider_refs SET is_current=false WHERE object_type='coupon' AND merchant_namespace='fixture'");
+  await release(null); await release(null);
+  assert.equal((await admin.query('SELECT qualification_state s FROM payment_orders WHERE id=$1',[unclaimed.id])).rows[0].s,'released');
+  await assert.rejects(()=>service.query('SELECT pay_waffo_claim_checkout($1,$2,$3,$4,$5)',[stranded,unclaimed.id,'fixture',
+    {orderId:unclaimed.id,userId:stranded,method:'card',merchant:'fixture',mode:'test',providerRequest:{fixture:true}},expiry]),
+  /CHECKOUT_DENIED/,'a released order can never be claimed afterwards');
+  await admin.query("UPDATE payment_provider_refs SET is_current=true WHERE external_id='coupon_first_month_v2'");
+  assert.notEqual((await buy(service,stranded,'card','5'.repeat(64))).rows[0].id,unclaimed.id,'the account can buy again');
+  await assert.rejects(()=>service.query('SELECT pay_waffo_abort_before_dispatch($1,$2,$3,$4)',[twice,bound.id,'fixture',null]),
+    /CLOSE_DENIED/,'a claimed order needs its exact expiry');
   await admin.query("UPDATE system_settings SET value=$1 WHERE key='payment_method_routes'",
     [{...current,card:{enabled:false},card_cn:{enabled:false},version:version+1}]);
   return ['stripe-mp-card-first-month-69-minus-20','stripe-mp-card-cn-first-month-69-minus-20',
     'stripe-mp-first-month-coupon-required','stripe-mp-card-first-month-concurrent-one-order',
-    'stripe-mp-card-never-dispatched-released','stripe-mp-card-verified-absent-released','stripe-mp-card-bound-checkout-not-closed'];
+    'stripe-mp-card-never-dispatched-released','stripe-mp-card-verified-absent-released','stripe-mp-card-bound-checkout-not-closed',
+    'stripe-mp-card-unclaimed-released-without-coupon'];
 }

@@ -2602,7 +2602,7 @@
   "fn:pay_common_snapshot_valid(jsonb)": "9e5d4a71a09c",
   "fn:pay_common_sync_subscription(text,text,jsonb)": "edea711ac065",
   "fn:pay_stripe_mp_price_usage_default()": "cd0c70480417",
-  "fn:pay_waffo_abort_before_dispatch(uuid,uuid,text,timestamp with time zone)": "444a4b6ebbe2",
+  "fn:pay_waffo_abort_before_dispatch(uuid,uuid,text,timestamp with time zone)": "e0b9d69324f9",
   "fn:pay_waffo_admit_purchase(uuid,text,uuid,text,text,text,text,text,bigint,text,jsonb,text,uuid)": "432ef66a5e15",
   "fn:pay_waffo_assert_actor(uuid)": "54ddb30dbe59",
   "fn:pay_waffo_atomic_refund_termination_clawback(uuid,uuid,text,text,text,text,text,boolean,text,timestamp with time zone)": "fd1e786132b8",

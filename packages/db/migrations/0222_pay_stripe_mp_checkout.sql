@@ -4,7 +4,8 @@
 --    one-time coupon. Snapshot records price 69 / discount 20 (pre-tax amount due 49 = amount_total), and the
 --    order is refused without exactly one current coupon mapping. Wallet first month stays a one-time 49 price.
 -- 2. Never-dispatched and verified-absent checkouts can be closed for Stripe card orders as for wallets,
---    so an unpaid card checkout does not keep a pending order or a founder slot.
+--    so an unpaid card checkout does not keep a pending order or a founder slot. An order admitted but never
+--    claimed (no request frozen) can also be released, e.g. when its first-month coupon mapping disappeared.
 -- No table or column changes. Rollback: forward-fix; financial rows are never deleted.
 BEGIN;
 SET LOCAL lock_timeout='5s';
@@ -249,7 +250,10 @@ BEGIN
  SELECT * INTO o FROM payment_orders WHERE id=p_order AND user_id=p_user FOR UPDATE;
  IF o.id IS NULL OR o.payment_mode IS DISTINCT FROM 'test' OR o.payment_channel IS DISTINCT FROM 'stripe'
   OR o.merchant_namespace IS DISTINCT FROM p_merchant OR o.payment_method NOT IN ('alipay','wechat_pay','card','card_cn')
-  OR o.method_dispatched_at IS NULL OR p_expected IS NULL OR o.method_checkout_expires_at IS DISTINCT FROM p_expected
+  -- A never-claimed order (no request frozen, nothing sent to Stripe) is released with p_expected NULL;
+  -- a claimed one only with its exact frozen expiry. The claim refuses released or closed orders.
+  OR (o.method_dispatched_at IS NULL) IS DISTINCT FROM (p_expected IS NULL)
+  OR (o.method_dispatched_at IS NOT NULL AND o.method_checkout_expires_at IS DISTINCT FROM p_expected)
   OR o.payment_status IS DISTINCT FROM 'unpaid' OR o.fulfilled_at IS NOT NULL
   OR EXISTS(SELECT 1 FROM payment_provider_refs WHERE order_id=o.id AND object_type IN ('checkout','payment')) THEN
   RAISE EXCEPTION 'PAY_WAFFO_CLOSE_DENIED'; END IF;

@@ -49,10 +49,15 @@ describe('PAY-STRIPE-MP card checkout adapter', () => {
       expect(f.eq).toHaveBeenCalledWith('is_current', true);
     }
   });
-  it('refuses without a current coupon before claiming or calling Stripe', async () => {
+  it('refuses without a current coupon before claiming or calling Stripe, releasing the never-claimed order', async () => {
     const f = fixture('card', null);
     await expect(createStripeCardCheckout(f.input)).rejects.toThrow('PAY_WAFFO_PRICE_UNAVAILABLE');
-    expect(f.rpc).not.toHaveBeenCalled(); expect(mocks.dispatch).not.toHaveBeenCalled();
+    expect(f.rpc).toHaveBeenCalledTimes(1);
+    expect(f.rpc).toHaveBeenCalledWith('pay_waffo_abort_before_dispatch', { p_user: id, p_order: id, p_merchant: 'fixture',
+      p_expected: null });
+    expect(mocks.build).not.toHaveBeenCalled(); expect(mocks.dispatch).not.toHaveBeenCalled();
+    const failed = fixture('card', null); failed.rpc.mockResolvedValue({ data: null, error: { message: 'denied' } });
+    await expect(createStripeCardCheckout(failed.input)).rejects.toThrow('PAY_WAFFO_CHECKOUT_UNAVAILABLE');
   });
   it('recovers with the coupon frozen at dispatch even after the current mapping rotated', async () => {
     const f = fixture('card', { external_id: 'coupon_new' }, { dispatch: false, frozenCoupon: 'coupon_old' });
