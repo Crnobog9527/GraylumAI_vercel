@@ -18,7 +18,7 @@ export async function stripeMpExternalRefundCases({admin,service,connect}) {
     return id;
   };
   // A card subscription whose first month is running now.
-  const member=async(method,digest)=>{
+  const member=async(method,digest,tax=0)=>{
     const user=randomUUID(); await admin.query('INSERT INTO profiles(id,credits) VALUES($1,0)',[user]);
     // International card: first month 69-20 (gold_first30); mainland card: standard 69.
     const o=(await service.query(`SELECT o.* FROM pay_waffo_create_purchase($1,'membership_plan',$2,'monthly',$3,$4,'fixture',
@@ -28,6 +28,8 @@ export async function stripeMpExternalRefundCases({admin,service,connect}) {
     const paid=(await service.query('SELECT pay_waffo_fulfill_payment($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) v',[o.id,'fixture',cs,
       `in_${o.id}`,o.amount_total,'usd',new Date(start.getTime()+6000),`sub_${o.id}`,start,end])).rows[0].v;
     assert.equal(paid.state,'fulfilled',JSON.stringify(paid));
+    // Every card payment records its tax right after fulfillment (0237; 0 without Managed Payments).
+    if(tax!==null) await service.query(`SELECT pay_stripe_mp_record_tax($1,'fixture',$2,$3)`,[o.id,`in_${o.id}`,tax]);
     return {user,o,payment:`in_${o.id}`};
   };
   const record=(f,refund,amount,db=service)=>db.query(`SELECT pay_stripe_mp_record_external_refund($1,'fixture',$2,$3,$4,'usd',$5) v`,
@@ -38,8 +40,7 @@ export async function stripeMpExternalRefundCases({admin,service,connect}) {
   const facts=async user=>(await service.query('SELECT pay_common_membership_facts($1) v',[user])).rows[0].v.internal_membership;
 
   // Taxed first month (69-20=49 + 9.80 tax): a partial refund is only recorded and kept for review.
-  const card=await member('card','c1'.repeat(32));
-  await service.query(`SELECT pay_stripe_mp_record_tax($1,'fixture',$2,980)`,[card.o.id,card.payment]);
+  const card=await member('card','c1'.repeat(32),980);
   assert.deepEqual(await profile(card.user),{credits:8970,membership_level:'gold'});
   const partial=(await record(card,'re_partial',1000)).rows[0].v;
   assert.equal(partial.state,'partial_review');
@@ -80,6 +81,22 @@ export async function stripeMpExternalRefundCases({admin,service,connect}) {
   assert.equal((await record(empty,'re_empty',empty.o.amount_total)).rows[0].v.creditsShortfall,8970);
   assert.deepEqual((await ledger(empty)).map(r=>[r.amount,r.metadata.creditsShortfall]),[[0,8970]]);
 
+  // Without the payment's recorded tax the charged total is unknown: refused (Stripe retries), nothing recorded.
+  const untaxed=await member('card','c7'.repeat(32),null);
+  await assert.rejects(()=>record(untaxed,'re_untaxed',untaxed.o.amount_total),/TAX_PENDING/);
+  assert.equal((await order(untaxed)).payment_amount_facts.filter(x=>x.kind==='refund').length,0);
+  await service.query(`SELECT pay_stripe_mp_record_tax($1,'fixture',$2,980)`,[untaxed.o.id,untaxed.payment]);
+  assert.equal((await record(untaxed,'re_untaxed',untaxed.o.amount_total)).rows[0].v.state,'partial_review',
+    'the pre-tax amount alone is not a full refund of a taxed charge');
+
+  // Only this period's unused grant credits are taken back; credits from other sources stay.
+  const mixed=await member('card_cn','c8'.repeat(32));
+  await admin.query(`UPDATE subscription_credit_grants SET consumed_amount=8000 WHERE source_order_id=$1`,[mixed.o.id]);
+  await admin.query('UPDATE profiles SET credits=5970 WHERE id=$1',[mixed.user]);
+  const mixedRefund=(await record(mixed,'re_mixed',mixed.o.amount_total)).rows[0].v;
+  assert.deepEqual([mixedRefund.creditsTakenBack,mixedRefund.creditsShortfall],[970,0]);
+  assert.equal((await profile(mixed.user)).credits,5000,'the 5000 credits from another source are untouched');
+
   // Several partial refunds: the one that reaches the full amount ends the order, exactly once; later ones only record.
   const parts=await member('card_cn','c6'.repeat(32));
   const states=[];
@@ -115,12 +132,18 @@ export async function stripeMpExternalRefundCases({admin,service,connect}) {
   assert.equal((await service.query(`SELECT pay_waffo_fulfill_payment($1,'fixture',$2,$3,$4,'usd',$5,NULL,NULL,NULL) v`,
     [po.id,pcs,`pi_${po.id}`,po.amount_total,new Date()])).rows[0].v.state,'fulfilled');
   const pack={o:po,payment:`pi_${po.id}`};
+  await service.query(`SELECT pay_stripe_mp_record_tax($1,'fixture',$2,0)`,[po.id,pack.payment]);
   const beforePack=(await profile(buyer.user)).credits;
+  // A pack is not tracked per source yet: the full refund ends the order and is reported for a person to settle
+  // (MASTER_PLAN item 47), with the pack, its credits and the balance; no credits are taken automatically.
   const packRefund=(await record(pack,'re_pack',po.amount_total)).rows[0].v;
-  assert.deepEqual([packRefund.state,packRefund.creditsTakenBack,packRefund.renewing],['refunded',990,false]);
-  // The same refund event delivered again: recorded once, credits not taken back twice.
-  assert.equal((await record(pack,'re_pack',po.amount_total)).rows[0].v.duplicate,true);
-  assert.equal((await profile(buyer.user)).credits,beforePack-990);
+  assert.deepEqual([packRefund.state,packRefund.packageId,packRefund.packCredits,packRefund.balance],
+    ['pack_review',pkg,990,beforePack]);
+  assert.equal((await record(pack,'re_pack',po.amount_total)).rows[0].v.duplicate,true,'the same refund event, once');
+  assert.equal((await profile(buyer.user)).credits,beforePack);
+  assert.deepEqual([(await order(pack)).status,(await order(pack)).metadata.stripeExternalRefund.state],['refunded','pack_review']);
+  assert.equal((await record(pack,'re_pack_more',10)).rows[0].v.state,'refunded','a later refund only records');
+  assert.equal((await order(pack)).metadata.stripeExternalRefund.state,'pack_review','and keeps the review marker');
   assert.equal((await profile(buyer.user)).membership_level,'gold','a pack refund leaves the membership alone');
 
   // Scope: only a payment this card order recorded; one refund belongs to one order; service role only.
@@ -139,5 +162,6 @@ export async function stripeMpExternalRefundCases({admin,service,connect}) {
   return ['stripe-mp-external-refund-partial-review','stripe-mp-external-refund-full-ends-order','stripe-mp-external-refund-once',
     'stripe-mp-external-refund-settles-level','stripe-mp-external-refund-shortfall-recorded',
     'stripe-mp-external-refund-concurrent-one-end','stripe-mp-external-refund-pack','stripe-mp-external-refund-duplicate-once',
-    'stripe-mp-external-refund-partials-reach-full-once','stripe-mp-external-refund-shortfall-ledger','stripe-mp-external-refund-scope'];
+    'stripe-mp-external-refund-partials-reach-full-once','stripe-mp-external-refund-tax-pending',
+    'stripe-mp-external-refund-only-this-grant','stripe-mp-external-refund-pack-review','stripe-mp-external-refund-shortfall-ledger','stripe-mp-external-refund-scope'];
 }

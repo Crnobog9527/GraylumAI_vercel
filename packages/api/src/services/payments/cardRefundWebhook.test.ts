@@ -59,6 +59,11 @@ describe('PAY-STRIPE-MP external refunds of card orders', () => {
     expect(renewing.alert).toHaveBeenCalledTimes(1);
     expect(mocks.error).toHaveBeenCalledWith('billing', 'stripe_mp_external_refund_still_renewing',
       expect.objectContaining({ action: '该订阅仍在续费，请确认是否需要停续费' }));
+    const pack = fixture([refund()], { state: 'pack_review', duplicate: false, packageId: 'pkg', packCredits: 990, balance: 120 });
+    await pack.run({ refundId: 're_1' });
+    expect(pack.alert).toHaveBeenCalledTimes(1);
+    expect(mocks.error).toHaveBeenCalledWith('billing', 'stripe_mp_external_refund_pack',
+      expect.objectContaining({ orderId: 'order', packageId: 'pkg', packCredits: 990, balance: 120 }));
     const duplicate = fixture([refund()], { state: 'refunded', duplicate: true, renewing: true });
     await duplicate.run({ refundId: 're_1' });
     expect(duplicate.alert).not.toHaveBeenCalled();
