@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict';
 import {spawnSync} from 'node:child_process';
 import {randomUUID} from 'node:crypto';
-import {readFileSync} from 'node:fs';
+import {readFileSync,readdirSync} from 'node:fs';
 import {createRequire} from 'node:module';
 import {resolve} from 'node:path';
 import {POSTGRES_IMAGE} from '../v3/images.mjs';
@@ -59,9 +59,14 @@ try {
   fingerprint:development?undefined:snapshot});
  assert.equal(report.build.failed,null);
  const finalCatalog=snapshot();
+ // Later migrations patch 0201 functions in place, so 0201 is replayed together with every
+ // migration after it, in order; the whole tail must be repeatable and land on the same catalog.
  ok(sql(migration));
- assert.deepEqual(snapshot(),finalCatalog,'repeat 0201 preserves the complete final catalog');
- report.checks.push('0201 reapplication with all later migrations preserves full catalog');
+ for(const file of readdirSync(resolve(root,'packages/db/migrations')).filter(f=>/^\d{4}_.*\.sql$/.test(f)&&f>'0201_').sort()){
+  ok(sql(read('packages/db/migrations/'+file)));
+ }
+ assert.deepEqual(snapshot(),finalCatalog,'repeat 0201 and every later migration preserves the complete final catalog');
+ report.checks.push('0201 reapplication followed by all later migrations preserves full catalog');
  const require=createRequire(resolve(root,'packages/api/package.json'));
  const {Client}=require('pg');
  const address=ok(docker(['port',name,'5432/tcp']));assert.match(address,/^127\.0\.0\.1:\d+$/);
