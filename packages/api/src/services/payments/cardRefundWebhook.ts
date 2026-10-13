@@ -23,7 +23,7 @@ export async function handleCardRefund(db: SupabaseClient, stripe: RefundStripe,
   alert: () => void = () => {}) {
   const scope = await resolveStripeScope(stripe as unknown as Stripe);
   const refunds = input.refundId ? [await stripe.refunds.retrieve(input.refundId)]
-    : input.chargeId ? (await stripe.refunds.list({ charge: input.chargeId, limit: 100 })).data : [];
+    : input.chargeId ? await listChargeRefunds(stripe, input.chargeId) : [];
   if (!refunds.length) return false;
   for (const refund of refunds) {
     if (refund.object !== 'refund' || (input.refundId && refund.id !== input.refundId)) throw new Error(PAYMENT_EVIDENCE_CONFLICT);
@@ -50,23 +50,38 @@ export async function handleCardRefund(db: SupabaseClient, stripe: RefundStripe,
       p_payment: match.paymentId, p_refund: refund.id, p_amount: refund.amount, p_currency: refund.currency,
       p_refunded_at: new Date(refund.created * 1000).toISOString() });
     if (recorded.error || !recorded.data) throw new Error('PAY_STRIPE_MP_REFUND_UNAVAILABLE', { cause: recorded.error });
-    reportRefund(match.order.id, match.kind, recorded.data as RefundResult, alert);
+    reportRefund(match.order.id, match.kind, refund.id, recorded.data as RefundResult, alert);
   }
   // A refund of ours in the same event still goes through its approval flow on the existing path.
   return external.length === refunds.length;
 }
 
-function reportRefund(orderId: string, kind: string, result: RefundResult, alert: () => void) {
-  if (result.duplicate) return;
+/** Every refund of the charge; an incomplete list fails the webhook (Stripe retries) instead of acknowledging it. */
+async function listChargeRefunds(stripe: RefundStripe, chargeId: string) {
+  const refunds: Stripe.Refund[] = [];
+  let after: string | undefined;
+  for (let page = 0; page < 10; page++) {
+    const rows = await stripe.refunds.list({ charge: chargeId, limit: 100, ...(after ? { starting_after: after } : {}) });
+    refunds.push(...rows.data);
+    if (!rows.has_more || !rows.data.length) return refunds;
+    after = rows.data[rows.data.length - 1]!.id;
+  }
+  throw new Error('PAY_STRIPE_MP_REFUND_LIST_INCOMPLETE');
+}
+
+/** Alerts follow the persisted state, also on a replay: a delivery that crashed before alerting is alerted on retry. */
+function reportRefund(orderId: string, kind: string, refundId: string, result: RefundResult, alert: () => void) {
+  // Stable across replays of the same refund, so repeated alerts can be told apart from new ones.
+  const dedupKey = `stripe-mp-external-refund:${result.state}:${orderId}:${refundId}`;
   if (result.state === 'partial_review') {
-    logger.error('billing', 'stripe_mp_external_refund_partial', { orderId, kind,
+    logger.error('billing', 'stripe_mp_external_refund_partial', { orderId, kind, dedupKey, replay: result.duplicate,
       action: '部分外部退款：已记账，会员和积分未改动，请人工核对' });
     alert();
     return;
   }
   if (result.state === 'pack_review') {
     // Packs are not tracked per source yet: a person decides how many credits to take back (MASTER_PLAN item 47).
-    logger.error('billing', 'stripe_mp_external_refund_pack', { orderId, packageId: result.packageId,
+    logger.error('billing', 'stripe_mp_external_refund_pack', { orderId, dedupKey, replay: result.duplicate, packageId: result.packageId,
       packCredits: result.packCredits, balance: result.balance, action: '积分包已被外部全额退款：请按积分包积分和当前余额人工决定收回多少' });
     alert();
     return;
@@ -75,7 +90,7 @@ function reportRefund(orderId: string, kind: string, result: RefundResult, alert
   if (result.creditsShortfall) logger.error('billing', 'stripe_mp_external_refund_shortfall', { orderId, kind,
     shortfall: result.creditsShortfall });
   if (result.renewing) {
-    logger.error('billing', 'stripe_mp_external_refund_still_renewing', { orderId, kind,
+    logger.error('billing', 'stripe_mp_external_refund_still_renewing', { orderId, kind, dedupKey, replay: result.duplicate,
       action: '该订阅仍在续费，请确认是否需要停续费' });
     alert();
   }

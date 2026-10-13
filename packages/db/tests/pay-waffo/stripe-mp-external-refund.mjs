@@ -48,6 +48,8 @@ export async function stripeMpExternalRefundCases({admin,service,connect}) {
   assert.deepEqual(await profile(card.user),{credits:8970,membership_level:'gold'},'a partial refund changes nothing');
   assert.equal((await facts(card.user)).mapping_state,'internal_paid');
   assert.equal((await order(card)).metadata.stripeExternalRefund.state,'partial_review');
+  assert.deepEqual([(await record(card,'re_partial',1000)).rows[0].v.state,(await order(card)).payment_amount_facts
+    .filter(x=>x.kind==='refund').length],['partial_review',1],'a replayed partial refund keeps its review state, recorded once');
   // The refund that completes the full amount ends what the order paid for, once.
   const full=(await record(card,'re_rest',4880)).rows[0].v;
   assert.deepEqual([full.state,full.creditsTakenBack,full.creditsShortfall,full.renewing],['refunded',8970,0,true]);
@@ -103,7 +105,7 @@ export async function stripeMpExternalRefundCases({admin,service,connect}) {
   for(const [id,amount] of [['re_p1',2000],['re_p2',2000],['re_p1',2000],['re_p3',parts.o.amount_total-4000],['re_p4',100]]) {
     const v=(await record(parts,id,amount)).rows[0].v; states.push(`${v.state}${v.duplicate?':dup':''}`);
   }
-  assert.deepEqual(states,['partial_review','partial_review','recorded:dup','refunded','refunded'],JSON.stringify(states));
+  assert.deepEqual(states,['partial_review','partial_review','partial_review:dup','refunded','refunded'],JSON.stringify(states));
   assert.equal((await ledger(parts)).length,1,'credits are taken back once');
   assert.equal((await profile(parts.user)).credits,0);
   assert.equal((await order(parts)).payment_amount_facts.filter(x=>x.kind==='refund').length,4,'re_p1 delivered twice, recorded once');
@@ -139,7 +141,10 @@ export async function stripeMpExternalRefundCases({admin,service,connect}) {
   const packRefund=(await record(pack,'re_pack',po.amount_total)).rows[0].v;
   assert.deepEqual([packRefund.state,packRefund.packageId,packRefund.packCredits,packRefund.balance],
     ['pack_review',pkg,990,beforePack]);
-  assert.equal((await record(pack,'re_pack',po.amount_total)).rows[0].v.duplicate,true,'the same refund event, once');
+  // A replay returns the persisted review state (so a crashed delivery's alert is repeated), and changes nothing.
+  const replay=(await record(pack,'re_pack',po.amount_total)).rows[0].v;
+  assert.deepEqual([replay.duplicate,replay.state,replay.packageId,replay.packCredits,replay.balance],
+    [true,'pack_review',pkg,990,beforePack]);
   assert.equal((await profile(buyer.user)).credits,beforePack);
   assert.deepEqual([(await order(pack)).status,(await order(pack)).metadata.stripeExternalRefund.state],['refunded','pack_review']);
   assert.equal((await record(pack,'re_pack_more',10)).rows[0].v.state,'refunded','a later refund only records');

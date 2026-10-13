@@ -37,10 +37,17 @@ BEGIN
  SELECT * INTO ref FROM payment_provider_refs WHERE channel='stripe' AND merchant_namespace=p_merchant AND mode='test'
   AND object_type='refund' AND external_id=p_refund;
  IF ref.order_id IS DISTINCT FROM o.id THEN RAISE EXCEPTION 'PAY_COMMON_REFUND_IDENTITY_MISMATCH'; END IF;
+ IF o.subscription_id IS NOT NULL THEN
+  SELECT * INTO s FROM user_subscriptions WHERE id=o.subscription_id;
+  renewing:=s.status IN ('active','trialing','past_due','unpaid') AND s.cancel_at_period_end IS DISTINCT FROM 'true';
+ END IF;
+ -- A replay (retry after a crash, or the same refund via another event) returns the persisted review state, so the
+ -- caller repeats any alert a crashed delivery never sent; nothing is recorded or taken back again.
  IF EXISTS(SELECT 1 FROM jsonb_array_elements(coalesce(o.payment_amount_facts,'[]'::jsonb)) f
   WHERE f->>'kind'='refund' AND f->>'evidence_ref'=p_refund) THEN
-  RETURN jsonb_build_object('state',CASE WHEN o.status='refunded' THEN 'refunded' ELSE 'recorded' END,'duplicate',true,
-   'userId',o.user_id);
+  RETURN jsonb_build_object('state',coalesce(o.metadata->'stripeExternalRefund'->>'state','recorded'),'duplicate',true,
+   'userId',o.user_id,'renewing',renewing,'packageId',CASE WHEN o.item_type='credit_package' THEN o.item_id END,
+   'packCredits',o.metadata->'stripeExternalRefund'->'packCredits','balance',o.metadata->'stripeExternalRefund'->'balanceAtRefund');
  END IF;
  UPDATE payment_orders SET payment_amount_facts=coalesce(payment_amount_facts,'[]'::jsonb)||jsonb_build_array(
   jsonb_build_object('kind','refund','amount',(p_amount::numeric/100)::numeric(20,2)::text,'currency',o.currency,
@@ -53,10 +60,6 @@ BEGIN
   FROM jsonb_array_elements(coalesce(o.payment_amount_facts,'[]'::jsonb)) f WHERE f->>'kind'='tax' AND f->>'evidence_ref'=p_payment;
  SELECT coalesce(sum(round((f->>'amount')::numeric*100))::bigint,0) INTO refunded
   FROM jsonb_array_elements(o.payment_amount_facts) f WHERE f->>'kind'='refund';
- IF o.subscription_id IS NOT NULL THEN
-  SELECT * INTO s FROM user_subscriptions WHERE id=o.subscription_id;
-  renewing:=s.status IN ('active','trialing','past_due','unpaid') AND s.cancel_at_period_end IS DISTINCT FROM 'true';
- END IF;
  -- Already ended by an earlier refund: this one is only recorded (the refund fact above), never ends it twice.
  IF o.status='refunded' THEN
   RETURN jsonb_build_object('state','refunded','duplicate',false,'userId',o.user_id,'renewing',renewing,

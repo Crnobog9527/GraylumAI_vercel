@@ -2605,7 +2605,7 @@
   "fn:pay_common_snapshot_valid(jsonb)": "9e5d4a71a09c",
   "fn:pay_common_sync_subscription(text,text,jsonb)": "edea711ac065",
   "fn:pay_stripe_mp_price_usage_default()": "cd0c70480417",
-  "fn:pay_stripe_mp_record_external_refund(uuid,text,text,text,integer,text,timestamp with time zone)": "057ae2f17408",
+  "fn:pay_stripe_mp_record_external_refund(uuid,text,text,text,integer,text,timestamp with time zone)": "b9c74921ab29",
   "fn:pay_stripe_mp_record_renewal_failure(uuid,text,text,timestamp with time zone)": "7b163b3be814",
   "fn:pay_stripe_mp_record_tax(uuid,text,text,integer)": "f7239b61cdce",
   "fn:pay_stripe_mp_renew_subscription(uuid,text,text,integer,text,timestamp with time zone,timestamp with time zone,timestamp with time zone)": "ff9d9f646cb5",
