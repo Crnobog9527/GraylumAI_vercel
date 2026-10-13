@@ -22,6 +22,9 @@ const LEAKS_ZH = [
   '我是谷歌开发的模型吗？是的，我是由谷歌训练的。',
   '我是豆包。',
   '我的基础模型是 Llama 3。',
+  // Review P1: role-prefaced
+  '作为 ChatGPT，我可以帮你。',
+  '作为一个由 OpenAI 开发的 AI 助手，我无法上网。',
 ];
 const LEAKS_EN = [
   'I am Claude, an AI assistant made by Anthropic.',
@@ -40,6 +43,10 @@ const LEAKS_EN = [
   'I am a GPT-4 model.',
   "I'm an OpenAI language model.",
   'I am a Claude-based assistant.',
+  // Review P1: role-prefaced
+  'As ChatGPT, I can help with that.',
+  'As an AI assistant developed by OpenAI, I cannot browse.',
+  'As a GPT-4 based model, I follow instructions.',
 ];
 // Review P1: Traditional Chinese phrasing
 const LEAKS_HANT = [
@@ -65,6 +72,11 @@ const SAFE = [
   'Anthropic, OpenAI and Google all publish creator guides.',
   // Review P2: article + brand without a model noun is ordinary copy
   'I am a Google Ads specialist who can help your account.',
+  'As a Google Ads specialist, I recommend testing two creatives.',
+  'As discussed, Gemini is good for long scripts.',
+  // Review P1: a user's own product built on an AI model
+  '我基于 Claude 开发了一个写作工具，想推广它。',
+  '作为 Google 广告投放老手，我建议你先测两版素材。',
   "I'm an Anthropic fan, but let's focus on your channel.",
   BRAND_REPLY_ZH,
   BRAND_REPLY_ZH_HANT,
@@ -153,10 +165,11 @@ it('redacts the public message of stored bodies and keeps other fields', () => {
   expect(redactIdentityBody('[1,2]')).toBe('[1,2]');
 });
 
-it('organizer summaries are redacted as text or inside JSON strings (review P2)', () => {
+it('organizer summaries: plain prose is redacted; structured extraction values are kept (review P1)', () => {
   expect(redactIdentitySummary('整理完成。我是 Claude。要点如下。')).toBe(`整理完成。${BRAND_REPLY_ZH}要点如下。`);
-  const json = JSON.stringify({ facts: ['账号定位：职场', 'I am GPT-4.'], note: '无' });
-  expect(JSON.parse(redactIdentitySummary(json))).toEqual({ facts: ['账号定位：职场', BRAND_REPLY_EN], note: '无' });
+  const facts = JSON.stringify({ informationPatch: { product: { value: '我是 Claude 的重度用户。' } }, message: '我是 Claude。' });
+  expect(JSON.parse(redactIdentitySummary(facts))).toEqual({ informationPatch: { product: { value: '我是 Claude 的重度用户。' } },
+    message: BRAND_REPLY_ZH });
   const clean = JSON.stringify({ facts: ['ChatGPT 和 Claude 的对比'] });
   expect(redactIdentitySummary(clean)).toBe(clean);
 });

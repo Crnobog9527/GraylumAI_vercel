@@ -23,8 +23,15 @@ const PATTERNS = [
   `我(?:是)?(?:由|被)\\s*${BRAND}\\s*(?:公司)?${ZH_GAP}{0,6}${MADE}`,
   // 我的底层模型是 GPT-4 / 我背后的技术来自 Google
   `我(?:的|背[后後]的)(?:底[层層]|基[础礎]|背[后後])?(?:模型|大模型|架[构構]|技[术術])${ZH_GAP}{0,8}?(?:是|基[于於]|${FROM}|用的是)\\s*${BRAND}`,
-  // 我基于 Claude / 我用的是 GPT
-  `我(?:基[于於]|背[后後]是|使用的是|用的是|底[层層]是)\\s*${BRAND}`,
+  // 我基于 Claude / 我用的是 GPT — but not a user's product ("我基于 Claude 开发了一个写作工具", review P1)
+  `我(?:基[于於]|背[后後]是|使用的是|用的是|底[层層]是)\\s*${BRAND}(?!${ZH_GAP}{0,8}?(?:[开開][发發]了|做了|搭建|[构構]建了|打造了|写了|[写寫]了))`,
+  // 作为 ChatGPT，我… / 作为一个由 OpenAI 开发的 AI 助手… (review P1: role-prefaced)
+  `作[为為]\\s*(?:一[个個]|一款)?\\s*${BRAND}\\s*[，,]\\s*我`,
+  `作[为為]${ZH_GAP}{0,12}?${FROM}\\s*${BRAND}\\s*(?:公司)?${ZH_GAP}{0,10}?(?:${MADE}|的${ZH_GAP}{0,6}?(?:模型|助手|AI))`,
+  // As ChatGPT, I can help / As an AI assistant developed by OpenAI / As a GPT-4 based model (review P1)
+  String.raw`\bAs\s+${BRAND}\b[^.!?\n]{0,6}?,\s*(?:I|my)\b`,
+  String.raw`\bAs\s+(?:an?|the)\s+(?:[\w-]+\s+){0,4}(?:model|AI|assistant|chatbot|LLM)\b[^.!?\n]{0,40}?\b(?:by|from)\s+${BRAND}`,
+  String.raw`\bAs\s+(?:an?|the)\s+${BRAND}[\w.-]*(?:\s+[\w-]+){0,2}?\s+(?:model|AI|assistant|chatbot|LLM)\b`,
   // I am Claude / I'm ChatGPT / I am called Gemini
   String.raw`\bI(?:'m|’m|\s+am)\s+(?:called\s+|actually\s+)?${BRAND}\b`,
   // I am a GPT-4 model / I'm an OpenAI language model / I am a Claude-based assistant. An article form needs a
@@ -84,7 +91,7 @@ export function redactModelIdentity(text: string) {
 }
 
 /** First-person openings a trailing, unfinished sentence may still turn into a leak with. */
-const FIRST_PERSON = /我|\bI\b|\bI['’]|\bmy\b/iu;
+const FIRST_PERSON = /我|作[为為]|\bI\b|\bI['’]|\bmy\b|\bas\b/iu;
 
 /**
  * Streaming view of cumulative text: complete sentences are redacted; an unfinished last
@@ -128,10 +135,18 @@ export function redactIdentityStrings<T>(value: T): T {
   return walk(value) as T;
 }
 
-/** Organizer summaries: plain text, or every string inside a JSON value (review P2). */
+/**
+ * Organizer summaries: plain-text summaries are public prose and are redacted. A structured summary is
+ * extracted account data (user facts may name AI products, review P1): only its top-level public
+ * prose fields are redacted, never extraction values.
+ */
 export function redactIdentitySummary(summary: string) {
   let value: unknown;
   try { value = JSON.parse(summary); } catch { return redactModelIdentity(summary); }
-  const redacted = redactIdentityStrings(value);
-  return JSON.stringify(redacted) === JSON.stringify(value) ? summary : JSON.stringify(redacted);
+  if (typeof value === 'string') { const text = redactModelIdentity(value); return text === value ? summary : JSON.stringify(text); }
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return summary;
+  const record = value as Record<string, unknown>;
+  const redacted = Object.fromEntries(Object.entries(record).map(([key, item]) =>
+    [key, (key === 'message' || key === 'summary') && typeof item === 'string' ? redactModelIdentity(item) : item]));
+  return JSON.stringify(redacted) === JSON.stringify(record) ? summary : JSON.stringify(redacted);
 }

@@ -81,6 +81,14 @@ it('legacy text events are not deduplicated (repeated identical events still rea
   expect(out).toHaveLength(2);
 });
 
+it('a source switch to held-back text still sends an empty replacement (review P2)', () => {
+  const out: NativeTextUpdate[] = [];
+  const guarded = guardedProgress(event => out.push(event as NativeTextUpdate));
+  guarded({ type: 'text', text: '旧来源的文字。', delta: '旧来源的文字。', replace: true, source: 'assistant' });
+  guarded({ type: 'text', text: 'I', delta: 'I', replace: true, source: 'message' });
+  expect(out.at(-1)).toMatchObject({ replace: true, text: '', source: 'message' });
+});
+
 it('switch off passes events and bodies through untouched', () => {
   const guard = runtimeIdentityGuard(false);
   const emit: (event: RuntimeProgress) => void = () => {};

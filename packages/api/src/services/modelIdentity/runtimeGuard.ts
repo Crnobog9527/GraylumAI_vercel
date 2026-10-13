@@ -23,10 +23,11 @@ export function guardedProgress(emit: (event: RuntimeProgress) => void) {
   let emitted = '', source: string | undefined, latest: TextEvent | undefined, held = false, switched = false;
   const send = (event: TextEvent, text: string) => {
     if ('delta' in event) {
-      if (text === emitted && (!event.replace || text)) return;
+      // A source switch always reaches the client as a replacement, even an empty one (review P2).
+      if (!switched && text === emitted && (!event.replace || text)) return;
       // A source switch must reach the client as a replacement, never as an appended delta.
       const extend = !event.replace && !switched && text.startsWith(emitted);
-      if (!text && !emitted) return;
+      if (!text && !emitted && !switched) return;
       emit({ ...event, text, delta: extend ? text.slice(emitted.length) : text, replace: !extend });
     } else {
       if (!text && event.text) return;
