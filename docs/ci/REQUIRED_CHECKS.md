@@ -12,7 +12,7 @@
 | Lint & Type Check | `lint-and-type`：源码大小、Web/API ESLint、Web typegen + tsc、API tsc、API 类型排除基线核验 | 存量 lint/type 基线仍存在，见下文 |
 | TypeScript Check | 复用同一个 `lint-and-type` worker 的完整结果 | 不重复执行第二轮类型检查 |
 | Unit Tests | `test` 和 `integration` 均成功：工作流契约、可信基线迁移账本、API 单测、PAY-1 子集、billing cron、proxy、CI safeguards；BILL2、Runtime、空库文件建库与指纹/开户审计/credit guard | 仅指定集成测试；不含所有 integration 文件 |
-| Security Unit Tests | 复用完整 `test` worker，包括 API 的 `billing.security.test.ts`、`securityChecks.test.ts` 等 | 不额外执行一个独立安全测试集，也不依赖 integration worker |
+| Security Unit Tests | 复用完整 `test` worker，包括 API 的 `securityChecks.test.ts`，以及 BILL2、`billingUnit.test.ts` 等计费单测（旧预扣 `billing.security.test.ts` 已随 LEGACY-CLOSE PR-A 和被测代码一起删除） | 不额外执行一个独立安全测试集，也不依赖 integration worker |
 | Build Check | `build-and-e2e`：Web 全量 Vitest、`pnpm build`、本地启动、secretless Chromium Security E2E | 构建和测试都实际执行；缓存不会替代结果 |
 | Security E2E Tests | 复用同一个 `build-and-e2e`，Playwright 只运行 `security.spec.ts --project=chromium` | 当前 8 项执行、15 项跳过；不是 staging 完整安全验证 |
 | Dependency Audit | pnpm 11.13.0 对隔离目录内的原始 `pnpm-lock.yaml` 副本执行 `pnpm audit --audit-level high` | 检查锁文件依赖漏洞；high/critical 阻断，不是业务安全扫描；C8 去掉与该输入无关的全仓安装 |

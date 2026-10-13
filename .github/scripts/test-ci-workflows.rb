@@ -12,8 +12,10 @@ class CIWorkflowsTest < Minitest::Test
     @security = YAML.safe_load(File.read("#{ROOT}/workflows/security.yml"))
   end
   GATES = {'lint-check'=>['Lint & Type Check','lint-and-type'], 'typecheck'=>['TypeScript Check','lint-and-type'],
-           'unit-check'=>['Unit Tests',{'WORK_RESULT'=>'test','INTEGRATION_RESULT'=>'integration'}],
-           'security-unit-tests'=>['Security Unit Tests','test'],
+           'unit-check'=>['Unit Tests',{'WORK_RESULT'=>'test','INTEGRATION_RESULT'=>'integration',
+                                        'CONTRACTS_RESULT'=>'ci-contracts','LEDGER_RESULT'=>'migration-ledger'}],
+           'security-unit-tests'=>['Security Unit Tests',{'WORK_RESULT'=>'test','CONTRACTS_RESULT'=>'ci-contracts',
+                                                          'LEDGER_RESULT'=>'migration-ledger'}],
            'build'=>['Build Check','build-and-e2e'], 'security-e2e-tests'=>['Security E2E Tests','build-and-e2e']}.freeze
   INTEGRATION_RUNS = ['node packages/db/tests/v3/run-workbench.mjs --bill2-core-only --without-app --schema-from-files',
                       'node packages/db/tests/v3/run-workbench.mjs --runtime-only --with-staging-schema --without-app --schema-from-files',
@@ -116,10 +118,17 @@ class CIWorkflowsTest < Minitest::Test
     steps = @ci['jobs']['test']['steps']
     safeguards = steps.find { |step| step['run'] == 'pnpm test:ci:safeguards' }
     assert_equal 'CI safeguards — migration ledger and database baseline', safeguards.fetch('name')
-    contract_index = steps.index { |step| step['run'] == 'ruby .github/scripts/test-ci-workflows.rb' }
-    install_index = steps.index { |step| step['run'] == 'pnpm install --frozen-lockfile' }
-    refute_nil contract_index
-    assert_operator contract_index, :<, install_index
+    refute_nil steps.index { |step| step['run'] == 'pnpm install --frozen-lockfile' }
+    # The contract worker runs before, and without, any dependency install.
+    contract_steps = @ci['jobs']['ci-contracts']['steps']
+    contract_runs = runs.select { |run| run == 'ruby .github/scripts/test-ci-workflows.rb' }
+    assert_equal 1, contract_runs.length
+    assert_includes contract_steps.map { |step| step['run'] }, 'ruby .github/scripts/test-ci-workflows.rb'
+    contract_steps.each do |step|
+      refute_includes step['run'].to_s, 'pnpm', step['name']
+      refute step.key?('if'), step['name']
+      refute step.key?('continue-on-error'), step['name']
+    end
     assert_equal 'true', @ci['jobs']['build-and-e2e']['env']['SECURITY_E2E_LOCAL_ONLY']
     assert_equal 'false', @ci['jobs']['build-and-e2e']['env']['E2E_ALLOW_DATABASE_FIXTURES']
   end
@@ -215,9 +224,22 @@ class CIWorkflowsTest < Minitest::Test
     end
   end
 
+  def test_migration_ledger_runs_in_its_own_unskippable_worker
+    ledger = 'CI safeguard — check migration ledger'
+    jobs = @ci.fetch('jobs')
+    owners = jobs.select { |_, job| job.fetch('steps').any? { |step| step['name'] == ledger } }.keys
+    assert_equal ['migration-ledger'], owners
+    steps = jobs.fetch('migration-ledger').fetch('steps')
+    assert_equal 0, steps.find { |step| step['name'] == 'Checkout' }.fetch('with').fetch('fetch-depth')
+    steps.each do |step|
+      refute step.key?('if'), step['name']
+      refute step.key?('continue-on-error'), step['name']
+    end
+  end
+
   def test_scheduled_migration_step_executes_trusted_checker_and_rejects_damage
     # Execute the actual workflow shell, not a reimplementation of its routing.
-    step = @ci.fetch('jobs').fetch('test').fetch('steps').find { |s| s['name'] == 'CI safeguard — check migration ledger' }
+    step = @ci.fetch('jobs').fetch('migration-ledger').fetch('steps').find { |s| s['name'] == 'CI safeguard — check migration ledger' }
     repository = File.expand_path('..', ROOT)
     Dir.mktmpdir('ci-schedule-ledger-') do |dir|
       checkout = File.join(dir, 'checkout')
