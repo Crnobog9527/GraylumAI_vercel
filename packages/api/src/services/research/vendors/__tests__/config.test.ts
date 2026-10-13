@@ -51,7 +51,9 @@ describe('research_tools_config', () => {
     expect(researchToolsConfigSchema.safeParse(mismatched).success).toBe(false);
     expect(researchToolsConfigSchema.safeParse({ ...valid(), routes: [{ ...valid().routes[0], backup: 'brightdata' }] }).success).toBe(false);
     expect(researchToolsConfigSchema.safeParse({ ...valid(), routes: [valid().routes[0], valid().routes[0]] }).success).toBe(false);
-    expect(researchToolsConfigSchema.safeParse({ ...valid(), limits: { maxSubcallsPerRound: 32, discoverSubcalls: 25 } }).success).toBe(false);
+    expect(researchToolsConfigSchema.safeParse({ ...valid(), limits: { maxSubcallsPerRound: 30, discoverSubcalls: 25 } }).success).toBe(false);
+    expect(researchToolsConfigSchema.safeParse({ ...valid(), limits: { maxSubcallsPerRound: 29, discoverSubcalls: 29 } }).success).toBe(true);
+    expect(researchToolsConfigSchema.safeParse({ ...valid(), limits: { maxSubcallsPerRound: 12, discoverSubcalls: 30 } }).success).toBe(false);
   });
 
   it('fails closed when the setting is absent, unreadable or invalid', async () => {

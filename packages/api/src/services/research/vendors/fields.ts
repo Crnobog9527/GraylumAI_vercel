@@ -62,9 +62,10 @@ export function timestamp(value: unknown, paths: readonly string[]): string | un
   return new Date(ms).toISOString();
 }
 
+/** Text values; whitespace-only strings count as not provided. */
 export function text(value: unknown, paths: readonly string[]): string | undefined {
   const found = first(value, paths);
-  if (typeof found === 'string') return found;
+  if (typeof found === 'string') return found.trim() === '' ? undefined : found;
   if (typeof found === 'number' || typeof found === 'boolean') return String(found);
   return undefined;
 }

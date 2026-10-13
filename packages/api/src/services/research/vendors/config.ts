@@ -55,7 +55,7 @@ export const researchToolsConfigSchema = z.object({
   verifiedPlatforms: z.array(z.enum(SOCIAL_PLATFORMS)).max(SOCIAL_PLATFORMS.length),
   routes: z.array(routeSchema).max(64),
   limits: z.object({
-    maxSubcallsPerRound: z.number().int().min(1).max(RUN_MAX_CALLS - 1),
+    maxSubcallsPerRound: z.number().int().min(1).max(RUN_MAX_CALLS - 3),
     discoverSubcalls: z.number().int().min(1).max(RUN_MAX_CALLS - 3),
   }).strict(),
   recentGrowth: z.object({
