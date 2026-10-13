@@ -153,14 +153,14 @@ it('keeps the pay button disabled with the server reason when checkout is not re
   } finally { if (!page.isClosed()) await page.close(); }
 }, 30000);
 
-it('explains an old renewing subscription whose charge failed, and points to subscription management', async () => {
+it('explains a subscription with an unsuccessful payment, and points to subscription management', async () => {
   const old = { currentLevel: 'free', entries: MATRIX.entries.map(item => ({ ...item, allowed: false,
     action: 'resolvePaymentIssue', reasonCode: 'PAYMENT_ATTENTION_REQUIRED',
     safeMessage: '当前订阅存在付款异常，请先处理付款问题后再切换套餐。' })) };
   const { page, errors } = await open({ matrix: old });
   try {
     await browserExpect(page.getByTestId('report-paywall-pay')).toBeDisabled();
-    await browserExpect(page.getByText(/你还有一个续费中的旧订阅/)).toBeVisible();
+    await browserExpect(page.getByText(/你还有一个付款没有成功的订阅/)).toBeVisible();
     await browserExpect(page.getByText('当前订阅存在付款异常，请先处理付款问题后再切换套餐。')).toHaveCount(0);
     const manage = page.getByTestId('report-paywall-manage-subscription');
     await browserExpect(manage).toHaveText('去订阅管理');

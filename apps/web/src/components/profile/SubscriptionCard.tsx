@@ -22,6 +22,7 @@ import {
   getPlanEligibilityKey,
   type MembershipPlanEligibilityEntry,
 } from './subscriptionPlanButtonState';
+import { EligibilityNotices } from './EligibilityNotices';
 import { invalidatePostCheckoutMembershipQueries } from './checkoutSyncInvalidations';
 import { formatUsd, getCreditPackagePrice } from './creditPackagePrice';
 import { ProfileCatalogState, emptyStateCardStyle } from './ProfileCatalogState';
@@ -502,9 +503,7 @@ export const SubscriptionCard = memo(function SubscriptionCard({ user: _user }: 
         <div className="mb-6 text-sm" style={{ color: 'var(--text-tertiary)' }}>
           年付积分按月释放，未使用积分可累积，不按月清零。取消续费后，已付周期权益保留至到期。
         </div>
-        {eligibilityMatrix?.entries.some(entry => entry.reasonCode === 'RENEWAL_RESTORE_REQUIRED') && (
-          <p className="mb-4 text-sm">已安排到期取消，当前权益保留至到期。请先通过“管理订阅 / 取消续费”恢复续费后再升级套餐。</p>
-        )}
+        <EligibilityNotices entries={eligibilityMatrix?.entries} />
 
         {checkoutNotice && (
           <div
