@@ -3,15 +3,12 @@ import { RateLimitError } from '../lib/rateLimitError';
 import { saveVersionConflictMessage, candidateInvalidatedMessage, saveRoundClosedMessage } from "../services/artifacts/public";
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
-import { workbenchSearch, workbenchSearchInput } from "../services/research/workbenchSearch";
 import { protectedProcedure, router } from "../trpc";
-import { workbenchGeneration, generationQuoteInput, generationInput, generationScope, generationRecoveryInput } from "../services/artifacts/generation";
 import {
   workbenchService,
   startSchema,
   webCommandSchema,
 } from "../services/artifacts/workbench";
-import { artifactReuse, createWorkInput, workSourceScope } from "../services/artifacts/reuse";
 const scope = z
   .object({ projectId: z.string().uuid(), roundId: z.string().uuid() })
   .strict();
@@ -20,7 +17,6 @@ const procedure = protectedProcedure.use(async ({ ctx, next }) => {
   const result = await next({
     ctx: {
       ...ctx,
-      generation: workbenchGeneration(ctx.userScopedSupabase, ctx.hasSupabaseAdminPrivileges ? ctx.supabaseAdmin : null),
       workbench: workbenchService(
         ctx.userScopedSupabase,
         ctx.hasSupabaseAdminPrivileges ? ctx.supabaseAdmin : null,
@@ -42,21 +38,11 @@ const procedure = protectedProcedure.use(async ({ ctx, next }) => {
         message: string;
       }
     > = {
-      RESEARCH_DISABLED: { code: "SERVICE_UNAVAILABLE", message: "网页搜索尚未启用，仍可补充自己的参考资料。" },
       RESEARCH_BILLING_UNAVAILABLE: { code: "SERVICE_UNAVAILABLE", message: "搜索结算暂不可用，请保留本次记录后重试。" },
-      RESEARCH_SCOPE_UNAVAILABLE: { code: "CONFLICT", message: "当前步骤状态已变化，请刷新后再搜索。" },
       SUMMARY_MODEL_NOT_CONFIGURED: { code: "SERVICE_UNAVAILABLE", message: "整理模型尚未配置或不可用，请联系管理员检查。已有成果保持不变。" },
       SUMMARY_MODEL_MUST_DIFFER: { code: "SERVICE_UNAVAILABLE", message: "整理模型必须与对话模型不同，请在后台调整。" },
       SUMMARY_OUTPUT_LIMIT_INVALID: { code: "SERVICE_UNAVAILABLE", message: "整理输出上限配置无效，未调用整理模型。" },
-      SUMMARY_REPLY_UNAVAILABLE: { code: "CONFLICT", message: "对应回复尚未完成或来源已变化，暂不能整理。" },
-      GENERATION_DISABLED: { code: "SERVICE_UNAVAILABLE", message: "AI 生成尚未启用，仍可编辑和保存内容。" },
-      GENERATION_UNSUPPORTED_MODEL: { code: "SERVICE_UNAVAILABLE", message: "当前模型尚未通过工作台容量与计费配置校验。" },
-      SUMMARY_INPUT_CAPACITY: { code: "BAD_REQUEST", message: "已有方法和对话超过整理模型容量，未发起本次模型调用。" },
       GENERATION_CAPACITY: { code: "BAD_REQUEST", message: "完整方法和项目内容超过当前模型容量，未扣费。" },
-      GENERATION_QUOTE_CHANGED: { code: "CONFLICT", message: "内容或服务状态已变化，本次未发送，请重试。" },
-      GENERATION_CONFLICT: { code: "CONFLICT", message: "生成状态或输入已变化，请刷新生成记录。不会自动重复调用模型。" },
-      GENERATION_INPUT_UNAVAILABLE: { code: "BAD_REQUEST", message: "工作稿的来源或依赖已变化，请检查来源、重新保存工作稿并确认依赖后再生成。" },
-      GENERATION_BUDGET: { code: "BAD_REQUEST", message: "生成费用超出允许范围，未扣费。" },
       ARTIFACT_REFERENCE_UNAVAILABLE: {code:"CONFLICT",message:"定位来源或引用配置暂不可用，请重新查看来源。原作品已保留。"},
       ARTIFACT_ACCOUNT_CONFLICT: {
         code: "CONFLICT", message: "此账号已有另一功能的项目，暂不能在新功能中开始。请从已有项目查看历史，原成果不会被修改。",
@@ -94,37 +80,14 @@ const procedure = protectedProcedure.use(async ({ ctx, next }) => {
   }
   return result;
 });
+// LEGACY-CLOSE: the old /workbench page and its generation, search, reuse, project, round,
+// report and export procedures are gone. Positioning, runtime and the module catalog use these four.
 export const workbenchRouter = router({
-  createWork: procedure.input(createWorkInput).mutation(({ctx,input})=>artifactReuse(ctx.userScopedSupabase,ctx.hasSupabaseAdminPrivileges?ctx.supabaseAdmin:null).create(input)),
-  workSource: procedure.input(workSourceScope).query(({ctx,input})=>artifactReuse(ctx.userScopedSupabase,ctx.hasSupabaseAdminPrivileges?ctx.supabaseAdmin:null).source(input)),
-  referenceChoices: procedure.input(z.object({sourceVersionId:z.string().uuid()}).strict()).query(({ctx,input})=>artifactReuse(ctx.userScopedSupabase,ctx.hasSupabaseAdminPrivileges?ctx.supabaseAdmin:null).choices(input.sourceVersionId)),
-  cancelSearch: procedure.input(workbenchSearchInput).mutation(({ctx,input})=>workbenchSearch(ctx.userScopedSupabase,ctx.hasSupabaseAdminPrivileges?ctx.supabaseAdmin:null).cancel(input)),
-  search: procedure.input(workbenchSearchInput).mutation(({ctx,input})=>workbenchSearch(ctx.userScopedSupabase,ctx.hasSupabaseAdminPrivileges?ctx.supabaseAdmin:null).search(input)),
-  generationQuote: procedure.input(generationQuoteInput).mutation(({ ctx, input }) => ctx.generation.quote(input)),
-  generate: procedure.input(generationInput).mutation(({ ctx, input }) => ctx.generation.generate(input)),
-  generations: procedure.input(generationScope).query(({ ctx, input }) => ctx.generation.list(input)),
-  cancelGeneration: procedure.input(generationScope.extend({ requestId: z.string().uuid() }).strict()).mutation(({ ctx, input }) => ctx.generation.cancel(input)),
-  abandonGeneration: procedure.input(generationScope.extend({ requestId: z.string().uuid() }).strict()).mutation(({ ctx, input }) => ctx.generation.abandon(input)),
-  recoverGeneration: procedure.input(generationRecoveryInput).mutation(({ ctx, input }) => ctx.generation.recover(input)),
   catalog: procedure.input(z.object({moduleId:z.string().uuid()}).strict().optional()).query(({ ctx,input }) => ctx.workbench.catalog(input?.moduleId)),
-  projects: procedure.query(({ ctx }) => ctx.workbench.projects()),
-  rounds: procedure
-    .input(z.object({ projectId: z.string().uuid() }).strict())
-    .query(({ ctx, input }) => ctx.workbench.rounds(input.projectId)),
   read: procedure
     .input(scope)
     .query(({ ctx, input }) =>
       ctx.workbench.read(input.projectId, input.roundId),
-    ),
-  report: procedure
-    .input(scope)
-    .query(({ ctx, input }) =>
-      ctx.workbench.report(input.projectId, input.roundId),
-    ),
-  export: procedure
-    .input(scope)
-    .mutation(({ ctx, input }) =>
-      ctx.workbench.export(input.projectId, input.roundId),
     ),
   start: procedure
     .input(startSchema)

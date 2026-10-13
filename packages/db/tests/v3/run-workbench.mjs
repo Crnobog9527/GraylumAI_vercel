@@ -3,7 +3,6 @@
 import { legacyRuntime, instrumentLegacy, copyLegacyTests, patchLegacyFinanceReader } from './legacy-runtime.mjs';
 import { installWorkbenchBilling } from "./billing-fixture.mjs";
 import { buildFromFiles, installPgCronStub } from "../baseline/build-from-files.mjs";
-import { installAdminSurfacesPreview } from "./admin-surfaces-fixture.mjs";
 import { writeRateLimitCaseReport } from "./local-rate-limit-case-report.mjs";
 import { installLocalRateLimitCases } from "./local-rate-limit-cases.mjs";
 import { createLocalRateLimit } from "./local-rate-limit.mjs";
@@ -36,7 +35,7 @@ const previewOptions = parsePreviewOptions(initialArgs);
 const lifecycle = previewDecision(previewOptions);
 // These suites drove the deleted /chat page, agentSlice or old /workbench reuse flow.
 const RETIRED_FLAGS = ['--agent-slice-only', '--ordinary-only', '--chat-only', '--chat-reliability-only',
-  '--reuse-only', '--real-skill-only'];
+  '--reuse-only', '--real-skill-only', '--workbench-restart-only'];
 const retiredFlag = initialArgs.find(arg => RETIRED_FLAGS.includes(arg));
 if (!lifecycle.controlOnly && retiredFlag) throw new Error(`${retiredFlag} retired by LEGACY-CLOSE`);
 let previewState;
@@ -72,6 +71,8 @@ if(stagingHost&&(!stagingSchema||!opcMode||serve))throw new Error('staging-host 
 const syntheticStagingHost='syntheticstaging.supabase.co',stagingWindowId=randomUUID();
 const opcSchema=stagingSchema||opcMode||args.includes('--with-opc-schema');
 const runtimeMode=args.includes('--runtime-only');
+// The plain serve preview and its restart phase ran the deleted /workbench page suite.
+if(!lifecycle.controlOnly&&serve&&!opcMode&&!runtimeMode)throw new Error('--serve without --opc-only or --runtime-only retired by LEGACY-CLOSE');
 const runtimeSchema=stagingSchema||opcSchema||runtimeMode||runtimeUpgrade||args.includes('--with-runtime-schema');
 const bill2Schema=args.includes('--with-bill2-schema')||runtimeSchema;
 const bill2Mode=args.includes('--bill2-only')||args.includes('--bill2-core-only');
@@ -827,13 +828,6 @@ try {
   });
   await new Promise((resolve, reject) => { gateway.once("error", reject); gateway.listen(previewState?.ports.gateway ?? 0, "127.0.0.1", resolve); });
   const apiUrl = `http://127.0.0.1:${gateway.address().port}`;
-  // Only the disposable, credential-free source COPY receives this transport
-  // substitution. Shipped code has no environment-controlled mock/provider URL.
-  const generationPath = resolve(root, 'packages/api/src/services/artifacts/generation.ts');
-  const productionSource = readFileSync(generationPath, 'utf8');
-  const marker = "await fetch('https://openrouter.ai/api/v1/chat/completions',";
-  if (productionSource.split(marker).length !== 2) throw new Error('local transport fixture source boundary changed');
-  writeFileSync(generationPath, productionSource.replace(marker, `await fetch('${apiUrl}/__workbench_model_fixture',`));
   // Every fetch from the disposable Next process is constrained to loopback,
   // including optional routing helpers. No configured provider can be contacted.
   const networkGuard=resolve(root,'local-loopback-only.cjs');
@@ -842,12 +836,6 @@ try {
   const observerPreload=!withoutApp?`require(${JSON.stringify(resolve(root,'packages/db/tests/v3/local-rate-limit-observer.cjs'))});`:'';
   writeFileSync(networkGuard,`require(${JSON.stringify(resolve(root,'packages/db/tests/v3/local-fetch-guard.cjs'))}).installLocalFetchGuard(${JSON.stringify(stagingHost?{stagingOrigin:'https://'+syntheticStagingHost,gatewayOrigin:apiUrl}:{})});\n${observerPreload}`);
   console.log('Model transport: synthetic loopback HTTP; non-loopback server fetch denied in disposable copy only');
-  const searchPath=resolve(root,'packages/api/src/services/research/workbenchSearch.ts');
-  let searchSource=readFileSync(searchPath,'utf8');
-  const searchMarker="options=>connectAgentKey(options,process.env.AGENTKEY_API_KEY??'')";
-  if(searchSource.split(searchMarker).length!==2)throw new Error('research fixture boundary changed');
-  searchSource=searchSource.replace('connectAgentKey, researchIdentity,','connectAgentKey, connectLocalAgentKey, researchIdentity,').replace(searchMarker,"async options=>{if(!privateClient)throw new Error('LOCAL_RESEARCH_CLIENT_REQUIRED');const row=await privateClient.from('system_settings').select('value').eq('key','local_research_endpoint').single();if(row.error||!row.data)throw new Error('LOCAL_RESEARCH_ENDPOINT_REQUIRED');return connectLocalAgentKey(options,new URL(row.data.value));}");
-  writeFileSync(searchPath,searchSource);
   if(legacyRoot)instrumentLegacy(legacyRoot,apiUrl);
   const service = jwt("service_role"),
     anon = jwt("anon");
@@ -1015,11 +1003,6 @@ try {
     console.log("WITHOUT_APP_RESULT " + JSON.stringify({ suite: withoutAppSuite, ...counts, excluded }));
     if (errors.length) throw new Error("without-app result mismatch:\n" + errors.join("\n"));
   }
-  if (!aiOnly || args.includes('--reuse-only') || args.includes('--workbench-restart-only')) {
-  env.V3_WORKBENCH_PHASE = "restore";
-  await restartApplication();
-  await childExit(runTests());
-  }
   });
   // An initialized disposable preview may run a focused browser regression
   // against its retained local data without repeating schema bootstrap.
@@ -1049,23 +1032,6 @@ try {
       if(![saved.actor,saved.sessionId,saved.modelId,saved.moduleId].every(v=>/^[a-f0-9-]{36}$/.test(v))||new URL(saved.url).origin!==env.V3_LOCAL_APP)throw new Error('invalid Runtime preview identity');
       // Preserve the verified opening grant and ledger; do not top up/reset the demo.
       console.log('LOCAL_RUNTIME_ACCEPTANCE_READY '+saved.url);
-    }else{
-    // Re-enable only the synthetic source association after all revocation
-    // assertions, so Owner can create a fresh work in the disposable preview.
-    if(args.includes('--reuse-only')){
-      const sample=JSON.parse(readFileSync(resolve(env.V3_WORKBENCH_OUTPUT,'reuse-restore.json'),'utf8'));
-      const actor=JSON.parse(readFileSync(resolve(env.V3_WORKBENCH_OUTPUT,'restore.json'),'utf8')).actor;
-      if(![actor,sample.sourceModule,sample.sourceSkill].every(value=>/^[a-f0-9-]{36}$/.test(value)))throw new Error('invalid reuse preview identity');
-      sql(`INSERT INTO artifact_accounts VALUES('${actor}','${sample.sourceModule}','${sample.sourceSkill}','synthetic:local-account') ON CONFLICT DO NOTHING;`);
-    }
-    // Admin surfaces absent from the disposable schema, added after all assertions.
-    if(args.includes('--admin-only'))installAdminSurfacesPreview(sql, root);
-    const saved=JSON.parse(readFileSync(resolve(env.V3_WORKBENCH_OUTPUT,'restore.json'),'utf8'));
-    const demoIds=saved.fixtures.map(f=>f.moduleId);
-    if(![saved.actor,...demoIds].every(value=>/^[a-f0-9-]{36}$/.test(value)))throw new Error('invalid local acceptance identity');
-    sql(`UPDATE modules SET model_id=(SELECT id FROM ai_models WHERE api_key='LOCAL_SYNTHETIC_KEY' LIMIT 1) WHERE id IN (${demoIds.map(value=>`'${value}'`).join(',')}); UPDATE profiles SET credits=100000 WHERE id='${saved.actor}';`);
-    writeFileSync(resolve(env.V3_WORKBENCH_OUTPUT,'acceptance.json'),JSON.stringify({url:env.V3_LOCAL_APP,credentials:saved.credentials,samples:saved.fixtures.map(f=>({label:f.label,moduleId:f.moduleId})),mode:'Synthetic local transport only; no production or provider access'},null,2),{mode:0o600});
-    console.log('LOCAL_ACCEPTANCE_READY '+env.V3_LOCAL_APP);
     }
     previewState.initialized = true;
     writePreviewState(previewState);
