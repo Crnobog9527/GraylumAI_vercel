@@ -2,6 +2,9 @@
 import { describe, expect, it, vi } from 'vitest';
 import { accountRouter } from './account';
 
+const manifest = vi.hoisted(() => ({ schedule: vi.fn() }));
+vi.mock('../services/accountErasure/offdbManifest', () => ({ scheduleErasureManifestSync: manifest.schedule }));
+
 const id = '00000000-0000-4000-8000-000000000001';
 const hash = 'a'.repeat(64);
 
@@ -49,17 +52,21 @@ describe('one-click conversation deletion (Owner 2026-10-13: no impact list, 023
     financialReviewCount: 0 }, error: null };
 
   it('allows the owner: one mark call on this session only, no preview', async () => {
+    manifest.schedule.mockClear();
     const rpc = vi.fn().mockResolvedValueOnce(deleted);
     await expect(caller(rpc).conversationErasure({ sessionId: id })).resolves.toEqual(deleted.data);
     expect(rpc.mock.calls).toEqual([['content_erasure_mark_session', { a: 'user-1', target: id }]]);
+    // The marker's outbox row is pushed off-database right away (backup-restore replay).
+    expect(manifest.schedule).toHaveBeenCalledTimes(1);
   });
 
   it('denies a conversation the caller does not own', async () => {
+    manifest.schedule.mockClear();
     const rpc = vi.fn().mockResolvedValue({ data: null, error: { code: '42501', message: 'CONTENT_NOT_FOUND' } });
     await expect(caller(rpc).conversationErasure({ sessionId: id }))
       .rejects.toMatchObject({ code: 'NOT_FOUND', message: 'CONTENT_NOT_FOUND' });
     await expect(caller(rpc).conversationErasureCleanup({ sessionId: id }))
-      .rejects.toMatchObject({ code: 'NOT_FOUND', message: 'CONTENT_NOT_FOUND' });
+      .rejects.toMatchObject({ code: 'NOT_FOUND', message: 'CONTENT_NOT_FOUND' });    expect(manifest.schedule).not.toHaveBeenCalled();
   });
 
   it('accepts only a session id: no kind, no client hash', async () => {

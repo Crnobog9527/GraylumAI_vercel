@@ -80,6 +80,9 @@ export async function eraseConversation(database: Database | null | undefined, a
   if (response.error) fail(response.error);
   const parsed = confirmationResult.safeParse(response.data);
   if (!parsed.success || parsed.data.id !== sessionId || parsed.data.kind !== 'session') fail(null);
+  // The mark recorded the deletion in the database outbox (0227); push it off-database now,
+  // best effort, like every other confirmed deletion (backup-restore replay runbook).
+  scheduleErasureManifestSync(database);
   return parsed.data;
 }
 /**
