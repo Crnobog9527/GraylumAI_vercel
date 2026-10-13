@@ -10,8 +10,8 @@ const id = (value: string | { id: string } | null | undefined) => typeof value =
 
 type RefundStripe = Pick<Stripe, 'refunds' | 'charges' | 'invoicePayments' | 'paymentIntents' | 'invoices' | 'subscriptions'
   | 'accounts' | 'balance'>;
-type RefundResult = { state: 'refunded' | 'recorded' | 'partial_review'; duplicate: boolean; renewing?: boolean;
-  creditsShortfall?: number };
+type RefundResult = { state: 'refunded' | 'recorded' | 'partial_review' | 'pack_review'; duplicate: boolean; renewing?: boolean;
+  creditsShortfall?: number; packageId?: string; packCredits?: number; balance?: number };
 
 /** Refund events (charge.refunded, refund.*, charge.refund.updated) of PAY-STRIPE-MP card orders. A refund we did not
  * approve is an external refund fact (Link support, Stripe after 48 hours, a Dashboard refund): each succeeded refund
@@ -58,6 +58,13 @@ function reportRefund(orderId: string, kind: string, result: RefundResult, alert
   if (result.state === 'partial_review') {
     logger.error('billing', 'stripe_mp_external_refund_partial', { orderId, kind,
       action: '部分外部退款：已记账，会员和积分未改动，请人工核对' });
+    alert();
+    return;
+  }
+  if (result.state === 'pack_review') {
+    // Packs are not tracked per source yet: a person decides how many credits to take back (MASTER_PLAN item 47).
+    logger.error('billing', 'stripe_mp_external_refund_pack', { orderId, packageId: result.packageId,
+      packCredits: result.packCredits, balance: result.balance, action: '积分包已被外部全额退款：请按积分包积分和当前余额人工决定收回多少' });
     alert();
     return;
   }

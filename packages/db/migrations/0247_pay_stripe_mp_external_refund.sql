@@ -4,9 +4,11 @@
 -- is a refund fact (#847 MIGRATION-PLAN section 3). One function records it for the order its payment paid for
 -- (first payment, renewal or international-card credit pack; the payment is the order's 'payment' reference):
 -- - every refund is recorded once (a 'refund' reference and a 'refund' payment fact), whatever order events arrive in;
--- - a FULL refund (refunded >= pre-tax amount + recorded tax) ends what that order paid for: unused credits are taken
---   back (the shortfall is Graylum's and is recorded), the order becomes refunded (no membership from it, no further
---   annual releases, recognisable as refunded for the founder rules) and the cached level is settled by 0243;
+-- - a FULL refund (refunded >= pre-tax amount + recorded tax) of a subscription period ends it: the period's unused
+--   grant credits are taken back (the shortfall is Graylum's and is in the ledger), the order becomes refunded (no
+--   membership from it, no further annual releases, recognisable as refunded for the founder rules) and the cached
+--   level is settled by 0243; a full refund of a credit pack ends the order but only reports for a person to settle;
+-- - without the payment's recorded tax the charged total is unknown: the refund is refused and retried;
 -- - a PARTIAL refund is only recorded and returned for review (Owner/controller 2026-10-14: no automatic ending);
 -- - renewal is never stopped here; the caller alerts when the subscription is still renewing.
 -- No table or column changes. Rollback: forward-fix; financial rows are never deleted.
@@ -43,7 +45,10 @@ BEGIN
  UPDATE payment_orders SET payment_amount_facts=coalesce(payment_amount_facts,'[]'::jsonb)||jsonb_build_array(
   jsonb_build_object('kind','refund','amount',(p_amount::numeric/100)::numeric(20,2)::text,'currency',o.currency,
    'unit','major','evidence_ref',p_refund)) WHERE id=o.id RETURNING * INTO o;
- -- Charged = pre-tax amount + the Managed Payments tax recorded for this payment (0237).
+ -- Charged = pre-tax amount + the tax recorded for this payment (0237; recorded after every card payment, 0 without
+ -- Managed Payments). Without it the charged total is unknown: refuse, so the refund is retried once tax is recorded.
+ IF NOT EXISTS(SELECT 1 FROM jsonb_array_elements(coalesce(o.payment_amount_facts,'[]'::jsonb)) f
+  WHERE f->>'kind'='tax' AND f->>'evidence_ref'=p_payment) THEN RAISE EXCEPTION 'PAY_STRIPE_MP_TAX_PENDING'; END IF;
  SELECT o.amount_total+coalesce(sum(round((f->>'amount')::numeric*100))::bigint,0) INTO charged
   FROM jsonb_array_elements(coalesce(o.payment_amount_facts,'[]'::jsonb)) f WHERE f->>'kind'='tax' AND f->>'evidence_ref'=p_payment;
  SELECT coalesce(sum(round((f->>'amount')::numeric*100))::bigint,0) INTO refunded
@@ -52,23 +57,38 @@ BEGIN
   SELECT * INTO s FROM user_subscriptions WHERE id=o.subscription_id;
   renewing:=s.status IN ('active','trialing','past_due','unpaid') AND s.cancel_at_period_end IS DISTINCT FROM 'true';
  END IF;
- IF refunded<charged OR o.status='refunded' THEN
-  UPDATE payment_orders SET metadata=coalesce(metadata,'{}'::jsonb)||jsonb_build_object('stripeExternalRefund',
-   jsonb_build_object('state',CASE WHEN o.status='refunded' THEN 'refunded' ELSE 'partial_review' END,'refundedMinor',refunded,
-    'chargedMinor',charged,'lastRefundId',p_refund)) WHERE id=o.id;
-  RETURN jsonb_build_object('state',CASE WHEN o.status='refunded' THEN 'refunded' ELSE 'partial_review' END,'duplicate',false,
-   'userId',o.user_id,'renewing',renewing,'refundedMinor',refunded,'chargedMinor',charged);
+ -- Already ended by an earlier refund: this one is only recorded (the refund fact above), never ends it twice.
+ IF o.status='refunded' THEN
+  RETURN jsonb_build_object('state','refunded','duplicate',false,'userId',o.user_id,'renewing',renewing,
+   'refundedMinor',refunded,'chargedMinor',charged);
  END IF;
- -- Full refund: take back what this order granted that is still unused (approximated by the balance, as the
- -- package refund does), reverse its subscription grants, end the order. Never pushes the balance below zero.
+ IF refunded<charged THEN
+  UPDATE payment_orders SET metadata=coalesce(metadata,'{}'::jsonb)||jsonb_build_object('stripeExternalRefund',
+   jsonb_build_object('state','partial_review','refundedMinor',refunded,'chargedMinor',charged,'lastRefundId',p_refund))
+  WHERE id=o.id;
+  RETURN jsonb_build_object('state','partial_review','duplicate',false,'userId',o.user_id,'renewing',renewing,
+   'refundedMinor',refunded,'chargedMinor',charged);
+ END IF;
+ -- Full refund of a credit pack: packs are not tracked per source yet (PAY-DISPUTE-GUARD PR-D0), and a package
+ -- refund is only recorded for a person to settle (MASTER_PLAN item 47; controller 2026-10-14, option B). The order
+ -- is ended as refunded; no credits are taken; the caller alerts with the pack, its credits and the balance.
  IF o.item_type='credit_package' THEN
   SELECT coalesce(sum(amount),0) INTO credits_back FROM credit_transactions
    WHERE source_order_id=o.id AND idempotency_key='method-package:'||o.id;
- ELSE
-  SELECT coalesce(sum(credits_granted),0) INTO credits_back FROM subscription_credit_grants
-   WHERE source_order_id=o.id AND status='granted';
-  UPDATE subscription_credit_grants SET status='reversed' WHERE source_order_id=o.id AND status='granted';
+  UPDATE payment_orders SET status='refunded',payment_status='refunded',
+   metadata=coalesce(metadata,'{}'::jsonb)||jsonb_build_object('stripeExternalRefund',jsonb_build_object('state','pack_review',
+    'refundedMinor',refunded,'chargedMinor',charged,'lastRefundId',p_refund,'refundedAt',p_refunded_at,
+    'packCredits',credits_back,'balanceAtRefund',owner.credits))
+  WHERE id=o.id;
+  RETURN jsonb_build_object('state','pack_review','duplicate',false,'userId',o.user_id,'renewing',false,
+   'packageId',o.item_id,'packCredits',credits_back,'balance',owner.credits,'refundedMinor',refunded,'chargedMinor',charged);
  END IF;
+ -- Full refund of a subscription period: take back what this order's grants still hold, reverse them, end the order.
+ -- Only what this order's own grants still hold (PAYG keeps consumed_amount per grant): other sources stay untouched.
+ -- Never pushes the balance below zero.
+ SELECT coalesce(sum(greatest(credits_granted-consumed_amount,0)),0) INTO credits_back FROM subscription_credit_grants
+  WHERE source_order_id=o.id AND status='granted';
+ UPDATE subscription_credit_grants SET status='reversed' WHERE source_order_id=o.id AND status='granted';
  taken:=least(greatest(owner.credits,0),credits_back)::integer;
  key:='pay-stripe-mp:external-refund:'||o.id;
  -- One ledger row per ended order, also when nothing could be taken back: the shortfall Graylum absorbs is on record.
@@ -77,13 +97,13 @@ BEGIN
   INSERT INTO credit_transactions(user_id,amount,type,description,ledger_type,reason_code,source_type,source_order_id,
    source_refund_id,idempotency_key,balance_before,balance_after,metadata)
   VALUES(owner.id,-taken,'deduction','External card refund','refund_clawback','refund_clawback','stripe_refund',o.id,
-   p_refund,key,owner.credits,owner.credits-taken,jsonb_build_object('creditsGranted',credits_back,'creditsTakenBack',taken,
+   p_refund,key,owner.credits,owner.credits-taken,jsonb_build_object('creditsUnused',credits_back,'creditsTakenBack',taken,
     'creditsShortfall',credits_back-taken,'shortfallAbsorbedBy','graylum','refundedMinor',refunded,'chargedMinor',charged));
  END IF;
  UPDATE payment_orders SET status='refunded',payment_status='refunded',
   metadata=coalesce(metadata,'{}'::jsonb)||jsonb_build_object('stripeExternalRefund',jsonb_build_object('state','refunded',
    'refundedMinor',refunded,'chargedMinor',charged,'lastRefundId',p_refund,'refundedAt',p_refunded_at,
-   'creditsGranted',credits_back,'creditsTakenBack',taken,'creditsShortfall',credits_back-taken))
+   'creditsUnused',credits_back,'creditsTakenBack',taken,'creditsShortfall',credits_back-taken))
  WHERE id=o.id;
  -- The refunded order no longer counts in pay_common_membership_facts; lower the cached level to match (0243).
  PERFORM pay_common_settle_membership_level(o.user_id);
