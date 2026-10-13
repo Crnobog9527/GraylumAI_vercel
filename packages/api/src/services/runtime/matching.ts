@@ -2,6 +2,7 @@
 import { z } from 'zod';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { databaseSkillSource, userVisibleModules } from '../skills/databaseSource';
+import { activateFreeChatSkill } from '../skills/stepGuide';
 import { activateSkill, discoverSkills, SkillLoadError } from '../skills/loader';
 import { fixtureInputCapacity, selectRuntimeHistory } from './context';
 
@@ -58,8 +59,13 @@ export async function activateRuntimeCandidate(user:SupabaseClient,admin:Supabas
  const c=matchCandidate.parse(candidate);
  if(c.requiresTask)throw new Error('RUNTIME_SKILL_TASK_REQUIRED');
  const source=databaseSkillSource({userClient:user,privateClient:admin,moduleId:c.moduleId,skillId:c.skillId,revisionId:c.revisionId});
- const loaded=await activateSkill(source,{packageId:c.packageId,revisionId:c.revisionId,packageHash:c.packageHash},{maxContextBytes:c.inputLimit});
- return loaded.forModel();
+ const identity={packageId:c.packageId,revisionId:c.revisionId,packageHash:c.packageHash};
+ const descriptor=(await source.list()).find(d=>d.revisionId===c.revisionId&&d.packageHash===c.packageHash&&d.packageId===c.packageId);
+ // An unknown identity keeps the loader's own refusal.
+ if(!descriptor)return (await activateSkill(source,identity,{maxContextBytes:c.inputLimit})).forModel();
+ // A matched Skill gets SKILL.md and the step guide, not the steps' files: candidate sizing (fittingCandidates)
+ // runs this same activation before the paid match, so what is sized is exactly what runs (R8b).
+ return (await activateFreeChatSkill(source,descriptor,{maxContextBytes:c.inputLimit,withResources:false})).instructions;
 }
 /** A selected Skill runs with its own model capacity: never pay for a match whose selection cannot run.
  * The input alone is a lower bound, so a candidate that cannot hold it is dropped without loading its Skill. */

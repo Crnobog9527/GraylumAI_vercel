@@ -11,9 +11,9 @@ const LOGIN_HREF = '/login';
 const SIGNUP_HREF = '/login?action=signup';
 
 const NAV_LINKS = [
-  { label: '功能', href: '/landing#features' },
+  { label: '它怎么工作', href: '/landing#how-it-works' },
   { label: '定价', href: '/landing/pricing' },
-  { label: '关于', href: '/landing#about' },
+  { label: '关于', href: '/about' },
 ] as const;
 
 export default function LandingHeader({ siteName = resolveSiteName() }: { siteName?: string }) {

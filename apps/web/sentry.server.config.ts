@@ -3,6 +3,7 @@
 // https://docs.sentry.io/platforms/javascript/guides/nextjs/
 
 import * as Sentry from "@sentry/nextjs";
+import { scrubBreadcrumb, scrubErrorEvent, scrubTransactionEvent } from "./src/lib/sentry-scrub";
 
 function getSentryEnvironment() {
   return (
@@ -49,13 +50,17 @@ Sentry.init({
     Sentry.httpIntegration(),
   ],
 
-  // Before sending event, add additional context
-  beforeSend(event, hint) {
+  // DATA-ERASURE E7: never send personal data or user content (see lib/sentry-scrub.ts).
+  sendDefaultPii: false,
+  beforeBreadcrumb: scrubBreadcrumb,
+  beforeSendTransaction: scrubTransactionEvent,
+
+  beforeSend(event) {
     // Don't send events in development
     if (process.env.NODE_ENV === "development") {
       console.log("[Sentry] Server event captured (not sent in dev):", event.message || event.exception?.values?.[0]?.value);
       return null;
     }
-    return event;
+    return scrubErrorEvent(event);
   },
 });
