@@ -36,7 +36,11 @@ const isoTime = z.string().datetime({ offset: true });
 const attestation = z.object({ by: z.string().uuid(), at: isoTime }).strict();
 const vendorSchema = z.object({ enabled: z.boolean(), hardCapAttested: attestation.nullable() }).strict()
   .refine(v => !v.enabled || v.hardCapAttested !== null, 'A supplier can only be enabled after its platform hard cap is attested');
-const units = z.string().regex(/^[1-9]\d{0,5}$/);
+/**
+ * Every adapter route is pinned to one unit per call (plan §3.5), so the frozen bound must be exactly that;
+ * a larger typo would over-reserve the user's balance. A route with a different ceiling changes this code.
+ */
+const ADAPTER_MAX_UNITS = '1';
 
 const routeSchema = z.object({
   platform: z.enum([...SOCIAL_PLATFORMS, 'web']),
@@ -45,14 +49,20 @@ const routeSchema = z.object({
   route: z.string().min(1).max(120),
   // Only primary routes are approved today (Bright Data backup needs a separate Owner approval, RT-9).
   backup: z.null(),
-  maxUnitsPerCall: units,
+  maxUnitsPerCall: z.literal(ADAPTER_MAX_UNITS),
 }).strict();
 
 export const researchToolsConfigSchema = z.object({
   version: z.literal(1),
   enabled: z.boolean(),
   vendors: z.object({ tikhub: vendorSchema, parallel: vendorSchema, firecrawl: vendorSchema }).strict(),
+  /** Platforms whose verified routes may be used at all. */
   verifiedPlatforms: z.array(z.enum(SOCIAL_PLATFORMS)).max(SOCIAL_PLATFORMS.length),
+  /**
+   * Subset usable for benchmarks: it also needs reliable publication times (30-day rule). YouTube and
+   * Instagram stay out until RT-7 verifies time-bearing routes, while their other lookups remain usable.
+   */
+  benchmarkPlatforms: z.array(z.enum(SOCIAL_PLATFORMS)).max(SOCIAL_PLATFORMS.length),
   routes: z.array(routeSchema).max(64),
   limits: z.object({
     maxSubcallsPerRound: z.number().int().min(1).max(RUN_MAX_CALLS - 3),
@@ -63,6 +73,11 @@ export const researchToolsConfigSchema = z.object({
     minViewsToFollowers: z.string().regex(/^(0|[1-9]\d{0,3})(\.\d{1,4})?$/),
   }).strict(),
 }).strict().superRefine((config, ctx) => {
+  config.benchmarkPlatforms.forEach((platform, index) => {
+    if (!config.verifiedPlatforms.includes(platform)) {
+      ctx.addIssue({ code: 'custom', path: ['benchmarkPlatforms', index], message: `${platform} is not a verified platform` });
+    }
+  });
   const seen = new Set<string>();
   config.routes.forEach((entry, index) => {
     const key = `${entry.platform}:${entry.kind}`;
@@ -96,7 +111,7 @@ export const DISABLED_RESEARCH_TOOLS: ResearchToolsConfig = Object.freeze({
     parallel: { enabled: false, hardCapAttested: null },
     firecrawl: { enabled: false, hardCapAttested: null },
   },
-  verifiedPlatforms: [], routes: [],
+  verifiedPlatforms: [], benchmarkPlatforms: [], routes: [],
   limits: { maxSubcallsPerRound: 12, discoverSubcalls: 25 },
   recentGrowth: { maxFirstPostAgeDays: 90, minViewsToFollowers: '1' },
 }) as ResearchToolsConfig;
@@ -119,10 +134,18 @@ export type RouteSelection =
   | { ok: true; vendor: ResearchVendor; route: string; maxUnitsPerCall: string }
   | { ok: false; reason: 'RESEARCH_DISABLED' | 'PLATFORM_NOT_VERIFIED' | 'ROUTE_NOT_CONFIGURED' | 'VENDOR_DISABLED' };
 
-/** The host, not the model, picks the supplier: platform + query kind → configured primary route. */
-export function selectRoute(config: ResearchToolsConfig, platform: SocialPlatform | 'web', kind: RouteKind): RouteSelection {
+/**
+ * The host, not the model, picks the supplier: platform + query kind → configured primary route.
+ * `purpose: 'benchmark'` additionally requires the platform to be benchmark-eligible.
+ */
+export function selectRoute(
+  config: ResearchToolsConfig, platform: SocialPlatform | 'web', kind: RouteKind, purpose: 'general' | 'benchmark' = 'general',
+): RouteSelection {
   if (!config.enabled) return { ok: false, reason: 'RESEARCH_DISABLED' };
-  if (platform !== 'web' && !config.verifiedPlatforms.includes(platform)) return { ok: false, reason: 'PLATFORM_NOT_VERIFIED' };
+  if (platform !== 'web') {
+    const list = purpose === 'benchmark' ? config.benchmarkPlatforms : config.verifiedPlatforms;
+    if (!list.includes(platform)) return { ok: false, reason: 'PLATFORM_NOT_VERIFIED' };
+  }
   const entry = config.routes.find(item => item.platform === platform && item.kind === kind);
   if (!entry) return { ok: false, reason: 'ROUTE_NOT_CONFIGURED' };
   if (!config.vendors[entry.vendor].enabled) return { ok: false, reason: 'VENDOR_DISABLED' };

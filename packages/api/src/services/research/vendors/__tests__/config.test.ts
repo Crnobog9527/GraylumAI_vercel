@@ -14,7 +14,8 @@ const valid = (): ResearchToolsConfig => ({
     parallel: { enabled: true, hardCapAttested: attested },
     firecrawl: { enabled: false, hardCapAttested: null },
   },
-  verifiedPlatforms: ['tiktok'],
+  verifiedPlatforms: ['tiktok', 'instagram'],
+  benchmarkPlatforms: ['tiktok'],
   routes: [
     { platform: 'tiktok', kind: 'account_posts', vendor: 'tikhub', route: '/tiktok/app/v3/fetch_user_post_videos', backup: null, maxUnitsPerCall: '1' },
     { platform: 'x', kind: 'account_profile', vendor: 'tikhub', route: '/twitter/web/fetch_user_profile', backup: null, maxUnitsPerCall: '1' },
@@ -51,6 +52,8 @@ describe('research_tools_config', () => {
     expect(researchToolsConfigSchema.safeParse(mismatched).success).toBe(false);
     expect(researchToolsConfigSchema.safeParse({ ...valid(), routes: [{ ...valid().routes[0], backup: 'brightdata' }] }).success).toBe(false);
     expect(researchToolsConfigSchema.safeParse({ ...valid(), routes: [valid().routes[0], valid().routes[0]] }).success).toBe(false);
+    expect(researchToolsConfigSchema.safeParse({ ...valid(), routes: [{ ...valid().routes[0], maxUnitsPerCall: '100000' }] }).success).toBe(false);
+    expect(researchToolsConfigSchema.safeParse({ ...valid(), benchmarkPlatforms: ['x'] }).success).toBe(false);
     expect(researchToolsConfigSchema.safeParse({ ...valid(), limits: { maxSubcallsPerRound: 30, discoverSubcalls: 25 } }).success).toBe(false);
     expect(researchToolsConfigSchema.safeParse({ ...valid(), limits: { maxSubcallsPerRound: 29, discoverSubcalls: 29 } }).success).toBe(true);
     expect(researchToolsConfigSchema.safeParse({ ...valid(), limits: { maxSubcallsPerRound: 12, discoverSubcalls: 30 } }).success).toBe(false);
@@ -71,6 +74,12 @@ describe('selectRoute', () => {
     expect(selectRoute(config, 'tiktok', 'account_posts')).toEqual({ ok: true, vendor: 'tikhub',
       route: '/tiktok/app/v3/fetch_user_post_videos', maxUnitsPerCall: '1' });
     expect(selectRoute(config, 'x', 'account_profile')).toEqual({ ok: false, reason: 'PLATFORM_NOT_VERIFIED' });
+    // Instagram lookups are usable in general, but not for benchmarks until its post times are verified.
+    const withInstagram = { ...config, routes: [...config.routes, { platform: 'instagram' as const, kind: 'account_profile' as const,
+      vendor: 'tikhub' as const, route: '/instagram/v1/fetch_user_info_by_username', backup: null, maxUnitsPerCall: '1' as const }] };
+    expect(selectRoute(withInstagram, 'instagram', 'account_profile')).toMatchObject({ ok: true });
+    expect(selectRoute(withInstagram, 'instagram', 'account_profile', 'benchmark')).toEqual({ ok: false, reason: 'PLATFORM_NOT_VERIFIED' });
+    expect(selectRoute(config, 'tiktok', 'account_posts', 'benchmark')).toMatchObject({ ok: true });
     expect(selectRoute(config, 'tiktok', 'keyword_posts')).toEqual({ ok: false, reason: 'ROUTE_NOT_CONFIGURED' });
     expect(selectRoute(config, 'web', 'web_fetch')).toEqual({ ok: false, reason: 'VENDOR_DISABLED' });
     expect(selectRoute(config, 'web', 'web_search')).toMatchObject({ ok: true, vendor: 'parallel', route: 'parallel:search:advanced' });
