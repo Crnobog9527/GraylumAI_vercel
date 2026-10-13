@@ -3,7 +3,10 @@
 -- refused the turn (user without a confirmed positioning asking for own-account social media operations),
 -- the round charges nothing; Graylum bears the model cost. Reuses runtime_execution action fail_platform
 -- (0215: bill2 confirmed_failure + bill2_finalize compensation, once per call) with one more reason,
--- positioning_required. Nothing else in the function changes. No remote database use.
+-- positioning_required. Nothing else in the function changes.
+-- Also adds runtime_positioning_gate(actor), read-only: whether the actor has a confirmed positioning (the 0219 rule)
+-- and how many of their rounds were refunded as positioning refusals in the last 24 hours. Admission caps that
+-- refund path (5 per 24 hours, POSITIONING-GATE abuse guard, controller 2026-10-14). No remote database use.
 BEGIN;
 SET LOCAL lock_timeout='5s';
 DO $migration$
@@ -20,4 +23,18 @@ BEGIN
  patched:=md5(pg_get_functiondef('public.runtime_execution(uuid,uuid,text,jsonb)'::regprocedure));
  IF patched<>'7525ae8d4e450dd8f03db7fa77e89453' THEN RAISE EXCEPTION 'POSITIONING_REFUSAL_TARGET_MISMATCH: %',patched;END IF;
 END $migration$;
+-- Counts only fallback refusals refunded in full: positioning_required is written solely by fail_platform (above),
+-- and only once the round is settled/refunded and cancelled. A user's own stop never carries this reason.
+-- Returns these two values only, never content. Runs on every gated admission: the partial (actor_id, created_at)
+-- index below holds only positioning refusals, so the count never scans the actor's other rounds or the table.
+CREATE INDEX IF NOT EXISTS runtime_executions_positioning_refusals
+ ON public.runtime_executions(actor_id,created_at) WHERE unavailable_reason='positioning_required';
+CREATE OR REPLACE FUNCTION public.runtime_positioning_gate(p_actor_id uuid) RETURNS jsonb
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path=public,pg_temp AS $$
+ SELECT jsonb_build_object('positioned',public.opc_has_confirmed_positioning(p_actor_id),
+  'refusals24h',(SELECT count(*) FROM public.runtime_executions e WHERE e.actor_id=p_actor_id
+   AND e.state='cancelled' AND e.unavailable_reason='positioning_required' AND e.created_at>=now()-interval '24 hours'));
+$$;
+REVOKE ALL ON FUNCTION public.runtime_positioning_gate(uuid) FROM PUBLIC,anon,authenticated,service_role;
+GRANT EXECUTE ON FUNCTION public.runtime_positioning_gate(uuid) TO service_role;
 COMMIT;

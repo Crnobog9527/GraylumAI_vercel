@@ -128,6 +128,8 @@ it('clears a former prompt module flag before publishing when the choice is No',
   expect(clear!.values).toMatchObject({ social_media_related: false });
   expect(clear!.filters).toEqual(expect.arrayContaining([['social_media_related', true]]));
   expect(metadata(f.rpc)).toEqual(input.module);
+  // Publication expects the version the clearing write produced, not the one the editor opened.
+  expect(f.rpc.mock.calls[0]![1].p_expected_updated_at).toBe('2026-10-13T00:00:01.000Z');
   // Cleared first, so the 0219 guard never sees a flagged module become a (positioning) Skill.
   const order = f.steps.filter(step => step.op === 'update').length;
   expect(order).toBe(1);
@@ -135,6 +137,7 @@ it('clears a former prompt module flag before publishing when the choice is No',
   const plain = database();
   await saveModuleSkill(plain.db, randomUUID(), { ...input });
   expect(plain.updates()).toEqual([]);
+  expect(plain.rpc.mock.calls[0]![1].p_expected_updated_at).toBe(input.expectedUpdatedAt);
 });
 
 it('continues an exact retry whose flag was already saved before the response was lost', async () => {

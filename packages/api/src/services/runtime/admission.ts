@@ -48,7 +48,8 @@ import {freezeStagingPaygPricing} from './paygPricing';
 import {freezePaygMessageBudget} from './paygMessageBudget';
 import {readPaygHostPolicies} from './paygHostPolicy';
 import {runAutomaticFinancialRecovery} from './automaticRecovery';
-import {hasConfirmedPositioning,judgePositioning,windowBoundKey,refusePositioning,type PositioningGatePolicy} from './positioningGate';
+import {readPositioningGate,judgePositioning,windowBoundKey,refusePositioning,POSITIONING_REFUSAL_CAP,
+ type PositioningGatePolicy} from './positioningGate';
 import {POSITIONING_FALLBACK,POSITIONING_FALLBACK_INSTRUCTIONS} from './positioningFallback';
 
 const uuid=z.string().uuid();
@@ -144,7 +145,7 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
    // POSITIONING-GATE: the positioning read overlaps the checks below (one round trip); OPC turns, reports and
    // organizing are never gated, so they never read it.
    const positioning=policy.positioningGate&&!policy.opcTurnToken&&!policy.reportGeneration&&input.selection.kind!=='organizer'
-    ?hasConfirmedPositioning(admin,actorId):undefined;
+    ?readPositioningGate(admin,actorId):undefined;
    positioning?.catch(()=>{});
    if(policy.reportGeneration&&session.waitingOrganizer)throw new Error('OPC_CAPTURE_PENDING');
    const blocked=await finishWaitingOrganizer(session,input.requestId,policy.resumeWaitingOrganizer);
@@ -154,7 +155,9 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
    try{requireNewWork(await newWorkGate(admin,policy.real?'staging':'local').message(actorId,settings));}
    finally{leaveRateLimit?.();}
    // Only users without a confirmed positioning are checked, after the rate limit.
-   const gated=positioning!==undefined&&!await positioning;
+   const gateState=await positioning;
+   const gated=Boolean(gateState&&!gateState.positioned);
+   const capped=gated&&gateState!.refusals24h>=POSITIONING_REFUSAL_CAP;
    const mentorStream=Boolean(policy.opcTurnToken&&policy.mentorStream);
    if(policy.organizeOpening&&(!mentorStream||!isOpeningInput(input.input)))throw new Error('RUNTIME_CONTEXT_INVALID');
    const hostParsed=hostTurnContextSchema.safeParse(policy.hostTurnContext);
@@ -239,8 +242,7 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
    if(policy.real)realModel(row.data);
    // Decisions judges every other gated message, including a non-social Skill turning to social media; an admitted
    // gated turn always keeps the fallback rule, since Decisions does not see earlier turns ("好的，那帮我写三条").
-   if(gated)await judgePositioning(policy.positioningGate!,{text:input.input,apiKey});
-   const positioningFallback=gated;
+   const positioningFallback=gated&&await judgePositioning(policy.positioningGate!,{text:input.input,apiKey},capped);
    // The executor appends this rule (withPrimaryAddenda); admission sizes it too, so a fitting turn never fails later.
    const positioningRule=positioningFallback?POSITIONING_FALLBACK_INSTRUCTIONS:'';
    if(input.selection.kind==='organizer')modelConfiguration(()=>assertSeparateSummaryModel(session.dialogueModel,row.data.model_id));

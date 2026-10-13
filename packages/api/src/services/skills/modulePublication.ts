@@ -96,14 +96,15 @@ export async function saveModuleSkill(db: SupabaseClient, actorId: string, value
   const flag = choice === true;
   if (flag && isPositioningWorkflow(prepared.workflow)) throw new Error('SOCIAL_MEDIA_FLAG_POSITIONING_SKILL');
   // "否" clears a flag a former prompt module may carry, before publishing (the 0219 guard refuses a flagged positioning Skill).
-  if (choice === false && value.expectedUpdatedAt !== null) await clearSocialFlag(db, value.moduleId);
+  // Publication then expects the version this write produced (0072 compares updated_at exactly).
+  const cleared = choice === false && value.expectedUpdatedAt !== null ? await clearSocialFlag(db, value.moduleId) : undefined;
   const model = await db.from('ai_models').select(RUNTIME_MODEL_COLUMNS).eq('id',value.module.model_id).single();
   if(model.error || !model.data) throw new Error('请选择已配置的对话模型');
   const option=runtimeModelOption(model.data,'skill');
   if(!option.available) throw new Error(option.reason ?? '对话模型配置不完整');
   const { descriptor, files, workflow } = prepared;
   const { data, error } = await db.rpc('admin_publish_skill_module', {
-    p_actor_id: actorId, p_module_id: value.moduleId, p_expected_updated_at: value.expectedUpdatedAt,
+    p_actor_id: actorId, p_module_id: value.moduleId, p_expected_updated_at: cleared ?? value.expectedUpdatedAt,
     // A flagged new module is created disabled, flagged, and only then enabled as requested.
     p_metadata: flag ? { ...value.module, active: false } : value.module, p_skill_id: value.skillId, p_revision_id: value.revisionId,
     p_request_id: value.requestId, p_expected_version: value.expectedVersion,
@@ -123,13 +124,14 @@ async function boundSkill(db: SupabaseClient, moduleId: string): Promise<boolean
   return Boolean(row.data?.skill_id);
 }
 
-async function clearSocialFlag(db: SupabaseClient, moduleId: string) {
+/** Returns the module version after clearing, or undefined when nothing was written. */
+async function clearSocialFlag(db: SupabaseClient, moduleId: string): Promise<string | undefined> {
   let opened;
   try { opened = await readSocialMediaFlag(db, moduleId); }
-  catch (error) { if (error instanceof Error && error.message === 'SOCIAL_MEDIA_FLAG_MODULE_NOT_FOUND') return; throw error; }
-  if (!opened.socialMediaRelated) return;
-  await saveSocialMediaFlag(db, { moduleId, socialMediaRelated: false, expectedSocialMediaRelated: true,
-    expectedModuleUpdatedAt: opened.moduleUpdatedAt });
+  catch (error) { if (error instanceof Error && error.message === 'SOCIAL_MEDIA_FLAG_MODULE_NOT_FOUND') return undefined; throw error; }
+  if (!opened.socialMediaRelated) return undefined;
+  return (await saveSocialMediaFlag(db, { moduleId, socialMediaRelated: false, expectedSocialMediaRelated: true,
+    expectedModuleUpdatedAt: opened.moduleUpdatedAt })).moduleUpdatedAt;
 }
 
 /** Any failure here leaves the new module disabled (never enabled without its flag); the administrator reopens it. */

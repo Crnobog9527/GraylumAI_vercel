@@ -180,7 +180,7 @@ describe('downstream real-model admission after a valid remote window',()=>{
   mocks.realAdmission=true;
   const calls=allModels?[...policy.callPolicies,{...policy.callPolicies[0],modelId:summaryId,model:'test/summary'}]:policy.callPolicies;
   rpc.mockImplementation(async(name:string)=>({data:name==='runtime_test_policy'?{...policy,callPolicies:calls}:name==='runtime_test_actor_access'?true:name==='runtime_session_context'?{scope:{kind:'positioning_draft',draftId:actor},dialogueModelId:actor,dialogueModel:'test/model'}:name==='runtime_admission_replay'?null:name==='runtime_admit'?{executionId:windowId}:
-   name==='opc_has_confirmed_positioning'?true:[],error:null}));
+   name==='runtime_positioning_gate'?{positioned:true,refusals24h:0}:[],error:null}));
  }
  async function post(path:string,input:unknown){
   return fetchRequestHandler({endpoint:'/api/trpc',req:new Request('http://localhost/api/trpc/'+path,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(input)}),router:app,createContext:()=>context()});
