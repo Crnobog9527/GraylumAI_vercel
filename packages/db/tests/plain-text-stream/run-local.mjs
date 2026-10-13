@@ -83,16 +83,33 @@ try{
  }
  report.checks.push('unmarked v6/v2 turns keep the legacy runtime_cancel');
 
+ // The report only lists quiet rounds: age both rounds past the cutoff and drop the live dispatch lease
+ // that `begin` holds (a round still inside its lease is never a stale-round candidate).
  const stale=await setup({...FREE_CHAT,...MARK});
  const staleCall=await claim(db,stale);await receipt(db,stale,staleCall);await rpc(db,'bill2_finalize',stale.actor,stale.run);
  const plain=await setup(FREE_CHAT);
  const plainCall=await claim(db,plain);await receipt(db,plain,plainCall);await rpc(db,'bill2_finalize',plain.actor,plain.run);
- const rounds=(await db.query("SELECT runtime_stale_charged_rounds(clock_timestamp(),500) r")).rows[0].r;
- const streamed=id=>rounds.rounds?.find(r=>r.executionId===id)?.evidence?.streamed;
- if(rounds.rounds?.some(r=>r.executionId===stale.execution)){
-  assert.equal(streamed(stale.execution),true);assert.equal(streamed(plain.execution),false);
-  report.checks.push('stale charged rounds report marked turns as streamed, unmarked v6 as not');
- }else report.checks.push('stale charged rounds: fixture rounds not reported here (filters); function patch checked below');
+ for(const r of [stale,plain]){
+  await db.query("UPDATE runtime_executions SET created_at=created_at-interval '2 days' WHERE id=$1",[r.execution]);
+  await db.query("UPDATE bill2_runs SET runtime_dispatch_deadline=NULL WHERE id=$1",[r.run]);
+  await db.query(`UPDATE bill2_calls SET created_at=created_at-interval '2 days',
+   dispatched_at=dispatched_at-interval '2 days',settled_at=settled_at-interval '2 days' WHERE run_id=$1`,[r.run]);
+ }
+ const cutoff=(await db.query("SELECT clock_timestamp()-interval '1 day' t")).rows[0].t;
+ const rounds=(await db.query('SELECT runtime_stale_charged_rounds($1,500) r',[cutoff])).rows[0].r;
+ const reported=id=>rounds.rounds?.find(r=>r.executionId===id);
+ if(!reported(stale.execution)||!reported(plain.execution)){
+  // Show every filter the report applies, so a miss names its reason instead of passing silently.
+  const why=await db.query(`SELECT e.id,e.state,e.created_at,r.contract_version,r.closed,r.cancel_requested,r.paused_reason,
+   r.runtime_dispatch_deadline,(SELECT is_deleted FROM profiles p WHERE p.id=e.actor_id) deleted,
+   (SELECT jsonb_agg(jsonb_build_object('state',c.state,'charged',c.charged_delta,'created',c.created_at,'dispatched',c.dispatched_at,
+     'settled',c.settled_at,'compensated',c.compensated_at)) FROM bill2_calls c WHERE c.run_id=r.id) calls
+   FROM runtime_executions e JOIN bill2_runs r ON r.id=e.billing_run_id WHERE e.id=ANY($1)`,[[stale.execution,plain.execution]]);
+  assert.fail('stale-round fixture not reported: '+JSON.stringify({cutoff,rows:why.rows}));
+ }
+ assert.equal(reported(stale.execution).evidence.streamed,true,'marked plain-text turn is reported as streamed');
+ assert.equal(reported(plain.execution).evidence.streamed,false,'unmarked v6 turn is reported as not streamed');
+ report.checks.push('stale charged rounds report a marked turn as streamed and an unmarked v6 turn as not');
 
  for(const sig of ['public.runtime_execution(uuid,uuid,text,jsonb)','public.runtime_stale_charged_rounds(timestamptz,integer)']){
   const def=(await db.query('SELECT pg_get_functiondef($1::regprocedure) d',[sig])).rows[0].d;
