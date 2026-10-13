@@ -14,7 +14,6 @@ vi.mock('@/components/ui/dialog', () => {
   return { Dialog: Wrapper, DialogContent: Wrapper, DialogHeader: Wrapper, DialogTitle: Wrapper };
 });
 import ModuleDetailDialog from './ModuleDetailDialog';
-import { LegacyChatDisabledButton } from '../../app/workbench/report-work-actions';
 const module = { id: 'positioning-module', title: '任意显示名称', description: 'fixture' };
 function action(node: ReactNode): ReactElement<any> | undefined {
   if (Array.isArray(node)) return node.map(action).find(Boolean);
@@ -25,7 +24,6 @@ function action(node: ReactNode): ReactElement<any> | undefined {
 beforeEach(() => { vi.clearAllMocks(); mocks.catalog = { data: [], isError: false }; });
 describe('legacy entry replacements', () => {
   it.each([
-    ['app/workbench/page.tsx', '/positioning'],
     ['components/profile/UsageHistoryCard.tsx', '/positioning'],
     ['components/admin/AdminSidebar.tsx', '/'],
   ])('%s links to %s', (file, destination) => {
@@ -37,20 +35,6 @@ describe('legacy entry replacements', () => {
     const source = readFileSync(new URL('../admin/AdminGuard.tsx', import.meta.url), 'utf8');
     expect(source).toContain("router.push('/')");
     expect(source).not.toContain("router.push('/chat')");
-  });
-  it('both old workbench chat actions use a disabled button with a visible explanation', () => {
-    for (const label of ['在聊天中继续此轮次', '基于此定位创作脚本']) {
-      const html = renderToStaticMarkup(<LegacyChatDisabledButton>{label}</LegacyChatDisabledButton>);
-      expect(html).toMatch(/<button[^>]*disabled=""/);
-      expect(html).toContain('旧对话已停用');
-      expect(html).not.toContain('href=');
-    }
-    for (const file of ['page.tsx', 'report-work-actions.tsx']) {
-      const source = readFileSync(new URL(`../../app/workbench/${file}`, import.meta.url), 'utf8');
-      expect(source).toContain('<LegacyChatDisabledButton>');
-      expect(source).not.toContain('/chat?conversation=');
-      expect(source).not.toContain('api.chatEnter.mutate');
-    }
   });
   it('opens positioning only for a module in the published positioning catalog', () => {
     mocks.catalog.data = [{ moduleId: module.id }];

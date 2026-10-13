@@ -11,7 +11,7 @@ export async function retentionCases({admin,service}) {
     'monthly','card','gold_first30','fixture',$3,3,'terms-v1',$4) o`,[user,plan,mode,JSON.stringify(raw)]);
   const order=(await buy(buyer)).rows[0];
   await admin.query(`INSERT INTO payment_provider_refs(channel,merchant_namespace,mode,object_type,external_id,order_id)
-    VALUES('waffo','fixture','test','checkout','checkout_paid',$1)`,[order.id]);
+    VALUES('stripe','fixture','test','checkout','checkout_paid',$1)`,[order.id]);
   const observe=()=>service.query(`SELECT pay_waffo_observe_qualification($1,'fixture','test','checkout_paid',
     'paid','payment_gold',4900,'usd',now()) AS state`,[order.id]);
   assert.equal((await observe()).rows[0].state,'sold');

@@ -13,6 +13,9 @@ import { WorkspaceFrame } from '@/components/opc/workspace-frame';
 import { ContentEditor } from '@/components/opc/content-editor';
 import composerStyles from '@/components/opc/work-composer.module.css';
 import workStyles from './runtime-work.module.css';
+import {
+ clearForSend, forgetPending, markPendingRestored, openingDraft, readPending, rememberPending, requestIdFor,
+} from './send-input';
 import { QueryNotice } from '@/components/opc/query-notice';
 import { trpc } from '@/trpc/client';
 import {
@@ -70,7 +73,7 @@ function RuntimeWorkspace({routeSession,routeModule}:{routeSession:string;routeM
  const requestedModule=routeModule;
  const alive=useRef(true);
  useEffect(()=>{alive.current=true;return()=>{alive.current=false;};},[]);
- useEffect(()=>{if(sessionId)setInput(localStorage.getItem('opc-runtime-input:'+sessionId)??'');},[sessionId]);
+ useEffect(()=>{if(sessionId)setInput(openingDraft(localStorage,sessionId));},[sessionId]);
  useEffect(()=>{setStoredModule(sessionId?localStorage.getItem('opc-runtime-skill:'+sessionId)??'':'');},[sessionId]);
  function updateInput(value:string){setInput(value);if(sessionId)localStorage.setItem('opc-runtime-input:'+sessionId,value);}
  const choices=trpc.runtime.choices.useQuery(sessionId?{sessionId}:undefined);
@@ -141,24 +144,37 @@ function RuntimeWorkspace({routeSession,routeModule}:{routeSession:string;routeM
   url.search='';url.searchParams.set('session',result.sessionId);history.replaceState(null,'',url);setSession(result.sessionId);
  }catch{setError('建立草稿失败。再次点击会恢复同一次开始请求。');}}
  function requestedVideoChoice(value:string):VideoChoice|'end'|null{const text=value.trim().replace(/[。.!！?？]/g,'');if(/^(暂时结束|先结束|先到这里|暂时不生成)$/.test(text))return'end';if(/^(先做分镜[，,、\s]*再生成剪辑建议|分镜\s*[+＋和与、]\s*剪辑建议都生成|都生成|生成分镜和剪辑建议)$/.test(text))return'both';if(/^(只生成分镜|仅生成分镜|生成分镜)$/.test(text))return'storyboard';if(/^(只生成剪辑建议|仅生成剪辑建议|生成剪辑建议)$/.test(text))return'editing';return null;}
- async function send(scriptRequest=false){if(!workContextReady||!choices.data){setError('正在核对原工作与可用能力，请稍候；输入已保留。');return;}if(scriptRequest&&!isVideo)return;const videoChoice=isVideo&&currentScript?requestedVideoChoice(input):null;if(videoChoice){await chooseVideo(videoChoice);return;}setError('');try{
+ async function send(scriptRequest=false){if(!workContextReady||!choices.data){setError('正在核对原工作与可用能力，请稍候；输入已保留。');return;}if(scriptRequest&&!isVideo)return;const videoChoice=isVideo&&currentScript?requestedVideoChoice(input):null;if(videoChoice){await chooseVideo(videoChoice);return;}setError('');
+  // UI-A fix: the box empties on send; a send that is not stored puts the text back (unless the user typed again).
+  let restoreInput=()=>{},stored=false;
+  try{
   const chosen=choices.data?.skills.find(s=>'skill:'+s.moduleId===activeSelection);
   const selected=chosen?{kind:'skill' as const,moduleId:chosen.moduleId,revisionId:chosen.revisionId}:activeSelection.startsWith('auto:')?{kind:'auto' as const,modelId:activeSelection.slice(5)}:{kind:'ordinary' as const,modelId:activeSelection};
-  const url=new URL(location.href),requestId=url.searchParams.get('request')??crypto.randomUUID();url.searchParams.set('request',requestId);history.replaceState(null,'',url);
-  const submitted=input;if(!scriptRequest)setOutgoing({text:submitted});
-  const admitted=await prepare.mutateAsync({sessionId,requestId,input:scriptRequest?'[OPC_SCRIPT_V1] 请基于当前选题简报讨论并给出可修改的口播稿。'+(submitted.trim()||'先给我一版口播稿。'):submitted,selection:selected,network:'deny',sources:[]});
+  const submitted=input;
+  const requestInput=scriptRequest?'[OPC_SCRIPT_V1] 请基于当前选题简报讨论并给出可修改的口播稿。'+(submitted.trim()||'先给我一版口播稿。'):submitted;
+  // An unconfirmed earlier send of the same input keeps its request id, so the server replays instead of charging twice.
+  const url=new URL(location.href),requestId=requestIdFor(url.searchParams.get('request'),readPending(localStorage,sessionId),requestInput);
+  url.searchParams.set('request',requestId);history.replaceState(null,'',url);
+  if(!scriptRequest)setOutgoing({text:submitted});
+  // The box and the saved draft empty now; the sent text is kept in its own record until the server settles it.
+  rememberPending(localStorage,sessionId,{requestId,text:submitted,input:requestInput});
+  restoreInput=clearForSend(setInput,submitted,text=>{localStorage.setItem('opc-runtime-input:'+sessionId,text);markPendingRestored(localStorage,sessionId);});
+  const admitted=await prepare.mutateAsync({sessionId,requestId,input:requestInput,selection:selected,network:'deny',sources:[]});
   if(!alive.current)return;
   // Q1: the previous organizer answered instead; this message was not stored. Input and request id stay.
-  if(!payg.admitted(admitted)){setOutgoing(null);await view.refetch();return;}
-  setOutgoing(old=>old&&{...old,executionId:admitted.executionId});
+  // A definite refusal: nothing was stored, so the record can go.
+  if(!payg.admitted(admitted)){setOutgoing(null);restoreInput();forgetPending(localStorage,sessionId);await view.refetch();return;}
+  stored=true;setOutgoing(old=>old&&{...old,executionId:admitted.executionId});
   void utils.opc.conversations.invalidate();
   sessionStorage.removeItem('opc-runtime-send:'+sessionId);
   url.searchParams.delete('request');history.replaceState(null,'',url);
-  setInput(current=>{if(current===submitted){localStorage.removeItem('opc-runtime-input:'+sessionId);return '';}return current;});
+  forgetPending(localStorage,sessionId);
   const executed=await execute.mutateAsync({executionId:admitted.executionId});
   if(alive.current){if('unavailable' in executed&&executed.unavailable==='capacity'){markCapacity(admitted.executionId);setError('本次必要材料超过模型输入容量。原请求和已完成内容已保留；请点“停止”后缩短材料再发送。');}await Promise.all([view.refetch(),utils.opc.conversations.invalidate()]);}
  }catch(cause){if(!alive.current)return;const gate=runtimeAdmissionNotice(cause);
-  setOutgoing(old=>old?.executionId?old:null); // Not admitted: the text is still in the box.
+  setOutgoing(old=>old?.executionId?old:null); // Not confirmed: the text goes back into the box.
+  // The outcome may be unknown (reply lost), so the record and request id stay for a replaying resend.
+  if(!stored)restoreInput();
   if(isOrganizerPendingError(cause)){payg.block();await view.refetch();return;}
   setError(gate??'请求状态待核实。请读取原任务状态，不要重新发送相同内容。');await view.refetch();}}
  const initialSend=useRef(false);
@@ -320,7 +336,7 @@ function RuntimeWorkspace({routeSession,routeModule}:{routeSession:string;routeM
      actions={[{label:CHAT_ACTION.retry,disabled:editItem.isPending,onClick:()=>void setType('unknown')}]}>内容类型保存结果待核实。</ChatInlineNotice>}
     {workItem&&contentType==='unknown'&&<section className="rounded-xl border p-4" aria-label="确认内容类型"><h2>这条选题准备做成什么内容？</h2><p>先确认形式，再一起细化重点和结构。</p><div className="flex gap-2 mt-3">{['article','image_text','video'].map(value=><Button key={value} disabled={busy||editItem.isPending||typePending} onClick={()=>setType(value)}>{typeLabel[value]}</Button>)}</div></section>}{executions?.map((e,index)=><div key={e.executionId}>{e.createdAt&&(index===0||!executions[index-1].createdAt||transcriptDay(executions[index-1].createdAt!)!==transcriptDay(e.createdAt))&&<p className={workStyles.dateMarker}>{transcriptDate(e.createdAt)}</p>}<article className={workStyles.turn}>
     {e.input&&!e.input.startsWith('[OPC_WORK_CONTINUE_V1]')&&<p className={workStyles.userMessage}>{e.input.startsWith('[OPC_VIDEO_PACKAGE_V1]')?(e.input.includes('只生成分镜脚本')?'请基于已定稿口播稿生成分镜脚本。':e.input.includes('只生成剪辑建议')?'请基于已保存的分镜生成剪辑建议。':'请先完成分镜脚本，再基于分镜生成剪辑建议。'):e.input.replace(/^\[OPC_SCRIPT_V1\]\s*/, '')}</p>}
-    <div className={workStyles.agentMessage}><div className={workStyles.agentIdentity}><img src="/graylum-logo.png" alt=""/><span>Graylum · {e.skillExecution&&e.state==='completed'&&!e.input?.startsWith('[OPC_WORK_CONTINUE_V1]')&&!e.input?.startsWith('[OPC_VIDEO_PACKAGE_V1]')?'已完成本轮建议':'增长顾问'}</span></div><div>
+    <div className={workStyles.agentMessage}><div className={workStyles.agentIdentity}><img src="/graylum-logo.png" alt=""/><span>Graylum · AI 自媒体陪跑教练</span>{e.skillExecution&&e.state==='completed'&&!e.input?.startsWith('[OPC_WORK_CONTINUE_V1]')&&!e.input?.startsWith('[OPC_VIDEO_PACKAGE_V1]')&&<span className="ml-2 text-xs opacity-70">已完成本轮建议</span>}</div><div>
      {workItem&&e.skillExecution&&e.state==='completed'&&!e.input?.startsWith('[OPC_WORK_CONTINUE_V1]')&&!e.input?.startsWith('[OPC_VIDEO_PACKAGE_V1]')&&e.contentAvailable?<div className={workStyles.proposal}><div className={workStyles.proposalHead}><strong>建议稿</strong><span>{versions.some(v=>v.kind===(isVideo?'script':'brief')&&v.executionId===e.executionId)?'已采用':'尚未采用'}</span></div><MessageMarkdown className={workStyles.reply} text={displayReply(e.input,e.body??e.primaryBody)}/></div>:showsReply(e)&&(e.contentAvailable?<MessageMarkdown className={workStyles.reply} text={displayReply(e.input,e.body??e.primaryBody)}/>:<p className={workStyles.reply}>来源已不可用，暂不展示此内容。</p>)}
      {workItem&&contentType!=='unknown'&&e.state==='completed'&&e.skillExecution&&!e.input?.startsWith('[OPC_VIDEO_PACKAGE_V1]')&&!e.input?.startsWith('[OPC_WORK_CONTINUE_V1]')&&<div className="mt-3 flex flex-wrap gap-2">{versions.some(v=>v.kind===(isVideo?'script':'brief')&&v.executionId===e.executionId)?<Link className="underline" href={'/library?item='+workItem.workItemId+'&return='+sessionId}>{isVideo?'这版口播稿已定稿':'已采用为草稿'} · 查看</Link>:<Button disabled={busy} onClick={()=>finalizeScript(e.executionId)}>{isVideo?'将这条回复定稿为口播稿':'采用为当前草稿'}</Button>}</div>}
      {workItem&&contentType==='unknown'&&e.state==='completed'&&e.skillExecution&&e.contentAvailable&&!e.input?.startsWith('[OPC_WORK_CONTINUE_V1]')&&!e.input?.startsWith('[OPC_VIDEO_PACKAGE_V1]')&&<div className="mt-2">{saved.data?.find((result:{artifactId:string;version:number})=>result.artifactId===e.executionId)?<p role="status">已保存成果 · 第 {saved.data.find((result:{artifactId:string;version:number})=>result.artifactId===e.executionId)?.version} 版</p>:<Button variant="outline" disabled={saveWorkResult.isPending} onClick={()=>persistSkillResult(e.executionId)}>保存 Skill 成果</Button>}</div>}
