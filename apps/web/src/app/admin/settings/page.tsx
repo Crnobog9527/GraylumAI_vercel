@@ -19,6 +19,7 @@ import { getSafeErrorMessage } from '@/lib/safe-error-message';
 import AdminSettingsLoadError from '@/components/admin/AdminErrorState';
 import { RuntimeRateLimitSettings, RuntimeRateLimitTabTrigger } from '@/components/admin/RuntimeRateLimitSettings';
 import { ModelIdentityGuardControl } from '@/components/admin/ModelIdentityGuardControl';
+import { ResearchToolsSettings } from '@/components/admin/ResearchToolsSettings';
 import { RuntimeStopLossSettings, RuntimeStopLossTabTrigger } from '@/components/admin/stop-loss/RuntimeStopLossSettings';
 import { SettingsLoadFailure, SettingsLoading } from '@/components/admin/stop-loss/SettingsLoadFailure';
 import { MentorBudgetTabContent, MentorBudgetTabTrigger } from '@/components/admin/MentorBudgetSettings';
@@ -449,6 +450,7 @@ export default function AdminSettingsPage() {
             </CardContent>
           </Card>
           <div className="mt-6"><ModelIdentityGuardControl /></div>
+          <div className="mt-6"><ResearchToolsSettings /></div>
         </TabsContent>
 
         {/* Membership Tab */}
