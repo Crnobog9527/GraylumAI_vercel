@@ -3,6 +3,7 @@ import { CHAT_ACTION, type ChatNotice } from '@/components/chat/ChatInlineNotice
 import { OUTPUT_TRUNCATED_NOTICE, PLATFORM_FAILURE_NOTICE, PROVIDER_HISTORY_NOTICE, PROVIDER_REJECTED_NOTICE,
   HISTORY_OMITTED_NOTICE } from '@/lib/runtime-gate-notice';
 import { isPaygWaiting, organizerSkipped, type PaygViewFields } from '@/lib/payg-wait';
+import { POSITIONING_REQUIRED_NOTICE } from './gate-notices';
 
 /** A frozen guidance request without its execution, waiting for the user's explicit retry. */
 export const GUIDE_HELD_NOTICE = '引导请求待恢复。点“重试”会沿用原请求，不会另开一次。';
@@ -45,6 +46,9 @@ export function runtimeTurnNotices(turn: RuntimeTurn, ctx: {
   // preflight: automatic refund (0215); platform_review: compensated after the daily review (0220).
   if ((turn.unavailableReason === 'preflight' || turn.unavailableReason === 'platform_review') && turn.state === 'cancelled')
     return [{ id: id('platform'), tone: 'warning', text: PLATFORM_FAILURE_NOTICE }];
+  // POSITIONING-GATE fallback refusal: refunded through fail_platform (0233).
+  if (turn.unavailableReason === 'positioning_required' && turn.state === 'cancelled')
+    return [{ id: id('positioning'), tone: 'warning', text: POSITIONING_REQUIRED_NOTICE }];
   if (turn.historyOmitted)
     notices.push({ id: id('history-omitted'), tone: 'status', text: HISTORY_OMITTED_NOTICE });
   // The view names a whole-turn provider refusal; the same text the execute result showed live.
