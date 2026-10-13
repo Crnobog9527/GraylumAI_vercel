@@ -35,27 +35,23 @@ try {
       VALUES('fixture','fixture','ai','passed',now()-$1::interval)`, [age]);
     await c.query(`INSERT INTO scheduled_job_runs(job_key,started_at,created_at) VALUES('job_a',now()-$1::interval,now()-$1::interval)`, [age]);
   }
-  // A job that has not finished for 40 days keeps its newest finished run (library cleanup resumes from its
-  // summary) and its newest run, even when that newest run is an abandoned 'running' row.
+  // A job that stopped running keeps nothing past the cutoff: no summary, cursor or error text.
   await c.query(`INSERT INTO scheduled_job_runs(job_key,started_at,finished_at,status,summary,error) VALUES
-    ('job_b',now()-interval '45 days',now()-interval '45 days','success','{}',NULL),
     ('job_b',now()-interval '40 days',now()-interval '40 days','success','{"scanCursor":"c","failedPaths":["李雷.pdf"]}',NULL),
     ('job_b',now()-interval '35 days',NULL,'running','{"note":"x"}','private error 李雷')`);
   const audit = await count('user_activity_logs');
   await c.query(`INSERT INTO user_activity_logs(action,action_type,created_at) VALUES('fixture','credit_adjustment',now()-interval '90 days')`);
 
   const result = await cleanup();
-  assert.deepEqual(result, { applicationLogs: 2, diagnosticResults: 2, scheduledJobRuns: 3, more: false });
+  assert.deepEqual(result, { applicationLogs: 2, diagnosticResults: 2, scheduledJobRuns: 4, more: false });
   for (const table of ['application_logs', 'diagnostic_results']) {
     assert.equal(await count(table, "WHERE created_at<now()-interval '29 days'"), 0, table);
     assert.equal(await count(table, "WHERE created_at>=now()-interval '29 days'"), 2, table);
   }
   assert.equal(await count('scheduled_job_runs', "WHERE job_key='job_a'"), 2);
-  assert.deepEqual((await c.query("SELECT status,summary,error FROM scheduled_job_runs WHERE job_key='job_b' ORDER BY started_at")).rows,
-    [{ status: 'success', summary: { scanCursor: 'c' }, error: null }, { status: 'running', summary: {}, error: null }],
-    'kept old runs lose error text and every summary field except the scan cursor');
+  assert.equal(await count('scheduled_job_runs', "WHERE job_key='job_b'"), 0, 'a stopped job keeps no expired run');
   assert.equal(await count('user_activity_logs'), audit + 1, 'admin audit is not touched');
-  report.checks.push('deletes rows older than 29 days, keeps newer rows, the newest run of each job and admin audit');
+  report.checks.push('deletes rows older than 29 days (job runs included), keeps newer rows and admin audit');
 
   assert.deepEqual(await cleanup(), { applicationLogs: 0, diagnosticResults: 0, scheduledJobRuns: 0, more: false });
   report.checks.push('repeat run is a no-op');

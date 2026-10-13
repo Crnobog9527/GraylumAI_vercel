@@ -21,21 +21,11 @@ BEGIN
  DELETE FROM diagnostic_results WHERE id IN
   (SELECT id FROM diagnostic_results WHERE created_at<cutoff ORDER BY created_at LIMIT p_limit);
  GET DIAGNOSTICS n_diag=ROW_COUNT;
- -- Per job, the newest run and the newest finished run are kept whatever their age: library cleanup
- -- resumes from the summary cursor of the latest finished run, even after an abandoned 'running' row.
+ -- Job runs expire like any log. Library cleanup runs daily, so its resume cursor always lives in a
+ -- recent row; only after 29+ days without a run does its orphan scan start again from the beginning.
  DELETE FROM scheduled_job_runs WHERE id IN
-  (SELECT r.id FROM scheduled_job_runs r WHERE r.started_at<cutoff
-    AND r.id<>(SELECT l.id FROM scheduled_job_runs l WHERE l.job_key=r.job_key ORDER BY l.started_at DESC,l.id DESC LIMIT 1)
-    AND r.id IS DISTINCT FROM (SELECT f.id FROM scheduled_job_runs f WHERE f.job_key=r.job_key AND f.finished_at IS NOT NULL
-      ORDER BY f.started_at DESC,f.id DESC LIMIT 1)
-   ORDER BY r.started_at LIMIT p_limit);
+  (SELECT id FROM scheduled_job_runs WHERE started_at<cutoff ORDER BY started_at LIMIT p_limit);
  GET DIAGNOSTICS n_jobs=ROW_COUNT;
- -- The kept rows also lose everything past the cutoff except the opaque storage scan cursor
- -- (object path ids, no content): no error text or other summary outlives 30 days.
- UPDATE scheduled_job_runs SET error=NULL,
-  summary=CASE WHEN summary ? 'scanCursor' THEN jsonb_build_object('scanCursor',summary->'scanCursor') ELSE '{}'::jsonb END
- WHERE id IN (SELECT id FROM scheduled_job_runs WHERE started_at<cutoff
-  AND (error IS NOT NULL OR summary-'scanCursor'<>'{}'::jsonb) ORDER BY started_at LIMIT p_limit);
  RETURN jsonb_build_object('applicationLogs',n_app,'diagnosticResults',n_diag,'scheduledJobRuns',n_jobs,
   'more',n_app=p_limit OR n_diag=p_limit OR n_jobs=p_limit);
 END $$;
