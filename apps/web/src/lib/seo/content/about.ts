@@ -5,6 +5,7 @@
  */
 
 import type { ArticleContent } from '../article';
+import { ONE_LINE_DEFINITION } from '../site';
 import { SIGNUP_CTA_HREF } from './shared';
 
 // About pages (SEO_GEO_SPEC 7.5 and 12.5): company, what the product does, how the site is written,
@@ -22,7 +23,7 @@ export const ABOUT_ZH_HANS: ArticleContent = {
   lead: 'Graylum 是一款 AI 自媒体陪跑教练，由美国怀俄明州的 Grayscale Luminary LLC 开发和运营。它通过对话帮你找准账号定位、决定每周发什么，并写出能直接发布的内容。',
   definition: {
     term: 'Graylum 是什么：',
-    text: 'Graylum 是面向自媒体新手和个人创作者的 AI 陪跑教练。它像一位运营顾问一样主动提问、帮你把想法说清楚，再给出下一步该做什么。',
+    text: ONE_LINE_DEFINITION['zh-Hans'],
   },
   cta: {
     label: '免费和教练聊聊',
@@ -77,7 +78,7 @@ export const ABOUT_ZH_TW: ArticleContent = {
   lead: 'Graylum 是一款 AI 自媒體陪跑教練，由美國懷俄明州的 Grayscale Luminary LLC 開發與營運。它透過對話幫你找準帳號定位、決定每週要發什麼，並寫出可以直接發布的內容。',
   definition: {
     term: 'Graylum 是什麼：',
-    text: 'Graylum 是給自媒體新手和個人創作者的 AI 陪跑教練。它像一位經營顧問一樣主動提問、幫你把想法說清楚，再告訴你下一步該做什麼。',
+    text: ONE_LINE_DEFINITION['zh-TW'],
   },
   cta: {
     label: '免費和教練聊聊',
