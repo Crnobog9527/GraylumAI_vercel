@@ -17,19 +17,22 @@ export function PriceD({ data, membershipHref }: { data: LandingData; membership
   return (
     <section id="pricing" aria-labelledby="pricing-title" className={cn(styles.section, styles.deferred)}>
       <div className={styles.priceHead}>
-      <h2 id="pricing-title" className={cn(styles.display, styles.priceTitle)}>{PRICE_COMPARE.title}</h2>
+        <h2 id="pricing-title" className={cn(styles.display, styles.priceTitle)}>{PRICE_COMPARE.title}</h2>
 
-      {rows.length > 0 ? (
-        <div className={cn(styles.compare, styles.ticked)}>
-          <p className={styles.compareLede}>{PRICE_COMPARE.lede}</p>
-          <ul>
-            {rows.map((row, index) => (
-              <li key={row.sourceId}><span>{row.label}<sup><a href={`#d-source-${row.sourceId}`} aria-label={`出处 ${index + 1}`}>{index + 1}</a></sup></span><span>{row.price}</span></li>
-            ))}
-          </ul>
-          {pricing.proMonthly !== null ? <p className={styles.ownPrice}>{PRICE_COMPARE.ownPrice(formatUsd(pricing.proMonthly))}</p> : null}
-        </div>
-      ) : null}
+        {rows.length > 0 ? (
+          <div className={cn(styles.compare, styles.ticked)}>
+            <p className={styles.compareLede}>{PRICE_COMPARE.lede}</p>
+            <ul>
+              {rows.map((row, index) => (
+                <li key={row.sourceId}>
+                  <span>{row.label}<sup><a href={`#d-source-${row.sourceId}`} aria-label={`出处 ${index + 1}`}>{index + 1}</a></sup></span>
+                  <span>{row.price}</span>
+                </li>
+              ))}
+            </ul>
+            {pricing.proMonthly !== null ? <p className={styles.ownPrice}>{PRICE_COMPARE.ownPrice(formatUsd(pricing.proMonthly))}</p> : null}
+          </div>
+        ) : null}
       </div>
 
       {pricing.founderOpen ? (
