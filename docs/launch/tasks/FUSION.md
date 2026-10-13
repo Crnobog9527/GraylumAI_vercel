@@ -4,6 +4,8 @@
 
 > **2026-10-12 Owner 决定（Master Plan 第 2.1 节）**：评审团改为自研，复用对比模式的多模型并行能力；开工前先调研 GitHub 成熟开源项目的架构和 flowith.io 的做法，能直接用的不自己造。OpenRouter Fusion 方案（实测证据 [#852](https://github.com/Crnobog9527/GraylumAI_vercel/pull/852)）已被取代，下文“Fusion 方案”各条只作历史保留；原“自研方案（参考设计）”改为现行方案的起点，按调研结果细化后写进 FUSION-REVIEW 的实施 PR。评审仍不联网。
 
+> **2026-10-13 FUSION-REVIEW 实施方案**：[FUSION-REVIEW.md](FUSION-REVIEW.md) 定义了自研评审的架构、“Fusion 多模型单次上界”（同一组并行调用的上界之和、组冻结）、部分结算和必测项新口径；本文件与它冲突时以它为准，本文件的必测项和计费段落由它的 PR-1、PR-4 同步改写。
+
 ## 开工前必读
 
 v12 第 4、7、9 节；v10.2 第 6 节（五条底线）；[BILL2 技术契约](V3-BILL-2-provider-authoritative-billing.md)（尤其是运行单、结果未知和第 128 行"Fusion 部分失败"条款）；[AGENT-CORE 实施说明](AGENT-CORE.md) 中的附属会话部分；[DATA-ERASURE 实施说明](DATA-ERASURE.md)。
