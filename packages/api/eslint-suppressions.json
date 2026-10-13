@@ -24,32 +24,6 @@
       "count": 2
     }
   },
-  "src/routers/ai.test.ts": {
-    "@typescript-eslint/no-explicit-any": {
-      "count": 2
-    }
-  },
-  "src/routers/ai.ts": {
-    "@typescript-eslint/no-explicit-any": {
-      "count": 2
-    },
-    "@typescript-eslint/no-unused-vars": {
-      "count": 1
-    }
-  },
-  "src/routers/aiStreamAdmission.integration.ts": {
-    "@typescript-eslint/no-explicit-any": {
-      "count": 2
-    }
-  },
-  "src/routers/aiStreamRoute.test.ts": {
-    "@typescript-eslint/no-explicit-any": {
-      "count": 21
-    },
-    "@typescript-eslint/no-unused-vars": {
-      "count": 1
-    }
-  },
   "src/routers/chat.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 2
@@ -98,7 +72,7 @@
       "count": 3
     },
     "@typescript-eslint/no-unused-vars": {
-      "count": 4
+      "count": 3
     }
   },
   "src/routers/invitation.dashboard.test.ts": {
@@ -134,7 +108,7 @@
   },
   "src/routers/modelCredentials.test.ts": {
     "@typescript-eslint/no-explicit-any": {
-      "count": 6
+      "count": 4
     }
   },
   "src/routers/modules.test.ts": {
@@ -150,19 +124,6 @@
   "src/routers/modules.usage.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 1
-    }
-  },
-  "src/routers/openRouterSearch.integration.ts": {
-    "@typescript-eslint/no-explicit-any": {
-      "count": 9
-    },
-    "@typescript-eslint/no-unused-vars": {
-      "count": 1
-    }
-  },
-  "src/routers/ordinaryChatReliability.integration.ts": {
-    "@typescript-eslint/no-explicit-any": {
-      "count": 12
     }
   },
   "src/routers/payments.test.ts": {
@@ -181,14 +142,6 @@
   "src/routers/s1Fix1Grants.integration.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 5
-    }
-  },
-  "src/routers/searchEvidence.integration.ts": {
-    "@typescript-eslint/no-explicit-any": {
-      "count": 6
-    },
-    "@typescript-eslint/no-unused-vars": {
-      "count": 2
     }
   },
   "src/routers/settings.test.ts": {
@@ -279,11 +232,6 @@
       "count": 1
     }
   },
-  "src/services/__tests__/chatRuntime.test.ts": {
-    "@typescript-eslint/no-explicit-any": {
-      "count": 2
-    }
-  },
   "src/services/__tests__/creditBalance.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 1
@@ -300,11 +248,6 @@
     }
   },
   "src/services/__tests__/invitationRebate.test.ts": {
-    "@typescript-eslint/no-explicit-any": {
-      "count": 1
-    }
-  },
-  "src/services/__tests__/modelRouter.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 1
     }
@@ -370,13 +313,10 @@
   },
   "src/services/__tests__/workbench.integration.ts": {
     "@typescript-eslint/no-explicit-any": {
-      "count": 17
+      "count": 15
     },
     "@typescript-eslint/no-unused-vars": {
       "count": 1
-    },
-    "prefer-const": {
-      "count": 2
     }
   },
   "src/services/__tests__/workbenchGeneration.test.ts": {
@@ -435,12 +375,12 @@
   },
   "src/services/diagnostics.ts": {
     "@typescript-eslint/no-unused-vars": {
-      "count": 13
+      "count": 6
     }
   },
   "src/services/diagnosticsResults.test.ts": {
     "@typescript-eslint/no-explicit-any": {
-      "count": 6
+      "count": 5
     }
   },
   "src/services/invitationRebate.ts": {
@@ -471,7 +411,7 @@
   },
   "src/services/opc/service.ts": {
     "@typescript-eslint/no-explicit-any": {
-      "count": 4
+      "count": 1
     }
   },
   "src/services/providerUsage.ts": {

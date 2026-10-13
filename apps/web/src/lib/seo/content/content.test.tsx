@@ -1,0 +1,139 @@
+import { renderToStaticMarkup } from 'react-dom/server';
+import { describe, expect, it, vi } from 'vitest';
+import { ArticlePage } from '@/components/public-site/ArticlePage';
+import { sanitizeRedirectTarget } from '@/lib/auth';
+import { SIMPLIFIED_HOME_HREF, SITE_CHROME } from '@/components/public-site/site-chrome';
+import type { ArticleContent } from '../article';
+import { PUBLIC_PAGES } from '../public-pages';
+import { ABOUT_ZH_HANS, ABOUT_ZH_TW } from './about';
+import { SIGNUP_CTA_HREF } from './shared';
+import { ZH_TW_GLOSSARY } from './zh-tw/glossary';
+import { ZH_TW_HUB } from './zh-tw/hub';
+import { ZH_TW_IG_JINGYING } from './zh-tw/ig-jingying';
+import { ZH_TW_SHEQUN_JINGYING } from './zh-tw/shequn-jingying';
+import { ZH_TW_SHEQUN_XINGXIAO } from './zh-tw/shequn-xingxiao';
+import { ZH_TW_ZIMEITI_JINGYING } from './zh-tw/zimeiti-jingying';
+import { ZH_TW_ZIMEITI_KECHENG } from './zh-tw/zimeiti-kecheng';
+
+vi.mock('next/link', () => ({
+  default: ({ href, children, ...rest }: { href: string; children: React.ReactNode }) => <a href={href} {...rest}>{children}</a>,
+}));
+
+// Every public content page; keyword pages are added here as they are written.
+const ARTICLES: ArticleContent[] = [
+  ABOUT_ZH_HANS,
+  ABOUT_ZH_TW,
+  ZH_TW_HUB,
+  ZH_TW_ZIMEITI_JINGYING,
+  ZH_TW_SHEQUN_XINGXIAO,
+  ZH_TW_SHEQUN_JINGYING,
+  ZH_TW_IG_JINGYING,
+  ZH_TW_ZIMEITI_KECHENG,
+];
+
+// Login entry pages are not in the sitemap but are real pages every visitor can open.
+const LOGIN_LINKS = new Set(['/login', SIGNUP_CTA_HREF]);
+// The public Simplified home page until the /app move (site-chrome SIMPLIFIED_HOME_HREF).
+const TEMPORARY_PUBLIC_LINKS = new Set([SIMPLIFIED_HOME_HREF]);
+const PAGE_PATHS = new Set(PUBLIC_PAGES.map(page => page.path));
+
+// Characters that only exist in Simplified Chinese; Taiwan pages must not contain them (spec 3.1).
+const SIMPLIFIED_ONLY = /[们这说个发为对时会过还进动么优网户页质视频账号运营设计应该经开关题见让从产业务认识讯书写读样实际点热准问]/;
+
+function internalLinks(content: ArticleContent) {
+  const chrome = SITE_CHROME[content.locale];
+  return [
+    content.cta.href,
+    ...content.breadcrumb.map(item => item.path),
+    ...content.related.map(link => link.href),
+    ...Object.values(content.alternates ?? {}),
+    chrome.home,
+    ...chrome.nav.map(link => link.href),
+    ...chrome.company.map(link => link.href),
+    ...chrome.legal.map(link => link.href),
+  ];
+}
+
+describe.each(ARTICLES.map(content => [content.path, content] as const))('public page %s', (_path, content) => {
+  it('sends the product entry through sign-up to the positioning diagnosis', () => {
+    const url = new URL(content.cta.href, 'https://www.graylum.com');
+    expect(url.pathname).toBe('/login');
+    expect(url.searchParams.get('action')).toBe('signup');
+    expect(sanitizeRedirectTarget(url.searchParams.get('redirect'))).toBe('/positioning');
+  });
+
+  it('is in the sitemap and every internal link points at an existing public page', () => {
+    expect(PAGE_PATHS.has(content.path)).toBe(true);
+    for (const href of internalLinks(content)) {
+      expect(PAGE_PATHS.has(href) || LOGIN_LINKS.has(href) || TEMPORARY_PUBLIC_LINKS.has(href), href).toBe(true);
+    }
+  });
+
+  it('keeps the title, description and first-screen answer within the spec limits', () => {
+    const cjk = (text: string) => (text.match(/[㐀-鿿]/g) ?? []).length;
+    expect(cjk(content.metaTitle)).toBeLessThanOrEqual(30);
+    // SEO_GEO_SPEC section 5 (description 60–80 characters) and 7.1 (answer within 100 characters).
+    expect(cjk(content.metaDescription)).toBeGreaterThanOrEqual(60);
+    expect(cjk(content.metaDescription)).toBeLessThanOrEqual(80);
+    expect(content.lead.length).toBeLessThanOrEqual(100);
+    expect(content.sections.length).toBeGreaterThanOrEqual(3);
+    expect(content.sections.length).toBeLessThanOrEqual(6);
+  });
+
+  it('renders exactly one H1, a product entry, the visible FAQ as FAQPage data, and the page language', () => {
+    const html = renderToStaticMarkup(<ArticlePage content={content} supportEmail="help@graylum.com" />);
+    expect(html.match(/<h1[\s>]/g)).toHaveLength(1);
+    expect(html).toContain(`href="${content.cta.href.replace(/&/g, '&amp;')}"`);
+    // The author attribution itself links to About (SEO_GEO_SPEC 7.5).
+    expect(html).toContain(`<a href="${SITE_CHROME[content.locale].company[0].href}" rel="author"`);
+    expect(html).toContain(`>${SITE_CHROME[content.locale].authorLabel}</a>`);
+    expect(html).toContain(`lang="${content.locale === 'zh-TW' ? 'zh-Hant-TW' : 'zh-Hans'}"`);
+    const data = JSON.parse(html.match(/<script type="application\/ld\+json">(.*?)<\/script>/)![1]);
+    const faq = data.find((item: { '@type': string }) => item['@type'] === 'FAQPage');
+    expect(faq?.mainEntity.map((item: { name: string }) => item.name)).toEqual(content.faq?.map(item => item.question));
+    for (const item of content.faq ?? []) {
+      expect(html).toContain(item.answer);
+    }
+    expect(html.match(/<h[1-6][\s>]/g)!.length).toBe(html.match(/<h[1-6][\s>]/g)!.filter(tag => !tag.startsWith('<h4')).length);
+  });
+
+  it.runIf(content.path.startsWith('/zh-tw/') && content.path !== '/zh-tw/about')('links back to the hub with 自媒體 and to two sibling pages', () => {
+    expect(content.breadcrumb[0]).toEqual({ name: '自媒體', path: '/zh-tw' });
+    expect(content.related.some(link => link.href === '/zh-tw')).toBe(true);
+    expect(content.related.filter(link => link.href.startsWith('/zh-tw/')).length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('never links visitors to "/", which is still the logged-in home before the /app move', () => {
+    const html = renderToStaticMarkup(<ArticlePage content={content} />);
+    expect(html).not.toContain('href="/"');
+    expect(html).not.toContain('href="/?');
+    // Search engines still see the production root as the home page.
+    if (content.breadcrumb[0].path === '/') {
+      expect(html).toContain('"item":"https://www.graylum.com/"');
+      expect(html).toContain(`href="${SIMPLIFIED_HOME_HREF}"`);
+    }
+  });
+
+  it.runIf(content.locale === 'zh-TW' && content.path !== '/zh-tw/about')('cites at least one visible source (spec 12.4)', () => {
+    expect(content.sources?.length).toBeGreaterThan(0);
+    const html = renderToStaticMarkup(<ArticlePage content={content} />);
+    for (const source of content.sources ?? []) {
+      expect(source.href).toMatch(/^https:\/\//);
+      expect(html).toContain(`href="${source.href.replace(/&/g, '&amp;')}"`);
+    }
+  });
+
+  it.runIf(content.locale === 'zh-TW')('uses Traditional characters only', () => {
+    const text = JSON.stringify(content) + JSON.stringify(SITE_CHROME['zh-TW']);
+    expect(text.match(SIMPLIFIED_ONLY)?.[0]).toBeUndefined();
+  });
+
+  it.runIf(content.locale === 'zh-TW')('uses the Taiwan wording from the glossary', () => {
+    const text = JSON.stringify(content) + JSON.stringify(SITE_CHROME['zh-TW']);
+    for (const entry of ZH_TW_GLOSSARY) {
+      for (const word of entry.avoid) {
+        expect(text.includes(word), `${word} → ${entry.taiwan}`).toBe(false);
+      }
+    }
+  });
+});

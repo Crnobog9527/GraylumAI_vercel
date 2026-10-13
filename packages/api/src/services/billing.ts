@@ -194,9 +194,8 @@ export class ModelPricingUnavailableError extends Error {
     public readonly modelId: string,
     public readonly reason: 'missing' | 'zero_pricing',
   ) {
-    super(reason === 'missing'
-      ? `模型价格未配置: ${modelId}`
-      : `模型输入/输出价格不能为 0: ${modelId}`);
+    // MODEL-IDENTITY-GUARD: the message may reach users; the model id stays on the property.
+    super(reason === 'missing' ? '模型价格未配置' : '模型输入/输出价格不能为 0');
     this.name = 'ModelPricingUnavailableError';
   }
 }

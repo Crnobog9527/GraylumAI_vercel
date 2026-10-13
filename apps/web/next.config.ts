@@ -2,6 +2,7 @@ import type { NextConfig } from "next";
 import { withSentryConfig } from "@sentry/nextjs";
 import { PHASE_PRODUCTION_BUILD } from "next/constants";
 import { validateRedisEnvForBuild } from "../../packages/api/src/lib/envValidator";
+import { buildRobotsHeaderRules, SITE_INDEXING_ENV } from "./src/lib/robots-policy";
 
 const sentryBuildUploadEnabled =
   process.env.ENABLE_SENTRY_BUILD_UPLOAD === "true" &&
@@ -53,10 +54,13 @@ const nextConfig: NextConfig = {
         // Start with 30 days on this host only; preload is difficult to undo.
         { key: "Strict-Transport-Security", value: "max-age=2592000" },
         { key: "Content-Security-Policy-Report-Only", value: reportOnlyCsp },
-        // Keep every host out of search and AI indexes until the redesigned public site launches.
-        { key: "X-Robots-Tag", value: "noindex, nofollow" },
       ],
-    }, {
+    },
+    // X-Robots-Tag: every response stays noindex unless SITE_INDEXING is exactly "public"; on the public
+    // environment only logged-in, login and status pages keep it (SEO_GEO_SPEC sections 2 and 15). Read at
+    // build time; staging and production build in separate Vercel projects with their own value.
+    ...buildRobotsHeaderRules(process.env[SITE_INDEXING_ENV]),
+    {
       // Only content-addressed font resources are immutable, not the notices.
       source: "/fonts/misans/:asset(.+\\.(?:woff2|css))",
       headers: [{ key: "Cache-Control", value: "public, max-age=31536000, immutable" }],

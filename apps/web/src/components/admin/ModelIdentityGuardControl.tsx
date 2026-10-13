@@ -44,7 +44,7 @@ export function ModelIdentityGuardControl() {
       <CardTitle>模型身份保护</CardTitle>
       <CardDescription>
         开启时，用户看不到真实的模型品牌和型号，问到时统一回复品牌话术（Fusion 评审团除外）。
-        关闭后页面恢复显示模型名称，但网页和服务器之间的数据里仍然不带模型的技术编号。
+        关闭后只停用品牌身份说明和回答替换；网页和服务器之间的数据始终不带真实模型名称和编号。
         本块单独保存，不包含在“保存所有设置”里。
       </CardDescription>
     </CardHeader>
@@ -81,8 +81,8 @@ export function ModelIdentityGuardControl() {
           <AlertDialogTitle>{confirming ? '确认开启模型身份保护？' : '确认关闭模型身份保护？'}</AlertDialogTitle>
           <AlertDialogDescription>
             {confirming
-              ? '开启后，之后发出的消息会统一使用品牌身份，页面不再显示模型名称。'
-              : '关闭后，之后发出的消息不再加品牌身份说明，模型可能会说出自己的真实品牌；页面恢复显示模型名称。'}
+              ? '开启后，之后发出的消息会统一使用品牌身份，问到身份时回复品牌话术。'
+              : '关闭后，之后发出的消息不再加品牌身份说明，模型可能会说出自己的真实品牌。页面和数据里仍不显示模型名称。'}
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>

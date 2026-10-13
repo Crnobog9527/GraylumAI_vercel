@@ -11,7 +11,7 @@ const REJECTIONS: Record<string, Rejection> = {
   PAY_WAFFO_MEMBERSHIP_TRANSITION_REQUIRED: { code: 'PRECONDITION_FAILED',
     message: '你已有生效中的会员，不能重复购买。会员到期前无需再次付款。' },
   PAY_WAFFO_GOLD_FIRST_INELIGIBLE: { code: 'PRECONDITION_FAILED',
-    message: 'Gold 首 30 天优惠仅限首次购买 Gold 的账号，你的账号不符合条件。' },
+    message: 'Gold 首月优惠仅限首次购买 Gold 的账号，你的账号不符合条件。' },
   PAY_WAFFO_PURCHASE_PENDING: { code: 'CONFLICT',
     message: '你有一笔付款还在处理中，请先完成它，或等它超时关闭后再试。' },
   PAY_WAFFO_CHECKOUT_OPEN: { code: 'CONFLICT',

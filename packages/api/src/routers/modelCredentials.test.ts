@@ -2,10 +2,8 @@
 import { randomUUID } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
 import { modelRouter } from './model';
-import { aiRouter } from './ai';
 import { settingsRouter } from './settings';
 import { DiagnosticsService } from '../services/diagnostics';
-import { getAvailableModels, selectModel } from '../services/modelRouter';
 
 const id = '11111111-1111-4111-8111-111111111111';
 function fixture(role: 'admin' | 'user' = 'admin') {
@@ -60,22 +58,10 @@ function fixture(role: 'admin' | 'user' = 'admin') {
 }
 
 describe('B01 model credential boundary', () => {
-  it('user routing, preferred-model selection, catalog and cost estimation survive column denial', async () => {
+  it('users cannot read the administrator model catalog', async () => {
     const f = fixture('user');
-    const models = await getAvailableModels(f.user as any);
-    expect(models[0].id).toBe(id);
-    expect(models[0].apiKey).toBeNull();
-    const selected = await selectModel({ supabase: f.user as any, userPreferredModel: id,
-      message: 'hello', conversationTurns: 0 });
-    expect(selected.modelConfig.id).toBe(id);
-    const caller = aiRouter.createCaller(f.context);
-    f.noSecret(await caller.getAvailableModels());
-    const estimate = await caller.estimateCost({ message: 'hello', modelId: id });
-    expect(estimate.modelId).toBe(f.row.model_id);
-    f.noSecret(estimate);
-    const active = await modelRouter.createCaller(f.context).getActiveModels();
-    expect(active?.[0].id).toBe(id);
-    expect(f.calls.length).toBeGreaterThan(3);
+    // MODEL-IDENTITY-GUARD: name-bearing model procedures are administrator-only.
+    await expect(modelRouter.createCaller(f.context).getActiveModels()).rejects.toMatchObject({ code: 'FORBIDDEN' });
     expect(f.calls.every(call => !call.admin && call.columns !== '*' && !call.columns.includes('api_key'))).toBe(true);
   });
 

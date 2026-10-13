@@ -1880,7 +1880,7 @@ it("OPC: one mentor conversation persists across steps, refresh and original Ses
     expect(await page.getByRole("textbox", {name:"给导师的回复"}).isVisible()).toBe(true);
     async function expectOpening(label: string, title: string) {
       const paragraph = page.getByRole("log", { name: "完整导师消息" })
-        .getByText(`导师主动引导 · ${label}`, { exact: true })
+        .getByText(`AI 自媒体陪跑教练 · 主动引导 · ${label}`, { exact: true })
         .locator("..").locator("p");
       await expect.poll(() => paragraph.textContent(), { timeout: 30000 })
         .toContain(`“${title}”`);
@@ -1906,7 +1906,7 @@ it("OPC: one mentor conversation persists across steps, refresh and original Ses
     await page.reload();
     await expect
       .poll(() =>
-        page.getByRole("textbox", { name: "给导师的回复" }).inputValue(),
+        page.getByRole("textbox", { name: "给导师的回复" }).textContent(),
       )
       .toBe("我想先明确我的受众");
     let loseFirstReply = true;
@@ -1944,7 +1944,7 @@ it("OPC: one mentor conversation persists across steps, refresh and original Ses
     expect(
       await page
         .getByRole("textbox", { name: "给导师的回复", exact: true })
-        .inputValue(),
+        .textContent(),
     ).toBe("恢复期间另写的未发送内容");
     const d = await f.service.read(draftId);
     expect(d.sessionId).toBeTruthy();
@@ -2043,7 +2043,7 @@ it("OPC: one mentor conversation persists across steps, refresh and original Ses
     expect(
       await page
         .getByRole("textbox", { name: "给导师的回复", exact: true })
-        .inputValue(),
+        .textContent(),
     ).toBe("跨步骤保留的未发送内容");
     await page
       .getByRole("textbox", { name: "给导师的回复" })
@@ -2239,7 +2239,7 @@ it("OPC: browser confirms the autosaved form as the step result without a duplic
     const draftId = new URL(page.url()).pathname.split("/").at(-1)!;
     async function expectOpening(label: string, title: string) {
       const paragraph = page.getByRole("log", { name: "完整导师消息" })
-        .getByText(`导师主动引导 · ${label}`, { exact: true })
+        .getByText(`AI 自媒体陪跑教练 · 主动引导 · ${label}`, { exact: true })
         .locator("..").locator("p");
       await expect.poll(() => paragraph.textContent(), { timeout: 30000 })
         .toContain(`“${title}”`);
@@ -2718,7 +2718,7 @@ it("OPC: question-by-question confirmation keeps mentor, receipt recovery and hi
     await first().waitFor();expect(await second().count()).toBe(0);
     async function expectOpening(label: string, title: string) {
       const paragraph = page.getByRole("log", { name: "完整导师消息" })
-        .getByText(`导师主动引导 · ${label}`, { exact: true })
+        .getByText(`AI 自媒体陪跑教练 · 主动引导 · ${label}`, { exact: true })
         .locator("..").locator("p");
       await expect.poll(() => paragraph.textContent(), { timeout: 30000 })
         .toContain(`“${title}”`);
@@ -2737,7 +2737,7 @@ it("OPC: question-by-question confirmation keeps mentor, receipt recovery and hi
         informationWrites.push(r.postData()??"");
       }
     });
-    async function send(text:string){await composer().fill(text);await page.getByRole("button",{name:"发送",exact:true}).click();try{await expect.poll(()=>composer().inputValue(),{timeout:30000}).toBe("");}catch(error){console.info('QUESTION_SEND_FAILURE',{alerts:await page.getByRole('alert').allTextContents(),admissions:admissions.length});await page.screenshot({path:process.env.V3_WORKBENCH_OUTPUT+'/question-send-failure.png'});throw error;}}
+    async function send(text:string){await composer().fill(text);await page.getByRole("button",{name:"发送",exact:true}).click();try{await expect.poll(()=>composer().textContent(),{timeout:30000}).toBe("");}catch(error){console.info('QUESTION_SEND_FAILURE',{alerts:await page.getByRole('alert').allTextContents(),admissions:admissions.length});await page.screenshot({path:process.env.V3_WORKBENCH_OUTPUT+'/question-send-failure.png'});throw error;}}
     await send("我做 AI 赛道");
     await expect.poll(()=>first().inputValue(),{timeout:30000}).toBe("我做 AI 赛道");
     // Autosave includes a 700ms debounce plus a fresh read and the write.
@@ -3622,7 +3622,7 @@ it("OPC: a revision makes the page open the current question again in the new ro
     }
     const openingFor = (label: string) =>
       page.getByRole("log", { name: "完整导师消息" })
-        .getByText(`导师主动引导 · ${label}`, { exact: true });
+        .getByText(`AI 自媒体陪跑教练 · 主动引导 · ${label}`, { exact: true });
     await login();
     // Round A opens its current question while the user is idle.
     await expect.poll(() => openingFor("1.1").count(), { timeout: 30000 }).toBe(1);
@@ -4618,7 +4618,7 @@ it("OPC: an upstream reconfirmation can be resubmitted and never hides already a
     await expect.poll(async () => (await rowTexts()).length, {timeout:30000}).toBe(2);
     // No deferral UI in a mentor draft: defer on the server, then check the page.
     // Like the removed control, defer only after this question's own opening finished.
-    await page.getByRole("log", {name:"完整导师消息"}).getByText("导师主动引导 · 1.2", {exact:true}).waitFor({timeout:60000});
+    await page.getByRole("log", {name:"完整导师消息"}).getByText("AI 自媒体陪跑教练 · 主动引导 · 1.2", {exact:true}).waitFor({timeout:60000});
     await deferQuestion(f, draft.draftId, "step-0", "other");
     await resetLocalIpWindow();
 
@@ -4764,11 +4764,11 @@ it("OPC: clicking a review row opens that reached question without advancing pro
     await expect.poll(async () => heading().textContent(), {timeout:30000}).toContain("1.3");
     // No deferral UI in a mentor draft: defer on the server, then check the page.
     // Like the removed control, defer only after this question's own opening finished.
-    await page.getByRole("log", {name:"完整导师消息"}).getByText("导师主动引导 · 1.3", {exact:true}).waitFor({timeout:60000});
+    await page.getByRole("log", {name:"完整导师消息"}).getByText("AI 自媒体陪跑教练 · 主动引导 · 1.3", {exact:true}).waitFor({timeout:60000});
     await deferQuestion(f, draft.draftId, "step-0", "extra1");
     await page.reload();
     // Deferring q3 reaches q4, which the page opens on its own after the reload.
-    await page.getByRole("log", {name:"完整导师消息"}).getByText("导师主动引导 · 1.4", {exact:true}).waitFor({timeout:60000});
+    await page.getByRole("log", {name:"完整导师消息"}).getByText("AI 自媒体陪跑教练 · 主动引导 · 1.4", {exact:true}).waitFor({timeout:60000});
     await expect.poll(async () => (await read()).information["step-0"].values?.extra1?.status, {timeout:30000}).toBe("deferred");
     await expect.poll(async () => (await read()).information["step-0"].values?.extra2?.status, {timeout:30000}).not.toBe("confirmed");
     await expect.poll(async () => (await rowTexts()).length, {timeout:60000}).toBe(4);
@@ -4908,11 +4908,11 @@ it("OPC: a legally reached question keeps its explicit confirm and mentor send w
     await expect.poll(async () => (await read()).information["step-0"].values?.extra1?.value, {timeout:30000}).toBe("第三条实质答案");
     // No deferral UI in a mentor draft: defer on the server, then check the page.
     // Like the removed control, defer only after this question's own opening finished.
-    await page.getByRole("log", {name:"完整导师消息"}).getByText("导师主动引导 · 1.3", {exact:true}).waitFor({timeout:60000});
+    await page.getByRole("log", {name:"完整导师消息"}).getByText("AI 自媒体陪跑教练 · 主动引导 · 1.3", {exact:true}).waitFor({timeout:60000});
     await deferQuestion(f, draft.draftId, "step-0", "extra1");
     await page.reload();
     // Deferring q3 reaches q4, which the page opens on its own after the reload.
-    await page.getByRole("log", {name:"完整导师消息"}).getByText("导师主动引导 · 1.4", {exact:true}).waitFor({timeout:60000});
+    await page.getByRole("log", {name:"完整导师消息"}).getByText("AI 自媒体陪跑教练 · 主动引导 · 1.4", {exact:true}).waitFor({timeout:60000});
     await expect.poll(async () => (await read()).information["step-0"].values?.extra1?.status, {timeout:30000}).toBe("deferred");
     await expect.poll(async () => (await rowTexts()).length, {timeout:60000}).toBe(4);
     expect((await rowTexts()).join(" | ")).not.toContain("Extra field 3");
@@ -5108,7 +5108,7 @@ it("OPC: an immutable information snapshot reconstructs the reached frontier whe
     await expect.poll(async () => (await read()).information["step-0"].values?.extra1?.value, {timeout:30000}).toBe("第三条实质答案");
     // No deferral UI in a mentor draft: defer on the server, then check the page.
     // Like the removed control, defer only after this question's own opening finished.
-    await page.getByRole("log", {name:"完整导师消息"}).getByText("导师主动引导 · 1.3", {exact:true}).waitFor({timeout:60000});
+    await page.getByRole("log", {name:"完整导师消息"}).getByText("AI 自媒体陪跑教练 · 主动引导 · 1.3", {exact:true}).waitFor({timeout:60000});
     await deferQuestion(f, draft.draftId, "step-0", "extra1");
     await resetLocalIpWindow();
 
@@ -7307,7 +7307,7 @@ it("OPC: U2 browser adopts only second topic, edits a server version and returns
     await page.getByLabel('消息',{exact:true}).fill('这条问题先不要发送');
     await page.getByLabel('文章正文').fill('未保存的下一次修改');
     await page.reload();
-    await expect.poll(()=>page.getByLabel('消息',{exact:true}).inputValue()).toBe('这条问题先不要发送');
+    await expect.poll(()=>page.getByLabel('消息',{exact:true}).textContent()).toBe('这条问题先不要发送');
     await expect.poll(()=>page.getByLabel('文章正文').inputValue()).toBe('未保存的下一次修改');
     await page.getByRole('button',{name:'历史版本',exact:true}).click();
     await page.getByText('修改后的正文：补充前后对照案例。').waitFor();
@@ -7323,7 +7323,7 @@ it("OPC: U2 browser adopts only second topic, edits a server version and returns
     await page.getByRole('button',{name:'登录',exact:true}).last().click();
     await page.waitForURL(url=>url.pathname==='/runtime');
     await expect.poll(()=>page.getByLabel('文章正文').inputValue()).toBe('未保存的下一次修改');
-    await expect.poll(()=>page.getByLabel('消息',{exact:true}).inputValue()).toBe('这条问题先不要发送');
+    await expect.poll(()=>page.getByLabel('消息',{exact:true}).textContent()).toBe('这条问题先不要发送');
   }catch(error){console.info('U4_CORE_FAILURE',error instanceof Error?error.stack:'unknown');throw error;}finally{console.info('U4_CORE_CLOSE_START');await browser.close();console.info('U4_CORE_CLOSED');}
 },300000);
 
@@ -8902,7 +8902,7 @@ it("OPC: topic invalid messages and legacy invalid pending records remain recove
     await input.fill('a'.repeat(8001));
     // The shared composer bounds typed input before dispatch; backend schema
     // validation still protects restored legacy requests below.
-    expect((await input.inputValue()).length).toBe(8000);
+    expect((await input.textContent())?.length).toBe(8000);
     expect(await topicIdentity(f.actor)).toEqual(identity);
     expect(await input.isEnabled()).toBe(true);
     // A record frozen by the earlier UI before its schema rejection is equally
@@ -8939,7 +8939,7 @@ it.each([false, true])("OPC: mentor history preserves a saved empty edit after r
   const reply = '我想帮助刚接触短视频的人';
   try {
     await page.goto(process.env.V3_LOCAL_APP + path);
-    await page.getByRole('log', { name: '完整导师消息' }).getByText('导师主动引导 · 1.1', { exact: true }).waitFor();
+    await page.getByRole('log', { name: '完整导师消息' }).getByText('AI 自媒体陪跑教练 · 主动引导 · 1.1', { exact: true }).waitFor();
     const input = page.getByRole('textbox', { name: '给导师的回复', exact: true });
     await expect.poll(() => input.isEnabled(), { timeout: 30000 }).toBe(true);
     await input.fill(reply);
@@ -9010,7 +9010,7 @@ it("OPC: mentor lost reply still projects once from its unchanged frozen informa
   const intercepted=new Promise<void>(resolve=>{reached=resolve;});
   try {
     await page.goto(process.env.V3_LOCAL_APP + '/positioning/' + d.draftId);
-    await page.getByRole('log', { name: '完整导师消息' }).getByText('导师主动引导 · 1.1', { exact: true }).waitFor();
+    await page.getByRole('log', { name: '完整导师消息' }).getByText('AI 自媒体陪跑教练 · 主动引导 · 1.1', { exact: true }).waitFor();
     const input = page.getByRole('textbox', { name: '给导师的回复', exact: true });
     await expect.poll(() => input.isEnabled(), { timeout: 30000 }).toBe(true);
     await page.route('**/api/trpc/runtime.view*', route => route.abort());
@@ -9649,7 +9649,7 @@ it("OPC: library finalization closes only on success and account discussion swit
    if(name==='ux-account-a'&&destinations.length===1)await page.getByLabel('给导师的回复',{exact:true}).fill('只属于账号 A 的未发送消息');
   }
   expect(destinations[0]).not.toBe(destinations[1]);expect(destinations[2]).toBe(destinations[0]);
-  expect(await page.getByLabel('给导师的回复',{exact:true}).inputValue()).toBe('只属于账号 A 的未发送消息');
+  expect(await page.getByLabel('给导师的回复',{exact:true}).textContent()).toBe('只属于账号 A 的未发送消息');
   const accounts=(await f.service.library({search:'',from:null,to:null})).businesses[0].accounts;
   expect(accounts.every((account:{sourceVersionId:string})=>account.sourceVersionId===f.sourceVersionId)).toBe(true);
  }finally{await browser.close();}
@@ -10103,7 +10103,7 @@ it.each(['true','omitted','false'] as const)('OPC: stopped pending cost unlocks 
   await composer.fill('New business answer after the stopped request');
   await page.getByRole('button',{name:'发送',exact:true}).click();
   await expect.poll(async()=>(await sql.query('select count(*)::int n from runtime_executions where session_id=$1',[draft.sessionId])).rows[0].n,{timeout:30000}).toBe(2);
-  await expect.poll(()=>composer.inputValue(),{timeout:30000}).toBe('');
+  await expect.poll(()=>composer.textContent(),{timeout:30000}).toBe('');
   expect((await sql.query('select to_jsonb(r) row from bill2_runs r where id=(select billing_run_id from runtime_executions where id=$1)',[prepared.executionId])).rows).toEqual(original);
   expect(posts).toBe(1);
   await expect.poll(async()=>(await f.service.read(draft.draftId)).information['step-0'].values[field.id]?.value,{timeout:15000}).toBe('New business answer after the stopped request');
@@ -10663,7 +10663,7 @@ it("OPC: RATE-LIMIT browser gate notices keep the original request, never auto-r
     const draft = await f.service.start({ requestId: randomUUID(), registration: f.registration, mode: "mentor", businessName: "限流测试业务" });
     await page.goto(process.env.V3_LOCAL_APP + "/positioning/" + draft.draftId);
     const chat = page.getByRole("log", { name: "完整导师消息" });
-    await chat.getByText("导师主动引导 · 1.1", { exact: true }).waitFor({ timeout: 60000 });
+    await chat.getByText("AI 自媒体陪跑教练 · 主动引导 · 1.1", { exact: true }).waitFor({ timeout: 60000 });
     const box = page.getByRole("textbox", { name: "给导师的回复", exact: true });
     const send = page.getByRole("button", { name: "发送", exact: true });
     const labels = chat.getByText(/^导师 · /);

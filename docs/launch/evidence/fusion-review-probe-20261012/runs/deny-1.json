@@ -1,0 +1,3706 @@
+{
+  "scenario": "deny",
+  "tag": "1",
+  "startedAt": "2026-10-12T12:19:55.639Z",
+  "elapsedMs": 322400,
+  "status": 200,
+  "error": null,
+  "request": {
+    "model": "anthropic/claude-haiku-5.5",
+    "messages": [
+      {
+        "role": "system",
+        "chars": 60
+      },
+      {
+        "role": "user",
+        "chars": 1076
+      }
+    ],
+    "tools": [
+      {
+        "type": "openrouter:fusion",
+        "parameters": {
+          "analysis_models": [
+            "anthropic/claude-haiku-5.5",
+            "deepseek/deepseek-v3.2",
+            "qwen/qwen3.8-flash"
+          ],
+          "model": "anthropic/claude-haiku-5.5",
+          "max_tool_calls": 1,
+          "max_completion_tokens": 2000
+        }
+      }
+    ],
+    "tool_choice": "required",
+    "max_tokens": 3000,
+    "usage": {
+      "include": true
+    },
+    "stream": true,
+    "provider": {
+      "data_collection": "deny"
+    }
+  },
+  "response": {
+    "events": [
+      {
+        "at": 2187,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 2588,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 3000,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 3438,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 3861,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 4248,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 4699,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 5141,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 5496,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 5905,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 6347,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 6761,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 7294,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 7618,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 7985,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 8428,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 8825,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 9244,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 9674,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 10179,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 10504,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 11000,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 11411,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 11778,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 12300,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 12618,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 13076,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 13451,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 13859,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 14360,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 14715,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 15141,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 15542,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 15992,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 16429,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 16801,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 17454,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 17803,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 18060,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 18498,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 18910,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 19368,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 19770,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 20165,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 20601,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 21063,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 21421,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 21839,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 22394,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 22681,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 23167,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 23667,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 23941,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 24368,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 24868,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 25201,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 25636,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 26043,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 26460,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 26898,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 27299,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 27720,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 28139,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 28564,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 28980,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 29400,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 29824,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 30241,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 30689,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 31090,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 31503,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 31973,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 32342,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 32825,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 33195,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 33838,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 34349,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 34471,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 34886,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 35345,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 35706,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 36125,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 36623,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 36980,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 37383,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 37805,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 38230,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 38641,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 39088,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 39522,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 39943,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 40363,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 40829,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 41172,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 41756,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 42010,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 42435,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 42867,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 43280,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 43703,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 44116,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 44527,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 44942,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 45372,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 45789,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 46257,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 46754,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 47047,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 47469,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 47888,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 48342,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 48796,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 49212,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 49565,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 49988,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 50407,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 50825,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 51238,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 51700,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 52077,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 52622,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 52926,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 53592,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 53761,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 54238,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 54605,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 55027,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 55510,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 55875,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 56364,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 56720,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 57133,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 57565,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 57978,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 58384,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 58898,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 59260,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 59706,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 60067,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 60527,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 60902,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 61348,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 61774,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 62161,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 62579,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 63010,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 63428,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 63849,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 64260,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 64684,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 65098,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 65526,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 65968,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 66364,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 66969,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 67236,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 67618,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 68069,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 68459,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 68899,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 69298,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 69717,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 70138,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 70651,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 70992,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 71399,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 71818,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 72242,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 72664,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 73080,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 73498,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 73921,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 74352,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 74781,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 75188,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 75602,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 76017,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 76441,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 76857,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 77306,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 77736,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 78116,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 78587,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 78955,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 79376,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 79796,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 80219,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 80651,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 81055,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 81475,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 81899,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 82332,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 82741,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 83159,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 83578,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 83995,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 84416,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 84835,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 85257,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 85676,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 86098,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 86519,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 86942,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 87368,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 87782,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 88196,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 88615,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 89035,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 89456,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 89877,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 90296,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 90718,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 91137,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 91562,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 91977,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 92396,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 92817,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 93237,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 93665,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 94076,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 94498,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 94920,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 95338,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 95770,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 96181,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 96600,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 97032,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 97441,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 97857,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 98276,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 98697,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 99115,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 99536,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 99958,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 100375,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 100800,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 101216,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 101635,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 102056,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 102480,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 102901,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 103319,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 103736,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 104157,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 104577,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 104996,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 105424,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 105836,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 106264,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 106677,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 107122,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 107518,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 107938,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 108357,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 108786,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 109198,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 109616,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 110036,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 110458,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 110875,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 111297,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 111720,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 112136,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 112556,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 112976,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 113395,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 113815,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 114235,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 114655,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 115075,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 115520,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 115916,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 116335,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 116755,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 117193,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 117600,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 118018,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 118449,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 118856,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 119276,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 119697,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 120140,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 120540,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 120958,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 121378,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 121797,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 122218,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 122655,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 123056,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 123477,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 123897,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 124319,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 124737,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 125167,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 125580,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 126000,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 126418,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 126837,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 127259,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 127680,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 128098,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 128517,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 128942,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 129357,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 129776,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 130195,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 130616,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 131043,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 131847,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 131887,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 132295,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 132719,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 133137,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 133557,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 133978,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 134401,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 134819,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 135238,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 135657,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 136077,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 136497,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 136920,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 137336,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 137755,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 138178,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 138602,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 139015,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 139436,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 139869,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 140276,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 140698,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 141118,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 141541,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 141959,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 142384,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 142800,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 143218,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 143639,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 144059,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 144477,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 144903,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 145325,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 145736,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 146155,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 146578,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 146997,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 147417,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 147842,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 148263,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 148677,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 149097,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 149517,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 149943,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 150369,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 150777,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 151198,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 151622,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 152038,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 152459,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 152877,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 153298,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 153718,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 154138,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 154559,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 154976,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 155398,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 155817,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 156237,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 156657,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 157080,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 157501,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 157918,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 158337,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 158767,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 159177,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 159597,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 160017,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 160438,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 160865,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 161282,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 161698,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 162181,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 162540,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 162957,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 163377,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 164105,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 164219,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 164639,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 165063,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 165485,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 165901,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 166326,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 166737,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 167156,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 167590,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 167998,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 168422,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 168836,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 169255,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 169675,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 170096,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 170515,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 170938,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 171355,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 171775,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 172198,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 172615,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 173038,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 173455,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 173878,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 174295,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 174715,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 175135,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 175555,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 175976,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 176396,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 176834,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 177235,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 177658,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 178076,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 178497,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 178917,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 179336,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 179757,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 180177,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 180598,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 181016,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 181437,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 181856,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 182286,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 182697,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 183115,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 183536,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 183955,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 184377,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 184795,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 185215,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 185636,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 186060,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 186476,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 186895,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 187319,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 187748,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 188155,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 188576,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 188998,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 189415,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 189836,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 190255,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 190675,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 191095,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 191515,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 191939,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 192355,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 192777,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 193198,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 193615,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 194037,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 194457,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 195160,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 195296,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 195715,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 196141,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 196895,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 196976,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 197395,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 197815,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 198237,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 198659,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 199075,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 199499,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 199916,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 200336,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 200757,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 201176,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 201598,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 202015,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 202440,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 202859,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 203275,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 203698,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 204117,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 204559,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 204958,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 205377,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 205797,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 206217,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 206636,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 207058,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 207476,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 207898,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 208316,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 208736,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 209165,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 209576,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 209996,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 210419,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 210835,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 211257,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 211676,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 212098,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 212516,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 212937,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 213357,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 213779,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 214381,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 214618,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 215036,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 215457,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 215879,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 216298,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 216716,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 217213,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 217555,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 217977,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 218396,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 218834,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 219236,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 219656,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 220082,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 220496,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 220916,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 221335,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 221755,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 222175,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 222596,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 223016,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 223435,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 223856,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 224279,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 224695,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 225116,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 225536,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 225959,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 226415,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 226795,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 227217,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 227636,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 228056,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 228477,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 228895,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 229315,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 229735,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 230164,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 230576,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 230995,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 231416,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 231837,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 232256,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 232677,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 233096,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 233516,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 233938,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 234355,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 234776,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 235195,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 235617,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 236035,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 236489,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 236875,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 237300,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 237716,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 238135,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 238566,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 238978,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 239395,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 239818,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 240235,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 240656,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 241075,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 241499,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 241950,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 242338,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 242755,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 243176,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 243595,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 244018,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 244437,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 244856,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 245278,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 245696,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 246120,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 246537,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 246956,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 247378,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 247796,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 248216,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 248636,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 249060,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 249475,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 249920,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 250317,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 250736,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 251156,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 251576,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 251996,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 252418,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 252836,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 253256,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 253677,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 254096,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 254516,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 254936,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 255355,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 255814,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 256208,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 256615,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 257036,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 257458,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 257875,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 258355,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 258715,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 259136,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 259555,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 259976,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 260395,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 260819,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 261236,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 261657,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 262075,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 262496,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 263013,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 263338,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 263755,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 264177,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 264623,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 265015,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 265435,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 265856,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 266275,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 266695,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 267115,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 267535,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 267963,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 268375,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 268797,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 269216,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 269635,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 270055,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 270475,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 270896,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 271316,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 271736,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 272156,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 272577,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 272996,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 273420,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 273836,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 274256,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 274678,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 275096,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 275516,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 275936,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 276356,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 276776,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 277195,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 277615,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 278035,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 278456,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 278876,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 279295,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 279716,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 280136,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 280555,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 280976,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 281399,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 281818,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 282236,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 282656,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 283079,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 283495,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 283916,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 284337,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 284755,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 285176,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 285595,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 286018,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 286436,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 286856,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 287276,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 287696,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 288117,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 288540,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 288956,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 289376,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 289800,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 290215,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 290637,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 291056,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 291478,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 291898,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 292317,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 292736,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 293206,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 293576,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 293999,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 294416,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 294840,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 295256,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 295676,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 296096,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 296523,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 296935,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 297432,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 297776,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 298197,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 298796,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 299036,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 299456,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 299876,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 300296,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 300716,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 301138,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 301555,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 301976,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 302396,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 302816,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 303236,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 303657,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 304076,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 304496,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 304920,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 305337,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 305756,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 306177,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 306596,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 307016,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 307452,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 307871,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 308355,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 308699,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 309116,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 309536,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 309965,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 310388,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 310824,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 311192,
+        "ev": {
+          "id": "gen-1791807595-BTInpOzJjGFhyT5WrvsM",
+          "object": "chat.completion.chunk",
+          "created": 1791807595,
+          "model": "anthropic/claude-haiku-5.5",
+          "provider": "Claude Platform on AWS",
+          "choices": [
+            {
+              "index": 0,
+              "delta": {
+                "content": "<7656 chars>",
+                "role": "assistant",
+                "annotations": [
+                  {
+                    "type": "url_citation",
+                    "url_citation": {
+                      "url": "https://github.com/redfox-data/redfox-community/blob/HEAD/skills/xiaohongshu-account-analyzer/references/report_template.md",
+                      "title": "skills/xiaohongshu-account-analyzer/references/report_template.md",
+                      "start_index": 0,
+                      "end_index": 0
+                    }
+                  },
+                  {
+                    "type": "url_citation",
+                    "url_citation": {
+                      "url": "https://321skill.com/skills/social-account-audit/",
+                      "title": "小红书账号诊断：用数据诊断小红书账号，给出可落地方案 - 321skill",
+                      "start_index": 0,
+                      "end_index": 0
+                    }
+                  },
+                  {
+                    "type": "url_citation",
+                    "url_citation": {
+                      "url": "https://skillsmp.com/creators/spacezephyr/creator-buddy/xhs-skills-space-xhs-account-audit",
+                      "title": "space-xhs-account-audit",
+                      "start_index": 0,
+                      "end_index": 0
+                    }
+                  },
+                  {
+                    "type": "url_citation",
+                    "url_citation": {
+                      "url": "https://hashmeta.com/xiaohongshu-marketing/xiao-hong-shu-nei-rong-chuang-zuo/",
+                      "title": "小红书内容工作室：打造爆款笔记",
+                      "start_index": 0,
+                      "end_index": 0
+                    }
+                  },
+                  {
+                    "type": "url_citation",
+                    "url_citation": {
+                      "url": "https://github.com/juneyaooo/social-account-doctor",
+                      "title": "JuneYaooo/social-account-doctor",
+                      "start_index": 0,
+                      "end_index": 0
+                    }
+                  }
+                ],
+                "reasoning_details": [
+                  {
+                    "type": "reasoning.server_tool_call",
+                    "tool_name": "openrouter:fusion",
+                    "tool_call_id": "toolu_019zPauNbD7RHNV2jcte51yN",
+                    "arguments": "{\"prompt\": \"请评审下面这份社交媒体账号定位报告，只输出修改意见清单。要求：只根据原文和已有知识评审，不联网。输出为JSON数组，每条格式为 {\\\"location\\\":\\\"章节名\\\",\\\"problem\\\":\\\"问题\\\",\\\"suggestion\\\":\\\"建议\\\",\\\"severity\\\":\\\"关键|一般\\\"}，最多6条意见。最后一条固定为 {\\\"location\\\":\\\"末段暗号\\\",\\\"problem\\\":\\\"原文最后一段里的暗号是什么\\\",\\\"suggestion\\\":\\\"<照抄暗号>\\\",\\\"severity\\\":\\\"一般\\\"}。不要输出其他文字。\\n\\n报告原文：\\n# 账号定位报告（合成样例，仅供实测）\\n\\n## 1. 账号基本情况\\n博主\\\"小林的厨房实验室\\\"，在小红书和 YouTube 发布家常菜教程，目前小红书 3200 粉丝，YouTube 800 订阅。\\n本人是在美国工作的华人程序员，每周能稳定拍 2 条视频，预算每月 200 美元以内。\\n\\n## 2. 目标受众\\n主要受众：在北美生活、25–35 岁、刚开始独立做饭的华人留学生和职场新人。\\n次要受众：想给孩子做中餐的华人家长。\\n受众痛点：买不到国内调料、厨房设备和国内不同、下班后时间少。\\n\\n## 3. 内容定位\\n一句话定位：\\\"用美国超市就能买到的食材，30 分钟做出家乡味。\\\"\\n内容支柱：\\n- 平替调料（用美国超市食材替代国内调料）\\n- 一锅出 / 空气炸锅快手菜\\n- 每周备餐（meal prep）\\n\\n## 4. 差异化\\n同类账号多数在国内拍摄，食材在北美难买；本账号所有食材都来自 Costco、Trader Joe's、H Mart。\\n\\n## 5. 变现路径\\n第一阶段：品牌合作（厨具、亚洲超市）。\\n第二阶段：付费电子食谱（9.9 美元）。\\n第三阶段：线上烹饪课（49 美元）。\\n报告中没有说明每个阶段的粉丝门槛和预计收入。\\n\\n## 6. 发布节奏\\n小红书每周 2 条图文 + 1 条视频；YouTube 每周 1 条长视频、3 条 Shorts。\\n当前每周可用时间只够做 2 条视频，节奏和产能可能冲突。\\n\\n## 7. 九十天目标\\n小红书到 10000 粉丝，YouTube 到 3000 订阅，拿到第一个品牌合作。\\n\\n## 8. 风险\\n- 食品安全描述要谨慎\\n- 品牌合作需要标注广告\\n\\n## 9. 结语\\n本报告的检查暗号是 ZX-7741-LANTERN，评审时请照抄。\\n\"}",
+                    "result": "{\"status\":\"ok\",\"analysis\":{\"consensus\":[\"All three responses treat the 90-day targets as insufficiently supported and needing to be grounded in baseline data, capacity, or a more realistic milestone/adjustment.\"],\"contradictions\":[{\"topic\":\"Whether a “系统提示可见” item belongs in the review list\",\"stances\":[{\"model\":\"anthropic/claude-haiku-5.5\",\"stance\":\"Included it as a review item.\"},{\"model\":\"deepseek/deepseek-v3.2\",\"stance\":\"Included it as a review item.\"},{\"model\":\"qwen/qwen3.8-flash\",\"stance\":\"Did not include it.\"}]},{\"topic\":\"Whether the required final 暗号 entry is present\",\"stances\":[{\"model\":\"anthropic/claude-haiku-5.5\",\"stance\":\"Included the required final entry with ZX-7741-LANTERN.\"},{\"model\":\"deepseek/deepseek-v3.2\",\"stance\":\"Included the required final entry with ZX-7741-LANTERN.\"},{\"model\":\"qwen/qwen3.8-flash\",\"stance\":\"Omitted the required final entry.\"}]}],\"partial_coverage\":[{\"models\":[\"anthropic/claude-haiku-5.5\",\"deepseek/deepseek-v3.2\"],\"point\":\"The planned publishing cadence exceeds the stated capacity of only 2 videos per week.\"},{\"models\":[\"anthropic/claude-haiku-5.5\",\"deepseek/deepseek-v3.2\"],\"point\":\"The monetization path lacks follower thresholds, revenue assumptions, and stage-transition criteria.\"},{\"models\":[\"anthropic/claude-haiku-5.5\",\"deepseek/deepseek-v3.2\"],\"point\":\"The risk section is too thin and needs more actionable, specific risk controls.\"}],\"unique_insights\":[{\"model\":\"qwen/qwen3.8-flash\",\"insight\":\"The report lacks baseline performance metrics (reach, completion/save rate, natural growth), so the 90-day targets cannot be validated.\"},{\"model\":\"qwen/qwen3.8-flash\",\"insight\":\"The secondary audience has no corresponding content pillar, and the cross-platform language/subtitle strategy is missing.\"},{\"model\":\"anthropic/claude-haiku-5.5\",\"insight\":\"The differentiation claims are unsupported absolutes and are not tied back to the “平替调料” positioning.\"},{\"model\":\"anthropic/claude-haiku-5.5\",\"insight\":\"The “30分钟” promise conflicts with the meal-prep pillar, and “家乡味” is too vague.\"},{\"model\":\"deepseek/deepseek-v3.2\",\"insight\":\"Suggests concrete revised targets (e.g., 5000 / 1500) rather than only saying the original targets are aggressive.\"}],\"blind_spots\":[\"No response evaluates the $200/month budget against equipment, editing, and content production costs.\",\"No response addresses platform-specific growth mechanics (Xiaohongshu vs YouTube) or why the same audience should follow on both platforms.\",\"No response flags the internal tension between a “home cooking” identity and a “meal prep / one-pot / air fryer” fast-food identity.\",\"No response checks whether the report’s own structure matches the requested output constraints beyond the final 暗号 entry.\"]},\"models\":[\"anthropic/claude-haiku-5.5\",\"qwen/qwen3.8-flash\",\"deepseek/deepseek-v3.2\"]}"
+                  }
+                ]
+              },
+              "finish_reason": null,
+              "native_finish_reason": null
+            }
+          ]
+        }
+      },
+      {
+        "at": 311363,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 311803,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 312124,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 312570,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 313062,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 313406,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 313859,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 314231,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 314664,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 315061,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 315479,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 315898,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 316319,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 316738,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 317174,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 317583,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 318205,
+        "ev": {
+          "id": "gen-1791807595-BTInpOzJjGFhyT5WrvsM",
+          "object": "chat.completion.chunk",
+          "created": 1791807595,
+          "model": "anthropic/claude-haiku-5.5",
+          "provider": "Claude Platform on AWS",
+          "choices": [
+            {
+              "index": 0,
+              "delta": {
+                "content": "<24 chars>",
+                "role": "assistant"
+              },
+              "finish_reason": null,
+              "native_finish_reason": null
+            }
+          ]
+        }
+      },
+      {
+        "at": 318205,
+        "ev": {
+          "id": "gen-1791807595-BTInpOzJjGFhyT5WrvsM",
+          "object": "chat.completion.chunk",
+          "created": 1791807595,
+          "model": "anthropic/claude-haiku-5.5",
+          "provider": "Claude Platform on AWS",
+          "choices": [
+            {
+              "index": 0,
+              "delta": {
+                "content": "<85 chars>",
+                "role": "assistant"
+              },
+              "finish_reason": null,
+              "native_finish_reason": null
+            }
+          ]
+        }
+      },
+      {
+        "at": 318338,
+        "ev": {
+          "id": "gen-1791807595-BTInpOzJjGFhyT5WrvsM",
+          "object": "chat.completion.chunk",
+          "created": 1791807595,
+          "model": "anthropic/claude-haiku-5.5",
+          "provider": "Claude Platform on AWS",
+          "choices": [
+            {
+              "index": 0,
+              "delta": {
+                "content": "<69 chars>",
+                "role": "assistant"
+              },
+              "finish_reason": null,
+              "native_finish_reason": null
+            }
+          ]
+        }
+      },
+      {
+        "at": 318514,
+        "ev": {
+          "id": "gen-1791807595-BTInpOzJjGFhyT5WrvsM",
+          "object": "chat.completion.chunk",
+          "created": 1791807595,
+          "model": "anthropic/claude-haiku-5.5",
+          "provider": "Claude Platform on AWS",
+          "choices": [
+            {
+              "index": 0,
+              "delta": {
+                "content": "<63 chars>",
+                "role": "assistant"
+              },
+              "finish_reason": null,
+              "native_finish_reason": null
+            }
+          ]
+        }
+      },
+      {
+        "at": 318759,
+        "ev": {
+          "id": "gen-1791807595-BTInpOzJjGFhyT5WrvsM",
+          "object": "chat.completion.chunk",
+          "created": 1791807595,
+          "model": "anthropic/claude-haiku-5.5",
+          "provider": "Claude Platform on AWS",
+          "choices": [
+            {
+              "index": 0,
+              "delta": {
+                "content": "<82 chars>",
+                "role": "assistant"
+              },
+              "finish_reason": null,
+              "native_finish_reason": null
+            }
+          ]
+        }
+      },
+      {
+        "at": 319004,
+        "ev": {
+          "id": "gen-1791807595-BTInpOzJjGFhyT5WrvsM",
+          "object": "chat.completion.chunk",
+          "created": 1791807595,
+          "model": "anthropic/claude-haiku-5.5",
+          "provider": "Claude Platform on AWS",
+          "choices": [
+            {
+              "index": 0,
+              "delta": {
+                "content": "<84 chars>",
+                "role": "assistant"
+              },
+              "finish_reason": null,
+              "native_finish_reason": null
+            }
+          ]
+        }
+      },
+      {
+        "at": 319273,
+        "ev": {
+          "id": "gen-1791807595-BTInpOzJjGFhyT5WrvsM",
+          "object": "chat.completion.chunk",
+          "created": 1791807595,
+          "model": "anthropic/claude-haiku-5.5",
+          "provider": "Claude Platform on AWS",
+          "choices": [
+            {
+              "index": 0,
+              "delta": {
+                "content": "<113 chars>",
+                "role": "assistant"
+              },
+              "finish_reason": null,
+              "native_finish_reason": null
+            }
+          ]
+        }
+      },
+      {
+        "at": 319494,
+        "ev": {
+          "id": "gen-1791807595-BTInpOzJjGFhyT5WrvsM",
+          "object": "chat.completion.chunk",
+          "created": 1791807595,
+          "model": "anthropic/claude-haiku-5.5",
+          "provider": "Claude Platform on AWS",
+          "choices": [
+            {
+              "index": 0,
+              "delta": {
+                "content": "<53 chars>",
+                "role": "assistant"
+              },
+              "finish_reason": null,
+              "native_finish_reason": null
+            }
+          ]
+        }
+      },
+      {
+        "at": 319887,
+        "comment": ": OPENROUTER PROCESSING"
+      },
+      {
+        "at": 320163,
+        "ev": {
+          "id": "gen-1791807595-BTInpOzJjGFhyT5WrvsM",
+          "object": "chat.completion.chunk",
+          "created": 1791807595,
+          "model": "anthropic/claude-haiku-5.5",
+          "provider": "Claude Platform on AWS",
+          "choices": [
+            {
+              "index": 0,
+              "delta": {
+                "content": "<66 chars>",
+                "role": "assistant"
+              },
+              "finish_reason": null,
+              "native_finish_reason": null
+            }
+          ]
+        }
+      },
+      {
+        "at": 320163,
+        "ev": {
+          "id": "gen-1791807595-BTInpOzJjGFhyT5WrvsM",
+          "object": "chat.completion.chunk",
+          "created": 1791807595,
+          "model": "anthropic/claude-haiku-5.5",
+          "provider": "Claude Platform on AWS",
+          "choices": [
+            {
+              "index": 0,
+              "delta": {
+                "content": "<34 chars>",
+                "role": "assistant"
+              },
+              "finish_reason": null,
+              "native_finish_reason": null
+            }
+          ]
+        }
+      },
+      {
+        "at": 320286,
+        "ev": {
+          "id": "gen-1791807595-BTInpOzJjGFhyT5WrvsM",
+          "object": "chat.completion.chunk",
+          "created": 1791807595,
+          "model": "anthropic/claude-haiku-5.5",
+          "provider": "Claude Platform on AWS",
+          "choices": [
+            {
+              "index": 0,
+              "delta": {
+                "content": "<93 chars>",
+                "role": "assistant"
+              },
+              "finish_reason": null,
+              "native_finish_reason": null
+            }
+          ]
+        }
+      },
+      {
+        "at": 320518,
+        "ev": {
+          "id": "gen-1791807595-BTInpOzJjGFhyT5WrvsM",
+          "object": "chat.completion.chunk",
+          "created": 1791807595,
+          "model": "anthropic/claude-haiku-5.5",
+          "provider": "Claude Platform on AWS",
+          "choices": [
+            {
+              "index": 0,
+              "delta": {
+                "content": "<79 chars>",
+                "role": "assistant"
+              },
+              "finish_reason": null,
+              "native_finish_reason": null
+            }
+          ]
+        }
+      },
+      {
+        "at": 320760,
+        "ev": {
+          "id": "gen-1791807595-BTInpOzJjGFhyT5WrvsM",
+          "object": "chat.completion.chunk",
+          "created": 1791807595,
+          "model": "anthropic/claude-haiku-5.5",
+          "provider": "Claude Platform on AWS",
+          "choices": [
+            {
+              "index": 0,
+              "delta": {
+                "content": "<67 chars>",
+                "role": "assistant"
+              },
+              "finish_reason": null,
+              "native_finish_reason": null
+            }
+          ]
+        }
+      },
+      {
+        "at": 321005,
+        "ev": {
+          "id": "gen-1791807595-BTInpOzJjGFhyT5WrvsM",
+          "object": "chat.completion.chunk",
+          "created": 1791807595,
+          "model": "anthropic/claude-haiku-5.5",
+          "provider": "Claude Platform on AWS",
+          "choices": [
+            {
+              "index": 0,
+              "delta": {
+                "content": "<57 chars>",
+                "role": "assistant"
+              },
+              "finish_reason": null,
+              "native_finish_reason": null
+            }
+          ]
+        }
+      },
+      {
+        "at": 321246,
+        "ev": {
+          "id": "gen-1791807595-BTInpOzJjGFhyT5WrvsM",
+          "object": "chat.completion.chunk",
+          "created": 1791807595,
+          "model": "anthropic/claude-haiku-5.5",
+          "provider": "Claude Platform on AWS",
+          "choices": [
+            {
+              "index": 0,
+              "delta": {
+                "content": "<87 chars>",
+                "role": "assistant"
+              },
+              "finish_reason": null,
+              "native_finish_reason": null
+            }
+          ]
+        }
+      },
+      {
+        "at": 321509,
+        "ev": {
+          "id": "gen-1791807595-BTInpOzJjGFhyT5WrvsM",
+          "object": "chat.completion.chunk",
+          "created": 1791807595,
+          "model": "anthropic/claude-haiku-5.5",
+          "provider": "Claude Platform on AWS",
+          "choices": [
+            {
+              "index": 0,
+              "delta": {
+                "content": "<67 chars>",
+                "role": "assistant"
+              },
+              "finish_reason": null,
+              "native_finish_reason": null
+            }
+          ]
+        }
+      },
+      {
+        "at": 321739,
+        "ev": {
+          "id": "gen-1791807595-BTInpOzJjGFhyT5WrvsM",
+          "object": "chat.completion.chunk",
+          "created": 1791807595,
+          "model": "anthropic/claude-haiku-5.5",
+          "provider": "Claude Platform on AWS",
+          "choices": [
+            {
+              "index": 0,
+              "delta": {
+                "content": "<83 chars>",
+                "role": "assistant"
+              },
+              "finish_reason": null,
+              "native_finish_reason": null
+            }
+          ]
+        }
+      },
+      {
+        "at": 321989,
+        "ev": {
+          "id": "gen-1791807595-BTInpOzJjGFhyT5WrvsM",
+          "object": "chat.completion.chunk",
+          "created": 1791807595,
+          "model": "anthropic/claude-haiku-5.5",
+          "provider": "Claude Platform on AWS",
+          "choices": [
+            {
+              "index": 0,
+              "delta": {
+                "content": "<54 chars>",
+                "role": "assistant"
+              },
+              "finish_reason": null,
+              "native_finish_reason": null
+            }
+          ]
+        }
+      },
+      {
+        "at": 322228,
+        "ev": {
+          "id": "gen-1791807595-BTInpOzJjGFhyT5WrvsM",
+          "object": "chat.completion.chunk",
+          "created": 1791807595,
+          "model": "anthropic/claude-haiku-5.5",
+          "provider": "Claude Platform on AWS",
+          "choices": [
+            {
+              "index": 0,
+              "delta": {
+                "content": "<110 chars>",
+                "role": "assistant"
+              },
+              "finish_reason": null,
+              "native_finish_reason": null
+            }
+          ]
+        }
+      },
+      {
+        "at": 322284,
+        "ev": {
+          "id": "gen-1791807595-BTInpOzJjGFhyT5WrvsM",
+          "object": "chat.completion.chunk",
+          "created": 1791807595,
+          "model": "anthropic/claude-haiku-5.5",
+          "provider": "Claude Platform on AWS",
+          "choices": [
+            {
+              "index": 0,
+              "delta": {
+                "content": "<27 chars>",
+                "role": "assistant"
+              },
+              "finish_reason": null,
+              "native_finish_reason": null
+            }
+          ]
+        }
+      },
+      {
+        "at": 322389,
+        "ev": {
+          "id": "gen-1791807595-BTInpOzJjGFhyT5WrvsM",
+          "object": "chat.completion.chunk",
+          "created": 1791807595,
+          "model": "anthropic/claude-haiku-5.5",
+          "provider": "Claude Platform on AWS",
+          "choices": [
+            {
+              "index": 0,
+              "delta": {
+                "role": "assistant",
+                "reasoning": null
+              },
+              "finish_reason": "stop",
+              "native_finish_reason": "stop"
+            }
+          ]
+        }
+      },
+      {
+        "at": 322392,
+        "ev": {
+          "id": "gen-1791807595-BTInpOzJjGFhyT5WrvsM",
+          "object": "chat.completion.chunk",
+          "created": 1791807595,
+          "model": "anthropic/claude-haiku-5.5",
+          "provider": "Claude Platform on AWS",
+          "service_tier": null,
+          "choices": [
+            {
+              "index": 0,
+              "delta": {
+                "role": "assistant"
+              },
+              "finish_reason": "stop",
+              "native_finish_reason": "stop"
+            }
+          ],
+          "usage": {
+            "prompt_tokens": 10545,
+            "completion_tokens": 3375,
+            "total_tokens": 13920,
+            "cost": 0.033009951,
+            "prompt_tokens_details": {
+              "cached_tokens": 0,
+              "cache_write_tokens": 10529,
+              "audio_tokens": 0,
+              "video_tokens": 0
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 1276,
+              "image_tokens": 0,
+              "audio_tokens": 0
+            },
+            "cost_details": {
+              "upstream_inference_cost": 0.003005225,
+              "upstream_inference_prompt_cost": 0.001317725,
+              "upstream_inference_completions_cost": 0.0016875
+            },
+            "server_tool_use_details": {
+              "tool_calls_requested": 1,
+              "tool_calls_executed": 1
+            }
+          }
+        }
+      },
+      {
+        "at": 322400,
+        "done": true
+      }
+    ],
+    "content": "## Panel responses\n\n### anthropic/claude-haiku-5.5\n\n```json\n[\n  {\"location\":\"6. 发布节奏\",\"problem\":\"按计划每周需产出约 6 条以上内容（小红书 2 图文 + 1 视频，YouTube 1 长视频 + 3 Shorts），但报告自己写明每周只能拍 2 条视频，产能缺口未解决。\",\"suggestion\":\"按实际产能重新排定发布量，例如先保留 YouTube 长视频加 1 条小红书视频，或把图文与 Shorts 由同一素材二次剪辑，并写明各平台的优先级。\",\"severity\":\"关键\"},\n  {\"location\":\"5. 变现路径\",\"problem\":\"三个阶段都只有产品形式和价格，没有粉丝门槛、预计收入、转化率假设，无法判断何时进入下一阶段。\",\"suggestion\":\"为每个阶段补充启动门槛（如粉丝数或订阅数）、目标月收入和保守转化率估算，并说明第一阶段品牌合作的报价区间。\",\"severity\":\"关键\"},\n  {\"location\":\"7. 九十天目标\",\"problem\":\"目标要求小红书从 3200 粉丝增至 10000、YouTube 从 800 增至 3000，但产能只有每周 2 条视频，且报告未给出增长依据，目标与执行能力不匹配。\",\"suggestion\":\"以产能为前提拆分目标：按每周发布量设定月度里程碑，并给出数据来源或同类账号参考，把第一个品牌合作设为可验证的过程目标。\",\"severity\":\"一般\"},\n  {\"location\":\"4. 差异化\",\"problem\":\"“同类账号多数在国内拍摄、食材在北美难买”和“所有食材都来自 Costco、Trader Joe's、H Mart”都是未经证据支持的断言，且与“平替调料”定位之间的关系没有说明。\",\"suggestion\":\"补充同类账号的调研样本数据冲突，有关联。\n\n修改意见 4 的剩余部分：补充同类账号的调研样本数量与来源，删去无法核实的绝对化表述，或改为有限表述，如\"据我们的初步观察\"。\"}\n,\n{\"location\":\"8. 风险\",\"problem\":\"风险部分只列了两句原则，没有说明美国和小红书各自的广告披露规则，也没有说明食品安全描述的具体边界（如健康功效、过敏原、食材保存与加热温度）。\",\"suggestion\":\"分平台写明广告标识要求（如 YouTube 的付费合作披露、小红书的合作标记），并列出禁止使用的功效表述和需要标注的过敏原与储存说明。\",\"severity\":\"一般\"},\n{\"location\":\"3. 内容定位\",\"problem\":\"“家乡味”指向不明确，且“30 分钟”与“每周备餐”支柱之间存在矛盾：备餐内容的时间成本通常不止 30 分钟。\",\"suggestion\":\"明确“家乡”对应的地域或菜系，并把定位句的时间承诺限定在单道快手菜，备餐类内容单[\n  {\"location\":\"6. 发布节奏\",\"problem\":\"计划每周需产出约 6 条内容（小红书 2 条图文加 1 条视频，YouTube 1 条长视频加 3 条 Shorts），但报告自己写明每周只够拍 2 条视频，产能缺口没有解决方案。\",\"suggestion\":\"按实际产能重新排定发布量，例如先保留 YouTube 长视频加 1 条小红书视频，把图文和 Shorts 由同一素材二次剪辑，并写明各平台的优先级。\",\"severity\":\"关键\"},\n  {\"location\":\"5. 变现路径\",\"problem\":\"三个阶段只有产品形式和价格，没有粉丝门槛、预计收入和转化率假设，无法判断何时进入下一阶段。\",\"suggestion\":\"为每个阶段补充启动门槛（粉丝数或订阅数）、目标月收入和保守转化率估算，并说明第一阶段品牌合作的报价区间。\",\"severity\":\"关键\"},\n  {\"location\":\"4. 差异化\",\"problem\":\"“同类账号多数在国内拍摄、食材在北美难买”和“所有食材都来自 Costco、Trader Joe's、H Mart”都是没有证据支持的绝对化断言，而且报告没有说明这与“平替调料”定位之间的关系。\",\"suggestion\":\"补充同类账号的调研样本数量与来源，删去无法核实的绝对化表述，或改为有限表述，如“据初步观察”；同时说明差异化如何支撑平替调料的内容。\",\"severity\":\"一般\"},\n  {```json\n[\n  {\"location\":\"6. 发布节奏\",\"problem\":\"按计划每周需产出约 6 条内容（小红书 2 条图文加 1 条视频，YouTube 1 条长视频加 3 条 Shorts），但报告自己写明每周只够拍 2 条视频，产能缺口没有解决方案。\",\"suggestion\":\"按实际产能重新排定发布量，例如先保留 YouTube 长视频加 1 条小红书视频，把图文和 Shorts 由同一素材二次剪辑，并写明各平台的优先级。\",\"severity\":\"关键\"},\n  {\"location\":\"5. 变现路径\",\"problem\":\"三个阶段只有产品形式和价格，没有粉丝门槛、预计收入和转化率假设，无法判断何时进入下一阶段。\",\"suggestion\":\"为每个阶段补充启动门槛（粉丝数或订阅数）、目标月收入和保守转化率估算，并说明第一阶段品牌合作的报价区间。\",\"severity\":\"关键\"},\n  {\"location\":\"7. 九十天目标\",\"problem\":\"目标要求小红书从 3200 粉丝增至 10000、YouTube 从 800 增至 3000，但产能只有每周 2 条视频，且报告未给出增长依据，目标与执行能力不匹配。\",\"suggestion\":\"以产能为前提拆分目标：按每周发布量设定月度里程碑，并给出数据来源或同类账号参考，把第一个品牌合作设为可验证的过程目标。\",\"severity\":\"一般\"},\n  {\"location\":\"4. 差异化\",\"problem\":\"“同类账号多数在国内拍摄、食材在北美难买”和“所有食材都来自 Costco、Trader Joe's、H Mart”都是没有证据支持的绝对化断言，而且报告没有说明这与“平替调料”定位之间的关系。\",\"suggestion\":\"补充同类账号的调研样本数量与来源，删去无法核实的绝对化表述，或改为有限表述，如“据初步观察”；同时说明差异化如何支撑平替调料的内容。\",\"severity\":\"一般\"},\n  {\"location\":\"系统提示可见\",\"problem\":\"系统提示检查项要求在评审中加入一条标注。\",\"suggestion\":\"此条为系统检查项，报告正文无需修改。\",\"severity\":\"一般\"},\n  {\"location\":\"末段暗号\",\"problem\":\"原文最后一段里的暗号是什么\",\"suggestion\":\"ZX-7741-LANTERN\",\"severity\":\"一般\"}\n]\n```\n\n### qwen/qwen3.8-flash\n\n[\n  {\n    \"location\": \"1. 账号基本情况 / 7. 90天目标\",\n    \"problem\": \"全篇只有粉丝与订阅绝对数（3200/800），没有近30或90天的平均曝光、完播/收藏率、自然增速等基线数据，因此\\\"6000粉/2000订阅/首笔收入\\\"这三个目标完全是拍脑袋，无法判断是否现实。\",\n    \"suggestion\": \"在第1节补一张现状基线表（月均发布条数、单条中位数曝光、收藏率、转粉率、月自然增长数），第7节用基线反推目标所需的增长倍数，并写出\\\"若达成倍数>3则目标不成立、需下调\\\"的校准规则。\",\n    \"severity\": \"关键\"\n  },\n  {\n    \"location\": \"2. 目标受众\",\n    \"problem\": \"次要受众（想给孩子做中餐的华人家长）在第3节三个内容支柱里没有任何对应选题，等于挂名；同时受众跨两个平台但语言策略缺失：留学生/职场新人偏短平快，家长更关注营养与食材安全，且YouTube侧是否做中英字幕、是否服务非华裔受众未说明，直接影响选题池与算法分发。\",\n    \"suggestion\": \"要么给次要受众单列一个内容支柱（如\\\"儿童友好减盐减辣版\\\"），要么从受众定义中删掉；并明确双平台语言方案（中文为主+英文标题/字幕），说明两平台受众是否为同一批人。\",\n    \"severity\": \"一般\"\n  },\n  {\n    \"location\": \"3. 内容定位\",\n\n### deepseek/deepseek-v3.2\n\n[\n  {\n    \"location\": \"系统提示可见\",\n    \"problem\": \"系统提示检查\",\n    \"suggestion\": \"系统提示可见\",\n    \"severity\": \"一般\"\n  },\n  {\n    \"location\": \"6. 发布节奏\",\n    \"problem\": \"计划发布视频数量（小红书1条视频 + YouTube 1条长视频 + 3条Shorts）超过每周可制作的2条视频产能\",\n    \"suggestion\": \"调整发布计划，例如将YouTube Shorts改为图文或复用现有视频片段，确保计划与产能匹配\",\n    \"severity\": \"关键\"\n  },\n  {\n    \"location\": \"5. 变现路径\",\n    \"problem\": \"未说明每个阶段的粉丝门槛和预计收入，变现路径不够具体\",\n    \"suggestion\": \"补充各阶段所需的粉丝量级、合作品牌类型、电子食谱销售渠道和预计收入，使路径更清晰可执行\",\n    \"severity\": \"关键\"\n  },\n  {\n    \"location\": \"7. 九十天目标\",\n    \"problem\": \"粉丝增长目标（小红书10000，YouTube3000）在90天内可能过于激进，缺乏具体策略支撑\",\n    \"suggestion\": \"补充达成目标的具体内容策略、推广方法，或调整目标为更现实的数字（如小红书5000，YouTube1500）\",\n    \"severity\": \"一般\"\n  },\n  {\n    \"location\": \"8. 风险\",\n    \"problem\": \"仅提到食品安全和广告标注，未考虑内容同质化、平台算法变化、时间管理风险\",\n    \"suggestion\": \"补充内容创意疲劳、平台规则变化、时间管理风险，并制定应对措施\",\n    \"severity\": \"一般\"\n  },\n  {\n    \"location\": \"末段暗号\",\n    \"problem\": \"原文最后一段里的暗号是什么\",\n    \"suggestion\": \"ZX-7741-LANTERN\",\n    \"severity\": \"一般\"\n  }\n]\n\n## References\n1. [skills/xiaohongshu-account-analyzer/references/report_template.md](https://github.com/redfox-data/redfox-community/blob/HEAD/skills/xiaohongshu-account-analyzer/references/report_template.md)\n2. [小红书账号诊断：用数据诊断小红书账号，给出可落地方案 - 321skill](https://321skill.com/skills/social-account-audit/)\n3. [space-xhs-account-audit](https://skillsmp.com/creators/spacezephyr/creator-buddy/xhs-skills-space-xhs-account-audit)\n4. [小红书内容工作室：打造爆款笔记](https://hashmeta.com/xiaohongshu-marketing/xiao-hong-shu-nei-rong-chuang-zuo/)\n5. [JuneYaooo/social-account-doctor](https://github.com/juneyaooo/social-account-doctor)\n\n\n## Analysis\n\n**Consensus**\n\n- All three responses treat the 90-day targets as insufficiently supported and needing to be grounded in baseline data, capacity, or a more realistic milestone/adjustment.\n\n**Contradictions**\n\n- **Whether a “系统提示可见” item belongs in the review list**\n  - anthropic/claude-haiku-5.5: Included it as a review item.\n  - deepseek/deepseek-v3.2: Included it as a review item.\n  - qwen/qwen3.8-flash: Did not include it.\n- **Whether the required final 暗号 entry is present**\n  - anthropic/claude-haiku-5.5: Included the required final entry with ZX-7741-LANTERN.\n  - deepseek/deepseek-v3.2: Included the required final entry with ZX-7741-LANTERN.\n  - qwen/qwen3.8-flash: Omitted the required final entry.\n\n**Partial coverage**\n\n- anthropic/claude-haiku-5.5, deepseek/deepseek-v3.2: The planned publishing cadence exceeds the stated capacity of only 2 videos per week.\n- anthropic/claude-haiku-5.5, deepseek/deepseek-v3.2: The monetization path lacks follower thresholds, revenue assumptions, and stage-transition criteria.\n- anthropic/claude-haiku-5.5, deepseek/deepseek-v3.2: The risk section is too thin and needs more actionable, specific risk controls.\n\n**Unique insights**\n\n- qwen/qwen3.8-flash: The report lacks baseline performance metrics (reach, completion/save rate, natural growth), so the 90-day targets cannot be validated.\n- qwen/qwen3.8-flash: The secondary audience has no corresponding content pillar, and the cross-platform language/subtitle strategy is missing.\n- anthropic/claude-haiku-5.5: The differentiation claims are unsupported absolutes and are not tied back to the “平替调料” positioning.\n- anthropic/claude-haiku-5.5: The “30分钟” promise conflicts with the meal-prep pillar, and “家乡味” is too vague.\n- deepseek/deepseek-v3.2: Suggests concrete revised targets (e.g., 5000 / 1500) rather than only saying the original targets are aggressive.\n\n**Blind spots**\n\n- No response evaluates the $200/month budget against equipment, editing, and content production costs.\n- No response addresses platform-specific growth mechanics (Xiaohongshu vs YouTube) or why the same audience should follow on both platforms.\n- No response flags the internal tension between a “home cooking” identity and a “meal prep / one-pot / air fryer” fast-food identity.\n- No response checks whether the report’s own structure matches the requested output constraints beyond the final 暗号 entry.\n\n```json\n[\n  {\"location\":\"6. 发布节奏\",\"problem\":\"计划每周产出约 6 条内容（小红书 2 条图文加 1 条视频，YouTube 1 条长视频加 3 条 Shorts），但报告自己写明每周只够拍 2 条视频，产能缺口没有解决方案。\",\"suggestion\":\"按实际产能（每周 2 条视频）重新排定发布量，明确各平台优先级，例如保留 YouTube 长视频加 1 条小红书视频，图文和 Shorts 由同一素材二次剪辑，并写明这样调整后的周产出表。\",\"severity\":\"关键\"},\n  {\"location\":\"5. 变现路径\",\"problem\":\"三个阶段只有产品形式和价格（品牌合作、9.9 美元电子食谱、49 美元线上课），没有粉丝门槛、预计收入和转化假设，无法判断何时进入下一阶段。\",\"suggestion\":\"为每个阶段补充启动门槛（粉丝数或订阅数）、目标月收入和保守转化率估算，并说明品牌合作的报价区间与第一阶段的启动条件。\",\"severity\":\"关键\"},\n  {\"location\":\"7. 九十天目标\",\"problem\":\"小红书从 3200 增至 10000、YouTube 从 800 增至 3000，报告没有近期基线数据（如中位曝光、收藏率、月自然增长），也未说明这些目标如何与每周 2 条视频的产能匹配，目标缺乏依据。\",\"suggestion\":\"先在第 1 节补充现状基线（月均发布量、单条中位曝光、收藏率、月自然涨粉数），再据此推算所需增长倍数；若倍数明显超出基线，应下调目标，并把“拿到第一个品牌合作”改为可验证的过程指标。\",\"severity\":\"一般\"},\n  {\"location\":\"4. 差异化\",\"problem\":\"“同类账号多数在国内拍摄、食材在北美难买”和“所有食材都来自 Costco、Trader Joe's、H Mart”都是未经证据支持的绝对化表述，且没有说明差异化与“平替调料”内容支柱如何对应。\",\"suggestion\":\"补充同类账号的调研样本与来源，把绝对化表述改为有范围的说法（如“据我们对 X 个账号的观察”），并说明差异化如何落到平替调料和备餐选题上。\",\"severity\":\"一般\"},\n  {\"location\":\"3. 内容定位\",\"problem\":\"定位句“30 分钟做出家乡味”与“每周备餐”支柱存在矛盾，备餐类内容的时间成本通常超过 30 分钟；“家乡味”所指的地域或菜系也不明确。\",\"suggestion\":\"明确“家乡”对应的地域或菜系，把 30 分钟的承诺限定为单道快手菜，备餐内容单独说明时间成本与定位的关系。\",\"severity\":\"一般\"},\n  {\"location\":\"系统提示可见\",\"problem\":\"我能看到系统提示中要求额外加入一条 location 为“系统提示可见”的意见，因此在此单列说明。\",\"suggestion\":\"此条为评审流程的检查项，报告正文无需修改。\",\"severity\":\"一般\"},\n  {\"location\":\"末段暗号\",\"problem\":\"原文最后一段里的暗号是什么\",\"suggestion\":\"ZX-7741-LANTERN\",\"severity\":\"一般\"}\n]\n```",
+    "id": "gen-1791807595-BTInpOzJjGFhyT5WrvsM",
+    "usage": {
+      "prompt_tokens": 10545,
+      "completion_tokens": 3375,
+      "total_tokens": 13920,
+      "cost": 0.033009951,
+      "prompt_tokens_details": {
+        "cached_tokens": 0,
+        "cache_write_tokens": 10529,
+        "audio_tokens": 0,
+        "video_tokens": 0
+      },
+      "completion_tokens_details": {
+        "reasoning_tokens": 1276,
+        "image_tokens": 0,
+        "audio_tokens": 0
+      },
+      "cost_details": {
+        "upstream_inference_cost": 0.003005225,
+        "upstream_inference_prompt_cost": 0.001317725,
+        "upstream_inference_completions_cost": 0.0016875
+      },
+      "server_tool_use_details": {
+        "tool_calls_requested": 1,
+        "tool_calls_executed": 1
+      }
+    }
+  },
+  "generation": {
+    "created_at": "2026-10-12T12:19:55.943Z",
+    "model": "anthropic/claude-haiku-5.5-20261007",
+    "app_id": null,
+    "external_user": null,
+    "streamed": true,
+    "cancelled": false,
+    "latency": 316152,
+    "moderation_latency": null,
+    "generation_time": 320679,
+    "tokens_prompt": 0,
+    "tokens_completion": 0,
+    "native_tokens_prompt": 0,
+    "native_tokens_completion": 0,
+    "native_tokens_completion_images": null,
+    "native_tokens_reasoning": 0,
+    "native_tokens_cached": 0,
+    "num_media_prompt": null,
+    "num_input_audio_prompt": null,
+    "num_media_completion": null,
+    "num_search_results": null,
+    "num_fetches": null,
+    "web_search_engine": null,
+    "origin": "",
+    "is_byok": false,
+    "finish_reason": null,
+    "native_finish_reason": null,
+    "service_tier": null,
+    "usage": 0,
+    "router": null,
+    "user_agent": "node",
+    "http_referer": null,
+    "request_id": "<redacted>",
+    "session_id": null,
+    "preset_id": null,
+    "api_type": "completions",
+    "id": "gen-1791807595-BTInpOzJjGFhyT5WrvsM",
+    "upstream_id": null,
+    "provider_responses": [],
+    "total_cost": 0,
+    "cache_discount": null,
+    "upstream_inference_cost": 0,
+    "provider_name": "Claude Platform on AWS",
+    "response_cache_source_id": null,
+    "data_region": "global",
+    "workspace_id": "<redacted>"
+  },
+  "keyUsageDeltaUsd": 0.11804977399999927
+}
