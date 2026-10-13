@@ -50,6 +50,13 @@ describe('PAY-STRIPE-MP external refunds of card orders', () => {
     await expect(f.run({ refundId: 're_1' })).resolves.toBe(false);
     expect(f.db.rpc).not.toHaveBeenCalled();
   });
+  it('records the external refunds of a charge that also carries one of ours, and still hands ours to the existing path', async () => {
+    const f = fixture([refund({ id: 're_ours', metadata: { refundIntentId: 'intent', orderId: 'order' } }),
+      refund({ id: 're_link', created: 1792000100, amount: 1000 })]);
+    await expect(f.run({ chargeId: 'ch_1' })).resolves.toBe(false);
+    expect(f.db.rpc).toHaveBeenCalledTimes(1);
+    expect(f.db.rpc).toHaveBeenCalledWith('pay_stripe_mp_record_external_refund', expect.objectContaining({ p_refund: 're_link' }));
+  });
   it('alerts for a partial refund kept for review, and for a full refund whose subscription still renews', async () => {
     const partial = fixture([refund({ amount: 1000 })], { state: 'partial_review', duplicate: false });
     await partial.run({ refundId: 're_1' });

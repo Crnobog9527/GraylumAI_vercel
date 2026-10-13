@@ -16,8 +16,9 @@ type RefundResult = { state: 'refunded' | 'recorded' | 'partial_review' | 'pack_
 /** Refund events (charge.refunded, refund.*, charge.refund.updated) of PAY-STRIPE-MP card orders. A refund we did not
  * approve is an external refund fact (Link support, Stripe after 48 hours, a Dashboard refund): each succeeded refund
  * is recorded once by pay_stripe_mp_record_external_refund (0247), which ends the order only when fully refunded.
- * Returns false when the payment is not a card order (wallet, legacy, off-site) or the refund is one of ours (our
- * approval flows tag their refunds with refundIntentId), so the existing refund path keeps handling those. */
+ * Each refund is classified on its own: ours (our approval flows tag them with refundIntentId) are left to the existing
+ * refund path, external ones are recorded here. Returns false when the payment is not a card order (wallet, legacy,
+ * off-site) or the event also carries a refund of ours, so the existing path still runs for that one. */
 export async function handleCardRefund(db: SupabaseClient, stripe: RefundStripe, input: { refundId?: string; chargeId?: string },
   alert: () => void = () => {}) {
   const scope = await resolveStripeScope(stripe as unknown as Stripe);
@@ -27,7 +28,8 @@ export async function handleCardRefund(db: SupabaseClient, stripe: RefundStripe,
   for (const refund of refunds) {
     if (refund.object !== 'refund' || (input.refundId && refund.id !== input.refundId)) throw new Error(PAYMENT_EVIDENCE_CONFLICT);
   }
-  if (refunds.some(refund => refund.metadata?.refundIntentId)) return false;
+  const external = refunds.filter(refund => !refund.metadata?.refundIntentId);
+  if (!external.length) return false;
   const chargeId = input.chargeId ?? id(refunds[0]!.charge);
   const paymentIntentId = id(refunds[0]!.payment_intent);
   if (refunds.some(refund => id(refund.charge) !== chargeId)) throw new Error(PAYMENT_EVIDENCE_CONFLICT);
@@ -42,7 +44,7 @@ export async function handleCardRefund(db: SupabaseClient, stripe: RefundStripe,
     return false;
   }
   // Oldest first, so the refund that completes a full refund is the one that ends the order.
-  for (const refund of [...refunds].sort((a, b) => a.created - b.created)) {
+  for (const refund of [...external].sort((a, b) => a.created - b.created)) {
     if (refund.status !== 'succeeded') continue;
     const recorded = await db.rpc('pay_stripe_mp_record_external_refund', { p_order: match.order.id, p_merchant: scope.merchant,
       p_payment: match.paymentId, p_refund: refund.id, p_amount: refund.amount, p_currency: refund.currency,
@@ -50,7 +52,8 @@ export async function handleCardRefund(db: SupabaseClient, stripe: RefundStripe,
     if (recorded.error || !recorded.data) throw new Error('PAY_STRIPE_MP_REFUND_UNAVAILABLE', { cause: recorded.error });
     reportRefund(match.order.id, match.kind, recorded.data as RefundResult, alert);
   }
-  return true;
+  // A refund of ours in the same event still goes through its approval flow on the existing path.
+  return external.length === refunds.length;
 }
 
 function reportRefund(orderId: string, kind: string, result: RefundResult, alert: () => void) {
