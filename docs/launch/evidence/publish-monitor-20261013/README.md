@@ -2,7 +2,7 @@
 
 **结论：1 美元预算内无法做真实调用，实测已停下并报告总控，没有注册、没有付费。实际花费 0 美元。**
 （2026-10-13 更新：Owner 按选项 A 自行订阅 1 个月 10 美元标准套餐，密钥到位后再做真实调用，不往任何社媒发布，结果补在本文件。）
-本记录只有公开文档、公开条款和开源代码的核对结果。所有真实调用项目都是 **NOT_RUN**，不能当作实测通过。
+第 1–3 节是公开文档、条款和开源代码的核对；第 4 节是 Owner 订阅后的只读真实调用结果，没有实测的项目在第 4.4 节逐项标出。
 
 ## 1. 为什么停下
 
@@ -104,19 +104,44 @@ Post for Me 是开源的（[DayMoonDevelopment/post-for-me](https://github.com/D
 | 5 | 目前存储媒体不另收费 | 一致（代码里没找到存储计费） | 计费只按成功发布 |
 | 6 | 失败的帖子可以用同一 `media_url` 重试，但不保证媒体还在，最安全是重新上传 | — | 重试一律重新上传 |
 
-## 4. 还没验证（需要密钥后实测）
+## 4. 真实调用实测（2026-10-13，Owner 订阅标准套餐后，只读，不发布）
 
-| 项目 | 状态 |
+环境：Owner 的 Post for Me 项目（Quickstart），已 Enable：Instagram、Instagram (Facebook Login)、LinkedIn、Threads、TikTok、X OAuth 2.0、YouTube、Bluesky；
+Redirect URL 留空。脚本 `postforme-probe.mjs`，北京时间 16:13–16:15。
+
+### 4.1 不连账号的接口（PASS）
+
+| 调用 | 结果 |
 | --- | --- |
-| 9 个平台的授权流程能否走通、授权页显示什么 | NOT_RUN |
-| 每个平台实际返回的字段、空值和延迟 | NOT_RUN |
-| 一个账号能往回读多少条 / 多久（有没有 30 天、90 天的实际上限） | NOT_RUN |
-| 授权失效时的真实返回（空列表还是报错） | NOT_RUN |
-| 429 的返回格式和 `Retry-After` | NOT_RUN |
-| 读作品数据是否真的不计费；超额是否真的自动升级 | NOT_RUN（只有代码证据） |
+| `GET /v1/social-accounts`、`/social-posts`、`/social-post-results`、`/webhooks` | 全部 200，返回 `{data:[], meta:{total, offset, limit:50, next}}`；耗时 0.5–2.9 秒 |
+| 错误密钥 | 401，`{meta:{requestId}, error:{code:"err:frontline:client:invalid_key", message}}`（网关返回，格式和业务接口不同） |
+| 读一个不存在的账号的作品 | **500** `{"statusCode":500,"message":"Internal server error"}`，不是 404 —— 不能靠状态码区分"账号不存在"和"服务出错" |
+| `limit=1000` | 400，`{message:["limit must not be greater than 100"], error:"Bad Request", statusCode:400}` |
+| 普通响应头 | `x-ratelimit-limit: 5`、`x-ratelimit-remaining`、`x-ratelimit-reset`（Unix 秒） |
+
+### 4.2 限流（PASS）
+
+连续 45 次 `GET /social-accounts`（顺序发，加上前面 7 次）：第 38 次起返回 **429**，
+`{meta:{requestId}, error:{code:"err:frontline:client:rate_limited", message}}`，带 `retry-after`（秒）和 `x-ratelimit-limit: 40`，
+`x-ratelimit-reset` 落在整分钟。**每分钟 40 次、按整分钟窗口**得到实测确认；每秒 5 次的头存在，顺序请求没有触发。
+
+### 4.3 生成授权链接（PASS）
+
+`POST /v1/social-accounts/auth-url`，`permissions: ["posts","feeds"]`：YouTube 返回 201，链接指向 `accounts.google.com`；X 返回 201，链接指向 `x.com`。
+链接本身没有记录（属于一次性授权地址）。
+
+### 4.4 连接账号后读作品数据
+
+| 平台 | 状态 |
+| --- | --- |
+| YouTube（Owner 有频道、没发过内容） | 待 Owner 连接后测"没有内容时返回什么" |
+| X | 待 Owner 连接并确认是否有帖子 |
+| Instagram、Facebook、LinkedIn、Threads、TikTok、TikTok Business、Pinterest、Bluesky | **未实测**（Owner 没有这些平台的账号） |
+| 授权失效时的真实返回 | 未实测 |
+| 读作品数据是否真的不计费；超额是否真的自动升级 | 未实测（只有代码证据；本次没有任何发布） |
 | 发布（任何社媒账号） | 不在本次范围，发布属于对外发布，需 Owner 当次批准 |
 
-## 5. 拿到密钥后怎么测（脚本已备好，未运行）
+## 5. 测试脚本用法
 
 脚本 [`postforme-probe.mjs`](postforme-probe.mjs) 只调用读接口和"生成授权链接"，代码里写死拒绝发布接口；不打印密钥、不输出作品文字和素材地址。
 
@@ -138,5 +163,5 @@ node docs/launch/evidence/publish-monitor-20261013/postforme-probe.mjs feed <soc
 
 | 项目 | 金额 |
 | --- | --- |
-| Post for Me | 0 美元（未注册、未订阅） |
+| Post for Me | 10 美元标准套餐月费（Owner 自己订阅，测完当月取消）；实测调用本身没有产生额外费用（只读、没有发布） |
 | 其他供应商 | 0 美元（没有调用 TikHub） |

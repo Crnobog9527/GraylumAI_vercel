@@ -12,13 +12,15 @@
 //   node postforme-probe.mjs accounts
 //   node postforme-probe.mjs auth-url <platform> [external_id]
 //   node postforme-probe.mjs feed <social_account_id> [max_pages]
+//   node postforme-probe.mjs smoke            (list endpoints, error shapes, rate-limit headers)
+//   node postforme-probe.mjs burst [n]        (n sequential GET /social-accounts, to observe 429)
 import { readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 
 const BASE = 'https://api.postforme.dev/v1';
 const ALLOWED = [/^GET \/social-accounts(\/[^/]+)?$/, /^POST \/social-accounts\/auth-url$/,
-  /^GET \/social-account-feeds\/[^/]+$/];
+  /^GET \/social-account-feeds\/[^/]+$/, /^GET \/social-posts$/, /^GET \/social-post-results$/, /^GET \/webhooks$/];
 
 function loadKey() {
   const file = join(homedir(), '.graylum', 'secrets', 'postforme.env');
@@ -28,22 +30,22 @@ function loadKey() {
   return key;
 }
 
-async function call(method, path, body) {
+async function call(method, path, body, key = loadKey()) {
   if (!ALLOWED.some((re) => re.test(`${method} ${path.split('?')[0]}`))) {
     throw new Error(`refused: ${method} ${path} is not on the read-only allow list`);
   }
   const started = Date.now();
   const res = await fetch(`${BASE}${path}`, {
     method,
-    headers: { Authorization: `Bearer ${loadKey()}`, 'Content-Type': 'application/json' },
+    headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
     body: body ? JSON.stringify(body) : undefined,
   });
   const text = await res.text();
   let json = null;
   try { json = JSON.parse(text); } catch { /* non-JSON error body */ }
   const headers = {};
-  for (const h of ['retry-after', 'x-ratelimit-limit', 'x-ratelimit-remaining', 'x-ratelimit-reset']) {
-    if (res.headers.get(h)) headers[h] = res.headers.get(h);
+  for (const [h, v] of res.headers) {
+    if (/ratelimit|retry-after|x-request-id|content-type/i.test(h)) headers[h] = v;
   }
   return { status: res.status, ms: Date.now() - started, headers, json, errorText: json ? null : text.slice(0, 200) };
 }
@@ -95,10 +97,41 @@ async function feed(accountId, maxPages = 3) {
   return { accountId, pages };
 }
 
+function brief(r) {
+  const data = r.json?.data;
+  return { status: r.status, ms: r.ms, headers: r.headers, count: Array.isArray(data) ? data.length : null,
+    meta: r.json?.meta ?? null, body_keys: r.json ? Object.keys(r.json) : null,
+    error: r.status >= 400 ? (r.json ?? r.errorText) : null };
+}
+
+// Read-only reachability, list endpoints and error shapes. No account is required.
+async function smoke() {
+  const out = {};
+  for (const path of ['/social-accounts', '/social-posts', '/social-post-results', '/webhooks']) {
+    out[`GET ${path}`] = brief(await call('GET', path));
+  }
+  out['bad key'] = brief(await call('GET', '/social-accounts', undefined, 'pfm_live_invalid_probe_key'));
+  out['unknown account feed'] = brief(await call('GET', '/social-account-feeds/spc_does_not_exist?expand=metrics'));
+  out['invalid limit'] = brief(await call('GET', '/social-account-feeds/spc_does_not_exist?limit=1000'));
+  return out;
+}
+
+// Sequential burst to observe the per-second / per-minute limits (all requests are GET /social-accounts).
+async function burst(n = 12) {
+  const rows = [];
+  for (let i = 0; i < Number(n); i += 1) {
+    const r = await call('GET', '/social-accounts');
+    rows.push({ i, status: r.status, ms: r.ms, headers: r.headers, error: r.status >= 400 ? (r.json ?? r.errorText) : null });
+  }
+  return rows;
+}
+
 const [cmd, a, b] = process.argv.slice(2);
-const run = { accounts: () => accounts(), 'auth-url': () => authUrl(a, b), feed: () => feed(a, b) }[cmd];
+const run = {
+  accounts: () => accounts(), 'auth-url': () => authUrl(a, b), feed: () => feed(a, b), smoke: () => smoke(), burst: () => burst(a),
+}[cmd];
 if (!run) {
-  console.error('usage: accounts | auth-url <platform> [external_id] | feed <social_account_id> [max_pages]');
+  console.error('usage: accounts | auth-url <platform> [external_id] | feed <id> [max_pages] | smoke | burst [n]');
   process.exit(2);
 }
 console.log(JSON.stringify({ at: new Date().toISOString(), cmd, result: await run() }, null, 2));
