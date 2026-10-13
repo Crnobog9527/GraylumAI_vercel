@@ -48,6 +48,66 @@ BEGIN
   RETURN g.id;
 END $$;
 
+-- Group admission in one transaction (FUSION-REVIEW PR-3b): the switch, membership permission, model
+-- allowlist and group budget are read here, so a concurrent change is decided by what this transaction
+-- reads. Idempotent by request: a replay returns the first admission's runs and frozen requests (kept in
+-- each run's private input), never re-prices. Each run carries exactly one frozen call:
+-- payload.input.fusion = {index, phase, body, call}, with call.requestHash = sha256(body).
+-- Only review groups are admitted until FUSION-COMPARE defines its model list.
+CREATE OR REPLACE FUNCTION public.fusion_group_admit(p_actor_id uuid, p_request_id uuid, p_kind text,
+  p_source_session_id uuid, p_runs jsonb)
+RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
+DECLARE g fusion_billing_groups; item jsonb; f jsonb; v jsonb; run jsonb; out jsonb:='[]'; member_level text;
+  total numeric:=0; i integer:=0; gid uuid;
+BEGIN
+  PERFORM bill2_actor(p_actor_id);
+  IF p_kind IS DISTINCT FROM 'review' THEN RAISE EXCEPTION 'FUSION_GROUP_INVALID'; END IF;
+  PERFORM pg_advisory_xact_lock(hashtextextended('fusion-admit:'||p_actor_id::text||':'||p_request_id::text,0));
+  SELECT * INTO g FROM fusion_billing_groups WHERE actor_id=p_actor_id AND request_id=p_request_id;
+  IF g.id IS NOT NULL THEN
+    IF g.kind<>p_kind OR g.source_session_id IS DISTINCT FROM p_source_session_id THEN RAISE EXCEPTION 'FUSION_GROUP_CONFLICT'; END IF;
+    RETURN jsonb_build_object('groupId',g.id,'replayed',true,'runs',coalesce((SELECT jsonb_agg(jsonb_build_object(
+      'runId',r.id,'fusion',r.payload#>'{input,fusion}') ORDER BY (r.payload#>>'{input,fusion,index}')::int)
+      FROM bill2_runs r WHERE r.fusion_group_id=g.id AND r.actor_id=p_actor_id),'[]'));
+  END IF;
+  IF jsonb_typeof(p_runs) IS DISTINCT FROM 'array' OR jsonb_array_length(p_runs) NOT BETWEEN 1 AND 16 THEN
+    RAISE EXCEPTION 'FUSION_GROUP_INVALID'; END IF;
+  SELECT value INTO v FROM system_settings WHERE key='fusion_settings';
+  IF jsonb_typeof(v)='string' THEN v:=(v#>>'{}')::jsonb; END IF;
+  IF v#>>'{review,enabled}' IS DISTINCT FROM 'true' THEN RAISE EXCEPTION 'FUSION_REVIEW_DISABLED'; END IF;
+  -- Paid, consistent, unexpired membership (same facts as reports), then the plan's own Fusion switch.
+  PERFORM report_membership_check(p_actor_id);
+  SELECT membership_level INTO member_level FROM profiles WHERE id=p_actor_id;
+  IF NOT EXISTS(SELECT 1 FROM membership_plans mp WHERE mp.level=member_level AND mp.allow_fusion_review) THEN
+    RAISE EXCEPTION 'FUSION_MEMBERSHIP_REQUIRED'; END IF;
+  FOR item IN SELECT value FROM jsonb_array_elements(p_runs) LOOP
+    f:=item#>'{payload,input,fusion}';
+    IF jsonb_typeof(f) IS DISTINCT FROM 'object' OR (f->>'index') IS DISTINCT FROM i::text
+      OR jsonb_typeof(f->'body') IS DISTINCT FROM 'string' OR jsonb_typeof(f->'call') IS DISTINCT FROM 'object'
+      OR f->>'phase' NOT IN ('fusion_review','fusion_summary') OR f#>>'{call,phase}' IS DISTINCT FROM f->>'phase'
+      OR f#>>'{call,requestHash}' IS DISTINCT FROM encode(sha256(convert_to(f->>'body','UTF8')),'hex')
+      OR jsonb_array_length(item#>'{payload,callPolicy}')<>1 OR item#>>'{payload,limits,maxCalls}' IS DISTINCT FROM '1'
+      OR item#>>'{payload,callPolicy,0,modelId}' IS DISTINCT FROM item#>>'{payload,modelId}'
+      OR item#>>'{payload,contractVersion}' IS DISTINCT FROM 'bill2.v2' OR item#>'{payload,sessionRef}' IS NOT NULL
+    THEN RAISE EXCEPTION 'FUSION_GROUP_INVALID'; END IF;
+    -- Administrator allowlist: reviewers for review calls, the summary model for the summary call.
+    IF (f->>'phase'='fusion_review' AND NOT coalesce(v#>'{review,reviewerModelIds}','[]') ? (item#>>'{payload,modelId}'))
+      OR (f->>'phase'='fusion_summary' AND v#>>'{review,summaryModelId}' IS DISTINCT FROM item#>>'{payload,modelId}')
+    THEN RAISE EXCEPTION 'FUSION_MODEL_DENIED'; END IF;
+    total:=total+bill2_decimal(item#>'{payload,limits,costUsd}');
+    i:=i+1;
+  END LOOP;
+  IF coalesce(v#>>'{review,maxBudgetUsd}','')='' OR total>bill2_decimal(v#>'{review,maxBudgetUsd}') THEN
+    RAISE EXCEPTION 'FUSION_BUDGET_EXCEEDED'; END IF;
+  gid:=fusion_group_create(p_actor_id,p_request_id,p_kind,p_source_session_id);
+  FOR item IN SELECT value FROM jsonb_array_elements(p_runs) LOOP
+    run:=bill2_prepare(p_actor_id,(item->>'requestId')::uuid,item->'payload');
+    PERFORM fusion_group_attach(p_actor_id,gid,(run->>'id')::uuid);
+    out:=out||jsonb_build_object('runId',run->>'id','fusion',item#>'{payload,input,fusion}');
+  END LOOP;
+  RETURN jsonb_build_object('groupId',gid,'replayed',false,'runs',out);
+END $$;
+
 -- Saved output: idempotent for the same body; only for a dispatched call of a grouped run whose
 -- source conversation still exists. The call row lock orders this with settlement and erasure.
 CREATE OR REPLACE FUNCTION public.fusion_call_output_save(p_actor_id uuid, p_call_id uuid, p_body text)
@@ -110,7 +170,7 @@ LANGUAGE sql STABLE SECURITY DEFINER SET search_path=public,pg_temp AS $$
 $$;
 
 DO $$ DECLARE f text; BEGIN
-  FOREACH f IN ARRAY ARRAY['fusion_group_create(uuid,uuid,text,uuid)','fusion_call_output_save(uuid,uuid,text)',
+  FOREACH f IN ARRAY ARRAY['fusion_group_create(uuid,uuid,text,uuid)','fusion_group_admit(uuid,uuid,text,uuid,jsonb)','fusion_call_output_save(uuid,uuid,text)',
     'fusion_call_output_read(uuid,uuid)','fusion_pending_financial_batch(integer)'] LOOP
     EXECUTE format('REVOKE ALL ON FUNCTION public.%s FROM PUBLIC,anon,authenticated,service_role', f);
     EXECUTE format('GRANT EXECUTE ON FUNCTION public.%s TO service_role', f);
