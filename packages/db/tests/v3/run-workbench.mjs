@@ -34,8 +34,11 @@ try {
 const initialArgs = process.argv.slice(2);
 const previewOptions = parsePreviewOptions(initialArgs);
 const lifecycle = previewDecision(previewOptions);
-if (!lifecycle.controlOnly && initialArgs.includes('--agent-slice-only'))
-  throw new Error('--agent-slice-only retired by LEGACY-CLOSE');
+// These suites drove the deleted /chat page, agentSlice or old /workbench reuse flow.
+const RETIRED_FLAGS = ['--agent-slice-only', '--ordinary-only', '--chat-only', '--chat-reliability-only',
+  '--reuse-only', '--real-skill-only'];
+const retiredFlag = initialArgs.find(arg => RETIRED_FLAGS.includes(arg));
+if (!lifecycle.controlOnly && retiredFlag) throw new Error(`${retiredFlag} retired by LEGACY-CLOSE`);
 let previewState;
 if (previewOptions.persistent) {
   releasePreviewLease = acquirePreviewLease(previewOptions.id, source);
@@ -48,7 +51,7 @@ if (previewOptions.persistent) {
 const restoredArgs = previewState && !lifecycle.bootstrap && !structuralPreviewArgs(initialArgs).length
   ? [...initialArgs, ...previewState.structuralArgs] : initialArgs;
 // Retired previews remain removable; no retired test or resume mode is allowed.
-const args = lifecycle.controlOnly ? restoredArgs.filter(arg => arg !== '--agent-slice-only') : restoredArgs;
+const args = lifecycle.controlOnly ? restoredArgs.filter(arg => !RETIRED_FLAGS.includes(arg)) : restoredArgs;
 if(args.some(arg=>!arg.startsWith('--legacy-ref=')&&!arg.startsWith('--case-pattern=')&&!arg.startsWith('--preview-id=')&&!arg.startsWith('--preview-action=')&&!arg.startsWith('--confirm-destroy=')&&!['--cdc-b2-eval','--staging-host','--with-staging-schema','--with-opc-schema','--opc-only','--runtime-upgrade-only','--with-runtime-schema','--runtime-only','--bill2-upgrade-only','--with-bill2-schema','--bill2-compat-only','--bill2-core-only','--without-app','--bill2-only','--workbench-restart-only','--ordinary-only','--reuse-only','--ai-only','--chat-only','--chat-reliability-only','--research-only','--admin-only','--settings-only','--usage-only','--real-skill-only','--serve','--schema-from-files'].includes(arg))||new Set(args).size!==args.length||args.filter(arg=>arg.endsWith('-only')).length>1)throw new Error('use --ai-only, --chat-only, --research-only, --admin-only or --settings-only, optionally --serve');
 if (lifecycle.controlOnly) { controlPreview(previewOptions, previewState, docker); return; }
 if (previewState && !lifecycle.bootstrap) validateResumeState(previewState, structuralPreviewArgs(args));
@@ -831,9 +834,6 @@ try {
   const marker = "await fetch('https://openrouter.ai/api/v1/chat/completions',";
   if (productionSource.split(marker).length !== 2) throw new Error('local transport fixture source boundary changed');
   writeFileSync(generationPath, productionSource.replace(marker, `await fetch('${apiUrl}/__workbench_model_fixture',`));
-  const streamPath=resolve(root,'apps/web/src/app/api/ai/stream/route.ts'),streamSource=readFileSync(streamPath,'utf8');
-  if(streamSource.split('await fetch(endpoint,').length!==2)throw new Error('stream fixture boundary changed');
-  writeFileSync(streamPath,streamSource.replace('await fetch(endpoint,',`await fetch('${apiUrl}/__chat_model_fixture',`));
   // Every fetch from the disposable Next process is constrained to loopback,
   // including optional routing helpers. No configured provider can be contacted.
   const networkGuard=resolve(root,'local-loopback-only.cjs');
