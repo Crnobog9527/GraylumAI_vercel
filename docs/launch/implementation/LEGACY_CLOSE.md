@@ -1,6 +1,6 @@
 # LEGACY-CLOSE 删除与功能对照
 
-状态：部分实施，**未完成 LEGACY-CLOSE，不合并**。
+状态：第一段 #792 已合并；第二段（旧对话后端）和第三段（旧 `/workbench` 与自研内容检查）按顺序实施，见文末。
 初始基线 staging `c91c526d3c43fb5e0b28c2a0a1942b457590fa3a`；
 按总控 2026-10-11 通知同步至 `ea5a693c8b7b99463ede5fd41588c4dec4ef118c`（#784 已合并）。
 授权：[#771 总控派发](https://github.com/Crnobog9527/GraylumAI_vercel/pull/771#issuecomment-6099912595)
@@ -88,3 +88,29 @@
   因此 HTTP 410 验证 BLOCKED；原生产关闭契约单测已在 API 全量内通过。
 - 本轮：代码大小检查 PASS；完整验证及机器人复审结果以 PR 最新交接评论为准。
 - NOT_RUN：本机浏览器、真实模型、远程数据库、生产、合并；无产品验收声明。
+
+## 第二段：旧对话后端（2026-10-13）
+
+范围以 Master Plan 第 7.1 节 LEGACY-CLOSE 一行为准。删除前逐项核对了静态 import、tRPC 客户端调用、测试和本地测试运行器。
+
+| 删除对象 | 核对结果 |
+| --- | --- |
+| `/api/ai/stream`、`/api/ai/requests` 及 `lib/ordinary-chat-request`、`ordinary-chat-access`、`legacy-chat` | 只服务旧 `/chat`；#507 后发送已返回 410，页面已在 #792 删除。删除后旧地址返回 404。限流名单和测试观察器里的旧路径一并去掉。 |
+| `services/contextManager`、`streamingOutput`、`contextSnapshots`、`modelRouter`、`chatRuntime`、`tokenCounter`、`promptCacheBuilder` | 只被上面的旧路由、`routers/ai` 和后台诊断的旧检查调用。`skillRuntime` 仍被 `routers/skills` 使用，保留。 |
+| `routers/ai`（sendMessage、abortRequest、estimateCost、getAvailableModels、getConversationMessages、getTokenStats） | 前端和后台页面都没有调用；整组删除。后台模型管理用的是 `routers/model`，不受影响。 |
+| `routers/chat` 除 `getConversations` 外的 11 个接口（新建、改名、删除、读消息、统计、导出、sendMessage） | 前端只剩个人中心"使用历史"调用 `getConversations`，保留它。 |
+| 后台诊断的 6 项旧检查（智能路由、Token 计算、Prompt 缓存、上下文压缩、实时关键词、旧对话真实运行证据）和诊断页"最新真实运行证据"卡片 | 只读旧对话数据或调用旧路由；第 8 节第 3 条已定随 LEGACY-CLOSE 删除。模型状态、计费、限流、熔断、RLS 检查保留。 |
+| 只测上述代码的测试 | 删除；`billing.test.ts` 里对旧 stream 源码的断言、凭证边界测试里的旧路由用例、v3 Skill 集成测试里的旧模块提示词用例一并去掉，其余保留。 |
+
+凭证保护和用户数据隔离：
+
+- 删除的代码不被新 Runtime、定位、资料库调用（类型检查验证引用闭合）。新链路的密钥读取、actor 校验、来源工具权限没有改动。
+- 模型密钥边界测试保留后台模型管理、诊断模型状态和非管理员拒绝三组；删除的只是已不存在的旧路由用例。
+- 能按 ID 读旧对话消息的接口全部删除，剩下的 `getConversations` 仍只按当前用户读取。安全 e2e 里的旧对话跨用户用例随接口删除，工单跨用户用例保留。
+- 没有迁移旧的通用 PII 正则过滤（Master Plan 已定不要求）。
+
+未处理、留给后续：
+
+- 后台设置页仍有只服务旧对话的设置项（智能路由、Prompt 缓存等），现在不再生效；是否从设置页移除交总控安排。
+- `packages/db/tests/v3` 的旧版本兼容测试（legacy-runtime、bill2 upgrade）在历史固定版本上运行旧对话代码，保留。
+- `workbench.integration.ts` 里依赖旧对话的用例随第三段处理。

@@ -831,9 +831,6 @@ try {
   const marker = "await fetch('https://openrouter.ai/api/v1/chat/completions',";
   if (productionSource.split(marker).length !== 2) throw new Error('local transport fixture source boundary changed');
   writeFileSync(generationPath, productionSource.replace(marker, `await fetch('${apiUrl}/__workbench_model_fixture',`));
-  const streamPath=resolve(root,'apps/web/src/app/api/ai/stream/route.ts'),streamSource=readFileSync(streamPath,'utf8');
-  if(streamSource.split('await fetch(endpoint,').length!==2)throw new Error('stream fixture boundary changed');
-  writeFileSync(streamPath,streamSource.replace('await fetch(endpoint,',`await fetch('${apiUrl}/__chat_model_fixture',`));
   // Every fetch from the disposable Next process is constrained to loopback,
   // including optional routing helpers. No configured provider can be contacted.
   const networkGuard=resolve(root,'local-loopback-only.cjs');

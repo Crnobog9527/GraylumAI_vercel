@@ -15,7 +15,6 @@ import { createSafeInternalError } from '../lib/publicError';
 import { logger } from '../lib/logger';
 
 const DIAGNOSTICS_RUN_FAILURE_MESSAGE = '诊断执行失败，请稍后重试';
-const DIAGNOSTICS_RUNTIME_PROOF_FAILURE_MESSAGE = '加载运行时凭证失败，请稍后重试';
 const DIAGNOSTICS_BATCH_RESULTS_FAILURE_MESSAGE = '读取诊断批次结果失败，请稍后重试';
 const DIAGNOSTICS_CLEANUP_FAILURE_MESSAGE = '清理诊断记录失败，请稍后重试';
 
@@ -32,16 +31,6 @@ function createSummaryStatsFallback() {
     pass_rate: 0,
     avg_latency_ms: 0,
     last_run: null,
-  };
-}
-
-function createRuntimeProofFallback(hours: number) {
-  return {
-    found: false,
-    status: 'error' as const,
-    message: DIAGNOSTICS_RUNTIME_PROOF_FAILURE_MESSAGE,
-    checkedAt: new Date().toISOString(),
-    hours,
   };
 }
 
@@ -148,12 +137,10 @@ export const diagnosticsRouter = router({
   getDashboard: adminProcedure
     .input(z.object({
       summaryHours: z.number().min(1).max(168).default(24),
-      runtimeHours: z.number().min(1).max(168).default(72),
       recentRunsLimit: z.number().min(1).max(20).default(5),
     }).optional())
     .query(async ({ ctx, input }) => {
       const summaryHours = input?.summaryHours ?? 24;
-      const runtimeHours = input?.runtimeHours ?? 72;
       const recentRunsLimit = input?.recentRunsLimit ?? 5;
 
       const service = new DiagnosticsService({
@@ -162,7 +149,7 @@ export const diagnosticsRouter = router({
         userId: ctx.profileId,
       });
 
-      const [latestResults, summaryStats, healthCheck, runtimeProof, recentRuns] = await Promise.all([
+      const [latestResults, summaryStats, healthCheck, recentRuns] = await Promise.all([
         service.getLatestResults().catch(() => {
           logDiagnosticsFallback('diagnostics_latest_results_failed');
           return [];
@@ -172,10 +159,6 @@ export const diagnosticsRouter = router({
           return createSummaryStatsFallback();
         }),
         getDiagnosticsHealthCheck(ctx.userScopedSupabase, ctx.supabaseAdmin),
-        service.getLatestRuntimeProof(runtimeHours).catch(() => {
-          logDiagnosticsFallback('diagnostics_runtime_proof_failed', { hours: runtimeHours });
-          return createRuntimeProofFallback(runtimeHours);
-        }),
         getRecentRunsData(ctx.supabaseAdmin, recentRunsLimit),
       ]);
 
@@ -183,7 +166,6 @@ export const diagnosticsRouter = router({
         latestResults,
         summaryStats,
         healthCheck,
-        runtimeProof,
         recentRuns,
       };
     }),
@@ -340,25 +322,6 @@ export const diagnosticsRouter = router({
       } catch (error) {
         logDiagnosticsFallback('diagnostics_summary_stats_failed', { hours: input?.hours ?? 24 });
         return createSummaryStatsFallback();
-      }
-    }),
-
-  getLatestRuntimeProof: adminProcedure
-    .input(z.object({
-      hours: z.number().min(1).max(168).default(72),
-    }).optional())
-    .query(async ({ ctx, input }) => {
-      const service = new DiagnosticsService({
-        supabase: ctx.userScopedSupabase,
-        supabaseAdmin: ctx.supabaseAdmin,
-        userId: ctx.profileId,
-      });
-
-      try {
-        return await service.getLatestRuntimeProof(input?.hours ?? 72);
-      } catch (error) {
-        logDiagnosticsFallback('diagnostics_runtime_proof_failed', { hours: input?.hours ?? 72 });
-        return createRuntimeProofFallback(input?.hours ?? 72);
       }
     }),
 
