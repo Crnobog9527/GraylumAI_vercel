@@ -110,6 +110,9 @@ describe('callFirecrawl', () => {
       method: 'POST', url: 'https://api.firecrawl.dev/v1/scrape',
       body: { url: 'https://example.com/a', formats: ['markdown'], onlyMainContent: true, parsePDF: false, proxy: 'basic' } } });
     expect(buildFirecrawlRequest('https://example.com/report.PDF')).toEqual({ reason: 'PDF_NOT_SUPPORTED' });
+    expect(buildFirecrawlRequest('https://example.com/report%2Epdf')).toEqual({ reason: 'PDF_NOT_SUPPORTED' });
+    expect(buildFirecrawlRequest('https://example.com/a%2epDf')).toEqual({ reason: 'PDF_NOT_SUPPORTED' });
+    expect(buildFirecrawlRequest('https://example.com/bad%E0%A4%A')).toEqual({ reason: 'INVALID_URL' });
     for (const bad of ['ftp://example.com', 'https://user:pw@example.com', 'http://localhost:3000', 'http://10.0.0.1/',
       'http://192.168.1.1', 'http://[::1]/', 'http://[::ffff:7f00:1]/', 'http://[::]/', 'http://[2001:db8::1]/',
       'http://192.0.2.1/', 'http://198.51.100.1/', 'http://203.0.113.1/', 'http://192.0.0.8/', 'http://localhost./',

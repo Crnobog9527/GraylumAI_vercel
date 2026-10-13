@@ -117,6 +117,9 @@ describe('callTikhub', () => {
       deps(jsonFetch(200, { code: 200, data: { data: { mid: 456664753, following: 10, follower: 52000 } } })));
     expect(relation).toMatchObject({ outcome: 'ok', usage: { units: '1' } });
     expect(relation.items[0].fields).toMatchObject({ id: '456664753', followers: 52000, following: 10 });
+    const bare = await callTikhub({ platform: 'bilibili', kind: 'account_relation', account: '456664753' },
+      deps(jsonFetch(200, { code: 200, data: { data: { following: 10, follower: 52000 } } })));
+    expect(bare.items[0].fields).toMatchObject({ id: '456664753', followers: 52000 });
     const noFollowers = await callTikhub({ platform: 'bilibili', kind: 'account_relation', account: '1' },
       deps(jsonFetch(200, { code: 200, data: { data: { mid: 1, following: 3 } } })));
     expect(noFollowers).toMatchObject({ outcome: 'failed', reason: 'EMPTY_OR_UNRECOGNIZED' });

@@ -22,7 +22,10 @@ export function buildFirecrawlRequest(rawUrl: string): { request: VendorRequest;
   try { url = new URL(rawUrl.trim()); } catch { return { reason: 'INVALID_URL' }; }
   if (url.protocol !== 'https:' && url.protocol !== 'http:') return { reason: 'INVALID_URL' };
   if (url.username || url.password || nonPublicHost(url.hostname) || url.href.length > 2000) return { reason: 'INVALID_URL' };
-  if (/\.pdf$/i.test(url.pathname)) return { reason: 'PDF_NOT_SUPPORTED' };
+  // Check the decoded path too: `report%2Epdf` is the same PDF once the origin decodes it.
+  let decodedPath = url.pathname;
+  try { decodedPath = decodeURIComponent(url.pathname); } catch { return { reason: 'INVALID_URL' }; }
+  if (/\.pdf$/i.test(url.pathname) || /\.pdf\s*$/i.test(decodedPath)) return { reason: 'PDF_NOT_SUPPORTED' };
   url.hash = '';
   return { url: url.href, request: { method: 'POST', url: FIRECRAWL_SCRAPE_URL, body: {
     url: url.href, formats: ['markdown'], onlyMainContent: true, parsePDF: false, proxy: 'basic',

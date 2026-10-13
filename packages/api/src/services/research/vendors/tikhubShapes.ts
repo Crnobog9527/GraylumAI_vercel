@@ -138,15 +138,24 @@ const PROFILE_KEYS = ['follower_count', 'followers_count', 'unique_id', 'screen_
 /** A profile needs an identity plus something describing it; a post needs its id plus real content or metrics. */
 function usable(item: ResearchItem, kind: SocialKind): boolean {
   const f = item.fields;
-  if (kind === 'account_relation') return f.id !== undefined && f.followers !== undefined;
+  if (kind === 'account_relation') return f.followers !== undefined;
   if (kind === 'account_profile') return (f.id !== undefined || f.handle !== undefined) && (f.followers !== undefined || f.name !== undefined);
   return f.id !== undefined && ['title', 'author', 'publishedAt', 'views', 'likes', 'comments', 'shares'].some(name => f[name] !== undefined);
 }
 
 /** Normalized items for a TikHub envelope; an unrecognized shape yields no items, never invented ones. */
-export function normalizeTikhub(json: unknown, platform: SocialPlatform, kind: SocialKind): ResearchItem[] {
+export function normalizeTikhub(json: unknown, platform: SocialPlatform, kind: SocialKind, account?: string): ResearchItem[] {
   const data = (json as Raw | null)?.data;
-  if (kind === 'account_profile' || kind === 'account_relation') {
+  if (kind === 'account_relation') {
+    // The documented relation object is just {following, follower}; it need not repeat the user id,
+    // so the requested account is the identity.
+    const found = findAll(data, object => has(object, 'follower') && count(object, ['follower']) !== undefined, 1)[0];
+    if (!found) return [];
+    const item = toItem({ id: text(found, ['mid', 'uid']) ?? account, followers: count(found, ['follower']),
+      following: count(found, ['following']) }, ['id', 'followers', 'following']);
+    return usable(item, kind) ? [item] : [];
+  }
+  if (kind === 'account_profile') {
     const found = findAll(data, object => has(object, ...PROFILE_KEYS), 20).map(profile).find(item => usable(item, kind));
     return found ? [found] : [];
   }

@@ -161,7 +161,7 @@ export async function callTikhub(call: TikhubCall, deps: VendorDeps): Promise<Re
     return { ...base, outcome: 'failed', reason: `UPSTREAM_${code ?? 'UNKNOWN'}`, httpStatus: 200,
       supplierMayCharge: true, usage: { unit: 'call', units: '1' } };
   }
-  const all = normalizeTikhub(answer.json, call.platform, call.kind);
+  const all = normalizeTikhub(answer.json, call.platform, call.kind, call.account?.trim());
   // A recognized empty post list is a real, billed "no results" answer. A missing profile or an
   // unrecognized payload is not a delivery and is never reported as a successful, billable result.
   if (all.length === 0 && call.kind !== 'account_profile' && call.kind !== 'account_relation' && hasEmptyPostList(answer.json, call.platform, call.kind)) {
