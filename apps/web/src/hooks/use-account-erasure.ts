@@ -100,7 +100,7 @@ export function useAccountErasure(options: { email?: string; usesPassword: boole
       const result = await portal.mutateAsync({});
       window.location.assign(result.portalUrl);
     } catch {
-      setError('订阅管理暂不可用，请稍后重试。');
+      setError('订阅管理暂时打不开，请稍后重试，或联系客服帮你停止自动续费。');
     }
   });
 
