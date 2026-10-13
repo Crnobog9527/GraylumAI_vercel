@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { describe, expect, it, vi } from 'vitest';
-import { runConversationErasure, type ConversationErasureDeps } from './conversation-erasure';
+import { REVIEW_NOTICE, laterNotice, runConversationErasure, type ConversationErasureDeps } from './conversation-erasure';
 
 const id = '11111111-1111-4111-8111-111111111111';
 const done = { kind: 'session' as const, id, status: 'deleted' as const, alreadyDeleted: false,
@@ -46,5 +46,16 @@ describe('runConversationErasure', () => {
     const { value } = deps(async () => ({ ...done, status: 'review_required' as const, financialReviewCount: 1 }));
     await expect(runConversationErasure(value, id)).resolves.toBe('deleted');
     expect(value.notify).toHaveBeenLastCalledWith({ tone: 'notice', text: expect.stringContaining('账务') });
+  });
+});
+
+describe('laterNotice', () => {
+  it('keeps a newer failure instead of a late accounting notice', () => {
+    const failure = { tone: 'error' as const, text: '这个对话正在使用中，没有删除' };
+    expect(laterNotice(failure, REVIEW_NOTICE)).toBe(failure);
+  });
+  it('shows the accounting notice when nothing more important is on screen', () => {
+    expect(laterNotice(null, REVIEW_NOTICE)).toBe(REVIEW_NOTICE);
+    expect(laterNotice({ tone: 'notice', text: 'x' }, REVIEW_NOTICE)).toBe(REVIEW_NOTICE);
   });
 });

@@ -10,6 +10,11 @@ export type ConversationNotice = { tone: 'error' | 'notice'; text: string };
 /** Content is gone; only money records on the deleted conversation are still being checked. */
 export const REVIEW_NOTICE: ConversationNotice = { tone: 'notice', text: '对话已删除，部分账务记录仍在核对中。' };
 
+/** A late background notice never hides a failure the user still has to act on. */
+export function laterNotice(current: ConversationNotice | null, incoming: ConversationNotice) {
+  return current?.tone === 'error' ? current : incoming;
+}
+
 export type ConversationErasureDeps = {
   /** Remove the row from the list at once (optimistic). */
   hide: (sessionId: string) => void;
