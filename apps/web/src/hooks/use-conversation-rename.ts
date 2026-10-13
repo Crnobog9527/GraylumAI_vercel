@@ -51,21 +51,22 @@ export function useConversationRename() {
       try {
         const saved = await utils.client.opc.conversationRename.mutate({ sessionId, name });
         revisions.current.settle(sessionId, saved.name ?? '');
+        // Only the latest edit clears the error and refreshes the list: a refetch while a newer edit of
+        // this conversation is queued could show this older title over it. An empty name restores the
+        // server's default title, which the refresh brings.
         if (revisions.current.isLatest(sessionId, revision)) {
           setFailure((current) => current?.sessionId === sessionId ? null : current);
+          void utils.opc.conversations.invalidate();
         }
-        // An empty name restores the server's default title; refresh either way in the background.
-        void utils.opc.conversations.invalidate();
       } catch (cause) {
         revisions.current.settle(sessionId, null);
-        // A newer edit of the same conversation is queued or shown: keep its title. Otherwise show the
-        // last title the server confirmed, not an optimistic one that never saved.
-        // A failure superseded by a newer edit of the same conversation is not shown: that edit decides.
+        // A failure superseded by a newer edit of the same conversation changes nothing: that edit
+        // decides. Otherwise show the last title the server confirmed, not an unsaved optimistic one.
         if (revisions.current.isLatest(sessionId, revision)) {
           setTitle(revisions.current.rollbackTitle(sessionId, previous));
           setFailure({ sessionId, text: renameFailureMessage(cause) });
+          void utils.opc.conversations.invalidate();
         }
-        void utils.opc.conversations.invalidate();
       }
     };
     const next = (queues.current.get(sessionId) ?? Promise.resolve()).then(run);
