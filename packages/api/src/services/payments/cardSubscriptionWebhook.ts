@@ -4,7 +4,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { resolveStripeScope } from './stripeCheckoutPersistence';
 import { recoverMethodCheckout } from './walletWebhook';
 import { freezePurchaseSnapshot } from './contracts';
-import { stripePreTaxAmount } from './purchaseFacts';
+import { GRAYLUM_INITIATED_CANCEL, stripePreTaxAmount } from './purchaseFacts';
 import { recordStripeInvoiceConflict } from './stripeConflictEvidence';
 import { recordCardPaymentTax } from './cardPaymentEvidence';
 import { PAYMENT_EVIDENCE_CONFLICT } from './stripeWebhookError';
@@ -80,7 +80,8 @@ async function syncState(db: SupabaseClient, merchant: string, localSubscription
   // Only a cancellation the buyer asked for ends the founder renewal window; retry exhaustion does not.
   const result = await db.rpc('pay_stripe_mp_sync_subscription', { p_subscription: localSubscriptionId, p_merchant: merchant,
     p_cancel_at_period_end: state.stop, p_canceled: state.canceled,
-    p_user_canceled: state.canceled && subscription.cancellation_details?.reason === 'cancellation_requested' });
+    p_user_canceled: state.canceled && subscription.cancellation_details?.reason === 'cancellation_requested'
+      && subscription.cancellation_details?.comment !== GRAYLUM_INITIATED_CANCEL });
   if (result.error) throw new Error('PAY_STRIPE_MP_RENEWAL_UNAVAILABLE', { cause: result.error });
   return state;
 }
@@ -92,7 +93,8 @@ async function stopRenewalAfterReview(db: SupabaseClient, stripe: Stripe, mercha
   subscriptionId: string) {
   let subscription = await readSubscription(stripe, subscriptionId);
   if (!stripeStopState(subscription).stop && !stripeStopState(subscription).canceled) {
-    await stripe.subscriptions.update(subscriptionId, { cancel_at_period_end: true });
+    await stripe.subscriptions.update(subscriptionId, { cancel_at_period_end: true,
+      cancellation_details: { comment: GRAYLUM_INITIATED_CANCEL } });
     subscription = await readSubscription(stripe, subscriptionId);
   }
   const state = await syncState(db, merchant, localSubscriptionId, subscription);

@@ -89,7 +89,8 @@ describe('PAY-STRIPE-MP card subscription webhooks', () => {
     await expect(handleCardSubscriptionInvoice(f.db, f.stripe, 'in_1', 'invoice.paid', undefined, alert)).resolves.toBe(true);
     expect(alert).toHaveBeenCalledTimes(1);
     expect((f.raw.subscriptions as unknown as { update: ReturnType<typeof vi.fn> }).update)
-      .toHaveBeenCalledWith('sub_1', { cancel_at_period_end: true });
+      .toHaveBeenCalledWith('sub_1', { cancel_at_period_end: true,
+      cancellation_details: { comment: 'graylum_initiated' } });
     expect(f.rpc).toHaveBeenLastCalledWith('pay_stripe_mp_sync_subscription', { p_subscription: 'local_sub', p_merchant: 'fixture',
       p_cancel_at_period_end: true, p_canceled: false, p_user_canceled: false });
     // If Stripe does not show the stop, the event fails so Stripe retries it (the renewal itself is deduplicated).
@@ -142,7 +143,8 @@ describe('PAY-STRIPE-MP card subscription webhooks', () => {
     const alert = vi.fn();
     await expect(handleCardSubscriptionInvoice(f.db, f.stripe, 'in_1', 'invoice.paid', undefined, alert)).resolves.toBe(true);
     expect(mocks.conflict).toHaveBeenCalled();
-    expect(update).toHaveBeenCalledWith('sub_1', { cancel_at_period_end: true });
+    expect(update).toHaveBeenCalledWith('sub_1', { cancel_at_period_end: true,
+      cancellation_details: { comment: 'graylum_initiated' } });
     expect(alert).toHaveBeenCalledTimes(1);
     expect(f.rpc).toHaveBeenLastCalledWith('pay_stripe_mp_sync_subscription', { p_subscription: 'local_sub', p_merchant: 'fixture',
       p_cancel_at_period_end: true, p_canceled: false, p_user_canceled: false });
@@ -157,6 +159,9 @@ describe('PAY-STRIPE-MP card subscription webhooks', () => {
       // Retry exhaustion vs a cancellation the buyer asked for (Link / portal): only the latter ends the founder window.
       [{ status: 'canceled', cancel_at_period_end: false, cancellation_details: { reason: 'payment_failed' } }, false, true, false],
       [{ status: 'canceled', cancel_at_period_end: false, cancellation_details: { reason: 'cancellation_requested' } }, false, true, true],
+      // Our own stop (review, monthly refund) is marked, so the buyer keeps the founder window.
+      [{ status: 'canceled', cancel_at_period_end: false,
+        cancellation_details: { reason: 'cancellation_requested', comment: 'graylum_initiated' } }, false, true, false],
       [{ status: 'active', cancel_at_period_end: false, cancel_at: 1794472954 }, true, false, false],
       // A cancel_at later than the current period end still renews in between: not a stop.
       [{ status: 'active', cancel_at_period_end: false, cancel_at: 1797064954 }, false, false, false]] as const) {
