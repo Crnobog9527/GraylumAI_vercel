@@ -30,6 +30,12 @@ BEGIN
       ORDER BY f.started_at DESC,f.id DESC LIMIT 1)
    ORDER BY r.started_at LIMIT p_limit);
  GET DIAGNOSTICS n_jobs=ROW_COUNT;
+ -- The kept rows also lose everything past the cutoff except the opaque storage scan cursor
+ -- (object path ids, no content): no error text or other summary outlives 30 days.
+ UPDATE scheduled_job_runs SET error=NULL,
+  summary=CASE WHEN summary ? 'scanCursor' THEN jsonb_build_object('scanCursor',summary->'scanCursor') ELSE '{}'::jsonb END
+ WHERE id IN (SELECT id FROM scheduled_job_runs WHERE started_at<cutoff
+  AND (error IS NOT NULL OR summary-'scanCursor'<>'{}'::jsonb) ORDER BY started_at LIMIT p_limit);
  RETURN jsonb_build_object('applicationLogs',n_app,'diagnosticResults',n_diag,'scheduledJobRuns',n_jobs,
   'more',n_app=p_limit OR n_diag=p_limit OR n_jobs=p_limit);
 END $$;
