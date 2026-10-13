@@ -88,6 +88,11 @@ BEGIN
   SELECT * INTO g FROM fusion_billing_groups WHERE actor_id=p_actor_id AND request_id=p_request_id;
   IF g.id IS NOT NULL THEN
     IF g.kind<>p_kind OR g.source_session_id IS DISTINCT FROM p_source_session_id THEN RAISE EXCEPTION 'FUSION_GROUP_CONFLICT'; END IF;
+    -- The replay returns frozen private requests: take the conversation's share lock first and refuse
+    -- once it is deleted, so a replay never returns content a committed deletion removed.
+    PERFORM 1 FROM runtime_sessions WHERE id=g.source_session_id AND actor_id=p_actor_id
+      AND content_deleted_at IS NULL AND erased_at IS NULL FOR SHARE;
+    IF NOT FOUND THEN RAISE EXCEPTION 'FUSION_GROUP_DENIED'; END IF;
     RETURN jsonb_build_object('groupId',g.id,'replayed',true,'runs',coalesce((SELECT jsonb_agg(jsonb_build_object(
       'runId',r.id,'fusion',r.payload#>'{input,fusion}') ORDER BY (r.payload#>>'{input,fusion,index}')::int)
       FROM bill2_runs r WHERE r.fusion_group_id=g.id AND r.actor_id=p_actor_id),'[]'));
@@ -161,15 +166,21 @@ BEGIN
   RETURN jsonb_build_object('callId',c.id,'bodyHash',h,'savedAt',o.saved_at);
 END $$;
 
-CREATE OR REPLACE FUNCTION public.fusion_call_output_read(p_actor_id uuid, p_call_id uuid)
-RETURNS jsonb LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path=public,pg_temp AS $$
+-- Reads take the source conversation's share lock first (deletion takes it for update), then read the
+-- body afresh: a read either completes before a deletion commits or sees it and returns nothing.
+-- The function changed from STABLE to VOLATILE while unmerged; row locks need a volatile function.
+DROP FUNCTION IF EXISTS public.fusion_call_output_read(uuid,uuid);
+CREATE FUNCTION public.fusion_call_output_read(p_actor_id uuid, p_call_id uuid)
+RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
 DECLARE o fusion_call_outputs; s runtime_sessions;
 BEGIN
   PERFORM bill2_actor(p_actor_id);
+  SELECT s2.* INTO s FROM runtime_sessions s2 JOIN fusion_billing_groups g ON g.source_session_id=s2.id
+    JOIN bill2_runs r ON r.fusion_group_id=g.id JOIN bill2_calls c ON c.run_id=r.id
+    WHERE c.id=p_call_id AND g.actor_id=p_actor_id FOR SHARE OF s2;
+  IF s.id IS NULL OR s.content_deleted_at IS NOT NULL OR s.erased_at IS NOT NULL THEN RETURN NULL; END IF;
   SELECT * INTO o FROM fusion_call_outputs WHERE call_id=p_call_id AND actor_id=p_actor_id;
   IF o.call_id IS NULL THEN RETURN NULL; END IF;
-  SELECT s2.* INTO s FROM runtime_sessions s2 JOIN fusion_billing_groups g ON g.source_session_id=s2.id WHERE g.id=o.group_id;
-  IF s.id IS NULL OR s.content_deleted_at IS NOT NULL OR s.erased_at IS NOT NULL THEN RETURN NULL; END IF;
   RETURN jsonb_build_object('callId',o.call_id,'body',o.body,'bodyHash',o.body_hash,'savedAt',o.saved_at);
 END $$;
 

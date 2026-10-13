@@ -42,6 +42,23 @@ export async function fusionSessionlessCases({db,Client,connectionString,report,
   assert.equal((await rpc(db,'fusion_call_output_read',g.actor,c0.id)).body,'review A');
   report.checks.push('Fusion output save is idempotent, refuses a different body and another user; readable while the conversation exists');
 
+  // A read overlapping a deletion waits for the conversation lock and then returns nothing.
+  const racing = await sessionGroup(db,createFixture,{n:1,credits:9});
+  const rcall = callOf(racing,racing.members[0]);
+  await rpc(db,'fusion_call_output_save',racing.actor,rcall.id,'racing body');
+  const [deleting,reading] = [new Client({connectionString}),new Client({connectionString})];
+  await Promise.all([deleting.connect(),reading.connect()]);
+  try {
+    await deleting.query('BEGIN');
+    await deleting.query('UPDATE runtime_sessions SET content_deleted_at=now() WHERE id=$1',[racing.session]);
+    await deleting.query('DELETE FROM fusion_call_outputs WHERE call_id=$1',[rcall.id]);
+    const pending = reading.query('SELECT fusion_call_output_read($1,$2) v',[racing.actor,rcall.id]).then(r=>r.rows[0].v);
+    await new Promise(r=>setTimeout(r,300));
+    await deleting.query('COMMIT');
+    assert.equal(await pending,null,'the overlapping read returns nothing once the deletion committed');
+  } finally { await deleting.end(); await reading.end(); }
+  report.checks.push('an output read overlapping a deletion waits on the conversation lock and returns nothing after it commits');
+
   // Unjudged at the recovery deadline: a saved Fusion output is billed like usable; none is no_delivery.
   for (const f of g.members) await receipt(db,g,f,callOf(g,f));
   await db.query("UPDATE bill2_calls SET recovery_deadline=now()-interval '1 second' WHERE run_id=ANY($1::uuid[])",[g.runs]);

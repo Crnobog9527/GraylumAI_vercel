@@ -104,4 +104,9 @@ export async function fusionAdmitCases({db,Client,connectionString,report,create
     assert.equal(await runCount(db,actor),before+4,'only one admission created runs');
   } finally { await Promise.all(clients.map(c=>c.end())); }
   report.checks.push('two concurrent admissions of one request produce one group and one set of runs');
+
+  // A replay after the source conversation was deleted returns nothing private.
+  await rpc(db,'content_erasure_mark_session',actor,session);
+  await assert.rejects(admit([],request),/FUSION_GROUP_DENIED/);
+  report.checks.push('an admission replay after the source conversation was deleted is refused');
 }
