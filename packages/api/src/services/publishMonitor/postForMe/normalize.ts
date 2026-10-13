@@ -22,6 +22,10 @@ const MAX_BREAKDOWN_ITEMS = 100;
 const MAX_BREAKDOWN_FIELDS = 20;
 const METRIC_KEY = /^[A-Za-z0-9_.]{1,96}$/;
 const TWITTER_EPOCH_MS = 1288834974657n;
+/** Same bound as social_posts.platform_post_id (migration 0240); longer IDs are rejected, never truncated. */
+export const MAX_POST_ID_LENGTH = 256;
+/** Listed when the provider sent no metrics object at all for a post. */
+export const ALL_METRICS_MISSING = 'metrics';
 
 const feedPage = z.object({
   data: z.array(z.unknown()).max(100),
@@ -117,14 +121,15 @@ export function normalizePost(raw: unknown, platform: string): NormalizedPost | 
   if (raw === null || typeof raw !== 'object') return null;
   const item = raw as Record<string, unknown>;
   const id = item.platform_post_id;
-  if (typeof id !== 'string' || id.length < 1 || id.length > 256) return null;
+  if (typeof id !== 'string' || id.length < 1 || id.length > MAX_POST_ID_LENGTH) return null;
   let postedAt = isoTimestamp(item.posted_at);
   let postedAtSource: NormalizedPost['postedAtSource'] = postedAt ? 'provider' : null;
   if (!postedAt && platform === 'x') {
     postedAt = xSnowflakeTime(id);
     postedAtSource = postedAt ? 'x_snowflake' : null;
   }
-  const flat = item.metrics === undefined ? { metrics: {}, breakdowns: {}, missingFields: [] } : flattenMetrics(item.metrics);
+  const flat = item.metrics === undefined || item.metrics === null
+    ? { metrics: {}, breakdowns: {}, missingFields: [ALL_METRICS_MISSING] } : flattenMetrics(item.metrics);
   return { platformPostId: id, postedAt, postedAtSource, url: publicHttpsUrl(item.platform_url),
     titleExcerpt: postTitle(item, platform), ...flat };
 }

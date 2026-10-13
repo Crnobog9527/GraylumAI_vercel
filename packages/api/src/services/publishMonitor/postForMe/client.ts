@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { z } from 'zod';
 import { exchange, type FetchImpl, type PostForMeExchange, publicHttpsUrl } from './http';
-import { normalizeFeedPage, type FeedPage } from './normalize';
+import { MAX_POST_ID_LENGTH, normalizeFeedPage, type FeedPage } from './normalize';
 
 /**
  * Post for Me client for PUBLISH-MONITOR (plan §4.1). Read paths, consent links and account removal only;
@@ -210,7 +210,9 @@ export function readFeedPage(deps: ClientDeps, accountId: string, platform: stri
   if (query.cursor) params.set('cursor', query.cursor);
   for (const id of query.platformPostIds ?? []) {
     // Provider IDs can be URIs (Bluesky at://did:.../app.bsky.feed.post/...); URLSearchParams encodes them.
-    if (id.length < 1 || id.length > 512 || /[\s\u0000-\u001f\u007f]/.test(id)) throw new Error('POSTFORME_POST_ID_INVALID');
+    if (id.length < 1 || id.length > MAX_POST_ID_LENGTH || /[\s\u0000-\u001f\u007f]/.test(id)) {
+      throw new Error('POSTFORME_POST_ID_INVALID');
+    }
     params.append('platform_post_id', id);
   }
   return call(deps, { method: 'GET', path: `/social-account-feeds/${accountId}?${params}` },

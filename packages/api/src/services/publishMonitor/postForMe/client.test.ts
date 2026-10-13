@@ -151,6 +151,10 @@ describe('post for me client', () => {
     await readFeedPage(sky.deps, 'spc_2', 'bluesky', { platformPostIds: ['at://did:plc:abc/app.bsky.feed.post/3k'] });
     expect(sky.calls[0]!.url).toContain('platform_post_id=at%3A%2F%2Fdid%3Aplc%3Aabc%2Fapp.bsky.feed.post%2F3k');
     expect(() => readFeedPage(deps([]).deps, 'spc_2', 'x', { platformPostIds: ['a b'] })).toThrow('POSTFORME_POST_ID_INVALID');
+    expect(() => readFeedPage(deps([]).deps, 'spc_2', 'x', { platformPostIds: ['a'.repeat(257)] })).toThrow('POSTFORME_POST_ID_INVALID');
+    const mixed = await readFeedPage(deps([json(200, { data: [{ platform_post_id: 'a'.repeat(257) },
+      { platform_post_id: 'ok1' }], meta: {} })]).deps, 'spc_2', 'bluesky');
+    expect(mixed.kind === 'ok' && [mixed.value.rejected, mixed.value.posts[0]!.missingFields]).toEqual([1, ['metrics']]);
     expect(result.kind).toBe('ok');
     if (result.kind !== 'ok') return;
     expect(result.value).toMatchObject({ rejected: 1, nextCursor: 'c2', hasMore: true });
