@@ -2,8 +2,7 @@
 -- PAY-COMMON (0243): an ended wallet / Waffo / Stripe internal membership no longer blocks buying again.
 -- Entitlements already follow pay_common_membership_facts (paid order end + renewal grace), but nothing
 -- moved profiles.membership_level back after a wallet or Waffo term ended, and the ordinary-purchase
--- admission refused any non-free cached level or any 'active' subscription row. 0238 covers only a final
--- Stripe card cancellation.
+-- admission refused any non-free cached level or any 'active' subscription row.
 -- 1. pay_common_settle_membership_level: under the profile lock, lowers the cached level to the facts
 --    projection (internal_paid -> its level, internal_inactive -> free). It never raises a level, and
 --    skips admin overrides, legacy Stripe conflicts, closed/erasing accounts and held monthly refunds.
@@ -11,7 +10,9 @@
 -- 3. pay_waffo_admit_purchase (latest body: 0222; 0237/0238 do not change it) settles first, and an
 --    internal subscription that stopped renewing and whose period ended no longer blocks admission.
 --    A still-renewing card subscription keeps blocking: the provider may still charge it.
--- No table or column changes; repeatable. Rollback: forward-fix (re-create 0222's admission body).
+-- 4. pay_stripe_mp_sync_subscription (0238) settles through the same function on a final cancellation.
+-- Depends on 0237/0238 (#909/#922) being applied first. No table or column changes; repeatable.
+-- Rollback: forward-fix (re-create 0222's admission body and 0238's sync body).
 BEGIN;
 SET LOCAL lock_timeout='5s';
 
@@ -87,5 +88,34 @@ BEGIN
   END IF;
   EXECUTE source;
 END $admission$;
+
+-- 0238's final Stripe card cancellation computed its own remaining level; it now settles from the same
+-- facts projection (refunding / review orders, admin overrides and legacy conflicts decided there).
+DO $stripe_cancel$
+DECLARE source text;
+  old_cancel constant text:=$old$ IF s.status='canceled' THEN
+  SELECT coalesce(max(lvl),0) INTO remaining FROM (
+   SELECT CASE o.purchase_membership_level WHEN 'gold' THEN 2 WHEN 'pro' THEN 1 ELSE 0 END lvl FROM payment_orders o
+    WHERE o.user_id=s.user_id AND o.item_type='membership_plan' AND o.payment_method IS NOT NULL AND o.fulfilled_at IS NOT NULL
+     AND o.payment_status='paid' AND o.status='completed' AND o.entitlement_start<=now() AND o.entitlement_end>now()
+   UNION ALL
+   SELECT CASE p.level WHEN 'gold' THEN 2 WHEN 'pro' THEN 1 ELSE 0 END FROM user_subscriptions x
+    JOIN membership_plans p ON p.id=x.membership_plan_id
+    WHERE x.user_id=s.user_id AND x.id<>s.id AND (x.stripe_subscription_id IS NOT NULL OR x.status='admin_override')
+     AND x.status IN ('active','trialing','past_due','unpaid','admin_override')
+     AND (x.current_period_end IS NULL OR x.current_period_end>now())) held;
+  UPDATE profiles SET membership_level=CASE remaining WHEN 2 THEN 'gold' WHEN 1 THEN 'pro' ELSE 'free' END
+   WHERE id=s.user_id AND CASE membership_level WHEN 'gold' THEN 2 WHEN 'pro' THEN 1 ELSE 0 END>remaining;
+ END IF;$old$;
+  new_cancel constant text:=' -- PAY_COMMON_MEMBERSHIP_EXPIRY (0243): the cached level follows pay_common_membership_facts.'||chr(10)
+    ||' IF s.status=''canceled'' AND current_setting(''role'',true)=''service_role'' THEN'||chr(10)
+    ||'  PERFORM public.pay_common_settle_membership_level(s.user_id);'||chr(10)||' END IF;';
+BEGIN
+  source:=pg_get_functiondef('public.pay_stripe_mp_sync_subscription(uuid,text,boolean,boolean)'::regprocedure);
+  IF position(new_cancel IN source)=0 THEN
+    IF position(old_cancel IN source)=0 THEN RAISE EXCEPTION 'PAY_COMMON_EXPIRY_STRIPE_CANCEL_PATCH_MISSING'; END IF;
+    EXECUTE replace(source,old_cancel,new_cancel);
+  END IF;
+END $stripe_cancel$;
 
 COMMIT;

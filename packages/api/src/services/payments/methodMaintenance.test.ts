@@ -2,7 +2,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { releaseMethodMembershipCredits } from './methodMaintenance';
 const byName = (values: Record<string, { data: unknown; error: unknown }>) =>
-  vi.fn((name: string) => Promise.resolve(values[name]));
+  vi.fn().mockImplementation((name: string) => Promise.resolve(values[name]));
 describe('annual method grant cron', () => {
  it('uses the bounded atomic release independently of sales switches', async () => {
   const rpc = byName({ pay_waffo_release_due: { data: 8970, error: null },

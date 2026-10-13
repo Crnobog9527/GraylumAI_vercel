@@ -93,16 +93,11 @@ export async function stripeMpRenewalCases({admin,service,connect}) {
   // A member whose paid period is still running keeps the cached level even if another subscription is canceled.
   const keepLevel=(await admin.query('SELECT membership_level FROM profiles WHERE id=$1',[card.user])).rows[0].membership_level;
   assert.equal(keepLevel,'gold');
-  // Pro->Gold upgrade with the older Pro term still running, Gold canceled first: the level drops to pro, not free.
-  // (Disposable fixture: the running renewed term stands in for the older Pro period.)
-  await admin.query('BEGIN');
-  await admin.query('ALTER TABLE payment_orders DISABLE TRIGGER pay_common_purchase_freeze');
-  await admin.query(`UPDATE payment_orders SET purchase_membership_level='pro' WHERE subscription_id=$1 AND source_order_id IS NOT NULL`,
-    [card.sub]);
-  await admin.query('ALTER TABLE payment_orders ENABLE TRIGGER pay_common_purchase_freeze');
-  await admin.query('COMMIT');
+  // 0243: the final cancellation settles from pay_common_membership_facts; the renewed term already paid
+  // keeps running to its end, so the level is kept (no paid time is revoked).
   await sync(card,false,true);
-  assert.equal((await admin.query('SELECT membership_level FROM profiles WHERE id=$1',[card.user])).rows[0].membership_level,'pro');
+  assert.equal((await admin.query('SELECT membership_level FROM profiles WHERE id=$1',[card.user])).rows[0].membership_level,'gold');
+  assert.equal((await facts(card.user)).mapping_state,'internal_paid');
   // A charge after the final cancellation is kept for review (refund), never granted.
   const cnCredits=(await admin.query('SELECT credits FROM profiles WHERE id=$1',[cn.user])).rows[0].credits;
   assert.equal((await renew(service,cn)).rows[0].v.state,'review');
