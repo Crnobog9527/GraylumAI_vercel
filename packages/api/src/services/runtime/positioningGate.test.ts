@@ -59,12 +59,16 @@ it('reuses the admitted model row OpenRouter key and never calls without one', a
   expect(transport).toHaveBeenCalledOnce();
 });
 
-it('refuses on block, falls back on unavailable or a thrown classifier, and passes on allow', async () => {
+it('refuses on block and admits on allow, unavailable or a thrown classifier', async () => {
   const input = { text: 'x', apiKey: 'K' };
   await expect(judgePositioning({ classify: async () => 'block' }, input)).rejects.toMatchObject({ reason: 'POSITIONING_REQUIRED' });
-  expect(await judgePositioning({ classify: async () => 'unavailable' }, input)).toBe(true);
-  expect(await judgePositioning({ classify: async () => { throw new Error('x'); } }, input)).toBe(true);
-  expect(await judgePositioning({ classify: async () => 'allow' }, input)).toBe(false);
+  expect(await judgePositioning({ classify: async () => 'unavailable' }, input)).toBe('unavailable');
+  expect(await judgePositioning({ classify: async () => { throw new Error('x'); } }, input)).toBe('unavailable');
+  expect(await judgePositioning({ classify: async () => 'allow' }, input)).toBe('allow');
+});
+
+it('asks the primary model to read the conversation, not only the current message', () => {
+  expect(POSITIONING_FALLBACK_INSTRUCTIONS).toContain('read together with the conversation so far');
 });
 
 it('reads the 0219 rule and fails operationally instead of guessing', async () => {
