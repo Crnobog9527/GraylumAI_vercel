@@ -111,13 +111,15 @@ function listPage(deps: ClientDeps, offset: number, externalId?: string): Promis
 /**
  * Accounts carrying one exact external_id (what an attempt imported, plan §4.1), one page at a time;
  * callers keep calling with nextOffset until it is null, so no imported account is left unmanaged.
+ * Offsets shift when accounts are deleted: collect every page first, then delete (never advance the
+ * offset after deleting rows from the current page).
  */
 export function listAccountsByExternalId(deps: ClientDeps, externalId: string, offset = 0): Promise<Outcome<AccountPage>> {
   if (!EXTERNAL_ID.test(externalId)) throw new Error('POSTFORME_EXTERNAL_ID_INVALID');
   return listPage(deps, offset, externalId);
 }
 
-/** Every account in the project, one page at a time (daily orphan sweep, plan §4.1). */
+/** Every account in the project, one page at a time (daily orphan sweep, plan §4.1). Same rule: list fully, then delete. */
 export function listAllAccounts(deps: ClientDeps, offset = 0): Promise<Outcome<AccountPage>> {
   return listPage(deps, offset);
 }

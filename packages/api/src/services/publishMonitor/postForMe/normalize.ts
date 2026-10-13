@@ -102,6 +102,15 @@ function excerpt(caption: unknown): string | null {
   return clean ? [...clean].slice(0, 120).join('') : null;
 }
 
+// YouTube keeps the video title in platform_data.title; caption is the description there.
+function postTitle(item: Record<string, unknown>, platform: string): string | null {
+  if (platform === 'youtube' && item.platform_data && typeof item.platform_data === 'object') {
+    const title = excerpt((item.platform_data as Record<string, unknown>).title);
+    if (title) return title;
+  }
+  return excerpt(item.caption);
+}
+
 export function normalizePost(raw: unknown, platform: string): NormalizedPost | null {
   if (raw === null || typeof raw !== 'object') return null;
   const item = raw as Record<string, unknown>;
@@ -115,7 +124,7 @@ export function normalizePost(raw: unknown, platform: string): NormalizedPost | 
   }
   const flat = item.metrics === undefined ? { metrics: {}, breakdowns: {}, missingFields: [] } : flattenMetrics(item.metrics);
   return { platformPostId: id, postedAt, postedAtSource, url: publicHttpsUrl(item.platform_url),
-    titleExcerpt: excerpt(item.caption), ...flat };
+    titleExcerpt: postTitle(item, platform), ...flat };
 }
 
 export type FeedPage = { posts: NormalizedPost[]; rejected: number; nextCursor: string | null; hasMore: boolean };

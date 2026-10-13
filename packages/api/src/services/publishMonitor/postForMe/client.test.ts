@@ -160,6 +160,9 @@ describe('post for me client', () => {
       missingFields: ['non_public_metrics.url_link_clicks'] });
     expect(other).toMatchObject({ postedAt: '2026-09-14T09:28:23.000Z', postedAtSource: 'provider', url: null,
       metrics: {}, missingFields: ['views'] });
+    const yt = await readFeedPage(deps([json(200, { data: [{ platform_post_id: 'v9', caption: 'long description',
+      platform_data: { title: 'Video title' } }], meta: {} })]).deps, 'spc_3', 'youtube');
+    expect(yt.kind === 'ok' && yt.value.posts[0]!.titleExcerpt).toBe('Video title');
     const bad = await readFeedPage(deps([json(200, { posts: [] })]).deps, 'spc_1', 'x');
     expect(bad).toMatchObject({ kind: 'failed', reason: 'RESPONSE_SHAPE' });
     // Measured: an unknown account answers 500, which must stay "not fetched", not "no posts".
