@@ -8,7 +8,7 @@ import { openRouterBound } from '../bill2/openRouterPolicy';
 const mocks=vi.hoisted(()=>({host:vi.fn(),freeze:vi.fn()}));
 vi.mock('./paygHostPolicy',()=>({readPaygHostPolicies:mocks.host}));
 vi.mock('./paygPricing',()=>({freezeStagingPaygPricing:mocks.freeze}));
-vi.mock('./newWorkGate',()=>({readNewWorkSettings:()=>({}),
+vi.mock('./newWorkGate',()=>({readNewWorkSettings:()=>({}),readAdmissionSettings:()=>({}),
   newWorkGate:()=>({message:async()=>({ok:true})}),requireNewWork:()=>{}}));
 vi.mock('./billingUnitAdmission',async original=>({
   ...(await original<typeof import('./billingUnitAdmission')>()),

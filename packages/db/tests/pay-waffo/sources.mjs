@@ -65,11 +65,24 @@ export async function sourceCases({admin}) {
     const pack=(await admin.query(`INSERT INTO credit_packages(name,price,credits_amount,bonus_credits,active)
       VALUES('Fixture',990,990,0,'true') RETURNING id`)).rows[0].id;
     await admin.query(`INSERT INTO payment_provider_refs(channel,merchant_namespace,mode,object_type,external_id,
-      credit_package_id,billing_cycle,is_current) VALUES('stripe','fixture','test','price',$1,$2,'one_time',true)`,
+      credit_package_id,billing_cycle,is_current,package_tier) VALUES('stripe','fixture','test','price',$1,$2,'one_time',true,'gold')`,
       [`price_${pack}`,pack]);
     const quoted=(await admin.query(`SELECT o.* FROM pay_waffo_create_purchase($1,'credit_package',$2,'one_time',
       'alipay','standard','fixture','test',3,'terms-v1',NULL) o`,[user,pack])).rows[0];
     assert.equal(quoted.amount_total,890);
+    if(channel==='waffo' && cycle==='monthly') {
+      // PAY-STRIPE-MP: members may buy packs by international card (one-time, Managed Payments), not by mainland card.
+      await admin.query("UPDATE payment_orders SET purchase_closed_at=now(),status='canceled' WHERE id=$1",[quoted.id]);
+      const pack2=(method)=>admin.query(`SELECT o.* FROM pay_waffo_create_purchase($1,'credit_package',$2,'one_time',
+        $3,'standard','fixture','test',3,'terms-v1',NULL) o`,[user,pack,method]);
+      await assert.rejects(()=>pack2('card_cn'),/METHOD_DENIED/);
+      const cardPack=(await pack2('card')).rows[0];
+      assert.deepEqual([cardPack.payment_channel,cardPack.mode,cardPack.auto_renew,cardPack.stripe_managed_payments,
+        cardPack.amount_total,cardPack.price_ref_id],['stripe','payment',false,true,890,quoted.price_ref_id]);
+      assert.equal(cardPack.purchase_snapshot.tax_behavior,'exclusive');
+      assert.equal((await pack2('card')).rows[0].id,cardPack.id,'repeated submit returns the same pending order');
+      await assert.rejects(()=>pack2('alipay'),/PURCHASE_PENDING/);
+    }
     if(channel==='waffo' && cycle==='monthly') for(const [externalMode,staleStatus] of [
       ['test','canceled'],['test','active'],['test','trialing'],['test','active-current'],['live','active'],[null,'trialing'],
     ]) {
@@ -98,7 +111,7 @@ export async function sourceCases({admin}) {
     await admin.query("UPDATE subscription_credit_grants SET accounting_state='review_required',accounting_review_reason='refund review' WHERE id=$1",[grant]);
     await assert.rejects(()=>rpc('bill2_prepare',[user,randomUUID(),payload]));
   }
-  return ['waffo-month-bill2-reserve-settle-release','waffo-year-bill2-reserve-settle-release',
+  return ['stripe-mp-card-pack-one-time','stripe-mp-card-cn-pack-denied','stripe-mp-card-pack-repeat-same-order','waffo-month-bill2-reserve-settle-release','waffo-year-bill2-reserve-settle-release',
     'wallet-year-bill2-reserve-settle-release','source-refund-review-isolation','internal-member-wallet-pack-eligibility','frozen-source-amount-guard',
     'external-member-after-internal-expiry','stale-internal-only-denied','cross-mode-membership-denied','expired-active-internal-history','expired-trialing-internal-history',
     'effective-membership-ambiguity-still-denied','legacy-duplicate-renewal-guard-preserved'];

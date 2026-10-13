@@ -21,7 +21,6 @@ import { invitationRouter } from './routers/invitation';
 import { checkinRouter } from './routers/checkin';
 import { adminRouter } from './routers/admin';
 import { modulesRouter } from './routers/modules';
-import { aiRouter } from './routers/ai';
 import { diagnosticsRouter } from './routers/diagnostics';
 import { costsRouter } from './routers/costs';
 import { paymentsRouter } from './routers/payments';
@@ -55,7 +54,6 @@ export const appRouter = router({
   admin: adminRouter,
   adminStaleRounds: adminStaleRoundsRouter,
   modules: modulesRouter,
-  ai: aiRouter,
   diagnostics: diagnosticsRouter,
   costs: costsRouter,
   payments: paymentsRouter,

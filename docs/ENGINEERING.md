@@ -84,6 +84,11 @@
 - 界面优先复用 `components/ui` 的基础组件和 [DESIGN.md](../DESIGN.md) 的设计变量。
   类名拼接用 `cn()`（`apps/web/src/lib/utils.ts`），很长的类名分成多段传入。
 - 不直接向用户展示原始错误信息，参考 `apps/web/src/lib/safe-error-message.ts`。
+- 公开页面（不登录就能打开、对搜索引擎开放的页面，例如落地页、价格、常见问题、教程、
+  About、`/zh-tw` 下的页面和以后的博客）新增或修改时，必须遵守
+  [SEO/GEO 规范](launch/SEO_GEO_SPEC.md)，并在 PR 描述里逐项勾选规范第 13 节检查单。
+  元数据、JSON-LD 和 sitemap 走 `apps/web/src/lib/seo` 的统一函数，不在页面里自己拼。
+  登录后才能看到的页面不在此列（它们始终 `noindex`）。
 
 ## 5. 后端约定
 
