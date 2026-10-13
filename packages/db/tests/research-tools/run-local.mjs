@@ -102,7 +102,8 @@ try {
   await code(set(config({ parallel: true }), [], 5, admin), '23514');
   await c.query('RESET ROLE');
   // Incomplete objects ({} or a missing key) are malformed too, never "attested".
-  for (const [bad, revision] of [['{}', 5], ['{"by":"00000000-0000-4000-8000-000000000001"}', 6]]) {
+  for (const [bad, revision] of [['{}', 5], ['{"by":"00000000-0000-4000-8000-000000000001"}', 6],
+    ['{"by":"00000000-0000-4000-8000-000000000001","at":"2026-99-99T99:99:99Z"}', 7]]) {
     await c.query(`UPDATE system_settings SET value=jsonb_set(value,'{vendors,firecrawl,hardCapAttested}',$1::jsonb) WHERE key='research_tools_config'`, [bad]);
     await c.query('SET ROLE service_role');
     await code(set(config({ firecrawl: true }), [], revision, admin), '23514');

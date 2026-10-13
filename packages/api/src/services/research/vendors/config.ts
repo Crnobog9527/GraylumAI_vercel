@@ -150,12 +150,15 @@ export const DISABLED_RESEARCH_TOOLS: ResearchToolsConfig = Object.freeze({
 }) as ResearchToolsConfig;
 
 /**
- * The revision the 0254 writer will compare against, read with the same rule as its SQL
- * (`value->>'revision' ~ '^(0|[1-9][0-9]{0,9})$'`, otherwise 0), so a repair save never conflicts.
+ * The revision the 0254 writer will compare against: PostgreSQL's own `value->>'revision'` text
+ * (JSON decoding would turn `1.0` into 1), with the same rule as the SQL, otherwise 0. So a repair
+ * save of an invalid row never conflicts.
  */
-function storedRevision(raw: unknown): number {
-  const value = (raw as { revision?: unknown } | null)?.revision;
-  const textValue = typeof value === 'number' && Number.isFinite(value) ? String(value) : typeof value === 'string' ? value : '';
+async function storedRevision(db: SupabaseClient): Promise<number> {
+  const { data, error } = await db.from('system_settings').select('revision:value->>revision')
+    .eq('key', RESEARCH_TOOLS_KEY).maybeSingle();
+  const textValue = !error && typeof (data as { revision?: unknown } | null)?.revision === 'string'
+    ? (data as { revision: string }).revision : '';
   return /^(0|[1-9][0-9]{0,9})$/.test(textValue) ? Number(textValue) : 0;
 }
 
@@ -180,7 +183,7 @@ export async function readResearchToolsConfig(db: SupabaseClient): Promise<Resea
     if (!data) return off('default');
     const raw = typeof data.value === 'string' ? JSON.parse(data.value) : data.value;
     const parsed = storedResearchToolsSchema.safeParse(raw);
-    if (!parsed.success) return off('invalid', storedRevision(raw));
+    if (!parsed.success) return off('invalid', await storedRevision(db));
     const { revision, updatedBy, updatedAt, ...config } = parsed.data;
     return { config, source: 'configured', revision, updatedBy, updatedAt };
   } catch {

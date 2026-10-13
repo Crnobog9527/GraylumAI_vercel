@@ -52,6 +52,12 @@ BEGIN
    AND attested->>'by' ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
    AND attested->>'at' ~ '^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(\.\d{1,6})?Z$') IS DISTINCT FROM TRUE
   THEN attested:=NULL;END IF;
+  -- The shape check is textual; the time must also be a real timestamp (e.g. no month 99).
+  IF attested IS NOT NULL THEN
+   BEGIN PERFORM (attested->>'at')::timestamptz;
+   EXCEPTION WHEN others THEN attested:=NULL;
+   END;
+  END IF;
   IF enabled='true'::jsonb AND attested IS NULL THEN
    RAISE EXCEPTION 'RESEARCH_TOOLS_HARD_CAP_REQUIRED' USING ERRCODE='23514';END IF;
   vendors:=vendors||jsonb_build_object(vendor,jsonb_build_object('enabled',enabled,

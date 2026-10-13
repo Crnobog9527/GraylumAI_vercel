@@ -28,8 +28,20 @@ const valid = (): ResearchToolsConfig => ({
   recentGrowth: { maxFirstPostAgeDays: 90, minViewsToFollowers: '1' },
 });
 
-function dbReturning(value: unknown, error: unknown = null): SupabaseClient {
-  const chain = { select: () => chain, eq: () => chain, maybeSingle: async () => ({ data: value === undefined ? null : { value }, error }) };
+/** `revisionText` is what PostgreSQL's value->>'revision' would return (defaults to the JSON value as text). */
+function dbReturning(value: unknown, error: unknown = null, revisionText?: string | null): SupabaseClient {
+  let columns = '';
+  const pgText = () => {
+    if (revisionText !== undefined) return revisionText;
+    const raw = (typeof value === 'string' ? (() => { try { return JSON.parse(value); } catch { return null; } })() : value) as { revision?: unknown } | null;
+    const r = raw?.revision;
+    return r === undefined || r === null ? null : typeof r === 'string' ? r : JSON.stringify(r);
+  };
+  const chain = {
+    select: (c: string) => { columns = c; return chain; }, eq: () => chain,
+    maybeSingle: async () => ({ error, data: value === undefined ? null
+      : columns.startsWith('revision:') ? { revision: pgText() } : { value } }),
+  };
   return { from: () => chain } as unknown as SupabaseClient;
 }
 
@@ -84,6 +96,8 @@ describe('research_tools_config', () => {
     for (const [revision, expected] of [['01', 0], ['1e3', 0], [true, 0], [1.5, 0], ['7', 7], [-1, 0]] as const) {
       expect((await readResearchToolsConfig(dbReturning({ ...stored, enabled: 'yes', revision }))).revision).toBe(expected);
     }
+    // JSON decoding turns a stored 1.0 into 1, but PostgreSQL sees "1.0" and uses 0: follow PostgreSQL.
+    expect((await readResearchToolsConfig(dbReturning({ ...stored, enabled: 'yes', revision: 1 }, null, '1.0'))).revision).toBe(0);
   });
 });
 
