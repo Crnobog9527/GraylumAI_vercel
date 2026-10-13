@@ -137,6 +137,7 @@ async function feed(selector, maxPages = 3) {
   const [platform, tag] = String(selector).split('#');
   if (!tag) return { selector, error: 'use the platform#tag selector printed by `accounts`' };
   const list = await call('GET', '/social-accounts');
+  if (list.status !== 200) return { selector, error: 'account list failed', status: list.status, detail: list.json ?? list.errorText };
   const accountId = (list.json?.data ?? []).find((a) => a.platform === platform && tagOf(a.id) === tag)?.id;
   if (!accountId) return { selector, error: `no connected account ${selector}` };
   const pages = [];
