@@ -110,7 +110,7 @@ END $$;
 CREATE OR REPLACE FUNCTION public.pay_stripe_mp_sync_subscription(
  p_subscription uuid,p_merchant text,p_cancel_at_period_end boolean,p_canceled boolean
 ) RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
-DECLARE s user_subscriptions;
+DECLARE s user_subscriptions; remaining integer;
 BEGIN
  PERFORM 1 FROM profiles WHERE id=(SELECT user_id FROM user_subscriptions WHERE id=p_subscription) FOR UPDATE;
  SELECT * INTO s FROM user_subscriptions WHERE id=p_subscription FOR UPDATE;
@@ -125,16 +125,22 @@ BEGIN
  UPDATE user_subscriptions SET status=CASE WHEN p_canceled THEN 'canceled' ELSE status END,
   cancel_at_period_end=CASE WHEN p_canceled OR p_cancel_at_period_end THEN 'true' ELSE 'false' END
   WHERE id=s.id RETURNING * INTO s;
- -- Final cancellation: the cached level (read by purchase admission) returns to free unless another paid
- -- membership period is still running or another subscription (legacy Stripe, admin override) is active.
- IF s.status='canceled' AND NOT EXISTS(SELECT 1 FROM payment_orders o WHERE o.user_id=s.user_id
-    AND o.item_type='membership_plan' AND o.payment_method IS NOT NULL AND o.fulfilled_at IS NOT NULL
-    AND o.payment_status='paid' AND o.status='completed' AND o.entitlement_start<=now() AND o.entitlement_end>now())
-  AND NOT EXISTS(SELECT 1 FROM user_subscriptions x WHERE x.user_id=s.user_id AND x.id<>s.id
-    AND (x.stripe_subscription_id IS NOT NULL OR x.status='admin_override')
-    AND x.status IN ('active','trialing','past_due','unpaid','admin_override')
-    AND (x.current_period_end IS NULL OR x.current_period_end>now())) THEN
-  UPDATE profiles SET membership_level='free' WHERE id=s.user_id AND membership_level<>'free';
+ -- Final cancellation: the cached level (read by purchase admission) drops to the highest level still held:
+ -- a paid membership period still running (e.g. an older Pro term after a Pro->Gold upgrade) or another
+ -- active subscription (legacy Stripe, admin override); free when nothing is left. It is only ever lowered.
+ IF s.status='canceled' THEN
+  SELECT coalesce(max(lvl),0) INTO remaining FROM (
+   SELECT CASE o.purchase_membership_level WHEN 'gold' THEN 2 WHEN 'pro' THEN 1 ELSE 0 END lvl FROM payment_orders o
+    WHERE o.user_id=s.user_id AND o.item_type='membership_plan' AND o.payment_method IS NOT NULL AND o.fulfilled_at IS NOT NULL
+     AND o.payment_status='paid' AND o.status='completed' AND o.entitlement_start<=now() AND o.entitlement_end>now()
+   UNION ALL
+   SELECT CASE p.level WHEN 'gold' THEN 2 WHEN 'pro' THEN 1 ELSE 0 END FROM user_subscriptions x
+    JOIN membership_plans p ON p.id=x.membership_plan_id
+    WHERE x.user_id=s.user_id AND x.id<>s.id AND (x.stripe_subscription_id IS NOT NULL OR x.status='admin_override')
+     AND x.status IN ('active','trialing','past_due','unpaid','admin_override')
+     AND (x.current_period_end IS NULL OR x.current_period_end>now())) held;
+  UPDATE profiles SET membership_level=CASE remaining WHEN 2 THEN 'gold' WHEN 1 THEN 'pro' ELSE 'free' END
+   WHERE id=s.user_id AND CASE membership_level WHEN 'gold' THEN 2 WHEN 'pro' THEN 1 ELSE 0 END>remaining;
  END IF;
  RETURN jsonb_build_object('status',s.status,'cancelAtPeriodEnd',s.cancel_at_period_end,'duplicate',false);
 END $$;
