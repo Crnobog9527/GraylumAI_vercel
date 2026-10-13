@@ -6,7 +6,7 @@
 // anti-bot or login options are ever requested. `proxy: 'basic'` pins one credit: the default `auto`
 // retries hard targets through the 5-credit enhanced proxy.
 import { clip, clipBytes, count, text, timestamp } from './fields';
-import { exchange, nonPublicHost, usageUnits } from './http';
+import { exchange, nonPublicHost, publicHttpUrl, usageUnits } from './http';
 import type { ResearchCallResult, VendorDeps, VendorRequest } from './types';
 
 export const FIRECRAWL_SCRAPE_URL = 'https://api.firecrawl.dev/v1/scrape';
@@ -94,7 +94,8 @@ export async function callFirecrawl(rawUrl: string, deps: VendorDeps): Promise<R
     else fields[name] = values[name]!;
   }
   const truncated = markdown !== undefined && clipped !== markdown;
-  const pageUrl = text(answer.json, ['data.metadata.sourceURL', 'data.metadata.url']) ?? built.url;
+  // The reported page URL must pass the same public-URL guard; otherwise keep the URL we validated and sent.
+  const pageUrl = publicHttpUrl(text(answer.json, ['data.metadata.sourceURL', 'data.metadata.url'])) ?? built.url;
   return { ...base, outcome: truncated ? 'partial' : 'ok', reason: null, httpStatus: 200, supplierMayCharge: true,
     usage, items: [{ url: pageUrl, fields, missing }], truncated };
 }

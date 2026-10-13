@@ -94,3 +94,14 @@ export function nonPublicHost(hostname: string): boolean {
     || (a === 192 && b === 0 && (c === 0 || c === 2)) || (a === 198 && b === 51 && c === 100) || (a === 203 && b === 0 && c === 113)
     || (a === 192 && b === 88 && c === 99);
 }
+
+/** A result link the user can open: trimmed, absolute http(s), no credentials, public host. */
+export function publicHttpUrl(value: string | undefined): string | undefined {
+  const trimmed = value?.trim();
+  if (!trimmed) return undefined;
+  try {
+    const url = new URL(trimmed);
+    return (url.protocol === 'https:' || url.protocol === 'http:') && !url.username && !url.password && !nonPublicHost(url.hostname)
+      ? url.href : undefined;
+  } catch { return undefined; }
+}

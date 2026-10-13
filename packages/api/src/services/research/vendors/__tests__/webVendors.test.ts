@@ -135,6 +135,14 @@ describe('callFirecrawl', () => {
     expect(result.items[0].missing).toEqual(['publishedAt', 'language']);
   });
 
+  it('never reports a non-public or non-http page URL from the supplier', async () => {
+    for (const sourceURL of ['file:///etc/passwd', 'http://localhost/x', 'https://u:p@example.com/x']) {
+      const body = { success: true, data: { markdown: 'page', metadata: { sourceURL, creditsUsed: 1 } } };
+      const result = await callFirecrawl('https://example.com/a', deps(jsonFetch(200, body)));
+      expect(result.items[0].url).toBe('https://example.com/a');
+    }
+  });
+
   it('reports a target 404 as a billed failure with no page', async () => {
     const body = { success: true, data: { markdown: 'Not found', metadata: { statusCode: 404, creditsUsed: 1 } } };
     expect(await callFirecrawl('https://example.com/gone', deps(jsonFetch(200, body))))
