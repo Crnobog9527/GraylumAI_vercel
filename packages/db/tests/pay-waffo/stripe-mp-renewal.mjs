@@ -35,7 +35,8 @@ export async function stripeMpRenewalCases({admin,service,connect}) {
   const sub=async f=>(await admin.query('SELECT status,cancel_at_period_end,founder_failed_at,current_period_end FROM user_subscriptions WHERE id=$1',[f.sub])).rows[0];
   const fail=(f,at,invoice=`in_renew_${f.o.id.slice(0,8)}`)=>service.query(
     `SELECT pay_stripe_mp_record_renewal_failure($1,'fixture',$2,$3) v`,[f.sub,invoice,at]);
-  const sync=(f,stop,canceled)=>service.query(`SELECT pay_stripe_mp_sync_subscription($1,'fixture',$2,$3) v`,[f.sub,stop,canceled]);
+  const sync=(f,stop,canceled,userCanceled=false)=>service.query(`SELECT pay_stripe_mp_sync_subscription($1,'fixture',$2,$3,$4) v`,
+    [f.sub,stop,canceled,userCanceled]);
 
   // 24-hour grace for card and card_cn: the renewal is due, still renewing, membership kept (no credits).
   const card=await paidFirst('card','gold_first30','monthly','a1'.repeat(32));
@@ -126,9 +127,23 @@ export async function stripeMpRenewalCases({admin,service,connect}) {
   assert.equal(founderRenewal.state,'fulfilled');
   assert.equal((await admin.query('SELECT offer_kind FROM payment_orders WHERE id=$1',[founderRenewal.orderId])).rows[0].offer_kind,'founder_renewal');
 
+  // Founder window after a failed renewal: retry exhaustion keeps it; a cancellation the buyer asked for ends it.
+  const releaseSlot=()=>admin.query(`UPDATE payment_orders SET qualification_state='released' WHERE id=(SELECT id FROM payment_orders
+    WHERE offer_kind='founder' AND qualification_state='reserved' AND payment_mode='test' ORDER BY created_at LIMIT 1)`);
+  const deadline=async f=>(await admin.query('SELECT pay_waffo_founder_deadline($1) v',[f.o.id])).rows[0].v;
+  await releaseSlot(); const exhausted=await paidFirst('card_cn','founder','yearly','a4'.repeat(32));
+  await fail(exhausted,new Date(exhausted.end.getTime()+3600000),'in_exhausted');
+  await sync(exhausted,false,true,false);
+  assert.ok(await deadline(exhausted),'retry exhaustion keeps the 7-day founder window');
+  await releaseSlot(); const optedOut=await paidFirst('card_cn','founder','yearly','a5'.repeat(32));
+  await fail(optedOut,new Date(optedOut.end.getTime()+3600000),'in_opted_out');
+  await sync(optedOut,false,true,true);
+  assert.equal(await deadline(optedOut),null,'a cancellation the buyer asked for ends the founder window');
+  await assert.rejects(()=>sync(card,false,false,true),/RENEW_SCOPE/,'a user cancellation is always a final cancellation');
+
   // Scope: only Stripe card subscriptions, never Waffo or wallet ones.
   const waffoSub=(await admin.query("SELECT id FROM user_subscriptions WHERE payment_channel='waffo' LIMIT 1")).rows[0]?.id;
-  if(waffoSub) await assert.rejects(()=>service.query(`SELECT pay_stripe_mp_sync_subscription($1,'fixture',true,false)`,[waffoSub]),/RENEW_SCOPE/);
+  if(waffoSub) await assert.rejects(()=>service.query(`SELECT pay_stripe_mp_sync_subscription($1,'fixture',true,false,false)`,[waffoSub]),/RENEW_SCOPE/);
   for(const role of ['anon','authenticated']) {
     await service.query(`SET ROLE ${role}`);
     await assert.rejects(()=>sync(card,true,false),/permission denied/);
@@ -139,5 +154,5 @@ export async function stripeMpRenewalCases({admin,service,connect}) {
   return ['stripe-mp-grace-card-and-card-cn','stripe-mp-failure-recorded-once','stripe-mp-failure-earliest-out-of-order','stripe-mp-past-due-keeps-grace',
     'stripe-mp-renewal-list-price-not-first-month','stripe-mp-renewal-pre-tax-only','stripe-mp-renewal-tax-recorded','stripe-mp-renewal-once-concurrently',
     'stripe-mp-renewal-clears-failure','stripe-mp-next-charge-date','stripe-mp-one-order-per-period','stripe-mp-stop-ends-grace',
-    'stripe-mp-cancel-permanent','stripe-mp-cancel-resets-cached-level','stripe-mp-cancel-keeps-remaining-level','stripe-mp-erasure-renewing-follows-stop','stripe-mp-charge-after-cancel-review','stripe-mp-founder-card-cn-deadline','stripe-mp-founder-renewal','stripe-mp-renewal-scope'];
+    'stripe-mp-cancel-permanent','stripe-mp-cancel-resets-cached-level','stripe-mp-cancel-keeps-remaining-level','stripe-mp-erasure-renewing-follows-stop','stripe-mp-charge-after-cancel-review','stripe-mp-founder-card-cn-deadline','stripe-mp-founder-renewal','stripe-mp-founder-window-retry-exhausted','stripe-mp-founder-window-user-cancel','stripe-mp-renewal-scope'];
 }

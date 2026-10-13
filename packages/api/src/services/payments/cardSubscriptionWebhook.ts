@@ -77,8 +77,10 @@ async function readSubscription(stripe: Stripe, subscriptionId: string) {
 
 async function syncState(db: SupabaseClient, merchant: string, localSubscriptionId: string, subscription: Stripe.Subscription) {
   const state = stripeStopState(subscription);
+  // Only a cancellation the buyer asked for ends the founder renewal window; retry exhaustion does not.
   const result = await db.rpc('pay_stripe_mp_sync_subscription', { p_subscription: localSubscriptionId, p_merchant: merchant,
-    p_cancel_at_period_end: state.stop, p_canceled: state.canceled });
+    p_cancel_at_period_end: state.stop, p_canceled: state.canceled,
+    p_user_canceled: state.canceled && subscription.cancellation_details?.reason === 'cancellation_requested' });
   if (result.error) throw new Error('PAY_STRIPE_MP_RENEWAL_UNAVAILABLE', { cause: result.error });
   return state;
 }
@@ -176,6 +178,8 @@ export async function handleCardSubscriptionState(db: SupabaseClient, stripe: St
   if (!order.localSubscriptionId) {
     // Before the first payment is recorded there is nothing local to update. A plain state needs nothing, but a stop
     // or cancellation must not be lost: refuse it so Stripe retries once the first payment has created the mapping.
+    // incomplete_expired: the first invoice was never paid and Stripe sends nothing more; nothing to carry.
+    if (subscription.status === 'incomplete_expired') return true;
     const state = stripeStopState(subscription);
     if (state.stop || state.canceled) throw new Error('PAY_STRIPE_MP_FIRST_PAYMENT_PENDING');
     return true;

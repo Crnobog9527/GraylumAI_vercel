@@ -91,7 +91,7 @@ describe('PAY-STRIPE-MP card subscription webhooks', () => {
     expect((f.raw.subscriptions as unknown as { update: ReturnType<typeof vi.fn> }).update)
       .toHaveBeenCalledWith('sub_1', { cancel_at_period_end: true });
     expect(f.rpc).toHaveBeenLastCalledWith('pay_stripe_mp_sync_subscription', { p_subscription: 'local_sub', p_merchant: 'fixture',
-      p_cancel_at_period_end: true, p_canceled: false });
+      p_cancel_at_period_end: true, p_canceled: false, p_user_canceled: false });
     // If Stripe does not show the stop, the event fails so Stripe retries it (the renewal itself is deduplicated).
     const g = fixture({ subscriptionRef: { subscription_id: 'local_sub' }, order: { ...cardOrder, purchase_snapshot: firstMonth } });
     Object.assign(g.invoice, renewal({}));
@@ -145,24 +145,27 @@ describe('PAY-STRIPE-MP card subscription webhooks', () => {
     expect(update).toHaveBeenCalledWith('sub_1', { cancel_at_period_end: true });
     expect(alert).toHaveBeenCalledTimes(1);
     expect(f.rpc).toHaveBeenLastCalledWith('pay_stripe_mp_sync_subscription', { p_subscription: 'local_sub', p_merchant: 'fixture',
-      p_cancel_at_period_end: true, p_canceled: false });
+      p_cancel_at_period_end: true, p_canceled: false, p_user_canceled: false });
     // Before the first payment is mapped: Stripe retries until there is a local subscription to stop.
     const early = fixture({ order: cardOrder });
     Object.assign(early.invoice, { billing_reason: 'subscription_update', amount_paid: 2000 });
     await expect(handleCardSubscriptionInvoice(early.db, early.stripe, 'in_1', 'invoice.paid')).rejects.toThrow('FIRST_PAYMENT_PENDING');
   });
   it('copies only stop-at-period-end and the final cancellation; past_due changes nothing', async () => {
-    for (const [patch, cancelAt, canceled] of [[{ status: 'active', cancel_at_period_end: true }, true, false],
-      [{ status: 'past_due', cancel_at_period_end: false }, false, false], [{ status: 'canceled', cancel_at_period_end: false }, false, true],
-      [{ status: 'active', cancel_at_period_end: false, cancel_at: 1794472954 }, true, false],
+    for (const [patch, cancelAt, canceled, userCanceled] of [[{ status: 'active', cancel_at_period_end: true }, true, false, false],
+      [{ status: 'past_due', cancel_at_period_end: false }, false, false, false],
+      // Retry exhaustion vs a cancellation the buyer asked for (Link / portal): only the latter ends the founder window.
+      [{ status: 'canceled', cancel_at_period_end: false, cancellation_details: { reason: 'payment_failed' } }, false, true, false],
+      [{ status: 'canceled', cancel_at_period_end: false, cancellation_details: { reason: 'cancellation_requested' } }, false, true, true],
+      [{ status: 'active', cancel_at_period_end: false, cancel_at: 1794472954 }, true, false, false],
       // A cancel_at later than the current period end still renews in between: not a stop.
-      [{ status: 'active', cancel_at_period_end: false, cancel_at: 1797064954 }, false, false]] as const) {
+      [{ status: 'active', cancel_at_period_end: false, cancel_at: 1797064954 }, false, false, false]] as const) {
       const f = fixture({ subscriptionRef: { subscription_id: 'local_sub' }, order: cardOrder });
       f.raw.subscriptions.retrieve.mockResolvedValue({ object: 'subscription', id: 'sub_1', livemode: false, cancel_at: null,
         items: { data: [{ current_period_end: 1794472954 }] }, ...patch });
       await expect(handleCardSubscriptionState(f.db, f.stripe, 'sub_1')).resolves.toBe(true);
       expect(f.rpc).toHaveBeenCalledWith('pay_stripe_mp_sync_subscription', { p_subscription: 'local_sub', p_merchant: 'fixture',
-        p_cancel_at_period_end: cancelAt, p_canceled: canceled });
+        p_cancel_at_period_end: cancelAt, p_canceled: canceled, p_user_canceled: userCanceled });
     }
     // Before the first payment is recorded: a plain state is acknowledged, a stop or cancellation is retried later.
     const early = fixture({ order: cardOrder });
@@ -177,6 +180,13 @@ describe('PAY-STRIPE-MP card subscription webhooks', () => {
       expect(stopped.rpc).not.toHaveBeenCalled();
     }
     expect(early.rpc).not.toHaveBeenCalled();
+    // incomplete_expired: the first invoice was never paid, so there will never be a mapping; acknowledged, not retried.
+    const abandoned = fixture({ order: cardOrder });
+    abandoned.raw.subscriptions.retrieve.mockResolvedValue({ object: 'subscription', id: 'sub_1', livemode: false,
+      status: 'incomplete_expired', metadata: { orderId, userId: 'user' }, cancel_at: null, cancel_at_period_end: false,
+      items: { data: [{ current_period_end: 1794472954 }] } });
+    await expect(handleCardSubscriptionState(abandoned.db, abandoned.stripe, 'sub_1')).resolves.toBe(true);
+    expect(abandoned.rpc).not.toHaveBeenCalled();
   });
   it('leaves legacy subscriptions and invoices without a subscription to the legacy path', async () => {
     const legacy = fixture({}, {});
