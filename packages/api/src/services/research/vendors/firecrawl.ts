@@ -23,8 +23,12 @@ function privateHost(hostname: string): boolean {
   const v4 = host.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
   if (!v4) return false;
   const [a, b] = [Number(v4[1]), Number(v4[2])];
+  const c = Number(v4[3]);
+  // IANA special-purpose blocks that are not globally reachable (plus multicast and reserved 224/3).
   return a === 0 || a === 10 || a === 127 || a >= 224 || (a === 169 && b === 254) || (a === 192 && b === 168)
-    || (a === 172 && b >= 16 && b <= 31) || (a === 100 && b >= 64 && b <= 127) || (a === 198 && (b === 18 || b === 19));
+    || (a === 172 && b >= 16 && b <= 31) || (a === 100 && b >= 64 && b <= 127) || (a === 198 && (b === 18 || b === 19))
+    || (a === 192 && b === 0 && (c === 0 || c === 2)) || (a === 198 && b === 51 && c === 100) || (a === 203 && b === 0 && c === 113)
+    || (a === 192 && b === 88 && c === 99);
 }
 
 /** Public http(s) page without credentials; PDFs are refused before any request (they cost extra). */

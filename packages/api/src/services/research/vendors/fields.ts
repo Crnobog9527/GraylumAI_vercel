@@ -39,8 +39,11 @@ export function displayCount(value: unknown, paths: readonly string[]): number |
   const exact = count(value, paths);
   if (exact !== undefined) return exact;
   const found = text(value, paths);
-  const match = found?.match(/^\s*([\d,]+)\s*(views?|次观看)?\s*$/i);
-  return match ? Number(match[1].replace(/,/g, '')) : undefined;
+  // Plain digits or correctly grouped thousands only ("343,369"); "1,,2" or ", views" stay missing.
+  const match = found?.match(/^\s*(\d{1,3}(?:,\d{3})+|\d+)\s*(views?|次观看)?\s*$/i);
+  if (!match) return undefined;
+  const parsed = Number(match[1].replace(/,/g, ''));
+  return Number.isFinite(parsed) ? parsed : undefined;
 }
 
 /** Epoch seconds, epoch milliseconds or an absolute date string → ISO. Relative labels are missing. */

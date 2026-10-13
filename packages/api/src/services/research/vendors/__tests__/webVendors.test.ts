@@ -30,6 +30,11 @@ describe('official usage parsing', () => {
     const { count } = await import('../fields');
     expect(count({ n: '9'.repeat(400) }, ['n'])).toBeUndefined();
     expect(count({ n: '12' }, ['n'])).toBe(12);
+    const { displayCount } = await import('../fields');
+    expect(displayCount({ v: '343,369 views' }, ['v'])).toBe(343369);
+    for (const bad of [', views', '1,,2 views', '12,34 views', `${'9'.repeat(400)} views`, '1.2M views']) {
+      expect(displayCount({ v: bad }, ['v'])).toBeUndefined();
+    }
   });
 
   it('reads Firecrawl credits from either documented location', () => {
@@ -103,7 +108,7 @@ describe('callFirecrawl', () => {
     expect(buildFirecrawlRequest('https://example.com/report.PDF')).toEqual({ reason: 'PDF_NOT_SUPPORTED' });
     for (const bad of ['ftp://example.com', 'https://user:pw@example.com', 'http://localhost:3000', 'http://10.0.0.1/',
       'http://192.168.1.1', 'http://[::1]/', 'http://[::ffff:7f00:1]/', 'http://[::]/', 'http://[2001:db8::1]/',
-      'http://localhost./', 'http://foo.local./', 'http://bar.internal../', 'http://100.64.0.1/', 'http://198.18.0.1/', 'http://0.0.0.0/', 'http://2130706433/', 'http://intranet/', 'not a url']) {
+      'http://192.0.2.1/', 'http://198.51.100.1/', 'http://203.0.113.1/', 'http://192.0.0.8/', 'http://localhost./', 'http://foo.local./', 'http://bar.internal../', 'http://100.64.0.1/', 'http://198.18.0.1/', 'http://0.0.0.0/', 'http://2130706433/', 'http://intranet/', 'not a url']) {
       expect(buildFirecrawlRequest(bad)).toEqual({ reason: 'INVALID_URL' });
     }
   });

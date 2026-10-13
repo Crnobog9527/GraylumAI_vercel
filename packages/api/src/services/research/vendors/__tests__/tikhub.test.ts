@@ -34,6 +34,11 @@ describe('TikHub routes', () => {
     expect(buildTikhubRequest({ platform: 'tiktok', kind: 'keyword_posts', keyword: '一'.repeat(41) })).toEqual({ reason: 'INVALID_KEYWORD' });
     expect(buildTikhubRequest({ platform: 'weibo', kind: 'account_posts', account: 'abc' })).toEqual({ reason: 'INVALID_ACCOUNT' });
     expect(buildTikhubRequest({ platform: 'tiktok', kind: 'account_profile', account: 'a/../b' })).toEqual({ reason: 'INVALID_ACCOUNT' });
+    expect(buildTikhubRequest({ platform: 'x', kind: 'account_profile', account: 'a'.repeat(16) })).toEqual({ reason: 'INVALID_ACCOUNT' });
+    expect(buildTikhubRequest({ platform: 'x', kind: 'account_profile', account: 'nasa.gov' })).toEqual({ reason: 'INVALID_ACCOUNT' });
+    expect(buildTikhubRequest({ platform: 'instagram', kind: 'account_posts', account: 'a-b' })).toEqual({ reason: 'INVALID_ACCOUNT' });
+    expect('request' in buildTikhubRequest({ platform: 'instagram', kind: 'account_posts', account: 'nat.geo_1' })).toBe(true);
+    expect(buildTikhubRequest({ platform: 'youtube', kind: 'account_profile', account: 'UCLA_DiR1FfKNvjuUpBHmylQ' })).toEqual({ reason: 'ROUTE_NOT_SUPPORTED' });
     const result = await callTikhub({ platform: 'xiaohongshu', kind: 'account_posts', account: 'x' }, deps(fetchImpl));
     expect(result).toMatchObject({ outcome: 'not_sent', reason: 'ROUTE_NOT_SUPPORTED', supplierMayCharge: false });
     expect(calls).toHaveLength(0);
@@ -67,7 +72,7 @@ describe('callTikhub', () => {
   it('never passes bios or contact details through for profiles', async () => {
     const body = { code: 200, data: { user: { uid: '9', nickname: 'N', unique_id: 'n', follower_count: 15000,
       signature: '微信 abc123', email: 'a@b.c', avatar_larger: { url_list: ['x'] } } } };
-    const result = await callTikhub({ platform: 'tiktok', kind: 'account_profile', account: 'n' }, deps(jsonFetch(200, body)));
+    const result = await callTikhub({ platform: 'tiktok', kind: 'account_profile', account: 'nn' }, deps(jsonFetch(200, body)));
     expect(result.items).toHaveLength(1);
     expect(result.items[0].fields).toMatchObject({ id: '9', followers: 15000, handle: 'n' });
     expect(JSON.stringify(result.items)).not.toMatch(/微信|a@b\.c|url_list/);
@@ -157,7 +162,7 @@ describe('callTikhub', () => {
     const shapeless = await callTikhub({ platform: 'tiktok', kind: 'keyword_posts', keyword: 'q' },
       deps(jsonFetch(200, { code: 200, data: { aweme_list: null } })));
     expect(shapeless).toMatchObject({ outcome: 'failed', reason: 'EMPTY_OR_UNRECOGNIZED' });
-    const profile = await callTikhub({ platform: 'tiktok', kind: 'account_profile', account: 'n' }, deps(jsonFetch(200, { code: 200 })));
+    const profile = await callTikhub({ platform: 'tiktok', kind: 'account_profile', account: 'nn' }, deps(jsonFetch(200, { code: 200 })));
     expect(profile).toMatchObject({ outcome: 'failed', reason: 'EMPTY_OR_UNRECOGNIZED' });
   });
 });

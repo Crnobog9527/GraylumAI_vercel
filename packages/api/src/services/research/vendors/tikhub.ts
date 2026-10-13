@@ -11,7 +11,7 @@ import type {
 export const TIKHUB_BASE = 'https://api.tikhub.io/api/v1';
 export const MAX_POSTS = 30;
 
-type AccountId = 'handle' | 'numeric' | 'youtube_channel';
+type AccountId = 'tiktok_handle' | 'x_handle' | 'instagram_handle' | 'numeric' | 'youtube_channel';
 interface TikhubRoute {
   method: 'GET' | 'POST';
   path: string;
@@ -42,19 +42,17 @@ export const TIKHUB_ROUTES: Partial<Record<`${SocialPlatform}:${SocialKind}`, Ti
     params: ({ keyword, limit }) => ({ keyword: keyword!, offset: 0, count: limit, sort_type: 0, publish_time: 0, region: 'US' }),
   },
   'tiktok:account_profile': {
-    method: 'GET', path: '/tiktok/app/v3/handler_user_profile', account: 'handle', params: ({ account }) => ({ unique_id: account! }),
+    method: 'GET', path: '/tiktok/app/v3/handler_user_profile', account: 'tiktok_handle', params: ({ account }) => ({ unique_id: account! }),
   },
   'tiktok:account_posts': {
-    method: 'GET', path: '/tiktok/app/v3/fetch_user_post_videos', account: 'handle',
+    method: 'GET', path: '/tiktok/app/v3/fetch_user_post_videos', account: 'tiktok_handle',
     params: ({ account, limit }) => ({ unique_id: account!, max_cursor: 0, count: limit, sort_type: 0 }),
   },
   'youtube:keyword_posts': {
     method: 'GET', path: '/youtube/web_v2/get_general_search_v2', params: ({ keyword }) => ({ keyword: keyword!, type: 'video' }),
   },
-  'youtube:account_profile': {
-    method: 'GET', path: '/youtube/web_v2/get_channel_description', account: 'youtube_channel',
-    params: ({ account }) => ({ channel_id: account!, language_code: 'en', country_code: 'US' }),
-  },
+  // YouTube profiles are absent until RT-7 maps the documented channel fields (channel_id, handle,
+  // abbreviated subscriber labels); without them no follower count can be read.
   'youtube:account_posts': {
     method: 'GET', path: '/youtube/web_v2/get_channel_videos', account: 'youtube_channel',
     params: ({ account }) => ({ channel_id: account!, need_format: 'true' }),
@@ -63,23 +61,26 @@ export const TIKHUB_ROUTES: Partial<Record<`${SocialPlatform}:${SocialKind}`, Ti
     method: 'GET', path: '/twitter/web/fetch_search_timeline', params: ({ keyword }) => ({ keyword: keyword!, search_type: 'Latest' }),
   },
   'x:account_profile': {
-    method: 'GET', path: '/twitter/web/fetch_user_profile', account: 'handle', params: ({ account }) => ({ screen_name: account! }),
+    method: 'GET', path: '/twitter/web/fetch_user_profile', account: 'x_handle', params: ({ account }) => ({ screen_name: account! }),
   },
   'x:account_posts': {
-    method: 'GET', path: '/twitter/web/fetch_user_post_tweet', account: 'handle', params: ({ account }) => ({ screen_name: account! }),
+    method: 'GET', path: '/twitter/web/fetch_user_post_tweet', account: 'x_handle', params: ({ account }) => ({ screen_name: account! }),
   },
   'instagram:account_profile': {
-    method: 'GET', path: '/instagram/v1/fetch_user_info_by_username', account: 'handle',
+    method: 'GET', path: '/instagram/v1/fetch_user_info_by_username', account: 'instagram_handle',
     params: ({ account }) => ({ username: account! }),
   },
   'instagram:account_posts': {
-    method: 'GET', path: '/instagram/v3/get_user_posts', account: 'handle',
+    method: 'GET', path: '/instagram/v3/get_user_posts', account: 'instagram_handle',
     params: ({ account, limit }) => ({ username: account!, first: limit }),
   },
 };
 
 const ACCOUNT_PATTERNS: Record<AccountId, RegExp> = {
-  handle: /^[A-Za-z0-9._-]{1,64}$/,
+  // Platform username rules; anything else cannot exist there and must not cost a call.
+  tiktok_handle: /^[A-Za-z0-9._]{2,24}$/,
+  x_handle: /^[A-Za-z0-9_]{1,15}$/,
+  instagram_handle: /^[A-Za-z0-9._]{1,30}$/,
   numeric: /^\d{1,20}$/,
   youtube_channel: /^UC[A-Za-z0-9_-]{22}$/,
 };
