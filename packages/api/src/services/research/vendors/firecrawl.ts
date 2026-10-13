@@ -3,7 +3,8 @@
 // (plan §3.5): markdown only, main content only, no JSON extraction (5x credits), no PDF parsing
 // (`parsePDF: false` bills a PDF as one credit instead of one per page, even when an extensionless
 // URL or a redirect lands on a PDF), a single page with no link following. Public pages only; no
-// anti-bot or login options are ever requested.
+// anti-bot or login options are ever requested. `proxy: 'basic'` pins one credit: the default `auto`
+// retries hard targets through the 5-credit enhanced proxy.
 import { clip, count, text, timestamp } from './fields';
 import { exchange, usageUnits } from './http';
 import type { ResearchCallResult, VendorDeps, VendorRequest } from './types';
@@ -40,7 +41,7 @@ export function buildFirecrawlRequest(rawUrl: string): { request: VendorRequest;
   if (/\.pdf$/i.test(url.pathname)) return { reason: 'PDF_NOT_SUPPORTED' };
   url.hash = '';
   return { url: url.href, request: { method: 'POST', url: FIRECRAWL_SCRAPE_URL, body: {
-    url: url.href, formats: ['markdown'], onlyMainContent: true, parsePDF: false,
+    url: url.href, formats: ['markdown'], onlyMainContent: true, parsePDF: false, proxy: 'basic',
   } } };
 }
 

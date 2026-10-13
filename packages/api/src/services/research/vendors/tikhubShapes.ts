@@ -193,7 +193,7 @@ const EMPTY_LIST_PATHS: Partial<Record<`${SocialPlatform}:${SocialKind}`, readon
   'youtube:account_posts': ['data.videos', 'data.contents'],
   'x:keyword_posts': ['data.timeline', 'data.tweets'],
   'x:account_posts': ['data.timeline', 'data.tweets'],
-  'instagram:account_posts': ['data.items', 'data.data.items'],
+  'instagram:account_posts': ['data.edges', 'data.items', 'data.data.items'],
 };
 
 /** True when the route's own list path holds an empty array (as opposed to a missing or changed shape). */

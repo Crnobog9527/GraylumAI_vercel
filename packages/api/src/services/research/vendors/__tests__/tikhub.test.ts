@@ -138,6 +138,9 @@ describe('callTikhub', () => {
     const weibo = await callTikhub({ platform: 'weibo', kind: 'account_posts', account: '1' },
       deps(jsonFetch(200, { code: 200, data: { data: { statuses: [] } } })));
     expect(weibo).toMatchObject({ outcome: 'ok', reason: 'NO_RESULTS' });
+    const instagram = await callTikhub({ platform: 'instagram', kind: 'account_posts', account: 'quiet' },
+      deps(jsonFetch(200, { code: 200, data: { edges: [] } })));
+    expect(instagram).toMatchObject({ outcome: 'ok', reason: 'NO_RESULTS' });
     const unrelated = await callTikhub({ platform: 'tiktok', kind: 'keyword_posts', keyword: 'zzzz' },
       deps(jsonFetch(200, { code: 200, data: { metadata: { data: [] } } })));
     expect(unrelated).toMatchObject({ outcome: 'failed', reason: 'EMPTY_OR_UNRECOGNIZED' });
