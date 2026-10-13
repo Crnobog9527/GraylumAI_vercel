@@ -81,6 +81,9 @@ export function useConversationErasure(leave: (sessionId: string) => void) {
       store.hide(id);
       void resumeConversationErasure({
         ...steps, leave, wait: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+        // Several deletions may resume together: a status notice never hides another one's error.
+        notify: (next) => store.setNotice(next?.tone === 'notice'
+          ? laterNotice(useConversationErasureStore.getState().notice, next) : next),
       }, id);
     }
   }, [steps, leave]);
