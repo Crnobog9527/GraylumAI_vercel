@@ -50,6 +50,16 @@ BEGIN
  END IF;
 END $catalog$;
 
+-- Composite targets so a connection or request can only name the actor's own brand account.
+DO $$
+BEGIN
+ IF NOT EXISTS(SELECT 1 FROM pg_constraint WHERE conrelid='public.opc_accounts'::regclass
+  AND conname='opc_accounts_project_actor_business_key') THEN
+  ALTER TABLE public.opc_accounts ADD CONSTRAINT opc_accounts_project_actor_business_key
+   UNIQUE(project_id,actor_id,business_id);
+ END IF;
+END $$;
+
 -- §3.2 tables. New: no existing relation stores third-party social connections, post metrics over
 -- time, weekly-review claims or OAuth attempts (§3.3). All access goes through the definer functions.
 
@@ -68,7 +78,7 @@ CREATE TABLE IF NOT EXISTS public.social_connections(
  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
  actor_id uuid NOT NULL REFERENCES public.profiles(id) ON DELETE RESTRICT,
  business_id uuid,
- account_project_id uuid REFERENCES public.opc_accounts(project_id) ON DELETE RESTRICT,
+ account_project_id uuid,
  role text NOT NULL CHECK(role IN ('own','benchmark')),
  source text NOT NULL CHECK(source IN ('postforme','tikhub','manual')),
  platform text NOT NULL CHECK(platform ~ '^[a-z0-9_-]{1,32}$'),
@@ -93,6 +103,8 @@ CREATE TABLE IF NOT EXISTS public.social_connections(
  created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
  updated_at timestamptz NOT NULL DEFAULT clock_timestamp(),
  FOREIGN KEY(actor_id,business_id) REFERENCES public.opc_businesses(actor_id,id) ON DELETE RESTRICT,
+ FOREIGN KEY(account_project_id,actor_id,business_id)
+  REFERENCES public.opc_accounts(project_id,actor_id,business_id) ON DELETE RESTRICT,
  CHECK(source<>'postforme' OR provider_account_id IS NOT NULL),
  CHECK(role<>'benchmark' OR (source='tikhub' AND account_project_id IS NULL AND profile_ref IS NOT NULL)),
  -- A retained deletion record keeps no brand binding and no user-visible identity (DATA-ERASURE §2).
@@ -130,7 +142,8 @@ CREATE TABLE IF NOT EXISTS public.social_posts(
  updated_at timestamptz NOT NULL DEFAULT clock_timestamp(),
  FOREIGN KEY(connection_id,actor_id) REFERENCES public.social_connections(id,actor_id) ON DELETE RESTRICT,
  UNIQUE(connection_id,source,platform_post_id),
- UNIQUE(id,actor_id)
+ UNIQUE(id,actor_id),
+ UNIQUE(id,connection_id)
 );
 CREATE INDEX IF NOT EXISTS social_posts_connection_posted ON public.social_posts(connection_id,posted_at DESC);
 
@@ -148,7 +161,9 @@ CREATE TABLE IF NOT EXISTS public.social_metric_snapshots(
  missing_fields text[] NOT NULL DEFAULT '{}',
  evidence_ref text CHECK(char_length(evidence_ref)<=256),
  FOREIGN KEY(connection_id,actor_id) REFERENCES public.social_connections(id,actor_id) ON DELETE RESTRICT,
- FOREIGN KEY(post_id,actor_id) REFERENCES public.social_posts(id,actor_id) ON DELETE RESTRICT
+ FOREIGN KEY(post_id,actor_id) REFERENCES public.social_posts(id,actor_id) ON DELETE RESTRICT,
+ -- A post snapshot belongs to the post's own connection.
+ FOREIGN KEY(post_id,connection_id) REFERENCES public.social_posts(id,connection_id) ON DELETE RESTRICT
 );
 CREATE UNIQUE INDEX IF NOT EXISTS social_metric_snapshots_post_day
  ON public.social_metric_snapshots(post_id,captured_on) WHERE post_id IS NOT NULL;
@@ -179,7 +194,7 @@ CREATE TABLE IF NOT EXISTS public.social_connect_requests(
  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
  actor_id uuid NOT NULL REFERENCES public.profiles(id) ON DELETE RESTRICT,
  business_id uuid,
- target_account_project_id uuid REFERENCES public.opc_accounts(project_id) ON DELETE SET NULL,
+ target_account_project_id uuid,
  platform text NOT NULL CHECK(platform ~ '^[a-z0-9_-]{1,32}$'),
  permissions text[] NOT NULL CHECK(permissions <@ ARRAY['feeds','posts'] AND cardinality(permissions) BETWEEN 1 AND 2),
  -- Full provider external_id: <non-reversible user mapping>.<attempt suffix>; no identity in clear.
@@ -191,6 +206,8 @@ CREATE TABLE IF NOT EXISTS public.social_connect_requests(
  consumed_at timestamptz,
  confirm_expires_at timestamptz,
  FOREIGN KEY(actor_id,business_id) REFERENCES public.opc_businesses(actor_id,id) ON DELETE RESTRICT,
+ FOREIGN KEY(target_account_project_id,actor_id,business_id)
+  REFERENCES public.opc_accounts(project_id,actor_id,business_id) ON DELETE SET NULL(target_account_project_id),
  CHECK(state<>'awaiting_callback' OR consumed_at IS NULL),
  CHECK(state NOT IN ('pending_confirm','applied') OR consumed_at IS NOT NULL),
  CHECK((state='pending_confirm')=(confirm_expires_at IS NOT NULL))

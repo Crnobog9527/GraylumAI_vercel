@@ -24,10 +24,15 @@ describe('new-action membership entitlements', () => {
     expect(result).toMatchObject({ allowPublish: publish, ownDataWindowDays: days,
       allowBenchmarkMonitor: bench, allowWeeklyAutoReview: review });
   });
-  it('fails closed when a publish-monitor entitlement column is missing or invalid', async () => {
-    const f = fixture('gold');
-    f.rows.membership_plans![2]!.own_data_window_days = -1;
-    await expect(readMembershipEntitlements(f.client, actorId)).rejects.toThrow('ENTITLEMENTS_UNAVAILABLE');
+  it('turns only publish-monitor features off when their columns are missing or invalid', async () => {
+    for (const mutate of [(row: Record<string, unknown>) => { row.own_data_window_days = -1; },
+      (row: Record<string, unknown>) => { delete row.allow_publish; }]) {
+      const f = fixture('gold');
+      mutate(f.rows.membership_plans![2]!);
+      const result = await readMembershipEntitlements(f.client, actorId);
+      expect(result).toMatchObject({ level: 'gold', allowFusionReview: true, libraryStorageBytes: 2_000_000_000,
+        allowPublish: false, ownDataWindowDays: 0, allowBenchmarkMonitor: false, allowWeeklyAutoReview: false });
+    }
   });
   it('uses current admin configuration independently, including free and off-sale plans', async () => {
     const f = fixture('free');

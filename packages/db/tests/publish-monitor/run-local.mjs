@@ -138,11 +138,22 @@ try {
   const other = await member();
   await code(c.query(`INSERT INTO social_posts(actor_id,connection_id,source,platform_post_id)
     VALUES($1,$2,'postforme','x1')`, [other.a, own]), '23503');
+  // An own connection can only name the actor's own account of the same brand.
+  await code(c.query(`INSERT INTO social_connections(actor_id,business_id,account_project_id,role,source,platform,
+    provider_account_id,status) VALUES($1,$2,$3,'own','postforme','x','pfm_cross','connected')`,
+  [user.a, user.business, other.account]), '23503');
+  await code(c.query(`INSERT INTO social_connect_requests(actor_id,business_id,target_account_project_id,platform,permissions,
+    external_id,state,expires_at) VALUES($1,$2,$3,'x','{feeds}',$4,'awaiting_callback',now()+interval '10 minutes')`,
+  [user.a, user.business, other.account, 'c'.repeat(16) + '.' + 'd'.repeat(16)]), '23503');
+  // A snapshot of a post must use that post's own connection.
+  await code(c.query(`INSERT INTO social_metric_snapshots(actor_id,connection_id,post_id,captured_on,source,metrics)
+    VALUES($1,$2,$3,current_date-1,'tikhub','{}')`, [user.a, bench, post]), '23503');
   const otherConn = await connect(other, { account: other.account, provider: 'pfm_other' });
   await c.query(`INSERT INTO social_publish_jobs(actor_id,business_id,idempotency_key,request_fingerprint,targets,state)
     VALUES($1,$2,'same-key-0001',repeat('a',64),'[{"platform":"x"}]','completed'),
     ($3,$4,'same-key-0001',repeat('b',64),'[{"platform":"x"}]','completed')`, [user.a, user.business, other.a, other.business]);
-  report.checks.push('rows cannot point at another user\'s connection; idempotency keys are scoped per user');
+  report.checks.push('rows cannot point at another user\'s connection or account; snapshots stay on their post\'s '
+    + 'connection; idempotency keys are scoped per user');
 
   // Account erasure: provider-mirroring rows stay as identity-free deletion records, everything else goes.
   await c.query(`INSERT INTO social_review_runs(actor_id,period_start,status,runtime_request_id,finished_at)
