@@ -77,7 +77,8 @@ async function assertUnpaidIntent(input: {
     || objectId(intent.customer) !== objectId(session.customer)) {
     throw new Error('PAY_COMMON_ATTEMPT_IDENTITY_MISMATCH');
   }
-  assertPurchaseReceipt({ snapshot: order.purchase_snapshot, amount: intent.amount,
+  // The intent amount includes any tax Managed Payments added; the session reports how much.
+  assertPurchaseReceipt({ snapshot: order.purchase_snapshot, amount: intent.amount, tax: session.total_details?.amount_tax,
     currency: intent.currency, livemode: intent.livemode, scope });
   if (!(intent.status === 'canceled' || ((session.status === 'expired' || input.beforeExpiration) && intent.status === 'requires_payment_method'))
     || intent.amount_received !== 0 || intent.amount_capturable !== 0) {
@@ -132,7 +133,7 @@ export async function expireUnpaidStripeCheckout(input: {
   if (session.status !== 'open' || session.payment_status !== 'unpaid' || session.subscription
     || session.metadata?.orderId !== order.id || session.metadata?.userId !== order.user_id
     || session.client_reference_id !== order.user_id) throw new Error('PAY_COMMON_ATTEMPT_NOT_TERMINAL');
-  assertPurchaseReceipt({ snapshot: order.purchase_snapshot, amount: session.amount_total,
+  assertPurchaseReceipt({ snapshot: order.purchase_snapshot, amount: session.amount_total, tax: session.total_details?.amount_tax,
     currency: session.currency, livemode: session.livemode, scope });
   if (session.payment_intent) await assertUnpaidIntent({ ...input, beforeExpiration: true });
   await input.stripe.checkout.sessions.expire(session.id);
@@ -157,7 +158,7 @@ export async function closeExpiredStripeCheckout(input: {
     || session.payment_status !== 'unpaid' || session.subscription) {
     throw new Error('PAY_COMMON_ATTEMPT_NOT_TERMINAL');
   }
-  const snapshot = assertPurchaseReceipt({ snapshot: order.purchase_snapshot, amount: session.amount_total,
+  const snapshot = assertPurchaseReceipt({ snapshot: order.purchase_snapshot, amount: session.amount_total, tax: session.total_details?.amount_tax,
     currency: session.currency, livemode: session.livemode, scope });
   if (session.mode !== (snapshot.item_type === 'membership_plan' ? 'subscription' : 'payment')) {
     throw new Error('PAY_COMMON_ATTEMPT_IDENTITY_MISMATCH');
