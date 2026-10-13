@@ -1,5 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-// FUSION-REVIEW PR-1 (0234): billing group over per-model runs.
+// FUSION-REVIEW PR-1 (0234): billing group over per-model runs; each run settles on its own (Owner 2026-10-14).
 import assert from 'node:assert/strict';
 import {randomUUID} from 'node:crypto';
 import {rpc,closeAccount} from '../erasure-b2a/cases.mjs';
@@ -13,7 +13,7 @@ async function group(db,createFixture,{n=3,credits=100,phase='fusion_review'}={}
   const first = await createFixture(db,{credits,phase});
   const members = [first];
   for (let i=1;i<n;i++) members.push(await createFixture(db,{actor:first.actor,phase}));
-  const id = await rpc(db,'fusion_group_create',first.actor,randomUUID(),'review',first.payload.rules.creditsPerUsd);
+  const id = await rpc(db,'fusion_group_create',first.actor,randomUUID(),'review');
   for (const f of members) await rpc(db,'fusion_group_attach',first.actor,id,f.run);
   const items = members.map(f=>({runId:f.run,sequence:1,payload:f.claimPayload}));
   return {actor:first.actor,id,members,items,runs:members.map(f=>f.run)};
@@ -65,18 +65,17 @@ export async function fusionGroupCases({db,Client,connectionString,report,create
   try {
     await Promise.all(clients.map((c,i)=>c.query('SELECT bill2_finalize($1,$2)',[exact.actor,exact.runs[i]])));
   } finally { await Promise.all(clients.map(c=>c.end())); }
-  assert.equal(await charged(db,exact.runs.slice(0,2)),1,'two 0.4-credit calls: ceil(0.8)=1');
+  assert.equal(await charged(db,exact.runs.slice(0,2)),2,'each member rounds on its own (Owner 2026-10-14): ceil(0.4)+ceil(0.4)=2');
   // 3. The third member is still unsettled and does not block the others; its late settlement keeps one rounding.
   assert.equal((await calls(db,[exact.runs[2]]))[0].settled_at,null);
   await rpc(db,'bill2_finalize',exact.actor,exact.runs[2]);
-  assert.equal(await charged(db,exact.runs),2,'group total is ceil(1.2)=2, rounded once');
-  assert.equal(await wallet(db,exact.actor),25);
+  assert.equal(await charged(db,exact.runs),3,'three members, each ceil(0.4)=1');
+  assert.equal(await wallet(db,exact.actor),24);
   for (const f of exact.members) await conserved(db,f);
-  assert.equal(Number((await db.query('SELECT weighted_nominal_usd v FROM fusion_billing_groups WHERE id=$1',[exact.id])).rows[0].v),0.0012);
-  report.checks.push('verdict required before settlement and immutable; concurrent member finalize; unsettled member does not block; group charged ceil(total*q) once');
+  report.checks.push('verdict required before settlement and immutable; concurrent member finalize; unsettled member does not block; each member settles and rounds on its own');
 
-  // Claim of a later batch vs settlement of an earlier run sharing a model: settlement takes
-  // run -> model lock -> group. Hold the model lock first, then the group, as settlement does.
+  // Claim of a later batch vs another transaction holding a shared model lock and then the group
+  // row: the claim takes model locks before the group, so neither side waits on the other in a cycle.
   const later = await group(db,createFixture,{n:2,credits:18});
   const modelKey = (await db.query("SELECT hashtextextended('bill2-payg:'||$1,0) k",[later.members[0].claimPayload.model])).rows[0].k;
   const [holder,claimer] = [new Client({connectionString}),new Client({connectionString})];
@@ -93,8 +92,8 @@ export async function fusionGroupCases({db,Client,connectionString,report,create
   } finally { await holder.end(); await claimer.end(); }
   report.checks.push('group claim waits for model locks before the group row: settlement-order holder takes the group without deadlock');
 
-  // A call whose nominal value exceeds its own hold advances the group only by the capped amount,
-  // so the group total is the same in either settlement order: ceil(9 + 0.4) = 10 both ways.
+  // Settlement order does not change the bill: an over-hold call is capped at its own hold (9)
+  // and the other rounds alone (1), so 10 in either order.
   for (const order of [[0,1],[1,0]]) {
     const over = await group(db,createFixture,{n:2,credits:18});
     const oc = await claimGroup(db,over);
@@ -108,7 +107,7 @@ export async function fusionGroupCases({db,Client,connectionString,report,create
   }
   await assert.rejects(rpc(db,'fusion_group_claim',short.actor,short.id,'review:9',1,
     JSON.stringify(short.items.map(x=>({...x,sequence:2})))),/FUSION_GROUP_INVALID/);
-  report.checks.push('over-hold call advances the group by its capped amount: same total in both settlement orders; one call per Fusion run');
+  report.checks.push('per-member settlement: over-hold call capped at its own hold; same total in both orders; one call per Fusion run');
 
   // 5. Zero-charge verdicts refund in full.
   const bad = await group(db,createFixture,{n:2,credits:18});
@@ -122,7 +121,7 @@ export async function fusionGroupCases({db,Client,connectionString,report,create
   assert.equal(runs[bc.calls[0].runId],0,'format_invalid is not charged');
   assert.equal(await charged(db,bad.runs),1);
   assert.equal(await wallet(db,bad.actor),17);
-  report.checks.push('format_invalid verdict charges zero and releases the full hold; the usable member still rounds once');
+  report.checks.push('format_invalid verdict charges zero and releases the full hold; the usable member is charged on its own');
 
   // Content deletion (not account closure) before the verdict keeps the hold and settles nothing.
   const deleted = await group(db,createFixture,{n:1,credits:9});
@@ -153,7 +152,7 @@ export async function fusionGroupCases({db,Client,connectionString,report,create
   report.checks.push('account closure before the verdict settles every group member at zero charge; no hold stays frozen');
 
   // Membership is immutable once a call exists.
-  const other = await rpc(db,'fusion_group_create',exact.actor,randomUUID(),'review',exact.members[0].payload.rules.creditsPerUsd);
+  const other = await rpc(db,'fusion_group_create',exact.actor,randomUUID(),'review');
   await assert.rejects(rpc(db,'fusion_group_attach',exact.actor,other,exact.runs[0]),/FUSION_GROUP_DENIED/);
   await assert.rejects(db.query('UPDATE bill2_runs SET fusion_group_id=NULL WHERE id=$1',[exact.runs[0]]),/FUSION_GROUP_IMMUTABLE/);
   report.checks.push('group membership cannot be changed after attach');

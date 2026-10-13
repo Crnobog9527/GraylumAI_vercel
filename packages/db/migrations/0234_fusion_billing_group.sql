@@ -1,12 +1,12 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 -- FUSION-REVIEW PR-1. Number allocated by the controller.
 -- A Fusion billing group ties the per-model billing runs of one review (or comparison) together.
--- Every model keeps its own run and execution, so all existing one-run-one-execution invariants
--- (stop, recovery, dispatch, replay, erasure detach, 24h deadline, 32-call cap) stay unchanged.
--- The group adds only: an all-or-nothing full-hold claim for a batch of runs, group-cumulative
--- rounding (the whole group rounds up once), Fusion purposes refused outside the group claim,
--- and a host verdict that must exist before a Fusion call settles.
--- New tables: existing runs cannot express "several runs share one rounding and one batch hold".
+-- Every model keeps its own run and execution, and each run settles and rounds on its own like any
+-- PAYG run (Owner 2026-10-14). All existing one-run-one-execution invariants stay unchanged.
+-- The group adds only: an all-or-nothing full-hold claim for a batch of runs (balance must cover the
+-- whole batch's upper bound, Owner 2026-10-13 option A), Fusion purposes refused outside the group
+-- claim, one call per Fusion run, and a host verdict that must exist before a Fusion call settles.
+-- New tables: existing runs cannot express "a batch of runs is held all-or-nothing, idempotently".
 BEGIN;
 
 CREATE TABLE IF NOT EXISTS public.fusion_billing_groups (
@@ -14,9 +14,6 @@ CREATE TABLE IF NOT EXISTS public.fusion_billing_groups (
   actor_id uuid NOT NULL REFERENCES public.profiles(id),
   request_id uuid NOT NULL,
   kind text NOT NULL CHECK (kind IN ('review','compare')),
-  credits_per_usd numeric NOT NULL CHECK (credits_per_usd > 0),
-  weighted_nominal_usd numeric NOT NULL DEFAULT 0 CHECK (weighted_nominal_usd >= 0),
-  version integer NOT NULL DEFAULT 0,
   created_at timestamptz NOT NULL DEFAULT now(),
   CONSTRAINT fusion_billing_groups_request_unique UNIQUE (actor_id, request_id)
 );
@@ -70,19 +67,19 @@ DROP TRIGGER IF EXISTS fusion_billing_call_guard ON public.bill2_calls;
 CREATE TRIGGER fusion_billing_call_guard BEFORE UPDATE OF fusion_verdict ON public.bill2_calls
   FOR EACH ROW EXECUTE FUNCTION public.fusion_billing_guard();
 
-CREATE OR REPLACE FUNCTION public.fusion_group_create(p_actor_id uuid, p_request_id uuid, p_kind text, p_credits_per_usd numeric)
+CREATE OR REPLACE FUNCTION public.fusion_group_create(p_actor_id uuid, p_request_id uuid, p_kind text)
 RETURNS uuid LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
 DECLARE g fusion_billing_groups;
 BEGIN
   PERFORM bill2_actor(p_actor_id);
-  INSERT INTO fusion_billing_groups(actor_id, request_id, kind, credits_per_usd)
-    VALUES (p_actor_id, p_request_id, p_kind, p_credits_per_usd) ON CONFLICT (actor_id, request_id) DO NOTHING;
+  INSERT INTO fusion_billing_groups(actor_id, request_id, kind)
+    VALUES (p_actor_id, p_request_id, p_kind) ON CONFLICT (actor_id, request_id) DO NOTHING;
   SELECT * INTO g FROM fusion_billing_groups WHERE actor_id=p_actor_id AND request_id=p_request_id;
-  IF g.kind IS DISTINCT FROM p_kind OR g.credits_per_usd IS DISTINCT FROM p_credits_per_usd THEN RAISE EXCEPTION 'FUSION_GROUP_CONFLICT'; END IF;
+  IF g.kind IS DISTINCT FROM p_kind THEN RAISE EXCEPTION 'FUSION_GROUP_CONFLICT'; END IF;
   RETURN g.id;
 END $$;
 
--- Lock order everywhere: runs (by id) -> model advisory locks (sorted) -> group -> profile, matching claim, record and finalize.
+-- Lock order: runs (by id) -> model advisory locks (sorted) -> group -> profile; settlement never locks the group.
 CREATE OR REPLACE FUNCTION public.fusion_group_attach(p_actor_id uuid, p_group_id uuid, p_run_id uuid)
 RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
 DECLARE r bill2_runs; g fusion_billing_groups;
@@ -91,7 +88,7 @@ BEGIN
   SELECT * INTO g FROM fusion_billing_groups WHERE id=p_group_id AND actor_id=p_actor_id FOR UPDATE;
   IF r.id IS NULL OR g.id IS NULL OR r.contract_version<>'bill2.v2' THEN RAISE EXCEPTION 'FUSION_GROUP_DENIED'; END IF;
   IF r.fusion_group_id=g.id THEN RETURN; END IF;
-  IF r.fusion_group_id IS NOT NULL OR r.closed OR r.credits_per_usd IS DISTINCT FROM g.credits_per_usd
+  IF r.fusion_group_id IS NOT NULL OR r.closed
     OR EXISTS (SELECT 1 FROM bill2_calls WHERE run_id=r.id) THEN RAISE EXCEPTION 'FUSION_GROUP_DENIED'; END IF;
   PERFORM set_config('graylum.fusion_group_attach', r.id::text, true);
   UPDATE bill2_runs SET fusion_group_id=g.id, version=version+1 WHERE id=r.id;
@@ -177,7 +174,7 @@ BEGIN
 END $$;
 
 DO $$ DECLARE f text; BEGIN
-  FOREACH f IN ARRAY ARRAY['fusion_group_create(uuid,uuid,text,numeric)','fusion_group_attach(uuid,uuid,uuid)',
+  FOREACH f IN ARRAY ARRAY['fusion_group_create(uuid,uuid,text)','fusion_group_attach(uuid,uuid,uuid)',
     'fusion_group_claim(uuid,uuid,text,integer,jsonb)','fusion_call_verdict(uuid,uuid,text)'] LOOP
     EXECUTE format('REVOKE ALL ON FUNCTION public.%s FROM PUBLIC,anon,authenticated,service_role', f);
     EXECUTE format('GRANT EXECUTE ON FUNCTION public.%s TO service_role', f);
@@ -199,40 +196,16 @@ $i$);
   END IF;
 END $$;
 
--- Settlement: group members round on the group's cumulative weighted nominal value, so the
--- group as a whole is charged ceil(total * q) once; a Fusion call without a host verdict does
--- not settle (its hold stays), and zero-charge verdicts take the existing refund path.
-DO $$ DECLARE src text; a1 text; a2 text; a3 text; a4 text; a5 text; a6 text; a7 text; BEGIN
+-- Settlement (Owner 2026-10-14): every member run settles and rounds on its own, exactly as an
+-- ordinary PAYG run; the group adds no shared rounding. Only two changes: a Fusion call without a host
+-- verdict does not settle (its hold stays), and zero-charge verdicts take the existing refund path.
+DO $$ DECLARE src text; a3 text; a4 text; BEGIN
   src:=pg_get_functiondef('public.bill2_payg_finalize(uuid,uuid)'::regprocedure);
-  IF position('fusion_billing_groups' IN src)=0 THEN
-    a1:='DECLARE r bill2_runs;c bill2_calls;rec record;';
-    a2:=$x$ PERFORM bill2_payg_lock_models(r);
- PERFORM id FROM bill2_calls WHERE run_id=rid ORDER BY id FOR UPDATE;$x$;
+  IF position('fusion_purpose(c.payload)' IN src)=0 THEN
     a3:=$x$  IF bad THEN UPDATE bill2_runs SET conflict=true$x$;
     a4:=$x$  IF c.provider_rejected OR c.dispatched_at IS NULL OR (r.closed AND r.outcome='confirmed_failure') THEN$x$;
-    a5:='   w:=r.weighted_nominal_usd;';
-    a6:='   debit:=least(delta,c.reserved_credits)::int;cap:=greatest(bounded-c.reserved_credits,0);bound:=delta-debit-cap;';
-    a7:='   n:=0;delta:=0;bounded:=0;debit:=0;cap:=0;bound:=0;';
-    IF array_length(string_to_array(src,a1),1)<>2 OR array_length(string_to_array(src,a2),1)<>2
-      OR array_length(string_to_array(src,a3),1)<>2 OR array_length(string_to_array(src,a4),1)<>2
-      OR array_length(string_to_array(src,a5),1)<>2 OR array_length(string_to_array(src,a6),1)<>2
-      OR array_length(string_to_array(src,a7),1)<>2
-      OR array_length(string_to_array(src,$x$   version=version+1 WHERE id=rid RETURNING * INTO r;
- END LOOP;$x$),1)<>2 THEN RAISE EXCEPTION 'FUSION_SOURCE_MISMATCH: bill2_payg_finalize'; END IF;
-    src:=replace(src,a1,'DECLARE fg fusion_billing_groups;nmc numeric;r bill2_runs;c bill2_calls;rec record;');
-    -- Group members advance the shared accumulator by the billable amount capped at the call's own
-    -- hold, so the group total is ceil(q * sum(min(n_i*m_i, hold_i/q))) in any settlement order.
-    src:=replace(src,a6,a6||$x$
-   nmc:=n*bill2_unit_multiplier(c.payload->'billingUnit'->'multiplier');
-   IF fg.id IS NOT NULL THEN
-    nmc:=least(nmc,c.reserved_credits::numeric/r.credits_per_usd);
-    debit:=(ceil((w+nmc)*r.credits_per_usd)-ceil(w*r.credits_per_usd))::int;
-    cap:=greatest(delta-debit,0);bound:=delta-debit-cap;
-   END IF;$x$);
-    src:=replace(src,a7,a7||'nmc:=0;');
-    src:=replace(src,a2,$x$ PERFORM bill2_payg_lock_models(r);
- SELECT * INTO fg FROM fusion_billing_groups WHERE id=r.fusion_group_id FOR UPDATE;
- PERFORM id FROM bill2_calls WHERE run_id=rid ORDER BY id FOR UPDATE;$x$);
+    IF array_length(string_to_array(src,a3),1)<>2 OR array_length(string_to_array(src,a4),1)<>2 THEN
+      RAISE EXCEPTION 'FUSION_SOURCE_MISMATCH: bill2_payg_finalize'; END IF;
     src:=replace(src,a3,$x$  IF fusion_purpose(c.payload) AND c.dispatched_at IS NOT NULL AND NOT c.provider_rejected
    AND NOT (r.closed AND r.outcome='confirmed_failure') AND c.fusion_verdict IS NULL THEN
    -- Only account closure ends an unjudged call at zero charge; ordinary content deletion keeps the hold.
@@ -242,14 +215,6 @@ DO $$ DECLARE src text; a1 text; a2 text; a3 text; a4 text; a5 text; a6 text; a7
 $x$||a3);
     src:=replace(src,a4,$x$  IF c.provider_rejected OR c.dispatched_at IS NULL OR (r.closed AND r.outcome='confirmed_failure')
    OR c.fusion_verdict IN ('format_invalid','revision_invalid','no_delivery','erased_before_verdict') THEN$x$);
-    src:=replace(src,a5,'   w:=CASE WHEN fg.id IS NULL THEN r.weighted_nominal_usd ELSE fg.weighted_nominal_usd END;');
-    src:=replace(src,$x$   version=version+1 WHERE id=rid RETURNING * INTO r;
- END LOOP;$x$,$x$   version=version+1 WHERE id=rid RETURNING * INTO r;
-  IF fg.id IS NOT NULL THEN
-   UPDATE fusion_billing_groups SET weighted_nominal_usd=weighted_nominal_usd+nmc,
-    version=version+1 WHERE id=fg.id RETURNING * INTO fg;
-  END IF;
- END LOOP;$x$);
     EXECUTE src;
   END IF;
 END $$;
