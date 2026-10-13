@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { PAYG_START_THRESHOLDS_KEY } from './bill2/settingKeys';
 import { REPORT_SETTING } from './report/contract';
 import { PAYMENT_CHANNEL_KEY } from './payments/channelSettings';
+import { PAYMENT_METHOD_ROUTES_KEY } from './payments/methodRouting';
 import { PAYG_HOST_SETTING, paygHostSettingWrite } from './runtime/paygHostPolicy';
 import { RUNTIME_RATE_LIMIT_KEY } from './runtime/rateLimitSettings';
 import { PURPOSE_BUDGET_KEY } from './runtime/purposeBudgets';
@@ -15,7 +16,9 @@ import { MODEL_IDENTITY_GUARD_KEY } from './modelIdentity/guardSetting';
 const dedicatedSettingKeys = new Set([
   PAYMENT_CHANNEL_KEY, PAYG_HOST_SETTING, REPORT_SETTING, RUNTIME_RATE_LIMIT_KEY, PURPOSE_BUDGET_KEY,
   PROVIDER_PRICES_KEY, ABSORB_CONFIG_KEY, ABSORB_ACK_KEY, PAYG_START_THRESHOLDS_KEY, STOP_LOSS_KEY,
-  MODEL_IDENTITY_GUARD_KEY,
+  MODEL_IDENTITY_GUARD_KEY, PAYMENT_METHOD_ROUTES_KEY,
+  // Read by methodPayments checkout; the settings page has no field for it.
+  'payment_terms_version',
 ]);
 
 export const adminSettingsRowSchema = z.object({
