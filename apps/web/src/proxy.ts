@@ -40,7 +40,6 @@ const PUBLIC_PRICING_ENTRY_PATHS = [
 
 // 需要速率限制的 API 路径
 const RATE_LIMITED_PATHS = [
-  '/api/ai/stream',
   '/api/trpc',
 ];
 

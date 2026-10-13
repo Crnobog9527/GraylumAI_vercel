@@ -5,7 +5,7 @@ import { router as createTRPCRouter } from '../trpc';
 import { methodPaymentProcedures } from './methodPayments';
 import { logger } from '../lib/logger';
 import { WaffoFailure } from '../services/payments/waffoFailure';
-const mocks = vi.hoisted(() => ({ cancel: vi.fn(), provider: vi.fn(), wallet: vi.fn(), gateOpen: { value: false } }));
+const mocks = vi.hoisted(() => ({ cancel: vi.fn(), provider: vi.fn(), wallet: vi.fn(), card: vi.fn(), gateOpen: { value: false } }));
 vi.mock('../services/payments/waffoTestOperationsClient', () => ({ getWaffoTestOperationsClient: mocks.provider }));
 // Every new checkout is closed in code during PR-1; the error-mapping tests open the gate explicitly.
 vi.mock('../services/payments/methodCheckoutGate', async (load) => {
@@ -15,6 +15,7 @@ vi.mock('../services/payments/methodCheckoutGate', async (load) => {
   } };
 });
 vi.mock('../services/payments/walletCheckout', () => ({ createWalletCheckout: mocks.wallet }));
+vi.mock('../services/payments/stripeMethodCheckout', () => ({ createStripeCardCheckout: mocks.card }));
 vi.mock('../services/stripe', () => ({ assertCheckoutRateLimit: vi.fn(), getStripeAppUrl: () => 'https://auth-staging.graylum.com',
   getStripeClient: vi.fn() }));
 const router = createTRPCRouter(methodPaymentProcedures);
@@ -45,6 +46,7 @@ function fixture(role = 'user', settings?: Record<string, unknown>) {
 afterEach(() => { vi.unstubAllEnvs(); });
 beforeEach(() => {
   mocks.wallet.mockReset().mockResolvedValue({ orderId: 'order', state: 'open', url: 'https://checkout.stripe.com/c/pay/x' });
+  mocks.card.mockReset().mockResolvedValue({ orderId: 'card-order', state: 'open', url: 'https://checkout.stripe.com/c/pay/card' });
   mocks.gateOpen.value = false;
   mocks.cancel.mockReset().mockResolvedValue({ orderId: 'ORD_original', status: 'canceling' });
   mocks.provider.mockReset().mockReturnValue({ merchant: 'fixture', mode: 'test', cancelSubscription: mocks.cancel });
@@ -89,14 +91,17 @@ it('keeps every card checkout closed in production and staging even with every s
       expect(f.rpc).not.toHaveBeenCalled();
     }
   }
-  expect(mocks.wallet).not.toHaveBeenCalled(); expect(mocks.provider).not.toHaveBeenCalled();
+  expect(mocks.wallet).not.toHaveBeenCalled(); expect(mocks.card).not.toHaveBeenCalled(); expect(mocks.provider).not.toHaveBeenCalled();
 });
-it('never sends a card purchase to Waffo or the wallet checkout, even past the environment gate', async () => {
+it('sends card purchases past the environment gate to the Stripe card checkout, never Waffo or the wallet checkout', async () => {
   stubStaging(); mocks.gateOpen.value = true;
   for (const method of ['card', 'card_cn'] as const) {
     await expect(fixture('user', settings(true)).caller.methodCheckout({ ...card, method }))
-      .rejects.toMatchObject({ code: 'SERVICE_UNAVAILABLE' });
+      .resolves.toEqual({ orderId: 'card-order', state: 'open', url: 'https://checkout.stripe.com/c/pay/card' });
+    expect(mocks.card).toHaveBeenLastCalledWith(expect.objectContaining({ purchase: { ...card, method } }));
   }
+  await expect(fixture('user', settings(false)).caller.methodCheckout(card)).rejects.toMatchObject({ code: 'SERVICE_UNAVAILABLE' });
+  expect(mocks.card).toHaveBeenCalledTimes(2);
   expect(mocks.wallet).not.toHaveBeenCalled(); expect(mocks.provider).not.toHaveBeenCalled();
 });
 it('checks the route switch and version before the wallet checkout', async () => {

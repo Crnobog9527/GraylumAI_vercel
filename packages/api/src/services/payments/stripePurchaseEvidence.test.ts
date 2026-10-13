@@ -53,6 +53,16 @@ describe('authoritative Stripe purchase evidence', () => {
     await expect(closeExpiredStripeCheckout(test.args)).rejects.toThrow();
     expect(test.rpc).not.toHaveBeenCalled();
   });
+  it('closes an abandoned Managed Payments checkout whose total includes tax added on top (PAY-STRIPE-MP)', async () => {
+    const exclusive = { ...order, purchase_snapshot: { ...snapshot, tax_behavior: 'exclusive' } };
+    const taxed = { ...session, amount_total: 1799 + 360, total_details: { amount_tax: 360 } };
+    const test = fixture(taxed);
+    await expect(closeExpiredStripeCheckout({ ...test.args, order: exclusive })).resolves.toBe(true);
+    // Tax on an order whose snapshot was not tax-exclusive is still a mismatch, and nothing is closed.
+    const other = fixture(taxed);
+    await expect(closeExpiredStripeCheckout(other.args)).rejects.toThrow('PAY_COMMON_RECEIPT_MISMATCH');
+    expect(other.rpc).not.toHaveBeenCalled();
+  });
   it('does not close after a network timeout or scope mismatch', async () => {
     const test = fixture();
     test.retrieve.mockRejectedValue(new Error('timeout'));
