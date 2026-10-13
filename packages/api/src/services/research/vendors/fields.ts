@@ -61,7 +61,8 @@ export function displayCount(value: unknown, paths: readonly string[]): number |
 }
 
 /** Epoch seconds, epoch milliseconds or an absolute date string → ISO. Relative labels are missing. */
-export function timestamp(value: unknown, paths: readonly string[], earliestMs = 1): string | undefined {
+/** Web dates have no lower bound beyond what a Date can hold; social posts pass SOCIAL_EARLIEST_MS. */
+export function timestamp(value: unknown, paths: readonly string[], earliestMs = -8.64e15): string | undefined {
   return firstValid(value, paths, found => readTimestamp(found, earliestMs));
 }
 
