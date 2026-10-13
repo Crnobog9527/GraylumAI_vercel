@@ -46,6 +46,15 @@ describe('PAY-STRIPE-MP external refunds of card orders', () => {
       p_payment: 'in_1', p_refund: 're_1', p_amount: 4900, p_currency: 'usd', p_refunded_at: '2026-10-14T17:46:40.000Z' });
     expect(f.alert).not.toHaveBeenCalled();
   });
+  it('never treats our own approved refund that kept the 6% fee (a partial refund at Stripe) as an external refund', async () => {
+    // 4b-1: pre-tax 940 - fee 56 + tax 188 = 1072 of a 1128 charge, created with our refundIntentId.
+    for (const input of [{ refundId: 're_ours' }, { chargeId: 'ch_1' }]) {
+      const f = fixture([refund({ id: 're_ours', amount: 1072, metadata: { orderId: 'order', refundIntentId: 'intent' } })]);
+      await expect(f.run(input)).resolves.toBe(false);
+      expect(f.db.rpc).not.toHaveBeenCalled();
+      expect(f.alert).not.toHaveBeenCalled();
+    }
+  });
   it('leaves refunds we initiated (approval flows) to the existing path', async () => {
     const f = fixture([refund({ metadata: { refundIntentId: 'intent', orderId: 'order' } })]);
     await expect(f.run({ refundId: 're_1' })).resolves.toBe(false);

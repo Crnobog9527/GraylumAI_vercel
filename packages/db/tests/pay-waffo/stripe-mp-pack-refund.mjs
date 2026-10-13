@@ -23,7 +23,7 @@ export async function stripeMpPackRefundCases({admin,service}) {
   await admin.query(`INSERT INTO payment_provider_refs(channel,merchant_namespace,mode,object_type,external_id,credit_package_id,
     billing_cycle,is_current,package_tier,price_usage) VALUES('stripe','fixture','test','price',$1,$2,'one_time',true,'gold','package')`,
     [`price_pack_refund_${pkg}`,pkg]);
-  // A Gold member who bought an international card pack (9.40 + 1.88 tax), within 7 days, no credit used since.
+  // A Gold member who bought an international card pack (8.90 member price + 1.88 tax), within 7 days, no credit used since.
   const buyer=async digest=>{
     const user=randomUUID(); await admin.query('INSERT INTO profiles(id,credits) VALUES($1,0)',[user]);
     const m=(await service.query(`SELECT o.* FROM pay_waffo_create_purchase($1,'membership_plan',$2,'monthly','card','gold_first30',
@@ -47,12 +47,12 @@ export async function stripeMpPackRefundCases({admin,service}) {
     [actor,f.o.id,f.ticket,cash,fee]);
 
   const f=await buyer('d1'.repeat(32));
-  assert.equal(f.o.amount_total,940);
-  // Refund = pre-tax 940 - floor(940 x 6%) (= 56) + tax 188; the whole pack (990) is taken back.
+  assert.equal(f.o.amount_total,890);
+  // Refund = pre-tax 890 - floor(890 x 6%) (= 53) + tax 188; the whole pack (990) is taken back.
   const q=(await quote(f)).rows[0].q;
-  assert.deepEqual([q.basisMinor,q.feeMinor,q.taxMinor,q.netMinor,q.credits],[940,56,188,1072,990]);
+  assert.deepEqual([q.basisMinor,q.feeMinor,q.taxMinor,q.netMinor,q.credits],[890,53,188,1025,990]);
   // Where the law forbids the fee: pre-tax + tax in full.
-  assert.deepEqual([(await quote(f,'not_permitted')).rows[0].q.netMinor],[1128]);
+  assert.deepEqual([(await quote(f,'not_permitted')).rows[0].q.netMinor],[1078]);
   // The Stripe evidence must carry exactly the recorded tax.
   await assert.rejects(()=>quote(f,'confirmed',{...f.cash,taxMinor:0}),/CASH_EVIDENCE_INVALID/);
   await assert.rejects(()=>quote(f,'confirmed',{...f.cash,taxMinor:200}),/CASH_EVIDENCE_INVALID/);
@@ -64,8 +64,8 @@ export async function stripeMpPackRefundCases({admin,service}) {
   assert.equal((await admin.query('SELECT credits FROM profiles WHERE id=$1',[f.user])).rows[0].credits,before-990);
   const res=refund=>service.query('SELECT pay_common_package_refund_result($1,$2,$3) q',[f.o.id,intent.id,{id:`re_${intent.id}`,
     intentId:intent.id,orderId:f.o.id,paymentIntentId:f.cash.paymentIntentId,chargeId:f.cash.chargeId,currency:'usd',
-    amount:1072,mode:'test',merchant:'fixture',status:'succeeded',...refund}]);
-  await assert.rejects(()=>res({amount:1128}),/RESULT_MISMATCH/,'the refund amount must be the approved one');
+    amount:1025,mode:'test',merchant:'fixture',status:'succeeded',...refund}]);
+  await assert.rejects(()=>res({amount:1078}),/RESULT_MISMATCH/,'the refund amount must be the approved one');
   assert.equal((await res({})).rows[0].q.status,'succeeded');
   assert.equal((await admin.query('SELECT status FROM payment_orders WHERE id=$1',[f.o.id])).rows[0].status,'partially_refunded');
   // No fee: the whole charge (pre-tax + tax) comes back, so the order is fully refunded.
@@ -75,7 +75,7 @@ export async function stripeMpPackRefundCases({admin,service}) {
     [actor,g.o.id,g.ticket,g.cash,gq.versionHash])).rows[0].q;
   await service.query('SELECT pay_common_package_refund_claim($1,$2,$3,$4)',[actor,g.o.id,gi.id,g.cash]);
   await service.query('SELECT pay_common_package_refund_result($1,$2,$3)',[g.o.id,gi.id,{id:`re_${gi.id}`,intentId:gi.id,orderId:g.o.id,
-    paymentIntentId:g.cash.paymentIntentId,chargeId:g.cash.chargeId,currency:'usd',amount:1128,mode:'test',merchant:'fixture',status:'succeeded'}]);
+    paymentIntentId:g.cash.paymentIntentId,chargeId:g.cash.chargeId,currency:'usd',amount:1078,mode:'test',merchant:'fixture',status:'succeeded'}]);
   assert.equal((await admin.query('SELECT status FROM payment_orders WHERE id=$1',[g.o.id])).rows[0].status,'refunded');
   // Any credit used since the payment: not eligible (record AA).
   const h=await buyer('d3'.repeat(32));
