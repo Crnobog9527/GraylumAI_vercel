@@ -45,13 +45,18 @@ export async function readMethodMembership(db: SupabaseClient, userId: string, n
   // For the purchase entry (PAY-STRIPE-MP step 5): the published terms version methodCheckout requires, and whether
   // the Gold first-month offer applies. The latter is display only: pay_waffo_admit_purchase decides at checkout,
   // also against other accounts of the same person (identity digests), which this read cannot see.
-  const [terms, gold] = await Promise.all([
+  // Gold as 0222 admission counts it: orders before 0170 have no purchase_membership_level, only metadata or the plan.
+  const [terms, plans] = await Promise.all([
     db.from('system_settings').select('value').eq('key', 'payment_terms_version').maybeSingle(),
-    db.from('payment_orders').select('id').eq('user_id', userId).eq('payment_mode', 'test')
-      .eq('purchase_membership_level', 'gold')
-      .or('payment_status.in.(paid,refunded,partially_refunded),fulfilled_at.not.is.null').limit(1),
+    db.from('membership_plans').select('id').eq('level', 'gold').limit(20),
   ]);
-  if (!terms || terms.error || !gold || gold.error || !Array.isArray(gold.data)) throw new Error('PAY_WAFFO_MEMBERSHIP_UNAVAILABLE');
+  if (!terms || terms.error || !plans || plans.error || !Array.isArray(plans.data)) throw new Error('PAY_WAFFO_MEMBERSHIP_UNAVAILABLE');
+  const goldPlans = plans.data.map(row => String(row.id));
+  const isGold = ['purchase_membership_level.eq.gold', 'metadata->>membershipLevel.eq.gold',
+    ...(goldPlans.length ? [`item_id.in.(${goldPlans.join(',')})`] : [])].join(',');
+  const gold = await db.from('payment_orders').select('id').eq('user_id', userId).eq('payment_mode', 'test')
+    .or(`and(or(${isGold}),or(payment_status.in.(paid,refunded,partially_refunded),fulfilled_at.not.is.null))`).limit(1);
+  if (!gold || gold.error || !Array.isArray(gold.data)) throw new Error('PAY_WAFFO_MEMBERSHIP_UNAVAILABLE');
   const version = (terms.data as { value?: { version?: unknown } } | null)?.value?.version;
   // Historical sold slots never return to the pool, including refunds and cancellation.
   const occupied = founderOrders.data.length;

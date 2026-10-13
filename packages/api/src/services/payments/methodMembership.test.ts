@@ -15,8 +15,9 @@ function fixture(counts: Array<number | null> = [40, 3, 2], route: unknown = nul
     { data: counts.some(n => n === null) ? null : counts.flatMap((n, i) =>
       Array.from({ length: n! }, () => ({ qualification_state: ['sold', 'reserved', 'review'][i] }))), error: null }];
   if (memberships.length) results.push({ data: subscriptions, error: null });
-  results.push({ data: { value: { version: 'terms-2026-10' } }, error: null }, { data: goldOrders, error: null });
-  const queries: Array<{ eq: ReturnType<typeof vi.fn>; not: ReturnType<typeof vi.fn> }> = [];
+  results.push({ data: { value: { version: 'terms-2026-10' } }, error: null }, { data: [{ id: 'plan-gold' }], error: null },
+    { data: goldOrders, error: null });
+  const queries: Array<{ eq: ReturnType<typeof vi.fn>; not: ReturnType<typeof vi.fn>; or: ReturnType<typeof vi.fn> }> = [];
   const from = vi.fn(() => {
     const result = results.shift();
     const query = { select: vi.fn(), eq: vi.fn(), not: vi.fn(), gt: vi.fn(), or: vi.fn(), is: vi.fn(), in: vi.fn(), order: vi.fn(), limit: vi.fn(),
@@ -57,7 +58,9 @@ describe('method membership read projection', () => {
     expect((await readMethodMembership(f.db, 'actor', 0, staging)).goldFirstMonthEligible).toBe(false);
     const gold = f.queries.at(-1)!;
     expect(gold.eq).toHaveBeenCalledWith('user_id', 'actor');
-    expect(gold.eq).toHaveBeenCalledWith('purchase_membership_level', 'gold');
+    // Legacy Gold orders (before 0170) count too, by metadata or plan, as 0222 admission does.
+    expect(gold.or).toHaveBeenCalledWith('and(or(purchase_membership_level.eq.gold,metadata->>membershipLevel.eq.gold,'
+      + 'item_id.in.(plan-gold)),or(payment_status.in.(paid,refunded,partially_refunded),fulfilled_at.not.is.null))');
   });
   it('does not present missing count as zero or hide oversold state', async () => {
     await expect(readMethodMembership(fixture([null, 0, 0]).db, 'actor')).rejects.toThrow('PAY_WAFFO_MEMBERSHIP_UNAVAILABLE');
