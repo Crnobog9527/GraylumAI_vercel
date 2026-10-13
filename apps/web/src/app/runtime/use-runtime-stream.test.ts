@@ -5,7 +5,7 @@ import type { LiveReply } from '@/app/positioning/[draftId]/agent-turn-display';
 import { liveReplyController } from '@/app/positioning/[draftId]/live-reply-controller';
 import { STREAM_INTERRUPTED } from '@/app/positioning/[draftId]/mentor-turn';
 import { runStreamedExecution } from './use-runtime-stream';
-import { liveReplyText } from './runtime-live-reply';
+import { liveReplyText, liveScrollSignature } from './runtime-live-reply';
 
 const ID = '00000000-0000-4000-8000-000000000001';
 const delta = (text: string, offset: number): AgentTurnEvent => ({ type: 'textDelta', text, offset, rev: 1, source: 'assistant' });
@@ -92,5 +92,15 @@ describe('liveReplyText', () => {
     expect(liveReplyText(reply, ID, { state: 'running', input: '[OPC_VIDEO_PACKAGE_V1] …' })).toBeNull();
     expect(liveReplyText({ ...reply, text: '' }, ID)).toBeNull();
     expect(liveReplyText(null, ID)).toBeNull();
+  });
+});
+
+describe('liveScrollSignature', () => {
+  const reply = { executionId: ID, text: '逐', phase: 'mentor', card: null, rev: 1, points: 1, stalled: false } satisfies LiveReply;
+  it('changes as streamed text grows or is replaced, so a reader at the bottom keeps following it', () => {
+    const grown = liveScrollSignature({ ...reply, text: '逐字', points: 2 });
+    expect(grown).not.toBe(liveScrollSignature(reply));
+    expect(liveScrollSignature({ ...reply, rev: 2 })).not.toBe(liveScrollSignature(reply));
+    expect(liveScrollSignature(null)).toBe('');
   });
 });

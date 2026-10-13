@@ -17,6 +17,11 @@ export function liveReplyText(reply: LiveReply | null, executionId: string,
   return reply.text;
 }
 
+/** Changes whenever streamed text grows, so the transcript follows it like any other new content. */
+export function liveScrollSignature(reply: LiveReply | null): string {
+  return reply ? '|live:' + reply.executionId + ':' + reply.rev + ':' + reply.points : '';
+}
+
 /** The streamed text of one turn, as it arrives; nothing when there is none to show. */
 export function LiveReplyText({ text }: { text: string | null }) {
   return text ? <MessageMarkdown className={workStyles.reply} text={text}/> : null;

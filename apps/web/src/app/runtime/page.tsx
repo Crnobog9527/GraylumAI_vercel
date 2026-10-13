@@ -28,7 +28,7 @@ import { finishedExecution } from '@/lib/finished-execution';
 import { isOrganizerPendingError } from '@/lib/payg-wait';
 import { usePaygResume } from '@/lib/use-payg-resume';
 import { useRuntimeStream } from './use-runtime-stream';
-import { LiveReplyText, PendingLiveReply, liveReplyText } from './runtime-live-reply';
+import { LiveReplyText, PendingLiveReply, liveReplyText, liveScrollSignature } from './runtime-live-reply';
 
 type VideoChoice='both'|'storyboard'|'editing';
 type VideoOperation={workItemId:string;choice?:VideoChoice;script:{requestId:string;executionId:string;expectedVersion:number};followup:{requestId:string;input:string;selection:{kind:'skill';moduleId:string;revisionId:string};executionId?:string};package:{requestId:string;expectedStoryboardVersion:number;expectedEditingVersion:number};sourceScriptId?:string;held?:boolean};
@@ -80,7 +80,8 @@ function RuntimeWorkspace({routeSession,routeModule}:{routeSession:string;routeM
  function updateInput(value:string){setInput(value);if(sessionId)localStorage.setItem('opc-runtime-input:'+sessionId,value);}
  const choices=trpc.runtime.choices.useQuery(sessionId?{sessionId}:undefined);
  const view=trpc.runtime.view.useQuery({sessionId},{enabled:Boolean(sessionId),refetchInterval:5000});
- const payg=usePaygResume(()=>view.refetch());
+ // A resumed turn may settle charges: re-read the balance as each streamed turn does.
+ const payg=usePaygResume(()=>Promise.all([view.refetch(),utils.credits.getBalance.invalidate()]));
  const saved=trpc.opc.workResults.useQuery({sessionId},{enabled:Boolean(sessionId&&view.data?.scope?.kind==='work_item')});
  const saveWorkResult=trpc.opc.saveWorkResult.useMutation();
  const library=trpc.opc.library.useQuery({search:'',from:null,to:null},{enabled:Boolean(sessionId&&view.data?.scope?.kind==='work_item')});
@@ -284,7 +285,9 @@ function RuntimeWorkspace({routeSession,routeModule}:{routeSession:string;routeM
   const align=()=>node.parentElement?.style.setProperty('--chat-scrollbar-space',((node.offsetWidth-node.clientWidth)/2)+'px');
   align();const observer=new ResizeObserver(align);observer.observe(node);return()=>observer.disconnect();
  },[]);
- const scrollSignature=transcriptSignature(executions?.map(item=>[item.executionId,item.state,item.body,item.primaryBody].join(':')).join('|'),outgoing);
+ const turnsSignature=transcriptSignature(executions?.map(item=>[item.executionId,item.state,item.body,item.primaryBody].join(':')).join('|'),outgoing);
+ // Streamed text grows without any view change; it moves the transcript too (only while following the bottom).
+ const scrollSignature=turnsSignature===undefined?undefined:turnsSignature+liveScrollSignature(runner.reply);
  useEffect(()=>{
   const node=scrollArea.current;if(!node||!scrollKey||scrollSignature===undefined)return;
   scrollState.current=followTranscript(node,scrollState.current,scrollKey,scrollSignature,()=>{
