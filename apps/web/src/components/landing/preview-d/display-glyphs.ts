@@ -8,7 +8,7 @@ import { SAMPLE_REPORTS_TITLE } from '@/lib/landing/landing-samples';
  * Sample D's display face is Noto Sans CJK SC Black (Apache 2.0, fonts/LICENSE.txt) cut down to the glyphs of
  * the headings below plus printable ASCII, so the page loads one ~50 KB file instead of another CJK font.
  * The test checks every heading character is in the subset. After changing a heading, regenerate with:
- *   pyftsubset NotoSansHans-Black.otf --text-file=<DISPLAY_GLYPHS> --flavor=woff2 --layout-features='*'
+ *   pyftsubset NotoSansHans-Black.otf --text-file=<DISPLAY_GLYPHS> --flavor=woff2 --layout-features='*' --name-IDs='*'
  *     --output-file=fonts/display-subset.woff2
  */
 export const DISPLAY_TEXTS: readonly string[] = [
