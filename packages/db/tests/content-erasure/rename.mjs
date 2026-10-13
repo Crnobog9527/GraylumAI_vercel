@@ -37,7 +37,13 @@ export async function runRename({db,report}){
  const work=await runtimeFixture(db,{settled:true});
  await db.query(`UPDATE runtime_sessions SET scope=scope||'{"kind":"positioning_topic"}' WHERE id=$1`,[work.session]);
  await assert.rejects(rename(db,work,'工作'),/CONVERSATION_NOT_FOUND/);
- report.checks.push('rename denied for another account and for non-free conversations');
+ // The table itself refuses a name owned by someone other than the conversation's owner.
+ await assert.rejects(db.query('INSERT INTO runtime_session_names(session_id,actor_id,name) VALUES($1,$2,$3)',
+  [f.session,other.actor,'别人的名字']),/CONVERSATION_NAME_OWNER_MISMATCH/);
+ await rename(db,f,'自己的名字');
+ await assert.rejects(db.query('UPDATE runtime_session_names SET actor_id=$2 WHERE session_id=$1',[f.session,other.actor]),
+  /CONVERSATION_NAME_OWNER_MISMATCH/);
+ report.checks.push('rename denied for another account and for non-free conversations; table enforces the owner');
 
  // Erased with the conversation; a deleted conversation cannot be renamed again.
  await rename(db,f,'会被删除的名字');

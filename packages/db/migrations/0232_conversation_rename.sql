@@ -10,6 +10,21 @@ CREATE TABLE IF NOT EXISTS public.runtime_session_names (
  updated_at timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS runtime_session_names_actor ON public.runtime_session_names(actor_id);
+-- Ownership in the database, not only in the RPC (DATA-ERASURE §6): a name row always belongs to the
+-- owner of its conversation, so conversation deletion (by session) and account erasure and its
+-- completion proof (by actor) always see the same rows, whoever writes them.
+CREATE OR REPLACE FUNCTION public.runtime_session_names_owner_guard() RETURNS trigger
+LANGUAGE plpgsql SET search_path=public,pg_temp AS $$
+BEGIN
+ IF NOT EXISTS(SELECT 1 FROM runtime_sessions s WHERE s.id=NEW.session_id AND s.actor_id=NEW.actor_id) THEN
+  RAISE EXCEPTION 'CONVERSATION_NAME_OWNER_MISMATCH' USING ERRCODE='23514';
+ END IF;
+ RETURN NEW;
+END $$;
+REVOKE ALL ON FUNCTION public.runtime_session_names_owner_guard() FROM PUBLIC,anon,authenticated,service_role;
+DROP TRIGGER IF EXISTS runtime_session_names_owner_guard ON public.runtime_session_names;
+CREATE TRIGGER runtime_session_names_owner_guard BEFORE INSERT OR UPDATE ON public.runtime_session_names
+ FOR EACH ROW EXECUTE FUNCTION public.runtime_session_names_owner_guard();
 ALTER TABLE public.runtime_session_names ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON public.runtime_session_names FROM PUBLIC,anon,authenticated,service_role;
 
