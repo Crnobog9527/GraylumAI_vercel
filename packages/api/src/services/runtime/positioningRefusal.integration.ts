@@ -86,7 +86,8 @@ async function fallbackRound(reply: string, gate: string | null = POSITIONING_FA
     if (server.listening) await new Promise<void>((resolve, reject) => server.close(e => e ? reject(e) : resolve()));
     await db.end();
   };
-  return { admitted, host, financial, close, dispatched: () => dispatched };
+  const gateState = async () => (await db.query('select public.runtime_positioning_gate($1) v', [actor])).rows[0].v;
+  return { admitted, host, financial, close, dispatched: () => dispatched, db, actor, gateState };
 }
 
 it('RUNTIME: a fallback positioning refusal ends the round and restores its charge exactly once', async () => {
@@ -101,6 +102,27 @@ it('RUNTIME: a fallback positioning refusal ends the round and restores its char
     expect(await f.host().execute(f.admitted.executionId)).toEqual({ state: 'cancelled', unavailable: 'positioning_required' });
     expect(f.dispatched()).toBe(1);
     expect(await f.financial()).toEqual(after);
+    // The abuse-guard count (0233) sees exactly this refunded refusal...
+    expect(await f.gateState()).toEqual({ positioned: false, refusals24h: 1 });
+    // ...and forgets it once the 24-hour window has passed.
+    await f.db.query("update runtime_executions set created_at=now()-interval '25 hours' where id=$1", [f.admitted.executionId]);
+    expect(await f.gateState()).toEqual({ positioned: false, refusals24h: 0 });
+  } finally { await f.close(); }
+}, 30000);
+
+it('RUNTIME: the refusal count ignores a user stop and other cancellations, and only service_role may read it', async () => {
+  const f = await fallbackRound('小红书的推荐算法主要看互动率。');
+  try {
+    // A round the user stopped (cancelled without the positioning reason) is never counted.
+    await f.db.query("update runtime_executions set state='cancelled',unavailable_reason=null where id=$1", [f.admitted.executionId]);
+    expect(await f.gateState()).toEqual({ positioned: false, refusals24h: 0 });
+    for (const role of ['authenticated', 'anon']) {
+      await f.db.query('begin');
+      try {
+        await f.db.query(`set local role ${role}`);
+        await expect(f.db.query('select public.runtime_positioning_gate($1)', [f.actor])).rejects.toThrow(/permission denied/);
+      } finally { await f.db.query('rollback'); }
+    }
   } finally { await f.close(); }
 }, 30000);
 

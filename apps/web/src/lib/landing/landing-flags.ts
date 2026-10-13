@@ -23,7 +23,7 @@ export const LANDING_FEATURES = {
   content: { task: 'CONTENT-CONVERSATION-DRIVEN', show: true },
   publish: { task: 'PUBLISH-MONITOR', show: true },
   fusion: { task: 'FUSION-REVIEW', show: true },
-  // The page promises 500 sign-up credits; until that grant change is live the opening grant is 100.
+  // The page promises 500 sign-up credits; the grant is 500 once migration 0230 is applied (before that, 100).
   signupGrant: { task: 'PAYWALL（注册赠送 500 积分）', show: true },
   // The founder card also needs its price and seats from a public server answer; without one it stays away.
   founder: { task: 'PAY-FOUNDER', show: true },

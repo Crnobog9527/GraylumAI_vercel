@@ -35,9 +35,12 @@ it.skipIf(!key)('Decisions separates own-account social media operations from ev
   };
   for (const [text, expected] of cases) {
     const verdict = await decide(key!, text, transport);
-    if (verdict === expected) agree++;
+    // 'allow' and 'clear' both admit the message; 'clear' also passes the abuse-guard cap.
+    const admitted = verdict === 'allow' || verdict === 'clear';
+    const match = expected === 'block' ? verdict === 'block' : admitted;
+    if (match) agree++;
     if (verdict === 'unavailable') unavailable++;
-    process.stdout.write(`${verdict === expected ? 'OK  ' : 'DIFF'} expected=${expected} got=${verdict} ${text}\n`);
+    process.stdout.write(`${match ? 'OK  ' : 'DIFF'} expected=${expected} got=${verdict} ${text}\n`);
   }
   process.stdout.write(JSON.stringify({ cases: cases.length, agree, unavailable, costUsd: Number(cost.toFixed(6)) }) + '\n');
   expect(unavailable).toBe(0);

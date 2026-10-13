@@ -1,5 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-import { beforeEach, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { runtimeAdmissionService } from './admission';
 import { OPENING_INPUT } from '../../shared/opcQuestions';
@@ -11,13 +11,14 @@ vi.mock('../redisRateLimiter', () => ({ checkRuntimeRateLimit: mock.redis }));
 vi.mock('./automaticRecovery', () => ({ runAutomaticFinancialRecovery: mock.recovery }));
 const id = (n: number) => `10000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
 
-function fixture(options: { positioned?: boolean | 'error'; social?: boolean } = {}) {
+function fixture(options: { positioned?: boolean | 'error'; social?: boolean; refusals?: number } = {}) {
   let replay: { executionId: string } | null = null;
   const rpc = vi.fn(async (name: string, args: Record<string, unknown>): Promise<{ data: unknown; error: unknown }> => {
     if (name === 'runtime_session_context') return { data: { scope: { kind: 'positioning_draft', draftId: id(2) } }, error: null };
     if (name === 'runtime_admission_replay') return { data: replay, error: null };
-    if (name === 'opc_has_confirmed_positioning') return options.positioned === 'error'
-      ? { data: null, error: { code: '57014', message: 'timeout' } } : { data: options.positioned ?? false, error: null };
+    if (name === 'runtime_positioning_gate') return options.positioned === 'error'
+      ? { data: null, error: { code: '57014', message: 'timeout' } }
+      : { data: { positioned: options.positioned ?? false, refusals24h: options.refusals ?? 0 }, error: null };
     if (name === 'runtime_admit') return { data: { executionId: id(4), payload: args.p_payload }, error: null };
     throw new Error(name);
   });
@@ -102,11 +103,11 @@ it('fails operationally, never as "has none", when the positioning read fails', 
 it('never gates hosts without the policy, positioning (OPC) turns or a replay', async () => {
   const plain = fixture();
   await prepare(plain, { ...plain.policy, positioningGate: undefined });
-  expect(plain.names()).not.toContain('opc_has_confirmed_positioning');
+  expect(plain.names()).not.toContain('runtime_positioning_gate');
   const opc = fixture(); opc.classify.mockResolvedValue('block');
   await prepare(opc, { ...opc.policy, mentorStream: true, opcTurnToken: id(5) }, { ...opc.input, input: OPENING_INPUT,
     selection: { kind: 'ordinary', modelId: id(3) } }).catch(() => undefined);
-  expect(opc.names()).not.toContain('opc_has_confirmed_positioning');
+  expect(opc.names()).not.toContain('runtime_positioning_gate');
   expect(opc.classify).not.toHaveBeenCalled();
   const replayed = fixture(); replayed.classify.mockResolvedValue('block'); replayed.replay({ executionId: id(4) });
   expect(await prepare(replayed)).toEqual({ executionId: id(4) });
@@ -133,4 +134,24 @@ it('sizes the frozen fallback rule at admission, so a turn that fits never fails
   expect(await admits(true, low)).toBe(true);
   // ...is too long once the rule is part of the instructions, and is refused before any execution exists.
   expect(await admits(false, low)).toBe(false);
+});
+
+// Abuse guard (controller 2026-10-14): after 5 refunded fallback refusals in 24 hours.
+describe('refund cap', () => {
+  it('still admits ordinary chat (a clear verdict), normally charged and without the fallback rule', async () => {
+    const f = fixture({ refusals: 5 }); f.classify.mockResolvedValue('clear');
+    const result = await prepare(f, f.policy, { ...f.input, input: '推荐一下东京三日游的路线' }) as { payload: Record<string, unknown> };
+    expect(result.payload).not.toHaveProperty('positioningGate');
+    expect(f.names()).toContain('runtime_admit');
+  });
+  it.each(['allow', 'unavailable'] as const)('refuses an ambiguous request (%s) at admission, so no primary model call', async verdict => {
+    const f = fixture({ refusals: 5 }); f.classify.mockResolvedValue(verdict);
+    await expect(prepare(f, f.policy, { ...f.input, input: '好的，那帮我写三条' })).rejects.toMatchObject({ reason: 'POSITIONING_REQUIRED' });
+    expect(f.names()).not.toContain('runtime_admit');
+  });
+  it('applies again only from the cap, and below it ambiguous requests keep the fallback rule', async () => {
+    const f = fixture({ refusals: 4 }); f.classify.mockResolvedValue('allow');
+    const result = await prepare(f) as { payload: Record<string, unknown> };
+    expect(result.payload.positioningGate).toBe('fallback-v1');
+  });
 });

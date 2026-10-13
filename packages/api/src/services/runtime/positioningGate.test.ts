@@ -2,7 +2,8 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { logger } from '../../lib/logger';
-import { DECISIONS_MODEL, DECISIONS_URL, decide, decisionsClassifier, hasConfirmedPositioning, judgePositioning, openRouterKey }
+import { DECISIONS_MODEL, DECISIONS_URL, decide, decisionsClassifier, readPositioningGate, judgePositioning, openRouterKey,
+  windowBoundKey }
   from './positioningGate';
 import { isPositioningRefusal, POSITIONING_MARKER, POSITIONING_FALLBACK_INSTRUCTIONS } from './positioningFallback';
 import { withPrimaryAddenda } from './primaryInstructions';
@@ -14,7 +15,7 @@ const answer = (noul: number, cost = 0.00002) => new Response(JSON.stringify({
   answers: { own_account_social_media_operations: { type: 'noul', noul } }, model: DECISIONS_MODEL,
   usage: { input_tokens: 300, output_tokens: 1, cost } }), { status: 200 });
 
-it.each([[0.91, 'block'], [0.5, 'block'], [0.12, 'allow']] as const)('Decisions probability %s means %s', async (noul, verdict) => {
+it.each([[0.91, 'block'], [0.5, 'block'], [0.3, 'allow'], [0.2, 'allow'], [0.12, 'clear']] as const)('Decisions probability %s means %s', async (noul, verdict) => {
   const transport = vi.fn(async () => answer(noul));
   expect(await decide('KEY', '帮我想下周发什么', transport as never)).toBe(verdict);
   const [url, init] = transport.mock.calls[0]! as unknown as [string, RequestInit];
@@ -62,32 +63,44 @@ it('reuses the admitted model row OpenRouter key and never calls without one', a
     { provider: 'openai', api_endpoint: '', api_key: ' ' }, { provider: 'openai', api_endpoint: '' }])
     expect(openRouterKey(row)).toBeUndefined();
   const transport = vi.fn(async () => answer(0.1));
-  expect(await decisionsClassifier(transport as never)({ text: 'x', apiKey: 'K1' })).toBe('allow');
+  expect(await decisionsClassifier(transport as never)({ text: 'x', apiKey: 'K1' })).toBe('clear');
   expect((transport.mock.calls[0] as unknown as [string, RequestInit])[1].headers).toMatchObject({ Authorization: 'Bearer K1' });
   expect(await decisionsClassifier(transport as never)({ text: 'x', apiKey: undefined })).toBe('unavailable');
   expect(transport).toHaveBeenCalledOnce();
 });
 
-it('refuses on block and admits on allow, unavailable or a thrown classifier', async () => {
+it('below the cap refuses on block and admits everything else with the fallback rule', async () => {
   const input = { text: 'x', apiKey: 'K' };
-  await expect(judgePositioning({ classify: async () => 'block' }, input)).rejects.toMatchObject({ reason: 'POSITIONING_REQUIRED' });
-  expect(await judgePositioning({ classify: async () => 'unavailable' }, input)).toBe('unavailable');
-  expect(await judgePositioning({ classify: async () => { throw new Error('x'); } }, input)).toBe('unavailable');
-  expect(await judgePositioning({ classify: async () => 'allow' }, input)).toBe('allow');
+  await expect(judgePositioning({ classify: async () => 'block' }, input, false)).rejects.toMatchObject({ reason: 'POSITIONING_REQUIRED' });
+  for (const verdict of ['allow', 'clear', 'unavailable'] as const)
+    expect(await judgePositioning({ classify: async () => verdict }, input, false)).toBe(true);
+  expect(await judgePositioning({ classify: async () => { throw new Error('x'); } }, input, false)).toBe(true);
+});
+
+it('at the cap admits only a clear verdict, without the rule, and refuses the rest (unavailable included)', async () => {
+  const input = { text: 'x', apiKey: 'K' };
+  expect(await judgePositioning({ classify: async () => 'clear' }, input, true)).toBe(false);
+  for (const verdict of ['block', 'allow', 'unavailable'] as const)
+    await expect(judgePositioning({ classify: async () => verdict }, input, true)).rejects.toMatchObject({ reason: 'POSITIONING_REQUIRED' });
+  await expect(judgePositioning({ classify: async () => { throw new Error('x'); } }, input, true))
+    .rejects.toMatchObject({ reason: 'POSITIONING_REQUIRED' });
 });
 
 it('asks the primary model to read the conversation, not only the current message', () => {
   expect(POSITIONING_FALLBACK_INSTRUCTIONS).toContain('read together with the conversation so far');
 });
 
-it('reads the 0219 rule and fails operationally instead of guessing', async () => {
-  const rpc = vi.fn().mockResolvedValueOnce({ data: true, error: null }).mockResolvedValueOnce({ data: false, error: null })
+it('reads the 0233 gate state and fails operationally instead of guessing', async () => {
+  const rpc = vi.fn().mockResolvedValueOnce({ data: { positioned: true, refusals24h: 0 }, error: null })
+    .mockResolvedValueOnce({ data: { positioned: false, refusals24h: 5 }, error: null })
+    .mockResolvedValueOnce({ data: { positioned: false }, error: null })
     .mockResolvedValueOnce({ data: null, error: { code: '57014', message: 'timeout' } });
   const admin = { rpc } as unknown as SupabaseClient;
-  expect(await hasConfirmedPositioning(admin, 'actor')).toBe(true);
-  expect(await hasConfirmedPositioning(admin, 'actor')).toBe(false);
-  await expect(hasConfirmedPositioning(admin, 'actor')).rejects.toBeInstanceOf(StagingAccessError);
-  expect(rpc).toHaveBeenCalledWith('opc_has_confirmed_positioning', { p_actor_id: 'actor' });
+  expect(await readPositioningGate(admin, 'actor')).toEqual({ positioned: true, refusals24h: 0 });
+  expect(await readPositioningGate(admin, 'actor')).toEqual({ positioned: false, refusals24h: 5 });
+  await expect(readPositioningGate(admin, 'actor')).rejects.toBeInstanceOf(StagingAccessError);
+  await expect(readPositioningGate(admin, 'actor')).rejects.toBeInstanceOf(StagingAccessError);
+  expect(rpc).toHaveBeenCalledWith('runtime_positioning_gate', { p_actor_id: 'actor' });
 });
 
 it('maps the refusal to a stable code the front end can recognize', () => {
@@ -133,4 +146,14 @@ it('ends a refused PAYG round through fail_platform with positioning_required', 
   const local = vi.fn(async () => ({ state: 'cancelled' }));
   expect(await endPositioningRefusal(local as never, args, false)).toEqual({ state: 'cancelled', code: POSITIONING_REQUIRED });
   expect(local).toHaveBeenCalledExactlyOnceWith('runtime_cancel', args);
+});
+
+it('uses only the credential the approved staging window quoted for this model', async () => {
+  const { createHash } = await import('node:crypto');
+  const account = (key: string) => 'openrouter-key:' + createHash('sha256').update(key).digest('hex');
+  const row = { provider: 'openai', api_endpoint: '', api_key: 'APPROVED' };
+  expect(windowBoundKey(row, account('APPROVED'))).toBe('APPROVED');
+  expect(windowBoundKey({ ...row, api_key: 'ROTATED' }, account('APPROVED'))).toBeUndefined();
+  expect(windowBoundKey(row, undefined)).toBeUndefined();
+  expect(windowBoundKey({ ...row, api_endpoint: 'https://example.com/v1/chat/completions' }, account('APPROVED'))).toBeUndefined();
 });

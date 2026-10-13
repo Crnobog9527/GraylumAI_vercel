@@ -1,5 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { z } from 'zod';
+import { logger } from '../lib/logger';
 import { PAYG_START_THRESHOLDS_KEY } from './bill2/settingKeys';
 import { REPORT_SETTING } from './report/contract';
 import { PAYMENT_CHANNEL_KEY } from './payments/channelSettings';
@@ -26,8 +27,19 @@ export const adminSettingsRowSchema = z.object({
   value: z.union([z.string(), z.number().finite(), z.boolean()]),
 }).passthrough();
 
-export function genericAdminSettingsRows<T extends { key: string }>(rows: T[] | null) {
-  return rows?.filter(row => !dedicatedSettingKeys.has(row?.key)) ?? rows;
+// The settings page edits scalars only; an unlisted structured row is skipped (and logged) rather
+// than failing the whole page. Null and malformed scalar rows still fail the scalar validation.
+function isStructuredValue(value: unknown) {
+  return typeof value === 'object' && value !== null;
+}
+
+export function genericAdminSettingsRows<T extends { key: string; value?: unknown }>(rows: T[] | null) {
+  return rows?.filter(row => {
+    if (dedicatedSettingKeys.has(row?.key)) return false;
+    if (!isStructuredValue(row?.value)) return true;
+    logger.warn('api', 'admin_settings_unknown_structured_key_skipped', { key: row.key });
+    return false;
+  }) ?? rows;
 }
 
 // Keep decimal strings exact; SQL computes L using the frozen run/call rates.

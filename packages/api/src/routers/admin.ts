@@ -2377,7 +2377,7 @@ export const adminRouter = router({
         outputCreditsPer1KRange: formatRange(outputCreditsPer1KValues),
         searchCreditsPer1KRange: formatRange(searchCreditsPer1KValues),
         searchSurchargeCredits: parseSearchSurcharge(settingsMap['search_surcharge_credits']),
-        newUserCredits: parseNumericSetting(settingsMap, 'new_user_credits', 100),
+        newUserCredits: parseNumericSetting(settingsMap, 'new_user_credits', 500),
       };
 
       return {

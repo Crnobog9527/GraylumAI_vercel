@@ -1040,7 +1040,7 @@ it('RUNTIME: AC-0 router round trips per phase stay fixed for admission, Skill l
   const skillWarm=await skillPrepare();
   const all={start,ordinary,stream,skill,execute,skillWarm};
   const counts=Object.fromEntries(Object.entries(all).map(([name,m])=>[name,phases(m.summary)]));
-  // POSITIONING-GATE: free-chat admission adds one read (opc_has_confirmed_positioning); this user has no positioning
+  // POSITIONING-GATE: free-chat admission adds one read (runtime_positioning_gate); this user has no positioning
   // and the fixture model has no OpenRouter key, so Decisions is not called (fallback rule frozen instead).
   expect(counts,JSON.stringify(Object.fromEntries(Object.entries(all).map(([name,m])=>[name,m.summary])))).toEqual({
    start:{prelude:2,policy:0,host:1},
@@ -1055,7 +1055,7 @@ it('RUNTIME: AC-0 router round trips per phase stay fixed for admission, Skill l
   const label=(name:string)=>Object.fromEntries(Object.entries(all).map(([key,m])=>[key,m.summary.labels[name]?.rt??0]));
   // D7 checks before buffered output and on both sides of post-execution capture.
   expect(label('rpc/content_erasure_visible')).toEqual({start:0,ordinary:0,stream:5,skill:0,execute:2,skillWarm:0});
-  expect(label('rpc/opc_has_confirmed_positioning')).toEqual({start:0,ordinary:1,stream:0,skill:1,execute:0,skillWarm:1});
+  expect(label('rpc/runtime_positioning_gate')).toEqual({start:0,ordinary:1,stream:0,skill:1,execute:0,skillWarm:1});
   expect(label('auth/v1/user')).toEqual({start:1,ordinary:1,stream:2,skill:1,execute:2,skillWarm:1});
   // AC-0c: one service-role and one user-scoped (RLS) module read per request
   // (AC-0 baseline 7 for the Skill prepare); package checks before use and
