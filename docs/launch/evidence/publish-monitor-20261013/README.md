@@ -164,6 +164,7 @@ Redirect URL 留空。脚本 `postforme-probe.mjs`，北京时间 16:13–16:15�
 脚本 [`postforme-probe.mjs`](postforme-probe.mjs) 只调用读接口和"生成授权链接"（只请求读数据权限 `feeds`，不请求发布权限），代码里写死拒绝发布接口；不打印密钥、账号编号、作品文字和素材地址（按平台名找账号，编号只在脚本内部使用）。
 `accounts` 给每个账号一个稳定的选择标记（平台 + 账号编号的不可逆短哈希，如 `x#3fa9c1d2`）和遮挡后的名字提示，`feed` 用这个标记指定账号，
 增删账号不会让标记指向别的账号；
+Bluesky 要用账号 handle 和应用专用密码连接，脚本不接收任何密码：由 Owner 在 Post for Me 后台 Accounts → Connect 自己连，连好后再用 `accounts` / `feed` 读取。
 `auth-url` 的平台可以带连接方式：Instagram 必须写 `instagram:instagram` 或 `instagram:facebook`，LinkedIn 默认 `organization`。
 `auth-url` 把一次性授权链接写进本机 `~/.graylum/tmp/`（仅本人可读，不进仓库、不打印），Owner 从那个文件打开链接。
 

@@ -105,6 +105,9 @@ function saveConsentUrl(platform, url) {
 
 // platformArg may carry a connection type, e.g. `instagram:facebook` or `instagram:instagram`.
 function platformData(platform, type) {
+  // Bluesky connects with a handle + app password. This probe never handles passwords:
+  // the Owner connects Bluesky in the Post for Me dashboard (Accounts -> Connect), then uses `accounts` / `feed`.
+  if (platform === 'bluesky') throw new Error('bluesky: connect it yourself in the Post for Me dashboard; this probe does not take passwords');
   if (platform === 'linkedin') return { linkedin: { connection_type: type ?? 'organization' } };
   if (platform === 'instagram') {
     if (!type) throw new Error('instagram needs a connection type: instagram:instagram or instagram:facebook');
