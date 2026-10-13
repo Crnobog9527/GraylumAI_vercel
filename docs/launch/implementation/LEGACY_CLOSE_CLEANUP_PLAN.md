@@ -56,8 +56,8 @@
 | `atomic_pre_deduct` | `bill2_prepare`、`bill2_payg_claim`（新计费冻结积分） | **留** | — |
 | `bill2_legacy_settle`、`bill2_legacy_refund` | `bill2_finalize`、`bill2_payg_finalize` | **留** | — |
 | `atomic_settle`、`atomic_refund`（外壳） | `research_user_charge`（0071，研究计费，`research/store.ts:49` 在用） | **留**（注意：只看 TS 会误判为可删） | — |
-| `atomic_finalize_ai_success/_failure/_abort`、`atomic_abort_settle`（外壳，最新在 0162） | 只有已删的 `billing.ts` 和没人调用的 `ordinary_chat_transition` | **删** | 是 |
-| `bill2_legacy_finalize_success/_failure/_abort`、`bill2_legacy_abort_settle` | 只被上面 4 个外壳调用 | **删** | 是 |
+| `atomic_finalize_ai_success/_failure/_abort`、`atomic_abort_settle`（外壳，最新在 0162） | 当前代码里只有 `billing.ts`（无线上调用）和没人调用的 `ordinary_chat_transition`；但它们是旧代码预扣的**唯一结算路径**，`bill2/upgrade.integration.ts` 专门验证"旧代码 + 新结构"下用它们结清旧预扣 | **有条件删**（见下方"兼容窗口"） | 是 |
+| `bill2_legacy_finalize_success/_failure/_abort`、`bill2_legacy_abort_settle` | 只被上面 4 个外壳调用 | **有条件删**（同上） | 是 |
 | `ordinary_chat_claim`、`ordinary_chat_transition` | 无 | **删** | 是 |
 | `ordinary_chat_delete_guard`（对话删除触发器） | 触发器仍挂在 `conversations` 上 | **随 `ordinary_chat_requests` 表一起删** | 是 |
 | `agent_slice_*` 中已无调用方的一批（`admit / admission_replay / begin / open / call / record_final / result / conversation / context / selected_source / link / link_read / continue_work / sources / targets / freeze_discussion / stamp_dispatch / preferences_valid / assert_legacy_generation`，及重命名留下的 `*_before_*` 副本）、`agent_preference` | 无 | **删** | 是 |
@@ -67,6 +67,12 @@
 | `artifact_chat`、`artifact_chat_binding` | `chat.getConversations` → 技能对话统计（个人中心用量卡片） | **留**（写入已死，读取还活着） | — |
 | `soft_delete_conversation`（0147） | 只有集成测试 | **删** | 是 |
 | `purge_deleted_records`（0196/0197） | 没有调用方（pg_cron 已在 0148 移除） | **待定**：它是数据保留任务，不是旧对话专用，需单独决定 |
+
+**兼容窗口（审查 P1）**：上面 8 个旧结算函数是旧部署发起的预扣唯一能结清的路径。只有同时满足以下条件才删，否则留到下一轮：
+1. 所有环境都不再运行旧版本代码（旧对话入口 #898 已删，部署已全部切到新代码）；
+2. 只读确认没有未结清的旧预扣：`billing_history` 里 `operation_type='pre_deduct'`、不属于任何 `bill2_runs`、也没有对应 `settle/refund` 的记录为 0（staging 和正式库分别查；正式库只读查询也要按 AGENTS.md 第 1 节先批准）；
+3. `bill2/upgrade.integration.ts`（旧代码→新结构的兼容验证，不在 CI 必需检查里，只在 `--bill2-upgrade-only` 下运行）随之退役或改为验证"无未结旧预扣"，并在 PR 里说明理由，不能悄悄删。
+任一条件不满足，就把这 8 个函数从 PR-B 移到"待定"。
 
 额外要改：`scripts/check-staging-db-readiness.mjs` 的必需函数清单里有 `atomic_finalize_ai_*`、`atomic_abort_settle`；0162 对 `atomic_pre_deduct` 和全部 `bill2_legacy_*` 有源码 md5 固定检查、0204 按名字重写这 7 个函数——删除迁移必须排在 0204 之后，且不能让历史迁移重放失败。
 
@@ -90,7 +96,7 @@
 ## 6. 删除 PR 怎么拆（方案合并后按顺序开）
 
 1. **PR-A（high，无迁移）**：删 `services/billing.ts` 和两个测试、整体导出、`package.json` 子路径、`logger.billing.*`、相关 ESLint/大小基线条目；删 4 个旧预扣设置（后台页面 + staging 种子）；删 `checkOutputSecurity` / `sanitizeOutputSecurity` 及独用辅助函数和测试。`types/billing.ts` 里只服务旧预扣的类型在这个 PR 里逐个确认后删。
-2. **PR-B（high，迁移 0240）**：删第 5.1 节标"删"的 SQL 函数（4 个结算外壳 + 4 个 `bill2_legacy_*` 旧结算、`ordinary_chat_claim/transition`、已死的 `agent_slice_*` / `agent_preference`、旧工作台 RPC、`soft_delete_conversation`）；同步改 `check-staging-db-readiness.mjs`；确认 0162 的 md5 固定检查和 0204 重写不受影响；空库建库 + 重放 + 指纹。
+2. **PR-B（high，迁移 0240）**：删第 5.1 节标"删"的 SQL 函数（`ordinary_chat_claim/transition`、已死的 `agent_slice_*` / `agent_preference`、旧工作台 RPC、`soft_delete_conversation`）；8 个旧结算函数只在"兼容窗口"三个条件都满足时才一起删，否则留下；同步改 `check-staging-db-readiness.mjs`；确认 0162 的 md5 固定检查和 0204 重写不受影响；空库建库 + 重放 + 指纹。
 3. **PR-C（high，迁移，编号再申请）**：删第 5.2 节标"删"的 4 张表（`ordinary_chat_requests`、`conversation_context_snapshots`、`agent_confirmed_preferences`、`agent_preference_requests`）和 `agent_slice_calls`，同时改所有引用它们的注销函数（含财务证据函数）、`processorContracts.ts`、`schema.ts` 和注销数据库测试。上 staging 前先只读确认这些表的行数和未结预扣；staging 的旧测试数据随删表丢弃（正式环境上线前清空，按第 1 节规则单独批准）。
 4. **待定项**（`agent_slice_executions/links/pairs`、`artifact_chat*`、`prompts`、`purge_deleted_records`、`preAICallSecurityChecks` 一整条链、签名函数）：记入后续，每项需要先改一条活着的链或做产品/保护层面的确认，不在本轮删除。
 
