@@ -24,14 +24,15 @@ export function useConversationRename() {
   const utils = trpc.useUtils();
   const [editingId, setEditingId] = useState('');
   const [value, setValue] = useState('');
-  const [error, setError] = useState('');
+  // The message belongs to one conversation's latest edit; a later success there clears it.
+  const [failure, setFailure] = useState<{ sessionId: string; text: string } | null>(null);
   // Saves of one conversation run in order; different conversations save independently.
   const queues = useRef(new Map<string, Promise<void>>());
   // Latest edit per conversation: only that edit may roll the shown title back.
   const revisions = useRef(createRenameRevisions());
 
   const start = useCallback((sessionId: string, title: string) => {
-    setError('');
+    setFailure(null);
     setEditingId(sessionId);
     setValue(title);
   }, []);
@@ -41,7 +42,7 @@ export function useConversationRename() {
     const name = value.trim();
     setEditingId('');
     if (name === previous) return Promise.resolve();
-    setError('');
+    setFailure(null);
     const setTitle = (title: string) => utils.opc.conversations.setData(undefined, (rows) =>
       rows?.map((row) => row.sessionId === sessionId ? { ...row, title } : row));
     if (name) setTitle(name);
@@ -50,14 +51,20 @@ export function useConversationRename() {
       try {
         const saved = await utils.client.opc.conversationRename.mutate({ sessionId, name });
         revisions.current.settle(sessionId, saved.name ?? '');
+        if (revisions.current.isLatest(sessionId, revision)) {
+          setFailure((current) => current?.sessionId === sessionId ? null : current);
+        }
         // An empty name restores the server's default title; refresh either way in the background.
         void utils.opc.conversations.invalidate();
       } catch (cause) {
         revisions.current.settle(sessionId, null);
         // A newer edit of the same conversation is queued or shown: keep its title. Otherwise show the
         // last title the server confirmed, not an optimistic one that never saved.
-        if (revisions.current.isLatest(sessionId, revision)) setTitle(revisions.current.rollbackTitle(sessionId, previous));
-        setError(renameFailureMessage(cause));
+        // A failure superseded by a newer edit of the same conversation is not shown: that edit decides.
+        if (revisions.current.isLatest(sessionId, revision)) {
+          setTitle(revisions.current.rollbackTitle(sessionId, previous));
+          setFailure({ sessionId, text: renameFailureMessage(cause) });
+        }
         void utils.opc.conversations.invalidate();
       }
     };
@@ -67,5 +74,5 @@ export function useConversationRename() {
     return next;
   }, [utils, value]);
 
-  return { editingId, value, setValue, error, start, cancel, save };
+  return { editingId, value, setValue, error: failure?.text ?? '', start, cancel, save };
 }
