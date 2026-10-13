@@ -56,6 +56,7 @@ describe('official usage parsing', () => {
     // Web pages may be old; social posts cannot predate 2000.
     expect(timestamp({ t: '1998-05-01' }, ['t'])).toBe('1998-05-01T00:00:00.000Z');
     expect(timestamp({ t: '1969-07-20' }, ['t'])).toBe('1969-07-20T00:00:00.000Z');
+    for (const ambiguous of [31_536_000_000, -1_000, 123_456]) expect(timestamp({ t: ambiguous }, ['t'])).toBeUndefined();
     const { SOCIAL_EARLIEST_MS } = await import('../fields');
     expect(timestamp({ t: '1998-05-01' }, ['t'], SOCIAL_EARLIEST_MS)).toBeUndefined();
     expect(timestamp({ t: 12 }, ['t'], SOCIAL_EARLIEST_MS)).toBeUndefined();

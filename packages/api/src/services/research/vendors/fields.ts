@@ -74,8 +74,12 @@ const DAY_MS = 86_400_000;
 function readTimestamp(found: unknown, earliestMs: number): string | undefined {
   let ms: number | undefined;
   if (typeof found === 'number' || (typeof found === 'string' && /^\d{9,13}$/.test(found))) {
+    // Seconds and milliseconds overlap for small values, so numeric epochs are read only in their
+    // unambiguous ranges (10-digit seconds, 13-digit milliseconds); anything else is missing.
     const numeric = Number(found);
-    ms = numeric < 1e11 ? numeric * 1000 : numeric;
+    if (numeric >= 1e9 && numeric < 1e10) ms = numeric * 1000;
+    else if (numeric >= 1e12 && numeric < 1e13) ms = numeric;
+    else return undefined;
   } else if (typeof found === 'string' && /\d{4}/.test(found)) {
     ms = Date.parse(found);
   }
