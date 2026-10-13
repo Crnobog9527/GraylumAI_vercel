@@ -53,6 +53,10 @@ export function executorRpc(options:{database:SessionRpc;actor:()=>Promise<strin
  }
 }
 
+/** A stable error code for logs; free text (which may quote user material) is never logged. */
+export function diagnosticCode(error:unknown):string {
+ return error instanceof Error&&/^[A-Z][A-Z0-9_]{2,80}$/.test(error.message)?error.message:'UNCLASSIFIED';
+}
 export const preflightCodes=new Set([
  'RUNTIME_TIME_BUDGET_EXHAUSTED',
  'RUNTIME_PROVIDER_HISTORY_DENIED',
