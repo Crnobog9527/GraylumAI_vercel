@@ -21,8 +21,8 @@ describe('TikHub routes', () => {
     expect(paths).not.toContain('/instagram/v2/fetch_user_posts');
     expect(paths).not.toContain('/instagram/v2/search_reels');
     expect(paths).toContain('/douyin/search/fetch_video_search_v2');
-    // No follower count without the unverified relation endpoint, so no Bilibili profile route yet.
-    expect(Object.keys(TIKHUB_ROUTES).some(key => key.startsWith('bilibili:'))).toBe(false);
+    expect(TIKHUB_ROUTES['bilibili:account_relation']?.path).toBe('/bilibili/web/fetch_user_relation_stat');
+    expect(TIKHUB_ROUTES['tiktok:account_relation']).toBeUndefined();
     expect(paths).toContain('/instagram/v3/get_user_posts');
   });
 
@@ -106,6 +106,20 @@ describe('callTikhub', () => {
     const hung = await callTikhub({ platform: 'x', kind: 'account_profile', account: 'NASA' }, deps(hangingFetch(calls)));
     expect(hung).toMatchObject({ outcome: 'unknown', reason: 'TIMEOUT', usage: { units: null } });
     expect(calls).toHaveLength(2);
+  });
+
+  it('reads Bilibili followers from the separate, separately billed relation call', async () => {
+    const profile = await callTikhub({ platform: 'bilibili', kind: 'account_profile', account: '456664753' },
+      deps(jsonFetch(200, { code: 200, data: { data: { mid: 456664753, name: 'UP', sign: 'x', official: { type: -1 } } } })));
+    expect(profile).toMatchObject({ outcome: 'ok', usage: { units: '1' } });
+    expect(profile.items[0].missing).toContain('followers');
+    const relation = await callTikhub({ platform: 'bilibili', kind: 'account_relation', account: '456664753' },
+      deps(jsonFetch(200, { code: 200, data: { data: { mid: 456664753, following: 10, follower: 52000 } } })));
+    expect(relation).toMatchObject({ outcome: 'ok', usage: { units: '1' } });
+    expect(relation.items[0].fields).toMatchObject({ id: '456664753', followers: 52000, following: 10 });
+    const noFollowers = await callTikhub({ platform: 'bilibili', kind: 'account_relation', account: '1' },
+      deps(jsonFetch(200, { code: 200, data: { data: { mid: 1, following: 3 } } })));
+    expect(noFollowers).toMatchObject({ outcome: 'failed', reason: 'EMPTY_OR_UNRECOGNIZED' });
   });
 
   it('cuts to the requested limit and says so', async () => {

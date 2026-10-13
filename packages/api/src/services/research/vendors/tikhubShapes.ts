@@ -138,6 +138,7 @@ const PROFILE_KEYS = ['follower_count', 'followers_count', 'unique_id', 'screen_
 /** A profile needs an identity plus something describing it; a post needs its id plus real content or metrics. */
 function usable(item: ResearchItem, kind: SocialKind): boolean {
   const f = item.fields;
+  if (kind === 'account_relation') return f.id !== undefined && f.followers !== undefined;
   if (kind === 'account_profile') return (f.id !== undefined || f.handle !== undefined) && (f.followers !== undefined || f.name !== undefined);
   return f.id !== undefined && ['title', 'author', 'publishedAt', 'views', 'likes', 'comments', 'shares'].some(name => f[name] !== undefined);
 }
@@ -145,7 +146,7 @@ function usable(item: ResearchItem, kind: SocialKind): boolean {
 /** Normalized items for a TikHub envelope; an unrecognized shape yields no items, never invented ones. */
 export function normalizeTikhub(json: unknown, platform: SocialPlatform, kind: SocialKind): ResearchItem[] {
   const data = (json as Raw | null)?.data;
-  if (kind === 'account_profile') {
+  if (kind === 'account_profile' || kind === 'account_relation') {
     const found = findAll(data, object => has(object, ...PROFILE_KEYS), 20).map(profile).find(item => usable(item, kind));
     return found ? [found] : [];
   }

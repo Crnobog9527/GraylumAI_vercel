@@ -31,8 +31,15 @@ export const TIKHUB_ROUTES: Partial<Record<`${SocialPlatform}:${SocialKind}`, Ti
     method: 'GET', path: '/xiaohongshu/app_v2/search_notes',
     params: ({ keyword }) => ({ keyword: keyword!, page: 1, sort_type: 'general' }),
   },
-  // Bilibili is deliberately absent: its profile endpoint has no follower count and the relation
-  // endpoint that supplies it is unverified. RT-7 adds both together, or the platform stays unsupported.
+  // Bilibili's profile has no follower count; followers come from a second, separately billed
+  // relation call. Both paths are from TikHub's OpenAPI spec; RESEARCH-0 tested only the profile, so
+  // RT-7 verifies the relation call before Bilibili can be enabled (it is not benchmark-capable yet).
+  'bilibili:account_profile': {
+    method: 'GET', path: '/bilibili/web/fetch_user_profile', account: 'numeric', params: ({ account }) => ({ uid: account! }),
+  },
+  'bilibili:account_relation': {
+    method: 'GET', path: '/bilibili/web/fetch_user_relation_stat', account: 'numeric', params: ({ account }) => ({ uid: account! }),
+  },
   'weibo:account_posts': {
     method: 'GET', path: '/weibo/app/fetch_user_timeline', account: 'numeric',
     params: ({ account }) => ({ uid: account!, page: 1, filter_type: 'all' }),
@@ -157,7 +164,7 @@ export async function callTikhub(call: TikhubCall, deps: VendorDeps): Promise<Re
   const all = normalizeTikhub(answer.json, call.platform, call.kind);
   // A recognized empty post list is a real, billed "no results" answer. A missing profile or an
   // unrecognized payload is not a delivery and is never reported as a successful, billable result.
-  if (all.length === 0 && call.kind !== 'account_profile' && hasEmptyPostList(answer.json, call.platform, call.kind)) {
+  if (all.length === 0 && call.kind !== 'account_profile' && call.kind !== 'account_relation' && hasEmptyPostList(answer.json, call.platform, call.kind)) {
     return { ...base, outcome: 'ok', reason: 'NO_RESULTS', httpStatus: 200, supplierMayCharge: true, usage: { unit: 'call', units: '1' } };
   }
   if (all.length === 0) {
