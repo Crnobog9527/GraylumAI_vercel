@@ -123,11 +123,13 @@ export async function executeOriginalExecution(host:OriginalExecutionHost,execut
     // lost cancellation response is inspected by financial recovery below;
     // there is no repeated cancellation or assumption of a refund.
     // 0248: the code is written atomically with this cancellation only; before 0248 the plain cancel runs.
-    logger.error('api','runtime_stream_cancelled',{executionId,code:'STAGING_RUNTIME_DISABLED'});
-    const coded=await host.admin.rpc('runtime_cancel_with_code',
+    let cancelled=await host.admin.rpc('runtime_cancel_with_code',
      {p_actor_id:host.actorId,p_execution_id:executionId,p_code:'STAGING_RUNTIME_DISABLED'});
-    if(coded.error&&['PGRST202','42883'].includes(coded.error.code))
-     await host.admin.rpc('runtime_cancel',{p_actor_id:host.actorId,p_execution_id:executionId});
+    if(cancelled.error&&['PGRST202','42883'].includes(cancelled.error.code))
+     cancelled=await host.admin.rpc('runtime_cancel',{p_actor_id:host.actorId,p_execution_id:executionId});
+    // Only a cancellation this request actually performed is logged as its cause.
+    if(['prepared','running','interrupted'].includes(observed.data?.state)&&!cancelled.error&&cancelled.data?.state==='cancelled')
+     logger.error('api','runtime_stream_cancelled',{executionId,code:'STAGING_RUNTIME_DISABLED'});
    }
    const adapter=stagingTransport(host.admin,original,host.budget);
    const replayOnly={dispatch:async()=>{throw new Error('RUNTIME_DISPATCH_DISABLED');},lookup:adapter.lookup};
