@@ -11,7 +11,7 @@ import { POSITIONING_FALLBACK, POSITIONING_MARKER } from './positioningFallback'
 // model refuses with the structured marker, the round ends through fail_platform (0215 + 0233): the charged call is
 // compensated once, nothing is shown or saved as an answer, and the execution records positioning_required.
 const connectionString = process.env.V3_LOCAL_DB!;
-async function fallbackRound(reply: string, gate: string | undefined = POSITIONING_FALLBACK) {
+async function fallbackRound(reply: string, gate: string | null = POSITIONING_FALLBACK) {
   if (!connectionString?.startsWith('postgres://postgres@127.0.0.1:') || !connectionString.endsWith('/v3_disposable'))
     throw new Error('isolated runner required');
   const db = new pg.Client({ connectionString });
@@ -126,7 +126,7 @@ it('RUNTIME: an ordinary answer under the fallback rule completes and is charged
 it('RUNTIME: without the frozen fallback rule the marker is never a positioning refusal and nothing is refunded', async () => {
   // Such a reply still meets the existing native-output checks (a reply opening with "[" is not a usable answer);
   // the gate itself neither refuses nor compensates it.
-  const f = await fallbackRound(POSITIONING_MARKER, undefined);
+  const f = await fallbackRound(POSITIONING_MARKER, null);
   try {
     const result = await f.host().execute(f.admitted.executionId);
     expect(result).not.toHaveProperty('code');
