@@ -38,6 +38,8 @@ const frozenPayg = frozen.extend({
   contractVersion: z.literal('bill2.v2'),
   limits: frozen.shape.limits.extend({ credits: z.literal(0) }),
 }).refine(value => value.callPolicy.every(policy => policy.payg !== undefined) && value.rules.billingUnit !== undefined);
+/** FUSION-REVIEW admission validates its runs before the database transaction prepares them. */
+export const frozenPaygRunSchema = frozenPayg;
 export type FrozenPaygRun = z.infer<typeof frozenPayg>;
 export type FrozenRun = z.infer<typeof frozen>;
 const call = z.object({ runtimeEpoch: z.number().int().positive().optional(), payg: paygCallQuote.optional(),
@@ -47,6 +49,7 @@ const call = z.object({ runtimeEpoch: z.number().int().positive().optional(), pa
   automaticRetry: z.literal(false), hiddenTools: z.literal(false), lookupSupported: z.boolean(), phase: z.string().min(1).max(64),
   billingUnit: z.object({ modelId: uuid, multiplier: z.string().regex(MULTIPLIER_PATTERN), source: z.enum(['model', 'provider', 'global']) })
     .strict().optional() }).strict();
+export const frozenCallSchema = call;
 export type FrozenCall = z.infer<typeof call>;
 export type RunView = { executionId?: string|null; accountClosed?: boolean; contentDeleted?: boolean; id: string; state: 'prepared' | 'dispatched' | 'unknown' | 'cost_pending' | 'settled' | 'refunded';
   contractVersion?: string; calls?: Array<{preDeductId?: string; chargedCredits?: number;}>;
