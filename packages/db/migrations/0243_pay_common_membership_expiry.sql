@@ -56,8 +56,12 @@ BEGIN
    AND NOT EXISTS(SELECT 1 FROM account_erasure_requests r WHERE r.profile_id=p.id)
    AND NOT EXISTS(SELECT 1 FROM payment_orders o WHERE o.user_id=p.id
      AND o.refund_approval->>'kind'='monthly_first_purchase' AND o.refund_approval->>'hold'='held')
-   AND NOT EXISTS(SELECT 1 FROM user_subscriptions s WHERE s.user_id=p.id AND (s.status='admin_override'
-     OR s.stripe_subscription_id IS NOT NULL AND s.status IN ('active','trialing','past_due','incomplete','unpaid')))
+   AND NOT EXISTS(SELECT 1 FROM user_subscriptions s WHERE s.user_id=p.id
+     AND s.stripe_subscription_id IS NOT NULL AND s.status IN ('active','trialing','past_due','incomplete','unpaid'))
+   -- Same effective-override predicate as pay_common_membership_facts: only an override set after the last paid term.
+   AND NOT EXISTS(SELECT 1 FROM user_subscriptions s WHERE s.user_id=p.id AND s.status='admin_override'
+     AND s.metadata ? 'adminOverride' AND s.updated_at>=(SELECT max(o.fulfilled_at) FROM payment_orders o
+       WHERE o.user_id=p.id AND o.item_type='membership_plan' AND o.payment_method IS NOT NULL AND o.fulfilled_at IS NOT NULL))
    ORDER BY p.id LIMIT p_limit LOOP
   IF pay_common_settle_membership_level(u) THEN n:=n+1; END IF;
  END LOOP;

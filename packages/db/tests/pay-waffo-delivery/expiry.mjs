@@ -38,7 +38,7 @@ export async function seedEndedMemberships({admin,service}) {
   const plan=(await admin.query("SELECT id FROM membership_plans WHERE level='gold'")).rows[0].id;
   const version=await setRoutes(admin,{card:{enabled:true}});
   const seeded={plan};
-  for(const name of ['wallet','walletRace','walletHeld','goldThenPro']) {
+  for(const name of ['wallet','walletRace','walletHeld','goldThenPro','oldOverride','newOverride']) {
     const user=await newUser(admin),start=secondsAgo(40*DAY);
     await payTerm({admin,service},user,plan,'alipay','standard',version,start,plusMonth(start));
     seeded[name]={user};
@@ -52,7 +52,7 @@ export async function seedEndedMemberships({admin,service}) {
   const stop=(await service.query('SELECT pay_waffo_cancel_intent($1,$2) v',[seeded.cardStopped.user,seeded.cardStopped.subscription])).rows[0].v;
   await service.query("SELECT pay_waffo_cancel_result($1,'fixture',$2,'canceled')",[seeded.cardStopped.subscription,stop.providerId]);
   // The cache kept the level it had while the term was current.
-  for(const name of ['wallet','walletRace','walletHeld','goldThenPro','cardStopped','cardRenewing','cardGrace'])
+  for(const name of ['wallet','walletRace','walletHeld','goldThenPro','oldOverride','newOverride','cardStopped','cardRenewing','cardGrace'])
     await admin.query("UPDATE profiles SET membership_level='gold' WHERE id=$1",[seeded[name].user]);
   return seeded;
 }
@@ -89,8 +89,17 @@ export async function verifyEndedMemberships({admin,service,connect},seeded) {
     assert.equal((await service.query('SELECT pay_common_settle_membership_levels(1) n')).rows[0].n,1,`run ${run}`);
   assert.equal(await level(admin,seeded.walletHeld.user),'gold');
   await admin.query("UPDATE payment_orders SET refund_approval=NULL WHERE user_id=$1",[seeded.walletHeld.user]);
+  // Admin overrides follow the facts predicate: one set before the last paid term is ignored, a newer one is kept.
+  for(const [name,at] of [['oldOverride','2020-01-01T00:00:00Z'],['newOverride',new Date(Date.now()+60000)]])
+    await admin.query(`UPDATE user_subscriptions SET status='admin_override',metadata='{"adminOverride":{"newLevel":"gold"}}',
+      updated_at=$2 WHERE user_id=$1`,[seeded[name].user,at]);
+  const facts=async user=>(await service.query('SELECT pay_common_membership_facts($1) v',[user])).rows[0].v.internal_membership;
+  assert.equal((await facts(seeded.oldOverride.user)).mapping_state,'internal_inactive');
+  assert.equal(await facts(seeded.newOverride.user),null);
   // Daily batch: ended terms settle, renewal grace keeps the level, and a second run changes nothing.
-  assert.ok((await service.query('SELECT pay_common_settle_membership_levels(100) n')).rows[0].n>=2);
+  assert.ok((await service.query('SELECT pay_common_settle_membership_levels(100) n')).rows[0].n>=3);
+  assert.equal(await level(admin,seeded.oldOverride.user),'free','an older admin override does not keep a stale level');
+  assert.equal(await level(admin,seeded.newOverride.user),'gold','a newer admin override is left to the admin');
   for(const name of ['walletHeld','goldThenPro','cardStopped','cardRenewing'])
     assert.equal(await level(admin,seeded[name].user),'free',name);
   assert.equal(await level(admin,seeded.cardGrace.user),'gold','24-hour renewal grace keeps the level');
@@ -115,7 +124,7 @@ export async function verifyEndedMemberships({admin,service,connect},seeded) {
   assert.equal(await level(admin,seeded.goldThenPro.user),'pro');
   assert.equal((await service.query('SELECT pay_common_settle_membership_level($1) v',[seeded.goldThenPro.user])).rows[0].v,false);
   return ['0243-settle-service-only','0243-admission-settles-ended-wallet','0243-ended-wallet-buys-again',
-    '0243-concurrent-rebuy-one-order','0243-held-monthly-refund-skipped','0243-skipped-profiles-do-not-starve-batch','0243-batch-settles-wallet-and-waffo-card',
+    '0243-concurrent-rebuy-one-order','0243-held-monthly-refund-skipped','0243-skipped-profiles-do-not-starve-batch','0243-batch-settles-wallet-and-waffo-card','0243-old-admin-override-settles','0243-new-admin-override-kept',
     '0243-grace-keeps-level','0243-batch-idempotent','0243-stopped-card-buys-again','0243-renewing-card-still-blocked',
     '0243-gold-ended-pro-current-to-pro'];
 }
