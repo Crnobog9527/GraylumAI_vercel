@@ -42,6 +42,7 @@ import { withPrimaryAddenda } from './primaryInstructions';
 import { callBillingUnit } from './billingUnitAdmission';
 import type {GateRejection} from './newWorkGate';
 import {allowedOutput} from './moderation';
+import {runtimeIdentityGuard} from '../modelIdentity/runtimeGuard';
 import {frozenBrandIdentity,withBrandIdentity} from '../modelIdentity/brandIdentity';
 export function runtimeExecutor(options:RuntimeExecutorOptions){
  if(typeof options.callGate!=='function')throw new Error('RUNTIME_CALL_GATE_REQUIRED');
@@ -115,7 +116,9 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
   // B2a: once BILL2 reports a confirmed erasure, nothing more reaches the client.
   let accountClosed=false;
   const closed=():never=>{accountClosed=true;throw new Error('RUNTIME_ACCOUNT_CLOSED');};
-  const progress=progressEmitter(onProgress,()=>budget.timing?.mark('firstValidContent'),()=>accountClosed);
+  // MODEL-IDENTITY-GUARD layer 3: self-identification in streamed and stored replies becomes the brand reply.
+  const identity=runtimeIdentityGuard(frozenBrandIdentity(context.instructions));
+  const progress=identity.progress(progressEmitter(onProgress,()=>budget.timing?.mark('firstValidContent'),()=>accountClosed));
   const normalized=context.providerRequestFormat==='serial-tools-v2'||context.providerRequestFormat==='serial-tools-v6-reasoning'||streaming;
   const historyChecked=historyGuard(executionId,code=>{preflightFailure=code;});
   try{
@@ -368,12 +371,13 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
     if(!native&&turn.card)progress({type:'card',card:turn.card});
    }
    let turnMetadata:Record<string,unknown>=turn?{truncated:turn.truncated}:{};
+   body=identity.body(body);
    if(native){
     const fitted=prepareNativePrimary(body,turnMetadata,{envelopeOrder:context.envelopeOrder,appendCard:Boolean(context.mentorText),
       length:primaryLength,attachedOrganizer:Boolean(context.attachedOrganizer),executionId});
      body=fitted.body;turnMetadata=fitted.metadata;
     if(nativeProgress){const final=projection.finish(visibleText(body,context));if(final)progress(final);}
-    if(turn?.card)progress({type:'card',card:JSON.parse(body).card});
+    if(turn?.card&&JSON.parse(body).card)progress({type:'card',card:JSON.parse(body).card});
    }
    if(nativeProgress&&!accountClosed&&!moderationBlocked){const done=await finishStop(executionId,onProgress,undefined,execution.live);if(done)return done;}
    if(context.reportGeneration)await session.addItems([]);
@@ -402,6 +406,7 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
       return JSON.stringify(response);
      }});}
    }
+   if(summary!==undefined)summary=identity.summary(summary);
    // This is after organizer spend and streamed text. Real moderation must decide
    // whether to buffer/retract output or check the primary reply before organizing.
    if(execution.live&&!await allowedOutput({actorId:await options.actor(),executionId,body,summary})){
