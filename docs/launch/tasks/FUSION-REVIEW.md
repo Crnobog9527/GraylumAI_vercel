@@ -233,7 +233,7 @@
      | `revision_invalid` | 汇总正文已保存但宿主检查不过 | 0 |
      | `no_delivery` | 没有保存下正文就收尾：供应商确认失败、到 `recovery_deadline` 仍无正文（宿主也没写判定）、派发前过期取消 | 0 |
      | `erased_before_verdict` | 注销先于判定（PR-1 第 9 项） | 0 |
-     | `unjudged_saved` | 到 `recovery_deadline` 宿主仍没写判定，但正文已保存（总控 2026-10-14：沿用 BILL2"派发后结果不明"口径，不凭空零收费） | 按 usable 口径：已知用量按名义费用；没有用量按 `min(c,U)` 兜底或保留 `cost_pending` 转人工 |
+     | `unjudged_saved` | 到 `recovery_deadline` 宿主仍没写判定，但正文已保存进执行输出（`runtime_executions.result`，用户看得到的结果；只有供应商回执不算）（总控 2026-10-14：沿用 BILL2"派发后结果不明"口径，不凭空零收费） | 按 usable 口径：已知用量按名义费用；没有用量按 `min(c,U)` 兜底或保留 `cost_pending` 转人工 |
      | `user_stopped` | 用户派发后主动停止（或内容删除导致运行单取消）、还没有判定 | 按 BILL2 派发后取消的口径，按已知用量 / 成本结算，不免费 |
 
      应收为 0 的判定都是冻结全退，供应商成本照常入账、计入平台承担（也计入下面的熔断统计）。

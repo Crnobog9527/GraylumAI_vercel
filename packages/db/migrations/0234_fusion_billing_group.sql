@@ -252,12 +252,13 @@ DO $$ DECLARE src text; a3 text; a4 text; BEGIN
    ELSIF r.cancel_requested OR r.paused_reason='user_stop' THEN
     UPDATE bill2_calls SET fusion_verdict='user_stopped' WHERE id=c.id RETURNING * INTO c;
    -- No host verdict by the call's recovery deadline: follow the existing BILL2 rule for an
-   -- unresolved dispatched result instead of holding forever. A saved response body is billed like
-   -- usable (known usage, else min(c,U) fallback or cost_pending review); no saved body is no_delivery.
+   -- unresolved dispatched result instead of holding forever. "Saved" means saved into the execution
+   -- output the user sees (runtime_executions.result), not merely a provider receipt: that output is
+   -- billed like usable (known usage, else min(c,U) fallback or cost_pending review); otherwise the
+   -- result never reached the user and the call is no_delivery.
    ELSIF clock_timestamp()>=coalesce(c.recovery_deadline,c.created_at+interval '24 hours') THEN
-    UPDATE bill2_calls SET fusion_verdict=CASE WHEN EXISTS(SELECT 1 FROM bill2_receipts WHERE call_id=c.id
-      AND payload->>'source'='response' AND payload->>'rawBody' IS NOT NULL
-      AND payload->>'evidenceKind' IS DISTINCT FROM 'transport_observation' AND payload->>'rejectedReason' IS NULL)
+    UPDATE bill2_calls SET fusion_verdict=CASE WHEN EXISTS(SELECT 1 FROM runtime_executions
+      WHERE billing_run_id=r.id AND result IS NOT NULL)
      THEN 'unjudged_saved' ELSE 'no_delivery' END WHERE id=c.id RETURNING * INTO c;
    ELSE CONTINUE;END IF;
   END IF;

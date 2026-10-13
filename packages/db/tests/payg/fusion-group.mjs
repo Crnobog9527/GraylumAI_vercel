@@ -169,11 +169,29 @@ export async function fusionGroupCases({db,Client,connectionString,report,create
     model:sf.claimPayload.model,protocol:sf.claimPayload.protocol,providerId:'generation-'+svc.calls[0].id,source:'response',
     sourceHash:'c'.repeat(64),observedAt:new Date().toISOString(),coverage:'request_total',final:true,cost:'0.0004',currency:'USD',
     usage:{inputTokens:400,outputTokens:0},rawBody:'{"choices":[]}'});
+  // A provider receipt with a body is not delivery: without a saved execution output it stays no_delivery.
+  const receiptOnly = await group(db,createFixture,{n:1,credits:9});
+  const ro = await claimGroup(db,receiptOnly);
+  await dispatchAll(db,receiptOnly,ro);
+  const rf = receiptOnly.members[0];
+  await rpc(db,'bill2_record',receiptOnly.actor,rf.run,ro.calls[0].id,{provider:rf.claimPayload.provider,account:'sandbox',
+    model:rf.claimPayload.model,protocol:rf.claimPayload.protocol,providerId:'generation-'+ro.calls[0].id,source:'response',
+    sourceHash:'c'.repeat(64),observedAt:new Date().toISOString(),coverage:'request_total',final:true,cost:'0.0004',currency:'USD',
+    usage:{inputTokens:400,outputTokens:0},rawBody:'{"choices":[]}'});
+  await db.query("UPDATE bill2_calls SET recovery_deadline=now()-interval '1 second' WHERE id=$1",[ro.calls[0].id]);
+  await rpc(db,'bill2_finalize',receiptOnly.actor,receiptOnly.runs[0]);
+  assert.equal((await calls(db,receiptOnly.runs))[0].fusion_verdict,'no_delivery','receipt body alone is not a delivered result');
+  // Saved execution output (what the user sees) without a host verdict: billed like usable.
+  const sid = randomUUID();
+  await db.query("INSERT INTO runtime_sessions(id,actor_id,scope,start_request_id,start_payload) VALUES($1,$2,$3,$4,'{}')",
+    [sid,saved.actor,sf.payload.scope,randomUUID()]);
+  await db.query(`INSERT INTO runtime_executions(actor_id,session_id,request_id,payload,history_revision,state,billing_run_id,result)
+    VALUES($1,$2,$3,'{}',0,'completed',$4,'{"answer":"saved"}')`,[saved.actor,sid,randomUUID(),saved.runs[0]]);
   await db.query("UPDATE bill2_calls SET recovery_deadline=now()-interval '1 second' WHERE id=$1",[svc.calls[0].id]);
   await rpc(db,'bill2_finalize',saved.actor,saved.runs[0]);
   const billed = (await calls(db,saved.runs))[0];
   assert.deepEqual([billed.fusion_verdict,billed.settled_at!==null],['unjudged_saved',true]);
-  assert.equal(await charged(db,saved.runs),1,'saved body without a host verdict is billed from known usage');
+  assert.equal(await charged(db,saved.runs),1,'saved execution output without a host verdict is billed from known usage');
   report.checks.push('format_invalid verdict charges zero and releases the full hold; the usable member is charged on its own');
 
   // Content deletion (not account closure) before the verdict keeps the hold and settles nothing.
