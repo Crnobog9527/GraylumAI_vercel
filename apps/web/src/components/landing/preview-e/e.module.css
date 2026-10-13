@@ -153,7 +153,7 @@
 .report{display:grid;gap:24px;border-radius:24px;background:var(--gl-surface);border:1px solid var(--gl-border);padding:clamp(20px,3vw,36px)}
 .reportHead{display:flex;align-items:center;gap:8px;margin:0;color:var(--gl-text-secondary-aa);font-size:14px}
 .tag{padding:0 8px;border-radius:var(--gl-radius-pill);background:var(--gl-accent-tag);color:var(--gl-accent-tag-text);font-size:12px;line-height:20px}
-.reportPart{display:grid;gap:8px;padding-left:16px;border-left:2px solid var(--gl-accent-gold)}
+.reportPart{display:grid;gap:8px;padding-top:16px;border-top:1px solid var(--gl-border)}
 .reportPart p{margin:0;color:var(--gl-text-body);font-size:15px;line-height:1.75}
 .reportPart p:first-child{color:var(--gl-text);font-size:17px;font-weight:600}
 .placeholder{display:grid;gap:8px}
