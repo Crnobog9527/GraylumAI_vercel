@@ -45,6 +45,15 @@ describe('PAY-STRIPE-MP external refunds of card orders', () => {
     await expect(f.run({ refundId: 're_ours' })).resolves.toBe(true);
     expect(mocks.monthly).toHaveBeenCalledWith(f.db, 'order', 're_ours', f.stripe);
     expect(f.db.rpc).not.toHaveBeenCalled(); expect(f.alert).not.toHaveBeenCalled();
+    // An external refund (Link, Dashboard) while our monthly refund is approved or running is persisted on that intent
+    // as a conflict for review, never also booked as an external refund.
+    mocks.monthly.mockReset().mockImplementation(async (_db: unknown, _order: string, refundId: string) =>
+      ({ handled: refundId === 're_link' }));
+    const during = fixture([refund({ id: 're_link', amount: 1000 })]);
+    await expect(during.run({ refundId: 're_link' })).resolves.toBe(true);
+    expect(mocks.monthly).toHaveBeenCalledWith(during.db, 'order', 're_link', during.stripe);
+    expect(during.db.rpc).not.toHaveBeenCalled();
+    expect(during.alert).toHaveBeenCalledTimes(1);
     // A refund of ours naming another order is a conflict, never recorded.
     const other = fixture([refund({ id: 're_ours', metadata: { orderId: 'another', refundIntentId: 'intent' } })]);
     await expect(other.run({ refundId: 're_ours' })).rejects.toThrow('PAYMENT_EVIDENCE_CONFLICT');

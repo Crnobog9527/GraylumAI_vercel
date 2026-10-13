@@ -32,7 +32,7 @@ export async function handleCardRefund(db: SupabaseClient, stripe: RefundStripe,
   for (const refund of refunds) {
     if (refund.object !== 'refund' || (input.refundId && refund.id !== input.refundId)) throw new Error(PAYMENT_EVIDENCE_CONFLICT);
   }
-  const external = refunds.filter(refund => !refund.metadata?.refundIntentId);
+  let external = refunds.filter(refund => !refund.metadata?.refundIntentId);
   const ours = refunds.filter(refund => refund.metadata?.refundIntentId);
   const chargeId = input.chargeId ?? id(refunds[0]!.charge);
   const paymentIntentId = id(refunds[0]!.payment_intent);
@@ -43,6 +43,20 @@ export async function handleCardRefund(db: SupabaseClient, stripe: RefundStripe,
     if (refund.metadata?.orderId !== match!.order.id) throw new Error(PAYMENT_EVIDENCE_CONFLICT);
     const monthly = await reconcileMonthlyRefundForOrder(db, match!.order.id, refund.id, stripe as unknown as MonthlyStripe);
     if (monthly.handled) oursHandled++;
+  }
+  // An order whose monthly refund is approved or running (step 4b-2) owns its cash: an external refund (Link, Dashboard)
+  // is persisted on that intent as a conflict for review, never also booked as an external refund here.
+  const owned = new Set<string>();
+  for (const refund of match ? external : []) {
+    const monthly = await reconcileMonthlyRefundForOrder(db, match!.order.id, refund.id, stripe as unknown as MonthlyStripe);
+    if (monthly.handled) owned.add(refund.id);
+  }
+  if (owned.size) {
+    logger.error('billing', 'stripe_mp_external_refund_during_monthly_refund', { orderId: match!.order.id,
+      refundIds: [...owned], action: '月付退款进行中又收到外部退款：已记为冲突，请人工核对' });
+    alert();
+    external = external.filter(refund => !owned.has(refund.id));
+    if (!external.length) return oursHandled === ours.length;
   }
   if (!external.length) return ours.length > 0 && oursHandled === ours.length;
   if (!match) {
