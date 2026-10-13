@@ -3,9 +3,18 @@ import type Stripe from 'stripe';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { resolveStripeScope } from './stripeCheckoutPersistence';
 import { recoverMethodCheckout } from './walletWebhook';
+import { freezePurchaseSnapshot } from './contracts';
+import { stripePreTaxAmount } from './purchaseFacts';
+import { recordStripeInvoiceConflict } from './stripeConflictEvidence';
+import { logger } from '../../lib/logger';
 
 const id = (value: string | { id: string } | null | undefined) => typeof value === 'string' ? value : value?.id ?? null;
-type CardSubscriptionOrder = { id: string; user_id: string; payment_method: string };
+type CardSubscriptionOrder = { id: string; user_id: string; payment_method: string; purchase_snapshot?: unknown;
+  localSubscriptionId: string | null };
+const iso = (seconds: number | null | undefined) => {
+  if (!Number.isSafeInteger(seconds) || (seconds as number) <= 0) throw new Error('PAY_WAFFO_PAYMENT_CONFLICT');
+  return new Date((seconds as number) * 1000).toISOString();
+};
 
 /** The PAY-STRIPE-MP card order behind a Stripe subscription, or null for any other subscription (legacy
  * D17 subscriptions keep their own path). Decided from our mapping or the authenticated subscription's
@@ -16,12 +25,12 @@ async function findCardOrder(db: SupabaseClient, stripe: Stripe, scope: { mercha
     .eq('merchant_namespace', scope.merchant).eq('mode', scope.mode).eq('object_type', 'subscription')
     .eq('external_id', subscriptionId).maybeSingle();
   if (ref.error) throw new Error('PAY_WAFFO_PERSISTENCE_UNAVAILABLE');
-  const query = db.from('payment_orders').select('id,user_id,payment_method').in('payment_method', ['card', 'card_cn']);
+  const query = db.from('payment_orders').select('id,user_id,payment_method,purchase_snapshot').in('payment_method', ['card', 'card_cn']);
   if (ref.data?.subscription_id) {
     const mapped = await query.eq('subscription_id', ref.data.subscription_id).eq('purchase_action', 'checkout')
       .order('created_at', { ascending: true }).limit(1).maybeSingle();
     if (mapped.error) throw new Error('PAY_WAFFO_PERSISTENCE_UNAVAILABLE');
-    return mapped.data;
+    return mapped.data ? { ...mapped.data, localSubscriptionId: ref.data.subscription_id as string } : null;
   }
   // Not mapped yet: the first invoice can arrive before checkout completion is recorded.
   const subscription = await stripe.subscriptions.retrieve(subscriptionId);
@@ -31,7 +40,7 @@ async function findCardOrder(db: SupabaseClient, stripe: Stripe, scope: { mercha
   const order = await query.eq('id', orderId).maybeSingle();
   if (order.error) throw new Error('PAY_WAFFO_PERSISTENCE_UNAVAILABLE');
   if (order.data && order.data.user_id !== subscription.metadata?.userId) throw new Error('PAY_WAFFO_PAYMENT_CONFLICT');
-  return order.data;
+  return order.data ? { ...order.data, localSubscriptionId: null } : null;
 }
 
 /** The Checkout Session that created this order's subscription: our mapping first, else a scoped search. */
@@ -47,11 +56,26 @@ async function orderCheckoutSession(db: SupabaseClient, stripe: Stripe, scope: {
   return matches[0]!.id;
 }
 
+/** A paid renewal invoice: one line, the next period, pre-tax amount (Managed Payments adds tax on top). */
+function renewalFacts(invoice: Stripe.Invoice, subscriptionId: string, snapshot: unknown) {
+  const line = invoice.lines?.data?.length === 1 && !invoice.lines.has_more ? invoice.lines.data[0] : null;
+  const taxes = (invoice.total_taxes ?? []).reduce((sum, row) => sum + (row.amount ?? 0), 0);
+  if (invoice.livemode || invoice.status !== 'paid' || invoice.currency !== 'usd' || invoice.amount_paid !== invoice.amount_due
+    || !line || id(invoice.parent?.subscription_details?.subscription) !== subscriptionId) {
+    throw new Error('PAY_WAFFO_PAYMENT_CONFLICT');
+  }
+  return { amount: stripePreTaxAmount(freezePurchaseSnapshot(snapshot), invoice.amount_paid, taxes),
+    paidAt: iso(invoice.status_transitions?.paid_at), start: iso(line.period?.start), end: iso(line.period?.end) };
+}
+
 /** Invoice events of PAY-STRIPE-MP card subscriptions. Returns false for any other invoice.
- * The first invoice (subscription_create) only confirms the first payment through the same idempotent
- * fulfillment as checkout completion, so the two events grant once in any order. Renewals, failures and
- * other invoices are handled in a later step; until then they are refused (the card gate is closed). */
-export async function handleCardSubscriptionInvoice(db: SupabaseClient, stripe: Stripe, invoiceId: string, eventType: string) {
+ * - subscription_create: confirms the first payment through the same idempotent fulfillment as checkout
+ *   completion, so the two events grant once in any order.
+ * - subscription_cycle paid: one renewal per invoice at the frozen list price (both paid events dedupe).
+ * - subscription_cycle failed: records the first failure time (founder 7-day deadline).
+ * - anything else on a card subscription (e.g. subscription_update): recorded for manual review, never granted. */
+export async function handleCardSubscriptionInvoice(db: SupabaseClient, stripe: Stripe, invoiceId: string, eventType: string,
+  eventCreated?: number) {
   const scope = await resolveStripeScope(stripe);
   const invoice = await stripe.invoices.retrieve(invoiceId);
   if (invoice.object !== 'invoice' || invoice.id !== invoiceId) throw new Error('PAY_WAFFO_PAYMENT_CONFLICT');
@@ -59,17 +83,49 @@ export async function handleCardSubscriptionInvoice(db: SupabaseClient, stripe: 
   if (!subscriptionId) return false;
   const order = await findCardOrder(db, stripe, scope, subscriptionId);
   if (!order) return false;
-  if ((eventType === 'invoice.paid' || eventType === 'invoice.payment_succeeded') && invoice.billing_reason === 'subscription_create') {
+  const paid = eventType === 'invoice.paid' || eventType === 'invoice.payment_succeeded';
+  if (paid && invoice.billing_reason === 'subscription_create') {
     await recoverMethodCheckout(db, stripe, await orderCheckoutSession(db, stripe, scope, order, subscriptionId), eventType);
     return true;
   }
-  throw new Error('PAY_STRIPE_MP_CARD_SUBSCRIPTION_NOT_READY');
+  if (invoice.billing_reason === 'subscription_cycle' && (paid || eventType === 'invoice.payment_failed')) {
+    // A renewal can only follow a recorded first payment; until then Stripe retries.
+    if (!order.localSubscriptionId) throw new Error('PAY_STRIPE_MP_FIRST_PAYMENT_PENDING');
+    const target = { p_subscription: order.localSubscriptionId, p_merchant: scope.merchant, p_invoice: invoice.id };
+    const facts = paid ? renewalFacts(invoice, subscriptionId, order.purchase_snapshot) : null;
+    const result = facts
+      ? await db.rpc('pay_stripe_mp_renew_subscription', { ...target, p_amount: facts.amount, p_currency: invoice.currency,
+        p_paid: facts.paidAt, p_start: facts.start, p_end: facts.end })
+      : await db.rpc('pay_stripe_mp_record_renewal_failure', { ...target, p_failed_at: iso(eventCreated) });
+    if (result.error) throw new Error('PAY_STRIPE_MP_RENEWAL_UNAVAILABLE', { cause: result.error });
+    if (paid && result.data?.state === 'review') {
+      logger.error('billing', 'stripe_mp_renewal_review', { orderId: result.data.orderId, reason: 'unexpected_renewal' });
+    }
+    return true;
+  }
+  if (invoice.billing_reason === 'subscription_create' && eventType === 'invoice.payment_failed') return true;
+  // Not a path we grant from (proration, manual invoice...): keep the evidence for a person to resolve.
+  await recordStripeInvoiceConflict({ db, scope, invoiceId: invoice.id, sourceOrderId: order.id });
+  logger.error('billing', 'stripe_mp_invoice_review', { orderId: order.id, billingReason: invoice.billing_reason, eventType });
+  return true;
 }
 
-/** customer.subscription.* of PAY-STRIPE-MP card subscriptions: state sync is a later step (refused until
- * then; the card gate is closed). Returns false for any other subscription. */
+/** customer.subscription.* of PAY-STRIPE-MP card subscriptions: copy only "stop at period end" (also set by the
+ * buyer on Link) and the final cancellation (failed retries, Link, data deletion). Stripe's temporary past_due
+ * is not copied, so the 24-hour renewal grace keeps working. Returns false for any other subscription. */
 export async function handleCardSubscriptionState(db: SupabaseClient, stripe: Stripe, subscriptionId: string) {
   const scope = await resolveStripeScope(stripe);
-  if (!await findCardOrder(db, stripe, scope, subscriptionId)) return false;
-  throw new Error('PAY_STRIPE_MP_CARD_SUBSCRIPTION_NOT_READY');
+  const order = await findCardOrder(db, stripe, scope, subscriptionId);
+  if (!order) return false;
+  // Created before the first payment is recorded: the first payment carries the state.
+  if (!order.localSubscriptionId) return true;
+  const subscription = await stripe.subscriptions.retrieve(subscriptionId);
+  if (subscription.object !== 'subscription' || subscription.id !== subscriptionId || subscription.livemode) {
+    throw new Error('PAY_WAFFO_PAYMENT_CONFLICT');
+  }
+  const result = await db.rpc('pay_stripe_mp_sync_subscription', { p_subscription: order.localSubscriptionId,
+    p_merchant: scope.merchant, p_cancel_at_period_end: subscription.cancel_at_period_end === true || subscription.cancel_at !== null,
+    p_canceled: subscription.status === 'canceled' || subscription.status === 'incomplete_expired' });
+  if (result.error) throw new Error('PAY_STRIPE_MP_RENEWAL_UNAVAILABLE', { cause: result.error });
+  return true;
 }

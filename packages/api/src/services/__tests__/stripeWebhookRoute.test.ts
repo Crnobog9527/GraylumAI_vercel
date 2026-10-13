@@ -62,10 +62,10 @@ describe('stripe webhook route', () => {
 
   it.each(['invoice.paid', 'invoice.payment_succeeded', 'invoice.payment_failed'])(
     'routes %s of a PAY-STRIPE-MP card subscription away from the legacy invoice path', async (type) => {
-      const event = { type, data: { object: { id: 'in_card' } } } as Stripe.Event;
+      const event = { type, created: 1791800000, data: { object: { id: 'in_card' } } } as Stripe.Event;
       walletMocks.invoice.mockResolvedValue(true);
       await handleStripeWebhookEvent({} as never, event);
-      expect(walletMocks.invoice).toHaveBeenCalledWith({}, undefined, 'in_card', type);
+      expect(walletMocks.invoice).toHaveBeenCalledWith({}, undefined, 'in_card', type, 1791800000);
       expect(stripeFulfillmentMocks.fulfillMembershipInvoice).not.toHaveBeenCalled();
       expect(stripeFulfillmentMocks.markMembershipInvoicePaymentFailed).not.toHaveBeenCalled();
       walletMocks.invoice.mockRejectedValue(new Error('PAY_STRIPE_MP_CARD_SUBSCRIPTION_NOT_READY'));

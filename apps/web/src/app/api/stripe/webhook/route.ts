@@ -36,7 +36,7 @@ export async function handleStripeWebhookEvent(
     if (await recoverMethodCheckout(supabase, getStripeClient(), event.data.object.id, event.type)) return;
   }
   if (event.type === 'invoice.paid' || event.type === 'invoice.payment_succeeded' || event.type === 'invoice.payment_failed') {
-    if (await handleCardSubscriptionInvoice(supabase, getStripeClient(), event.data.object.id, event.type)) return;
+    if (await handleCardSubscriptionInvoice(supabase, getStripeClient(), event.data.object.id, event.type, event.created)) return;
   }
   if (event.type === 'customer.subscription.created' || event.type === 'customer.subscription.updated'
     || event.type === 'customer.subscription.deleted') {
