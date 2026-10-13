@@ -151,6 +151,25 @@ export async function fusionGroupCases({db,Client,connectionString,report,create
   assert.equal(await wallet(db,erased.actor),18,'every held credit is released');
   report.checks.push('account closure before the verdict settles every group member at zero charge; no hold stays frozen');
 
+  // Verdict input hardening: NULL is rejected; after account closure a late usable verdict is refused;
+  // a call cancelled before dispatch records no_delivery and settles at zero.
+  const late = await group(db,createFixture,{n:2,credits:18});
+  const lc = await claimGroup(db,late);
+  await dispatchAll(db,late,{calls:lc.calls.slice(0,1)});
+  await assert.rejects(rpc(db,'fusion_call_verdict',late.actor,lc.calls[0].id,null),/FUSION_VERDICT_INVALID/);
+  await rpc(db,'bill2_cancel',late.actor,lc.calls[1].runId);
+  await rpc(db,'bill2_finalize',late.actor,lc.calls[1].runId);
+  const cancelled = (await db.query('SELECT fusion_verdict,settled_at,charged_delta FROM bill2_calls WHERE id=$1',[lc.calls[1].id])).rows[0];
+  assert.equal(cancelled.fusion_verdict,'no_delivery');
+  assert.notEqual(cancelled.settled_at,null);
+  await record(db,late,late.members.find(f=>f.run===lc.calls[0].runId),lc.calls[0],'0.0004');
+  await closeAccount(db,{actor:late.actor});
+  await assert.rejects(rpc(db,'fusion_call_verdict',late.actor,lc.calls[0].id,'usable'),/FUSION_VERDICT_DENIED/);
+  await rpc(db,'bill2_finalize',late.actor,lc.calls[0].runId);
+  assert.equal(await charged(db,late.runs),0,'closed account: late usable verdict refused, call settles at zero');
+  assert.equal(await wallet(db,late.actor),18);
+  report.checks.push('NULL verdict rejected; cancelled-before-dispatch call records no_delivery; late usable verdict after account closure refused');
+
   // Membership is immutable once a call exists.
   const other = await rpc(db,'fusion_group_create',exact.actor,randomUUID(),'review');
   await assert.rejects(rpc(db,'fusion_group_attach',exact.actor,other,exact.runs[0]),/FUSION_GROUP_DENIED/);

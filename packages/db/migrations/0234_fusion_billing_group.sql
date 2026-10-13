@@ -160,7 +160,7 @@ CREATE OR REPLACE FUNCTION public.fusion_call_verdict(p_actor_id uuid, p_call_id
 RETURNS text LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
 DECLARE c bill2_calls; r bill2_runs;
 BEGIN
-  IF p_verdict NOT IN ('usable','format_invalid','revision_invalid','no_delivery') THEN RAISE EXCEPTION 'FUSION_VERDICT_INVALID'; END IF;
+  IF p_verdict IS NULL OR p_verdict NOT IN ('usable','format_invalid','revision_invalid','no_delivery') THEN RAISE EXCEPTION 'FUSION_VERDICT_INVALID'; END IF;
   SELECT * INTO c FROM bill2_calls WHERE id=p_call_id FOR UPDATE;
   SELECT * INTO r FROM bill2_runs WHERE id=c.run_id AND actor_id=p_actor_id;
   IF c.id IS NULL OR r.id IS NULL OR r.fusion_group_id IS NULL OR NOT fusion_purpose(c.payload) THEN RAISE EXCEPTION 'FUSION_VERDICT_DENIED'; END IF;
@@ -169,6 +169,9 @@ BEGIN
     RETURN c.fusion_verdict;
   END IF;
   IF c.settled_at IS NOT NULL THEN RAISE EXCEPTION 'FUSION_VERDICT_DENIED'; END IF;
+  -- After account closure a new verdict may not override the zero-charge erasure path; the call row
+  -- lock serializes this with settlement, which locks the same row.
+  IF bill2_erasure_closed(p_actor_id, r.id) THEN RAISE EXCEPTION 'FUSION_VERDICT_DENIED'; END IF;
   UPDATE bill2_calls SET fusion_verdict=p_verdict WHERE id=c.id;
   RETURN p_verdict;
 END $$;
@@ -206,7 +209,13 @@ DO $$ DECLARE src text; a3 text; a4 text; BEGIN
     a4:=$x$  IF c.provider_rejected OR c.dispatched_at IS NULL OR (r.closed AND r.outcome='confirmed_failure') THEN$x$;
     IF array_length(string_to_array(src,a3),1)<>2 OR array_length(string_to_array(src,a4),1)<>2 THEN
       RAISE EXCEPTION 'FUSION_SOURCE_MISMATCH: bill2_payg_finalize'; END IF;
-    src:=replace(src,a3,$x$  IF fusion_purpose(c.payload) AND c.dispatched_at IS NOT NULL AND NOT c.provider_rejected
+    src:=replace(src,a3,$x$  -- Calls that end without a response (provider rejection, cancelled before dispatch, run closed as
+  -- confirmed failure) record the exhaustive no_delivery verdict before the existing zero-charge path.
+  IF fusion_purpose(c.payload) AND c.fusion_verdict IS NULL AND (c.provider_rejected
+   OR (c.dispatched_at IS NULL AND c.state='cancelled') OR (r.closed AND r.outcome='confirmed_failure')) THEN
+   UPDATE bill2_calls SET fusion_verdict='no_delivery' WHERE id=c.id RETURNING * INTO c;
+  END IF;
+  IF fusion_purpose(c.payload) AND c.dispatched_at IS NOT NULL AND NOT c.provider_rejected
    AND NOT (r.closed AND r.outcome='confirmed_failure') AND c.fusion_verdict IS NULL THEN
    -- Only account closure ends an unjudged call at zero charge; ordinary content deletion keeps the hold.
    IF NOT bill2_erasure_closed(a,rid) THEN CONTINUE;END IF;
