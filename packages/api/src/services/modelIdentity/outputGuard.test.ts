@@ -88,6 +88,10 @@ const SAFE = [
   '我基于 Claude 开发了一个写作工具，想推广它。',
   '作为 Google 广告投放老手，我建议你先测两版素材。',
   "I'm an Anthropic fan, but let's focus on your channel.",
+  // Review P2: occupational continuations after the model noun
+  'I am a Google AI researcher building tools for creators.',
+  'I am an OpenAI model photographer.',
+  'As a Google AI researcher, I share notes weekly.',
   BRAND_REPLY_ZH,
   BRAND_REPLY_ZH_HANT,
   BRAND_REPLY_EN,

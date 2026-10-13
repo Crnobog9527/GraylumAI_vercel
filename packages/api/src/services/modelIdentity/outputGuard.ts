@@ -12,6 +12,9 @@ const BRAND = String.raw`(?:claude|anthropic|chat\s?gpt|gpt(?:[-\s]?\d[\w.]*)?|o
   + String.raw`deepseek|深度求索|llama|meta\s?ai|mistral|grok|x\.?ai|文心一言|百度|kimi|月之暗面|豆包|字[节節]跳[动動]|位元組跳動|智[谱譜]|chatglm|glm|混元|[腾騰][讯訊]|`
   + String.raw`谷歌|微软|microsoft|copilot)`;
 const ZH_GAP = '[^。！？!?.\\n，,；;]';
+// The model noun must name the speaker: it ends the clause or continues with identity wording, so
+// "I am a Google AI researcher" or "a model photographer" stay ordinary copy (review P2).
+const ROLE_END = String.raw`\b(?=\s*(?:[,.!?;:]|$)|\s+(?:by|from|developed|trained|made|created|built|that|which|and|here)\b)`;
 // After a bare brand, an identity claim ends the clause or continues with model wording; "I am Google
 // certified", "I am Claude's biggest fan", "我是 Claude 的重度用户" are ordinary copy (review P2).
 const VERSION = String.raw`(?:[-\s]?\d[\w.]*|\s+(?:opus|sonnet|haiku|flash|pro|ultra|turbo|mini|nano|lite|max))*`;
@@ -39,12 +42,12 @@ const PATTERNS = [
   // As ChatGPT, I can help / As an AI assistant developed by OpenAI / As a GPT-4 based model (review P1)
   String.raw`\bAs\s+${BRAND}\b[^.!?\n]{0,6}?,\s*(?:I|my)\b`,
   String.raw`\bAs\s+(?:an?|the)\s+(?:[\w-]+\s+){0,4}(?:model|AI|assistant|chatbot|LLM)\b[^.!?\n]{0,40}?\b(?:by|from)\s+${BRAND}`,
-  String.raw`\bAs\s+(?:an?|the)\s+${BRAND}[\w.-]*(?:\s+[\w-]+){0,2}?\s+(?:model|AI|assistant|chatbot|LLM)\b`,
+  String.raw`\bAs\s+(?:an?|the)\s+${BRAND}[\w.-]*(?:\s+[\w-]+){0,2}?\s+(?:model|AI|assistant|chatbot|LLM)${ROLE_END}`,
   // I am Claude / I'm ChatGPT / I am called Gemini
   String.raw`\bI(?:'m|’m|\s+am)\s+(?:called\s+|actually\s+)?${BRAND}${VERSION}${EN_END}`,
   // I am a GPT-4 model / I'm an OpenAI language model / I am a Claude-based assistant. An article form needs a
   // model noun, so copy such as "I am a Google Ads specialist" stays untouched (review P2).
-  String.raw`\bI(?:'m|’m|\s+am)\s+(?:an?|the)\s+${BRAND}[\w.-]*(?:\s+[\w-]+){0,2}?\s+(?:model|AI|assistant|chatbot|LLM)\b`,
+  String.raw`\bI(?:'m|’m|\s+am)\s+(?:an?|the)\s+${BRAND}[\w.-]*(?:\s+[\w-]+){0,2}?\s+(?:model|AI|assistant|chatbot|LLM)${ROLE_END}`,
   // I am a large language model trained by Google / I'm an AI assistant made by Anthropic
   String.raw`\bI(?:'m|’m|\s+am)\s+(?:an?\s+|the\s+)?(?:[\w-]+\s+){0,4}(?:model|AI|assistant|chatbot|LLM)\b[^.!?\n]{0,40}?\b(?:by|from)\s+${BRAND}`,
   // I was trained by OpenAI / I've been developed by Anthropic
