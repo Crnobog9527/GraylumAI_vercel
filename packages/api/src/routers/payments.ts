@@ -37,7 +37,7 @@ import { STRIPE_MANAGED_ACTIVE_SUBSCRIPTION_STATUSES } from '../services/subscri
 import { addUtcCalendarMonthsClamped } from '../services/subscriptionCreditGrants';
 import { findStripeReference, resolveStripeOrderIds, loadCurrentStripeSubscription } from '../services/payments/stripeReferences';
 import { loadCurrentStripePrices } from '../services/payments/stripeCatalog';
-import { syncMethodCheckoutReturn } from '../services/payments/methodCheckoutSync';
+import { fulfillRecoveredPaidCheckout, syncMethodCheckoutReturn } from '../services/payments/methodCheckoutSync';
 import { assertCreditPackageMembership } from '../services/payments/creditPackageMembership';
 import { mapPurchaseCheckoutError } from '../services/payments/purchaseCheckoutError';
 import { createDurableStripeCheckout, resolveStripeScope } from '../services/payments/stripeCheckoutPersistence';
@@ -1253,12 +1253,7 @@ export const paymentsRouter = router({
         operation: '用户资料服务',
       });
 
-      if (!profile) {
-        throw new TRPCError({
-          code: 'NOT_FOUND',
-          message: '用户资料不存在，无法创建支付会话',
-        });
-      }
+      if (!profile) throw new TRPCError({ code: 'NOT_FOUND', message: '用户资料不存在，无法创建支付会话' });
 
       const itemId = input.kind === 'credit_package' ? input.packageId : input.planId;
       const product = await readCheckoutData<{ id: string; name: string; level?: string; is_active?: string; active?: string }>({
@@ -1294,10 +1289,10 @@ export const paymentsRouter = router({
           action: { itemType: input.kind, itemId, billingCycle: input.kind === 'credit_package' ? 'one_time' : input.billingCycle },
           appUrl,
         });
-        // A recovered paid session returns through the existing authoritative fulfillment path.
+        // A recovered paid session: wallet and card orders take their own recovery, only legacy orders the old path.
         if (session.payment_status === 'paid') {
-          if (session.mode === 'payment') await fulfillCreditPackageOrder(ctx.supabaseAdmin, session);
-          else await fulfillPaidMembershipCheckoutSession(ctx.supabaseAdmin, stripe, session);
+          await fulfillRecoveredPaidCheckout(ctx.supabaseAdmin, stripe, session, ctx.profileId, () => session.mode === 'payment'
+            ? fulfillCreditPackageOrder(ctx.supabaseAdmin, session) : fulfillPaidMembershipCheckoutSession(ctx.supabaseAdmin, stripe, session));
           return { checkoutUrl: `${appUrl}/profile?tab=subscription&checkout=success&session_id=${encodeURIComponent(session.id)}`,
             sessionId: session.id };
         }

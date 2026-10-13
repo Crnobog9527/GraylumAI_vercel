@@ -1,6 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { describe, expect, it, vi } from 'vitest';
 import { readCardPaymentEvidence, type CardOrder } from './cardPaymentEvidence';
+import { PAYMENT_EVIDENCE_CONFLICT, stripeWebhookErrorCode } from './stripeWebhookError';
 
 const scope = { merchant: 'acct_fixture', mode: 'test' as const };
 const orderId = '00000000-0000-4000-8000-000000000001';
@@ -84,17 +85,20 @@ describe('PAY-STRIPE-MP card first-payment evidence', () => {
     ['first invoice with two lines', (t: ReturnType<typeof fixture>) => { t.invoice.lines.data.push(t.invoice.lines.data[0]!); }],
   ])('refuses %s', async (_name, change) => {
     const t = fixture(); change(t);
-    await expect(t.read()).rejects.toThrow(/PAY_WAFFO_PAYMENT_CONFLICT|PAY_COMMON_RECEIPT_MISMATCH/);
+    const error = await t.read().then(() => null, (caught: unknown) => caught);
+    expect(String(error)).toMatch(/PAY_COMMON_PAYMENT_EVIDENCE_CONFLICT|PAY_COMMON_RECEIPT_MISMATCH/);
+    // The webhook raises the payment-evidence alert for every conflicting fact.
+    expect(stripeWebhookErrorCode(error)).toBe(PAYMENT_EVIDENCE_CONFLICT);
   });
   it('refuses a mainland card session with other methods, MP turned on, or a mainland card pack', async () => {
     const cn = fixture('card_cn'); cn.session.payment_method_types = ['card', 'alipay'];
-    await expect(cn.read()).rejects.toThrow('PAY_WAFFO_PAYMENT_CONFLICT');
+    await expect(cn.read()).rejects.toThrow('PAY_COMMON_PAYMENT_EVIDENCE_CONFLICT');
     const mp = fixture('card_cn'); mp.session.managed_payments = { enabled: true };
-    await expect(mp.read()).rejects.toThrow('PAY_WAFFO_PAYMENT_CONFLICT');
-    await expect(fixture('card_cn', pack).read()).rejects.toThrow('PAY_WAFFO_PAYMENT_CONFLICT');
+    await expect(mp.read()).rejects.toThrow('PAY_COMMON_PAYMENT_EVIDENCE_CONFLICT');
+    await expect(fixture('card_cn', pack).read()).rejects.toThrow('PAY_COMMON_PAYMENT_EVIDENCE_CONFLICT');
   });
   it('refuses a refunded or uncaptured pack charge', async () => {
     const t = fixture('card', pack); t.charge.amount_refunded = 940; t.charge.refunded = true;
-    await expect(t.read()).rejects.toThrow('PAY_WAFFO_PAYMENT_CONFLICT');
+    await expect(t.read()).rejects.toThrow('PAY_COMMON_PAYMENT_EVIDENCE_CONFLICT');
   });
 });
