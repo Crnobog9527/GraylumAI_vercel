@@ -15,7 +15,7 @@ import { ContentErasureDialog } from '@/components/opc/content-erasure-dialog';
 import composerStyles from '@/components/opc/work-composer.module.css';
 import workStyles from './runtime-work.module.css';
 import {
- clearForSend, forgetPending, forgetSentDraft, markPendingRestored, openingDraft, readPending, rememberPending, requestIdFor,
+ clearForSend, forgetPending, markPendingRestored, openingDraft, readPending, rememberPending, requestIdFor,
  settlePending,
 } from './send-input';
 import { QueryNotice } from '@/components/opc/query-notice';
@@ -164,7 +164,7 @@ function RuntimeWorkspace({routeSession,routeModule}:{routeSession:string;routeM
   const url=new URL(location.href),requestId=requestIdFor(url.searchParams.get('request'),readPending(localStorage,sessionId),requestInput);
   url.searchParams.set('request',requestId);history.replaceState(null,'',url);
   if(!scriptRequest)setOutgoing({text:submitted});
-  // Only the visible box empties now; the saved draft stays until the server stores the message.
+  // The box and the saved draft empty now; the sent text is kept in its own record until the server settles it.
   rememberPending(localStorage,sessionId,{requestId,text:submitted,input:requestInput},view.data?.executions as Array<{input:string|null}>|undefined);
   restoreInput=clearForSend(setInput,submitted,text=>{localStorage.setItem('opc-runtime-input:'+sessionId,text);markPendingRestored(localStorage,sessionId);});
   const admitted=await prepare.mutateAsync({sessionId,requestId,input:requestInput,selection:selected,network:'deny',sources:[]});
@@ -176,7 +176,7 @@ function RuntimeWorkspace({routeSession,routeModule}:{routeSession:string;routeM
   void utils.opc.conversations.invalidate();
   sessionStorage.removeItem('opc-runtime-send:'+sessionId);
   url.searchParams.delete('request');history.replaceState(null,'',url);
-  forgetSentDraft(localStorage,'opc-runtime-input:'+sessionId,submitted);forgetPending(localStorage,sessionId);
+  forgetPending(localStorage,sessionId);
   const executed=await execute.mutateAsync({executionId:admitted.executionId});
   if(alive.current){if('unavailable' in executed&&executed.unavailable==='capacity'){markCapacity(admitted.executionId);setError('本次必要材料超过模型输入容量。原请求和已完成内容已保留；请点“停止”后缩短材料再发送。');}await Promise.all([view.refetch(),utils.opc.conversations.invalidate()]);}
  }catch(cause){if(!alive.current)return;const gate=runtimeAdmissionNotice(cause);

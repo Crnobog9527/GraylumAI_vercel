@@ -4,11 +4,11 @@ type SetInput = (update: (current: string) => string) => void;
 /**
  * The text to show after a send that was not stored: the failed message comes back,
  * and a new draft the user started meanwhile is kept after it (neither is lost).
+ * The box and the saved draft were emptied on send, so whatever is there now was typed afterwards —
+ * even when it reads exactly like the failed text — and is never merged away.
  */
 export function restoredDraft(current: string, submitted: string) {
-  // The box was emptied on send, so anything in it now is new typing, even if it begins like the failed text.
-  if (current === '' || current === submitted) return submitted;
-  return submitted + '\n\n' + current;
+  return current === '' ? submitted : submitted + '\n\n' + current;
 }
 
 /**
@@ -24,10 +24,6 @@ export function clearForSend(setInput: SetInput, submitted: string, save: (text:
   });
 }
 
-/** Once the server stored the message, drop the saved draft only if it is still that message. */
-export function forgetSentDraft(storage: Pick<Storage, 'getItem' | 'removeItem'>, key: string, submitted: string) {
-  if (storage.getItem(key) === submitted) storage.removeItem(key);
-}
 
 type DraftStorage = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>;
 const draftKey = (sessionId: string) => 'opc-runtime-input:' + sessionId;
@@ -51,6 +47,8 @@ export function rememberPending(storage: DraftStorage, sessionId: string,
   now = Date.now()) {
   const seen = history ? history.filter(turn => turn.input === send.input).length : null;
   storage.setItem(pendingKey(sessionId), JSON.stringify({ ...send, at: now, seen }));
+  // The sent text now lives only in this record; the draft key keeps just what is typed from here on.
+  storage.removeItem(draftKey(sessionId));
 }
 
 export function forgetPending(storage: DraftStorage, sessionId: string) {
@@ -108,8 +106,8 @@ export function settlePending(storage: DraftStorage, sessionId: string,
   const pending = readPending(storage, sessionId);
   if (!pending) return;
   if (pendingWasStored(pending, history)) {
-    // Only text this page put back may be cut from the front; otherwise only an exact leftover copy goes.
-    const clean = (value: string) => pending.restored ? withoutSent(value, pending.text) : value === pending.text ? '' : value;
+    // Only text this page put back may be cut from the front; a draft typed after the send is left alone.
+    const clean = (value: string) => pending.restored ? withoutSent(value, pending.text) : value;
     // Save the draft without the sent text first; only then is the record (the request id) safe to drop.
     const saved = clean(storage.getItem(draftKey(sessionId)) ?? '');
     if (saved) storage.setItem(draftKey(sessionId), saved);

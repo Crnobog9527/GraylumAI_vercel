@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { expect, it } from 'vitest';
 import {
-  clearForSend, forgetSentDraft, markPendingRestored, openingDraft, pendingWasStored, readPending, rememberPending, requestIdFor, restoredDraft,
+  clearForSend, markPendingRestored, openingDraft, pendingWasStored, readPending, rememberPending, requestIdFor, restoredDraft,
   settlePending, withoutSent,
 } from './send-input';
 
@@ -28,20 +28,11 @@ it('keeps both the failed message and a draft typed while it was pending, and sa
   expect(saved).toEqual(['第一条消息\n\n新的草稿']);
 });
 
-it('restores the failed message even when the new draft happens to begin with it', () => {
+it('restores the failed message in front of any new draft, even one that reads the same', () => {
   expect(restoredDraft('好的，我再补充一点', '好')).toBe('好\n\n好的，我再补充一点');
   expect(restoredDraft('', '第一条消息')).toBe('第一条消息');
-  expect(restoredDraft('第一条消息', '第一条消息')).toBe('第一条消息');
-});
-
-it('drops the saved draft only while it is still the sent message', () => {
-  const saved = new Map([['k', '第一条消息']]);
-  const storage = { getItem: (k: string) => saved.get(k) ?? null, removeItem: (k: string) => { saved.delete(k); } };
-  forgetSentDraft(storage, 'k', '第一条消息');
-  expect(saved.has('k')).toBe(false);
-  saved.set('k', '新的草稿');
-  forgetSentDraft(storage, 'k', '第一条消息');
-  expect(saved.get('k')).toBe('新的草稿');
+  // The box was emptied on send, so an identical "继续" in it now is the user's next message, not a copy.
+  expect(restoredDraft('继续', '继续')).toBe('继续\n\n继续');
 });
 
 function memoryStorage() {
@@ -147,4 +138,29 @@ it('saves the draft without the sent text before dropping the record when histor
   expect(storage.map.has('opc-runtime-pending:s')).toBe(false);
   // A reload now opens only the new draft; the sent text cannot come back without its request id.
   expect(openingDraft(storage, 's')).toBe('新的草稿');
+});
+
+/** Send "继续", then type "继续" again while it is pending (updateInput saves it under the draft key). */
+function sendThenRetypeSame() {
+  const storage = memoryStorage();
+  storage.setItem('opc-runtime-input:s', '继续');
+  rememberPending(storage, 's', { requestId: 'r1', text: '继续', input: '继续' }, [], T0);
+  expect(storage.map.has('opc-runtime-input:s')).toBe(false); // the sent text now lives only in the record
+  storage.setItem('opc-runtime-input:s', '继续');
+  return storage;
+}
+
+it('keeps an identical next draft typed while a send was pending when that send is stored', () => {
+  const storage = sendThenRetypeSame();
+  const shown = { value: '继续' };
+  settlePending(storage, 's', [{ input: '继续', createdAt: at(400) }], f => { shown.value = f(shown.value); });
+  expect(shown.value).toBe('继续');
+  expect(storage.map.get('opc-runtime-input:s')).toBe('继续');
+});
+
+it('brings back both copies when that send was not stored', () => {
+  const storage = sendThenRetypeSame();
+  const box = { value: openingDraft(storage, 's') };
+  settlePending(storage, 's', [], f => { box.value = f(box.value); });
+  expect(box.value).toBe('继续\n\n继续');
 });
