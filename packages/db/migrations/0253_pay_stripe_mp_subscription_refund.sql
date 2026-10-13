@@ -5,7 +5,7 @@
 -- subscription at once (marked Graylum-initiated by the server), or restore renewal when the refund fails. Changes:
 -- - a card subscription stores no Stripe ids on its rows: its Stripe subscription is its 'subscription' reference and
 --   its first invoice its 'payment' reference; its grants carry no Stripe invoice or subscription id;
--- - a card checkout row that never took money (abandoned, expired) is not membership history;
+-- - a card checkout Stripe confirmed closed unpaid (0204 'released', abandoned or expired) is not membership history;
 -- - an international card (Managed Payments) charged the pre-tax amount plus the tax recorded for its invoice (0237):
 --   terms carry taxMinor (card orders only, 0 for a mainland card) and the refund adds it in full:
 --   refund = pre-tax - floor(pre-tax x 6%) + tax (controller 2026-10-14); "fully refunded" compares with the whole
@@ -88,9 +88,11 @@ BEGIN
  AND external_id=CASE WHEN card THEN p_terms->>'providerSubscriptionId' ELSE s.stripe_subscription_id END
  AND channel='stripe' AND mode='test' AND merchant_namespace=o.merchant_namespace)
  OR EXISTS(SELECT 1 FROM payment_provider_refs WHERE order_id=o.id AND object_type='refund')
- -- A card checkout row is created before payment; one that never took money (abandoned, expired) is not history.
+ -- A card checkout row is created before payment. Only one Stripe confirmed closed unpaid (0204 'released') is left
+ -- out of history; an open one may already be paid at Stripe before its webhook lands, so it still counts.
  OR (SELECT count(*) FROM payment_orders x WHERE x.user_id=o.user_id AND x.item_type='membership_plan'
   AND (NOT card OR x.payment_method IS NULL OR x.payment_method NOT IN ('card','card_cn')
+   OR x.qualification_state IS DISTINCT FROM 'released'
    OR x.fulfilled_at IS NOT NULL OR x.payment_status IN ('paid','refunded','partially_refunded')
    OR EXISTS(SELECT 1 FROM payment_provider_refs r WHERE r.order_id=x.id AND r.object_type IN ('payment','invoice'))))<>1
  OR (SELECT count(*) FROM user_subscriptions WHERE user_id=o.user_id)<>1

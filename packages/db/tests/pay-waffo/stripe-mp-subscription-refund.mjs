@@ -27,7 +27,8 @@ export async function stripeMpSubscriptionRefundCases({admin,service}) {
       abandoned=(await service.query(`SELECT o.* FROM pay_waffo_create_purchase($1,'membership_plan',$2,'monthly','card','standard',
         'fixture','test',$3,'terms-v1',$4) o`,[user,plan,version,JSON.stringify([{kind:'email',key_version:'test-v1',digest}])])).rows[0];
       await checkout(user,abandoned,'card');
-      await service.query(`SELECT pay_waffo_observe_qualification($1,'fixture','test',$2,'closed_unpaid',NULL,0,'usd',NULL)`,
+      // 'open': the checkout page is still open (it may already be paid at Stripe before its webhook lands).
+      if(abandonFirst!=='open') await service.query(`SELECT pay_waffo_observe_qualification($1,'fixture','test',$2,'closed_unpaid',NULL,0,'usd',NULL)`,
         [abandoned.id,`cs_${abandoned.id}`]);
     }
     const o=(await service.query(`SELECT o.* FROM pay_waffo_create_purchase($1,'membership_plan',$2,'monthly',$3,'gold_first30',
@@ -136,6 +137,12 @@ export async function stripeMpSubscriptionRefundCases({admin,service}) {
   assert.equal((await approve(p)).status,'approved');
   // Only an order that truly never took money is left out: one paid and refunded since, or one with a recorded Stripe
   // payment whatever its status says, is still membership history (not a first purchase).
+  const open=await buyer('ea'.repeat(32),'card',980,'open');
+  assert.equal((await admin.query('SELECT qualification_state FROM payment_orders WHERE id=$1',[open.abandoned])).rows[0].qualification_state,
+    'reserved');
+  await assert.rejects(()=>approve(open),/PAY_MONTHLY_HISTORY/,'a checkout Stripe has not confirmed closed unpaid');
+  assert.equal((await admin.query('SELECT qualification_state FROM payment_orders WHERE id=$1',[p.abandoned])).rows[0].qualification_state,
+    'released');
   const refunded=await buyer('e8'.repeat(32),'card',980,true);
   await admin.query("UPDATE payment_orders SET payment_status='refunded' WHERE id=$1",[refunded.abandoned]);
   await assert.rejects(()=>approve(refunded),/PAY_MONTHLY_HISTORY/,'paid and refunded');
@@ -155,5 +162,5 @@ export async function stripeMpSubscriptionRefundCases({admin,service}) {
     [{...current,card:{enabled:false},card_cn:{enabled:false},version:version+1}]);
   return ['stripe-mp-subscription-refund-tax-terms','stripe-mp-subscription-refund-held','stripe-mp-subscription-refund-cancel',
     'stripe-mp-subscription-refund-erasure-proof','stripe-mp-subscription-refund-no-fee','stripe-mp-subscription-refund-restore',
-    'stripe-mp-subscription-refund-mainland','stripe-mp-subscription-refund-abandoned','stripe-mp-subscription-refund-paid-history','stripe-mp-subscription-refund-consumption'];
+    'stripe-mp-subscription-refund-mainland','stripe-mp-subscription-refund-abandoned','stripe-mp-subscription-refund-paid-history','stripe-mp-subscription-refund-open-checkout','stripe-mp-subscription-refund-consumption'];
 }

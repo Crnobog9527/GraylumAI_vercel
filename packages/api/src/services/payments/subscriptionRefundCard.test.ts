@@ -33,12 +33,16 @@ describe('card subscription first-purchase refund evidence (PAY-STRIPE-MP)', () 
       quote: { basisMinor: 6900, feeMinor: 414, netMinor: 6486 } });
     expect(f.write).not.toHaveBeenCalled();
   });
-  it('ignores a card checkout that never took money, but not one that did', async () => {
+  it('ignores a card checkout Stripe confirmed closed unpaid, but not an open one or one that took money', async () => {
     const f = await cardFixture();
     const abandoned = { ...f.order, id: '77777777-7777-4777-8777-777777777777', status: 'expired', payment_status: 'unpaid',
-      fulfilled_at: null, subscription_id: null, payment_amount_facts: null };
+      fulfilled_at: null, subscription_id: null, payment_amount_facts: null, qualification_state: 'released' };
     f.tables.payment_orders.push(abandoned);
     expect(await previewSubscriptionRefund(f.db, f.provider, actorId, request)).toMatchObject({ status: 'eligible' });
+    // Still open: it may already be paid at Stripe before its webhook lands.
+    abandoned.qualification_state = 'reserved';
+    expect(await previewSubscriptionRefund(f.db, f.provider, actorId, request)).toMatchObject({ status: 'review_required' });
+    abandoned.qualification_state = 'released';
     abandoned.payment_status = 'paid';
     expect(await previewSubscriptionRefund(f.db, f.provider, actorId, request)).toMatchObject({ status: 'review_required' });
   });

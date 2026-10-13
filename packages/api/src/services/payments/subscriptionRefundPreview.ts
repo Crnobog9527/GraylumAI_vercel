@@ -37,8 +37,10 @@ function recordedTax(order: PreviewOrder, invoiceId: string) {
   requireEvidence(facts.length, 'PAY_REFUND_TAX_PENDING');
   return facts.reduce((sum, fact) => sum + Math.round(Number(fact.amount) * 100), 0);
 }
-// A card checkout row is created before payment; one that never took money (abandoned, expired) is not history.
-const tookMoney = (order: PreviewOrder, refs: SubscriptionRefundEvidence['refs']) => !isCard(order) || Boolean(order.fulfilled_at)
+// A card checkout row is created before payment. Only one Stripe confirmed closed unpaid (0204 'released') is left out
+// of history; an open one may already be paid at Stripe before its webhook lands, so it still counts.
+const tookMoney = (order: PreviewOrder, refs: SubscriptionRefundEvidence['refs']) => !isCard(order)
+  || order.qualification_state !== 'released' || Boolean(order.fulfilled_at)
   || ['paid', 'refunded', 'partially_refunded'].includes(order.payment_status ?? '')
   || refs.some(row => row.order_id === order.id && ['payment', 'invoice'].includes(row.object_type));
 function mapped(evidence: SubscriptionRefundEvidence, order: PreviewOrder, kind: string, key: 'order_id' | 'subscription_id', id: string) {
