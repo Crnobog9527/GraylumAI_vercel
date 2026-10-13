@@ -81,7 +81,8 @@ function RuntimeWorkspace({routeSession,routeModule}:{routeSession:string;routeM
  const choices=trpc.runtime.choices.useQuery(sessionId?{sessionId}:undefined);
  const view=trpc.runtime.view.useQuery({sessionId},{enabled:Boolean(sessionId),refetchInterval:5000});
  // A resumed turn may settle charges: re-read the balance as each streamed turn does.
- const payg=usePaygResume(()=>Promise.all([view.refetch(),utils.credits.getBalance.invalidate()]));
+ // "继续" streams too: the same execution and resume token over runtime.resumeStream (runner is declared below).
+ const payg=usePaygResume(()=>Promise.all([view.refetch(),utils.credits.getBalance.invalidate()]),undefined,token=>runner.resume(token));
  const saved=trpc.opc.workResults.useQuery({sessionId},{enabled:Boolean(sessionId&&view.data?.scope?.kind==='work_item')});
  const saveWorkResult=trpc.opc.saveWorkResult.useMutation();
  const library=trpc.opc.library.useQuery({search:'',from:null,to:null},{enabled:Boolean(sessionId&&view.data?.scope?.kind==='work_item')});
@@ -268,9 +269,10 @@ function RuntimeWorkspace({routeSession,routeModule}:{routeSession:string;routeM
  // eslint-disable-next-line react-hooks/exhaustive-deps
  },[sessionId,workItem?.workItemId,view.data,videoBusy]);
 
- async function stop(executionId:string){setError('');rememberUserStop(browserSession(),sessionId,executionId);runner.freeze(executionId);
+ async function stop(executionId:string){setError('');rememberUserStop(browserSession(),sessionId,executionId);
   setUserStops(ids=>ids.includes(executionId)?ids:[...ids,executionId]);
-  try{await cancel.mutateAsync({executionId});await view.refetch();}catch{setError('取消状态待核实，请读取原任务。');}}
+  const request=runner.freeze(executionId);
+  try{await cancel.mutateAsync(request??{executionId});await view.refetch();}catch{setError('取消状态待核实，请读取原任务。');}}
  async function recover(executionId:string){setError('');try{const executed=await runner.run(executionId);if('unavailable' in executed&&executed.unavailable==='capacity'){markCapacity(executionId);setError('原请求的必要材料超过模型输入容量，无法继续发送。已有内容已保留；请点“停止”后缩短材料再发送。');}await view.refetch();}catch{setError('暂时无法恢复，请保留原任务。');}}
  const executions=view.data?.executions as Array<{executionId:string;createdAt?:string;state:string;input:string|null;body:string|null;primaryBody:string|null;organizerComplete:boolean|null;skillExecution:boolean;needsTask:boolean;unavailableReason:string|null;historyOmitted?:boolean;contentAvailable:boolean;cursor?:number|null;epoch?:number|null;remainingCalls?:number|null}>|undefined;
  const capacitySignature=executions?.map(e=>e.executionId+':'+e.state).join('|');

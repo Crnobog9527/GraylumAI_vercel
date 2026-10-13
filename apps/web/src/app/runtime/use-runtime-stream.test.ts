@@ -69,7 +69,9 @@ describe('runStreamedExecution (runtime.executeStream on /runtime)', () => {
     const running = runStreamedExecution(live, async () => events([delta('已显示', 0)], gate,
       [delta('之后', 3), { type: 'result', result: stopped }]), ID, handlers);
     await vi.waitFor(() => expect(live.current()?.text).toBe('已显示'));
-    live.stop(ID);
+    // The stop request keeps exactly what is shown (code points) and where it came from.
+    expect(live.stop(ID)).toEqual({ executionId: ID, stopAt: 3, source: 'assistant' });
+    expect(live.stop(ID)).toBeNull();
     release();
     await expect(running).resolves.toEqual(stopped);
     expect(live.current()).toMatchObject({ text: '已显示', stopped: true });

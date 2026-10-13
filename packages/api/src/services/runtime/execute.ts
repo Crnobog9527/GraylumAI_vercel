@@ -6,7 +6,7 @@ import {billingClaimNotice,claimNoticeFields} from './claimNotice';
 import {stoppedCompletion} from './stoppedCompletion';
 import {NativeSession} from './nativeSession';
 import {NativeProgressProjection} from './nativeProgress';
-import {nativeVisible,nativeMetadata,prepareNativePrimary,nativeFrameProjection,
+import {visibleText,nativeMetadata,prepareNativePrimary,nativeFrameProjection,
  completedOutput,finalizeNativeSummary} from './nativeOutput';
 import {paygOwnerDatabase} from './paygOwner';
 import {executorRpc,historyGuard,terminalReplyGuard,recoverExecutorFinancial,
@@ -24,7 +24,7 @@ import {logger} from '../../lib/logger';
 import {recoverOpenRouterHistory,latestHistoryTurn,assertLatestHistoryRetained} from './historyRecovery';
 import {projectOpenRouterItemsForSizing} from './openRouterHistory';
 import {AGENT_TURN_REQUEST_FORMAT,validReasoningFormat,
- STREAMING_FORMATS,historyToolNames,openRouterRequestBody} from './providerRequest';
+ PLAIN_TEXT_STREAM,streamsPrimary,historyToolNames,openRouterRequestBody} from './providerRequest';
 import {cardSources, groundedCardTool, groundedCardToolBytes, rejectSeparateCardProse} from './groundedCard';
 import {agentTurnResult} from './agentTurnResult';
 import {askQuestionTool,askQuestionToolBytes,questionMessageFromArguments,QUESTION_CONTRACT} from './agentTools';
@@ -89,8 +89,10 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
   const grounded=Boolean(context.hostTurnContext?.cardContract);
   let sources=cardSources(context.input,[]);
   const native=Boolean(context.nativeOutput);
-  const nativeProgress=native&&(agentTurn||Boolean(context.envelopeOrder));
-  const projectionOptions={mode:agentTurn?'agent' as const:'message-first' as const,
+  // A plain-text stream (CHAT-NATIVE-OUTPUT) projects assistant text like an Agent turn, without cards.
+  const plainStream=context.textStream===PLAIN_TEXT_STREAM;
+  const nativeProgress=native&&(agentTurn||Boolean(context.envelopeOrder)||plainStream);
+  const projectionOptions={mode:agentTurn||plainStream?'agent' as const:'message-first' as const,
    toolMessage:agentTurn&&fiveFields&&!grounded,appendCard:Boolean(context.mentorText)};
   let projection=new NativeProgressProjection(projectionOptions);
   let primaryLength=false;
@@ -110,7 +112,7 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
   let gateRejection:GateRejection|undefined;
   const checkAgentReply=terminalReplyGuard(agentTurn,context.tools.includes(ASK_QUESTION_TOOL),()=>{terminalReplyFailure=true;},Boolean(context.skillFile));
   let preflightFailure:string|undefined;
-  const streaming=STREAMING_FORMATS.has(context.providerRequestFormat??'');
+  const streaming=streamsPrimary(context);
   // B2a: once BILL2 reports a confirmed erasure, nothing more reaches the client.
   let accountClosed=false;
   const closed=():never=>{accountClosed=true;throw new Error('RUNTIME_ACCOUNT_CLOSED');};
@@ -374,7 +376,7 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
     const fitted=prepareNativePrimary(body,turnMetadata,{envelopeOrder:context.envelopeOrder,appendCard:Boolean(context.mentorText),
       length:primaryLength,attachedOrganizer:Boolean(context.attachedOrganizer),executionId});
      body=fitted.body;turnMetadata=fitted.metadata;
-    if(nativeProgress){const final=projection.finish(nativeVisible(body));if(final)progress(final);}
+    if(nativeProgress){const final=projection.finish(visibleText(body,context));if(final)progress(final);}
     if(turn?.card&&JSON.parse(body).card)progress({type:'card',card:JSON.parse(body).card});
    }
    if(nativeProgress&&!accountClosed&&!moderationBlocked){const done=await finishStop(executionId,onProgress,undefined,execution.live);if(done)return done;}
