@@ -18,12 +18,12 @@ const stubs: Array<[(id: string) => boolean, string]> = [
     const m=()=>({isPending:false,mutate(){},mutateAsync:async()=>({})});
     // Any utils path (utils.opc.conversations.setData…) is a no-op; the list itself stays static.
     const deep=()=>new Proxy(()=>{},{get:(_,key)=>key==='then'?undefined:deep(),apply:()=>undefined});
-    export const trpc={useUtils:()=>deep(),
+    const client={account:{conversationErasure:{mutate:input=>new Promise((resolve,reject)=>
+      window.erasures.push({input,resolve,reject}))}}};
+    export const trpc={useUtils:()=>new Proxy({},{get:(_,key)=>key==='client'?client:deep()}),
       opc:{library:{useQuery:()=>q({accounts:[]})},list:{useQuery:()=>q([])},
         conversations:{useQuery:()=>q([{sessionId:'${SESSION}',title:'周末选题讨论',lastActivityAt:'2026-10-13T00:00:00Z'}])},
         workUiChange:{useMutation:m},accountUiChange:{useMutation:m}},
-      account:{conversationErasure:{useMutation:()=>({isPending:false,mutateAsync:input=>new Promise((resolve,reject)=>
-        window.erasures.push({input,resolve,reject}))})}},
       user:{getUserProfile:{useQuery:()=>q(null)}},ticket:{createTicket:{useMutation:m}}};`],
   [id => id.endsWith('/hooks/use-credits'), 'export const useCreditsBalance=()=>({data:undefined});'],
   [id => id.endsWith('/lib/supabase'), 'export const createClient=()=>({auth:{signOut:async()=>{}}});'],
@@ -54,7 +54,11 @@ beforeAll(async () => {
       if (id === entry) return `import React from 'react'; import {createRoot} from 'react-dom/client';
         import {WorkspaceFrame} from ${JSON.stringify(source)};
         window.opened=[];window.erasures=[];window.replaced=[];window.erased=[];
-        createRoot(document.getElementById('root')).render(React.createElement(WorkspaceFrame,null,'对话内容'));`;
+        const root=createRoot(document.getElementById('root'));
+        const frame=()=>React.createElement(WorkspaceFrame,null,'对话内容');
+        root.render(frame());
+        // Like leaving the page: the old frame unmounts and a new page mounts its own frame.
+        window.remount=()=>{root.render(null);setTimeout(()=>root.render(frame()),0);};`;
     } }],
     build: { write: false, minify: false, lib: { entry, name: 'FrameDeleteTest', formats: ['iife'] } },
   });
@@ -135,6 +139,17 @@ it('puts the row back with a plain reason when the server refuses, and never rep
   await ui(page.getByText('周末选题讨论')).toBeVisible();
   await ui(page.getByRole('alert')).toContainText('没有删除，已放回列表');
   expect(await page.evaluate(() => (window as unknown as Win).erased)).toEqual([]);
+}));
+
+it('keeps the row hidden and still reports a failure after the page changes mid-deletion', () => open(1280, async page => {
+  await confirmDelete(page);
+  await page.evaluate(() => (window as unknown as { remount: () => void }).remount());
+  await ui(page.getByText('对话内容')).toBeAttached();
+  await ui(page.getByText('查看归档')).toBeVisible();
+  await ui(page.getByText('周末选题讨论')).toHaveCount(0);
+  await answer(page, false, 'CONTENT_ERASURE_BUSY');
+  await ui(page.getByText('周末选题讨论')).toBeVisible();
+  await ui(page.getByRole('alert')).toContainText('没有删除，已放回列表');
 }));
 
 it('keeps an uncertain result honest: row back, list resynced, no success claim', () => open(1280, async page => {

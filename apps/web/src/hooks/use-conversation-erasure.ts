@@ -1,57 +1,56 @@
 'use client';
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-import { useCallback, useRef, useState } from 'react';
+import { useCallback } from 'react';
 import { trpc } from '@/trpc/client';
 import { useAfterContentErasure } from '@/hooks/use-content-erasure';
-import { runConversationErasure, type ConversationNotice } from '@/lib/conversation-erasure';
+import { runConversationErasure } from '@/lib/conversation-erasure';
+import { useConversationErasureStore } from '@/stores/conversation-erasure';
 
 type Row = { sessionId: string; title: string; lastActivityAt: string };
+/** Rows taken out of the cached list, so a failure can put them back where they were. */
+const removed = new Map<string, { row: Row; index: number }>();
 
 /**
- * Instant whole-conversation deletion (Owner 2026-10-13). Rows being deleted stay hidden even if a
- * list refetch that started earlier comes back with them; a failure shows them again.
+ * Instant whole-conversation deletion (Owner 2026-10-13). The pending rows and the result notice
+ * live in a page-independent store, and the call uses the plain client, so leaving the deleted
+ * conversation's page neither brings the row back nor loses a late failure.
  */
 export function useConversationErasure(leave: (sessionId: string) => void) {
   const utils = trpc.useUtils();
   const afterErasure = useAfterContentErasure();
-  const mutation = trpc.account.conversationErasure.useMutation();
-  const [hidden, setHidden] = useState<ReadonlySet<string>>(() => new Set());
-  const [notice, setNotice] = useState<ConversationNotice | null>(null);
-  const removed = useRef(new Map<string, { row: Row; index: number }>());
+  const hidden = useConversationErasureStore((state) => state.hidden);
+  const notice = useConversationErasureStore((state) => state.notice);
 
   const erase = useCallback((sessionId: string) => {
+    const store = useConversationErasureStore.getState();
     void utils.opc.conversations.cancel();
     return runConversationErasure({
       hide: (id) => {
-        setHidden((current) => new Set(current).add(id));
+        store.hide(id);
         const rows = utils.opc.conversations.getData();
         const index = rows?.findIndex((row) => row.sessionId === id) ?? -1;
-        if (rows && index >= 0) removed.current.set(id, { row: rows[index], index });
+        if (rows && index >= 0) removed.set(id, { row: rows[index], index });
         utils.opc.conversations.setData(undefined, (current) => current?.filter((row) => row.sessionId !== id));
       },
       restore: (id) => {
-        const saved = removed.current.get(id);
-        removed.current.delete(id);
+        const saved = removed.get(id);
+        removed.delete(id);
         if (saved) {
           utils.opc.conversations.setData(undefined, (current) => !current || current.some((row) => row.sessionId === id)
             ? current : [...current.slice(0, saved.index), saved.row, ...current.slice(saved.index)]);
         }
-        setHidden((current) => {
-          const next = new Set(current);
-          next.delete(id);
-          return next;
-        });
+        store.show(id);
       },
       leave,
-      erase: (id) => mutation.mutateAsync({ sessionId: id }),
+      erase: (id) => utils.client.account.conversationErasure.mutate({ sessionId: id }),
       afterErased: (id) => {
-        removed.current.delete(id);
+        removed.delete(id);
         void afterErasure({ kind: 'session', id });
       },
       resync: () => { void utils.opc.conversations.invalidate(); },
-      notify: setNotice,
+      notify: store.setNotice,
     }, sessionId);
-  }, [utils, afterErasure, mutation, leave]);
+  }, [utils, afterErasure, leave]);
 
-  return { hidden, notice, erase, dismissNotice: () => setNotice(null) };
+  return { hidden, notice, erase };
 }
