@@ -80,7 +80,8 @@ async function accounts() {
 
 async function authUrl(platform, externalId) {
   const r = await call('POST', '/social-accounts/auth-url', {
-    platform, external_id: externalId ?? 'graylum-probe', permissions: ['posts', 'feeds'],
+    // Analytics-only scope. Publishing scope is a separate consent and is not requested by this probe.
+    platform, external_id: externalId ?? 'graylum-probe', permissions: ['feeds'],
   });
   // The URL is a consent link for the Owner's own test account; print host only.
   const url = r.json?.url ? new URL(r.json.url).host : null;

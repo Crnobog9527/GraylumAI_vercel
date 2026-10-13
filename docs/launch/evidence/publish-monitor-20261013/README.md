@@ -1,7 +1,9 @@
 # PUBLISH-MONITOR 开工前实测记录：Post for Me（2026-10-13）
 
-**结论：1 美元预算内无法做真实调用，实测已停下并报告总控，没有注册、没有付费。实际花费 0 美元。**
-（2026-10-13 更新：Owner 按选项 A 自行订阅 1 个月 10 美元标准套餐，密钥到位后再做真实调用，不往任何社媒发布，结果补在本文件。）
+**结论（2026-10-13 最终）**：Post for Me 必须付费订阅才能拿到密钥，1 美元预算内做不了，先停下报告总控；
+之后 Owner 按选项 A 自己订阅 1 个月 10 美元标准套餐并配置密钥，我做了只读真实调用（第 4 节），没有发布任何内容。
+**花费：10 美元套餐月费（Owner 支付，测完当月取消）；实测调用没有额外费用。**
+已实测：接口连通、错误格式、限流、授权链接、X 和 YouTube 读取；未实测：其余 7 个平台、授权失效、发布、读取是否计费和超额自动升级。
 第 1–3 节是公开文档、条款和开源代码的核对；第 4 节是 Owner 订阅后的只读真实调用结果，没有实测的项目在第 4.4 节逐项标出。
 
 ## 1. 为什么停下
@@ -28,7 +30,7 @@ Post for Me 是开源的（[DayMoonDevelopment/post-for-me](https://github.com/D
   "90 天趋势"只能由 Graylum 每天自己存快照，从用户连接那天开始积累，不能回补连接之前的每日变化。
   例外：Pinterest 同时返回 `90d` 和 `lifetime` 两组数；Facebook 按发布日起 90 天窗口取 insights，最多回看 2 年。
 - 只能读**用户自己授权连接的账号**；没有读别人公开账号的接口。Gold 的"对标账号监控"不能靠 Post for Me，要用 TikHub（RESEARCH-TOOLS）。
-- 用户授权时要请求 `permissions: ["posts", "feeds"]`，否则读不到作品数据；接口本身不检查有没有 feeds 权限，缺权限时表现为数据缺失或空列表。
+- 用户授权时 `permissions` 里要包含 `feeds`，否则读不到作品数据（只读数据时只请求 `feeds`，发布权限另行授权）；接口本身不检查有没有 feeds 权限，缺权限时表现为数据缺失或空列表。
 
 | 平台 | 每页最多 | 主要指标字段（代码里的名字） | 注意 |
 | --- | --- | --- | --- |
@@ -127,7 +129,7 @@ Redirect URL 留空。脚本 `postforme-probe.mjs`，北京时间 16:13–16:15�
 
 ### 4.3 生成授权链接（PASS）
 
-`POST /v1/social-accounts/auth-url`，`permissions: ["posts","feeds"]`：YouTube 返回 201，链接指向 `accounts.google.com`；X 返回 201，链接指向 `x.com`。
+`POST /v1/social-accounts/auth-url`（当时请求的是 `["posts","feeds"]`，链接没有被打开、没有授权；脚本此后改为只请求 `feeds`）：YouTube 返回 201，链接指向 `accounts.google.com`；X 返回 201，链接指向 `x.com`。
 链接本身没有记录（属于一次性授权地址）。
 
 ### 4.4 连接账号后读作品数据（Owner 在后台自己连接，勾选 posts + feeds；北京时间 16:15–16:18）
@@ -159,7 +161,7 @@ Redirect URL 留空。脚本 `postforme-probe.mjs`，北京时间 16:13–16:15�
 
 ## 5. 测试脚本用法
 
-脚本 [`postforme-probe.mjs`](postforme-probe.mjs) 只调用读接口和"生成授权链接"，代码里写死拒绝发布接口；不打印密钥、不输出作品文字和素材地址。
+脚本 [`postforme-probe.mjs`](postforme-probe.mjs) 只调用读接口和"生成授权链接"（只请求读数据权限 `feeds`，不请求发布权限），代码里写死拒绝发布接口；不打印密钥、不输出作品文字和素材地址。
 
 ```bash
 node docs/launch/evidence/publish-monitor-20261013/postforme-probe.mjs accounts
