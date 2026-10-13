@@ -18,3 +18,10 @@ export async function syncMethodCheckoutReturn(db: SupabaseClient, stripe: Strip
     orderStatus: synced.data.status ? normalizePaymentOrderStatus(synced.data.status) : null,
     fulfilledAt: (synced.data.fulfilled_at as string | null) ?? null, stripeSubscriptionId: null, stripeInvoiceId: null };
 }
+
+/** A paid session found again by a new checkout request: wallet and card orders take their own recovery
+ * (the legacy validators refuse discounted or taxed Managed Payments invoices); only legacy orders run `legacy`. */
+export async function fulfillRecoveredPaidCheckout(db: SupabaseClient, stripe: Stripe, session: Stripe.Checkout.Session,
+  userId: string, legacy: () => Promise<unknown>) {
+  if (!await syncMethodCheckoutReturn(db, stripe, session, userId)) await legacy();
+}

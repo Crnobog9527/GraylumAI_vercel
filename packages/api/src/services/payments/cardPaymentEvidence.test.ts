@@ -1,6 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { describe, expect, it, vi } from 'vitest';
 import { readCardPaymentEvidence, type CardOrder } from './cardPaymentEvidence';
+import { PAYMENT_EVIDENCE_CONFLICT, stripeWebhookErrorCode } from './stripeWebhookError';
 
 const scope = { merchant: 'acct_fixture', mode: 'test' as const };
 const orderId = '00000000-0000-4000-8000-000000000001';
@@ -43,20 +44,20 @@ function fixture(method: 'card' | 'card_cn' = 'card', snapshot: Record<string, u
 
 describe('PAY-STRIPE-MP card first-payment evidence', () => {
   it('reads a paid first month from the subscription\'s first invoice and the Stripe period', async () => {
-    await expect(fixture().read()).resolves.toEqual({ paymentId: 'in_1', checkoutId: 'cs_1', amount: 4900, currency: 'usd',
+    await expect(fixture().read()).resolves.toEqual({ paymentId: 'in_1', checkoutId: 'cs_1', amount: 4900, tax: 0, currency: 'usd',
       paidAt: '2026-10-12T08:42:40.000Z',
       subscription: { id: 'sub_1', start: '2026-10-12T08:42:34.000Z', end: '2026-11-12T08:42:34.000Z' } });
     await expect(fixture('card_cn').read()).resolves.toMatchObject({ amount: 4900, subscription: { id: 'sub_1' } });
   });
-  it('compares pre-tax amounts: tax Managed Payments adds on top is excluded', async () => {
+  it('compares pre-tax amounts and returns the tax Managed Payments adds on top separately', async () => {
     const t = fixture();
     t.session.amount_total = 5880; t.session.total_details = { amount_tax: 980 };
     t.invoice.amount_due = 5880; t.invoice.amount_paid = 5880; t.invoice.total_taxes = [{ amount: 980 }];
-    await expect(t.read()).resolves.toMatchObject({ amount: 4900 });
+    await expect(t.read()).resolves.toMatchObject({ amount: 4900, tax: 980 });
     const p = fixture('card', pack);
     p.session.amount_total = 1128; p.session.total_details = { amount_tax: 188 };
     p.intent.amount_received = 1128; p.charge.amount_captured = 1128;
-    await expect(p.read()).resolves.toEqual({ paymentId: 'pi_1', checkoutId: 'cs_1', amount: 940, currency: 'usd',
+    await expect(p.read()).resolves.toEqual({ paymentId: 'pi_1', checkoutId: 'cs_1', amount: 940, tax: 188, currency: 'usd',
       paidAt: '2026-10-12T08:42:40.000Z', subscription: null });
   });
   it('takes the paid term from the first invoice even after the subscription has renewed', async () => {
@@ -84,17 +85,20 @@ describe('PAY-STRIPE-MP card first-payment evidence', () => {
     ['first invoice with two lines', (t: ReturnType<typeof fixture>) => { t.invoice.lines.data.push(t.invoice.lines.data[0]!); }],
   ])('refuses %s', async (_name, change) => {
     const t = fixture(); change(t);
-    await expect(t.read()).rejects.toThrow(/PAY_WAFFO_PAYMENT_CONFLICT|PAY_COMMON_RECEIPT_MISMATCH/);
+    const error = await t.read().then(() => null, (caught: unknown) => caught);
+    expect(String(error)).toMatch(/PAY_COMMON_PAYMENT_EVIDENCE_CONFLICT|PAY_COMMON_RECEIPT_MISMATCH/);
+    // The webhook raises the payment-evidence alert for every conflicting fact.
+    expect(stripeWebhookErrorCode(error)).toBe(PAYMENT_EVIDENCE_CONFLICT);
   });
   it('refuses a mainland card session with other methods, MP turned on, or a mainland card pack', async () => {
     const cn = fixture('card_cn'); cn.session.payment_method_types = ['card', 'alipay'];
-    await expect(cn.read()).rejects.toThrow('PAY_WAFFO_PAYMENT_CONFLICT');
+    await expect(cn.read()).rejects.toThrow('PAY_COMMON_PAYMENT_EVIDENCE_CONFLICT');
     const mp = fixture('card_cn'); mp.session.managed_payments = { enabled: true };
-    await expect(mp.read()).rejects.toThrow('PAY_WAFFO_PAYMENT_CONFLICT');
-    await expect(fixture('card_cn', pack).read()).rejects.toThrow('PAY_WAFFO_PAYMENT_CONFLICT');
+    await expect(mp.read()).rejects.toThrow('PAY_COMMON_PAYMENT_EVIDENCE_CONFLICT');
+    await expect(fixture('card_cn', pack).read()).rejects.toThrow('PAY_COMMON_PAYMENT_EVIDENCE_CONFLICT');
   });
   it('refuses a refunded or uncaptured pack charge', async () => {
     const t = fixture('card', pack); t.charge.amount_refunded = 940; t.charge.refunded = true;
-    await expect(t.read()).rejects.toThrow('PAY_WAFFO_PAYMENT_CONFLICT');
+    await expect(t.read()).rejects.toThrow('PAY_COMMON_PAYMENT_EVIDENCE_CONFLICT');
   });
 });

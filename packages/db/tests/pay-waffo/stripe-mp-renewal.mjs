@@ -45,8 +45,10 @@ export async function stripeMpRenewalCases({admin,service,connect}) {
     assert.equal(m.mapping_state,'internal_paid',JSON.stringify(m)); assert.ok(m.renewal_grace_until,'grace applies');
   }
   // A failure is recorded once (Stripe's later retries do not move it) and does not break the grace.
+  // Reverse delivery: a later retry processed first, then the original failure; the earliest one wins.
   const failedAt=new Date(card.end.getTime()+3600000);
-  await fail(card,failedAt); await fail(card,new Date(failedAt.getTime()+1800000));
+  await fail(card,new Date(failedAt.getTime()+1800000)); await fail(card,failedAt);
+  await fail(card,new Date(failedAt.getTime()+2700000));
   assert.equal((await sub(card)).founder_failed_at.toISOString(),failedAt.toISOString());
   assert.equal((await sub(card)).status,'active','past_due is never copied');
   assert.equal((await facts(card.user)).mapping_state,'internal_paid');
@@ -59,8 +61,11 @@ export async function stripeMpRenewalCases({admin,service,connect}) {
   const ok=results.filter(r=>r.status==='fulfilled').map(r=>r.value.rows[0].v);
   assert.equal(ok.filter(v=>v.duplicate===false).length,1,JSON.stringify(results.map(r=>r.reason?.message??r.value.rows[0].v)));
   assert.equal((await renew(service,card)).rows[0].v.duplicate,true,'invoice.paid then invoice.payment_succeeded');
-  const renewed=(await admin.query(`SELECT amount_total,purchase_snapshot,payment_method,stripe_managed_payments,offer_kind
+  const renewed=(await admin.query(`SELECT id,amount_total,purchase_snapshot,payment_method,stripe_managed_payments,offer_kind
     FROM payment_orders WHERE subscription_id=$1 AND source_order_id IS NOT NULL`,[card.sub])).rows;
+  // The renewal invoice's Managed Payments tax is recorded on the renewal order (0237 pay_stripe_mp_record_tax).
+  const renewalTax=()=>service.query(`SELECT pay_stripe_mp_record_tax($1,'fixture',$2,1380) v`,[renewed[0].id,`in_renew_${card.o.id.slice(0,8)}`]);
+  assert.equal((await renewalTax()).rows[0].v.duplicate,false); assert.equal((await renewalTax()).rows[0].v.duplicate,true);
   assert.equal(renewed.length,1);
   assert.deepEqual([renewed[0].amount_total,renewed[0].purchase_snapshot.price,renewed[0].purchase_snapshot.discount,
     renewed[0].payment_method,renewed[0].stripe_managed_payments,renewed[0].offer_kind],[6900,'69.00','0.00','card',true,'standard']);
@@ -126,8 +131,8 @@ export async function stripeMpRenewalCases({admin,service,connect}) {
   await service.query('SET ROLE service_role');
   await admin.query("UPDATE system_settings SET value=$1 WHERE key='payment_method_routes'",
     [{...current,card:{enabled:false},card_cn:{enabled:false},version:version+1}]);
-  return ['stripe-mp-grace-card-and-card-cn','stripe-mp-failure-recorded-once','stripe-mp-past-due-keeps-grace',
-    'stripe-mp-renewal-list-price-not-first-month','stripe-mp-renewal-pre-tax-only','stripe-mp-renewal-once-concurrently',
+  return ['stripe-mp-grace-card-and-card-cn','stripe-mp-failure-recorded-once','stripe-mp-failure-earliest-out-of-order','stripe-mp-past-due-keeps-grace',
+    'stripe-mp-renewal-list-price-not-first-month','stripe-mp-renewal-pre-tax-only','stripe-mp-renewal-tax-recorded','stripe-mp-renewal-once-concurrently',
     'stripe-mp-renewal-clears-failure','stripe-mp-next-charge-date','stripe-mp-one-order-per-period','stripe-mp-stop-ends-grace',
     'stripe-mp-cancel-permanent','stripe-mp-cancel-resets-cached-level','stripe-mp-cancel-keeps-remaining-level','stripe-mp-erasure-renewing-follows-stop','stripe-mp-charge-after-cancel-review','stripe-mp-founder-card-cn-deadline','stripe-mp-founder-renewal','stripe-mp-renewal-scope'];
 }

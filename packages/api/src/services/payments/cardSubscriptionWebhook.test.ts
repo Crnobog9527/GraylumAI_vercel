@@ -56,19 +56,24 @@ describe('PAY-STRIPE-MP card subscription webhooks', () => {
   });
   it('refuses a subscription whose metadata names another owner', async () => {
     const f = fixture({ order: cardOrder }, { orderId, userId: 'someone-else' });
-    await expect(handleCardSubscriptionInvoice(f.db, f.stripe, 'in_1', 'invoice.paid')).rejects.toThrow('PAY_WAFFO_PAYMENT_CONFLICT');
+    await expect(handleCardSubscriptionInvoice(f.db, f.stripe, 'in_1', 'invoice.paid')).rejects.toThrow('PAY_COMMON_PAYMENT_EVIDENCE_CONFLICT');
     expect(mocks.recover).not.toHaveBeenCalled();
   });
   it('renews a paid cycle invoice at the pre-tax amount for the invoice period, for both paid events', async () => {
     const f = fixture({ subscriptionRef: { subscription_id: 'local_sub' }, order: { ...cardOrder, purchase_snapshot: firstMonth } });
     Object.assign(f.invoice, renewal({ amount_paid: 8280, amount_due: 8280, total_taxes: [{ amount: 1380 }] }));
+    f.rpc.mockImplementation(async (name: string) => ({ error: null,
+      data: name === 'pay_stripe_mp_renew_subscription' ? { state: 'fulfilled', orderId: 'renewal_order' } : { duplicate: false } }));
     for (const type of ['invoice.paid', 'invoice.payment_succeeded']) {
       await expect(handleCardSubscriptionInvoice(f.db, f.stripe, 'in_1', type)).resolves.toBe(true);
     }
-    expect(f.rpc).toHaveBeenCalledTimes(2);
-    expect(f.rpc).toHaveBeenLastCalledWith('pay_stripe_mp_renew_subscription', { p_subscription: 'local_sub', p_merchant: 'fixture',
+    expect(f.rpc).toHaveBeenCalledTimes(4);
+    expect(f.rpc).toHaveBeenCalledWith('pay_stripe_mp_renew_subscription', { p_subscription: 'local_sub', p_merchant: 'fixture',
       p_invoice: 'in_1', p_amount: 6900, p_currency: 'usd', p_paid: '2026-11-12T09:42:40.000Z',
       p_start: '2026-11-12T08:42:34.000Z', p_end: '2026-12-12T08:42:34.000Z' });
+    // The tax on top of the list price is recorded on the renewal order (the database dedupes the second event).
+    expect(f.rpc).toHaveBeenLastCalledWith('pay_stripe_mp_record_tax', { p_order: 'renewal_order', p_merchant: 'fixture',
+      p_payment: 'in_1', p_tax: 1380 });
     expect(mocks.recover).not.toHaveBeenCalled();
   });
   it('stops renewal at Stripe and confirms it when a renewal is kept for review', async () => {
