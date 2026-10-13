@@ -141,9 +141,10 @@ export async function callTikhub(call: TikhubCall, deps: VendorDeps): Promise<Re
     return { ...base, outcome: 'failed', reason: `HTTP_${answer.status}`, httpStatus: answer.status,
       supplierMayCharge: false, usage: { unit: 'call', units: '0' } };
   }
+  // A 200 whose body cannot be read is indeterminate: it may be a billed delivery. Never resend it.
   if (answer.kind === 'unreadable') {
-    return { ...base, outcome: 'failed', reason: answer.reason, httpStatus: 200, supplierMayCharge: true,
-      usage: { unit: 'call', units: '1' } };
+    return { ...base, outcome: 'unknown', reason: answer.reason, httpStatus: 200, supplierMayCharge: true,
+      usage: { unit: 'call', units: null } };
   }
   const code = tikhubBodyCode(answer.json);
   if (code !== 200) {
@@ -153,7 +154,7 @@ export async function callTikhub(call: TikhubCall, deps: VendorDeps): Promise<Re
   const all = normalizeTikhub(answer.json, call.platform, call.kind);
   // A recognized empty post list is a real, billed "no results" answer. A missing profile or an
   // unrecognized payload is not a delivery and is never reported as a successful, billable result.
-  if (all.length === 0 && call.kind !== 'account_profile' && hasEmptyPostList(answer.json, call.platform)) {
+  if (all.length === 0 && call.kind !== 'account_profile' && hasEmptyPostList(answer.json, call.platform, call.kind)) {
     return { ...base, outcome: 'ok', reason: 'NO_RESULTS', httpStatus: 200, supplierMayCharge: true, usage: { unit: 'call', units: '1' } };
   }
   if (all.length === 0) {

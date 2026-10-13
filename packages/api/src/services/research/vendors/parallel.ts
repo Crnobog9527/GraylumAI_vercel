@@ -62,8 +62,9 @@ export async function callParallel(query: string, deps: VendorDeps, mode: Parall
     return { ...base, outcome: 'unknown', reason: answer.reason, httpStatus: null, supplierMayCharge: true,
       usage: { unit: 'sku_search', units: null } };
   }
+  // A 200 whose body cannot be read is indeterminate (possibly billed); other statuses are confirmed failures.
   if (answer.kind === 'unreadable') {
-    return { ...base, outcome: 'failed', reason: answer.reason, httpStatus: answer.status,
+    return { ...base, outcome: answer.status === 200 ? 'unknown' : 'failed', reason: answer.reason, httpStatus: answer.status,
       supplierMayCharge: answer.status === 200, usage: { unit: 'sku_search', units: null } };
   }
   const results = (answer.json as { results?: unknown } | null)?.results;

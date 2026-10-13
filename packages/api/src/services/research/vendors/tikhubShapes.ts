@@ -161,19 +161,30 @@ export function normalizeTikhub(json: unknown, platform: SocialPlatform, kind: S
   }
 }
 
-/** List containers each platform uses for posts; an empty one is a real "no results" answer. */
-const POST_LIST_KEYS: Record<SocialPlatform, readonly string[]> = {
-  douyin: ['aweme_list', 'data'], tiktok: ['aweme_list', 'search_item_list', 'data'], xiaohongshu: ['items', 'notes'],
-  bilibili: [], weibo: ['statuses', 'list'], youtube: ['videos', 'contents', 'items'], x: ['timeline', 'tweets', 'entries'],
-  instagram: ['items', 'edges'],
+/**
+ * Exact paths where each route's post list lives. Only an empty array at one of these paths is a real
+ * "no results" answer; RT-7 confirms them against recorded responses before a platform is verified.
+ */
+const EMPTY_LIST_PATHS: Partial<Record<`${SocialPlatform}:${SocialKind}`, readonly string[]>> = {
+  'douyin:keyword_posts': ['data.data', 'data.business_data'],
+  'xiaohongshu:keyword_posts': ['data.items', 'data.data.items'],
+  'weibo:account_posts': ['data.statuses', 'data.data.statuses', 'data.data.list'],
+  'tiktok:keyword_posts': ['data.search_item_list', 'data.data'],
+  'tiktok:account_posts': ['data.aweme_list'],
+  'youtube:keyword_posts': ['data.videos', 'data.contents'],
+  'youtube:account_posts': ['data.videos', 'data.contents'],
+  'x:keyword_posts': ['data.timeline', 'data.tweets'],
+  'x:account_posts': ['data.timeline', 'data.tweets'],
+  'instagram:account_posts': ['data.items', 'data.data.items'],
 };
 
-/** True when the body holds a recognized, empty post list (as opposed to a missing or changed shape). */
-export function hasEmptyPostList(json: unknown, platform: SocialPlatform): boolean {
-  const data = (json as Raw | null)?.data;
-  if (Array.isArray(data)) return data.length === 0;
-  const keys = POST_LIST_KEYS[platform];
-  return findAll(data, o => keys.some(key => Array.isArray(o[key]) && (o[key] as unknown[]).length === 0), 1).length > 0;
+/** True when the route's own list path holds an empty array (as opposed to a missing or changed shape). */
+export function hasEmptyPostList(json: unknown, platform: SocialPlatform, kind: SocialKind): boolean {
+  const paths = EMPTY_LIST_PATHS[`${platform}:${kind}`] ?? [];
+  return paths.some(path => {
+    const value = path.split('.').reduce<unknown>((node, key) => (node as Raw | null)?.[key], json);
+    return Array.isArray(value) && value.length === 0;
+  });
 }
 
 /** TikHub reports failures in the body: HTTP 200 with a non-200 `code` is a failure it may still bill. */

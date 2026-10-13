@@ -51,7 +51,8 @@ export function timestamp(value: unknown, paths: readonly string[]): string | un
   } else if (typeof found === 'string' && /\d{4}/.test(found)) {
     ms = Date.parse(found);
   }
-  if (ms === undefined || !Number.isFinite(ms) || ms <= 0) return undefined;
+  // Beyond ±8.64e15 ms a Date is invalid and toISOString() would throw; treat it as missing.
+  if (ms === undefined || !Number.isFinite(ms) || ms <= 0 || ms > 8.64e15) return undefined;
   return new Date(ms).toISOString();
 }
 

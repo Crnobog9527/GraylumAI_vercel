@@ -108,12 +108,25 @@ describe('callTikhub', () => {
   });
 
   it('keeps a recognized empty list as a successful, billed no-results answer', async () => {
-    const empty = await callTikhub({ platform: 'tiktok', kind: 'keyword_posts', keyword: 'zzzz' },
+    const empty = await callTikhub({ platform: 'tiktok', kind: 'account_posts', account: 'quiet' },
       deps(jsonFetch(200, { code: 200, data: { aweme_list: [] } })));
     expect(empty).toMatchObject({ outcome: 'ok', reason: 'NO_RESULTS', items: [], usage: { units: '1' } });
     const weibo = await callTikhub({ platform: 'weibo', kind: 'account_posts', account: '1' },
       deps(jsonFetch(200, { code: 200, data: { data: { statuses: [] } } })));
     expect(weibo).toMatchObject({ outcome: 'ok', reason: 'NO_RESULTS' });
+    const unrelated = await callTikhub({ platform: 'tiktok', kind: 'keyword_posts', keyword: 'zzzz' },
+      deps(jsonFetch(200, { code: 200, data: { metadata: { data: [] } } })));
+    expect(unrelated).toMatchObject({ outcome: 'failed', reason: 'EMPTY_OR_UNRECOGNIZED' });
+  });
+
+  it('reports an unreadable 200 as unknown (possibly billed, never resent) and out-of-range dates as missing', async () => {
+    expect(await callTikhub({ platform: 'x', kind: 'account_profile', account: 'NASA' }, deps(jsonFetch(200, '<html>'))))
+      .toMatchObject({ outcome: 'unknown', reason: 'RESPONSE_NOT_JSON', usage: { units: null }, supplierMayCharge: true });
+    expect(await callTikhub({ platform: 'x', kind: 'account_profile', account: 'NASA' }, deps(jsonFetch(502, '<html>'))))
+      .toMatchObject({ outcome: 'failed', reason: 'HTTP_502' });
+    const result = await callTikhub({ platform: 'tiktok', kind: 'account_posts', account: 'natgeo' },
+      deps(jsonFetch(200, { code: 200, data: { aweme_list: [awemeItem('1', { create_time: 1e20 })] } })));
+    expect(result.items[0].missing).toContain('publishedAt');
   });
 
   it('reports an empty or unrecognized payload as a failed delivery, never as a billable success', async () => {

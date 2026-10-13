@@ -61,8 +61,9 @@ export async function callFirecrawl(rawUrl: string, deps: VendorDeps): Promise<R
     return { ...base, outcome: 'unknown', reason: answer.reason, httpStatus: null, supplierMayCharge: true,
       usage: { unit: 'credit', units: null } };
   }
+  // A 200 whose body cannot be read is indeterminate (possibly billed); other statuses are confirmed failures.
   if (answer.kind === 'unreadable') {
-    return { ...base, outcome: 'failed', reason: answer.reason, httpStatus: answer.status,
+    return { ...base, outcome: answer.status === 200 ? 'unknown' : 'failed', reason: answer.reason, httpStatus: answer.status,
       supplierMayCharge: answer.status === 200, usage: { unit: 'credit', units: null } };
   }
   const json = answer.json as { success?: unknown } | null;

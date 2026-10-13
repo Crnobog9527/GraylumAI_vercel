@@ -65,7 +65,9 @@ describe('callParallel', () => {
       .toMatchObject({ outcome: 'failed', reason: 'HTTP_401', supplierMayCharge: false });
     expect(await callParallel('q', deps(hangingFetch()))).toMatchObject({ outcome: 'unknown', reason: 'TIMEOUT', usage: { units: null } });
     expect(await callParallel('q', deps(jsonFetch(200, 'not json'))))
-      .toMatchObject({ outcome: 'failed', reason: 'RESPONSE_NOT_JSON', supplierMayCharge: true });
+      .toMatchObject({ outcome: 'unknown', reason: 'RESPONSE_NOT_JSON', supplierMayCharge: true });
+    expect(await callParallel('q', deps(jsonFetch(500, 'oops'))))
+      .toMatchObject({ outcome: 'failed', reason: 'RESPONSE_NOT_JSON', supplierMayCharge: false });
   });
 });
 
