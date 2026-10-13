@@ -59,7 +59,8 @@ it('admits an allowed message of a user without a positioning, judged exactly on
   const result = await prepare(f) as { payload: Record<string, unknown> };
   // The fixture model row has no OpenRouter key; the classifier gets the same row's key (none) without another read.
   expect(f.classify).toHaveBeenCalledExactlyOnceWith({ text: f.input.input, apiKey: undefined });
-  expect(result.payload).not.toHaveProperty('positioningGate');
+  // Decisions sees only this message: the primary model keeps the fallback rule for contextual requests.
+  expect(result.payload.positioningGate).toBe('fallback-v1');
 });
 
 it('refuses a blocked message with the stable code before any execution or reservation', async () => {

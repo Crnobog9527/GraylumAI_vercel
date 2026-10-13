@@ -9,8 +9,9 @@ import { StagingAccessError, stagingRpcFailure } from './stagingErrors';
  * POSITIONING-GATE (Owner 2026-10-12, Master Plan 2.1): a user without a confirmed positioning cannot get
  * social media operations for their own account. Only such users are checked: a Skill flagged "与社交媒体相关"
  * is refused outright; every other free-chat message is judged once by the Decisions model before admission.
- * A refusal happens before runtime_admit, so no execution, reservation or charge exists. When Decisions is
- * unavailable the turn is admitted with a frozen fallback rule for the primary model (positioningFallback).
+ * A refusal happens before runtime_admit, so no execution, reservation or charge exists. Decisions sees only the
+ * current message, so every admitted gated turn (Decisions allowed or unavailable) also carries a frozen fallback
+ * rule: the primary model, which reads the whole conversation, refuses contextual requests (positioningFallback.ts).
  * Decisions is platform-paid (not BILL2); its cost is logged as positioning_gate_decision.
  */
 export const DECISIONS_URL = 'https://openrouter.ai/api/alpha/decisions';
@@ -116,13 +117,13 @@ export function decisionsClassifier(transport: typeof fetch = fetch): Positionin
 
 /**
  * Admission check for a gated (non-OPC, non-report, non-organizer) turn of a user without a positioning.
- * Returns true when the primary model must carry the fallback rule because Decisions was unavailable.
+ * Refuses on block; an allowed or unavailable verdict admits the turn (always with the fallback rule).
  */
 export async function judgePositioning(gate: PositioningGatePolicy,
-  input: { text: string; apiKey: string | undefined }): Promise<boolean> {
+  input: { text: string; apiKey: string | undefined }): Promise<GateVerdict> {
   let verdict: GateVerdict;
   try { verdict = await (gate.classify ?? decisionsClassifier())(input); }
   catch { verdict = 'unavailable'; }
   if (verdict === 'block') refusePositioning();
-  return verdict === 'unavailable';
+  return verdict;
 }

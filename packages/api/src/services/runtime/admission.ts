@@ -235,8 +235,10 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
    // The OpenRouter key of this same row serves Decisions (no extra read); it never travels further.
    const apiKey=openRouterKey(row.data);delete (row.data as {api_key?:unknown}).api_key;
    if(policy.real)realModel(row.data);
-   // Decisions judges every other gated message, including a non-social Skill turning to social media.
-   const positioningFallback=gated&&await judgePositioning(policy.positioningGate!,{text:input.input,apiKey});
+   // Decisions judges every other gated message, including a non-social Skill turning to social media; an admitted
+   // gated turn always keeps the fallback rule, since Decisions does not see earlier turns ("好的，那帮我写三条").
+   if(gated)await judgePositioning(policy.positioningGate!,{text:input.input,apiKey});
+   const positioningFallback=gated;
    if(input.selection.kind==='organizer')modelConfiguration(()=>assertSeparateSummaryModel(session.dialogueModel,row.data.model_id));
    let attachedOrganizer:{
     modelId:string;model:string;maxOutputTokens:number;inputBytes?:number;historyItems?:number;reasoning?:ReasoningPolicy;instructions?:string;input?:string
