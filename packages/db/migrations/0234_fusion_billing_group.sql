@@ -130,6 +130,10 @@ BEGIN
     IF jsonb_array_length(out)<>cardinality(s.call_ids) THEN RAISE EXCEPTION 'FUSION_GROUP_CONFLICT'; END IF;
     RETURN jsonb_build_object('state','claimed','calls',out);
   END IF;
+  -- A new step only takes fresh runs: a run that already has a call belongs to an earlier step, and
+  -- replacements and later rounds must use new runs, never reuse an old result.
+  IF EXISTS (SELECT 1 FROM bill2_calls WHERE run_id IN (SELECT (x->>'runId')::uuid FROM jsonb_array_elements(p_items) x)) THEN
+    RAISE EXCEPTION 'FUSION_GROUP_CONFLICT'; END IF;
   BEGIN
     PERFORM set_config('graylum.fusion_group_claim', g.id::text, true);
     FOR item IN SELECT * FROM jsonb_array_elements(p_items) LOOP
@@ -169,8 +173,10 @@ BEGIN
     RETURN c.fusion_verdict;
   END IF;
   IF c.settled_at IS NOT NULL THEN RAISE EXCEPTION 'FUSION_VERDICT_DENIED'; END IF;
-  -- After account closure a new verdict may not override the zero-charge erasure path; the call row
-  -- lock serializes this with settlement, which locks the same row.
+  -- After account closure a new verdict may not override the zero-charge erasure path. The call row
+  -- lock serializes this with settlement; the profile share lock serializes it with account closure,
+  -- which updates the profile row, so closure either commits first (verdict refused) or waits.
+  PERFORM 1 FROM profiles WHERE id=p_actor_id FOR SHARE;
   IF bill2_erasure_closed(p_actor_id, r.id) THEN RAISE EXCEPTION 'FUSION_VERDICT_DENIED'; END IF;
   UPDATE bill2_calls SET fusion_verdict=p_verdict WHERE id=c.id;
   RETURN p_verdict;

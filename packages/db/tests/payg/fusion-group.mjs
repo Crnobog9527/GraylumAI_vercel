@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 // FUSION-REVIEW PR-1 (0234): billing group over per-model runs; each run settles on its own (Owner 2026-10-14).
 import assert from 'node:assert/strict';
-import {randomUUID} from 'node:crypto';
+import {randomUUID,createHash} from 'node:crypto';
 import {rpc,closeAccount} from '../erasure-b2a/cases.mjs';
 import {conserved} from './core.mjs';
 
@@ -43,7 +43,9 @@ export async function fusionGroupCases({db,Client,connectionString,report,create
   assert.equal(await wallet(db,exact.actor),0,'replay takes no new hold');
   await assert.rejects(rpc(db,'fusion_group_claim',exact.actor,exact.id,'review:1',1,
     JSON.stringify(exact.items.map((x,i)=>i?x:{...x,payload:{...x.payload,requestHash:'d'.repeat(64)}}))),/FUSION_GROUP_CONFLICT/);
-  report.checks.push('fusion group claim: balance below batch upper bound creates nothing; exact balance holds every member in full; replay is idempotent; changed payload conflicts');
+  await assert.rejects(claimGroup(db,exact,'review:2',1),/FUSION_GROUP_CONFLICT/);
+  await assert.rejects(claimGroup(db,exact,'review:1',2),/FUSION_GROUP_CONFLICT/);
+  report.checks.push('fusion group claim: balance below batch upper bound creates nothing; exact balance holds every member in full; replay is idempotent; changed payload conflicts; runs of an earlier step cannot be reused by a new step or attempt');
 
   // 4. Ordinary claims refuse Fusion purposes and grouped runs.
   const loose = await createFixture(db,{phase:'fusion_review'});
@@ -169,6 +171,27 @@ export async function fusionGroupCases({db,Client,connectionString,report,create
   assert.equal(await charged(db,late.runs),0,'closed account: late usable verdict refused, call settles at zero');
   assert.equal(await wallet(db,late.actor),18);
   report.checks.push('NULL verdict rejected; cancelled-before-dispatch call records no_delivery; late usable verdict after account closure refused');
+
+  // Concurrent account closure vs a delayed verdict: closure holds the profile row; the verdict waits
+  // for it and then sees the account closed.
+  const race = await group(db,createFixture,{n:1,credits:9});
+  const rc = await claimGroup(db,race);
+  await dispatchAll(db,race,rc);
+  await record(db,race,race.members[0],rc.calls[0],'0.0004');
+  const [closer,judge] = [new Client({connectionString}),new Client({connectionString})];
+  await Promise.all([closer.connect(),judge.connect()]);
+  try {
+    await closer.query('BEGIN');
+    await closer.query('SELECT account_erasure_confirm_with_digests($1,$2,$3)',[race.actor,randomUUID(),
+      JSON.stringify([{kind:'email',key_version:'b2a_local_v1',digest:createHash('sha256').update(race.actor).digest('hex')}])]);
+    const verdict = judge.query('SELECT fusion_call_verdict($1,$2,$3)',[race.actor,rc.calls[0].id,'usable']).then(()=>'written',e=>e.message);
+    await new Promise(r=>setTimeout(r,300));
+    await closer.query('COMMIT');
+    assert.match(await verdict,/FUSION_VERDICT_DENIED/);
+  } finally { await closer.end(); await judge.end(); }
+  await rpc(db,'bill2_finalize',race.actor,race.runs[0]);
+  assert.equal(await charged(db,race.runs),0);
+  report.checks.push('verdict racing with account closure waits on the profile row and is refused once closure commits');
 
   // Membership is immutable once a call exists.
   const other = await rpc(db,'fusion_group_create',exact.actor,randomUUID(),'review');
