@@ -100,9 +100,11 @@ BEGIN
   OR NOT EXISTS(SELECT 1 FROM payment_orders WHERE subscription_id=s.id AND payment_channel='stripe'
     AND payment_method IN ('card','card_cn') AND auto_renew AND fulfilled_at IS NOT NULL) THEN
   RAISE EXCEPTION 'PAY_STRIPE_MP_RENEW_SCOPE'; END IF;
- -- Only the first failure of the current period starts the deadline; retries never move it later.
- IF s.founder_failed_at IS NULL AND p_failed_at>=s.current_period_end-interval '5 minutes' THEN
-  UPDATE user_subscriptions SET founder_failed_at=p_failed_at WHERE id=s.id;
+ -- The earliest failure of the current period starts the deadline, even when Stripe's retry webhooks arrive
+ -- out of order; a later retry never moves it later.
+ IF p_failed_at>=s.current_period_end-interval '5 minutes'
+  AND (s.founder_failed_at IS NULL OR p_failed_at<s.founder_failed_at) THEN
+  UPDATE user_subscriptions SET founder_failed_at=p_failed_at WHERE id=s.id RETURNING * INTO s;
  END IF;
  RETURN jsonb_build_object('failedAt',coalesce(s.founder_failed_at,p_failed_at));
 END $$;

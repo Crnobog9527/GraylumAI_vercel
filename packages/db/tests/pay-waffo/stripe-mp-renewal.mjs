@@ -45,8 +45,10 @@ export async function stripeMpRenewalCases({admin,service,connect}) {
     assert.equal(m.mapping_state,'internal_paid',JSON.stringify(m)); assert.ok(m.renewal_grace_until,'grace applies');
   }
   // A failure is recorded once (Stripe's later retries do not move it) and does not break the grace.
+  // Reverse delivery: a later retry processed first, then the original failure; the earliest one wins.
   const failedAt=new Date(card.end.getTime()+3600000);
-  await fail(card,failedAt); await fail(card,new Date(failedAt.getTime()+1800000));
+  await fail(card,new Date(failedAt.getTime()+1800000)); await fail(card,failedAt);
+  await fail(card,new Date(failedAt.getTime()+2700000));
   assert.equal((await sub(card)).founder_failed_at.toISOString(),failedAt.toISOString());
   assert.equal((await sub(card)).status,'active','past_due is never copied');
   assert.equal((await facts(card.user)).mapping_state,'internal_paid');
@@ -131,7 +133,7 @@ export async function stripeMpRenewalCases({admin,service,connect}) {
   await service.query('SET ROLE service_role');
   await admin.query("UPDATE system_settings SET value=$1 WHERE key='payment_method_routes'",
     [{...current,card:{enabled:false},card_cn:{enabled:false},version:version+1}]);
-  return ['stripe-mp-grace-card-and-card-cn','stripe-mp-failure-recorded-once','stripe-mp-past-due-keeps-grace',
+  return ['stripe-mp-grace-card-and-card-cn','stripe-mp-failure-recorded-once','stripe-mp-failure-earliest-out-of-order','stripe-mp-past-due-keeps-grace',
     'stripe-mp-renewal-list-price-not-first-month','stripe-mp-renewal-pre-tax-only','stripe-mp-renewal-once-concurrently',
     'stripe-mp-renewal-clears-failure','stripe-mp-next-charge-date','stripe-mp-one-order-per-period','stripe-mp-stop-ends-grace',
     'stripe-mp-cancel-permanent','stripe-mp-cancel-resets-cached-level','stripe-mp-cancel-keeps-remaining-level','stripe-mp-erasure-renewing-follows-stop','stripe-mp-charge-after-cancel-review','stripe-mp-founder-card-cn-deadline','stripe-mp-founder-renewal','stripe-mp-renewal-scope'];
