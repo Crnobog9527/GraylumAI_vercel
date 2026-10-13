@@ -1,6 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import {executionSkillFileTool} from './skillFileExecution';
 import {skillFileToolBytes} from './skillFile';
+import {executionMentorHistoryTool,mentorHistoryToolBytes} from './mentorHistory';
 import {sourceRuntimeTool} from './sourceRuntimeTool';
 import {billingClaimNotice,claimNoticeFields} from './claimNotice';
 import {stoppedCompletion} from './stoppedCompletion';
@@ -27,7 +28,7 @@ import {AGENT_TURN_REQUEST_FORMAT,validReasoningFormat,
  STREAMING_FORMATS,historyToolNames,openRouterRequestBody} from './providerRequest';
 import {cardSources, groundedCardTool, groundedCardToolBytes, rejectSeparateCardProse} from './groundedCard';
 import {agentTurnResult} from './agentTurnResult';
-import {askQuestionTool,askQuestionToolBytes,questionMessageFromArguments,QUESTION_CONTRACT} from './agentTools';
+import {askQuestionTool,askQuestionToolBytes,questionMessageFromArguments,QUESTION_CONTRACT,READ_HISTORY_TOOL} from './agentTools';
 import {ASK_QUESTION_TOOL,INVALID_REPLY_NOTICE} from '../../shared/agentTurn';
 import { authoritativeBilling, type FrozenCall } from '../bill2/service';
 import {OPENROUTER_RESPONSE_TIMEOUT_MS} from '../bill2/openRouterPolicy';
@@ -95,7 +96,8 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
   let projection=new NativeProgressProjection(projectionOptions);
   let primaryLength=false;
   if(fiveFields&&!agentTurn)throw new Error('RUNTIME_CONTEXT_INVALID');
-  if(agentTurn&&(context.matching||context.workspaceContext||context.tools.some(name=>name!==ASK_QUESTION_TOOL&&name!=='read_skill_file')))throw new Error('RUNTIME_CONTEXT_INVALID');
+  if(agentTurn&&(context.matching||context.workspaceContext||
+   context.tools.some(name=>name!==ASK_QUESTION_TOOL&&name!=='read_skill_file'&&name!==READ_HISTORY_TOOL)))throw new Error('RUNTIME_CONTEXT_INVALID');
   if(!agentTurn&&context.tools.includes(ASK_QUESTION_TOOL))throw new Error('RUNTIME_CONTEXT_INVALID');
   const policy=execution.billing.callPolicy.find(p=>p.model===context.model);
   if(!policy)throw new Error('RUNTIME_MODEL_DENIED');
@@ -108,7 +110,7 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
   let gateChecked=resumedGate,moderationBlocked=false;
   let waitPoint:{epoch:number;sequence:number;requestHash:string;phase:string;state:PaygWait['state']}|undefined;
   let gateRejection:GateRejection|undefined;
-  const checkAgentReply=terminalReplyGuard(agentTurn,context.tools.includes(ASK_QUESTION_TOOL),()=>{terminalReplyFailure=true;},Boolean(context.skillFile));
+  const checkAgentReply=terminalReplyGuard(agentTurn,context.tools.includes(ASK_QUESTION_TOOL),()=>{terminalReplyFailure=true;},Boolean(context.skillFile),Boolean(context.historyRead));
   let preflightFailure:string|undefined;
   const streaming=STREAMING_FORMATS.has(context.providerRequestFormat??'');
   // B2a: once BILL2 reports a confirmed erasure, nothing more reaches the client.
@@ -253,10 +255,12 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
    const tools:RuntimeTool[]=context.tools.map(name=>name===ASK_QUESTION_TOOL?questionTool:
     name==='read_skill_file'?executionSkillFileTool({executionId,moduleId:context.moduleId!,binding:context.skillFile!,
      rpc:ownerRpc,assertCanStart:()=>budget.assertCanStart(),timing:budget.timing,onRefused:()=>{terminalReplyFailure=true;}}):
+    name===READ_HISTORY_TOOL?executionMentorHistoryTool({executionId,rpc:ownerRpc,assertCanStart:()=>budget.assertCanStart(),
+     onRefused:()=>{terminalReplyFailure=true;}}):
     sourceRuntimeTool({name,context,args,ownerRpc,budget,execution,exchange}));
    const toolBytes=(agentTurn?(grounded?groundedCardToolBytes():askQuestionToolBytes(fiveFields)):
     Buffer.byteLength(JSON.stringify(tools.map(t=>({name:t.name,description:t.description})))))+
-    (context.skillFile?skillFileToolBytes():0)+
+    (context.skillFile?skillFileToolBytes():0)+(context.historyRead?mentorHistoryToolBytes():0)+
     (context.historySelection?.markerReserveBytes??(context.promptCache?PROMPT_CACHE_OVERHEAD_BYTES:0));
    const preserveHistoricalMaterial=Boolean(context.sources?.length)||requestsHistoricalComparison(context.input);
    const primarySequence=callSequence;
@@ -299,7 +303,7 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
      logger.warn('api','runtime_history_prefix_omitted',{executionId,omittedItems:originalCount-history.length});
     }
     const selectionOptions={instructions:effective.instructions,inputBytes:Math.min(primaryPolicy.inputLimit,context.purposeBudget?.inputBytes??Infinity),
-     historyItems:context.historyItems,toolBytes:toolBytes+(context.skillFileReserve??0),...sizing,
+     historyItems:context.historyItems,toolBytes:toolBytes+Math.max(context.skillFileReserve??0,context.historyRead?.reserve??0),...sizing,
      projectHistoryItem:(item:unknown)=>context.hostTurnContext?
       projectHostTurnItem(item,context.scopeMaterial,preserveHistoricalMaterial,projectSupersededScopeItem):
       legacyInput||preserveHistoricalMaterial?item:projectSupersededScopeItem(item,context.scopeMaterial)};
