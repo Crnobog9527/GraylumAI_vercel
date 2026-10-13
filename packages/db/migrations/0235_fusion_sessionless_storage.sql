@@ -259,6 +259,13 @@ DO $$ DECLARE src text; a text; BEGIN
     a:=$x$ UPDATE runtime_scope_material m SET request=NULL,content=NULL,content_hash=NULL,erased_at=stamp$x$;
     IF array_length(string_to_array(src,a),1)<>2 THEN RAISE EXCEPTION 'FUSION_SOURCE_MISMATCH: content_erasure_confirm'; END IF;
     EXECUTE replace(src,a,$x$ -- 0235 fusion outputs
+ -- Like the session/project locks above, take the Fusion run locks up front with NOWAIT: a concurrent group
+ -- claim holds a run and then the profile, so waiting here could deadlock; failing fast lets the caller
+ -- (or the deletion sweep) retry once the claim committed (#947 review).
+ PERFORM r.id FROM bill2_runs r JOIN fusion_billing_groups g ON g.id=r.fusion_group_id
+  WHERE g.actor_id=a AND (g.source_session_id=ANY(sessions)
+   OR g.source_session_id IN (SELECT d.session_id FROM opc_drafts d WHERE d.actor_id=a AND d.project_id=ANY(projects)))
+  ORDER BY r.id FOR UPDATE OF r NOWAIT;
  FOR row IN SELECT r.id,r.closed FROM bill2_runs r JOIN fusion_billing_groups g ON g.id=r.fusion_group_id
   WHERE g.actor_id=a AND (g.source_session_id=ANY(sessions)
    OR g.source_session_id IN (SELECT d.session_id FROM opc_drafts d WHERE d.actor_id=a AND d.project_id=ANY(projects))) ORDER BY r.id LOOP

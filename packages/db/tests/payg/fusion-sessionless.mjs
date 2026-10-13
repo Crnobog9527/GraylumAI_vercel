@@ -30,7 +30,7 @@ const receipt = (db,g,f,c,cost='0.0004') => rpc(db,'bill2_record',g.actor,f.run,
   observedAt:new Date().toISOString(),coverage:'request_total',final:true,cost,currency:'USD',usage:{inputTokens:Math.round(Number(cost)*1e6),outputTokens:0}});
 const callOf = (g,f) => g.calls.find(c=>c.runId===f.run);
 
-export async function fusionSessionlessCases({db,report,createFixture}) {
+export async function fusionSessionlessCases({db,Client,connectionString,report,createFixture}) {
   // Saved output: idempotent, conflicting body refused, readable while the conversation exists.
   const g = await sessionGroup(db,createFixture);
   const c0 = callOf(g,g.members[0]);
@@ -146,6 +146,24 @@ export async function fusionSessionlessCases({db,report,createFixture}) {
   assert.equal(await wallet(db,del.actor),16,'late receipt settles at known cost and releases the rest of the hold');
   await assert.rejects(rpc(db,'fusion_group_create',del.actor,randomUUID(),'review',del.session),/FUSION_GROUP_DENIED/);
   report.checks.push('deleting the source conversation deletes its Fusion outputs, closes and scrubs the group runs (user_stopped at known cost; late receipt settles), refuses new outputs and groups');
+
+  // Deletion overlapping a claim that holds a Fusion run fails fast (NOWAIT) instead of deadlocking,
+  // and succeeds once the claim committed.
+  const busy = await sessionGroup(db,createFixture,{n:1,credits:9});
+  const [holder,deleter] = [new Client({connectionString}),new Client({connectionString})];
+  await Promise.all([holder.connect(),deleter.connect()]);
+  try {
+    await holder.query('BEGIN');
+    await holder.query('SELECT id FROM bill2_runs WHERE id=$1 FOR UPDATE',[busy.runs[0]]);
+    await deleter.query("SET lock_timeout='5s'");
+    const started = Date.now();
+    await assert.rejects(deleter.query('SELECT content_erasure_mark_session($1,$2)',[busy.actor,busy.session]),/CONTENT_ERASURE_BUSY/,'the existing retryable busy refusal');
+    assert.ok(Date.now()-started<4000,'fails fast rather than waiting');
+    await holder.query('COMMIT');
+    await deleter.query('SELECT content_erasure_mark_session($1,$2)',[busy.actor,busy.session]);
+    assert.equal(await outputs(db,busy.actor),0);
+  } finally { await holder.end(); await deleter.end(); }
+  report.checks.push('conversation deletion overlapping a held Fusion run fails fast (NOWAIT, retryable) and succeeds afterwards');
 
   // A run cannot join a group whose source conversation was deleted.
   const extra = await createFixture(db,{actor:del.actor,phase:'fusion_review'});
