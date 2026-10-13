@@ -39,6 +39,28 @@ export async function runCases(db,report){
  assert.match(first.content.brief,/A1_LEGACY_SAVED_BODY/,'frozen revision evidence is never rewritten');
  assert.equal(await count(db,pending.session),2,'unfinished legacy video binding keeps its revision current');
  report.checks.push('legacy saved-body sessions get one header-only revision; history kept; pending video binding skipped');
+ const videoDone=await legacy(db,'videodone'),videoHead=await latest(db,videoDone.session);
+ assert.equal(videoHead.revision,'2','a finished video-preparation revision is reprojected');
+ assert.doesNotMatch(videoHead.content.brief,/A1_VIDEO_BOUND_BODY/);
+ assert.match(videoHead.content.brief,/^内容类型：video\n标题：independent title\n简报：independent brief$/);
+ report.checks.push('a finished legacy video-preparation body is reprojected to header-only material');
+
+ // New work items from a handoff start with content type and title, not only the brief.
+ assert.match(await def(db,'opc_handoff(uuid,uuid,uuid,uuid,jsonb)'),/opc_work_material_payload\(wid\)/);
+ const h=(await db.query('SELECT a1_test.link(d7_test.artifacts($1)) v',[pending.fixture.actor])).rows[0].v;
+ const ctx=(await db.query(`SELECT d.draft_id,a.platform,a.account_key,a.revision,i.plan_id FROM opc_drafts d,opc_items i
+  JOIN opc_accounts a ON a.project_id=i.account_project_id WHERE d.project_id=$1 AND i.work_item_id=$2`,[h.project,h.workItem])).rows[0];
+ const key=randomUUID();
+ const body=[{id:key,platform:ctx.platform,account:ctx.account_key,title:'A1 交接标题',brief:'A1 交接简报',day:'2026-10-14',contentType:'video'}];
+ const plan=(await db.query(`INSERT INTO opc_plans(id,draft_id,version,source_version_id,request_id,request,body)
+  VALUES(gen_random_uuid(),$1,2,$2,gen_random_uuid(),jsonb_build_object('sourceVersionId',$2::uuid),$3) RETURNING id`,
+  [ctx.draft_id,h.version,JSON.stringify(body)])).rows[0].id;
+ const handed=await rpc(db,'opc_handoff',pending.fixture.actor,ctx.draft_id,randomUUID(),plan,
+  JSON.stringify([{platform:ctx.platform,account:ctx.account_key,expectedRevision:Number(ctx.revision)}]));
+ const fresh=await latest(db,handed[0].sessionId);
+ assert.equal(fresh.revision,'1');assert.equal(await count(db,handed[0].sessionId),1);
+ assert.match(fresh.content.brief,/^内容类型：video\n标题：A1 交接标题\n简报：A1 交接简报$/);
+ report.checks.push('a new handoff starts its topic material with content type, title and brief');
 
  // Both save paths keep their D7 guards and no longer write scope material.
  for(const sig of ['opc_content_from_execution(uuid,uuid,uuid,bigint,text,text,uuid,uuid)',

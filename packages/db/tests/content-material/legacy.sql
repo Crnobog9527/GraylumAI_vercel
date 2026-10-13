@@ -14,7 +14,7 @@ CREATE FUNCTION a1_test.material(sid uuid,rev bigint,req uuid,content jsonb) RET
   encode(sha256(convert_to(content::text,'UTF8')),'hex'));
 $$;
 DO $$
-DECLARE f jsonb;art jsonb;pending jsonb;bound uuid:=gen_random_uuid();
+DECLARE f jsonb;art jsonb;pending jsonb;bound uuid:=gen_random_uuid();done uuid:=gen_random_uuid();
 BEGIN
  f:=b2a_test.fixture();
  art:=a1_test.link(d7_test.artifacts((f->>'actor')::uuid));
@@ -30,4 +30,16 @@ BEGIN
  PERFORM a1_test.material((pending->>'session')::uuid,2,(pending->>'content')::uuid,jsonb_build_object(
   'brief','已定稿口播稿：A1_PENDING_SAVED_BODY','material','{}','roundId',NULL));
  INSERT INTO a1_test.legacy VALUES('pending',pending||jsonb_build_object('binding',bound,'fixture',f));
+ -- Latest revision written by a legacy video preparation (generated request id) whose
+ -- execution already froze it: the binding is finished, so the body must be reprojected.
+ art:=a1_test.link(d7_test.artifacts((f->>'actor')::uuid));
+ PERFORM a1_test.material((art->>'session')::uuid,1,gen_random_uuid(),jsonb_build_object(
+  'brief','已定稿口播稿：A1_VIDEO_BOUND_BODY','material','{}','roundId',NULL));
+ INSERT INTO opc_video_material_bindings(actor_id,request_id,work_item_id,source_script_id,session_id,material_revision)
+ VALUES((f->>'actor')::uuid,done,(art->>'workItem')::uuid,(art->>'content')::uuid,(art->>'session')::uuid,1);
+ INSERT INTO runtime_executions(id,actor_id,session_id,request_id,payload,history_revision,state)
+ SELECT gen_random_uuid(),(f->>'actor')::uuid,m.session_id,done,jsonb_build_object('scopeMaterial',
+  jsonb_build_object('sessionId',m.session_id,'revision',1,'hash',m.content_hash)),0,'completed'
+ FROM runtime_scope_material m WHERE m.session_id=(art->>'session')::uuid AND m.revision=1;
+ INSERT INTO a1_test.legacy VALUES('videodone',art);
 END $$;

@@ -3,7 +3,9 @@
 -- sections 2.3 and 3.2). Number assigned by the controller. No remote application.
 -- 1. Saved bodies no longer enter the always-on topic scope material: content saves stop
 --    writing material revisions; the material keeps content type, title, brief and positioning.
--- 2. Existing work-item sessions whose latest material is a saved body get one appended
+--    New work items (opc_handoff) start from the same material.
+-- 2. Existing work-item sessions whose latest material is a saved body (content save or a
+--    completed legacy video preparation) get one appended
 --    header-only revision (frozen history is never rewritten). Sessions with an unfinished
 --    legacy video binding are skipped; video preparation is retired separately (R).
 -- 3. A brief adopted from an execution is saved through the existing item edit and recorded
@@ -53,6 +55,18 @@ BEGIN
  END LOOP;
 END $$;
 
+-- New work items start from the same material (content type and title, not only the brief).
+DO $$
+DECLARE source text;needle text:='jsonb_build_object(''brief'',item->>''brief'',''material'',opc_profile(v.id)::text,''roundId'',NULL)';
+BEGIN
+ source:=pg_get_functiondef('public.opc_handoff(uuid,uuid,uuid,uuid,jsonb)'::regprocedure);
+ IF position('opc_work_material_payload(wid)' IN source)=0 THEN
+  IF (length(source)-length(replace(source,needle,'')))/length(needle)<>1 THEN
+   RAISE EXCEPTION 'A1_SOURCE_MISMATCH: opc_handoff material';END IF;
+  EXECUTE replace(source,needle,'opc_work_material_payload(wid)');
+ END IF;
+END $$;
+
 -- Append one header-only revision where the latest revision is a saved body.
 DO $$
 DECLARE r record;
@@ -66,7 +80,10 @@ BEGIN
    -- Same gate runtime_material applies; unusable sessions are never admitted again.
    AND coalesce(bill2_scope_allowed(s.actor_id,s.scope),false)
    AND m.erased_at IS NULL AND NOT m.revoked
-   AND EXISTS(SELECT 1 FROM opc_content_versions c WHERE c.id=m.request_id AND c.actor_id=s.actor_id)
+   -- Body-bearing revisions: a content save (request id = content id) or a legacy video
+   -- preparation (its binding points at this revision; unfinished ones are skipped below).
+   AND (EXISTS(SELECT 1 FROM opc_content_versions c WHERE c.id=m.request_id AND c.actor_id=s.actor_id)
+    OR EXISTS(SELECT 1 FROM opc_video_material_bindings vb WHERE vb.session_id=s.id AND vb.material_revision=m.revision))
    AND EXISTS(SELECT 1 FROM opc_items i WHERE i.work_item_id=(s.scope->>'workItemId')::uuid)
    -- An unfinished legacy video binding must keep its bound revision current.
    AND NOT EXISTS(SELECT 1 FROM opc_video_material_bindings b

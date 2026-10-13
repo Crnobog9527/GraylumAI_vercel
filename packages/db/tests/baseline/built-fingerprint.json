@@ -2537,7 +2537,7 @@
   "fn:opc_free_conversations(uuid)": "8db864056416",
   "fn:opc_guard_content_kind()": "d064863dde2d",
   "fn:opc_guard_saved_content_type()": "3de8386f8415",
-  "fn:opc_handoff(uuid,uuid,uuid,uuid,jsonb)": "60c41d04affc",
+  "fn:opc_handoff(uuid,uuid,uuid,uuid,jsonb)": "c2cd412ae167",
   "fn:opc_handoff_b1(uuid,uuid,uuid,uuid,jsonb)": "11d5d6d871dd",
   "fn:opc_has_confirmed_positioning(uuid)": "8fd35a9f8200",
   "fn:opc_historical_reach(uuid,uuid,text)": "6daa2d356d8d",
