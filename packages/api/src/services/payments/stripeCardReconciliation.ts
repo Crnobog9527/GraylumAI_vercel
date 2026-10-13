@@ -24,7 +24,8 @@ type Options = { expectedMode: StripeScope['mode']; now?: Date; days?: number; m
 
 /** PAY-STRIPE-MP daily backstop (04:00 billing-reconcile, #847 2.5-5): if a webhook was lost, a paid card order could
  * stay undelivered with nothing noticing. Scans the last `days` of Stripe checkout sessions, paid renewal invoices and
- * refund events (so a refund that succeeds long after it was created is still seen), and repairs card orders through the same idempotent handlers the webhook uses (first payment,
+ * refund events (so a refund that succeeds long after it was created is still seen), and repairs card orders
+ * through the same idempotent handlers the webhook uses (first payment,
  * renewal, external refund). Whatever cannot be repaired, or an incomplete scan, is a finding for manual review.
  * The environment decides whether it runs and in which mode (staging: test keys; production: live keys, off until the
  * Owner approves it at launch). A key whose mode differs from the configured one is refused, never scanned. */
