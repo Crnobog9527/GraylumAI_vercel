@@ -75,7 +75,9 @@ export function flattenMetrics(raw: unknown): {
   const breakdowns: Record<string, Breakdown> = {};
   const missing: string[] = [];
   const walk = (value: unknown, prefix: string, depth: number) => {
-    if (Object.keys(metrics).length + missing.length >= MAX_METRIC_KEYS || depth > 3) return;
+    if (Object.keys(metrics).length + Object.keys(breakdowns).length + missing.length >= MAX_METRIC_KEYS) return;
+    // Deeper than we keep: the provider supplied something we do not store, so it is listed as missing.
+    if (depth > 3) { if (prefix) missing.push(prefix); return; }
     if (value !== null && typeof value === 'object' && !Array.isArray(value)) {
       for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
         const path = prefix ? `${prefix}.${key}` : key;

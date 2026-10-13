@@ -180,7 +180,9 @@ describe('post for me client', () => {
     expect(() => postForMeApiKey({ POSTFORME_API_KEY: 'sk-other' })).toThrow('POSTFORME_NOT_CONFIGURED');
     expect(postForMeApiKey({ POSTFORME_API_KEY: ` ${KEY} ` })).toBe(KEY);
     expect(xSnowflakeTime('123')).toBeNull();
-    expect(flattenMetrics({ a: { b: { c: { d: { e: 1 } } } } }).metrics).toEqual({});
+    const deep = flattenMetrics({ a: { b: { c: { d: { e: 1 } } } } });
+    expect(deep.metrics).toEqual({});
+    expect(deep.missingFields).toEqual(['a.b.c.d']);
     const arrays = flattenMetrics({ audience_countries: [{ country: 'US', percentage: 0.4 }], retention: [100, 80.5],
       bad: [{ nested: { x: 1 } }], huge: Array.from({ length: 101 }, () => 1) });
     expect(arrays.breakdowns).toEqual({ audience_countries: [{ country: 'US', percentage: 0.4 }], retention: [100, 80.5] });
