@@ -35,14 +35,10 @@ it('runs the bounded recovery through the existing authenticated cron entry', as
   expect(await response.json()).toEqual({ success: true, processed: 1, completed: 1, pending: 0, failed: 0,
     conversations: { cleaned: 2, pending: 0, failed: 0, more: false } });
 });
-it('sweeps deleted conversations; a busy one stays pending without failing the run', async () => {
-  mocks.sweep.mockResolvedValue({ cleaned: 1, pending: 1, failed: 0, more: false });
-  const response = await GET(new Request('https://synthetic.test/api/cron/account-erasure'));
-  expect(response.status).toBe(200);
-  expect((await response.json()).conversations).toEqual({ cleaned: 1, pending: 1, failed: 0, more: false });
-});
+
 it.each([
   [{ cleaned: 0, pending: 0, failed: 1, more: false }, 'a permanent cleanup failure'],
+  [{ cleaned: 1, pending: 1, failed: 0, more: false }, 'a conversation still busy after the retries'],
   [{ cleaned: 50, pending: 0, failed: 0, more: true }, 'a backlog left after the time budget'],
 ])('fails the run for %s', async (conversations) => {
   mocks.sweep.mockResolvedValue(conversations);

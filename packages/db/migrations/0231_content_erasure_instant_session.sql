@@ -78,8 +78,8 @@ REVOKE ALL ON FUNCTION public.content_erasure_confirm(uuid,text,uuid,text) FROM 
 GRANT EXECUTE ON FUNCTION public.content_erasure_confirm(uuid,text,uuid,text) TO service_role;
 
 -- Backstop for the cleanup the client starts: oldest marked sessions first, one page per call
--- after the caller's cursor, one subtransaction each. Only lock contention is "pending" (retried
--- next run); any other failure is counted as failed so the cron run reports it. Closed accounts
+-- after the caller's cursor, one subtransaction each. Only lock contention is "pending" (the
+-- caller retries it in the same run); any other failure is counted as failed so the run reports it. Closed accounts
 -- are cleaned by account erasure instead.
 CREATE OR REPLACE FUNCTION public.content_erasure_sweep_sessions(lim integer,after_at timestamptz,after_id uuid)
 RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$

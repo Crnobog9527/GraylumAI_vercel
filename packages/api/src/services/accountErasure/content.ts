@@ -105,26 +105,34 @@ type SweepDatabase = { rpc(name: string, args: Record<string, unknown>): Promise
   data: unknown; error: { code?: string; message?: string } | null;
 }> & { abortSignal?: (signal: AbortSignal) => PromiseLike<{ data: unknown; error: { message?: string } | null }> } };
 /**
- * Cron backstop (0231): pages through every marked conversation the client did not finish, until the
- * backlog is drained or the route's shared deadline is near (`more` then stays true and the run
- * reports it). Each page call is bounded by the time left. Busy conversations stay pending for the
- * next run; any other failure is counted as failed.
+ * Cron backstop (0231): pages through every marked conversation the client did not finish. A pass
+ * that ends with busy (pending) or failed rows starts again from the oldest, up to three passes,
+ * while the route's shared deadline allows. The result describes the last pass: anything still
+ * pending, failed or unreached (`more`) fails the run, so the 24-hour cleanup bound is never missed
+ * silently. Each page call is bounded by the time left.
  */
 export async function sweepErasedConversations(database: SweepDatabase, deadline: number, now = () => Date.now()) {
-  const total: ConversationSweep = { cleaned: 0, pending: 0, failed: 0, more: true };
-  let cursor: { afterAt: string | null; afterId: string | null } = { afterAt: null, afterId: null };
-  while (total.more && deadline - now() > 3_000) {
-    const call = database.rpc('content_erasure_sweep_sessions', {
-      lim: 50, after_at: cursor.afterAt, after_id: cursor.afterId,
-    });
-    const response = await (call.abortSignal ? call.abortSignal(AbortSignal.timeout(deadline - now())) : call);
-    if (response.error) throw new Error('CONTENT_ERASURE_SWEEP_FAILED');
-    const page = sweepPage.parse(response.data);
-    total.cleaned += page.cleaned; total.pending += page.pending; total.failed += page.failed;
-    total.more = page.more;
-    cursor = page;
+  let cleaned = 0;
+  let last: ConversationSweep = { cleaned: 0, pending: 0, failed: 0, more: true };
+  for (let pass = 0; pass < 3 && deadline - now() > 3_000; pass += 1) {
+    const current: ConversationSweep = { cleaned: 0, pending: 0, failed: 0, more: true };
+    let cursor: { afterAt: string | null; afterId: string | null } = { afterAt: null, afterId: null };
+    while (current.more && deadline - now() > 3_000) {
+      const call = database.rpc('content_erasure_sweep_sessions', {
+        lim: 50, after_at: cursor.afterAt, after_id: cursor.afterId,
+      });
+      const response = await (call.abortSignal ? call.abortSignal(AbortSignal.timeout(deadline - now())) : call);
+      if (response.error) throw new Error('CONTENT_ERASURE_SWEEP_FAILED');
+      const page = sweepPage.parse(response.data);
+      current.cleaned += page.cleaned; current.pending += page.pending; current.failed += page.failed;
+      current.more = page.more;
+      cursor = page;
+    }
+    cleaned += current.cleaned;
+    last = current;
+    if (current.more || (!current.pending && !current.failed)) break;
   }
-  return total;
+  return { ...last, cleaned };
 }
 /** Recheck before returning buffered text/results. No positive cache survives a
  * deletion. The existing invocation still completes its original money recovery. */
