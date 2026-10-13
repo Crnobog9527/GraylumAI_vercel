@@ -28,6 +28,13 @@ for (const [name, load] of loaders) {
     });
     afterEach(() => { vi.unstubAllEnvs(); vi.useRealTimers(); });
 
+    it('never enables Upstash analytics (it would keep user ids beyond 30 days)', async () => {
+      const { checkRateLimit } = await load();
+      for (const type of ['ai', 'ai_stream', 'api', 'auth', 'anonymous'] as const) await checkRateLimit('user', type);
+      expect(mocks.options).toHaveBeenCalled();
+      for (const [options] of mocks.options.mock.calls) expect(options).toMatchObject({ analytics: false });
+    });
+
     for (const type of ['ai', 'ai_stream', 'api', 'auth', 'anonymous'] as const) {
       it(`${type}: permits healthy requests`, async () => {
         const { checkRateLimit } = await load();

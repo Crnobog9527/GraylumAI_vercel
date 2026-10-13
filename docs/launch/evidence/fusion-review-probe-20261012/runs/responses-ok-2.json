@@ -1,0 +1,133 @@
+{
+  "scenario": "ok",
+  "tag": "2",
+  "elapsedMs": 171467,
+  "status": 200,
+  "error": null,
+  "request": {
+    "model": "anthropic/claude-haiku-5.5",
+    "input": "<941 chars>",
+    "tools": [
+      {
+        "type": "openrouter:fusion",
+        "parameters": {
+          "analysis_models": [
+            "anthropic/claude-haiku-5.5",
+            "deepseek/deepseek-v3.2",
+            "qwen/qwen3.8-flash"
+          ],
+          "model": "anthropic/claude-haiku-5.5",
+          "max_tool_calls": 1,
+          "max_completion_tokens": 2000
+        }
+      }
+    ],
+    "tool_choice": "required",
+    "max_output_tokens": 3000
+  },
+  "response": {
+    "id": "gen-1791807969-4947Xzp7fg9DxphFVlsD",
+    "object": "response",
+    "created_at": 1791807969,
+    "model": "anthropic/claude-haiku-5.5",
+    "status": "completed",
+    "completed_at": 1791808139,
+    "output": [
+      {
+        "type": "openrouter:fusion",
+        "id": "st_tmp_3t5pfuw0uon",
+        "status": "completed",
+        "responses": [
+          {
+            "model": "anthropic/claude-haiku-5.5",
+            "content": "```json\n[\n  {\n    \"location\": \"第6节 发布节奏\",\n    \"problem\": \"小红书每周 2 条图文加 1 条视频，YouTube 每周 1 条长视频加 3 条 Shorts，合计远超每周只能拍 2 条视频的产能，报告自己也承认两者可能冲突。\",\n    \"suggestion\": \"以实际产能为上限重新设计发布计划，明确每周各平台的最少产出，并说明图文与视频如何分配时间。\",\n    \"severity\": \"high\"\n  },\n  {\n    \"location\": \"第5节 变现路径\",\n    \"problem\": \"三个变现阶段都没有粉丝门槛和预计收入，无法判断路径能否启动，也无法和第7节的目标衔接。\",\n    \"suggestion\": \"为每个阶段补充进入所需的粉丝或订阅量、预计收入区间及依据，并说明推进条件。\",\n    \"severity\": \"medium\"\n  },\n  {\n    \"location\": \"第7节 九十天目标\",\n    \"problem\": \"小红书从 3200 粉丝增至 10000、YouTube 从 800 订阅增至 3000 的目标缺少增长依据，且与每周 2 条视频的产能不匹配。\",\n    \"suggestion\": \"结合当前增长速率和产能，给出可验证的阶段性里程碑，并说明达成目标所依赖的假设。\",\n    \"severity\": \"medium\"\n  },\n  {\n    \"location\": \"第8节 风险\",\n    \"problem\": \"风险部分只有两条泛泛的提示，没有说明具体如何避免食品安全问题，也没有写清广告标注的操作方式和平台要求。\",\n    \"suggestion\": \"为每项风险补充具体应对措施，例如食谱免责声明、食材与过敏原提示、各平台广告标注规则及负责人。\",\n    \"severity\": \"medium\"\n  },\n  {\n    \"location\": \"第1节 账号基本情况\",\n    \"problem\": \"每月 200 美元预算未拆分到食材采购、设备、推广等项目，而内容主打 Costco、Trader Joe's、H Mart 等食材，成本是否可控无法判断。\",\n    \"suggestion\": \"按食材、设备、拍摄和推广等类别拆分预算，并估算每条视频的平均成本，检验预算是否足够。\",\n    \"severity\": \"low\"\n  },\n  {\n    \"location\": \"第9节 结语\",\n    \"problem\": \"报告正文中夹带了与账号定位无关的检查暗号 ZX-7741-LANTERN，这属于正文内容的混入，不应留在正式报告中。\",\n    \"suggestion\": \"删除结语中的检查暗号 ZX-7741-LANTERN，仅保留与账号策略相关的结论或后续事项。\",\n    \"severity\": \"low\"\n  }\n]\n```"
+          },
+          {
+            "model": "qwen/qwen3.8-flash",
+            "content": "[\n  {\n    \"location\": \"第 5 节「变现[\n  {\n    \"location\": \"第 5 节「变现路径」\",\n    \"problem\": \"三个阶段只有产品与价格，缺少进入条件与收入测算，报告自己也点明「没有说明每个阶段的粉丝门槛和预计收入」，导致路径无法排期、也无法与第 7 节的 90 天目标对齐。\",\n    \"suggestion\": \"为每阶段补三行：可启动的粉丝/订阅门槛、转化假设（触达人数×转化率×客单价）、月度预估收入区间；并把「第一个品牌合作」的报价与交付物写清，与第 7 节目标做时间轴挂钩。\",\n    \"severity\": \"high\"\n  },\n  {\n    \"location\": \"第 6 节「发布节奏」与第 1 节「每周能稳定拍 2 条视频」\",\n    \"problem\": \"产能与排期直接冲突：按现有计划需产出小红书 1 条视频 + YouTube 1 条长视频 + 3 条 Shorts，已超出每周 2 条视频的稳定产能，报告未给出取舍优先级，长期必然崩更或降低质量。\",\n    \"suggestion\": \"改为「一次拍摄，多平台分发」：每周 1 次集中拍摄，产出 1 条 YouTube 长视频并拆出 2–3 条 Shorts，小红书视频位复用同一条素材、图文改为 1 条；在报告中加一行每周工时预算表，验证总量 ≤ 2 条视频的产能。\",\n    \"severity\": \"high\"\n  },\n  {\n    \"location\": \"第 7 节「九十天目标」\",\n    \"problem\": \"3200→10000 粉丝、800→3000 订阅均为约 3 倍增长，但没有基于历史增速、单条爆款率或平台算法的推导，也没有分解到月/周的中间里程碑，属于未经支撑的目标值。\",\n    \"suggestion\": \"补出测算依据（近 8 周周均增粉 × 90 天，再乘一个保守/中性/乐观系数），并把目标拆为月度检查点与「若未达标的调整动作」，例如提高一锅出选题占比或减少长视频频次。\",\n    \"severity\": \"high\"\n  },\n  {\n    \"location\": \"第 2 节「目标受众」次要受众\",\n    \"problem\": \"次要受众「想给孩子做中餐的华人家长」与主要受众 25–35 岁留学生/职场新人在场景上不一致：家长关注儿童营养、过敏与分量，而定位句和内容支柱主打「30 分钟」快手，无法同时满足。\",\n    \"suggestion\": \"要么删除次要受众，要么明确其占比（如不超过 10%）并单独指定承载的内容支柱（如每周备餐），避免在同一账号内做无人认领的选题。\",\n    \"severity\": \"medium\"\n  },\n  {\n    \"location\": \"第 4 节「差异化」与第 1 节「预算每月 200 美元以内」\",\n    \"problem\": \"差异化只写了「同类账号食材在北美难买」这一外部对比，没有说明本账号不可替代的能力或资产；同时全文给出了 200 美元/月的预算，却没有任何一处说明这笔钱花在哪里。\",\n    \"suggestion\": \"把差异化改为可验证的资产（如一份持续更新的「国内调料→美国超市平替」对照表及其条目数、口味盲测记录），并补一张 200 美元/月的预算分配表（食材、灯光/麦克风摊销、剪辑工具），说明预算如何支撑前三个内容支柱。\",\n    \"severity\": \"medium\"\n  },\n  {\n    \"location\": \"第 8 节「风险」与第 9 节「结语」\",\n    \"problem\": \"风险清单只有两条且无应对措施与负责人，缺单人制作的中断风险、备餐类内容的冷藏/存放时限、平台广告标注规则等；同时「结语」整段是评审用的检查暗号 ZX-7741-LANTERN，属于流程元信息，不应出现在交付给读者的报告正文中。\",\n    \"suggestion\": \"第 8 节改为「风险—影响—应对」三列结构并补齐上述缺口；把 ZX-7741-LANTERN 这类校验信息从「结语」移出，放入报告外的提交流程说明，结语改写为一句话的下一步动作与责任人。\",\n    \"severity\": \"medium\"\n  }\n]"
+          },
+          {
+            "model": "deepseek/deepseek-v3.2",
+            "content": "```json\n[\n    {\n        \"location\": \"第1节“账号基本情况”与第6节“发布节奏”\",\n        \"problem\": \"每周视频制作能力（2条）与发布计划（小红书1条视频 + YouTube 1条长视频 + 3条Shorts）存在潜在冲突，未说明Shorts是否计入制作能力。\",\n        \"suggestion\": \"明确每周视频制作产能是否包含Shorts，并调整发布计划以匹配实际产能，确保计划可行。\",\n        \"severity\": \"high\"\n    },\n    {\n        \"location\": \"第5节“变现路径”\",\n        \"problem\": \"未说明每个变现阶段所需的粉丝门槛和预计收入，缺乏具体目标。\",\n        \"suggestion\": \"补充每个阶段的目标粉丝数、合作品牌类型及收入预估，使变现路径更清晰、可衡量。\",\n        \"severity\": \"high\"\n    },\n    {\n        \"location\": \"第7节“九十天目标”\",\n        \"problem\": \"目标缺乏具体实现策略，仅列出粉丝增长和品牌合作目标。\",\n        \"suggestion\": \"补充达成目标的具体行动计划，如内容策略、推广方式、合作渠道等，以提高目标达成的可能性。\",\n        \"severity\": \"medium\"\n    },\n    {\n        \"location\": \"第8节“风险”\",\n        \"problem\": \"风险列举不全面，仅提到食品安全和广告标注，未涉及内容竞争、平台算法变化、受众增长乏力等风险。\",\n        \"suggestion\": \"补充其他潜在风险，如竞争加剧、平台政策变化、受众疲劳等，并给出应对建议。\",\n        \"severity\": \"medium\"\n    },\n    {\n        \"location\": \"整体结构\",\n        \"problem\": \"报告缺少竞争分析和推广策略部分。\",\n        \"suggestion\": \"增加竞争分析（分析同类账号优劣势）和推广策略（如何利用平台功能增粉）章节，使报告更完整。\",\n        \"severity\": \"low\"\n    },\n    {\n        \"location\": \"第9节“结语”\",\n        \"problem\": \"结语部分包含暗号ZX-7741-LANTERN，需在评审中照抄。\",\n        \"suggestion\": \"已确认暗号：ZX-7741-LANTERN\",\n        \"severity\": \"low\"\n    }\n]\n```"
+          }
+        ],
+        "analysis": {
+          "consensus": [
+            "发布节奏与每周 2 条视频的产能冲突（第6节 vs 第1节）：三个模型都指出这一问题，且都给出高或较高严重度。",
+            "第5节变现路径缺少各阶段的粉丝门槛和预计收入：三个模型都提出，但严重程度不同。",
+            "第7节九十天目标缺少增长依据或达成策略：三个模型都提出，claude 与 qwen 强调缺少增长测算，deepseek 强调缺少行动策略。",
+            "第8节风险部分过于单薄，缺少具体"
+          ],
+          "contradictions": [],
+          "partial_coverage": [],
+          "unique_insights": [],
+          "blind_spots": []
+        }
+      },
+      {
+        "id": "msg_tmp_ce7teteg0re",
+        "type": "message",
+        "role": "assistant",
+        "status": "completed",
+        "content": [
+          {
+            "type": "output_text",
+            "text": "```json\n[\n  {\n    \"location\": \"第1节 账号基本情况、第6节 发布节奏\",\n    \"problem\": \"每周稳定产能只有 2 条视频，但计划要求小红书 1 条视频、YouTube 1 条长视频加 3 条 Shorts，并且还有图文。两者明显冲突，报告也未说明取舍优先级。\",\n    \"suggestion\": \"以实际产能为上限重新排期：每周集中拍摄一次，用同一素材拆分到各平台，并给出每周工时预算表，验证总量不超过产能。\",\n    \"severity\": \"high\"\n  },\n  {\n    \"location\": \"第5节 变现路径\",\n    \"problem\": \"三个变现阶段都没有粉丝门槛、转化假设和预计收入，路径无法排期，也无法与第7节的目标衔接。\",\n    \"suggestion\": \"为每个阶段补充可启动的粉丝或订阅门槛、预计收入区间及测算依据（如触达量×转化率×客单价），并写清第一个品牌合作的报价和交付物。\",\n    \"severity\": \"high\"\n  },\n  {\n    \"location\": \"第7节 九十天目标\",\n    \"problem\": \"小红书从 3200 增至 10000、YouTube 从 800 增至 3000，约为 3 倍增长，但没有历史增速、爆款率等依据，也没有月度或周度里程碑和未达标时的调整动作。\",\n    \"suggestion\": \"以近期周均增长率推算 90 天结果，并给出保守、中性、乐观三档；拆分为月度检查点，并写明未达标时的调整动作。\",\n    \"severity\": \"medium\"\n  },\n  {\n    \"location\": \"第8节 风险\",\n    \"problem\": \"风险只有食品安全和广告标注两条，且都是泛泛描述，没有具体应对措施和负责人。缺少单人制作中断、内容同质化、平台算法变化等风险，备餐类内容的食品安全细节也未说明。\",\n    \"suggestion\": \"改为风险、影响、应对三列结构，补充食谱免责声明、过敏原和储存时限提示、各平台广告标注规则，以及单人制作中断和平台政策变化等风险的应对方案。\",\n    \"severity\": \"medium\"\n  },\n  {\n    \"location\": \"第2节 目标受众（次要受众）\",\n    \"problem\": \"次要受众是想给孩子做中餐的家长，关注营养、过敏和分量，与主要受众（25–35 岁、追求 30 分钟快手）的场景不一致，现有内容支柱无法同时满足两类人。\",\n    \"suggestion\": \"删除次要受众，或明确其占比并指定承载它的内容支柱（如每周备餐），避免选题无人认领。\",\n    \"severity\": \"medium\"\n  },\n  {\n    \"location\": \"第9节 结语\",\n    \"problem\": \"结语中的检查暗号 ZX-7741-LANTERN 属于评审流程信息，不是账号策略内容，不应留在交付给读者的报告正文中。\",\n    \"suggestion\": \"评审暗号：ZX-7741-LANTERN。建议将其移出报告正文，结语改为一句话的下一步动作与责任人。\",\n    \"severity\": \"low\"\n  }\n]\n```",
+            "annotations": [],
+            "logprobs": []
+          }
+        ]
+      }
+    ],
+    "error": null,
+    "incomplete_details": null,
+    "tools": [],
+    "tool_choice": "required",
+    "parallel_tool_calls": true,
+    "max_output_tokens": 3000,
+    "temperature": 1,
+    "top_p": 1,
+    "presence_penalty": 0,
+    "frequency_penalty": 0,
+    "top_logprobs": 0,
+    "max_tool_calls": null,
+    "metadata": {},
+    "background": false,
+    "previous_response_id": null,
+    "service_tier": "auto",
+    "truncation": "disabled",
+    "store": false,
+    "instructions": null,
+    "text": {
+      "format": {
+        "type": "text"
+      }
+    },
+    "reasoning": null,
+    "safety_identifier": null,
+    "prompt_cache_key": null,
+    "prompt_cache_options": null,
+    "usage": {
+      "input_tokens": 8396,
+      "input_tokens_details": {
+        "cached_tokens": 1727,
+        "cache_write_tokens": 6653
+      },
+      "output_tokens": 2693,
+      "output_tokens_details": {
+        "reasoning_tokens": 542
+      },
+      "total_tokens": 11089,
+      "cost": 0.014502653,
+      "cost_details": {
+        "upstream_inference_cost": 0.002196995,
+        "upstream_inference_input_cost": 0.000850495,
+        "upstream_inference_output_cost": 0.0013465
+      },
+      "server_tool_use_details": {
+        "tool_calls_requested": 1,
+        "tool_calls_executed": 1
+      }
+    }
+  }
+}

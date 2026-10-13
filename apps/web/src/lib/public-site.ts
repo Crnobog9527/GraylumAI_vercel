@@ -4,7 +4,6 @@
  * This code is proprietary and confidential.
  */
 
-import type { Metadata } from 'next';
 import { cache } from 'react';
 import { appRouter } from '@repo/api/src/root';
 import { createTRPCContext } from '@repo/api/src/trpc';
@@ -94,24 +93,3 @@ async function loadPublicSiteSettingsUncached(): Promise<PublicSiteSettings> {
 }
 
 export const getPublicSiteSettings = cache(loadPublicSiteSettingsUncached);
-
-export async function buildPublicPageMetadata(
-  title: string,
-  description: string,
-  keywords: string[] = ['AI', '社交媒体', '增长', '内容策略']
-): Promise<Metadata> {
-  const { siteName } = await getPublicSiteSettings();
-  const fullTitle = `${title} | ${siteName}`;
-
-  return {
-    title: fullTitle,
-    description,
-    keywords,
-    openGraph: {
-      title: fullTitle,
-      description,
-      type: 'website',
-      locale: 'zh_CN',
-    },
-  };
-}

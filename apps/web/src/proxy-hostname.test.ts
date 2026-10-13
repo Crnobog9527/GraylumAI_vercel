@@ -241,3 +241,16 @@ describe('public crawler resources', () => {
     }
   });
 });
+
+describe('public sitemap', () => {
+  it('serves sitemap.xml directly on every host without bypassing neighboring paths', () => {
+    for (const host of ['app.graylum.com', 'www.graylum.com', 'auth-staging.graylum.com', 'preview.vercel.app', 'localhost']) {
+      for (const path of ['/sitemap.xml', '/sitemap.xml?crawler=1']) {
+        expect(unstable_doesMiddlewareMatch({ config, url: `https://${host}${path}` })).toBe(false);
+      }
+    }
+    for (const url of ['/sitemapXxml', '/sitemap.xml/private', '/sitemap.xml.bak', '/sitemap.xmlx', '/zh-tw/sitemap.xml', '/profile']) {
+      expect(unstable_doesMiddlewareMatch({ config, url })).toBe(true);
+    }
+  });
+});

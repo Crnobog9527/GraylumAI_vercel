@@ -31,3 +31,9 @@ it('workbench generation keeps one system message and leads it with the identity
   expect(on[0].content).toBe(BRAND_IDENTITY_INSTRUCTIONS + '\n' + off[0].content);
   expect(on[1]).toEqual(off[1]);
 });
+
+it('workbench step summaries and generations never get the identity rule (they produce the artifact)', () => {
+  for (const purpose of ['summary', 'generation'] as const) {
+    expect(buildWorkbenchMessages('METHOD', { a: 1 }, purpose, true)).toEqual(buildWorkbenchMessages('METHOD', { a: 1 }, purpose));
+  }
+});

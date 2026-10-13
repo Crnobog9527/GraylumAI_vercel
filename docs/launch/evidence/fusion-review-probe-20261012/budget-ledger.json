@@ -1,0 +1,15 @@
+{
+  "taskLimitUsd": 2,
+  "closed": true,
+  "keys": {
+    "payg-profile.env": {
+      "var": "GRAYLUM_PAYG_TEST_OPENROUTER_KEY",
+      "usageBaseline": 12.238333515
+    },
+    "fusion-review.env": {
+      "var": "OPENROUTER_API_KEY",
+      "usageBaseline": 0
+    }
+  },
+  "note": "FUSION-REVIEW 实测（2026-10-12），实测已结束、闸门已关闭（closed）。usageBaseline 是各测试密钥在本任务开始前的累计用量（美元），已花费用由 budget.mjs 每次从 OpenRouter 现查。要再跑，须先有新的预算批准，再把 closed 改为 false，并按批准的金额调整 taskLimitUsd。"
+}

@@ -21,7 +21,7 @@ export const MENTOR_REPLY_LABEL = "给导师的回复";
 
 /** The card's fixed "其他" entry: move focus to the message box so the user answers in their own words. */
 export function focusReply() {
-  document.querySelector<HTMLTextAreaElement>(`textarea[aria-label="${MENTOR_REPLY_LABEL}"]`)?.focus();
+  document.querySelector<HTMLElement>(`[role="textbox"][aria-label="${MENTOR_REPLY_LABEL}"]`)?.focus();
 }
 
 /** Where the shown text comes from, as named by its latest snapshot (offset 0); the stop request repeats it. */

@@ -1,0 +1,37 @@
+{
+  "mode": "text",
+  "model": "anthropic/claude-sonnet-5.5",
+  "at": "2026-10-12T12:29:31.106Z",
+  "results": [
+    {
+      "i": 0,
+      "status": 200,
+      "ms": 31600,
+      "cost": 0.049044,
+      "finish": "stop",
+      "provider": "Claude Platform on AWS",
+      "out_tokens": 4383,
+      "ok": false,
+      "errs": [
+        "canary_dropped"
+      ],
+      "error": null,
+      "report_chars": 1991
+    },
+    {
+      "i": 1,
+      "status": 200,
+      "ms": 32840,
+      "cost": 0.052224,
+      "finish": "stop",
+      "provider": "Claude Platform on AWS",
+      "out_tokens": 4701,
+      "ok": false,
+      "errs": [
+        "canary_dropped"
+      ],
+      "error": null,
+      "report_chars": 2012
+    }
+  ]
+}

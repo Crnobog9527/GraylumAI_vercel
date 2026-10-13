@@ -68,7 +68,7 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
   const ownerDatabase=isPayg?paygOwnerDatabase(options.database,{executionId,epoch:execution.epoch!}):options.database;
   const ownerRpc=<T>(name:string,value:Record<string,unknown>)=>rpc<T>(name,value,ownerDatabase);
   if(execution.state==='cancelled')return {state:'cancelled' as const,
-   ...(execution.unavailableReason==='provider_history'||execution.unavailableReason==='preflight'
+   ...(['provider_history','preflight','platform_review'].includes(execution.unavailableReason??'')
     ?{unavailable:execution.unavailableReason}:{})};
   if(execution.cancelRequested){
    await billing.recoverReceipts(execution.runId);
