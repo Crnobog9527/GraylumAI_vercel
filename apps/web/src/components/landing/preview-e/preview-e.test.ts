@@ -13,6 +13,8 @@ const plan = (level: string, monthly: number, yearly: number) => ({
   id: `plan-${level}`, name: level, level, price: { monthly, yearly },
   credits: { monthly: 1000, monthlyBonus: 0 }, discount: 0, checkoutReady: { monthly: true, yearly: true },
 });
+// renderToStaticMarkup escapes quotes and ampersands in text.
+const escaped = (text: string) => text.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/'/g, '&#x27;');
 const ALL_ON = Object.fromEntries(Object.keys(LANDING_FEATURES).map(key => [key, true])) as LandingFlags;
 
 function render(flags: LandingFlags) {
@@ -35,11 +37,11 @@ describe('style sample E', () => {
     expect([...positions].sort((a, b) => a - b)).toEqual(positions);
     for (const text of [HERO.promise, HERO.primaryCta, HERO.secondaryCta, VOICE_WALL.lede, RISK_REVERSAL.title, FINAL_ACTION.cta,
       data.heroNote, data.finalNote, data.promise.map(part => part.text).join(''), ...FINAL_ACTION.paths]) {
-      expect(html).toContain(text);
+      expect(html).toContain(escaped(text));
     }
-    for (const note of data.notes) expect(html).toContain(note.answer);
-    for (const step of data.flowSteps) for (const text of [step.title, step.demo, step.note]) expect(html).toContain(text);
-    for (const group of data.faqGroups) for (const item of group.items) expect(html).toContain(item.question);
+    for (const note of data.notes) expect(html).toContain(escaped(note.answer));
+    for (const step of data.flowSteps) for (const text of [step.title, step.demo, step.note]) expect(html).toContain(escaped(text));
+    for (const group of data.faqGroups) for (const item of group.items) expect(html).toContain(escaped(item.question));
     expect(html).toContain('aria-label="Pro"');
     expect(html).toContain('aria-label="Gold"');
     expect(html).toContain('id="how-it-works"');
