@@ -1,7 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { expect, it } from 'vitest';
 import { BRAND_IDENTITY_INSTRUCTIONS, BRAND_REPLY_EN, BRAND_REPLY_ZH, BRAND_REPLY_ZH_HANT, withBrandIdentity } from './brandIdentity';
-import { buildWorkbenchMessages } from '../artifacts/generation';
 
 it('carries the Owner-approved replies verbatim (版本一 + 称呼 A, 2026-10-12)', () => {
   expect(BRAND_REPLY_ZH).toBe('我是 Graylum 的 AI 自媒体陪跑教练，背后整合了多家领先的 AI 技术，具体用了哪些属于内部技术细节，不对外公开。我们继续聊你的账号吧？');
@@ -22,18 +21,4 @@ it('never claims a self-built model and forbids confirming any vendor guess', ()
 it('prepends only when the switch is on, leaving the rest byte-identical', () => {
   expect(withBrandIdentity('Skill', false)).toBe('Skill');
   expect(withBrandIdentity('Skill', true)).toBe(BRAND_IDENTITY_INSTRUCTIONS + '\nSkill');
-});
-
-it('workbench generation keeps one system message and leads it with the identity when on', () => {
-  const off = buildWorkbenchMessages('METHOD', { a: 1 }, 'reply');
-  const on = buildWorkbenchMessages('METHOD', { a: 1 }, 'reply', true);
-  expect(on).toHaveLength(2);
-  expect(on[0].content).toBe(BRAND_IDENTITY_INSTRUCTIONS + '\n' + off[0].content);
-  expect(on[1]).toEqual(off[1]);
-});
-
-it('workbench step summaries and generations never get the identity rule (they produce the artifact)', () => {
-  for (const purpose of ['summary', 'generation'] as const) {
-    expect(buildWorkbenchMessages('METHOD', { a: 1 }, purpose, true)).toEqual(buildWorkbenchMessages('METHOD', { a: 1 }, purpose));
-  }
 });

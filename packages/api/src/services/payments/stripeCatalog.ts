@@ -73,7 +73,9 @@ export async function loadCurrentStripePrices(input: {
     .eq('channel', 'stripe').eq('merchant_namespace', input.scope.merchant).eq('mode', input.scope.mode)
     .eq('object_type', 'price').eq('offer_kind', 'standard').eq('is_current', true)
     // The admin catalog manages recurring plan and pack prices; wallet one-time membership prices (0221) are separate.
-    .eq('price_usage', input.kind === 'credit_package' ? 'package' : 'subscription').in(column, input.ids);
+    .eq('price_usage', input.kind === 'credit_package' ? 'package' : 'subscription')
+    // It also manages only the generic pack price: Pro/Gold member pack prices (0211 tiers) belong to method checkout.
+    .eq('package_tier', 'legacy').in(column, input.ids);
   if (result.error || !Array.isArray(result.data)) throw new Error('PAY_COMMON_MAPPING_READ_FAILED', { cause: result.error });
   for (const ref of result.data) {
     const key = `${ref[column]}:${ref.billing_cycle}`;

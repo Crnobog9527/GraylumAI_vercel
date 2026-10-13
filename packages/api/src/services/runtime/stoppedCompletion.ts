@@ -12,6 +12,8 @@ import { executorRpc, type RuntimeExecutorOptions } from './executorRpc';
 import type { authoritativeBilling } from '../bill2/service';
 import type { RuntimeExecution } from './paygResume';
 import type { RuntimeProgress } from './progress';
+import { runtimeIdentityGuard } from '../modelIdentity/runtimeGuard';
+import { frozenBrandIdentity } from '../modelIdentity/brandIdentity';
 
 type StopCall = {sequence:number;requestHash:string;phase:string;dispatched:boolean;settled:boolean;responsePending?:boolean};
 export type StopExecution = RuntimeExecution & {
@@ -94,6 +96,10 @@ export function stoppedCompletion(options: RuntimeExecutorOptions, billing: Retu
       if(valid&&!(tool&&context.hostTurnContext?.cardContract))body=agentTurnResult(body,output,Boolean(tool),tool
         ?questionMessageFromArguments(tool.function?.arguments??''):undefined,true,Boolean(context.mentorText)).body;
     }else if(message?.tool_calls?.length)valid=false;
+    // MODEL-IDENTITY-GUARD: redact before rebuilding the projection, in the live executor's order, so the
+    // stop source derived here matches the replacement snapshot the client saw (review P1).
+    const identity=runtimeIdentityGuard(frozenBrandIdentity(context.instructions));
+    body=identity.body(body);
     try{
       if(valid){
         const fitted=prepareNativePrimary(body,{}, {envelopeOrder:context.envelopeOrder,appendCard:Boolean(context.mentorText),
@@ -117,7 +123,7 @@ export function stoppedCompletion(options: RuntimeExecutorOptions, billing: Retu
     let result=valid?stoppedResult({executionId,format:agent?'agent':step?'step':'plain',body,
       appendCard:Boolean(context.mentorText),stopAt:execution.stop!.stopAt,source:execution.stop?.source,expectedSource:source,
       capacityLimited,primaryComplete:choice?.finish_reason!=='length',attachedOrganizer:Boolean(context.attachedOrganizer),
-      ...(typeof summary==='string'?{summary}:{})}):null;
+      ...(typeof summary==='string'?{summary:identity.summary(summary)}:{})}):null;
     if(result&&!await allowedOutput({actorId:await options.actor(),executionId,body:result.body,summary:result.summary}))result=null;
     const database=execution.billing.contractVersion==='bill2.v2'
       ?paygOwnerDatabase(options.database,{executionId,epoch:execution.epoch!}):options.database;

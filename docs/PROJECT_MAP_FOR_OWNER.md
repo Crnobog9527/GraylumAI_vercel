@@ -38,7 +38,7 @@
 
 旧 `/chat` 链路（`app/api/ai/stream`、`routers/ai.ts`、`services/modelRouter.ts`、`services/contextManager.ts` 等）
 已由 LEGACY-CLOSE 删除，核对记录见 [LEGACY_CLOSE.md](launch/implementation/LEGACY_CLOSE.md)。
-旧 `/workbench` 成果页和旧成果生成仍在，按 LEGACY-CLOSE 第三段删除。旧计费服务 `services/billing.ts` 仍有其他调用方，未删除。
+旧 `/workbench` 成果页、旧成果生成、旧工作台搜索和自研内容检查（`contentModerator`、`aiOutputFilter`）也已删除，`/workbench` 跳到 `/positioning`；`/workbench/marketplace`、`/workbench/search` 是新工作区页面，保留。旧计费服务 `services/billing.ts` 仍被定时对账等引用，未删除。
 所有积分只有一个余额和流水，没有第二个钱包。
 
 BILL-PAYG 本次只做 [PR-A 计费核心](https://github.com/Crnobog9527/GraylumAI_vercel/pull/617)，

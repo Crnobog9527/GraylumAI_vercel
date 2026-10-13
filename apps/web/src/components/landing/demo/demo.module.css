@@ -1,0 +1,46 @@
+/* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+/*
+ * Only the demo's window and its layout. Everything inside the window (messages, question card, composer,
+ * checklist, report dialog) uses the workbench's own modules, so the demo follows the conversation page.
+ */
+.window{position:relative;display:flex;flex-direction:column;height:min(760px,calc(100dvh - 40px));min-height:600px;overflow:hidden;border:1px solid var(--gl-border);
+  border-radius:var(--gl-radius-card);background:var(--gl-canvas);box-shadow:var(--gl-shadow-panel);text-align:left}
+.badge{flex:none;padding:0 8px;border-radius:var(--gl-radius-pill);background:var(--gl-accent-tag);color:var(--gl-accent-tag-text);
+  font-size:var(--gl-text-micro);line-height:20px}
+.chrome{display:flex;align-items:center;gap:10px;min-height:40px;padding:0 14px;border-bottom:1px solid var(--gl-border);
+  background:var(--gl-surface);color:var(--gl-text-secondary-aa);font-size:var(--gl-text-caption)}
+.chrome p{flex:1;min-width:0;margin:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.chrome button{flex:none;min-height:32px;padding:4px 10px;border:0;border-radius:var(--gl-radius-sm);background:none;color:var(--gl-text-secondary-aa);
+  font:inherit;cursor:pointer}
+.chrome button:hover{background:var(--gl-surface-muted);color:var(--gl-text)}
+.tabs{display:none}
+.shell{flex:1;min-height:0;display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:8px;padding:8px}
+.shell[data-right=closed]{grid-template-columns:minmax(0,1fr)}
+.shell[data-right=closed]>.rightPane{display:none}
+.centerPane,.rightPane{min-width:0;min-height:0}
+.overlay{position:absolute;inset:0;z-index:5;display:flex;align-items:center;justify-content:center;padding:16px;background:rgba(0,0,0,.28)}
+.overlay>div{max-height:100%}
+.thinking{color:var(--gl-text-secondary-aa)!important}
+.restart{flex:none}
+.failed{margin:auto;color:var(--gl-text-secondary-aa);font-size:var(--gl-text-ui)}
+.dot{display:inline-block;width:7px;height:7px;margin-left:6px;border-radius:50%;background:var(--gl-accent-gold);vertical-align:2px}
+.toConfirm{display:none}
+/* The workbench's #8a8a8a/#999 small text is below 4.5:1 on white; public pages use the AA grey. */
+.window small,.window footer p,.window header p,.window [data-question-card] > p:first-child,
+.window [data-question-card] [role=group] p,.window [data-message-role] > span{color:var(--gl-text-secondary-aa)}
+/* The demo must never trap the page's scroll: its log hands the gesture back to the page at its ends. */
+.window [role=log]{overscroll-behavior:auto!important}
+.window [role=log]:focus{outline:none}
+.window button:focus-visible{outline:2px solid var(--gl-text);outline-offset:1px}
+@media(max-width:760px){
+  .window{height:70dvh;min-height:520px;max-height:680px}
+  .tabs{display:grid;grid-template-columns:1fr 1fr;gap:4px;margin:8px 8px 0;padding:3px;border-radius:var(--gl-radius-card);background:var(--gl-surface-muted)}
+  .tabs button{min-height:36px;border:0;border-radius:var(--gl-radius-control);background:none;color:var(--gl-text-secondary-aa);font:inherit;font-size:var(--gl-text-ui);cursor:pointer}
+  .tabs button[aria-pressed=true]{background:var(--gl-surface);color:var(--gl-text);font-weight:500;box-shadow:var(--gl-shadow-raised)}
+  .shell,.shell[data-right=closed]{grid-template-columns:minmax(0,1fr);padding:8px 6px 6px}
+  .shell[data-panel=chat]>.rightPane,.shell[data-panel=checklist]>.centerPane{display:none}
+  .shell[data-panel=checklist]>.rightPane{display:flex}
+  .window .hideNarrow{display:none}
+  .window .attachment{max-height:min(200px,26dvh)}
+  .toConfirm{display:flex;width:100%;margin-top:8px}
+}

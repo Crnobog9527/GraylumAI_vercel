@@ -84,6 +84,29 @@ describe('settings dashboard structured settings isolation', () => {
     });
   });
 
+  it('reads the staging key set with payment structures and retired keys (LEGACY-CLOSE 500)', async () => {
+    const retired = ['assistant_model_id', 'chat_billing_hint', 'chat_prompt_text', 'chat_show_model_selector',
+      'chat_welcome_message', 'enable_free_tier', 'enable_long_text_warning', 'enable_prompt_cache',
+      'enable_smart_routing', 'enable_smart_search_decision', 'free_tier_messages', 'input_credits_per_1k',
+      'long_text_warning_threshold', 'max_messages_per_conversation', 'output_credits_per_1k',
+      'search_decision_min_confidence', 'show_token_usage_stats', 'smart_routing_min_confidence', 'web_search_credits'];
+    const kept = { primary_model_id: 'd04a4800-2d3a-43b3-8af9-cb960572e34f', v3_summary_max_tokens: '4096',
+      search_surcharge_credits: '15', home_show_onboarding: 'true', max_input_characters: '10000',
+      billing_credits_per_usd: '100', library_upload_enabled: false, fusion_compare_max_models: 4 };
+    const { admin } = fixture([
+      ...structuredSettings,
+      { key: 'payment_method_routes', value: { version: 3, card: { enabled: false },
+        wechat_pay: { enabled: true, annualVerified: false }, alipay: { enabled: true, annualVerified: false } } },
+      { key: 'payment_terms_version', value: { version: 'fixture-terms' } },
+      ...retired.map(key => ({ key, value: 'true' })),
+      ...Object.entries(kept).map(([key, value]) => ({ key, value })),
+    ]);
+    const { systemSettings } = await admin.getSettingsDashboard();
+    expect(systemSettings).toMatchObject(kept);
+    expect(systemSettings).not.toHaveProperty('payment_method_routes');
+    expect(systemSettings).not.toHaveProperty('payment_terms_version');
+  });
+
   it('does not validate dedicated values even when they are malformed or serialized', async () => {
     const { admin } = fixture(structuredSettings.map(row => ({ ...row, value: 'invalid dedicated value' })));
     await expect(admin.getSettingsDashboard()).resolves.toEqual({ systemSettings: {}, membershipPlans: [] });
