@@ -1,5 +1,6 @@
 import { libraryRouter } from './routers/library';
 import { reportModelRouter } from './routers/reportModel';
+import { socialMediaFlagRouter } from './routers/socialMediaFlag';
 import { opcRouter } from './routers/opc';
 import { runtimeRouter } from './routers/runtime';
 import { workbenchRouter } from './routers/workbench';
@@ -20,13 +21,13 @@ import { invitationRouter } from './routers/invitation';
 import { checkinRouter } from './routers/checkin';
 import { adminRouter } from './routers/admin';
 import { modulesRouter } from './routers/modules';
-import { aiRouter } from './routers/ai';
 import { diagnosticsRouter } from './routers/diagnostics';
 import { costsRouter } from './routers/costs';
 import { paymentsRouter } from './routers/payments';
 import { skillsRouter } from './routers/skills';
 import { accountRouter } from './routers/account';
 import { dataUseRouter } from './routers/dataUse';
+import { adminStaleRoundsRouter } from './routers/adminStaleRounds';
 
 /**
  * 主路由器
@@ -45,13 +46,14 @@ export const appRouter = router({
   billingReport: billingReportRouter,
   mentorBudget: mentorBudgetRouter,
   reportModel: reportModelRouter,
+  socialMediaFlag: socialMediaFlagRouter,
   runtimeRateLimits: runtimeRateLimitsRouter,
   modelIdentity: modelIdentityRouter,
   invitation: invitationRouter,
   checkin: checkinRouter,
   admin: adminRouter,
+  adminStaleRounds: adminStaleRoundsRouter,
   modules: modulesRouter,
-  ai: aiRouter,
   diagnostics: diagnosticsRouter,
   costs: costsRouter,
   payments: paymentsRouter,

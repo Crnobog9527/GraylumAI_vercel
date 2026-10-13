@@ -4,6 +4,10 @@ import { freezePurchaseSnapshot } from './contracts';
 import { assertPurchaseReceipt, checkoutIdempotencyKey, majorToCents, snapshotAmountDue, type StripeScope } from './purchaseFacts';
 import { assertStripePurchasePrice } from './stripePurchaseEvidence';
 
+/** PAY-STRIPE-MP card checkout: `card` uses Managed Payments, `card_cn` plain Stripe. A discounted
+ * subscription is only ever the server-selected first-month coupon on the plan's standard price. */
+export type StripeCardCheckout = Readonly<{ managedPayments: boolean; couponId?: string }>;
+
 export type StripeCheckoutIntent = {
   id: string;
   userId: string;
@@ -16,7 +20,22 @@ export type StripeCheckoutIntent = {
   sessionId: string | null;
   recover?: boolean;
   walletMethod?: 'wechat_pay' | 'alipay';
+  card?: StripeCardCheckout;
 };
+
+type MethodParams = Pick<Stripe.Checkout.SessionCreateParams,
+  'payment_method_types' | 'payment_method_options' | 'managed_payments' | 'billing_address_collection'>;
+function paymentMethodParams(input: { recurring: boolean; walletMethod?: 'wechat_pay' | 'alipay'; card?: StripeCardCheckout }): MethodParams {
+  if (input.walletMethod) {
+    return { payment_method_types: [input.walletMethod],
+      ...(input.walletMethod === 'wechat_pay' ? { payment_method_options: { wechat_pay: { client: 'web' as const } } } : {}) };
+  }
+  // Managed Payments rejects payment_method_types; Stripe chooses the methods and adds tax at checkout.
+  if (input.card?.managedPayments) return { managed_payments: { enabled: true } };
+  // Mainland card: no Managed Payments; the billing country stays on the order for later review.
+  if (input.card) return { payment_method_types: ['card'], billing_address_collection: 'required' as const };
+  return { payment_method_types: input.recurring ? ['card'] : ['card', 'alipay'] };
+}
 
 export function buildStripeCheckoutRequest(input: {
   orderId: string;
@@ -27,12 +46,17 @@ export function buildStripeCheckoutRequest(input: {
   appUrl: string;
   expiresAt: number;
   walletMethod?: 'wechat_pay' | 'alipay';
+  card?: StripeCardCheckout;
 }): Stripe.Checkout.SessionCreateParams {
   const snapshot = freezePurchaseSnapshot(input.snapshot);
   const amount = snapshotAmountDue(snapshot);
   const recurring = snapshot.item_type === 'membership_plan' && !input.walletMethod;
-  if (recurring && majorToCents(snapshot.discount) !== 0) {
-    throw new Error('PAY_COMMON_SUBSCRIPTION_DISCOUNT_UNSUPPORTED');
+  const discounted = majorToCents(snapshot.discount) !== 0;
+  const coupon = input.card?.couponId;
+  if (input.card && input.walletMethod) throw new Error('PAY_COMMON_CHECKOUT_REQUEST_INVALID');
+  if (recurring && discounted && !coupon) throw new Error('PAY_COMMON_SUBSCRIPTION_DISCOUNT_UNSUPPORTED');
+  if (coupon !== undefined && (!recurring || !discounted || !/^[A-Za-z0-9_-]{1,200}$/.test(coupon))) {
+    throw new Error('PAY_COMMON_CHECKOUT_REQUEST_INVALID');
   }
   const origin = new URL(input.appUrl);
   if (!['http:', 'https:'].includes(origin.protocol) || origin.username || origin.password
@@ -41,23 +65,45 @@ export function buildStripeCheckoutRequest(input: {
     orderId: input.orderId, userId: input.userId, itemId: snapshot.item_id,
     itemType: snapshot.item_type, billingCycle: snapshot.billing_cycle, priceId: input.priceId,
   };
-  const lineItem: NonNullable<Stripe.Checkout.SessionCreateParams['line_items']>[number] = majorToCents(snapshot.discount) === 0
+  const lineItem: NonNullable<Stripe.Checkout.SessionCreateParams['line_items']>[number] = !discounted || coupon
     ? { price: input.priceId, quantity: 1 }
     : { price_data: { currency: snapshot.currency, unit_amount: amount,
       product_data: { name: input.productName } }, quantity: 1 };
   return {
     mode: recurring ? 'subscription' : 'payment',
-    payment_method_types: input.walletMethod ? [input.walletMethod] : recurring ? ['card'] : ['card', 'alipay'],
-    ...(input.walletMethod === 'wechat_pay' ? { payment_method_options: { wechat_pay: { client: 'web' as const } } } : {}),
-    ...(recurring ? {} : { customer_creation: 'always' }),
+    ...paymentMethodParams({ recurring, walletMethod: input.walletMethod, card: input.card }),
+    ...(recurring || input.card?.managedPayments ? {} : { customer_creation: 'always' }),
     client_reference_id: input.userId,
     line_items: [lineItem],
+    ...(coupon ? { discounts: [{ coupon }] } : {}),
     expires_at: input.expiresAt,
     success_url: `${origin.origin}/profile?tab=subscription&checkout=success&session_id={CHECKOUT_SESSION_ID}`,
     cancel_url: `${origin.origin}/profile?tab=subscription&checkout=canceled&session_id={CHECKOUT_SESSION_ID}`,
     metadata,
     ...(recurring ? { subscription_data: { metadata } } : { payment_intent_data: { metadata } }),
   };
+}
+
+const METHOD_KEYS = ['payment_method_types', 'payment_method_options', 'managed_payments', 'billing_address_collection'] as const;
+function sameMethodParams(request: Stripe.Checkout.SessionCreateParams, expected: MethodParams) {
+  return METHOD_KEYS.every(key => JSON.stringify(request[key] ?? null) === JSON.stringify(expected[key] ?? null));
+}
+
+/** Stripe tax code for AI-as-a-service, personal use: required on every Managed Payments product. */
+export const MANAGED_PAYMENTS_TAX_CODE = 'txcd_10105001';
+
+/** The first-month coupon must take exactly the snapshot discount off one invoice, nothing else. */
+export function assertFirstMonthCoupon(coupon: Stripe.Coupon, input: {
+  couponId: string; snapshot: unknown; scope: StripeScope; productId: string | null;
+}) {
+  const snapshot = freezePurchaseSnapshot(input.snapshot);
+  const products = coupon.applies_to?.products;
+  if (coupon.id !== input.couponId || coupon.object !== 'coupon' || !coupon.valid || coupon.livemode !== (input.scope.mode === 'live')
+    || coupon.percent_off !== null || coupon.amount_off !== majorToCents(snapshot.discount) || coupon.currency !== snapshot.currency
+    || coupon.duration !== 'once' || (products && (!input.productId || !products.includes(input.productId)))) {
+    throw new Error('PAY_COMMON_PRICE_MISMATCH');
+  }
+  return coupon;
 }
 
 // Only a complete scoped scan can prove absence. An incomplete scan always requires reconciliation.
@@ -89,7 +135,7 @@ async function findOriginalCheckout(stripe: Pick<Stripe, 'checkout'>, intent: St
 // Checkout adapter entry: admission and request persistence must precede this call.
 // Persisting a provider result is a separate short database transaction; no lock spans the network.
 export async function dispatchStripeCheckoutIntent(input: {
-  stripe: Pick<Stripe, 'prices' | 'checkout'>;
+  stripe: Pick<Stripe, 'prices' | 'checkout'> & Partial<Pick<Stripe, 'coupons'>>;
   intent: StripeCheckoutIntent;
   scope: StripeScope;
   persistSession: (session: Stripe.Checkout.Session) => Promise<void>;
@@ -112,11 +158,18 @@ export async function dispatchStripeCheckoutIntent(input: {
     const snapshot = freezePurchaseSnapshot(intent.snapshot);
     const item = intent.request.line_items?.[0];
     const discounted = majorToCents(snapshot.discount) !== 0;
-    if (intent.request.mode !== (snapshot.item_type === 'membership_plan' && !intent.walletMethod ? 'subscription' : 'payment')
+    const recurring = snapshot.item_type === 'membership_plan' && !intent.walletMethod;
+    const coupon = intent.card?.couponId;
+    if ((intent.card && intent.walletMethod) || (coupon !== undefined && (!recurring || !discounted))
+      || !sameMethodParams(intent.request, paymentMethodParams({ recurring, walletMethod: intent.walletMethod, card: intent.card }))
+      || JSON.stringify(intent.request.discounts ?? null) !== JSON.stringify(coupon ? [{ coupon }] : null)) {
+      throw new Error('PAY_COMMON_CHECKOUT_REQUEST_INVALID');
+    }
+    if (intent.request.mode !== (recurring ? 'subscription' : 'payment')
       || intent.request.metadata?.itemId !== snapshot.item_id || intent.request.metadata?.itemType !== snapshot.item_type
       || intent.request.metadata?.billingCycle !== snapshot.billing_cycle || intent.request.metadata?.priceId !== intent.priceId
       || intent.request.line_items?.length !== 1 || item?.quantity !== 1
-      || (discounted ? item.price_data?.unit_amount !== snapshotAmountDue(snapshot)
+      || (discounted && !coupon ? item.price_data?.unit_amount !== snapshotAmountDue(snapshot)
         || item.price_data.currency !== snapshot.currency || Boolean(item.price)
         : item.price !== intent.priceId || Boolean(item.price_data))) {
       throw new Error('PAY_COMMON_CHECKOUT_REQUEST_INVALID');
@@ -141,9 +194,17 @@ export async function dispatchStripeCheckoutIntent(input: {
         if (input.createIfMissing === false || !Number.isSafeInteger(intent.request.expires_at) || intent.request.expires_at! <= now) {
           throw new Error('PAY_COMMON_CHECKOUT_RECONCILIATION_REQUIRED');
         }
-        const price = await stripe.prices.retrieve(intent.priceId);
-        assertStripePurchasePrice({ price, priceId: intent.priceId, snapshot: intent.snapshot, scope, walletMethod: intent.walletMethod });
-        if (intent.walletMethod && input.closeBeforeDispatch
+        const managed = intent.card?.managedPayments === true;
+        const price = managed ? await stripe.prices.retrieve(intent.priceId, { expand: ['product'] })
+          : await stripe.prices.retrieve(intent.priceId);
+        assertStripePurchasePrice({ price, priceId: intent.priceId, snapshot: intent.snapshot, scope, walletMethod: intent.walletMethod,
+          ...(managed ? { taxCode: MANAGED_PAYMENTS_TAX_CODE } : {}) });
+        if (coupon) {
+          if (!stripe.coupons) throw new Error('PAY_COMMON_CHECKOUT_REQUEST_INVALID');
+          assertFirstMonthCoupon(await stripe.coupons.retrieve(coupon), { couponId: coupon, snapshot: intent.snapshot, scope,
+            productId: typeof price.product === 'string' ? price.product : price.product?.id ?? null });
+        }
+        if ((intent.walletMethod || intent.card) && input.closeBeforeDispatch
           && intent.request.expires_at! - Math.floor(Date.now() / 1000) < 30 * 60 + 15) {
           mayAbort = false;
           await input.closeBeforeDispatch();
@@ -160,9 +221,12 @@ export async function dispatchStripeCheckoutIntent(input: {
       || session.client_reference_id !== intent.userId || (intent.sessionId && session.id !== intent.sessionId)) {
       throw new Error('PAY_COMMON_ATTEMPT_IDENTITY_MISMATCH');
     }
-    assertPurchaseReceipt({ snapshot, amount: session.amount_total, currency: session.currency,
-      livemode: session.livemode, scope });
-    if (session.mode !== intent.request.mode) throw new Error('PAY_COMMON_RECEIPT_MISMATCH');
+    assertPurchaseReceipt({ snapshot, amount: session.amount_total, tax: session.total_details?.amount_tax,
+      currency: session.currency, livemode: session.livemode, scope });
+    if (session.mode !== intent.request.mode
+      || (intent.card && (session.managed_payments?.enabled ?? false) !== intent.card.managedPayments)) {
+      throw new Error('PAY_COMMON_RECEIPT_MISMATCH');
+    }
     await input.persistSession(session);
     return session;
   } catch (error) {

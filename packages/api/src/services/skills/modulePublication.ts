@@ -93,6 +93,8 @@ export async function saveModuleSkill(db: SupabaseClient, actorId: string, value
     p_request_id: value.requestId, p_expected_version: value.expectedVersion,
     p_manifest: descriptor, p_hash_payload: packageHashPayload(descriptor), p_files: files, p_workflow: workflow,
   });
+  // POSITIONING-GATE (0219): a module marked social-media related cannot become the positioning Skill.
+  if (error?.message === 'SOCIAL_MEDIA_FLAG_POSITIONING_SKILL') throw new Error('SOCIAL_MEDIA_FLAG_POSITIONING_SKILL');
   if (error || !data) throw new Error('Skill 发布未完成，请重新读取模块，检查版本和模型后再发布。');
   return data as { moduleId: string; revisionId: string; version: number };
 }

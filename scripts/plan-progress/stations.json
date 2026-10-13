@@ -264,7 +264,7 @@
     {
       "id": "paywall",
       "name": "付费墙和会员",
-      "plain": "银行卡订阅用 Waffo，微信和支付宝单笔会员与积分包用 Stripe；生成报告需要会员。",
+      "plain": "银行卡订阅用 Stripe（MP 覆盖的国家由 Stripe 代收代缴税，未覆盖的国家照常卖并开税务门槛监控），中国大陆用户可选微信、支付宝单笔或大陆银行卡订阅；生成报告需要会员。",
       "tasks": [
         {
           "name": "ENTITLEMENTS",
@@ -276,11 +276,11 @@
         },
         {
           "name": "PAY-WAFFO",
-          "plain": "接通银行卡订阅与钱包单笔付款，复用订单、会员积分和人工退款。"
+          "plain": "原 Waffo 收款，2026-10-12 起冻结：停用新购、代码保留，改用 Stripe。"
         },
         {
-          "name": "PAY-STRIPE-CARD-FALLBACK",
-          "plain": "Waffo 出问题时，可手动把新的银行卡购买切到 Stripe 的备选通道。"
+          "name": "PAY-STRIPE-MP",
+          "plain": "银行卡订阅改用 Stripe（MP 覆盖的国家代收代缴税，未覆盖的照常卖并监控纳税门槛）；中国大陆用户可选微信、支付宝或大陆银行卡。正式开通、税务编码、正式密钥和回调到上线前再逐项请你批准。"
         },
         {
           "name": "PAY-FOUNDER",
@@ -296,7 +296,7 @@
         },
         {
           "name": "PAY-DISPUTE-GUARD",
-          "plain": "上线前拒付通知、可撤回冻结和停续费，独立交付。"
+          "plain": "上线前接收 Stripe 拒付通知、可撤回冻结和停续费，独立交付。"
         },
         {
           "name": "PAYWALL",
@@ -306,26 +306,16 @@
           "name": "EXPERT-CONSULT",
           "plain": "报告末尾加“预约真人专家咨询”的入口。"
         }
-      ],
-      "waitingForOwner": [
-        {
-          "task": "PAY-STRIPE-CARD-FALLBACK",
-          "text": "启用前须完成 Stripe 收款的税务核实（Graylum 是卖方）；正式配置另行批准。"
-        },
-        {
-          "task": "PAY-WAFFO",
-          "text": "等供应商能力核实和最小核心待定事项；商品配置及钱包大额真实付款、退款另行批准。"
-        }
       ]
     },
     {
       "id": "publish",
       "name": "一键发布、看作品数据",
-      "plain": "用户把内容一键发到 9 个海外社媒平台，并看到自己作品的数据。",
+      "plain": "用户把内容一键发到海外社媒平台，看到自己作品的数据（Pro 近 30 天）；Gold 会员另有 AI 每周自动复盘、给出调整建议。",
       "tasks": [
         {
           "name": "PUBLISH-MONITOR",
-          "plain": "接入 Post for Me 做多平台发布和数据监控。"
+          "plain": "接入 Post for Me 做多平台发布和数据监控，小红书、抖音读公开数据，支持手动导入；每周自动复盘仅限 Gold。"
         }
       ],
       "waitingForOwner": [
@@ -342,7 +332,15 @@
       "tasks": [
         {
           "name": "PUBLIC-SITE",
-          "plain": "域名合并、SEO/GEO 基础设置、公开页面重做和新落地页。"
+          "plain": "域名合并、SEO/GEO 基础设置、公开页面重做和新落地页。域名合并的正式环境设置、创始人背景措辞到对应那一步再请你批准。"
+        },
+        {
+          "name": "ANALYTICS",
+          "plain": "知道访客从哪来（含 AI 推荐）、多少人注册和付费；Cookie 弹窗用 Termly。开账号、给编号和后台设置需要你来做。"
+        },
+        {
+          "name": "SKILL-I18N-HOOK",
+          "plain": "为英文用户准备：Skill 界面文字可配英文，AI 按用户语言回答。"
         },
         {
           "name": "MODEL-IDENTITY-GUARD",
@@ -351,12 +349,6 @@
         {
           "name": "POSITIONING-GATE",
           "plain": "没做定位的用户聊社媒运营时，先引导他做定位或导入已有定位。"
-        }
-      ],
-      "waitingForOwner": [
-        {
-          "task": "PUBLIC-SITE",
-          "text": "首页核心词等你用关键词规划师导出中文搜索量；域名合并涉及的正式环境设置逐项批准；创始人背景措辞由你确认。"
         }
       ]
     },
@@ -399,7 +391,7 @@
         },
         {
           "task": "REL-1",
-          "text": "等你：上线前升级 Vercel Pro、准备客服邮箱、生成隐私条款和服务条款，最后批准上线。"
+          "text": "等你：上线前升级 Vercel Pro、准备客服邮箱、生成隐私条款和服务条款，在 OpenRouter 账号和各 workspace 关闭“允许用于训练”，批准开启 Stripe Tax 门槛监控，最后批准上线。"
         }
       ]
     },
@@ -421,18 +413,12 @@
           "name": "CHARGEBACK",
           "plain": "拒付结果出来后的处理和申诉材料导出。"
         }
-      ],
-      "waitingForOwner": [
-        {
-          "task": "CHARGEBACK",
-          "text": "等你：向 Waffo 核实拒付怎么通知、要哪些材料、期限和手续费。"
-        }
       ]
     },
     {
       "id": "integrations",
-      "name": "连接飞书和社媒账号",
-      "plain": "连上飞书和用户的社媒账号，自动同步数据。",
+      "name": "连接飞书",
+      "plain": "连上飞书等外部服务（社媒数据同步已并入上线前的\"一键发布、看作品数据\"）。",
       "afterLaunch": true,
       "tasks": [
         {
@@ -445,7 +431,7 @@
         },
         {
           "name": "SOCIAL-SYNC",
-          "plain": "自动同步社媒账号的数据。"
+          "plain": "原「自动同步社媒数据」任务，2026-10-13 并入上线前的「一键发布、看作品数据」。"
         }
       ]
     },
@@ -474,6 +460,18 @@
         {
           "name": "LIB-EXT",
           "plain": "更多文件格式、全文搜索和外部导入。"
+        }
+      ]
+    },
+    {
+      "id": "english",
+      "name": "产品英文版",
+      "plain": "英文用户能看到英文界面、英文 Skill 文字和英文网站页面。",
+      "afterLaunch": true,
+      "tasks": [
+        {
+          "name": "I18N-EN",
+          "plain": "界面英文化、语言提示条、英文 Skill 文字和英文页面。"
         }
       ]
     }

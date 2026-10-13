@@ -7,7 +7,6 @@ import { readFile } from 'node:fs/promises';
 import { packageHash, packageHashPayload, activateSkill, discoverSkills, type PackageDescriptor } from '../skills/loader';
 import { publishSkillPackage, type PackagePublication } from '../skills/publication';
 import { databaseSkillSource } from '../skills/databaseSource';
-import { resolveActiveModulePrompt } from '../chatRuntime';
 import { databaseResearchStore } from '../research/store';
 import { creditsToUnits, contractHash } from '../research/agentKey';
 import { localMcpFixture, schema } from './fixtures/agentKeyServer';
@@ -150,13 +149,8 @@ describe('V3 real PostgreSQL and PostgREST',()=>{
     await expect(activateSkill(src,found.selection,{task:'gather',maxContextBytes:10000})).rejects.toThrow();
   }
  });
- it('keeps legitimate text runtime via private client and rejects directory/revoked/missing service',async()=>{
-  const id=randomUUID();await sql.query("insert into skills(id,skill_key,draft_content) values($1,$2,'Private text method')",[id,id]);const m=randomUUID();await sql.query("insert into modules(id,title,skill_id,active) values($1,'text',$2,true)",[m,id]);
-  await admin.rpc('atomic_publish_skill',{p_skill_id:id,p_published_by:actor});
-  const prompt=await resolveActiveModulePrompt(admin,{moduleId:m});expect(prompt.content).toBe('Private text method');
-  const rev=(await sql.query('select id from skill_revisions where skill_id=$1',[id])).rows[0].id;await admin.rpc('revoke_skill_revision',{p_revision_id:rev,p_actor_id:actor});
-  await expect(resolveActiveModulePrompt(admin,{moduleId:m})).rejects.toThrow();
-  const p=await fixture(0);const d=await seed(p);await publishSkillPackage(admin,actor,p);await expect(resolveActiveModulePrompt(admin,{moduleId:d})).rejects.toThrow();
+ it('rejects a directory Skill without the private service client',async()=>{
+  const p=await fixture(0);const d=await seed(p);await publishSkillPackage(admin,actor,p);
   await expect(discoverSkills(databaseSkillSource({userClient:user,privateClient:null,moduleId:d,skillId:p.id}))).rejects.toThrow();
  });
  it('runs protected administrator payload publication through actual profile/RPC HTTP',async()=>{

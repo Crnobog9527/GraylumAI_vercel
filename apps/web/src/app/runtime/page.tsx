@@ -11,7 +11,6 @@ import { followTranscript, transcriptSignature } from '@/components/chat/chat-sc
 import { WorkComposer } from '@/components/opc/work-composer';
 import { WorkspaceFrame } from '@/components/opc/workspace-frame';
 import { ContentEditor } from '@/components/opc/content-editor';
-import { ContentErasureDialog } from '@/components/opc/content-erasure-dialog';
 import composerStyles from '@/components/opc/work-composer.module.css';
 import workStyles from './runtime-work.module.css';
 import { QueryNotice } from '@/components/opc/query-notice';
@@ -64,7 +63,6 @@ function RuntimeWorkspace({routeSession,routeModule}:{routeSession:string;routeM
  // The user's message, shown at once until the server records its turn.
  const [outgoing,setOutgoing]=useState<{text:string;executionId?:string}|null>(null);
  const [gateStops,setGateStops]=useState<Record<string,string>>({});
- const [erasingAnswer,setErasingAnswer]=useState('');
  const [userStops,setUserStops]=useState<string[]>([]);
  const capacityKey=(executionId:string)=>'opc-runtime-capacity:'+sessionId+':'+executionId;
  function markCapacity(executionId:string){try{sessionStorage.setItem(capacityKey(executionId),'1');}catch{/* The current alert still explains the failure. */}setCapacityIds(ids=>ids.includes(executionId)?ids:[...ids,executionId]);}
@@ -322,13 +320,11 @@ function RuntimeWorkspace({routeSession,routeModule}:{routeSession:string;routeM
      actions={[{label:CHAT_ACTION.retry,disabled:editItem.isPending,onClick:()=>void setType('unknown')}]}>内容类型保存结果待核实。</ChatInlineNotice>}
     {workItem&&contentType==='unknown'&&<section className="rounded-xl border p-4" aria-label="确认内容类型"><h2>这条选题准备做成什么内容？</h2><p>先确认形式，再一起细化重点和结构。</p><div className="flex gap-2 mt-3">{['article','image_text','video'].map(value=><Button key={value} disabled={busy||editItem.isPending||typePending} onClick={()=>setType(value)}>{typeLabel[value]}</Button>)}</div></section>}{executions?.map((e,index)=><div key={e.executionId}>{e.createdAt&&(index===0||!executions[index-1].createdAt||transcriptDay(executions[index-1].createdAt!)!==transcriptDay(e.createdAt))&&<p className={workStyles.dateMarker}>{transcriptDate(e.createdAt)}</p>}<article className={workStyles.turn}>
     {e.input&&!e.input.startsWith('[OPC_WORK_CONTINUE_V1]')&&<p className={workStyles.userMessage}>{e.input.startsWith('[OPC_VIDEO_PACKAGE_V1]')?(e.input.includes('只生成分镜脚本')?'请基于已定稿口播稿生成分镜脚本。':e.input.includes('只生成剪辑建议')?'请基于已保存的分镜生成剪辑建议。':'请先完成分镜脚本，再基于分镜生成剪辑建议。'):e.input.replace(/^\[OPC_SCRIPT_V1\]\s*/, '')}</p>}
-    <div className={workStyles.agentMessage}><div className={workStyles.agentIdentity}><img src="/graylum-logo.png" alt=""/><span>Graylum · {e.skillExecution&&e.state==='completed'&&!e.input?.startsWith('[OPC_WORK_CONTINUE_V1]')&&!e.input?.startsWith('[OPC_VIDEO_PACKAGE_V1]')?'已完成本轮建议':'增长顾问'}</span></div><div>
+    <div className={workStyles.agentMessage}><div className={workStyles.agentIdentity}><img src="/graylum-logo.png" alt=""/><span>Graylum · AI 自媒体陪跑教练</span>{e.skillExecution&&e.state==='completed'&&!e.input?.startsWith('[OPC_WORK_CONTINUE_V1]')&&!e.input?.startsWith('[OPC_VIDEO_PACKAGE_V1]')&&<span className="ml-2 text-xs opacity-70">已完成本轮建议</span>}</div><div>
      {workItem&&e.skillExecution&&e.state==='completed'&&!e.input?.startsWith('[OPC_WORK_CONTINUE_V1]')&&!e.input?.startsWith('[OPC_VIDEO_PACKAGE_V1]')&&e.contentAvailable?<div className={workStyles.proposal}><div className={workStyles.proposalHead}><strong>建议稿</strong><span>{versions.some(v=>v.kind===(isVideo?'script':'brief')&&v.executionId===e.executionId)?'已采用':'尚未采用'}</span></div><MessageMarkdown className={workStyles.reply} text={displayReply(e.input,e.body??e.primaryBody)}/></div>:showsReply(e)&&(e.contentAvailable?<MessageMarkdown className={workStyles.reply} text={displayReply(e.input,e.body??e.primaryBody)}/>:<p className={workStyles.reply}>来源已不可用，暂不展示此内容。</p>)}
      {workItem&&contentType!=='unknown'&&e.state==='completed'&&e.skillExecution&&!e.input?.startsWith('[OPC_VIDEO_PACKAGE_V1]')&&!e.input?.startsWith('[OPC_WORK_CONTINUE_V1]')&&<div className="mt-3 flex flex-wrap gap-2">{versions.some(v=>v.kind===(isVideo?'script':'brief')&&v.executionId===e.executionId)?<Link className="underline" href={'/library?item='+workItem.workItemId+'&return='+sessionId}>{isVideo?'这版口播稿已定稿':'已采用为草稿'} · 查看</Link>:<Button disabled={busy} onClick={()=>finalizeScript(e.executionId)}>{isVideo?'将这条回复定稿为口播稿':'采用为当前草稿'}</Button>}</div>}
      {workItem&&contentType==='unknown'&&e.state==='completed'&&e.skillExecution&&e.contentAvailable&&!e.input?.startsWith('[OPC_WORK_CONTINUE_V1]')&&!e.input?.startsWith('[OPC_VIDEO_PACKAGE_V1]')&&<div className="mt-2">{saved.data?.find((result:{artifactId:string;version:number})=>result.artifactId===e.executionId)?<p role="status">已保存成果 · 第 {saved.data.find((result:{artifactId:string;version:number})=>result.artifactId===e.executionId)?.version} 版</p>:<Button variant="outline" disabled={saveWorkResult.isPending} onClick={()=>persistSkillResult(e.executionId)}>保存 Skill 成果</Button>}</div>}
      <ChatNoticeList notices={[...turnNotices(e),...payg.turnNotices(e,busy)]}/>
-     {!isOpenTurn(e.state)&&e.contentAvailable&&<button type="button" className={workStyles.eraseAnswer}
-      onClick={()=>setErasingAnswer(e.executionId)}>永久删除这条回答</button>}
     </div></div>
    </article></div>)}
    {isVideo&&currentScript&&videoPromptEnded&&(!currentStoryboard||!currentEditing)&&<Button variant="outline" onClick={()=>{localStorage.removeItem('opc-video-ended:'+currentScript.id);setVideoUiRevision(v=>v+1);}}>继续这版口播稿的分镜或剪辑</Button>}
@@ -343,6 +339,5 @@ function RuntimeWorkspace({routeSession,routeModule}:{routeSession:string;routeM
    <WorkComposer value={input} onChange={updateInput} onSend={()=>void send()}
     sendDisabled={busy||Boolean(view.data?.activeExecution)||!workContextReady||!choices.data||!activeSelection} sessionId={sessionId} skillId={activeSelection.startsWith('skill:')?activeSelection.slice(6):''} onSkillChange={id=>{setSelection(id?'skill:'+id:ordinary);if(id)localStorage.setItem('opc-runtime-skill:'+sessionId,id);else localStorage.removeItem('opc-runtime-skill:'+sessionId);}} note={workItem?'本次讨论参考当前工作的最新成果。Enter 发送，Shift + Enter 换行。':'可以自由提问；Agent 按需查阅相关资料。Enter 发送，Shift + Enter 换行。'}/>
   </div></footer>}
-  {erasingAnswer&&<ContentErasureDialog target={{kind:'answer',id:erasingAnswer}} onClose={()=>setErasingAnswer('')}/>}
  </main></WorkspaceFrame>;
 }

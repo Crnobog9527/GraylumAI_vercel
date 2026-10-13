@@ -482,14 +482,12 @@ test.describe('Authenticated Security', () => {
     );
   });
 
-  test('should enforce self-only access for tickets and conversations across users', async () => {
+  // LEGACY-CLOSE removed the old chat conversation procedures; ticket isolation remains covered here.
+  test('should enforce self-only access for tickets across users', async () => {
     const userClient = await createAuthedTrpcClient(authStatePaths.user);
     const adminClient = await createAuthedTrpcClient(authStatePaths.admin);
     const suffix = Date.now();
 
-    const adminConversation = await adminClient.chat.createConversation.mutate({
-      title: `Security isolation ${suffix}`,
-    });
     const adminTicket = await adminClient.ticket.createTicket.mutate({
       title: `Security ticket ${suffix}`,
       description: `Security ticket body ${suffix}`,
@@ -498,20 +496,11 @@ test.describe('Authenticated Security', () => {
 
     try {
       await expectDenied(
-        userClient.chat.getMessages.query({
-          conversationId: adminConversation.id,
-        })
-      );
-
-      await expectDenied(
         userClient.ticket.getTicketById.query({
           ticketId: adminTicket.id,
         })
       );
     } finally {
-      await adminClient.chat.deleteConversation.mutate({
-        conversationId: adminConversation.id,
-      }).catch(() => undefined);
       await adminClient.ticket.closeTicket.mutate({
         ticketId: adminTicket.id,
       }).catch(() => undefined);

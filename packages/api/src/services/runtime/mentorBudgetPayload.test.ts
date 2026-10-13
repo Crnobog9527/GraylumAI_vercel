@@ -3,6 +3,7 @@ import { expect, it, vi } from 'vitest';
 import { writeFileSync } from 'node:fs';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { runtimeAdmissionService } from './admission';
+import { testIdentityGuard } from '../__tests__/fixtures/runtimeGates';
 import { postgresJsonbBytes } from './payloadSize';
 import { PURPOSE_INPUT_CAPS, PURPOSE_OUTPUT_CAP, type PurposeBudgets } from './purposeBudgets';
 import { packageHash, sha256, type SkillSource } from '../skills/loader';
@@ -86,8 +87,12 @@ it('46KB resource fits configured input; overflowing frozen payload is rejected 
   const normal = await fixture(46000, false, config);
   await normal.run();
   expect(postgresJsonbBytes(normal.captured().p_billing)).toBeLessThan(262144 - 8192);
+  // This fixture sits exactly between the input and payload limits; the identity prefix (on by default)
+  // would trip the input limit first, so it is switched off to keep testing the payload guard.
+  testIdentityGuard.enabled = false;
   const oversized = await fixture(162000);
-  await expect(oversized.run()).rejects.toThrow('RUNTIME_FROZEN_PAYLOAD_TOO_LARGE');
+  try { await expect(oversized.run()).rejects.toThrow('RUNTIME_FROZEN_PAYLOAD_TOO_LARGE'); }
+  finally { testIdentityGuard.enabled = true; }
   expect(oversized.writes).toEqual([]);
   expect(oversized.captured()).toBeUndefined();
 });

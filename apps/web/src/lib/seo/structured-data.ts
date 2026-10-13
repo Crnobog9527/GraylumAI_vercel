@@ -4,7 +4,7 @@
  * This code is proprietary and confidential.
  */
 
-import { absoluteUrl, LEGAL_NAME, SITE_LOCALES, SITE_NAME, SITE_ORIGIN, type SiteLocale } from './site';
+import { absoluteUrl, DEFAULT_LOCALE, LEGAL_NAME, ONE_LINE_DEFINITION, SITE_LOCALES, SITE_NAME, SITE_ORIGIN, type SiteLocale } from './site';
 
 // JSON-LD builders (docs/launch/SEO_GEO_SPEC.md section 10). Everything here must match what the
 // page visibly shows: no HowTo, no self-written Review or AggregateRating.
@@ -21,6 +21,7 @@ export function organizationJsonLd(options: { supportEmail?: string | null; same
     '@id': ORGANIZATION_ID,
     name: SITE_NAME,
     legalName: LEGAL_NAME,
+    description: ONE_LINE_DEFINITION[DEFAULT_LOCALE],
     url: absoluteUrl('/'),
     logo: absoluteUrl('/graylum-logo.png'),
   };
@@ -45,7 +46,15 @@ export function websiteJsonLd(): JsonLdObject {
   };
 }
 
-export function softwareApplicationJsonLd(options: { description: string; path?: string }): JsonLdObject {
+export function softwareApplicationJsonLd(options: {
+  description: string;
+  path?: string;
+  // Prices exactly as the page's price cards show them; without it the entry says "free to start".
+  offers?: { name: string; price: number }[];
+}): JsonLdObject {
+  const offers = options.offers?.length
+    ? options.offers.map(offer => ({ '@type': 'Offer', name: offer.name, price: String(offer.price), priceCurrency: 'USD' }))
+    : { '@type': 'Offer', price: '0', priceCurrency: 'USD' };
   return {
     '@context': 'https://schema.org',
     '@type': 'SoftwareApplication',
@@ -54,8 +63,7 @@ export function softwareApplicationJsonLd(options: { description: string; path?:
     operatingSystem: 'Web',
     url: absoluteUrl(options.path ?? '/'),
     description: options.description,
-    // Free to start; paid plans are listed on the pricing page.
-    offers: { '@type': 'Offer', price: '0', priceCurrency: 'USD' },
+    offers,
     publisher: { '@id': ORGANIZATION_ID },
   };
 }

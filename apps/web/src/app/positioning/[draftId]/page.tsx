@@ -1188,7 +1188,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
                   <div ref={attachChatScroll} onScroll={onChatScroll} role="log" aria-label="完整导师消息" aria-live="polite"
                     className="max-h-[55vh] min-h-56 space-y-3 overflow-y-auto overscroll-contain pr-2">
                     {mentorExecutions.length===0&&<div className="mr-4 rounded-xl border border-[var(--border-primary)] p-3">
-                      <span className={resultStyles.agentIdentity}><img src="/graylum-logo.png" alt=""/>Graylum · 增长顾问</span>
+                      <span className={resultStyles.agentIdentity}><img src="/graylum-logo.png" alt=""/>Graylum · AI 自媒体陪跑教练</span>
                       <p className={`mt-1 whitespace-pre-wrap break-words ${resultStyles.messageBody}`}>
                         {existingEntry ? EXISTING_WELCOME : d.accountRevision ? "已保留原正式定位的全部步骤。请选择需要修改的部分；未变化且已确认的内容无需重新填写。修改保存为草稿，核对后可更新正式版本。" : "我会在同一个对话里陪你完成全部步骤。你聊到的信息会自动记到右侧清单的对应栏目，每一步齐了以后由你核对并确认一次。"}
                       </p>
@@ -1229,7 +1229,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
                             aria-label={summaryTurn ? "本步小结卡" : undefined}
                             className="mr-4 rounded-xl border border-[var(--border-primary)] p-3">
                             <span className={resultStyles.agentIdentity}><img src="/graylum-logo.png" alt=""/>
-                              {summaryTurn ? "本步小结" : openingTurn ? "导师主动引导" : "导师"}{turnLabel}</span>
+                              {summaryTurn ? "本步小结" : openingTurn ? "AI 自媒体陪跑教练 · 主动引导" : "AI 自媒体陪跑教练"}{turnLabel}</span>
                             <MentorMarkdown className={`mt-1 ${resultStyles.messageBody}`} text={reply.text} live={Boolean(live)} result={execution}/>
                             {summaryTurn && !next && !s.valid && turn?.stepId === step.id && summaryShown(execution) &&
                               <p className="mt-2 text-xs text-[var(--text-secondary)]">小结不会自动确认这一步；请在下方确认卡核对后再点确认。</p>}
@@ -1247,7 +1247,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
                       <span>你 · {steps.find(candidate => candidate.id === pendingBubble.stepId)?.title}</span>
                       <p className={`whitespace-pre-wrap ${resultStyles.messageBody}`}>
                         {shownInput(pendingBubble.input)}</p><ChatPendingStatus sending={running}/></div>}
-                  {liveOnly&&(liveOnly.text||!liveOnly.card)&&<div data-message-role="assistant" aria-label="导师正在回复" className="mr-4 rounded-xl border border-[var(--border-primary)] p-3"><span className={resultStyles.agentIdentity}><img src="/graylum-logo.png" alt=""/>导师</span>{liveOnly.text?<MentorMarkdown className={`mt-1 ${resultStyles.messageBody}`} text={liveOnly.text} live/>:<p className={`mt-1 ${resultStyles.messageBody}`}>导师正在思考…</p>}</div>}
+                  {liveOnly&&(liveOnly.text||!liveOnly.card)&&<div data-message-role="assistant" aria-label="AI 自媒体陪跑教练正在回复" className="mr-4 rounded-xl border border-[var(--border-primary)] p-3"><span className={resultStyles.agentIdentity}><img src="/graylum-logo.png" alt=""/>AI 自媒体陪跑教练</span>{liveOnly.text?<MentorMarkdown className={`mt-1 ${resultStyles.messageBody}`} text={liveOnly.text} live/>:<p className={`mt-1 ${resultStyles.messageBody}`}>正在思考…</p>}</div>}
                   <ChatNoticeList notices={[...payg.blockedNotices(mentorExecutions, busy),
                     nudgeNotice(nudged, () => void ask(step, checklistUpdatedInput(nudged)), sendLocked, hasPendingStepRequest),
                     ...mentorTailNotices({ livePhase: live.phase, stop: live.stopAction,

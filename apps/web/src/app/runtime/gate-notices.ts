@@ -26,7 +26,7 @@ export function runtimeExecutionNotice(result: unknown): string | null {
   if (notice) return notice;
   if (!result || typeof result !== 'object' || !('unavailable' in result)) return null;
   if (result.unavailable === 'provider_history') return PROVIDER_HISTORY_NOTICE;
-  if (result.unavailable === 'preflight') return PLATFORM_FAILURE_NOTICE;
+  if (result.unavailable === 'preflight' || result.unavailable === 'platform_review') return PLATFORM_FAILURE_NOTICE;
   if (result.unavailable === 'output_truncated') return OUTPUT_TRUNCATED_NOTICE;
   return gateResultNotice(result.unavailable);
 }

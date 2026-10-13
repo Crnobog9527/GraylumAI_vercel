@@ -1,0 +1,126 @@
+{
+  "scenario": "ok",
+  "tag": "ws1",
+  "elapsedMs": 11309,
+  "status": 200,
+  "error": null,
+  "request": {
+    "model": "anthropic/claude-haiku-5.5",
+    "input": "<941 chars>",
+    "tools": [
+      {
+        "type": "openrouter:fusion",
+        "parameters": {
+          "analysis_models": [
+            "anthropic/claude-haiku-5.5",
+            "deepseek/deepseek-v3.2",
+            "qwen/qwen3.8-flash"
+          ],
+          "model": "anthropic/claude-haiku-5.5",
+          "max_tool_calls": 1,
+          "max_completion_tokens": 2000
+        }
+      }
+    ],
+    "tool_choice": "required",
+    "max_output_tokens": 3000
+  },
+  "response": {
+    "id": "gen-1791808719-MbE4BldWBjaOGm76WkP5",
+    "object": "response",
+    "created_at": 1791808719,
+    "model": "anthropic/claude-haiku-5.5",
+    "status": "completed",
+    "completed_at": 1791808728,
+    "output": [
+      {
+        "type": "openrouter:fusion",
+        "id": "st_tmp_djhmakh301",
+        "status": "completed",
+        "error": "Fusion panel stage failed: All analysis models failed to produce a response",
+        "failure_reason": "all_panels_failed",
+        "failed_models": [
+          {
+            "model": "anthropic/claude-haiku-5.5",
+            "error": "responses request failed: {\"error\":{\"message\":\"Tool 'openrouter:web_search' is blocked by this workspace's server tool policy. A workspace admin can allow it on the workspace's Server Tools page.\",\"code\":403,\"metadata\":{\"provider_name\":null,\"previous_errors\":[{\"code\":403,\"message\":\"Tool 'openrouter:web_search' is blocked by this workspace's server tool policy. A workspace admin can allow it on the workspace's Server Tools page.\"},{\"code\":403,\"message\":\"Tool 'openrouter:web_search' is blocked by this workspace's server tool policy. A workspace admin can allow it on the workspace's Server Tools page.\"},{\"code\":403,\"message\":\"Tool 'openrouter:web_search' is blocked by this workspace's server tool policy. A workspace admin can allow it on the workspace's Server Tools page.\"},{\"code\":403,\"message\":\"Tool 'openrouter:web_search' is blocked by this workspace's server tool policy. A workspace admin can allow it on the workspace's Server Tools page.\"}]}},\"user_id\":\"<redacted>\"}",
+            "status_code": 403
+          },
+          {
+            "model": "deepseek/deepseek-v3.2",
+            "error": "responses request failed: {\"error\":{\"message\":\"Tool 'openrouter:web_search' is blocked by this workspace's server tool policy. A workspace admin can allow it on the workspace's Server Tools page.\",\"code\":403,\"metadata\":{\"provider_name\":null,\"previous_errors\":[{\"code\":403,\"message\":\"Tool 'openrouter:web_search' is blocked by this workspace's server tool policy. A workspace admin can allow it on the workspace's Server Tools page.\"},{\"code\":403,\"message\":\"Tool 'openrouter:web_search' is blocked by this workspace's server tool policy. A workspace admin can allow it on the workspace's Server Tools page.\"},{\"code\":403,\"message\":\"Tool 'openrouter:web_search' is blocked by this workspace's server tool policy. A workspace admin can allow it on the workspace's Server Tools page.\"},{\"code\":403,\"message\":\"Tool 'openrouter:web_search' is blocked by this workspace's server tool policy. A workspace admin can allow it on the workspace's Server Tools page.\"},{\"code\":403,\"message\":\"Tool 'openrouter:web_search' is blocked by this workspace's server tool policy. A workspace admin can allow it on the workspace's Server Tools page.\"},{\"code\":403,\"message\":\"Tool 'openrouter:web_search' is blocked by this workspace's server tool policy. A workspace admin can allow it on the workspace's Server Tools page.\"},{\"code\":403,\"message\":\"Tool 'openrouter:web_search' is blocked by this workspace's server tool policy. A workspace admin can allow it on the workspace's Server Tools page.\"}]}},\"user_id\":\"<redacted>\"}",
+            "status_code": 403
+          },
+          {
+            "model": "qwen/qwen3.8-flash",
+            "error": "responses request failed: {\"error\":{\"message\":\"Tool 'openrouter:web_search' is blocked by this workspace's server tool policy. A workspace admin can allow it on the workspace's Server Tools page.\",\"code\":403,\"metadata\":{\"provider_name\":null,\"previous_errors\":[{\"code\":403,\"message\":\"Tool 'openrouter:web_search' is blocked by this workspace's server tool policy. A workspace admin can allow it on the workspace's Server Tools page.\"}]}},\"user_id\":\"<redacted>\"}",
+            "status_code": 403
+          }
+        ]
+      },
+      {
+        "id": "msg_tmp_x4wwhxlku0n",
+        "type": "message",
+        "role": "assistant",
+        "status": "completed",
+        "content": [
+          {
+            "type": "output_text",
+            "text": "评审团没有产出结果，所以我无法输出合并后的修改意见 JSON 数组。\n\n调用 `openrouter:fusion` 时，三个评审模型（claude-haiku-5.5、deepseek-v3.2、qwen3.8-flash）全部失败，返回的错误是：\n\n> Tool 'openrouter:web_search' is blocked by this workspace's server tool policy.\n\n这说明工作区的服务端工具策略禁止了 `openrouter:web_search`。即使我的请求要求\"不要联网\"，评审模型的调用仍会带上这个工具，因此被拒绝。要解决这个问题，需要工作区管理员在 Server Tools 页面允许该工具，或者调整策略。\n\n每次请求只能调用一次 fusion，所以我不能在当前请求里重试。\n\n可以选择以下方式继续：\n1. 管理员放开 `openrouter:web_search` 后，我重新发起一次评审。\n2. 我直接在这里按同样格式写一份修改意见 JSON 数组，并明确标注为\"非评审团输出\"，最后一条照抄原文暗号 ZX-7741-LANTERN。\n\n你希望用哪种方式？",
+            "annotations": [],
+            "logprobs": []
+          }
+        ]
+      }
+    ],
+    "error": null,
+    "incomplete_details": null,
+    "tools": [],
+    "tool_choice": "required",
+    "parallel_tool_calls": true,
+    "max_output_tokens": 3000,
+    "temperature": 1,
+    "top_p": 1,
+    "presence_penalty": 0,
+    "frequency_penalty": 0,
+    "top_logprobs": 0,
+    "max_tool_calls": null,
+    "metadata": {},
+    "background": false,
+    "previous_response_id": null,
+    "service_tier": "auto",
+    "truncation": "disabled",
+    "store": false,
+    "instructions": null,
+    "text": {
+      "format": {
+        "type": "text"
+      }
+    },
+    "reasoning": null,
+    "safety_identifier": null,
+    "prompt_cache_key": null,
+    "prompt_cache_options": null,
+    "usage": {
+      "input_tokens": 5880,
+      "input_tokens_details": {
+        "cached_tokens": 0,
+        "cache_write_tokens": 5864
+      },
+      "output_tokens": 1848,
+      "output_tokens_details": {
+        "reasoning_tokens": 401
+      },
+      "total_tokens": 7728,
+      "cost": 0.0016586,
+      "cost_details": {
+        "upstream_inference_cost": 0.0016586,
+        "upstream_inference_input_cost": 0.0007346,
+        "upstream_inference_output_cost": 0.000924
+      },
+      "server_tool_use_details": {
+        "tool_calls_requested": 1,
+        "tool_calls_executed": 1
+      }
+    }
+  }
+}
