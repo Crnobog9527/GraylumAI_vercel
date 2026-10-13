@@ -21,6 +21,8 @@ describe('TikHub routes', () => {
     expect(paths).not.toContain('/instagram/v2/fetch_user_posts');
     expect(paths).not.toContain('/instagram/v2/search_reels');
     expect(paths).toContain('/douyin/search/fetch_video_search_v2');
+    // No follower count without the unverified relation endpoint, so no Bilibili profile route yet.
+    expect(Object.keys(TIKHUB_ROUTES).some(key => key.startsWith('bilibili:'))).toBe(false);
     expect(paths).toContain('/instagram/v3/get_user_posts');
   });
 

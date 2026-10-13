@@ -127,6 +127,8 @@ describe('callFirecrawl', () => {
     const body = { success: true, data: { metadata: { statusCode: 200, creditsUsed: 1 } } };
     expect(await callFirecrawl('https://example.com/a', deps(jsonFetch(200, body))))
       .toMatchObject({ outcome: 'failed', reason: 'EMPTY_OR_UNRECOGNIZED', items: [], supplierMayCharge: true });
+    const blank = { success: true, data: { markdown: ' \n\n  ', metadata: { statusCode: 200, creditsUsed: 1 } } };
+    expect(await callFirecrawl('https://example.com/a', deps(jsonFetch(200, blank)))).toMatchObject({ outcome: 'failed', reason: 'EMPTY_OR_UNRECOGNIZED' });
   });
 
   it('keeps missing credits null on success', async () => {

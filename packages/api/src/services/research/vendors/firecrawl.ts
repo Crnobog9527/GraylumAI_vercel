@@ -84,7 +84,7 @@ export async function callFirecrawl(rawUrl: string, deps: VendorDeps): Promise<R
     return { ...base, outcome: 'failed', reason: 'PDF_NOT_SUPPORTED', httpStatus: 200, supplierMayCharge: true, usage };
   }
   // No recognizable page body means nothing was delivered, whatever `success` says.
-  if (markdown === undefined) {
+  if (markdown === undefined || markdown.trim() === '') {
     return { ...base, outcome: 'failed', reason: 'EMPTY_OR_UNRECOGNIZED', httpStatus: 200, supplierMayCharge: true, usage };
   }
   const clipped = clip(markdown, MAX_MARKDOWN_CHARS);

@@ -31,10 +31,8 @@ export const TIKHUB_ROUTES: Partial<Record<`${SocialPlatform}:${SocialKind}`, Ti
     method: 'GET', path: '/xiaohongshu/app_v2/search_notes',
     params: ({ keyword }) => ({ keyword: keyword!, page: 1, sort_type: 'general' }),
   },
-  // The Bilibili profile carries no follower count; the relation endpoint is untested (RT-7).
-  'bilibili:account_profile': {
-    method: 'GET', path: '/bilibili/web/fetch_user_profile', account: 'numeric', params: ({ account }) => ({ uid: account! }),
-  },
+  // Bilibili is deliberately absent: its profile endpoint has no follower count and the relation
+  // endpoint that supplies it is unverified. RT-7 adds both together, or the platform stays unsupported.
   'weibo:account_posts': {
     method: 'GET', path: '/weibo/app/fetch_user_timeline', account: 'numeric',
     params: ({ account }) => ({ uid: account!, page: 1, filter_type: 'all' }),
