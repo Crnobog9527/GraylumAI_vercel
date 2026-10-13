@@ -122,6 +122,8 @@ describe('callTikhub', () => {
   it('reports an unreadable 200 as unknown (possibly billed, never resent) and out-of-range dates as missing', async () => {
     expect(await callTikhub({ platform: 'x', kind: 'account_profile', account: 'NASA' }, deps(jsonFetch(200, '<html>'))))
       .toMatchObject({ outcome: 'unknown', reason: 'RESPONSE_NOT_JSON', usage: { units: null }, supplierMayCharge: true });
+    expect(await callTikhub({ platform: 'x', kind: 'account_profile', account: 'NASA' }, deps(jsonFetch(200, ''))))
+      .toMatchObject({ outcome: 'unknown', reason: 'RESPONSE_EMPTY' });
     expect(await callTikhub({ platform: 'x', kind: 'account_profile', account: 'NASA' }, deps(jsonFetch(502, '<html>'))))
       .toMatchObject({ outcome: 'failed', reason: 'HTTP_502' });
     const result = await callTikhub({ platform: 'tiktok', kind: 'account_posts', account: 'natgeo' },

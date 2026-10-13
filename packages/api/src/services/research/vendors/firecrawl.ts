@@ -83,6 +83,10 @@ export async function callFirecrawl(rawUrl: string, deps: VendorDeps): Promise<R
   if (/pdf/i.test(contentType) || markdown?.trimStart().startsWith('JVBERi0')) {
     return { ...base, outcome: 'failed', reason: 'PDF_NOT_SUPPORTED', httpStatus: 200, supplierMayCharge: true, usage };
   }
+  // No recognizable page body means nothing was delivered, whatever `success` says.
+  if (markdown === undefined) {
+    return { ...base, outcome: 'failed', reason: 'EMPTY_OR_UNRECOGNIZED', httpStatus: 200, supplierMayCharge: true, usage };
+  }
   const clipped = clip(markdown, MAX_MARKDOWN_CHARS);
   const values: Record<string, string | undefined> = {
     title: clip(text(answer.json, ['data.metadata.title', 'data.metadata.ogTitle']), 300),

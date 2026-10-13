@@ -72,9 +72,15 @@ export async function callParallel(query: string, deps: VendorDeps, mode: Parall
     return { ...base, outcome: 'failed', reason: `HTTP_${answer.status}`, httpStatus: answer.status,
       supplierMayCharge: answer.status === 200, usage: { unit: 'sku_search', units: parallelUsage(answer.json) } };
   }
-  const all = list(answer.json, ['results']).map(webItem);
+  const usage = { unit: 'sku_search' as const, units: parallelUsage(answer.json) };
+  if (results.length === 0) return { ...base, outcome: 'ok', reason: 'NO_RESULTS', httpStatus: 200, supplierMayCharge: true, usage };
+  // Entries without a URL are not usable results; a non-empty set with none usable is a changed shape, not a delivery.
+  const all = list(answer.json, ['results']).map(webItem).filter(item => item.url !== undefined);
+  if (all.length === 0) {
+    return { ...base, outcome: 'failed', reason: 'EMPTY_OR_UNRECOGNIZED', httpStatus: 200, supplierMayCharge: true, usage };
+  }
   const items = all.slice(0, MAX_RESULTS);
   return { ...base, outcome: all.length > MAX_RESULTS ? 'partial' : 'ok', reason: null, httpStatus: 200,
-    supplierMayCharge: true, usage: { unit: 'sku_search', units: parallelUsage(answer.json) }, items,
+    supplierMayCharge: true, usage, items,
     truncated: all.length > MAX_RESULTS };
 }

@@ -7,7 +7,7 @@ export const MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
 export type VendorExchange =
   | { kind: 'response'; status: number; json: unknown }
   /** The supplier answered but the body was unreadable or too large; it may still charge. */
-  | { kind: 'unreadable'; status: number; reason: 'RESPONSE_TOO_LARGE' | 'RESPONSE_NOT_JSON' }
+  | { kind: 'unreadable'; status: number; reason: 'RESPONSE_TOO_LARGE' | 'RESPONSE_NOT_JSON' | 'RESPONSE_EMPTY' }
   /** No answer: the request may or may not have reached the supplier. */
   | { kind: 'unknown'; reason: 'TIMEOUT' | 'NETWORK_ERROR' };
 
@@ -54,8 +54,9 @@ export async function exchange(
     const response = await fetchImpl(request.url, init);
     const body = await readCapped(response, MAX_RESPONSE_BYTES);
     if (body === null) return { kind: 'unreadable', status: response.status, reason: 'RESPONSE_TOO_LARGE' };
+    if (body.trim() === '') return { kind: 'unreadable', status: response.status, reason: 'RESPONSE_EMPTY' };
     try {
-      return { kind: 'response', status: response.status, json: body === '' ? null : JSON.parse(body) };
+      return { kind: 'response', status: response.status, json: JSON.parse(body) };
     } catch {
       return { kind: 'unreadable', status: response.status, reason: 'RESPONSE_NOT_JSON' };
     }

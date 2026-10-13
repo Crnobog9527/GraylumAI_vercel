@@ -54,6 +54,22 @@ describe('callParallel', () => {
     expect(result.items[0].missing).toEqual(['excerpt', 'publishedAt']);
   });
 
+  it('separates a real empty result set from malformed entries', async () => {
+    expect(await callParallel('q', deps(jsonFetch(200, { results: [], usage: [{ name: 'sku_search', count: 1 }] }))))
+      .toMatchObject({ outcome: 'ok', reason: 'NO_RESULTS', items: [], usage: { units: '1' } });
+    expect(await callParallel('q', deps(jsonFetch(200, { results: [{}, { title: 'no url' }], usage: [{ name: 'sku_search', count: 1 }] }))))
+      .toMatchObject({ outcome: 'failed', reason: 'EMPTY_OR_UNRECOGNIZED', items: [] });
+    const mixed = await callParallel('q', deps(jsonFetch(200, { results: [{}, { url: 'https://a.example', title: 'A' }] })));
+    expect(mixed.items.map(item => item.url)).toEqual(['https://a.example']);
+  });
+
+  it('treats an empty 200 body as unknown for every supplier', async () => {
+    expect(await callParallel('q', deps(jsonFetch(200, '')))).toMatchObject({ outcome: 'unknown', reason: 'RESPONSE_EMPTY' });
+    expect(await callFirecrawl('https://example.com/a', deps(jsonFetch(200, ''))))
+      .toMatchObject({ outcome: 'unknown', reason: 'RESPONSE_EMPTY' });
+    expect(await callParallel('q', deps(jsonFetch(503, '')))).toMatchObject({ outcome: 'failed', reason: 'RESPONSE_EMPTY' });
+  });
+
   it('refuses empty, overlong or unsupported-mode queries without sending', async () => {
     expect(buildParallelRequest(' ')).toEqual({ reason: 'INVALID_QUERY' });
     expect(buildParallelRequest('a'.repeat(201))).toEqual({ reason: 'INVALID_QUERY' });
@@ -105,6 +121,12 @@ describe('callFirecrawl', () => {
       .toMatchObject({ outcome: 'failed', reason: 'PDF_NOT_SUPPORTED', items: [], usage: { units: '1' } });
     const typed = { success: true, data: { markdown: '', metadata: { contentType: 'application/pdf', creditsUsed: 1 } } };
     expect(await callFirecrawl('https://example.com/d', deps(jsonFetch(200, typed)))).toMatchObject({ reason: 'PDF_NOT_SUPPORTED' });
+  });
+
+  it('does not report a success without a recognizable page body', async () => {
+    const body = { success: true, data: { metadata: { statusCode: 200, creditsUsed: 1 } } };
+    expect(await callFirecrawl('https://example.com/a', deps(jsonFetch(200, body))))
+      .toMatchObject({ outcome: 'failed', reason: 'EMPTY_OR_UNRECOGNIZED', items: [], supplierMayCharge: true });
   });
 
   it('keeps missing credits null on success', async () => {
