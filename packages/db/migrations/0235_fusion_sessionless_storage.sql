@@ -72,6 +72,8 @@ BEGIN
     IF o.body_hash<>h THEN RAISE EXCEPTION 'FUSION_OUTPUT_CONFLICT'; END IF;
     RETURN jsonb_build_object('callId',c.id,'bodyHash',h,'savedAt',o.saved_at);
   END IF;
+  -- A call already settled or judged (e.g. no_delivery at the recovery deadline) never gains a body later.
+  IF c.settled_at IS NOT NULL OR c.fusion_verdict IS NOT NULL THEN RAISE EXCEPTION 'FUSION_OUTPUT_DENIED'; END IF;
   INSERT INTO fusion_call_outputs(call_id, run_id, group_id, actor_id, body, body_hash)
     VALUES (c.id, r.id, g.id, p_actor_id, p_body, h) RETURNING * INTO o;
   RETURN jsonb_build_object('callId',c.id,'bodyHash',h,'savedAt',o.saved_at);
@@ -129,6 +131,20 @@ DO $$ DECLARE src text; a text; BEGIN
   END IF;
 END $$;
 
+-- 0234 lets the host write a verdict without looking at the body. A verdict about a body
+-- (usable / format_invalid / revision_invalid) needs the saved Fusion output; no_delivery needs its
+-- absence. Outputs are inserted under the same call row lock, so the check is consistent.
+DO $$ DECLARE src text; a text; BEGIN
+  src:=pg_get_functiondef('public.fusion_call_verdict(uuid,uuid,text)'::regprocedure);
+  IF position('fusion_call_outputs' IN src)=0 THEN
+    a:=$x$  UPDATE bill2_calls SET fusion_verdict=p_verdict WHERE id=c.id;$x$;
+    IF array_length(string_to_array(src,a),1)<>2 THEN RAISE EXCEPTION 'FUSION_SOURCE_MISMATCH: fusion_call_verdict'; END IF;
+    EXECUTE replace(src,a,$x$  IF (p_verdict='no_delivery')=EXISTS(SELECT 1 FROM fusion_call_outputs WHERE call_id=c.id) THEN
+    RAISE EXCEPTION 'FUSION_VERDICT_DENIED'; END IF;
+$x$||a);
+  END IF;
+END $$;
+
 -- Deleting a conversation also deletes the Fusion outputs started from it and scrubs those runs with
 -- the same per-run steps the cleanup already uses for execution runs. Money facts stay on the runs.
 DO $$ DECLARE src text; a text; BEGIN
@@ -143,8 +159,12 @@ DO $$ DECLARE src text; a text; BEGIN
   UPDATE bill2_runs SET content_deleted_at=stamp WHERE id=row.id AND content_deleted_at IS NULL;
   IF NOT row.closed THEN PERFORM bill2_cancel(a,row.id); END IF;
   PERFORM bill2_finalize(a,row.id);
-  PERFORM account_erasure_scrub_calls(a,row.id);
-  PERFORM account_erasure_scrub_run(a,row.id);
+  -- Anything a scrub could not clear yet is counted (review_required), and the recovery cron
+  -- scrubs a content-deleted run again once it settles (PR-3b).
+  financial:=account_erasure_scrub_calls(a,row.id);
+  remaining:=remaining+coalesce((financial->>'remaining')::bigint,0);
+  financial:=account_erasure_scrub_run(a,row.id);
+  remaining:=remaining+coalesce((financial->>'remaining')::bigint,0);
   financial:=account_erasure_scrub_receipts(a,row.id,100);
   remaining:=remaining+coalesce((financial->>'remaining')::bigint,0);
  END LOOP;
