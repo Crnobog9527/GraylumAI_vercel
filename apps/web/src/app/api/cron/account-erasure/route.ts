@@ -18,13 +18,16 @@ export async function GET(request: Request) {
     const client = createClient(url, key, {
       auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
     });
-    // One deadline for the whole run (maxDuration 60s): account erasure first, leaving the
-    // conversation sweep at least 15 seconds before the shared end.
-    const deadline = Date.now() + 52_000;
-    const summary = await runAccountErasureExecutor(client, deadline - 15_000);
-    // Deleted conversations whose background cleanup did not finish (DATA-ERASURE 0231). Busy rows
-    // are retried within this run; anything still pending, failed or unreached fails it (24-hour bound).
-    const conversations = await sweepErasedConversations(client, deadline);
+    // maxDuration 60s. Deleted conversations whose background cleanup did not finish (DATA-ERASURE
+    // 0231) go first, inside a hard 12-second budget, so an account-erasure backlog can never starve
+    // them. Account erasure then keeps its original 45-second deadline from the start of the run; its
+    // follow-up calls are individually bounded (about 13 s worst case), which ends before 60 s.
+    // Busy rows are retried within the sweep; anything still pending, failed or unreached fails the run.
+    const started = Date.now();
+    // A failing sweep must not skip account erasure in this run; it still fails the run below.
+    const conversations = await sweepErasedConversations(client, started + 12_000).catch(() => null);
+    const summary = await runAccountErasureExecutor(client, started + 45_000);
+    if (!conversations) throw new Error('CONTENT_ERASURE_SWEEP_FAILED');
     const success = summary.failed === 0 && summary.pending === 0
       && conversations.pending === 0 && conversations.failed === 0 && !conversations.more;
     return NextResponse.json({ success, ...summary, conversations }, { status: success ? 200 : 500 });

@@ -26,12 +26,13 @@ it('runs the bounded recovery through the existing authenticated cron entry', as
   expect(response.status).toBe(200);
   expect(mocks.auth).toHaveBeenCalledWith(expect.any(Request), 'account-erasure');
   expect(mocks.recover).toHaveBeenCalledWith({ synthetic: true }, expect.any(Number));
-  // One shared deadline: the executor stops 15s before it, the sweep uses the rest.
+  // The conversation sweep runs first in a hard 12s budget; account erasure keeps 45s from the start.
   const [, executorDeadline] = mocks.recover.mock.calls[0];
   const [sweepClient, sweepDeadline] = mocks.sweep.mock.calls[0];
   expect(sweepClient).toEqual({ synthetic: true });
-  expect(sweepDeadline - executorDeadline).toBe(15_000);
-  expect(sweepDeadline - Date.now()).toBeLessThanOrEqual(52_000);
+  expect(executorDeadline - sweepDeadline).toBe(33_000);
+  expect(sweepDeadline - Date.now()).toBeLessThanOrEqual(12_000);
+  expect(mocks.sweep.mock.invocationCallOrder[0]).toBeLessThan(mocks.recover.mock.invocationCallOrder[0]);
   expect(await response.json()).toEqual({ success: true, processed: 1, completed: 1, pending: 0, failed: 0,
     conversations: { cleaned: 2, pending: 0, failed: 0, more: false } });
 });
@@ -50,7 +51,14 @@ it('reports a failed conversation sweep as a sanitized failure', async () => {
   mocks.sweep.mockRejectedValue(new Error('synthetic private diagnostic'));
   const response = await GET(new Request('https://synthetic.test/api/cron/account-erasure'));
   expect(response.status).toBe(500);
+  expect(mocks.recover).toHaveBeenCalledTimes(1);
   expect(await response.json()).toEqual({ error: 'Account erasure failed' });
+});
+it('still sweeps deleted conversations when account erasure has a backlog', async () => {
+  mocks.recover.mockResolvedValue({ processed: 9, completed: 0, pending: 30, failed: 0 });
+  const response = await GET(new Request('https://synthetic.test/api/cron/account-erasure'));
+  expect(mocks.sweep).toHaveBeenCalledTimes(1);
+  expect((await response.json()).conversations).toEqual({ cleaned: 2, pending: 0, failed: 0, more: false });
 });
 it('reports sanitized failure without raw provider or database content', async () => {
   mocks.recover.mockRejectedValue(new Error('synthetic private diagnostic'));
