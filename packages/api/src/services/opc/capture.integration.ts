@@ -1168,9 +1168,9 @@ it('RUNTIME: V3 withdrawal moves only an older pending suggestion and leaves con
   expect(dismissed.fieldMeta.goal).toMatchObject({ source: 'user' });
 });
 
-// About 15 sequential full mentor admissions (each seed prepares and cancels one);
-// CI measured 12-19s, so the 20s default timed out on a slower runner.
-it('RUNTIME: V3 withdrawal refuses host turns, newer suggestions and malformed lists', async () => {
+// Split in two because each seed is a full mentor admission (about 1.2s on CI);
+// together the cases neared the 20s default timeout on slower runners.
+it('RUNTIME: V3 withdrawal refuses host turns and malformed lists', async () => {
   const { f } = await suggestedFixture();
   const goal = () => f.steps().then(steps => steps['step-0'].fieldMeta.goal);
   const pending = (await goal()).suggestion;
@@ -1184,6 +1184,13 @@ it('RUNTIME: V3 withdrawal refuses host turns, newer suggestions and malformed l
   for (const bad of [{}, null, Array(13).fill(one[0])]) {
     expect(await f.apply(await userTurn(await f.seed(withdrawOutput(bad))))).toMatchObject({ result: 'invalid_output' });
   }
+  expect((await goal()).suggestion).toEqual(pending);
+});
+
+it('RUNTIME: V3 withdrawal refuses unseen, superseded and replaced suggestions', async () => {
+  const { f } = await suggestedFixture();
+  const goal = () => f.steps().then(steps => steps['step-0'].fieldMeta.goal);
+  const one = [{ stepId: 'step-0', fieldId: 'goal' }];
   const unseen = await userTurn(await f.seed(withdrawOutput(one)), undefined, null);
   expect(await f.apply(unseen)).toMatchObject({ discarded: [{ withdrawal: 1, reason: 'not_shown' }] });
   const sameText = await userTurn(await f.seed(withdrawOutput(one, [patch('Pending goal suggestion')])));
@@ -1201,7 +1208,7 @@ it('RUNTIME: V3 withdrawal refuses host turns, newer suggestions and malformed l
   expect(await f.apply(replaced)).toMatchObject({ discarded: [{ withdrawal: 1, reason: 'not_shown' }] });
   expect((await goal()).suggestion.value).toBe('Newest suggestion');
   expect((await goal()).withdrawnSuggestion).toBeUndefined();
-}, 60000);
+});
 
 it('RUNTIME: V3 a deferred turn older than the withdrawal cannot revive advice or erase the withdrawn record', async () => {
   const { f } = await suggestedFixture();
