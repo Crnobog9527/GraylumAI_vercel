@@ -9,8 +9,8 @@
 -- that execution reads as unavailable and the earlier version reads as unreadable.
 --
 -- Reads of a report whose round is already published accept any round of the same draft; every other
--- check stays: actor, session and scope, the draft owning the session, the round's formal version not
--- erased. Admission (report_admission_check) and billing claims call report_source directly and keep
+-- check stays: actor, session and scope, the draft owning the session (or report_source's work-item
+-- binding), the round's formal version not erased. Admission (report_admission_check) and billing claims call report_source directly and keep
 -- requiring the current round. Deletion, account erasure and source withdrawal still make it unreadable
 -- through the existing execution, evidence and version checks, which this does not touch.
 BEGIN;
@@ -23,7 +23,8 @@ BEGIN
   PERFORM bill2_actor(p_actor_id);
   SELECT * INTO s FROM runtime_sessions WHERE id=p_session_id AND actor_id=p_actor_id;
   IF s.id IS NULL OR NOT bill2_scope_allowed(p_actor_id,s.scope)
-   OR NOT EXISTS(SELECT 1 FROM opc_drafts WHERE actor_id=p_actor_id AND session_id=s.id AND project_id=p_project_id) THEN
+   OR (NOT EXISTS(SELECT 1 FROM opc_drafts WHERE actor_id=p_actor_id AND session_id=s.id AND project_id=p_project_id)
+    AND NOT(s.scope->>'kind'='work_item' AND s.scope->>'workItemId'=p_project_id::text)) THEN
    RAISE EXCEPTION 'REPORT_SOURCE_CONFLICT'; END IF;
   RETURN;
  END IF;

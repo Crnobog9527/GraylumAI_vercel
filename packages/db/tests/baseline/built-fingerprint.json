@@ -2659,7 +2659,7 @@
   "fn:report_revision_state(uuid,artifact_requests)": "b992d138b54a",
   "fn:report_revision_values(jsonb,jsonb,jsonb)": "c1429dcbce4d",
   "fn:report_source(uuid,uuid,uuid,uuid)": "12a302383629",
-  "fn:report_source_for_read(uuid,uuid,uuid,uuid)": "91d955e4029e",
+  "fn:report_source_for_read(uuid,uuid,uuid,uuid)": "d4d9dbff879b",
   "fn:research_billing_summary(timestamp with time zone,timestamp with time zone)": "0b49f98c3209",
   "fn:research_cancel(uuid,uuid)": "eed19976d2ba",
   "fn:research_lookup(uuid,uuid,uuid)": "499535997404",

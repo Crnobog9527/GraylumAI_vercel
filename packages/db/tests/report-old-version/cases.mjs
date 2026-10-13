@@ -36,6 +36,19 @@ export async function runCases({db,report}) {
  await assert.rejects(rpc(db,'report_source',f.actor,f.session,f.project,f.round),/REPORT_SOURCE_CONFLICT/);
  report.checks.push('after a revision the earlier report is readable and exportable; generation stays bound to the current round');
 
+ // A work-item session keeps report_source's binding (scope.workItemId = project) on reads.
+ const w=await revised(db);
+ const source=randomUUID();
+ await db.query(`INSERT INTO artifact_projects(id,actor_id,module_id,skill_id,work_title,current_version)
+  SELECT $1,actor_id,module_id,skill_id,'work item source',0 FROM artifact_projects WHERE id=$2`,[source,w.project]);
+ await db.query(`UPDATE artifact_projects SET work_kind='script',source_project_id=$1 WHERE id=$2`,[source,w.project]);
+ const workSession=(await db.query(`INSERT INTO runtime_sessions(actor_id,scope,start_request_id,start_payload)
+  VALUES($1,$2,$3,'{}') RETURNING id`,[w.actor,{kind:'work_item',projectId:source,workItemId:w.project},randomUUID()])).rows[0].id;
+ await db.query('SELECT report_source_for_read($1,$2,$3,$4)',[w.actor,workSession,w.project,w.round]);
+ await assert.rejects(db.query('SELECT report_source_for_read($1,$2,$3,$4)',[w.actor,workSession,source,w.round]),
+  /REPORT_SOURCE_CONFLICT/,'a work-item session reads only its own work item');
+ report.checks.push('a work-item session reads its published report; other projects are refused');
+
  const withdrawn=await revised(db,1);
  assert.equal(await readable(db,withdrawn),true);
  await db.query(`UPDATE artifact_evidence_restrictions SET expires_at=clock_timestamp() WHERE evidence_id IN
