@@ -3,7 +3,7 @@ import { afterEach, expect, it, vi } from 'vitest';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { logger } from '../../lib/logger';
 import { DECISIONS_MODEL, DECISIONS_URL, decide, decisionsClassifier, hasConfirmedPositioning, judgePositioning } from './positioningGate';
-import { holdsPositioningMarker, isPositioningRefusal, POSITIONING_MARKER, POSITIONING_FALLBACK_INSTRUCTIONS } from './positioningFallback';
+import { isPositioningRefusal, POSITIONING_MARKER, POSITIONING_FALLBACK_INSTRUCTIONS } from './positioningFallback';
 import { withPrimaryAddenda } from './primaryInstructions';
 import { stagingProcedureError, StagingAccessError } from './stagingErrors';
 import { isPositioningRequired, POSITIONING_REQUIRED } from '../../shared/positioningGate';
@@ -97,10 +97,30 @@ it('adds the fallback rule only to a turn frozen with it', () => {
   expect(withPrimaryAddenda('base', { workspaceContext: true })).toContain('first read the confirmed entry whose kind is positioning');
 });
 
-it('recognizes the structured marker and holds back only text that could still become it', () => {
+it('recognizes only a reply that starts with the structured marker', () => {
   expect(isPositioningRefusal(POSITIONING_MARKER)).toBe(true);
   expect(isPositioningRefusal('\n ' + POSITIONING_MARKER)).toBe(true);
   expect(isPositioningRefusal('好的。' + POSITIONING_MARKER)).toBe(false);
-  for (const visible of ['', ' ', '[', '[[GRAY', POSITIONING_MARKER, POSITIONING_MARKER + '\n']) expect(holdsPositioningMarker(visible)).toBe(true);
-  for (const visible of ['好', '[链接]', '[[其他]]']) expect(holdsPositioningMarker(visible)).toBe(false);
+  expect(isPositioningRefusal('[[GRAYLUM_POSITIONING')).toBe(false);
+});
+
+it('ends a refused PAYG round through fail_platform with positioning_required', async () => {
+  const { endPositioningRefusal } = await import('./positioningFallback');
+  const args = { p_execution_id: 'e' };
+  const cancelled = vi.fn(async () => ({ state: 'cancelled' }));
+  expect(await endPositioningRefusal(cancelled as never, args, true))
+    .toEqual({ state: 'cancelled', unavailable: 'positioning_required', code: POSITIONING_REQUIRED });
+  expect(cancelled).toHaveBeenCalledExactlyOnceWith('runtime_execution',
+    { p_execution_id: 'e', p_action: 'fail_platform', p_result: { unavailable_reason: 'positioning_required' } });
+  expect(await endPositioningRefusal(vi.fn(async () => ({ state: 'cost_pending' })) as never, args, true))
+    .toEqual({ state: 'cost_pending' });
+  // Unknown call outcome (round left open) or a lost response: interrupt for normal recovery, never claim "not charged".
+  for (const outcome of [async () => ({ state: 'running' }), async () => { throw new Error('lost'); }]) {
+    const rpc = vi.fn(async (_name: string, value: Record<string, unknown>) => value.p_action === 'interrupt' ? {} : outcome());
+    expect(await endPositioningRefusal(rpc as never, args, true)).toEqual({ state: 'pending' });
+    expect(rpc.mock.calls.map(call => call[1].p_action)).toEqual(['fail_platform', 'interrupt']);
+  }
+  const local = vi.fn(async () => ({ state: 'cancelled' }));
+  expect(await endPositioningRefusal(local as never, args, false)).toEqual({ state: 'cancelled', code: POSITIONING_REQUIRED });
+  expect(local).toHaveBeenCalledExactlyOnceWith('runtime_cancel', args);
 });
