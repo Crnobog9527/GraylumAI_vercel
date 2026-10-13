@@ -25,7 +25,19 @@ export type MembershipPlanButtonState = {
   canCreateCheckout: boolean;
   canChangeSubscriptionPlan: boolean;
   message: string | null;
+  /** Show a way to the subscription page (where the old subscription can be stopped). */
+  manageSubscription?: boolean;
 };
+
+/** Where an account's subscription is managed or stopped (个人中心 · 订阅). */
+export const SUBSCRIPTION_MANAGEMENT_HREF = '/profile?tab=subscription';
+
+/**
+ * The server refuses a new purchase while an older subscription still renews but its last charge failed
+ * (`resolvePaymentIssue`), so the user is not charged twice. Say that plainly and point to where it is stopped.
+ */
+export const OLD_RENEWAL_BLOCKS_PURCHASE =
+  '你还有一个续费中的旧订阅（最近一次自动扣款没有成功）。请先在订阅管理里点"管理订阅 / 取消续费"停止它，再重新购买。';
 
 export function getPlanEligibilityKey(planId: string, billingCycle: 'monthly' | 'yearly') {
   return `${planId}:${billingCycle}`;
@@ -87,10 +99,11 @@ export function getMembershipPlanButtonState(input: {
   if (eligibility.action === 'resolvePaymentIssue') {
     return {
       disabled: true,
-      label: '请先处理付款异常',
+      label: '请先停止旧订阅',
       canCreateCheckout: false,
       canChangeSubscriptionPlan: false,
-      message: eligibility.safeMessage,
+      message: OLD_RENEWAL_BLOCKS_PURCHASE,
+      manageSubscription: true,
     };
   }
 
