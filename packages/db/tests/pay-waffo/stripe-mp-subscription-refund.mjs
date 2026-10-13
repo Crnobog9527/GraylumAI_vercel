@@ -27,8 +27,7 @@ export async function stripeMpSubscriptionRefundCases({admin,service}) {
       abandoned=(await service.query(`SELECT o.* FROM pay_waffo_create_purchase($1,'membership_plan',$2,'monthly','card','standard',
         'fixture','test',$3,'terms-v1',$4) o`,[user,plan,version,JSON.stringify([{kind:'email',key_version:'test-v1',digest}])])).rows[0];
       await checkout(user,abandoned,'card');
-      // 'open': the checkout page is still open (it may already be paid at Stripe before its webhook lands).
-      if(abandonFirst!=='open') await service.query(`SELECT pay_waffo_observe_qualification($1,'fixture','test',$2,'closed_unpaid',NULL,0,'usd',NULL)`,
+      await service.query(`SELECT pay_waffo_observe_qualification($1,'fixture','test',$2,'closed_unpaid',NULL,0,'usd',NULL)`,
         [abandoned.id,`cs_${abandoned.id}`]);
     }
     const o=(await service.query(`SELECT o.* FROM pay_waffo_create_purchase($1,'membership_plan',$2,'monthly',$3,'gold_first30',
@@ -137,7 +136,11 @@ export async function stripeMpSubscriptionRefundCases({admin,service}) {
   assert.equal((await approve(p)).status,'approved');
   // Only an order that truly never took money is left out: one paid and refunded since, or one with a recorded Stripe
   // payment whatever its status says, is still membership history (not a first purchase).
-  const open=await buyer('ea'.repeat(32),'card',980,'open');
+  // Still open (a second checkout page, possibly already paid at Stripe before its webhook lands). One open checkout blocks
+  // a new purchase, so the fixture reopens the closed row after the real purchase.
+  const open=await buyer('ea'.repeat(32),'card',980,true);
+  await admin.query(`UPDATE payment_orders SET qualification_state='reserved',qualification_closed_ref=NULL
+    WHERE id=$1`,[open.abandoned]);
   assert.equal((await admin.query('SELECT qualification_state FROM payment_orders WHERE id=$1',[open.abandoned])).rows[0].qualification_state,
     'reserved');
   await assert.rejects(()=>approve(open),/PAY_MONTHLY_HISTORY/,'a checkout Stripe has not confirmed closed unpaid');
