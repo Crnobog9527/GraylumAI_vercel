@@ -15,6 +15,7 @@ import {runStrategy} from './strategy.mjs';
 import {runSettings} from './settings.mjs';
 import {runResearch} from './research.mjs';
 import {runArtifacts} from './artifacts.mjs';
+import {runFusion} from './fusion.mjs';
 import {runDependencies} from './dependencies.mjs';
 import {runCaptureV3} from './capture-v3.mjs';
 import {runPayg} from './payg.mjs';
@@ -76,6 +77,7 @@ try {
  await client.query(read('packages/db/tests/content-erasure/fixture.sql'));
  await runCases(client,report);
  await runArtifacts(client,report);
+ await runFusion(client,report);
  await runResearch({db:client,Client,connectionString,report});
  await runSettings({db:client,Client,connectionString,report});
  await client.query(read('packages/db/tests/runtime-view-perf/fixture.sql'));

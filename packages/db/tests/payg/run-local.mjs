@@ -22,6 +22,7 @@ import {erasureCases} from './erasure.mjs';
 import {concurrencyCases} from './concurrency.mjs';
 import {windowConcurrencyCases} from './window-concurrency.mjs';
 import {fusionGroupCases} from './fusion-group.mjs';
+import {fusionSessionlessCases} from './fusion-sessionless.mjs';
 
 const development = process.argv.slice(2).join(' ')==='--local-only --development';
 if ((!development&&process.argv.slice(2).join(' ')!=='--local-only')||process.env.CI) throw Error('Require --local-only outside CI');
@@ -124,6 +125,7 @@ try {
   await concurrencyCases({db,Client,connectionString,report,createFixture,claim,receipt});
   await windowConcurrencyCases({db,Client,connectionString,report,createFixture,claim});
   await fusionGroupCases({db,Client,connectionString,report,createFixture,claim});
+  await fusionSessionlessCases({db,report,createFixture});
 } catch (error) {
   report.failed = String(error.stack??error);
   report.databaseError = {code:error.code,detail:error.detail,where:error.where,position:error.position};
