@@ -129,6 +129,9 @@ describe('callTikhub', () => {
       user: { rest_id: '11', legacy: { screen_name: 'NASA' } },
       tweet: { rest_id: '22', legacy: { full_text: 'hello', created_at: 'Mon Oct 13 00:00:00 +0000 2026', favorite_count: 3 } } } })));
     expect(tweets.items.map(item => item.fields.id)).toEqual(['22']);
+    const hollow = await callTikhub({ platform: 'x', kind: 'account_posts', account: 'NASA' }, deps(jsonFetch(200, { code: 200,
+      data: { tweet: { rest_id: '22', legacy: { full_text: null, created_at: null } } } })));
+    expect(hollow).toMatchObject({ outcome: 'failed', reason: 'EMPTY_OR_UNRECOGNIZED' });
   });
 
   it('keeps a recognized empty list as a successful, billed no-results answer', async () => {

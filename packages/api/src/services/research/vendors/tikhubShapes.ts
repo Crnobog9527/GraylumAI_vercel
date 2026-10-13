@@ -135,11 +135,11 @@ function profile(object: Raw) {
 const PROFILE_KEYS = ['follower_count', 'followers_count', 'unique_id', 'screen_name', 'mid', 'sign', 'legacy',
   'sub_count', 'edge_followed_by', 'subscriber_count'];
 
-/** A profile needs an identity plus something describing it; a post needs its own id. */
+/** A profile needs an identity plus something describing it; a post needs its id plus real content or metrics. */
 function usable(item: ResearchItem, kind: SocialKind): boolean {
   const f = item.fields;
   if (kind === 'account_profile') return (f.id !== undefined || f.handle !== undefined) && (f.followers !== undefined || f.name !== undefined);
-  return f.id !== undefined;
+  return f.id !== undefined && ['title', 'author', 'publishedAt', 'views', 'likes', 'comments', 'shares'].some(name => f[name] !== undefined);
 }
 
 /** Normalized items for a TikHub envelope; an unrecognized shape yields no items, never invented ones. */
