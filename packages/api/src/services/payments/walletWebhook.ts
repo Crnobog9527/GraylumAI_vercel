@@ -103,8 +103,13 @@ export async function recoverMethodCheckout(db: SupabaseClient, stripe: Stripe, 
     p_start: term?.start ?? null, p_end: term?.end ?? null,
   });
   if (applied.error || !applied.data) throw new Error('PAY_WAFFO_FULFILLMENT_UNAVAILABLE');
-  if ('tax' in cash) await recordCardPaymentTax(db, scope.merchant, order.id, cash);
-  // A delivered Pro -> Gold upgrade stops the prior card subscription at period end (PAY-STRIPE-MP step 4a).
-  if ((applied.data as { state?: string }).state === 'fulfilled') await stopPriorAfterUpgrade(db, stripe, order);
+  // A delivered Pro -> Gold upgrade stops the prior card subscription at period end (PAY-STRIPE-MP step 4a). Every
+  // replay of a delivered payment comes back 'fulfilled' and repeats both steps; neither failure skips the other, so
+  // a tax bookkeeping failure can never leave the replaced Pro renewing next to the Gold.
+  const failures: unknown[] = [];
+  const attempt = async (step: () => Promise<unknown>) => { try { await step(); } catch (error) { failures.push(error); } };
+  if ((applied.data as { state?: string }).state === 'fulfilled') await attempt(() => stopPriorAfterUpgrade(db, stripe, order));
+  if ('tax' in cash) await attempt(() => recordCardPaymentTax(db, scope.merchant, order.id, cash));
+  if (failures.length) throw failures[0];
   return { orderId: order.id };
 }
