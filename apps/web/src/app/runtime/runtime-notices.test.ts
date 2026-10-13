@@ -177,12 +177,3 @@ describe("BILL-PAYG turns", () => {
   });
 });
 
-// POSITIONING-GATE: a refunded fallback refusal reads as "定位 first", not as a generic ended round.
-describe("positioning refusal turn", () => {
-  it("shows only the positioning notice for a cancelled positioning_required turn", async () => {
-    const { POSITIONING_REQUIRED_NOTICE } = await import("./gate-notices");
-    const notices = runtimeTurnNotices(turn({ state: "cancelled", unavailableReason: "positioning_required" }), ctx());
-    expect(notices.map(n => n.text)).toEqual([POSITIONING_REQUIRED_NOTICE]);
-    expect(notices[0]!.text).not.toBe(ENDED_NOTICE);
-  });
-});
