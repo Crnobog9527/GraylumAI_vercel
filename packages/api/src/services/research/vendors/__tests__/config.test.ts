@@ -69,11 +69,17 @@ describe('research_tools_config', () => {
   });
 
   it('fails closed when the setting is absent, unreadable or invalid', async () => {
-    expect(await readResearchToolsConfig(dbReturning(undefined))).toEqual({ config: DISABLED_RESEARCH_TOOLS, source: 'default' });
+    expect(await readResearchToolsConfig(dbReturning(undefined)))
+      .toEqual({ config: DISABLED_RESEARCH_TOOLS, source: 'default', revision: 0, updatedBy: null, updatedAt: null });
     expect(await readResearchToolsConfig(dbReturning(null, { message: 'down' }))).toMatchObject({ source: 'invalid', config: { enabled: false } });
     expect(await readResearchToolsConfig(dbReturning({ version: 2 }))).toMatchObject({ source: 'invalid', config: { enabled: false } });
     expect(await readResearchToolsConfig(dbReturning('{broken'))).toMatchObject({ source: 'invalid' });
-    expect(await readResearchToolsConfig(dbReturning(JSON.stringify(valid())))).toMatchObject({ source: 'configured', config: { enabled: true } });
+    const stored = { ...valid(), revision: 3, updatedBy: attested.by, updatedAt: '2026-10-14T00:00:00.000000Z' };
+    expect(await readResearchToolsConfig(dbReturning(JSON.stringify(stored))))
+      .toMatchObject({ source: 'configured', revision: 3, updatedBy: attested.by, config: { enabled: true } });
+    // A value without the writer's revision/author was not written by 0254: fail closed, keep its revision visible.
+    expect(await readResearchToolsConfig(dbReturning(valid()))).toMatchObject({ source: 'invalid', config: { enabled: false } });
+    expect(await readResearchToolsConfig(dbReturning({ ...stored, enabled: 'yes' }))).toMatchObject({ source: 'invalid', revision: 3 });
   });
 });
 

@@ -61,7 +61,7 @@ const routeSchema = z.object({
   maxUnitsPerCall: z.literal(ADAPTER_MAX_UNITS),
 }).strict();
 
-export const researchToolsConfigSchema = z.object({
+const configShape = {
   version: z.literal(1),
   enabled: z.boolean(),
   vendors: z.object({ tikhub: vendorSchema, parallel: vendorSchema, firecrawl: vendorSchema }).strict(),
@@ -81,7 +81,11 @@ export const researchToolsConfigSchema = z.object({
     maxFirstPostAgeDays: z.number().int().min(1).max(365),
     minViewsToFollowers: z.string().regex(/^(0|[1-9]\d{0,3})(\.\d{1,4})?$/),
   }).strict(),
-}).strict().superRefine((config, ctx) => {
+};
+
+type ConfigBody = z.infer<z.ZodObject<typeof configShape>>;
+
+function checkConfig(config: ConfigBody, ctx: z.RefinementCtx) {
   config.benchmarkPlatforms.forEach((platform, index) => {
     if (!config.verifiedPlatforms.includes(platform)) {
       ctx.addIssue({ code: 'custom', path: ['benchmarkPlatforms', index], message: `${platform} is not a verified platform` });
@@ -105,7 +109,17 @@ export const researchToolsConfigSchema = z.object({
       ctx.addIssue({ code: 'custom', path: ['routes', index, 'route'], message: `Unknown ${entry.vendor} route for ${key}` });
     }
   });
-});
+}
+
+export const researchToolsConfigSchema = z.object(configShape).strict().superRefine(checkConfig);
+
+/** What the 0254 writer stores: the config plus server-written revision, author and time. */
+export const storedResearchToolsSchema = z.object({
+  ...configShape,
+  revision: z.number().int().min(1).max(9999999999),
+  updatedBy: z.string().uuid(),
+  updatedAt: isoTime,
+}).strict().superRefine(checkConfig);
 
 export type ResearchToolsConfig = z.infer<typeof researchToolsConfigSchema>;
 type RoutePlatform = ResearchToolsConfig['routes'][number]['platform'];
@@ -135,17 +149,35 @@ export const DISABLED_RESEARCH_TOOLS: ResearchToolsConfig = Object.freeze({
   recentGrowth: { maxFirstPostAgeDays: 90, minViewsToFollowers: '1' },
 }) as ResearchToolsConfig;
 
-/** Reads the stored config; absent, unreadable or invalid → everything off (fail closed). */
-export async function readResearchToolsConfig(db: SupabaseClient): Promise<{ config: ResearchToolsConfig; source: 'configured' | 'default' | 'invalid' }> {
+export interface ResearchToolsState {
+  config: ResearchToolsConfig;
+  source: 'configured' | 'default' | 'invalid';
+  revision: number;
+  updatedBy: string | null;
+  updatedAt: string | null;
+}
+
+/**
+ * Reads the stored config; absent, unreadable or invalid → everything off (fail closed). An invalid
+ * stored value still reports its revision so an admin can overwrite it with a valid one.
+ */
+export async function readResearchToolsConfig(db: SupabaseClient): Promise<ResearchToolsState> {
+  const off = (source: ResearchToolsState['source'], revision = 0): ResearchToolsState =>
+    ({ config: DISABLED_RESEARCH_TOOLS, source, revision, updatedBy: null, updatedAt: null });
   try {
     const { data, error } = await db.from('system_settings').select('value').eq('key', RESEARCH_TOOLS_KEY).maybeSingle();
-    if (error) return { config: DISABLED_RESEARCH_TOOLS, source: 'invalid' };
-    if (!data) return { config: DISABLED_RESEARCH_TOOLS, source: 'default' };
+    if (error) return off('invalid');
+    if (!data) return off('default');
     const raw = typeof data.value === 'string' ? JSON.parse(data.value) : data.value;
-    const parsed = researchToolsConfigSchema.safeParse(raw);
-    return parsed.success ? { config: parsed.data, source: 'configured' } : { config: DISABLED_RESEARCH_TOOLS, source: 'invalid' };
+    const parsed = storedResearchToolsSchema.safeParse(raw);
+    if (!parsed.success) {
+      const revision = Number((raw as { revision?: unknown } | null)?.revision);
+      return off('invalid', Number.isSafeInteger(revision) && revision >= 0 ? revision : 0);
+    }
+    const { revision, updatedBy, updatedAt, ...config } = parsed.data;
+    return { config, source: 'configured', revision, updatedBy, updatedAt };
   } catch {
-    return { config: DISABLED_RESEARCH_TOOLS, source: 'invalid' };
+    return off('invalid');
   }
 }
 
