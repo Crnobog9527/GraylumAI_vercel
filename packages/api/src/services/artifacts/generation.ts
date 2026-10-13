@@ -153,8 +153,9 @@ const chatSystemInstruction = 'Complete only the requested workflow step using t
 export function buildWorkbenchMessages(method:string, context:Record<string,unknown>,
   purpose:'reply'|'summary'|'generation', brand=false):ModelRequest['messages'] {
   const instruction=purpose==='reply'?dialogueSystemInstruction:purpose==='summary'?chatSystemInstruction:systemInstruction;
-  // MODEL-IDENTITY-GUARD layer 1: the brand identity leads the system message when the switch is on.
-  return [{role:'system',content:withBrandIdentity(`${instruction}\n${method}`,brand)},
+  // MODEL-IDENTITY-GUARD layer 1: only the user-facing dialogue reply speaks as the brand; the step
+  // summary and generation calls keep producing the artifact (an identity sentence would replace it).
+  return [{role:'system',content:withBrandIdentity(`${instruction}\n${method}`,brand&&purpose==='reply')},
     {role:'user',content:JSON.stringify(context)}];
 }
 
@@ -275,8 +276,8 @@ export function workbenchGeneration(userClient: SupabaseClient, privateClient: S
     const contextData = { referencedSource, conversation, currentReply, ...(v.conversationId ? { currentStepResult: { body: snapshot.steps[v.stepId].body, version: snapshot.steps[v.stepId].version } } : {}), step: { id: step.id, title: step.title, minLength: step.minLength, maxLength: step.maxLength }, instruction: v.instruction,
       steps: Object.fromEntries([...ancestors].sort().map(k => [k, snapshot.steps[k]])), evidence };
     checkInputSecurity(JSON.stringify(contextData));
-    const brand=await modelIdentityGuardEnabled(privateClient!);
     const purpose=v.purpose==='reply'?'reply':v.conversationId?'summary':'generation';
+    const brand=purpose==='reply'&&await modelIdentityGuardEnabled(privateClient!);
     const messages=buildWorkbenchMessages(loaded.forModel(),contextData,purpose,brand);
     // Catch already-known secondary capacity/pricing failures before paying for
     // a dialogue response. The actual response and current config are rechecked
