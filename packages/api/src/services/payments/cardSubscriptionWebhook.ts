@@ -3,6 +3,7 @@ import type Stripe from 'stripe';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { resolveStripeScope } from './stripeCheckoutPersistence';
 import { recoverMethodCheckout } from './walletWebhook';
+import { PAYMENT_EVIDENCE_CONFLICT } from './stripeWebhookError';
 
 const id = (value: string | { id: string } | null | undefined) => typeof value === 'string' ? value : value?.id ?? null;
 type CardSubscriptionOrder = { id: string; user_id: string; payment_method: string };
@@ -30,7 +31,7 @@ async function findCardOrder(db: SupabaseClient, stripe: Stripe, scope: { mercha
     || !/^[0-9a-f-]{36}$/i.test(orderId)) return null;
   const order = await query.eq('id', orderId).maybeSingle();
   if (order.error) throw new Error('PAY_WAFFO_PERSISTENCE_UNAVAILABLE');
-  if (order.data && order.data.user_id !== subscription.metadata?.userId) throw new Error('PAY_WAFFO_PAYMENT_CONFLICT');
+  if (order.data && order.data.user_id !== subscription.metadata?.userId) throw new Error(PAYMENT_EVIDENCE_CONFLICT);
   return order.data;
 }
 
@@ -54,7 +55,7 @@ async function orderCheckoutSession(db: SupabaseClient, stripe: Stripe, scope: {
 export async function handleCardSubscriptionInvoice(db: SupabaseClient, stripe: Stripe, invoiceId: string, eventType: string) {
   const scope = await resolveStripeScope(stripe);
   const invoice = await stripe.invoices.retrieve(invoiceId);
-  if (invoice.object !== 'invoice' || invoice.id !== invoiceId) throw new Error('PAY_WAFFO_PAYMENT_CONFLICT');
+  if (invoice.object !== 'invoice' || invoice.id !== invoiceId) throw new Error(PAYMENT_EVIDENCE_CONFLICT);
   const subscriptionId = id(invoice.parent?.subscription_details?.subscription);
   if (!subscriptionId) return false;
   const order = await findCardOrder(db, stripe, scope, subscriptionId);

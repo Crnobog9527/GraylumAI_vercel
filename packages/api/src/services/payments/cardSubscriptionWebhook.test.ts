@@ -47,7 +47,7 @@ describe('PAY-STRIPE-MP card subscription webhooks', () => {
   });
   it('refuses a subscription whose metadata names another owner', async () => {
     const f = fixture({ order: cardOrder }, { orderId, userId: 'someone-else' });
-    await expect(handleCardSubscriptionInvoice(f.db, f.stripe, 'in_1', 'invoice.paid')).rejects.toThrow('PAY_WAFFO_PAYMENT_CONFLICT');
+    await expect(handleCardSubscriptionInvoice(f.db, f.stripe, 'in_1', 'invoice.paid')).rejects.toThrow('PAY_COMMON_PAYMENT_EVIDENCE_CONFLICT');
     expect(mocks.recover).not.toHaveBeenCalled();
   });
   it('refuses renewals, failures and state changes of card subscriptions until they are handled (gate closed)', async () => {
