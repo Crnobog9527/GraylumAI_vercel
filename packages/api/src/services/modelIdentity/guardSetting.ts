@@ -35,6 +35,14 @@ export async function readModelIdentityGuard(db: SupabaseClient): Promise<ModelI
   } catch { return unavailable(); }
 }
 
+/** A system_settings value read alongside other settings: absent means on, unreadable stays on. */
+export function identityGuardFromStored(raw: unknown): boolean {
+  if (raw === undefined || raw === null) return true;
+  const parsed = storedSchema.safeParse(typeof raw === 'string' ? (() => { try { return JSON.parse(raw); } catch { return null; } })() : raw);
+  if (!parsed.success) logger.error('security', 'model_identity_guard_read_failed_kept_on', {});
+  return parsed.success ? parsed.data.enabled : true;
+}
+
 /** For user-facing paths: any read failure keeps the protection on. */
 export async function modelIdentityGuardEnabled(db: SupabaseClient): Promise<boolean> {
   try { return (await readModelIdentityGuard(db)).enabled; }
