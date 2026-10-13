@@ -32,7 +32,9 @@ export const APP_SEGMENTS = new Set(['about', 'acceptable-use', 'access-denied',
   'requests', 'reset-password', 'runtime', 'runtime-recovery', 'search', 'settings', 'shequn-jingying', 'shequn-xingxiao',
   'skills', 'stream', 'stripe', 'terms', 'tickets', 'topics', 'transactions', 'trpc', 'tutorials', 'upload', 'users',
   'verify-email', 'waffo', 'webhook', 'workbench', 'zh-tw', 'zimeiti-jingying', 'zimeiti-kecheng',
-  '_next', 'static', 'chunks', 'app', 'pages', 'css', 'media', 'd']);
+  // Style samples D and E (PUBLIC-SITE, /landing/preview/d and /e), removed with the samples.
+  'd', 'e',
+  '_next', 'static', 'chunks', 'app', 'pages', 'css', 'media']);
 const OWN_HOST = /(^|\.)graylum\.com$|\.vercel\.app$|^localhost$|^127\.0\.0\.1$/;
 
 /** Only listed static segments survive. tRPC procedure names and bundle file names come from the
