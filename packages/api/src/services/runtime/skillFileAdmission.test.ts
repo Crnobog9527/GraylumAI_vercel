@@ -208,3 +208,11 @@ it('R4: drops only the history read when its larger reserve does not fit, keepin
  expect(context.tools).toEqual(['ask_question','read_skill_file']);expect(context.historyRead).toBeUndefined();
  expect(context.instructions).not.toContain('read_history');expect(context.maxTurns).toBe(2);
 });
+
+it('#878 regression: a PAYG mentor turn never offers a third tool, so the history read is left out', async()=>{
+ const f=fixture();
+ const admitted=await runtimeAdmissionService(f.user,f.admin,{...f.policy,inputBytes:64000,paygHost:true,
+  hostTurnContext:{stepId:'first',opening:false,checklist:[]}}).prepare(f.input),context=runtimeContext.parse(admitted.context);
+ expect(context.tools).toEqual(['ask_question','read_skill_file']);expect(context.historyRead).toBeUndefined();
+ expect(context.instructions).not.toContain('read_history');expect(context.maxTurns).toBe(2);
+});

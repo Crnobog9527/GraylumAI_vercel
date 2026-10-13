@@ -46,6 +46,7 @@ import {admissionDeadline,admittedOutputLimit} from './admissionLimits';
 import {admitPricing} from './pricingAdmission';
 import {freezeStagingPaygPricing} from './paygPricing';
 import {freezePaygMessageBudget} from './paygMessageBudget';
+import {PAYG_MAX_TOOLS} from '../bill2/paygPolicy';
 import {readPaygHostPolicies} from './paygHostPolicy';
 import {runAutomaticFinancialRecovery} from './automaticRecovery';
 
@@ -284,7 +285,11 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
    }
    // R4: the user's earlier messages share that same optional read; dropping it never blocks the turn.
    let historyRead=false;
-   if(skillFile&&hostTurnContext&&!stepSummary){
+   // A PAYG call may carry at most PAYG_MAX_TOOLS tool definitions; the history read would be a third
+   // next to the card and the Skill file, so such turns keep the earlier tools only (#878 regression).
+   const paygRun=Boolean(policy.paygHost||policy.payg);
+   const historyFits=!paygRun||(stepSummary?0:1)+(skillFile?1:0)+1<=PAYG_MAX_TOOLS;
+   if(skillFile&&hostTurnContext&&!stepSummary&&historyFits){
     try{requireCapacity(instructions+MENTOR_HISTORY_INSTRUCTIONS,true,currentInput,true);instructions+=MENTOR_HISTORY_INSTRUCTIONS;historyRead=true;}
     catch(error){if(!(error instanceof Error)||error.message!=='RUNTIME_REQUIRED_CONTEXT_EXCEEDS_CAPACITY')throw error;}
    }

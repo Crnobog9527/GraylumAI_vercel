@@ -11,7 +11,7 @@ import {nativeVisible,nativeMetadata,prepareNativePrimary,nativeFrameProjection,
  completedOutput,finalizeNativeSummary} from './nativeOutput';
 import {paygOwnerDatabase} from './paygOwner';
 import {executorRpc,historyGuard,terminalReplyGuard,recoverExecutorFinancial,
- preflightCodes,platformFailureReason,hash,progressEmitter,type RuntimeExecutorOptions} from './executorRpc';
+ preflightCodes,platformFailureReason,hash,progressEmitter,diagnosticCode,type RuntimeExecutorOptions} from './executorRpc';
 import {fitNativeRequestOutput,runtimePaygCall, type ResumeInput, type PaygWait, type PaygPosition} from './paygRuntime';
 import {beginPaygExecution, type RuntimeExecution} from './paygResume';
 import {PROMPT_CACHE_OVERHEAD_BYTES} from './promptCache';
@@ -474,6 +474,7 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
     }
    }
    if(!execution.live)return {state:'pending' as const,...(capacity?{unavailable:'capacity' as const}:{})};
+   logger.error('api','runtime_pre_dispatch_failed',{executionId,code:diagnosticCode(error)});
    const failed=await ownerRpc<{state:string}>('runtime_execution',{...args,p_action:'fail_before_dispatch',
     ...(preflightFailure==='RUNTIME_PROVIDER_HISTORY_DENIED'?{p_result:{unavailable_reason:'provider_history'}}:{})}).catch(()=>null);
    if(failed?.state==='cancelled'){
