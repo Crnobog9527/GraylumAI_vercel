@@ -5,6 +5,7 @@
 //   MP_EXPECT_ACCOUNT=acct_... node scripts/stripe-mp-sandbox-catalog.mjs plan    read-only: what exists / is missing
 //   MP_EXPECT_ACCOUNT=acct_... node scripts/stripe-mp-sandbox-catalog.mjs apply   create only the missing objects
 //   MP_EXPECT_ACCOUNT=acct_... node scripts/stripe-mp-sandbox-catalog.mjs sql     print staging mapping SQL to stdout
+//     (committed as scripts/pay-stripe-mp/staging-catalog.sql; checks and rollback live next to it)
 //
 // The key is read only from ~/.graylum/secrets/stripe-test.env, must start with sk_test_ and is never printed.
 // The expected sandbox account id is passed by the operator so it never lands in the repo; without it nothing runs.
@@ -152,7 +153,9 @@ async function apply(state) {
 }
 
 const q = value => `'${String(value).replaceAll("'", "''")}'`;
-function sql(merchant, state) {
+// Staging has exactly one Stripe test merchant; the SQL reads it instead of embedding the account id.
+const MERCHANT = "(SELECT DISTINCT merchant_namespace FROM payment_provider_refs WHERE channel='stripe' AND mode='test')";
+function sql(state) {
   if (state.problems.length || state.prices.some(p => !p.found) || !state.coupon) {
     throw new Error('STOP: run plan/apply until every catalog object exists and matches');
   }
@@ -161,14 +164,16 @@ function sql(merchant, state) {
   const lines = ['-- PAY-STRIPE-MP sandbox catalog mapping (staging only). Generated; review before running.', 'BEGIN;',
     // The approved catalog must already be in membership_plans; otherwise admission refuses anyway.
     `DO $$ BEGIN IF (SELECT count(*) FROM membership_plans WHERE (level,monthly_price,yearly_price) IN
-  (('pro',2900,27900),('gold',6900,62100)))<>2 THEN RAISE EXCEPTION 'membership_plans not on the approved catalog'; END IF; END $$;`];
+  (('pro',2900,27900),('gold',6900,62100)))<>2 THEN RAISE EXCEPTION 'membership_plans not on the approved catalog'; END IF;
+  IF (SELECT count(DISTINCT merchant_namespace) FROM payment_provider_refs WHERE channel='stripe' AND mode='test')<>1 THEN
+    RAISE EXCEPTION 'expected exactly one Stripe test merchant'; END IF; END $$;`];
   for (const r of rows) {
     const plan = `(SELECT id FROM membership_plans WHERE level=${q(r.level)})`;
-    lines.push(`UPDATE payment_provider_refs SET is_current=false WHERE channel='stripe' AND merchant_namespace=${q(merchant)}
+    lines.push(`UPDATE payment_provider_refs SET is_current=false WHERE channel='stripe' AND merchant_namespace=${MERCHANT}
   AND mode='test' AND object_type=${q(r.type)} AND membership_plan_id=${plan} AND billing_cycle=${q(r.cycle)}
   AND offer_kind=${q(r.offer)} AND price_usage=${q(r.usage)} AND is_current AND external_id<>${q(r.external)};`);
     lines.push(`INSERT INTO payment_provider_refs(channel,merchant_namespace,mode,object_type,external_id,membership_plan_id,
-  billing_cycle,is_current,offer_kind,price_usage) VALUES('stripe',${q(merchant)},'test',${q(r.type)},${q(r.external)},${plan},
+  billing_cycle,is_current,offer_kind,price_usage) VALUES('stripe',${MERCHANT},'test',${q(r.type)},${q(r.external)},${plan},
   ${q(r.cycle)},true,${q(r.offer)},${q(r.usage)}) ON CONFLICT ON CONSTRAINT pay_common_ref_identity DO UPDATE SET is_current=true;`);
   }
   lines.push('COMMIT;');
@@ -180,8 +185,8 @@ if (!['plan', 'apply', 'sql'].includes(command)) {
   console.error('usage: node scripts/stripe-mp-sandbox-catalog.mjs plan|apply|sql');
   process.exit(2);
 }
-const merchant = await assertAccount();
+await assertAccount();
 let state = await inspect();
 if (command === 'apply') { await apply(state); state = await inspect(); }
-if (command === 'sql') console.log(sql(merchant, state));
+if (command === 'sql') console.log(sql(state));
 else report(state);
