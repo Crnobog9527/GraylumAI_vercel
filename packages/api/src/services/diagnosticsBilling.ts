@@ -41,8 +41,10 @@ export async function testBillingReconcile(ctx: DiagnosticContext): Promise<Diag
   const started = Date.now();
   const base = { testId: 'billing_reconcile', testName: '余额对账测试', category: 'billing' as const };
   try {
-    // Existing reconciliation reads records and the read-only research summary RPC.
-    const result = await runDailyBillingReconciliation(ctx.supabase);
+    // Reconciliation reads ledgers across all users and the research summary RPC,
+    // which 0071 grants to service_role only. Every caller is admin-gated
+    // (adminProcedure or the cron secret); runDailyBillingReconciliation only reads.
+    const result = await runDailyBillingReconciliation(ctx.supabaseAdmin);
     const valid = result.success && result.status === 'SUCCESS' && result.mismatches.length === 0;
     return {
       ...base, status: valid ? 'passed' : 'failed', latencyMs: Date.now() - started,

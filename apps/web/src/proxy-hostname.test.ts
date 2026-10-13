@@ -218,11 +218,13 @@ describe('proxy hostname classification', () => {
 
 
 describe('public font resources', () => {
-  it('bypasses auth only for the public MiSans resource directory', () => {
-    for (const url of ['/fonts/misans/abc.woff2', '/fonts/misans/misans-abc.css', '/fonts/misans/LICENSE.pdf']) {
+  it('bypasses auth only for the public font resource directories', () => {
+    for (const url of ['/fonts/misans/abc.woff2', '/fonts/misans/misans-abc.css', '/fonts/misans/LICENSE.pdf',
+      '/fonts/noto-sans-cjk-display/LICENSE.txt']) {
       expect(unstable_doesMiddlewareMatch({ config, url })).toBe(false);
     }
-    for (const url of ['/positioning', '/profile', '/admin', '/fonts/private.woff2', '/fonts/misans-private/secret']) {
+    for (const url of ['/positioning', '/profile', '/admin', '/fonts/private.woff2', '/fonts/misans-private/secret',
+      '/fonts/noto-sans-cjk-display-private/secret']) {
       expect(unstable_doesMiddlewareMatch({ config, url })).toBe(true);
     }
   });

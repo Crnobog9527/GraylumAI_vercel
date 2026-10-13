@@ -205,23 +205,6 @@ interface RunResult {
   };
 }
 
-interface RuntimeProof {
-  found: boolean;
-  status: DiagnosticStatus;
-  message: string;
-  checkedAt: string;
-  usageLog?: Record<string, unknown>;
-  tokenStats?: Record<string, unknown>;
-  settle?: Record<string, unknown>;
-  transaction?: Record<string, unknown>;
-  snapshots?: {
-    searchDigest: boolean;
-    compressionCheckpoint: boolean;
-    rollingSummary: boolean;
-  };
-  checks?: Record<string, boolean>;
-}
-
 export default function AdminDiagnosticsPage() {
   const [isRunning, setIsRunning] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState<DiagnosticCategory | 'all'>('all');
@@ -235,7 +218,6 @@ export default function AdminDiagnosticsPage() {
   const latestResults = dashboard?.latestResults;
   const summaryStats = dashboard?.summaryStats;
   const healthCheck = dashboard?.healthCheck;
-  const runtimeProof = dashboard?.runtimeProof;
   const recentRuns = dashboard?.recentRuns;
 
   const queryErrorMessage = dashboardError?.message ?? null;
@@ -390,41 +372,6 @@ export default function AdminDiagnosticsPage() {
   const healthStatus = healthCheck?.status ?? 'healthy';
   const healthColor = healthStatus === 'healthy' ? 'text-emerald-400' : healthStatus === 'warning' ? 'text-amber-400' : 'text-red-400';
   const healthBgColor = healthStatus === 'healthy' ? 'bg-emerald-500/20' : healthStatus === 'warning' ? 'bg-amber-500/20' : 'bg-red-500/20';
-  const runtimeProofData = runtimeProof as RuntimeProof | undefined;
-  const runtimeProofRequestId =
-    runtimeProofData?.usageLog && typeof runtimeProofData.usageLog.request_id === 'string'
-      ? runtimeProofData.usageLog.request_id
-      : null;
-  const runtimeProofModelId =
-    runtimeProofData?.usageLog && typeof runtimeProofData.usageLog.model_id === 'string'
-      ? runtimeProofData.usageLog.model_id
-      : null;
-  const runtimeProofCredits =
-    runtimeProofData?.tokenStats && runtimeProofData.tokenStats.total_credits !== undefined
-      ? String(runtimeProofData.tokenStats.total_credits)
-      : '--';
-  const runtimeProofSearchCount =
-    runtimeProofData?.tokenStats && runtimeProofData.tokenStats.web_search_count !== undefined
-      ? String(runtimeProofData.tokenStats.web_search_count)
-      : '--';
-  const runtimeProofStatus = runtimeProofData?.status ?? 'warning';
-  const runtimeProofChecks = Object.entries(runtimeProofData?.checks ?? {});
-  const runtimeProofOkCount = runtimeProofChecks.filter(([, ok]) => ok).length;
-  const runtimeProofColor =
-    runtimeProofStatus === 'passed'
-      ? 'text-emerald-400'
-      : runtimeProofStatus === 'warning'
-        ? 'text-amber-400'
-        : runtimeProofStatus === 'error'
-          ? 'text-red-400'
-          : 'text-red-400';
-  const runtimeProofBg =
-    runtimeProofStatus === 'passed'
-      ? 'bg-emerald-500/20'
-      : runtimeProofStatus === 'warning'
-        ? 'bg-amber-500/20'
-        : 'bg-red-500/20';
-
   return (
     <div className="space-y-6 p-4 md:p-8">
       {/* Page Header */}
@@ -621,106 +568,6 @@ export default function AdminDiagnosticsPage() {
           </CardContent>
         </Card>
       </div>
-
-      <Card
-        className="mb-8"
-        data-testid="runtime-proof-card"
-        style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}
-      >
-        <CardContent className="p-6">
-          <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
-            <div className="space-y-2">
-              <div className="flex items-center gap-3">
-                <div className={`p-3 rounded-xl ${runtimeProofBg}`}>
-                  <Activity className={`h-6 w-6 ${runtimeProofColor}`} />
-                </div>
-                <div>
-                  <p className="text-sm" style={{ color: 'var(--text-tertiary)' }}>最新真实运行证据</p>
-                  <p
-                    className="text-xl font-semibold"
-                    data-testid="runtime-proof-message"
-                    style={{ color: 'var(--text-primary)' }}
-                  >
-                    {runtimeProofData?.message ?? '尚未加载'}
-                  </p>
-                </div>
-              </div>
-              <div className="flex flex-wrap items-center gap-2 text-sm" style={{ color: 'var(--text-secondary)' }}>
-                <Badge
-                  className={`${runtimeProofBg} ${runtimeProofColor}`}
-                  data-testid="runtime-proof-status"
-                >
-                  {statusConfig[runtimeProofStatus].label}
-                </Badge>
-                <span>校验项 {runtimeProofOkCount}/{runtimeProofChecks.length || 0}</span>
-                {runtimeProofRequestId && (
-                  <span className="font-mono">request {runtimeProofRequestId.slice(0, 18)}...</span>
-                )}
-                {runtimeProofModelId && (
-                  <span>model {runtimeProofModelId}</span>
-                )}
-              </div>
-            </div>
-            <div className="flex items-center gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => refetchDashboard()}
-                  className="border-[var(--border-primary)]"
-                >
-                <RefreshCw className="h-4 w-4 mr-2" />
-                刷新证据
-              </Button>
-            </div>
-          </div>
-
-          {runtimeProofChecks.length > 0 && (
-            <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-3">
-              {runtimeProofChecks.map(([key, ok]) => (
-                <div
-                  key={key}
-                  className="flex items-center justify-between rounded-lg px-3 py-2"
-                  style={{ background: 'var(--bg-tertiary)' }}
-                >
-                  <span className="text-sm" style={{ color: 'var(--text-secondary)' }}>
-                    {key}
-                  </span>
-                  <Badge className={ok ? 'bg-emerald-500/20 text-emerald-400' : 'bg-red-500/20 text-red-400'}>
-                    {ok ? '一致' : '异常'}
-                  </Badge>
-                </div>
-              ))}
-            </div>
-          )}
-
-          <div className="mt-4 grid grid-cols-1 md:grid-cols-4 gap-3 text-sm">
-            <div className="rounded-lg p-3" style={{ background: 'var(--bg-tertiary)' }}>
-              <p style={{ color: 'var(--text-tertiary)' }}>搜索快照</p>
-              <p style={{ color: 'var(--text-primary)' }}>
-                {runtimeProofData?.snapshots?.searchDigest ? '存在' : '无'}
-              </p>
-            </div>
-            <div className="rounded-lg p-3" style={{ background: 'var(--bg-tertiary)' }}>
-              <p style={{ color: 'var(--text-tertiary)' }}>压缩快照</p>
-              <p style={{ color: 'var(--text-primary)' }}>
-                {runtimeProofData?.snapshots?.compressionCheckpoint ? '存在' : '无'}
-              </p>
-            </div>
-            <div className="rounded-lg p-3" style={{ background: 'var(--bg-tertiary)' }}>
-              <p style={{ color: 'var(--text-tertiary)' }}>积分</p>
-              <p style={{ color: 'var(--text-primary)' }}>
-                {runtimeProofCredits}
-              </p>
-            </div>
-            <div className="rounded-lg p-3" style={{ background: 'var(--bg-tertiary)' }}>
-              <p style={{ color: 'var(--text-tertiary)' }}>联网次数</p>
-              <p style={{ color: 'var(--text-primary)' }}>
-                {runtimeProofSearchCount}
-              </p>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
 
       {/* Tabs */}
       <Tabs defaultValue="results" className="space-y-6">

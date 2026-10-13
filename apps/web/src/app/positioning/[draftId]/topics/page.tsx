@@ -30,6 +30,7 @@ import { topicFailureMessage, topicTurnOutcome, topicOpenTurnNotice, topicReject
 import { finishedExecution } from '@/lib/finished-execution';
 import { isOrganizerPendingError, isPaygWaiting, type PaygViewFields } from '@/lib/payg-wait';
 import { usePaygResume } from '@/lib/use-payg-resume';
+import { useTopicInput } from './topic-input';
 
 type PlanItem = {
   id: string;
@@ -122,10 +123,8 @@ export default function TopicWorkspacePage() {
   const [panelOpen,setPanelOpen]=useState(true);
   const [infoOpen,setInfoOpen]=useState(false);
   const free=useFreeConversation();
-  const [input, setInput] = useState('');
   const inputKey=draftId?'opc-topic-input:'+draftId:'';
-  useEffect(()=>{if(inputKey)setInput(localStorage.getItem(inputKey)??'');},[inputKey]);
-  function updateInput(value:string){setInput(value);if(inputKey)localStorage.setItem(inputKey,value);}
+  const { input, updateInput, clearForSend, putBack, stored } = useTopicInput(inputKey);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   // The user's message, shown at once until the server records its turn.
@@ -272,7 +271,7 @@ export default function TopicWorkspacePage() {
     } catch (cause) { setError(topicFailureMessage(cause)); }
   }
 
-  async function perform(proposed: Operation) {
+  async function perform(proposed: Operation, fromBox = false) {
     if (!storageKey || operationBusy.current) return;
     operationBusy.current = true;
     setWorking(true);
@@ -284,6 +283,7 @@ export default function TopicWorkspacePage() {
         const raw = localStorage.getItem(storageKey);
         const op: Operation = raw ? JSON.parse(raw) : proposed;
         if (op.request.draftId !== draftId) throw new Error('OPC_REQUEST_CONFLICT');
+        let reached = false; const back = () => { if (op.kind === 'chat') putBack(op.request.requestId, op.request.input); };
         // Use the exact server schemas before freezing or dispatching. Even an
         // invalid pre-upgrade pending record can be released without guessing
         // whether a transport failure committed a valid business operation.
@@ -292,7 +292,7 @@ export default function TopicWorkspacePage() {
           : op.kind === 'adopt' ? opcHandoff.safeParse(op.request)
           : op.kind === 'draft' ? opcTopicDraft.safeParse(op.request)
           : op.kind === 'adoptTopics' ? opcAdoptTopics.safeParse(op.request) : null;
-        if (!valid?.success) {
+        if (!valid?.success) { if (raw) back(); // a new message is still in the box
           if (raw) {
             localStorage.setItem(storageKey + ':invalid:' + op.request.requestId, raw);
             localStorage.removeItem(storageKey);
@@ -304,18 +304,18 @@ export default function TopicWorkspacePage() {
           return;
         }
         localStorage.setItem(storageKey, JSON.stringify(op));
-        setPending(op);
+        setPending(op); if (fromBox && !raw && op.kind === 'chat') clearForSend(op.request.input);
         try {
           if (op.kind === 'chat') {
             setOutgoing({ text: op.request.input });
             const admitted = await turn.mutateAsync(op.request);
             // Q1: the previous organizer answered instead; nothing was stored and the input stays in the box.
-            if (!payg.admitted(admitted)) { setOutgoing(null); localStorage.removeItem(storageKey); setPending(null); return; }
-            setOutgoing(old => old && { ...old, executionId: admitted.executionId });
+            if (!payg.admitted(admitted)) { setOutgoing(null); back(); localStorage.removeItem(storageKey); setPending(null); return; }
+            reached = true; setOutgoing(old => old && { ...old, executionId: admitted.executionId });
             if (op.candidateAtSend) localStorage.setItem('opc-topic-adoption-context:'+sessionId+':'+admitted.executionId,JSON.stringify(op.candidateAtSend));
             const outcome = topicTurnOutcome(await execute.mutateAsync({ executionId: admitted.executionId }));
             if (outcome.notice) setError(outcome.notice);
-            if (!outcome.keepInput) setInput(current=>{if(current===op.request.input){localStorage.removeItem(inputKey);return '';}return current;});
+            if (outcome.keepInput) back(); else stored(op.request.requestId, op.request.input);
           } else if (op.kind === 'save') {
             const result = await savePlan.mutateAsync(op.request);
             editCandidate(null);
@@ -338,7 +338,7 @@ export default function TopicWorkspacePage() {
           localStorage.removeItem(storageKey);
           setPending(null);
         } catch (cause) {
-          setOutgoing(old => old?.executionId ? old : null); // Not admitted: the text is still in the box.
+          setOutgoing(old => old?.executionId ? old : null); if (!reached) back(); // Not admitted: the text goes back.
           const message = cause instanceof Error ? cause.message : '';
           if (definiteRejections.has(message)) {
             localStorage.setItem(storageKey + ':rejected:' + op.request.requestId, JSON.stringify(op));
@@ -358,7 +358,7 @@ export default function TopicWorkspacePage() {
     if (!sessionId || !input.trim() || pending) return;
     const visible = candidate ?? (topicDraft.data?.body?.length
       ? { body: topicDraft.data.body as PlanItem[], requestId: topicDraft.data.draftVersionId ?? '' } : null);
-    await perform({ kind: 'chat', request: { draftId, requestId: crypto.randomUUID(), input: input.trim() }, candidateAtSend:visible?structuredClone(visible):null });
+    await perform({ kind: 'chat', request: { draftId, requestId: crypto.randomUUID(), input: input.trim() }, candidateAtSend:visible?structuredClone(visible):null }, true);
   }
 
   // Opening is authorized by the persisted consent, never by this page/URL.
@@ -566,7 +566,7 @@ export default function TopicWorkspacePage() {
                   <div className={topicStyles.assistantTurn}>
                     <img className={topicStyles.agentAvatar} src="/graylum-logo.png" alt="" />
                     <div className={topicStyles.assistantMessage}>
-                      <span className={topicStyles.agentName}>Graylum · 增长顾问</span>
+                      <span className={topicStyles.agentName}>Graylum · AI 自媒体陪跑教练</span>
                       {!((topicRejectedTurn(e) || isPaygWaiting(e.state)) && !(e.body ?? e.primaryBody)) && <MessageMarkdown className={topicStyles.reply}
                         text={e.contentAvailable ? replyProse(e.body ?? e.primaryBody) : '来源已不可用，暂不展示此内容。'} />}
                       <ChatNoticeList notices={[openTurnNotice(e), ...payg.turnNotices(e, busy)]} />

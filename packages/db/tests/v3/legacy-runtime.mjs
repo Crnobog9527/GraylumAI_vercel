@@ -31,7 +31,8 @@ export function instrumentLegacy(root, apiUrl) {
 }
 export function copyLegacyTests(candidate,legacy) {
  // Test-only files; the actual services, routes, schema TS and dependency lock remain the old version.
- for(const path of ['packages/api/src/services/__tests__','packages/api/src/routers/ordinaryChatReliability.integration.ts','packages/api/vitest.integration.config.ts']) cpSync(resolve(candidate,path),resolve(legacy,path),{recursive:true});
+ // LEGACY-CLOSE removed the candidate's ordinary-chat suite; copy only paths the candidate still has.
+ for(const path of ['packages/api/src/services/__tests__','packages/api/src/routers/ordinaryChatReliability.integration.ts','packages/api/vitest.integration.config.ts'].filter(p=>existsSync(resolve(candidate,p)))) cpSync(resolve(candidate,path),resolve(legacy,path),{recursive:true});
 }
 
 // The supported rollback bundle retains exactly these two reader compatibility changes.

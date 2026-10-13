@@ -40,7 +40,6 @@ const PUBLIC_PRICING_ENTRY_PATHS = [
 
 // 需要速率限制的 API 路径
 const RATE_LIMITED_PATHS = [
-  '/api/ai/stream',
   '/api/trpc',
 ];
 
@@ -157,7 +156,7 @@ export function routeAuthLanding(request: NextRequest): NextResponse | null {
   }
 
   if (routeCallbackError(searchParams)?.to === 'verify-expired') {
-    return NextResponse.redirect(new URL(buildVerifyEmailPath('', '/profile', 'expired'), request.url));
+    return NextResponse.redirect(new URL(buildVerifyEmailPath('/profile', 'expired'), request.url));
   }
 
   return null;
@@ -374,7 +373,6 @@ export async function proxy(request: NextRequest) {
         const requestedRedirect = sanitizeRedirectTarget(request.nextUrl.searchParams.get('redirect'));
         if (!userIsVerified) {
           const verifyUrl = new URL('/verify-email', request.url);
-          verifyUrl.searchParams.set('email', user.email ?? '');
           verifyUrl.searchParams.set('redirect', requestedRedirect);
           return NextResponse.redirect(verifyUrl);
         }
@@ -393,7 +391,6 @@ export async function proxy(request: NextRequest) {
 
     if (!userIsVerified) {
       const verifyUrl = new URL('/verify-email', request.url);
-      verifyUrl.searchParams.set('email', user.email ?? '');
       verifyUrl.searchParams.set('redirect', `${pathname}${request.nextUrl.search}`);
       return NextResponse.redirect(verifyUrl);
     }
@@ -439,7 +436,6 @@ export async function proxy(request: NextRequest) {
 
     if (!isPublicPath(pathname) && user && !userIsVerified) {
       const verifyUrl = new URL('/verify-email', request.url);
-      verifyUrl.searchParams.set('email', user.email ?? '');
       verifyUrl.searchParams.set('redirect', `${pathname}${request.nextUrl.search}`);
       return NextResponse.redirect(verifyUrl);
     }
@@ -449,7 +445,6 @@ export async function proxy(request: NextRequest) {
       const requestedRedirect = sanitizeRedirectTarget(request.nextUrl.searchParams.get('redirect'));
       if (!userIsVerified) {
         const verifyUrl = new URL('/verify-email', request.url);
-        verifyUrl.searchParams.set('email', user.email ?? '');
         verifyUrl.searchParams.set('redirect', requestedRedirect);
         return NextResponse.redirect(verifyUrl);
       }
@@ -467,9 +462,10 @@ export const config = {
      * - _next/static (static files)
      * - _next/image (image optimization files)
      * - fonts/misans/ (public font binaries and license notices only)
+     * - fonts/noto-sans-cjk-display/ (style sample D's heading font and its license notice only)
      * - robots.txt, sitemap.xml (exact public crawler files)
      * - favicon.ico (favicon file)
      */
-    '/((?!_next/static|_next/image|fonts/misans/|favicon.ico|robots\\.txt$|sitemap\\.xml$|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
+    '/((?!_next/static|_next/image|fonts/misans/|fonts/noto-sans-cjk-display/|favicon.ico|robots\\.txt$|sitemap\\.xml$|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
   ],
 };

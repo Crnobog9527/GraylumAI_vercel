@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import sitemap from '@/app/sitemap';
 import { buildPageMetadata, publicPageRobots } from './metadata';
 import { PUBLIC_PAGES } from './public-pages';
-import { absoluteUrl, hreflangMap } from './site';
+import { absoluteUrl, hreflangMap, ONE_LINE_DEFINITION } from './site';
 import { faqPageJsonLd, organizationJsonLd, serializeJsonLd } from './structured-data';
 
 afterEach(() => {
@@ -82,6 +82,10 @@ describe('structured data', () => {
     const json = serializeJsonLd(faqPageJsonLd([{ question: '</script><b>', answer: 'a' }]));
     expect(json).not.toContain('<');
     expect(JSON.parse(json).mainEntity[0].name).toBe('</script><b>');
+  });
+
+  it('describes the organization with the shared one-line definition', () => {
+    expect(organizationJsonLd().description).toBe(ONE_LINE_DEFINITION['zh-Hans']);
   });
 
   it('adds contactPoint and sameAs only when given', () => {

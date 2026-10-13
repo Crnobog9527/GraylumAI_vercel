@@ -1,6 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
+import { scheduleErasureManifestSync } from './offdbManifest';
 
 export const contentTarget = z.object({
   kind: z.enum(['answer', 'session', 'artifact', 'content']),
@@ -61,7 +62,30 @@ export async function confirmContentErasure(database: Database | null | undefine
   if (response.error) fail(response.error);
   const parsed = confirmationResult.safeParse(response.data);
   if (!parsed.success || parsed.data.id !== target.id || parsed.data.kind !== target.kind) fail(null);
+  scheduleErasureManifestSync(database);
   return parsed.data;
+}
+export const conversationTarget = z.object({ sessionId: z.string().uuid() }).strict();
+/**
+ * Owner 2026-10-13: deleting a whole conversation shows no impact list, only "cannot be undone".
+ * The server computes the scope itself: the kind is fixed to `session`, the database scope function
+ * still checks ownership, and the hash it just produced is confirmed under the same row locks, so
+ * the irreversible marker, late-result refusal and replay refusal of content_erasure_confirm are
+ * unchanged. A scope that grows between the two calls (a reply landing) is recomputed, not trusted.
+ */
+export async function eraseConversation(database: Database | null | undefined, actorId: string,
+  input: z.infer<typeof conversationTarget>) {
+  const { sessionId } = conversationTarget.parse(input);
+  const target = { kind: 'session' as const, id: sessionId };
+  for (let attempt = 1; ; attempt += 1) {
+    const preview = await previewContentErasure(database, actorId, target);
+    try {
+      return await confirmContentErasure(database, actorId, { ...target, previewHash: preview.previewHash, acknowledged: true });
+    } catch (error) {
+      const changed = error instanceof TRPCError && error.message === 'CONTENT_ERASURE_PREVIEW_CHANGED';
+      if (!changed || attempt >= 3) throw error;
+    }
+  }
 }
 /** Recheck before returning buffered text/results. No positive cache survives a
  * deletion. The existing invocation still completes its original money recovery. */
