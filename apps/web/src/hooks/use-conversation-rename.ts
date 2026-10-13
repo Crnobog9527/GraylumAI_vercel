@@ -17,8 +17,10 @@ export function renameFailureMessage(error: unknown) {
 }
 
 /**
- * Inline rename of an ordinary conversation (UI-FINISH, Owner 2026-10-13). The new name shows at once;
- * a refusal puts the old title back and says why. An empty name restores the default title.
+ * Inline rename of an ordinary conversation (UI-FINISH, Owner 2026-10-13). A name being saved is shown
+ * as an overlay on top of the server list and never written into the shared query cache, so a list
+ * refetch (for this or any other conversation) cannot replace it, and dropping the overlay always
+ * falls back to the server's own title. An empty name restores the server's default title.
  */
 export function useConversationRename() {
   const utils = trpc.useUtils();
@@ -26,9 +28,10 @@ export function useConversationRename() {
   const [value, setValue] = useState('');
   // The message belongs to one conversation's latest edit; a later success there clears it.
   const [failure, setFailure] = useState<{ sessionId: string; text: string } | null>(null);
+  // Names being saved, by conversation (only the latest edit of each).
+  const [pending, setPending] = useState<ReadonlyMap<string, string>>(() => new Map());
   // Saves of one conversation run in order; different conversations save independently.
   const queues = useRef(new Map<string, Promise<void>>());
-  // Latest edit per conversation: only that edit may roll the shown title back.
   const revisions = useRef(createRenameRevisions());
 
   const start = useCallback((sessionId: string, title: string) => {
@@ -38,42 +41,46 @@ export function useConversationRename() {
   }, []);
   const cancel = useCallback(() => setEditingId(''), []);
 
-  const save = useCallback((sessionId: string, previous: string) => {
+  const setPendingName = useCallback((sessionId: string, name: string | null) => setPending((current) => {
+    const next = new Map(current);
+    if (name) next.set(sessionId, name); else next.delete(sessionId);
+    return next;
+  }), []);
+
+  const save = useCallback((sessionId: string, shown: string) => {
     const name = value.trim();
     setEditingId('');
-    if (name === previous) return Promise.resolve();
+    if (name === shown) return Promise.resolve();
     setFailure(null);
-    const setTitle = (title: string) => utils.opc.conversations.setData(undefined, (rows) =>
-      rows?.map((row) => row.sessionId === sessionId ? { ...row, title } : row));
-    if (name) setTitle(name);
-    const revision = revisions.current.begin(sessionId, previous);
+    const revision = revisions.current.begin(sessionId);
+    // Clearing the name shows the server's title until the refresh brings the default back.
+    setPendingName(sessionId, name || null);
     const run = async () => {
+      let refused: unknown = null;
       try {
-        const saved = await utils.client.opc.conversationRename.mutate({ sessionId, name });
-        revisions.current.settle(sessionId, saved.name ?? '');
-        // Only the latest edit clears the error and refreshes the list: a refetch while a newer edit of
-        // this conversation is queued could show this older title over it. An empty name restores the
-        // server's default title, which the refresh brings.
-        if (revisions.current.isLatest(sessionId, revision)) {
-          setFailure((current) => current?.sessionId === sessionId ? null : current);
-          void utils.opc.conversations.invalidate();
-        }
+        await utils.client.opc.conversationRename.mutate({ sessionId, name });
       } catch (cause) {
-        revisions.current.settle(sessionId, null);
-        // A failure superseded by a newer edit of the same conversation changes nothing: that edit
-        // decides. Otherwise show the last title the server confirmed, not an unsaved optimistic one.
-        if (revisions.current.isLatest(sessionId, revision)) {
-          setTitle(revisions.current.rollbackTitle(sessionId, previous));
-          setFailure({ sessionId, text: renameFailureMessage(cause) });
-          void utils.opc.conversations.invalidate();
-        }
+        refused = cause;
+      }
+      // A saved name stays on screen until the refreshed list carries it (no flicker back to the old
+      // title); a refused one gives way to the server's title at once. Only the latest edit of this
+      // conversation ends its overlay and owns the message: an older one never touches a newer edit.
+      const refreshed = utils.opc.conversations.invalidate();
+      if (refused === null) await Promise.resolve(refreshed).catch(() => undefined);
+      if (revisions.current.isLatest(sessionId, revision)) {
+        setPendingName(sessionId, null);
+        setFailure((current) => refused ? { sessionId, text: renameFailureMessage(refused) }
+          : current?.sessionId === sessionId ? null : current);
       }
     };
     const next = (queues.current.get(sessionId) ?? Promise.resolve()).then(run);
     queues.current.set(sessionId, next);
     void next.finally(() => { if (queues.current.get(sessionId) === next) queues.current.delete(sessionId); });
     return next;
-  }, [utils, value]);
+  }, [utils, value, setPendingName]);
 
-  return { editingId, value, setValue, error: failure?.text ?? '', start, cancel, save };
+  /** The title to show: a name being saved, otherwise the server's. */
+  const titleOf = useCallback((sessionId: string, serverTitle: string) => pending.get(sessionId) ?? serverTitle, [pending]);
+
+  return { editingId, value, setValue, error: failure?.text ?? '', start, cancel, save, titleOf };
 }

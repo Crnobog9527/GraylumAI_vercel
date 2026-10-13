@@ -249,6 +249,7 @@ it('renames a conversation inline from the ⋯ menu; Enter saves the trimmed nam
   await page.keyboard.press('Enter');
   await ui(input).toHaveCount(0);
   await ui.poll(() => renames(page)).toEqual([{ sessionId: SESSION, name: '新名字' }]);
+
 }));
 
 it('Esc cancels a rename without saving, and an unchanged name sends nothing', () => open(1280, async page => {
@@ -275,6 +276,8 @@ it('a second conversation saves while the first rename is still pending', () => 
   await input.fill('第一个');
   await page.keyboard.press('Enter');
   await ui.poll(() => renames(page)).toHaveLength(1);
+  // The name being saved is shown at once, on top of the server list.
+  await ui(page.getByText('第一个', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: '第二个对话的更多操作' }).focus();
   await page.keyboard.press('Enter');
   await page.getByRole('menuitem', { name: '重命名' }).click();

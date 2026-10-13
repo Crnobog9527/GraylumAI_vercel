@@ -19,23 +19,24 @@ export function ConversationRow({ conversation, menuOpen, menuPosition, onOpenMe
   rename: ReturnType<typeof useConversationRename>;
 }) {
   const editing = rename.editingId === conversation.sessionId;
+  const title = rename.titleOf(conversation.sessionId, conversation.title);
   return <div className={styles.threadRow}>
     {editing ? <div className={styles.renameThread}>
       <input className={styles.inlineRename} autoFocus aria-label="重命名对话" maxLength={80} value={rename.value}
         onChange={(event) => rename.setValue(event.target.value)}
-        onBlur={() => void rename.save(conversation.sessionId, conversation.title)}
+        onBlur={() => void rename.save(conversation.sessionId, title)}
         onKeyDown={(event) => {
           if (event.key === 'Escape') { event.stopPropagation(); rename.cancel(); }
           if (event.key === 'Enter') event.currentTarget.blur();
         }}/>
     </div> : <Link className={styles.thread} href={'/runtime?session=' + conversation.sessionId}>
-      <span>{conversation.title}</span>
+      <span>{title}</span>
       <small>{new Date(conversation.lastActivityAt).toLocaleDateString('zh-CN')} · 对话</small>
     </Link>}
-    {!editing && <button type="button" className={styles.more} aria-label={conversation.title + '的更多操作'}
+    {!editing && <button type="button" className={styles.more} aria-label={title + '的更多操作'}
       aria-expanded={menuOpen} onClick={onOpenMenu}><Ellipsis size={17}/></button>}
     {menuOpen && <div className={styles.workMenu} style={menuPosition} role="menu">
-      <button role="menuitem" onClick={() => { onCloseMenu(); rename.start(conversation.sessionId, conversation.title); }}>
+      <button role="menuitem" onClick={() => { onCloseMenu(); rename.start(conversation.sessionId, title); }}>
         重命名</button>
       <button role="menuitem" className={styles.danger} onClick={() => { onCloseMenu(); onDelete(); }}>删除对话</button>
     </div>}
