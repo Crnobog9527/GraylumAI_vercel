@@ -12,13 +12,16 @@ import styles from './demo.module.css';
 export function LazyDemo() {
   const ref = useRef<HTMLDivElement>(null);
   const [Demo, setDemo] = useState<ComponentType | null>(null);
+  const [failed, setFailed] = useState(false);
 
   useEffect(() => {
     const node = ref.current;
     if (!node) return;
     let cancelled = false;
     const load = () => {
-      void import('./DemoWorkspace').then(module => { if (!cancelled) setDemo(() => module.DemoWorkspace); });
+      import('./DemoWorkspace')
+        .then(module => { if (!cancelled) setDemo(() => module.DemoWorkspace); })
+        .catch(() => { if (!cancelled) setFailed(true); });
     };
     if (typeof IntersectionObserver === 'undefined') { load(); return () => { cancelled = true; }; }
     const observer = new IntersectionObserver(entries => {
@@ -32,8 +35,9 @@ export function LazyDemo() {
 
   if (Demo) return <Demo />;
   return (
-    <div ref={ref} className={styles.window} aria-busy="true">
+    <div ref={ref} className={styles.window} aria-busy={!failed}>
       <div className={styles.chrome}><span className={styles.badge}>{DEMO_LABEL}</span><p>{DEMO_NOTE}</p></div>
+      {failed ? <p role="status" className={styles.failed}>演示没有加载出来，请刷新页面再试。</p> : null}
     </div>
   );
 }

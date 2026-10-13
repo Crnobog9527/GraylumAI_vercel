@@ -2,7 +2,7 @@
 'use client';
 
 import { useEffect, useReducer, useRef, useState } from 'react';
-import { ArrowUp, Box, PanelRightClose, PanelRightOpen, Plus, X } from 'lucide-react';
+import { ArrowUp, Box, PanelRightClose, PanelRightOpen, Plus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { MessageMarkdown } from '@/components/chat/MessageMarkdown';
 import { CaptureChecklist } from '@/components/opc/capture-checklist';
@@ -11,9 +11,9 @@ import frame from '@/components/opc/workspace-frame.module.css';
 import composer from '@/components/opc/work-composer.module.css';
 import result from '@/components/opc/positioning-result.module.css';
 import { cn } from '@/lib/utils';
+import { DemoReportDialog } from './DemoReportDialog';
 import {
-  DEMO_LABEL, DEMO_NOTE, DEMO_STEPS, REPORT_BODY, REPORT_INTRO, REPORT_TITLE,
-  demoInformation, demoReducer, initialDemoState, openQuestion, type DemoMessage,
+  DEMO_LABEL, DEMO_NOTE, DEMO_STEPS, demoInformation, demoReducer, initialDemoState, openQuestion, type DemoMessage,
 } from './demo-script';
 import styles from './demo.module.css';
 
@@ -77,7 +77,13 @@ export function DemoWorkspace() {
   const live = state.messages.find(message => message.id === state.liveId);
   const shown = useReveal(state.liveId, live?.text ?? '', () => dispatch({ type: 'settled' }));
   const card = state.liveId ? null : openQuestion(state);
-  const panel = state.panel === 'report' ? 'chat' : state.panel;
+  const panel = state.panel;
+  const readyToConfirm = state.phase === 'summary' && !state.liveId;
+  const answer = (option: number) => {
+    setOtherHint(false);
+    dispatch({ type: 'answer', option });
+    log.current?.focus({ preventScroll: true });
+  };
 
   useEffect(() => {
     const node = log.current;
@@ -90,16 +96,18 @@ export function DemoWorkspace() {
       <div className={styles.chrome}>
         <span className={styles.badge}>{DEMO_LABEL}</span>
         <p>{DEMO_NOTE}</p>
-        <button type="button" onClick={() => { dispatch({ type: 'reset' }); setOtherHint(false); }}>重新开始</button>
+        <button type="button" className={styles.restart} onClick={() => { dispatch({ type: 'reset' }); setOtherHint(false); }}>重新开始</button>
       </div>
       <div role="group" aria-label="切换显示" className={styles.tabs}>
         <button type="button" aria-pressed={panel === 'chat'} onClick={() => dispatch({ type: 'panel', panel: 'chat' })}>对话</button>
         <button type="button" aria-pressed={panel === 'checklist'}
-          onClick={() => dispatch({ type: 'panel', panel: 'checklist' })}>定位清单</button>
+          onClick={() => dispatch({ type: 'panel', panel: 'checklist' })}>
+          定位清单{state.checklistUpdated ? <span className={styles.dot} role="status" aria-label="有更新" /> : null}
+        </button>
       </div>
       <div className={styles.shell} data-panel={panel} data-right={rightOpen ? 'open' : 'closed'}>
         <section className={cn(frame.center, styles.centerPane)} aria-label="对话">
-          <main className={`${result.workspaceMain} ${result.conversationPage} h-full w-full text-[var(--text-primary)]`}>
+          <div className={`${result.workspaceMain} ${result.conversationPage} h-full w-full text-[var(--text-primary)]`}>
             <div className={result.workspaceContent}>
               <header className={result.positionTop}>
                 <h3 className="m-0 text-[13px] font-medium">我的定位分析</h3>
@@ -123,7 +131,8 @@ export function DemoWorkspace() {
                 <article className={result.stepArticle}>
                   <div className={result.stepColumns}>
                     <div className={result.mentorChat}>
-                      <div ref={log} role="log" aria-label="示例对话" aria-live="polite" className="space-y-3">
+                      <div ref={log} role="log" aria-label="示例对话" aria-live="polite" aria-busy={Boolean(state.liveId)} tabIndex={-1}
+                        className="space-y-3">
                         {state.messages.map(message => (
                           <Message key={message.id} message={message} shown={message.id === state.liveId ? shown : null} />
                         ))}
@@ -132,7 +141,7 @@ export function DemoWorkspace() {
                         <div className={composer.composer}>
                           {card ? (
                             <div className={cn(composer.attachment, styles.attachment)}>
-                              <QuestionCardView card={card} docked onAnswer={(_, option) => { setOtherHint(false); dispatch({ type: 'answer', option }); }}
+                              <QuestionCardView card={card} docked onAnswer={(_, option) => answer(option)}
                                 onOther={() => setOtherHint(true)} />
                             </div>
                           ) : null}
@@ -147,6 +156,9 @@ export function DemoWorkspace() {
                             </div>
                           </div>
                         </div>
+                        {readyToConfirm ? (
+                          <Button className={styles.toConfirm} onClick={() => dispatch({ type: 'panel', panel: 'checklist' })}>去定位清单确认这一步</Button>
+                        ) : null}
                         {otherHint ? <p className={styles.composerHint}>演示里请点上面的选项；真实对话里可以直接用自己的话回答。</p> : null}
                       </div>
                     </div>
@@ -160,7 +172,7 @@ export function DemoWorkspace() {
                 <p>{state.valid ? '示例：点「生成报告」看报告长什么样' : '确认第一步后，可以看示例报告'}</p>
               </footer>
             </div>
-          </main>
+          </div>
         </section>
         <aside className={cn(frame.right, styles.rightPane)} aria-label="定位清单">
           <div className={result.panel}>
@@ -175,21 +187,7 @@ export function DemoWorkspace() {
           </div>
         </aside>
       </div>
-      {state.reportOpen ? (
-        <div className={styles.overlay}>
-          <div role="dialog" aria-modal="true" aria-label={REPORT_TITLE} className={`${result.consentCard} !max-w-2xl`}
-            onKeyDown={event => { if (event.key === 'Escape') dispatch({ type: 'report', open: false }); }}>
-            <header>
-              <h2>{REPORT_TITLE}</h2>
-              <Button className={result.consentClose} variant="ghost" aria-label="关闭报告" onClick={() => dispatch({ type: 'report', open: false })}>
-                <X size={18} aria-hidden="true" />
-              </Button>
-            </header>
-            <p>{REPORT_INTRO}</p>
-            <MessageMarkdown text={REPORT_BODY} />
-          </div>
-        </div>
-      ) : null}
+      {state.reportOpen ? <DemoReportDialog onClose={() => dispatch({ type: 'report', open: false })} /> : null}
     </div>
   );
 }

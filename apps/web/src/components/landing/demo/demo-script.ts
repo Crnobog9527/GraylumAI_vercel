@@ -11,7 +11,7 @@ export const DEMO_LABEL = '示例';
 export const DEMO_NOTE = '示例对话：人物和内容为虚构，用来演示教练怎么工作。不连接服务器，不调用模型，不扣积分。';
 
 export type DemoMessage = { id: string; role: 'user' | 'assistant'; label: string; text: string; summary?: boolean };
-export type DemoPanel = 'chat' | 'checklist' | 'report';
+export type DemoPanel = 'chat' | 'checklist';
 export type DemoPhase = 'q1' | 'q2' | 'summary' | 'confirmed';
 
 export const DEMO_STEPS = [
@@ -58,7 +58,7 @@ const REPLY_TRUTH = '记下了。说句实话：这类话题牙医和品牌都�
 
 function summaryText(experience: string, audience: string) {
   return `**本步小结**\n\n- 可以讲的经验：${experience}\n- 每周能投入的时间：下班后和周末\n- 想帮的人：${audience}\n\n` +
-    '这一步的必需信息齐了。请在右侧清单核对，确认后我们进入「方向判断」。';
+    '这一步的必需信息齐了。请在定位清单里核对，确认后我们进入「方向判断」。';
 }
 
 export const REPORT_TITLE = '定位报告（示例）';
@@ -90,7 +90,10 @@ export type DemoState = {
   /** Fields the visitor typed in the checklist; shown as theirs and as saved, like the real autosave. */
   typed: string[];
   valid: boolean;
+  /** Which panel shows on narrow screens, where only one fits. */
   panel: DemoPanel;
+  /** The checklist changed while the conversation was showing (the narrow-screen tab gets a dot). */
+  checklistUpdated: boolean;
   reportOpen: boolean;
   /** The message that is being "typed" right now; the view reveals it unless motion is reduced. */
   liveId: string | null;
@@ -110,6 +113,7 @@ export function initialDemoState(): DemoState {
     typed: [],
     valid: false,
     panel: 'chat',
+    checklistUpdated: false,
     reportOpen: false,
     liveId: null,
   };
@@ -152,11 +156,13 @@ export function demoReducer(state: DemoState, action: DemoAction): DemoState {
       const user: DemoMessage = { id: `m${step}`, role: 'user', label: '你 · 你是谁', text: choice };
       if (state.phase === 'q1') {
         const reply = action.option === card.recommended ? REPLY_RECOMMENDED : REPLY_TRUTH;
-        return { ...state, phase: 'q2', liveId: `m${step + 1}`, values: { ...state.values, experience: captured(choice) },
+        return { ...state, phase: 'q2', checklistUpdated: state.panel !== 'checklist',
+          liveId: `m${step + 1}`, values: { ...state.values, experience: captured(choice) },
           messages: [...state.messages, user, { id: `m${step + 1}`, role: 'assistant', label: '导师 · 你是谁', text: reply }] };
       }
       const experience = state.values.experience?.value ?? '';
-      return { ...state, phase: 'summary', liveId: `m${step + 1}`, values: { ...state.values, audience: captured(choice) },
+      return { ...state, phase: 'summary', checklistUpdated: state.panel !== 'checklist',
+        liveId: `m${step + 1}`, values: { ...state.values, audience: captured(choice) },
         messages: [...state.messages, user,
           { id: `m${step + 1}`, role: 'assistant', label: '本步小结 · 你是谁', summary: true, text: summaryText(experience, choice) }] };
     }
@@ -174,9 +180,9 @@ export function demoReducer(state: DemoState, action: DemoAction): DemoState {
       return { ...state, phase: 'confirmed', valid: true, values: confirmed };
     }
     case 'panel':
-      return { ...state, panel: action.panel };
+      return { ...state, panel: action.panel, checklistUpdated: action.panel === 'checklist' ? false : state.checklistUpdated };
     case 'report':
-      return { ...state, reportOpen: action.open, panel: action.open ? 'report' : state.panel === 'report' ? 'checklist' : state.panel };
+      return { ...state, reportOpen: action.open };
     case 'settled':
       return { ...state, liveId: null };
     case 'reset':

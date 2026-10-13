@@ -35,6 +35,15 @@ describe('landing demo script', () => {
     expect(demoInformation(state).you.schema.map(field => field.id)).toEqual(['experience', 'time', 'audience']);
   });
 
+  it('marks the checklist as updated on narrow screens until it is opened, and the report keeps the panel', () => {
+    let state = demoReducer(initialDemoState(), { type: 'answer', option: 2 });
+    expect(state.checklistUpdated).toBe(true);
+    state = demoReducer(state, { type: 'panel', panel: 'checklist' });
+    expect(state.checklistUpdated).toBe(false);
+    state = demoReducer(demoReducer(state, { type: 'report', open: true }), { type: 'report', open: false });
+    expect(state.panel).toBe('checklist');
+  });
+
   it('invents no follower, income or growth numbers', () => {
     const text = [REPORT_BODY, ...initialDemoState().messages.map(message => message.text),
       ...QUESTION_ONE.options, ...QUESTION_TWO.options].join('\n');

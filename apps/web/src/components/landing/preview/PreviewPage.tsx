@@ -27,6 +27,7 @@ export function PreviewPage({ variant, data, siteName, membershipHref }: {
   membershipHref: string;
 }) {
   const { pricing } = data;
+  const current = PREVIEW_VARIANTS.find(item => item.id === variant) ?? PREVIEW_VARIANTS[0];
   const promise = variant === 'c' ? <span className={styles.marker}>{HERO.promise}</span> : HERO.promise;
   return (
     <div className={cn(light.light, styles.page)} data-variant={variant}>
@@ -37,6 +38,7 @@ export function PreviewPage({ variant, data, siteName, membershipHref }: {
             {item.name}
           </Link>
         ))}
+        <p className={styles.sampleNote}>{current.summary} {current.review}</p>
       </nav>
       <header className={styles.header}>
         <div className={cn(styles.wrap, styles.headerInner)}>
