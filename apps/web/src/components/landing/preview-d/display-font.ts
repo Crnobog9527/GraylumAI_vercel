@@ -2,8 +2,9 @@
 import localFont from 'next/font/local';
 
 // The heading face for sample D only (see display-glyphs.ts): one small subset file, preloaded on this route.
+// It sits in public/ next to its Apache 2.0 license, which is served at /fonts/noto-sans-cjk-display/LICENSE.txt.
 export const displayFont = localFont({
-  src: './fonts/display-subset.woff2',
+  src: '../../../../public/fonts/noto-sans-cjk-display/display-subset.woff2',
   weight: '900',
   style: 'normal',
   display: 'swap',

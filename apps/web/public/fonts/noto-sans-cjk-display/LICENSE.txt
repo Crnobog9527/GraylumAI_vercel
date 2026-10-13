@@ -1,6 +1,6 @@
 display-subset.woff2 is a subset of Noto Sans CJK SC Black ("Noto Sans S Chinese Black"),
 Copyright © 2014 Adobe Systems Incorporated, licensed under the Apache License, Version 2.0
-(full text below). Modification: only the glyphs listed in ../display-glyphs.ts are kept; the
+(full text below). Modification: only the glyphs listed in apps/web/src/components/landing/preview-d/display-glyphs.ts are kept; the
 font's own copyright and license name records are kept inside the file.
 
                                  Apache License
