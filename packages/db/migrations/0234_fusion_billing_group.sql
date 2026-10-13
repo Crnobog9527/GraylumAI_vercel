@@ -205,6 +205,27 @@ $i$);
   END IF;
 END $$;
 
+-- Fusion batches replace the ordinary start threshold L with the call's own full bound (Owner
+-- 2026-10-13 option A: the balance must cover the whole batch). Inside fusion_group_claim only; the
+-- ordinary threshold, its configuration and every other claim check stay unchanged.
+DO $$ DECLARE src text; a text; b text; BEGIN
+  src:=pg_get_functiondef('public.bill2_payg_claim(uuid,uuid,integer,jsonb)'::regprocedure);
+  IF position('fusion-group-bound' IN src)=0 THEN
+    a:=$x$ SELECT value INTO cfg FROM system_settings WHERE key='billing_payg_start_thresholds' FOR SHARE;$x$;
+    b:=$x$  l:=(threshold->>'credits')::int;
+ END IF;$x$;
+    IF array_length(string_to_array(src,a),1)<>2 OR array_length(string_to_array(src,b),1)<>2 THEN
+      RAISE EXCEPTION 'FUSION_SOURCE_MISMATCH: bill2_payg_claim threshold'; END IF;
+    src:=replace(src,a,$x$ IF r.fusion_group_id IS NOT NULL AND current_setting('graylum.fusion_group_claim',true)=r.fusion_group_id::text THEN
+  cfg:=jsonb_build_object('version','fusion-group-bound');l:=greatest(1,ceil(u*r.credits_per_usd*m_call));
+ ELSE
+$x$||a);
+    src:=replace(src,b,b||$x$
+ END IF;$x$);
+    EXECUTE src;
+  END IF;
+END $$;
+
 -- Settlement (Owner 2026-10-14): every member run settles and rounds on its own, exactly as an
 -- ordinary PAYG run; the group adds no shared rounding. Only two changes: a Fusion call without a host
 -- verdict does not settle (its hold stays), and zero-charge verdicts take the existing refund path.

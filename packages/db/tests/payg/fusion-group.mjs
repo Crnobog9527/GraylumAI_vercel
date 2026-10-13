@@ -9,10 +9,10 @@ const wallet = async (db,actor) => (await db.query('SELECT credits FROM profiles
 const calls = async (db,runs) => (await db.query('SELECT * FROM bill2_calls WHERE run_id=ANY($1::uuid[]) ORDER BY run_id',[runs])).rows;
 const charged = async (db,runs) => Number((await db.query('SELECT coalesce(sum(charged),0) v FROM bill2_runs WHERE id=ANY($1::uuid[])',[runs])).rows[0].v);
 
-async function group(db,createFixture,{n=3,credits=100,phase='fusion_review'}={}) {
-  const first = await createFixture(db,{credits,phase});
+async function group(db,createFixture,{n=3,credits=100,phase='fusion_review',threshold=1}={}) {
+  const first = await createFixture(db,{credits,phase,threshold});
   const members = [first];
-  for (let i=1;i<n;i++) members.push(await createFixture(db,{actor:first.actor,phase}));
+  for (let i=1;i<n;i++) members.push(await createFixture(db,{actor:first.actor,phase,threshold}));
   const id = await rpc(db,'fusion_group_create',first.actor,randomUUID(),'review');
   for (const f of members) await rpc(db,'fusion_group_attach',first.actor,id,f.run);
   const items = members.map(f=>({runId:f.run,sequence:1,payload:f.claimPayload}));
@@ -46,6 +46,18 @@ export async function fusionGroupCases({db,Client,connectionString,report,create
   await assert.rejects(claimGroup(db,exact,'review:2',1),/FUSION_GROUP_CONFLICT/);
   await assert.rejects(claimGroup(db,exact,'review:1',2),/FUSION_GROUP_CONFLICT/);
   report.checks.push('fusion group claim: balance below batch upper bound creates nothing; exact balance holds every member in full; replay is idempotent; changed payload conflicts; runs of an earlier step cannot be reused by a new step or attempt');
+
+  // The ordinary start threshold L does not apply to a Fusion batch: L=1000 credits, batch bound 27.
+  const highL = await group(db,createFixture,{credits:27,threshold:1000});
+  assert.equal((await claimGroup(db,highL)).state,'claimed');
+  assert.deepEqual((await calls(db,highL.runs)).map(c=>[c.reserved_credits,c.start_threshold,c.threshold_version]),
+    [[9,9,'fusion-group-bound'],[9,9,'fusion-group-bound'],[9,9,'fusion-group-bound']]);
+  // Reverse: without the group-claim marker the ordinary L still applies (L=1000, balance 27).
+  const ordinary = await createFixture(db,{credits:27,threshold:1000});
+  assert.equal((await rpc(db,'bill2_claim',ordinary.actor,ordinary.run,1,ordinary.claimPayload)).state,'waiting_credits');
+  assert.equal((await calls(db,[ordinary.run])).length,0,'ordinary claim below L creates no call');
+  assert.equal(await wallet(db,ordinary.actor),27);
+  report.checks.push('Fusion batch replaces the ordinary start threshold with each call bound; ordinary claims still wait below L');
 
   // 4. Ordinary claims refuse Fusion purposes and grouped runs.
   const loose = await createFixture(db,{phase:'fusion_review'});
