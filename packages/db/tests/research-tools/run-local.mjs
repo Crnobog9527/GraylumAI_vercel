@@ -101,6 +101,14 @@ try {
   assert.equal(repaired.vendors.tikhub.hardCapAttested.by, admin);
   await code(set(config({ parallel: true }), [], 5, admin), '23514');
   await c.query('RESET ROLE');
+  // Incomplete objects ({} or a missing key) are malformed too, never "attested".
+  for (const [bad, revision] of [['{}', 5], ['{"by":"00000000-0000-4000-8000-000000000001"}', 6]]) {
+    await c.query(`UPDATE system_settings SET value=jsonb_set(value,'{vendors,firecrawl,hardCapAttested}',$1::jsonb) WHERE key='research_tools_config'`, [bad]);
+    await c.query('SET ROLE service_role');
+    await code(set(config({ firecrawl: true }), [], revision, admin), '23514');
+    assert.equal((await set(config({}), [], revision, admin)).vendors.firecrawl.hardCapAttested, null);
+    await c.query('RESET ROLE');
+  }
   report.checks.push('a malformed stored attestation is dropped on the next save (repair path) and never counts as attested');
 
   await c.query("DELETE FROM system_settings WHERE key='research_tools_config'");

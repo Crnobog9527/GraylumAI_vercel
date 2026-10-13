@@ -122,6 +122,14 @@ describe('researchTools router', () => {
     expect(h.rpcCalls).toHaveLength(1);
   });
 
+  it('reports a committed save as saved even if the history lookup fails afterwards', async () => {
+    const h = harness('admin');
+    const from = h.db.from;
+    h.db.from = (table: string) => (table === 'user_activity_logs' ? (() => { throw new Error('history down'); })() : from(table));
+    const view = await h.caller.set(input({}) as never);
+    expect(view).toMatchObject({ source: 'configured', revision: 1, historyAvailable: false, history: [] });
+  });
+
   it('keeps audit history to summaries, never full values or secrets', async () => {
     const h = harness('admin');
     const view = await h.caller.set(input({ tikhub: true }, ['tikhub']) as never);

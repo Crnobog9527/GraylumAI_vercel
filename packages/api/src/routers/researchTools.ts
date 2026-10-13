@@ -5,8 +5,8 @@ import { researchToolsUpdateSchema, researchToolsView, setResearchToolsConfig } 
 export const researchToolsRouter = router({
   get: adminProcedure.query(({ ctx }) => researchToolsView(ctx.supabase)),
   set: adminProcedure.input(researchToolsUpdateSchema).mutation(async ({ ctx, input }) => {
-    await setResearchToolsConfig(ctx.supabase, ctx.user.id, input);
-    // Always answer with the server read-back, never the requested value.
-    return researchToolsView(ctx.supabase);
+    // Answer with the writer's committed value (never the requested one); enrichment cannot fail it.
+    const committed = await setResearchToolsConfig(ctx.supabase, ctx.user.id, input);
+    return researchToolsView(ctx.supabase, committed);
   }),
 });

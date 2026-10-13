@@ -4,7 +4,7 @@
 import { z } from 'zod';
 import { TRPCError } from '@trpc/server';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { readResearchToolsConfig, researchToolsConfigSchema } from './vendors/config';
+import { readResearchToolsConfig, researchToolsConfigSchema, storedResearchToolsSchema, type ResearchToolsState } from './vendors/config';
 import { RESEARCH_VENDORS } from './vendors/types';
 
 const vendorSwitch = z.object({ enabled: z.boolean() }).strict();
@@ -47,7 +47,8 @@ function candidate(input: ResearchToolsUpdate, prior: Awaited<ReturnType<typeof 
   return { ...input.config, vendors };
 }
 
-export async function setResearchToolsConfig(db: SupabaseClient, actorId: string, input: unknown) {
+/** Saves and returns the committed state from the writer's own result (not a second read). */
+export async function setResearchToolsConfig(db: SupabaseClient, actorId: string, input: unknown): Promise<ResearchToolsState> {
   const update = researchToolsUpdateSchema.safeParse(input);
   if (!update.success) throw new TRPCError({ code: 'BAD_REQUEST', message: 'RESEARCH_TOOLS_INPUT_INVALID' });
   const prior = await readResearchToolsConfig(db);
@@ -73,26 +74,35 @@ export async function setResearchToolsConfig(db: SupabaseClient, actorId: string
     throw new TRPCError({ code: 'BAD_REQUEST', message: hardCap ? 'RESEARCH_TOOLS_HARD_CAP_REQUIRED' : 'RESEARCH_TOOLS_INPUT_INVALID' });
   }
   if (result.error || !result.data) return unavailable();
+  const committed = storedResearchToolsSchema.safeParse(result.data);
+  if (!committed.success) return unavailable();
+  const { revision, updatedBy, updatedAt, ...config } = committed.data;
+  return { config, source: 'configured', revision, updatedBy, updatedAt };
 }
 
-/** Admin view: current state, last author and recent change summaries (never full values). */
-export async function researchToolsView(db: SupabaseClient) {
-  const state = await readResearchToolsConfig(db);
+/**
+ * Admin view: current state, last author and recent change summaries (never full values). After a
+ * save, `known` is the committed state; history and e-mails are best effort and never turn a
+ * committed save into an error (`historyAvailable: false` instead).
+ */
+export async function researchToolsView(db: SupabaseClient, known?: ResearchToolsState) {
+  const state = known ?? await readResearchToolsConfig(db);
   try {
     const history = await db.from('user_activity_logs')
       .select('admin_id,details,created_at').eq('action', AUDIT_ACTION)
       .order('created_at', { ascending: false }).limit(10);
-    if (history.error) return unavailable();
+    if (history.error) return withoutHistory(state);
     const attesters = RESEARCH_VENDORS.map(v => state.config.vendors[v].hardCapAttested?.by ?? null);
     const ids = [...new Set([state.updatedBy, ...attesters, ...history.data.map(row => row.admin_id)]
       .filter((id): id is string => typeof id === 'string'))];
     const people = ids.length
       ? await db.from('profiles').select('id,email').in('id', ids)
       : { data: [] as Array<{ id: string; email: string | null }>, error: null };
-    if (people.error) return unavailable();
+    if (people.error) return withoutHistory(state);
     const email = (id: string | null) => people.data.find(p => p.id === id)?.email ?? null;
     return {
       ...state,
+      historyAvailable: true,
       updatedByEmail: email(state.updatedBy),
       hardCapAttestedBy: Object.fromEntries(RESEARCH_VENDORS.map(v =>
         [v, email(state.config.vendors[v].hardCapAttested?.by ?? null)])),
@@ -108,5 +118,9 @@ export async function researchToolsView(db: SupabaseClient) {
         };
       }),
     };
-  } catch { return unavailable(); }
+  } catch { return withoutHistory(state); }
+}
+
+function withoutHistory(state: ResearchToolsState) {
+  return { ...state, historyAvailable: false, updatedByEmail: null, hardCapAttestedBy: {} as Record<string, string | null>, history: [] };
 }

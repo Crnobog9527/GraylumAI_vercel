@@ -47,9 +47,10 @@ BEGIN
    ELSE prior->'vendors'->vendor->'hardCapAttested' END;
   -- Keep a prior attestation only if it has the exact server-written shape; a malformed one is
   -- dropped so an admin can repair an invalid row through this writer (direct writes are blocked).
-  IF NOT (jsonb_typeof(attested)='object' AND (attested - ARRAY['by','at'])='{}'::jsonb
+  -- IS DISTINCT FROM TRUE: a missing key makes the regex NULL, which must also count as malformed.
+  IF (jsonb_typeof(attested)='object' AND (attested - ARRAY['by','at'])='{}'::jsonb
    AND attested->>'by' ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
-   AND attested->>'at' ~ '^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(\.\d{1,6})?Z$')
+   AND attested->>'at' ~ '^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(\.\d{1,6})?Z$') IS DISTINCT FROM TRUE
   THEN attested:=NULL;END IF;
   IF enabled='true'::jsonb AND attested IS NULL THEN
    RAISE EXCEPTION 'RESEARCH_TOOLS_HARD_CAP_REQUIRED' USING ERRCODE='23514';END IF;
