@@ -38,6 +38,8 @@ const LEAKS_EN = [
   'I am based on Claude 3 Opus.',
   'Sure! I am GPT-4o, a model from OpenAI.',
   'I am called Gemini.',
+  "I'm Claude 3 Opus.",
+  'I am Gemini 2.0 Flash, a model by Google.',
   'I’m Claude.',
   // Review P1: articles before the vendor
   'I am a GPT-4 model.',
@@ -73,6 +75,11 @@ const SAFE = [
   // Review P2: article + brand without a model noun is ordinary copy
   'I am a Google Ads specialist who can help your account.',
   'As a Google Ads specialist, I recommend testing two creatives.',
+  // Review P2: possessive / qualification after a bare brand
+  'I am Google certified.',
+  "I am Claude's biggest fan.",
+  '我是 Claude 的重度用户。',
+  '我是谷歌认证的广告师。',
   'As discussed, Gemini is good for long scripts.',
   // Review P1: a user's own product built on an AI model
   '我基于 Claude 开发了一个写作工具，想推广它。',

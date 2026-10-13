@@ -11,12 +11,18 @@ const BRAND = String.raw`(?:claude|anthropic|chat\s?gpt|gpt(?:[-\s]?\d[\w.]*)?|o
   + String.raw`deepseek|深度求索|llama|meta\s?ai|mistral|grok|x\.?ai|文心一言|百度|kimi|月之暗面|豆包|字[节節]跳[动動]|位元組跳動|智[谱譜]|chatglm|glm|混元|[腾騰][讯訊]|`
   + String.raw`谷歌|微软|microsoft|copilot)`;
 const ZH_GAP = '[^。！？!?.\\n，,；;]';
+// After a bare brand, an identity claim ends the clause or continues with model wording; "I am Google
+// certified", "I am Claude's biggest fan", "我是 Claude 的重度用户" are ordinary copy (review P2).
+const VERSION = String.raw`(?:[-\s]?\d[\w.]*|\s+(?:opus|sonnet|haiku|flash|pro|ultra|turbo|mini|nano|lite|max))*`;
+const EN_END = String.raw`(?=\s*(?:[,.!?;:]|$)|\s+(?:an?\s+|the\s+)?(?:[\w-]+\s+){0,2}?(?:model|AI|assistant|chatbot|LLM)\b`
+  + String.raw`|\s+(?:by|from|developed|trained|made|created|built)\b)`;
 // Simplified and Traditional forms of the same words (review: 我由 Anthropic 開發 / 我的底層模型是 / 我基於).
 const MADE = '(?:[训訓][练練]|[开開][发發]|打造|[研][发發]|[创創]建|推出|[设設][计計])';
 const FROM = '(?:由|[来來]自)';
+const ZH_END = `(?=\\s*(?:[，,。.！!？?；;：:、]|$)|\\s*(?:大?模型|助手|AI|[语語]言模型|${FROM}|${MADE}))`;
 const PATTERNS = [
   // 我是 Claude / 我叫 ChatGPT / 我是一个 Gemini 模型
-  `我(?:是|叫|就是)\\s*(?:一[个個]|一款|名叫)?\\s*${BRAND}`,
+  `我(?:是|叫|就是)\\s*(?:一[个個]|一款|名叫)?\\s*${BRAND}${VERSION}${ZH_END}`,
   // 我是由 Google 训练的大型语言模型 / 我是来自 OpenAI 的语言模型
   `我(?:是|叫)${ZH_GAP}{0,10}?${FROM}\\s*${BRAND}\\s*(?:公司)?${ZH_GAP}{0,10}?(?:${MADE}|的${ZH_GAP}{0,6}?(?:模型|助手|AI))`,
   // 我由 Anthropic 开发 / 我是被 OpenAI 训练出来的
@@ -33,7 +39,7 @@ const PATTERNS = [
   String.raw`\bAs\s+(?:an?|the)\s+(?:[\w-]+\s+){0,4}(?:model|AI|assistant|chatbot|LLM)\b[^.!?\n]{0,40}?\b(?:by|from)\s+${BRAND}`,
   String.raw`\bAs\s+(?:an?|the)\s+${BRAND}[\w.-]*(?:\s+[\w-]+){0,2}?\s+(?:model|AI|assistant|chatbot|LLM)\b`,
   // I am Claude / I'm ChatGPT / I am called Gemini
-  String.raw`\bI(?:'m|’m|\s+am)\s+(?:called\s+|actually\s+)?${BRAND}\b`,
+  String.raw`\bI(?:'m|’m|\s+am)\s+(?:called\s+|actually\s+)?${BRAND}${VERSION}${EN_END}`,
   // I am a GPT-4 model / I'm an OpenAI language model / I am a Claude-based assistant. An article form needs a
   // model noun, so copy such as "I am a Google Ads specialist" stays untouched (review P2).
   String.raw`\bI(?:'m|’m|\s+am)\s+(?:an?|the)\s+${BRAND}[\w.-]*(?:\s+[\w-]+){0,2}?\s+(?:model|AI|assistant|chatbot|LLM)\b`,
