@@ -14,7 +14,7 @@ import { ContentEditor } from '@/components/opc/content-editor';
 import { ContentErasureDialog } from '@/components/opc/content-erasure-dialog';
 import composerStyles from '@/components/opc/work-composer.module.css';
 import workStyles from './runtime-work.module.css';
-import { clearForSend, forgetSentDraft } from './send-input';
+import { clearForSend, forgetPending, forgetSentDraft, openingDraft, rememberPending } from './send-input';
 import { QueryNotice } from '@/components/opc/query-notice';
 import { trpc } from '@/trpc/client';
 import {
@@ -73,7 +73,7 @@ function RuntimeWorkspace({routeSession,routeModule}:{routeSession:string;routeM
  const requestedModule=routeModule;
  const alive=useRef(true);
  useEffect(()=>{alive.current=true;return()=>{alive.current=false;};},[]);
- useEffect(()=>{if(sessionId)setInput(localStorage.getItem('opc-runtime-input:'+sessionId)??'');},[sessionId]);
+ useEffect(()=>{if(sessionId)setInput(openingDraft(localStorage,sessionId));},[sessionId]);
  useEffect(()=>{setStoredModule(sessionId?localStorage.getItem('opc-runtime-skill:'+sessionId)??'':'');},[sessionId]);
  function updateInput(value:string){setInput(value);if(sessionId)localStorage.setItem('opc-runtime-input:'+sessionId,value);}
  const choices=trpc.runtime.choices.useQuery(sessionId?{sessionId}:undefined);
@@ -153,7 +153,8 @@ function RuntimeWorkspace({routeSession,routeModule}:{routeSession:string;routeM
   const url=new URL(location.href),requestId=url.searchParams.get('request')??crypto.randomUUID();url.searchParams.set('request',requestId);history.replaceState(null,'',url);
   const submitted=input;if(!scriptRequest)setOutgoing({text:submitted});
   // Only the visible box empties now; the saved draft stays until the server stores the message.
-  restoreInput=clearForSend(setInput,submitted,text=>localStorage.setItem('opc-runtime-input:'+sessionId,text));
+  rememberPending(localStorage,sessionId,requestId,submitted);
+  restoreInput=clearForSend(setInput,submitted,text=>{localStorage.setItem('opc-runtime-input:'+sessionId,text);forgetPending(localStorage,sessionId);});
   const admitted=await prepare.mutateAsync({sessionId,requestId,input:scriptRequest?'[OPC_SCRIPT_V1] 请基于当前选题简报讨论并给出可修改的口播稿。'+(submitted.trim()||'先给我一版口播稿。'):submitted,selection:selected,network:'deny',sources:[]});
   if(!alive.current)return;
   // Q1: the previous organizer answered instead; this message was not stored. Input and request id stay.
@@ -162,7 +163,7 @@ function RuntimeWorkspace({routeSession,routeModule}:{routeSession:string;routeM
   void utils.opc.conversations.invalidate();
   sessionStorage.removeItem('opc-runtime-send:'+sessionId);
   url.searchParams.delete('request');history.replaceState(null,'',url);
-  forgetSentDraft(localStorage,'opc-runtime-input:'+sessionId,submitted);
+  forgetSentDraft(localStorage,'opc-runtime-input:'+sessionId,submitted);forgetPending(localStorage,sessionId);
   const executed=await execute.mutateAsync({executionId:admitted.executionId});
   if(alive.current){if('unavailable' in executed&&executed.unavailable==='capacity'){markCapacity(admitted.executionId);setError('本次必要材料超过模型输入容量。原请求和已完成内容已保留；请点“停止”后缩短材料再发送。');}await Promise.all([view.refetch(),utils.opc.conversations.invalidate()]);}
  }catch(cause){if(!alive.current)return;const gate=runtimeAdmissionNotice(cause);

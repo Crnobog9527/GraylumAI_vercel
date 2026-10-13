@@ -28,3 +28,35 @@ export function clearForSend(setInput: SetInput, submitted: string, save: (text:
 export function forgetSentDraft(storage: Pick<Storage, 'getItem' | 'removeItem'>, key: string, submitted: string) {
   if (storage.getItem(key) === submitted) storage.removeItem(key);
 }
+
+type DraftStorage = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>;
+const draftKey = (sessionId: string) => 'opc-runtime-input:' + sessionId;
+const pendingKey = (sessionId: string) => 'opc-runtime-pending:' + sessionId;
+
+/**
+ * The sent text is kept under its own key until the server confirms it, because the draft key is
+ * overwritten as soon as the user types the next message. A reload before confirmation then still has it.
+ */
+export function rememberPending(storage: DraftStorage, sessionId: string, requestId: string, text: string) {
+  storage.setItem(pendingKey(sessionId), JSON.stringify({ requestId, text }));
+}
+
+export function forgetPending(storage: DraftStorage, sessionId: string) {
+  storage.removeItem(pendingKey(sessionId));
+}
+
+/** The draft to show when the page opens: an unconfirmed send goes back in front of any newer draft. */
+export function openingDraft(storage: DraftStorage, sessionId: string) {
+  const draft = storage.getItem(draftKey(sessionId)) ?? '';
+  let text: unknown;
+  try {
+    text = JSON.parse(storage.getItem(pendingKey(sessionId)) ?? 'null')?.text;
+  } catch {
+    text = undefined;
+  }
+  if (typeof text !== 'string' || !text) return draft;
+  const merged = restoredDraft(draft, text);
+  storage.setItem(draftKey(sessionId), merged);
+  forgetPending(storage, sessionId);
+  return merged;
+}

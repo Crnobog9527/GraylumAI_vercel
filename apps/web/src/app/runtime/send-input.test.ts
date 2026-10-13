@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { expect, it } from 'vitest';
-import { clearForSend, forgetSentDraft, restoredDraft } from './send-input';
+import { clearForSend, forgetPending, forgetSentDraft, openingDraft, rememberPending, restoredDraft } from './send-input';
 
 function box(initial: string) {
   const state = { value: initial };
@@ -39,4 +39,40 @@ it('drops the saved draft only while it is still the sent message', () => {
   saved.set('k', '新的草稿');
   forgetSentDraft(storage, 'k', '第一条消息');
   expect(saved.get('k')).toBe('新的草稿');
+});
+
+function memoryStorage() {
+  const map = new Map<string, string>();
+  return { map, getItem: (k: string) => map.get(k) ?? null, setItem: (k: string, v: string) => { map.set(k, v); },
+    removeItem: (k: string) => { map.delete(k); } };
+}
+
+it('keeps an unconfirmed send across a reload even after the user overwrote the draft with a new one', () => {
+  const storage = memoryStorage();
+  storage.setItem('opc-runtime-input:s', '第一条消息');
+  rememberPending(storage, 's', 'r1', '第一条消息');
+  storage.setItem('opc-runtime-input:s', '新的草稿'); // what updateInput does while the send is pending
+  // Reload before the server answered: both texts come back, once, and the pending copy is folded in.
+  expect(openingDraft(storage, 's')).toBe('第一条消息\n\n新的草稿');
+  expect(storage.map.get('opc-runtime-input:s')).toBe('第一条消息\n\n新的草稿');
+  expect(storage.map.has('opc-runtime-pending:s')).toBe(false);
+  expect(openingDraft(storage, 's')).toBe('第一条消息\n\n新的草稿');
+});
+
+it('opens with the plain draft when nothing is pending, or when the send was confirmed', () => {
+  const storage = memoryStorage();
+  storage.setItem('opc-runtime-input:s', '草稿');
+  expect(openingDraft(storage, 's')).toBe('草稿');
+  rememberPending(storage, 's', 'r1', '第一条消息');
+  forgetPending(storage, 's');
+  expect(openingDraft(storage, 's')).toBe('草稿');
+  storage.setItem('opc-runtime-pending:s', 'not json');
+  expect(openingDraft(storage, 's')).toBe('草稿');
+});
+
+it('does not duplicate the send when the draft key still holds it', () => {
+  const storage = memoryStorage();
+  storage.setItem('opc-runtime-input:s', '第一条消息');
+  rememberPending(storage, 's', 'r1', '第一条消息');
+  expect(openingDraft(storage, 's')).toBe('第一条消息');
 });
