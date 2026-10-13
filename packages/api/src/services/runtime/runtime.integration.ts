@@ -1040,19 +1040,22 @@ it('RUNTIME: AC-0 router round trips per phase stay fixed for admission, Skill l
   const skillWarm=await skillPrepare();
   const all={start,ordinary,stream,skill,execute,skillWarm};
   const counts=Object.fromEntries(Object.entries(all).map(([name,m])=>[name,phases(m.summary)]));
+  // POSITIONING-GATE: free-chat admission adds one read (opc_has_confirmed_positioning); this user has no positioning
+  // and the fixture model has no OpenRouter key, so Decisions is not called (fallback rule frozen instead).
   expect(counts,JSON.stringify(Object.fromEntries(Object.entries(all).map(([name,m])=>[name,m.summary])))).toEqual({
    start:{prelude:2,policy:0,host:1},
-   ordinary:{prelude:2,policy:0,host:0,admission:6,rateLimit:0},
+   ordinary:{prelude:2,policy:0,host:0,admission:7,rateLimit:0},
    stream:{prelude:2,policy:0,host:0,execute:7,provider:9,rateLimit:0},
-   skill:{prelude:2,policy:0,host:0,admission:13,rateLimit:0},
+   skill:{prelude:2,policy:0,host:0,admission:14,rateLimit:0},
    execute:{prelude:2,policy:0,host:0,execute:6,provider:7,rateLimit:0},
-   skillWarm:{prelude:2,policy:0,host:0,admission:11,rateLimit:0},
+   skillWarm:{prelude:2,policy:0,host:0,admission:12,rateLimit:0},
   });
   // AC-0c: Auth verifies once per invocation and credential, plus once again
   // after the provider response (AC-0 baseline was 2/6/9/12/9).
   const label=(name:string)=>Object.fromEntries(Object.entries(all).map(([key,m])=>[key,m.summary.labels[name]?.rt??0]));
   // D7 checks before buffered output and on both sides of post-execution capture.
   expect(label('rpc/content_erasure_visible')).toEqual({start:0,ordinary:0,stream:5,skill:0,execute:2,skillWarm:0});
+  expect(label('rpc/opc_has_confirmed_positioning')).toEqual({start:0,ordinary:1,stream:0,skill:1,execute:0,skillWarm:1});
   expect(label('auth/v1/user')).toEqual({start:1,ordinary:1,stream:2,skill:1,execute:2,skillWarm:1});
   // AC-0c: one service-role and one user-scoped (RLS) module read per request
   // (AC-0 baseline 7 for the Skill prepare); package checks before use and

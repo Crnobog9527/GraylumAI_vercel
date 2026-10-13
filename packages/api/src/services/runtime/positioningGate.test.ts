@@ -2,7 +2,8 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { logger } from '../../lib/logger';
-import { DECISIONS_MODEL, DECISIONS_URL, decide, decisionsClassifier, hasConfirmedPositioning, judgePositioning } from './positioningGate';
+import { DECISIONS_MODEL, DECISIONS_URL, decide, decisionsClassifier, hasConfirmedPositioning, judgePositioning, openRouterKey }
+  from './positioningGate';
 import { isPositioningRefusal, POSITIONING_MARKER, POSITIONING_FALLBACK_INSTRUCTIONS } from './positioningFallback';
 import { withPrimaryAddenda } from './primaryInstructions';
 import { stagingProcedureError, StagingAccessError } from './stagingErrors';
@@ -45,29 +46,25 @@ it.each([
   expect(await decide('KEY', 'x', vi.fn(transport) as never)).toBe('unavailable');
 });
 
-function models(row: Record<string, unknown> | null) {
-  const q = { select: () => q, eq: () => q, single: async () => row ? { data: row, error: null } : { data: null, error: { code: 'PGRST116' } } };
-  return { from: vi.fn(() => q) } as unknown as SupabaseClient;
-}
 it('reuses the admitted model row OpenRouter key and never calls without one', async () => {
-  const transport = vi.fn(async () => answer(0.1));
-  expect(await decisionsClassifier(models({ provider: 'openai', api_endpoint: '', api_key: ' K1 ' }), transport as never)
-    ({ text: 'x', modelRowId: 'm' })).toBe('allow');
-  expect((transport.mock.calls[0] as unknown as [string, RequestInit])[1].headers).toMatchObject({ Authorization: 'Bearer K1' });
+  expect(openRouterKey({ provider: 'openai', api_endpoint: '', api_key: ' K1 ' })).toBe('K1');
   for (const row of [null, { provider: 'fixture', api_endpoint: null, api_key: 'K' },
     { provider: 'openai', api_endpoint: 'https://example.com/v1/chat/completions', api_key: 'K' },
-    { provider: 'openai', api_endpoint: '', api_key: ' ' }]) {
-    expect(await decisionsClassifier(models(row), transport as never)({ text: 'x', modelRowId: 'm' })).toBe('unavailable');
-  }
+    { provider: 'openai', api_endpoint: '', api_key: ' ' }, { provider: 'openai', api_endpoint: '' }])
+    expect(openRouterKey(row)).toBeUndefined();
+  const transport = vi.fn(async () => answer(0.1));
+  expect(await decisionsClassifier(transport as never)({ text: 'x', apiKey: 'K1' })).toBe('allow');
+  expect((transport.mock.calls[0] as unknown as [string, RequestInit])[1].headers).toMatchObject({ Authorization: 'Bearer K1' });
+  expect(await decisionsClassifier(transport as never)({ text: 'x', apiKey: undefined })).toBe('unavailable');
   expect(transport).toHaveBeenCalledOnce();
 });
 
 it('refuses on block, falls back on unavailable or a thrown classifier, and passes on allow', async () => {
-  const admin = models(null), input = { text: 'x', modelRowId: 'm' };
-  await expect(judgePositioning({ classify: async () => 'block' }, admin, input)).rejects.toMatchObject({ reason: 'POSITIONING_REQUIRED' });
-  expect(await judgePositioning({ classify: async () => 'unavailable' }, admin, input)).toBe(true);
-  expect(await judgePositioning({ classify: async () => { throw new Error('x'); } }, admin, input)).toBe(true);
-  expect(await judgePositioning({ classify: async () => 'allow' }, admin, input)).toBe(false);
+  const input = { text: 'x', apiKey: 'K' };
+  await expect(judgePositioning({ classify: async () => 'block' }, input)).rejects.toMatchObject({ reason: 'POSITIONING_REQUIRED' });
+  expect(await judgePositioning({ classify: async () => 'unavailable' }, input)).toBe(true);
+  expect(await judgePositioning({ classify: async () => { throw new Error('x'); } }, input)).toBe(true);
+  expect(await judgePositioning({ classify: async () => 'allow' }, input)).toBe(false);
 });
 
 it('reads the 0219 rule and fails operationally instead of guessing', async () => {

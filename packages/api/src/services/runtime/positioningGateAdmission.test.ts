@@ -57,7 +57,8 @@ it('never calls Decisions for a user with a confirmed positioning', async () => 
 it('admits an allowed message of a user without a positioning, judged exactly once', async () => {
   const f = fixture();
   const result = await prepare(f) as { payload: Record<string, unknown> };
-  expect(f.classify).toHaveBeenCalledExactlyOnceWith({ text: f.input.input, modelRowId: id(3) });
+  // The fixture model row has no OpenRouter key; the classifier gets the same row's key (none) without another read.
+  expect(f.classify).toHaveBeenCalledExactlyOnceWith({ text: f.input.input, apiKey: undefined });
   expect(result.payload).not.toHaveProperty('positioningGate');
 });
 

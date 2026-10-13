@@ -22,7 +22,7 @@ export const DECISIONS_BLOCK_AT = 0.5;
 const QUESTION = 'own_account_social_media_operations';
 
 export type GateVerdict = 'block' | 'allow' | 'unavailable';
-export type PositioningClassifier = (input: { text: string; modelRowId: string }) => Promise<GateVerdict>;
+export type PositioningClassifier = (input: { text: string; apiKey: string | undefined }) => Promise<GateVerdict>;
 /** Present only for the free-chat host; positioning flows (OPC turns) and reports never carry it. */
 export type PositioningGatePolicy = { classify?: PositioningClassifier };
 
@@ -96,20 +96,21 @@ export async function decide(apiKey: string, text: string, transport: typeof fet
   return verdict;
 }
 
-/** Reuses the OpenRouter key already configured on the admitted model's row; never a new credential. */
-export function decisionsClassifier(admin: SupabaseClient, transport: typeof fetch = fetch): PositioningClassifier {
-  return async ({ text, modelRowId }) => {
-    let key: string | undefined;
-    try {
-      const row = await admin.from('ai_models').select('provider,api_endpoint,api_key').eq('id', modelRowId).single();
-      const endpoint = row.error ? null : resolveOpenAICompatibleEndpoint(row.data.provider, row.data.api_endpoint);
-      if (endpoint && isOpenRouterEndpoint(endpoint)) key = row.data!.api_key?.trim() || undefined;
-    } catch { key = undefined; }
-    if (!key) {
+/** The OpenRouter key already configured on the admitted model's row (Decisions never gets a new credential). */
+export function openRouterKey(row: { provider?: unknown; api_endpoint?: unknown; api_key?: unknown } | null | undefined) {
+  if (!row || typeof row.api_key !== 'string') return undefined;
+  const endpoint = resolveOpenAICompatibleEndpoint(typeof row.provider === 'string' ? row.provider : null,
+    typeof row.api_endpoint === 'string' ? row.api_endpoint : null);
+  return endpoint && isOpenRouterEndpoint(endpoint) ? row.api_key.trim() || undefined : undefined;
+}
+
+export function decisionsClassifier(transport: typeof fetch = fetch): PositioningClassifier {
+  return async ({ text, apiKey }) => {
+    if (!apiKey) {
       logger.warn('api', 'positioning_gate_decision', { model: DECISIONS_MODEL, verdict: 'unavailable', reason: 'no_key' });
       return 'unavailable';
     }
-    return decide(key, text, transport);
+    return decide(apiKey, text, transport);
   };
 }
 
@@ -117,10 +118,10 @@ export function decisionsClassifier(admin: SupabaseClient, transport: typeof fet
  * Admission check for a gated (non-OPC, non-report, non-organizer) turn of a user without a positioning.
  * Returns true when the primary model must carry the fallback rule because Decisions was unavailable.
  */
-export async function judgePositioning(gate: PositioningGatePolicy, admin: SupabaseClient,
-  input: { text: string; modelRowId: string }): Promise<boolean> {
+export async function judgePositioning(gate: PositioningGatePolicy,
+  input: { text: string; apiKey: string | undefined }): Promise<boolean> {
   let verdict: GateVerdict;
-  try { verdict = await (gate.classify ?? decisionsClassifier(admin))(input); }
+  try { verdict = await (gate.classify ?? decisionsClassifier())(input); }
   catch { verdict = 'unavailable'; }
   if (verdict === 'block') refusePositioning();
   return verdict === 'unavailable';

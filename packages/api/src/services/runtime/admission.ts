@@ -47,7 +47,7 @@ import {freezeStagingPaygPricing} from './paygPricing';
 import {freezePaygMessageBudget} from './paygMessageBudget';
 import {readPaygHostPolicies} from './paygHostPolicy';
 import {runAutomaticFinancialRecovery} from './automaticRecovery';
-import {hasConfirmedPositioning,judgePositioning,refusePositioning,type PositioningGatePolicy} from './positioningGate';
+import {hasConfirmedPositioning,judgePositioning,openRouterKey,refusePositioning,type PositioningGatePolicy} from './positioningGate';
 import {POSITIONING_FALLBACK} from './positioningFallback';
 
 const uuid=z.string().uuid();
@@ -140,6 +140,11 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
    const settings=readAdmissionSettings(admin);
    const replay=await query('runtime_admission_replay',{p_request_id:input.requestId,p_request:request});
    if(replay)return replay;
+   // POSITIONING-GATE: the positioning read overlaps the checks below (one round trip); OPC turns, reports and
+   // organizing are never gated, so they never read it.
+   const positioning=policy.positioningGate&&!policy.opcTurnToken&&!policy.reportGeneration&&input.selection.kind!=='organizer'
+    ?hasConfirmedPositioning(admin,actorId):undefined;
+   positioning?.catch(()=>{});
    if(policy.reportGeneration&&session.waitingOrganizer)throw new Error('OPC_CAPTURE_PENDING');
    const blocked=await finishWaitingOrganizer(session,input.requestId,policy.resumeWaitingOrganizer);
    if(blocked)return blocked;
@@ -147,9 +152,8 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
    const leaveRateLimit=currentRequestTiming()?.enter('rateLimit');
    try{requireNewWork(await newWorkGate(admin,policy.real?'staging':'local').message(actorId,settings));}
    finally{leaveRateLimit?.();}
-   // POSITIONING-GATE: only users without a confirmed positioning are checked, after the rate limit.
-   const gated=Boolean(policy.positioningGate&&!policy.opcTurnToken&&!policy.reportGeneration&&
-    input.selection.kind!=='organizer')&&!await hasConfirmedPositioning(admin,actorId);
+   // Only users without a confirmed positioning are checked, after the rate limit.
+   const gated=positioning!==undefined&&!await positioning;
    const mentorStream=Boolean(policy.opcTurnToken&&policy.mentorStream);
    if(policy.organizeOpening&&(!mentorStream||!isOpeningInput(input.input)))throw new Error('RUNTIME_CONTEXT_INVALID');
    const hostParsed=hostTurnContextSchema.safeParse(policy.hostTurnContext);
@@ -223,13 +227,16 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
     instructions=withBrandIdentity(instructions,true);
     if(skillChars)skillChars+=BRAND_IDENTITY_INSTRUCTIONS.length+1;
    }
-   const row=await admin.from('ai_models').select('id,model_id,provider,is_active,max_tokens,input_limit,config').eq('id',modelId).single();
+   const row=await admin.from('ai_models').select('id,model_id,provider,is_active,max_tokens,input_limit,config,api_endpoint,api_key')
+    .eq('id',modelId).single();
    // Match the actual administrator model to the enabled protocol and exact quote. Never substitute a default model.
    if(policy.real&&row.error){if(row.error.code==='PGRST116')throw unavailableModel();stagingRpcFailure(row.error);}
    if(row.error||row.data?.is_active!=='true'||(!policy.real&&row.data.provider!=='fixture'))throw unavailableModel();
+   // The OpenRouter key of this same row serves Decisions (no extra read); it never travels further.
+   const apiKey=openRouterKey(row.data);delete (row.data as {api_key?:unknown}).api_key;
    if(policy.real)realModel(row.data);
    // Decisions judges every other gated message, including a non-social Skill turning to social media.
-   const positioningFallback=gated&&await judgePositioning(policy.positioningGate!,admin,{text:input.input,modelRowId:modelId});
+   const positioningFallback=gated&&await judgePositioning(policy.positioningGate!,{text:input.input,apiKey});
    if(input.selection.kind==='organizer')modelConfiguration(()=>assertSeparateSummaryModel(session.dialogueModel,row.data.model_id));
    let attachedOrganizer:{
     modelId:string;model:string;maxOutputTokens:number;inputBytes?:number;historyItems?:number;reasoning?:ReasoningPolicy;instructions?:string;input?:string
