@@ -36,6 +36,10 @@ export async function recoverFusionFinancials(admin: SupabaseClient, options: { 
     const last = parsed.data[parsed.data.length - 1]!;
     cursor = { p_after_created: last.created_at, p_after_id: last.call_id };
   }
+  // After the financial wrap-up: reviews still in progress with every call settled and no movement for an
+  // hour become paused (not an end state; 0236). Ended reviews are never touched.
+  const paused = await admin.rpc('fusion_review_pause_idle', { p_idle: '1 hour' });
+  if (paused.error) summary.success = false;
   return summary;
 }
 
