@@ -19,4 +19,7 @@ it('does not tell a user who paid in another tab that nothing was charged', () =
   expect(canceledReturnNotice({ fulfilledAt: null, orderStatus: 'completed' }).tone).toBe('success');
   expect(canceledReturnNotice({ fulfilledAt: null, orderStatus: 'canceled' })).toEqual({ tone: 'cancelled', message: '你已取消本次支付，没有发生扣费。' });
   expect(canceledReturnNotice(undefined).tone).toBe('cancelled');
+  // Paid but kept for review: never "no charge".
+  expect(canceledReturnNotice({ fulfilledAt: null, orderStatus: 'pending', paymentStatus: 'paid' }).tone).toBe('warning');
+  expect(canceledReturnNotice({ fulfilledAt: null, orderStatus: 'canceled', paymentStatus: 'unpaid' }).tone).toBe('cancelled');
 });
