@@ -1,0 +1,90 @@
+{
+  "task": "PAY-STRIPE-MP PR-2 (#894)",
+  "date": "2026-10-13",
+  "mode": "Stripe test sandbox only; sessions created through buildStripeCheckoutRequest + dispatchStripeCheckoutIntent, not paid, expired afterwards",
+  "note": "amount_tax is 0 because no billing address was entered; MP adds tax at checkout on top of the pre-tax amount",
+  "results": [
+    {
+      "case": "card first month (MP)",
+      "mode": "subscription",
+      "status": "open",
+      "managed_payments": {
+        "enabled": true
+      },
+      "payment_method_types": [
+        "card",
+        "cashapp"
+      ],
+      "amount_subtotal": 6900,
+      "amount_discount": 2000,
+      "amount_tax": 0,
+      "amount_total": 4900,
+      "billing_address_collection": null,
+      "persisted": true,
+      "repeat_same_session": true
+    },
+    {
+      "case": "card_cn first month",
+      "mode": "subscription",
+      "status": "open",
+      "managed_payments": {
+        "enabled": false
+      },
+      "payment_method_types": [
+        "card"
+      ],
+      "amount_subtotal": 6900,
+      "amount_discount": 2000,
+      "amount_tax": 0,
+      "amount_total": 4900,
+      "billing_address_collection": "required",
+      "persisted": true,
+      "repeat_same_session": true
+    },
+    {
+      "case": "card founder yearly (MP)",
+      "mode": "subscription",
+      "status": "open",
+      "managed_payments": {
+        "enabled": true
+      },
+      "payment_method_types": [
+        "card",
+        "cashapp"
+      ],
+      "amount_subtotal": 49600,
+      "amount_discount": 0,
+      "amount_tax": 0,
+      "amount_total": 49600,
+      "billing_address_collection": null,
+      "persisted": true,
+      "repeat_same_session": true
+    },
+    {
+      "case": "card one-time (MP, pack shape)",
+      "mode": "payment",
+      "status": "open",
+      "managed_payments": {
+        "enabled": true
+      },
+      "payment_method_types": [
+        "card",
+        "cashapp"
+      ],
+      "amount_subtotal": 6900,
+      "amount_discount": 0,
+      "amount_tax": 0,
+      "amount_total": 6900,
+      "billing_address_collection": null,
+      "persisted": true,
+      "repeat_same_session": true
+    },
+    {
+      "case": "coupon amount differs from order",
+      "result": "PAY_COMMON_PRICE_MISMATCH"
+    },
+    {
+      "expired_sessions": 4
+    }
+  ]
+}

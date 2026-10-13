@@ -22,7 +22,7 @@ export async function readWalletPaymentEvidence(input: {
     || session.client_reference_id !== order.user_id || session.metadata?.userId !== order.user_id
     || session.metadata?.orderId !== order.id || session.payment_method_types.length !== 1
     || session.payment_method_types[0] !== order.payment_method) throw new Error('PAY_WAFFO_PAYMENT_CONFLICT');
-  assertPurchaseReceipt({ snapshot: order.purchase_snapshot, scope, amount: session.amount_total,
+  assertPurchaseReceipt({ snapshot: order.purchase_snapshot, scope, amount: session.amount_total, tax: session.total_details?.amount_tax,
     currency: session.currency, livemode: session.livemode });
   input.onValidatedSession?.(session);
   if (session.payment_status !== 'paid') return null;
