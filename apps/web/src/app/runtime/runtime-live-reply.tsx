@@ -17,10 +17,16 @@ export function liveReplyText(reply: LiveReply | null, executionId: string,
   return reply.text;
 }
 
+/** The streamed text of one turn, as it arrives; nothing when there is none to show. */
+export function LiveReplyText({ text }: { text: string | null }) {
+  return text ? <MessageMarkdown className={workStyles.reply} text={text}/> : null;
+}
+
 /** A reply that streams before the view lists its turn (right after sending). */
-export function PendingLiveReply({ text }: { text: string }) {
+export function PendingLiveReply({ text }: { text: string | null }) {
+  if (!text) return null;
   return <div className={workStyles.agentMessage} data-message-role="assistant">
     <div className={workStyles.agentIdentity}><img src="/graylum-logo.png" alt=""/><span>Graylum · AI 自媒体陪跑教练</span></div>
-    <MessageMarkdown className={workStyles.reply} text={text}/>
+    <LiveReplyText text={text}/>
   </div>;
 }
