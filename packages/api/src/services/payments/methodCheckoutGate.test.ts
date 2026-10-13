@@ -2,7 +2,11 @@
 import { describe, expect, it } from 'vitest';
 import { assertMethodCheckoutEnvironment, methodCardCheckoutReady, methodCheckoutEnvironmentOpen } from './methodCheckoutGate';
 
-const staging = { VERCEL: '1', VERCEL_PROJECT_PRODUCTION_URL: 'auth-staging.graylum.com' };
+// The staging deployment, bound like the runtime staging check (project, branch, repository, database).
+const staging = { VERCEL: '1', VERCEL_PROJECT_PRODUCTION_URL: 'auth-staging.graylum.com', VERCEL_GIT_COMMIT_REF: 'staging',
+  VERCEL_GIT_REPO_OWNER: 'Crnobog9527', VERCEL_GIT_REPO_SLUG: 'GraylumAI_vercel', VERCEL_PROJECT_ID: 'synthetic-staging-project',
+  V3_RUNTIME_STAGING_PROJECT_ID: 'synthetic-staging-project', NEXT_PUBLIC_SUPABASE_URL: 'https://synthetic.supabase.co',
+  V3_RUNTIME_STAGING_DATABASE_HOST: 'synthetic.supabase.co', V3_RUNTIME_STAGING_WINDOW_ID: '00000000-0000-4000-8000-000000000001' };
 const routes = (card: boolean) => ({ version: 4, card: { enabled: card }, card_cn: { enabled: card },
   wechat_pay: { enabled: true, annualVerified: true }, alipay: { enabled: true, annualVerified: true } });
 const methods = ['card', 'card_cn', 'wechat_pay', 'alipay'] as const;
@@ -32,7 +36,15 @@ describe('PAY-STRIPE-MP checkout gate (3c: card open on staging only, behind the
       expect(methodCardCheckoutReady(env, routes(false))).toBe(false);
     }
     expect(methodCardCheckoutReady(staging, null)).toBe(false);
-    // Only the staging deployment itself: a preview or another project with the same flags stays closed.
-    expect(methodCheckoutEnvironmentOpen({ VERCEL_PROJECT_PRODUCTION_URL: 'auth-staging.graylum.com' }, 'card')).toBe(false);
+    // Either card route makes the entry ready; `routes` tells the page which method is open.
+    expect(methodCardCheckoutReady(staging, { ...routes(false), card_cn: { enabled: true } })).toBe(true);
+  });
+  it('a preview of the staging project, another project or another database stays closed', () => {
+    for (const patch of [{ VERCEL_GIT_COMMIT_REF: 'feature-branch', VERCEL_ENV: 'preview' }, { VERCEL_PROJECT_ID: 'other-project' },
+      { NEXT_PUBLIC_SUPABASE_URL: 'https://other.supabase.co' }, { VERCEL_GIT_REPO_OWNER: 'someone-else' },
+      { VERCEL_PROJECT_PRODUCTION_URL: 'app.graylum.com' }, { VERCEL: undefined }]) {
+      expect(methodCheckoutEnvironmentOpen({ ...staging, ...patch }, 'card')).toBe(false);
+      expect(methodCardCheckoutReady({ ...staging, ...patch }, routes(true))).toBe(false);
+    }
   });
 });
