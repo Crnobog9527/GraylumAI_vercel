@@ -11,10 +11,11 @@
 // Usage:
 //   node postforme-probe.mjs accounts
 //   node postforme-probe.mjs auth-url <platform> [external_id]
-//   node postforme-probe.mjs feed <platform> [max_pages]   (account IDs are looked up internally, never printed)
+//   node postforme-probe.mjs feed <platform>[#n] [max_pages]  (n = position shown by `accounts`, default 1;
+//                                                              account IDs are looked up internally, never printed)
 //   node postforme-probe.mjs smoke            (list endpoints, error shapes, rate-limit headers)
 //   node postforme-probe.mjs burst [n]        (n sequential GET /social-accounts, to observe 429)
-import { readFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 
@@ -75,8 +76,27 @@ function shapeOf(post) {
 async function accounts() {
   const r = await call('GET', '/social-accounts');
   // Account IDs are user-linked identifiers: print platform and status only.
-  const rows = (r.json?.data ?? []).map((a) => ({ platform: a.platform, status: a.status }));
+  const seen = {};
+  const rows = (r.json?.data ?? []).map((a) => {
+    seen[a.platform] = (seen[a.platform] ?? 0) + 1;
+    return { select: `${a.platform}#${seen[a.platform]}`, platform: a.platform, status: a.status, name_hint: maskName(a.username) };
+  });
   return { status: r.status, ms: r.ms, headers: r.headers, accounts: rows, error: r.errorText };
+}
+
+// First and last character only, so the Owner can tell two accounts apart without exposing the handle.
+function maskName(name) {
+  if (typeof name !== 'string' || name.length === 0) return null;
+  return name.length <= 2 ? '*'.repeat(name.length) : `${name[0]}***${name.at(-1)}`;
+}
+
+// The one-time consent URL goes to a private local file (mode 600) outside the repository, never to stdout.
+function saveConsentUrl(platform, url) {
+  const dir = join(homedir(), '.graylum', 'tmp');
+  mkdirSync(dir, { recursive: true, mode: 0o700 });
+  const file = join(dir, `postforme-consent-${platform}.txt`);
+  writeFileSync(file, `${url}\n`, { mode: 0o600 });
+  return file;
 }
 
 async function authUrl(platform, externalId) {
@@ -84,15 +104,20 @@ async function authUrl(platform, externalId) {
     // Analytics-only scope. Publishing scope is a separate consent and is not requested by this probe.
     platform, external_id: externalId ?? 'graylum-probe', permissions: ['feeds'],
   });
-  // The URL is a consent link for the Owner's own test account; print host only.
-  const url = r.json?.url ? new URL(r.json.url).host : null;
-  return { status: r.status, ms: r.ms, consent_host: url, error: r.json?.message ?? r.errorText };
+  // The URL is a consent link for the Owner's own test account; print host and the private file path only.
+  const url = r.json?.url ?? null;
+  return {
+    status: r.status, ms: r.ms, consent_host: url ? new URL(url).host : null,
+    consent_url_file: url ? saveConsentUrl(platform, url) : null, error: r.json?.message ?? r.errorText,
+  };
 }
 
-async function feed(platform, maxPages = 3) {
+async function feed(selector, maxPages = 3) {
+  const [platform, nth = '1'] = String(selector).split('#');
   const list = await call('GET', '/social-accounts');
-  const accountId = (list.json?.data ?? []).find((a) => a.platform === platform)?.id;
-  if (!accountId) return { platform, error: `no connected ${platform} account` };
+  const matches = (list.json?.data ?? []).filter((a) => a.platform === platform);
+  const accountId = matches[Number(nth) - 1]?.id;
+  if (!accountId) return { selector, error: `no connected account ${selector} (found ${matches.length} for ${platform})` };
   const pages = [];
   let cursor = null;
   for (let i = 0; i < Number(maxPages); i += 1) {
@@ -110,7 +135,7 @@ async function feed(platform, maxPages = 3) {
     cursor = r.json?.meta?.cursor ?? null;
     if (!r.json?.meta?.has_more || !cursor) break;
   }
-  return { platform, pages };
+  return { selector: `${platform}#${nth}`, of: matches.length, pages };
 }
 
 function brief(r) {
@@ -147,7 +172,7 @@ const run = {
   accounts: () => accounts(), 'auth-url': () => authUrl(a, b), feed: () => feed(a, b), smoke: () => smoke(), burst: () => burst(a),
 }[cmd];
 if (!run) {
-  console.error('usage: accounts | auth-url <platform> [external_id] | feed <platform> [max_pages] | smoke | burst [n]');
+  console.error('usage: accounts | auth-url <platform> [external_id] | feed <platform>[#n] [max_pages] | smoke | burst [n]');
   process.exit(2);
 }
 console.log(JSON.stringify({ at: new Date().toISOString(), cmd, result: await run() }, null, 2));
