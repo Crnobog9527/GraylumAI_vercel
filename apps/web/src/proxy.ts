@@ -157,7 +157,7 @@ export function routeAuthLanding(request: NextRequest): NextResponse | null {
   }
 
   if (routeCallbackError(searchParams)?.to === 'verify-expired') {
-    return NextResponse.redirect(new URL(buildVerifyEmailPath('', '/profile', 'expired'), request.url));
+    return NextResponse.redirect(new URL(buildVerifyEmailPath('/profile', 'expired'), request.url));
   }
 
   return null;
@@ -374,7 +374,6 @@ export async function proxy(request: NextRequest) {
         const requestedRedirect = sanitizeRedirectTarget(request.nextUrl.searchParams.get('redirect'));
         if (!userIsVerified) {
           const verifyUrl = new URL('/verify-email', request.url);
-          verifyUrl.searchParams.set('email', user.email ?? '');
           verifyUrl.searchParams.set('redirect', requestedRedirect);
           return NextResponse.redirect(verifyUrl);
         }
@@ -393,7 +392,6 @@ export async function proxy(request: NextRequest) {
 
     if (!userIsVerified) {
       const verifyUrl = new URL('/verify-email', request.url);
-      verifyUrl.searchParams.set('email', user.email ?? '');
       verifyUrl.searchParams.set('redirect', `${pathname}${request.nextUrl.search}`);
       return NextResponse.redirect(verifyUrl);
     }
@@ -439,7 +437,6 @@ export async function proxy(request: NextRequest) {
 
     if (!isPublicPath(pathname) && user && !userIsVerified) {
       const verifyUrl = new URL('/verify-email', request.url);
-      verifyUrl.searchParams.set('email', user.email ?? '');
       verifyUrl.searchParams.set('redirect', `${pathname}${request.nextUrl.search}`);
       return NextResponse.redirect(verifyUrl);
     }
@@ -449,7 +446,6 @@ export async function proxy(request: NextRequest) {
       const requestedRedirect = sanitizeRedirectTarget(request.nextUrl.searchParams.get('redirect'));
       if (!userIsVerified) {
         const verifyUrl = new URL('/verify-email', request.url);
-        verifyUrl.searchParams.set('email', user.email ?? '');
         verifyUrl.searchParams.set('redirect', requestedRedirect);
         return NextResponse.redirect(verifyUrl);
       }
