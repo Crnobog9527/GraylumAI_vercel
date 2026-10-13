@@ -83,9 +83,15 @@ export function text(value: unknown, paths: readonly string[]): string | undefin
   return firstValid(value, paths, readText);
 }
 
+/** Identifiers: non-blank strings or non-negative safe integers (numeric ids are common). */
+export function idText(value: unknown, paths: readonly string[]): string | undefined {
+  return firstValid(value, paths, found => (typeof found === 'number' && Number.isSafeInteger(found) && found >= 0
+    ? String(found) : readText(found)));
+}
+
+/** Content text: only real, non-blank strings. Numbers or booleans are never turned into titles or pages. */
 function readText(found: unknown): string | undefined {
   if (typeof found === 'string') return found.trim() === '' ? undefined : found;
-  if (typeof found === 'number' || typeof found === 'boolean') return String(found);
   return undefined;
 }
 

@@ -2,7 +2,7 @@
 // TikHub passes each platform's own JSON through under `data` without a published schema, so items are
 // located by their characteristic keys (ported from the RESEARCH-0 comparison tooling).
 // Only whitelisted fields leave this module: no bios, contact details, avatars or commenter data.
-import { bool, clip, count, displayCount, findAll, has, text, timestamp } from './fields';
+import { bool, clip, count, displayCount, findAll, has, idText, text, timestamp } from './fields';
 import type { ResearchItem, SocialKind, SocialPlatform } from './types';
 
 export const POST_FIELDS = [
@@ -28,14 +28,14 @@ function toItem(values: Values, whitelist: readonly string[], url?: string): Res
 }
 
 function aweme(item: Raw, platform: 'douyin' | 'tiktok') {
-  const id = text(item, ['aweme_id']);
+  const id = idText(item, ['aweme_id']);
   const handle = text(item, ['author.unique_id']);
   const url = platform === 'tiktok' && handle && id ? `https://www.tiktok.com/@${handle}/video/${id}`
     : platform === 'douyin' && id ? `https://www.douyin.com/video/${id}` : text(item, ['share_url', 'share_info.share_url']);
   return toItem({
     id, title: clip(text(item, ['desc']), TITLE_CHARS),
     author: text(item, ['author.nickname', 'author.unique_id']),
-    authorId: text(item, ['author.unique_id', 'author.sec_uid', 'author.uid']),
+    authorId: idText(item, ['author.unique_id', 'author.sec_uid', 'author.uid']),
     publishedAt: timestamp(item, ['create_time']),
     views: count(item, ['statistics.play_count']), likes: count(item, ['statistics.digg_count']),
     comments: count(item, ['statistics.comment_count']), shares: count(item, ['statistics.share_count']),
@@ -44,8 +44,8 @@ function aweme(item: Raw, platform: 'douyin' | 'tiktok') {
 
 function xhsNote(item: Raw) {
   return toItem({
-    id: text(item, ['id', 'note_id']), title: clip(text(item, ['title', 'display_title', 'desc']), TITLE_CHARS),
-    author: text(item, ['user.nickname', 'user.name']), authorId: text(item, ['user.userid', 'user.user_id', 'user.id']),
+    id: idText(item, ['id', 'note_id']), title: clip(text(item, ['title', 'display_title', 'desc']), TITLE_CHARS),
+    author: text(item, ['user.nickname', 'user.name']), authorId: idText(item, ['user.userid', 'user.user_id', 'user.id']),
     publishedAt: timestamp(item, ['timestamp', 'time', 'create_time']),
     views: count(item, ['view_count']), likes: count(item, ['liked_count', 'likes']),
     comments: count(item, ['comments_count']), shares: count(item, ['shared_count', 'share_count']),
@@ -53,10 +53,10 @@ function xhsNote(item: Raw) {
 }
 
 function weiboPost(item: Raw) {
-  const userId = text(item, ['user.idstr', 'user.id']);
+  const userId = idText(item, ['user.idstr', 'user.id']);
   const blog = text(item, ['mblogid']);
   return toItem({
-    id: text(item, ['idstr', 'mid', 'id']), title: clip(text(item, ['text_raw', 'text']), TITLE_CHARS),
+    id: idText(item, ['idstr', 'mid', 'id']), title: clip(text(item, ['text_raw', 'text']), TITLE_CHARS),
     author: text(item, ['user.screen_name']), authorId: userId,
     publishedAt: timestamp(item, ['created_at']),
     views: count(item, ['reads_count', 'page_info.play_count']), likes: count(item, ['attitudes_count']),
@@ -65,7 +65,7 @@ function weiboPost(item: Raw) {
 }
 
 function youtubeVideo(item: Raw, channel: string | undefined) {
-  const id = text(item, ['video_id', 'videoId', 'id']);
+  const id = idText(item, ['video_id', 'videoId', 'id']);
   return toItem({
     id, title: clip(text(item, ['title']), TITLE_CHARS),
     author: text(item, ['author', 'channel_name', 'channel.title']) ?? channel,
@@ -80,7 +80,7 @@ function youtubeVideo(item: Raw, channel: string | undefined) {
 function instagramPost(item: Raw) {
   const code = text(item, ['code', 'shortcode']);
   return toItem({
-    id: text(item, ['id', 'pk']), title: clip(text(item, ['caption.text', 'caption_text']), TITLE_CHARS),
+    id: idText(item, ['id', 'pk']), title: clip(text(item, ['caption.text', 'caption_text']), TITLE_CHARS),
     author: text(item, ['user.username', 'owner.username']), authorId: text(item, ['user.username', 'owner.username']),
     publishedAt: timestamp(item, ['taken_at', 'taken_at_timestamp']),
     views: count(item, ['play_count', 'ig_play_count', 'view_count', 'video_view_count']),
@@ -93,7 +93,7 @@ function instagramPost(item: Raw) {
 /** `accountHandle` is the requested account for account-post calls, used when the tweet omits its author. */
 function tweet(item: Raw, accountHandle?: string) {
   const legacy = (item.legacy ?? item) as Raw;
-  const id = text(item, ['tweet_id', 'rest_id', 'id_str']) ?? text(legacy, ['id_str']);
+  const id = idText(item, ['tweet_id', 'rest_id', 'id_str']) ?? idText(legacy, ['id_str']);
   const handle = text(item, ['author.screen_name', 'user_info.screen_name', 'core.user_results.result.legacy.screen_name', 'screen_name'])
     ?? accountHandle;
   return toItem({
@@ -120,7 +120,7 @@ function bilibiliVerified(object: Raw): boolean | undefined {
 
 function profile(object: Raw) {
   return toItem({
-    id: text(object, ['uid', 'mid', 'rest_id', 'id', 'idstr', 'user_id']),
+    id: idText(object, ['uid', 'mid', 'rest_id', 'id', 'idstr', 'user_id']),
     name: text(object, ['nickname', 'name', 'full_name', 'title', 'screen_name', 'legacy.name']),
     handle: text(object, ['unique_id', 'screen_name', 'username', 'legacy.screen_name']),
     followers: count(object, ['follower_count', 'followers_count', 'fans', 'follower', 'sub_count',
@@ -156,7 +156,7 @@ export function normalizeTikhub(json: unknown, platform: SocialPlatform, kind: S
     // so the requested account is the identity.
     const found = findAll(data, object => has(object, 'follower') && count(object, ['follower']) !== undefined, 1)[0];
     if (!found) return [];
-    const item = toItem({ id: text(found, ['mid', 'uid']) ?? account, followers: count(found, ['follower']),
+    const item = toItem({ id: idText(found, ['mid', 'uid']) ?? account, followers: count(found, ['follower']),
       following: count(found, ['following']) }, ['id', 'followers', 'following']);
     return usable(item, kind) ? [item] : [];
   }

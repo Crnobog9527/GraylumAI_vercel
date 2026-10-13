@@ -152,6 +152,9 @@ describe('callTikhub', () => {
     const hollow = await callTikhub({ platform: 'x', kind: 'account_posts', account: 'NASA' }, deps(jsonFetch(200, { code: 200,
       data: { tweet: { rest_id: '22', legacy: { full_text: null, created_at: null } } } })));
     expect(hollow).toMatchObject({ outcome: 'failed', reason: 'EMPTY_OR_UNRECOGNIZED' });
+    const fake = await callTikhub({ platform: 'x', kind: 'account_posts', account: 'NASA' }, deps(jsonFetch(200, { code: 200,
+      data: { tweet: { tweet_id: '22', text: false, created_at: false } } })));
+    expect(fake).toMatchObject({ outcome: 'failed', reason: 'EMPTY_OR_UNRECOGNIZED' });
     const blank = await callTikhub({ platform: 'x', kind: 'account_posts', account: 'NASA' }, deps(jsonFetch(200, { code: 200,
       data: { tweet: { tweet_id: '22', text: '   ', created_at: '   ' } } })));
     expect(blank).toMatchObject({ outcome: 'failed', reason: 'EMPTY_OR_UNRECOGNIZED' });

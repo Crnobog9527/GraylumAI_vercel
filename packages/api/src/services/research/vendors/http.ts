@@ -110,19 +110,36 @@ export function publicHttpUrl(value: string | undefined): string | undefined {
   } catch { return undefined; }
 }
 
+/** Eight 16-bit groups of an IPv6 address, or null when it is not plain hexadecimal IPv6. */
+function ipv6Groups(ip: string): number[] | null {
+  const halves = ip.split('::');
+  if (halves.length > 2) return null;
+  const parse = (part: string) => (part === '' ? [] : part.split(':'));
+  const head = parse(halves[0]);
+  const tail = halves.length === 2 ? parse(halves[1]) : [];
+  const missing = 8 - head.length - tail.length;
+  if (halves.length === 1 ? head.length !== 8 : missing < 1) return null;
+  const all = [...head, ...Array(halves.length === 2 ? missing : 0).fill('0'), ...tail];
+  if (all.some(group => !/^[0-9a-f]{1,4}$/.test(group))) return null;
+  return all.map(group => parseInt(group, 16));
+}
+
 /**
- * Resolved addresses: only global unicast counts as public. IPv6 must be in 2000::/3 and outside the
- * documentation, 6to4 and Teredo blocks; IPv4-mapped IPv6 is judged by its IPv4 part.
+ * Resolved addresses: an allowlist. IPv4 must be outside the special-purpose blocks; IPv6 must be global
+ * unicast 2000::/3 and outside 2001::/23 (incl. Teredo, benchmarking), 2001:db8::/32, 2002::/16 (6to4),
+ * 3fff::/20 (documentation) and 2620:4f:8000::/48. IPv4-mapped IPv6 is judged by its IPv4 part.
  */
 export function nonPublicIp(address: string): boolean {
   const ip = address.toLowerCase();
   const mapped = ip.match(/^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/);
   if (mapped) return nonPublicIpv4(mapped[1]);
   if (/^\d{1,3}(\.\d{1,3}){3}$/.test(ip)) return nonPublicIpv4(ip);
-  if (!ip.includes(':')) return true;
-  const first = parseInt(ip.split(':')[0] || '0', 16);
-  if (!(first >= 0x2000 && first <= 0x3fff)) return true;
-  return ip.startsWith('2001:db8:') || ip.startsWith('2002:') || /^2001:0?:/.test(ip) || ip.startsWith('2001:0000:');
+  const g = ipv6Groups(ip);
+  if (!g) return true;
+  if (g[0] < 0x2000 || g[0] > 0x3fff) return true;
+  if (g[0] === 0x2001 && (g[1] < 0x0200 || g[1] === 0x0db8)) return true;
+  if (g[0] === 0x2002 || (g[0] === 0x3fff && g[1] < 0x1000)) return true;
+  return g[0] === 0x2620 && g[1] === 0x004f && g[2] === 0x8000;
 }
 
 /** Status codes after which the supplier may already have billed: any 2xx, and 5xx where billing is undocumented. */

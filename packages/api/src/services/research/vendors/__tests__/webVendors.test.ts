@@ -122,7 +122,12 @@ describe('outbound safety', () => {
     for (const ip of ['127.0.0.1', '10.1.2.3', '169.254.1.1', '::1', 'fe80::1', 'fd00::1', '::ffff:127.0.0.1', '2001:db8::1', '::', '0.0.0.0']) {
       expect(nonPublicIp(ip)).toBe(true);
     }
-    for (const ip of ['93.184.215.14', '2606:4700::1111', '::ffff:93.184.215.14']) expect(nonPublicIp(ip)).toBe(false);
+    for (const ip of ['3fff::1', '3fff:0fff::1', '2001:2::1', '2001::1', '2002::1', '2620:4f:8000::1', '64:ff9b::1', 'fe80::1%eth0', '1::2::3']) {
+      expect(nonPublicIp(ip)).toBe(true);
+    }
+    for (const ip of ['93.184.215.14', '2606:4700::1111', '::ffff:93.184.215.14', '2a00:1450:4001::200e', '3fff:1000::1']) {
+      expect(nonPublicIp(ip)).toBe(false);
+    }
   });
 
   it('marks 2xx and undocumented 5xx as possibly billed', () => {
@@ -206,6 +211,13 @@ describe('callFirecrawl', () => {
     expect(await callFirecrawl('https://example.com/raw', deps(jsonFetch(200, raw)))).toMatchObject({ reason: 'PDF_NOT_SUPPORTED' });
     const typed = { success: true, data: { markdown: '', metadata: { contentType: 'application/pdf', creditsUsed: 1 } } };
     expect(await callFirecrawl('https://example.com/d', deps(jsonFetch(200, typed)))).toMatchObject({ reason: 'PDF_NOT_SUPPORTED' });
+  });
+
+  it('never turns non-string page content into a page', async () => {
+    for (const markdown of [false, true, 12345]) {
+      const body = { success: true, data: { markdown, metadata: { creditsUsed: 1 } } };
+      expect(await callFirecrawl('https://example.com/a', deps(jsonFetch(200, body)))).toMatchObject({ outcome: 'failed', reason: 'EMPTY_OR_UNRECOGNIZED' });
+    }
   });
 
   it('does not report a success without a recognizable page body', async () => {
