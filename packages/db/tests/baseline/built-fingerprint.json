@@ -2605,7 +2605,7 @@
   "fn:pay_stripe_mp_price_usage_default()": "cd0c70480417",
   "fn:pay_stripe_mp_record_renewal_failure(uuid,text,text,timestamp with time zone)": "f9b9fe5cabf1",
   "fn:pay_stripe_mp_renew_subscription(uuid,text,text,integer,text,timestamp with time zone,timestamp with time zone,timestamp with time zone)": "ff9d9f646cb5",
-  "fn:pay_stripe_mp_sync_subscription(uuid,text,boolean,boolean)": "1ef223fcebb3",
+  "fn:pay_stripe_mp_sync_subscription(uuid,text,boolean,boolean)": "1948ce3d68a3",
   "fn:pay_waffo_abort_before_dispatch(uuid,uuid,text,timestamp with time zone)": "e0b9d69324f9",
   "fn:pay_waffo_admit_purchase(uuid,text,uuid,text,text,text,text,text,bigint,text,jsonb,text,uuid)": "432ef66a5e15",
   "fn:pay_waffo_assert_actor(uuid)": "54ddb30dbe59",
