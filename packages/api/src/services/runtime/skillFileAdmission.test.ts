@@ -1,5 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import {expect,it,vi} from 'vitest';
+import {createHash} from 'node:crypto';
 import type {SupabaseClient} from '@supabase/supabase-js';
 import {packageHash,sha256} from '../skills/loader';
 import {runtimeAdmissionService} from './admission';
@@ -195,7 +196,8 @@ it('R4: a host mentor turn shares its single read slot with the user\'s earlier 
  expect(context.tools).toEqual(['ask_question','read_skill_file','read_history']);
  expect(context.historyRead).toEqual({version:'mentor-history-v1',reserve:26624});
  expect(context.maxTurns).toBe(2);expect(context.maxToolCalls).toBe(1);expect(admitted.billing.limits.maxCalls).toBe(2);
- expect(context.instructions).toContain('earlier messages of this conversation with read_history');
+ // Its guidance travels in the tool description, so dropping the tool never leaves stale instructions.
+ expect(context.instructions).not.toContain('read_history');
  expect(runtimeContext.safeParse({...context,historyRead:undefined}).success).toBe(false);
  expect(runtimeContext.safeParse({...context,tools:['ask_question','read_history'],skillFile:undefined,skillFileReserve:undefined}).success).toBe(false);
  expect(await service.prepare(f.input)).toEqual(admitted);
@@ -209,10 +211,31 @@ it('R4: drops only the history read when its larger reserve does not fit, keepin
  expect(context.instructions).not.toContain('read_history');expect(context.maxTurns).toBe(2);
 });
 
-it('#878 regression: a PAYG mentor turn never offers a third tool, so the history read is left out', async()=>{
+const hash='a'.repeat(64);
+const paygPolicy={modelId:model,model:'fixture',provider:'fixture',account:'local',protocol:'fixture-cost-v1' as const,
+ multiplier:'1',upperUsd:'0.1',inputLimit:64000,outputLimit:1000,automaticRetry:false as const,hiddenTools:false as const,
+ lookupSupported:true,providerLimits:{providerSlug:'local',contextTokens:300000,promptUsdPerMillion:'1',completionUsdPerMillion:'1',requestUsd:'0'},
+ payg:{policyId:'local',version:'1',profileVersion:'1',evidenceVersion:'1',pricingHash:hash,endpointTag:'local',
+  nominalPricing:{version:'nominal-v1' as const,pricingHash:hash,endpointTag:'local',tiers:[{minPromptTokens:0,prompt:'1',completion:'1',request:'0'}],timeOfDay:[]},
+  templateTokens:4096,marginTokens:4096,admissionPath:'fixture' as const,maxBytes:64000,maxMessages:32,maxTools:2,
+  maxSchemaBytes:16384,purposes:['skill'],expiresAt:'2099-01-01T00:00:00Z'}};
+const payg={callPolicies:[paygPolicy],billingUnit:{version:'bill-unit-v2' as const,creditsPerUsd:'1000',defaultMultiplier:'1',hash,
+ models:{[model]:{multiplier:'1',source:'global' as const}},providers:{}}};
+const host={stepId:'first',opening:false,checklist:[]};
+
+it('#878 regression: a PAYG mentor turn never carries a third tool, so only the history read is dropped',async()=>{
  const f=fixture();
- const admitted=await runtimeAdmissionService(f.user,f.admin,{...f.policy,inputBytes:64000,paygHost:true,
-  hostTurnContext:{stepId:'first',opening:false,checklist:[]}}).prepare(f.input),context=runtimeContext.parse(admitted.context);
+ const admitted=await runtimeAdmissionService(f.user,f.admin,{...f.policy,inputBytes:64000,payg,hostTurnContext:host}).prepare(f.input);
+ const context=runtimeContext.parse(admitted.context);
+ expect(admitted.billing.contractVersion).toBe('bill2.v2');
  expect(context.tools).toEqual(['ask_question','read_skill_file']);expect(context.historyRead).toBeUndefined();
  expect(context.instructions).not.toContain('read_history');expect(context.maxTurns).toBe(2);
+ expect(admitted.billing.sourceHash).toBe(createHash('sha256').update(JSON.stringify(admitted.context)).digest('hex'));
+});
+
+it('a PAYG-capable host that resolves to v1 billing keeps the history read',async()=>{
+ const f=fixture();
+ const admitted=await runtimeAdmissionService(f.user,f.admin,{...f.policy,inputBytes:64000,paygHost:true,hostTurnContext:host}).prepare(f.input);
+ expect(admitted.billing.contractVersion).toBe('bill2.v1');
+ expect(runtimeContext.parse(admitted.context).tools).toEqual(['ask_question','read_skill_file','read_history']);
 });

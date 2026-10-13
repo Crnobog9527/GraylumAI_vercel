@@ -34,7 +34,7 @@ import {ASK_QUESTION_TOOL,questionAnswerSourceSchema} from '../../shared/agentTu
 import {isOpeningInput} from '../../shared/opcQuestions';
 import {groundedCardToolBytes} from './groundedCard';
 import {askQuestionToolBytes,QUESTION_CONTRACT,QUESTION_CONTRACT_INSTRUCTIONS,READ_HISTORY_TOOL} from './agentTools';
-import {MENTOR_HISTORY_INSTRUCTIONS,MENTOR_HISTORY_RESERVE_BYTES,MENTOR_HISTORY_VERSION,mentorHistoryToolBytes} from './mentorHistory';
+import {MENTOR_HISTORY_RESERVE_BYTES,MENTOR_HISTORY_VERSION,mentorHistoryToolBytes} from './mentorHistory';
 import {currentRequestTiming} from './timing';
 import {PURPOSE_OUTPUT_CAP,readPurposeBudgets} from './purposeBudgets';
 import {assertFrozenPayloads} from './payloadSize';
@@ -46,7 +46,6 @@ import {admissionDeadline,admittedOutputLimit} from './admissionLimits';
 import {admitPricing} from './pricingAdmission';
 import {freezeStagingPaygPricing} from './paygPricing';
 import {freezePaygMessageBudget} from './paygMessageBudget';
-import {PAYG_MAX_TOOLS} from '../bill2/paygPolicy';
 import {readPaygHostPolicies} from './paygHostPolicy';
 import {runAutomaticFinancialRecovery} from './automaticRecovery';
 
@@ -285,12 +284,8 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
    }
    // R4: the user's earlier messages share that same optional read; dropping it never blocks the turn.
    let historyRead=false;
-   // A PAYG call may carry at most PAYG_MAX_TOOLS tool definitions; the history read would be a third
-   // next to the card and the Skill file, so such turns keep the earlier tools only (#878 regression).
-   const paygRun=Boolean(policy.paygHost||policy.payg);
-   const historyFits=!paygRun||(stepSummary?0:1)+(skillFile?1:0)+1<=PAYG_MAX_TOOLS;
-   if(skillFile&&hostTurnContext&&!stepSummary&&historyFits){
-    try{requireCapacity(instructions+MENTOR_HISTORY_INSTRUCTIONS,true,currentInput,true);instructions+=MENTOR_HISTORY_INSTRUCTIONS;historyRead=true;}
+   if(skillFile&&hostTurnContext&&!stepSummary){
+    try{requireCapacity(instructions,true,currentInput,true);historyRead=true;}
     catch(error){if(!(error instanceof Error)||error.message!=='RUNTIME_REQUIRED_CONTEXT_EXCEEDS_CAPACITY')throw error;}
    }
    if(hostTurnContext)promptCache=freezeHostPromptCache({real:Boolean(policy.real),role:input.selection.kind,
@@ -406,6 +401,12 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
     });
    }
    if(paygTemplates){
+    // #878 regression: a PAYG call carries at most its profile's maxTools (SQL 0162 caps it at 2). The
+    // history read is the optional extra tool, guided only by its own description, so it alone is dropped.
+    const maxTools=Math.min(...paygTemplates.filter(p=>p.modelId===modelId).map(p=>p.payg?.maxTools??0));
+    if(context.historyRead&&context.tools.length>maxTools){
+     context.tools=context.tools.filter(name=>name!==READ_HISTORY_TOOL);delete context.historyRead;
+    }
     freezePaygMessageBudget(context,paygTemplates);
     billing.sourceHash=createHash('sha256').update(JSON.stringify(context)).digest('hex');
     const templates=paygTemplates.filter(p=>selectedIds.has(p.modelId));
