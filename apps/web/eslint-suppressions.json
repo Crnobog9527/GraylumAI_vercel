@@ -98,14 +98,6 @@
       "count": 2
     }
   },
-  "src/app/workbench/report-work-actions.tsx": {
-    "@typescript-eslint/no-unused-vars": {
-      "count": 2
-    },
-    "react-hooks/exhaustive-deps": {
-      "count": 2
-    }
-  },
   "src/components/admin/AdminGuard.tsx": {
     "@typescript-eslint/no-unused-vars": {
       "count": 1

@@ -20,3 +20,20 @@ describe('legacy chat redirect before page/authentication', () => {
     },
   );
 });
+
+describe('legacy workbench redirect before page/authentication', () => {
+  it.each(['/workbench', '/workbench?project=old'])('redirects %s to positioning with a reversible 307', async path => {
+    const response = await unstable_getResponseFromNextConfig({
+      url: `https://graylum.test${path}`, nextConfig: config,
+    });
+    expect(response.status).toBe(307);
+    expect(new URL(response.headers.get('location')!).pathname).toBe('/positioning');
+  });
+
+  it.each(['/workbench/marketplace', '/workbench/search'])('keeps %s as a page', async path => {
+    const response = await unstable_getResponseFromNextConfig({
+      url: `https://graylum.test${path}`, nextConfig: config,
+    });
+    expect(response.headers.get('location')).toBeNull();
+  });
+});
