@@ -84,9 +84,13 @@ export async function verifyEndedMemberships({admin,service,connect},seeded) {
     'id',gen_random_uuid()) WHERE user_id=$1`,[seeded.walletHeld.user]);
   assert.equal((await service.query('SELECT pay_common_settle_membership_level($1) v',[seeded.walletHeld.user])).rows[0].v,false);
   assert.equal(await level(admin,seeded.walletHeld.user),'gold');
+  // Repeated small batches: a profile the setter would skip never takes a slot, so every run still settles one.
+  for(let run=0;run<2;run++)
+    assert.equal((await service.query('SELECT pay_common_settle_membership_levels(1) n')).rows[0].n,1,`run ${run}`);
+  assert.equal(await level(admin,seeded.walletHeld.user),'gold');
   await admin.query("UPDATE payment_orders SET refund_approval=NULL WHERE user_id=$1",[seeded.walletHeld.user]);
   // Daily batch: ended terms settle, renewal grace keeps the level, and a second run changes nothing.
-  assert.ok((await service.query('SELECT pay_common_settle_membership_levels(100) n')).rows[0].n>=4);
+  assert.ok((await service.query('SELECT pay_common_settle_membership_levels(100) n')).rows[0].n>=2);
   for(const name of ['walletHeld','goldThenPro','cardStopped','cardRenewing'])
     assert.equal(await level(admin,seeded[name].user),'free',name);
   assert.equal(await level(admin,seeded.cardGrace.user),'gold','24-hour renewal grace keeps the level');
@@ -111,7 +115,7 @@ export async function verifyEndedMemberships({admin,service,connect},seeded) {
   assert.equal(await level(admin,seeded.goldThenPro.user),'pro');
   assert.equal((await service.query('SELECT pay_common_settle_membership_level($1) v',[seeded.goldThenPro.user])).rows[0].v,false);
   return ['0243-settle-service-only','0243-admission-settles-ended-wallet','0243-ended-wallet-buys-again',
-    '0243-concurrent-rebuy-one-order','0243-held-monthly-refund-skipped','0243-batch-settles-wallet-and-waffo-card',
+    '0243-concurrent-rebuy-one-order','0243-held-monthly-refund-skipped','0243-skipped-profiles-do-not-starve-batch','0243-batch-settles-wallet-and-waffo-card',
     '0243-grace-keeps-level','0243-batch-idempotent','0243-stopped-card-buys-again','0243-renewing-card-still-blocked',
     '0243-gold-ended-pro-current-to-pro'];
 }

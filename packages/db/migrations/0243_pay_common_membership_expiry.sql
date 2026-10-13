@@ -43,13 +43,21 @@ RETURNS integer LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp
 DECLARE u uuid; n integer:=0;
 BEGIN
  IF p_limit IS NULL OR p_limit<1 OR p_limit>500 THEN RAISE EXCEPTION 'PAY_COMMON_LIMIT_INVALID'; END IF;
- -- Candidates: cached paid level with a paid-method order but no current order at that level.
+ -- Candidates are filtered before LIMIT with the setter's own skip conditions, so profiles it would leave
+ -- unchanged (held refund, erasure, legacy Stripe, admin override, renewal grace, a higher current term)
+ -- never take a slot and starve later ended memberships.
  FOR u IN SELECT p.id FROM profiles p WHERE p.membership_level IN ('pro','gold') AND p.status='active'
    AND p.is_deleted='false' AND EXISTS(SELECT 1 FROM payment_orders o WHERE o.user_id=p.id
      AND o.item_type='membership_plan' AND o.payment_method IS NOT NULL AND o.fulfilled_at IS NOT NULL)
    AND NOT EXISTS(SELECT 1 FROM payment_orders o WHERE o.user_id=p.id AND o.item_type='membership_plan'
-     AND o.payment_method IS NOT NULL AND o.fulfilled_at IS NOT NULL AND o.purchase_membership_level=p.membership_level
-     AND o.entitlement_start<=now() AND o.entitlement_end>now())
+     AND o.payment_method IS NOT NULL AND o.fulfilled_at IS NOT NULL AND o.entitlement_start<=now()
+     AND o.entitlement_end>now()-interval '24 hours'
+     AND (o.purchase_membership_level=p.membership_level OR o.purchase_membership_level='gold'))
+   AND NOT EXISTS(SELECT 1 FROM account_erasure_requests r WHERE r.profile_id=p.id)
+   AND NOT EXISTS(SELECT 1 FROM payment_orders o WHERE o.user_id=p.id
+     AND o.refund_approval->>'kind'='monthly_first_purchase' AND o.refund_approval->>'hold'='held')
+   AND NOT EXISTS(SELECT 1 FROM user_subscriptions s WHERE s.user_id=p.id AND (s.status='admin_override'
+     OR s.stripe_subscription_id IS NOT NULL AND s.status IN ('active','trialing','past_due','incomplete','unpaid')))
    ORDER BY p.id LIMIT p_limit LOOP
   IF pay_common_settle_membership_level(u) THEN n:=n+1; END IF;
  END LOOP;
