@@ -109,6 +109,23 @@ describe('callTikhub', () => {
     expect(result.items).toHaveLength(30);
   });
 
+  it('accepts only usable profiles and real tweets, never empty shells', async () => {
+    const shell = await callTikhub({ platform: 'x', kind: 'account_profile', account: 'NASA' },
+      deps(jsonFetch(200, { code: 200, data: { metadata: { legacy: {} }, user: { rest_id: '11', legacy: { screen_name: 'NASA', followers_count: 9 } } } })));
+    expect(shell).toMatchObject({ outcome: 'ok' });
+    expect(shell.items[0].fields).toMatchObject({ followers: 9 });
+    const onlyShell = await callTikhub({ platform: 'x', kind: 'account_profile', account: 'NASA' },
+      deps(jsonFetch(200, { code: 200, data: { metadata: { legacy: {} } } })));
+    expect(onlyShell).toMatchObject({ outcome: 'failed', reason: 'EMPTY_OR_UNRECOGNIZED' });
+    const userOnly = await callTikhub({ platform: 'x', kind: 'account_posts', account: 'NASA' },
+      deps(jsonFetch(200, { code: 200, data: { user: { rest_id: '11', legacy: { screen_name: 'NASA', followers_count: 9 } } } })));
+    expect(userOnly).toMatchObject({ outcome: 'failed', reason: 'EMPTY_OR_UNRECOGNIZED' });
+    const tweets = await callTikhub({ platform: 'x', kind: 'account_posts', account: 'NASA' }, deps(jsonFetch(200, { code: 200, data: {
+      user: { rest_id: '11', legacy: { screen_name: 'NASA' } },
+      tweet: { rest_id: '22', legacy: { full_text: 'hello', created_at: 'Mon Oct 13 00:00:00 +0000 2026', favorite_count: 3 } } } })));
+    expect(tweets.items.map(item => item.fields.id)).toEqual(['22']);
+  });
+
   it('keeps a recognized empty list as a successful, billed no-results answer', async () => {
     const empty = await callTikhub({ platform: 'tiktok', kind: 'account_posts', account: 'quiet' },
       deps(jsonFetch(200, { code: 200, data: { aweme_list: [] } })));

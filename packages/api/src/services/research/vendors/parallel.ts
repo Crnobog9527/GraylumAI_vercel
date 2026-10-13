@@ -33,6 +33,16 @@ export function parallelUsage(json: unknown): string | null {
   return usageUnits((entries[0] as { count?: unknown }).count);
 }
 
+/** A result link the user can open: trimmed, absolute http(s), no credentials. */
+function publicHttpUrl(value: string | undefined): string | undefined {
+  const trimmed = value?.trim();
+  if (!trimmed) return undefined;
+  try {
+    const url = new URL(trimmed);
+    return (url.protocol === 'https:' || url.protocol === 'http:') && !url.username && !url.password ? url.href : undefined;
+  } catch { return undefined; }
+}
+
 function webItem(raw: unknown): ResearchItem {
   const values: Record<string, string | undefined> = {
     title: clip(text(raw, ['title']), 300),
@@ -45,7 +55,7 @@ function webItem(raw: unknown): ResearchItem {
     if (values[name] === undefined) missing.push(name);
     else fields[name] = values[name]!;
   }
-  const url = text(raw, ['url']);
+  const url = publicHttpUrl(text(raw, ['url']));
   return url === undefined ? { fields, missing } : { url, fields, missing };
 }
 

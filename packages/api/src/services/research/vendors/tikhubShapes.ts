@@ -105,6 +105,12 @@ function tweet(item: Raw) {
   }, POST_FIELDS, id && handle ? `https://x.com/${handle}/status/${id}` : undefined);
 }
 
+function isTweet(object: Raw): boolean {
+  const legacy = (object.legacy ?? null) as Raw | null;
+  const own = has(object, 'text', 'full_text') && has(object, 'created_at');
+  return own || (legacy !== null && has(legacy, 'full_text', 'text') && has(legacy, 'created_at'));
+}
+
 function bilibiliVerified(object: Raw): boolean | undefined {
   const official = object.official as Raw | undefined;
   return typeof official?.type === 'number' ? official.type >= 0 : undefined;
@@ -129,13 +135,24 @@ function profile(object: Raw) {
 const PROFILE_KEYS = ['follower_count', 'followers_count', 'unique_id', 'screen_name', 'mid', 'sign', 'legacy',
   'sub_count', 'edge_followed_by', 'subscriber_count'];
 
+/** A profile needs an identity plus something describing it; a post needs its own id. */
+function usable(item: ResearchItem, kind: SocialKind): boolean {
+  const f = item.fields;
+  if (kind === 'account_profile') return (f.id !== undefined || f.handle !== undefined) && (f.followers !== undefined || f.name !== undefined);
+  return f.id !== undefined;
+}
+
 /** Normalized items for a TikHub envelope; an unrecognized shape yields no items, never invented ones. */
 export function normalizeTikhub(json: unknown, platform: SocialPlatform, kind: SocialKind): ResearchItem[] {
   const data = (json as Raw | null)?.data;
   if (kind === 'account_profile') {
-    const found = findAll(data, object => has(object, ...PROFILE_KEYS), 1)[0];
-    return found ? [profile(found)] : [];
+    const found = findAll(data, object => has(object, ...PROFILE_KEYS), 20).map(profile).find(item => usable(item, kind));
+    return found ? [found] : [];
   }
+  return rawPosts(data, platform).filter(item => usable(item, kind));
+}
+
+function rawPosts(data: unknown, platform: SocialPlatform): ResearchItem[] {
   switch (platform) {
     case 'douyin':
     case 'tiktok':
@@ -155,7 +172,8 @@ export function normalizeTikhub(json: unknown, platform: SocialPlatform, kind: S
         || posts.findIndex(other => other.fields.id === post.fields.id) === index);
     }
     case 'x':
-      return findAll(data, o => has(o, 'tweet_id', 'rest_id', 'id_str') && has(o, 'created_at', 'legacy', 'text')).map(tweet);
+      // Tweets carry text and a creation time (directly or under `legacy`); user objects with rest_id do not.
+      return findAll(data, o => has(o, 'tweet_id', 'rest_id', 'id_str') && isTweet(o)).map(tweet);
     default:
       return [];
   }

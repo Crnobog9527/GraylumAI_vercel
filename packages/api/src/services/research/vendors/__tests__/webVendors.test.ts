@@ -26,6 +26,12 @@ describe('official usage parsing', () => {
     expect(parallelUsage({ usage: [{ name: 'sku_search', count: -1 }] })).toBeNull();
   });
 
+  it('keeps huge digit strings out of counts instead of returning Infinity', async () => {
+    const { count } = await import('../fields');
+    expect(count({ n: '9'.repeat(400) }, ['n'])).toBeUndefined();
+    expect(count({ n: '12' }, ['n'])).toBe(12);
+  });
+
   it('reads Firecrawl credits from either documented location', () => {
     expect(firecrawlCredits({ creditsUsed: 1 })).toBe('1');
     expect(firecrawlCredits({ data: { metadata: { creditsUsed: 1 } } })).toBe('1');
@@ -59,8 +65,10 @@ describe('callParallel', () => {
       .toMatchObject({ outcome: 'ok', reason: 'NO_RESULTS', items: [], usage: { units: '1' } });
     expect(await callParallel('q', deps(jsonFetch(200, { results: [{}, { title: 'no url' }], usage: [{ name: 'sku_search', count: 1 }] }))))
       .toMatchObject({ outcome: 'failed', reason: 'EMPTY_OR_UNRECOGNIZED', items: [] });
-    const mixed = await callParallel('q', deps(jsonFetch(200, { results: [{}, { url: 'https://a.example', title: 'A' }] })));
-    expect(mixed.items.map(item => item.url)).toEqual(['https://a.example']);
+    expect(await callParallel('q', deps(jsonFetch(200, { results: [{ url: '   ' }, { url: 'not a URL' }, { url: 'javascript:alert(1)' }] }))))
+      .toMatchObject({ outcome: 'failed', reason: 'EMPTY_OR_UNRECOGNIZED' });
+    const mixed = await callParallel('q', deps(jsonFetch(200, { results: [{}, { url: ' https://a.example ', title: 'A' }] })));
+    expect(mixed.items.map(item => item.url)).toEqual(['https://a.example/']);
   });
 
   it('treats an empty 200 body as unknown for every supplier', async () => {
@@ -95,7 +103,7 @@ describe('callFirecrawl', () => {
     expect(buildFirecrawlRequest('https://example.com/report.PDF')).toEqual({ reason: 'PDF_NOT_SUPPORTED' });
     for (const bad of ['ftp://example.com', 'https://user:pw@example.com', 'http://localhost:3000', 'http://10.0.0.1/',
       'http://192.168.1.1', 'http://[::1]/', 'http://[::ffff:7f00:1]/', 'http://[::]/', 'http://[2001:db8::1]/',
-      'http://100.64.0.1/', 'http://198.18.0.1/', 'http://0.0.0.0/', 'http://2130706433/', 'http://intranet/', 'not a url']) {
+      'http://localhost./', 'http://foo.local./', 'http://bar.internal../', 'http://100.64.0.1/', 'http://198.18.0.1/', 'http://0.0.0.0/', 'http://2130706433/', 'http://intranet/', 'not a url']) {
       expect(buildFirecrawlRequest(bad)).toEqual({ reason: 'INVALID_URL' });
     }
   });

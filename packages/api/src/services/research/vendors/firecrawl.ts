@@ -15,7 +15,8 @@ const PAGE_FIELDS = ['title', 'publishedAt', 'language', 'markdown'] as const;
 
 /** Non-public targets. IPv6 literals are refused outright (mapped, unspecified, ULA, link-local, ...). */
 function privateHost(hostname: string): boolean {
-  const host = hostname.toLowerCase();
+  // `localhost.` and `foo.internal.` are the same hosts as without the DNS root dot.
+  const host = hostname.toLowerCase().replace(/\.+$/, '');
   if (host.startsWith('[') || host.includes(':')) return true;
   if (host === 'localhost' || host.endsWith('.localhost') || host.endsWith('.local') || host.endsWith('.internal')) return true;
   if (!host.includes('.')) return true;
