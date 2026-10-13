@@ -3,10 +3,13 @@
 import { describe, expect, it } from 'vitest';
 import { buildParallelRequest, callParallel, parallelModeFor, parallelUsage } from '../parallel';
 import { buildFirecrawlRequest, callFirecrawl, firecrawlCredits, MAX_MARKDOWN_BYTES } from '../firecrawl';
-import { usageUnits } from '../http';
+import { mayHaveBilled, nonPublicIp, usageUnits } from '../http';
 import { FIXED_NOW, hangingFetch, jsonFetch, type RecordedCall } from './fetchDoubles';
 
-const deps = (fetchImpl: typeof fetch) => ({ apiKey: 'test-key', fetchImpl, now: FIXED_NOW, timeoutMs: 50 });
+// Tests never touch real DNS: targets resolve to a public documentation-free address unless overridden.
+const publicDns = async () => ['93.184.215.14'];
+const deps = (fetchImpl: typeof fetch, resolveHost: (host: string) => Promise<string[]> = publicDns) =>
+  ({ apiKey: 'test-key', fetchImpl, now: FIXED_NOW, timeoutMs: 50, resolveHost });
 
 describe('official usage parsing', () => {
   it('accepts non-negative decimals and rejects everything else', () => {
@@ -101,8 +104,52 @@ describe('callParallel', () => {
     expect(await callParallel('q', deps(hangingFetch()))).toMatchObject({ outcome: 'unknown', reason: 'TIMEOUT', usage: { units: null } });
     expect(await callParallel('q', deps(jsonFetch(200, 'not json'))))
       .toMatchObject({ outcome: 'unknown', reason: 'RESPONSE_NOT_JSON', supplierMayCharge: true });
+    // Parallel does not document 5xx billing, so it is recorded as possibly billed (the user is still not charged).
     expect(await callParallel('q', deps(jsonFetch(500, 'oops'))))
-      .toMatchObject({ outcome: 'failed', reason: 'RESPONSE_NOT_JSON', supplierMayCharge: false });
+      .toMatchObject({ outcome: 'failed', reason: 'RESPONSE_NOT_JSON', supplierMayCharge: true });
+  });
+});
+
+describe('outbound safety', () => {
+  it('never follows supplier redirects, so API key headers cannot reach another host', async () => {
+    const calls: RecordedCall[] = [];
+    const result = await callParallel('q', deps(jsonFetch(302, '', calls)));
+    expect(calls[0].init.redirect).toBe('manual');
+    expect(result).toMatchObject({ outcome: 'failed', supplierMayCharge: false });
+  });
+
+  it('classifies resolved addresses: only global unicast is public', () => {
+    for (const ip of ['127.0.0.1', '10.1.2.3', '169.254.1.1', '::1', 'fe80::1', 'fd00::1', '::ffff:127.0.0.1', '2001:db8::1', '::', '0.0.0.0']) {
+      expect(nonPublicIp(ip)).toBe(true);
+    }
+    for (const ip of ['93.184.215.14', '2606:4700::1111', '::ffff:93.184.215.14']) expect(nonPublicIp(ip)).toBe(false);
+  });
+
+  it('marks 2xx and undocumented 5xx as possibly billed', () => {
+    expect(mayHaveBilled(200, true)).toBe(true);
+    expect(mayHaveBilled(204, false)).toBe(true);
+    expect(mayHaveBilled(503, true)).toBe(true);
+    expect(mayHaveBilled(503, false)).toBe(false);
+    expect(mayHaveBilled(429, true)).toBe(false);
+  });
+
+  it('refuses a public-looking name that resolves to a private address, before any request', async () => {
+    const calls: RecordedCall[] = [];
+    const page = { success: true, data: { markdown: 'x', metadata: { creditsUsed: 1 } } };
+    const rebound = await callFirecrawl('https://localtest.me/', deps(jsonFetch(200, page, calls), async () => ['127.0.0.1']));
+    expect(rebound).toMatchObject({ outcome: 'not_sent', reason: 'NON_PUBLIC_TARGET', supplierMayCharge: false });
+    const mixed = await callFirecrawl('https://mixed.example.com/', deps(jsonFetch(200, page, calls), async () => ['93.184.215.14', '10.0.0.5']));
+    expect(mixed).toMatchObject({ outcome: 'not_sent', reason: 'NON_PUBLIC_TARGET' });
+    const unresolved = await callFirecrawl('https://nx.example.com/', deps(jsonFetch(200, page, calls), async () => { throw new Error('ENOTFOUND'); }));
+    expect(unresolved).toMatchObject({ outcome: 'not_sent', reason: 'NON_PUBLIC_TARGET' });
+    expect(calls).toHaveLength(0);
+    expect(await callFirecrawl('https://v6.example.com/', deps(jsonFetch(200, page, calls), async () => ['2606:4700::1111'])))
+      .toMatchObject({ outcome: 'ok' });
+  });
+
+  it('treats an unreadable non-200 2xx as unknown and a 5xx as a failure that may still be billed', async () => {
+    expect(await callParallel('q', deps(jsonFetch(202, 'not json')))).toMatchObject({ outcome: 'unknown', supplierMayCharge: true });
+    expect(await callParallel('q', deps(jsonFetch(502, { error: 'x' })))).toMatchObject({ outcome: 'failed', supplierMayCharge: true });
   });
 });
 

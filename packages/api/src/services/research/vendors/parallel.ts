@@ -3,7 +3,7 @@
 // query, a fixed mode. Only keywords leave Graylum (plan §4.2); results are for this user only and
 // are never cached for another user (Parallel customer terms §2(b)).
 import { clip, list, text, timestamp } from './fields';
-import { exchange, publicHttpUrl, usageUnits } from './http';
+import { exchange, mayHaveBilled, publicHttpUrl, usageUnits } from './http';
 import type { ResearchCallResult, ResearchItem, VendorDeps, VendorRequest } from './types';
 
 export const PARALLEL_SEARCH_URL = 'https://api.parallel.ai/v1/search';
@@ -73,13 +73,13 @@ export async function callParallel(query: string, deps: VendorDeps, mode: Parall
   }
   // A 200 whose body cannot be read is indeterminate (possibly billed); other statuses are confirmed failures.
   if (answer.kind === 'unreadable') {
-    return { ...base, outcome: answer.status === 200 ? 'unknown' : 'failed', reason: answer.reason, httpStatus: answer.status,
-      supplierMayCharge: answer.status === 200, usage: { unit: 'sku_search', units: null } };
+    return { ...base, outcome: answer.status >= 200 && answer.status < 300 ? 'unknown' : 'failed', reason: answer.reason, httpStatus: answer.status,
+      supplierMayCharge: mayHaveBilled(answer.status, true), usage: { unit: 'sku_search', units: null } };
   }
   const results = (answer.json as { results?: unknown } | null)?.results;
   if (answer.status !== 200 || !Array.isArray(results)) {
     return { ...base, outcome: 'failed', reason: `HTTP_${answer.status}`, httpStatus: answer.status,
-      supplierMayCharge: answer.status === 200, usage: { unit: 'sku_search', units: parallelUsage(answer.json) } };
+      supplierMayCharge: mayHaveBilled(answer.status, true), usage: { unit: 'sku_search', units: parallelUsage(answer.json) } };
   }
   const usage = { unit: 'sku_search' as const, units: parallelUsage(answer.json) };
   if (results.length === 0) return { ...base, outcome: 'ok', reason: 'NO_RESULTS', httpStatus: 200, supplierMayCharge: true, usage };

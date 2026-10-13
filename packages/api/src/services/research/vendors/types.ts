@@ -62,4 +62,6 @@ export interface VendorDeps {
   fetchImpl?: typeof fetch;
   timeoutMs?: number;
   now?: () => Date;
+  /** DNS lookup for pre-dispatch target checks (Firecrawl); defaults to node:dns. */
+  resolveHost?: (hostname: string) => Promise<string[]>;
 }

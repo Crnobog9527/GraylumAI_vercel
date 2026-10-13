@@ -46,7 +46,10 @@ export async function exchange(
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), deps.timeoutMs ?? DEFAULT_TIMEOUT_MS);
   try {
-    const init: RequestInit = { method: request.method, headers: { Accept: 'application/json', ...headers }, signal: controller.signal };
+    // Never follow redirects: a 3xx from a supplier API would otherwise carry our API key header to another host.
+    const init: RequestInit = {
+      method: request.method, headers: { Accept: 'application/json', ...headers }, signal: controller.signal, redirect: 'manual',
+    };
     if (request.body !== undefined) {
       init.headers = { ...init.headers as Record<string, string>, 'Content-Type': 'application/json' };
       init.body = JSON.stringify(request.body);
@@ -84,11 +87,12 @@ export function nonPublicHost(hostname: string): boolean {
   const special = ['localhost', 'local', 'internal', 'arpa', 'test', 'invalid', 'example', 'onion', 'lan', 'home', 'corp', 'intranet', 'private', 'alt'];
   if (special.some(suffix => host === suffix || host.endsWith(`.${suffix}`))) return true;
   if (!host.includes('.')) return true;
-  const v4 = host.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
-  if (!v4) return false;
-  const [a, b] = [Number(v4[1]), Number(v4[2])];
-  const c = Number(v4[3]);
-  // IANA special-purpose blocks that are not globally reachable (plus multicast and reserved 224/3).
+  return /^\d{1,3}(\.\d{1,3}){3}$/.test(host) ? nonPublicIpv4(host) : false;
+}
+
+/** IANA special-purpose IPv4 blocks that are not globally reachable (plus multicast and reserved 224/3). */
+function nonPublicIpv4(address: string): boolean {
+  const [a, b, c] = address.split('.').map(Number);
   return a === 0 || a === 10 || a === 127 || a >= 224 || (a === 169 && b === 254) || (a === 192 && b === 168)
     || (a === 172 && b >= 16 && b <= 31) || (a === 100 && b >= 64 && b <= 127) || (a === 198 && (b === 18 || b === 19))
     || (a === 192 && b === 0 && (c === 0 || c === 2)) || (a === 198 && b === 51 && c === 100) || (a === 203 && b === 0 && c === 113)
@@ -104,4 +108,24 @@ export function publicHttpUrl(value: string | undefined): string | undefined {
     return (url.protocol === 'https:' || url.protocol === 'http:') && !url.username && !url.password && !nonPublicHost(url.hostname)
       ? url.href : undefined;
   } catch { return undefined; }
+}
+
+/**
+ * Resolved addresses: only global unicast counts as public. IPv6 must be in 2000::/3 and outside the
+ * documentation, 6to4 and Teredo blocks; IPv4-mapped IPv6 is judged by its IPv4 part.
+ */
+export function nonPublicIp(address: string): boolean {
+  const ip = address.toLowerCase();
+  const mapped = ip.match(/^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/);
+  if (mapped) return nonPublicIpv4(mapped[1]);
+  if (/^\d{1,3}(\.\d{1,3}){3}$/.test(ip)) return nonPublicIpv4(ip);
+  if (!ip.includes(':')) return true;
+  const first = parseInt(ip.split(':')[0] || '0', 16);
+  if (!(first >= 0x2000 && first <= 0x3fff)) return true;
+  return ip.startsWith('2001:db8:') || ip.startsWith('2002:') || /^2001:0?:/.test(ip) || ip.startsWith('2001:0000:');
+}
+
+/** Status codes after which the supplier may already have billed: any 2xx, and 5xx where billing is undocumented. */
+export function mayHaveBilled(status: number, undocumented5xx: boolean): boolean {
+  return (status >= 200 && status < 300) || (undocumented5xx && status >= 500);
 }

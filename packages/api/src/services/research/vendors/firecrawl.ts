@@ -6,7 +6,8 @@
 // anti-bot or login options are ever requested. `proxy: 'basic'` pins one credit: the default `auto`
 // retries hard targets through the 5-credit enhanced proxy.
 import { clip, clipBytes, count, text, timestamp } from './fields';
-import { exchange, nonPublicHost, publicHttpUrl, usageUnits } from './http';
+import { lookup } from 'node:dns/promises';
+import { exchange, mayHaveBilled, nonPublicHost, nonPublicIp, publicHttpUrl, usageUnits } from './http';
 import type { ResearchCallResult, VendorDeps, VendorRequest } from './types';
 
 export const FIRECRAWL_SCRAPE_URL = 'https://api.firecrawl.dev/v1/scrape';
@@ -41,12 +42,33 @@ export function firecrawlCredits(json: unknown): string | null {
   return null;
 }
 
+const defaultResolve = async (hostname: string) => (await lookup(hostname, { all: true })).map(entry => entry.address);
+
+/**
+ * Pre-dispatch DNS check: a public-looking name that resolves to a private address (e.g. 127.0.0.1)
+ * is refused before paying for it. Firecrawl resolves the name again on its own servers, so DNS
+ * rebinding and redirects at the target cannot be ruled out from here; those land on Firecrawl's
+ * network, and the returned page URL is re-checked before it is shown.
+ */
+async function resolvesPublic(hostname: string, deps: VendorDeps): Promise<boolean> {
+  try {
+    const addresses = await (deps.resolveHost ?? defaultResolve)(hostname);
+    return addresses.length > 0 && addresses.every(address => !nonPublicIp(address));
+  } catch {
+    return false;
+  }
+}
+
 export async function callFirecrawl(rawUrl: string, deps: VendorDeps): Promise<ResearchCallResult> {
   const fetchedAt = (deps.now?.() ?? new Date()).toISOString();
   const base = { vendor: 'firecrawl' as const, route: FIRECRAWL_ROUTE, fetchedAt, items: [], truncated: false };
   const built = buildFirecrawlRequest(rawUrl);
   if ('reason' in built) {
     return { ...base, outcome: 'not_sent', reason: built.reason, httpStatus: null, supplierMayCharge: false,
+      usage: { unit: 'credit', units: '0' } };
+  }
+  if (!(await resolvesPublic(new URL(built.url).hostname, deps))) {
+    return { ...base, outcome: 'not_sent', reason: 'NON_PUBLIC_TARGET', httpStatus: null, supplierMayCharge: false,
       usage: { unit: 'credit', units: '0' } };
   }
   const answer = await exchange(built.request, { Authorization: `Bearer ${deps.apiKey}` }, deps);
@@ -56,13 +78,13 @@ export async function callFirecrawl(rawUrl: string, deps: VendorDeps): Promise<R
   }
   // A 200 whose body cannot be read is indeterminate (possibly billed); other statuses are confirmed failures.
   if (answer.kind === 'unreadable') {
-    return { ...base, outcome: answer.status === 200 ? 'unknown' : 'failed', reason: answer.reason, httpStatus: answer.status,
-      supplierMayCharge: answer.status === 200, usage: { unit: 'credit', units: null } };
+    return { ...base, outcome: answer.status >= 200 && answer.status < 300 ? 'unknown' : 'failed', reason: answer.reason, httpStatus: answer.status,
+      supplierMayCharge: mayHaveBilled(answer.status, true), usage: { unit: 'credit', units: null } };
   }
   const json = answer.json as { success?: unknown } | null;
   if (answer.status !== 200 || json?.success !== true) {
     return { ...base, outcome: 'failed', reason: `HTTP_${answer.status}`, httpStatus: answer.status,
-      supplierMayCharge: answer.status === 200, usage: { unit: 'credit', units: firecrawlCredits(answer.json) } };
+      supplierMayCharge: mayHaveBilled(answer.status, true), usage: { unit: 'credit', units: firecrawlCredits(answer.json) } };
   }
   const usage = { unit: 'credit' as const, units: firecrawlCredits(answer.json) };
   // Firecrawl bills target pages that answered 403/404; the user still gets no page.
