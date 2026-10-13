@@ -36,6 +36,8 @@ export const runtimeContext=z.object({
   historyItems:z.number().int().min(0).max(1000).optional(),
   reasoning:reasoningPolicy.optional(),instructions:z.string().max(12000).optional(),
   input:z.string().max(24000).optional()}).strict().optional(),
+ // POSITIONING-GATE: Decisions was unavailable; the primary model carries the fallback rule.
+ positioningGate:z.literal('fallback-v1').optional(),
  workspaceContext:z.boolean().optional(),opcTurnToken:z.string().uuid().optional(),matching:matchingPlan.optional(),scopeMaterial:z.unknown().optional(),
  answeredCard:z.unknown().optional(),request:z.unknown().optional(),
  moduleId:z.string().uuid().optional(),skillId:z.string().uuid().optional(),revisionId:z.string().uuid().optional(),sources:z.array(z.unknown()).optional(),

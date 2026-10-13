@@ -65,6 +65,28 @@ export async function fusionSessionlessCases({db,report,createFixture}) {
   assert.equal(await rpc(db,'fusion_call_verdict',v.actor,v1.id,'usable'),'usable');
   report.checks.push('verdicts are checked against the saved output: no body verdict without a body, no no_delivery with one');
 
+  // A zero-charge verdict can settle before the provider cost is known: the user is refunded at once and
+  // the call stays listed for the cost lookup until the cost is recorded (#935 review).
+  const zero = await sessionGroup(db,createFixture,{n:1,credits:9});
+  const zc = callOf(zero,zero.members[0]);
+  const zf = zero.members[0];
+  const evidenceOf = (cost,final,suffix) => ({provider:zf.claimPayload.provider,account:'sandbox',model:zf.claimPayload.model,
+    protocol:zf.claimPayload.protocol,providerId:'generation-'+zc.id,source:suffix,sourceHash:(final?'e':'f').repeat(64),
+    observedAt:new Date().toISOString(),coverage:'request_total',final,cost,currency:'USD',...(cost?{usage:{inputTokens:400,outputTokens:0}}:{})});
+  await rpc(db,'bill2_record',zero.actor,zf.run,zc.id,evidenceOf(null,false,'response'));
+  await rpc(db,'fusion_call_output_save',zero.actor,zc.id,'not valid review json');
+  await rpc(db,'fusion_call_verdict',zero.actor,zc.id,'format_invalid');
+  await rpc(db,'bill2_finalize',zero.actor,zf.run);
+  const zeroCall = (await calls(db,zero.runs))[0];
+  assert.ok(zeroCall.settled_at);assert.equal(zeroCall.selected_cost_usd,null);assert.equal(await wallet(db,zero.actor),9);
+  const listedZero = async () => (await db.query('SELECT * FROM fusion_pending_financial_batch(200)')).rows.some(r=>r.call_id===zc.id);
+  assert.equal(await listedZero(),true,'settled at zero, cost still unknown: listed for the lookup');
+  await rpc(db,'bill2_record',zero.actor,zf.run,zc.id,evidenceOf('0.0004',true,'lookup'));
+  assert.ok((await calls(db,zero.runs))[0].selected_cost_usd!==null);
+  assert.equal(await listedZero(),false,'listed until the cost is recorded');
+  assert.equal(await wallet(db,zero.actor),9,'the late cost is recorded without charging the user');
+  report.checks.push('zero-charge verdict before the provider cost: refunded at once, kept in the recovery batch until the cost is recorded');
+
   // Recovery batch lists grouped runs with unsettled calls only.
   const pending = await sessionGroup(db,createFixture,{n:1,credits:9});
   const rows = (await db.query('SELECT * FROM fusion_pending_financial_batch(200)')).rows;

@@ -192,8 +192,13 @@ LANGUAGE sql STABLE SECURITY DEFINER SET search_path=public,pg_temp AS $$
       'id',r.test_window_id,'callPolicies',r.payload->'callPolicy','creditsPerUsd',r.payload->'rules'->>'creditsPerUsd',
       'multiplier',r.payload->'rules'->>'multiplier','expiresAt',r.deadline) END, c.created_at
   FROM bill2_runs r JOIN bill2_calls c ON c.run_id=r.id
-  WHERE r.fusion_group_id IS NOT NULL AND r.contract_version='bill2.v2' AND c.settled_at IS NULL
-    AND (c.dispatched_at IS NOT NULL OR c.dispatch_deadline<=clock_timestamp())
+  WHERE r.fusion_group_id IS NOT NULL AND r.contract_version='bill2.v2'
+    AND ((c.settled_at IS NULL AND (c.dispatched_at IS NOT NULL OR c.dispatch_deadline<=clock_timestamp()))
+      -- A zero-charge verdict can settle before the provider cost arrives (#935 review): keep looking the
+      -- cost up for the record, within the existing lookup budget and deadline (bill2_recovery_claim rules).
+      OR (c.settled_at IS NOT NULL AND c.dispatched_at IS NOT NULL AND c.selected_cost_usd IS NULL
+        AND c.provider_id IS NOT NULL AND c.recovery_attempts<3
+        AND clock_timestamp()<=coalesce(c.recovery_deadline,c.created_at+interval '24 hours')))
     AND (p_after_created IS NULL OR (c.created_at, c.id) > (p_after_created, p_after_id))
   ORDER BY c.created_at, c.id LIMIT least(greatest(coalesce(p_limit,50),1),200);
 $$;
@@ -300,10 +305,11 @@ $x$||a);
   END IF;
   src:=pg_get_functiondef('public.account_erasure_body_remaining(uuid)'::regprocedure);
   IF position('fusion_call_outputs' IN src)=0 THEN
-    a:=$x$total bigint:=(SELECT count(*) FROM opc_data_events WHERE actor_id=p_profile_id);$x$;
+    -- Anchor without the closing semicolon, so it holds with or without 0232's runtime_session_names term.
+    a:=$x$total bigint:=(SELECT count(*) FROM opc_data_events WHERE actor_id=p_profile_id)$x$;
     IF array_length(string_to_array(src,a),1)<>2 THEN RAISE EXCEPTION 'FUSION_SOURCE_MISMATCH: account_erasure_body_remaining'; END IF;
-    EXECUTE replace(src,a,$x$total bigint:=(SELECT count(*) FROM opc_data_events WHERE actor_id=p_profile_id)
-  +(SELECT count(*) FROM fusion_call_outputs WHERE actor_id=p_profile_id);$x$);
+    EXECUTE replace(src,a,a||$x$
+  +(SELECT count(*) FROM fusion_call_outputs WHERE actor_id=p_profile_id)$x$);
   END IF;
 END $$;
 COMMIT;

@@ -9,6 +9,7 @@ import {executeOriginalExecution,runtimeLocalEndpoint,streamOriginalExecution} f
 import {StagingAccessError,stagingProcedureError,stagingRpcFailure} from '../services/runtime/stagingErrors';
 import {briefAdoption, contentReaction, topicAdoptionWithSource} from "../services/opc/dataFoundation";
 import { dedupeHandoffResults } from "../services/opc/handoff-view";
+import { conversationRename, renameConversation } from "../services/opc/conversationName";
 import {
   opcService,
   opcStart,
@@ -173,6 +174,9 @@ export const opcRouter = router({
     if (error) stagingRpcFailure(error);
     return z.array(z.object({ sessionId: z.string().uuid(), title: z.string(), lastActivityAt: z.string() })).parse(data);
   }),
+  conversationRename: procedure
+    .input(conversationRename)
+    .mutation(({ ctx, input }) => renameConversation(ctx.supabaseAdmin, ctx.user.id, input)),
   planRequestState: readProcedure
     .input(
       z
