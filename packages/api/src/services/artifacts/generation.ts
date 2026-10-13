@@ -33,7 +33,8 @@ export const generationQuoteInput = generationScope.extend({
 export const generationInput = generationQuoteInput.extend({
   requestId: uuid, quoteHash: z.string().regex(/^[a-f0-9]{64}$/), budgetCredits: z.number().int().min(1).max(1000000),
 }).strict();
-const answerSchema = z.object({ body: z.string().min(1).max(20000), inputTokens: z.number().int().min(0).max(2000000), outputTokens: z.number().int().min(0).max(2000000) }).strict();
+const ANSWER_MAX_CHARS = 20000;
+const answerSchema = z.object({ body: z.string().min(1).max(ANSWER_MAX_CHARS), inputTokens: z.number().int().min(0).max(2000000), outputTokens: z.number().int().min(0).max(2000000) }).strict();
 export const generationStatus = generationStatusSchema.extend({ recoveryReceipt: z.string().max(200000).optional() });
 const receiptSchema = answerSchema.extend({ credits: z.number().int().min(0).max(1000000), costUsd: z.number().finite().nonnegative() });
 export const generationRecoveryInput = generationScope.extend({ requestId: uuid, recoveryReceipt: z.string().min(1).max(200000).optional() }).strict();
@@ -390,7 +391,7 @@ export function workbenchGeneration(userClient: SupabaseClient, privateClient: S
         // Never charge above the user-approved reservation. Persist actual
         // calculated model cost separately for accounting/reconciliation.
         // MODEL-IDENTITY-GUARD layer 3: a dialogue reply that still names its model is replaced before it is saved.
-        const body = redactWorkbenchReply(v.purpose, ready.messages[0]?.content ?? '', filtered.content);
+        const body = redactWorkbenchReply(v.purpose, ready.messages[0]?.content ?? '', filtered.content, ANSWER_MAX_CHARS);
         known = receiptSchema.parse({ ...answer, body, credits: Math.min(cost.credits, ready.quote.reservedCredits), costUsd: cost.costUsd });
         await rpc(v, 'receipt', v.requestId, { token: reserved.token, result: known });
         return generationStatus.parse(await rpc(v, 'settle', v.requestId));

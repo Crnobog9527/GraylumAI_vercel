@@ -176,6 +176,13 @@ export function redactIdentitySummary(summary: string) {
  * system message (the identity instruction leads it when the switch was on). Other purposes produce the
  * artifact and are never rewritten.
  */
-export function redactWorkbenchReply(purpose: string | undefined, systemContent: string, text: string) {
-  return purpose === 'reply' && frozenBrandIdentity(systemContent) ? redactModelIdentity(text) : text;
+export function redactWorkbenchReply(purpose: string | undefined, systemContent: string, text: string, maxLength: number) {
+  if (purpose !== 'reply' || !frozenBrandIdentity(systemContent)) return text;
+  const redacted = redactModelIdentity(text);
+  if (redacted.length <= maxLength) return redacted;
+  // The brand reply is longer than most leaks; never let it push a valid reply past the receipt limit
+  // (a failed receipt would leave a dispatched, reserved generation unsettled — review P1).
+  let out = '';
+  for (const char of redacted) { if (out.length + char.length > maxLength) break; out += char; }
+  return out;
 }

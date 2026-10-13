@@ -195,9 +195,17 @@ it('a card whose options collapse into the same brand reply is dropped instead o
 
 it('workbench dialogue replies are redacted when the frozen instruction carries the identity (review P1)', () => {
   const on = withBrandIdentity('Discuss…', true), off = 'Discuss…';
-  expect(redactWorkbenchReply('reply', on, 'I am Claude. Here is the plan.')).toBe(`${BRAND_REPLY_EN} Here is the plan.`);
-  expect(redactWorkbenchReply('reply', off, 'I am Claude.')).toBe('I am Claude.');
+  expect(redactWorkbenchReply('reply', on, 'I am Claude. Here is the plan.', 20000)).toBe(`${BRAND_REPLY_EN} Here is the plan.`);
+  expect(redactWorkbenchReply('reply', off, 'I am Claude.', 20000)).toBe('I am Claude.');
   // Step summaries and generations produce the artifact and are never rewritten.
-  expect(redactWorkbenchReply('summary', on, 'I am Claude.')).toBe('I am Claude.');
-  expect(redactWorkbenchReply(undefined, on, 'I am Claude.')).toBe('I am Claude.');
+  expect(redactWorkbenchReply('summary', on, 'I am Claude.', 20000)).toBe('I am Claude.');
+  expect(redactWorkbenchReply(undefined, on, 'I am Claude.', 20000)).toBe('I am Claude.');
+  // Review P1: a reply near the receipt limit stays within it after the longer brand reply is inserted.
+  const near = 'I am Claude. ' + '好'.repeat(19980);
+  const capped = redactWorkbenchReply('reply', on, near, 20000);
+  expect(capped.length).toBeLessThanOrEqual(20000);
+  expect(capped.startsWith(BRAND_REPLY_EN)).toBe(true);
+  const emoji = redactWorkbenchReply('reply', on, 'I am Claude. ' + '😀'.repeat(9990), 20000);
+  expect(emoji.length).toBeLessThanOrEqual(20000);
+  expect(emoji).not.toMatch(/[\uD800-\uDBFF]$/);
 });
