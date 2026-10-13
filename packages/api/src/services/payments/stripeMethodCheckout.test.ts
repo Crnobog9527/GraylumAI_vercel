@@ -13,8 +13,11 @@ const plan = '00000000-0000-4000-8000-000000000002';
 const snapshot = (discount: string) => ({ version: 1, item_type: 'membership_plan', item_id: plan,
   item_updated_at: '2026-10-05T00:00:00.000Z', billing_cycle: 'monthly', currency: 'usd', unit: 'major', price: '69.00',
   discount, tax_behavior: 'exclusive', credits: 8970, bonus_credits: 0 });
-function fixture(method: 'card' | 'card_cn', coupon: { external_id: string } | null = { external_id: 'coupon_first' }) {
-  const rpc = vi.fn().mockResolvedValue({ data: { dispatch: true, request: { providerRequest: { expires_at: 9999999999 } } }, error: null });
+function fixture(method: 'card' | 'card_cn', coupon: { external_id: string } | null = { external_id: 'coupon_first' },
+  claim: { dispatch: boolean; frozenCoupon?: string | null } = { dispatch: true }) {
+  const frozen = claim.frozenCoupon === undefined ? coupon?.external_id : claim.frozenCoupon;
+  const providerRequest = { expires_at: 9999999999, ...(frozen ? { discounts: [{ coupon: frozen }] } : {}) };
+  const rpc = vi.fn().mockResolvedValue({ data: { dispatch: claim.dispatch, request: { providerRequest } }, error: null });
   const eq = vi.fn(() => chain);
   const chain = { select: vi.fn(() => chain), eq, maybeSingle: vi.fn()
     .mockResolvedValueOnce({ data: { external_id: 'price_gold_month' }, error: null })
@@ -51,9 +54,20 @@ describe('PAY-STRIPE-MP card checkout adapter', () => {
     await expect(createStripeCardCheckout(f.input)).rejects.toThrow('PAY_WAFFO_PRICE_UNAVAILABLE');
     expect(f.rpc).not.toHaveBeenCalled(); expect(mocks.dispatch).not.toHaveBeenCalled();
   });
+  it('recovers with the coupon frozen at dispatch even after the current mapping rotated', async () => {
+    const f = fixture('card', { external_id: 'coupon_new' }, { dispatch: false, frozenCoupon: 'coupon_old' });
+    await expect(createStripeCardCheckout(f.input)).resolves.toMatchObject({ state: 'open' });
+    expect(mocks.dispatch).toHaveBeenLastCalledWith(expect.objectContaining({ createIfMissing: false,
+      intent: expect.objectContaining({ card: { managedPayments: true, couponId: 'coupon_old' }, recover: true }) }));
+  });
+  it('refuses a fresh claim whose frozen coupon differs from the one just selected', async () => {
+    const f = fixture('card', { external_id: 'coupon_new' }, { dispatch: true, frozenCoupon: 'coupon_old' });
+    await expect(createStripeCardCheckout(f.input)).rejects.toThrow('PAY_WAFFO_CHECKOUT_UNAVAILABLE');
+    expect(mocks.dispatch).not.toHaveBeenCalled();
+  });
   it('reads no coupon for an undiscounted card purchase and refuses wallet methods', async () => {
     mocks.prepare.mockResolvedValue({ id, item_id: plan, price_ref_id: id, purchase_snapshot: snapshot('0.00') });
-    await createStripeCardCheckout(fixture('card').input);
+    await createStripeCardCheckout(fixture('card', null, { dispatch: true, frozenCoupon: null }).input);
     expect(mocks.build).toHaveBeenLastCalledWith(expect.objectContaining({ card: { managedPayments: true } }));
     const wallet = fixture('card'); (wallet.input.purchase as { method: string }).method = 'alipay';
     await expect(createStripeCardCheckout(wallet.input)).rejects.toThrow('PAY_WAFFO_METHOD_DENIED');

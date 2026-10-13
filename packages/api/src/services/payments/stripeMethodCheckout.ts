@@ -23,6 +23,16 @@ async function currentFirstMonthCoupon(db: SupabaseClient, merchant: string, ord
   return coupon.data.external_id as string;
 }
 
+/** The coupon frozen into the claimed request; a recovery must look for the session it was created with. */
+function frozenCoupon(request: Stripe.Checkout.SessionCreateParams) {
+  const discounts = request.discounts;
+  if (discounts === undefined) return undefined;
+  if (!Array.isArray(discounts) || discounts.length !== 1 || typeof discounts[0]?.coupon !== 'string') {
+    throw new Error('PAY_WAFFO_CHECKOUT_UNAVAILABLE');
+  }
+  return discounts[0].coupon;
+}
+
 function assertSessionMethod(session: Stripe.Checkout.Session, purchase: Input['purchase']) {
   const types = session.payment_method_types;
   const managed = session.managed_payments?.enabled === true;
@@ -49,19 +59,25 @@ export async function createStripeMethodCheckout(input: Input) {
   // Only a card subscription can be discounted (0222 first month); the request builder refuses anything else.
   const couponId = snapshot?.item_type === 'membership_plan' && majorToCents(snapshot.discount) !== 0
     ? await currentFirstMonthCoupon(db, scope.merchant, order) : undefined;
-  const card: StripeCardCheckout | undefined = isCard
-    ? { managedPayments: purchase.method === 'card', ...(couponId ? { couponId } : {}) } : undefined;
+  const cardFor = (coupon: string | undefined): StripeCardCheckout | undefined => isCard
+    ? { managedPayments: purchase.method === 'card', ...(coupon ? { couponId: coupon } : {}) } : undefined;
   // Stripe requires 30 minutes after creation: reserve one minute for dispatch.
   // The database includes all 31 minutes in the frozen upgrade safety cutoff.
   const expiresAt = Math.floor(Date.now() / 1000) + 31 * 60;
   const proposed = buildStripeCheckoutRequest({ orderId: order.id, userId, snapshot: order.purchase_snapshot,
-    priceId: price.data.external_id, productName: 'Membership / Credits', appUrl: input.appUrl, expiresAt, walletMethod, card });
+    priceId: price.data.external_id, productName: 'Membership / Credits', appUrl: input.appUrl, expiresAt, walletMethod,
+    card: cardFor(couponId) });
   const claimed = await db.rpc('pay_waffo_claim_checkout', { p_user: userId, p_order: order.id, p_merchant: scope.merchant,
     p_expires: new Date(expiresAt * 1000).toISOString(), p_request: { orderId: order.id, userId, method: purchase.method,
       merchant: scope.merchant, mode: 'test', providerRequest: proposed } });
   if (claimed.error || typeof claimed.data?.dispatch !== 'boolean' || !claimed.data?.request?.providerRequest) {
     throw new Error('PAY_WAFFO_CHECKOUT_UNAVAILABLE');
   }
+  // A fresh claim froze the request just built; a recovered claim keeps the coupon it was dispatched with,
+  // even if the current mapping rotated since. Recovery never creates a new Session (createIfMissing=false).
+  const frozen = frozenCoupon(claimed.data.request.providerRequest);
+  if (claimed.data.dispatch && frozen !== couponId) throw new Error('PAY_WAFFO_CHECKOUT_UNAVAILABLE');
+  const card = cardFor(claimed.data.dispatch ? couponId : frozen);
   const closeBeforeDispatch = claimed.data.dispatch ? async () => {
     const closed = await db.rpc('pay_waffo_abort_before_dispatch', { p_user: userId, p_order: order.id,
       p_merchant: scope.merchant, p_expected: new Date(claimed.data.request.providerRequest.expires_at * 1000).toISOString() });
