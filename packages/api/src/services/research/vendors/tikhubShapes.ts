@@ -90,10 +90,12 @@ function instagramPost(item: Raw) {
   }, POST_FIELDS, code ? `https://www.instagram.com/p/${code}/` : undefined);
 }
 
-function tweet(item: Raw) {
+/** `accountHandle` is the requested account for account-post calls, used when the tweet omits its author. */
+function tweet(item: Raw, accountHandle?: string) {
   const legacy = (item.legacy ?? item) as Raw;
   const id = text(item, ['tweet_id', 'rest_id', 'id_str']) ?? text(legacy, ['id_str']);
-  const handle = text(item, ['author.screen_name', 'user_info.screen_name', 'core.user_results.result.legacy.screen_name', 'screen_name']);
+  const handle = text(item, ['author.screen_name', 'user_info.screen_name', 'core.user_results.result.legacy.screen_name', 'screen_name'])
+    ?? accountHandle;
   return toItem({
     id, title: clip(text(item, ['text', 'full_text']) ?? text(legacy, ['full_text', 'text']), TITLE_CHARS),
     author: handle, authorId: handle,
@@ -135,12 +137,15 @@ function profile(object: Raw) {
 const PROFILE_KEYS = ['follower_count', 'followers_count', 'unique_id', 'screen_name', 'mid', 'sign', 'legacy',
   'sub_count', 'edge_followed_by', 'subscriber_count'];
 
-/** A profile needs an identity plus something describing it; a post needs its id plus real content or metrics. */
+/**
+ * A profile needs an identity plus something describing it; a post needs its id plus real content or
+ * metrics. The author alone never counts: it may be filled from the requested account.
+ */
 function usable(item: ResearchItem, kind: SocialKind): boolean {
   const f = item.fields;
   if (kind === 'account_relation') return f.followers !== undefined;
   if (kind === 'account_profile') return (f.id !== undefined || f.handle !== undefined) && (f.followers !== undefined || f.name !== undefined);
-  return f.id !== undefined && ['title', 'author', 'publishedAt', 'views', 'likes', 'comments', 'shares'].some(name => f[name] !== undefined);
+  return f.id !== undefined && ['title', 'publishedAt', 'views', 'likes', 'comments', 'shares'].some(name => f[name] !== undefined);
 }
 
 /** Normalized items for a TikHub envelope; an unrecognized shape yields no items, never invented ones. */
@@ -159,10 +164,10 @@ export function normalizeTikhub(json: unknown, platform: SocialPlatform, kind: S
     const found = findAll(data, object => has(object, ...PROFILE_KEYS), 20).map(profile).find(item => usable(item, kind));
     return found ? [found] : [];
   }
-  return rawPosts(data, platform).filter(item => usable(item, kind));
+  return rawPosts(data, platform, kind === 'account_posts' ? account : undefined).filter(item => usable(item, kind));
 }
 
-function rawPosts(data: unknown, platform: SocialPlatform): ResearchItem[] {
+function rawPosts(data: unknown, platform: SocialPlatform, accountHandle?: string): ResearchItem[] {
   switch (platform) {
     case 'douyin':
     case 'tiktok':
@@ -185,7 +190,7 @@ function rawPosts(data: unknown, platform: SocialPlatform): ResearchItem[] {
     }
     case 'x':
       // Tweets carry text and a creation time (directly or under `legacy`); user objects with rest_id do not.
-      return findAll(data, o => has(o, 'tweet_id', 'rest_id', 'id_str') && isTweet(o)).map(tweet);
+      return findAll(data, o => has(o, 'tweet_id', 'rest_id', 'id_str') && isTweet(o)).map(item => tweet(item, accountHandle));
     default:
       return [];
   }
