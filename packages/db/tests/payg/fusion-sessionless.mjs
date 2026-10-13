@@ -74,6 +74,29 @@ export async function fusionSessionlessCases({db,report,createFixture}) {
   assert.ok(!rows.some(r=>r.run_id===g.runs[0]),'settled group runs are not listed');
   report.checks.push('fusion_pending_financial_batch lists unsettled sessionless group calls with dispatch state, deadline and binding');
 
+  // Paging: a cursor moves past calls that cannot progress; undispatched calls wait for their dispatch deadline.
+  const paged = await sessionGroup(db,createFixture,{n:2,credits:18});
+  // Timestamps travel as text (as PostgREST returns them), keeping microseconds for the cursor.
+  const pageRows = (await db.query('SELECT call_id,run_id,created_at::text created FROM fusion_pending_financial_batch(200)')).rows
+    .filter(r=>paged.runs.includes(r.run_id));
+  assert.equal(pageRows.length,2);
+  const firstRow = pageRows[0];
+  const nextPage = (await db.query('SELECT * FROM fusion_pending_financial_batch(200,$1,$2)',[firstRow.created,firstRow.call_id])).rows;
+  assert.ok(!nextPage.some(r=>r.call_id===firstRow.call_id) && nextPage.some(r=>paged.runs.includes(r.run_id)));
+  const fresh = await createFixture(db,{credits:9,phase:'fusion_review'});
+  const freshSession = randomUUID();
+  await db.query("INSERT INTO runtime_sessions(id,actor_id,scope,start_request_id,start_payload) VALUES($1,$2,$3,$4,'{}')",
+    [freshSession,fresh.actor,fresh.payload.scope,randomUUID()]);
+  const freshGroup = await rpc(db,'fusion_group_create',fresh.actor,randomUUID(),'review',freshSession);
+  await rpc(db,'fusion_group_attach',fresh.actor,freshGroup,fresh.run);
+  const freshClaim = await rpc(db,'fusion_group_claim',fresh.actor,freshGroup,'review:1',1,
+    JSON.stringify([{runId:fresh.run,sequence:1,payload:fresh.claimPayload}]));
+  const listedFresh = async () => (await db.query('SELECT * FROM fusion_pending_financial_batch(200)')).rows.some(r=>r.run_id===fresh.run);
+  assert.equal(await listedFresh(),false,'an undispatched call before its dispatch deadline is not listed');
+  await db.query("UPDATE bill2_calls SET dispatch_deadline=now()-interval '1 second' WHERE id=$1",[freshClaim.calls[0].id]);
+  assert.equal(await listedFresh(),true);
+  report.checks.push('recovery batch pages by (created_at, id) and lists undispatched calls only after their dispatch deadline');
+
   // Deleting the source conversation deletes its Fusion outputs, scrubs the runs and leaves no hold.
   const del = await sessionGroup(db,createFixture,{n:2,credits:18});
   const d0 = callOf(del,del.members[0]);
@@ -101,6 +124,22 @@ export async function fusionSessionlessCases({db,report,createFixture}) {
   assert.equal(await wallet(db,del.actor),16,'late receipt settles at known cost and releases the rest of the hold');
   await assert.rejects(rpc(db,'fusion_group_create',del.actor,randomUUID(),'review',del.session),/FUSION_GROUP_DENIED/);
   report.checks.push('deleting the source conversation deletes its Fusion outputs, closes and scrubs the group runs (user_stopped at known cost; late receipt settles), refuses new outputs and groups');
+
+  // A run cannot join a group whose source conversation was deleted.
+  const extra = await createFixture(db,{actor:del.actor,phase:'fusion_review'});
+  await assert.rejects(rpc(db,'fusion_group_attach',del.actor,del.id,extra.run),/FUSION_GROUP_DENIED/);
+  // A run already closed as delivered but not yet judged settles as user_stopped when its conversation is deleted.
+  const closed = await sessionGroup(db,createFixture,{n:1,credits:9});
+  const cc = callOf(closed,closed.members[0]);
+  await receipt(db,closed,closed.members[0],cc);
+  await rpc(db,'fusion_call_output_save',closed.actor,cc.id,'delivered body');
+  await rpc(db,'bill2_close',closed.actor,closed.runs[0],'delivered',{kind:'usable_result',evidenceRef:'fusion-output',
+    evidenceHash:'d'.repeat(64)});
+  await rpc(db,'content_erasure_mark_session',closed.actor,closed.session);
+  const settledClosed = (await calls(db,closed.runs))[0];
+  assert.equal(settledClosed.fusion_verdict,'user_stopped');assert.ok(settledClosed.settled_at);
+  assert.equal(await wallet(db,closed.actor),8,'known cost billed, rest of the hold released at deletion');
+  report.checks.push('attach refused after source deletion; a closed-but-unjudged run settles as user_stopped on deletion');
 
   // Account erasure removes Fusion outputs and counts them as remaining body until then.
   const acct = await sessionGroup(db,createFixture,{n:1,credits:9});
