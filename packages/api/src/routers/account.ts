@@ -1,5 +1,6 @@
 import {
   assertUserErasable, contentTarget, contentConfirmation, previewContentErasure, confirmContentErasure,
+  conversationTarget, eraseConversation,
 } from '../services/accountErasure/content';
 import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
@@ -22,6 +23,11 @@ export const accountRouter = router({
     assertUserErasable(input.kind);
     requireServiceRole(ctx.hasSupabaseAdminPrivileges);
     return confirmContentErasure(ctx.supabaseAdmin, ctx.profileId, input);
+  }),
+  /** One click deletes one whole conversation; the server decides the scope (Owner 2026-10-13). */
+  conversationErasure: protectedProcedure.input(conversationTarget).mutation(({ ctx, input }) => {
+    requireServiceRole(ctx.hasSupabaseAdminPrivileges);
+    return eraseConversation(ctx.supabaseAdmin, ctx.profileId, input);
   }),
   erasurePreview: protectedProcedure.query(async ({ ctx }) => {
     requireServiceRole(ctx.hasSupabaseAdminPrivileges);

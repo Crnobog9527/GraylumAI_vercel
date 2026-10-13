@@ -25,6 +25,31 @@ for (const [runner, message] of [
   });
 }
 
+for (const flag of ['--ordinary-only', '--chat-only', '--chat-reliability-only', '--reuse-only', '--real-skill-only',
+  '--workbench-restart-only']) {
+  test(`run-workbench.mjs rejects retired ${flag} instead of reporting an empty pass`, () => {
+    const result = spawnSync(process.execPath, [`${root}packages/db/tests/v3/run-workbench.mjs`, flag],
+      { cwd: root, env: { PATH: '' }, encoding: 'utf8', timeout: 10000 });
+    assert.ifError(result.error);
+    assert.notEqual(result.status, 0);
+    assert.ok(result.stderr.includes(`${flag} retired by LEGACY-CLOSE`), result.stderr);
+    assert.equal(result.stdout.includes('LOCAL_EVIDENCE_DIRECTORY'), false);
+  });
+}
+
+test('run-workbench.mjs rejects the old /workbench serve preview without a current suite', t => {
+  const dir = mkdtempSync(join(tmpdir(), 'legacy-close-serve-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const result = spawnSync(process.execPath, [`${root}packages/db/tests/v3/run-workbench.mjs`, '--serve',
+    '--preview-id=retired-serve', '--preview-action=start'],
+  { cwd: root, env: { PATH: dir, V3_PREVIEW_STATE_ROOT: dir }, encoding: 'utf8', timeout: 10000 });
+  assert.ifError(result.error);
+  assert.equal(existsSync(join(dir, 'retired-serve.lock')), false);
+  assert.notEqual(result.status, 0);
+  assert.ok(result.stderr.includes('--serve without --opc-only or --runtime-only retired by LEGACY-CLOSE'), result.stderr);
+  assert.equal(result.stdout.includes('LOCAL_EVIDENCE_DIRECTORY'), false);
+});
+
 for (const action of ['stop', 'destroy', 'resume', 'restart', 'renew']) {
   test(`saved retired slice preview permits cleanup only: ${action}`, t => {
     const dir = mkdtempSync(join(tmpdir(), 'legacy-close-test-'));
