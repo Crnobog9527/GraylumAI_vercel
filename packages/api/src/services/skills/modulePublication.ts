@@ -88,10 +88,15 @@ export async function saveModuleSkill(db: SupabaseClient, actorId: string, value
   const prepared = prepareModuleSkill(value);
   // POSITIONING-GATE: a module getting its first Skill (new, or a converted prompt module) needs the explicit choice;
   // a module that already has a Skill ignores it (separate setting card).
-  const isNew = value.expectedUpdatedAt === null || !(await boundSkill(db, value.moduleId));
-  if (isNew && value.socialMediaRelated === undefined) throw new Error('SOCIAL_MEDIA_FLAG_REQUIRED');
-  const flag = isNew && value.socialMediaRelated === true;
+  // The editor sends the choice only for a first Skill, and an exact retry resends it: whenever present, the stated
+  // choice is applied idempotently (never re-derived from the binding a partially committed first try created).
+  const choice = value.socialMediaRelated;
+  if (choice === undefined && (value.expectedUpdatedAt === null || !(await boundSkill(db, value.moduleId))))
+    throw new Error('SOCIAL_MEDIA_FLAG_REQUIRED');
+  const flag = choice === true;
   if (flag && isPositioningWorkflow(prepared.workflow)) throw new Error('SOCIAL_MEDIA_FLAG_POSITIONING_SKILL');
+  // "否" clears a flag a former prompt module may carry, before publishing (the 0219 guard refuses a flagged positioning Skill).
+  if (choice === false && value.expectedUpdatedAt !== null) await clearSocialFlag(db, value.moduleId);
   const model = await db.from('ai_models').select(RUNTIME_MODEL_COLUMNS).eq('id',value.module.model_id).single();
   if(model.error || !model.data) throw new Error('请选择已配置的对话模型');
   const option=runtimeModelOption(model.data,'skill');
@@ -116,6 +121,15 @@ async function boundSkill(db: SupabaseClient, moduleId: string): Promise<boolean
   const row = await db.from('modules').select('skill_id').eq('id', moduleId).maybeSingle();
   if (row.error) throw new Error('Skill 发布未完成，请重新读取模块，检查版本和模型后再发布。');
   return Boolean(row.data?.skill_id);
+}
+
+async function clearSocialFlag(db: SupabaseClient, moduleId: string) {
+  let opened;
+  try { opened = await readSocialMediaFlag(db, moduleId); }
+  catch (error) { if (error instanceof Error && error.message === 'SOCIAL_MEDIA_FLAG_MODULE_NOT_FOUND') return; throw error; }
+  if (!opened.socialMediaRelated) return;
+  await saveSocialMediaFlag(db, { moduleId, socialMediaRelated: false, expectedSocialMediaRelated: true,
+    expectedModuleUpdatedAt: opened.moduleUpdatedAt });
 }
 
 /** Any failure here leaves the new module disabled (never enabled without its flag); the administrator reopens it. */

@@ -41,8 +41,8 @@ function database(options: { flagFails?: boolean; enableFails?: boolean; flagged
         const values = step.values as { social_media_related?: boolean; active?: boolean } | undefined;
         if (values?.social_media_related !== undefined) {
           if (options.flagFails) return resolve({ data: [], error: null });
-          flagged = true; version = '2026-10-13T00:00:01.000Z';
-          return resolve({ data: [{ id: 'm', social_media_related: true, updated_at: version }], error: null });
+          flagged = values.social_media_related; version = '2026-10-13T00:00:01.000Z';
+          return resolve({ data: [{ id: 'm', social_media_related: flagged, updated_at: version }], error: null });
         }
         if (values?.active) return resolve({ data: options.enableFails ? [] : [{ id: 'm' }], error: null });
         return resolve({ data: null, error: null });
@@ -108,14 +108,33 @@ it('refuses flagging a new positioning Skill before publishing', async () => {
   expect(plain.rpc).toHaveBeenCalledOnce();
 });
 
-it('ignores the choice for a module that already has a Skill (its own setting card owns the flag)', async () => {
+it('applies a resent choice for a module whose first publication already bound the Skill (exact retry)', async () => {
   const f = database({ skillBound: true }), input = { ...moduleInput(), expectedUpdatedAt: '2026-10-13T00:00:00.000Z', socialMediaRelated: true };
   await saveModuleSkill(f.db, randomUUID(), input);
-  expect(metadata(f.rpc)).toEqual(input.module);
-  expect(f.updates()).toEqual([]);
+  expect(metadata(f.rpc)).toEqual({ ...input.module, active: false });
+  expect(f.updates().map(step => step.values)).toEqual([expect.objectContaining({ social_media_related: true }),
+    expect.objectContaining({ active: true })]);
+  // A module that already has a Skill and no choice sent keeps its flag untouched (its own setting card owns it).
   const absent = database({ skillBound: true }), unchanged = { ...moduleInput(), expectedUpdatedAt: '2026-10-13T00:00:00.000Z' };
   delete unchanged.socialMediaRelated;
   await expect(saveModuleSkill(absent.db, randomUUID(), unchanged)).resolves.toBeTruthy();
+  expect(absent.updates()).toEqual([]);
+});
+
+it('clears a former prompt module flag before publishing when the choice is No', async () => {
+  const f = database({ flagged: true }), input = { ...moduleInput(), expectedUpdatedAt: '2026-10-13T00:00:00.000Z', socialMediaRelated: false };
+  await saveModuleSkill(f.db, randomUUID(), input);
+  const [clear] = f.updates();
+  expect(clear!.values).toMatchObject({ social_media_related: false });
+  expect(clear!.filters).toEqual(expect.arrayContaining([['social_media_related', true]]));
+  expect(metadata(f.rpc)).toEqual(input.module);
+  // Cleared first, so the 0219 guard never sees a flagged module become a (positioning) Skill.
+  const order = f.steps.filter(step => step.op === 'update').length;
+  expect(order).toBe(1);
+  // Nothing to clear: an unflagged module publishes without a flag write.
+  const plain = database();
+  await saveModuleSkill(plain.db, randomUUID(), { ...input });
+  expect(plain.updates()).toEqual([]);
 });
 
 it('continues an exact retry whose flag was already saved before the response was lost', async () => {
