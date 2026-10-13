@@ -26,7 +26,7 @@ function harness(dispatch: Record<string, unknown> = { dispatched: true, observa
     rotatePrepared: vi.fn(async () => { calls.push('rotate'); return true; }),
     dispatchOnce: vi.fn(async () => { calls.push('dispatch'); return dispatch; }),
     recordReceipt: vi.fn(async () => ({})),
-    finalizeRun: vi.fn(async () => { calls.push('finalize'); return { state: 'settled', closed: calls.includes('cancel') }; }),
+    finalizeRun: vi.fn(async () => { calls.push('finalize'); return { state: 'settled', closed: true }; }),
     requestCancel: vi.fn(async () => { calls.push('cancel'); return {}; }),
   };
   const admin = { rpc: vi.fn(async (name: string, args: Record<string, unknown>) => { calls.push(`${name}:${String(args.p_verdict ?? '')}`); return { data: {}, error: null }; }) };

@@ -41,10 +41,11 @@ export function fusionExecutor(deps: { billing: Billing; admin: SupabaseClient; 
       ? result.error.message : 'FUSION_DATABASE_UNAVAILABLE');
     return result.data as T;
   }
-  /** Settle and close one run. Settlement waits for the verdict; the run closes once its one call settled. */
+  /** Settle, then close the run: its only call already has a verdict, so closing changes no charge
+   * (a call whose cost is still unknown keeps its hold until recovery), and erasure sees no open run. */
   async function settle(runId: string) {
-    const state = await billing.finalizeRun(runId);
-    if (!state.closed && ['settled', 'refunded'].includes(state.state)) await billing.requestCancel(runId);
+    await billing.finalizeRun(runId);
+    await billing.requestCancel(runId);
     return billing.finalizeRun(runId);
   }
   return {

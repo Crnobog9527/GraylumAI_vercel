@@ -129,7 +129,8 @@ it.runIf(staging)('RUNTIME: Fusion group admission, streamed dispatch, saved bod
   const calls = (await db.query('select c.settled_at,c.fusion_verdict,c.charged_delta,r.closed from bill2_calls c join bill2_runs r on r.id=c.run_id where r.fusion_group_id=$1',
     [group.groupId])).rows;
   expect(calls).toHaveLength(2);
-  expect(calls.every(c => c.settled_at && c.fusion_verdict === 'usable' && c.closed && Number(c.charged_delta) >= 1)).toBe(true);
+  for (const call of calls) expect({ settled: Boolean(call.settled_at), verdict: call.fusion_verdict, closed: call.closed,
+    charged: Number(call.charged_delta) >= 1 }).toEqual({ settled: true, verdict: 'usable', closed: true, charged: true });
   expect(await wallet(f.actor)).toBe(1000 - calls.reduce((sum, c) => sum + Number(c.charged_delta), 0));
 });
 
