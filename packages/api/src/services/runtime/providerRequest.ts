@@ -18,12 +18,29 @@ export const STREAMING_FORMATS:ReadonlySet<string>=new Set(['serial-tools-v3-str
 export const REASONING_FORMATS:ReadonlySet<string>=new Set(['serial-tools-v4-stream','agent-turn-v5-stream','serial-tools-v6-reasoning']);
 /** Format of new real free-chat (ordinary) turns: non-streamed, with frozen interactive reasoning. */
 export const FREE_CHAT_REQUEST_FORMAT='serial-tools-v6-reasoning';
+/**
+ * Frozen-context marker of a plain-text turn whose primary reply streams (CHAT-NATIVE-OUTPUT).
+ * It never changes the request format: a marked v2 (Skill) or v6 (free chat) turn sends the same
+ * bytes plus `stream`, and an unmarked turn of any format keeps its original bytes.
+ */
+export const PLAIN_TEXT_STREAM='plain-text-v1';
+/** Where the plain-text stream marker may be frozen: native plain replies, never cards, envelopes or reports. */
+export function plainTextStreamAllowed(context:{providerRequestFormat?:string;nativeOutput?:string;envelopeOrder?:string;
+ reportGeneration?:unknown;matching?:unknown;role?:string;attachedOrganizer?:unknown}):boolean{
+ return Boolean(context.nativeOutput)&&!context.envelopeOrder&&!context.reportGeneration&&!context.matching&&
+  !context.attachedOrganizer&&(context.providerRequestFormat==='serial-tools-v6-reasoning'&&context.role==='ordinary'
+   ||context.providerRequestFormat==='serial-tools-v2'&&context.role==='skill');
+}
+/** True when the frozen context streams its primary reply. */
+export function streamsPrimary(context:{providerRequestFormat?:string;textStream?:string}):boolean{
+ return STREAMING_FORMATS.has(context.providerRequestFormat??'')||context.textStream===PLAIN_TEXT_STREAM;
+}
 /** Interactive Agent turn format (AC-1). Used by new mentor admissions. */
 export const AGENT_TURN_REQUEST_FORMAT='agent-turn-v5-stream';
 
 type FrozenCallPolicy=z.infer<typeof frozenCallPolicy>;
 /** Only the frozen context fields that decide the provider bytes. */
-export type RequestContext={providerRequestFormat?:ProviderRequestFormat;tools:readonly string[];workspaceContext?:boolean;
+export type RequestContext={providerRequestFormat?:ProviderRequestFormat;textStream?:string;tools:readonly string[];workspaceContext?:boolean;
  promptCache?:PromptCachePolicy;network?:string;reasoning?:ReasoningPolicy;attachedOrganizer?:{reasoning?:ReasoningPolicy}};
 
 /** Fail closed for reasoning attached to an older, unmarked request format. */
@@ -46,7 +63,7 @@ export function openRouterRequestBody(request:string,options:{context:RequestCon
  const {context,policy,phase}=options;
  if(!validReasoningFormat(context))throw new Error('RUNTIME_CONTEXT_INVALID');
  const original=JSON.parse(request);
- const format=context.providerRequestFormat,streaming=Boolean(format&&STREAMING_FORMATS.has(format));
+ const format=context.providerRequestFormat,streaming=streamsPrimary(context);
  const requested:Array<{type?:string;function?:{name?:string}}>=original.tools??[];
  // Agent turns may use only the interactive tools their context lists; every
  // older format may use only the owned-source read of a workspace context.

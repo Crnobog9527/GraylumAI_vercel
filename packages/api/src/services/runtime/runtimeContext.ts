@@ -5,7 +5,7 @@ import {frozenReport} from '../report/contract';
 import {z} from 'zod';
 import {promptCachePolicy} from './promptCache';
 import {hostTurnContextSchema,historySelectionSchema} from './hostTurn';
-import {PROVIDER_REQUEST_FORMATS} from './providerRequest';
+import {PLAIN_TEXT_STREAM,PROVIDER_REQUEST_FORMATS,plainTextStreamAllowed} from './providerRequest';
 import {QUESTION_CONTRACT,LEGACY_QUESTION_CONTRACT} from './agentTools';
 import {ASK_QUESTION_TOOL} from '../../shared/agentTurn';
 import {frozenPurposeBudget,FROZEN_OUTPUT_CAP} from './purposeBudgets';
@@ -18,6 +18,7 @@ export const runtimeContext=z.object({
  reportGeneration:frozenReport.optional(),
  mentorText:z.literal('append-card-v1').optional(),
  nativeOutput:z.literal('native-output-v1').optional(),envelopeOrder:z.literal('message-first-v1').optional(),
+ textStream:z.literal(PLAIN_TEXT_STREAM).optional(),
  inputSelection:z.enum(['scope-projection-v1','scope-projection-v2']).optional(),
  hostTurnContext:hostTurnContextSchema.optional(),historySelection:historySelectionSchema.optional(),
  providerRequestFormat:z.enum(PROVIDER_REQUEST_FORMATS).optional(),promptCache:promptCachePolicy.optional(),
@@ -50,6 +51,7 @@ export const runtimeContext=z.object({
  if(context.hostTurnContext?.stepSummary&&(context.input!==STEP_SUMMARY_INPUT||context.hostTurnContext.opening||
    context.tools.includes(ASK_QUESTION_TOOL)||context.attachedOrganizer))
   ctx.addIssue({code:'custom',message:'RUNTIME_STEP_SUMMARY_CONTEXT_INVALID'});
+ if(context.textStream&&!plainTextStreamAllowed(context))ctx.addIssue({code:'custom',message:'RUNTIME_CONTEXT_INVALID'});
  const host = context.hostTurnContext !== undefined;
  if (host !== (context.inputSelection === 'scope-projection-v2') || host !== (context.historySelection !== undefined) ||
      host && (context.role !== 'skill' || context.providerRequestFormat !== 'agent-turn-v5-stream') ||
