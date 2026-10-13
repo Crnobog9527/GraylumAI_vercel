@@ -20,7 +20,7 @@ function memoryStorage(): Storage {
 }
 
 function deps(erase: ResumeDeps['erase']) {
-  return { erase, afterErased: vi.fn(), restore: vi.fn(), resync: vi.fn(), notify: vi.fn(), wait: vi.fn(async () => undefined) };
+  return { erase, leave: vi.fn(), afterErased: vi.fn(), restore: vi.fn(), resync: vi.fn(), notify: vi.fn(), wait: vi.fn(async () => undefined) };
 }
 
 describe('pending conversation deletions', () => {
@@ -61,14 +61,25 @@ describe('resumeConversationErasure', () => {
     expect(d.restore).not.toHaveBeenCalled();
   });
 
-  it('puts the row back with a reason when the deletion is refused or stays busy', async () => {
-    for (const erase of [vi.fn().mockRejectedValue(new Error('CONTENT_NOT_FOUND')),
-      vi.fn().mockRejectedValue(new Error('CONTENT_ERASURE_BUSY'))]) {
-      const d = deps(erase);
-      await expect(resumeConversationErasure(d, id)).resolves.toBe('failed');
-      expect(d.restore).toHaveBeenCalledWith(id);
-      expect(d.notify).toHaveBeenCalledWith(expect.objectContaining({ tone: 'error' }));
-    }
+  it('puts the row back with a reason when the deletion is refused', async () => {
+    const d = deps(vi.fn().mockRejectedValue(new Error('CONTENT_NOT_FOUND')));
+    await expect(resumeConversationErasure(d, id)).resolves.toBe('failed');
+    expect(d.restore).toHaveBeenCalledWith(id);
+    expect(d.notify).toHaveBeenCalledWith(expect.objectContaining({ tone: 'error' }));
+  });
+
+  it('keeps a still-busy deletion hidden and pending: its outcome is unknown', async () => {
+    const d = deps(vi.fn().mockRejectedValue(new Error('CONTENT_ERASURE_BUSY')));
+    await expect(resumeConversationErasure(d, id)).resolves.toBe('pending');
+    expect(d.restore).not.toHaveBeenCalled();
+    expect(d.afterErased).not.toHaveBeenCalled();
+    expect(d.notify).toHaveBeenCalledWith(expect.objectContaining({ tone: 'notice' }));
+  });
+
+  it('leaves the page first when the reload landed on the conversation being deleted', async () => {
+    const d = deps(async () => done);
+    await resumeConversationErasure(d, id);
+    expect(d.leave).toHaveBeenCalledWith(id);
   });
 
   it('treats an already-deleted conversation as done', async () => {

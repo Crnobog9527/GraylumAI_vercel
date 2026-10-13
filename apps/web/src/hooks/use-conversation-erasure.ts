@@ -77,10 +77,10 @@ export function useConversationErasure(leave: (sessionId: string) => void) {
       resuming.add(id);
       store.hide(id);
       void resumeConversationErasure({
-        ...steps, wait: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+        ...steps, leave, wait: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
       }, id).finally(() => resuming.delete(id));
     }
-  }, [steps]);
+  }, [steps, leave]);
 
   const erase = useCallback((sessionId: string) => {
     void utils.opc.conversations.cancel();

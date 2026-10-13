@@ -43,6 +43,8 @@ export function readPending(store: Storage | null, now = Date.now()): string[] {
 }
 
 export type ResumeDeps = {
+  /** Leave the page if it is showing this conversation (the reload may have landed on it). */
+  leave: (sessionId: string) => void;
   erase: (sessionId: string) => Promise<ContentErasureResult>;
   afterErased: (sessionId: string) => void;
   restore: (sessionId: string) => void;
@@ -56,9 +58,11 @@ const BUSY_RETRIES = 5;
 /**
  * After a reload: the row stays hidden and the deletion is sent again (it is idempotent: an already
  * marked conversation returns at once). While the first request still holds the conversation the
- * repeat is busy, so it waits and retries. A real refusal puts the row back with a plain reason.
+ * repeat is busy, so it waits and retries; if it stays busy the outcome is unknown and the row stays
+ * hidden. A real refusal puts the row back with a plain reason.
  */
 export async function resumeConversationErasure(deps: ResumeDeps, sessionId: string) {
+  deps.leave(sessionId);
   for (let attempt = 0; attempt <= BUSY_RETRIES; attempt += 1) {
     try {
       const result = await deps.erase(sessionId);
@@ -70,9 +74,15 @@ export async function resumeConversationErasure(deps: ResumeDeps, sessionId: str
         deps.afterErased(sessionId);
         return 'deleted' as const;
       }
-      if (getErrorMessageText(error).includes('CONTENT_ERASURE_BUSY') && attempt < BUSY_RETRIES) {
-        await deps.wait(1500);
-        continue;
+      if (getErrorMessageText(error).includes('CONTENT_ERASURE_BUSY')) {
+        if (attempt < BUSY_RETRIES) {
+          await deps.wait(1500);
+          continue;
+        }
+        // Still busy: the request from before the reload may yet commit. The outcome is unknown, so the
+        // row stays hidden and the record stays (it expires after ten minutes, or the next load retries).
+        deps.notify({ tone: 'notice', text: '这个对话的删除还在处理中，稍后刷新可查看结果。' });
+        return 'pending' as const;
       }
       deps.restore(sessionId);
       deps.resync();
