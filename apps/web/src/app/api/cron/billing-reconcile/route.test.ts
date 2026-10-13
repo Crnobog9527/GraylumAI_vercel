@@ -13,11 +13,18 @@ const mocks = vi.hoisted(() => ({
   closeExpired: vi.fn(),
   logError: vi.fn(),
   staleRounds: vi.fn(),
+  stripeCard: vi.fn(),
+  stripeClient: vi.fn(),
+  reportStripeCard: vi.fn(),
 }));
 
 vi.mock('@repo/api/src/services/payments/waffoReconciliation', () => ({ reconcileWaffoPayments: mocks.waffo }));
 vi.mock('@repo/api/src/services/payments/waffoTestOperationsClient', () => ({ getWaffoTestOperationsClient: mocks.waffoClient }));
 vi.mock('@repo/api/src/services/runtime/staleChargedRounds', () => ({ findStaleChargedRounds: mocks.staleRounds }));
+vi.mock('@repo/api/src/services/payments/stripeCardReconciliation', () => ({ reconcileStripeCardPayments: mocks.stripeCard }));
+vi.mock('@repo/api/src/services/stripe', () => ({ getStripeClient: mocks.stripeClient }));
+vi.mock('@/lib/payment-alert.mjs', () => ({ reportStripeCardReconciliation: mocks.reportStripeCard,
+  reportPaymentEvidenceConflict: vi.fn() }));
 vi.mock('@repo/api/src/services/payments/waffoCardCheckout', () => ({ closeExpiredWaffoCheckouts: mocks.closeExpired }));
 
 vi.mock('@supabase/supabase-js', () => ({
@@ -81,6 +88,8 @@ describe('/api/cron/billing-reconcile', () => {
     mocks.runDailyBillingReconciliation.mockResolvedValue(dailySuccess);
     mocks.runBillingEngineV15ReadinessAudit.mockResolvedValue(readinessSuccess);
     mocks.staleRounds.mockResolvedValue({ success: true, findings: [], total: 0, truncated: false });
+    mocks.stripeClient.mockReturnValue({ client: 'stripe' });
+    mocks.stripeCard.mockResolvedValue({ success: true, skipped: true, findings: [] });
   });
 
   it('rejects unauthorized invocation before creating a privileged client', async () => {
@@ -203,6 +212,26 @@ describe('/api/cron/billing-reconcile', () => {
     mocks.staleRounds.mockRejectedValue(new Error('STALE_ROUND_SCAN_FAILED'));
     expect(await (await GET(new Request('https://graylum.test/api/cron/billing-reconcile'))).json())
       .toMatchObject({ success: false, staleRounds: { scanFailed: true } });
+  });
+
+  it('runs the Stripe card backstop, alerts on findings, and never blocks the other audits', async () => {
+    const finding = { kind: 'paid_not_delivered', object: 'checkout', externalId: 'cs_1', orderId: 'o-1' };
+    mocks.stripeCard.mockResolvedValue({ success: false, skipped: false, complete: true, repaired: 1, checked: 3, findings: [finding] });
+    const response = await GET(new Request('https://graylum.test/api/cron/billing-reconcile'));
+    expect(response.status).toBe(500);
+    expect(await response.json()).toMatchObject({ stripeCard: { repaired: 1, findings: [finding] }, summary: {} });
+    expect(mocks.stripeCard).toHaveBeenCalledWith({ client: 'service-role' }, { client: 'stripe' }, { alert: expect.any(Function) });
+    expect(mocks.reportStripeCard).toHaveBeenCalledWith([finding]);
+    expect(mocks.cronJob).toHaveBeenCalledWith('billing-reconcile', 'failed', expect.any(Number),
+      expect.stringContaining('Stripe card payments need manual review: 1'), expect.objectContaining({ stripeCard: expect.any(Object) }));
+    mocks.stripeCard.mockRejectedValue(new Error('PAY_COMMON_PROVIDER_SCOPE_UNKNOWN'));
+    expect(await (await GET(new Request('https://graylum.test/api/cron/billing-reconcile'))).json())
+      .toMatchObject({ success: false, stripeCard: { findings: [{ kind: 'scan_failed' }] } });
+    expect(mocks.reportStripeCard).toHaveBeenLastCalledWith([{ kind: 'scan_failed' }]);
+    // No Stripe configuration (e.g. a preview without keys): skipped, not a failure.
+    mocks.stripeClient.mockImplementation(() => { throw new Error('STRIPE_SECRET_KEY missing'); });
+    expect(await (await GET(new Request('https://graylum.test/api/cron/billing-reconcile'))).json())
+      .toMatchObject({ success: true, stripeCard: { skipped: true } });
   });
 
   it('registers one daily UTC reconciliation cron', () => {

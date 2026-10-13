@@ -11,6 +11,9 @@ import { getWaffoTestOperationsClient } from '@repo/api/src/services/payments/wa
 import { closeExpiredWaffoCheckouts } from '@repo/api/src/services/payments/waffoCardCheckout';
 import { describeWaffoFailure } from '@repo/api/src/services/payments/waffoFailure';
 import { findStaleChargedRounds } from '@repo/api/src/services/runtime/staleChargedRounds';
+import { reconcileStripeCardPayments } from '@repo/api/src/services/payments/stripeCardReconciliation';
+import { getStripeClient } from '@repo/api/src/services/stripe';
+import { reportPaymentEvidenceConflict, reportStripeCardReconciliation } from '@/lib/payment-alert.mjs';
 import { validateCronRequest } from '@/lib/cron-auth';
 
 export const runtime = 'nodejs';
@@ -39,6 +42,23 @@ async function runWaffoReconciliation(supabase: SupabaseClient) {
   }
 }
 
+/** PAY-STRIPE-MP: repairs card orders whose webhook was lost; Stripe test mode (staging) only. Unrepaired items alert. */
+async function runStripeCardReconciliation(supabase: SupabaseClient) {
+  let stripe;
+  try { stripe = getStripeClient(); } catch { return { success: true, skipped: true, findings: [] }; }
+  try {
+    const result = await reconcileStripeCardPayments(supabase, stripe,
+      { alert: () => reportPaymentEvidenceConflict('billing-reconcile') });
+    reportStripeCardReconciliation(result.findings);
+    return result;
+  } catch (error) {
+    logger.error('billing', 'stripe_card_reconciliation_failed', { code: error instanceof Error ? error.message : 'UNEXPECTED' });
+    const findings = [{ kind: 'scan_failed' as const }];
+    reportStripeCardReconciliation(findings);
+    return { success: false, skipped: false, findings };
+  }
+}
+
 export async function GET(request: Request) {
   const unauthorizedResponse = validateCronRequest(request, 'billing-reconcile');
   if (unauthorizedResponse) {
@@ -57,15 +77,16 @@ export async function GET(request: Request) {
 
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
     logger.system.cronJob('billing-reconcile', 'started');
-    const [result, readinessAudit, erasureFinancial, waffo, staleRounds] = await Promise.all([
+    const [result, readinessAudit, erasureFinancial, waffo, staleRounds, stripeCard] = await Promise.all([
       runDailyBillingReconciliation(supabase),
       runBillingEngineV15ReadinessAudit(supabase),
       runErasureFinancialReconciliation(supabase),
       runWaffoReconciliation(supabase),
       runStaleRoundReconciliation(supabase),
+      runStripeCardReconciliation(supabase),
     ]);
     const success = result.success && readinessAudit.success && erasureFinancial.success && waffo.success
-      && staleRounds.success;
+      && staleRounds.success && stripeCard.success;
 
     if (!success) {
       logger.system.cronJob(
@@ -75,11 +96,13 @@ export async function GET(request: Request) {
         [...result.mismatches, ...readinessAudit.findings.map((finding) => finding.message),
           ...(erasureFinancial.success ? [] : ['Erasure financial recovery pending']),
           ...(waffo.success ? [] : [`Waffo payments need manual review: ${waffo.findings.length}`]),
-          ...(staleRounds.success ? [] : [`Stale charged rounds need manual review: ${staleRounds.total}`])].join(' | '),
+          ...(staleRounds.success ? [] : [`Stale charged rounds need manual review: ${staleRounds.total}`]),
+          ...(stripeCard.success ? [] : [`Stripe card payments need manual review: ${stripeCard.findings.length}`])].join(' | '),
         {
           erasureFinancial,
           waffo,
           staleRounds,
+          stripeCard,
           mismatches: result.mismatches,
           summary: result.summary,
           readinessAudit: {
@@ -116,6 +139,7 @@ export async function GET(request: Request) {
       erasureFinancial,
       waffo,
       staleRounds,
+      stripeCard,
       timestamp: new Date().toISOString(),
     }, { status: success ? 200 : 500 });
   } catch (error) {
