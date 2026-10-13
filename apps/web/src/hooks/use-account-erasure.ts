@@ -8,6 +8,10 @@ import {
   describeErasureError, isAccountClosedError, isRenewalBlockedError, type AccountErasurePreview,
 } from '@/lib/account-erasure';
 
+export function settledPreview(query: { data?: unknown; isFetching: boolean; error: unknown }) {
+  return query.isFetching || query.error ? undefined : query.data as AccountErasurePreview | undefined;
+}
+
 export type ErasureStep = 'impact' | 'verify' | 'confirm' | 'done';
 const CODE_COOLDOWN_SECONDS = 60;
 
@@ -106,9 +110,11 @@ export function useAccountErasure(options: { email?: string; usesPassword: boole
 
   return {
     open, step, secret, busy, error, codeSent: codeSentAt !== null,
-    preview: preview.data as AccountErasurePreview | undefined,
-    previewLoading: preview.isLoading,
-    previewFailed: Boolean(preview.error),
+    // Only facts from a finished, successful fetch count: a cached preview from an earlier opening must
+    // not offer "继续" while the current facts are loading or after their refresh failed.
+    preview: settledPreview(preview),
+    previewLoading: preview.isFetching,
+    previewFailed: Boolean(preview.error) && !preview.isFetching,
     captchaKey, setCaptchaToken, captchaExpired: () => setError(CAPTCHA_EXPIRED_MESSAGE),
     captchaUnavailable: () => setError('人机验证暂不可用，请稍后重试。'),
     setOpen: reset, setStep, setSecret, sendCode, verify, confirm, openPortal,
