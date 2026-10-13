@@ -135,6 +135,45 @@ export async function fusionGroupCases({db,Client,connectionString,report,create
   assert.equal(runs[bc.calls[0].runId],0,'format_invalid is not charged');
   assert.equal(await charged(db,bad.runs),1);
   assert.equal(await wallet(db,bad.actor),17);
+  // Zero-charge verdict with inconsistent usage evidence still refunds (does not stop on the conflict).
+  const noisy = await group(db,createFixture,{n:1,credits:9});
+  const nc = await claimGroup(db,noisy);
+  await dispatchAll(db,noisy,nc);
+  const nf = noisy.members[0];
+  await record(db,noisy,nf,nc.calls[0],'0.0004');
+  await rpc(db,'bill2_record',noisy.actor,nf.run,nc.calls[0].id,{provider:nf.claimPayload.provider,account:'sandbox',
+    model:nf.claimPayload.model,protocol:nf.claimPayload.protocol,providerId:'generation-second-'+nc.calls[0].id,source:'response',
+    sourceHash:'e'.repeat(64),observedAt:new Date().toISOString(),coverage:'request_total',final:true,cost:'0.0004',currency:'USD',
+    usage:{inputTokens:777,outputTokens:0}}).catch(()=>null);
+  await rpc(db,'fusion_call_verdict',noisy.actor,nc.calls[0].id,'format_invalid');
+  await rpc(db,'bill2_finalize',noisy.actor,nf.run);
+  assert.notEqual((await calls(db,noisy.runs))[0].settled_at,null,'zero-charge verdict settles despite usage conflict');
+  assert.equal(await wallet(db,noisy.actor),9);
+  // A host that never judges a dispatched call: past the call's recovery deadline it ends as no_delivery.
+  const silent = await group(db,createFixture,{n:1,credits:9});
+  const ic = await claimGroup(db,silent);
+  await dispatchAll(db,silent,ic);
+  await record(db,silent,silent.members[0],ic.calls[0],'0.0004');
+  assert.equal((await calls(db,silent.runs))[0].settled_at,null,'inside the recovery window the hold waits for the host');
+  await db.query("UPDATE bill2_calls SET recovery_deadline=now()-interval '1 second' WHERE id=$1",[ic.calls[0].id]);
+  await rpc(db,'bill2_finalize',silent.actor,silent.runs[0]);
+  const ended = (await calls(db,silent.runs))[0];
+  assert.deepEqual([ended.fusion_verdict,ended.settled_at!==null],['no_delivery',true]);
+  assert.equal(await wallet(db,silent.actor),9,'no saved body and no host verdict by the deadline: no_delivery, hold released');
+  // Same, but the response body was saved: billed like usable from known usage, never free.
+  const saved = await group(db,createFixture,{n:1,credits:9});
+  const svc = await claimGroup(db,saved);
+  await dispatchAll(db,saved,svc);
+  const sf = saved.members[0];
+  await rpc(db,'bill2_record',saved.actor,sf.run,svc.calls[0].id,{provider:sf.claimPayload.provider,account:'sandbox',
+    model:sf.claimPayload.model,protocol:sf.claimPayload.protocol,providerId:'generation-'+svc.calls[0].id,source:'response',
+    sourceHash:'c'.repeat(64),observedAt:new Date().toISOString(),coverage:'request_total',final:true,cost:'0.0004',currency:'USD',
+    usage:{inputTokens:400,outputTokens:0},rawBody:'{"choices":[]}'});
+  await db.query("UPDATE bill2_calls SET recovery_deadline=now()-interval '1 second' WHERE id=$1",[svc.calls[0].id]);
+  await rpc(db,'bill2_finalize',saved.actor,saved.runs[0]);
+  const billed = (await calls(db,saved.runs))[0];
+  assert.deepEqual([billed.fusion_verdict,billed.settled_at!==null],['unjudged_saved',true]);
+  assert.equal(await charged(db,saved.runs),1,'saved body without a host verdict is billed from known usage');
   report.checks.push('format_invalid verdict charges zero and releases the full hold; the usable member is charged on its own');
 
   // Content deletion (not account closure) before the verdict keeps the hold and settles nothing.

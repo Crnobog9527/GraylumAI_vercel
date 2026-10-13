@@ -31,7 +31,7 @@ ALTER TABLE public.bill2_calls ADD COLUMN IF NOT EXISTS fusion_verdict text;
 DO $$ BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='bill2_calls_fusion_verdict_check') THEN
     ALTER TABLE public.bill2_calls ADD CONSTRAINT bill2_calls_fusion_verdict_check CHECK (fusion_verdict IS NULL OR fusion_verdict IN
-      ('usable','format_invalid','revision_invalid','no_delivery','erased_before_verdict','user_stopped'));
+      ('usable','format_invalid','revision_invalid','no_delivery','erased_before_verdict','user_stopped','unjudged_saved'));
   END IF;
 END $$;
 ALTER TABLE public.fusion_billing_groups ENABLE ROW LEVEL SECURITY;
@@ -251,8 +251,19 @@ DO $$ DECLARE src text; a3 text; a4 text; BEGIN
     UPDATE bill2_calls SET fusion_verdict='erased_before_verdict' WHERE id=c.id RETURNING * INTO c;
    ELSIF r.cancel_requested OR r.paused_reason='user_stop' THEN
     UPDATE bill2_calls SET fusion_verdict='user_stopped' WHERE id=c.id RETURNING * INTO c;
+   -- No host verdict by the call's recovery deadline: follow the existing BILL2 rule for an
+   -- unresolved dispatched result instead of holding forever. A saved response body is billed like
+   -- usable (known usage, else min(c,U) fallback or cost_pending review); no saved body is no_delivery.
+   ELSIF clock_timestamp()>=coalesce(c.recovery_deadline,c.created_at+interval '24 hours') THEN
+    UPDATE bill2_calls SET fusion_verdict=CASE WHEN EXISTS(SELECT 1 FROM bill2_receipts WHERE call_id=c.id
+      AND payload->>'source'='response' AND payload->>'rawBody' IS NOT NULL
+      AND payload->>'evidenceKind' IS DISTINCT FROM 'transport_observation' AND payload->>'rejectedReason' IS NULL)
+     THEN 'unjudged_saved' ELSE 'no_delivery' END WHERE id=c.id RETURNING * INTO c;
    ELSE CONTINUE;END IF;
   END IF;
+  -- A zero-charge verdict needs no usage: inconsistent usage evidence must not freeze its refund.
+  -- The conflicting receipts stay stored for provider-cost reconciliation.
+  IF c.fusion_verdict IN ('format_invalid','revision_invalid','no_delivery','erased_before_verdict') THEN bad:=false;END IF;
 $x$||a3);
     src:=replace(src,a4,$x$  IF c.provider_rejected OR c.dispatched_at IS NULL OR (r.closed AND r.outcome='confirmed_failure')
    OR c.fusion_verdict IN ('format_invalid','revision_invalid','no_delivery','erased_before_verdict') THEN$x$);
