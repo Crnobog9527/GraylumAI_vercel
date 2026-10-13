@@ -153,7 +153,7 @@ it('keeps the pay button disabled with the server reason when checkout is not re
   } finally { if (!page.isClosed()) await page.close(); }
 }, 30000);
 
-it('explains a subscription with an unsuccessful payment, and points to subscription management', async () => {
+it('explains a subscription with an unsuccessful payment, and points to a support ticket', async () => {
   const old = { currentLevel: 'free', entries: MATRIX.entries.map(item => ({ ...item, allowed: false,
     action: 'resolvePaymentIssue', reasonCode: 'PAYMENT_ATTENTION_REQUIRED',
     safeMessage: '当前订阅存在付款异常，请先处理付款问题后再切换套餐。' })) };
@@ -162,20 +162,20 @@ it('explains a subscription with an unsuccessful payment, and points to subscrip
     await browserExpect(page.getByTestId('report-paywall-pay')).toBeDisabled();
     await browserExpect(page.getByText(/你还有一个付款没有成功的订阅/)).toBeVisible();
     await browserExpect(page.getByText('当前订阅存在付款异常，请先处理付款问题后再切换套餐。')).toHaveCount(0);
-    const manage = page.getByTestId('report-paywall-manage-subscription');
-    await browserExpect(manage).toHaveText('去订阅管理');
-    await browserExpect(manage).toHaveAttribute('href', '/profile?tab=subscription');
+    const ticket = page.getByTestId('report-paywall-support-ticket');
+    await browserExpect(ticket).toHaveText('提交工单');
+    await browserExpect(ticket).toHaveAttribute('href', '/profile?tab=tickets');
     expect(await checkouts(page)).toEqual([]);
     expect(errors).toEqual([]);
   } finally { await page.close(); }
 }, 30000);
 
-it('shows no subscription link for other refusals', async () => {
+it('shows no support link for other refusals', async () => {
   const blocked = { currentLevel: 'free', entries: MATRIX.entries.map(item => entryFor(item.planId, item.billingCycle, false)) };
   const { page, errors } = await open({ matrix: blocked });
   try {
     await browserExpect(page.getByText('当前账号暂时不能购买，请联系客服。')).toBeVisible();
-    await browserExpect(page.getByTestId('report-paywall-manage-subscription')).toHaveCount(0);
+    await browserExpect(page.getByTestId('report-paywall-support-ticket')).toHaveCount(0);
     expect(errors).toEqual([]);
   } finally { await page.close(); }
 }, 30000);

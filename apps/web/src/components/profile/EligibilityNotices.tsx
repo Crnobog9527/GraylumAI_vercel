@@ -1,5 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-import { UNPAID_SUBSCRIPTION_BLOCKS_PURCHASE } from './subscriptionPlanButtonState';
+import { SUPPORT_TICKET_HREF, UNPAID_SUBSCRIPTION_BLOCKS_PURCHASE } from './subscriptionPlanButtonState';
 
 /**
  * Account-wide reasons the plan buttons are disabled, shown once above the plans on the subscription page
@@ -12,6 +12,7 @@ export function EligibilityNotices({ entries }: { entries?: ReadonlyArray<{ reas
     {restore && <p className="mb-4 text-sm">
       已安排到期取消，当前权益保留至到期。请先通过“管理订阅 / 取消续费”恢复续费后再升级套餐。</p>}
     {unpaid && <p className="mb-4 text-sm" role="status" data-testid="profile-unpaid-subscription-notice"
-      style={{ color: 'var(--warning)' }}>{UNPAID_SUBSCRIPTION_BLOCKS_PURCHASE}</p>}
+      style={{ color: 'var(--warning)' }}>{UNPAID_SUBSCRIPTION_BLOCKS_PURCHASE}{' '}
+      <a href={SUPPORT_TICKET_HREF} className="underline" style={{ color: 'var(--text-primary)' }}>提交工单</a></p>}
   </>;
 }

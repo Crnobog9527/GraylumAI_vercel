@@ -25,22 +25,21 @@ export type MembershipPlanButtonState = {
   canCreateCheckout: boolean;
   canChangeSubscriptionPlan: boolean;
   message: string | null;
-  /** Show a way to the subscription page (where the old subscription can be stopped). */
-  manageSubscription?: boolean;
+  /** Show a way to a support ticket (the only path that reliably clears an unpaid subscription). */
+  contactSupport?: boolean;
 };
 
-/** Where an account's subscription is managed or stopped (个人中心 · 订阅). */
-export const SUBSCRIPTION_MANAGEMENT_HREF = '/profile?tab=subscription';
+/** Where an account opens a support ticket (个人中心 · 工单). */
+export const SUPPORT_TICKET_HREF = '/profile?tab=tickets';
 
 /**
  * The server refuses a new purchase while a subscription still has an unsuccessful payment (`resolvePaymentIssue`:
  * Stripe `past_due`, `unpaid`, or `incomplete`, i.e. a failed renewal or a failed first payment), so the user is not
- * charged twice. Say that plainly, true for both cases, and point to where it is stopped.
+ * charged twice. Cancelling in the Stripe portal only takes effect at period end, and eligibility checks the unpaid
+ * state first, so "stop it yourself" would not unblock the purchase; support can settle or stop it. Say that plainly.
  */
 export const UNPAID_SUBSCRIPTION_BLOCKS_PURCHASE = '你还有一个付款没有成功的订阅（例如自动续费扣款失败）。'
-  + '为避免重复扣费，暂时不能购买新的套餐。'
-  // Only Stripe subscriptions have the self-service button; a Waffo one is stopped by support.
-  + '请先到订阅管理里停止它，再重新购买；如果那里没有"管理订阅 / 取消续费"按钮，请提交工单，我们帮你处理。';
+  + '为避免重复扣费，暂时不能购买新的套餐。请提交工单，我们帮你停止这个订阅或补上付款，处理好后就能重新购买。';
 
 export function getPlanEligibilityKey(planId: string, billingCycle: 'monthly' | 'yearly') {
   return `${planId}:${billingCycle}`;
@@ -106,7 +105,7 @@ export function getMembershipPlanButtonState(input: {
       canCreateCheckout: false,
       canChangeSubscriptionPlan: false,
       message: UNPAID_SUBSCRIPTION_BLOCKS_PURCHASE,
-      manageSubscription: true,
+      contactSupport: true,
     };
   }
 

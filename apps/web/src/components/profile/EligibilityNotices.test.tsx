@@ -13,6 +13,7 @@ it('shows the unpaid-subscription explanation once on the subscription page, whe
   const opening = UNPAID_SUBSCRIPTION_BLOCKS_PURCHASE.slice(0, 14);
   expect(opening).toBe('你还有一个付款没有成功的订阅');
   expect(html.split(opening).length - 1).toBe(1);
+  expect(html).toContain('href="/profile?tab=tickets"');
   expect(html).not.toContain('已安排到期取消');
 });
 

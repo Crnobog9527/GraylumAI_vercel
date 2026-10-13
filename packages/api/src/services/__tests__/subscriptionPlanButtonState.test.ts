@@ -123,7 +123,7 @@ describe('getMembershipPlanButtonState', () => {
       canCreateCheckout: false,
       canChangeSubscriptionPlan: false,
       message: UNPAID_SUBSCRIPTION_BLOCKS_PURCHASE,
-      manageSubscription: true,
+      contactSupport: true,
     });
   });
 });
