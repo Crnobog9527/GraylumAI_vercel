@@ -2,10 +2,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type Stripe from 'stripe';
 import type { SupabaseClient } from '@supabase/supabase-js';
-const mocks = vi.hoisted(() => ({ scope: vi.fn(), find: vi.fn(), error: vi.fn() }));
+const mocks = vi.hoisted(() => ({ scope: vi.fn(), find: vi.fn(), error: vi.fn(), monthly: vi.fn() }));
 vi.mock('./stripeCheckoutPersistence', () => ({ resolveStripeScope: mocks.scope }));
 vi.mock('./cardPaymentLookup', () => ({ findCardOrderForPayment: mocks.find }));
 vi.mock('../../lib/logger', () => ({ logger: { error: mocks.error } }));
+vi.mock('./monthlyRefundWebhook', () => ({ reconcileMonthlyRefundForOrder: mocks.monthly }));
 import { handleCardRefund } from './cardRefundWebhook';
 
 const refund = (patch: Record<string, unknown> = {}) => ({ object: 'refund', id: 're_1', charge: 'ch_1', payment_intent: 'pi_1',
@@ -35,6 +36,18 @@ describe('PAY-STRIPE-MP external refunds of card orders', () => {
   beforeEach(() => {
     mocks.scope.mockReset().mockResolvedValue({ mode: 'test', merchant: 'fixture' });
     mocks.find.mockReset().mockResolvedValue(match); mocks.error.mockReset();
+    mocks.monthly.mockReset().mockResolvedValue({ handled: false });
+  });
+  it('records our approved monthly refund of a card subscription through the monthly refund flow (step 4b-2)', async () => {
+    const ours = refund({ id: 're_ours', amount: 5390, metadata: { orderId: 'order', refundIntentId: 'intent' } });
+    mocks.monthly.mockResolvedValue({ handled: true, result: {} });
+    const f = fixture([ours]);
+    await expect(f.run({ refundId: 're_ours' })).resolves.toBe(true);
+    expect(mocks.monthly).toHaveBeenCalledWith(f.db, 'order', 're_ours', f.stripe);
+    expect(f.db.rpc).not.toHaveBeenCalled(); expect(f.alert).not.toHaveBeenCalled();
+    // A refund of ours naming another order is a conflict, never recorded.
+    const other = fixture([refund({ id: 're_ours', metadata: { orderId: 'another', refundIntentId: 'intent' } })]);
+    await expect(other.run({ refundId: 're_ours' })).rejects.toThrow('PAYMENT_EVIDENCE_CONFLICT');
   });
   it('records each succeeded refund of the charge once, oldest first, against the paid period', async () => {
     const f = fixture([refund({ id: 're_2', created: 1792000100, amount: 100 }), refund({ id: 're_1' }),

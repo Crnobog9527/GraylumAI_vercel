@@ -3,6 +3,8 @@ import type Stripe from 'stripe';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { resolveStripeScope } from './stripeCheckoutPersistence';
 import { findCardOrderForPayment } from './cardPaymentLookup';
+import { reconcileMonthlyRefundForOrder } from './monthlyRefundWebhook';
+import type { MonthlyStripe } from './monthlyRefundProvider';
 import { PAYMENT_EVIDENCE_CONFLICT } from './stripeWebhookError';
 import { logger } from '../../lib/logger';
 
@@ -17,8 +19,10 @@ type RefundResult = { state: 'refunded' | 'recorded' | 'partial_review' | 'pack_
  * approve is an external refund fact (Link support, Stripe after 48 hours, a Dashboard refund): each succeeded refund
  * is recorded once by pay_stripe_mp_record_external_refund (0247), which ends the order only when fully refunded.
  * Each refund is classified on its own: ours (our approval flows tag them with refundIntentId) are left to the existing
- * refund path, external ones are recorded here. Returns false when the payment is not a card order (wallet, legacy,
- * off-site) or the event also carries a refund of ours, so the existing path still runs for that one. */
+ * refund path, external ones are recorded here. Our approved monthly refund of a card subscription (step 4b-2) is
+ * recorded here through the monthly refund flow, since the legacy path cannot map a card order (no stored Stripe ids).
+ * Returns false when the payment is not a card order (wallet, legacy, off-site) or the event also carries another
+ * refund of ours (a pack), so the existing path still runs for that one. */
 export async function handleCardRefund(db: SupabaseClient, stripe: RefundStripe, input: { refundId?: string; chargeId?: string },
   alert: () => void = () => {}) {
   const scope = await resolveStripeScope(stripe as unknown as Stripe);
@@ -29,11 +33,18 @@ export async function handleCardRefund(db: SupabaseClient, stripe: RefundStripe,
     if (refund.object !== 'refund' || (input.refundId && refund.id !== input.refundId)) throw new Error(PAYMENT_EVIDENCE_CONFLICT);
   }
   const external = refunds.filter(refund => !refund.metadata?.refundIntentId);
-  if (!external.length) return false;
+  const ours = refunds.filter(refund => refund.metadata?.refundIntentId);
   const chargeId = input.chargeId ?? id(refunds[0]!.charge);
   const paymentIntentId = id(refunds[0]!.payment_intent);
   if (refunds.some(refund => id(refund.charge) !== chargeId)) throw new Error(PAYMENT_EVIDENCE_CONFLICT);
   const match = await findCardOrderForPayment(db, stripe, scope, { chargeId, paymentIntentId });
+  let oursHandled = 0;
+  for (const refund of match ? ours : []) {
+    if (refund.metadata?.orderId !== match!.order.id) throw new Error(PAYMENT_EVIDENCE_CONFLICT);
+    const monthly = await reconcileMonthlyRefundForOrder(db, match!.order.id, refund.id, stripe as unknown as MonthlyStripe);
+    if (monthly.handled) oursHandled++;
+  }
+  if (!external.length) return ours.length > 0 && oursHandled === ours.length;
   if (!match) {
     // A card order whose payment is not recorded yet: Stripe retries until the payment (and its reference) exists,
     // so the refund is never lost and the payment cannot be granted after it.
@@ -52,8 +63,8 @@ export async function handleCardRefund(db: SupabaseClient, stripe: RefundStripe,
     if (recorded.error || !recorded.data) throw new Error('PAY_STRIPE_MP_REFUND_UNAVAILABLE', { cause: recorded.error });
     reportRefund(match.order.id, match.kind, refund.id, recorded.data as RefundResult, alert);
   }
-  // A refund of ours in the same event still goes through its approval flow on the existing path.
-  return external.length === refunds.length;
+  // Another refund of ours in the same event still goes through its approval flow on the existing path.
+  return oursHandled === ours.length;
 }
 
 /** Every refund of the charge; an incomplete list fails the webhook (Stripe retries) instead of acknowledging it. */

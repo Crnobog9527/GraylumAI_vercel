@@ -12,12 +12,13 @@ const orderSchema = z.object({
   payment_channel: nullable, payment_mode: nullable, merchant_namespace: nullable,
   purchase_snapshot: z.unknown(), subscription_id: nullable, source_order_id: nullable,
   fulfilled_at: nullable, updated_at: ref, refund_status: z.string().nullable(),
+  payment_method: nullable, payment_amount_facts: z.unknown(),
 });
 export type PreviewOrder = z.infer<typeof orderSchema>;
 const columns = {
   orders: 'id,user_id,item_type,item_id,billing_cycle,status,payment_status,amount_total,currency,'
     + 'payment_channel,payment_mode,merchant_namespace,purchase_snapshot,subscription_id,source_order_id,'
-    + 'fulfilled_at,updated_at,refund_status:refund_approval->>status',
+    + 'fulfilled_at,updated_at,refund_status:refund_approval->>status,payment_method,payment_amount_facts',
   profiles: 'id,role,status,is_deleted',
   tickets: 'id,user_id,category,is_deleted,created_at,updated_at',
   subscriptions: 'id,user_id,status,payment_channel,payment_mode,merchant_namespace,contract_snapshot,updated_at',

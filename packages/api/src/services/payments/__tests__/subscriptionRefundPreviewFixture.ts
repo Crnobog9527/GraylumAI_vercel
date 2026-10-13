@@ -19,7 +19,7 @@ export function fixture() {
   const order = { id: orderId, user_id: subjectId, item_type: 'membership_plan', item_id: itemId, billing_cycle: 'monthly',
     status: 'completed', payment_status: 'paid', amount_total: 6900, currency: 'usd', payment_channel: 'stripe', payment_mode: 'test',
     merchant_namespace: 'acct_fixture', purchase_snapshot: snapshot, subscription_id: subscriptionId, source_order_id: null,
-    fulfilled_at: paidAt, updated_at: paidAt, refund_approval: null };
+    fulfilled_at: paidAt, updated_at: paidAt, refund_approval: null, payment_method: null, payment_amount_facts: null };
   const tables: Record<string, Row[]> = {
     payment_orders: [order],
     profiles: [actorId, subjectId].map(id => ({ id, role: id === actorId ? 'admin' : 'user', status: 'active', is_deleted: 'false' })),
