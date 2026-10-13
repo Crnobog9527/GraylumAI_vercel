@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { describe, expect, it } from 'vitest';
 import {
-  createAuthUrl, deleteAccount, getAccount, listAccountsByExternalId, readFeedPage, type ClientDeps,
+  createAuthUrl, deleteAccount, getAccount, listAccountsByExternalId, listAllAccounts, readFeedPage, type ClientDeps,
 } from './client';
 import { postForMeApiKey } from './config';
 import { privateHost, publicHttpsUrl } from './http';
@@ -64,6 +64,23 @@ describe('post for me client', () => {
     }
     expect(await deleteAccount(deps([json(404, {})]).deps, 'spc_1')).toEqual({ kind: 'rejected', status: 404 });
     expect(await deleteAccount(deps([json(200, { success: true })]).deps, 'spc_1')).toEqual({ kind: 'ok', value: true });
+  });
+
+  it('pages through every matching account', async () => {
+    const acct = (id: string) => ({ id, platform: 'facebook', status: 'connected', external_id: EXTERNAL });
+    const first = deps([json(200, { data: Array.from({ length: 100 }, (_, i) => acct(`spc_${i}`)),
+      meta: { total: 130, offset: 0, limit: 100 } })]);
+    const p1 = await listAccountsByExternalId(first.deps, EXTERNAL);
+    expect(first.calls[0]!.url).toContain(`limit=100&offset=0&external_id=${encodeURIComponent(EXTERNAL)}`);
+    expect(p1.kind === 'ok' && p1.value.nextOffset).toBe(100);
+    const second = deps([json(200, { data: Array.from({ length: 30 }, (_, i) => acct(`spc_x${i}`)),
+      meta: { total: 130, offset: 100, limit: 100 } })]);
+    const p2 = await listAccountsByExternalId(second.deps, EXTERNAL, 100);
+    expect(p2.kind === 'ok' && [p2.value.accounts.length, p2.value.nextOffset]).toEqual([30, null]);
+    // A page that does not answer the offset asked for is not trusted.
+    expect(await listAllAccounts(deps([json(200, { data: [], meta: { total: 5, offset: 0, limit: 100 } })]).deps, 100))
+      .toMatchObject({ kind: 'failed', reason: 'RESPONSE_SHAPE' });
+    expect(await listAllAccounts(deps([json(200, { data: [] })]).deps)).toMatchObject({ kind: 'failed' });
   });
 
   it('refuses malformed identifiers before calling', async () => {

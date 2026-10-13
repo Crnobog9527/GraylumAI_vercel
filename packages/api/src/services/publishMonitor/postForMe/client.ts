@@ -87,14 +87,39 @@ export function getAccount(deps: ClientDeps, id: string): Promise<Outcome<PostFo
   });
 }
 
-/** Accounts carrying one exact external_id (used to find what an attempt imported, plan §4.1). */
-export function listAccountsByExternalId(deps: ClientDeps, externalId: string): Promise<Outcome<PostForMeAccount[]>> {
-  if (!EXTERNAL_ID.test(externalId)) throw new Error('POSTFORME_EXTERNAL_ID_INVALID');
-  const query = new URLSearchParams({ external_id: externalId, limit: '100' });
+export type AccountPage = { accounts: PostForMeAccount[]; nextOffset: number | null };
+const PAGE = 100;
+const accountPage = z.object({
+  data: z.array(accountSchema).max(PAGE),
+  meta: z.object({ total: z.number().int().nonnegative(), offset: z.number().int().nonnegative(),
+    limit: z.number().int().positive() }).passthrough(),
+}).passthrough();
+
+function listPage(deps: ClientDeps, offset: number, externalId?: string): Promise<Outcome<AccountPage>> {
+  if (!Number.isSafeInteger(offset) || offset < 0) throw new Error('POSTFORME_OFFSET_INVALID');
+  const query = new URLSearchParams({ limit: String(PAGE), offset: String(offset) });
+  if (externalId) query.set('external_id', externalId);
   return call(deps, { method: 'GET', path: `/social-accounts?${query}` }, json => {
-    const parsed = z.object({ data: z.array(accountSchema).max(100) }).passthrough().safeParse(json);
-    return parsed.success ? parsed.data.data.map(account) : null;
+    const parsed = accountPage.safeParse(json);
+    if (!parsed.success || parsed.data.meta.offset !== offset) return null;
+    const next = offset + parsed.data.data.length;
+    return { accounts: parsed.data.data.map(account),
+      nextOffset: parsed.data.data.length > 0 && next < parsed.data.meta.total ? next : null };
   });
+}
+
+/**
+ * Accounts carrying one exact external_id (what an attempt imported, plan §4.1), one page at a time;
+ * callers keep calling with nextOffset until it is null, so no imported account is left unmanaged.
+ */
+export function listAccountsByExternalId(deps: ClientDeps, externalId: string, offset = 0): Promise<Outcome<AccountPage>> {
+  if (!EXTERNAL_ID.test(externalId)) throw new Error('POSTFORME_EXTERNAL_ID_INVALID');
+  return listPage(deps, offset, externalId);
+}
+
+/** Every account in the project, one page at a time (daily orphan sweep, plan §4.1). */
+export function listAllAccounts(deps: ClientDeps, offset = 0): Promise<Outcome<AccountPage>> {
+  return listPage(deps, offset);
 }
 
 export type AuthUrlInput = { platform: PostForMePlatform; externalId: string; permissions: Array<'feeds' | 'posts'>;
