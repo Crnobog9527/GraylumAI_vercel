@@ -71,7 +71,8 @@ Owner 2026-10-12 先批准过 11 页的版本（原话：「同意：根路径�
 ### 3.3 首页与繁体枢纽页（已批准）
 
 - 简体首页 `/`：
-  - Title（给搜索引擎）：`Graylum – AI 自媒体工具：定位、选题、写内容的 AI 自媒体陪跑教练`，一次覆盖"自媒体 / AI 自媒体 / 自媒体 AI 工具"三种真实写法。
+  - Title（给搜索引擎）：`AI 自媒体陪跑教练｜从零开始，教你做好自媒体`（Owner 2026-10-13 选定，取代 10-12 的 `Graylum – AI 自媒体工具：定位、选题、写内容的 AI 自媒体陪跑教练`）。搜索结果上方已单独显示网站名称 Graylum，标题不再放品牌名；前半句是产品称呼，后半句写新手想要的结果，不用“定位、选题”这类新手看不懂的词。
+  - Description：`从制定账号策略到分析内容表现，Graylum 会持续复盘数据、找出增长机会、给出具体优化建议。不懂运营的新手，也能用专业的方法做好自媒体。`（Owner 2026-10-13 选定）。差异点放在“看数据、做复盘、给优化建议”，不放 GPT 也能做的定位和写文案。其中复盘数据的说法要有上线前验收通过的负责任务：Owner 同日决定 SOCIAL-SYNC 在上线前完成，排期和负责任务以 Master Plan 第 2.1 节为准；若上线前未验收，按该节删掉这部分说法。
   - H1（给用户）：`你的 AI 自媒体陪跑教练`（Owner 2026-10-12 选定）。
   - "自媒体"（美国规划师 100–1K/月，难度 59.7，维基和百度百科占前两位）只作长期词自然出现在 Title 和首屏，不指望早期排名。
 - 繁体枢纽页 `/zh-tw/`：按"第二个首页"做，核心词 **自媒體**（规划师：台湾 1K–10K），页内回答"自媒體是什麼"（台湾 1K–10K）。Title 带"自媒體"和"AI 自媒體"；H1 `你的 AI 自媒體陪跑教練`。所有繁体内页用"自媒體"做锚文本回链它。"自媒體經營"一族归 `/zh-tw/zimeiti-jingying`，枢纽页不抢这个词，避免两页争同一个词。全部用台湾用语（社群、小編、短影音、IG 經營），不用香港说法（社交媒體、KOL、數碼營銷）。
@@ -91,12 +92,14 @@ Owner 2026-10-12 先批准过 11 页的版本（原话：「同意：根路径�
 4. 同一内容只有一个地址：根路径直接渲染首页，不再保留 `/landing` 作为第二地址（`/landing` 301 到 `/`）。
 5. 分页、筛选、排序参数一律 `noindex` 或 canonical 回主地址；`utm_*` 参数不进 canonical。
 6. 404 返回真实 404 状态码，不软 404。
+7. 公开分享页或其他由用户内容生成的公开页（以后如果做）：失效、删除或不再公开时返回真实 404（永久删除可用 410），不要 301 / 302 跳到首页，也不要返回 200 加"内容不存在"（会被当成软 404 或重复页面）。（Owner 2026-10-13 要求）
+8. 站内搜索结果页（以后如果做，带 `?q=` 等参数）按本节第 5 条处理：一律 `noindex`，不进 sitemap，也不在 robots.txt 里 Disallow（理由同第 11 节：要让谷歌读到 `noindex`）。（Owner 2026-10-13 要求）
 
 ## 5. 元数据（统一由 `generateMetadata` 生成，不允许页面自己拼）
 
 | 字段 | 规则 |
 | --- | --- |
-| `title` | 核心词放最前；英文 ≤ 60 字符，中文 ≤ 30 个汉字；格式 `核心词 – 一句话承诺 \| Graylum`；首页 `Graylum – <核心词>...` |
+| `title` | 核心词放最前；英文 ≤ 60 字符，中文 ≤ 30 个汉字；格式 `核心词 – 一句话承诺 \| Graylum`；首页按第 3.3 节，不带品牌后缀 |
 | `description` | 含核心词 + 用户得到什么 + 行动引导；英文 120–155 字符，中文 60–80 字 |
 | `alternates.canonical` | 绝对地址，自己指向自己 |
 | `alternates.languages` | 见第 3.1 节 hreflang 规则 |
@@ -175,7 +178,7 @@ sitemap：`app/sitemap.ts` 生成，分语言、含 `lastModified`、只含可�
 AI 搜索引用的来源主要是：① 谷歌/必应里本来就排得上的页面；② 高权威第三方页面里对品牌的描述。所以：
 
 1. 先做好搜索排名，再谈 GEO。
-2. 全站统一一句话定义（出现在首页、About、`Organization.description`、所有第三方目录简介）。中文版由落地页文案任务定稿后固定；英文版（`/en` 上线时用）：`Graylum is an AI social media strategist that helps beginners find their positioning, decide what to post each week, and write the content.`
+2. 全站统一一句话定义（出现在首页、About、`Organization.description`、所有第三方目录简介）。中文版（Owner 2026-10-13 选定）：`Graylum 是 AI 自媒体陪跑教练，像专业运营一样帮你看数据、做复盘、给出优化建议。`；繁体：`Graylum 是 AI 自媒體陪跑教練，像專業經營顧問一樣幫你看數據、做檢討、給出優化建議。`；代码里只在 `apps/web/src/lib/seo/site.ts` 的 `ONE_LINE_DEFINITION` 定义一次。其中“看数据、做复盘”和首页摘要一样，要有上线前验收通过的负责任务（Master Plan 第 2.1 节）；英文版（`/en` 上线时用）：`Graylum is an AI social media strategist that helps beginners find their positioning, decide what to post each week, and write the content.`
 3. 每页首屏结论段写成"问题 → 直接答案 → 可核对的要点"，用数字、步骤、清单。
 4. 引用可靠来源（平台官方帮助页、公开报告）并标出处。
 5. About 页写清公司（Grayscale Luminary LLC，怀俄明州）、创始人、联系方式；法律页齐全（条款文字由 Owner 用第三方软件生成）。

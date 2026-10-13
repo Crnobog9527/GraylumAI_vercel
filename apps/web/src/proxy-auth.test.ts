@@ -38,6 +38,19 @@ describe('proxy login requirement by host', () => {
     });
   });
 
+  it('sends an unverified user to the verify page without the email in the URL', async () => {
+    getUser.mockResolvedValue({ data: { user: { email: 'a+b@example.com', email_confirmed_at: null } } });
+    const cases = [
+      ['https://auth-staging.graylum.com/profile?tab=x', 'https://auth-staging.graylum.com/verify-email?redirect=%2Fprofile%3Ftab%3Dx'],
+      ['https://auth-staging.graylum.com/login?redirect=%2Fchat', 'https://auth-staging.graylum.com/verify-email?redirect=%2Fchat'],
+      ['http://localhost:3000/profile', 'http://localhost:3000/verify-email?redirect=%2Fprofile'],
+      ['http://localhost:3000/login?redirect=%2Fchat', 'http://localhost:3000/verify-email?redirect=%2Fchat'],
+    ];
+    for (const [from, location] of cases) {
+      expect(await get(from)).toEqual({ status: 307, location });
+    }
+  });
+
   it('keeps public pages open on the staging domain', async () => {
     for (const path of ['/login', '/verify-email', '/landing', '/forgot-password', '/reset-password']) {
       expect((await get(`https://auth-staging.graylum.com${path}`)).status).toBe(200);
