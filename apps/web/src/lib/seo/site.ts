@@ -14,6 +14,13 @@ export const DEFAULT_OG_IMAGE = '/og/default.png';
 
 export type SiteLocale = 'zh-Hans' | 'zh-TW';
 
+// The one-line definition shared by the About page and Organization.description (SEO_GEO_SPEC
+// section 12, item 2; Owner 2026-10-13).
+export const ONE_LINE_DEFINITION: Record<SiteLocale, string> = {
+  'zh-Hans': 'Graylum 是 AI 自媒体陪跑教练，像专业运营一样帮你看数据、做复盘、给出优化建议。',
+  'zh-TW': 'Graylum 是 AI 自媒體陪跑教練，像專業經營顧問一樣幫你看數據、做檢討、給出優化建議。',
+};
+
 type LocaleConfig = {
   // Path prefix for this language; the default language lives at the root.
   prefix: string;

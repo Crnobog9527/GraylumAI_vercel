@@ -61,11 +61,11 @@ describe('verify page reason', () => {
     expect(VERIFY_REASON_MESSAGES.signup).toContain('重复注册不会修改原来的密码');
   });
 
-  it('builds encoded paths and omits an empty email', () => {
-    expect(buildVerifyEmailPath('a+b@example.test', '/profile?x=1', 'signup'))
-      .toBe('/verify-email?email=a%2Bb%40example.test&redirect=%2Fprofile%3Fx%3D1&reason=signup');
-    expect(buildVerifyEmailPath('', '/profile', 'expired')).toBe('/verify-email?redirect=%2Fprofile&reason=expired');
-    expect(buildVerifyEmailPath('a@example.test', '/')).toBe('/verify-email?email=a%40example.test&redirect=%2F');
+  it('builds encoded paths that never carry the email', () => {
+    expect(buildVerifyEmailPath('/profile?x=1', 'signup')).toBe('/verify-email?redirect=%2Fprofile%3Fx%3D1&reason=signup');
+    expect(buildVerifyEmailPath('/profile', 'expired')).toBe('/verify-email?redirect=%2Fprofile&reason=expired');
+    expect(buildVerifyEmailPath('/')).toBe('/verify-email?redirect=%2F');
+    expect(buildVerifyEmailPath('/profile?tab=security')).not.toMatch(/email=|@/);
   });
 });
 

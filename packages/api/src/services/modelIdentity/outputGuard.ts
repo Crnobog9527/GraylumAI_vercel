@@ -1,5 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-import { BRAND_REPLY_EN, BRAND_REPLY_ZH, BRAND_REPLY_ZH_HANT, frozenBrandIdentity } from './brandIdentity';
+import { BRAND_REPLY_EN, BRAND_REPLY_ZH, BRAND_REPLY_ZH_HANT } from './brandIdentity';
 import { questionCardSchema, questionToolCardSchema } from '../../shared/agentTurn';
 
 /**
@@ -169,20 +169,4 @@ export function redactIdentitySummary(summary: string) {
   const redacted = Object.fromEntries(Object.entries(record).map(([key, item]) =>
     [key, (key === 'message' || key === 'summary') && typeof item === 'string' ? redactModelIdentity(item) : item]));
   return JSON.stringify(redacted) === JSON.stringify(record) ? summary : JSON.stringify(redacted);
-}
-
-/**
- * Workbench dialogue replies (review P1): the same replacement as the runtime, decided from the frozen
- * system message (the identity instruction leads it when the switch was on). Other purposes produce the
- * artifact and are never rewritten.
- */
-export function redactWorkbenchReply(purpose: string | undefined, systemContent: string, text: string, maxLength: number) {
-  if (purpose !== 'reply' || !frozenBrandIdentity(systemContent)) return text;
-  const redacted = redactModelIdentity(text);
-  if (redacted.length <= maxLength) return redacted;
-  // The brand reply is longer than most leaks; never let it push a valid reply past the receipt limit
-  // (a failed receipt would leave a dispatched, reserved generation unsettled — review P1).
-  let out = '';
-  for (const char of redacted) { if (out.length + char.length > maxLength) break; out += char; }
-  return out;
 }

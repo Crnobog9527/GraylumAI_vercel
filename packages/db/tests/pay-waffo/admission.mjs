@@ -17,6 +17,10 @@ export async function admissionCases({ admin, service, connect }) {
       membership_plan_id,billing_cycle,is_current,offer_kind,price_usage) VALUES($1,'fixture','test','price',$2,$3,$4,true,$5,$6)`,
     [channel,`price_${channel}_${usage}_${offer}`,plan,cycle,offer,usage]);
   }
+  // Card first Gold month = standard monthly subscription price + this one-time coupon (0222).
+  await admin.query(`INSERT INTO payment_provider_refs(channel,merchant_namespace,mode,object_type,external_id,
+    membership_plan_id,billing_cycle,is_current,offer_kind,price_usage) VALUES('stripe','fixture','test','coupon',
+    'coupon_first_month',$1,'monthly',true,'gold_first30','subscription')`,[plan]);
   const digests = (digest = 'c'.repeat(64)) => [{kind:'email',key_version:'test-v1',digest}];
   const buy = (db,user,opts={}) => db.query(`SELECT o.* FROM pay_waffo_create_purchase(
     $1,'membership_plan',$2,$3,$4,$5,'fixture',$6,$7,'terms-v1',$8) o`,
@@ -65,6 +69,8 @@ export async function admissionCases({ admin, service, connect }) {
   assert.equal(order.entitlement_term,'month'); assert.equal(order.stripe_subscription_id,null);
   assert.equal(order.payment_channel,'stripe'); assert.equal(order.stripe_managed_payments,null);
   assert.equal(order.purchase_snapshot.tax_behavior,'exclusive');
+  assert.deepEqual([order.purchase_snapshot.price,order.purchase_snapshot.discount],['49.00','0.00'],
+    'wallet first month stays a one-time 49 price');
   assert.equal((await buy(service,order.user_id)).rows[0].id,order.id);
   await assert.rejects(()=>buy(service,order.user_id,{method:'card'}),/PURCHASE_PENDING/);
   await assert.rejects(()=>service.query('UPDATE payment_orders SET qualification_state=\'released\' WHERE id=$1',[order.id]),

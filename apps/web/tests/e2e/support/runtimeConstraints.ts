@@ -37,13 +37,5 @@ export function probeShowsRegionRestriction(probe: { status: number; body: strin
 }
 
 export function isRegionRestrictionIssue(issue: FlowIssue) {
-  if (hasRegionRestrictionMessage(issue.message)) {
-    return true;
-  }
-
-  return (
-    issue.url?.includes('/api/ai/stream') === true &&
-    issue.source === 'response' &&
-    issue.status === 400
-  );
+  return hasRegionRestrictionMessage(issue.message);
 }
