@@ -200,25 +200,6 @@
       "count": 1
     }
   },
-  "src/services/__tests__/billing.security.test.ts": {
-    "@typescript-eslint/no-explicit-any": {
-      "count": 5
-    },
-    "@typescript-eslint/no-unused-vars": {
-      "count": 1
-    },
-    "prefer-const": {
-      "count": 1
-    }
-  },
-  "src/services/__tests__/billing.test.ts": {
-    "@typescript-eslint/no-explicit-any": {
-      "count": 1
-    },
-    "@typescript-eslint/no-unused-vars": {
-      "count": 2
-    }
-  },
   "src/services/__tests__/billingReconciliation.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 2
@@ -334,17 +315,6 @@
   "src/services/bill2/upgrade.integration.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 5
-    },
-    "@typescript-eslint/no-unused-vars": {
-      "count": 1
-    }
-  },
-  "src/services/billing.ts": {
-    "@typescript-eslint/no-explicit-any": {
-      "count": 5
-    },
-    "@typescript-eslint/no-unsafe-function-type": {
-      "count": 6
     },
     "@typescript-eslint/no-unused-vars": {
       "count": 1
