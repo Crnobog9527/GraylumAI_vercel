@@ -74,3 +74,23 @@ export function usageUnits(value: unknown): string | null {
   const textValue = typeof value === 'number' && Number.isFinite(value) ? String(value) : value;
   return typeof textValue === 'string' && DECIMAL.test(textValue) ? textValue : null;
 }
+
+/** Non-public targets. IPv6 literals are refused outright (mapped, unspecified, ULA, link-local, ...). */
+export function nonPublicHost(hostname: string): boolean {
+  // `localhost.` and `foo.internal.` are the same hosts as without the DNS root dot.
+  const host = hostname.toLowerCase().replace(/\.+$/, '');
+  if (host.startsWith('[') || host.includes(':')) return true;
+  // IANA special-use and common private suffixes: never public pages.
+  const special = ['localhost', 'local', 'internal', 'arpa', 'test', 'invalid', 'example', 'onion', 'lan', 'home', 'corp', 'intranet', 'private', 'alt'];
+  if (special.some(suffix => host === suffix || host.endsWith(`.${suffix}`))) return true;
+  if (!host.includes('.')) return true;
+  const v4 = host.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+  if (!v4) return false;
+  const [a, b] = [Number(v4[1]), Number(v4[2])];
+  const c = Number(v4[3]);
+  // IANA special-purpose blocks that are not globally reachable (plus multicast and reserved 224/3).
+  return a === 0 || a === 10 || a === 127 || a >= 224 || (a === 169 && b === 254) || (a === 192 && b === 168)
+    || (a === 172 && b >= 16 && b <= 31) || (a === 100 && b >= 64 && b <= 127) || (a === 198 && (b === 18 || b === 19))
+    || (a === 192 && b === 0 && (c === 0 || c === 2)) || (a === 198 && b === 51 && c === 100) || (a === 203 && b === 0 && c === 113)
+    || (a === 192 && b === 88 && c === 99);
+}

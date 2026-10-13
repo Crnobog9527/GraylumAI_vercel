@@ -6,7 +6,7 @@
 // anti-bot or login options are ever requested. `proxy: 'basic'` pins one credit: the default `auto`
 // retries hard targets through the 5-credit enhanced proxy.
 import { clip, clipBytes, count, text, timestamp } from './fields';
-import { exchange, usageUnits } from './http';
+import { exchange, nonPublicHost, usageUnits } from './http';
 import type { ResearchCallResult, VendorDeps, VendorRequest } from './types';
 
 export const FIRECRAWL_SCRAPE_URL = 'https://api.firecrawl.dev/v1/scrape';
@@ -15,32 +15,13 @@ export const FIRECRAWL_ROUTE = 'firecrawl:scrape:markdown';
 export const MAX_MARKDOWN_BYTES = 20_000;
 const PAGE_FIELDS = ['title', 'publishedAt', 'language', 'markdown'] as const;
 
-/** Non-public targets. IPv6 literals are refused outright (mapped, unspecified, ULA, link-local, ...). */
-function privateHost(hostname: string): boolean {
-  // `localhost.` and `foo.internal.` are the same hosts as without the DNS root dot.
-  const host = hostname.toLowerCase().replace(/\.+$/, '');
-  if (host.startsWith('[') || host.includes(':')) return true;
-  // IANA special-use and common private suffixes: never public pages.
-  const special = ['localhost', 'local', 'internal', 'arpa', 'test', 'invalid', 'example', 'onion', 'lan', 'home', 'corp', 'intranet', 'private', 'alt'];
-  if (special.some(suffix => host === suffix || host.endsWith(`.${suffix}`))) return true;
-  if (!host.includes('.')) return true;
-  const v4 = host.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
-  if (!v4) return false;
-  const [a, b] = [Number(v4[1]), Number(v4[2])];
-  const c = Number(v4[3]);
-  // IANA special-purpose blocks that are not globally reachable (plus multicast and reserved 224/3).
-  return a === 0 || a === 10 || a === 127 || a >= 224 || (a === 169 && b === 254) || (a === 192 && b === 168)
-    || (a === 172 && b >= 16 && b <= 31) || (a === 100 && b >= 64 && b <= 127) || (a === 198 && (b === 18 || b === 19))
-    || (a === 192 && b === 0 && (c === 0 || c === 2)) || (a === 198 && b === 51 && c === 100) || (a === 203 && b === 0 && c === 113)
-    || (a === 192 && b === 88 && c === 99);
-}
 
 /** Public http(s) page without credentials; PDFs are refused before any request (they cost extra). */
 export function buildFirecrawlRequest(rawUrl: string): { request: VendorRequest; url: string } | { reason: string } {
   let url: URL;
   try { url = new URL(rawUrl.trim()); } catch { return { reason: 'INVALID_URL' }; }
   if (url.protocol !== 'https:' && url.protocol !== 'http:') return { reason: 'INVALID_URL' };
-  if (url.username || url.password || privateHost(url.hostname) || url.href.length > 2000) return { reason: 'INVALID_URL' };
+  if (url.username || url.password || nonPublicHost(url.hostname) || url.href.length > 2000) return { reason: 'INVALID_URL' };
   if (/\.pdf$/i.test(url.pathname)) return { reason: 'PDF_NOT_SUPPORTED' };
   url.hash = '';
   return { url: url.href, request: { method: 'POST', url: FIRECRAWL_SCRAPE_URL, body: {

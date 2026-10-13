@@ -3,7 +3,7 @@
 // query, a fixed mode. Only keywords leave Graylum (plan §4.2); results are for this user only and
 // are never cached for another user (Parallel customer terms §2(b)).
 import { clip, list, text, timestamp } from './fields';
-import { exchange, usageUnits } from './http';
+import { exchange, nonPublicHost, usageUnits } from './http';
 import type { ResearchCallResult, ResearchItem, VendorDeps, VendorRequest } from './types';
 
 export const PARALLEL_SEARCH_URL = 'https://api.parallel.ai/v1/search';
@@ -41,13 +41,14 @@ export function parallelUsage(json: unknown): string | null {
   return usageUnits((entries[0] as { count?: unknown }).count);
 }
 
-/** A result link the user can open: trimmed, absolute http(s), no credentials. */
+/** A result link the user can open: trimmed, absolute http(s), no credentials, public host. */
 function publicHttpUrl(value: string | undefined): string | undefined {
   const trimmed = value?.trim();
   if (!trimmed) return undefined;
   try {
     const url = new URL(trimmed);
-    return (url.protocol === 'https:' || url.protocol === 'http:') && !url.username && !url.password ? url.href : undefined;
+    return (url.protocol === 'https:' || url.protocol === 'http:') && !url.username && !url.password && !nonPublicHost(url.hostname)
+      ? url.href : undefined;
   } catch { return undefined; }
 }
 

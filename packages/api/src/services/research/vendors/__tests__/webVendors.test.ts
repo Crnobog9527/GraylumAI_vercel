@@ -47,7 +47,7 @@ describe('official usage parsing', () => {
 describe('callParallel', () => {
   it('sends only the keyword query in the tested shape', async () => {
     const calls: RecordedCall[] = [];
-    const body = { results: [{ url: 'https://a.example/x', title: 'A', excerpts: ['摘要'], publish_date: '2026-09-01' }],
+    const body = { results: [{ url: 'https://a.example.com/x', title: 'A', excerpts: ['摘要'], publish_date: '2026-09-01' }],
       usage: [{ name: 'sku_search', count: 1 }] };
     const result = await callParallel('露营装备 推荐', deps(jsonFetch(200, body, calls)));
     expect(JSON.parse(String(calls[0].init.body))).toEqual({
@@ -58,12 +58,12 @@ describe('callParallel', () => {
     expect(JSON.parse(String(calls[1].init.body)).mode).toBe('advanced');
     expect(calls[0].init.headers).toMatchObject({ 'x-api-key': 'test-key' });
     expect(result).toMatchObject({ outcome: 'ok', usage: { unit: 'sku_search', units: '1' } });
-    expect(result.items[0]).toEqual({ url: 'https://a.example/x',
+    expect(result.items[0]).toEqual({ url: 'https://a.example.com/x',
       fields: { title: 'A', excerpt: '摘要', publishedAt: '2026-09-01T00:00:00.000Z' }, missing: [] });
   });
 
   it('keeps a missing usage field as null on a successful answer', async () => {
-    const result = await callParallel('q', deps(jsonFetch(200, { results: [{ url: 'https://a.example', title: 'A' }] })));
+    const result = await callParallel('q', deps(jsonFetch(200, { results: [{ url: 'https://a.example.com', title: 'A' }] })));
     expect(result).toMatchObject({ outcome: 'ok', usage: { units: null } });
     expect(result.items[0].missing).toEqual(['excerpt', 'publishedAt']);
   });
@@ -73,10 +73,11 @@ describe('callParallel', () => {
       .toMatchObject({ outcome: 'ok', reason: 'NO_RESULTS', items: [], usage: { units: '1' } });
     expect(await callParallel('q', deps(jsonFetch(200, { results: [{}, { title: 'no url' }], usage: [{ name: 'sku_search', count: 1 }] }))))
       .toMatchObject({ outcome: 'failed', reason: 'EMPTY_OR_UNRECOGNIZED', items: [] });
-    expect(await callParallel('q', deps(jsonFetch(200, { results: [{ url: '   ' }, { url: 'not a URL' }, { url: 'javascript:alert(1)' }] }))))
+    expect(await callParallel('q', deps(jsonFetch(200, { results: [{ url: '   ' }, { url: 'not a URL' }, { url: 'javascript:alert(1)' },
+      { url: 'http://localhost/' }, { url: 'http://127.0.0.1/' }, { url: 'https://foo.test/' }] }))))
       .toMatchObject({ outcome: 'failed', reason: 'EMPTY_OR_UNRECOGNIZED' });
-    const mixed = await callParallel('q', deps(jsonFetch(200, { results: [{}, { url: ' https://a.example ', title: 'A' }] })));
-    expect(mixed.items.map(item => item.url)).toEqual(['https://a.example/']);
+    const mixed = await callParallel('q', deps(jsonFetch(200, { results: [{}, { url: ' https://a.example.com ', title: 'A' }] })));
+    expect(mixed.items.map(item => item.url)).toEqual(['https://a.example.com/']);
   });
 
   it('treats an empty 200 body as unknown for every supplier', async () => {
