@@ -117,11 +117,12 @@ export function stoppedCompletion(options: RuntimeExecutorOptions, billing: Retu
       &&organized.choices[0]?.finish_reason==='stop'&&!terminalAgentReplyFailure(organized,true)
       ?organized.choices[0]?.message?.content:undefined;
     // MODEL-IDENTITY-GUARD: the stop position counts the redacted text the client was shown.
-    body=runtimeIdentityGuard(frozenBrandIdentity(context.instructions)).body(body);
+    const identity=runtimeIdentityGuard(frozenBrandIdentity(context.instructions));
+    body=identity.body(body);
     let result=valid?stoppedResult({executionId,format:agent?'agent':step?'step':'plain',body,
       appendCard:Boolean(context.mentorText),stopAt:execution.stop!.stopAt,source:execution.stop?.source,expectedSource:source,
       capacityLimited,primaryComplete:choice?.finish_reason!=='length',attachedOrganizer:Boolean(context.attachedOrganizer),
-      ...(typeof summary==='string'?{summary}:{})}):null;
+      ...(typeof summary==='string'?{summary:identity.summary(summary)}:{})}):null;
     if(result&&!await allowedOutput({actorId:await options.actor(),executionId,body:result.body,summary:result.summary}))result=null;
     const database=execution.billing.contractVersion==='bill2.v2'
       ?paygOwnerDatabase(options.database,{executionId,epoch:execution.epoch!}):options.database;

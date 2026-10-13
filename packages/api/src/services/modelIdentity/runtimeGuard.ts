@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import type { RuntimeProgress } from '../runtime/progress';
-import { redactIdentityBody, redactModelIdentity, streamingRedaction } from './outputGuard';
+import { redactIdentityBody, redactIdentitySummary, redactModelIdentity, streamingRedaction } from './outputGuard';
 
 type TextEvent = Extract<RuntimeProgress, { type: 'text' }>;
 
@@ -13,6 +13,7 @@ export function runtimeIdentityGuard(enabled: boolean) {
   return {
     enabled,
     body: (body: string) => enabled ? redactIdentityBody(body) : body,
+    summary: (summary: string) => enabled ? redactIdentitySummary(summary) : summary,
     progress: (emit: (event: RuntimeProgress) => void) => enabled ? guardedProgress(emit) : emit,
   };
 }

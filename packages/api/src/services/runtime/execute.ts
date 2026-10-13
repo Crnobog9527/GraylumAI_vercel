@@ -404,6 +404,7 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
       return JSON.stringify(response);
      }});}
    }
+   if(summary!==undefined)summary=identity.summary(summary);
    // This is after organizer spend and streamed text. Real moderation must decide
    // whether to buffer/retract output or check the primary reply before organizing.
    if(execution.live&&!await allowedOutput({actorId:await options.actor(),executionId,body,summary})){

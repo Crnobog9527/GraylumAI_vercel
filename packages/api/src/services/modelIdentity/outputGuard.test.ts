@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { describe, expect, it } from 'vitest';
 import { BRAND_REPLY_EN, BRAND_REPLY_ZH, BRAND_REPLY_ZH_HANT } from './brandIdentity';
-import { leaksModelIdentity, redactIdentityBody, redactModelIdentity, streamingRedaction } from './outputGuard';
+import { leaksModelIdentity, redactIdentityBody, redactIdentitySummary, redactModelIdentity, streamingRedaction } from './outputGuard';
 
 // Leaks: what a model may say about itself after a direct question or a jailbreak.
 const LEAKS_ZH = [
@@ -36,6 +36,19 @@ const LEAKS_EN = [
   'Sure! I am GPT-4o, a model from OpenAI.',
   'I am called Gemini.',
   'I’m Claude.',
+  // Review P1: articles before the vendor
+  'I am a GPT-4 model.',
+  "I'm an OpenAI language model.",
+  'I am a Claude-based assistant.',
+];
+// Review P1: Traditional Chinese phrasing
+const LEAKS_HANT = [
+  '我由 Anthropic 開發。',
+  '我的底層模型是 GPT-4。',
+  '我基於 Claude。',
+  '我是由 Google 訓練的大型語言模型。',
+  '我是一個 Gemini 模型。',
+  '我背後的技術來自 OpenAI。',
 ];
 // Must stay untouched: ordinary answers that mention AI companies or products.
 const SAFE = [
@@ -76,6 +89,13 @@ describe('jailbreak and identity leaks are replaced', () => {
   });
 });
 
+describe('Traditional Chinese leaks are replaced with the Traditional reply', () => {
+  it.each(LEAKS_HANT)('zh-Hant: %s', text => {
+    expect(leaksModelIdentity(text)).toBe(true);
+    expect(leaksModelIdentity(redactModelIdentity(text))).toBe(false);
+  });
+});
+
 describe('ordinary mentions are not touched', () => {
   it.each(SAFE)('%s', text => {
     expect(leaksModelIdentity(text)).toBe(false);
@@ -92,7 +112,9 @@ it('streaming holds back only an unfinished first-person sentence', () => {
   expect(streamingRedaction('先说结论。我是由 Goo')).toBe('先说结论。');
   expect(streamingRedaction('先说结论。我是由 Google 训练的。')).toBe(`先说结论。${BRAND_REPLY_ZH}`);
   expect(streamingRedaction('先说结论。第二点是关于 Goo')).toBe('先说结论。第二点是关于 Goo');
-  expect(streamingRedaction('Short answer. I am Cla')).toBe('Short answer.');
+  expect(streamingRedaction('Short answer. I am Cla')).toBe('Short answer. ');
+  // Review P2: a safe prefix before a later first-person word stays visible.
+  expect(streamingRedaction('先说结论。对于你的账号，我建议')).toBe('先说结论。对于你的账号，');
   expect(streamingRedaction('Short answer. Post daily')).toBe('Short answer. Post daily');
 });
 
@@ -110,7 +132,20 @@ it('redacts the public message of stored bodies and keeps other fields', () => {
   expect(JSON.parse(redactIdentityBody(step))).toEqual({ message: `${BRAND_REPLY_ZH}继续第二步。`, inputKind: 'answer' });
   const agent = JSON.stringify({ format: 'x', message: '我是 Claude。', card: { message: '我是 Claude。', options: [] } });
   expect(JSON.parse(redactIdentityBody(agent)).card.message).toBe(BRAND_REPLY_ZH);
+  // Review P1: an appended card keeps its own message; it is redacted independently.
+  const appended = JSON.stringify({ format: 'x', message: '先看第一题。\n\n我是 Claude。', card: { message: '我是 Claude。', options: [] } });
+  const parsed = JSON.parse(redactIdentityBody(appended));
+  expect(parsed.card.message).toBe(BRAND_REPLY_ZH);
+  expect(parsed.message).not.toMatch(/Claude/);
   const clean = JSON.stringify({ message: '继续第二步。', card: null });
   expect(redactIdentityBody(clean)).toBe(clean);
   expect(redactIdentityBody('[1,2]')).toBe('[1,2]');
+});
+
+it('organizer summaries are redacted as text or inside JSON strings (review P2)', () => {
+  expect(redactIdentitySummary('整理完成。我是 Claude。要点如下。')).toBe(`整理完成。${BRAND_REPLY_ZH}要点如下。`);
+  const json = JSON.stringify({ facts: ['账号定位：职场', 'I am GPT-4.'], note: '无' });
+  expect(JSON.parse(redactIdentitySummary(json))).toEqual({ facts: ['账号定位：职场', BRAND_REPLY_EN], note: '无' });
+  const clean = JSON.stringify({ facts: ['ChatGPT 和 Claude 的对比'] });
+  expect(redactIdentitySummary(clean)).toBe(clean);
 });
