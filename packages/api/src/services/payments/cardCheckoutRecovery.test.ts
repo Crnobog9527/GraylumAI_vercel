@@ -51,6 +51,18 @@ describe('PAY-STRIPE-MP card first payment through the method recovery', () => {
     await review.run();
     expect(mocks.stopPrior).toHaveBeenCalledTimes(1);
   });
+  it('stops the replaced Pro even when recording the tax fails, and records the tax even when the stop fails', async () => {
+    mocks.stopPrior.mockReset();
+    const taxDown = fixture({ method_transition: 'upgrade', method_prior_subscription: 'pro-sub' });
+    taxDown.db.rpc.mockImplementation(async (name: string) => name === 'pay_stripe_mp_record_tax'
+      ? { data: null, error: { message: 'down' } } : { data: { state: 'fulfilled' }, error: null });
+    await expect(taxDown.run()).rejects.toThrow();
+    expect(mocks.stopPrior).toHaveBeenCalledTimes(1);
+    const stopDown = fixture({ method_transition: 'upgrade', method_prior_subscription: 'pro-sub' });
+    mocks.stopPrior.mockRejectedValueOnce(new Error('stripe down'));
+    await expect(stopDown.run()).rejects.toThrow('stripe down');
+    expect(stopDown.db.rpc).toHaveBeenLastCalledWith('pay_stripe_mp_record_tax', expect.objectContaining({ p_order: 'order' }));
+  });
   it('fulfills an international card pack as a one-time payment', async () => {
     mocks.card.mockResolvedValue({ paymentId: 'pi_1', checkoutId: 'cs_card', amount: 940, tax: 188, currency: 'usd',
       paidAt: '2026-10-12T08:42:40.000Z', subscription: null });
