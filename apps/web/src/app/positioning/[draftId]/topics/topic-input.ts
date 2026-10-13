@@ -33,6 +33,10 @@ export function useTopicInput(inputKey: string) {
     setInput(localStorage.getItem(inputKey) ?? '');
     putBackIds.current = readPutBack(localStorage, putBackKey);
   }, [inputKey, putBackKey]);
+  // Another tab on the same draft may have put text back or taken it out since; always act on the saved list.
+  const reread = () => {
+    if (putBackKey) putBackIds.current = readPutBack(localStorage, putBackKey);
+  };
   const remember = () => {
     if (!putBackKey) return;
     if (putBackIds.current.size) localStorage.setItem(putBackKey, JSON.stringify([...putBackIds.current]));
@@ -56,6 +60,7 @@ export function useTopicInput(inputKey: string) {
     },
     /** Not stored (or held by a gate): the text goes back once per request, in front of any newer draft. */
     putBack(requestId: string, text: string) {
+      reread();
       if (putBackIds.current.has(requestId)) return;
       putBackIds.current.add(requestId);
       remember();
@@ -67,6 +72,7 @@ export function useTopicInput(inputKey: string) {
     },
     /** Stored after all (a retry succeeded): take out only the copy this page put back, if it did. */
     stored(requestId: string, text: string) {
+      reread();
       if (!putBackIds.current.delete(requestId)) return;
       remember();
       setInput(current => {
