@@ -48,13 +48,13 @@ function readCount(found: unknown): number | undefined {
   return undefined;
 }
 
-/** "343,369 views" → 343369, "181 videos" → 181. Abbreviated labels such as "1.2M" or "50万次观看" stay missing. */
+/** "343,369 views" → 343369, "181 videos" → 181, "999 subscribers" → 999. Abbreviated labels such as "1.2M" or "50万次观看" stay missing. */
 export function displayCount(value: unknown, paths: readonly string[]): number | undefined {
   const exact = count(value, paths);
   if (exact !== undefined) return exact;
   const found = text(value, paths);
   // Plain digits or correctly grouped thousands only ("343,369"); "1,,2" or ", views" stay missing.
-  const match = found?.match(/^\s*(\d{1,3}(?:,\d{3})+|\d+)\s*(views?|videos?|次观看|个视频)?\s*$/i);
+  const match = found?.match(/^\s*(\d{1,3}(?:,\d{3})+|\d+)\s*(views?|videos?|subscribers?|次观看|个视频|位订阅者)?\s*$/i);
   if (!match) return undefined;
   const parsed = Number(match[1].replace(/,/g, ''));
   return Number.isSafeInteger(parsed) ? parsed : undefined;
