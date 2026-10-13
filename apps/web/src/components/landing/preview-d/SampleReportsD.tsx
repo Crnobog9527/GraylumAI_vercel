@@ -3,6 +3,7 @@
 
 import { useState, type KeyboardEvent } from 'react';
 import { SAMPLE_LABEL, SAMPLE_REPORTS_TITLE, SAMPLE_SECTIONS, type SampleReport } from '@/lib/landing/landing-samples';
+import { Phrases } from './Phrases';
 import styles from './d.module.css';
 
 /**
@@ -25,7 +26,7 @@ export function SampleReportsD({ reports }: { reports: readonly SampleReport[] }
 
   return (
     <div className={styles.reports}>
-      <h3 className={styles.displaySmall}>{SAMPLE_REPORTS_TITLE}</h3>
+      <h3 className={styles.displaySmall}><Phrases text={SAMPLE_REPORTS_TITLE} /></h3>
       <div role="tablist" aria-label={SAMPLE_REPORTS_TITLE} className={styles.reportTabs}>
         {reports.map((item, index) => (
           <button key={item.id} id={`d-${item.id}-tab`} type="button" role="tab" aria-selected={index === active}

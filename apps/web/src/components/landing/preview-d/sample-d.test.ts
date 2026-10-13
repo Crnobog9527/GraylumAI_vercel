@@ -12,6 +12,7 @@ import { FLOW_STEPS } from '@/lib/landing/landing-flow';
 import { LANDING_FEATURES, type LandingFlags } from '@/lib/landing/landing-flags';
 import { buildLandingPageData } from '@/lib/landing/landing-page-data';
 import { DISPLAY_TEXTS, SUBSET_TEXT } from './display-glyphs';
+import { HEADING_PHRASES } from './Phrases';
 import { SampleD } from './SampleD';
 
 const plan = (level: string, monthly: number, yearly: number) => ({
@@ -31,8 +32,10 @@ describe('style sample D', () => {
     const data = buildLandingPageData(ALL_ON, [plan('pro', 29, 279), plan('gold', 69, 621)]);
     const html = renderToStaticMarkup(createElement(SampleD, { data, siteName: 'Graylum', membershipHref: '/profile' }));
     expect(html.match(/<h1[\s>]/g)).toHaveLength(1);
+    // Heading phrases are split into spans; compare the visible text with the tags removed.
+    const text = html.replace(/<[^>]+>/g, '');
     const order = [HERO.title, VOICE_WALL.title, HOW_IT_WORKS.title, PRICE_COMPARE.title, LANDING_FAQ_TITLE, FINAL_ACTION.title]
-      .map(title => html.indexOf(`>${title}</h`));
+      .map(title => text.indexOf(title));
     expect(order.every(index => index > 0)).toBe(true);
     expect([...order].sort((a, b) => a - b)).toEqual(order);
     for (const text of [HERO.promise, HERO.primaryCta, HERO.secondaryCta, ...data.notes.map(note => note.answer)]) {
@@ -45,6 +48,10 @@ describe('style sample D', () => {
     expect(html).toContain('aria-label="Pro"');
     expect(html).toContain('aria-label="Gold"');
     expect(html).toContain('id="how-it-works"');
+  });
+
+  it('splits headings only into phrases that join back to the final copy', () => {
+    for (const [title, phrases] of Object.entries(HEADING_PHRASES)) expect(phrases.join('')).toBe(title);
   });
 
   it('has every heading character in the display font subset', () => {

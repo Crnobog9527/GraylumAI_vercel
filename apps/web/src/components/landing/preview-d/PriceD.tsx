@@ -40,7 +40,7 @@ export function PriceD({ data, membershipHref }: { data: LandingData; membership
       {pricing.cards.length > 0 ? (
         <PriceCardsD cards={pricing.cards} yearlyBadge={pricing.yearlyBadge} showResult={data.showResult} membershipHref={membershipHref} />
       ) : (
-        <p role="status" className={styles.lede}>
+        <p role="status" className={cn(styles.lede, styles.plansMissing)}>
           会员方案暂时读不到，请稍后刷新，或先看<Link href="/landing/pricing">价格页</Link>。
         </p>
       )}

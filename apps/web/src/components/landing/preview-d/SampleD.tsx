@@ -11,6 +11,7 @@ import { cn } from '@/lib/utils';
 import { displayFont } from './display-font';
 import { PriceD } from './PriceD';
 import { FaqD, FinalD, HowItWorksD, VoiceWallD } from './SectionsD';
+import { Phrases } from './Phrases';
 import styles from './d.module.css';
 
 const CHROME = SITE_CHROME['zh-Hans'];
@@ -52,7 +53,7 @@ export function SampleD({ data, siteName, membershipHref }: { data: LandingData;
       <main>
         <section aria-labelledby="hero-title" className={styles.hero}>
           <div className={styles.heroStage}>
-            <h1 id="hero-title" className={styles.heroTitle}>{HERO.title}</h1>
+            <h1 id="hero-title" className={styles.heroTitle}><Phrases text={HERO.title} /></h1>
             <p className={styles.heroPromise}>{HERO.promise}</p>
             <div className={styles.heroActions}>
               <Link href={SIGNUP_CTA_HREF} className={cn(styles.pill, styles.pillLight, styles.pillLarge)}>

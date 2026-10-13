@@ -57,6 +57,9 @@
 .displaySmall { margin: 0; font-size: clamp(28px, 3.4vw, 44px); line-height: 1.05; }
 .lede { margin: 0; max-width: 30em; color: var(--d-muted); font-size: 17px; line-height: 1.8; }
 
+/* A heading phrase never splits across lines (Phrases.tsx) */
+.phrase { white-space: nowrap; }
+
 /* Pills */
 .pill {
   display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 44px; padding: 0 20px;
@@ -91,6 +94,7 @@
 .headerActions { display: flex; gap: 8px; }
 .headerActions .pill { min-height: 48px; box-shadow: 0 6px 20px -8px rgba(0, 0, 0, .25); }
 .headerActions .pillLight { display: none; }
+.headerActions .pillDark { border-color: rgba(255, 255, 255, .22); }
 @media (min-width: 420px) { .headerActions .pillLight { display: inline-flex; } }
 @media (min-width: 900px) { .nav { display: flex; } }
 
@@ -230,7 +234,7 @@
 .ownPrice { margin: 20px 0 0; font-size: 20px; font-weight: 600; letter-spacing: -.01em; }
 .founderLine { margin: 48px 0 0; font-size: 17px; font-weight: 600; text-align: center; }
 .founderLine span { margin-left: 8px; color: var(--d-muted); font-size: 14px; font-weight: 400; }
-.plans { margin-top: clamp(48px, 6vw, 80px); }
+.plans, .plansMissing { margin-top: clamp(48px, 6vw, 80px); }
 .billing { display: flex; width: fit-content; margin: 0 auto; padding: 4px; border: 1px solid var(--d-line); border-radius: var(--gl-radius-pill); background: #fff; }
 .billing label {
   display: flex; align-items: center; gap: 8px; min-height: 40px; padding: 0 20px; border-radius: var(--gl-radius-pill);

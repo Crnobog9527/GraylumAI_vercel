@@ -10,6 +10,7 @@ import { SIGNUP_CTA_HREF } from '@/lib/seo/content/shared';
 import { cn } from '@/lib/utils';
 import { InkFill, StepRail } from './motion';
 import { SampleReportsD } from './SampleReportsD';
+import { Phrases } from './Phrases';
 import styles from './d.module.css';
 
 /** Section 2, the sticky-note wall: the complaint as a note, the coach's answer on a white sheet beside it. */
@@ -18,7 +19,7 @@ export function VoiceWallD({ notes }: { notes: readonly VoiceNote[] }) {
   return (
     <section aria-labelledby="voice-title" className={cn(styles.section, styles.deferred)}>
       <div className={styles.splitHead}>
-        <h2 id="voice-title" className={styles.display}>{VOICE_WALL.title}</h2>
+        <h2 id="voice-title" className={styles.display}><Phrases text={VOICE_WALL.title} /></h2>
         <p className={styles.lede}>{VOICE_WALL.lede}</p>
       </div>
       <RevealOnScroll className={styles.wall}>
@@ -52,7 +53,7 @@ export function HowItWorksD({ promise, steps, reports, timeline }: {
 }) {
   return (
     <section id="how-it-works" aria-labelledby="how-title" className={cn(styles.panel, styles.panelGold, styles.deferred)}>
-      <h2 id="how-title" className={cn(styles.display, styles.displayHuge)}>{HOW_IT_WORKS.title}</h2>
+      <h2 id="how-title" className={cn(styles.display, styles.displayHuge)}><Phrases text={HOW_IT_WORKS.title} /></h2>
       <InkFill text={promise.map(part => part.text).join('')} className={styles.inkFill} />
       {steps.length > 0 ? (
         <StepRail className={styles.steps}>
@@ -74,7 +75,7 @@ export function HowItWorksD({ promise, steps, reports, timeline }: {
       <SampleReportsD reports={reports} />
       {timeline.length > 0 ? (
         <div className={styles.when}>
-          <h3 className={styles.displaySmall}>{HOW_IT_WORKS.timelineTitle}</h3>
+          <h3 className={styles.displaySmall}><Phrases text={HOW_IT_WORKS.timelineTitle} /></h3>
           <ol>
             {timeline.map((item, index) => (
               <li key={item.text}><span className={styles.whenIndex} aria-hidden="true">{index + 1}</span>{item.text}</li>
@@ -113,7 +114,7 @@ export function FaqD({ groups }: { groups: readonly LandingFaqGroup[] }) {
 export function FinalD({ showStack, founderSeats, note }: { showStack: boolean; founderSeats: number | null; note: string }) {
   return (
     <section aria-labelledby="final-title" className={cn(styles.panel, styles.panelInk, styles.final, styles.deferred)}>
-      <h2 id="final-title" className={cn(styles.display, styles.displayHuge)}>{FINAL_ACTION.title}</h2>
+      <h2 id="final-title" className={cn(styles.display, styles.displayHuge)}><Phrases text={FINAL_ACTION.title} /></h2>
       <ul className={styles.paths}>
         {FINAL_ACTION.paths.map((path, index) => (
           <li key={path} data-path={index === 0 ? 'alone' : 'coach'}>{path}</li>
