@@ -26,10 +26,14 @@ describe('Sentry runtime sampling and replay privacy', () => {
     for (const [options] of init.mock.calls) {
       expect(options.tracesSampleRate).toBe(environment === 'production' ? 0.1 : 0);
     }
-    expect(replayIntegration).toHaveBeenCalledWith({ maskAllText: true, blockAllMedia: true });
-    expect(init.mock.calls[2][0]).toMatchObject({
-      replaysOnErrorSampleRate: 1.0,
-      replaysSessionSampleRate: environment === 'production' ? 0.1 : 0,
-    });
+    // DATA-ERASURE E7: Replay metadata carries full page URLs, so it stays off in every runtime.
+    expect(replayIntegration).not.toHaveBeenCalled();
+    expect(init.mock.calls[2][0]).toMatchObject({ replaysOnErrorSampleRate: 0, replaysSessionSampleRate: 0 });
+    for (const [options] of init.mock.calls) {
+      expect(options).toMatchObject({ sendDefaultPii: false });
+      expect(typeof options.beforeSend).toBe('function');
+      expect(typeof options.beforeSendTransaction).toBe('function');
+      expect(typeof options.beforeBreadcrumb).toBe('function');
+    }
   });
 });

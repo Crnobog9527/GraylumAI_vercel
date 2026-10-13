@@ -43,6 +43,7 @@ import { withPrimaryAddenda } from './primaryInstructions';
 import { callBillingUnit } from './billingUnitAdmission';
 import type {GateRejection} from './newWorkGate';
 import {allowedOutput} from './moderation';
+import {frozenBrandIdentity,withBrandIdentity} from '../modelIdentity/brandIdentity';
 export function runtimeExecutor(options:RuntimeExecutorOptions){
  if(typeof options.callGate!=='function')throw new Error('RUNTIME_CALL_GATE_REQUIRED');
  const budget=options.budget??createRuntimeBudget();
@@ -67,7 +68,7 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
   const ownerDatabase=isPayg?paygOwnerDatabase(options.database,{executionId,epoch:execution.epoch!}):options.database;
   const ownerRpc=<T>(name:string,value:Record<string,unknown>)=>rpc<T>(name,value,ownerDatabase);
   if(execution.state==='cancelled')return {state:'cancelled' as const,
-   ...(execution.unavailableReason==='provider_history'||execution.unavailableReason==='preflight'
+   ...(['provider_history','preflight','platform_review'].includes(execution.unavailableReason??'')
     ?{unavailable:execution.unavailableReason}:{})};
   if(execution.cancelRequested){
    await billing.recoverReceipts(execution.runId);
@@ -238,7 +239,8 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
     const candidate=plan.candidates.find(c=>c.key===selected.key);
     if(candidate){
      if(!options.activateSkill)throw new Error('RUNTIME_SKILL_ACTIVATION_UNAVAILABLE');
-     const instructions=await options.activateSkill(candidate);
+     // MODEL-IDENTITY-GUARD: a matched Skill keeps the brand identity frozen into this admission.
+     const instructions=withBrandIdentity(await options.activateSkill(candidate),frozenBrandIdentity(context.instructions));
      const selectedPolicy=execution.billing.callPolicy.find(p=>p.modelId===candidate.modelId&&p.model===candidate.model);
      if(!selectedPolicy)throw new Error('RUNTIME_MODEL_DENIED');
      primaryPolicy=selectedPolicy;

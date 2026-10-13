@@ -7,19 +7,25 @@ import { trpc } from '@/trpc/client';
 import styles from './work-composer.module.css';
 import { QueryNotice, workspaceErrorMessage } from './query-notice';
 import { ComposerEditor, type ComposerEditorHandle } from './composer-editor';
+import { COMPOSER_REFERENCES_ENABLED } from './composer-references';
+import { useComposerReferences } from './reference-menu';
 
 /**
  * One input surface for free conversation, positioning and topic work.
  * `attachment` is shown inside the same frame, above the text box (the mentor's open question card).
  */
-export function WorkComposer({value,onChange,onSend,disabled=false,sendDisabled=false,label='消息',placeholder='消息',maxLength=20000,sessionId,skillId='',onSkillChange,note,attachment}: {
+export function WorkComposer({value,onChange,onSend,disabled=false,sendDisabled=false,label='消息',placeholder='消息',maxLength=20000,sessionId,skillId='',onSkillChange,note,attachment,
+ references=COMPOSER_REFERENCES_ENABLED}: {
  value:string;onChange:(value:string)=>void;onSend:(skillId?:string)=>void;disabled?:boolean;sendDisabled?:boolean;label?:string;placeholder?:string;maxLength?:number;
  sessionId?:string;skillId?:string;onSkillChange?:(id:string)=>void;note?:string;attachment?:ReactNode;
+ /** UI-B skeleton (default off): `@` picks library documents; they are kept but not sent yet. */
+ references?:boolean;
 }) {
  const [menu,setMenu]=useState<'files'|'skills'|null>(null),[query,setQuery]=useState(''),[localSkill,setLocalSkill]=useState(''),[error,setError]=useState(''),[reading,setReading]=useState(false);
  const root=useRef<HTMLDivElement>(null);
  const fileInput=useRef<HTMLInputElement>(null),current=useRef(value);current.current=value;
  const box=useRef<ComposerEditorHandle>(null);
+ const referencePicker=useComposerReferences(references,box);
  // The box stays enabled while a turn runs, so focus is kept after Enter; a click on send returns it.
  const sendAndFocus=()=>sendKeepingFocus(()=>onSend(selected),box.current);
  useEffect(()=>{if(!menu)return;const key=(event:KeyboardEvent)=>{if(event.key==='Escape')setMenu(null);};const outside=(event:PointerEvent)=>{if(!root.current?.contains(event.target as Node))setMenu(null);};document.addEventListener('keydown',key);document.addEventListener('pointerdown',outside);return()=>{document.removeEventListener('keydown',key);document.removeEventListener('pointerdown',outside);};},[menu]);
@@ -51,7 +57,8 @@ export function WorkComposer({value,onChange,onSend,disabled=false,sendDisabled=
   {attachment&&<div className={styles.attachment}>{attachment}</div>}
   <ComposerEditor ref={box} label={label} placeholder={placeholder} value={value} maxLength={maxLength}
    disabled={disabled||reading} onChange={onChange} onEscape={()=>setMenu(null)}
-   onEnter={()=>{if(!cannotSend)onSend(selected);}} className={styles.editor}/>
+   onEnter={()=>{if(!cannotSend)onSend(selected);}} className={styles.editor} references={referencePicker.hooks}/>
+  {referencePicker.menu}
   <div className={styles.tools}><div className={styles.toolLeft}>
    <div className={styles.menuAnchor}><button type="button" aria-label="添加资料" disabled={disabled||reading} aria-expanded={menu==='files'} onClick={()=>setMenu(menu==='files'?null:'files')}><Plus size={19}/></button>{menu==='files'&&<div className={styles.menu} role="dialog" aria-label="添加资料"><button type="button" onClick={()=>fileInput.current?.click()}><FileText size={16}/> 从文件添加</button><p>支持 TXT、Markdown、CSV、JSON、日志。内容会加入本条消息，发送前可以检查或删除。</p></div>}</div>
    <input ref={fileInput} type="file" aria-label="选择附件" accept=".txt,.md,.csv,.json,.log" multiple hidden onChange={event=>void addFiles(event.target.files)}/>

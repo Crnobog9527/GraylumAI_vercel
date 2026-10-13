@@ -1,5 +1,4 @@
 import { describe, expect, it } from 'vitest';
-import { loadLatestRuntimeProof } from './diagnostics';
 import {
   deleteOldDiagnosticResults,
   readDiagnosticSummary,
@@ -147,16 +146,4 @@ describe('diagnostics results without the 0005 view/RPCs', () => {
     await expect(run(table([], { error: { code: '42501' } }))).rejects.toThrow(/diagnostic_results/);
   });
 
-  it('reports the legacy-chat runtime proof as retired instead of "no recent requests"', async () => {
-    const legacy = { from: () => {
-      const builder: Record<string, unknown> = {};
-      for (const method of ['select', 'eq', 'gte', 'order', 'limit']) builder[method] = () => builder;
-      builder.maybeSingle = async () => ({ data: null, error: { code: '42501' } });
-      return builder;
-    } } as any;
-    const proof = await loadLatestRuntimeProof(legacy, 72);
-
-    expect(proof).toMatchObject({ found: false, status: 'warning' });
-    expect(proof.message).toContain('LEGACY-CLOSE');
-  });
 });

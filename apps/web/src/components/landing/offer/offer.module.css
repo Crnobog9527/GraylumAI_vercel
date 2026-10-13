@@ -1,0 +1,36 @@
+/* Landing page motion. Without JavaScript or with reduced motion everything is visible at once. */
+
+/* Sticky-note wall: the answer waits until its row scrolls into view (data-reveal set by RevealOnScroll). */
+.revealRow[data-reveal='pending'] .revealAnswer {
+  opacity: 0;
+  transform: translateY(10px);
+}
+
+.revealRow[data-reveal='shown'] .revealAnswer {
+  opacity: 1;
+  transform: translateY(0);
+  transition: opacity 0.5s ease-out 0.7s, transform 0.5s ease-out 0.7s;
+}
+
+.note {
+  transform: rotate(var(--note-tilt, -1deg));
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .revealRow[data-reveal] .revealAnswer {
+    opacity: 1;
+    transform: none;
+    transition: none;
+  }
+
+  .note {
+    transform: none;
+  }
+}
+
+/* Below-the-fold sections skip layout until they come near the viewport, so their CJK font subsets do not
+   compete with the first screen (the text stays in the HTML for search engines and find-in-page). */
+.deferred {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 900px;
+}

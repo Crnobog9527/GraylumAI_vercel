@@ -6,14 +6,14 @@ const footerLinks = {
   product: {
     title: '产品',
     links: [
-      { label: '功能介绍', href: '/landing#features' },
+      { label: '它怎么工作', href: '/landing#how-it-works' },
       { label: '定价方案', href: '/landing/pricing' },
     ],
   },
   company: {
     title: '公司',
     links: [
-      { label: '关于我们', href: '/landing#about' },
+      { label: '关于我们', href: '/about' },
       { label: '联系我们', href: '/contact' },
     ],
   },

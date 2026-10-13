@@ -21,7 +21,7 @@ export type PublicPage = {
 
 export const PUBLIC_PAGES: PublicPage[] = [
   // The public host serves the home page at "/" (rewritten to /landing until the single-host move).
-  { path: '/', locale: 'zh-Hans', lastModified: '2026-10-12' },
+  { path: '/', locale: 'zh-Hans', lastModified: '2026-10-13' },
   { path: '/landing/pricing', locale: 'zh-Hans', lastModified: '2026-10-12' },
   { path: '/tutorials', locale: 'zh-Hans', lastModified: '2026-10-12' },
   { path: '/faq', locale: 'zh-Hans', lastModified: '2026-10-12' },
@@ -29,10 +29,10 @@ export const PUBLIC_PAGES: PublicPage[] = [
   { path: '/terms', locale: 'zh-Hans', lastModified: '2026-10-12' },
   { path: '/privacy', locale: 'zh-Hans', lastModified: '2026-10-12' },
   { path: '/acceptable-use', locale: 'zh-Hans', lastModified: '2026-10-12' },
-  { path: '/about', locale: 'zh-Hans', lastModified: '2026-10-12', alternates: { 'zh-TW': '/zh-tw/about' } },
+  { path: '/about', locale: 'zh-Hans', lastModified: '2026-10-13', alternates: { 'zh-TW': '/zh-tw/about' } },
   // Traditional Chinese (Taiwan), SEO_GEO_SPEC 3.2 and appendix B.
   { path: '/zh-tw', locale: 'zh-TW', lastModified: '2026-10-12', footerLabel: '自媒體是什麼？' },
-  { path: '/zh-tw/about', locale: 'zh-TW', lastModified: '2026-10-12', alternates: { 'zh-Hans': '/about' } },
+  { path: '/zh-tw/about', locale: 'zh-TW', lastModified: '2026-10-13', alternates: { 'zh-Hans': '/about' } },
   { path: '/zh-tw/zimeiti-jingying', locale: 'zh-TW', lastModified: '2026-10-12', footerLabel: '如何經營自媒體' },
   { path: '/zh-tw/shequn-xingxiao', locale: 'zh-TW', lastModified: '2026-10-12', footerLabel: '社群行銷' },
   { path: '/zh-tw/shequn-jingying', locale: 'zh-TW', lastModified: '2026-10-12', footerLabel: '社群經營' },
