@@ -5,7 +5,7 @@ const limit = vi.hoisted(() => ({ check: vi.fn(), close: vi.fn() }));
 vi.mock('./financialRecovery', () => ({ closeErasedAccountFinancials: limit.close }));
 vi.mock('../redisRateLimiter', () => ({ checkRateLimitOrThrow: limit.check }));
 
-import { confirmAccountErasure, loadAccountErasurePreview } from './service';
+import { confirmAccountErasure, loadAccountErasurePreview, renewalCancelHint } from './service';
 import { openingGrantDigests } from './openingGrantIdentity';
 import { REAUTH_MAX_AGE_SECONDS, REAUTH_REQUIRED_MESSAGE } from './reauth';
 
@@ -21,8 +21,10 @@ function authClient(claims: Record<string, unknown> | null, error: unknown = nul
 function adminClient(options: {
   confirm?: { data?: unknown; error?: { message: string; code?: string } | null };
   banError?: { status?: number } | null;
+  preview?: unknown;
 } = {}) {
   const rpc = vi.fn(async (name: string) => {
+    if (name === 'account_erasure_preview') return { data: options.preview ?? null, error: null };
     if (name === 'account_erasure_confirm_with_digests') {
       return {
         data: options.confirm?.data ?? {
@@ -130,8 +132,25 @@ describe('account erasure confirm', () => {
       confirm: { data: null, error: { message: 'ACCOUNT_ERASURE_SUBSCRIPTION_RENEWING', code: 'P0001' } },
     });
     await expect(confirm(admin, authClient({ sub: USER, amr: [{ method: 'otp', timestamp: NOW_S }] })))
-      .rejects.toMatchObject({ code: 'PRECONDITION_FAILED' });
+      .rejects.toMatchObject({ code: 'PRECONDITION_FAILED', message: expect.stringContaining('订阅管理') });
     expect(admin.auth.admin.updateUserById).not.toHaveBeenCalled();
+  });
+
+  it('names the cancel entry of every renewing channel', async () => {
+    const admin = adminClient({
+      confirm: { data: null, error: { message: 'ACCOUNT_ERASURE_SUBSCRIPTION_RENEWING', code: 'P0001' } },
+      preview: { credits: 0, subscriptionRenewing: true, renewalChannels: ['stripe_portal', 'waffo'],
+        subscriptionActiveUntil: null, pendingPayments: 0, runsInFlight: 0, closed: false },
+    });
+    const error = await confirm(admin, authClient({ sub: USER, amr: [{ method: 'otp', timestamp: NOW_S }] }))
+      .then(() => null, (e: Error) => e);
+    expect(error).toMatchObject({ code: 'PRECONDITION_FAILED' });
+    expect(error?.message).toMatch(/^ACCOUNT_ERASURE_SUBSCRIPTION_RENEWING: /);
+    expect(error?.message).toContain('管理订阅 / 取消续费');
+    expect(error?.message).toContain('联系客服停止续费');
+    expect(renewalCancelHint(['waffo', 'stripe'])).toBe(
+      'ACCOUNT_ERASURE_SUBSCRIPTION_RENEWING: 请先停止自动续费，再申请注销。银行卡自动续费目前请联系客服停止续费');
+    expect(renewalCancelHint(['other'])).toContain('联系客服');
   });
 
   it('hides unknown database errors', async () => {
@@ -156,7 +175,12 @@ describe('account erasure preview', () => {
       pendingPayments: 0, runsInFlight: 1, closed: false,
     };
     const admin = { rpc: vi.fn().mockResolvedValue({ data: facts, error: null }) };
-    await expect(loadAccountErasurePreview(admin as unknown as SupabaseClient, USER)).resolves.toEqual(facts);
+    // A database before 0224 sends no renewalChannels; it parses as none.
+    await expect(loadAccountErasurePreview(admin as unknown as SupabaseClient, USER))
+      .resolves.toEqual({ ...facts, renewalChannels: [] });
+    admin.rpc.mockResolvedValueOnce({ data: { ...facts, renewalChannels: ['waffo'] }, error: null });
+    await expect(loadAccountErasurePreview(admin as unknown as SupabaseClient, USER))
+      .resolves.toMatchObject({ renewalChannels: ['waffo'] });
     expect(admin.rpc).toHaveBeenCalledWith('account_erasure_preview', { p_profile_id: USER });
 
     admin.rpc.mockResolvedValueOnce({ data: { credits: '40' }, error: null });

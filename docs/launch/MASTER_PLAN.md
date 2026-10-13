@@ -105,6 +105,34 @@ Owner 原话（2026-10-13，经总控转达）：
 
 - 最后一轮汇总写出的修订稿不再加一次复核调用，不提高价格上限。页面把它标为"未经评审团复核"，每个标为"只改表述"的章节展示修改前后对照，用户逐个勾选"确认不改变定位事实"后才能采用；也可以只把修订稿作为报告文本保存（定位字段不变）。
 
+**2026-10-13：全站发布量到 Post for Me 套餐上限时暂停发布，80% 时提醒 Owner**
+
+Owner 原话（2026-10-13，总控对话，经总控-7 转达；回应 [PUBLISH-MONITOR 方案](tasks/PUBLISH-MONITOR.md) 第 11 节第 10 项）：
+
+> 同意全站发布量到套餐上限时暂停发布，80% 时提醒我决定是否升级
+
+以下是落实范围，不是原话：
+
+- 起因：Post for Me 套餐按计费周期计发布条数，超出后下个周期自动升级套餐（开源代码证据，见 [实测记录](evidence/publish-monitor-20261013/README.md)）。
+- 全站发布量到当前套餐上限时，暂停所有新发布，界面提示"发布通道暂时繁忙，稍后自动恢复"；到 80% 时提醒 Owner，由 Owner 决定是否升级套餐（升级是付费操作，按 AGENTS 第 1 节逐次批准）。
+- 不对单个用户设条数上限。第 51 项"两档都按积分计费、不限条数"的"不限条数"按此理解为不对单个用户限条数，全站套餐上限到顶时的暂停属于本决定允许的例外。
+- 计数按 Post for Me 订阅的计费周期（续费日）算，不按自然月；名额在发出前原子预留（PUBLISH-MONITOR 方案第 6 节）。
+
+**2026-10-13：公开页风格统一和提速一起做、先出样稿；DESIGN.md 三层设计规范**
+
+Owner 原话（2026-10-13，总控-7 对话；省略号为原文省略）：
+
+> 同意现在开始公开页面风格统一（按对话页风格），和全站提速合在一起做；先出样稿给我选。要注意的是…动画窗口 UI 界面，必须要和我们登录后实际的对话页面保持一致。
+
+> 好的，按这个三层方案来，继续推进
+
+以下是落实范围，不是原话：
+
+- `DESIGN.md` 是全站唯一的设计规范，不另建文件，页面里的颜色和字号用设计变量，不写死。分三层：第一层是全站共用的浅色地基（颜色、字体与字号、间距、圆角、阴影、基础组件），取自登录后的对话页；第二层是公开页版式（首屏、正文排版、价格卡、便签、常见问题、页头页脚、分段布局、动画节奏），等 Owner 选定样稿后再写；第三层是管理页等登录后页面的版式（表格、长表单、设置、统计、空状态），登录后页面统一时再补。
+- 公开页（落地页、价格、常见问题、教程、/about、/zh-tw，以及以后的博客）的落地页演示窗口直接复用登录后对话页的真实组件，喂事先写好的示例数据，必须和登录后的对话页保持一致；演示不连后端、不调用模型、不扣积分。
+- 风格样稿在 PR #893（staging 的 `/landing/preview/a`、`/b`、`/c`，不公开、不被收录），Owner 选定后删掉未选的版本。
+- 取代：公开页原来的暗色风格（`DESIGN.md` 文件头的暗色色板对公开页不再适用；登录后其他页面在统一之前仍沿用）。和本节 2026-10-12"全站风格统一分两步"同方向，细化其中"公开页面按对话页风格重做"。
+
 **2026-10-13：删除整个对话像 ChatGPT 一样瞬间完成；普通对话加重命名**
 
 Owner 原话（2026-10-13，总控对话，经总控-7 转达）：
@@ -175,6 +203,23 @@ Owner 原话（2026-10-13，SEO/GEO 文案窗口对话，按时间顺序）：
 - 国内平台数据范围变化：小红书、抖音改为可读用户账号公开数据并支持手动导入，取代已确认设计中"国内平台不支持自己作品数据、需用户自己看后台"的说法（`docs/launch/design/landing/offer-one-page-final-2026-10-13.md` 第 136–137 行、`docs/launch/design/paywall/paywall-final-v25.html` 第 512 行）。这两份定稿文件保留原样作为历史；落地页和付费墙的对应文案由 PUBLIC-SITE、PAYWALL 按本条更新，且只在 PUBLISH-MONITOR 验收通过后对外展示；REL-1 上线前核对两处说法与实际能力一致。
 - Post for Me 实测上限 1 美元，不订阅付费套餐；若必须付费订阅才能测，先停下报 Owner。
 - 上线门槛不变：PUBLISH-MONITOR（含数据复盘）仍是 REL-1 的前置，必须上线前验收。SEO 规范第 3.3 节的兜底只保证首页说法与实际一致：任何时候复盘未验收，首页"复盘数据"的说法都不得对外展示；它不构成跳过 PUBLISH-MONITOR 上线的许可，缩小上线范围须 Owner 另行决定。
+
+**2026-10-13：付款后续四项和网站统计的 Owner 确认项**
+
+Owner 原话（2026-10-13，总控窗口对话）：
+
+> 付款后续四项按推荐；F1 用微信群，F8用腾讯会议或者飞书会议 ，N5 发件人Graylum AI<no-reply@graylum.com>, 这个发件邮箱地址后边还得确认一下。
+
+> 网站统计除了O2, 其他都按推荐， 登录后只统计 4 个关键动作吗？如果不统计每个页面的浏览，其实可能对用户行为的判断不会那么精准，不是吗？
+
+> 网站统计 O2 改为应用内也统计页面浏览，其余按推荐
+
+> O10 选 B。
+
+以下是落实范围，不是原话：
+
+- PAY-FOUNDER / PAY-NOTIFY / PAY-EVIDENCE / PAY-DISPUTE-GUARD 各方案"交给总控转 Owner 决定的事项"按推荐执行（含 D2：国际卡 MP 拒付由 Stripe 处理，大陆卡由 Owner 人工处理；E1：证据保留到最后一次扣款后 540 天，到期先标记待删除、至少 24 小时后由每日任务删除，实际最长约 540 天加 24–48 小时；E3：注销后约 48 小时内删除，未结拒付除外）；F1 微信群；F8 直播平台用腾讯会议或飞书会议（F8 的第一场时间和案例拆解如何取得会员同意未定，仍待 Owner 决定，是售卖前验收项）；N5 发件人 `Graylum AI <no-reply@graylum.com>`，上线前确认地址。
+- ANALYTICS：O1、O3–O9 按推荐；O2 改为应用内也统计页面浏览（网址去编号）加 4 个关键事件，只在 Termly 按地区规则允许统计时统计（先同意地区需明确同意，美国等默认允许、可拒绝）、不发邮箱、姓名、用户编号、订单号这类能直接认出是谁的字段（GA 仍会收到假名 Cookie 编号并处理 IP、设备和大致位置，按 ANALYTICS 方案如实写进隐私条款）、带一次性密钥的网址不统计；O10 选 B（GA4 保留期 2 个月只删除用户级和事件级数据，标准汇总报表中的汇总数据保留，隐私条款如实写明）。A/B 测试分组另立任务，不在 ANALYTICS 第一步。
 
 **2026-10-13：网站统计——同意弹窗用 Termly、不自研统计，新增 ANALYTICS**
 
@@ -1940,7 +1985,7 @@ node scripts/plan-progress.mjs --ref origin/staging
 | | PAY-EVIDENCE | 付款 IP/设备证据与清理独立交付，沿第 51 项 W；Owner 定留存后同步 DATA-ERASURE 契约和实际清理，完成前不采集。条款版本和订单同意仍归收款核心。正式售卖前完成已定证据要求。 | PAY-STRIPE-MP、DATA-ERASURE | 高 | 待实施方案细化 | — |
 | | PAY-DISPUTE-GUARD | 第 51 项 X/AC/AD 已定的上线前拒付通知接收、可撤回冻结及停止续费，从收款 PR 拆出独立交付。**2026-10-12 起新订单走 Stripe（第 2.1 节 2026-10-12 决定），方向改为按 Stripe 拒付事件（`charge.dispute.*`）处理**：Stripe Managed Payments 订单由 Stripe 作为记录商户处理拒付，本任务接收它的拒付事件做通知记录、可撤回冻结和停止续费；中国大陆银行卡订阅和微信/支付宝单笔（普通 Stripe，Graylum 是卖家）的拒付由我们自己处理，同样从 Stripe 拒付事件接收。PAY-STRIPE-MP 只保证这些事件不报错（[#847 迁移方案](https://github.com/Crnobog9527/GraylumAI_vercel/pull/847)）。MP 与普通 Stripe 各自的事件、到冻结的对应和人工替代，实施时由方案细化。Waffo 的每日 GraphQL `chargebacks` 查询和邮件（[Waffo 2026-10-10 答复](https://github.com/Crnobog9527/GraylumAI_vercel/pull/752#issuecomment-6095292601)，PAY-WAFFO §3、§8）只保留给已有 Waffo 旧订单。最终判定、申诉等扩展仍归上线后 CHARGEBACK，不扩大本任务。 | PAY-STRIPE-MP | 高 | 待实施方案细化 | — |
 | | PUBLIC-SITE | 公开站上线准备（第 2.1 节 2026-10-12 域名合并、中文优先、风格统一、落地页方向决定）：app.graylum.com 并入 www.graylum.com、应用放 /app；SEO/GEO 规范与基础设置；公开页面（落地页、定价、常见问题、教程）按对话页风格重做；新落地页按全部完工后的产品来写、未验收的能力不写。具体拆分待 SEO/GEO 规范文档和域名方案定稿后细化；正式环境平台设置逐项另获 Owner 批准。 | 第一段（SEO/GEO 基础设置和台湾 6 页）现在就做（Owner 2026-10-12 8 条线排期，第 2.1 节）；新落地页的能力文案须等 D1 范围功能完成；`/app` 路由搬迁放在冻结窗口最后做；域名合并的正式环境设置另行批准 | 高 | 待实施方案细化 | — |
-| | ANALYTICS | 网站统计（第 2.1 节 2026-10-13 决定，方案 [ANALYTICS](tasks/ANALYTICS.md)）：Termly 同意弹窗（地区规则、Google Consent Mode v2、统计和广告脚本按 Termly 分类放行）；GA4 公开页浏览和四个关键事件（注册、完成定位、开始付款、付款成功由服务器在 Stripe 回调履约后上报、按订单只记一次），不发邮箱、用户编号等能直接认出身份的信息，一次性密钥网址不统计；GA4 自定义渠道"AI 推荐"；注册时把首次来源写进账号资料（迁移，接入注销）；Vercel Web Analytics 看总量和中国大陆；业务数字从数据库出报表，不自研统计系统。第一步随公开站上线；第二步 Meta 像素和 Conversions API 等 Owner 投广告前再做 | Owner 确认方案第 9 节细节；GA4 和 Termly 账号、公开编号、Measurement Protocol 密钥由 Owner 提供（方案第 8 节）；排在官网线第一段之后（与 PUBLIC-SITE 同改根布局）；Vercel 自定义事件等 Vercel Pro | 高（PR-3 含迁移、注销和付款回调；PR-1、PR-2 只改前端） | 中 / 3（第二步另计 1–2） | — |
+| | ANALYTICS | 网站统计（第 2.1 节 2026-10-13 决定，方案 [ANALYTICS](tasks/ANALYTICS.md)）：Termly 同意弹窗（地区规则、Google Consent Mode v2、统计和广告脚本按 Termly 分类放行）；GA4 页面浏览（公开页；2026-10-13 起应用内也记，只发去掉编号的路由模板）和四个关键事件（注册、完成定位、开始付款、付款成功由服务器在 Stripe 回调履约后上报、按订单只记一次），不发邮箱、用户编号等能直接认出身份的信息，一次性密钥网址不统计；GA4 自定义渠道"AI 推荐"；注册时把首次来源写进账号资料（迁移，接入注销）；Vercel Web Analytics 看总量和中国大陆；业务数字从数据库出报表，不自研统计系统。第一步随公开站上线；第二步 Meta 像素和 Conversions API 等 Owner 投广告前再做 | 方案第 9 节已由 Owner 2026-10-13 确认（第 2.1 节）；GA4 和 Termly 账号、公开编号、Measurement Protocol 密钥由 Owner 提供（方案第 8 节）；排在官网线第一段之后（与 PUBLIC-SITE 同改根布局）；Vercel 自定义事件等 Vercel Pro | 高（PR-3 含迁移、注销和付款回调；PR-1、PR-2 只改前端） | 中 / 3（第二步另计 1–2） | — |
 | | V3-M3 → REL-1 | 完整验收和发布（第 9.3 节；正式环境没有真实用户，按新建环境发布，不做旧数据兼容和迁移）。上线清单（2026-10-12 补充，第 2.1 节）：开启 Stripe Tax 门槛监控（Stripe 正式环境设置须 Owner 批准）；核对 OpenRouter 账号和各 workspace 已关闭“允许用于训练”。2026-10-13 补充：核对首页摘要"复盘数据"的说法与 PUBLISH-MONITOR 验收结果一致（PUBLISH-MONITOR 仍是上线前置，见第 2.1 节；SEO 规范第 3.3 节）。 | 以上全部；PAY-FOUNDER、PAY-NOTIFY、PAY-EVIDENCE、PAY-DISPUTE-GUARD、SKILL-I18N-HOOK | 高；生产另行批准 | 大 | V3-M3：阻塞：等第 0–4 阶段的 D1 范围全部完成（依赖"以上全部"） |
 | **5 上线后** | INTEGRATION-BASE → V3-FEISHU、SOCIAL-SYNC | 沿用 v11 §8（C1 套餐式自动追踪已确认）。2026-10-13：SOCIAL-SYNC 并入 PUBLISH-MONITOR 上线前完成（第 2.1 节），本行只剩 INTEGRATION-BASE、V3-FEISHU | REL-1 上线 | 高 | 大 | SOCIAL-SYNC：关闭：2026-10-13 并入 PUBLISH-MONITOR 上线前完成 |
 | | CHARGEBACK | 方向（Owner 2026-10-04，第 2.1 节第 51 项，[记录 W](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5981381009)、[记录 X](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5981808905)；**上线后任务，不阻塞上线**）：拒付最终判定输了，按商品分别处理：订阅按退款规则处理这一期（扣掉还没用完的积分、终止这份订阅以后的积分发放，是创始会员的立即结束创始身份，名额不放回）；微信一次性会员结束这一期，1 年期的终止以后按月发放的积分、扣掉这一期还没用完的积分（是创始会员的同样结束创始身份）；订阅和微信一次性会员被冻结的已发积分判输扣回、判赢解冻，不动其他来源（[记录 AC](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5982525998)）；积分包扣回这个包里没用完的积分、判赢解冻，不动其他来源的积分（[记录 Z](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5982115736)）；所有拒付都不自动接受，由 Owner 人工处理（[记录 Y](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5982111397)）；赢了就解除 PAY-DISPUTE-GUARD 的冻结、恢复，按幂等处理（拒付期间被暂停的按月积分，判赢后按原发放日逐期补发，幂等，不改变原会员期限和发放日期，不延到原到期日之后）；订阅判赢后不自动恢复扣费，提醒用户自己重新订阅；判输时订阅终止（[记录 AD](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5982615688)），具体由 CHARGEBACK 方案提出、Owner 批准；一键导出申诉材料（用收款核心的同意记录，原写 PAY-WAFFO，及 PAY-EVIDENCE 的付款证据）；限制同一人反复拒付；信用卡账单商户名（由 Waffo 控制）。续费和到期提醒归 PAY-NOTIFY，拒付事件接收和可撤回冻结归 PAY-DISPUTE-GUARD，上线前完成（2026-10-09 拆分）。拒付通知方式、举证截止日和手续费（每笔 $25）已由 [Waffo 2026-10-10 答复](https://github.com/Crnobog9527/GraylumAI_vercel/pull/752#issuecomment-6095292601)；开工前仍须向 Waffo 核实要交的材料和账单商户名。2026-10-12 补充：新订单改走 Stripe（MP 订单由 Stripe 作为记录商户处理拒付，大陆通道和钱包单笔由我们处理），上文 Waffo 的通知方式、手续费、材料和账单商户名只适用于旧 Waffo 订单；按 Stripe 的做法实施时由方案细化 | PAY-STRIPE-MP、PAY-NOTIFY、PAY-EVIDENCE、PAY-DISPUTE-GUARD；拒付材料和账单商户名核实（旧 Waffo 订单仍向 Waffo 核实） | 高 | 待实施方案细化 | — |

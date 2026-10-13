@@ -11,7 +11,6 @@ vi.mock('@upstash/ratelimit', () => ({ Ratelimit: class {
 } }));
 
 const id = '00000000-0000-4000-8000-000000000001';
-const scope = { projectId: id, roundId: id, stepId: 'step' };
 const workflow = { id: 'flow', version: 1, kind: 'document',
   steps: [{ id: 'step', title: 'Step', dependsOn: [], resources: ['SKILL.md'], minLength: 1,
     maxLength: 2000, requiresEvidence: false, requiredCapabilities: [] }],
@@ -51,7 +50,8 @@ beforeEach(() => {
 });
 afterEach(() => { vi.unstubAllEnvs(); vi.useRealTimers(); });
 
-const entries = ['generation quote', 'generation execute', 'research search', 'research cancel', 'checkout', 'subscription change'] as const;
+// LEGACY-CLOSE removed the old workbench generation and search entry points.
+const entries = ['checkout', 'subscription change'] as const;
 for (const entry of entries) {
   describe(entry, () => {
     it.each(['over limit', 'backend error', 'timeout', 'missing config'] as const)('rejects %s before paid work', async fault => {
@@ -61,22 +61,9 @@ for (const entry of entries) {
       if (fault === 'timeout') { vi.useFakeTimers(); state.limit.mockImplementation(() => new Promise(() => {})); }
       const f = fixture();
       const transport = vi.fn(() => { throw new Error('Provider must never run'); });
-      let run: () => Promise<unknown>;
-      if (entry.startsWith('generation')) {
-        const { workbenchGeneration } = await import('../artifacts/generation');
-        const service = workbenchGeneration(f.client as never, f.admin as never, transport as never);
-        const input = { ...scope, instruction: '', expectedSteps: { step: { version: 0, reviewVersion: 0 } } };
-        run = entry === 'generation quote' ? () => service.quote(input) : () => service.generate({ ...input, requestId: id, quoteHash: 'a'.repeat(64), budgetCredits: 1 });
-      } else if (entry.startsWith('research')) {
-        const { workbenchSearch } = await import('../research/workbenchSearch');
-        const service = workbenchSearch(f.client as never, f.admin as never, transport as never);
-        const input = { ...scope, requestId: id, query: 'synthetic query' };
-        run = entry === 'research search' ? () => service.search(input) : () => service.cancel(input);
-      } else {
-        const { assertCheckoutRateLimit, assertSubscriptionChangeRateLimit } = await import('../stripe');
-        run = () => (entry === 'checkout' ? assertCheckoutRateLimit : assertSubscriptionChangeRateLimit)(id,
-          new Headers({ 'x-vercel-forwarded-for': '203.0.113.7' }));
-      }
+      const { assertCheckoutRateLimit, assertSubscriptionChangeRateLimit } = await import('../stripe');
+      const run = () => (entry === 'checkout' ? assertCheckoutRateLimit : assertSubscriptionChangeRateLimit)(id,
+        new Headers({ 'x-vercel-forwarded-for': '203.0.113.7' }));
       const assertion = expect(run()).rejects.toMatchObject({
         code: fault === 'over limit' ? 'TOO_MANY_REQUESTS' : 'SERVICE_UNAVAILABLE',
         cause: { retryAfter: 60 },
