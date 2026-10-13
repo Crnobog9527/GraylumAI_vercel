@@ -1,0 +1,105 @@
+/* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+/*
+ * The light foundation (DESIGN.md "Light foundation"): colors, type, radii and shadows taken from the
+ * accepted conversation workbench (workspace-frame, question-card, capture-checklist, work-composer and
+ * positioning-result modules). Public pages and the landing demo put `.light` on their root; the workbench
+ * keeps its own scoped values and is not changed by this file.
+ *
+ * The shadcn variables at the end make Button, Textarea and the other ui/ components render as they do on
+ * the workbench (dark #262626 primary action, white fields, quiet borders).
+ */
+.light {
+  /* Surfaces */
+  --gl-canvas: #f7f7f7;
+  --gl-surface: #fff;
+  --gl-surface-subtle: #fafafa;
+  --gl-surface-muted: #f4f4f5;
+  --gl-surface-warm: #faf9f5;
+  /* Text */
+  --gl-text: #262626;
+  --gl-text-body: #444;
+  --gl-text-secondary: #777;
+  --gl-text-tertiary: #999;
+  --gl-text-placeholder: #aaa;
+  /* Small text on public pages must reach 4.5:1 on white; #777 and #999 are workbench-only. */
+  --gl-text-secondary-aa: #6b6b6b;
+  /* Lines */
+  --gl-border: #ededed;
+  --gl-border-control: #e5e5e5;
+  --gl-border-strong: #dcdcdc;
+  /* The one primary action per area */
+  --gl-action: #262626;
+  --gl-action-hover: #3b3b3b;
+  --gl-action-text: #fff;
+  /* Warm accent: the current work, the recommended choice, the brand mark */
+  --gl-accent-selected: #faf4e5;
+  --gl-accent-tag: #f4efe3;
+  --gl-accent-tag-text: #7a5f2c;
+  --gl-accent-gold: #ffbb17;
+  --gl-accent-gold-soft: rgba(255, 187, 23, 0.1);
+  --gl-accent-gold-text: #ad6700;
+  --gl-brand-gold: #ffd700;
+  /* States (same tones as the conversation notices) */
+  --gl-success: #2f6a3b;
+  --gl-success-bg: #f1f7f2;
+  --gl-warning: #76592a;
+  --gl-warning-bg: #faf6ee;
+  --gl-error: #a23b3b;
+  --gl-error-bg: #fcf1f1;
+  --gl-info: #2563a8;
+  /* Shape */
+  --gl-radius-sm: 6px;
+  --gl-radius-control: 8px;
+  --gl-radius-card: 12px;
+  --gl-radius-dialog: 18px;
+  --gl-radius-composer: 25px;
+  --gl-radius-pill: 999px;
+  --gl-shadow-panel: 0 2px 8px rgba(2, 4, 26, 0.06);
+  --gl-shadow-composer: 0 2px 7px rgba(2, 4, 26, 0.043);
+  --gl-shadow-menu: 0 14px 34px rgba(0, 0, 0, 0.13);
+  --gl-shadow-dialog: 0 16px 48px rgba(0, 0, 0, 0.08);
+  /* Type scale (px / line height) */
+  --gl-text-micro: 11px;
+  --gl-text-caption: 12px;
+  --gl-text-ui: 13px;
+  --gl-text-base: 14px;
+  --gl-text-message: 15px;
+  --gl-text-title: 17px;
+  --gl-leading-ui: 1.6;
+  --gl-leading-message: 1.75;
+  --gl-motion: 150ms ease;
+
+  /* Workbench aliases used inside the reused conversation components */
+  --bg-primary: var(--gl-surface);
+  --bg-secondary: var(--gl-canvas);
+  --bg-tertiary: #f1f1f2;
+  --text-primary: var(--gl-text);
+  --text-secondary: var(--gl-text-secondary);
+  --text-tertiary: var(--gl-text-tertiary);
+  --border-primary: var(--gl-border);
+  --color-primary: #242424;
+  --color-secondary: #444;
+  /* shadcn (ui/) */
+  --background: 0 0% 100%;
+  --foreground: 0 0% 15%;
+  --card: 0 0% 100%;
+  --card-foreground: 0 0% 15%;
+  --popover: 0 0% 100%;
+  --popover-foreground: 0 0% 15%;
+  --primary: 0 0% 15%;
+  --primary-foreground: 0 0% 100%;
+  --secondary: 0 0% 96%;
+  --secondary-foreground: 0 0% 15%;
+  --muted: 0 0% 96%;
+  --muted-foreground: 0 0% 47%;
+  --accent: 0 0% 96%;
+  --accent-foreground: 0 0% 15%;
+  --border: 0 0% 90%;
+  --input: 0 0% 90%;
+  --ring: 0 0% 60%;
+
+  color-scheme: light;
+  background: var(--gl-canvas);
+  color: var(--gl-text);
+  font-family: var(--font-primary);
+}

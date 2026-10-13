@@ -1,0 +1,195 @@
+/* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+'use client';
+
+import { useEffect, useReducer, useRef, useState } from 'react';
+import { ArrowUp, Box, PanelRightClose, PanelRightOpen, Plus, X } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { MessageMarkdown } from '@/components/chat/MessageMarkdown';
+import { CaptureChecklist } from '@/components/opc/capture-checklist';
+import { OTHER_PLACEHOLDER, QuestionCardView } from '@/components/opc/question-card';
+import frame from '@/components/opc/workspace-frame.module.css';
+import composer from '@/components/opc/work-composer.module.css';
+import result from '@/components/opc/positioning-result.module.css';
+import { cn } from '@/lib/utils';
+import {
+  DEMO_LABEL, DEMO_NOTE, DEMO_STEPS, REPORT_BODY, REPORT_INTRO, REPORT_TITLE,
+  demoInformation, demoReducer, initialDemoState, openQuestion, type DemoMessage,
+} from './demo-script';
+import styles from './demo.module.css';
+
+const noop = () => undefined;
+
+/** Reveals a new mentor reply a few characters at a time, like the live stream; reduced motion shows it whole. */
+function useReveal(liveId: string | null, text: string, onDone: () => void) {
+  const [shown, setShown] = useState<number | null>(null);
+  const done = useRef(onDone);
+  done.current = onDone;
+  useEffect(() => {
+    if (!liveId) return;
+    if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) { done.current(); return; }
+    let count = -1;
+    const cleanup: { timer?: number } = {};
+    setShown(-1);
+    const start = window.setTimeout(() => {
+      const timer = window.setInterval(() => {
+        count += 3;
+        if (count >= text.length) { window.clearInterval(timer); setShown(null); done.current(); return; }
+        setShown(count);
+      }, 28);
+      cleanup.timer = timer;
+    }, 550);
+    return () => { window.clearTimeout(start); if (cleanup.timer) window.clearInterval(cleanup.timer); setShown(null); };
+  }, [liveId, text]);
+  return shown;
+}
+
+function Message({ message, shown }: { message: DemoMessage; shown: number | null }) {
+  if (message.role === 'user') {
+    return (
+      <div data-message-role="user" className="ml-8 rounded-xl bg-[var(--bg-tertiary)] p-3">
+        <span className="text-xs text-[var(--text-secondary)]">{message.label}</span>
+        <p className={`mt-1 whitespace-pre-wrap break-words ${result.messageBody}`}>{message.text}</p>
+      </div>
+    );
+  }
+  const live = shown !== null;
+  return (
+    <div data-message-role="assistant" data-step-summary={message.summary || undefined}
+      className="mr-4 rounded-xl border border-[var(--border-primary)] p-3">
+      <span className={result.agentIdentity}><img src="/graylum-logo.png" alt="" width={22} height={22} />{message.label}</span>
+      {live && shown < 0
+        ? <p className={cn('mt-1', result.messageBody, styles.thinking)}>导师正在思考…</p>
+        : <MessageMarkdown className={`mt-1 ${result.messageBody}`} text={live ? message.text.slice(0, shown) : message.text} streaming={live} />}
+    </div>
+  );
+}
+
+/**
+ * The landing demo (module 3): the real conversation components fed with a scripted, made-up case. The visitor
+ * can answer the question card, edit and confirm the checklist, open the report and switch panels. No request
+ * leaves the page: nothing here imports the tRPC client, Supabase or fetch.
+ */
+export function DemoWorkspace() {
+  const [state, dispatch] = useReducer(demoReducer, undefined, initialDemoState);
+  const [rightOpen, setRightOpen] = useState(true);
+  const [otherHint, setOtherHint] = useState(false);
+  const log = useRef<HTMLDivElement>(null);
+  const live = state.messages.find(message => message.id === state.liveId);
+  const shown = useReveal(state.liveId, live?.text ?? '', () => dispatch({ type: 'settled' }));
+  const card = state.liveId ? null : openQuestion(state);
+  const panel = state.panel === 'report' ? 'chat' : state.panel;
+
+  useEffect(() => {
+    const node = log.current;
+    if (node) node.scrollTop = node.scrollHeight;
+  }, [state.messages.length, shown, card]);
+
+  const steps = DEMO_STEPS;
+  return (
+    <div className={styles.window} role="group" aria-label="教练工作演示（示例）">
+      <div className={styles.chrome}>
+        <span className={styles.badge}>{DEMO_LABEL}</span>
+        <p>{DEMO_NOTE}</p>
+        <button type="button" onClick={() => { dispatch({ type: 'reset' }); setOtherHint(false); }}>重新开始</button>
+      </div>
+      <div role="group" aria-label="切换显示" className={styles.tabs}>
+        <button type="button" aria-pressed={panel === 'chat'} onClick={() => dispatch({ type: 'panel', panel: 'chat' })}>对话</button>
+        <button type="button" aria-pressed={panel === 'checklist'}
+          onClick={() => dispatch({ type: 'panel', panel: 'checklist' })}>定位清单</button>
+      </div>
+      <div className={styles.shell} data-panel={panel} data-right={rightOpen ? 'open' : 'closed'}>
+        <section className={cn(frame.center, styles.centerPane)} aria-label="对话">
+          <main className={`${result.workspaceMain} ${result.conversationPage} h-full w-full text-[var(--text-primary)]`}>
+            <div className={result.workspaceContent}>
+              <header className={result.positionTop}>
+                <h3 className="m-0 text-[13px] font-medium">我的定位分析</h3>
+                <div className={result.positionActions}>
+                  <span>整体规划 · {state.valid ? '第一步已确认' : '进行中'}</span>
+                  <button type="button" className={styles.hideNarrow} aria-label={rightOpen ? '收起右边栏' : '展开右边栏'}
+                    onClick={() => setRightOpen(open => !open)}>
+                    {rightOpen ? <PanelRightClose size={18} /> : <PanelRightOpen size={18} />}
+                  </button>
+                </div>
+              </header>
+              <nav aria-label="定位步骤" className={result.phaseStrip} style={{ gridTemplateColumns: `repeat(${steps.length},minmax(0,1fr))` }}>
+                {steps.map((step, index) => (
+                  <Button key={step.id} variant={index === 0 ? 'default' : 'outline'} aria-current={index === 0 ? 'step' : undefined}
+                    disabled={index > 0}>
+                    {index === 0 && state.valid ? '✓ ' : `${index + 1} `}{step.title}
+                  </Button>
+                ))}
+              </nav>
+              <section aria-label="当前定位步骤">
+                <article className={result.stepArticle}>
+                  <div className={result.stepColumns}>
+                    <div className={result.mentorChat}>
+                      <div ref={log} role="log" aria-label="示例对话" aria-live="polite" className="space-y-3">
+                        {state.messages.map(message => (
+                          <Message key={message.id} message={message} shown={message.id === state.liveId ? shown : null} />
+                        ))}
+                      </div>
+                      <div className={composer.wrap}>
+                        <div className={composer.composer}>
+                          {card ? (
+                            <div className={cn(composer.attachment, styles.attachment)}>
+                              <QuestionCardView card={card} docked onAnswer={(_, option) => { setOtherHint(false); dispatch({ type: 'answer', option }); }}
+                                onOther={() => setOtherHint(true)} />
+                            </div>
+                          ) : null}
+                          <div className={styles.fakeEditor} aria-hidden="true">{OTHER_PLACEHOLDER}</div>
+                          <div className={composer.tools}>
+                            <div className={composer.toolLeft}>
+                              <div className={composer.menuAnchor}><button type="button" aria-label="添加资料" disabled><Plus size={19} /></button></div>
+                              <div className={composer.menuAnchor}><button type="button" aria-label="使用技能" disabled><Box size={18} /></button></div>
+                            </div>
+                            <div className={composer.toolRight}>
+                              <button type="button" aria-label="发送" className={composer.send} disabled><ArrowUp size={18} /></button>
+                            </div>
+                          </div>
+                        </div>
+                        {otherHint ? <p className={styles.composerHint}>演示里请点上面的选项；真实对话里可以直接用自己的话回答。</p> : null}
+                      </div>
+                    </div>
+                  </div>
+                </article>
+              </section>
+              <footer className={result.publishBar}>
+                <div>
+                  <Button variant="outline" disabled={!state.valid} onClick={() => dispatch({ type: 'report', open: true })}>生成报告</Button>
+                </div>
+                <p>{state.valid ? '示例：点「生成报告」看报告长什么样' : '确认第一步后，可以看示例报告'}</p>
+              </footer>
+            </div>
+          </main>
+        </section>
+        <aside className={cn(frame.right, styles.rightPane)} aria-label="定位清单">
+          <div className={result.panel}>
+            <header><h2>定位清单</h2><p>跟着对话自动记录；每一步核对后确认一次</p></header>
+            <div className={result.body}>
+              <CaptureChecklist steps={DEMO_STEPS} information={demoInformation(state)} valid={{ you: state.valid }}
+                edits={{}} selectedStepId="you" editable={!state.valid} manual={false} locked={false}
+                confirmable={() => true} confirmation={() => 'none'} saveState={state.typed.length ? { you: 'saved' } : {}} conflicts={{}} resolving={null}
+                onEdit={(_, fieldId, text) => dispatch({ type: 'edit', fieldId, text })} onComposition={noop} onResolve={noop}
+                onReview={() => dispatch({ type: 'confirm' })} onRecoverConfirmation={noop} onKeepConflict={noop} onRetrySave={noop} />
+            </div>
+          </div>
+        </aside>
+      </div>
+      {state.reportOpen ? (
+        <div className={styles.overlay}>
+          <div role="dialog" aria-modal="true" aria-label={REPORT_TITLE} className={`${result.consentCard} !max-w-2xl`}
+            onKeyDown={event => { if (event.key === 'Escape') dispatch({ type: 'report', open: false }); }}>
+            <header>
+              <h2>{REPORT_TITLE}</h2>
+              <Button className={result.consentClose} variant="ghost" aria-label="关闭报告" onClick={() => dispatch({ type: 'report', open: false })}>
+                <X size={18} aria-hidden="true" />
+              </Button>
+            </header>
+            <p>{REPORT_INTRO}</p>
+            <MessageMarkdown text={REPORT_BODY} />
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
