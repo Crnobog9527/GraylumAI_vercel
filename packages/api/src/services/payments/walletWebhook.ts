@@ -4,11 +4,28 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { resolveStripeScope } from './stripeCheckoutPersistence';
 import { readWalletPaymentEvidence } from './walletPaymentEvidence';
 import { walletMembershipTerm } from './methodMembershipTerm';
+import { readCardPaymentEvidence, type CardOrder, type CardPaymentEvidence } from './cardPaymentEvidence';
 
-/** Resolve ownership from the original checkout mapping. Event metadata cannot choose an account.
- * The same entry supports callback retry and original-session recovery after a timeout. */
+const isCard = (method: string) => method === 'card' || method === 'card_cn';
+
+/** The price this order was admitted with, from the same mapping admission used. */
+async function orderPriceId(db: SupabaseClient, order: { price_ref_id: string; merchant_namespace: string }) {
+  const price = await db.from('payment_provider_refs').select('external_id').eq('id', order.price_ref_id).eq('channel', 'stripe')
+    .eq('merchant_namespace', order.merchant_namespace).eq('mode', 'test').eq('object_type', 'price').maybeSingle();
+  if (price.error || !price.data?.external_id) throw new Error('PAY_WAFFO_PERSISTENCE_UNAVAILABLE');
+  return price.data.external_id as string;
+}
+
 export async function recoverWalletCheckout(db: SupabaseClient, stripe: Stripe, sessionId: string,
   verifiedEventType?: string) {
+  return Boolean(await recoverMethodCheckout(db, stripe, sessionId, verifiedEventType));
+}
+
+/** New-method orders (wallet one-time, PAY-STRIPE-MP card / card_cn): resolve ownership from the original
+ * checkout mapping, never event metadata. Supports callback retry, browser return and original-session
+ * recovery after a timeout. Returns null for orders of the legacy path. */
+export async function recoverMethodCheckout(db: SupabaseClient, stripe: Stripe, sessionId: string,
+  verifiedEventType?: string): Promise<{ orderId: string } | null> {
   const scope = await resolveStripeScope(stripe);
   const refs = await db.from('payment_provider_refs').select('order_id').eq('channel', 'stripe')
     .eq('merchant_namespace', scope.merchant).eq('mode', scope.mode).eq('object_type', 'checkout').eq('external_id', sessionId).maybeSingle();
@@ -21,17 +38,22 @@ export async function recoverWalletCheckout(db: SupabaseClient, stripe: Stripe, 
     recoveredSession = await stripe.checkout.sessions.retrieve(sessionId);
     if (recoveredSession.object !== 'checkout.session' || recoveredSession.id !== sessionId) throw new Error('PAY_WAFFO_PAYMENT_CONFLICT');
     const originalId = recoveredSession.metadata?.orderId;
-    if (!originalId || !/^[0-9a-f-]{36}$/i.test(originalId)) return false;
+    if (!originalId || !/^[0-9a-f-]{36}$/i.test(originalId)) return null;
     orderId = originalId;
   }
   const result = await db.from('payment_orders').select('*').eq('id', orderId).maybeSingle();
   if (result.error || !result.data) throw new Error('PAY_WAFFO_PERSISTENCE_UNAVAILABLE');
   const order = result.data;
-  if (!order.payment_method) return false;
-  if (scope.mode !== 'test' || !['wechat_pay', 'alipay'].includes(order.payment_method)) throw new Error('PAY_WAFFO_PAYMENT_CONFLICT');
+  if (!order.payment_method) return null;
+  if (scope.mode !== 'test' || !['wechat_pay', 'alipay', 'card', 'card_cn'].includes(order.payment_method)) {
+    throw new Error('PAY_WAFFO_PAYMENT_CONFLICT');
+  }
   let observed: { status: string | null; payment_status: string } | null = null;
-  const cash = await readWalletPaymentEvidence({ stripe, scope, order, sessionId,
-    onValidatedSession: value => { observed = value; } });
+  const onValidatedSession = (value: Stripe.Checkout.Session) => { observed = value; };
+  const cash: CardPaymentEvidence | Awaited<ReturnType<typeof readWalletPaymentEvidence>> = isCard(order.payment_method)
+    ? await readCardPaymentEvidence({ stripe, scope, order: order as CardOrder, sessionId, onValidatedSession,
+      priceId: await orderPriceId(db, order) })
+    : await readWalletPaymentEvidence({ stripe, scope, order, sessionId, onValidatedSession });
   if (recoveredSession) {
     const bound = await db.rpc('pay_waffo_bind_checkout', { p_user: order.user_id, p_order: order.id, p_merchant: scope.merchant,
       p_checkout: recoveredSession.id, p_expires: new Date(recoveredSession.expires_at * 1000).toISOString() });
@@ -45,7 +67,7 @@ export async function recoverWalletCheckout(db: SupabaseClient, stripe: Stripe, 
         p_mode: 'test', p_checkout: sessionId, p_state: 'closed_unpaid', p_payment: null, p_amount: 0, p_currency: 'usd', p_paid_at: null });
       if (closed.error) throw new Error('PAY_WAFFO_CHECKOUT_UNAVAILABLE');
     }
-    return true;
+    return { orderId: order.id };
   }
   let renewal: { originalEnd: string; eligibleUntil: string } | undefined;
   if (order.method_transition === 'founder_renewal') {
@@ -57,13 +79,15 @@ export async function recoverWalletCheckout(db: SupabaseClient, stripe: Stripe, 
     }
     renewal = { originalEnd: new Date(original.data.entitlement_end).toISOString(), eligibleUntil: new Date(deadline.data).toISOString() };
   }
-  const term = order.item_type === 'membership_plan'
+  // A card subscription's term is the Stripe subscription's own current period (calendar month or year).
+  const card = 'subscription' in cash ? cash.subscription : null;
+  const term = card ? { start: card.start, end: card.end } : order.item_type === 'membership_plan'
     ? walletMembershipTerm({ paidAt: cash.paidAt, term: order.entitlement_term, founderRenewal: renewal }) : null;
   const applied = await db.rpc('pay_waffo_fulfill_payment', {
     p_order: order.id, p_merchant: scope.merchant, p_checkout: cash.checkoutId, p_payment: cash.paymentId,
-    p_amount: cash.amount, p_currency: cash.currency, p_paid_at: cash.paidAt, p_subscription: null,
+    p_amount: cash.amount, p_currency: cash.currency, p_paid_at: cash.paidAt, p_subscription: card?.id ?? null,
     p_start: term?.start ?? null, p_end: term?.end ?? null,
   });
   if (applied.error || !applied.data) throw new Error('PAY_WAFFO_FULFILLMENT_UNAVAILABLE');
-  return true;
+  return { orderId: order.id };
 }

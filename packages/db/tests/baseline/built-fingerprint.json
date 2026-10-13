@@ -2618,7 +2618,7 @@
   "fn:pay_waffo_create_transition(uuid,uuid,text,text,text,text,bigint,text,jsonb,text,uuid)": "21aa62604d24",
   "fn:pay_waffo_expire_gold_identities()": "83744f7fe07a",
   "fn:pay_waffo_founder_deadline(uuid)": "b30b8744bfdd",
-  "fn:pay_waffo_fulfill_payment(uuid,text,text,text,integer,text,timestamp with time zone,text,timestamp with time zone,timestamp with time zone)": "ef2013fd89f5",
+  "fn:pay_waffo_fulfill_payment(uuid,text,text,text,integer,text,timestamp with time zone,text,timestamp with time zone,timestamp with time zone)": "0dec4e74452e",
   "fn:pay_waffo_gold_digests(jsonb)": "c0f8fa4ddd7d",
   "fn:pay_waffo_grant_period(uuid,integer)": "fa718420c2d2",
   "fn:pay_waffo_internal_source_guard()": "dbccb1d0dcb5",

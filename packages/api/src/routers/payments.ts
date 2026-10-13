@@ -25,27 +25,19 @@ import {
   getStripeClient,
   getStripePortalReturnUrl,
 } from '../services/stripe';
-import {
-  fulfillCreditPackageOrder,
-  fulfillPaidMembershipCheckoutSession,
-  upsertPaymentOrderBySession,
-} from '../services/stripeFulfillment';
-import {
-  normalizePaymentOrderStatus,
-  type PaymentOrderStatus,
-} from '../services/paymentOrderStatus';
+import { fulfillCreditPackageOrder, fulfillPaidMembershipCheckoutSession, upsertPaymentOrderBySession } from '../services/stripeFulfillment';
+import { normalizePaymentOrderStatus, type PaymentOrderStatus } from '../services/paymentOrderStatus';
 import {
   resolveMembershipEligibility,
   type MembershipEligibilityResult,
   type MembershipBillingCycle,
 } from '../services/membershipEligibility';
-import {
-  isSubscriptionPlanChangeOrder,
-} from '../services/subscriptionPlanChangeLock';
+import { isSubscriptionPlanChangeOrder } from '../services/subscriptionPlanChangeLock';
 import { STRIPE_MANAGED_ACTIVE_SUBSCRIPTION_STATUSES } from '../services/subscriptionOverrides';
 import { addUtcCalendarMonthsClamped } from '../services/subscriptionCreditGrants';
 import { findStripeReference, resolveStripeOrderIds, loadCurrentStripeSubscription } from '../services/payments/stripeReferences';
 import { loadCurrentStripePrices } from '../services/payments/stripeCatalog';
+import { syncMethodCheckoutReturn } from '../services/payments/methodCheckoutSync';
 import { assertCreditPackageMembership } from '../services/payments/creditPackageMembership';
 import { mapPurchaseCheckoutError } from '../services/payments/purchaseCheckoutError';
 import { createDurableStripeCheckout, resolveStripeScope } from '../services/payments/stripeCheckoutPersistence';
@@ -1369,6 +1361,10 @@ export const paymentsRouter = router({
         });
       }
 
+      // Wallet and PAY-STRIPE-MP card orders never take the legacy recording below.
+      const methodReturn = await syncMethodCheckoutReturn(ctx.supabaseAdmin, stripe, session, ctx.profileId).catch(error => {
+        logSyncCheckoutStageFailure('method_checkout_recover', input, error); throw createPaymentOperationError('同步支付会话', error); });
+      if (methodReturn) return methodReturn;
       let syncStage = 'upsert_payment_order';
       let syncStageContext: Record<string, unknown> = {
         profileId: maskIdentifier(ctx.profileId),
