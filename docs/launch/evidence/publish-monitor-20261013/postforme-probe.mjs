@@ -94,23 +94,35 @@ function maskName(name) {
 function saveConsentUrl(platform, url) {
   const dir = join(homedir(), '.graylum', 'tmp');
   mkdirSync(dir, { recursive: true, mode: 0o700 });
-  const file = join(dir, `postforme-consent-${platform}.txt`);
+  const file = join(dir, `postforme-consent-${platform.replace(/[^a-z0-9_-]/gi, '_')}.txt`);
   writeFileSync(file, `${url}\n`, { mode: 0o600 });
   return file;
 }
 
-async function authUrl(platform, externalId) {
+// platformArg may carry a connection type, e.g. `instagram:facebook` or `instagram:instagram`.
+function platformData(platform, type) {
+  if (platform === 'linkedin') return { linkedin: { connection_type: type ?? 'organization' } };
+  if (platform === 'instagram') {
+    if (!type) throw new Error('instagram needs a connection type: instagram:instagram or instagram:facebook');
+    return { instagram: { connection_type: type } };
+  }
+  return undefined;
+}
+
+async function authUrl(platformArg, externalId) {
+  const [platform, type] = String(platformArg).split(':');
+  const data = platformData(platform, type);
   const r = await call('POST', '/social-accounts/auth-url', {
     // Analytics-only scope. Publishing scope is a separate consent and is not requested by this probe.
     platform, external_id: externalId ?? 'graylum-probe', permissions: ['feeds'],
-    // Quickstart projects must use the organization connection type for LinkedIn (provider docs).
-    ...(platform === 'linkedin' ? { platform_data: { linkedin: { connection_type: 'organization' } } } : {}),
+    // Quickstart LinkedIn must use `organization`; Instagram must choose its login flow when both are enabled.
+    ...(data ? { platform_data: data } : {}),
   });
   // The URL is a consent link for the Owner's own test account; print host and the private file path only.
   const url = r.json?.url ?? null;
   return {
     status: r.status, ms: r.ms, consent_host: url ? new URL(url).host : null,
-    consent_url_file: url ? saveConsentUrl(platform, url) : null, error: r.json?.message ?? r.errorText,
+    consent_url_file: url ? saveConsentUrl(String(platformArg), url) : null, error: r.json?.message ?? r.errorText,
   };
 }
 
@@ -174,7 +186,7 @@ const run = {
   accounts: () => accounts(), 'auth-url': () => authUrl(a, b), feed: () => feed(a, b), smoke: () => smoke(), burst: () => burst(a),
 }[cmd];
 if (!run) {
-  console.error('usage: accounts | auth-url <platform> [external_id] | feed <platform>[#n] [max_pages] | smoke | burst [n]');
+  console.error('usage: accounts | auth-url <platform>[:type] [external_id] | feed <platform>[#n] [max_pages] | smoke | burst [n]');
   process.exit(2);
 }
 console.log(JSON.stringify({ at: new Date().toISOString(), cmd, result: await run() }, null, 2));

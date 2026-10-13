@@ -163,6 +163,7 @@ Redirect URL 留空。脚本 `postforme-probe.mjs`，北京时间 16:13–16:15�
 
 脚本 [`postforme-probe.mjs`](postforme-probe.mjs) 只调用读接口和"生成授权链接"（只请求读数据权限 `feeds`，不请求发布权限），代码里写死拒绝发布接口；不打印密钥、账号编号、作品文字和素材地址（按平台名找账号，编号只在脚本内部使用）。
 `accounts` 给每个账号一个选择标记（如 `x#1`、`facebook#2`）和遮挡后的名字提示，同一平台有多个账号时用 `feed facebook#2` 指定；
+`auth-url` 的平台可以带连接方式：Instagram 必须写 `instagram:instagram` 或 `instagram:facebook`，LinkedIn 默认 `organization`。
 `auth-url` 把一次性授权链接写进本机 `~/.graylum/tmp/`（仅本人可读，不进仓库、不打印），Owner 从那个文件打开链接。
 
 ```bash
