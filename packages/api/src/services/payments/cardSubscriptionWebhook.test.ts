@@ -133,8 +133,18 @@ describe('PAY-STRIPE-MP card subscription webhooks', () => {
       expect(f.rpc).toHaveBeenCalledWith('pay_stripe_mp_sync_subscription', { p_subscription: 'local_sub', p_merchant: 'fixture',
         p_cancel_at_period_end: cancelAt, p_canceled: canceled });
     }
+    // Before the first payment is recorded: a plain state is acknowledged, a stop or cancellation is retried later.
     const early = fixture({ order: cardOrder });
+    early.raw.subscriptions.retrieve.mockResolvedValue({ object: 'subscription', id: 'sub_1', livemode: false, status: 'active', metadata: { orderId, userId: 'user' },
+      cancel_at: null, cancel_at_period_end: false, items: { data: [{ current_period_end: 1794472954 }] } });
     await expect(handleCardSubscriptionState(early.db, early.stripe, 'sub_1')).resolves.toBe(true);
+    for (const patch of [{ cancel_at_period_end: true }, { status: 'canceled' }]) {
+      const stopped = fixture({ order: cardOrder });
+      stopped.raw.subscriptions.retrieve.mockResolvedValue({ object: 'subscription', id: 'sub_1', livemode: false, status: 'active', metadata: { orderId, userId: 'user' },
+        cancel_at: null, cancel_at_period_end: false, items: { data: [{ current_period_end: 1794472954 }] }, ...patch });
+      await expect(handleCardSubscriptionState(stopped.db, stopped.stripe, 'sub_1')).rejects.toThrow('FIRST_PAYMENT_PENDING');
+      expect(stopped.rpc).not.toHaveBeenCalled();
+    }
     expect(early.rpc).not.toHaveBeenCalled();
   });
   it('leaves legacy subscriptions and invoices without a subscription to the legacy path', async () => {

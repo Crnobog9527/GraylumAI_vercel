@@ -157,8 +157,14 @@ export async function handleCardSubscriptionState(db: SupabaseClient, stripe: St
   const scope = await resolveStripeScope(stripe);
   const order = await findCardOrder(db, stripe, scope, subscriptionId);
   if (!order) return false;
-  // Created before the first payment is recorded: the first payment carries the state.
-  if (!order.localSubscriptionId) return true;
-  await syncState(db, scope.merchant, order.localSubscriptionId, await readSubscription(stripe, subscriptionId));
+  const subscription = await readSubscription(stripe, subscriptionId);
+  if (!order.localSubscriptionId) {
+    // Before the first payment is recorded there is nothing local to update. A plain state needs nothing, but a stop
+    // or cancellation must not be lost: refuse it so Stripe retries once the first payment has created the mapping.
+    const state = stripeStopState(subscription);
+    if (state.stop || state.canceled) throw new Error('PAY_STRIPE_MP_FIRST_PAYMENT_PENDING');
+    return true;
+  }
+  await syncState(db, scope.merchant, order.localSubscriptionId, subscription);
   return true;
 }
