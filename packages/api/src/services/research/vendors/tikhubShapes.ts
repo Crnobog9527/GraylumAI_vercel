@@ -208,8 +208,8 @@ const EMPTY_LIST_PATHS: Partial<Record<`${SocialPlatform}:${SocialKind}`, readon
   'tiktok:account_posts': ['data.aweme_list'],
   'youtube:keyword_posts': ['data.videos', 'data.contents'],
   'youtube:account_posts': ['data.videos', 'data.contents'],
-  'x:keyword_posts': ['data.timeline', 'data.tweets'],
-  'x:account_posts': ['data.timeline', 'data.tweets'],
+  'x:keyword_posts': ['data.entries', 'data.timeline', 'data.tweets'],
+  'x:account_posts': ['data.entries', 'data.timeline', 'data.tweets'],
   'instagram:account_posts': ['data.edges', 'data.items', 'data.data.items'],
 };
 

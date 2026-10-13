@@ -172,6 +172,9 @@ describe('callTikhub', () => {
     const instagram = await callTikhub({ platform: 'instagram', kind: 'account_posts', account: 'quiet' },
       deps(jsonFetch(200, { code: 200, data: { edges: [] } })));
     expect(instagram).toMatchObject({ outcome: 'ok', reason: 'NO_RESULTS' });
+    const xSearch = await callTikhub({ platform: 'x', kind: 'keyword_posts', keyword: 'zzzz' },
+      deps(jsonFetch(200, { code: 200, data: { entries: [] } })));
+    expect(xSearch).toMatchObject({ outcome: 'ok', reason: 'NO_RESULTS' });
     const drifted = await callTikhub({ platform: 'instagram', kind: 'account_posts', account: 'natgeo' },
       deps(jsonFetch(200, { code: 200, data: { edges: [], items: [{ changed: true }] } })));
     expect(drifted).toMatchObject({ outcome: 'failed', reason: 'EMPTY_OR_UNRECOGNIZED' });
