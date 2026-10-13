@@ -65,6 +65,12 @@ export function useConversationRename() {
       // A saved name stays on screen until the refreshed list carries it (no flicker back to the old
       // title); a refused one gives way to the server's title at once. Only the latest edit of this
       // conversation ends its overlay and owns the message: an older one never touches a newer edit.
+      // A saved non-empty name is the server's title now: put it in the list, so the screen stays right
+      // even if the refresh below fails. (A cleared name's default title only comes with the refresh.)
+      if (refused === null && name) {
+        utils.opc.conversations.setData(undefined, (rows) =>
+          rows?.map((row) => row.sessionId === sessionId ? { ...row, title: name } : row));
+      }
       const refreshed = utils.opc.conversations.invalidate();
       if (refused === null) await Promise.resolve(refreshed).catch(() => undefined);
       if (revisions.current.isLatest(sessionId, revision)) {

@@ -26,6 +26,8 @@ export function ConversationRow({ conversation, menuOpen, menuPosition, onOpenMe
         onChange={(event) => rename.setValue(event.target.value)}
         onBlur={() => void rename.save(conversation.sessionId, title)}
         onKeyDown={(event) => {
+          // Enter or Esc that accepts or cancels an IME candidate (Chinese input) is not a save or cancel.
+          if (event.nativeEvent.isComposing || event.keyCode === 229) return;
           if (event.key === 'Escape') { event.stopPropagation(); rename.cancel(); }
           if (event.key === 'Enter') event.currentTarget.blur();
         }}/>

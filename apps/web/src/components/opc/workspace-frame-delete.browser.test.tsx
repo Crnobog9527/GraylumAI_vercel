@@ -289,6 +289,18 @@ it('a second conversation saves while the first rename is still pending', () => 
   await page.evaluate(() => (window as unknown as { releaseRename?: () => void }).releaseRename?.());
 }, '#rename-slow'));
 
+it('Enter that accepts an IME candidate does not save the name', () => open(1280, async page => {
+  const input = await startRename(page);
+  await input.fill('周末');
+  await input.evaluate(element => {
+    element.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', keyCode: 229, isComposing: true, bubbles: true }));
+  });
+  await ui(input).toBeFocused();
+  expect(await renames(page)).toEqual([]);
+  await page.keyboard.press('Enter');
+  await ui.poll(() => renames(page)).toEqual([{ sessionId: SESSION, name: '周末' }]);
+}));
+
 it('rename input fits a 375px screen', () => open(375, async page => {
   await page.getByRole('button', { name: '打开导航' }).first().click();
   const input = await startRename(page);
