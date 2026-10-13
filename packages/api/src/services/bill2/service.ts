@@ -95,7 +95,7 @@ export function authoritativeBilling(deps: { budget?:RuntimeBudget; admin: Billi
     const remaining=Math.max(1,Math.floor(deps.budget?.remainingPersistence()??10_000));
     const result=await (financialNames.has(name)&&query.abortSignal ? query.abortSignal(AbortSignal.timeout(Math.min(10_000,remaining))) : query);
     if (result.error) {
-      if (name === 'bill2_claim' || name === 'bill2_dispatch') throw claimFailure(result.error);
+      if (name === 'bill2_claim' || name === 'bill2_dispatch' || name === 'fusion_group_claim') throw claimFailure(result.error);
       throw new Error('BILL2_DATABASE_UNAVAILABLE');
     }
     return result.data as T;
@@ -174,8 +174,26 @@ export function authoritativeBilling(deps: { budget?:RuntimeBudget; admin: Billi
       if (claimed.dispatchToken) capabilities.set(claimed.id, { token: claimed.dispatchToken, frozen: parsed, runId, actorId });
       return { id: claimed.id, state: claimed.state };
     }
+  /** FUSION-REVIEW: one atomic, idempotent batch claim (full hold or nothing, 0234). Fresh tokens become
+   * this process's dispatch capabilities; a replay returns no token, so its prepared calls need rotatePrepared. */
+  async function claimFusionGroup(groupId: string, stepKey: string, attempt: number, items: Array<{ runId: string; payload: FrozenCall }>) {
+    const parsed = items.map(item => ({ runId: uuid.parse(item.runId), sequence: 1, payload: call.parse(item.payload) }));
+    const actorId = uuid.parse(await deps.actor());
+    const claimed = await rpcAs<{ state: 'claimed' | 'waiting_credits'; calls: Array<DispatchClaim & { runId: string }> }>('fusion_group_claim',
+      { p_group_id: uuid.parse(groupId), p_step_key: z.string().min(1).max(128).parse(stepKey),
+        p_attempt: z.number().int().positive().parse(attempt), p_items: parsed }, actorId);
+    if (claimed.state === 'waiting_credits') return { state: 'waiting_credits' as const, calls: [] };
+    const calls = claimed.calls.map(claim => {
+      const item = parsed.find(entry => entry.runId === claim.runId);
+      if (!item) throw new Error('FUSION_GROUP_CONFLICT');
+      if (claim.dispatchToken) capabilities.set(claim.id, { token: claim.dispatchToken, frozen: item.payload, runId: item.runId, actorId });
+      return { runId: item.runId, id: claim.id, state: claim.state, fresh: Boolean(claim.dispatchToken) };
+    });
+    if (calls.length !== parsed.length) throw new Error('FUSION_GROUP_CONFLICT');
+    return { state: 'claimed' as const, calls };
+  }
   return {
-    readRun, finalizeRun, recoverReceipts,
+    readRun, finalizeRun, recoverReceipts, claimFusionGroup,
     /** Trusted server recovery of a retained transport observation; never exposed as a client receipt endpoint. */
     recordReceipt,
     createDraft: () => rpc<string>('bill2_create_draft', {}),
