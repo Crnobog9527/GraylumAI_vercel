@@ -88,7 +88,7 @@
 
 | 改动 | 由谁做 | 时机 |
 | --- | --- | --- |
-| DATA-ERASURE 文档修订：加入 `payment_order_evidence` 的保留期和注销规则 | 本任务单独开（规则文档变更，按 AGENTS 第 1 节由 Owner 批准） | Owner 定 E1–E3 之后，最先做 |
+| DATA-ERASURE 文档修订：加入 `payment_order_evidence` 的保留期和注销规则 | 本任务单独开（落实 Owner 已批准的 E1–E3；DATA-ERASURE 文档不是 AGENTS 第 1 节的规则文件，不需再批；正式环境和凭证操作仍另批） | 最先做 |
 | PR-E1（high，迁移 1 个，编号向总控申请）：新表、到期删除、注销清理、管理员只读查询、数据库测试 | 本任务单独开 | DATA-ERASURE 修订合并后；不依赖 MP |
 | 续费成功时顺延最初订单证据的 `expires_at`（沿 `source_order_id`） | MP 窗口在 PR-3 的 Stripe 续费处理里预留调用点最好；否则由 PR-E2 在 MP 停写后加入；验收见第 6 节"续费顺延" | MP PR-3 或 PR-E2 |
 | PR-E2（high）：在建订单的服务端入口把请求头传进来、在**同一个数据库事务**里和订单一起写入证据（证据写不进去，订单也不创建，不会生成可付款的结账页，用户重试即可） | **单独开、排在 MP 之后**：它改 `methodPayments.ts` / `methodPurchase.ts` 这条结账路径，必须等 MP 窗口 PR-2、PR-3 合并、停止写这几个文件之后再做；如果 MP 窗口届时还在改，就请 MP 窗口顺带加这几行，本任务只提供 PR-E1 的写入函数 | MP PR-3 合并后 |
