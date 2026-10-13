@@ -60,6 +60,19 @@ describe('PAY-STRIPE-MP card checkout adapter', () => {
     expect(mocks.dispatch).toHaveBeenLastCalledWith(expect.objectContaining({ createIfMissing: false,
       intent: expect.objectContaining({ card: { managedPayments: true, couponId: 'coupon_old' }, recover: true }) }));
   });
+  it('recovers a dispatched order from its frozen request even when no coupon mapping is current', async () => {
+    const providerRequest = { expires_at: 9999999999, discounts: [{ coupon: 'coupon_rolled_back' }] };
+    mocks.prepare.mockResolvedValue({ id, item_id: plan, price_ref_id: id, purchase_snapshot: snapshot('20.00'),
+      method_dispatched_at: '2026-10-13T00:00:00Z', checkout_request: { providerRequest } });
+    const f = fixture('card', null, { dispatch: false, frozenCoupon: 'coupon_rolled_back' });
+    await expect(createStripeCardCheckout(f.input)).resolves.toMatchObject({ state: 'open' });
+    expect(mocks.build).not.toHaveBeenCalled();
+    expect(f.eq).not.toHaveBeenCalledWith('object_type', 'coupon');
+    expect(f.rpc).toHaveBeenCalledWith('pay_waffo_claim_checkout', expect.objectContaining({
+      p_request: expect.objectContaining({ providerRequest }) }));
+    expect(mocks.dispatch).toHaveBeenLastCalledWith(expect.objectContaining({ createIfMissing: false,
+      intent: expect.objectContaining({ card: { managedPayments: true, couponId: 'coupon_rolled_back' }, recover: true }) }));
+  });
   it('refuses a fresh claim whose frozen coupon differs from the one just selected', async () => {
     const f = fixture('card', { external_id: 'coupon_new' }, { dispatch: true, frozenCoupon: 'coupon_old' });
     await expect(createStripeCardCheckout(f.input)).rejects.toThrow('PAY_WAFFO_CHECKOUT_UNAVAILABLE');
