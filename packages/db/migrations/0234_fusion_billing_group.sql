@@ -10,7 +10,7 @@
 BEGIN;
 
 CREATE TABLE IF NOT EXISTS public.fusion_billing_groups (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  id uuid DEFAULT gen_random_uuid() CONSTRAINT fusion_billing_groups_pk PRIMARY KEY,
   actor_id uuid NOT NULL REFERENCES public.profiles(id),
   request_id uuid NOT NULL,
   kind text NOT NULL CHECK (kind IN ('review','compare')),
@@ -18,7 +18,7 @@ CREATE TABLE IF NOT EXISTS public.fusion_billing_groups (
   weighted_nominal_usd numeric NOT NULL DEFAULT 0 CHECK (weighted_nominal_usd >= 0),
   version integer NOT NULL DEFAULT 0,
   created_at timestamptz NOT NULL DEFAULT now(),
-  UNIQUE (actor_id, request_id)
+  CONSTRAINT fusion_billing_groups_request_unique UNIQUE (actor_id, request_id)
 );
 CREATE TABLE IF NOT EXISTS public.fusion_billing_group_steps (
   group_id uuid NOT NULL REFERENCES public.fusion_billing_groups(id),
@@ -26,7 +26,7 @@ CREATE TABLE IF NOT EXISTS public.fusion_billing_group_steps (
   attempt integer NOT NULL CHECK (attempt BETWEEN 1 AND 32),
   call_ids uuid[] NOT NULL CHECK (cardinality(call_ids) BETWEEN 1 AND 16),
   created_at timestamptz NOT NULL DEFAULT now(),
-  PRIMARY KEY (group_id, step_key, attempt)
+  CONSTRAINT fusion_billing_group_steps_pk PRIMARY KEY (group_id, step_key, attempt)
 );
 ALTER TABLE public.bill2_runs ADD COLUMN IF NOT EXISTS fusion_group_id uuid REFERENCES public.fusion_billing_groups(id);
 CREATE INDEX IF NOT EXISTS bill2_runs_fusion_group_idx ON public.bill2_runs(fusion_group_id) WHERE fusion_group_id IS NOT NULL;
@@ -213,7 +213,8 @@ DO $$ DECLARE src text; a1 text; a2 text; a3 text; a4 text; a5 text; BEGIN
  PERFORM id FROM bill2_calls WHERE run_id=rid ORDER BY id FOR UPDATE;$x$);
     src:=replace(src,a3,$x$  IF fusion_purpose(c.payload) AND c.dispatched_at IS NOT NULL AND NOT c.provider_rejected
    AND NOT (r.closed AND r.outcome='confirmed_failure') AND c.fusion_verdict IS NULL THEN
-   IF NOT erasing THEN CONTINUE;END IF;
+   -- Only account closure ends an unjudged call at zero charge; ordinary content deletion keeps the hold.
+   IF NOT bill2_erasure_closed(a,rid) THEN CONTINUE;END IF;
    UPDATE bill2_calls SET fusion_verdict='erased_before_verdict' WHERE id=c.id RETURNING * INTO c;
   END IF;
 $x$||a3);

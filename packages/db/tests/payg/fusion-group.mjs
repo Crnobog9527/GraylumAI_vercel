@@ -89,6 +89,19 @@ export async function fusionGroupCases({db,Client,connectionString,report,create
   assert.equal(await wallet(db,bad.actor),17);
   report.checks.push('format_invalid verdict charges zero and releases the full hold; the usable member still rounds once');
 
+  // Content deletion (not account closure) before the verdict keeps the hold and settles nothing.
+  const deleted = await group(db,createFixture,{n:1,credits:9});
+  const dc = await claimGroup(db,deleted);
+  await dispatchAll(db,deleted,dc);
+  await record(db,deleted,deleted.members[0],dc.calls[0],'0.0004');
+  await db.query('UPDATE bill2_runs SET content_deleted_at=now() WHERE id=$1',[deleted.runs[0]]);
+  await rpc(db,'bill2_finalize',deleted.actor,deleted.runs[0]);
+  const kept = (await calls(db,deleted.runs))[0];
+  assert.equal(kept.fusion_verdict,null,'content deletion does not synthesize a zero-charge verdict');
+  assert.equal(kept.settled_at,null);
+  assert.equal(await wallet(db,deleted.actor),0,'the hold stays until a host verdict');
+  report.checks.push('content deletion before the verdict keeps the hold; only account closure ends an unjudged call at zero charge');
+
   // 6. Erasure before the verdict ends in a zero-charge verdict for every member.
   const erased = await group(db,createFixture,{n:2,credits:18});
   const ec = await claimGroup(db,erased);
