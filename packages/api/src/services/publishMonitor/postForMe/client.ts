@@ -1,0 +1,143 @@
+/* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import { z } from 'zod';
+import { exchange, type FetchImpl, type PostForMeExchange, publicHttpsUrl } from './http';
+import { normalizeFeedPage, type FeedPage } from './normalize';
+
+/**
+ * Post for Me client for PUBLISH-MONITOR (plan §4.1). Read paths, consent links and account removal only;
+ * there is deliberately no publishing call here (PR-5, every real publish needs Owner approval).
+ * Every call passes the shared limiter first: one key serves all users (40/min, 5/s measured 2026-10-13).
+ */
+export type Limiter = { acquire(): Promise<{ ok: true } | { ok: false; retryAfterSeconds: number }> };
+export type ClientDeps = { apiKey: string; limiter: Limiter; fetchImpl?: FetchImpl; timeoutMs?: number };
+
+export type Outcome<T> =
+  | { kind: 'ok'; value: T }
+  /** Shared limiter or provider 429: nothing was done; try again after the delay. */
+  | { kind: 'rate_limited'; retryAfterSeconds: number }
+  /** The provider answered with a definite client error: the request was not carried out. */
+  | { kind: 'rejected'; status: number }
+  /** Answered but unusable (5xx, unreadable, wrong shape): treat as "not fetched", keep old data. */
+  | { kind: 'failed'; status: number | null; reason: string }
+  /** No answer: the request may or may not have taken effect. Callers reconcile; never blindly resend writes. */
+  | { kind: 'unknown'; reason: string };
+
+const ACCOUNT_ID = /^[A-Za-z0-9_-]{1,128}$/;
+const EXTERNAL_ID = /^[a-z0-9]{16,64}\.[a-z0-9]{16,64}$/;
+const PLATFORM = z.enum(['tiktok', 'tiktok_business', 'instagram', 'facebook', 'x', 'threads', 'linkedin',
+  'pinterest', 'bluesky', 'youtube']);
+export type PostForMePlatform = z.infer<typeof PLATFORM>;
+
+const accountSchema = z.object({
+  id: z.string().regex(ACCOUNT_ID),
+  platform: z.string().max(32),
+  status: z.enum(['connected', 'disconnected']),
+  external_id: z.string().max(200).nullable().optional(),
+  username: z.string().max(200).nullable().optional(),
+}).passthrough();
+export type PostForMeAccount = { id: string; platform: string; status: 'connected' | 'disconnected';
+  externalId: string | null; username: string | null };
+
+function account(raw: z.infer<typeof accountSchema>): PostForMeAccount {
+  return { id: raw.id, platform: raw.platform, status: raw.status, externalId: raw.external_id ?? null,
+    username: raw.username ?? null };
+}
+
+function classify<T>(result: PostForMeExchange, parse: (json: unknown) => T | null): Outcome<T> {
+  if (result.kind === 'unknown') return { kind: 'unknown', reason: result.reason };
+  if (result.kind === 'unreadable') {
+    if (result.status === 429) return { kind: 'rate_limited', retryAfterSeconds: 60 };
+    return result.status >= 400 && result.status < 500 && result.status !== 408
+      ? { kind: 'rejected', status: result.status } : { kind: 'failed', status: result.status, reason: result.reason };
+  }
+  if (result.status === 429) return { kind: 'rate_limited', retryAfterSeconds: result.retryAfterSeconds ?? 60 };
+  if (result.status === 408) return { kind: 'unknown', reason: 'PROVIDER_TIMEOUT' };
+  if (result.status >= 400 && result.status < 500) return { kind: 'rejected', status: result.status };
+  if (result.status < 200 || result.status >= 300) {
+    return { kind: 'failed', status: result.status, reason: 'PROVIDER_ERROR' };
+  }
+  const value = parse(result.json);
+  return value === null ? { kind: 'failed', status: result.status, reason: 'RESPONSE_SHAPE' } : { kind: 'ok', value };
+}
+
+async function call<T>(deps: ClientDeps, request: Parameters<typeof exchange>[0],
+  parse: (json: unknown) => T | null): Promise<Outcome<T>> {
+  const slot = await deps.limiter.acquire();
+  if (!slot.ok) return { kind: 'rate_limited', retryAfterSeconds: slot.retryAfterSeconds };
+  return classify(await exchange(request, deps.apiKey, deps), parse);
+}
+
+function assertAccountId(id: string) {
+  if (!ACCOUNT_ID.test(id)) throw new Error('POSTFORME_ACCOUNT_ID_INVALID');
+}
+
+export function getAccount(deps: ClientDeps, id: string): Promise<Outcome<PostForMeAccount>> {
+  assertAccountId(id);
+  return call(deps, { method: 'GET', path: `/social-accounts/${id}` }, json => {
+    const parsed = accountSchema.safeParse(json);
+    return parsed.success ? account(parsed.data) : null;
+  });
+}
+
+/** Accounts carrying one exact external_id (used to find what an attempt imported, plan §4.1). */
+export function listAccountsByExternalId(deps: ClientDeps, externalId: string): Promise<Outcome<PostForMeAccount[]>> {
+  if (!EXTERNAL_ID.test(externalId)) throw new Error('POSTFORME_EXTERNAL_ID_INVALID');
+  const query = new URLSearchParams({ external_id: externalId, limit: '100' });
+  return call(deps, { method: 'GET', path: `/social-accounts?${query}` }, json => {
+    const parsed = z.object({ data: z.array(accountSchema).max(100) }).passthrough().safeParse(json);
+    return parsed.success ? parsed.data.data.map(account) : null;
+  });
+}
+
+export type AuthUrlInput = { platform: PostForMePlatform; externalId: string; permissions: Array<'feeds' | 'posts'>;
+  connectionType?: 'organization' | 'instagram' | 'facebook' };
+
+/** Consent link for the user's own account. Read-only scope unless publishing consent was given (plan §4.1). */
+export function createAuthUrl(deps: ClientDeps, input: AuthUrlInput): Promise<Outcome<string>> {
+  const platform = PLATFORM.parse(input.platform);
+  if (!EXTERNAL_ID.test(input.externalId)) throw new Error('POSTFORME_EXTERNAL_ID_INVALID');
+  const permissions = [...new Set(input.permissions)].sort();
+  if (permissions.length === 0 || !permissions.includes('feeds')) throw new Error('POSTFORME_PERMISSIONS_INVALID');
+  let platformData: Record<string, unknown> | undefined;
+  if (platform === 'linkedin') platformData = { linkedin: { connection_type: input.connectionType ?? 'organization' } };
+  if (platform === 'instagram') {
+    if (input.connectionType !== 'instagram' && input.connectionType !== 'facebook') {
+      throw new Error('POSTFORME_INSTAGRAM_CONNECTION_TYPE_REQUIRED');
+    }
+    platformData = { instagram: { connection_type: input.connectionType } };
+  }
+  if (platform === 'bluesky') throw new Error('POSTFORME_BLUESKY_NEEDS_APP_PASSWORD');
+  return call(deps, { method: 'POST', path: '/social-accounts/auth-url', body: {
+    platform, external_id: input.externalId, permissions, ...(platformData ? { platform_data: platformData } : {}),
+  } }, json => {
+    const parsed = z.object({ url: z.string() }).passthrough().safeParse(json);
+    return parsed.success ? publicHttpsUrl(parsed.data.url, 4096) : null;
+  });
+}
+
+export type FeedQuery = { cursor?: string | null; limit?: number; platformPostIds?: string[] };
+
+export function readFeedPage(deps: ClientDeps, accountId: string, platform: string,
+  query: FeedQuery = {}): Promise<Outcome<FeedPage>> {
+  assertAccountId(accountId);
+  const params = new URLSearchParams({ expand: 'metrics', limit: String(Math.min(Math.max(query.limit ?? 100, 1), 100)) });
+  if (query.cursor) params.set('cursor', query.cursor);
+  for (const id of query.platformPostIds ?? []) {
+    if (!/^[A-Za-z0-9_:.-]{1,256}$/.test(id)) throw new Error('POSTFORME_POST_ID_INVALID');
+    params.append('platform_post_id', id);
+  }
+  return call(deps, { method: 'GET', path: `/social-account-feeds/${accountId}?${params}` },
+    json => normalizeFeedPage(json, platform));
+}
+
+/** Removes the provider account and its history (plan §4.1: delete, not disconnect). Never retried here. */
+export function deleteAccount(deps: ClientDeps, id: string): Promise<Outcome<true>> {
+  assertAccountId(id);
+  return call(deps, { method: 'DELETE', path: `/social-accounts/${id}` }, () => true as const);
+}
+
+/** Clears the provider tokens but keeps history; used before deleting an account with unresolved publishes. */
+export function disconnectAccount(deps: ClientDeps, id: string): Promise<Outcome<true>> {
+  assertAccountId(id);
+  return call(deps, { method: 'POST', path: `/social-accounts/${id}/disconnect` }, () => true as const);
+}
