@@ -38,6 +38,7 @@ describe('frozen plain-text stream marker',()=>{
    {...skill,providerRequestFormat:'serial-tools-v4-stream',envelopeOrder:'message-first-v1',reasoning:{effort:'low'}},
    {...skill,providerRequestFormat:'agent-turn-v5-stream',reasoning:{effort:'low'}},
    {...freeChat,attachedOrganizer:{modelId:id,model:'synthetic/organizer',maxOutputTokens:100}},
+   {...freeChat,positioningGate:'fallback-v1'},
   ])expect(runtimeContext.safeParse({...context,textStream:PLAIN_TEXT_STREAM}).success).toBe(false);
   expect(runtimeContext.safeParse({...freeChat,textStream:'plain-text-v2'}).success).toBe(false);
   expect(plainTextStreamAllowed({...skill,matching:{}})).toBe(false);

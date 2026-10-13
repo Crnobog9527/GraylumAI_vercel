@@ -24,11 +24,14 @@ export const FREE_CHAT_REQUEST_FORMAT='serial-tools-v6-reasoning';
  * bytes plus `stream`, and an unmarked turn of any format keeps its original bytes.
  */
 export const PLAIN_TEXT_STREAM='plain-text-v1';
-/** Where the plain-text stream marker may be frozen: native plain replies, never cards, envelopes or reports. */
+/**
+ * Where the plain-text stream marker may be frozen: native plain replies, never cards, envelopes or reports.
+ * A POSITIONING-GATE fallback round stays buffered: its refusal marker must never reach the user (#900).
+ */
 export function plainTextStreamAllowed(context:{providerRequestFormat?:string;nativeOutput?:string;envelopeOrder?:string;
- reportGeneration?:unknown;matching?:unknown;role?:string;attachedOrganizer?:unknown}):boolean{
+ reportGeneration?:unknown;matching?:unknown;role?:string;attachedOrganizer?:unknown;positioningGate?:string}):boolean{
  return Boolean(context.nativeOutput)&&!context.envelopeOrder&&!context.reportGeneration&&!context.matching&&
-  !context.attachedOrganizer&&(context.providerRequestFormat==='serial-tools-v6-reasoning'&&context.role==='ordinary'
+  !context.attachedOrganizer&&!context.positioningGate&&(context.providerRequestFormat==='serial-tools-v6-reasoning'&&context.role==='ordinary'
    ||context.providerRequestFormat==='serial-tools-v2'&&context.role==='skill');
 }
 /** True when the frozen context streams its primary reply. */
