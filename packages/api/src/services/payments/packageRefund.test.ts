@@ -10,7 +10,8 @@ function fixture() {
     netMinor: 9400, currency: 'usd', idempotencyKey: 'pay-common:refund:' + intentId,
     claimedAt: new Date().toISOString(), cash: { chargeId: 'ch_fixture', paymentIntentId: 'pi_fixture' } };
   const order = { id: orderId, user_id: orderId, payment_channel: 'stripe', payment_mode: 'test',
-    merchant_namespace: 'acct_fixture', amount_total: 10000, currency: 'usd', refund_approval: approval };
+    merchant_namespace: 'acct_fixture', amount_total: 10000, currency: 'usd', refund_approval: approval,
+    payment_method: null as string | null, payment_amount_facts: [] as Array<Record<string, string>> };
   const refund = { id: 're_fixture', amount: 9400, currency: 'usd', status: 'succeeded',
     charge: 'ch_fixture', payment_intent: 'pi_fixture', metadata: { orderId, refundIntentId: intentId } };
   const calls: string[] = [];
@@ -40,6 +41,28 @@ function fixture() {
   return { approval, order, stripe, rpc, refund, calls,
     db: { from, rpc } as unknown as SupabaseClient, provider: stripe as unknown as RefundStripe };
 }
+describe('PAY-STRIPE-MP international card pack (Managed Payments, tax on top)', () => {
+  it('checks Stripe against the pre-tax amount plus the recorded tax and passes that tax to the quote', async () => {
+    const f = fixture();
+    f.order.payment_method = 'card';
+    f.order.payment_amount_facts = [{ kind: 'paid', amount: '100.00', evidence_ref: 'pi_fixture' },
+      { kind: 'tax', amount: '20.00', evidence_ref: 'pi_fixture' }];
+    f.stripe.paymentIntents.retrieve.mockResolvedValue({ ...(await f.stripe.paymentIntents.retrieve()), amount_received: 12000 });
+    f.stripe.charges.retrieve.mockResolvedValue({ ...(await f.stripe.charges.retrieve()), amount: 12000, amount_captured: 12000 });
+    await expect(readPackageRefundCash(f.db, f.provider, orderId)).resolves.toMatchObject({ paidMinor: 10000, taxMinor: 2000 });
+  });
+  it('refuses a card pack whose charge does not match pre-tax + tax, or whose tax is not recorded yet', async () => {
+    const f = fixture();
+    f.order.payment_method = 'card';
+    f.order.payment_amount_facts = [{ kind: 'tax', amount: '20.00', evidence_ref: 'pi_fixture' }];
+    await expect(readPackageRefundCash(f.db, f.provider, orderId)).rejects.toThrow('PAY_REFUND_PAYMENT_MISMATCH');
+    f.order.payment_amount_facts = [];
+    await expect(readPackageRefundCash(f.db, f.provider, orderId)).rejects.toThrow('PAY_REFUND_TAX_PENDING');
+    // Other packs: no tax, the pre-tax charge as before.
+    const plain = fixture();
+    await expect(readPackageRefundCash(plain.db, plain.provider, orderId)).resolves.toMatchObject({ paidMinor: 10000, taxMinor: 0 });
+  });
+});
 describe('package refund dispatch boundary', () => {
   it('commits stable identity before sending exact net cash', async () => {
     const f = fixture();
