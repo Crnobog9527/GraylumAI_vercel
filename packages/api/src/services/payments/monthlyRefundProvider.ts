@@ -82,7 +82,10 @@ export async function readMonthlyProvider(stripe: MonthlyStripe, intent: Monthly
     && charge.amount === charged && charge.amount_captured === charged && charge.currency === t.currency
     && objectId(charge.payment_intent) === t.paymentIntentId && objectId(sub.customer)
     && objectId(charge.customer) === objectId(sub.customer) && objectId(pi.customer) === objectId(sub.customer));
-  const refunds = await all(cursor => stripe.refunds.list({ charge: t.chargeId, limit: 100, starting_after: cursor }));
+  // An external refund (no metadata of this intent) that failed or was canceled moved no cash: it is not this intent's
+  // evidence and must not block it. Any other foreign refund still fails the read (a conflict for review).
+  const refunds = (await all(cursor => stripe.refunds.list({ charge: t.chargeId, limit: 100, starting_after: cursor })))
+    .filter(row => row.metadata?.refundIntentId === intent.id || !['failed', 'canceled'].includes(row.status ?? ''));
   evidence(refunds.length <= 1);
   const rows = refunds.map(row => refundFact(row, t, intent.id));
   const item = sub.items.data[0];

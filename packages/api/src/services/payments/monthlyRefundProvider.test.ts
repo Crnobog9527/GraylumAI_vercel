@@ -38,6 +38,17 @@ describe('monthly original-channel evidence reader', () => {
     await expect(readMonthlyProvider(untaxed.stripe, untaxed.intent)).rejects.toThrow();
     expect(f.writes).toEqual([]);
   });
+  it('ignores an external refund that failed or was canceled (no cash moved), but not one that moved cash', async () => {
+    const f = fixture();
+    const external = (status: string) => ({ id: `re_external_${status}`, object: 'refund', amount: 1000, currency: 'usd',
+      charge: f.intent.terms.chargeId, payment_intent: f.intent.terms.paymentIntentId, status, metadata: {} });
+    const list = (rows: unknown[]) => vi.fn(async () => ({ data: rows, has_more: false })) as unknown as MonthlyStripe['refunds']['list'];
+    f.stripe.refunds.list = list([external('failed'), external('canceled')]);
+    expect(await readMonthlyProvider(f.stripe, f.intent)).toMatchObject({ refunds: { complete: true, rows: [] } });
+    f.stripe.refunds.list = list([external('succeeded')]);
+    await expect(readMonthlyProvider(f.stripe, f.intent)).rejects.toThrow();
+    expect(f.writes).toEqual([]);
+  });
   it.each(['disputed', 'schedule', 'pending_update', 'pending_setup_intent', 'invoice', 'pendingItems'])('%s blocks new external steps', async field => {
     const f = fixture();
     if (field === 'disputed') f.charge.disputed = true;
