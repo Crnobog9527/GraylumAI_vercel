@@ -3,7 +3,7 @@
 import { useCallback } from 'react';
 import { trpc } from '@/trpc/client';
 import { useAfterContentErasure } from '@/hooks/use-content-erasure';
-import { runConversationErasure } from '@/lib/conversation-erasure';
+import { REVIEW_NOTICE, laterNotice, runConversationErasure } from '@/lib/conversation-erasure';
 import { useConversationErasureStore } from '@/stores/conversation-erasure';
 
 type Row = { sessionId: string; title: string; lastActivityAt: string };
@@ -46,6 +46,12 @@ export function useConversationErasure(leave: (sessionId: string) => void) {
       afterErased: (id) => {
         removed.delete(id);
         void afterErasure({ kind: 'session', id });
+        // Physical cleanup in the background; the account-erasure cron sweeps anything left. It also
+        // reports money still being checked on the deleted conversation.
+        void utils.client.account.conversationErasureCleanup.mutate({ sessionId: id }).then((result) => {
+          // Another deletion may have failed meanwhile; its error stays on screen.
+          if (result.reviewRequired) store.setNotice(laterNotice(useConversationErasureStore.getState().notice, REVIEW_NOTICE));
+        }, () => undefined);
       },
       resync: () => { void utils.opc.conversations.invalidate(); },
       notify: store.setNotice,

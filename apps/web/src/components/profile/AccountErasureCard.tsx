@@ -15,7 +15,7 @@ import {
 } from '@/components/ui/dialog';
 import { DialogCaptcha } from '@/components/auth/DialogCaptcha';
 import { keepDialogOpenForCaptcha } from '@/lib/dialogCaptcha';
-import { buildErasureImpactLines, type ImpactLine } from '@/lib/account-erasure';
+import { buildErasureImpactLines, renewalUsesStripePortal, type ImpactLine } from '@/lib/account-erasure';
 import { useAccountErasure } from '@/hooks/use-account-erasure';
 
 const TONE_COLOR: Record<ImpactLine['tone'], string> = {
@@ -128,11 +128,17 @@ export function AccountErasureCard({ user }: { user: { email?: string; auth_prov
             {erasure.step !== 'done' && (
               <Button variant="outline" disabled={erasure.busy} onClick={() => onOpenChange(false)} style={ghostStyle}>取消</Button>
             )}
-            {erasure.step === 'impact' && blocked && (
+            {erasure.step === 'impact' && blocked && preview && renewalUsesStripePortal(preview) && (
               <Button disabled={erasure.busy} onClick={erasure.openPortal} style={dangerStyle}>管理订阅 / 取消续费</Button>
             )}
-            {erasure.step === 'impact' && !blocked && (
-              <Button disabled={!preview || erasure.busy} onClick={() => erasure.setStep('verify')} style={dangerStyle}>
+            {/* Until the facts arrive nothing may suggest the user can go on: renewal could still block. */}
+            {erasure.step === 'impact' && !preview && !erasure.previewFailed && (
+              <Button disabled style={dangerStyle} aria-label="正在读取注销影响">
+                <Loader2 className="h-4 w-4 animate-spin" />
+              </Button>
+            )}
+            {erasure.step === 'impact' && preview && !blocked && (
+              <Button disabled={erasure.busy} onClick={() => erasure.setStep('verify')} style={dangerStyle}>
                 继续
               </Button>
             )}

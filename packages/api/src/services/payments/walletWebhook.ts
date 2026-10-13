@@ -4,6 +4,17 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { resolveStripeScope } from './stripeCheckoutPersistence';
 import { readWalletPaymentEvidence } from './walletPaymentEvidence';
 import { walletMembershipTerm } from './methodMembershipTerm';
+import { logger } from '../../lib/logger';
+
+/** A session we never created an order for (the test sandbox is shared with other tools, e.g. the
+ * PAY-STRIPE-MP probes): orders are committed before their session exists, so an unknown or missing order
+ * means the session is not ours. Unpaid ones are acknowledged so Stripe stops retrying; a paid one still
+ * fails loudly because money must never be silently dropped. */
+function foreignSession(session: Stripe.Checkout.Session, reason: string) {
+  if (session.payment_status === 'paid') return false;
+  logger.warn('billing', 'stripe_checkout_foreign_session_ignored', { reason, status: session.status, mode: session.mode });
+  return true;
+}
 
 /** Resolve ownership from the original checkout mapping. Event metadata cannot choose an account.
  * The same entry supports callback retry and original-session recovery after a timeout. */
@@ -21,10 +32,11 @@ export async function recoverWalletCheckout(db: SupabaseClient, stripe: Stripe, 
     recoveredSession = await stripe.checkout.sessions.retrieve(sessionId);
     if (recoveredSession.object !== 'checkout.session' || recoveredSession.id !== sessionId) throw new Error('PAY_WAFFO_PAYMENT_CONFLICT');
     const originalId = recoveredSession.metadata?.orderId;
-    if (!originalId || !/^[0-9a-f-]{36}$/i.test(originalId)) return false;
+    if (!originalId || !/^[0-9a-f-]{36}$/i.test(originalId)) return foreignSession(recoveredSession, 'no_order') || false;
     orderId = originalId;
   }
   const result = await db.from('payment_orders').select('*').eq('id', orderId).maybeSingle();
+  if (!result.error && !result.data && recoveredSession && foreignSession(recoveredSession, 'unknown_order')) return true;
   if (result.error || !result.data) throw new Error('PAY_WAFFO_PERSISTENCE_UNAVAILABLE');
   const order = result.data;
   if (!order.payment_method) return false;

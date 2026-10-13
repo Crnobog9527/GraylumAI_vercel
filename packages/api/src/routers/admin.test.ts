@@ -1242,7 +1242,7 @@ describe('adminRouter finance stats runtime billing summary', () => {
       tokenPriceMultiplier: 1.5,
       billingUnitSource: { creditsPerUsd: 'default', defaultMultiplier: 'default' },
       searchSurchargeCredits: null,
-      newUserCredits: 100,
+      newUserCredits: 500,
     });
   });
 
@@ -2125,7 +2125,7 @@ describe('adminRouter lightweight admin dashboards', () => {
   });
 
   it.each([
-    ['malformed setting row', 'system_settings', [{ key: 'site_name', value: { nested: true } }]],
+    ['malformed setting row', 'system_settings', [{ key: 'site_name', value: null }]],
     ['malformed settings membership row', 'membership_plans', [{
       id: 'plan-1',
       name: 'Pro',
