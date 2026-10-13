@@ -32,18 +32,7 @@ const USER_FACING_SYSTEM_SETTING_KEYS = [
   'home_show_onboarding',
   'home_analysis_module_id',
   'home_show_featured_modules',
-  'chat_show_model_selector',
   'max_input_characters',
-  'enable_free_tier',
-  'free_tier_messages',
-  'enable_long_text_warning',
-  'long_text_warning_threshold',
-  'show_token_usage_stats',
-  'chat_prompt_text',
-  'chat_welcome_message',
-  'chat_billing_hint',
-  'input_credits_per_1k',
-  'output_credits_per_1k',
 ] as const;
 
 const creditPackageCatalogRowSchema = z.object({
@@ -195,9 +184,9 @@ async function validateSummarySelection(client: SupabaseClient<any, 'public', an
 
 async function validateRoutingSelections(client: SupabaseClient<any, 'public', any>, input: Array<{key:string;value:unknown}>) {
   for (const setting of input) {
-    if (setting.key !== 'primary_model_id' && setting.key !== 'assistant_model_id') continue;
+    if (setting.key !== 'primary_model_id') continue;
     if (setting.value === '') continue;
-    const label = setting.key === 'primary_model_id' ? '主力模型' : '辅助模型';
+    const label = '主力模型';
     if (!z.string().uuid().safeParse(setting.value).success) {
       throw new TRPCError({ code: 'BAD_REQUEST', message: `请从列表中选择${label}，不要填写模型名称` });
     }

@@ -2,6 +2,7 @@
 import { assertCheckoutRateLimit, getStripeAppUrl, getStripeClient } from '../services/stripe';
 import { methodPurchaseInputSchema } from '../services/payments/methodPurchase';
 import { createWalletCheckout } from '../services/payments/walletCheckout';
+import { createStripeCardCheckout } from '../services/payments/stripeMethodCheckout';
 import { readPaymentMethodRoutes, assertPaymentMethodRoute, isCardMethod } from '../services/payments/methodRouting';
 import { z } from 'zod';
 import { cancelWaffoMembership, controlWaffoProduct } from '../services/payments/waffoOperations';
@@ -54,11 +55,11 @@ export const methodPaymentProcedures = {
         throw new Error('PAY_WAFFO_TERMS_UNAVAILABLE');
       }
       await assertCheckoutRateLimit(ctx.profileId, ctx.headers);
-      // Channel choice stays in methodRouting. New card purchases are Stripe; the Stripe card
-      // checkout adapter arrives in PAY-STRIPE-MP PR-2 (the environment gate keeps this closed).
-      if (isCardMethod(input.method)) throw new Error('PAY_WAFFO_STEP2_NOT_READY');
-      return await createWalletCheckout({ db: ctx.supabaseAdmin, stripe: getStripeClient(), userId: ctx.profileId,
-        appUrl: getStripeAppUrl(), termsVersion: terms.data.value.version, purchase: input });
+      // Channel choice stays in methodRouting: every new purchase is Stripe. Card checkout stays behind the
+      // environment gate until payment fulfillment (PAY-STRIPE-MP PR-3) lands.
+      const checkout = { db: ctx.supabaseAdmin, stripe: getStripeClient(), userId: ctx.profileId,
+        appUrl: getStripeAppUrl(), termsVersion: terms.data.value.version, purchase: input };
+      return await (isCardMethod(input.method) ? createStripeCardCheckout(checkout) : createWalletCheckout(checkout));
     } catch (error) {
       logMethodPaymentFailure('method_checkout', ctx.profileId, error, { method: input.method });
       throw mapMethodPurchaseRejection(error) ?? createSafeServiceUnavailableError(error, '暂时无法创建付款，请稍后查看原订单状态');

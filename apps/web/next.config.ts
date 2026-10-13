@@ -36,9 +36,13 @@ const reportOnlyCsp = [
 
 const nextConfig: NextConfig = {
   devIndicators: false,
-  // Temporary redirect runs before authentication and retains the legacy page code.
+  // LEGACY-CLOSE: the old /chat and /workbench pages are deleted; their links land on positioning
+  // before authentication. /workbench/marketplace and /workbench/search stay as they are.
   async redirects() {
-    return [{ source: "/chat", destination: "/positioning", permanent: false }];
+    return [
+      { source: "/chat", destination: "/positioning", permanent: false },
+      { source: "/workbench", destination: "/positioning", permanent: false },
+    ];
   },
   async headers() {
     return [{

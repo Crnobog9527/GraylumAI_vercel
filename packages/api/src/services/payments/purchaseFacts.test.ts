@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { freezePurchaseSnapshot } from './contracts';
 import {
   assertPurchaseReceipt, centsToMajor, checkoutIdempotencyKey, frozenGrantCredits,
-  majorToCents, purchasePayloadHash, snapshotAmountDue,
+  majorToCents, purchasePayloadHash, snapshotAmountDue, stripePreTaxAmount,
 } from './purchaseFacts';
 
 const snapshot = freezePurchaseSnapshot({
@@ -47,8 +47,23 @@ describe('frozen Stripe purchase facts', () => {
   });
   it('does not guess unsupported currency, tax, discount or overflow', () => {
     expect(() => snapshotAmountDue({ ...snapshot, currency: 'jpy' })).toThrow();
-    expect(() => snapshotAmountDue({ ...snapshot, tax_behavior: 'exclusive' })).toThrow();
     expect(() => snapshotAmountDue({ ...snapshot, discount: '20' })).toThrow();
     expect(() => frozenGrantCredits({ ...snapshot, credits: 2147483647 })).toThrow();
+  });
+  it('compares the pre-tax amount: tax Stripe adds on top only for exclusive snapshots (PAY-STRIPE-MP)', () => {
+    const exclusive = freezePurchaseSnapshot({ ...snapshot, item_type: 'membership_plan', billing_cycle: 'monthly',
+      price: '69.00', discount: '20.00', tax_behavior: 'exclusive' });
+    const scope = { merchant: 'acct_fixture', mode: 'test' } as const;
+    expect(snapshotAmountDue(exclusive)).toBe(4900);
+    expect(stripePreTaxAmount(exclusive, 5880, 980)).toBe(4900);
+    expect(() => assertPurchaseReceipt({ snapshot: exclusive, amount: 5880, tax: 980, currency: 'usd', livemode: false, scope }))
+      .not.toThrow();
+    expect(() => assertPurchaseReceipt({ snapshot: exclusive, amount: 4900, currency: 'usd', livemode: false, scope })).not.toThrow();
+    // Tax charged on a non-exclusive order, tax hidden in the total, negative or oversized tax: mismatch.
+    for (const [snap, total, tax] of [[snapshot, 1799 + 100, 100], [exclusive, 5880, 0], [exclusive, 4900, -1],
+      [exclusive, 100, 200], [exclusive, null, 0]] as const) {
+      expect(() => assertPurchaseReceipt({ snapshot: snap, amount: total, tax, currency: 'usd', livemode: false, scope }))
+        .toThrow('PAY_COMMON_RECEIPT_MISMATCH');
+    }
   });
 });

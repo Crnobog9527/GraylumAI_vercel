@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { testBillingPrededuct, testBillingIdempotency, testBillingReconcile } from '../diagnosticsBilling';
+import type { DiagnosticContext } from '../diagnostics';
 const state = vi.hoisted(() => ({ reconcile: vi.fn() }));
 vi.mock('../billingReconciliation', () => ({ runDailyBillingReconciliation: state.reconcile }));
 
@@ -50,8 +51,17 @@ describe('read-only billing diagnostics', () => {
     const result = await testBillingReconcile(fixture.ctx);
     expect(result.status).toBe(expected);
     expect(result.details).toMatchObject({ mode: 'read_only', mismatches });
-    expect(state.reconcile).toHaveBeenCalledWith(fixture.ctx.supabase);
+    expect(state.reconcile).toHaveBeenCalledWith(fixture.ctx.supabaseAdmin);
     expect(fixture.rpc).not.toHaveBeenCalled();
+  });
+  it('reads reconciliation through the service-role client, never the user-scoped one', async () => {
+    const userScoped = { from: vi.fn(), rpc: vi.fn() };
+    const admin = { from: vi.fn(), rpc: vi.fn() };
+    state.reconcile.mockResolvedValue({ status: 'SUCCESS', success: true, mismatches: [] });
+    await testBillingReconcile({ supabase: userScoped, supabaseAdmin: admin } as unknown as DiagnosticContext);
+    expect(state.reconcile).toHaveBeenCalledTimes(1);
+    expect(state.reconcile.mock.calls[0][0]).toBe(admin);
+    expect(state.reconcile.mock.calls[0][0]).not.toBe(userScoped);
   });
   it('reports unavailable reconciliation as failure', async () => {
     state.reconcile.mockRejectedValue(new Error('private detail'));
