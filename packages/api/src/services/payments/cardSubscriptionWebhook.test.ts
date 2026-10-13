@@ -85,7 +85,9 @@ describe('PAY-STRIPE-MP card subscription webhooks', () => {
       items: { data: [{ current_period_end: 1797064954 }] } };
     f.raw.subscriptions.retrieve.mockResolvedValueOnce(active).mockResolvedValueOnce({ ...active, cancel_at_period_end: true });
     (f.raw.subscriptions as unknown as { update: ReturnType<typeof vi.fn> }).update = vi.fn(async () => ({}));
-    await expect(handleCardSubscriptionInvoice(f.db, f.stripe, 'in_1', 'invoice.paid')).resolves.toBe(true);
+    const alert = vi.fn();
+    await expect(handleCardSubscriptionInvoice(f.db, f.stripe, 'in_1', 'invoice.paid', undefined, alert)).resolves.toBe(true);
+    expect(alert).toHaveBeenCalledTimes(1);
     expect((f.raw.subscriptions as unknown as { update: ReturnType<typeof vi.fn> }).update)
       .toHaveBeenCalledWith('sub_1', { cancel_at_period_end: true });
     expect(f.rpc).toHaveBeenLastCalledWith('pay_stripe_mp_sync_subscription', { p_subscription: 'local_sub', p_merchant: 'fixture',
@@ -124,6 +126,10 @@ describe('PAY-STRIPE-MP card subscription webhooks', () => {
     f.invoice.billing_reason = 'subscription_update';
     await expect(handleCardSubscriptionInvoice(f.db, f.stripe, 'in_1', 'invoice.paid')).resolves.toBe(true);
     expect(f.rpc).not.toHaveBeenCalled(); expect(mocks.conflict).toHaveBeenCalled();
+    // Nothing charged (amount_paid 0 in this fixture): no stop and no alert.
+    const quiet = vi.fn();
+    await handleCardSubscriptionInvoice(f.db, f.stripe, 'in_1', 'invoice.paid', undefined, quiet);
+    expect(quiet).not.toHaveBeenCalled();
   });
   it('stops the subscription when such an invoice actually charged money', async () => {
     const active = { object: 'subscription', id: 'sub_1', livemode: false, status: 'active', cancel_at: null, cancel_at_period_end: false,
@@ -133,9 +139,11 @@ describe('PAY-STRIPE-MP card subscription webhooks', () => {
     f.raw.subscriptions.retrieve.mockResolvedValueOnce(active).mockResolvedValueOnce({ ...active, cancel_at_period_end: true });
     const update = vi.fn(async () => ({}));
     (f.raw.subscriptions as unknown as { update: typeof update }).update = update;
-    await expect(handleCardSubscriptionInvoice(f.db, f.stripe, 'in_1', 'invoice.paid')).resolves.toBe(true);
+    const alert = vi.fn();
+    await expect(handleCardSubscriptionInvoice(f.db, f.stripe, 'in_1', 'invoice.paid', undefined, alert)).resolves.toBe(true);
     expect(mocks.conflict).toHaveBeenCalled();
     expect(update).toHaveBeenCalledWith('sub_1', { cancel_at_period_end: true });
+    expect(alert).toHaveBeenCalledTimes(1);
     expect(f.rpc).toHaveBeenLastCalledWith('pay_stripe_mp_sync_subscription', { p_subscription: 'local_sub', p_merchant: 'fixture',
       p_cancel_at_period_end: true, p_canceled: false });
     // Before the first payment is mapped: Stripe retries until there is a local subscription to stop.

@@ -114,9 +114,11 @@ function renewalFacts(invoice: Stripe.Invoice, subscriptionId: string, snapshot:
  *   completion, so the two events grant once in any order.
  * - subscription_cycle paid: one renewal per invoice at the frozen list price (both paid events dedupe).
  * - subscription_cycle failed: records the first failure time (founder 7-day deadline).
- * - anything else on a card subscription (e.g. subscription_update): recorded for manual review, never granted. */
+ * - anything else on a card subscription (e.g. subscription_update): recorded for manual review, never granted.
+ * Money kept for review (an unexpected renewal or a charged non-renewal invoice) stops renewal at Stripe and calls
+ * `alert` (the webhook passes the payment-evidence alert) once the stop is confirmed. */
 export async function handleCardSubscriptionInvoice(db: SupabaseClient, stripe: Stripe, invoiceId: string, eventType: string,
-  eventCreated?: number) {
+  eventCreated?: number, alert: () => void = () => {}) {
   const scope = await resolveStripeScope(stripe);
   const invoice = await stripe.invoices.retrieve(invoiceId);
   if (invoice.object !== 'invoice' || invoice.id !== invoiceId) throw new Error(PAYMENT_EVIDENCE_CONFLICT);
@@ -146,6 +148,7 @@ export async function handleCardSubscriptionInvoice(db: SupabaseClient, stripe: 
     if (paid && result.data?.state === 'review') {
       logger.error('billing', 'stripe_mp_renewal_review', { orderId: result.data.orderId, reason: 'unexpected_renewal' });
       await stopRenewalAfterReview(db, stripe, scope.merchant, order.localSubscriptionId, subscriptionId);
+      alert();
     }
     return true;
   }
@@ -157,6 +160,7 @@ export async function handleCardSubscriptionInvoice(db: SupabaseClient, stripe: 
   if (paid && (invoice.amount_paid ?? 0) > 0) {
     if (!order.localSubscriptionId) throw new Error('PAY_STRIPE_MP_FIRST_PAYMENT_PENDING');
     await stopRenewalAfterReview(db, stripe, scope.merchant, order.localSubscriptionId, subscriptionId);
+    alert();
   }
   return true;
 }
