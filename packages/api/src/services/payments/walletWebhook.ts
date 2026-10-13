@@ -4,6 +4,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { resolveStripeScope } from './stripeCheckoutPersistence';
 import { readWalletPaymentEvidence } from './walletPaymentEvidence';
 import { walletMembershipTerm } from './methodMembershipTerm';
+import { logger } from '../../lib/logger';
 import { readCardPaymentEvidence, type CardOrder, type CardPaymentEvidence } from './cardPaymentEvidence';
 
 const isCard = (method: string) => method === 'card' || method === 'card_cn';
@@ -16,6 +17,16 @@ async function orderPriceId(db: SupabaseClient, order: { price_ref_id: string; m
   return price.data.external_id as string;
 }
 
+/** A session we never created an order for (the test sandbox is shared with other tools, e.g. the
+ * PAY-STRIPE-MP probes): orders are committed before their session exists, so an unknown or missing order
+ * means the session is not ours. Unpaid ones are acknowledged so Stripe stops retrying; a paid one still
+ * fails loudly because money must never be silently dropped. */
+function foreignSession(session: Stripe.Checkout.Session, reason: string) {
+  if (session.payment_status === 'paid') return false;
+  logger.warn('billing', 'stripe_checkout_foreign_session_ignored', { reason, status: session.status, mode: session.mode });
+  return true;
+}
+
 export async function recoverWalletCheckout(db: SupabaseClient, stripe: Stripe, sessionId: string,
   verifiedEventType?: string) {
   return Boolean(await recoverMethodCheckout(db, stripe, sessionId, verifiedEventType));
@@ -23,9 +34,10 @@ export async function recoverWalletCheckout(db: SupabaseClient, stripe: Stripe, 
 
 /** New-method orders (wallet one-time, PAY-STRIPE-MP card / card_cn): resolve ownership from the original
  * checkout mapping, never event metadata. Supports callback retry, browser return and original-session
- * recovery after a timeout. Returns null for orders of the legacy path. */
+ * recovery after a timeout. Returns null for orders of the legacy path, and { orderId: null } for an unpaid
+ * session that is not ours (acknowledged, nothing to do). */
 export async function recoverMethodCheckout(db: SupabaseClient, stripe: Stripe, sessionId: string,
-  verifiedEventType?: string): Promise<{ orderId: string } | null> {
+  verifiedEventType?: string): Promise<{ orderId: string | null } | null> {
   const scope = await resolveStripeScope(stripe);
   const refs = await db.from('payment_provider_refs').select('order_id').eq('channel', 'stripe')
     .eq('merchant_namespace', scope.merchant).eq('mode', scope.mode).eq('object_type', 'checkout').eq('external_id', sessionId).maybeSingle();
@@ -38,10 +50,11 @@ export async function recoverMethodCheckout(db: SupabaseClient, stripe: Stripe, 
     recoveredSession = await stripe.checkout.sessions.retrieve(sessionId);
     if (recoveredSession.object !== 'checkout.session' || recoveredSession.id !== sessionId) throw new Error('PAY_WAFFO_PAYMENT_CONFLICT');
     const originalId = recoveredSession.metadata?.orderId;
-    if (!originalId || !/^[0-9a-f-]{36}$/i.test(originalId)) return null;
+    if (!originalId || !/^[0-9a-f-]{36}$/i.test(originalId)) return foreignSession(recoveredSession, 'no_order') ? { orderId: null } : null;
     orderId = originalId;
   }
   const result = await db.from('payment_orders').select('*').eq('id', orderId).maybeSingle();
+  if (!result.error && !result.data && recoveredSession && foreignSession(recoveredSession, 'unknown_order')) return { orderId: null };
   if (result.error || !result.data) throw new Error('PAY_WAFFO_PERSISTENCE_UNAVAILABLE');
   const order = result.data;
   if (!order.payment_method) return null;

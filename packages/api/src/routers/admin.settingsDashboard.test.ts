@@ -2,6 +2,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { REPORT_SETTING } from '../services/report/contract';
 import { PAYG_START_THRESHOLDS_KEY } from '../services/bill2/settingKeys';
+import { logger } from '../lib/logger';
 import { adminRouter } from './admin';
 import { settingsRouter } from './settings';
 import { PAYMENT_CHANNEL_KEY } from '../services/payments/channelSettings';
@@ -82,6 +83,47 @@ describe('settings dashboard structured settings isolation', () => {
     await expect(admin.getSettingsDashboard()).resolves.toEqual({
       ...before, systemSettings: { ...before.systemSettings, site_name: 'Updated fixture' },
     });
+  });
+
+  it('reads the staging key set with payment structures and retired keys (LEGACY-CLOSE 500)', async () => {
+    const retired = ['assistant_model_id', 'chat_billing_hint', 'chat_prompt_text', 'chat_show_model_selector',
+      'chat_welcome_message', 'enable_free_tier', 'enable_long_text_warning', 'enable_prompt_cache',
+      'enable_smart_routing', 'enable_smart_search_decision', 'free_tier_messages', 'input_credits_per_1k',
+      'long_text_warning_threshold', 'max_messages_per_conversation', 'output_credits_per_1k',
+      'search_decision_min_confidence', 'show_token_usage_stats', 'smart_routing_min_confidence', 'web_search_credits'];
+    const kept = { primary_model_id: 'd04a4800-2d3a-43b3-8af9-cb960572e34f', v3_summary_max_tokens: '4096',
+      search_surcharge_credits: '15', home_show_onboarding: 'true', max_input_characters: '10000',
+      billing_credits_per_usd: '100', library_upload_enabled: false, fusion_compare_max_models: 4 };
+    const { admin } = fixture([
+      ...structuredSettings,
+      { key: 'payment_method_routes', value: { version: 3, card: { enabled: false },
+        wechat_pay: { enabled: true, annualVerified: false }, alipay: { enabled: true, annualVerified: false } } },
+      { key: 'payment_terms_version', value: { version: 'fixture-terms' } },
+      ...retired.map(key => ({ key, value: 'true' })),
+      ...Object.entries(kept).map(([key, value]) => ({ key, value })),
+    ]);
+    const { systemSettings } = await admin.getSettingsDashboard();
+    expect(systemSettings).toMatchObject(kept);
+    expect(systemSettings).not.toHaveProperty('payment_method_routes');
+    expect(systemSettings).not.toHaveProperty('payment_terms_version');
+  });
+
+  it('skips unknown structured values with a warning instead of failing the page', async () => {
+    const warn = vi.spyOn(logger, 'warn').mockImplementation(() => undefined);
+    try {
+      const { admin } = fixture([
+        { key: 'future_structured_setting', value: { version: 1, enabled: true } },
+        { key: 'future_list_setting', value: ['a'] },
+        { key: 'site_name', value: 'Fixture site' },
+      ]);
+      await expect(admin.getSettingsDashboard()).resolves.toEqual({
+        systemSettings: { site_name: 'Fixture site' }, membershipPlans: [],
+      });
+      expect(warn).toHaveBeenCalledWith('api', 'admin_settings_unknown_structured_key_skipped', { key: 'future_structured_setting' });
+      expect(warn).toHaveBeenCalledWith('api', 'admin_settings_unknown_structured_key_skipped', { key: 'future_list_setting' });
+    } finally {
+      warn.mockRestore();
+    }
   });
 
   it('does not validate dedicated values even when they are malformed or serialized', async () => {

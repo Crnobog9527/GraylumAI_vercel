@@ -108,6 +108,73 @@ outside this workbench slice. The formal strategy edit currently saves a
 pending revision through the shared OPC draft; the reference's independent
 per-account versus shared-business edit choice is not yet a formal contract.
 
+## Light foundation (layer 1, shared by the workbench and public pages)
+
+The Owner decided on 2026-10-13 that this file is the only design specification, in three layers:
+(1) this foundation, taken from the accepted conversation workbench; (2) the public-page layer (hero,
+article text, price cards, sticky notes, FAQ, header and footer, section rhythm, motion), written here
+after the Owner picks one of the public-page samples; (3) the management layer (tables, long forms,
+settings, statistics, empty states), added when the signed-in pages are unified after launch.
+
+The values below are read from the workbench modules listed in the previous section. Their runtime
+mirror is `apps/web/src/components/design/light-tokens.module.css` (class `.light`, variables
+`--gl-*`), which public pages and the landing demo put on their root. Pages use these variables, not
+literal colors or sizes. The workbench keeps its own scoped values; it is the source, not a consumer.
+The dark tokens in the front matter remain only for signed-in pages that are not yet unified.
+
+### Color
+
+| Role | Variable | Value | Where it comes from |
+| --- | --- | --- | --- |
+| Canvas around panels | `--gl-canvas` | `#f7f7f7` | workspace background |
+| Panel, card, field | `--gl-surface` | `#fff` | conversation and result panels |
+| Quiet box (update, notice) | `--gl-surface-subtle` | `#fafafa` | checklist update, completion notice |
+| User bubble, hover row | `--gl-surface-muted` | `#f4f4f5` | user message, option hover |
+| Warm page tint | `--gl-surface-warm` | `#faf9f5` | rail hover |
+| Primary text | `--gl-text` | `#262626` | all panels |
+| Message body | `--gl-text-body` | `#444` | mentor message body |
+| Secondary / tertiary text | `--gl-text-secondary` / `--gl-text-tertiary` | `#777` / `#999` | captions, states |
+| Small text on public pages | `--gl-text-secondary-aa` | `#6b6b6b` | reaches 4.5:1 on white; `#777` and `#999` stay workbench-only |
+| Border / control border / strong | `--gl-border` / `--gl-border-control` / `--gl-border-strong` | `#ededed` / `#e5e5e5` / `#dcdcdc` | dividers, fields, current question |
+| Primary action | `--gl-action` (hover `--gl-action-hover`) | `#262626` (`#3b3b3b`) | send, confirm, publish bar |
+| Current work | `--gl-accent-selected` | `#faf4e5` | active rail item |
+| Recommended tag | `--gl-accent-tag` / `--gl-accent-tag-text` | `#f4efe3` / `#7a5f2c` | question card 推荐 |
+| Gold accent | `--gl-accent-gold`, `--gl-accent-gold-soft`, `--gl-accent-gold-text` | `#ffbb17`, 10% tint, `#ad6700` | credit widget, membership |
+| Brand mark | `--gl-brand-gold` | `#ffd700` | logo only |
+| Success / warning / error | `--gl-success*`, `--gl-warning*`, `--gl-error*` | text on tinted background | conversation notices |
+
+The primary action is dark, not gold. Gold and the warm tints mark the current work, the recommended
+choice and membership; they are never the background of long text.
+
+### Type
+
+One family, `--font-primary` (MiSans with PingFang SC, Hiragino Sans GB and Microsoft YaHei fallbacks).
+Workbench sizes: 11px micro labels, 12px captions and states, 13px UI rows and options, 14px fields and
+questions, 15px message body (line height 1.75), 17px panel titles. Weights are 400 and 500, with 550–600
+only for short titles. Larger display sizes for public pages belong to layer 2.
+
+### Space, shape and depth
+
+Spacing steps are 4, 8, 12, 16, 20 and 24px (6, 10 and 14 appear inside compact rows). Radii: 6px small
+controls, 8px buttons and fields, 12px cards and panels, 18px dialogs, 25px the message composer, pill
+for tags. Depth is tonal: panels use `--gl-shadow-panel`, the composer `--gl-shadow-composer`, menus and
+dialogs `--gl-shadow-menu` and `--gl-shadow-dialog`; routine cards have a border and no shadow.
+
+### Base components
+
+- **Button:** `components/ui/button` under `.light`: default is the dark primary action, outline is white
+  with `--gl-border-control`; 8px radius, 34px minimum height (44px on touch widths for important actions).
+- **Field:** white, `--gl-border-control`, 8px radius, 14px text, line height 1.65; the label stays visible.
+- **Card:** white, 1px `--gl-border`, 12px radius, 12–16px padding, no shadow.
+- **Tag:** pill, 11px, `--gl-accent-tag` for recommended, `--gl-surface-muted` for neutral.
+- **Notice:** `ChatInlineNotice`, 13px on a tinted background by tone; status notices have no background.
+- **Dialog:** white, 18px radius, `--gl-shadow-dialog`, title row with a divider; actions centered, the
+  primary one first and dark.
+- **Composer:** 25px radius, `--gl-shadow-composer`, round 34px icon buttons, dark round send button.
+
+Motion is 150ms for hover and focus. Long content does not animate in; with reduced motion every state
+shows its end state.
+
 ## Overview
 
 ### Creative North Star

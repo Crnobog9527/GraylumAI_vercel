@@ -71,14 +71,20 @@ export async function stripeMpRenewalCases({admin,service,connect}) {
   await assert.rejects(()=>renew(service,card,{invoice:'in_second_same_period'}),/RENEW_CONFLICT/,'one paid order per period');
 
   // Stop at period end (also set by the buyer on Link) ends the grace; the final cancellation is permanent.
+  // Account deletion (0224, any channel): a still-renewing MP subscription blocks it, served by the Stripe portal.
+  const erasure=async user=>(await admin.query('SELECT account_erasure_renewing($1) renewing,account_erasure_renewal_channels($1) channels',
+    [user])).rows[0];
+  assert.deepEqual(await erasure(cn.user),{renewing:true,channels:['stripe_portal']});
   assert.equal((await facts(cn.user)).mapping_state,'internal_paid');
   await sync(cn,true,false);
+  assert.deepEqual(await erasure(cn.user),{renewing:false,channels:[]},'stopping renewal in the portal lifts the deletion block');
   assert.deepEqual([(await sub(cn)).status,(await sub(cn)).cancel_at_period_end],['active','true']);
   assert.notEqual((await facts(cn.user)).mapping_state,'internal_paid','a stopped subscription ends at the paid end');
   await sync(cn,false,false);
   assert.equal((await sub(cn)).cancel_at_period_end,'false','resuming before the end clears the stop');
   await sync(cn,false,true); await sync(cn,false,false);
   assert.deepEqual([(await sub(cn)).status,(await sub(cn)).cancel_at_period_end],['canceled','true'],'a late update never reopens');
+  assert.equal((await erasure(cn.user)).renewing,false);
   // A charge after the final cancellation is kept for review (refund), never granted.
   const cnCredits=(await admin.query('SELECT credits FROM profiles WHERE id=$1',[cn.user])).rows[0].credits;
   assert.equal((await renew(service,cn)).rows[0].v.state,'review');
@@ -110,5 +116,5 @@ export async function stripeMpRenewalCases({admin,service,connect}) {
   return ['stripe-mp-grace-card-and-card-cn','stripe-mp-failure-recorded-once','stripe-mp-past-due-keeps-grace',
     'stripe-mp-renewal-list-price-not-first-month','stripe-mp-renewal-pre-tax-only','stripe-mp-renewal-once-concurrently',
     'stripe-mp-renewal-clears-failure','stripe-mp-next-charge-date','stripe-mp-one-order-per-period','stripe-mp-stop-ends-grace',
-    'stripe-mp-cancel-permanent','stripe-mp-charge-after-cancel-review','stripe-mp-founder-card-cn-deadline','stripe-mp-founder-renewal','stripe-mp-renewal-scope'];
+    'stripe-mp-cancel-permanent','stripe-mp-erasure-renewing-follows-stop','stripe-mp-charge-after-cancel-review','stripe-mp-founder-card-cn-deadline','stripe-mp-founder-renewal','stripe-mp-renewal-scope'];
 }

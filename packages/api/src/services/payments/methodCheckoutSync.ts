@@ -10,6 +10,8 @@ import { recoverMethodCheckout } from './walletWebhook';
 export async function syncMethodCheckoutReturn(db: SupabaseClient, stripe: Stripe, session: Stripe.Checkout.Session, userId: string) {
   const method = await recoverMethodCheckout(db, stripe, session.id);
   if (!method) return null;
+  // The owner check already matched this session to the signed-in user; it must belong to one of our orders.
+  if (!method.orderId) throw new Error('PAY_WAFFO_PERSISTENCE_UNAVAILABLE');
   const synced = await db.from('payment_orders').select('status,fulfilled_at').eq('id', method.orderId).eq('user_id', userId).maybeSingle();
   if (synced.error || !synced.data) throw new Error('PAY_WAFFO_PERSISTENCE_UNAVAILABLE', { cause: synced.error });
   return { sessionId: session.id, mode: session.mode, checkoutStatus: session.status, paymentStatus: session.payment_status,
