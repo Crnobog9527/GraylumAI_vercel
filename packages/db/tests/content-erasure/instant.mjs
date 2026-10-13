@@ -157,6 +157,20 @@ export async function runInstant({db,Client,connectionString,report}){
   await cleanup(db,l);
   report.checks.push('local conversation: marker only; read-only scope takes no account-wide locks');
 
+  // Capture into the work is in progress (it holds the work's project): deletion waits for nothing,
+  // reports busy and marks nothing, so capture can never write a copy after the cleanup scanned it.
+  const w=await capturedIntoWork(db);
+  await locker.query('BEGIN');await locker.query('SELECT id FROM artifact_projects WHERE id=$1 FOR UPDATE',[w.project]);
+  await assert.rejects(mark(db,w),/CONTENT_ERASURE_BUSY/);
+  await locker.query('ROLLBACK');
+  assert.equal((await row(db,'runtime_sessions',w.session)).content_deleted_at,null);
+  await mark(db,w);
+  assert.ok((await row(db,'runtime_sessions',w.session)).erased_at);
+  await assert.rejects(rpc(db,'opc_capture_apply',w.actor,w.draft,null),/./,'capture after deletion is refused');
+  assert.doesNotMatch(JSON.stringify((await db.query('SELECT steps FROM artifact_rounds WHERE id=$1',[w.round])).rows[0].steps),
+   /COPIED_PRIVATE_SUGGESTION/);
+  report.checks.push('capture in progress on the fed work: deletion reports busy and marks nothing; after it, capture cannot write a copy');
+
   // A copy exists but its cleanup is busy: nothing is marked and the call reports busy.
   const b=await capturedIntoWork(db);
   await locker.query('BEGIN');await locker.query('SELECT id FROM runtime_executions WHERE session_id=$1 FOR UPDATE',[b.session]);

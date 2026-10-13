@@ -2408,7 +2408,7 @@
   "fn:content_erasure_artifact_readable(uuid,uuid)": "da7d8e80dc10",
   "fn:content_erasure_capture_copy(jsonb,jsonb)": "b8320654d942",
   "fn:content_erasure_capture_steps(jsonb)": "81b75c872950",
-  "fn:content_erasure_confirm(uuid,text,uuid,text)": "4a73904fc00b",
+  "fn:content_erasure_confirm(uuid,text,uuid,text)": "2a20e7d38bfd",
   "fn:content_erasure_execution_guard()": "3adbedaaee4d",
   "fn:content_erasure_financial_allowed(uuid,uuid)": "3c6e64645a80",
   "fn:content_erasure_ledger_owned(jsonb)": "739cbffa5e1b",

@@ -68,7 +68,8 @@ REVOKE ALL ON FUNCTION public.content_erasure_mark_session(uuid,uuid) FROM PUBLI
 GRANT EXECUTE ON FUNCTION public.content_erasure_mark_session(uuid,uuid) TO service_role;
 
 -- Cleanup of a marked session no longer locks every session and project of the account.
--- Its own writers are already refused, so it locks the sessions its scope touches, then
+-- Its own writers are already refused, so it locks the sessions its scope touches and the works
+-- those sessions feed (capture takes the same project lock before writing), then
 -- recomputes the scope under those locks; a scope that reaches an unlocked session or any
 -- project is busy (retried later), never partially cleaned. ids/sessions/rounds are only
 -- scratch here; the original body reassigns them from the final scope.
@@ -91,6 +92,12 @@ BEGIN
    '  rounds:=ARRAY(SELECT DISTINCT s0.id FROM runtime_sessions s0 WHERE s0.actor_id=a\n'
    '   AND (s0.id=ANY(sessions) OR s0.id IN (SELECT e0.session_id FROM runtime_executions e0 WHERE e0.id=ANY(ids))) ORDER BY s0.id);\n'
    '  PERFORM id FROM runtime_sessions WHERE id=ANY(rounds) ORDER BY id FOR UPDATE NOWAIT;\n'
+   '  -- Works these conversations feed (draft, topic workspace or captured field): capture locks the\n'
+   '  -- project before writing, so holding it here serializes capture with this cleanup.\n'
+   '  PERFORM id FROM artifact_projects WHERE actor_id=a AND (id IN (SELECT d0.project_id FROM opc_drafts d0 WHERE d0.session_id=ANY(rounds))\n'
+   '   OR id IN (SELECT d1.project_id FROM opc_topic_workspaces t1 JOIN opc_drafts d1 ON d1.draft_id=t1.draft_id WHERE t1.session_id=ANY(rounds))\n'
+   '   OR id IN (SELECT r0.project_id FROM artifact_rounds r0 JOIN artifact_projects p0 ON p0.id=r0.project_id\n'
+   '    WHERE p0.actor_id=a AND content_erasure_references(r0.steps,ids))) ORDER BY id FOR UPDATE NOWAIT;\n'
    '  scope:=content_erasure_scope(a,k,target);\n'
    '  SELECT coalesce(array_agg(v::uuid),''{}'') INTO ids FROM jsonb_array_elements_text(scope->''executions'') v;\n'
    '  SELECT coalesce(array_agg(v::uuid),''{}'') INTO sessions FROM jsonb_array_elements_text(scope->''sessions'') v;\n'
