@@ -1,5 +1,6 @@
 -- DATA-ERASURE: deleting a whole conversation is one small synchronous step (Owner 2026-10-13).
--- The step sets the existing irreversible session marker under a lock on that one session only.
+-- The step sets the existing irreversible session marker under a lock on that one session only;
+-- when a copy of the conversation lives elsewhere it also runs the full cleanup in the same request.
 -- Every existing reader, writer and money path already refuses a marked session
 -- (content_erasure_runtime_check, content_erasure_parent_guard, runtime_execution,
 -- runtime_view, opc_free_conversations). Physical cleanup is the unchanged
@@ -12,7 +13,7 @@ CREATE INDEX IF NOT EXISTS runtime_sessions_content_cleanup_pending_idx
 
 CREATE OR REPLACE FUNCTION public.content_erasure_mark_session(a uuid,target uuid)
 RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
-DECLARE s runtime_sessions; deleted boolean;
+DECLARE s runtime_sessions; deleted boolean; scope jsonb; ids uuid[]; refs uuid[]; local boolean;
 BEGIN
  PERFORM bill2_actor(a);
  -- Same order as content_erasure_confirm (profile, then session). A short wait instead of
@@ -23,12 +24,42 @@ BEGIN
  SELECT * INTO s FROM runtime_sessions WHERE id=target AND actor_id=a FOR UPDATE;
  IF NOT FOUND THEN RAISE EXCEPTION 'CONTENT_NOT_FOUND' USING ERRCODE='42501'; END IF;
  deleted:=s.content_deleted_at IS NOT NULL OR s.erased_at IS NOT NULL;
- IF NOT deleted THEN
-  UPDATE runtime_sessions SET content_deleted_at=clock_timestamp() WHERE id=target;
+ IF deleted THEN
+  RETURN jsonb_build_object('kind','session','id',target,'status','deleted','alreadyDeleted',true,
+   'preservedSavedVersions',0,'financialReviewCount',0);
+ END IF;
+ -- Read-only scope (no account-wide locks). The marker alone is enough only when nothing outside
+ -- this conversation holds a copy: a free conversation (no draft or topic binding), every scoped
+ -- execution in it, no saved content, work, data event, result link, captured field, library
+ -- request or other conversation's frozen material referencing it. Anything else, or any doubt,
+ -- runs the full cleanup now so no derived copy stays readable after this call returns.
+ scope:=content_erasure_scope(a,'session',target);
+ SELECT coalesce(array_agg(v::uuid),'{}') INTO ids FROM jsonb_array_elements_text(scope->'executions') v;
+ refs:=ids||target;
+ local:=NOT EXISTS(SELECT 1 FROM opc_drafts d WHERE d.session_id=target)
+  AND NOT EXISTS(SELECT 1 FROM opc_topic_workspaces t WHERE t.session_id=target)
+  AND NOT EXISTS(SELECT 1 FROM runtime_executions e WHERE e.id=ANY(ids) AND e.session_id<>target)
+  AND jsonb_array_length(scope->'projects')=0 AND jsonb_array_length(scope->'versions')=0
+  AND jsonb_array_length(scope->'contents')=0 AND jsonb_array_length(scope->'affectedSources')=0
+  AND NOT EXISTS(SELECT 1 FROM opc_content_versions c WHERE c.actor_id=a AND c.execution_id=ANY(ids))
+  AND NOT EXISTS(SELECT 1 FROM opc_data_events d WHERE d.actor_id=a AND d.execution_id=ANY(ids))
+  AND NOT EXISTS(SELECT 1 FROM opc_result_links l WHERE l.execution_id=ANY(ids))
+  AND NOT EXISTS(SELECT 1 FROM artifact_rounds r JOIN artifact_projects p ON p.id=r.project_id
+   WHERE p.actor_id=a AND r.erased_at IS NULL AND content_erasure_references(r.steps,refs))
+  AND NOT EXISTS(SELECT 1 FROM opc_library_requests q WHERE q.actor_id=a AND q.erased_at IS NULL
+   AND (content_erasure_references(q.payload,refs) OR content_erasure_references(q.result,refs)))
+  AND NOT EXISTS(SELECT 1 FROM runtime_scope_material m JOIN runtime_sessions o ON o.id=m.session_id
+   WHERE o.actor_id=a AND m.session_id<>target AND m.erased_at IS NULL
+    AND (content_erasure_references(m.request,refs) OR content_erasure_references(m.content,refs)));
+ UPDATE runtime_sessions SET content_deleted_at=clock_timestamp() WHERE id=target;
+ IF NOT local THEN
+  -- Same transaction: the marked-session cleanup locks only rows in scope. If it is busy the
+  -- marker rolls back with it and the caller reports the conversation as not deleted.
+  RETURN content_erasure_confirm(a,'session',target,NULL)||jsonb_build_object('alreadyDeleted',false);
  END IF;
  -- Content is unreadable from here on. Money facts stay on their original runs; the
- -- cleanup reports any financial review through the existing reconciliation.
- RETURN jsonb_build_object('kind','session','id',target,'status','deleted','alreadyDeleted',deleted,
+ -- background cleanup reports any financial review.
+ RETURN jsonb_build_object('kind','session','id',target,'status','deleted','alreadyDeleted',false,
   'preservedSavedVersions',0,'financialReviewCount',0);
 EXCEPTION WHEN lock_not_available OR deadlock_detected THEN
  RAISE EXCEPTION 'CONTENT_ERASURE_BUSY' USING ERRCODE='55P03';

@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict';
 import {randomUUID} from 'node:crypto';
 import {runtimeFixture} from './cases.mjs';
-import {rpc,fixture,evidence,closeAccount} from '../erasure-b2a/cases.mjs';
+import {rpc,fixture,evidence,closeAccount,outcome} from '../erasure-b2a/cases.mjs';
 const mark=(db,f,id=f.session)=>rpc(db,'content_erasure_mark_session',f.actor,id);
 const cleanup=(db,f,id=f.session)=>rpc(db,'content_erasure_confirm',f.actor,'session',id,null);
 const row=async(db,table,id)=>(await db.query(`SELECT * FROM ${table} WHERE id=$1`,[id])).rows[0];
@@ -12,6 +12,42 @@ async function bystander(db,f){
  await db.query(`INSERT INTO runtime_sessions(id,actor_id,scope,start_request_id,start_payload)
   SELECT $1::uuid,actor_id,scope||jsonb_build_object('fixtureBystander',$1::text),gen_random_uuid(),'{}' FROM runtime_sessions WHERE id=$2`,[id,f.session]);
  return id;
+}
+// A positioning conversation whose answer was captured into a live work (same setup as capture-v3).
+async function capturedIntoWork(db){
+ const f=(await db.query('SELECT runtime_perf_test.seed(0,false) v')).rows[0].v;
+ const art=(await db.query('SELECT d7_test.artifacts($1) v',[f.actor])).rows[0].v;
+ const project=randomUUID(),round=randomUUID();
+ const workflow={steps:[{id:'s',information:[{id:'goal'}]}]};
+ const steps={s:{version:7,valid:true,information:{goal:{value:'KEEP_CONFIRMED',status:'confirmed',nature:'fact'}},
+  fieldMeta:{goal:{source:'manual'}}}};
+ await db.query('INSERT INTO artifact_projects(id,actor_id,module_id,skill_id) VALUES($1,$2,$3,$4)',[project,f.actor,art.module,art.skill]);
+ await db.query(`INSERT INTO artifact_rounds(id,project_id,revision_id,package_hash,workflow,workflow_hash,template_hash,steps)
+  VALUES($1,$2,$3,$4,$5,$6,$6,$7)`,[round,project,art.revision,'b'.repeat(64),workflow,'c'.repeat(64),steps]);
+ const registration=(await db.query('SELECT id FROM artifact_workflows WHERE skill_id=$1',[art.skill])).rows[0].id;
+ await db.query(`INSERT INTO opc_drafts VALUES($1,$2,$3,$4,$5,$6,$7,'mentor')`,[f.draft,f.actor,project,round,f.session,randomUUID(),registration]);
+ await db.query('UPDATE modules SET model_id=$2 WHERE id=$1',[art.module,f.model]);
+ const material={roundId:round,work:{projectId:project,roundId:round,revisionId:art.revision,packageHash:'b'.repeat(64),source:null,steps}};
+ const hash=(await db.query("SELECT encode(sha256(convert_to($1::jsonb::text,'UTF8')),'hex') h",[material])).rows[0].h;
+ await db.query(`INSERT INTO runtime_scope_material(session_id,revision,request_id,request,content,content_hash)
+  VALUES($1,1,$2,'{}',$3,$4)`,[f.session,randomUUID(),material,hash]);
+ const e={id:randomUUID(),request_id:randomUUID()},token=randomUUID();
+ const suggestion={value:'COPIED_PRIVATE_SUGGESTION',nature:'fact',basis:'user_statement'};
+ const input={captureFormat:'v2',userInput:'请更新目标',checklist:[{id:'s',fields:[{id:'goal'}]}]};
+ const output={inputKind:'request',patches:[{stepId:'s',fieldId:'goal',status:'provisional',...suggestion}],notes:[]};
+ const payload={...f.payload,role:'skill',request:{input:'Synthetic input',requestId:e.request_id},moduleId:art.module,revisionId:art.revision,
+  opcTurnToken:token,scopeMaterial:{sessionId:f.session,revision:1,hash,content:material},attachedOrganizer:{input:JSON.stringify(input)}};
+ await db.query(`INSERT INTO opc_turns(token,draft_id,session_id,request_id,round_id,step_id,purpose,material_revision,input_hash)
+  VALUES($1,$2,$3,$4,$5,'s','mentor',1,$6)`,[token,f.draft,f.session,e.request_id,round,'e'.repeat(64)]);
+ const billing={...f.billing,moduleId:art.module,skillId:art.skill,revisionId:art.revision,input:payload};
+ const run=await rpc(db,'bill2_prepare',f.actor,randomUUID(),billing);
+ await db.query(`INSERT INTO runtime_executions(id,actor_id,session_id,request_id,payload,billing_run_id,history_revision,state,result,created_at)
+  VALUES($1,$2,$3,$4,$5,$6,0,'completed',$7,$8)`,[e.id,f.actor,f.session,e.request_id,payload,run.id,{...outcome,summary:JSON.stringify(output)},
+  new Date(1767225600000)]);
+ await db.query('UPDATE bill2_runs SET session_ref=$2 WHERE id=$1',[run.id,f.session]);
+ await db.query('SELECT runtime_billing_allowed($1,$2,$3)',[f.actor,billing,run.id]);
+ assert.equal((await rpc(db,'opc_capture_apply',f.actor,f.draft,e.id)).result,'suggested');
+ return {...f,round,project};
 }
 export async function runInstant({db,Client,connectionString,report}){
  const locker=new Client({connectionString});await locker.connect();
@@ -88,6 +124,46 @@ export async function runInstant({db,Client,connectionString,report}){
   assert.doesNotMatch(JSON.stringify(late),/B2A_PRIVATE_CANARY|LATE_PRIVATE_RESULT|sdkResponse|rawBody/);
   assert.doesNotMatch(JSON.stringify(await row(db,'runtime_executions',p.execution)),/LATE_PRIVATE_RESULT/);
   report.checks.push('same conversation generating: late result and history refused after mark; money recorded on original run');
+
+  // A copy lives in a live work: the same call runs the full cleanup, so the copy is gone on return,
+  // while an unrelated busy conversation and an unrelated busy work of the account do not block it.
+  const c=await capturedIntoWork(db);
+  assert.match(JSON.stringify((await db.query('SELECT steps FROM artifact_rounds WHERE id=$1',[c.round])).rows[0].steps),
+   /COPIED_PRIVATE_SUGGESTION/);
+  const otherConversation=await bystander(db,{actor:c.actor,session:c.session});
+  const otherWork=randomUUID();
+  await db.query(`INSERT INTO artifact_projects(id,actor_id,module_id,skill_id,account)
+   SELECT $1,actor_id,module_id,skill_id,'unrelated-work' FROM artifact_projects WHERE id=$2`,[otherWork,c.project]);
+  await locker.query('BEGIN');
+  await locker.query('SELECT id FROM runtime_sessions WHERE id=$1 FOR UPDATE',[otherConversation]);
+  await locker.query('SELECT id FROM artifact_projects WHERE id=$1 FOR UPDATE',[otherWork]);
+  const full=await mark(db,c);
+  await locker.query('ROLLBACK');
+  assert.equal(full.alreadyDeleted,false);assert.ok(['deleted','review_required'].includes(full.status));
+  assert.ok((await row(db,'runtime_sessions',c.session)).erased_at,'full cleanup ran in the same call');
+  assert.doesNotMatch(JSON.stringify((await db.query('SELECT steps FROM artifact_rounds WHERE id=$1',[c.round])).rows[0].steps),
+   /COPIED_PRIVATE_SUGGESTION/,'the copy in the live work is unreadable when the call returns');
+  report.checks.push('copy in a live work: full cleanup in the same call, copy gone on return; unrelated busy conversation/work do not block');
+
+  // A local free conversation: only the marker, even with the account's other conversation and work locked.
+  const l=await runtimeFixture(db,{settled:true});
+  const lockedConversation=await bystander(db,l);
+  await locker.query('BEGIN');
+  await locker.query('SELECT id FROM runtime_sessions WHERE id=$1 FOR UPDATE',[lockedConversation]);
+  await locker.query('SELECT id FROM artifact_projects WHERE id=$1 FOR UPDATE',[otherWork]);
+  assert.equal((await mark(db,l)).status,'deleted');
+  await locker.query('ROLLBACK');
+  assert.equal((await row(db,'runtime_sessions',l.session)).erased_at,null,'local deletion leaves cleanup to the background');
+  await cleanup(db,l);
+  report.checks.push('local conversation: marker only; read-only scope takes no account-wide locks');
+
+  // A copy exists but its cleanup is busy: nothing is marked and the call reports busy.
+  const b=await capturedIntoWork(db);
+  await locker.query('BEGIN');await locker.query('SELECT id FROM runtime_executions WHERE session_id=$1 FOR UPDATE',[b.session]);
+  await assert.rejects(mark(db,b),/CONTENT_ERASURE_BUSY/);
+  await locker.query('ROLLBACK');
+  assert.equal((await row(db,'runtime_sessions',b.session)).content_deleted_at,null,'busy full cleanup rolls back the marker');
+  report.checks.push('copy present and cleanup busy: marker rolled back, reported busy');
 
   // Sweep: the cron backstop pages through marked sessions, skips closed accounts, keeps busy ones pending
   // and counts any other failure as failed.
