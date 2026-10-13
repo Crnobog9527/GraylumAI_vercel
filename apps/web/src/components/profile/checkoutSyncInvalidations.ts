@@ -34,3 +34,11 @@ export function invalidatePostCheckoutMembershipQueries(utils: PostCheckoutInval
     utils.payments.listBillingRecords.invalidate(),
   ]);
 }
+
+/** Cancel-URL return: the server re-reads the session, which another tab may have paid in the meantime. */
+export function canceledReturnNotice(result: { fulfilledAt?: string | null; orderStatus?: string | null } | null | undefined) {
+  if (result?.fulfilledAt || result?.orderStatus === 'completed') {
+    return { tone: 'success' as const, message: '这笔支付已经完成，订单状态已同步到账。' };
+  }
+  return { tone: 'cancelled' as const, message: '你已取消本次支付，没有发生扣费。' };
+}

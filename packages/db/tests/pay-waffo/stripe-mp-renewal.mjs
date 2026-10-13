@@ -93,6 +93,16 @@ export async function stripeMpRenewalCases({admin,service,connect}) {
   // A member whose paid period is still running keeps the cached level even if another subscription is canceled.
   const keepLevel=(await admin.query('SELECT membership_level FROM profiles WHERE id=$1',[card.user])).rows[0].membership_level;
   assert.equal(keepLevel,'gold');
+  // Pro->Gold upgrade with the older Pro term still running, Gold canceled first: the level drops to pro, not free.
+  // (Disposable fixture: the running renewed term stands in for the older Pro period.)
+  await admin.query('BEGIN');
+  await admin.query('ALTER TABLE payment_orders DISABLE TRIGGER pay_common_purchase_freeze');
+  await admin.query(`UPDATE payment_orders SET purchase_membership_level='pro' WHERE subscription_id=$1 AND source_order_id IS NOT NULL`,
+    [card.sub]);
+  await admin.query('ALTER TABLE payment_orders ENABLE TRIGGER pay_common_purchase_freeze');
+  await admin.query('COMMIT');
+  await sync(card,false,true);
+  assert.equal((await admin.query('SELECT membership_level FROM profiles WHERE id=$1',[card.user])).rows[0].membership_level,'pro');
   // A charge after the final cancellation is kept for review (refund), never granted.
   const cnCredits=(await admin.query('SELECT credits FROM profiles WHERE id=$1',[cn.user])).rows[0].credits;
   assert.equal((await renew(service,cn)).rows[0].v.state,'review');
@@ -124,5 +134,5 @@ export async function stripeMpRenewalCases({admin,service,connect}) {
   return ['stripe-mp-grace-card-and-card-cn','stripe-mp-failure-recorded-once','stripe-mp-past-due-keeps-grace',
     'stripe-mp-renewal-list-price-not-first-month','stripe-mp-renewal-pre-tax-only','stripe-mp-renewal-once-concurrently',
     'stripe-mp-renewal-clears-failure','stripe-mp-next-charge-date','stripe-mp-one-order-per-period','stripe-mp-stop-ends-grace',
-    'stripe-mp-cancel-permanent','stripe-mp-cancel-resets-cached-level','stripe-mp-erasure-renewing-follows-stop','stripe-mp-charge-after-cancel-review','stripe-mp-founder-card-cn-deadline','stripe-mp-founder-renewal','stripe-mp-renewal-scope'];
+    'stripe-mp-cancel-permanent','stripe-mp-cancel-resets-cached-level','stripe-mp-cancel-keeps-remaining-level','stripe-mp-erasure-renewing-follows-stop','stripe-mp-charge-after-cancel-review','stripe-mp-founder-card-cn-deadline','stripe-mp-founder-renewal','stripe-mp-renewal-scope'];
 }
