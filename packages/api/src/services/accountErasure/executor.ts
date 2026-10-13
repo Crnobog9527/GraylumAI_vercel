@@ -7,6 +7,7 @@ import { z } from 'zod';
 import { createAccountErasureHost } from './host';
 import { createErasureAuthAdapter } from './authAdapter';
 import { createErasureStorageTransport } from './storageTransport';
+import { syncErasureManifest } from './offdbManifest';
 
 const claimSchema = z.discriminatedUnion('claimed', [
   z.object({ claimed: z.literal(false) }).strict(),
@@ -126,6 +127,11 @@ export async function runAccountErasureExecutor(client: SupabaseClient, deadline
       more = logRetentionSchema.parse(logs.data).more;
     }
     if (more) throw new Error('LOG_RETENTION_BACKLOG');
+  } catch { summary.failed++; }
+  // Off-database erasure manifest: retry unsynced rows and drop rows older than 35 days.
+  try {
+    const manifest = await syncErasureManifest(client, { cleanup: true, deadline: Math.max(Date.now() + 2_000, deadline) });
+    if (!manifest.ok) summary.failed++;
   } catch { summary.failed++; }
   try {
     const result = await client.rpc('account_erasure_executor_pending', {}).abortSignal(AbortSignal.timeout(2000));
