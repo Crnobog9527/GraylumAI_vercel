@@ -80,7 +80,7 @@ GraylumAI_vercel/
 │   │   │   ├── services/       # Business logic
 │   │   │   │   ├── chatRuntime.ts # Runtime orchestration
 │   │   │   │   ├── rateLimiter.ts # Request rate limits
-│   │   │   │   ├── billing.ts  # Credit system
+│   │   │   │   ├── bill2/      # Credit system (BILL2)
 │   │   │   │   ├── modelRouter.ts    # Smart routing
 │   │   │   │   └── contextManager.ts # Context compression
 │   │   │   ├── lib/            # Utilities
@@ -111,7 +111,7 @@ Handles AI provider interactions; Claude uses the OpenRouter-compatible path:
 
 Routing decisions combine task classification with runtime configuration loaded by `chatRuntime.ts`. `primary_model_id` and `assistant_model_id` refer to database model records; the selected model is not fixed to an old provider model name. Search decisions and provider capability are evaluated separately. See [settings effects](ADMIN_SETTINGS_EFFECT_MATRIX.md).
 
-### 3. Three-Phase Billing (`packages/api/src/services/billing.ts`)
+### 3. Three-Phase Billing (`packages/api/src/services/bill2`)
 
 ```
 Pre-deduct → AI Call → Settle/Refund
@@ -155,7 +155,7 @@ See [admin operations](runbooks/ADMIN_OPERATIONS.md) for API inputs, failure han
 2. Rate limit check (rateLimiter.ts)
        │
        ▼
-3. Pre-deduct credits (billing.ts)
+3. Reserve credits (services/bill2)
        │
        ▼
 4. Smart model routing (modelRouter.ts)

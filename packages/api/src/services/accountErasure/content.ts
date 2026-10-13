@@ -1,6 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
+import { scheduleErasureManifestSync } from './offdbManifest';
 
 export const contentTarget = z.object({
   kind: z.enum(['answer', 'session', 'artifact', 'content']),
@@ -61,6 +62,7 @@ export async function confirmContentErasure(database: Database | null | undefine
   if (response.error) fail(response.error);
   const parsed = confirmationResult.safeParse(response.data);
   if (!parsed.success || parsed.data.id !== target.id || parsed.data.kind !== target.kind) fail(null);
+  scheduleErasureManifestSync(database);
   return parsed.data;
 }
 export const conversationTarget = z.object({ sessionId: z.string().uuid() }).strict();

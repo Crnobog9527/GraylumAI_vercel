@@ -15,7 +15,7 @@
 | L1 | Supabase 数据库备份（每日备份） | staging：`supabase backups list` 返回空列表，PITR 未开（2026-10-12）。正式：未核实 | 每日备份：Pro/Team/Enterprise 可访问 7/14/30 天；数据库备份不含 Storage 文件 [S8] | staging 已核实（没有可恢复的每日备份）。正式环境的套餐和备份窗口未核实。Pro 的 7 天在 30 天以内；Enterprise 的 30 天正好到上限 | 正式库建好后由总控只读核对套餐，Owner 决定套餐 |
 | L2 | Supabase PITR | staging 未开。正式未核实 | 可选 7/14/28 天 [S8] | 正式环境如果开，选 28 天以内的档位才满足 E7 | 同上 |
 | L3 | Supabase 平台日志（API、Auth、Postgres 日志） | 未核实套餐 | 可查询窗口：Free/Pro/Team/Enterprise 为 1/7/28/90 天 [S8] | Enterprise 的 90 天超过 E7，用 Enterprise 前要请 Owner 决定。访问窗口不等于平台内部所有副本的销毁时间 | Owner 定套餐时一并确认 |
-| L4 | 数据库里的日志表 | staging 只读计数（2026-10-12）：`application_logs` 0 行；`user_activity_logs` 22 行，最早 09-26；`diagnostic_results` 390 行，最早 **09-14**；`ai_usage_logs` 309 行，最早 09-26；`scheduled_job_runs`（定时任务执行记录，含错误和任意 `summary`）15 行，最早 09-30 | — | **缺口**：0148 删掉了 `cleanup_old_logs` 以后，没有任何通用的日志定期清理；staging 上 pg_cron、pg_net 都没装。`diagnostic_results` 已经存了 28 天，再过两天就超过 30 天。`user_activity_logs`（管理员访问用户的审计记录）和 `scheduled_job_runs`（0017，只追加、没有任何删除路径）也没有到期清理。`ai_usage_logs` 属于账务，注销时清正文、按 3 年账务保留，不算日志 | 需要新开任务：给日志表加到期清理（复用现有的每日 cron 路由，不新建调度），哪些表算日志、保留多久按 E7 定 |
+| L4 | 数据库里的日志表 | staging 只读计数（2026-10-12）：`application_logs` 0 行；`user_activity_logs` 22 行，最早 09-26；`diagnostic_results` 390 行，最早 **09-14**；`ai_usage_logs` 309 行，最早 09-26；`scheduled_job_runs`（定时任务执行记录，含错误和任意 `summary`）15 行，最早 09-30 | — | **缺口**：0148 删掉了 `cleanup_old_logs` 以后，没有任何通用的日志定期清理；staging 上 pg_cron、pg_net 都没装。`diagnostic_results` 已经存了 28 天，再过两天就超过 30 天。`scheduled_job_runs`（0017，只追加、没有任何删除路径）也没有到期清理。**已由 #867（迁移 0226）补上**：`application_logs`、`diagnostic_results`、`scheduled_job_runs` 每天删除超过 29 天的行。`user_activity_logs`（管理员审计，含积分调整和 PAYG 计量复核证据）**不算日志**：Owner 2026-10-12 原话："同意管理员审计记录（user_activity_logs）按账务记录保留 3 年，不按 30 天日志清理。" 到期清理随账务 3 年到期清理一起做（上线后）。`ai_usage_logs` 属于账务，注销时清正文、按 3 年账务保留，不算日志 | #867 |
 | L5 | Supabase Storage 文件的备份 | 未核实 | 数据库备份不含 Storage 文件 [S8]；Storage 自身是否另有备份，公开资料未写 | 未核实。需要问 Supabase 或看套餐说明 | 上线前核对 |
 | L6 | Vercel 运行日志（函数 stdout/stderr） | staging 为 Hobby（EXECUTOR.md 记录）。正式未核实。Log Drains：staging 团队查询返回 404，没有看到已配置的转存 | Hobby 1 小时、Pro 1 天、Enterprise 3 天；Observability Plus 30 天 [S7] | Hobby/Pro 都在 30 天以内。买 Observability Plus 正好 30 天。**以后加 Log Drains 会把日志转到第三方，必须先补那一家的保留期** | 升级 Pro 时确认没有开超过 30 天的附加项 |
 | L7 | Vercel 构建日志 | 每次部署都有 | 构建日志随部署长期保存（Vercel 社区和文档的说法） | **Owner 2026-10-12 已定：不含用户数据，不在承诺范围**（构建时不读用户数据） | — |
@@ -29,7 +29,7 @@
 **从备份恢复以后怎么办（E7、§8）**：恢复只能先恢复到隔离环境，开放读写之前，要把注销和单条删除重新执行一遍。
 但旧备份里的 `account_erasure_requests` 只包含备份那一刻已有的请求；**备份之后才确认的注销不在里面**，只重放恢复出来的表，会把这些账号的旧内容放出来。
 所以必须有一份**存在数据库以外**、持续更新的最小删除清单，恢复时导入并重放；拿不到这份清单就不能开放服务。清单不放内容，但要够重放：账号注销记请求编号、账号编号、确认时间；单条删除（对话、成果、资料库文档等）还要记删除类型和目标编号（`content_erasure_confirm` 和资料库删除都要靠它们定位）。每条记录要保留到它之前的所有备份都过期为止。
-**缺口**：仓库里目前没有这样的库外删除清单（缺口汇总第 5 条）。整个恢复流程也**还没有演练过**（T15/T16），staging 没有每日备份，暂时演练不了。
+**进展**：库外删除清单已由迁移 0227 补上（存 Upstash Redis，只记类型、目标编号、账号编号、确认时间，35 天过期），恢复步骤见 [从备份恢复后重放删除](DATA_ERASURE_BACKUP_RESTORE_REPLAY.md)。注销请求编号不记，重放时用新的请求编号。整个恢复流程也**还没有演练过**（T15/T16），staging 没有每日备份，暂时演练不了。
 
 ## 清单二：第三方删除流程
 
@@ -69,12 +69,12 @@
 
 ## 发现的缺口汇总（需要另外立项或请 Owner 决定）
 
-1. **日志表没有定期清理**（L4，Owner 已同意上线前补）：`diagnostic_results` 已存 28 天，`user_activity_logs`、`scheduled_job_runs` 也没有到期清理。建议新开一个小任务，复用每日 cron 加日志到期清理。
+1. **日志表没有定期清理**（L4，Owner 已同意上线前补）：由 #867（迁移 0226）处理 `application_logs`、`diagnostic_results`、`scheduled_job_runs`。`user_activity_logs` 按 Owner 决定作为账务审计保留 3 年，随账务到期清理一起做（上线后）。
    注意 cron 每天只跑一次：如果按"超过 30 天就删"写，刚跑完那一刻写入的行最多会留将近 31 天。删除线要设在 29 天（留出一天的运行间隔），或者提高运行频率。
 2. **Sentry**（L9）：上报前脱敏已由 #865 补上，后续 PR 改为白名单；90 天保留期 Owner 已定为第三方例外，写入隐私条款。`SENTRY_OTLP_TRACES_URL` 的用途待核实。
 3. **模型线路政策表**还没有（清单二）；旧对话链路的 Google 直连不在 OpenRouter 范围里，LEGACY-CLOSE 删除这条链路之前不得在后台启用。
 4. **正式环境**的 Supabase 套餐、备份、PITR、日志窗口都未核实（L1–L3），等正式库建好后只读核对。
-5. **从备份恢复后重放删除**（库外删除清单 Owner 已同意上线前补）：缺一份存在数据库以外的最小删除清单（否则备份之后才注销的账号、才删除的对话和文档会被恢复出来；单条删除要记删除类型和目标编号），整个流程也没有演练（T15/T16）。
+5. **从备份恢复后重放删除**（库外删除清单 Owner 已同意上线前补）：缺一份存在数据库以外的最小删除清单（否则备份之后才注销的账号、才删除的对话和文档会被恢复出来；单条删除要记删除类型和目标编号），整个流程也没有演练（T15/T16）。清单本身已由迁移 0227 补上（见[重放运行手册](DATA_ERASURE_BACKUP_RESTORE_REPLAY.md)），演练和正式环境备份窗口核对仍未做。
 6. **Upstash 限流 analytics**（L10，Owner 已同意上线前补）：统计里的用户编号保留 90 天，注销不删。要关掉 analytics、改用不带用户编号的标识，或者 30 天内清掉。
 7. **hCaptcha** 技术数据最长保留一年：Owner 已定为第三方例外，写入隐私条款。
 8. **Vercel 构建日志**（L7）：Owner 已定不含用户数据、不在承诺范围；**Speed Insights**（L8b）未核实。
