@@ -350,6 +350,6 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .pill, .stepMark, .faqItem summary svg { transition: none; }
+  .pill, .stepMark, .faqItem summary svg, .header { transition: none; }
   .note, .wallRow:nth-child(even) .note { transform: none; }
 }

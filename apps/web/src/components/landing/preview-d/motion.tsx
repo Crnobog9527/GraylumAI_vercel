@@ -89,7 +89,8 @@ export function AutoHideHeader({ children, className }: { children: ReactNode; c
   const ref = useRef<HTMLElement>(null);
   useEffect(() => {
     const node = ref.current;
-    if (!node) return;
+    // With reduced motion the header simply stays put.
+    if (!node || reducedMotion()) return;
     let last = window.scrollY;
     let frame = 0;
     const update = () => {
@@ -101,8 +102,15 @@ export function AutoHideHeader({ children, className }: { children: ReactNode; c
       last = y;
     };
     const onScroll = () => { if (!frame) frame = requestAnimationFrame(update); };
+    // Keyboard focus brings the header back, so tabbing never lands on hidden links.
+    const onFocus = () => { delete node.dataset.hidden; };
     window.addEventListener('scroll', onScroll, { passive: true });
-    return () => { cancelAnimationFrame(frame); window.removeEventListener('scroll', onScroll); };
+    node.addEventListener('focusin', onFocus);
+    return () => {
+      cancelAnimationFrame(frame);
+      window.removeEventListener('scroll', onScroll);
+      node.removeEventListener('focusin', onFocus);
+    };
   }, []);
   return <header ref={ref} className={className}>{children}</header>;
 }
