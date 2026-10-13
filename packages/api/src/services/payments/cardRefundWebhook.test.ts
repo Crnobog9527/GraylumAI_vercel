@@ -54,6 +54,11 @@ describe('PAY-STRIPE-MP external refunds of card orders', () => {
     await expect(during.run({ chargeId: 'ch_1' })).resolves.toBe(true);
     expect(mocks.monthly).toHaveBeenCalledTimes(1);
     expect(mocks.monthly).toHaveBeenCalledWith(during.db, 'order', null, during.stripe);
+    // A failed or canceled external refund moved no cash: the running refund is not frozen by it.
+    mocks.monthly.mockClear();
+    const failed = fixture([refund({ id: 're_failed', status: 'failed' }), refund({ id: 're_canceled', status: 'canceled' })]);
+    await failed.run({ chargeId: 'ch_1' });
+    expect(mocks.monthly).not.toHaveBeenCalledWith(failed.db, 'order', null, failed.stripe);
     expect(during.db.rpc).not.toHaveBeenCalled();
     expect(during.alert).toHaveBeenCalledTimes(1);
     // A refund of ours naming another order is a conflict, never recorded.

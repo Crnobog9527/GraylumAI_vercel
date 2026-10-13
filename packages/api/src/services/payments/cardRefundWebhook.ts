@@ -47,11 +47,13 @@ export async function handleCardRefund(db: SupabaseClient, stripe: RefundStripe,
   // An order whose monthly refund is approved or running (step 4b-2) owns its cash: external refunds (Link, Dashboard)
   // are persisted on that intent as one conflict for review, carrying the charge's whole refunded amount read from
   // Stripe (so no refund is lost, whatever the order or number of refunds), never also booked as external refunds here.
-  if (match && external.length) {
+  // A failed or canceled external refund moved no cash and must not freeze the intent.
+  const movingCash = external.filter(refund => !['failed', 'canceled'].includes(refund.status ?? ''));
+  if (match && movingCash.length) {
     const monthly = await reconcileMonthlyRefundForOrder(db, match.order.id, null, stripe as unknown as MonthlyStripe);
     if (monthly.handled) {
       logger.error('billing', 'stripe_mp_external_refund_during_monthly_refund', { orderId: match.order.id,
-        refundIds: external.map(refund => refund.id), action: '月付退款进行中又收到外部退款：已按这笔扣款的退款总额记为冲突，请人工核对' });
+        refundIds: movingCash.map(refund => refund.id), action: '月付退款进行中又收到外部退款：已按这笔扣款的退款总额记为冲突，请人工核对' });
       alert();
       return oursHandled === ours.length;
     }
