@@ -12,14 +12,18 @@ const STAGING_PRODUCTION_URLS: ReadonlySet<string> = new Set(['auth-staging.gray
  * separate decision and must not follow the card test switch. */
 const WALLET_CHECKOUT_READY = false;
 
-/** Test-only card admission, checked before any settings, order or provider access: a staging
- * deployment with the Waffo test client explicitly enabled. Production is closed whatever its
- * configuration says. The default-off server switch is `payment_method_routes.card.enabled`,
- * enforced by assertPaymentMethodRoute together with the route version. */
+/** Stripe card subscriptions (PAY-STRIPE-MP) stay closed in code until the Stripe card checkout
+ * adapter (PR-2) lands. Waffo no longer takes new card purchases (Owner 2026-10-12). */
+const STRIPE_CARD_CHECKOUT_READY = false;
+
+/** Test-only card admission, checked before any settings, order or provider access: the staging
+ * deployment only. Production is closed whatever its configuration says. The default-off server
+ * switches are `payment_method_routes.card.enabled` / `card_cn.enabled`, enforced by
+ * assertPaymentMethodRoute together with the route version. */
 export function methodCheckoutEnvironmentOpen(env: Env, method: PaymentMethod) {
-  if (method !== 'card') return WALLET_CHECKOUT_READY;
-  return env.VERCEL === '1' && STAGING_PRODUCTION_URLS.has(env.VERCEL_PROJECT_PRODUCTION_URL ?? '')
-    && env.WAFFO_TEST_OPERATIONS_ENABLED === 'true';
+  if (method !== 'card' && method !== 'card_cn') return WALLET_CHECKOUT_READY;
+  return STRIPE_CARD_CHECKOUT_READY && env.VERCEL === '1'
+    && STAGING_PRODUCTION_URLS.has(env.VERCEL_PROJECT_PRODUCTION_URL ?? '');
 }
 
 export function assertMethodCheckoutEnvironment(env: Env, method: PaymentMethod) {

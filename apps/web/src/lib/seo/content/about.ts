@@ -25,7 +25,7 @@ export const ABOUT_ZH_HANS: ArticleContent = {
     text: 'Graylum 是面向自媒体新手和个人创作者的 AI 陪跑教练。它像一位运营顾问一样主动提问、帮你把想法说清楚，再给出下一步该做什么。',
   },
   cta: {
-    label: '免费开始定位诊断',
+    label: '免费和教练聊聊',
     description: '注册后可以免费完成定位诊断：AI 教练会一步步问你的情况，帮你理清适合做什么账号、做给谁看。',
     href: SIGNUP_CTA_HREF,
   },
@@ -80,7 +80,7 @@ export const ABOUT_ZH_TW: ArticleContent = {
     text: 'Graylum 是給自媒體新手和個人創作者的 AI 陪跑教練。它像一位經營顧問一樣主動提問、幫你把想法說清楚，再告訴你下一步該做什麼。',
   },
   cta: {
-    label: '免費開始定位診斷',
+    label: '免費和教練聊聊',
     description: '註冊後可以免費完成定位診斷：AI 教練會一步步了解你的情況，幫你釐清適合經營什麼帳號、做給誰看。',
     href: SIGNUP_CTA_HREF,
   },

@@ -42,7 +42,8 @@ export function runtimeTurnNotices(turn: RuntimeTurn, ctx: {
   // Both reasons say "not charged"; only a finished (cancelled) round may show them.
   if (turn.unavailableReason === 'provider_history' && turn.state === 'cancelled')
     return [{ id: id('history'), tone: 'warning', text: PROVIDER_HISTORY_NOTICE }];
-  if (turn.unavailableReason === 'preflight' && turn.state === 'cancelled')
+  // preflight: automatic refund (0215); platform_review: compensated after the daily review (0220).
+  if ((turn.unavailableReason === 'preflight' || turn.unavailableReason === 'platform_review') && turn.state === 'cancelled')
     return [{ id: id('platform'), tone: 'warning', text: PLATFORM_FAILURE_NOTICE }];
   if (turn.historyOmitted)
     notices.push({ id: id('history-omitted'), tone: 'status', text: HISTORY_OMITTED_NOTICE });

@@ -44,7 +44,7 @@ test.describe('Authentication', () => {
         await gotoWithBypass(page, '/landing?domain=www');
 
         steps.push('Inspect the public signup CTA target');
-        const signupLink = page.getByRole('link', { name: '免费开始' }).first();
+        const signupLink = page.getByRole('link', { name: '免费和教练聊聊' }).first();
         await expect(signupLink).toBeVisible({ timeout: 10000 });
 
         const href = await signupLink.getAttribute('href');
@@ -144,10 +144,11 @@ test.describe('Authentication', () => {
       steps.push('Open /landing?domain=www');
       await gotoWithBypass(page, '/landing?domain=www');
 
-      steps.push('Verify restored landing CTA copy and independent page links are visible');
+      steps.push('Verify the landing hero, CTA and public page links are visible');
+      await expect(page.getByRole('heading', { level: 1, name: '你的 AI 自媒体陪跑教练' })).toBeVisible();
       await expect(page.getByText('登录').first()).toBeVisible();
-      await expect(page.getByText('免费开始').first()).toBeVisible();
-      await expect(page.getByRole('link', { name: '使用教程' }).first()).toBeVisible();
+      await expect(page.getByRole('link', { name: '免费和教练聊聊' }).first()).toBeVisible();
+      await expect(page.getByRole('link', { name: '关于我们' }).first()).toBeVisible();
       await expect(page.getByRole('link', { name: '常见问题' }).first()).toBeVisible();
 
       const blockingIssues = monitor.getIssues('P1');
@@ -163,7 +164,7 @@ test.describe('Authentication', () => {
           title: 'public-landing-smoke',
           role: 'public',
           route: '/landing?domain=www',
-          expected: 'Public landing page keeps the restored homepage CTA copy and still exposes the independent tutorial/FAQ links without blocking console or network issues.',
+          expected: 'Public landing page shows the offer hero and CTA and exposes the About/FAQ links without blocking console or network issues.',
         },
         actual,
         steps,

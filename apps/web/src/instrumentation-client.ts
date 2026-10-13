@@ -1,4 +1,5 @@
 import * as Sentry from "@sentry/nextjs";
+import { scrubBreadcrumb, scrubErrorEvent, scrubTransactionEvent } from "./lib/sentry-scrub";
 
 function getSentryEnvironment() {
   return (
@@ -21,9 +22,10 @@ Sentry.init({
   // Setting this option to true will print useful information to the console while you're setting up Sentry.
   debug: false,
 
-  // Replay configuration for session replay
-  replaysOnErrorSampleRate: 1.0,
-  replaysSessionSampleRate: process.env.NODE_ENV === "production" ? 0.1 : 0,
+  // Session Replay stays off: its recording metadata carries the full page URL (draft ids, query
+  // strings), which beforeSend cannot scrub. DATA-ERASURE E7.
+  replaysOnErrorSampleRate: 0,
+  replaysSessionSampleRate: 0,
 
   // Filter out noisy errors
   ignoreErrors: [
@@ -62,23 +64,18 @@ Sentry.init({
     /^moz-extension:\/\//i,
   ],
 
-  // Add integrations
-  integrations: [
-    Sentry.replayIntegration({
-      // Additional Replay configuration
-      maskAllText: true,
-      blockAllMedia: true,
-    }),
-  ],
+  // DATA-ERASURE E7: never send personal data or user content (see lib/sentry-scrub.ts).
+  sendDefaultPii: false,
+  beforeBreadcrumb: scrubBreadcrumb,
+  beforeSendTransaction: scrubTransactionEvent,
 
-  // Before sending event, add additional context
-  beforeSend(event, hint) {
+  beforeSend(event) {
     // Don't send events in development
     if (process.env.NODE_ENV === "development") {
-      console.log("[Sentry] Event captured (not sent in dev):", event);
+      console.log("[Sentry] Event captured (not sent in dev):", event.message || event.exception?.values?.[0]?.value);
       return null;
     }
-    return event;
+    return scrubErrorEvent(event);
   },
 });
 
