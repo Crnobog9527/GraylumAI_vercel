@@ -7,15 +7,24 @@ import { exchange, usageUnits } from './http';
 import type { ResearchCallResult, ResearchItem, VendorDeps, VendorRequest } from './types';
 
 export const PARALLEL_SEARCH_URL = 'https://api.parallel.ai/v1/search';
-/** Only the mode RESEARCH-0 tested; other modes stay out until RT-7 measures them. */
-export const PARALLEL_MODES = ['advanced'] as const;
+/**
+ * Upstream modes from Parallel's API reference: `fast` is the default for the planned `web_search` tool,
+ * the model-facing `pro` choice maps to `advanced` (what RESEARCH-0 tested). RT-7 measures `fast`.
+ * Each mode is its own priced route.
+ */
+export const PARALLEL_MODES = ['fast', 'advanced'] as const;
 export type ParallelMode = typeof PARALLEL_MODES[number];
-export const PARALLEL_ROUTE = 'parallel:search:advanced';
+export const parallelRoute = (mode: ParallelMode) => `parallel:search:${mode}`;
+export const PARALLEL_ROUTES = PARALLEL_MODES.map(parallelRoute);
+/** Model-facing tool choice → upstream mode. */
+export function parallelModeFor(choice: 'fast' | 'pro'): ParallelMode {
+  return choice === 'pro' ? 'advanced' : 'fast';
+}
 const MAX_RESULTS = 10;
 const EXCERPT_CHARS = 500;
 const WEB_FIELDS = ['title', 'excerpt', 'publishedAt'] as const;
 
-export function buildParallelRequest(query: string, mode: ParallelMode = 'advanced'): { request: VendorRequest } | { reason: string } {
+export function buildParallelRequest(query: string, mode: ParallelMode = 'fast'): { request: VendorRequest } | { reason: string } {
   const trimmed = query.trim();
   if (!trimmed || [...trimmed].length > 200 || /\p{Cc}/u.test(trimmed)) return { reason: 'INVALID_QUERY' };
   if (!PARALLEL_MODES.includes(mode)) return { reason: 'MODE_NOT_SUPPORTED' };
@@ -59,9 +68,9 @@ function webItem(raw: unknown): ResearchItem {
   return url === undefined ? { fields, missing } : { url, fields, missing };
 }
 
-export async function callParallel(query: string, deps: VendorDeps, mode: ParallelMode = 'advanced'): Promise<ResearchCallResult> {
+export async function callParallel(query: string, deps: VendorDeps, mode: ParallelMode = 'fast'): Promise<ResearchCallResult> {
   const fetchedAt = (deps.now?.() ?? new Date()).toISOString();
-  const base = { vendor: 'parallel' as const, route: PARALLEL_ROUTE, fetchedAt, items: [], truncated: false };
+  const base = { vendor: 'parallel' as const, route: parallelRoute(mode), fetchedAt, items: [], truncated: false };
   const built = buildParallelRequest(query, mode);
   if ('reason' in built) {
     return { ...base, outcome: 'not_sent', reason: built.reason, httpStatus: null, supplierMayCharge: false,

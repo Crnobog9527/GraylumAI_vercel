@@ -73,7 +73,12 @@ describe('selectRoute', () => {
     expect(selectRoute(config, 'x', 'account_profile')).toEqual({ ok: false, reason: 'PLATFORM_NOT_VERIFIED' });
     expect(selectRoute(config, 'tiktok', 'keyword_posts')).toEqual({ ok: false, reason: 'ROUTE_NOT_CONFIGURED' });
     expect(selectRoute(config, 'web', 'web_fetch')).toEqual({ ok: false, reason: 'VENDOR_DISABLED' });
-    expect(selectRoute(config, 'web', 'web_search')).toMatchObject({ ok: true, vendor: 'parallel' });
+    expect(selectRoute(config, 'web', 'web_search')).toMatchObject({ ok: true, vendor: 'parallel', route: 'parallel:search:advanced' });
+    const fast = valid();
+    fast.routes[2] = { ...fast.routes[2], route: 'parallel:search:fast' };
+    expect(researchToolsConfigSchema.safeParse(fast).success).toBe(true);
+    fast.routes[2] = { ...fast.routes[2], route: 'parallel:search:turbo' };
+    expect(researchToolsConfigSchema.safeParse(fast).success).toBe(false);
     expect(selectRoute({ ...config, enabled: false }, 'web', 'web_search')).toEqual({ ok: false, reason: 'RESEARCH_DISABLED' });
   });
 });

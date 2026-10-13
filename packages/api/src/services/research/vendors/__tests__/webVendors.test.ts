@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 // Parallel and Firecrawl adapters against fetch doubles; response shapes follow RESEARCH-0 (#466, #465).
 import { describe, expect, it } from 'vitest';
-import { buildParallelRequest, callParallel, parallelUsage } from '../parallel';
+import { buildParallelRequest, callParallel, parallelModeFor, parallelUsage } from '../parallel';
 import { buildFirecrawlRequest, callFirecrawl, firecrawlCredits, MAX_MARKDOWN_BYTES } from '../firecrawl';
 import { usageUnits } from '../http';
 import { FIXED_NOW, hangingFetch, jsonFetch, type RecordedCall } from './fetchDoubles';
@@ -51,8 +51,11 @@ describe('callParallel', () => {
       usage: [{ name: 'sku_search', count: 1 }] };
     const result = await callParallel('露营装备 推荐', deps(jsonFetch(200, body, calls)));
     expect(JSON.parse(String(calls[0].init.body))).toEqual({
-      objective: 'Find recent, reliable web pages about: 露营装备 推荐', search_queries: ['露营装备 推荐'], mode: 'advanced',
+      objective: 'Find recent, reliable web pages about: 露营装备 推荐', search_queries: ['露营装备 推荐'], mode: 'fast',
     });
+    expect(result.route).toBe('parallel:search:fast');
+    await callParallel('q', deps(jsonFetch(200, body, calls)), parallelModeFor('pro'));
+    expect(JSON.parse(String(calls[1].init.body)).mode).toBe('advanced');
     expect(calls[0].init.headers).toMatchObject({ 'x-api-key': 'test-key' });
     expect(result).toMatchObject({ outcome: 'ok', usage: { unit: 'sku_search', units: '1' } });
     expect(result.items[0]).toEqual({ url: 'https://a.example/x',
@@ -86,7 +89,7 @@ describe('callParallel', () => {
   it('refuses empty, overlong or unsupported-mode queries without sending', async () => {
     expect(buildParallelRequest(' ')).toEqual({ reason: 'INVALID_QUERY' });
     expect(buildParallelRequest('a'.repeat(201))).toEqual({ reason: 'INVALID_QUERY' });
-    expect(buildParallelRequest('q', 'fast' as never)).toEqual({ reason: 'MODE_NOT_SUPPORTED' });
+    expect(buildParallelRequest('q', 'turbo' as never)).toEqual({ reason: 'MODE_NOT_SUPPORTED' });
   });
 
   it('classifies HTTP errors and timeouts', async () => {

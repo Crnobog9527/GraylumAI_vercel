@@ -78,7 +78,7 @@ export const TIKHUB_ROUTES: Partial<Record<`${SocialPlatform}:${SocialKind}`, Ti
 
 const ACCOUNT_PATTERNS: Record<AccountId, RegExp> = {
   // Platform username rules; anything else cannot exist there and must not cost a call.
-  tiktok_handle: /^[A-Za-z0-9._]{2,24}$/,
+  tiktok_handle: /^(?!.*\.$)[A-Za-z0-9._]{2,24}$/,
   x_handle: /^[A-Za-z0-9_]{1,15}$/,
   instagram_handle: /^[A-Za-z0-9._]{1,30}$/,
   numeric: /^\d{1,20}$/,

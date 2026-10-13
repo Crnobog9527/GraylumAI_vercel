@@ -4,7 +4,7 @@
 // invalid configuration means every research call stays off.
 import { z } from 'zod';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { PARALLEL_ROUTE } from './parallel';
+import { PARALLEL_ROUTES } from './parallel';
 import { FIRECRAWL_ROUTE } from './firecrawl';
 import { tikhubRouteId } from './tikhub';
 import {
@@ -68,7 +68,7 @@ export const researchToolsConfigSchema = z.object({
     const key = `${entry.platform}:${entry.kind}`;
     if (seen.has(key)) ctx.addIssue({ code: 'custom', path: ['routes', index], message: `Duplicate route ${key}` });
     seen.add(key);
-    if (expectedRoute(entry.platform, entry.kind, entry.vendor) !== entry.route) {
+    if (expectedRoute(entry.platform, entry.kind, entry.vendor, entry.route) !== entry.route) {
       ctx.addIssue({ code: 'custom', path: ['routes', index, 'route'], message: `Unknown ${entry.vendor} route for ${key}` });
     }
   });
@@ -79,9 +79,9 @@ type RoutePlatform = ResearchToolsConfig['routes'][number]['platform'];
 type RouteKind = ResearchToolsConfig['routes'][number]['kind'];
 
 /** The adapter route a config entry must name; null when no verified adapter route exists. */
-function expectedRoute(platform: RoutePlatform, kind: RouteKind, vendor: ResearchVendor): string | null {
+function expectedRoute(platform: RoutePlatform, kind: RouteKind, vendor: ResearchVendor, route: string): string | null {
   if (platform === 'web') {
-    if (kind === 'web_search' && vendor === 'parallel') return PARALLEL_ROUTE;
+    if (kind === 'web_search' && vendor === 'parallel') return PARALLEL_ROUTES.includes(route) ? route : null;
     if (kind === 'web_fetch' && vendor === 'firecrawl') return FIRECRAWL_ROUTE;
     return null;
   }

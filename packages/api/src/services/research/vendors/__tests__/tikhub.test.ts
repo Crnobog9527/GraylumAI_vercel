@@ -36,6 +36,8 @@ describe('TikHub routes', () => {
     expect(buildTikhubRequest({ platform: 'tiktok', kind: 'account_profile', account: 'a/../b' })).toEqual({ reason: 'INVALID_ACCOUNT' });
     expect(buildTikhubRequest({ platform: 'x', kind: 'account_profile', account: 'a'.repeat(16) })).toEqual({ reason: 'INVALID_ACCOUNT' });
     expect(buildTikhubRequest({ platform: 'x', kind: 'account_profile', account: 'nasa.gov' })).toEqual({ reason: 'INVALID_ACCOUNT' });
+    expect(buildTikhubRequest({ platform: 'tiktok', kind: 'account_profile', account: 'natgeo.' })).toEqual({ reason: 'INVALID_ACCOUNT' });
+    expect('request' in buildTikhubRequest({ platform: 'tiktok', kind: 'account_profile', account: 'nat.geo' })).toBe(true);
     expect(buildTikhubRequest({ platform: 'instagram', kind: 'account_posts', account: 'a-b' })).toEqual({ reason: 'INVALID_ACCOUNT' });
     expect('request' in buildTikhubRequest({ platform: 'instagram', kind: 'account_posts', account: 'nat.geo_1' })).toBe(true);
     expect(buildTikhubRequest({ platform: 'youtube', kind: 'account_profile', account: 'UCLA_DiR1FfKNvjuUpBHmylQ' })).toEqual({ reason: 'ROUTE_NOT_SUPPORTED' });
