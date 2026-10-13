@@ -2,7 +2,8 @@
 /**
  * POSITIONING-GATE fallback (Owner 2026-10-12, "Decisions 先判断，主模型兜底"): every admitted turn of a
  * user without a confirmed positioning carries this frozen rule, because Decisions judges only the current
- * message and is skipped when unavailable. The primary model reads the whole conversation and refuses with an exact structured marker. The executor recognizes the marker,
+ * message and is skipped when unavailable. The primary model reads the whole conversation and refuses with an
+ * exact structured marker. The executor recognizes the marker,
  * never shows or stores it as an answer, and ends the round through fail_platform so its charge is restored
  * (Graylum bears the model cost, Owner 2026-10-12 supplement).
  */
@@ -12,7 +13,8 @@ export const POSITIONING_FALLBACK = 'fallback-v1' as const;
 export const POSITIONING_MARKER = '[[GRAYLUM_POSITIONING_REQUIRED]]';
 export const POSITIONING_FALLBACK_INSTRUCTIONS =
   '\nHost rule (positioning check): this user has not confirmed an account positioning yet. If the current user ' +
-  "message, read together with the conversation so far, asks you to plan, create or run social media operations for the user's OWN account or channel (account " +
+  'message, read together with the conversation so far, asks you to plan, create or run social media operations ' +
+  "for the user's OWN account or channel (account " +
   'positioning, content direction, topics, posts, scripts or captions for their account, follower growth, monetizing ' +
   "their account, or reviewing their account's performance), do not answer it: reply with exactly " +
   POSITIONING_MARKER + ' and nothing else. Answer every other request normally, including general social media ' +
