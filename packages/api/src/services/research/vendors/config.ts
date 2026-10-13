@@ -89,6 +89,12 @@ export const researchToolsConfigSchema = z.object({
     if (!BENCHMARK_CAPABLE_PLATFORMS.includes(platform)) {
       ctx.addIssue({ code: 'custom', path: ['benchmarkPlatforms', index], message: `${platform} routes cannot supply benchmark fields yet` });
     }
+    // A benchmark fetch needs the follower-bearing profile and the recent posts (plan §1.1, §1.2).
+    for (const kind of ['account_profile', 'account_posts'] as const) {
+      if (!config.routes.some(entry => entry.platform === platform && entry.kind === kind)) {
+        ctx.addIssue({ code: 'custom', path: ['benchmarkPlatforms', index], message: `${platform} needs a configured ${kind} route` });
+      }
+    }
   });
   const seen = new Set<string>();
   config.routes.forEach((entry, index) => {

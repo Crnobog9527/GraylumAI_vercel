@@ -18,6 +18,7 @@ const valid = (): ResearchToolsConfig => ({
   benchmarkPlatforms: ['tiktok'],
   routes: [
     { platform: 'tiktok', kind: 'account_posts', vendor: 'tikhub', route: '/tiktok/app/v3/fetch_user_post_videos', backup: null, maxUnitsPerCall: '1' },
+    { platform: 'tiktok', kind: 'account_profile', vendor: 'tikhub', route: '/tiktok/app/v3/handler_user_profile', backup: null, maxUnitsPerCall: '1' },
     { platform: 'x', kind: 'account_profile', vendor: 'tikhub', route: '/twitter/web/fetch_user_profile', backup: null, maxUnitsPerCall: '1' },
     { platform: 'web', kind: 'web_search', vendor: 'parallel', route: 'parallel:search:fast', backup: null, maxUnitsPerCall: '1' },
     { platform: 'web', kind: 'web_search_pro', vendor: 'parallel', route: 'parallel:search:advanced', backup: null, maxUnitsPerCall: '1' },
@@ -49,14 +50,19 @@ describe('research_tools_config', () => {
     v5.routes[0] = { ...v5.routes[0], platform: 'douyin', kind: 'keyword_posts', route: '/douyin/search/fetch_video_search_v5' };
     expect(researchToolsConfigSchema.safeParse(v5).success).toBe(false);
     const mismatched = valid();
-    mismatched.routes[2] = { ...mismatched.routes[2], vendor: 'firecrawl' };
+    mismatched.routes[3] = { ...mismatched.routes[3], vendor: 'firecrawl' };
     expect(researchToolsConfigSchema.safeParse(mismatched).success).toBe(false);
-    expect(researchToolsConfigSchema.safeParse({ ...valid(), routes: [{ ...valid().routes[0], backup: 'brightdata' }] }).success).toBe(false);
-    expect(researchToolsConfigSchema.safeParse({ ...valid(), routes: [valid().routes[0], valid().routes[0]] }).success).toBe(false);
-    expect(researchToolsConfigSchema.safeParse({ ...valid(), routes: [{ ...valid().routes[0], maxUnitsPerCall: '100000' }] }).success).toBe(false);
+    expect(researchToolsConfigSchema.safeParse({ ...valid(), routes: [{ ...valid().routes[0], backup: 'brightdata' }], benchmarkPlatforms: [] }).success).toBe(false);
+    expect(researchToolsConfigSchema.safeParse({ ...valid(), routes: [valid().routes[0], valid().routes[0]], benchmarkPlatforms: [] }).success).toBe(false);
+    // Control: the same reduced shapes are valid without the defect under test.
+    expect(researchToolsConfigSchema.safeParse({ ...valid(), routes: [valid().routes[0]], benchmarkPlatforms: [] }).success).toBe(true);
+    expect(researchToolsConfigSchema.safeParse({ ...valid(), routes: [{ ...valid().routes[0], maxUnitsPerCall: '100000' }], benchmarkPlatforms: [] }).success).toBe(false);
     expect(researchToolsConfigSchema.safeParse({ ...valid(), benchmarkPlatforms: ['x'] }).success).toBe(false);
     expect(researchToolsConfigSchema.safeParse({ ...valid(), benchmarkPlatforms: ['tiktok', 'instagram'] }).success).toBe(false);
-    expect(researchToolsConfigSchema.safeParse({ ...valid(), verifiedPlatforms: ['tiktok', 'x'], benchmarkPlatforms: ['tiktok', 'x'] }).success).toBe(true);
+    expect(researchToolsConfigSchema.safeParse({ ...valid(), verifiedPlatforms: ['tiktok', 'x'], benchmarkPlatforms: ['tiktok', 'x'] }).success).toBe(false);
+    const profileless = valid();
+    profileless.routes = profileless.routes.filter(entry => !(entry.platform === 'tiktok' && entry.kind === 'account_profile'));
+    expect(researchToolsConfigSchema.safeParse(profileless).success).toBe(false);
     expect(researchToolsConfigSchema.safeParse({ ...valid(), limits: { maxSubcallsPerRound: 30, discoverSubcalls: 25 } }).success).toBe(false);
     expect(researchToolsConfigSchema.safeParse({ ...valid(), limits: { maxSubcallsPerRound: 29, discoverSubcalls: 29 } }).success).toBe(true);
     expect(researchToolsConfigSchema.safeParse({ ...valid(), limits: { maxSubcallsPerRound: 12, discoverSubcalls: 30 } }).success).toBe(false);
@@ -88,7 +94,7 @@ describe('selectRoute', () => {
     expect(selectRoute(config, 'web', 'web_search')).toMatchObject({ ok: true, vendor: 'parallel', route: 'parallel:search:fast' });
     expect(selectRoute(config, 'web', 'web_search_pro')).toMatchObject({ ok: true, route: 'parallel:search:advanced' });
     const swapped = valid();
-    swapped.routes[2] = { ...swapped.routes[2], route: 'parallel:search:advanced' };
+    swapped.routes[3] = { ...swapped.routes[3], route: 'parallel:search:advanced' };
     expect(researchToolsConfigSchema.safeParse(swapped).success).toBe(false);
     expect(selectRoute({ ...config, enabled: false }, 'web', 'web_search')).toEqual({ ok: false, reason: 'RESEARCH_DISABLED' });
   });
