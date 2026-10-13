@@ -19,7 +19,8 @@ const valid = (): ResearchToolsConfig => ({
   routes: [
     { platform: 'tiktok', kind: 'account_posts', vendor: 'tikhub', route: '/tiktok/app/v3/fetch_user_post_videos', backup: null, maxUnitsPerCall: '1' },
     { platform: 'x', kind: 'account_profile', vendor: 'tikhub', route: '/twitter/web/fetch_user_profile', backup: null, maxUnitsPerCall: '1' },
-    { platform: 'web', kind: 'web_search', vendor: 'parallel', route: 'parallel:search:advanced', backup: null, maxUnitsPerCall: '1' },
+    { platform: 'web', kind: 'web_search', vendor: 'parallel', route: 'parallel:search:fast', backup: null, maxUnitsPerCall: '1' },
+    { platform: 'web', kind: 'web_search_pro', vendor: 'parallel', route: 'parallel:search:advanced', backup: null, maxUnitsPerCall: '1' },
     { platform: 'web', kind: 'web_fetch', vendor: 'firecrawl', route: 'firecrawl:scrape:markdown', backup: null, maxUnitsPerCall: '1' },
   ],
   limits: { maxSubcallsPerRound: 12, discoverSubcalls: 25 },
@@ -84,12 +85,11 @@ describe('selectRoute', () => {
     expect(selectRoute(config, 'tiktok', 'account_posts', 'benchmark')).toMatchObject({ ok: true });
     expect(selectRoute(config, 'tiktok', 'keyword_posts')).toEqual({ ok: false, reason: 'ROUTE_NOT_CONFIGURED' });
     expect(selectRoute(config, 'web', 'web_fetch')).toEqual({ ok: false, reason: 'VENDOR_DISABLED' });
-    expect(selectRoute(config, 'web', 'web_search')).toMatchObject({ ok: true, vendor: 'parallel', route: 'parallel:search:advanced' });
-    const fast = valid();
-    fast.routes[2] = { ...fast.routes[2], route: 'parallel:search:fast' };
-    expect(researchToolsConfigSchema.safeParse(fast).success).toBe(true);
-    fast.routes[2] = { ...fast.routes[2], route: 'parallel:search:turbo' };
-    expect(researchToolsConfigSchema.safeParse(fast).success).toBe(false);
+    expect(selectRoute(config, 'web', 'web_search')).toMatchObject({ ok: true, vendor: 'parallel', route: 'parallel:search:fast' });
+    expect(selectRoute(config, 'web', 'web_search_pro')).toMatchObject({ ok: true, route: 'parallel:search:advanced' });
+    const swapped = valid();
+    swapped.routes[2] = { ...swapped.routes[2], route: 'parallel:search:advanced' };
+    expect(researchToolsConfigSchema.safeParse(swapped).success).toBe(false);
     expect(selectRoute({ ...config, enabled: false }, 'web', 'web_search')).toEqual({ ok: false, reason: 'RESEARCH_DISABLED' });
   });
 });

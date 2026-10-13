@@ -4,7 +4,7 @@
 // invalid configuration means every research call stays off.
 import { z } from 'zod';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { PARALLEL_ROUTES } from './parallel';
+import { parallelRoute } from './parallel';
 import { FIRECRAWL_ROUTE } from './firecrawl';
 import { tikhubRouteId } from './tikhub';
 import {
@@ -52,7 +52,8 @@ const ADAPTER_MAX_UNITS = '1';
 
 const routeSchema = z.object({
   platform: z.enum([...SOCIAL_PLATFORMS, 'web']),
-  kind: z.enum([...SOCIAL_KINDS, 'web_search', 'web_fetch']),
+  // web_search = Parallel fast; web_search_pro = Parallel advanced. Separate kinds keep route, request and frozen price aligned.
+  kind: z.enum([...SOCIAL_KINDS, 'web_search', 'web_search_pro', 'web_fetch']),
   vendor: z.enum(RESEARCH_VENDORS),
   route: z.string().min(1).max(120),
   // Only primary routes are approved today (Bright Data backup needs a separate Owner approval, RT-9).
@@ -94,7 +95,7 @@ export const researchToolsConfigSchema = z.object({
     const key = `${entry.platform}:${entry.kind}`;
     if (seen.has(key)) ctx.addIssue({ code: 'custom', path: ['routes', index], message: `Duplicate route ${key}` });
     seen.add(key);
-    if (expectedRoute(entry.platform, entry.kind, entry.vendor, entry.route) !== entry.route) {
+    if (expectedRoute(entry.platform, entry.kind, entry.vendor) !== entry.route) {
       ctx.addIssue({ code: 'custom', path: ['routes', index, 'route'], message: `Unknown ${entry.vendor} route for ${key}` });
     }
   });
@@ -105,13 +106,14 @@ type RoutePlatform = ResearchToolsConfig['routes'][number]['platform'];
 type RouteKind = ResearchToolsConfig['routes'][number]['kind'];
 
 /** The adapter route a config entry must name; null when no verified adapter route exists. */
-function expectedRoute(platform: RoutePlatform, kind: RouteKind, vendor: ResearchVendor, route: string): string | null {
+function expectedRoute(platform: RoutePlatform, kind: RouteKind, vendor: ResearchVendor): string | null {
   if (platform === 'web') {
-    if (kind === 'web_search' && vendor === 'parallel') return PARALLEL_ROUTES.includes(route) ? route : null;
+    if (kind === 'web_search' && vendor === 'parallel') return parallelRoute('fast');
+    if (kind === 'web_search_pro' && vendor === 'parallel') return parallelRoute('advanced');
     if (kind === 'web_fetch' && vendor === 'firecrawl') return FIRECRAWL_ROUTE;
     return null;
   }
-  if (kind === 'web_search' || kind === 'web_fetch' || vendor !== 'tikhub') return null;
+  if (kind === 'web_search' || kind === 'web_search_pro' || kind === 'web_fetch' || vendor !== 'tikhub') return null;
   return tikhubRouteId(platform, kind);
 }
 

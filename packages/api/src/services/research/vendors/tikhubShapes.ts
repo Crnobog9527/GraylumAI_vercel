@@ -201,10 +201,11 @@ const EMPTY_LIST_PATHS: Partial<Record<`${SocialPlatform}:${SocialKind}`, readon
 /** True when the route's own list path holds an empty array (as opposed to a missing or changed shape). */
 export function hasEmptyPostList(json: unknown, platform: SocialPlatform, kind: SocialKind): boolean {
   const paths = EMPTY_LIST_PATHS[`${platform}:${kind}`] ?? [];
-  return paths.some(path => {
-    const value = path.split('.').reduce<unknown>((node, key) => (node as Raw | null)?.[key], json);
-    return Array.isArray(value) && value.length === 0;
-  });
+  // Every recognized list that is present must be empty; one non-empty list means a changed shape, not "no results".
+  const lists = paths
+    .map(path => path.split('.').reduce<unknown>((node, key) => (node as Raw | null)?.[key], json))
+    .filter((value): value is unknown[] => Array.isArray(value));
+  return lists.length > 0 && lists.every(list => list.length === 0);
 }
 
 /** TikHub reports failures in the body: HTTP 200 with a non-200 `code` is a failure it may still bill. */

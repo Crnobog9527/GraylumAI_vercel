@@ -15,7 +15,6 @@ export const PARALLEL_SEARCH_URL = 'https://api.parallel.ai/v1/search';
 export const PARALLEL_MODES = ['fast', 'advanced'] as const;
 export type ParallelMode = typeof PARALLEL_MODES[number];
 export const parallelRoute = (mode: ParallelMode) => `parallel:search:${mode}`;
-export const PARALLEL_ROUTES = PARALLEL_MODES.map(parallelRoute);
 /** Model-facing tool choice → upstream mode. */
 export function parallelModeFor(choice: 'fast' | 'pro'): ParallelMode {
   return choice === 'pro' ? 'advanced' : 'fast';
