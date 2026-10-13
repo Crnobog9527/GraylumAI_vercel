@@ -34,29 +34,76 @@ const draftKey = (sessionId: string) => 'opc-runtime-input:' + sessionId;
 const pendingKey = (sessionId: string) => 'opc-runtime-pending:' + sessionId;
 
 /**
- * The sent text is kept under its own key until the server confirms it, because the draft key is
- * overwritten as soon as the user types the next message. A reload before confirmation then still has it.
+ * A send not yet confirmed by this page: the box text, the exact request input, its request id and when it left.
+ * Kept apart from the draft (which the next keystroke overwrites) until the server history settles it.
  */
-export function rememberPending(storage: DraftStorage, sessionId: string, requestId: string, text: string) {
-  storage.setItem(pendingKey(sessionId), JSON.stringify({ requestId, text }));
+export type PendingSend = { requestId: string; text: string; input: string; at: number; restored?: boolean };
+
+export function rememberPending(storage: DraftStorage, sessionId: string,
+  send: { requestId: string; text: string; input: string }, now = Date.now()) {
+  storage.setItem(pendingKey(sessionId), JSON.stringify({ ...send, at: now }));
 }
 
 export function forgetPending(storage: DraftStorage, sessionId: string) {
   storage.removeItem(pendingKey(sessionId));
 }
 
-/** The draft to show when the page opens: an unconfirmed send goes back in front of any newer draft. */
-export function openingDraft(storage: DraftStorage, sessionId: string) {
-  const draft = storage.getItem(draftKey(sessionId)) ?? '';
-  let text: unknown;
+export function readPending(storage: DraftStorage, sessionId: string): PendingSend | null {
   try {
-    text = JSON.parse(storage.getItem(pendingKey(sessionId)) ?? 'null')?.text;
+    const value = JSON.parse(storage.getItem(pendingKey(sessionId)) ?? 'null');
+    const ok = value && typeof value.requestId === 'string' && typeof value.text === 'string'
+      && typeof value.input === 'string' && typeof value.at === 'number';
+    return ok ? value : null;
   } catch {
-    text = undefined;
+    return null;
   }
-  if (typeof text !== 'string' || !text) return draft;
-  const merged = restoredDraft(draft, text);
-  storage.setItem(draftKey(sessionId), merged);
-  forgetPending(storage, sessionId);
-  return merged;
+}
+
+/** The draft to show when the page opens; an unconfirmed send is settled later against the server history. */
+export function openingDraft(storage: DraftStorage, sessionId: string) {
+  return storage.getItem(draftKey(sessionId)) ?? '';
+}
+
+/**
+ * Did the server store this send? Its history has a turn with the same input from about when it left.
+ * (Two minutes of clock slack; an older identical message, such as an earlier "继续", does not count.)
+ */
+export function pendingWasStored(pending: PendingSend, history: ReadonlyArray<{ input: string | null; createdAt?: string }>) {
+  return history.some(turn => turn.input === pending.input
+    && (!turn.createdAt || Date.parse(turn.createdAt) >= pending.at - 120_000));
+}
+
+/** Remove a stored send from the box, keeping anything typed after it. */
+export function withoutSent(current: string, text: string) {
+  if (current === text) return '';
+  return current.startsWith(text + '\n\n') ? current.slice(text.length + 2) : current;
+}
+
+/**
+ * Settle an unconfirmed send once the server history is loaded. Stored: drop it from the box and storage.
+ * Not stored: put it back in front of the draft once, and keep the record so a resend reuses its request id.
+ */
+export function settlePending(storage: DraftStorage, sessionId: string,
+  history: ReadonlyArray<{ input: string | null; createdAt?: string }>, setInput: SetInput) {
+  const pending = readPending(storage, sessionId);
+  if (!pending) return;
+  if (pendingWasStored(pending, history)) {
+    forgetPending(storage, sessionId);
+    forgetSentDraft(storage, draftKey(sessionId), pending.text);
+    setInput(current => withoutSent(current, pending.text));
+    return;
+  }
+  if (pending.restored) return;
+  storage.setItem(pendingKey(sessionId), JSON.stringify({ ...pending, restored: true }));
+  setInput(current => {
+    const next = restoredDraft(current, pending.text);
+    storage.setItem(draftKey(sessionId), next);
+    return next;
+  });
+}
+
+/** Request id for a send: the one already in the address, else the unconfirmed one for the same input, else new. */
+export function requestIdFor(fromAddress: string | null, pending: PendingSend | null, input: string,
+  fresh: () => string = () => crypto.randomUUID()) {
+  return fromAddress ?? (pending && pending.input === input ? pending.requestId : null) ?? fresh();
 }

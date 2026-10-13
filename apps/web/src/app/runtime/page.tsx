@@ -14,7 +14,9 @@ import { ContentEditor } from '@/components/opc/content-editor';
 import { ContentErasureDialog } from '@/components/opc/content-erasure-dialog';
 import composerStyles from '@/components/opc/work-composer.module.css';
 import workStyles from './runtime-work.module.css';
-import { clearForSend, forgetPending, forgetSentDraft, openingDraft, rememberPending } from './send-input';
+import {
+ clearForSend, forgetPending, forgetSentDraft, openingDraft, readPending, rememberPending, requestIdFor, settlePending,
+} from './send-input';
 import { QueryNotice } from '@/components/opc/query-notice';
 import { trpc } from '@/trpc/client';
 import {
@@ -93,6 +95,11 @@ function RuntimeWorkspace({routeSession,routeModule}:{routeSession:string;routeM
  }}),cancel=trpc.runtime.cancel.useMutation();
  const [videoBusy,setVideoBusy]=useState(false),[,setVideoUiRevision]=useState(0);
  const busy=start.isPending||prepare.isPending||execute.isPending||videoBusy||guiding||payg.busy;
+ // A send this page never saw confirmed (reload, or left mid-send) is settled against the server history.
+ useEffect(()=>{
+  if(!sessionId||!view.data?.executions||busy)return;
+  settlePending(localStorage,sessionId,view.data.executions as Array<{input:string|null;createdAt?:string}>,setInput);
+ },[sessionId,view.data,busy]);
  const ordinary=choices.data?.models[0]?.id??'';
  const moduleSelection=requestedModule||storedModule;
  const chosenModule=choices.data?.skills.find(skill=>skill.moduleId===moduleSelection);
@@ -150,12 +157,16 @@ function RuntimeWorkspace({routeSession,routeModule}:{routeSession:string;routeM
   try{
   const chosen=choices.data?.skills.find(s=>'skill:'+s.moduleId===activeSelection);
   const selected=chosen?{kind:'skill' as const,moduleId:chosen.moduleId,revisionId:chosen.revisionId}:activeSelection.startsWith('auto:')?{kind:'auto' as const,modelId:activeSelection.slice(5)}:{kind:'ordinary' as const,modelId:activeSelection};
-  const url=new URL(location.href),requestId=url.searchParams.get('request')??crypto.randomUUID();url.searchParams.set('request',requestId);history.replaceState(null,'',url);
-  const submitted=input;if(!scriptRequest)setOutgoing({text:submitted});
+  const submitted=input;
+  const requestInput=scriptRequest?'[OPC_SCRIPT_V1] 请基于当前选题简报讨论并给出可修改的口播稿。'+(submitted.trim()||'先给我一版口播稿。'):submitted;
+  // An unconfirmed earlier send of the same input keeps its request id, so the server replays instead of charging twice.
+  const url=new URL(location.href),requestId=requestIdFor(url.searchParams.get('request'),readPending(localStorage,sessionId),requestInput);
+  url.searchParams.set('request',requestId);history.replaceState(null,'',url);
+  if(!scriptRequest)setOutgoing({text:submitted});
   // Only the visible box empties now; the saved draft stays until the server stores the message.
-  rememberPending(localStorage,sessionId,requestId,submitted);
+  rememberPending(localStorage,sessionId,{requestId,text:submitted,input:requestInput});
   restoreInput=clearForSend(setInput,submitted,text=>{localStorage.setItem('opc-runtime-input:'+sessionId,text);forgetPending(localStorage,sessionId);});
-  const admitted=await prepare.mutateAsync({sessionId,requestId,input:scriptRequest?'[OPC_SCRIPT_V1] 请基于当前选题简报讨论并给出可修改的口播稿。'+(submitted.trim()||'先给我一版口播稿。'):submitted,selection:selected,network:'deny',sources:[]});
+  const admitted=await prepare.mutateAsync({sessionId,requestId,input:requestInput,selection:selected,network:'deny',sources:[]});
   if(!alive.current)return;
   // Q1: the previous organizer answered instead; this message was not stored. Input and request id stay.
   if(!payg.admitted(admitted)){setOutgoing(null);restoreInput();await view.refetch();return;}
