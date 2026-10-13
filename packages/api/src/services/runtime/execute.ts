@@ -11,7 +11,7 @@ import {nativeVisible,nativeMetadata,prepareNativePrimary,nativeFrameProjection,
  completedOutput,finalizeNativeSummary} from './nativeOutput';
 import {paygOwnerDatabase} from './paygOwner';
 import {executorRpc,historyGuard,terminalReplyGuard,recoverExecutorFinancial,
- preflightCodes,platformFailureReason,hash,progressEmitter,diagnosticCode,failBeforeDispatch,type RuntimeExecutorOptions} from './executorRpc';
+ preflightCodes,platformFailureReason,hash,progressEmitter,diagnosticCode,failBeforeDispatch,cancelWithCode,type RuntimeExecutorOptions} from './executorRpc';
 import {fitNativeRequestOutput,runtimePaygCall, type ResumeInput, type PaygWait, type PaygPosition} from './paygRuntime';
 import {beginPaygExecution, type RuntimeExecution} from './paygResume';
 import {PROMPT_CACHE_OVERHEAD_BYTES} from './promptCache';
@@ -465,9 +465,9 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
    }
    const capacity=error instanceof Error&&['RUNTIME_REQUIRED_CONTEXT_EXCEEDS_CAPACITY','RUNTIME_COMPLETE_REQUEST_EXCEEDS_CAPACITY'].includes(error.message);
    if((transportNotStarted||providerRejected)&&execution.live){
-    // The original grant was atomically revoked and BILL2 finalized. Reuse
-    // normal cancellation to synchronize this execution and release Session.
-    const stopped=await ownerRpc<{state:'cancelled'|'completed'|'cost_pending'}>('runtime_cancel',args).catch(()=>null);
+    // The grant was atomically revoked and BILL2 finalized; a never-started v1 transport also records why (0248).
+    const stopped=await (transportNotStarted&&!isPayg?cancelWithCode(ownerRpc,args,transportFailureCode??diagnosticCode(error))
+     :ownerRpc<{state:'cancelled'|'completed'|'cost_pending'}>('runtime_cancel',args)).catch(()=>null);
     if(stopped){
      const billingState=providerRejected?await billing.readRun(execution.runId).catch(()=>null):null;
      const noCharge=billingState?.chargedCredits===0&&['refunded','settled'].includes(billingState.state);

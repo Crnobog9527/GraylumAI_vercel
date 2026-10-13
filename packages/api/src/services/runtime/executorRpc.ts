@@ -43,6 +43,8 @@ export function executorRpc(options:{database:SessionRpc;actor:()=>Promise<strin
      'RUNTIME_MENTOR_HISTORY_TOO_LARGE','RUNTIME_TOOL_DENIED','RUNTIME_TOOL_CLOSED','RUNTIME_TOOL_LIMIT',
      'RUNTIME_TOOL_CONFLICT','RUNTIME_TOOL_RESULT_CONFLICT'].includes(message))
     throw new Error('RUNTIME_HISTORY_READ_REFUSED');
+   if(name==='runtime_cancel_with_code'&&typeof result.error==='object'&&'code' in result.error
+    &&['PGRST202','42883'].includes(String(result.error.code)))throw new Error('RUNTIME_CANCEL_WITH_CODE_UNAVAILABLE');
    // Before 0248 the database refuses the diagnostic field; the caller retries without it.
    if(name==='runtime_execution'&&message==='RUNTIME_FAILURE_REASON_DENIED')throw new Error('RUNTIME_FAILURE_REASON_DENIED');
    if(message==='RUNTIME_TEST_WINDOW_DENIED'||message==='RUNTIME_TEST_MODEL_DENIED')
@@ -70,6 +72,15 @@ export async function failBeforeDispatch(rpc:<T>(name:string,args:Record<string,
  return send({...reason,failure_code:code})
   .catch(refused=>refused instanceof Error&&refused.message==='RUNTIME_FAILURE_REASON_DENIED'?send(reason):null)
   .catch(()=>null);
+}
+/** Cancels and records why in one transaction (0248); before 0248 exists, the plain cancellation runs. */
+export async function cancelWithCode(rpc:<T>(name:string,args:Record<string,unknown>)=>Promise<T>,
+  args:Record<string,unknown>,code:string):Promise<{state:'cancelled'|'completed'|'cost_pending'}> {
+ logger.error('api','runtime_pre_dispatch_failed',{executionId:args.p_execution_id,code});
+ return rpc<{state:'cancelled'|'completed'|'cost_pending'}>('runtime_cancel_with_code',{...args,p_code:code}).catch(error=>{
+  if(error instanceof Error&&error.message==='RUNTIME_CANCEL_WITH_CODE_UNAVAILABLE')return rpc('runtime_cancel',args);
+  throw error;
+ });
 }
 export const preflightCodes=new Set([
  'RUNTIME_TIME_BUDGET_EXHAUSTED',
