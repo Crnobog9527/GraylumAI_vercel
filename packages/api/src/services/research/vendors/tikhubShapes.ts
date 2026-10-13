@@ -119,8 +119,8 @@ function bilibiliVerified(object: Raw): boolean | undefined {
 function profile(object: Raw) {
   return toItem({
     id: text(object, ['uid', 'mid', 'rest_id', 'id', 'idstr', 'user_id']),
-    name: text(object, ['nickname', 'name', 'full_name', 'title', 'screen_name']),
-    handle: text(object, ['unique_id', 'screen_name', 'username']),
+    name: text(object, ['nickname', 'name', 'full_name', 'title', 'screen_name', 'legacy.name']),
+    handle: text(object, ['unique_id', 'screen_name', 'username', 'legacy.screen_name']),
     followers: count(object, ['follower_count', 'followers_count', 'fans', 'follower', 'sub_count',
       'legacy.followers_count', 'edge_followed_by.count']) ?? displayCount(object, ['subscriber_count']),
     following: count(object, ['following_count', 'friends_count', 'following', 'attention', 'friends',

@@ -86,10 +86,11 @@ export function findAll(
 ): Record<string, unknown>[] {
   const out: Record<string, unknown>[] = [];
   const queue: unknown[] = [root];
-  let visited = 0;
-  while (queue.length > 0 && out.length < max && visited < 50_000) {
-    const node = queue.shift();
-    visited += 1;
+  // A read cursor instead of shift(): shift() re-indexes the array and makes large bodies quadratic.
+  let cursor = 0;
+  while (cursor < queue.length && out.length < max && cursor < 50_000) {
+    const node = queue[cursor];
+    cursor += 1;
     if (node === null || typeof node !== 'object') continue;
     if (!Array.isArray(node) && predicate(node as Record<string, unknown>)) {
       out.push(node as Record<string, unknown>);

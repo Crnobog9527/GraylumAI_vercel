@@ -118,7 +118,7 @@ describe('callTikhub', () => {
     const shell = await callTikhub({ platform: 'x', kind: 'account_profile', account: 'NASA' },
       deps(jsonFetch(200, { code: 200, data: { metadata: { legacy: {} }, user: { rest_id: '11', legacy: { screen_name: 'NASA', followers_count: 9 } } } })));
     expect(shell).toMatchObject({ outcome: 'ok' });
-    expect(shell.items[0].fields).toMatchObject({ followers: 9 });
+    expect(shell.items[0].fields).toMatchObject({ followers: 9, handle: 'NASA' });
     const onlyShell = await callTikhub({ platform: 'x', kind: 'account_profile', account: 'NASA' },
       deps(jsonFetch(200, { code: 200, data: { metadata: { legacy: {} } } })));
     expect(onlyShell).toMatchObject({ outcome: 'failed', reason: 'EMPTY_OR_UNRECOGNIZED' });
