@@ -19,7 +19,8 @@ function fixture(refunds: ReturnType<typeof refund>[], result: Record<string, un
         ? { payment_channel: 'stripe', payment_method: 'card' } : null })) };
     return chain;
   }) };
-  const stripe = { refunds: { retrieve: vi.fn(async () => refunds[0]), list: vi.fn(async () => ({ data: refunds })) },
+  const stripe = { refunds: { retrieve: vi.fn(async () => refunds[0]),
+    list: vi.fn(async (): Promise<{ data: unknown[]; has_more: boolean }> => ({ data: refunds, has_more: false })) },
     charges: { retrieve: vi.fn(async () => ({ payment_intent: 'pi_1' })) },
     paymentIntents: { retrieve: vi.fn(async (): Promise<Record<string, unknown>> => ({ metadata: {} })) },
     invoicePayments: { list: vi.fn(async () => ({ data: [] as unknown[] })) },
@@ -50,6 +51,13 @@ describe('PAY-STRIPE-MP external refunds of card orders', () => {
     await expect(f.run({ refundId: 're_1' })).resolves.toBe(false);
     expect(f.db.rpc).not.toHaveBeenCalled();
   });
+  it('records the external refunds of a charge that also carries one of ours, and still hands ours to the existing path', async () => {
+    const f = fixture([refund({ id: 're_ours', metadata: { refundIntentId: 'intent', orderId: 'order' } }),
+      refund({ id: 're_link', created: 1792000100, amount: 1000 })]);
+    await expect(f.run({ chargeId: 'ch_1' })).resolves.toBe(false);
+    expect(f.db.rpc).toHaveBeenCalledTimes(1);
+    expect(f.db.rpc).toHaveBeenCalledWith('pay_stripe_mp_record_external_refund', expect.objectContaining({ p_refund: 're_link' }));
+  });
   it('alerts for a partial refund kept for review, and for a full refund whose subscription still renews', async () => {
     const partial = fixture([refund({ amount: 1000 })], { state: 'partial_review', duplicate: false });
     await partial.run({ refundId: 're_1' });
@@ -64,9 +72,15 @@ describe('PAY-STRIPE-MP external refunds of card orders', () => {
     expect(pack.alert).toHaveBeenCalledTimes(1);
     expect(mocks.error).toHaveBeenCalledWith('billing', 'stripe_mp_external_refund_pack',
       expect.objectContaining({ orderId: 'order', packageId: 'pkg', packCredits: 990, balance: 120 }));
-    const duplicate = fixture([refund()], { state: 'refunded', duplicate: true, renewing: true });
-    await duplicate.run({ refundId: 're_1' });
-    expect(duplicate.alert).not.toHaveBeenCalled();
+    // A replay after a crash between recording and alerting alerts again from the persisted state.
+    const replay = fixture([refund()], { state: 'pack_review', duplicate: true, packageId: 'pkg', packCredits: 990, balance: 120 });
+    await replay.run({ refundId: 're_1' });
+    expect(replay.alert).toHaveBeenCalledTimes(1);
+    expect(mocks.error).toHaveBeenLastCalledWith('billing', 'stripe_mp_external_refund_pack', expect.objectContaining({
+      dedupKey: 'stripe-mp-external-refund:pack_review:order:re_1', replay: true }));
+    const settled = fixture([refund()], { state: 'refunded', duplicate: true, renewing: false });
+    await settled.run({ refundId: 're_1' });
+    expect(settled.alert).not.toHaveBeenCalled();
   });
   it('retries while a card order has not recorded the refunded payment yet; other payments go to the legacy path', async () => {
     mocks.find.mockResolvedValue(null);
@@ -76,6 +90,18 @@ describe('PAY-STRIPE-MP external refunds of card orders', () => {
     expect(pending.db.rpc).not.toHaveBeenCalled();
     const legacy = fixture([refund()]);
     await expect(legacy.run({ refundId: 're_1' })).resolves.toBe(false);
+  });
+  it('reads every page of a charge\'s refunds and fails rather than acknowledging an incomplete list', async () => {
+    const f = fixture([]);
+    f.stripe.refunds.list.mockResolvedValueOnce({ data: [refund({ id: 're_a' })], has_more: true })
+      .mockResolvedValueOnce({ data: [refund({ id: 're_b', created: 1792000100 })], has_more: false });
+    await expect(f.run({ chargeId: 'ch_1' })).resolves.toBe(true);
+    expect(f.stripe.refunds.list).toHaveBeenLastCalledWith({ charge: 'ch_1', limit: 100, starting_after: 're_a' });
+    expect(f.db.rpc).toHaveBeenCalledTimes(2);
+    const endless = fixture([]);
+    endless.stripe.refunds.list.mockResolvedValue({ data: [refund()], has_more: true });
+    await expect(endless.run({ chargeId: 'ch_1' })).rejects.toThrow('PAY_STRIPE_MP_REFUND_LIST_INCOMPLETE');
+    expect(endless.db.rpc).not.toHaveBeenCalled();
   });
   it('refuses a refund object that does not match the event', async () => {
     const f = fixture([refund({ id: 're_other' })]);
