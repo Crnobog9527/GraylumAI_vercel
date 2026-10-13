@@ -28,7 +28,7 @@ export async function createFixture(db,options={}) {
     tiers:options.tiers??[{minPromptTokens:0,prompt:'1',completion:'0',request:'0'}],timeOfDay:options.timeOfDay??[]};
   const identity = {policyId:'payg-local',profileVersion:'local-v1',evidenceVersion:'local-v1',
     pricingHash,endpointTag,nominalPricing,templateTokens,marginTokens};
-  const payg = {...identity,version:'v1',admissionPath:options.empirical?'empirical':'fixture',maxBytes:196608,maxMessages:32,maxTools:2,
+  const payg = {...identity,version:'v1',admissionPath:options.empirical?'empirical':'fixture',maxBytes:196608,maxMessages:32,maxTools:options.maxTools??2,
     maxSchemaBytes:16384,purposes:['question'],expiresAt:new Date(Date.now()+3600000).toISOString()};
   const quote = {...identity,policyVersion:'v1',bytes,promptTokensUpper,messages:1,tools:0,schemaBytes:0};
   const promptPrice = options.promptPrice??'1';
