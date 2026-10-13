@@ -154,12 +154,8 @@ export const DISABLED_RESEARCH_TOOLS: ResearchToolsConfig = Object.freeze({
  * (JSON decoding would turn `1.0` into 1), with the same rule as the SQL, otherwise 0. So a repair
  * save of an invalid row never conflicts.
  */
-async function storedRevision(db: SupabaseClient): Promise<number> {
-  const { data, error } = await db.from('system_settings').select('revision:value->>revision')
-    .eq('key', RESEARCH_TOOLS_KEY).maybeSingle();
-  const textValue = !error && typeof (data as { revision?: unknown } | null)?.revision === 'string'
-    ? (data as { revision: string }).revision : '';
-  return /^(0|[1-9][0-9]{0,9})$/.test(textValue) ? Number(textValue) : 0;
+function storedRevision(revisionText: unknown): number {
+  return typeof revisionText === 'string' && /^(0|[1-9][0-9]{0,9})$/.test(revisionText) ? Number(revisionText) : 0;
 }
 
 export interface ResearchToolsState {
@@ -178,12 +174,14 @@ export async function readResearchToolsConfig(db: SupabaseClient): Promise<Resea
   const off = (source: ResearchToolsState['source'], revision = 0): ResearchToolsState =>
     ({ config: DISABLED_RESEARCH_TOOLS, source, revision, updatedBy: null, updatedAt: null });
   try {
-    const { data, error } = await db.from('system_settings').select('value').eq('key', RESEARCH_TOOLS_KEY).maybeSingle();
+    // Value and PostgreSQL's revision text come from one request, so they describe one snapshot.
+    const { data, error } = await db.from('system_settings').select('value,revision:value->>revision')
+      .eq('key', RESEARCH_TOOLS_KEY).maybeSingle();
     if (error) return off('invalid');
     if (!data) return off('default');
     const raw = typeof data.value === 'string' ? JSON.parse(data.value) : data.value;
     const parsed = storedResearchToolsSchema.safeParse(raw);
-    if (!parsed.success) return off('invalid', await storedRevision(db));
+    if (!parsed.success) return off('invalid', storedRevision((data as { revision?: unknown }).revision));
     const { revision, updatedBy, updatedAt, ...config } = parsed.data;
     return { config, source: 'configured', revision, updatedBy, updatedAt };
   } catch {

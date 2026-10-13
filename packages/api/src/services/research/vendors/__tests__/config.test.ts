@@ -40,7 +40,7 @@ function dbReturning(value: unknown, error: unknown = null, revisionText?: strin
   const chain = {
     select: (c: string) => { columns = c; return chain; }, eq: () => chain,
     maybeSingle: async () => ({ error, data: value === undefined ? null
-      : columns.startsWith('revision:') ? { revision: pgText() } : { value } }),
+      : columns.includes('revision:') ? { value, revision: pgText() } : { value } }),
   };
   return { from: () => chain } as unknown as SupabaseClient;
 }
