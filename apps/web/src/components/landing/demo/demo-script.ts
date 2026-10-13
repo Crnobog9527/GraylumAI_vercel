@@ -100,6 +100,8 @@ export type DemoState = {
   reportOpen: boolean;
   /** The message that is being "typed" right now; the view reveals it unless motion is reduced. */
   liveId: string | null;
+  /** Counts restarts, so a new run never reuses a message id (and its reveal progress) from the last one. */
+  run: number;
 };
 
 const captured = (value: string): FieldValue => ({ value, status: 'provisional', nature: 'fact' });
@@ -119,6 +121,7 @@ export function initialDemoState(): DemoState {
     checklistUpdated: false,
     reportOpen: false,
     liveId: null,
+    run: 0,
   };
 }
 
@@ -157,26 +160,28 @@ export function demoReducer(state: DemoState, action: DemoAction): DemoState {
       const choice = card?.options[action.option];
       if (!card || choice === undefined) return state;
       const step = state.messages.length;
-      const user: DemoMessage = { id: `m${step}`, role: 'user', label: '你 · 你是谁', text: choice };
+      const id = (n: number) => `${state.run}-m${n}`;
+      const user: DemoMessage = { id: id(step), role: 'user', label: '你 · 你是谁', text: choice };
       if (state.phase === 'q1') {
         const reply = action.option === card.recommended ? REPLY_RECOMMENDED : REPLY_TRUTH;
         return { ...state, phase: 'q2', checklistUpdated: state.panel !== 'checklist',
-          liveId: `m${step + 1}`, values: { ...state.values, experience: captured(choice) },
-          messages: [...state.messages, user, { id: `m${step + 1}`, role: 'assistant', label: '导师 · 你是谁', text: reply }] };
+          liveId: id(step + 1), values: { ...state.values, experience: captured(choice) },
+          messages: [...state.messages, user, { id: id(step + 1), role: 'assistant', label: '导师 · 你是谁', text: reply }] };
       }
       const experience = state.values.experience?.value ?? '';
       return { ...state, phase: 'summary', checklistUpdated: state.panel !== 'checklist',
-        liveId: `m${step + 1}`, values: { ...state.values, audience: captured(choice) },
+        liveId: id(step + 1), values: { ...state.values, audience: captured(choice) },
         messages: [...state.messages, user,
-          { id: `m${step + 1}`, role: 'assistant', label: '本步小结 · 你是谁', summary: true, text: summaryText(experience, choice) }] };
+          { id: id(step + 1), role: 'assistant', label: '本步小结 · 你是谁', summary: true, text: summaryText(experience, choice) }] };
     }
     case 'free': {
       const text = action.text.trim();
       if (!text || state.liveId) return state;
       const step = state.messages.length;
-      return { ...state, liveId: `m${step + 1}`, messages: [...state.messages,
-        { id: `m${step}`, role: 'user', label: '你 · 你是谁', text },
-        { id: `m${step + 1}`, role: 'assistant', label: '导师 · 你是谁', text: FREE_REPLY }] };
+      const id = (n: number) => `${state.run}-m${n}`;
+      return { ...state, liveId: id(step + 1), messages: [...state.messages,
+        { id: id(step), role: 'user', label: '你 · 你是谁', text },
+        { id: id(step + 1), role: 'assistant', label: '导师 · 你是谁', text: FREE_REPLY }] };
     }
     case 'edit': {
       const previous = state.values[action.fieldId] ?? { value: '', status: 'unknown', nature: 'unknown' };
@@ -198,6 +203,6 @@ export function demoReducer(state: DemoState, action: DemoAction): DemoState {
     case 'settled':
       return { ...state, liveId: null };
     case 'reset':
-      return initialDemoState();
+      return { ...initialDemoState(), run: state.run + 1 };
   }
 }

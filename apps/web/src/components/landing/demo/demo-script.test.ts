@@ -20,7 +20,11 @@ describe('landing demo script', () => {
     expect(Object.values(state.values).every(value => value.status === 'confirmed')).toBe(true);
     state = demoReducer(state, { type: 'report', open: true });
     expect(state.reportOpen).toBe(true);
-    expect(demoReducer(state, { type: 'reset' })).toEqual(initialDemoState());
+    const restarted = demoReducer(state, { type: 'reset' });
+    expect(restarted).toEqual({ ...initialDemoState(), run: 1 });
+    // A new run never reuses the reply id of the last run, so no stale reveal progress applies to it.
+    const again = demoReducer(restarted, { type: 'answer', option: 2 });
+    expect(state.messages.map(message => message.id)).not.toContain(again.liveId);
   });
 
   it('says it straight when the visitor picks a crowded topic', () => {
