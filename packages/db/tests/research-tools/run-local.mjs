@@ -92,6 +92,17 @@ try {
   }
   report.checks.push('each successful change writes one summary audit row (no full value, no secrets); refused changes write none');
 
+  // Repair: a malformed attestation in the stored row (only postgres could have written it) is dropped
+  // by the next admin save instead of being copied forward, so the writer can always fix the row.
+  await c.query(`UPDATE system_settings SET value=jsonb_set(value,'{vendors,parallel,hardCapAttested}','"bad"') WHERE key='research_tools_config'`);
+  await c.query('SET ROLE service_role');
+  const repaired = await set(config({}), [], 4, admin);
+  assert.equal(repaired.vendors.parallel.hardCapAttested, null);
+  assert.equal(repaired.vendors.tikhub.hardCapAttested.by, admin);
+  await code(set(config({ parallel: true }), [], 5, admin), '23514');
+  await c.query('RESET ROLE');
+  report.checks.push('a malformed stored attestation is dropped on the next save (repair path) and never counts as attested');
+
   await c.query("DELETE FROM system_settings WHERE key='research_tools_config'");
   assert.equal(await stored(), undefined);
   report.checks.push('postgres can delete the key, which turns every research call off');

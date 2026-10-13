@@ -2696,7 +2696,7 @@
   "fn:research_billing_summary(timestamp with time zone,timestamp with time zone)": "0b49f98c3209",
   "fn:research_cancel(uuid,uuid)": "eed19976d2ba",
   "fn:research_lookup(uuid,uuid,uuid)": "499535997404",
-  "fn:research_tools_config_set(jsonb,text[],bigint,uuid)": "130053f6a070",
+  "fn:research_tools_config_set(jsonb,text[],bigint,uuid)": "eba6828a511c",
   "fn:research_tools_settings_guard()": "27d76b043a58",
   "fn:research_transition(text,uuid,uuid,uuid,jsonb)": "5c16d1242bae",
   "fn:research_user_charge(uuid,uuid,uuid,text)": "43e7695b80b8",

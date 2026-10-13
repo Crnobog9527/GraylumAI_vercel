@@ -44,7 +44,13 @@ BEGIN
    RAISE EXCEPTION 'RESEARCH_TOOLS_INPUT_INVALID' USING ERRCODE='23514';END IF;
   -- Attestation is server-stamped; a client-supplied hardCapAttested is ignored.
   attested:=CASE WHEN vendor=ANY(p_attest_vendors) THEN jsonb_build_object('by',p_actor,'at',stamp)
-   ELSE nullif(prior->'vendors'->vendor->'hardCapAttested','null'::jsonb) END;
+   ELSE prior->'vendors'->vendor->'hardCapAttested' END;
+  -- Keep a prior attestation only if it has the exact server-written shape; a malformed one is
+  -- dropped so an admin can repair an invalid row through this writer (direct writes are blocked).
+  IF NOT (jsonb_typeof(attested)='object' AND (attested - ARRAY['by','at'])='{}'::jsonb
+   AND attested->>'by' ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+   AND attested->>'at' ~ '^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(\.\d{1,6})?Z$')
+  THEN attested:=NULL;END IF;
   IF enabled='true'::jsonb AND attested IS NULL THEN
    RAISE EXCEPTION 'RESEARCH_TOOLS_HARD_CAP_REQUIRED' USING ERRCODE='23514';END IF;
   vendors:=vendors||jsonb_build_object(vendor,jsonb_build_object('enabled',enabled,
