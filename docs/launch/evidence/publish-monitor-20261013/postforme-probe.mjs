@@ -11,11 +11,12 @@
 // Usage:
 //   node postforme-probe.mjs accounts
 //   node postforme-probe.mjs auth-url <platform> [external_id]
-//   node postforme-probe.mjs feed <platform>[#n] [max_pages]  (n = position shown by `accounts`, default 1;
-//                                                              account IDs are looked up internally, never printed)
+//   node postforme-probe.mjs feed <platform>#<tag> [max_pages]  (tag = stable hash shown by `accounts`;
+//                                                                account IDs are looked up internally, never printed)
 //   node postforme-probe.mjs smoke            (list endpoints, error shapes, rate-limit headers)
 //   node postforme-probe.mjs burst [n]        (n sequential GET /social-accounts, to observe 429)
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 
@@ -76,12 +77,15 @@ function shapeOf(post) {
 async function accounts() {
   const r = await call('GET', '/social-accounts');
   // Account IDs are user-linked identifiers: print platform and status only.
-  const seen = {};
-  const rows = (r.json?.data ?? []).map((a) => {
-    seen[a.platform] = (seen[a.platform] ?? 0) + 1;
-    return { select: `${a.platform}#${seen[a.platform]}`, platform: a.platform, status: a.status, name_hint: maskName(a.username) };
-  });
+  const rows = (r.json?.data ?? []).map((a) => ({
+    select: `${a.platform}#${tagOf(a.id)}`, platform: a.platform, status: a.status, name_hint: maskName(a.username),
+  }));
   return { status: r.status, ms: r.ms, headers: r.headers, accounts: rows, error: r.errorText };
+}
+
+// Stable, non-reversible selector derived from the account ID, so it does not shift when accounts are added or removed.
+function tagOf(id) {
+  return createHash('sha256').update(String(id)).digest('hex').slice(0, 8);
 }
 
 // First and last character only, so the Owner can tell two accounts apart without exposing the handle.
@@ -127,11 +131,11 @@ async function authUrl(platformArg, externalId) {
 }
 
 async function feed(selector, maxPages = 3) {
-  const [platform, nth = '1'] = String(selector).split('#');
+  const [platform, tag] = String(selector).split('#');
+  if (!tag) return { selector, error: 'use the platform#tag selector printed by `accounts`' };
   const list = await call('GET', '/social-accounts');
-  const matches = (list.json?.data ?? []).filter((a) => a.platform === platform);
-  const accountId = matches[Number(nth) - 1]?.id;
-  if (!accountId) return { selector, error: `no connected account ${selector} (found ${matches.length} for ${platform})` };
+  const accountId = (list.json?.data ?? []).find((a) => a.platform === platform && tagOf(a.id) === tag)?.id;
+  if (!accountId) return { selector, error: `no connected account ${selector}` };
   const pages = [];
   let cursor = null;
   for (let i = 0; i < Number(maxPages); i += 1) {
@@ -149,7 +153,7 @@ async function feed(selector, maxPages = 3) {
     cursor = r.json?.meta?.cursor ?? null;
     if (!r.json?.meta?.has_more || !cursor) break;
   }
-  return { selector: `${platform}#${nth}`, of: matches.length, pages };
+  return { selector, pages };
 }
 
 function brief(r) {
@@ -186,7 +190,7 @@ const run = {
   accounts: () => accounts(), 'auth-url': () => authUrl(a, b), feed: () => feed(a, b), smoke: () => smoke(), burst: () => burst(a),
 }[cmd];
 if (!run) {
-  console.error('usage: accounts | auth-url <platform>[:type] [external_id] | feed <platform>[#n] [max_pages] | smoke | burst [n]');
+  console.error('usage: accounts | auth-url <platform>[:type] [external_id] | feed <platform>#<tag> [max_pages] | smoke | burst [n]');
   process.exit(2);
 }
 console.log(JSON.stringify({ at: new Date().toISOString(), cmd, result: await run() }, null, 2));
