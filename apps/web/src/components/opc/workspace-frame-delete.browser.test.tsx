@@ -21,7 +21,8 @@ const stubs: Array<[(id: string) => boolean, string]> = [
     const deep=()=>new Proxy(()=>{},{get:(_,key)=>key==='then'?undefined:deep(),apply:()=>undefined});
     const client={account:{conversationErasure:{mutate:input=>new Promise((resolve,reject)=>
       window.erasures.push({input,resolve,reject}))},
-      conversationErasureCleanup:{mutate:async input=>{window.cleanups.push(input);return {cleaned:true};}}}};
+      conversationErasureCleanup:{mutate:async input=>{window.cleanups.push(input);
+        return {cleaned:true,reviewRequired:location.hash==='#review'};}}}};
     export const trpc={useUtils:()=>new Proxy({},{get:(_,key)=>key==='client'?client:deep()}),
       opc:{library:{useQuery:()=>q(location.hash==='#strategy'?{businesses:[{businessId:'b1',accounts:[{projectId:'p1',
         platform:'抖音',account:'测试号',strategyDraftId:'d1',sourceVersionId:'v1',sourceVersion:1,items:[]}]}]}
@@ -174,6 +175,13 @@ it('says so when the content is gone but money records are still being checked',
   await ui(page.getByRole('status')).toContainText('部分账务记录仍在核对中');
   await ui(page.getByText('周末选题讨论')).toHaveCount(0);
 }));
+
+it('shows the accounting notice when the background cleanup finds money still being checked', () => open(1280, async page => {
+  await confirmDelete(page);
+  await answer(page, true);
+  await ui(page.getByRole('status')).toContainText('部分账务记录仍在核对中');
+  await ui(page.getByText('周末选题讨论')).toHaveCount(0);
+}, '#review'));
 
 it('cancel keeps the conversation and sends nothing', () => open(1280, async page => {
   await openMenu(page);

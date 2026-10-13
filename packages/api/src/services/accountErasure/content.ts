@@ -90,11 +90,12 @@ export async function cleanUpConversation(database: Database | null | undefined,
   if (!database) fail(null);
   const { sessionId } = conversationTarget.parse(input);
   const response = await database.rpc('content_erasure_confirm', { a: actorId, k: 'session', target: sessionId, expected_hash: null });
-  if (response.error?.message === 'CONTENT_ERASURE_BUSY') return { cleaned: false };
+  if (response.error?.message === 'CONTENT_ERASURE_BUSY') return { cleaned: false, reviewRequired: false };
   if (response.error) fail(response.error);
   const parsed = confirmationResult.safeParse(response.data);
   if (!parsed.success || parsed.data.id !== sessionId || parsed.data.kind !== 'session') fail(null);
-  return { cleaned: true };
+  // Unresolved money on the deleted conversation is reported here, as the confirm call used to.
+  return { cleaned: true, reviewRequired: parsed.data.status === 'review_required' };
 }
 const sweepPage = z.object({
   cleaned: z.number().int().nonnegative(), pending: z.number().int().nonnegative(), failed: z.number().int().nonnegative(),

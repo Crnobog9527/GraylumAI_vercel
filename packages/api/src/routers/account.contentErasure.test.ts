@@ -84,9 +84,14 @@ describe('one-click conversation deletion (Owner 2026-10-13: no impact list, 023
   it('cleans up a marked conversation through confirm without a hash; busy is left for the sweep', async () => {
     const rpc = vi.fn().mockResolvedValueOnce({ data: { ...deleted.data, alreadyDeleted: true }, error: null })
       .mockResolvedValueOnce({ data: null, error: { code: '55P03', message: 'CONTENT_ERASURE_BUSY' } });
-    await expect(caller(rpc).conversationErasureCleanup({ sessionId: id })).resolves.toEqual({ cleaned: true });
+    await expect(caller(rpc).conversationErasureCleanup({ sessionId: id })).resolves.toEqual({ cleaned: true, reviewRequired: false });
     expect(rpc.mock.calls[0]).toEqual(['content_erasure_confirm', { a: 'user-1', k: 'session', target: id, expected_hash: null }]);
-    await expect(caller(rpc).conversationErasureCleanup({ sessionId: id })).resolves.toEqual({ cleaned: false });
+    await expect(caller(rpc).conversationErasureCleanup({ sessionId: id })).resolves.toEqual({ cleaned: false, reviewRequired: false });
+  });
+
+  it('reports money still being checked on the deleted conversation', async () => {
+    const rpc = vi.fn().mockResolvedValue({ data: { ...deleted.data, status: 'review_required', financialReviewCount: 1 }, error: null });
+    await expect(caller(rpc).conversationErasureCleanup({ sessionId: id })).resolves.toEqual({ cleaned: true, reviewRequired: true });
   });
 
   it('never lets cleanup erase an unmarked conversation', async () => {
