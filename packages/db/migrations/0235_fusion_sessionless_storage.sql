@@ -305,10 +305,11 @@ $x$||a);
   END IF;
   src:=pg_get_functiondef('public.account_erasure_body_remaining(uuid)'::regprocedure);
   IF position('fusion_call_outputs' IN src)=0 THEN
-    a:=$x$total bigint:=(SELECT count(*) FROM opc_data_events WHERE actor_id=p_profile_id);$x$;
+    -- Anchor without the closing semicolon, so it holds with or without 0232's runtime_session_names term.
+    a:=$x$total bigint:=(SELECT count(*) FROM opc_data_events WHERE actor_id=p_profile_id)$x$;
     IF array_length(string_to_array(src,a),1)<>2 THEN RAISE EXCEPTION 'FUSION_SOURCE_MISMATCH: account_erasure_body_remaining'; END IF;
-    EXECUTE replace(src,a,$x$total bigint:=(SELECT count(*) FROM opc_data_events WHERE actor_id=p_profile_id)
-  +(SELECT count(*) FROM fusion_call_outputs WHERE actor_id=p_profile_id);$x$);
+    EXECUTE replace(src,a,a||$x$
+  +(SELECT count(*) FROM fusion_call_outputs WHERE actor_id=p_profile_id)$x$);
   END IF;
 END $$;
 COMMIT;
