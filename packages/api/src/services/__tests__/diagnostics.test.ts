@@ -213,10 +213,9 @@ describe('diagnostics routed client contract', () => {
 describe('billing diagnostic service uses only real read paths', () => {
   it.each(['healthy', 'query failure', 'mismatch'] as const)('keeps three read-only probes and reports the unavailable stop-loss monitor: %s', async mode => {
     const writes: string[] = [];
-    const rpc = vi.fn(async (name: string) => {
-      if (name !== 'research_billing_summary') throw new Error('Mutating RPC is forbidden');
-      return { data: { count: 0, credits: 0 }, error: null };
-    });
+    // 0071 grants research_billing_summary to service_role only, so reconciliation reads it
+    // through the admin client; the user-scoped client is never asked for a billing RPC.
+    const rpc = vi.fn(() => { throw new Error('User-scoped billing RPC is not granted'); });
     const from = vi.fn((table: string) => {
       if (table === 'diagnostic_results') return { insert: async () => { writes.push(table); return { error: null }; } };
       const response = { data: mode === 'mismatch' && table === 'ai_usage_logs' ? [{ status: 'success' }] : [],
@@ -229,15 +228,18 @@ describe('billing diagnostic service uses only real read paths', () => {
       };
       return builder;
     });
-    const adminRpc = vi.fn(() => { throw new Error('No privileged billing mutations allowed'); });
+    const adminRpc = vi.fn(async (name: string) => {
+      if (name !== 'research_billing_summary') throw new Error('No privileged billing mutations allowed');
+      return { data: { count: 0, credits: 0 }, error: null };
+    });
     const service = new DiagnosticsService({ supabase: { from, rpc } as never,
       supabaseAdmin: { from, rpc: adminRpc } as never, userId: 'synthetic-admin' });
     const result = await service.runCategoryTests('billing');
     expect(result.results.filter(r => r.testId !== 'runtime_stop_loss').map(r => r.status)).toEqual(mode === 'query failure'
       ? ['failed', 'failed', 'failed'] : ['warning', 'warning', mode === 'mismatch' ? 'failed' : 'passed']);
     expect(result.results.find(r => r.testId === 'runtime_stop_loss')?.status).toBe('error');
-    expect(adminRpc).not.toHaveBeenCalled();
-    expect(rpc.mock.calls.map(([name]) => name)).toEqual(['research_billing_summary']);
+    expect(rpc).not.toHaveBeenCalled();
+    expect(adminRpc.mock.calls.map(([name]) => name)).toEqual(['research_billing_summary']);
     expect(writes).toEqual(['diagnostic_results']);
     expect(result.saveStatus?.saved).toBe(true);
   });

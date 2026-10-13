@@ -313,23 +313,10 @@
   },
   "src/services/__tests__/workbench.integration.ts": {
     "@typescript-eslint/no-explicit-any": {
-      "count": 15
-    },
-    "@typescript-eslint/no-unused-vars": {
-      "count": 1
-    }
-  },
-  "src/services/__tests__/workbenchGeneration.test.ts": {
-    "@typescript-eslint/no-unused-vars": {
-      "count": 3
+      "count": 13
     }
   },
   "src/services/adminUserAccess.ts": {
-    "@typescript-eslint/no-explicit-any": {
-      "count": 2
-    }
-  },
-  "src/services/artifacts/generation.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 2
     }

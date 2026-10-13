@@ -256,38 +256,22 @@ test.describe('Admin Config Flows', () => {
       await expect(page).toHaveURL(/\/admin\/settings/);
       await page.getByRole('tab', { name: '页面体验' }).click();
 
-      const chatPromptInput = page.getByTestId('admin-setting-chat_prompt_text');
-      const chatWelcomeInput = page.getByTestId('admin-setting-chat_welcome_message');
-      const chatModelSelectorSwitch = page.getByTestId('admin-setting-chat_show_model_selector');
-      const chatBillingHintInput = page.getByTestId('admin-setting-chat_billing_hint');
+      // LEGACY-CLOSE removed the old chat-page settings; the home-page switches remain.
       const homeOnboardingSwitch = page.getByTestId('admin-setting-home_show_onboarding');
       const homeFeaturedSwitch = page.getByTestId('admin-setting-home_show_featured_modules');
-      await expect(chatPromptInput).toBeVisible({ timeout: 10000 });
+      await expect(homeOnboardingSwitch).toBeVisible({ timeout: 10000 });
 
-      const originalChatPrompt = await chatPromptInput.inputValue();
-      const originalChatWelcome = await chatWelcomeInput.inputValue();
-      const originalChatBillingHint = await chatBillingHintInput.inputValue();
-      const originalModelSelectorState = (await chatModelSelectorSwitch.getAttribute('data-state')) === 'checked';
       const originalOnboardingState = (await homeOnboardingSwitch.getAttribute('data-state')) === 'checked';
       const originalFeaturedState = (await homeFeaturedSwitch.getAttribute('data-state')) === 'checked';
-      const updatedChatPrompt = `Parity welcome prompt ${Date.now()}`;
-      const updatedChatWelcome = `欢迎来到新的聊天页 ${Date.now()}`;
-      const updatedBillingHint = `Parity billing hint ${Date.now()}`;
 
       steps.push('Update page-experience settings from the canonical settings page');
-      await chatPromptInput.fill(updatedChatPrompt);
-      await chatWelcomeInput.fill(updatedChatWelcome);
-      await chatBillingHintInput.fill(updatedBillingHint);
-      await setSwitchState(chatModelSelectorSwitch, !originalModelSelectorState);
       await setSwitchState(homeOnboardingSwitch, !originalOnboardingState);
       await setSwitchState(homeFeaturedSwitch, !originalFeaturedState);
       await saveAllSettings(page);
       await page.reload();
       await page.getByRole('tab', { name: '页面体验' }).click();
-      await expect(chatPromptInput).toBeVisible({ timeout: 10000 });
-      await expect(chatPromptInput).toHaveValue(updatedChatPrompt, { timeout: 15000 });
-      await expect(chatWelcomeInput).toHaveValue(updatedChatWelcome, { timeout: 15000 });
-      await expect(chatBillingHintInput).toHaveValue(updatedBillingHint, { timeout: 15000 });
+      await expect(homeOnboardingSwitch).toHaveAttribute('data-state', originalOnboardingState ? 'unchecked' : 'checked', { timeout: 15000 });
+      await expect(homeFeaturedSwitch).toHaveAttribute('data-state', originalFeaturedState ? 'unchecked' : 'checked', { timeout: 15000 });
 
       // The new home page (/) no longer renders the onboarding guide or featured modules; these
       // toggles now only affect /landing, so the stale home-page assertions were removed.
@@ -329,11 +313,7 @@ test.describe('Admin Config Flows', () => {
       steps.push('Restore the original page-experience settings from /admin/settings');
       await gotoWithBypass(page, '/admin/settings');
       await page.getByRole('tab', { name: '页面体验' }).click();
-      await expect(chatPromptInput).toBeVisible({ timeout: 10000 });
-      await chatPromptInput.fill(originalChatPrompt);
-      await chatWelcomeInput.fill(originalChatWelcome);
-      await chatBillingHintInput.fill(originalChatBillingHint);
-      await setSwitchState(chatModelSelectorSwitch, originalModelSelectorState);
+      await expect(homeOnboardingSwitch).toBeVisible({ timeout: 10000 });
       await setSwitchState(homeOnboardingSwitch, originalOnboardingState);
       await setSwitchState(homeFeaturedSwitch, originalFeaturedState);
       await saveAllSettings(page);
