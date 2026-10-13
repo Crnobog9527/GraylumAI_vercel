@@ -5,7 +5,7 @@ import { z } from 'zod';
 import { evaluateAction, getState, loadLatestMembershipFacts } from './membershipEligibility';
 import {
   entitlementRowShape, FUSION_COMPARE_SETTING, fusionCompareLimitSchema, membershipLevelSchema,
-  type MembershipLevel,
+  publishMonitorEntitlementShape, type MembershipLevel,
 } from './membershipEntitlementConfig';
 
 const profileSchema = z.object({
@@ -13,7 +13,11 @@ const profileSchema = z.object({
   status: z.literal('active'),
   is_deleted: z.literal('false'),
 });
-const planSchema = z.object({ id: z.string(), level: membershipLevelSchema, ...entitlementRowShape });
+const planSchema = z.object({
+  id: z.string(), level: membershipLevelSchema, ...entitlementRowShape, ...publishMonitorEntitlementShape,
+});
+const PLAN_COLUMNS = 'id,level,allow_fusion_review,allow_fusion_compare,library_storage_bytes,'
+  + 'allow_publish,own_data_window_days,allow_benchmark_monitor,allow_weekly_auto_review';
 
 function unavailable(): never {
   throw new TRPCError({ code: 'SERVICE_UNAVAILABLE', message: 'ENTITLEMENTS_UNAVAILABLE' });
@@ -22,7 +26,7 @@ function unavailable(): never {
 async function readPlan(client: SupabaseClient, level: MembershipLevel) {
   // is_active is a catalog/checkout switch, not revocation of previously granted membership.
   const { data, error } = await client.from('membership_plans')
-    .select('id,level,allow_fusion_review,allow_fusion_compare,library_storage_bytes').eq('level', level).limit(2);
+    .select(PLAN_COLUMNS).eq('level', level).limit(2);
   const parsed = z.array(planSchema).length(1).safeParse(data);
   if (error || !parsed.success) unavailable();
   return parsed.data[0]!;
@@ -71,6 +75,10 @@ export async function readMembershipEntitlements(client: SupabaseClient, profile
       allowFusionCompare: plan.allow_fusion_compare,
       libraryStorageBytes: plan.library_storage_bytes,
       fusionCompareMaxModels: limit.data,
+      allowPublish: plan.allow_publish,
+      ownDataWindowDays: plan.own_data_window_days,
+      allowBenchmarkMonitor: plan.allow_benchmark_monitor,
+      allowWeeklyAutoReview: plan.allow_weekly_auto_review,
     });
   } catch (error) {
     if (error instanceof TRPCError) throw error;
