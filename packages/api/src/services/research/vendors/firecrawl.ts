@@ -5,13 +5,14 @@
 // URL or a redirect lands on a PDF), a single page with no link following. Public pages only; no
 // anti-bot or login options are ever requested. `proxy: 'basic'` pins one credit: the default `auto`
 // retries hard targets through the 5-credit enhanced proxy.
-import { clip, count, text, timestamp } from './fields';
+import { clip, clipBytes, count, text, timestamp } from './fields';
 import { exchange, usageUnits } from './http';
 import type { ResearchCallResult, VendorDeps, VendorRequest } from './types';
 
 export const FIRECRAWL_SCRAPE_URL = 'https://api.firecrawl.dev/v1/scrape';
 export const FIRECRAWL_ROUTE = 'firecrawl:scrape:markdown';
-export const MAX_MARKDOWN_CHARS = 20_000;
+/** Byte ceiling for page text handed to the model (plan §2.3). */
+export const MAX_MARKDOWN_BYTES = 20_000;
 const PAGE_FIELDS = ['title', 'publishedAt', 'language', 'markdown'] as const;
 
 /** Non-public targets. IPv6 literals are refused outright (mapped, unspecified, ULA, link-local, ...). */
@@ -93,7 +94,7 @@ export async function callFirecrawl(rawUrl: string, deps: VendorDeps): Promise<R
   if (markdown === undefined || markdown.trim() === '') {
     return { ...base, outcome: 'failed', reason: 'EMPTY_OR_UNRECOGNIZED', httpStatus: 200, supplierMayCharge: true, usage };
   }
-  const clipped = clip(markdown, MAX_MARKDOWN_CHARS);
+  const clipped = clipBytes(markdown, MAX_MARKDOWN_BYTES);
   const values: Record<string, string | undefined> = {
     title: clip(text(answer.json, ['data.metadata.title', 'data.metadata.ogTitle']), 300),
     publishedAt: timestamp(answer.json, ['data.metadata.publishedTime', 'data.metadata.article:published_time']),

@@ -144,6 +144,11 @@ describe('callTikhub', () => {
     const weibo = await callTikhub({ platform: 'weibo', kind: 'account_posts', account: '1' },
       deps(jsonFetch(200, { code: 200, data: { data: { statuses: [] } } })));
     expect(weibo).toMatchObject({ outcome: 'ok', reason: 'NO_RESULTS' });
+    const v3 = await callTikhub({ platform: 'instagram', kind: 'account_posts', account: 'natgeo' }, deps(jsonFetch(200, { code: 200,
+      data: { edges: [{ node: { id: '1', code: 'AbC', caption: { text: 'hi' }, like_count: 5, user: { username: 'natgeo' } } }] } })));
+    expect(v3).toMatchObject({ outcome: 'ok' });
+    expect(v3.items[0]).toMatchObject({ url: 'https://www.instagram.com/p/AbC/', fields: { likes: 5 } });
+    expect(v3.items[0].missing).toContain('publishedAt');
     const instagram = await callTikhub({ platform: 'instagram', kind: 'account_posts', account: 'quiet' },
       deps(jsonFetch(200, { code: 200, data: { edges: [] } })));
     expect(instagram).toMatchObject({ outcome: 'ok', reason: 'NO_RESULTS' });

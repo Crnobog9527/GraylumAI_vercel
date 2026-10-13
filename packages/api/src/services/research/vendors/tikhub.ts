@@ -120,7 +120,11 @@ function requestFor(route: TikhubRoute, input: { keyword?: string; account?: str
   return { method: 'GET', url: url.toString() };
 }
 
-/** One TikHub call. Never retried or switched to another supplier here. */
+/**
+ * One TikHub call. Never retried or switched to another supplier here. TikHub's per-endpoint rate
+ * limit (10/s by default) is shared across serverless instances, so it is enforced by the caller
+ * (RT-3, existing Upstash limiter) before this function runs; RT-1 adds no traffic of its own.
+ */
 export async function callTikhub(call: TikhubCall, deps: VendorDeps): Promise<ResearchCallResult> {
   const fetchedAt = (deps.now?.() ?? new Date()).toISOString();
   const route = tikhubRouteId(call.platform, call.kind) ?? `${call.platform}:${call.kind}`;

@@ -2,7 +2,7 @@
 // Parallel and Firecrawl adapters against fetch doubles; response shapes follow RESEARCH-0 (#466, #465).
 import { describe, expect, it } from 'vitest';
 import { buildParallelRequest, callParallel, parallelUsage } from '../parallel';
-import { buildFirecrawlRequest, callFirecrawl, firecrawlCredits, MAX_MARKDOWN_CHARS } from '../firecrawl';
+import { buildFirecrawlRequest, callFirecrawl, firecrawlCredits, MAX_MARKDOWN_BYTES } from '../firecrawl';
 import { usageUnits } from '../http';
 import { FIXED_NOW, hangingFetch, jsonFetch, type RecordedCall } from './fetchDoubles';
 
@@ -114,11 +114,16 @@ describe('callFirecrawl', () => {
   });
 
   it('returns the clipped page and its credits', async () => {
-    const markdown = 'x'.repeat(MAX_MARKDOWN_CHARS + 5);
+    const markdown = 'x'.repeat(MAX_MARKDOWN_BYTES + 5);
     const body = { success: true, data: { markdown, metadata: { title: 'T', sourceURL: 'https://example.com/a', statusCode: 200, creditsUsed: 1 } } };
     const result = await callFirecrawl('https://example.com/a', deps(jsonFetch(200, body)));
     expect(result).toMatchObject({ outcome: 'partial', truncated: true, usage: { unit: 'credit', units: '1' } });
-    expect(String(result.items[0].fields.markdown)).toHaveLength(MAX_MARKDOWN_CHARS);
+    expect(Buffer.byteLength(String(result.items[0].fields.markdown))).toBeLessThanOrEqual(MAX_MARKDOWN_BYTES);
+    const cjk = { success: true, data: { markdown: `${'中'.repeat(5000)}\n\n${'文'.repeat(5000)}`, metadata: { creditsUsed: 1 } } };
+    const page = await callFirecrawl('https://example.com/zh', deps(jsonFetch(200, cjk)));
+    expect(page).toMatchObject({ outcome: 'partial', truncated: true });
+    expect(Buffer.byteLength(String(page.items[0].fields.markdown))).toBeLessThanOrEqual(MAX_MARKDOWN_BYTES);
+    expect(String(page.items[0].fields.markdown)).toBe('中'.repeat(5000));
     expect(result.items[0].missing).toEqual(['publishedAt', 'language']);
   });
 

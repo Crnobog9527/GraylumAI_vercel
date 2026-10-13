@@ -103,6 +103,25 @@ export function findAll(
 export const has = (object: Record<string, unknown>, ...keys: string[]) =>
   keys.some(key => Object.hasOwn(object, key));
 
+/**
+ * Cut to at most `maxBytes` UTF-8 bytes on a code-point boundary, preferring the last paragraph break
+ * in the second half of the kept text.
+ */
+export function clipBytes(value: string, maxBytes: number): string {
+  if (Buffer.byteLength(value, 'utf8') <= maxBytes) return value;
+  let used = 0;
+  let end = 0;
+  for (const char of value) {
+    const size = Buffer.byteLength(char, 'utf8');
+    if (used + size > maxBytes) break;
+    used += size;
+    end += char.length;
+  }
+  const kept = value.slice(0, end);
+  const paragraph = kept.lastIndexOf('\n\n');
+  return paragraph >= kept.length / 2 ? kept.slice(0, paragraph) : kept;
+}
+
 /** Cut to `max` characters on a code-point boundary. */
 export function clip(value: string | undefined, max: number): string | undefined {
   if (value === undefined) return undefined;

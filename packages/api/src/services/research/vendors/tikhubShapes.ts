@@ -166,8 +166,10 @@ function rawPosts(data: unknown, platform: SocialPlatform): ResearchItem[] {
       return findAll(data, o => has(o, 'video_id', 'videoId') && has(o, 'title')).map(item => youtubeVideo(item, channel));
     }
     case 'instagram': {
-      // Some routes return the same posts twice (flat list and GraphQL edges).
-      const posts = findAll(data, o => has(o, 'taken_at', 'taken_at_timestamp') && has(o, 'code', 'shortcode', 'id')).map(instagramPost);
+      // Some routes return the same posts twice (flat list and GraphQL edges). v3 posts have no
+      // publication time, so a post is recognized by its shortcode plus content or metrics.
+      const posts = findAll(data, o => has(o, 'code', 'shortcode')
+        && has(o, 'taken_at', 'taken_at_timestamp', 'caption', 'like_count', 'edge_liked_by', 'play_count', 'comment_count')).map(instagramPost);
       return posts.filter((post, index) => post.fields.id === undefined
         || posts.findIndex(other => other.fields.id === post.fields.id) === index);
     }
