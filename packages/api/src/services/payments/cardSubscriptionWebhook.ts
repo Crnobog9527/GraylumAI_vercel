@@ -4,7 +4,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { resolveStripeScope } from './stripeCheckoutPersistence';
 import { recoverMethodCheckout } from './walletWebhook';
 import { freezePurchaseSnapshot } from './contracts';
-import { stripePreTaxAmount } from './purchaseFacts';
+import { GRAYLUM_INITIATED_CANCEL, stripePreTaxAmount } from './purchaseFacts';
 import { recordStripeInvoiceConflict } from './stripeConflictEvidence';
 import { recordCardPaymentTax } from './cardPaymentEvidence';
 import { PAYMENT_EVIDENCE_CONFLICT } from './stripeWebhookError';
@@ -77,8 +77,11 @@ async function readSubscription(stripe: Stripe, subscriptionId: string) {
 
 async function syncState(db: SupabaseClient, merchant: string, localSubscriptionId: string, subscription: Stripe.Subscription) {
   const state = stripeStopState(subscription);
+  // Only a cancellation the buyer asked for ends the founder renewal window; retry exhaustion does not.
   const result = await db.rpc('pay_stripe_mp_sync_subscription', { p_subscription: localSubscriptionId, p_merchant: merchant,
-    p_cancel_at_period_end: state.stop, p_canceled: state.canceled });
+    p_cancel_at_period_end: state.stop, p_canceled: state.canceled,
+    p_user_canceled: state.canceled && subscription.cancellation_details?.reason === 'cancellation_requested'
+      && subscription.cancellation_details?.comment !== GRAYLUM_INITIATED_CANCEL });
   if (result.error) throw new Error('PAY_STRIPE_MP_RENEWAL_UNAVAILABLE', { cause: result.error });
   return state;
 }
@@ -90,7 +93,8 @@ async function stopRenewalAfterReview(db: SupabaseClient, stripe: Stripe, mercha
   subscriptionId: string) {
   let subscription = await readSubscription(stripe, subscriptionId);
   if (!stripeStopState(subscription).stop && !stripeStopState(subscription).canceled) {
-    await stripe.subscriptions.update(subscriptionId, { cancel_at_period_end: true });
+    await stripe.subscriptions.update(subscriptionId, { cancel_at_period_end: true,
+      cancellation_details: { comment: GRAYLUM_INITIATED_CANCEL } });
     subscription = await readSubscription(stripe, subscriptionId);
   }
   const state = await syncState(db, merchant, localSubscriptionId, subscription);
@@ -176,6 +180,8 @@ export async function handleCardSubscriptionState(db: SupabaseClient, stripe: St
   if (!order.localSubscriptionId) {
     // Before the first payment is recorded there is nothing local to update. A plain state needs nothing, but a stop
     // or cancellation must not be lost: refuse it so Stripe retries once the first payment has created the mapping.
+    // incomplete_expired: the first invoice was never paid and Stripe sends nothing more; nothing to carry.
+    if (subscription.status === 'incomplete_expired') return true;
     const state = stripeStopState(subscription);
     if (state.stop || state.canceled) throw new Error('PAY_STRIPE_MP_FIRST_PAYMENT_PENDING');
     return true;

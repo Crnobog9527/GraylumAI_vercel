@@ -43,7 +43,7 @@ export async function membershipExpiryStripeCases({admin,service}) {
     await admin.query("UPDATE profiles SET membership_level='gold' WHERE id=$1",[user]);
     return {...f,end};
   };
-  const sync=(f,stop,canceled)=>service.query(`SELECT pay_stripe_mp_sync_subscription($1,'fixture',$2,$3) v`,[f.sub,stop,canceled]);
+  const sync=(f,stop,canceled)=>service.query(`SELECT pay_stripe_mp_sync_subscription($1,'fixture',$2,$3,false) v`,[f.sub,stop,canceled]);
   const renew=async f=>(await service.query(`SELECT pay_stripe_mp_renew_subscription($1,'fixture',$2,6900,'usd',$3,$4,$5) v`,
     [f.sub,`in_expiry_renew_${f.order.slice(0,8)}`,new Date(f.end.getTime()+60000),f.end,month(f.end)])).rows[0].v;
 

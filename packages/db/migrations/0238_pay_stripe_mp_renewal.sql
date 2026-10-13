@@ -109,8 +109,10 @@ BEGIN
  RETURN jsonb_build_object('failedAt',coalesce(s.founder_failed_at,p_failed_at));
 END $$;
 
+-- An earlier draft had 4 parameters; drop it so the name stays unique (0243 looks the function up by name).
+DROP FUNCTION IF EXISTS public.pay_stripe_mp_sync_subscription(uuid,text,boolean,boolean);
 CREATE OR REPLACE FUNCTION public.pay_stripe_mp_sync_subscription(
- p_subscription uuid,p_merchant text,p_cancel_at_period_end boolean,p_canceled boolean
+ p_subscription uuid,p_merchant text,p_cancel_at_period_end boolean,p_canceled boolean,p_user_canceled boolean
 ) RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
 DECLARE s user_subscriptions; remaining integer;
 BEGIN
@@ -118,13 +120,17 @@ BEGIN
  SELECT * INTO s FROM user_subscriptions WHERE id=p_subscription FOR UPDATE;
  IF s.id IS NULL OR s.payment_channel IS DISTINCT FROM 'stripe' OR s.payment_mode IS DISTINCT FROM 'test'
   OR s.merchant_namespace IS DISTINCT FROM p_merchant OR s.stripe_subscription_id IS NOT NULL
-  OR p_cancel_at_period_end IS NULL OR p_canceled IS NULL
+  OR p_cancel_at_period_end IS NULL OR p_canceled IS NULL OR p_user_canceled IS NULL OR (p_user_canceled AND NOT p_canceled)
   OR NOT EXISTS(SELECT 1 FROM payment_orders WHERE subscription_id=s.id AND payment_channel='stripe'
     AND payment_method IN ('card','card_cn') AND auto_renew AND fulfilled_at IS NOT NULL) THEN
   RAISE EXCEPTION 'PAY_STRIPE_MP_RENEW_SCOPE'; END IF;
  -- A final cancellation is permanent: a late "updated" event can never reopen it.
  IF s.status='canceled' THEN RETURN jsonb_build_object('status','canceled','duplicate',true); END IF;
+ -- A cancellation the buyer asked for (Link / portal; Stripe reason cancellation_requested) is an opt-out:
+ -- recorded like a Waffo cancel request, so pay_waffo_founder_deadline gives no founder renewal window.
  UPDATE user_subscriptions SET status=CASE WHEN p_canceled THEN 'canceled' ELSE status END,
+  method_cancel_requested_at=CASE WHEN p_user_canceled THEN coalesce(method_cancel_requested_at,clock_timestamp())
+   ELSE method_cancel_requested_at END,
   cancel_at_period_end=CASE WHEN p_canceled OR p_cancel_at_period_end THEN 'true' ELSE 'false' END
   WHERE id=s.id RETURNING * INTO s;
  -- Final cancellation: the cached level (read by purchase admission) drops to the highest level still held:
@@ -150,11 +156,11 @@ END $$;
 REVOKE ALL ON FUNCTION public.pay_stripe_mp_renew_subscription(uuid,text,text,integer,text,timestamptz,timestamptz,timestamptz)
  FROM PUBLIC,anon,authenticated;
 REVOKE ALL ON FUNCTION public.pay_stripe_mp_record_renewal_failure(uuid,text,text,timestamptz) FROM PUBLIC,anon,authenticated;
-REVOKE ALL ON FUNCTION public.pay_stripe_mp_sync_subscription(uuid,text,boolean,boolean) FROM PUBLIC,anon,authenticated;
+REVOKE ALL ON FUNCTION public.pay_stripe_mp_sync_subscription(uuid,text,boolean,boolean,boolean) FROM PUBLIC,anon,authenticated;
 GRANT EXECUTE ON FUNCTION public.pay_stripe_mp_renew_subscription(uuid,text,text,integer,text,timestamptz,timestamptz,timestamptz)
  TO service_role;
 GRANT EXECUTE ON FUNCTION public.pay_stripe_mp_record_renewal_failure(uuid,text,text,timestamptz) TO service_role;
-GRANT EXECUTE ON FUNCTION public.pay_stripe_mp_sync_subscription(uuid,text,boolean,boolean) TO service_role;
+GRANT EXECUTE ON FUNCTION public.pay_stripe_mp_sync_subscription(uuid,text,boolean,boolean,boolean) TO service_role;
 
 -- 24-hour renewal grace (0214) and founder deadline (0211) for Stripe card / card_cn subscriptions.
 DO $grace$
