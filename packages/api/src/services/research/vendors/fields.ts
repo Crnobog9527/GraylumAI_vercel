@@ -23,9 +23,23 @@ export function first(value: unknown, paths: readonly string[]): unknown {
   return undefined;
 }
 
+/** Try each path in order and keep the first one that yields a valid value (e.g. `views` is an object, `views.count` a number). */
+function firstValid<T>(value: unknown, paths: readonly string[], read: (found: unknown) => T | undefined): T | undefined {
+  for (const dotted of paths) {
+    const found = get(value, dotted);
+    if (found === undefined) continue;
+    const parsed = read(found);
+    if (parsed !== undefined) return parsed;
+  }
+  return undefined;
+}
+
 /** Non-negative finite numbers or plain numeric strings; anything else is missing. */
 export function count(value: unknown, paths: readonly string[]): number | undefined {
-  const found = first(value, paths);
+  return firstValid(value, paths, readCount);
+}
+
+function readCount(found: unknown): number | undefined {
   if (typeof found === 'number' && Number.isFinite(found) && found >= 0) return found;
   if (typeof found === 'string' && /^\d+(\.\d+)?$/.test(found.trim())) {
     const parsed = Number(found);
@@ -48,8 +62,10 @@ export function displayCount(value: unknown, paths: readonly string[]): number |
 
 /** Epoch seconds, epoch milliseconds or an absolute date string → ISO. Relative labels are missing. */
 export function timestamp(value: unknown, paths: readonly string[]): string | undefined {
-  const found = first(value, paths);
-  if (found === undefined) return undefined;
+  return firstValid(value, paths, readTimestamp);
+}
+
+function readTimestamp(found: unknown): string | undefined {
   let ms: number | undefined;
   if (typeof found === 'number' || (typeof found === 'string' && /^\d{9,13}$/.test(found))) {
     const numeric = Number(found);
@@ -64,7 +80,10 @@ export function timestamp(value: unknown, paths: readonly string[]): string | un
 
 /** Text values; whitespace-only strings count as not provided. */
 export function text(value: unknown, paths: readonly string[]): string | undefined {
-  const found = first(value, paths);
+  return firstValid(value, paths, readText);
+}
+
+function readText(found: unknown): string | undefined {
   if (typeof found === 'string') return found.trim() === '' ? undefined : found;
   if (typeof found === 'number' || typeof found === 'boolean') return String(found);
   return undefined;

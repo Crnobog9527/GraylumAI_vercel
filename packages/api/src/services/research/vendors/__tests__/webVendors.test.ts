@@ -30,6 +30,7 @@ describe('official usage parsing', () => {
     const { count } = await import('../fields');
     expect(count({ n: '9'.repeat(400) }, ['n'])).toBeUndefined();
     expect(count({ n: '12' }, ['n'])).toBe(12);
+    expect(count({ views: { count: '123' } }, ['views', 'views.count'])).toBe(123);
     const { displayCount } = await import('../fields');
     expect(displayCount({ v: '343,369 views' }, ['v'])).toBe(343369);
     for (const bad of [', views', '1,,2 views', '12,34 views', `${'9'.repeat(400)} views`, '1.2M views']) {
