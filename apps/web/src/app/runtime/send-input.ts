@@ -48,6 +48,15 @@ export function forgetPending(storage: DraftStorage, sessionId: string) {
   storage.removeItem(pendingKey(sessionId));
 }
 
+/**
+ * After an error whose outcome is unknown (the server may have stored the send and only the reply was lost):
+ * the text is back in the box, but the record and its request id stay until the server history settles it.
+ */
+export function markPendingRestored(storage: DraftStorage, sessionId: string) {
+  const pending = readPending(storage, sessionId);
+  if (pending) storage.setItem(pendingKey(sessionId), JSON.stringify({ ...pending, restored: true }));
+}
+
 export function readPending(storage: DraftStorage, sessionId: string): PendingSend | null {
   try {
     const value = JSON.parse(storage.getItem(pendingKey(sessionId)) ?? 'null');
@@ -88,8 +97,11 @@ export function settlePending(storage: DraftStorage, sessionId: string,
   const pending = readPending(storage, sessionId);
   if (!pending) return;
   if (pendingWasStored(pending, history)) {
+    // Save the draft without the sent text first; only then is the record (the request id) safe to drop.
+    const saved = withoutSent(storage.getItem(draftKey(sessionId)) ?? '', pending.text);
+    if (saved) storage.setItem(draftKey(sessionId), saved);
+    else storage.removeItem(draftKey(sessionId));
     forgetPending(storage, sessionId);
-    forgetSentDraft(storage, draftKey(sessionId), pending.text);
     setInput(current => withoutSent(current, pending.text));
     return;
   }

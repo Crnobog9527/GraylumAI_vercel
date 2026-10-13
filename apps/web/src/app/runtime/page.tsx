@@ -15,7 +15,8 @@ import { ContentErasureDialog } from '@/components/opc/content-erasure-dialog';
 import composerStyles from '@/components/opc/work-composer.module.css';
 import workStyles from './runtime-work.module.css';
 import {
- clearForSend, forgetPending, forgetSentDraft, openingDraft, readPending, rememberPending, requestIdFor, settlePending,
+ clearForSend, forgetPending, forgetSentDraft, markPendingRestored, openingDraft, readPending, rememberPending, requestIdFor,
+ settlePending,
 } from './send-input';
 import { QueryNotice } from '@/components/opc/query-notice';
 import { trpc } from '@/trpc/client';
@@ -165,11 +166,12 @@ function RuntimeWorkspace({routeSession,routeModule}:{routeSession:string;routeM
   if(!scriptRequest)setOutgoing({text:submitted});
   // Only the visible box empties now; the saved draft stays until the server stores the message.
   rememberPending(localStorage,sessionId,{requestId,text:submitted,input:requestInput});
-  restoreInput=clearForSend(setInput,submitted,text=>{localStorage.setItem('opc-runtime-input:'+sessionId,text);forgetPending(localStorage,sessionId);});
+  restoreInput=clearForSend(setInput,submitted,text=>{localStorage.setItem('opc-runtime-input:'+sessionId,text);markPendingRestored(localStorage,sessionId);});
   const admitted=await prepare.mutateAsync({sessionId,requestId,input:requestInput,selection:selected,network:'deny',sources:[]});
   if(!alive.current)return;
   // Q1: the previous organizer answered instead; this message was not stored. Input and request id stay.
-  if(!payg.admitted(admitted)){setOutgoing(null);restoreInput();await view.refetch();return;}
+  // A definite refusal: nothing was stored, so the record can go.
+  if(!payg.admitted(admitted)){setOutgoing(null);restoreInput();forgetPending(localStorage,sessionId);await view.refetch();return;}
   stored=true;setOutgoing(old=>old&&{...old,executionId:admitted.executionId});
   void utils.opc.conversations.invalidate();
   sessionStorage.removeItem('opc-runtime-send:'+sessionId);
@@ -178,7 +180,8 @@ function RuntimeWorkspace({routeSession,routeModule}:{routeSession:string;routeM
   const executed=await execute.mutateAsync({executionId:admitted.executionId});
   if(alive.current){if('unavailable' in executed&&executed.unavailable==='capacity'){markCapacity(admitted.executionId);setError('本次必要材料超过模型输入容量。原请求和已完成内容已保留；请点“停止”后缩短材料再发送。');}await Promise.all([view.refetch(),utils.opc.conversations.invalidate()]);}
  }catch(cause){if(!alive.current)return;const gate=runtimeAdmissionNotice(cause);
-  setOutgoing(old=>old?.executionId?old:null); // Not admitted: the text goes back into the box.
+  setOutgoing(old=>old?.executionId?old:null); // Not confirmed: the text goes back into the box.
+  // The outcome may be unknown (reply lost), so the record and request id stay for the history check.
   if(!stored)restoreInput();
   if(isOrganizerPendingError(cause)){payg.block();await view.refetch();return;}
   setError(gate??'请求状态待核实。请读取原任务状态，不要重新发送相同内容。');await view.refetch();}}

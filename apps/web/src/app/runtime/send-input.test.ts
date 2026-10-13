@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { expect, it } from 'vitest';
 import {
-  clearForSend, forgetSentDraft, openingDraft, pendingWasStored, readPending, rememberPending, requestIdFor, restoredDraft,
+  clearForSend, forgetSentDraft, markPendingRestored, openingDraft, pendingWasStored, readPending, rememberPending, requestIdFor, restoredDraft,
   settlePending, withoutSent,
 } from './send-input';
 
@@ -96,4 +96,34 @@ it('opens with the plain draft and ignores a broken pending record', () => {
   storage.setItem('opc-runtime-pending:s', 'not json');
   expect(openingDraft(storage, 's')).toBe('草稿');
   expect(readPending(storage, 's')).toBeNull();
+});
+
+it('keeps the request id after an error with an unknown outcome, so a resend from any link replays', () => {
+  const storage = memoryStorage();
+  rememberPending(storage, 's', { requestId: 'r1', text: '第一条消息', input: '第一条消息' }, T0);
+  // prepare failed without an answer (it may have been stored): text back in the box, record kept.
+  storage.setItem('opc-runtime-input:s', '第一条消息');
+  markPendingRestored(storage, 's');
+  expect(readPending(storage, 's')).toMatchObject({ requestId: 'r1', restored: true });
+  // Reopened without ?request=: no second copy is merged in, and resending the same text reuses r1.
+  const box = { value: openingDraft(storage, 's') };
+  settlePending(storage, 's', [], f => { box.value = f(box.value); });
+  expect(box.value).toBe('第一条消息');
+  expect(requestIdFor(null, readPending(storage, 's'), '第一条消息', () => 'fresh')).toBe('r1');
+});
+
+it('saves the draft without the sent text before dropping the record when history later shows it stored', () => {
+  const storage = memoryStorage();
+  rememberPending(storage, 's', { requestId: 'r1', text: '第一条消息', input: '第一条消息' }, T0);
+  storage.setItem('opc-runtime-input:s', '新的草稿');
+  const box = { value: openingDraft(storage, 's') };
+  const set = (f: (v: string) => string) => { box.value = f(box.value); };
+  settlePending(storage, 's', [], set); // first poll: not there yet, so it is put back in front
+  expect(storage.map.get('opc-runtime-input:s')).toBe('第一条消息\n\n新的草稿');
+  settlePending(storage, 's', [{ input: '第一条消息', createdAt: at(1000) }], set); // a later poll finds it
+  expect(box.value).toBe('新的草稿');
+  expect(storage.map.get('opc-runtime-input:s')).toBe('新的草稿');
+  expect(storage.map.has('opc-runtime-pending:s')).toBe(false);
+  // A reload now opens only the new draft; the sent text cannot come back without its request id.
+  expect(openingDraft(storage, 's')).toBe('新的草稿');
 });
