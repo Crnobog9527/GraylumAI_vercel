@@ -27,5 +27,9 @@ node packages/db/tests/payg/run-local.mjs --local-only
 - 计费投影允许/拒绝权限、平台承担和实际/名义差额恒等式。
 - grant 过期、逆转、终止、隔离；混合模型倍数、充值不补收 E、大小和缺字段边界；直接验证 quote 缺失或 NULL 的输入/输出/context 上限会拒绝。
 
+- FUSION-REVIEW 计费组（0234，`fusion-group.mjs`）：整组余额不够时一个调用都不建、够时各单满额冻结；重复组领取幂等、换内容冲突；
+  普通领取拒绝 Fusion 用途和组内运行单；没有判定不结算、判定只写一次；两连接并发结算组内运行单，总扣费等于 ceil(组累计×q)；
+  未结算运行单不挡其他运行单；format_invalid 零收费全退；注销后组内全部运行单零收费结算；入组后不能改组。
+
 所有身份、余额、门槛、模型与价格均为每次本地建库的合成 fixture，v2 不接入默认 Runtime。
 结构指纹提交仍使用工程规范要求的 `run-db-baseline-replay.mjs --local-only --write-built`。
