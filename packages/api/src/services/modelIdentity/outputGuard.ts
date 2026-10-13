@@ -12,6 +12,9 @@ const BRAND = String.raw`(?:claude|anthropic|chat\s?gpt|gpt(?:[-\s]?\d[\w.]*)?|o
   + String.raw`deepseek|深度求索|llama|meta\s?ai|mistral|grok|x\.?ai|文心一言|百度|kimi|月之暗面|豆包|字[节節]跳[动動]|位元組跳動|智[谱譜]|chatglm|glm|混元|[腾騰][讯訊]|`
   + String.raw`谷歌|微软|microsoft|copilot)`;
 const ZH_GAP = '[^。！？!?.\\n，,；;]';
+// Who made the speaker: maker wording ("trained by"), or "from" right after the model noun. A nearby
+// source ("analyze data from Google") is ordinary copy (review P2).
+const MAKER = String.raw`(?:[^.!?\n]{0,40}?\b(?:built|developed|trained|made|created|designed|powered|provided)\s+by|\s+from)`;
 // The model noun must name the speaker: it ends the clause or continues with identity wording, so
 // "I am a Google AI researcher" or "a model photographer" stay ordinary copy (review P2).
 const ROLE_END = String.raw`\b(?=\s*(?:[,.!?;:]|$)|\s+(?:by|from|developed|trained|made|created|built|that|which|and|here)\b)`;
@@ -41,7 +44,7 @@ const PATTERNS = [
   `作[为為]\\s*(?:一[个個]|一款)?\\s*${FROM}\\s*${BRAND}\\s*(?:公司)?${ZH_GAP}{0,10}?(?:${MADE}|的${ZH_GAP}{0,6}?(?:模型|助手|AI))`,
   // As ChatGPT, I can help / As an AI assistant developed by OpenAI / As a GPT-4 based model (review P1)
   String.raw`\bAs\s+${BRAND}\b[^.!?\n]{0,6}?,\s*(?:I|my)\b`,
-  String.raw`\bAs\s+(?:an?|the)\s+(?:[\w-]+\s+){0,4}(?:model|AI|assistant|chatbot|LLM)\b[^.!?\n]{0,40}?\b(?:by|from)\s+${BRAND}`,
+  String.raw`\bAs\s+(?:an?|the)\s+(?:[\w-]+\s+){0,4}(?:model|AI|assistant|chatbot|LLM)\b${MAKER}\s+${BRAND}`,
   String.raw`\bAs\s+(?:an?|the)\s+${BRAND}[\w.-]*(?:\s+[\w-]+){0,2}?\s+(?:model|AI|assistant|chatbot|LLM)${ROLE_END}`,
   // I am Claude / I'm ChatGPT / I am called Gemini
   String.raw`\bI(?:'m|’m|\s+am)\s+(?:called\s+|actually\s+)?${BRAND}${VERSION}${EN_END}`,
@@ -49,7 +52,7 @@ const PATTERNS = [
   // model noun, so copy such as "I am a Google Ads specialist" stays untouched (review P2).
   String.raw`\bI(?:'m|’m|\s+am)\s+(?:an?|the)\s+${BRAND}[\w.-]*(?:\s+[\w-]+){0,2}?\s+(?:model|AI|assistant|chatbot|LLM)${ROLE_END}`,
   // I am a large language model trained by Google / I'm an AI assistant made by Anthropic
-  String.raw`\bI(?:'m|’m|\s+am)\s+(?:an?\s+|the\s+)?(?:[\w-]+\s+){0,4}(?:model|AI|assistant|chatbot|LLM)\b[^.!?\n]{0,40}?\b(?:by|from)\s+${BRAND}`,
+  String.raw`\bI(?:'m|’m|\s+am)\s+(?:an?\s+|the\s+)?(?:[\w-]+\s+){0,4}(?:model|AI|assistant|chatbot|LLM)\b${MAKER}\s+${BRAND}`,
   // I was trained by OpenAI / I've been developed by Anthropic
   String.raw`\bI(?:\s+was|\s+have\s+been|'ve\s+been|’ve\s+been)\s+(?:created|trained|developed|built|made|designed)\s+by\s+${BRAND}`,
   // My underlying model is GPT-4

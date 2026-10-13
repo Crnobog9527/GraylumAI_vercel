@@ -40,6 +40,7 @@ const LEAKS_EN = [
   'I am called Gemini.',
   "I'm Claude 3 Opus.",
   'I am Gemini 2.0 Flash, a model by Google.',
+  "I'm a language model from OpenAI.",
   'I’m Claude.',
   // Review P1: articles before the vendor
   'I am a GPT-4 model.',
@@ -92,6 +93,9 @@ const SAFE = [
   'I am a Google AI researcher building tools for creators.',
   'I am an OpenAI model photographer.',
   'As a Google AI researcher, I share notes weekly.',
+  // Review P2: a nearby source is not the maker
+  'I am an AI assistant helping you analyze data from Google.',
+  'As an AI assistant, I pulled these recommendations from Google Trends.',
   BRAND_REPLY_ZH,
   BRAND_REPLY_ZH_HANT,
   BRAND_REPLY_EN,
