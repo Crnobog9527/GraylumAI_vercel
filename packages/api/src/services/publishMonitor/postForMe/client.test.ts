@@ -167,6 +167,14 @@ describe('post for me client', () => {
     const yt = await readFeedPage(deps([json(200, { data: [{ platform_post_id: 'v9', caption: 'long description',
       platform_data: { title: 'Video title' } }], meta: {} })]).deps, 'spc_3', 'youtube');
     expect(yt.kind === 'ok' && yt.value.posts[0]!.titleExcerpt).toBe('Video title');
+    const viaNext = await readFeedPage(deps([json(200, { data: [], meta: { cursor: 'c9', next: 'https://api.postforme.dev/n' } })])
+      .deps, 'spc_1', 'x');
+    expect(viaNext.kind === 'ok' && [viaNext.value.hasMore, viaNext.value.nextCursor]).toEqual([true, 'c9']);
+    expect(await readFeedPage(deps([json(200, { data: [], meta: { has_more: true } })]).deps, 'spc_1', 'x'))
+      .toMatchObject({ kind: 'failed', reason: 'RESPONSE_SHAPE' });
+    const done = await readFeedPage(deps([json(200, { data: [], meta: { has_more: false, cursor: 'c9', next: 'x' } })]).deps,
+      'spc_1', 'x');
+    expect(done.kind === 'ok' && done.value.hasMore).toBe(false);
     const bad = await readFeedPage(deps([json(200, { posts: [] })]).deps, 'spc_1', 'x');
     expect(bad).toMatchObject({ kind: 'failed', reason: 'RESPONSE_SHAPE' });
     // Measured: an unknown account answers 500, which must stay "not fetched", not "no posts".

@@ -32,6 +32,7 @@ const feedPage = z.object({
   meta: z.object({
     cursor: z.string().max(2048).nullable().optional(),
     has_more: z.boolean().optional(),
+    next: z.string().max(4096).nullable().optional(),
   }).passthrough(),
 }).passthrough();
 
@@ -146,7 +147,11 @@ export function normalizeFeedPage(json: unknown, platform: string): FeedPage | n
     const post = normalizePost(raw, platform);
     if (post) posts.push(post); else rejected += 1;
   }
-  const hasMore = parsed.data.meta.has_more === true;
-  const nextCursor = hasMore ? parsed.data.meta.cursor ?? null : null;
-  return { posts, rejected, nextCursor, hasMore: hasMore && nextCursor !== null };
+  // has_more is optional in the provider schema; when absent, a non-null next link means more pages.
+  const meta = parsed.data.meta;
+  const hasMore = meta.has_more ?? (typeof meta.next === 'string' && meta.next.length > 0);
+  const nextCursor = hasMore ? meta.cursor ?? null : null;
+  // Claiming more pages without a cursor to fetch them is inconsistent: not a trustworthy page.
+  if (hasMore && nextCursor === null) return null;
+  return { posts, rejected, nextCursor, hasMore };
 }
