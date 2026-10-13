@@ -91,7 +91,7 @@ const ACCOUNT_PATTERNS: Record<AccountId, RegExp> = {
   // Platform username rules; anything else cannot exist there and must not cost a call.
   tiktok_handle: /^(?!.*\.$)[A-Za-z0-9._]{2,24}$/,
   x_handle: /^[A-Za-z0-9_]{1,15}$/,
-  instagram_handle: /^[A-Za-z0-9._]{1,30}$/,
+  instagram_handle: /^(?!\.)(?!.*\.\.)(?!.*\.$)[A-Za-z0-9._]{1,30}$/,
   numeric: /^\d{1,20}$/,
   youtube_channel: /^UC[A-Za-z0-9_-]{22}$/,
 };

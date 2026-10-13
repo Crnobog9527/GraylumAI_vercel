@@ -40,6 +40,9 @@ describe('TikHub routes', () => {
     expect('request' in buildTikhubRequest({ platform: 'tiktok', kind: 'account_profile', account: 'nat.geo' })).toBe(true);
     expect(buildTikhubRequest({ platform: 'instagram', kind: 'account_posts', account: 'a-b' })).toEqual({ reason: 'INVALID_ACCOUNT' });
     expect('request' in buildTikhubRequest({ platform: 'instagram', kind: 'account_posts', account: 'nat.geo_1' })).toBe(true);
+    for (const bad of ['.natgeo', 'natgeo.', 'nat..geo']) {
+      expect(buildTikhubRequest({ platform: 'instagram', kind: 'account_posts', account: bad })).toEqual({ reason: 'INVALID_ACCOUNT' });
+    }
     expect('request' in buildTikhubRequest({ platform: 'youtube', kind: 'account_profile', account: 'UCLA_DiR1FfKNvjuUpBHmylQ' })).toBe(true);
     const result = await callTikhub({ platform: 'xiaohongshu', kind: 'account_posts', account: 'x' }, deps(fetchImpl));
     expect(result).toMatchObject({ outcome: 'not_sent', reason: 'ROUTE_NOT_SUPPORTED', supplierMayCharge: false });
