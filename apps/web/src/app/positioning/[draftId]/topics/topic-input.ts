@@ -37,6 +37,8 @@ export function useTopicInput(inputKey: string) {
   const reread = () => {
     if (putBackKey) putBackIds.current = readPutBack(localStorage, putBackKey);
   };
+  // The draft is shared by every tab on this draft; edit the saved copy, not this tab's possibly stale state.
+  const shared = (current: string) => (inputKey ? localStorage.getItem(inputKey) : null) ?? current;
   const remember = () => {
     if (!putBackKey) return;
     if (putBackIds.current.size) localStorage.setItem(putBackKey, JSON.stringify([...putBackIds.current]));
@@ -65,7 +67,7 @@ export function useTopicInput(inputKey: string) {
       putBackIds.current.add(requestId);
       remember();
       setInput(current => {
-        const next = restoredDraft(current, text);
+        const next = restoredDraft(shared(current), text);
         save(next);
         return next;
       });
@@ -76,7 +78,7 @@ export function useTopicInput(inputKey: string) {
       if (!putBackIds.current.delete(requestId)) return;
       remember();
       setInput(current => {
-        const next = withoutPutBack(current, text);
+        const next = withoutPutBack(shared(current), text);
         save(next);
         return next;
       });
