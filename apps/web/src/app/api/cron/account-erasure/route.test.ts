@@ -14,7 +14,7 @@ beforeEach(() => {
   vi.stubEnv('SUPABASE_SERVICE_ROLE_KEY', 'synthetic-service-value');
   mocks.create.mockReturnValue({ synthetic: true });
   mocks.recover.mockResolvedValue({ processed: 1, completed: 1, pending: 0, failed: 0 });
-  mocks.sweep.mockResolvedValue({ cleaned: 2, pending: 0 });
+  mocks.sweep.mockResolvedValue({ cleaned: 2, pending: 0, failed: 0, more: false });
 });
 it('denies unauthenticated cron before inventory or provider work', async () => {
   mocks.auth.mockReturnValue(new Response('Unauthorized', { status: 401 }));
@@ -28,13 +28,22 @@ it('runs the bounded recovery through the existing authenticated cron entry', as
   expect(mocks.recover).toHaveBeenCalledWith({ synthetic: true });
   expect(mocks.sweep).toHaveBeenCalledWith({ synthetic: true });
   expect(await response.json()).toEqual({ success: true, processed: 1, completed: 1, pending: 0, failed: 0,
-    conversations: { cleaned: 2, pending: 0 } });
+    conversations: { cleaned: 2, pending: 0, failed: 0, more: false } });
 });
 it('sweeps deleted conversations; a busy one stays pending without failing the run', async () => {
-  mocks.sweep.mockResolvedValue({ cleaned: 1, pending: 1 });
+  mocks.sweep.mockResolvedValue({ cleaned: 1, pending: 1, failed: 0, more: false });
   const response = await GET(new Request('https://synthetic.test/api/cron/account-erasure'));
   expect(response.status).toBe(200);
-  expect((await response.json()).conversations).toEqual({ cleaned: 1, pending: 1 });
+  expect((await response.json()).conversations).toEqual({ cleaned: 1, pending: 1, failed: 0, more: false });
+});
+it.each([
+  [{ cleaned: 0, pending: 0, failed: 1, more: false }, 'a permanent cleanup failure'],
+  [{ cleaned: 50, pending: 0, failed: 0, more: true }, 'a backlog left after the time budget'],
+])('fails the run for %s', async (conversations) => {
+  mocks.sweep.mockResolvedValue(conversations);
+  const response = await GET(new Request('https://synthetic.test/api/cron/account-erasure'));
+  expect(response.status).toBe(500);
+  expect((await response.json())).toMatchObject({ success: false, conversations });
 });
 it('reports a failed conversation sweep as a sanitized failure', async () => {
   mocks.sweep.mockRejectedValue(new Error('synthetic private diagnostic'));
@@ -58,7 +67,7 @@ it('reports cleanup retry as pending rather than success', async () => {
   const response = await GET(new Request('https://synthetic.test/api/cron/account-erasure'));
   expect(response.status).toBe(500);
   expect(await response.json()).toEqual({ success: false, processed: 1, completed: 0, pending: 1, failed: 0,
-    conversations: { cleaned: 2, pending: 0 } });
+    conversations: { cleaned: 2, pending: 0, failed: 0, more: false } });
 });
 it('uses daily 05:00 UTC cleanup without overlapping existing cron schedules', () => {
   const config = JSON.parse(readFileSync('vercel.json', 'utf8'));

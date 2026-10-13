@@ -95,3 +95,30 @@ describe('one-click conversation deletion (Owner 2026-10-13: no impact list, 023
       .rejects.toMatchObject({ code: 'CONFLICT', message: 'CONTENT_ERASURE_PREVIEW_CHANGED' });
   });
 });
+
+describe('conversation cleanup sweep (cron backstop)', () => {
+  const page = (over: Record<string, unknown>) => ({ data: { cleaned: 0, pending: 0, failed: 0, more: false,
+    afterAt: null, afterId: null, ...over }, error: null });
+  it('pages with the cursor until the backlog is drained and sums the counts', async () => {
+    const { sweepErasedConversations } = await import('../services/accountErasure/content');
+    const cursor = { afterAt: '2026-10-13T00:00:00Z', afterId: id };
+    const rpc = vi.fn().mockResolvedValueOnce(page({ cleaned: 49, pending: 1, more: true, ...cursor }))
+      .mockResolvedValueOnce(page({ cleaned: 3, failed: 1 }));
+    await expect(sweepErasedConversations({ rpc } as never)).resolves.toEqual({ cleaned: 52, pending: 1, failed: 1, more: false });
+    expect(rpc.mock.calls[0][1]).toEqual({ lim: 50, after_at: null, after_id: null });
+    expect(rpc.mock.calls[1][1]).toEqual({ lim: 50, after_at: cursor.afterAt, after_id: id });
+  });
+  it('stops at the time budget and reports the backlog', async () => {
+    const { sweepErasedConversations } = await import('../services/accountErasure/content');
+    let clock = 0;
+    const rpc = vi.fn().mockImplementation(async () => { clock += 10_000; return page({ cleaned: 50, more: true,
+      afterAt: '2026-10-13T00:00:00Z', afterId: id }); });
+    await expect(sweepErasedConversations({ rpc } as never, 25_000, () => clock)).resolves.toMatchObject({ more: true });
+    expect(rpc).toHaveBeenCalledTimes(3);
+  });
+  it('throws a private error when the sweep itself fails', async () => {
+    const { sweepErasedConversations } = await import('../services/accountErasure/content');
+    const rpc = vi.fn().mockResolvedValue({ data: null, error: { message: 'private detail' } });
+    await expect(sweepErasedConversations({ rpc } as never)).rejects.toThrow('CONTENT_ERASURE_SWEEP_FAILED');
+  });
+});

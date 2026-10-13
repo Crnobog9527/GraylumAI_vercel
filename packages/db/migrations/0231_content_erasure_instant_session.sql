@@ -77,26 +77,34 @@ END $$;
 REVOKE ALL ON FUNCTION public.content_erasure_confirm(uuid,text,uuid,text) FROM PUBLIC,anon,authenticated;
 GRANT EXECUTE ON FUNCTION public.content_erasure_confirm(uuid,text,uuid,text) TO service_role;
 
--- Backstop for the cleanup the client starts: oldest marked sessions first, one
--- subtransaction each, so one busy session never blocks the rest. Closed accounts are
--- cleaned by account erasure instead.
-CREATE OR REPLACE FUNCTION public.content_erasure_sweep_sessions(lim integer)
+-- Backstop for the cleanup the client starts: oldest marked sessions first, one page per call
+-- after the caller's cursor, one subtransaction each. Only lock contention is "pending" (retried
+-- next run); any other failure is counted as failed so the cron run reports it. Closed accounts
+-- are cleaned by account erasure instead.
+CREATE OR REPLACE FUNCTION public.content_erasure_sweep_sessions(lim integer,after_at timestamptz,after_id uuid)
 RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
-DECLARE row record; cleaned integer:=0; pending integer:=0;
+DECLARE row record; cleaned integer:=0; pending integer:=0; failed integer:=0; seen integer:=0;
+ last_at timestamptz:=after_at; last_id uuid:=after_id;
 BEGIN
  IF lim IS NULL OR lim<1 OR lim>200 THEN RAISE EXCEPTION 'CONTENT_ERASURE_SWEEP_LIMIT' USING ERRCODE='22023'; END IF;
- FOR row IN SELECT s.id,s.actor_id FROM runtime_sessions s
+ IF (after_at IS NULL)<>(after_id IS NULL) THEN RAISE EXCEPTION 'CONTENT_ERASURE_SWEEP_CURSOR' USING ERRCODE='22023'; END IF;
+ FOR row IN SELECT s.id,s.actor_id,s.content_deleted_at FROM runtime_sessions s
   WHERE s.content_deleted_at IS NOT NULL AND s.erased_at IS NULL
+   AND (after_at IS NULL OR (s.content_deleted_at,s.id)>(after_at,after_id))
    AND NOT EXISTS(SELECT 1 FROM account_erasure_requests r WHERE r.profile_id=s.actor_id)
   ORDER BY s.content_deleted_at,s.id LIMIT lim LOOP
+  seen:=seen+1; last_at:=row.content_deleted_at; last_id:=row.id;
   BEGIN
    PERFORM content_erasure_confirm(row.actor_id,'session',row.id,NULL);
    cleaned:=cleaned+1;
-  EXCEPTION WHEN OTHERS THEN
+  EXCEPTION WHEN lock_not_available OR deadlock_detected THEN
    pending:=pending+1;
+  WHEN OTHERS THEN
+   failed:=failed+1;
   END;
  END LOOP;
- RETURN jsonb_build_object('cleaned',cleaned,'pending',pending);
+ RETURN jsonb_build_object('cleaned',cleaned,'pending',pending,'failed',failed,'more',seen=lim,
+  'afterAt',last_at,'afterId',last_id);
 END $$;
-REVOKE ALL ON FUNCTION public.content_erasure_sweep_sessions(integer) FROM PUBLIC,anon,authenticated;
-GRANT EXECUTE ON FUNCTION public.content_erasure_sweep_sessions(integer) TO service_role;
+REVOKE ALL ON FUNCTION public.content_erasure_sweep_sessions(integer,timestamptz,uuid) FROM PUBLIC,anon,authenticated;
+GRANT EXECUTE ON FUNCTION public.content_erasure_sweep_sessions(integer,timestamptz,uuid) TO service_role;

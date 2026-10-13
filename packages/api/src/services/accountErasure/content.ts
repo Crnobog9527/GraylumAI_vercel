@@ -96,12 +96,31 @@ export async function cleanUpConversation(database: Database | null | undefined,
   if (!parsed.success || parsed.data.id !== sessionId || parsed.data.kind !== 'session') fail(null);
   return { cleaned: true };
 }
-const sweepResult = z.object({ cleaned: z.number().int().nonnegative(), pending: z.number().int().nonnegative() }).strict();
-/** Cron backstop (0231): cleans marked conversations the client did not finish. Busy ones stay pending. */
-export async function sweepErasedConversations(database: Database, limit = 50) {
-  const response = await database.rpc('content_erasure_sweep_sessions', { lim: limit });
-  if (response.error) throw new Error('CONTENT_ERASURE_SWEEP_FAILED');
-  return sweepResult.parse(response.data);
+const sweepPage = z.object({
+  cleaned: z.number().int().nonnegative(), pending: z.number().int().nonnegative(), failed: z.number().int().nonnegative(),
+  more: z.boolean(), afterAt: z.string().nullable(), afterId: z.string().uuid().nullable(),
+}).strict();
+export type ConversationSweep = { cleaned: number; pending: number; failed: number; more: boolean };
+/**
+ * Cron backstop (0231): pages through every marked conversation the client did not finish, until the
+ * backlog is drained or the time budget ends (`more` then stays true and the run reports it).
+ * Busy conversations stay pending for the next run; any other failure is counted as failed.
+ */
+export async function sweepErasedConversations(database: Database, budgetMs = 25_000, now = () => Date.now()) {
+  const deadline = now() + budgetMs;
+  const total: ConversationSweep = { cleaned: 0, pending: 0, failed: 0, more: false };
+  let cursor: { afterAt: string | null; afterId: string | null } = { afterAt: null, afterId: null };
+  do {
+    const response = await database.rpc('content_erasure_sweep_sessions', {
+      lim: 50, after_at: cursor.afterAt, after_id: cursor.afterId,
+    });
+    if (response.error) throw new Error('CONTENT_ERASURE_SWEEP_FAILED');
+    const page = sweepPage.parse(response.data);
+    total.cleaned += page.cleaned; total.pending += page.pending; total.failed += page.failed;
+    total.more = page.more;
+    cursor = page;
+  } while (total.more && now() < deadline);
+  return total;
 }
 /** Recheck before returning buffered text/results. No positive cache survives a
  * deletion. The existing invocation still completes its original money recovery. */

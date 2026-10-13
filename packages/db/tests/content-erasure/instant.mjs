@@ -21,7 +21,7 @@ export async function runInstant({db,Client,connectionString,report}){
   for(const role of ['anon','authenticated']){
    await db.query('SET ROLE '+role);
    await assert.rejects(mark(db,f),/permission denied/);
-   await assert.rejects(rpc(db,'content_erasure_sweep_sessions',10),/permission denied/);
+   await assert.rejects(rpc(db,'content_erasure_sweep_sessions',10,null,null),/permission denied/);
    await db.query('RESET ROLE');
   }
   const other=await fixture(db);
@@ -89,21 +89,36 @@ export async function runInstant({db,Client,connectionString,report}){
   assert.doesNotMatch(JSON.stringify(await row(db,'runtime_executions',p.execution)),/LATE_PRIVATE_RESULT/);
   report.checks.push('same conversation generating: late result and history refused after mark; money recorded on original run');
 
-  // Sweep: the cron backstop cleans marked sessions, skips closed accounts, survives busy ones.
+  // Sweep: the cron backstop pages through marked sessions, skips closed accounts, keeps busy ones pending
+  // and counts any other failure as failed.
   const s1=await runtimeFixture(db,{settled:true}),s2=await runtimeFixture(db,{settled:true}),s3=await runtimeFixture(db,{settled:true});
-  for(const x of [s1,s2,s3])await mark(db,x);
+  const s4=await runtimeFixture(db,{settled:true});
+  for(const x of [s1,s2,s3,s4])await mark(db,x);
   await closeAccount(db,s3);
+  const sweep=(lim,cursor)=>rpc(db,'content_erasure_sweep_sessions',lim,cursor?.afterAt??null,cursor?.afterId??null);
+  await assert.rejects(sweep(0),/SWEEP_LIMIT/);
+  await assert.rejects(rpc(db,'content_erasure_sweep_sessions',1,new Date().toISOString(),null),/SWEEP_CURSOR/);
   await locker.query('BEGIN');await locker.query('SELECT id FROM runtime_executions WHERE id=$1 FOR UPDATE',[s2.execution]);
-  await assert.rejects(rpc(db,'content_erasure_sweep_sessions',0),/SWEEP_LIMIT/);
-  const first=await rpc(db,'content_erasure_sweep_sessions',200);
+  // A permanent failure (not lock contention) in s4's cleanup.
+  await db.query(`CREATE FUNCTION public.zz_fail_s4() RETURNS trigger LANGUAGE plpgsql AS $$BEGIN
+   IF NEW.id='${s4.session}' AND NEW.erased_at IS NOT NULL THEN RAISE EXCEPTION 'synthetic permanent failure'; END IF;
+   RETURN NEW;END$$`);
+  await db.query('CREATE TRIGGER zz_fail_s4 BEFORE UPDATE ON runtime_sessions FOR EACH ROW EXECUTE FUNCTION public.zz_fail_s4()');
+  let cursor=null;const totals={cleaned:0,pending:0,failed:0};let pages=0;
+  do{const page=await sweep(1,cursor);pages++;for(const k of Object.keys(totals))totals[k]+=page[k];
+   cursor=page.more?page:null;}while(cursor&&pages<1000);
   await locker.query('ROLLBACK');
-  assert.ok(first.pending>=1,'busy session stays pending');
-  assert.ok((await row(db,'runtime_sessions',s1.session)).erased_at);
+  await db.query('DROP TRIGGER zz_fail_s4 ON runtime_sessions');await db.query('DROP FUNCTION public.zz_fail_s4()');
+  assert.ok(totals.pending>=1,'lock contention stays pending');
+  assert.ok(totals.failed>=1,'a permanent failure is reported, not hidden as pending');
+  assert.ok((await row(db,'runtime_sessions',s1.session)).erased_at,'paging reached every page');
   assert.equal((await row(db,'runtime_sessions',s2.session)).erased_at,null);
-  await rpc(db,'content_erasure_sweep_sessions',200);
-  assert.ok((await row(db,'runtime_sessions',s2.session)).erased_at,'retried on the next run');
+  assert.equal((await row(db,'runtime_sessions',s4.session)).erased_at,null);
+  cursor=null;do{const page=await sweep(200,cursor);cursor=page.more?page:null;}while(cursor);
+  assert.ok((await row(db,'runtime_sessions',s2.session)).erased_at,'busy one retried on the next run');
+  assert.ok((await row(db,'runtime_sessions',s4.session)).erased_at,'failed one retried once fixed');
   assert.equal((await row(db,'runtime_sessions',s3.session)).erased_at,null,'closed account left to account erasure');
   await rpc(db,'account_erasure_scrub_runtime',s3.actor);
-  report.checks.push('sweep: cleans marked sessions oldest first, busy retried next run, closed accounts skipped');
+  report.checks.push('sweep: pages by cursor, busy stays pending, permanent failures counted as failed, closed accounts skipped');
  }finally{await db.query('RESET ROLE');await locker.query('ROLLBACK');await locker.end();}
 }
