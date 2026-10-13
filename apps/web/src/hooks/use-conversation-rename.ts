@@ -3,6 +3,7 @@
 import { useCallback, useRef, useState } from 'react';
 import { trpc } from '@/trpc/client';
 import { getErrorMessageText } from '@/lib/safe-error-message';
+import { createRenameRevisions } from '@/lib/conversation-rename';
 
 const REFUSALS: Array<[string, string]> = [
   ['OPC_CONVERSATION_ERASED', '这个对话已删除，不能重命名。'],
@@ -26,6 +27,8 @@ export function useConversationRename() {
   const [error, setError] = useState('');
   // Saves of one conversation run in order; different conversations save independently.
   const queues = useRef(new Map<string, Promise<void>>());
+  // Latest edit per conversation: only that edit may roll the shown title back.
+  const revisions = useRef(createRenameRevisions());
 
   const start = useCallback((sessionId: string, title: string) => {
     setError('');
@@ -42,13 +45,15 @@ export function useConversationRename() {
     const setTitle = (title: string) => utils.opc.conversations.setData(undefined, (rows) =>
       rows?.map((row) => row.sessionId === sessionId ? { ...row, title } : row));
     if (name) setTitle(name);
+    const revision = revisions.current.next(sessionId);
     const run = async () => {
       try {
         await utils.client.opc.conversationRename.mutate({ sessionId, name });
         // An empty name restores the server's default title; refresh either way in the background.
         void utils.opc.conversations.invalidate();
       } catch (cause) {
-        setTitle(previous);
+        // A newer edit of the same conversation is queued or shown: keep its title.
+        if (revisions.current.isLatest(sessionId, revision)) setTitle(previous);
         setError(renameFailureMessage(cause));
         void utils.opc.conversations.invalidate();
       }
