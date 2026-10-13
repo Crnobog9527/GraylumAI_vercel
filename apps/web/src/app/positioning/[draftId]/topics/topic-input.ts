@@ -55,10 +55,13 @@ export function useTopicInput(inputKey: string) {
       setInput(value);
       if (inputKey) localStorage.setItem(inputKey, value);
     },
-    /** The message left the box; from here on the box and its draft hold only what is typed next. */
-    clearForSend() {
+    /**
+     * The message left the box; from here on the box and its draft hold only what is typed next. The shared draft is
+     * removed only while it is still this message: another tab may have saved a newer one, which stays.
+     */
+    clearForSend(text: string) {
       setInput('');
-      save('');
+      if (inputKey && (localStorage.getItem(inputKey) ?? '').trim() === text.trim()) localStorage.removeItem(inputKey);
     },
     /** Not stored (or held by a gate): the text goes back once per request, in front of any newer draft. */
     putBack(requestId: string, text: string) {

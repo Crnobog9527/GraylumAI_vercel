@@ -304,7 +304,7 @@ export default function TopicWorkspacePage() {
           return;
         }
         localStorage.setItem(storageKey, JSON.stringify(op));
-        setPending(op); if (fromBox && !raw) clearForSend();
+        setPending(op); if (fromBox && !raw && op.kind === 'chat') clearForSend(op.request.input);
         try {
           if (op.kind === 'chat') {
             setOutgoing({ text: op.request.input });
