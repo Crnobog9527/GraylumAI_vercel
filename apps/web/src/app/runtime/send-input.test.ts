@@ -93,3 +93,14 @@ it('opens with the plain draft and ignores a broken record', () => {
   expect(openingDraft(storage, 's')).toBe('草稿');
   expect(readPending(storage, 's')).toBeNull();
 });
+
+it('gives an edited resend a new id instead of the address id of the unanswered send', () => {
+  const storage = memoryStorage();
+  rememberPending(storage, 's', send('第一条消息'));
+  const pending = readPending(storage, 's');
+  expect(requestIdFor('r1', pending, '第一条消息', () => 'fresh')).toBe('r1'); // unchanged: replay
+  expect(requestIdFor('r1', pending, '第一条消息，改过', () => 'fresh')).toBe('fresh'); // edited: a new message
+  expect(requestIdFor('other', pending, '第一条消息，改过', () => 'fresh')).toBe('other'); // e.g. the new-task hand-off
+  expect(requestIdFor('from-url', null, '任何内容', () => 'fresh')).toBe('from-url');
+  expect(requestIdFor(null, null, '任何内容', () => 'fresh')).toBe('fresh');
+});

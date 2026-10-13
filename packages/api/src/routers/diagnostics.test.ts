@@ -98,6 +98,7 @@ function createHealthQueryBuilder(result: Promise<unknown>, admin = false) {
 const cleanupCalls: Array<[string, unknown]> = [];
 
 function createAdminCaller(options?: {
+  role?: string;
   batchResult?: { data: unknown; error: unknown };
   recentRunsResult?: { data: unknown; error: unknown };
   cleanupResult?: { count: number | null; error: unknown };
@@ -115,7 +116,7 @@ function createAdminCaller(options?: {
           ? {
               data: {
                 id: 'admin-user',
-                role: 'admin',
+                role: options?.role ?? 'admin',
                 status: 'active',
                 nickname: 'Admin',
                 email: 'admin@example.com',
@@ -382,5 +383,29 @@ describe('diagnosticsRouter error sanitization', () => {
         expect.objectContaining({ batchId: 'batch-2', testCount: 1 }),
       ],
     });
+  });
+});
+
+describe('diagnosticsRouter admin gate', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('lets an admin run all diagnostics, including the billing reconciliation', async () => {
+    diagnosticsServiceState.runAllTests.mockResolvedValueOnce({ batchId: 'batch-1', results: [] });
+    await expect(createAdminCaller().runAllTests()).resolves.toMatchObject({ batchId: 'batch-1' });
+    expect(diagnosticsServiceState.runAllTests).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects a regular user before any diagnostic (and its service-role reads) runs', async () => {
+    // Each caller resolves the profile once, so use a fresh one per request.
+    const caller = () => createAdminCaller({ role: 'user' });
+    await expect(caller().runAllTests()).rejects.toMatchObject({ code: 'FORBIDDEN' });
+    await expect(caller().runCategoryTests({ category: 'billing', runType: 'manual' }))
+      .rejects.toMatchObject({ code: 'FORBIDDEN' });
+    await expect(caller().runSingleTest({ testId: 'billing_reconcile' }))
+      .rejects.toMatchObject({ code: 'FORBIDDEN' });
+    expect(diagnosticsServiceState.runAllTests).not.toHaveBeenCalled();
+    expect(diagnosticsServiceState.runCategoryTests).not.toHaveBeenCalled();
   });
 });
