@@ -46,8 +46,9 @@ export async function stripeMpUpgradeCases({admin,service}) {
   const goldOrder=(await upgrade()).rows[0];
   assert.deepEqual([goldOrder.method_transition,goldOrder.method_prior_subscription,goldOrder.source_order_id],['upgrade',proSub,proOrder.id]);
   // Delivering the Gold marks the Pro for stopping; the server then stops it at Stripe (cardUpgrade.ts).
-  const goldEnd=new Date();goldEnd.setUTCMonth(goldEnd.getUTCMonth()+1);
-  assert.equal((await pay(user,goldOrder,'card',new Date(Date.now()-60000),goldEnd)).state,'fulfilled');
+  const goldStart=new Date(Math.floor(Date.now()/1000)*1000-60000),goldEnd=new Date(goldStart);goldEnd.setUTCMonth(goldEnd.getUTCMonth()+1);
+  const goldPaid=await pay(user,goldOrder,'card',goldStart,goldEnd);
+  assert.equal(goldPaid.state,'fulfilled',JSON.stringify(goldPaid));
   assert.ok((await admin.query('SELECT method_cancel_requested_at FROM user_subscriptions WHERE id=$1',[proSub])).rows[0].method_cancel_requested_at);
   // A Pro our record shows stopping is not observed as renewing, whatever Stripe said a moment ago.
   assert.equal((await observe()).rows[0].v,null);
