@@ -9,6 +9,8 @@ import { validatePublication } from './publication';
 import { validateWorkflow,informationSchema } from '../artifacts/workflow';
 import { RUNTIME_MODEL_COLUMNS, runtimeModelOption } from '../models/runtimeEligibility';
 import { parseWorkflowManifest, workflowManifestPath } from './workflowManifest';
+import { readSocialMediaFlag, saveSocialMediaFlag } from './socialMediaFlag';
+import { isPositioningWorkflow } from '../opc/positioningWorkflow';
 
 const label = z.string().trim().min(1).max(160).regex(/^[^\r\n\x00-\x1f]+$/);
 export const moduleSkillInput = z.object({
@@ -21,6 +23,8 @@ export const moduleSkillInput = z.object({
   planResources:z.array(z.string().max(240)).min(1).max(64).optional(),
   steps: z.array(z.object({ title: label, information:z.array(informationSchema).max(24).optional(), resources: z.array(z.string().max(240)).min(1).max(64) }).strict()).min(1).max(32),
   resourcePlanReviewed: z.literal(true),
+  /** POSITIONING-GATE: required when the module is created, so a new Skill is never enabled before this choice. */
+  socialMediaRelated: z.boolean().optional(),
   module: z.object({
     title: z.string().trim().min(1).max(100), description: z.string().max(500).nullable(),
     full_description: z.string().max(5000).nullable(), model_id: z.string().uuid(),
@@ -82,19 +86,64 @@ export function prepareModuleSkill(value: ModuleSkillInput) {
 
 export async function saveModuleSkill(db: SupabaseClient, actorId: string, value: ModuleSkillInput) {
   const prepared = prepareModuleSkill(value);
+  // POSITIONING-GATE: a module getting its first Skill (new, or a converted prompt module) needs the explicit choice;
+  // a module that already has a Skill ignores it (separate setting card).
+  // The editor sends the choice only for a first Skill, and an exact retry resends it: whenever present, the stated
+  // choice is applied idempotently (never re-derived from the binding a partially committed first try created).
+  const choice = value.socialMediaRelated;
+  if (choice === undefined && (value.expectedUpdatedAt === null || !(await boundSkill(db, value.moduleId))))
+    throw new Error('SOCIAL_MEDIA_FLAG_REQUIRED');
+  const flag = choice === true;
+  if (flag && isPositioningWorkflow(prepared.workflow)) throw new Error('SOCIAL_MEDIA_FLAG_POSITIONING_SKILL');
+  // "否" clears a flag a former prompt module may carry, before publishing (the 0219 guard refuses a flagged positioning Skill).
+  // Publication then expects the version this write produced (0072 compares updated_at exactly).
+  const cleared = choice === false && value.expectedUpdatedAt !== null ? await clearSocialFlag(db, value.moduleId) : undefined;
   const model = await db.from('ai_models').select(RUNTIME_MODEL_COLUMNS).eq('id',value.module.model_id).single();
   if(model.error || !model.data) throw new Error('请选择已配置的对话模型');
   const option=runtimeModelOption(model.data,'skill');
   if(!option.available) throw new Error(option.reason ?? '对话模型配置不完整');
   const { descriptor, files, workflow } = prepared;
   const { data, error } = await db.rpc('admin_publish_skill_module', {
-    p_actor_id: actorId, p_module_id: value.moduleId, p_expected_updated_at: value.expectedUpdatedAt,
-    p_metadata: value.module, p_skill_id: value.skillId, p_revision_id: value.revisionId,
+    p_actor_id: actorId, p_module_id: value.moduleId, p_expected_updated_at: cleared ?? value.expectedUpdatedAt,
+    // A flagged new module is created disabled, flagged, and only then enabled as requested.
+    p_metadata: flag ? { ...value.module, active: false } : value.module, p_skill_id: value.skillId, p_revision_id: value.revisionId,
     p_request_id: value.requestId, p_expected_version: value.expectedVersion,
     p_manifest: descriptor, p_hash_payload: packageHashPayload(descriptor), p_files: files, p_workflow: workflow,
   });
   // POSITIONING-GATE (0219): a module marked social-media related cannot become the positioning Skill.
   if (error?.message === 'SOCIAL_MEDIA_FLAG_POSITIONING_SKILL') throw new Error('SOCIAL_MEDIA_FLAG_POSITIONING_SKILL');
   if (error || !data) throw new Error('Skill 发布未完成，请重新读取模块，检查版本和模型后再发布。');
-  return data as { moduleId: string; revisionId: string; version: number };
+  const published = data as { moduleId: string; revisionId: string; version: number };
+  if (flag) await flagNewModule(db, value.moduleId, value.module.active);
+  return published;
+}
+
+async function boundSkill(db: SupabaseClient, moduleId: string): Promise<boolean> {
+  const row = await db.from('modules').select('skill_id').eq('id', moduleId).maybeSingle();
+  if (row.error) throw new Error('Skill 发布未完成，请重新读取模块，检查版本和模型后再发布。');
+  return Boolean(row.data?.skill_id);
+}
+
+/** Returns the module version after clearing, or undefined when nothing was written. */
+async function clearSocialFlag(db: SupabaseClient, moduleId: string): Promise<string | undefined> {
+  let opened;
+  try { opened = await readSocialMediaFlag(db, moduleId); }
+  catch (error) { if (error instanceof Error && error.message === 'SOCIAL_MEDIA_FLAG_MODULE_NOT_FOUND') return undefined; throw error; }
+  if (!opened.socialMediaRelated) return undefined;
+  return (await saveSocialMediaFlag(db, { moduleId, socialMediaRelated: false, expectedSocialMediaRelated: true,
+    expectedModuleUpdatedAt: opened.moduleUpdatedAt })).moduleUpdatedAt;
+}
+
+/** Any failure here leaves the new module disabled (never enabled without its flag); the administrator reopens it. */
+async function flagNewModule(db: SupabaseClient, moduleId: string, active: boolean) {
+  try {
+    // An exact retry after a lost response finds the flag already saved: keep it and continue.
+    const opened = await readSocialMediaFlag(db, moduleId);
+    const version = opened.socialMediaRelated ? opened.moduleUpdatedAt : (await saveSocialMediaFlag(db, { moduleId,
+      socialMediaRelated: true, expectedSocialMediaRelated: false, expectedModuleUpdatedAt: opened.moduleUpdatedAt })).moduleUpdatedAt;
+    if (!active) return;
+    const enabled = await db.from('modules').update({ active: true, updated_at: new Date().toISOString() })
+      .eq('id', moduleId).eq('social_media_related', true).eq('updated_at', version).select('id');
+    if (enabled.error || enabled.data?.length !== 1) throw new Error('SOCIAL_MEDIA_FLAG_CONFLICT');
+  } catch { throw new Error('SOCIAL_MEDIA_FLAG_NEW_MODULE_INCOMPLETE'); }
 }

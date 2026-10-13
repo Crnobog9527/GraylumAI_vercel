@@ -73,9 +73,6 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Test required-check contracts
-        run: ruby .github/scripts/test-ci-workflows.rb
-
       - name: Setup pnpm
         uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
 
@@ -84,6 +81,62 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run API tests
+        run: pnpm test:api
+
+      - name: Launch regression — PAY-1 frontend checkout readiness and cancellation
+        run: pnpm test:ci:pay-1-frontend
+
+      - name: Launch regression — billing cron authorization and reconciliation
+        run: pnpm --filter web exec vitest run src/app/api/cron/billing-reconcile/route.test.ts
+
+      - name: Launch regression — proxy hostname behavior
+        run: pnpm test:ci:proxy-hostname
+
+      - name: CI safeguards — migration ledger and database baseline
+        run: pnpm test:ci:safeguards
+
+  # The contract and ledger workers stay outside the test worker: a queued
+  # migration PR with a numbering gap fails both, and that must not stop the
+  # unit and regression tests from reporting. Both gates below require all three.
+  ci-contracts:
+    name: Test required-check contracts
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Test required-check contracts
+        run: ruby .github/scripts/test-ci-workflows.rb
+
+  migration-ledger:
+    name: Check migration ledger
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          package-manager-cache: false
 
       - name: CI safeguard — check migration ledger
         run: |
@@ -156,24 +209,6 @@ jobs:
               --diff-filter=MDTUXB "$migration_base_sha" -- packages/db/migrations
             node scripts/check-migration-ledger.mjs
           fi
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Run API tests
-        run: pnpm test:api
-
-      - name: Launch regression — PAY-1 frontend checkout readiness and cancellation
-        run: pnpm test:ci:pay-1-frontend
-
-      - name: Launch regression — billing cron authorization and reconciliation
-        run: pnpm --filter web exec vitest run src/app/api/cron/billing-reconcile/route.test.ts
-
-      - name: Launch regression — proxy hostname behavior
-        run: pnpm test:ci:proxy-hostname
-
-      - name: CI safeguards — migration ledger and database baseline
-        run: pnpm test:ci:safeguards
 
   build-and-e2e:
     name: Run build and secretless security E2E
@@ -395,7 +430,7 @@ jobs:
 
   unit-check:
     name: Unit Tests
-    needs: [test, integration]
+    needs: [test, integration, ci-contracts, migration-ledger]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -406,9 +441,12 @@ jobs:
         env:
           WORK_RESULT: ${{ needs.test.result }}
           INTEGRATION_RESULT: ${{ needs.integration.result }}
+          CONTRACTS_RESULT: ${{ needs.ci-contracts.result }}
+          LEDGER_RESULT: ${{ needs.migration-ledger.result }}
         run: |
           set -euo pipefail
-          if [ "$WORK_RESULT" != success ] || [ "$INTEGRATION_RESULT" != success ]; then
+          if [ "$WORK_RESULT" != success ] || [ "$INTEGRATION_RESULT" != success ] ||
+            [ "$CONTRACTS_RESULT" != success ] || [ "$LEDGER_RESULT" != success ]; then
             echo 'Missing, failed, cancelled, or skipped validation.' >&2
             exit 1
           fi
@@ -416,7 +454,7 @@ jobs:
 
   security-unit-tests:
     name: Security Unit Tests
-    needs: [test]
+    needs: [test, ci-contracts, migration-ledger]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -426,9 +464,12 @@ jobs:
       - name: Require successful worker validation
         env:
           WORK_RESULT: ${{ needs.test.result }}
+          CONTRACTS_RESULT: ${{ needs.ci-contracts.result }}
+          LEDGER_RESULT: ${{ needs.migration-ledger.result }}
         run: |
           set -euo pipefail
-          if [ "$WORK_RESULT" != success ]; then
+          if [ "$WORK_RESULT" != success ] || [ "$CONTRACTS_RESULT" != success ] ||
+            [ "$LEDGER_RESULT" != success ]; then
             echo 'Missing, failed, cancelled, or skipped validation.' >&2
             exit 1
           fi

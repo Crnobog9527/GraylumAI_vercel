@@ -1,6 +1,8 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import {assertPath} from '../skills/loader';
 import {SKILL_FILE_TRACE_BYTES,skillFileParameters} from './skillFile';
+import {mentorHistoryParameters} from './mentorHistory';
+import {READ_HISTORY_TOOL} from './agentTools';
 import {throwIfContentErased} from '../accountErasure/content';
 import type {RuntimeProgress} from './progress';
 import {createHash} from 'node:crypto';
@@ -35,6 +37,12 @@ export function executorRpc(options:{database:SessionRpc;actor:()=>Promise<strin
      'RUNTIME_SKILL_FILE_TOO_LARGE','RUNTIME_SKILL_FILE_CONFLICT','RUNTIME_TOOL_DENIED','RUNTIME_TOOL_CLOSED',
      'RUNTIME_TOOL_LIMIT','RUNTIME_TOOL_CONFLICT','RUNTIME_TOOL_RESULT_CONFLICT'].includes(message))
     throw new Error('RUNTIME_SKILL_FILE_REFUSED');
+   // R4: a permanent history-read refusal ends the turn; any other failure stays retryable.
+   if((name==='runtime_tool'&&args.p_name===READ_HISTORY_TOOL||name==='runtime_mentor_history')&&
+    typeof message==='string'&&['RUNTIME_MENTOR_HISTORY_DENIED','RUNTIME_MENTOR_HISTORY_REVOKED',
+     'RUNTIME_MENTOR_HISTORY_TOO_LARGE','RUNTIME_TOOL_DENIED','RUNTIME_TOOL_CLOSED','RUNTIME_TOOL_LIMIT',
+     'RUNTIME_TOOL_CONFLICT','RUNTIME_TOOL_RESULT_CONFLICT'].includes(message))
+    throw new Error('RUNTIME_HISTORY_READ_REFUSED');
    if(message==='RUNTIME_TEST_WINDOW_DENIED'||message==='RUNTIME_TEST_MODEL_DENIED')
     throw new StagingAccessError('RUNTIME_PRICE_CONFIGURATION_PENDING');
    if(typeof message==='string'&&['RUNTIME_RESUME_CONFLICT','RUNTIME_RESUME_SOURCE_CHANGED',
@@ -45,6 +53,10 @@ export function executorRpc(options:{database:SessionRpc;actor:()=>Promise<strin
  }
 }
 
+/** A stable error code for logs; free text (which may quote user material) is never logged. */
+export function diagnosticCode(error:unknown):string {
+ return error instanceof Error&&/^[A-Z][A-Z0-9_]{2,80}$/.test(error.message)?error.message:'UNCLASSIFIED';
+}
 export const preflightCodes=new Set([
  'RUNTIME_TIME_BUDGET_EXHAUSTED',
  'RUNTIME_PROVIDER_HISTORY_DENIED',
@@ -92,12 +104,14 @@ export function historyGuard(executionId:string,failed:(code:string)=>void) {
   };
 }
 
-export function terminalReplyGuard(active:boolean,allowsCard:boolean,failed:()=>void,allowsSkillFile=false) {
+export function terminalReplyGuard(active:boolean,allowsCard:boolean,failed:()=>void,allowsSkillFile=false,allowsHistory=false) {
+  // One read per turn: a Skill file or the user's earlier messages (R4), never both.
   let fileRequested=false;
   return (response:unknown,organizer=false)=>{
     const message=(response as {choices?:Array<{message?:{tool_calls?:Array<{id?:string;type?:string;
       function?:{name?:string;arguments?:string}}>}}>})?.choices?.[0]?.message;
     const readsFile=message?.tool_calls?.[0]?.function?.name==='read_skill_file';
+    const readsHistory=message?.tool_calls?.[0]?.function?.name===READ_HISTORY_TOOL;
     let invalidFileArguments=false;
     if(readsFile){try{
       const call=message!.tool_calls![0]!,{path}=skillFileParameters.parse(JSON.parse(call.function!.arguments!));
@@ -106,11 +120,17 @@ export function terminalReplyGuard(active:boolean,allowsCard:boolean,failed:()=>
         typeof call.id!=='string'||!call.id.length||Array.from(call.id).length>256||call.id.includes('\0')||
         Buffer.from(call.id).toString('utf8')!==call.id;
      }catch{invalidFileArguments=true;}}
-    const oversized=readsFile&&Buffer.byteLength(JSON.stringify(JSON.stringify(message)))>SKILL_FILE_TRACE_BYTES;
-    if(active&&(terminalAgentReplyFailure(response,organizer,allowsCard,allowsSkillFile&&!fileRequested)||oversized||invalidFileArguments)){
+    if(readsHistory){try{
+      const call=message!.tool_calls![0]!;mentorHistoryParameters.parse(JSON.parse(call.function!.arguments!));
+      invalidFileArguments=call.type!=='function'||typeof call.id!=='string'||!call.id.length||Array.from(call.id).length>256||
+        call.id.includes('\0')||Buffer.from(call.id).toString('utf8')!==call.id;
+     }catch{invalidFileArguments=true;}}
+    const oversized=(readsFile||readsHistory)&&Buffer.byteLength(JSON.stringify(JSON.stringify(message)))>SKILL_FILE_TRACE_BYTES;
+    if(active&&(terminalAgentReplyFailure(response,organizer,allowsCard,allowsSkillFile&&!fileRequested,allowsHistory&&!fileRequested)||
+      oversized||invalidFileArguments)){
       failed();
       throw new Error('RUNTIME_TERMINAL_REPLY');
     }
-    if(active&&!organizer&&readsFile)fileRequested=true;
+    if(active&&!organizer&&(readsFile||readsHistory))fileRequested=true;
   };
 }

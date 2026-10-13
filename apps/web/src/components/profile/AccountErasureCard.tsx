@@ -131,8 +131,14 @@ export function AccountErasureCard({ user }: { user: { email?: string; auth_prov
             {erasure.step === 'impact' && blocked && preview && renewalUsesStripePortal(preview) && (
               <Button disabled={erasure.busy} onClick={erasure.openPortal} style={dangerStyle}>管理订阅 / 取消续费</Button>
             )}
-            {erasure.step === 'impact' && !blocked && (
-              <Button disabled={!preview || erasure.busy} onClick={() => erasure.setStep('verify')} style={dangerStyle}>
+            {/* Until the facts arrive nothing may suggest the user can go on: renewal could still block. */}
+            {erasure.step === 'impact' && !preview && !erasure.previewFailed && (
+              <Button disabled style={dangerStyle} aria-label="正在读取注销影响">
+                <Loader2 className="h-4 w-4 animate-spin" />
+              </Button>
+            )}
+            {erasure.step === 'impact' && preview && !blocked && (
+              <Button disabled={erasure.busy} onClick={() => erasure.setStep('verify')} style={dangerStyle}>
                 继续
               </Button>
             )}
