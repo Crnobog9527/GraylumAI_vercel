@@ -2,11 +2,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type Stripe from 'stripe';
 import type { SupabaseClient } from '@supabase/supabase-js';
-const mocks = vi.hoisted(() => ({ scope: vi.fn(), card: vi.fn(), wallet: vi.fn() }));
+const mocks = vi.hoisted(() => ({ scope: vi.fn(), card: vi.fn(), wallet: vi.fn(), stopPrior: vi.fn() }));
 vi.mock('./stripeCheckoutPersistence', () => ({ resolveStripeScope: mocks.scope }));
 vi.mock('./cardPaymentEvidence', async importActual => ({ ...await importActual<typeof import('./cardPaymentEvidence')>(),
   readCardPaymentEvidence: mocks.card }));
 vi.mock('./walletPaymentEvidence', () => ({ readWalletPaymentEvidence: mocks.wallet }));
+vi.mock('./cardUpgrade', () => ({ stopPriorAfterUpgrade: mocks.stopPrior }));
 import { recoverMethodCheckout } from './walletWebhook';
 
 function fixture(overrides: Record<string, unknown> = {}) {
@@ -38,6 +39,17 @@ describe('PAY-STRIPE-MP card first payment through the method recovery', () => {
     // The tax Managed Payments added is recorded on the order as its own fact, after the payment itself.
     expect(f.db.rpc).toHaveBeenLastCalledWith('pay_stripe_mp_record_tax', { p_order: 'order', p_merchant: 'fixture',
       p_payment: 'in_1', p_tax: 980 });
+  });
+  it('stops the prior card subscription after a delivered upgrade, not after a payment kept for review', async () => {
+    mocks.stopPrior.mockReset();
+    const f = fixture({ method_transition: 'upgrade', method_prior_subscription: 'pro-sub' });
+    await f.run();
+    expect(mocks.stopPrior).toHaveBeenCalledWith(f.db, {}, expect.objectContaining({ method_transition: 'upgrade',
+      method_prior_subscription: 'pro-sub' }));
+    const review = fixture({ method_transition: 'upgrade', method_prior_subscription: 'pro-sub' });
+    review.db.rpc.mockResolvedValue({ data: { state: 'review', reason: 'upgrade_payment_after_cutoff' }, error: null });
+    await review.run();
+    expect(mocks.stopPrior).toHaveBeenCalledTimes(1);
   });
   it('fulfills an international card pack as a one-time payment', async () => {
     mocks.card.mockResolvedValue({ paymentId: 'pi_1', checkoutId: 'cs_card', amount: 940, tax: 188, currency: 'usd',

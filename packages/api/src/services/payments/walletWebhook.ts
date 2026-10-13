@@ -6,6 +6,7 @@ import { readWalletPaymentEvidence } from './walletPaymentEvidence';
 import { walletMembershipTerm } from './methodMembershipTerm';
 import { logger } from '../../lib/logger';
 import { readCardPaymentEvidence, recordCardPaymentTax, type CardOrder, type CardPaymentEvidence } from './cardPaymentEvidence';
+import { stopPriorAfterUpgrade } from './cardUpgrade';
 
 const isCard = (method: string) => method === 'card' || method === 'card_cn';
 
@@ -103,5 +104,7 @@ export async function recoverMethodCheckout(db: SupabaseClient, stripe: Stripe, 
   });
   if (applied.error || !applied.data) throw new Error('PAY_WAFFO_FULFILLMENT_UNAVAILABLE');
   if ('tax' in cash) await recordCardPaymentTax(db, scope.merchant, order.id, cash);
+  // A delivered Pro -> Gold upgrade stops the prior card subscription at period end (PAY-STRIPE-MP step 4a).
+  if ((applied.data as { state?: string }).state === 'fulfilled') await stopPriorAfterUpgrade(db, stripe, order);
   return { orderId: order.id };
 }
