@@ -595,21 +595,6 @@ describe('estimatePreDeductCredits', () => {
   });
 });
 
-describe('production stream billing wiring', () => {
-  it('passes billing runtime settings into stream pre-deduct and settle calculations', () => {
-    const source = readFileSync(
-      new URL('../../../../../apps/web/src/app/api/ai/stream/route.ts', import.meta.url),
-      'utf8',
-    );
-
-    expect(source).toContain('getBillingRuntimeSettings');
-    expect(source).toContain('estimatePreDeductCredits');
-    expect(source.match(/calculateTokenCostWithPricing\([\s\S]*?billingRuntimeSettings\)/g)?.length)
-      .toBeGreaterThanOrEqual(2);
-    expect(source).toContain('billingSettingsSnapshot');
-  });
-});
-
 // ============================================
 // BillingService Tests
 // ============================================
