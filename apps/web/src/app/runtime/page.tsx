@@ -16,7 +16,6 @@ import composerStyles from '@/components/opc/work-composer.module.css';
 import workStyles from './runtime-work.module.css';
 import {
  clearForSend, forgetPending, markPendingRestored, openingDraft, readPending, rememberPending, requestIdFor,
- settlePending,
 } from './send-input';
 import { QueryNotice } from '@/components/opc/query-notice';
 import { trpc } from '@/trpc/client';
@@ -96,11 +95,6 @@ function RuntimeWorkspace({routeSession,routeModule}:{routeSession:string;routeM
  }}),cancel=trpc.runtime.cancel.useMutation();
  const [videoBusy,setVideoBusy]=useState(false),[,setVideoUiRevision]=useState(0);
  const busy=start.isPending||prepare.isPending||execute.isPending||videoBusy||guiding||payg.busy;
- // A send this page never saw confirmed (reload, or left mid-send) is settled against the server history.
- useEffect(()=>{
-  if(!sessionId||!view.data?.executions||busy)return;
-  settlePending(localStorage,sessionId,view.data.executions as Array<{input:string|null;createdAt?:string}>,setInput);
- },[sessionId,view.data,busy]);
  const ordinary=choices.data?.models[0]?.id??'';
  const moduleSelection=requestedModule||storedModule;
  const chosenModule=choices.data?.skills.find(skill=>skill.moduleId===moduleSelection);
@@ -165,7 +159,7 @@ function RuntimeWorkspace({routeSession,routeModule}:{routeSession:string;routeM
   url.searchParams.set('request',requestId);history.replaceState(null,'',url);
   if(!scriptRequest)setOutgoing({text:submitted});
   // The box and the saved draft empty now; the sent text is kept in its own record until the server settles it.
-  rememberPending(localStorage,sessionId,{requestId,text:submitted,input:requestInput},view.data?.executions as Array<{input:string|null}>|undefined);
+  rememberPending(localStorage,sessionId,{requestId,text:submitted,input:requestInput});
   restoreInput=clearForSend(setInput,submitted,text=>{localStorage.setItem('opc-runtime-input:'+sessionId,text);markPendingRestored(localStorage,sessionId);});
   const admitted=await prepare.mutateAsync({sessionId,requestId,input:requestInput,selection:selected,network:'deny',sources:[]});
   if(!alive.current)return;
@@ -181,7 +175,7 @@ function RuntimeWorkspace({routeSession,routeModule}:{routeSession:string;routeM
   if(alive.current){if('unavailable' in executed&&executed.unavailable==='capacity'){markCapacity(admitted.executionId);setError('本次必要材料超过模型输入容量。原请求和已完成内容已保留；请点“停止”后缩短材料再发送。');}await Promise.all([view.refetch(),utils.opc.conversations.invalidate()]);}
  }catch(cause){if(!alive.current)return;const gate=runtimeAdmissionNotice(cause);
   setOutgoing(old=>old?.executionId?old:null); // Not confirmed: the text goes back into the box.
-  // The outcome may be unknown (reply lost), so the record and request id stay for the history check.
+  // The outcome may be unknown (reply lost), so the record and request id stay for a replaying resend.
   if(!stored)restoreInput();
   if(isOrganizerPendingError(cause)){payg.block();await view.refetch();return;}
   setError(gate??'请求状态待核实。请读取原任务状态，不要重新发送相同内容。');await view.refetch();}}
