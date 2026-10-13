@@ -82,8 +82,8 @@ describe("runtimeTailNotices", () => {
   });
 });
 
-it('uses the persisted platform-failure reason after reload', () => {
- const notices=runtimeTurnNotices(turn({state:'cancelled',unavailableReason:'preflight'}),ctx());
+it.each(['preflight','platform_review'])('uses the persisted platform-failure reason %s after reload', unavailableReason => {
+ const notices=runtimeTurnNotices(turn({state:'cancelled',unavailableReason}),ctx());
  expect(notices).toHaveLength(1);
  expect(notices[0].text).toContain('本轮不扣积分');
 });

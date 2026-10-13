@@ -11,6 +11,17 @@ import type { SiteLocale } from '@/lib/seo/site';
 export { SIGNUP_CTA_HREF as SIGNUP_HREF } from '@/lib/seo/content/shared';
 export const LOGIN_HREF = '/login';
 
+// Until the /app move makes "/" the public home page (SEO_GEO_SPEC section 15), "/" on staging and the app
+// host is the logged-in home and sends visitors to login. Visible links to the Simplified home therefore go
+// to the public /landing page; canonical, hreflang, sitemap and JSON-LD keep the production root "/".
+// Change back to "/" in the /app move.
+export const SIMPLIFIED_HOME_HREF = '/landing';
+
+/** The address a visible link should use for a page path; only the Simplified home differs for now. */
+export function visibleHref(path: string): string {
+  return path === '/' ? SIMPLIFIED_HOME_HREF : path;
+}
+
 type Link = { label: string; href: string };
 
 export type SiteChrome = {
@@ -37,13 +48,13 @@ const LEGAL_PATHS = { terms: '/terms', privacy: '/privacy', acceptableUse: '/acc
 
 export const SITE_CHROME: Record<SiteLocale, SiteChrome> = {
   'zh-Hans': {
-    home: '/',
+    home: SIMPLIFIED_HOME_HREF,
     nav: [
       { label: '价格', href: '/landing/pricing' },
       { label: '关于我们', href: '/about' },
     ],
     login: '登录',
-    signup: '免费开始诊断',
+    signup: '免费和教练聊聊',
     pagesTitle: '内容',
     companyTitle: '公司',
     company: [
@@ -74,7 +85,7 @@ export const SITE_CHROME: Record<SiteLocale, SiteChrome> = {
       { label: '關於我們', href: '/zh-tw/about' },
     ],
     login: '登入',
-    signup: '免費開始診斷',
+    signup: '免費和教練聊聊',
     pagesTitle: '自媒體經營指南',
     companyTitle: '公司',
     company: [

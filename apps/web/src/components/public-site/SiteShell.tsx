@@ -8,7 +8,7 @@ import type { ReactNode } from 'react';
 import Link from 'next/link';
 import { PUBLIC_PAGES } from '@/lib/seo/public-pages';
 import { SITE_LOCALES, type SiteLocale } from '@/lib/seo/site';
-import { LANGUAGE_NAMES, LOGIN_HREF, SIGNUP_HREF, SITE_CHROME } from './site-chrome';
+import { LANGUAGE_NAMES, LOGIN_HREF, SIGNUP_HREF, SITE_CHROME, visibleHref } from './site-chrome';
 
 const LINK_CLASS = 'text-sm text-[#9A9A9A] transition-colors hover:text-[#FFD700]';
 const LOCALES: SiteLocale[] = ['zh-Hans', 'zh-TW'];
@@ -40,11 +40,14 @@ export function SiteShell({
   locale,
   alternates = {},
   supportEmail,
+  siteName = 'Graylum',
   children,
 }: {
   locale: SiteLocale;
   alternates?: Partial<Record<SiteLocale, string>>;
   supportEmail?: string | null;
+  // Platform name from admin settings (`site_name`); pages that do not read settings keep the brand default.
+  siteName?: string;
   children: ReactNode;
 }) {
   const chrome = SITE_CHROME[locale];
@@ -54,7 +57,7 @@ export function SiteShell({
     .map(page => ({ label: page.footerLabel!, href: page.path }));
   const languageLinks = LOCALES.map(key => ({
     label: LANGUAGE_NAMES[key],
-    href: key === locale ? '' : alternates[key] ?? SITE_CHROME[key].home,
+    href: key === locale ? '' : visibleHref(alternates[key] ?? SITE_CHROME[key].home),
   })).filter(link => link.href);
 
   return (
@@ -63,7 +66,7 @@ export function SiteShell({
         <div className="mx-auto flex h-16 max-w-6xl items-center justify-between gap-4 px-4 sm:px-6 lg:px-8">
           <Link href={chrome.home} className="flex items-center gap-2">
             <img src="/graylum-logo.svg" alt="" aria-hidden="true" width={32} height={32} className="h-8 w-8 rounded-[10px]" />
-            <span className="text-lg font-bold">Graylum</span>
+            <span className="text-lg font-bold">{siteName}</span>
           </Link>
           <nav className="flex items-center gap-4 sm:gap-6">
             {chrome.nav.map(link => (

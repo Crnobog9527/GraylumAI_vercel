@@ -41,9 +41,10 @@ export function parseVerifyReason(value: string | null): VerifyReason | null {
   return value === 'signup' || value === 'expired' ? value : null;
 }
 
-export function buildVerifyEmailPath(email: string, redirect: string, reason?: VerifyReason) {
+// The email never goes in this URL (see pendingAuthEmail.ts): the page reads it from the session,
+// from this tab's storage, or asks the visitor to type it.
+export function buildVerifyEmailPath(redirect: string, reason?: VerifyReason) {
   const params = new URLSearchParams();
-  if (email) params.set('email', email);
   params.set('redirect', redirect);
   if (reason) params.set('reason', reason);
   return `/verify-email?${params.toString()}`;

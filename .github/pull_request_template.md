@@ -13,6 +13,15 @@
 
 - 改了哪些地方：
 - 是否涉及 AGENTS.md 第 1 节事项（正式环境、密钥、真钱、平台设置或 staging 绑定、规则变更、产品决定）：`否` / 说明并附 Owner 同意记录
+- 是否新增或修改公开页面（不登录可见、对搜索引擎开放）：`否` / `是`，并逐项勾选下面的 [SEO/GEO 规范](https://github.com/Crnobog9527/GraylumAI_vercel/blob/staging/docs/launch/SEO_GEO_SPEC.md) 第 13 节检查单：
+  - [ ] title / description / canonical / hreflang / OG 图齐全；`keywords` 已删
+  - [ ] 只有一个 H1；H2 覆盖真实疑问
+  - [ ] 首屏给结论；有产品入口
+  - [ ] JSON-LD 通过 Google 富媒体测试
+  - [ ] 不是 `force-dynamic`；Lighthouse 移动端性能 ≥ 90
+  - [ ] 内链 ≥ 3 条，无死链
+  - [ ] 进入 sitemap；robots 允许；`/app`、`/admin`、`/auth`、登录入口页仍返回 `noindex`
+  - [ ] 真实浏览器按 AGENTS.md 第 4 节验证过
 
 ## 验证
 

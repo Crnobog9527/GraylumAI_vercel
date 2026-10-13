@@ -18,7 +18,7 @@
 | 资料库 | `/library` | 查看和编辑已采用的选题、稿件、定位版本；将按 v12 第 5 节增加上传和语料库 |
 | 功能广场、搜索 | `/workbench/marketplace`、`/workbench/search` | 侧栏入口 |
 | 个人中心 | `/profile` | 订阅、设置、工单、历史 |
-| 旧对话 | `/chat` | 旧引擎，主导航已不再指向它，但落地页、个人中心历史和后台还有链接；计划下线（v12 第 8 节） |
+| 旧对话 | `/chat` | 已下线（LEGACY-CLOSE）：页面和后端代码已删除，旧链接直接跳到 `/positioning`；个人中心"使用历史"仍列出旧对话记录 |
 | 管理后台 | `/admin/*` | 用户、模型、成本、Skill（模块）、会员计划、设置、诊断等 |
 
 模型管理的“思考设置”中，“试一次”通过 `modelReasoning.tryOnce` 调用
@@ -28,16 +28,18 @@
 同时受模型和线路上限约束。预算不能在此上限内留足回答空间时直接拒绝。
 它不验证真实交互的工具调用；真实 staging 验证须另行批准。
 
-## 3) 两套对话引擎（新功能只接新的）
+## 3) 对话引擎：只有统一 Runtime
 
-| | 新：统一 Runtime | 旧：`/chat` 链路 |
-| --- | --- | --- |
-| 用在哪里 | 定位、选题、工作会话、侧栏对话 | `/chat` 普通对话 |
-| 主要代码 | `packages/api/src/services/runtime`（官方 Agent SDK）、`services/bill2`（计费）、`routers/runtime.ts`、`routers/opc.ts`、`services/opc` | `apps/web/src/app/api/ai/stream/route.ts`、`services/modelRouter.ts`、`services/contextManager.ts`、`services/billing.ts` |
-| 计费 | BILL2：一次用户操作一个运行单。默认 v1 整单预扣；PAYG v2 核心按每个 call 预留并结算，按累计应计积分取整差额结算，暂时仅测试可创建。一个运行单可以包含多个调用 | 旧的预扣 / 结算 / 退费 |
-| 前途 | 所有新功能都接这里 | 新工作区接管自由对话后下线 |
+| | 统一 Runtime |
+| --- | --- |
+| 用在哪里 | 定位、选题、工作会话、侧栏对话 |
+| 主要代码 | `packages/api/src/services/runtime`（官方 Agent SDK）、`services/bill2`（计费）、`routers/runtime.ts`、`routers/opc.ts`、`services/opc` |
+| 计费 | BILL2：一次用户操作一个运行单。默认 v1 整单预扣；PAYG v2 核心按每个 call 预留并结算，按累计应计积分取整差额结算，暂时仅测试可创建。一个运行单可以包含多个调用 |
 
-两套共用同一个积分余额和流水，没有第二个钱包。
+旧 `/chat` 链路（`app/api/ai/stream`、`routers/ai.ts`、`services/modelRouter.ts`、`services/contextManager.ts` 等）
+已由 LEGACY-CLOSE 删除，核对记录见 [LEGACY_CLOSE.md](launch/implementation/LEGACY_CLOSE.md)。
+旧 `/workbench` 成果页、旧成果生成、旧工作台搜索和自研内容检查（`contentModerator`、`aiOutputFilter`）也已删除，`/workbench` 跳到 `/positioning`；`/workbench/marketplace`、`/workbench/search` 是新工作区页面，保留。旧计费服务 `services/billing.ts` 仍被定时对账等引用，未删除。
+所有积分只有一个余额和流水，没有第二个钱包。
 
 BILL-PAYG 本次只做 [PR-A 计费核心](https://github.com/Crnobog9527/GraylumAI_vercel/pull/617)，
 具体契约见 [BILL2 说明第 0 节](launch/tasks/V3-BILL-2-provider-authoritative-billing.md#0-bill-payg-pr-av1-保留v2-逐调用预留)：
@@ -51,9 +53,11 @@ BILL-PAYG 本次只做 [PR-A 计费核心](https://github.com/Crnobog9527/Graylu
 本段说明合同和实现范围；当前测试、CI、审查及迁移状态以 PR 的 Handoff 为准。
 
 
-缓存代码位置：当前 Runtime 使用 `packages/api/src/services/runtime/promptCache.ts`；
-旧诊断仍引用 `services/promptCacheBuilder.ts`。没有调用方的旧 `services/promptCache.ts`
-及其专属测试已删除，不影响上述两个模块。
+缓存代码位置：Runtime 使用 `packages/api/src/services/runtime/promptCache.ts`。
+旧的 `services/promptCacheBuilder.ts` 和后台诊断里的旧 Prompt 缓存检查已随 LEGACY-CLOSE 删除。
+
+后台诊断的 AI 类检查只剩"AI 模型状态检查"；智能路由、Token 计算、Prompt 缓存、上下文压缩、
+实时关键词和旧对话"真实运行证据"六项只服务旧 `/chat`，已删除。
 
 后台诊断的“速率限制”只检查本地限流器，“消费熔断”只读取旧配置及默认值；
 两项都不证明请求链路已强制执行，报告明确标为警告。RLS 的服务端表可访问性检查

@@ -729,9 +729,9 @@ describe('routing model settings', () => {
       isEmailVerified:!!role,authProvider:'email',hasSupabaseAdminPrivileges:true,supabase:client,supabaseAdmin:client,supabasePublic:{},
     } as any)};
   }
-  it.each(['primary_model_id','assistant_model_id'])('rejects provider names in %s for both endpoints before writes',async key=>{
+  it('rejects provider names in primary_model_id for both endpoints before writes',async()=>{
     for(const bulk of [false,true]) {
-      const t=setup(),input={key,value:'openai/gpt-5.6-luna'};
+      const t=setup(),input={key:'primary_model_id',value:'openai/gpt-5.6-luna'};
       await expect(bulk?t.caller.updateSystemSettingsBulk([{key:'max_input_characters',value:'10000'},input]):t.caller.updateSystemSettings(input))
         .rejects.toMatchObject({code:'BAD_REQUEST',message:expect.stringContaining('请从列表中选择')});
       expect(t.models).not.toHaveBeenCalled();expect(t.upsert).not.toHaveBeenCalled();
@@ -739,7 +739,7 @@ describe('routing model settings', () => {
   });
   it.each([null,{id:modelId,is_active:'false'}])('rejects missing or disabled selections without partial writes (%j)',async model=>{
     const t=setup({model});
-    await expect(t.caller.updateSystemSettingsBulk([{key:'max_input_characters',value:'10000'},{key:'assistant_model_id',value:modelId}])).rejects.toMatchObject({code:'BAD_REQUEST'});
+    await expect(t.caller.updateSystemSettingsBulk([{key:'max_input_characters',value:'10000'},{key:'primary_model_id',value:modelId}])).rejects.toMatchObject({code:'BAD_REQUEST'});
     expect(t.upsert).not.toHaveBeenCalled();
   });
   it('fails closed on a model lookup error',async()=>{
@@ -749,12 +749,14 @@ describe('routing model settings', () => {
   });
   it('accepts active UUIDs and optional empty model selections',async()=>{
     const t=setup();
-    const input=[{key:'primary_model_id',value:''},{key:'assistant_model_id',value:modelId}];
+    const input=[{key:'primary_model_id',value:modelId}];
     await expect(t.caller.updateSystemSettingsBulk(input)).resolves.toEqual(input);
     expect(t.models).toHaveBeenCalledTimes(1);
+    const empty=[{key:'primary_model_id',value:''}];
+    await expect(setup().caller.updateSystemSettingsBulk(empty)).resolves.toEqual(empty);
   });
   it.each([false,true])('maps a concurrent reference deletion to a safe correction message (bulk=%s)',async bulk=>{
-    const t=setup({writeError:{code:'23503',message:'selected model no longer exists SECRET_CANARY'}}),input={key:'assistant_model_id',value:modelId};
+    const t=setup({writeError:{code:'23503',message:'selected model no longer exists SECRET_CANARY'}}),input={key:'primary_model_id',value:modelId};
     await expect(bulk?t.caller.updateSystemSettingsBulk([input]):t.caller.updateSystemSettings(input)).rejects.toMatchObject({code:'BAD_REQUEST',message:'模型配置已变化，请刷新模型列表后重新选择'});
   });
   it('returns only routing display fields, without summary eligibility restrictions or credentials',async()=>{

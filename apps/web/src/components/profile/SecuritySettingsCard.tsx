@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import { createClient } from '@/lib/supabase';
 import { buildAuthHref } from '@/lib/site-config';
+import { buildVerifyEmailPath } from '@/lib/authFlow';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -161,9 +162,7 @@ export const SecuritySettingsCard = memo(function SecuritySettingsCard({ user }:
                     size="sm"
                     onClick={() =>
                       router.push(
-                        buildAuthHref(
-                          `/verify-email?email=${encodeURIComponent(user?.email || '')}&redirect=${encodeURIComponent('/profile?tab=security')}`
-                        )
+                        buildAuthHref(buildVerifyEmailPath('/profile?tab=security'))
                       )
                     }
                     style={{

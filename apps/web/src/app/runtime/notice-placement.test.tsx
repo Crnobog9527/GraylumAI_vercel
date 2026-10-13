@@ -29,3 +29,9 @@ it('puts the open turn notice and its actions under the last message, above the 
  expect(html.match(/回复尚未完成/g)).toHaveLength(1);
  for(const old of ['恢复原任务','取消剩余执行','恢复引导请求'])expect(html).not.toContain(old);
 });
+
+it('offers no way to delete a single answer (Owner 2026-10-13: whole conversations only, from the list)',()=>{
+ const html=renderToStaticMarkup(<RuntimePage/>);
+ expect(html).toContain('第一条');
+ expect(html).not.toMatch(/删除这条回答/);
+});
