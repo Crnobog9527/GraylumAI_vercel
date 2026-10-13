@@ -2,7 +2,10 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { describe, it, expect, vi } from 'vitest';
 import { readMethodMembership } from './methodMembership';
-const staging = { VERCEL: '1', VERCEL_PROJECT_PRODUCTION_URL: 'auth-staging.graylum.com', WAFFO_TEST_OPERATIONS_ENABLED: 'true' };
+const staging = { VERCEL: '1', VERCEL_PROJECT_PRODUCTION_URL: 'auth-staging.graylum.com', VERCEL_GIT_COMMIT_REF: 'staging',
+  VERCEL_GIT_REPO_OWNER: 'Crnobog9527', VERCEL_GIT_REPO_SLUG: 'GraylumAI_vercel', VERCEL_PROJECT_ID: 'synthetic-staging-project',
+  V3_RUNTIME_STAGING_PROJECT_ID: 'synthetic-staging-project', NEXT_PUBLIC_SUPABASE_URL: 'https://synthetic.supabase.co',
+  V3_RUNTIME_STAGING_DATABASE_HOST: 'synthetic.supabase.co', V3_RUNTIME_STAGING_WINDOW_ID: '00000000-0000-4000-8000-000000000001', WAFFO_TEST_OPERATIONS_ENABLED: 'true' };
 const routes = (card: boolean) => ({ version: 2, card: { enabled: card },
   wechat_pay: { enabled: true, annualVerified: true }, alipay: { enabled: true, annualVerified: true } });
 function fixture(counts: Array<number | null> = [40, 3, 2], route: unknown = null,
