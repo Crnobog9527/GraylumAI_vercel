@@ -6,7 +6,8 @@ import {z} from 'zod';
 import {promptCachePolicy} from './promptCache';
 import {hostTurnContextSchema,historySelectionSchema} from './hostTurn';
 import {PROVIDER_REQUEST_FORMATS} from './providerRequest';
-import {QUESTION_CONTRACT,LEGACY_QUESTION_CONTRACT} from './agentTools';
+import {QUESTION_CONTRACT,LEGACY_QUESTION_CONTRACT,READ_HISTORY_TOOL} from './agentTools';
+import {MENTOR_HISTORY_VERSION,MENTOR_HISTORY_RESERVE_BYTES} from './mentorHistory';
 import {ASK_QUESTION_TOOL} from '../../shared/agentTurn';
 import {frozenPurposeBudget,FROZEN_OUTPUT_CAP} from './purposeBudgets';
 import {matchingPlan} from './matching';
@@ -25,7 +26,9 @@ export const runtimeContext=z.object({
  historyItems:z.number().int().min(0).max(1000),purposeBudget:frozenPurposeBudget.optional(),
  skillFile:skillFileBinding.optional(),
  skillFileReserve:z.number().int().min(12288).max(131072).optional(),
- tools:z.array(z.enum(['search','read_source','read_skill_file',ASK_QUESTION_TOOL])).default([]),maxToolCalls:z.number().int().min(0).max(16).default(0),
+ historyRead:z.object({version:z.literal(MENTOR_HISTORY_VERSION),reserve:z.literal(MENTOR_HISTORY_RESERVE_BYTES)}).strict().optional(),
+ tools:z.array(z.enum(['search','read_source','read_skill_file',READ_HISTORY_TOOL,ASK_QUESTION_TOOL])).default([]),
+ maxToolCalls:z.number().int().min(0).max(16).default(0),
  modelId:z.string().uuid().optional(),network:z.enum(['deny','allow','require_latest']).optional(),
  attachedOrganizer:z.object({
   modelId:z.string().uuid(),model:z.string().min(1),
@@ -49,6 +52,11 @@ export const runtimeContext=z.object({
    context.skillFile.packageId!==context.skillId||context.skillFile.revisionId!==context.revisionId||
    !context.moduleId||context.maxTurns!==2||context.maxToolCalls!==1))
   ctx.addIssue({code:'custom',message:'RUNTIME_SKILL_FILE_CONTEXT_INVALID'});
+ // R4: earlier user messages share the bound Skill file's single read slot of a mentor turn.
+ if(Boolean(context.historyRead)!==context.tools.includes(READ_HISTORY_TOOL)||context.historyRead&&
+  (!context.skillFile||!context.opcTurnToken||!context.hostTurnContext||context.hostTurnContext.stepSummary||
+   !context.tools.includes(ASK_QUESTION_TOOL)))
+  ctx.addIssue({code:'custom',message:'RUNTIME_HISTORY_READ_CONTEXT_INVALID'});
  if(context.hostTurnContext?.stepSummary&&(context.input!==STEP_SUMMARY_INPUT||context.hostTurnContext.opening||
    context.tools.includes(ASK_QUESTION_TOOL)||context.attachedOrganizer))
   ctx.addIssue({code:'custom',message:'RUNTIME_STEP_SUMMARY_CONTEXT_INVALID'});

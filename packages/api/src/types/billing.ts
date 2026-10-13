@@ -38,43 +38,6 @@ export type BillingStatus = typeof BillingStatus[keyof typeof BillingStatus];
 // ============================================
 
 /**
- * 预扣请求
- */
-export const PreDeductRequestSchema = z.object({
-  userId: z.string().uuid(),
-  estimatedCredits: z.number().positive('预扣积分必须为正数'),
-  reason: z.string().optional().default('AI 对话预扣'),
-  conversationId: z.string().uuid().optional(),
-});
-
-/**
- * 结算请求
- */
-export const SettleRequestSchema = z.object({
-  preDeductId: z.string().uuid(),
-  actualCredits: z.number().nonnegative('实际积分不能为负'),
-  usage: z.object({
-    inputTokens: z.number(),
-    outputTokens: z.number(),
-    cacheReadTokens: z.number().optional(),
-    cacheCreationTokens: z.number().optional(),
-    webSearchCount: z.number().optional(),
-  }),
-  modelUsed: z.string(),
-  conversationId: z.string().uuid().optional(),
-  messageId: z.string().uuid().optional(),
-});
-
-/**
- * 退费请求
- */
-export const RefundRequestSchema = z.object({
-  preDeductId: z.string().uuid(),
-  reason: z.string(),
-  partialRefund: z.number().nonnegative().optional(), // 部分退费金额，不填则全额退费
-});
-
-/**
  * 计费记录查询
  */
 export const BillingQuerySchema = z.object({
@@ -112,33 +75,6 @@ export const UserBalanceSchema = z.object({
 });
 
 /**
- * 成本估算请求
- */
-export const CostEstimateRequestSchema = z.object({
-  modelId: z.string(),
-  estimatedInputTokens: z.number(),
-  estimatedOutputTokens: z.number(),
-  enableWebSearch: z.boolean().optional(),
-  webSearchCount: z.number().optional(),
-});
-
-/**
- * 成本估算响应
- */
-export const CostEstimateResponseSchema = z.object({
-  estimatedCredits: z.number(),
-  estimatedCostUsd: z.number(),
-  breakdown: z.object({
-    inputCost: z.number(),
-    outputCost: z.number(),
-    searchCost: z.number(),
-    total: z.number(),
-  }),
-  safetyMargin: z.number(), // 安全边际 (建议预扣额外的比例)
-  recommendedPreDeduct: z.number(), // 建议预扣金额
-});
-
-/**
  * 消费统计
  */
 export const UsageStatsSchema = z.object({
@@ -169,87 +105,10 @@ export const UsageStatsSchema = z.object({
 // 导出 TypeScript 类型
 // ============================================
 
-export type PreDeductRequest = z.infer<typeof PreDeductRequestSchema>;
-export type SettleRequest = z.infer<typeof SettleRequestSchema>;
-export type RefundRequest = z.infer<typeof RefundRequestSchema>;
 export type BillingQuery = z.infer<typeof BillingQuerySchema>;
 export type BillingHistoryRecord = z.infer<typeof BillingHistoryRecordSchema>;
 export type UserBalance = z.infer<typeof UserBalanceSchema>;
-export type CostEstimateRequest = z.infer<typeof CostEstimateRequestSchema>;
-export type CostEstimateResponse = z.infer<typeof CostEstimateResponseSchema>;
 export type UsageStats = z.infer<typeof UsageStatsSchema>;
-
-// ============================================
-// 计费服务接口
-// ============================================
-
-/**
- * 计费服务接口定义
- */
-export interface IBillingService {
-  /**
-   * 预扣积分
-   * @returns 预扣记录 ID
-   */
-  preDeduct(request: PreDeductRequest): Promise<string>;
-
-  /**
-   * 结算积分
-   */
-  settle(request: SettleRequest): Promise<void>;
-
-  /**
-   * 退费
-   */
-  refund(request: RefundRequest): Promise<void>;
-
-  /**
-   * 获取用户余额
-   */
-  getBalance(userId: string): Promise<UserBalance>;
-
-  /**
-   * 估算成本
-   */
-  estimateCost(request: CostEstimateRequest): Promise<CostEstimateResponse>;
-
-  /**
-   * 获取消费统计
-   */
-  getUsageStats(userId: string, period: 'daily' | 'weekly' | 'monthly'): Promise<UsageStats>;
-}
-
-// ============================================
-// 错误类型
-// ============================================
-
-export class InsufficientCreditsError extends Error {
-  constructor(
-    public readonly userId: string,
-    public readonly required: number,
-    public readonly available: number,
-  ) {
-    super(`积分不足: 需要 ${required}，当前可用 ${available}`);
-    this.name = 'InsufficientCreditsError';
-  }
-}
-
-export class BillingNotFoundError extends Error {
-  constructor(public readonly billingId: string) {
-    super(`计费记录不存在: ${billingId}`);
-    this.name = 'BillingNotFoundError';
-  }
-}
-
-export class InvalidBillingOperationError extends Error {
-  constructor(
-    public readonly operation: string,
-    public readonly reason: string,
-  ) {
-    super(`无效的计费操作 (${operation}): ${reason}`);
-    this.name = 'InvalidBillingOperationError';
-  }
-}
 
 // ============================================
 // 常量
@@ -259,18 +118,6 @@ export class InvalidBillingOperationError extends Error {
  * 计费相关常量
  */
 export const BILLING_CONSTANTS = {
-  // 预扣安全边际 (预扣时额外增加的比例)
-  SAFETY_MARGIN: 0.2, // 20%
-
-  // 最小预扣金额
-  MIN_PRE_DEDUCT: 10,
-
-  // 最大预扣金额
-  MAX_PRE_DEDUCT: 10000,
-
-  // 预扣超时时间 (毫秒) - 超过此时间未结算则自动退费
-  PRE_DEDUCT_TIMEOUT: 5 * 60 * 1000, // 5 分钟
-
   // 积分与美元兑换比例 (1美元 = X积分)。只在 system_settings 确认没有这一行时使用。
   // Owner 已定 q=100、m=3，但 staging 改值要另行批准：届时写入显式配置行，
   // 不靠改这里的缺省值，避免合并代码本身改变某个环境的生效值（见 services/billingUnit.ts）。
@@ -279,36 +126,3 @@ export const BILLING_CONSTANTS = {
   // 全站默认加价倍数（缺省值，规则同上）；模型可单独覆盖
   TOKEN_PRICE_MULTIPLIER: 1.5, // 用户价格 = API 成本 * 1.5
 } as const;
-
-/**
- * 模型定价表 (每百万 Token 美元)
- *
- * @deprecated Legacy explicit fallback / tests only. Production chat billing
- * must read ai_models through getModelPricing and must not silently default to
- * this table when model pricing is missing or zero.
- */
-export const MODEL_PRICING = {
-  // Claude Sonnet 4
-  'claude-sonnet-4-20250514': {
-    inputPer1M: 3.0,
-    outputPer1M: 15.0,
-    cacheWritePer1M: 3.75,
-    cacheReadPer1M: 0.30,
-  },
-  // Claude Haiku 3.5
-  'claude-3-5-haiku-20241022': {
-    inputPer1M: 0.80,
-    outputPer1M: 4.0,
-    cacheWritePer1M: 1.0,
-    cacheReadPer1M: 0.08,
-  },
-  // Claude Opus 4
-  'claude-opus-4-20250514': {
-    inputPer1M: 15.0,
-    outputPer1M: 75.0,
-    cacheWritePer1M: 18.75,
-    cacheReadPer1M: 1.50,
-  },
-} as const;
-
-export type SupportedModelId = keyof typeof MODEL_PRICING;

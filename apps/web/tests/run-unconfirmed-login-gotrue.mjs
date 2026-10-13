@@ -10,7 +10,7 @@ import { resolve } from 'node:path';
 // Staging reported GoTrue v2.197.0 on 2026-09-30. Tag and index digest are updated together.
 const GOTRUE_IMAGE = 'ghcr.io/supabase/gotrue:v2.197.0@sha256:1736a63078f5922b198c4cbe50f80ab9a2d3b54fe8b7b6cfb2e9dc5dbbc12c6b';
 const MAILPIT_IMAGE = 'axllent/mailpit:v1.31.3@sha256:ed9b00c609e77e99c79b93f1178255ebc271868920f2c69a8d166bd5634ed10d';
-const POSTGRES_IMAGE = 'postgres:17-alpine@sha256:18cfe3ef5e6815560c98237d6216d1e5119702fb0f3894c8785dd58b8bbe5d73';
+const POSTGRES_IMAGE = 'postgres@sha256:18cfe3ef5e6815560c98237d6216d1e5119702fb0f3894c8785dd58b8bbe5d73';
 
 if (process.argv[2] !== '--local-only' || process.env.CI) {
   throw new Error('Usage: node apps/web/tests/run-unconfirmed-login-gotrue.mjs --local-only');
