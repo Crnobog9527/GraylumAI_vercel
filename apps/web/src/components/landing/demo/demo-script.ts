@@ -192,7 +192,8 @@ export function demoReducer(state: DemoState, action: DemoAction): DemoState {
     }
     case 'confirm': {
       const values = state.values;
-      if (state.valid || FIELDS.some(field => field.required && !values[field.id]?.value.trim())) return state;
+      // Like the signed-in page, nothing is confirmed while a reply is still arriving.
+      if (state.valid || state.liveId || FIELDS.some(field => field.required && !values[field.id]?.value.trim())) return state;
       const confirmed = Object.fromEntries(Object.entries(values).map(([id, value]) => [id, { ...value, status: 'confirmed' as const }]));
       return { ...state, phase: 'confirmed', valid: true, values: confirmed };
     }

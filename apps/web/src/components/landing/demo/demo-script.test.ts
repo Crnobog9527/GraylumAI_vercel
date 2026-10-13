@@ -15,7 +15,8 @@ describe('landing demo script', () => {
     expect(state.phase).toBe('summary');
     expect(state.messages.at(-1)!.summary).toBe(true);
     expect(openQuestion(state)).toBeNull();
-    state = demoReducer(state, { type: 'confirm' });
+    expect(demoReducer(state, { type: 'confirm' }).valid).toBe(false); // the summary is still being typed
+    state = demoReducer(demoReducer(state, { type: 'settled' }), { type: 'confirm' });
     expect(state.valid).toBe(true);
     expect(Object.values(state.values).every(value => value.status === 'confirmed')).toBe(true);
     state = demoReducer(state, { type: 'report', open: true });

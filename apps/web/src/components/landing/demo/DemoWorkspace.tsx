@@ -182,7 +182,8 @@ export function DemoWorkspace() {
               </section>
               <footer className={result.publishBar}>
                 <div>
-                  <Button variant="outline" disabled={!state.valid} onClick={() => dispatch({ type: 'report', open: true })}>生成报告</Button>
+                  <Button variant="outline" disabled={!state.valid || Boolean(state.liveId)}
+                    onClick={() => dispatch({ type: 'report', open: true })}>生成报告</Button>
                 </div>
                 <p>{state.valid ? '示例：点「生成报告」看报告长什么样' : '确认第一步后，可以看示例报告'}</p>
               </footer>
@@ -194,7 +195,7 @@ export function DemoWorkspace() {
             <header><h2>定位清单</h2><p>跟着对话自动记录；每一步核对后确认一次</p></header>
             <div className={result.body}>
               <CaptureChecklist steps={DEMO_STEPS} information={demoInformation(state)} valid={{ you: state.valid }}
-                edits={{}} selectedStepId="you" editable={!state.valid} manual={false} locked={false}
+                edits={{}} selectedStepId="you" editable={!state.valid} manual={false} locked={Boolean(state.liveId)}
                 confirmable={() => true} confirmation={() => 'none'} saveState={state.typed.length ? { you: 'saved' } : {}} conflicts={{}} resolving={null}
                 onEdit={(_, fieldId, text) => dispatch({ type: 'edit', fieldId, text })} onComposition={noop} onResolve={noop}
                 onReview={() => dispatch({ type: 'confirm' })} onRecoverConfirmation={noop} onKeepConflict={noop} onRetrySave={noop} />
