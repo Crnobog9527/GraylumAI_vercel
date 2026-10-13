@@ -1,0 +1,248 @@
+/* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+/*
+ * Style sample E (not public): the light foundation (--gl-*) set in ploy.ai's visual language — very large tight
+ * headlines, a dark "film" card that opens and closes the page, big rounded colour panels, black pill buttons and
+ * a few motions tied to scrolling. Only this sample reads this file. Colours not in the foundation are the four
+ * panel tones below; everything else is a --gl-* variable.
+ */
+.page{
+  --e-film:#141312;          /* hero and footer card: a dark studio, not a tinted black UI */
+  --e-film-text:rgba(255,255,255,.78);
+  --e-note:#f4eaa9;          /* sticky-note yellow for the voice wall */
+  --e-note-text:#5a5221;
+  --e-mist:#e2e6ee;          /* cool panel behind the demo window */
+  --e-mint:#e5efe6;          /* "先聊后买" */
+  --e-unread:#c6c6c6;        /* words not yet read in the scroll fill */
+  --e-gutter:16px;
+  min-height:100vh;overflow-x:clip;background:var(--gl-canvas);color:var(--gl-text);font-size:16px;line-height:1.7
+}
+@media(min-width:768px){.page{--e-gutter:32px}}
+.wrap{width:100%;max-width:1240px;margin:0 auto;padding:0 var(--e-gutter)}
+.narrow{max-width:960px}
+
+/* Sample note bar: only on the sample, not part of the design. */
+.sampleBar{padding:7px 16px;background:#1f1f1f;color:#ddd;font-size:var(--gl-text-caption);line-height:1.5;text-align:center}
+
+/* Header: floats over the canvas like ploy's, with the two pills on the right. */
+.header{position:sticky;top:0;z-index:30;padding:12px 0;background:color-mix(in srgb,var(--gl-canvas) 82%,transparent);
+  backdrop-filter:saturate(1.4) blur(14px);-webkit-backdrop-filter:saturate(1.4) blur(14px)}
+.headerInner{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.brand{display:flex;align-items:center;gap:9px;color:var(--gl-text);font-size:21px;font-weight:600;letter-spacing:-.04em;text-decoration:none}
+.brand img{width:28px;height:28px;border-radius:var(--gl-radius-sm);background:var(--gl-action)}
+.nav{display:flex;align-items:center;gap:6px}
+.navLink{display:none;padding:6px 12px;color:var(--gl-text-secondary-aa);font-size:15px;text-decoration:none}
+.navLink:hover{color:var(--gl-text)}
+@media(min-width:720px){.navLink{display:inline}}
+
+/* Pills */
+.pill,.pillLight,.pillGhost,.pillSmall,.pillSmallLight{display:inline-flex;align-items:center;justify-content:center;gap:8px;border-radius:var(--gl-radius-pill);
+  font-weight:500;text-decoration:none;white-space:nowrap;transition:background var(--gl-motion),border-color var(--gl-motion),color var(--gl-motion)}
+.pill,.pillLight,.pillGhost{min-height:52px;padding:0 28px;font-size:17px}
+.pill,.pillSmall{background:var(--gl-action);color:var(--gl-action-text)}
+.pill:hover,.pillSmall:hover{background:var(--gl-action-hover)}
+.pillLight,.pillSmallLight{background:#fff;color:var(--gl-text)}
+.pillLight:hover,.pillSmallLight:hover{background:#ececec}
+.pillGhost{border:1px solid rgba(255,255,255,.42);color:#fff}
+.pillGhost:hover{border-color:#fff;background:rgba(255,255,255,.08)}
+.pillSmall,.pillSmallLight{min-height:40px;padding:0 18px;font-size:14px}
+.pillSmallLight{border:1px solid var(--gl-border-control)}
+.page a:focus-visible,.page button:focus-visible,.page summary:focus-visible,.page label:focus-within{outline:2px solid var(--gl-text);outline-offset:3px}
+.film a:focus-visible{outline-color:#fff}
+
+/* Hero: the film card. The ring light is the creator's own studio light; it switches on once, then holds still. */
+.film{position:relative;isolation:isolate;display:grid;place-items:center;min-height:min(88svh,860px);margin:0 8px;padding:112px 20px 64px;overflow:hidden;
+  border-radius:28px;background:var(--e-film);color:#fff;text-align:center}
+@media(min-width:768px){.film{margin:0 12px;border-radius:32px}}
+.ring{position:absolute;z-index:-1;top:46%;left:50%;width:min(118vw,880px);aspect-ratio:1;border-radius:50%;transform:translate(-50%,-50%);
+  border:clamp(10px,1.6vw,18px) solid rgba(255,222,150,.5);filter:blur(5px);
+  box-shadow:0 0 120px 30px rgba(255,187,23,.16),inset 0 0 120px 24px rgba(255,187,23,.12)}
+.floor{position:absolute;z-index:-1;inset:auto 0 0;height:45%;background:radial-gradient(60% 70% at 50% 100%,rgba(255,187,23,.13),transparent 70%)}
+@media(prefers-reduced-motion:no-preference){
+  .ring,.floor{animation:ringOn 1.8s ease-out .25s both}
+}
+@keyframes ringOn{0%{opacity:0}30%{opacity:.55}38%{opacity:.12}52%{opacity:.8}60%{opacity:.4}100%{opacity:1}}
+.heroText{display:grid;justify-items:center;gap:28px;max-width:1100px}
+.h1{margin:0;max-width:9.5em;font-size:clamp(52px,10vw,148px);font-weight:600;line-height:1.02;letter-spacing:-.055em;text-wrap:balance;
+  text-shadow:0 2px 30px rgba(20,19,18,.55)}
+.promise{margin:0;max-width:24em;color:rgba(255,255,255,.9);font-size:clamp(19px,2.2vw,25px);line-height:1.6;text-wrap:balance}
+.actions{display:flex;flex-wrap:wrap;justify-content:center;gap:12px}
+.heroNote{margin:0;max-width:34em;color:var(--e-film-text);font-size:14px}
+@media(max-width:520px){.actions{display:grid;width:100%}.film{padding-top:88px}}
+
+/* Sections */
+.section{padding:112px 0}
+.anchor{scroll-margin-top:72px}
+.sectionTight{padding:72px 0 112px}
+@media(max-width:767px){.section{padding:72px 0}
+.sectionTight{padding:48px 0 72px}}
+.display{margin:0;font-size:clamp(42px,7.4vw,112px);font-weight:600;line-height:1.04;letter-spacing:-.055em;text-wrap:balance}
+.lede{margin:0;max-width:30em;color:var(--gl-text-body);font-size:18px;line-height:1.7}
+.headRow{display:grid;gap:24px;margin-bottom:48px}
+@media(min-width:960px){.headRow{grid-template-columns:minmax(0,1.5fr) minmax(0,1fr);align-items:end;gap:48px}}
+.h3{margin:0;font-size:clamp(26px,3vw,40px);font-weight:600;line-height:1.15;letter-spacing:-.04em}
+
+/* Voice wall: one yellow panel, the complaint left, the coach's answer (a white card) right. */
+.notePanel{border-radius:28px;background:var(--e-note);padding:12px clamp(16px,4vw,56px)}
+.noteRow{display:grid;gap:16px;padding:32px 0;border-top:1px solid rgba(38,38,38,.12)}
+.noteRow:first-child{border-top:0}
+@media(min-width:900px){.noteRow{grid-template-columns:minmax(0,1.1fr) minmax(0,1fr);gap:48px;align-items:center;padding:40px 0}}
+.quote{margin:0}
+.quote blockquote{margin:0;font-size:clamp(20px,2.3vw,28px);font-weight:500;line-height:1.5;letter-spacing:-.02em}
+.quote figcaption{margin-top:12px;color:var(--e-note-text);font-size:14px}
+.answer{border-radius:18px;background:var(--gl-surface);padding:20px 24px;box-shadow:0 1px 0 rgba(38,38,38,.06)}
+.answerLabel{display:flex;align-items:center;gap:8px;margin:0 0 6px;font-size:14px;font-weight:600}
+.answerLabel::before{content:"";width:8px;height:8px;border-radius:50%;background:var(--gl-accent-gold)}
+.answer p:last-child{margin:0;color:var(--gl-text-body);font-size:16px;line-height:1.75}
+.noteRow[data-reveal=pending] .answer{opacity:0;transform:translateY(12px)}
+.noteRow[data-reveal=shown] .answer{opacity:1;transform:none;transition:opacity .5s ease-out .6s,transform .5s ease-out .6s}
+
+/* How it works: the promise fills from grey to ink as it is read (scroll-driven, CSS only). */
+.fill{margin:40px 0 0;max-width:30em;font-size:clamp(24px,3.3vw,42px);font-weight:500;line-height:1.45;letter-spacing:-.03em}
+@supports (animation-timeline:view()){
+  @media(prefers-reduced-motion:no-preference){
+    .fill{view-timeline-name:--e-fill}
+    .fill>span{color:var(--e-unread);animation:ink linear both;animation-timeline:--e-fill;animation-range:cover var(--a) cover var(--b)}
+  }
+}
+@keyframes ink{to{color:var(--gl-text)}}
+.demoStage{margin-top:64px;border-radius:28px;background:var(--e-mist);padding:clamp(8px,3vw,40px)}
+
+/* The walk-through as a timeline: the rail fills as the steps pass. */
+.steps{position:relative;display:grid;gap:56px;margin:96px 0 0;padding:0;list-style:none}
+.steps::before,.steps::after{content:"";position:absolute;top:20px;bottom:20px;left:19px;width:2px;background:var(--gl-border-strong)}
+.steps::after{background:var(--gl-text);transform-origin:top;transform:scaleY(1)}
+@supports (animation-timeline:view()){
+  @media(prefers-reduced-motion:no-preference){
+    .steps{view-timeline-name:--e-steps}
+    .steps::after{animation:rail linear both;animation-timeline:--e-steps;animation-range:contain 0% contain 100%}
+  }
+}
+@keyframes rail{from{transform:scaleY(0)}to{transform:scaleY(1)}}
+.step{position:relative;z-index:1;display:grid;grid-template-columns:40px minmax(0,1fr);gap:20px}
+@media(min-width:960px){.step{grid-template-columns:40px minmax(0,1fr) minmax(0,1fr);gap:32px}}
+.stepNum{display:grid;place-items:center;width:40px;height:40px;border-radius:50%;background:var(--gl-text);color:#fff;font-size:15px;font-weight:600}
+.stepBody{display:grid;gap:10px;align-content:start}
+.stepTitle{margin:0;font-size:clamp(24px,2.6vw,32px);font-weight:600;line-height:1.25;letter-spacing:-.035em}
+.stepDemo{margin:0;color:var(--gl-text-body);font-size:17px;line-height:1.7}
+.why{grid-column:2;border-radius:18px;background:var(--gl-surface);border:1px solid var(--gl-border);padding:18px 20px}
+@media(min-width:960px){.why{grid-column:3}}
+.whyLabel{margin:0 0 6px;color:var(--gl-accent-gold-text);font-size:14px;font-weight:600}
+.why p:last-child{margin:0;color:var(--gl-text-body);font-size:15px;line-height:1.75}
+
+/* Publish step: the platform names run past once per 30 seconds; paused on hover and with reduced motion. */
+.marquee{overflow:hidden;margin-top:6px;-webkit-mask-image:linear-gradient(90deg,transparent,#000 12%,#000 88%,transparent);
+  mask-image:linear-gradient(90deg,transparent,#000 12%,#000 88%,transparent)}
+.marqueeTrack{display:flex;gap:28px;width:max-content;margin:0;padding:6px 0;list-style:none;color:var(--gl-text-secondary-aa);font-size:18px;font-weight:600;
+  letter-spacing:-.02em}
+@media(prefers-reduced-motion:no-preference){
+  .marqueeTrack{animation:marquee 30s linear infinite}
+  .marquee:hover .marqueeTrack{animation-play-state:paused}
+}
+@media(prefers-reduced-motion:reduce){.marqueeTrack{flex-wrap:wrap;width:auto}.marqueeTrack [aria-hidden]{display:none}}
+@keyframes marquee{to{transform:translateX(-50%)}}
+
+/* Sample reports (shown only once real reports exist) */
+.samples{margin-top:96px}
+.tabs{display:flex;gap:8px;margin:24px 0 16px;overflow-x:auto;padding-bottom:4px}
+.tab{flex:none;max-width:17rem;min-height:44px;padding:8px 16px;border:1px solid var(--gl-border-control);border-radius:var(--gl-radius-pill);background:var(--gl-surface);
+  color:var(--gl-text-secondary-aa);font:inherit;font-size:14px;line-height:1.4;text-align:left;cursor:pointer}
+.tab[aria-selected=true]{border-color:var(--gl-text);background:var(--gl-text);color:#fff}
+.report{display:grid;gap:24px;border-radius:24px;background:var(--gl-surface);border:1px solid var(--gl-border);padding:clamp(20px,3vw,36px)}
+.reportHead{display:flex;align-items:center;gap:8px;margin:0;color:var(--gl-text-secondary-aa);font-size:14px}
+.tag{padding:0 8px;border-radius:var(--gl-radius-pill);background:var(--gl-accent-tag);color:var(--gl-accent-tag-text);font-size:12px;line-height:20px}
+.reportPart{display:grid;gap:8px;padding-left:16px;border-left:2px solid var(--gl-accent-gold)}
+.reportPart p{margin:0;color:var(--gl-text-body);font-size:15px;line-height:1.75}
+.reportPart p:first-child{color:var(--gl-text);font-size:17px;font-weight:600}
+.placeholder{display:grid;gap:8px}
+.placeholder span{height:8px;border-radius:var(--gl-radius-pill);background:var(--gl-surface-muted)}
+
+/* What you get when: three stops on one line. */
+.when{margin-top:112px}
+.whenList{position:relative;display:grid;gap:24px;margin:32px 0 0;padding:0;list-style:none}
+@media(min-width:900px){.whenList{grid-template-columns:repeat(3,minmax(0,1fr));gap:32px;padding-top:28px;border-top:2px solid var(--gl-text)}}
+.whenItem{display:grid;gap:10px;font-size:clamp(19px,1.8vw,22px);font-weight:500;line-height:1.5;letter-spacing:-.02em}
+.whenItem span{color:var(--gl-text-secondary-aa);font-size:14px;font-weight:600;letter-spacing:0}
+
+/* Price */
+.compare{display:grid;gap:4px;margin-bottom:56px}
+.compareLede{margin:0 0 12px;font-size:18px;font-weight:600}
+.compareRow{display:grid;gap:4px;padding:18px 0;border-bottom:1px solid var(--gl-border-strong)}
+@media(min-width:720px){.compareRow{grid-template-columns:minmax(0,1fr) auto;gap:24px;align-items:baseline}}
+.compareRow span:first-child{color:var(--gl-text-body);font-size:17px}
+.compareRow span:last-child{font-size:clamp(18px,2vw,24px);font-weight:600;letter-spacing:-.02em}
+.compareRow sup{margin-left:2px;color:var(--gl-text-secondary-aa);font-size:11px}
+.own{margin:24px 0 0;font-size:clamp(24px,3vw,36px);font-weight:600;line-height:1.3;letter-spacing:-.035em}
+.founder{margin:0 0 24px;font-size:18px;font-weight:600}
+.founder span{margin-left:8px;color:var(--gl-text-secondary-aa);font-size:15px;font-weight:400}
+.billing{display:inline-grid;grid-template-columns:1fr 1fr;gap:4px;margin-bottom:24px;padding:4px;border-radius:var(--gl-radius-pill);background:#e9e9e9}
+.billing label{display:flex;align-items:center;justify-content:center;gap:8px;min-height:44px;padding:0 22px;border-radius:var(--gl-radius-pill);
+  color:var(--gl-text-secondary-aa);font-size:15px;font-weight:500;cursor:pointer}
+.billing label[data-on=true]{background:var(--gl-text);color:#fff}
+.billing label[data-disabled=true]{cursor:not-allowed;opacity:.5}
+.badge{padding:0 8px;border-radius:var(--gl-radius-pill);background:var(--gl-success-bg);color:var(--gl-success);font-size:12px;line-height:20px}
+.cards{display:grid;gap:16px}
+@media(min-width:860px){.cards{grid-template-columns:repeat(auto-fit,minmax(0,1fr))}}
+.card{display:grid;align-content:start;gap:18px;border-radius:28px;background:var(--gl-surface);padding:clamp(24px,3vw,36px)}
+.card[data-recommended=true]{background:var(--gl-text);color:#fff}
+.cardHead{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.cardName{margin:0;font-size:22px;font-weight:600;letter-spacing:-.03em}
+.recTag{padding:0 10px;border-radius:var(--gl-radius-pill);background:var(--gl-accent-gold);color:var(--gl-text);font-size:13px;font-weight:600;line-height:24px}
+.result{margin:0;font-size:16px;font-weight:500;line-height:1.6}
+.priceLine{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 10px;margin:0}
+.priceLine s{color:var(--gl-text-secondary-aa);font-size:20px}
+.priceLine b{font-size:clamp(48px,5.4vw,72px);font-weight:600;line-height:1;letter-spacing:-.05em;font-variant-numeric:tabular-nums}
+.per,.muted{color:var(--gl-text-secondary-aa);font-size:15px}
+.saving{margin:0;color:var(--gl-success);font-size:15px}
+.renewal{margin:10px 0 0;color:var(--gl-text-secondary-aa);font-size:13px;line-height:1.6}
+.fit{margin:0;padding-top:16px;border-top:1px solid var(--gl-border);color:var(--gl-text-body);font-size:15px}
+.card[data-recommended=true] .per,.card[data-recommended=true] .muted,.card[data-recommended=true] .renewal,
+.card[data-recommended=true] .priceLine s{color:rgba(255,255,255,.72)}
+.card[data-recommended=true] .fit{border-color:rgba(255,255,255,.16);color:rgba(255,255,255,.86)}
+.card[data-recommended=true] .saving{color:#9fd8aa}
+.card[data-recommended=true] .badge{background:rgba(159,216,170,.16);color:#bfe8c7}
+.cardCta{width:100%}
+.risk{margin-top:16px;border-radius:28px;background:var(--e-mint);padding:clamp(24px,4vw,48px)}
+.risk ul{display:grid;gap:12px;margin:20px 0 0;padding:0;list-style:none}
+.risk li{position:relative;padding-left:22px;color:var(--gl-text-body);font-size:17px;line-height:1.7}
+.risk li::before{content:"";position:absolute;top:.75em;left:0;width:8px;height:8px;border-radius:50%;background:var(--gl-success)}
+.sources{margin-top:32px;color:var(--gl-text-secondary-aa);font-size:13px;line-height:1.7}
+.sources p,.sources ol{margin:0}
+.sources ol{padding-left:18px}
+
+/* FAQ: the heading holds still on the left while the questions scroll. */
+.faqGrid{display:grid;gap:40px}
+@media(min-width:960px){.faqGrid{grid-template-columns:minmax(0,5fr) minmax(0,7fr);gap:64px}.faqHead{position:sticky;top:108px;align-self:start}}
+.faqGroup+.faqGroup{margin-top:48px}
+.faqGroupTitle{margin:0 0 4px;color:var(--gl-text-secondary-aa);font-size:15px;font-weight:600}
+.faqItem{border-bottom:1px solid var(--gl-border-strong)}
+.faqItem summary{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;padding:22px 0;font-size:clamp(17px,1.6vw,20px);font-weight:500;
+  line-height:1.5;letter-spacing:-.015em;cursor:pointer;list-style:none}
+.faqItem summary::-webkit-details-marker{display:none}
+.faqItem summary svg{flex:none;margin-top:4px;transition:transform var(--gl-motion)}
+.faqItem[open] summary svg{transform:rotate(45deg)}
+.faqAnswer{display:grid;gap:12px;padding:0 40px 24px 0;color:var(--gl-text-body);font-size:16px;line-height:1.8}
+.faqAnswer p{margin:0}
+
+/* Final action: the old path stays grey, the new one is in ink. */
+.final{text-align:center}
+.paths{display:grid;gap:28px;max-width:30em;margin:48px auto 0;padding:0;list-style:none;font-size:clamp(22px,2.5vw,30px);font-weight:500;line-height:1.55;
+  letter-spacing:-.025em;text-wrap:pretty}
+.paths li:first-child{color:#7d7d7d}
+.stack{max-width:40em;margin:48px auto 0;color:var(--gl-text-body);font-size:17px}
+.stack b{color:var(--gl-text)}
+.finalFounder{margin:16px 0 0;font-size:17px;font-weight:600}
+.finalFounder span{margin-left:8px;color:var(--gl-text-secondary-aa);font-size:15px;font-weight:400}
+.finalCta{margin-top:40px}
+.finalNote{margin:16px 0 0;color:var(--gl-text-secondary-aa);font-size:14px}
+
+/* Footer: the closing film card. */
+.footer{margin:0 8px 8px;border-radius:28px;background:var(--e-film);color:#fff;padding:56px 0 40px}
+@media(min-width:768px){.footer{margin:0 12px 12px;border-radius:32px}}
+.footerGrid{display:grid;gap:32px}
+@media(min-width:720px){.footerGrid{grid-template-columns:2fr 1fr 1fr}}
+.footerBrand{margin:0;font-size:clamp(36px,5vw,64px);font-weight:600;line-height:1;letter-spacing:-.055em}
+.footerTitle{margin:0 0 12px;color:var(--e-film-text);font-size:14px}
+.footer ul{display:grid;gap:10px;margin:0;padding:0;list-style:none}
+.footer ul a{color:#fff;font-size:15px;text-decoration:none}
+.footer ul a:hover{text-decoration:underline}
+.copyright{margin:48px 0 0;color:var(--e-film-text);font-size:13px}
