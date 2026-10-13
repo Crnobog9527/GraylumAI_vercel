@@ -19,6 +19,7 @@ function client() {
     if (name === 'data_use_consent_expire') data = 0;
     if (name === 'erasure_manifest_pending') data = [];
     if (name === 'erasure_manifest_cleanup') data = 0;
+    if (name === 'log_retention_cleanup') data = { applicationLogs: 0, diagnosticResults: 2, scheduledJobRuns: 1, more: false };
     const promise = Promise.resolve({ data, error: null });
     return Object.assign(promise, { abortSignal: () => promise });
   });
@@ -139,6 +140,7 @@ it('uses available daily budget beyond 20 subjects and resumes remaining work ne
     if (name === 'data_use_consent_expire') data = 0;
     if (name === 'erasure_manifest_pending') data = [];
     if (name === 'erasure_manifest_cleanup') data = 0;
+    if (name === 'log_retention_cleanup') data = { applicationLogs: 0, diagnosticResults: 0, scheduledJobRuns: 0, more: false };
     const promise = Promise.resolve({ data, error: null });
     return Object.assign(promise, { abortSignal: () => promise });
   });
@@ -194,4 +196,43 @@ it('syncs the off-database erasure manifest and its 35-day cleanup in the same c
   database.rpc.mockImplementation(name => name === 'erasure_manifest_cleanup'
     ? Promise.resolve({ data: null, error: { code: 'XX000' } }) as never : original(name));
   expect((await runAccountErasureExecutor(database as never)).failed).toBe(1);
+});
+it('removes expired log rows through the same cron and reports a cleanup failure', async () => {
+  const database = client();
+  expect((await runAccountErasureExecutor(database as never)).failed).toBe(0);
+  expect(database.rpc).toHaveBeenCalledWith('log_retention_cleanup', {});
+  const original = database.rpc.getMockImplementation()!;
+  database.rpc.mockImplementation(name => name === 'log_retention_cleanup'
+    ? { abortSignal: () => Promise.resolve({ data: null, error: { code: 'XX000' } }) } as never
+    : original(name));
+  expect((await runAccountErasureExecutor(database as never)).failed).toBe(1);
+});
+it('keeps draining a log backlog within ten batches and reports what is left', async () => {
+  const database = client();
+  const original = database.rpc.getMockImplementation()!;
+  let calls = 0;
+  const reply = (more: boolean) => {
+    const promise = Promise.resolve({ data: { applicationLogs: 5000, diagnosticResults: 0, scheduledJobRuns: 0, more }, error: null });
+    return Object.assign(promise, { abortSignal: () => promise });
+  };
+  database.rpc.mockImplementation(name => name === 'log_retention_cleanup' ? reply(++calls < 3) as never : original(name));
+  expect((await runAccountErasureExecutor(database as never)).failed).toBe(0);
+  expect(calls).toBe(3);
+  calls = 0;
+  database.rpc.mockImplementation(name => name === 'log_retention_cleanup' ? (calls++, reply(true)) as never : original(name));
+  expect((await runAccountErasureExecutor(database as never)).failed).toBe(1);
+  expect(calls).toBe(10);
+});
+it('stops starting log cleanup batches once the work deadline has passed', async () => {
+  const database = client();
+  const original = database.rpc.getMockImplementation()!;
+  let calls = 0;
+  database.rpc.mockImplementation(name => {
+    if (name !== 'log_retention_cleanup') return original(name);
+    calls++;
+    const promise = Promise.resolve({ data: { applicationLogs: 5000, diagnosticResults: 0, scheduledJobRuns: 0, more: true }, error: null });
+    return Object.assign(promise, { abortSignal: () => promise }) as never;
+  });
+  expect((await runAccountErasureExecutor(database as never, Date.now() - 1)).failed).toBe(1);
+  expect(calls).toBe(1);
 });
