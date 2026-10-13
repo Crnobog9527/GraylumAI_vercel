@@ -103,6 +103,8 @@ async function authUrl(platform, externalId) {
   const r = await call('POST', '/social-accounts/auth-url', {
     // Analytics-only scope. Publishing scope is a separate consent and is not requested by this probe.
     platform, external_id: externalId ?? 'graylum-probe', permissions: ['feeds'],
+    // Quickstart projects must use the organization connection type for LinkedIn (provider docs).
+    ...(platform === 'linkedin' ? { platform_data: { linkedin: { connection_type: 'organization' } } } : {}),
   });
   // The URL is a consent link for the Owner's own test account; print host and the private file path only.
   const url = r.json?.url ?? null;
