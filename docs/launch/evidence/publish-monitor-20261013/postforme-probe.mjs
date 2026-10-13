@@ -15,7 +15,7 @@
 //                                                                account IDs are looked up internally, never printed)
 //   node postforme-probe.mjs smoke            (list endpoints, error shapes, rate-limit headers)
 //   node postforme-probe.mjs burst [n]        (n sequential GET /social-accounts, to observe 429)
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
@@ -98,8 +98,10 @@ function maskName(name) {
 function saveConsentUrl(platform, url) {
   const dir = join(homedir(), '.graylum', 'tmp');
   mkdirSync(dir, { recursive: true, mode: 0o700 });
+  chmodSync(dir, 0o700); // an existing directory keeps its old mode otherwise
   const file = join(dir, `postforme-consent-${platform.replace(/[^a-z0-9_-]/gi, '_')}.txt`);
-  writeFileSync(file, `${url}\n`, { mode: 0o600 });
+  rmSync(file, { force: true }); // never reuse a pre-existing file that may have wider permissions
+  writeFileSync(file, `${url}\n`, { mode: 0o600, flag: 'wx' });
   return file;
 }
 
