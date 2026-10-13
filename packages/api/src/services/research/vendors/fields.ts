@@ -1,5 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-// Field extraction for third-party research responses (ported from scripts/research0/metrics.mjs).
+// Field extraction for third-party research responses (ported from the RESEARCH-0 comparison tooling).
 // A value the supplier did not provide stays undefined and is reported as missing; it is never
 // coerced to zero, and zero supplied by the supplier is a real value.
 

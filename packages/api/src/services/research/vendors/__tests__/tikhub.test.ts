@@ -107,9 +107,11 @@ describe('callTikhub', () => {
     expect(result.items).toHaveLength(30);
   });
 
-  it('returns no invented items for an unrecognized shape', async () => {
-    const result = await callTikhub({ platform: 'weibo', kind: 'account_posts', account: '2803301701' },
+  it('reports an empty or unrecognized payload as a failed delivery, never as a billable success', async () => {
+    const posts = await callTikhub({ platform: 'weibo', kind: 'account_posts', account: '2803301701' },
       deps(jsonFetch(200, { code: 200, data: { something: 'else' } })));
-    expect(result).toMatchObject({ outcome: 'ok', items: [] });
+    expect(posts).toMatchObject({ outcome: 'failed', reason: 'EMPTY_OR_UNRECOGNIZED', items: [], supplierMayCharge: true });
+    const profile = await callTikhub({ platform: 'tiktok', kind: 'account_profile', account: 'n' }, deps(jsonFetch(200, { code: 200 })));
+    expect(profile).toMatchObject({ outcome: 'failed', reason: 'EMPTY_OR_UNRECOGNIZED' });
   });
 });

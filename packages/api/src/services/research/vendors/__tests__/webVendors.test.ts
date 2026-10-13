@@ -73,10 +73,11 @@ describe('callFirecrawl', () => {
   it('pins the request to one markdown page and refuses PDFs and private hosts before sending', () => {
     expect(buildFirecrawlRequest('https://example.com/a#frag')).toEqual({ url: 'https://example.com/a', request: {
       method: 'POST', url: 'https://api.firecrawl.dev/v1/scrape',
-      body: { url: 'https://example.com/a', formats: ['markdown'], onlyMainContent: true } } });
+      body: { url: 'https://example.com/a', formats: ['markdown'], onlyMainContent: true, parsePDF: false } } });
     expect(buildFirecrawlRequest('https://example.com/report.PDF')).toEqual({ reason: 'PDF_NOT_SUPPORTED' });
     for (const bad of ['ftp://example.com', 'https://user:pw@example.com', 'http://localhost:3000', 'http://10.0.0.1/',
-      'http://192.168.1.1', 'http://[::1]/', 'http://intranet/', 'not a url']) {
+      'http://192.168.1.1', 'http://[::1]/', 'http://[::ffff:7f00:1]/', 'http://[::]/', 'http://[2001:db8::1]/',
+      'http://100.64.0.1/', 'http://198.18.0.1/', 'http://0.0.0.0/', 'http://2130706433/', 'http://intranet/', 'not a url']) {
       expect(buildFirecrawlRequest(bad)).toEqual({ reason: 'INVALID_URL' });
     }
   });
@@ -94,6 +95,14 @@ describe('callFirecrawl', () => {
     const body = { success: true, data: { markdown: 'Not found', metadata: { statusCode: 404, creditsUsed: 1 } } };
     expect(await callFirecrawl('https://example.com/gone', deps(jsonFetch(200, body))))
       .toMatchObject({ outcome: 'failed', reason: 'TARGET_HTTP_404', supplierMayCharge: true, items: [], usage: { units: '1' } });
+  });
+
+  it('refuses a PDF that arrives through an extensionless URL or redirect, after the one billed credit', async () => {
+    const base64 = { success: true, data: { markdown: 'JVBERi0xLjcKJ...', metadata: { statusCode: 200, creditsUsed: 1 } } };
+    expect(await callFirecrawl('https://example.com/download', deps(jsonFetch(200, base64))))
+      .toMatchObject({ outcome: 'failed', reason: 'PDF_NOT_SUPPORTED', items: [], usage: { units: '1' } });
+    const typed = { success: true, data: { markdown: '', metadata: { contentType: 'application/pdf', creditsUsed: 1 } } };
+    expect(await callFirecrawl('https://example.com/d', deps(jsonFetch(200, typed)))).toMatchObject({ reason: 'PDF_NOT_SUPPORTED' });
   });
 
   it('keeps missing credits null on success', async () => {

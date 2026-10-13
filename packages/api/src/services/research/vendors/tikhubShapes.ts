@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 // TikHub passes each platform's own JSON through under `data` without a published schema, so items are
-// located by their characteristic keys (ported from scripts/research0/vendors/tikhubShapes.mjs).
+// located by their characteristic keys (ported from the RESEARCH-0 comparison tooling).
 // Only whitelisted fields leave this module: no bios, contact details, avatars or commenter data.
 import { bool, clip, count, displayCount, findAll, has, text, timestamp } from './fields';
 import type { ResearchItem, SocialKind, SocialPlatform } from './types';

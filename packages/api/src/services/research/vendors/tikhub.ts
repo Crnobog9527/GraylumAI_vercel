@@ -151,6 +151,11 @@ export async function callTikhub(call: TikhubCall, deps: VendorDeps): Promise<Re
       supplierMayCharge: true, usage: { unit: 'call', units: '1' } };
   }
   const all = normalizeTikhub(answer.json, call.platform, call.kind);
+  // An empty or changed payload is not a delivery: never report it as a successful, billable result.
+  if (all.length === 0) {
+    return { ...base, outcome: 'failed', reason: 'EMPTY_OR_UNRECOGNIZED', httpStatus: 200,
+      supplierMayCharge: true, usage: { unit: 'call', units: '1' } };
+  }
   const limit = Math.min(Math.max(Math.trunc(call.limit ?? MAX_POSTS), 1), MAX_POSTS);
   const items = all.slice(0, limit);
   return { ...base, outcome: all.length > limit ? 'partial' : 'ok', reason: null, httpStatus: 200,

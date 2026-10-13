@@ -1,8 +1,9 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 // Firecrawl page-fetch adapter. The request is pinned so usage cannot exceed one credit per call
 // (plan §3.5): markdown only, main content only, no JSON extraction (5x credits), no PDF parsing
-// (extra credits per page), a single page with no link following. Public pages only; no anti-bot
-// or login options are ever requested.
+// (`parsePDF: false` bills a PDF as one credit instead of one per page, even when an extensionless
+// URL or a redirect lands on a PDF), a single page with no link following. Public pages only; no
+// anti-bot or login options are ever requested.
 import { clip, count, text, timestamp } from './fields';
 import { exchange, usageUnits } from './http';
 import type { ResearchCallResult, VendorDeps, VendorRequest } from './types';
@@ -12,12 +13,17 @@ export const FIRECRAWL_ROUTE = 'firecrawl:scrape:markdown';
 export const MAX_MARKDOWN_CHARS = 20_000;
 const PAGE_FIELDS = ['title', 'publishedAt', 'language', 'markdown'] as const;
 
+/** Non-public targets. IPv6 literals are refused outright (mapped, unspecified, ULA, link-local, ...). */
 function privateHost(hostname: string): boolean {
-  const host = hostname.toLowerCase().replace(/^\[|\]$/g, '');
+  const host = hostname.toLowerCase();
+  if (host.startsWith('[') || host.includes(':')) return true;
   if (host === 'localhost' || host.endsWith('.localhost') || host.endsWith('.local') || host.endsWith('.internal')) return true;
-  if (!host.includes('.') && !host.includes(':')) return true;
-  if (/^(127\.|10\.|0\.|169\.254\.|192\.168\.)/.test(host) || /^172\.(1[6-9]|2\d|3[01])\./.test(host)) return true;
-  return host.includes(':') && (host === '::1' || /^f[cd]/.test(host) || host.startsWith('fe80'));
+  if (!host.includes('.')) return true;
+  const v4 = host.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+  if (!v4) return false;
+  const [a, b] = [Number(v4[1]), Number(v4[2])];
+  return a === 0 || a === 10 || a === 127 || a >= 224 || (a === 169 && b === 254) || (a === 192 && b === 168)
+    || (a === 172 && b >= 16 && b <= 31) || (a === 100 && b >= 64 && b <= 127) || (a === 198 && (b === 18 || b === 19));
 }
 
 /** Public http(s) page without credentials; PDFs are refused before any request (they cost extra). */
@@ -29,7 +35,7 @@ export function buildFirecrawlRequest(rawUrl: string): { request: VendorRequest;
   if (/\.pdf$/i.test(url.pathname)) return { reason: 'PDF_NOT_SUPPORTED' };
   url.hash = '';
   return { url: url.href, request: { method: 'POST', url: FIRECRAWL_SCRAPE_URL, body: {
-    url: url.href, formats: ['markdown'], onlyMainContent: true,
+    url: url.href, formats: ['markdown'], onlyMainContent: true, parsePDF: false,
   } } };
 }
 
@@ -70,7 +76,12 @@ export async function callFirecrawl(rawUrl: string, deps: VendorDeps): Promise<R
   if (targetStatus !== undefined && targetStatus >= 400) {
     return { ...base, outcome: 'failed', reason: `TARGET_HTTP_${targetStatus}`, httpStatus: 200, supplierMayCharge: true, usage };
   }
+  // With parsePDF off a PDF comes back base64-encoded: billed once, but there is no page to give the user.
+  const contentType = text(answer.json, ['data.metadata.contentType', 'data.metadata.content-type']) ?? '';
   const markdown = text(answer.json, ['data.markdown']);
+  if (/pdf/i.test(contentType) || markdown?.trimStart().startsWith('JVBERi0')) {
+    return { ...base, outcome: 'failed', reason: 'PDF_NOT_SUPPORTED', httpStatus: 200, supplierMayCharge: true, usage };
+  }
   const clipped = clip(markdown, MAX_MARKDOWN_CHARS);
   const values: Record<string, string | undefined> = {
     title: clip(text(answer.json, ['data.metadata.title', 'data.metadata.ogTitle']), 300),
