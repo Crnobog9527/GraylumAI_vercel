@@ -58,8 +58,12 @@ export const TIKHUB_ROUTES: Partial<Record<`${SocialPlatform}:${SocialKind}`, Ti
   'youtube:keyword_posts': {
     method: 'GET', path: '/youtube/web_v2/get_general_search_v2', params: ({ keyword }) => ({ keyword: keyword!, type: 'video' }),
   },
-  // YouTube profiles are absent until RT-7 maps the documented channel fields (channel_id, handle,
-  // abbreviated subscriber labels); without them no follower count can be read.
+  // Tested in RESEARCH-0. Abbreviated subscriber labels ("1.2M") stay missing, so YouTube is not
+  // benchmark-capable; the profile still serves ordinary account lookups.
+  'youtube:account_profile': {
+    method: 'GET', path: '/youtube/web_v2/get_channel_description', account: 'youtube_channel',
+    params: ({ account }) => ({ channel_id: account!, language_code: 'en', country_code: 'US' }),
+  },
   'youtube:account_posts': {
     method: 'GET', path: '/youtube/web_v2/get_channel_videos', account: 'youtube_channel',
     params: ({ account }) => ({ channel_id: account!, need_format: 'true' }),

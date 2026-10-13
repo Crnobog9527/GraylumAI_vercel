@@ -40,7 +40,7 @@ describe('TikHub routes', () => {
     expect('request' in buildTikhubRequest({ platform: 'tiktok', kind: 'account_profile', account: 'nat.geo' })).toBe(true);
     expect(buildTikhubRequest({ platform: 'instagram', kind: 'account_posts', account: 'a-b' })).toEqual({ reason: 'INVALID_ACCOUNT' });
     expect('request' in buildTikhubRequest({ platform: 'instagram', kind: 'account_posts', account: 'nat.geo_1' })).toBe(true);
-    expect(buildTikhubRequest({ platform: 'youtube', kind: 'account_profile', account: 'UCLA_DiR1FfKNvjuUpBHmylQ' })).toEqual({ reason: 'ROUTE_NOT_SUPPORTED' });
+    expect('request' in buildTikhubRequest({ platform: 'youtube', kind: 'account_profile', account: 'UCLA_DiR1FfKNvjuUpBHmylQ' })).toBe(true);
     const result = await callTikhub({ platform: 'xiaohongshu', kind: 'account_posts', account: 'x' }, deps(fetchImpl));
     expect(result).toMatchObject({ outcome: 'not_sent', reason: 'ROUTE_NOT_SUPPORTED', supplierMayCharge: false });
     expect(calls).toHaveLength(0);
@@ -79,6 +79,14 @@ describe('callTikhub', () => {
     expect(result.items[0].fields).toMatchObject({ id: '9', followers: 15000, handle: 'n' });
     expect(JSON.stringify(result.items)).not.toMatch(/微信|a@b\.c|url_list/);
     expect(result.items[0].missing).toContain('following');
+  });
+
+  it('reads a YouTube channel profile and keeps abbreviated subscriber labels missing', async () => {
+    const body = { code: 200, data: { channel_id: 'UCLA_DiR1FfKNvjuUpBHmylQ', handle: '@natgeo', title: 'National Geographic', subscriber_count: '1.2M' } };
+    const result = await callTikhub({ platform: 'youtube', kind: 'account_profile', account: 'UCLA_DiR1FfKNvjuUpBHmylQ' }, deps(jsonFetch(200, body)));
+    expect(result).toMatchObject({ outcome: 'ok' });
+    expect(result.items[0].fields).toMatchObject({ id: 'UCLA_DiR1FfKNvjuUpBHmylQ', handle: '@natgeo', name: 'National Geographic' });
+    expect(result.items[0].missing).toContain('followers');
   });
 
   it('keeps the YouTube relative date and abbreviated views missing', async () => {
@@ -172,6 +180,9 @@ describe('callTikhub', () => {
     expect(v3).toMatchObject({ outcome: 'ok' });
     expect(v3.items[0]).toMatchObject({ url: 'https://www.instagram.com/p/AbC/', fields: { likes: 5 } });
     expect(v3.items[0].missing).toContain('publishedAt');
+    const codeOnly = await callTikhub({ platform: 'instagram', kind: 'account_posts', account: 'natgeo' }, deps(jsonFetch(200, { code: 200,
+      data: { items: [{ shortcode: 'XyZ', like_count: 3 }] } })));
+    expect(codeOnly.items[0]).toMatchObject({ url: 'https://www.instagram.com/p/XyZ/', fields: { id: 'XyZ', likes: 3 } });
     const instagram = await callTikhub({ platform: 'instagram', kind: 'account_posts', account: 'quiet' },
       deps(jsonFetch(200, { code: 200, data: { edges: [] } })));
     expect(instagram).toMatchObject({ outcome: 'ok', reason: 'NO_RESULTS' });

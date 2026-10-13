@@ -80,7 +80,7 @@ function youtubeVideo(item: Raw, channel: string | undefined) {
 function instagramPost(item: Raw) {
   const code = text(item, ['code', 'shortcode']);
   return toItem({
-    id: idText(item, ['id', 'pk']), title: clip(text(item, ['caption.text', 'caption_text']), TITLE_CHARS),
+    id: idText(item, ['id', 'pk']) ?? code, title: clip(text(item, ['caption.text', 'caption_text']), TITLE_CHARS),
     author: text(item, ['user.username', 'owner.username']), authorId: text(item, ['user.username', 'owner.username']),
     publishedAt: timestamp(item, ['taken_at', 'taken_at_timestamp']),
     views: count(item, ['play_count', 'ig_play_count', 'view_count', 'video_view_count']),
@@ -120,9 +120,9 @@ function bilibiliVerified(object: Raw): boolean | undefined {
 
 function profile(object: Raw) {
   return toItem({
-    id: idText(object, ['uid', 'mid', 'rest_id', 'id', 'idstr', 'user_id']),
+    id: idText(object, ['uid', 'mid', 'rest_id', 'id', 'idstr', 'user_id', 'channel_id', 'channelId']),
     name: text(object, ['nickname', 'name', 'full_name', 'title', 'screen_name', 'legacy.name']),
-    handle: text(object, ['unique_id', 'screen_name', 'username', 'legacy.screen_name']),
+    handle: text(object, ['unique_id', 'screen_name', 'username', 'legacy.screen_name', 'handle']),
     followers: count(object, ['follower_count', 'followers_count', 'fans', 'follower', 'sub_count',
       'legacy.followers_count', 'edge_followed_by.count']) ?? displayCount(object, ['subscriber_count']),
     following: count(object, ['following_count', 'friends_count', 'following', 'attention', 'friends',
@@ -134,7 +134,7 @@ function profile(object: Raw) {
   }, PROFILE_FIELDS);
 }
 
-const PROFILE_KEYS = ['follower_count', 'followers_count', 'unique_id', 'screen_name', 'mid', 'sign', 'legacy',
+const PROFILE_KEYS = ['channel_id', 'follower_count', 'followers_count', 'unique_id', 'screen_name', 'mid', 'sign', 'legacy',
   'sub_count', 'edge_followed_by', 'subscriber_count'];
 
 /**

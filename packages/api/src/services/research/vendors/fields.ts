@@ -57,7 +57,7 @@ export function displayCount(value: unknown, paths: readonly string[]): number |
   const match = found?.match(/^\s*(\d{1,3}(?:,\d{3})+|\d+)\s*(views?|次观看)?\s*$/i);
   if (!match) return undefined;
   const parsed = Number(match[1].replace(/,/g, ''));
-  return Number.isFinite(parsed) ? parsed : undefined;
+  return Number.isSafeInteger(parsed) ? parsed : undefined;
 }
 
 /** Epoch seconds, epoch milliseconds or an absolute date string → ISO. Relative labels are missing. */
