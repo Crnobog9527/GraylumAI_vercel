@@ -123,6 +123,7 @@ Owner 原话（2026-10-13，SEO/GEO 文案窗口对话，按时间顺序）：
 - 选项 A 原文（总控给出）：复盘由 PUBLISH-MONITOR 负责——海外 9 平台用 Post for Me 授权读取用户作品数据；小红书、抖音用 TikHub 读用户账号公开数据（不需授权，与 RESEARCH-TOOLS 共用适配器）；另加手动导入兜底（贴作品链接、上传后台截图或表格）；每周复盘由 AI 读这些数据给出有效内容和下周调整。
 - SOCIAL-SYNC 不再单独做，并入 PUBLISH-MONITOR；INTEGRATION-BASE、V3-FEISHU 仍在上线后。取代第 3.x 节"宣传不提内容追踪和数据复盘（社媒同步在上线后，D1）"的写法。LEARN-2 不提前，依赖改为 PUBLISH-MONITOR。
 - 会员权益仍按第 51 项（Pro：自己作品近 30 天数据；Gold：另加对标监控、90 天趋势、每周自动复盘），不因本决定改变。
+- 国内平台数据范围变化：小红书、抖音改为可读用户账号公开数据并支持手动导入，取代已确认设计中"国内平台不支持自己作品数据、需用户自己看后台"的说法（`docs/launch/design/landing/offer-one-page-final-2026-10-13.md` 第 136–137 行、`docs/launch/design/paywall/paywall-final-v25.html` 第 512 行）。这两份定稿文件保留原样作为历史；落地页和付费墙的对应文案由 PUBLIC-SITE、PAYWALL 按本条更新，且只在 PUBLISH-MONITOR 验收通过后对外展示；REL-1 上线前核对两处说法与实际能力一致。
 - Post for Me 实测上限 1 美元，不订阅付费套餐；若必须付费订阅才能测，先停下报 Owner。
 - 上线门槛不变：PUBLISH-MONITOR（含数据复盘）仍是 REL-1 的前置，必须上线前验收。SEO 规范第 3.3 节的兜底只保证首页说法与实际一致：任何时候复盘未验收，首页"复盘数据"的说法都不得对外展示；它不构成跳过 PUBLISH-MONITOR 上线的许可，缩小上线范围须 Owner 另行决定。
 
