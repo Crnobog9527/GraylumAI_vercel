@@ -25,6 +25,8 @@
 
 ## 验证
 
+<!-- 浏览器验收登录：运行 `node scripts/staging-login <角色>`，用生成的 storageState 打开浏览器；过期就重跑；不读取、不记录凭证。
+     详见 docs/runbooks/STAGING_TEST_LOGIN.md -->
 - 做了哪些操作、实际结果：
 - 没跑或没验证的：
 

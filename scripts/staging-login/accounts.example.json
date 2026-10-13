@@ -1,0 +1,6 @@
+{
+  "_note": "复制到 ~/.graylum/secrets/staging-test-accounts.json 后填写真实的测试站测试邮箱（不要密码、不要个人邮箱），再 chmod 600。",
+  "user": "test-user@example.test",
+  "free": "test-free@example.test",
+  "admin": "test-admin@example.test"
+}
