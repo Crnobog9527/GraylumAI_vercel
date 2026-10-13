@@ -6,6 +6,7 @@ import { ArrowUp, Box, PanelRightClose, PanelRightOpen, Plus } from 'lucide-reac
 import { Button } from '@/components/ui/button';
 import { MessageMarkdown } from '@/components/chat/MessageMarkdown';
 import { CaptureChecklist } from '@/components/opc/capture-checklist';
+import { ComposerEditor, type ComposerEditorHandle } from '@/components/opc/composer-editor';
 import { OTHER_PLACEHOLDER, QuestionCardView } from '@/components/opc/question-card';
 import frame from '@/components/opc/workspace-frame.module.css';
 import composer from '@/components/opc/work-composer.module.css';
@@ -79,15 +80,21 @@ function Message({ message, shown }: { message: DemoMessage; shown: number | nul
 export function DemoWorkspace() {
   const [state, dispatch] = useReducer(demoReducer, undefined, initialDemoState);
   const [rightOpen, setRightOpen] = useState(true);
-  const [otherHint, setOtherHint] = useState(false);
+  const [draft, setDraft] = useState('');
+  const box = useRef<ComposerEditorHandle>(null);
   const log = useRef<HTMLDivElement>(null);
   const live = state.messages.find(message => message.id === state.liveId);
   const shown = useReveal(state.liveId, live?.text ?? '', () => dispatch({ type: 'settled' }));
   const card = state.liveId ? null : openQuestion(state);
   const panel = state.panel;
+  const send = () => {
+    if (!draft.trim() || state.liveId) return;
+    dispatch({ type: 'free', text: draft });
+    setDraft('');
+    box.current?.focus();
+  };
   const readyToConfirm = state.phase === 'summary' && !state.liveId;
   const answer = (option: number) => {
-    setOtherHint(false);
     dispatch({ type: 'answer', option });
     log.current?.focus({ preventScroll: true });
   };
@@ -103,7 +110,7 @@ export function DemoWorkspace() {
       <div className={styles.chrome}>
         <span className={styles.badge}>{DEMO_LABEL}</span>
         <p>{DEMO_NOTE}</p>
-        <button type="button" className={styles.restart} onClick={() => { dispatch({ type: 'reset' }); setOtherHint(false); }}>重新开始</button>
+        <button type="button" className={styles.restart} onClick={() => { dispatch({ type: 'reset' }); setDraft(''); }}>重新开始</button>
       </div>
       <div role="group" aria-label="切换显示" className={styles.tabs}>
         <button type="button" aria-pressed={panel === 'chat'} onClick={() => dispatch({ type: 'panel', panel: 'chat' })}>对话</button>
@@ -149,24 +156,25 @@ export function DemoWorkspace() {
                           {card ? (
                             <div className={cn(composer.attachment, styles.attachment)}>
                               <QuestionCardView card={card} docked onAnswer={(_, option) => answer(option)}
-                                onOther={() => setOtherHint(true)} />
+                                onOther={() => box.current?.focus()} />
                             </div>
                           ) : null}
-                          <div className={styles.fakeEditor} aria-hidden="true">{OTHER_PLACEHOLDER}</div>
+                          <ComposerEditor ref={box} label="给导师的回复" placeholder={OTHER_PLACEHOLDER} value={draft} maxLength={8000}
+                            onChange={setDraft} onEnter={send} className={composer.editor} />
                           <div className={composer.tools}>
                             <div className={composer.toolLeft}>
                               <div className={composer.menuAnchor}><button type="button" aria-label="添加资料" disabled><Plus size={19} /></button></div>
                               <div className={composer.menuAnchor}><button type="button" aria-label="使用技能" disabled><Box size={18} /></button></div>
                             </div>
                             <div className={composer.toolRight}>
-                              <button type="button" aria-label="发送" className={composer.send} disabled><ArrowUp size={18} /></button>
+                              <button type="button" aria-label="发送" className={composer.send} disabled={!draft.trim() || Boolean(state.liveId)}
+                                onClick={send}><ArrowUp size={18} /></button>
                             </div>
                           </div>
                         </div>
                         {readyToConfirm ? (
                           <Button className={styles.toConfirm} onClick={() => dispatch({ type: 'panel', panel: 'checklist' })}>去定位清单确认这一步</Button>
                         ) : null}
-                        {otherHint ? <p className={styles.composerHint}>演示里请点上面的选项；真实对话里可以直接用自己的话回答。</p> : null}
                       </div>
                     </div>
                   </div>

@@ -52,6 +52,9 @@ export const QUESTION_TWO: QuestionCard = {
   recommendationReason: '这群人最着急、最愿意行动，你走过的每一步对他们都有用。',
 } as QuestionCard;
 
+/** Free text in the demo: the script cannot follow it, and says so instead of pretending to. */
+export const FREE_REPLY = '这是示例对话，导师只会按写好的脚本回答。真实对话里，导师会接着你说的内容继续问。\n\n你可以先选上面的一个选项，看看接下来会怎样。';
+
 const REPLY_RECOMMENDED = '好，这条路是你自己走过的，别人很难替代。我先记到右侧「可以讲的经验」，你随时可以改。\n\n下一个问题：你更想帮谁？';
 const REPLY_TRUTH = '记下了。说句实话：这类话题牙医和品牌都在讲，你作为助理不占优势，也比较难变现。' +
   '我建议把它当作补充内容，主线放在你自己的入行经历上。\n\n下一个问题：你更想帮谁？';
@@ -121,6 +124,7 @@ export function initialDemoState(): DemoState {
 
 export type DemoAction =
   | { type: 'answer'; option: number }
+  | { type: 'free'; text: string }
   | { type: 'edit'; fieldId: string; text: string }
   | { type: 'confirm' }
   | { type: 'panel'; panel: DemoPanel }
@@ -165,6 +169,14 @@ export function demoReducer(state: DemoState, action: DemoAction): DemoState {
         liveId: `m${step + 1}`, values: { ...state.values, audience: captured(choice) },
         messages: [...state.messages, user,
           { id: `m${step + 1}`, role: 'assistant', label: '本步小结 · 你是谁', summary: true, text: summaryText(experience, choice) }] };
+    }
+    case 'free': {
+      const text = action.text.trim();
+      if (!text || state.liveId) return state;
+      const step = state.messages.length;
+      return { ...state, liveId: `m${step + 1}`, messages: [...state.messages,
+        { id: `m${step}`, role: 'user', label: '你 · 你是谁', text },
+        { id: `m${step + 1}`, role: 'assistant', label: '导师 · 你是谁', text: FREE_REPLY }] };
     }
     case 'edit': {
       const previous = state.values[action.fieldId] ?? { value: '', status: 'unknown', nature: 'unknown' };

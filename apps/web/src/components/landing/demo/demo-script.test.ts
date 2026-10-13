@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { demoInformation, demoReducer, initialDemoState, openQuestion, QUESTION_ONE, QUESTION_TWO, REPORT_BODY } from './demo-script';
+import { FREE_REPLY, demoInformation, demoReducer, initialDemoState, openQuestion, QUESTION_ONE, QUESTION_TWO, REPORT_BODY } from './demo-script';
 
 describe('landing demo script', () => {
   it('walks the first step: two answers, a summary, then a confirmed step that unlocks the report', () => {
@@ -42,6 +42,14 @@ describe('landing demo script', () => {
     expect(state.checklistUpdated).toBe(false);
     state = demoReducer(demoReducer(state, { type: 'report', open: true }), { type: 'report', open: false });
     expect(state.panel).toBe('checklist');
+  });
+
+  it('answers free text honestly and keeps the open question', () => {
+    const state = demoReducer(initialDemoState(), { type: 'free', text: '我其实想拍 vlog' });
+    expect(state.messages.at(-2)!.text).toBe('我其实想拍 vlog');
+    expect(state.messages.at(-1)!.text).toBe(FREE_REPLY);
+    expect(openQuestion(demoReducer(state, { type: 'settled' }))).toBe(QUESTION_ONE);
+    expect(demoReducer(state, { type: 'free', text: '  ' })).toBe(state);
   });
 
   it('invents no follower, income or growth numbers', () => {
