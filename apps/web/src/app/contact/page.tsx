@@ -8,16 +8,18 @@ import { ArrowRight, Mail, MessageSquareMore } from 'lucide-react';
 import MarketingShell from '@/components/landing/MarketingShell';
 import PublicPageHero from '@/components/landing/PublicPageHero';
 import { contactChannels } from '@/lib/landing-content';
-import { buildPublicPageMetadata, getPublicSiteSettings } from '@/lib/public-site';
+import { getPublicSiteSettings } from '@/lib/public-site';
+import { buildPageMetadata } from '@/lib/seo/metadata';
 
-export const dynamic = 'force-dynamic';
+// Static with hourly refresh: the support e-mail comes from site settings (SEO_GEO_SPEC section 9).
+export const revalidate = 3600;
 
-export async function generateMetadata() {
-  return buildPublicPageMetadata(
-    '联系我们',
-    '获取商务合作、产品咨询与支持反馈入口，快速找到适合你的沟通方式。',
-    ['联系我们', '商务合作', '产品咨询', '支持反馈']
-  );
+export function generateMetadata() {
+  return buildPageMetadata({
+    title: '联系我们',
+    description: '获取商务合作、产品咨询与支持反馈入口，快速找到适合你的沟通方式。',
+    path: '/contact',
+  });
 }
 
 export default async function ContactPage() {

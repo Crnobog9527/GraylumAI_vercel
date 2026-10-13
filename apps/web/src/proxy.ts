@@ -26,6 +26,13 @@ const PUBLIC_SITE_PATHS = [
   '/favicon.ico',
 ];
 
+// Public site pages added by PUBLIC-SITE. Unlike the prefix list above, these match whole path segments
+// only: /zh-tw and /zh-tw/... are public on the public host, /zh-twx is not.
+const PUBLIC_SITE_PAGE_PATHS = [
+  '/about',
+  '/zh-tw',
+];
+
 const PUBLIC_PRICING_ENTRY_PATHS = [
   '/pricing',
   '/plans',
@@ -77,7 +84,10 @@ function isPublicSitePath(pathname: string): boolean {
     return true;
   }
 
-  return PUBLIC_SITE_PATHS.some(path => pathname.startsWith(path));
+  return (
+    PUBLIC_SITE_PATHS.some(path => pathname.startsWith(path)) ||
+    PUBLIC_SITE_PAGE_PATHS.some(path => pathname === path || pathname.startsWith(`${path}/`))
+  );
 }
 
 function isPublicPricingEntryPath(pathname: string): boolean {
@@ -457,9 +467,9 @@ export const config = {
      * - _next/static (static files)
      * - _next/image (image optimization files)
      * - fonts/misans/ (public font binaries and license notices only)
-     * - robots.txt (exact public crawler file)
+     * - robots.txt, sitemap.xml (exact public crawler files)
      * - favicon.ico (favicon file)
      */
-    '/((?!_next/static|_next/image|fonts/misans/|favicon.ico|robots\\.txt$|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
+    '/((?!_next/static|_next/image|fonts/misans/|favicon.ico|robots\\.txt$|sitemap\\.xml$|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
   ],
 };

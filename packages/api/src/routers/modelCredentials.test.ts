@@ -68,14 +68,13 @@ describe('B01 model credential boundary', () => {
     const selected = await selectModel({ supabase: f.user as any, userPreferredModel: id,
       message: 'hello', conversationTurns: 0 });
     expect(selected.modelConfig.id).toBe(id);
+    // MODEL-IDENTITY-GUARD: these name-bearing procedures are administrator-only now.
     const caller = aiRouter.createCaller(f.context);
-    f.noSecret(await caller.getAvailableModels());
-    const estimate = await caller.estimateCost({ message: 'hello', modelId: id });
-    expect(estimate.modelId).toBe(f.row.model_id);
-    f.noSecret(estimate);
-    const active = await modelRouter.createCaller(f.context).getActiveModels();
-    expect(active?.[0].id).toBe(id);
-    expect(f.calls.length).toBeGreaterThan(3);
+    for (const call of [() => caller.getAvailableModels(), () => caller.estimateCost({ message: 'hello', modelId: id }),
+      () => caller.getTokenStats({ period: 'week' }), () => modelRouter.createCaller(f.context).getActiveModels()]) {
+      await expect(call()).rejects.toMatchObject({ code: 'FORBIDDEN' });
+    }
+    expect(f.calls.length).toBeGreaterThan(1);
     expect(f.calls.every(call => !call.admin && call.columns !== '*' && !call.columns.includes('api_key'))).toBe(true);
   });
 

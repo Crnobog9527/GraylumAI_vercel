@@ -35,7 +35,8 @@ it('B01: model selection and credential-free HTTP responses after revocation', a
     const login = await client.auth.signInWithPassword({ email, password });
     expect(login.error).toBeNull();
     expect((await client.from('ai_models').select('api_key').eq('id', modelId)).error?.code).toBe('42501');
-    expect((await client.from('ai_models').select('id,name').eq('id', modelId)).data?.[0].id).toBe(modelId);
+    // MODEL-IDENTITY-GUARD (0217): clients read no ai_models column at all.
+    expect((await client.from('ai_models').select('id,name').eq('id', modelId)).error?.code).toBe('42501');
     expect((await db.from('ai_models').select('api_key').eq('id', modelId).single()).data?.api_key).toBe(secret);
     const context = await browser.newContext();
     await context.route('**/*', route => {

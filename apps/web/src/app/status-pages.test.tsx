@@ -72,9 +72,17 @@ describe('not found page', () => {
 });
 
 describe('root layout', () => {
-  it('declares the document language as zh-CN', () => {
+  it('declares the document language as Simplified Chinese', () => {
     const html = renderToStaticMarkup(<RootLayout><p>child</p></RootLayout>);
-    expect(html).toMatch(/^<html lang="zh-CN">/);
+    expect(html).toMatch(/^<html lang="zh-Hans">/);
     expect(html).toContain('<p>child</p>');
+  });
+
+  it('outputs Organization and WebSite structured data without a placeholder inbox', () => {
+    const html = renderToStaticMarkup(<RootLayout><p>child</p></RootLayout>);
+    const json = html.match(/<script type="application\/ld\+json">(.*?)<\/script>/)?.[1];
+    const data = JSON.parse(json!);
+    expect(data.map((item: { '@type': string }) => item['@type'])).toEqual(['Organization', 'WebSite']);
+    expect(JSON.stringify(data)).not.toContain('example.com');
   });
 });

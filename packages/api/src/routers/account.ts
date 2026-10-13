@@ -1,4 +1,6 @@
-import { contentTarget, contentConfirmation, previewContentErasure, confirmContentErasure } from '../services/accountErasure/content';
+import {
+  assertUserErasable, contentTarget, contentConfirmation, previewContentErasure, confirmContentErasure,
+} from '../services/accountErasure/content';
 import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
 import { protectedProcedure, router } from '../trpc';
@@ -12,10 +14,12 @@ function requireServiceRole(hasSupabaseAdminPrivileges: boolean) {
 
 export const accountRouter = router({
   contentErasurePreview: protectedProcedure.input(contentTarget).query(({ ctx, input }) => {
+    assertUserErasable(input.kind);
     requireServiceRole(ctx.hasSupabaseAdminPrivileges);
     return previewContentErasure(ctx.supabaseAdmin, ctx.profileId, input);
   }),
   contentErasureConfirm: protectedProcedure.input(contentConfirmation).mutation(({ ctx, input }) => {
+    assertUserErasable(input.kind);
     requireServiceRole(ctx.hasSupabaseAdminPrivileges);
     return confirmContentErasure(ctx.supabaseAdmin, ctx.profileId, input);
   }),

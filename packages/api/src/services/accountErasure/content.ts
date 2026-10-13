@@ -6,6 +6,13 @@ export const contentTarget = z.object({
   kind: z.enum(['answer', 'session', 'artifact', 'content']),
   id: z.string().uuid(),
 }).strict();
+/**
+ * Owner 2026-10-13: like ChatGPT and Claude, a user deletes a whole conversation, never one answer.
+ * The `answer` scope stays in the database functions for internal use; the user-facing API refuses it.
+ */
+export function assertUserErasable(kind: z.infer<typeof contentTarget>['kind']) {
+  if (kind === 'answer') throw new TRPCError({ code: 'FORBIDDEN', message: 'CONTENT_ERASURE_SCOPE_DISABLED' });
+}
 export const contentConfirmation = contentTarget.extend({
   previewHash: z.string().regex(/^[a-f0-9]{64}$/),
   acknowledged: z.literal(true),

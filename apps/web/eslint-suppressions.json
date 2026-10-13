@@ -4,16 +4,6 @@
       "count": 1
     }
   },
-  "sentry.edge.config.ts": {
-    "@typescript-eslint/no-unused-vars": {
-      "count": 1
-    }
-  },
-  "sentry.server.config.ts": {
-    "@typescript-eslint/no-unused-vars": {
-      "count": 1
-    }
-  },
   "src/app/admin/announcements/page.tsx": {
     "@typescript-eslint/no-unused-vars": {
       "count": 1
@@ -211,11 +201,6 @@
   },
   "src/hooks/use-credits.tsx": {
     "react-hooks/exhaustive-deps": {
-      "count": 1
-    }
-  },
-  "src/instrumentation-client.ts": {
-    "@typescript-eslint/no-unused-vars": {
       "count": 1
     }
   },

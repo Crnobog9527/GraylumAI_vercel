@@ -3,14 +3,20 @@ import MarketingShell from '@/components/landing/MarketingShell';
 import { PricingPlans } from '@/components/pricing/PricingPlans';
 import { PricingCreditPacks, PricingFaq, PricingStudio } from '@/components/pricing/PricingExtras';
 import { PRICING_COPY as COPY } from '@/components/pricing/pricingContent';
-import { buildPublicPageMetadata, getPublicSiteSettings } from '@/lib/public-site';
+import { getPublicSiteSettings } from '@/lib/public-site';
+import { buildPageMetadata } from '@/lib/seo/metadata';
 import { getPublicCreditPackages } from '@/lib/public-pricing';
 import { buildAuthHref } from '@/lib/site-config';
 
-export const dynamic = 'force-dynamic';
+// Static with hourly refresh (SEO_GEO_SPEC section 9); plan and credit-pack prices come from the server catalog.
+export const revalidate = 3600;
 
-export async function generateMetadata() {
-  return buildPublicPageMetadata('价格', '免费开始，Pro 和 Gold 会员价格、积分、积分包和常见问题。', ['价格', '会员', '积分包', '退款']);
+export function generateMetadata() {
+  return buildPageMetadata({
+    title: '价格',
+    description: '免费开始，Pro 和 Gold 会员价格、积分、积分包和常见问题。',
+    path: '/landing/pricing',
+  });
 }
 
 /** Public pricing page (PAYWALL design v25 scene 5); every price comes from the server catalog. */

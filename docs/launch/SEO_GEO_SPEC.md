@@ -78,7 +78,7 @@ Owner 2026-10-12 先批准过 11 页的版本（原话：「同意：根路径�
 - 用词依据（2026-10-12 实测）：
   - "AI 自媒体教练 / 自媒体教练 / 自媒體教練"在简体、台湾都没有搜索量，自动补全只有一个人名——"教练"在中文里不是搜索词，只作差异化说法放在 H1。
   - "AI 自媒体 / AI 自媒體"Semrush 未收录，但简体和台湾的自动补全都有长尾（课程、工具、创业系统、事务所），是正在冒头的词，放 Title。
-  - "社交媒体策略 / 策略师 / 社媒策略 / 社群策略 / 社交媒體策略"在简体、台湾都没有搜索量、自动补全为空，是英文 social media strategy 的直译，**中文页不用**。品牌定位句"AI 社媒策略师"只用于英文版和品牌介绍。
+  - "社交媒体策略 / 策略师 / 社媒策略 / 社群策略 / 社交媒體策略"在简体、台湾都没有搜索量、自动补全为空，是英文 social media strategy 的直译，**中文页不用**。品牌定位句"AI 社媒策略师"只用于英文版和品牌介绍（2026-10-12 起中文页统一称“AI 自媒体陪跑教练”，品牌介绍也用新称呼；旧称只保留在价格对比句“雇佣 Graylum AI 社交媒体策略师：$29/月起”，见 Master Plan 第 2.1 节）。
   - "陪跑"见附录 B：规划师在美国简体里"自媒体陪跑 / 陪跑教练"不到 10 次，台湾"自媒體陪跑 / 陪跑教練 / 陪跑課程"10–100 次；它是华人创作者圈卖真人服务的说法（价格从几万到 20 万台币），只作 H1 和文案用词，不作搜索目标。
 - 英文首页词（`social media coach`，附录 A）只在 `/en` 上线时用于英文首页。
 - 中文市场的流量预期和获客分工见附录 C：YouTube 中文频道是主引擎，SEO 页是承接层。
@@ -91,6 +91,8 @@ Owner 2026-10-12 先批准过 11 页的版本（原话：「同意：根路径�
 4. 同一内容只有一个地址：根路径直接渲染首页，不再保留 `/landing` 作为第二地址（`/landing` 301 到 `/`）。
 5. 分页、筛选、排序参数一律 `noindex` 或 canonical 回主地址；`utm_*` 参数不进 canonical。
 6. 404 返回真实 404 状态码，不软 404。
+7. 公开分享页或其他由用户内容生成的公开页（以后如果做）：失效、删除或不再公开时返回真实 404（永久删除可用 410），不要 301 / 302 跳到首页，也不要返回 200 加"内容不存在"（会被当成软 404 或重复页面）。（Owner 2026-10-13 要求）
+8. 站内搜索结果页（以后如果做，带 `?q=` 等参数）按本节第 5 条处理：一律 `noindex`，不进 sitemap，也不在 robots.txt 里 Disallow（理由同第 11 节：要让谷歌读到 `noindex`）。（Owner 2026-10-13 要求）
 
 ## 5. 元数据（统一由 `generateMetadata` 生成，不允许页面自己拼）
 
@@ -175,7 +177,7 @@ sitemap：`app/sitemap.ts` 生成，分语言、含 `lastModified`、只含可�
 AI 搜索引用的来源主要是：① 谷歌/必应里本来就排得上的页面；② 高权威第三方页面里对品牌的描述。所以：
 
 1. 先做好搜索排名，再谈 GEO。
-2. 全站统一一句话定义（出现在首页、About、`Organization.description`、所有第三方目录简介）。中文版由落地页文案任务定稿后固定；英文版（`/en` 上线时用）：`Graylum is an AI social media coach that helps beginners find their positioning, decide what to post each week, and write the content.`
+2. 全站统一一句话定义（出现在首页、About、`Organization.description`、所有第三方目录简介）。中文版由落地页文案任务定稿后固定；英文版（`/en` 上线时用）：`Graylum is an AI social media strategist that helps beginners find their positioning, decide what to post each week, and write the content.`
 3. 每页首屏结论段写成"问题 → 直接答案 → 可核对的要点"，用数字、步骤、清单。
 4. 引用可靠来源（平台官方帮助页、公开报告）并标出处。
 5. About 页写清公司（Grayscale Luminary LLC，怀俄明州）、创始人、联系方式；法律页齐全（条款文字由 Owner 用第三方软件生成）。
@@ -212,6 +214,8 @@ Owner 2026-10-12 决定：博客用仓库内文章实现，不接外部系统。
 | `apps/web/src/lib/public-paths.ts` | 公开为默认，`/app` `/admin` 需登录 | 权限 |
 | 旧应用路径跳转 | www 和 staging 主机上，旧的应用路径 `/positioning`、`/runtime`、`/profile`、`/library`、`/marketplace`、`/workbench`（含子路径）308 到 `/app/` 下同一路径，保留参数；`next.config.ts` 里现有的 `/chat` → `/positioning` 临时跳转直接改成 `/chat` → `/app/positioning`，不留跳转链，并纳入跳转测试；登录回调里的 `next` / `redirect` 目标经 `sanitizeRedirectTarget` 时把这些旧路径换成 `/app/...`，默认目标从 `/profile` 改成 `/app/profile`；`next=/` 登录后去 `/app`（`/` 现在是公开首页）。实测：切换前发出的验证邮件 / OAuth 链接在切换后点开，落到 `/app` 下正确页面 | 登录态，high |
 | 路由目录 | 根路径已登录首页 `src/app/page.tsx`（及同目录的 `home.module.css`、`home-steps`）移到 `src/app/app/page.tsx`；`positioning / runtime / profile / library / marketplace / workbench` 移到 `src/app/app/`；`login / register / verify-email / forgot-password / reset-password / auth / admin / api` 不动；全仓约 45 处内链、21 个文件改前缀（不含测试） | 面广 |
+| 根布局按语言拆分 | 拆分简体 / zh-tw 根布局，使繁体页文档级 html lang 为 zh-Hant-TW（2026-10-12 总控决定从 PUBLIC-SITE 第一段推后到此）。做法：随路由目录搬迁把现有路由放进路由分组，简体分组的根布局输出 `<html lang="zh-Hans">`，`src/app/zh-tw` 用自己的根布局输出 `<html lang="zh-Hant-TW">`；去掉 `components/public-site/SiteShell.tsx` 外层的 `lang` 临时写法；不能改成按请求读路径（会让公开页变成动态渲染，违反第 9 节） | 面广 |
+| 公开页的简体首页链接 | 迁移后改回 `/`：迁移前根路径 `/` 在 staging 和应用域上还是登录后首页，所以公开页里可见的简体首页链接（繁体页的语言切换、品牌、面包屑“首页”）临时指向 `/landing`（`components/public-site/site-chrome.ts` 的 `SIMPLIFIED_HOME_HREF`，2026-10-12 #855 验收后总控决定）；canonical、hreflang、sitemap、JSON-LD 一直用 `https://www.graylum.com/`。迁移让 `/` 成为公开首页后，把 `SIMPLIFIED_HOME_HREF` 改回 `/`，同时按第 4 节第 4 条让 `/landing` 跳到 `/` | ordinary |
 | `next.config.ts` | `redirects()` 加 `has: host = app.graylum.com` 的 `permanent: true`（308，保留 POST 方法和请求体）：界面路由加 `/app` 前缀，`app.graylum.com/` 到 `/app`，`/auth` `/api` `/admin` `/_next` 和登录入口页只换主机不加前缀（第 2 节）；加 `has: host = graylum.com` 到 www 的 308（保留路径和参数），或改用 Vercel 设置（见第 2 节）；`X-Robots-Tag noindex`：`SITE_INDEXING` 不是 `public` 时**整个环境保留**；是 `public` 时只对 `/app` `/admin` `/auth`、登录入口页、`/maintenance`、`/access-denied`，这些路径不进 robots Disallow。测试覆盖：裸域跳转保留路径和参数；非 public 环境任意路径都带 noindex；public 环境下上述路径带 noindex、公开页不带 | ordinary |
 | 环境变量 | 仅正式环境：`NEXT_PUBLIC_APP_URL`、`NEXT_PUBLIC_AUTH_APP_URL` = `https://www.graylum.com`。staging 保持 `https://auth-staging.graylum.com` | 正式环境改值属 AGENTS §1 |
 | 支付回调 | `waffoCheckout.ts`、`stripeCheckoutIntent.ts` 的 successUrl 从请求 origin 拼，自动跟随；仅正式环境：Waffo / Stripe 后台 webhook 主机**先**改成 www（路径不变），再切域名；用带请求体的 POST 实测 app 域跳转后方法和内容不变。staging 沙箱 webhook 保持 `auth-staging.graylum.com`，只在 staging 验证新路径规则下回调仍然通 | 正式环境属 §1；staging 只做验证，不改主机 |

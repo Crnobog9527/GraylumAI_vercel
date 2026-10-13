@@ -5,6 +5,7 @@
  */
 
 import { router, adminProcedure } from '../trpc';
+import { withRealModelUsed } from '../services/modelIdentity/usageAliases';
 import { z } from 'zod';
 import { logger } from '../lib/logger';
 import { createSafeInternalError } from '../lib/publicError';
@@ -48,11 +49,12 @@ export const costsRouter = router({
       const window = getCostWindow(now, input.days, input.timezone);
       const queryStartIso = window.rangeStartIso < window.monthStartIso
         ? window.rangeStartIso : window.monthStartIso;
-      const rows = await requireReportRows<DashboardRow>((from, to) => ctx.supabase
+      // MODEL-IDENTITY-GUARD: token_stats stores aliases; reports group by the real model.
+      const rows = await withRealModelUsed(ctx.supabase, await requireReportRows<DashboardRow>((from, to) => ctx.supabase
         .from('token_stats')
         .select('user_id, model_used, total_credits, total_cost_usd, cached_tokens, input_tokens, created_at')
         .gte('created_at', queryStartIso)
-        .order('created_at').order('id').range(from, to));
+        .order('created_at').order('id').range(from, to)));
       const topUserIds = buildTopUsersFromRows(
         rows.filter((row) => row.created_at >= window.rangeStartIso),
         [],
@@ -164,7 +166,7 @@ export const costsRouter = router({
         throw createSafeInternalError(error, '读取 Token 统计失败，请稍后重试');
       }
 
-      const stats: TokenStat[] = (data ?? []).map((record: any) => ({
+      const stats: TokenStat[] = (await withRealModelUsed(ctx.supabase, data ?? [])).map((record: any) => ({
         id: record.id,
         conversationId: record.conversation_id,
         modelUsed: record.model_used ?? 'unknown',

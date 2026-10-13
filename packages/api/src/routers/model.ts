@@ -1,5 +1,5 @@
 import { inferTokenCountingMetadata, withTokenCountingMetadata } from '../services/modelCapabilities';
-import { router, adminProcedure, protectedProcedure } from '../trpc';
+import { router, adminProcedure } from '../trpc';
 import { z } from 'zod';
 import { TRPCError } from '@trpc/server';
 import { createSafeInternalError } from '../lib/publicError';
@@ -198,8 +198,8 @@ async function verifyAndPersistConnection(
 }
 
 export const modelRouter = router({
-  // Public: Get active AI models for users to select
-  getActiveModels: protectedProcedure.query(async ({ ctx }) => {
+  // MODEL-IDENTITY-GUARD: returns real model names/ids, so administrators only (no user page calls it).
+  getActiveModels: adminProcedure.query(async ({ ctx }) => {
     const { data, error } = await ctx.supabase
       .from('ai_models')
       .select('id, name, model_id, provider, description, enable_web_search, max_tokens')
