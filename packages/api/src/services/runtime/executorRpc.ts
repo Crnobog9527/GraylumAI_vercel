@@ -43,6 +43,8 @@ export function executorRpc(options:{database:SessionRpc;actor:()=>Promise<strin
      'RUNTIME_MENTOR_HISTORY_TOO_LARGE','RUNTIME_TOOL_DENIED','RUNTIME_TOOL_CLOSED','RUNTIME_TOOL_LIMIT',
      'RUNTIME_TOOL_CONFLICT','RUNTIME_TOOL_RESULT_CONFLICT'].includes(message))
     throw new Error('RUNTIME_HISTORY_READ_REFUSED');
+   // Before 0248 the database refuses the diagnostic field; the caller retries without it.
+   if(name==='runtime_execution'&&message==='RUNTIME_FAILURE_REASON_DENIED')throw new Error('RUNTIME_FAILURE_REASON_DENIED');
    if(message==='RUNTIME_TEST_WINDOW_DENIED'||message==='RUNTIME_TEST_MODEL_DENIED')
     throw new StagingAccessError('RUNTIME_PRICE_CONFIGURATION_PENDING');
    if(typeof message==='string'&&['RUNTIME_RESUME_CONFLICT','RUNTIME_RESUME_SOURCE_CHANGED',
@@ -56,6 +58,18 @@ export function executorRpc(options:{database:SessionRpc;actor:()=>Promise<strin
 /** A stable error code for logs; free text (which may quote user material) is never logged. */
 export function diagnosticCode(error:unknown):string {
  return error instanceof Error&&/^[A-Z][A-Z0-9_]{2,80}$/.test(error.message)?error.message:'UNCLASSIFIED';
+}
+/** Ends an execution proven never to have dispatched, recording why (0248) without private data.
+ * Until 0248 is applied the database refuses the code and only the old reason is retried; a repeat is a no-op. */
+export async function failBeforeDispatch(rpc:<T>(name:string,args:Record<string,unknown>)=>Promise<T>,
+  args:Record<string,unknown>,code:string,providerHistory:boolean):Promise<{state:string}|null> {
+ logger.error('api','runtime_pre_dispatch_failed',{executionId:args.p_execution_id,code});
+ const reason:Record<string,string>=providerHistory?{unavailable_reason:'provider_history'}:{};
+ const send=(result:Record<string,string>)=>rpc<{state:string}>('runtime_execution',
+  {...args,p_action:'fail_before_dispatch',...(Object.keys(result).length?{p_result:result}:{})});
+ return send({...reason,failure_code:code})
+  .catch(refused=>refused instanceof Error&&refused.message==='RUNTIME_FAILURE_REASON_DENIED'?send(reason):null)
+  .catch(()=>null);
 }
 export const preflightCodes=new Set([
  'RUNTIME_TIME_BUDGET_EXHAUSTED',

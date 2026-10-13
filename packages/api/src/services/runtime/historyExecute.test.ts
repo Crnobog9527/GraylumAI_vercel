@@ -97,6 +97,6 @@ it.each(['fresh','frozen','replay','current','matching-latest'] as const)('histo
   expect(frozen).toBeUndefined();
   expect(result).toEqual({state:'cancelled',unavailable:'provider_history'});
   expect(database.rpc.mock.calls.find(([,args])=>args.p_action==='fail_before_dispatch')?.[1].p_result)
-   .toEqual({unavailable_reason:'provider_history'});
+   .toEqual({unavailable_reason:'provider_history',failure_code:'RUNTIME_PROVIDER_HISTORY_DENIED'});
  }
 });

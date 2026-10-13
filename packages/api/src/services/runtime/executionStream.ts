@@ -13,6 +13,7 @@ import {loadStagingPolicy,loadStagingRecoveryPolicy} from './stagingPolicy';
 import {StagingAccessError,stagingProcedureError,stagingRpcFailure} from './stagingErrors';
 import {stagingTransport} from './stagingTransport';
 import {retainedOutputReason} from './view';
+import {logger} from '../../lib/logger';
 import {runtimeExecutor} from './execute';
 import {runtimeActor} from './actor';
 import {activateRuntimeCandidate} from './matching';
@@ -125,6 +126,13 @@ export async function executeOriginalExecution(host:OriginalExecutionHost,execut
    const adapter=stagingTransport(host.admin,original,host.budget);
    const replayOnly={dispatch:async()=>{throw new Error('RUNTIME_DISPATCH_DISABLED');},lookup:adapter.lookup};
    const state=await runtimeExecutor({...base,adapter:replayOnly,callGate:denyNewCalls}).recoverFinancial(executionId);
+   // 0248: this branch ends a still-unfinished execution without any executor record; keep why.
+   if(['prepared','running','interrupted'].includes(observed.data?.state)&&['cancelled','cost_pending'].includes(state.state)){
+    const code=process.env.V3_RUNTIME_STAGING_ENABLED!=='true'?'STAGING_RUNTIME_DISABLED':'STAGING_POLICY_UNAVAILABLE';
+    logger.error('api','runtime_stream_cancelled',{executionId,code});
+    await host.admin.rpc('runtime_record_failure_code',{p_actor_id:host.actorId,p_execution_id:executionId,p_code:code})
+     .then(()=>undefined,()=>undefined);
+   }
    // With p_finish, runtime_financial_recovery returns only these three states.
    return outcome({state:state.state as 'completed'|'cancelled'|'cost_pending'});
   }
