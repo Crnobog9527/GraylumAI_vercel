@@ -20,7 +20,9 @@ const stubs: Array<[(id: string) => boolean, string]> = [
     // Any utils path (utils.opc.conversations.setData…) is a no-op; the list itself stays static.
     const deep=()=>new Proxy(()=>{},{get:(_,key)=>key==='then'?undefined:deep(),apply:()=>undefined});
     const client={account:{conversationErasure:{mutate:input=>new Promise((resolve,reject)=>
-      window.erasures.push({input,resolve,reject}))}}};
+      window.erasures.push({input,resolve,reject}))}},
+      opc:{conversationRename:{mutate:async input=>{window.renames.push(input);
+        if(location.hash==='#rename-fails')throw new Error('OPC_CONVERSATION_ERASED');return {sessionId:input.sessionId,name:input.name};}}}};
     export const trpc={useUtils:()=>new Proxy({},{get:(_,key)=>key==='client'?client:deep()}),
       opc:{library:{useQuery:()=>q(location.hash==='#strategy'?{businesses:[{businessId:'b1',accounts:[{projectId:'p1',
         platform:'抖音',account:'测试号',strategyDraftId:'d1',sourceVersionId:'v1',sourceVersion:1,items:[]}]}]}
@@ -58,7 +60,7 @@ beforeAll(async () => {
       if (id.startsWith('\0stub')) return stubs[Number(id.slice(5))][1];
       if (id === entry) return `import React from 'react'; import {createRoot} from 'react-dom/client';
         import {WorkspaceFrame} from ${JSON.stringify(source)};
-        window.opened=[];window.erasures=[];window.replaced=[];window.erased=[];
+        window.opened=[];window.erasures=[];window.replaced=[];window.erased=[];window.renames=[];
         const root=createRoot(document.getElementById('root'));
         const frame=()=>React.createElement(WorkspaceFrame,null,'对话内容');
         root.render(frame());
@@ -97,7 +99,7 @@ async function open(width: number, run: (page: Page) => Promise<void>, hash = ''
 const more = (page: Page) => page.getByRole('button', { name: '周末选题讨论的更多操作' });
 
 type Held = { input: unknown; resolve: (value: unknown) => void; reject: (error: unknown) => void };
-type Win = { opened: unknown[]; erasures: Held[]; replaced: string[]; erased: unknown[] };
+type Win = { opened: unknown[]; erasures: Held[]; replaced: string[]; erased: unknown[]; renames: unknown[] };
 const held = (page: Page) => page.evaluate(() => (window as unknown as Win).erasures.map(item => item.input));
 const answer = (page: Page, ok: boolean, message = '') => page.evaluate(([okay, text]) => {
   const call = (window as unknown as Win).erasures.at(-1)!;
@@ -214,6 +216,51 @@ it('deletes a work conversation through the same one-click dialog; the work itse
   expect(await page.evaluate(() => (window as unknown as Win).opened)).toEqual([]);
   await ui(page.getByText('口播稿工作')).toBeVisible();
 }, '#work'));
+
+const renames = (page: Page) => page.evaluate(() => (window as unknown as Win).renames);
+async function startRename(page: Page) {
+  await openMenu(page);
+  await page.getByRole('menuitem', { name: '重命名' }).click();
+  const input = page.getByRole('textbox', { name: '重命名对话' });
+  await ui(input).toHaveValue('周末选题讨论');
+  await ui(input).toBeFocused();
+  return input;
+}
+
+it('renames a conversation inline from the ⋯ menu; Enter saves the trimmed name', () => open(1280, async page => {
+  const input = await startRename(page);
+  await input.fill('  新名字  ');
+  await page.keyboard.press('Enter');
+  await ui(input).toHaveCount(0);
+  await ui.poll(() => renames(page)).toEqual([{ sessionId: SESSION, name: '新名字' }]);
+}));
+
+it('Esc cancels a rename without saving, and an unchanged name sends nothing', () => open(1280, async page => {
+  let input = await startRename(page);
+  await input.fill('不保存');
+  await page.keyboard.press('Escape');
+  await ui(input).toHaveCount(0);
+  input = await startRename(page);
+  await page.keyboard.press('Enter');
+  await ui(input).toHaveCount(0);
+  expect(await renames(page)).toEqual([]);
+}));
+
+it('a refused rename keeps the old title and explains why', () => open(1280, async page => {
+  const input = await startRename(page);
+  await input.fill('已删的对话');
+  await page.keyboard.press('Enter');
+  await ui(page.getByRole('alert')).toContainText('这个对话已删除，不能重命名');
+  await ui(page.getByText('周末选题讨论')).toBeVisible();
+}, '#rename-fails'));
+
+it('rename input fits a 375px screen', () => open(375, async page => {
+  await page.getByRole('button', { name: '打开导航' }).first().click();
+  const input = await startRename(page);
+  const box = await input.boundingBox();
+  expect(box && box.x >= 0 && box.x + box.width <= 375).toBe(true);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375);
+}));
 
 it('reaches the ⋯ button with Tab, which makes it visible', () => open(1280, async page => {
   for (let i = 0; i < 60 && !(await more(page).evaluate(el => el === document.activeElement)); i++) {
