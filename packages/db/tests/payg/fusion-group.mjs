@@ -145,10 +145,21 @@ export async function fusionGroupCases({db,Client,connectionString,report,create
   await db.query('UPDATE bill2_runs SET content_deleted_at=now() WHERE id=$1',[deleted.runs[0]]);
   await rpc(db,'bill2_finalize',deleted.actor,deleted.runs[0]);
   const kept = (await calls(db,deleted.runs))[0];
-  assert.equal(kept.fusion_verdict,null,'content deletion does not synthesize a zero-charge verdict');
-  assert.equal(kept.settled_at,null);
-  assert.equal(await wallet(db,deleted.actor),0,'the hold stays until a host verdict');
-  report.checks.push('content deletion before the verdict keeps the hold; only account closure ends an unjudged call at zero charge');
+  assert.equal(kept.fusion_verdict,'user_stopped','content deletion cancels the run like a user stop, never a zero-charge verdict');
+  assert.notEqual(kept.settled_at,null);
+  assert.equal(await charged(db,deleted.runs),1,'billed from known usage like any cancellation after dispatch');
+  assert.equal(await wallet(db,deleted.actor),8);
+  // User stop after dispatch with no saved body: settles from known cost, not free and not stuck.
+  const stopped = await group(db,createFixture,{n:1,credits:9});
+  const sc = await claimGroup(db,stopped);
+  await dispatchAll(db,stopped,sc);
+  await rpc(db,'bill2_cancel',stopped.actor,stopped.runs[0]);
+  await record(db,stopped,stopped.members[0],sc.calls[0],'0.0004');
+  await rpc(db,'bill2_finalize',stopped.actor,stopped.runs[0]);
+  const sv = (await calls(db,stopped.runs))[0];
+  assert.deepEqual([sv.fusion_verdict,sv.settled_at!==null],['user_stopped',true]);
+  assert.equal(await charged(db,stopped.runs),1);
+  report.checks.push('content deletion and user stop after dispatch settle from known cost (user_stopped); only account closure ends an unjudged call at zero charge');
 
   // 6. Erasure before the verdict ends in a zero-charge verdict for every member.
   const erased = await group(db,createFixture,{n:2,credits:18});

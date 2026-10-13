@@ -31,7 +31,7 @@ ALTER TABLE public.bill2_calls ADD COLUMN IF NOT EXISTS fusion_verdict text;
 DO $$ BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='bill2_calls_fusion_verdict_check') THEN
     ALTER TABLE public.bill2_calls ADD CONSTRAINT bill2_calls_fusion_verdict_check CHECK (fusion_verdict IS NULL OR fusion_verdict IN
-      ('usable','format_invalid','revision_invalid','no_delivery','erased_before_verdict'));
+      ('usable','format_invalid','revision_invalid','no_delivery','erased_before_verdict','user_stopped'));
   END IF;
 END $$;
 ALTER TABLE public.fusion_billing_groups ENABLE ROW LEVEL SECURITY;
@@ -244,9 +244,14 @@ DO $$ DECLARE src text; a3 text; a4 text; BEGIN
   END IF;
   IF fusion_purpose(c.payload) AND c.dispatched_at IS NOT NULL AND NOT c.provider_rejected
    AND NOT (r.closed AND r.outcome='confirmed_failure') AND c.fusion_verdict IS NULL THEN
-   -- Only account closure ends an unjudged call at zero charge; ordinary content deletion keeps the hold.
-   IF NOT bill2_erasure_closed(a,rid) THEN CONTINUE;END IF;
-   UPDATE bill2_calls SET fusion_verdict='erased_before_verdict' WHERE id=c.id RETURNING * INTO c;
+   -- Account closure ends an unjudged call at zero charge. A user stop (or content deletion, which
+   -- cancels the run) after dispatch is billable from known usage/cost like any PAYG cancellation
+   -- (BILL2 contract: cancel after dispatch settles on confirmed cost). Otherwise wait for the host.
+   IF bill2_erasure_closed(a,rid) THEN
+    UPDATE bill2_calls SET fusion_verdict='erased_before_verdict' WHERE id=c.id RETURNING * INTO c;
+   ELSIF r.cancel_requested OR r.paused_reason='user_stop' THEN
+    UPDATE bill2_calls SET fusion_verdict='user_stopped' WHERE id=c.id RETURNING * INTO c;
+   ELSE CONTINUE;END IF;
   END IF;
 $x$||a3);
     src:=replace(src,a4,$x$  IF c.provider_rejected OR c.dispatched_at IS NULL OR (r.closed AND r.outcome='confirmed_failure')
