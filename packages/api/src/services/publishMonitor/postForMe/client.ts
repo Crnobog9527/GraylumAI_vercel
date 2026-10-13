@@ -129,8 +129,37 @@ export type AuthUrlInput = { platform: PostForMePlatform; externalId: string; pe
   /** Bluesky only: the user's handle and app password, forwarded once to the provider, never stored or logged. */
   bluesky?: { handle: string; appPassword: string } };
 
+// Read-only provider scopes for a feeds-only connection. Post for Me's defaults include publishing scopes and an
+// override replaces the whole list (provider source, auth-url.helper.ts), so the insights scopes are included here.
+// NOT YET VERIFIED per platform against real consent screens: PR-2b must connect each platform once with these
+// and confirm reading still works; a platform that fails falls back to combined authorization with disclosure.
+const READ_ONLY_SCOPES: Partial<Record<string, string[]>> = {
+  facebook: ['public_profile', 'pages_show_list', 'pages_read_engagement', 'business_management', 'read_insights'],
+  instagram_facebook: ['instagram_basic', 'pages_show_list', 'public_profile', 'business_management',
+    'pages_read_engagement', 'instagram_manage_insights'],
+  instagram_instagram: ['instagram_business_basic', 'instagram_business_manage_insights'],
+  tiktok: ['user.info.basic', 'video.list'],
+  tiktok_business: ['user.info.basic', 'user.info.username', 'user.info.stats', 'user.info.profile', 'user.account.type',
+    'user.insights', 'video.list', 'video.insights', 'comment.list'],
+  youtube: ['https://www.googleapis.com/auth/youtube.readonly', 'https://www.googleapis.com/auth/userinfo.profile',
+    'https://www.googleapis.com/auth/yt-analytics.readonly'],
+  pinterest: ['boards:read', 'pins:read', 'user_accounts:read'],
+  linkedin: ['r_basicprofile', 'r_organization_social', 'rw_organization_admin'],
+  threads: ['threads_basic', 'threads_manage_insights'],
+};
+
+export type AuthLink = {
+  url: string;
+  /**
+   * True when the platform cannot be asked for read-only access (X OAuth2 has a fixed scope list; a Bluesky app
+   * password grants full access): the consent screen will also cover posting, and the UI must say so before
+   * redirecting. Graylum still never publishes without the separate publishing consent (plan §4.1).
+   */
+  combinedAuthorization: boolean;
+};
+
 /** Consent link for the user's own account. Read-only scope unless publishing consent was given (plan §4.1). */
-export function createAuthUrl(deps: ClientDeps, input: AuthUrlInput): Promise<Outcome<string>> {
+export function createAuthUrl(deps: ClientDeps, input: AuthUrlInput): Promise<Outcome<AuthLink>> {
   const platform = PLATFORM.parse(input.platform);
   if (!EXTERNAL_ID.test(input.externalId)) throw new Error('POSTFORME_EXTERNAL_ID_INVALID');
   const permissions = [...new Set(input.permissions)].sort();
@@ -153,12 +182,20 @@ export function createAuthUrl(deps: ClientDeps, input: AuthUrlInput): Promise<Ou
     platformData = { bluesky: { handle, app_password: appPassword } };
   }
   if (permissions.includes('posts') && input.forceReauth !== true) throw new Error('POSTFORME_PUBLISH_NEEDS_REAUTH');
+  const readOnly = permissions.includes('posts') ? undefined
+    : READ_ONLY_SCOPES[platform === 'instagram' ? `instagram_${input.connectionType}` : platform];
+  if (readOnly) {
+    const key = platform;
+    platformData = { ...platformData, [key]: { ...(platformData?.[key] as object | undefined), permission_overrides: readOnly } };
+  }
+  const combinedAuthorization = !permissions.includes('posts') && !readOnly;
   return call(deps, { method: 'POST', path: '/social-accounts/auth-url', body: {
     platform, external_id: input.externalId, permissions, ...(platformData ? { platform_data: platformData } : {}),
     ...(input.forceReauth ? { force_reauth: true } : {}),
   } }, json => {
     const parsed = z.object({ url: z.string() }).passthrough().safeParse(json);
-    return parsed.success ? publicHttpsUrl(parsed.data.url, 4096) : null;
+    const url = parsed.success ? publicHttpsUrl(parsed.data.url, 4096) : null;
+    return url ? { url, combinedAuthorization } : null;
   });
 }
 
@@ -170,7 +207,8 @@ export function readFeedPage(deps: ClientDeps, accountId: string, platform: stri
   const params = new URLSearchParams({ expand: 'metrics', limit: String(Math.min(Math.max(query.limit ?? 100, 1), 100)) });
   if (query.cursor) params.set('cursor', query.cursor);
   for (const id of query.platformPostIds ?? []) {
-    if (!/^[A-Za-z0-9_:.-]{1,256}$/.test(id)) throw new Error('POSTFORME_POST_ID_INVALID');
+    // Provider IDs can be URIs (Bluesky at://did:.../app.bsky.feed.post/...); URLSearchParams encodes them.
+    if (id.length < 1 || id.length > 512 || /[\s\u0000-\u001f\u007f]/.test(id)) throw new Error('POSTFORME_POST_ID_INVALID');
     params.append('platform_post_id', id);
   }
   return call(deps, { method: 'GET', path: `/social-account-feeds/${accountId}?${params}` },

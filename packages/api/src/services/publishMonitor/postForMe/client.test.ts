@@ -94,11 +94,22 @@ describe('post for me client', () => {
   it('builds read-only consent links and accepts only public https links back', async () => {
     const d = deps([json(201, { url: 'https://accounts.google.com/o/oauth2?x=1' })]);
     const result = await createAuthUrl(d.deps, { platform: 'youtube', externalId: EXTERNAL, permissions: ['feeds'] });
-    expect(result).toEqual({ kind: 'ok', value: 'https://accounts.google.com/o/oauth2?x=1' });
-    expect(JSON.parse(String(d.calls[0]!.init.body))).toEqual({ platform: 'youtube', external_id: EXTERNAL, permissions: ['feeds'] });
+    expect(result).toEqual({ kind: 'ok', value: { url: 'https://accounts.google.com/o/oauth2?x=1', combinedAuthorization: false } });
+    const sent = JSON.parse(String(d.calls[0]!.init.body));
+    expect(sent).toMatchObject({ platform: 'youtube', external_id: EXTERNAL, permissions: ['feeds'] });
+    expect(sent.platform_data.youtube.permission_overrides).toContain('https://www.googleapis.com/auth/youtube.readonly');
+    expect(sent.platform_data.youtube.permission_overrides.join(' ')).not.toMatch(/upload|force-ssl/);
+    const x = deps([json(201, { url: 'https://x.com/i/oauth2' })]);
+    expect(await createAuthUrl(x.deps, { platform: 'x', externalId: EXTERNAL, permissions: ['feeds'] }))
+      .toMatchObject({ kind: 'ok', value: { combinedAuthorization: true } });
+    expect(JSON.parse(String(x.calls[0]!.init.body)).platform_data).toBeUndefined();
+    const fb = deps([json(201, { url: 'https://www.facebook.com/dialog' })]);
+    await createAuthUrl(fb.deps, { platform: 'facebook', externalId: EXTERNAL, permissions: ['feeds'] });
+    expect(JSON.parse(String(fb.calls[0]!.init.body)).platform_data.facebook.permission_overrides).not.toContain('pages_manage_posts');
     const linkedin = deps([json(201, { url: 'https://www.linkedin.com/oauth' })]);
     await createAuthUrl(linkedin.deps, { platform: 'linkedin', externalId: EXTERNAL, permissions: ['feeds'] });
-    expect(JSON.parse(String(linkedin.calls[0]!.init.body)).platform_data).toEqual({ linkedin: { connection_type: 'organization' } });
+    expect(JSON.parse(String(linkedin.calls[0]!.init.body)).platform_data.linkedin)
+      .toMatchObject({ connection_type: 'organization', permission_overrides: ['r_basicprofile', 'r_organization_social', 'rw_organization_admin'] });
     expect(() => createAuthUrl(deps([]).deps, { platform: 'instagram', externalId: EXTERNAL, permissions: ['feeds'] }))
       .toThrow('POSTFORME_INSTAGRAM_CONNECTION_TYPE_REQUIRED');
     expect(() => createAuthUrl(deps([]).deps, { platform: 'bluesky', externalId: EXTERNAL, permissions: ['feeds'] }))
@@ -116,7 +127,9 @@ describe('post for me client', () => {
       .toThrow('POSTFORME_PUBLISH_NEEDS_REAUTH');
     const publish = deps([json(201, { url: 'https://x.com/i/oauth2' })]);
     await createAuthUrl(publish.deps, { platform: 'x', externalId: EXTERNAL, permissions: ['posts', 'feeds'], forceReauth: true });
-    expect(JSON.parse(String(publish.calls[0]!.init.body))).toMatchObject({ permissions: ['feeds', 'posts'], force_reauth: true });
+    const publishBody = JSON.parse(String(publish.calls[0]!.init.body));
+    expect(publishBody).toMatchObject({ permissions: ['feeds', 'posts'], force_reauth: true });
+    expect(publishBody.platform_data).toBeUndefined();
     for (const url of ['http://x.com/a', 'https://127.0.0.1/a', 'https://user:pw@x.com/', 'javascript:alert(1)']) {
       const bad = await createAuthUrl(deps([json(201, { url })]).deps, { platform: 'x', externalId: EXTERNAL, permissions: ['feeds'] });
       expect(bad).toMatchObject({ kind: 'failed', reason: 'RESPONSE_SHAPE' });
@@ -134,6 +147,10 @@ describe('post for me client', () => {
     const d = deps([json(200, page)]);
     const result = await readFeedPage(d.deps, 'spc_1', 'x', { limit: 500, platformPostIds: ['v1'] });
     expect(d.calls[0]!.url).toContain('expand=metrics&limit=100&platform_post_id=v1');
+    const sky = deps([json(200, { data: [], meta: {} })]);
+    await readFeedPage(sky.deps, 'spc_2', 'bluesky', { platformPostIds: ['at://did:plc:abc/app.bsky.feed.post/3k'] });
+    expect(sky.calls[0]!.url).toContain('platform_post_id=at%3A%2F%2Fdid%3Aplc%3Aabc%2Fapp.bsky.feed.post%2F3k');
+    expect(() => readFeedPage(deps([]).deps, 'spc_2', 'x', { platformPostIds: ['a b'] })).toThrow('POSTFORME_POST_ID_INVALID');
     expect(result.kind).toBe('ok');
     if (result.kind !== 'ok') return;
     expect(result.value).toMatchObject({ rejected: 1, nextCursor: 'c2', hasMore: true });
