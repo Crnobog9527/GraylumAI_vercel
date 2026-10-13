@@ -2519,7 +2519,7 @@
   "fn:fusion_group_claim(uuid,uuid,text,integer,jsonb)": "9835f1f1363a",
   "fn:fusion_group_create(uuid,uuid,text)": "a548758efeca",
   "fn:fusion_group_create(uuid,uuid,text,uuid)": "afcd2d382656",
-  "fn:fusion_pending_financial_batch(integer)": "ef107bc4cb67",
+  "fn:fusion_pending_financial_batch(integer)": "8da511447c2e",
   "fn:fusion_purpose(jsonb)": "483cfa2a8516",
   "fn:get_system_setting_int(text,integer)": "40a5ae3ee26a",
   "fn:guard_model_setting_references()": "a799b7fc80c9",

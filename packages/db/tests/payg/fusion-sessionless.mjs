@@ -54,10 +54,12 @@ export async function fusionSessionlessCases({db,report,createFixture}) {
 
   // Recovery batch lists grouped runs with unsettled calls only.
   const pending = await sessionGroup(db,createFixture,{n:1,credits:9});
-  const batch = (await db.query('SELECT * FROM fusion_pending_financial_batch(200)')).rows.map(r=>r.run_id);
-  assert.ok(batch.includes(pending.runs[0]));
-  assert.ok(!batch.includes(g.runs[0]),'settled group runs are not listed');
-  report.checks.push('fusion_pending_financial_batch lists sessionless group runs with unsettled calls');
+  const rows = (await db.query('SELECT * FROM fusion_pending_financial_batch(200)')).rows;
+  const listed = rows.find(r=>r.run_id===pending.runs[0]);
+  assert.ok(listed && listed.call_id===pending.calls[0].id && listed.actor_id===pending.actor && listed.dispatched===true);
+  assert.ok(listed.dispatch_deadline instanceof Date && listed.recovery===null,'isolated fixture runs carry no staging binding');
+  assert.ok(!rows.some(r=>r.run_id===g.runs[0]),'settled group runs are not listed');
+  report.checks.push('fusion_pending_financial_batch lists unsettled sessionless group calls with dispatch state, deadline and binding');
 
   // Deleting the source conversation deletes its Fusion outputs, scrubs the runs and leaves no hold.
   const del = await sessionGroup(db,createFixture,{n:2,credits:18});
