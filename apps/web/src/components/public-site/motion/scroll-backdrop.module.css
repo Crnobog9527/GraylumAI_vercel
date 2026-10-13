@@ -1,0 +1,100 @@
+/* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+/*
+ * ScrollBackdrop's layers. Five states, one per fifth of the page: a small glow ringed at the top right (first
+ * screen), drifting left as the ring opens, flattening into a wide horizon low on the screen, gathering at the
+ * right, and widening into a warm field under the page's close. All three layers read the same --scroll.
+ * Colors are fixed light-theme values: the public pages are light only.
+ */
+.backdrop {
+  --scroll: 0;
+  --bd-gold: 255, 196, 46;
+  --bd-gold-deep: 230, 160, 0;
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  pointer-events: none;
+  contain: strict;
+}
+
+.glow, .ring, .dots {
+  position: absolute;
+  animation-duration: 1s;
+  animation-timing-function: linear;
+  animation-fill-mode: both;
+  animation-play-state: paused;
+  animation-delay: calc(var(--scroll) * -0.999s);
+  will-change: transform, opacity;
+}
+
+.glow {
+  top: 50%;
+  left: 50%;
+  width: 64vmax;
+  height: 64vmax;
+  margin: -32vmax 0 0 -32vmax;
+  border-radius: 50%;
+  background: radial-gradient(closest-side, rgba(var(--bd-gold), .55), rgba(var(--bd-gold), .22) 55%, rgba(var(--bd-gold), 0));
+  transform: translate(30vw, -30vh) scale(.62);
+}
+
+.ring {
+  top: 50%;
+  left: 50%;
+  width: 70vmax;
+  height: 70vmax;
+  margin: -35vmax 0 0 -35vmax;
+  border: 1.5px solid rgba(var(--bd-gold-deep), .38);
+  border-radius: 50%;
+  transform: translate(30vw, -30vh) rotate(0deg) scale(.42);
+}
+.ring::after {
+  content: '';
+  position: absolute;
+  inset: 9%;
+  border: 1px dashed rgba(38, 38, 38, .14);
+  border-radius: 50%;
+}
+
+.dots {
+  inset: -10vh 0 auto;
+  height: 140vh;
+  background-image: radial-gradient(rgba(38, 38, 38, .13) 1px, transparent 1.4px);
+  background-size: 22px 22px;
+  mask-image: radial-gradient(70% 60% at 50% 40%, #000, transparent 75%);
+}
+
+.backdrop[data-motion='on'] .glow { animation-name: glowStates; }
+.backdrop[data-motion='on'] .ring { animation-name: ringStates; }
+.backdrop[data-motion='on'] .dots { animation-name: dotsDrift; }
+
+@keyframes glowStates {
+  0% { transform: translate(30vw, -30vh) scale(.62); opacity: 1; }
+  25% { transform: translate(-28vw, -8vh) scale(.8); opacity: .9; }
+  50% { transform: translate(0, 36vh) scale(1.5, .42); opacity: .85; }
+  75% { transform: translate(32vw, 4vh) scale(.72); opacity: .9; }
+  100% { transform: translate(0, 24vh) scale(1.35); opacity: 1; }
+}
+
+@keyframes ringStates {
+  0% { transform: translate(30vw, -30vh) rotate(0deg) scale(.42); }
+  25% { transform: translate(-28vw, -8vh) rotate(28deg) scale(.86, .56); }
+  50% { transform: translate(0, 36vh) rotate(-6deg) scale(1.55, .3); }
+  75% { transform: translate(32vw, 4vh) rotate(48deg) scale(.74); }
+  100% { transform: translate(0, 24vh) rotate(90deg) scale(1.1, .82); }
+}
+
+@keyframes dotsDrift {
+  0% { transform: translateY(0); }
+  100% { transform: translateY(-28vh); }
+}
+
+@media (max-width: 767px) {
+  .glow { width: 80vmax; height: 80vmax; margin: -40vmax 0 0 -40vmax; }
+  .ring { width: 86vmax; height: 86vmax; margin: -43vmax 0 0 -43vmax; }
+}
+
+/* Reduced motion: the first state, still. The component also never starts its scroll listener. */
+@media (prefers-reduced-motion: reduce) {
+  .glow, .ring, .dots { animation: none !important; will-change: auto; }
+}
