@@ -32,6 +32,9 @@ describe('PAY-STRIPE-MP card subscription managed in the portal', () => {
       .resolves.toMatchObject({ localId: 'gold' });
     await expect(loadCardPortalSubscription(db([sub('a', true, '2026-11-01'), sub('b', true, '2027-01-01')]), 'u', scope))
       .resolves.toMatchObject({ localId: 'b' });
+    // The Gold already canceled (no longer open): the replaced Pro alone is still not offered for restoring.
+    await expect(loadCardPortalSubscription(db([sub('pro', true, '2027-01-01')], ['pro']), 'u', scope)).resolves.toBeNull();
+    await expect(loadCardPortalSubscription(db([sub('pro', true, '2027-01-01')]), 'u', scope)).resolves.toMatchObject({ localId: 'pro' });
   });
   it('refuses two renewing card subscriptions and returns null without one', async () => {
     await expect(loadCardPortalSubscription(db([sub('a', false, '2026-11-01'), sub('b', false, '2027-01-01')]), 'u', scope))
