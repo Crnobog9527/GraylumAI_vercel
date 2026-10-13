@@ -161,7 +161,7 @@ Redirect URL 留空。脚本 `postforme-probe.mjs`，北京时间 16:13–16:15�
 
 ## 5. 测试脚本用法
 
-脚本 [`postforme-probe.mjs`](postforme-probe.mjs) 只调用读接口和"生成授权链接"（只请求读数据权限 `feeds`，不请求发布权限），代码里写死拒绝发布接口；不打印密钥、不输出作品文字和素材地址。
+脚本 [`postforme-probe.mjs`](postforme-probe.mjs) 只调用读接口和"生成授权链接"（只请求读数据权限 `feeds`，不请求发布权限），代码里写死拒绝发布接口；不打印密钥、账号编号、作品文字和素材地址（按平台名找账号，编号只在脚本内部使用）。
 
 ```bash
 node docs/launch/evidence/publish-monitor-20261013/postforme-probe.mjs accounts
@@ -172,7 +172,7 @@ node docs/launch/evidence/publish-monitor-20261013/postforme-probe.mjs auth-url 
 ```
 
 ```bash
-node docs/launch/evidence/publish-monitor-20261013/postforme-probe.mjs feed <social_account_id> 3
+node docs/launch/evidence/publish-monitor-20261013/postforme-probe.mjs feed x 3
 ```
 
 授权链接由 Owner 本人在浏览器里用自己的测试账号点开（需要登录平台，AI 不代登录）。每个平台记录：字段、最早一条作品日期、条数、耗时、错误。

@@ -11,7 +11,7 @@
 // Usage:
 //   node postforme-probe.mjs accounts
 //   node postforme-probe.mjs auth-url <platform> [external_id]
-//   node postforme-probe.mjs feed <social_account_id> [max_pages]
+//   node postforme-probe.mjs feed <platform> [max_pages]   (account IDs are looked up internally, never printed)
 //   node postforme-probe.mjs smoke            (list endpoints, error shapes, rate-limit headers)
 //   node postforme-probe.mjs burst [n]        (n sequential GET /social-accounts, to observe 429)
 import { readFileSync } from 'node:fs';
@@ -74,7 +74,8 @@ function shapeOf(post) {
 
 async function accounts() {
   const r = await call('GET', '/social-accounts');
-  const rows = (r.json?.data ?? []).map((a) => ({ id: a.id, platform: a.platform, status: a.status }));
+  // Account IDs are user-linked identifiers: print platform and status only.
+  const rows = (r.json?.data ?? []).map((a) => ({ platform: a.platform, status: a.status }));
   return { status: r.status, ms: r.ms, headers: r.headers, accounts: rows, error: r.errorText };
 }
 
@@ -88,7 +89,10 @@ async function authUrl(platform, externalId) {
   return { status: r.status, ms: r.ms, consent_host: url, error: r.json?.message ?? r.errorText };
 }
 
-async function feed(accountId, maxPages = 3) {
+async function feed(platform, maxPages = 3) {
+  const list = await call('GET', '/social-accounts');
+  const accountId = (list.json?.data ?? []).find((a) => a.platform === platform)?.id;
+  if (!accountId) return { platform, error: `no connected ${platform} account` };
   const pages = [];
   let cursor = null;
   for (let i = 0; i < Number(maxPages); i += 1) {
@@ -106,7 +110,7 @@ async function feed(accountId, maxPages = 3) {
     cursor = r.json?.meta?.cursor ?? null;
     if (!r.json?.meta?.has_more || !cursor) break;
   }
-  return { accountId, pages };
+  return { platform, pages };
 }
 
 function brief(r) {
@@ -143,7 +147,7 @@ const run = {
   accounts: () => accounts(), 'auth-url': () => authUrl(a, b), feed: () => feed(a, b), smoke: () => smoke(), burst: () => burst(a),
 }[cmd];
 if (!run) {
-  console.error('usage: accounts | auth-url <platform> [external_id] | feed <id> [max_pages] | smoke | burst [n]');
+  console.error('usage: accounts | auth-url <platform> [external_id] | feed <platform> [max_pages] | smoke | burst [n]');
   process.exit(2);
 }
 console.log(JSON.stringify({ at: new Date().toISOString(), cmd, result: await run() }, null, 2));
