@@ -135,7 +135,9 @@ Auth 账号在对象已删、关系已安全处理后通过受控 Auth 删除接
 
 > 2026-10-13 Owner 决定（Master Plan 第 2.1 节）：用户只能整个删除对话，不能单独删除一条回答；用户发起的单条回答删除由服务端拒绝（[#873](https://github.com/Crnobog9527/GraylumAI_vercel/pull/873)）。下文"一条回答"的删除范围只作为内部能力保留，已保存成果的单独删除不变。
 
-> 同日 Owner 再决定（Master Plan 第 2.1 节"删除整个对话像 ChatGPT 一样瞬间完成"）：删除**整个对话**不再先显示影响，弹窗只提示“删除后无法恢复”，打开即可确认；删除范围由服务端按这一个对话自己计算（`account.conversationErasure`，内部仍是 `content_erasure_preview` 算出范围后立即用同一哈希调用 `content_erasure_confirm`，范围中途变化就重算），不可逆标记、迟到结果和重放拒绝不变。界面先把这一行移出列表，失败时放回并说明原因。已保存成果和注销仍按本节先显示影响。同步只做标记、其余异步清理的提速另开 PR。
+> 同日 Owner 再决定（Master Plan 第 2.1 节"删除整个对话像 ChatGPT 一样瞬间完成"）：删除**整个对话**不再先显示影响，弹窗只提示“删除后无法恢复”，打开即可确认；删除范围由服务端按这一个对话自己计算（`account.conversationErasure`，内部仍是 `content_erasure_preview` 算出范围后立即用同一哈希调用 `content_erasure_confirm`，范围中途变化就重算），不可逆标记、迟到结果和重放拒绝不变。界面先把这一行移出列表，失败时放回并说明原因。已保存成果和注销仍按本节先显示影响。
+
+> 提速（迁移 0231）：`account.conversationErasure` 只调用 `content_erasure_mark_session`——只锁这一个对话，提交不可逆标记，之后读、写、重放、迟到结果全部被已有守卫拒绝（第 47 行“物理删除异步完成不影响拒绝读取”）。物理清理复用 `content_erasure_confirm` 的“已删除”路径：前端在删除成功后后台调用 `account.conversationErasureCleanup`，现有 account-erasure 定时任务每天调用 `content_erasure_sweep_sessions` 兜底（24 小时内清完，已注销账号交给注销流程）。清理已标记对话时只锁其范围内的对话，范围碰到未锁对话就留到下次；不新建队列、表或引擎（第 48 行）。
 
 | 用户选择 | 必须清除的范围 | 保留及提示 |
 | --- | --- | --- |

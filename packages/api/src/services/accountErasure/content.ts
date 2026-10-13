@@ -65,25 +65,43 @@ export async function confirmContentErasure(database: Database | null | undefine
 }
 export const conversationTarget = z.object({ sessionId: z.string().uuid() }).strict();
 /**
- * Owner 2026-10-13: deleting a whole conversation shows no impact list, only "cannot be undone".
- * The server computes the scope itself: the kind is fixed to `session`, the database scope function
- * still checks ownership, and the hash it just produced is confirmed under the same row locks, so
- * the irreversible marker, late-result refusal and replay refusal of content_erasure_confirm are
- * unchanged. A scope that grows between the two calls (a reply landing) is recomputed, not trusted.
+ * Owner 2026-10-13: deleting a whole conversation shows no impact list and completes at once.
+ * One small step (0231 content_erasure_mark_session): only this session is locked and its
+ * irreversible marker committed, after which every read, write, replay and late result is refused.
+ * The kind is fixed to `session` and the database still checks ownership.
  */
 export async function eraseConversation(database: Database | null | undefined, actorId: string,
   input: z.infer<typeof conversationTarget>) {
+  if (!database) fail(null);
   const { sessionId } = conversationTarget.parse(input);
-  const target = { kind: 'session' as const, id: sessionId };
-  for (let attempt = 1; ; attempt += 1) {
-    const preview = await previewContentErasure(database, actorId, target);
-    try {
-      return await confirmContentErasure(database, actorId, { ...target, previewHash: preview.previewHash, acknowledged: true });
-    } catch (error) {
-      const changed = error instanceof TRPCError && error.message === 'CONTENT_ERASURE_PREVIEW_CHANGED';
-      if (!changed || attempt >= 3) throw error;
-    }
-  }
+  const response = await database.rpc('content_erasure_mark_session', { a: actorId, target: sessionId });
+  if (response.error) fail(response.error);
+  const parsed = confirmationResult.safeParse(response.data);
+  if (!parsed.success || parsed.data.id !== sessionId || parsed.data.kind !== 'session') fail(null);
+  return parsed.data;
+}
+/**
+ * Physical cleanup of a marked conversation: the unchanged content_erasure_confirm on its
+ * already-deleted path (no preview hash; an unmarked session is refused). Busy is not an error
+ * here: the account-erasure cron sweeps whatever is left.
+ */
+export async function cleanUpConversation(database: Database | null | undefined, actorId: string,
+  input: z.infer<typeof conversationTarget>) {
+  if (!database) fail(null);
+  const { sessionId } = conversationTarget.parse(input);
+  const response = await database.rpc('content_erasure_confirm', { a: actorId, k: 'session', target: sessionId, expected_hash: null });
+  if (response.error?.message === 'CONTENT_ERASURE_BUSY') return { cleaned: false };
+  if (response.error) fail(response.error);
+  const parsed = confirmationResult.safeParse(response.data);
+  if (!parsed.success || parsed.data.id !== sessionId || parsed.data.kind !== 'session') fail(null);
+  return { cleaned: true };
+}
+const sweepResult = z.object({ cleaned: z.number().int().nonnegative(), pending: z.number().int().nonnegative() }).strict();
+/** Cron backstop (0231): cleans marked conversations the client did not finish. Busy ones stay pending. */
+export async function sweepErasedConversations(database: Database, limit = 50) {
+  const response = await database.rpc('content_erasure_sweep_sessions', { lim: limit });
+  if (response.error) throw new Error('CONTENT_ERASURE_SWEEP_FAILED');
+  return sweepResult.parse(response.data);
 }
 /** Recheck before returning buffered text/results. No positive cache survives a
  * deletion. The existing invocation still completes its original money recovery. */

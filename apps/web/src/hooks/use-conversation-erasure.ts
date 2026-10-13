@@ -46,6 +46,8 @@ export function useConversationErasure(leave: (sessionId: string) => void) {
       afterErased: (id) => {
         removed.delete(id);
         void afterErasure({ kind: 'session', id });
+        // Physical cleanup in the background; the account-erasure cron sweeps anything left.
+        void utils.client.account.conversationErasureCleanup.mutate({ sessionId: id }).catch(() => undefined);
       },
       resync: () => { void utils.opc.conversations.invalidate(); },
       notify: store.setNotice,
