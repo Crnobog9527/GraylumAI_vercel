@@ -13,7 +13,7 @@ CREATE INDEX IF NOT EXISTS runtime_sessions_content_cleanup_pending_idx
 
 CREATE OR REPLACE FUNCTION public.content_erasure_mark_session(a uuid,target uuid)
 RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
-DECLARE s runtime_sessions; deleted boolean; scope jsonb; ids uuid[]; refs uuid[]; local boolean;
+DECLARE s runtime_sessions; deleted boolean; scope jsonb; ids uuid[]; refs uuid[]; local boolean; stamp timestamptz;
 BEGIN
  PERFORM bill2_actor(a);
  -- Same order as content_erasure_confirm (profile, then session). A short wait instead of
@@ -57,7 +57,10 @@ BEGIN
   AND NOT EXISTS(SELECT 1 FROM runtime_scope_material m JOIN runtime_sessions o ON o.id=m.session_id
    WHERE o.actor_id=a AND m.session_id<>target AND m.erased_at IS NULL
     AND (content_erasure_references(m.request,refs) OR content_erasure_references(m.content,refs)));
- UPDATE runtime_sessions SET content_deleted_at=clock_timestamp() WHERE id=target;
+ UPDATE runtime_sessions SET content_deleted_at=clock_timestamp() WHERE id=target RETURNING content_deleted_at INTO stamp;
+ -- Off-database erasure manifest (0227): recorded at the marker's time, in the same transaction;
+ -- the later cleanup's own note keeps this first time.
+ PERFORM erasure_manifest_note('session',target,a,stamp);
  IF NOT local THEN
   -- Same transaction: the marked-session cleanup locks only rows in scope. If it is busy the
   -- marker rolls back with it and the caller reports the conversation as not deleted.

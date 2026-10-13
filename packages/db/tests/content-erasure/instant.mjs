@@ -69,6 +69,10 @@ export async function runInstant({db,Client,connectionString,report}){
   await db.query('RESET ROLE');
   const marked=await row(db,'runtime_sessions',f.session);
   assert.ok(marked.content_deleted_at);assert.equal(marked.erased_at,null,'physical cleanup is not synchronous');
+  // Off-database manifest (0227) records the deletion at the marker's time, before any cleanup.
+  const note=(await db.query(`SELECT confirmed_at FROM erasure_manifest_outbox WHERE kind='session' AND target_id=$1 AND profile_id=$2`,
+   [f.session,f.actor])).rows;
+  assert.equal(note.length,1);assert.equal(note[0].confirmed_at.getTime(),marked.content_deleted_at.getTime());
   await assert.rejects(rpc(db,'runtime_view',f.actor,f.session),/CONTENT_ERASED/);
   await assert.rejects(rpc(db,'runtime_execution',f.actor,f.execution,'read',null),/CONTENT_ERASED/);
   await assert.rejects(rpc(db,'content_erasure_visible',f.actor,f.execution),/CONTENT_ERASED/);
@@ -87,6 +91,8 @@ export async function runInstant({db,Client,connectionString,report}){
   assert.ok(cleaned.erased_at);assert.equal(cleaned.scope,null);
   assert.equal((await row(db,'runtime_executions',f.execution)).payload,null);
   assert.equal((await cleanup(db,f)).alreadyDeleted,true,'repeat cleanup is a no-op');
+  assert.equal((await db.query(`SELECT confirmed_at FROM erasure_manifest_outbox WHERE kind='session' AND target_id=$1`,[f.session]))
+   .rows[0].confirmed_at.getTime(),marked.content_deleted_at.getTime(),'cleanup keeps the first manifest time');
   report.checks.push('cleanup: confirm without hash only for a marked session; body cleared; repeat no-op');
 
   // Another conversation of the same account is busy (a reply is generating there).
