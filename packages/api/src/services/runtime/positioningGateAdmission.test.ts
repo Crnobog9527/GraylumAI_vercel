@@ -119,3 +119,18 @@ it('judges each concurrent duplicate on its own and admits nothing when blocked'
   expect(results.map(r => r.status)).toEqual(['rejected', 'rejected']);
   expect(f.names()).not.toContain('runtime_admit');
 });
+
+it('sizes the frozen fallback rule at admission, so a turn that fits never fails later in the executor', async () => {
+  const policyFor = (f: ReturnType<typeof fixture>) => ({ ...f.policy, inputBytes: 6000 });
+  const admits = async (positioned: boolean, length: number) => {
+    const f = fixture({ positioned });
+    try { await prepare(f, policyFor(f), { ...f.input, input: 'x'.repeat(length) }); return true; }
+    catch (error) { expect(error).toMatchObject({ reason: 'RUNTIME_INPUT_TOO_LONG' }); return false; }
+  };
+  // The longest message a positioned user (no rule) may send...
+  let low = 1, high = 6000;
+  while (low < high) { const mid = Math.ceil((low + high) / 2); if (await admits(true, mid)) low = mid; else high = mid - 1; }
+  expect(await admits(true, low)).toBe(true);
+  // ...is too long once the rule is part of the instructions, and is refused before any execution exists.
+  expect(await admits(false, low)).toBe(false);
+});
