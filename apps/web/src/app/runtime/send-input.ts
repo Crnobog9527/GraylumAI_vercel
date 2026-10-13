@@ -86,8 +86,14 @@ export function openingDraft(storage: DraftStorage, sessionId: string) {
   return merged;
 }
 
-/** Request id for a send: the one already in the address, else the unconfirmed one for the same input, else new. */
+/**
+ * Request id for a send. The same input as an unanswered send reuses that send's id (the server replays it, no
+ * second charge). The id left in the address is reused too, unless it belongs to that unanswered send and the user
+ * changed the text: then this is a different message and gets a new id (reusing it would be RUNTIME_REQUEST_CONFLICT).
+ */
 export function requestIdFor(fromAddress: string | null, pending: PendingSend | null, input: string,
   fresh: () => string = () => crypto.randomUUID()) {
-  return fromAddress ?? (pending && pending.input === input ? pending.requestId : null) ?? fresh();
+  if (fromAddress && pending?.requestId !== fromAddress) return fromAddress;
+  if (pending?.input === input) return pending.requestId;
+  return fresh();
 }
