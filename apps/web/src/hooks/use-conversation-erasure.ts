@@ -1,19 +1,19 @@
 'use client';
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-import { useCallback, useEffect, useMemo } from 'react';
+import { useCallback, useLayoutEffect, useMemo } from 'react';
 import { trpc } from '@/trpc/client';
 import { useAfterContentErasure } from '@/hooks/use-content-erasure';
 import { REVIEW_NOTICE, laterNotice, runConversationErasure } from '@/lib/conversation-erasure';
 import {
-  forgetPending, readPending, rememberPending, resumeConversationErasure,
+  forgetPending, rememberPending, resumeConversationErasure,
 } from '@/lib/pending-conversation-erasure';
-import { useConversationErasureStore } from '@/stores/conversation-erasure';
+import { PENDING_AT_LOAD, useConversationErasureStore } from '@/stores/conversation-erasure';
 
 type Row = { sessionId: string; title: string; lastActivityAt: string };
 /** Rows taken out of the cached list, so a failure can put them back where they were. */
 const removed = new Map<string, { row: Row; index: number }>();
-/** Conversations whose deletion is being re-sent after a reload in this page load. */
-const resuming = new Set<string>();
+/** Deletions from before this page load that have been re-sent (each once per load). */
+const resumed = new Set<string>();
 
 function tabStorage(): Storage | null {
   try { return typeof window === 'undefined' ? null : window.sessionStorage; } catch { return null; }
@@ -70,15 +70,18 @@ export function useConversationErasure(leave: (sessionId: string) => void) {
   }, [utils, afterErasure]);
 
   // A reload while a deletion was in flight: keep those rows hidden and send the deletion again.
-  useEffect(() => {
+  // Layout phase, so the hidden IDs are in place before the first paint of a list that is already
+  // in the cache: the deleted row never flashes.
+  useLayoutEffect(() => {
     const store = useConversationErasureStore.getState();
-    for (const id of readPending(tabStorage())) {
-      if (resuming.has(id) || store.hidden.has(id)) continue;
-      resuming.add(id);
+    for (const id of PENDING_AT_LOAD) {
+      // Already hidden since the store was created; re-send once per page load.
+      if (resumed.has(id)) continue;
+      resumed.add(id);
       store.hide(id);
       void resumeConversationErasure({
         ...steps, leave, wait: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
-      }, id).finally(() => resuming.delete(id));
+      }, id);
     }
   }, [steps, leave]);
 

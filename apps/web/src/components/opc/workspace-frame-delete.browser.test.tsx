@@ -184,6 +184,13 @@ it('shows the accounting notice when the background cleanup finds money still be
 }, '#review'));
 
 async function reload(page: Page) {
+  // Record every paint after the reload that shows the deleted row, not only the settled state.
+  await page.addInitScript(() => {
+    const seen = { flashes: 0 };
+    (window as unknown as { paints: typeof seen }).paints = seen;
+    const tick = () => { if (document.body?.innerText.includes('周末选题讨论')) seen.flashes += 1; requestAnimationFrame(tick); };
+    requestAnimationFrame(tick);
+  });
   await page.reload();
   await page.addStyleTag({ content: css });
   await page.addScriptTag({ content: code });
@@ -195,9 +202,10 @@ it('a reload right after deleting keeps the row gone and finishes the deletion',
   await ui(page.getByText('周末选题讨论')).toHaveCount(0);
   // The first request is still in flight (never answered) when the page reloads.
   await reload(page);
-  await ui(page.getByText('周末选题讨论')).toHaveCount(0);
   await page.waitForTimeout(300);
   await ui(page.getByText('周末选题讨论')).toHaveCount(0);
+  // Not a single painted frame after the reload showed the row.
+  expect(await page.evaluate(() => (window as unknown as { paints: { flashes: number } }).paints.flashes)).toBe(0);
   // The deletion is sent again from the new page (it is idempotent on the server).
   await ui.poll(() => held(page)).toEqual([{ sessionId: SESSION }]);
   await answer(page, true);
