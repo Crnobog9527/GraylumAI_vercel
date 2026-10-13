@@ -123,7 +123,11 @@ DECLARE source text;
     ||' IF s.status=''canceled'' AND current_setting(''role'',true)=''service_role'' THEN'||chr(10)
     ||'  PERFORM public.pay_common_settle_membership_level(s.user_id);'||chr(10)||' END IF;';
 BEGIN
-  source:=pg_get_functiondef('public.pay_stripe_mp_sync_subscription(uuid,text,boolean,boolean)'::regprocedure);
+  -- Looked up by name so 0238's signature can change; a leftover overload stops the migration.
+  IF (SELECT count(*) FROM pg_proc WHERE proname='pay_stripe_mp_sync_subscription'
+    AND pronamespace='public'::regnamespace)<>1 THEN RAISE EXCEPTION 'PAY_COMMON_EXPIRY_STRIPE_SYNC_OVERLOAD'; END IF;
+  SELECT pg_get_functiondef(oid) INTO source FROM pg_proc WHERE proname='pay_stripe_mp_sync_subscription'
+    AND pronamespace='public'::regnamespace;
   IF position(new_cancel IN source)=0 THEN
     IF position(old_cancel IN source)=0 THEN RAISE EXCEPTION 'PAY_COMMON_EXPIRY_STRIPE_CANCEL_PATCH_MISSING'; END IF;
     EXECUTE replace(source,old_cancel,new_cancel);
