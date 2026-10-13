@@ -475,7 +475,7 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
     }
    }
    if(!execution.live)return {state:'pending' as const,...(capacity?{unavailable:'capacity' as const}:{})};
-   const failed=await failBeforeDispatch(ownerRpc,args,transportFailureCode??diagnosticCode(error),
+   const failed=await failBeforeDispatch(ownerRpc,args,preflightFailure??transportFailureCode??diagnosticCode(error),
     preflightFailure==='RUNTIME_PROVIDER_HISTORY_DENIED');
    if(failed?.state==='cancelled'){
     const unavailable:GateRejection|'provider_history'|'preflight'|'capacity'|undefined=gateRejection??(preflightFailure?
