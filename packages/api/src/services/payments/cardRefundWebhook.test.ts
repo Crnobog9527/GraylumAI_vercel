@@ -47,11 +47,13 @@ describe('PAY-STRIPE-MP external refunds of card orders', () => {
     expect(f.db.rpc).not.toHaveBeenCalled(); expect(f.alert).not.toHaveBeenCalled();
     // An external refund (Link, Dashboard) while our monthly refund is approved or running is persisted on that intent
     // as a conflict for review, never also booked as an external refund.
-    mocks.monthly.mockReset().mockImplementation(async (_db: unknown, _order: string, refundId: string) =>
-      ({ handled: refundId === 're_link' }));
-    const during = fixture([refund({ id: 're_link', amount: 1000 })]);
-    await expect(during.run({ refundId: 're_link' })).resolves.toBe(true);
-    expect(mocks.monthly).toHaveBeenCalledWith(during.db, 'order', 're_link', during.stripe);
+    // Several external refunds are kept as one aggregate read from the charge (refund id null), not one slot each.
+    mocks.monthly.mockReset().mockImplementation(async (_db: unknown, _order: string, refundId: string | null) =>
+      ({ handled: refundId === null }));
+    const during = fixture([refund({ id: 're_link', amount: 1000 }), refund({ id: 're_dash', amount: 500, created: 1792000100 })]);
+    await expect(during.run({ chargeId: 'ch_1' })).resolves.toBe(true);
+    expect(mocks.monthly).toHaveBeenCalledTimes(1);
+    expect(mocks.monthly).toHaveBeenCalledWith(during.db, 'order', null, during.stripe);
     expect(during.db.rpc).not.toHaveBeenCalled();
     expect(during.alert).toHaveBeenCalledTimes(1);
     // A refund of ours naming another order is a conflict, never recorded.
