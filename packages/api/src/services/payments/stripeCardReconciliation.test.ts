@@ -30,7 +30,7 @@ function fixture(state: { orders?: Record<string, Order>; sessions?: unknown[]; 
   const stripe = { checkout: { sessions: { list: page(state.sessions) } }, invoices: { list: page(state.invoices) },
     refunds: { list: page(state.refunds) } };
   const run = (options: Record<string, unknown> = {}) => reconcileStripeCardPayments(db as unknown as SupabaseClient,
-    stripe as unknown as Stripe, { now, ...options });
+    stripe as unknown as Stripe, { expectedMode: 'test', now, ...options });
   return { db, stripe, orders, recorded, run };
 }
 const card = (patch: Partial<Order> = {}): Order => ({ payment_channel: 'stripe', payment_method: 'card', fulfilled_at: null,
@@ -42,11 +42,15 @@ describe('PAY-STRIPE-MP daily Stripe card reconciliation', () => {
     mocks.scope.mockReset().mockResolvedValue({ mode: 'test', merchant: 'fixture' });
     for (const mock of [mocks.recover, mocks.invoice, mocks.refund]) mock.mockReset();
   });
-  it('does nothing in live mode (staging only until card checkout opens in production)', async () => {
+  it('runs in the mode the environment configures and refuses a key of the other mode', async () => {
     mocks.scope.mockResolvedValue({ mode: 'live', merchant: 'fixture' });
     const f = fixture({ sessions: [session()] });
-    await expect(f.run()).resolves.toMatchObject({ skipped: true, success: true });
+    await expect(f.run()).rejects.toThrow('PAY_STRIPE_MP_RECONCILIATION_MODE_MISMATCH');
     expect(f.stripe.checkout.sessions.list).not.toHaveBeenCalled();
+    await expect(f.run({ expectedMode: 'live' })).resolves.toMatchObject({ success: true });
+    expect(f.stripe.checkout.sessions.list).toHaveBeenCalled();
+    mocks.scope.mockResolvedValue({ mode: 'test', merchant: 'fixture' });
+    await expect(f.run({ expectedMode: 'live' })).rejects.toThrow('MODE_MISMATCH');
   });
   it('delivers a paid card checkout whose webhook was lost, through the same first-payment recovery', async () => {
     const f = fixture({ orders: { [ORDER]: card() }, sessions: [session()] });

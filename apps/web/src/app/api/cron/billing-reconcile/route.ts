@@ -42,18 +42,27 @@ async function runWaffoReconciliation(supabase: SupabaseClient) {
   }
 }
 
-/** PAY-STRIPE-MP: repairs card orders whose webhook was lost; Stripe test mode (staging) only. Unrepaired items alert. */
+/** PAY-STRIPE-MP: repairs card orders whose webhook was lost; unrepaired items alert. Off unless the environment sets
+ * STRIPE_CARD_RECONCILIATION_MODE to the Stripe mode it must run with (staging: test; production: live, enabled only
+ * with Owner approval at launch, REL-1). A key of the other mode is refused and alerted, never scanned. */
 async function runStripeCardReconciliation(supabase: SupabaseClient) {
+  const expectedMode = process.env.STRIPE_CARD_RECONCILIATION_MODE;
+  if (expectedMode !== 'test' && expectedMode !== 'live') return { success: true, skipped: true, findings: [] };
   let stripe;
-  try { stripe = getStripeClient(); } catch { return { success: true, skipped: true, findings: [] }; }
+  try { stripe = getStripeClient(); } catch {
+    const findings = [{ kind: 'scan_failed' as const, code: 'STRIPE_NOT_CONFIGURED' }];
+    reportStripeCardReconciliation(findings);
+    return { success: false, skipped: false, findings };
+  }
   try {
     const result = await reconcileStripeCardPayments(supabase, stripe,
-      { alert: () => reportPaymentEvidenceConflict('billing-reconcile') });
+      { expectedMode, alert: () => reportPaymentEvidenceConflict('billing-reconcile') });
     reportStripeCardReconciliation(result.findings);
     return result;
   } catch (error) {
-    logger.error('billing', 'stripe_card_reconciliation_failed', { code: error instanceof Error ? error.message : 'UNEXPECTED' });
-    const findings = [{ kind: 'scan_failed' as const }];
+    const code = error instanceof Error && /^[A-Z][A-Z0-9_]{2,80}$/.test(error.message) ? error.message : 'UNEXPECTED';
+    logger.error('billing', 'stripe_card_reconciliation_failed', { code });
+    const findings = [{ kind: 'scan_failed' as const, code }];
     reportStripeCardReconciliation(findings);
     return { success: false, skipped: false, findings };
   }

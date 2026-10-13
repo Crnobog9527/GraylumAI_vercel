@@ -18,16 +18,17 @@ export type StripeCardFinding = {
   object?: 'checkout' | 'invoice' | 'refund'; externalId?: string; orderId?: string; code?: string;
 };
 type Listed<T> = { data: T[]; has_more: boolean };
-type Options = { now?: Date; days?: number; maxPages?: number; alert?: () => void };
+type Options = { expectedMode: StripeScope['mode']; now?: Date; days?: number; maxPages?: number; alert?: () => void };
 
 /** PAY-STRIPE-MP daily backstop (04:00 billing-reconcile, #847 2.5-5): if a webhook was lost, a paid card order could
  * stay undelivered with nothing noticing. Scans the last `days` of Stripe checkout sessions, paid renewal invoices and
  * succeeded refunds, and repairs card orders through the same idempotent handlers the webhook uses (first payment,
  * renewal, external refund). Whatever cannot be repaired, or an incomplete scan, is a finding for manual review.
- * Test mode only (staging): in live mode it does nothing until opening card checkout is approved for production. */
-export async function reconcileStripeCardPayments(db: SupabaseClient, stripe: Stripe, options: Options = {}) {
+ * The environment decides whether it runs and in which mode (staging: test keys; production: live keys, off until the
+ * Owner approves it at launch). A key whose mode differs from the configured one is refused, never scanned. */
+export async function reconcileStripeCardPayments(db: SupabaseClient, stripe: Stripe, options: Options) {
   const scope = await resolveStripeScope(stripe);
-  if (scope.mode !== 'test') return { success: true, skipped: true, complete: true, repaired: 0, checked: 0, findings: [] };
+  if (scope.mode !== options.expectedMode) throw new Error('PAY_STRIPE_MP_RECONCILIATION_MODE_MISMATCH');
   const since = Math.floor((options.now ?? new Date()).getTime() / 1000) - (options.days ?? 7) * DAY;
   const maxPages = options.maxPages ?? 10;
   const findings: StripeCardFinding[] = [];
