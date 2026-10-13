@@ -2,6 +2,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { REPORT_SETTING } from '../services/report/contract';
 import { PAYG_START_THRESHOLDS_KEY } from '../services/bill2/settingKeys';
+import { logger } from '../lib/logger';
 import { adminRouter } from './admin';
 import { settingsRouter } from './settings';
 import { PAYMENT_CHANNEL_KEY } from '../services/payments/channelSettings';
@@ -105,6 +106,24 @@ describe('settings dashboard structured settings isolation', () => {
     expect(systemSettings).toMatchObject(kept);
     expect(systemSettings).not.toHaveProperty('payment_method_routes');
     expect(systemSettings).not.toHaveProperty('payment_terms_version');
+  });
+
+  it('skips unknown structured values with a warning instead of failing the page', async () => {
+    const warn = vi.spyOn(logger, 'warn').mockImplementation(() => undefined);
+    try {
+      const { admin } = fixture([
+        { key: 'future_structured_setting', value: { version: 1, enabled: true } },
+        { key: 'future_list_setting', value: ['a'] },
+        { key: 'site_name', value: 'Fixture site' },
+      ]);
+      await expect(admin.getSettingsDashboard()).resolves.toEqual({
+        systemSettings: { site_name: 'Fixture site' }, membershipPlans: [],
+      });
+      expect(warn).toHaveBeenCalledWith('api', 'admin_settings_unknown_structured_key_skipped', { key: 'future_structured_setting' });
+      expect(warn).toHaveBeenCalledWith('api', 'admin_settings_unknown_structured_key_skipped', { key: 'future_list_setting' });
+    } finally {
+      warn.mockRestore();
+    }
   });
 
   it('does not validate dedicated values even when they are malformed or serialized', async () => {
