@@ -44,6 +44,8 @@ import { callBillingUnit } from './billingUnitAdmission';
 import type {GateRejection} from './newWorkGate';
 import {allowedOutput} from './moderation';
 import {runtimeIdentityGuard} from '../modelIdentity/runtimeGuard';
+import {POSITIONING_REFUSED,positioningRefused,endPositioningRefusal} from './positioningFallback';
+import {cancelledOutcome,finishCancelRequested} from './executorOutcome';
 import {frozenBrandIdentity,withBrandIdentity} from '../modelIdentity/brandIdentity';
 export function runtimeExecutor(options:RuntimeExecutorOptions){
  if(typeof options.callGate!=='function')throw new Error('RUNTIME_CALL_GATE_REQUIRED');
@@ -68,14 +70,8 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
   const isPayg=execution.billing?.contractVersion==='bill2.v2';
   const ownerDatabase=isPayg?paygOwnerDatabase(options.database,{executionId,epoch:execution.epoch!}):options.database;
   const ownerRpc=<T>(name:string,value:Record<string,unknown>)=>rpc<T>(name,value,ownerDatabase);
-  if(execution.state==='cancelled')return {state:'cancelled' as const,
-   ...(['provider_history','preflight','platform_review'].includes(execution.unavailableReason??'')
-    ?{unavailable:execution.unavailableReason}:{})};
-  if(execution.cancelRequested){
-   await billing.recoverReceipts(execution.runId);
-   const recovered=await ownerRpc<{state:string}>('runtime_financial_recovery',{...args,p_finish:true});
-   return {state:recovered.state as 'completed'|'cancelled'|'cost_pending',...(execution.result?{body:execution.result.body,...(execution.result.summary!==undefined?{summary:execution.result.summary}:{})}:{})};
-  }
+  if(execution.state==='cancelled')return cancelledOutcome(execution.unavailableReason);
+  if(execution.cancelRequested)return finishCancelRequested(billing,ownerRpc,args,execution);
   if(execution.state==='completed')return completedOutput(execution.result,execution.context,onProgress);
   if(execution.state==='cost_pending'&&execution.result){
    // Immutable saved output: recover billed calls without the SDK or Session writes.
@@ -358,6 +354,7 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
     callSequence=primarySequence;
     body=await runPrimary(true);
    }
+   if(positioningRefused(context,body))throw new Error(POSITIONING_REFUSED); // POSITIONING-GATE fallback: never shown or saved.
    if(context.network==='require_latest'){
     const latest=await ownerRpc<{state:'cancelled'|'cost_pending';unavailable?:boolean}>('runtime_execution',{...args,p_action:'check_latest'});
     if(latest.unavailable)return {state:latest.state,unavailable:'latest' as const};
@@ -422,6 +419,7 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
    return {...nativeMetadata(result),body,...(summary!==undefined?{summary}:{}),state:completed.state};
   }catch(error){
    claimNotice??=billingClaimNotice(error);
+   if(error instanceof Error&&error.message===POSITIONING_REFUSED)return endPositioningRefusal(ownerRpc,args,isPayg);
    if(nativeProgress&&!accountClosed&&!moderationBlocked){const done=await finishStop(executionId,onProgress,undefined,execution.live);if(done)return done;}
    if(nativeProgress&&execution.live&&projection.text&&!waitPoint){const correction=projection.finish(INVALID_REPLY_NOTICE);if(correction)progress(correction);}
    if(waitPoint){

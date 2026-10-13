@@ -4,8 +4,12 @@ import { OUTPUT_TRUNCATED_NOTICE, PLATFORM_FAILURE_NOTICE, PROVIDER_HISTORY_NOTI
 import { hostNotice, isPaygWaiting } from '@/lib/payg-wait';
 import { RUNTIME_INPUT_TOO_LONG_MESSAGE } from '../../../../../packages/api/src/shared/runtimeInputMessages';
 import { RUNTIME_PAYG_PROFILE_REQUIRED_MESSAGE } from '../../../../../packages/api/src/shared/runtimeAdmissionMessages';
+import { isPositioningRequired, POSITIONING_REQUIRED_REASON } from '../../../../../packages/api/src/shared/positioningGate';
 
 export { OUTPUT_TRUNCATED_NOTICE };
+/** POSITIONING-GATE step 2 interim text; the guide card (start positioning / import) is step 3. */
+export const POSITIONING_REQUIRED_NOTICE =
+  '为自己的账号做社媒运营之前，需要先完成账号定位：请到“对话”里开始定位，或导入你已有的定位。本次没有扣积分。';
 const videoGatePrefix = 'OPC_CONTENT_GATE_';
 
 /** A `runtime.prepare` refusal by the new-work gate; the caller keeps the request and input. */
@@ -17,6 +21,9 @@ export function runtimeAdmissionNotice(cause: unknown): string | null {
   // The model has no per-call billing profile: refused before any call or charge, so say so instead of "pending".
   if (cause instanceof Error && cause.message === RUNTIME_PAYG_PROFILE_REQUIRED_MESSAGE && data?.code === 'PRECONDITION_FAILED' &&
     data.path === 'runtime.prepare') return RUNTIME_PAYG_PROFILE_REQUIRED_MESSAGE;
+  // Refused before admission (no execution, no charge): show the fixed text, never the code.
+  if (cause instanceof Error && data?.code === 'PRECONDITION_FAILED' && data.path === 'runtime.prepare' &&
+    isPositioningRequired(cause)) return POSITIONING_REQUIRED_NOTICE;
   return gateAdmissionNotice(cause, ['runtime.prepare']);
 }
 
@@ -28,6 +35,7 @@ export function runtimeExecutionNotice(result: unknown): string | null {
   if (result.unavailable === 'provider_history') return PROVIDER_HISTORY_NOTICE;
   if (result.unavailable === 'preflight' || result.unavailable === 'platform_review') return PLATFORM_FAILURE_NOTICE;
   if (result.unavailable === 'output_truncated') return OUTPUT_TRUNCATED_NOTICE;
+  if (result.unavailable === POSITIONING_REQUIRED_REASON) return POSITIONING_REQUIRED_NOTICE;
   return gateResultNotice(result.unavailable);
 }
 
