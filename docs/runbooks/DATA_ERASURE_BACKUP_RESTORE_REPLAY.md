@@ -74,14 +74,21 @@ Redis 键名：`graylum:erasure-manifest:<kind>:<目标编号>`，值是上面�
      `previewHash`，再 `content_erasure_confirm(账号, kind, 目标, previewHash)`。
      返回 `CONTENT_NOT_FOUND` 表示这条是备份之后才创建的，恢复出来的库里本来就没有，记为"不存在"。
    - `library_document`：`library_delete(账号, 文档)`，然后运行资料库清理（`cleanupLibrary`），把对应存储文件删掉。
-     文档不存在时返回 `deleted`，记为"不存在"。
+     文档行和上传预留都不存在（备份之后才上传又删除的）时，`library_delete` 会返回 `deleted`，但资料库清理找不到它，
+     不会删存储。这时**直接按固定路径删除并核对**：资料库存储桶里的 `<账号编号>/<文档编号>/original` 和
+     `<账号编号>/<文档编号>/text`（迁移 0203 的约束规定了这个格式），用 Storage API 删除，再列一次确认两个路径都不存在，
+     才记为"不存在"。删不掉或核对不了，按失败处理。
    - 重放本身会在隔离库里再写一遍待同步记录；它们同步到 Redis 时键已存在，不会改写。
+   - **备份里原本就在途的注销**：清单只导出备份之后确认的条目，备份那一刻已经确认、但还没完成的注销不在清单里，
+     可它们的内容和存储文件都随备份恢复回来了。所以不论清单里有没有 `account` 条目，都要在隔离项目里运行注销执行器，
+     直到 `account_erasure_requests` 里**每一条**都是 `completed`（已知例外的老账号按当时的例外记录处理，写进记录），
+     再进入下一步。这一项单独查 `account_erasure_requests`，不依赖清单。
 4. **存储文件单独核对**：数据库备份不含 Storage 文件 [S8]。重放后确认被删账号和被删资料库文档的存储路径都已不存在。
 5. **核对**：对清单里每一条确认删除标记已经存在：
-   - `account`：`account_erasure_requests.stage='completed'`；
+   - `account`：`account_erasure_requests.stage='completed'`；并且恢复出来的库里所有注销请求都已 `completed`（已知例外除外，逐条记录）；
    - `answer` / `session` / `artifact`：对应行 `content_deleted_at` 不为空（或整行已不存在）；
    - `content`：`opc_content_versions.erased_at` 不为空；
-   - `library_document`：状态是 `deleting` 或整行已不存在。
+   - `library_document`：状态是 `deleting` 或整行已不存在；两个固定存储路径都已不存在。
    另外按 DATA-ERASURE §8：财务的 unknown 和防重复记录照常保留，不能因为恢复重新派发或重新发放开户积分。
 6. **只有第 2–5 步全部通过**，才把隔离项目切换为服务项目并开放。任何一条失败、或数量对不上，停下来报告 Owner。
    记录：备份时间、清单条数（按类型）、重放结果（删除 / 不存在 / 失败）、核对结果。记录里不写编号以外的内容。
