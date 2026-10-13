@@ -21,7 +21,7 @@ function privateHost(hostname: string): boolean {
   const host = hostname.toLowerCase().replace(/\.+$/, '');
   if (host.startsWith('[') || host.includes(':')) return true;
   // IANA special-use and common private suffixes: never public pages.
-  const special = ['localhost', 'local', 'internal', 'arpa', 'test', 'invalid', 'example', 'onion', 'lan', 'home', 'corp', 'intranet', 'private'];
+  const special = ['localhost', 'local', 'internal', 'arpa', 'test', 'invalid', 'example', 'onion', 'lan', 'home', 'corp', 'intranet', 'private', 'alt'];
   if (special.some(suffix => host === suffix || host.endsWith(`.${suffix}`))) return true;
   if (!host.includes('.')) return true;
   const v4 = host.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);

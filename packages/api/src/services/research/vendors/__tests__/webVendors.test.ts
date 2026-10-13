@@ -112,7 +112,7 @@ describe('callFirecrawl', () => {
     for (const bad of ['ftp://example.com', 'https://user:pw@example.com', 'http://localhost:3000', 'http://10.0.0.1/',
       'http://192.168.1.1', 'http://[::1]/', 'http://[::ffff:7f00:1]/', 'http://[::]/', 'http://[2001:db8::1]/',
       'http://192.0.2.1/', 'http://198.51.100.1/', 'http://203.0.113.1/', 'http://192.0.0.8/', 'http://localhost./',
-      'http://printer.home.arpa/', 'http://foo.test/', 'http://foo.invalid/', 'https://www.example/', 'http://foo.local./', 'http://bar.internal../', 'http://100.64.0.1/', 'http://198.18.0.1/', 'http://0.0.0.0/', 'http://2130706433/', 'http://intranet/', 'not a url']) {
+      'http://printer.home.arpa/', 'https://service.alt/', 'http://foo.test/', 'http://foo.invalid/', 'https://www.example/', 'http://foo.local./', 'http://bar.internal../', 'http://100.64.0.1/', 'http://198.18.0.1/', 'http://0.0.0.0/', 'http://2130706433/', 'http://intranet/', 'not a url']) {
       expect(buildFirecrawlRequest(bad)).toEqual({ reason: 'INVALID_URL' });
     }
   });
