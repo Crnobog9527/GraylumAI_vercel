@@ -20,8 +20,7 @@ const ok=r=>{if(r.status!==0||r.error)throw new Error((r.stderr||String(r.error)
 const endpoint=ok(run('docker',['context','inspect','--format','{{.Endpoints.docker.Host}}']));
 assert.ok(endpoint.startsWith('unix:///')&&!endpoint.includes('\n'),'only local Docker socket');
 const docker=(args,input)=>run('docker',['--host',endpoint,...args],input);
-const image=POSTGRES_IMAGE.replace(/:[^/@]+@/, '@');
-ok(docker(['image','inspect',image]));
+ok(docker(['image','inspect',POSTGRES_IMAGE]));
 const name=`graylum-content-material-${randomUUID().slice(0,8)}`;
 const sql=input=>docker(['exec','-i',name,'psql','-X','-qAt','-U','postgres','-d','a1','-v','ON_ERROR_STOP=1'],input);
 const fp=read('packages/db/tests/baseline/fingerprint.sql');
@@ -32,7 +31,7 @@ const report={build:null,checks:[],failed:null};
 let client;let seeded=false;
 try {
  ok(docker(['run','-d','--pull=never','--name',name,'-p','127.0.0.1::5432',
-  '-e','POSTGRES_DB=a1','-e','POSTGRES_HOST_AUTH_METHOD=trust',image]));
+  '-e','POSTGRES_DB=a1','-e','POSTGRES_HOST_AUTH_METHOD=trust',POSTGRES_IMAGE]));
  let ready=false;
  for(let i=0;i<300&&!ready;i++){
   ready=docker(['exec',name,'pg_isready','-h','127.0.0.1','-U','postgres','-d','a1']).status===0;
