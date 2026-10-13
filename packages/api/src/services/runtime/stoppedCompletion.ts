@@ -96,6 +96,10 @@ export function stoppedCompletion(options: RuntimeExecutorOptions, billing: Retu
       if(valid&&!(tool&&context.hostTurnContext?.cardContract))body=agentTurnResult(body,output,Boolean(tool),tool
         ?questionMessageFromArguments(tool.function?.arguments??''):undefined,true,Boolean(context.mentorText)).body;
     }else if(message?.tool_calls?.length)valid=false;
+    // MODEL-IDENTITY-GUARD: redact before rebuilding the projection, in the live executor's order, so the
+    // stop source derived here matches the replacement snapshot the client saw (review P1).
+    const identity=runtimeIdentityGuard(frozenBrandIdentity(context.instructions));
+    body=identity.body(body);
     try{
       if(valid){
         const fitted=prepareNativePrimary(body,{}, {envelopeOrder:context.envelopeOrder,appendCard:Boolean(context.mentorText),
@@ -116,9 +120,6 @@ export function stoppedCompletion(options: RuntimeExecutorOptions, billing: Retu
     const summary=organized?.model===context.attachedOrganizer?.model&&organized?.choices?.length===1
       &&organized.choices[0]?.finish_reason==='stop'&&!terminalAgentReplyFailure(organized,true)
       ?organized.choices[0]?.message?.content:undefined;
-    // MODEL-IDENTITY-GUARD: the stop position counts the redacted text the client was shown.
-    const identity=runtimeIdentityGuard(frozenBrandIdentity(context.instructions));
-    body=identity.body(body);
     let result=valid?stoppedResult({executionId,format:agent?'agent':step?'step':'plain',body,
       appendCard:Boolean(context.mentorText),stopAt:execution.stop!.stopAt,source:execution.stop?.source,expectedSource:source,
       capacityLimited,primaryComplete:choice?.finish_reason!=='length',attachedOrganizer:Boolean(context.attachedOrganizer),

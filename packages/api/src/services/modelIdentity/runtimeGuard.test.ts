@@ -58,10 +58,12 @@ it('legacy cumulative text events and card messages are redacted', () => {
   const out: RuntimeProgress[] = [];
   const guarded = guardedProgress(event => out.push(event));
   guarded({ type: 'text', text: '我是 Claude。' });
-  guarded({ type: 'card', card: { message: '我是 Claude。', question: 'I am Claude.', options: ['我是 Gemini。', '普通'] } as never });
+  // A card that redaction makes invalid is not sent at all (the text already carries the brand reply).
+  guarded({ type: 'card', card: { question: '你更想用哪个？', options: ['I am Claude.', 'I am Gemini.'], recommended: null } as never });
+  guarded({ type: 'card', card: { question: '你更想用哪个？', options: ['短视频', '图文'], recommended: null } as never });
   expect(out).toEqual([
     { type: 'text', text: BRAND_REPLY_ZH },
-    { type: 'card', card: { message: BRAND_REPLY_ZH, question: BRAND_REPLY_EN, options: [BRAND_REPLY_ZH, '普通'] } },
+    { type: 'card', card: { question: '你更想用哪个？', options: ['短视频', '图文'], recommended: null } },
   ]);
 });
 

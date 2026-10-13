@@ -375,7 +375,7 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
       length:primaryLength,attachedOrganizer:Boolean(context.attachedOrganizer),executionId});
      body=fitted.body;turnMetadata=fitted.metadata;
     if(nativeProgress){const final=projection.finish(nativeVisible(body));if(final)progress(final);}
-    if(turn?.card)progress({type:'card',card:JSON.parse(body).card});
+    if(turn?.card&&JSON.parse(body).card)progress({type:'card',card:JSON.parse(body).card});
    }
    if(nativeProgress&&!accountClosed&&!moderationBlocked){const done=await finishStop(executionId,onProgress,undefined,execution.live);if(done)return done;}
    if(context.reportGeneration)await session.addItems([]);

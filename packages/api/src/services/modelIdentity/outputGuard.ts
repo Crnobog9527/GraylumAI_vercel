@@ -1,5 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { BRAND_REPLY_EN, BRAND_REPLY_ZH, BRAND_REPLY_ZH_HANT } from './brandIdentity';
+import { questionCardSchema, questionToolCardSchema } from '../../shared/agentTurn';
 
 /**
  * MODEL-IDENTITY-GUARD layer 3: replace a model's first-person self-identification
@@ -128,9 +129,21 @@ export function redactIdentityBody(body: string) {
   // and readers prefer card.message after reload (review P1).
   // Every displayed card string (message, question, options, recommendationReason) is redacted on its own:
   // an appended card's text differs from the combined message and readers prefer it after reload (review P1).
-  const card = record.card && typeof record.card === 'object' ? redactIdentityStrings(record.card) : record.card;
+  const card = record.card && typeof record.card === 'object' ? redactIdentityCard(record.card) : record.card;
   if (message === record.message && JSON.stringify(card) === JSON.stringify(record.card)) return body;
   return JSON.stringify({ ...record, message, ...(record.card !== undefined ? { card } : {}) });
+}
+
+/**
+ * Every displayed card string is redacted. A card that redaction makes invalid (options collapsing into
+ * the same brand reply, or longer than a field allows) is dropped: the message already carries the brand
+ * reply, and an invalid card would fail the whole paid turn (review P2).
+ */
+export function redactIdentityCard<T>(card: T): T | null {
+  const redacted = redactIdentityStrings(card);
+  if (JSON.stringify(redacted) === JSON.stringify(card)) return card;
+  const schema = card && typeof card === 'object' && 'message' in card ? questionToolCardSchema : questionCardSchema;
+  return schema.safeParse(redacted).success ? redacted : null;
 }
 
 /** Every string inside a JSON value; other values and keys unchanged. */

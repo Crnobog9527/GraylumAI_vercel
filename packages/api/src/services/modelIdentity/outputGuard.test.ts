@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { describe, expect, it } from 'vitest';
 import { BRAND_REPLY_EN, BRAND_REPLY_ZH, BRAND_REPLY_ZH_HANT } from './brandIdentity';
-import { leaksModelIdentity, redactIdentityBody, redactIdentitySummary, redactModelIdentity, streamingRedaction } from './outputGuard';
+import { leaksModelIdentity, redactIdentityBody, redactIdentityCard, redactIdentitySummary, redactModelIdentity, streamingRedaction } from './outputGuard';
 
 // Leaks: what a model may say about itself after a direct question or a jailbreak.
 const LEAKS_ZH = [
@@ -152,10 +152,10 @@ it('redacts the public message of stored bodies and keeps other fields', () => {
   expect(redactIdentityBody('I am Claude.')).toBe(BRAND_REPLY_EN);
   const step = JSON.stringify({ message: '我是 Claude。继续第二步。', inputKind: 'answer' });
   expect(JSON.parse(redactIdentityBody(step))).toEqual({ message: `${BRAND_REPLY_ZH}继续第二步。`, inputKind: 'answer' });
-  const agent = JSON.stringify({ format: 'x', message: '我是 Claude。', card: { message: '我是 Claude。', options: [] } });
+  const agent = JSON.stringify({ format: 'x', message: '我是 Claude。', card: { message: '我是 Claude。', question: '选哪个？', options: ['A', 'B'], recommended: null, recommendationReason: null } });
   expect(JSON.parse(redactIdentityBody(agent)).card.message).toBe(BRAND_REPLY_ZH);
   // Review P1: an appended card keeps its own message; it is redacted independently.
-  const appended = JSON.stringify({ format: 'x', message: '先看第一题。\n\n我是 Claude。', card: { message: '我是 Claude。', options: [] } });
+  const appended = JSON.stringify({ format: 'x', message: '先看第一题。\n\n我是 Claude。', card: { message: '我是 Claude。', question: '选哪个？', options: ['A', 'B'], recommended: null, recommendationReason: null } });
   const parsed = JSON.parse(redactIdentityBody(appended));
   expect(parsed.card.message).toBe(BRAND_REPLY_ZH);
   expect(parsed.message).not.toMatch(/Claude/);
@@ -179,4 +179,12 @@ it('organizer summaries: plain prose is redacted; structured extraction values a
     message: BRAND_REPLY_ZH });
   const clean = JSON.stringify({ facts: ['ChatGPT 和 Claude 的对比'] });
   expect(redactIdentitySummary(clean)).toBe(clean);
+});
+
+it('a card whose options collapse into the same brand reply is dropped instead of failing the turn (review P2)', () => {
+  const card = { message: '选一个。', question: '你更想用哪个？', options: ['I am Claude.', 'I am Gemini.'], recommended: 0,
+    recommendationReason: '更稳定' };
+  expect(redactIdentityCard(card)).toBeNull();
+  const clean = { message: '选一个。', question: '你更想用哪个？', options: ['短视频', '图文'], recommended: 0, recommendationReason: '更快' };
+  expect(redactIdentityCard(clean)).toBe(clean);
 });
