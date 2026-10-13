@@ -50,13 +50,14 @@ BEGIN
  END IF;
 END $catalog$;
 
--- Composite targets so a connection or request can only name the actor's own brand account.
+-- Composite targets so a connection or request can only name the actor's own brand account on the same
+-- platform. Connections store the brand account's platform name; adapters map provider names onto it.
 DO $$
 BEGIN
  IF NOT EXISTS(SELECT 1 FROM pg_constraint WHERE conrelid='public.opc_accounts'::regclass
-  AND conname='opc_accounts_project_actor_business_key') THEN
-  ALTER TABLE public.opc_accounts ADD CONSTRAINT opc_accounts_project_actor_business_key
-   UNIQUE(project_id,actor_id,business_id);
+  AND conname='opc_accounts_project_actor_business_platform_key') THEN
+  ALTER TABLE public.opc_accounts ADD CONSTRAINT opc_accounts_project_actor_business_platform_key
+   UNIQUE(project_id,actor_id,business_id,platform);
  END IF;
 END $$;
 
@@ -103,8 +104,8 @@ CREATE TABLE IF NOT EXISTS public.social_connections(
  created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
  updated_at timestamptz NOT NULL DEFAULT clock_timestamp(),
  FOREIGN KEY(actor_id,business_id) REFERENCES public.opc_businesses(actor_id,id) ON DELETE RESTRICT,
- FOREIGN KEY(account_project_id,actor_id,business_id)
-  REFERENCES public.opc_accounts(project_id,actor_id,business_id) ON DELETE RESTRICT,
+ FOREIGN KEY(account_project_id,actor_id,business_id,platform)
+  REFERENCES public.opc_accounts(project_id,actor_id,business_id,platform) ON DELETE RESTRICT,
  CHECK(source<>'postforme' OR provider_account_id IS NOT NULL),
  CHECK(role<>'benchmark' OR (source='tikhub' AND account_project_id IS NULL AND profile_ref IS NOT NULL)),
  -- A retained deletion record keeps no brand binding and no user-visible identity (DATA-ERASURE §2).
@@ -206,8 +207,8 @@ CREATE TABLE IF NOT EXISTS public.social_connect_requests(
  consumed_at timestamptz,
  confirm_expires_at timestamptz,
  FOREIGN KEY(actor_id,business_id) REFERENCES public.opc_businesses(actor_id,id) ON DELETE RESTRICT,
- FOREIGN KEY(target_account_project_id,actor_id,business_id)
-  REFERENCES public.opc_accounts(project_id,actor_id,business_id) ON DELETE SET NULL(target_account_project_id),
+ FOREIGN KEY(target_account_project_id,actor_id,business_id,platform)
+  REFERENCES public.opc_accounts(project_id,actor_id,business_id,platform) ON DELETE SET NULL(target_account_project_id),
  CHECK(state<>'awaiting_callback' OR consumed_at IS NULL),
  CHECK(state NOT IN ('pending_confirm','applied') OR consumed_at IS NOT NULL),
  CHECK((state='pending_confirm')=(confirm_expires_at IS NOT NULL))

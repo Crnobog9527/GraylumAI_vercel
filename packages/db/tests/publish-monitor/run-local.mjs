@@ -145,6 +145,13 @@ try {
   await code(c.query(`INSERT INTO social_connect_requests(actor_id,business_id,target_account_project_id,platform,permissions,
     external_id,state,expires_at) VALUES($1,$2,$3,'x','{feeds}',$4,'awaiting_callback',now()+interval '10 minutes')`,
   [user.a, user.business, other.account, 'c'.repeat(16) + '.' + 'd'.repeat(16)]), '23503');
+  // ...and only the brand account of the same platform (fixture account platform is 'x').
+  // 'disconnected' is outside the one-effective-connection index, so only the platform key can reject it.
+  await code(connect(user, { account: user.account, platform: 'youtube', provider: 'pfm_wrong_platform',
+    status: 'disconnected' }), '23503');
+  await code(c.query(`INSERT INTO social_connect_requests(actor_id,business_id,target_account_project_id,platform,permissions,
+    external_id,state,expires_at) VALUES($1,$2,$3,'youtube','{feeds}',$4,'awaiting_callback',now()+interval '10 minutes')`,
+  [user.a, user.business, user.account, 'e'.repeat(16) + '.' + 'f'.repeat(16)]), '23503');
   // A snapshot of a post must use that post's own connection.
   await code(c.query(`INSERT INTO social_metric_snapshots(actor_id,connection_id,post_id,captured_on,source,metrics)
     VALUES($1,$2,$3,current_date-1,'tikhub','{}')`, [user.a, bench, post]), '23503');
