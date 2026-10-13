@@ -20,7 +20,9 @@ const stubs: Array<[(id: string) => boolean, string]> = [
     // Any utils path (utils.opc.conversations.setData…) is a no-op; the list itself stays static.
     const deep=()=>new Proxy(()=>{},{get:(_,key)=>key==='then'?undefined:deep(),apply:()=>undefined});
     const client={account:{conversationErasure:{mutate:input=>new Promise((resolve,reject)=>
-      window.erasures.push({input,resolve,reject}))}}};
+      window.erasures.push({input,resolve,reject}))},
+      conversationErasureCleanup:{mutate:async input=>{window.cleanups.push(input);
+        return {cleaned:true,reviewRequired:location.hash==='#review'};}}}};
     export const trpc={useUtils:()=>new Proxy({},{get:(_,key)=>key==='client'?client:deep()}),
       opc:{library:{useQuery:()=>q(location.hash==='#strategy'?{businesses:[{businessId:'b1',accounts:[{projectId:'p1',
         platform:'抖音',account:'测试号',strategyDraftId:'d1',sourceVersionId:'v1',sourceVersion:1,items:[]}]}]}
@@ -58,7 +60,7 @@ beforeAll(async () => {
       if (id.startsWith('\0stub')) return stubs[Number(id.slice(5))][1];
       if (id === entry) return `import React from 'react'; import {createRoot} from 'react-dom/client';
         import {WorkspaceFrame} from ${JSON.stringify(source)};
-        window.opened=[];window.erasures=[];window.replaced=[];window.erased=[];
+        window.opened=[];window.erasures=[];window.replaced=[];window.erased=[];window.cleanups=[];
         const root=createRoot(document.getElementById('root'));
         const frame=()=>React.createElement(WorkspaceFrame,null,'对话内容');
         root.render(frame());
@@ -97,7 +99,7 @@ async function open(width: number, run: (page: Page) => Promise<void>, hash = ''
 const more = (page: Page) => page.getByRole('button', { name: '周末选题讨论的更多操作' });
 
 type Held = { input: unknown; resolve: (value: unknown) => void; reject: (error: unknown) => void };
-type Win = { opened: unknown[]; erasures: Held[]; replaced: string[]; erased: unknown[] };
+type Win = { opened: unknown[]; erasures: Held[]; replaced: string[]; erased: unknown[]; cleanups: unknown[] };
 const held = (page: Page) => page.evaluate(() => (window as unknown as Win).erasures.map(item => item.input));
 const answer = (page: Page, ok: boolean, message = '') => page.evaluate(([okay, text]) => {
   const call = (window as unknown as Win).erasures.at(-1)!;
@@ -134,6 +136,8 @@ it.each([1280, 375])('removes the row and closes the dialog at once, before the 
     await answer(page, true);
     await ui(page.getByText('周末选题讨论')).toHaveCount(0);
     await ui.poll(() => page.evaluate(() => (window as unknown as Win).erased)).toEqual([{ kind: 'session', id: SESSION }]);
+    // Physical cleanup starts in the background only after the server confirmed the deletion.
+    await ui.poll(() => page.evaluate(() => (window as unknown as Win).cleanups)).toEqual([{ sessionId: SESSION }]);
     await ui(page.getByRole('alert')).toHaveCount(0);
   }));
 
@@ -144,6 +148,7 @@ it('puts the row back with a plain reason when the server refuses, and never rep
   await ui(page.getByText('周末选题讨论')).toBeVisible();
   await ui(page.getByRole('alert')).toContainText('没有删除，已放回列表');
   expect(await page.evaluate(() => (window as unknown as Win).erased)).toEqual([]);
+  expect(await page.evaluate(() => (window as unknown as Win).cleanups)).toEqual([]);
 }));
 
 it('keeps the row hidden and still reports a failure after the page changes mid-deletion', () => open(1280, async page => {
@@ -170,6 +175,13 @@ it('says so when the content is gone but money records are still being checked',
   await ui(page.getByRole('status')).toContainText('部分账务记录仍在核对中');
   await ui(page.getByText('周末选题讨论')).toHaveCount(0);
 }));
+
+it('shows the accounting notice when the background cleanup finds money still being checked', () => open(1280, async page => {
+  await confirmDelete(page);
+  await answer(page, true);
+  await ui(page.getByRole('status')).toContainText('部分账务记录仍在核对中');
+  await ui(page.getByText('周末选题讨论')).toHaveCount(0);
+}, '#review'));
 
 it('cancel keeps the conversation and sends nothing', () => open(1280, async page => {
   await openMenu(page);
