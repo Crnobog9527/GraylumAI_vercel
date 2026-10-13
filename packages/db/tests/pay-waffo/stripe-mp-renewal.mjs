@@ -141,6 +141,10 @@ export async function stripeMpRenewalCases({admin,service,connect}) {
   assert.equal(await deadline(optedOut),null,'a cancellation the buyer asked for ends the founder window');
   await assert.rejects(()=>sync(card,false,false,true),/RENEW_SCOPE/,'a user cancellation is always a final cancellation');
 
+  // One function by this name (no leftover 4-parameter overload).
+  assert.equal((await admin.query(`SELECT count(*)::int n FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
+    WHERE n.nspname='public' AND p.proname='pay_stripe_mp_sync_subscription'`)).rows[0].n,1);
+
   // Scope: only Stripe card subscriptions, never Waffo or wallet ones.
   const waffoSub=(await admin.query("SELECT id FROM user_subscriptions WHERE payment_channel='waffo' LIMIT 1")).rows[0]?.id;
   if(waffoSub) await assert.rejects(()=>service.query(`SELECT pay_stripe_mp_sync_subscription($1,'fixture',true,false,false)`,[waffoSub]),/RENEW_SCOPE/);
@@ -154,5 +158,5 @@ export async function stripeMpRenewalCases({admin,service,connect}) {
   return ['stripe-mp-grace-card-and-card-cn','stripe-mp-failure-recorded-once','stripe-mp-failure-earliest-out-of-order','stripe-mp-past-due-keeps-grace',
     'stripe-mp-renewal-list-price-not-first-month','stripe-mp-renewal-pre-tax-only','stripe-mp-renewal-tax-recorded','stripe-mp-renewal-once-concurrently',
     'stripe-mp-renewal-clears-failure','stripe-mp-next-charge-date','stripe-mp-one-order-per-period','stripe-mp-stop-ends-grace',
-    'stripe-mp-cancel-permanent','stripe-mp-cancel-resets-cached-level','stripe-mp-cancel-keeps-remaining-level','stripe-mp-erasure-renewing-follows-stop','stripe-mp-charge-after-cancel-review','stripe-mp-founder-card-cn-deadline','stripe-mp-founder-renewal','stripe-mp-founder-window-retry-exhausted','stripe-mp-founder-window-user-cancel','stripe-mp-renewal-scope'];
+    'stripe-mp-cancel-permanent','stripe-mp-cancel-resets-cached-level','stripe-mp-cancel-keeps-remaining-level','stripe-mp-erasure-renewing-follows-stop','stripe-mp-charge-after-cancel-review','stripe-mp-founder-card-cn-deadline','stripe-mp-founder-renewal','stripe-mp-founder-window-retry-exhausted','stripe-mp-founder-window-user-cancel','stripe-mp-sync-single-signature','stripe-mp-renewal-scope'];
 }

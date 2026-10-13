@@ -109,6 +109,8 @@ BEGIN
  RETURN jsonb_build_object('failedAt',coalesce(s.founder_failed_at,p_failed_at));
 END $$;
 
+-- An earlier draft had 4 parameters; drop it so the name stays unique (0243 looks the function up by name).
+DROP FUNCTION IF EXISTS public.pay_stripe_mp_sync_subscription(uuid,text,boolean,boolean);
 CREATE OR REPLACE FUNCTION public.pay_stripe_mp_sync_subscription(
  p_subscription uuid,p_merchant text,p_cancel_at_period_end boolean,p_canceled boolean,p_user_canceled boolean
 ) RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
