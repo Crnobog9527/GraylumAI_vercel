@@ -150,7 +150,7 @@ export function normalizeFeedPage(json: unknown, platform: string): FeedPage | n
   // has_more is optional in the provider schema; when absent, a non-null next link means more pages.
   const meta = parsed.data.meta;
   const hasMore = meta.has_more ?? (typeof meta.next === 'string' && meta.next.length > 0);
-  const nextCursor = hasMore ? meta.cursor ?? null : null;
+  const nextCursor = hasMore && typeof meta.cursor === 'string' && meta.cursor.trim() ? meta.cursor : null;
   // Claiming more pages without a cursor to fetch them is inconsistent: not a trustworthy page.
   if (hasMore && nextCursor === null) return null;
   return { posts, rejected, nextCursor, hasMore };

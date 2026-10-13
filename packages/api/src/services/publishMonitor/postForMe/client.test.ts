@@ -170,8 +170,10 @@ describe('post for me client', () => {
     const viaNext = await readFeedPage(deps([json(200, { data: [], meta: { cursor: 'c9', next: 'https://api.postforme.dev/n' } })])
       .deps, 'spc_1', 'x');
     expect(viaNext.kind === 'ok' && [viaNext.value.hasMore, viaNext.value.nextCursor]).toEqual([true, 'c9']);
-    expect(await readFeedPage(deps([json(200, { data: [], meta: { has_more: true } })]).deps, 'spc_1', 'x'))
-      .toMatchObject({ kind: 'failed', reason: 'RESPONSE_SHAPE' });
+    for (const meta of [{ has_more: true }, { has_more: true, cursor: '' }, { has_more: true, cursor: '  ' }]) {
+      expect(await readFeedPage(deps([json(200, { data: [], meta })]).deps, 'spc_1', 'x'))
+        .toMatchObject({ kind: 'failed', reason: 'RESPONSE_SHAPE' });
+    }
     const done = await readFeedPage(deps([json(200, { data: [], meta: { has_more: false, cursor: 'c9', next: 'x' } })]).deps,
       'spc_1', 'x');
     expect(done.kind === 'ok' && done.value.hasMore).toBe(false);
