@@ -10,6 +10,7 @@ let code: string;
 let css: string;
 const entry = fileURLToPath(new URL('./__frame_delete_fixture__.js', import.meta.url));
 const SESSION = '00000000-0000-4000-8000-0000000000a1';
+const WORK_SESSION = '00000000-0000-4000-8000-0000000000b2';
 
 // Everything around the list is stubbed. The deletion call is held by the page (window.erasures), so a
 // test decides when and how the server answers and can check what the list shows meanwhile.
@@ -22,7 +23,10 @@ const stubs: Array<[(id: string) => boolean, string]> = [
       window.erasures.push({input,resolve,reject}))}}};
     export const trpc={useUtils:()=>new Proxy({},{get:(_,key)=>key==='client'?client:deep()}),
       opc:{library:{useQuery:()=>q(location.hash==='#strategy'?{businesses:[{businessId:'b1',accounts:[{projectId:'p1',
-        platform:'抖音',account:'测试号',strategyDraftId:'d1',sourceVersionId:'v1',sourceVersion:1,items:[]}]}]}:{accounts:[]})},list:{useQuery:()=>q([])},
+        platform:'抖音',account:'测试号',strategyDraftId:'d1',sourceVersionId:'v1',sourceVersion:1,items:[]}]}]}
+        :location.hash==='#work'?{businesses:[{businessId:'b1',accounts:[{projectId:'p1',platform:'抖音',account:'测试号',
+        items:[{workItemId:'w1',sessionId:'${WORK_SESSION}',title:'口播稿工作',brief:null,day:'2026-10-13',revision:1}]}]}]}
+        :{accounts:[]})},list:{useQuery:()=>q([])},
         conversations:{useQuery:()=>q([{sessionId:'${SESSION}',title:'周末选题讨论',lastActivityAt:'2026-10-13T00:00:00Z'}])},
         workUiChange:{useMutation:m},accountUiChange:{useMutation:m}},
       user:{getUserProfile:{useQuery:()=>q(null)}},ticket:{createTicket:{useMutation:m}}};`],
@@ -196,6 +200,20 @@ it('Esc on the strategy menu returns focus to its own button, not an earlier row
   await ui(page.getByRole('menu')).toHaveCount(0);
   await ui(strategy).toBeFocused();
 }, '#strategy'));
+
+it('deletes a work conversation through the same one-click dialog; the work itself stays', () => open(1280, async page => {
+  await page.getByRole('button', { name: '口播稿工作的更多操作' }).focus();
+  await page.keyboard.press('Enter');
+  await page.getByRole('menuitem', { name: '永久删除对话记录' }).click();
+  const dialog = page.getByRole('dialog');
+  await ui(dialog).toContainText('删除后无法恢复');
+  await ui(dialog.getByRole('button', { name: '删除', exact: true })).toBeEnabled();
+  await dialog.getByRole('button', { name: '删除', exact: true }).click();
+  await ui(page.getByRole('dialog')).toHaveCount(0, { timeout: 1000 });
+  expect(await held(page)).toEqual([{ sessionId: WORK_SESSION }]);
+  expect(await page.evaluate(() => (window as unknown as Win).opened)).toEqual([]);
+  await ui(page.getByText('口播稿工作')).toBeVisible();
+}, '#work'));
 
 it('reaches the ⋯ button with Tab, which makes it visible', () => open(1280, async page => {
   for (let i = 0; i < 60 && !(await more(page).evaluate(el => el === document.activeElement)); i++) {
