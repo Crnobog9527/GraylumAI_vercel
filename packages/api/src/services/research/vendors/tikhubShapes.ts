@@ -2,7 +2,7 @@
 // TikHub passes each platform's own JSON through under `data` without a published schema, so items are
 // located by their characteristic keys (ported from the RESEARCH-0 comparison tooling).
 // Only whitelisted fields leave this module: no bios, contact details, avatars or commenter data.
-import { bool, clip, count, displayCount, findAll, has, idText, text, timestamp } from './fields';
+import { SOCIAL_EARLIEST_MS, bool, clip, count, displayCount, findAll, has, idText, text, timestamp } from './fields';
 import { publicHttpUrl } from './http';
 import type { ResearchItem, SocialKind, SocialPlatform } from './types';
 
@@ -39,7 +39,7 @@ function aweme(item: Raw, platform: 'douyin' | 'tiktok') {
     id, title: clip(text(item, ['desc']), TITLE_CHARS),
     author: text(item, ['author.nickname', 'author.unique_id']),
     authorId: idText(item, ['author.unique_id', 'author.sec_uid', 'author.uid']),
-    publishedAt: timestamp(item, ['create_time']),
+    publishedAt: timestamp(item, ['create_time'], SOCIAL_EARLIEST_MS),
     views: count(item, ['statistics.play_count']), likes: count(item, ['statistics.digg_count']),
     comments: count(item, ['statistics.comment_count']), shares: count(item, ['statistics.share_count']),
   }, POST_FIELDS, url);
@@ -49,7 +49,7 @@ function xhsNote(item: Raw) {
   return toItem({
     id: idText(item, ['id', 'note_id']), title: clip(text(item, ['title', 'display_title', 'desc']), TITLE_CHARS),
     author: text(item, ['user.nickname', 'user.name']), authorId: idText(item, ['user.userid', 'user.user_id', 'user.id']),
-    publishedAt: timestamp(item, ['timestamp', 'time', 'create_time']),
+    publishedAt: timestamp(item, ['timestamp', 'time', 'create_time'], SOCIAL_EARLIEST_MS),
     views: count(item, ['view_count']), likes: count(item, ['liked_count', 'likes']),
     comments: count(item, ['comments_count']), shares: count(item, ['shared_count', 'share_count']),
   }, POST_FIELDS, text(item, ['share_info.link']));
@@ -61,7 +61,7 @@ function weiboPost(item: Raw) {
   return toItem({
     id: idText(item, ['idstr', 'mid', 'id']), title: clip(text(item, ['text_raw', 'text']), TITLE_CHARS),
     author: text(item, ['user.screen_name']), authorId: userId,
-    publishedAt: timestamp(item, ['created_at']),
+    publishedAt: timestamp(item, ['created_at'], SOCIAL_EARLIEST_MS),
     views: count(item, ['reads_count', 'page_info.play_count']), likes: count(item, ['attitudes_count']),
     comments: count(item, ['comments_count']), shares: count(item, ['reposts_count']),
   }, POST_FIELDS, userId && blog ? `https://weibo.com/${userId}/${blog}` : undefined);
@@ -74,7 +74,7 @@ function youtubeVideo(item: Raw, channel: string | undefined) {
     author: text(item, ['author', 'channel_name', 'channel.title']) ?? channel,
     authorId: text(item, ['channel_id', 'channelId']),
     // Only relative labels ("3 days ago") are documented; they are not a timestamp and stay missing.
-    publishedAt: timestamp(item, ['published_at', 'publish_date', 'upload_date']),
+    publishedAt: timestamp(item, ['published_at', 'publish_date', 'upload_date'], SOCIAL_EARLIEST_MS),
     views: displayCount(item, ['view_count', 'views']), likes: count(item, ['like_count']),
     comments: count(item, ['comment_count']), shares: undefined,
   }, POST_FIELDS, id ? `https://www.youtube.com/watch?v=${id}` : undefined);
@@ -85,7 +85,7 @@ function instagramPost(item: Raw) {
   return toItem({
     id: idText(item, ['id', 'pk']) ?? code, title: clip(text(item, ['caption.text', 'caption_text']), TITLE_CHARS),
     author: text(item, ['user.username', 'owner.username']), authorId: text(item, ['user.username', 'owner.username']),
-    publishedAt: timestamp(item, ['taken_at', 'taken_at_timestamp']),
+    publishedAt: timestamp(item, ['taken_at', 'taken_at_timestamp'], SOCIAL_EARLIEST_MS),
     views: count(item, ['play_count', 'ig_play_count', 'view_count', 'video_view_count']),
     likes: count(item, ['like_count', 'edge_liked_by.count']),
     comments: count(item, ['comment_count', 'edge_media_to_comment.count']),
@@ -102,7 +102,7 @@ function tweet(item: Raw, accountHandle?: string) {
   return toItem({
     id, title: clip(text(item, ['text', 'full_text']) ?? text(legacy, ['full_text', 'text']), TITLE_CHARS),
     author: handle, authorId: handle,
-    publishedAt: timestamp(item, ['created_at']) ?? timestamp(legacy, ['created_at']),
+    publishedAt: timestamp(item, ['created_at'], SOCIAL_EARLIEST_MS) ?? timestamp(legacy, ['created_at'], SOCIAL_EARLIEST_MS),
     views: count(item, ['views', 'view_count', 'views.count']),
     likes: count(item, ['favorites', 'favorite_count', 'likes']) ?? count(legacy, ['favorite_count']),
     comments: count(item, ['replies', 'reply_count']) ?? count(legacy, ['reply_count']),

@@ -50,9 +50,14 @@ describe('official usage parsing', () => {
     const { timestamp } = await import('../fields');
     expect(timestamp({ t: 1_760_000_000 }, ['t'])).toBe('2025-10-09T08:53:20.000Z');
     expect(timestamp({ t: 1_760_000_000_000 }, ['t'])).toBe('2025-10-09T08:53:20.000Z');
-    for (const bad of [1_760_000_000_000_000, 4_102_444_800, '2999-01-01', 1e20, 12, '1999-12-31']) {
+    for (const bad of [1_760_000_000_000_000, 4_102_444_800, '2999-01-01', 1e20]) {
       expect(timestamp({ t: bad }, ['t'])).toBeUndefined();
     }
+    // Web pages may be old; social posts cannot predate 2000.
+    expect(timestamp({ t: '1998-05-01' }, ['t'])).toBe('1998-05-01T00:00:00.000Z');
+    const { SOCIAL_EARLIEST_MS } = await import('../fields');
+    expect(timestamp({ t: '1998-05-01' }, ['t'], SOCIAL_EARLIEST_MS)).toBeUndefined();
+    expect(timestamp({ t: 12 }, ['t'], SOCIAL_EARLIEST_MS)).toBeUndefined();
   });
 
   it('reads Firecrawl credits from either documented location', () => {

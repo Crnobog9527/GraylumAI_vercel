@@ -61,14 +61,16 @@ export function displayCount(value: unknown, paths: readonly string[]): number |
 }
 
 /** Epoch seconds, epoch milliseconds or an absolute date string → ISO. Relative labels are missing. */
-export function timestamp(value: unknown, paths: readonly string[]): string | undefined {
-  return firstValid(value, paths, readTimestamp);
+export function timestamp(value: unknown, paths: readonly string[], earliestMs = 1): string | undefined {
+  return firstValid(value, paths, found => readTimestamp(found, earliestMs));
 }
 
-const EARLIEST_MS = Date.UTC(2000, 0, 1);
+/** Social posts on the supported platforms cannot predate 2000; older values are malformed, not old. */
+export const SOCIAL_EARLIEST_MS = Date.UTC(2000, 0, 1);
+
 const DAY_MS = 86_400_000;
 
-function readTimestamp(found: unknown): string | undefined {
+function readTimestamp(found: unknown, earliestMs: number): string | undefined {
   let ms: number | undefined;
   if (typeof found === 'number' || (typeof found === 'string' && /^\d{9,13}$/.test(found))) {
     const numeric = Number(found);
@@ -76,9 +78,9 @@ function readTimestamp(found: unknown): string | undefined {
   } else if (typeof found === 'string' && /\d{4}/.test(found)) {
     ms = Date.parse(found);
   }
-  // Only plausible publication times: from 2000 to one day ahead (clock skew). Microsecond epochs,
+  // Only plausible publication times: from `earliestMs` to one day ahead (clock skew). Microsecond epochs,
   // far-future dates and anything a Date cannot hold are treated as missing, never as "recent".
-  if (ms === undefined || !Number.isFinite(ms) || ms < EARLIEST_MS || ms > Date.now() + DAY_MS) return undefined;
+  if (ms === undefined || !Number.isFinite(ms) || ms < earliestMs || ms > Date.now() + DAY_MS) return undefined;
   return new Date(ms).toISOString();
 }
 
