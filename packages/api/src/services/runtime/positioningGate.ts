@@ -61,10 +61,11 @@ export function decisionsRequest(text: string) {
   };
 }
 
-const decisionsResponse = z.object({
+// Usage is read on its own first: a billed call whose answer is malformed still records its cost.
+const decisionsUsage = z.object({ usage: z.object({ input_tokens: z.number().optional(),
+  output_tokens: z.number().optional(), cost: z.number().optional() }) });
+const decisionsAnswer = z.object({
   answers: z.object({ [QUESTION]: z.object({ type: z.literal('noul'), noul: z.number().min(0).max(1) }) }),
-  usage: z.object({ input_tokens: z.number().optional(), output_tokens: z.number().optional(),
-    cost: z.number().optional() }).optional(),
 });
 
 /** One platform-paid Decisions call, no retry. Never throws; every failure is 'unavailable'. */
@@ -72,7 +73,7 @@ export async function decide(apiKey: string, text: string, transport: typeof fet
   clock: () => number = () => performance.now()): Promise<GateVerdict> {
   const started = clock();
   let httpStatus: number | null = null, verdict: GateVerdict = 'unavailable', probability: number | null = null;
-  let usage: z.infer<typeof decisionsResponse>['usage'];
+  let usage: z.infer<typeof decisionsUsage>['usage'] | undefined;
   try {
     const response = await transport(DECISIONS_URL, {
       method: 'POST', redirect: 'error', signal: AbortSignal.timeout(DECISIONS_TIMEOUT_MS),
@@ -84,9 +85,9 @@ export async function decide(apiKey: string, text: string, transport: typeof fet
       // Never read or echo an untrusted error body.
       await response.body?.cancel().catch(() => {});
     } else {
-      const parsed = decisionsResponse.parse(await response.json());
-      usage = parsed.usage;
-      probability = parsed.answers[QUESTION]!.noul;
+      const body: unknown = await response.json();
+      usage = decisionsUsage.safeParse(body).data?.usage;
+      probability = decisionsAnswer.parse(body).answers[QUESTION]!.noul;
       verdict = probability >= DECISIONS_BLOCK_AT ? 'block' : 'allow';
     }
   } catch { verdict = 'unavailable'; }

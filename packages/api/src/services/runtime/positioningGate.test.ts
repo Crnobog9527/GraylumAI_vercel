@@ -36,6 +36,15 @@ it('logs the platform-paid cost without user text', async () => {
   expect(JSON.stringify(fields)).not.toContain('PRIVATE');
 });
 
+it('records the billed cost even when the answer itself is malformed', async () => {
+  const info = vi.spyOn(logger, 'info');
+  const malformed = new Response(JSON.stringify({ answers: { own_account_social_media_operations: { type: 'noul', noul: 7 } },
+    usage: { input_tokens: 280, output_tokens: 1, cost: 0.000028 } }), { status: 200 });
+  expect(await decide('KEY', 'x', vi.fn(async () => malformed) as never)).toBe('unavailable');
+  expect(info.mock.calls.find(call => call[1] === 'positioning_gate_decision')![2])
+    .toMatchObject({ verdict: 'unavailable', costUsd: 0.000028, inputTokens: 280, probability: null });
+});
+
 it.each([
   ['an HTTP error', async () => new Response('{"error":{"message":"secret"}}', { status: 503 })],
   ['a transport failure', async () => { throw new Error('network'); }],
