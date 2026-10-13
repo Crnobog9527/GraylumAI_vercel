@@ -316,6 +316,10 @@
         {
           "name": "PUBLISH-MONITOR",
           "plain": "接入 Post for Me 做多平台发布和数据监控，小红书、抖音读公开数据，支持手动导入，AI 每周复盘。"
+        },
+        {
+          "name": "SOCIAL-SYNC",
+          "plain": "原「自动同步社媒数据」任务，2026-10-13 并入本站一起做。"
         }
       ],
       "waitingForOwner": [
