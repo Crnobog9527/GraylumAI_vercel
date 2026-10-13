@@ -57,6 +57,12 @@ describe('landing demo script', () => {
     expect(demoReducer(state, { type: 'free', text: '  ' })).toBe(state);
   });
 
+  it('keeps what the visitor types into a later step', () => {
+    const state = demoReducer(initialDemoState(), { type: 'edit', fieldId: 'direction', text: '转行入门' });
+    expect(demoInformation(state).direction.values?.direction.value).toBe('转行入门');
+    expect(state.valid).toBe(false);
+  });
+
   it('invents no follower, income or growth numbers', () => {
     const text = [REPORT_BODY, ...initialDemoState().messages.map(message => message.text),
       ...QUESTION_ONE.options, ...QUESTION_TWO.options].join('\n');

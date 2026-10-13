@@ -148,8 +148,9 @@ export function demoInformation(state: DemoState): Record<string, StepInformatio
     [id, state.typed.includes(id) ? { source: 'user' } : { source: 'capture', basis: 'user_statement' }]));
   return {
     you: { schema: FIELDS, values: state.values, meta },
-    direction: { schema: LATER.direction },
-    benchmark: { schema: LATER.benchmark },
+    // Field ids are unique across steps, so every step reads its own fields from the one value map.
+    direction: { schema: LATER.direction, values: state.values, meta },
+    benchmark: { schema: LATER.benchmark, values: state.values, meta },
   };
 }
 
