@@ -6,11 +6,13 @@ const staging = { VERCEL: '1', VERCEL_PROJECT_PRODUCTION_URL: 'auth-staging.gray
 const routes = (card: boolean) => ({ version: 2, card: { enabled: card },
   wechat_pay: { enabled: true, annualVerified: true }, alipay: { enabled: true, annualVerified: true } });
 function fixture(counts: Array<number | null> = [40, 3, 2], route: unknown = null,
-  memberships: unknown[] = [], subscriptions: unknown[] | null = []) {
-  const results = [{ data: route === null ? null : { value: route }, error: null }, { data: memberships, error: null },
+  memberships: unknown[] = [], subscriptions: unknown[] | null = [], goldOrders: unknown[] = []) {
+  const results: Array<{ data: unknown; error: null }> = [{ data: route === null ? null : { value: route }, error: null },
+    { data: memberships, error: null },
     { data: counts.some(n => n === null) ? null : counts.flatMap((n, i) =>
-      Array.from({ length: n! }, () => ({ qualification_state: ['sold', 'reserved', 'review'][i] }))), error: null },
-    { data: subscriptions, error: null }];
+      Array.from({ length: n! }, () => ({ qualification_state: ['sold', 'reserved', 'review'][i] }))), error: null }];
+  if (memberships.length) results.push({ data: subscriptions, error: null });
+  results.push({ data: { value: { version: 'terms-2026-10' } }, error: null }, { data: goldOrders, error: null });
   const queries: Array<{ eq: ReturnType<typeof vi.fn>; not: ReturnType<typeof vi.fn> }> = [];
   const from = vi.fn(() => {
     const result = results.shift();
@@ -30,7 +32,7 @@ describe('method membership read projection', () => {
     expect(f.queries[1]?.eq).toHaveBeenCalledWith('user_id', 'actor');
     expect(f.queries[1]?.eq).toHaveBeenCalledWith('payment_status', 'paid');
     expect(f.queries[1]?.not).toHaveBeenCalledWith('fulfilled_at', 'is', null);
-    for (const q of f.queries.slice(2)) {
+    for (const q of f.queries.slice(2, 3)) {
       expect(q.eq).toHaveBeenCalledWith('payment_mode', 'test');
       expect(q.eq).not.toHaveBeenCalledWith('merchant_namespace', expect.anything());
       expect(q.eq).not.toHaveBeenCalledWith('payment_status', expect.anything());
@@ -44,6 +46,15 @@ describe('method membership read projection', () => {
     for (const enabled of [true, false]) {
       expect(await ready({ ...staging, VERCEL_PROJECT_PRODUCTION_URL: 'app.graylum.com' }, enabled)).toBe(false);
     }
+  });
+  it('tells the purchase entry the terms version and whether the Gold first-month offer applies (display only)', async () => {
+    const first = await readMethodMembership(fixture().db, 'actor', 0, staging);
+    expect([first.termsVersion, first.goldFirstMonthEligible]).toEqual(['terms-2026-10', true]);
+    const f = fixture(undefined, null, [], [], [{ id: 'gold-order' }]);
+    expect((await readMethodMembership(f.db, 'actor', 0, staging)).goldFirstMonthEligible).toBe(false);
+    const gold = f.queries.at(-1)!;
+    expect(gold.eq).toHaveBeenCalledWith('user_id', 'actor');
+    expect(gold.eq).toHaveBeenCalledWith('purchase_membership_level', 'gold');
   });
   it('does not present missing count as zero or hide oversold state', async () => {
     await expect(readMethodMembership(fixture([null, 0, 0]).db, 'actor')).rejects.toThrow('PAY_WAFFO_MEMBERSHIP_UNAVAILABLE');

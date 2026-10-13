@@ -42,6 +42,17 @@ export async function readMethodMembership(db: SupabaseClient, userId: string, n
   if (paid.some(row => !stopped.has(row.subscription_id))) throw new Error('PAY_WAFFO_MEMBERSHIP_UNAVAILABLE');
   const memberships = paid.map(row => ({ ...row, cancel_at_period_end: stopped.get(row.subscription_id) === true,
     auto_renew: row.auto_renew === true && stopped.get(row.subscription_id) === false }));
+  // For the purchase entry (PAY-STRIPE-MP step 5): the published terms version methodCheckout requires, and whether
+  // the Gold first-month offer applies. The latter is display only: pay_waffo_admit_purchase decides at checkout,
+  // also against other accounts of the same person (identity digests), which this read cannot see.
+  const [terms, gold] = await Promise.all([
+    db.from('system_settings').select('value').eq('key', 'payment_terms_version').maybeSingle(),
+    db.from('payment_orders').select('id').eq('user_id', userId).eq('payment_mode', 'test')
+      .eq('purchase_membership_level', 'gold')
+      .or('payment_status.in.(paid,refunded,partially_refunded),fulfilled_at.not.is.null').limit(1),
+  ]);
+  if (!terms || terms.error || !gold || gold.error || !Array.isArray(gold.data)) throw new Error('PAY_WAFFO_MEMBERSHIP_UNAVAILABLE');
+  const version = (terms.data as { value?: { version?: unknown } } | null)?.value?.version;
   // Historical sold slots never return to the pool, including refunds and cancellation.
   const occupied = founderOrders.data.length;
   const sold = founderOrders.data.filter(row => row.qualification_state === 'sold').length;
@@ -51,5 +62,7 @@ export async function readMethodMembership(db: SupabaseClient, userId: string, n
     checkoutReady: methodCardCheckoutReady(env, routes),
     founder: { total: 50, sold, reserved: occupied - sold, available: 50 - occupied },
     memberships,
+    termsVersion: typeof version === 'string' ? version : null,
+    goldFirstMonthEligible: gold.data.length === 0,
   };
 }
