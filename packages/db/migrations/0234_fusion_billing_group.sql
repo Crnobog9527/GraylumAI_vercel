@@ -136,7 +136,8 @@ BEGIN
   BEGIN
     PERFORM set_config('graylum.fusion_group_claim', g.id::text, true);
     FOR item IN SELECT * FROM jsonb_array_elements(p_items) LOOP
-      IF NOT fusion_purpose(item->'payload') THEN RAISE EXCEPTION 'FUSION_GROUP_INVALID'; END IF;
+      -- One call per Fusion run: replacements and later rounds use new runs, so max_calls never binds.
+      IF NOT fusion_purpose(item->'payload') OR (item->>'sequence') IS DISTINCT FROM '1' THEN RAISE EXCEPTION 'FUSION_GROUP_INVALID'; END IF;
       res:=bill2_claim(p_actor_id, (item->>'runId')::uuid, (item->>'sequence')::int, item->'payload');
       IF res->>'state'='waiting_credits' OR res->>'id' IS NULL THEN RAISE EXCEPTION 'FUSION_GROUP_WAITING_CREDITS'; END IF;
       SELECT * INTO c FROM bill2_calls WHERE id=(res->>'id')::uuid;
@@ -201,7 +202,7 @@ END $$;
 -- Settlement: group members round on the group's cumulative weighted nominal value, so the
 -- group as a whole is charged ceil(total * q) once; a Fusion call without a host verdict does
 -- not settle (its hold stays), and zero-charge verdicts take the existing refund path.
-DO $$ DECLARE src text; a1 text; a2 text; a3 text; a4 text; a5 text; BEGIN
+DO $$ DECLARE src text; a1 text; a2 text; a3 text; a4 text; a5 text; a6 text; a7 text; BEGIN
   src:=pg_get_functiondef('public.bill2_payg_finalize(uuid,uuid)'::regprocedure);
   IF position('fusion_billing_groups' IN src)=0 THEN
     a1:='DECLARE r bill2_runs;c bill2_calls;rec record;';
@@ -210,12 +211,25 @@ DO $$ DECLARE src text; a1 text; a2 text; a3 text; a4 text; a5 text; BEGIN
     a3:=$x$  IF bad THEN UPDATE bill2_runs SET conflict=true$x$;
     a4:=$x$  IF c.provider_rejected OR c.dispatched_at IS NULL OR (r.closed AND r.outcome='confirmed_failure') THEN$x$;
     a5:='   w:=r.weighted_nominal_usd;';
+    a6:='   debit:=least(delta,c.reserved_credits)::int;cap:=greatest(bounded-c.reserved_credits,0);bound:=delta-debit-cap;';
+    a7:='   n:=0;delta:=0;bounded:=0;debit:=0;cap:=0;bound:=0;';
     IF array_length(string_to_array(src,a1),1)<>2 OR array_length(string_to_array(src,a2),1)<>2
       OR array_length(string_to_array(src,a3),1)<>2 OR array_length(string_to_array(src,a4),1)<>2
-      OR array_length(string_to_array(src,a5),1)<>2
+      OR array_length(string_to_array(src,a5),1)<>2 OR array_length(string_to_array(src,a6),1)<>2
+      OR array_length(string_to_array(src,a7),1)<>2
       OR array_length(string_to_array(src,$x$   version=version+1 WHERE id=rid RETURNING * INTO r;
  END LOOP;$x$),1)<>2 THEN RAISE EXCEPTION 'FUSION_SOURCE_MISMATCH: bill2_payg_finalize'; END IF;
-    src:=replace(src,a1,'DECLARE fg fusion_billing_groups;r bill2_runs;c bill2_calls;rec record;');
+    src:=replace(src,a1,'DECLARE fg fusion_billing_groups;nmc numeric;r bill2_runs;c bill2_calls;rec record;');
+    -- Group members advance the shared accumulator by the billable amount capped at the call's own
+    -- hold, so the group total is ceil(q * sum(min(n_i*m_i, hold_i/q))) in any settlement order.
+    src:=replace(src,a6,a6||$x$
+   nmc:=n*bill2_unit_multiplier(c.payload->'billingUnit'->'multiplier');
+   IF fg.id IS NOT NULL THEN
+    nmc:=least(nmc,c.reserved_credits::numeric/r.credits_per_usd);
+    debit:=(ceil((w+nmc)*r.credits_per_usd)-ceil(w*r.credits_per_usd))::int;
+    cap:=greatest(delta-debit,0);bound:=delta-debit-cap;
+   END IF;$x$);
+    src:=replace(src,a7,a7||'nmc:=0;');
     src:=replace(src,a2,$x$ PERFORM bill2_payg_lock_models(r);
  SELECT * INTO fg FROM fusion_billing_groups WHERE id=r.fusion_group_id FOR UPDATE;
  PERFORM id FROM bill2_calls WHERE run_id=rid ORDER BY id FOR UPDATE;$x$);
@@ -232,7 +246,7 @@ $x$||a3);
     src:=replace(src,$x$   version=version+1 WHERE id=rid RETURNING * INTO r;
  END LOOP;$x$,$x$   version=version+1 WHERE id=rid RETURNING * INTO r;
   IF fg.id IS NOT NULL THEN
-   UPDATE fusion_billing_groups SET weighted_nominal_usd=weighted_nominal_usd+n*bill2_unit_multiplier(c.payload->'billingUnit'->'multiplier'),
+   UPDATE fusion_billing_groups SET weighted_nominal_usd=weighted_nominal_usd+nmc,
     version=version+1 WHERE id=fg.id RETURNING * INTO fg;
   END IF;
  END LOOP;$x$);

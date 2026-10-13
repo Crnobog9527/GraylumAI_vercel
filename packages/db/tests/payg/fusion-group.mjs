@@ -93,6 +93,23 @@ export async function fusionGroupCases({db,Client,connectionString,report,create
   } finally { await holder.end(); await claimer.end(); }
   report.checks.push('group claim waits for model locks before the group row: settlement-order holder takes the group without deadlock');
 
+  // A call whose nominal value exceeds its own hold advances the group only by the capped amount,
+  // so the group total is the same in either settlement order: ceil(9 + 0.4) = 10 both ways.
+  for (const order of [[0,1],[1,0]]) {
+    const over = await group(db,createFixture,{n:2,credits:18});
+    const oc = await claimGroup(db,over);
+    await dispatchAll(db,over,oc);
+    const costs = ['0.01','0.0004'];
+    for (const [i,f] of over.members.entries()) await record(db,over,f,oc.calls.find(c=>c.runId===f.run),costs[i]);
+    for (const c of oc.calls) await rpc(db,'fusion_call_verdict',over.actor,c.id,'usable');
+    for (const i of order) await rpc(db,'bill2_finalize',over.actor,over.runs[i]);
+    assert.equal(await charged(db,over.runs),10,'order '+order.join(','));
+    for (const f of over.members) await conserved(db,f);
+  }
+  await assert.rejects(rpc(db,'fusion_group_claim',short.actor,short.id,'review:9',1,
+    JSON.stringify(short.items.map(x=>({...x,sequence:2})))),/FUSION_GROUP_INVALID/);
+  report.checks.push('over-hold call advances the group by its capped amount: same total in both settlement orders; one call per Fusion run');
+
   // 5. Zero-charge verdicts refund in full.
   const bad = await group(db,createFixture,{n:2,credits:18});
   const bc = await claimGroup(db,bad);
