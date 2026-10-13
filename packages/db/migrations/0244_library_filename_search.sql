@@ -4,8 +4,9 @@
 BEGIN;
 SET LOCAL lock_timeout = '5s';
 
--- Only the caller's own documents that can be referenced: ready text documents (not images, uploads in progress,
--- failed or deleting ones), since a reference must be readable once chosen. The term is matched literally:
+-- Only the caller's own documents that can be referenced: ready text documents with at least one text segment
+-- (not images, uploads in progress, failed or deleting ones, nor a ready PDF that is all scanned or blank pages),
+-- since a reference must be readable once chosen. The term is matched literally:
 -- \, % and _ are escaped, so it cannot act as a LIKE pattern. 1–100 characters, 50 per page, same cursor as the list.
 CREATE OR REPLACE FUNCTION public.library_search(a uuid,q text,after_created_at timestamptz DEFAULT NULL,after_id uuid DEFAULT NULL)
 RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
@@ -17,7 +18,8 @@ BEGIN
  pattern:='%'||replace(replace(replace(term,'\','\\'),'%','\%'),'_','\_')||'%';
  SELECT coalesce(jsonb_agg(to_jsonb(x) ORDER BY x.created_at DESC,x.id DESC),'[]') INTO rows
  FROM (SELECT id,kind,format,purpose,filename,status,original_bytes,text_bytes,content_version,created_at
-  FROM library_documents WHERE actor_id=a AND kind='document' AND status='ready' AND filename ILIKE pattern ESCAPE '\'
+  FROM library_documents d WHERE actor_id=a AND kind='document' AND status='ready' AND filename ILIKE pattern ESCAPE '\'
+  AND EXISTS(SELECT 1 FROM library_document_segments s WHERE s.document_id=d.id AND s.actor_id=a)
   AND (after_id IS NULL OR (created_at,id)<(after_created_at,after_id))
   ORDER BY created_at DESC,id DESC LIMIT 51) x;
  more:=jsonb_array_length(rows)>50;

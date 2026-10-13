@@ -95,7 +95,7 @@ export function libraryService(client: SupabaseClient, actorId: string, storage:
       await sweep();
       return result;
     },
-    /** Own ready text documents whose file name contains `query` literally (the database escapes it). */
+    /** Own ready text documents with readable text whose file name contains `query` literally (the database escapes it). */
     search(query: string, cursor?: LibraryCursor) {
       return libraryRpc<LibrarySearch>(client, 'library_search', { a: actorId, q: query,
         after_created_at: cursor?.createdAt ?? null, after_id: cursor?.id ?? null });

@@ -2472,7 +2472,7 @@
   "fn:library_pdf_text_begin(uuid,uuid,bigint)": "c0b5fbde8334",
   "fn:library_publish(uuid,uuid,bigint,jsonb)": "c35b77fae433",
   "fn:library_purpose(uuid,uuid,text)": "5ace37d0550d",
-  "fn:library_search(uuid,text,timestamp with time zone,uuid)": "61bc0fd363ca",
+  "fn:library_search(uuid,text,timestamp with time zone,uuid)": "1497811441e0",
   "fn:library_segments(uuid,uuid,integer,integer)": "dc4d9f9698e5",
   "fn:library_segments_range(uuid,uuid,integer,integer,integer)": "120bd87537ed",
   "fn:library_upload_begin(uuid,uuid,text,text,text,bigint)": "ebd27a6fffa6",

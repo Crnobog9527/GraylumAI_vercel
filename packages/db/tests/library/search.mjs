@@ -6,11 +6,17 @@ import { randomUUID } from 'node:crypto';
 export async function verifySearch(admin, one) {
   const mine = randomUUID(), other = randomUUID();
   await admin.query('INSERT INTO profiles(id) VALUES($1),($2)', [mine, other]);
-  const add = (actor, filename, status = 'ready', minutesAgo = 0, kind = 'document') => admin.query(
-    `INSERT INTO library_documents(actor_id,request_id,kind,format,purpose,filename,status,created_at)
-     VALUES($1,$2,$6,CASE WHEN $6='image' THEN 'png' ELSE 'md' END,'reference',$3,$4,
-      clock_timestamp()-make_interval(mins=>$5)) RETURNING id`,
-    [actor, randomUUID(), filename, status, minutesAgo, kind]).then(r => r.rows[0].id);
+  // A ready text document normally has extracted segments; `text: false` models an all-scanned or blank PDF.
+  const add = async (actor, filename, status = 'ready', minutesAgo = 0, kind = 'document', text = true) => {
+    const id = (await admin.query(
+      `INSERT INTO library_documents(actor_id,request_id,kind,format,purpose,filename,status,created_at)
+       VALUES($1,$2,$6,CASE WHEN $6='image' THEN 'png' ELSE 'md' END,'reference',$3,$4,
+        clock_timestamp()-make_interval(mins=>$5)) RETURNING id`,
+      [actor, randomUUID(), filename, status, minutesAgo, kind])).rows[0].id;
+    if (text && kind === 'document') await admin.query(`INSERT INTO library_document_segments(document_id,actor_id,ordinal,body,source)
+      VALUES($1,$2,0,'text','extracted')`, [id, actor]);
+    return id;
+  };
   const search = async (q, actor = mine, cursor = null) => (await one.query(
     'SELECT library_search($1,$2,$3,$4) v', [actor, q, cursor?.createdAt ?? null, cursor?.id ?? null])).rows[0].v;
   const names = r => r.documents.map(d => d.filename);
@@ -22,12 +28,13 @@ export async function verifySearch(admin, one) {
   await add(mine, '周报 失败.md', 'failed', 1);
   await add(mine, '周报 上传中.md', 'uploading', 1);
   await add(mine, '周报截图.png', 'ready', 1, 'image');
+  await add(mine, '周报 扫描件.pdf', 'ready', 1, 'document', false);
   await add(mine, '100%_完成\\清单.md', 'ready', 4);
   await add(mine, '100 完成 清单.md', 'ready', 5);
   await add(other, '周报 别人的.md', 'ready', 0);
 
-  // Own ready text documents only, newest first, case-insensitive; images and unfinished, failed or deleting
-  // documents are never offered, since a chosen reference must be readable.
+  // Own ready text documents with readable segments only, newest first, case-insensitive; images, unfinished,
+  // failed or deleting documents and all-scanned PDFs are never offered, since a chosen reference must be readable.
   assert.deepEqual(names(await search('周报')), ['Weekly 周报.MD', '周报 第1周.md']);
   assert.deepEqual(names(await search('weekly')), ['Weekly 周报.MD']);
   assert.deepEqual(names(await search('周报', other)), ['周报 别人的.md']);
