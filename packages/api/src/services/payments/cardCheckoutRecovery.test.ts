@@ -4,7 +4,8 @@ import type Stripe from 'stripe';
 import type { SupabaseClient } from '@supabase/supabase-js';
 const mocks = vi.hoisted(() => ({ scope: vi.fn(), card: vi.fn(), wallet: vi.fn() }));
 vi.mock('./stripeCheckoutPersistence', () => ({ resolveStripeScope: mocks.scope }));
-vi.mock('./cardPaymentEvidence', () => ({ readCardPaymentEvidence: mocks.card }));
+vi.mock('./cardPaymentEvidence', async importActual => ({ ...await importActual<typeof import('./cardPaymentEvidence')>(),
+  readCardPaymentEvidence: mocks.card }));
 vi.mock('./walletPaymentEvidence', () => ({ readWalletPaymentEvidence: mocks.wallet }));
 import { recoverMethodCheckout } from './walletWebhook';
 
@@ -23,7 +24,7 @@ describe('PAY-STRIPE-MP card first payment through the method recovery', () => {
   beforeEach(() => {
     mocks.scope.mockReset().mockResolvedValue({ mode: 'test', merchant: 'fixture' });
     mocks.wallet.mockReset();
-    mocks.card.mockReset().mockResolvedValue({ paymentId: 'in_1', checkoutId: 'cs_card', amount: 4900, currency: 'usd',
+    mocks.card.mockReset().mockResolvedValue({ paymentId: 'in_1', checkoutId: 'cs_card', amount: 4900, tax: 980, currency: 'usd',
       paidAt: '2026-10-12T08:42:40.000Z', subscription: { id: 'sub_1', start: '2026-10-12T08:42:34.000Z', end: '2026-11-12T08:42:34.000Z' } });
   });
   it('fulfills a card subscription with the Stripe period, subscription id and pre-tax amount', async () => {
@@ -34,14 +35,18 @@ describe('PAY-STRIPE-MP card first payment through the method recovery', () => {
     expect(f.db.rpc).toHaveBeenCalledWith('pay_waffo_fulfill_payment', { p_order: 'order', p_merchant: 'fixture', p_checkout: 'cs_card',
       p_payment: 'in_1', p_amount: 4900, p_currency: 'usd', p_paid_at: '2026-10-12T08:42:40.000Z', p_subscription: 'sub_1',
       p_start: '2026-10-12T08:42:34.000Z', p_end: '2026-11-12T08:42:34.000Z' });
+    // The tax Managed Payments added is recorded on the order as its own fact, after the payment itself.
+    expect(f.db.rpc).toHaveBeenLastCalledWith('pay_stripe_mp_record_tax', { p_order: 'order', p_merchant: 'fixture',
+      p_payment: 'in_1', p_tax: 980 });
   });
   it('fulfills an international card pack as a one-time payment', async () => {
-    mocks.card.mockResolvedValue({ paymentId: 'pi_1', checkoutId: 'cs_card', amount: 940, currency: 'usd',
+    mocks.card.mockResolvedValue({ paymentId: 'pi_1', checkoutId: 'cs_card', amount: 940, tax: 188, currency: 'usd',
       paidAt: '2026-10-12T08:42:40.000Z', subscription: null });
     const f = fixture({ item_type: 'credit_package' });
     await f.run();
     expect(f.db.rpc).toHaveBeenCalledWith('pay_waffo_fulfill_payment', expect.objectContaining({ p_payment: 'pi_1', p_amount: 940,
       p_subscription: null, p_start: null, p_end: null }));
+    expect(f.db.rpc).toHaveBeenLastCalledWith('pay_stripe_mp_record_tax', expect.objectContaining({ p_payment: 'pi_1', p_tax: 188 }));
   });
   it('closes an expired or async-failed unpaid card checkout and releases the reservation; an open one is left alone', async () => {
     for (const [status, eventType, closes] of [['expired', 'checkout.session.expired', true],

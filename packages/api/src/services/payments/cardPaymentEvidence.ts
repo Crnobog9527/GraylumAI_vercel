@@ -1,5 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import type Stripe from 'stripe';
+import type { SupabaseClient } from '@supabase/supabase-js';
 import { freezePurchaseSnapshot } from './contracts';
 import { assertPurchaseReceipt, snapshotAmountDue, stripePreTaxAmount, type StripeScope } from './purchaseFacts';
 import { PAYMENT_EVIDENCE_CONFLICT } from './stripeWebhookError';
@@ -15,9 +16,17 @@ export type CardOrder = {
   payment_channel: string; merchant_namespace: string; payment_mode: string; stripe_managed_payments: boolean | null;
 };
 export type CardPaymentEvidence = {
-  paymentId: string; checkoutId: string; amount: number; currency: string; paidAt: string;
+  paymentId: string; checkoutId: string; amount: number; tax: number; currency: string; paidAt: string;
   subscription: { id: string; start: string; end: string } | null;
 };
+
+/** Managed Payments tax is kept as its own fact on the order; the pre-tax amount grants the entitlement. */
+export async function recordCardPaymentTax(db: Pick<SupabaseClient, 'rpc'>, merchant: string, orderId: string,
+  evidence: CardPaymentEvidence) {
+  const recorded = await db.rpc('pay_stripe_mp_record_tax', { p_order: orderId, p_merchant: merchant,
+    p_payment: evidence.paymentId, p_tax: evidence.tax });
+  if (recorded.error) throw new Error('PAY_WAFFO_FULFILLMENT_UNAVAILABLE', { cause: recorded.error });
+}
 
 /** PAY-STRIPE-MP first payment of a card / card_cn order. Called with the original scoped client and a
  * server-loaded order, never browser or event payment facts. Amounts are pre-tax: Managed Payments adds
@@ -75,7 +84,7 @@ async function readSubscriptionPayment(input: Parameters<typeof readCardPaymentE
     || stripePreTaxAmount(freezePurchaseSnapshot(order.purchase_snapshot), invoice.amount_paid, taxes) !== due) {
     throw new Error(PAYMENT_EVIDENCE_CONFLICT);
   }
-  return { paymentId: invoice.id, checkoutId: session.id, amount: due, currency: invoice.currency,
+  return { paymentId: invoice.id, checkoutId: session.id, amount: due, tax: taxes, currency: invoice.currency,
     paidAt: iso(invoice.status_transitions?.paid_at),
     subscription: { id: subscriptionId, start: iso(line.period?.start), end: iso(line.period?.end) } };
 }
@@ -98,5 +107,5 @@ async function readOneTimePayment(input: Parameters<typeof readCardPaymentEviden
     || id(charge.customer) !== id(session.customer)) throw new Error(PAYMENT_EVIDENCE_CONFLICT);
   assertPurchaseReceipt({ ...receipt, amount: charge.amount_captured, currency: charge.currency, livemode: charge.livemode });
   return { paymentId: intentId, checkoutId: session.id, amount: snapshotAmountDue(freezePurchaseSnapshot(order.purchase_snapshot)),
-    currency: charge.currency, paidAt: iso(charge.created), subscription: null };
+    tax: tax ?? 0, currency: charge.currency, paidAt: iso(charge.created), subscription: null };
 }

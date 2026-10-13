@@ -47,11 +47,27 @@ export async function stripeMpFulfillCases({admin,service,connect}) {
     WHERE s.user_id=$1`,[card.user])).rows;
   assert.deepEqual(sub,[{payment_channel:'stripe',stripe_subscription_id:null,cancel_at_period_end:'false',external_id:`sub_${card.o.id}`}]);
   assert.equal((await admin.query('SELECT count(*)::int n FROM subscription_credit_grants WHERE source_order_id=$1',[card.o.id])).rows[0].n,1);
+  // Managed Payments tax: appended once to the order's payment facts; a different amount for the same payment conflicts.
+  const tax=(f,payment,cents,db=service)=>db.query('SELECT pay_stripe_mp_record_tax($1,$2,$3,$4) v',[f.o.id,'fixture',payment,cents]);
+  assert.equal((await tax(card,`in_${card.o.id}`,980)).rows[0].v.duplicate,false);
+  assert.equal((await tax(card,`in_${card.o.id}`,980)).rows[0].v.duplicate,true);
+  await assert.rejects(()=>tax(card,`in_${card.o.id}`,981),/PAYMENT_EVIDENCE_CONFLICT/);
+  await assert.rejects(()=>tax(card,'in_not_this_order',980),/TAX_SCOPE/,'only a payment this order recorded');
+  const facts=(await admin.query('SELECT payment_amount_facts f FROM payment_orders WHERE id=$1',[card.o.id])).rows[0].f;
+  assert.deepEqual(facts.filter(x=>x.kind==='tax'),[{kind:'tax',amount:'9.80',currency:'usd',unit:'major',evidence_ref:`in_${card.o.id}`}]);
+  assert.equal(facts.filter(x=>x.kind==='paid').length,1,'the pre-tax paid fact is unchanged');
+  for(const role of ['anon','authenticated']) {
+    await service.query(`SET ROLE ${role}`);
+    await assert.rejects(()=>tax(card,`in_${card.o.id}`,980),/permission denied/);
+  }
+  await service.query('SET ROLE service_role');
   // The same Stripe payment cannot be claimed by another order.
   const other=await order('card_cn','standard','monthly','7'.repeat(64));
   await assert.rejects(()=>fulfill(service,other,{payment:`in_${card.o.id}`,amount:other.o.amount_total}),/PAYMENT_REBOUND|EXTRA_PAYMENT/);
   // Mainland card subscription: standard 69, no Managed Payments.
   assert.equal((await fulfill(service,other)).rows[0].v.state,'fulfilled');
+  await assert.rejects(()=>tax(other,`in_${other.o.id}`,100),/TAX_SCOPE/,'no Managed Payments, no tax');
+  assert.equal((await tax(other,`in_${other.o.id}`,0)).rows[0].v.duplicate,false);
   assert.equal((await admin.query('SELECT credits FROM profiles WHERE id=$1',[other.user])).rows[0].credits,8970);
 
   // Expired or failed unpaid card checkout: closed, founder slot released, the buyer can try again.
@@ -70,12 +86,13 @@ export async function stripeMpFulfillCases({admin,service,connect}) {
   // A payment that arrives after the close is kept for review, never re-taking the released slot.
   const yearEnd=new Date(start);yearEnd.setUTCFullYear(yearEnd.getUTCFullYear()+1);
   assert.equal((await fulfill(service,founder,{to:yearEnd})).rows[0].v.state,'review');
+  assert.equal((await tax(founder,`in_${founder.o.id}`,500)).rows[0].v.duplicate,false,'a payment kept for review keeps its tax');
   assert.equal(await slots(),before-1);
   assert.equal((await admin.query('SELECT membership_level FROM profiles WHERE id=$1',[founder.user])).rows[0].membership_level,'free');
 
   await admin.query("UPDATE system_settings SET value=$1 WHERE key='payment_method_routes'",
     [{...current,card:{enabled:false},card_cn:{enabled:false},version:version+1}]);
   return ['stripe-mp-card-first-month-granted-once-concurrently','stripe-mp-card-pre-tax-only','stripe-mp-card-period-calendar-month',
-    'stripe-mp-card-subscription-mapped','stripe-mp-card-payment-not-rebound','stripe-mp-card-cn-first-payment',
+    'stripe-mp-card-subscription-mapped','stripe-mp-card-tax-recorded-once','stripe-mp-card-cn-no-tax','stripe-mp-card-payment-not-rebound','stripe-mp-card-cn-first-payment',
     'stripe-mp-card-expired-releases-founder-slot','stripe-mp-card-late-payment-review'];
 }
