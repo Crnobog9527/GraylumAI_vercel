@@ -7,7 +7,7 @@ const routes = (card: boolean) => ({ version: 4, card: { enabled: card }, card_c
   wechat_pay: { enabled: true, annualVerified: true }, alipay: { enabled: true, annualVerified: true } });
 const methods = ['card', 'card_cn', 'wechat_pay', 'alipay'] as const;
 
-describe('PAY-STRIPE-MP checkout gate (PR-1: every new checkout closed in code)', () => {
+describe('PAY-STRIPE-MP checkout gate (3c: card open on staging only, behind the server switch)', () => {
   it('production stays closed whatever its configuration', () => {
     for (const host of ['app.graylum.com', 'graylum.com', 'www.graylum.com', 'evil-auth-staging.graylum.com', '']) {
       const env = { ...staging, VERCEL_PROJECT_PRODUCTION_URL: host, VERCEL_ENV: 'production' };
@@ -18,15 +18,21 @@ describe('PAY-STRIPE-MP checkout gate (PR-1: every new checkout closed in code)'
       expect(methodCardCheckoutReady(env, routes(true))).toBe(false);
     }
   });
-  it('staging card checkout stays closed until the Stripe card adapter and fulfillment land', () => {
-    // The old Waffo test flag no longer opens anything: Waffo takes no new card purchases.
+  it('staging opens card checkout in code; the default-off server switch still decides; wallets stay closed', () => {
+    // 3c "打开银行卡下单": the code gate is open on staging only. The old Waffo test flag changes nothing.
     for (const env of [staging, { ...staging, WAFFO_TEST_OPERATIONS_ENABLED: 'true' }]) {
-      for (const method of methods) {
-        expect(methodCheckoutEnvironmentOpen(env, method)).toBe(false);
-        expect(() => assertMethodCheckoutEnvironment(env, method)).toThrow('PAY_WAFFO_STEP2_NOT_READY');
+      for (const method of ['card', 'card_cn'] as const) {
+        expect(methodCheckoutEnvironmentOpen(env, method)).toBe(true);
+        expect(() => assertMethodCheckoutEnvironment(env, method)).not.toThrow();
       }
-      expect(methodCardCheckoutReady(env, routes(true))).toBe(false);
+      for (const method of ['wechat_pay', 'alipay'] as const) {
+        expect(methodCheckoutEnvironmentOpen(env, method)).toBe(false);
+      }
+      expect(methodCardCheckoutReady(env, routes(true))).toBe(true);
+      expect(methodCardCheckoutReady(env, routes(false))).toBe(false);
     }
     expect(methodCardCheckoutReady(staging, null)).toBe(false);
+    // Only the staging deployment itself: a preview or another project with the same flags stays closed.
+    expect(methodCheckoutEnvironmentOpen({ VERCEL_PROJECT_PRODUCTION_URL: 'auth-staging.graylum.com' }, 'card')).toBe(false);
   });
 });

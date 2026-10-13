@@ -36,11 +36,13 @@ describe('method membership read projection', () => {
       expect(q.eq).not.toHaveBeenCalledWith('payment_status', expect.anything());
     }
   });
-  it('keeps card checkout not ready everywhere until the Stripe card checkout lands (PAY-STRIPE-MP PR-1)', async () => {
-    for (const env of [staging, { ...staging, VERCEL_PROJECT_PRODUCTION_URL: 'app.graylum.com' }]) {
-      for (const enabled of [true, false]) {
-        expect((await readMethodMembership(fixture(undefined, routes(enabled)).db, 'actor', 0, env)).checkoutReady).toBe(false);
-      }
+  it('reports card checkout ready only on staging with the server switch on (PAY-STRIPE-MP 3c)', async () => {
+    const ready = async (env: typeof staging, enabled: boolean) =>
+      (await readMethodMembership(fixture(undefined, routes(enabled)).db, 'actor', 0, env)).checkoutReady;
+    expect(await ready(staging, true)).toBe(true);
+    expect(await ready(staging, false)).toBe(false);
+    for (const enabled of [true, false]) {
+      expect(await ready({ ...staging, VERCEL_PROJECT_PRODUCTION_URL: 'app.graylum.com' }, enabled)).toBe(false);
     }
   });
   it('does not present missing count as zero or hide oversold state', async () => {

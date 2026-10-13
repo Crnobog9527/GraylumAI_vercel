@@ -81,13 +81,12 @@ function stubStaging(production = 'auth-staging.graylum.com') {
   vi.stubEnv('VERCEL', '1'); vi.stubEnv('VERCEL_PROJECT_PRODUCTION_URL', production);
   vi.stubEnv('WAFFO_TEST_OPERATIONS_ENABLED', 'true');
 }
-it('keeps every card checkout closed in production and staging even with every switch on', async () => {
-  for (const host of ['app.graylum.com', 'auth-staging.graylum.com']) {
+it('keeps every card checkout closed in production even with every switch on, and on staging while the switch is off', async () => {
+  for (const [host, enabled] of [['app.graylum.com', true], ['auth-staging.graylum.com', false]] as const) {
     stubStaging(host);
     for (const method of ['card', 'card_cn'] as const) {
-      const f = fixture('user', settings(true));
+      const f = fixture('user', settings(enabled));
       await expect(f.caller.methodCheckout({ ...card, method })).rejects.toMatchObject({ code: 'SERVICE_UNAVAILABLE' });
-      expect(f.from.mock.calls.every(([table]) => table === 'profiles')).toBe(true);
       expect(f.rpc).not.toHaveBeenCalled();
     }
   }

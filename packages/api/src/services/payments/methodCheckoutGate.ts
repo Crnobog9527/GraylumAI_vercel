@@ -12,9 +12,12 @@ const STAGING_PRODUCTION_URLS: ReadonlySet<string> = new Set(['auth-staging.gray
  * separate decision and must not follow the card test switch. */
 const WALLET_CHECKOUT_READY = false;
 
-/** Stripe card subscriptions (PAY-STRIPE-MP) stay closed in code until the Stripe card checkout
- * adapter (PR-2) lands. Waffo no longer takes new card purchases (Owner 2026-10-12). */
-const STRIPE_CARD_CHECKOUT_READY = false;
+/** Stripe card checkout (PAY-STRIPE-MP 3c, "打开银行卡下单"): the code is ready (checkout, first payment, renewals,
+ * external refunds, daily Stripe backstop). It still opens on the staging deployment only, and there only while the
+ * default-off server switch `payment_method_routes.card.enabled` / `card_cn.enabled` is on (the controller turns it
+ * on). Production stays closed in code below until the Owner approves opening it. Waffo takes no new card purchases
+ * (Owner 2026-10-12). */
+const STRIPE_CARD_CHECKOUT_READY = true;
 
 /** Test-only card admission, checked before any settings, order or provider access: the staging
  * deployment only. Production is closed whatever its configuration says. The default-off server
