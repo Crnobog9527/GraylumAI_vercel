@@ -21,7 +21,8 @@ const stubs: Array<[(id: string) => boolean, string]> = [
     const client={account:{conversationErasure:{mutate:input=>new Promise((resolve,reject)=>
       window.erasures.push({input,resolve,reject}))}}};
     export const trpc={useUtils:()=>new Proxy({},{get:(_,key)=>key==='client'?client:deep()}),
-      opc:{library:{useQuery:()=>q({accounts:[]})},list:{useQuery:()=>q([])},
+      opc:{library:{useQuery:()=>q(location.hash==='#strategy'?{businesses:[{businessId:'b1',accounts:[{projectId:'p1',
+        platform:'抖音',account:'测试号',strategyDraftId:'d1',sourceVersionId:'v1',sourceVersion:1,items:[]}]}]}:{accounts:[]})},list:{useQuery:()=>q([])},
         conversations:{useQuery:()=>q([{sessionId:'${SESSION}',title:'周末选题讨论',lastActivityAt:'2026-10-13T00:00:00Z'}])},
         workUiChange:{useMutation:m},accountUiChange:{useMutation:m}},
       user:{getUserProfile:{useQuery:()=>q(null)}},ticket:{createTicket:{useMutation:m}}};`],
@@ -71,7 +72,7 @@ beforeAll(async () => {
 }, 60000);
 afterAll(async () => { await browser?.close(); });
 
-async function open(width: number, run: (page: Page) => Promise<void>) {
+async function open(width: number, run: (page: Page) => Promise<void>, hash = '') {
   const page = await browser.newPage({ viewport: { width, height: 800 } });
   try {
     const errors: string[] = [];
@@ -79,7 +80,7 @@ async function open(width: number, run: (page: Page) => Promise<void>) {
     // A real origin, so the frame can use sessionStorage/localStorage; nothing leaves the test.
     await page.route('**/*', route => route.request().url() === 'http://frame.test/'
       ? route.fulfill({ contentType: 'text/html', body: '<div id="root"></div>' }) : route.abort());
-    await page.goto('http://frame.test/');
+    await page.goto('http://frame.test/' + hash);
     await page.addStyleTag({ content: css });
     await page.addScriptTag({ content: code });
     await ui(page.getByText('周末选题讨论')).toBeAttached();
@@ -183,6 +184,18 @@ it('Esc closes the ⋯ menu and puts focus back on the ⋯ button', () => open(1
   await ui(more(page)).toBeFocused();
   await ui(more(page)).toHaveAttribute('aria-expanded', 'false');
 }));
+
+it('Esc on the strategy menu returns focus to its own button, not an earlier row', () => open(1280, async page => {
+  await openMenu(page);
+  await page.keyboard.press('Escape');
+  const strategy = page.getByRole('button', { name: /定位策略的更多操作/ });
+  await strategy.focus();
+  await page.keyboard.press('Enter');
+  await ui(page.getByRole('menu')).toBeVisible();
+  await page.keyboard.press('Escape');
+  await ui(page.getByRole('menu')).toHaveCount(0);
+  await ui(strategy).toBeFocused();
+}, '#strategy'));
 
 it('reaches the ⋯ button with Tab, which makes it visible', () => open(1280, async page => {
   for (let i = 0; i < 60 && !(await more(page).evaluate(el => el === document.activeElement)); i++) {
