@@ -1,0 +1,43 @@
+{
+  "task": "PAY-STRIPE-MP credit-pack catalog",
+  "date": "2026-10-13",
+  "mode": "Stripe test sandbox only; sessions created through buildStripeCheckoutRequest + dispatchStripeCheckoutIntent for the Pro small pack ($9.40), not paid, expired afterwards",
+  "results": [
+    {
+      "case": "card pack (MP)",
+      "mode": "payment",
+      "status": "open",
+      "managed_payments": {
+        "enabled": true
+      },
+      "payment_method_types": [
+        "card",
+        "cashapp"
+      ],
+      "amount_subtotal": 940,
+      "amount_tax": 0,
+      "amount_total": 940
+    },
+    {
+      "case": "alipay pack (same price)",
+      "mode": "payment",
+      "status": "open",
+      "managed_payments": {
+        "enabled": false
+      },
+      "payment_method_types": [
+        "alipay"
+      ],
+      "amount_subtotal": 940,
+      "amount_tax": 0,
+      "amount_total": 940
+    },
+    {
+      "case": "gold price for a pro order",
+      "result": "PAY_COMMON_PRICE_MISMATCH"
+    },
+    {
+      "expired_sessions": 2
+    }
+  ]
+}
