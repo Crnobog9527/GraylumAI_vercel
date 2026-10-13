@@ -107,6 +107,8 @@ export function flattenMetrics(raw: unknown): {
   };
   walk(raw, '', 0);
   if (truncated) missing.push(METRICS_TRUNCATED);
+  // An empty or unusable metrics payload ({} or a non-object) means analytics were not supplied.
+  if (!Object.keys(metrics).length && !Object.keys(breakdowns).length && !missing.length) missing.push(ALL_METRICS_MISSING);
   return { metrics, breakdowns, missingFields: missing.sort() };
 }
 

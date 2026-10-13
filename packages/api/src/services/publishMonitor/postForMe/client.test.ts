@@ -194,6 +194,7 @@ describe('post for me client', () => {
     expect(() => postForMeApiKey({ POSTFORME_API_KEY: 'sk-other' })).toThrow('POSTFORME_NOT_CONFIGURED');
     expect(postForMeApiKey({ POSTFORME_API_KEY: ` ${KEY} ` })).toBe(KEY);
     expect(xSnowflakeTime('123')).toBeNull();
+    for (const empty of [{}, 'n/a', 5, []]) expect(flattenMetrics(empty).missingFields).toEqual(['metrics']);
     const many = flattenMetrics(Object.fromEntries(Array.from({ length: 250 }, (_, i) => [`m${i}`, i])));
     expect(Object.keys(many.metrics)).toHaveLength(200);
     expect(many.missingFields).toEqual(['metrics.truncated']);
