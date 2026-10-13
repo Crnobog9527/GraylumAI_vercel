@@ -292,7 +292,7 @@ export default function TopicWorkspacePage() {
           : op.kind === 'adopt' ? opcHandoff.safeParse(op.request)
           : op.kind === 'draft' ? opcTopicDraft.safeParse(op.request)
           : op.kind === 'adoptTopics' ? opcAdoptTopics.safeParse(op.request) : null;
-        if (!valid?.success) { back();
+        if (!valid?.success) { if (raw) back(); // a new message is still in the box
           if (raw) {
             localStorage.setItem(storageKey + ':invalid:' + op.request.requestId, raw);
             localStorage.removeItem(storageKey);

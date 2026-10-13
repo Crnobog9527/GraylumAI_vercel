@@ -9,6 +9,16 @@ export function withoutPutBack(current: string, text: string) {
   return current.startsWith(text + '\n\n') ? current.slice(text.length + 2) : current;
 }
 
+/** Request ids whose text this page put back into the box; kept beside the draft so a reload still knows them. */
+export function readPutBack(storage: Pick<Storage, 'getItem'>, key: string): Set<string> {
+  try {
+    const ids = JSON.parse(storage.getItem(key) ?? '[]');
+    return new Set(Array.isArray(ids) ? ids.filter((id): id is string => typeof id === 'string') : []);
+  } catch {
+    return new Set();
+  }
+}
+
 /**
  * The topic message box (same behaviour as the free-chat box, #872). It empties as soon as a message is sent;
  * the pending operation (with its request id) keeps the text. If the server does not store it, the text comes back
@@ -16,8 +26,18 @@ export function withoutPutBack(current: string, text: string) {
  */
 export function useTopicInput(inputKey: string) {
   const [input, setInput] = useState('');
+  const putBackKey = inputKey ? inputKey + ':put-back' : '';
   const putBackIds = useRef(new Set<string>());
-  useEffect(() => { if (inputKey) setInput(localStorage.getItem(inputKey) ?? ''); }, [inputKey]);
+  useEffect(() => {
+    if (!inputKey) return;
+    setInput(localStorage.getItem(inputKey) ?? '');
+    putBackIds.current = readPutBack(localStorage, putBackKey);
+  }, [inputKey, putBackKey]);
+  const remember = () => {
+    if (!putBackKey) return;
+    if (putBackIds.current.size) localStorage.setItem(putBackKey, JSON.stringify([...putBackIds.current]));
+    else localStorage.removeItem(putBackKey);
+  };
   const save = (value: string) => {
     if (!inputKey) return;
     if (value) localStorage.setItem(inputKey, value);
@@ -38,6 +58,7 @@ export function useTopicInput(inputKey: string) {
     putBack(requestId: string, text: string) {
       if (putBackIds.current.has(requestId)) return;
       putBackIds.current.add(requestId);
+      remember();
       setInput(current => {
         const next = restoredDraft(current, text);
         save(next);
@@ -47,6 +68,7 @@ export function useTopicInput(inputKey: string) {
     /** Stored after all (a retry succeeded): take out only the copy this page put back, if it did. */
     stored(requestId: string, text: string) {
       if (!putBackIds.current.delete(requestId)) return;
+      remember();
       setInput(current => {
         const next = withoutPutBack(current, text);
         save(next);
