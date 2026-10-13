@@ -33,13 +33,14 @@ export function buildFirecrawlRequest(rawUrl: string): { request: VendorRequest;
   } } };
 }
 
-/** Credits from the documented locations; absent or malformed → null (never 0). */
+/**
+ * Credits from the provider-owned top-level field only; absent or malformed → null (never 0).
+ * `data.metadata` mixes in fields scraped from the target page, so a page could plant a fake
+ * `creditsUsed` there; it is never trusted as a receipt. RT-7 confirms the real location.
+ */
 export function firecrawlCredits(json: unknown): string | null {
-  for (const path of ['creditsUsed', 'data.metadata.creditsUsed']) {
-    const value = path.split('.').reduce<unknown>((node, key) => (node as Record<string, unknown> | null)?.[key], json);
-    if (value !== undefined) return usageUnits(value);
-  }
-  return null;
+  const value = (json as { creditsUsed?: unknown } | null)?.creditsUsed;
+  return value === undefined ? null : usageUnits(value);
 }
 
 const defaultResolve = async (hostname: string) => (await lookup(hostname, { all: true })).map(entry => entry.address);

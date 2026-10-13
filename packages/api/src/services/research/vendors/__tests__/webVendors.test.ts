@@ -48,7 +48,8 @@ describe('official usage parsing', () => {
 
   it('reads Firecrawl credits from either documented location', () => {
     expect(firecrawlCredits({ creditsUsed: 1 })).toBe('1');
-    expect(firecrawlCredits({ data: { metadata: { creditsUsed: 1 } } })).toBe('1');
+    // Page-controlled metadata is never a billing receipt.
+    expect(firecrawlCredits({ data: { metadata: { creditsUsed: 0 } } })).toBeNull();
     expect(firecrawlCredits({ data: {} })).toBeNull();
   });
 });
@@ -144,7 +145,7 @@ describe('outbound safety', () => {
 
   it('refuses a public-looking name that resolves to a private address, before any request', async () => {
     const calls: RecordedCall[] = [];
-    const page = { success: true, data: { markdown: 'x', metadata: { creditsUsed: 1 } } };
+    const page = { success: true, creditsUsed: 1, data: { markdown: 'x', metadata: {} } };
     const rebound = await callFirecrawl('https://localtest.me/', deps(jsonFetch(200, page, calls), async () => ['127.0.0.1']));
     expect(rebound).toMatchObject({ outcome: 'not_sent', reason: 'NON_PUBLIC_TARGET', supplierMayCharge: false });
     const mixed = await callFirecrawl('https://mixed.example.com/', deps(jsonFetch(200, page, calls), async () => ['93.184.215.14', '10.0.0.5']));
@@ -181,11 +182,11 @@ describe('callFirecrawl', () => {
 
   it('returns the clipped page and its credits', async () => {
     const markdown = 'x'.repeat(MAX_MARKDOWN_BYTES + 5);
-    const body = { success: true, data: { markdown, metadata: { title: 'T', sourceURL: 'https://example.com/a', statusCode: 200, creditsUsed: 1 } } };
+    const body = { success: true, data: { markdown, metadata: { title: 'T', sourceURL: 'https://example.com/a', statusCode: 200 } }, creditsUsed: 1 };
     const result = await callFirecrawl('https://example.com/a', deps(jsonFetch(200, body)));
     expect(result).toMatchObject({ outcome: 'partial', truncated: true, usage: { unit: 'credit', units: '1' } });
     expect(Buffer.byteLength(String(result.items[0].fields.markdown))).toBeLessThanOrEqual(MAX_MARKDOWN_BYTES);
-    const cjk = { success: true, data: { markdown: `${'中'.repeat(5000)}\n\n${'文'.repeat(5000)}`, metadata: { creditsUsed: 1 } } };
+    const cjk = { success: true, creditsUsed: 1, data: { markdown: `${'中'.repeat(5000)}\n\n${'文'.repeat(5000)}`, metadata: {} } };
     const page = await callFirecrawl('https://example.com/zh', deps(jsonFetch(200, cjk)));
     expect(page).toMatchObject({ outcome: 'partial', truncated: true });
     expect(Buffer.byteLength(String(page.items[0].fields.markdown))).toBeLessThanOrEqual(MAX_MARKDOWN_BYTES);
@@ -195,40 +196,40 @@ describe('callFirecrawl', () => {
 
   it('never reports a non-public or non-http page URL from the supplier', async () => {
     for (const sourceURL of ['file:///etc/passwd', 'http://localhost/x', 'https://u:p@example.com/x']) {
-      const body = { success: true, data: { markdown: 'page', metadata: { sourceURL, creditsUsed: 1 } } };
+      const body = { success: true, creditsUsed: 1, data: { markdown: 'page', metadata: { sourceURL } } };
       const result = await callFirecrawl('https://example.com/a', deps(jsonFetch(200, body)));
       expect(result.items[0].url).toBe('https://example.com/a');
     }
   });
 
   it('reports a target 404 as a billed failure with no page', async () => {
-    const body = { success: true, data: { markdown: 'Not found', metadata: { statusCode: 404, creditsUsed: 1 } } };
+    const body = { success: true, creditsUsed: 1, data: { markdown: 'Not found', metadata: { statusCode: 404 } } };
     expect(await callFirecrawl('https://example.com/gone', deps(jsonFetch(200, body))))
       .toMatchObject({ outcome: 'failed', reason: 'TARGET_HTTP_404', supplierMayCharge: true, items: [], usage: { units: '1' } });
   });
 
   it('refuses a PDF that arrives through an extensionless URL or redirect, after the one billed credit', async () => {
-    const base64 = { success: true, data: { markdown: 'JVBERi0xLjcKJ...', metadata: { statusCode: 200, creditsUsed: 1 } } };
+    const base64 = { success: true, creditsUsed: 1, data: { markdown: 'JVBERi0xLjcKJ...', metadata: { statusCode: 200 } } };
     expect(await callFirecrawl('https://example.com/download', deps(jsonFetch(200, base64))))
       .toMatchObject({ outcome: 'failed', reason: 'PDF_NOT_SUPPORTED', items: [], usage: { units: '1' } });
-    const raw = { success: true, data: { markdown: '%PDF-1.7\n%\u00e2\u00e3', metadata: { statusCode: 200, creditsUsed: 1 } } };
+    const raw = { success: true, creditsUsed: 1, data: { markdown: '%PDF-1.7\n%\u00e2\u00e3', metadata: { statusCode: 200 } } };
     expect(await callFirecrawl('https://example.com/raw', deps(jsonFetch(200, raw)))).toMatchObject({ reason: 'PDF_NOT_SUPPORTED' });
-    const typed = { success: true, data: { markdown: '', metadata: { contentType: 'application/pdf', creditsUsed: 1 } } };
+    const typed = { success: true, creditsUsed: 1, data: { markdown: '', metadata: { contentType: 'application/pdf' } } };
     expect(await callFirecrawl('https://example.com/d', deps(jsonFetch(200, typed)))).toMatchObject({ reason: 'PDF_NOT_SUPPORTED' });
   });
 
   it('never turns non-string page content into a page', async () => {
     for (const markdown of [false, true, 12345]) {
-      const body = { success: true, data: { markdown, metadata: { creditsUsed: 1 } } };
+      const body = { success: true, creditsUsed: 1, data: { markdown, metadata: {} } };
       expect(await callFirecrawl('https://example.com/a', deps(jsonFetch(200, body)))).toMatchObject({ outcome: 'failed', reason: 'EMPTY_OR_UNRECOGNIZED' });
     }
   });
 
   it('does not report a success without a recognizable page body', async () => {
-    const body = { success: true, data: { metadata: { statusCode: 200, creditsUsed: 1 } } };
+    const body = { success: true, creditsUsed: 1, data: { metadata: { statusCode: 200 } } };
     expect(await callFirecrawl('https://example.com/a', deps(jsonFetch(200, body))))
       .toMatchObject({ outcome: 'failed', reason: 'EMPTY_OR_UNRECOGNIZED', items: [], supplierMayCharge: true });
-    const blank = { success: true, data: { markdown: ' \n\n  ', metadata: { statusCode: 200, creditsUsed: 1 } } };
+    const blank = { success: true, creditsUsed: 1, data: { markdown: ' \n\n  ', metadata: { statusCode: 200 } } };
     expect(await callFirecrawl('https://example.com/a', deps(jsonFetch(200, blank)))).toMatchObject({ outcome: 'failed', reason: 'EMPTY_OR_UNRECOGNIZED' });
   });
 

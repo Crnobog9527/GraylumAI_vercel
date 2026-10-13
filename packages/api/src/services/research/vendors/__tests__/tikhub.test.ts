@@ -133,6 +133,13 @@ describe('callTikhub', () => {
     expect(noFollowers).toMatchObject({ outcome: 'failed', reason: 'EMPTY_OR_UNRECOGNIZED' });
   });
 
+  it('drops supplier links that are not public http(s) URLs', async () => {
+    const note = (link: string) => ({ id: 'n1', title: 'T', liked_count: 3, share_info: { link } });
+    const body = { code: 200, data: { items: [note('javascript:alert(1)'), { ...note('https://www.xiaohongshu.com/x'), id: 'n2' }] } };
+    const result = await callTikhub({ platform: 'xiaohongshu', kind: 'keyword_posts', keyword: '护肤' }, deps(jsonFetch(200, body)));
+    expect(result.items.map(item => item.url)).toEqual([undefined, 'https://www.xiaohongshu.com/x']);
+  });
+
   it('cuts to the requested limit and says so', async () => {
     const posts = Array.from({ length: 35 }, (_, index) => awemeItem(String(index)));
     const result = await callTikhub({ platform: 'tiktok', kind: 'account_posts', account: 'natgeo', limit: 30 },

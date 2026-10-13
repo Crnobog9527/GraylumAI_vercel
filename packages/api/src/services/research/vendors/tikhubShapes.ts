@@ -3,6 +3,7 @@
 // located by their characteristic keys (ported from the RESEARCH-0 comparison tooling).
 // Only whitelisted fields leave this module: no bios, contact details, avatars or commenter data.
 import { bool, clip, count, displayCount, findAll, has, idText, text, timestamp } from './fields';
+import { publicHttpUrl } from './http';
 import type { ResearchItem, SocialKind, SocialPlatform } from './types';
 
 export const POST_FIELDS = [
@@ -24,7 +25,9 @@ function toItem(values: Values, whitelist: readonly string[], url?: string): Res
     if (value === undefined) missing.push(name);
     else fields[name] = value;
   }
-  return url === undefined ? { fields, missing } : { url, fields, missing };
+  // Supplier-provided links must be public http(s) URLs; anything else is dropped, never shown.
+  const safeUrl = publicHttpUrl(url);
+  return safeUrl === undefined ? { fields, missing } : { url: safeUrl, fields, missing };
 }
 
 function aweme(item: Raw, platform: 'douyin' | 'tiktok') {
