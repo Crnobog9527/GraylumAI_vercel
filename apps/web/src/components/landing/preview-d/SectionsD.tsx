@@ -17,7 +17,7 @@ import styles from './d.module.css';
 export function VoiceWallD({ notes }: { notes: readonly VoiceNote[] }) {
   if (notes.length === 0) return null;
   return (
-    <section aria-labelledby="voice-title" className={cn(styles.section, styles.deferred)}>
+    <section aria-labelledby="voice-title" className={cn(styles.panel, styles.panelWhite, styles.deferred)}>
       <div className={styles.splitHead}>
         <h2 id="voice-title" className={styles.display}><Phrases text={VOICE_WALL.title} /></h2>
         <p className={styles.lede}>{VOICE_WALL.lede}</p>

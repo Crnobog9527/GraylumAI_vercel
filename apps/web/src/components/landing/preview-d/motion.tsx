@@ -84,6 +84,29 @@ export function StepRail({ children, className }: { children: ReactNode; classNa
   return <ol ref={ref} className={className}>{children}</ol>;
 }
 
+/** The floating header slides away while scrolling down and returns on any scroll up (or near the top). */
+export function AutoHideHeader({ children, className }: { children: ReactNode; className?: string }) {
+  const ref = useRef<HTMLElement>(null);
+  useEffect(() => {
+    const node = ref.current;
+    if (!node) return;
+    let last = window.scrollY;
+    let frame = 0;
+    const update = () => {
+      frame = 0;
+      const y = window.scrollY;
+      const hide = y > 400 && y > last + 4 && !node.contains(document.activeElement);
+      if (hide) node.dataset.hidden = 'true';
+      else if (y < last - 4 || y <= 400) delete node.dataset.hidden;
+      last = y;
+    };
+    const onScroll = () => { if (!frame) frame = requestAnimationFrame(update); };
+    window.addEventListener('scroll', onScroll, { passive: true });
+    return () => { cancelAnimationFrame(frame); window.removeEventListener('scroll', onScroll); };
+  }, []);
+  return <header ref={ref} className={className}>{children}</header>;
+}
+
 /**
  * A price figure whose digits roll into place the first time it scrolls into view and whenever it changes
  * (monthly ↔ yearly). The accessible name is the plain text.

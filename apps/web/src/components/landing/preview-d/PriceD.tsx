@@ -16,6 +16,7 @@ export function PriceD({ data, membershipHref }: { data: LandingData; membership
   const { pricing, compareRows: rows } = data;
   return (
     <section id="pricing" aria-labelledby="pricing-title" className={cn(styles.section, styles.deferred)}>
+      <div className={styles.priceHead}>
       <h2 id="pricing-title" className={cn(styles.display, styles.priceTitle)}>{PRICE_COMPARE.title}</h2>
 
       {rows.length > 0 ? (
@@ -23,12 +24,13 @@ export function PriceD({ data, membershipHref }: { data: LandingData; membership
           <p className={styles.compareLede}>{PRICE_COMPARE.lede}</p>
           <ul>
             {rows.map((row, index) => (
-              <li key={row.sourceId}><span>{row.label}<sup>{index + 1}</sup></span><span>{row.price}</span></li>
+              <li key={row.sourceId}><span>{row.label}<sup><a href={`#d-source-${row.sourceId}`} aria-label={`出处 ${index + 1}`}>{index + 1}</a></sup></span><span>{row.price}</span></li>
             ))}
           </ul>
           {pricing.proMonthly !== null ? <p className={styles.ownPrice}>{PRICE_COMPARE.ownPrice(formatUsd(pricing.proMonthly))}</p> : null}
         </div>
       ) : null}
+      </div>
 
       {pricing.founderOpen ? (
         <p className={styles.founderLine}>
@@ -53,7 +55,7 @@ export function PriceD({ data, membershipHref }: { data: LandingData; membership
       {rows.length > 0 ? (
         <div className={styles.sources}>
           <p>{PRICE_COMPARE.sourcesTitle}</p>
-          <ol>{rows.map(row => <li key={row.sourceId}>{PRICE_COMPARE.sources[row.sourceId]}</li>)}</ol>
+          <ol>{rows.map(row => <li key={row.sourceId} id={`d-source-${row.sourceId}`}>{PRICE_COMPARE.sources[row.sourceId]}</li>)}</ol>
         </div>
       ) : null}
     </section>

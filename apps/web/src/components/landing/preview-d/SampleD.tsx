@@ -11,6 +11,7 @@ import { cn } from '@/lib/utils';
 import { displayFont } from './display-font';
 import { PriceD } from './PriceD';
 import { FaqD, FinalD, HowItWorksD, VoiceWallD } from './SectionsD';
+import { AutoHideHeader } from './motion';
 import { Phrases } from './Phrases';
 import styles from './d.module.css';
 
@@ -35,7 +36,7 @@ export function SampleD({ data, siteName, membershipHref }: { data: LandingData;
         <span className={styles.sampleNote}>D · 用 Impeccable 按 ploy.ai 的设计语言做：超大粗体标题、圆角大画板、黑色胶囊按钮。</span>
       </nav>
 
-      <header className={styles.header}>
+      <AutoHideHeader className={styles.header}>
         <div className={styles.headerPill}>
           <Link href="/landing" className={styles.brand}>
             <img src="/graylum-logo.svg" alt="" aria-hidden="true" width={26} height={26} />{siteName}
@@ -48,7 +49,7 @@ export function SampleD({ data, siteName, membershipHref }: { data: LandingData;
           <Link href={LOGIN_HREF} className={cn(styles.pill, styles.pillLight)}>{CHROME.login}</Link>
           <Link href={SIGNUP_CTA_HREF} className={cn(styles.pill, styles.pillDark, styles.headerCta)}>{HERO.primaryCta}</Link>
         </div>
-      </header>
+      </AutoHideHeader>
 
       <main>
         <section aria-labelledby="hero-title" className={styles.hero}>

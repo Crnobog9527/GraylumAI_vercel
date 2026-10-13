@@ -33,10 +33,10 @@ describe('style sample D', () => {
     const html = renderToStaticMarkup(createElement(SampleD, { data, siteName: 'Graylum', membershipHref: '/profile' }));
     expect(html.match(/<h1[\s>]/g)).toHaveLength(1);
     // Heading phrases are split into spans; compare the visible text with the tags removed.
-    const text = html.replace(/<[^>]+>/g, '');
+    const text = html.slice(html.indexOf('<main')).replace(/<[^>]+>/g, '');
     const order = [HERO.title, VOICE_WALL.title, HOW_IT_WORKS.title, PRICE_COMPARE.title, LANDING_FAQ_TITLE, FINAL_ACTION.title]
       .map(title => text.indexOf(title));
-    expect(order.every(index => index > 0)).toBe(true);
+    expect(order.every(index => index >= 0)).toBe(true);
     expect([...order].sort((a, b) => a - b)).toEqual(order);
     for (const text of [HERO.promise, HERO.primaryCta, HERO.secondaryCta, ...data.notes.map(note => note.answer)]) {
       expect(html).toContain(escape(text));
