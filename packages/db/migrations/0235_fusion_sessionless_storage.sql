@@ -48,6 +48,28 @@ BEGIN
   RETURN g.id;
 END $$;
 
+-- Attaching a run takes the source conversation first (share lock), as deletion (update lock) and
+-- output saving do: an attach either commits before a deletion, which then finds and cleans the run,
+-- or waits and is refused once the conversation is deleted. Otherwise identical to 0234.
+CREATE OR REPLACE FUNCTION public.fusion_group_attach(p_actor_id uuid, p_group_id uuid, p_run_id uuid)
+RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
+DECLARE r bill2_runs; g fusion_billing_groups; s runtime_sessions;
+BEGIN
+  SELECT s2.* INTO s FROM runtime_sessions s2 JOIN fusion_billing_groups g2 ON g2.source_session_id=s2.id
+    WHERE g2.id=p_group_id AND g2.actor_id=p_actor_id FOR SHARE OF s2;
+  SELECT * INTO r FROM bill2_runs WHERE id=p_run_id AND actor_id=p_actor_id FOR UPDATE;
+  SELECT * INTO g FROM fusion_billing_groups WHERE id=p_group_id AND actor_id=p_actor_id FOR UPDATE;
+  IF r.id IS NULL OR g.id IS NULL OR r.contract_version<>'bill2.v2' THEN RAISE EXCEPTION 'FUSION_GROUP_DENIED'; END IF;
+  IF r.fusion_group_id=g.id THEN RETURN; END IF;
+  IF g.source_session_id IS NOT NULL AND (s.id IS NULL OR s.content_deleted_at IS NOT NULL OR s.erased_at IS NOT NULL) THEN
+    RAISE EXCEPTION 'FUSION_GROUP_DENIED'; END IF;
+  IF r.fusion_group_id IS NOT NULL OR r.closed
+    OR EXISTS (SELECT 1 FROM bill2_calls WHERE run_id=r.id) THEN RAISE EXCEPTION 'FUSION_GROUP_DENIED'; END IF;
+  PERFORM set_config('graylum.fusion_group_attach', r.id::text, true);
+  UPDATE bill2_runs SET fusion_group_id=g.id, version=version+1 WHERE id=r.id;
+  PERFORM set_config('graylum.fusion_group_attach', '', true);
+END $$;
+
 -- Group admission in one transaction (FUSION-REVIEW PR-3b): the switch, membership permission, model
 -- allowlist and group budget are read here, so a concurrent change is decided by what this transaction
 -- reads. Idempotent by request: a replay returns the first admission's runs and frozen requests (kept in
@@ -155,28 +177,47 @@ END $$;
 -- the recovery cron reads them here: dispatched calls get the existing receipt recovery and finalize,
 -- calls never dispatched by their dispatch deadline are cancelled (hold released, no charge). `recovery`
 -- is the immutable original binding of a staging run (same shape as runtime_test_recovery_policy).
--- The return type changed while this migration was unmerged; drop first so a re-run stays valid.
+-- Paged by (created_at, id) so calls that cannot progress yet (e.g. cost still unknown after their
+-- deadline) never starve newer ones; undispatched calls are listed only once their dispatch deadline passed.
+-- The return type and signature changed while this migration was unmerged; drop first so a re-run stays valid.
 DROP FUNCTION IF EXISTS public.fusion_pending_financial_batch(integer);
-CREATE FUNCTION public.fusion_pending_financial_batch(p_limit integer)
-RETURNS TABLE(actor_id uuid, run_id uuid, call_id uuid, dispatched boolean, dispatch_deadline timestamptz, recovery jsonb)
+DROP FUNCTION IF EXISTS public.fusion_pending_financial_batch(integer,timestamptz,uuid);
+CREATE FUNCTION public.fusion_pending_financial_batch(p_limit integer, p_after_created timestamptz DEFAULT NULL,
+  p_after_id uuid DEFAULT NULL)
+RETURNS TABLE(actor_id uuid, run_id uuid, call_id uuid, dispatched boolean, dispatch_deadline timestamptz,
+  recovery jsonb, created_at timestamptz)
 LANGUAGE sql STABLE SECURITY DEFINER SET search_path=public,pg_temp AS $$
   SELECT r.actor_id, r.id, c.id, c.dispatched_at IS NOT NULL, c.dispatch_deadline,
     CASE WHEN r.payload->>'mode'='staging_test' AND r.test_window_id IS NOT NULL THEN jsonb_build_object(
       'id',r.test_window_id,'callPolicies',r.payload->'callPolicy','creditsPerUsd',r.payload->'rules'->>'creditsPerUsd',
-      'multiplier',r.payload->'rules'->>'multiplier','expiresAt',r.deadline) END
+      'multiplier',r.payload->'rules'->>'multiplier','expiresAt',r.deadline) END, c.created_at
   FROM bill2_runs r JOIN bill2_calls c ON c.run_id=r.id
   WHERE r.fusion_group_id IS NOT NULL AND r.contract_version='bill2.v2' AND c.settled_at IS NULL
+    AND (c.dispatched_at IS NOT NULL OR c.dispatch_deadline<=clock_timestamp())
+    AND (p_after_created IS NULL OR (c.created_at, c.id) > (p_after_created, p_after_id))
   ORDER BY c.created_at, c.id LIMIT least(greatest(coalesce(p_limit,50),1),200);
 $$;
 
 DO $$ DECLARE f text; BEGIN
   FOREACH f IN ARRAY ARRAY['fusion_group_create(uuid,uuid,text,uuid)','fusion_group_admit(uuid,uuid,text,uuid,jsonb)','fusion_call_output_save(uuid,uuid,text)',
-    'fusion_call_output_read(uuid,uuid)','fusion_pending_financial_batch(integer)'] LOOP
+    'fusion_call_output_read(uuid,uuid)','fusion_pending_financial_batch(integer,timestamptz,uuid)'] LOOP
     EXECUTE format('REVOKE ALL ON FUNCTION public.%s FROM PUBLIC,anon,authenticated,service_role', f);
     EXECUTE format('GRANT EXECUTE ON FUNCTION public.%s TO service_role', f);
   END LOOP;
   -- The sourceless 0234 form is for local fixtures only.
   REVOKE EXECUTE ON FUNCTION public.fusion_group_create(uuid,uuid,text) FROM service_role;
+END $$;
+
+-- Content deletion ends an unjudged dispatched call as user_stopped (billable at known cost, FUSION-REVIEW
+-- §3.3) even when the run was already closed, so a deleted conversation never leaves a hold until the
+-- deadline nor turns a delivered result into a refunded no_delivery.
+DO $$ DECLARE src text; a text; BEGIN
+  src:=pg_get_functiondef('public.bill2_payg_finalize(uuid,uuid)'::regprocedure);
+  IF position('OR r.content_deleted_at IS NOT NULL THEN' IN src)=0 THEN
+    a:=$x$   ELSIF r.cancel_requested OR r.paused_reason='user_stop' THEN$x$;
+    IF array_length(string_to_array(src,a),1)<>2 THEN RAISE EXCEPTION 'FUSION_SOURCE_MISMATCH: bill2_payg_finalize stop'; END IF;
+    EXECUTE replace(src,a,$x$   ELSIF r.cancel_requested OR r.paused_reason='user_stop' OR r.content_deleted_at IS NOT NULL THEN$x$);
+  END IF;
 END $$;
 
 -- 0234 decided "saved" for an unjudged call by runtime_executions.result. Sessionless Fusion calls
