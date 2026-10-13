@@ -1,6 +1,6 @@
 # LEGACY-CLOSE 删除与功能对照
 
-状态：第一段 #792 已合并；第二段（旧对话后端）和第三段（旧 `/workbench` 与自研内容检查）按顺序实施，见文末。
+状态：第一段 #792、第二段 #898 已合并；第三段（旧 `/workbench` 与自研内容检查）见文末。
 初始基线 staging `c91c526d3c43fb5e0b28c2a0a1942b457590fa3a`；
 按总控 2026-10-11 通知同步至 `ea5a693c8b7b99463ede5fd41588c4dec4ef118c`（#784 已合并）。
 授权：[#771 总控派发](https://github.com/Crnobog9527/GraylumAI_vercel/pull/771#issuecomment-6099912595)
@@ -113,3 +113,41 @@
 
 - 后台设置页仍有只服务旧对话的设置项（智能路由、Prompt 缓存等），现在不再生效；是否从设置页移除交总控安排。
 - `packages/db/tests/v3` 的旧版本兼容测试（legacy-runtime、bill2 upgrade）在历史固定版本上运行旧对话代码，保留。
+
+## 第三段：旧 `/workbench` 与自研内容检查（2026-10-13）
+
+| 删除对象 | 核对结果 |
+| --- | --- |
+| `apps/web/src/app/workbench/page.tsx`、`generation-panel.tsx`、`report-work-actions.tsx` | 新工作区没有链接指向旧 `/workbench`；`/workbench` 改为 307 跳到 `/positioning`。`/workbench/marketplace`、`/workbench/search` 是新工作区页面，保留。 |
+| `workbench` 路由的 generationQuote、generate、generations、cancel/abandon/recoverGeneration、search、cancelSearch、createWork、workSource、referenceChoices、projects、rounds、report、export | 只被旧页面调用。保留 catalog、read、start、execute（定位、Runtime、功能详情在用）。 |
+| `services/artifacts/generation.ts`、`services/research/workbenchSearch.ts` | 只被上面的接口使用。 |
+| `services/contentModerator.ts`、`services/aiOutputFilter.ts` | 唯一调用方是旧成果生成。 |
+| 后台设置页 19 项旧对话设置 | 见下表。 |
+
+保留：`services/artifacts/reuse.ts`（Runtime 读资料的 `runtime_source` 和 CI 里的 Runtime 集成测试仍在用旧作品引用；只删了它在旧页面的接口）；`middleware/securityChecks.ts` 的 `checkOutputSecurity` / `sanitizeOutputSecurity`（现在只有自身测试使用，是否删除另议）。
+
+MODERATION 检查点：`services/runtime/moderation.ts` 和 RATE-LIMIT 接线里的 `requireAllowedInput` / `allowedOutput` 调用没有改动，仍默认放行。
+
+凭证保护：新链路的模型密钥只在调用供应商时由服务角色读出（`runtime/stagingTransport.ts`），不进入提示词，模型输出里不会出现；被删的正则输出过滤只作用于旧成果生成。按 Master Plan，不迁移旧的通用 PII 正则过滤。用户数据隔离：保留的 workbench 接口仍经登录、邮箱验证和服务端 actor 校验；删除的只是旧页面接口。
+
+### 删除的后台设置项
+
+依据：在 `packages/api/src`、`apps/web/src` 中，除设置页本身和设置路由的读取名单外，没有任何代码读取这些键（新 Runtime、PROMPT-CACHE、定位都不读）。数据库里已有的值不动。
+
+| 设置键 | 原用途 |
+| --- | --- |
+| `enable_smart_routing`、`smart_routing_min_confidence` | 旧 `modelRouter` 智能路由 |
+| `assistant_model_id` | 旧路由的辅助模型（同时去掉设置保存时对它的校验） |
+| `enable_smart_search_decision`、`search_decision_min_confidence` | 旧对话联网判断 |
+| `enable_prompt_cache` | 旧 `promptCacheBuilder`；Runtime 的提示缓存在 `runtime/promptCache.ts`，不读这个键 |
+| `chat_show_model_selector`、`chat_prompt_text`、`chat_welcome_message`、`chat_billing_hint` | 旧 `/chat` 页面文案和模型下拉框 |
+| `show_token_usage_stats`、`enable_long_text_warning`、`long_text_warning_threshold`、`max_messages_per_conversation` | 旧 `/chat` 页面统计、长文本提示、对话长度 |
+| `enable_free_tier`、`free_tier_messages` | 旧对话免费体验 |
+| `input_credits_per_1k`、`output_credits_per_1k`、`web_search_credits` | 旧对话计价（设置页已标"已退役 / 参考显示"） |
+
+其中 11 项同时从设置路由对用户公开的读取名单里去掉。保留：`primary_model_id`（Runtime 自由对话默认模型）、`v3_summary_*`（Runtime 整理模型）、`search_surcharge_credits`（后台财务和搜索计费）、`home_*`、`max_input_characters`（新输入框正在别的窗口修改，暂不动）、`billing_*` 预扣设置（属计费服务，另议）、`first_purchase_bonus_percent`（不属于旧对话）。
+
+### 测试和本地运行器
+
+- `workbench.integration.ts` 只保留 `ADMIN:` 用例和 4 个搜索计费存储用例；旧页面浏览器流程、旧生成、旧工作台搜索、CONSUMPTION 用例删除。后台用例的登录改走 `/positioning`。
+- 本地运行器退役 `--workbench-restart-only` 和不带 `--opc-only` / `--runtime-only` 的 `--serve`（都依赖已删的旧页面用例），去掉重启阶段和对已删文件的源码替换。

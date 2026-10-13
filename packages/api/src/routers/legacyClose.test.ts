@@ -6,8 +6,12 @@ it('removes legacy slice and guided-chat procedures while retaining active works
   const procedures = Object.keys(appRouter._def.procedures);
   expect(procedures.filter(name => name.startsWith('agentSlice.'))).toEqual([]);
   expect(procedures.filter(name => name.startsWith('workbench.chat'))).toEqual([]);
-  for (const name of ['workbench.execute', 'workbench.read', 'workbench.report',
-    'workbench.export', 'runtime.executeStream', 'opc.mentorTurnStream']) {
+  expect(procedures.filter(name => name.startsWith('ai.'))).toEqual([]);
+  for (const name of ['workbench.generate', 'workbench.search', 'workbench.createWork', 'workbench.report', 'workbench.export']) {
+    expect(procedures).not.toContain(name);
+  }
+  for (const name of ['workbench.catalog', 'workbench.read', 'workbench.start', 'workbench.execute',
+    'runtime.executeStream', 'opc.mentorTurnStream']) {
     expect(procedures).toContain(name);
   }
 });
