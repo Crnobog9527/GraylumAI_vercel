@@ -37,18 +37,27 @@ BEGIN
  END IF;
 END $$;
 
--- Cancellations decided outside the executor (stream policy refusal, closed test window)
--- record their code afterwards. Only a finished, still-visible execution without a code is
--- touched; state, billing and content are never changed.
-CREATE OR REPLACE FUNCTION public.runtime_record_failure_code(p_actor_id uuid,p_execution_id uuid,p_code text) RETURNS boolean
+-- The stream host cancels on its own when the staging runtime is disabled. That cancel and
+-- its code are one transaction: the code is written only when this very call moves an
+-- unfinished execution to the final 'cancelled' state (never on cost_pending, never for a
+-- cancellation another request already made). Locks follow runtime_cancel: session, execution.
+CREATE OR REPLACE FUNCTION public.runtime_cancel_with_code(p_actor_id uuid,p_execution_id uuid,p_code text) RETURNS jsonb
 LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
+DECLARE e runtime_executions;prior text;result jsonb;
 BEGIN
  IF p_code IS NULL OR p_code !~ '^[A-Z][A-Z0-9_]{2,80}$' THEN RAISE EXCEPTION 'RUNTIME_FAILURE_CODE_INVALID';END IF;
- UPDATE runtime_executions SET failure_code=p_code
- WHERE id=p_execution_id AND actor_id=p_actor_id AND failure_code IS NULL AND state IN ('cancelled','cost_pending')
-  AND erased_at IS NULL AND content_deleted_at IS NULL;
- RETURN FOUND;
+ PERFORM bill2_actor(p_actor_id);
+ SELECT * INTO e FROM runtime_executions WHERE id=p_execution_id AND actor_id=p_actor_id;
+ IF e.id IS NULL THEN RAISE EXCEPTION 'RUNTIME_EXECUTION_DENIED';END IF;
+ PERFORM 1 FROM runtime_sessions WHERE id=e.session_id AND actor_id=p_actor_id FOR UPDATE;
+ SELECT state INTO prior FROM runtime_executions WHERE id=p_execution_id FOR UPDATE;
+ result:=runtime_cancel(p_actor_id,p_execution_id);
+ IF prior IN ('prepared','running','interrupted') AND result->>'state'='cancelled' THEN
+  UPDATE runtime_executions SET failure_code=coalesce(failure_code,p_code)
+  WHERE id=p_execution_id AND erased_at IS NULL AND content_deleted_at IS NULL;
+ END IF;
+ RETURN result;
 END $$;
-REVOKE ALL ON FUNCTION public.runtime_record_failure_code(uuid,uuid,text) FROM PUBLIC,anon,authenticated,service_role;
-GRANT EXECUTE ON FUNCTION public.runtime_record_failure_code(uuid,uuid,text) TO service_role;
+REVOKE ALL ON FUNCTION public.runtime_cancel_with_code(uuid,uuid,text) FROM PUBLIC,anon,authenticated,service_role;
+GRANT EXECUTE ON FUNCTION public.runtime_cancel_with_code(uuid,uuid,text) TO service_role;
 COMMIT;

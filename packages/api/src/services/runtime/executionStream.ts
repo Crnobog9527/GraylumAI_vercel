@@ -121,18 +121,19 @@ export async function executeOriginalExecution(host:OriginalExecutionHost,execut
     // An explicit host stop also closes this original execution. A failed or
     // lost cancellation response is inspected by financial recovery below;
     // there is no repeated cancellation or assumption of a refund.
-    await host.admin.rpc('runtime_cancel',{p_actor_id:host.actorId,p_execution_id:executionId});
+    // 0248: the code is written atomically with this cancellation only; before 0248 the plain cancel runs.
+    logger.error('api','runtime_stream_cancelled',{executionId,code:'STAGING_RUNTIME_DISABLED'});
+    const coded=await host.admin.rpc('runtime_cancel_with_code',
+     {p_actor_id:host.actorId,p_execution_id:executionId,p_code:'STAGING_RUNTIME_DISABLED'});
+    if(coded.error&&['PGRST202','42883'].includes(coded.error.code))
+     await host.admin.rpc('runtime_cancel',{p_actor_id:host.actorId,p_execution_id:executionId});
    }
    const adapter=stagingTransport(host.admin,original,host.budget);
    const replayOnly={dispatch:async()=>{throw new Error('RUNTIME_DISPATCH_DISABLED');},lookup:adapter.lookup};
    const state=await runtimeExecutor({...base,adapter:replayOnly,callGate:denyNewCalls}).recoverFinancial(executionId);
-   // 0248: this branch ends a still-unfinished execution without any executor record; keep why.
-   if(['prepared','running','interrupted'].includes(observed.data?.state)&&['cancelled','cost_pending'].includes(state.state)){
-    const code=process.env.V3_RUNTIME_STAGING_ENABLED!=='true'?'STAGING_RUNTIME_DISABLED':'STAGING_POLICY_UNAVAILABLE';
-    logger.error('api','runtime_stream_cancelled',{executionId,code});
-    await host.admin.rpc('runtime_record_failure_code',{p_actor_id:host.actorId,p_execution_id:executionId,p_code:code})
-     .then(()=>undefined,()=>undefined);
-   }
+   // Recovery itself may end an execution whose test window has closed; log it (no stored cause, see 0248).
+   if(['prepared','running','interrupted'].includes(observed.data?.state)&&state.state!=='completed')
+    logger.error('api','runtime_stream_recovery_finished',{executionId,code:'STAGING_POLICY_UNAVAILABLE',state:state.state});
    // With p_finish, runtime_financial_recovery returns only these three states.
    return outcome({state:state.state as 'completed'|'cancelled'|'cost_pending'});
   }

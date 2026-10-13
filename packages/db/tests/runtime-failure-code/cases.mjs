@@ -42,15 +42,20 @@ export async function runCases({db,report}) {
  assert.equal(await one(db,'SELECT runtime_history_available($1) v',[a.e]),await one(db,'SELECT runtime_history_available($1) v',[c.e]));
  report.checks.push('runtime_view never returns failure_code; the code does not change history availability');
 
- assert.equal(await rpc(db,'runtime_record_failure_code',c.f.actor,c.e,'STAGING_POLICY_UNAVAILABLE'),true);
- assert.equal((await row(db,c.e)).failure_code,'STAGING_POLICY_UNAVAILABLE');
- assert.equal(await rpc(db,'runtime_record_failure_code',c.f.actor,c.e,'STAGING_RUNTIME_DISABLED'),false);
- assert.equal((await row(db,c.e)).failure_code,'STAGING_POLICY_UNAVAILABLE');
- assert.equal(await rpc(db,'runtime_record_failure_code',d.f.actor,d.e,'STAGING_POLICY_UNAVAILABLE'),false);
- assert.equal(await rpc(db,'runtime_record_failure_code',a.f.actor,c.e,'STAGING_POLICY_UNAVAILABLE'),false);
- await denied(rpc(db,'runtime_record_failure_code',c.f.actor,c.e,'free text'),'RUNTIME_FAILURE_CODE_INVALID');
- const grants=await db.query(`SELECT r, has_function_privilege(r,'public.runtime_record_failure_code(uuid,uuid,text)','EXECUTE') ok
+ // The stream host's own cancellation: the code only when this call ends an unfinished execution.
+ const cancel=(f,e,code='STAGING_RUNTIME_DISABLED')=>rpc(db,'runtime_cancel_with_code',f.actor,e,code);
+ assert.equal((await cancel(d.f,d.e)).state,'cancelled');
+ assert.deepEqual(await row(db,d.e),{state:'cancelled',unavailable_reason:null,failure_code:'STAGING_RUNTIME_DISABLED'});
+ await cancel(c.f,c.e);
+ assert.equal((await row(db,c.e)).failure_code,null);
+ await cancel(a.f,a.e);
+ assert.equal((await row(db,a.e)).failure_code,'BILL2_INPUT_PROFILE_INVALID');
+ const other=await unfinished(db);
+ await denied(cancel(a.f,other.e),'RUNTIME_EXECUTION_DENIED');
+ await denied(cancel(other.f,other.e,'free text'),'RUNTIME_FAILURE_CODE_INVALID');
+ assert.equal((await row(db,other.e)).state,'interrupted');
+ const grants=await db.query(`SELECT r, has_function_privilege(r,'public.runtime_cancel_with_code(uuid,uuid,text)','EXECUTE') ok
   FROM unnest(ARRAY['anon','authenticated','service_role']) r ORDER BY r`);
  assert.deepEqual(grants.rows.map(x=>x.r+':'+x.ok),['anon:false','authenticated:false','service_role:true']);
- report.checks.push('runtime_record_failure_code writes once, only for the owner\'s finished execution, never for an unfinished one; service_role only');
+ report.checks.push('runtime_cancel_with_code records the code only when it ends an unfinished execution itself; an execution already cancelled by another request keeps its own (or no) code; owner-only; service_role only');
 }
