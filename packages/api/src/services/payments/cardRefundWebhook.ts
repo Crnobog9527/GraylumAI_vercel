@@ -1,0 +1,93 @@
+/* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import type Stripe from 'stripe';
+import type { SupabaseClient } from '@supabase/supabase-js';
+import { resolveStripeScope } from './stripeCheckoutPersistence';
+import { findCardOrderForPayment } from './cardPaymentLookup';
+import { PAYMENT_EVIDENCE_CONFLICT } from './stripeWebhookError';
+import { logger } from '../../lib/logger';
+
+const id = (value: string | { id: string } | null | undefined) => typeof value === 'string' ? value : value?.id ?? null;
+
+type RefundStripe = Pick<Stripe, 'refunds' | 'charges' | 'invoicePayments' | 'paymentIntents' | 'invoices' | 'subscriptions'
+  | 'accounts' | 'balance'>;
+type RefundResult = { state: 'refunded' | 'recorded' | 'partial_review'; duplicate: boolean; renewing?: boolean;
+  creditsShortfall?: number };
+
+/** Refund events (charge.refunded, refund.*, charge.refund.updated) of PAY-STRIPE-MP card orders. A refund we did not
+ * approve is an external refund fact (Link support, Stripe after 48 hours, a Dashboard refund): each succeeded refund
+ * is recorded once by pay_stripe_mp_record_external_refund (0247), which ends the order only when fully refunded.
+ * Returns false when the payment is not a card order (wallet, legacy, off-site) or the refund is one of ours (our
+ * approval flows tag their refunds with refundIntentId), so the existing refund path keeps handling those. */
+export async function handleCardRefund(db: SupabaseClient, stripe: RefundStripe, input: { refundId?: string; chargeId?: string },
+  alert: () => void = () => {}) {
+  const scope = await resolveStripeScope(stripe as unknown as Stripe);
+  const refunds = input.refundId ? [await stripe.refunds.retrieve(input.refundId)]
+    : input.chargeId ? (await stripe.refunds.list({ charge: input.chargeId, limit: 100 })).data : [];
+  if (!refunds.length) return false;
+  for (const refund of refunds) {
+    if (refund.object !== 'refund' || (input.refundId && refund.id !== input.refundId)) throw new Error(PAYMENT_EVIDENCE_CONFLICT);
+  }
+  if (refunds.some(refund => refund.metadata?.refundIntentId)) return false;
+  const chargeId = input.chargeId ?? id(refunds[0]!.charge);
+  const paymentIntentId = id(refunds[0]!.payment_intent);
+  if (refunds.some(refund => id(refund.charge) !== chargeId)) throw new Error(PAYMENT_EVIDENCE_CONFLICT);
+  const match = await findCardOrderForPayment(db, stripe, scope, { chargeId, paymentIntentId });
+  if (!match) {
+    // A card order whose payment is not recorded yet: Stripe retries until the payment (and its reference) exists,
+    // so the refund is never lost and the payment cannot be granted after it.
+    if (await cardOrderAwaitingPayment(db, stripe, paymentIntentId ?? (chargeId
+      ? id((await stripe.charges.retrieve(chargeId)).payment_intent) : null))) {
+      throw new Error('PAY_STRIPE_MP_FIRST_PAYMENT_PENDING');
+    }
+    return false;
+  }
+  // Oldest first, so the refund that completes a full refund is the one that ends the order.
+  for (const refund of [...refunds].sort((a, b) => a.created - b.created)) {
+    if (refund.status !== 'succeeded') continue;
+    const recorded = await db.rpc('pay_stripe_mp_record_external_refund', { p_order: match.order.id, p_merchant: scope.merchant,
+      p_payment: match.paymentId, p_refund: refund.id, p_amount: refund.amount, p_currency: refund.currency,
+      p_refunded_at: new Date(refund.created * 1000).toISOString() });
+    if (recorded.error || !recorded.data) throw new Error('PAY_STRIPE_MP_REFUND_UNAVAILABLE', { cause: recorded.error });
+    reportRefund(match.order.id, match.kind, recorded.data as RefundResult, alert);
+  }
+  return true;
+}
+
+function reportRefund(orderId: string, kind: string, result: RefundResult, alert: () => void) {
+  if (result.duplicate) return;
+  if (result.state === 'partial_review') {
+    logger.error('billing', 'stripe_mp_external_refund_partial', { orderId, kind,
+      action: '部分外部退款：已记账，会员和积分未改动，请人工核对' });
+    alert();
+    return;
+  }
+  if (result.state !== 'refunded') return;
+  if (result.creditsShortfall) logger.error('billing', 'stripe_mp_external_refund_shortfall', { orderId, kind,
+    shortfall: result.creditsShortfall });
+  if (result.renewing) {
+    logger.error('billing', 'stripe_mp_external_refund_still_renewing', { orderId, kind,
+      action: '该订阅仍在续费，请确认是否需要停续费' });
+    alert();
+  }
+}
+
+/** True when the payment belongs to a card order whose payment has not been recorded yet: a credit pack's
+ * PaymentIntent, or a subscription invoice's subscription, names an order paid by card. */
+async function cardOrderAwaitingPayment(db: Pick<SupabaseClient, 'from'>, stripe: RefundStripe, paymentIntentId: string | null) {
+  if (!paymentIntentId) return false;
+  const intent = await stripe.paymentIntents.retrieve(paymentIntentId);
+  let orderId: string | null = intent.metadata?.orderId ?? null;
+  if (!orderId) {
+    const payments = await stripe.invoicePayments.list({ payment: { type: 'payment_intent', payment_intent: paymentIntentId },
+      status: 'paid', limit: 1 });
+    const invoiceId = id(payments.data[0]?.invoice);
+    const invoice = invoiceId ? await stripe.invoices.retrieve(invoiceId) : null;
+    const subscriptionId = id(invoice?.parent?.subscription_details?.subscription);
+    orderId = subscriptionId ? (await stripe.subscriptions.retrieve(subscriptionId)).metadata?.orderId ?? null : null;
+  }
+  if (!orderId || !/^[0-9a-f-]{36}$/i.test(orderId)) return false;
+  const order = await db.from('payment_orders').select('payment_method,payment_channel').eq('id', orderId).maybeSingle();
+  if (order.error) throw new Error('PAY_WAFFO_PERSISTENCE_UNAVAILABLE', { cause: order.error });
+  return order.data?.payment_channel === 'stripe' && ['card', 'card_cn'].includes(order.data.payment_method);
+}
+
