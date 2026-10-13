@@ -28,15 +28,21 @@ BEGIN
   RETURN jsonb_build_object('kind','session','id',target,'status','deleted','alreadyDeleted',true,
    'preservedSavedVersions',0,'financialReviewCount',0);
  END IF;
+ -- Writers that copy a result out of this conversation (saving a work result, capture, history
+ -- dependencies) lock its execution rows first and then check availability, so taking the same
+ -- rows here serializes them with the marker: a copy committed first is visible to the checks
+ -- below and cleaned now; a writer that waits sees the committed marker and is refused.
+ PERFORM id FROM runtime_executions WHERE session_id=target AND actor_id=a ORDER BY id FOR UPDATE;
  -- Read-only scope (no account-wide locks). The marker alone is enough only when nothing outside
- -- this conversation holds a copy: a free conversation (no draft or topic binding), every scoped
+ -- this conversation holds a copy: a free conversation (no work, draft or topic binding), every scoped
  -- execution in it, no saved content, work, data event, result link, captured field, library
  -- request or other conversation's frozen material referencing it. Anything else, or any doubt,
  -- runs the full cleanup now so no derived copy stays readable after this call returns.
  scope:=content_erasure_scope(a,'session',target);
  SELECT coalesce(array_agg(v::uuid),'{}') INTO ids FROM jsonb_array_elements_text(scope->'executions') v;
  refs:=ids||target;
- local:=NOT EXISTS(SELECT 1 FROM opc_drafts d WHERE d.session_id=target)
+ local:=s.scope->>'kind'='positioning_draft' AND s.scope->>'workItemId' IS NULL
+  AND NOT EXISTS(SELECT 1 FROM opc_drafts d WHERE d.session_id=target)
   AND NOT EXISTS(SELECT 1 FROM opc_topic_workspaces t WHERE t.session_id=target)
   AND NOT EXISTS(SELECT 1 FROM runtime_executions e WHERE e.id=ANY(ids) AND e.session_id<>target)
   AND jsonb_array_length(scope->'projects')=0 AND jsonb_array_length(scope->'versions')=0

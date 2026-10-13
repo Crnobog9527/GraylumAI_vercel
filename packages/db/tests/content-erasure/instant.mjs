@@ -171,6 +171,25 @@ export async function runInstant({db,Client,connectionString,report}){
    /COPIED_PRIVATE_SUGGESTION/);
   report.checks.push('capture in progress on the fed work: deletion reports busy and marks nothing; after it, capture cannot write a copy');
 
+  // Saving a work result holds the execution while it copies: the mark waits for it (bounded), so a
+  // committed copy is seen and cleaned in the same call; a result save that waits on a marked
+  // conversation is refused (opc_work_result checks availability after locking the execution).
+  const v=await runtimeFixture(db,{settled:true});
+  await locker.query('BEGIN');await locker.query('SELECT id FROM runtime_executions WHERE id=$1 FOR UPDATE',[v.execution]);
+  await assert.rejects(mark(db,v),/CONTENT_ERASURE_BUSY/);
+  await locker.query('ROLLBACK');
+  assert.equal((await row(db,'runtime_sessions',v.session)).content_deleted_at,null,'held execution: nothing marked');
+  await db.query('BEGIN');await mark(db,v);
+  await locker.query('BEGIN');
+  await locker.query("SET LOCAL lock_timeout='5s'");
+  const waiting=locker.query('SELECT id FROM runtime_executions WHERE id=$1 FOR UPDATE',[v.execution]);
+  await new Promise(resolve=>setTimeout(resolve,200));
+  await db.query('COMMIT');await waiting;
+  assert.equal((await locker.query('SELECT runtime_history_available($1) v',[v.execution])).rows[0].v,false,
+   'a writer that waited on the execution sees the committed marker');
+  await locker.query('ROLLBACK');
+  report.checks.push('execution-locking writers (saved results) serialize with the mark: held means busy, waiting means refused');
+
   // A copy exists but its cleanup is busy: nothing is marked and the call reports busy.
   const b=await capturedIntoWork(db);
   await locker.query('BEGIN');await locker.query('SELECT id FROM runtime_executions WHERE session_id=$1 FOR UPDATE',[b.session]);
@@ -210,5 +229,5 @@ export async function runInstant({db,Client,connectionString,report}){
   assert.equal((await row(db,'runtime_sessions',s3.session)).erased_at,null,'closed account left to account erasure');
   await rpc(db,'account_erasure_scrub_runtime',s3.actor);
   report.checks.push('sweep: pages by cursor, busy stays pending, permanent failures counted as failed, closed accounts skipped');
- }finally{await db.query('RESET ROLE');await locker.query('ROLLBACK');await locker.end();}
+ }finally{await db.query('ROLLBACK').catch(()=>{});await db.query('RESET ROLE');await locker.query('ROLLBACK');await locker.end();}
 }

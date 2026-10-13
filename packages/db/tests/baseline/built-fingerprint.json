@@ -2412,7 +2412,7 @@
   "fn:content_erasure_execution_guard()": "3adbedaaee4d",
   "fn:content_erasure_financial_allowed(uuid,uuid)": "3c6e64645a80",
   "fn:content_erasure_ledger_owned(jsonb)": "739cbffa5e1b",
-  "fn:content_erasure_mark_session(uuid,uuid)": "5bbc2244bb29",
+  "fn:content_erasure_mark_session(uuid,uuid)": "de612a101fa5",
   "fn:content_erasure_marker_guard()": "0202fde2876d",
   "fn:content_erasure_parent_guard()": "7440842c273b",
   "fn:content_erasure_preview(uuid,text,uuid)": "a4c147cb9fdc",
