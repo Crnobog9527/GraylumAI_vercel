@@ -80,8 +80,11 @@ export function useComposerReferences(enabled: boolean, box: RefObject<ComposerE
         setActive((highlighted + step) % choices.length);
         return true;
       }
-      // A highlighted choice takes Enter/Tab; with nothing to pick, Enter keeps its usual meaning.
-      if ((event.key === 'Enter' && !event.shiftKey || event.key === 'Tab') && highlighted >= 0) {
+      const confirming = event.key === 'Enter' && !event.shiftKey || event.key === 'Tab';
+      // While the list is loading, Enter waits instead of sending the literal `@text`.
+      if (confirming && list.isLoading) return true;
+      // A highlighted choice takes Enter/Tab; once loaded with nothing to pick, Enter keeps its usual meaning.
+      if (confirming && highlighted >= 0) {
         pick(choices[highlighted]);
         return true;
       }

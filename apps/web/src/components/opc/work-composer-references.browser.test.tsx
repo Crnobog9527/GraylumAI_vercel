@@ -29,6 +29,7 @@ beforeAll(async () => {
       // Library list answers from window.listData and records every call's `enabled`, so "off" can prove no request.
       if (id === TRPC) return `export const trpc={
         library:{list:{useQuery:(input,options)=>{window.listCalls.push(Boolean(options&&options.enabled));
+          if(options&&options.enabled&&window.listLoading)return {isLoading:true,error:null,data:undefined,refetch(){}};
           return options&&options.enabled?{isLoading:false,error:null,data:window.listData,refetch(){}}
             :{isLoading:false,error:null,data:undefined,refetch(){}}}}},
         runtime:{choices:{useQuery:()=>({isLoading:false,error:null,data:undefined,refetch(){}})}}};`;
@@ -165,3 +166,12 @@ it('says so and lets Enter send when a reference does not fit the length limit',
   await page.keyboard.press('Enter');
   expect(await read<string[]>(page, 'sent')).toEqual(['一二三四五六七八九十@周']);
 }, 15));
+
+it('does not send while the document list is still loading', () => open(true, async page => {
+  await page.evaluate(() => { (window as unknown as { listLoading: boolean }).listLoading = true; });
+  await page.keyboard.type('参考@周');
+  await ui(menu(page)).toContainText('正在读取资料库');
+  await page.keyboard.press('Enter');
+  expect(await read<string[]>(page, 'sent')).toEqual([]);
+  expect(await read<string>(page, 'value')).toBe('参考@周');
+}));
