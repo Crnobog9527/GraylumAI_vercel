@@ -117,15 +117,15 @@ describe('conversation cleanup sweep (cron backstop)', () => {
     const rpc = vi.fn().mockResolvedValueOnce(page({ cleaned: 49, more: true, ...cursor }))
       .mockResolvedValueOnce(page({ cleaned: 3 }));
     await expect(sweepErasedConversations({ rpc } as never, Date.now() + 30_000)).resolves.toEqual({ cleaned: 52, pending: 0, failed: 0, more: false });
-    expect(rpc.mock.calls[0][1]).toEqual({ lim: 50, after_at: null, after_id: null });
-    expect(rpc.mock.calls[1][1]).toEqual({ lim: 50, after_at: cursor.afterAt, after_id: id });
+    expect(rpc.mock.calls[0][1]).toEqual({ lim: 1, after_at: null, after_id: null });
+    expect(rpc.mock.calls[1][1]).toEqual({ lim: 1, after_at: cursor.afterAt, after_id: id });
   });
   it('retries busy or failed rows from the oldest in the same run, at most three passes', async () => {
     const { sweepErasedConversations } = await import('../services/accountErasure/content');
     const settled = vi.fn().mockResolvedValueOnce(page({ cleaned: 4, pending: 1 })).mockResolvedValueOnce(page({ cleaned: 1 }));
     await expect(sweepErasedConversations({ rpc: settled } as never, Date.now() + 30_000))
       .resolves.toEqual({ cleaned: 5, pending: 0, failed: 0, more: false });
-    expect(settled.mock.calls[1][1]).toEqual({ lim: 50, after_at: null, after_id: null });
+    expect(settled.mock.calls[1][1]).toEqual({ lim: 1, after_at: null, after_id: null });
     const stuck = vi.fn().mockResolvedValue(page({ pending: 1, failed: 1 }));
     await expect(sweepErasedConversations({ rpc: stuck } as never, Date.now() + 30_000))
       .resolves.toEqual({ cleaned: 0, pending: 1, failed: 1, more: false });

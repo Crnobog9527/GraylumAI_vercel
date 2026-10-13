@@ -124,8 +124,10 @@ export async function sweepErasedConversations(database: SweepDatabase, deadline
     const current: ConversationSweep = { cleaned: 0, pending: 0, failed: 0, more: true };
     let cursor: { afterAt: string | null; afterId: string | null } = { afterAt: null, afterId: null };
     while (current.more && deadline - now() > 3_000) {
+      // One conversation per call: each RPC is its own transaction, so every finished cleanup is
+      // committed and an abort at the deadline loses at most the one in progress.
       const call = database.rpc('content_erasure_sweep_sessions', {
-        lim: 50, after_at: cursor.afterAt, after_id: cursor.afterId,
+        lim: 1, after_at: cursor.afterAt, after_id: cursor.afterId,
       });
       const response = await (call.abortSignal ? call.abortSignal(AbortSignal.timeout(deadline - now())) : call);
       if (response.error) throw new Error('CONTENT_ERASURE_SWEEP_FAILED');
