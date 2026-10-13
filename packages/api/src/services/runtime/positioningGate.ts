@@ -1,5 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import { logger } from '../../lib/logger';
 import { isOpenRouterEndpoint, resolveOpenAICompatibleEndpoint } from '../providerUtils';
@@ -104,6 +105,16 @@ export function openRouterKey(row: { provider?: unknown; api_endpoint?: unknown;
   const endpoint = resolveOpenAICompatibleEndpoint(typeof row.provider === 'string' ? row.provider : null,
     typeof row.api_endpoint === 'string' ? row.api_endpoint : null);
   return endpoint && isOpenRouterEndpoint(endpoint) ? row.api_key.trim() || undefined : undefined;
+}
+
+/**
+ * The key Decisions may use on staging: only the exact credential the approved test window quoted for this model
+ * (the same `openrouter-key:<sha256>` binding the primary transport enforces). Anything else, and every local
+ * fixture run, is "no key", so Decisions is skipped and the fallback rule applies.
+ */
+export function windowBoundKey(row: Parameters<typeof openRouterKey>[0], account: string | undefined) {
+  const key = openRouterKey(row);
+  return key && account === 'openrouter-key:' + createHash('sha256').update(key).digest('hex') ? key : undefined;
 }
 
 export function decisionsClassifier(transport: typeof fetch = fetch): PositioningClassifier {

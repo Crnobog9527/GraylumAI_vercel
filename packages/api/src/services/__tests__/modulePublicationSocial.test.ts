@@ -23,7 +23,7 @@ const reasoning = { reasoning: { route: 'deepinfra', purposes: { interactive: { 
     contextLength: 10000, maxCompletionTokens: 4096 }] } } };
 
 type Step = { table: string; op: 'select' | 'update'; values?: unknown; filters: Array<[string, unknown]> };
-function database(options: { flagFails?: boolean; enableFails?: boolean; flagged?: boolean } = {}) {
+function database(options: { flagFails?: boolean; enableFails?: boolean; flagged?: boolean; skillBound?: boolean } = {}) {
   const steps: Step[] = [];
   let version = '2026-10-13T00:00:00.000Z', flagged = options.flagged ?? false;
   const from = (table: string) => {
@@ -35,7 +35,8 @@ function database(options: { flagFails?: boolean; enableFails?: boolean; flagged
       eq: (column: string, value: unknown) => { step.filters.push([column, value]); return chain; },
       single: async () => ({ data: { id: randomUUID(), name: 'Qwen', model_id: 'qwen/qwen3.8-27b', provider: 'openai', is_active: 'true',
         max_tokens: 4096, input_limit: 800000, api_key: 'LOCAL_ONLY', api_endpoint: '', config: reasoning }, error: null }),
-      maybeSingle: async () => ({ data: { id: 'm', social_media_related: flagged, updated_at: version }, error: null }),
+      maybeSingle: async () => ({ data: { id: 'm', social_media_related: flagged, updated_at: version,
+        skill_id: options.skillBound ? 'bound-skill' : null }, error: null }),
       then: (resolve: (value: unknown) => void) => {
         const values = step.values as { social_media_related?: boolean; active?: boolean } | undefined;
         if (values?.social_media_related !== undefined) {
@@ -107,12 +108,12 @@ it('refuses flagging a new positioning Skill before publishing', async () => {
   expect(plain.rpc).toHaveBeenCalledOnce();
 });
 
-it('ignores the choice for an existing module (its own setting card owns the flag)', async () => {
-  const f = database(), input = { ...moduleInput(), expectedUpdatedAt: '2026-10-13T00:00:00.000Z', socialMediaRelated: true };
+it('ignores the choice for a module that already has a Skill (its own setting card owns the flag)', async () => {
+  const f = database({ skillBound: true }), input = { ...moduleInput(), expectedUpdatedAt: '2026-10-13T00:00:00.000Z', socialMediaRelated: true };
   await saveModuleSkill(f.db, randomUUID(), input);
   expect(metadata(f.rpc)).toEqual(input.module);
   expect(f.updates()).toEqual([]);
-  const absent = database(), unchanged = { ...moduleInput(), expectedUpdatedAt: '2026-10-13T00:00:00.000Z' };
+  const absent = database({ skillBound: true }), unchanged = { ...moduleInput(), expectedUpdatedAt: '2026-10-13T00:00:00.000Z' };
   delete unchanged.socialMediaRelated;
   await expect(saveModuleSkill(absent.db, randomUUID(), unchanged)).resolves.toBeTruthy();
 });
@@ -124,4 +125,17 @@ it('continues an exact retry whose flag was already saved before the response wa
   expect(updates.some(step => (step.values as { social_media_related?: boolean }).social_media_related !== undefined)).toBe(false);
   expect(updates.map(step => step.values)).toEqual([expect.objectContaining({ active: true })]);
   expect(updates[0]!.filters).toEqual(expect.arrayContaining([['social_media_related', true], ['updated_at', '2026-10-13T00:00:00.000Z']]));
+});
+
+it('requires and applies the choice when an existing prompt module gets its first Skill', async () => {
+  const opened = '2026-10-13T00:00:00.000Z';
+  const missing = database(), converted = { ...moduleInput(), expectedUpdatedAt: opened };
+  delete converted.socialMediaRelated;
+  await expect(saveModuleSkill(missing.db, randomUUID(), converted)).rejects.toThrow(/^SOCIAL_MEDIA_FLAG_REQUIRED$/);
+  expect(missing.rpc).not.toHaveBeenCalled();
+  const f = database(), flagged = { ...moduleInput(), expectedUpdatedAt: opened, socialMediaRelated: true };
+  await saveModuleSkill(f.db, randomUUID(), flagged);
+  expect(metadata(f.rpc)).toEqual({ ...flagged.module, active: false });
+  expect(f.updates().map(step => step.values)).toEqual([expect.objectContaining({ social_media_related: true }),
+    expect.objectContaining({ active: true })]);
 });

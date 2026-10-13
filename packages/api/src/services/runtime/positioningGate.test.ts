@@ -2,7 +2,8 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { logger } from '../../lib/logger';
-import { DECISIONS_MODEL, DECISIONS_URL, decide, decisionsClassifier, hasConfirmedPositioning, judgePositioning, openRouterKey }
+import { DECISIONS_MODEL, DECISIONS_URL, decide, decisionsClassifier, hasConfirmedPositioning, judgePositioning, openRouterKey,
+  windowBoundKey }
   from './positioningGate';
 import { isPositioningRefusal, POSITIONING_MARKER, POSITIONING_FALLBACK_INSTRUCTIONS } from './positioningFallback';
 import { withPrimaryAddenda } from './primaryInstructions';
@@ -133,4 +134,14 @@ it('ends a refused PAYG round through fail_platform with positioning_required', 
   const local = vi.fn(async () => ({ state: 'cancelled' }));
   expect(await endPositioningRefusal(local as never, args, false)).toEqual({ state: 'cancelled', code: POSITIONING_REQUIRED });
   expect(local).toHaveBeenCalledExactlyOnceWith('runtime_cancel', args);
+});
+
+it('uses only the credential the approved staging window quoted for this model', async () => {
+  const { createHash } = await import('node:crypto');
+  const account = (key: string) => 'openrouter-key:' + createHash('sha256').update(key).digest('hex');
+  const row = { provider: 'openai', api_endpoint: '', api_key: 'APPROVED' };
+  expect(windowBoundKey(row, account('APPROVED'))).toBe('APPROVED');
+  expect(windowBoundKey({ ...row, api_key: 'ROTATED' }, account('APPROVED'))).toBeUndefined();
+  expect(windowBoundKey(row, undefined)).toBeUndefined();
+  expect(windowBoundKey({ ...row, api_endpoint: 'https://example.com/v1/chat/completions' }, account('APPROVED'))).toBeUndefined();
 });

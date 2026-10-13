@@ -86,8 +86,9 @@ export function prepareModuleSkill(value: ModuleSkillInput) {
 
 export async function saveModuleSkill(db: SupabaseClient, actorId: string, value: ModuleSkillInput) {
   const prepared = prepareModuleSkill(value);
-  // POSITIONING-GATE: a new module needs the explicit choice; an existing module ignores it (separate setting card).
-  const isNew = value.expectedUpdatedAt === null;
+  // POSITIONING-GATE: a module getting its first Skill (new, or a converted prompt module) needs the explicit choice;
+  // a module that already has a Skill ignores it (separate setting card).
+  const isNew = value.expectedUpdatedAt === null || !(await boundSkill(db, value.moduleId));
   if (isNew && value.socialMediaRelated === undefined) throw new Error('SOCIAL_MEDIA_FLAG_REQUIRED');
   const flag = isNew && value.socialMediaRelated === true;
   if (flag && isPositioningWorkflow(prepared.workflow)) throw new Error('SOCIAL_MEDIA_FLAG_POSITIONING_SKILL');
@@ -109,6 +110,12 @@ export async function saveModuleSkill(db: SupabaseClient, actorId: string, value
   const published = data as { moduleId: string; revisionId: string; version: number };
   if (flag) await flagNewModule(db, value.moduleId, value.module.active);
   return published;
+}
+
+async function boundSkill(db: SupabaseClient, moduleId: string): Promise<boolean> {
+  const row = await db.from('modules').select('skill_id').eq('id', moduleId).maybeSingle();
+  if (row.error) throw new Error('Skill 发布未完成，请重新读取模块，检查版本和模型后再发布。');
+  return Boolean(row.data?.skill_id);
 }
 
 /** Any failure here leaves the new module disabled (never enabled without its flag); the administrator reopens it. */

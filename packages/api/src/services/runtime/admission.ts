@@ -48,7 +48,7 @@ import {freezeStagingPaygPricing} from './paygPricing';
 import {freezePaygMessageBudget} from './paygMessageBudget';
 import {readPaygHostPolicies} from './paygHostPolicy';
 import {runAutomaticFinancialRecovery} from './automaticRecovery';
-import {hasConfirmedPositioning,judgePositioning,openRouterKey,refusePositioning,type PositioningGatePolicy} from './positioningGate';
+import {hasConfirmedPositioning,judgePositioning,windowBoundKey,refusePositioning,type PositioningGatePolicy} from './positioningGate';
 import {POSITIONING_FALLBACK,POSITIONING_FALLBACK_INSTRUCTIONS} from './positioningFallback';
 
 const uuid=z.string().uuid();
@@ -234,7 +234,8 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
    if(policy.real&&row.error){if(row.error.code==='PGRST116')throw unavailableModel();stagingRpcFailure(row.error);}
    if(row.error||row.data?.is_active!=='true'||(!policy.real&&row.data.provider!=='fixture'))throw unavailableModel();
    // The OpenRouter key of this same row serves Decisions (no extra read); it never travels further.
-   const apiKey=openRouterKey(row.data);delete (row.data as {api_key?:unknown}).api_key;
+   const apiKey=policy.real?windowBoundKey(row.data,realModel(row.data).account):undefined;
+   delete (row.data as {api_key?:unknown}).api_key;
    if(policy.real)realModel(row.data);
    // Decisions judges every other gated message, including a non-social Skill turning to social media; an admitted
    // gated turn always keeps the fallback rule, since Decisions does not see earlier turns ("好的，那帮我写三条").
