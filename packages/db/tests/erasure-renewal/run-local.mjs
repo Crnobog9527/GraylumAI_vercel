@@ -87,9 +87,10 @@ try {
   await expectAllowed(waffo);
   report.checks.push('Waffo: deny while renewing and while a cancel is only requested; allow after the confirmed cancel');
 
-  // Stripe Managed Payments international card: Stripe id only in payment_provider_refs.
+  // Stripe Managed Payments international card: Stripe id only in payment_provider_refs, which is what the
+  // customer portal resolves, so the hint points to the portal.
   const mp = await profile(), mpSub = await subscribe(mp, { channel: 'stripe' });
-  await expectBlocked(mp, ['stripe']);
+  await expectBlocked(mp, ['stripe_portal']);
   await c.query("UPDATE user_subscriptions SET cancel_at_period_end='true' WHERE id=$1", [mpSub]);
   await expectAllowed(mp);
   report.checks.push('MP international card (no stripe_subscription_id): deny while renewing, allow after cancel');
@@ -99,8 +100,10 @@ try {
   // the subscription is simulated as written without a provider ref yet (e.g. while the ref is pending).
   for (const f of ['account_erasure_renewing(uuid)', 'account_erasure_renewal_channels(uuid)', 'account_erasure_preview(uuid)']) {
     const src = await v('SELECT prosrc v FROM pg_proc WHERE oid=$1::regprocedure', [f]);
-    assert.doesNotMatch(src, /payment_method|auto_renew|stripe_managed_payments|payment_provider_refs/, f);
+    assert.doesNotMatch(src, /payment_method|auto_renew|stripe_managed_payments/, f);
   }
+  // Blocking itself never depends on provider mappings; only the cancel-entry hint reads them.
+  assert.doesNotMatch(await v("SELECT prosrc v FROM pg_proc WHERE oid='account_erasure_renewing(uuid)'::regprocedure"), /payment_provider_refs/);
   const cn = await profile(), cnSub = await subscribe(cn, { channel: 'stripe', ref: false });
   await expectBlocked(cn, ['stripe']);
   await c.query("UPDATE user_subscriptions SET cancel_at_period_end='true' WHERE id=$1", [cnSub]);
@@ -112,6 +115,10 @@ try {
   await subscribe(mixed, { stripeId: 'sub_mixed_' + randomUUID().slice(0, 8) });
   await subscribe(mixed, { channel: 'waffo' });
   await expectBlocked(mixed, ['stripe_portal', 'waffo']);
+  const mixedCard = await profile();
+  await subscribe(mixedCard, { channel: 'stripe' });
+  await subscribe(mixedCard, { channel: 'stripe', ref: false });
+  await expectBlocked(mixedCard, ['stripe', 'stripe_portal']);
   report.checks.push('mixed channels: every renewing channel is listed for the cancel hint');
 
   // Non-renewing paid access (wallet annual is inserted with cancel_at_period_end='true') never blocks,

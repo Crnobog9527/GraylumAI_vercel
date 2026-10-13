@@ -18,11 +18,15 @@ LANGUAGE sql STABLE SET search_path=public,pg_temp AS $$
   AND s.cancel_at_period_end::text IS DISTINCT FROM 'true');
 $$;
 
--- Where each renewing subscription is cancelled, without exposing provider ids. A legacy Stripe
--- subscription id means the Stripe customer portal; otherwise the subscription's own channel.
+-- Where each renewing subscription is cancelled, without exposing provider ids. The Stripe customer
+-- portal serves a legacy Stripe subscription id and a Stripe-channel subscription whose Stripe id is
+-- mapped in payment_provider_refs (what createCustomerPortalSession resolves); otherwise the channel.
+-- Only this hint reads the mapping; whether erasure is blocked never depends on it.
 CREATE OR REPLACE FUNCTION public.account_erasure_renewal_channels(p_profile_id uuid) RETURNS jsonb
 LANGUAGE sql STABLE SET search_path=public,pg_temp AS $$
- SELECT coalesce(jsonb_agg(DISTINCT CASE WHEN s.stripe_subscription_id IS NOT NULL THEN 'stripe_portal'
+ SELECT coalesce(jsonb_agg(DISTINCT CASE WHEN s.stripe_subscription_id IS NOT NULL
+   OR s.payment_channel='stripe' AND EXISTS(SELECT 1 FROM payment_provider_refs r WHERE r.subscription_id=s.id
+    AND r.channel='stripe' AND r.object_type='subscription') THEN 'stripe_portal'
    WHEN s.payment_channel IN ('stripe','waffo') THEN s.payment_channel ELSE 'other' END),'[]'::jsonb)
  FROM user_subscriptions s WHERE s.user_id=p_profile_id
   AND lower(s.status) IN ('active','trialing','past_due','incomplete','unpaid','paused')

@@ -2240,7 +2240,7 @@
   "fn:account_erasure_progress_issue(uuid,uuid,text)": "4dd2789c1d3d",
   "fn:account_erasure_progress_read(uuid,text)": "dbcd03b12bf4",
   "fn:account_erasure_prune_business(uuid,integer)": "b40e28ce2d21",
-  "fn:account_erasure_renewal_channels(uuid)": "d19c258623d5",
+  "fn:account_erasure_renewal_channels(uuid)": "88b061dd8366",
   "fn:account_erasure_renewing(uuid)": "d6de73ea342f",
   "fn:account_erasure_scrub_calls(uuid,uuid)": "66f592cc079f",
   "fn:account_erasure_scrub_content(uuid)": "5c09badb322c",
