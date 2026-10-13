@@ -43,6 +43,7 @@ import { callBillingUnit } from './billingUnitAdmission';
 import type {GateRejection} from './newWorkGate';
 import {allowedOutput} from './moderation';
 import {runtimeIdentityGuard} from '../modelIdentity/runtimeGuard';
+import {POSITIONING_REFUSED,positioningRefused,endPositioningRefusal} from './positioningFallback';
 import {frozenBrandIdentity,withBrandIdentity} from '../modelIdentity/brandIdentity';
 export function runtimeExecutor(options:RuntimeExecutorOptions){
  if(typeof options.callGate!=='function')throw new Error('RUNTIME_CALL_GATE_REQUIRED');
@@ -68,7 +69,7 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
   const ownerDatabase=isPayg?paygOwnerDatabase(options.database,{executionId,epoch:execution.epoch!}):options.database;
   const ownerRpc=<T>(name:string,value:Record<string,unknown>)=>rpc<T>(name,value,ownerDatabase);
   if(execution.state==='cancelled')return {state:'cancelled' as const,
-   ...(['provider_history','preflight','platform_review'].includes(execution.unavailableReason??'')
+   ...(['provider_history','preflight','platform_review','positioning_required'].includes(execution.unavailableReason??'')
     ?{unavailable:execution.unavailableReason}:{})};
   if(execution.cancelRequested){
    await billing.recoverReceipts(execution.runId);
@@ -354,6 +355,7 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
     callSequence=primarySequence;
     body=await runPrimary(true);
    }
+   if(positioningRefused(context,body))throw new Error(POSITIONING_REFUSED); // POSITIONING-GATE fallback: never shown or saved.
    if(context.network==='require_latest'){
     const latest=await ownerRpc<{state:'cancelled'|'cost_pending';unavailable?:boolean}>('runtime_execution',{...args,p_action:'check_latest'});
     if(latest.unavailable)return {state:latest.state,unavailable:'latest' as const};
@@ -418,6 +420,7 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
    return {...nativeMetadata(result),body,...(summary!==undefined?{summary}:{}),state:completed.state};
   }catch(error){
    claimNotice??=billingClaimNotice(error);
+   if(error instanceof Error&&error.message===POSITIONING_REFUSED)return endPositioningRefusal(ownerRpc,args,isPayg);
    if(nativeProgress&&!accountClosed&&!moderationBlocked){const done=await finishStop(executionId,onProgress,undefined,execution.live);if(done)return done;}
    if(nativeProgress&&execution.live&&projection.text&&!waitPoint){const correction=projection.finish(INVALID_REPLY_NOTICE);if(correction)progress(correction);}
    if(waitPoint){
