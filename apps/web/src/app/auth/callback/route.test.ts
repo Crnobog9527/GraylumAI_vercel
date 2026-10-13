@@ -92,12 +92,13 @@ describe('auth callback link errors', () => {
     expect(Object.fromEntries(to.searchParams)).toEqual({ redirect: '/profile' });
   });
 
-  it('still sends a signed-in unverified user to the verify page with the email', async () => {
+  it('still sends a signed-in unverified user to the verify page, without the email in the URL', async () => {
     auth.exchangeCodeForSession.mockResolvedValue({ error: null });
     auth.getUser.mockResolvedValue({ data: { user: { email: 'a@example.test', email_confirmed_at: null } } });
     const to = await callback('code=abc&next=%2Fprofile');
     expect(to.pathname).toBe('/verify-email');
-    expect(Object.fromEntries(to.searchParams)).toEqual({ email: 'a@example.test', redirect: '/profile' });
+    expect(Object.fromEntries(to.searchParams)).toEqual({ redirect: '/profile' });
+    expect(decodeURIComponent(to.toString())).not.toContain('a@example.test');
   });
 });
 

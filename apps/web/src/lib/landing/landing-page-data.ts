@@ -7,11 +7,12 @@ import { SAMPLE_REPORTS } from './landing-samples';
 import { allOn, visibleItems, type LandingFlags } from './landing-flags';
 import { buildLandingPricing, landingOfferList, type LandingOffers } from './landing-pricing';
 
-// Home page wording approved by the Owner on 2026-10-12 (SEO_GEO_SPEC section 3.3). The public host
-// serves this page at "/", so that is its canonical address.
-export const HOME_TITLE = 'Graylum – AI 自媒体工具：定位、选题、写内容的 AI 自媒体陪跑教练';
+// Home page wording approved by the Owner on 2026-10-13 (SEO_GEO_SPEC section 3.3). The public host
+// serves this page at "/", so that is its canonical address. The description's data-review claim
+// needs its owning task accepted before launch (MASTER_PLAN section 2.1, 2026-10-13).
+export const HOME_TITLE = 'AI 自媒体陪跑教练｜从零开始，教你做好自媒体';
 export const HOME_DESCRIPTION =
-  'Graylum 是你的 AI 自媒体陪跑教练：帮你找准账号定位、决定每周发什么、写出能直接发的内容。免费和教练聊聊，一步步把账号做起来。';
+  '从制定账号策略到分析内容表现，Graylum 会持续复盘数据、找出增长机会、给出具体优化建议。不懂运营的新手，也能用专业的方法做好自媒体。';
 
 /**
  * Everything the landing page shows, after hiding switched-off capabilities. Pure, so the page, its

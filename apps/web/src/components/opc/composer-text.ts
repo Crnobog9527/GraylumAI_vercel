@@ -1,6 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import type { JSONContent } from '@tiptap/core';
 import { Fragment, Slice, type Node as ProseNode, type Schema } from '@tiptap/pm/model';
+import { referenceLeafText } from './composer-references';
 
 /**
  * The message box edits plain text: one paragraph per line, no marks.
@@ -20,9 +21,14 @@ export function textToDoc(text: string): JSONContent {
   };
 }
 
-/** Editor document (or pasted fragment) → plain text, lines joined by a single newline. */
+/** Editor document → plain text, lines joined by a single newline; a reference reads as `@名称`. */
 export function docToText(doc: Pick<ProseNode, 'textBetween' | 'content'>) {
-  return doc.textBetween(0, doc.content.size, '\n');
+  return doc.textBetween(0, doc.content.size, '\n', referenceLeafText);
+}
+
+/** Plain text of a range, counted the same way as `docToText`. */
+export function rangeText(doc: Pick<ProseNode, 'textBetween'>, from: number, to: number) {
+  return doc.textBetween(from, to, '\n', referenceLeafText);
 }
 
 /** Keep at most `room` UTF-16 units (the unit textarea maxLength counts), without splitting a surrogate pair. */

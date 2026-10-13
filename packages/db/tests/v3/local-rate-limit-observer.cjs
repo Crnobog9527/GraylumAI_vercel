@@ -12,7 +12,7 @@ Server.prototype.emit = function (event, ...args) {
   const path = request?.url?.split('?')[0];
   if (event === 'request' && app && output &&
       request.socket?.localPort === Number(new URL(app).port) &&
-      (path.startsWith('/api/trpc') || path.startsWith('/api/ai/stream'))) {
+      (path.startsWith('/api/trpc'))) {
     const id = `${process.pid}-${++sequence}`;
     const write = (data) => appendFileSync(join(output, 'rate-limit-requests.jsonl'),
       JSON.stringify({ id, time: Date.now(), ...data }) + '\n', { mode: 0o600 });

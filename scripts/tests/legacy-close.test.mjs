@@ -25,6 +25,17 @@ for (const [runner, message] of [
   });
 }
 
+for (const flag of ['--ordinary-only', '--chat-only', '--chat-reliability-only', '--reuse-only', '--real-skill-only']) {
+  test(`run-workbench.mjs rejects retired ${flag} instead of reporting an empty pass`, () => {
+    const result = spawnSync(process.execPath, [`${root}packages/db/tests/v3/run-workbench.mjs`, flag],
+      { cwd: root, env: { PATH: '' }, encoding: 'utf8', timeout: 10000 });
+    assert.ifError(result.error);
+    assert.notEqual(result.status, 0);
+    assert.ok(result.stderr.includes(`${flag} retired by LEGACY-CLOSE`), result.stderr);
+    assert.equal(result.stdout.includes('LOCAL_EVIDENCE_DIRECTORY'), false);
+  });
+}
+
 for (const action of ['stop', 'destroy', 'resume', 'restart', 'renew']) {
   test(`saved retired slice preview permits cleanup only: ${action}`, t => {
     const dir = mkdtempSync(join(tmpdir(), 'legacy-close-test-'));
