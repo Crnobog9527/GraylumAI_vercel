@@ -14,6 +14,9 @@ export const PUBLIC_PATHS = [
   '/terms',
   '/privacy',
   '/acceptable-use',
+  // Public site pages (PUBLIC-SITE, SEO_GEO_SPEC 3.2): About and the Traditional Chinese (Taiwan) section.
+  '/about',
+  '/zh-tw',
   '/auth',
   '/landing',
   '/api',

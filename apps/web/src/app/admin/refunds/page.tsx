@@ -2,7 +2,13 @@
 'use client';
 
 import { AdminMonthlyRefunds } from '@/components/admin/refunds/AdminMonthlyRefunds';
+import { AdminStaleRounds } from '@/components/admin/refunds/AdminStaleRounds';
 
 export default function AdminRefundsPage() {
-  return <AdminMonthlyRefunds />;
+  return (
+    <>
+      <AdminMonthlyRefunds />
+      <AdminStaleRounds />
+    </>
+  );
 }

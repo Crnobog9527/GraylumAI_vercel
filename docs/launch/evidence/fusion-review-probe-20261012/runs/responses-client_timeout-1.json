@@ -1,0 +1,29 @@
+{
+  "scenario": "client_timeout",
+  "tag": "1",
+  "elapsedMs": 20006,
+  "status": null,
+  "error": "AbortError",
+  "request": {
+    "model": "anthropic/claude-haiku-5.5",
+    "input": "<941 chars>",
+    "tools": [
+      {
+        "type": "openrouter:fusion",
+        "parameters": {
+          "analysis_models": [
+            "anthropic/claude-haiku-5.5",
+            "deepseek/deepseek-v3.2",
+            "qwen/qwen3.8-flash"
+          ],
+          "model": "anthropic/claude-haiku-5.5",
+          "max_tool_calls": 1,
+          "max_completion_tokens": 2000
+        }
+      }
+    ],
+    "tool_choice": "required",
+    "max_output_tokens": 3000
+  },
+  "response": null
+}

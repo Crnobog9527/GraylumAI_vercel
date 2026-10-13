@@ -12,7 +12,7 @@ import {ORGANIZER_INSTRUCTIONS} from '../opc/organizerPrompt';
 const source = vi.hoisted(() => ({current: undefined as SkillSource | undefined}));
 vi.mock('../skills/databaseSource', () => ({databaseSkillSource: () => source.current}));
 const id = (n: number) => `10000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
-async function fixture(template?: string, oldVersion = false, resources = ['references/step.md'], hostRules = true) {
+async function fixture(template?: string, oldVersion = false, resources: string[] | null = ['references/step.md'], hostRules = true) {
   const entry = '---\nname: capacity-test\ndescription: Synthetic capacity preflight\n---\nMethod.';
   const files: Record<string, string> = { 'SKILL.md': entry, 'references/step.md': 'PRIVATE_STEP_METHOD',
     'workflow.yaml': 'kind: document\nsteps:\n - title: First\n   resources: [SKILL.md]\n' +
@@ -68,7 +68,7 @@ async function fixture(template?: string, oldVersion = false, resources = ['refe
   const service = runtimeAdmissionService(user, admin, {
     account: 'synthetic', costPerCall: '0.02', creditsPerUsd: '1000', multiplier: '1', maxCalls: 2,
     opcTurnToken: id(9), purposeBudgets: false, maxOutputTokens: 1000, inputBytes: 200000, historyItems: 100, additionalInstructions,
-    skillResources: resources, organizerInput, organizerInstructions: hostRules ? ORGANIZER_INSTRUCTIONS : undefined,
+    skillResources: resources ?? undefined, organizerInput, organizerInstructions: hostRules ? ORGANIZER_INSTRUCTIONS : undefined,
   });
   const request = { sessionId: id(2), requestId: id(7), input, organizeAfter: true,
     selection: { kind: 'skill' as const, moduleId: id(4), revisionId: id(6) }, network: 'deny' };
@@ -147,4 +147,14 @@ it('uses declared templates and general fallback for non-positioning Skill calle
   expect(instructions).toContain(GENERIC_ORGANIZER_TEMPLATE);
   const legacy = await fixture(undefined, true, undefined, false); await legacy.run();
   expect((legacy.captured().p_payload.attachedOrganizer as {instructions: string}).instructions).toBe(GENERIC_ORGANIZER_TEMPLATE);
+});
+
+it('R8b: free chat gives the model a non-positioning Skill\'s steps as a work guide; a workflow host does not', async () => {
+  // null: no workflow host resources, as in free chat.
+  const chat = await fixture(undefined, false, null, false); await chat.run();
+  const instructions = chat.captured().p_payload.instructions as string;
+  expect(instructions).toContain('Work guide declared by this Skill');
+  expect(instructions).toContain('1. First');
+  const host = await fixture(); await host.run();
+  expect(host.captured().p_payload.instructions as string).not.toContain('Work guide declared by this Skill');
 });
