@@ -45,15 +45,18 @@ export function useConversationRename() {
     const setTitle = (title: string) => utils.opc.conversations.setData(undefined, (rows) =>
       rows?.map((row) => row.sessionId === sessionId ? { ...row, title } : row));
     if (name) setTitle(name);
-    const revision = revisions.current.next(sessionId);
+    const revision = revisions.current.begin(sessionId, previous);
     const run = async () => {
       try {
-        await utils.client.opc.conversationRename.mutate({ sessionId, name });
+        const saved = await utils.client.opc.conversationRename.mutate({ sessionId, name });
+        revisions.current.settle(sessionId, saved.name ?? '');
         // An empty name restores the server's default title; refresh either way in the background.
         void utils.opc.conversations.invalidate();
       } catch (cause) {
-        // A newer edit of the same conversation is queued or shown: keep its title.
-        if (revisions.current.isLatest(sessionId, revision)) setTitle(previous);
+        revisions.current.settle(sessionId, null);
+        // A newer edit of the same conversation is queued or shown: keep its title. Otherwise show the
+        // last title the server confirmed, not an optimistic one that never saved.
+        if (revisions.current.isLatest(sessionId, revision)) setTitle(revisions.current.rollbackTitle(sessionId, previous));
         setError(renameFailureMessage(cause));
         void utils.opc.conversations.invalidate();
       }
