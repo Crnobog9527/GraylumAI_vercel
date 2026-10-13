@@ -13,33 +13,45 @@ export async function stripeMpSubscriptionRefundCases({admin,service}) {
   await admin.query("INSERT INTO profiles(id,credits,role,status) VALUES($1,0,'admin','active')",[actor]);
   const one=async(sql,args)=>(await service.query(sql,args)).rows[0];
   // A Gold first month bought by card (international: 49.00 + 9.80 tax; mainland: no tax), a day ago, nothing used.
-  const buyer=async(digest,method='card',tax=980)=>{
-    const user=randomUUID(); await admin.query('INSERT INTO profiles(id,credits) VALUES($1,0)',[user]);
-    const o=(await service.query(`SELECT o.* FROM pay_waffo_create_purchase($1,'membership_plan',$2,'monthly',$3,'gold_first30',
-      'fixture','test',$4,'terms-v1',$5) o`,[user,plan,method,version,JSON.stringify([{kind:'email',key_version:'test-v1',digest}])])).rows[0];
-    const start=new Date(Math.floor(Date.now()/1000)*1000-86400000),end=new Date(start);end.setUTCMonth(end.getUTCMonth()+1);
-    await admin.query('UPDATE payment_orders SET created_at=$2 WHERE id=$1',[o.id,new Date(start.getTime()-60000)]);
+  const checkout=async(user,o,method)=>{
     const expiry=new Date(Date.now()+1800000);
     await service.query('SELECT pay_waffo_claim_checkout($1,$2,$3,$4,$5)',[user,o.id,'fixture',
       {orderId:o.id,userId:user,method,merchant:'fixture',mode:'test',providerRequest:{fixture:true}},expiry]);
     await service.query('SELECT pay_waffo_bind_checkout($1,$2,$3,$4,$5)',[user,o.id,'fixture',`cs_${o.id}`,expiry]);
+  };
+  const buyer=async(digest,method='card',tax=980,abandonFirst=false)=>{
+    const user=randomUUID(); await admin.query('INSERT INTO profiles(id,credits) VALUES($1,0)',[user]);
+    let abandoned=null;
+    if(abandonFirst) {
+      // Opened the card checkout page, then closed it: Stripe expired the session unpaid (walletWebhook closes it).
+      abandoned=(await service.query(`SELECT o.* FROM pay_waffo_create_purchase($1,'membership_plan',$2,'monthly','card','standard',
+        'fixture','test',$3,'terms-v1',$4) o`,[user,plan,version,JSON.stringify([{kind:'email',key_version:'test-v1',digest}])])).rows[0];
+      await checkout(user,abandoned,'card');
+      await service.query(`SELECT pay_waffo_observe_qualification($1,'fixture','test',$2,'closed_unpaid',NULL,0,'usd',NULL)`,
+        [abandoned.id,`cs_${abandoned.id}`]);
+    }
+    const o=(await service.query(`SELECT o.* FROM pay_waffo_create_purchase($1,'membership_plan',$2,'monthly',$3,'gold_first30',
+      'fixture','test',$4,'terms-v1',$5) o`,[user,plan,method,version,JSON.stringify([{kind:'email',key_version:'test-v1',digest}])])).rows[0];
+    const start=new Date(Math.floor(Date.now()/1000)*1000-86400000),end=new Date(start);end.setUTCMonth(end.getUTCMonth()+1);
+    await admin.query('UPDATE payment_orders SET created_at=$2 WHERE id=$1',[o.id,new Date(start.getTime()-60000)]);
+    await checkout(user,o,method);
     const paidAt=new Date(start.getTime()+6000);
     assert.equal((await one('SELECT pay_waffo_fulfill_payment($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) v',[o.id,'fixture',`cs_${o.id}`,
       `in_${o.id}`,o.amount_total,'usd',paidAt,`sub_${o.id}`,start,end])).v.state,'fulfilled');
     if(method==='card' && tax!==null) await service.query(`SELECT pay_stripe_mp_record_tax($1,'fixture',$2,$3)`,[o.id,`in_${o.id}`,tax]);
     const row=(await admin.query('SELECT * FROM payment_orders WHERE id=$1',[o.id])).rows[0];
     const sub=(await admin.query('SELECT * FROM user_subscriptions WHERE id=$1',[row.subscription_id])).rows[0];
-    const ticket=(await admin.query("INSERT INTO tickets(user_id,title,category) VALUES($1,'refund','billing') RETURNING id,created_at",[user])).rows[0];
+    const ticket=(await admin.query("INSERT INTO tickets(user_id,title,category) VALUES($1,'refund','billing') RETURNING id,created_at::text AS created_at",[user])).rows[0];
     const credits=Number(row.purchase_snapshot.credits)+Number(row.purchase_snapshot.bonus_credits);
     const fee=Math.floor(row.amount_total*6/100);
     // What the server quotes (monthlyRefundService): card orders carry taxMinor; the fee is on the pre-tax amount.
     const terms={kind:'monthly_first_purchase',orderId:o.id,userId:user,ticketId:ticket.id,subscriptionId:sub.id,
       providerSubscriptionId:`sub_${o.id}`,paymentIntentId:`pi_${o.id}`,chargeId:`ch_${o.id}`,invoiceId:`in_${o.id}`,
-      merchant:'fixture',mode:'test',currency:'usd',plan:'gold',paidAt:paidAt.toISOString(),submittedAt:ticket.created_at.toISOString(),
+      merchant:'fixture',mode:'test',currency:'usd',plan:'gold',paidAt:paidAt.toISOString(),submittedAt:ticket.created_at,
       periodEnd:sub.current_period_end.toISOString(),originalCancelAtPeriodEnd:false,paidMinor:row.amount_total,
       basisMinor:row.amount_total,feeMinor:fee,taxMinor:method==='card'?tax:0,netMinor:row.amount_total-fee+(method==='card'?tax:0),
       credits,feePermitted:'confirmed',feeEvidence:'legal:us-ca:2026-10',evidenceRefs:['a','b','c','d'],snapshot:row.purchase_snapshot};
-    return {user,order:o.id,sub:sub.id,terms,credits};
+    return {user,order:o.id,sub:sub.id,terms,credits,abandoned:abandoned?.id};
   };
   const approve=async(f,terms=f.terms)=>{
     const local=(await one('SELECT pay_common_monthly_refund_approve($1,$2,$3,$4) q',[actor,f.order,terms,'a'.repeat(64)])).q.localVersion;
@@ -118,13 +130,19 @@ export async function stripeMpSubscriptionRefundCases({admin,service}) {
   assert.equal((await approve(m)).status,'approved');
   await assert.rejects(async()=>{ const n=await buyer('e5'.repeat(32),'card',null); await approve({...n,terms:{...n.terms,taxMinor:980}}); },
     /TAX_PENDING/);
-  // An abandoned card checkout does not count as membership history.
-  const p=await buyer('e6'.repeat(32));
-  await admin.query(`INSERT INTO payment_orders(user_id,item_type,item_id,billing_cycle,status,payment_status,amount_total,currency,
-    payment_channel,payment_mode,merchant_namespace,payment_method,purchase_snapshot)
-    SELECT user_id,item_type,item_id,billing_cycle,'expired','unpaid',amount_total,currency,payment_channel,payment_mode,
-    merchant_namespace,payment_method,purchase_snapshot FROM payment_orders WHERE id=$1`,[p.order]);
+  // An abandoned card checkout (never paid) does not count as membership history.
+  const p=await buyer('e6'.repeat(32),'card',980,true);
+  assert.equal((await admin.query('SELECT payment_status,fulfilled_at FROM payment_orders WHERE id=$1',[p.abandoned])).rows[0].fulfilled_at,null);
   assert.equal((await approve(p)).status,'approved');
+  // Only an order that truly never took money is left out: one paid and refunded since, or one with a recorded Stripe
+  // payment whatever its status says, is still membership history (not a first purchase).
+  const refunded=await buyer('e8'.repeat(32),'card',980,true);
+  await admin.query("UPDATE payment_orders SET payment_status='refunded' WHERE id=$1",[refunded.abandoned]);
+  await assert.rejects(()=>approve(refunded),/PAY_MONTHLY_HISTORY/,'paid and refunded');
+  const recorded=await buyer('e9'.repeat(32),'card',980,true);
+  await admin.query(`INSERT INTO payment_provider_refs(channel,merchant_namespace,mode,object_type,external_id,order_id)
+    VALUES('stripe','fixture','test','payment',$1,$2)`,[`in_paid_${recorded.abandoned}`,recorded.abandoned]);
+  await assert.rejects(()=>approve(recorded),/PAY_MONTHLY_HISTORY/,'a Stripe payment recorded');
   // Used credits since the payment: refused (record AA). A non-admin cannot approve.
   const q=await buyer('e7'.repeat(32));
   await admin.query(`INSERT INTO credit_transactions(user_id,amount,type,description,ledger_type,counts_as_spend,balance_before,balance_after)
@@ -137,5 +155,5 @@ export async function stripeMpSubscriptionRefundCases({admin,service}) {
     [{...current,card:{enabled:false},card_cn:{enabled:false},version:version+1}]);
   return ['stripe-mp-subscription-refund-tax-terms','stripe-mp-subscription-refund-held','stripe-mp-subscription-refund-cancel',
     'stripe-mp-subscription-refund-erasure-proof','stripe-mp-subscription-refund-no-fee','stripe-mp-subscription-refund-restore',
-    'stripe-mp-subscription-refund-mainland','stripe-mp-subscription-refund-abandoned','stripe-mp-subscription-refund-consumption'];
+    'stripe-mp-subscription-refund-mainland','stripe-mp-subscription-refund-abandoned','stripe-mp-subscription-refund-paid-history','stripe-mp-subscription-refund-consumption'];
 }

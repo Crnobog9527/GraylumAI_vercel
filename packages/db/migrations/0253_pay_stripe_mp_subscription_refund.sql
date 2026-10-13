@@ -111,7 +111,7 @@ BEGIN
   OR g.status IS DISTINCT FROM 'granted' OR g.accounting_state IS DISTINCT FROM 'trusted' OR g.consumed_amount<>0
   OR g.grant_snapshot IS DISTINCT FROM o.purchase_snapshot OR g.billing_cycle IS DISTINCT FROM 'monthly'
   OR g.grant_type IS DISTINCT FROM 'monthly_invoice'
-  OR g.stripe_invoice_id IS DISTINCT FROM CASE WHEN card THEN NULL ELSE p_terms->>'invoiceId' END
+  OR g.stripe_invoice_id IS DISTINCT FROM (CASE WHEN card THEN NULL ELSE p_terms->>'invoiceId' END)
   OR g.stripe_subscription_id IS DISTINCT FROM s.stripe_subscription_id
   OR g.period_start IS DISTINCT FROM s.current_period_start OR g.period_end IS DISTINCT FROM s.current_period_end
   OR g.credits_granted<=0 OR NOT EXISTS(SELECT 1 FROM credit_transactions c WHERE c.id=g.credit_transaction_id
