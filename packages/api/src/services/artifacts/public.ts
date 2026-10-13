@@ -126,10 +126,17 @@ export const reportSchema = z.object({
   report: z
     .object({
       title: z.string(),
-      generatedReport: z.object({
-        executionId: uuid, evidenceId: uuid, revision: z.number().int().nonnegative(),
-        body: z.string(), bodyHash: z.string(), manuallyEdited: z.boolean(),
-      }).optional(),
+      generatedReport: z.union([
+        z.object({
+          executionId: uuid, evidenceId: uuid, revision: z.number().int().nonnegative(),
+          body: z.string(), bodyHash: z.string(), manuallyEdited: z.boolean(),
+        }),
+        // R14: an adopted review revision whose field changes the user confirmed.
+        z.object({
+          source: z.literal('review_revision'), revisionId: uuid, sourceVersionId: uuid,
+          body: z.string(), bodyHash: z.string(), manuallyEdited: z.literal(false), fieldsSynced: z.literal(true),
+        }),
+      ]).optional(),
       sections: z.array(
         z.object({
           title: z.string(),
@@ -163,7 +170,8 @@ export function reportMarkdown(value: ArtifactReport): string {
       `# ${literalMarkdown(r.title)}`,
       `版本：${value.version}`,
       ...(r.generatedReport
-        ? [literalMarkdown(r.generatedReport.body), r.generatedReport.manuallyEdited ? '报告已手动修改' : '模型报告定稿']
+        ? [literalMarkdown(r.generatedReport.body), 'source' in r.generatedReport ? '评审修订稿（字段已同步）'
+          : r.generatedReport.manuallyEdited ? '报告已手动修改' : '模型报告定稿']
         : r.sections.map(
         (s) =>
           `## ${literalMarkdown(s.title)}\n\n${literalMarkdown(s.body)}\n\n来源：${s.evidenceIds.join(", ") || "未提供"}`,
