@@ -62,18 +62,21 @@ async function readSubscriptionPayment(input: Parameters<typeof readCardPaymentE
     || (subscription.managed_payments?.enabled === true) !== (order.payment_method === 'card')) {
     throw new Error('PAY_WAFFO_PAYMENT_CONFLICT');
   }
-  // The first invoice of the subscription carries the money; later invoices are renewals (not this path).
+  // The first invoice carries the money and the paid term. Its single line is immutable; the subscription item's
+  // current period moves on renewal, so a late recovery must never take the term from the item.
   const invoice = await stripe.invoices.retrieve(invoiceId);
   const taxes = (invoice.total_taxes ?? []).reduce((sum, row) => sum + (row.amount ?? 0), 0);
+  const line = invoice.lines?.data?.length === 1 && !invoice.lines.has_more ? invoice.lines.data[0] : null;
   if (invoice.object !== 'invoice' || invoice.id !== invoiceId || invoice.livemode || invoice.status !== 'paid'
     || invoice.billing_reason !== 'subscription_create' || invoice.currency !== 'usd' || invoice.amount_paid !== invoice.amount_due
     || id(invoice.parent?.subscription_details?.subscription) !== subscriptionId
+    || !line || id(line.pricing?.price_details?.price) !== input.priceId || line.quantity !== 1
     || stripePreTaxAmount(freezePurchaseSnapshot(order.purchase_snapshot), invoice.amount_paid, taxes) !== due) {
     throw new Error('PAY_WAFFO_PAYMENT_CONFLICT');
   }
   return { paymentId: invoice.id, checkoutId: session.id, amount: due, currency: invoice.currency,
     paidAt: iso(invoice.status_transitions?.paid_at),
-    subscription: { id: subscriptionId, start: iso(item.current_period_start), end: iso(item.current_period_end) } };
+    subscription: { id: subscriptionId, start: iso(line.period?.start), end: iso(line.period?.end) } };
 }
 
 async function readOneTimePayment(input: Parameters<typeof readCardPaymentEvidence>[0], session: Stripe.Checkout.Session,

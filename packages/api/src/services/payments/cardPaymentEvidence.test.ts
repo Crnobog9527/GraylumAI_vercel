@@ -24,7 +24,9 @@ function fixture(method: 'card' | 'card_cn' = 'card', snapshot: Record<string, u
   const subscription = { object: 'subscription', id: 'sub_1', livemode: false, metadata: { userId: 'user', orderId }, customer: 'cus_1',
     managed_payments: method === 'card' ? { enabled: true } : null,
     items: { data: [{ price: { id: 'price_gold_month' }, quantity: 1, current_period_start: 1791794554, current_period_end: 1794472954 }] } };
+  const line = { quantity: 1, pricing: { price_details: { price: 'price_gold_month' } }, period: { start: 1791794554, end: 1794472954 } };
   const invoice = { object: 'invoice', id: 'in_1', livemode: false, status: 'paid', billing_reason: 'subscription_create', currency: 'usd',
+    lines: { has_more: false, data: [line] },
     amount_due: due, amount_paid: due, total_taxes: [] as Array<{ amount: number }>, status_transitions: { paid_at: 1791794560 },
     parent: { subscription_details: { subscription: 'sub_1' } } };
   const intent = { object: 'payment_intent', id: 'pi_1', livemode: false, status: 'succeeded', latest_charge: 'ch_1', customer: 'cus_1',
@@ -57,6 +59,12 @@ describe('PAY-STRIPE-MP card first-payment evidence', () => {
     await expect(p.read()).resolves.toEqual({ paymentId: 'pi_1', checkoutId: 'cs_1', amount: 940, currency: 'usd',
       paidAt: '2026-10-12T08:42:40.000Z', subscription: null });
   });
+  it('takes the paid term from the first invoice even after the subscription has renewed', async () => {
+    const t = fixture();
+    t.subscription.items.data[0]!.current_period_start = 1794472954; t.subscription.items.data[0]!.current_period_end = 1797064954;
+    await expect(t.read()).resolves.toMatchObject({ paidAt: '2026-10-12T08:42:40.000Z',
+      subscription: { start: '2026-10-12T08:42:34.000Z', end: '2026-11-12T08:42:34.000Z' } });
+  });
   it('returns null while the session is unpaid', async () => {
     const t = fixture(); t.session.payment_status = 'unpaid';
     await expect(t.read()).resolves.toBeNull();
@@ -72,6 +80,8 @@ describe('PAY-STRIPE-MP card first-payment evidence', () => {
       t.invoice.parent.subscription_details.subscription = 'sub_2'; }],
     ['tax hidden in the invoice total', (t: ReturnType<typeof fixture>) => { t.invoice.amount_due = 5880; t.invoice.amount_paid = 5880; }],
     ['wrong session total', (t: ReturnType<typeof fixture>) => { t.session.amount_total = 6900; }],
+    ['first invoice of another price', (t: ReturnType<typeof fixture>) => { t.invoice.lines.data[0]!.pricing.price_details.price = 'p'; }],
+    ['first invoice with two lines', (t: ReturnType<typeof fixture>) => { t.invoice.lines.data.push(t.invoice.lines.data[0]!); }],
   ])('refuses %s', async (_name, change) => {
     const t = fixture(); change(t);
     await expect(t.read()).rejects.toThrow(/PAY_WAFFO_PAYMENT_CONFLICT|PAY_COMMON_RECEIPT_MISMATCH/);
