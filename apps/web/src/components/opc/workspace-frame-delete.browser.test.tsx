@@ -11,6 +11,7 @@ let css: string;
 const entry = fileURLToPath(new URL('./__frame_delete_fixture__.js', import.meta.url));
 const SESSION = '00000000-0000-4000-8000-0000000000a1';
 const WORK_SESSION = '00000000-0000-4000-8000-0000000000b2';
+const OTHER = '00000000-0000-4000-8000-0000000000c3';
 
 // Everything around the list is stubbed. The deletion call is held by the page (window.erasures), so a
 // test decides when and how the server answers and can check what the list shows meanwhile.
@@ -22,14 +23,17 @@ const stubs: Array<[(id: string) => boolean, string]> = [
     const client={account:{conversationErasure:{mutate:input=>new Promise((resolve,reject)=>
       window.erasures.push({input,resolve,reject}))}},
       opc:{conversationRename:{mutate:async input=>{window.renames.push(input);
-        if(location.hash==='#rename-fails')throw new Error('OPC_CONVERSATION_ERASED');return {sessionId:input.sessionId,name:input.name};}}}};
+        if(location.hash==='#rename-fails')throw new Error('OPC_CONVERSATION_ERASED');
+        if(location.hash==='#rename-slow')await new Promise(resolve=>{window.releaseRename=resolve;});
+        return {sessionId:input.sessionId,name:input.name};}}}};
     export const trpc={useUtils:()=>new Proxy({},{get:(_,key)=>key==='client'?client:deep()}),
       opc:{library:{useQuery:()=>q(location.hash==='#strategy'?{businesses:[{businessId:'b1',accounts:[{projectId:'p1',
         platform:'抖音',account:'测试号',strategyDraftId:'d1',sourceVersionId:'v1',sourceVersion:1,items:[]}]}]}
         :location.hash==='#work'?{businesses:[{businessId:'b1',accounts:[{projectId:'p1',platform:'抖音',account:'测试号',
         items:[{workItemId:'w1',sessionId:'${WORK_SESSION}',title:'口播稿工作',brief:null,day:'2026-10-13',revision:1}]}]}]}
         :{accounts:[]})},list:{useQuery:()=>q([])},
-        conversations:{useQuery:()=>q([{sessionId:'${SESSION}',title:'周末选题讨论',lastActivityAt:'2026-10-13T00:00:00Z'}])},
+        conversations:{useQuery:()=>q([{sessionId:'${SESSION}',title:'周末选题讨论',lastActivityAt:'2026-10-13T00:00:00Z'},
+          ...(location.hash==='#rename-slow'?[{sessionId:'${OTHER}',title:'第二个对话',lastActivityAt:'2026-10-12T00:00:00Z'}]:[])])},
         workUiChange:{useMutation:m},accountUiChange:{useMutation:m}},
       user:{getUserProfile:{useQuery:()=>q(null)}},ticket:{createTicket:{useMutation:m}}};`],
   [id => id.endsWith('/hooks/use-credits'), 'export const useCreditsBalance=()=>({data:undefined});'],
@@ -253,6 +257,22 @@ it('a refused rename keeps the old title and explains why', () => open(1280, asy
   await ui(page.getByRole('alert')).toContainText('这个对话已删除，不能重命名');
   await ui(page.getByText('周末选题讨论')).toBeVisible();
 }, '#rename-fails'));
+
+it('a second conversation saves while the first rename is still pending', () => open(1280, async page => {
+  let input = await startRename(page);
+  await input.fill('第一个');
+  await page.keyboard.press('Enter');
+  await ui.poll(() => renames(page)).toHaveLength(1);
+  await page.getByRole('button', { name: '第二个对话的更多操作' }).focus();
+  await page.keyboard.press('Enter');
+  await page.getByRole('menuitem', { name: '重命名' }).click();
+  input = page.getByRole('textbox', { name: '重命名对话' });
+  await input.fill('第二个');
+  await page.getByText('查看归档').click();
+  await ui(input).toHaveCount(0);
+  await ui.poll(() => renames(page)).toEqual([{ sessionId: SESSION, name: '第一个' }, { sessionId: OTHER, name: '第二个' }]);
+  await page.evaluate(() => (window as unknown as { releaseRename?: () => void }).releaseRename?.());
+}, '#rename-slow'));
 
 it('rename input fits a 375px screen', () => open(375, async page => {
   await page.getByRole('button', { name: '打开导航' }).first().click();

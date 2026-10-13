@@ -24,7 +24,8 @@ export function useConversationRename() {
   const [editingId, setEditingId] = useState('');
   const [value, setValue] = useState('');
   const [error, setError] = useState('');
-  const saving = useRef(false);
+  // Saves of one conversation run in order; different conversations save independently.
+  const queues = useRef(new Map<string, Promise<void>>());
 
   const start = useCallback((sessionId: string, title: string) => {
     setError('');
@@ -33,27 +34,29 @@ export function useConversationRename() {
   }, []);
   const cancel = useCallback(() => setEditingId(''), []);
 
-  const save = useCallback(async (sessionId: string, previous: string) => {
-    if (saving.current) return;
+  const save = useCallback((sessionId: string, previous: string) => {
     const name = value.trim();
     setEditingId('');
-    if (name === previous) return;
-    saving.current = true;
+    if (name === previous) return Promise.resolve();
     setError('');
     const setTitle = (title: string) => utils.opc.conversations.setData(undefined, (rows) =>
       rows?.map((row) => row.sessionId === sessionId ? { ...row, title } : row));
     if (name) setTitle(name);
-    try {
-      await utils.client.opc.conversationRename.mutate({ sessionId, name });
-      // An empty name restores the server's default title; refresh either way in the background.
-      void utils.opc.conversations.invalidate();
-    } catch (cause) {
-      setTitle(previous);
-      setError(renameFailureMessage(cause));
-      void utils.opc.conversations.invalidate();
-    } finally {
-      saving.current = false;
-    }
+    const run = async () => {
+      try {
+        await utils.client.opc.conversationRename.mutate({ sessionId, name });
+        // An empty name restores the server's default title; refresh either way in the background.
+        void utils.opc.conversations.invalidate();
+      } catch (cause) {
+        setTitle(previous);
+        setError(renameFailureMessage(cause));
+        void utils.opc.conversations.invalidate();
+      }
+    };
+    const next = (queues.current.get(sessionId) ?? Promise.resolve()).then(run);
+    queues.current.set(sessionId, next);
+    void next.finally(() => { if (queues.current.get(sessionId) === next) queues.current.delete(sessionId); });
+    return next;
   }, [utils, value]);
 
   return { editingId, value, setValue, error, start, cancel, save };
