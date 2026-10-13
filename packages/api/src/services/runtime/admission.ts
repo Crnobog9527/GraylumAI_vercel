@@ -16,6 +16,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { isEmailVerified } from '../../lib/auth';
 import { databaseSkillSource } from '../skills/databaseSource';
 import { activateSkill, identityOf } from '../skills/loader';
+import { BRAND_IDENTITY_INSTRUCTIONS, withBrandIdentity } from '../modelIdentity/brandIdentity';
 import { summaryPolicy, assertSeparateSummaryModel } from '../artifacts/summaryPolicy';
 import { aggregateCredits, decimal } from '../bill2/decimal';
 import type {StagingPolicy} from './stagingPolicy';
@@ -37,7 +38,7 @@ import {currentRequestTiming} from './timing';
 import {PURPOSE_OUTPUT_CAP,readPurposeBudgets} from './purposeBudgets';
 import {assertFrozenPayloads} from './payloadSize';
 import {freezeWindowBillingUnit} from './billingUnitAdmission';
-import {newWorkGate,readNewWorkSettings,requireNewWork} from './newWorkGate';
+import {newWorkGate,readAdmissionSettings,requireNewWork} from './newWorkGate';
 import {requireAllowedInput} from './moderation';
 import {FREE_CHAT_REQUEST_FORMAT} from './providerRequest';
 import {admissionDeadline,admittedOutputLimit} from './admissionLimits';
@@ -132,7 +133,7 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
    if(input.network==='require_latest'&&!policy.searchEnabled)throw new Error('RUNTIME_SEARCH_UNAVAILABLE');
    let session=await query('runtime_session_context',{p_session_id:input.sessionId});
    // Resolve replay before model or revision freshness changes produce another budget.
-   const settings=readNewWorkSettings(admin);
+   const settings=readAdmissionSettings(admin);
    const replay=await query('runtime_admission_replay',{p_request_id:input.requestId,p_request:request});
    if(replay)return replay;
    if(policy.reportGeneration&&session.waitingOrganizer)throw new Error('OPC_CAPTURE_PENDING');
@@ -204,6 +205,14 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
     const summary=modelConfiguration(()=>summaryPolicy(Object.fromEntries(rows.data.map(row=>[row.key,row.value])),session.dialogueModelId));
     modelId=summary.modelId;organizerOutput=summary.maxTokens;
     instructions='Organize the provided current-session material. Preserve source references and uncertainties. Do not create new facts.';
+   }
+   // MODEL-IDENTITY-GUARD layer 1: the brand identity leads the single system message and is
+   // frozen with this admission; a Skill's cached prefix grows by the same fixed text.
+   const settingsRead=await settings;
+   const brandIdentity=settingsRead.ok?settingsRead.identityGuard??true:true;
+   if(brandIdentity){
+    instructions=withBrandIdentity(instructions,true);
+    if(skillChars)skillChars+=BRAND_IDENTITY_INSTRUCTIONS.length+1;
    }
    const row=await admin.from('ai_models').select('id,model_id,provider,is_active,max_tokens,input_limit,config').eq('id',modelId).single();
    // Match the actual administrator model to the enabled protocol and exact quote. Never substitute a default model.
@@ -289,7 +298,7 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
    // All dropped: no paid match; the turn is admitted exactly as an ordinary selection.
    const sourceTools=[...(searchAllowed?['search']:[]),...(input.sources.length||workspaceContext?['read_source']:[])];
    // The executor sizes a selected Skill with these exact tool descriptions plus the same cache/marker overhead.
-   if(candidates.length)candidates=await fittingCandidates(candidates,candidate=>activateRuntimeCandidate(user,admin,candidate),
+   if(candidates.length)candidates=await fittingCandidates(candidates,candidate=>activateRuntimeCandidate(user,admin,candidate,brandIdentity),
     {input:currentInput,inputBytes,toolBytes:sourceToolBytes(sourceTools,workspaceContext)+
      (historySelection?.markerReserveBytes??(promptCache?PROMPT_CACHE_OVERHEAD_BYTES:0)),
      instructions:skill=>withPrimaryAddenda(skill,{workspaceContext,network:input.network})});

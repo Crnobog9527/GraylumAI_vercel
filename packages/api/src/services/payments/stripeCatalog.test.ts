@@ -98,8 +98,10 @@ describe('Stripe catalog authority', () => {
     const rows = ['standard', 'gold_first30', 'founder'].map(offer => ({
       channel: 'stripe', merchant_namespace: 'acct_fixture', mode: 'test', object_type: 'price',
       offer_kind: offer, is_current: true, membership_plan_id: 'fixture_plan',
-      billing_cycle: 'monthly', external_id: `price_${offer}`,
+      billing_cycle: 'monthly', external_id: `price_${offer}`, price_usage: 'subscription',
     }));
+    // A wallet one-time price for the same plan and cycle (0221) must not make the admin catalog ambiguous.
+    rows.push({ ...rows[0], external_id: 'price_wallet_one_time', price_usage: 'one_time' });
     let selected = rows;
     const query = {
       select: () => query,

@@ -8,6 +8,7 @@ import {StagingAccessError,stagingProcedureError} from './stagingErrors';
 import {sourceToolBytes} from './sourceRuntimeTool';
 import {withPrimaryAddenda} from './primaryInstructions';
 import {PROMPT_CACHE_OVERHEAD_BYTES} from './promptCache';
+import {withBrandIdentity} from '../modelIdentity/brandIdentity';
 import {RUNTIME_INPUT_TOO_LONG_MESSAGE} from '../../shared/runtimeInputMessages';
 import {OPENING_INPUT} from '../../shared/opcQuestions';
 vi.mock('./newWorkGate',async original=>({...await original<typeof import('./newWorkGate')>(),
@@ -35,6 +36,7 @@ function fixture(){
   if(name==='runtime_admission_replay')return {data:saved,error:null};
   if(name==='runtime_admit'){saved={context:args.p_payload,billing:args.p_billing};return {data:saved,error:null};}
   if(name==='runtime_workspace_session')return {data:true,error:null};
+  if(name==='model_identity_guard_config')return {data:{version:1,enabled:true,revision:0,updatedBy:null,updatedAt:null},error:null};
   throw new Error(name);
  });
  const admin={rpc,from:(table:string)=>{
@@ -98,7 +100,8 @@ const autoInput={selection:{kind:'auto',modelId:model}};
 
 it('drops an automatic match candidate whose own capacity cannot run the selected Skill before any charge',async()=>{
  const f=fixture();skill.instructions='S'.repeat(9000);
- matching.candidates=[autoCandidate(0,14000),autoCandidate(1,10000)];
+ // A matched Skill is sized with the brand identity it will run with (MODEL-IDENTITY-GUARD).
+ matching.candidates=[autoCandidate(0,16000),autoCandidate(1,10000)];
  const admitted=await runtimeAdmissionService(f.user,f.admin,{...f.policy,...autoPolicy})
   .prepare({...f.input,...autoInput,input:'x'.repeat(3000)});
  expect(admitted.context.matching.candidates.map((c:{key:string})=>c.key)).toEqual(['candidate-0']);
@@ -132,7 +135,7 @@ it('sizes candidates with the workspace read_source description the executor wil
   return runtimeAdmissionService(f.user,f.admin,{...f.policy,...autoPolicy,workspaceContext:true,maxCalls:3}).prepare({...f.input,...autoInput,input});};
  const probe=await admit(31000);
  expect(probe.context.tools).toEqual(['read_source']);expect(probe.context.matching.candidates).toHaveLength(1);
- const instructions=withPrimaryAddenda(skill.instructions,{workspaceContext:true,network:'deny'});
+ const instructions=withPrimaryAddenda(withBrandIdentity(skill.instructions,true),{workspaceContext:true,network:'deny'});
  const required=Buffer.byteLength(JSON.stringify({instructions,messages:[{role:'user',content:input}]}))+1024+
   sourceToolBytes(['read_source'],true)+(probe.context.promptCache?PROMPT_CACHE_OVERHEAD_BYTES:0);
  expect((await admit(required)).context.matching.candidates).toHaveLength(1);

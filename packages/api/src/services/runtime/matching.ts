@@ -5,6 +5,7 @@ import { databaseSkillSource, userVisibleModules } from '../skills/databaseSourc
 import { activateFreeChatSkill } from '../skills/stepGuide';
 import { activateSkill, discoverSkills, SkillLoadError } from '../skills/loader';
 import { fixtureInputCapacity, selectRuntimeHistory } from './context';
+import { withBrandIdentity } from '../modelIdentity/brandIdentity';
 
 export const matchCandidate=z.object({
  key:z.string().regex(/^candidate-[0-9]+$/),name:z.string().min(1),description:z.string(),
@@ -55,17 +56,19 @@ export async function discoverRuntimeCandidates(user:SupabaseClient,admin:Supaba
  if(candidates.length>16)throw new Error('RUNTIME_CATALOG_CAPACITY');
  return candidates;
 }
-export async function activateRuntimeCandidate(user:SupabaseClient,admin:SupabaseClient,candidate:MatchCandidate){
+export async function activateRuntimeCandidate(user:SupabaseClient,admin:SupabaseClient,candidate:MatchCandidate,brandIdentity=false){
  const c=matchCandidate.parse(candidate);
  if(c.requiresTask)throw new Error('RUNTIME_SKILL_TASK_REQUIRED');
  const source=databaseSkillSource({userClient:user,privateClient:admin,moduleId:c.moduleId,skillId:c.skillId,revisionId:c.revisionId});
  const identity={packageId:c.packageId,revisionId:c.revisionId,packageHash:c.packageHash};
  const descriptor=(await source.list()).find(d=>d.revisionId===c.revisionId&&d.packageHash===c.packageHash&&d.packageId===c.packageId);
+ // MODEL-IDENTITY-GUARD layer 1: a matched Skill speaks with the brand identity frozen at admission.
  // An unknown identity keeps the loader's own refusal.
- if(!descriptor)return (await activateSkill(source,identity,{maxContextBytes:c.inputLimit})).forModel();
+ if(!descriptor)return withBrandIdentity((await activateSkill(source,identity,{maxContextBytes:c.inputLimit})).forModel(),brandIdentity);
  // A matched Skill gets SKILL.md and the step guide, not the steps' files: candidate sizing (fittingCandidates)
  // runs this same activation before the paid match, so what is sized is exactly what runs (R8b).
- return (await activateFreeChatSkill(source,descriptor,{maxContextBytes:c.inputLimit,withResources:false})).instructions;
+ return withBrandIdentity((await activateFreeChatSkill(source,descriptor,{maxContextBytes:c.inputLimit,withResources:false})).instructions,
+  brandIdentity);
 }
 /** A selected Skill runs with its own model capacity: never pay for a match whose selection cannot run.
  * The input alone is a lower bound, so a candidate that cannot hold it is dropped without loading its Skill. */
