@@ -43,8 +43,8 @@ function VerifyEmailPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [email, setEmail] = useState('');
-  // The URL never carries the email: it comes from the session or this tab's storage, and when
-  // neither has it (another device, an expired link) the visitor types it to get a new link.
+  // The URL never carries the email: it comes from the session (read-only) or this tab's storage
+  // (editable prefill); with neither (another device, an expired link) the visitor types it.
   const [emailEditable, setEmailEditable] = useState(false);
   const [redirectTarget, setRedirectTarget] = useState('/profile');
   const [checking, setChecking] = useState(true);
@@ -75,7 +75,9 @@ function VerifyEmailPageContent() {
       if (data.user?.email) {
         setEmail(data.user.email);
       }
-      setEmailEditable(!data.user?.email && !nextEmail);
+      // Without a session the saved email is only a prefill: it may be from an earlier attempt in
+      // this tab, so the visitor can still correct it before resending.
+      setEmailEditable(!data.user?.email);
 
       if (isEmailVerified(data.user)) {
         clearPendingEmail();
