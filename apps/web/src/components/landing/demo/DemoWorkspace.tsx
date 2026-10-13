@@ -19,28 +19,35 @@ import styles from './demo.module.css';
 
 const noop = () => undefined;
 
-/** Reveals a new mentor reply a few characters at a time, like the live stream; reduced motion shows it whole. */
+const prefersReducedMotion = () =>
+  typeof window !== 'undefined' && Boolean(window.matchMedia?.('(prefers-reduced-motion: reduce)').matches);
+
+/**
+ * Reveals a new mentor reply a few characters at a time, like the live stream; reduced motion shows it whole.
+ * The progress is keyed by the reply's id, so a reply that has not started yet reads as "thinking" in the very
+ * render that adds it (never the whole text for a frame first).
+ */
 function useReveal(liveId: string | null, text: string, onDone: () => void) {
-  const [shown, setShown] = useState<number | null>(null);
+  const [progress, setProgress] = useState<{ id: string; count: number } | null>(null);
   const done = useRef(onDone);
   done.current = onDone;
   useEffect(() => {
     if (!liveId) return;
-    if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) { done.current(); return; }
+    if (prefersReducedMotion()) { done.current(); return; }
     let count = -1;
     const cleanup: { timer?: number } = {};
-    setShown(-1);
     const start = window.setTimeout(() => {
       const timer = window.setInterval(() => {
         count += 3;
-        if (count >= text.length) { window.clearInterval(timer); setShown(null); done.current(); return; }
-        setShown(count);
+        if (count >= text.length) { window.clearInterval(timer); done.current(); return; }
+        setProgress({ id: liveId, count });
       }, 28);
       cleanup.timer = timer;
     }, 550);
-    return () => { window.clearTimeout(start); if (cleanup.timer) window.clearInterval(cleanup.timer); setShown(null); };
+    return () => { window.clearTimeout(start); if (cleanup.timer) window.clearInterval(cleanup.timer); };
   }, [liveId, text]);
-  return shown;
+  if (!liveId || prefersReducedMotion()) return null;
+  return progress?.id === liveId ? progress.count : -1;
 }
 
 function Message({ message, shown }: { message: DemoMessage; shown: number | null }) {
