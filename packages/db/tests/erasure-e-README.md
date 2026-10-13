@@ -6,7 +6,7 @@
 
 ## 盘点（起点 staging `28af1e34f3947389f14d85401c0f33b91fca7a60`）
 
-- `packages/api/src/trpc.ts:113–180`：100 积分开户赠送；`opening_grant:<userId>` 防重；调用
+- `packages/api/src/trpc.ts:113–180`：开户赠送（0151 为 100 积分，0230 起 500 积分）；`opening_grant:<userId>` 防重；调用
   `atomic_apply_credit_ledger_entry`。`:202–264` 恢复零余额新资料，`:346–390` 创建资料后赠送。
 - `packages/db/migrations/0051_auth_opening_grant_profile_defaults.sql:11`：新资料默认 0，不靠 Auth 触发器赠送。
 - 管理界面虽显示 `new_user_credits` 配置，现有开户路径实际固定为 100；本任务保持原赠送额度。
