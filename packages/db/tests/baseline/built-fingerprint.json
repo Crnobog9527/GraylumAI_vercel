@@ -2588,7 +2588,7 @@
   "fn:opc_work_results(uuid,uuid)": "2464496cef58",
   "fn:opc_work_ui_change(uuid,uuid,uuid,bigint,text,text)": "d5075bc2352e",
   "fn:opening_grant_claim(uuid,jsonb)": "30331285839c",
-  "fn:opening_grant_remember(uuid,jsonb,boolean)": "3ccd7b4643de",
+  "fn:opening_grant_remember(uuid,jsonb,boolean)": "fee0083fea70",
   "fn:ordinary_chat_claim(uuid,uuid,jsonb,uuid)": "9471b3f38d2d",
   "fn:ordinary_chat_delete_guard()": "51f6828019b5",
   "fn:ordinary_chat_transition(uuid,uuid,uuid,text,jsonb)": "a293b7c8940b",
