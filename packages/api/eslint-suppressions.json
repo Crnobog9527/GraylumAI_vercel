@@ -313,13 +313,10 @@
   },
   "src/services/__tests__/workbench.integration.ts": {
     "@typescript-eslint/no-explicit-any": {
-      "count": 17
+      "count": 15
     },
     "@typescript-eslint/no-unused-vars": {
       "count": 1
-    },
-    "prefer-const": {
-      "count": 2
     }
   },
   "src/services/__tests__/workbenchGeneration.test.ts": {

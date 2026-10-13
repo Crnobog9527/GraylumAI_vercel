@@ -100,7 +100,7 @@
 | `routers/ai`（sendMessage、abortRequest、estimateCost、getAvailableModels、getConversationMessages、getTokenStats） | 前端和后台页面都没有调用；整组删除。后台模型管理用的是 `routers/model`，不受影响。 |
 | `routers/chat` 除 `getConversations` 外的 11 个接口（新建、改名、删除、读消息、统计、导出、sendMessage） | 前端只剩个人中心"使用历史"调用 `getConversations`，保留它。 |
 | 后台诊断的 6 项旧检查（智能路由、Token 计算、Prompt 缓存、上下文压缩、实时关键词、旧对话真实运行证据）和诊断页"最新真实运行证据"卡片 | 只读旧对话数据或调用旧路由；第 8 节第 3 条已定随 LEGACY-CLOSE 删除。模型状态、计费、限流、熔断、RLS 检查保留。 |
-| 只测上述代码的测试 | 删除；`billing.test.ts` 里对旧 stream 源码的断言、凭证边界测试里的旧路由用例、v3 Skill 集成测试里的旧模块提示词用例一并去掉，其余保留。 |
+| 只测上述代码的测试 | 删除；`workbench.integration.ts` 中驱动已删 `/chat` 页面的 37 个 `CHAT:` 用例和依赖它的 `REAL SKILL`、两个 `REUSE` 用例一并删除（`/chat?module=` 跳转 `/positioning` 的后台用例保留）；`modelColumnGrants.integration.ts` 改为从后台模型页登录、只查保留的模型接口；本地运行器只选这些用例的 `--ordinary-only`、`--chat-only`、`--chat-reliability-only`、`--reuse-only`、`--real-skill-only` 改为报错退役，避免空跑当作通过；`billing.test.ts` 里对旧 stream 源码的断言、凭证边界测试里的旧路由用例、v3 Skill 集成测试里的旧模块提示词用例一并去掉，其余保留。 |
 
 凭证保护和用户数据隔离：
 
@@ -113,4 +113,3 @@
 
 - 后台设置页仍有只服务旧对话的设置项（智能路由、Prompt 缓存等），现在不再生效；是否从设置页移除交总控安排。
 - `packages/db/tests/v3` 的旧版本兼容测试（legacy-runtime、bill2 upgrade）在历史固定版本上运行旧对话代码，保留。
-- `workbench.integration.ts` 里依赖旧对话的用例随第三段处理。
