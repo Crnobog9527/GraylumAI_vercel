@@ -130,16 +130,32 @@ Redirect URL 留空。脚本 `postforme-probe.mjs`，北京时间 16:13–16:15�
 `POST /v1/social-accounts/auth-url`，`permissions: ["posts","feeds"]`：YouTube 返回 201，链接指向 `accounts.google.com`；X 返回 201，链接指向 `x.com`。
 链接本身没有记录（属于一次性授权地址）。
 
-### 4.4 连接账号后读作品数据
+### 4.4 连接账号后读作品数据（Owner 在后台自己连接，勾选 posts + feeds；北京时间 16:15–16:18）
 
-| 平台 | 状态 |
+报告里不写账号名和平台用户编号，用"Owner 的 X 测试账号""Owner 的 YouTube 测试账号"代称；原始输出只留在本机，不入库。
+
+**Owner 的 X 测试账号（PASS，有发现）**
+
+| 项目 | 结果 |
 | --- | --- |
-| YouTube（Owner 有频道、没发过内容） | 待 Owner 连接后测"没有内容时返回什么" |
-| X | 待 Owner 连接并确认是否有帖子 |
-| Instagram、Facebook、LinkedIn、Threads、TikTok、TikTok Business、Pinterest、Bluesky | **未实测**（Owner 没有这些平台的账号） |
-| 授权失效时的真实返回 | 未实测 |
-| 读作品数据是否真的不计费；超额是否真的自动升级 | 未实测（只有代码证据；本次没有任何发布） |
-| 发布（任何社媒账号） | 不在本次范围，发布属于对外发布，需 Owner 当次批准 |
+| 读取 | `expand=metrics&limit=100` 一次 200，95 条，约 3.9 秒；`limit=20` 翻页 5 页（20/20/20/20/15），游标正常，最后一页 `has_more=false` |
+| 字段 | 每条都有 `caption, media, metrics, platform, platform_account_id, platform_post_id, platform_url, social_account_id` |
+| **发布时间** | **95 条全部没有 `posted_at` 字段**（接口说明里有这个字段，但 X 线路实际不返回） |
+| 时间范围 | 用 X 帖子编号自带的时间戳推算：最早 2026-09-04，最新 2026-10-03；近 30 天 72 条，近 90 天 95 条。95 条是否就是全部帖子、X 线路最多能往回读多少，这个账号太新，测不出上限 |
+| 指标 | 95 条都有三组：`public_metrics`（retweet/reply/like/quote/impression/bookmark）、`organic_metrics`（impression/like/reply/retweet/url_link_clicks/user_profile_clicks）、`non_public_metrics`（impression/url_link_clicks/user_profile_clicks）；数值为 0 的字段照常返回 0，不是空 |
+| 不带 `expand=metrics` | 200，没有 `metrics` 字段，约 1 秒（比带指标快） |
+| 更新频率 | 每次调用实时向 X 读取（代码证据），本次没有隔天对比，没测到 X 自己的数据延迟 |
+
+**Owner 的 YouTube 测试账号（部分 PASS，有发现）**
+
+| 项目 | 结果 |
+| --- | --- |
+| "空频道" | 实际返回 **1 条视频**（发布于 2026-09-14，有 `posted_at`、`platform_url`、1 个媒体、`platform_data`），可能是 Owner 不记得的旧上传或非公开视频；没能测到"完全没有内容"时的返回 |
+| 指标 | 只有 `views, likes, comments, dislikes` 四项，全是 0；代码里写的观看时长、新增订阅等 YouTube Analytics 字段**没有返回**（可能是新频道没有分析数据，需有数据的频道复测） |
+| **间歇 500** | 第一次读取 200；紧接着连续 6 次（不同 `limit`、带不带指标）都返回 500 `Internal server error`；约 1 分钟后再读又是 200。账号状态一直是 connected。原因从外部看不到（代码里 YouTube 每次读取都会先刷新授权，非授权类错误统一变成 500） |
+
+**未实测**：Instagram、Facebook、LinkedIn、Threads、TikTok、TikTok Business、Pinterest、Bluesky（Owner 没有这些平台的账号）；
+授权失效时的真实返回；读作品数据是否真的不计费、超额是否真的自动升级（本次没有任何发布，只有代码证据）；发布（不在本次范围）。
 
 ## 5. 测试脚本用法
 

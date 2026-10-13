@@ -50,14 +50,25 @@ async function call(method, path, body, key = loadKey()) {
   return { status: res.status, ms: Date.now() - started, headers, json, errorText: json ? null : text.slice(0, 200) };
 }
 
+// Field paths with value kinds only (number / zero / null / string / ...), never the values themselves.
+function kinds(value, prefix = '', out = {}) {
+  if (value && typeof value === 'object' && !Array.isArray(value)) {
+    for (const [k, v] of Object.entries(value)) kinds(v, prefix ? `${prefix}.${k}` : k, out);
+  } else {
+    out[prefix] = value === null ? 'null' : value === 0 ? 'zero' : Array.isArray(value) ? `array(${value.length})` : typeof value;
+  }
+  return out;
+}
+
 function shapeOf(post) {
   const metrics = post.metrics && typeof post.metrics === 'object' ? post.metrics : null;
   return {
     posted_at: post.posted_at ?? null,
+    post_keys: Object.keys(post).sort(),
     has_caption: Boolean(post.caption),
+    has_platform_url: Boolean(post.platform_url),
     media_count: Array.isArray(post.media) ? post.media.length : 0,
-    metric_fields: metrics ? Object.keys(metrics).sort() : [],
-    metric_nulls: metrics ? Object.keys(metrics).filter((k) => metrics[k] === null).sort() : [],
+    metric_kinds: metrics ? kinds(metrics) : null,
   };
 }
 
