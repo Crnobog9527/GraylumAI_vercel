@@ -125,6 +125,24 @@ describe('PAY-STRIPE-MP card subscription webhooks', () => {
     await expect(handleCardSubscriptionInvoice(f.db, f.stripe, 'in_1', 'invoice.paid')).resolves.toBe(true);
     expect(f.rpc).not.toHaveBeenCalled(); expect(mocks.conflict).toHaveBeenCalled();
   });
+  it('stops the subscription when such an invoice actually charged money', async () => {
+    const active = { object: 'subscription', id: 'sub_1', livemode: false, status: 'active', cancel_at: null, cancel_at_period_end: false,
+      metadata: { orderId, userId: 'user' }, items: { data: [{ current_period_end: 1797064954 }] } };
+    const f = fixture({ subscriptionRef: { subscription_id: 'local_sub' }, order: cardOrder });
+    Object.assign(f.invoice, { billing_reason: 'subscription_update', amount_paid: 2000 });
+    f.raw.subscriptions.retrieve.mockResolvedValueOnce(active).mockResolvedValueOnce({ ...active, cancel_at_period_end: true });
+    const update = vi.fn(async () => ({}));
+    (f.raw.subscriptions as unknown as { update: typeof update }).update = update;
+    await expect(handleCardSubscriptionInvoice(f.db, f.stripe, 'in_1', 'invoice.paid')).resolves.toBe(true);
+    expect(mocks.conflict).toHaveBeenCalled();
+    expect(update).toHaveBeenCalledWith('sub_1', { cancel_at_period_end: true });
+    expect(f.rpc).toHaveBeenLastCalledWith('pay_stripe_mp_sync_subscription', { p_subscription: 'local_sub', p_merchant: 'fixture',
+      p_cancel_at_period_end: true, p_canceled: false });
+    // Before the first payment is mapped: Stripe retries until there is a local subscription to stop.
+    const early = fixture({ order: cardOrder });
+    Object.assign(early.invoice, { billing_reason: 'subscription_update', amount_paid: 2000 });
+    await expect(handleCardSubscriptionInvoice(early.db, early.stripe, 'in_1', 'invoice.paid')).rejects.toThrow('FIRST_PAYMENT_PENDING');
+  });
   it('copies only stop-at-period-end and the final cancellation; past_due changes nothing', async () => {
     for (const [patch, cancelAt, canceled] of [[{ status: 'active', cancel_at_period_end: true }, true, false],
       [{ status: 'past_due', cancel_at_period_end: false }, false, false], [{ status: 'canceled', cancel_at_period_end: false }, false, true],

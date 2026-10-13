@@ -153,6 +153,11 @@ export async function handleCardSubscriptionInvoice(db: SupabaseClient, stripe: 
   // Not a path we grant from (proration, manual invoice...): keep the evidence for a person to resolve.
   await recordStripeInvoiceConflict({ db, scope, invoiceId: invoice.id, sourceOrderId: order.id });
   logger.error('billing', 'stripe_mp_invoice_review', { orderId: order.id, billingReason: invoice.billing_reason, eventType });
+  // Money taken without an entitlement: stop the subscription from charging again until a person resolves it.
+  if (paid && (invoice.amount_paid ?? 0) > 0) {
+    if (!order.localSubscriptionId) throw new Error('PAY_STRIPE_MP_FIRST_PAYMENT_PENDING');
+    await stopRenewalAfterReview(db, stripe, scope.merchant, order.localSubscriptionId, subscriptionId);
+  }
   return true;
 }
 
