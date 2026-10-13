@@ -149,6 +149,16 @@ export const DISABLED_RESEARCH_TOOLS: ResearchToolsConfig = Object.freeze({
   recentGrowth: { maxFirstPostAgeDays: 90, minViewsToFollowers: '1' },
 }) as ResearchToolsConfig;
 
+/**
+ * The revision the 0254 writer will compare against, read with the same rule as its SQL
+ * (`value->>'revision' ~ '^(0|[1-9][0-9]{0,9})$'`, otherwise 0), so a repair save never conflicts.
+ */
+function storedRevision(raw: unknown): number {
+  const value = (raw as { revision?: unknown } | null)?.revision;
+  const textValue = typeof value === 'number' && Number.isFinite(value) ? String(value) : typeof value === 'string' ? value : '';
+  return /^(0|[1-9][0-9]{0,9})$/.test(textValue) ? Number(textValue) : 0;
+}
+
 export interface ResearchToolsState {
   config: ResearchToolsConfig;
   source: 'configured' | 'default' | 'invalid';
@@ -170,10 +180,7 @@ export async function readResearchToolsConfig(db: SupabaseClient): Promise<Resea
     if (!data) return off('default');
     const raw = typeof data.value === 'string' ? JSON.parse(data.value) : data.value;
     const parsed = storedResearchToolsSchema.safeParse(raw);
-    if (!parsed.success) {
-      const revision = Number((raw as { revision?: unknown } | null)?.revision);
-      return off('invalid', Number.isSafeInteger(revision) && revision >= 0 ? revision : 0);
-    }
+    if (!parsed.success) return off('invalid', storedRevision(raw));
     const { revision, updatedBy, updatedAt, ...config } = parsed.data;
     return { config, source: 'configured', revision, updatedBy, updatedAt };
   } catch {

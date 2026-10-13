@@ -80,6 +80,10 @@ describe('research_tools_config', () => {
     // A value without the writer's revision/author was not written by 0254: fail closed, keep its revision visible.
     expect(await readResearchToolsConfig(dbReturning(valid()))).toMatchObject({ source: 'invalid', config: { enabled: false } });
     expect(await readResearchToolsConfig(dbReturning({ ...stored, enabled: 'yes' }))).toMatchObject({ source: 'invalid', revision: 3 });
+    // Same revision rule as the 0254 SQL, so a repair save never conflicts.
+    for (const [revision, expected] of [['01', 0], ['1e3', 0], [true, 0], [1.5, 0], ['7', 7], [-1, 0]] as const) {
+      expect((await readResearchToolsConfig(dbReturning({ ...stored, enabled: 'yes', revision }))).revision).toBe(expected);
+    }
   });
 });
 
