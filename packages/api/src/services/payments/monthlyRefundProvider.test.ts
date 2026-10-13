@@ -13,8 +13,8 @@ const fixtureModule = await import(/* @vite-ignore */ modulePath) as {
 };
 beforeEach(() => vi.useFakeTimers({ now: new Date(now) }));
 afterEach(() => vi.useRealTimers());
-function fixture() {
-  const { intent } = executionFixture();
+function fixture(taxMinor?: number) {
+  const { intent } = executionFixture(taxMinor);
   intent.terms.merchant = 'acct_fixture';
   return { ...fixtureModule.provider({ terms: intent.terms, user: intent.terms.userId, order: intent.terms.orderId }), intent };
 }
@@ -23,6 +23,19 @@ describe('monthly original-channel evidence reader', () => {
     const f = fixture();
     expect(await readMonthlyProvider(f.stripe, f.intent)).toMatchObject({ mode: 'test',
       subscription: { preflight: 'clear', renewalOwnership: 'original' }, refunds: { complete: true, rows: [] } });
+    expect(f.writes).toEqual([]);
+  });
+  it('reads a card order (PAY-STRIPE-MP) as charged the pre-tax amount plus its tax', async () => {
+    const f = fixture(1380);
+    // Stripe charged 69.00 + 13.80 tax for the card subscription's first invoice.
+    f.invoice.amount_paid = f.charge.amount = f.charge.amount_captured = 8280;
+    const retrieve = f.stripe.paymentIntents.retrieve;
+    f.stripe.paymentIntents.retrieve = vi.fn(async (...args: Parameters<typeof retrieve>) =>
+      ({ ...await retrieve(...args), amount_received: 8280 })) as unknown as typeof retrieve;
+    expect(await readMonthlyProvider(f.stripe, f.intent)).toMatchObject({ subscription: { preflight: 'clear' } });
+    // Read against the pre-tax amount alone, the same charge is not this order's cash.
+    const untaxed = fixture(1380);
+    await expect(readMonthlyProvider(untaxed.stripe, untaxed.intent)).rejects.toThrow();
     expect(f.writes).toEqual([]);
   });
   it.each(['disputed', 'schedule', 'pending_update', 'pending_setup_intent', 'invoice', 'pendingItems'])('%s blocks new external steps', async field => {
