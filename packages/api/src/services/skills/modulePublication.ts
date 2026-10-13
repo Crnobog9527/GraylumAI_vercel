@@ -114,12 +114,13 @@ export async function saveModuleSkill(db: SupabaseClient, actorId: string, value
 /** Any failure here leaves the new module disabled (never enabled without its flag); the administrator reopens it. */
 async function flagNewModule(db: SupabaseClient, moduleId: string, active: boolean) {
   try {
+    // An exact retry after a lost response finds the flag already saved: keep it and continue.
     const opened = await readSocialMediaFlag(db, moduleId);
-    const saved = await saveSocialMediaFlag(db, { moduleId, socialMediaRelated: true, expectedSocialMediaRelated: false,
-      expectedModuleUpdatedAt: opened.moduleUpdatedAt });
+    const version = opened.socialMediaRelated ? opened.moduleUpdatedAt : (await saveSocialMediaFlag(db, { moduleId,
+      socialMediaRelated: true, expectedSocialMediaRelated: false, expectedModuleUpdatedAt: opened.moduleUpdatedAt })).moduleUpdatedAt;
     if (!active) return;
     const enabled = await db.from('modules').update({ active: true, updated_at: new Date().toISOString() })
-      .eq('id', moduleId).eq('social_media_related', true).eq('updated_at', saved.moduleUpdatedAt).select('id');
+      .eq('id', moduleId).eq('social_media_related', true).eq('updated_at', version).select('id');
     if (enabled.error || enabled.data?.length !== 1) throw new Error('SOCIAL_MEDIA_FLAG_CONFLICT');
   } catch { throw new Error('SOCIAL_MEDIA_FLAG_NEW_MODULE_INCOMPLETE'); }
 }

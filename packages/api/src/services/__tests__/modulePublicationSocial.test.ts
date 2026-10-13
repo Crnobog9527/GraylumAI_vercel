@@ -23,9 +23,9 @@ const reasoning = { reasoning: { route: 'deepinfra', purposes: { interactive: { 
     contextLength: 10000, maxCompletionTokens: 4096 }] } } };
 
 type Step = { table: string; op: 'select' | 'update'; values?: unknown; filters: Array<[string, unknown]> };
-function database(options: { flagFails?: boolean; enableFails?: boolean } = {}) {
+function database(options: { flagFails?: boolean; enableFails?: boolean; flagged?: boolean } = {}) {
   const steps: Step[] = [];
-  let version = '2026-10-13T00:00:00.000Z', flagged = false;
+  let version = '2026-10-13T00:00:00.000Z', flagged = options.flagged ?? false;
   const from = (table: string) => {
     const step: Step = { table, op: 'select', filters: [] };
     steps.push(step);
@@ -115,4 +115,13 @@ it('ignores the choice for an existing module (its own setting card owns the fla
   const absent = database(), unchanged = { ...moduleInput(), expectedUpdatedAt: '2026-10-13T00:00:00.000Z' };
   delete unchanged.socialMediaRelated;
   await expect(saveModuleSkill(absent.db, randomUUID(), unchanged)).resolves.toBeTruthy();
+});
+
+it('continues an exact retry whose flag was already saved before the response was lost', async () => {
+  const f = database({ flagged: true }), input = { ...moduleInput(), socialMediaRelated: true };
+  await expect(saveModuleSkill(f.db, randomUUID(), input)).resolves.toBeTruthy();
+  const updates = f.updates();
+  expect(updates.some(step => (step.values as { social_media_related?: boolean }).social_media_related !== undefined)).toBe(false);
+  expect(updates.map(step => step.values)).toEqual([expect.objectContaining({ active: true })]);
+  expect(updates[0]!.filters).toEqual(expect.arrayContaining([['social_media_related', true], ['updated_at', '2026-10-13T00:00:00.000Z']]));
 });
