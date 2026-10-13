@@ -1,5 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-import { BRAND_REPLY_EN, BRAND_REPLY_ZH, BRAND_REPLY_ZH_HANT } from './brandIdentity';
+import { BRAND_REPLY_EN, BRAND_REPLY_ZH, BRAND_REPLY_ZH_HANT, frozenBrandIdentity } from './brandIdentity';
 import { questionCardSchema, questionToolCardSchema } from '../../shared/agentTurn';
 
 /**
@@ -169,4 +169,13 @@ export function redactIdentitySummary(summary: string) {
   const redacted = Object.fromEntries(Object.entries(record).map(([key, item]) =>
     [key, (key === 'message' || key === 'summary') && typeof item === 'string' ? redactModelIdentity(item) : item]));
   return JSON.stringify(redacted) === JSON.stringify(record) ? summary : JSON.stringify(redacted);
+}
+
+/**
+ * Workbench dialogue replies (review P1): the same replacement as the runtime, decided from the frozen
+ * system message (the identity instruction leads it when the switch was on). Other purposes produce the
+ * artifact and are never rewritten.
+ */
+export function redactWorkbenchReply(purpose: string | undefined, systemContent: string, text: string) {
+  return purpose === 'reply' && frozenBrandIdentity(systemContent) ? redactModelIdentity(text) : text;
 }

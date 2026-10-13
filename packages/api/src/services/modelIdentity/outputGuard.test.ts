@@ -1,7 +1,8 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { describe, expect, it } from 'vitest';
 import { BRAND_REPLY_EN, BRAND_REPLY_ZH, BRAND_REPLY_ZH_HANT } from './brandIdentity';
-import { leaksModelIdentity, redactIdentityBody, redactIdentityCard, redactIdentitySummary, redactModelIdentity, streamingRedaction } from './outputGuard';
+import { leaksModelIdentity, redactIdentityBody, redactIdentityCard, redactIdentitySummary, redactModelIdentity, redactWorkbenchReply, streamingRedaction } from './outputGuard';
+import { withBrandIdentity } from './brandIdentity';
 
 // Leaks: what a model may say about itself after a direct question or a jailbreak.
 const LEAKS_ZH = [
@@ -190,4 +191,13 @@ it('a card whose options collapse into the same brand reply is dropped instead o
   expect(redactIdentityCard(card)).toBeNull();
   const clean = { message: '选一个。', question: '你更想用哪个？', options: ['短视频', '图文'], recommended: 0, recommendationReason: '更快' };
   expect(redactIdentityCard(clean)).toBe(clean);
+});
+
+it('workbench dialogue replies are redacted when the frozen instruction carries the identity (review P1)', () => {
+  const on = withBrandIdentity('Discuss…', true), off = 'Discuss…';
+  expect(redactWorkbenchReply('reply', on, 'I am Claude. Here is the plan.')).toBe(`${BRAND_REPLY_EN} Here is the plan.`);
+  expect(redactWorkbenchReply('reply', off, 'I am Claude.')).toBe('I am Claude.');
+  // Step summaries and generations produce the artifact and are never rewritten.
+  expect(redactWorkbenchReply('summary', on, 'I am Claude.')).toBe('I am Claude.');
+  expect(redactWorkbenchReply(undefined, on, 'I am Claude.')).toBe('I am Claude.');
 });

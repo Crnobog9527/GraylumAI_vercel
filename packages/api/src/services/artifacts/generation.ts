@@ -20,6 +20,7 @@ import { workflowSchema } from './workflow';
 import { snapshotSchema, generationStatusSchema } from './public';
 import { withBrandIdentity } from '../modelIdentity/brandIdentity';
 import { modelIdentityGuardEnabled } from '../modelIdentity/guardSetting';
+import { redactWorkbenchReply } from '../modelIdentity/outputGuard';
 const uuid = z.string().uuid();
 export const generationScope = z.object({ projectId: uuid, roundId: uuid }).strict();
 export const generationQuoteInput = generationScope.extend({
@@ -388,7 +389,9 @@ export function workbenchGeneration(userClient: SupabaseClient, privateClient: S
         const cost = calculateTokenCostWithPricing({ ...answer, cacheReadTokens: 0, cacheCreationTokens: 0 }, ready.quote.pricing, {}, ready.quote.settings);
         // Never charge above the user-approved reservation. Persist actual
         // calculated model cost separately for accounting/reconciliation.
-        known = receiptSchema.parse({ ...answer, body: filtered.content, credits: Math.min(cost.credits, ready.quote.reservedCredits), costUsd: cost.costUsd });
+        // MODEL-IDENTITY-GUARD layer 3: a dialogue reply that still names its model is replaced before it is saved.
+        const body = redactWorkbenchReply(v.purpose, ready.messages[0]?.content ?? '', filtered.content);
+        known = receiptSchema.parse({ ...answer, body, credits: Math.min(cost.credits, ready.quote.reservedCredits), costUsd: cost.costUsd });
         await rpc(v, 'receipt', v.requestId, { token: reserved.token, result: known });
         return generationStatus.parse(await rpc(v, 'settle', v.requestId));
       } catch (error) {
