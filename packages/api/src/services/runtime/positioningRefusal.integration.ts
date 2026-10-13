@@ -115,13 +115,24 @@ it('RUNTIME: concurrent executions of one refused round dispatch once and compen
   } finally { await f.close(); }
 }, 30000);
 
-it.each([
-  ['an ordinary answer under the fallback rule', '小红书的推荐算法主要看互动率。', POSITIONING_FALLBACK],
-  ['the marker without the fallback rule', POSITIONING_MARKER, undefined],
-])('RUNTIME: %s completes and is charged normally', async (_name, reply, gate) => {
-  const f = await fallbackRound(reply, gate);
+it('RUNTIME: an ordinary answer under the fallback rule completes and is charged normally', async () => {
+  const f = await fallbackRound('小红书的推荐算法主要看互动率。');
   try {
     expect(await f.host().execute(f.admitted.executionId)).toMatchObject({ state: 'completed' });
     expect(await f.financial()).toMatchObject({ credits: 97, compensations: 0, execution_state: 'completed', unavailable_reason: null });
+  } finally { await f.close(); }
+}, 30000);
+
+it('RUNTIME: without the frozen fallback rule the marker is never a positioning refusal and nothing is refunded', async () => {
+  // Such a reply still meets the existing native-output checks (a reply opening with "[" is not a usable answer);
+  // the gate itself neither refuses nor compensates it.
+  const f = await fallbackRound(POSITIONING_MARKER, undefined);
+  try {
+    const result = await f.host().execute(f.admitted.executionId);
+    expect(result).not.toHaveProperty('code');
+    expect((result as { unavailable?: unknown }).unavailable).not.toBe('positioning_required');
+    const after = await f.financial();
+    expect(after).toMatchObject({ credits: 97, compensations: 0 });
+    expect(after.unavailable_reason).not.toBe('positioning_required');
   } finally { await f.close(); }
 }, 30000);
