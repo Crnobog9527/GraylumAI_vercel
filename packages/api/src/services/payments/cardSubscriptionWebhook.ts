@@ -6,13 +6,15 @@ import { recoverMethodCheckout } from './walletWebhook';
 import { freezePurchaseSnapshot } from './contracts';
 import { stripePreTaxAmount } from './purchaseFacts';
 import { recordStripeInvoiceConflict } from './stripeConflictEvidence';
+import { recordCardPaymentTax } from './cardPaymentEvidence';
+import { PAYMENT_EVIDENCE_CONFLICT } from './stripeWebhookError';
 import { logger } from '../../lib/logger';
 
 const id = (value: string | { id: string } | null | undefined) => typeof value === 'string' ? value : value?.id ?? null;
 type CardSubscriptionOrder = { id: string; user_id: string; payment_method: string; purchase_snapshot?: unknown;
   localSubscriptionId: string | null };
 const iso = (seconds: number | null | undefined) => {
-  if (!Number.isSafeInteger(seconds) || (seconds as number) <= 0) throw new Error('PAY_WAFFO_PAYMENT_CONFLICT');
+  if (!Number.isSafeInteger(seconds) || (seconds as number) <= 0) throw new Error(PAYMENT_EVIDENCE_CONFLICT);
   return new Date((seconds as number) * 1000).toISOString();
 };
 
@@ -39,7 +41,7 @@ async function findCardOrder(db: SupabaseClient, stripe: Stripe, scope: { mercha
     || !/^[0-9a-f-]{36}$/i.test(orderId)) return null;
   const order = await query.eq('id', orderId).maybeSingle();
   if (order.error) throw new Error('PAY_WAFFO_PERSISTENCE_UNAVAILABLE');
-  if (order.data && order.data.user_id !== subscription.metadata?.userId) throw new Error('PAY_WAFFO_PAYMENT_CONFLICT');
+  if (order.data && order.data.user_id !== subscription.metadata?.userId) throw new Error(PAYMENT_EVIDENCE_CONFLICT);
   return order.data ? { ...order.data, localSubscriptionId: null } : null;
 }
 
@@ -68,7 +70,7 @@ function stripeStopState(subscription: Stripe.Subscription) {
 async function readSubscription(stripe: Stripe, subscriptionId: string) {
   const subscription = await stripe.subscriptions.retrieve(subscriptionId);
   if (subscription.object !== 'subscription' || subscription.id !== subscriptionId || subscription.livemode) {
-    throw new Error('PAY_WAFFO_PAYMENT_CONFLICT');
+    throw new Error(PAYMENT_EVIDENCE_CONFLICT);
   }
   return subscription;
 }
@@ -101,9 +103,9 @@ function renewalFacts(invoice: Stripe.Invoice, subscriptionId: string, snapshot:
   const taxes = (invoice.total_taxes ?? []).reduce((sum, row) => sum + (row.amount ?? 0), 0);
   if (invoice.livemode || invoice.status !== 'paid' || invoice.currency !== 'usd' || invoice.amount_paid !== invoice.amount_due
     || !line || id(invoice.parent?.subscription_details?.subscription) !== subscriptionId) {
-    throw new Error('PAY_WAFFO_PAYMENT_CONFLICT');
+    throw new Error(PAYMENT_EVIDENCE_CONFLICT);
   }
-  return { amount: stripePreTaxAmount(freezePurchaseSnapshot(snapshot), invoice.amount_paid, taxes),
+  return { amount: stripePreTaxAmount(freezePurchaseSnapshot(snapshot), invoice.amount_paid, taxes), tax: taxes,
     paidAt: iso(invoice.status_transitions?.paid_at), start: iso(line.period?.start), end: iso(line.period?.end) };
 }
 
@@ -117,7 +119,7 @@ export async function handleCardSubscriptionInvoice(db: SupabaseClient, stripe: 
   eventCreated?: number) {
   const scope = await resolveStripeScope(stripe);
   const invoice = await stripe.invoices.retrieve(invoiceId);
-  if (invoice.object !== 'invoice' || invoice.id !== invoiceId) throw new Error('PAY_WAFFO_PAYMENT_CONFLICT');
+  if (invoice.object !== 'invoice' || invoice.id !== invoiceId) throw new Error(PAYMENT_EVIDENCE_CONFLICT);
   const subscriptionId = id(invoice.parent?.subscription_details?.subscription);
   if (!subscriptionId) return false;
   const order = await findCardOrder(db, stripe, scope, subscriptionId);
@@ -137,6 +139,10 @@ export async function handleCardSubscriptionInvoice(db: SupabaseClient, stripe: 
         p_paid: facts.paidAt, p_start: facts.start, p_end: facts.end })
       : await db.rpc('pay_stripe_mp_record_renewal_failure', { ...target, p_failed_at: iso(eventCreated) });
     if (result.error) throw new Error('PAY_STRIPE_MP_RENEWAL_UNAVAILABLE', { cause: result.error });
+    // The renewal's Managed Payments tax is its own fact on the renewal order, as for the first payment.
+    if (facts && typeof result.data?.orderId === 'string') {
+      await recordCardPaymentTax(db, scope.merchant, result.data.orderId, { paymentId: invoice.id, tax: facts.tax });
+    }
     if (paid && result.data?.state === 'review') {
       logger.error('billing', 'stripe_mp_renewal_review', { orderId: result.data.orderId, reason: 'unexpected_renewal' });
       await stopRenewalAfterReview(db, stripe, scope.merchant, order.localSubscriptionId, subscriptionId);
