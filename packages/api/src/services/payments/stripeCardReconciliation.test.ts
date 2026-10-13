@@ -105,6 +105,12 @@ describe('PAY-STRIPE-MP daily Stripe card reconciliation', () => {
       invoices: [renewal], recorded: new Set(['payment:in_cycle']) });
     mocks.invoice.mockReset().mockImplementation(async () => { untaxed.orders[ORDER] = card({ fulfilled_at: 'x' }); return true; });
     await expect(untaxed.run()).resolves.toMatchObject({ success: true, repaired: 1 });
+    // Kept for review (taxed): replayed so a confirmed stop and its alert are repeated, but not counted as a repair.
+    const review = fixture({ orders: { [ORDER]: card({ method_review_reason: 'unexpected_renewal' }) }, invoices: [renewal],
+      recorded: new Set(['payment:in_cycle']) });
+    mocks.invoice.mockReset().mockResolvedValue(true);
+    await expect(review.run()).resolves.toMatchObject({ success: true, repaired: 0 });
+    expect(mocks.invoice).toHaveBeenCalledWith(review.db, review.stripe, 'in_cycle', 'invoice.paid', undefined, undefined);
   });
   it('records an external refund whose webhook was lost, from the refund events of the window', async () => {
     // re_late was created long before the window and succeeded inside it: its refund.updated event is in the window.

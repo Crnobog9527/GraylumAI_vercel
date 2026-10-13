@@ -235,12 +235,27 @@ describe('/api/cron/billing-reconcile', () => {
     mocks.stripeClient.mockImplementation(() => { throw new Error('STRIPE_SECRET_KEY missing'); });
     expect(await (await GET(new Request('https://graylum.test/api/cron/billing-reconcile'))).json())
       .toMatchObject({ success: false, stripeCard: { findings: [{ kind: 'scan_failed', code: 'STRIPE_NOT_CONFIGURED' }] } });
+    // A typo is a configuration failure, not the intentional "off".
+    vi.stubEnv('STRIPE_CARD_RECONCILIATION_MODE', 'TEST');
+    expect(await (await GET(new Request('https://graylum.test/api/cron/billing-reconcile'))).json())
+      .toMatchObject({ success: false, stripeCard: { findings: [{ kind: 'scan_failed', code: 'STRIPE_CARD_RECONCILIATION_MODE_INVALID' }] } });
     // Not enabled for this environment (the production default until the Owner approves): skipped.
     vi.stubEnv('STRIPE_CARD_RECONCILIATION_MODE', '');
     mocks.stripeCard.mockClear();
     expect(await (await GET(new Request('https://graylum.test/api/cron/billing-reconcile'))).json())
       .toMatchObject({ success: true, stripeCard: { skipped: true } });
     expect(mocks.stripeCard).not.toHaveBeenCalled();
+  });
+
+  it('stops waiting for a stalled Stripe scan before the cron limit and reports it', async () => {
+    vi.useFakeTimers();
+    try {
+      mocks.stripeCard.mockReturnValue(new Promise(() => {}));
+      const pending = GET(new Request('https://graylum.test/api/cron/billing-reconcile'));
+      await vi.advanceTimersByTimeAsync(50_000);
+      expect(await (await pending).json()).toMatchObject({ success: false,
+        stripeCard: { findings: [{ kind: 'scan_failed', code: 'STRIPE_CARD_RECONCILIATION_TIMEOUT' }] } });
+    } finally { vi.useRealTimers(); }
   });
 
   it('registers one daily UTC reconciliation cron', () => {

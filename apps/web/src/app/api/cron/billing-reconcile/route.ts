@@ -47,7 +47,13 @@ async function runWaffoReconciliation(supabase: SupabaseClient) {
  * with Owner approval at launch, REL-1). A key of the other mode is refused and alerted, never scanned. */
 async function runStripeCardReconciliation(supabase: SupabaseClient) {
   const expectedMode = process.env.STRIPE_CARD_RECONCILIATION_MODE;
-  if (expectedMode !== 'test' && expectedMode !== 'live') return { success: true, skipped: true, findings: [] };
+  if (!expectedMode) return { success: true, skipped: true, findings: [] };
+  if (expectedMode !== 'test' && expectedMode !== 'live') {
+    // A typo must not look like the intentional "off": it is a configuration failure, alerted.
+    const findings = [{ kind: 'scan_failed' as const, code: 'STRIPE_CARD_RECONCILIATION_MODE_INVALID' }];
+    reportStripeCardReconciliation(findings);
+    return { success: false, skipped: false, findings };
+  }
   let stripe;
   try { stripe = getStripeClient(); } catch {
     const findings = [{ kind: 'scan_failed' as const, code: 'STRIPE_NOT_CONFIGURED' }];
@@ -55,8 +61,13 @@ async function runStripeCardReconciliation(supabase: SupabaseClient) {
     return { success: false, skipped: false, findings };
   }
   try {
-    const result = await reconcileStripeCardPayments(supabase, stripe,
-      { expectedMode, alert: () => reportPaymentEvidenceConflict('billing-reconcile') });
+    // A stalled Stripe request (default timeout 80 s) must not outlive the cron's 60 s: stop waiting after 50 s and report
+    // an incomplete scan. Work cut off mid-way is safe; every repair is idempotent and is retried the next day.
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const result = await Promise.race([
+      reconcileStripeCardPayments(supabase, stripe, { expectedMode, alert: () => reportPaymentEvidenceConflict('billing-reconcile') }),
+      new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('STRIPE_CARD_RECONCILIATION_TIMEOUT')), 50_000); }),
+    ]).finally(() => clearTimeout(timer));
     reportStripeCardReconciliation(result.findings);
     return result;
   } catch (error) {

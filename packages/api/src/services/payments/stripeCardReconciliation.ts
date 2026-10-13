@@ -94,10 +94,13 @@ export async function reconcileStripeCardPayments(db: SupabaseClient, stripe: St
     ...(after ? { starting_after: after } : {}) }), async invoice => {
     if (invoice.billing_reason !== 'subscription_cycle' || !id(invoice.parent?.subscription_details?.subscription)) return;
     const known = await recordedOrder(db, scope, 'payment', invoice.id);
-    if (known && hasTax(await cardOrder(db, known))) return;
-    // Missing, or recorded without its tax fact: the renewal handler is idempotent and records both.
+    const knownOrder = known ? await cardOrder(db, known) : null;
+    if (knownOrder && hasTax(knownOrder) && knownOrder.fulfilled_at && !knownOrder.method_review_reason) return;
+    // Missing, recorded without its tax fact, or kept for review: the renewal handler is idempotent; a replay of a
+    // review renewal repeats the confirmed stop at Stripe and its alert, which a crash after the tax write may have cut.
     if (!await handleCardSubscriptionInvoice(db, stripe, invoice.id, 'invoice.paid', undefined, options.alert)) return;
     const orderId = await recordedOrder(db, scope, 'payment', invoice.id);
+    if (knownOrder && hasTax(knownOrder)) return;
     if (orderId && hasTax(await cardOrder(db, orderId))) repaired++;
     else findings.push({ kind: orderId ? 'tax_not_recorded' : 'renewal_not_recorded', object: 'invoice', externalId: invoice.id,
       ...(orderId ? { orderId } : {}) });
