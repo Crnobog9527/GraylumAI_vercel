@@ -46,6 +46,15 @@ describe('official usage parsing', () => {
     }
   });
 
+  it('keeps implausible timestamps missing instead of inventing recent or future dates', async () => {
+    const { timestamp } = await import('../fields');
+    expect(timestamp({ t: 1_760_000_000 }, ['t'])).toBe('2025-10-09T08:53:20.000Z');
+    expect(timestamp({ t: 1_760_000_000_000 }, ['t'])).toBe('2025-10-09T08:53:20.000Z');
+    for (const bad of [1_760_000_000_000_000, 4_102_444_800, '2999-01-01', 1e20, 12, '1999-12-31']) {
+      expect(timestamp({ t: bad }, ['t'])).toBeUndefined();
+    }
+  });
+
   it('reads Firecrawl credits from either documented location', () => {
     expect(firecrawlCredits({ creditsUsed: 1 })).toBe('1');
     // Page-controlled metadata is never a billing receipt.

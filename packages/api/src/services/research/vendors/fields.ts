@@ -65,6 +65,9 @@ export function timestamp(value: unknown, paths: readonly string[]): string | un
   return firstValid(value, paths, readTimestamp);
 }
 
+const EARLIEST_MS = Date.UTC(2000, 0, 1);
+const DAY_MS = 86_400_000;
+
 function readTimestamp(found: unknown): string | undefined {
   let ms: number | undefined;
   if (typeof found === 'number' || (typeof found === 'string' && /^\d{9,13}$/.test(found))) {
@@ -73,8 +76,9 @@ function readTimestamp(found: unknown): string | undefined {
   } else if (typeof found === 'string' && /\d{4}/.test(found)) {
     ms = Date.parse(found);
   }
-  // Beyond ±8.64e15 ms a Date is invalid and toISOString() would throw; treat it as missing.
-  if (ms === undefined || !Number.isFinite(ms) || ms <= 0 || ms > 8.64e15) return undefined;
+  // Only plausible publication times: from 2000 to one day ahead (clock skew). Microsecond epochs,
+  // far-future dates and anything a Date cannot hold are treated as missing, never as "recent".
+  if (ms === undefined || !Number.isFinite(ms) || ms < EARLIEST_MS || ms > Date.now() + DAY_MS) return undefined;
   return new Date(ms).toISOString();
 }
 
