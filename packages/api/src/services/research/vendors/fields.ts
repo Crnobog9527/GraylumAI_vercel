@@ -34,16 +34,16 @@ function firstValid<T>(value: unknown, paths: readonly string[], read: (found: u
   return undefined;
 }
 
-/** Non-negative finite numbers or plain numeric strings; anything else is missing. */
+/** Counters (followers, views, likes...): non-negative safe integers or plain digit strings; anything else is missing. */
 export function count(value: unknown, paths: readonly string[]): number | undefined {
   return firstValid(value, paths, readCount);
 }
 
 function readCount(found: unknown): number | undefined {
-  if (typeof found === 'number' && Number.isFinite(found) && found >= 0) return found;
-  if (typeof found === 'string' && /^\d+(\.\d+)?$/.test(found.trim())) {
+  if (typeof found === 'number') return Number.isSafeInteger(found) && found >= 0 ? found : undefined;
+  if (typeof found === 'string' && /^\d+$/.test(found.trim())) {
     const parsed = Number(found);
-    return Number.isFinite(parsed) ? parsed : undefined;
+    return Number.isSafeInteger(parsed) ? parsed : undefined;
   }
   return undefined;
 }
