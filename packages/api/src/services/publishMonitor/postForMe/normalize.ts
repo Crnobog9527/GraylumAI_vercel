@@ -26,6 +26,8 @@ const TWITTER_EPOCH_MS = 1288834974657n;
 export const MAX_POST_ID_LENGTH = 256;
 /** Listed when the provider sent no metrics object at all for a post. */
 export const ALL_METRICS_MISSING = 'metrics';
+/** Listed when the provider sent more metric fields than we keep: the snapshot is known to be incomplete. */
+export const METRICS_TRUNCATED = 'metrics.truncated';
 
 const feedPage = z.object({
   data: z.array(z.unknown()).max(100),
@@ -79,8 +81,12 @@ export function flattenMetrics(raw: unknown): {
   const metrics: Record<string, number> = {};
   const breakdowns: Record<string, Breakdown> = {};
   const missing: string[] = [];
+  let truncated = false;
   const walk = (value: unknown, prefix: string, depth: number) => {
-    if (Object.keys(metrics).length + Object.keys(breakdowns).length + missing.length >= MAX_METRIC_KEYS) return;
+    if (Object.keys(metrics).length + Object.keys(breakdowns).length + missing.length >= MAX_METRIC_KEYS) {
+      truncated = true;
+      return;
+    }
     // Deeper than we keep: the provider supplied something we do not store, so it is listed as missing.
     if (depth > 3) { if (prefix) missing.push(prefix); return; }
     if (value !== null && typeof value === 'object' && !Array.isArray(value)) {
@@ -100,6 +106,7 @@ export function flattenMetrics(raw: unknown): {
     else missing.push(prefix);
   };
   walk(raw, '', 0);
+  if (truncated) missing.push(METRICS_TRUNCATED);
   return { metrics, breakdowns, missingFields: missing.sort() };
 }
 
