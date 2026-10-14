@@ -11,6 +11,7 @@ const caps = vi.hoisted(() => [] as Array<{ opinion: number; summary: number }>)
 const requests = vi.hoisted(() => [] as Array<{ modelId: string; phase: string; input: string }>);
 const clock = vi.hoisted(() => ({ t: Date.parse('2026-10-14T00:00:00Z'), next() { this.t += 1000; return new Date(this.t).toISOString(); } }));
 const db = vi.hoisted(() => ({ review: null as Record<string, unknown> | null, calls: [] as Call[], outputs: new Map<string, string>(),
+  savedAt: new Map<string, string>(),
   groups: new Map<string, { groupId: string; runs: Array<{ runId: string; index: number; phase: string; body: string; call: { model: string } }> }>() }));
 const ids = { reviewers: ['00000000-0000-4000-8000-0000000000a1', '00000000-0000-4000-8000-0000000000a2', '00000000-0000-4000-8000-0000000000a3'],
   summary: '00000000-0000-4000-8000-0000000000b1' };
@@ -68,7 +69,8 @@ const original = '## 定位\n原定位\n## 结语\n原结语';
 const admin = { rpc: async (name: string, args: Record<string, unknown>) => {
   if (name === 'fusion_review_preview') return { data: { reportBytes: 2000, materialsBytes: 500, fieldCount: 1 }, error: null };
   if (name === 'fusion_review_source') return { data: { body: original, sections, maxCharacters: 12000, declared: [{ stepId: 's1', fieldIds: ['goal'] }] }, error: null };
-  if (name === 'fusion_call_output_read') { const body = db.outputs.get(String(args.p_call_id)); return { data: body ? { body } : null, error: null }; }
+  if (name === 'fusion_call_output_read') { const body = db.outputs.get(String(args.p_call_id));
+    return { data: body ? { body, savedAt: db.savedAt.get(String(args.p_call_id)) } : null, error: null }; }
   if (name === 'fusion_call_verdict') { const call = db.calls.find(c => c.callId === args.p_call_id)!; call.verdict = String(args.p_verdict); return { data: call.verdict, error: null }; }
   throw new Error('unexpected ' + name);
 } } as unknown as SupabaseClient;
@@ -85,19 +87,19 @@ const revision = (value: string) => JSON.stringify({
   body: `## 定位\n${value}\n## 结语\n原结语`,
   steps: [{ stepId: 's1', fields: [{ fieldId: 'goal', value, changed: true }] }],
   changeNotes: [{ section: '定位', wordingOnly: false, note: '更具体', fields: [{ stepId: 's1', fieldId: 'goal' }] }] });
-function setup(script: (call: Call) => string | null) {
+function setup(script: (call: Call) => string | null, refuse?: string) {
   const proposals: unknown[] = [];
   const executor = { run: vi.fn(async (_run: unknown, claimed: { id: string }, judge: (text: string) => string) => {
     const call = db.calls.find(c => c.callId === claimed.id)!;
     call.dispatched = true; call.dispatchedAt = clock.next();
     const text = script(call);
     if (text === null) { call.verdict = 'no_delivery'; call.settled = true; call.settledAt = clock.next(); return { state: 'judged', verdict: 'no_delivery' }; }
-    db.outputs.set(call.callId, text);
+    db.outputs.set(call.callId, text); db.savedAt.set(call.callId, clock.next());
     call.verdict = judge(text); call.settled = true; call.settledAt = clock.next();
     return { state: 'judged', verdict: call.verdict, text };
   }) };
   const flow = reviewFlow({ admin, actorId: randomUUID(), executor: executor as never,
-    propose: async input => { proposals.push(input); return { revisionId: '00000000-0000-4000-8000-0000000000d1' }; } });
+    propose: async input => { if (refuse) throw new Error(refuse); proposals.push(input); return { revisionId: '00000000-0000-4000-8000-0000000000d1' }; } });
   const runAll = async () => {
     const step = await flow.continue(String(db.review!.reviewId));
     for (const call of step.calls) await flow.dispatch(String(db.review!.reviewId), call.callId);
@@ -107,7 +109,7 @@ function setup(script: (call: Call) => string | null) {
 }
 
 describe('review flow', () => {
-  beforeEach(() => { db.review = null; db.calls = []; db.outputs.clear(); db.groups.clear(); requests.length = 0; caps.length = 0; });
+  beforeEach(() => { db.review = null; db.calls = []; db.outputs.clear(); db.savedAt.clear(); db.groups.clear(); requests.length = 0; caps.length = 0; });
 
   it('without a split: round 1, one summary, proposes the revision to R14, never re-reviewed by the panel', async () => {
     const t = setup(call => call.phase === 'fusion_summary' ? revision('新目标') : opinion('major'));
@@ -180,6 +182,29 @@ describe('review flow', () => {
     // The debate request names exactly the pairs to answer.
     const toB = JSON.parse(requests.filter(r => r.phase === 'fusion_review')[4]!.input);
     expect(toB.respondTo).toHaveLength(2 * 4);
+  });
+
+  it('ends the review when R14 refuses the proposal for good (draft changed meanwhile), freeing the slot', async () => {
+    const t = setup(call => call.phase === 'fusion_summary' ? revision('新目标') : opinion('major'), 'REPORT_REVISION_STALE');
+    await t.flow.start({ requestId: randomUUID(), draftId: randomUUID(), sourceVersionId: randomUUID() });
+    await t.runAll(); await t.runAll();
+    expect((await t.flow.continue(String(db.review!.reviewId))).review).toMatchObject({ state: 'incomplete',
+      outcome: { kind: 'proposal_refused', code: 'REPORT_REVISION_STALE' } });
+  });
+
+  it('shows judged results before financial settlement, and the usable summary attempt after a retry', async () => {
+    const t = setup(call => call.phase === 'fusion_summary' ? revision('新目标') : opinion('major'));
+    await t.flow.start({ requestId: randomUUID(), draftId: randomUUID(), sourceVersionId: randomUUID() });
+    await t.runAll(); await t.runAll();
+    await t.flow.continue(String(db.review!.reviewId));
+    for (const call of db.calls) { call.settled = false; delete call.settledAt; }
+    // An earlier summary attempt that expired before dispatch, listed first.
+    const usable = db.calls.find(c => c.phase === 'fusion_summary')!;
+    db.calls.unshift({ ...usable, callId: randomUUID(), dispatched: false, verdict: 'no_delivery', settled: true, settledAt: clock.next() });
+    const { events } = await t.flow.events(String(db.review!.reviewId));
+    expect(events.filter(e => e.type === 'decision')).toHaveLength(12);
+    expect(events.filter(e => e.type === 'adjudication')).toHaveLength(1);
+    expect(events.map(e => e.type)).toContain('revision_ready');
   });
 
   it('ends at once when every reviewer keeps every decision and finds nothing; never proposes', async () => {

@@ -19,8 +19,8 @@ const FAILURE: Record<string, string> = { format_invalid: 'format', revision_inv
 const USABLE = new Set(['usable', 'unjudged_saved']);
 
 export function reviewEvents(input: { view: ReviewView; reviewers: string[]; sections: string[];
-  /** Saved bodies of judged calls, by call id. */
-  outputs: Map<string, string>; revision: RevisionInput }): { events: ReviewEvent[]; ended: boolean } {
+  /** Saved bodies of judged calls with their save time, by call id. */
+  outputs: Map<string, { body: string; savedAt: string }>; revision: RevisionInput }): { events: ReviewEvent[]; ended: boolean } {
   const { view, reviewers, sections, outputs } = input;
   const timed: Array<{ at: string; order: number; event: ReviewEvent }> = [];
   let order = 0;
@@ -34,9 +34,10 @@ export function reviewEvents(input: { view: ReviewView; reviewers: string[]; sec
     const round = step.round;
     if (call.phase === 'fusion_summary') {
       add(call.dispatchedAt, { id: `summary_started:${round}`, type: 'summary_started', round });
-      const text = call.verdict && USABLE.has(call.verdict) ? outputs.get(call.callId) : undefined;
-      const adjudication = text ? adjudicationOf(text) : [];
-      adjudication.forEach((item, i) => add(call.settledAt, { id: `adjudication:${round}:${i}`, type: 'adjudication',
+      const saved = call.verdict && USABLE.has(call.verdict) ? outputs.get(call.callId) : undefined;
+      const adjudication = saved ? adjudicationOf(saved.body) : [];
+      // Results are shown once judged, from the save time: financial settlement may come much later or never.
+      adjudication.forEach((item, i) => add(saved!.savedAt, { id: `adjudication:${round}:${i}`, type: 'adjudication',
         issue: clip(item.issue), reviewers: item.reviewers.filter(r => /^[A-C]$/.test(r)), single: item.single, adopted: item.adopted,
         reason: clip(item.reason) }));
       continue;
@@ -46,21 +47,24 @@ export function reviewEvents(input: { view: ReviewView; reviewers: string[]; sec
     const reviewer = reviewerLabel(index);
     add(call.dispatchedAt, { id: `reviewer_started:${round}:${reviewer}`, type: 'reviewer_started', round, reviewer });
     if (!call.verdict) continue;
-    const opinion = USABLE.has(call.verdict) ? parseOpinion(outputs.get(call.callId) ?? '', { sections, debate: round > 1 }) : null;
+    const saved = outputs.get(call.callId);
+    const opinion = USABLE.has(call.verdict) ? parseOpinion(saved?.body ?? '', { sections, debate: round > 1 }) : null;
+    // A judged call: shown from its save time, or (no body) from settlement, whichever is known.
+    const at = saved?.savedAt ?? call.settledAt;
     if (!opinion) {
-      add(call.settledAt, { id: `reviewer_failed:${round}:${reviewer}`, type: 'reviewer_failed', round, reviewer,
+      add(at, { id: `reviewer_failed:${round}:${reviewer}`, type: 'reviewer_failed', round, reviewer,
         reason: FAILURE[call.verdict] ?? 'format' });
       continue;
     }
     if (round === 1) firstRound.set(index, opinion);
-    for (const d of opinion.decisions) add(call.settledAt, { id: `decision:${round}:${reviewer}:${d.decision}`, type: 'decision', round,
+    for (const d of opinion.decisions) add(at, { id: `decision:${round}:${reviewer}:${d.decision}`, type: 'decision', round,
       reviewer, decision: d.decision, strongestCase: clip(d.strongestCase), strongestAlternative: clip(d.strongestAlternative), verdict: d.verdict });
-    opinion.issues.forEach((issue, i) => add(call.settledAt, { id: `issue:${round}:${reviewer}:${i}`, type: 'issue', round, reviewer,
+    opinion.issues.forEach((issue, i) => add(at, { id: `issue:${round}:${reviewer}:${i}`, type: 'issue', round, reviewer,
       section: issue.location.replace(/^#+\s*/, '').trim(), perspective: clip(issue.perspective), severity: issue.severity,
       problem: clip(issue.problem), fix: clip(issue.suggestion) }));
     for (const response of opinion.responses ?? []) {
       if (!/^[A-C]$/.test(response.reviewer) || response.reviewer === reviewer) continue;
-      add(call.settledAt, { id: `response:${reviewer}:${response.reviewer}:${response.decision}`, type: 'response', round, reviewer,
+      add(at, { id: `response:${reviewer}:${response.reviewer}:${response.decision}`, type: 'response', round, reviewer,
         to: response.reviewer, decision: response.decision, strongestView: clip(response.strongestView), stance: response.stance });
     }
   }
@@ -77,15 +81,18 @@ export function reviewEvents(input: { view: ReviewView; reviewers: string[]; sec
     }
   }
   if (view.endedAt) {
-    const summary = view.calls.find(call => call.phase === 'fusion_summary' && call.verdict);
+    // The attempt behind the outcome: the usable one, else the last judged attempt (an earlier one may have
+    // expired before dispatch and been claimed again).
+    const judged = view.calls.filter(call => call.phase === 'fusion_summary' && call.verdict);
+    const summary = judged.find(call => USABLE.has(String(call.verdict))) ?? judged[judged.length - 1];
     if (view.state === 'revision_failed' && summary) {
-      const text = outputs.get(summary.callId);
+      const text = outputs.get(summary.callId)?.body;
       const check = text ? checkRevision(text, input.revision) : null;
       add(view.endedAt, { id: 'revision_failed', type: 'revision_failed', reason: check && !check.ok ? check.reason
         : FAILURE[String(summary.verdict)] ?? 'REVISION_FORMAT' });
     }
     if (view.state === 'completed' && view.revisionId && summary) {
-      const check = checkRevision(outputs.get(summary.callId) ?? '', input.revision);
+      const check = checkRevision(outputs.get(summary.callId)?.body ?? '', input.revision);
       if (check.ok) add(view.endedAt, { id: 'revision_ready', type: 'revision_ready', revisionId: view.revisionId,
         changedSections: check.changedSections.length, changedSectionTitles: check.changedSections,
         changedFields: Object.values(check.r14Fields).reduce((n, fields) => n + Object.keys(fields).length, 0) });

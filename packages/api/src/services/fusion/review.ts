@@ -25,6 +25,9 @@ type Source = z.infer<typeof source>;
 /** The summary's revision that passed the host check: what R14 proposes. */
 type Passed = { round: number; body: string; steps: StepValues; changeNotes: unknown; r14Fields: StepValues };
 const ATTEMPTS = 3;
+/** R14 refusals that retrying cannot fix (REPORT_UNAVAILABLE and auth problems are retried by the next continue). */
+const PROPOSAL_REFUSALS = new Set(['REPORT_REVISION_STALE', 'REPORT_SOURCE_CONFLICT', 'REPORT_REVISION_UNSUPPORTED',
+  'REPORT_REVISION_INVALID', 'REPORT_REVISION_DECIDED', 'REPORT_NOT_COMPLETE', 'CONTENT_ERASED']);
 const stepKey = (at: ReviewPosition) => `review:${at.round}:${at.phase}:${at.attempt}`;
 
 /** FUSION-REVIEW §2.1/§2.2 orchestration over the review record (0236): the server decides each next step;
@@ -148,8 +151,17 @@ export function reviewFlow(deps: { admin: SupabaseClient; actorId: string;
     let revisionId: string | undefined;
     if (revision) {
       if (!deps.propose) throw new Error('FUSION_REVIEW_UNAVAILABLE');
-      ({ revisionId } = await deps.propose({ draftId: view.draftId, requestId: derivedUuid(`${view.reviewId}:propose`),
-        sourceVersionId: view.sourceVersionId, body: revision.body, fields: revision.r14Fields }));
+      try {
+        ({ revisionId } = await deps.propose({ draftId: view.draftId, requestId: derivedUuid(`${view.reviewId}:propose`),
+          sourceVersionId: view.sourceVersionId, body: revision.body, fields: revision.r14Fields }));
+      } catch (error) {
+        // R14 refuses for good (the user edited the draft or published a newer version meanwhile, or the content
+        // is gone): end the review instead of retrying forever and holding the user's only review slot (#962 review).
+        const code = error instanceof Error ? error.message : '';
+        if (!PROPOSAL_REFUSALS.has(code)) throw error;
+        const at = { round: view.round, phase: view.phase, attempt: view.attempt };
+        return record.advance(view.reviewId, at, { state: 'incomplete', outcome: { kind: 'proposal_refused', code } });
+      }
     }
     const at = { round: view.round, phase: view.phase, attempt: view.attempt };
     return record.advance(view.reviewId, at, { state, outcome,
@@ -259,10 +271,12 @@ export function reviewFlow(deps: { admin: SupabaseClient; actorId: string;
       const view = await record.read(reviewId);
       if (!view) throw new Error('FUSION_REVIEW_DENIED');
       const src = await readSource(reviewId);
-      const outputs = new Map<string, string>();
+      const outputs = new Map<string, { body: string; savedAt: string }>();
       for (const call of view.calls.filter(c => c.verdict !== null)) {
-        const text = await outputOf(call.callId);
-        if (text) outputs.set(call.callId, text);
+        const result = await admin.rpc('fusion_call_output_read', { p_actor_id: actorId, p_call_id: call.callId });
+        if (result.error) throw new Error('FUSION_REVIEW_UNAVAILABLE');
+        const saved = result.data as { body: string; savedAt: string } | null;
+        if (saved?.body) outputs.set(call.callId, { body: saved.body, savedAt: saved.savedAt });
       }
       return reviewEvents({ view, reviewers: config.parse(view.config).reviewers, sections: src.sections, outputs,
         revision: revisionInput(view, src) });
