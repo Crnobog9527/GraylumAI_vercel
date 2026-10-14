@@ -55,7 +55,7 @@ try {
  const connectionString=`postgres://postgres@${address}/b2a`;
  client=new Client({connectionString});await client.connect();
  await client.query(read('packages/db/tests/erasure-b2a/fixture.sql'));
- await runCases({db:client,report});
+ await runCases({db:client,Client,connectionString,report});
  const audits=ok(sql(read('packages/db/tests/account-open-policy-audit.sql')));
  assert.equal(audits,'');report.checks.push('account-open policy audit unchanged');
 } catch(error) {report.failed=String(error.stack??error);process.exitCode=1;}

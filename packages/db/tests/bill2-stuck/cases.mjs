@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import {createHash,randomUUID} from 'node:crypto';
 import {rpc} from '../erasure-b2a/cases.mjs';
-import {claim} from '../payg/fixture.mjs';
+import {claim,createFixture} from '../payg/fixture.mjs';
 import {fixture,proof,balance} from '../payg/provider-rejection.mjs';
 const hash=value=>createHash('sha256').update(value).digest('hex');
 const record=(db,f,c,e)=>rpc(db,'bill2_record',f.actor,f.run,c.id,e);
@@ -28,7 +28,7 @@ function lookup(f,identity,outcome){
    :{lookupOutcome:'not_found',evidenceKind:'provider_rejection_lookup',transport:{httpStatus:404,complete:true,transportIssue:null}})};
 }
 
-export async function runCases({db,report}) {
+export async function runCases({db,Client,connectionString,report}) {
  // (A) 400/401/403/422/429 settle at zero only after a later not_found lookup; never immediately.
  for(const version of ['v1','v2'])for(const status of [400,401,403,422,429]){
   // Every fixture opens with 100 credits (v1 holds at prepare, v2 at claim).
@@ -133,6 +133,29 @@ export async function runCases({db,report}) {
  assert.equal(fusion.creditsAfter,100);assert.equal(await balance(db,fz),100);
  assert.equal((await call(db,fc)).fusion_verdict,'user_stopped');
  report.checks.push('the staging shape (Fusion review call, cancelled run, verdict user_stopped, cost unknown) settles at 0 and restores the balance');
+
+ // Two settlements by one admin of that admin's own two stuck calls overlap without deadlocking
+ // (the staging repair shape: account A is itself the administrator).
+ const pa=await stuck(),owner=pa.s.actor;
+ const sb=await createFixture(db,{actor:owner,empirical:true,bytes:2000,lookupSupported:true}),cb=await claim(db,sb);
+ await record(db,sb,cb,{provider:'openrouter',account:'sandbox',model:sb.claimPayload.model,protocol:'openrouter-chat-v1',
+  evidenceKind:'transport_observation',providerId:'gen-stuck-'+cb.id,cost:null,final:false,currency:'USD',source:'response',
+  coverage:'request_total',observedAt:new Date().toISOString(),sourceHash:'e'.repeat(64),rejectedReason:'incomplete_stream'});
+ await rpc(db,'bill2_cancel',owner,sb.run);await rpc(db,'bill2_finalize',owner,sb.run);
+ await db.query('UPDATE bill2_calls SET recovery_attempts=3 WHERE id IN ($1,$2)',[pa.sc.id,cb.id]);
+ await db.query("UPDATE profiles SET role='admin' WHERE id=$1",[owner]);
+ const ownerHeld=await balance(db,pa.s);
+ const one=new Client({connectionString}),two=new Client({connectionString});
+ await one.connect();await two.connect();
+ try {
+  for(const c of [one,two]){await c.query('BEGIN');await c.query("SET LOCAL lock_timeout='20s'");}
+  // Each commits as soon as its own settlement returns; whichever locks first lets the other proceed.
+  const settleIn=(c,id)=>rpc(c,'bill2_payg_admin_settle_call',owner,randomUUID(),id,'0','并发释放').then(()=>c.query('COMMIT'));
+  await Promise.all([settleIn(one,pa.sc.id),settleIn(two,cb.id)]);
+ } finally {await one.query('ROLLBACK').catch(()=>null);await two.query('ROLLBACK').catch(()=>null);await one.end();await two.end();}
+ assert.ok(await balance(db,pa.s)>ownerHeld);
+ assert.equal((await call(db,pa.sc)).settled_at!==null&&(await call(db,cb)).settled_at!==null,true);
+ report.checks.push('one admin settling two of their own stuck calls in overlapping transactions: both complete (no lock-upgrade deadlock)');
 
  const grants=await db.query(`SELECT f,r,has_function_privilege(r,f,'EXECUTE') ok FROM unnest(ARRAY[
   'public.bill2_payg_stuck_calls(integer)','public.bill2_payg_admin_settle_call(uuid,uuid,uuid,numeric,text)']) f,

@@ -2645,7 +2645,7 @@
   "fn:bill2_legacy_settle(uuid,uuid,integer,jsonb,jsonb)": "e67fe80cc70c",
   "fn:bill2_outcome_projection(jsonb)": "157635d6ba56",
   "fn:bill2_payg_absorb_report(timestamp with time zone,timestamp with time zone)": "336c3faed08c",
-  "fn:bill2_payg_admin_settle_call(uuid,uuid,uuid,numeric,text)": "d5b889ea5a34",
+  "fn:bill2_payg_admin_settle_call(uuid,uuid,uuid,numeric,text)": "1de0fa7a3534",
   "fn:bill2_payg_call_stuck(bill2_calls,bill2_runs)": "34edb89c9289",
   "fn:bill2_payg_claim(uuid,uuid,integer,jsonb)": "cbd7fc4d03c0",
   "fn:bill2_payg_compensate(bill2_runs,bill2_calls)": "8daa785df26e",

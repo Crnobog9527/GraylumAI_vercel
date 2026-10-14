@@ -86,7 +86,9 @@ BEGIN
  PERFORM bill2_payg_lock_models(r);
  SELECT * INTO c FROM bill2_calls WHERE id=p_call_id AND run_id=r.id FOR UPDATE;
  PERFORM id FROM bill2_receipts WHERE call_id=c.id ORDER BY id FOR UPDATE;
- PERFORM id FROM profiles WHERE id=p_admin_id AND role='admin' AND status='active' AND is_deleted='false' FOR SHARE;
+ -- FOR UPDATE, not SHARE: finalize later updates the account profile, which may be this same admin,
+ -- and two settlements holding SHARE would deadlock upgrading it.
+ PERFORM id FROM profiles WHERE id=p_admin_id AND role='admin' AND status='active' AND is_deleted='false' FOR UPDATE;
  IF NOT FOUND THEN RAISE EXCEPTION 'BILL2_ADMIN_SETTLE_DENIED' USING ERRCODE='42501';END IF;
  SELECT * INTO prior FROM user_activity_logs WHERE id=p_request_id;
  IF prior.id IS NOT NULL THEN
