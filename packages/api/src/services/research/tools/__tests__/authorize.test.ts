@@ -44,7 +44,7 @@ describe('profile links', () => {
       'https://user:pw@x.com/tidyroom', 'ftp://x.com/tidyroom', 'https://x.com/%E0%A4%A',
       'https://x.com/tidyroom/status/123', 'https://www.tiktok.com/@homeideas/video/1', 'https://www.instagram.com/tidy_room/reels',
       'https://space.bilibili.com/123456/video', 'https://weibo.com/u/7654321/home',
-      'https://www.youtube.com/channel/UCabcdefghijklmnopqrstuv/videos']) {
+      'https://www.youtube.com/channel/UCabcdefghijklmnopqrstuv/videos', 'https://x.com:4444/tidyroom']) {
       expect(parseProfileLink(link)).toBeNull();
     }
   });
@@ -54,6 +54,12 @@ describe('profile links', () => {
     expect(canonicalAccount('tiktok', 'https://www.tiktok.com/@homeideas')).toBe('homeideas');
     expect(canonicalAccount('tiktok', 'https://x.com/homeideas')).toBeNull();
     expect(canonicalAccount('bilibili', '12a')).toBeNull();
+  });
+
+  it('drops sentence punctuation after a link', () => {
+    expect(profileLinksIn('My benchmark is https://x.com/alice. Also https://www.tiktok.com/@bob.c, and https://x.com/carol; https://x.com/dan!'))
+      .toEqual([{ platform: 'x', account: 'alice' }, { platform: 'tiktok', account: 'bob.c' },
+        { platform: 'x', account: 'carol' }, { platform: 'x', account: 'dan' }]);
   });
 
   it('lists distinct profile links in order, ignoring plain mentions', () => {

@@ -65,7 +65,8 @@ export function parseProfileLink(link: string): CanonicalAccount | null {
   let url: URL;
   try { url = new URL(link); } catch { return null; }
   if (url.protocol !== 'https:' && url.protocol !== 'http:') return null;
-  if (url.username || url.password) return null;
+  // Only the platform's normal origin counts: no credentials, no custom port.
+  if (url.username || url.password || url.port) return null;
   let found: ReturnType<typeof fromUrl>;
   try { found = fromUrl(url); } catch { return null; }
   if (!found) return null;
@@ -73,14 +74,16 @@ export function parseProfileLink(link: string): CanonicalAccount | null {
   return account === null ? null : { platform: found.platform, account };
 }
 
-const LINK = /https?:\/\/[^\s<>"'，。；、）)\]】]+/gi;
+const LINK = /https?:\/\/[^\s<>"'，。；、）)\]】,;!?]+/gi;
+/** Sentence-ending dots or colons are not part of a link; no supported handle can end with them. */
+const TRAILING = /[.:]+$/;
 
 /** Every distinct profile account linked in a message, in order of appearance. */
 export function profileLinksIn(message: string): CanonicalAccount[] {
   const seen = new Set<string>();
   const found: CanonicalAccount[] = [];
   for (const match of message.matchAll(LINK)) {
-    const parsed = parseProfileLink(match[0]);
+    const parsed = parseProfileLink(match[0].replace(TRAILING, ''));
     if (!parsed) continue;
     const key = `${parsed.platform}:${parsed.account}`;
     if (seen.has(key)) continue;
