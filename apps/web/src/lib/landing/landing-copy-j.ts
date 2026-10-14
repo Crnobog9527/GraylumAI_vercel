@@ -26,7 +26,9 @@ export const J_NOTE_IDS: Readonly<Record<string, string>> = {
   p2: '黑龙骑士',
   p3: '@KAOCHI999',
   p5: '鄭欣宜',
-  // p7, p8 (Reddit): not checked yet, so they keep the placeholder.
+  p7: 'u/DrRZXQ',
+  // p8: the quoted reply comes from a marketing tool's account, not a shop owner; the Owner decides whether to replace
+  // the quote, so it keeps the placeholder for now.
 };
 /** Notes quoted from forums or comments (the rest are people quoted in news reports, who have no ID). */
 export const J_FORUM_NOTES: readonly string[] = ['p2', 'p3', 'p5', 'p7', 'p8'];
