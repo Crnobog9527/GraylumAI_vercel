@@ -215,10 +215,10 @@ BEGIN
   FROM picked WHERE c.id=picked.id
   RETURNING c.id,c.actor_id,c.provider_account_id,c.status,c.owner_ref
  )
- SELECT COALESCE(jsonb_agg(jsonb_build_object('connectionId',claimed.id,'providerAccountId',provider_account_id,
-  'deleting',status='deleting',
-  'action',CASE WHEN status<>'deleting' OR k.publishes_open THEN 'disconnect' ELSE 'delete' END,
-  'ownerRef',CASE WHEN status='deleting' THEN owner_ref
+ SELECT COALESCE(jsonb_agg(jsonb_build_object('connectionId',claimed.id,'providerAccountId',claimed.provider_account_id,
+  'deleting',claimed.status='deleting',
+  'action',CASE WHEN claimed.status<>'deleting' OR k.publishes_open THEN 'disconnect' ELSE 'delete' END,
+  'ownerRef',CASE WHEN claimed.status='deleting' THEN claimed.owner_ref
    ELSE (SELECT provider_ref FROM social_monitor_settings s WHERE s.actor_id=claimed.actor_id) END) ORDER BY claimed.id),
   '[]'::jsonb) INTO out FROM claimed JOIN candidates k ON k.id=claimed.id;
  RETURN out;
