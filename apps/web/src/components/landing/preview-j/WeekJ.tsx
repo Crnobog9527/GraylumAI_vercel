@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { J_WEEK, type WeekCard, type WeekLine } from '@/lib/landing/landing-copy-j-week';
 import { ConfirmJ, personaInformation } from './WorkbenchPartsJ';
+import { useOwnerEditing } from './use-owner-editing';
 import styles from './week-j.module.css';
 
 const STAGE_ICONS: readonly LucideIcon[] = [Compass, Lightbulb, PenLine, Send, BarChart3];
@@ -37,6 +38,7 @@ export function WeekJ() {
   const [count, setCount] = useState(-1);
   const [playing, setPlaying] = useState(false);
   const ref = useRef<HTMLElement>(null);
+  const editing = useOwnerEditing();
 
   useEffect(() => {
     const node = ref.current;
@@ -48,11 +50,11 @@ export function WeekJ() {
   }, []);
 
   useEffect(() => {
-    if (!playing || count < 0) return;
+    if (!playing || editing || count < 0) return;
     const done = count >= LINES.length;
     const timer = window.setTimeout(() => setCount(done ? 1 : count + 1), done ? HOLD_MS : lineMs(LINES[count - 1]));
     return () => window.clearTimeout(timer);
-  }, [playing, count]);
+  }, [playing, editing, count]);
 
   const shown = count < 0 ? LINES.slice(REST) : LINES.slice(0, count);
   const stage = shown[shown.length - 1]?.stage ?? 0;

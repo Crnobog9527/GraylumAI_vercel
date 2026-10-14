@@ -6,6 +6,7 @@ import { ArrowRight } from 'lucide-react';
 import { DEMO_LABEL } from '@/components/landing/demo/demo-script';
 import { allOn, type LandingFlags } from '@/lib/landing/landing-flags';
 import { J_WORK, J_WORK_SCENES } from '@/lib/landing/landing-copy-j-work';
+import { useOwnerEditing } from './use-owner-editing';
 import { WorkScreenJ } from './WorkScreensJ';
 import styles from './work-j.module.css';
 import page from './j.module.css';
@@ -29,6 +30,7 @@ export function WorkJ({ flags }: { flags: LandingFlags }) {
   const [auto, setAuto] = useState(true);
   const [visible, setVisible] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+  const editing = useOwnerEditing();
 
   useEffect(() => {
     const node = ref.current;
@@ -45,7 +47,7 @@ export function WorkJ({ flags }: { flags: LandingFlags }) {
   const current = Math.min(active, Math.max(0, scenes.length - 1));
   const scene = scenes[current];
   useEffect(() => {
-    if (!scene || step < 0 || !visible || !auto) return;
+    if (!scene || step < 0 || !visible || !auto || editing) return;
     const last = step >= scene.steps.length - 1;
     if (last && current >= scenes.length - 1) return;
     const timer = window.setTimeout(() => {
@@ -53,7 +55,7 @@ export function WorkJ({ flags }: { flags: LandingFlags }) {
       else { setActive(current + 1); setStep(0); }
     }, WORK_STEP_MS);
     return () => window.clearTimeout(timer);
-  }, [scene, step, visible, auto, current, scenes.length]);
+  }, [scene, step, visible, auto, editing, current, scenes.length]);
 
   if (!scene) return null;
   const open = step < 0 ? scene.steps.length - 1 : Math.min(step, scene.steps.length - 1);
