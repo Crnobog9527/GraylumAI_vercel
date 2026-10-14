@@ -22,13 +22,14 @@ export function providerPlatform(brandPlatform: string): PostForMePlatform | nul
 export type ConnectErrorCode = 'PUBLISH_MONITOR_ACCOUNT_NOT_FOUND' | 'PUBLISH_MONITOR_PLATFORM_UNSUPPORTED'
   | 'PUBLISH_MONITOR_REQUEST_INVALID' | 'PUBLISH_MONITOR_ACCOUNT_OWNED_ELSEWHERE' | 'PUBLISH_MONITOR_ACCOUNT_BOUND_ELSEWHERE'
   | 'PUBLISH_MONITOR_TARGET_ALREADY_CONNECTED' | 'PUBLISH_MONITOR_ACCOUNT_CLOSED' | 'PUBLISH_MONITOR_PROVIDER_BUSY'
+  | 'PUBLISH_MONITOR_AUTHORIZATION_CHANGED'
   | 'PUBLISH_MONITOR_PROVIDER_UNAVAILABLE' | 'PUBLISH_MONITOR_UNAVAILABLE';
 export class ConnectError extends Error {
   constructor(readonly code: ConnectErrorCode, readonly retryAfterSeconds?: number) { super(code); }
 }
 const KNOWN: ConnectErrorCode[] = ['PUBLISH_MONITOR_ACCOUNT_NOT_FOUND', 'PUBLISH_MONITOR_REQUEST_INVALID',
   'PUBLISH_MONITOR_ACCOUNT_OWNED_ELSEWHERE', 'PUBLISH_MONITOR_ACCOUNT_BOUND_ELSEWHERE',
-  'PUBLISH_MONITOR_TARGET_ALREADY_CONNECTED', 'PUBLISH_MONITOR_ACCOUNT_CLOSED'];
+  'PUBLISH_MONITOR_TARGET_ALREADY_CONNECTED', 'PUBLISH_MONITOR_ACCOUNT_CLOSED', 'PUBLISH_MONITOR_AUTHORIZATION_CHANGED'];
 function dbFailure(error: { message?: string } | null | undefined): ConnectError {
   return new ConnectError(KNOWN.find(code => error?.message?.includes(code)) ?? 'PUBLISH_MONITOR_UNAVAILABLE');
 }
@@ -72,6 +73,8 @@ export async function recordCallback(db: Rpc, client: ClientDeps, profileId: str
     if (account.kind === 'rate_limited') throw new ConnectError('PUBLISH_MONITOR_PROVIDER_BUSY', account.retryAfterSeconds);
     if (account.kind === 'rejected') continue;
     if (account.kind !== 'ok') throw new ConnectError('PUBLISH_MONITOR_PROVIDER_UNAVAILABLE');
+    // A disconnected provider account has no usable authorization; it is never offered for confirmation.
+    if (account.value.status !== 'connected') continue;
     candidates.push({ providerAccountId: account.value.id, platform: account.value.platform,
       externalId: account.value.externalId });
   }
@@ -83,11 +86,18 @@ export async function recordCallback(db: Rpc, client: ClientDeps, profileId: str
   return parsed.data;
 }
 
-export async function confirmConnect(db: Rpc, profileId: string, requestId: string, providerAccountId: string,
-  autoTrack: boolean) {
+export async function confirmConnect(db: Rpc, client: ClientDeps, profileId: string, requestId: string,
+  providerAccountId: string, autoTrack: boolean) {
+  // Re-read just before applying: the database rejects the confirmation if the authorization moved since the callback.
+  const account = await getAccount(client, providerId.parse(providerAccountId));
+  if (account.kind === 'rate_limited') throw new ConnectError('PUBLISH_MONITOR_PROVIDER_BUSY', account.retryAfterSeconds);
+  if (account.kind === 'rejected') throw new ConnectError('PUBLISH_MONITOR_AUTHORIZATION_CHANGED');
+  if (account.kind !== 'ok') throw new ConnectError('PUBLISH_MONITOR_PROVIDER_UNAVAILABLE');
+  const current = { providerAccountId: account.value.id, platform: account.value.platform,
+    externalId: account.value.externalId, status: account.value.status };
   const result = await db.rpc('publish_monitor_connect_confirm', { a: uuid.parse(profileId),
-    p_request_id: uuid.parse(requestId), p_provider_account_id: providerId.parse(providerAccountId),
-    p_auto_track: autoTrack });
+    p_request_id: uuid.parse(requestId), p_provider_account_id: account.value.id, p_auto_track: autoTrack,
+    p_current: current });
   if (result.error) throw dbFailure(result.error);
   const parsed = confirmSchema.safeParse(result.data);
   if (!parsed.success) throw dbFailure(null);

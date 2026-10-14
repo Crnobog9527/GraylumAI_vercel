@@ -8,7 +8,7 @@ import { closeAccount } from '../erasure-b2a/cases.mjs';
 
 const migrationPath = 'packages/db/migrations/0246_publish_monitor_connect.sql';
 const rpcs = ['publish_monitor_connect_start(uuid,uuid,text[])', 'publish_monitor_connect_callback(uuid,uuid,jsonb)',
-  'publish_monitor_connect_confirm(uuid,uuid,text,boolean)'];
+  'publish_monitor_connect_confirm(uuid,uuid,text,boolean,jsonb)'];
 const db = await localDb(), c = db.client;
 const report = { build: db.build, migration: '0246', checks: [] };
 const v = async (sql, args = []) => (await c.query(sql, args)).rows[0]?.v;
@@ -19,7 +19,12 @@ const svc = async (sql, args) => {
 };
 const start = (a, acct, perms = ['feeds']) => svc('SELECT publish_monitor_connect_start($1,$2,$3) v', [a, acct, perms]);
 const callback = (a, req, cands) => svc('SELECT publish_monitor_connect_callback($1,$2,$3) v', [a, req, JSON.stringify(cands)]);
-const confirm = (a, req, pid, track = true) => svc('SELECT publish_monitor_connect_confirm($1,$2,$3,$4) v', [a, req, pid, track]);
+// current = the provider facts the server re-read just before confirming; defaults to "unchanged since callback".
+const confirm = (a, req, pid, track = true, current) => svc('SELECT publish_monitor_connect_confirm($1,$2,$3,$4,$5) v',
+  [a, req, pid, track, JSON.stringify(current ?? { providerAccountId: pid, platform: 'facebook', externalId: '$REQ', status: 'connected' })]);
+const ext = async req => v('SELECT external_id v FROM social_connect_requests WHERE id=$1', [req]);
+const confirmLive = async (a, req, pid, track = true) => confirm(a, req, pid, track,
+  { providerAccountId: pid, platform: 'facebook', externalId: await ext(req), status: 'connected' });
 const fixtureSql = `CREATE SCHEMA IF NOT EXISTS pm_test;
 CREATE OR REPLACE FUNCTION pm_test.member(a uuid,plat text) RETURNS uuid LANGUAGE plpgsql AS $$
 DECLARE sk uuid:=gen_random_uuid();m uuid:=gen_random_uuid();rev uuid:=gen_random_uuid();p uuid:=gen_random_uuid();
@@ -86,7 +91,7 @@ try {
   const victim = await member();
   const vs = await start(victim.a, victim.account);
   await callback(victim.a, vs.requestId, [cand('pfm_victim', vs.externalId)]);
-  await confirm(victim.a, vs.requestId, 'pfm_victim');
+  await confirmLive(victim.a, vs.requestId, 'pfm_victim');
   const cb = await callback(u.a, s2.requestId, [cand('pfm_new_1', s2.externalId), cand('pfm_new_2', s2.externalId),
     cand('pfm_stale', s1.externalId), cand('pfm_wrong_platform', s2.externalId, 'x'), cand('pfm_victim', vs.externalId)]);
   assert.deepEqual([cb.newAccounts, cb.quarantined, cb.ignored],
@@ -97,14 +102,19 @@ try {
   report.checks.push('callback only considers accounts carrying this attempt\'s exact external_id and platform; '
     + 'stale, foreign and replayed callbacks change nothing');
 
-  await code(confirm(u.a, s2.requestId, 'pfm_victim'), 'PT409');
-  await code(confirm(other.a, s2.requestId, 'pfm_new_1'), 'PT409');
-  const done = await confirm(u.a, s2.requestId, 'pfm_new_1', false);
+  await code(confirmLive(u.a, s2.requestId, 'pfm_victim'), 'PT409');
+  await code(confirmLive(other.a, s2.requestId, 'pfm_new_1'), 'PT409');
+  // Taken over between callback and confirm: the provider now shows another attempt's value, or a disconnected account.
+  await code(confirm(u.a, s2.requestId, 'pfm_new_1', false,
+    { providerAccountId: 'pfm_new_1', platform: 'facebook', externalId: vs.externalId, status: 'connected' }), 'PT409');
+  await code(confirm(u.a, s2.requestId, 'pfm_new_1', false,
+    { providerAccountId: 'pfm_new_1', platform: 'facebook', externalId: s2.externalId, status: 'disconnected' }), 'PT409');
+  const done = await confirmLive(u.a, s2.requestId, 'pfm_new_1', false);
   assert.deepEqual(done.unselected, ['pfm_new_2']);
   const row = (await c.query('SELECT * FROM social_connections WHERE id=$1', [done.connectionId])).rows[0];
   assert.deepEqual([row.actor_id, row.account_project_id, row.platform, row.status, row.consent_read, row.consent_auto_track,
     row.consent_publish, row.provider_can_publish], [u.a, u.account, 'facebook', 'connected', true, false, false, false]);
-  await code(confirm(u.a, s2.requestId, 'pfm_new_2'), 'PT409');
+  await code(confirmLive(u.a, s2.requestId, 'pfm_new_2'), 'PT409');
   report.checks.push('confirm binds only a candidate of the actor\'s own attempt to its target account; read-only consent; '
     + 'unselected accounts are returned for provider cleanup; no double confirm');
 
@@ -113,15 +123,21 @@ try {
   const cb3 = await callback(u.a, s3.requestId, [cand('pfm_victim', s3.externalId), cand('pfm_new_1', s3.externalId)]);
   assert.deepEqual([cb3.quarantined, cb3.ownExisting], [['pfm_victim'], ['pfm_new_1']]);
   assert.equal(await v("SELECT status v FROM social_connections WHERE provider_account_id='pfm_victim'"), 'quarantined');
-  await code(confirm(u.a, s3.requestId, 'pfm_victim'), 'PT409');
-  const upgraded = await confirm(u.a, s3.requestId, 'pfm_new_1', true);
+  await code(confirmLive(u.a, s3.requestId, 'pfm_victim'), 'PT409');
+  const upgraded = await confirmLive(u.a, s3.requestId, 'pfm_new_1', true);
   assert.equal(upgraded.connectionId, done.connectionId);
   assert.deepEqual((await c.query('SELECT consent_publish,provider_can_publish,consent_auto_track FROM social_connections'
     + ' WHERE id=$1', [done.connectionId])).rows[0], { consent_publish: true, provider_can_publish: true, consent_auto_track: true });
   assert.equal(await v("SELECT actor_id v FROM social_connections WHERE provider_account_id='pfm_victim'"), victim.a,
     'another user\'s account is never rebound');
+  // A later read-only re-authorization drops the provider capability but keeps the user's publishing consent.
+  const s6 = await start(u.a, u.account);
+  await callback(u.a, s6.requestId, [cand('pfm_new_1', s6.externalId)]);
+  await confirmLive(u.a, s6.requestId, 'pfm_new_1', true);
+  assert.deepEqual((await c.query('SELECT consent_publish,provider_can_publish FROM social_connections WHERE id=$1',
+    [done.connectionId])).rows[0], { consent_publish: true, provider_can_publish: false });
   report.checks.push('a proven takeover quarantines the other user\'s connection without binding it; publishing upgrade '
-    + 'changes only the target connection');
+    + 'changes only the target connection; read-only re-authorization drops provider publish capability');
 
   await c.query("UPDATE social_connect_requests SET expires_at=now()-interval '1 second' WHERE actor_id=$1"
     + " AND state='awaiting_callback'", [u.a]);

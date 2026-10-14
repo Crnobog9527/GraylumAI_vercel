@@ -87,10 +87,12 @@ BEGIN
   'ownExisting',to_jsonb(own),'quarantined',to_jsonb(quarantined),'ignored',to_jsonb(ignored));
 END $$;
 
--- The user picked one account on the confirmation page. Only the attempt's target brand account changes; consents
--- of any other connection are untouched (plan §4.1). Unselected new accounts are returned for provider cleanup.
+-- The user picked one account on the confirmation page. The server re-reads that account from the provider just
+-- before calling and passes its current facts: they must still be connected and carry this attempt's exact
+-- external_id and platform, so an authorization taken over between callback and confirm is never applied.
+-- Only the attempt's target brand account changes; consents of any other connection are untouched (plan §4.1).
 CREATE OR REPLACE FUNCTION public.publish_monitor_connect_confirm(a uuid,p_request_id uuid,p_provider_account_id text,
- p_auto_track boolean) RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
+ p_auto_track boolean,p_current jsonb) RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
 DECLARE req social_connect_requests; existing social_connections; target social_connections; conn uuid;
  publish boolean;
 BEGIN
@@ -101,6 +103,10 @@ BEGIN
  IF req.id IS NULL OR req.state<>'pending_confirm' OR req.confirm_expires_at<=clock_timestamp()
   OR req.target_account_project_id IS NULL OR NOT (p_provider_account_id=ANY(req.candidate_provider_ids)) THEN
   RAISE EXCEPTION 'PUBLISH_MONITOR_REQUEST_INVALID' USING ERRCODE='PT409'; END IF;
+ IF jsonb_typeof(p_current) IS DISTINCT FROM 'object' OR p_current->>'providerAccountId' IS DISTINCT FROM p_provider_account_id
+  OR p_current->>'externalId' IS DISTINCT FROM req.external_id OR p_current->>'platform' IS DISTINCT FROM req.platform
+  OR p_current->>'status' IS DISTINCT FROM 'connected' THEN
+  RAISE EXCEPTION 'PUBLISH_MONITOR_AUTHORIZATION_CHANGED' USING ERRCODE='PT409'; END IF;
  publish:='posts'=ANY(req.permissions);
  SELECT * INTO existing FROM social_connections WHERE provider_account_id=p_provider_account_id FOR UPDATE;
  IF existing.id IS NOT NULL AND existing.actor_id<>a THEN
@@ -112,7 +118,8 @@ BEGIN
    RAISE EXCEPTION 'PUBLISH_MONITOR_ACCOUNT_BOUND_ELSEWHERE' USING ERRCODE='PT409'; END IF;
   UPDATE social_connections SET status='connected',consent_read=true,consent_auto_track=p_auto_track,
    consent_publish=CASE WHEN publish THEN true ELSE consent_publish END,
-   provider_can_publish=provider_can_publish OR publish,updated_at=clock_timestamp()
+   -- Capability follows this authorization (a read-only re-authorization drops it); consent stays the user's choice.
+   provider_can_publish=publish,updated_at=clock_timestamp()
   WHERE id=existing.id RETURNING id INTO conn;
  ELSE
   IF target.id IS NOT NULL THEN RAISE EXCEPTION 'PUBLISH_MONITOR_TARGET_ALREADY_CONNECTED' USING ERRCODE='PT409'; END IF;

@@ -71,9 +71,11 @@ describe('publish-monitor connect flow', () => {
       json(200, { id: 'spc_new', platform: 'facebook', status: 'connected', external_id: EXTERNAL }),
       json(200, { id: 'spc_other', platform: 'facebook', status: 'connected', external_id: 'c'.repeat(32) + '.' + 'd'.repeat(32) }),
       json(404, {}),
+      json(200, { id: 'spc_off', platform: 'facebook', status: 'disconnected', external_id: EXTERNAL }),
     ]);
-    const result = await recordCallback(db.db, p.deps, actor, request, ['spc_new', 'spc_other', 'spc_gone', '../x', 'spc_new']);
-    expect(p.urls.map(u => u.split('/').pop())).toEqual(['spc_new', 'spc_other', 'spc_gone']);
+    const result = await recordCallback(db.db, p.deps, actor, request,
+      ['spc_new', 'spc_other', 'spc_gone', 'spc_off', '../x', 'spc_new']);
+    expect(p.urls.map(u => u.split('/').pop())).toEqual(['spc_new', 'spc_other', 'spc_gone', 'spc_off']);
     expect(db.calls[0]!.args.p_candidates).toEqual([
       { providerAccountId: 'spc_new', platform: 'facebook', externalId: EXTERNAL },
       { providerAccountId: 'spc_other', platform: 'facebook', externalId: 'c'.repeat(32) + '.' + 'd'.repeat(32) },
@@ -83,12 +85,18 @@ describe('publish-monitor connect flow', () => {
     await expect(recordCallback(rpc({}).db, busy.deps, actor, request, ['spc_new'])).rejects.toThrow('PUBLISH_MONITOR_PROVIDER_BUSY');
   });
 
-  it('confirms one picked account and reports refusals', async () => {
+  it('re-reads the picked account and passes its current facts for the database to check', async () => {
+    const live = () => json(200, { id: 'spc_1', platform: 'facebook', status: 'connected', external_id: EXTERNAL });
     const db = rpc({ publish_monitor_connect_confirm: { data: { connectionId: conn, unselected: ['spc_2'] } } });
-    expect(await confirmConnect(db.db, actor, request, 'spc_1', true)).toEqual({ connectionId: conn, unselected: ['spc_2'] });
-    expect(db.calls[0]!.args).toEqual({ a: actor, p_request_id: request, p_provider_account_id: 'spc_1', p_auto_track: true });
-    const owned = rpc({ publish_monitor_connect_confirm: { error: { message: 'PUBLISH_MONITOR_ACCOUNT_OWNED_ELSEWHERE' } } });
-    await expect(confirmConnect(owned.db, actor, request, 'spc_1', false)).rejects.toThrow('PUBLISH_MONITOR_ACCOUNT_OWNED_ELSEWHERE');
-    await expect(confirmConnect(rpc({}).db, actor, request, 'a/b', false)).rejects.toThrow();
+    expect(await confirmConnect(db.db, provider([live()]).deps, actor, request, 'spc_1', true))
+      .toEqual({ connectionId: conn, unselected: ['spc_2'] });
+    expect(db.calls[0]!.args).toEqual({ a: actor, p_request_id: request, p_provider_account_id: 'spc_1', p_auto_track: true,
+      p_current: { providerAccountId: 'spc_1', platform: 'facebook', externalId: EXTERNAL, status: 'connected' } });
+    const changed = rpc({ publish_monitor_connect_confirm: { error: { message: 'PUBLISH_MONITOR_AUTHORIZATION_CHANGED' } } });
+    await expect(confirmConnect(changed.db, provider([live()]).deps, actor, request, 'spc_1', false))
+      .rejects.toThrow('PUBLISH_MONITOR_AUTHORIZATION_CHANGED');
+    await expect(confirmConnect(rpc({}).db, provider([json(404, {})]).deps, actor, request, 'spc_1', false))
+      .rejects.toThrow('PUBLISH_MONITOR_AUTHORIZATION_CHANGED');
+    await expect(confirmConnect(rpc({}).db, provider([]).deps, actor, request, 'a/b', false)).rejects.toThrow();
   });
 });
