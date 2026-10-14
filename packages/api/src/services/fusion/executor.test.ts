@@ -70,6 +70,10 @@ describe('Fusion executor', () => {
     const result = await h.executor.run(run, { runId: 'run-1', id: 'call-1', state: 'prepared', fresh: false }, () => 'usable');
     expect(result).toEqual({ state: 'judged', verdict: 'no_delivery' });
     expect(h.calls.slice(0, 3)).toEqual(['rotate', 'dispatch', 'fusion_call_verdict:no_delivery']);
+    expect(h.gate).toHaveBeenCalledWith('actor', 1, 'bill2.v2');
+    h.gate.mockResolvedValueOnce({ ok: false, reason: 'call_limited', retryAfter: 30, window: 'minute' } as never);
+    await expect(h.executor.run(run, { runId: 'run-1', id: 'call-1', state: 'prepared', fresh: false }, () => 'usable')).rejects.toThrow();
+    expect(h.calls.filter(c => c === 'rotate')).toHaveLength(1);
     expect(h.calls).not.toContain('fusion_call_output_save:');
   });
   it('leaves unreadable or unconfirmed responses to recovery, with no saved body and no verdict', async () => {

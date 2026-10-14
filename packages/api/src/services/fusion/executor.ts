@@ -67,9 +67,12 @@ export function fusionExecutor(deps: { billing: Billing; admin: SupabaseClient; 
     async run(run: AdmittedFusionRun, claimed: FusionClaimedCall, judge: (text: string) => FusionBodyVerdict,
       onChunk?: (chunk: string) => void): Promise<FusionCallOutcome> {
       deps.budget.modelCallTimeout(OPENROUTER_RESPONSE_TIMEOUT_MS);
-      // A replayed claim carries no token: rotate one for a call that was never dispatched.
-      if (!claimed.fresh && !(await billing.rotatePrepared(run.runId, claimed.id, run.call))) {
-        return { state: 'pending', reason: 'not_dispatched' };
+      // A replayed claim carries no token: rotate one for a call that was never dispatched. Whether the
+      // original claim passed the call gate is not durable (a crash may fall between claim and gate), so a
+      // call dispatched through this path passes the gate itself (#954 review).
+      if (!claimed.fresh) {
+        requireNewWork(await deps.callGate(actorId, 1, 'bill2.v2'));
+        if (!(await billing.rotatePrepared(run.runId, claimed.id, run.call))) return { state: 'pending', reason: 'not_dispatched' };
       }
       const dispatch = await billing.dispatchOnce(claimed.id, run.body, onChunk);
       if (dispatch.transportNotStarted) return { state: 'pending', reason: 'not_started' };
