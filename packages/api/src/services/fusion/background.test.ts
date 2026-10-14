@@ -39,7 +39,7 @@ type Call = { callId: string; dispatched: boolean };
 function fakeFlow(step: { state?: string; waiting?: 'credits' | 'calls'; calls?: Call[] }, dispatched: string[], gate?: Promise<void>) {
   return () => ({
     continue: async () => ({ review: { state: step.state ?? 'running' }, calls: step.calls ?? [], waiting: step.waiting }),
-    dispatch: async (_review: string, callId: string) => { await gate; dispatched.push(callId); },
+    dispatch: async (_review: string, callId: string) => { await gate; dispatched.push(callId); return { state: 'judged', verdict: 'usable' }; },
   }) as never;
 }
 
@@ -118,6 +118,32 @@ describe('review background', () => {
       flow: fakeFlow({ calls: [{ callId: 'a', dispatched: false }] }, dispatched) }))
       .toEqual({ next: true, reason: 'advanced', dispatched: 1 });
     expect(dispatched).toEqual(['a']);
+  });
+
+  it.each(['not_started', 'not_dispatched'])('fulfilled %s outcomes stop and preserve retry capacity', async reason => {
+    const { db, lease } = leaseDb({ count: MAX_ADVANCES - 1 });
+    const flow = () => ({
+      continue: async () => ({ review: { state: 'running' }, calls: [{ callId: 'a', dispatched: false }] }),
+      dispatch: async () => ({ state: 'pending', reason }),
+    }) as never;
+    for (let i = 0; i < 35; i++) {
+      expect(await advanceReview({ admin: db, reviewId, flow })).toEqual({ next: false, reason: 'failed', dispatched: 0 });
+    }
+    expect(lease.count).toBe(MAX_ADVANCES - 1);
+    expect(await advanceReview({ admin: db, reviewId,
+      flow: fakeFlow({ calls: [{ callId: 'a', dispatched: false }] }, []) }))
+      .toEqual({ next: true, reason: 'advanced', dispatched: 1 });
+  });
+
+  it.each(['receipt_pending', 'response_unreadable', 'closed'])('counts dispatched %s alongside a refused call', async reason => {
+    const { db, lease } = leaseDb();
+    const flow = () => ({
+      continue: async () => ({ review: { state: 'running' },
+        calls: [{ callId: 'a', dispatched: false }, { callId: 'b', dispatched: false }] }),
+      dispatch: async (_review: string, callId: string) => ({ state: 'pending', reason: callId === 'a' ? reason : 'not_started' }),
+    }) as never;
+    expect(await advanceReview({ admin: db, reviewId, flow })).toEqual({ next: true, reason: 'advanced', dispatched: 1 });
+    expect(lease.count).toBe(1);
   });
 
   it('a failing step stops the relay with the lease released; past the advance limit nothing runs and an alert is logged', async () => {

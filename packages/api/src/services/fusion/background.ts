@@ -88,7 +88,9 @@ export async function advanceReview(input: { admin: SupabaseClient; reviewId: st
       const results = await Promise.allSettled(calls.map(call => flow.dispatch(reviewId, call.callId)));
       const failed = results.filter(result => result.status === 'rejected').length;
       if (failed) logger.warn('billing', 'fusion_review_dispatch_failed', { reviewId, failed });
-      const dispatched = calls.length - failed;
+      const dispatched = results.filter(result => result.status === 'fulfilled'
+        && (result.value.state === 'judged'
+          || !['not_started', 'not_dispatched'].includes(result.value.reason))).length;
       // No accepted dispatch: stop this chain and refund the attempt so a later retry can recover from an outage.
       if (!dispatched) return { next: false, reason: 'failed', dispatched: 0 };
       // Partial progress may continue; dispatchOnce still prevents resending accepted calls.
