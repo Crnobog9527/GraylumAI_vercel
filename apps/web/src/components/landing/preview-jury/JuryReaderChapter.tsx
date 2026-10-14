@@ -1,7 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 'use client';
 
-import { useState } from 'react';
 import { ChevronDown, Gavel, Link2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { DetailIssue, DetailSection, JurySeatNames, RulingFields, Seat } from './jury-events';

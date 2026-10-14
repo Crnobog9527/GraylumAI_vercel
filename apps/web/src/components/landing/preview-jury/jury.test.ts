@@ -23,7 +23,10 @@ import { failedSeatsAt } from './jury-progress';
 import { buildScenes, playbackLength, skippedStages, stageIndex } from './jury-scenes';
 import { findScenario, JURY_SCENARIOS } from './jury-scripts';
 import { REPORT_SECTIONS } from './jury-mock-reviews';
-import { JuryResults } from './JuryResults';
+import { JuryReader } from './JuryReader';
+import { changeHunks, sentences } from './jury-hunks';
+import { remainingMs, remainingText, totalText } from './jury-eta';
+import { readerChapters, readingMinutes, summaryLines } from './jury-reader';
 import { JuryStatic } from './JuryStatic';
 
 const events = (id: string): JuryEvent[] => findScenario(id).arrivals.flatMap(arrival => arrival.events);
@@ -323,23 +326,61 @@ describe('seat names and static rendering', () => {
     }
   });
 
-  it('opens with the short version only: how many chapters changed and at most three points, chapters on request', () => {
+  it('opens with 30 秒看懂, shows changed chapters open with their choice and the rest as one line', () => {
     const { detail } = findScenario('full');
-    const html = renderToStaticMarkup(createElement(JuryResults, { detail, names: DEFAULT_SEAT_NAMES, onOpenRecord: () => {} }));
-    const changed = choosable(detail.summary.sections).length;
-    expect(html).toContain(`修订稿改了 ${changed} 章`);
-    const points = keyPoints(detail, REPORT_SECTIONS);
-    expect(points.length).toBeGreaterThan(0);
-    expect(points.length).toBeLessThanOrEqual(3);
-    for (const point of points) expect(html).toContain(point.text);
-    expect(html).not.toContain('采用修订版');
-    expect(html).toContain('逐章看');
-    expect(html).toContain('其余 6 章评审团没有意见');
+    const html = renderToStaticMarkup(createElement(JuryReader, { detail, names: DEFAULT_SEAT_NAMES }));
+    const changed = choosable(detail.summary.sections);
+    expect(html).toContain('30 秒看懂');
+    for (const line of summaryLines(detail)) expect(html).toContain(line.text);
+    expect(summaryLines(detail)).toHaveLength(4);
+    expect(html).toContain(`评审改了 ${changed.length} 章，最重要的 3 条`);
+    for (const point of keyPoints(detail, REPORT_SECTIONS)) expect(html).toContain(point.text);
+    expect(html).toContain(`已选 0/${changed.length}`);
+    expect(html).toContain(`预计阅读约 ${readingMinutes(detail, readerChapters(detail))} 分钟`);
+    expect(html.match(/采用修订版/g)?.length).toBe(changed.length);
+    expect(html).toContain('只看改动');
+    expect(html).toContain('确认');
+    // An unchanged chapter is one line: its title and what it says, no full text.
+    expect(html).toContain('第 5 章 同类账号');
+    expect(html.match(/看这一章全文/g) ?? []).toHaveLength(0);
     const failedDetail = findScenario('failed').detail;
-    const failed = renderToStaticMarkup(createElement(JuryResults, { detail: failedDetail, names: DEFAULT_SEAT_NAMES, onOpenRecord: () => {} }));
-    expect(failed).toContain('修订稿没有生成成功');
+    const failed = renderToStaticMarkup(createElement(JuryReader, { detail: failedDetail, names: DEFAULT_SEAT_NAMES }));
+    expect(failed).toContain('修订稿没有生成成功，原文没有任何改动');
     expect(failed).not.toContain('采用修订版');
+    expect(failed).not.toContain('已选 0/');
     expect(keyPoints(failedDetail, REPORT_SECTIONS)[0]?.text).toBeTruthy();
+  });
+
+  it('shows only the changed sentences of a chapter, one sentence of context around each, the rest folded', () => {
+    for (const { original, revised } of Object.values(REVISION_TEXT)) {
+      const hunks = changeHunks(original, revised);
+      expect(hunks.some(hunk => hunk.type === 'change')).toBe(true);
+      const rebuilt = (side: 'before' | 'after') => hunks.map(hunk => (hunk.type === 'change' ? hunk[side] : hunk.text)).join('');
+      expect(rebuilt('before')).toBe(sentences(original).join(''));
+      expect(rebuilt('after')).toBe(sentences(revised).join(''));
+    }
+    const money = changeHunks(REVISION_TEXT['第 10 章 变现路径'].original, REVISION_TEXT['第 10 章 变现路径'].revised);
+    expect(money.map(hunk => hunk.type)).toEqual(['folded', 'context', 'change', 'context', 'folded']);
+  });
+
+  it('estimates the time left from the measured parts, never going up', () => {
+    const full = buildScenes(findScenario('full').arrivals);
+    const consensus = buildScenes(findScenario('consensus').arrivals);
+    expect(remainingMs(full, 0)).toBe(210_000);
+    expect(remainingMs(consensus, 0)).toBe(150_000);
+    expect(totalText(full)).toBe('约 3–4 分钟');
+    expect(totalText(consensus)).toBe('约 2–3 分钟');
+    let last = Infinity;
+    for (let clock = 0; clock <= playbackLength(full); clock += 1000) {
+      const left = remainingMs(full, clock);
+      expect(left).toBeLessThanOrEqual(last);
+      last = left;
+    }
+    expect(remainingMs(full, playbackLength(full))).toBe(0);
+    expect(remainingText(150_000)).toBe('还剩约 2 分 30 秒');
+    expect(remainingText(120_000)).toBe('还剩约 2 分钟');
+    expect(remainingText(41_000)).toBe('还剩约 50 秒');
+    expect(remainingText(5_000)).toBe('马上就好');
   });
 
   it('ranks debated rulings first among the key points, and cuts a chapter\'s reason to its first sentence', () => {
