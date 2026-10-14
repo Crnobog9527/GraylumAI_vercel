@@ -142,6 +142,13 @@ export function deskAt(scenes: readonly Scene[], clock: number, final = false): 
 
 function focusOf(scene: Scene | null, clock: number): string | null {
   switch (scene?.kind) {
+    case 'reading':
+    case 'writing': {
+      // Follow the readers down the page: the topmost chapter someone is reading, so the others sit below it.
+      const order = REPORT_CHAPTERS.map(chapter => chapter.title);
+      const at = Object.values(readingOf(scene, clock)).sort((left, right) => order.indexOf(left) - order.indexOf(right));
+      return at[0] ?? null;
+    }
     case 'steelman': return DECISION_SECTION[scene.decision];
     case 'critique': return scene.issues[Math.max(0, issueIndexAt(scene, clock))]?.section ?? null;
     case 'divergence': return DECISION_SECTION[scene.split.decision];

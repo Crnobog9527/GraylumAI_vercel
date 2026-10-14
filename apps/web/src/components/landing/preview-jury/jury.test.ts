@@ -135,6 +135,7 @@ describe('one stage at a time', () => {
   it('shows reviewers reading until their answer arrives, and greys out a reviewer who failed', () => {
     const scenes = buildScenes(findScenario('full').arrivals);
     expect(deskAt(scenes, 10_000).reading.A).toBeTruthy();
+    expect(Object.values(deskAt(scenes, 10_000).reading)).toContain(deskAt(scenes, 10_000).focus);
     expect(deskAt(scenes, 22_500).reading.A).toBeUndefined();
     expect(seatStates(sceneAt(scenes, 22_500), 22_500, [], false).A.text).toBe('已交卷');
     const failedScenes = buildScenes(findScenario('failed').arrivals);
