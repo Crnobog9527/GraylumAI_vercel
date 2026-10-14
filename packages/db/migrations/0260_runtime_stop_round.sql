@@ -13,7 +13,7 @@ DO $migration$
 DECLARE definition text; source_md5 text; patched text;
 BEGIN
  definition:=pg_get_functiondef('public.runtime_execution(uuid,uuid,text,jsonb)'::regprocedure);source_md5:=md5(definition);
- IF source_md5='__TARGET_MD5__' THEN RETURN;END IF;
+ IF source_md5='2454764d7936ea176717506a9aa8c658' THEN RETURN;END IF;
  IF source_md5<>'6f66e0feeaba637dae8f96acdf2c4e00' THEN RAISE EXCEPTION 'STOP_ROUND_SOURCE_MISMATCH: runtime_execution(uuid,uuid,text,jsonb)';END IF;
  IF (length(definition)-length(replace(definition,$a1$   OR (p_result ? 'source' AND p_result->>'source' NOT IN ('assistant','message','final'))
    OR EXISTS(SELECT 1 FROM jsonb_object_keys(p_result) k WHERE k NOT IN ('stopAt','source'))$a1$,'')))
@@ -28,6 +28,6 @@ BEGIN
    OR EXISTS(SELECT 1 FROM jsonb_object_keys(p_result) k WHERE k NOT IN ('stopAt','source','call'))$b1$);
  EXECUTE definition;
  patched:=md5(pg_get_functiondef('public.runtime_execution(uuid,uuid,text,jsonb)'::regprocedure));
- IF patched<>'__TARGET_MD5__' THEN RAISE EXCEPTION 'STOP_ROUND_TARGET_MISMATCH: %',patched;END IF;
+ IF patched<>'2454764d7936ea176717506a9aa8c658' THEN RAISE EXCEPTION 'STOP_ROUND_TARGET_MISMATCH: %',patched;END IF;
 END $migration$;
 COMMIT;
