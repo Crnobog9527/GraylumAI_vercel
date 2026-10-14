@@ -151,6 +151,38 @@
   不悄悄去掉模型、用更少的模型降级运行（评审团是管理员指定的 3–8 个模型，人数变了就改变了质量和价格）。
   运行中某个模型确认失败或结果未知不属于降级准入，按"部分失败如实展示"处理：本轮有至少 1 个成功意见就照常汇总，页面写明哪几个模型没给出意见。复用 `paygRuntime.ts` 的 `measureCallInput` / `fitNativeRequestOutput`。
 
+### 2.2a 评审过程事件（给前端动画，Owner 2026-10-14）
+
+Owner 要求评审过程中让用户看到评审团的思考和互相挑刺。前端动画只按下面的事件播放，事件全部由服务端从**真实的评审记录和已保存的输出**推导，
+没有对应的真实数据就没有事件，不做模拟表演。
+
+- **怎么取**：`fusionReview.events({ reviewId, after? })` 返回 `{ events, ended }`。`events` 按 `seq` 递增；传 `after`（上次拿到的最大 `seq`）
+  只返回更新的。事件只追加、不改写、不重排：同一次评审任何时候重新推导，前面的事件内容和 `seq` 都不变。刷新页面后从 `after` 不传开始读，
+  就能完整恢复；不加新表，也不依赖流式连接。
+- **什么时候出现**：某个评审开始调用时出 `reviewer_started`；它的回答通过宿主检查后，这个评审的 `decision` / `issue` / `response` 一次性全部出现
+  （前端可以逐条播放，但只能播放已经拿到的事件）；没有通过时出 `reviewer_failed`。汇总同理。
+- **文字限制**：所有文字字段都是摘要，最长 120 个字符（超出截断并以"…"结尾），不放报告全文和完整意见。评审只用代号 A/B/C（按设置里的评审顺序），
+  不出现模型名。
+
+公共字段：`{ seq: number, type: string, round?: 1 | 2, reviewer?: "A" | "B" | "C" }`，其余字段见下表。
+
+| type | 什么时候 | 其他字段 |
+| --- | --- | --- |
+| `review_started` | 评审开始（读报告） | `reviewers: ["A","B","C"]`, `sections: number`（报告章节数） |
+| `reviewer_started` | 某个评审开始调用 | `round`, `reviewer` |
+| `decision` | 评审的钢人判断，每个关键决定一条 | `round`, `reviewer`, `decision: "positioning"\|"audience"\|"platform"\|"monetization"`, `strongestCase`, `strongestAlternative`, `verdict: "keep"\|"change"` |
+| `issue` | 评审的问题，每条一条（宿主丢掉的笼统意见不出现） | `round`, `reviewer`, `section`（章节标题）, `perspective`, `severity: "critical"\|"major"\|"minor"`, `problem` |
+| `reviewer_failed` | 某个评审没给出可用意见 | `round`, `reviewer`, `reason: "format"\|"no_delivery"\|"stopped"` |
+| `disagreement` | 第 1 轮结束、发现分歧（每个有分歧的决定一条） | `decision`, `keep: ["A",...]`, `change: ["B",...]` |
+| `response` | 第 2 轮评审回应别人，每位被回应的评审一条 | `round: 2`, `reviewer`, `to`, `strongestView`, `stance: "agree"\|"disagree"` |
+| `summary_started` | 汇总开始调用 | `round` |
+| `adjudication` | 汇总的裁决记录，每条一条 | `issue`, `reviewers: ["A",...]`, `single: boolean`, `adopted: boolean`, `reason` |
+| `revision_ready` | 修订稿通过宿主检查并已交给 R14 | `changedSections: number`, `changedFields: number`, `revisionId` |
+| `revision_failed` | 汇总没通过宿主检查 | `reason`（宿主检查代号，例如 `REVISION_NOTES`） |
+| `review_ended` | 评审结束（任何结局） | `state`, `outcome` |
+
+另外：`ended=true` 表示评审已结束，之后不会再有新事件。没有分歧时不会出现 `disagreement` 和 `response`，直接到 `summary_started`。
+
 ### 2.3 和 FUSION-COMPARE 共用哪些模块
 
 | 模块 | 归属 | 评审用 | 对比用 |
