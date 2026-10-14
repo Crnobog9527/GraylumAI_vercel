@@ -8,6 +8,17 @@ import {
   describeErasureError, isAccountClosedError, isRenewalBlockedError, type AccountErasurePreview,
 } from '@/lib/account-erasure';
 
+/**
+ * Facts count only after a read that finished successfully during this opening of the dialog: a cached
+ * preview from an earlier opening must not offer "继续" while loading, paused (offline) or failed.
+ */
+export function settledPreview(query: {
+  data?: unknown; fetchStatus: 'fetching' | 'paused' | 'idle'; error: unknown; dataUpdatedAt: number;
+}, openedAt: number) {
+  if (query.fetchStatus !== 'idle' || query.error || query.dataUpdatedAt < openedAt) return undefined;
+  return query.data as AccountErasurePreview | undefined;
+}
+
 export type ErasureStep = 'impact' | 'verify' | 'confirm' | 'done';
 const CODE_COOLDOWN_SECONDS = 60;
 
@@ -21,6 +32,7 @@ export function useAccountErasure(options: { email?: string; usesPassword: boole
   const [captchaToken, setCaptchaToken] = useState<string | null>(null);
   const [captchaKey, setCaptchaKey] = useState(0);
   const requestId = useRef<string | null>(null);
+  const [openedAt, setOpenedAt] = useState(0);
   const preview = trpc.account.erasurePreview.useQuery(undefined, { enabled: open, staleTime: 0 });
   const confirmMutation = trpc.account.erasureConfirm.useMutation();
   const portal = trpc.payments.createCustomerPortalSession.useMutation();
@@ -33,6 +45,7 @@ export function useAccountErasure(options: { email?: string; usesPassword: boole
     setCaptchaToken(null);
     // One idempotency key per dialog session; a retry of the same confirm reuses it.
     requestId.current = nextOpen ? crypto.randomUUID() : null;
+    if (nextOpen) setOpenedAt(Date.now());
   };
 
   const run = async (task: () => Promise<void>) => {
@@ -106,9 +119,9 @@ export function useAccountErasure(options: { email?: string; usesPassword: boole
 
   return {
     open, step, secret, busy, error, codeSent: codeSentAt !== null,
-    preview: preview.data as AccountErasurePreview | undefined,
-    previewLoading: preview.isLoading,
-    previewFailed: Boolean(preview.error),
+    preview: settledPreview(preview, openedAt),
+    previewLoading: preview.fetchStatus !== 'idle',
+    previewFailed: Boolean(preview.error) && !preview.isFetching,
     captchaKey, setCaptchaToken, captchaExpired: () => setError(CAPTCHA_EXPIRED_MESSAGE),
     captchaUnavailable: () => setError('人机验证暂不可用，请稍后重试。'),
     setOpen: reset, setStep, setSecret, sendCode, verify, confirm, openPortal,

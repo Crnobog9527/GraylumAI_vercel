@@ -11,6 +11,7 @@ let css: string;
 const entry = fileURLToPath(new URL('./__frame_delete_fixture__.js', import.meta.url));
 const SESSION = '00000000-0000-4000-8000-0000000000a1';
 const WORK_SESSION = '00000000-0000-4000-8000-0000000000b2';
+const OTHER = '00000000-0000-4000-8000-0000000000c3';
 
 // Everything around the list is stubbed. The deletion call is held by the page (window.erasures), so a
 // test decides when and how the server answers and can check what the list shows meanwhile.
@@ -20,14 +21,21 @@ const stubs: Array<[(id: string) => boolean, string]> = [
     // Any utils path (utils.opc.conversations.setData…) is a no-op; the list itself stays static.
     const deep=()=>new Proxy(()=>{},{get:(_,key)=>key==='then'?undefined:deep(),apply:()=>undefined});
     const client={account:{conversationErasure:{mutate:input=>new Promise((resolve,reject)=>
-      window.erasures.push({input,resolve,reject}))}}};
+      window.erasures.push({input,resolve,reject}))},
+      conversationErasureCleanup:{mutate:async input=>{window.cleanups.push(input);
+        return {cleaned:true,reviewRequired:location.hash==='#review'};}}},
+      opc:{conversationRename:{mutate:async input=>{window.renames.push(input);
+        if(location.hash==='#rename-fails')throw new Error('OPC_CONVERSATION_ERASED');
+        if(location.hash==='#rename-slow')await new Promise(resolve=>{window.releaseRename=resolve;});
+        return {sessionId:input.sessionId,name:input.name};}}}};
     export const trpc={useUtils:()=>new Proxy({},{get:(_,key)=>key==='client'?client:deep()}),
       opc:{library:{useQuery:()=>q(location.hash==='#strategy'?{businesses:[{businessId:'b1',accounts:[{projectId:'p1',
         platform:'抖音',account:'测试号',strategyDraftId:'d1',sourceVersionId:'v1',sourceVersion:1,items:[]}]}]}
         :location.hash==='#work'?{businesses:[{businessId:'b1',accounts:[{projectId:'p1',platform:'抖音',account:'测试号',
         items:[{workItemId:'w1',sessionId:'${WORK_SESSION}',title:'口播稿工作',brief:null,day:'2026-10-13',revision:1}]}]}]}
         :{accounts:[]})},list:{useQuery:()=>q([])},
-        conversations:{useQuery:()=>q([{sessionId:'${SESSION}',title:'周末选题讨论',lastActivityAt:'2026-10-13T00:00:00Z'}])},
+        conversations:{useQuery:()=>q([{sessionId:'${SESSION}',title:'周末选题讨论',lastActivityAt:'2026-10-13T00:00:00Z'},
+          ...(location.hash==='#rename-slow'?[{sessionId:'${OTHER}',title:'第二个对话',lastActivityAt:'2026-10-12T00:00:00Z'}]:[])])},
         workUiChange:{useMutation:m},accountUiChange:{useMutation:m}},
       user:{getUserProfile:{useQuery:()=>q(null)}},ticket:{createTicket:{useMutation:m}}};`],
   [id => id.endsWith('/hooks/use-credits'), 'export const useCreditsBalance=()=>({data:undefined});'],
@@ -58,7 +66,7 @@ beforeAll(async () => {
       if (id.startsWith('\0stub')) return stubs[Number(id.slice(5))][1];
       if (id === entry) return `import React from 'react'; import {createRoot} from 'react-dom/client';
         import {WorkspaceFrame} from ${JSON.stringify(source)};
-        window.opened=[];window.erasures=[];window.replaced=[];window.erased=[];
+        window.opened=[];window.erasures=[];window.replaced=[];window.erased=[];window.cleanups=[];window.renames=[];
         const root=createRoot(document.getElementById('root'));
         const frame=()=>React.createElement(WorkspaceFrame,null,'对话内容');
         root.render(frame());
@@ -97,7 +105,7 @@ async function open(width: number, run: (page: Page) => Promise<void>, hash = ''
 const more = (page: Page) => page.getByRole('button', { name: '周末选题讨论的更多操作' });
 
 type Held = { input: unknown; resolve: (value: unknown) => void; reject: (error: unknown) => void };
-type Win = { opened: unknown[]; erasures: Held[]; replaced: string[]; erased: unknown[] };
+type Win = { opened: unknown[]; erasures: Held[]; replaced: string[]; erased: unknown[]; cleanups: unknown[]; renames: unknown[] };
 const held = (page: Page) => page.evaluate(() => (window as unknown as Win).erasures.map(item => item.input));
 const answer = (page: Page, ok: boolean, message = '') => page.evaluate(([okay, text]) => {
   const call = (window as unknown as Win).erasures.at(-1)!;
@@ -134,6 +142,8 @@ it.each([1280, 375])('removes the row and closes the dialog at once, before the 
     await answer(page, true);
     await ui(page.getByText('周末选题讨论')).toHaveCount(0);
     await ui.poll(() => page.evaluate(() => (window as unknown as Win).erased)).toEqual([{ kind: 'session', id: SESSION }]);
+    // Physical cleanup starts in the background only after the server confirmed the deletion.
+    await ui.poll(() => page.evaluate(() => (window as unknown as Win).cleanups)).toEqual([{ sessionId: SESSION }]);
     await ui(page.getByRole('alert')).toHaveCount(0);
   }));
 
@@ -144,6 +154,7 @@ it('puts the row back with a plain reason when the server refuses, and never rep
   await ui(page.getByText('周末选题讨论')).toBeVisible();
   await ui(page.getByRole('alert')).toContainText('没有删除，已放回列表');
   expect(await page.evaluate(() => (window as unknown as Win).erased)).toEqual([]);
+  expect(await page.evaluate(() => (window as unknown as Win).cleanups)).toEqual([]);
 }));
 
 it('keeps the row hidden and still reports a failure after the page changes mid-deletion', () => open(1280, async page => {
@@ -169,6 +180,54 @@ it('says so when the content is gone but money records are still being checked',
   await answer(page, true, 'review_required');
   await ui(page.getByRole('status')).toContainText('部分账务记录仍在核对中');
   await ui(page.getByText('周末选题讨论')).toHaveCount(0);
+}));
+
+it('shows the accounting notice when the background cleanup finds money still being checked', () => open(1280, async page => {
+  await confirmDelete(page);
+  await answer(page, true);
+  await ui(page.getByRole('status')).toContainText('部分账务记录仍在核对中');
+  await ui(page.getByText('周末选题讨论')).toHaveCount(0);
+}, '#review'));
+
+async function reload(page: Page) {
+  // Record every paint after the reload that shows the deleted row, not only the settled state.
+  await page.addInitScript(() => {
+    const seen = { flashes: 0 };
+    (window as unknown as { paints: typeof seen }).paints = seen;
+    const tick = () => { if (document.body?.innerText.includes('周末选题讨论')) seen.flashes += 1; requestAnimationFrame(tick); };
+    requestAnimationFrame(tick);
+  });
+  await page.reload();
+  await page.addStyleTag({ content: css });
+  await page.addScriptTag({ content: code });
+  await ui(page.getByText('查看归档')).toBeVisible();
+}
+
+it('a reload right after deleting keeps the row gone and finishes the deletion', () => open(1280, async page => {
+  await confirmDelete(page);
+  await ui(page.getByText('周末选题讨论')).toHaveCount(0);
+  // The first request is still in flight (never answered) when the page reloads.
+  await reload(page);
+  await page.waitForTimeout(300);
+  await ui(page.getByText('周末选题讨论')).toHaveCount(0);
+  // Not a single painted frame after the reload showed the row.
+  expect(await page.evaluate(() => (window as unknown as { paints: { flashes: number } }).paints.flashes)).toBe(0);
+  // The deletion is sent again from the new page (it is idempotent on the server).
+  await ui.poll(() => held(page)).toEqual([{ sessionId: SESSION }]);
+  await answer(page, true);
+  await ui.poll(() => page.evaluate(() => (window as unknown as Win).cleanups)).toEqual([{ sessionId: SESSION }]);
+  expect(await page.evaluate(() => Object.keys(sessionStorage).filter(key => key.includes('pending-conversation-erasure')))).toEqual([]);
+  await reload(page);
+  await ui(page.getByText('周末选题讨论')).toBeVisible();
+}));
+
+it('a reload during a deletion the server then refuses puts the row back with a reason', () => open(1280, async page => {
+  await confirmDelete(page);
+  await reload(page);
+  await ui.poll(() => held(page)).toHaveLength(1);
+  await answer(page, false, 'CONTENT_NOT_FOUND');
+  await ui(page.getByText('周末选题讨论')).toBeVisible();
+  await ui(page.getByRole('alert')).toContainText('没有确认删除，已放回列表');
 }));
 
 it('cancel keeps the conversation and sends nothing', () => open(1280, async page => {
@@ -214,6 +273,82 @@ it('deletes a work conversation through the same one-click dialog; the work itse
   expect(await page.evaluate(() => (window as unknown as Win).opened)).toEqual([]);
   await ui(page.getByText('口播稿工作')).toBeVisible();
 }, '#work'));
+
+const renames = (page: Page) => page.evaluate(() => (window as unknown as Win).renames);
+async function startRename(page: Page) {
+  await openMenu(page);
+  await page.getByRole('menuitem', { name: '重命名' }).click();
+  const input = page.getByRole('textbox', { name: '重命名对话' });
+  await ui(input).toHaveValue('周末选题讨论');
+  await ui(input).toBeFocused();
+  return input;
+}
+
+it('renames a conversation inline from the ⋯ menu; Enter saves the trimmed name', () => open(1280, async page => {
+  const input = await startRename(page);
+  await input.fill('  新名字  ');
+  await page.keyboard.press('Enter');
+  await ui(input).toHaveCount(0);
+  await ui.poll(() => renames(page)).toEqual([{ sessionId: SESSION, name: '新名字' }]);
+
+}));
+
+it('Esc cancels a rename without saving, and an unchanged name sends nothing', () => open(1280, async page => {
+  let input = await startRename(page);
+  await input.fill('不保存');
+  await page.keyboard.press('Escape');
+  await ui(input).toHaveCount(0);
+  input = await startRename(page);
+  await page.keyboard.press('Enter');
+  await ui(input).toHaveCount(0);
+  expect(await renames(page)).toEqual([]);
+}));
+
+it('a refused rename keeps the old title and explains why', () => open(1280, async page => {
+  const input = await startRename(page);
+  await input.fill('已删的对话');
+  await page.keyboard.press('Enter');
+  await ui(page.getByRole('alert')).toContainText('这个对话已删除，不能重命名');
+  await ui(page.getByText('周末选题讨论')).toBeVisible();
+}, '#rename-fails'));
+
+it('a second conversation saves while the first rename is still pending', () => open(1280, async page => {
+  let input = await startRename(page);
+  await input.fill('第一个');
+  await page.keyboard.press('Enter');
+  await ui.poll(() => renames(page)).toHaveLength(1);
+  // The name being saved is shown at once, on top of the server list.
+  await ui(page.getByText('第一个', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: '第二个对话的更多操作' }).focus();
+  await page.keyboard.press('Enter');
+  await page.getByRole('menuitem', { name: '重命名' }).click();
+  input = page.getByRole('textbox', { name: '重命名对话' });
+  await input.fill('第二个');
+  await page.getByText('查看归档').click();
+  await ui(input).toHaveCount(0);
+  await ui.poll(() => renames(page)).toEqual([{ sessionId: SESSION, name: '第一个' }, { sessionId: OTHER, name: '第二个' }]);
+  await page.evaluate(() => (window as unknown as { releaseRename?: () => void }).releaseRename?.());
+}, '#rename-slow'));
+
+it('Enter that accepts an IME candidate does not save the name', () => open(1280, async page => {
+  const input = await startRename(page);
+  await input.fill('周末');
+  await input.evaluate(element => {
+    element.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', keyCode: 229, isComposing: true, bubbles: true }));
+  });
+  await ui(input).toBeFocused();
+  expect(await renames(page)).toEqual([]);
+  await page.keyboard.press('Enter');
+  await ui.poll(() => renames(page)).toEqual([{ sessionId: SESSION, name: '周末' }]);
+}));
+
+it('rename input fits a 375px screen', () => open(375, async page => {
+  await page.getByRole('button', { name: '打开导航' }).first().click();
+  const input = await startRename(page);
+  const box = await input.boundingBox();
+  expect(box && box.x >= 0 && box.x + box.width <= 375).toBe(true);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375);
+}));
 
 it('reaches the ⋯ button with Tab, which makes it visible', () => open(1280, async page => {
   for (let i = 0; i < 60 && !(await more(page).evaluate(el => el === document.activeElement)); i++) {

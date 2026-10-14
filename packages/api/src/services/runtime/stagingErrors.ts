@@ -5,6 +5,7 @@ import { logger } from '../../lib/logger';
 import { DatabaseReadError } from '../../lib/databaseReadError';
 import { RUNTIME_INPUT_TOO_LONG_MESSAGE } from '../../shared/runtimeInputMessages';
 import { RUNTIME_PAYG_PROFILE_REQUIRED_MESSAGE } from '../../shared/runtimeAdmissionMessages';
+import { POSITIONING_REQUIRED_MESSAGE } from '../../shared/positioningGate';
 
 const failures = {
   CONTENT_ERASED: ['PRECONDITION_FAILED', 'CONTENT_ERASED'],
@@ -48,6 +49,8 @@ const failures = {
   RUNTIME_PRICE_SNAPSHOT_STALE: ['PRECONDITION_FAILED', '模型价格太久没更新，暂时无法核对，请稍后重试或请管理员在后台重新读取。'],
   RUNTIME_PRICE_INCREASED: ['PRECONDITION_FAILED', '供应商价格已上涨，超过已批准的报价，这个模型需要重新批准报价后才能继续使用。'],
   RUNTIME_PRICE_UNKNOWN_FIELD: ['PRECONDITION_FAILED', '供应商价格里出现了系统还不认识的收费项，这个模型暂停使用，等待系统更新。'],
+  // POSITIONING-GATE: stable code first; the front end shows its guide card for it.
+  POSITIONING_REQUIRED: ['PRECONDITION_FAILED', POSITIONING_REQUIRED_MESSAGE],
 } as const;
 export type StagingFailure = keyof typeof failures;
 export class StagingAccessError extends Error {

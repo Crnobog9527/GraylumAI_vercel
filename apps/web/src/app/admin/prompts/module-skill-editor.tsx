@@ -10,6 +10,8 @@ export type SkillForm = {
   kind: 'document' | 'social'; directoryName: string; files: { path: string; base64: string }[];
   planResources?: string[]; reportGeneration?: WorkflowManifest['reportGeneration'];
   steps: { title: string; resources: string[]; information?: {id:string;title:string;required:boolean;profileKey?:string;elicitation?:'user_fact'|'agent_proposal'}[] }[]; reviewed: boolean;
+  /** POSITIONING-GATE: chosen only when creating a module; later changes use the separate setting card. */
+  socialMediaRelated?: boolean;
 };
 export const emptySkillForm = (): SkillForm => ({ kind: 'document', directoryName: '', files: [],
   steps: [{ title: '', resources: ['SKILL.md'] }], reviewed: false });
@@ -17,7 +19,8 @@ export const emptySkillForm = (): SkillForm => ({ kind: 'document', directoryNam
 /** Package fields sent to skills.saveModule; optional workflow declarations are omitted when absent. */
 export const skillPublicationFields = (form: SkillForm) => ({ kind: form.kind, files: form.files, steps: form.steps,
   ...(form.planResources ? { planResources: form.planResources } : {}),
-  ...(form.reportGeneration ? { reportGeneration: form.reportGeneration } : {}) });
+  ...(form.reportGeneration ? { reportGeneration: form.reportGeneration } : {}),
+  ...(form.socialMediaRelated !== undefined ? { socialMediaRelated: form.socialMediaRelated } : {}) });
 
 /** Only reads selected files. Never executes a package, follows links, or uploads on selection. */
 export async function readSkillFiles(files: FileList | File[]) {
@@ -44,9 +47,11 @@ export async function readSkillFiles(files: FileList | File[]) {
   return { directoryName: [...roots][0] ?? '', files: result, workflow };
 }
 
-export function ModuleSkillEditor({ value, onChange, error, onError, onReadingChange, disabled = false }: {
-  value: SkillForm; onChange: (next: SkillForm) => void; error: string; onError: (message: string) => void; onReadingChange: (reading: boolean) => void; disabled?: boolean;
+export function ModuleSkillEditor({ value, onChange, error, onError, onReadingChange, disabled = false, isNew = false }: {
+  value: SkillForm; onChange: (next: SkillForm) => void; error: string; onError: (message: string) => void;
+  onReadingChange: (reading: boolean) => void; disabled?: boolean; isNew?: boolean;
 }) {
+  const socialChoicePending = isNew && value.socialMediaRelated === undefined;
   const [reading, setReading] = useState(false);
   const declaredWorkflow = value.files.some(file=>file.path===workflowManifestPath);
   const patch = (next: Partial<SkillForm>) => onChange({ ...value, ...next, reviewed: false });
@@ -105,8 +110,25 @@ export function ModuleSkillEditor({ value, onChange, error, onError, onReadingCh
       </details>
     </div>)}
     {!declaredWorkflow && <Button type="button" variant="outline" disabled={value.steps.length >= 32} onClick={() => patch({ steps: [...value.steps, { title: '', resources: ['SKILL.md'] }] })}>添加步骤</Button>}
-    <label className="flex gap-2 text-sm"><input type="checkbox" checked={value.reviewed} onChange={e => onChange({ ...value, reviewed: e.target.checked })} />我已检查步骤顺序和各步使用的参考文件</label>
+    {isNew && <NewSkillSocialChoice value={value.socialMediaRelated} onChange={socialMediaRelated => patch({ socialMediaRelated })} />}
+    <label className="flex gap-2 text-sm">
+      <input type="checkbox" checked={value.reviewed} disabled={socialChoicePending}
+        onChange={e => onChange({ ...value, reviewed: e.target.checked })} />
+      我已检查步骤顺序和各步使用的参考文件{socialChoicePending ? '（请先选择是否与社交媒体相关）' : ''}
+    </label>
     <p className="text-xs text-[var(--text-secondary)]">对话模型使用上方指定模型；整理成果使用 AI 模型页单独配置的汇总模型。</p>
     {error && <p role="alert" className="text-red-400">{error}</p>}
+  </fieldset>;
+}
+
+/** New modules must answer this before publishing, so a social media Skill is never enabled unflagged. */
+function NewSkillSocialChoice({ value, onChange }: { value: boolean | undefined; onChange: (next: boolean) => void }) {
+  return <fieldset className="space-y-1 rounded border border-[var(--border-primary)] p-3 text-sm">
+    <legend className="px-1 font-medium">与社交媒体相关（必选）</legend>
+    <label className="flex gap-2"><input type="radio" name="new-skill-social" checked={value === true}
+      onChange={() => onChange(true)} />是：还没有确认定位的用户不能使用这个 Skill</label>
+    <label className="flex gap-2"><input type="radio" name="new-skill-social" checked={value === false}
+      onChange={() => onChange(false)} />否</label>
+    <p className="text-xs text-[var(--text-secondary)]">定位 Skill 本身请选“否”。发布后可在下方“与社交媒体相关”卡片里修改。</p>
   </fieldset>;
 }

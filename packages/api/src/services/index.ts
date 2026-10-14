@@ -12,8 +12,6 @@ export type { LogLevel, LogCategory, LogContext, AppLogger } from '../lib/logger
 export { validateEnv, validateEnvOnStartup, getSafeEnvSummary } from '../lib/envValidator';
 export type { ValidationResult } from '../lib/envValidator';
 
-// 计费服务
-export * from './billing';
 
 // 模型供应商工具
 export * from './providerUtils';

@@ -1,4 +1,5 @@
 import { PAYMENT_METHOD_ROUTES_KEY, paymentMethodRoutesSchema, readPaymentMethodRoutes } from '../services/payments/methodRouting';
+import { FUSION_SETTINGS_KEY } from '../services/fusion/settings';
 import { PAYMENT_CHANNEL_KEY, paymentChannelSettingSchema, readPaymentChannel } from '../services/payments/channelSettings';
 import { validatePaygAdminSetting } from '../services/adminSettings';
 import {
@@ -95,6 +96,9 @@ const systemSettingInputSchema = z.object({
   }
   if (setting.key === 'runtime_purpose_budgets') {
     ctx.addIssue({ code: 'custom', path: ['key'], message: '用途预算请通过专用管理接口保存' });
+  }
+  if (setting.key === FUSION_SETTINGS_KEY) {
+    ctx.addIssue({ code: 'custom', path: ['key'], message: 'Fusion 设置请通过专用管理接口保存' });
   }
   validatePaygAdminSetting(setting, ctx);
   if (setting.key === FUSION_COMPARE_SETTING && !fusionCompareLimitSchema.safeParse(setting.value).success) {
