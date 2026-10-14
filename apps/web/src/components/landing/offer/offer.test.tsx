@@ -98,10 +98,10 @@ describe('landing page sections', () => {
     expect(html).not.toContain('排程工具');
     expect(html).not.toContain('创始会员');
     expect(html).not.toContain('模型 A');
-    // With signupGrant off the 500-credit promise is left out.
+    // The page says "free trial" and never how many credits come with sign-up (Owner 2026-10-14).
     expect(html).not.toContain('500 积分');
-    expect(html).toContain('免费注册，不用绑卡。聊出来的内容随时能看、能导出，不会收回。');
-    expect(html).toContain('不用绑卡 · 聊出来的内容不会收回');
+    expect(html).not.toContain('不会收回');
+    expect(html.split('无需绑卡，免费试用').length - 1).toBeGreaterThanOrEqual(2);
     // The page never states income, follower growth or durations.
     expect(html).not.toMatch(/月入|涨粉\d|\d+\s*(分钟|小时内出)/);
   });
