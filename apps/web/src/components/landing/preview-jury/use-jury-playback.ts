@@ -18,7 +18,8 @@ export function usePrefersReducedMotion(): boolean {
 
 /**
  * The playback clock: real time × speed, stopping at the end. It ticks ten times a second (CSS carries the
- * motion) and keeps running in a background tab, as the real review would; a long gap (a throttled tab) is capped at five seconds.
+ * motion) and follows wall time even when a background tab throttles the timer, so after a return the replay
+ * shows what arrived meanwhile instead of lagging behind; pausing is the only thing that stops it.
  */
 export function useJuryPlayback(lengthMs: number, enabled: boolean) {
   const [clock, setClock] = useState(0);
@@ -33,7 +34,7 @@ export function useJuryPlayback(lengthMs: number, enabled: boolean) {
     last.current = performance.now();
     const timer = window.setInterval(() => {
       const time = performance.now();
-      const delta = Math.min(time - (last.current ?? time), 5000);
+      const delta = time - (last.current ?? time);
       last.current = time;
       setClock(value => Math.min(lengthMs, value + delta * speed));
     }, 100);
