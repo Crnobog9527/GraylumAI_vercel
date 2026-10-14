@@ -11,6 +11,12 @@ describe('outcomeUnknown', () => {
     expect(outcomeUnknown(null)).toBe(true);
   });
 
+  it('is unknown for an *_UNAVAILABLE result, which can follow a committed change', () => {
+    expect(outcomeUnknown(Object.assign(new Error('CONTENT_ERASURE_UNAVAILABLE'), { data: { code: 'SERVICE_UNAVAILABLE' } }))).toBe(true);
+    expect(outcomeUnknown(Object.assign(new Error('CONTENT_ERASURE_UNAVAILABLE'), { data: { code: 'CONFLICT' } }))).toBe(true);
+    expect(outcomeUnknown(Object.assign(new Error('busy'), { data: { code: 'SERVICE_UNAVAILABLE' } }))).toBe(true);
+  });
+
   it('is unknown when the server failed unexpectedly', () => {
     expect(outcomeUnknown(answered('INTERNAL_SERVER_ERROR'))).toBe(true);
     expect(outcomeUnknown(answered('TIMEOUT'))).toBe(true);
@@ -22,7 +28,7 @@ describe('outcomeUnknown', () => {
   });
 
   it('is known when the server refused with an application code', () => {
-    for (const code of ['CONFLICT', 'NOT_FOUND', 'TOO_MANY_REQUESTS', 'SERVICE_UNAVAILABLE', 'UNAUTHORIZED', 'BAD_REQUEST']) {
+    for (const code of ['CONFLICT', 'NOT_FOUND', 'TOO_MANY_REQUESTS', 'UNAUTHORIZED', 'BAD_REQUEST', 'PRECONDITION_FAILED']) {
       expect(outcomeUnknown(answered(code))).toBe(false);
     }
   });

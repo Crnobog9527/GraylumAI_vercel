@@ -17,6 +17,9 @@ const REFUSALS: Array<[string, string]> = [
   ['OPC_CONVERSATION_NAME_INVALID', '名字最多 80 个字，不能包含换行。'],
 ];
 
+/** Refusals about the name or the conversation itself: final even for a resend after a reload. */
+const BUSINESS_REFUSALS = REFUSALS.map(([code]) => code);
+
 export function renameFailureMessage(error: unknown) {
   const text = getErrorMessageText(error);
   return REFUSALS.find(([code]) => text.includes(code))?.[1] ?? '名字没有保存，请稍后再试。';
@@ -54,7 +57,7 @@ export function useConversationRename() {
     return next;
   }), []);
 
-  const send = useCallback((sessionId: string, name: string, attempt = 0) => {
+  const send = useCallback((sessionId: string, name: string, attempt = 0, resumed = false) => {
     const revision = revisions.current.begin(sessionId);
     rememberName(tabStorage(), sessionId, name);
     setPendingName(sessionId, name);
@@ -68,8 +71,13 @@ export function useConversationRename() {
       const latest = revisions.current.isLatest(sessionId, revision);
       // No answer (reload, network) or an unexpected server failure: the name may be saved. Keep showing
       // it and keep the record; try again shortly, and the next page load sends it again too.
-      if (refused !== null && outcomeUnknown(refused)) {
-        if (latest && attempt < 2) setTimeout(() => { if (revisions.current.isLatest(sessionId, revision)) send(sessionId, name, attempt + 1); }, 2000);
+      // A resent name (after a reload) answers only for the resend: unless the server rejects the name or
+      // the conversation itself, the original request may still have saved it, so keep it pending.
+      const settledByReplay = !resumed || BUSINESS_REFUSALS.some((code) => getErrorMessageText(refused).includes(code));
+      if (refused !== null && (outcomeUnknown(refused) || !settledByReplay)) {
+        if (latest && attempt < 2) {
+          setTimeout(() => { if (revisions.current.isLatest(sessionId, revision)) send(sessionId, name, attempt + 1, resumed); }, 2000);
+        }
         return;
       }
       // A saved non-empty name is the server's title now: put it in the list, so the screen stays right
@@ -109,7 +117,7 @@ export function useConversationRename() {
   useEffect(() => {
     if (resumed.current) return;
     resumed.current = true;
-    for (const [sessionId, name] of readNames(tabStorage())) void send(sessionId, name);
+    for (const [sessionId, name] of readNames(tabStorage())) void send(sessionId, name, 0, true);
   }, [send]);
 
   /** The title to show: a name being saved, otherwise the server's. */

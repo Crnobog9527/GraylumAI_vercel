@@ -3,7 +3,10 @@ import { existsSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { chromium, expect as ui, type Browser, type Page } from '@playwright/test';
-import { afterAll, beforeAll, expect, it } from 'vitest';
+import { afterAll, beforeAll, expect, it, vi } from 'vitest';
+
+// Real browser pages with reloads and retry waits: allow more than the 5-second default per test.
+vi.setConfig({ testTimeout: 60_000 });
 
 let browser: Browser;
 let code: string;
@@ -194,7 +197,7 @@ it('a reload that aborts the deletion request still finishes it on the new page 
     await ui.poll(() => held(page)).toEqual([{ sessionId: SESSION }]);
     await answer(page, true);
     await ui.poll(() => page.evaluate(() => (window as unknown as Win).cleanups)).toEqual([{ sessionId: SESSION }]);
-  }));
+  }), 60_000); // Includes a 2.5-second watch after the reload.
 
 it('a resumed deletion that keeps failing without an answer stays hidden and pending', () => open(1280, async page => {
   await confirmDelete(page);
@@ -206,7 +209,7 @@ it('a resumed deletion that keeps failing without an answer stays hidden and pen
   await ui(page.getByRole('status')).toContainText('删除还在处理中');
   await ui(page.getByText('周末选题讨论')).toHaveCount(0);
   expect(await page.evaluate(() => Object.keys(sessionStorage).filter(key => key.includes('pending-conversation-erasure')))).toHaveLength(1);
-}));
+}), 60_000); // Five 1.5-second retry waits.
 
 it('says so when the content is gone but money records are still being checked', () => open(1280, async page => {
   await confirmDelete(page);
