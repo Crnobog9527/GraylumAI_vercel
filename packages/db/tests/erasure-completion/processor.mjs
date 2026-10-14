@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {randomUUID} from 'node:crypto';
 import {closeAccount,fixture,call} from '../erasure-b2a/cases.mjs';
 import {ready} from '../erasure-binding/cases.mjs';
+import {recordLibraryProof} from './library-proof.mjs';
 export async function runProcessor(db,processAccountErasure,report){
  const database={async rpc(name,args){
   assert.match(name,/^[a-z_0-9]+$/);
@@ -23,11 +24,13 @@ export async function runProcessor(db,processAccountErasure,report){
   budget:{deadline:Date.now()+120000,operationTimeoutMs:5000}};
  const minimal={actor:randomUUID()};
  await db.query('INSERT INTO profiles(id,credits) VALUES($1,37)',[minimal.actor]);await closeAccount(db,minimal);
+ await recordLibraryProof(db,minimal);
  assert.deepEqual(await processAccountErasure({profileId:minimal.actor,...adapters}),
   {stage:'completed',retry:false,remaining:0,manualReview:0,errorCodes:[]});
  assert.equal(removes,1);assert.equal(storageCalls,1);
  assert.equal((await db.query('SELECT credits FROM profiles WHERE id=$1',[minimal.actor])).rows[0].credits,37);
  const normal=await ready(db,{scrub:false});
+ await recordLibraryProof(db,normal);
  const balance=(await db.query('SELECT credits FROM profiles WHERE id=$1',[normal.actor])).rows[0].credits;
  const completed=await processAccountErasure({profileId:normal.actor,...adapters});
  assert.equal(completed.stage,'completed',JSON.stringify(completed));assert.equal(completed.retry,false);
@@ -54,6 +57,7 @@ export async function runProcessor(db,processAccountErasure,report){
  report.checks.push('missing provider/cost: original money/identity retained, durable review and fixed due date, no Auth deletion');
  const uncertain={actor:randomUUID()};
  await db.query('INSERT INTO profiles(id,credits) VALUES($1,19)',[uncertain.actor]);await closeAccount(db,uncertain);
+ await recordLibraryProof(db,uncertain);
  let uncertainRemoves=0,state='present';
  const authAdapter={async getState(){return state;},async remove(){
   uncertainRemoves++;

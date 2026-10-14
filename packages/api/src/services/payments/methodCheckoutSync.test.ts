@@ -4,7 +4,7 @@ import type Stripe from 'stripe';
 import type { SupabaseClient } from '@supabase/supabase-js';
 const recover = vi.hoisted(() => vi.fn());
 vi.mock('./walletWebhook', () => ({ recoverMethodCheckout: recover }));
-import { fulfillRecoveredPaidCheckout } from './methodCheckoutSync';
+import { fulfillRecoveredPaidCheckout, syncMethodCheckoutReturn } from './methodCheckoutSync';
 
 const session = { id: 'cs_paid', mode: 'subscription', status: 'complete', payment_status: 'paid' } as Stripe.Checkout.Session;
 function db(order: unknown) {
@@ -20,6 +20,14 @@ describe('PAY-STRIPE-MP paid session recovered by a new checkout request', () =>
       session, 'user-1', legacy);
     expect(recover).toHaveBeenCalledWith(expect.anything(), expect.anything(), 'cs_paid');
     expect(legacy).not.toHaveBeenCalled();
+  });
+  it('reports the session as the recovery saw it: paid after the caller read it, kept for review, is not "no charge"', async () => {
+    // The browser returned through the cancel page; payment completed between the caller's read and the recovery's.
+    recover.mockReset().mockResolvedValue({ orderId: 'order-card', checkoutStatus: 'complete', paymentStatus: 'paid' });
+    const stale = { ...session, status: 'open', payment_status: 'unpaid' } as Stripe.Checkout.Session;
+    const result = await syncMethodCheckoutReturn(db({ status: 'pending', fulfilled_at: null }), {} as Stripe, stale, 'user-1');
+    // paymentStatus 'paid' is what makes the cancel-page notice say "payment received, under review" (canceledReturnNotice).
+    expect(result).toMatchObject({ checkoutStatus: 'complete', paymentStatus: 'paid', fulfilledAt: null });
   });
   it('keeps the legacy fulfillment for legacy orders', async () => {
     recover.mockReset().mockResolvedValue(null);

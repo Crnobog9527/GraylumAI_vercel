@@ -89,32 +89,6 @@ export const SIGNATURE_CONFIG = {
   prefix: 'GRAYLUM-HMAC-SHA256',
 };
 
-const SENSITIVE_OUTPUT_PATTERNS = [
-  /api[_-]?key\s*[:=]\s*["']?[a-zA-Z0-9-_]{20,}/i,
-  /password\s*[:=]\s*["']?[^\s"']{8,}/i,
-  /secret\s*[:=]\s*["']?[a-zA-Z0-9-_]{20,}/i,
-  /sk-[a-zA-Z0-9]{48}/i,
-  /sk-ant-[a-zA-Z0-9-_]{95}/i,
-];
-
-function maskSensitiveValue(value: string): string {
-  const trimmed = value.trim();
-  if (trimmed.length <= 4) {
-    return '****';
-  }
-
-  return `${trimmed.slice(0, 2)}${'*'.repeat(Math.max(trimmed.length - 4, 4))}${trimmed.slice(-2)}`;
-}
-
-function sanitizeSensitiveMatch(match: string): string {
-  const assignment = match.match(/^([^:=]+[:=]\s*["']?)([^"'\s]+)(["']?)$/i);
-  if (assignment) {
-    return `${assignment[1]}${maskSensitiveValue(assignment[2])}${assignment[3]}`;
-  }
-
-  return maskSensitiveValue(match);
-}
-
 function normalizeSecurityInput(message: string): string {
   return message
     .normalize('NFKC')
@@ -510,31 +484,6 @@ export async function checkRequestSignature(
   }
 }
 
-/**
- * 内容安全检查 (输出)
- * 检测 AI 输出中的敏感内容
- */
-export function checkOutputSecurity(content: string): boolean {
-  for (const pattern of SENSITIVE_OUTPUT_PATTERNS) {
-    if (pattern.test(content)) {
-      logger.warn('security', 'sensitive_ai_output_detected');
-      return false;
-    }
-  }
-
-  return true;
-}
-
-export function sanitizeOutputSecurity(content: string): string {
-  let sanitized = content;
-
-  for (const pattern of SENSITIVE_OUTPUT_PATTERNS) {
-    sanitized = sanitized.replace(pattern, (match) => sanitizeSensitiveMatch(match));
-  }
-
-  return sanitized;
-}
-
 export default {
   preAICallSecurityChecks,
   checkRateLimit,
@@ -542,8 +491,6 @@ export default {
   getUserBalance,
   checkUserStatus,
   checkInputSecurity,
-  checkOutputSecurity,
-  sanitizeOutputSecurity,
   // 签名验证
   generateSignature,
   verifyTimestamp,

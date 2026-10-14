@@ -53,13 +53,6 @@ function fixture(kind) {
       erased: `SELECT count(*) FROM runtime_sessions WHERE actor_id='${actor}' AND erased_at IS NOT NULL AND scope IS NULL`,
       denial: 'BILL2_ACTOR_DENIED' };
   }
-  if (kind === 'agent') {
-    return { actor, key: `hashtextextended('${actor}',413)`,
-      call: `agent_preference('${actor}','confirm','{"scope":"user","name":"tone","value":"private tone",
-        "confirmed":true,"requestId":"${request}","expectedVersion":0}')`,
-      erased: `SELECT count(*) FROM agent_confirmed_preferences WHERE actor_id='${actor}'`,
-      erasedCount: '0', denial: 'PREFERENCE_DENIED' };
-  }
   if (kind === 'research') {
     const plan = randomUUID();
     return { actor, table: 'research_plans', key: '150150',
@@ -195,7 +188,8 @@ try {
     } finally { if (session.code === undefined) await session.end(); }
     console.log(`PASS ${nested ? 'successful exception subtransaction' : 'direct'} confirm: both scrubs retry until separate commit`);
   }
-  for (const kind of ['runtime', 'agent', 'research', 'artifact', 'opc']) {
+  // LEGACY-CLOSE 0241 dropped the old agent preference writer, so it has no late-writer case.
+  for (const kind of ['runtime', 'research', 'artifact', 'opc']) {
     const normal = fixture(kind);
     q(service(`SELECT ${normal.call}`));
     console.log(`PASS ${kind}: real normal admission remains writable`);
