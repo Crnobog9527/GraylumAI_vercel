@@ -31,15 +31,15 @@ export const J_NOTE_ANSWERS: Readonly<Record<string, string>> = {
 };
 
 /**
- * Forum users' IDs, shown in full (Owner 2026-10-14: "论坛用户的 ID，完整显示、不放原贴连接"). They must be copied
- * verbatim from the local quote table; until they are, each forum note shows this placeholder.
- */
-/**
  * OWNER (2026-10-15, "副标题用 AI 教练版"): the first screen's promise without "它". The shared HERO.promise still says
  * "运营从此交给它"; it changes with it when sample J replaces the public landing page.
  */
 export const J_HERO_PROMISE = '运营从此交给我们的 AI 教练，你只管专心输出你擅长的内容。';
 
+/**
+ * Forum users' IDs, shown in full (Owner 2026-10-14: "论坛用户的 ID，完整显示、不放原贴连接"). They must be copied
+ * verbatim from the local quote table; until they are, each forum note shows this placeholder.
+ */
 export const J_ID_PLACEHOLDER = '【用户 ID 待补】';
 export const J_NOTE_IDS: Readonly<Record<string, string>> = {
   // Checked on the live pages on 2026-10-14 (read only); the quotes still match word for word.
