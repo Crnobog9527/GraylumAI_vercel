@@ -81,7 +81,7 @@ BEGIN
    -- Proven takeover: the other user's connection stops reading and publishing until its owner re-authorises.
    -- Every takeover bumps updated_at, even on an already quarantined row, so confirm can reject stale facts.
    IF existing.status<>'deleting' THEN
-    UPDATE social_connections SET status='quarantined',provider_disconnect_pending=true,lease_owner=NULL,
+    UPDATE social_connections SET status='quarantined',provider_disconnect_pending=true,deletion_attempts=0,lease_owner=NULL,
      lease_expires_at=NULL,updated_at=clock_timestamp()
     WHERE id=existing.id;
    END IF;
@@ -116,8 +116,8 @@ BEGIN
    AND (cleanup_lease_until IS NULL OR cleanup_lease_until<=now_at)
   ORDER BY created_at LIMIT p_limit FOR UPDATE SKIP LOCKED
  ), claimed AS (
-  UPDATE social_connect_requests r SET cleanup_lease_until=now_at+make_interval(secs=>p_lease_seconds),
-   cleanup_attempts=r.cleanup_attempts+1
+  -- Attempts are counted when a result is reported (cleanup_finish), so claimed-but-unreached rows lose nothing.
+  UPDATE social_connect_requests r SET cleanup_lease_until=now_at+make_interval(secs=>p_lease_seconds)
   FROM picked WHERE r.id=picked.id
   RETURNING r.id,r.external_id,r.platform,r.candidate_provider_ids
  )
@@ -147,7 +147,7 @@ BEGIN
   ELSIF existing.status='deleting' THEN verdict:='skip';
   ELSIF existing.actor_id=req.actor_id THEN verdict:='keep';
   ELSE
-   UPDATE social_connections SET status='quarantined',provider_disconnect_pending=true,lease_owner=NULL,
+   UPDATE social_connections SET status='quarantined',provider_disconnect_pending=true,deletion_attempts=0,lease_owner=NULL,
     lease_expires_at=NULL,updated_at=clock_timestamp()
    WHERE id=existing.id;
    verdict:='takeover';
@@ -216,6 +216,7 @@ BEGIN
  IF p_request_id IS NULL OR p_done IS NULL OR (p_error IS NOT NULL AND p_error !~ '^[A-Z0-9_]{1,64}$') THEN
   RAISE EXCEPTION 'PUBLISH_MONITOR_INPUT_INVALID' USING ERRCODE='22023'; END IF;
  UPDATE social_connect_requests SET cleanup_lease_until=NULL,cleanup_error=CASE WHEN p_done THEN NULL ELSE p_error END,
+  cleanup_attempts=LEAST(cleanup_attempts+1,1000),
   cleaned_at=CASE WHEN p_done THEN clock_timestamp() ELSE NULL END
  WHERE id=p_request_id AND cleaned_at IS NULL AND state IN ('applied','abandoned');
 END $$;
@@ -225,21 +226,35 @@ END $$;
 -- of an attempt that is still open or not yet settled. Unknown formats are reported, never deleted (environment
 -- safety: another environment or a manually connected test account may share the provider project).
 CREATE OR REPLACE FUNCTION public.publish_monitor_orphan_classify(p_accounts jsonb) RETURNS jsonb
-LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path=public,pg_temp AS $$
-DECLARE item jsonb; pid text; ext text; deletable text[]:='{}'; unknown text[]:='{}';
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
+DECLARE item jsonb; pid text; ext text; existing social_connections; owner text;
+ deletable text[]:='{}'; unknown text[]:='{}'; taken text[]:='{}';
 BEGIN
  IF jsonb_typeof(p_accounts) IS DISTINCT FROM 'array' OR jsonb_array_length(p_accounts)>5000 THEN
   RAISE EXCEPTION 'PUBLISH_MONITOR_INPUT_INVALID' USING ERRCODE='22023'; END IF;
  FOR item IN SELECT * FROM jsonb_array_elements(p_accounts) LOOP
   pid:=item->>'providerAccountId'; ext:=item->>'externalId';
   IF pid IS NULL OR pid !~ '^[A-Za-z0-9_-]{1,128}$' THEN RAISE EXCEPTION 'PUBLISH_MONITOR_INPUT_INVALID' USING ERRCODE='22023'; END IF;
-  CONTINUE WHEN EXISTS(SELECT 1 FROM social_connections WHERE provider_account_id=pid);
+  SELECT * INTO existing FROM social_connections WHERE provider_account_id=pid FOR UPDATE;
+  IF existing.id IS NOT NULL THEN
+   -- A bound account now carrying another user's reference was taken over and the callback or webhook was missed:
+   -- quarantine it and queue the disconnect, exactly like a callback that proves a takeover.
+   IF existing.status NOT IN ('deleting','quarantined') AND ext ~ '^[0-9a-f]{32}\.[0-9a-f]{32}$' THEN
+    SELECT provider_ref INTO owner FROM social_monitor_settings WHERE actor_id=existing.actor_id;
+    IF owner IS NOT NULL AND split_part(ext,'.',1)<>owner THEN
+     UPDATE social_connections SET status='quarantined',provider_disconnect_pending=true,deletion_attempts=0,
+      lease_owner=NULL,lease_expires_at=NULL,updated_at=clock_timestamp() WHERE id=existing.id;
+     taken:=taken||pid;
+    END IF;
+   END IF;
+   CONTINUE;
+  END IF;
   -- Exactly what publish_monitor_random_hex() generates for both halves; anything else is only reported.
   IF ext IS NULL OR ext !~ '^[0-9a-f]{32}\.[0-9a-f]{32}$' THEN unknown:=unknown||pid; CONTINUE; END IF;
   CONTINUE WHEN EXISTS(SELECT 1 FROM social_connect_requests WHERE external_id=ext AND cleaned_at IS NULL);
   deletable:=deletable||pid;
  END LOOP;
- RETURN jsonb_build_object('delete',to_jsonb(deletable),'unknownFormat',to_jsonb(unknown));
+ RETURN jsonb_build_object('delete',to_jsonb(deletable),'unknownFormat',to_jsonb(unknown),'takenOver',to_jsonb(taken));
 END $$;
 
 -- Daily job: claim provider work on connections. A deletion record is deleted at the provider, unless a publish of
@@ -264,8 +279,8 @@ BEGIN
   WHERE NOT (k.status='deleting' AND k.publishes_open AND k.provider_tokens_cleared)
   ORDER BY k.updated_at LIMIT p_limit FOR UPDATE OF c SKIP LOCKED
  ), claimed AS (
-  UPDATE social_connections c SET lease_owner=lease,lease_expires_at=now_at+make_interval(secs=>p_lease_seconds),
-   deletion_attempts=c.deletion_attempts+1
+  -- Attempts are counted when a result is reported (provider_work_finish), not when claimed.
+  UPDATE social_connections c SET lease_owner=lease,lease_expires_at=now_at+make_interval(secs=>p_lease_seconds)
   FROM picked WHERE c.id=picked.id
   RETURNING c.id,c.actor_id,c.provider_account_id,c.status,c.owner_ref
  )
@@ -295,13 +310,15 @@ BEGIN
   -- Nothing references a deleting row: its posts and snapshots were removed when it entered 'deleting'.
   DELETE FROM social_connections WHERE id=c.id;
  ELSIF p_outcome='disconnected' AND c.status='deleting' THEN
-  UPDATE social_connections SET provider_tokens_cleared=true,deletion_error=NULL,lease_owner=NULL,lease_expires_at=NULL,
-   updated_at=clock_timestamp() WHERE id=c.id;
+  UPDATE social_connections SET provider_tokens_cleared=true,deletion_error=NULL,deletion_attempts=0,lease_owner=NULL,
+   lease_expires_at=NULL,updated_at=clock_timestamp() WHERE id=c.id;
  ELSIF p_outcome IN ('deleted','gone','disconnected','owner_back') AND c.provider_disconnect_pending THEN
-  UPDATE social_connections SET provider_disconnect_pending=false,deletion_error=NULL,lease_owner=NULL,
+  -- A settled takeover starts the next episode with a fresh retry allowance.
+  UPDATE social_connections SET provider_disconnect_pending=false,deletion_error=NULL,deletion_attempts=0,lease_owner=NULL,
    lease_expires_at=NULL,updated_at=clock_timestamp() WHERE id=c.id;
  ELSE
-  UPDATE social_connections SET deletion_error=COALESCE(p_error,'PROVIDER_RETRY'),lease_owner=NULL,lease_expires_at=NULL,
+  UPDATE social_connections SET deletion_error=COALESCE(p_error,'PROVIDER_RETRY'),
+   deletion_attempts=LEAST(deletion_attempts+1,1000),lease_owner=NULL,lease_expires_at=NULL,
    updated_at=clock_timestamp() WHERE id=c.id;
  END IF;
 END $$;

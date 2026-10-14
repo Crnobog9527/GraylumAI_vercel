@@ -94,14 +94,14 @@ describe('publish-monitor provider cleanup', () => {
 
   it('orphan sweep only reports unless deletion is enabled, and never deletes unknown formats', async () => {
     const listing = () => [page([acct('spc_orphan', EXT), acct('spc_dash', null)], 0, 2)];
-    const decision = { delete: ['spc_orphan'], unknownFormat: ['spc_dash'] };
+    const decision = { delete: ['spc_orphan'], unknownFormat: ['spc_dash'], takenOver: [] };
     const reportOnly = provider(listing());
     expect(await sweepOrphans(database({ publish_monitor_orphan_classify: [decision] }).db, reportOnly.deps, false, far))
-      .toEqual({ listed: 2, orphans: 1, deleted: 0, unknownFormat: 1, deferred: 0 });
+      .toEqual({ listed: 2, orphans: 1, deleted: 0, unknownFormat: 1, deferred: 0, takenOver: 0 });
     expect(reportOnly.calls).toHaveLength(1);
     const enabled = provider([...listing(), json(200, acct('spc_orphan', EXT)), json(200, {})]);
     expect(await sweepOrphans(database({ publish_monitor_orphan_classify: [decision] }).db, enabled.deps, true, far))
-      .toEqual({ listed: 2, orphans: 1, deleted: 1, unknownFormat: 1, deferred: 0 });
+      .toEqual({ listed: 2, orphans: 1, deleted: 1, unknownFormat: 1, deferred: 0, takenOver: 0 });
     expect(enabled.calls).not.toContain('DELETE /social-accounts/spc_dash');
   });
 
@@ -110,7 +110,7 @@ describe('publish-monitor provider cleanup', () => {
     const p = provider([page([acct('spc_1', EXT)], 0, 300)]);
     const d = database({});
     expect(await sweepOrphans(d.db, p.deps, true, 10, () => (t += 6)))
-      .toEqual({ listed: 0, orphans: 0, deleted: 0, unknownFormat: 0, deferred: 0, incomplete: true });
+      .toEqual({ listed: 0, orphans: 0, deleted: 0, unknownFormat: 0, deferred: 0, takenOver: 0, incomplete: true });
     expect(p.calls).toHaveLength(1);
     expect(d.calls).toEqual([]);
   });

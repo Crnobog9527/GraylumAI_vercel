@@ -146,6 +146,8 @@ export async function runProviderWork(db: Rpc, client: ClientDeps, until: number
 }
 
 export type SweepReport = { listed: number; orphans: number; deleted: number; unknownFormat: number; deferred: number;
+  /** Bound accounts found carrying another user's reference: quarantined and queued for disconnect. */
+  takenOver: number;
   /** The listing did not finish before the deadline; nothing was decided or deleted this run. */
   incomplete?: true };
 
@@ -157,13 +159,15 @@ export type SweepReport = { listed: number; orphans: number; deleted: number; un
 export async function sweepOrphans(db: Rpc, client: ClientDeps, deleteEnabled: boolean, until: number,
   now: Clock = Date.now): Promise<SweepReport> {
   const accounts = await listAll(offset => listAllAccounts(client, offset), until, now);
-  if (!accounts && now() >= until) return { listed: 0, orphans: 0, deleted: 0, unknownFormat: 0, deferred: 0, incomplete: true };
+  if (!accounts && now() >= until) {
+    return { listed: 0, orphans: 0, deleted: 0, unknownFormat: 0, deferred: 0, takenOver: 0, incomplete: true };
+  }
   if (!accounts) throw new CleanupError('PUBLISH_MONITOR_CLEANUP_UNAVAILABLE');
   const decision = await rpc(db, 'publish_monitor_orphan_classify', {
     p_accounts: accounts.map(a => ({ providerAccountId: a.id, externalId: a.externalId })),
-  }, z.object({ delete: z.array(providerId), unknownFormat: z.array(providerId) }).strict());
+  }, z.object({ delete: z.array(providerId), unknownFormat: z.array(providerId), takenOver: z.array(providerId) }).strict());
   const report: SweepReport = { listed: accounts.length, orphans: decision.delete.length, deleted: 0,
-    unknownFormat: decision.unknownFormat.length, deferred: 0 };
+    unknownFormat: decision.unknownFormat.length, deferred: 0, takenOver: decision.takenOver.length };
   if (deleteEnabled) {
     const byId = new Map(accounts.map(a => [a.id, a.externalId]));
     for (const id of decision.delete) {
@@ -172,7 +176,7 @@ export async function sweepOrphans(db: Rpc, client: ClientDeps, deleteEnabled: b
       else report.deleted += 1;
     }
   }
-  if (report.orphans > 0 || report.unknownFormat > 0) {
+  if (report.orphans > 0 || report.unknownFormat > 0 || report.takenOver > 0) {
     logger.warn('api', 'publish_monitor_orphan_sweep', { ...report, deleteEnabled });
   }
   return report;
