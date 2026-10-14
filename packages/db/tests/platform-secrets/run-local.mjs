@@ -93,7 +93,7 @@ try {
   report.checks.push('deny: user, suspended, deleted and unknown actors; invalid input refused without echoing it; no audit');
 
   const first = await set('openrouter', fake('a1b2'), 0, admin);
-  assert.equal(first.length, 5);
+  assert.equal(first.length, 6);
   assert.ok(!JSON.stringify(first).includes(CANARY));
   const s1 = await status('openrouter');
   assert.deepEqual({ ...s1, updatedAt: null }, { slot: 'openrouter', configured: true, last4: 'a1b2', revision: 1,
@@ -143,6 +143,16 @@ try {
   assert.equal(await readSecret('tikhub'), `tikhub-${CANARY}-fake-i9j0`);
   report.checks.push('a dangling Vault reference fails the read loudly and the next write repairs it');
 
+  // Post for Me webhook shared secret: its own slot, independent of the Post for Me API key.
+  await set('postforme_webhook', `whsecret-${CANARY}-fake-k1l2`, 0, admin);
+  assert.equal(await readSecret('postforme_webhook'), `whsecret-${CANARY}-fake-k1l2`);
+  assert.equal(await readSecret('postforme'), null);
+  assert.deepEqual((await v('SELECT platform_secret_status() v')).map(row => row.slot),
+    ['openrouter', 'postforme', 'postforme_webhook', 'tikhub', 'parallel', 'firecrawl']);
+  await clear('postforme_webhook', 1, admin);
+  assert.equal(await readSecret('postforme_webhook'), null);
+  report.checks.push('postforme_webhook is its own slot: set, read and clear without touching postforme');
+
   await c.query('RESET ROLE');
   const rows = await audits();
   assert.deepEqual(rows.map(row => [row.action, row.details.slot, row.details.last4, row.details.previousLast4,
@@ -153,8 +163,10 @@ try {
     ['platform_secret_set', 'openrouter', 'e5f6', null, 4],
     ['platform_secret_set', 'tikhub', 'g7h8', null, 1],
     ['platform_secret_replace', 'tikhub', 'i9j0', 'g7h8', 2],
+    ['platform_secret_set', 'postforme_webhook', 'k1l2', null, 1],
+    ['platform_secret_clear', 'postforme_webhook', null, 'k1l2', 2],
   ]);
-  assert.deepEqual(rows.map(row => row.admin_id), [admin, admin2, admin, admin, admin, admin]);
+  assert.deepEqual(rows.map(row => row.admin_id), [admin, admin2, admin, admin, admin, admin, admin, admin]);
   for (const table of ['user_activity_logs', 'application_logs', 'platform_secrets', 'vault.secrets']) {
     if (!await v('SELECT to_regclass($1) IS NOT NULL v', [table])) continue;
     assert.equal(await v(`SELECT count(*)::int v FROM ${table} t WHERE strpos(t::text,$1)>0`, [CANARY]), 0, table);

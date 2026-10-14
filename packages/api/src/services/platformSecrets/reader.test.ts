@@ -34,8 +34,8 @@ describe('getPlatformSecret', () => {
     const { db } = client(() => ({ data: null, error: null }));
     expect(await getPlatformSecret(db, 'postforme', { env: { POSTFORME_API_KEY: ` ${ENV_KEY} ` } }))
       .toEqual({ value: ENV_KEY, source: 'env' });
-    for (const [slot, name] of [['tikhub', 'TIKHUB_API_KEY'], ['parallel', 'PARALLEL_API_KEY'],
-      ['firecrawl', 'FIRECRAWL_API_KEY']] as const) {
+    for (const [slot, name] of [['postforme_webhook', 'POSTFORME_WEBHOOK_SECRET'], ['tikhub', 'TIKHUB_API_KEY'],
+      ['parallel', 'PARALLEL_API_KEY'], ['firecrawl', 'FIRECRAWL_API_KEY']] as const) {
       expect((await getPlatformSecret(db, slot, { env: { [name]: ENV_KEY } })).source).toBe('env');
     }
   });

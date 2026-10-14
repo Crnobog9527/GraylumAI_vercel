@@ -1,5 +1,6 @@
 -- Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved.
--- ADMIN-SECRETS: business third-party keys (OpenRouter, Post for Me, TikHub, Parallel, Firecrawl)
+-- ADMIN-SECRETS: business third-party keys (OpenRouter, Post for Me API key and webhook secret, TikHub,
+-- Parallel, Firecrawl)
 -- entered in the admin, encrypted in Supabase Vault, write-only for the browser.
 -- Allocation: controller 2026-10-14 (0259). Plan: docs/launch/tasks/ADMIN-SECRETS.md.
 --   * platform_secrets keeps only metadata (last 4 characters, revision, who, when); the value
@@ -19,7 +20,7 @@ BEGIN;
 SET LOCAL lock_timeout='5s';
 
 CREATE TABLE IF NOT EXISTS public.platform_secrets(
- slot text PRIMARY KEY CHECK (slot IN ('openrouter','postforme','tikhub','parallel','firecrawl')),
+ slot text PRIMARY KEY CHECK (slot IN ('openrouter','postforme','postforme_webhook','tikhub','parallel','firecrawl')),
  vault_secret_id uuid,
  last4 text CHECK (last4 IS NULL OR char_length(last4)=4),
  revision bigint NOT NULL DEFAULT 0 CHECK (revision>=0),
@@ -34,7 +35,7 @@ REVOKE ALL ON TABLE public.platform_secrets FROM PUBLIC,anon,authenticated,servi
 CREATE OR REPLACE FUNCTION public.platform_secret_check(p_slot text,p_actor uuid,p_revision bigint)
 RETURNS void LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path=public,pg_temp AS $$
 BEGIN
- IF p_slot IS NULL OR p_slot NOT IN ('openrouter','postforme','tikhub','parallel','firecrawl')
+ IF p_slot IS NULL OR p_slot NOT IN ('openrouter','postforme','postforme_webhook','tikhub','parallel','firecrawl')
   OR p_actor IS NULL OR p_revision IS NULL OR p_revision<0 OR p_revision>=9999999999
  THEN RAISE EXCEPTION 'PLATFORM_SECRET_INPUT_INVALID' USING ERRCODE='23514';END IF;
  IF NOT EXISTS(SELECT 1 FROM profiles WHERE id=p_actor AND role='admin'
@@ -49,7 +50,7 @@ LANGUAGE sql STABLE SECURITY DEFINER SET search_path=public,pg_temp AS $$
  SELECT jsonb_agg(jsonb_build_object('slot',s.slot,'configured',p.last4 IS NOT NULL,'last4',p.last4,
   'revision',coalesce(p.revision,0),'updatedBy',p.updated_by,
   'updatedAt',to_char(p.updated_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"')) ORDER BY s.n)
- FROM unnest(ARRAY['openrouter','postforme','tikhub','parallel','firecrawl']) WITH ORDINALITY s(slot,n)
+ FROM unnest(ARRAY['openrouter','postforme','postforme_webhook','tikhub','parallel','firecrawl']) WITH ORDINALITY s(slot,n)
  LEFT JOIN platform_secrets p ON p.slot=s.slot
 $$;
 
@@ -111,7 +112,7 @@ CREATE OR REPLACE FUNCTION public.platform_secret_read(p_slot text) RETURNS text
 LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path=public,pg_temp AS $$
 DECLARE sid uuid;v text;
 BEGIN
- IF p_slot IS NULL OR p_slot NOT IN ('openrouter','postforme','tikhub','parallel','firecrawl')
+ IF p_slot IS NULL OR p_slot NOT IN ('openrouter','postforme','postforme_webhook','tikhub','parallel','firecrawl')
  THEN RAISE EXCEPTION 'PLATFORM_SECRET_INPUT_INVALID' USING ERRCODE='23514';END IF;
  SELECT vault_secret_id INTO sid FROM platform_secrets WHERE slot=p_slot;
  IF sid IS NULL THEN RETURN NULL;END IF;

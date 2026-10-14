@@ -5,7 +5,9 @@
  * Supabase Vault. System keys (database, service role, Stripe, Redis…) stay in Vercel and are
  * not handled here. The list must match the CHECK in public.platform_secrets.
  */
-export const PLATFORM_SECRET_SLOTS = ['openrouter', 'postforme', 'tikhub', 'parallel', 'firecrawl'] as const;
+export const PLATFORM_SECRET_SLOTS = [
+  'openrouter', 'postforme', 'postforme_webhook', 'tikhub', 'parallel', 'firecrawl',
+] as const;
 export type PlatformSecretSlot = typeof PLATFORM_SECRET_SLOTS[number];
 
 /**
@@ -16,6 +18,7 @@ export type PlatformSecretSlot = typeof PLATFORM_SECRET_SLOTS[number];
 export const PLATFORM_SECRET_ENV_FALLBACK: Record<PlatformSecretSlot, string | null> = {
   openrouter: null,
   postforme: 'POSTFORME_API_KEY',
+  postforme_webhook: 'POSTFORME_WEBHOOK_SECRET',
   tikhub: 'TIKHUB_API_KEY',
   parallel: 'PARALLEL_API_KEY',
   firecrawl: 'FIRECRAWL_API_KEY',
@@ -26,6 +29,8 @@ const BASE = /^[!-~]{16,1024}$/;
 const FORMAT: Record<PlatformSecretSlot, RegExp> = {
   openrouter: /^sk-or-/,
   postforme: /^pfm_(live|test)_[A-Za-z0-9]{8,128}$/,
+  // The shared secret Post for Me sends in the webhook header; Graylum chooses it.
+  postforme_webhook: BASE,
   tikhub: BASE,
   parallel: BASE,
   firecrawl: BASE,

@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 // Pure helpers for the ADMIN-SECRETS page (write-only third-party keys).
 
-export type PlatformSecretSlot = 'openrouter' | 'postforme' | 'tikhub' | 'parallel' | 'firecrawl';
+export type PlatformSecretSlot = 'openrouter' | 'postforme' | 'postforme_webhook' | 'tikhub' | 'parallel' | 'firecrawl';
 export interface PlatformSecretItem {
   slot: PlatformSecretSlot;
   configured: boolean;
@@ -16,6 +16,8 @@ export interface PlatformSecretItem {
 export const SLOT_INFO: Record<PlatformSecretSlot, { name: string; usage: string; hint: string }> = {
   openrouter: { name: 'OpenRouter', usage: '所有 AI 模型调用', hint: '以 sk-or- 开头' },
   postforme: { name: 'Post for Me', usage: '一键发布和作品数据', hint: '以 pfm_live_ 或 pfm_test_ 开头' },
+  postforme_webhook: { name: 'Post for Me Webhook 共享密钥', usage: '校验 Post for Me 发来的发布结果和账号变化通知',
+    hint: '至少 16 个字符，和 Post for Me 后台填写的一致' },
   tikhub: { name: 'TikHub', usage: '社媒平台公开数据搜索', hint: '' },
   parallel: { name: 'Parallel', usage: '网页搜索', hint: '' },
   firecrawl: { name: 'Firecrawl', usage: '网页正文读取', hint: '' },

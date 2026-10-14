@@ -86,6 +86,17 @@ it('save and clear invalidate this instance cache at once', async () => {
   await expect(getPlatformSecret(f.db as never, 'tikhub', { env: {} })).rejects.toMatchObject({ code: 'PLATFORM_SECRET_NOT_CONFIGURED' });
 });
 
+it('saves the Post for Me webhook secret in its own slot', async () => {
+  const f = harness('admin');
+  const after = await f.caller.set({ slot: 'postforme_webhook', value: `whsecret-${CANARY}-fake-m3n4`, expectedRevision: 0 });
+  expect(after.slots.find(s => s.slot === 'postforme_webhook')).toMatchObject({ configured: true, last4: 'm3n4',
+    envFallback: { name: 'POSTFORME_WEBHOOK_SECRET' } });
+  expect(after.slots.find(s => s.slot === 'postforme')).toMatchObject({ configured: false });
+  expect(JSON.stringify(after)).not.toContain(CANARY);
+  await expect(f.caller.set({ slot: 'postforme_webhook', value: 'too-short', expectedRevision: 1 }))
+    .rejects.toMatchObject({ code: 'BAD_REQUEST' });
+});
+
 it('a stale editor gets a conflict instead of overwriting', async () => {
   const f = harness('admin');
   await f.caller.set({ slot: 'parallel', value: `parallel-${CANARY}-fake-a`, expectedRevision: 0 });
