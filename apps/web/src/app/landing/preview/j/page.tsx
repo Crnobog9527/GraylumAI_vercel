@@ -2,7 +2,6 @@
 import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
 import { SampleJ } from '@/components/landing/preview-j/SampleJ';
-import { monthlyCredits, pickPaywallPlans } from '@/components/paywall/paywallPlans';
 import { resolveLandingFlags } from '@/lib/landing/landing-flags';
 import { withLocalSamplePricing } from '@/lib/dev/local-sample-pricing';
 import { buildLandingPageData } from '@/lib/landing/landing-page-data';
@@ -20,21 +19,15 @@ export const metadata: Metadata = { title: 'Graylum 风格样稿 J', robots: NOI
 export default async function LandingPreviewJ() {
   if (isPublicIndexingEnabled(process.env[SITE_INDEXING_ENV])) notFound();
   const [{ siteName, membershipPlans, membershipPlansStatus }, offers] = await Promise.all([getPublicSiteSettings(), getLandingOffers()]);
-  // Plan prices, the Gold first month and the founder seats come from the server, as on /landing (#987). Only a local
-  // development server without that data falls back to fixed sample prices, marked as such on the cards.
+  // The Pro price ("$29/月起") comes from the server catalog, as on /landing (#987). Only a local development server
+  // without that data falls back to the fixed sample prices, marked as such.
   const priced = withLocalSamplePricing(process.env, membershipPlansStatus === 'available' ? membershipPlans : [], offers);
   const flags = resolveLandingFlags();
-  const flagsUsed = priced.sample ? { ...flags, founder: true } : flags;
+  // Owner 2026-10-15: the founder offer is off the home page, so its FAQ entries go with it.
+  const flagsUsed = { ...flags, founder: false };
   const data = buildLandingPageData(flagsUsed, priced.plans, priced.offers);
-  // Monthly credits per plan for the cards, from the same catalog; the founder seat total for v25's seat bar.
-  const credits = Object.fromEntries(pickPaywallPlans(priced.plans)
-    .filter(plan => plan.level === 'pro' || plan.level === 'gold')
-    .map(plan => [plan.level, monthlyCredits(plan)]));
   // The sample reports are not generated yet: their placeholder shows only in a local development preview, or once the
   // landing flag is turned on (off on staging and production by default).
-  const showSamples = flags.sampleReports || process.env.NODE_ENV === 'development';
-  const extras = {
-    founderTotal: priced.offers.founder?.total ?? null, founderPrice: priced.offers.founder?.price ?? null, credits, flags: flagsUsed, showSamples,
-  };
+  const extras = { flags: flagsUsed, showSamples: flags.sampleReports || process.env.NODE_ENV === 'development' };
   return <SampleJ data={data} siteName={siteName} extras={extras} samplePricing={priced.sample} />;
 }

@@ -9,7 +9,7 @@ import { SIGNUP_CTA_HREF } from '@/lib/seo/content/shared';
 import { cn } from '@/lib/utils';
 import { HeroJ } from './HeroJ';
 import { MotionJ } from './MotionJ';
-import type { PriceExtras } from './PlanCardsJ';
+import type { PageExtras } from './extras-j';
 import { PriceJ } from './PriceJ';
 import { CompareJ } from './CompareJ';
 import { FaqJ, FinalJ } from './SectionsJ';
@@ -35,7 +35,7 @@ export type LandingData = ReturnType<typeof buildLandingPageData>;
  * "先聊后买"), the FAQ and the close. The server HTML is the finished page.
  */
 export function SampleJ({ data, siteName, extras, samplePricing = false }: {
-  data: LandingData; siteName: string; extras: PriceExtras; samplePricing?: boolean;
+  data: LandingData; siteName: string; extras: PageExtras; samplePricing?: boolean;
 }) {
   return (
     <MotionJ className={cn(light.light, styles.page)}>
@@ -64,10 +64,9 @@ export function SampleJ({ data, siteName, extras, samplePricing = false }: {
         <TakeoverJ intro={extras.showSamples ? <SamplesJ /> : undefined} />
         <WorkJ flags={extras.flags} />
         <CompareJ />
-        <PriceJ pricing={data.pricing} rows={data.compareRows} risk={data.risk} showResult={data.showResult}
-          founderSeats={data.founderSeats} extras={extras} sample={samplePricing} />
+        <PriceJ proMonthly={data.pricing.proMonthly} rows={data.compareRows} sample={samplePricing} />
         <FaqJ groups={data.faqGroups} />
-        <FinalJ showStack={data.showStack} founderSeats={data.founderSeats} founderTotal={extras.founderTotal} founderPrice={extras.founderPrice} />
+        <FinalJ />
       </main>
 
       <footer className={styles.footer}>

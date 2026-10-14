@@ -2,10 +2,9 @@
 import Link from 'next/link';
 import { ArrowRight, Plus } from 'lucide-react';
 import { FINAL_ACTION, HERO_H } from '@/lib/landing/landing-copy';
-import { J_FAQ_REWORDS } from '@/lib/landing/landing-copy-j';
+import { J_FAQ_REWORDS, J_FINAL } from '@/lib/landing/landing-copy-j';
 import { LANDING_FAQ_TITLE, type LandingFaqGroup } from '@/lib/landing/landing-faq';
 import { SIGNUP_CTA_HREF } from '@/lib/seo/content/shared';
-import { FounderBarJ } from './PlanCardsJ';
 import styles from './sections-j.module.css';
 import page from './j.module.css';
 
@@ -14,7 +13,7 @@ export function rewordFaq(text: string) {
   return J_FAQ_REWORDS.reduce((current, [from, to]) => current.replace(from, to), text);
 }
 
-/** The FAQ, groups side by side on a wide screen; the first question of each group starts open. */
+/** The FAQ, groups side by side on a wide screen; every answer starts closed (Owner 2026-10-15). */
 export function FaqJ({ groups }: { groups: readonly LandingFaqGroup[] }) {
   if (groups.length === 0) return null;
   return (
@@ -25,8 +24,8 @@ export function FaqJ({ groups }: { groups: readonly LandingFaqGroup[] }) {
           {groups.map(group => (
             <div key={group.title} className={styles.faqGroup}>
               <h3>{group.title}</h3>
-              {group.items.map((item, index) => (
-                <details key={item.id} id={item.id} className={styles.faqItem} open={index === 0}>
+              {group.items.map(item => (
+                <details key={item.id} id={item.id} className={styles.faqItem}>
                   <summary><span>{item.question}</span><Plus size={18} aria-hidden="true" /></summary>
                   <div>{item.answer.map(paragraph => <p key={paragraph}>{rewordFaq(paragraph)}</p>)}</div>
                 </details>
@@ -39,20 +38,18 @@ export function FaqJ({ groups }: { groups: readonly LandingFaqGroup[] }) {
   );
 }
 
-/** The close: the two paths, what you get, the founder seats while they last, and the one button. */
-export function FinalJ({ showStack, founderSeats, founderTotal, founderPrice }: {
-  showStack: boolean; founderSeats: number | null; founderTotal: number | null; founderPrice: number | null;
-}) {
+/**
+ * The close (Owner 2026-10-15): one push from the visitor's side — the result they want after the whole page, one
+ * button, the same note as the first screen. The founder offer is no longer on this page.
+ */
+export function FinalJ() {
+  const final = J_FINAL.versions[0];
   return (
     <section aria-labelledby="final-title" className={page.section} data-zone="final">
       <div className={page.wrap}>
         <div className={styles.final}>
-          <h2 id="final-title" className={page.display}>{FINAL_ACTION.title}</h2>
-          <ul className={styles.paths}>
-            {FINAL_ACTION.paths.map((path, index) => <li key={path} data-path={index === 0 ? 'alone' : 'coach'}>{path}</li>)}
-          </ul>
-          {showStack ? <p className={styles.stack}><b>{FINAL_ACTION.stackLabel}</b>{FINAL_ACTION.stack.text}</p> : null}
-          <FounderBarJ left={founderSeats} total={founderTotal} price={founderPrice} />
+          <h2 id="final-title" className={page.display}>{final.title}</h2>
+          <p className={styles.finalLine}>{final.line}</p>
           <Link href={SIGNUP_CTA_HREF} className={page.pill}>{FINAL_ACTION.cta}<ArrowRight size={18} aria-hidden="true" /></Link>
           <p className={styles.finalNote}>{HERO_H.ctaNote}</p>
         </div>

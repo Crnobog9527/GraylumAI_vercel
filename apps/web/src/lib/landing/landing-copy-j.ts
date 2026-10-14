@@ -83,7 +83,8 @@ export const J_PRICE = {
   sourceLabel: '出处',
   /** NEW: the check date only (the shared note's "上线前再核对一次" is an internal reminder, not for buyers). */
   checked: '价格于 2026-10-12 核对',
-  more: '看完整价格和权益',
+  /** NEW (Owner 2026-10-15): the button beside our price. */
+  more: '了解完整价格和权益',
   unavailable: '会员方案暂时读不到，请稍后刷新，或先看价格页。',
 } as const;
 
@@ -91,3 +92,25 @@ export const J_PRICE = {
 export const J_FAQ_REWORDS: readonly (readonly [string, string])[] = [
   ['AI教练的所有功能都尽量做到了一键使用。', 'AI 教练的大部分操作都尽量做成了点一下就能完成。'],
 ];
+
+/**
+ * NEW (Owner 2026-10-15: "推他一把"): the close, written from what the visitor wants after the whole page — a direction
+ * settled today, without going it alone. Three versions for the Owner to choose from; the page shows `versions[0]`.
+ * No exaggeration, no promise of income, and the AI coach is never "它".
+ */
+export const J_FINAL = {
+  versions: [
+    {
+      title: '今天就把你的方向定下来',
+      line: '和 AI 教练聊一次，把你适合做什么、给谁看、第一周发哪几条理清楚。先免费试，觉得有用再开通。',
+    },
+    {
+      title: '下班后的一小时，从今天起不再自己摸索',
+      line: 'AI 教练陪你把定位、选题、发布和复盘一步步做下来，你只管拍。',
+    },
+    {
+      title: '别再一个人对着空白页想发什么',
+      line: '先免费聊一次：AI 教练会问清你的情况，告诉你适合做什么，以及第一周发哪几条、为什么。',
+    },
+  ],
+} as const;

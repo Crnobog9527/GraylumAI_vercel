@@ -6,7 +6,7 @@ import sitemap from '@/app/sitemap';
 import { metadata } from '@/app/landing/preview/j/page';
 import { FINAL_ACTION, H_COMPARE, HERO, HERO_H, PRICE_COMPARE, RISK_REVERSAL, VOICE_WALL } from '@/lib/landing/landing-copy';
 import * as copyJ from '@/lib/landing/landing-copy-j';
-import { J_FAQ_REWORDS, J_HERO_PROMISE, J_ID_PLACEHOLDER, J_NOTE_HEADS, J_PRICE, J_TAKEOVER, noteSource } from '@/lib/landing/landing-copy-j';
+import { J_FAQ_REWORDS, J_FINAL, J_HERO_PROMISE, J_ID_PLACEHOLDER, J_NOTE_HEADS, J_PRICE, J_TAKEOVER, noteSource } from '@/lib/landing/landing-copy-j';
 import { LANDING_FEATURES, type LandingFlags } from '@/lib/landing/landing-flags';
 import { buildLandingPageData } from '@/lib/landing/landing-page-data';
 import { APP_SEGMENTS } from '@/lib/sentry-scrub';
@@ -19,7 +19,7 @@ import { J_COMPARE } from '@/lib/landing/landing-copy-j-compare';
 import { J_REPORT, J_TAKEOVER_MOMENTS } from '@/lib/landing/landing-copy-j-takeover';
 import { J_SAMPLES, samplePath } from '@/lib/landing/landing-copy-j-samples';
 import { J_WORK, J_WORK_SCENES } from '@/lib/landing/landing-copy-j-work';
-import { J_FOUNDER_BAR, J_PRICE_TOTAL } from '@/lib/landing/landing-copy-j-price';
+import { J_PRICE_TOTAL } from '@/lib/landing/landing-copy-j-price';
 
 const ALL_ON = Object.fromEntries(Object.keys(LANDING_FEATURES).map(key => [key, true])) as LandingFlags;
 const escape = (text: string) => text.replace(/&/g, '&amp;').replace(/"/g, '&quot;');
@@ -31,7 +31,7 @@ const plan = (level: string, monthly: number, yearly: number) => ({
 
 function render() {
   const data = buildLandingPageData(ALL_ON, [plan('pro', 29, 279), plan('gold', 69, 621)]);
-  return { data, html: renderToStaticMarkup(createElement(SampleJ, { data, siteName: 'Graylum', extras: { founderTotal: null, founderPrice: null, credits: { pro: 1000, gold: 1000 }, flags: ALL_ON } })) };
+  return { data, html: renderToStaticMarkup(createElement(SampleJ, { data, siteName: 'Graylum', extras: { flags: ALL_ON } })) };
 }
 
 describe('style sample J', () => {
@@ -137,35 +137,43 @@ describe('style sample J, the later sections', () => {
     for (const pair of J_COMPARE.pairs) expect(html.split(escape(pair.question)).length - 1).toBeGreaterThanOrEqual(2);
   });
 
-  it('prices the usual ways first, each with its source beside it, then the cards, then 先聊后买', () => {
+  it('prices only the usual ways against ours, with the way to the pricing page; no plans, founder offer or 先聊后买', () => {
     const { html } = render();
     const pricing = html.slice(html.indexOf('id="pricing"'), html.indexOf('id="faq"'));
     for (const row of PRICE_COMPARE.rows) expect(pricing).toContain(escape(PRICE_COMPARE.sources[row.sourceId]));
     expect(pricing).toContain(J_PRICE.ownPrice('$29'));
-    const anchors = pricing.indexOf(J_PRICE.compareTitle);
-    const cards = pricing.indexOf('aria-label="Pro"');
-    const risk = pricing.indexOf(RISK_REVERSAL.title);
-    expect(anchors).toBeGreaterThan(0);
-    expect(anchors).toBeLessThan(cards);
-    expect(cards).toBeLessThan(risk);
+    expect(pricing).toContain(J_PRICE.more);
     expect(pricing).toContain('href="/landing/pricing"');
+    expect(pricing.indexOf(J_PRICE_TOTAL.text)).toBeLessThan(pricing.indexOf(J_PRICE.ownPrice('$29')));
+    // Owner 2026-10-15: plan cards, the founder offer and "先聊后买" are off the home page.
+    expect(pricing).not.toContain('aria-label="Pro"');
+    expect(pricing).not.toContain(RISK_REVERSAL.title);
+    expect(html).not.toContain('创始会员');
+    expect(pricing).not.toMatch(/checkout|plan=|tab=subscription/);
+    // The FAQ follows the price directly.
+    expect(html.indexOf('id="faq"')).toBeGreaterThan(html.indexOf('id="pricing"'));
   });
 
-  it('opens the first question of each FAQ group and words the old "所有功能一键使用" less absolutely', () => {
+  it('starts every FAQ answer closed and words the old "所有功能一键使用" less absolutely', () => {
     const { data, html } = render();
     const faq = html.slice(html.indexOf('id="faq"'), html.indexOf('id="final-title"'));
-    expect(faq.match(/<details[^>]* open=""/g)).toHaveLength(data.faqGroups.length);
+    expect(faq).toContain('<details');
+    expect(faq).not.toMatch(/<details[^>]* open=""/);
     for (const [from, to] of J_FAQ_REWORDS) {
       expect(faq).not.toContain(from);
       if (data.faqGroups.some(group => group.items.some(item => item.answer.some(text => text.includes(from))))) expect(faq).toContain(to);
     }
   });
 
-  it('closes with the two paths and the same note under the button as the first screen', () => {
+  it('closes with one push from the visitor\'s side, the button and the same note as the first screen', () => {
     const { html } = render();
     const close = html.slice(html.indexOf('id="final-title"'));
-    for (const path of FINAL_ACTION.paths) expect(close).toContain(escape(path));
+    expect(close).toContain(J_FINAL.versions[0].title);
+    expect(close).toContain(J_FINAL.versions[0].line);
+    expect(close).toContain(FINAL_ACTION.cta);
     expect(close).toContain(HERO_H.ctaNote);
+    expect(J_FINAL.versions.length).toBeGreaterThanOrEqual(2);
+    expect(JSON.stringify(J_FINAL)).not.toMatch(/它|保证|一定能|稳赚|月入/);
   });
 });
 
@@ -196,32 +204,13 @@ describe('sample J story timing', () => {
     expect(JSON.stringify(J_WEEK).replace(/15 分钟|十五分钟|七点/g, '')).not.toMatch(/\d+\s*%|\$|\d{2,}/);
   });
 
-  it('adds the usual ways up correctly, and every plan card leads to the pricing page, never straight to checkout', () => {
+  it('adds the usual ways up correctly', () => {
     const amounts = (id: string) => (PRICE_COMPARE.rows.find(row => row.sourceId === id)?.price ?? '')
       .match(/\$[\d,]+(?:–[\d,]+)?/)?.[0].replace(/[$,]/g, '').split('–').map(Number) ?? [];
     const [low] = amounts('consultant');
     const lowest = low + amounts('scheduler')[0] + amounts('benchmark')[0] + amounts('project')[0];
     expect(J_PRICE_TOTAL.text).toBe(`每月约 $${lowest.toLocaleString('en-US')} 起`);
-    const { html } = render();
-    expect(html).toContain(J_PRICE_TOTAL.label);
-    const pricing = html.slice(html.indexOf('id="pricing"'), html.indexOf('id="faq"'));
-    expect(pricing).not.toMatch(/checkout|plan=|tab=subscription/);
-    expect(pricing.match(/href="\/landing\/pricing"/g)?.length).toBeGreaterThanOrEqual(3);
-  });
-
-  it('shows the founder bar in the v25 form only while seats are left', () => {
-    const offers = { founder: { price: 496, total: 50, available: 37 } };
-    const data = buildLandingPageData(ALL_ON, [plan('pro', 29, 279), plan('gold', 69, 621)], offers);
-    const extras = { founderTotal: 50, founderPrice: 496, credits: {}, flags: ALL_ON };
-    const html = renderToStaticMarkup(createElement(SampleJ, { data, siteName: 'Graylum', extras }));
-    expect(html).toContain(J_FOUNDER_BAR.title);
-    expect(html).toContain(J_FOUNDER_BAR.joined(13, 37));
-    expect(html).toContain(J_FOUNDER_BAR.rule('$496'));
-    // Owner 2026-10-14 (MASTER_PLAN 2.1, as in #987): the founder price is never called "终身".
-    expect(html).not.toContain('终身');
-    const soldOut = buildLandingPageData(ALL_ON, [plan('pro', 29, 279), plan('gold', 69, 621)],
-      { founder: { price: 496, total: 50, available: 0 } });
-    expect(renderToStaticMarkup(createElement(SampleJ, { data: soldOut, siteName: 'Graylum', extras }))).not.toContain(J_FOUNDER_BAR.title);
+    expect(render().html).toContain(J_PRICE_TOTAL.label);
   });
 });
 
@@ -229,7 +218,7 @@ describe('sample J sample reports', () => {
   it('stays off unless the preview or the flag turns it on, and then shows the four groups as placeholders', () => {
     const { data, html } = render();
     expect(html).not.toContain(J_SAMPLES.title);
-    const extras = { founderTotal: null, founderPrice: null, credits: {}, flags: ALL_ON, showSamples: true };
+    const extras = { flags: ALL_ON, showSamples: true };
     const shown = renderToStaticMarkup(createElement(SampleJ, { data, siteName: 'Graylum', extras }));
     expect(shown).toContain(J_SAMPLES.title);
     for (const report of J_SAMPLES.reports) {

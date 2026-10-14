@@ -19,11 +19,6 @@
 
 /* The close */
 .final { display: grid; justify-items: center; gap: 24px; padding: clamp(40px, 6vw, 88px) clamp(20px, 4vw, 64px); border-radius: 32px; border: 1px solid var(--j-line); background: rgba(255, 255, 255, .72); text-align: center; box-shadow: var(--j-shadow-lift); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); }
-.paths { display: grid; gap: 12px; max-width: 960px; margin: 0; padding: 0; list-style: none; text-align: left; }
-@media (min-width: 768px) { .paths { grid-template-columns: 1fr 1fr; } }
-.paths li { padding: 20px 22px; border-radius: 20px; font-size: 16px; line-height: 1.75; }
-.paths li[data-path='alone'] { border: 1px dashed rgba(20, 19, 18, .25); color: var(--j-muted); }
-.paths li[data-path='coach'] { border: 2px solid var(--j-ink); background: #fff; font-weight: 500; }
-.stack { max-width: 46em; margin: 0; color: var(--j-body); font-size: 15.5px; line-height: 1.8; }
+.finalLine { margin: 0; max-width: 34em; color: var(--j-body); font-size: clamp(17px, 1.6vw, 21px); line-height: 1.7; text-wrap: pretty; }
 .finalNote { margin: -8px 0 0; color: var(--j-muted); font-size: 14px; }
 @media (prefers-reduced-motion: reduce) { .faqItem summary svg { transition: none; } }
