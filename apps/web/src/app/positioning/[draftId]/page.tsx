@@ -416,7 +416,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
   const [openingSteps, setOpeningSteps] = useState<string[]>([]);
   const [notice, setNotice] = useState("");
   useEffect(() => {
-    if (planView || hydratedDraft !== draftId || !d || !history.data) return;
+    if (planView || hydratedDraft !== draftId || !d || !history.data || d.conversationDeleted) return; // read-only: no turn
     // A manual draft (我已有定位, R15) opens too: the mentor asks for the existing positioning first.
     if (d.snapshot.state !== "draft") return;
     const flowSteps: Step[] = d.snapshot.workflow.steps;

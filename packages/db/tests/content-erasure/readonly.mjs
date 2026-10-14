@@ -10,16 +10,19 @@ const listed=async(db,a)=>(await rpc(db,'opc_query',a,null)).drafts;
 const deleteConversation=(db,a,session)=>rpc(db,'content_erasure_mark_session',a,session);
 
 // A positioning draft shaped like a real one (one step with one field), on the fixture's skill.
-// `confirmed` decides whether the field was confirmed by the user.
+// `confirmed`: true = one field confirmed (the other provisional, the step not confirmed);
+// 'step' = the step confirmed with its body, no field confirmed one by one; false = nothing confirmed.
 async function draftWith(db,a,base,confirmed){
  const p=randomUUID(),r=randomUUID();
  const src=(await db.query('SELECT module_id,skill_id FROM artifact_projects WHERE id=$1',[base.project_id])).rows[0];
  const rev=(await db.query('SELECT revision_id FROM artifact_rounds WHERE id=$1',[base.round_id])).rows[0].revision_id;
  await db.query(`INSERT INTO artifact_projects(id,actor_id,module_id,skill_id,account,work_title,current_version)
   VALUES($1::uuid,$2,$3,$4,'readonly-'||$1::text,'positioning draft',0)`,[p,a,src.module_id,src.skill_id]);
- const workflow={steps:[{id:'s',information:[{id:'goal'}]}]};
- const steps=confirmed?{s:{version:1,valid:false,information:{goal:{value:'KEEP_CONFIRMED',status:'confirmed',nature:'fact'}},
-  fieldMeta:{goal:{source:'manual'}}}}:{};
+ const workflow={steps:[{id:'s',information:[{id:'goal'},{id:'aud'}]}]};
+ const steps=confirmed==='step'?{s:{version:2,valid:true,body:'KEEP_STEP_BODY',information:{}}}
+  :confirmed?{s:{version:1,valid:false,body:'READONLY_UNCONFIRMED_BODY',notes:['READONLY_NOTE'],
+   information:{goal:{value:'KEEP_CONFIRMED',status:'confirmed',nature:'fact'},aud:{value:'READONLY_UNCONFIRMED',status:'provisional'}},
+   fieldMeta:{goal:{source:'manual'}}}}:{};
  await db.query(`INSERT INTO artifact_rounds(id,project_id,revision_id,package_hash,workflow,workflow_hash,template_hash,state,steps)
   VALUES($1,$2,$3,$4,$5,$6,$6,'draft',$7)`,[r,p,rev,'b'.repeat(64),workflow,'c'.repeat(64),steps]);
  const d=(await db.query('SELECT bill2_create_draft($1) v',[a])).rows[0].v;
@@ -42,6 +45,7 @@ export async function runReadonly({db,report}){
  const base=await drafts(db,f.actor);
  const confirmed=await draftWith(db,f.actor,base,true);
  const empty=await draftWith(db,f.actor,base,false);
+ const stepOnly=await draftWith(db,f.actor,base,'step');
  // Words from the conversation (a question and a reply) that must never come back through the read-only draft.
  await db.query(`INSERT INTO runtime_executions(actor_id,session_id,request_id,payload,history_revision,state,result)
   VALUES($1,$2,gen_random_uuid(),'{"input":"READONLY_PRIVATE_QUESTION","role":"skill"}',0,'completed','{"body":"READONLY_PRIVATE_REPLY"}')`,
@@ -49,19 +53,27 @@ export async function runReadonly({db,report}){
  const before=await rpc(db,'opc_query',f.actor,confirmed.draft_id);
  assert.equal(before.conversationDeleted,false);
  assert.deepEqual((await listed(db,f.actor)).map(x=>x.draftId).filter(id=>id!==base.draft_id).sort(),
-  [confirmed.draft_id,empty.draft_id].sort());
+  [confirmed.draft_id,empty.draft_id,stepOnly.draft_id].sort());
 
  // Delete both conversations (draft-bound: the full cleanup runs in the same call).
  await deleteConversation(db,f.actor,confirmed.session_id);
  await deleteConversation(db,f.actor,empty.session_id);
+ await deleteConversation(db,f.actor,stepOnly.session_id);
  const after=await rpc(db,'opc_query',f.actor,confirmed.draft_id);
  assert.equal(after.conversationDeleted,true,'read-only, not refused');
  assert.equal(after.draftId,confirmed.draft_id);assert.ok(after.snapshot,'confirmed work is still readable');
  assert.doesNotMatch(JSON.stringify(after),/READONLY_PRIVATE_(QUESTION|REPLY)/,'nothing said in the deleted conversation comes back');
+ // The database itself returns only confirmed content (an older API without its own filter gets the same).
+ assert.equal(after.information.s.values.goal.value,'KEEP_CONFIRMED');
+ assert.doesNotMatch(JSON.stringify(after),/READONLY_UNCONFIRMED|READONLY_NOTE/,'no unconfirmed value, step body or note');
+ assert.deepEqual([after.turns,after.plans,after.handoffs,after.report],[[],[],[],null]);
+ const step=await rpc(db,'opc_query',f.actor,stepOnly.draft_id);
+ assert.equal(step.snapshot.steps.s.body,'KEEP_STEP_BODY','a confirmed step keeps its body');
+ assert.equal(before.information.s.values.aud.value,'READONLY_UNCONFIRMED','fixture: a normal read still returns everything');
  const list=(await listed(db,f.actor)).filter(x=>x.draftId!==base.draft_id);
  assert.ok(list.every(x=>'topicSessionId' in x),'entries carry the topic workspace session (null without one)');
- assert.deepEqual(list.map(x=>[x.draftId,x.conversationDeleted]),[[confirmed.draft_id,true]],
-  'confirmed draft listed as read-only; the one with nothing confirmed is hidden');
+ assert.deepEqual(list.map(x=>[x.draftId,x.conversationDeleted]).sort(),[[confirmed.draft_id,true],[stepOnly.draft_id,true]].sort(),
+  'drafts with confirmed content listed as read-only; the one with nothing confirmed is hidden');
  assert.equal(await rpc(db,'bill2_scope_allowed',f.actor,{kind:'positioning_draft',draftId:confirmed.draft_id}),false,
   'no new writes or model calls');
  const other=await fixture(db);
@@ -79,10 +91,18 @@ export async function runReadonly({db,report}){
   ['opc_topic_consent',[f.actor,confirmed.draft_id,v]],
   ['opc_topic_draft_save',[f.actor,confirmed.draft_id,id,0,v,[]]],
   ['opc_topic_material',[f.actor,confirmed.draft_id,id,'x']],
+  ['opc_adopt_topics_with_source',[f.actor,confirmed.draft_id,id,0,v,[],[],[],v]],
+  ['opc_topic_draft_from_execution',[f.actor,confirmed.draft_id,id,0,v,id,[]]],
+  ['opc_step_material',[f.actor,confirmed.draft_id,id,'s','information','x']],
+  ['fusion_review_start',[f.actor,id,confirmed.draft_id,v,{}]],
+  // Reads other than opc_query: none of them returns confirmed positioning content.
+  ['opc_topic_read',[f.actor,confirmed.draft_id]],
+  ['opc_topic_draft_read',[f.actor,confirmed.draft_id]],
+  ['opc_plan_result',[f.actor,confirmed.draft_id,id]],
  ]){
   await assert.rejects(rpc(db,name,...args.map(x=>Array.isArray(x)?JSON.stringify(x):x)),/CONTENT_ERASED/,name);
  }
- report.checks.push('conversation deleted: confirmed draft read-only and listed; empty draft hidden; every draft write refused; other account denied');
+ report.checks.push('conversation deleted: confirmed-only read from the database; confirmed step body kept; empty draft hidden; every draft write and auxiliary read refused; other account denied');
 
  // A draft attached to an account (the fixture's base draft is its account's strategy) leaves the account
  // row once its conversation is deleted and shows up in the list as read-only, where it can be deleted whole.
@@ -98,7 +118,7 @@ export async function runReadonly({db,report}){
  const preview=await rpc(db,'content_erasure_preview',f.actor,'artifact',confirmed.project_id);
  await rpc(db,'content_erasure_confirm',f.actor,'artifact',confirmed.project_id,preview.previewHash);
  await assert.rejects(rpc(db,'opc_query',f.actor,confirmed.draft_id),/CONTENT_ERASED/);
- assert.deepEqual((await listed(db,f.actor)).filter(x=>x.draftId!==base.draft_id),[],'nothing left in the list');
+ assert.deepEqual((await listed(db,f.actor)).filter(x=>x.draftId!==base.draft_id).map(x=>x.draftId),[stepOnly.draft_id],'the deleted draft left the list');
  const round=(await db.query('SELECT steps,erased_at FROM artifact_rounds WHERE id=$1',[confirmed.round_id])).rows[0];
  assert.ok(round.erased_at);assert.equal(round.steps,null);
  report.checks.push('read-only draft deleted as a whole: unreadable, gone from the list, confirmed content cleared');
