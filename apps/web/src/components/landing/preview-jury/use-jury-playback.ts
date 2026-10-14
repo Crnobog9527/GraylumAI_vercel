@@ -53,5 +53,8 @@ export function useJuryPlayback(lengthMs: number, enabled: boolean) {
     else setPlaying(value => !value);
   }, [finished, restart]);
 
-  return { clock, playing: playing && !finished, finished, speed, setSpeed, toggle, restart };
+  const skipToEnd = useCallback(() => setClock(lengthMs), [lengthMs]);
+  const seek = useCallback((ms: number) => setClock(Math.max(0, Math.min(lengthMs, ms))), [lengthMs]);
+
+  return { clock, playing: playing && !finished, finished, speed, setSpeed, toggle, restart, skipToEnd, seek };
 }
