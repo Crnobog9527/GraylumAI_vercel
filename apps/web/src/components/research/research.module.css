@@ -1,0 +1,81 @@
+/* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+/*
+ * Research calls and selection cards on the light OPC workbench, same palette as the question card
+ * (question-card.module.css): #262626 text, #8a8a8a secondary text, quiet #ececec borders.
+ */
+
+/* ---- Research calls ---- */
+.calls{display:grid;gap:2px;margin:0;padding:0;list-style:none;font-family:var(--font-primary)}
+.call{display:flex;align-items:flex-start;gap:8px;padding:6px 10px;border-radius:8px;background:#fafafa}
+.callIcon{flex:none;margin-top:4px}
+.spin{animation:spin 1s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+@media(prefers-reduced-motion:reduce){.spin{animation:none}}
+.callBody{display:grid;gap:1px;min-width:0}
+.callLine{display:flex;gap:6px;margin:0;font-size:13px;line-height:1.6;color:#262626}
+.callVerb{flex:none;color:#8a8a8a}
+.callQuery{min-width:0;overflow-wrap:anywhere}
+.callMeta{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:0;font-size:12px;line-height:18px;color:#8a8a8a}
+.callDetail{margin:0;font-size:12px;line-height:18px;color:#777}
+.chip{padding:0 6px;border-radius:999px;font-size:11px;line-height:18px;white-space:nowrap}
+.chip.state_success{background:#eaf4ec;color:#2f6b3a}
+.chip.state_missing{background:#f8ecea;color:#9a3b2e}
+.chip.state_pending{background:#f4efe3;color:#7a5f2c}
+.callIcon.state_running{color:#8a8a8a}
+.callIcon.state_success{color:#2f6b3a}
+.callIcon.state_missing{color:#9a3b2e}
+.callIcon.state_pending{color:#7a5f2c}
+
+/* ---- Selection cards ---- */
+.card{display:flex;flex-direction:column;gap:8px;padding:12px 14px;border:1px solid #ececec;border-radius:12px;background:#fff;
+  font-family:var(--font-primary);color:#262626}
+.head{margin:0;color:#8a8a8a;font-size:12px;line-height:18px}
+.subhead{margin:6px 0 0;padding:0 8px;color:#8a8a8a;font-size:12px;line-height:18px}
+.title{margin:0;font-size:14px;font-weight:500;line-height:1.6}
+.hint,.note{margin:0;color:#8a8a8a;font-size:12px;line-height:18px}
+.note{padding-top:2px}
+.list{display:grid;gap:2px}
+.row{display:flex;align-items:center;gap:8px;min-height:36px;padding:4px 8px;border-radius:8px}
+.rowOff .field{color:#aaa;text-decoration:line-through}
+.check{flex:none;width:16px;height:16px;margin:0;accent-color:#262626;cursor:pointer}
+.check:disabled{cursor:not-allowed}
+.field{flex:1;min-width:0;height:32px;padding:0 8px;border:1px solid #ececec;border-radius:8px;background:#fff;color:#262626;
+  font:inherit;font-size:13px}
+.field:focus-visible{outline:0;border-color:#bdbdbd}
+.field:disabled{background:#fafafa}
+.addedTag{flex:none;padding:0 6px;border-radius:999px;background:#f4f4f5;color:#555;font-size:11px;line-height:18px}
+.addedText{flex:1;min-width:0;padding:0 8px;font-size:13px;line-height:1.6;overflow-wrap:anywhere}
+.addRow{display:flex;gap:8px;padding:0 8px}
+.iconButton{display:grid;flex:none;place-items:center;width:28px;height:28px;border:0;border-radius:50%;background:none;color:#8a8a8a;
+  cursor:pointer}
+.iconButton:hover:not(:disabled){background:#f2f2f2;color:#262626}
+.pick{cursor:pointer;transition:background var(--transition-fast)}
+.pick:hover{background:#f4f4f5}
+.picked{background:#f4f4f5}
+.reference{cursor:default;color:#8a8a8a}
+.reference:hover{background:none}
+.pickText{display:grid;flex:1;min-width:0}
+.pickName{font-size:13px;line-height:1.6;overflow-wrap:anywhere}
+.pickMeta{color:#8a8a8a;font-size:12px;line-height:18px;overflow-wrap:anywhere}
+.refTag{flex:none;padding:0 6px;border-radius:999px;background:#f4efe3;color:#7a5f2c;font-size:11px;line-height:18px;white-space:nowrap}
+.footer{display:flex;align-items:center;justify-content:space-between;gap:12px;padding-top:4px}
+.count{color:#777;font-size:12px}
+.primary,.secondary{display:inline-flex;align-items:center;gap:4px;height:32px;padding:0 14px;border-radius:8px;font:inherit;font-size:13px;
+  cursor:pointer;white-space:nowrap}
+.primary{border:0;background:#262626;color:#fff}
+.primary:disabled{background:#d4d4d4;cursor:not-allowed}
+.secondary{border:1px solid #ececec;background:#fff;color:#262626}
+.secondary:disabled{color:#aaa;cursor:not-allowed}
+.problem{margin:0;color:#9a3b2e;font-size:12px;line-height:18px}
+.echo{display:flex;flex-wrap:wrap;gap:6px;margin:0;padding:0;list-style:none}
+.echoItem{padding:2px 10px;border:1px solid #ececec;border-radius:999px;background:#fafafa;font-size:13px;line-height:1.6;
+  overflow-wrap:anywhere}
+
+@media(max-width:480px){
+  .row{min-height:44px}
+  .check{width:18px;height:18px}
+  .field{height:40px;font-size:16px}
+  .primary,.secondary{height:40px}
+  .reference{flex-wrap:wrap}
+  .reference .refTag{margin-left:26px}
+}

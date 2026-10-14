@@ -1,0 +1,35 @@
+/* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+/* Benchmark table, same palette as the research cards. A real table on wide screens, stacked blocks on phones. */
+.wrap{display:flex;flex-direction:column;gap:8px;padding:12px 14px;border:1px solid #ececec;border-radius:12px;background:#fff;
+  font-family:var(--font-primary);color:#262626}
+.top{display:flex;align-items:baseline;justify-content:space-between;gap:12px}
+.head{margin:0;color:#8a8a8a;font-size:12px;line-height:18px}
+.summary{margin:0;color:#777;font-size:12px}
+.table{width:100%;border-collapse:collapse;font-size:13px;line-height:1.5}
+.table th,.table td{padding:8px 10px;border-bottom:1px solid #f0f0f0;text-align:left;vertical-align:top}
+.table thead th{color:#8a8a8a;font-size:12px;font-weight:400;white-space:nowrap}
+.table td{font-variant-numeric:tabular-nums;white-space:nowrap}
+.table tbody tr:last-child th,.table tbody tr:last-child td{border-bottom:0}
+.account{display:grid;gap:2px;font-weight:400}
+.accountName{font-weight:500;overflow-wrap:anywhere}
+.accountMeta{display:flex;flex-wrap:wrap;align-items:center;gap:6px;color:#8a8a8a;font-size:12px}
+.category{color:#555}
+.badge{padding:0 6px;border-radius:999px;font-size:11px;line-height:18px}
+.ok{background:#eaf4ec;color:#2f6b3a}
+.off{background:#f4f4f5;color:#777}
+.missing{color:#aaa}
+.ref{margin-left:2px;color:#8a8a8a;font-size:10px}
+.sources{display:grid;gap:2px;margin:0;padding:0;list-style:none;color:#8a8a8a;font-size:12px;line-height:18px;overflow-wrap:anywhere}
+.note{margin:0;color:#8a8a8a;font-size:12px;line-height:18px}
+
+@media(max-width:640px){
+  .table thead{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+  .table,.table tbody,.table tr,.table th,.table td{display:block;width:100%}
+  .table tr{padding:10px 0;border-bottom:1px solid #f0f0f0}
+  .table tbody tr:last-child{border-bottom:0}
+  .table th,.table td{padding:2px 0;border:0}
+  .table th{padding-bottom:6px}
+  .table td{display:flex;justify-content:space-between;gap:12px;white-space:normal}
+  .table td::before{content:attr(data-label);color:#8a8a8a;font-size:12px}
+  .table td>span{margin-left:auto;text-align:right}
+}

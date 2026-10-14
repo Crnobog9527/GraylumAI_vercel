@@ -1,0 +1,43 @@
+/* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import { Check, CircleAlert, Clock3, Loader2 } from "lucide-react";
+import { cn } from "@/lib/utils";
+import { CALL_STATE_LABELS, describeCall, type CallState, type ResearchCall } from "./research-model";
+import styles from "./research.module.css";
+
+const ICONS: Record<CallState, typeof Check> = { running: Loader2, success: Check, missing: CircleAlert, pending: Clock3 };
+
+/**
+ * Every research call of a reply, one compact row each: what was searched, which kind of data, and the result
+ * (成功 / 未取到 / 待核). Free card tools are not searches and are left out. No supplier names, no costs.
+ */
+export function ResearchCallList({ calls }: { calls: ResearchCall[] }) {
+  const rows = calls.map(call => ({ id: call.id, view: describeCall(call) }))
+    .filter((row): row is { id: string; view: NonNullable<ReturnType<typeof describeCall>> } => row.view !== null);
+  if (rows.length === 0) return null;
+  return (
+    <ul aria-label="搜索记录" className={styles.calls}>
+      {rows.map(({ id, view }) => {
+        const Icon = ICONS[view.state];
+        return (
+          <li key={id} className={styles.call} data-research-call={view.state}>
+            <Icon aria-hidden size={14} className={cn(styles.callIcon, styles[`state_${view.state}`],
+              view.state === "running" && styles.spin)} />
+            <div className={styles.callBody}>
+              <p className={styles.callLine}>
+                <span className={styles.callVerb}>{view.state === "running" ? CALL_STATE_LABELS.running : "搜索"}</span>
+                <span className={styles.callQuery}>{view.query || "（未提供）"}</span>
+              </p>
+              <p className={styles.callMeta}>
+                <span>{view.line}</span>
+                {view.state !== "running" && (
+                  <span className={cn(styles.chip, styles[`state_${view.state}`])}>{CALL_STATE_LABELS[view.state]}</span>
+                )}
+              </p>
+              {view.detail && <p className={styles.callDetail}>{view.detail}</p>}
+            </div>
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
