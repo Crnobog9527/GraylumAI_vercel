@@ -67,6 +67,7 @@ export type RunReport = { processed: number; settled: number; deferred: number }
 /** Settles attempts that can no longer be used: new accounts they imported are deleted, takeovers queued. */
 export async function cleanupAttempts(db: Rpc, client: ClientDeps, until: number, now: Clock = Date.now): Promise<RunReport> {
   const report: RunReport = { processed: 0, settled: 0, deferred: 0 };
+  if (now() >= until) return report;
   const attempts = await rpc(db, 'publish_monitor_cleanup_claim', { p_limit: 50, p_lease_seconds: LEASE_SECONDS },
     z.array(claimedAttempt));
   for (const attempt of attempts) {
@@ -92,35 +93,46 @@ export async function cleanupAttempts(db: Rpc, client: ClientDeps, until: number
   return report;
 }
 
-const claimedWork = z.object({ connectionId: z.string().uuid(), providerAccountId: providerId,
-  action: z.enum(['delete', 'disconnect']), ownerRef: z.string().nullable() }).strict();
+const claimedWork = z.object({ connectionId: z.string().uuid(), providerAccountId: providerId, deleting: z.boolean(),
+  action: z.enum(['delete', 'disconnect']), ownerRef: z.string().regex(/^[0-9a-f]{32}$/).nullable() }).strict();
+type WorkOutcome = 'deleted' | 'gone' | 'owner_changed' | 'disconnected' | 'owner_back' | 'retry';
+
+/**
+ * One claimed connection. The account is always re-read first and acted on only while it still carries the expected
+ * owner's reference: a deletion record is deleted (or, while its owner's publishes are unresolved, only disconnected)
+ * only if the record's owner still authorizes it; a takeover is disconnected only if the original owner does not.
+ */
+async function settle(client: ClientDeps, job: z.infer<typeof claimedWork>): Promise<[WorkOutcome, string | null]> {
+  const current = await getAccount(client, job.providerAccountId);
+  if (gone(current)) return ['gone', null];
+  if (current.kind !== 'ok') return ['retry', errorCode(current)];
+  const owner = current.value.externalId?.split('.')[0] ?? null;
+  if (job.deleting) {
+    if (!job.ownerRef) return ['retry', 'OWNER_UNKNOWN'];
+    // Someone else authorized this account since: it is theirs now; only our record ends.
+    if (owner !== job.ownerRef) return ['owner_changed', null];
+  } else if (job.ownerRef && owner === job.ownerRef) {
+    // The original owner re-authorised since the takeover: their fresh grant is not ours to revoke.
+    return ['owner_back', null];
+  }
+  if (job.action === 'disconnect' && current.value.status === 'disconnected') return ['disconnected', null];
+  const result = job.action === 'delete'
+    ? await deleteAccount(client, job.providerAccountId) : await disconnectAccount(client, job.providerAccountId);
+  if (result.kind === 'ok') return [job.action === 'delete' ? 'deleted' : 'disconnected', null];
+  if (gone(result)) return ['gone', null];
+  return ['retry', errorCode(result)];
+}
 
 /** Provider deletions of 'deleting' connections and disconnects of proven takeovers, retried until settled. */
 export async function runProviderWork(db: Rpc, client: ClientDeps, until: number, now: Clock = Date.now): Promise<RunReport> {
   const report: RunReport = { processed: 0, settled: 0, deferred: 0 };
+  if (now() >= until) return report;
   const jobs = await rpc(db, 'publish_monitor_provider_work_claim', { p_limit: 50, p_lease_seconds: LEASE_SECONDS },
     z.array(claimedWork));
   for (const job of jobs) {
     if (now() >= until) break;
     report.processed += 1;
-    let outcome: 'deleted' | 'gone' | 'disconnected' | 'owner_back' | 'retry' = 'retry';
-    let error: string | null = null;
-    if (job.action === 'delete') {
-      const removed = await deleteAccount(client, job.providerAccountId);
-      outcome = removed.kind === 'ok' ? 'deleted' : gone(removed) ? 'gone' : 'retry';
-      if (outcome === 'retry') error = errorCode(removed);
-    } else {
-      const current = await getAccount(client, job.providerAccountId);
-      if (gone(current)) outcome = 'gone';
-      else if (current.kind !== 'ok') error = errorCode(current);
-      // The original owner re-authorised since the takeover: their fresh grant is not ours to revoke.
-      else if (job.ownerRef && current.value.externalId?.split('.')[0] === job.ownerRef) outcome = 'owner_back';
-      else {
-        const cleared = await disconnectAccount(client, job.providerAccountId);
-        outcome = cleared.kind === 'ok' || gone(cleared) ? 'disconnected' : 'retry';
-        if (outcome === 'retry') error = errorCode(cleared);
-      }
-    }
+    const [outcome, error] = await settle(client, job);
     await rpc(db, 'publish_monitor_provider_work_finish', { p_connection_id: job.connectionId, p_outcome: outcome,
       p_error: error }, z.unknown());
     if (outcome === 'retry') report.deferred += 1; else report.settled += 1;

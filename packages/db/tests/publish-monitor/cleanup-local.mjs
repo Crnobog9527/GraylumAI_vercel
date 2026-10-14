@@ -110,8 +110,10 @@ try {
   const open = await start(other.a, other.account);
   const orphan = await svc('SELECT publish_monitor_orphan_classify($1) v', [j([acc('pfm_u_kept', 'x'),
     acc('pfm_dash', null), acc('pfm_weird', 'Owner-Test'), acc('pfm_open', open.externalId),
-    acc('pfm_unsettled', a1.externalId), acc('pfm_settled', b1.externalId), acc('pfm_gone_user', 'f'.repeat(32) + '.' + 'e'.repeat(32))])]);
-  assert.deepEqual(orphan, { delete: ['pfm_settled', 'pfm_gone_user'], unknownFormat: ['pfm_dash', 'pfm_weird'] });
+    acc('pfm_unsettled', a1.externalId), acc('pfm_settled', b1.externalId), acc('pfm_gone_user', 'f'.repeat(32) + '.' + 'e'.repeat(32)),
+    acc('pfm_lookalike', 'abcdefghijklmnop.qrstuvwxyzabcdef')])]);
+  assert.deepEqual(orphan, { delete: ['pfm_settled', 'pfm_gone_user'],
+    unknownFormat: ['pfm_dash', 'pfm_weird', 'pfm_lookalike'] });
   report.checks.push('orphan sweep deletes only unbound accounts in Graylum\'s own format whose attempt is settled or unknown; '
     + 'other formats are only reported');
 
@@ -139,15 +141,37 @@ try {
   const del = await conn('pfm_u_kept');
   assert.deepEqual([del.status, del.business_id, del.account_project_id, del.consent_read, del.provider_can_publish],
     ['deleting', null, null, false, false]);
+  assert.equal(del.owner_ref, await v('SELECT provider_ref v FROM social_monitor_settings WHERE actor_id=$1', [u.a]),
+    'the deletion record keeps the owner reference the worker must find on the provider account');
   assert.equal(await v('SELECT count(*)::int v FROM social_posts WHERE connection_id=$1', [keptConn.id]), 0);
   await code(svc('SELECT publish_monitor_disconnect($1,$2) v', [u.a, keptConn.id]), 'P0002');
   const delJob = (await svc('SELECT publish_monitor_provider_work_claim(50,120) v'))
     .find(x => x.providerAccountId === 'pfm_u_kept');
-  assert.equal(delJob.action, 'delete');
+  assert.deepEqual([delJob.action, delJob.deleting, delJob.ownerRef], ['delete', true, del.owner_ref]);
   await workFinish(delJob.connectionId, 'gone');
   assert.equal(await conn('pfm_u_kept'), undefined, 'a confirmed provider deletion removes the record');
-  report.checks.push('a user disconnects only their own connection: data removed now, identity-free record until the '
-    + 'provider deletion is confirmed');
+  report.checks.push('a user disconnects only their own connection: data removed now, identity-free record with the owner '
+    + 'reference until the provider deletion is confirmed');
+
+  // Unresolved publishes: the deletion only clears tokens (once) and waits; afterwards it deletes. A changed owner ends
+  // only our record.
+  await connect(other, 'pfm_pub');
+  const pub = await conn('pfm_pub');
+  await c.query(`INSERT INTO social_publish_jobs(actor_id,business_id,idempotency_key,request_fingerprint,targets,state)
+    VALUES($1,$2,'pub-open-key-01',repeat('a',64),$3,'dispatching')`,
+  [other.a, pub.business_id, j([{ connectionId: pub.id, platform: 'facebook' }])]);
+  await svc('SELECT publish_monitor_disconnect($1,$2) v', [other.a, pub.id]);
+  const hold = (await work()).find(x => x.providerAccountId === 'pfm_pub');
+  assert.deepEqual([hold.action, hold.deleting], ['disconnect', true]);
+  await workFinish(hold.connectionId, 'disconnected');
+  assert.equal((await conn('pfm_pub')).provider_tokens_cleared, true);
+  assert.equal((await work()).find(x => x.providerAccountId === 'pfm_pub'), undefined, 'cleared tokens wait for results');
+  await c.query("UPDATE social_publish_jobs SET state='completed' WHERE idempotency_key='pub-open-key-01'");
+  const afterJob = (await work()).find(x => x.providerAccountId === 'pfm_pub');
+  assert.equal(afterJob.action, 'delete');
+  await workFinish(afterJob.connectionId, 'owner_changed');
+  assert.equal(await conn('pfm_pub'), undefined, 'a changed owner ends only our record');
+  report.checks.push('with unresolved publishes a deletion only clears tokens and waits; a changed owner ends only our record');
 
   // Webhook: a provider-side disconnect asks the owner to re-authorise; unknown accounts are ignored.
   await connect(other, 'pfm_hook');

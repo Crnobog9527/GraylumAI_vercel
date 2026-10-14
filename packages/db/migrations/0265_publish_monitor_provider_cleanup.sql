@@ -12,6 +12,12 @@ ALTER TABLE public.social_connect_requests ADD COLUMN IF NOT EXISTS cleanup_leas
 ALTER TABLE public.social_connect_requests ADD COLUMN IF NOT EXISTS cleanup_error text;
 -- A proven takeover still has to be cleared at the provider (plan §4.1 step 2) until this is false.
 ALTER TABLE public.social_connections ADD COLUMN IF NOT EXISTS provider_disconnect_pending boolean NOT NULL DEFAULT false;
+-- A deletion record keeps the owner's non-reversible provider reference (the first half of its external_id), so the
+-- worker deletes the provider account only while it still carries that owner's authorization (plan §9 item 14). It
+-- is captured when the row enters 'deleting', before account erasure removes the settings row.
+ALTER TABLE public.social_connections ADD COLUMN IF NOT EXISTS owner_ref text;
+-- Tokens already cleared for a deletion that has to wait for unresolved publishes (plan §4.1: disconnect first).
+ALTER TABLE public.social_connections ADD COLUMN IF NOT EXISTS provider_tokens_cleared boolean NOT NULL DEFAULT false;
 DO $$
 BEGIN
  IF NOT EXISTS(SELECT 1 FROM pg_constraint WHERE conrelid='public.social_connect_requests'::regclass
@@ -21,6 +27,25 @@ BEGIN
     AND (cleaned_at IS NULL OR state IN ('applied','abandoned')));
  END IF;
 END $$;
+DO $$
+BEGIN
+ IF NOT EXISTS(SELECT 1 FROM pg_constraint WHERE conrelid='public.social_connections'::regclass
+  AND conname='social_connections_owner_ref_check') THEN
+  ALTER TABLE public.social_connections ADD CONSTRAINT social_connections_owner_ref_check
+   CHECK(owner_ref IS NULL OR owner_ref ~ '^[0-9a-f]{32}$');
+ END IF;
+END $$;
+CREATE OR REPLACE FUNCTION public.publish_monitor_capture_owner_ref() RETURNS trigger
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
+BEGIN
+ IF NEW.status='deleting' AND OLD.status IS DISTINCT FROM 'deleting' AND NEW.owner_ref IS NULL THEN
+  NEW.owner_ref:=(SELECT provider_ref FROM social_monitor_settings WHERE actor_id=NEW.actor_id);
+ END IF;
+ RETURN NEW;
+END $$;
+DROP TRIGGER IF EXISTS social_connections_capture_owner_ref ON public.social_connections;
+CREATE TRIGGER social_connections_capture_owner_ref BEFORE UPDATE OF status ON public.social_connections
+ FOR EACH ROW EXECUTE FUNCTION public.publish_monitor_capture_owner_ref();
 CREATE INDEX IF NOT EXISTS social_connect_requests_cleanup ON public.social_connect_requests(created_at)
  WHERE cleaned_at IS NULL;
 CREATE INDEX IF NOT EXISTS social_connections_provider_work ON public.social_connections(updated_at)
@@ -155,53 +180,69 @@ BEGIN
   pid:=item->>'providerAccountId'; ext:=item->>'externalId';
   IF pid IS NULL OR pid !~ '^[A-Za-z0-9_-]{1,128}$' THEN RAISE EXCEPTION 'PUBLISH_MONITOR_INPUT_INVALID' USING ERRCODE='22023'; END IF;
   CONTINUE WHEN EXISTS(SELECT 1 FROM social_connections WHERE provider_account_id=pid);
-  IF ext IS NULL OR ext !~ '^[a-z0-9]{16,64}\.[a-z0-9]{16,64}$' THEN unknown:=unknown||pid; CONTINUE; END IF;
+  -- Exactly what publish_monitor_random_hex() generates for both halves; anything else is only reported.
+  IF ext IS NULL OR ext !~ '^[0-9a-f]{32}\.[0-9a-f]{32}$' THEN unknown:=unknown||pid; CONTINUE; END IF;
   CONTINUE WHEN EXISTS(SELECT 1 FROM social_connect_requests WHERE external_id=ext AND cleaned_at IS NULL);
   deletable:=deletable||pid;
  END LOOP;
  RETURN jsonb_build_object('delete',to_jsonb(deletable),'unknownFormat',to_jsonb(unknown));
 END $$;
 
--- Daily job: claim provider work on connections: deletion of 'deleting' rows (erasure or user disconnect), and the
--- disconnect of a takeover. ownerRef lets the server skip a takeover the original owner has since re-authorised.
+-- Daily job: claim provider work on connections. A deletion record is deleted at the provider, unless a publish of
+-- its owner still waits for a final result: then its tokens are only cleared (once) and the account is kept for
+-- reconciliation (plan §4.1). A proven takeover is disconnected. ownerRef is the reference the provider account must
+-- still carry for the action to apply; the server re-reads the account and compares before acting.
 CREATE OR REPLACE FUNCTION public.publish_monitor_provider_work_claim(p_limit integer,p_lease_seconds integer) RETURNS jsonb
 LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
 DECLARE now_at timestamptz:=clock_timestamp(); lease uuid:=gen_random_uuid(); out jsonb;
 BEGIN
  IF p_limit IS NULL OR p_limit NOT BETWEEN 1 AND 100 OR p_lease_seconds IS NULL OR p_lease_seconds NOT BETWEEN 30 AND 900 THEN
   RAISE EXCEPTION 'PUBLISH_MONITOR_INPUT_INVALID' USING ERRCODE='22023'; END IF;
- WITH picked AS (
-  SELECT id FROM social_connections
-  WHERE source='postforme' AND (status='deleting' OR provider_disconnect_pending) AND deletion_attempts<50
-   AND (lease_expires_at IS NULL OR lease_expires_at<=now_at)
-  ORDER BY updated_at LIMIT p_limit FOR UPDATE SKIP LOCKED
+ WITH candidates AS (
+  SELECT c.id,c.updated_at,c.status,c.provider_tokens_cleared,
+   EXISTS(SELECT 1 FROM social_publish_jobs j WHERE j.actor_id=c.actor_id AND j.state IN ('claimed','dispatching','unknown')
+    AND j.targets @> jsonb_build_array(jsonb_build_object('connectionId',c.id::text))) AS publishes_open
+  FROM social_connections c
+  WHERE c.source='postforme' AND (c.status='deleting' OR c.provider_disconnect_pending) AND c.deletion_attempts<50
+   AND (c.lease_expires_at IS NULL OR c.lease_expires_at<=now_at)
+ ), picked AS (
+  SELECT c.id FROM social_connections c JOIN candidates k ON k.id=c.id
+  WHERE NOT (k.status='deleting' AND k.publishes_open AND k.provider_tokens_cleared)
+  ORDER BY k.updated_at LIMIT p_limit FOR UPDATE OF c SKIP LOCKED
  ), claimed AS (
   UPDATE social_connections c SET lease_owner=lease,lease_expires_at=now_at+make_interval(secs=>p_lease_seconds),
    deletion_attempts=c.deletion_attempts+1
   FROM picked WHERE c.id=picked.id
-  RETURNING c.id,c.actor_id,c.provider_account_id,c.status
+  RETURNING c.id,c.actor_id,c.provider_account_id,c.status,c.owner_ref
  )
  SELECT COALESCE(jsonb_agg(jsonb_build_object('connectionId',claimed.id,'providerAccountId',provider_account_id,
-  'action',CASE WHEN status='deleting' THEN 'delete' ELSE 'disconnect' END,
-  'ownerRef',(SELECT provider_ref FROM social_monitor_settings s WHERE s.actor_id=claimed.actor_id)) ORDER BY claimed.id),
-  '[]'::jsonb) INTO out FROM claimed;
+  'deleting',status='deleting',
+  'action',CASE WHEN status<>'deleting' OR k.publishes_open THEN 'disconnect' ELSE 'delete' END,
+  'ownerRef',CASE WHEN status='deleting' THEN owner_ref
+   ELSE (SELECT provider_ref FROM social_monitor_settings s WHERE s.actor_id=claimed.actor_id) END) ORDER BY claimed.id),
+  '[]'::jsonb) INTO out FROM claimed JOIN candidates k ON k.id=claimed.id;
  RETURN out;
 END $$;
 
--- Outcome of one claimed connection. 'deleted' (or 'gone': the provider has no such account) ends a deletion row;
--- 'disconnected' or 'owner_back' ends a pending takeover disconnect; 'retry' records the error for the next run.
+-- Outcome of one claimed connection. For a deletion record: 'deleted' or 'gone' (the provider has no such account)
+-- ends it; 'owner_changed' (someone else now authorizes that account) ends our record without touching theirs;
+-- 'disconnected' marks its tokens cleared while publishes are unresolved. For a takeover: 'disconnected', 'gone' or
+-- 'owner_back' settles it. 'retry' records the error for the next run.
 CREATE OR REPLACE FUNCTION public.publish_monitor_provider_work_finish(p_connection_id uuid,p_outcome text,p_error text)
 RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
 DECLARE c social_connections;
 BEGIN
- IF p_connection_id IS NULL OR p_outcome NOT IN ('deleted','gone','disconnected','owner_back','retry')
+ IF p_connection_id IS NULL OR p_outcome NOT IN ('deleted','gone','owner_changed','disconnected','owner_back','retry')
   OR (p_error IS NOT NULL AND p_error !~ '^[A-Z0-9_]{1,64}$') THEN
   RAISE EXCEPTION 'PUBLISH_MONITOR_INPUT_INVALID' USING ERRCODE='22023'; END IF;
  SELECT * INTO c FROM social_connections WHERE id=p_connection_id FOR UPDATE;
  IF c.id IS NULL THEN RETURN; END IF;
- IF p_outcome IN ('deleted','gone') AND c.status='deleting' THEN
+ IF p_outcome IN ('deleted','gone','owner_changed') AND c.status='deleting' THEN
   -- Nothing references a deleting row: its posts and snapshots were removed when it entered 'deleting'.
   DELETE FROM social_connections WHERE id=c.id;
+ ELSIF p_outcome='disconnected' AND c.status='deleting' THEN
+  UPDATE social_connections SET provider_tokens_cleared=true,deletion_error=NULL,lease_owner=NULL,lease_expires_at=NULL,
+   updated_at=clock_timestamp() WHERE id=c.id;
  ELSIF p_outcome IN ('deleted','gone','disconnected','owner_back') AND c.provider_disconnect_pending THEN
   UPDATE social_connections SET provider_disconnect_pending=false,deletion_error=NULL,lease_owner=NULL,
    lease_expires_at=NULL,updated_at=clock_timestamp() WHERE id=c.id;
@@ -252,12 +293,14 @@ END $$;
 
 DO $$ DECLARE f regprocedure; BEGIN
  FOR f IN SELECT p.oid::regprocedure FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
-  WHERE n.nspname='public' AND p.proname IN ('publish_monitor_connect_callback','publish_monitor_cleanup_claim',
+  WHERE n.nspname='public' AND p.proname IN ('publish_monitor_capture_owner_ref','publish_monitor_connect_callback',
+   'publish_monitor_cleanup_claim',
    'publish_monitor_cleanup_classify','publish_monitor_cleanup_finish','publish_monitor_orphan_classify',
    'publish_monitor_provider_work_claim','publish_monitor_provider_work_finish','publish_monitor_disconnect',
    'publish_monitor_provider_account_disconnected') LOOP
   EXECUTE format('REVOKE ALL ON FUNCTION %s FROM PUBLIC,anon,authenticated,service_role',f);
-  EXECUTE format('GRANT EXECUTE ON FUNCTION %s TO service_role',f);
+  IF split_part(f::text,'(',1)<>'publish_monitor_capture_owner_ref' THEN
+   EXECUTE format('GRANT EXECUTE ON FUNCTION %s TO service_role',f); END IF;
  END LOOP;
 END $$;
 COMMIT;
