@@ -4,7 +4,7 @@
  * and the margin where notes are pinned beside the chapter they are about.
  */
 .viewport {
-  position: relative; height: clamp(480px, 70vh, 760px); overflow-y: auto; overscroll-behavior: contain;
+  position: relative; height: clamp(420px, calc(100vh - 210px), 760px); overflow-y: auto; overscroll-behavior: contain;
   padding: 20px clamp(8px, 2vw, 20px) 40px 0; scroll-behavior: auto;
 }
 .viewport:focus-visible { outline: 2px solid var(--j-ink); outline-offset: -2px; }
