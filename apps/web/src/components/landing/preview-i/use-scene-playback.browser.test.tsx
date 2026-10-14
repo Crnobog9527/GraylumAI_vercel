@@ -27,7 +27,7 @@ beforeAll(async () => {
           const far=location.hash==='#far';
           return <><button onClick={()=>setKey('b')}>switch</button>
             <p data-testid="state">{playback?playback.phase:'all'}</p>
-            {key==='a'?<div ref={ref} style={{marginTop:far?5000:0,height:40}}>a</div>:<div ref={ref} style={{height:40}}>b</div>}</>;
+            {key==='a'?<div key="a" ref={ref} style={{marginTop:far?5000:0,height:40}}>a</div>:<div key="b" ref={ref} style={{height:40}}>b</div>}</>;
         }
         createRoot(document.getElementById('root')).render(<App/>);`;
     } }],
