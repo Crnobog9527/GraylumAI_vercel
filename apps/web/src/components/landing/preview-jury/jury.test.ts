@@ -12,6 +12,8 @@ import {
 } from './jury-events';
 import { DOC_HEAD, deskAt, type MarginItem } from './jury-desk';
 import { canvasAt, statusWord } from './jury-canvas';
+import { briefScenes } from './jury-brief';
+import { JuryCanvasPlayer } from './JuryCanvasPlayer';
 import { diffText } from './jury-diff';
 import { REVISION_TEXT } from './jury-mock-rulings';
 import { REPORT_CHAPTERS } from './jury-report';
@@ -438,5 +440,29 @@ describe('the canvas', () => {
     expect(unchanged.edges).toEqual([]);
     const consensus = buildScenes(findScenario('consensus').arrivals);
     expect(consensus.some(scene => scene.kind === 'response')).toBe(false);
+  });
+});
+
+describe('the brief canvas for embedding', () => {
+  it('keeps every stage in order but plays back to back from zero, much shorter than the full review', () => {
+    for (const scenario of JURY_SCENARIOS) {
+      const full = buildScenes(scenario.arrivals);
+      const brief = briefScenes(full);
+      expect(brief[0]?.start).toBe(0);
+      brief.forEach((scene, index) => {
+        if (index > 0) expect(scene.start).toBe(brief[index - 1].end);
+      });
+      expect([...new Set(brief.map(scene => scene.stage))]).toEqual([...new Set(full.map(scene => scene.stage))]);
+      expect(playbackLength(brief)).toBeLessThan(playbackLength(full) / 2);
+      expect(brief.filter(scene => scene.kind === 'ruling').length).toBeLessThanOrEqual(3);
+      const end = canvasAt(brief, playbackLength(brief) - 1, DEFAULT_SEAT_NAMES);
+      expect(end.next.state).toBe(scenario.id === 'failed' ? 'unchanged' : 'revised');
+    }
+  });
+
+  it('renders the canvas alone, with the configured names and no model names', () => {
+    const html = renderToStaticMarkup(createElement(JuryCanvasPlayer, { brief: true, speed: 2, names: resolveSeatNames(SAMPLE_PANEL) }));
+    expect(html).toContain('专门挑刺的资深短视频运营与商业变现老顾问');
+    expect(html).not.toMatch(MODEL_NAMES);
   });
 });
