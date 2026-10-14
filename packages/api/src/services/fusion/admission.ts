@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { frozenCallSchema, frozenPaygRunSchema, type BillingRpc, type FrozenCall, type FrozenPaygRun } from '../bill2/service';
+import { decimal } from '../bill2/decimal';
 import { assertFusionEntitlement, readMembershipEntitlements } from '../membershipEntitlements';
 import { admissionDeadline } from '../runtime/admissionLimits';
 import { freezeWindowBillingUnit } from '../runtime/billingUnitAdmission';
@@ -25,26 +26,45 @@ const refusals = new Set(['FUSION_REVIEW_DISABLED', 'FUSION_MEMBERSHIP_REQUIRED'
   'REPORT_ENTITLEMENTS_UNAVAILABLE', 'FUSION_MODEL_DENIED', 'FUSION_BUDGET_EXCEEDED', 'FUSION_GROUP_INVALID',
   'FUSION_GROUP_CONFLICT', 'FUSION_GROUP_DENIED', 'BILL2_REQUEST_CONFLICT', 'RUNTIME_TEST_WINDOW_DENIED',
   'RUNTIME_TEST_MODEL_DENIED']);
-const memberRequest = (requestId: string, index: number) => {
-  const hex = createHash('sha256').update(`fusion-run:${requestId}:${index}`).digest('hex');
+/** A stable UUID derived from a seed (retries of the same step reuse the same request ids). */
+export function derivedUuid(seed: string) {
+  const hex = createHash('sha256').update(seed).digest('hex');
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-4${hex.slice(13, 16)}-8${hex.slice(17, 20)}-${hex.slice(20, 32)}`;
-};
+}
+const memberRequest = (requestId: string, index: number) => derivedUuid(`fusion-run:${requestId}:${index}`);
+
+/** The frozen runs of an existing admission, without pricing anything; null when the request was never admitted. */
+export async function replayFusionGroup(admin: SupabaseClient, actorId: string, requestId: string, sourceSessionId: string) {
+  try {
+    return toGroup(await rpc<unknown>(admin, 'fusion_group_admit', { p_actor_id: actorId, p_request_id: uuid.parse(requestId),
+      p_kind: 'review', p_source_session_id: uuid.parse(sourceSessionId), p_runs: [] }));
+  } catch (error) {
+    if (error instanceof Error && error.message === 'FUSION_GROUP_INVALID') return null;
+    throw error;
+  }
+}
 
 /** Group admission (FUSION-REVIEW §2.1, §3.2). The host freezes each model's exact request and call;
  * the database (0235 fusion_group_admit) then rechecks the switch, membership, allowlist and group
  * budget in one transaction, creates the group and its runs, and replays the first admission for the
  * same request. The early checks here only give a clear reason before any work is frozen. */
 export async function admitFusionGroup(input: { admin: SupabaseClient; actorId: string; requestId: string;
-  sourceSessionId: string; members: FusionMember[]; env?: Record<string, string | undefined> }): Promise<AdmittedFusionGroup> {
+  sourceSessionId: string; members: FusionMember[]; env?: Record<string, string | undefined>;
+  /** The output caps frozen at review start: later groups never use a cap raised mid-review (#962 review). */
+  outputTokens?: { opinion: number; summary: number };
+  /** The credits this group may hold, frozen with the estimate the user agreed to (#962 review). */
+  maxCredits?: number;
+  /** The provider cost bound of this group, frozen with the same estimate (decimal dollars). */
+  maxUsd?: string;
+  /** Each member's own frozen bounds, in member order: every run is also held to its own (#962 review). */
+  memberCaps?: Array<{ credits: number; usd: string }> }): Promise<AdmittedFusionGroup> {
   const { admin, actorId, members } = input;
   const env = input.env ?? process.env;
   if (!members.length || members.length > 16) throw new Error('FUSION_GROUP_INVALID');
   const groupArgs = { p_actor_id: actorId, p_request_id: uuid.parse(input.requestId), p_kind: 'review',
     p_source_session_id: uuid.parse(input.sourceSessionId) };
-  // Replay first: the transaction answers an existing request before it reads any input, so a retried
-  // request gets the first frozen runs without re-pricing or creating billing drafts.
-  try { return toGroup(await rpc<unknown>(admin, 'fusion_group_admit', { ...groupArgs, p_runs: [] })); }
-  catch (error) { if (!(error instanceof Error) || error.message !== 'FUSION_GROUP_INVALID') throw error; }
+  // The live permissions first, also for a replay: a group admitted while the user waited for credits is claimed
+  // later, and by then the switch, the allowlist or the membership may forbid it (#962 review).
   const settings = await readFusionSettings(admin);
   if (!settings.review.enabled) throw new Error('FUSION_REVIEW_DISABLED');
   assertFusionEntitlement(await readMembershipEntitlements(admin, actorId), 'review', members.length);
@@ -53,6 +73,10 @@ export async function admitFusionGroup(input: { admin: SupabaseClient; actorId: 
       : settings.review.summaryModelId === member.modelId;
     if (!allowed) throw new Error('FUSION_MODEL_DENIED');
   }
+  // Then replay: the transaction answers an existing request before it reads any input, so a retried
+  // request gets the first frozen runs without re-pricing or creating billing drafts.
+  try { return toGroup(await rpc<unknown>(admin, 'fusion_group_admit', { ...groupArgs, p_runs: [] })); }
+  catch (error) { if (!(error instanceof Error) || error.message !== 'FUSION_GROUP_INVALID') throw error; }
   const window = await loadStagingPolicy(admin as unknown as BillingRpc, actorId, env);
   const rows = await admin.from('ai_models').select(FUSION_MODEL_COLUMNS).in('id', [...new Set(members.map(m => m.modelId))]);
   if (rows.error) throw new Error('FUSION_ADMISSION_UNAVAILABLE');
@@ -61,7 +85,8 @@ export async function admitFusionGroup(input: { admin: SupabaseClient; actorId: 
   const models = await Promise.all(members.map(member => {
     const row = (rows.data as FusionModelRow[]).find(candidate => candidate.id === member.modelId);
     if (!row) throw new Error('FUSION_MODEL_UNAVAILABLE');
-    const tokens = member.phase === 'fusion_review' ? settings.review.opinionOutputTokens : settings.review.summaryOutputTokens;
+    const caps = input.outputTokens ?? { opinion: settings.review.opinionOutputTokens, summary: settings.review.summaryOutputTokens };
+    const tokens = member.phase === 'fusion_review' ? caps.opinion : caps.summary;
     return admitFusionModel(admin, window, row, member.phase, tokens, deadline, env);
   }));
   const priced = await freezeStagingPaygPricing(admin, models.map(model => model.policy));
@@ -81,9 +106,24 @@ export async function admitFusionGroup(input: { admin: SupabaseClient; actorId: 
       scope: { kind: 'positioning_draft', draftId: uuid.parse(draftId) }, operation: 'question', modelId: member.modelId,
       sourceHash: createHash('sha256').update(JSON.stringify(context)).digest('hex'), input: context, callPolicy: [policy], rules,
       limits: { costUsd: call.upperUsd, credits: 0, maxPreDeduct: upperCredits, maxCalls: 1, deadline } });
-    return { requestId: memberRequest(input.requestId, index), payload };
+    return { requestId: memberRequest(input.requestId, index), payload, upperCredits, upperUsd: call.upperUsd };
   }));
-  return toGroup(await rpc<unknown>(admin, 'fusion_group_admit', { ...groupArgs, p_runs: runs }));
+  // Prices or multipliers changed since the review started: never hold more than the maximum the user was shown.
+  // Both the credits and the provider cost: a price rise offset by a lower rate or multiplier keeps the credits equal
+  // but must still not push the review past the budget it was admitted under (#962 review).
+  if (input.maxCredits !== undefined && runs.reduce((sum, run) => sum + run.upperCredits, 0) > input.maxCredits) {
+    throw new Error('FUSION_ESTIMATE_EXCEEDED');
+  }
+  if (input.maxUsd !== undefined && runs.reduce((sum, run) => sum + decimal(run.upperUsd), 0n) > decimal(input.maxUsd)) {
+    throw new Error('FUSION_ESTIMATE_EXCEEDED');
+  }
+  // Per run too: one model's rise offset by another's fall keeps the totals, but a later retry of the cheaper seat
+  // could then push the review past its maximum.
+  if (input.memberCaps && runs.some((run, index) => { const cap = input.memberCaps![index];
+    return !cap || run.upperCredits > cap.credits || decimal(run.upperUsd) > decimal(cap.usd); })) {
+    throw new Error('FUSION_ESTIMATE_EXCEEDED');
+  }
+  return toGroup(await rpc<unknown>(admin, 'fusion_group_admit', { ...groupArgs, p_runs: runs.map(({ requestId, payload }) => ({ requestId, payload })) }));
 }
 
 function toGroup(value: unknown): AdmittedFusionGroup {
