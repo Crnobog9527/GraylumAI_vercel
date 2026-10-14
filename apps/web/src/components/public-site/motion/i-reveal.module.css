@@ -1,0 +1,33 @@
+/* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+/* IReveal: section entrances and the road between sections. Hidden states apply only once the script armed them. */
+.reveal { position: relative; }
+.reveal[data-i-ready]:not([data-i-in]) .rise,
+.reveal[data-i-ready]:not([data-i-in]) .pop { opacity: 0; }
+/* Animations fill backwards only, so once played the element's own hover transitions work as usual. */
+.reveal[data-i-ready][data-i-in] .rise { animation: i-rise .8s cubic-bezier(.34, 1.56, .64, 1) backwards; }
+.reveal[data-i-ready][data-i-in] .pop { animation: i-pop .7s cubic-bezier(.34, 1.56, .64, 1) backwards; }
+.reveal[data-i-ready][data-i-in] .rise,
+.reveal[data-i-ready][data-i-in] .pop { animation-delay: calc(var(--d, 0) * 90ms); }
+@keyframes i-rise { from { opacity: 0; transform: translateY(26px) scale(.98); } to { opacity: 1; transform: none; } }
+@keyframes i-pop { from { opacity: 0; transform: scale(.7) rotate(-6deg); } to { opacity: 1; transform: none; } }
+
+.roadWrap { max-width: 1200px; width: 100%; height: 72px; margin: -8px auto; padding: 0 clamp(16px, 3vw, 24px); }
+.road { display: block; width: 100%; height: 100%; overflow: visible; }
+.roadLine { fill: none; stroke: #23304d; stroke-opacity: .35; stroke-width: 3; stroke-linecap: round; stroke-dasharray: 2 12; }
+.roadMask { fill: none; stroke: #fff; stroke-width: 12; stroke-dasharray: 1; stroke-dashoffset: 0; }
+.roadWrap[data-i-ready]:not([data-i-in]) .roadMask { stroke-dashoffset: 1; }
+.roadWrap[data-i-ready] .roadMask { transition: stroke-dashoffset 1.4s cubic-bezier(.65, 0, .35, 1); }
+.pin {
+  position: absolute; right: clamp(16px, 3vw, 24px); top: 10px; width: 18px; height: 18px;
+  border: 3px solid #23304d; border-radius: 50% 50% 50% 0; background: #ff6b4a; transform: rotate(-45deg);
+}
+.pin[data-flip='true'] { top: 34px; }
+.roadWrap[data-i-ready]:not([data-i-in]) .pin { opacity: 0; transform: translateY(-14px) rotate(-45deg) scale(.4); }
+.roadWrap[data-i-ready] .pin {
+  transition: opacity .3s ease-out 1.2s, transform .6s cubic-bezier(.34, 1.56, .64, 1) 1.2s;
+}
+@media (max-width: 767px) { .roadWrap { height: 48px; } .pin[data-flip='true'] { top: 22px; } }
+@media (prefers-reduced-motion: reduce) {
+  .reveal .rise, .reveal .pop { animation: none !important; }
+  .roadMask, .pin { transition: none !important; }
+}
