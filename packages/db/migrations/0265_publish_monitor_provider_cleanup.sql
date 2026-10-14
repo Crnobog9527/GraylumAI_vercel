@@ -286,7 +286,7 @@ BEGIN
  IF p_limit IS NULL OR p_limit NOT BETWEEN 1 AND 100 OR p_lease_seconds IS NULL OR p_lease_seconds NOT BETWEEN 30 AND 900 THEN
   RAISE EXCEPTION 'PUBLISH_MONITOR_INPUT_INVALID' USING ERRCODE='22023'; END IF;
  WITH candidates AS (
-  SELECT c.id,c.updated_at,c.status,c.provider_tokens_cleared,
+  SELECT c.id,c.updated_at,c.status,c.provider_tokens_cleared,c.provider_disconnect_pending,
    EXISTS(SELECT 1 FROM social_publish_jobs j WHERE j.actor_id=c.actor_id AND j.state IN ('claimed','dispatching','unknown')
     AND j.targets @> jsonb_build_array(jsonb_build_object('connectionId',c.id::text))) AS publishes_open
   FROM social_connections c
@@ -294,7 +294,8 @@ BEGIN
    AND (c.lease_expires_at IS NULL OR c.lease_expires_at<=now_at)
  ), picked AS (
   SELECT c.id FROM social_connections c JOIN candidates k ON k.id=c.id
-  WHERE NOT (k.status='deleting' AND k.publishes_open AND k.provider_tokens_cleared)
+  -- A held record waits for its publishes, unless a new takeover was queued on it since its tokens were cleared.
+  WHERE NOT (k.status='deleting' AND k.publishes_open AND k.provider_tokens_cleared AND NOT k.provider_disconnect_pending)
   ORDER BY k.updated_at LIMIT p_limit FOR UPDATE OF c SKIP LOCKED
  ), claimed AS (
   -- Attempts are counted when a result is reported (provider_work_finish), not when claimed.

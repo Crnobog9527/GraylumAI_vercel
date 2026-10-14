@@ -203,6 +203,12 @@ try {
   await workFinish(hold, 'gone');
   assert.equal((await conn('pfm_pub')).provider_tokens_cleared, true, 'held, not deleted');
   assert.equal((await work()).find(x => x.providerAccountId === 'pfm_pub'), undefined, 'cleared tokens wait for results');
+  // A new takeover queued on the held record is still claimed and disconnected while publishes are unresolved.
+  await c.query('UPDATE social_connections SET provider_disconnect_pending=true WHERE provider_account_id=$1', ['pfm_pub']);
+  const heldTake = (await work()).find(x => x.providerAccountId === 'pfm_pub');
+  assert.deepEqual([heldTake.action, heldTake.takeoverPending], ['disconnect', true]);
+  await workFinish(heldTake, 'disconnected');
+  assert.deepEqual([(await conn('pfm_pub')).provider_disconnect_pending, (await conn('pfm_pub')).status], [false, 'deleting']);
   await c.query("UPDATE social_publish_jobs SET state='completed' WHERE idempotency_key='pub-open-key-01'");
   const afterJob = (await work()).find(x => x.providerAccountId === 'pfm_pub');
   assert.equal(afterJob.action, 'delete');
