@@ -35,7 +35,9 @@ export function ReadonlyDraftView({ draftId, draft }: { draftId: string; draft: 
             <dd className="mt-1 whitespace-pre-wrap break-words text-sm">{field.value}</dd>
           </div>)}
         </dl>
-      </section>) : <p className="text-sm text-[var(--text-secondary)]">没有已确认的内容。</p>}
+      </section>) : <p className="text-sm text-[var(--text-secondary)]">
+        这里没有未发布的已确认内容。如果这份定位有已发布的版本，发布版本按原来的规则保留；不需要时可以在左侧列表这一项的「⋯」里整份删除。
+      </p>}
       <footer className="flex flex-wrap items-center gap-3">
         <InformationExport draftId={draftId} current={draft}/>
         <Link href="/positioning" className="text-sm underline">开始新的定位</Link>

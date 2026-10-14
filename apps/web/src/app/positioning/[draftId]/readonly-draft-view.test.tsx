@@ -26,6 +26,6 @@ describe('ReadonlyDraftView', () => {
   it('says so when nothing was confirmed', async () => {
     const { ReadonlyDraftView } = await import('./readonly-draft-view');
     expect(renderToStaticMarkup(<ReadonlyDraftView draftId="draft" draft={{ ...exportFixture(0), conversationDeleted: true }}/>))
-      .toContain('没有已确认的内容');
+      .toContain('没有未发布的已确认内容');
   });
 });
