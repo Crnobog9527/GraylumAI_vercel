@@ -281,7 +281,7 @@ Owner 要求评审过程中让用户看到评审团的思考和互相挑刺。�
   2026-10-14 起按计费组实现（第 3.4 节）：每个 Fusion 运行单只有一次调用（组领取只接受第 1 次调用），过期补领、下一轮和汇总都新建运行单，
   所以单个运行单的 `max_calls` 不会被补领占满；上面的 `轮数上限 × (N + 1) ≤ 32` 改为对整次评审的运行单数量的限制，由 PR-3/PR-4 的准入检查。
 - **运行前预告**：显示"最多消耗 X 积分"= 总预估换算的积分，用户同意后才开始（Master Plan 第 4.1 节）。
-  实现（#962）：开始评审时按每次调用各自冻结的积分（各自向上取整、按各模型倍数）加总，存为 `config.estimateCredits` 并随评审返回，界面直接显示这个数。同时按阶段和模型存下每次调用自己的积分上限和美元上限（`config.callCaps`）；每次领取（包括只补领部分席位）只能用被领取的那几个模型的上限之和。之后价格或倍数变了，某一步要冻结的积分或供应商成本上界超过这个和就不领取：第 2 轮跳过，第 1 轮或汇总则结束为未完成（`price_changed`），已显示的上限不会被突破。所有领取都走同一个入口：凡是重试也不会好转的拒绝（大小或价格上限、管理员中途改了设置或关闭评审团、会员或测试窗口失效）都按同一规则处理，结束原因分别是 `input_too_large`、`price_changed`、`claim_refused`（附拒绝代码），评审不会卡在进行中；临时故障照常抛出、下次重试。
+  实现（#962）：开始评审时按每次调用各自冻结的积分（各自向上取整、按各模型倍数）加总，存为 `config.estimateCredits` 并随评审返回，界面直接显示这个数。同时按阶段和模型存下每次调用自己的积分上限和美元上限（`config.callCaps`）；每次领取（包括只补领部分席位）只能用被领取的那几个模型的上限之和。之后价格或倍数变了，某一步要冻结的积分或供应商成本上界超过这个和就不领取：第 2 轮跳过，第 1 轮或汇总则结束为未完成（`price_changed`），已显示的上限不会被突破。所有领取都走同一个入口，规则是反过来写的：只列出临时故障（服务暂时不可用、冲突、要重新登录等）和没有代码的异常，抛出后下次重试；其他任何带代码的拒绝（大小或价格上限、管理员中途改设置或关闭评审团、评审 Skill 下架、会员或测试窗口失效，以及以后新增的拒绝）都结束这一步，结束原因分别是 `input_too_large`、`price_changed`、`claim_refused`（附拒绝代码），评审不会卡在进行中。
 
 ### 3.3 三种结局和部分结算
 
@@ -399,13 +399,15 @@ Owner 要求评审过程中让用户看到评审团的思考和互相挑刺。�
 
 - 评审和汇总的每个请求**显式关闭联网**，复用现有 `services/openRouterSearch.ts` 的 `openRouterSearchParameters(model, false)`：
   它拒绝 `openrouter/`、`perplexity/` 开头和名字带 `search` / `sonar` 的内置搜索模型（`isPlainOpenRouterModel`），并在请求里写明
-  `plugins: [{id: 'web', enabled: false}]`、`tools: []`、`tool_choice: 'none'`——不能只靠"不传 plugins"，因为 workspace 可能默认开着旧的 web 插件。
+  `plugins: [{id: 'web', enabled: false}]`，并且请求里完全不带 `tools` 和 `tool_choice` 字段——不能只靠"不传 plugins"，因为 workspace 可能默认开着旧的 web 插件。
+  （PR-3b #954 实施时定为不带工具字段：没有工具定义，模型就没有工具可调；共用适配器对 Fusion 请求只放行 web 插件关闭这一种 plugins，
+  带任何 `tools` 或 `tool_choice` 的请求一律拒绝，比写 `tools: []` 更严。本节原来写的 `tools: []`、`tool_choice: 'none'` 按此更正。）
   请求里也不带 `web_search_options`、不用 `:online` 后缀。请求在算 `requestHash` 前由宿主组装，执行时按冻结的请求发出。
 - 这项检查在三处都做：后台 Fusion 设置保存评审模型、汇总模型时；`startReview` 和组领取准入时；每次组装请求时。不通过就拒绝，不悄悄换模型。
 - 数据库 `runtime_tool` 对 Fusion 用途的执行拒绝任何工具调用（包括 R4 的 `read_history`），防止以后改代码时误加。
 - 不用 OpenRouter 的 `openrouter:fusion` 服务端工具（#852 实测关不掉联网），也不用 `openrouter/` 开头的元模型
   （`docs/ENGINEERING.md` 第 6 节本来就这么写，不用改）。
-- 验收：一次完整评审的请求日志里，每个请求都是 `tools: []`、`tool_choice: 'none'`、web 插件显式关闭；后台选 `perplexity/*`、`*sonar*`
+- 验收：一次完整评审的请求日志里，每个请求都不带 `tools` / `tool_choice`、web 插件显式关闭；后台选 `perplexity/*`、`*sonar*`
   等内置搜索模型做评审或汇总时，保存和准入都被拒；用量里 `web_search_requests` 为 0；返回内容里没有网页引用。
 
 ### 4.2 定位 Skill 第 12 版 `review-rubric.md` 怎么改

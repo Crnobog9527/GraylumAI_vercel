@@ -386,6 +386,11 @@ describe('review flow', () => {
     await t.runAll();
     const end = await t.flow.continue(String(db.review!.reviewId));
     expect(end.review).toMatchObject({ state: 'incomplete', outcome: { kind: 'claim_refused', phase: 'summary', reason: 'FUSION_REVIEW_DISABLED' } });
+    // Any other coded refusal ends the step too (a revoked Skill, a denied test window), not only listed ones.
+    db.review!.state = 'running';
+    priceRise.code = 'RUNTIME_STAGING_POLICY_DENIED';
+    expect((await t.flow.continue(String(db.review!.reviewId))).review)
+      .toMatchObject({ state: 'incomplete', outcome: { kind: 'claim_refused', reason: 'RUNTIME_STAGING_POLICY_DENIED' } });
     // A transient failure is thrown for a retry, never turned into an end state.
     db.review!.state = 'running';
     priceRise.code = 'FUSION_ADMISSION_UNAVAILABLE';

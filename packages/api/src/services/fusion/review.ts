@@ -14,7 +14,7 @@ import { debateRequest, readReviewSkill, resolveReviewSkill, reviewerLabel, revi
 import { reviewDetail, reviewEvents } from './reviewEvents';
 import { adoptionChoices, adoptionSections, applyChoices, type AdoptionChoice } from './reviewAdoption';
 import { ENDED_STATES, reviewRecord, type ReviewPosition, type ReviewView } from './reviewRecord';
-import { CLAIM_REFUSALS, memberCaps, PERMANENT_REFUSALS } from './reviewLimits';
+import { claimOutcome, memberCaps, PERMANENT_REFUSALS } from './reviewLimits';
 import { readFusionSettings } from './settings';
 
 type Executor = ReturnType<typeof fusionExecutor>;
@@ -304,7 +304,14 @@ export function reviewFlow(deps: { admin: SupabaseClient; actorId: string;
       // replayed, never ran it (#962 review). Nothing is claimed yet, so ending here charges nothing.
       // Paused too: an idle zero-step review is paused by the daily job and resumed by its first claim (#962 review).
       if (!view.steps.length && (view.state === 'running' || view.state === 'paused')) {
-        const skillText = await readReviewSkill(admin, config.parse(view.config).skill as ReviewSkill);
+        let skillText;
+        try { skillText = await readReviewSkill(admin, config.parse(view.config).skill as ReviewSkill); }
+        catch (error) {
+          // A Skill revoked before the first claim ends the review the same way a refused claim does.
+          const outcome = claimOutcome(error);
+          if (!outcome) throw error;
+          return { review: await finish(view, 'incomplete', { ...outcome, phase: 'review' }), calls: [] };
+        }
         if (!fitsWhenSent(view, src, skillText)) {
           return { review: await finish(view, 'incomplete', { kind: 'input_too_large', phase: 'review' }), calls: [] };
         }
@@ -324,15 +331,14 @@ export function reviewFlow(deps: { admin: SupabaseClient; actorId: string;
           let claimed;
           try { claimed = await claimStep(view, src, at, pending.length ? pending : models); }
           catch (error) {
-            const code = error instanceof Error ? error.message : '';
-            const kind = Object.hasOwn(CLAIM_REFUSALS, code) ? CLAIM_REFUSALS[code]! : null;
-            if (!kind) throw error;
+            const outcome = claimOutcome(error);
+            if (!outcome) throw error;
             // A step refused for good is never claimed: the debate round is skipped; round 1 (nothing charged yet) or
             // the summary ends the review (earlier calls are already settled) instead of failing on every continue.
             if (at.phase === 'review' && at.round > 1) {
               view = await record.advance(reviewId, at, { state: 'running', round: at.round, phase: 'summary', attempt: 1 });
             } else {
-              view = await finish(view, 'incomplete', { kind, phase: at.phase, ...(kind === 'claim_refused' ? { reason: code } : {}) });
+              view = await finish(view, 'incomplete', { ...outcome, phase: at.phase });
             }
             continue;
           }
