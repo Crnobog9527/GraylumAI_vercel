@@ -75,7 +75,7 @@ describe('publish-monitor provider cleanup', () => {
     const p = provider([
       mine('spc_del'), json(200, {}),
       json(404, {}),
-      json(200, acct('spc_reauthed', EXT)),
+      json(200, acct('spc_reauthed', EXT)), json(200, {}),
       mine('spc_hold'), json(200, {}),
       mine('spc_back'),
       json(200, acct('spc_taken', EXT)), json(200, {}),
@@ -95,9 +95,12 @@ describe('publish-monitor provider cleanup', () => {
     expect(p.calls).toContain('POST /social-accounts/spc_taken_held/disconnect');
     // A deletion record still owing a takeover disconnect clears the overwriting authorization before it ends.
     expect(p.calls).toContain('POST /social-accounts/spc_taken_then_deleted/disconnect');
-    // Never deleted or disconnected: someone else's fresh grant, the owner's own re-authorisation, an already
-    // disconnected account, and a record whose owner is unknown.
-    for (const id of ['spc_reauthed', 'spc_back', 'spc_done', 'spc_noref']) {
+    // An overwrite behind a deletion record is always disconnected (no other connection can hold that ID), never
+    // deleted; nothing is touched for the owner's own re-authorisation, an already disconnected account, or an
+    // unknown owner.
+    expect(p.calls).toContain('POST /social-accounts/spc_reauthed/disconnect');
+    expect(p.calls).not.toContain('DELETE /social-accounts/spc_reauthed');
+    for (const id of ['spc_back', 'spc_done', 'spc_noref']) {
       expect(p.calls.filter(c => c.includes(id) && !c.startsWith('GET'))).toEqual([]);
     }
     expect(p.calls).toContain('POST /social-accounts/spc_hold/disconnect');

@@ -88,7 +88,7 @@ BEGIN
     -- Already deleting: keep the record and queue the disconnect, so the overwriting grant is cleared before it ends.
     UPDATE social_connections SET provider_disconnect_pending=true,deletion_attempts=0,lease_owner=NULL,
      lease_expires_at=NULL,updated_at=clock_timestamp()
-    WHERE id=existing.id AND NOT provider_disconnect_pending;
+    WHERE id=existing.id;
    END IF;
    quarantined:=quarantined||pid;
   END IF;
@@ -158,7 +158,7 @@ BEGIN
    -- Overwritten after its owner's record began deleting: queue the disconnect on that record; the provider work
    -- clears the overwriting grant before ending it (or holds it while publishes are unresolved).
    UPDATE social_connections SET provider_disconnect_pending=true,deletion_attempts=0,lease_owner=NULL,
-    lease_expires_at=NULL,updated_at=clock_timestamp() WHERE id=existing.id AND NOT provider_disconnect_pending;
+    lease_expires_at=NULL,updated_at=clock_timestamp() WHERE id=existing.id;
    verdict:='takeover';
   ELSIF existing.actor_id=req.actor_id THEN verdict:='keep';
   ELSE
@@ -254,9 +254,9 @@ BEGIN
   IF existing.id IS NOT NULL THEN
    -- A bound account now carrying another user's reference was taken over and the callback or webhook was missed:
    -- quarantine it and queue the disconnect, exactly like a callback that proves a takeover.
-   -- An already quarantined row starts a new takeover episode when its account is live again under someone else
-   -- (no disconnect pending); a disconnected account needs nothing.
-   IF existing.status<>'deleting' AND NOT (existing.status='quarantined' AND existing.provider_disconnect_pending)
+   -- Every proven takeover (re)queues the disconnect and clears any lease, so a worker claimed before it cannot report
+   -- a stale result; a disconnected account needs nothing.
+   IF existing.status<>'deleting'
     AND item->>'status' IS DISTINCT FROM 'disconnected' AND ext ~ '^[0-9a-f]{32}\.[0-9a-f]{32}$' THEN
     SELECT provider_ref INTO owner FROM social_monitor_settings WHERE actor_id=existing.actor_id;
     IF owner IS NOT NULL AND split_part(ext,'.',1)<>owner THEN

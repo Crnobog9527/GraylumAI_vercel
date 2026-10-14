@@ -236,6 +236,14 @@ try {
   // A worker that claimed the deletion before the takeover was queued reports a stale result: the record is kept.
   await workFinish({ connectionId: (await conn('pfm_late_take')).id, lease: randomUUID() }, 'owner_changed');
   assert.equal((await conn('pfm_late_take')).provider_disconnect_pending, true, 'kept for the queued disconnect');
+  // A repeated takeover while a worker holds the lease invalidates that lease too, so its result cannot clear the
+  // newly queued disconnect.
+  const leased = (await work()).find(x => x.providerAccountId === 'pfm_late_take');
+  const taker2 = await start(u.a, u.account);
+  await c.query("UPDATE social_connect_requests SET state='abandoned' WHERE id=$1", [taker2.requestId]);
+  await classify(taker2.requestId, [acc('pfm_late_take', taker2.externalId)]);
+  await workFinish(leased, 'owner_changed');
+  assert.equal((await conn('pfm_late_take')).provider_disconnect_pending, true, 'stale lease result ignored');
   // A callback that proves a takeover of a deleting record queues the disconnect too.
   const lateOwner2 = await member();
   await connect(lateOwner2, 'pfm_late_cb');
