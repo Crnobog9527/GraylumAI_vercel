@@ -89,6 +89,12 @@ describe('remote staging admission and HTTP error boundary', () => {
     await expect(caller.opc.conversations()).resolves.toEqual([]);
     await expect(caller.runtime.start(startInput)).rejects.toMatchObject({code:'PRECONDITION_FAILED'});
   });
+  it('rejects signed-out requests before any staging window RPC, even for an open window', async () => {
+    const caller = app.createCaller({ ...(context() as object), user: null } as never);
+    for (const call of [() => caller.opc.catalog(), () => caller.opc.library(libraryInput), () => caller.runtime.start(startInput)])
+      await expect(call()).rejects.toMatchObject({ code: 'UNAUTHORIZED' });
+    expect(rpc).not.toHaveBeenCalled(); expect(mocks.start).not.toHaveBeenCalled();
+  });
   it('allows genuine empty results and session admission for a valid remote window', async () => {
     const caller = app.createCaller(context());
     await expect(caller.opc.catalog()).resolves.toEqual([]);
