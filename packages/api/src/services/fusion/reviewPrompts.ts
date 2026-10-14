@@ -48,7 +48,7 @@ const REVIEWER_FORMAT = [
 ].join('\n');
 const DEBATE_FORMAT = [
   '这是第 2 轮：评审之间对关键决定有分歧。input.others 是其他评审的第 1 轮意见，input.mine 是你自己的第 1 轮意见。',
-  '对每位其他评审写一条 responses：reviewer 写对方的代号，strongestView 先把对方的观点讲到最强，stance 写 agree 或 disagree，reason 写理由。',
+  '针对每位其他评审在每个有分歧的关键决定上的观点，各写一条 responses：reviewer 写对方的代号，decision 写是哪个关键决定，strongestView 先把对方的观点讲到最强，stance 写 agree 或 disagree，reason 写理由。',
   '然后重新给出你自己的 decisions 和 issues（格式同第 1 轮），可以保留、修改或撤回第 1 轮的意见。',
 ].join('\n');
 const SUMMARY_FORMAT = [

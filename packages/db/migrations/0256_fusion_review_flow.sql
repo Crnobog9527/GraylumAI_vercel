@@ -1,7 +1,25 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 -- FUSION-REVIEW PR-4b: read-only helpers for the review flow. Number allocated by the controller.
--- All are service-role only with a fixed search_path; none writes anything.
+-- All functions are service-role only with a fixed search_path. Only the administrator breaker clear writes
+-- (marks rows; never deletes).
 BEGIN;
+
+-- Administrator unblock of the version breaker (Owner 2026-10-14 "边用边调"; 总控 2026-10-14): failed reviews of one
+-- version can be marked as not counting, with a reason. Nothing is deleted; the marking is the audit record:
+-- who, when, why and which reviews (one batch id per action).
+ALTER TABLE public.fusion_reviews ADD COLUMN IF NOT EXISTS breaker_cleared_at timestamptz,
+  ADD COLUMN IF NOT EXISTS breaker_cleared_by uuid,
+  ADD COLUMN IF NOT EXISTS breaker_clear_reason text,
+  ADD COLUMN IF NOT EXISTS breaker_clear_batch uuid;
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='fusion_reviews_breaker_clear_complete') THEN
+    ALTER TABLE public.fusion_reviews ADD CONSTRAINT fusion_reviews_breaker_clear_complete CHECK (
+      (breaker_cleared_at IS NULL AND breaker_cleared_by IS NULL AND breaker_clear_reason IS NULL AND breaker_clear_batch IS NULL)
+      OR (breaker_cleared_at IS NOT NULL AND breaker_cleared_by IS NOT NULL AND breaker_clear_batch IS NOT NULL
+        AND char_length(btrim(breaker_clear_reason)) BETWEEN 1 AND 500));
+  END IF;
+END $$;
+
 
 -- The review Skill is uploaded through the existing Skill publication but is not attached to any module, so
 -- read_skill_package (which requires an active module) cannot read it. This reader returns a file only when
@@ -101,7 +119,9 @@ CREATE OR REPLACE FUNCTION public.fusion_review_admin_list(p_limit integer, p_be
 RETURNS jsonb LANGUAGE sql STABLE SECURITY DEFINER SET search_path=public,pg_temp AS $$
   SELECT coalesce(jsonb_agg(x ORDER BY (x->>'createdAt')::timestamptz DESC, x->>'reviewId' DESC),'[]') FROM (
     SELECT jsonb_build_object('reviewId',rv.id,'actorId',rv.actor_id,'draftId',rv.draft_id,'state',rv.state,'outcome',rv.outcome,
-      'round',rv.round,'createdAt',rv.created_at,'endedAt',rv.ended_at,'reviewers',rv.config->'reviewers','summary',rv.config->'summary',
+      'round',rv.round,'createdAt',rv.created_at,'endedAt',rv.ended_at,'sourceVersionId',rv.source_version_id,
+      'breakerCleared',CASE WHEN rv.breaker_cleared_at IS NULL THEN NULL ELSE jsonb_build_object('at',rv.breaker_cleared_at,
+        'by',rv.breaker_cleared_by,'reason',rv.breaker_clear_reason,'batch',rv.breaker_clear_batch) END,'reviewers',rv.config->'reviewers','summary',rv.config->'summary',
       'costUsd',coalesce((SELECT sum(coalesce(c.selected_cost_usd,0)) FROM bill2_runs br JOIN bill2_calls c ON c.run_id=br.id
         WHERE br.actor_id=rv.actor_id AND br.fusion_group_id IN (SELECT (s->>'groupId')::uuid FROM jsonb_array_elements(rv.steps) s)),0),
       'chargedCredits',coalesce((SELECT sum(coalesce(br.charged,0)) FROM bill2_runs br
@@ -122,9 +142,46 @@ RETURNS jsonb LANGUAGE sql STABLE SECURITY DEFINER SET search_path=public,pg_tem
   FROM fusion_reviews rv WHERE rv.id=p_review_id;
 $$;
 
+-- Version breaker counts only unmarked reviews. Anchor patch of the live definition (not a full redefinition),
+-- so guards other migrations inject into fusion_review_start (0249 read-only drafts) are kept. Idempotent; refuses
+-- loudly when neither the original nor the patched condition is found.
+DO $$ DECLARE source text; patched text;
+  old_cond text:='SELECT state FROM fusion_reviews WHERE source_version_id=ver.id
+      ORDER BY created_at DESC LIMIT 3';
+  new_cond text:='SELECT state FROM fusion_reviews WHERE source_version_id=ver.id AND breaker_cleared_at IS NULL
+      ORDER BY created_at DESC LIMIT 3';
+BEGIN
+  source:=pg_get_functiondef('public.fusion_review_start(uuid,uuid,uuid,uuid,jsonb)'::regprocedure);
+  IF position(new_cond IN source)=0 THEN
+    IF position(old_cond IN source)=0 THEN RAISE EXCEPTION 'FUSION_REVIEW_START_SOURCE_MISMATCH'; END IF;
+    patched:=replace(source,old_cond,new_cond);
+    EXECUTE patched;
+  END IF;
+  IF position(new_cond IN pg_get_functiondef('public.fusion_review_start(uuid,uuid,uuid,uuid,jsonb)'::regprocedure))=0 THEN
+    RAISE EXCEPTION 'FUSION_REVIEW_BREAKER_PATCH_MISSING'; END IF;
+END $$;
+
+CREATE OR REPLACE FUNCTION public.fusion_review_breaker_clear(p_admin_id uuid, p_source_version_id uuid, p_reason text)
+RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
+DECLARE batch uuid:=gen_random_uuid(); ids jsonb;
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM profiles WHERE id=p_admin_id AND role='admin' AND status='active' AND is_deleted::text='false') THEN
+    RAISE EXCEPTION 'FUSION_ADMIN_REQUIRED'; END IF;
+  IF p_source_version_id IS NULL OR char_length(btrim(coalesce(p_reason,''))) NOT BETWEEN 1 AND 500 THEN
+    RAISE EXCEPTION 'FUSION_REVIEW_INVALID'; END IF;
+  -- Only ended failures of this one version that still count; running and successful reviews are never touched.
+  WITH marked AS (
+    UPDATE fusion_reviews SET breaker_cleared_at=clock_timestamp(), breaker_cleared_by=p_admin_id,
+      breaker_clear_reason=btrim(p_reason), breaker_clear_batch=batch
+    WHERE source_version_id=p_source_version_id AND state IN ('incomplete','revision_failed') AND breaker_cleared_at IS NULL
+    RETURNING id, created_at)
+  SELECT coalesce(jsonb_agg(id ORDER BY created_at, id),'[]') INTO ids FROM marked;
+  RETURN jsonb_build_object('batch',batch,'sourceVersionId',p_source_version_id,'reviewIds',ids,'reason',btrim(p_reason));
+END $$;
+
 DO $$ DECLARE f text; BEGIN
   FOREACH f IN ARRAY ARRAY['fusion_review_skill_file(uuid,uuid,text,text)','fusion_review_source(uuid,uuid)',
-    'fusion_review_preview(uuid,uuid,uuid)','fusion_review_admin_list(integer,timestamptz,uuid)','fusion_review_admin_read(uuid)',
+    'fusion_review_preview(uuid,uuid,uuid)','fusion_review_admin_list(integer,timestamptz,uuid)','fusion_review_admin_read(uuid)','fusion_review_breaker_clear(uuid,uuid,text)',
     'fusion_review_unjudged(integer)'] LOOP
     EXECUTE format('REVOKE ALL ON FUNCTION public.%s FROM PUBLIC,anon,authenticated,service_role', f);
     EXECUTE format('GRANT EXECUTE ON FUNCTION public.%s TO service_role', f);

@@ -37,7 +37,7 @@ describe('review opinions', () => {
     expect(parseOpinion(JSON.stringify({ ...opinion, decisions: [...decisions().slice(1), decisions()[1]] }), rules)).toBeNull();
     // A debate answer must respond to someone.
     expect(parseOpinion(JSON.stringify(opinion), { sections, debate: true })).toBeNull();
-    const debate = { ...opinion, responses: [{ reviewer: 'B', strongestView: 'B 认为受众应该更窄', stance: 'disagree', reason: '理由' }] };
+    const debate = { ...opinion, responses: [{ reviewer: 'B', decision: 'audience', strongestView: 'B 认为受众应该更窄', stance: 'disagree', reason: '理由' }] };
     expect(parseOpinion(JSON.stringify(debate), { sections, debate: true })?.responses).toHaveLength(1);
   });
 

@@ -35,4 +35,13 @@ export const fusionSettingsRouter = router({
     if (!result.data) throw new Error('FUSION_REVIEW_NOT_FOUND');
     return result.data as Record<string, unknown>;
   })),
+  /** Unblocks a version stopped by "3 failures in a row": marks its counted failures as not counting, with a
+   * reason; nothing is deleted and the marking (who, when, why, which reviews) stays on the records. */
+  clearBreaker: adminProcedure.input(z.object({ sourceVersionId: z.string().uuid(), reason: z.string().trim().min(1).max(500) }).strict())
+    .mutation(({ ctx, input }) => safe(async () => {
+      const result = await ctx.supabase.rpc('fusion_review_breaker_clear', { p_admin_id: ctx.user.id,
+        p_source_version_id: input.sourceVersionId, p_reason: input.reason });
+      if (result.error) throw new Error(/^FUSION_[A-Z_]+$/.test(result.error.message) ? result.error.message : 'FUSION_SETTINGS_UNAVAILABLE');
+      return result.data as { batch: string; sourceVersionId: string; reviewIds: string[]; reason: string };
+    })),
 });

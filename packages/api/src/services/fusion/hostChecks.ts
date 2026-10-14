@@ -14,7 +14,7 @@ const decisionSchema = z.object({ decision: z.enum(DECISIONS), strongestCase: te
   verdict: z.enum(VERDICTS), basis: text(2000) }).strip();
 const issueSchema = z.object({ location: text(200), perspective: text(200), problem: text(2000), suggestion: text(2000),
   severity: z.enum(SEVERITIES) }).strip();
-const responseSchema = z.object({ reviewer: text(8), strongestView: text(2000), stance: z.enum(['agree', 'disagree']),
+const responseSchema = z.object({ reviewer: text(8), decision: z.enum(DECISIONS), strongestView: text(2000), stance: z.enum(['agree', 'disagree']),
   reason: text(2000) }).strip();
 const rawOpinion = z.object({ decisions: z.array(decisionSchema).max(8), issues: z.array(issueSchema).max(50),
   responses: z.array(responseSchema).max(16).optional() }).strip();
@@ -32,8 +32,8 @@ const decisionFormat = { type: 'object', additionalProperties: false,
 const issueFormat = { type: 'object', additionalProperties: false,
   required: ['location', 'perspective', 'problem', 'suggestion', 'severity'], properties: {
     location: str, perspective: str, problem: str, suggestion: str, severity: { type: 'string', enum: [...SEVERITIES] } } } as const;
-const responseFormat = { type: 'object', additionalProperties: false, required: ['reviewer', 'strongestView', 'stance', 'reason'],
-  properties: { reviewer: str, strongestView: str, stance: { type: 'string', enum: ['agree', 'disagree'] }, reason: str } } as const;
+const responseFormat = { type: 'object', additionalProperties: false, required: ['reviewer', 'decision', 'strongestView', 'stance', 'reason'],
+  properties: { reviewer: str, decision: { type: 'string', enum: [...DECISIONS] }, strongestView: str, stance: { type: 'string', enum: ['agree', 'disagree'] }, reason: str } } as const;
 export const OPINION_RESPONSE_FORMAT = { type: 'json_schema', json_schema: { name: 'review_opinion', strict: true, schema: {
   type: 'object', additionalProperties: false, required: ['decisions', 'issues'], properties: {
     decisions: { type: 'array', items: decisionFormat }, issues: { type: 'array', items: issueFormat } } } } } as const;

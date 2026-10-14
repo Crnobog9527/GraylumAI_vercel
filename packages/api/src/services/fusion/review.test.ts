@@ -73,7 +73,7 @@ const opinion = (severity: string | null, verdict: 'keep' | 'change' = 'keep', d
   decisions: DECISIONS.map(decision => ({ decision, strongestCase: '最强理由', strongestAlternative: '最强替代', verdict, basis: '依据' })),
   issues: severity ? [{ location: '定位', perspective: '目标受众：上班族', problem: '定位太泛，上班族看不出能得到什么具体的好处和结果',
     suggestion: '写清楚给上班族的具体好处，例如下班三十分钟就能做好一顿饭', severity }] : [],
-  ...(debate ? { responses: [{ reviewer: 'A', strongestView: '对方认为受众应该更窄', stance: 'agree', reason: '有道理' }] } : {}) });
+  ...(debate ? { responses: [{ reviewer: 'A', decision: 'positioning', strongestView: '对方认为受众应该更窄', stance: 'agree', reason: '有道理' }] } : {}) });
 const revision = (value: string) => JSON.stringify({
   adjudication: [{ issue: '定位太泛', reviewers: ['A', 'B'], single: false, adopted: true, reason: '原文确实没写清' }],
   body: `## 定位\n${value}\n## 结语\n原结语`,
@@ -148,6 +148,9 @@ describe('review flow', () => {
     expect(types.indexOf('disagreement')).toBeLessThan(types.indexOf('response'));
     expect(types.indexOf('response')).toBeLessThan(types.indexOf('summary_started'));
     expect(types.slice(-3)).toEqual(['adjudication', 'revision_ready', 'review_ended']);
+    expect(events.find(e => e.type === 'revision_ready')).toMatchObject({ changedSectionTitles: ['定位'], changedSections: 1 });
+    expect(events.find(e => e.type === 'response')).toMatchObject({ decision: 'positioning', to: 'A' });
+    expect(events.find(e => e.type === 'issue')!.fix).toBeTruthy();
     expect(JSON.stringify(events)).not.toContain(ids.reviewers[0]);
     expect(new Set(events.map(e => e.id)).size).toBe(events.length);
     // Stable: reading again gives the same ids in the same order.

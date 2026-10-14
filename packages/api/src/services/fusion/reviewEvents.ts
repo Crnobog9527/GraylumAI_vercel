@@ -57,11 +57,11 @@ export function reviewEvents(input: { view: ReviewView; reviewers: string[]; sec
       reviewer, decision: d.decision, strongestCase: clip(d.strongestCase), strongestAlternative: clip(d.strongestAlternative), verdict: d.verdict });
     opinion.issues.forEach((issue, i) => add(call.settledAt, { id: `issue:${round}:${reviewer}:${i}`, type: 'issue', round, reviewer,
       section: issue.location.replace(/^#+\s*/, '').trim(), perspective: clip(issue.perspective), severity: issue.severity,
-      problem: clip(issue.problem) }));
+      problem: clip(issue.problem), fix: clip(issue.suggestion) }));
     for (const response of opinion.responses ?? []) {
       if (!/^[A-C]$/.test(response.reviewer) || response.reviewer === reviewer) continue;
-      add(call.settledAt, { id: `response:${reviewer}:${response.reviewer}`, type: 'response', round, reviewer, to: response.reviewer,
-        strongestView: clip(response.strongestView), stance: response.stance });
+      add(call.settledAt, { id: `response:${reviewer}:${response.reviewer}:${response.decision}`, type: 'response', round, reviewer,
+        to: response.reviewer, decision: response.decision, strongestView: clip(response.strongestView), stance: response.stance });
     }
   }
   // The split that opened the debate round: shown when that round was claimed.
@@ -87,7 +87,7 @@ export function reviewEvents(input: { view: ReviewView; reviewers: string[]; sec
     if (view.state === 'completed' && view.revisionId && summary) {
       const check = checkRevision(outputs.get(summary.callId) ?? '', input.revision);
       if (check.ok) add(view.endedAt, { id: 'revision_ready', type: 'revision_ready', revisionId: view.revisionId,
-        changedSections: check.changedSections.length,
+        changedSections: check.changedSections.length, changedSectionTitles: check.changedSections,
         changedFields: Object.values(check.r14Fields).reduce((n, fields) => n + Object.keys(fields).length, 0) });
     }
     add(view.endedAt, { id: 'review_ended', type: 'review_ended', state: view.state, outcome: view.outcome });
