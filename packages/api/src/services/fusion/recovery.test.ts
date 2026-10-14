@@ -22,12 +22,27 @@ function admin(rows: unknown[], options: { deleted?: string[]; failFinalize?: st
       return Promise.resolve({ data: { id: args.p_run_id, state: 'unknown', closed: false }, error: null });
     if (name === 'bill2_finalize' || name === 'bill2_read') return Promise.resolve({ data: { id: args.p_run_id, state: 'settled', closed: true,
       contentDeleted: options.deleted?.includes(String(args.p_run_id)) ?? false }, error: null });
+    if (name === 'fusion_review_pause_idle') {
+      // Like the real query builder: cancellable with an abort signal.
+      const result = Promise.resolve({ data: 0, error: null });
+      return Object.assign(result, { abortSignal: () => result });
+    }
     return Promise.resolve({ data: {}, error: null });
   } };
   return { db: db as unknown as SupabaseClient, calls };
 }
 
 describe('Fusion daily recovery', () => {
+  it('runs the idle-pause step first, so a backlog can never crowd it out', async () => {
+    let clock = now;
+    const busy = admin(Array.from({ length: 12 }, (_, i) => item(200 + i, true, -60)));
+    const fake = busy.db as unknown as { rpc: (n: string, a: Record<string, unknown>) => unknown };
+    const original = fake.rpc.bind(busy.db);
+    fake.rpc = (n, a) => { if (n === 'bill2_finalize') clock += 9_000; return original(n, a); };
+    const summary = await recoverFusionFinancials(busy.db, { now: () => clock, timeLimitMs: 40_000, budget: createRuntimeBudget() });
+    expect(busy.calls[0]).toBe('fusion_review_pause_idle:');
+    expect(summary.deferred).toBeGreaterThan(0);
+  });
   it('collects expired undispatched calls behind a long backlog of dispatched ones', async () => {
     const backlog = Array.from({ length: 30 }, (_, i) => item(100 + i, true, -60));
     const a = admin([...backlog, item(99, false, -1)]);
