@@ -17,7 +17,7 @@ export function rewordFaq(text: string) {
 export function FaqJ({ groups }: { groups: readonly LandingFaqGroup[] }) {
   if (groups.length === 0) return null;
   return (
-    <section id="faq" aria-labelledby="faq-title" className={page.section} data-zone="faq">
+    <section id="faq" aria-labelledby="faq-title" className={page.section} data-zone="faq" data-band="tint">
       <div className={page.wrap}>
         <h2 id="faq-title" className={page.display}>{LANDING_FAQ_TITLE}</h2>
         <div className={styles.faqGroups}>

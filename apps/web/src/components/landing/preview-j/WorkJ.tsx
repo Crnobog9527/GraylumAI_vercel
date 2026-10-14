@@ -66,7 +66,7 @@ export function WorkJ({ flags }: { flags: LandingFlags }) {
   };
 
   return (
-    <section aria-labelledby="work-title" className={page.section} data-zone="work">
+    <section aria-labelledby="work-title" className={page.section} data-zone="work" data-band="tint">
       <div className={page.wrap}>
         <div className={page.sectionHead}>
           <h2 id="work-title" className={page.display}>{J_WORK.groups[0]}</h2>

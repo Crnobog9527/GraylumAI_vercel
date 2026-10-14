@@ -35,7 +35,7 @@ export function pairTiming(generic: string, coach: string) {
 export function CompareJ() {
   const work: readonly ReactNode[] = [<Ask key="ask" />, <Plan key="plan" />, <Memory key="memory" />, <Review key="review" />];
   return (
-    <section aria-labelledby="compare-title" className={page.section} data-zone="compare">
+    <section aria-labelledby="compare-title" className={page.section} data-zone="compare" data-band="ink">
       <div className={page.wrap}>
         <h2 id="compare-title" className={styles.title}>
           {H_COMPARE.title.split(/(?<=，)/).map(part => <span key={part} className={styles.phrase}>{part}</span>)}

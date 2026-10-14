@@ -65,6 +65,17 @@
 @media (max-width: 420px) { .brand { font-size: 18px; } .pillSmall, .pillSmallLight { min-height: 36px; padding: 0 12px; font-size: 13px; } }
 .page a:focus-visible, .page button:focus-visible, .page summary:focus-visible { outline: 2px solid var(--j-ink); outline-offset: 3px; }
 
+/* Section bands (Owner 2026-10-15: "背景单调、容易视觉疲劳"): some modules sit on their own large rounded panel, inset
+   from the screen's edges, so the long page reads in chapters — a soft neutral band, or one dark band for the
+   comparison. Still neutral throughout; gold stays an accent. */
+.page [data-band] { position: relative; margin-inline: clamp(6px, 1.4vw, 20px); border-radius: clamp(24px, 3vw, 48px); }
+.page [data-band='tint'] { background: #f0efeb; box-shadow: inset 0 1px 0 rgba(255, 255, 255, .8); }
+.page [data-band='ink'] {
+  --j-ink: #f6f5f1; --j-body: #d9d7d1; --j-muted: #a8a6a0; --j-gold-text: #ffcf5a; --j-line: rgba(255, 255, 255, .14);
+  background: #1b1a18; color: var(--j-ink);
+}
+.page [data-band] + [data-band] { margin-top: clamp(12px, 2vw, 24px); }
+
 /* Sections and headings */
 .section { padding: 112px 0; scroll-margin-top: 72px; }
 @media (max-width: 767px) { .section { padding: 72px 0; } }
