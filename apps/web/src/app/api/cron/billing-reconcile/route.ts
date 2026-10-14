@@ -12,6 +12,7 @@ import { closeExpiredWaffoCheckouts } from '@repo/api/src/services/payments/waff
 import { describeWaffoFailure } from '@repo/api/src/services/payments/waffoFailure';
 import { findStaleChargedRounds } from '@repo/api/src/services/runtime/staleChargedRounds';
 import { recoverFusionFinancials } from '@repo/api/src/services/fusion/recovery';
+import { findStuckPaygCalls } from '@repo/api/src/services/bill2/stuckCalls';
 import { validateCronRequest } from '@/lib/cron-auth';
 
 export const runtime = 'nodejs';
@@ -33,6 +34,12 @@ async function runFusionRecovery(supabase: SupabaseClient) {
 }
 
 /** Waffo daily backstop: report-only. Off until the test operations binding is explicitly enabled. */
+// 0261: stuck calls keep this daily job failing (alerting) until an administrator settles them.
+async function runStuckCallScan(supabase: SupabaseClient) {
+  try { return await findStuckPaygCalls(supabase); }
+  catch { return { success: false, calls: [], total: 0, truncated: false, scanFailed: true }; }
+}
+
 async function runWaffoReconciliation(supabase: SupabaseClient) {
   if (process.env.WAFFO_TEST_OPERATIONS_ENABLED !== 'true') return { success: true, skipped: true, findings: [] };
   try {
@@ -64,16 +71,17 @@ export async function GET(request: Request) {
 
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
     logger.system.cronJob('billing-reconcile', 'started');
-    const [result, readinessAudit, erasureFinancial, waffo, staleRounds, fusion] = await Promise.all([
+    const [result, readinessAudit, erasureFinancial, waffo, staleRounds, fusion, stuckCalls] = await Promise.all([
       runDailyBillingReconciliation(supabase),
       runBillingEngineV15ReadinessAudit(supabase),
       runErasureFinancialReconciliation(supabase),
       runWaffoReconciliation(supabase),
       runStaleRoundReconciliation(supabase),
       runFusionRecovery(supabase),
+      runStuckCallScan(supabase),
     ]);
     const success = result.success && readinessAudit.success && erasureFinancial.success && waffo.success
-      && staleRounds.success && fusion.success;
+      && staleRounds.success && fusion.success && stuckCalls.success;
 
     if (!success) {
       logger.system.cronJob(
@@ -84,12 +92,14 @@ export async function GET(request: Request) {
           ...(erasureFinancial.success ? [] : ['Erasure financial recovery pending']),
           ...(waffo.success ? [] : [`Waffo payments need manual review: ${waffo.findings.length}`]),
           ...(staleRounds.success ? [] : [`Stale charged rounds need manual review: ${staleRounds.total}`]),
-          ...(fusion.success ? [] : [`Fusion calls pending recovery: ${fusion.failed}`])].join(' | '),
+          ...(fusion.success ? [] : [`Fusion calls pending recovery: ${fusion.failed}`]),
+          ...(stuckCalls.success ? [] : [`PAYG calls with unknown cost need manual settlement: ${stuckCalls.total}`])].join(' | '),
         {
           erasureFinancial,
           waffo,
           staleRounds,
           fusion,
+          stuckCalls,
           mismatches: result.mismatches,
           summary: result.summary,
           readinessAudit: {
@@ -127,6 +137,7 @@ export async function GET(request: Request) {
       waffo,
       staleRounds,
       fusion,
+      stuckCalls,
       timestamp: new Date().toISOString(),
     }, { status: success ? 200 : 500 });
   } catch (error) {
