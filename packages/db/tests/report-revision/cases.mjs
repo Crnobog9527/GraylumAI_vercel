@@ -19,7 +19,7 @@ const flow=[step('a','Audience',[],[field('who','Who'),field('pain','Pain',false
 const initial={a:{who:info('Busy parents'),pain:info('No time','deferred','hypothesis')},b:{offer:info('Meal plans')},c:{voice:info('Warm')}};
 
 /** A positioning round finalized through R5, so its formal version carries a generated report. */
-async function seed(db,maxLength=20000,minLength=1) {
+export async function seed(db,maxLength=20000,minLength=1) {
  const base=await fixture(db);
  const f=(await db.query('SELECT d7_test.artifacts($1) v',[base.actor])).rows[0].v;
  const project=randomUUID(),round=randomUUID(),execution=randomUUID(),session=randomUUID();

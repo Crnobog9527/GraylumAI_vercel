@@ -45,6 +45,7 @@
     "./skills/modulePublication": "./src/services/skills/modulePublication.ts",
     "./src/services/runtime/automaticRecovery": "./src/services/runtime/automaticRecovery.ts",
     "./src/services/runtime/staleChargedRounds": "./src/services/runtime/staleChargedRounds.ts",
+    "./src/services/fusion/recovery": "./src/services/fusion/recovery.ts",
     "./src/services/accountErasure/executor": "./src/services/accountErasure/executor.ts",
     "./src/services/accountErasure/content": "./src/services/accountErasure/content.ts",
     "./src/services/library/cleanup": "./src/services/library/cleanup.ts",
@@ -54,6 +55,7 @@
     "./src/services/payments/waffoReconciliation": "./src/services/payments/waffoReconciliation.ts",
     "./src/services/payments/waffoTestOperationsClient": "./src/services/payments/waffoTestOperationsClient.ts",
     "./src/services/payments/waffoFailure": "./src/services/payments/waffoFailure.ts",
+    "./src/services/payments/cardSubscriptionWebhook": "./src/services/payments/cardSubscriptionWebhook.ts",
     "./src/services/payments/walletWebhook": "./src/services/payments/walletWebhook.ts",
     "./src/services/payments/methodMaintenance": "./src/services/payments/methodMaintenance.ts"
   },
