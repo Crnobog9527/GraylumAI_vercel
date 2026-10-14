@@ -54,7 +54,8 @@
         },
         {
           "name": "INVITE-ABUSE",
-          "plain": "防止用小号反复刷邀请奖励。"
+          "plain": "防止用小号反复刷邀请奖励。",
+          "doneNote": "2026-10-14 Owner 决定取消邀请码送积分，联盟营销上线后再做。"
         },
         {
           "name": "DEP-BATCH-A",
