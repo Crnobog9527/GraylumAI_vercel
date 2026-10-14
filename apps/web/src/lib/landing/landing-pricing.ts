@@ -138,8 +138,8 @@ export function buildLandingPricing(source: readonly PaywallPlanSource[] | undef
   const founderOpen = Boolean(gold && founder && usable(founder.price) && founder.available > 0);
   if (gold && founder && founderOpen) {
     const text = CARD_TEXT.founder;
-    const yearly = yearlyQuote(gold.price.monthly, founder.price, '创始会员 · 终身 6 折',
-      `首年 ${formatUsd(founder.price)}，之后每年按当时 Gold 月付×12 的 6 折续费，调价会提前通知，可随时取消`);
+    const yearly = yearlyQuote(gold.price.monthly, founder.price, '创始会员 · 6 折',
+      `首年 ${formatUsd(founder.price)}；只要连续续费，一直按 Gold 价格的 6 折，目前每年 ${formatUsd(founder.price)}，可随时取消`);
     cards.push({
       key: 'founder', name: text.name, recommended: false, result: text.result, fit: text.fit, cta: text.cta,
       checkoutReady: { monthly: false, yearly: true },
