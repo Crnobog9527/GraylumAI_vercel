@@ -31,6 +31,9 @@ export function useReviewAddress(fallback: JuryScenarioId) {
   return { scenarioId, setScenarioId, resolved };
 }
 
+/** Reviews already brought back since this page was loaded. */
+const restoredThisLoad = new Set<string>();
+
 const key = (reviewId: string) => `graylum.jury.clock.${reviewId}`;
 
 function readClock(reviewId: string): number {
@@ -57,6 +60,9 @@ function writeClock(reviewId: string, clock: number) {
 export function useRestoredStep(reviewId: string, step: string, clock: number, onRestore: (clock: number) => void) {
   const first = useRef(true);
   useEffect(() => {
+    // Restore once per page load: switching a prototype setting remounts the player and should start fresh.
+    if (restoredThisLoad.has(reviewId)) return;
+    restoredThisLoad.add(reviewId);
     const saved = readClock(reviewId);
     if (saved > 0) onRestore(saved);
     // Only on arrival.
