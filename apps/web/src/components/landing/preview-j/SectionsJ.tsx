@@ -5,6 +5,7 @@ import { FINAL_ACTION, HERO_H } from '@/lib/landing/landing-copy';
 import { J_FAQ_REWORDS } from '@/lib/landing/landing-copy-j';
 import { LANDING_FAQ_TITLE, type LandingFaqGroup } from '@/lib/landing/landing-faq';
 import { SIGNUP_CTA_HREF } from '@/lib/seo/content/shared';
+import { FounderBarJ } from './PlanCardsJ';
 import styles from './sections-j.module.css';
 import page from './j.module.css';
 
@@ -39,7 +40,9 @@ export function FaqJ({ groups }: { groups: readonly LandingFaqGroup[] }) {
 }
 
 /** The close: the two paths, what you get, the founder seats while they last, and the one button. */
-export function FinalJ({ showStack, founderSeats }: { showStack: boolean; founderSeats: number | null }) {
+export function FinalJ({ showStack, founderSeats, founderTotal }: {
+  showStack: boolean; founderSeats: number | null; founderTotal: number | null;
+}) {
   return (
     <section aria-labelledby="final-title" className={page.section} data-zone="final">
       <div className={page.wrap}>
@@ -49,7 +52,7 @@ export function FinalJ({ showStack, founderSeats }: { showStack: boolean; founde
             {FINAL_ACTION.paths.map((path, index) => <li key={path} data-path={index === 0 ? 'alone' : 'coach'}>{path}</li>)}
           </ul>
           {showStack ? <p className={styles.stack}><b>{FINAL_ACTION.stackLabel}</b>{FINAL_ACTION.stack.text}</p> : null}
-          {founderSeats !== null ? <p className={styles.founder}>{FINAL_ACTION.founderLine}<span>还剩 {founderSeats} 个名额</span></p> : null}
+          <FounderBarJ left={founderSeats} total={founderTotal} />
           <Link href={SIGNUP_CTA_HREF} className={page.pill}>{FINAL_ACTION.cta}<ArrowRight size={18} aria-hidden="true" /></Link>
           <p className={styles.finalNote}>{HERO_H.ctaNote}</p>
         </div>

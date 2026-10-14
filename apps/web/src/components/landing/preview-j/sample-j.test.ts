@@ -15,6 +15,7 @@ import { chapterAt, CHAPTERS } from './TakeoverJ';
 import { WEEK_STEP_MS } from './WeekJ';
 import { J_WEEK } from '@/lib/landing/landing-copy-j-week';
 import { J_COMPARE } from '@/lib/landing/landing-copy-j-compare';
+import { J_FOUNDER_BAR, J_PRICE_TOTAL } from '@/lib/landing/landing-copy-j-price';
 
 const ALL_ON = Object.fromEntries(Object.keys(LANDING_FEATURES).map(key => [key, true])) as LandingFlags;
 const escape = (text: string) => text.replace(/&/g, '&amp;').replace(/"/g, '&quot;');
@@ -26,7 +27,7 @@ const plan = (level: string, monthly: number, yearly: number) => ({
 
 function render() {
   const data = buildLandingPageData(ALL_ON, [plan('pro', 29, 279), plan('gold', 69, 621)]);
-  return { data, html: renderToStaticMarkup(createElement(SampleJ, { data, siteName: 'Graylum', membershipHref: '/profile' })) };
+  return { data, html: renderToStaticMarkup(createElement(SampleJ, { data, siteName: 'Graylum', extras: { founderTotal: null, credits: { pro: 1000, gold: 1000 }, flags: ALL_ON } })) };
 }
 
 describe('style sample J', () => {
@@ -161,5 +162,32 @@ describe('sample J story timing', () => {
     expect(loop).toBeGreaterThanOrEqual(11000);
     expect(loop).toBeLessThanOrEqual(14000);
     expect(JSON.stringify(J_WEEK)).not.toMatch(/\d+\s*%|\$|\d{2,}/);
+  });
+
+  it('adds the usual ways up correctly, and every plan card leads to the pricing page, never straight to checkout', () => {
+    const amounts = (id: string) => (PRICE_COMPARE.rows.find(row => row.sourceId === id)?.price ?? '')
+      .match(/\$[\d,]+(?:–[\d,]+)?/)?.[0].replace(/[$,]/g, '').split('–').map(Number) ?? [];
+    const [low, high] = amounts('consultant');
+    const tools = amounts('scheduler')[0] + amounts('benchmark')[0];
+    const money = (value: number) => `$${value.toLocaleString('en-US')}`;
+    expect(J_PRICE_TOTAL.text).toContain(`${money(low + tools)}–${money(high + tools)}`);
+    expect(J_PRICE_TOTAL.text).toContain(money(amounts('project')[0]));
+    const { html } = render();
+    expect(html).toContain(J_PRICE_TOTAL.label);
+    const pricing = html.slice(html.indexOf('id="pricing"'), html.indexOf('id="faq"'));
+    expect(pricing).not.toMatch(/checkout|plan=|tab=subscription/);
+    expect(pricing.match(/href="\/landing\/pricing"/g)?.length).toBeGreaterThanOrEqual(3);
+  });
+
+  it('shows the founder bar in the v25 form only while seats are left', () => {
+    const offers = { founder: { price: 496, total: 50, available: 37 } };
+    const data = buildLandingPageData(ALL_ON, [plan('pro', 29, 279), plan('gold', 69, 621)], offers);
+    const extras = { founderTotal: 50, credits: {}, flags: ALL_ON };
+    const html = renderToStaticMarkup(createElement(SampleJ, { data, siteName: 'Graylum', extras }));
+    expect(html).toContain(J_FOUNDER_BAR.title);
+    expect(html).toContain(J_FOUNDER_BAR.joined(13, 37));
+    const soldOut = buildLandingPageData(ALL_ON, [plan('pro', 29, 279), plan('gold', 69, 621)],
+      { founder: { price: 496, total: 50, available: 0 } });
+    expect(renderToStaticMarkup(createElement(SampleJ, { data: soldOut, siteName: 'Graylum', extras }))).not.toContain(J_FOUNDER_BAR.title);
   });
 });

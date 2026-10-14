@@ -2,6 +2,7 @@
 import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
 import { SampleJ } from '@/components/landing/preview-j/SampleJ';
+import { monthlyCredits, pickPaywallPlans } from '@/components/paywall/paywallPlans';
 import { resolveLandingFlags } from '@/lib/landing/landing-flags';
 import { withLocalSamplePricing } from '@/lib/dev/local-sample-pricing';
 import { buildLandingPageData } from '@/lib/landing/landing-page-data';
@@ -9,7 +10,6 @@ import { getLandingOffers } from '@/lib/landing/landing-offers';
 import { getPublicSiteSettings } from '@/lib/public-site';
 import { isPublicIndexingEnabled, SITE_INDEXING_ENV } from '@/lib/robots-policy';
 import { NOINDEX_ROBOTS } from '@/lib/seo/metadata';
-import { buildAuthHref } from '@/lib/site-config';
 
 // Style sample J (PUBLIC-SITE): same rules as the /landing/preview/[variant] samples of #893. Static like the
 // landing page, never indexed, not in the sitemap or any navigation, and gone once the public site is indexable.
@@ -24,6 +24,12 @@ export default async function LandingPreviewJ() {
   // development server without that data falls back to fixed sample prices, marked as such on the cards.
   const priced = withLocalSamplePricing(process.env, membershipPlansStatus === 'available' ? membershipPlans : [], offers);
   const flags = resolveLandingFlags();
-  const data = buildLandingPageData(priced.sample ? { ...flags, founder: true } : flags, priced.plans, priced.offers);
-  return <SampleJ data={data} siteName={siteName} membershipHref={buildAuthHref('/profile?tab=subscription')} samplePricing={priced.sample} />;
+  const flagsUsed = priced.sample ? { ...flags, founder: true } : flags;
+  const data = buildLandingPageData(flagsUsed, priced.plans, priced.offers);
+  // Monthly credits per plan for the cards, from the same catalog; the founder seat total for v25's seat bar.
+  const credits = Object.fromEntries(pickPaywallPlans(priced.plans)
+    .filter(plan => plan.level === 'pro' || plan.level === 'gold')
+    .map(plan => [plan.level, monthlyCredits(plan)]));
+  const extras = { founderTotal: priced.offers.founder?.total ?? null, credits, flags: flagsUsed };
+  return <SampleJ data={data} siteName={siteName} extras={extras} samplePricing={priced.sample} />;
 }
