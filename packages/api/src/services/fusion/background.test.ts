@@ -98,6 +98,28 @@ describe('review background', () => {
     expect(lease.count).toBe(MAX_ADVANCES);
   });
 
+  it('repeated dispatch outages stop relaying and remain resumable after recovery', async () => {
+    const { db, lease } = leaseDb({ count: MAX_ADVANCES - 1 });
+    const dispatched: string[] = [];
+    const flow = () => ({
+      continue: async () => ({ review: { state: 'running' }, calls: [{ callId: 'a', dispatched: false }] }),
+      dispatch: async () => { throw new Error('RUNTIME_STAGING_SERVICE_UNAVAILABLE'); },
+    }) as never;
+    for (let i = 0; i < 35; i++) {
+      expect(await advanceReview({ admin: db, reviewId, flow })).toEqual({ next: false, reason: 'failed', dispatched: 0 });
+    }
+    expect(lease.count).toBe(MAX_ADVANCES - 1);
+    const readFailure = () => ({ continue: async () => { throw new Error('FUSION_REVIEW_UNAVAILABLE'); } }) as never;
+    for (let i = 0; i < 35; i++) {
+      expect(await advanceReview({ admin: db, reviewId, flow: readFailure })).toEqual({ next: false, reason: 'failed' });
+    }
+    expect(lease.count).toBe(MAX_ADVANCES - 1);
+    expect(await advanceReview({ admin: db, reviewId,
+      flow: fakeFlow({ calls: [{ callId: 'a', dispatched: false }] }, dispatched) }))
+      .toEqual({ next: true, reason: 'advanced', dispatched: 1 });
+    expect(dispatched).toEqual(['a']);
+  });
+
   it('a failing step stops the relay with the lease released; past the advance limit nothing runs and an alert is logged', async () => {
     const { db, lease } = leaseDb();
     const failing = () => ({ continue: async () => { throw new Error('FUSION_REVIEW_UNAVAILABLE'); } }) as never;

@@ -88,14 +88,17 @@ export async function advanceReview(input: { admin: SupabaseClient; reviewId: st
       const results = await Promise.allSettled(calls.map(call => flow.dispatch(reviewId, call.callId)));
       const failed = results.filter(result => result.status === 'rejected').length;
       if (failed) logger.warn('billing', 'fusion_review_dispatch_failed', { reviewId, failed });
-      // Relay even after a failed dispatch: the next continue claims an undispatched call again (§2.1 补领, bounded).
-      return { next: true, reason: 'advanced', dispatched: calls.length - failed };
+      const dispatched = calls.length - failed;
+      // No accepted dispatch: stop this chain and refund the attempt so a later retry can recover from an outage.
+      if (!dispatched) return { next: false, reason: 'failed', dispatched: 0 };
+      // Partial progress may continue; dispatchOnce still prevents resending accepted calls.
+      return { next: true, reason: 'advanced', dispatched };
     } catch (error) {
       const code = error instanceof Error && /^[A-Z][A-Z0-9_]{2,80}$/.test(error.message) ? error.message : 'UNEXPECTED';
       logger.warn('billing', 'fusion_review_advance_failed', { reviewId, code });
       return { next: false, reason: 'failed' };
     }
-  }, value => ['waiting_credits', 'in_flight', 'idle', 'ended'].includes(value.reason));
+  }, value => ['waiting_credits', 'in_flight', 'idle', 'ended', 'failed'].includes(value.reason));
   return outcome.ran ? outcome.value : { next: false, reason: outcome.reason };
 }
 
