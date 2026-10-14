@@ -59,6 +59,17 @@ describe('Fusion daily recovery', () => {
     expect(a.calls).not.toContain(`bill2_finalize:${id(11)}`);
     expect(summary).toMatchObject({ failed: 1, deferred: 1, success: false });
   });
+  it('on a full page of unjudged calls, settles the ones judged again now and defers other dispatched calls', async () => {
+    rejudged.length = 0;
+    // 50 unjudged rows (a full page): the first belongs to run 11, the rest to calls with no pending row here.
+    const unjudged = Array.from({ length: 50 }, (_, i) => ({ actor_id: id(100), review_id: id(300), call_id: id(i === 0 ? 500 : 600 + i),
+      run_id: id(i === 0 ? 11 : 700 + i), phase: 'fusion_review', round: 1 }));
+    const a = admin([item(10, true, -60), { ...item(11, true, -60), call_id: id(500) }], { unjudged });
+    const summary = await recoverFusionFinancials(a.db, { now: () => now, budget: createRuntimeBudget() });
+    expect(a.calls).toContain(`bill2_finalize:${id(11)}`);
+    expect(a.calls).not.toContain(`bill2_finalize:${id(10)}`);
+    expect(summary).toMatchObject({ rejudged: 1, deferred: 1 });
+  });
   it('runs the idle-pause step first, so a backlog can never crowd it out', async () => {
     let clock = now;
     const busy = admin(Array.from({ length: 12 }, (_, i) => item(200 + i, true, -60)));

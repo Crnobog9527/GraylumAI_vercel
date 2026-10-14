@@ -55,9 +55,11 @@ export async function recoverFusionFinancials(admin: SupabaseClient, options: { 
   // Calls whose saved body was not re-judged this run must not settle now: past the deadline the settlement would
   // treat them as unjudged_saved and bill a body that may be malformed (#962 review). They wait for the next run.
   const unsettleable = new Set<string>();
+  // Calls judged again just now: their verdicts are stored, so they settle even when the list was a full page.
+  const rejudged = new Set<string>();
   for (const [reviewId, { actorId, callIds }] of reviews) {
     if (now() + 10_000 > stopAt) { callIds.forEach(id => unsettleable.add(id)); continue; }
-    try { await reviewFlow({ admin, actorId }).rejudge(reviewId); summary.rejudged++; }
+    try { await reviewFlow({ admin, actorId }).rejudge(reviewId); summary.rejudged++; callIds.forEach(id => rejudged.add(id)); }
     catch { summary.failed++; summary.success = false; callIds.forEach(id => unsettleable.add(id)); }
   }
   // Listing is cheap: collect the pages first. Pages advance past calls that cannot progress yet (0235).
@@ -75,10 +77,12 @@ export async function recoverFusionFinancials(admin: SupabaseClient, options: { 
     cursor = { p_after_created: last.created_at, p_after_id: last.call_id };
   }
   // Releasing holds of calls never dispatched is quick and must not wait behind slow receipt lookups.
-  // A full page of unjudged calls may hide more: then no dispatched call settles this run (only expired, never
-  // dispatched holds are released), so none is billed before its body is judged.
+  // A full page of unjudged calls may hide more: then the only dispatched calls that settle this run are the ones
+  // judged again above (expired, never dispatched holds are always released), so none is billed before its body is
+  // judged, and a lasting backlog still drains a page per run instead of holding credits indefinitely (#962 review).
   const listedAll = !unjudged.error && Array.isArray(unjudged.data) && unjudged.data.length < UNJUDGED_PAGE;
-  const settleable = rows.filter(item => !unsettleable.has(item.call_id) && (listedAll || !item.dispatched));
+  const settleable = rows.filter(item => !unsettleable.has(item.call_id)
+    && (listedAll || !item.dispatched || rejudged.has(item.call_id)));
   summary.deferred += rows.length - settleable.length;
   const ordered = [...settleable.filter(item => !item.dispatched), ...settleable.filter(item => item.dispatched)];
   await recoverPage(admin, ordered, summary, now, stopAt, options.budget);
