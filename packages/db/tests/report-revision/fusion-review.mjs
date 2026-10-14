@@ -2,7 +2,7 @@
 // FUSION-REVIEW PR-4a (0236): the review record — start, claim inside the review lock, advance, stop/end,
 // idle pause, in-flight risk, breaker, version block and erasure. No model call.
 import assert from 'node:assert/strict';
-import {randomUUID} from 'node:crypto';
+import {randomUUID,createHash} from 'node:crypto';
 import {rpc,closeAccount} from '../erasure-b2a/cases.mjs';
 import {erase} from '../content-erasure/cases.mjs';
 import {createFixture} from '../payg/fixture.mjs';
@@ -163,6 +163,9 @@ export async function runFusionReview({db,Client,connectionString,report}) {
   await service(db,'fusion_review_close',f.actor,rv5.reviewId,'stopped');
   const waiting = (await db.query('SELECT fusion_verdict,settled_at FROM bill2_calls WHERE id=$1',[c5.id])).rows[0];
   assert.deepEqual(waiting,{fusion_verdict:null,settled_at:null},'a saved, unjudged body waits for the host verdict');
+  const unjudged = (await db.query('SELECT * FROM fusion_review_unjudged(200)')).rows;
+  assert.ok(unjudged.some(r=>r.call_id===c5.id && r.review_id===rv5.reviewId && r.phase==='fusion_review' && r.round===1),
+    '0256: recovery lists saved, unjudged calls with their review position');
   await rpc(db,'fusion_call_verdict',f.actor,c5.id,'format_invalid');
   await rpc(db,'bill2_finalize',f.actor,s5.run.run);
   const judged = (await db.query('SELECT fusion_verdict,settled_at,charged_delta FROM bill2_calls WHERE id=$1',[c5.id])).rows[0];
@@ -196,6 +199,32 @@ export async function runFusionReview({db,Client,connectionString,report}) {
     await holder.query('ROLLBACK');
   } finally { await holder.end(); await deleter.end(); }
   report.checks.push('draft deletion overlapping a held review row fails fast with the retryable busy refusal');
+
+  // 0256: the review Skill reader needs the Skill id, revision id and package hash all to match; service role only.
+  const body = Buffer.from('# Review prompt\nOnly the given report.');
+  await db.query(`INSERT INTO skill_package_files(revision_id,path,bytes,byte_length,media_type,file_hash)
+    VALUES($1,'review.md',$2,$3,'text/markdown',$4)`,[f.revision,body,body.length,createHash('sha256').update(body).digest('hex')]);
+  const read = (skill,revision,hash,path) => service(db,'fusion_review_skill_file',skill,revision,hash,path);
+  assert.equal(Buffer.from(await read(f.skill,f.revision,'b'.repeat(64),'review.md'),'base64').toString(),body.toString());
+  assert.deepEqual(await read(f.skill,f.revision,'b'.repeat(64),null),{});
+  for (const [skill,revision,hash] of [[f.skill,f.revision,'c'.repeat(64)],[randomUUID(),f.revision,'b'.repeat(64)],[f.skill,randomUUID(),'b'.repeat(64)]])
+    await assert.rejects(read(skill,revision,hash,'review.md'),/FUSION_REVIEW_SKILL_UNAVAILABLE/);
+  await assert.rejects(read(f.skill,f.revision,'b'.repeat(64),'missing.md'),/FUSION_REVIEW_SKILL_UNAVAILABLE/);
+  for (const role of ['anon','authenticated']) {
+    await db.query('SET ROLE '+role);
+    try {
+      for (const [sql,args] of [['SELECT fusion_review_skill_file($1,$2,$3,$4)',[f.skill,f.revision,'b'.repeat(64),'review.md']],
+        ['SELECT fusion_review_source($1,$2)',[f.actor,randomUUID()]],['SELECT fusion_review_unjudged(10)',[]]])
+        await assert.rejects(db.query(sql,args),/permission denied/,role+' '+sql);
+    } finally { await db.query('RESET ROLE'); }
+  }
+  // 0256: the frozen source of a review comes from its own version.
+  const source = await service(db,'fusion_review_source',f.actor,rv5.reviewId);
+  assert.equal(source.body,'## One\nOriginal report.\n## Two\nKnown limitations.');
+  assert.deepEqual(source.sections,['One','Two']);assert.equal(source.maxCharacters,12000);
+  assert.deepEqual(source.declared,[{stepId:'a',fieldIds:['who','pain']},{stepId:'b',fieldIds:['offer']},{stepId:'c',fieldIds:['voice']}]);
+  await assert.rejects(service(db,'fusion_review_source',randomUUID(),rv5.reviewId),/./,'another actor cannot read it');
+  report.checks.push('0256: review Skill reader matches skill, revision and package hash, service role only; frozen source and unjudged list');
 
   // Erasure: deleting the draft deletes its reviews; account erasure removes and counts them.
   const before = Number((await db.query('SELECT count(*) v FROM fusion_reviews WHERE actor_id=$1',[f.actor])).rows[0].v);
