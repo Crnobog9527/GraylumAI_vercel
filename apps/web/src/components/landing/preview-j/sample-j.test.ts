@@ -14,6 +14,7 @@ import { SampleJ } from './SampleJ';
 import { arrivedAt } from './PositioningClipJ';
 import { chapterAt, CHAPTERS } from './TakeoverJ';
 import { WEEK_STEP_MS } from './WeekJ';
+import { J_JURY_CHANGED, J_JURY_EVENTS, J_JURY_REPORT } from './jury-case-j';
 import { J_WEEK } from '@/lib/landing/landing-copy-j-week';
 import { J_COMPARE } from '@/lib/landing/landing-copy-j-compare';
 import { J_TAKEOVER_SCENES } from '@/lib/landing/landing-copy-j-takeover';
@@ -210,3 +211,29 @@ describe('sample J story timing', () => {
     expect(renderToStaticMarkup(createElement(SampleJ, { data: soldOut, siteName: 'Graylum', extras }))).not.toContain(J_FOUNDER_BAR.title);
   });
 });
+
+describe('sample J jury case (for #1002\'s canvas player)', () => {
+  it('follows the full scenario\'s order and ends on a revision of the changed chapters', () => {
+    const types = J_JURY_EVENTS.map(event => event.type);
+    expect(types[0]).toBe('review_started');
+    expect(types.slice(-2)).toEqual(['revision_ready_for_choice', 'review_ended']);
+    const at = (type: (typeof types)[number]) => types.indexOf(type);
+    expect(at('disagreement')).toBeLessThan(types.lastIndexOf('reviewer_started'));
+    expect(at('summary_started')).toBeLessThan(at('adjudication'));
+    expect(new Set(J_JURY_EVENTS.map(event => event.id)).size).toBe(J_JURY_EVENTS.length);
+    const ready = J_JURY_EVENTS.find(event => event.type === 'revision_ready_for_choice');
+    expect(ready && 'changedSectionTitles' in ready ? ready.changedSectionTitles : []).toEqual([...J_JURY_CHANGED]);
+  });
+
+  it('keeps every event text within 120 characters, with no model names and no figures', () => {
+    const texts = J_JURY_EVENTS.flatMap(event => Object.entries(event)
+      .filter(([key, value]) => typeof value === 'string' && !['id', 'type', 'section', 'state', 'outcome', 'decision', 'verdict',
+        'stance', 'reviewer', 'to', 'severity', 'perspective'].includes(key))
+      .map(([, value]) => value as string));
+    expect(texts.length).toBeGreaterThan(20);
+    for (const text of texts) expect(Array.from(text).length).toBeLessThanOrEqual(120);
+    const all = JSON.stringify([J_JURY_EVENTS, J_JURY_REPORT]).replace(/第 \d+ 章|第一个 30 天计划/g, '').replace(/":\d+|j-jury-\d+/g, '');
+    expect(all).not.toMatch(/\d|GPT|Claude|Gemini|DeepSeek|Qwen|模型 [A-C]/i);
+  });
+});
+
