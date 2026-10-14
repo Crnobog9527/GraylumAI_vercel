@@ -43,6 +43,8 @@ export type LandingCard = {
 export type LandingPricing = {
   cards: LandingCard[];
   yearlyBadge: string | null;
+  // The badge once the founder card is gone (the page drops it when the live seat count reaches 0).
+  yearlyBadgeWithoutFounder: string | null;
   founderOpen: boolean;
   proMonthly: number | null;
 };
@@ -145,13 +147,15 @@ export function buildLandingPricing(source: readonly PaywallPlanSource[] | undef
       checkoutReady: { monthly: false, yearly: true },
       quotes: { monthly: null, yearly }, missingNote: { monthly: '（创始会员只有年付）' },
     });
-    savings.push(savingPercent(gold.price.monthly, founder.price));
   }
 
-  const best = Math.max(0, ...savings);
+  const badge = (percent: number) => (percent > 0 ? `最高省 ${percent}%` : null);
+  const withoutFounder = Math.max(0, ...savings);
+  const best = founderOpen && gold && founder ? Math.max(withoutFounder, savingPercent(gold.price.monthly, founder.price)) : withoutFounder;
   return {
     cards,
-    yearlyBadge: best > 0 ? `最高省 ${best}%` : null,
+    yearlyBadge: badge(best),
+    yearlyBadgeWithoutFounder: badge(withoutFounder),
     founderOpen,
     proMonthly: pro ? pro.price.monthly : null,
   };

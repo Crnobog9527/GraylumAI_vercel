@@ -61,7 +61,8 @@ export function PriceSection({
         ) : null}
 
         {pricing.cards.length > 0 ? (
-          <PriceCards cards={pricing.cards} yearlyBadge={pricing.yearlyBadge} showResult={showResult} membershipHref={membershipHref} />
+          <PriceCards cards={pricing.cards} yearlyBadge={pricing.yearlyBadge} yearlyBadgeWithoutFounder={pricing.yearlyBadgeWithoutFounder}
+            showResult={showResult} membershipHref={membershipHref} />
         ) : (
           <p role="status" className="text-center text-sm text-[#9A9A9A]">
             会员方案暂时读不到，请稍后刷新，或先看<Link href="/landing/pricing" className="text-[#FFD700] underline">价格页</Link>。

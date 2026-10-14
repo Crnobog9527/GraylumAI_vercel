@@ -15,11 +15,13 @@ import { useFounderSeats } from './LiveFounderSeats';
 export function PriceCards({
   cards,
   yearlyBadge,
+  yearlyBadgeWithoutFounder = yearlyBadge,
   showResult,
   membershipHref,
 }: {
   cards: readonly LandingCard[];
   yearlyBadge: string | null;
+  yearlyBadgeWithoutFounder?: string | null;
   // Result lines whose capability is on, by card key.
   showResult: Record<string, boolean>;
   membershipHref: string;
@@ -28,6 +30,7 @@ export function PriceCards({
   // The founder card leaves once the live seat count reaches 0 (LiveFounderSeats).
   const founderGone = useFounderSeats(null) === 0;
   const shown = founderGone ? cards.filter(card => card.key !== 'founder') : cards;
+  const badge = founderGone ? yearlyBadgeWithoutFounder : yearlyBadge;
   const hasYearly = shown.some(card => card.quotes.yearly);
 
   return (
@@ -42,9 +45,9 @@ export function PriceCards({
               <input type="radio" name="landing-billing" className="sr-only" value={cycle} checked={billing === cycle}
                 disabled={disabled} onChange={() => setBilling(cycle)} />
               {cycle === 'monthly' ? '月付' : '年付'}
-              {cycle === 'yearly' && yearlyBadge ? (
+              {cycle === 'yearly' && badge ? (
                 <span className={cn('rounded-full px-2 py-0.5 text-xs font-semibold',
-                  billing === cycle ? 'bg-[#0A0A0A]/15 text-[#0A0A0A]' : 'bg-[#22C55E]/15 text-[#4ADE80]')}>{yearlyBadge}</span>
+                  billing === cycle ? 'bg-[#0A0A0A]/15 text-[#0A0A0A]' : 'bg-[#22C55E]/15 text-[#4ADE80]')}>{badge}</span>
               ) : null}
             </label>
           );

@@ -9,6 +9,7 @@ vi.mock('@/trpc/client', () => ({ trpc: { settings: { getPublicOffers: { useQuer
 
 import { FinalAction } from './FinalAction';
 import { FounderSeatsProvider } from './LiveFounderSeats';
+import { OfferFaq } from './OfferFaq';
 import { PriceSection } from './PriceSection';
 
 const plan = (level: string, monthly: number, yearly: number) => ({
@@ -23,6 +24,7 @@ function render() {
   return renderToStaticMarkup(createElement(FounderSeatsProvider, { initial: data.founderSeats, children: createElement(Fragment, null,
     createElement(PriceSection, { pricing: data.pricing, rows: data.compareRows, risk: data.risk, showResult: data.showResult,
       founderSeats: data.founderSeats, membershipHref: '/profile?tab=subscription' }),
+    createElement(OfferFaq, { groups: data.faqGroups }),
     createElement(FinalAction, { showStack: data.showStack, founderSeats: data.founderSeats, note: data.finalNote })) }));
 }
 
@@ -43,6 +45,8 @@ describe('live founder seats on the hourly pre-rendered landing page', () => {
     expect(html.match(/还剩 3 个名额/g)).toHaveLength(2);
     expect(html).not.toContain('还剩 37 个名额');
     expect(html).toContain('data-testid="landing-plan-founder"');
+    expect(html).toContain('最高省 40%');
+    expect(html).toContain('创始会员和普通 Gold 年付差在哪？');
   });
 
   it('removes the founder line, the closing seat line and the founder card once the live count is 0', () => {
@@ -52,5 +56,11 @@ describe('live founder seats on the hourly pre-rendered landing page', () => {
     expect(html).not.toContain('个名额');
     expect(html).not.toContain('data-testid="landing-plan-founder"');
     expect(html).toContain('data-testid="landing-plan-gold"');
+    // The yearly badge falls back to the best non-founder saving, and the founder FAQ entries leave too.
+    expect(html).toContain('最高省 25%');
+    expect(html).not.toContain('最高省 40%');
+    expect(html).not.toContain('创始会员和普通 Gold 年付差在哪？');
+    expect(html).not.toContain('为什么创始会员只有 50 个名额？');
+    expect(html).toContain('常见问题');
   });
 });
