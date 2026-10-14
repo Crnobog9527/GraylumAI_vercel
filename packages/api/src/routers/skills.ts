@@ -46,6 +46,10 @@ export const skillsRouter = router({
     catch (cause) {
       if (cause instanceof Error && cause.message === 'SOCIAL_MEDIA_FLAG_POSITIONING_SKILL')
         throw new TRPCError({ code: 'BAD_REQUEST', message: '这个模块勾选了“与社交媒体相关”，不能发布成定位 Skill。请先在下方取消勾选并保存，再发布。' });
+      if (cause instanceof Error && cause.message === 'SOCIAL_MEDIA_FLAG_REQUIRED')
+        throw new TRPCError({ code: 'BAD_REQUEST', message: '新建 Skill 时请先选择它是否“与社交媒体相关”。' });
+      if (cause instanceof Error && cause.message === 'SOCIAL_MEDIA_FLAG_NEW_MODULE_INCOMPLETE')
+        throw new TRPCError({ code: 'BAD_REQUEST', message: 'Skill 已发布但暂未启用：“与社交媒体相关”没有保存成功。请关闭后重新打开这个模块，勾选并保存后再启用。' });
       throw new TRPCError({ code: 'BAD_REQUEST', message: 'Skill 发布未完成。请检查文件格式、步骤资料和模型；若模块已被修改，请关闭后重新打开。' });
     }
   }),

@@ -37,7 +37,7 @@ function tables(resolve:(table:string,filters:Record<string,unknown>)=>{data:unk
   return builder;
  };
 }
-function clients(){
+function clients(social:Record<string,boolean|undefined>={}){
  const user={
   auth:{getUser:async()=>({data:{user:{id:'actor',email_confirmed_at:'2026-01-01T00:00:00Z'}},error:null})},
   from:tables((_table,f)=>f.id?{data:catalog.some(c=>c.module===f.id)?{id:f.id,active:true}:null,error:null}
@@ -45,7 +45,8 @@ function clients(){
  } as unknown as SupabaseClient;
  const admin={
   from:tables((table,f)=>{
-   if(table==='modules')return {data:catalog.filter(c=>(f.id as string[]).includes(c.module)).map(c=>({id:c.module,skill_id:c.skill,model_id:c.model})),error:null};
+   if(table==='modules')return {data:catalog.filter(c=>(f.id as string[]).includes(c.module)).map(c=>({id:c.module,skill_id:c.skill,model_id:c.model,
+    social_media_related:c.module in social?social[c.module]:false})),error:null};
    const c=catalog.find(x=>x.model===f.id)!;
    return {data:{id:c.model,model_id:'provider/'+c.name,provider:'fixture',is_active:String(c.modelActive),max_tokens:1000,input_limit:32000},error:null};
   }),
@@ -76,4 +77,14 @@ it('discovers the same candidates in the same order, skipping unavailable models
  }
  // A second discovery in a new request, now with a warm resource cache, is identical.
  expect(await discoverRuntimeCandidates(user,admin,{inputBytes:32000,maxOutputTokens:1000})).toEqual(candidates);
+});
+
+// POSITIONING-GATE: a user without a confirmed positioning is never matched to a social media Skill.
+it('excludes social media Skills (and rows without the flag) only when asked',async()=>{
+ const {user,admin}=clients({[id(1)]:true,[id(5)]:undefined});
+ expect((await discoverRuntimeCandidates(user,admin,{inputBytes:32000,maxOutputTokens:1000,excludeSocial:true})).map(c=>c.moduleId))
+  .toEqual([id(2)]);
+ clearSkillResourceCache();
+ expect((await discoverRuntimeCandidates(user,admin,{inputBytes:32000,maxOutputTokens:1000})).map(c=>c.moduleId))
+  .toEqual([id(1),id(2),id(5)]);
 });

@@ -119,9 +119,9 @@ SET ROLE service_role;
 SELECT public.opening_grant_claim('00000000-0000-4000-8000-00000000e001',
   jsonb_build_array(jsonb_build_object('kind','email','key_version','test-v1','digest',repeat('1',64))));
 RESET ROLE;
-INSERT INTO guard_results SELECT 'E first identity receives exactly one 100-credit gift',
-  (SELECT credits = 100 FROM profiles WHERE id='00000000-0000-4000-8000-00000000e001')
-  AND count(*) = 1 AND min(amount) = 100
+INSERT INTO guard_results SELECT 'E first identity receives exactly one 500-credit gift (0230)',
+  (SELECT credits = 500 FROM profiles WHERE id='00000000-0000-4000-8000-00000000e001')
+  AND count(*) = 1 AND min(amount) = 500
   FROM credit_transactions WHERE user_id='00000000-0000-4000-8000-00000000e001';
 SET ROLE service_role;
 SELECT public.account_erasure_confirm_with_digests('00000000-0000-4000-8000-00000000e001',
@@ -172,9 +172,9 @@ CREATE TEMP TABLE erasure_e_race_result AS
 SELECT extensions.dblink_disconnect('erasure_e_race');
 INSERT INTO guard_results SELECT 'E concurrent identity claims create only one paid gift and one denial',
   (SELECT count(*)=1 AND bool_and(result='{"granted":false}'::jsonb) FROM erasure_e_race_result)
-  AND (SELECT sum(credits)=100 FROM profiles
+  AND (SELECT sum(credits)=500 FROM profiles
     WHERE id IN ('00000000-0000-4000-8000-00000000e003','00000000-0000-4000-8000-00000000e004'))
-  AND count(*)=2 AND count(*) FILTER (WHERE amount=100)=1
+  AND count(*)=2 AND count(*) FILTER (WHERE amount=500)=1
   AND count(*) FILTER (WHERE amount=0 AND reason_code='opening_grant_ineligible')=1
   FROM credit_transactions
   WHERE user_id IN ('00000000-0000-4000-8000-00000000e003','00000000-0000-4000-8000-00000000e004');

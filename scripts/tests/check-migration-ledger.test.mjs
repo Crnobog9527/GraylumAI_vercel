@@ -23,11 +23,33 @@ const checker = path.join(repositoryRoot, 'scripts/check-migration-ledger.mjs');
 const repositoryMigrations = path.join(repositoryRoot, 'packages/db/migrations');
 const ciWorkflow = path.join(repositoryRoot, '.github/workflows/ci.yml');
 
+// A fixed, contiguous ledger (0001-0063 plus the historical 0018 pair) so these
+// cases test the checker's rules, not whichever migrations are queued in the repo.
+const FIXTURE_HIGHEST_MIGRATION = 63;
+const FIXTURE_NAMED_MIGRATIONS = new Map([
+  ['0001', ['0001_ai_billing_tables.sql']],
+  ['0018', ['0018_payment_fulfillment_atomicity.sql', '0018_rls_text_flags_and_job_runs.sql']],
+  ['0047', ['0047_subscription_fulfillment_service_role_grants.sql']],
+  ['0062', ['0062_skill_1a_db_publish_contract.sql']],
+  ['0063', ['0063_bill_1_reconciliation_select_contract.sql']],
+]);
+
+async function writeMigrationFixture(migrations, { skip = [] } = {}) {
+  await mkdir(migrations, { recursive: true });
+  for (let number = 1; number <= FIXTURE_HIGHEST_MIGRATION; number += 1) {
+    const padded = String(number).padStart(4, '0');
+    if (skip.includes(padded)) continue;
+    for (const name of FIXTURE_NAMED_MIGRATIONS.get(padded) ?? [`${padded}_fixture.sql`]) {
+      await writeFile(path.join(migrations, name), `-- migration fixture ${name}\n`);
+    }
+  }
+}
+
 function git(root, args) {
   return execFileSync('git', ['-C', root, ...args], { encoding: 'utf8', stdio: 'pipe' }).trim();
 }
 
-async function migrationFixture({ trustedChecker = true, trustedMigrations = true } = {}) {
+async function migrationFixture({ trustedChecker = true, trustedMigrations = true, skip = [] } = {}) {
   const root = await mkdtemp(path.join(os.tmpdir(), 'graylum-migration-ledger-'));
   const migrations = path.join(root, 'packages/db/migrations');
   if (trustedChecker) {
@@ -36,8 +58,7 @@ async function migrationFixture({ trustedChecker = true, trustedMigrations = tru
     await cp(checker, fixtureChecker);
   }
   if (trustedMigrations) {
-    await mkdir(path.dirname(migrations), { recursive: true });
-    await cp(repositoryMigrations, migrations, { recursive: true });
+    await writeMigrationFixture(migrations, { skip });
   } else {
     await writeFile(path.join(root, 'README.md'), 'base without migration evidence\n');
   }
@@ -50,8 +71,7 @@ async function migrationFixture({ trustedChecker = true, trustedMigrations = tru
   const baseSha = git(root, ['rev-parse', 'HEAD']);
 
   if (!trustedMigrations) {
-    await mkdir(path.dirname(migrations), { recursive: true });
-    await cp(repositoryMigrations, migrations, { recursive: true });
+    await writeMigrationFixture(migrations, { skip });
   }
 
   const eventPath = path.join(root, 'github-event.json');
@@ -87,7 +107,7 @@ async function withFixture(assertion, options) {
   }
 }
 
-test('accepts the current migration ledger against its exact base commit', async () => {
+test('accepts a contiguous migration ledger against its exact base commit', async () => {
   await withFixture(async (fixture) => {
     assert.match(runChecker(fixture), /Migration ledger check passed/);
   }, { trustedChecker: false });
@@ -249,6 +269,25 @@ test('allows a future migration only at the next sequential number', async () =>
     );
     assert.match(runChecker(fixture), /Migration ledger check passed/);
   });
+});
+
+test('rejects a new migration that skips the next sequential number', async () => {
+  await withFixture(async (fixture) => {
+    await writeFile(path.join(fixture.migrations, '0065_future.sql'), '-- future migration fixture\n');
+    assert.throws(
+      () => runChecker(fixture),
+      (error) => /Missing post-baseline migration number 0064/.test(error.stderr),
+    );
+  });
+});
+
+test('rejects a ledger whose exact base already has a post-baseline gap', async () => {
+  await withFixture(async (fixture) => {
+    assert.throws(
+      () => runChecker(fixture),
+      (error) => /Missing post-baseline migration number 0055/.test(error.stderr),
+    );
+  }, { skip: ['0055'] });
 });
 
 test('fails closed when the exact base SHA is missing or cannot be resolved', async () => {
