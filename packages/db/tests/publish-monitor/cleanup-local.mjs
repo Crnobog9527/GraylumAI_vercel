@@ -246,6 +246,25 @@ try {
   assert.equal(await conn('pfm_pub'), undefined, 'a changed owner ends only our record');
   report.checks.push('with unresolved publishes a deletion only clears tokens and waits; a changed owner ends only our record');
 
+  // A deletion record whose owner reference was lost (entered deletion before 0265, settings already erased): its job
+  // names only its own provider account ID, and ending it removes only that record; other users' rows are untouched.
+  const lost = await member(), bystander = await member();
+  await connect(lost, 'pfm_lost_owner');
+  await connect(bystander, 'pfm_bystander');
+  await svc('SELECT publish_monitor_disconnect($1,$2) v', [lost.a, (await conn('pfm_lost_owner')).id]);
+  await c.query('UPDATE social_connections SET owner_ref=NULL WHERE provider_account_id=$1', ['pfm_lost_owner']);
+  const others = (await c.query("SELECT id,status,updated_at FROM social_connections WHERE provider_account_id<>'pfm_lost_owner'"
+    + ' ORDER BY id')).rows;
+  const lostJob = (await work()).find(x => x.providerAccountId === 'pfm_lost_owner');
+  assert.deepEqual([lostJob.action, lostJob.deleting, lostJob.ownerRef], ['delete', true, null]);
+  await workFinish(lostJob, 'deleted');
+  assert.equal(await conn('pfm_lost_owner'), undefined);
+  const after = (await c.query("SELECT id,status,updated_at FROM social_connections WHERE provider_account_id<>'pfm_lost_owner'"
+    + ' ORDER BY id')).rows;
+  assert.deepEqual(after.map(r => r.id), others.map(r => r.id), 'no other connection record removed');
+  assert.equal((await conn('pfm_bystander')).status, 'connected');
+  report.checks.push('a deletion record with a lost owner reference deletes only its own provider account and record');
+
   // Webhook: a provider-side disconnect asks the owner to re-authorise; unknown accounts are ignored.
   await connect(other, 'pfm_hook');
   assert.equal(await svc('SELECT publish_monitor_provider_account_disconnected($1) v', ['pfm_hook']), true);
