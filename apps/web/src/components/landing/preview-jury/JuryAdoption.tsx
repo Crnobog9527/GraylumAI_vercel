@@ -9,6 +9,7 @@ import {
 } from './jury-adopt';
 import { useDraftChoices } from './use-draft-choices';
 import { JuryChapter } from './JuryChapter';
+import { RevealMore, useReveal } from './JuryReveal';
 import styles from './jury-results.module.css';
 
 type Stale = 'none' | 'report' | 'proposal';
@@ -28,6 +29,7 @@ export function JuryAdoption({ detail, names, quiet }: { detail: JuryDetail; nam
   const [later, setLater] = useState(false);
   const total = choosable(sections).length;
   const done = chosenCount(state, sections);
+  const reveal = useReveal(shown.length);
 
   const propose = () => {
     if (stale === 'report') { setError(adoptErrorLabel('REPORT_REVISION_STALE')); return; }
@@ -58,7 +60,7 @@ export function JuryAdoption({ detail, names, quiet }: { detail: JuryDetail; nam
     <section className={styles.block} aria-labelledby="jury-chapters">
       <h3 id="jury-chapters">逐章意见和你的选择</h3>
       <p className={styles.blockNote}>
-        改过的章节由你决定用修订版还是原文；没改的章节保留原文。选完后先看会改动哪些定位内容，再确认。
+        改过的章节由你决定用修订版还是原文，没改的保留原文。选完后先看会改动哪些定位内容，再确认。
         {quiet > 0 ? `其余 ${quiet} 章评审团没有意见。` : ''}
       </p>
       {result ? null : (
@@ -72,14 +74,18 @@ export function JuryAdoption({ detail, names, quiet }: { detail: JuryDetail; nam
         </label>
       )}
       <div className={styles.chapters}>
-        {shown.map(section => (
+        {shown.slice(0, reveal.shown).map(section => (
           <JuryChapter key={section.section} section={section} names={names} state={state} locked={Boolean(result || proposal)}
             onUse={use => { setState(value => setUse(value, sections, section.section, use)); setError(null); }}
             onConfirm={confirmed => setState(value => setConfirmed(value, section.section, confirmed))} />
         ))}
       </div>
 
-      {result ? <Done result={result} /> : proposal ? (
+      <RevealMore reveal={reveal} total={shown.length}>
+        {result ? null : <span className={styles.count}>已选 {done}/{total} 章</span>}
+      </RevealMore>
+
+      {result ? <Done result={result} /> : !reveal.done ? null : proposal ? (
         <Review proposal={proposal} error={error} onConfirm={confirm} onBack={() => { setProposal(null); setError(null); }} />
       ) : (
         <div className={styles.bar}>

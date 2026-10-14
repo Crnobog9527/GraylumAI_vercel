@@ -191,27 +191,3 @@ function readingOf(scene: Scene | null, clock: number): DeskView['reading'] {
   });
   return reading;
 }
-
-export type SeatState = { text: string; tone: 'idle' | 'active' | 'done' | 'failed' };
-
-/** One line per person on the panel strip: what they are doing now. */
-export function seatStates(scene: Scene | null, clock: number, failed: readonly Seat[], ended: boolean): Record<SeatCode, SeatState> {
-  const states = {} as Record<SeatCode, SeatState>;
-  for (const seat of SEATS) {
-    let state: SeatState = { text: '在席', tone: 'idle' };
-    if (scene?.kind === 'reading') {
-      const at = scene.submitAt[seat];
-      state = at !== undefined && clock >= at ? { text: '已交卷', tone: 'done' } : { text: '审阅中', tone: 'active' };
-    } else if (scene && scene.kind !== 'seated') state = { text: '已交卷', tone: 'done' };
-    if (scene?.kind === 'critique' && scene.seat === seat) state = { text: '正在批注', tone: 'active' };
-    if (scene?.kind === 'response' && scene.response.reviewer === seat) state = { text: '正在回复', tone: 'active' };
-    if (failed.includes(seat)) state = { text: '没有给出可用意见', tone: 'failed' };
-    states[seat] = state;
-  }
-  const summary: Partial<Record<Scene['kind'], SeatState>> = {
-    writing: { text: '汇总中', tone: 'active' }, ruling: { text: '逐条裁决', tone: 'active' }, revision: { text: '已交修订稿', tone: 'done' },
-  };
-  states.S = ended ? { text: '已完成', tone: 'done' } : (scene && summary[scene.kind]) || { text: '等待汇总', tone: 'idle' };
-  if (scene?.kind === 'revision' && scene.result.type === 'revision_failed') states.S = { text: '修订稿未通过检查', tone: 'failed' };
-  return states;
-}
