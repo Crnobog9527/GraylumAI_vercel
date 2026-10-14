@@ -36,13 +36,9 @@ const defaultSettings: Record<string, { value: string; type: 'string' | 'number'
   maintenance_mode: { value: 'false', type: 'boolean', label: '维护模式', description: '开启后向用户显示维护信息' },
 
   // Credits & Billing
-  new_user_credits: { value: '100', type: 'number', label: '新用户赠送积分', description: '新用户注册时赠送的积分数量' },
+  new_user_credits: { value: '500', type: 'number', label: '新用户赠送积分', description: '新用户注册时赠送的积分数量' },
   billing_credits_per_usd: { value: '', type: 'number', label: '每美元积分数', description: '留空 = 未配置（按缺省值 1000 计算）；只影响新操作' },
   billing_token_price_multiplier: { value: '', type: 'number', label: '全站默认加价倍数', description: '留空 = 未配置（缺省 1.5）；1–20，最多两位小数' },
-  billing_min_pre_deduct: { value: '10', type: 'number', label: '最小预扣积分', description: 'AI 请求预扣的最低积分数，默认沿用现有安全值 10' },
-  billing_max_pre_deduct: { value: '10000', type: 'number', label: '最大预扣积分', description: '单次 AI 请求预扣积分上限' },
-  billing_safety_margin: { value: '0.2', type: 'number', label: '预扣安全边际', description: '预扣时在估算积分上额外增加的比例，例如 0.2 表示 20%' },
-  billing_require_model_pricing: { value: 'true', type: 'boolean', label: '要求模型价格', description: '开启后模型价格缺失或为 0 时拒绝 AI 请求，不使用硬编码后备价格' },
   first_purchase_bonus_percent: { value: '20', type: 'number', label: '首充赠送%', description: '历史兼容字段，当前运行时未消费该配置' },
 
   // Features
@@ -78,7 +74,7 @@ const defaultSettings: Record<string, { value: string; type: 'string' | 'number'
 // 设置分组
 const settingGroups = {
   general: ['site_name', 'support_email', 'maintenance_mode'],
-  billing: ['new_user_credits', 'billing_credits_per_usd', 'billing_token_price_multiplier', 'billing_min_pre_deduct', 'billing_max_pre_deduct', 'billing_safety_margin', 'billing_require_model_pricing'],
+  billing: ['new_user_credits', 'billing_credits_per_usd', 'billing_token_price_multiplier'],
   checkin: ['checkin_day1', 'checkin_day2', 'checkin_day3', 'checkin_day4', 'checkin_day5', 'checkin_monthly_bonus'],
   referral: ['invite_inviter_reward', 'invite_invitee_reward', 'invite_rebate_percent', 'invite_binding_days', 'invite_daily_reward_limit', 'invite_monthly_count_limit', 'invite_total_reward_limit', 'invite_same_ip_hour_limit', 'invite_same_ip_day_limit', 'invite_risk_auto_reject'],
   experience: ['home_show_onboarding', 'home_show_featured_modules'],

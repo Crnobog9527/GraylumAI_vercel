@@ -8,10 +8,12 @@ const identity = {
   pricingHash: z.string().regex(/^[0-9a-f]{64}$/), endpointTag: reference,
   nominalPricing, templateTokens: tokens, marginTokens: tokens,
 };
+/** Tool definitions one PAYG call may carry; the SQL quote check (0162) enforces the same ceiling. */
+export const PAYG_MAX_TOOLS = 2;
 export const paygStablePolicy = z.object({
   ...identity, version: reference, admissionPath: z.enum(['fixture', 'empirical', 'tokenizer']),
   maxBytes: z.number().int().min(1).max(196_608),
-  maxMessages: z.number().int().min(1).max(128), maxTools: z.number().int().min(0).max(2),
+  maxMessages: z.number().int().min(1).max(128), maxTools: z.number().int().min(0).max(PAYG_MAX_TOOLS),
   maxSchemaBytes: z.number().int().min(0).max(16_384),
   purposes: z.array(reference).min(1).max(16), expiresAt: z.string().datetime(),
 }).strict().refine(value => value.pricingHash === value.nominalPricing.pricingHash

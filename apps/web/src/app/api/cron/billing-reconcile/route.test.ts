@@ -16,6 +16,7 @@ const mocks = vi.hoisted(() => ({
   stripeCard: vi.fn(),
   stripeClient: vi.fn(),
   reportStripeCard: vi.fn(),
+  fusion: vi.fn(),
 }));
 
 vi.mock('@repo/api/src/services/payments/waffoReconciliation', () => ({ reconcileWaffoPayments: mocks.waffo }));
@@ -25,6 +26,7 @@ vi.mock('@repo/api/src/services/payments/stripeCardReconciliation', () => ({ rec
 vi.mock('@repo/api/src/services/stripe', () => ({ getStripeClient: mocks.stripeClient }));
 vi.mock('@/lib/payment-alert.mjs', () => ({ reportStripeCardReconciliation: mocks.reportStripeCard,
   reportPaymentEvidenceConflict: vi.fn() }));
+vi.mock('@repo/api/src/services/fusion/recovery', () => ({ recoverFusionFinancials: mocks.fusion }));
 vi.mock('@repo/api/src/services/payments/waffoCardCheckout', () => ({ closeExpiredWaffoCheckouts: mocks.closeExpired }));
 
 vi.mock('@supabase/supabase-js', () => ({
@@ -91,6 +93,18 @@ describe('/api/cron/billing-reconcile', () => {
     vi.stubEnv('STRIPE_CARD_RECONCILIATION_MODE', 'test');
     mocks.stripeClient.mockReturnValue({ client: 'stripe' });
     mocks.stripeCard.mockResolvedValue({ success: true, skipped: true, findings: [] });
+    mocks.fusion.mockResolvedValue({ success: true, scanned: 0, cancelled: 0, recovered: 0, scrubbed: 0, failed: 0 });
+  });
+
+  it('runs the Fusion recovery step and fails the job while a Fusion call stays pending', async () => {
+    expect((await GET(new Request('https://graylum.test/api/cron/billing-reconcile'))).status).toBe(200);
+    expect(mocks.fusion).toHaveBeenCalledWith({ client: 'service-role' });
+    mocks.fusion.mockResolvedValue({ success: false, scanned: 1, cancelled: 0, recovered: 0, scrubbed: 0, failed: 1 });
+    const response = await GET(new Request('https://graylum.test/api/cron/billing-reconcile'));
+    expect(response.status).toBe(500);
+    expect(await response.json()).toMatchObject({ fusion: { failed: 1 } });
+    mocks.fusion.mockRejectedValue(new Error('unexpected'));
+    expect((await GET(new Request('https://graylum.test/api/cron/billing-reconcile'))).status).toBe(500);
   });
 
   it('rejects unauthorized invocation before creating a privileged client', async () => {
