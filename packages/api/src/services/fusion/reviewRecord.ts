@@ -17,6 +17,8 @@ const reviewView = z.object({
   steps: z.array(z.object({ round: z.number(), phase: z.string(), attempt: z.number(), groupId: uuid, stepKey: z.string(),
     claimedAt: z.string() })),
   outcome: z.unknown().nullable(), revisionId: uuid.nullable(), endedAt: z.string().nullable(),
+  /** The user's per-section choice (0256), once made. */
+  adoption: z.record(z.string(), z.unknown()).nullable().optional(),
   calls: z.array(z.object({ groupId: uuid, runId: uuid, callId: uuid, modelId: uuid, phase: z.string(), dispatched: z.boolean(),
     verdict: z.string().nullable(), settled: z.boolean(), state: z.string(),
     dispatchedAt: z.string().nullable().optional(), settledAt: z.string().nullable().optional() })),
@@ -54,6 +56,9 @@ export function reviewRecord(admin: SupabaseClient, actorId: string) {
         throw error;
       }
     },
+    /** Writes the per-section choice once; the same request returns the same record. */
+    recordAdoption: (reviewId: string, adoption: Record<string, unknown>) =>
+      view(rpc('fusion_review_adoption_record', { p_review_id: uuid.parse(reviewId), p_adoption: adoption })),
     async read(reviewId: string): Promise<ReviewView | null> {
       const value = await rpc('fusion_review_read', { p_review_id: uuid.parse(reviewId) });
       return value === null ? null : reviewView.parse(value);

@@ -11,6 +11,7 @@ import { estimateReview } from './reviewEstimate';
 import { debateRequest, readReviewSkill, resolveReviewSkill, reviewerLabel, reviewerRequest, summaryRequest, type ReviewContext,
   type ReviewSkill } from './reviewPrompts';
 import { reviewDetail, reviewEvents } from './reviewEvents';
+import { adoptionChoices, adoptionSections, applyChoices, type AdoptionChoice } from './reviewAdoption';
 import { ENDED_STATES, reviewRecord, type ReviewPosition, type ReviewView } from './reviewRecord';
 import { readFusionSettings } from './settings';
 
@@ -23,11 +24,8 @@ const source = z.object({ body: z.string().min(1), sections: z.array(z.string())
   declared: z.array(z.object({ stepId: z.string(), fieldIds: z.array(z.string()) })) });
 type Source = z.infer<typeof source>;
 /** The summary's revision that passed the host check: what R14 proposes. */
-type Passed = { round: number; body: string; steps: StepValues; changeNotes: unknown; r14Fields: StepValues };
+type Passed = { round: number; body: string; steps: StepValues; changeNotes: unknown; changedSections: string[]; r14Fields: StepValues };
 const ATTEMPTS = 3;
-/** R14 refusals that retrying cannot fix (REPORT_UNAVAILABLE and auth problems are retried by the next continue). */
-const PROPOSAL_REFUSALS = new Set(['REPORT_REVISION_STALE', 'REPORT_SOURCE_CONFLICT', 'REPORT_REVISION_UNSUPPORTED',
-  'REPORT_REVISION_INVALID', 'REPORT_REVISION_DECIDED', 'REPORT_NOT_COMPLETE', 'CONTENT_ERASED']);
 const stepKey = (at: ReviewPosition) => `review:${at.round}:${at.phase}:${at.attempt}`;
 
 /** FUSION-REVIEW §2.1/§2.2 orchestration over the review record (0236): the server decides each next step;
@@ -37,9 +35,11 @@ export function reviewFlow(deps: { admin: SupabaseClient; actorId: string;
   /** Needed to dispatch; recovery (re-judging only) passes none. */
   executor?: Executor;
   env?: Record<string, string | undefined>;
-  /** R14 reportRevisionPropose with the user's own client (it requires the user's verified identity). */
+  /** R14 reportRevisionPropose / Apply with the user's own client (they require the user's verified identity). */
   propose?: (input: { draftId: string; requestId: string; sourceVersionId: string; body: string; fields: StepValues }) =>
-    Promise<{ revisionId: string }> }) {
+    Promise<{ revisionId: string; diffHash: string }>;
+  apply?: (input: { draftId: string; revisionId: string; requestId: string; expectedDiffHash: string }) =>
+    Promise<{ versionId: string | null }> }) {
   const { admin, actorId } = deps;
   const env = deps.env ?? process.env;
   const record = reviewRecord(admin, actorId);
@@ -67,7 +67,8 @@ export function reviewFlow(deps: { admin: SupabaseClient; actorId: string;
     const result = text ? checkRevision(text, revisionInput(view, src)) : null;
     if (!result?.ok) return null;
     const round = view.steps.find(step => step.groupId === call!.groupId)?.round ?? 1;
-    return { round, body: result.body, steps: result.steps, changeNotes: result.changeNotes, r14Fields: result.r14Fields };
+    return { round, body: result.body, steps: result.steps, changeNotes: result.changeNotes, changedSections: result.changedSections,
+      r14Fields: result.r14Fields };
   }
   const revisionInput = (view: ReviewView, src: Source) => ({
     previousBody: src.body, previousSteps: frozenValues(view), frozenSteps: frozenValues(view),
@@ -146,26 +147,17 @@ export function reviewFlow(deps: { admin: SupabaseClient; actorId: string;
       outputTokens: { opinion: cfg.opinionTokens, summary: cfg.summaryTokens } });
     return record.claim(view.reviewId, at, group.groupId, group.runs.map(run => ({ runId: run.runId, payload: run.call })));
   }
-  async function finish(view: ReviewView, state: 'completed' | 'incomplete' | 'revision_failed', outcome: Record<string, unknown>,
-    revision: Passed | null) {
-    let revisionId: string | undefined;
-    if (revision) {
-      if (!deps.propose) throw new Error('FUSION_REVIEW_UNAVAILABLE');
-      try {
-        ({ revisionId } = await deps.propose({ draftId: view.draftId, requestId: derivedUuid(`${view.reviewId}:propose`),
-          sourceVersionId: view.sourceVersionId, body: revision.body, fields: revision.r14Fields }));
-      } catch (error) {
-        // R14 refuses for good (the user edited the draft or published a newer version meanwhile, or the content
-        // is gone): end the review instead of retrying forever and holding the user's only review slot (#962 review).
-        const code = error instanceof Error ? error.message : '';
-        if (!PROPOSAL_REFUSALS.has(code)) throw error;
-        const at = { round: view.round, phase: view.phase, attempt: view.attempt };
-        return record.advance(view.reviewId, at, { state: 'incomplete', outcome: { kind: 'proposal_refused', code } });
-      }
-    }
+  async function finish(view: ReviewView, state: 'completed' | 'incomplete' | 'revision_failed', outcome: Record<string, unknown>) {
     const at = { round: view.round, phase: view.phase, attempt: view.attempt };
-    return record.advance(view.reviewId, at, { state, outcome,
-      ...(revisionId ? { revisionId } : {}) });
+    return record.advance(view.reviewId, at, { state, outcome });
+  }
+  /** The per-section view of a passed revision, against the frozen reviewed version (§2.2, Owner 2026-10-14). */
+  async function adoptionPlan(view: ReviewView, src: Source) {
+    const passed = await passedRevision(view, src);
+    if (!passed) return null;
+    const notes = passed.changeNotes as Array<{ section: string; wordingOnly: boolean; fields: Array<{ stepId: string; fieldId: string }> }>;
+    return { passed, sections: adoptionSections({ originalBody: src.body, revisedBody: passed.body, sections: src.sections,
+      changedSections: passed.changedSections, changeNotes: notes, frozen: frozenValues(view), revisedSteps: passed.steps }) };
   }
   const done = (call: ReviewView['calls'][number]) => call.verdict !== null;
   /** Saved bodies of judged calls with their save time (the owner's own review only: reads go through the actor). */
@@ -237,9 +229,9 @@ export function reviewFlow(deps: { admin: SupabaseClient; actorId: string;
         if (at.phase === 'review' && at.round === 1) {
           const opinions = [...(await opinionsOf(view, src, 1)).values()];
           if (!opinions.length) {
-            view = await finish(view, 'incomplete', { kind: 'no_opinions' }, null);
+            view = await finish(view, 'incomplete', { kind: 'no_opinions' });
           } else if (opinions.every(opinion => !opinion.issues.length && opinion.decisions.every(d => d.verdict === 'keep'))) {
-            view = await finish(view, 'completed', { kind: 'no_change' }, null);
+            view = await finish(view, 'completed', { kind: 'no_change' });
           } else if (cfg.maxRounds >= 2 && opinions.length >= 2 && hasDisagreement(opinions)) {
             // Round 2 only on a real split over a key decision (Owner 2026-10-14): each reviewer answers the others.
             view = await record.advance(reviewId, at, { state: 'running', round: 2, phase: 'review', attempt: 1 });
@@ -253,10 +245,11 @@ export function reviewFlow(deps: { admin: SupabaseClient; actorId: string;
           continue;
         }
         const passed = await passedRevision(view, src);
+        // The revision is never re-reviewed by the panel (§8.1, Owner 2026-10-13 选 A): the user now chooses section by
+        // section (Owner 2026-10-14); nothing reaches R14 until then.
         view = passed
-          // The final revision is never re-reviewed by the panel (§8.1, Owner 2026-10-13 选 A): the user confirms it.
-          ? await finish(view, 'completed', { kind: 'revised', debated: at.round > 1, reviewedByPanel: false }, passed)
-          : await finish(view, 'revision_failed', { kind: 'revision_failed' }, null);
+          ? await finish(view, 'completed', { kind: 'revised', debated: at.round > 1, reviewedByPanel: false, awaitingChoice: true })
+          : await finish(view, 'revision_failed', { kind: 'revision_failed' });
       }
       return { review: view, calls: [] };
     },
@@ -280,13 +273,43 @@ export function reviewFlow(deps: { admin: SupabaseClient; actorId: string;
     },
     stop: (reviewId: string) => record.close(reviewId, 'stopped'),
     end: (reviewId: string) => record.close(reviewId, 'interrupted'),
+    /** Per-section adoption: every changed section is taken from the revision or kept; the merged text and the fields
+     * of adopted sections go through R14 propose + apply (a new formal version), and the choice is recorded once. */
+    async adopt(input: { reviewId: string; requestId: string; choices: AdoptionChoice[] }) {
+      const choices = adoptionChoices.parse(input.choices);
+      const view = await record.read(input.reviewId);
+      if (!view) throw new Error('FUSION_REVIEW_DENIED');
+      const prior = view.adoption as { requestId?: string; versionId?: string | null; adopted?: string[]; kept?: string[] } | null | undefined;
+      if (prior) {
+        if (prior.requestId !== input.requestId) throw new Error('FUSION_REVIEW_ADOPTED');
+        return { versionId: prior.versionId ?? null, adopted: prior.adopted ?? [], kept: prior.kept ?? [] };
+      }
+      if (view.state !== 'completed' || (view.outcome as { kind?: string } | null)?.kind !== 'revised') throw new Error('FUSION_REVIEW_INVALID');
+      // The original text comes from the frozen version (its hash is checked); the revision is re-checked.
+      const src = await readSource(input.reviewId);
+      const plan = await adoptionPlan(view, src);
+      if (!plan) throw new Error('FUSION_REVIEW_INVALID');
+      const merged = applyChoices({ originalBody: src.body, revisedBody: plan.passed.body, plan: plan.sections, choices });
+      let revisionId: string | null = null, versionId: string | null = null;
+      if (merged.adopted.length) {
+        if (!deps.propose || !deps.apply) throw new Error('FUSION_REVIEW_UNAVAILABLE');
+        const proposal = await deps.propose({ draftId: view.draftId, requestId: derivedUuid(`${view.reviewId}:adopt:${input.requestId}:propose`),
+          sourceVersionId: view.sourceVersionId, body: merged.body, fields: merged.fields });
+        revisionId = proposal.revisionId;
+        ({ versionId } = await deps.apply({ draftId: view.draftId, revisionId, expectedDiffHash: proposal.diffHash,
+          requestId: derivedUuid(`${view.reviewId}:adopt:${input.requestId}:apply`) }));
+      }
+      await record.recordAdoption(view.reviewId, { requestId: input.requestId, choices, adopted: merged.adopted, kept: merged.kept,
+        revisionId, versionId });
+      return { versionId, adopted: merged.adopted, kept: merged.kept };
+    },
     /** Full record for the owner (no 120-character summaries): each seat's reasoning and the rulings by section. */
     async detail(reviewId: string) {
       const view = await record.read(reviewId);
       if (!view) throw new Error('FUSION_REVIEW_DENIED');
       const src = await readSource(reviewId);
       return reviewDetail({ view, reviewers: config.parse(view.config).reviewers, sections: src.sections,
-        outputs: await savedOutputs(view), revision: revisionInput(view, src) });
+        outputs: await savedOutputs(view), revision: revisionInput(view, src), adoption: (await adoptionPlan(view, src))?.sections ?? null });
     },
     /** Progress events for the animation (§2.2a), derived from the record and judged outputs only. */
     async events(reviewId: string) {

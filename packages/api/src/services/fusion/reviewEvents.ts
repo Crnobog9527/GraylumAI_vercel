@@ -1,6 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { DECISIONS, adjudicationSchema, checkRevision, parseOpinion, type Adjudication, type Opinion, type RevisionInput } from './hostChecks';
 import { reviewerLabel } from './reviewPrompts';
+import type { AdoptionSection } from './reviewAdoption';
 import type { ReviewView } from './reviewRecord';
 
 /** Progress events for the review animation (FUSION-REVIEW §2.2a, Owner 2026-10-14). Derived only from the
@@ -92,13 +93,17 @@ export function reviewEvents(input: { view: ReviewView; reviewers: string[]; sec
       add(view.endedAt, { id: 'revision_failed', type: 'revision_failed', reason: check && !check.ok ? check.reason
         : FAILURE[String(summary.verdict)] ?? 'REVISION_FORMAT' });
     }
-    if (view.state === 'completed' && view.revisionId && summary) {
+    if (view.state === 'completed' && summary && USABLE.has(String(summary.verdict))) {
       const check = checkRevision(outputs.get(summary.callId)?.body ?? '', input.revision);
-      if (check.ok) add(view.endedAt, { id: 'revision_ready', type: 'revision_ready', revisionId: view.revisionId,
+      // The revision now waits for the user's per-section choice (Owner 2026-10-14).
+      if (check.ok) add(view.endedAt, { id: 'revision_ready_for_choice', type: 'revision_ready_for_choice',
         changedSections: check.changedSections.length, changedSectionTitles: check.changedSections,
         changedFields: Object.values(check.r14Fields).reduce((n, fields) => n + Object.keys(fields).length, 0) });
     }
     add(view.endedAt, { id: 'review_ended', type: 'review_ended', state: view.state, outcome: view.outcome });
+    const adoption = view.adoption as { at?: string; adopted?: string[]; kept?: string[]; versionId?: string | null } | null | undefined;
+    if (adoption?.at) add(adoption.at, { id: 'adoption_done', type: 'adoption_done', adoptedSections: adoption.adopted ?? [],
+      keptSections: adoption.kept ?? [], versionId: adoption.versionId ?? null });
   }
   // Database times order the events; ties keep the derivation order (seat, then item).
   timed.sort((a, b) => (a.at === b.at ? a.order - b.order : Date.parse(a.at || '1970-01-01') - Date.parse(b.at || '1970-01-01')));
@@ -120,7 +125,9 @@ function adjudicationOf(text: string): Adjudication[] {
  * reasoning; the result is organised section by section and the user decides). Seats only, never model names.
  * Only judged bodies are included; a reviewer whose answer failed or is still pending shows that status. */
 export function reviewDetail(input: { view: ReviewView; reviewers: string[]; sections: string[];
-  outputs: Map<string, { body: string; savedAt: string }>; revision: RevisionInput }) {
+  outputs: Map<string, { body: string; savedAt: string }>; revision: RevisionInput;
+  /** Per-section original/revised text, fields and links (null when no revision passed). */
+  adoption: AdoptionSection[] | null }) {
   const { view, reviewers, sections, outputs } = input;
   const stepOf = (groupId: string) => view.steps.find(step => step.groupId === groupId);
   const seats = reviewers.map((modelId, index) => {
@@ -143,8 +150,16 @@ export function reviewDetail(input: { view: ReviewView; reviewers: string[]; sec
   const rulings = check?.ok ? check.adjudication : [];
   // Template order, then rulings about the whole report.
   const order = [...sections, '全文'];
-  const bySection = order.map(section => ({ section, changed: check?.ok ? check.changedSections.includes(section) : false,
-    rulings: rulings.filter(item => item.section === section) })).filter(group => group.rulings.length || group.changed);
-  return { reviewId: view.reviewId, state: view.state, outcome: view.outcome, revisionId: view.revisionId, seats,
-    summary: { status: check?.ok ? 'usable' : summaryCall ? 'failed' : 'none', sections: bySection } };
+  const bySection = order.map(section => {
+    const plan = input.adoption?.find(item => item.section === section);
+    return { section, changed: plan?.changed ?? false, wordingOnly: plan?.wordingOnly ?? false,
+      ...(plan?.changed ? { original: plan.original, revised: plan.revised } : {}), fields: plan?.fields ?? [],
+      linkedSections: plan?.linkedSections ?? [], rulings: rulings.filter(item => item.section === section) };
+  }).filter(group => group.rulings.length || group.changed);
+  const awaiting = view.state === 'completed' && (view.outcome as { kind?: string } | null)?.kind === 'revised' && !view.adoption;
+  return { reviewId: view.reviewId, state: view.state, outcome: view.outcome, seats,
+    summary: { status: check?.ok ? 'usable' : summaryCall ? 'failed' : 'none', sections: bySection },
+    /** The user's choice once made; until then the review waits for it (no lock: the draft stays editable, and a choice
+     * against a version that is no longer current is refused by R14). */
+    adoption: view.adoption ?? null, awaitingChoice: awaiting };
 }

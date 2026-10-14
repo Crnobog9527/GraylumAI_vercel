@@ -43,8 +43,12 @@ vi.mock('./reviewRecord', async original => {
     start: async (input: { config: unknown; requestId: string }) => { db.review = { reviewId: randomUUID(), requestId: input.requestId, state: 'running', round: 1, phase: 'review', attempt: 1,
       draftId: randomUUID(), sourceVersionId: randomUUID(), sourceSessionId: randomUUID(), versionHash: 'h',
       materials: { s1: { goal: { value: '旧目标', status: 'confirmed' } } }, materialsHash: 'a'.repeat(64), config: input.config, steps: [],
-      outcome: null, revisionId: null, endedAt: null }; return view(); },
+      outcome: null, revisionId: null, endedAt: null, adoption: null }; return view(); },
     read: async () => db.review ? view() : null,
+    recordAdoption: async (_id: string, adoption: Record<string, unknown>) => {
+      if (!db.review!.adoption) db.review!.adoption = { ...adoption, at: clock.next() };
+      return view();
+    },
     replay: async (input: { requestId: string }) => db.review && db.review.requestId === input.requestId ? view() : null,
     claim: async (_id: string, at: { round: number; phase: string; attempt: number }, groupId: string, items: Array<{ runId: string; payload: { model: string } }>) => {
       const key = `review:${at.round}:${at.phase}:${at.attempt}`;
@@ -91,6 +95,7 @@ const revision = (value: string) => JSON.stringify({
   changeNotes: [{ section: '定位', wordingOnly: false, note: '更具体', fields: [{ stepId: 's1', fieldId: 'goal' }] }] });
 function setup(script: (call: Call) => string | null, refuse?: string) {
   const proposals: unknown[] = [];
+  const applied: unknown[] = [];
   const executor = { run: vi.fn(async (_run: unknown, claimed: { id: string }, judge: (text: string) => string) => {
     const call = db.calls.find(c => c.callId === claimed.id)!;
     call.dispatched = true; call.dispatchedAt = clock.next();
@@ -101,13 +106,15 @@ function setup(script: (call: Call) => string | null, refuse?: string) {
     return { state: 'judged', verdict: call.verdict, text };
   }) };
   const flow = reviewFlow({ admin, actorId: randomUUID(), executor: executor as never,
-    propose: async input => { if (refuse) throw new Error(refuse); proposals.push(input); return { revisionId: '00000000-0000-4000-8000-0000000000d1' }; } });
+    propose: async input => { if (refuse) throw new Error(refuse); proposals.push(input);
+      return { revisionId: '00000000-0000-4000-8000-0000000000d1', diffHash: 'f'.repeat(64) }; },
+    apply: async input => { applied.push(input); return { versionId: '00000000-0000-4000-8000-0000000000e1' }; } });
   const runAll = async () => {
     const step = await flow.continue(String(db.review!.reviewId));
     for (const call of step.calls) await flow.dispatch(String(db.review!.reviewId), call.callId);
     return step;
   };
-  return { flow, proposals, runAll };
+  return { flow, proposals, applied, runAll };
 }
 
 describe('review flow', () => {
@@ -121,9 +128,15 @@ describe('review flow', () => {
     expect((await t.runAll()).calls.map(c => c.modelId)).toEqual([ids.summary]);
     expect(db.review).toMatchObject({ round: 1, phase: 'summary' });
     const end = await t.flow.continue(String(db.review!.reviewId));
-    expect(end.review).toMatchObject({ state: 'completed', outcome: { kind: 'revised', debated: false, reviewedByPanel: false },
-      revisionId: '00000000-0000-4000-8000-0000000000d1' });
+    expect(end.review).toMatchObject({ state: 'completed',
+      outcome: { kind: 'revised', debated: false, reviewedByPanel: false, awaitingChoice: true } });
+    // Nothing reaches R14 until the user chooses section by section.
+    expect(t.proposals).toEqual([]);
+    const adopted = await t.flow.adopt({ reviewId: String(db.review!.reviewId), requestId: '00000000-0000-4000-8000-0000000000f1',
+      choices: [{ section: '定位', use: 'revised' }] });
+    expect(adopted).toEqual({ versionId: '00000000-0000-4000-8000-0000000000e1', adopted: ['定位'], kept: ['结语'] });
     expect(t.proposals).toEqual([expect.objectContaining({ body: '## 定位\n新目标\n## 结语\n原结语', fields: { s1: { goal: '新目标' } } })]);
+    expect(t.applied).toEqual([expect.objectContaining({ revisionId: '00000000-0000-4000-8000-0000000000d1', expectedDiffHash: 'f'.repeat(64) })]);
     // The summary saw the opinions as reviewers A, B, C, never model names.
     const summary = JSON.parse(requests.find(r => r.phase === 'fusion_summary')!.input);
     expect(summary.opinions.map((o: { reviewer: string }) => o.reviewer)).toEqual(['A', 'B', 'C']);
@@ -147,7 +160,6 @@ describe('review flow', () => {
     expect(db.review).toMatchObject({ round: 2, phase: 'summary' });
     expect((await t.flow.continue(String(db.review!.reviewId))).review).toMatchObject({ state: 'completed',
       outcome: { kind: 'revised', debated: true } });
-    expect(t.proposals).toHaveLength(1);
     // Later groups are admitted with the output caps frozen at start, not the current settings.
     expect(caps.every(c => c.opinion === 1000 && c.summary === 2000)).toBe(true);
     // Progress events: derived from the record only, seats instead of model names, summaries clipped.
@@ -159,8 +171,8 @@ describe('review flow', () => {
     expect(events.filter(e => e.type === 'disagreement').map(e => e.decision)).toEqual(['positioning', 'audience', 'platform', 'monetization']);
     expect(types.indexOf('disagreement')).toBeLessThan(types.indexOf('response'));
     expect(types.indexOf('response')).toBeLessThan(types.indexOf('summary_started'));
-    expect(types.slice(-3)).toEqual(['adjudication', 'revision_ready', 'review_ended']);
-    expect(events.find(e => e.type === 'revision_ready')).toMatchObject({ changedSectionTitles: ['定位'], changedSections: 1 });
+    expect(types.slice(-3)).toEqual(['adjudication', 'revision_ready_for_choice', 'review_ended']);
+    expect(events.find(e => e.type === 'revision_ready_for_choice')).toMatchObject({ changedSectionTitles: ['定位'], changedSections: 1 });
     expect(events.find(e => e.type === 'response')).toMatchObject({ decision: 'positioning' });
     expect(events.filter(e => e.type === 'response')).toHaveLength(3 * 2 * 4);
     expect(events.find(e => e.type === 'issue')!.fix).toBeTruthy();
@@ -171,7 +183,9 @@ describe('review flow', () => {
     expect(detail.seats.map(seat => [seat.seat, seat.rounds.map(r => r.status)])).toEqual([['A', ['usable', 'usable']],
       ['B', ['usable', 'usable']], ['C', ['usable', 'usable']]]);
     expect(detail.seats[1]!.rounds[0]!.issues![0]!.suggestion).toBe('写清楚给上班族的具体好处，例如下班三十分钟就能做好一顿饭');
-    expect(detail.summary.sections).toEqual([expect.objectContaining({ section: '定位', changed: true,
+    expect(detail.awaitingChoice).toBe(true);
+    expect(detail.summary.sections).toEqual([expect.objectContaining({ section: '定位', changed: true, original: '原定位', revised: '新目标',
+      fields: [{ stepId: 's1', fieldId: 'goal', before: '旧目标', after: '新目标' }], linkedSections: [],
       rulings: [expect.objectContaining({ opinion: '定位要写清人群', fix: '点明给上班族省时间', reviewers: ['A', 'B'] })] })]);
     expect(JSON.stringify(detail)).not.toContain(ids.reviewers[0]);
     // Stable: reading again gives the same ids in the same order.
@@ -194,12 +208,41 @@ describe('review flow', () => {
     expect(toB.respondTo).toHaveLength(2 * 4);
   });
 
-  it('ends the review when R14 refuses the proposal for good (draft changed meanwhile), freeing the slot', async () => {
-    const t = setup(call => call.phase === 'fusion_summary' ? revision('新目标') : opinion('major'), 'REPORT_REVISION_STALE');
+  it('adoption: every changed section decided, wording-only needs a confirmation, keeping all calls no R14, once per review', async () => {
+    const t = setup(call => call.phase === 'fusion_summary' ? JSON.stringify({ adjudication: [], body: '## 定位\n原定位。\n## 结语\n新结语',
+      steps: [{ stepId: 's1', fields: [{ fieldId: 'goal', value: '旧目标', changed: false }] }],
+      changeNotes: [{ section: '定位', wordingOnly: true, note: '标点', fields: [] }, { section: '结语', wordingOnly: true, note: '润色', fields: [] }] })
+      : opinion('major'));
     await t.flow.start({ requestId: randomUUID(), draftId: randomUUID(), sourceVersionId: randomUUID() });
-    await t.runAll(); await t.runAll();
-    expect((await t.flow.continue(String(db.review!.reviewId))).review).toMatchObject({ state: 'incomplete',
-      outcome: { kind: 'proposal_refused', code: 'REPORT_REVISION_STALE' } });
+    await t.runAll(); await t.runAll(); await t.flow.continue(String(db.review!.reviewId));
+    const reviewId = String(db.review!.reviewId);
+    await expect(t.flow.adopt({ reviewId, requestId: randomUUID(), choices: [{ section: '定位', use: 'original' }] }))
+      .rejects.toThrow('FUSION_ADOPTION_INCOMPLETE');
+    await expect(t.flow.adopt({ reviewId, requestId: randomUUID(), choices: [{ section: '定位', use: 'revised' }, { section: '结语', use: 'original' }] }))
+      .rejects.toThrow('FUSION_ADOPTION_CONFIRM_REQUIRED');
+    await expect(t.flow.adopt({ reviewId, requestId: randomUUID(), choices: [{ section: '定位', use: 'original' }, { section: '定位', use: 'original' }] }))
+      .rejects.toThrow('FUSION_ADOPTION_INVALID');
+    const requestId = randomUUID();
+    const kept = await t.flow.adopt({ reviewId, requestId, choices: [{ section: '定位', use: 'original' }, { section: '结语', use: 'original' }] });
+    expect(kept).toEqual({ versionId: null, adopted: [], kept: ['定位', '结语'] });
+    expect(t.proposals).toEqual([]);
+    expect(await t.flow.adopt({ reviewId, requestId, choices: [] })).toEqual(kept);
+    await expect(t.flow.adopt({ reviewId, requestId: randomUUID(), choices: [] })).rejects.toThrow('FUSION_REVIEW_ADOPTED');
+    expect(db.review!.adoption).toMatchObject({ requestId, kept: ['定位', '结语'], revisionId: null });
+  });
+
+  it('adoption: sections sharing a field are chosen together, and the merged text keeps the original for kept sections', async () => {
+    const t = setup(call => call.phase === 'fusion_summary' ? JSON.stringify({ adjudication: [], body: '## 定位\n新定位\n## 结语\n新结语',
+      steps: [{ stepId: 's1', fields: [{ fieldId: 'goal', value: '新目标', changed: true }] }],
+      changeNotes: [{ section: '定位', wordingOnly: false, note: 'a', fields: [{ stepId: 's1', fieldId: 'goal' }] },
+        { section: '结语', wordingOnly: false, note: 'b', fields: [{ stepId: 's1', fieldId: 'goal' }] }] }) : opinion('major'));
+    await t.flow.start({ requestId: randomUUID(), draftId: randomUUID(), sourceVersionId: randomUUID() });
+    await t.runAll(); await t.runAll(); await t.flow.continue(String(db.review!.reviewId));
+    const reviewId = String(db.review!.reviewId);
+    await expect(t.flow.adopt({ reviewId, requestId: randomUUID(), choices: [{ section: '定位', use: 'revised' }, { section: '结语', use: 'original' }] }))
+      .rejects.toThrow('FUSION_ADOPTION_LINKED');
+    const detail = await t.flow.detail(reviewId);
+    expect(detail.summary.sections.map(s => [s.section, s.linkedSections])).toEqual([['定位', ['结语']], ['结语', ['定位']]]);
   });
 
   it('shows judged results before financial settlement, and the usable summary attempt after a retry', async () => {
@@ -214,7 +257,7 @@ describe('review flow', () => {
     const { events } = await t.flow.events(String(db.review!.reviewId));
     expect(events.filter(e => e.type === 'decision')).toHaveLength(12);
     expect(events.filter(e => e.type === 'adjudication')).toHaveLength(1);
-    expect(events.map(e => e.type)).toContain('revision_ready');
+    expect(events.map(e => e.type)).toContain('revision_ready_for_choice');
   });
 
   it('a retried start returns the existing review before any check that may have changed', async () => {

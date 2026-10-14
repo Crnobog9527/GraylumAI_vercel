@@ -7,6 +7,8 @@ BEGIN;
 -- Administrator unblock of the version breaker (Owner 2026-10-14 "边用边调"; 总控 2026-10-14): failed reviews of one
 -- version can be marked as not counting, with a reason. Nothing is deleted; the marking is the audit record:
 -- who, when, why and which reviews (one batch id per action).
+-- Per-section adoption (Owner 2026-10-14 "评审结果逐章选择采用修订版或保留原文"): the user's choice, written once.
+ALTER TABLE public.fusion_reviews ADD COLUMN IF NOT EXISTS adoption jsonb;
 ALTER TABLE public.fusion_reviews ADD COLUMN IF NOT EXISTS breaker_cleared_at timestamptz,
   ADD COLUMN IF NOT EXISTS breaker_cleared_by uuid,
   ADD COLUMN IF NOT EXISTS breaker_clear_reason text,
@@ -103,7 +105,7 @@ LANGUAGE sql STABLE SET search_path=public,pg_temp AS $$
   SELECT jsonb_build_object('reviewId',rv.id,'state',rv.state,'round',rv.round,'phase',rv.phase,'attempt',rv.attempt,
     'draftId',rv.draft_id,'sourceVersionId',rv.source_version_id,'sourceSessionId',rv.source_session_id,
     'versionHash',rv.version_hash,'materials',rv.materials,'materialsHash',rv.materials_hash,'config',rv.config,
-    'steps',rv.steps,'outcome',rv.outcome,'revisionId',rv.revision_id,'endedAt',rv.ended_at,
+    'steps',rv.steps,'outcome',rv.outcome,'revisionId',rv.revision_id,'endedAt',rv.ended_at,'adoption',rv.adoption,
     -- Per call: its run, verdict and whether it settled, for continueReview.
     'calls',coalesce((SELECT jsonb_agg(jsonb_build_object('groupId',br.fusion_group_id,'runId',br.id,'callId',c.id,'modelId',br.payload->>'modelId',
       'phase',c.payload->>'phase','dispatched',c.dispatched_at IS NOT NULL,'verdict',c.fusion_verdict,
@@ -179,9 +181,33 @@ BEGIN
   RETURN jsonb_build_object('batch',batch,'sourceVersionId',p_source_version_id,'reviewIds',ids,'reason',btrim(p_reason));
 END $$;
 
+-- Records the user's per-section choice once, for a completed review whose summary passed. The same request
+-- returns the same record; another request after the first is refused. Who and when are set here, so the
+-- choice is auditable: sections adopted and kept, wording-only confirmations, the R14 revision and new version.
+CREATE OR REPLACE FUNCTION public.fusion_review_adoption_record(p_actor_id uuid, p_review_id uuid, p_adoption jsonb)
+RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
+DECLARE rv fusion_reviews;
+BEGIN
+  PERFORM bill2_actor(p_actor_id);
+  SELECT * INTO rv FROM fusion_reviews WHERE id=p_review_id AND actor_id=p_actor_id FOR UPDATE NOWAIT;
+  IF rv.id IS NULL THEN RAISE EXCEPTION 'FUSION_REVIEW_DENIED'; END IF;
+  IF jsonb_typeof(p_adoption) IS DISTINCT FROM 'object' OR coalesce(p_adoption->>'requestId','')!~'^[0-9a-f-]{36}$'
+    OR jsonb_typeof(p_adoption->'choices') IS DISTINCT FROM 'array' OR octet_length(p_adoption::text)>65536 THEN
+    RAISE EXCEPTION 'FUSION_REVIEW_INVALID'; END IF;
+  IF rv.adoption IS NOT NULL THEN
+    IF rv.adoption->>'requestId' IS DISTINCT FROM p_adoption->>'requestId' THEN RAISE EXCEPTION 'FUSION_REVIEW_ADOPTED'; END IF;
+    RETURN fusion_review_view(rv);
+  END IF;
+  IF rv.state IS DISTINCT FROM 'completed' OR rv.outcome->>'kind' IS DISTINCT FROM 'revised' THEN RAISE EXCEPTION 'FUSION_REVIEW_INVALID'; END IF;
+  UPDATE fusion_reviews SET adoption=p_adoption||jsonb_build_object('by',p_actor_id,'at',clock_timestamp()),updated_at=clock_timestamp()
+  WHERE id=rv.id RETURNING * INTO rv;
+  RETURN fusion_review_view(rv);
+END $$;
+
 DO $$ DECLARE f text; BEGIN
   FOREACH f IN ARRAY ARRAY['fusion_review_skill_file(uuid,uuid,text,text)','fusion_review_source(uuid,uuid)',
-    'fusion_review_preview(uuid,uuid,uuid)','fusion_review_admin_list(integer,timestamptz,uuid)','fusion_review_admin_read(uuid)','fusion_review_breaker_clear(uuid,uuid,text)',
+    'fusion_review_preview(uuid,uuid,uuid)','fusion_review_admin_list(integer,timestamptz,uuid)','fusion_review_admin_read(uuid)',
+    'fusion_review_breaker_clear(uuid,uuid,text)','fusion_review_adoption_record(uuid,uuid,jsonb)',
     'fusion_review_unjudged(integer)'] LOOP
     EXECUTE format('REVOKE ALL ON FUNCTION public.%s FROM PUBLIC,anon,authenticated,service_role', f);
     EXECUTE format('GRANT EXECUTE ON FUNCTION public.%s TO service_role', f);

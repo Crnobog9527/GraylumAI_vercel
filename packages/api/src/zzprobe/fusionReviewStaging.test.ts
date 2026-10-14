@@ -71,7 +71,15 @@ it.skipIf(!process.env.PROBE_MODE)('fusion review staging probe', async () => {
     const round = estimateReview({ quotes: window.callPolicies, reviewers: s.reviewerModelIds, summary: s.summaryModelId, maxRounds: 1, maxBudgetUsd: '100',
       opinionTokens: s.opinionOutputTokens, summaryTokens: s.summaryOutputTokens, fieldCount: preview.fieldCount, snapshotBytes: preview.reportBytes + preview.materialsBytes,
       instructionBytes: { reviewer: Buffer.byteLength(text.reviewer + text.rubric) + 2048, summary: Buffer.byteLength(text.summary + text.rubric) + 2048 } });
-    console.log('PLAN', JSON.stringify({ preview, worstPerRound: round.estimateUsd, current: await readFusionSettings(admin) }));
+    const est = (summaryTokens: number) => estimateReview({ quotes: window.callPolicies, reviewers: s.reviewerModelIds, summary: MODELS.sonnet,
+      maxRounds: 2, maxBudgetUsd: '100', opinionTokens: 4096, summaryTokens, fieldCount: preview.fieldCount,
+      snapshotBytes: preview.reportBytes + preview.materialsBytes,
+      instructionBytes: { reviewer: Buffer.byteLength(text.reviewer + text.rubric) + 2048, summary: Buffer.byteLength(text.summary + text.rubric) + 2048 } });
+    const summaryOnly = (summaryTokens: number) => estimateReview({ quotes: window.callPolicies, reviewers: [], summary: MODELS.sonnet,
+      maxRounds: 1, maxBudgetUsd: '100', opinionTokens: 4096, summaryTokens, fieldCount: preview.fieldCount,
+      snapshotBytes: preview.reportBytes + preview.materialsBytes,
+      instructionBytes: { reviewer: 0, summary: Buffer.byteLength(text.summary + text.rubric) + 2048 } });
+    console.log('PLAN', JSON.stringify({ review16384: est(16384), review32768: est(32768), summaryGroup16384: summaryOnly(16384), summaryGroup32768: summaryOnly(32768) }));
     return;
   }
   if (mode === 'settings') {
@@ -116,7 +124,8 @@ it.skipIf(!process.env.PROBE_MODE)('fusion review staging probe', async () => {
     for (const call of view.calls.filter((c: { phase: string }) => c.phase === 'fusion_summary')) {
       const text = (await admin.rpc('fusion_call_output_read', { p_actor_id: ACTOR, p_call_id: call.callId })).data?.body as string;
       let parsed: { body?: string; steps?: Array<{ stepId: string; fields: Array<{ fieldId: string; changed: boolean }> }>; changeNotes?: unknown[] } = {};
-      try { parsed = JSON.parse(text); } catch { console.log('WHY not json'); }
+      try { parsed = JSON.parse(text); } catch (e) { console.log('WHY not json', JSON.stringify({ len: text.length, endsWithBrace: text.trimEnd().endsWith('}'),
+        error: e instanceof Error ? e.message.replace(/"[^"]*"/g, '…').slice(0, 120) : '' })); }
       const r = checkRevision(text, { previousBody: src.body, previousSteps: frozen, frozenSteps: frozen, declared: src.declared, sections: src.sections, maxCharacters: src.maxCharacters });
       const secs = parsed.body ? reportSections(parsed.body, src.sections, src.maxCharacters) : null;
       if (parsed.body) {
@@ -131,6 +140,9 @@ it.skipIf(!process.env.PROBE_MODE)('fusion review staging probe', async () => {
           console.log('DIFF', idx(t), JSON.stringify({ lenBefore: [...x].length, lenAfter: [...y].length, wsOnly: norm(x) === norm(y), trimEqual: x.trim() === y.trim(), firstDiffAt: p })); }
         console.log('NOTES', JSON.stringify({ changedSections: changedSecs, notes: notes.map(n => ({ s: idx(n.section), exact: src.sections.includes(n.section), w: n.wordingOnly, f: (n.fields ?? []).map(f => f.stepId + '.' + f.fieldId) })), changedFields }));
       }
+      const adj = (parsed as { adjudication?: Array<{ section: string; reviewers: string[] }> }).adjudication ?? [];
+      console.log('ADJ', JSON.stringify({ count: adj.length, badSections: adj.map(x => x.section).filter(t => !src.sections.includes(t.replace(/^#+\s*/, '').trim()) && t !== '全文'),
+        badReviewers: adj.flatMap(x => x.reviewers).filter(r => !/^[A-C]$/.test(r)) }));
       console.log('WHY', JSON.stringify({ originalChars: [...src.body].length, result: r.ok ? 'ok' : (r as { reason: string }).reason, bodyChars: parsed.body ? [...parsed.body].length : null,
         sectionsOk: secs === null ? null : Boolean(secs), expectedSections: src.sections.length,
         headings: parsed.body ? parsed.body.split('\n').filter(l => l.startsWith('## ')).length : null,
@@ -195,7 +207,8 @@ it.skipIf(!process.env.PROBE_MODE)('fusion review staging probe', async () => {
     const executor = fusionExecutor({ billing, admin, actorId: ACTOR, callGate: async () => ({ ok: true }), budget });
     const revisions = reportRevisionService(user, admin);
     return reviewFlow({ admin, actorId: ACTOR, executor, env: {},
-      propose: async input => ({ revisionId: (await revisions.propose(input)).revisionId }) });
+      propose: async input => { const r = await revisions.propose(input); return { revisionId: r.revisionId, diffHash: r.diffHash }; },
+      apply: async input => ({ versionId: (await revisions.apply(input)).versionId }) });
   };
   const state = existsSync(STATE) ? JSON.parse(readFileSync(STATE, 'utf8')) : {};
   const t0 = Date.now();
