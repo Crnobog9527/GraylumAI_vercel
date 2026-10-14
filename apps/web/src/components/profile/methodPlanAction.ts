@@ -75,3 +75,11 @@ export function describeMethodMembership(row: MethodMembershipRow) {
     : row.cancel_at_period_end ? `已停止续费，会员权益用到 ${end}` : `不自动续费，会员权益用到 ${end}`;
   return { title, method: METHOD_LABEL[row.payment_method] ?? '其他方式', status };
 }
+
+/** Landing-page "buy" link: /profile?tab=subscription&buy=<pro|gold>&cycle=<monthly|yearly>. Anything else is ignored. */
+export function parseBuyDeepLink(params: { get: (key: string) => string | null }) {
+  const level = params.get('buy');
+  const cycle = params.get('cycle');
+  if ((level !== 'pro' && level !== 'gold') || (cycle !== 'monthly' && cycle !== 'yearly')) return null;
+  return { level, cycle } as const;
+}

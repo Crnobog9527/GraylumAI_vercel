@@ -15,7 +15,7 @@ import { ProfileCatalogState } from './ProfileCatalogState';
 import { CreditPackagesSection } from './CreditPackagesSection';
 import { MembershipPlanCard, type PlanConfig } from './MembershipPlanCard';
 import { MethodMembershipSummary } from './MethodMembershipSummary';
-import { currentMethodMembership, methodPlanAction, type MethodMembershipRow } from './methodPlanAction';
+import { currentMethodMembership, methodPlanAction, parseBuyDeepLink, type MethodMembershipRow } from './methodPlanAction';
 import { methodTaxSummary, planCheckoutTarget } from './planCheckoutTarget';
 import { useMethodCheckout } from '@/components/paywall/useMethodCheckout';
 import { MethodCheckoutDialog, type MethodCheckoutTarget } from '@/components/paywall/MethodCheckoutDialog';
@@ -63,6 +63,7 @@ export const SubscriptionCard = memo(function SubscriptionCard({ user: _user }: 
   const [founderSoldOut, setFounderSoldOut] = useState(false);
   const [founderDeclined, setFounderDeclined] = useState(false);
   const syncedCheckoutSessionRef = useRef<string | null>(null);
+  const deepLinkHandled = useRef(false);
   const checkout = useMethodCheckout();
   const entitlements = trpc.user.getEntitlements.useQuery(undefined, { staleTime: 30_000 });
 
@@ -202,6 +203,24 @@ export const SubscriptionCard = memo(function SubscriptionCard({ user: _user }: 
     return methodPlanAction({ level: plan.level, price: Number(plan.price?.[cycle]),
       checkoutReady: plan.checkoutReady?.[cycle] === true, current, entitlementLevel: entitlements.data?.level ?? null });
   }
+
+  // Landing-page price cards link here with ?buy=&cycle=: open the same dialog the plan button opens (offers included),
+  // once everything it depends on is known. Nothing opens when the plan cannot be bought; the params never replay.
+  const deepLink = parseBuyDeepLink(searchParams);
+  const deepLinkReady = !plansLoading && !checkout.loading && !entitlements.isLoading;
+  useEffect(() => {
+    if (!deepLink || !deepLinkReady || deepLinkHandled.current) return;
+    deepLinkHandled.current = true;
+    setBillingCycle(deepLink.cycle);
+    const plan = sellable.find(item => item.level === deepLink.level);
+    const action = plan && checkout.open ? actionFor(plan.id, deepLink.cycle) : null;
+    if (plan && action && !action.disabled) setTarget({ planId: plan.id, cycle: deepLink.cycle });
+    const url = new URL(window.location.href);
+    url.searchParams.delete('buy');
+    url.searchParams.delete('cycle');
+    window.history.replaceState(window.history.state, '', `${url.pathname}${url.search}${url.hash}`);
+  // Runs once, when the reads it needs have settled; the ref guards against replays.
+  }, [deepLinkReady]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const dialogTarget: MethodCheckoutTarget | null = (() => {
     const plan = target && sellable.find(item => item.id === target.planId);

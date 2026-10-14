@@ -281,11 +281,11 @@ describe('membership page in a browser', () => {
     await page.exposeFunction('recordCheckout', (input: unknown) => { sent.push(input); });
     await page.route('**/*', route => {
       const url = route.request().url();
-      if (url === 'http://profile.test/') return route.fulfill({ contentType: 'text/html', body: '<!doctype html><div id="root"></div>' });
+      if (url.split('?')[0] === 'http://profile.test/') return route.fulfill({ contentType: 'text/html', body: '<!doctype html><div id="root"></div>' });
       if (url.startsWith('https://checkout.stripe.com/')) return route.fulfill({ contentType: 'text/html', body: 'stripe' });
       return route.abort();
     });
-    await page.goto('http://profile.test/');
+    await page.goto(`http://profile.test/${setup.urlSearch ? `?${setup.urlSearch}` : ''}`);
     await page.evaluate(value => { (window as unknown as { __pay: unknown }).__pay = value; }, {
       plans: [plan, gold], packages: [], membership: ENTRY, level: 'free', checkouts: [], syncs: [], syncResult: {}, ...setup });
     await page.addScriptTag({ content: code });
@@ -413,6 +413,36 @@ describe('membership page in a browser', () => {
       expect(errors).toEqual([]);
     } finally { await page.close(); }
   }, 30_000);
+
+  it('opens the offer checkout straight from a landing-page buy link, and only when the plan can be bought', async () => {
+    const seats = { total: 50, sold: 37, reserved: 0, available: 13 };
+    const cases: Array<[Record<string, unknown>, string | null]> = [
+      [{ search: 'tab=subscription&buy=gold&cycle=monthly', membership: { ...ENTRY, goldFirstMonthEligible: true } }, '首月 $49'],
+      [{ search: 'tab=subscription&buy=gold&cycle=yearly', membership: { ...ENTRY, founder: seats } }, '$496'],
+      [{ search: 'tab=subscription&buy=gold&cycle=yearly' }, '$621'],
+      [{ search: 'tab=subscription&buy=pro&cycle=monthly', level: 'pro', membership: { ...ENTRY, memberships: [proMember] } }, null],
+      [{ search: 'tab=subscription&buy=gold&cycle=monthly', membership: { ...ENTRY, checkoutReady: false } }, null],
+    ];
+    for (const [setup, price] of cases) {
+      const { page, errors } = await open({ ...setup, urlSearch: setup.search });
+      try {
+        if (price) {
+          const dialog = page.getByTestId('method-checkout-dialog');
+          await browserExpect(dialog).toBeVisible();
+          await browserExpect(dialog).toContainText(price);
+          if (price === '$621') await browserExpect(dialog).not.toContainText('创始');
+          await browserExpect(page.getByTestId('method-checkout-terms')).not.toBeChecked();
+        } else {
+          await browserExpect(page.getByTestId('profile-membership-plan-gold')).toBeVisible();
+          await browserExpect(page.getByTestId('method-checkout-dialog')).toHaveCount(0);
+        }
+        // The buy params are used once and removed from the address.
+        await browserExpect.poll(() => new URL(page.url()).search).not.toContain('buy=');
+        expect(sentByPage.get(page)).toEqual([]);
+        expect(errors).toEqual([]);
+      } finally { await page.close(); }
+    }
+  }, 60_000);
 
   it('fits a 375px phone: plans and the checkout dialog without horizontal scrolling', async () => {
     const { page, errors } = await open({}, 375);

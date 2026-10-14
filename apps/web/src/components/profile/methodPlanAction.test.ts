@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { describe, expect, it } from 'vitest';
-import { currentMethodMembership, describeMethodMembership, methodPlanAction, type MethodMembershipRow } from './methodPlanAction';
+import { currentMethodMembership, describeMethodMembership, methodPlanAction, parseBuyDeepLink, type MethodMembershipRow } from './methodPlanAction';
 
 const NOW = Date.parse('2026-10-14T00:00:00Z');
 const row = (patch: Partial<MethodMembershipRow> = {}): MethodMembershipRow => ({
@@ -55,4 +55,11 @@ describe('membership summary', () => {
     expect(describeMethodMembership(row({ purchase_membership_level: 'gold', offer_kind: 'founder_renewal', billing_cycle: 'yearly' })).title)
       .toBe('Gold · 创始会员 · 年付');
   });
+});
+
+it('reads only well-formed landing-page buy links', () => {
+  const read = (query: string) => parseBuyDeepLink(new URLSearchParams(query));
+  expect(read('buy=gold&cycle=yearly')).toEqual({ level: 'gold', cycle: 'yearly' });
+  expect(read('buy=pro&cycle=monthly')).toEqual({ level: 'pro', cycle: 'monthly' });
+  for (const query of ['', 'buy=gold', 'buy=free&cycle=monthly', 'buy=gold&cycle=weekly', 'cycle=yearly']) expect(read(query)).toBeNull();
 });
