@@ -25,6 +25,8 @@ const runtimeReport = (extra = [], failed = 0) => ({
     file(runtime.files[6], [pass('RUNTIME: v2 R13 financial conservation')]),
     file(runtime.files[7], [pass('RUNTIME: platform failure restores charged credits once')]),
     file(runtime.files[8], [pass('RUNTIME: stale charged rounds are reported through the function')]),
+    file(runtime.files[9], [pass('RUNTIME: a fallback positioning refusal restores its charge once')]),
+    file(runtime.files[10], [pass('RUNTIME: Fusion group admission, streamed dispatch, saved body, verdict and per-run settlement')]),
   ],
 });
 
@@ -42,7 +44,7 @@ test('name patterns select the suite prefix and exclude exactly the app-only cas
 test('verification passes only when every non-excluded case passed', () => {
   const result = verifyWithoutAppResults('runtime', runtimeReport());
   assert.deepEqual(result.errors, []);
-  assert.equal(result.passed, 9);
+  assert.equal(result.passed, 11);
   assert.equal(result.skipped, 5);
 });
 

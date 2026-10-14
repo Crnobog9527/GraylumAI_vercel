@@ -22,7 +22,8 @@ import {
   getPlanEligibilityKey,
   type MembershipPlanEligibilityEntry,
 } from './subscriptionPlanButtonState';
-import { invalidatePostCheckoutMembershipQueries } from './checkoutSyncInvalidations';
+import { EligibilityNotices } from './EligibilityNotices';
+import { canceledReturnNotice, invalidatePostCheckoutMembershipQueries } from './checkoutSyncInvalidations';
 import { formatUsd, getCreditPackagePrice } from './creditPackagePrice';
 import { ProfileCatalogState, emptyStateCardStyle } from './ProfileCatalogState';
 import { CreditPackagesSection } from './CreditPackagesSection';
@@ -278,20 +279,15 @@ export const SubscriptionCard = memo(function SubscriptionCard({ user: _user }: 
       sessionId: checkoutSessionId,
       checkoutState: 'canceled',
     })
-      .then(async () => {
-        void utils.payments.listBillingRecords.invalidate();
-        setCheckoutNotice({
-          tone: 'cancelled',
-          message: '你已取消本次支付，没有发生扣费。',
-        });
+      .then(async (result) => {
+        void invalidatePostCheckoutMembershipQueries(utils);
+        setCheckoutNotice(canceledReturnNotice(result));
         clearCheckoutParams();
       })
       .catch(() => {
         syncedCheckoutSessionRef.current = null;
-        setCheckoutNotice({
-          tone: 'cancelled',
-          message: '你已取消本次支付，没有发生扣费。账单状态稍后会自动同步。',
-        });
+        // Unconfirmed: the session may still have been paid in another tab, so do not promise "no charge".
+        setCheckoutNotice({ tone: 'cancelled', message: '你已离开付款页面。账单状态稍后会自动同步。' });
       });
   }, [checkoutSessionId, checkoutState, syncCheckoutSessionMutation, utils]);
 
@@ -311,7 +307,7 @@ export const SubscriptionCard = memo(function SubscriptionCard({ user: _user }: 
   function generateDefaultFeatures(plan: any): string[] {
     const features: string[] = [];
     if (plan.level === 'free') {
-      features.push('注册赠送100积分（一次性）');
+      features.push('注册赠送500积分（一次性）');
     } else {
       if (plan.credits?.monthly) {
         features.push(`月度积分${plan.credits.monthly}积分`);
@@ -502,9 +498,7 @@ export const SubscriptionCard = memo(function SubscriptionCard({ user: _user }: 
         <div className="mb-6 text-sm" style={{ color: 'var(--text-tertiary)' }}>
           年付积分按月释放，未使用积分可累积，不按月清零。取消续费后，已付周期权益保留至到期。
         </div>
-        {eligibilityMatrix?.entries.some(entry => entry.reasonCode === 'RENEWAL_RESTORE_REQUIRED') && (
-          <p className="mb-4 text-sm">已安排到期取消，当前权益保留至到期。请先通过“管理订阅 / 取消续费”恢复续费后再升级套餐。</p>
-        )}
+        <EligibilityNotices entries={eligibilityMatrix?.entries} />
 
         {checkoutNotice && (
           <div

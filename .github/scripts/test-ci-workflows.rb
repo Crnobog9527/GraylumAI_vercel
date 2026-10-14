@@ -64,7 +64,9 @@ class CIWorkflowsTest < Minitest::Test
       refute step.key?('env'), step['name']
     end
     images = File.read(File.expand_path('../packages/db/tests/v3/images.mjs', ROOT), encoding: 'UTF-8')
-    assert_equal 3, images.scan(/"[^"@]+:[^"@]+@sha256:[0-9a-f]{64}"/).length
+    exports = images.scan(/^export const \w+ = "([^"]*)";$/).flatten
+    assert_equal 3, exports.length
+    exports.each { |image| assert_match(/\A[^"@\s]+@sha256:[0-9a-f]{64}\z/, image) }
     %w[v3/run-workbench.mjs v3/run-local.mjs run-db-baseline-replay.mjs].each do |runner|
       source = File.read(File.expand_path("../packages/db/tests/#{runner}", ROOT), encoding: "UTF-8")
       refute_match(/postgres:\d|postgrest:v|gotrue:v/, source, runner)

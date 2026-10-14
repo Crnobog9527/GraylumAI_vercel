@@ -77,6 +77,11 @@ const envSchema = z.object({
     .regex(/^sk-or-/, 'OPENROUTER_API_KEY 必须以 sk-or- 开头')
     .optional(),
 
+  // PUBLISH-MONITOR: Post for Me (optional; the feature switch stays off without it)
+  POSTFORME_API_KEY: apiKeySchema
+    .regex(/^pfm_(live|test)_/, 'POSTFORME_API_KEY 必须以 pfm_live_ 或 pfm_test_ 开头')
+    .optional(),
+
   // Sentry (可选但推荐)
   NEXT_PUBLIC_SENTRY_DSN: z
     .string()
