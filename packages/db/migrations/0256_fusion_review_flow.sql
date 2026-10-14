@@ -202,7 +202,11 @@ BEGIN
     IF rv.adoption->>'requestId' IS DISTINCT FROM p_adoption->>'requestId' THEN RAISE EXCEPTION 'FUSION_REVIEW_ADOPTED'; END IF;
     -- The owner of a reservation completes it once, with the same choices; a recorded choice never changes.
     IF rv.adoption->>'state'='reserved' AND p_adoption->>'state'='recorded' THEN
-      IF rv.adoption->'choices' IS DISTINCT FROM p_adoption->'choices' THEN RAISE EXCEPTION 'FUSION_REVIEW_ADOPTED'; END IF;
+      -- Same choices and the reserved decision (or refused, with R14's refusal code) only (#962 review).
+      IF rv.adoption->'choices' IS DISTINCT FROM p_adoption->'choices'
+        OR NOT (p_adoption->>'decision' IS NOT DISTINCT FROM rv.adoption->>'decision'
+          OR (p_adoption->>'decision'='refused' AND coalesce(p_adoption->>'refusal','')<>'')) THEN
+        RAISE EXCEPTION 'FUSION_REVIEW_ADOPTED'; END IF;
       UPDATE fusion_reviews SET adoption=p_adoption||jsonb_build_object('by',p_actor_id,'at',clock_timestamp(),
         'reservedAt',rv.adoption->'at'),updated_at=clock_timestamp() WHERE id=rv.id RETURNING * INTO rv;
     END IF;

@@ -269,12 +269,16 @@ export async function runFusionReview({db,Client,connectionString,report}) {
   assert.deepEqual((await service(db,'fusion_review_read',f.actor,rv5.reviewId)).adoption,recorded.adoption);
   // A reservation blocks every other request before any R14 side effect, and only its owner completes it.
   await db.query(`UPDATE fusion_reviews SET adoption=NULL WHERE id=$1`,[rv5.reviewId]);
-  const reservation = {...adoption,state:'reserved',requestId:randomUUID()};
+  const reservation = {...adoption,state:'reserved',requestId:randomUUID(),decision:'apply'};
   await service(db,'fusion_review_adoption_record',f.actor,rv5.reviewId,reservation);
   await assert.rejects(service(db,'fusion_review_adoption_record',f.actor,rv5.reviewId,{...adoption,requestId:randomUUID()}),/FUSION_REVIEW_ADOPTED/,
     'another request is refused while the first is reserved');
   await assert.rejects(service(db,'fusion_review_adoption_record',f.actor,rv5.reviewId,{...reservation,state:'recorded',choices:[]}),/FUSION_REVIEW_ADOPTED/,
     'the reservation is completed with the same choices only');
+  await assert.rejects(service(db,'fusion_review_adoption_record',f.actor,rv5.reviewId,{...reservation,state:'recorded',decision:'decline'}),
+    /FUSION_REVIEW_ADOPTED/,'the reserved decision cannot change');
+  await assert.rejects(service(db,'fusion_review_adoption_record',f.actor,rv5.reviewId,{...reservation,state:'recorded',decision:'refused'}),
+    /FUSION_REVIEW_ADOPTED/,'refused needs the refusal code');
   const completed = await service(db,'fusion_review_adoption_record',f.actor,rv5.reviewId,{...reservation,state:'recorded'});
   assert.equal(completed.adoption.state,'recorded');assert.ok(completed.adoption.reservedAt);
   await assert.rejects(service(db,'fusion_review_adoption_record',f.actor,rv5.reviewId,{...adoption,state:'bogus'}),/FUSION_REVIEW_INVALID/);

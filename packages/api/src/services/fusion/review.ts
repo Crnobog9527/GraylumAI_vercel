@@ -27,7 +27,8 @@ type Source = z.infer<typeof source>;
 type Passed = { round: number; body: string; steps: StepValues; changeNotes: unknown; changedSections: string[]; r14Fields: StepValues };
 const ATTEMPTS = 3;
 /** R14 refusals that retrying cannot fix; transient ones (REPORT_UNAVAILABLE, auth) are retried by the client. */
-const PERMANENT_REFUSALS = new Set(['REPORT_REVISION_STALE', 'REPORT_SOURCE_CONFLICT', 'REPORT_REVISION_DECIDED', 'CONTENT_ERASED',
+// REPORT_REVISION_DECIDED is not here: it can mean this very decision already committed.
+const PERMANENT_REFUSALS = new Set(['REPORT_REVISION_STALE', 'REPORT_SOURCE_CONFLICT', 'CONTENT_ERASED',
   'REPORT_NOT_COMPLETE', 'REPORT_REVISION_UNSUPPORTED']);
 const stepKey = (at: ReviewPosition) => `review:${at.round}:${at.phase}:${at.attempt}`;
 
@@ -326,6 +327,9 @@ export function reviewFlow(deps: { admin: SupabaseClient; actorId: string;
       const { view, merged } = await adoptionInput(input);
       if (recordedChoice(view)) return adopted(view);
       if (!merged.adopted.length || !deps.apply || !deps.decline) throw new Error('FUSION_ADOPTION_INVALID');
+      // A reservation binds its decision: a retry of the same request cannot switch apply to decline or back (#962 review).
+      const reserved = view.adoption as { decision?: string } | null | undefined;
+      if (reserved && reserved.decision !== input.decision) throw new Error('FUSION_REVIEW_ADOPTED');
       const proposal = await proposeMerged(view, input.requestId, merged);
       if (proposal.diffHash !== input.expectedDiffHash) throw new Error('FUSION_ADOPTION_STALE');
       // Reserve the choice under the review lock before R14 decides anything: a concurrent request is refused from

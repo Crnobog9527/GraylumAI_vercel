@@ -49,6 +49,8 @@ vi.mock('./reviewRecord', async original => {
     recordAdoption: async (_id: string, adoption: Record<string, unknown>) => {
       const prior = db.review!.adoption as Record<string, unknown> | null;
       if (prior && prior.requestId !== adoption.requestId) throw new Error('FUSION_REVIEW_ADOPTED');
+      if (prior && prior.state === 'reserved' && adoption.state === 'recorded' && adoption.decision !== prior.decision
+        && adoption.decision !== 'refused') throw new Error('FUSION_REVIEW_ADOPTED');
       if (!prior || (prior.state === 'reserved' && adoption.state === 'recorded')) db.review!.adoption = { ...adoption, at: clock.next() };
       return view();
     },
@@ -275,6 +277,21 @@ describe('review flow', () => {
       expectedDiffHash: 'f'.repeat(64), decision: 'apply' })).rejects.toThrow('REPORT_REVISION_STALE');
     applyRefusal.value = '';
     expect(db.review!.adoption).toMatchObject({ state: 'recorded', decision: 'refused', refusal: 'REPORT_REVISION_STALE', adopted: [] });
+  });
+
+  it('a retry of a reserved confirmation cannot switch its decision', async () => {
+    const t = setup(call => call.phase === 'fusion_summary' ? revision('新目标') : opinion('major'));
+    await t.flow.start({ requestId: randomUUID(), draftId: randomUUID(), sourceVersionId: randomUUID() });
+    await t.runAll(); await t.runAll(); await t.flow.continue(String(db.review!.reviewId));
+    const reviewId = String(db.review!.reviewId);
+    const confirm = { reviewId, requestId: randomUUID(), choices: [{ section: '定位', use: 'revised' as const }], expectedDiffHash: 'f'.repeat(64) };
+    applyRefusal.value = 'REPORT_UNAVAILABLE';
+    await expect(t.flow.confirmAdoption({ ...confirm, decision: 'apply' })).rejects.toThrow('REPORT_UNAVAILABLE');
+    applyRefusal.value = '';
+    expect(db.review!.adoption).toMatchObject({ state: 'reserved', decision: 'apply' });
+    await expect(t.flow.confirmAdoption({ ...confirm, decision: 'decline' })).rejects.toThrow('FUSION_REVIEW_ADOPTED');
+    expect(t.declined).toEqual([]);
+    expect(await t.flow.confirmAdoption({ ...confirm, decision: 'apply' })).toMatchObject({ state: 'recorded', adopted: ['定位'] });
     expect((await t.flow.detail(reviewId)).awaitingChoice).toBe(false);
   });
 
