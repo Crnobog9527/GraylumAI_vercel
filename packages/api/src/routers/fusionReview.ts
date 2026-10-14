@@ -29,6 +29,19 @@ function reviewError(cause: unknown, path: string): TRPCError {
   return stagingProcedureError(cause, path);
 }
 
+/** The R14 calls the review flow uses (propose, apply, decline), with the user's own client. One helper for both
+ * middlewares so they cannot drift apart (#962 review: the reader had lost decline). */
+export function revisionHooks(revisions: Pick<ReturnType<typeof reportRevisionService>, 'propose' | 'apply' | 'decline'>) {
+  return {
+    propose: async (input: unknown) => {
+      const r = await revisions.propose(input);
+      return { revisionId: r.revisionId, diffHash: r.diffHash, diff: r.diff };
+    },
+    apply: async (input: unknown) => ({ versionId: (await revisions.apply(input)).versionId }),
+    decline: (input: unknown) => revisions.decline(input),
+  };
+}
+
 /** FUSION-REVIEW review API (staging test window only, like Runtime real calls). One request per model call. */
 const procedure = protectedProcedure.use(async ({ ctx, next, path }) => {
   try {
@@ -39,11 +52,7 @@ const procedure = protectedProcedure.use(async ({ ctx, next, path }) => {
     const actor = runtimeActor(ctx.userScopedSupabase.auth, ctx.user.id, budget, ctx.headers?.get('Authorization'));
     const billing = authoritativeBilling({ admin: admin as unknown as BillingRpc, actor, adapter: stagingTransport(admin, window, budget), budget });
     const executor = fusionExecutor({ billing, admin, actorId: ctx.user.id, callGate: newWorkGate(admin, 'staging').calls, budget });
-    const revisions = reportRevisionService(ctx.userScopedSupabase, admin);
-    const flow = reviewFlow({ admin, actorId: ctx.user.id, executor,
-      propose: async input => { const r = await revisions.propose(input); return { revisionId: r.revisionId, diffHash: r.diffHash, diff: r.diff }; },
-      apply: async input => ({ versionId: (await revisions.apply(input)).versionId }),
-      decline: input => revisions.decline(input) });
+    const flow = reviewFlow({ admin, actorId: ctx.user.id, executor, ...revisionHooks(reportRevisionService(ctx.userScopedSupabase, admin)) });
     const result = await next({ ctx: { ...ctx, flow } });
     if (!result.ok) throw result.error;
     return result;
@@ -55,10 +64,8 @@ const review = z.object({ reviewId: uuid }).strict();
 const reader = protectedProcedure.use(async ({ ctx, next, path }) => {
   try {
     if (!ctx.hasSupabaseAdminPrivileges || !ctx.supabaseAdmin) throw new StagingAccessError('RUNTIME_STAGING_SERVICE_UNAVAILABLE');
-    const revisions = reportRevisionService(ctx.userScopedSupabase, ctx.supabaseAdmin);
     const flow = reviewFlow({ admin: ctx.supabaseAdmin, actorId: ctx.user.id,
-      propose: async input => { const r = await revisions.propose(input); return { revisionId: r.revisionId, diffHash: r.diffHash, diff: r.diff }; },
-      apply: async input => ({ versionId: (await revisions.apply(input)).versionId }) });
+      ...revisionHooks(reportRevisionService(ctx.userScopedSupabase, ctx.supabaseAdmin)) });
     const result = await next({ ctx: { ...ctx, admin: ctx.supabaseAdmin, flow } });
     if (!result.ok) throw result.error;
     return result;
