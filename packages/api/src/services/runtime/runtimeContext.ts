@@ -5,7 +5,7 @@ import {frozenReport} from '../report/contract';
 import {z} from 'zod';
 import {promptCachePolicy} from './promptCache';
 import {hostTurnContextSchema,historySelectionSchema} from './hostTurn';
-import {PROVIDER_REQUEST_FORMATS} from './providerRequest';
+import {PLAIN_TEXT_STREAM,PROVIDER_REQUEST_FORMATS,plainTextStreamAllowed} from './providerRequest';
 import {QUESTION_CONTRACT,LEGACY_QUESTION_CONTRACT,READ_HISTORY_TOOL} from './agentTools';
 import {MENTOR_HISTORY_VERSION,MENTOR_HISTORY_RESERVE_BYTES} from './mentorHistory';
 import {ASK_QUESTION_TOOL} from '../../shared/agentTurn';
@@ -19,6 +19,7 @@ export const runtimeContext=z.object({
  reportGeneration:frozenReport.optional(),
  mentorText:z.literal('append-card-v1').optional(),
  nativeOutput:z.literal('native-output-v1').optional(),envelopeOrder:z.literal('message-first-v1').optional(),
+ textStream:z.literal(PLAIN_TEXT_STREAM).optional(),
  inputSelection:z.enum(['scope-projection-v1','scope-projection-v2']).optional(),
  hostTurnContext:hostTurnContextSchema.optional(),historySelection:historySelectionSchema.optional(),
  providerRequestFormat:z.enum(PROVIDER_REQUEST_FORMATS).optional(),promptCache:promptCachePolicy.optional(),
@@ -36,6 +37,8 @@ export const runtimeContext=z.object({
   historyItems:z.number().int().min(0).max(1000).optional(),
   reasoning:reasoningPolicy.optional(),instructions:z.string().max(12000).optional(),
   input:z.string().max(24000).optional()}).strict().optional(),
+ // POSITIONING-GATE: Decisions was unavailable; the primary model carries the fallback rule.
+ positioningGate:z.literal('fallback-v1').optional(),
  workspaceContext:z.boolean().optional(),opcTurnToken:z.string().uuid().optional(),matching:matchingPlan.optional(),scopeMaterial:z.unknown().optional(),
  answeredCard:z.unknown().optional(),request:z.unknown().optional(),
  moduleId:z.string().uuid().optional(),skillId:z.string().uuid().optional(),revisionId:z.string().uuid().optional(),sources:z.array(z.unknown()).optional(),
@@ -58,6 +61,7 @@ export const runtimeContext=z.object({
  if(context.hostTurnContext?.stepSummary&&(context.input!==STEP_SUMMARY_INPUT||context.hostTurnContext.opening||
    context.tools.includes(ASK_QUESTION_TOOL)||context.attachedOrganizer))
   ctx.addIssue({code:'custom',message:'RUNTIME_STEP_SUMMARY_CONTEXT_INVALID'});
+ if(context.textStream&&!plainTextStreamAllowed(context))ctx.addIssue({code:'custom',message:'RUNTIME_CONTEXT_INVALID'});
  const host = context.hostTurnContext !== undefined;
  if (host !== (context.inputSelection === 'scope-projection-v2') || host !== (context.historySelection !== undefined) ||
      host && (context.role !== 'skill' || context.providerRequestFormat !== 'agent-turn-v5-stream') ||

@@ -23,7 +23,7 @@ import {
   type MembershipPlanEligibilityEntry,
 } from './subscriptionPlanButtonState';
 import { EligibilityNotices } from './EligibilityNotices';
-import { invalidatePostCheckoutMembershipQueries } from './checkoutSyncInvalidations';
+import { canceledReturnNotice, invalidatePostCheckoutMembershipQueries } from './checkoutSyncInvalidations';
 import { formatUsd, getCreditPackagePrice } from './creditPackagePrice';
 import { ProfileCatalogState, emptyStateCardStyle } from './ProfileCatalogState';
 import { CreditPackagesSection } from './CreditPackagesSection';
@@ -279,20 +279,15 @@ export const SubscriptionCard = memo(function SubscriptionCard({ user: _user }: 
       sessionId: checkoutSessionId,
       checkoutState: 'canceled',
     })
-      .then(async () => {
-        void utils.payments.listBillingRecords.invalidate();
-        setCheckoutNotice({
-          tone: 'cancelled',
-          message: '你已取消本次支付，没有发生扣费。',
-        });
+      .then(async (result) => {
+        void invalidatePostCheckoutMembershipQueries(utils);
+        setCheckoutNotice(canceledReturnNotice(result));
         clearCheckoutParams();
       })
       .catch(() => {
         syncedCheckoutSessionRef.current = null;
-        setCheckoutNotice({
-          tone: 'cancelled',
-          message: '你已取消本次支付，没有发生扣费。账单状态稍后会自动同步。',
-        });
+        // Unconfirmed: the session may still have been paid in another tab, so do not promise "no charge".
+        setCheckoutNotice({ tone: 'cancelled', message: '你已离开付款页面。账单状态稍后会自动同步。' });
       });
   }, [checkoutSessionId, checkoutState, syncCheckoutSessionMutation, utils]);
 

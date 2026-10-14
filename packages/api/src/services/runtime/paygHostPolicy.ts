@@ -16,7 +16,9 @@ const admittedRoutes: Readonly<Record<string,string>> = {
   'google/gemini-3.8-flash':'google-ai-studio',
   'openai/gpt-6-luna':'openai',
 };
-const phase = z.enum(['ordinary', 'skill', 'organizer', 'skill_matching', 'attached_organizer', 'report']);
+// fusion_review / fusion_summary: FUSION-REVIEW per-model calls, claimed only as a billing group (0234).
+const phase = z.enum(['ordinary', 'skill', 'organizer', 'skill_matching', 'attached_organizer', 'report',
+  'fusion_review', 'fusion_summary']);
 /** Trusted admin configuration, never a browser admission field. Evidence references
  * must identify independently checked real samples; fixture results are not evidence. */
 // Small-cap probes establish truncation semantics; outputLimit is the separately authorized profile cap.
@@ -28,9 +30,9 @@ export const paygHostProfile = z.object({
   templateTokens: z.literal(4096), marginTokens: z.literal(4096),
   maxBytes: z.literal(196608), maxMessages: z.literal(128),
   maxTools: z.literal(2), maxSchemaBytes: z.literal(16384),
-  purposes: z.array(phase).min(1).max(6),
+  purposes: z.array(phase).min(1).max(8),
   requestFormats: z.array(z.enum(['serial-tools-v2', 'serial-tools-v4-stream',
-    'agent-turn-v5-stream', 'serial-tools-v6-reasoning'])).min(1).max(4),
+    'agent-turn-v5-stream', 'serial-tools-v6-reasoning', 'fusion-json-v1-stream'])).min(1).max(5),
   reasoningVariants: z.array(z.object({
     reasoning: reasoningPolicy,
     outputLimit: z.number().int().positive().max(PURPOSE_OUTPUT_CAP),

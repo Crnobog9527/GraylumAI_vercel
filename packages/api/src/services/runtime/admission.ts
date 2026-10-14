@@ -41,13 +41,16 @@ import {assertFrozenPayloads} from './payloadSize';
 import {freezeWindowBillingUnit} from './billingUnitAdmission';
 import {newWorkGate,readAdmissionSettings,requireNewWork} from './newWorkGate';
 import {requireAllowedInput} from './moderation';
-import {FREE_CHAT_REQUEST_FORMAT} from './providerRequest';
+import {FREE_CHAT_REQUEST_FORMAT,PLAIN_TEXT_STREAM,plainTextStreamAllowed} from './providerRequest';
 import {admissionDeadline,admittedOutputLimit} from './admissionLimits';
 import {admitPricing} from './pricingAdmission';
 import {freezeStagingPaygPricing} from './paygPricing';
 import {freezePaygMessageBudget} from './paygMessageBudget';
 import {readPaygHostPolicies} from './paygHostPolicy';
 import {runAutomaticFinancialRecovery} from './automaticRecovery';
+import {readPositioningGate,judgePositioning,windowBoundKey,refusePositioning,POSITIONING_REFUSAL_CAP,
+ type PositioningGatePolicy} from './positioningGate';
+import {POSITIONING_FALLBACK,POSITIONING_FALLBACK_INSTRUCTIONS} from './positioningFallback';
 
 const uuid=z.string().uuid();
 export const runtimeMaterialInput=z.object({sessionId:uuid,requestId:uuid,expectedRevision:z.number().int().nonnegative(),
@@ -73,6 +76,8 @@ export type LocalRuntimePolicy={
  expectedMaterialRevision?:number;opcTurnToken?:string;mentorStream?:boolean;organizeOpening?:boolean;
  additionalInstructions?:string;stableAdditionalInstructions?:string;skillResources?:readonly string[];searchEnabled?:boolean;workspaceContext?:boolean;
  organizerInstructions?:string;organizerInput?:string;answeredCard?:AnsweredCard;resolvedInput?:string;
+ /** POSITIONING-GATE: set only by the free-chat host; OPC turns, reports and organizing are never gated. */
+ positioningGate?:PositioningGatePolicy;
 };
 export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient,policy:LocalRuntimePolicy){
  policy=Object.freeze({...policy,...(policy.real?{real:structuredClone(policy.real),creditsPerUsd:policy.real.creditsPerUsd,multiplier:policy.real.multiplier}:{}),...(policy.skillResources?{skillResources:Object.freeze([...policy.skillResources])}:{})});
@@ -137,6 +142,11 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
    const settings=readAdmissionSettings(admin);
    const replay=await query('runtime_admission_replay',{p_request_id:input.requestId,p_request:request});
    if(replay)return replay;
+   // POSITIONING-GATE: the positioning read overlaps the checks below (one round trip); OPC turns, reports and
+   // organizing are never gated, so they never read it.
+   const positioning=policy.positioningGate&&!policy.opcTurnToken&&!policy.reportGeneration&&input.selection.kind!=='organizer'
+    ?readPositioningGate(admin,actorId):undefined;
+   positioning?.catch(()=>{});
    if(policy.reportGeneration&&session.waitingOrganizer)throw new Error('OPC_CAPTURE_PENDING');
    const blocked=await finishWaitingOrganizer(session,input.requestId,policy.resumeWaitingOrganizer);
    if(blocked)return blocked;
@@ -144,6 +154,10 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
    const leaveRateLimit=currentRequestTiming()?.enter('rateLimit');
    try{requireNewWork(await newWorkGate(admin,policy.real?'staging':'local').message(actorId,settings));}
    finally{leaveRateLimit?.();}
+   // Only users without a confirmed positioning are checked, after the rate limit.
+   const gateState=await positioning;
+   const gated=Boolean(gateState&&!gateState.positioned);
+   const capped=gated&&gateState!.refusals24h>=POSITIONING_REFUSAL_CAP;
    const mentorStream=Boolean(policy.opcTurnToken&&policy.mentorStream);
    if(policy.organizeOpening&&(!mentorStream||!isOpeningInput(input.input)))throw new Error('RUNTIME_CONTEXT_INVALID');
    const hostParsed=hostTurnContextSchema.safeParse(policy.hostTurnContext);
@@ -176,8 +190,10 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
    let skillId:string|undefined,moduleId:string|undefined,revisionId:string|undefined;
    if(input.selection.kind==='ordinary'||input.selection.kind==='auto')modelId=input.selection.modelId;
    else if(input.selection.kind==='skill'){
-    const module=await admin.from('modules').select('id,active,skill_id,model_id,report_model_id').eq('id',input.selection.moduleId).single();
+    const module=await admin.from('modules').select('id,active,skill_id,model_id,report_model_id,social_media_related')
+     .eq('id',input.selection.moduleId).single();
     if(module.error||module.data?.active!==true)throw new Error('RUNTIME_SKILL_DENIED');
+    if(gated&&module.data.social_media_related===true)refusePositioning();
     moduleId=uuid.parse(module.data.id);skillId=uuid.parse(module.data.skill_id);
     modelId=uuid.parse(policy.reportGeneration ? module.data.report_model_id ?? module.data.model_id : module.data.model_id);
     revisionId=input.selection.revisionId;
@@ -215,11 +231,20 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
     instructions=withBrandIdentity(instructions,true);
     if(skillChars)skillChars+=BRAND_IDENTITY_INSTRUCTIONS.length+1;
    }
-   const row=await admin.from('ai_models').select('id,model_id,provider,is_active,max_tokens,input_limit,config').eq('id',modelId).single();
+   const row=await admin.from('ai_models').select('id,model_id,provider,is_active,max_tokens,input_limit,config,api_endpoint,api_key')
+    .eq('id',modelId).single();
    // Match the actual administrator model to the enabled protocol and exact quote. Never substitute a default model.
    if(policy.real&&row.error){if(row.error.code==='PGRST116')throw unavailableModel();stagingRpcFailure(row.error);}
    if(row.error||row.data?.is_active!=='true'||(!policy.real&&row.data.provider!=='fixture'))throw unavailableModel();
+   // The OpenRouter key of this same row serves Decisions (no extra read); it never travels further.
+   const apiKey=policy.real?windowBoundKey(row.data,realModel(row.data).account):undefined;
+   delete (row.data as {api_key?:unknown}).api_key;
    if(policy.real)realModel(row.data);
+   // Decisions judges every other gated message, including a non-social Skill turning to social media; an admitted
+   // gated turn always keeps the fallback rule, since Decisions does not see earlier turns ("好的，那帮我写三条").
+   const positioningFallback=gated&&await judgePositioning(policy.positioningGate!,{text:input.input,apiKey},capped);
+   // The executor appends this rule (withPrimaryAddenda); admission sizes it too, so a fitting turn never fails later.
+   const positioningRule=positioningFallback?POSITIONING_FALLBACK_INSTRUCTIONS:'';
    if(input.selection.kind==='organizer')modelConfiguration(()=>assertSeparateSummaryModel(session.dialogueModel,row.data.model_id));
    let attachedOrganizer:{
     modelId:string;model:string;maxOutputTokens:number;inputBytes?:number;historyItems?:number;reasoning?:ReasoningPolicy;instructions?:string;input?:string
@@ -249,7 +274,8 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
    // SDK turns count model requests only. Paid search consumes another BILL2
    // call, and attached organization must remain inside this same frozen run.
    let candidates=input.selection.kind==='auto'?await discoverRuntimeCandidates(
-    user,admin,{...policy,inputBytes,maxOutputTokens:configuredOutput??policy.maxOutputTokens,...(policy.real?{resolveCapacity:(row:Record<string,unknown>)=>{const q=realModel(row);return {inputLimit:Math.min(inputBytes,q.inputLimit),outputLimit:outputCapacity(row,Infinity,configuredOutput)};}}:{})}):[];
+    user,admin,{...policy,inputBytes,maxOutputTokens:configuredOutput??policy.maxOutputTokens,excludeSocial:gated,
+     ...(policy.real?{resolveCapacity:(row:Record<string,unknown>)=>{const q=realModel(row);return {inputLimit:Math.min(inputBytes,q.inputLimit),outputLimit:outputCapacity(row,Infinity,configuredOutput)};}}:{})}):[];
    if(policy.additionalInstructions)instructions+='\n'+z.string().max(budgets||policy.reportGeneration?inputBytes:8000).parse(policy.additionalInstructions);
    let promptCache=hostTurnContext||policy.reportGeneration?undefined:freezePromptCache({
     real:Boolean(policy.real),role:input.selection.kind,model:row.data.model_id,
@@ -276,7 +302,7 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
    // Dropping it also drops its continuation call, so the turn is the one-call mentor shape.
    let maxCalls=policy.maxCalls;
    if(skillFile){
-    try{requireCapacity(instructions+skillFileInstructions,true);instructions+=skillFileInstructions;}
+    try{requireCapacity(instructions+skillFileInstructions+positioningRule,true);instructions+=skillFileInstructions;}
     catch(error){
      if(!(error instanceof Error)||error.message!=='RUNTIME_REQUIRED_CONTEXT_EXCEEDS_CAPACITY')throw error;
      skillFile=undefined;skillFileReserve=0;maxCalls--;
@@ -309,7 +335,8 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
    if(candidates.length)candidates=await fittingCandidates(candidates,candidate=>activateRuntimeCandidate(user,admin,candidate,brandIdentity),
     {input:currentInput,inputBytes,toolBytes:sourceToolBytes(sourceTools,workspaceContext)+
      (historySelection?.markerReserveBytes??(promptCache?PROMPT_CACHE_OVERHEAD_BYTES:0)),
-     instructions:skill=>withPrimaryAddenda(skill,{workspaceContext,network:input.network})});
+     instructions:skill=>withPrimaryAddenda(skill,{workspaceContext,network:input.network,
+      ...(positioningFallback?{positioningGate:POSITIONING_FALLBACK}:{})})});
    const primaryTurns=maxCalls-(attachedOrganizer?1:0)-(searchAllowed?1:0)-(candidates.length?1:0);
    if(primaryTurns<(searchAllowed||input.sources.length||workspaceContext?2:1))throw new Error('RUNTIME_CALL_BUDGET');
    // Splitting only helps when a modest message still fits; otherwise this is a configuration failure (500).
@@ -323,7 +350,7 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
    };
    if(candidates.length)refuseLongInput(text=>selectRuntimeHistory([],[{role:'user',content:matchingInput(text,candidates)}],
     {instructions:MATCH_INSTRUCTIONS,inputBytes:inputLimit,historyItems:0,toolBytes:0}));
-   refuseLongInput(text=>requireCapacity(instructions,Boolean(skillFile),
+   refuseLongInput(text=>requireCapacity(instructions+positioningRule,Boolean(skillFile),
     runtimeScopeInput(text,policy.reportGeneration?undefined:session.scopeMaterial,hostTurnContext),historyRead));
    // New mentor turns use the interactive format; replays returned before this branch.
    // A host-opened mentor turn (the user has not spoken) never gets a question card.
@@ -340,7 +367,7 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
    const organizerFormat=Boolean(policy.real&&!mentorStream&&(organize||attachedOrganizer));
    if(organizerFormat&&!reasoning)reasoning={parameter:'none'};
    const providerRequestFormat=mentorStream||policy.reportGeneration?'agent-turn-v5-stream':stepStream?'serial-tools-v4-stream':organizerFormat?'serial-tools-v6-reasoning':freeChat?FREE_CHAT_REQUEST_FORMAT:'serial-tools-v2';
-   const context={version:'runtime.v1',sdkVersion:'0.18.0',inputSelection:hostTurnContext?'scope-projection-v2':'scope-projection-v1',
+   const frozen={version:'runtime.v1',sdkVersion:'0.18.0',inputSelection:hostTurnContext?'scope-projection-v2':'scope-projection-v1',
     ...(hostTurnContext?{hostTurnContext,historySelection}:{}),
     ...(policy.reportGeneration?{reportGeneration:policy.reportGeneration}:{}),
     ...(promptCache?{promptCache}:{}),
@@ -350,6 +377,7 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
     role:input.selection.kind==='auto'?'ordinary':input.selection.kind,input:input.input,instructions,model:row.data.model_id,
     ...(policy.opcTurnToken?{opcTurnToken:uuid.parse(policy.opcTurnToken)}:{}),...(candidates.length?{matching:{candidates}}:{}),
     ...(!policy.reportGeneration&&session.scopeMaterial?{scopeMaterial:session.scopeMaterial}:{}),...(workspaceContext?{workspaceContext:true}:{}),
+    ...(positioningFallback?{positioningGate:POSITIONING_FALLBACK}:{}),
     modelId,...(attachedOrganizer?{attachedOrganizer}:{}),maxOutputTokens,maxTurns:primaryTurns,historyItems,network:input.network,
     // Freeze the purpose ceiling; each selected model keeps its own call-policy limit.
     ...(budgets||policy.reportGeneration?{purposeBudget:{purpose,inputBytes,historyItems}}:{}),
@@ -361,6 +389,8 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
     maxToolCalls:mentorStream?(opening||stepSummary&&!skillFile?0:1):
      (searchAllowed?1:0)+(workspaceContext?Math.min(2,primaryTurns-1):input.sources.length),
     request,...(policy.answeredCard?{answeredCard:policy.answeredCard}:{}),...(revisionId?{moduleId,skillId,revisionId}:{}),sources:input.sources};
+   // CHAT-NATIVE-OUTPUT: free chat and a chosen Skill stream their plain reply; the format and billing profile stay as they were.
+   const context:typeof frozen&{textStream?:typeof PLAIN_TEXT_STREAM}=plainTextStreamAllowed(frozen)?{...frozen,textStream:PLAIN_TEXT_STREAM}:frozen;
    const selectedIds=new Set([modelId,...(attachedOrganizer?[attachedOrganizer.modelId]:[]),...candidates.map(c=>c.modelId)]);
    const realCalls=policy.real?.callPolicies.filter(c=>selectedIds.has(c.modelId));
    const costPerCall=realCalls?.reduce((upper,c)=>decimal(c.upperUsd)>decimal(upper)?c.upperUsd:upper,'0')??policy.costPerCall;

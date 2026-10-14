@@ -2,7 +2,7 @@
 import { beforeEach, expect, it, vi } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
 const state = vi.hoisted(() => ({session:'',kind:'',calls:[] as string[],retry:undefined as undefined|(()=>Promise<unknown>)}));
-vi.mock('next/navigation',()=>({useSearchParams:()=>new URLSearchParams(state.session?'session='+state.session:'module=fixture')}));
+vi.mock('next/navigation',()=>({useRouter:()=>({replace(){},push(){}}),useSearchParams:()=>new URLSearchParams(state.session?'session='+state.session:'module=fixture')}));
 vi.mock('@/components/opc/workspace-frame',()=>({WorkspaceFrame:({children}:{children:React.ReactNode})=>children}));
 vi.mock('@/components/opc/work-composer',()=>({WorkComposer:()=>null}));
 vi.mock('@/components/opc/content-editor',()=>({ContentEditor:()=>null}));
