@@ -27,7 +27,7 @@ function createInvalidationUtils() {
       },
     },
     payments: {
-      getMembershipEligibilityMatrix: {
+      methodMembership: {
         invalidate: vi.fn().mockResolvedValue(undefined),
       },
       listBillingRecords: {
@@ -38,7 +38,7 @@ function createInvalidationUtils() {
 }
 
 describe('invalidatePostCheckoutMembershipQueries', () => {
-  it('invalidates membership eligibility after a successful checkout sync', async () => {
+  it('invalidates the paid memberships (methodMembership) after a successful checkout sync', async () => {
     const utils = createInvalidationUtils();
 
     await invalidatePostCheckoutMembershipQueries(utils);
@@ -47,7 +47,7 @@ describe('invalidatePostCheckoutMembershipQueries', () => {
     expect(utils.user.getEntitlements.invalidate).toHaveBeenCalledTimes(1);
     expect(utils.credits.getBalance.invalidate).toHaveBeenCalledTimes(1);
     expect(utils.credits.getCreditsSummary.invalidate).toHaveBeenCalledTimes(1);
-    expect(utils.payments.getMembershipEligibilityMatrix.invalidate).toHaveBeenCalledTimes(1);
+    expect(utils.payments.methodMembership.invalidate).toHaveBeenCalledTimes(1);
     expect(utils.payments.listBillingRecords.invalidate).toHaveBeenCalledTimes(1);
   });
 });

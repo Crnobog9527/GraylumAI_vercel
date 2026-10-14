@@ -13,7 +13,9 @@ import { PACK_MEMBERS_ONLY_NOTICE, creditPackBuyState, isPaidMember, type PackEn
 export const CreditPackagesSection = memo(function CreditPackagesSection({
   onBuyClick, pendingPackageId, checkoutOpen = true,
 }: {
-  onBuyClick?: (pkg: { id: string; name?: string; credits: number; bonus_credits: number; price: number; checkout_ready?: boolean }) => void;
+  /** `level` is the entitlement level the card priced the pack with, so the dialog shows the same amount. */
+  onBuyClick?: (pkg: { id: string; name?: string; credits: number; bonus_credits: number; price: number; checkout_ready?: boolean },
+    level: string | null) => void;
   pendingPackageId?: string | null;
   /** false while card checkout is closed (payments.methodMembership): no pack can be bought. */
   checkoutOpen?: boolean;
@@ -128,7 +130,7 @@ export const CreditPackagesSection = memo(function CreditPackagesSection({
               {'name' in pkg && typeof pkg.name === 'string' ? pkg.name : `${pkg.credits.toLocaleString()} 积分包`}
             </div>
             <Button
-              onClick={() => { if (!buy.disabled) onBuyClick?.(pkg); }}
+              onClick={() => { if (!buy.disabled) onBuyClick?.(pkg, priceLevel ?? null); }}
               size="sm"
               disabled={buy.disabled}
               className="w-full gap-2"

@@ -43,6 +43,8 @@ export const CHECKOUT_COPY = {
   rateLimited: '下单太频繁了，请稍等一分钟再试。',
   closed: '银行卡付款暂未开放，请稍后再来。',
   termsRequired: '请先勾选同意《服务条款》和《退款政策》。',
+  // Record W: a short refund line beside checkout; the 7-day window stays in the FAQ and terms (record AA).
+  refundSummary: '退款说明：付款后还没用过这次的积分，可以申请退款，具体条件见《退款政策》。',
   mainlandHint: '如果你在中国大陆，国际银行卡付款页会提示不支持；请回来改选“中国大陆银行卡”。',
 } as const;
 

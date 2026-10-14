@@ -74,6 +74,7 @@ export function MethodCheckoutForm(props: Props) {
         <span data-testid={`${id}-tax`} style={{ color: 'var(--text-secondary)' }}>{METHOD_COPY[method].tax}</span>
       </p>
       <p className="text-xs" data-testid={`${id}-renewal`} style={muted}>{props.renewal}</p>
+      <p className="text-xs" data-testid={`${id}-refund`} style={muted}>{CHECKOUT_COPY.refundSummary}</p>
 
       <label className="flex items-start gap-2 text-sm" style={{ color: 'var(--text-secondary)' }}>
         <input type="checkbox" data-testid={`${id}-terms`} className="mt-1" checked={accepted}

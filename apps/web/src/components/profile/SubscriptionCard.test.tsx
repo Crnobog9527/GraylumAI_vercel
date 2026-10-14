@@ -349,15 +349,19 @@ describe('membership page in a browser', () => {
     } finally { await page.close(); }
   }, 30_000);
 
-  it('buys a credit pack by international card only', async () => {
-    const { page, errors } = await open({ level: 'pro', membership: { ...ENTRY, memberships: [proMember] },
+  it('buys a credit pack by international card only, at the price the pack card showed', async () => {
+    // The profile still says pro (CreditStatsCard user), the server entitlement says gold: both card and dialog use gold.
+    const { page, errors } = await open({ level: 'gold', membership: { ...ENTRY, memberships: [proMember] },
       packages: [{ id: '00000000-0000-4000-8000-0000000000bb', name: '990 积分', credits: 990, bonus_credits: 0, price: 9.9,
         checkout_ready: true }] });
     try {
       await page.getByRole('button', { name: '购买', exact: true }).click();
       await browserExpect(page.getByTestId('method-checkout-method-card')).toBeVisible();
       await browserExpect(page.getByTestId('method-checkout-method-card_cn')).toHaveCount(0);
+      await browserExpect(page.getByTestId('profile-credit-package-price')).toContainText('$8.91');
+      await browserExpect(page.getByTestId('method-checkout-pay')).toContainText('$8.91');
       await browserExpect(page.getByTestId('method-checkout-renewal')).toHaveText('一次性付款，不自动续费。');
+      await browserExpect(page.getByTestId('method-checkout-refund')).toHaveText(/具体条件见《退款政策》/);
       await page.getByTestId('method-checkout-terms').check();
       await page.getByTestId('method-checkout-pay').click();
       await browserExpect(page).toHaveURL(/checkout\.stripe\.com/);

@@ -320,9 +320,9 @@ export const CreditStatsCard = memo(function CreditStatsCard({ user }: { user: M
   const allTimeSummary = trpc.credits.getCreditsSummary.useQuery({ period: 'all' }, CREDITS_SUMMARY_QUERY_OPTIONS);
 
   // International card only (MP, one-time); the mainland card sells membership subscriptions only.
-  const handlePackageBuy = (pkg: { id: string; name?: string; credits: number; bonus_credits: number; price: number }) => {
+  const handlePackageBuy = (pkg: { id: string; name?: string; credits: number; bonus_credits: number; price: number }, level: string | null) => {
     const totalCredits = pkg.credits + (pkg.bonus_credits ?? 0);
-    const payable = getCreditPackagePrice(pkg.price, user?.subscription_tier, plans.data).payableUsd;
+    const payable = getCreditPackagePrice(pkg.price, level, plans.data).payableUsd;
     setPackTarget({
       title: `购买 ${pkg.name || `${pkg.credits.toLocaleString()} 积分包`}`,
       description: `共 ${totalCredits.toLocaleString()} 积分（含赠送），积分永不过期。`,
