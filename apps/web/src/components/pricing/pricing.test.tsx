@@ -37,7 +37,8 @@ describe('pricing plans', () => {
     expect(html).toContain('最高省 25%');
     const inputs = html.match(/<input[^>]*name="pricing-billing"[^>]*>/g) ?? [];
     expect(inputs.find(input => input.includes('checked'))).toContain('value="monthly"');
-    expect(html).toContain('/profile?tab=subscription');
+    expect(html).toContain('/profile?tab=subscription&amp;buy=pro&amp;cycle=monthly');
+    expect(html).toContain('/profile?tab=subscription&amp;buy=gold&amp;cycle=monthly');
   });
 
   it('states the tax rule next to member prices without any tax amount', () => {
