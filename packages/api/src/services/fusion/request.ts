@@ -19,6 +19,15 @@ export type FusionRequest = { instructions: string; input: string; responseForma
 /** Exact provider bytes for one Fusion call. The host writes every message: no brand identity
  * statement is added (Fusion shows the real model name), no history, no tools and no tool_choice;
  * the legacy web plugin is explicitly off (FUSION-REVIEW §4.1). */
+/** Serialized size of a request as fusionRequestBody sends it (content escaped inside the outer JSON), plus room for
+ * the model, routing, limits and reasoning fields. Used to keep every review step within the per-call byte cap. */
+export const REQUEST_FIELDS_ALLOWANCE = 8192;
+export function fusionRequestBytes(request: FusionRequest): number {
+  return Buffer.byteLength(JSON.stringify({ messages: [{ role: 'system', content: request.instructions },
+    { role: 'user', content: request.input }], ...(request.responseFormat ? { response_format: request.responseFormat } : {}) }))
+    + REQUEST_FIELDS_ALLOWANCE;
+}
+
 export function fusionRequestBody(policy: z.infer<typeof frozenCallPolicy>, request: FusionRequest,
   outputLimit: number, reasoning?: ReasoningPolicy): string {
   if (!request.instructions.trim() || !request.input.trim()) throw new Error('FUSION_REQUEST_INVALID');

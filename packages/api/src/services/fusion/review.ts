@@ -6,7 +6,8 @@ import { loadStagingPolicy } from '../runtime/stagingPolicy';
 import { admitFusionGroup, derivedUuid, replayFusionGroup, type FusionMember } from './admission';
 import { fusionExecutor, type FusionBodyVerdict } from './executor';
 import { checkRevision, disputedDecisions, hasDisagreement, parseOpinion, type DeclaredStep, type Opinion, type StepValues } from './hostChecks';
-import { assertSnapshotSize } from './request';
+import { assertSnapshotSize, fusionRequestBytes, type FusionRequest } from './request';
+import { PAYG_PROFILE_MAX_BYTES } from '../runtime/paygHostPolicy';
 import { estimateReview } from './reviewEstimate';
 import { debateRequest, readReviewSkill, resolveReviewSkill, reviewerLabel, reviewerRequest, summaryRequest, type ReviewContext,
   type ReviewSkill } from './reviewPrompts';
@@ -129,6 +130,19 @@ export function reviewFlow(deps: { admin: SupabaseClient; actorId: string;
   }
   const contextOf = (view: ReviewView, src: Source): ReviewContext => ({ report: src.body, materials: view.materials,
     sections: src.sections, maxCharacters: src.maxCharacters });
+  /** The least trimming that fits the byte cap: 0 = full opinions; 1 = without replies and reasoning text; 2 = also only
+   * critical and major issues; 3 = also no issues (the key-decision verdicts stay). */
+  function fitted(build: (level: number) => FusionRequest): FusionRequest {
+    for (let level = 0; level < 3; level++) {
+      const request = build(level);
+      if (fusionRequestBytes(request) <= PAYG_PROFILE_MAX_BYTES) return request;
+    }
+    return build(3);
+  }
+  const trimmed = (opinion: Opinion | null, level: number): Opinion | null => !opinion || level === 0 ? opinion : {
+    decisions: opinion.decisions.map(d => level >= 1 ? { ...d, strongestCase: '', strongestAlternative: '', basis: '' } : d),
+    issues: level >= 3 ? [] : level >= 2 ? opinion.issues.filter(i => i.severity !== 'minor') : opinion.issues,
+    dropped: opinion.dropped };
   /** Admits and claims the models of the current position that have no finished call yet. */
   async function claimStep(view: ReviewView, src: Source, at: ReviewPosition, models: string[]) {
     const cfg = config.parse(view.config);
@@ -143,13 +157,18 @@ export function reviewFlow(deps: { admin: SupabaseClient; actorId: string;
       members = models.map(modelId => {
         const index = cfg.reviewers.indexOf(modelId);
         const others = [...first].filter(([other]) => other !== index).map(([other, opinion]) => ({ reviewer: reviewerLabel(other), opinion }));
-        return { modelId, phase: 'fusion_review' as const, request: debateRequest(skill, context, first.get(index) ?? null, others,
-          disputedDecisions([...first.values()])) };
+        return { modelId, phase: 'fusion_review' as const, request: fitted(level => debateRequest(skill, context,
+          trimmed(first.get(index) ?? null, level), others.map(o => ({ ...o, opinion: trimmed(o.opinion, level)! })),
+          disputedDecisions([...first.values()]))) };
       });
     } else {
-      members = [{ modelId: cfg.summary, phase: 'fusion_summary', request: summaryRequest(skill, context, await finalOpinions(view, src),
-        src.declared, frozenValues(view)) }];
+      const opinions = await finalOpinions(view, src);
+      members = [{ modelId: cfg.summary, phase: 'fusion_summary', request: fitted(level => summaryRequest(skill, context,
+        opinions.map(o => ({ ...o, opinion: trimmed(o.opinion, level)! })), src.declared, frozenValues(view))) }];
     }
+    // Every request must fit the per-call billing byte cap as actually serialized (#962 review); a step that cannot fit
+    // even fully trimmed is never claimed.
+    if (members.some(member => fusionRequestBytes(member.request) > PAYG_PROFILE_MAX_BYTES)) throw new Error('FUSION_INPUT_TOO_LARGE');
     const requestId = derivedUuid(`${view.reviewId}:${stepKey(at)}`);
     const group = await admitFusionGroup({ admin, actorId, requestId, sourceSessionId: view.sourceSessionId, members, env,
       outputTokens: { opinion: cfg.opinionTokens, summary: cfg.summaryTokens } });
@@ -250,7 +269,17 @@ export function reviewFlow(deps: { admin: SupabaseClient; actorId: string;
         if (!current.length) {
           const pending = models.filter(id => !here.some(call => done(call) && !(call.verdict === 'no_delivery' && !call.dispatched)
             && call.modelId === id));
-          const claimed = await claimStep(view, src, at, pending.length ? pending : models);
+          let claimed;
+          try { claimed = await claimStep(view, src, at, pending.length ? pending : models); }
+          catch (error) {
+            if (!(error instanceof Error) || error.message !== 'FUSION_INPUT_TOO_LARGE') throw error;
+            // A step that cannot fit the byte cap is never claimed: the debate round is skipped; round 1 (nothing charged
+            // yet) or the summary ends the review instead of failing on every continue.
+            if (at.phase === 'review' && at.round > 1) {
+              view = await record.advance(reviewId, at, { state: 'running', round: at.round, phase: 'summary', attempt: 1 });
+            } else view = await finish(view, 'incomplete', { kind: 'input_too_large', phase: at.phase });
+            continue;
+          }
           view = (await record.read(reviewId))!;
           if (claimed.state === 'waiting_credits') return { review: view, calls: [], waiting: 'credits' };
           return { review: view, calls: view.calls.filter(call => !done(call)) };

@@ -8,6 +8,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 type Call = { groupId: string; runId: string; callId: string; modelId: string; phase: string; dispatched: boolean;
   verdict: string | null; settled: boolean; state: string; dispatchedAt?: string; settledAt?: string };
 const raceReservation = vi.hoisted(() => ({ value: null as Record<string, unknown> | null }));
+const sourceBody = vi.hoisted(() => ({ value: null as string | null }));
 const applyRefusal = vi.hoisted(() => ({ value: '' }));
 const caps = vi.hoisted(() => [] as Array<{ opinion: number; summary: number }>);
 const requests = vi.hoisted(() => [] as Array<{ modelId: string; phase: string; input: string }>);
@@ -82,7 +83,7 @@ const sections = ['定位', '结语'];
 const original = '## 定位\n原定位\n## 结语\n原结语';
 const admin = { rpc: async (name: string, args: Record<string, unknown>) => {
   if (name === 'fusion_review_preview') return { data: { reportBytes: 2000, materialsBytes: 500, fieldCount: 1 }, error: null };
-  if (name === 'fusion_review_source') return { data: { body: original, sections, maxCharacters: 12000, declared: [{ stepId: 's1', fieldIds: ['goal'] }] }, error: null };
+  if (name === 'fusion_review_source') return { data: { body: sourceBody.value ?? original, sections, maxCharacters: 12000, declared: [{ stepId: 's1', fieldIds: ['goal'] }] }, error: null };
   if (name === 'fusion_call_output_read') { const body = db.outputs.get(String(args.p_call_id));
     return { data: body ? { body, savedAt: db.savedAt.get(String(args.p_call_id)) } : null, error: null }; }
   if (name === 'fusion_call_verdict') { const call = db.calls.find(c => c.callId === args.p_call_id)!; call.verdict = String(args.p_verdict); return { data: call.verdict, error: null }; }
@@ -313,6 +314,31 @@ describe('review flow', () => {
     await expect(t.flow.confirmAdoption({ reviewId, requestId, choices, expectedDiffHash: 'f'.repeat(64), decision: 'apply' }))
       .rejects.toThrow('FUSION_REVIEW_ADOPTED');
     expect(t.applied).toEqual([]);
+  });
+
+  it('a report too large for a request ends the review before anything is claimed or charged', async () => {
+    const t = setup(() => opinion('major'));
+    await t.flow.start({ requestId: randomUUID(), draftId: randomUUID(), sourceVersionId: randomUUID() });
+    sourceBody.value = `## 定位\n${'"'.repeat(200_000)}\n## 结语\n原结语`;
+    const end = await t.flow.continue(String(db.review!.reviewId));
+    sourceBody.value = null;
+    expect(end.review).toMatchObject({ state: 'incomplete', outcome: { kind: 'input_too_large', phase: 'review' } });
+    expect(db.calls).toEqual([]);
+  });
+
+  it('trims the opinions a summary carries until its serialized request fits the byte cap', async () => {
+    const long = '很长的理由'.repeat(390);
+    const big = JSON.stringify({ decisions: DECISIONS.map(decision => ({ decision, strongestCase: long, strongestAlternative: long,
+      verdict: 'keep' as const, basis: long })), issues: Array.from({ length: 50 }, () => ({ location: '定位', perspective: '目标受众',
+      problem: long, suggestion: '改成' + long.slice(2), severity: 'minor' })) });
+    const t = setup(call => call.phase === 'fusion_summary' ? revision('新目标') : big);
+    await t.flow.start({ requestId: randomUUID(), draftId: randomUUID(), sourceVersionId: randomUUID() });
+    await t.runAll(); await t.runAll();
+    const summary = requests.find(r => r.phase === 'fusion_summary')!;
+    const input = JSON.parse(summary.input);
+    expect(input.opinions).toHaveLength(3);
+    expect(input.opinions[0].issues).toEqual([]);
+    expect(input.opinions[0].decisions[0].strongestCase).toBe('');
   });
 
   it('a partial panel never ends as no change: one usable reviewer that finds nothing still goes to the summary', async () => {
