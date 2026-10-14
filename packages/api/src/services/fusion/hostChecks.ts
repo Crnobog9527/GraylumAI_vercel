@@ -33,7 +33,8 @@ const issueFormat = { type: 'object', additionalProperties: false,
   required: ['location', 'perspective', 'problem', 'suggestion', 'severity'], properties: {
     location: str, perspective: str, problem: str, suggestion: str, severity: { type: 'string', enum: [...SEVERITIES] } } } as const;
 const responseFormat = { type: 'object', additionalProperties: false, required: ['reviewer', 'decision', 'strongestView', 'stance', 'reason'],
-  properties: { reviewer: str, decision: { type: 'string', enum: [...DECISIONS] }, strongestView: str, stance: { type: 'string', enum: ['agree', 'disagree'] }, reason: str } } as const;
+  properties: { reviewer: str, decision: { type: 'string', enum: [...DECISIONS] }, strongestView: str,
+    stance: { type: 'string', enum: ['agree', 'disagree'] }, reason: str } } as const;
 export const OPINION_RESPONSE_FORMAT = { type: 'json_schema', json_schema: { name: 'review_opinion', strict: true, schema: {
   type: 'object', additionalProperties: false, required: ['decisions', 'issues'], properties: {
     decisions: { type: 'array', items: decisionFormat }, issues: { type: 'array', items: issueFormat } } } } } as const;
