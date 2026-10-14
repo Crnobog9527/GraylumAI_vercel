@@ -2731,7 +2731,7 @@
   "fn:fusion_purpose(jsonb)": "483cfa2a8516",
   "fn:fusion_review_admin_list(integer,timestamp with time zone,uuid)": "5245fffd2079",
   "fn:fusion_review_admin_read(uuid)": "33a76b66bb50",
-  "fn:fusion_review_adoption_record(uuid,uuid,jsonb)": "cdbdefb1a426",
+  "fn:fusion_review_adoption_record(uuid,uuid,jsonb)": "52add1934edf",
   "fn:fusion_review_advance(uuid,uuid,jsonb,jsonb)": "2457f8509d45",
   "fn:fusion_review_breaker_clear(uuid,uuid,text)": "20a42268d2b9",
   "fn:fusion_review_breaker_usage(uuid)": "b18055819cae",
