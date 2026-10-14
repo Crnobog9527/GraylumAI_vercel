@@ -35,8 +35,11 @@ export const STEEL_ROW = { lead: 900, gap: 650 } as const;
 export const REDLINE = { lead: 400, gap: 700 } as const;
 
 /** A reader moves down the report one chapter per step and stays on the last chapter; it never jumps back to the top. */
-const chapterAt = (local: number, offset: number) =>
-  REPORT_CHAPTERS[Math.min(REPORT_CHAPTERS.length - 1, Math.floor(Math.max(0, local) / READ_STEP) + offset)].title;
+const chapterAt = (local: number, offset: number, step = READ_STEP) =>
+  REPORT_CHAPTERS[Math.min(REPORT_CHAPTERS.length - 1, Math.floor(Math.max(0, local) / step) + offset)].title;
+
+/** Focus key for the top of the report, where the failed-revision notice sits. */
+export const DOC_HEAD = '__head';
 
 export function issueIndexAt(scene: Extract<Scene, { kind: 'critique' }>, clock: number): number {
   const elapsed = clock - scene.start - BEAT.issueLead;
@@ -156,7 +159,7 @@ function focusOf(scene: Scene | null, clock: number): string | null {
     case 'response': return DECISION_SECTION[scene.response.decision];
     case 'ruling': return section(scene.ruling.section);
     case 'revision': {
-      if (scene.result.type !== 'revision_ready_for_choice') return null;
+      if (scene.result.type !== 'revision_ready_for_choice') return DOC_HEAD;
       // Follow the redline as it moves down the report: the latest chapter whose marks have appeared.
       const shown = scene.result.changedSectionTitles.filter((_, index) => clock - scene.start >= REDLINE.lead + index * REDLINE.gap);
       return shown.at(-1) ?? scene.result.changedSectionTitles[0] ?? null;
@@ -179,7 +182,8 @@ function currentOf(scene: Scene | null, clock: number): string | null {
 function readingOf(scene: Scene | null, clock: number): DeskView['reading'] {
   if (!scene) return {};
   const local = clock - scene.start;
-  if (scene.kind === 'writing') return { S: chapterAt(local, 0) };
+  // The summary reads the whole report within its scene, however short the scene is.
+  if (scene.kind === 'writing') return { S: chapterAt(local, 0, (scene.end - scene.start) / REPORT_CHAPTERS.length) };
   if (scene.kind !== 'reading') return {};
   const reading: DeskView['reading'] = {};
   SEATS.forEach((seat, index) => {

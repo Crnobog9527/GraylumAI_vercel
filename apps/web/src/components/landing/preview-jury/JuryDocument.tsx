@@ -4,7 +4,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { cn } from '@/lib/utils';
 import type { JurySeatNames, SeatCode } from './jury-events';
-import type { DeskView } from './jury-desk';
+import { DOC_HEAD, type DeskView } from './jury-desk';
 import { diffText } from './jury-diff';
 import { REVISION_TEXT } from './jury-mock-rulings';
 import { REPORT_CHAPTERS, REPORT_TITLE, WHOLE_DOCUMENT } from './jury-report';
@@ -83,7 +83,7 @@ export function JuryDocument({ view, names, still, ...handlers }: PeekHandlers &
     <div className={cn(styles.viewport, still && styles.still)} ref={scroller} tabIndex={still ? undefined : 0} aria-label="被审阅的报告">
       <div className={styles.page} data-mode={view.mode}>
         <div className={styles.rowsWrap} ref={wrap}>
-          <div className={styles.headRow}>
+          <div className={styles.headRow} ref={node => { if (node) rows.current.set(DOC_HEAD, node); else rows.current.delete(DOC_HEAD); }}>
             <header className={styles.docHead}>
               <h2>{REPORT_TITLE}</h2>
               <p>{REPORT_CHAPTERS.length} 章，评审期间这份报告保持冻结，不会被改动</p>

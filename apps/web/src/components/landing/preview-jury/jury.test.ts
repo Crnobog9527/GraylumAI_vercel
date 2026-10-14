@@ -10,7 +10,7 @@ import {
 import {
   DEFAULT_SEAT_NAMES, resolveSeatNames, SAMPLE_PANEL, SEAT_NAME_MAX, summarize, type JuryEvent,
 } from './jury-events';
-import { deskAt, seatStates, type MarginItem } from './jury-desk';
+import { DOC_HEAD, deskAt, seatStates, type MarginItem } from './jury-desk';
 import { diffText } from './jury-diff';
 import { REVISION_TEXT } from './jury-mock-rulings';
 import { REPORT_CHAPTERS } from './jury-report';
@@ -208,6 +208,10 @@ describe('the annotated report', () => {
     const failedEnd = deskAt(failed, playbackLength(failed) - 1);
     expect(failedEnd.revisionFailed).toBe(true);
     expect(failedEnd.redline).toEqual([]);
+    expect(failedEnd.focus).toBe(DOC_HEAD);
+    const writing = scenes.find(scene => scene.kind === 'writing');
+    if (!writing) throw new Error('expected a writing scene');
+    expect(deskAt(scenes, writing.end - 1).reading.S).toBe(REPORT_CHAPTERS.at(-1)?.title);
   });
 
   it('shows every note and ruling at once for reduced motion', () => {
