@@ -1,0 +1,101 @@
+/* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+/*
+ * Margin notes. A full note is a small sheet with its author's colour as a thin left rule; a note the stage has moved
+ * past shrinks to one line. Only the newest note carries emphasis. New notes slide in from the page edge once.
+ */
+.margin { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; font-family: var(--j-sans); }
+.slot { min-width: 0; animation: noteIn .45s var(--j-ease) both; }
+
+.card {
+  --seat: var(--j-rule);
+  display: grid; gap: 6px; padding: 10px 12px 11px; border: 1px solid var(--j-rule); border-left: 3px solid var(--seat);
+  border-radius: 6px; background: var(--j-paper); color: var(--j-body); font-size: 13px; line-height: 1.65;
+  transition: border-color .4s, box-shadow .4s;
+}
+.card[data-seat='A'] { --seat: var(--j-seat-a); }
+.card[data-seat='B'] { --seat: var(--j-seat-b); }
+.card[data-seat='C'] { --seat: var(--j-seat-c); }
+.card[data-seat='S'] { --seat: var(--j-ink); }
+.card p { margin: 0; }
+.card[tabindex], .line[tabindex], .sideEntry[tabindex], .reply[tabindex] { cursor: pointer; }
+.card:focus-visible, .line:focus-visible, .sideEntry:focus-visible, .reply:focus-visible { outline: 2px solid var(--j-ink); outline-offset: 2px; }
+.current { border-top-color: var(--j-ink-soft); border-right-color: var(--j-ink-soft); border-bottom-color: var(--j-ink-soft); box-shadow: var(--j-lift); }
+
+.cardHead { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; min-width: 0; }
+.cardHead strong { color: var(--j-ink); font-size: 13.5px; font-weight: 600; }
+.hint { color: var(--j-muted); font-size: 12px; }
+.key { display: block; color: var(--j-muted); font-size: 11.5px; font-weight: 600; line-height: 1.6; }
+.angle { color: var(--j-bronze); font-size: 12px; }
+.opinion { color: var(--j-ink); font-size: 13.5px; font-weight: 600; }
+
+.line {
+  --seat: var(--j-rule);
+  display: flex; align-items: center; gap: 8px; min-width: 0; padding: 5px 8px; border-radius: 6px;
+  color: var(--j-muted); font-size: 12.5px; line-height: 1.5;
+}
+.line:hover { background: var(--j-paper); }
+.lineTitle { flex: none; color: var(--j-body); font-weight: 600; }
+.lineText { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.quiet { color: var(--j-muted); }
+.rulingLine { color: var(--j-body); }
+.votes { display: flex; flex-wrap: wrap; gap: 6px; margin-left: auto; }
+.vote { display: inline-flex; align-items: center; gap: 3px; }
+
+.steel { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.steelRow { display: grid; gap: 4px; padding-top: 8px; border-top: 1px solid var(--j-rule); animation: noteIn .45s var(--j-ease) both; }
+.steelHead { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-width: 0; }
+.alt { color: var(--j-muted); }
+
+.split { --seat: var(--j-bronze); }
+.pair { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); gap: 8px; align-items: stretch; }
+.side { display: grid; gap: 6px; align-content: start; min-width: 0; }
+.sideTitle { color: var(--j-ink); font-size: 12px; font-weight: 600; }
+.side[data-side='change'] .sideTitle { color: var(--j-bronze); }
+.sideEntry { display: grid; gap: 3px; padding: 6px 8px; border-radius: 5px; background: var(--j-canvas); }
+.sideEntry p { font-size: 12.5px; }
+.crux { position: relative; display: grid; place-items: center; width: 18px; }
+.crux::before { content: ''; position: absolute; inset: 4px auto 4px 50%; border-left: 1px dashed var(--j-bronze); }
+.crux span {
+  position: relative; padding: 4px 0; background: var(--j-paper); color: var(--j-bronze); font-size: 11px; line-height: 1.3;
+  writing-mode: vertical-rl; letter-spacing: .1em;
+}
+
+.thread { display: grid; gap: 0; margin: 4px 0 0; padding: 0 0 0 10px; border-left: 1px solid var(--j-rule); list-style: none; }
+.reply { display: grid; gap: 4px; padding: 8px 0 8px 8px; animation: noteIn .45s var(--j-ease) both; }
+.reply + .reply { border-top: 1px solid var(--j-rule); }
+.replyCurrent { background: linear-gradient(90deg, var(--j-bronze-soft), transparent 70%); }
+.replyHead { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.replyTo { color: var(--j-muted); font-size: 12px; }
+.restate { font-size: 12.5px; }
+.stance { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 12.5px; animation: noteIn .35s var(--j-ease) both; }
+.stance strong { color: var(--j-ink); }
+.stance[data-stance='disagree'] strong { color: var(--j-critical); }
+.stance span { display: inline-flex; align-items: center; gap: 4px; color: var(--j-muted); }
+
+.ruling { --seat: var(--j-ink); }
+.stampSlot { margin-left: auto; }
+.stampSlot[data-live='true'] > * { animation: stamp .42s cubic-bezier(.2, .9, .3, 1) both; }
+.rulingFoot { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; padding-top: 2px; }
+.raised { display: inline-flex; align-items: center; gap: 4px; color: var(--j-muted); font-size: 12px; }
+.flag { color: var(--j-muted); font-size: 12px; }
+.flag::before { content: ''; display: inline-block; width: 4px; height: 4px; margin-right: 6px; border-radius: 50%; background: var(--j-bronze); vertical-align: 2px; }
+
+@keyframes noteIn { from { opacity: 0; transform: translateX(10px); } }
+@keyframes stamp {
+  0% { opacity: 0; transform: scale(1.7) rotate(-4deg); }
+  70% { opacity: 1; transform: scale(.96) rotate(-4deg); }
+  100% { opacity: 1; transform: scale(1) rotate(-4deg); }
+}
+
+@media (max-width: 767px) {
+  .card { font-size: 13px; }
+  .pair { grid-template-columns: minmax(0, 1fr); }
+  .crux { width: auto; height: 22px; }
+  .crux::before { inset: 50% 0 auto 0; border-left: 0; border-top: 1px dashed var(--j-bronze); }
+  .crux span { padding: 0 8px; writing-mode: horizontal-tb; letter-spacing: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .slot, .steelRow, .reply, .stance, .stampSlot[data-live='true'] > * { animation: none; }
+  .card { transition: none; }
+}
