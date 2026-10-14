@@ -3,27 +3,12 @@ import { TRPCError } from '@trpc/server';
 import { protectedProcedure, router } from '../trpc';
 import { readMembershipEntitlements } from '../services/membershipEntitlements';
 import {
-  assertPublishMonitorEnabled, autoReviewInput, listConnections, PublishMonitorError,
-  readPublishMonitorSettings, setAutoReview,
+  autoReviewInput, listConnections, readPublishMonitorSettings, setAutoReview,
 } from '../services/publishMonitor/foundation';
+import { publishMonitorConnectRouter } from './publishMonitorConnect';
+import { guarded as safe } from './publishMonitorGuard';
 
 /** PUBLISH-MONITOR: a user reads and changes only their own monitoring state; off until enabled by admin. */
-type SwitchReader = Parameters<typeof assertPublishMonitorEnabled>[0];
-async function safe<T>(ctx: { hasSupabaseAdminPrivileges: boolean; supabaseAdmin: SwitchReader },
-  work: () => Promise<T>): Promise<T> {
-  if (!ctx.hasSupabaseAdminPrivileges) {
-    throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'PUBLISH_MONITOR_UNAVAILABLE' });
-  }
-  try {
-    await assertPublishMonitorEnabled(ctx.supabaseAdmin);
-    return await work();
-  } catch (cause) {
-    if (cause instanceof TRPCError) throw cause;
-    const code = cause instanceof PublishMonitorError ? cause.code : 'PUBLISH_MONITOR_UNAVAILABLE';
-    throw new TRPCError({ code: code === 'PUBLISH_MONITOR_UNAVAILABLE' ? 'INTERNAL_SERVER_ERROR' : 'FORBIDDEN',
-      message: code, cause });
-  }
-}
 
 export const publishMonitorRouter = router({
   settings: protectedProcedure.query(({ ctx }) =>
@@ -40,4 +25,5 @@ export const publishMonitorRouter = router({
   })),
   connections: protectedProcedure.query(({ ctx }) =>
     safe(ctx, () => listConnections(ctx.supabaseAdmin, ctx.profileId))),
+  connect: publishMonitorConnectRouter,
 });
