@@ -7,11 +7,11 @@
 
 /** NEW: one heading per voice-wall answer, matching the pain on the left (replaces the shared "教练怎么做"). */
 export const J_NOTE_HEADS: Readonly<Record<string, string>> = {
-  p1: '24 小时都有人回你',
+  p1: 'AI 教练 24 小时随时回你',
   p2: '每一步都告诉你具体怎么做',
   p3: '从你的经历里挖出能拍的',
   p4: '用真实数据找到差在哪',
-  p5: '一直有人陪你往下走',
+  p5: 'AI 教练一直陪你往下走',
   p7: '先替你判断，再给内容',
   p8: '每周照着清单做就行',
 };
