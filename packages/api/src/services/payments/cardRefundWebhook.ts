@@ -3,6 +3,8 @@ import type Stripe from 'stripe';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { resolveStripeScope } from './stripeCheckoutPersistence';
 import { findCardOrderForPayment } from './cardPaymentLookup';
+import { findStripeReference } from './stripeReferences';
+import type { StripeScope } from './purchaseFacts';
 import { PAYMENT_EVIDENCE_CONFLICT } from './stripeWebhookError';
 import { logger } from '../../lib/logger';
 
@@ -35,11 +37,19 @@ export async function handleCardRefund(db: SupabaseClient, stripe: RefundStripe,
   if (refunds.some(refund => id(refund.charge) !== chargeId)) throw new Error(PAYMENT_EVIDENCE_CONFLICT);
   const match = await findCardOrderForPayment(db, stripe, scope, { chargeId, paymentIntentId });
   if (!match) {
+    const intent = paymentIntentId ?? (chargeId ? id((await stripe.charges.retrieve(chargeId)).payment_intent) : null);
     // A card order whose payment is not recorded yet: Stripe retries until the payment (and its reference) exists,
     // so the refund is never lost and the payment cannot be granted after it.
-    if (await cardOrderAwaitingPayment(db, stripe, paymentIntentId ?? (chargeId
-      ? id((await stripe.charges.retrieve(chargeId)).payment_intent) : null))) {
-      throw new Error('PAY_STRIPE_MP_FIRST_PAYMENT_PENDING');
+    if (await cardOrderAwaitingPayment(db, stripe, intent)) throw new Error('PAY_STRIPE_MP_FIRST_PAYMENT_PENDING');
+    // No local order references this payment at all (a lost mapping, an off-site charge): the legacy path would only
+    // fail the webhook again and again. Alert it for manual review (which order, membership, credits) and acknowledge.
+    const succeeded = external.filter(refund => refund.status === 'succeeded');
+    if (external.length === refunds.length && succeeded.length && !await referencedPayment(db, stripe, scope, intent)) {
+      const refundIds = succeeded.map(refund => refund.id).sort();
+      logger.error('billing', 'stripe_mp_refund_unmatched', { refundIds, dedupKey: `stripe-mp-refund-unmatched:${refundIds.join(',')}`,
+        action: '外部退款找不到任何本地订单：请人工核对这笔付款属于哪个订单，并处理会员和积分' });
+      alert();
+      return true;
     }
     return false;
   }
@@ -94,6 +104,21 @@ function reportRefund(orderId: string, kind: string, refundId: string, result: R
       action: '该订阅仍在续费，请确认是否需要停续费' });
     alert();
   }
+}
+
+/** Whether any local order references this PaymentIntent, or an invoice it paid (the references the legacy refund path
+ * looks its order up by). */
+async function referencedPayment(db: SupabaseClient, stripe: RefundStripe, scope: StripeScope, intent: string | null) {
+  if (!intent) return false;
+  if (await findStripeReference(db, 'payment', intent, scope)) return true;
+  const payments = await stripe.invoicePayments.list({ payment: { type: 'payment_intent', payment_intent: intent }, limit: 10 });
+  for (const row of payments.data) {
+    const invoice = id(row.invoice);
+    if (invoice && (await findStripeReference(db, 'payment', invoice, scope) || await findStripeReference(db, 'invoice', invoice, scope))) {
+      return true;
+    }
+  }
+  return false;
 }
 
 /** True when the payment belongs to a card order whose payment has not been recorded yet: a credit pack's

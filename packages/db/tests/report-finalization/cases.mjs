@@ -6,7 +6,7 @@ import {erase} from '../content-erasure/cases.mjs';
 const hash=body=>createHash('sha256').update(body).digest('hex');
 const original='## One\nOriginal confirmed facts.\n## Two\nKnown limitations.';
 const edited='## One\nR5_MANUAL_PRIVATE_BODY\n## Two\nManually retained limitations.';
-async function seed(db,completeness='complete',evidenceCount=0) {
+export async function seed(db,completeness='complete',evidenceCount=0) {
  const base=await fixture(db);
  const f=(await db.query('SELECT d7_test.artifacts($1) v',[base.actor])).rows[0].v;
  const project=randomUUID(),round=randomUUID(),confirmation=randomUUID(),execution=randomUUID();

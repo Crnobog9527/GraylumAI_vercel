@@ -17,6 +17,9 @@ export function syntheticSdk(createClient,profileId){
    assert.equal(method,'GET');
    return auth==='present'?response({id:profileId}):auth==='absent'?response({code:'user_not_found'},404):response({},503);
   }
+  // Library erasure (LIB-2a) also scans its own bucket; this synthetic account holds no library objects.
+  if(target.pathname==='/storage/v1/object/list-v2/library-documents')
+   return response({hasNext:false,nextCursor:null,folders:[],objects:[]});
   if(target.pathname==='/storage/v1/object/list-v2/ticket-attachments'){
    assert.ok(body.limit>=1&&body.limit<=1000);assert.equal(body.with_delimiter,false);assert.equal(body.offset,undefined);
    if(mode==='page_failure'&&body.cursor)return response({},403);

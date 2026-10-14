@@ -5,7 +5,9 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { getMembershipPlanButtonState } from '../../../../../apps/web/src/components/profile/subscriptionPlanButtonState';
+import {
+  getMembershipPlanButtonState, UNPAID_SUBSCRIPTION_BLOCKS_PURCHASE,
+} from '../../../../../apps/web/src/components/profile/subscriptionPlanButtonState';
 
 const baseEligibility = {
   planId: 'plan-pro',
@@ -85,7 +87,6 @@ describe('getMembershipPlanButtonState', () => {
     ['RENEWAL_RESTORE_REQUIRED', 'none', '请先恢复续费'],
     ['CURRENT_PLAN', 'none', '当前套餐'],
     ['DOWNGRADE_NOT_ALLOWED', 'none', '暂不支持降级'],
-    ['PAYMENT_ATTENTION_REQUIRED', 'resolvePaymentIssue', '请先处理付款异常'],
   ] as const)('maps %s to the matching blocked label', (reasonCode, action, label) => {
     const result = getMembershipPlanButtonState({
       eligibility: {
@@ -105,6 +106,24 @@ describe('getMembershipPlanButtonState', () => {
       canCreateCheckout: false,
       canChangeSubscriptionPlan: false,
       message: 'safe message',
+    });
+  });
+
+  it('explains an unsuccessful subscription payment in plain words instead of the server message', () => {
+    const result = getMembershipPlanButtonState({
+      eligibility: { ...baseEligibility, allowed: false, action: 'resolvePaymentIssue', reasonCode: 'PAYMENT_ATTENTION_REQUIRED' },
+      eligibilityLoading: false,
+      checkoutReady: true,
+      pending: false,
+    });
+
+    expect(result).toMatchObject({
+      disabled: true,
+      label: '请先处理旧订阅',
+      canCreateCheckout: false,
+      canChangeSubscriptionPlan: false,
+      message: UNPAID_SUBSCRIPTION_BLOCKS_PURCHASE,
+      contactSupport: true,
     });
   });
 });

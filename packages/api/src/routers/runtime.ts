@@ -52,7 +52,9 @@ const procedure=protectedProcedure.use(async({ctx,next,path})=>{
    ...(real?{real,paygHost:true}:{}),resumeWaitingOrganizer:(token:import('../services/runtime/paygRuntime').ResumeInput)=>executeOriginalExecution({
    admin:ctx.supabaseAdmin!,user:ctx.userScopedSupabase,actorId:ctx.user.id,budget:ctx.runtimeBudget,
    authorization:ctx.headers?.get('Authorization'),maintenanceEndpoint:endpoint,
-  },token.executionId,undefined,token),purposeBudgets:true,account:'runtime-local',costPerCall:'0.02',creditsPerUsd:'1000',multiplier:'1',maxCalls:3,maxOutputTokens:1000,inputBytes:32000,historyItems:100,searchEnabled:!real,workspaceContext:true};
+  },token.executionId,undefined,token),purposeBudgets:true,account:'runtime-local',costPerCall:'0.02',creditsPerUsd:'1000',multiplier:'1',maxCalls:3,maxOutputTokens:1000,inputBytes:32000,historyItems:100,searchEnabled:!real,workspaceContext:true,
+   // POSITIONING-GATE: free chat only (Decisions via the admitted model's OpenRouter key); reports skip it in admission.
+   positioningGate:{}};
   const admission=runtimeAdmissionService(ctx.userScopedSupabase,ctx.supabaseAdmin,admissionPolicy);
   const report=reportService(ctx.userScopedSupabase,ctx.supabaseAdmin,admissionPolicy);
   const executor=runtimeExecutor({database:ctx.supabaseAdmin,budget:ctx.runtimeBudget,actor,endpoint,
@@ -151,6 +153,17 @@ export const runtimeRouter=router({
   admin:ctx.supabaseAdmin!,user:ctx.userScopedSupabase,actorId:ctx.user.id,budget:ctx.runtimeBudget,
   authorization:ctx.headers?.get('Authorization'),maintenanceEndpoint:ctx.maintenanceEndpoint,
  },input.executionId,undefined,input)),
+ // Same execution and resume token as `resume`; only the delivery streams (CHAT-NATIVE-OUTPUT).
+ resumeStream:maintenanceProcedure.input(resumeInput.extend({textProtocol:z.literal('textDelta-v1').optional()})).mutation(async function*({ctx,input}){
+  const timing=ctx.runtimeBudget?.timing;
+  const {textProtocol,...token}=input;
+  try{yield* streamOriginalExecution(onProgress=>executeOriginalExecution({
+   admin:ctx.supabaseAdmin!,user:ctx.userScopedSupabase,actorId:ctx.user.id,budget:ctx.runtimeBudget,
+   authorization:ctx.headers?.get('Authorization'),maintenanceEndpoint:ctx.maintenanceEndpoint,
+  },token.executionId,onProgress,token),timing,'runtime.resumeStream',undefined,textProtocol,
+   contentVisibilityFence(ctx.supabaseAdmin!,ctx.user.id,token.executionId));}
+  finally{timing?.release();}
+ }),
  execute:executionProcedure.mutation(options=>executeOriginal(options)),
  executeStream:executionProcedure.mutation(async function*(options){
   // The route returns before this stream ends; release this stream's reference.
