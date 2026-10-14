@@ -8,7 +8,8 @@ import styles from './palette-switch-h.module.css';
 /*
  * Sample-only: lets the Owner compare sample H's three candidate palettes on the live page. It flips
  * `data-palette` on the page wrapper (the element carrying palettes.palette); the server HTML is the first
- * palette. The choice is kept in the address (?palette=) and, as a convenience, in this browser.
+ * palette. The choice is kept in the address (?palette=) and, as a convenience, in this browser. Render it last
+ * in the page: its block reserves room at the bottom so the pinned pill never covers the footer.
  * Remove this and the two unchosen palettes once one is picked.
  */
 
@@ -65,14 +66,16 @@ export function PaletteSwitchH() {
   };
 
   return (
-    <div ref={ref} role="group" aria-label="配色方案（样稿对比用）" className={styles.switch}>
-      <span className={styles.label}>配色</span>
-      {PALETTES.map(palette => (
-        <button key={palette.id} type="button" aria-pressed={active === palette.id} data-swatch={palette.id}
-          onClick={() => choose(palette.id)}>
-          <i aria-hidden="true" />{palette.label}
-        </button>
-      ))}
+    <div ref={ref} className={styles.room}>
+      <div role="group" aria-label="配色方案（样稿对比用）" className={styles.switch}>
+        <span className={styles.label}>配色</span>
+        {PALETTES.map(palette => (
+          <button key={palette.id} type="button" aria-pressed={active === palette.id} data-swatch={palette.id}
+            onClick={() => choose(palette.id)}>
+            <i aria-hidden="true" />{palette.label}
+          </button>
+        ))}
+      </div>
     </div>
   );
 }

@@ -1,5 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-/* PaletteSwitchH: a small glass pill pinned to the bottom of the screen, sample-only, not part of the design. */
+/* PaletteSwitchH: a small glass pill pinned to the bottom of the screen, sample-only, not part of the design.
+   .room sits after the footer and is as tall as the pill plus its gap, so the page can scroll the footer clear. */
+.room { position: relative; z-index: 1; height: calc(72px + env(safe-area-inset-bottom)); }
 .switch {
   position: fixed;
   bottom: max(14px, env(safe-area-inset-bottom));

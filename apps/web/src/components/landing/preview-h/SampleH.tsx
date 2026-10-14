@@ -37,7 +37,6 @@ export function SampleH({ data, siteName, membershipHref }: { data: LandingData;
   return (
     <DepthStage className={cn(light.light, displayFont.variable, palettes.palette, styles.page)}>
       <AuroraBackdrop />
-      <PaletteSwitchH />
       <nav aria-label="样稿切换" className={styles.sampleBar}>
         <span>不公开的风格样稿，文案为定稿原文</span>
         {SAMPLES.map(id => (
@@ -110,6 +109,7 @@ export function SampleH({ data, siteName, membershipHref }: { data: LandingData;
         </nav>
         <p>© 2026 Grayscale Luminary LLC</p>
       </footer>
+      <PaletteSwitchH />
     </DepthStage>
   );
 }
