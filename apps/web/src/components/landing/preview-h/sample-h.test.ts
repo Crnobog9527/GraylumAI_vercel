@@ -9,7 +9,8 @@ import { metadata } from '@/app/landing/preview/h/page';
 import { SCENES } from '@/components/landing/preview-g/scenes';
 import { TILT_MAX, tiltFor } from '@/components/public-site/motion/DepthStage';
 import { DigitRoll, splitUnits } from '@/components/public-site/motion/depth-text';
-import { FINAL_ACTION, HERO, HERO_H, HOW_IT_WORKS, PRICE_COMPARE, VOICE_WALL } from '@/lib/landing/landing-copy';
+import { FINAL_ACTION, HERO, HERO_H, HOW_IT_WORKS, PRICE_COMPARE, RISK_REVERSAL, VOICE_WALL } from '@/lib/landing/landing-copy';
+import { SIGNUP_CTA_HREF } from '@/lib/seo/content/shared';
 import { LANDING_FAQ_TITLE } from '@/lib/landing/landing-faq';
 import { FLOW_STEPS } from '@/lib/landing/landing-flow';
 import { LANDING_FEATURES, type LandingFlags } from '@/lib/landing/landing-flags';
@@ -50,9 +51,10 @@ describe('style sample H', () => {
     for (const copy of [HERO.promise, HERO.primaryCta, HERO.secondaryCta, ...data.notes.map(note => note.answer)]) {
       expect(html).toContain(escape(copy));
     }
-    // The Owner's first-screen pitch (2026-10-14), verbatim, and one CTA note on both buttons without the credits.
+    // The Owner's first-screen pitch (2026-10-14), verbatim, and one CTA note under every main button, without the credits.
     for (const copy of Object.values(HERO_H)) expect(html).toContain(escape(copy));
-    expect(html.split(HERO_H.ctaNote)).toHaveLength(3);
+    // First screen, end of module 3 and the close.
+    expect(html.split(HERO_H.ctaNote)).toHaveLength(4);
     const hero = html.slice(html.indexOf('<section aria-labelledby="hero-title"'), html.indexOf('</section>'));
     expect(hero).not.toContain('500 积分');
     expect(hero).not.toContain('随时能看、能导出，不会收回');
@@ -67,6 +69,21 @@ describe('style sample H', () => {
     // Motion is switched on by script only; the server HTML is the finished state.
     expect(html).not.toContain('data-motion');
     expect(html).not.toContain('data-play');
+  });
+
+  it('applies the diagnosis layout: no step cards on the first screen, anchors before plans, a button after module 3', () => {
+    const { data, html } = render(ALL_ON);
+    const hero = html.slice(html.indexOf('<section aria-labelledby="hero-title"'), html.indexOf('id="voice-title"'));
+    for (const step of data.flowSteps.slice(0, 3)) expect(hero).not.toContain(escape(step.demo));
+    const pricing = html.slice(html.indexOf('id="pricing"'));
+    expect(pricing.indexOf(escape(PRICE_COMPARE.lede))).toBeLessThan(pricing.indexOf('aria-label="Pro"'));
+    expect(pricing.indexOf('aria-label="Pro"')).toBeLessThan(pricing.indexOf(escape(RISK_REVERSAL.title)));
+    const module3 = html.slice(html.indexOf('id="how-it-works"'), html.indexOf('id="pricing"'));
+    expect(module3).toContain(`href="${escape(SIGNUP_CTA_HREF)}"`);
+    for (const part of data.promise) expect(module3).toContain(`<li>${escape(part.text)}</li>`);
+    // Only the first question starts open; every card of the voice wall is in the HTML.
+    expect(html.match(/<details[^>]* open=""/g)).toHaveLength(1);
+    for (const note of data.notes) expect(html).toContain(escape(note.quote));
   });
 
   it('shows every step as a selectable conversation with its verbatim title, demo line and note', () => {

@@ -98,24 +98,26 @@
 @media (min-width: 480px) { .headerLogin { display: inline-flex; } }
 @media (min-width: 900px) { .nav { display: flex; } }
 
-/* First screen: title and actions on the left, a lens with three glass steps floating at different depths on the
-   right, the live demo under both in a glass frame that tilts flat as it scrolls up. */
+/* First screen: title, promise, the Owner's pitch and the actions in one column (the pitch splits into who-for and
+   how-it-differs side by side on a wide screen), then the live demo in a glass frame that tilts flat as it scrolls. */
 .main { display: grid; grid-template-columns: minmax(0, 1fr); gap: clamp(44px, 6vw, 88px); padding-bottom: 24px; }
 .hero {
   display: grid; grid-template-columns: minmax(0, 1fr); gap: 20px; max-width: 1200px; width: 100%; margin: 0 auto;
   padding: clamp(28px, 5vw, 64px) clamp(16px, 3vw, 24px) 0;
 }
 .hero > * { min-width: 0; }
-@media (min-width: 960px) {
-  .hero { grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); column-gap: 40px; align-items: center; }
-  .heroDemo { grid-column: 1 / -1; }
-}
 .heroText { display: grid; gap: 16px; justify-items: start; }
 .heroTitle { margin: 0; font-size: clamp(40px, 6vw, 88px); line-height: 1.04; perspective: 800px; }
 .heroPromise { margin: 0; max-width: 24em; color: var(--h-body); font-size: clamp(16px, 1.55vw, 20px); font-weight: 500; line-height: 1.6; text-wrap: pretty; }
 /* The Owner's first-screen pitch (HERO_H): who it is for, how a coach differs, the result. */
 .heroPitch { display: grid; gap: 10px; max-width: 36em; padding-left: 16px; border-left: 2px solid var(--h-line); }
 .heroPitch p { margin: 0; text-wrap: pretty; }
+@media (min-width: 1024px) {
+  .heroPitch { grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); column-gap: 40px; max-width: 1040px; }
+  .heroAudience { grid-row: span 3; align-self: start; }
+  .heroPitch .heroDifference { margin-top: 0; }
+  .heroResult { grid-column: 2; }
+}
 .heroAudience { display: grid; gap: 4px; color: var(--h-muted); font-size: 14.5px; line-height: 1.7; }
 .heroAudience span { color: var(--h-ink); font-weight: 600; }
 .heroPitch .heroDifference { margin-top: 6px; }
@@ -125,37 +127,6 @@
 .heroActions { display: flex; flex-wrap: wrap; gap: 10px; }
 .heroNote { margin: 0; max-width: 40em; color: var(--h-muted); font-size: 13px; line-height: 1.65; }
 
-.stage { position: relative; display: grid; gap: 8px; }
-.lens { display: none; }
-.chip {
-  display: flex; align-items: flex-start; gap: 12px; padding: 12px 14px; border: 1px solid rgba(255, 255, 255, .8);
-  border-radius: 18px; background: rgba(255, 255, 255, .6); backdrop-filter: blur(var(--h-blur)) saturate(1.6);
-  -webkit-backdrop-filter: blur(var(--h-blur)) saturate(1.6);
-  box-shadow: inset 0 1px 0 #fff, 0 0 0 1px rgba(var(--h-shade), .05), 0 22px 40px -26px rgba(var(--h-shade), .4);
-}
-.chipIndex {
-  flex: none; display: grid; place-items: center; width: 30px; height: 30px; border-radius: 50%; background: var(--h-iris);
-  color: var(--h-mark-ink); font-size: 14px; font-weight: 800; font-variant-numeric: tabular-nums;
-}
-.chipText { display: grid; gap: 2px; min-width: 0; }
-.chipText b { font-size: 15px; line-height: 1.4; }
-.chipText small { color: var(--h-muted); font-size: 12.5px; line-height: 1.55; }
-@media (min-width: 960px) {
-  .stage { display: block; min-height: 440px; perspective: 1000px; }
-  .lens {
-    position: absolute; top: 50%; left: 50%; display: block; width: 360px; height: 360px; margin: -180px 0 0 -180px;
-    overflow: hidden; border-radius: 50%; background: rgba(255, 255, 255, .32);
-    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .9), inset 0 -40px 80px rgba(var(--bd-tint), .3), 0 40px 90px -40px rgba(var(--h-shade), .4);
-  }
-  .lens i {
-    position: absolute; inset: -20%; background: var(--h-iris-conic); opacity: .42;
-    mask-image: radial-gradient(closest-side, transparent 62%, #000 64%, #000 72%, transparent 74%);
-  }
-  .chipSlot { position: absolute; width: 290px; }
-  .chipSlot:nth-of-type(1) { top: 4%; left: 0; }
-  .chipSlot:nth-of-type(2) { top: 40%; right: -8px; }
-  .chipSlot:nth-of-type(3) { bottom: 2%; left: 12%; }
-}
 .heroDemo { margin-top: 8px; perspective: 1400px; }
 .demoFrame {
   padding: 8px; border: 1px solid rgba(255, 255, 255, .85); border-radius: 26px; background: rgba(255, 255, 255, .45);
@@ -171,19 +142,25 @@
 .sectionHead { display: grid; gap: 10px; }
 .sectionHead > * { min-width: 0; }
 @media (min-width: 900px) { .sectionHead { grid-template-columns: minmax(0, 6fr) minmax(0, 6fr); gap: 48px; align-items: end; } }
-.promise { margin: 0; color: var(--h-body); font-size: 15.5px; line-height: 1.8; text-wrap: pretty; }
+.promise { display: grid; gap: 6px; margin: 0; padding: 0; color: var(--h-body); font-size: 15.5px; line-height: 1.7; list-style: none; }
+.promise li { position: relative; padding-left: 18px; text-wrap: pretty; }
+.promise li::before { content: ''; position: absolute; top: .72em; left: 2px; width: 6px; height: 6px; border-radius: 50%; background: var(--h-ring); }
+.promise li:last-child { color: var(--h-ink); font-weight: 600; }
+.sectionCta { display: grid; justify-items: center; gap: 10px; margin-top: 32px; text-align: center; }
 
 /* Section 2: complaint and answer on one glass card each */
-.wall {
-  display: grid; grid-auto-flow: column; grid-auto-columns: 84%; gap: 12px; margin: 22px -16px 0; padding: 4px 16px 12px;
-  overflow-x: auto; scroll-snap-type: x mandatory; scroll-padding-inline: 16px; scrollbar-width: thin; list-style: none; perspective: 1200px;
+.wall { display: grid; gap: 12px; margin: 22px 0 0; padding: 0; list-style: none; perspective: 1200px; }
+@media (min-width: 640px) { .wall { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (min-width: 960px) { .wall { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; margin-top: 26px; } }
+@media (max-width: 959px) { .wall[data-folded] > li:nth-child(n + 4) { display: none; } }
+.wallMore {
+  display: flex; align-items: center; justify-content: center; gap: 6px; width: 100%; min-height: 44px; margin-top: 12px;
+  border: 1px solid rgba(255, 255, 255, .85); border-radius: 999px; background: rgba(255, 255, 255, .6); color: var(--h-ink);
+  font: inherit; font-size: 14px; font-weight: 600; cursor: pointer; box-shadow: 0 0 0 1px rgba(var(--h-shade), .08);
 }
-@media (min-width: 640px) { .wall { grid-auto-columns: 46%; } }
-@media (min-width: 960px) {
-  .wall { grid-auto-flow: row; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; margin: 26px 0 0; padding: 0; overflow: visible; }
-}
+@media (min-width: 960px) { .wallMore { display: none; } }
 @media (max-width: 959px) { .wall > .wallItem { animation: none; } }
-.wallItem { display: grid; scroll-snap-align: start; }
+.wallItem { display: grid; }
 .wallCard { display: grid; grid-template-rows: auto 1fr; overflow: hidden; border-radius: 22px; }
 .note { margin: 0; padding: 16px 18px 12px; background: var(--h-note-bg); color: var(--h-note-ink); }
 .note blockquote { margin: 0; font-size: 14.5px; font-weight: 500; line-height: 1.7; }
@@ -225,8 +202,13 @@
 .founderLine span { margin-left: 8px; color: var(--h-muted); font-size: 13px; font-weight: 400; }
 .priceGrid { display: grid; gap: 16px; margin-top: 22px; }
 .priceGrid > * { min-width: 0; }
-@media (min-width: 1024px) { .priceGrid { grid-template-columns: minmax(0, 8fr) minmax(0, 4fr); gap: 20px; align-items: start; } }
-.priceSide { display: grid; gap: 12px; }
+/* Anchors as a strip of figures on a wide screen: four across, each label over its price. */
+@media (min-width: 900px) {
+  .compare ul { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); column-gap: 20px; }
+  .compare li { align-content: start; border-bottom: 0; }
+  .compare li span:last-child { font-size: 17px; font-weight: 700; }
+  .risk ul { grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 28px; }
+}
 .compare, .risk { padding: 16px 18px; border-radius: 22px; }
 .compareLede { margin: 0; font-size: 14.5px; font-weight: 600; }
 .compare ul { margin: 6px 0 0; padding: 0; list-style: none; }
@@ -348,22 +330,16 @@
   .headerActions .pill { min-height: 38px; padding: 0 14px; font-size: 13.5px; }
   .heroActions { width: 100%; }
   .heroActions .pill { flex: 1 1 0; padding: 0 12px; }
-  .chip { padding: 10px 12px; border-radius: 16px; }
 }
 
 /* Motion that belongs to this sample's layout (the shared pieces live in depth-motion.module.css). */
 @media (prefers-reduced-motion: no-preference) {
   /* First-screen text slides but never starts transparent, so it paints (and counts as painted) at once. */
-  .heroPromise, .heroPitch, .heroActions, .heroNote, .stage { animation: slideIn .9s var(--h-ease) both; }
+  .heroPromise, .heroPitch, .heroActions, .heroNote { animation: slideIn .9s var(--h-ease) both; }
   .heroPromise { animation-delay: .12s; }
   .heroPitch { animation-delay: .16s; }
   .heroActions { animation-delay: .22s; }
   .heroNote { animation-delay: .28s; }
-  .stage { animation: stageIn 1.2s var(--h-ease) .1s both; }
-  .chip { animation: bob 7s ease-in-out infinite alternate; }
-  .chipSlot:nth-of-type(2) .chip { animation-duration: 8.5s; animation-delay: -3s; }
-  .chipSlot:nth-of-type(3) .chip { animation-duration: 6.4s; animation-delay: -5s; }
-  .lens i { animation: spin 16s linear infinite; }
   .pillGlow::before { animation: glowPulse 3.2s ease-in-out infinite alternate; }
   .planEdge i { animation: spin 7s linear infinite; }
   .finalLight i { animation: bob 9s ease-in-out infinite alternate; }
@@ -375,7 +351,6 @@
   .pill, .billing label, .billingThumb, .faqItem summary svg, .reportTabs button { transition: none; }
 }
 @keyframes slideIn { from { transform: translate3d(0, 14px, 0); } to { transform: none; } }
-@keyframes stageIn { from { transform: perspective(1000px) translate3d(0, 24px, -60px) rotateX(10deg); } to { transform: none; } }
 @keyframes bob { from { transform: translate3d(0, -7px, 0); } to { transform: translate3d(0, 7px, 0); } }
 @keyframes spin { to { transform: rotate(1turn); } }
 @keyframes glowPulse { from { opacity: .45; } to { opacity: .85; } }

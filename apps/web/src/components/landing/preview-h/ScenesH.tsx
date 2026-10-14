@@ -11,29 +11,37 @@ import { sceneTimeline, type LineTiming } from './scene-timing';
 import styles from './scenes-h.module.css';
 
 const reducedMotion = () => Boolean(window.matchMedia?.('(prefers-reduced-motion: reduce)').matches);
+/** Pause after a scene finishes before the next one starts on its own. */
+export const AUTO_PAUSE_MS = 2200;
 
 /**
  * Module 3's nine steps as conversations (the same scripts as sample G): a glass rail of the nine titles (chips on
  * a phone) and one chat window per step. Every panel is in the server HTML (inactive ones `hidden`), so all the
  * copy is readable without JavaScript. Once the window scrolls into view, the open scene plays: your messages pop
  * in, the coach shows typing dots and types its reply, cards rise in after it. Switching scenes replays the new
- * one. With reduced motion nothing plays and every message is simply there.
+ * one. While nobody has touched it, a finished scene hands over to the next after a short pause (only while the
+ * window is on screen, and not past the last step); the first click, key or "下一个" hands control to the visitor.
+ * With reduced motion nothing plays and every message is simply there.
  */
 export function ScenesH({ steps }: { steps: readonly FlowStep[] }) {
   const [active, setActive] = useState(0);
   // 0: show everything at rest. Above 0: a play token; bumping it replays the open scene from the start.
   const [run, setRun] = useState(0);
+  // Scenes advance on their own until the visitor picks one.
+  const [auto, setAuto] = useState(true);
+  const [visible, setVisible] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
+  const tabsRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const node = rootRef.current;
     if (!node || reducedMotion() || typeof IntersectionObserver === 'undefined') return;
     const media = window.matchMedia?.('(prefers-reduced-motion: reduce)');
     const observer = new IntersectionObserver(entries => {
-      if (!entries.some(entry => entry.isIntersecting)) return;
-      observer.disconnect();
-      setRun(token => token || 1);
-    }, { threshold: 0.3 });
+      const shown = entries.some(entry => entry.isIntersecting);
+      setVisible(shown);
+      if (shown) setRun(token => token || 1);
+    }, { rootMargin: '-20% 0px -30% 0px' });
     observer.observe(node);
     const onPreference = () => { if (reducedMotion()) setRun(0); };
     media?.addEventListener?.('change', onPreference);
@@ -43,10 +51,32 @@ export function ScenesH({ steps }: { steps: readonly FlowStep[] }) {
     };
   }, []);
 
+  const current = Math.min(active, Math.max(steps.length - 1, 0));
+  const last = current >= steps.length - 1;
+  const currentId = steps[current]?.id;
+
+  useEffect(() => {
+    if (!auto || !visible || run === 0 || last || !currentId) return;
+    const { total } = sceneTimeline(findScene(currentId)?.lines ?? []);
+    const timer = window.setTimeout(() => {
+      const index = current + 1;
+      setActive(index);
+      setRun(token => token + 1);
+      // Bring the new chip into the phone's scrolling row without moving the page.
+      const tabs = tabsRef.current;
+      const tab = document.getElementById(`h-${steps[index].id}-tab`);
+      if (tabs && tab && tabs.scrollWidth > tabs.clientWidth) {
+        const left = tabs.scrollLeft + tab.getBoundingClientRect().left - tabs.getBoundingClientRect().left - 16;
+        tabs.scrollTo({ left, behavior: 'smooth' });
+      }
+    }, total + AUTO_PAUSE_MS);
+    return () => window.clearTimeout(timer);
+  }, [auto, visible, run, last, current, currentId, steps]);
+
   if (steps.length === 0) return null;
-  const current = Math.min(active, steps.length - 1);
 
   function select(index: number, focus = false) {
+    setAuto(false);
     setActive(index);
     setRun(token => (token > 0 ? token + 1 : 0));
     if (!focus) return;
@@ -65,7 +95,7 @@ export function ScenesH({ steps }: { steps: readonly FlowStep[] }) {
 
   return (
     <div ref={rootRef} className={styles.scenes}>
-      <div role="tablist" aria-label="九个场景" aria-orientation="vertical" className={styles.toc}>
+      <div ref={tabsRef} role="tablist" aria-label="九个场景" aria-orientation="vertical" className={styles.toc}>
         {steps.map((step, index) => (
           <button key={step.id} id={`h-${step.id}-tab`} type="button" role="tab" aria-selected={index === current}
             aria-controls={`h-${step.id}-panel`} tabIndex={index === current ? 0 : -1}

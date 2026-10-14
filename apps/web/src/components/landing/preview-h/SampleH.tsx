@@ -1,6 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import Link from 'next/link';
-import type { CSSProperties } from 'react';
 import { ArrowDown, ArrowRight } from 'lucide-react';
 import light from '@/components/design/light-tokens.module.css';
 import { LazyDemo } from '@/components/landing/demo/LazyDemo';
@@ -33,7 +32,6 @@ export type LandingData = ReturnType<typeof buildLandingPageData>;
  * Copy and section order are the landing page's.
  */
 export function SampleH({ data, siteName, membershipHref }: { data: LandingData; siteName: string; membershipHref: string }) {
-  const previewSteps = data.flowSteps.slice(0, 3);
   return (
     <DepthStage className={cn(light.light, displayFont.variable, palettes.palette, styles.page)}>
       <AuroraBackdrop />
@@ -81,20 +79,6 @@ export function SampleH({ data, siteName, membershipHref }: { data: LandingData;
             <p className={styles.heroNote}>{HERO_H.ctaNote}</p>
           </div>
 
-          {previewSteps.length > 0 ? (
-            <div className={styles.stage} aria-hidden="true">
-              <span className={styles.lens}><i /></span>
-              {previewSteps.map((step, index) => (
-                <div key={step.id} className={cn(styles.chipSlot, depthClass.parallax)}
-                  style={{ '--speed': [0.5, 1.1, 0.8][index], '--slot': index } as CSSProperties}>
-                  <div className={styles.chip}>
-                    <span className={styles.chipIndex}>{index + 1}</span>
-                    <span className={styles.chipText}><b>{step.title}</b><small>{step.demo}</small></span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          ) : null}
 
           <div className={cn(styles.heroDemo, depthClass.depth)}>
             <div className={styles.demoFrame}><LazyDemo /></div>

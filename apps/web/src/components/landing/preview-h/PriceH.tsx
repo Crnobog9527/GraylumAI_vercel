@@ -12,9 +12,9 @@ import { Heading } from './SectionsH';
 import styles from './h.module.css';
 
 /**
- * Section 4 in one screen on desktop: the plan cards (first on a phone too), then the "if you hired someone"
- * anchors and "先聊后买" in a narrow glass column beside them. Same server data as the landing page; prices roll in
- * like an odometer and the recommended plan carries a slowly turning light edge.
+ * Section 4 in the final copy's order: the "if you hired someone" anchors first (a strip of figures, so $29 is read
+ * against them), then the plan cards, then "先聊后买" right under the cards' buttons. Same server data as the landing
+ * page; prices roll in like an odometer and the recommended plan carries a slowly turning light edge.
  */
 export function PriceH({ data, membershipHref }: { data: LandingData; membershipHref: string }) {
   const { pricing, compareRows: rows } = data;
@@ -31,6 +31,20 @@ export function PriceH({ data, membershipHref }: { data: LandingData; membership
       </div>
 
       <div className={styles.priceGrid}>
+        {rows.length > 0 ? (
+          <div className={cn(styles.compare, styles.glass, depthClass.reveal)} data-reveal="">
+            <p className={styles.compareLede}>{PRICE_COMPARE.lede}</p>
+            <ul>
+              {rows.map((row, index) => (
+                <li key={row.sourceId} className={depthClass.reveal} data-reveal="" style={{ '--d': index } as CSSProperties}>
+                  <span>{row.label}<sup><a href={`#h-source-${row.sourceId}`} aria-label={`出处 ${index + 1}`}>{index + 1}</a></sup></span>
+                  <span>{row.price}</span>
+                </li>
+              ))}
+            </ul>
+            {pricing.proMonthly !== null ? <p className={styles.ownPrice}>{PRICE_COMPARE.ownPrice(formatUsd(pricing.proMonthly))}</p> : null}
+          </div>
+        ) : null}
         {pricing.cards.length > 0 ? (
           <PlanCardsH cards={pricing.cards} yearlyBadge={pricing.yearlyBadge} showResult={data.showResult} membershipHref={membershipHref} />
         ) : (
@@ -38,25 +52,9 @@ export function PriceH({ data, membershipHref }: { data: LandingData; membership
             会员方案暂时读不到，请稍后刷新，或先看<Link href="/landing/pricing">价格页</Link>。
           </p>
         )}
-        <div className={styles.priceSide}>
-          {rows.length > 0 ? (
-            <div className={cn(styles.compare, styles.glass, depthClass.reveal)} data-reveal="">
-              <p className={styles.compareLede}>{PRICE_COMPARE.lede}</p>
-              <ul>
-                {rows.map((row, index) => (
-                  <li key={row.sourceId} className={depthClass.reveal} data-reveal="" style={{ '--d': index } as CSSProperties}>
-                    <span>{row.label}<sup><a href={`#h-source-${row.sourceId}`} aria-label={`出处 ${index + 1}`}>{index + 1}</a></sup></span>
-                    <span>{row.price}</span>
-                  </li>
-                ))}
-              </ul>
-              {pricing.proMonthly !== null ? <p className={styles.ownPrice}>{PRICE_COMPARE.ownPrice(formatUsd(pricing.proMonthly))}</p> : null}
-            </div>
-          ) : null}
-          <div className={cn(styles.risk, styles.glass, depthClass.reveal)} data-reveal="" style={{ '--d': 1 } as CSSProperties}>
-            <p className={styles.riskTitle}>{RISK_REVERSAL.title}</p>
-            <ul>{data.risk.map(point => <li key={point.text}><Check size={15} aria-hidden="true" />{point.text}</li>)}</ul>
-          </div>
+        <div className={cn(styles.risk, styles.glass, depthClass.reveal)} data-reveal="" style={{ '--d': 1 } as CSSProperties}>
+          <p className={styles.riskTitle}>{RISK_REVERSAL.title}</p>
+          <ul>{data.risk.map(point => <li key={point.text}><Check size={15} aria-hidden="true" />{point.text}</li>)}</ul>
         </div>
       </div>
 
