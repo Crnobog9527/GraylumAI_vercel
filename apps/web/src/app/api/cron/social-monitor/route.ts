@@ -27,21 +27,22 @@ export async function GET(request: Request) {
   } catch {
     return NextResponse.json({ error: 'Social monitor job failed' }, { status: 500 });
   }
+  // A failed final write fails the response too, so a "running" record never sits behind a reported success.
   const finish = (status: 'success' | 'error', summary: Record<string, unknown>, error: string | null = null) =>
-    finishScheduledJobRun({ supabase: client, runId, status, summary, error }).catch(() => undefined);
+    finishScheduledJobRun({ supabase: client, runId, status, summary, error });
   const deps = await loadPostForMeDeps().catch(() => null);
   // No Post for Me key in this environment: nothing to clean at the provider yet.
-  if (!deps) {
-    await finish('success', { skipped: 'POSTFORME_NOT_CONFIGURED' });
-    return NextResponse.json({ success: true, skipped: 'POSTFORME_NOT_CONFIGURED' });
-  }
   try {
+    if (!deps) {
+      await finish('success', { skipped: 'POSTFORME_NOT_CONFIGURED' });
+      return NextResponse.json({ success: true, skipped: 'POSTFORME_NOT_CONFIGURED' });
+    }
     const report = await runSocialMonitorJob(client, deps, Date.now() + 240_000);
     const success = report.failures.length === 0;
     await finish(success ? 'success' : 'error', report, success ? null : `FAILED_STEPS:${report.failures.join(',')}`);
     return NextResponse.json({ success, ...report }, { status: success ? 200 : 500 });
   } catch {
-    await finish('error', {}, 'SOCIAL_MONITOR_FAILED');
+    await finish('error', {}, 'SOCIAL_MONITOR_FAILED').catch(() => undefined);
     return NextResponse.json({ error: 'Social monitor job failed' }, { status: 500 });
   }
 }

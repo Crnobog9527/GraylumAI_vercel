@@ -7,12 +7,21 @@ import type { ClientDeps } from './postForMe/client';
  * keys are entered in the admin, not in Vercel environment variables.
  *
  * 未完成 / UNFINISHED: #975 is not merged yet. Until it is, these readers only use the server environment, and only
- * outside production (staging and local testing). In production they report "not configured", so nothing depends on
+ * outside the real production site (staging project, previews and local testing). In production they report "not configured", so nothing depends on
  * environment variables there. After #975 merges, replace the bodies with its admin secret reader (slot 'postforme'
  * for the API key, and a webhook-secret slot to be added there) and keep the environment fallback non-production only.
  */
 type Env = Record<string, string | undefined>;
-const productionLike = (env: Env) => env.VERCEL_ENV === 'production';
+// The separate staging project serves the staging branch from Vercel's "production" environment
+// (docs/DEPLOYMENT.md), so the label alone cannot tell staging from the real production site. The fallback is
+// allowed off Vercel (local tests), on preview deployments, and on exactly the staging project's domain and branch.
+const STAGING_PRODUCTION_URL = 'auth-staging.graylum.com';
+function environmentFallbackAllowed(env: Env): boolean {
+  if (env.VERCEL !== '1') return env.VERCEL_ENV !== 'production';
+  if (env.VERCEL_ENV === 'preview' || env.VERCEL_ENV === 'development') return true;
+  return env.VERCEL_PROJECT_PRODUCTION_URL === STAGING_PRODUCTION_URL && env.VERCEL_GIT_COMMIT_REF === 'staging';
+}
+const productionLike = (env: Env) => !environmentFallbackAllowed(env);
 
 export async function readPostForMeApiKey(env: Env = process.env): Promise<string | null> {
   if (productionLike(env)) return null;

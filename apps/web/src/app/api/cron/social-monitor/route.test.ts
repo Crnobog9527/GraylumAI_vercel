@@ -50,6 +50,12 @@ it('runs the job within its 240-second budget and fails the run when a step fail
     error: 'FAILED_STEPS:sweep' }));
 });
 
+it('a failed run-record write fails the response instead of reporting success', async () => {
+  mocks.run.mockResolvedValue({ providerWork: null, attempts: null, sweep: null, sweepDeleteEnabled: false, failures: [] });
+  mocks.finish.mockRejectedValueOnce(new Error('write failed'));
+  expect((await call()).status).toBe(500);
+});
+
 it('is scheduled once a day, apart from the other daily jobs', () => {
   const config = JSON.parse(readFileSync('vercel.json', 'utf8'));
   expect(config.crons).toContainEqual({ path: '/api/cron/social-monitor', schedule: '0 7 * * *' });
