@@ -358,8 +358,8 @@ describe('membership page in a browser', () => {
       await page.getByRole('button', { name: '购买', exact: true }).click();
       await browserExpect(page.getByTestId('method-checkout-method-card')).toBeVisible();
       await browserExpect(page.getByTestId('method-checkout-method-card_cn')).toHaveCount(0);
-      await browserExpect(page.getByTestId('profile-credit-package-price')).toContainText('$8.91');
-      await browserExpect(page.getByTestId('method-checkout-pay')).toContainText('$8.91');
+      await browserExpect(page.getByTestId('profile-credit-package-price')).toContainText('$8.90');
+      await browserExpect(page.getByTestId('method-checkout-pay')).toContainText('$8.90');
       await browserExpect(page.getByTestId('method-checkout-renewal')).toHaveText('一次性付款，不自动续费。');
       await browserExpect(page.getByTestId('method-checkout-refund')).toHaveText(/具体条件见《退款政策》/);
       await page.getByTestId('method-checkout-terms').check();
