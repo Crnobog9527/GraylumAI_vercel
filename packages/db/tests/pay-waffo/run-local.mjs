@@ -14,6 +14,8 @@ import { catalogCases } from './catalog.mjs';
 import { refundCases } from './refunds.mjs';
 import { stripeMpCases } from './stripe-mp.mjs';
 import { stripeMpCheckoutCases } from './stripe-mp-checkout.mjs';
+import { stripeMpFulfillCases } from './stripe-mp-fulfill.mjs';
+import { stripeMpRenewalCases } from './stripe-mp-renewal.mjs';
 import { POSTGRES_IMAGE } from '../v3/images.mjs';
 import { buildFromFiles, installPgCronStub } from '../baseline/build-from-files.mjs';
 
@@ -47,7 +49,8 @@ try {
   const before = fingerprint();
   // Later migrations replace 0204's routing and admission; replay the whole chain to stay at the latest state.
   for (const file of ['0204_pay_waffo_qualification.sql', '0211_pay_waffo_delivery.sql', '0214_pay_waffo_renewal_grace.sql',
-    '0221_pay_stripe_mp_routing.sql', '0222_pay_stripe_mp_checkout.sql']) {
+    '0221_pay_stripe_mp_routing.sql', '0222_pay_stripe_mp_checkout.sql',
+    '0237_pay_stripe_mp_card_packs.sql', '0238_pay_stripe_mp_renewal.sql']) {
     sql(readFileSync(resolve(root, 'packages/db/migrations', file),'utf8'));
   }
   assert.deepEqual(fingerprint(),before,'new migration repeat preserves structure');
@@ -96,6 +99,8 @@ try {
   cases.push(...await refundCases({admin,service,connect}));
   cases.push(...await stripeMpCases({admin,service,connect}));
   cases.push(...await stripeMpCheckoutCases({admin,service,connect}));
+  cases.push(...await stripeMpFulfillCases({admin,service,connect}));
+  cases.push(...await stripeMpRenewalCases({admin,service,connect}));
   console.log(JSON.stringify({result:'PASS',replay:report,
     cases:['event-idempotency','event-conflict','test-live-isolation','refund-event-not-payment-dedup',
       'service-only-receipt','durable-lookup-refs-no-contact-data','route-version-cas','route-delete-denied',...scopedCases,...cases]}));

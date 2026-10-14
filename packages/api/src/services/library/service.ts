@@ -8,6 +8,7 @@ import { cleanupLibrary } from './cleanup';
 import { pdfUpload } from './pdfUpload';
 import { wordUpload } from './wordUpload';
 import { libraryRpc } from './rpc';
+import { scheduleErasureManifestSync } from '../accountErasure/offdbManifest';
 import { libraryStorage, type LibraryStorage } from './storage';
 
 type LibraryItem = {
@@ -30,6 +31,7 @@ export function libraryService(client: SupabaseClient, actorId: string, storage:
   const sweep = () => cleanupLibrary(client, { actorId, limit: 4, budgetMs: 5000, storage });
   const remove = async (documentId: string, unfinishedOnly = false) => {
     const result = await libraryRpc<{ status: string }>(client, 'library_delete', { a: actorId, did: documentId, unfinished_only: unfinishedOnly });
+    if (result.status === 'deleting') scheduleErasureManifestSync(client);
     await cleanupLibrary(client, { actorId, documentId, limit: 1, storage });
     return result;
   };

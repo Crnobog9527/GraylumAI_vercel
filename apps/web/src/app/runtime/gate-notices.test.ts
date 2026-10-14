@@ -165,3 +165,22 @@ it('a model without a per-call billing profile shows the real reason instead of 
   expect(runtimeAdmissionNotice(Object.assign(new Error(RUNTIME_PAYG_PROFILE_REQUIRED_MESSAGE),
     { data: { code: 'PRECONDITION_FAILED', path: 'runtime.execute' } }))).toBeNull();
 });
+
+// POSITIONING-GATE step 2: readable Chinese text until the step-3 guide card, never the code.
+describe('positioning refusal notice', () => {
+  const server = 'POSITIONING_REQUIRED：为自己的账号做社媒运营之前，需要先完成定位，或者导入你已有的定位。本次没有扣积分。';
+  it('shows the fixed notice for an admission refusal and a refunded round', async () => {
+    const { POSITIONING_REQUIRED_NOTICE } = await import('./gate-notices');
+    const notice = runtimeAdmissionNotice(prepareRefusal('PRECONDITION_FAILED', server));
+    expect(notice).toBe(POSITIONING_REQUIRED_NOTICE);
+    expect(notice).not.toMatch(/[A-Z_]{6,}/);
+    expect(notice).toContain('没有扣积分');
+    expect(runtimeExecutionNotice({ state: 'cancelled', unavailable: 'positioning_required', code: 'POSITIONING_REQUIRED' }))
+      .toBe(POSITIONING_REQUIRED_NOTICE);
+  });
+  it('does not claim a positioning refusal for another path or error code', () => {
+    expect(runtimeAdmissionNotice(Object.assign(new Error(server), { data: { code: 'PRECONDITION_FAILED', path: 'opc.prepareStep' } }))
+      ?? '').not.toContain('账号定位');
+    expect(runtimeAdmissionNotice(prepareRefusal('INTERNAL_SERVER_ERROR', server)) ?? '').not.toContain('账号定位');
+  });
+});

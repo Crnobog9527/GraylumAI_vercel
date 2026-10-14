@@ -4,6 +4,7 @@ import { libraryRpc } from './rpc';
 import { canonicalPath } from './content';
 import { libraryStorage, type LibraryStorage } from './storage';
 import { startScheduledJobRun, finishScheduledJobRun } from '../scheduledJobRuns';
+import { scheduleErasureManifestSync } from '../accountErasure/offdbManifest';
 
 type Reservation = {
   actor_id: string; document_id: string; original_path: string; text_path: string | null;
@@ -32,6 +33,8 @@ export async function cleanupLibrary(client: SupabaseClient, options: {
         // A stale uploading candidate may already have published. The locked RPC decides;
         // never touch Storage unless that transaction actually marked it for deletion.
         row.cleanup = deletion.status === 'deleting';
+        // Open-account expiry deletions are recorded for the off-database manifest (0227).
+        if (row.cleanup && !row.closed) scheduleErasureManifestSync(client);
       }
       let absent = false;
       if (row.cleanup) {

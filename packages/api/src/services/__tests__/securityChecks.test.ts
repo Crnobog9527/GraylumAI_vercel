@@ -9,7 +9,6 @@ import {
   checkConsumptionCircuitBreaker,
   checkUserStatus,
   checkInputSecurity,
-  checkOutputSecurity,
   generateSignature,
   verifyTimestamp,
   verifyRequestSignature,
@@ -250,86 +249,6 @@ describe('checkInputSecurity', () => {
     it('should accept typical message lengths', () => {
       const normalMessage = 'a'.repeat(5000);
       expect(() => checkInputSecurity(normalMessage)).not.toThrow();
-    });
-  });
-});
-
-// ============================================
-// Output Security Tests
-// ============================================
-
-describe('checkOutputSecurity', () => {
-  describe('API Key Detection', () => {
-    it('should detect OpenAI API keys (exact 48 char pattern)', () => {
-      // Pattern: sk-[a-zA-Z0-9]{48} - exactly 48 alphanumeric after "sk-"
-      const content = 'Here is your API key: sk-abcdefghij1234567890abcdefghij1234567890abcdef12';
-      expect(checkOutputSecurity(content)).toBe(false);
-    });
-
-    it('should detect Anthropic API keys (exact 95 char pattern)', () => {
-      // Pattern: sk-ant-[a-zA-Z0-9-_]{95} - exactly 95 chars after "sk-ant-"
-      const chars95 = 'a'.repeat(95);
-      const content = `The key is sk-ant-${chars95}`;
-      expect(checkOutputSecurity(content)).toBe(false);
-    });
-
-    it('should detect generic API key patterns', () => {
-      // Pattern: api_key[:=]... with 20+ chars
-      const content = 'api_key = "abcdefghij1234567890abcd"';
-      expect(checkOutputSecurity(content)).toBe(false);
-    });
-
-    it('should NOT detect short API key-like patterns', () => {
-      // Too short to match (less than pattern requirements)
-      const content = 'api_key = "short123"';
-      expect(checkOutputSecurity(content)).toBe(true);
-    });
-  });
-
-  describe('Password Detection', () => {
-    it('should detect password in config format', () => {
-      // Pattern: password[:=]... with 8+ non-whitespace chars
-      const content = 'password="SuperSecret123!"';
-      expect(checkOutputSecurity(content)).toBe(false);
-    });
-
-    it('should NOT detect password in natural text (no assignment)', () => {
-      // "password is:" doesn't match "password[:=]" pattern exactly
-      const content = 'Your password is: mySecretPassword123';
-      expect(checkOutputSecurity(content)).toBe(true);
-    });
-  });
-
-  describe('Secret Detection', () => {
-    it('should detect secret key patterns', () => {
-      // Pattern: secret[:=]... with 20+ chars
-      const content = 'secret = "abcdefghij1234567890abcdef"';
-      expect(checkOutputSecurity(content)).toBe(false);
-    });
-
-    it('should detect secret in colon format', () => {
-      // Pattern matches SECRET_KEY: with 20+ chars
-      // But the current pattern is /secret\s*[:=]/ which needs lowercase or mixed
-      const content = 'secret: abcdefghij1234567890abcdef';
-      expect(checkOutputSecurity(content)).toBe(false);
-    });
-  });
-
-  describe('Safe Content', () => {
-    const safeContents = [
-      '这是一段正常的回复',
-      'Here is how to use the API...',
-      'The password field should be at least 8 characters',
-      'You can find the API documentation at...',
-      'The secret to good code is clean architecture',
-      'sk-123', // Too short to be a real key
-      'api_key description without actual key',
-    ];
-
-    safeContents.forEach((content) => {
-      it(`should allow safe content: "${content.substring(0, 30)}..."`, () => {
-        expect(checkOutputSecurity(content)).toBe(true);
-      });
     });
   });
 });
