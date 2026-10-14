@@ -224,7 +224,7 @@ describe('SubscriptionCard catalog availability', () => {
 
 // Real browser: the SubscriptionCard and CreditStatsCard bundled with a server double.
 // window.__pay holds the answers (membership, search, checkout mode) and records what was sent.
-describe('membership page in a browser', () => {
+describe('membership page in a local browser', () => {
   let browser: Browser;
   let code: string;
 
@@ -253,6 +253,7 @@ describe('membership page in a browser', () => {
           getMembershipEligibilityMatrix: { useQuery: () => query({ entries: state.eligibility ?? [] }) },
           methodCheckout: mutation(async input => { state.checkouts.push(input); window.recordCheckout?.(input);
             if (state.checkoutError) throw Object.assign(new Error(state.checkoutError.message), { data: { code: state.checkoutError.code } });
+            if (state.recovery) return { orderId: 'o1', state: 'recovery_required', url: null };
             return { orderId: 'o1', state: 'open', url: 'https://checkout.stripe.com/c/pay/cs_test_9' }; }),
           getSubscriptionManagement: { useQuery: () => query({ available: false }) },
           createCustomerPortalSession: mutation(async () => ({})),
@@ -459,6 +460,25 @@ describe('membership page in a browser', () => {
       } finally { await page.close(); }
     }
   }, 60_000);
+
+  it('keeps a recovery_required purchase locked after the dialog is closed and reopened', async () => {
+    const { page, errors } = await open({ recovery: true });
+    try {
+      const buy = page.getByTestId('profile-membership-plan-pro').getByRole('button', { name: '开通' });
+      await buy.click();
+      await page.getByTestId('method-checkout-terms').check();
+      await page.getByTestId('method-checkout-pay').click();
+      await browserExpect(page.getByTestId('method-checkout-outcome')).toContainText('请不要重新下单');
+      await page.keyboard.press('Escape');
+      await browserExpect(page.getByTestId('method-checkout-dialog')).toHaveCount(0);
+      await buy.click();
+      await page.getByTestId('method-checkout-terms').check();
+      await browserExpect(page.getByTestId('method-checkout-outcome')).toContainText('请不要重新下单');
+      await browserExpect(page.getByTestId('method-checkout-pay')).toBeDisabled();
+      expect(sentByPage.get(page)).toHaveLength(1);
+      expect(errors).toEqual([]);
+    } finally { await page.close(); }
+  }, 30_000);
 
   it('fits a 375px phone: plans and the checkout dialog without horizontal scrolling', async () => {
     const { page, errors } = await open({}, 375);

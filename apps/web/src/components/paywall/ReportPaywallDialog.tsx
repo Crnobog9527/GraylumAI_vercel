@@ -100,7 +100,7 @@ export function ReportPaywallView({ checkout, onClose }: { checkout: PaywallChec
                   <PaywallPlanPicker plans={checkout.plans} billing={billing} selected={plan?.level ?? 'pro'}
                     quoteOptions={checkout.quoteOptions} disabled={checkout.method.pending}
                     onBilling={chooseBilling} onSelect={setSelected} />
-                  {checkout.founderSeats > 0 && plan?.level === 'gold' ? (
+                  {checkout.founderSeats > 0 && plan?.level === 'gold' && billing === 'yearly' ? (
                     <p data-testid="paywall-founder-seats" className="text-sm" style={{ color: 'var(--text-secondary)' }}>
                       <b style={{ color: 'var(--text-primary)' }}>Gold 创始会员 · 年付 {formatUsd(GOLD_FOUNDER_YEAR_USD)}</b>
                       {' '}还剩 {checkout.founderSeats} 个名额（共 50 个），满了就关闭

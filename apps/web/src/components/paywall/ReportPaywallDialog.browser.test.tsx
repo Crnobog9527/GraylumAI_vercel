@@ -511,3 +511,15 @@ it('shows no support link without an unsuccessful old subscription', async () =>
     expect(errors).toEqual([]);
   } finally { await page.close(); }
 }, 30000);
+
+it('shows the founder seats only with yearly billing, never next to a monthly Gold price', async () => {
+  const { page, errors } = await open({ membership: { ...WITH_SEATS, goldFirstMonthEligible: true } });
+  try {
+    await page.getByTestId('paywall-plan-gold').click();
+    await browserExpect(page.getByTestId('report-paywall-pay')).toContainText('$49');
+    await browserExpect(page.getByTestId('paywall-founder-seats')).toHaveCount(0);
+    await page.getByText('年付').click();
+    await browserExpect(page.getByTestId('paywall-founder-seats')).toContainText('还剩 13 个名额');
+    expect(errors).toEqual([]);
+  } finally { await page.close(); }
+}, 30000);

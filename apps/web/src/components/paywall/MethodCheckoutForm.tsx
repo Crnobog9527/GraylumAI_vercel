@@ -54,9 +54,11 @@ export function MethodCheckoutForm(props: Props) {
     return <p role="status" data-testid={`${id}-closed`} className="text-sm" style={muted}>{CHECKOUT_COPY.closed}</p>;
   }
 
-  const outcome = checkout.outcome;
+  const lockedMessage = checkout.lockedMessage(purchase);
+  const outcome = checkout.outcome ?? (lockedMessage ? { tone: 'recovery' as const, message: lockedMessage,
+    goldFirstIneligible: false, founderSoldOut: false, founderIneligible: false } : null);
   // After "recovery_required" (or an address we refused) the same order must not be bought again from here.
-  const canPay = Boolean(purchase) && !props.blockedReason && accepted && !checkout.pending && outcome?.tone !== 'recovery';
+  const canPay = Boolean(purchase) && !props.blockedReason && accepted && !checkout.pending && outcome?.tone !== 'recovery' && !lockedMessage;
   return (
     <div className="grid gap-3" data-testid={`${id}-checkout`}>
       <fieldset className="grid gap-2" disabled={checkout.pending}>
