@@ -84,6 +84,11 @@ BEGIN
     UPDATE social_connections SET status='quarantined',provider_disconnect_pending=true,deletion_attempts=0,lease_owner=NULL,
      lease_expires_at=NULL,updated_at=clock_timestamp()
     WHERE id=existing.id;
+   ELSE
+    -- Already deleting: keep the record and queue the disconnect, so the overwriting grant is cleared before it ends.
+    UPDATE social_connections SET provider_disconnect_pending=true,deletion_attempts=0,lease_owner=NULL,
+     lease_expires_at=NULL,updated_at=clock_timestamp()
+    WHERE id=existing.id AND NOT provider_disconnect_pending;
    END IF;
    quarantined:=quarantined||pid;
   END IF;
@@ -319,6 +324,19 @@ BEGIN
   RAISE EXCEPTION 'PUBLISH_MONITOR_INPUT_INVALID' USING ERRCODE='22023'; END IF;
  SELECT * INTO c FROM social_connections WHERE id=p_connection_id FOR UPDATE;
  IF c.id IS NULL THEN RETURN; END IF;
+ -- A takeover queued after this job was claimed (the queueing clears the lease): the worker's outcome is stale; keep
+ -- the record so the next run clears the overwriting grant first.
+ IF c.status='deleting' AND c.provider_disconnect_pending AND c.lease_owner IS NULL AND p_outcome<>'gone' THEN
+  RETURN;
+ END IF;
+ -- Unresolved publishes still need this record to reconcile: hold it instead of ending it.
+ IF c.status='deleting' AND p_outcome IN ('deleted','gone','owner_changed') AND EXISTS(SELECT 1 FROM social_publish_jobs j
+   WHERE j.actor_id=c.actor_id AND j.state IN ('claimed','dispatching','unknown')
+    AND j.targets @> jsonb_build_array(jsonb_build_object('connectionId',c.id::text))) THEN
+  UPDATE social_connections SET provider_tokens_cleared=true,provider_disconnect_pending=false,deletion_error=NULL,
+   deletion_attempts=0,lease_owner=NULL,lease_expires_at=NULL,updated_at=clock_timestamp() WHERE id=c.id;
+  RETURN;
+ END IF;
  IF p_outcome IN ('deleted','gone','owner_changed') AND c.status='deleting' THEN
   -- Nothing references a deleting row: its posts and snapshots were removed when it entered 'deleting'.
   DELETE FROM social_connections WHERE id=c.id;

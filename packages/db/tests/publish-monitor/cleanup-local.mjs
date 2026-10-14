@@ -195,8 +195,9 @@ try {
   await svc('SELECT publish_monitor_disconnect($1,$2) v', [other.a, pub.id]);
   const hold = (await work()).find(x => x.providerAccountId === 'pfm_pub');
   assert.deepEqual([hold.action, hold.deleting], ['disconnect', true]);
-  await workFinish(hold.connectionId, 'disconnected');
-  assert.equal((await conn('pfm_pub')).provider_tokens_cleared, true);
+  // Even "account gone" does not end a record that unresolved publishes still need.
+  await workFinish(hold.connectionId, 'gone');
+  assert.equal((await conn('pfm_pub')).provider_tokens_cleared, true, 'held, not deleted');
   assert.equal((await work()).find(x => x.providerAccountId === 'pfm_pub'), undefined, 'cleared tokens wait for results');
   await c.query("UPDATE social_publish_jobs SET state='completed' WHERE idempotency_key='pub-open-key-01'");
   const afterJob = (await work()).find(x => x.providerAccountId === 'pfm_pub');
@@ -221,6 +222,18 @@ try {
   const lateVerdict = await classify(taker.requestId, [acc('pfm_late_take', taker.externalId)]);
   assert.deepEqual(lateVerdict.map(x => x.action), ['takeover']);
   assert.deepEqual([(await conn('pfm_late_take')).status, (await conn('pfm_late_take')).provider_disconnect_pending],
+    ['deleting', true]);
+  // A worker that claimed the deletion before the takeover was queued reports a stale result: the record is kept.
+  await workFinish((await conn('pfm_late_take')).id, 'owner_changed');
+  assert.equal((await conn('pfm_late_take')).provider_disconnect_pending, true, 'kept for the queued disconnect');
+  // A callback that proves a takeover of a deleting record queues the disconnect too.
+  const lateOwner2 = await member();
+  await connect(lateOwner2, 'pfm_late_cb');
+  await svc('SELECT publish_monitor_disconnect($1,$2) v', [lateOwner2.a, (await conn('pfm_late_cb')).id]);
+  const cbTaker = await member();
+  const cbAttempt = await start(cbTaker.a, cbTaker.account);
+  await callback(cbTaker.a, cbAttempt.requestId, [cand('pfm_late_cb', cbAttempt.externalId)]);
+  assert.deepEqual([(await conn('pfm_late_cb')).status, (await conn('pfm_late_cb')).provider_disconnect_pending],
     ['deleting', true]);
   report.checks.push('an account taken over after deletion began is queued for disconnect before its record ends');
 
