@@ -14,18 +14,22 @@ import styles from './jury-document.module.css';
 
 const CURSOR_SEATS: readonly SeatCode[] = ['A', 'B', 'C', 'S'];
 
-function Redline({ title }: { title: string }) {
-  const text = REVISION_TEXT[title];
-  if (!text) return null;
+/** A passage with the revision's marks: deletions struck through, additions on a tint. */
+export function RedlineText({ before, after, className }: { before: string; after: string; className?: string }) {
   return (
-    <p className={styles.body}>
-      {diffText(text.original, text.revised).map((part, index) => part.type === 'same'
+    <p className={className ?? styles.body}>
+      {diffText(before, after).map((part, index) => part.type === 'same'
         ? <span key={index}>{part.text}</span>
         : part.type === 'del'
           ? <del key={index} className={styles.del}>{part.text}</del>
           : <ins key={index} className={styles.ins}>{part.text}</ins>)}
     </p>
   );
+}
+
+function Redline({ title }: { title: string }) {
+  const text = REVISION_TEXT[title];
+  return text ? <RedlineText before={text.original} after={text.revised} /> : null;
 }
 
 /**
@@ -54,13 +58,25 @@ export function JuryDocument({ view, names, still, ...handlers }: PeekHandlers &
     return () => observer.disconnect();
   }, [still]);
 
+  // Keep what the stage is about in view: the chapter at the top, unless that would push the newest note (or the part
+  // of it still growing) below the fold; then just enough to show the note's end, never past its start.
+  const growth = Object.values(view.notes).flat().reduce((sum, item) => sum + (item.kind === 'decision' && item.open ? item.revealed : 0)
+    + (item.kind === 'split' ? item.replies.filter(reply => reply.turned).length : 0), 0);
+  const { focus, current } = view;
   useEffect(() => {
     const box = scroller.current;
-    const target = view.focus ? rows.current.get(view.focus) : null;
-    if (still || !box || !target) return;
-    const top = box.scrollTop + target.getBoundingClientRect().top - box.getBoundingClientRect().top - 24;
-    box.scrollTo({ top: Math.max(0, top), behavior: 'smooth' });
-  }, [still, view.focus]);
+    if (still || !box) return;
+    const row = focus ? rows.current.get(focus) : null;
+    const note = current ? box.querySelector<HTMLElement>(`[data-note="${CSS.escape(current)}"]`) : null;
+    if (!row && !note) return;
+    const top = (node: HTMLElement) => node.getBoundingClientRect().top - box.getBoundingClientRect().top;
+    let delta = top(row ?? (note as HTMLElement)) - 24;
+    if (note) {
+      const overflow = top(note) + note.offsetHeight - delta - (box.clientHeight - 16);
+      if (overflow > 0) delta = Math.min(delta + overflow, top(note) - 24);
+    }
+    box.scrollTo({ top: Math.max(0, box.scrollTop + delta), behavior: 'smooth' });
+  }, [still, focus, current, growth]);
 
   const chapters = [...REPORT_CHAPTERS, ...(view.notes[WHOLE_DOCUMENT] ? [{ title: WHOLE_DOCUMENT, number: '', name: '全文意见', body: '' }] : [])];
   return (
@@ -99,7 +115,7 @@ export function JuryDocument({ view, names, still, ...handlers }: PeekHandlers &
                   {marked ? <Redline title={chapter.title} /> : chapter.body ? <p className={styles.body}>{chapter.body}</p> : null}
                   {marked ? <p className={styles.revNote}>修订稿改动了这一章</p> : null}
                 </div>
-                <div className={styles.gutter}>{items.length > 0 ? <JuryMargin items={items} names={names} {...handlers} /> : null}</div>
+                <div className={styles.gutter}>{items.length > 0 ? <JuryMargin items={items} names={names} still={still} {...handlers} /> : null}</div>
               </section>
             );
           })}

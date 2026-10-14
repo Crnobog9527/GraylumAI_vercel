@@ -38,6 +38,9 @@
 .lineText { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .quiet { color: var(--j-muted); }
 .rulingLine { color: var(--j-body); }
+.splitLine { flex-wrap: wrap; color: var(--j-body); }
+.splitLine .votes { margin-left: 0; align-items: center; gap: 4px; }
+.splitLine .lineText { flex-basis: 100%; }
 .votes { display: flex; flex-wrap: wrap; gap: 6px; margin-left: auto; }
 .vote { display: inline-flex; align-items: center; gap: 3px; }
 
@@ -86,6 +89,9 @@
   70% { opacity: 1; transform: scale(.96) rotate(-4deg); }
   100% { opacity: 1; transform: scale(1) rotate(-4deg); }
 }
+
+/* The reduced-motion page shows every note at once as lines: let each wrap to two lines instead of cutting it. */
+.margin[data-still='true'] .lineText { display: -webkit-box; white-space: normal; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
 
 @media (max-width: 767px) {
   .card { font-size: 13px; }

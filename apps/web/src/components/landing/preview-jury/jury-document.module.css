@@ -9,6 +9,9 @@
 }
 .viewport:focus-visible { outline: 2px solid var(--j-ink); outline-offset: -2px; }
 .still { height: auto; overflow: visible; padding: 0; }
+.still .text { padding-block: 8px; }
+.still .body { font-size: 14.5px; line-height: 1.8; }
+.still .gutter { padding-block: 6px; }
 
 .page { --j-lane: 34px; --j-text-w: minmax(0, 1.3fr); display: grid; }
 .headRow { display: grid; grid-template-columns: var(--j-lane) var(--j-text-w) minmax(0, 1fr); }

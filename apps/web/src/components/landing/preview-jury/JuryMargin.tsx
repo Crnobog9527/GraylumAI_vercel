@@ -19,10 +19,10 @@ function peekProps(seat: SeatCode, { onPeek, onPick }: PeekHandlers) {
 }
 
 /** One chapter's margin: the notes the review has left on it so far. */
-export function JuryMargin({ items, ...props }: Props & { items: readonly MarginItem[] }) {
+export function JuryMargin({ items, still, ...props }: Props & { items: readonly MarginItem[]; still?: boolean }) {
   return (
-    <ul className={styles.margin}>
-      {items.map(item => <li key={item.key} className={styles.slot}><Note item={item} {...props} /></li>)}
+    <ul className={styles.margin} data-still={Boolean(still)}>
+      {items.map(item => <li key={item.key} className={styles.slot} data-note={item.key}><Note item={item} {...props} /></li>)}
     </ul>
   );
 }
@@ -112,6 +112,21 @@ function Side({ seats, verdict, item, names, handlers }: {
 }
 
 function Split({ item, names, ...handlers }: Props & { item: Extract<MarginItem, { kind: 'split' }> }) {
+  if (item.compact) {
+    const turned = item.replies.filter(reply => reply.response.stance === 'agree').map(reply => reply.response.reviewer);
+    return (
+      <div className={cn(styles.line, styles.splitLine)} aria-label={`「${DECISION_LABEL[item.split.decision]}」上的分歧`}>
+        <span className={styles.lineTitle}>「{DECISION_LABEL[item.split.decision]}」分歧</span>
+        <span className={styles.votes}>
+          保留{item.split.keep.map(seat => <SeatMark key={seat} seat={seat} names={names} size="sm" />)}
+          改{item.split.change.map(seat => <SeatMark key={seat} seat={seat} names={names} size="sm" />)}
+        </span>
+        <span className={styles.lineText}>
+          {item.replies.length === 0 ? '' : turned.length > 0 ? `第 2 轮 ${turned.map(seat => names[seat]).join('、')} 被说服` : '第 2 轮双方都没有改变'}
+        </span>
+      </div>
+    );
+  }
   return (
     <article className={cn(styles.card, styles.split, item.current && styles.current)} aria-label={`「${DECISION_LABEL[item.split.decision]}」上的分歧`}>
       <header className={styles.cardHead}><strong>「{DECISION_LABEL[item.split.decision]}」意见不一</strong></header>
@@ -132,7 +147,7 @@ function Split({ item, names, ...handlers }: Props & { item: Extract<MarginItem,
 function ReplyRow({ reply, names, handlers }: { reply: Reply; names: JurySeatNames; handlers: PeekHandlers }) {
   const { reviewer, to, strongestView, stance } = reply.response;
   return (
-    <li className={cn(styles.reply, reply.current && styles.replyCurrent)} {...peekProps(reviewer, handlers)}>
+    <li className={cn(styles.reply, reply.current && styles.replyCurrent)} data-note={reply.response.id} {...peekProps(reviewer, handlers)}>
       <div className={styles.replyHead}>
         <SeatBadge seat={reviewer} names={names} compact />
         <span className={styles.replyTo}>回复</span>

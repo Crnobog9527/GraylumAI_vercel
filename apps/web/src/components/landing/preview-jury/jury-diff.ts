@@ -5,8 +5,9 @@ export type DiffPart = { type: 'same' | 'del' | 'ins'; text: string };
 
 /**
  * Character-level redline of two short passages (a chapter excerpt is a few hundred characters at most), so it works
- * for Chinese without a word splitter. Kept runs shorter than two characters between changes are folded into the
- * change on both sides, so the marks read as phrases instead of scattered single characters.
+ * for Chinese without a word splitter. Kept runs shorter than four characters between changes are folded into the
+ * change on both sides, so the marks read as phrases instead of scattered characters; when less than half of the
+ * passage survives, only the shared start and end stay and the middle reads as one deletion and one addition.
  */
 export function diffText(before: string, after: string): DiffPart[] {
   const a = Array.from(before);
@@ -30,14 +31,29 @@ export function diffText(before: string, after: string): DiffPart[] {
     else if (j < b.length && (i >= a.length || table[i][j + 1] >= table[i + 1][j])) { add('ins', b[j]); j += 1; }
     else { add('del', a[i]); i += 1; }
   }
-  return fold(raw);
+  const kept = raw.filter(part => part.type === 'same').reduce((sum, part) => sum + Array.from(part.text).length, 0);
+  return kept * 2 < Math.max(a.length, b.length) ? rewrite(a, b) : fold(raw);
+}
+
+function rewrite(a: string[], b: string[]): DiffPart[] {
+  let start = 0;
+  while (start < a.length && start < b.length && a[start] === b[start]) start += 1;
+  let end = 0;
+  while (end < a.length - start && end < b.length - start && a[a.length - 1 - end] === b[b.length - 1 - end]) end += 1;
+  const parts: DiffPart[] = [
+    { type: 'same', text: a.slice(0, start).join('') },
+    { type: 'del', text: a.slice(start, a.length - end).join('') },
+    { type: 'ins', text: b.slice(start, b.length - end).join('') },
+    { type: 'same', text: a.slice(a.length - end).join('') },
+  ];
+  return parts.filter(part => part.text);
 }
 
 function fold(parts: DiffPart[]): DiffPart[] {
   const out: { del: string; ins: string; same: string }[] = [];
   for (const [index, part] of parts.entries()) {
     const between = index > 0 && index < parts.length - 1;
-    const tiny = part.type === 'same' && between && Array.from(part.text).length < 2;
+    const tiny = part.type === 'same' && between && Array.from(part.text).length < 4;
     if (part.type === 'same' && !tiny) { out.push({ del: '', ins: '', same: part.text }); continue; }
     const last = out[out.length - 1];
     const change = last && !last.same ? last : (out.push({ del: '', ins: '', same: '' }), out[out.length - 1]);

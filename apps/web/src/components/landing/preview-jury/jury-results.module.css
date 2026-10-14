@@ -55,6 +55,11 @@
 .compare summary { padding: 10px 14px; color: var(--j-ink); font-size: 14px; font-weight: 700; cursor: pointer; }
 .compare summary:focus-visible { outline: 2px solid var(--j-ink); outline-offset: -2px; border-radius: 8px; }
 .compareGrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; padding: 0 14px 12px; }
+.compare > .compareLabel { padding: 0 14px; }
+.redline {
+  margin: 0 14px 12px; padding: 10px 12px; border: 1px solid var(--j-rule); border-radius: 8px; background: var(--j-paper);
+  font-family: var(--j-serif); font-size: 14.5px; line-height: 1.9;
+}
 .compareLabel { margin: 0 0 4px; color: var(--j-muted); font-size: 12.5px; font-weight: 700; }
 .compareText { margin: 0; padding: 10px 12px; border-radius: 8px; background: var(--j-paper); border: 1px solid var(--j-rule); font-size: 14px; line-height: 1.75; }
 .revised { border-color: var(--j-ink-soft); background: var(--j-paper); }

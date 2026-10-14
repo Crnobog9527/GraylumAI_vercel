@@ -13,13 +13,15 @@ export type Reply = { response: EventOf<'response'>; verdictNow: Verdict | null;
 export type MarginItem =
   | { kind: 'decision'; key: string; cards: SteelmanCard[]; decision: EventOf<'decision'>['decision']; open: boolean; revealed: number }
   | { kind: 'issue'; key: string; seat: Seat; issue: EventOf<'issue'>; tone: 'current' | 'normal' | 'quiet'; stamp: boolean | null }
-  | { kind: 'split'; key: string; split: EventOf<'disagreement'>; cards: SteelmanCard[]; replies: Reply[]; current: boolean }
+  | { kind: 'split'; key: string; split: EventOf<'disagreement'>; cards: SteelmanCard[]; replies: Reply[]; current: boolean; compact?: boolean }
   | { kind: 'ruling'; key: string; ruling: EventOf<'adjudication'>; current: boolean; compact: boolean };
 
 export type Mode = StageKey | 'final';
 export type DeskView = {
   mode: Mode;
   focus: string | null;
+  /** Key of the note the stage is about right now (an issue, decision, split, reply or ruling), kept in view. */
+  current: string | null;
   /** Chapter each reviewer (or the summary while writing) is reading right now. */
   reading: Partial<Record<SeatCode, string>>;
   notes: Record<string, MarginItem[]>;
@@ -127,15 +129,15 @@ export function deskAt(scenes: readonly Scene[], clock: number, final = false): 
       break;
     case 'final':
       for (const item of collapsedDecisions()) if (!splits.has(item.decision)) put(DECISION_SECTION[item.decision], item);
-      for (const item of issues) put(item.issue.section, { ...item, stamp: stamped(item) });
-      for (const item of splits.values()) put(DECISION_SECTION[item.split.decision], { ...item, current: false });
-      for (const item of rulings) put(item.ruling.section, { ...item, current: false });
+      for (const item of issues) put(item.issue.section, { ...item, tone: 'quiet', stamp: stamped(item) });
+      for (const item of splits.values()) put(DECISION_SECTION[item.split.decision], { ...item, current: false, compact: true });
+      for (const item of rulings) put(item.ruling.section, { ...item, current: false, compact: true });
       break;
     default:
       break;
   }
 
-  return { mode, focus: focusOf(current, clock), reading: readingOf(current, clock), notes, redline, revisionFailed };
+  return { mode, focus: focusOf(current, clock), current: currentOf(current, clock), reading: readingOf(current, clock), notes, redline, revisionFailed };
 }
 
 function focusOf(scene: Scene | null, clock: number): string | null {
@@ -146,6 +148,17 @@ function focusOf(scene: Scene | null, clock: number): string | null {
     case 'response': return DECISION_SECTION[scene.response.decision];
     case 'ruling': return section(scene.ruling.section);
     case 'revision': return scene.result.type === 'revision_ready_for_choice' ? scene.result.changedSectionTitles[0] ?? null : null;
+    default: return null;
+  }
+}
+
+function currentOf(scene: Scene | null, clock: number): string | null {
+  switch (scene?.kind) {
+    case 'steelman': return `d-${scene.decision}`;
+    case 'critique': return scene.issues[issueIndexAt(scene, clock)]?.id ?? null;
+    case 'divergence': return scene.split.id;
+    case 'response': return scene.response.id;
+    case 'ruling': return scene.ruling.id;
     default: return null;
   }
 }
