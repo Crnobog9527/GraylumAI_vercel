@@ -28,7 +28,7 @@ export function JuryEmbedDemo({ scenario, names }: { scenario: JuryScenarioId; n
         ) : null}
       </div>
       <div className={styles.embedStage}>
-        <JuryCanvasPlayer key={`${scenario}-${brief}-${driven}`} data={data} brief={brief} names={names}
+        <JuryCanvasPlayer data={data} brief={brief} names={names}
           progress={driven ? progress : undefined} speed={brief ? 1 : 3} />
       </div>
     </section>
