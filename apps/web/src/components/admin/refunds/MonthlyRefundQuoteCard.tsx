@@ -9,6 +9,8 @@ import { FEE_PERMITTED_LABELS, MONTHLY_REFUND_RULES, PLAN_LABELS, formatRefundTi
 export type MonthlyRefundQuoteTerms = {
   orderId: string; ticketId: string;
   plan: string; currency: string; paidMinor: number; basisMinor: number; feeMinor: number; netMinor: number;
+  /** International card (Managed Payments) orders only: the tax charged on top of paidMinor, refunded in full. */
+  taxMinor?: number;
   credits: number; paidAt: string; submittedAt: string; periodEnd: string; mode: string;
   feePermitted: 'confirmed' | 'not_permitted'; feeEvidence: string; evidenceRefs: string[];
 };
@@ -30,7 +32,12 @@ export function MonthlyRefundQuoteCard({ terms, approving, disabled, onApprove }
     ['付款时间', formatRefundTime(terms.paidAt)],
     ['工单提交时间', formatRefundTime(terms.submittedAt)],
     ['当前计费周期结束', formatRefundTime(terms.periodEnd)],
-    ['实付金额', money(terms.paidMinor)],
+    // A card order was charged the pre-tax price plus tax; the fee is on the pre-tax price and the tax comes back in full.
+    ...(terms.taxMinor === undefined ? [['实付金额', money(terms.paidMinor)] as [string, string]] : [
+      ['实付金额（含税）', money(terms.paidMinor + terms.taxMinor)],
+      ['其中税前价', money(terms.paidMinor)],
+      ['其中税（全额退回）', money(terms.taxMinor)],
+    ] as Array<[string, string]>),
     ['计算基数', money(terms.basisMinor)],
     ['手续费', `${money(terms.feeMinor)}（${FEE_PERMITTED_LABELS[terms.feePermitted]}）`],
     ['退回给用户', money(terms.netMinor)],

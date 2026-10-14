@@ -1,6 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { classifyErasureError, type ContentErasureResult } from '@/lib/content-erasure';
 import { getErrorMessageText } from '@/lib/safe-error-message';
+import { outcomeUnknown } from '@/lib/request-outcome';
 
 /** Owner 2026-10-13: the only warning before deleting a whole conversation. */
 export const CONVERSATION_ERASURE_WARNING = '删除后无法恢复。';
@@ -28,6 +29,8 @@ export type ConversationErasureDeps = {
   /** Refetch the list so it shows the server's truth after an uncertain or failed attempt. */
   resync: () => void;
   notify: (notice: ConversationNotice | null) => void;
+  /** The outcome is unknown: keep the row hidden and the pending record, and send the deletion again. */
+  resume: (sessionId: string) => void;
 };
 
 const FAILURES: Array<[string, string]> = [
@@ -66,6 +69,13 @@ export async function runConversationErasure(deps: ConversationErasureDeps, sess
     if (classifyErasureError(error, 'confirm').type === 'gone') {
       deps.afterErased(sessionId);
       return 'deleted' as const;
+    }
+    // No answer from the server (the page was reloaded or left, the network dropped) or an unexpected
+    // server failure: the deletion may still have happened. Never put the row back on a guess.
+    if (outcomeUnknown(error)) {
+      deps.notify({ tone: 'notice', text: '删除结果还在确认中，正在重试。' });
+      deps.resume(sessionId);
+      return 'pending' as const;
     }
     deps.restore(sessionId);
     deps.resync();

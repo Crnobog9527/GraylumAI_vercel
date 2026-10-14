@@ -41,6 +41,9 @@ vi.mock('../lib/logger', () => ({
   logger: loggerState,
 }));
 
+const methodState = vi.hoisted(() => ({ recover: vi.fn(async () => null as { orderId: string } | null) }));
+vi.mock('../services/payments/walletWebhook', () => ({ recoverMethodCheckout: methodState.recover }));
+
 vi.mock('../services/stripeFulfillment', () => ({
   fulfillCreditPackageOrder: vi.fn(),
   fulfillMembershipInvoice: vi.fn(),
@@ -3532,9 +3535,11 @@ describe('createCheckoutSession catalog fail-closed guards', () => {
 });
 
 describe('PAY-1 Customer Portal', () => {
-  function portalHarness(options: { noSubscription?: boolean; wrongCustomer?: boolean; immediateCancel?: boolean; upgrades?: boolean; scheduled?: boolean; readError?: boolean } = {}) {
+  function portalHarness(options: { noSubscription?: boolean; wrongCustomer?: boolean; immediateCancel?: boolean; upgrades?: boolean; scheduled?: boolean; readError?: boolean;
+    card?: { orderId?: string; userId?: string } } = {}) {
     const create = vi.fn().mockResolvedValue({ url: 'https://billing.stripe.com/p/session/test' });
-    const retrieve = vi.fn().mockResolvedValue({ id: 'sub_pay1', cancel_at: options.scheduled ? 2000000000 : null, customer: options.wrongCustomer ? 'cus_other' : 'cus_pay1', metadata: { userId: 'user-1' } });
+    const retrieve = vi.fn().mockResolvedValue({ id: 'sub_pay1', cancel_at: options.scheduled ? 2000000000 : null, customer: options.wrongCustomer ? 'cus_other' : 'cus_pay1',
+      metadata: { userId: options.card?.userId ?? 'user-1', orderId: options.card?.orderId ?? 'order-card' } });
     const filters: Array<[string, unknown]> = [];
     const supabase = { rpc: async () => { throw new Error('Unexpected Portal RPC'); },
       from(table: string) {
@@ -3542,8 +3547,10 @@ describe('PAY-1 Customer Portal', () => {
         if (table === 'payment_orders') {
           const row = { id: 'order-pay1', payment_channel: 'stripe', merchant_namespace: 'acct_fixture',
             payment_mode: 'test', price_ref_id: 'price-ref-pay1', subscription_id: 'mirror_pay1' };
-          const builder = { select: () => builder, eq: () => builder, not: () => builder, order: () => builder,
-            limit: () => builder, maybeSingle: async () => ({ data: row, error: null }) };
+          // PAY-STRIPE-MP card loader: the subscription's fulfilled card orders.
+          const builder = { select: () => builder, eq: () => builder, not: () => builder, order: () => builder, in: () => builder,
+            limit: () => builder, maybeSingle: async () => ({ data: row, error: null }),
+            then: <T>(resolve: (value: { data: unknown[]; error: null }) => T) => Promise.resolve({ data: [{ id: 'order-card' }], error: null }).then(resolve) };
           return builder;
         }
         if (table === 'subscription_credit_grants') {
@@ -3563,10 +3570,14 @@ describe('PAY-1 Customer Portal', () => {
           return builder;
         }
         if (table !== 'user_subscriptions') throw new Error(`unexpected table ${table}`);
+        let cardQuery = false;
         const builder = {
           select: () => builder, not: () => builder, order: () => builder, in: () => builder,
+          is: (column: string) => { cardQuery = column === 'stripe_subscription_id'; return builder; },
           eq(column: string, value: unknown) { filters.push([column, value]); return builder; },
-          limit: async () => ({ data: options.noSubscription ? [] : [{ id: 'mirror_pay1', payment_channel: 'stripe', merchant_namespace: 'acct_fixture', payment_mode: 'test', status: 'active', membership_plan_id: 'plan-pay1', billing_cycle: 'monthly', current_period_start: '2026-01-01T00:00:00Z', stripe_customer_id: 'cus_pay1', stripe_subscription_id: 'sub_pay1' }], error: options.readError ? { message: 'db failed' } : null }),
+          // A card (MP) subscription stores no Stripe ids; the legacy row here does, so the card query finds only `card`.
+          limit: async () => cardQuery ? { data: options.card ? [{ id: 'mirror_pay1', cancel_at_period_end: 'false',
+            current_period_end: '2026-02-01T00:00:00Z' }] : [], error: null } : ({ data: options.noSubscription || options.card ? [] : [{ id: 'mirror_pay1', payment_channel: 'stripe', merchant_namespace: 'acct_fixture', payment_mode: 'test', status: 'active', membership_plan_id: 'plan-pay1', billing_cycle: 'monthly', current_period_start: '2026-01-01T00:00:00Z', stripe_customer_id: 'cus_pay1', stripe_subscription_id: 'sub_pay1' }], error: options.readError ? { message: 'db failed' } : null }),
         };
         return builder;
       },
@@ -3593,6 +3604,19 @@ describe('PAY-1 Customer Portal', () => {
     const h = portalHarness({ noSubscription });
     await expect(h.caller.getSubscriptionManagement()).resolves.toEqual({ available: !noSubscription });
     expect(h.create).not.toHaveBeenCalled();
+  });
+  it('opens the Portal for a card (Managed Payments) subscription on its own customer, proven by its order metadata', async () => {
+    const h = portalHarness({ card: {} });
+    await expect(h.caller.getSubscriptionManagement()).resolves.toEqual({ available: true });
+    await expect(h.caller.createCustomerPortalSession({})).resolves.toEqual({ portalUrl: 'https://billing.stripe.com/p/session/test' });
+    expect(h.retrieve).toHaveBeenCalledWith('sub_pay1');
+    expect(h.create).toHaveBeenCalledWith(expect.objectContaining({ customer: 'cus_pay1', flow_data: expect.objectContaining({
+      type: 'subscription_cancel', subscription_cancel: { subscription: 'sub_pay1' } }) }));
+    for (const card of [{ orderId: 'order-of-someone-else' }, { userId: 'user-2' }]) {
+      const foreign = portalHarness({ card });
+      await expect(foreign.caller.createCustomerPortalSession({})).rejects.toMatchObject({ code: 'SERVICE_UNAVAILABLE' });
+      expect(foreign.create).not.toHaveBeenCalled();
+    }
   });
   it('server-resolves the authenticated customer and creates only a period-end cancellation flow', async () => {
     const h = portalHarness();
@@ -3623,5 +3647,42 @@ describe('PAY-1 Customer Portal', () => {
     const caller = paymentsRouter.createCaller({ user: null, headers: new Headers(), supabase: h.supabase } as any);
     await expect(caller.createCustomerPortalSession({})).rejects.toMatchObject({ code: 'UNAUTHORIZED' });
     expect(h.create).not.toHaveBeenCalled();
+  });
+});
+
+describe('PAY-STRIPE-MP browser checkout return', () => {
+  beforeEach(() => { methodState.recover.mockReset().mockResolvedValue(null); vi.mocked(upsertPaymentOrderBySession).mockReset();
+    vi.mocked(fulfillPaidMembershipCheckoutSession).mockReset(); });
+  function harness(order: { status: string; fulfilled_at: string | null } | null) {
+    const session = { id: 'cs_card', mode: 'subscription', status: 'complete', payment_status: 'paid',
+      client_reference_id: 'user-1', metadata: { userId: 'user-1', orderId: '00000000-0000-4000-8000-000000000009' } };
+    stripeState.getStripeClient.mockReturnValue({ checkout: { sessions: { retrieve: vi.fn().mockResolvedValue(session) } } });
+    const eq = vi.fn(() => chain);
+    const chain = { select: vi.fn(() => chain), eq, maybeSingle: vi.fn().mockResolvedValue({ data: order, error: null }) };
+    const admin = { from: vi.fn((table: string) => { if (table !== 'payment_orders') throw new Error(table); return chain; }), rpc: vi.fn() };
+    const profile = { id: 'user-1', role: 'user', status: 'active', nickname: 'User', email: 'user@example.com' };
+    const user = { from(table: string) {
+      if (table === 'profiles') return createSingleQueryBuilder(Promise.resolve({ data: profile, error: null }));
+      throw new Error(`Unexpected user table ${table}`);
+    } };
+    const caller = createProtectedCaller({ supabase: user, supabaseAdmin: admin });
+    return { caller, eq, admin };
+  }
+  it('syncs a card or wallet order through the method recovery, never the legacy recording', async () => {
+    methodState.recover.mockResolvedValue({ orderId: 'order-card' });
+    const h = harness({ status: 'completed', fulfilled_at: '2026-10-13T00:00:00.000Z' });
+    await expect(h.caller.syncCheckoutSession({ sessionId: 'cs_card' })).resolves.toEqual({ sessionId: 'cs_card', mode: 'subscription',
+      checkoutStatus: 'complete', paymentStatus: 'paid', orderStatus: 'completed', fulfilledAt: '2026-10-13T00:00:00.000Z',
+      stripeSubscriptionId: null, stripeInvoiceId: null });
+    expect(methodState.recover).toHaveBeenCalledWith(h.admin, expect.anything(), 'cs_card');
+    expect(h.eq).toHaveBeenCalledWith('user_id', 'user-1');
+    expect(upsertPaymentOrderBySession).not.toHaveBeenCalled();
+    expect(fulfillPaidMembershipCheckoutSession).not.toHaveBeenCalled();
+  });
+  it('does not fall through to the legacy path when the method recovery fails', async () => {
+    methodState.recover.mockRejectedValue(new Error('PAY_WAFFO_PAYMENT_CONFLICT'));
+    const h = harness(null);
+    await expect(h.caller.syncCheckoutSession({ sessionId: 'cs_card' })).rejects.toBeTruthy();
+    expect(upsertPaymentOrderBySession).not.toHaveBeenCalled();
   });
 });

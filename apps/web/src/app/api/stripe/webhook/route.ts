@@ -16,7 +16,9 @@ import {
 } from '@repo/api/src/services/stripeFulfillment';
 import { reportPaymentEvidenceConflict } from '@/lib/payment-alert.mjs';
 import { PAYMENT_EVIDENCE_CONFLICT, stripeWebhookErrorCode } from '@repo/api/src/services/payments/stripeWebhookError';
-import { recoverWalletCheckout } from '@repo/api/src/services/payments/walletWebhook';
+import { recoverMethodCheckout } from '@repo/api/src/services/payments/walletWebhook';
+import { handleCardSubscriptionInvoice, handleCardSubscriptionState } from '@repo/api/src/services/payments/cardSubscriptionWebhook';
+import { handleCardRefund } from '@repo/api/src/services/payments/cardRefundWebhook';
 import { logServerError } from '@/lib/server-log';
 
 export const runtime = 'nodejs';
@@ -31,7 +33,28 @@ export async function handleStripeWebhookEvent(
 ) {
   if (event.type === 'checkout.session.completed' || event.type === 'checkout.session.async_payment_succeeded'
     || event.type === 'checkout.session.expired' || event.type === 'checkout.session.async_payment_failed') {
-    if (await recoverWalletCheckout(supabase, getStripeClient(), event.data.object.id, event.type)) return;
+    // Wallet and PAY-STRIPE-MP card orders never take the legacy recording path below.
+    if (await recoverMethodCheckout(supabase, getStripeClient(), event.data.object.id, event.type)) return;
+  }
+  if (event.type === 'invoice.paid' || event.type === 'invoice.payment_succeeded' || event.type === 'invoice.payment_failed') {
+    // Money kept for review on a card subscription (renewal stopped at Stripe) raises the payment-evidence alert.
+    if (await handleCardSubscriptionInvoice(supabase, getStripeClient(), event.data.object.id, event.type, event.created,
+      () => reportPaymentEvidenceConflict(event.type))) return;
+  }
+  if (event.type === 'customer.subscription.created' || event.type === 'customer.subscription.updated'
+    || event.type === 'customer.subscription.deleted') {
+    if (await handleCardSubscriptionState(supabase, getStripeClient(), event.data.object.id)) return;
+  }
+  if (event.type === 'charge.refunded' || event.type === 'refund.created' || event.type === 'refund.updated'
+    || event.type === 'refund.failed' || event.type === 'charge.refund.updated') {
+    // PAY-STRIPE-MP card orders: external refunds are recorded on the card order; others keep the legacy path.
+    const input = event.type === 'charge.refunded' ? { chargeId: event.data.object.id } : { refundId: event.data.object.id };
+    if (await handleCardRefund(supabase, getStripeClient(), input, () => reportPaymentEvidenceConflict(event.type))) return;
+  }
+  if (event.type.startsWith('charge.dispute.')) {
+    // Disputes are acknowledged only; freezing and matching belong to PAY-DISPUTE-GUARD (it reuses findCardOrderForPayment).
+    logServerError('billing', 'stripe_dispute_received', { eventType: event.type });
+    return;
   }
   switch (event.type) {
     case 'checkout.session.completed': {

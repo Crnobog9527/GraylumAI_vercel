@@ -3,17 +3,19 @@
 import assert from 'node:assert/strict';
 import {spawnSync} from 'node:child_process';
 import {randomUUID} from 'node:crypto';
-import {readFileSync,mkdtempSync,writeFileSync,rmSync} from 'node:fs';
+import {readFileSync,mkdtempSync,writeFileSync,rmSync,mkdirSync,existsSync} from 'node:fs';
 import {pathToFileURL} from 'node:url';
 import {createRequire} from 'node:module';
-import {resolve} from 'node:path';
+import {resolve,dirname,relative} from 'node:path';
 import {POSTGRES_IMAGE} from '../v3/images.mjs';
 import {buildFromFiles,installPgCronStub} from '../baseline/build-from-files.mjs';
 import {runCases} from './cases.mjs';
+import {runFusionExecutor} from './fusion.mjs';
 import {runExecutor} from './executor.mjs';
 import {runProcessor} from './processor.mjs';
 import {runLeaves} from './leaves.mjs';
 import {runConcurrency} from './concurrency.mjs';
+import {startRedisDouble} from './redis-double.mjs';
 
 const safeupdateLibrary=process.env.ERASURE_SAFEUPDATE_LIBRARY;
 if(safeupdateLibrary && !safeupdateLibrary.startsWith('/'))throw new Error('Require absolute local safeupdate library path');
@@ -34,7 +36,7 @@ const fp=read('packages/db/tests/baseline/fingerprint.sql');
 const objectSql=fp.slice(0,fp.indexOf('-- FINAL'))+'SELECT jsonb_object_agg(k,d ORDER BY k) FROM grouped;';
 const snapshot=()=>JSON.parse(ok(sql(objectSql)));
 const report={development,safeupdate:Boolean(safeupdateLibrary),build:null,checks:[],failed:null};
-let client;let compiled;
+let client;let compiled;let redis;
 try {
  ok(docker(['run','-d','--pull=never','--name',name,'-p','127.0.0.1::5432',
   '-e','POSTGRES_DB=b2a','-e','POSTGRES_HOST_AUTH_METHOD=trust',POSTGRES_IMAGE]));
@@ -80,18 +82,35 @@ try {
  // Compile the exact production composition, with only external HTTP replaced in tests.
  const ts=require('typescript');
  compiled=mkdtempSync(resolve(root,'packages/api/.erasure-processor-test-'));
- for(const file of ['rpcDiagnostics','processorContracts','processor','host','manifest','storage','storageTransport','authAdapter','scopedManifest','executor']){
-  const source=read(`packages/api/src/services/accountErasure/${file}.ts`);
-  const code=ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ES2022}}).outputText
-   .replace(/from '(\.\/[A-Za-z]+)'/g,"from '$1.mjs'");
-  writeFileSync(resolve(compiled,file+'.mjs'),code);
- }
- const {runAccountErasureExecutor}=await import(pathToFileURL(resolve(compiled,'executor.mjs')).href);
+ // Transpile the whole relative import closure (the executor also composes library erasure), mirroring src paths.
+ const src=resolve(root,'packages/api/src'),done=new Set();
+ const emit=file=>{
+  if(done.has(file))return;done.add(file);
+  const code=ts.transpileModule(readFileSync(file,'utf8'),{compilerOptions:{module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ES2022}}).outputText
+   .replace(/from '(\.{1,2}\/[^']+)'/g,(_,spec)=>{
+    const base=resolve(dirname(file),spec);const found=[base+'.ts',base+'/index.ts'].find(existsSync);
+    assert.ok(found,'unresolved import '+spec);emit(found);
+    return `from '${spec}${found.endsWith('/index.ts')?'/index':''}.mjs'`;
+   });
+  const target=resolve(compiled,relative(src,file)).replace(/\.ts$/,'.mjs');
+  mkdirSync(dirname(target),{recursive:true});writeFileSync(target,code);
+ };
+ for(const file of ['executor','processor'])emit(resolve(src,`services/accountErasure/${file}.ts`));
+ const module=file=>pathToFileURL(resolve(compiled,`services/accountErasure/${file}.mjs`)).href;
+ // The executor syncs the off-database manifest (0227) through the existing Upstash REST client.
+ redis=await startRedisDouble();Object.assign(process.env,redis.env);
+ const {runAccountErasureExecutor}=await import(module('executor'));
  await runExecutor({db:client,Client,connectionString,require,runAccountErasureExecutor,report,safeupdate:Boolean(safeupdateLibrary)});
+ await runFusionExecutor({db:client,Client,connectionString,require,runAccountErasureExecutor,report});
+ const synced=[...redis.store].filter(([key])=>key.startsWith('graylum:erasure-manifest:account:'));
+ assert.ok(synced.length>0,'completed erasures reached the off-database manifest');
+ for(const [,entry] of synced)assert.deepEqual(Object.keys(JSON.parse(entry.value)).sort(),['confirmedAt','kind','profileId','targetId']);
+ assert.equal((await client.query('SELECT count(*)::int n FROM erasure_manifest_outbox WHERE synced_at IS NULL')).rows[0].n,0);
+ report.checks.push('executor syncs the off-database manifest: ids and times only, nothing left unsynced');
  await runCases(client,report);
  await runLeaves(client,report);
  await runConcurrency({db:client,Client,connectionString,report});
- const {processAccountErasure}=await import(pathToFileURL(resolve(compiled,'processor.mjs')).href);
+ const {processAccountErasure}=await import(module('processor'));
  await runProcessor(client,processAccountErasure,report);
  const unsafe=sql(read('packages/db/tests/erasure-completion/rollback.sql'));
  assert.notEqual(unsafe.status,0);assert.match(unsafe.stderr,/ERASURE_COMPLETION_ROLLBACK_REQUIRES_FORWARD_FIX/);
@@ -100,6 +119,7 @@ try {
  assert.equal(audits,'');report.checks.push('account-open policy audit unchanged');
 } catch(error) {report.failed=String(error.stack??error);process.exitCode=1;}
 finally {
+ await redis?.close();
  await client?.end();if(compiled)rmSync(compiled,{recursive:true});report.cleanup=docker(['rm','-f','-v',name]).status===0?'PASS':'FAIL';
  if(report.cleanup!=='PASS')process.exitCode=1;
  console.log(JSON.stringify(report,null,2));
