@@ -57,6 +57,10 @@ export const J_TAKEOVER = {
     { id: 'topics', title: '不用自己想选题', line: '每周发什么、为什么发这条，它替你排好。' },
     { id: 'method', title: '不用研究运营技术', line: '运营方法都装在教练里，你照着做就行。' },
     { id: 'data', title: '不用自己看数据', line: '每周告诉你哪条有效、下周怎么调。' },
+    // Points 4 and 5 (Owner 2026-10-14: "加成第 4、5 点"); both lines NEW. No promise of income: the coach judges
+    // whether a direction can earn and the report suggests a route.
+    { id: 'money', title: '不用为怎么变现发愁', line: '方向能不能赚钱，它先帮你判断；报告里写清适合你的变现路径。' },
+    { id: 'models', title: '不用研究模型和提示词', line: '哪个模型更强、提示词怎么写，都已经打包进你的 AI 教练。' },
   ],
   /** NEW: the third chapter's title. */
   promisesTitle: '这些事，不用你再操心',
@@ -89,4 +93,9 @@ export const J_VOICE = {
 export const J_PROMISE_SAMPLES = {
   weeks: ['第 1 周：讲清你自己是怎么入行的', '第 2 周：入行要准备的证书和课程', '第 3 周：第一份工作怎么找'],
   basics: ['账号名字', '账号简介', '头像和封面'],
+  /** The sample report's 变现路线, split into its three steps. */
+  money: ['先用免费内容建立信任', '再提供一对一入行咨询', '之后整理成入行指南'],
+  /** NEW: what you no longer handle yourself (point 5). */
+  chores: ['选模型', '写提示词'],
+  packed: '已经打包进你的 AI 教练',
 } as const;

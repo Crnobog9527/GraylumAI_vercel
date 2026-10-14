@@ -66,7 +66,10 @@ describe('style sample J', () => {
     const { html } = render();
     expect(html).toContain(J_TAKEOVER.positioningTitle);
     expect(html).toContain(J_TAKEOVER.benchmarkLine);
+    expect(J_TAKEOVER.promises.map(promise => promise.id)).toEqual(['topics', 'method', 'data', 'money', 'models']);
     for (const promise of J_TAKEOVER.promises) expect(html).toContain(promise.title);
+    // Earning is a judged direction and a suggested route, never a promise.
+    expect(JSON.stringify(J_TAKEOVER.promises)).not.toMatch(/保证|一定能|稳赚/);
     expect(html).toContain(J_TAKEOVER.promiseClose);
     // The long promise paragraph is never shown in one block any more.
     expect(html).not.toContain('你不用再分心研究运营技术，不用自己想选题');

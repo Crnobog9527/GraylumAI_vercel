@@ -2,19 +2,20 @@
 'use client';
 
 import type { CSSProperties } from 'react';
-import { CalendarDays, Check, ListChecks, TrendingUp } from 'lucide-react';
+import { ArrowDown, CalendarDays, Check, ListChecks, PackageCheck, TrendingUp } from 'lucide-react';
 import { H_COMPARE_SAMPLES } from '@/lib/landing/landing-copy';
 import { J_PROMISE_SAMPLES, J_TAKEOVER } from '@/lib/landing/landing-copy-j';
 import styles from './takeover-j.module.css';
 
 /**
- * The old promise paragraph as three things you no longer do, one small picture each: the weeks of topics laid out
- * for you, the account basics ticked off by the method, the weekly review written from your data. They arrive one
- * after another as the scroll moves on (`progress` 0 → 1); with reduced motion all three are simply there.
+ * The old promise paragraph as five things you no longer do, one small picture each: the weeks of topics laid out
+ * for you, the account basics ticked off by the method, the weekly review written from your data, the route to
+ * earning from the sample report, and the models and prompts already packed in. They arrive one after another as
+ * the scroll moves on (`progress` 0 → 1); with reduced motion all five are simply there.
  */
 export function PromiseClipJ({ progress }: { progress: number }) {
-  const lit = (index: number) => progress >= index * 0.28;
-  const step = (index: number) => Math.min(1, Math.max(0, (progress - index * 0.28) / 0.22));
+  const lit = (index: number) => progress >= index * 0.17;
+  const step = (index: number) => Math.min(1, Math.max(0, (progress - index * 0.17) / 0.15));
   const pictures = [
     <ul key="topics" className={styles.mini}>
       {J_PROMISE_SAMPLES.weeks.map((week, index) => (
@@ -35,6 +36,17 @@ export function PromiseClipJ({ progress }: { progress: number }) {
         </div>
       ))}
     </dl>,
+    <ol key="money" className={styles.mini}>
+      {J_PROMISE_SAMPLES.money.map((item, index) => (
+        <li key={item} style={{ opacity: step(3) * 3 > index ? 1 : 0.15 } as CSSProperties}>
+          {index > 0 ? <ArrowDown size={14} aria-hidden="true" /> : <TrendingUp size={14} aria-hidden="true" />}{item}
+        </li>
+      ))}
+    </ol>,
+    <div key="models" className={styles.packed}>
+      <p>{J_PROMISE_SAMPLES.chores.map(chore => <s key={chore} data-done={step(4) > 0.4 || undefined}>{chore}</s>)}</p>
+      <p data-done={step(4) > 0.8 || undefined}><PackageCheck size={15} aria-hidden="true" />{J_PROMISE_SAMPLES.packed}</p>
+    </div>,
   ];
   return (
     <ol className={styles.promises}>

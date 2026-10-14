@@ -75,13 +75,14 @@
 
 /* What you no longer do (3c) */
 .promises { display: grid; gap: 14px; height: 100%; margin: 0; padding: 0; list-style: none; align-content: center; }
-@media (min-width: 768px) { .promises { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
-.promises li {
+@media (min-width: 768px) { .promises { grid-template-columns: repeat(6, minmax(0, 1fr)); } .promises > li { grid-column: span 2; }
+  .promises > li:nth-child(4) { grid-column: 2 / span 2; } }
+.promises > li {
   display: grid; align-content: start; gap: 8px; padding: 20px; border: 1px solid var(--j-line); border-radius: 20px; background: #fff;
   opacity: .25; transition: opacity .5s var(--j-ease), translate .5s var(--j-ease); translate: 0 16px;
 }
-.promises li[data-lit] { opacity: 1; translate: 0 0; }
-.static .promises li { opacity: 1; translate: 0 0; }
+.promises > li[data-lit] { opacity: 1; translate: 0 0; }
+.static .promises > li { opacity: 1; translate: 0 0; }
 .promises h4 { margin: 0; font-size: 20px; font-weight: 600; letter-spacing: -.02em; }
 .promises p { margin: 0; color: var(--j-body); font-size: 15px; line-height: 1.7; }
 .card { margin-top: 6px; padding: 12px; border-radius: 14px; background: #f6f6f3; }
@@ -93,8 +94,26 @@
 .review div { transition: opacity .3s; }
 .review dt { display: flex; align-items: center; gap: 6px; color: #777; font-size: 12px; }
 .review dd { margin: 0; }
+/* Point 5: the chores crossed out, then "packed in" */
+.packed { display: grid; gap: 8px; font-size: 13.5px; }
+.packed p { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0; }
+.packed s { padding: 2px 10px; border: 1px solid #ddd; border-radius: 999px; background: #fff; text-decoration-color: transparent; transition: text-decoration-color .3s, color .3s; }
+.packed s[data-done] { color: #999; text-decoration-color: #999; }
+.packed p:last-child { opacity: .15; transition: opacity .3s; }
+.packed p:last-child[data-done] { opacity: 1; }
+.packed svg { color: #1a7f45; }
+/* Five cards in a locked screen: tighter cards and pictures on a desktop. */
+.takeover .promises > li { gap: 4px; padding: 14px 16px; }
+.takeover .promises h4 { font-size: 17px; }
+.takeover .promises > li > p { font-size: 13.5px; line-height: 1.6; }
+.takeover .card { margin-top: 4px; padding: 10px; }
+.static .packed p:last-child { opacity: 1; }
 @media (max-width: 767px) {
-  .promises li { padding: 14px; }
+  .promises { gap: 8px; }
+  .takeover .promises > li { padding: 10px 14px; }
+  .takeover .promises h4 { font-size: 16px; }
+  .takeover .promises > li > p { font-size: 13px; line-height: 1.5; }
+  .promises > li { padding: 14px; }
   .promises .card { display: none; }
 }
 
