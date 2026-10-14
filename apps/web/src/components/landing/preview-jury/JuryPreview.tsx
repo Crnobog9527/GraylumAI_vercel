@@ -7,15 +7,14 @@ import { FastForward, Pause, Play, RotateCcw } from 'lucide-react';
 import light from '@/components/design/light-tokens.module.css';
 import { cn } from '@/lib/utils';
 import { resolveSeatNames, SAMPLE_PANEL, type JurySeatNames, type SeatCode } from './jury-events';
-import { posesAt } from './jury-poses';
 import { buildScenes, formatElapsed, playbackLength, sceneAt, skippedStages } from './jury-scenes';
 import { findScenario, JURY_SCENARIOS, type JuryScenario, type JuryScenarioId } from './jury-scripts';
 import { arrivedAt, failedSeatsAt, speakerOf } from './jury-progress';
-import { JuryBoard } from './JuryBoard';
+import { deskAt } from './jury-desk';
+import { JuryDesk } from './JuryDesk';
 import { JuryDossier } from './JuryDossier';
 import { JuryRail } from './JuryRail';
 import { JuryResults } from './JuryResults';
-import { JuryRoom } from './JuryRoom';
 import { JuryStatic } from './JuryStatic';
 import { useJuryPlayback, usePrefersReducedMotion } from './use-jury-playback';
 import styles from './jury.module.css';
@@ -23,8 +22,8 @@ import styles from './jury.module.css';
 const SPEEDS = [1, 3] as const;
 
 /**
- * FUSION-REVIEW prototype v2: the review as a small jury room. One stage at a time, each person with their own
- * record, and a result page where the user picks the revision or the original chapter by chapter. Mock data in the
+ * FUSION-REVIEW prototype v3: the review as annotations on the user's report. One stage at a time, each person with
+ * their own record, and a result page where the user picks the revision or the original chapter by chapter. Mock data in the
  * shapes of FUSION-REVIEW.md §2.2a (events, detail, adopt). Not linked anywhere and never indexed.
  */
 export function JuryPreview() {
@@ -36,7 +35,7 @@ export function JuryPreview() {
   return (
     <div className={cn(light.light, styles.page)}>
       <nav aria-label="原型说明" className={styles.sampleBar}>
-        <span>不公开的评审团动画原型（第 2 版）：模拟数据，按真实评审的事件顺序和等待时长播放</span>
+        <span>不公开的评审团动画原型（第 3 版）：模拟数据，按真实评审的事件顺序和等待时长播放</span>
         <Link href="/landing/preview/g">样稿 G</Link>
       </nav>
 
@@ -44,7 +43,7 @@ export function JuryPreview() {
         <div className={styles.titleBlock}>
           <h1 className={styles.title}>评审团正在审阅你的定位报告</h1>
           <p className={styles.subtitle}>
-            三位评审各自独立判断，再互相挑刺；意见不一的地方辩论一轮，最后由{names.S}逐条裁决、写出修订稿，由你逐章决定用不用。
+            三位评审各自读完、在页边批注；意见不一的地方辩论一轮，再由{names.S}逐条裁决、写出修订稿。用不用修订稿，由你逐章决定。
           </p>
         </div>
         <div className={styles.controls}>
@@ -97,8 +96,8 @@ function Player({ scenario, names }: { scenario: JuryScenario; names: JurySeatNa
   const clock = playback.clock;
   const ended = playback.finished;
   const scene = sceneAt(scenes, clock);
-  const poses = posesAt(scene, clock, failedSeatsAt(scenes, clock));
-  // Pointing only counts while the room is on screen: once it is gone no leave event may come to clear it.
+  const failed = failedSeatsAt(scenes, clock);
+  // Pointing only counts while the desk is on screen: once it is gone no leave event may come to clear it.
   const seat = (ended ? null : peek) ?? pinned ?? speakerOf(scene) ?? 'A';
   const arrived = arrivedAt(scenario.arrivals, ended ? Infinity : clock);
 
@@ -134,18 +133,15 @@ function Player({ scenario, names }: { scenario: JuryScenario; names: JurySeatNa
           {ended ? (
             <JuryResults detail={scenario.detail} names={names} onOpenRecord={openRecord} />
           ) : (
-            <div className={styles.stage}>
-              <JuryRoom names={names} poses={poses} selected={peek ?? pinned} entering={scene?.kind === 'seated'}
-                onPeek={setPeek} onPick={code => (pinned === code ? setPinned(null) : openRecord(code))} />
-              {scene ? <JuryBoard scene={scene} names={names} clock={clock} /> : null}
-            </div>
+            <JuryDesk scene={scene} view={deskAt(scenes, clock)} names={names} clock={clock} failed={failed} selected={peek ?? pinned}
+              onPeek={setPeek} onPick={code => (pinned === code ? setPinned(null) : openRecord(code))} />
           )}
         </div>
         <aside className={styles.side} ref={dossierRef} aria-label="评审记录">
           <p className={styles.sideHint}>
-            指向（手机上点一下）评审室里的人，看这位的完整记录
+            指向（手机上点一下）评审或页边批注，看这位的完整记录
             <button type="button" className={styles.backToRoom} onClick={() => stageRef.current?.scrollIntoView({ behavior: 'smooth' })}>
-              回到评审室
+              回到报告
             </button>
           </p>
           <JuryDossier detail={scenario.detail} names={names} seat={seat} arrived={arrived} live={!ended}

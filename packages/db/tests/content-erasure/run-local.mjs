@@ -25,6 +25,7 @@ import {runCases as runAccountBinding} from '../erasure-binding/cases.mjs';
 import {runConcurrency} from './concurrency.mjs';
 import {runInstant} from './instant.mjs';
 import {runRename} from './rename.mjs';
+import {runReadonly} from './readonly.mjs';
 const development=process.argv.slice(2).join(' ')==='--local-only --development';
 if ((!development && process.argv.slice(2).join(' ') !== '--local-only') || process.env.CI) throw new Error('Require --local-only');
 const root=resolve(import.meta.dirname,'../../../..');
@@ -69,9 +70,11 @@ try {
  const tail=readdirSync(resolve(root,'packages/db/migrations')).filter(f=>/^\d{4}_.*\.sql$/.test(f)&&f>'0201_').sort()
   .map(name=>({name,sql:read('packages/db/migrations/'+name)}));
  const currentMd5=signature=>ok(sql(`SELECT md5(pg_get_functiondef('public.${signature}'::regprocedure));`));
+ const hasMarker=(signature,marker)=>{assert.ok(!marker.includes('$md5_chain_marker$'));
+  return ok(sql(`SELECT position($md5_chain_marker$${marker}$md5_chain_marker$ IN pg_get_functiondef('public.${signature}'::regprocedure))>0;`))==='t';};
  report.skipped=[];
  for(let i=0;i<tail.length;i++){
-  const superseded=await supersededPatch(tail,i,currentMd5);
+  const superseded=await supersededPatch(tail,i,currentMd5,hasMarker);
   if(superseded.skip)console.log('skip superseded md5 patch '+superseded.reason);
   if(superseded.skip)report.skipped.push(superseded.reason);
   ok(sql(superseded.skip?superseded.rest:tail[i].sql));
@@ -100,6 +103,7 @@ try {
  await runConcurrency({db:client,Client,connectionString,report});
  await runInstant({db:client,Client,connectionString,report});
  await runRename({db:client,report});
+ await runReadonly({db:client,report});
  await runAccountFinancial(client,report);
  await runAccountBinding(client,report);
  const audits=ok(sql(read('packages/db/tests/account-open-policy-audit.sql')));
