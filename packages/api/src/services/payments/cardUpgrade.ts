@@ -46,7 +46,9 @@ export async function observeUpgradePrior(db: SupabaseClient, stripe: Stripe, us
   const state = stripeStopState(subscription);
   if (subscription.status !== 'active' || state.stop || state.canceled) {
     await syncState(db, scope.merchant, priorLocalId, subscription);
-    return;
+    // Refused here, not left to admission: a positive observation from a minute ago (0251) could still admit it while
+    // an unpaid Pro invoice (past_due) can retry and charge.
+    throw new MethodPurchaseRejected('PAY_WAFFO_UPGRADE_WAIT');
   }
   const observed = await db.rpc('pay_stripe_mp_observe_subscription', { p_subscription: priorLocalId, p_merchant: scope.merchant });
   if (observed.error) throw new Error('PAY_STRIPE_MP_RENEWAL_UNAVAILABLE', { cause: observed.error });

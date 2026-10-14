@@ -35,10 +35,10 @@ describe('PAY-STRIPE-MP Pro -> Gold upgrade of a card subscription', () => {
     expect(f.db.rpc).toHaveBeenCalledWith('pay_stripe_mp_observe_subscription', { p_subscription: PRO, p_merchant: 'fixture' });
     expect(mocks.sync).not.toHaveBeenCalled();
   });
-  it('copies a stopping or past-due Pro instead, so admission refuses the upgrade with its usual answer', async () => {
+  it('copies a stopping or past-due Pro and refuses the upgrade at once, whatever an earlier observation said', async () => {
     for (const patch of [{ cancel_at_period_end: true }, { status: 'past_due' }]) {
       const f = fixture(); mocks.read.mockResolvedValue({ ...renewing, ...patch });
-      await f.run();
+      await expect(f.run()).rejects.toThrow('PAY_WAFFO_UPGRADE_WAIT');
       expect(f.db.rpc).not.toHaveBeenCalled();
       expect(mocks.sync).toHaveBeenLastCalledWith(f.db, 'fixture', PRO, expect.objectContaining(patch));
     }
