@@ -419,6 +419,22 @@ DO $$ DECLARE src text;a text:=$x$  IF entry->>'protocol' IS DISTINCT FROM 'open
   END IF;
 END $$;
 
+-- Automatic recovery inventory: a tool call has no lookup, so a closed run whose dispatched tool call never
+-- got a result was never listed (the closed branch waits for every cost). Once that call's recovery deadline
+-- has passed, list the run so the recovery worker finishes it and the hold is released as tool_unknown.
+DO $$ DECLARE src text;a text:=$x$ OR count(*)>0 OR (r.closed AND$x$; BEGIN
+  src:=pg_get_functiondef('public.runtime_pending_financial_batch(uuid,integer)'::regprocedure);
+  IF position('-- 0255 expired tool calls' IN src)=0 THEN
+    IF array_length(string_to_array(src,a),1)<>2 THEN RAISE EXCEPTION 'RESEARCH_TOOL_BILLING_SOURCE_MISMATCH: runtime_pending_financial_batch';END IF;
+    EXECUTE replace(src,a,$x$ OR count(*)>0 -- 0255 expired tool calls
+    OR (r.closed AND r.contract_version='bill2.v2' AND (e.state IN ('cost_pending','cancelled') OR e.result IS NOT NULL)
+     AND EXISTS(SELECT 1 FROM bill2_calls tool_call WHERE tool_call.run_id=r.id AND tool_call.call_kind='tool'
+      AND tool_call.dispatched_at IS NOT NULL AND tool_call.settled_at IS NULL
+      AND clock_timestamp()>=coalesce(tool_call.recovery_deadline,tool_call.created_at+interval '24 hours')))
+    OR (r.closed AND$x$);
+  END IF;
+END $$;
+
 -- Finance report: same rows and order as 0162, plus the call kind and the supplier cost state/bound so
 -- pending tool costs are reported apart from confirmed ones (plan §3.4). A new return type needs DROP.
 DROP FUNCTION IF EXISTS public.bill2_admin_call_report(timestamptz,timestamptz,integer);

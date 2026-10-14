@@ -187,6 +187,28 @@ export async function researchToolCases({db,Client,connectionString,report,creat
     report.checks.push('RT-2 crash after dispatch: waits for its result, then settles as unknown at the recovery deadline (user 0, cost pending); a late result confirms the cost without charging; after reconciliation a late result is refused');
   }
 
+  // The same crash on a runtime-bound run, finished only through the automatic recovery inventory.
+  {
+    const f = await make();
+    const execution = (await db.query('SELECT b2a_test.bind($1) v',[f])).rows[0].v;
+    const c = await claimTool(db,f,1);
+    // The stalled execution is ended; the run closes but waits for the tool result.
+    await db.query("UPDATE runtime_executions SET state='cancelled' WHERE id=$1",[execution]);
+    assert.equal((await rpc(db,'runtime_financial_recovery',f.actor,execution,true)).state,'cost_pending');
+    const listed = async () => (await rpc(db,'runtime_pending_financial_batch',f.actor,20)).filter(x=>x.runId===f.run);
+    assert.equal((await listed()).length,0,'not listed before the recovery deadline');
+    await db.query("UPDATE bill2_calls SET recovery_deadline=now()-interval '1 second' WHERE id=$1",[c.id]);
+    const [item] = await listed();
+    assert.equal(item?.finishAllowed,true,'listed once the deadline has passed');
+    // What the recovery worker does for a finishable item (automaticRecovery.ts).
+    assert.equal((await rpc(db,'runtime_financial_recovery',f.actor,item.executionId,true)).state,'cancelled');
+    const s = await call(db,c.id);
+    assert.deepEqual([s.settled,s.charged_delta,s.nominal_source,s.supplier_cost_state],[true,0,'tool_unknown','pending']);
+    assert.equal((await financial(db,f)).credits,100);
+    assert.equal((await listed()).length,0);
+    report.checks.push('RT-2 recovery inventory: a closed run with a crashed tool call is listed after the recovery deadline and the worker releases the hold as unknown');
+  }
+
   // Reconciliation fills the pending supplier cost; admin only; replay-safe.
   {
     const f = await make();
