@@ -57,7 +57,7 @@ export function JuryPreview() {
       <Player key={scenario.id} scenario={scenario} names={names} settings={settings} />
       <footer className={styles.sampleBar}>
         <p>
-          三位评审各自读完、在页边批注；意见不一的地方辩论一轮，再由{names.S}逐条裁决、写出修订稿。用不用修订稿，由你逐章决定。
+          三位评审各自读完、提出意见；意见不一的地方辩论一轮，再由{names.S}逐条裁决、写出修订稿。用不用修订稿，由你逐章决定。
         </p>
         <p>
           不公开的评审团动画原型（第 4 版，画布）：模拟数据，按真实评审的事件顺序和等待时长播放。
