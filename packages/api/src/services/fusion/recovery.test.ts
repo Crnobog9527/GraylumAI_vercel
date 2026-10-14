@@ -33,24 +33,15 @@ function admin(rows: unknown[], options: { deleted?: string[]; failFinalize?: st
 }
 
 describe('Fusion daily recovery', () => {
-  it('runs the idle-pause step only with time left before the deadline', async () => {
-    const a = admin([]);
-    await recoverFusionFinancials(a.db, { now: () => now, budget: createRuntimeBudget() });
-    expect(a.calls).toContain('fusion_review_pause_idle:');
-    const late = admin([]);
-    await recoverFusionFinancials(late.db, { now: () => now, timeLimitMs: 4_000, budget: createRuntimeBudget() });
-    expect(late.calls).not.toContain('fusion_review_pause_idle:');
-    // A backlog stops 10 s before the limit, so the pause keeps its own window.
+  it('runs the idle-pause step first, so a backlog can never crowd it out', async () => {
     let clock = now;
     const busy = admin(Array.from({ length: 12 }, (_, i) => item(200 + i, true, -60)));
-    const original = (busy.db as unknown as { rpc: (n: string, a: Record<string, unknown>) => unknown }).rpc.bind(busy.db);
-    (busy.db as unknown as { rpc: (n: string, a: Record<string, unknown>) => unknown }).rpc = (n, a) => {
-      if (n === 'bill2_finalize') clock += 4_000; // within the 5 s per-item assumption
-      return original(n, a);
-    };
-    await recoverFusionFinancials(busy.db, { now: () => clock, timeLimitMs: 40_000, budget: createRuntimeBudget() });
-    expect(busy.calls).toContain('fusion_review_pause_idle:');
-    expect(busy.calls.filter(c => c.startsWith('bill2_finalize')).length).toBeLessThan(12);
+    const fake = busy.db as unknown as { rpc: (n: string, a: Record<string, unknown>) => unknown };
+    const original = fake.rpc.bind(busy.db);
+    fake.rpc = (n, a) => { if (n === 'bill2_finalize') clock += 9_000; return original(n, a); };
+    const summary = await recoverFusionFinancials(busy.db, { now: () => clock, timeLimitMs: 40_000, budget: createRuntimeBudget() });
+    expect(busy.calls[0]).toBe('fusion_review_pause_idle:');
+    expect(summary.deferred).toBeGreaterThan(0);
   });
   it('collects expired undispatched calls behind a long backlog of dispatched ones', async () => {
     const backlog = Array.from({ length: 30 }, (_, i) => item(100 + i, true, -60));

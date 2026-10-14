@@ -29,13 +29,20 @@ export async function recoverFusionFinancials(admin: SupabaseClient, options: { 
   const limit = options.limit ?? 50;
   // The cron route has 60 seconds in total and runs other reconciliations alongside (#954 review).
   const stopAt = now() + (options.timeLimitMs ?? 40_000);
+  const bounded = <T>(query: PromiseLike<T> & { abortSignal?: (signal: AbortSignal) => PromiseLike<T> }) =>
+    query.abortSignal ? query.abortSignal(AbortSignal.timeout(Math.max(1, Math.min(5_000, stopAt - now())))) : query;
+  // First, while the whole window is free: reviews still in progress with every call settled and no movement
+  // for an hour become paused (not an end state; 0236; ended reviews are never touched). Running it first means
+  // a lasting backlog below can never crowd it out; a review settled later in this run pauses on the next one.
+  const paused = await bounded(admin.rpc('fusion_review_pause_idle', { p_idle: '1 hour' }));
+  if (paused.error) summary.success = false;
   // Listing is cheap: collect the pages first. Pages advance past calls that cannot progress yet (0235).
+  // Keep paging (each call bounded, stopping before the per-item reserve) so expired undispatched calls
+  // behind a long backlog of slow dispatched ones are still collected and released first (#954 review).
   const rows: Array<z.infer<typeof row>> = [];
   let cursor: { p_after_created: string; p_after_id: string } | undefined;
-  // Keep paging to the end (bounded by the time limit and a safety cap), so expired undispatched calls
-  // behind a long backlog of slow dispatched ones are still collected and released first (#954 review).
-  for (let page = 0; page < (options.pages ?? 200) && now() < stopAt; page++) {
-    const listed = await admin.rpc('fusion_pending_financial_batch', { p_limit: limit, ...cursor });
+  for (let page = 0; page < (options.pages ?? 200) && now() + 10_000 <= stopAt; page++) {
+    const listed = await bounded(admin.rpc('fusion_pending_financial_batch', { p_limit: limit, ...cursor }));
     const parsed = listed.error ? undefined : z.array(row).safeParse(listed.data);
     if (!parsed?.success) return { ...summary, success: false };
     rows.push(...parsed.data);
@@ -46,22 +53,13 @@ export async function recoverFusionFinancials(admin: SupabaseClient, options: { 
   // Releasing holds of calls never dispatched is quick and must not wait behind slow receipt lookups.
   const ordered = [...rows.filter(item => !item.dispatched), ...rows.filter(item => item.dispatched)];
   await recoverPage(admin, ordered, summary, now, stopAt, options.budget);
-  // After the financial wrap-up: reviews still in progress with every call settled and no movement for an
-  // hour become paused (not an end state; 0236). Ended reviews are never touched.
-  // Bounded like every other step: skipped when the deadline is near, and given at most 5 seconds.
-  if (now() + 5_000 <= stopAt) {
-    const paused = await admin.rpc('fusion_review_pause_idle', { p_idle: '1 hour' })
-      .abortSignal(AbortSignal.timeout(Math.min(5_000, stopAt - now())));
-    if (paused.error) summary.success = false;
-  }
   return summary;
 }
 
 async function recoverPage(admin: SupabaseClient, rows: Array<z.infer<typeof row>>, summary: Summary, now: () => number,
   stopAt: number, shared?: RuntimeBudget) {
   for (const [index, item] of rows.entries()) {
-    // Keep 5 seconds for the slowest single step (one lookup, settle and scrub), plus a separate 5-second
-    // window for the idle-pause step that follows, so a lasting backlog never crowds it out.
+    // Keep room for the slowest single step (one lookup, settle and scrub) before the limit.
     if (now() + 10_000 > stopAt) { summary.deferred += rows.length - index; break; }
     summary.scanned++;
     // Every RPC and lookup of this row is bounded by the step's own deadline, not a fresh 285 s (#954 review).
