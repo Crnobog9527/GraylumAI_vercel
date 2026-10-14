@@ -158,6 +158,23 @@ it.each([1280, 375])('removes the row and closes the dialog at once, before the 
     await ui(page.getByRole('alert')).toHaveCount(0);
   }));
 
+it('drops the "返回当前工作" link to the deleted conversation before the page leaves', () => open(1280, async page => {
+  await page.evaluate(id => sessionStorage.setItem('opc-work-return', '/runtime?session=' + id), SESSION);
+  await confirmDelete(page);
+  // Already gone while the server call is still pending: the start page it lands on never links back.
+  expect(await held(page)).toEqual([{ sessionId: SESSION }]);
+  expect(await page.evaluate(() => sessionStorage.getItem('opc-work-return'))).toBeNull();
+  await answer(page, true);
+}));
+
+it('keeps the "返回当前工作" link when it points at other work', () => open(1280, async page => {
+  await page.evaluate(() => sessionStorage.setItem('opc-work-return', '/positioning/00000000-0000-4000-8000-0000000000ff'));
+  await confirmDelete(page);
+  await answer(page, true);
+  await ui.poll(() => page.evaluate(() => (window as unknown as Win).cleanups)).toEqual([{ sessionId: SESSION }]);
+  expect(await page.evaluate(() => sessionStorage.getItem('opc-work-return'))).toBe('/positioning/00000000-0000-4000-8000-0000000000ff');
+}));
+
 it('puts the row back with a plain reason when the server refuses, and never reports success', () => open(1280, async page => {
   await confirmDelete(page);
   await ui(page.getByText('周末选题讨论')).toHaveCount(0);

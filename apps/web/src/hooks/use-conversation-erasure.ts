@@ -6,7 +6,7 @@ import { REVIEW_NOTICE, laterNotice, runConversationErasure } from '@/lib/conver
 import {
   forgetPending, pendingRelated, rememberPending, resumeConversationErasure,
 } from '@/lib/pending-conversation-erasure';
-import { announceErasure, forgetLocalCopies, refreshAfterErasure } from '@/lib/content-erasure';
+import { announceErasure, forgetLocalCopies, forgetWorkReturn, refreshAfterErasure } from '@/lib/content-erasure';
 import { PENDING_AT_LOAD, useConversationErasureStore } from '@/stores/conversation-erasure';
 
 type Row = { sessionId: string; title: string; lastActivityAt: string };
@@ -41,6 +41,8 @@ export function useConversationErasure(leave: (sessionId: string) => void) {
       hide: (id: string) => {
         store.hide(id);
         rememberPending(tabStorage(), id, Date.now(), relatedBySession.get(id) ?? []);
+        // Before the page leaves: the page it lands on must not link back to the deleted conversation.
+        forgetWorkReturn([id, ...(relatedBySession.get(id) ?? [])], tabStorage());
         const rows = utils.opc.conversations.getData();
         const index = rows?.findIndex((row) => row.sessionId === id) ?? -1;
         if (rows && index >= 0) removed.set(id, { row: rows[index], index });
