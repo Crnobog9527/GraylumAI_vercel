@@ -43,13 +43,13 @@ export default function LoginPage() {
   );
 }
 
-function LoginPageContent() {
+export function LoginPageContent() {
   const searchParams = useSearchParams();
   const { data: systemSettings } = trpc.settings.getSystemSettings.useQuery(undefined, {
     retry: false,
     refetchOnWindowFocus: false,
   });
-  const [mode, setMode] = useState<AuthMode>('login');
+  const [mode, setMode] = useState<AuthMode>(() => (searchParams.get('action') === 'signup' ? 'signup' : 'login'));
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [nickname, setNickname] = useState('');
