@@ -99,6 +99,9 @@ BEGIN
   v:=fusion_review_settings(p_actor_id);
   SELECT * INTO d FROM opc_drafts WHERE draft_id=p_draft_id AND actor_id=p_actor_id;
   SELECT * INTO p FROM artifact_projects WHERE id=d.project_id FOR SHARE;
+  -- Re-read the draft under the project lock, as opc_revise/report_revision do: a revise that committed
+  -- meanwhile has moved the draft to a new round, which the freshness check below then refuses.
+  SELECT * INTO d FROM opc_drafts WHERE draft_id=p_draft_id AND actor_id=p_actor_id;
   SELECT * INTO ver FROM artifact_versions WHERE id=p_source_version_id AND project_id=p.id AND erased_at IS NULL;
   SELECT * INTO r FROM artifact_rounds WHERE id=ver.round_id AND project_id=p.id;
   -- The same freshness rule as R14 propose: only the current formal version from a generated report.
