@@ -2818,7 +2818,7 @@
   "fn:prevent_client_profile_credit_write()": "f86e977868bb",
   "fn:prevent_skill_revision_mutation()": "3c4871f3d370",
   "fn:publish_monitor_actor(uuid)": "0f070bc19157",
-  "fn:publish_monitor_connect_callback(uuid,uuid,jsonb)": "c3a1991871ae",
+  "fn:publish_monitor_connect_callback(uuid,uuid,jsonb)": "dcfad8b7d2da",
   "fn:publish_monitor_connect_confirm(uuid,uuid,text,boolean,jsonb)": "aae07660d9bd",
   "fn:publish_monitor_connect_start(uuid,uuid,text[])": "306512b627e7",
   "fn:publish_monitor_connections(uuid)": "e3ef4d0438b2",

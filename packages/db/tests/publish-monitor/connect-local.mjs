@@ -133,6 +133,8 @@ try {
   // A later read-only re-authorization drops the provider capability but keeps the user's publishing consent.
   const s6 = await start(u.a, u.account);
   await callback(u.a, s6.requestId, [cand('pfm_new_1', s6.externalId)]);
+  // Already at the callback (not only for the confirmed target), every own imported account follows this authorization.
+  assert.equal(await v('SELECT provider_can_publish v FROM social_connections WHERE id=$1', [done.connectionId]), false);
   await confirmLive(u.a, s6.requestId, 'pfm_new_1', true);
   assert.deepEqual((await c.query('SELECT consent_publish,provider_can_publish FROM social_connections WHERE id=$1',
     [done.connectionId])).rows[0], { consent_publish: true, provider_can_publish: false });
@@ -142,6 +144,13 @@ try {
   const sv = await start(victim.a, victim.account);
   assert.deepEqual((await callback(victim.a, sv.requestId, [cand('pfm_new_1', sv.externalId)])).quarantined, ['pfm_new_1']);
   await code(confirmLive(u.a, s7.requestId, 'pfm_new_1'), 'PT409');
+  assert.equal(await v("SELECT status v FROM social_connections WHERE provider_account_id='pfm_new_1'"), 'quarantined');
+  // Already quarantined before u's callback, then taken over again after it: the stale confirmation is still rejected.
+  const s8 = await start(u.a, u.account);
+  await callback(u.a, s8.requestId, [cand('pfm_new_1', s8.externalId)]);
+  const sv2 = await start(victim.a, victim.account);
+  await callback(victim.a, sv2.requestId, [cand('pfm_new_1', sv2.externalId)]);
+  await code(confirmLive(u.a, s8.requestId, 'pfm_new_1'), 'PT409');
   assert.equal(await v("SELECT status v FROM social_connections WHERE provider_account_id='pfm_new_1'"), 'quarantined');
   report.checks.push('a proven takeover quarantines the other user\'s connection without binding it; publishing upgrade '
     + 'changes only the target connection; read-only re-authorization drops provider publish capability; '

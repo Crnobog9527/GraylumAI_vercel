@@ -70,10 +70,15 @@ BEGIN
    ignored:=ignored||pid; CONTINUE; END IF;
   SELECT * INTO existing FROM social_connections WHERE provider_account_id=pid FOR UPDATE;
   IF existing.id IS NULL THEN fresh:=fresh||pid;
-  ELSIF existing.actor_id=a THEN own:=own||pid;
+  ELSIF existing.actor_id=a THEN
+   own:=own||pid;
+   -- This authorization covers every account it imported: the provider capability follows it, consent does not change.
+   UPDATE social_connections SET provider_can_publish='posts'=ANY(req.permissions),updated_at=clock_timestamp()
+   WHERE id=existing.id AND provider_can_publish IS DISTINCT FROM ('posts'=ANY(req.permissions));
   ELSE
    -- Proven takeover: the other user's connection stops reading and publishing until its owner re-authorises.
-   IF existing.status NOT IN ('deleting','quarantined') THEN
+   -- Every takeover bumps updated_at, even on an already quarantined row, so confirm can reject stale facts.
+   IF existing.status<>'deleting' THEN
     UPDATE social_connections SET status='quarantined',lease_owner=NULL,lease_expires_at=NULL,updated_at=clock_timestamp()
     WHERE id=existing.id;
    END IF;
