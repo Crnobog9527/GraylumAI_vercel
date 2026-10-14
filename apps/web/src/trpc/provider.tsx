@@ -101,7 +101,7 @@ export default function Provider({ children }: { children: React.ReactNode }) {
       onToken: token => { accessTokenRef.current = token; sessionPromiseRef.current = Promise.resolve(token); },
     });
     return trpc.createClient({ links: [sessionRefreshLink(session), splitLink({
-      condition: op => op.path === 'runtime.executeStream' || op.path === 'opc.mentorTurnStream',
+      condition: op => op.path === 'runtime.executeStream' || op.path === 'runtime.resumeStream' || op.path === 'opc.mentorTurnStream',
       true: httpBatchStreamLink(options),
       false: httpBatchLink(options),
     })] });
