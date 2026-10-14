@@ -2,6 +2,11 @@
 import { createHash } from 'node:crypto';
 import { freezePurchaseSnapshot, type PurchaseSnapshot } from './contracts';
 
+/** Marks a stop or cancellation Graylum asked Stripe for (review stop, monthly refund), as opposed to the buyer's own:
+ * Stripe reports both as cancellation_requested, and only the buyer's own ends the founder renewal window. Stripe
+ * replaces cancellation_details on every new cancellation, so the marker always describes the latest one. */
+export const GRAYLUM_INITIATED_CANCEL = 'graylum_initiated';
+
 export type StripeScope = Readonly<{ merchant: string; mode: 'test' | 'live' }>;
 export type PurchaseAction = Readonly<{
   itemType: 'credit_package' | 'membership_plan';

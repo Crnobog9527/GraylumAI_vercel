@@ -32,6 +32,10 @@ export function nativeVisible(body:string):string {
     return typeof value.message === 'string' ? value.message : INVALID_REPLY_NOTICE;
   } catch { return fallback(); }
 }
+/** Public text of a saved native body. A plain-text stream's body is the reply itself, whatever it starts with. */
+export function visibleText(body:string,context:{textStream?:string}):string {
+  return context.textStream==='plain-text-v1'?body:nativeVisible(body);
+}
 export function nativeMetadata(result:Record<string,unknown>|null|undefined
 ):Pick<AgentTurnOutcome,'stopped'|'completeness'|'organized'|'summaryOmitted'|'messageFirst'|'envelopeCompact'> {
   if(!result)return {};
@@ -80,9 +84,9 @@ export function nativeFrameProjection(projection:NativeProgressProjection,progre
 
 export function completedOutput(result:({body:string;summary?:string}&Record<string,unknown>)|null,
   context:unknown,onProgress?: (update:NativeTextUpdate)=>void) {
-  const saved=context as {nativeOutput?:string;envelopeOrder?:string;providerRequestFormat?:string};
-  if(saved.nativeOutput&&(saved.envelopeOrder||saved.providerRequestFormat==='agent-turn-v5-stream')&&result?.body){
-    const text=nativeVisible(result.body);onProgress?.({type:'text',text,delta:text,replace:true,source:'final'});
+  const saved=context as {nativeOutput?:string;envelopeOrder?:string;providerRequestFormat?:string;textStream?:string};
+  if(saved.nativeOutput&&(saved.envelopeOrder||saved.providerRequestFormat==='agent-turn-v5-stream'||saved.textStream==='plain-text-v1')&&result?.body){
+    const text=visibleText(result.body,saved);onProgress?.({type:'text',text,delta:text,replace:true,source:'final'});
   }
   return {...nativeMetadata(result),body:result?.body,
     ...(result?.summary!==undefined?{summary:result.summary}:{}),state:'completed' as const};
