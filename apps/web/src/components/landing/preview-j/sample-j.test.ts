@@ -54,7 +54,11 @@ describe('style sample J', () => {
 
   it('cites forum quotes as platform · user ID · date and news quotes as they were', () => {
     expect(noteSource('p7', 'Reddit r/socialmedia，2026-04')).toBe('Reddit r/socialmedia · u/DrRZXQ · 2026-04');
-    expect(noteSource('p8', 'Reddit r/smallbusinessowner，2026-04')).toBe(`Reddit r/smallbusinessowner · ${J_ID_PLACEHOLDER} · 2026-04`);
+    expect(noteSource('p8', 'Reddit r/smallbusinessowner，2026-04')).toBe('Reddit r/smallbusinessowner · u/huttleai · 2026-04');
+    expect(noteSource('p5', '方格子，约 2026')).toBe('方格子 · 享民頭條撰文 · 约 2026');
+    // A forum note without a checked ID shows the placeholder rather than a guess.
+    expect(noteSource('p9', '某论坛，2026')).toBe('某论坛，2026');
+    expect(J_ID_PLACEHOLDER).toBe('【用户 ID 待补】');
     expect(noteSource('p1', '北京日报报道中的受访者，2024-11')).toBe('北京日报报道中的受访者，2024-11');
   });
 
