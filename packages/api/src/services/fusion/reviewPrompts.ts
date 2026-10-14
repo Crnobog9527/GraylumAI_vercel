@@ -46,6 +46,7 @@ const SUMMARY_FORMAT = [
   'body 是修订后的完整报告，必须保留给出的全部 "## " 章节标题，顺序不变，每节都有内容。',
   'steps 必须列出给出的每一个步骤和每一个字段：没改的字段照抄 currentValue、changed=false；改了的字段 changed=true，值非空、不超过 400 字。',
   'changeNotes 对每个改动过的章节写一条：改了定位事实就在 fields 里列出对应的 stepId 和 fieldId（这些字段必须 changed=true），只改表述就 wordingOnly=true、fields 为空。',
+  '不打算修改的章节必须逐字照抄原文（标点、空格、换行都不变）。宿主会逐字比较每一章：哪怕只改了一个字或一个标点，也必须为这一章写一条 changeNotes，漏写任何一章都算修订失败。',
 ].join('\n');
 
 /** Host-written length rule: counted in characters (as the host check counts), headings included. */

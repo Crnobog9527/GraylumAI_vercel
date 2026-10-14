@@ -143,10 +143,11 @@ describe('review flow', () => {
     expect(db.review).toMatchObject({ state: 'incomplete' });
   });
 
-  it('tells the summary model the exact length limit the host check enforces (staging run: 10888 → 16522 characters)', () => {
+  it('tells the summary model the exact length limit and the verbatim-copy rule the host check enforces (staging runs)', () => {
     const request = summaryRequest({ reviewer: 'r', summary: 's', rubric: 'b' },
       { report: original, materials: {}, sections, maxCharacters: 12000 }, [], [{ stepId: 's1', fieldIds: ['goal'] }], { s1: { goal: '旧目标' } });
     expect(request.instructions).toContain('不能超过 12000 个字符');
+    expect(request.instructions).toContain('逐字照抄原文');
   });
 
   it('stop ends the review; continue then claims nothing', async () => {
