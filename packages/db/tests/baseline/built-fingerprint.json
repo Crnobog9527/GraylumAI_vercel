@@ -2819,7 +2819,7 @@
   "fn:prevent_skill_revision_mutation()": "3c4871f3d370",
   "fn:publish_monitor_actor(uuid)": "0f070bc19157",
   "fn:publish_monitor_connect_callback(uuid,uuid,jsonb)": "c3a1991871ae",
-  "fn:publish_monitor_connect_confirm(uuid,uuid,text,boolean,jsonb)": "dbe0d8f04168",
+  "fn:publish_monitor_connect_confirm(uuid,uuid,text,boolean,jsonb)": "aae07660d9bd",
   "fn:publish_monitor_connect_start(uuid,uuid,text[])": "306512b627e7",
   "fn:publish_monitor_connections(uuid)": "e3ef4d0438b2",
   "fn:publish_monitor_erasure_remaining(uuid)": "b25c23942c57",

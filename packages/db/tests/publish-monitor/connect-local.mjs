@@ -136,8 +136,16 @@ try {
   await confirmLive(u.a, s6.requestId, 'pfm_new_1', true);
   assert.deepEqual((await c.query('SELECT consent_publish,provider_can_publish FROM social_connections WHERE id=$1',
     [done.connectionId])).rows[0], { consent_publish: true, provider_can_publish: false });
+  // Another user's callback proves a takeover after u's callback (racing past u's re-read): u's confirm must not reopen it.
+  const s7 = await start(u.a, u.account);
+  await callback(u.a, s7.requestId, [cand('pfm_new_1', s7.externalId)]);
+  const sv = await start(victim.a, victim.account);
+  assert.deepEqual((await callback(victim.a, sv.requestId, [cand('pfm_new_1', sv.externalId)])).quarantined, ['pfm_new_1']);
+  await code(confirmLive(u.a, s7.requestId, 'pfm_new_1'), 'PT409');
+  assert.equal(await v("SELECT status v FROM social_connections WHERE provider_account_id='pfm_new_1'"), 'quarantined');
   report.checks.push('a proven takeover quarantines the other user\'s connection without binding it; publishing upgrade '
-    + 'changes only the target connection; read-only re-authorization drops provider publish capability');
+    + 'changes only the target connection; read-only re-authorization drops provider publish capability; '
+    + 'a quarantine after the callback cannot be reopened by a stale confirmation');
 
   await c.query("UPDATE social_connect_requests SET expires_at=now()-interval '1 second' WHERE actor_id=$1"
     + " AND state='awaiting_callback'", [u.a]);

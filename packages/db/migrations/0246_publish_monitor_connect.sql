@@ -116,6 +116,10 @@ BEGIN
  IF existing.id IS NOT NULL THEN
   IF existing.status='deleting' OR existing.account_project_id IS DISTINCT FROM req.target_account_project_id THEN
    RAISE EXCEPTION 'PUBLISH_MONITOR_ACCOUNT_BOUND_ELSEWHERE' USING ERRCODE='PT409'; END IF;
+  -- Quarantined after this attempt's callback: another user's later callback proved a takeover that the server's
+  -- re-read may have raced past. Only a quarantine that predates this attempt can be lifted by confirming it.
+  IF existing.status='quarantined' AND existing.updated_at>req.consumed_at THEN
+   RAISE EXCEPTION 'PUBLISH_MONITOR_AUTHORIZATION_CHANGED' USING ERRCODE='PT409'; END IF;
   UPDATE social_connections SET status='connected',consent_read=true,consent_auto_track=p_auto_track,
    consent_publish=CASE WHEN publish THEN true ELSE consent_publish END,
    -- Capability follows this authorization (a read-only re-authorization drops it); consent stays the user's choice.
