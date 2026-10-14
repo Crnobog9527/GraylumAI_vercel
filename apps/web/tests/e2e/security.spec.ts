@@ -581,9 +581,10 @@ test.describe('Retired invitation links', () => {
         if (request.url().includes('invitation.')) invitationCalls.push(request.url());
       });
       await gotoWithBypass(page, `/login?${query}`);
+      // The first request after the production build starts can be slow; wait as the other login checks do.
+      await waitForLoginFormReady(page);
       const signup = query.startsWith('action=signup');
-      await expect(page.locator('form button[type="submit"]')).toContainText(signup ? '创建账户' : '登录', { timeout: 10000 });
-      await expect(page.locator('input[type="email"]')).toBeVisible();
+      await expect(page.locator('form button[type="submit"]')).toContainText(signup ? '创建账户' : '登录', { timeout: 30000 });
       if (signup) await expect(page.locator('#nickname')).toBeVisible();
       await expect(page.locator('#invite-code')).toHaveCount(0);
       await expect(page.getByText('邀请码')).toHaveCount(0);
