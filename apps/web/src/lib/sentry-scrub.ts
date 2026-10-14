@@ -36,6 +36,8 @@ export const APP_SEGMENTS = new Set(['about', 'acceptable-use', 'access-denied',
   'd', 'e', 'g', 'h', 'i', 'j',
   // FUSION-REVIEW animation prototype (/landing/preview/jury), removed with the prototype.
   'jury',
+  // The landing samples' local edit mode (/api/dev/owner-edits; answers 404 outside a local dev server).
+  'dev', 'owner-edits',
   '_next', 'static', 'chunks', 'app', 'pages', 'css', 'media']);
 const OWN_HOST = /(^|\.)graylum\.com$|\.vercel\.app$|^localhost$|^127\.0\.0\.1$/;
 

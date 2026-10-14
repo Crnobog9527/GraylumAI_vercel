@@ -53,7 +53,8 @@ describe('style sample J', () => {
   });
 
   it('cites forum quotes as platform · user ID · date and news quotes as they were', () => {
-    expect(noteSource('p7', 'Reddit r/socialmedia，2026-04')).toBe(`Reddit r/socialmedia · ${J_ID_PLACEHOLDER} · 2026-04`);
+    expect(noteSource('p7', 'Reddit r/socialmedia，2026-04')).toBe('Reddit r/socialmedia · u/DrRZXQ · 2026-04');
+    expect(noteSource('p8', 'Reddit r/smallbusinessowner，2026-04')).toBe(`Reddit r/smallbusinessowner · ${J_ID_PLACEHOLDER} · 2026-04`);
     expect(noteSource('p1', '北京日报报道中的受访者，2024-11')).toBe('北京日报报道中的受访者，2024-11');
   });
 
