@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import {
-  DECISIONS, type AdoptChoice, type AdoptResult, type DecisionKey, type DetailIssue, type DetailSection, type JuryDetail,
+  DECISIONS, type AdoptChoice, type AdoptProposed, type AdoptRecorded, type DecisionKey, type DetailIssue, type DetailSection, type JuryDetail,
   type Seat, type Verdict,
 } from './jury-events';
 
@@ -58,11 +58,45 @@ export function toChoices(state: ChoiceState, sections: readonly DetailSection[]
   });
 }
 
-/** What the prototype pretends fusionReview.adopt returned: a new version only when at least one chapter was adopted. */
-export function mockAdopt(choices: readonly AdoptChoice[]): AdoptResult {
+const STEP_TITLE: Record<string, string> = {
+  audience: '受众画像', platform: '平台选择', content: '内容支柱', monetization: '变现路径', plan: '30 天行动',
+};
+const FIELD_TITLE: Record<string, string> = {
+  core: '核心受众', secondary: '同步发布的平台', pillars: '三个内容支柱', firstStep: '第一步怎么赚钱', cadence: '更新节奏',
+};
+/** Steps built on the changed ones: confirmed together with them, values unchanged (shape of R14's cascade). */
+const CASCADE: AdoptProposed['diff']['cascade'] = [
+  { stepId: 'topics', stepTitle: '第一周选题', fields: [
+    { fieldId: 'topicList', fieldTitle: '选题清单', before: { value: '按原定位生成的 7 个选题', status: 'confirmed' },
+      after: { value: '按原定位生成的 7 个选题', status: 'confirmed' } },
+  ] },
+];
+
+/**
+ * What the prototype pretends fusionReview.adopt returned: with an adopted chapter, a proposal (R14's field diff and
+ * cascade, nothing changed yet); with every chapter kept, the choice is simply recorded.
+ */
+export function mockPropose(sections: readonly DetailSection[], choices: readonly AdoptChoice[]): AdoptProposed | AdoptRecorded {
   const adopted = choices.filter(item => item.use === 'revised').map(item => item.section);
   const kept = choices.filter(item => item.use === 'original').map(item => item.section);
-  return { versionId: adopted.length > 0 ? 'mock-version' : null, adopted, kept };
+  if (adopted.length === 0) return { state: 'recorded', versionId: null, adopted, kept };
+  const seen = new Set<string>();
+  const changes = sections.filter(item => adopted.includes(item.section)).flatMap(item => item.fields)
+    .filter(item => !seen.has(`${item.stepId}.${item.fieldId}`) && Boolean(seen.add(`${item.stepId}.${item.fieldId}`)))
+    .map(item => ({
+      stepId: item.stepId, stepTitle: STEP_TITLE[item.stepId] ?? item.stepId, fieldId: item.fieldId,
+      fieldTitle: FIELD_TITLE[item.fieldId] ?? item.fieldId,
+      before: { value: item.before, status: 'confirmed' }, after: { value: item.after, status: 'confirmed' },
+    }));
+  return {
+    state: 'proposed', revisionId: 'mock-revision', diff: { changes, cascade: changes.length > 0 ? CASCADE : [] },
+    diffHash: `mock-${adopted.length}-${changes.length}`, adopted, kept,
+  };
+}
+
+/** fusionReview.confirmAdoption: apply makes a new formal version, decline changes nothing. */
+export function mockConfirm(proposal: AdoptProposed, decision: 'apply' | 'decline'): AdoptRecorded {
+  return { state: 'recorded', versionId: decision === 'apply' ? 'mock-version' : null, adopted: proposal.adopted, kept: proposal.kept };
 }
 
 /** fusionReview.adopt refusal codes, in plain words. */
@@ -71,6 +105,7 @@ export const ADOPT_ERROR_LABEL: Record<string, string> = {
   FUSION_ADOPTION_INVALID: '选择没有提交成功，请刷新页面后再选一次。',
   FUSION_ADOPTION_CONFIRM_REQUIRED: '只改了表述的章节，采用前要先勾选「确认不改变定位事实」。',
   FUSION_ADOPTION_LINKED: '联动的章节要选成一样，请再检查一下。',
+  FUSION_ADOPTION_STALE: '内容有更新，请重新查看后再确认。',
   FUSION_REVIEW_ADOPTED: '这次评审已经选过了，下面是当时的选择。',
   REPORT_REVISION_STALE: '评审之后你改过草稿，这份修订稿已经作废。你的草稿没有变化，可以对新草稿重新发起评审。',
 };

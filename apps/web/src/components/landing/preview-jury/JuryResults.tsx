@@ -1,18 +1,12 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 'use client';
 
-import { useMemo, useState } from 'react';
-import { CheckCircle2, Clock3 } from 'lucide-react';
-import {
-  DECISIONS, DECISION_LABEL, SEATS, type AdoptResult, type JuryDetail, type JurySeatNames, type SeatCode,
-} from './jury-events';
-import {
-  adoptErrorLabel, choosable, chosenCount, finalVerdicts, isComplete, issueCount, issuesByChapter, mockAdopt, needsConfirm, setConfirmed,
-  setUse, splitDecisions, toChoices, type ChoiceState,
-} from './jury-adopt';
+import { useMemo } from 'react';
+import { DECISIONS, DECISION_LABEL, SEATS, type JuryDetail, type JurySeatNames, type SeatCode } from './jury-events';
+import { choosable, finalVerdicts, issueCount, issuesByChapter, splitDecisions } from './jury-adopt';
 import { DECISION_SECTION, REPORT_SECTIONS } from './jury-mock-reviews';
 import { SeatBadge, SeverityTag, VerdictStamp } from './JuryBits';
-import { JuryChapter } from './JuryChapter';
+import { JuryAdoption } from './JuryAdoption';
 import styles from './jury-results.module.css';
 
 /**
@@ -82,72 +76,7 @@ export function JuryResults({ detail, names, onOpenRecord }: {
       </section>
 
       {failed ? <FailedChapters detail={detail} names={names} /> : (
-        <Adoption detail={detail} names={names} quiet={quiet} />
-      )}
-    </section>
-  );
-}
-
-function Adoption({ detail, names, quiet }: { detail: JuryDetail; names: JurySeatNames; quiet: number }) {
-  const sections = detail.summary.sections;
-  const shown = sections.filter(item => item.rulings.length > 0 || item.changed);
-  const [state, setState] = useState<ChoiceState>({});
-  const [result, setResult] = useState<AdoptResult | null>(detail.adoption);
-  const [error, setError] = useState<string | null>(null);
-  const [stale, setStale] = useState(false);
-  const [later, setLater] = useState(false);
-  const total = choosable(sections).length;
-  const done = chosenCount(state, sections);
-
-  const submit = () => {
-    if (stale) { setError(adoptErrorLabel('REPORT_REVISION_STALE')); return; }
-    if (!isComplete(state, sections)) {
-      const unconfirmed = choosable(sections).some(item => needsConfirm(item, state));
-      setError(adoptErrorLabel(unconfirmed ? 'FUSION_ADOPTION_CONFIRM_REQUIRED' : 'FUSION_ADOPTION_INCOMPLETE'));
-      return;
-    }
-    setError(null);
-    setResult(mockAdopt(toChoices(state, sections)));
-  };
-
-  return (
-    <section className={styles.block} aria-labelledby="jury-chapters">
-      <h3 id="jury-chapters">逐章意见和你的选择</h3>
-      <p className={styles.blockNote}>
-        改过的章节由你决定用修订版还是原文；没改的章节保留原文。全部选完后合成一份新版本。
-        {quiet > 0 ? `其余 ${quiet} 章评审团没有意见。` : ''}
-      </p>
-      {result ? null : (
-        <label className={styles.prototypeSwitch}>
-          <input type="checkbox" checked={stale} onChange={event => setStale(event.target.checked)} />
-          原型开关：模拟「评审之后改过草稿」，看提交被拒时的提示
-        </label>
-      )}
-      <div className={styles.chapters}>
-        {shown.map(section => (
-          <JuryChapter key={section.section} section={section} names={names} state={state} locked={Boolean(result)}
-            onUse={use => { setState(value => setUse(value, sections, section.section, use)); setError(null); }}
-            onConfirm={confirmed => setState(value => setConfirmed(value, section.section, confirmed))} />
-        ))}
-      </div>
-
-      {result ? (
-        <div className={styles.done} role="status">
-          <CheckCircle2 size={20} aria-hidden="true" />
-          {result.versionId
-            ? <p>新版本已生成：{result.adopted.length} 章采用修订版{result.kept.length ? `，${result.kept.length} 章保留原文` : ''}。之后的选题和写作会用新版本。</p>
-            : <p>你选择全部保留原文，报告没有变化；这次的选择已经记下。</p>}
-        </div>
-      ) : (
-        <div className={styles.bar}>
-          <span className={styles.count}>已选 {done}/{total} 章</span>
-          {error ? <p className={styles.error} role="alert">{error}</p> : null}
-          {later ? <p className={styles.later}><Clock3 size={14} aria-hidden="true" />选择会一直留在这次评审里，你可以先去改草稿，回来再选。</p> : null}
-          <div className={styles.barActions}>
-            <button type="button" className={styles.secondary} onClick={() => setLater(true)}>先不选，稍后回来</button>
-            <button type="button" className={styles.primary} onClick={submit} aria-disabled={done < total}>合成新版本</button>
-          </div>
-        </div>
+        <JuryAdoption detail={detail} names={names} quiet={quiet} />
       )}
     </section>
   );

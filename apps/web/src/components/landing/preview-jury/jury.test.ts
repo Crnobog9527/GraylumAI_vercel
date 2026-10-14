@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest';
 import sitemap from '@/app/sitemap';
 import { metadata } from '@/app/landing/preview/jury/page';
 import {
-  ADOPT_ERROR_LABEL, choosable, isComplete, linkedGroup, mockAdopt, needsConfirm, setConfirmed, setUse, toChoices, type ChoiceState,
+  ADOPT_ERROR_LABEL, choosable, isComplete, linkedGroup, mockConfirm, mockPropose, needsConfirm, setConfirmed, setUse, toChoices, type ChoiceState,
 } from './jury-adopt';
 import {
   DEFAULT_SEAT_NAMES, resolveSeatNames, SAMPLE_PANEL, SEAT_NAME_MAX, summarize, type JuryEvent,
@@ -27,7 +27,7 @@ describe('jury prototype page', () => {
   });
 });
 
-describe('mock data follows FUSION-REVIEW §2.2a (contract v5)', () => {
+describe('mock data follows FUSION-REVIEW §2.2a (contract v6)', () => {
   it('gives every event a unique id and keeps event text to 120 characters, while the detail keeps the full text', () => {
     for (const scenario of JURY_SCENARIOS) {
       const list = events(scenario.id);
@@ -163,19 +163,35 @@ describe('chapter-by-chapter choice', () => {
     let state: ChoiceState = {};
     for (const item of choosable(sections)) state = setUse(state, sections, item.section, 'original');
     expect(isComplete(state, sections)).toBe(true);
-    expect(mockAdopt(toChoices(state, sections)).versionId).toBeNull();
+    expect(mockPropose(sections, toChoices(state, sections))).toMatchObject({ state: 'recorded', versionId: null, adopted: [] });
     state = setUse(state, sections, '第 3 章 差异化', 'revised');
     expect(isComplete(state, sections)).toBe(false);
     state = setConfirmed(state, '第 3 章 差异化', true);
     const choices = toChoices(state, sections);
     expect(choices.find(item => item.section === '第 3 章 差异化')).toEqual({ section: '第 3 章 差异化', use: 'revised', confirmedNoFactChange: true });
     expect(choices.every(item => sections.find(section => section.section === item.section)?.changed)).toBe(true);
-    expect(mockAdopt(choices)).toMatchObject({ versionId: 'mock-version', adopted: ['第 3 章 差异化'] });
+    const proposal = mockPropose(sections, choices);
+    expect(proposal).toMatchObject({ state: 'proposed', adopted: ['第 3 章 差异化'] });
+    if (proposal.state !== 'proposed') throw new Error('expected a proposal');
+    expect(proposal.diff.changes).toHaveLength(0);
+    expect(mockConfirm(proposal, 'apply').versionId).toBe('mock-version');
+    expect(mockConfirm(proposal, 'decline')).toMatchObject({ state: 'recorded', versionId: null });
+  });
+
+  it('shows the field changes and the steps confirmed with them before anything changes', () => {
+    let state: ChoiceState = {};
+    for (const item of choosable(sections)) state = setUse(state, sections, item.section, 'original');
+    state = setUse(state, sections, '第 10 章 变现路径', 'revised');
+    const proposal = mockPropose(sections, toChoices(state, sections));
+    if (proposal.state !== 'proposed') throw new Error('expected a proposal');
+    expect(proposal.adopted).toEqual(['第 10 章 变现路径', '第 12 章 30 天行动']);
+    expect(proposal.diff.changes.map(item => item.fieldTitle)).toEqual(['第一步怎么赚钱', '更新节奏']);
+    expect(proposal.diff.cascade.length).toBeGreaterThan(0);
   });
 
   it('explains every refusal code in plain words', () => {
     for (const code of ['FUSION_ADOPTION_INCOMPLETE', 'FUSION_ADOPTION_INVALID', 'FUSION_ADOPTION_CONFIRM_REQUIRED', 'FUSION_ADOPTION_LINKED',
-      'FUSION_REVIEW_ADOPTED', 'REPORT_REVISION_STALE']) {
+      'FUSION_ADOPTION_STALE', 'FUSION_REVIEW_ADOPTED', 'REPORT_REVISION_STALE']) {
       expect(ADOPT_ERROR_LABEL[code]).toBeTruthy();
     }
   });

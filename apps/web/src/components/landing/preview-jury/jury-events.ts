@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 
 /**
- * Shapes of FUSION-REVIEW.md §2.2a (contract v5): the process events of fusionReview.events (summaries, ≤120 chars)
+ * Shapes of FUSION-REVIEW.md §2.2a (contract v6): the process events of fusionReview.events (summaries, ≤120 chars)
  * and the owner-only full text of fusionReview.detail. The prototype replays mock data of these shapes; nothing here
  * calls the backend or a model. Only seat codes appear (A/B/C, the summary is S); names come from fusionReview.panel().
  */
@@ -71,13 +71,22 @@ export type DetailSection = {
   linkedSections: string[];
 };
 export type AdoptChoice = { section: string; use: 'revised' | 'original'; confirmedNoFactChange?: boolean };
-export type AdoptResult = { versionId: string | null; adopted: string[]; kept: string[] };
+/** fusionReview.confirmAdoption's answer, or adopt's when every chapter keeps the original: the choice is recorded. */
+export type AdoptRecorded = { state: 'recorded'; versionId: string | null; adopted: string[]; kept: string[] };
+type FieldState = { value: string; status: string };
+/** R14's field diff: what the adopted chapters change, and the later steps confirmed together with them. */
+export type RevisionDiff = {
+  changes: { stepId: string; stepTitle: string; fieldId: string; fieldTitle: string; before: FieldState; after: FieldState }[];
+  cascade: { stepId: string; stepTitle: string; fields: { fieldId: string; fieldTitle: string; before: FieldState; after: FieldState }[] }[];
+};
+/** fusionReview.adopt with at least one adopted chapter: a proposal to show before confirming; nothing changed yet. */
+export type AdoptProposed = { state: 'proposed'; revisionId: string; diff: RevisionDiff; diffHash: string; adopted: string[]; kept: string[] };
 export type JuryDetail = {
   reviewId: string; state: string; outcome: string; revisionId: string | null;
   seats: { seat: Seat; rounds: DetailRound[] }[];
   summary: { status: 'usable' | 'failed' | 'none'; sections: DetailSection[] };
   /** The user's chapter choices once made (fusionReview.adopt can be called once), otherwise null. */
-  adoption: AdoptResult | null;
+  adoption: AdoptRecorded | null;
   /** The review has ended and waits for the chapter choices; the draft is not locked meanwhile. */
   awaitingChoice: boolean;
 };

@@ -89,7 +89,23 @@
 .primary[aria-disabled='true'] { background: #bdbdbd; }
 .secondary { border: 1px solid #e0e0da; background: #fff; color: #262626; }
 .primary:focus-visible, .secondary:focus-visible { outline: 2px solid #262626; outline-offset: 2px; }
-.prototypeSwitch { display: flex; align-items: center; gap: 6px; color: #6b6b6b; font-size: 12.5px; }
+.prototypeSwitch { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; color: #6b6b6b; font-size: 12.5px; }
+.prototypeSwitch select { min-height: 30px; padding: 0 8px; border: 1px solid #e0e0da; border-radius: 8px; background: #fff; font: inherit; }
+
+.review {
+  display: grid; gap: 12px; padding: 18px; border-radius: 18px; background: #fff; scroll-margin: 16px;
+  border: 1.5px solid #262626; box-shadow: 0 8px 28px rgba(2, 4, 26, .16);
+}
+.review h4 { margin: 0; font-size: 16px; font-weight: 900; }
+.diff { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.diff li { display: grid; grid-template-columns: minmax(0, 13em) minmax(0, 1fr); gap: 4px 12px; padding: 8px 10px; border-radius: 10px; background: #faf8f2; }
+.diffWhere { color: #6b6b6b; font-size: 13px; font-weight: 700; }
+.diffValues { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; font-size: 14px; }
+.diffValues s { color: #8a8a8a; }
+.cascade { padding: 10px 12px; border-radius: 10px; background: #eef4fb; color: #1f4f86; font-size: 13.5px; }
+.cascade p { margin: 0 0 4px; }
+.cascade ul { margin: 0; padding-left: 18px; }
+.reviewActions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
 .done { display: flex; align-items: flex-start; gap: 10px; padding: 14px 16px; border-radius: 14px; background: #f1f7f2; color: #2f6a3b; }
 .done p { margin: 0; font-size: 15px; font-weight: 700; }
 
@@ -108,5 +124,8 @@
   .barActions { grid-column: 1; grid-row: auto; }
   .barActions button { flex: 1; padding: 0 10px; }
   .option { flex: 1; justify-content: center; }
+  .review { padding: 14px; }
+  .diff li { grid-template-columns: minmax(0, 1fr); }
+  .reviewActions button { flex: 1 1 100%; }
 }
 @media (prefers-reduced-motion: reduce) { .results { animation: none; } }
