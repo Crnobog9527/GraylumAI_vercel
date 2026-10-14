@@ -365,6 +365,18 @@ describe('the canvas', () => {
     }
   });
 
+  it('says what each reviewer is doing now in the word under its mark, also while the second round reads', () => {
+    const second = scenes.find(scene => scene.kind === 'reading' && scene.round === 2);
+    if (second?.kind !== 'reading') throw new Error('expected a second reading round');
+    const view = canvasAt(scenes, second.start + 1, names);
+    for (const seat of ['A', 'B', 'C'] as const) {
+      expect(statusWord(view, seat)).toBe('在读');
+      expect(view.columns[seat].at(-1)?.key).toBe('read-2');
+      expect(view.columns[seat].some(card => card.key === 'read-1')).toBe(false);
+    }
+    expect(statusWord(canvasAt(scenes, second.end - 1, names), 'A')).toBe('已交卷');
+  });
+
   it('threads each reviewer to the report while reading, and shows only the current issue in words', () => {
     const reading = canvasAt(scenes, 10_000, names);
     expect(reading.doc.state).toBe('reading');

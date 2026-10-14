@@ -86,12 +86,14 @@ export function canvasAt(scenes: readonly Scene[], clock: number, names: JurySea
         }
         break;
       case 'reading': {
-        const key = 'read';
+        const key = `read-${scene.round}`;
         const waiting: Seat[] = [];
         for (const seat of SEATS) {
           const submitted = clock >= (scene.submitAt[seat] ?? Infinity);
           const state = submitted ? (scene.failed.includes(seat) ? 'failed' : 'done') : 'reading';
           if (state === 'reading') waiting.push(seat);
+          // Round 2 reads anew at the bottom of the string; the round-1 card has done its job.
+          if (scene.round === 2) columns[seat] = columns[seat].filter(card => card.key !== 'read-1');
           place(columns, seat, { kind: 'read', key, round: scene.round, state });
         }
         if (now) {
@@ -183,9 +185,9 @@ export function canvasAt(scenes: readonly Scene[], clock: number, names: JurySea
       }
       case 'failed': {
         const { reviewer, round } = scene.failure;
-        place(columns, reviewer, { kind: 'read', key: 'read', round, state: 'failed' });
+        place(columns, reviewer, { kind: 'read', key: `read-${round}`, round, state: 'failed' });
         if (now) {
-          view.current = 'read';
+          view.current = `read-${round}`;
           view.focus = [reviewer];
           view.caption = `${of(names[reviewer])}没有给出可用意见，这一轮不计入`;
         }
