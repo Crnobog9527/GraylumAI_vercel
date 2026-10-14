@@ -22,7 +22,7 @@ describe('Post for Me webhook', () => {
   });
 
   it('a provider-side disconnect is applied idempotently; other events change nothing', async () => {
-    const rpc = vi.fn().mockResolvedValue({ data: true, error: null });
+    const rpc = vi.fn(() => ({ abortSignal: () => Promise.resolve({ data: true, error: null }) }));
     const db = () => ({ rpc }) as never;
     const disconnected = { event_type: 'social.account.updated', data: { id: 'spc_1', status: 'disconnected' } };
     expect(await handlePostForMeWebhook(post(disconnected), SECRET, db)).toEqual({ status: 200, body: { ok: true } });
@@ -33,6 +33,16 @@ describe('Post for Me webhook', () => {
       SECRET, db);
     await handlePostForMeWebhook(post({ event_type: 'social.account.created', data: { id: 'spc_2' } }), SECRET, db);
     expect(rpc).not.toHaveBeenCalled();
+  });
+
+  it('a slow or failing write answers 503 within the deadline so the provider retries', async () => {
+    const slow = vi.fn(() => ({ abortSignal: (signal: AbortSignal) => new Promise((_, reject) =>
+      signal.addEventListener('abort', () => reject(new Error('aborted')))) }));
+    const started = Date.now();
+    const result = await handlePostForMeWebhook(post({ event_type: 'social.account.updated',
+      data: { id: 'spc_1', status: 'disconnected' } }), SECRET, () => ({ rpc: slow }) as never);
+    expect(result.status).toBe(503);
+    expect(Date.now() - started).toBeLessThan(950);
   });
 
   it('rejects malformed or oversized bodies', async () => {

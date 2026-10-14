@@ -12,6 +12,8 @@ import { logger } from '../../lib/logger';
  */
 export const WEBHOOK_SECRET_HEADER = 'post-for-me-webhook-secret';
 const MAX_BODY_BYTES = 64 * 1024;
+// The provider waits about one second; the write gets most of it and is retried by the provider if it runs out.
+const WRITE_TIMEOUT_MS = 700;
 type Rpc = Pick<SupabaseClient, 'rpc'>;
 
 const digest = (value: string) => createHash('sha256').update(value, 'utf8').digest();
@@ -46,9 +48,10 @@ export async function handlePostForMeWebhook(request: Request, secret: string | 
     if (!account.success) return { status: 400, body: { ok: false, error: 'INVALID' } };
     if (account.data.status === 'disconnected') {
       const result = await db().rpc('publish_monitor_provider_account_disconnected', {
-        p_provider_account_id: account.data.id });
-      // A failed write is retried by the provider; the daily read path also notices the state.
-      if (result.error) return { status: 500, body: { ok: false, error: 'UNAVAILABLE' } };
+        p_provider_account_id: account.data.id }).abortSignal(AbortSignal.timeout(WRITE_TIMEOUT_MS))
+        .then(r => r, () => ({ error: { message: 'TIMEOUT' } }));
+      // A failed or slow write is retried by the provider (the update is idempotent); answer within its deadline.
+      if (result.error) return { status: 503, body: { ok: false, error: 'UNAVAILABLE' } };
     }
     return { status: 200, body: { ok: true } };
   }

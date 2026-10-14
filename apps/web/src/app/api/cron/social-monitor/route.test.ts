@@ -1,11 +1,13 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
-const mocks = vi.hoisted(() => ({ auth: vi.fn(), create: vi.fn(), deps: vi.fn(), run: vi.fn() }));
+const mocks = vi.hoisted(() => ({ auth: vi.fn(), create: vi.fn(), deps: vi.fn(), run: vi.fn(), start: vi.fn(), finish: vi.fn() }));
 vi.mock('@/lib/cron-auth', () => ({ validateCronRequest: mocks.auth }));
 vi.mock('@supabase/supabase-js', () => ({ createClient: mocks.create }));
 vi.mock('@repo/api/src/services/publishMonitor/secrets', () => ({ loadPostForMeDeps: mocks.deps }));
 vi.mock('@repo/api/src/services/publishMonitor/socialMonitorJob', () => ({ runSocialMonitorJob: mocks.run }));
+vi.mock('@repo/api/src/services/scheduledJobRuns', () => ({ startScheduledJobRun: mocks.start,
+  finishScheduledJobRun: mocks.finish }));
 import { GET } from './route';
 
 afterEach(() => vi.unstubAllEnvs());
@@ -15,6 +17,8 @@ beforeEach(() => {
   vi.stubEnv('SUPABASE_SERVICE_ROLE_KEY', 'synthetic-service-value');
   mocks.create.mockReturnValue({ synthetic: true });
   mocks.deps.mockResolvedValue({ synthetic: 'deps' });
+  mocks.start.mockResolvedValue('run-1');
+  mocks.finish.mockResolvedValue(undefined);
 });
 const call = () => GET(new Request('https://synthetic.test/api/cron/social-monitor'));
 
@@ -29,6 +33,7 @@ it('skips cleanly when this environment has no Post for Me key', async () => {
   const res = await call();
   expect([res.status, await res.json()]).toEqual([200, { success: true, skipped: 'POSTFORME_NOT_CONFIGURED' }]);
   expect(mocks.run).not.toHaveBeenCalled();
+  expect(mocks.finish).toHaveBeenCalledWith(expect.objectContaining({ runId: 'run-1', status: 'success' }));
 });
 
 it('runs the job within its 240-second budget and fails the run when a step failed', async () => {
@@ -40,6 +45,9 @@ it('runs the job within its 240-second budget and fails the run when a step fail
   const until = mocks.run.mock.calls[0]![2] as number;
   expect(until - now).toBeGreaterThanOrEqual(239_000);
   expect(until - now).toBeLessThanOrEqual(241_000);
+  expect(mocks.start).toHaveBeenCalledWith(expect.objectContaining({ jobKey: 'social_monitor', triggerSource: 'cron' }));
+  expect(mocks.finish).toHaveBeenCalledWith(expect.objectContaining({ runId: 'run-1', status: 'error',
+    error: 'FAILED_STEPS:sweep' }));
 });
 
 it('is scheduled once a day, apart from the other daily jobs', () => {
