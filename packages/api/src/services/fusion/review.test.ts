@@ -363,20 +363,33 @@ describe('review flow', () => {
   it('never holds more credits than the maximum shown at start: a pricier later step ends the review uncharged', async () => {
     const t = setup(() => opinion('major'));
     const started = await t.flow.start({ requestId: randomUUID(), draftId: randomUUID(), sourceVersionId: randomUUID() });
-    const cfg = started.config as { estimateCredits: number; phaseCredits: { review: number; debate: number; summary: number } };
-    expect(cfg.estimateCredits).toBe(cfg.phaseCredits.review + cfg.phaseCredits.debate + cfg.phaseCredits.summary);
-    const usd = (started.config as { phaseUsd: Record<string, string>; estimateUsd: string });
-    expect(Number(usd.phaseUsd.review) + Number(usd.phaseUsd.debate) + Number(usd.phaseUsd.summary))
-      .toBeGreaterThanOrEqual(Number(usd.estimateUsd));
+    type Caps = Record<'review' | 'debate' | 'summary', Record<string, { credits: number; usd: string }>>;
+    const cfg = started.config as { estimateCredits: number; estimateUsd: string; callCaps: Caps };
+    const all = Object.values(cfg.callCaps).flatMap(phase => Object.values(phase));
+    expect(cfg.estimateCredits).toBe(all.reduce((sum, cap) => sum + cap.credits, 0));
+    expect(all.reduce((sum, cap) => sum + Number(cap.usd), 0)).toBeGreaterThanOrEqual(Number(cfg.estimateUsd) - 1e-9);
     priceRise.phase = 'fusion_summary';
     await t.runAll();
     const end = await t.flow.continue(String(db.review!.reviewId));
-    expect(creditCaps[0]).toBe(cfg.phaseCredits.review);
-    expect(creditCaps.at(-1)).toBe(cfg.phaseCredits.summary);
-    expect(usdCaps[0]).toBe(usd.phaseUsd.review);
-    expect(usdCaps.at(-1)).toBe(usd.phaseUsd.summary);
+    const sum = (phase: Record<string, { credits: number; usd: string }>) => Object.values(phase).reduce((n, cap) => n + cap.credits, 0);
+    expect(creditCaps[0]).toBe(sum(cfg.callCaps.review));
+    expect(creditCaps.at(-1)).toBe(cfg.callCaps.summary[ids.summary]!.credits);
+    expect(usdCaps.at(-1)).toBe(cfg.callCaps.summary[ids.summary]!.usd);
     expect(end.review).toMatchObject({ state: 'incomplete', outcome: { kind: 'price_changed', phase: 'summary' } });
     expect(db.calls.some(call => call.phase === 'fusion_summary')).toBe(false);
+  });
+
+  it('a retry of only some seats is capped by those seats alone', async () => {
+    const t = setup(() => opinion('major'));
+    const started = await t.flow.start({ requestId: randomUUID(), draftId: randomUUID(), sourceVersionId: randomUUID() });
+    const caps = (started.config as { callCaps: Record<string, Record<string, { credits: number; usd: string }>> }).callCaps.review!;
+    await t.flow.continue(String(db.review!.reviewId));
+    // The first seat's call expired before dispatch; the others delivered.
+    Object.assign(db.calls[0]!, { verdict: 'no_delivery', settled: true, settledAt: clock.next() });
+    await t.runAll();
+    await t.flow.continue(String(db.review!.reviewId));
+    expect(creditCaps.at(-1)).toBe(caps[ids.reviewers[0]!]!.credits);
+    expect(usdCaps.at(-1)).toBe(caps[ids.reviewers[0]!]!.usd);
   });
 
   it('trims the opinions a summary carries until its serialized request fits the byte cap', async () => {

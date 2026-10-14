@@ -32,14 +32,14 @@ export type EstimateInput = {
 /** Rounded up to whole micro-dollars, so a stored bound is never below the computed one. */
 const micro = (usd: number) => (Math.ceil(usd * 1e6) / 1e6).toFixed(6);
 export type PhaseBytes = { review: number; debate: number; summary: number };
+export type CallCaps = Record<'review' | 'debate' | 'summary', Record<string, { credits: number; usd: string }>>;
 export function estimateReview(input: EstimateInput): { rounds: number; estimateUsd: string;
   /** "最多消耗 X 积分" shown before the user agrees (§3.2): every call's credit hold, each rounded up on its own. */
   estimateCredits: number;
-  /** The credit holds each phase's group may freeze (a later claim above it is refused, so the shown maximum holds). */
-  phaseCredits: PhaseBytes;
-  /** The provider cost bound of each phase's group, in dollars (decimal strings): a later claim above it is refused, so
-   * the review never exceeds the single-review budget it was admitted under (#962 review). */
-  phaseUsd: { review: string; debate: string; summary: string };
+  /** Each call's own bounds by phase and model (credits, decimal dollars): a claim, also a retry of only some seats,
+   * may hold at most the sum of its members' bounds, so neither the shown maximum nor the single-review budget it was
+   * admitted under can be exceeded when prices change (#962 review). */
+  callCaps: CallCaps;
   /** The serialized size each phase's request may reach: the prices above assume it, and claims enforce it. */
   requestBytes: PhaseBytes } {
   const bound = (modelId: string, outputTokens: number, bytes: number) => {
@@ -67,19 +67,21 @@ export function estimateReview(input: EstimateInput): { rounds: number; estimate
   // were charged (#962 review): round 1 and the summary are required; the debate round is dropped when it cannot fit.
   if (reviewerBytes > PAYG_PROFILE_MAX_BYTES || summaryBytes > PAYG_PROFILE_MAX_BYTES) throw new Error('FUSION_INPUT_TOO_LARGE');
   const debateFits = debateBytes <= PAYG_PROFILE_MAX_BYTES;
-  const firstRound = add(input.reviewers.map(id => bound(id, input.opinionTokens, reviewerBytes)));
+  const firstCalls = input.reviewers.map(id => bound(id, input.opinionTokens, reviewerBytes));
   // Only bound the debate when a second round is possible; an unused debate payload must not refuse a one-round plan.
-  const debate = input.maxRounds >= 2 && debateFits
-    ? add(input.reviewers.map(id => bound(id, input.opinionTokens, debateBytes))) : add([]);
+  const debateCalls = input.maxRounds >= 2 && debateFits ? input.reviewers.map(id => bound(id, input.opinionTokens, debateBytes)) : [];
+  const firstRound = add(firstCalls), debate = add(debateCalls);
   const summary = bound(input.summary, input.summaryTokens, summaryBytes);
+  const caps = (calls: Array<{ usd: number; credits: number }>) =>
+    Object.fromEntries(calls.map((call, i) => [input.reviewers[i]!, { credits: call.credits, usd: micro(call.usd) }]));
   const budget = Number(input.maxBudgetUsd);
   for (let rounds = Math.min(input.maxRounds, debateFits ? 2 : 1); rounds >= 1; rounds--) {
     const total = add([firstRound, rounds > 1 ? debate : add([]), summary]);
     // Rounded up to whole micro-dollars so the stored estimate is never below the computed bound.
     if (Number.isFinite(total.usd) && total.usd <= budget) return { rounds, estimateUsd: micro(total.usd),
       estimateCredits: total.credits,
-      phaseCredits: { review: firstRound.credits, debate: rounds > 1 ? debate.credits : 0, summary: summary.credits },
-      phaseUsd: { review: micro(firstRound.usd), debate: micro(rounds > 1 ? debate.usd : 0), summary: micro(summary.usd) },
+      callCaps: { review: caps(firstCalls), debate: rounds > 1 ? caps(debateCalls) : {},
+        summary: { [input.summary]: { credits: summary.credits, usd: micro(summary.usd) } } },
       requestBytes: { review: reviewerBytes, debate: rounds > 1 ? debateBytes : 0, summary: summaryBytes } };
   }
   throw new Error('FUSION_BUDGET_EXCEEDED');

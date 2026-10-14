@@ -20,9 +20,9 @@ type Executor = ReturnType<typeof fusionExecutor>;
 const config = z.object({ estimateUsd: z.string(), maxRounds: z.number().int().min(1), reviewers: z.array(z.string().uuid()).min(1),
   /** "最多消耗 X 积分" (§3.2), shown before the user agrees; absent on reviews started before it was recorded. */
   estimateCredits: z.number().int().positive().optional(),
-  /** Per-phase group credit caps frozen with that maximum (absent on older reviews: no cap). */
-  phaseCredits: z.object({ review: z.number(), debate: z.number(), summary: z.number() }).optional(),
-  phaseUsd: z.object({ review: z.string(), debate: z.string(), summary: z.string() }).optional(),
+  /** Each call's credit and dollar bounds by phase and model, frozen with that maximum (absent on older reviews: no cap). */
+  callCaps: z.record(z.enum(['review', 'debate', 'summary']),
+    z.record(z.string(), z.object({ credits: z.number().int(), usd: z.string() }))).optional(),
   opinionTokens: z.number().int().positive(), summaryTokens: z.number().int().positive(),
   /** Per-phase request size the estimate priced (absent: only the byte cap applies). */
   requestBytes: z.object({ review: z.number(), debate: z.number(), summary: z.number() }).optional(),
@@ -173,6 +173,14 @@ export function reviewFlow(deps: { admin: SupabaseClient; actorId: string;
     decisions: opinion.decisions.map(d => level >= 1 ? { ...d, strongestCase: '', strongestAlternative: '', basis: '' } : d),
     issues: level >= 3 ? [] : level >= 2 ? opinion.issues.filter(i => i.severity !== 'minor') : opinion.issues,
     dropped: opinion.dropped };
+  /** The bounds of exactly the members claimed now: a retry of some seats gets only theirs (#962 review). A member
+   * without a frozen bound (a phase the estimate did not allow) gets zero, so it can never be claimed. */
+  const memberCaps = (caps: Record<string, { credits: number; usd: string }> | undefined, members: FusionMember[]) => {
+    if (!caps) return {};
+    const own = members.map(member => caps[member.modelId] ?? { credits: 0, usd: '0' });
+    const micros = own.reduce((sum, cap) => sum + Math.round(Number(cap.usd) * 1e6), 0);
+    return { maxCredits: own.reduce((sum, cap) => sum + cap.credits, 0), maxUsd: (micros / 1e6).toFixed(6) };
+  };
   const phaseOf = (at: ReviewPosition) => at.phase === 'summary' ? 'summary' as const : at.round > 1 ? 'debate' as const : 'review' as const;
   /** Admits and claims the models of the current position that have no finished call yet. */
   async function claimStep(view: ReviewView, src: Source, at: ReviewPosition, models: string[]) {
@@ -204,7 +212,7 @@ export function reviewFlow(deps: { admin: SupabaseClient; actorId: string;
     const requestId = derivedUuid(`${view.reviewId}:${stepKey(at)}`);
     const group = await admitFusionGroup({ admin, actorId, requestId, sourceSessionId: view.sourceSessionId, members, env,
       outputTokens: { opinion: cfg.opinionTokens, summary: cfg.summaryTokens },
-      maxCredits: cfg.phaseCredits?.[phaseOf(at)], maxUsd: cfg.phaseUsd?.[phaseOf(at)] });
+      ...memberCaps(cfg.callCaps?.[phaseOf(at)], members) });
     return record.claim(view.reviewId, at, group.groupId, group.runs.map(run => ({ runId: run.runId, payload: run.call })));
   }
   async function finish(view: ReviewView, state: 'completed' | 'incomplete' | 'revision_failed', outcome: Record<string, unknown>) {
@@ -282,14 +290,14 @@ export function reviewFlow(deps: { admin: SupabaseClient; actorId: string;
         .parse(sizes.data);
       // Instructions travel as one escaped string in the body; the host-written format rules add at most a few KB.
       const sent = (value: string) => Buffer.byteLength(JSON.stringify(value)) + 4096;
-      const { rounds, estimateUsd, estimateCredits, phaseCredits, phaseUsd, requestBytes } = estimateReview({ quotes: window.callPolicies,
+      const { rounds, estimateUsd, estimateCredits, callCaps, requestBytes } = estimateReview({ quotes: window.callPolicies,
         creditsPerUsd: window.creditsPerUsd, reviewers: settings.review.reviewerModelIds,
         summary: settings.review.summaryModelId, maxRounds: settings.review.maxRounds, maxBudgetUsd: settings.review.maxBudgetUsd,
         opinionTokens: settings.review.opinionOutputTokens, summaryTokens: settings.review.summaryOutputTokens, fieldCount: preview.fieldCount,
         snapshotBytes: preview.reportSentBytes + preview.materialsSentBytes,
         instructionBytes: { reviewer: sent(`${text.reviewer}\n\n${text.rubric}`), summary: sent(`${text.summary}\n\n${text.rubric}`) } });
       const view = await record.start({ requestId: input.requestId, draftId: input.draftId, sourceVersionId: input.sourceVersionId,
-        config: { estimateUsd, estimateCredits, phaseCredits, phaseUsd, maxRounds: rounds, reviewers: settings.review.reviewerModelIds,
+        config: { estimateUsd, estimateCredits, callCaps, maxRounds: rounds, reviewers: settings.review.reviewerModelIds,
           summary: settings.review.summaryModelId,
           opinionTokens: settings.review.opinionOutputTokens, summaryTokens: settings.review.summaryOutputTokens, skill, requestBytes } });
       // Before anything is claimed: round 1 and the most trimmed summary, measured exactly as they will be sent, must fit
