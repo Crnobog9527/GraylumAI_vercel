@@ -10,7 +10,7 @@ import { fixtureSql } from './fixtures.mjs';
 
 const migrationPath = 'packages/db/migrations/0265_publish_monitor_provider_cleanup.sql';
 const rpcs = ['publish_monitor_connect_callback(uuid,uuid,jsonb)', 'publish_monitor_cleanup_claim(integer,integer)',
-  'publish_monitor_cleanup_classify(uuid,jsonb)', 'publish_monitor_cleanup_finish(uuid,boolean,text)',
+  'publish_monitor_cleanup_classify(uuid,jsonb)', 'publish_monitor_cleanup_finish(uuid,uuid,boolean,text)',
   'publish_monitor_orphan_classify(jsonb)', 'publish_monitor_provider_work_claim(integer,integer)',
   'publish_monitor_provider_work_finish(uuid,uuid,text,text)', 'publish_monitor_disconnect(uuid,uuid)',
   'publish_monitor_provider_account_disconnected(text)'];
@@ -33,9 +33,16 @@ const start = (a, acct) => svc('SELECT publish_monitor_connect_start($1,$2,$3) v
 const callback = (a, req, cands) => svc('SELECT publish_monitor_connect_callback($1,$2,$3) v', [a, req, j(cands)]);
 const confirm = (a, req, pid, ext) => svc('SELECT publish_monitor_connect_confirm($1,$2,$3,$4,$5) v',
   [a, req, pid, false, j({ providerAccountId: pid, platform: 'facebook', externalId: ext, status: 'connected' })]);
-const claim = () => svc('SELECT publish_monitor_cleanup_claim(50,120) v');
+const claim = async () => {
+  const items = await svc('SELECT publish_monitor_cleanup_claim(50,120) v');
+  for (const item of items) leases.set(item.requestId, item.lease);
+  return items;
+};
 const classify = (req, accounts) => svc('SELECT publish_monitor_cleanup_classify($1,$2) v', [req, j(accounts)]);
-const finish = (req, done, err = null) => svc('SELECT publish_monitor_cleanup_finish($1,$2,$3) v', [req, done, err]);
+// Cleanup results must carry the lease of the claim that handed the attempt out; the latest one is remembered here.
+const leases = new Map();
+const finish = (req, done, err = null, lease = leases.get(req)) =>
+  svc('SELECT publish_monitor_cleanup_finish($1,$2,$3,$4) v', [req, lease ?? randomUUID(), done, err]);
 const acc = (pid, ext) => ({ providerAccountId: pid, externalId: ext });
 const work = () => svc('SELECT publish_monitor_provider_work_claim(50,120) v');
 // job: a claimed item ({ connectionId, lease }); only the current claim's lease may report its outcome.
@@ -101,6 +108,9 @@ try {
   const taken = await conn('pfm_owned');
   assert.deepEqual([taken.status, taken.provider_disconnect_pending, taken.actor_id], ['quarantined', true, owned.a]);
   assert.equal((await conn('pfm_u_kept')).status, 'connected');
+  // A result from an older claim is ignored; only the current lease can settle the attempt.
+  await finish(b1.requestId, true, null, randomUUID());
+  assert.equal((await state(b1.requestId)).cleaned_at, null, 'stale cleanup result ignored');
   await finish(b1.requestId, true);
   // A settled abandoned attempt is checked again daily for 30 days (its consent link never expires): not right away,
   // but after a day; an attempt older than 30 days is not.

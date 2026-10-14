@@ -9,6 +9,8 @@ SET LOCAL lock_timeout='5s';
 ALTER TABLE public.social_connect_requests ADD COLUMN IF NOT EXISTS cleaned_at timestamptz;
 ALTER TABLE public.social_connect_requests ADD COLUMN IF NOT EXISTS cleanup_attempts integer NOT NULL DEFAULT 0;
 ALTER TABLE public.social_connect_requests ADD COLUMN IF NOT EXISTS cleanup_lease_until timestamptz;
+-- Which claim may report the cleanup result: a worker re-claimed after its lease expired cannot overwrite a newer one.
+ALTER TABLE public.social_connect_requests ADD COLUMN IF NOT EXISTS cleanup_lease uuid;
 ALTER TABLE public.social_connect_requests ADD COLUMN IF NOT EXISTS cleanup_error text;
 -- A proven takeover still has to be cleared at the provider (plan §4.1 step 2) until this is false.
 ALTER TABLE public.social_connections ADD COLUMN IF NOT EXISTS provider_disconnect_pending boolean NOT NULL DEFAULT false;
@@ -46,6 +48,10 @@ END $$;
 DROP TRIGGER IF EXISTS social_connections_capture_owner_ref ON public.social_connections;
 CREATE TRIGGER social_connections_capture_owner_ref BEFORE UPDATE OF status ON public.social_connections
  FOR EACH ROW EXECUTE FUNCTION public.publish_monitor_capture_owner_ref();
+-- Deletion records that already existed before this migration get their owner now, while the settings row remains.
+UPDATE public.social_connections c SET owner_ref=s.provider_ref
+FROM public.social_monitor_settings s
+WHERE c.status='deleting' AND c.owner_ref IS NULL AND s.actor_id=c.actor_id AND s.provider_ref IS NOT NULL;
 CREATE INDEX IF NOT EXISTS social_connect_requests_cleanup ON public.social_connect_requests(created_at)
  WHERE cleaned_at IS NULL;
 CREATE INDEX IF NOT EXISTS social_connections_provider_work ON public.social_connections(updated_at)
@@ -106,7 +112,7 @@ END $$;
 -- Each claim holds a lease, so overlapping runs never process the same attempt.
 CREATE OR REPLACE FUNCTION public.publish_monitor_cleanup_claim(p_limit integer,p_lease_seconds integer) RETURNS jsonb
 LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
-DECLARE now_at timestamptz:=clock_timestamp(); out jsonb;
+DECLARE now_at timestamptz:=clock_timestamp(); lease uuid:=gen_random_uuid(); out jsonb;
 BEGIN
  IF p_limit IS NULL OR p_limit NOT BETWEEN 1 AND 100 OR p_lease_seconds IS NULL OR p_lease_seconds NOT BETWEEN 30 AND 900 THEN
   RAISE EXCEPTION 'PUBLISH_MONITOR_INPUT_INVALID' USING ERRCODE='22023'; END IF;
@@ -128,12 +134,14 @@ BEGIN
   ORDER BY cleaned_at IS NOT NULL,cleaned_at NULLS FIRST,created_at LIMIT p_limit FOR UPDATE SKIP LOCKED
  ), claimed AS (
   -- Attempts are counted when a result is reported (cleanup_finish), so claimed-but-unreached rows lose nothing.
-  UPDATE social_connect_requests r SET cleanup_lease_until=now_at+make_interval(secs=>p_lease_seconds)
+  UPDATE social_connect_requests r SET cleanup_lease_until=now_at+make_interval(secs=>p_lease_seconds),cleanup_lease=lease
   FROM picked WHERE r.id=picked.id
-  RETURNING r.id,r.external_id,r.platform,r.candidate_provider_ids
+  RETURNING r.id,r.external_id,r.platform,r.candidate_provider_ids,r.cleaned_at,r.created_at
  )
- SELECT COALESCE(jsonb_agg(jsonb_build_object('requestId',id,'externalId',external_id,'platform',platform,
-  'candidateIds',to_jsonb(candidate_provider_ids)) ORDER BY id),'[]'::jsonb) INTO out FROM claimed;
+ -- Returned in the same priority order, so a time-limited worker reaches never-settled attempts first.
+ SELECT COALESCE(jsonb_agg(jsonb_build_object('requestId',id,'lease',lease,'externalId',external_id,'platform',platform,
+  'candidateIds',to_jsonb(candidate_provider_ids)) ORDER BY cleaned_at IS NOT NULL,cleaned_at NULLS FIRST,created_at),
+  '[]'::jsonb) INTO out FROM claimed;
  RETURN out;
 END $$;
 
@@ -226,15 +234,16 @@ LANGUAGE sql STABLE SECURITY DEFINER SET search_path=public,pg_temp AS $$
      OR created_at>clock_timestamp()-interval '30 days')))
 $$;
 
-CREATE OR REPLACE FUNCTION public.publish_monitor_cleanup_finish(p_request_id uuid,p_done boolean,p_error text)
+CREATE OR REPLACE FUNCTION public.publish_monitor_cleanup_finish(p_request_id uuid,p_lease uuid,p_done boolean,p_error text)
 RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
 BEGIN
- IF p_request_id IS NULL OR p_done IS NULL OR (p_error IS NOT NULL AND p_error !~ '^[A-Z0-9_]{1,64}$') THEN
+ IF p_request_id IS NULL OR p_lease IS NULL OR p_done IS NULL OR (p_error IS NOT NULL AND p_error !~ '^[A-Z0-9_]{1,64}$') THEN
   RAISE EXCEPTION 'PUBLISH_MONITOR_INPUT_INVALID' USING ERRCODE='22023'; END IF;
- UPDATE social_connect_requests SET cleanup_lease_until=NULL,cleanup_error=CASE WHEN p_done THEN NULL ELSE p_error END,
+ UPDATE social_connect_requests SET cleanup_lease_until=NULL,cleanup_lease=NULL,
+  cleanup_error=CASE WHEN p_done THEN NULL ELSE p_error END,
   cleanup_attempts=CASE WHEN p_done THEN 0 ELSE LEAST(cleanup_attempts+1,1000) END,
   cleaned_at=CASE WHEN p_done THEN clock_timestamp() ELSE cleaned_at END
- WHERE id=p_request_id AND state IN ('applied','abandoned');
+ WHERE id=p_request_id AND state IN ('applied','abandoned') AND cleanup_lease=p_lease;
 END $$;
 
 -- Daily orphan sweep: of the provider accounts listed (all pages first, plan §9 item 22), which are ours to delete?
@@ -312,7 +321,7 @@ BEGIN
   'deleting',claimed.status='deleting','takeoverPending',claimed.provider_disconnect_pending,
   'action',CASE WHEN claimed.status<>'deleting' OR k.publishes_open THEN 'disconnect' ELSE 'delete' END,
   'ownerRef',CASE WHEN claimed.status='deleting' THEN claimed.owner_ref
-   ELSE (SELECT provider_ref FROM social_monitor_settings s WHERE s.actor_id=claimed.actor_id) END) ORDER BY claimed.id),
+   ELSE (SELECT provider_ref FROM social_monitor_settings s WHERE s.actor_id=claimed.actor_id) END) ORDER BY k.updated_at),
   '[]'::jsonb) INTO out FROM claimed JOIN candidates k ON k.id=claimed.id;
  RETURN out;
 END $$;
