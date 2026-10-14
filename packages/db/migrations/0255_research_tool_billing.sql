@@ -151,7 +151,11 @@ BEGIN
    OR coalesce(outcome,'') NOT IN ('delivered','failed_free','failed_charged','unknown')
   THEN RAISE EXCEPTION 'BILL2_UNTRUSTED_RECEIPT';END IF;
   PERFORM (e->>'observedAt')::timestamptz;
-  IF EXISTS(SELECT 1 FROM bill2_receipts WHERE call_id=c.id) THEN RAISE EXCEPTION 'BILL2_TOOL_RECEIPT_CONFLICT';END IF;
+  -- One result per call. A call already reconciled by an admin keeps that confirmed cost: a result that
+  -- arrives later is refused rather than overwriting it. A late result for a call settled as unknown (no
+  -- reconciliation yet) may still confirm the supplier cost; the user settlement never changes.
+  IF EXISTS(SELECT 1 FROM bill2_receipts WHERE call_id=c.id) OR c.supplier_cost_reconciled_at IS NOT NULL
+  THEN RAISE EXCEPTION 'BILL2_TOOL_RECEIPT_CONFLICT';END IF;
   units:=e->'usage'->>'units';
   IF e->>'cost' IS NOT NULL THEN cost:=bill2_decimal(e->'cost');END IF;
   IF outcome='delivered' AND units IS NOT NULL THEN

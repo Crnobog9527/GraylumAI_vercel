@@ -163,7 +163,22 @@ export async function researchToolCases({db,Client,connectionString,report,creat
     const s = await call(db,c.id);
     assert.deepEqual([s.settled,s.charged_delta,s.nominal_source,s.supplier_cost_state],[true,0,'tool_unknown','pending']);
     assert.equal((await financial(db,f)).credits,100);
-    report.checks.push('RT-2 crash after dispatch: the call waits for its result, then settles as unknown at the recovery deadline (user 0, cost pending)');
+    // A late result may confirm the pending supplier cost; the user settlement stays at 0.
+    await rpc(db,'bill2_record',f.actor,f.run,c.id,result(c,'delivered','1','0.01'));
+    const late = await call(db,c.id);
+    assert.deepEqual([late.charged_delta,late.nominal_source,late.supplier_cost_state,Number(late.cost)],[0,'tool_unknown','confirmed',0.01]);
+    assert.equal((await financial(db,f)).credits,100);
+    // Once an admin has reconciled a call, a later result is refused and the reconciled cost stays.
+    const g = await make();
+    const d = await claimTool(db,g,1);
+    await db.query("UPDATE bill2_calls SET recovery_deadline=now()-interval '1 second' WHERE id=$1",[d.id]);
+    await rpc(db,'bill2_finalize',g.actor,g.run);
+    const admin = randomUUID();
+    await db.query("INSERT INTO profiles(id,credits,role) VALUES($1,0,'admin')",[admin]);
+    await rpc(db,'bill2_tool_cost_reconcile',admin,d.id,'0.005','a'.repeat(64));
+    await assert.rejects(rpc(db,'bill2_record',g.actor,g.run,d.id,result(d,'delivered','1','0.01')),/BILL2_TOOL_RECEIPT_CONFLICT/);
+    assert.equal(Number((await call(db,d.id)).cost),0.005);
+    report.checks.push('RT-2 crash after dispatch: waits for its result, then settles as unknown at the recovery deadline (user 0, cost pending); a late result confirms the cost without charging; after reconciliation a late result is refused');
   }
 
   // Reconciliation fills the pending supplier cost; admin only; replay-safe.
