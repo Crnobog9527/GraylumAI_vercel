@@ -1,5 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { STOPPED_NOTICE } from "./stop-reply";
+import { definiteRefusal } from "@/app/runtime/gate-notices";
 
 /**
  * REPORT-GEN on the positioning page (#667 backend), without React so the rules are testable.
@@ -18,6 +19,7 @@ export const REPORT_INCOMPLETE_NOTICE = "这份报告的结构不完整，不能
 export const REPORT_STOPPED_NOTICE = "停止的报告不能作为正式报告。";
 export const REPORT_EMPTY_NOTICE = "这次没有生成报告。";
 export const REPORT_UNCONFIRMED_NOTICE = "开始生成的结果暂未确认。再点一次“生成完整报告”会接着同一次请求，不会重复扣费。";
+export const REPORT_REFUSED_NOTICE = "报告没有开始生成，这次没有扣费。请稍后再试。";
 export const REPORT_DISABLED_NOTICE = "报告生成暂未开放。";
 export const REPORT_ALREADY_EXISTS_NOTICE = "这一轮已经有报告了，已为你打开。";
 
@@ -41,7 +43,8 @@ export type StartRefusal = { text: string; membership?: true; hideEntry?: true; 
 export function reportStartRefusal(cause: unknown): StartRefusal {
   const message = cause instanceof Error ? cause.message : "";
   const text = startRefusals[message];
-  if (!text) return { text: REPORT_UNCONFIRMED_NOTICE };
+  // A definite refusal (HTTP 4xx) admitted nothing: say so instead of "not confirmed".
+  if (!text) return { text: definiteRefusal(cause)?.path === "runtime.reportStart" ? REPORT_REFUSED_NOTICE : REPORT_UNCONFIRMED_NOTICE };
   if (message === "REPORT_MEMBERSHIP_REQUIRED") return { text, membership: true };
   if (message === "REPORT_DISABLED") return { text, hideEntry: true };
   if (message === "REPORT_ALREADY_EXISTS") return { text, opened: true };

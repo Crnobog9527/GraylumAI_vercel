@@ -115,3 +115,18 @@ export function definiteRefusal(cause: unknown): { path: string } | null {
   if (!Number.isInteger(status) || status < 400 || status > 499 || [401, 408, 429].includes(status)) return null;
   return { path: String(data.path ?? '') };
 }
+
+/** A definite admission refusal: nothing was admitted, so no model call and no charge. */
+export const DEFINITE_REFUSAL_NOTICE = '这次请求没有被受理：没有发起模型调用，也没有扣积分。';
+
+/**
+ * Fixed text for a definite refusal of one of `paths`, or null when the outcome is open.
+ * Only shared fixed texts are shown; any other refusal gets the neutral definite notice.
+ */
+export function definiteRefusalNotice(cause: unknown, paths: readonly string[]): string | null {
+  const refused = definiteRefusal(cause);
+  if (!refused || !paths.includes(refused.path)) return null;
+  const message = (cause as Error).message;
+  if (message === RUNTIME_PAYG_PROFILE_REQUIRED_MESSAGE || message === RUNTIME_INPUT_TOO_LONG_MESSAGE) return message;
+  return DEFINITE_REFUSAL_NOTICE;
+}
