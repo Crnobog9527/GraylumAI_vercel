@@ -40,12 +40,12 @@ export function JuryCanvasPlayer({ data, brief = false, ...rest }: JuryCanvasPla
   // A new plan (another case, or the short version switched) starts again from the beginning.
   const [plan, setPlan] = useState({ scenes, id: 0 });
   if (plan.scenes !== scenes) setPlan({ scenes, id: plan.id + 1 });
-  return <Playing key={plan.id} scenes={scenes} report={juryCase.report} {...rest} />;
+  return <Playing key={plan.id} scenes={scenes} report={juryCase.report} brief={brief} {...rest} />;
 }
 
 const DEFAULT_CASE = mockCase('full');
 
-function Playing({ scenes, report, progress, speed = 1, names = DEFAULT_SEAT_NAMES, onPick }: Omit<JuryCanvasPlayerProps, 'data' | 'brief'> & {
+function Playing({ scenes, report, brief, progress, speed = 1, names = DEFAULT_SEAT_NAMES, onPick }: Omit<JuryCanvasPlayerProps, 'data'> & {
   scenes: Scene[]; report: JuryCase['report'];
 }) {
   const reduced = usePrefersReducedMotion();
@@ -56,7 +56,7 @@ function Playing({ scenes, report, progress, speed = 1, names = DEFAULT_SEAT_NAM
   const clock = driven ? Math.min(1, Math.max(0, progress)) * last : reduced ? last : Math.min(playback.clock, last);
   return (
     <div className={theme.player}>
-      <JuryCanvas view={canvasAt(scenes, clock, names)} names={names} selected={null} report={report} follow={!driven}
+      <JuryCanvas view={canvasAt(scenes, clock, names)} names={names} selected={null} report={report} follow={!driven} captionAbove={brief}
         onPeek={() => {}} onPick={onPick} />
     </div>
   );

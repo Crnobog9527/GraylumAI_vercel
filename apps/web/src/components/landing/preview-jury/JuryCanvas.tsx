@@ -23,13 +23,16 @@ type Hover = { onPeek: (seat: SeatCode | null) => void; onPick?: (seat: SeatCode
  * person's work grows downward as a short string of cards. Only the thing happening now is lit; pointing at (or tapping) a person or a card opens their full
  * record.
  */
-export function JuryCanvas({ view, names, selected, onPeek, onPick, report = MOCK_REPORT, follow = true }: {
+export function JuryCanvas({ view, names, selected, onPeek, onPick, report = MOCK_REPORT, follow = true, captionAbove = false }: {
   view: CanvasView; names: JurySeatNames; selected: SeatCode | null;
   /** The two reports shown; the prototype's mock creator by default. */
   report?: JuryCaseReport;
   /** On a phone, scroll the page to keep what happens now in view. Off when the page's own scrolling drives the
    * canvas; on a computer the canvas always scrolls inside itself. */
   follow?: boolean;
+  /** Put the sentence about now in a bar above the canvas instead of floating over it, so it never covers a report
+   * card's title (the short version embedded on the landing page). */
+  captionAbove?: boolean;
 } & Hover) {
   const scroller = useRef<HTMLDivElement>(null);
   const board = useRef<HTMLDivElement>(null);
@@ -37,10 +40,13 @@ export function JuryCanvas({ view, names, selected, onPeek, onPick, report = MOC
   useFollowCurrent(scroller, view.current, view.focus.join(), follow);
   const lane = { view, names, selected, onPeek, onPick };
 
-  return (
+  const caption = (
+    <p className={captionAbove ? styles.captionBar : styles.caption} aria-live="polite" key={view.caption}>{view.caption}</p>
+  );
+  const canvas = (
     <div className={styles.scroller} ref={scroller}>
       <div className={styles.board} ref={board}>
-        <p className={styles.caption} aria-live="polite" key={view.caption}>{view.caption}</p>
+        {captionAbove ? null : caption}
         <Wires boxes={boxes} edges={view.edges} joined={view.joined} />
         <article className={styles.doc} data-node="doc" data-state={view.doc.state}>
           <h2>{report.title}</h2>
@@ -71,6 +77,7 @@ export function JuryCanvas({ view, names, selected, onPeek, onPick, report = MOC
       </div>
     </div>
   );
+  return captionAbove ? <div className={styles.framed}>{caption}{canvas}</div> : canvas;
 }
 
 /** One person: their mark with a status word, and their work hanging under it. The summary waits faintly until it writes. */
