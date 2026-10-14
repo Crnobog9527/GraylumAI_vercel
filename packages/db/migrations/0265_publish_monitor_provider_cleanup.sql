@@ -148,14 +148,16 @@ END $$;
 -- Decide what to do with provider accounts that currently carry a settled attempt's external_id (facts read by the
 -- server). Accounts carrying anything else are not this attempt's to touch. A proven takeover found here is
 -- quarantined exactly like in a callback (plan §4.1: rejected callbacks are settled by the same ownership rules).
-CREATE OR REPLACE FUNCTION public.publish_monitor_cleanup_classify(p_request_id uuid,p_accounts jsonb) RETURNS jsonb
+CREATE OR REPLACE FUNCTION public.publish_monitor_cleanup_classify(p_request_id uuid,p_lease uuid,p_accounts jsonb) RETURNS jsonb
 LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
 DECLARE req social_connect_requests; item jsonb; pid text; existing social_connections; verdicts jsonb:='[]'; verdict text;
 BEGIN
- IF p_request_id IS NULL OR jsonb_typeof(p_accounts) IS DISTINCT FROM 'array' OR jsonb_array_length(p_accounts)>5000 THEN
+ IF p_request_id IS NULL OR p_lease IS NULL OR jsonb_typeof(p_accounts) IS DISTINCT FROM 'array'
+  OR jsonb_array_length(p_accounts)>5000 THEN
   RAISE EXCEPTION 'PUBLISH_MONITOR_INPUT_INVALID' USING ERRCODE='22023'; END IF;
  SELECT * INTO req FROM social_connect_requests WHERE id=p_request_id FOR UPDATE;
- IF req.id IS NULL OR req.state NOT IN ('applied','abandoned') THEN
+ -- Only the current claim may act: a worker whose lease was taken over cannot apply stale facts.
+ IF req.id IS NULL OR req.state NOT IN ('applied','abandoned') OR req.cleanup_lease IS DISTINCT FROM p_lease THEN
   RAISE EXCEPTION 'PUBLISH_MONITOR_REQUEST_INVALID' USING ERRCODE='PT409'; END IF;
  FOR item IN SELECT * FROM jsonb_array_elements(p_accounts) LOOP
   pid:=item->>'providerAccountId';

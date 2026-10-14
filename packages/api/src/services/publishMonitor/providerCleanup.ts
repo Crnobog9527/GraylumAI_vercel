@@ -84,6 +84,7 @@ export async function cleanupAttempts(db: Rpc, client: ClientDeps, until: number
     if (!accounts) error = 'PROVIDER_LIST_FAILED';
     else {
       const verdicts = await rpc(db, 'publish_monitor_cleanup_classify', { p_request_id: attempt.requestId,
+        p_lease: attempt.lease,
         p_accounts: accounts.map(a => ({ providerAccountId: a.id, externalId: a.externalId })) }, z.array(verdict));
       for (const v of verdicts.filter(x => x.action === 'delete')) {
         if (now() >= until || (await deleteIfStill(client, v.providerAccountId, attempt.externalId)) === 'retry') {
@@ -118,8 +119,9 @@ async function settle(client: ClientDeps, job: z.infer<typeof claimedWork>): Pro
   if (current.kind !== 'ok') return ['retry', errorCode(current)];
   const owner = current.value.externalId?.split('.')[0] ?? null;
   if (job.deleting) {
-    if (!job.ownerRef) return ['retry', 'OWNER_UNKNOWN'];
-    if (owner !== job.ownerRef) {
+    // Owner unknown (a record that entered deletion before 0265 after its settings were erased): no other Graylum
+    // connection can hold this account ID while the record exists, so the record's own action proceeds.
+    if (job.ownerRef && owner !== job.ownerRef) {
       // While this record holds the provider account ID no other Graylum connection can bind it, so a different
       // owner is always an unconfirmed overwrite: its grant is cleared before the record ends (or is held while its
       // owner's publishes are unresolved, action 'disconnect').

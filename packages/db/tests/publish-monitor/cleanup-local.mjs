@@ -10,7 +10,7 @@ import { fixtureSql } from './fixtures.mjs';
 
 const migrationPath = 'packages/db/migrations/0265_publish_monitor_provider_cleanup.sql';
 const rpcs = ['publish_monitor_connect_callback(uuid,uuid,jsonb)', 'publish_monitor_cleanup_claim(integer,integer)',
-  'publish_monitor_cleanup_classify(uuid,jsonb)', 'publish_monitor_cleanup_finish(uuid,uuid,boolean,text)',
+  'publish_monitor_cleanup_classify(uuid,uuid,jsonb)', 'publish_monitor_cleanup_finish(uuid,uuid,boolean,text)',
   'publish_monitor_orphan_classify(jsonb)', 'publish_monitor_provider_work_claim(integer,integer)',
   'publish_monitor_provider_work_finish(uuid,uuid,text,text)', 'publish_monitor_disconnect(uuid,uuid)',
   'publish_monitor_provider_account_disconnected(text)'];
@@ -38,7 +38,15 @@ const claim = async () => {
   for (const item of items) leases.set(item.requestId, item.lease);
   return items;
 };
-const classify = (req, accounts) => svc('SELECT publish_monitor_cleanup_classify($1,$2) v', [req, j(accounts)]);
+// Classification needs the current cleanup lease; attempts the test settles without a daily claim get one here.
+const classify = async (req, accounts, lease = leases.get(req)) => {
+  if (!lease) {
+    lease = randomUUID();
+    await c.query('UPDATE social_connect_requests SET cleanup_lease=$2 WHERE id=$1', [req, lease]);
+    leases.set(req, lease);
+  }
+  return svc('SELECT publish_monitor_cleanup_classify($1,$2,$3) v', [req, lease, j(accounts)]);
+};
 // Cleanup results must carry the lease of the claim that handed the attempt out; the latest one is remembered here.
 const leases = new Map();
 const finish = (req, done, err = null, lease = leases.get(req)) =>
@@ -102,6 +110,7 @@ try {
   const owned = await member();
   await connect(owned, 'pfm_owned');
   await connect(u, 'pfm_u_kept');
+  await code(classify(b1.requestId, [], randomUUID()), 'PT409');
   const verdicts = await classify(b1.requestId, [acc('pfm_b_1', b1.externalId), acc('pfm_other_ext', a1.externalId),
     acc('pfm_owned', b1.externalId), acc('pfm_u_kept', b1.externalId)]);
   assert.deepEqual(verdicts.map(x => x.action), ['delete', 'skip', 'takeover', 'keep']);
@@ -236,6 +245,25 @@ try {
   await workFinish(afterJob, 'owner_changed');
   assert.equal(await conn('pfm_pub'), undefined, 'a changed owner ends only our record');
   report.checks.push('with unresolved publishes a deletion only clears tokens and waits; a changed owner ends only our record');
+
+  // A deletion record whose owner reference was lost (entered deletion before 0265, settings already erased): its job
+  // names only its own provider account ID, and ending it removes only that record; other users' rows are untouched.
+  const lost = await member(), bystander = await member();
+  await connect(lost, 'pfm_lost_owner');
+  await connect(bystander, 'pfm_bystander');
+  await svc('SELECT publish_monitor_disconnect($1,$2) v', [lost.a, (await conn('pfm_lost_owner')).id]);
+  await c.query('UPDATE social_connections SET owner_ref=NULL WHERE provider_account_id=$1', ['pfm_lost_owner']);
+  const others = (await c.query("SELECT id,status,updated_at FROM social_connections WHERE provider_account_id<>'pfm_lost_owner'"
+    + ' ORDER BY id')).rows;
+  const lostJob = (await work()).find(x => x.providerAccountId === 'pfm_lost_owner');
+  assert.deepEqual([lostJob.action, lostJob.deleting, lostJob.ownerRef], ['delete', true, null]);
+  await workFinish(lostJob, 'deleted');
+  assert.equal(await conn('pfm_lost_owner'), undefined);
+  const after = (await c.query("SELECT id,status,updated_at FROM social_connections WHERE provider_account_id<>'pfm_lost_owner'"
+    + ' ORDER BY id')).rows;
+  assert.deepEqual(after.map(r => r.id), others.map(r => r.id), 'no other connection record removed');
+  assert.equal((await conn('pfm_bystander')).status, 'connected');
+  report.checks.push('a deletion record with a lost owner reference deletes only its own provider account and record');
 
   // Webhook: a provider-side disconnect asks the owner to re-authorise; unknown accounts are ignored.
   await connect(other, 'pfm_hook');
