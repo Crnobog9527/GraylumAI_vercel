@@ -338,3 +338,6 @@ export async function researchToolCases({db,Client,connectionString,report,creat
   }
   report.checks.push('RT-2 grants: tool helpers private; reconcile callable by service_role only');
 }
+
+// Shared with research-runtime.mjs (RT-3b storage, 0263).
+export {fixture as toolFixture,claimTool,result as toolResult,call as toolCallRow};
