@@ -64,6 +64,33 @@ VALUES
 ON CONFLICT (key) DO UPDATE
 SET value = EXCLUDED.value;
 
+-- A seed replay must not change an amount whose standard Stripe price is currently mapped: that price would stay current and
+-- every checkout would fail PAY_COMMON_PRICE_MISMATCH. Like pay_common_save_catalog's PAY_COMMON_PRICE_REPLACEMENT_REQUIRED,
+-- refuse here; change such amounts through the admin catalog save, which replaces the price and its mapping together.
+DO $seed_price_guard$
+BEGIN
+  IF EXISTS (
+    SELECT 1
+    FROM (VALUES ('free', 'monthly', 0), ('free', 'yearly', 0), ('pro', 'monthly', 2900), ('pro', 'yearly', 27900),
+      ('gold', 'monthly', 6900), ('gold', 'yearly', 62100)) AS seed(level, cycle, amount)
+    JOIN public.membership_plans plan ON plan.level = seed.level
+    JOIN public.payment_provider_refs ref ON ref.membership_plan_id = plan.id AND ref.object_type = 'price'
+      AND ref.billing_cycle = seed.cycle AND ref.is_current AND ref.offer_kind = 'standard'
+    WHERE (CASE seed.cycle WHEN 'monthly' THEN plan.monthly_price ELSE plan.yearly_price END) IS DISTINCT FROM seed.amount
+  ) OR EXISTS (
+    SELECT 1
+    FROM (VALUES ('30000000-0000-4000-8000-000000000001'::uuid, 990), ('30000000-0000-4000-8000-000000000002'::uuid, 2990),
+      ('30000000-0000-4000-8000-000000000003'::uuid, 9990)) AS seed(id, amount)
+    JOIN public.credit_packages pack ON pack.id = seed.id
+    JOIN public.payment_provider_refs ref ON ref.credit_package_id = pack.id AND ref.object_type = 'price'
+      AND ref.is_current
+    WHERE pack.price IS DISTINCT FROM seed.amount
+  ) THEN
+    RAISE EXCEPTION 'SEED_PRICE_REPLACEMENT_REQUIRED' USING ERRCODE = '23514';
+  END IF;
+END
+$seed_price_guard$;
+
 INSERT INTO public.membership_plans (
   id,
   name,
