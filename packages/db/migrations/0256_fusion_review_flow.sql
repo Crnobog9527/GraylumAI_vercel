@@ -44,6 +44,24 @@ BEGIN
       ORDER BY o) FROM jsonb_array_elements(r.workflow->'steps') WITH ORDINALITY x(st,o)),'[]'));
 END $$;
 
+-- Sizes of a version before a review starts, for the worst-case estimate and context check: report bytes,
+-- confirmed-field bytes and the number of declared fields. Same ownership and readability rules as start.
+CREATE OR REPLACE FUNCTION public.fusion_review_preview(p_actor_id uuid, p_draft_id uuid, p_source_version_id uuid)
+RETURNS jsonb LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path=public,pg_temp AS $$
+DECLARE d opc_drafts; ver artifact_versions; r artifact_rounds;
+BEGIN
+  PERFORM bill2_actor(p_actor_id);
+  SELECT * INTO d FROM opc_drafts WHERE draft_id=p_draft_id AND actor_id=p_actor_id;
+  SELECT * INTO ver FROM artifact_versions WHERE id=p_source_version_id AND project_id=d.project_id AND erased_at IS NULL;
+  SELECT * INTO r FROM artifact_rounds WHERE id=ver.round_id;
+  IF d.draft_id IS NULL OR ver.id IS NULL OR r.id IS NULL OR NOT content_erasure_artifact_readable(p_actor_id,ver.id) THEN
+    RAISE EXCEPTION 'FUSION_REVIEW_STALE'; END IF;
+  RETURN jsonb_build_object('reportBytes',octet_length(coalesce(ver.report#>>'{generatedReport,body}','')),
+    'materialsBytes',octet_length(coalesce((SELECT jsonb_object_agg(s.key,s.value->'information') FROM jsonb_each(r.steps) s),'{}')::text),
+    'fieldCount',(SELECT count(*) FROM jsonb_array_elements(r.workflow->'steps') st,
+      jsonb_array_elements(coalesce(st->'information','[]')) i));
+END $$;
+
 -- Recovery (§3.3): calls of reviews in progress or ended whose body was saved but never judged. The
 -- caller redoes the frozen host check and writes the verdict before settlement.
 CREATE OR REPLACE FUNCTION public.fusion_review_unjudged(p_limit integer)
@@ -57,8 +75,25 @@ LANGUAGE sql STABLE SECURITY DEFINER SET search_path=public,pg_temp AS $$
   ORDER BY c.created_at, c.id LIMIT least(greatest(coalesce(p_limit,50),1),200);
 $$;
 
+-- The review view also names each call's model (the flow re-claims only models without a finished call).
+-- Same signature and grants as 0236.
+CREATE OR REPLACE FUNCTION public.fusion_review_view(rv fusion_reviews) RETURNS jsonb
+LANGUAGE sql STABLE SET search_path=public,pg_temp AS $$
+  SELECT jsonb_build_object('reviewId',rv.id,'state',rv.state,'round',rv.round,'phase',rv.phase,'attempt',rv.attempt,
+    'draftId',rv.draft_id,'sourceVersionId',rv.source_version_id,'sourceSessionId',rv.source_session_id,
+    'versionHash',rv.version_hash,'materials',rv.materials,'materialsHash',rv.materials_hash,'config',rv.config,
+    'steps',rv.steps,'outcome',rv.outcome,'revisionId',rv.revision_id,'endedAt',rv.ended_at,
+    -- Per call: its run, verdict and whether it settled, for continueReview.
+    'calls',coalesce((SELECT jsonb_agg(jsonb_build_object('groupId',br.fusion_group_id,'runId',br.id,'callId',c.id,'modelId',br.payload->>'modelId',
+      'phase',c.payload->>'phase','dispatched',c.dispatched_at IS NOT NULL,'verdict',c.fusion_verdict,
+      'settled',c.settled_at IS NOT NULL,'state',c.state) ORDER BY c.created_at,c.id)
+      FROM bill2_runs br JOIN bill2_calls c ON c.run_id=br.id
+      WHERE br.actor_id=rv.actor_id AND br.fusion_group_id IN (SELECT (x->>'groupId')::uuid FROM jsonb_array_elements(rv.steps) x)),'[]'));
+$$;
+
 DO $$ DECLARE f text; BEGIN
   FOREACH f IN ARRAY ARRAY['fusion_review_skill_file(uuid,uuid,text,text)','fusion_review_source(uuid,uuid)',
+    'fusion_review_preview(uuid,uuid,uuid)',
     'fusion_review_unjudged(integer)'] LOOP
     EXECUTE format('REVOKE ALL ON FUNCTION public.%s FROM PUBLIC,anon,authenticated,service_role', f);
     EXECUTE format('GRANT EXECUTE ON FUNCTION public.%s TO service_role', f);

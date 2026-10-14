@@ -6,10 +6,13 @@ import { createRuntimeBudget, type RuntimeBudget } from '../runtime/budget';
 import { parseStagingPolicy } from '../runtime/stagingPolicy';
 import { stagingTransport } from '../runtime/stagingTransport';
 import { logger } from '../../lib/logger';
+import { reviewFlow } from './review';
 
 const row = z.object({ actor_id: z.string().uuid(), run_id: z.string().uuid(), call_id: z.string().uuid(),
   dispatched: z.boolean(), dispatch_deadline: z.string().nullable(), recovery: z.unknown().nullable(), created_at: z.string() });
 type Summary = { success: boolean; scanned: number; cancelled: number; recovered: number; scrubbed: number; failed: number;
+  /** Reviews whose saved, unjudged bodies were judged again before settlement. */
+  rejudged: number;
   /** Left for the next run when the time limit was reached. */
   deferred: number };
 const noTransport: BillingTransport = {
@@ -24,7 +27,7 @@ const noTransport: BillingTransport = {
  * deletion can happen while its call is still open (#947 review). Runs one call at a time; failures stay listed. */
 export async function recoverFusionFinancials(admin: SupabaseClient, options: { limit?: number; pages?: number;
   budget?: RuntimeBudget; now?: () => number; timeLimitMs?: number } = {}): Promise<Summary> {
-  const summary: Summary = { success: true, scanned: 0, cancelled: 0, recovered: 0, scrubbed: 0, failed: 0, deferred: 0 };
+  const summary: Summary = { success: true, scanned: 0, cancelled: 0, recovered: 0, scrubbed: 0, failed: 0, deferred: 0, rejudged: 0 };
   const now = options.now ?? Date.now;
   const limit = options.limit ?? 50;
   // The cron route has 60 seconds in total and runs other reconciliations alongside (#954 review).
@@ -36,6 +39,18 @@ export async function recoverFusionFinancials(admin: SupabaseClient, options: { 
   // a lasting backlog below can never crowd it out; a review settled later in this run pauses on the next one.
   const paused = await bounded(admin.rpc('fusion_review_pause_idle', { p_idle: '1 hour' }));
   if (paused.error) summary.success = false;
+  // Before settlement: a body saved but never judged (a crash between save and verdict) is judged again with
+  // the frozen host check, so the deadline rule never bills a malformed body as unjudged_saved (§3.3, #954).
+  const unjudged = await bounded(admin.rpc('fusion_review_unjudged', { p_limit: 50 }));
+  const reviews = new Map<string, string>();
+  if (unjudged.error) summary.success = false;
+  else for (const item of z.array(z.object({ actor_id: z.string().uuid(), review_id: z.string().uuid() }).passthrough())
+    .safeParse(unjudged.data).data ?? []) reviews.set(item.review_id, item.actor_id);
+  for (const [reviewId, actorId] of reviews) {
+    if (now() + 10_000 > stopAt) break;
+    try { await reviewFlow({ admin, actorId }).rejudge(reviewId); summary.rejudged++; }
+    catch { summary.failed++; summary.success = false; }
+  }
   // Listing is cheap: collect the pages first. Pages advance past calls that cannot progress yet (0235).
   // Keep paging (each call bounded, stopping before the per-item reserve) so expired undispatched calls
   // behind a long backlog of slow dispatched ones are still collected and released first (#954 review).

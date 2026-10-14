@@ -17,7 +17,7 @@ const reviewView = z.object({
   steps: z.array(z.object({ round: z.number(), phase: z.string(), attempt: z.number(), groupId: uuid, stepKey: z.string(),
     claimedAt: z.string() })),
   outcome: z.unknown().nullable(), revisionId: uuid.nullable(), endedAt: z.string().nullable(),
-  calls: z.array(z.object({ groupId: uuid, runId: uuid, callId: uuid, phase: z.string(), dispatched: z.boolean(),
+  calls: z.array(z.object({ groupId: uuid, runId: uuid, callId: uuid, modelId: uuid, phase: z.string(), dispatched: z.boolean(),
     verdict: z.string().nullable(), settled: z.boolean(), state: z.string() })),
 });
 export type ReviewView = z.infer<typeof reviewView>;

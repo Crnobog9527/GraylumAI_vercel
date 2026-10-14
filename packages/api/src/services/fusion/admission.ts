@@ -25,10 +25,23 @@ const refusals = new Set(['FUSION_REVIEW_DISABLED', 'FUSION_MEMBERSHIP_REQUIRED'
   'REPORT_ENTITLEMENTS_UNAVAILABLE', 'FUSION_MODEL_DENIED', 'FUSION_BUDGET_EXCEEDED', 'FUSION_GROUP_INVALID',
   'FUSION_GROUP_CONFLICT', 'FUSION_GROUP_DENIED', 'BILL2_REQUEST_CONFLICT', 'RUNTIME_TEST_WINDOW_DENIED',
   'RUNTIME_TEST_MODEL_DENIED']);
-const memberRequest = (requestId: string, index: number) => {
-  const hex = createHash('sha256').update(`fusion-run:${requestId}:${index}`).digest('hex');
+/** A stable UUID derived from a seed (retries of the same step reuse the same request ids). */
+export function derivedUuid(seed: string) {
+  const hex = createHash('sha256').update(seed).digest('hex');
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-4${hex.slice(13, 16)}-8${hex.slice(17, 20)}-${hex.slice(20, 32)}`;
-};
+}
+const memberRequest = (requestId: string, index: number) => derivedUuid(`fusion-run:${requestId}:${index}`);
+
+/** The frozen runs of an existing admission, without pricing anything; null when the request was never admitted. */
+export async function replayFusionGroup(admin: SupabaseClient, actorId: string, requestId: string, sourceSessionId: string) {
+  try {
+    return toGroup(await rpc<unknown>(admin, 'fusion_group_admit', { p_actor_id: actorId, p_request_id: uuid.parse(requestId),
+      p_kind: 'review', p_source_session_id: uuid.parse(sourceSessionId), p_runs: [] }));
+  } catch (error) {
+    if (error instanceof Error && error.message === 'FUSION_GROUP_INVALID') return null;
+    throw error;
+  }
+}
 
 /** Group admission (FUSION-REVIEW §2.1, §3.2). The host freezes each model's exact request and call;
  * the database (0235 fusion_group_admit) then rechecks the switch, membership, allowlist and group

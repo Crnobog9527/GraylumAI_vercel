@@ -1,14 +1,18 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { createRuntimeBudget } from '../runtime/budget';
 import { recoverFusionFinancials } from './recovery';
+
+const rejudged = vi.hoisted(() => [] as string[]);
+vi.mock('./review', () => ({ reviewFlow: (deps: { actorId: string }) => ({
+  rejudge: async (reviewId: string) => { rejudged.push(`${deps.actorId}:${reviewId}`); } }) }));
 
 const id = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
 const now = Date.parse('2026-10-14T00:00:00Z');
 const item = (n: number, dispatched: boolean, minutes: number) => ({ actor_id: id(100), run_id: id(n), call_id: id(n + 50), dispatched,
   dispatch_deadline: new Date(now + minutes * 60_000).toISOString(), recovery: null, created_at: `2026-10-13T00:00:${String(n).padStart(2, '0')}.000001Z` });
-function admin(rows: unknown[], options: { deleted?: string[]; failFinalize?: string } = {}) {
+function admin(rows: unknown[], options: { deleted?: string[]; failFinalize?: string; unjudged?: unknown[] } = {}) {
   const calls: string[] = [];
   const db = { rpc(name: string, args: Record<string, unknown>) {
     calls.push(`${name}:${String(args.p_run_id ?? '')}`);
@@ -22,6 +26,7 @@ function admin(rows: unknown[], options: { deleted?: string[]; failFinalize?: st
       return Promise.resolve({ data: { id: args.p_run_id, state: 'unknown', closed: false }, error: null });
     if (name === 'bill2_finalize' || name === 'bill2_read') return Promise.resolve({ data: { id: args.p_run_id, state: 'settled', closed: true,
       contentDeleted: options.deleted?.includes(String(args.p_run_id)) ?? false }, error: null });
+    if (name === 'fusion_review_unjudged') return Promise.resolve({ data: options.unjudged ?? [], error: null });
     if (name === 'fusion_review_pause_idle') {
       // Like the real query builder: cancellable with an abort signal.
       const result = Promise.resolve({ data: 0, error: null });
@@ -33,6 +38,15 @@ function admin(rows: unknown[], options: { deleted?: string[]; failFinalize?: st
 }
 
 describe('Fusion daily recovery', () => {
+  it('re-judges saved, unjudged review bodies once per review before any settlement', async () => {
+    rejudged.length = 0;
+    const row = (call: number) => ({ actor_id: id(100), review_id: id(300), call_id: id(call), run_id: id(call + 1), phase: 'fusion_review', round: 1 });
+    const a = admin([item(10, true, -60)], { unjudged: [row(400), row(402)] });
+    const summary = await recoverFusionFinancials(a.db, { now: () => now, budget: createRuntimeBudget() });
+    expect(rejudged).toEqual([`${id(100)}:${id(300)}`]);
+    expect(summary.rejudged).toBe(1);
+    expect(a.calls.indexOf('fusion_review_unjudged:')).toBeLessThan(a.calls.findIndex(c => c.startsWith('bill2_finalize')));
+  });
   it('runs the idle-pause step first, so a backlog can never crowd it out', async () => {
     let clock = now;
     const busy = admin(Array.from({ length: 12 }, (_, i) => item(200 + i, true, -60)));
