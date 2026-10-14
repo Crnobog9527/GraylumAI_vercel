@@ -4,7 +4,7 @@
  * `data-palette` on the page). Each is quiet on purpose: one hue family plus ink, low saturation, no rainbow.
  *  - ivory (default, also the server HTML): ivory paper, deep ink, a bronze accent.
  *  - graphite: fog grey and graphite, a slate-blue accent, like a financial or engineering product.
- *  - gold: neutral grey; the brand gold only as a fill or ring on the few key marks. --h-accent is the text
+ *  - gold: neutral grey; the brand gold only as a fill on the few key marks (rings use a deeper gold). --h-accent is the text
  *    color, so in this palette it is a dark amber that stays readable on white.
  * --h-* feed h.module.css and scenes-h.module.css; --bd-* feed AuroraBackdrop. Triplets (`r, g, b`) are used as
  * rgba(var(--x), alpha).
@@ -87,7 +87,7 @@
   --h-accent: #8a5a00;
   --h-accent-rgb: 255, 187, 23;
   --h-accent-soft: rgba(255, 187, 23, .16);
-  --h-ring: #e8a800;
+  --h-ring: #a87200; /* rings and focus outlines need 3:1 on the canvas; the bright gold stays a fill */
   --h-selection: #ffe8a8;
   --h-iris: linear-gradient(135deg, #ffd24d 0%, #ffbb17 100%);
   --h-iris-conic: conic-gradient(from 0deg, rgba(255, 187, 23, 0) 0deg, #ffbb17 90deg, rgba(255, 187, 23, 0) 180deg,
