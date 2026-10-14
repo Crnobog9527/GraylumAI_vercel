@@ -25,11 +25,13 @@ function fixture(state: { orders?: Record<string, Order>; sessions?: unknown[]; 
   mocks.ref.mockImplementation(async (_db: unknown, type: string, external: string) =>
     recorded.has(`${type}:${external}`) ? { order_id: ORDER } : undefined);
   const db = { from: vi.fn((table: string) => {
-    let key = '';
+    let key = '', after = '';
     const chain = { select: vi.fn(() => chain), eq: vi.fn((_k: string, value: string) => { key = value; return chain; }),
       is: vi.fn(() => chain), not: vi.fn(() => chain), neq: vi.fn(() => chain), in: vi.fn(() => chain), order: vi.fn(() => chain),
-      // Card subscriptions with a requested stop Stripe has not confirmed (scan 4).
-      limit: vi.fn(async () => ({ error: null, data: table === 'user_subscriptions' ? (state.stopping ?? []).map(id => ({ id })) : [] })),
+      gt: vi.fn((_k: string, value: string) => { after = value; return chain; }),
+      // Card subscriptions with a requested stop Stripe has not confirmed (scan 4), in id order after the cursor.
+      limit: vi.fn(async (n: number) => ({ error: null, data: table === 'user_subscriptions'
+        ? [...(state.stopping ?? [])].sort().filter(id => id > after).slice(0, n).map(id => ({ id })) : [] })),
       maybeSingle: vi.fn(async () => ({ error: null, data: orders[key] ?? null })) };
     return chain;
   }) };
@@ -63,11 +65,20 @@ describe('PAY-STRIPE-MP daily Stripe card reconciliation', () => {
     expect(mocks.stop).toHaveBeenCalledWith(f.db, f.stripe, 'fixture', 'pro', 'sub_pro');
     expect(result).toMatchObject({ success: false, repaired: 1, findings: [{ kind: 'stop_unconfirmed', object: 'subscription',
       externalId: 'stuck', code: 'PAY_STRIPE_MP_RENEWAL_STOP_UNCONFIRMED' }] });
-    // More than a day's batch: the first 100 are retried and the scan is reported incomplete, never silently complete.
+    // More than one page (after a Stripe outage): every pending stop is retried, page after page, even when the first
+    // page keeps failing; beyond the page cap the scan is reported incomplete, never silently complete.
+    mocks.stop.mockReset().mockImplementation(async (_db: unknown, _stripe: unknown, _merchant: string, local: string) => {
+      if (local < 's050') throw new Error('PAY_STRIPE_MP_RENEWAL_STOP_UNCONFIRMED');
+    });
+    const ids = Array.from({ length: 150 }, (_, i) => `s${String(i).padStart(3, '0')}`);
+    const many = await fixture({ stopping: ids }).run();
+    expect(mocks.stop).toHaveBeenCalledTimes(150);
+    expect(many).toMatchObject({ complete: true, repaired: 100 });
+    expect(many.findings.filter(item => item.kind === 'stop_unconfirmed')).toHaveLength(50);
     mocks.stop.mockReset().mockResolvedValue(undefined);
-    const many = await fixture({ stopping: Array.from({ length: 101 }, (_, i) => `s${i}`) }).run();
+    const capped = await fixture({ stopping: ids }).run({ maxPages: 1 });
     expect(mocks.stop).toHaveBeenCalledTimes(100);
-    expect(many).toMatchObject({ complete: false, repaired: 100,
+    expect(capped).toMatchObject({ complete: false,
       findings: [{ kind: 'scan_incomplete', object: 'subscription', code: 'PENDING_STOPS_OVER_LIMIT' }] });
   });
   it('runs in the mode the environment configures and refuses a key of the other mode', async () => {
