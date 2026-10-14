@@ -39,7 +39,8 @@ const review = z.object({
   const issue = (message: string) => context.addIssue({ code: 'custom', message });
   if (new Set(value.reviewerModelIds).size !== value.reviewerModelIds.length) issue('FUSION_REVIEWERS_DUPLICATE');
   if (value.maxRounds * (value.reviewerModelIds.length + 1) > FUSION_MAX_REVIEW_CALLS) issue('FUSION_REVIEW_CALLS_EXCEEDED');
-  if (value.enabled && (value.reviewerModelIds.length !== PANEL_SEATS.length || !value.summaryModelId || !value.maxBudgetUsd)) {
+  if (value.enabled && (value.reviewerModelIds.length !== PANEL_SEATS.length || !value.summaryModelId || !value.maxBudgetUsd
+    || !value.skillId)) {
     issue('FUSION_REVIEW_INCOMPLETE');
   }
 });

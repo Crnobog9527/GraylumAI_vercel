@@ -1,0 +1,20 @@
+/* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import { describe, expect, it } from 'vitest';
+import { estimateReview } from './reviewEstimate';
+
+const quote = (modelId: string) => ({ modelId, outputLimit: 32768, providerLimits: { providerSlug: 'x', contextTokens: 1_000_000,
+  promptUsdPerMillion: '0.1', completionUsdPerMillion: '0.1', requestUsd: '0' } });
+const ids = ['00000000-0000-4000-8000-0000000000a1', '00000000-0000-4000-8000-0000000000a2', '00000000-0000-4000-8000-0000000000a3'];
+const base = { quotes: [...ids, 's'].map(quote) as never, reviewers: ids, summary: 's', maxRounds: 2, maxBudgetUsd: '100',
+  summaryTokens: 16384, instructionBytes: { reviewer: 8000, summary: 8000 }, fieldCount: 14, snapshotBytes: 30_000 };
+
+describe('review estimate', () => {
+  it('keeps every request within the per-call billing byte cap: drops the debate round, or refuses before anything is charged', () => {
+    expect(estimateReview({ ...base, opinionTokens: 4096 }).rounds).toBe(2);
+    // Three 12k-token opinions make the debate request too large: one round only.
+    expect(estimateReview({ ...base, opinionTokens: 12_000, snapshotBytes: 5_000, fieldCount: 0,
+      instructionBytes: { reviewer: 60_000, summary: 1_000 } }).rounds).toBe(1);
+    // A summary that cannot fit the cap: refused at start, before round 1 is charged.
+    expect(() => estimateReview({ ...base, opinionTokens: 32768 })).toThrow('FUSION_INPUT_TOO_LARGE');
+  });
+});

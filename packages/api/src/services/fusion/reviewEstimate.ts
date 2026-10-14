@@ -3,6 +3,7 @@ import type { z } from 'zod';
 import type { frozenCallPolicy } from '../bill2/service';
 import { openRouterCallBound } from '../bill2/openRouterPolicy';
 import { FUSION_INPUT_CAP } from './request';
+import { PAYG_PROFILE_MAX_BYTES } from '../runtime/paygHostPolicy';
 
 type CallPolicy = z.infer<typeof frozenCallPolicy>;
 /** Per-call profile overheads frozen with every payg quote (template + margin tokens). */
@@ -40,11 +41,15 @@ export function estimateReview(input: EstimateInput): { rounds: number; estimate
   const debateBytes = reviewerBytes + input.reviewers.length * opinionBytes;
   const summaryBytes = input.instructionBytes.summary + input.snapshotBytes + 2 * steps + FRAMING_BYTES
     + input.reviewers.length * opinionBytes;
+  // Every request must also fit the per-call billing profile, or a later step could not be claimed after earlier ones
+  // were charged (#962 review): round 1 and the summary are required; the debate round is dropped when it cannot fit.
+  if (reviewerBytes > PAYG_PROFILE_MAX_BYTES || summaryBytes > PAYG_PROFILE_MAX_BYTES) throw new Error('FUSION_INPUT_TOO_LARGE');
+  const debateFits = debateBytes <= PAYG_PROFILE_MAX_BYTES;
   const firstRound = input.reviewers.reduce((sum, id) => sum + bound(id, input.opinionTokens, reviewerBytes), 0);
   const debate = input.reviewers.reduce((sum, id) => sum + bound(id, input.opinionTokens, debateBytes), 0);
   const summary = bound(input.summary, input.summaryTokens, summaryBytes);
   const budget = Number(input.maxBudgetUsd);
-  for (let rounds = Math.min(input.maxRounds, 2); rounds >= 1; rounds--) {
+  for (let rounds = Math.min(input.maxRounds, debateFits ? 2 : 1); rounds >= 1; rounds--) {
     const total = firstRound + (rounds > 1 ? debate : 0) + summary;
     // Rounded up to whole micro-dollars so the stored estimate is never below the computed bound.
     if (Number.isFinite(total) && total <= budget) return { rounds, estimateUsd: (Math.ceil(total * 1e6) / 1e6).toFixed(6) };
