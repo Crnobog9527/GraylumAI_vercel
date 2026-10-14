@@ -114,7 +114,8 @@ export function ReportPaywallView({ checkout, onClose }: { checkout: PaywallChec
               price={`${formatUsd(quote.amount)} ${quote.perLabel}`} renewal={quote.renewal}
               cta={`${COPY.cta} · ${formatUsd(quote.amount)}`} ctaSub={COPY.ctaSub}
               blockedReason={purchase ? null : COPY.notReady} onGoldFirstDeclined={checkout.declineFirstMonth}
-              onFounderSoldOut={checkout.markFounderSoldOut} fineprint={quote.founder ? CHECKOUT_COPY.founderRule : null}
+              onFounderDeclined={checkout.declineFounder} onFounderSoldOut={checkout.markFounderSoldOut}
+              fineprint={quote.founder ? CHECKOUT_COPY.founderRule : null}
               notice={checkout.founderSoldOut && plan.level === 'gold' && billing === 'yearly' ? CHECKOUT_COPY.founderSoldOut : null} />
           ) : null}
 

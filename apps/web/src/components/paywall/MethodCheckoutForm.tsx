@@ -17,6 +17,8 @@ type Props = {
   blockedReason?: string | null;
   /** Gold first month refused by the server: let the parent switch to the standard price. */
   onGoldFirstDeclined?: () => void;
+  /** This account cannot take the founder price (an earlier founder order): let the parent switch to standard. */
+  onFounderDeclined?: () => void;
   /** Founder seats sold out at checkout: the parent drops to the standard yearly price. */
   onFounderSoldOut?: () => void;
   /** A standing notice for this checkout (e.g. the founder price just sold out). */
@@ -106,9 +108,11 @@ export function MethodCheckoutForm(props: Props) {
         <div role={outcome.tone === 'error' ? 'alert' : 'status'} data-testid={`${id}-outcome`} className="grid gap-2 text-sm"
           style={{ color: outcome.tone === 'error' ? 'var(--error)' : 'var(--warning)' }}>
           <p>{outcome.message}</p>
-          {outcome.goldFirstIneligible && props.onGoldFirstDeclined ? (
-            <Button type="button" variant="outline" size="sm" className="justify-self-start"
-              onClick={() => { clearOutcome(); props.onGoldFirstDeclined?.(); }}>改按标准价购买</Button>
+          {(outcome.goldFirstIneligible && props.onGoldFirstDeclined) || (outcome.founderIneligible && props.onFounderDeclined) ? (
+            <Button type="button" variant="outline" size="sm" className="justify-self-start" onClick={() => {
+              clearOutcome();
+              (outcome.goldFirstIneligible ? props.onGoldFirstDeclined : props.onFounderDeclined)?.();
+            }}>改按标准价购买</Button>
           ) : null}
         </div>
       ) : null}

@@ -61,6 +61,7 @@ export const SubscriptionCard = memo(function SubscriptionCard({ user: _user }: 
   const [target, setTarget] = useState<{ planId: string; cycle: 'monthly' | 'yearly' } | null>(null);
   const [firstMonthDeclined, setFirstMonthDeclined] = useState(false);
   const [founderSoldOut, setFounderSoldOut] = useState(false);
+  const [founderDeclined, setFounderDeclined] = useState(false);
   const syncedCheckoutSessionRef = useRef<string | null>(null);
   const checkout = useMethodCheckout();
   const entitlements = trpc.user.getEntitlements.useQuery(undefined, { staleTime: 30_000 });
@@ -183,7 +184,7 @@ export const SubscriptionCard = memo(function SubscriptionCard({ user: _user }: 
   const current = currentMethodMembership(memberships);
   const methods = checkout.methodsFor('membership_plan');
   const goldFirstMonth = checkout.entry?.goldFirstMonthEligible === true && !firstMonthDeclined;
-  const founderSeats = founderSoldOut ? 0 : founderSeatsLeft(checkout.entry);
+  const founderSeats = founderSoldOut || founderDeclined ? 0 : founderSeatsLeft(checkout.entry);
   const sellable = useMemo(() => pickPaywallPlans(apiPlans), [apiPlans]);
   const displayPlans: PlanConfig[] = apiPlans.map(plan => ({
     id: plan.id,
@@ -218,7 +219,8 @@ export const SubscriptionCard = memo(function SubscriptionCard({ user: _user }: 
       }}
     >
       <MethodCheckoutDialog target={dialogTarget} checkout={checkout} onClose={() => setTarget(null)}
-        onGoldFirstDeclined={() => setFirstMonthDeclined(true)} onFounderSoldOut={() => setFounderSoldOut(true)}
+        onGoldFirstDeclined={() => setFirstMonthDeclined(true)} onFounderDeclined={() => setFounderDeclined(true)}
+        onFounderSoldOut={() => setFounderSoldOut(true)}
         notice={founderSoldOut && target?.cycle === 'yearly' && dialogTarget?.purchase.offer === 'standard' ? CHECKOUT_COPY.founderSoldOut : null} />
       {/* Header */}
       <div className="mb-6 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">

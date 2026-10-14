@@ -89,7 +89,9 @@ export function isStripeCheckoutUrl(value: unknown): value is string {
   }
 }
 
-export type CheckoutRefusal = { message: string; goldFirstIneligible: boolean; founderSoldOut: boolean };
+/** `founderIneligible`: this account already had a founder order (0222 FOUNDER_RENEWAL_REQUIRED / FOUNDER_EXPIRED);
+ * the standard yearly price still applies to it. */
+export type CheckoutRefusal = { message: string; goldFirstIneligible: boolean; founderSoldOut: boolean; founderIneligible: boolean };
 
 const BUSINESS_CODES = new Set(['PRECONDITION_FAILED', 'CONFLICT', 'FORBIDDEN', 'BAD_REQUEST']);
 
@@ -100,12 +102,13 @@ export function describeCheckoutError(error: unknown): CheckoutRefusal {
   const message = typeof raw === 'string' ? raw.trim() : '';
   if (code === 'TOO_MANY_REQUESTS') {
     return { message: /频繁/.test(message) && message.length <= 80 ? message : CHECKOUT_COPY.rateLimited,
-      goldFirstIneligible: false, founderSoldOut: false };
+      goldFirstIneligible: false, founderSoldOut: false, founderIneligible: false };
   }
   // Input validation failures arrive as a JSON issue list; they are not a business answer to show.
   if (typeof code === 'string' && BUSINESS_CODES.has(code) && message && !message.startsWith('[') && message.length <= 200) {
     return { message, goldFirstIneligible: code === 'PRECONDITION_FAILED' && message.includes('首月'),
-      founderSoldOut: code === 'CONFLICT' && message.includes('创始会员名额已售完') };
+      founderSoldOut: code === 'CONFLICT' && message.includes('创始会员名额已售完'),
+      founderIneligible: code === 'PRECONDITION_FAILED' && /创始会员(续费资格已过期|，请通过创始会员续费入口)|已购买过创始会员/.test(message) };
   }
-  return { message: CHECKOUT_COPY.unavailable, goldFirstIneligible: false, founderSoldOut: false };
+  return { message: CHECKOUT_COPY.unavailable, goldFirstIneligible: false, founderSoldOut: false, founderIneligible: false };
 }

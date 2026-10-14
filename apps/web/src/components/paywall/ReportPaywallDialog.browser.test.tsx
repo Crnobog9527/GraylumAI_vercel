@@ -465,3 +465,23 @@ it('when the last founder seat goes during checkout, it drops to $621, says so, 
     expect(errors).toEqual([]);
   } finally { await page.close(); }
 }, 30000);
+
+it('lets a former founder buy Gold yearly at the standard price after the founder price is refused', async () => {
+  const { page, errors } = await open({ membership: WITH_SEATS, checkoutMode: 'error',
+    checkoutError: { code: 'PRECONDITION_FAILED', message: '你已购买过创始会员，请通过创始会员续费入口操作。' } });
+  try {
+    await page.getByText('年付').click();
+    await page.getByTestId('paywall-plan-gold').click();
+    await page.getByTestId('report-paywall-terms').check();
+    await page.getByTestId('report-paywall-pay').click();
+    await browserExpect(page.getByRole('alert')).toContainText('你已购买过创始会员');
+    await page.getByRole('button', { name: '改按标准价购买' }).click();
+    await browserExpect(page.getByTestId('report-paywall-pay')).toContainText('$621');
+    await browserExpect(page.getByTestId('paywall-founder-seats')).toHaveCount(0);
+    await page.evaluate(() => { Object.assign(window, { checkoutMode: 'open' }); });
+    await page.getByTestId('report-paywall-pay').click();
+    await browserExpect(page).toHaveURL(/checkout\.stripe\.com/);
+    expect((await checkouts(page) as Array<{ offer: string }>).map(item => item.offer)).toEqual(['founder', 'standard']);
+    expect(errors).toEqual([]);
+  } finally { await page.close(); }
+}, 30000);

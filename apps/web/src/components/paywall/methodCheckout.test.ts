@@ -57,12 +57,17 @@ describe('refusals', () => {
       ['BAD_REQUEST', '这个优惠不适用于所选套餐，请刷新页面后重试。'],
     ]) {
       expect(describeCheckoutError(trpcError(code, message))).toEqual({ message, goldFirstIneligible: false,
-        founderSoldOut: message === '创始会员名额已售完。' });
+        founderSoldOut: message === '创始会员名额已售完。', founderIneligible: false });
     }
   });
   it('marks the Gold first-month refusal so the user can switch to the standard price', () => {
     expect(describeCheckoutError(trpcError('PRECONDITION_FAILED', 'Gold 首月优惠仅限首次购买 Gold 的账号，你的账号不符合条件。')))
-      .toEqual({ message: 'Gold 首月优惠仅限首次购买 Gold 的账号，你的账号不符合条件。', goldFirstIneligible: true, founderSoldOut: false });
+      .toEqual({ message: 'Gold 首月优惠仅限首次购买 Gold 的账号，你的账号不符合条件。', goldFirstIneligible: true, founderSoldOut: false,
+        founderIneligible: false });
+    // A former founder: the founder price is refused, the standard yearly plan is not.
+    for (const message of ['你已购买过创始会员，请通过创始会员续费入口操作。', '创始会员续费资格已过期。']) {
+      expect(describeCheckoutError(trpcError('PRECONDITION_FAILED', message))).toMatchObject({ message, founderIneligible: true });
+    }
   });
   it('gives one generic line for outages, input errors and unknown failures', () => {
     expect(describeCheckoutError(trpcError('SERVICE_UNAVAILABLE', 'whatever')).message).toBe(CHECKOUT_COPY.unavailable);

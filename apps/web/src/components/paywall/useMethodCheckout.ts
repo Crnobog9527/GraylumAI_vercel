@@ -8,7 +8,9 @@ import {
   type CardMethod, type MethodPurchase,
 } from './methodCheckout';
 
-export type CheckoutOutcome = { tone: 'error' | 'recovery'; message: string; goldFirstIneligible: boolean; founderSoldOut: boolean };
+export type CheckoutOutcome = {
+  tone: 'error' | 'recovery'; message: string; goldFirstIneligible: boolean; founderSoldOut: boolean; founderIneligible: boolean;
+};
 
 /**
  * Membership entry and the card purchase action (`payments.methodCheckout`). One in-flight request
@@ -38,7 +40,7 @@ export function useMethodCheckout() {
         window.location.assign(result.url);
         return;
       }
-      setOutcome({ tone: 'recovery', goldFirstIneligible: false, founderSoldOut: false,
+      setOutcome({ tone: 'recovery', goldFirstIneligible: false, founderSoldOut: false, founderIneligible: false,
         message: result.state === 'recovery_required' ? CHECKOUT_COPY.recovery : CHECKOUT_COPY.badUrl });
     } catch (error) {
       const refusal = describeCheckoutError(error);
