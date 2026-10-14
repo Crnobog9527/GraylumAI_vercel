@@ -45,7 +45,7 @@ describe('profile links', () => {
       'https://x.com/tidyroom/status/123', 'https://www.tiktok.com/@homeideas/video/1', 'https://www.instagram.com/tidy_room/reels',
       'https://space.bilibili.com/123456/video', 'https://weibo.com/u/7654321/home',
       'https://www.youtube.com/channel/UCabcdefghijklmnopqrstuv/videos', 'https://x.com:4444/tidyroom',
-      'https://www.tiktok.com/@@homeideas', 'https://x.com/@tidyroom', 'https://www.instagram.com/@tidy_room']) {
+      'https://x.com/about', 'https://www.instagram.com/legal/', 'https://www.tiktok.com/@@homeideas', 'https://x.com/@tidyroom', 'https://www.instagram.com/@tidy_room']) {
       expect(parseProfileLink(link)).toBeNull();
     }
   });
@@ -65,6 +65,7 @@ describe('profile links', () => {
 
   it('ignores links glued onto other text', () => {
     expect(profileLinksIn('nothttps://x.com/alice javascript:https://x.com/bob a.https://x.com/carol')).toEqual([]);
+    expect(profileLinksIn('mailto:u@example.com?body=https://x.com/alice data:text/plain,https://x.com/bob')).toEqual([]);
     expect(profileLinksIn('https://x.com/dan，(https://x.com/erin) 链接：https://x.com/fay')).toEqual([
       { platform: 'x', account: 'dan' }, { platform: 'x', account: 'erin' }, { platform: 'x', account: 'fay' }]);
   });

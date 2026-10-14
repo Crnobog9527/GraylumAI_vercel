@@ -14,8 +14,10 @@ const CASE_INSENSITIVE: ReadonlySet<SocialPlatform> = new Set(['tiktok', 'x', 'i
 
 /** First path segments that are site pages, not accounts. */
 const X_RESERVED = new Set(['home', 'explore', 'i', 'search', 'settings', 'intent', 'share', 'hashtag',
-  'messages', 'notifications', 'compose', 'login', 'signup', 'tos', 'privacy']);
-const INSTAGRAM_RESERVED = new Set(['p', 'reel', 'reels', 'explore', 'stories', 'accounts', 'tv', 'direct']);
+  'messages', 'notifications', 'compose', 'login', 'logout', 'signup', 'tos', 'privacy', 'about', 'jobs', 'help',
+  'download', 'account', 'lists', 'bookmarks', 'communities', 'premium', 'verified', 'business', 'en', 'rules', 'safety']);
+const INSTAGRAM_RESERVED = new Set(['p', 'reel', 'reels', 'explore', 'stories', 'accounts', 'tv', 'direct', 'about',
+  'legal', 'developer', 'web', 'emails', 'challenge', 'privacy', 'terms', 'directory', 'session', 'download', 'oauth']);
 
 const hostIs = (host: string, ...domains: string[]) => domains.some(domain => host === domain || host === `www.${domain}`
   || host === `m.${domain}` || host === `mobile.${domain}`);
@@ -82,9 +84,10 @@ export function parseProfileLink(link: string): CanonicalAccount | null {
  * Every supported profile URL is printable ASCII, so a link ends at the first other character (spaces,
  * Chinese text and full-width punctuation such as ！？：”) or ASCII sentence punctuation.
  */
-// A link must stand on its own: at the start of the message or after a non-ASCII-word character, so
-// `nothttps://…` or `javascript:https://…` is not a profile link.
-const LINK = /(?<![A-Za-z0-9:/._@%+-])https?:\/\/[\x21-\x7e]+/gi;
+// A link must stand on its own: at the start of the message, after whitespace, an opening bracket or
+// quote, or after non-ASCII text (Chinese words and punctuation). Anything else (`nothttps://`,
+// `javascript:https://`, `?body=https://`, `data:text/plain,https://`) is part of another string.
+const LINK = /(?<=^|[\s(\[<"'{]|[^\x00-\x7f])https?:\/\/[\x21-\x7e]+/gi;
 const NOT_IN_LINK = /[<>"'()[\],;!?]/;
 /** Sentence-ending dots or colons are not part of a link; no supported handle can end with them. */
 const TRAILING = /[.:]+$/;
