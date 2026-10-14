@@ -2526,7 +2526,7 @@
   "fn:fusion_call_verdict(uuid,uuid,text)": "0aec31b33411",
   "fn:fusion_group_admit(uuid,uuid,text,uuid,jsonb)": "2c50a86d335d",
   "fn:fusion_group_attach(uuid,uuid,uuid)": "92457d5b1be8",
-  "fn:fusion_group_claim(uuid,uuid,text,integer,jsonb)": "9835f1f1363a",
+  "fn:fusion_group_claim(uuid,uuid,text,integer,jsonb)": "b4754b59797a",
   "fn:fusion_group_create(uuid,uuid,text)": "a548758efeca",
   "fn:fusion_group_create(uuid,uuid,text,uuid)": "afcd2d382656",
   "fn:fusion_pending_financial_batch(integer,timestamp with time zone,uuid)": "2be48103af3c",

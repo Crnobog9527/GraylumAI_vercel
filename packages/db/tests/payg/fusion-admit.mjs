@@ -81,6 +81,11 @@ export async function fusionAdmitCases({db,Client,connectionString,report,create
   assert.equal(await runCount(db,actor),before+2);
   const group = (await db.query('SELECT source_session_id FROM fusion_billing_groups WHERE id=$1',[first.groupId])).rows[0];
   assert.equal(group.source_session_id,session);
+  // The claim must be exactly the frozen call: a substituted request hash or phase is refused.
+  for (const patch of [{requestHash:'0'.repeat(64)},{phase:'fusion_summary'}])
+    await assert.rejects(rpc(db,'fusion_group_claim',actor,first.groupId,'review:0',1,
+      JSON.stringify(first.runs.map((r,i)=>({runId:r.runId,sequence:1,payload:i?r.fusion.call:{...r.fusion.call,...patch}})))),
+      /FUSION_GROUP_CONFLICT/);
   // The frozen call claims as a full-hold batch.
   const claimed = await rpc(db,'fusion_group_claim',actor,first.groupId,'review:1',1,
     JSON.stringify(first.runs.map(r=>({runId:r.runId,sequence:1,payload:r.fusion.call}))));

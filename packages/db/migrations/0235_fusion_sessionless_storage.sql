@@ -135,6 +135,20 @@ BEGIN
   RETURN jsonb_build_object('groupId',gid,'replayed',false,'runs',out);
 END $$;
 
+-- A run admitted through fusion_group_admit carries its frozen call: the group claim must claim exactly
+-- that call (phase, request hash, quote), under the run locks it already holds (#947 review).
+DO $$ DECLARE src text; a text; BEGIN
+  src:=pg_get_functiondef('public.fusion_group_claim(uuid,uuid,text,integer,jsonb)'::regprocedure);
+  IF position('{input,fusion,call}' IN src)=0 THEN
+    a:=$x$      res:=bill2_claim(p_actor_id, (item->>'runId')::uuid, (item->>'sequence')::int, item->'payload');$x$;
+    IF array_length(string_to_array(src,a),1)<>2 THEN RAISE EXCEPTION 'FUSION_SOURCE_MISMATCH: fusion_group_claim'; END IF;
+    EXECUTE replace(src,a,$x$      IF EXISTS(SELECT 1 FROM bill2_runs br WHERE br.id=(item->>'runId')::uuid
+        AND br.payload#>'{input,fusion,call}' IS NOT NULL AND br.payload#>'{input,fusion,call}' IS DISTINCT FROM item->'payload') THEN
+        RAISE EXCEPTION 'FUSION_GROUP_CONFLICT'; END IF;
+$x$||a);
+  END IF;
+END $$;
+
 -- Saved output: idempotent for the same body; only for a dispatched call of a grouped run whose
 -- source conversation still exists. The call row lock orders this with settlement and erasure.
 CREATE OR REPLACE FUNCTION public.fusion_call_output_save(p_actor_id uuid, p_call_id uuid, p_body text)
