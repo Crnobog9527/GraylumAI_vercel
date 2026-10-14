@@ -212,6 +212,17 @@ try {
   assert.equal(await svc('SELECT publish_monitor_provider_account_disconnected($1) v', ['pfm_nobody']), false);
   report.checks.push('a provider-side disconnect moves only that connection to re-authorisation');
 
+  // An account overwritten after its owner's record began deleting is queued for disconnect, not skipped.
+  await connect(other, 'pfm_late_take');
+  await svc('SELECT publish_monitor_disconnect($1,$2) v', [other.a, (await conn('pfm_late_take')).id]);
+  const taker = await start(u.a, u.account);
+  await c.query("UPDATE social_connect_requests SET state='abandoned' WHERE id=$1", [taker.requestId]);
+  const lateVerdict = await classify(taker.requestId, [acc('pfm_late_take', taker.externalId)]);
+  assert.deepEqual(lateVerdict.map(x => x.action), ['takeover']);
+  assert.deepEqual([(await conn('pfm_late_take')).status, (await conn('pfm_late_take')).provider_disconnect_pending],
+    ['deleting', true]);
+  report.checks.push('an account taken over after deletion began is queued for disconnect before its record ends');
+
   // Erasure still completes, but an attempt whose provider cleanup is not finished (or finished under 30 days ago)
   // stays, detached from the brand, so the cleanup keeps its external_id; settled attempts are purged after 30 days.
   const late = await start(u.a, u.account);

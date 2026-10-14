@@ -149,7 +149,12 @@ BEGIN
   SELECT * INTO existing FROM social_connections WHERE provider_account_id=pid FOR UPDATE;
   IF item->>'externalId' IS DISTINCT FROM req.external_id THEN verdict:='skip';
   ELSIF existing.id IS NULL THEN verdict:='delete';
-  ELSIF existing.status='deleting' THEN verdict:='skip';
+  ELSIF existing.status='deleting' THEN
+   -- Overwritten after its owner's record began deleting: queue the disconnect on that record; the provider work
+   -- clears the overwriting grant before ending it (or holds it while publishes are unresolved).
+   UPDATE social_connections SET provider_disconnect_pending=true,deletion_attempts=0,lease_owner=NULL,
+    lease_expires_at=NULL,updated_at=clock_timestamp() WHERE id=existing.id AND NOT provider_disconnect_pending;
+   verdict:='takeover';
   ELSIF existing.actor_id=req.actor_id THEN verdict:='keep';
   ELSE
    UPDATE social_connections SET status='quarantined',provider_disconnect_pending=true,deletion_attempts=0,lease_owner=NULL,
