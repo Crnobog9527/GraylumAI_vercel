@@ -70,9 +70,11 @@ try {
  const tail=readdirSync(resolve(root,'packages/db/migrations')).filter(f=>/^\d{4}_.*\.sql$/.test(f)&&f>'0201_').sort()
   .map(name=>({name,sql:read('packages/db/migrations/'+name)}));
  const currentMd5=signature=>ok(sql(`SELECT md5(pg_get_functiondef('public.${signature}'::regprocedure));`));
+ const hasMarker=(signature,marker)=>{assert.ok(!marker.includes('$md5_chain_marker$'));
+  return ok(sql(`SELECT position($md5_chain_marker$${marker}$md5_chain_marker$ IN pg_get_functiondef('public.${signature}'::regprocedure))>0;`))==='t';};
  report.skipped=[];
  for(let i=0;i<tail.length;i++){
-  const superseded=await supersededPatch(tail,i,currentMd5);
+  const superseded=await supersededPatch(tail,i,currentMd5,hasMarker);
   if(superseded.skip)console.log('skip superseded md5 patch '+superseded.reason);
   if(superseded.skip)report.skipped.push(superseded.reason);
   ok(sql(superseded.skip?superseded.rest:tail[i].sql));
