@@ -9,7 +9,7 @@ import { advanceAuthorized, advanceReview, kickAdvance, kickStalledReviews, MAX_
 
 const reviewId = '00000000-0000-4000-8000-000000000001';
 const actorId = '00000000-0000-4000-8000-000000000002';
-/** A lease store with the semantics of 0266: one live holder, every grant counted, release only by the holder. */
+/** A lease store with the semantics of 0258: one live holder, every grant counted, release only by the holder. */
 function leaseDb(options: { count?: number; state?: string } = {}) {
   const lease = { token: null as string | null, count: options.count ?? 0 };
   const calls: string[] = [];

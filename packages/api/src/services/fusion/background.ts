@@ -13,7 +13,7 @@ import { reviewFlow } from './review';
 import { ENDED_STATES } from './reviewRecord';
 
 /** FUSION-BACKGROUND (Owner 2026-10-15 "现在就做。"): a review advances on the server, one step per function
- * invocation, so the user may leave the page. Each invocation takes the review's advance lease (0266), runs one
+ * invocation, so the user may leave the page. Each invocation takes the review's advance lease (0258), runs one
  * continue (re-judge, decide, claim) and dispatches that step's calls in parallel, then relays to a fresh invocation.
  * Billing is unchanged: the same claims (frozen caps, group admission), the same dispatchOnce and settlement. */
 
@@ -47,7 +47,7 @@ const leaseResult = z.object({ acquired: z.boolean(), reason: z.string(), actorI
   count: z.number().optional() }).passthrough();
 export type Lease = z.infer<typeof leaseResult>;
 
-/** Runs work under the review's advance lease (0266), or returns the refusal without running it. Every advancer
+/** Runs work under the review's advance lease (0258), or returns the refusal without running it. Every advancer
  * (the relay, an old page still calling dispatch) goes through here, so two never work on one review at once. */
 export async function withAdvanceLease<T>(admin: SupabaseClient, reviewId: string, work: (lease: Lease) => Promise<T>):
   Promise<{ ran: true; value: T } | { ran: false; reason: string }> {
@@ -121,7 +121,7 @@ export async function kickAdvance(origin: string, reviewId: string, hop = 0,
   }
 }
 
-/** Daily backstop: kicks reviews that stopped moving (each at most once a day, 0266), within a time limit. */
+/** Daily backstop: kicks reviews that stopped moving (each at most once a day, 0258), within a time limit. */
 export async function kickStalledReviews(admin: SupabaseClient, origin: string, options: { timeLimitMs?: number;
   now?: () => number; kick?: typeof kickAdvance } = {}) {
   const now = options.now ?? Date.now;

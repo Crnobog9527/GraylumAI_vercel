@@ -1,5 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-// FUSION-BACKGROUND (0266): the advance lease (one advancer at a time, counted, released only by its holder), the
+// FUSION-BACKGROUND (0258): the advance lease (one advancer at a time, counted, released only by its holder), the
 // daily kick marker (at most once a day per review) and the completion notice (own reviews only). No model call.
 import assert from 'node:assert/strict';
 import {randomUUID} from 'node:crypto';
@@ -58,7 +58,7 @@ export async function runFusionBackground({db,Client,connectionString,report}) {
     assert.equal(results.filter(r => r.acquired).length,1,'two concurrent advancers: exactly one holds the lease');
   } finally { for (const client of clients) await client.end(); }
   await db.query('UPDATE fusion_reviews SET advance_token=NULL,advance_until=NULL WHERE id=$1',[rv.reviewId]);
-  report.checks.push('0266: advance lease has one holder at a time, refuses a held row at once, is released only by its holder, is taken over when expired and stops past its limit');
+  report.checks.push('0258: advance lease has one holder at a time, refuses a held row at once, is released only by its holder, is taken over when expired and stops past its limit');
 
   // Daily kick: idle running or paused reviews without a live lease, each at most once a day.
   await db.query(`UPDATE fusion_reviews SET updated_at=now()-interval '1 hour',advance_kicked_at=NULL WHERE id=$1`,[rv.reviewId]);
@@ -75,7 +75,7 @@ export async function runFusionBackground({db,Client,connectionString,report}) {
   await db.query(`UPDATE fusion_reviews SET advance_token=NULL,advance_until=NULL,updated_at=now() WHERE id=$1`,[rv.reviewId]);
   assert.ok(!(await kicked()).includes(rv.reviewId),'a review that moved recently is not kicked');
   await assert.rejects(db.query(`SELECT * FROM fusion_review_kick_stalled('10 seconds',10)`),/FUSION_REVIEW_INVALID/);
-  report.checks.push('0266: daily kick lists idle reviews without a live lease, each at most once a day');
+  report.checks.push('0258: daily kick lists idle reviews without a live lease, each at most once a day');
 
   // Completion notice: own reviews only, "awaiting choice" until the choice is recorded, seen marked once.
   await db.query(`UPDATE fusion_reviews SET state='completed',outcome='{"kind":"revised"}',ended_at=now() WHERE id=$1`,[rv.reviewId]);
@@ -102,5 +102,5 @@ export async function runFusionBackground({db,Client,connectionString,report}) {
         await assert.rejects(db.query(sql,args),/permission denied/,role+' '+sql);
     } finally { await db.query('RESET ROLE'); }
   }
-  report.checks.push('0266: completion notice lists own reviews only, awaiting choice until recorded, seen marked once; all five functions service role only');
+  report.checks.push('0258: completion notice lists own reviews only, awaiting choice until recorded, seen marked once; all five functions service role only');
 }
