@@ -68,7 +68,7 @@ export default function AdminFinancePage() {
     creditsConsumed: 0, creditsPurchased: 0, creditsGiven: 0, netCreditsFlow: 0 };
   const runtimeBilling = data?.runtimeBilling ?? { creditsPerUsd: 1000, tokenPriceMultiplier: 1.5, billingUnitSource: null,
     activeModelCount: 0, inputCreditsPer1KRange: null, outputCreditsPer1KRange: null, searchCreditsPer1KRange: null,
-    searchSurchargeCredits: 0, newUserCredits: 100 };
+    searchSurchargeCredits: 0, newUserCredits: 500 };
 
   // Paid USD revenue minus recorded provider cost, computed exactly on the server.
   const { estimatedProfitUsd } = financeOverview;

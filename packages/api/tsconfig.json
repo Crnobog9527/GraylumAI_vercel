@@ -32,8 +32,6 @@
     "src/routers/settings.test.ts",
     "src/routers/ticket.test.ts",
     "src/routers/user.test.ts",
-    "src/services/__tests__/billing.security.test.ts",
-    "src/services/__tests__/billing.test.ts",
     "src/services/__tests__/diagnostics.test.ts",
     "src/services/__tests__/invitationColumnGrants.integration.ts",
     "src/services/__tests__/invitationRuntime.test.ts",

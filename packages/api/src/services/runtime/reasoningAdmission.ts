@@ -5,7 +5,7 @@ import {reasoningPolicy,type ReasoningPolicy} from './reasoningPolicy';
 
 /** Admission only. Execution must never consult mutable administrator settings. */
 export function admitReasoning(
- row:{config?:unknown;model_id:string},purpose:'interactive'|'organize',
+ row:{config?:unknown;model_id:string},purpose:'interactive'|'organize'|'review'|'writing',
  providerSlug:string,maxOutputTokens:number,
 ):ReasoningPolicy{
  const raw=row.config&&typeof row.config==='object'&&!Array.isArray(row.config)
@@ -22,7 +22,7 @@ export function admitReasoning(
   throw new StagingAccessError('RUNTIME_REASONING_NOT_CONFIGURED');
  }
  if(config.route!==providerSlug)throw new StagingAccessError('RUNTIME_REASONING_ROUTE_MISMATCH');
- // Only the selected purpose is active here; review/writing remain storage-only.
+ // Only the selected purpose is active here; review/writing are admitted only for FUSION-REVIEW calls.
  // The actual output budget is no larger than the model, quote or organizer limit.
  const issues=checkReasoningConfig({...config,purposes:{[purpose]:setting}},
   {modelId:row.model_id,maxTokens:maxOutputTokens});
