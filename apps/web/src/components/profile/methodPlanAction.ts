@@ -69,7 +69,7 @@ function formatDate(iso: string) {
 export function describeMethodMembership(row: MethodMembershipRow) {
   const cycle = row.billing_cycle === 'yearly' ? '年付' : row.billing_cycle === 'monthly' ? '月付' : '';
   const title = [LEVEL_LABEL[row.purchase_membership_level] ?? row.purchase_membership_level,
-    row.offer_kind === 'founder' ? '创始会员' : null, cycle || null].filter(Boolean).join(' · ');
+    row.offer_kind === 'founder' || row.offer_kind === 'founder_renewal' ? '创始会员' : null, cycle || null].filter(Boolean).join(' · ');
   const end = formatDate(row.entitlement_end);
   const status = row.auto_renew ? `自动续费中，本期到 ${end}`
     : row.cancel_at_period_end ? `已停止续费，会员权益用到 ${end}` : `不自动续费，会员权益用到 ${end}`;

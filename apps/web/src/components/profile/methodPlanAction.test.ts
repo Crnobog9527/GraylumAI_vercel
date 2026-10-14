@@ -51,4 +51,8 @@ describe('membership summary', () => {
       auto_renew: false, payment_method: 'wechat_pay' }))).toEqual({ title: 'Gold · 创始会员 · 年付', method: '微信支付',
       status: '不自动续费，会员权益用到 2026-11-14' });
   });
+  it('keeps the founder label after a founder renewal (0238 offer_kind founder_renewal)', () => {
+    expect(describeMethodMembership(row({ purchase_membership_level: 'gold', offer_kind: 'founder_renewal', billing_cycle: 'yearly' })).title)
+      .toBe('Gold · 创始会员 · 年付');
+  });
 });
