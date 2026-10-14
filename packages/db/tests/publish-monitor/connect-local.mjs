@@ -152,9 +152,17 @@ try {
   await callback(victim.a, sv2.requestId, [cand('pfm_new_1', sv2.externalId)]);
   await code(confirmLive(u.a, s8.requestId, 'pfm_new_1'), 'PT409');
   assert.equal(await v("SELECT status v FROM social_connections WHERE provider_account_id='pfm_new_1'"), 'quarantined');
+  // An older attempt left on its confirmation page is abandoned by a newer one and can no longer be confirmed.
+  const older = await start(u.a, u.account, ['feeds', 'posts']);
+  await callback(u.a, older.requestId, [cand('pfm_new_1', older.externalId)]);
+  const newer = await start(u.a, u.account);
+  assert.equal(await v('SELECT state v FROM social_connect_requests WHERE id=$1', [older.requestId]), 'abandoned');
+  await code(confirmLive(u.a, older.requestId, 'pfm_new_1'), 'PT409');
+  await code(callback(u.a, older.requestId, []), 'PT409');
+  assert.ok(newer.requestId);
   report.checks.push('a proven takeover quarantines the other user\'s connection without binding it; publishing upgrade '
     + 'changes only the target connection; read-only re-authorization drops provider publish capability; '
-    + 'a quarantine after the callback cannot be reopened by a stale confirmation');
+    + 'a quarantine after the callback cannot be reopened by a stale confirmation; a newer attempt abandons an older pending confirmation');
 
   await c.query("UPDATE social_connect_requests SET expires_at=now()-interval '1 second' WHERE actor_id=$1"
     + " AND state='awaiting_callback'", [u.a]);

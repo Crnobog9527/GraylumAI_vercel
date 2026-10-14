@@ -2820,7 +2820,7 @@
   "fn:publish_monitor_actor(uuid)": "0f070bc19157",
   "fn:publish_monitor_connect_callback(uuid,uuid,jsonb)": "dcfad8b7d2da",
   "fn:publish_monitor_connect_confirm(uuid,uuid,text,boolean,jsonb)": "aae07660d9bd",
-  "fn:publish_monitor_connect_start(uuid,uuid,text[])": "306512b627e7",
+  "fn:publish_monitor_connect_start(uuid,uuid,text[])": "c04d2ee4ef45",
   "fn:publish_monitor_connections(uuid)": "e3ef4d0438b2",
   "fn:publish_monitor_erasure_remaining(uuid)": "b25c23942c57",
   "fn:publish_monitor_erasure_retained(text,jsonb)": "1e08b99dba87",

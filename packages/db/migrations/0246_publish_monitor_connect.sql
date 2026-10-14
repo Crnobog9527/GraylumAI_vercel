@@ -21,8 +21,9 @@ CREATE UNIQUE INDEX IF NOT EXISTS social_monitor_settings_provider_ref ON public
 CREATE OR REPLACE FUNCTION public.publish_monitor_random_hex() RETURNS text
 LANGUAGE sql VOLATILE SET search_path=public,pg_temp AS $$ SELECT replace(gen_random_uuid()::text,'-','') $$;
 
--- Start an attempt for one of the actor's own brand accounts. Any earlier attempt still awaiting its callback is
--- abandoned (only the newest may be consumed); abandoned rows stay for provider-side cleanup.
+-- Start an attempt for one of the actor's own brand accounts. Any earlier attempt still awaiting its callback or its
+-- confirmation is abandoned (only the newest may be consumed or confirmed, so an older confirmation page cannot
+-- overwrite a newer authorization); abandoned rows stay for provider-side cleanup.
 CREATE OR REPLACE FUNCTION public.publish_monitor_connect_start(a uuid,p_account_project_id uuid,p_permissions text[])
 RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
 DECLARE acct opc_accounts; ref text; req social_connect_requests; perms text[];
@@ -38,7 +39,8 @@ BEGIN
  INSERT INTO social_monitor_settings(actor_id,provider_ref) VALUES(a,publish_monitor_random_hex())
  ON CONFLICT(actor_id) DO UPDATE SET provider_ref=COALESCE(social_monitor_settings.provider_ref,EXCLUDED.provider_ref)
  RETURNING provider_ref INTO ref;
- UPDATE social_connect_requests SET state='abandoned' WHERE actor_id=a AND state='awaiting_callback';
+ UPDATE social_connect_requests SET state='abandoned',confirm_expires_at=NULL
+ WHERE actor_id=a AND state IN ('awaiting_callback','pending_confirm');
  INSERT INTO social_connect_requests(actor_id,business_id,target_account_project_id,platform,permissions,external_id,
   state,expires_at)
  VALUES(a,acct.business_id,acct.project_id,acct.platform,perms,ref||'.'||publish_monitor_random_hex(),
