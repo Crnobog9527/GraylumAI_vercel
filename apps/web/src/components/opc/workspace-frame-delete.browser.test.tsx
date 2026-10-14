@@ -3,7 +3,10 @@ import { existsSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { chromium, expect as ui, type Browser, type Page } from '@playwright/test';
-import { afterAll, beforeAll, expect, it } from 'vitest';
+import { afterAll, beforeAll, expect, it, vi } from 'vitest';
+
+// Real browser pages with reloads and retry waits: allow more than the 5-second default per test.
+vi.setConfig({ testTimeout: 60_000 });
 
 let browser: Browser;
 let code: string;
@@ -25,7 +28,8 @@ const stubs: Array<[(id: string) => boolean, string]> = [
       conversationErasureCleanup:{mutate:async input=>{window.cleanups.push(input);
         return {cleaned:true,reviewRequired:location.hash==='#review'};}}},
       opc:{conversationRename:{mutate:async input=>{window.renames.push(input);
-        if(location.hash==='#rename-fails')throw new Error('OPC_CONVERSATION_ERASED');
+        if(location.hash==='#rename-fails')throw Object.assign(new Error('OPC_CONVERSATION_ERASED'),{data:{code:'INTERNAL_SERVER_ERROR',httpStatus:500}});
+        if(location.hash==='#rename-hang')return new Promise(()=>undefined);
         if(location.hash==='#rename-slow')await new Promise(resolve=>{window.releaseRename=resolve;});
         return {sessionId:input.sessionId,name:input.name};}}}};
     export const trpc={useUtils:()=>new Proxy({},{get:(_,key)=>key==='client'?client:deep()}),
@@ -111,7 +115,9 @@ const answer = (page: Page, ok: boolean, message = '') => page.evaluate(([okay, 
   const call = (window as unknown as Win).erasures.at(-1)!;
   if (okay) call.resolve({ kind: 'session', id: (call.input as { sessionId: string }).sessionId, status: text || 'deleted',
     alreadyDeleted: false, preservedSavedVersions: 0, financialReviewCount: 0 });
-  else call.reject(new Error(text));
+  // Server refusals carry their tRPC code; a bare network failure carries none (outcome unknown).
+  else call.reject(text === 'Failed to fetch' ? new TypeError(text)
+    : Object.assign(new Error(text), { data: { code: text.includes('NOT_FOUND') ? 'NOT_FOUND' : 'CONFLICT' } }));
 }, [ok, message] as const);
 
 async function openMenu(page: Page) {
@@ -168,12 +174,42 @@ it('keeps the row hidden and still reports a failure after the page changes mid-
   await ui(page.getByRole('alert')).toContainText('没有删除，已放回列表');
 }));
 
-it('keeps an uncertain result honest: row back, list resynced, no success claim', () => open(1280, async page => {
+it('an unknown outcome keeps the row hidden and sends the deletion again, never claiming success', () => open(1280, async page => {
   await confirmDelete(page);
   await answer(page, false, 'Failed to fetch');
-  await ui(page.getByText('周末选题讨论')).toBeVisible();
-  await ui(page.getByRole('alert')).toContainText('删除结果暂未确认');
+  await ui(page.getByRole('status')).toContainText('删除结果还在确认中');
+  await ui(page.getByText('周末选题讨论')).toHaveCount(0);
+  await ui.poll(() => held(page)).toHaveLength(2);
+  expect(await page.evaluate(() => (window as unknown as Win).cleanups)).toEqual([]);
+  await answer(page, true);
+  await ui.poll(() => page.evaluate(() => (window as unknown as Win).cleanups)).toEqual([{ sessionId: SESSION }]);
 }));
+
+it('a reload that aborts the deletion request still finishes it on the new page (the 2026-10-14 staging case)', () =>
+  open(1280, async page => {
+    await confirmDelete(page);
+    // The old page sees its request fail as the reload tears it down, then the page reloads.
+    await answer(page, false, 'Failed to fetch');
+    await reload(page);
+    await page.waitForTimeout(2500);
+    await ui(page.getByText('周末选题讨论')).toHaveCount(0);
+    expect(await page.evaluate(() => (window as unknown as { paints: { flashes: number } }).paints.flashes)).toBe(0);
+    await ui.poll(() => held(page)).toEqual([{ sessionId: SESSION }]);
+    await answer(page, true);
+    await ui.poll(() => page.evaluate(() => (window as unknown as Win).cleanups)).toEqual([{ sessionId: SESSION }]);
+  }), 60_000); // Includes a 2.5-second watch after the reload.
+
+it('a resumed deletion that keeps failing without an answer stays hidden and pending', () => open(1280, async page => {
+  await confirmDelete(page);
+  await reload(page);
+  for (let i = 0; i < 6; i += 1) {
+    await ui.poll(() => held(page)).toHaveLength(i + 1);
+    await answer(page, false, 'Failed to fetch');
+  }
+  await ui(page.getByRole('status')).toContainText('删除还在处理中');
+  await ui(page.getByText('周末选题讨论')).toHaveCount(0);
+  expect(await page.evaluate(() => Object.keys(sessionStorage).filter(key => key.includes('pending-conversation-erasure')))).toHaveLength(1);
+}), 60_000); // Five 1.5-second retry waits.
 
 it('says so when the content is gone but money records are still being checked', () => open(1280, async page => {
   await confirmDelete(page);
@@ -341,6 +377,19 @@ it('Enter that accepts an IME candidate does not save the name', () => open(1280
   await page.keyboard.press('Enter');
   await ui.poll(() => renames(page)).toEqual([{ sessionId: SESSION, name: '周末' }]);
 }));
+
+it('a reload right after renaming keeps the new name and sends it again', () => open(1280, async page => {
+  const input = await startRename(page);
+  await input.fill('刷新前的新名字');
+  await page.keyboard.press('Enter');
+  await ui.poll(() => renames(page)).toHaveLength(1);
+  // The save never answers before the reload (#rename-hang).
+  await reload(page);
+  await page.waitForTimeout(500);
+  await ui(page.getByText('刷新前的新名字', { exact: true })).toBeVisible();
+  await ui(page.getByText('周末选题讨论')).toHaveCount(0);
+  await ui.poll(() => renames(page)).toEqual([{ sessionId: SESSION, name: '刷新前的新名字' }]);
+}, '#rename-hang'));
 
 it('rename input fits a 375px screen', () => open(375, async page => {
   await page.getByRole('button', { name: '打开导航' }).first().click();

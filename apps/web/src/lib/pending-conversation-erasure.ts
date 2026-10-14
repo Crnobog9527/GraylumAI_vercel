@@ -2,6 +2,7 @@
 import { classifyErasureError, type ContentErasureResult } from '@/lib/content-erasure';
 import { getErrorMessageText } from '@/lib/safe-error-message';
 import { REVIEW_NOTICE, type ConversationNotice } from '@/lib/conversation-erasure';
+import { outcomeUnknown } from '@/lib/request-outcome';
 
 /**
  * Conversations whose deletion request was sent but not yet answered, kept per browser tab so a
@@ -75,7 +76,12 @@ export async function resumeConversationErasure(deps: ResumeDeps, sessionId: str
         return 'deleted' as const;
       }
       const text = getErrorMessageText(error);
-      if (text.includes('CONTENT_ERASURE_BUSY') && attempt < BUSY_RETRIES) {
+      // Worth another try a moment later: still held by the earlier request, rate limited, briefly
+      // unavailable, or no answer at all.
+      const code = (error as { data?: { code?: unknown } } | null)?.data?.code;
+      const retryable = text.includes('CONTENT_ERASURE_BUSY') || outcomeUnknown(error)
+        || code === 'TOO_MANY_REQUESTS' || code === 'SERVICE_UNAVAILABLE';
+      if (retryable && attempt < BUSY_RETRIES) {
         await deps.wait(1500);
         continue;
       }
