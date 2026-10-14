@@ -234,7 +234,7 @@ CREATE TABLE IF NOT EXISTS public.social_publish_jobs(
  created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
  updated_at timestamptz NOT NULL DEFAULT clock_timestamp(),
  FOREIGN KEY(actor_id,business_id) REFERENCES public.opc_businesses(actor_id,id) ON DELETE RESTRICT,
- CHECK(state IN ('dispatching','unknown') OR business_id IS NOT NULL),
+ CHECK(state IN ('claimed','dispatching','unknown') OR business_id IS NOT NULL),
  UNIQUE(actor_id,idempotency_key)
 );
 CREATE INDEX IF NOT EXISTS social_publish_jobs_open ON public.social_publish_jobs(state,updated_at)
@@ -304,7 +304,8 @@ CREATE OR REPLACE FUNCTION public.publish_monitor_erasure_retained(t text,j json
 LANGUAGE sql IMMUTABLE SET search_path=public,pg_temp AS $$
  SELECT CASE t
   WHEN 'social_connections' THEN j->>'provider_account_id' IS NOT NULL
-  WHEN 'social_publish_jobs' THEN j->>'state' IN ('dispatching','unknown')
+  -- Open jobs hold frozen credits and publish slots: kept until publishing releases or settles them (plan §9 item 17).
+  WHEN 'social_publish_jobs' THEN j->>'state' IN ('claimed','dispatching','unknown')
   WHEN 'social_connect_requests' THEN j->>'state' IN ('awaiting_callback','pending_confirm')
   ELSE false END
 $$;
@@ -321,7 +322,7 @@ BEGIN
  WHERE actor_id=a AND provider_account_id IS NOT NULL AND status<>'deleting';
  GET DIAGNOSTICS n=ROW_COUNT;total:=total+n;
  UPDATE social_publish_jobs SET business_id=NULL,work_item_id=NULL,updated_at=clock_timestamp()
- WHERE actor_id=a AND state IN ('dispatching','unknown') AND (business_id IS NOT NULL OR work_item_id IS NOT NULL);
+ WHERE actor_id=a AND state IN ('claimed','dispatching','unknown') AND (business_id IS NOT NULL OR work_item_id IS NOT NULL);
  GET DIAGNOSTICS n=ROW_COUNT;total:=total+n;
  UPDATE social_connect_requests SET business_id=NULL,target_account_project_id=NULL
  WHERE actor_id=a AND state IN ('awaiting_callback','pending_confirm')
@@ -340,7 +341,7 @@ LANGUAGE sql STABLE SECURITY DEFINER SET search_path=public,pg_temp AS $$
  +(SELECT count(*) FROM social_connections WHERE actor_id=a AND provider_account_id IS NOT NULL
    AND (status<>'deleting' OR business_id IS NOT NULL))
  +(SELECT count(*) FROM social_publish_jobs WHERE actor_id=a
-   AND (state NOT IN ('dispatching','unknown') OR business_id IS NOT NULL))
+   AND (state NOT IN ('claimed','dispatching','unknown') OR business_id IS NOT NULL))
  +(SELECT count(*) FROM social_connect_requests WHERE actor_id=a
    AND (state NOT IN ('awaiting_callback','pending_confirm') OR business_id IS NOT NULL))
 $$;
