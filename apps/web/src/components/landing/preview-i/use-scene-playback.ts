@@ -48,11 +48,22 @@ export function useScenePlayback(lines: readonly Line[], key: string, target: Re
   const [playback, setPlayback] = useState<Playback>(null);
   const [run, setRun] = useState(0);
   const [seen, setSeen] = useState(false);
+  const [reduced, setReduced] = useState(false);
+
+  // The visitor can switch reduced motion on while the page is open: playback stops and every line shows.
+  useEffect(() => {
+    const media = window.matchMedia?.('(prefers-reduced-motion: reduce)');
+    if (!media) return;
+    const sync = () => setReduced(media.matches);
+    sync();
+    media.addEventListener?.('change', sync);
+    return () => media.removeEventListener?.('change', sync);
+  }, []);
 
   // Start only once the conversation is on screen; with reduced motion never start.
   useEffect(() => {
     const node = target.current;
-    if (!node || seen) return;
+    if (!node || seen || reduced) return;
     if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return;
     if (typeof IntersectionObserver === 'undefined') return;
     const observer = new IntersectionObserver(entries => {
@@ -60,10 +71,13 @@ export function useScenePlayback(lines: readonly Line[], key: string, target: Re
     }, { threshold: 0.3 });
     observer.observe(node);
     return () => observer.disconnect();
-  }, [target, seen]);
+  }, [target, seen, reduced]);
 
   useEffect(() => {
-    if (!seen) return;
+    if (!seen || reduced) {
+      setPlayback(null);
+      return;
+    }
     let timer = 0;
     let step = startLine(lines, 0);
     const tick = () => {
@@ -74,7 +88,7 @@ export function useScenePlayback(lines: readonly Line[], key: string, target: Re
     };
     tick();
     return () => window.clearTimeout(timer);
-  }, [seen, key, run, lines]);
+  }, [seen, reduced, key, run, lines]);
 
   return { playback, replay: () => setRun(value => value + 1), playing: playback !== null };
 }
