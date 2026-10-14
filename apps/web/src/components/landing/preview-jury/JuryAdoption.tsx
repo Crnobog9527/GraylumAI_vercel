@@ -6,8 +6,8 @@ import { CheckCircle2, Clock3 } from 'lucide-react';
 import type { AdoptProposed, AdoptRecorded, JuryDetail, JurySeatNames } from './jury-events';
 import {
   adoptErrorLabel, choosable, chosenCount, isComplete, mockConfirm, mockPropose, needsConfirm, setConfirmed, setUse, toChoices,
-  type ChoiceState,
 } from './jury-adopt';
+import { useDraftChoices } from './use-draft-choices';
 import { JuryChapter } from './JuryChapter';
 import styles from './jury-results.module.css';
 
@@ -20,7 +20,7 @@ type Stale = 'none' | 'report' | 'proposal';
 export function JuryAdoption({ detail, names, quiet }: { detail: JuryDetail; names: JurySeatNames; quiet: number }) {
   const sections = detail.summary.sections;
   const shown = sections.filter(item => item.rulings.length > 0 || item.changed);
-  const [state, setState] = useState<ChoiceState>({});
+  const { state, setState, clear } = useDraftChoices(detail.reviewId);
   const [proposal, setProposal] = useState<AdoptProposed | null>(null);
   const [result, setResult] = useState<AdoptRecorded | null>(detail.adoption);
   const [error, setError] = useState<string | null>(null);
@@ -38,13 +38,19 @@ export function JuryAdoption({ detail, names, quiet }: { detail: JuryDetail; nam
     }
     setError(null);
     const answer = mockPropose(sections, toChoices(state, sections));
-    if (answer.state === 'recorded') setResult(answer);
-    else setProposal(answer);
+    if (answer.state === 'recorded') { clear(); setResult(answer); } else setProposal(answer);
   };
   const confirm = (decision: 'apply' | 'decline') => {
     if (!proposal) return;
-    if (decision === 'apply' && stale === 'proposal') { setError(adoptErrorLabel('FUSION_ADOPTION_STALE')); setStale('none'); return; }
+    if (decision === 'apply' && stale === 'proposal') {
+      // The proposal the user saw is outdated: drop it, so the next look fetches and shows the new one.
+      setProposal(null);
+      setStale('none');
+      setError(adoptErrorLabel('FUSION_ADOPTION_STALE'));
+      return;
+    }
     setError(null);
+    clear();
     setResult(mockConfirm(proposal, decision));
   };
 
@@ -79,7 +85,7 @@ export function JuryAdoption({ detail, names, quiet }: { detail: JuryDetail; nam
         <div className={styles.bar}>
           <span className={styles.count}>已选 {done}/{total} 章</span>
           {error ? <p className={styles.error} role="alert">{error}</p> : null}
-          {later ? <p className={styles.later}><Clock3 size={14} aria-hidden="true" />选择会一直留在这次评审里，你可以先去改草稿，回来再选。</p> : null}
+          {later ? <p className={styles.later}><Clock3 size={14} aria-hidden="true" />已选的章节会保存在这台设备上；你可以先去改草稿，回来接着选。</p> : null}
           <div className={styles.barActions}>
             <button type="button" className={styles.secondary} onClick={() => setLater(true)}>先不选，稍后回来</button>
             <button type="button" className={styles.primary} onClick={propose} aria-disabled={done < total}>下一步：看改动</button>

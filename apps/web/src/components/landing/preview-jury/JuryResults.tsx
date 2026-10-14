@@ -18,7 +18,8 @@ export function JuryResults({ detail, names, onOpenRecord }: {
 }) {
   const sections = detail.summary.sections;
   const withRulings = sections.filter(item => item.rulings.length > 0 || item.changed);
-  const quiet = sections.length - withRulings.length;
+  // "全文" is the summary's whole-document entry, not a chapter.
+  const quiet = sections.filter(item => item.section !== '全文').length - withRulings.filter(item => item.section !== '全文').length;
   const failed = detail.summary.status !== 'usable';
   const rulings = sections.flatMap(item => item.rulings);
   const verdicts = useMemo(() => finalVerdicts(detail), [detail]);
