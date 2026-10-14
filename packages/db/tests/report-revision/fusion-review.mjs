@@ -144,6 +144,29 @@ export async function runFusionReview({db,Client,connectionString,report}) {
   } finally { await Promise.all(clients.map(c=>c.end())); }
   report.checks.push('two concurrent starts for one user create one review; an end state is idempotent and final');
 
+  // A stop between the saved body and the host verdict does not charge it as user_stopped: the call waits
+  // for the verdict, and a malformed body is still free. A replayed claim also resumes a paused review.
+  const rv5 = await start(db,f);
+  const s5 = await step(db,f);
+  const c5 = (await claim(db,f,rv5,s5)).calls[0];
+  await db.query("UPDATE fusion_reviews SET state='paused' WHERE id=$1",[rv5.reviewId]);
+  await claim(db,f,rv5,s5);
+  assert.equal((await service(db,'fusion_review_read',f.actor,rv5.reviewId)).state,'running','a replayed claim resumes a paused review');
+  assert.equal((await rpc(db,'bill2_dispatch',f.actor,s5.run.run,c5.id,c5.dispatchToken)).dispatch,true);
+  await rpc(db,'bill2_record',f.actor,s5.run.run,c5.id,{provider:s5.run.claimPayload.provider,account:'sandbox',
+    model:s5.run.claimPayload.model,protocol:s5.run.claimPayload.protocol,providerId:'generation-'+c5.id,source:'response',
+    sourceHash:'c'.repeat(64),observedAt:new Date().toISOString(),coverage:'request_total',final:true,cost:'0.0004',currency:'USD',
+    usage:{inputTokens:400,outputTokens:0}});
+  await rpc(db,'fusion_call_output_save',f.actor,c5.id,'not valid review json');
+  await service(db,'fusion_review_close',f.actor,rv5.reviewId,'stopped');
+  const waiting = (await db.query('SELECT fusion_verdict,settled_at FROM bill2_calls WHERE id=$1',[c5.id])).rows[0];
+  assert.deepEqual(waiting,{fusion_verdict:null,settled_at:null},'a saved, unjudged body waits for the host verdict');
+  await rpc(db,'fusion_call_verdict',f.actor,c5.id,'format_invalid');
+  await rpc(db,'bill2_finalize',f.actor,s5.run.run);
+  const judged = (await db.query('SELECT fusion_verdict,settled_at,charged_delta FROM bill2_calls WHERE id=$1',[c5.id])).rows[0];
+  assert.equal(judged.fusion_verdict,'format_invalid');assert.ok(judged.settled_at);assert.equal(Number(judged.charged_delta??0),0);
+  report.checks.push('a stop between the saved body and the verdict leaves the call to the host verdict (malformed stays free); replayed claims resume');
+
   // Version block after 3 failed ends in a row; breaker on platform-borne outcomes.
   for (let i=0;i<3;i++) {
     const failed = await start(db,f);

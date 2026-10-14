@@ -175,9 +175,11 @@ BEGIN
   IF EXISTS(SELECT 1 FROM jsonb_array_elements(rv.steps) x WHERE x->>'stepKey'=k AND x->>'groupId'<>p_group_id::text) THEN
     RAISE EXCEPTION 'FUSION_REVIEW_STEP_CONFLICT'; END IF;
   res:=fusion_group_claim(p_actor_id,p_group_id,k,1,p_items);
-  IF res->>'state'='claimed' AND NOT EXISTS(SELECT 1 FROM jsonb_array_elements(rv.steps) x WHERE x->>'stepKey'=k) THEN
-    UPDATE fusion_reviews SET steps=steps||jsonb_build_array(jsonb_build_object('round',p_round,'phase',p_phase,
-      'attempt',p_attempt,'groupId',p_group_id,'stepKey',k,'claimedAt',clock_timestamp())),
+  -- Every successful claim (a replay too) resumes the review; the step is appended once.
+  IF res->>'state'='claimed' THEN
+    UPDATE fusion_reviews SET steps=CASE WHEN EXISTS(SELECT 1 FROM jsonb_array_elements(steps) x WHERE x->>'stepKey'=k) THEN steps
+      ELSE steps||jsonb_build_array(jsonb_build_object('round',p_round,'phase',p_phase,
+      'attempt',p_attempt,'groupId',p_group_id,'stepKey',k,'claimedAt',clock_timestamp())) END,
       state='running',updated_at=clock_timestamp() WHERE id=rv.id;
   END IF;
   RETURN res;
@@ -254,6 +256,23 @@ BEGIN
       AND (fusion_call_in_flight(c) OR (c.dispatched_at IS NULL AND c.settled_at IS NULL)));
   GET DIAGNOSTICS n=ROW_COUNT;
   RETURN n;
+END $$;
+
+-- A stop (or deletion) after the body was saved but before the host verdict must not settle the call as
+-- user_stopped: that would charge a body the host may still judge format_invalid / revision_invalid.
+-- Such a call keeps waiting for the host verdict (or the recovery path at its deadline); a stopped call
+-- without a saved body still settles as user_stopped at known cost, and content deletion (which removes
+-- the body) still settles as user_stopped as before (§3.3; #955 review).
+DO $$ DECLARE src text; a text; BEGIN
+  src:=pg_get_functiondef('public.bill2_payg_finalize(uuid,uuid)'::regprocedure);
+  IF position('-- 0236 saved body waits for verdict' IN src)=0 THEN
+    a:=$x$   ELSIF r.cancel_requested OR r.paused_reason='user_stop' OR r.content_deleted_at IS NOT NULL THEN$x$;
+    IF array_length(string_to_array(src,a),1)<>2 THEN RAISE EXCEPTION 'FUSION_SOURCE_MISMATCH: bill2_payg_finalize 0236'; END IF;
+    EXECUTE replace(src,a,$x$   -- 0236 saved body waits for verdict
+   -- (Keeps 0235's marker text, so re-running 0235 after this migration stays a no-op.)
+   ELSIF ((r.cancel_requested OR r.paused_reason='user_stop') AND NOT EXISTS(SELECT 1 FROM fusion_call_outputs WHERE call_id=c.id))
+    OR r.content_deleted_at IS NOT NULL THEN$x$);
+  END IF;
 END $$;
 
 DO $$ DECLARE f text; BEGIN
