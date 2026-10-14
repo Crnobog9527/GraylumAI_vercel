@@ -30,11 +30,16 @@ async function rpc<T>(db: Rpc, name: string, args: Record<string, unknown>, sche
   return parsed.data;
 }
 
-/** Reads every page; null when any page fails (the caller retries later rather than acting on a partial list). */
-async function listAll(read: (offset: number) => Promise<Outcome<AccountPage>>): Promise<PostForMeAccount[] | null> {
+/**
+ * Reads every page; null when any page fails or the deadline passes before the last page (the caller retries
+ * later rather than acting on a partial list). No new page is started after the deadline.
+ */
+async function listAll(read: (offset: number) => Promise<Outcome<AccountPage>>, until: number,
+  now: Clock): Promise<PostForMeAccount[] | null> {
   const accounts: PostForMeAccount[] = [];
   let offset: number | null = 0;
   while (offset !== null) {
+    if (now() >= until) return null;
     const page = await read(offset);
     if (page.kind !== 'ok') return null;
     accounts.push(...page.value.accounts);
@@ -74,7 +79,7 @@ export async function cleanupAttempts(db: Rpc, client: ClientDeps, until: number
     if (now() >= until) break;
     report.processed += 1;
     let error: string | null = null;
-    const accounts = await listAll(offset => listAccountsByExternalId(client, attempt.externalId, offset));
+    const accounts = await listAll(offset => listAccountsByExternalId(client, attempt.externalId, offset), until, now);
     if (!accounts) error = 'PROVIDER_LIST_FAILED';
     else {
       const verdicts = await rpc(db, 'publish_monitor_cleanup_classify', { p_request_id: attempt.requestId,
@@ -140,7 +145,9 @@ export async function runProviderWork(db: Rpc, client: ClientDeps, until: number
   return report;
 }
 
-export type SweepReport = { listed: number; orphans: number; deleted: number; unknownFormat: number; deferred: number };
+export type SweepReport = { listed: number; orphans: number; deleted: number; unknownFormat: number; deferred: number;
+  /** The listing did not finish before the deadline; nothing was decided or deleted this run. */
+  incomplete?: true };
 
 /**
  * Daily backstop: accounts in the provider project that nothing in Graylum explains. Deleting is opt-in per
@@ -149,7 +156,8 @@ export type SweepReport = { listed: number; orphans: number; deleted: number; un
  */
 export async function sweepOrphans(db: Rpc, client: ClientDeps, deleteEnabled: boolean, until: number,
   now: Clock = Date.now): Promise<SweepReport> {
-  const accounts = await listAll(offset => listAllAccounts(client, offset));
+  const accounts = await listAll(offset => listAllAccounts(client, offset), until, now);
+  if (!accounts && now() >= until) return { listed: 0, orphans: 0, deleted: 0, unknownFormat: 0, deferred: 0, incomplete: true };
   if (!accounts) throw new CleanupError('PUBLISH_MONITOR_CLEANUP_UNAVAILABLE');
   const decision = await rpc(db, 'publish_monitor_orphan_classify', {
     p_accounts: accounts.map(a => ({ providerAccountId: a.id, externalId: a.externalId })),

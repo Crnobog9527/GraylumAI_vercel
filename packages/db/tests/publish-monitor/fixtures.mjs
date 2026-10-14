@@ -21,5 +21,8 @@ BEGIN
 END $$;`;
 
 // Migrations after `from` that redefine its functions, so a reapplication check replays the chain in order.
-const CHAIN = { '0246': ['packages/db/migrations/0265_publish_monitor_provider_cleanup.sql'] };
+const CHAIN = {
+  '0240': ['packages/db/migrations/0265_publish_monitor_provider_cleanup.sql'],
+  '0246': ['packages/db/migrations/0265_publish_monitor_provider_cleanup.sql'],
+};
 export const laterRedefinitions = from => CHAIN[from] ?? [];

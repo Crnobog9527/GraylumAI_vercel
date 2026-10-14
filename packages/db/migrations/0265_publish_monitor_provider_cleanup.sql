@@ -105,6 +105,9 @@ DECLARE now_at timestamptz:=clock_timestamp(); out jsonb;
 BEGIN
  IF p_limit IS NULL OR p_limit NOT BETWEEN 1 AND 100 OR p_lease_seconds IS NULL OR p_lease_seconds NOT BETWEEN 30 AND 900 THEN
   RAISE EXCEPTION 'PUBLISH_MONITOR_INPUT_INVALID' USING ERRCODE='22023'; END IF;
+ -- Settled attempts are kept 30 days (plan §7), then only the daily orphan sweep remains as a backstop. This runs on
+ -- every daily claim, whether or not there is new work.
+ DELETE FROM social_connect_requests WHERE cleaned_at<now_at-interval '30 days';
  UPDATE social_connect_requests SET state='abandoned',confirm_expires_at=NULL
  WHERE (state='awaiting_callback' AND expires_at<=now_at) OR (state='pending_confirm' AND confirm_expires_at<=now_at);
  WITH picked AS (
@@ -154,6 +157,59 @@ BEGIN
  RETURN verdicts;
 END $$;
 
+-- Account erasure (replaces the 0240 versions for attempts): an attempt is kept, detached from the brand, until its
+-- provider cleanup has succeeded and 30 days have passed (plan §7), even after it stops being open; otherwise a
+-- prune pass could delete the external_id the cleanup still needs. Other tables keep their 0240 rules.
+CREATE OR REPLACE FUNCTION public.publish_monitor_erasure_retained(t text,j jsonb) RETURNS boolean
+LANGUAGE sql STABLE SET search_path=public,pg_temp AS $$
+ SELECT CASE t
+  WHEN 'social_connections' THEN j->>'provider_account_id' IS NOT NULL
+  -- Open jobs hold frozen credits and publish slots: kept until publishing releases or settles them (plan §9 item 17).
+  WHEN 'social_publish_jobs' THEN j->>'state' IN ('claimed','dispatching','unknown')
+  WHEN 'social_connect_requests' THEN j->>'state' IN ('awaiting_callback','pending_confirm') OR j->>'cleaned_at' IS NULL
+   OR (j->>'cleaned_at')::timestamptz>clock_timestamp()-interval '30 days'
+  ELSE false END
+$$;
+
+CREATE OR REPLACE FUNCTION public.publish_monitor_erasure_scrub(a uuid) RETURNS integer
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
+DECLARE n integer; total integer:=0;
+BEGIN
+ PERFORM account_erasure_assert_closed(a);
+ -- Posts and snapshots go first through the prune loop; detach retained rows from the brand now.
+ UPDATE social_connections SET status='deleting',business_id=NULL,account_project_id=NULL,display_hint=NULL,
+  profile_ref=NULL,consent_read=false,consent_auto_track=false,consent_publish=false,refresh_id=NULL,
+  refresh_cursor=NULL,lease_owner=NULL,lease_expires_at=NULL,updated_at=clock_timestamp()
+ WHERE actor_id=a AND provider_account_id IS NOT NULL AND status<>'deleting';
+ GET DIAGNOSTICS n=ROW_COUNT;total:=total+n;
+ UPDATE social_publish_jobs SET business_id=NULL,work_item_id=NULL,updated_at=clock_timestamp()
+ WHERE actor_id=a AND state IN ('claimed','dispatching','unknown') AND (business_id IS NOT NULL OR work_item_id IS NOT NULL);
+ GET DIAGNOSTICS n=ROW_COUNT;total:=total+n;
+ UPDATE social_connect_requests SET business_id=NULL,target_account_project_id=NULL
+ WHERE actor_id=a AND (state IN ('awaiting_callback','pending_confirm') OR cleaned_at IS NULL
+   OR cleaned_at>clock_timestamp()-interval '30 days')
+  AND (business_id IS NOT NULL OR target_account_project_id IS NOT NULL);
+ GET DIAGNOSTICS n=ROW_COUNT;total:=total+n;
+ RETURN total;
+END $$;
+
+CREATE OR REPLACE FUNCTION public.publish_monitor_erasure_remaining(a uuid) RETURNS bigint
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path=public,pg_temp AS $$
+ SELECT (SELECT count(*) FROM social_monitor_settings WHERE actor_id=a)
+ +(SELECT count(*) FROM social_review_runs WHERE actor_id=a)
+ +(SELECT count(*) FROM social_metric_snapshots WHERE actor_id=a)
+ +(SELECT count(*) FROM social_posts WHERE actor_id=a)
+ +(SELECT count(*) FROM social_connections WHERE actor_id=a AND provider_account_id IS NULL)
+ +(SELECT count(*) FROM social_connections WHERE actor_id=a AND provider_account_id IS NOT NULL
+   AND (status<>'deleting' OR business_id IS NOT NULL))
+ +(SELECT count(*) FROM social_publish_jobs WHERE actor_id=a
+   AND (state NOT IN ('claimed','dispatching','unknown') OR business_id IS NOT NULL))
+ +(SELECT count(*) FROM social_connect_requests WHERE actor_id=a
+   AND (business_id IS NOT NULL OR target_account_project_id IS NOT NULL
+    OR NOT (state IN ('awaiting_callback','pending_confirm') OR cleaned_at IS NULL
+     OR cleaned_at>clock_timestamp()-interval '30 days')))
+$$;
+
 CREATE OR REPLACE FUNCTION public.publish_monitor_cleanup_finish(p_request_id uuid,p_done boolean,p_error text)
 RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
 BEGIN
@@ -162,8 +218,6 @@ BEGIN
  UPDATE social_connect_requests SET cleanup_lease_until=NULL,cleanup_error=CASE WHEN p_done THEN NULL ELSE p_error END,
   cleaned_at=CASE WHEN p_done THEN clock_timestamp() ELSE NULL END
  WHERE id=p_request_id AND cleaned_at IS NULL AND state IN ('applied','abandoned');
- -- Settled attempts are kept 30 days (plan §7), then only the daily orphan sweep remains as a backstop.
- DELETE FROM social_connect_requests WHERE cleaned_at<clock_timestamp()-interval '30 days';
 END $$;
 
 -- Daily orphan sweep: of the provider accounts listed (all pages first, plan §9 item 22), which are ours to delete?
@@ -294,12 +348,15 @@ END $$;
 DO $$ DECLARE f regprocedure; BEGIN
  FOR f IN SELECT p.oid::regprocedure FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
   WHERE n.nspname='public' AND p.proname IN ('publish_monitor_capture_owner_ref','publish_monitor_connect_callback',
+   'publish_monitor_erasure_retained','publish_monitor_erasure_scrub','publish_monitor_erasure_remaining',
    'publish_monitor_cleanup_claim',
    'publish_monitor_cleanup_classify','publish_monitor_cleanup_finish','publish_monitor_orphan_classify',
    'publish_monitor_provider_work_claim','publish_monitor_provider_work_finish','publish_monitor_disconnect',
    'publish_monitor_provider_account_disconnected') LOOP
   EXECUTE format('REVOKE ALL ON FUNCTION %s FROM PUBLIC,anon,authenticated,service_role',f);
-  IF split_part(f::text,'(',1)<>'publish_monitor_capture_owner_ref' THEN
+  -- The erasure helpers stay internal, exactly as in 0240.
+  IF split_part(f::text,'(',1) NOT IN ('publish_monitor_capture_owner_ref','publish_monitor_erasure_retained',
+   'publish_monitor_erasure_scrub','publish_monitor_erasure_remaining') THEN
    EXECUTE format('GRANT EXECUTE ON FUNCTION %s TO service_role',f); END IF;
  END LOOP;
 END $$;

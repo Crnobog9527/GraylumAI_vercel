@@ -180,14 +180,21 @@ try {
   assert.equal(await svc('SELECT publish_monitor_provider_account_disconnected($1) v', ['pfm_nobody']), false);
   report.checks.push('a provider-side disconnect moves only that connection to re-authorisation');
 
-  // Erasure still completes; settled attempt records are purged after 30 days.
+  // Erasure still completes, but an attempt whose provider cleanup is not finished (or finished under 30 days ago)
+  // stays, detached from the brand, so the cleanup keeps its external_id; settled attempts are purged after 30 days.
+  const late = await start(u.a, u.account);
+  await c.query("UPDATE social_connect_requests SET state='abandoned' WHERE id=$1", [late.requestId]);
   await closeAccount(c, { actor: u.a });
   for (let i = 0; i < 10; i++) await c.query('SELECT account_erasure_local_cleanup($1,true)', [u.a]);
   assert.equal(Number(await v('SELECT publish_monitor_erasure_remaining($1) v', [u.a])), 0);
+  const kept = await state(late.requestId);
+  assert.deepEqual([kept.state, kept.business_id, kept.target_account_project_id, kept.cleaned_at],
+    ['abandoned', null, null, null], 'an erased user\'s unsettled attempt keeps its cleanup record');
+  // The 30-day purge runs on every daily claim, even with no new work.
   await c.query("UPDATE social_connect_requests SET cleaned_at=now()-interval '31 days' WHERE id=$1", [b1.requestId]);
-  await finish(a1.requestId, true);
+  await claim();
   assert.equal(await state(b1.requestId), undefined);
-  report.checks.push('erasure completes with the new columns; settled attempts are purged after 30 days');
+  report.checks.push('erasure completes while unsettled attempts keep their cleanup record; the 30-day purge runs daily');
   assert.equal(db.sql(read('packages/db/tests/account-open-policy-audit.sql')), '');
   report.checks.push('account-open policy audit returns zero rows');
 } catch (error) { report.failed = String(error.stack ?? error); process.exitCode = 1; }
