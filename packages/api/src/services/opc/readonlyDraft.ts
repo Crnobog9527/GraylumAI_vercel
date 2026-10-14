@@ -4,9 +4,10 @@ import { withReportFlag } from './reportFlag';
 
 type Field = { id?: unknown; title?: unknown };
 type Value = { value?: unknown; status?: unknown; nature?: unknown };
+type StepState = { version?: unknown; reviewVersion?: unknown; valid?: unknown; body?: unknown };
 type Raw = {
   conversationDeleted?: unknown; draftId?: unknown; projectId?: unknown; roundId?: unknown; sessionId?: unknown;
-  snapshot?: { state?: unknown; workflow?: { steps?: Field[] }; steps?: Record<string, { version?: unknown; reviewVersion?: unknown; valid?: unknown; body?: unknown }> };
+  snapshot?: { state?: unknown; workflow?: { steps?: Field[] }; steps?: Record<string, StepState> };
   information?: Record<string, { schema?: Field[]; values?: Record<string, Value> | null }> | null;
 };
 
