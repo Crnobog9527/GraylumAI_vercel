@@ -6,24 +6,7 @@
  * system sans for everything around it.
  */
 .page {
-  --j-canvas: #fafafa;
-  --j-desk: #f3f3f3;
-  --j-paper: #ffffff;
-  --j-ink: #1c1c1c;
-  --j-body: #3a3a3a;
-  --j-muted: #6b6b6b;
-  --j-rule: #e5e5e5;
-  --j-ink-soft: #cccccc;
-  --j-bronze: #82632c;
-  --j-bronze-soft: rgba(130, 99, 44, .1);
-  --j-seat-a: #56677d;
-  --j-seat-b: #5f7258;
-  --j-seat-c: #8c6152;
-  --j-critical: #9a3b2e;
-  --j-lift: 0 10px 24px -14px rgba(0, 0, 0, .28);
-  --j-ease: cubic-bezier(.22, 1, .36, 1);
-  --j-serif: 'Songti SC', 'Noto Serif SC', 'Source Han Serif SC', 'STSong', serif;
-  --j-sans: 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', system-ui, sans-serif;
+  composes: theme from './jury-theme.module.css';
   min-height: 100vh;
   overflow-x: clip;
   background: var(--j-canvas);

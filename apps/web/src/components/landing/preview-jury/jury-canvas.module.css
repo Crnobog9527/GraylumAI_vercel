@@ -86,6 +86,7 @@
   display: grid; justify-items: center; gap: 4px; max-width: 100%; padding: 8px 12px 6px; border: 0; border-radius: 12px;
   background: color-mix(in srgb, var(--j-canvas) 88%, transparent); color: inherit; font: inherit; cursor: pointer;
 }
+div.head, div.card { cursor: default; }
 .head:hover .who, .lane[data-selected='true'] .who { text-decoration: underline; text-underline-offset: 3px; }
 .who { max-width: 100%; overflow: hidden; color: var(--j-ink); font-size: 14px; font-weight: 600; line-height: 1.4; text-overflow: ellipsis; white-space: nowrap; }
 .status { padding: 0 9px; border-radius: 999px; background: var(--j-desk); color: var(--j-body); font-size: 12.5px; line-height: 22px; white-space: nowrap; }

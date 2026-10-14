@@ -490,4 +490,11 @@ describe('the canvas for embedding', () => {
     expect(at(2)).toBe(end);
     expect(end).not.toMatch(MODEL_NAMES);
   });
+
+  it('is plain content without onPick, and clickable people and cards with it', () => {
+    const plain = renderToStaticMarkup(createElement(JuryCanvasPlayer, { progress: 0.5, brief: true }));
+    expect(plain).not.toContain('<button');
+    const clickable = renderToStaticMarkup(createElement(JuryCanvasPlayer, { progress: 0.5, brief: true, onPick: () => {} }));
+    expect(clickable.match(/<button/g)?.length).toBeGreaterThanOrEqual(4);
+  });
 });

@@ -13,7 +13,8 @@ import styles from './jury-canvas.module.css';
 
 type Box = { cx: number; cy: number; top: number; bottom: number; left: number; right: number };
 type Boxes = Partial<Record<Node | `end-${SeatCode}`, Box>>;
-type Hover = { onPeek: (seat: SeatCode | null) => void; onPick: (seat: SeatCode) => void };
+/** Without onPick the people and cards are plain text, not buttons that do nothing. */
+type Hover = { onPeek: (seat: SeatCode | null) => void; onPick?: (seat: SeatCode) => void };
 
 
 /**
@@ -83,12 +84,11 @@ function Lane({ seat, view, names, selected, onPeek, onPick }: {
   return (
     <section className={styles.lane} data-seat={seat} data-dim={dim} data-folded={folded} data-selected={selected === seat} data-node-end={seat}
       data-waiting={seat === 'S' && view.columns.S.length === 0} aria-label={names[seat]}>
-      <button type="button" className={styles.head} data-node={seat} title={`${names[seat]}：看完整记录`}
-        onMouseEnter={() => onPeek(seat)} onMouseLeave={() => onPeek(null)} onClick={() => onPick(seat)}>
+      <Press className={styles.head} data-node={seat} title={`${names[seat]}：看完整记录`} seat={seat} onPeek={onPeek} onPick={onPick}>
         <SeatMark seat={seat} names={names} size="lg" />
         <span className={styles.who}>{names[seat]}</span>
         <span className={styles.status}>{statusWord(view, seat)}</span>
-      </button>
+      </Press>
       <ol className={styles.cards}>
         {view.columns[seat].map((card, index, list) => {
           const current = view.current === card.key && !dim;
@@ -96,15 +96,29 @@ function Lane({ seat, view, names, selected, onPeek, onPick }: {
           const compact = !current && index < list.length - 1;
           return (
             <li key={card.key} data-current={current}>
-              <button type="button" className={styles.card} data-kind={card.kind}
-                onMouseEnter={() => onPeek(seat)} onMouseLeave={() => onPeek(null)} onClick={() => onPick(seat)}>
+              <Press className={styles.card} data-kind={card.kind}
+                seat={seat} onPeek={onPeek} onPick={onPick}>
                 <CardBody card={card} names={names} compact={compact} />
-              </button>
+              </Press>
             </li>
           );
         })}
       </ol>
     </section>
+  );
+}
+
+/** A person or card: a button that opens the record when the canvas has onPick, otherwise plain content. */
+function Press({ seat, onPeek, onPick, title, children, ...rest }: {
+  seat: SeatCode; onPeek: Hover['onPeek']; onPick?: Hover['onPick']; title?: string; children: ReactNode;
+  className: string; 'data-node'?: string; 'data-kind'?: string;
+}) {
+  if (!onPick) return <div {...rest}>{children}</div>;
+  return (
+    <button type="button" {...rest} title={title}
+      onMouseEnter={() => onPeek(seat)} onMouseLeave={() => onPeek(null)} onClick={() => onPick(seat)}>
+      {children}
+    </button>
   );
 }
 

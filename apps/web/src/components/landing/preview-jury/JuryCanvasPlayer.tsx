@@ -9,6 +9,7 @@ import { mockCase, type JuryCase } from './jury-case';
 import { buildScenes, playbackLength } from './jury-scenes';
 import { JuryCanvas } from './JuryCanvas';
 import { useJuryPlayback, usePrefersReducedMotion } from './use-jury-playback';
+import theme from './jury-theme.module.css';
 
 export type JuryCanvasPlayerProps = {
   /** The case to play (reports and events, see jury-case.ts); the prototype's mock creator by default. Keep it stable
@@ -21,7 +22,7 @@ export type JuryCanvasPlayerProps = {
   /** Short version: only the key moments (seated, reading, disagreement, summary, new report). */
   brief?: boolean;
   names?: JurySeatNames;
-  /** A person or card was clicked. */
+  /** A person or card was clicked. Without it the people and cards are not clickable. */
   onPick?: (seat: SeatCode) => void;
 };
 
@@ -43,7 +44,9 @@ export function JuryCanvasPlayer({ data, progress, speed = 1, brief = false, nam
   const last = Math.max(0, length - 1);
   const clock = driven ? Math.min(1, Math.max(0, progress)) * last : reduced ? last : Math.min(playback.clock, last);
   return (
-    <JuryCanvas view={canvasAt(scenes, clock, names)} names={names} selected={null} report={juryCase.report} follow={!driven}
-      onPeek={() => {}} onPick={seat => onPick?.(seat)} />
+    <div className={theme.player}>
+      <JuryCanvas view={canvasAt(scenes, clock, names)} names={names} selected={null} report={juryCase.report} follow={!driven}
+        onPeek={() => {}} onPick={onPick} />
+    </div>
   );
 }
