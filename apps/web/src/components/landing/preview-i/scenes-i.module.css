@@ -132,7 +132,7 @@
 .caption { margin: 0; color: var(--i-muted); font-size: 12px; }
 .chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; padding: 0; list-style: none; }
 .chips li { padding: 3px 10px; border: 1.5px solid var(--i-ink); border-radius: 999px; background: var(--i-mint-soft); font-size: 13px; line-height: 1.5; }
-.doc { border-left: 6px solid var(--i-coral); }
+.doc { background: var(--i-sun-soft); box-shadow: 3px 3px 0 var(--i-coral); }
 .outline { display: grid; gap: 4px; margin: 0; padding-left: 1.1em; font-size: 13.5px; line-height: 1.65; }
 
 /* The step's own copy beside the conversation */
