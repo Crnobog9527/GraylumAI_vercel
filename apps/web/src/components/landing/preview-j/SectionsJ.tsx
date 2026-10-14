@@ -11,7 +11,7 @@ import page from './j.module.css';
 /** The Owner's four-row comparison, word for word, as one plain table (no pictures, no extra blocks). */
 export function CompareJ() {
   return (
-    <section aria-labelledby="compare-title" className={page.section}>
+    <section aria-labelledby="compare-title" className={page.section} data-zone="compare">
       <div className={page.wrap}>
         <h2 id="compare-title" className={styles.compareTitle}>{H_COMPARE.title}</h2>
         <table className={styles.table}>
@@ -34,7 +34,7 @@ export function rewordFaq(text: string) {
 export function FaqJ({ groups }: { groups: readonly LandingFaqGroup[] }) {
   if (groups.length === 0) return null;
   return (
-    <section id="faq" aria-labelledby="faq-title" className={page.section}>
+    <section id="faq" aria-labelledby="faq-title" className={page.section} data-zone="faq">
       <div className={page.wrap}>
         <h2 id="faq-title" className={page.display}>{LANDING_FAQ_TITLE}</h2>
         <div className={styles.faqGroups}>
@@ -58,7 +58,7 @@ export function FaqJ({ groups }: { groups: readonly LandingFaqGroup[] }) {
 /** The close: the two paths, what you get, the founder seats while they last, and the one button. */
 export function FinalJ({ showStack, founderSeats }: { showStack: boolean; founderSeats: number | null }) {
   return (
-    <section aria-labelledby="final-title" className={page.section}>
+    <section aria-labelledby="final-title" className={page.section} data-zone="final">
       <div className={page.wrap}>
         <div className={styles.final}>
           <h2 id="final-title" className={page.display}>{FINAL_ACTION.title}</h2>

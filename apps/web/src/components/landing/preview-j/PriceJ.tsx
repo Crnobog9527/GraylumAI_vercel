@@ -30,7 +30,7 @@ export function PriceJ({ pricing, rows, risk, showResult, founderSeats, membersh
   const [billing, setBilling] = useState<PaywallBilling>('monthly');
   const hasYearly = pricing.cards.some(card => card.quotes.yearly);
   return (
-    <section id="pricing" aria-labelledby="pricing-title" className={page.section}>
+    <section id="pricing" aria-labelledby="pricing-title" className={page.section} data-zone="price">
       <div className={page.wrap}>
         <h2 id="pricing-title" className={page.display}>{J_PRICE.title}</h2>
 

@@ -17,7 +17,7 @@ export function ScenesJ({ steps }: { steps: readonly FlowStep[] }) {
   const shown = J_SCENES.steps.map(id => steps.find(step => step.id === id)).filter((step): step is FlowStep => Boolean(step));
   if (shown.length === 0) return null;
   return (
-    <section aria-labelledby="scenes-title" className={page.section}>
+    <section aria-labelledby="scenes-title" className={page.section} data-zone="work">
       <div className={page.wrap}>
         <div className={page.sectionHead}>
           <h2 id="scenes-title" className={page.display}>

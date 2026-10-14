@@ -82,7 +82,7 @@ export function TakeoverJ() {
 
   if (!locked) {
     return (
-      <section id="how-it-works" aria-labelledby="takeover-title" className={cn(page.section, styles.static)}>
+      <section id="how-it-works" aria-labelledby="takeover-title" className={cn(page.section, styles.static)} data-zone="takeover">
         <div className={page.wrap}>
           <h2 id="takeover-title" className={page.display}>{HOW_IT_WORKS.title}</h2>
           {chapters.map(chapter => (
@@ -98,7 +98,7 @@ export function TakeoverJ() {
 
   const current = chapters.find(chapter => chapter.id === id) ?? chapters[0];
   return (
-    <section ref={ref} id="how-it-works" aria-labelledby="takeover-title" className={styles.takeover}>
+    <section ref={ref} id="how-it-works" aria-labelledby="takeover-title" className={styles.takeover} data-zone="takeover">
       <div className={styles.stage}>
         <div className={cn(page.wrap, styles.frame)}>
           <header className={styles.head}>

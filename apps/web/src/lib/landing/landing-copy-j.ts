@@ -76,13 +76,6 @@ export const J_POSITIONING_SAMPLE = {
   benchmarkKinds: ['职业转型类账号', '新移民生活类账号', '牙科从业者账号'],
 } as const;
 
-/** The first screen's data-growth flywheel. Steps are the product's real ones; label and caption are NEW. */
-export const J_FLYWHEEL = {
-  label: '数据增长飞轮：定位、选题、创作、发布、看数据复盘，再回到调整定位和选题',
-  steps: ['定位', '选题', '创作', '发布', '看数据复盘'],
-  caption: '每转一圈，按数据调整一次，账号往上走一步',
-} as const;
-
 /** The voice wall's title (Owner 2026-10-14: "你是不是也这样？"; the Owner removed the lead in the live edit mode). */
 export const J_VOICE = {
   title: '你是不是也这样？',

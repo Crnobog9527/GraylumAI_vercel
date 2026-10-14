@@ -21,7 +21,7 @@ export function VoiceWallJ({ notes }: { notes: readonly VoiceNote[] }) {
   if (notes.length === 0) return null;
   const ordered = [...notes.filter(note => note.id === FIRST), ...notes.filter(note => note.id !== FIRST)];
   return (
-    <section aria-labelledby="voice-title" className={styles.section}>
+    <section aria-labelledby="voice-title" className={styles.section} data-zone="voice">
       <div className={styles.wrap}>
         <div className={styles.sectionHead}>
           <h2 id="voice-title" className={styles.display}>{J_VOICE.title}</h2>

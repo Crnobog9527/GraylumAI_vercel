@@ -12,6 +12,8 @@ import { buildLandingPageData } from '@/lib/landing/landing-page-data';
 import { APP_SEGMENTS } from '@/lib/sentry-scrub';
 import { SampleJ } from './SampleJ';
 import { chapterAt, CHAPTERS } from './TakeoverJ';
+import { WEEK_STEP_MS } from './WeekJ';
+import { J_WEEK } from '@/lib/landing/landing-copy-j-week';
 
 const ALL_ON = Object.fromEntries(Object.keys(LANDING_FEATURES).map(key => [key, true])) as LandingFlags;
 const escape = (text: string) => text.replace(/&/g, '&amp;').replace(/"/g, '&quot;');
@@ -144,5 +146,17 @@ describe('sample J story timing', () => {
     expect(chapterAt(0.5).id).toBe('jury');
     expect(chapterAt(1)).toEqual({ id: 'promises', local: 1 });
     expect(chapterAt(-1).id).toBe('positioning');
+  });
+
+  it('shows the first screen\'s week window at its last step on the server, with the five stages and no made-up numbers', () => {
+    const { html } = render();
+    expect(html).toContain('data-step="4"');
+    for (const stage of J_WEEK.stages) expect(html).toContain(stage);
+    expect(html).toContain(J_WEEK.review.rows[1][1].replace(/"/g, '&quot;'));
+    expect(WEEK_STEP_MS).toHaveLength(J_WEEK.stages.length);
+    const loop = WEEK_STEP_MS.reduce((sum, ms) => sum + ms, 0);
+    expect(loop).toBeGreaterThanOrEqual(11000);
+    expect(loop).toBeLessThanOrEqual(14000);
+    expect(JSON.stringify(J_WEEK)).not.toMatch(/\d+\s*%|\$|\d{2,}/);
   });
 });

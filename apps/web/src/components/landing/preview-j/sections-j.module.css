@@ -20,7 +20,7 @@
 .sceneDemo { margin: 0; color: var(--j-body); font-size: clamp(16px, 1.3vw, 18px); line-height: 1.7; }
 .sceneNote { margin: 0; padding-top: 12px; border-top: 1px solid var(--j-line); color: var(--j-muted); font-size: 15px; line-height: 1.75; }
 .sceneNote b { display: block; margin-bottom: 4px; color: var(--j-ink); font-size: 14px; font-weight: 600; }
-.sceneWindow { overflow: hidden; border-radius: 28px; background: #eceae4; padding: 14px; }
+.sceneWindow { overflow: hidden; border-radius: 28px; border: 1px solid var(--j-line); background: rgba(255, 255, 255, .7); padding: 14px; box-shadow: var(--j-shadow-lift); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); }
 .sceneBar { display: flex; align-items: center; gap: 8px; margin: 0 0 10px; padding: 0 6px; color: var(--j-muted); font-size: 13px; }
 .sceneBar span { padding: 0 8px; border-radius: 999px; background: var(--gl-accent-tag); color: var(--gl-accent-tag-text); font-size: 11.5px; line-height: 20px; }
 .sceneLog { display: grid; gap: 10px; padding: 16px; border-radius: 18px; background: #fff; }
@@ -50,7 +50,7 @@
 @media (max-width: 639px) { .table th, .table td { padding-right: 12px; font-size: 14.5px; } }
 
 /* Price */
-.compareCost { margin-top: 40px; padding: clamp(24px, 3vw, 40px); border-radius: 28px; background: #eceae4; }
+.compareCost { margin-top: 40px; padding: clamp(24px, 3vw, 40px); border-radius: 28px; border: 1px solid var(--j-line); background: #fff; box-shadow: var(--j-shadow); }
 .compareCost h3 { margin: 0 0 16px; font-size: clamp(20px, 2vw, 26px); font-weight: 600; letter-spacing: -.02em; }
 .compareCost ul { display: grid; margin: 0; padding: 0; list-style: none; }
 .compareCost li { display: grid; gap: 4px 24px; padding: 16px 0; border-top: 1px solid rgba(20, 19, 18, .1); }
@@ -77,7 +77,7 @@
 .unavailable { margin-top: 32px !important; }
 @media (min-width: 900px) { .plans { grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); } }
 .sampleTag { position: absolute; top: -11px; right: 20px; padding: 0 9px; border-radius: 999px; background: #fde68a; color: #6b4f00; font-size: 12px; font-weight: 600; line-height: 22px; }
-.plan { position: relative; display: grid; align-content: start; gap: 12px; padding: 28px; border: 1px solid var(--j-line); border-radius: 28px; background: #fff; }
+.plan { position: relative; display: grid; align-content: start; gap: 12px; padding: 28px; border: 1px solid var(--j-line); border-radius: 28px; background: #fff; box-shadow: var(--j-shadow); }
 .recommended { border: 2px solid var(--j-gold); }
 .planHead { display: flex; align-items: center; justify-content: space-between; margin: 0; }
 .planHead b { font-size: 26px; font-weight: 600; letter-spacing: -.03em; }
@@ -94,7 +94,7 @@
 .planButton:hover { border-color: var(--j-ink); }
 .planNote { margin: 0; color: var(--j-muted); font-size: 13px; line-height: 1.6; }
 .planFit { margin: 0; padding-top: 12px; border-top: 1px solid var(--j-line); color: var(--j-body); font-size: 14px; }
-.risk { margin-top: 20px; padding: clamp(22px, 3vw, 36px); border-radius: 28px; background: #eceae4; }
+.risk { margin-top: 20px; padding: clamp(22px, 3vw, 36px); border-radius: 28px; border: 1px solid var(--j-line); background: #fff; box-shadow: var(--j-shadow); }
 .risk h3 { margin: 0 0 12px; font-size: clamp(22px, 2.2vw, 30px); font-weight: 600; letter-spacing: -.03em; }
 .risk ul { display: grid; gap: 10px; margin: 0; padding: 0; list-style: none; }
 @media (min-width: 900px) { .risk ul { grid-template-columns: 1fr 1fr; column-gap: 32px; } }
@@ -115,7 +115,7 @@
 .faqItem p { margin: 0; color: var(--j-body); font-size: 15px; line-height: 1.8; }
 
 /* The close */
-.final { display: grid; justify-items: center; gap: 24px; padding: clamp(40px, 6vw, 88px) clamp(20px, 4vw, 64px); border-radius: 32px; background: #eceae4; text-align: center; }
+.final { display: grid; justify-items: center; gap: 24px; padding: clamp(40px, 6vw, 88px) clamp(20px, 4vw, 64px); border-radius: 32px; border: 1px solid var(--j-line); background: rgba(255, 255, 255, .72); text-align: center; box-shadow: var(--j-shadow-lift); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); }
 .paths { display: grid; gap: 12px; max-width: 960px; margin: 0; padding: 0; list-style: none; text-align: left; }
 @media (min-width: 768px) { .paths { grid-template-columns: 1fr 1fr; } }
 .paths li { padding: 20px 22px; border-radius: 20px; font-size: 16px; line-height: 1.75; }
