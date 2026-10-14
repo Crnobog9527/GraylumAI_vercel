@@ -91,7 +91,9 @@ export async function recordCallback(db: Rpc, client: ClientDeps, profileId: str
       account = await getAccount(client, id);
     }
     if (account.kind === 'rate_limited') throw new ConnectError('PUBLISH_MONITOR_PROVIDER_BUSY', account.retryAfterSeconds);
-    if (account.kind === 'rejected') continue;
+    // Only "no such account" (404) is skipped; 401/403 means our key or access is broken, so stop before the
+    // attempt is consumed and let the callback be retried.
+    if (account.kind === 'rejected' && account.status === 404) continue;
     if (account.kind !== 'ok') throw new ConnectError('PUBLISH_MONITOR_PROVIDER_UNAVAILABLE');
     // A disconnected provider account has no usable authorization; it is never offered for confirmation.
     if (account.value.status !== 'connected') continue;
@@ -116,7 +118,7 @@ export async function confirmConnect(db: Rpc, client: ClientDeps, profileId: str
   // Re-read just before applying: the database rejects the confirmation if the authorization moved since the callback.
   const account = await getAccount(client, providerId.parse(providerAccountId));
   if (account.kind === 'rate_limited') throw new ConnectError('PUBLISH_MONITOR_PROVIDER_BUSY', account.retryAfterSeconds);
-  if (account.kind === 'rejected') throw new ConnectError('PUBLISH_MONITOR_AUTHORIZATION_CHANGED');
+  if (account.kind === 'rejected' && account.status === 404) throw new ConnectError('PUBLISH_MONITOR_AUTHORIZATION_CHANGED');
   if (account.kind !== 'ok') throw new ConnectError('PUBLISH_MONITOR_PROVIDER_UNAVAILABLE');
   const current = { providerAccountId: account.value.id, platform: account.value.platform,
     externalId: account.value.externalId, status: account.value.status };

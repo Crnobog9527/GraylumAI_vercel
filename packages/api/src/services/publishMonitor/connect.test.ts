@@ -89,6 +89,11 @@ describe('publish-monitor connect flow', () => {
       newAccounts: ['spc_new'], ownExisting: [], quarantined: [], ignored: [] } } }).db, throttled.deps, actor, request,
       ['spc_new'], async ms => { waits.push(ms); });
     expect([waits, throttled.urls.length]).toEqual([[1000], 2]);
+    // A refused key (401/403) stops before the database consumes the attempt, so the callback can be retried.
+    const refused = rpc({});
+    await expect(recordCallback(refused.db, provider([json(401, {})]).deps, actor, request, ['spc_new']))
+      .rejects.toThrow('PUBLISH_MONITOR_PROVIDER_UNAVAILABLE');
+    expect(refused.calls).toEqual([]);
     const busy = provider([json(429, {})]);
     await expect(recordCallback(rpc({}).db, busy.deps, actor, request, ['spc_new'], async () => {}))
       .rejects.toThrow('PUBLISH_MONITOR_PROVIDER_BUSY');

@@ -48,7 +48,8 @@ export async function cleanupUnselected(client: ClientDeps, externalId: string, 
     if (outage || now() >= until) { result.deferred.push(id); continue; }
     try {
       const account = await getAccount(client, id);
-      if (account.kind === 'rejected') { result.kept.push(id); continue; }
+      // Only 404 proves the account is gone; 401/403 and other refusals are deferred for reconciliation.
+      if (account.kind === 'rejected' && account.status === 404) { result.kept.push(id); continue; }
       if (account.kind !== 'ok') { outage = true; result.deferred.push(id); continue; }
       if (account.value.externalId !== externalId) { result.kept.push(id); continue; }
       const removed = await deleteAccount(client, id);

@@ -30,6 +30,13 @@ describe('publish-monitor connect flow helpers', () => {
     expect(p.urls).toHaveLength(3);
   });
 
+  it('cleanup treats only 404 as gone; an auth refusal is deferred', async () => {
+    expect(await cleanupUnselected(provider([json(404, {})]).deps, EXTERNAL, ['spc_1']))
+      .toEqual({ deleted: [], kept: ['spc_1'], deferred: [] });
+    expect(await cleanupUnselected(provider([json(403, {})]).deps, EXTERNAL, ['spc_1', 'spc_2']))
+      .toEqual({ deleted: [], kept: [], deferred: ['spc_1', 'spc_2'] });
+  });
+
   it('cleanup defers everything once its time budget is used', async () => {
     let t = 0;
     const p = provider([acct('spc_1'), json(200, {})]);
