@@ -32,16 +32,26 @@ function render() {
 beforeEach(() => useQuery.mockReset());
 
 describe('live founder seats on the hourly pre-rendered landing page', () => {
-  it('shows the pre-rendered count until the browser has a live answer, or when that answer has no founder offer', () => {
-    useQuery.mockReturnValue({ data: undefined });
-    expect(render().match(/还剩 37 个名额/g)).toHaveLength(2);
-    useQuery.mockReturnValue({ data: { goldFirstMonth: 49, founder: null } });
+  it('shows the pre-rendered count until the browser has a live answer', () => {
+    useQuery.mockReturnValue({ data: undefined, isError: false });
     expect(render().match(/还剩 37 个名额/g)).toHaveLength(2);
     expect(useQuery).toHaveBeenCalledWith(undefined, expect.objectContaining({ enabled: true, retry: false }));
   });
 
+  it.each([
+    ['the request fails', { data: undefined, isError: true }],
+    ['the server cannot confirm the founder offer', { data: { goldFirstMonth: 49, founder: null }, isError: false }],
+  ])('hides every founder block when %s', (_, result) => {
+    useQuery.mockReturnValue(result);
+    const html = render();
+    expect(html).not.toContain('个名额');
+    expect(html).not.toContain('data-testid="landing-plan-founder"');
+    expect(html).not.toContain('创始会员和普通 Gold 年付差在哪？');
+    expect(html).toContain('最高省 25%');
+  });
+
   it('replaces the count with the live one', () => {
-    useQuery.mockReturnValue({ data: { goldFirstMonth: 49, founder: { price: 496, total: 50, available: 3 } } });
+    useQuery.mockReturnValue({ data: { goldFirstMonth: 49, founder: { price: 496, total: 50, available: 3 } }, isError: false });
     const html = render();
     expect(html.match(/还剩 3 个名额/g)).toHaveLength(2);
     expect(html).not.toContain('还剩 37 个名额');
@@ -54,7 +64,7 @@ describe('live founder seats on the hourly pre-rendered landing page', () => {
   });
 
   it('removes the founder line, the closing seat line and the founder card once the live count is 0', () => {
-    useQuery.mockReturnValue({ data: { goldFirstMonth: 49, founder: { price: 496, total: 50, available: 0 } } });
+    useQuery.mockReturnValue({ data: { goldFirstMonth: 49, founder: { price: 496, total: 50, available: 0 } }, isError: false });
     const html = render();
     expect(html).not.toContain('前 50 位创始会员');
     expect(html).not.toContain('个名额');

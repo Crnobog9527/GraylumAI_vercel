@@ -9,15 +9,16 @@ const LiveSeats = createContext<number | null | undefined>(undefined);
 
 /**
  * The page is pre-rendered hourly (SEO_GEO_SPEC: public pages revalidate >= 3600), so the founder seat count is
- * refreshed once in the browser from settings.getPublicOffers. A failed or missing answer keeps the pre-rendered
- * count; a live count of 0 hides the founder blocks. It never shows a founder block the server did not render.
+ * refreshed once in the browser from settings.getPublicOffers. Until it answers, the pre-rendered count shows; a live
+ * count of 0, a failed request or an answer without the founder offer all hide the founder blocks (nothing is
+ * advertised that the server cannot confirm). It never shows a founder block the server did not render.
  */
 export function FounderSeatsProvider({ initial, children }: { initial: number | null; children: ReactNode }) {
   const live = trpc.settings.getPublicOffers.useQuery(undefined, {
     enabled: initial !== null, staleTime: 60_000, retry: false, refetchOnWindowFocus: false,
   });
-  const founder = live.data?.founder;
-  return <LiveSeats.Provider value={founder ? founder.available : initial}>{children}</LiveSeats.Provider>;
+  const seats = live.isError ? 0 : live.data === undefined ? initial : (live.data.founder?.available ?? 0);
+  return <LiveSeats.Provider value={seats}>{children}</LiveSeats.Provider>;
 }
 
 /** The seats to show: the live count when a provider has one, otherwise the pre-rendered one. */
