@@ -54,7 +54,9 @@ export type FusionSettings = z.infer<typeof fusionSettings>;
 export const DEFAULT_FUSION_SETTINGS: FusionSettings = {
   version: 1,
   review: { enabled: false, reviewerModelIds: [], summaryModelId: null, skillId: null, maxRounds: 2,
-    opinionOutputTokens: 4096, summaryOutputTokens: Math.min(16384, PURPOSE_OUTPUT_CAP), maxBudgetUsd: null,
+    opinionOutputTokens: 4096,
+    // The summary writes the whole report plus a ruling per issue: 16384 was cut off in a staging run (#962).
+    summaryOutputTokens: PURPOSE_OUTPUT_CAP, maxBudgetUsd: null,
     dispatchMinutes: 10, breaker: { platformUsd: '2', noDeliveryCalls: 10 }, displayNames: DEFAULT_PANEL_NAMES },
   compare: { enabled: false },
 };
