@@ -2,7 +2,8 @@
 import { CHAT_ACTION, type ChatNotice } from '@/components/chat/ChatInlineNotice';
 import { PROVIDER_REJECTED_NOTICE, gateAdmissionNotice, gateResultNotice } from '@/lib/runtime-gate-notice';
 import { inFlight } from '@/app/runtime/runtime-notices';
-import { hostNotice, isPaygWaiting } from '@/lib/payg-wait';
+import { definiteRefusal, definiteRefusalNotice } from '@/app/runtime/gate-notices';
+import { hostNotice, isOrganizerPendingError, isPaygWaiting } from '@/lib/payg-wait';
 
 /** Fixed wording for a failed topic operation; the pending operation itself is kept by the caller. */
 export function topicFailureMessage(cause: unknown) {
@@ -17,7 +18,19 @@ export function topicFailureMessage(cause: unknown) {
     return '这个草稿已经有绑定的选题工作空间，不能静默换到另一个版本。请继续使用原有工作空间。';
   if (message.includes('OPC_REQUEST_CONFLICT'))
     return '这条消息的原请求身份与现在的负载不一致，已停止发送。请读取原任务状态后再决定。';
+  const refused = definiteRefusalNotice(cause, ['opc.topicTurn']);
+  if (refused) return refused;
   return '本次请求状态待核实。请点「重试」读取原任务，不要重复发送相同内容。';
+}
+
+/**
+ * A topic turn the server definitely refused before admitting it (an HTTP 4xx such as a missing billing
+ * profile): nothing exists to recover, so the caller releases it instead of holding it as unknown.
+ * A request-identity conflict and a pending earlier organizer keep their own handling.
+ */
+export function topicTurnRefused(cause: unknown) {
+  return definiteRefusal(cause)?.path === 'opc.topicTurn' && !(cause as Error).message.includes('OPC_REQUEST_CONFLICT')
+    && !isOrganizerPendingError(cause); // waits for the earlier organizer (payg-wait), never a release
 }
 
 /**
