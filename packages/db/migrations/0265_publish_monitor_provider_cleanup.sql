@@ -107,12 +107,16 @@ BEGIN
   RAISE EXCEPTION 'PUBLISH_MONITOR_INPUT_INVALID' USING ERRCODE='22023'; END IF;
  -- Settled attempts are kept 30 days (plan §7), then only the daily orphan sweep remains as a backstop. This runs on
  -- every daily claim, whether or not there is new work.
- DELETE FROM social_connect_requests WHERE cleaned_at<now_at-interval '30 days';
+ DELETE FROM social_connect_requests WHERE cleaned_at IS NOT NULL AND created_at<now_at-interval '30 days';
  UPDATE social_connect_requests SET state='abandoned',confirm_expires_at=NULL
  WHERE (state='awaiting_callback' AND expires_at<=now_at) OR (state='pending_confirm' AND confirm_expires_at<=now_at);
  WITH picked AS (
   SELECT id FROM social_connect_requests
-  WHERE cleaned_at IS NULL AND state IN ('applied','abandoned') AND cleanup_attempts<50
+  -- An abandoned attempt's consent link never expires at the provider, so it is checked again daily for 30 days:
+  -- an authorization completed later (webhook missed) is still found and settled.
+  WHERE state IN ('applied','abandoned') AND cleanup_attempts<50
+   AND (cleaned_at IS NULL OR (state='abandoned' AND created_at>now_at-interval '30 days'
+    AND cleaned_at<now_at-interval '20 hours'))
    AND (cleanup_lease_until IS NULL OR cleanup_lease_until<=now_at)
   ORDER BY created_at LIMIT p_limit FOR UPDATE SKIP LOCKED
  ), claimed AS (
@@ -136,7 +140,7 @@ BEGIN
  IF p_request_id IS NULL OR jsonb_typeof(p_accounts) IS DISTINCT FROM 'array' OR jsonb_array_length(p_accounts)>500 THEN
   RAISE EXCEPTION 'PUBLISH_MONITOR_INPUT_INVALID' USING ERRCODE='22023'; END IF;
  SELECT * INTO req FROM social_connect_requests WHERE id=p_request_id FOR UPDATE;
- IF req.id IS NULL OR req.cleaned_at IS NOT NULL OR req.state NOT IN ('applied','abandoned') THEN
+ IF req.id IS NULL OR req.state NOT IN ('applied','abandoned') THEN
   RAISE EXCEPTION 'PUBLISH_MONITOR_REQUEST_INVALID' USING ERRCODE='PT409'; END IF;
  FOR item IN SELECT * FROM jsonb_array_elements(p_accounts) LOOP
   pid:=item->>'providerAccountId';
@@ -158,8 +162,8 @@ BEGIN
 END $$;
 
 -- Account erasure (replaces the 0240 versions for attempts): an attempt is kept, detached from the brand, until its
--- provider cleanup has succeeded and 30 days have passed (plan §7), even after it stops being open; otherwise a
--- prune pass could delete the external_id the cleanup still needs. Other tables keep their 0240 rules.
+-- provider cleanup has succeeded and 30 days have passed since it was made (plan §7), even after it stops being open;
+-- otherwise a prune pass could delete the external_id the daily re-check still needs. Other tables keep 0240's rules.
 CREATE OR REPLACE FUNCTION public.publish_monitor_erasure_retained(t text,j jsonb) RETURNS boolean
 LANGUAGE sql STABLE SET search_path=public,pg_temp AS $$
  SELECT CASE t
@@ -167,7 +171,7 @@ LANGUAGE sql STABLE SET search_path=public,pg_temp AS $$
   -- Open jobs hold frozen credits and publish slots: kept until publishing releases or settles them (plan §9 item 17).
   WHEN 'social_publish_jobs' THEN j->>'state' IN ('claimed','dispatching','unknown')
   WHEN 'social_connect_requests' THEN j->>'state' IN ('awaiting_callback','pending_confirm') OR j->>'cleaned_at' IS NULL
-   OR (j->>'cleaned_at')::timestamptz>clock_timestamp()-interval '30 days'
+   OR (j->>'created_at')::timestamptz>clock_timestamp()-interval '30 days'
   ELSE false END
 $$;
 
@@ -187,7 +191,7 @@ BEGIN
  GET DIAGNOSTICS n=ROW_COUNT;total:=total+n;
  UPDATE social_connect_requests SET business_id=NULL,target_account_project_id=NULL
  WHERE actor_id=a AND (state IN ('awaiting_callback','pending_confirm') OR cleaned_at IS NULL
-   OR cleaned_at>clock_timestamp()-interval '30 days')
+   OR created_at>clock_timestamp()-interval '30 days')
   AND (business_id IS NOT NULL OR target_account_project_id IS NOT NULL);
  GET DIAGNOSTICS n=ROW_COUNT;total:=total+n;
  RETURN total;
@@ -207,7 +211,7 @@ LANGUAGE sql STABLE SECURITY DEFINER SET search_path=public,pg_temp AS $$
  +(SELECT count(*) FROM social_connect_requests WHERE actor_id=a
    AND (business_id IS NOT NULL OR target_account_project_id IS NOT NULL
     OR NOT (state IN ('awaiting_callback','pending_confirm') OR cleaned_at IS NULL
-     OR cleaned_at>clock_timestamp()-interval '30 days')))
+     OR created_at>clock_timestamp()-interval '30 days')))
 $$;
 
 CREATE OR REPLACE FUNCTION public.publish_monitor_cleanup_finish(p_request_id uuid,p_done boolean,p_error text)
@@ -216,9 +220,9 @@ BEGIN
  IF p_request_id IS NULL OR p_done IS NULL OR (p_error IS NOT NULL AND p_error !~ '^[A-Z0-9_]{1,64}$') THEN
   RAISE EXCEPTION 'PUBLISH_MONITOR_INPUT_INVALID' USING ERRCODE='22023'; END IF;
  UPDATE social_connect_requests SET cleanup_lease_until=NULL,cleanup_error=CASE WHEN p_done THEN NULL ELSE p_error END,
-  cleanup_attempts=LEAST(cleanup_attempts+1,1000),
-  cleaned_at=CASE WHEN p_done THEN clock_timestamp() ELSE NULL END
- WHERE id=p_request_id AND cleaned_at IS NULL AND state IN ('applied','abandoned');
+  cleanup_attempts=CASE WHEN p_done THEN 0 ELSE LEAST(cleanup_attempts+1,1000) END,
+  cleaned_at=CASE WHEN p_done THEN clock_timestamp() ELSE cleaned_at END
+ WHERE id=p_request_id AND state IN ('applied','abandoned');
 END $$;
 
 -- Daily orphan sweep: of the provider accounts listed (all pages first, plan §9 item 22), which are ours to delete?
@@ -282,10 +286,10 @@ BEGIN
   -- Attempts are counted when a result is reported (provider_work_finish), not when claimed.
   UPDATE social_connections c SET lease_owner=lease,lease_expires_at=now_at+make_interval(secs=>p_lease_seconds)
   FROM picked WHERE c.id=picked.id
-  RETURNING c.id,c.actor_id,c.provider_account_id,c.status,c.owner_ref
+  RETURNING c.id,c.actor_id,c.provider_account_id,c.status,c.owner_ref,c.provider_disconnect_pending
  )
  SELECT COALESCE(jsonb_agg(jsonb_build_object('connectionId',claimed.id,'providerAccountId',claimed.provider_account_id,
-  'deleting',claimed.status='deleting',
+  'deleting',claimed.status='deleting','takeoverPending',claimed.provider_disconnect_pending,
   'action',CASE WHEN claimed.status<>'deleting' OR k.publishes_open THEN 'disconnect' ELSE 'delete' END,
   'ownerRef',CASE WHEN claimed.status='deleting' THEN claimed.owner_ref
    ELSE (SELECT provider_ref FROM social_monitor_settings s WHERE s.actor_id=claimed.actor_id) END) ORDER BY claimed.id),
