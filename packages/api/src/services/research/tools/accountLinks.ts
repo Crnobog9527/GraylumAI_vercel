@@ -54,10 +54,13 @@ export function canonicalAccount(platform: SocialPlatform, value: string): strin
     const parsed = parseProfileLink(trimmed);
     return parsed?.platform === platform ? parsed.account : null;
   }
-  const pattern = accountPatternFor(platform);
-  const bare = CASE_INSENSITIVE.has(platform) && trimmed.startsWith('@') ? trimmed.slice(1) : trimmed;
-  if (!pattern?.test(bare)) return null;
-  return CASE_INSENSITIVE.has(platform) ? bare.toLowerCase() : bare;
+  return exactAccount(platform, CASE_INSENSITIVE.has(platform) && trimmed.startsWith('@') ? trimmed.slice(1) : trimmed);
+}
+
+/** Validates an identifier exactly as given (no `@` stripping); canonical form or null. */
+function exactAccount(platform: SocialPlatform, value: string): string | null {
+  if (!accountPatternFor(platform)?.test(value)) return null;
+  return CASE_INSENSITIVE.has(platform) ? value.toLowerCase() : value;
 }
 
 /** One profile link → canonical account; null for non-profile links and unsupported formats. */
@@ -70,7 +73,8 @@ export function parseProfileLink(link: string): CanonicalAccount | null {
   let found: ReturnType<typeof fromUrl>;
   try { found = fromUrl(url); } catch { return null; }
   if (!found) return null;
-  const account = canonicalAccount(found.platform, found.raw);
+  // The path segment must already be the bare account: `/@@alice` or X's `/@alice` is not a profile link.
+  const account = exactAccount(found.platform, found.raw);
   return account === null ? null : { platform: found.platform, account };
 }
 

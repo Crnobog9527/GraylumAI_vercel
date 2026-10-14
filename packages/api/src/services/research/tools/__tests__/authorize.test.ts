@@ -44,7 +44,8 @@ describe('profile links', () => {
       'https://user:pw@x.com/tidyroom', 'ftp://x.com/tidyroom', 'https://x.com/%E0%A4%A',
       'https://x.com/tidyroom/status/123', 'https://www.tiktok.com/@homeideas/video/1', 'https://www.instagram.com/tidy_room/reels',
       'https://space.bilibili.com/123456/video', 'https://weibo.com/u/7654321/home',
-      'https://www.youtube.com/channel/UCabcdefghijklmnopqrstuv/videos', 'https://x.com:4444/tidyroom']) {
+      'https://www.youtube.com/channel/UCabcdefghijklmnopqrstuv/videos', 'https://x.com:4444/tidyroom',
+      'https://www.tiktok.com/@@homeideas', 'https://x.com/@tidyroom', 'https://www.instagram.com/@tidy_room']) {
       expect(parseProfileLink(link)).toBeNull();
     }
   });
