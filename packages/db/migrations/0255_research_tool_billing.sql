@@ -243,6 +243,9 @@ BEGIN
     RETURN jsonb_build_object('nominal','0','source','tool_unknown');
   END IF;
   RETURN CASE
+    -- A run closed as a confirmed failure charges the user nothing; a used lookup is absorbed by the platform.
+    WHEN e->>'toolOutcome'='delivered' AND e->>'cost' IS NOT NULL AND r.closed AND r.outcome='confirmed_failure'
+      THEN jsonb_build_object('nominal','0','source','tool_failed_charged')
     WHEN e->>'toolOutcome'='delivered' AND e->>'cost' IS NOT NULL THEN jsonb_build_object('nominal',e->>'cost','source','tool_usage')
     WHEN e->>'toolOutcome'='delivered' THEN jsonb_build_object('nominal','0','source','tool_no_usage')
     WHEN e->>'toolOutcome'='failed_free' THEN jsonb_build_object('nominal','0','source','tool_failed')
@@ -312,7 +315,7 @@ END $$;
 
 -- Finalize: tool calls settle from their result; zero-charge tool outcomes take the refund path;
 -- a charged tool call is described as a lookup, not a model call.
-DO $$ DECLARE src text;d text;w text;z1 text;z2 text;t text;b text; BEGIN
+DO $$ DECLARE src text;d text;w text;z1 text;z2 text;t text;b text;f text; BEGIN
   src:=pg_get_functiondef('public.bill2_payg_finalize(uuid,uuid)'::regprocedure);
   IF position('-- 0255 tool settlement' IN src)=0 THEN
     d:=$x$DECLARE r bill2_runs;c bill2_calls;$x$;
@@ -327,10 +330,18 @@ DO $$ DECLARE src text;d text;w text;z1 text;z2 text;t text;b text; BEGIN
     z2:=$x$  IF c.dispatched_at IS NOT NULL AND source<>'confirmed_failure' THEN$x$;
     t:=$x$'consumption','AI call consumption',$x$;
     b:=$x$budget_conflict=budget_conflict OR n>upper_usd OR selected_cost_usd>upper_usd$x$;
+    -- Whole-run failure (0234 text): a dispatched tool call still goes through tool settlement, so its
+    -- supplier cost stays pending with a bound (or confirmed) instead of a generic refund.
+    f:=$x$  IF c.provider_rejected OR c.dispatched_at IS NULL OR (r.closed AND r.outcome='confirmed_failure')
+   OR c.fusion_verdict$x$;
     IF array_length(string_to_array(src,d),1)<>2 OR array_length(string_to_array(src,w),1)<>2
      OR array_length(string_to_array(src,z1),1)<>2 OR array_length(string_to_array(src,z2),1)<>2
-     OR array_length(string_to_array(src,t),1)<>2 OR array_length(string_to_array(src,b),1)<>2 THEN
+     OR array_length(string_to_array(src,t),1)<>2 OR array_length(string_to_array(src,b),1)<>2
+     OR array_length(string_to_array(src,f),1)<>2 THEN
       RAISE EXCEPTION 'RESEARCH_TOOL_BILLING_SOURCE_MISMATCH: bill2_payg_finalize';END IF;
+    src:=replace(src,f,$x$  IF c.provider_rejected OR c.dispatched_at IS NULL
+   OR (r.closed AND r.outcome='confirmed_failure' AND c.payload->>'protocol' IS DISTINCT FROM 'research-tool-v1')
+   OR c.fusion_verdict$x$);
     src:=replace(src,d,d||'tool jsonb;');
     src:=replace(src,w,$x$   -- 0255 tool settlement
    IF c.payload->>'protocol'='research-tool-v1' THEN
