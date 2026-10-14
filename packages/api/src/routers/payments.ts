@@ -38,6 +38,7 @@ import { addUtcCalendarMonthsClamped } from '../services/subscriptionCreditGrant
 import { findStripeReference, resolveStripeOrderIds, loadCurrentStripeSubscription } from '../services/payments/stripeReferences';
 import { loadCurrentStripePrices } from '../services/payments/stripeCatalog';
 import { fulfillRecoveredPaidCheckout, syncMethodCheckoutReturn } from '../services/payments/methodCheckoutSync';
+import { loadCardPortalSubscription, openStripePortal } from '../services/payments/stripePortal';
 import { assertCreditPackageMembership } from '../services/payments/creditPackageMembership';
 import { mapPurchaseCheckoutError } from '../services/payments/purchaseCheckoutError';
 import { createDurableStripeCheckout, resolveStripeScope } from '../services/payments/stripeCheckoutPersistence';
@@ -1013,6 +1014,10 @@ export const paymentsRouter = router({
     return listAdminPaymentOrders(ctx.supabase, input, createStripeBillingDocumentLoader(stripe, ctx.supabase));
   }),
   getSubscriptionManagement: protectedProcedure.query(async ({ ctx }) => {
+    // PAY-STRIPE-MP card subscriptions first (no stored Stripe ids), then legacy Stripe subscriptions.
+    if (await loadCardPortalSubscription(ctx.supabaseAdmin, ctx.profileId, await resolveStripeScope(getStripeClient()))) {
+      return { available: true };
+    }
     const subscription = await loadCurrentStripeManagedSubscription(ctx.supabaseAdmin, ctx.profileId);
     return { available: Boolean(subscription?.stripe_customer_id && subscription.stripe_subscription_id) };
   }),
@@ -1021,39 +1026,17 @@ export const paymentsRouter = router({
     .mutation(async ({ ctx, input }) => {
       const returnUrl = getStripePortalReturnUrl(input?.returnUrl);
       assertPaymentPersistenceConfigured(ctx.hasSupabaseAdminPrivileges);
-      const subscription = await loadCurrentStripeManagedSubscription(ctx.supabaseAdmin, ctx.profileId);
-      if (!subscription?.stripe_customer_id || !subscription.stripe_subscription_id) {
+      const stripe = getStripeClient();
+      const card = await loadCardPortalSubscription(ctx.supabaseAdmin, ctx.profileId, await resolveStripeScope(stripe));
+      const subscription = card ? null : await loadCurrentStripeManagedSubscription(ctx.supabaseAdmin, ctx.profileId);
+      if (!card && (!subscription?.stripe_customer_id || !subscription.stripe_subscription_id)) {
         throw new TRPCError({ code: 'NOT_FOUND', message: '当前没有可管理的订阅' });
       }
       try {
-        const stripe = getStripeClient();
-        const remote = await stripe.subscriptions.retrieve(subscription.stripe_subscription_id);
-        const customerId = typeof remote.customer === 'string' ? remote.customer : remote.customer.id;
-        if (customerId !== subscription.stripe_customer_id
-          || remote.metadata.userId !== ctx.profileId) {
-          throw new Error('Portal subscription ownership mismatch');
-        }
-        const configurations = await stripe.billingPortal.configurations.list({ is_default: true, limit: 1 });
-        const configuration = configurations.data[0];
-        if (!configuration?.active
-          || !configuration.features.subscription_cancel.enabled
-          || configuration.features.subscription_cancel.mode !== 'at_period_end'
-          || configuration.features.subscription_update.enabled) {
-          throw new Error('Portal configuration must allow period-end cancellation and disable plan changes');
-        }
-        const session = await stripe.billingPortal.sessions.create({
-          customer: customerId,
-          configuration: configuration.id,
-          return_url: returnUrl,
-          // Scheduled cancellations go to Portal home, where the customer can
-          // explicitly restore renewal. Upgrade itself never restores it.
-          flow_data: remote.cancel_at_period_end || remote.cancel_at != null ? undefined : {
-            type: 'subscription_cancel',
-            subscription_cancel: { subscription: remote.id },
-            after_completion: { type: 'redirect', redirect: { return_url: returnUrl } },
-          },
-        });
-        return { portalUrl: session.url };
+        return await openStripePortal(stripe, card
+          ? { subscriptionId: card.stripeSubscriptionId, orderIds: card.orderIds, userId: ctx.profileId, returnUrl }
+          : { subscriptionId: subscription!.stripe_subscription_id!, expectedCustomer: subscription!.stripe_customer_id,
+            userId: ctx.profileId, returnUrl });
       } catch (error) {
         throw createSafeServiceUnavailableError(error, '订阅管理暂不可用，请稍后重试');
       }

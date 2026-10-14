@@ -29,7 +29,10 @@
 .jump { justify-self: start; color: var(--j-muted); font-size: 12.5px; }
 
 .chapters { display: grid; gap: 14px; }
-.chapter { display: grid; gap: 12px; padding: 18px clamp(14px, 2.4vw, 22px); border: 1px solid var(--j-rule); border-radius: 8px; background: var(--j-paper); scroll-margin-top: 16px; }
+.chapter {
+  display: grid; gap: 12px; padding: 18px clamp(14px, 2.4vw, 22px); border: 1px solid var(--j-rule); border-radius: 8px; background: var(--j-paper);
+  scroll-margin-top: calc(var(--j-bar, 0px) + 16px);
+}
 .chapterChanged { border-color: var(--j-ink-soft); box-shadow: inset 4px 0 0 var(--j-bronze); }
 .chapterHead { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .chapterHead h3 { margin: 0 4px 0 0; font-size: 17px; font-weight: 600; }
@@ -102,6 +105,7 @@
 
 .review {
   display: grid; gap: 12px; padding: 18px; border-radius: 8px; background: var(--j-paper); scroll-margin: 16px;
+  scroll-margin-top: calc(var(--j-bar, 0px) + 16px);
   border: 1.5px solid var(--j-ink); box-shadow: var(--j-lift);
 }
 .review h4 { margin: 0; font-size: 16px; font-weight: 600; }
@@ -133,6 +137,8 @@
   .barActions button { flex: 1; padding: 0 10px; }
   .option { flex: 1; justify-content: center; }
   .review { padding: 14px; }
+  /* The toolbar scrolls away on a phone (jury.module.css), so jump targets need no room for it. */
+  .chapter, .review { scroll-margin-top: 16px; }
   .diff li { grid-template-columns: minmax(0, 1fr); }
   .reviewActions button { flex: 1 1 100%; }
 }

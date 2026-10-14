@@ -1,5 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { TRPCError } from '@trpc/server';
+import type { SupabaseClient } from '@supabase/supabase-js';
 
 type Rejection = { code: 'PRECONDITION_FAILED' | 'CONFLICT' | 'BAD_REQUEST' | 'FORBIDDEN'; message: string };
 
@@ -26,6 +27,9 @@ const REJECTIONS: Record<string, Rejection> = {
   PAY_WAFFO_ACCOUNT_CLOSED: { code: 'FORBIDDEN', message: '账号已停用或正在注销，不能购买。' },
   PAY_WAFFO_OFFER_INVALID: { code: 'BAD_REQUEST', message: '这个优惠不适用于所选套餐，请刷新页面后重试。' },
   PAY_WAFFO_TRANSITION_DENIED: { code: 'BAD_REQUEST', message: '这次升级或续费请求无效，请刷新页面后重试。' },
+  // Raised before checkout (cardUpgrade): a renewing prior paid another way cannot be stopped after a card upgrade.
+  PAY_STRIPE_MP_UPGRADE_PRIOR_CHANNEL: { code: 'PRECONDITION_FAILED',
+    message: '你现在的会员不是用银行卡开通的，暂时不能用银行卡直接升级。请提交工单，我们帮你处理升级，避免重复扣费。' },
 };
 
 /** Thrown only for a refusal the admission RPC returned; the message stays the control-flow code. */
@@ -40,8 +44,25 @@ export function admissionError(message: unknown, cause: unknown) {
   return new Error(/^PAY_WAFFO_[A-Z_]{1,60}$/.test(code) ? code : 'PAY_WAFFO_PURCHASE_DENIED', { cause });
 }
 
-export function mapMethodPurchaseRejection(error: unknown) {
+/** Same wording as the purchase page and profile notice (#937) for a subscription whose payment failed. */
+export const UNPAID_SUBSCRIPTION_MESSAGE = '你还有一个付款没有成功的订阅（例如自动续费扣款失败）。为避免重复扣费，暂时不能购买新的套餐。'
+  + '请提交工单，我们帮你停止这个订阅或补上付款，处理好后就能重新购买。';
+
+/** `unpaidSubscription`: the buyer has a subscription whose payment failed (past_due, incomplete, unpaid). Admission
+ * refuses it with the same code as an active membership; only the wording differs, so the buyer knows what to do. */
+export function mapMethodPurchaseRejection(error: unknown, context: { unpaidSubscription?: boolean } = {}) {
   if (!(error instanceof MethodPurchaseRejected)) return null;
   const rejection = REJECTIONS[error.message]!;
-  return new TRPCError({ code: rejection.code, message: rejection.message, cause: error });
+  const message = error.message === 'PAY_WAFFO_MEMBERSHIP_TRANSITION_REQUIRED' && context.unpaidSubscription
+    ? UNPAID_SUBSCRIPTION_MESSAGE : rejection.message;
+  return new TRPCError({ code: rejection.code, message, cause: error });
+}
+
+/** Whether the buyer has a subscription whose payment failed; a failed read keeps the ordinary wording. */
+export async function hasUnpaidSubscription(db: Pick<SupabaseClient, 'from'>, userId: string) {
+  try {
+    const result = await db.from('user_subscriptions').select('id').eq('user_id', userId)
+      .in('status', ['past_due', 'incomplete', 'unpaid']).limit(1);
+    return !result.error && Array.isArray(result.data) && result.data.length > 0;
+  } catch { return false; }
 }
