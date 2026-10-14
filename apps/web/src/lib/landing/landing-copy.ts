@@ -42,19 +42,18 @@ export const HERO_H = {
 } as const;
 
 /**
- * Sample H's "自己用通用 AI ／ 用教练" table beside the difference line (diagnosis #979 item 8 B). NEW WORDING for
- * the Owner to approve: each cell is shortened from a step note already on the page (landing-flow.ts), no new claim.
+ * Sample H's "expert experience" block (Owner 2026-10-14: the coach's questions, knowledge base, Skills and
+ * judgement come from a vertical social-media specialist's nine years; that is what a general AI cannot give).
+ * The heading and body are PLACEHOLDERS until the Owner writes them; the flow's labels use only the Owner's terms.
  */
-export const H_COMPARE = {
-  caption: '自己用通用 AI 和用教练，差在哪',
-  generic: '自己用通用 AI',
-  coach: '用教练',
-  rows: [
-    { generic: '等你提问，你问得笼统它就答得笼统', coach: '按一套固定的运营方法主动问你，答案从你的情况里推出来' },
-    { generic: '会编一个"示例账号"', coach: '对标数据实时查出来、程序算出来，查不到就写"未取到"' },
-    { generic: '每开一个新窗口，你就得从头介绍自己', coach: '带着你确认过的定位、资料和文风来回答' },
-    { generic: '看不到你的数据', coach: '看你真实发出去的内容和数据，建议从数据里来' },
-  ],
+export const H_EXPERT = {
+  titlePlaceholder: '【标题：待 Owner 定稿】',
+  bodyPlaceholder: '【说明：待 Owner 定稿。核心意思：教练的提问方法、知识库、Skill 和判断标准，来自一位垂类社媒运营专家 9 年的经验。】',
+  flowLabel: '经验怎么进到每一次对话',
+  years: '9 年',
+  source: '垂类社媒运营经验',
+  layers: ['知识库', 'Skill', '判断标准'],
+  outputs: ['每一次提问', '每一条建议'],
 } as const;
 
 /**

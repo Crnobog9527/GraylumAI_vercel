@@ -21,11 +21,11 @@
 }
 .center {
   position: relative; z-index: 1; display: flex; flex-direction: column; align-items: center; gap: 12px;
-  width: 100%; max-width: 660px; text-align: center;
+  width: 100%; max-width: 720px; text-align: center;
 }
 .center > * { min-width: 0; max-width: 100%; margin: 0; }
 .title {
-  font-family: var(--h-display-face); font-size: var(--h-fs-hero); font-weight: 900; letter-spacing: -.02em;
+  font-family: var(--h-display-face); font-size: min(var(--h-fs-hero), 62px); font-weight: 900; letter-spacing: -.02em;
   line-height: 1.12; text-wrap: balance; word-break: keep-all; perspective: 800px;
 }
 .promise { color: var(--h-ink); font-size: clamp(18px, 1.8vw, 24px); font-weight: 700; line-height: 1.5; text-wrap: balance; }
@@ -68,16 +68,17 @@
 @media (min-width: 1280px) {
   .floats { position: absolute; inset: 0; z-index: 0; display: block; pointer-events: none; }
   .float { position: absolute; width: 292px; }
-  .float[data-slot='question'] { top: 9%; left: max(28px, calc(50% - 690px)); }
+  .float[data-slot='steps'] { top: 12%; left: max(24px, calc(50% - 700px)); width: 300px; }
   .float[data-slot='summary'] { top: 55%; left: max(52px, calc(50% - 650px)); width: 280px; }
-  .float[data-slot='checklist'] { top: 7%; right: max(28px, calc(50% - 690px)); width: 270px; }
-  .float[data-slot='report'] { top: 58%; right: max(48px, calc(50% - 660px)); width: 268px; }
+  .float[data-slot='checklist'] { top: 6%; right: max(24px, calc(50% - 700px)); width: 270px; }
+  .float[data-slot='report'] { top: 60%; right: max(44px, calc(50% - 670px)); width: 268px; }
 }
 .floatCard {
   position: relative; padding: 12px; border: 1px solid var(--h-line); border-radius: 16px; background: #fff; color: #262626;
   font-size: 13px; text-align: left; box-shadow: 0 2px 4px rgba(var(--h-shade), .04), 0 24px 48px -28px rgba(var(--h-shade), .38);
 }
-.float[data-slot='question'] .floatCard { transform: rotate(-2deg); }
+.float[data-slot='steps'] .floatCard { transform: rotate(-2deg); }
+.float[data-slot='checklist'] .checklist { max-height: 276px; overflow: hidden; mask-image: linear-gradient(#000 72%, transparent); }
 .float[data-slot='summary'] .floatCard { transform: rotate(1.5deg); }
 .float[data-slot='checklist'] .floatCard { transform: rotate(2deg); }
 .float[data-slot='report'] .floatCard { transform: rotate(-1.5deg); }
@@ -85,6 +86,11 @@
   position: absolute; top: -9px; right: 12px; z-index: 1; padding: 0 7px; border-radius: 999px; background: var(--gl-accent-tag);
   color: var(--gl-accent-tag-text); font-size: 11px; line-height: 18px;
 }
+.steps { display: grid; gap: 10px; }
+.stepsHead { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin: 0; font-size: 13px; font-weight: 500; }
+.stepsHead small { color: #777; font-size: 11px; }
+.stepsStrip { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+.stepsStrip > * { pointer-events: none; font-size: 12px; }
 .message { display: grid; gap: 6px; }
 .messageTitle { margin: 0; font-weight: 700; }
 .messageList { display: grid; gap: 2px; margin: 0; padding-left: 1.1em; color: #444; line-height: 1.6; }
@@ -97,28 +103,61 @@
 .reportText { margin: 0; line-height: 1.6; }
 
 @media (max-width: 767px) {
-  .center { gap: 9px; }
+  .hero { padding-top: 8px; padding-bottom: 16px; }
+  .title { font-size: 36px; }
+  .promise { font-size: 17.5px; }
+  .center { gap: 8px; }
   .people { gap: 6px; }
-  .people li { min-height: 0; padding: 6px 9px; font-size: 13px; gap: 6px; }
+  .people li { min-height: 0; padding: 5px 8px; font-size: 12.5px; line-height: 1.4; gap: 6px; }
   .people svg { width: 14px; height: 14px; }
   .why { gap: 9px; margin-top: 4px !important; }
   .exchange > div { padding: 8px 10px; font-size: 12.5px; }
 }
 
-/* Second screen */
-.band { display: grid; grid-template-columns: minmax(0, 1fr); gap: calc(var(--h-card-gap) * 2); }
-.band > *, .diff > * { min-width: 0; }
-.diff { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--h-card-gap); align-items: center; }
-@media (min-width: 960px) { .diff { grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: 48px; } }
-.diffBody { margin: 0; color: var(--h-body); font-size: var(--h-fs-lede); line-height: 1.8; text-wrap: pretty; }
-.table { width: 100%; table-layout: fixed; border-collapse: separate; border-spacing: 0; overflow: hidden; border-radius: 20px; font-size: 15px; line-height: 1.6; }
-.table th, .table td { padding: 12px var(--h-card-pad); text-align: left; vertical-align: top; }
-.table thead th { color: var(--h-muted); font-size: var(--h-fs-small); font-weight: 600; }
-.table th + th, .table td + td { border-left: 1px solid var(--h-line); }
-.table tbody td { border-top: 1px solid var(--h-line); }
-.table td:first-child { color: var(--h-muted); }
-.table td:last-child { color: var(--h-ink); font-weight: 600; }
-@media (max-width: 767px) { .table th, .table td { padding: 10px 12px; font-size: 14px; } }
+/* Second screen: the demo, then the expert-experience flow */
+.band { display: grid; grid-template-columns: minmax(0, 1fr); gap: calc(var(--h-card-gap) * 3); }
+.band > * { min-width: 0; }
+.expert { display: grid; gap: 28px; align-items: center; }
+@media (min-width: 1024px) { .expert { grid-template-columns: minmax(0, 4fr) minmax(0, 8fr); gap: 56px; } }
+.expertText { display: grid; gap: 12px; }
+.placeholder {
+  margin: 0; padding: 10px 14px; border: 1px dashed rgba(var(--h-shade), .3); border-radius: 12px; color: var(--h-muted);
+  font-size: var(--h-fs-body); font-weight: 500; line-height: 1.7;
+}
+h2.placeholder { font-size: var(--h-fs-h3); font-weight: 700; }
+.flow { display: grid; grid-template-columns: minmax(0, 1fr); justify-items: center; gap: 10px; margin: 0; padding: 0; list-style: none; }
+@media (min-width: 768px) { .flow { grid-template-columns: minmax(0, 1fr) auto minmax(0, 1.1fr) auto minmax(0, 1fr); align-items: center; gap: 14px; } }
+.arrow { display: grid; color: var(--h-muted); }
+@media (max-width: 767px) { .arrow { transform: rotate(90deg); } }
+.source {
+  display: grid; justify-items: center; gap: 2px; width: 100%; padding: 22px 16px; border-radius: 20px; background: var(--h-ink); color: #fff;
+  text-align: center; box-shadow: 0 24px 48px -28px rgba(var(--h-shade), .6);
+}
+.source b { font-family: var(--h-display-face); font-size: clamp(40px, 4vw, 56px); font-weight: 900; line-height: 1.05; }
+.source span { color: rgba(255, 255, 255, .78); font-size: 14px; }
+.layers { display: grid; gap: 8px; width: 100%; }
+.layers > span, .output > span {
+  display: flex; align-items: center; gap: 10px; padding: 12px 16px; border: 1px solid var(--h-line); border-radius: 14px; background: #fff;
+  font-size: 15px; font-weight: 600; box-shadow: 0 1px 2px rgba(var(--h-shade), .04), 0 14px 28px -20px rgba(var(--h-shade), .3);
+}
+.layers > span:nth-child(2) { margin-left: 14px; }
+.layers > span:nth-child(3) { margin-left: 28px; }
+.layers svg, .output svg { flex: none; color: var(--h-accent); }
+.output { display: grid; gap: 8px; width: 100%; }
+.output > span { border-color: rgba(255, 187, 23, .55); background: #fffdf6; }
+
+/* Scroll-linked drift for pieces further down: each moves by its own --drift across its pass through the screen
+   (half as far on a phone), only where scroll-driven animations exist and motion is welcome. */
+@supports (animation-timeline: view()) {
+  @media (prefers-reduced-motion: no-preference) {
+    .drift { animation: drift linear both; animation-timeline: view(); animation-range: cover; }
+  }
+}
+@media (max-width: 767px) { .drift { --drift-scale: .5; } }
+@keyframes drift {
+  from { translate: 0 calc(var(--drift, 20px) * var(--drift-scale, 1)); }
+  to { translate: 0 calc(var(--drift, 20px) * var(--drift-scale, 1) * -1); }
+}
 
 /* The first screen's text slides up once on load but never starts transparent, so it paints at once; the
    product pieces rise in after it, then drift with the scroll (depthClass.parallax). */
@@ -129,7 +168,7 @@
   .why { animation-delay: .22s; }
   .result, .actions { animation-delay: .28s; }
   .floatCard { animation: floatIn 1.1s var(--h-ease) both; }
-  .float[data-slot='question'] .floatCard { animation-delay: .35s; --tilt: -2deg; }
+  .float[data-slot='steps'] .floatCard { animation-delay: .35s; --tilt: -2deg; }
   .float[data-slot='checklist'] .floatCard { animation-delay: .45s; --tilt: 2deg; }
   .float[data-slot='summary'] .floatCard { animation-delay: .55s; --tilt: 1.5deg; }
   .float[data-slot='report'] .floatCard { animation-delay: .65s; --tilt: -1.5deg; }

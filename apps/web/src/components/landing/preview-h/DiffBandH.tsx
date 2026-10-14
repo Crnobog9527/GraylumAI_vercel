@@ -1,37 +1,53 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import type { CSSProperties } from 'react';
+import { ArrowRight, Box, Lightbulb, Library, MessageCircleQuestion, Scale } from 'lucide-react';
 import { LazyDemo } from '@/components/landing/demo/LazyDemo';
-import { depthClass } from '@/components/public-site/motion/depth-text';
-import { H_COMPARE, HERO_H } from '@/lib/landing/landing-copy';
+import { H_EXPERT } from '@/lib/landing/landing-copy';
 import { cn } from '@/lib/utils';
 import styles from './h.module.css';
 import hero from './hero-h.module.css';
 
+const LAYERS = [
+  { icon: Library, label: H_EXPERT.layers[0] },
+  { icon: Box, label: H_EXPERT.layers[1] },
+  { icon: Scale, label: H_EXPERT.layers[2] },
+] as const;
+
 /**
- * The second screen, right under the full-screen first one: the product at work first (the real conversation
- * components, opening on the step summary and confirming the step), then why a coach and not a general AI — the
- * Owner's difference body beside four rows of "自己用通用 AI ／ 用教练" (below it on a phone).
+ * The second screen: the product at work (the real conversation components, opening on the step summary and
+ * confirming the step), then what a general AI cannot give — the coach is built on a social-media specialist's
+ * nine years: experience → knowledge base, Skills and judgement → every question and suggestion. The heading and
+ * body are the Owner's to write; until then they show as placeholders. The pieces drift as the page scrolls.
  */
 export function DiffBandH() {
   return (
-    <section aria-label={H_COMPARE.caption} className={cn(styles.section, hero.band)}>
-      <div className={styles.demoFrame}><LazyDemo start="summary" /></div>
-      <div className={hero.diff}>
-        <p className={hero.diffBody}>{HERO_H.differenceBody}</p>
-        <table className={cn(hero.table, styles.glass)}>
-          <caption className="sr-only">{H_COMPARE.caption}</caption>
-          <thead>
-            <tr><th scope="col">{H_COMPARE.generic}</th><th scope="col">{H_COMPARE.coach}</th></tr>
-          </thead>
-          <tbody>
-            {H_COMPARE.rows.map((row, index) => (
-              <tr key={row.coach} data-reveal="" className={depthClass.reveal} style={{ '--d': index } as CSSProperties}>
-                <td>{row.generic}</td>
-                <td>{row.coach}</td>
-              </tr>
+    <section aria-labelledby="expert-title" className={cn(styles.section, hero.band)}>
+      <div className={cn(styles.demoFrame, hero.drift)} style={{ '--drift': '28px' } as CSSProperties}>
+        <LazyDemo start="summary" />
+      </div>
+      <div className={hero.expert}>
+        <div className={hero.expertText}>
+          <h2 id="expert-title" className={hero.placeholder}>{H_EXPERT.titlePlaceholder}</h2>
+          <p className={hero.placeholder}>{H_EXPERT.bodyPlaceholder}</p>
+        </div>
+        <ol className={hero.flow} aria-label={H_EXPERT.flowLabel}>
+          <li className={cn(hero.source, hero.drift)} style={{ '--drift': '18px' } as CSSProperties}>
+            <b>{H_EXPERT.years}</b><span>{H_EXPERT.source}</span>
+          </li>
+          <li className={hero.arrow} aria-hidden="true"><ArrowRight size={20} /></li>
+          <li className={hero.layers}>
+            {LAYERS.map(({ icon: Icon, label }, index) => (
+              <span key={label} className={hero.drift} style={{ '--drift': `${12 + index * 14}px` } as CSSProperties}>
+                <Icon size={17} strokeWidth={1.8} aria-hidden="true" />{label}
+              </span>
             ))}
-          </tbody>
-        </table>
+          </li>
+          <li className={hero.arrow} aria-hidden="true"><ArrowRight size={20} /></li>
+          <li className={cn(hero.output, hero.drift)} style={{ '--drift': '36px' } as CSSProperties}>
+            <span><MessageCircleQuestion size={17} strokeWidth={1.8} aria-hidden="true" />{H_EXPERT.outputs[0]}</span>
+            <span><Lightbulb size={17} strokeWidth={1.8} aria-hidden="true" />{H_EXPERT.outputs[1]}</span>
+          </li>
+        </ol>
       </div>
     </section>
   );

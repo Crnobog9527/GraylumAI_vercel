@@ -3,10 +3,10 @@
 
 import type { CSSProperties, ReactNode } from 'react';
 import { CaptureChecklist } from '@/components/opc/capture-checklist';
-import { QuestionCardView } from '@/components/opc/question-card';
+import { Button } from '@/components/ui/button';
 import result from '@/components/opc/positioning-result.module.css';
 import {
-  DEMO_LABEL, DEMO_STEPS, QUESTION_ONE, REPORT_TITLE, demoInformation, demoReducer, summaryDemoState,
+  DEMO_LABEL, DEMO_STEPS, REPORT_TITLE, demoInformation, demoReducer, summaryDemoState,
 } from '@/components/landing/demo/demo-script';
 import { depthClass } from '@/components/public-site/motion/depth-text';
 import { cn } from '@/lib/utils';
@@ -20,15 +20,25 @@ const field = (id: string) => confirmed.values[id]?.value ?? '';
 
 /**
  * The real product pieces that float around the first screen's text, like the icons around Buffer's hero: the
- * mentor's question card, the step summary, the confirmed positioning checklist and the report. All come from
+ * positioning steps with the first one done, the step summary, the confirmed positioning checklist and the report
+ * (the mentor's question card is already in the exchange beside the difference line). All come from
  * the landing demo's made-up case (示例), rendered with the workbench's own components and styles; decorative for
  * assistive tech (the same content is in the demo below). Each drifts at its own speed as the page scrolls.
  */
 export function HeroFloatsH() {
   return (
     <div className={styles.floats} aria-hidden="true">
-      <Float slot="question" speed={0.55}>
-        <QuestionCardView card={QUESTION_ONE} disabled />
+      <Float slot="steps" speed={0.55}>
+        <div className={styles.steps}>
+          <p className={styles.stepsHead}><span>我的定位分析</span><small>整体规划 · 第一步已确认</small></p>
+          <div className={styles.stepsStrip}>
+            {DEMO_STEPS.map((step, index) => (
+              <Button key={step.id} variant={index === 0 ? 'default' : 'outline'} size="sm" tabIndex={-1}>
+                {index === 0 ? '✓ ' : `${index + 1} `}{step.title}
+              </Button>
+            ))}
+          </div>
+        </div>
       </Float>
       <Float slot="summary" speed={1.05}>
         <div data-message-role="assistant" className={styles.message}>

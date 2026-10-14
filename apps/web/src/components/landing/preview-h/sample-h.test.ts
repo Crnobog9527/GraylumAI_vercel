@@ -9,7 +9,7 @@ import { metadata } from '@/app/landing/preview/h/page';
 import { SCENES } from '@/components/landing/preview-g/scenes';
 import { TILT_MAX, tiltFor } from '@/components/public-site/motion/DepthStage';
 import { DigitRoll, splitUnits } from '@/components/public-site/motion/depth-text';
-import { FINAL_ACTION, H_COMPARE, H_HERO_EXCHANGE, HERO, HERO_H, HOW_IT_WORKS, PRICE_COMPARE, RISK_REVERSAL, VOICE_WALL } from '@/lib/landing/landing-copy';
+import { FINAL_ACTION, H_EXPERT, H_HERO_EXCHANGE, HERO, HERO_H, HOW_IT_WORKS, PRICE_COMPARE, RISK_REVERSAL, VOICE_WALL } from '@/lib/landing/landing-copy';
 import { SIGNUP_CTA_HREF } from '@/lib/seo/content/shared';
 import { LANDING_FAQ_TITLE } from '@/lib/landing/landing-faq';
 import { FLOW_STEPS } from '@/lib/landing/landing-flow';
@@ -53,17 +53,18 @@ describe('style sample H', () => {
       expect(html).toContain(escape(copy));
     }
     // The Owner's first-screen pitch (2026-10-14), verbatim, and one CTA note under every main button, without the credits.
-    for (const copy of Object.values(HERO_H)) expect(html).toContain(escape(copy));
+    const shown = [HERO_H.audience, HERO_H.audienceSummary, HERO_H.difference, HERO_H.result, HERO_H.ctaNote];
+    for (const copy of shown) expect(html).toContain(escape(copy));
     // First screen, end of module 3 and the close.
     expect(html.split(HERO_H.ctaNote)).toHaveLength(4);
-    const hero = html.slice(html.indexOf('<section aria-labelledby="hero-title"'), html.indexOf(`aria-label="${H_COMPARE.caption}"`));
+    const hero = html.slice(html.indexOf('<section aria-labelledby="hero-title"'), html.indexOf('aria-labelledby="expert-title"'));
     // The first screen answers the four questions in order: what, the benefit and who for, why, what you get.
     const four = [HERO.title, HERO.promise, HERO_H.audience, HERO_H.audienceSummary, HERO_H.difference, HERO_H.result]
       .map(copy => hero.indexOf(escape(copy)));
     expect(four.every(index => index >= 0)).toBe(true);
     expect([...four].sort((a, b) => a - b)).toEqual(four);
     expect(hero).not.toContain(escape(HERO_H.differenceBody));
-    for (const row of H_COMPARE.rows) expect(html).toContain(escape(row.coach));
+    for (const label of H_EXPERT.layers) expect(html).toContain(label);
     expect(hero).not.toContain('500 积分');
     expect(hero).not.toContain('随时能看、能导出，不会收回');
     expect(html).toContain('aria-label="Pro"');
