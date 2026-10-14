@@ -25,6 +25,7 @@ import {runCases as runAccountBinding} from '../erasure-binding/cases.mjs';
 import {runConcurrency} from './concurrency.mjs';
 import {runInstant} from './instant.mjs';
 import {runRename} from './rename.mjs';
+import {runReadonly} from './readonly.mjs';
 const development=process.argv.slice(2).join(' ')==='--local-only --development';
 if ((!development && process.argv.slice(2).join(' ') !== '--local-only') || process.env.CI) throw new Error('Require --local-only');
 const root=resolve(import.meta.dirname,'../../../..');
@@ -100,6 +101,7 @@ try {
  await runConcurrency({db:client,Client,connectionString,report});
  await runInstant({db:client,Client,connectionString,report});
  await runRename({db:client,report});
+ await runReadonly({db:client,report});
  await runAccountFinancial(client,report);
  await runAccountBinding(client,report);
  const audits=ok(sql(read('packages/db/tests/account-open-policy-audit.sql')));
