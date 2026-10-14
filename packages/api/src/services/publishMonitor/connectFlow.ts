@@ -29,23 +29,33 @@ export function assertBound(cookieHeader: string | null | undefined, requestId: 
 }
 
 export type CleanupResult = { deleted: string[]; kept: string[]; deferred: string[] };
+// Confirm and cancel have already made the attempt final before cleanup runs, so cleanup must finish well inside
+// the request: it stops at the first provider outage or after this budget and leaves the rest to the sweep.
+const CLEANUP_BUDGET_MS = 45_000;
+const NAMES_BUDGET_MS = 15_000;
 
 /**
  * Deletes accounts this attempt imported but the user did not keep. Each one is re-read first and deleted only if
  * it still carries this attempt's exact external_id (a newer attempt or another user may have taken it since).
  * Anything not settled here is left for the daily orphan sweep (PR-2c); this never throws.
  */
-export async function cleanupUnselected(client: ClientDeps, externalId: string, ids: string[]): Promise<CleanupResult> {
+export async function cleanupUnselected(client: ClientDeps, externalId: string, ids: string[],
+  now: () => number = Date.now): Promise<CleanupResult> {
   const result: CleanupResult = { deleted: [], kept: [], deferred: [] };
+  const until = now() + CLEANUP_BUDGET_MS;
+  let outage = false;
   for (const id of ids) {
+    if (outage || now() >= until) { result.deferred.push(id); continue; }
     try {
       const account = await getAccount(client, id);
       if (account.kind === 'rejected') { result.kept.push(id); continue; }
-      if (account.kind !== 'ok') { result.deferred.push(id); continue; }
+      if (account.kind !== 'ok') { outage = true; result.deferred.push(id); continue; }
       if (account.value.externalId !== externalId) { result.kept.push(id); continue; }
       const removed = await deleteAccount(client, id);
-      (removed.kind === 'ok' ? result.deleted : result.deferred).push(id);
+      if (removed.kind === 'ok') result.deleted.push(id);
+      else { outage = true; result.deferred.push(id); }
     } catch {
+      outage = true;
       result.deferred.push(id);
     }
   }
@@ -61,13 +71,18 @@ export type CandidateView = PendingConnect['candidates'][number] & { username: s
  * Display names for the confirmation page. Only accounts the database listed for this actor's own attempt are read,
  * so a user can never look up someone else's account by putting its id in a URL.
  */
-export async function describeCandidates(client: ClientDeps, pending: PendingConnect): Promise<CandidateView[]> {
+export async function describeCandidates(client: ClientDeps, pending: PendingConnect,
+  now: () => number = Date.now): Promise<CandidateView[]> {
   const views: CandidateView[] = [];
+  const until = now() + NAMES_BUDGET_MS;
+  // Names are optional: after the first provider problem or the time budget, the rest show their account ID.
+  let lookups = true;
   for (const candidate of pending.candidates.slice(0, 20)) {
     let username: string | null = null;
-    if (candidate.kind !== 'unavailable') {
+    if (lookups && candidate.kind !== 'unavailable' && now() < until) {
       const account = await getAccount(client, candidate.providerAccountId).catch(() => null);
       if (account?.kind === 'ok' && account.value.platform === pending.platform) username = account.value.username;
+      else if (account?.kind !== 'rejected') lookups = false;
     }
     views.push({ ...candidate, username });
   }
