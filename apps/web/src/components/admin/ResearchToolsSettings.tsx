@@ -101,6 +101,12 @@ export function ResearchToolsSettings() {
   const data = view.data as ResearchToolsView | undefined;
   useEffect(() => { if (data) setDraft(toDraft(data)); }, [data]);
 
+  /** Manual retry: a successful read clears the earlier failure message. */
+  async function reread() {
+    const result = await view.refetch();
+    if (!result.error) { setFailure(null); setNotice('已重新读取最新设置。'); }
+  }
+
   async function onSave() {
     if (!data || !draft) return;
     setNotice(null);
@@ -134,7 +140,7 @@ export function ResearchToolsSettings() {
         {/* A failed reread keeps the cached data on screen; saving stays blocked until a fresh read. */}
         {view.error && <div role="alert" className="mb-3 space-y-2" data-testid="research-tools-stale">
           <p>{researchToolsError(view.error, 'read')} 当前显示的可能不是最新设置，读取成功前不能保存。</p>
-          <Button variant="outline" onClick={() => { void view.refetch(); }}>重新读取</Button>
+          <Button variant="outline" onClick={() => { void reread(); }}>重新读取</Button>
         </div>}
         <ResearchToolsPanel view={data} draft={draft} onChange={next => { setNotice(null); setDraft(next); }}
           onSave={() => { void onSave(); }}
