@@ -284,7 +284,9 @@ BEGIN
     IF g.used_at IS NOT NULL AND NOT (f.state='prepared' AND f.refresh_id=g.id) THEN RAISE EXCEPTION 'RESEARCH_REFRESH_USED';END IF;
     IF f.state='in_progress' OR (f.state='prepared' AND f.refresh_id IS DISTINCT FROM g.id) THEN
       RETURN jsonb_build_object('claimed',false,'fetchId',f.id,'state',f.state,'evidence',f.last_success);END IF;
-    UPDATE research_refresh_grants SET used_at=coalesce(used_at,clock_timestamp()),used_execution_id=coalesce(used_execution_id,e) WHERE id=g.id;
+    -- The grant belongs to the answer that holds the attempt now: an answer that took over an unsent attempt
+    -- becomes its user, so deleting that answer deletes the grant and deleting the earlier one does not.
+    UPDATE research_refresh_grants SET used_at=coalesce(used_at,clock_timestamp()),used_execution_id=e WHERE id=g.id;
   -- An ordinary claim takes over only a prepared attempt not bound to a refresh grant (that one resumes with its
   -- own grant; meanwhile the earlier evidence is reused, never a new paid fetch).
   ELSIF f.state='in_progress' OR (f.state='prepared' AND f.refresh_id IS NOT NULL)

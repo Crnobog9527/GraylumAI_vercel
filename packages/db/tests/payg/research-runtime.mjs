@@ -256,6 +256,33 @@ export async function researchRuntimeCases({db,Client,connectionString,report,cr
     report.checks.push('RT-3b answer deletion: refresh grants used by the deleted answer, and unused grants made from its evidence, are deleted');
   }
 
+  // A refresh left unsent by one answer and resumed by another answer belongs to the answer that resumed it.
+  {
+    const f = await session(db,createFixture);
+    const [e2,e3] = [randomUUID(),randomUUID()];
+    for (const id of [e2,e3]) await db.query(`INSERT INTO runtime_executions(id,actor_id,session_id,request_id,payload,history_revision,state)
+      VALUES($1,$2,$3,gen_random_uuid(),'{}',0,'interrupted')`,[id,f.actor,f.session]);
+    const one = await rpc(db,'research_account_fetch_claim',f.actor,f.session,f.execution,'tiktok','alpha',null);
+    await rpc(db,'research_account_fetch_dispatch',f.actor,one.fetchId,one.attempt);
+    await rpc(db,'research_account_fetch_finish',f.actor,one.fetchId,one.attempt,'succeeded',{operations:['op-e1']});
+    const grant = await rpc(db,'research_refresh_create',f.actor,f.session,'tiktok','alpha');
+    assert.equal((await rpc(db,'research_account_fetch_claim',f.actor,f.session,e2,'tiktok','alpha',grant)).claimed,true);
+    const resumed = await rpc(db,'research_account_fetch_claim',f.actor,f.session,e3,'tiktok','alpha',grant);
+    assert.equal(resumed.claimed,true,'the unsent refresh is resumed by another answer');
+    const usedBy = async () => (await db.query('SELECT used_execution_id::text u FROM research_refresh_grants WHERE id=$1',[grant])).rows[0]?.u;
+    assert.equal(await usedBy(),e3);
+    const erase = async id => {
+      const scope = await rpc(db,'content_erasure_scope',f.actor,'answer',id);
+      const hash = (await db.query("SELECT encode(sha256(convert_to($1::jsonb::text,'utf8')),'hex') h",[scope])).rows[0].h;
+      await rpc(db,'content_erasure_confirm',f.actor,'answer',id,hash);
+    };
+    await erase(e2);
+    assert.equal(await usedBy(),e3,'deleting the answer that never sent it keeps the grant');
+    await erase(e3);
+    assert.equal(await count(db,'research_refresh_grants','id=$1',[grant]),0,'deleting the answer that resumed it deletes the grant');
+    report.checks.push('RT-3b refresh resumed by another answer: the grant follows the answer holding the attempt; deleting the earlier answer keeps it, deleting the resuming answer deletes it');
+  }
+
   // A runtime search whose BILL2 call is not settled yet still blocks deletion (money not final).
   {
     const f = await session(db,createFixture);
