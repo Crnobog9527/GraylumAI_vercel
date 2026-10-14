@@ -2,8 +2,9 @@
 import { Gavel, Link2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { DetailSection, JurySeatNames, RulingFields } from './jury-events';
-import { needsConfirm, type ChoiceState, type Use } from './jury-adopt';
+import { firstSentence, needsConfirm, type ChoiceState, type Use } from './jury-adopt';
 import { SeatBadge } from './JuryBits';
+import { RedlineText } from './JuryDocument';
 import styles from './jury-results.module.css';
 
 /** One ruling, written so it reads on its own: the panel's opinion, why, and what to change, with who raised it. */
@@ -28,9 +29,30 @@ function Ruling({ ruling, names }: { ruling: RulingFields; names: JurySeatNames 
   );
 }
 
+/** The original and the revision of a changed chapter, with the redline and the positioning fields it touches. */
+function Compare({ section }: { section: DetailSection }) {
+  return (
+    <>
+      <p className={styles.compareLabel}>修订标记{section.fields.length > 0 ? `（涉及 ${section.fields.length} 项定位内容）` : ''}</p>
+      <RedlineText before={section.original ?? ''} after={section.revised ?? ''} className={styles.redline} />
+      <div className={styles.compareGrid}>
+        <div><p className={styles.compareLabel}>原文</p><p className={styles.compareText}>{section.original}</p></div>
+        <div><p className={styles.compareLabel}>修订版</p><p className={cn(styles.compareText, styles.revised)}>{section.revised}</p></div>
+      </div>
+      {section.fields.length > 0 ? (
+        <ul className={styles.fields}>
+          {section.fields.map(item => (
+            <li key={`${item.stepId}.${item.fieldId}`}><s>{item.before}</s><span aria-hidden="true">→</span><b>{item.after}</b></li>
+          ))}
+        </ul>
+      ) : null}
+    </>
+  );
+}
+
 /**
- * A chapter of the result page: what the panel concluded about it and, when the revision changed it, the user's
- * choice between the revision and the original, with both texts side by side on request.
+ * A chapter of the result page: one line of what changed and why; the rulings and both texts only when opened.
+ * When the revision changed it, the user's choice between the revision and the original stays in view.
  */
 export function JuryChapter({ section, names, state, locked, onUse, onConfirm }: {
   section: DetailSection; names: JurySeatNames; state: ChoiceState; locked: boolean;
@@ -38,6 +60,7 @@ export function JuryChapter({ section, names, state, locked, onUse, onConfirm }:
 }) {
   const choice = state[section.section];
   const name = `choice-${section.section}`;
+  const primary = section.rulings.find(item => item.adopted) ?? section.rulings[0];
   return (
     <article className={cn(styles.chapter, section.changed && styles.chapterChanged)} id={`chapter-${section.section}`}>
       <header className={styles.chapterHead}>
@@ -45,27 +68,27 @@ export function JuryChapter({ section, names, state, locked, onUse, onConfirm }:
         <span className={styles.changeTag} data-changed={section.changed}>{section.changed ? '修订稿改了这一章' : '修订稿没改这一章'}</span>
         {section.wordingOnly ? <span className={styles.flagSoft}>只改了表述</span> : null}
       </header>
-      {section.rulings.length > 0 ? (
-        <ul className={styles.rulings}>{section.rulings.map(item => <Ruling key={item.issue} ruling={item} names={names} />)}</ul>
+      {primary ? (
+        <div className={styles.gistBlock}>
+          <p className={styles.gist}>{primary.opinion}</p>
+          <p className={styles.gistWhy}>为什么：{firstSentence(primary.reason)}</p>
+        </div>
+      ) : null}
+      {section.rulings.length > 0 || section.changed ? (
+        <details className={styles.compare}>
+          <summary>
+            {section.changed ? '看评审意见和原文对照' : '看评审意见'}
+            {section.rulings.length > 1 ? `（${section.rulings.length} 条）` : ''}
+          </summary>
+          {section.rulings.length > 0 ? (
+            <ul className={cn(styles.rulings, styles.inFold)}>{section.rulings.map(item => <Ruling key={item.issue} ruling={item} names={names} />)}</ul>
+          ) : null}
+          {section.changed ? <Compare section={section} /> : null}
+        </details>
       ) : null}
 
       {section.changed ? (
         <>
-          <details className={styles.compare}>
-            <summary>对比原文和修订版{section.fields.length > 0 ? `（涉及 ${section.fields.length} 项定位内容）` : ''}</summary>
-            <div className={styles.compareGrid}>
-              <div><p className={styles.compareLabel}>原文</p><p className={styles.compareText}>{section.original}</p></div>
-              <div><p className={styles.compareLabel}>修订版</p><p className={cn(styles.compareText, styles.revised)}>{section.revised}</p></div>
-            </div>
-            {section.fields.length > 0 ? (
-              <ul className={styles.fields}>
-                {section.fields.map(item => (
-                  <li key={`${item.stepId}.${item.fieldId}`}><s>{item.before}</s><span aria-hidden="true">→</span><b>{item.after}</b></li>
-                ))}
-              </ul>
-            ) : null}
-          </details>
-
           <fieldset className={styles.choice} disabled={locked}>
             <legend>这一章用哪个版本？</legend>
             <div className={styles.choiceRow}>

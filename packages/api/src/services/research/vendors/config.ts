@@ -9,7 +9,7 @@ import { FIRECRAWL_ROUTE } from './firecrawl';
 import { tikhubRouteId } from './tikhub';
 import {
   RESEARCH_VENDORS, SOCIAL_KINDS, SOCIAL_PLATFORMS,
-  type ResearchVendor, type SocialPlatform,
+  type ResearchVendor, type SocialKind, type SocialPlatform,
 } from './types';
 
 export const RESEARCH_TOOLS_KEY = 'research_tools_config';
@@ -30,12 +30,44 @@ export const BENCHMARK_RULES = Object.freeze({
 });
 
 /**
- * Platforms whose adapter routes can feed a benchmark: an account profile with followers plus account
- * posts carrying absolute publication times (30-day rule). Others (Douyin, Xiaohongshu, Weibo without
- * profile routes; YouTube, Instagram without reliable times; Bilibili without followers) need RT-7 first,
- * and adding one requires a code change here, not an admin setting.
+ * Per platform, the query kinds one benchmark account needs (each kind is one billed sub-call) and which of them
+ * carries the exact follower count. A benchmark needs exact followers plus an absolute publication time for the
+ * 30-day rule. `verified` is set in code only after RT-7 checked the routes against recorded real responses
+ * (plan §6.1); an admin setting can never enable an unverified platform. Douyin, Weibo and Instagram have no
+ * benchmark route set yet.
+ *
+ * - bilibili: the profile has no followers; they come from the separate relation call.
+ * - xiaohongshu: no public view counts, so `views` is always missing.
+ * - youtube: channel videos have only relative times and abbreviated subscriber labels; one post_detail of the
+ *   newest video gives the exact followers and that video's absolute date. Other videos keep publishedAt missing.
  */
-export const BENCHMARK_CAPABLE_PLATFORMS: readonly SocialPlatform[] = Object.freeze(['tiktok', 'x']);
+export interface BenchmarkRouteSet { kinds: readonly SocialKind[]; followersFrom: SocialKind; verified: boolean }
+const routeSet = (kinds: SocialKind[], followersFrom: SocialKind, verified: boolean): Readonly<BenchmarkRouteSet> =>
+  Object.freeze({ kinds: Object.freeze(kinds), followersFrom, verified });
+export const BENCHMARK_ROUTE_KINDS: Readonly<Partial<Record<SocialPlatform, Readonly<BenchmarkRouteSet>>>> = Object.freeze({
+  tiktok: routeSet(['account_profile', 'account_posts'], 'account_profile', true),
+  x: routeSet(['account_profile', 'account_posts'], 'account_profile', true),
+  bilibili: routeSet(['account_profile', 'account_relation', 'account_posts'], 'account_relation', false),
+  xiaohongshu: routeSet(['account_profile', 'account_posts'], 'account_profile', false),
+  youtube: routeSet(['account_posts', 'post_detail'], 'post_detail', false),
+});
+
+/** RT-3a budgets at most this many sub-calls per benchmark account inside the run's 32-call ceiling. */
+export const MAX_BENCHMARK_SUBCALLS_PER_ACCOUNT = 3;
+for (const [platform, entry] of Object.entries(BENCHMARK_ROUTE_KINDS)) {
+  if (entry!.kinds.length > MAX_BENCHMARK_SUBCALLS_PER_ACCOUNT || !entry!.kinds.includes(entry!.followersFrom)) {
+    throw new Error(`BENCHMARK_ROUTE_KINDS ${platform}: too many sub-calls or followers from an unlisted kind`);
+  }
+}
+
+/** Billed sub-calls one benchmark account needs on `platform`; 0 when the platform has no benchmark route set. */
+export function benchmarkSubcallsPerAccount(platform: SocialPlatform): number {
+  return BENCHMARK_ROUTE_KINDS[platform]?.kinds.length ?? 0;
+}
+
+/** Platforms whose benchmark routes are verified (derived from the table; changing it is a code change). */
+export const BENCHMARK_CAPABLE_PLATFORMS: readonly SocialPlatform[] = Object.freeze(
+  (Object.keys(BENCHMARK_ROUTE_KINDS) as SocialPlatform[]).filter(platform => BENCHMARK_ROUTE_KINDS[platform]!.verified));
 
 /** Run ceiling enforced by bill2_payg_validate_quote (0162); subcalls must fit beside model calls. */
 export const RUN_MAX_CALLS = 32;
@@ -61,7 +93,7 @@ const routeSchema = z.object({
   maxUnitsPerCall: z.literal(ADAPTER_MAX_UNITS),
 }).strict();
 
-export const researchToolsConfigSchema = z.object({
+const configShape = {
   version: z.literal(1),
   enabled: z.boolean(),
   vendors: z.object({ tikhub: vendorSchema, parallel: vendorSchema, firecrawl: vendorSchema }).strict(),
@@ -81,7 +113,11 @@ export const researchToolsConfigSchema = z.object({
     maxFirstPostAgeDays: z.number().int().min(1).max(365),
     minViewsToFollowers: z.string().regex(/^(0|[1-9]\d{0,3})(\.\d{1,4})?$/),
   }).strict(),
-}).strict().superRefine((config, ctx) => {
+};
+
+type ConfigBody = z.infer<z.ZodObject<typeof configShape>>;
+
+function checkConfig(config: ConfigBody, ctx: z.RefinementCtx) {
   config.benchmarkPlatforms.forEach((platform, index) => {
     if (!config.verifiedPlatforms.includes(platform)) {
       ctx.addIssue({ code: 'custom', path: ['benchmarkPlatforms', index], message: `${platform} is not a verified platform` });
@@ -89,8 +125,8 @@ export const researchToolsConfigSchema = z.object({
     if (!BENCHMARK_CAPABLE_PLATFORMS.includes(platform)) {
       ctx.addIssue({ code: 'custom', path: ['benchmarkPlatforms', index], message: `${platform} routes cannot supply benchmark fields yet` });
     }
-    // A benchmark fetch needs the follower-bearing profile and the recent posts (plan §1.1, §1.2).
-    for (const kind of ['account_profile', 'account_posts'] as const) {
+    // A benchmark fetch needs every route its platform's benchmark set lists (plan §1.1, §1.2).
+    for (const kind of BENCHMARK_ROUTE_KINDS[platform]?.kinds ?? []) {
       if (!config.routes.some(entry => entry.platform === platform && entry.kind === kind)) {
         ctx.addIssue({ code: 'custom', path: ['benchmarkPlatforms', index], message: `${platform} needs a configured ${kind} route` });
       }
@@ -105,7 +141,17 @@ export const researchToolsConfigSchema = z.object({
       ctx.addIssue({ code: 'custom', path: ['routes', index, 'route'], message: `Unknown ${entry.vendor} route for ${key}` });
     }
   });
-});
+}
+
+export const researchToolsConfigSchema = z.object(configShape).strict().superRefine(checkConfig);
+
+/** What the 0254 writer stores: the config plus server-written revision, author and time. */
+export const storedResearchToolsSchema = z.object({
+  ...configShape,
+  revision: z.number().int().min(1).max(9999999999),
+  updatedBy: z.string().uuid(),
+  updatedAt: isoTime,
+}).strict().superRefine(checkConfig);
 
 export type ResearchToolsConfig = z.infer<typeof researchToolsConfigSchema>;
 type RoutePlatform = ResearchToolsConfig['routes'][number]['platform'];
@@ -135,17 +181,43 @@ export const DISABLED_RESEARCH_TOOLS: ResearchToolsConfig = Object.freeze({
   recentGrowth: { maxFirstPostAgeDays: 90, minViewsToFollowers: '1' },
 }) as ResearchToolsConfig;
 
-/** Reads the stored config; absent, unreadable or invalid → everything off (fail closed). */
-export async function readResearchToolsConfig(db: SupabaseClient): Promise<{ config: ResearchToolsConfig; source: 'configured' | 'default' | 'invalid' }> {
+/**
+ * The revision the 0254 writer will compare against: PostgreSQL's own `value->>'revision'` text
+ * (JSON decoding would turn `1.0` into 1), with the same rule as the SQL, otherwise 0. So a repair
+ * save of an invalid row never conflicts.
+ */
+function storedRevision(revisionText: unknown): number {
+  return typeof revisionText === 'string' && /^(0|[1-9][0-9]{0,9})$/.test(revisionText) ? Number(revisionText) : 0;
+}
+
+export interface ResearchToolsState {
+  config: ResearchToolsConfig;
+  source: 'configured' | 'default' | 'invalid';
+  revision: number;
+  updatedBy: string | null;
+  updatedAt: string | null;
+}
+
+/**
+ * Reads the stored config; absent, unreadable or invalid → everything off (fail closed). An invalid
+ * stored value still reports its revision so an admin can overwrite it with a valid one.
+ */
+export async function readResearchToolsConfig(db: SupabaseClient): Promise<ResearchToolsState> {
+  const off = (source: ResearchToolsState['source'], revision = 0): ResearchToolsState =>
+    ({ config: DISABLED_RESEARCH_TOOLS, source, revision, updatedBy: null, updatedAt: null });
   try {
-    const { data, error } = await db.from('system_settings').select('value').eq('key', RESEARCH_TOOLS_KEY).maybeSingle();
-    if (error) return { config: DISABLED_RESEARCH_TOOLS, source: 'invalid' };
-    if (!data) return { config: DISABLED_RESEARCH_TOOLS, source: 'default' };
+    // Value and PostgreSQL's revision text come from one request, so they describe one snapshot.
+    const { data, error } = await db.from('system_settings').select('value,revision:value->>revision')
+      .eq('key', RESEARCH_TOOLS_KEY).maybeSingle();
+    if (error) return off('invalid');
+    if (!data) return off('default');
     const raw = typeof data.value === 'string' ? JSON.parse(data.value) : data.value;
-    const parsed = researchToolsConfigSchema.safeParse(raw);
-    return parsed.success ? { config: parsed.data, source: 'configured' } : { config: DISABLED_RESEARCH_TOOLS, source: 'invalid' };
+    const parsed = storedResearchToolsSchema.safeParse(raw);
+    if (!parsed.success) return off('invalid', storedRevision((data as { revision?: unknown }).revision));
+    const { revision, updatedBy, updatedAt, ...config } = parsed.data;
+    return { config, source: 'configured', revision, updatedBy, updatedAt };
   } catch {
-    return { config: DISABLED_RESEARCH_TOOLS, source: 'invalid' };
+    return off('invalid');
   }
 }
 

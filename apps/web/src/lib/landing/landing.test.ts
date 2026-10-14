@@ -42,12 +42,22 @@ describe('landing FAQ', () => {
   it('gives the JSON-LD the same text the page shows', () => {
     const data = buildLandingPageData(ALL_ON, CATALOG);
     const shown = data.faqGroups.flatMap(group => group.items);
-    expect(data.faqItems).toEqual(shown.map(item => ({ question: item.question, answer: item.answer.join('\n') })));
+    expect(data.faqItems).toEqual(shown.filter(item => !item.needs.includes('founder'))
+      .map(item => ({ question: item.question, answer: item.answer.join('\n') })));
     expect(faqAnswerText(shown[7])).toContain('\n1. 把你现有的定位资料上传到账号资料库，再连上你的账号。\n');
   });
 });
 
 describe('landing price cards', () => {
+  it('promises the AI coach on the Gold card and the free trial in the notes only while those are on (Owner 2026-10-14)', () => {
+    const noCoach = buildLandingPageData({ ...ALL_ON, coach: false }, []);
+    expect(noCoach.showResult.gold ?? false).toBe(false);
+    const noGrant = buildLandingPageData({ ...ALL_ON, signupGrant: false }, []);
+    expect(noGrant.heroNote).toBe('无需绑卡');
+    expect(noGrant.finalNote).toBe('无需绑卡');
+    expect(buildLandingPageData(ALL_ON, []).finalNote).toBe('无需绑卡，免费试用');
+  });
+
   const offers = { goldFirstMonth: 49, founder: { price: 496, total: 50, available: 37 } };
 
   it('matches the final card wording when the server provides every offer', () => {
@@ -63,8 +73,8 @@ describe('landing price cards', () => {
     expect(founder.quotes.monthly).toBeNull();
     expect(founder.missingNote.monthly).toBe('（创始会员只有年付）');
     expect(founder.quotes.yearly).toMatchObject({
-      price: '$496', strike: '$828', tag: '创始会员 · 终身 6 折', saving: '比按月付省 $332 · 相当于 $41.33/月',
-      renewal: '首年 $496，之后每年按当时 Gold 月付×12 的 6 折续费，调价会提前通知，可随时取消',
+      price: '$496', strike: '$828', tag: '创始会员 · 6 折', saving: '比按月付省 $332 · 相当于 $41.33/月',
+      renewal: '首年 $496；只要连续续费，一直按 Gold 价格的 6 折，目前每年 $496，可随时取消',
     });
   });
 
@@ -117,7 +127,7 @@ describe('landing page data', () => {
     expect(data.faqItems).toHaveLength(14);
     expect(data.faqItems.map(item => item.question)).not.toContain('为什么创始会员只有 50 个名额？');
     expect(data.compareRows).toHaveLength(4);
-    expect(data.heroNote).toContain('注册送 500 积分');
+    expect(data.heroNote).toBe('无需绑卡，免费试用');
     // No public price answer yet: no founder card, no seats, Gold monthly stays at the catalog price.
     expect(data.pricing.cards.map(card => card.key)).toEqual(['pro', 'gold']);
     expect(data.founderSeats).toBeNull();
@@ -127,7 +137,12 @@ describe('landing page data', () => {
   it('shows the full page when everything is on', () => {
     const data = buildLandingPageData(ALL_ON, CATALOG, { goldFirstMonth: 49, founder: { price: 496, total: 50, available: 12 } });
     expect(data.notes).toHaveLength(7);
-    expect(data.faqItems).toHaveLength(16);
+    expect(data.faqGroups.flatMap(group => group.items)).toHaveLength(16);
+    // Structured data is cached hourly, so it never carries the founder offer or its FAQ entries.
+    expect(data.faqItems.length).toBeLessThan(16);
+    expect(data.faqItems.map(item => item.question)).not.toContain('创始会员和普通 Gold 年付差在哪？');
+    expect(data.offerList.map(offer => offer.name).some(name => name.includes('创始'))).toBe(false);
+    expect(data.offerList.some(offer => offer.price === 496)).toBe(false);
     expect(data.compareRows).toHaveLength(4);
     expect(data.promise.map(part => part.text).join('')).toBe(
       '你不用再分心研究运营技术，不用自己想选题，也不用再为怎么变现发愁。发了内容以后，也不用自己看数据：它每周告诉你哪条有效、下周怎么调。'
@@ -135,8 +150,8 @@ describe('landing page data', () => {
     );
     expect(data.founderSeats).toBe(12);
     expect(data.showStack).toBe(true);
-    expect(data.heroNote).toBe('免费注册，不用绑卡。注册送 500 积分。聊出来的内容随时能看、能导出，不会收回。');
-    expect(data.finalNote).toBe('不用绑卡 · 注册送 500 积分 · 聊出来的内容不会收回');
+    expect(data.heroNote).toBe('无需绑卡，免费试用');
+    expect(data.finalNote).toBe('无需绑卡，免费试用');
     expect(data.risk).toHaveLength(4);
   });
 

@@ -12,7 +12,7 @@ const readSchema = z.object({
     workflow: z.object({ steps: z.array(field) }),
     steps: z.record(z.string(), z.object({
       version: z.number().int().nonnegative(), reviewVersion: z.number().int().nonnegative(),
-      valid: z.boolean(),
+      valid: z.boolean(), body: z.string().optional(),
     })),
   }),
   information: z.record(z.string(), z.object({
@@ -55,21 +55,37 @@ function literal(text: string) {
   }).join('');
 }
 
-export function confirmedInformationMarkdown(raw: unknown, draftId: string, expected: string): string | null {
-  if (informationExportIdentity(raw, draftId) !== expected) throw new Error(EXPORT_CHANGED);
+export type ConfirmedSection = { title: string; fields: Array<{ title: string; value: string; nature: string }> };
+
+/**
+ * The confirmed content only: what the read-only page shows and what the export writes are the same
+ * list, so nothing unconfirmed (and nothing from a deleted conversation) appears in either.
+ */
+export function confirmedSections(raw: unknown, draftId: string): ConfirmedSection[] {
   const p = projection(raw, draftId);
-  const sections: string[] = [];
+  // A draft whose conversation was deleted also keeps the body of each confirmed step: it may be the
+  // only confirmed content (fields deferred). The server sends it for confirmed steps only.
+  const stepBodies = (raw as { conversationDeleted?: unknown } | null)?.conversationDeleted === true;
   const natures: Record<string, string> = { fact: '事实', hypothesis: '假设', decision: '决定', unknown: '未标注' };
-  for (const step of p.steps) {
+  return p.steps.flatMap(step => {
     const fields = step.schema.flatMap(field => {
       const answer = step.values[field.id];
       if (answer?.status !== 'confirmed' || !answer.value.trim()) return [];
-      const title = literal(field.title).replace(/\n/g, ' ');
-      return [`### ${title}\n\n性质：${natures[answer.nature ?? 'unknown'] ?? '未标注'}\n\n` +
-        answer.value.replace(/\r\n?/g, '\n').split('\n').map(line => `> ${literal(line)}`).join('\n')];
+      return [{ title: field.title, value: answer.value, nature: natures[answer.nature ?? 'unknown'] ?? '未标注' }];
     });
-    if (fields.length) sections.push(`## ${literal(step.title).replace(/\n/g, ' ')}\n\n${fields.join('\n\n')}`);
-  }
+    const body = stepBodies && step.state.valid && step.state.body?.trim()
+      ? [{ title: '本步结论', value: step.state.body, nature: '已确认' }] : [];
+    return fields.length || body.length ? [{ title: step.title, fields: [...body, ...fields] }] : [];
+  });
+}
+
+export function confirmedInformationMarkdown(raw: unknown, draftId: string, expected: string): string | null {
+  if (informationExportIdentity(raw, draftId) !== expected) throw new Error(EXPORT_CHANGED);
+  const sections = confirmedSections(raw, draftId).map(section => {
+    const fields = section.fields.map(field => `### ${literal(field.title).replace(/\n/g, ' ')}\n\n性质：${field.nature}\n\n` +
+      field.value.replace(/\r\n?/g, '\n').split('\n').map(line => `> ${literal(line)}`).join('\n'));
+    return `## ${literal(section.title).replace(/\n/g, ' ')}\n\n${fields.join('\n\n')}`;
+  });
   return sections.length ? '# 已确认的前置信息\n\n仅包含已保存并确认的资料；假设与决定不代表已验证的事实。\n\n' +
     sections.join('\n\n') + '\n' : null;
 }
