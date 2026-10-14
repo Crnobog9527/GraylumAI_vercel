@@ -6,10 +6,16 @@
 
 -- Staging-only non-secret baseline seed for #148 Phase 3.
 --
+-- 正式环境使用前须 Owner 批准（AGENTS.md 第 1 节）。Production use requires Owner approval.
+--
 -- This file is not an automatic migration. It must be applied only to the
 -- staging database. The agent applies it after confirming the staging target
 -- (see docs/runbooks/STAGING_REPRODUCIBILITY.md); production use requires
 -- Owner approval under AGENTS.md section 1.
+--
+-- The plan and credit-package rows follow the decided catalog (MASTER_PLAN 2.1 item 51, records F/G/J/S/T;
+-- Owner 2026-10-14: free users get no monthly credits, only the 500 sign-up credits). Stripe price ids are
+-- never written here: they are derived from payment_provider_refs and set only through pay_common_save_catalog.
 --
 -- Safety boundaries:
 -- - No real provider keys, Supabase keys, connection strings, auth material, or
@@ -97,11 +103,11 @@ VALUES
     0,
     NULL,
     NULL,
-    100,
-    1200,
+    0,
+    0,
     0,
     100,
-    '["Basic staging access", "Short context retention"]'::jsonb,
+    '["注册赠送500积分（一次性）"]'::jsonb,
     7,
     10,
     'false',
@@ -110,21 +116,23 @@ VALUES
     10,
     NOW()
   ),
+  -- Pro: $29/month or $279/year; 3,480 credits a month (120 per dollar), yearly paid out as 12 monthly grants;
+  -- members buy credit packs at 95%.
   (
     '10000000-0000-4000-8000-000000000002',
     'Pro',
     'pro',
     true, true, 500000000,
     true, 30, false, false,
-    990,
-    9900,
+    2900,
+    27900,
     NULL,
     NULL,
-    1500,
-    20000,
+    3480,
+    41760,
     0,
-    100,
-    '["Extended staging context", "Export enabled"]'::jsonb,
+    95,
+    '[]'::jsonb,
     30,
     20,
     'true',
@@ -133,21 +141,23 @@ VALUES
     20,
     NOW()
   ),
+  -- Gold: $69/month or $621/year; 8,970 credits a month (130 per dollar); members buy credit packs at 90%.
+  -- The $49 first month and the $496 founder year are checkout offers, not catalog rows.
   (
     '10000000-0000-4000-8000-000000000003',
     'Gold',
     'gold',
     true, true, 2000000000,
     true, 90, true, true,
-    2990,
-    29900,
+    6900,
+    62100,
     NULL,
     NULL,
-    5000,
-    70000,
-    500,
+    8970,
+    107640,
+    0,
     90,
-    '["Long staging context", "Batch export enabled"]'::jsonb,
+    '[]'::jsonb,
     90,
     50,
     'true',
@@ -163,8 +173,7 @@ SET
   level = EXCLUDED.level,
   monthly_price = EXCLUDED.monthly_price,
   yearly_price = EXCLUDED.yearly_price,
-  stripe_monthly_price_id = EXCLUDED.stripe_monthly_price_id,
-  stripe_yearly_price_id = EXCLUDED.stripe_yearly_price_id,
+  -- stripe_*_price_id are derived from payment_provider_refs (pay_common_plan_derived) and never overwritten here.
   monthly_credits = EXCLUDED.monthly_credits,
   yearly_credits = EXCLUDED.yearly_credits,
   monthly_bonus_credits = EXCLUDED.monthly_bonus_credits,
@@ -190,36 +199,38 @@ INSERT INTO public.credit_packages (
   active
 )
 VALUES
+  -- Three tiers (records S/T): $9.90 / 990, $29.90 / 2,990, $99.90 / 9,990 + 1,000 bonus. Members only; the Pro 95% /
+  -- Gold 90% member prices are rounded down to $0.10 at checkout from package_discount.
   (
-    '20000000-0000-4000-8000-000000000001',
-    'Staging Starter Credits',
-    500,
-    500,
+    '30000000-0000-4000-8000-000000000001',
+    '积分包 小',
+    990,
+    990,
     0,
     NULL,
-    10,
+    1,
     'false',
     'true'
   ),
   (
-    '20000000-0000-4000-8000-000000000002',
-    'Staging Plus Credits',
-    1500,
-    1800,
-    150,
+    '30000000-0000-4000-8000-000000000002',
+    '积分包 中',
+    2990,
+    2990,
+    0,
     NULL,
-    20,
-    'true',
+    2,
+    'false',
     'true'
   ),
   (
-    '20000000-0000-4000-8000-000000000003',
-    'Staging Max Credits',
-    5000,
-    6500,
+    '30000000-0000-4000-8000-000000000003',
+    '积分包 大',
+    9990,
+    9990,
     1000,
     NULL,
-    30,
+    3,
     'false',
     'true'
   )
@@ -229,10 +240,15 @@ SET
   price = EXCLUDED.price,
   credits_amount = EXCLUDED.credits_amount,
   bonus_credits = EXCLUDED.bonus_credits,
-  stripe_price_id = EXCLUDED.stripe_price_id,
+  -- stripe_price_id is derived from payment_provider_refs and never overwritten here.
   sort_order = EXCLUDED.sort_order,
   is_popular = EXCLUDED.is_popular,
   active = EXCLUDED.active;
+
+-- The pre-decision staging packages stay unsellable wherever an earlier seed created them.
+UPDATE public.credit_packages SET active = 'false'
+WHERE id IN ('20000000-0000-4000-8000-000000000001', '20000000-0000-4000-8000-000000000002',
+  '20000000-0000-4000-8000-000000000003') AND active <> 'false';
 
 -- Legacy cost columns below are placeholders for old entry points only.
 -- New pricing paths use OpenRouter config.pricing; remove these with LEGACY-CLOSE.
