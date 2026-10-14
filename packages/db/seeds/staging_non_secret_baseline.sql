@@ -6,10 +6,16 @@
 
 -- Staging-only non-secret baseline seed for #148 Phase 3.
 --
+-- 正式环境使用前须 Owner 批准（AGENTS.md 第 1 节）。Production use requires Owner approval.
+--
 -- This file is not an automatic migration. It must be applied only to the
 -- staging database. The agent applies it after confirming the staging target
 -- (see docs/runbooks/STAGING_REPRODUCIBILITY.md); production use requires
 -- Owner approval under AGENTS.md section 1.
+--
+-- The plan and credit-package rows follow the decided catalog (MASTER_PLAN 2.1 item 51, records F/G/J/S/T;
+-- Owner 2026-10-14: free users get no monthly credits, only the 500 sign-up credits). Stripe price ids are
+-- never written here: they are derived from payment_provider_refs and set only through pay_common_save_catalog.
 --
 -- Safety boundaries:
 -- - No real provider keys, Supabase keys, connection strings, auth material, or
@@ -58,6 +64,38 @@ VALUES
 ON CONFLICT (key) DO UPDATE
 SET value = EXCLUDED.value;
 
+-- A seed replay must not change an amount whose standard Stripe price is currently mapped: that price would stay current and
+-- every checkout would fail PAY_COMMON_PRICE_MISMATCH. Like pay_common_save_catalog's PAY_COMMON_PRICE_REPLACEMENT_REQUIRED,
+-- refuse here; change such amounts through the admin catalog save, which replaces the price and its mapping together.
+DO $seed_price_guard$
+BEGIN
+  -- Take the row locks pay_common_save_catalog takes, so a concurrent catalog save cannot add a mapping after this check;
+  -- this transaction keeps them until the upserts below commit.
+  PERFORM 1 FROM public.membership_plans WHERE level IN ('free', 'pro', 'gold') ORDER BY id FOR UPDATE;
+  PERFORM 1 FROM public.credit_packages WHERE id IN ('30000000-0000-4000-8000-000000000001',
+    '30000000-0000-4000-8000-000000000002', '30000000-0000-4000-8000-000000000003') ORDER BY id FOR UPDATE;
+  IF EXISTS (
+    SELECT 1
+    FROM (VALUES ('free', 'monthly', 0), ('free', 'yearly', 0), ('pro', 'monthly', 2900), ('pro', 'yearly', 27900),
+      ('gold', 'monthly', 6900), ('gold', 'yearly', 62100)) AS seed(level, cycle, amount)
+    JOIN public.membership_plans plan ON plan.level = seed.level
+    JOIN public.payment_provider_refs ref ON ref.membership_plan_id = plan.id AND ref.object_type = 'price'
+      AND ref.billing_cycle = seed.cycle AND ref.is_current AND ref.offer_kind = 'standard'
+    WHERE (CASE seed.cycle WHEN 'monthly' THEN plan.monthly_price ELSE plan.yearly_price END) IS DISTINCT FROM seed.amount
+  ) OR EXISTS (
+    SELECT 1
+    FROM (VALUES ('30000000-0000-4000-8000-000000000001'::uuid, 990), ('30000000-0000-4000-8000-000000000002'::uuid, 2990),
+      ('30000000-0000-4000-8000-000000000003'::uuid, 9990)) AS seed(id, amount)
+    JOIN public.credit_packages pack ON pack.id = seed.id
+    JOIN public.payment_provider_refs ref ON ref.credit_package_id = pack.id AND ref.object_type = 'price'
+      AND ref.is_current
+    WHERE pack.price IS DISTINCT FROM seed.amount
+  ) THEN
+    RAISE EXCEPTION 'SEED_PRICE_REPLACEMENT_REQUIRED' USING ERRCODE = '23514';
+  END IF;
+END
+$seed_price_guard$;
+
 INSERT INTO public.membership_plans (
   id,
   name,
@@ -97,11 +135,11 @@ VALUES
     0,
     NULL,
     NULL,
-    100,
-    1200,
+    0,
+    0,
     0,
     100,
-    '["Basic staging access", "Short context retention"]'::jsonb,
+    '["注册赠送500积分（一次性）"]'::jsonb,
     7,
     10,
     'false',
@@ -110,21 +148,23 @@ VALUES
     10,
     NOW()
   ),
+  -- Pro: $29/month or $279/year; 3,480 credits a month (120 per dollar), yearly paid out as 12 monthly grants;
+  -- members buy credit packs at 95%.
   (
     '10000000-0000-4000-8000-000000000002',
     'Pro',
     'pro',
     true, true, 500000000,
     true, 30, false, false,
-    990,
-    9900,
+    2900,
+    27900,
     NULL,
     NULL,
-    1500,
-    20000,
+    3480,
+    41760,
     0,
-    100,
-    '["Extended staging context", "Export enabled"]'::jsonb,
+    95,
+    '[]'::jsonb,
     30,
     20,
     'true',
@@ -133,21 +173,23 @@ VALUES
     20,
     NOW()
   ),
+  -- Gold: $69/month or $621/year; 8,970 credits a month (130 per dollar); members buy credit packs at 90%.
+  -- The $49 first month and the $496 founder year are checkout offers, not catalog rows.
   (
     '10000000-0000-4000-8000-000000000003',
     'Gold',
     'gold',
     true, true, 2000000000,
     true, 90, true, true,
-    2990,
-    29900,
+    6900,
+    62100,
     NULL,
     NULL,
-    5000,
-    70000,
-    500,
+    8970,
+    107640,
+    0,
     90,
-    '["Long staging context", "Batch export enabled"]'::jsonb,
+    '[]'::jsonb,
     90,
     50,
     'true',
@@ -163,8 +205,7 @@ SET
   level = EXCLUDED.level,
   monthly_price = EXCLUDED.monthly_price,
   yearly_price = EXCLUDED.yearly_price,
-  stripe_monthly_price_id = EXCLUDED.stripe_monthly_price_id,
-  stripe_yearly_price_id = EXCLUDED.stripe_yearly_price_id,
+  -- stripe_*_price_id are derived from payment_provider_refs (pay_common_plan_derived) and never overwritten here.
   monthly_credits = EXCLUDED.monthly_credits,
   yearly_credits = EXCLUDED.yearly_credits,
   monthly_bonus_credits = EXCLUDED.monthly_bonus_credits,
@@ -190,36 +231,38 @@ INSERT INTO public.credit_packages (
   active
 )
 VALUES
+  -- Three tiers (records S/T): $9.90 / 990, $29.90 / 2,990, $99.90 / 9,990 + 1,000 bonus. Members only; the Pro 95% /
+  -- Gold 90% member prices are rounded down to $0.10 at checkout from package_discount.
   (
-    '20000000-0000-4000-8000-000000000001',
-    'Staging Starter Credits',
-    500,
-    500,
+    '30000000-0000-4000-8000-000000000001',
+    '积分包 小',
+    990,
+    990,
     0,
     NULL,
-    10,
+    1,
     'false',
     'true'
   ),
   (
-    '20000000-0000-4000-8000-000000000002',
-    'Staging Plus Credits',
-    1500,
-    1800,
-    150,
+    '30000000-0000-4000-8000-000000000002',
+    '积分包 中',
+    2990,
+    2990,
+    0,
     NULL,
-    20,
-    'true',
+    2,
+    'false',
     'true'
   ),
   (
-    '20000000-0000-4000-8000-000000000003',
-    'Staging Max Credits',
-    5000,
-    6500,
+    '30000000-0000-4000-8000-000000000003',
+    '积分包 大',
+    9990,
+    9990,
     1000,
     NULL,
-    30,
+    3,
     'false',
     'true'
   )
@@ -229,10 +272,15 @@ SET
   price = EXCLUDED.price,
   credits_amount = EXCLUDED.credits_amount,
   bonus_credits = EXCLUDED.bonus_credits,
-  stripe_price_id = EXCLUDED.stripe_price_id,
+  -- stripe_price_id is derived from payment_provider_refs and never overwritten here.
   sort_order = EXCLUDED.sort_order,
   is_popular = EXCLUDED.is_popular,
   active = EXCLUDED.active;
+
+-- The pre-decision staging packages stay unsellable wherever an earlier seed created them.
+UPDATE public.credit_packages SET active = 'false'
+WHERE id IN ('20000000-0000-4000-8000-000000000001', '20000000-0000-4000-8000-000000000002',
+  '20000000-0000-4000-8000-000000000003') AND active <> 'false';
 
 -- Legacy cost columns below are placeholders for old entry points only.
 -- New pricing paths use OpenRouter config.pricing; remove these with LEGACY-CLOSE.
