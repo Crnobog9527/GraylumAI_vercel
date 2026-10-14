@@ -99,8 +99,10 @@ export const fusionReviewRouter = router({
     if (ctx.replayed) return ctx.replayed;
     try { return await (await liveFlow(ctx)).start(input); } catch (cause) { throw unwrap(cause, path); }
   }),
-  /** Repeatable: decides and claims the next step, or returns the calls still to dispatch. */
-  continue: procedure.input(review).mutation(({ ctx, input }) => ctx.flow.continue(input.reviewId)),
+  /** Repeatable: decides and claims the next step, or returns the calls still to dispatch. It needs no live call
+   * window up front (only dispatch does): a claim checks the window itself, so an expired window ends the step
+   * instead of leaving a charged review unable to finish (#962 review). */
+  continue: reader.input(review).mutation(({ ctx, input }) => ctx.flow.continue(input.reviewId)),
   dispatch: procedure.input(review.extend({ callId: uuid })).mutation(({ ctx, input }) => ctx.flow.dispatch(input.reviewId, input.callId)),
   // Closing only cancels and releases in the database: it must work even after the staging call window is
   // closed or switched off, so a user can always stop and free the review slot (#962 review).

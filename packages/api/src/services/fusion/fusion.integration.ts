@@ -163,7 +163,11 @@ it.runIf(staging)('RUNTIME: Fusion admission refuses a disabled switch, a non-al
   const base = { admin, actorId: f.actor, sourceSessionId: f.session, env };
   await expect(admitFusionGroup({ ...base, requestId: randomUUID(), members: [{ ...members()[0]!, modelId: randomUUID() }] }))
     .rejects.toThrow('FUSION_MODEL_DENIED');
+  // A group admitted earlier (say, while the user waited for credits) is not replayed once membership lapses.
+  const earlier = randomUUID();
+  await admitFusionGroup({ ...base, requestId: earlier, members: members() });
   await db.query("update profiles set membership_level='free' where id=$1", [f.actor]);
+  await expect(admitFusionGroup({ ...base, requestId: earlier, members: members() })).rejects.toThrow();
   await expect(admitFusionGroup({ ...base, requestId: randomUUID(), members: members() })).rejects.toThrow();
   await db.query("update profiles set membership_level='gold' where id=$1", [f.actor]);
   const stored = (await db.query('select value from system_settings where key=$1', [FUSION_SETTINGS_KEY])).rows[0].value;

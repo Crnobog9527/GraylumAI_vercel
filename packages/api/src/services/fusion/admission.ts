@@ -61,10 +61,8 @@ export async function admitFusionGroup(input: { admin: SupabaseClient; actorId: 
   if (!members.length || members.length > 16) throw new Error('FUSION_GROUP_INVALID');
   const groupArgs = { p_actor_id: actorId, p_request_id: uuid.parse(input.requestId), p_kind: 'review',
     p_source_session_id: uuid.parse(input.sourceSessionId) };
-  // Replay first: the transaction answers an existing request before it reads any input, so a retried
-  // request gets the first frozen runs without re-pricing or creating billing drafts.
-  try { return toGroup(await rpc<unknown>(admin, 'fusion_group_admit', { ...groupArgs, p_runs: [] })); }
-  catch (error) { if (!(error instanceof Error) || error.message !== 'FUSION_GROUP_INVALID') throw error; }
+  // The live permissions first, also for a replay: a group admitted while the user waited for credits is claimed
+  // later, and by then the switch, the allowlist or the membership may forbid it (#962 review).
   const settings = await readFusionSettings(admin);
   if (!settings.review.enabled) throw new Error('FUSION_REVIEW_DISABLED');
   assertFusionEntitlement(await readMembershipEntitlements(admin, actorId), 'review', members.length);
@@ -73,6 +71,10 @@ export async function admitFusionGroup(input: { admin: SupabaseClient; actorId: 
       : settings.review.summaryModelId === member.modelId;
     if (!allowed) throw new Error('FUSION_MODEL_DENIED');
   }
+  // Then replay: the transaction answers an existing request before it reads any input, so a retried
+  // request gets the first frozen runs without re-pricing or creating billing drafts.
+  try { return toGroup(await rpc<unknown>(admin, 'fusion_group_admit', { ...groupArgs, p_runs: [] })); }
+  catch (error) { if (!(error instanceof Error) || error.message !== 'FUSION_GROUP_INVALID') throw error; }
   const window = await loadStagingPolicy(admin as unknown as BillingRpc, actorId, env);
   const rows = await admin.from('ai_models').select(FUSION_MODEL_COLUMNS).in('id', [...new Set(members.map(m => m.modelId))]);
   if (rows.error) throw new Error('FUSION_ADMISSION_UNAVAILABLE');
