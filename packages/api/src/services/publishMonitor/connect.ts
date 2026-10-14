@@ -101,6 +101,9 @@ export async function recordCallback(db: Rpc, client: ClientDeps, profileId: str
     candidates.push({ providerAccountId: account.value.id, platform: account.value.platform,
       externalId: account.value.externalId });
   }
+  // Hints were supplied but none of them exists or is connected any more: not this attempt's callback (a late one of
+  // an older attempt). Refuse without consuming the attempt; the older attempt's own cleanup settles its accounts.
+  if (ids.length > 0 && candidates.length === 0) throw new ConnectError('PUBLISH_MONITOR_CALLBACK_STALE');
   const result = await db.rpc('publish_monitor_connect_callback', { a: uuid.parse(profileId),
     p_request_id: uuid.parse(requestId), p_candidates: candidates });
   if (result.error) throw dbFailure(result.error);

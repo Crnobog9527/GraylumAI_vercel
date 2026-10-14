@@ -150,6 +150,15 @@ try {
   await workFinish(takeoverJob.connectionId, 'owner_back');
   assert.deepEqual([(await conn('pfm_owned')).provider_disconnect_pending, (await conn('pfm_owned')).status,
     (await conn('pfm_owned')).deletion_attempts], [false, 'quarantined', 0], 'a settled takeover resets its retry count');
+  // Taken over again later with the webhook missed: the sweep starts a new episode on the quarantined row, unless the
+  // account is merely disconnected.
+  const again = acc('pfm_owned', `${'8'.repeat(32)}.${'0'.repeat(32)}`);
+  assert.deepEqual((await svc('SELECT publish_monitor_orphan_classify($1) v', [j([{ ...again, status: 'disconnected' }])]))
+    .takenOver, []);
+  assert.deepEqual((await svc('SELECT publish_monitor_orphan_classify($1) v', [j([{ ...again, status: 'connected' }])]))
+    .takenOver, ['pfm_owned']);
+  assert.equal((await conn('pfm_owned')).provider_disconnect_pending, true);
+  await workFinish((await work()).find(x => x.providerAccountId === 'pfm_owned').connectionId, 'disconnected');
   report.checks.push('takeover disconnect is claimed under a lease with the owner reference and cleared when settled');
 
   // User disconnect: posts and snapshots go now; the row becomes an identity-free deletion record; others refused.
