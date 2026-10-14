@@ -70,3 +70,39 @@ it.each(['', ' ', '1.5', '1e2', '-1', '9007199254740992', null, undefined])(
       .toMatchObject({ invalidCalls: 1, complete: false, platformAbsorbedCredits: null });
   },
 );
+
+describe('PAYG report: research tool calls (0255)', () => {
+  const tool = { ...call, call_id: 't', provider: 'tikhub', model: 'tikhub:/tiktok/app/v3/handler_user_profile',
+    call_kind: 'tool', call_multiplier: '6', platform_absorbed_cap_credits: 0, platform_margin_cache_read_usd: null,
+    platform_margin_cache_write_usd: null, platform_margin_other_usd: null, supplier_cost_bound_usd: null };
+  it('reports a charged tool call with zero margin and no cache split', () => {
+    const report = buildPaygReport([{ ...tool, nominal_source: 'tool_usage', supplier_cost_state: 'confirmed',
+      selected_cost_usd: '0.01', nominal_cost_usd: '0.01', charged_delta: 6, theoretical_delta: 6 }]);
+    expect(report).toMatchObject({ invalidCalls: 0, complete: true, netChargedCredits: 6,
+      calls: [{ nominalSource: 'tool_usage', officialCostUsd: '0.01', platformMarginUsd: '0', marginBreakdownAvailable: false }] });
+    expect(buildPaygReport([{ ...tool, nominal_source: 'tool_usage', supplier_cost_state: 'confirmed',
+      selected_cost_usd: '0.01', nominal_cost_usd: '0.02', charged_delta: 12, theoretical_delta: 12 }]).invalidCalls).toBe(1);
+  });
+  it('keeps zero-charge tool calls out of charges and pending supplier costs out of costs', () => {
+    const zero = { ...tool, nominal_cost_usd: '0', charged_delta: 0, theoretical_delta: 0 };
+    const report = buildPaygReport([
+      { ...zero, call_id: 'u', nominal_source: 'tool_unknown', supplier_cost_state: 'pending', selected_cost_usd: null, supplier_cost_bound_usd: '0.01' },
+      { ...zero, call_id: 'n', nominal_source: 'tool_no_usage', supplier_cost_state: 'pending', selected_cost_usd: null, supplier_cost_bound_usd: '0.005' },
+      { ...zero, call_id: 'c', nominal_source: 'tool_failed_charged', supplier_cost_state: 'confirmed', selected_cost_usd: '0.01' },
+      { ...zero, call_id: 'f', nominal_source: 'tool_failed', supplier_cost_state: 'confirmed', selected_cost_usd: '0' },
+    ]);
+    expect(report).toMatchObject({ calls: [], invalidCalls: 0, complete: true, netChargedCredits: 0,
+      pendingSupplierCost: { calls: 2, boundUsd: '0.015' } });
+    expect(report.releasedToolCalls.map(c => [c.callId, c.providerCostKnown, c.officialCostUsd])).toEqual([
+      ['u', false, null], ['n', false, null], ['c', true, '0.01'], ['f', true, '0']]);
+  });
+  it('rejects inconsistent tool evidence instead of guessing', () => {
+    const zero = { ...tool, nominal_source: 'tool_unknown', nominal_cost_usd: '0', theoretical_delta: 0 };
+    for (const bad of [
+      { ...zero, charged_delta: 1, theoretical_delta: 1, supplier_cost_state: 'pending', selected_cost_usd: null, supplier_cost_bound_usd: '0.01' },
+      { ...zero, charged_delta: 0, supplier_cost_state: 'pending', selected_cost_usd: '0.01', supplier_cost_bound_usd: '0.01' },
+      { ...zero, charged_delta: 0, supplier_cost_state: 'pending', selected_cost_usd: null, supplier_cost_bound_usd: null },
+      { ...zero, charged_delta: 0, supplier_cost_state: 'confirmed', selected_cost_usd: null },
+    ]) expect(buildPaygReport([bad])).toMatchObject({ invalidCalls: 1, complete: false });
+  });
+});

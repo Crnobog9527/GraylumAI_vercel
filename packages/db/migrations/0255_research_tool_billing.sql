@@ -226,8 +226,11 @@ BEGIN
   IF c.supplier_cost_state='confirmed' AND c.supplier_cost_reconciled_at IS NOT NULL AND c.selected_cost_usd=cost THEN
     RETURN jsonb_build_object('callId',c.id,'costUsd',c.selected_cost_usd::text,'replayed',true);END IF;
   IF c.supplier_cost_state IS DISTINCT FROM 'pending' OR c.settled_at IS NULL THEN RAISE EXCEPTION 'BILL2_TOOL_RECONCILE_INVALID';END IF;
+  -- A confirmed cost above the frozen bound fails the route closed until an admin review (plan §3.5),
+  -- exactly like overuse reported at record time.
   UPDATE bill2_calls SET selected_cost_usd=cost,supplier_cost_state='confirmed',
-    supplier_cost_reconciled_at=clock_timestamp(),supplier_cost_reconciled_by=p_admin_id WHERE id=c.id;
+    supplier_cost_reconciled_at=clock_timestamp(),supplier_cost_reconciled_by=p_admin_id,
+    budget_conflict=budget_conflict OR cost>c.supplier_cost_bound_usd WHERE id=c.id;
   UPDATE bill2_runs SET provider_cost_usd=(SELECT CASE WHEN count(*) FILTER(WHERE dispatched_at IS NOT NULL AND selected_cost_usd IS NULL)=0
     THEN coalesce(sum(selected_cost_usd),0) END FROM bill2_calls WHERE run_id=r.id),version=version+1 WHERE id=r.id;
   INSERT INTO user_activity_logs(admin_id,action,action_type,details)
@@ -340,6 +343,33 @@ DO $$ DECLARE src text;a text:=$x$  IF entry->>'protocol' IS DISTINCT FROM 'open
     OR (entry->>'protocol'='research-tool-v1' AND entry->>'provider' IN ('tikhub','parallel','firecrawl')),false)$x$);
   END IF;
 END $$;
+
+-- Finance report: same rows and order as 0162, plus the call kind and the supplier cost state/bound so
+-- pending tool costs are reported apart from confirmed ones (plan §3.4). A new return type needs DROP.
+DROP FUNCTION IF EXISTS public.bill2_admin_call_report(timestamptz,timestamptz,integer);
+CREATE FUNCTION public.bill2_admin_call_report(p_from timestamp with time zone, p_to timestamp with time zone, p_limit integer)
+ RETURNS TABLE(call_id uuid, run_id uuid, call_sequence integer, created_at timestamp with time zone, provider text, model text, call_state text, selected_cost_usd text, run_state text, run_outcome text, credits_per_usd text, run_multiplier text, run_charged integer, run_actual_restore integer, run_call_count integer, call_multiplier text, multiplier_source text, purpose text,contract_version text,settled_at timestamptz,nominal_cost_usd text,nominal_source text,charged_delta integer,theoretical_delta text,platform_absorbed_cap_credits text,platform_absorbed_bound_credits text,platform_absorbed_cap_usd text,platform_absorbed_bound_usd text,platform_margin_usd text,platform_margin_cache_read_usd text,platform_margin_cache_write_usd text,platform_margin_other_usd text,compensation_credits integer,compensated_at timestamptz,
+  call_kind text,supplier_cost_state text,supplier_cost_bound_usd text)
+ LANGUAGE sql
+ STABLE SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+  SELECT c.id, c.run_id, c.sequence, c.created_at,
+         c.provider, c.model, c.state, c.selected_cost_usd::text,
+         r.state, r.outcome, r.credits_per_usd::text, r.multiplier::text,
+         r.charged, r.actual_restore, (SELECT count(*)::integer FROM bill2_calls x WHERE x.run_id = r.id),
+         c.payload #>> '{billingUnit,multiplier}', c.payload #>> '{billingUnit,source}',
+         coalesce(c.payload->>'phase',r.payload #>> '{purposeBudget,purpose}'),r.contract_version,c.settled_at,c.nominal_cost_usd::text,c.nominal_source,c.charged_delta,c.theoretical_delta::text,c.platform_absorbed_cap_credits::text,c.platform_absorbed_bound_credits::text,CASE WHEN r.contract_version='bill2.v2' THEN (c.platform_absorbed_cap_credits/(r.credits_per_usd*bill2_unit_multiplier(c.payload->'billingUnit'->'multiplier')))::text END,CASE WHEN r.contract_version='bill2.v2' THEN (c.platform_absorbed_bound_credits/(r.credits_per_usd*bill2_unit_multiplier(c.payload->'billingUnit'->'multiplier')))::text END,(c.nominal_cost_usd-c.selected_cost_usd)::text,c.platform_margin_cache_read_usd::text,c.platform_margin_cache_write_usd::text,c.platform_margin_other_usd::text,c.compensation_credits,c.compensated_at,
+         c.call_kind,c.supplier_cost_state,c.supplier_cost_bound_usd::text
+  FROM bill2_calls c
+  JOIN bill2_runs r ON r.id = c.run_id
+  WHERE p_from IS NOT NULL AND p_to IS NOT NULL AND p_from < p_to
+    AND c.created_at >= p_from AND c.created_at < p_to
+  ORDER BY c.created_at, c.id
+  LIMIT LEAST(GREATEST(coalesce(p_limit, 1), 1), 5000)
+$function$;
+REVOKE ALL ON FUNCTION public.bill2_admin_call_report(timestamptz,timestamptz,integer) FROM PUBLIC,anon,authenticated;
+GRANT EXECUTE ON FUNCTION public.bill2_admin_call_report(timestamptz,timestamptz,integer) TO service_role;
 
 DO $$ DECLARE f text; BEGIN
   FOREACH f IN ARRAY ARRAY['bill2_calls_kind_guard()','bill2_tool_cost(jsonb,text,boolean)','bill2_payg_zero_source(text)',

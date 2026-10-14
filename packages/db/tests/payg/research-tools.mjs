@@ -178,7 +178,20 @@ export async function researchToolCases({db,Client,connectionString,report,creat
     assert.equal((await call(db,c.id)).supplier_cost_state,'confirmed');
     assert.deepEqual(await financial(db,f),before,'user settlement never changes');
     assert.equal((await db.query("SELECT count(*)::int n FROM user_activity_logs WHERE action='bill2_tool_cost_reconcile' AND details->>'callId'=$1",[c.id])).rows[0].n,1);
-    report.checks.push('RT-2 reconciliation: admin fills pending supplier cost once (replay-safe, audited); user settlement unchanged; non-admin refused');
+    await db.query('SET ROLE service_role');
+    const reported = (await db.query(`SELECT call_kind,supplier_cost_state,supplier_cost_bound_usd,nominal_source
+      FROM bill2_admin_call_report(now()-interval '1 day',now()+interval '1 day',5000) WHERE call_id=$1`,[c.id])).rows[0];
+    await db.query('RESET ROLE');
+    assert.deepEqual(reported,{call_kind:'tool',supplier_cost_state:'confirmed',supplier_cost_bound_usd:'0.01',nominal_source:'tool_unknown'});
+    // A reconciled cost above the frozen bound blocks the route for new claims, like overuse at record time.
+    const g = await make();
+    const over = await claimTool(db,g,1);
+    await rpc(db,'bill2_record',g.actor,g.run,over.id,result(over,'unknown',null,null));
+    await rpc(db,'bill2_tool_cost_reconcile',admin,over.id,'0.03','a'.repeat(64));
+    assert.equal((await call(db,over.id)).budget_conflict,true);
+    await assert.rejects(claimTool(db,await make({route:g.policy.model}),1),/BILL2_PAYG_METERING_BLOCKED/);
+    await db.query('UPDATE bill2_calls SET budget_conflict=false WHERE id=$1',[over.id]);
+    report.checks.push('RT-2 reconciliation: admin fills pending supplier cost once (replay-safe, audited); user settlement unchanged; non-admin refused; above the bound blocks the route; finance report shows kind and cost state');
   }
 
   // staging test windows accept an approved tool route; model routes keep their rule.

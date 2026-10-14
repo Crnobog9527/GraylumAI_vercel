@@ -88,8 +88,15 @@ describe('tool result evidence', () => {
     expect(toolResultEvidence('call-1', p, result({ usage: { unit: 'credit', units: '5' } }), hash))
       .toMatchObject({ toolOutcome: 'delivered', cost: null, usage: { unit: 'call', units: null } });
     const parallel = policy(entry({ provider: 'parallel', route: 'parallel:search:fast', usageUnit: 'sku_search', price: '0.001' }));
-    expect(toolResultEvidence('call-2', parallel, result({ vendor: 'parallel', outcome: 'failed', supplierMayCharge: true,
+    expect(toolResultEvidence('call-2', parallel, result({ vendor: 'parallel', route: 'parallel:search:fast', outcome: 'failed', supplierMayCharge: true,
       usage: { unit: 'sku_search', units: null } }), hash)).toMatchObject({ toolOutcome: 'unknown', cost: null });
+  });
+
+  it('refuses a result from another vendor or route before pricing it', () => {
+    expect(() => toolResultEvidence('call-1', p, result({ route: '/tiktok/app/v3/fetch_user_post_videos' }), hash))
+      .toThrow('TOOL_RESULT_MISMATCH');
+    expect(() => toolResultEvidence('call-1', p, result({ vendor: 'parallel' }), hash)).toThrow('TOOL_RESULT_MISMATCH');
+    expect(() => toolResultEvidence('call-1', p, result({ route: 'other', outcome: 'not_sent' }), hash)).toThrow('TOOL_RESULT_MISMATCH');
   });
 
   it('records usage above the bound as reported (the database flags it)', () => {

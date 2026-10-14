@@ -57,7 +57,7 @@ export type ToolOutcome = 'delivered' | 'failed_free' | 'failed_charged' | 'unkn
 
 export class ToolBillingError extends Error {
   constructor(readonly code: 'TOOL_PRICE_NOT_CHARGEABLE' | 'TOOL_PRICE_EXPIRY_REQUIRED' | 'TOOL_PRICE_UNIT_MISMATCH'
-    | 'TOOL_BOUND_INVALID' | 'TOOL_INPUT_INVALID') {
+    | 'TOOL_BOUND_INVALID' | 'TOOL_INPUT_INVALID' | 'TOOL_RESULT_MISMATCH') {
     super(code);
   }
 }
@@ -134,6 +134,10 @@ export function toolClaimPayload(policy: ToolCallPolicy, call: { phase: string; 
  *   unknown → unknown (user 0, supplier cost pending; never resent).
  */
 export function toolResultEvidence(callId: string, policy: ToolCallPolicy, result: ResearchCallResult, sourceHash: string) {
+  // A result paired with another subcall's policy would be priced and labelled as the wrong route.
+  if (result.vendor !== policy.provider || `${result.vendor}:${result.route}` !== policy.model) {
+    throw new ToolBillingError('TOOL_RESULT_MISMATCH');
+  }
   if (result.outcome === 'not_sent') return null;
   if (!/^[a-f0-9]{64}$/.test(sourceHash)) throw new ToolBillingError('TOOL_INPUT_INVALID');
   const pricing = policy.toolPricing;
