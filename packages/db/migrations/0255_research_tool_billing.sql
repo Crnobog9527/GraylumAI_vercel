@@ -255,6 +255,9 @@ BEGIN
   SELECT * INTO c FROM bill2_calls WHERE id=p_call_id;
   IF c.id IS NULL OR c.call_kind<>'tool' THEN RAISE EXCEPTION 'BILL2_TOOL_RECONCILE_INVALID';END IF;
   SELECT * INTO r FROM bill2_runs WHERE id=c.run_id FOR UPDATE;
+  -- Same order as claim/record/finalize: run, then the route locks, then the call. A concurrent claim on the
+  -- route therefore sees the budget_conflict this may set instead of the old unflagged row.
+  PERFORM bill2_payg_lock_models(r);
   SELECT * INTO c FROM bill2_calls WHERE id=p_call_id FOR UPDATE;
   cost:=p_cost::numeric;
   IF c.supplier_cost_state='confirmed' AND c.supplier_cost_reconciled_at IS NOT NULL AND c.selected_cost_usd=cost THEN
