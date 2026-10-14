@@ -115,7 +115,7 @@ export const LANDING_FAQ: readonly LandingFaqGroup[] = [
         id: 'faq-11', needs: ['coach', 'signupGrant'],
         question: '免费能得到什么？要绑卡吗？',
         answer: [
-          '不用绑卡。注册送的积分，足够你和 Graylum AI 教练把情况聊透、把定位整理出来。这部分整理好的内容是你的，随时能看、能导出，我们不会收回。',
+          '不用绑卡，可以免费试用：和 Graylum AI 教练把情况聊透、把定位整理出来。这部分整理好的内容是你的，随时能看、能导出。',
         ],
       },
       {

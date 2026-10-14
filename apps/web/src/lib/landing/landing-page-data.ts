@@ -29,7 +29,7 @@ export function buildLandingPageData(flags: LandingFlags, plans: readonly Paywal
 
   return {
     heroNote: visibleItems(flags, HERO.note).map(part => part.text).join(''),
-    finalNote: visibleItems(flags, FINAL_ACTION.note).map(part => part.text).join(' · '),
+    finalNote: visibleItems(flags, FINAL_ACTION.note).map(part => part.text).join(''),
     notes: visibleItems(flags, VOICE_WALL.notes),
     promise: visibleItems(flags, HOW_IT_WORKS.promise),
     flowSteps: visibleItems(flags, FLOW_STEPS),
