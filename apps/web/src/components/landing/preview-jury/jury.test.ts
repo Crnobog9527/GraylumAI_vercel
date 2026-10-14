@@ -24,6 +24,7 @@ import { buildScenes, playbackLength, skippedStages, stageIndex } from './jury-s
 import { findScenario, JURY_SCENARIOS } from './jury-scripts';
 import { REPORT_SECTIONS } from './jury-mock-reviews';
 import { JuryReader } from './JuryReader';
+import { JuryReaderChapter } from './JuryReaderChapter';
 import { changeHunks, sentences } from './jury-hunks';
 import { remainingMs, remainingText, totalText } from './jury-eta';
 import { readerChapters, readingMinutes, summaryLines } from './jury-reader';
@@ -343,6 +344,13 @@ describe('seat names and static rendering', () => {
     // An unchanged chapter is one line: its title and what it says, no full text.
     expect(html).toContain('第 5 章 同类账号');
     expect(html.match(/看这一章全文/g) ?? []).toHaveLength(0);
+    const chapter = readerChapters(detail).find(item => !item.section?.changed && !item.issues.length);
+    if (!chapter) throw new Error('expected an unchanged chapter');
+    const full = renderToStaticMarkup(createElement(JuryReaderChapter, {
+      chapter, names: DEFAULT_SEAT_NAMES, adoption: null, compact: false, open: true, onToggle: () => {},
+    }));
+    expect(full).not.toContain('收起');
+    expect(full).toContain('看这一章全文');
     const failedDetail = findScenario('failed').detail;
     const failed = renderToStaticMarkup(createElement(JuryReader, { detail: failedDetail, names: DEFAULT_SEAT_NAMES }));
     expect(failed).toContain('修订稿没有生成成功，原文没有任何改动');

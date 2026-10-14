@@ -44,7 +44,8 @@ export function JuryReaderChapter({ chapter, names, adoption, compact, open, onT
         {section?.wordingOnly ? <span className={styles.tag}>只改了表述</span> : null}
         {!changed && (section?.rulings.length ?? 0) > 0 ? <span className={styles.tag}>有意见，没改</span> : null}
         {issues.length > 0 ? <span className={styles.tag} data-tone="changed">{issues.length} 条评审意见</span> : null}
-        {!flagged ? (
+        {/* In 看全文 every chapter is open, so there is nothing to fold. */}
+        {!flagged && compact ? (
           <button type="button" className={styles.fold} onClick={onToggle} aria-expanded={open}>{open ? '收起' : '展开'}</button>
         ) : null}
       </header>
