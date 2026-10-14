@@ -11,10 +11,12 @@ import { LANDING_FEATURES, type LandingFlags } from '@/lib/landing/landing-flags
 import { buildLandingPageData } from '@/lib/landing/landing-page-data';
 import { APP_SEGMENTS } from '@/lib/sentry-scrub';
 import { SampleJ } from './SampleJ';
+import { arrivedAt } from './PositioningClipJ';
 import { chapterAt, CHAPTERS } from './TakeoverJ';
 import { WEEK_STEP_MS } from './WeekJ';
 import { J_WEEK } from '@/lib/landing/landing-copy-j-week';
 import { J_COMPARE } from '@/lib/landing/landing-copy-j-compare';
+import { J_TAKEOVER_SCENES } from '@/lib/landing/landing-copy-j-takeover';
 import { J_FOUNDER_BAR, J_PRICE_TOTAL } from '@/lib/landing/landing-copy-j-price';
 
 const ALL_ON = Object.fromEntries(Object.keys(LANDING_FEATURES).map(key => [key, true])) as LandingFlags;
@@ -73,16 +75,18 @@ describe('style sample J', () => {
 
   it('tells the story as static steps in the server HTML, with the Owner\'s benchmark wording and no old claim', () => {
     const { html } = render();
-    expect(html).toContain(J_TAKEOVER.positioningTitle);
     expect(html).toContain(J_TAKEOVER.benchmarkLine);
-    expect(J_TAKEOVER.promises.map(promise => promise.id)).toEqual(['topics', 'method', 'data', 'money', 'models']);
-    for (const promise of J_TAKEOVER.promises) expect(html).toContain(promise.title);
-    // Earning is a judged direction and a suggested route, never a promise.
-    expect(JSON.stringify(J_TAKEOVER.promises)).not.toMatch(/保证|一定能|稳赚/);
-    expect(html).toContain(J_TAKEOVER.promiseClose);
+    for (const scene of J_TAKEOVER_SCENES) {
+      expect(html).toContain(scene.title);
+      expect(html).toContain(escape(scene.note));
+    }
+    expect(html).toContain(J_TAKEOVER.juryTitle);
+    // The scenes are the demo's made-up case: no figures, no promise of income.
+    expect(JSON.stringify(J_TAKEOVER_SCENES)).not.toMatch(/\d+\s*%|\$|保证|一定能|稳赚/);
     // The long promise paragraph is never shown in one block any more.
     expect(html).not.toContain('你不用再分心研究运营技术，不用自己想选题');
     expect(JSON.stringify(copyJ)).not.toContain('程序算出来');
+    expect(JSON.stringify(J_TAKEOVER_SCENES)).not.toContain('程序算');
   });
 });
 
@@ -144,12 +148,16 @@ describe('style sample J, the later sections', () => {
 });
 
 describe('sample J story timing', () => {
-  it('maps the scroll to the three chapters in order, ending inside the last', () => {
-    expect(CHAPTERS.map(chapter => chapter.id)).toEqual(['positioning', 'jury', 'promises']);
-    expect(chapterAt(0)).toEqual({ id: 'positioning', local: 0 });
-    expect(chapterAt(0.5).id).toBe('jury');
-    expect(chapterAt(1)).toEqual({ id: 'promises', local: 1 });
-    expect(chapterAt(-1).id).toBe('positioning');
+  it('maps the scroll to the four chapters in order, ending inside the last', () => {
+    expect(CHAPTERS.map(chapter => chapter.id)).toEqual(['you', 'direction', 'benchmark', 'jury']);
+    expect(chapterAt(0)).toEqual({ id: 'you', index: 0, local: 0 });
+    expect(chapterAt(0.4).id).toBe('direction');
+    expect(chapterAt(0.6).id).toBe('benchmark');
+    expect(chapterAt(1)).toEqual({ id: 'jury', index: 3, local: 1 });
+    expect(chapterAt(-1).id).toBe('you');
+    // Every message of a scene has arrived before the scroll leaves it.
+    for (const scene of J_TAKEOVER_SCENES) expect(arrivedAt(0.9, scene.lines.length)).toBe(scene.lines.length);
+    expect(arrivedAt(0, 6)).toBe(1);
   });
 
   it('shows the first screen\'s week window at its last step on the server, with the five stages and no made-up numbers', () => {

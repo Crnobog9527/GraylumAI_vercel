@@ -4,36 +4,43 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { HOW_IT_WORKS } from '@/lib/landing/landing-copy';
 import { J_TAKEOVER } from '@/lib/landing/landing-copy-j';
+import { J_TAKEOVER_SCENES } from '@/lib/landing/landing-copy-j-takeover';
 import { cn } from '@/lib/utils';
 import { JuryClipJ } from './JuryClipJ';
 import { PositioningClipJ } from './PositioningClipJ';
-import { PromiseClipJ } from './PromiseClipJ';
 import styles from './takeover-j.module.css';
 import page from './j.module.css';
 
-/** Where each chapter starts and ends along the section's scroll, 0 → 1. */
+/** Where each chapter starts and ends along the section's scroll, 0 → 1: the three positioning steps, then the jury. */
 export const CHAPTERS = [
-  { id: 'positioning', from: 0, to: 0.46 },
-  { id: 'jury', from: 0.46, to: 0.74 },
-  { id: 'promises', from: 0.74, to: 1 },
+  { id: 'you', from: 0, to: 0.3 },
+  { id: 'direction', from: 0.3, to: 0.52 },
+  { id: 'benchmark', from: 0.52, to: 0.74 },
+  { id: 'jury', from: 0.74, to: 1 },
 ] as const;
 type ChapterId = (typeof CHAPTERS)[number]['id'];
 
 /** The chapter at a point of the scroll, and how far into it (0 → 1). */
-export function chapterAt(progress: number): { id: ChapterId; local: number } {
+export function chapterAt(progress: number): { id: ChapterId; index: number; local: number } {
   const p = Math.min(1, Math.max(0, progress));
-  const chapter = CHAPTERS.find(item => p < item.to) ?? CHAPTERS[CHAPTERS.length - 1];
-  return { id: chapter.id, local: Math.min(1, (p - chapter.from) / (chapter.to - chapter.from)) };
+  const index = Math.max(0, CHAPTERS.findIndex(item => p < item.to));
+  const at = p >= 1 ? CHAPTERS.length - 1 : index;
+  const chapter = CHAPTERS[at];
+  return { id: chapter.id, index: at, local: Math.min(1, (p - chapter.from) / (chapter.to - chapter.from)) };
 }
 
 const reducedMotion = () => Boolean(window.matchMedia?.('(prefers-reduced-motion: reduce)').matches);
+const SIDEBAR = [
+  ...J_TAKEOVER_SCENES.map(scene => ({ id: scene.id as ChapterId, title: scene.title, note: scene.note })),
+  { id: 'jury' as ChapterId, title: J_TAKEOVER.juryTitle, note: J_TAKEOVER.juryBody },
+];
 
 /**
- * "AI 教练怎么接手你的运营" as a scroll-locked story. Once the visitor scrolls in, the stage holds still and the
- * scroll only advances the animation: the free positioning analysis (你是谁 → 方向判断 → 找对标), then the review
- * panel on a finished report, then what you no longer do yourself; when it has played through, the page scrolls on.
- * The pictures are not interactive (inert) and play quickly. The server HTML, a visitor without JavaScript and one
- * who asked for reduced motion all get the same story as static steps, with nothing locked.
+ * "AI 教练怎么接手你的运营" (Owner 2026-10-15: sample H's layout, the real product, real expertise). Once the visitor
+ * scrolls in, the stage holds still and the scroll plays the story: a sidebar of the scenes on the left (你是谁 →
+ * 方向判断 → 找对标 → the jury; a click jumps there) with what the current one shows, and in the middle the real
+ * positioning workbench — conversation and checklist — going through it. The pictures are not interactive (inert).
+ * The server HTML, a visitor without JavaScript and one who asked for reduced motion get every scene stacked, finished.
  */
 export function TakeoverJ() {
   const ref = useRef<HTMLElement>(null);
@@ -70,25 +77,19 @@ export function TakeoverJ() {
     };
   }, [locked]);
 
-  const { id, local } = chapterAt(progress);
-  const chapters: { id: ChapterId; title: string; body: ReactNode; picture: ReactNode }[] = [
-    { id: 'positioning', title: J_TAKEOVER.positioningTitle, body: J_TAKEOVER.positioningBody,
-      picture: <PositioningClipJ progress={locked ? (id === 'positioning' ? local : 1) : 1} /> },
-    { id: 'jury', title: J_TAKEOVER.juryTitle, body: J_TAKEOVER.juryBody,
-      picture: <JuryClipJ progress={locked ? (id === 'jury' ? local : id === 'positioning' ? 0 : 1) : 0.62} /> },
-    { id: 'promises', title: J_TAKEOVER.promisesTitle, body: J_TAKEOVER.promiseClose,
-      picture: <PromiseClipJ progress={locked ? (id === 'promises' ? local : 0) : 1} /> },
-  ];
+  const picture = (index: number, local: number): ReactNode => (index < 3
+    ? <PositioningClipJ scene={index} local={local} />
+    : <JuryClipJ progress={local} />);
 
   if (!locked) {
     return (
       <section id="how-it-works" aria-labelledby="takeover-title" className={cn(page.section, styles.static)} data-zone="takeover">
         <div className={page.wrap}>
           <h2 id="takeover-title" className={page.display}>{HOW_IT_WORKS.title}</h2>
-          {chapters.map(chapter => (
-            <article key={chapter.id} className={styles.staticStep}>
-              <div className={styles.copy}><h3>{chapter.title}</h3><p>{chapter.body}</p></div>
-              <div className={styles.picture} inert>{chapter.picture}</div>
+          {SIDEBAR.map((item, index) => (
+            <article key={item.id} className={styles.staticStep}>
+              <div className={styles.copy}><h3>{item.title}</h3><p>{item.note}</p></div>
+              <div className={styles.picture} inert>{picture(index, index < 3 ? 1 : 0.62)}</div>
             </article>
           ))}
         </div>
@@ -96,25 +97,35 @@ export function TakeoverJ() {
     );
   }
 
-  const current = chapters.find(chapter => chapter.id === id) ?? chapters[0];
+  const { index, local } = chapterAt(progress);
+  const jump = (to: number) => {
+    const node = ref.current;
+    if (!node) return;
+    const top = node.getBoundingClientRect().top + window.scrollY;
+    const span = node.offsetHeight - window.innerHeight;
+    window.scrollTo({ top: top + span * (CHAPTERS[to].from + 0.01), behavior: 'smooth' });
+  };
   return (
     <section ref={ref} id="how-it-works" aria-labelledby="takeover-title" className={styles.takeover} data-zone="takeover">
       <div className={styles.stage}>
         <div className={cn(page.wrap, styles.frame)}>
-          <header className={styles.head}>
-            <h2 id="takeover-title" className={styles.title}>{HOW_IT_WORKS.title}</h2>
-            <ol className={styles.steps} aria-hidden="true">
-              {chapters.map(chapter => <li key={chapter.id} data-on={chapter.id === id || undefined}>{chapter.title}</li>)}
-            </ol>
-          </header>
+          <h2 id="takeover-title" className={styles.title}>{HOW_IT_WORKS.title}</h2>
           <div className={styles.body}>
-            <div className={styles.copy} aria-live="polite" key={current.id}>
-              <h3>{current.title}</h3>
-              <p>{current.body}</p>
-            </div>
-            <div className={styles.picture} inert data-chapter={current.id}>{current.picture}</div>
+            <nav className={styles.side} aria-label="场景">
+              <ol>
+                {SIDEBAR.map((item, at) => (
+                  <li key={item.id} data-on={at === index || undefined} data-done={at < index || undefined}>
+                    <button type="button" onClick={() => jump(at)} aria-current={at === index ? 'step' : undefined}>
+                      <span className={styles.sideIndex} aria-hidden="true">{at + 1}</span><span className={styles.sideLabel}>{item.title}</span>
+                    </button>
+                    {at === index ? <p aria-live="polite">{item.note}</p> : null}
+                  </li>
+                ))}
+              </ol>
+              <div className={styles.bar} aria-hidden="true"><i style={{ transform: `scaleX(${progress})` }} /></div>
+            </nav>
+            <div className={styles.picture} inert data-chapter={CHAPTERS[index].id}>{picture(index, local)}</div>
           </div>
-          <div className={styles.bar} aria-hidden="true"><i style={{ transform: `scaleX(${progress})` }} /></div>
         </div>
       </div>
     </section>

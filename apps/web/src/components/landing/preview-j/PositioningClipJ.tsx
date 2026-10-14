@@ -1,92 +1,153 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 'use client';
 
-import { Check, Loader2 } from 'lucide-react';
+import { AlertTriangle, Check, Loader2 } from 'lucide-react';
 import { MessageMarkdown } from '@/components/chat/MessageMarkdown';
-import { DEMO_LABEL, DEMO_STEPS, demoInformation, summaryDemoState, type DemoState } from '@/components/landing/demo/demo-script';
+import {
+  DEMO_LABEL, DEMO_STEPS, QUESTION_ONE, demoInformation, demoReducer, summaryDemoState, type DemoState,
+} from '@/components/landing/demo/demo-script';
 import { CaptureChecklist } from '@/components/opc/capture-checklist';
 import result from '@/components/opc/positioning-result.module.css';
+import { QuestionCardView } from '@/components/opc/question-card';
+import { StepConfirmCard } from '@/components/opc/step-confirm-card';
 import { Button } from '@/components/ui/button';
-import { J_POSITIONING_SAMPLE, J_TAKEOVER } from '@/lib/landing/landing-copy-j';
-import { cn } from '@/lib/utils';
+import { J_POSITIONING_SAMPLE } from '@/lib/landing/landing-copy-j';
+import {
+  J_BENCHMARK_KINDS, J_BENCHMARK_TABLE, J_DIRECTION_QUESTION, J_TAKEOVER_SCENES, type TakeoverCard, type TakeoverLine,
+} from '@/lib/landing/landing-copy-j-takeover';
+import type { QuestionCard } from '@repo/api/src/shared/agentTurn';
 import styles from './takeover-j.module.css';
 
 const noop = () => undefined;
-type Line = { id: string; role: 'user' | 'assistant'; label: string; text: string };
-
-
-// The first phase is the demo's own script up to its summary; the second and third continue the same made-up case.
 const summary = summaryDemoState();
-const YOU: Line[] = summary.messages.map(message => ({ ...message }));
-const DIRECTION: Line[] = [
-  { id: 'd1', role: 'assistant', label: '导师 · 方向判断', text: J_POSITIONING_SAMPLE.directionReply },
-  { id: 'd2', role: 'assistant', label: '教练的提醒 · 方向判断', text: J_POSITIONING_SAMPLE.reminder },
-];
-const BENCHMARK: Line[] = [{ id: 'b1', role: 'assistant', label: '导师 · 找对标', text: J_TAKEOVER.benchmarkLine }];
-const PHASES = [YOU, DIRECTION, BENCHMARK];
+const ready = demoReducer(summary, { type: 'settled' });
 
-/** The checklist's values at each phase: phase 2 adds the direction, phase 3 the benchmark accounts. */
-function stateAt(phase: number): DemoState {
+/** The checklist's values once a scene is done: 方向判断 adds the direction and its risk, 找对标 the three kinds. */
+function stateAt(scene: number): DemoState {
   const captured = (value: string) => ({ value, status: 'confirmed' as const, nature: 'fact' as const });
   const values = { ...summary.values };
-  if (phase >= 1) Object.assign(values, { direction: captured(J_POSITIONING_SAMPLE.direction), risk: captured(J_POSITIONING_SAMPLE.reminder) });
-  if (phase >= 2) Object.assign(values, { accounts: captured(J_POSITIONING_SAMPLE.benchmarkKinds.join('、')) });
+  if (scene >= 1) Object.assign(values, { direction: captured(J_POSITIONING_SAMPLE.direction), risk: captured(J_POSITIONING_SAMPLE.reminder) });
+  if (scene >= 2) Object.assign(values, { accounts: captured(J_BENCHMARK_KINDS.map(item => item.kind).join('、')) });
   return { ...summary, values };
 }
 
+/** How many of a scene's messages have arrived at `local` (0 → 1): the first at once, the last a little before the end. */
+export function arrivedAt(local: number, count: number) {
+  return Math.min(count, Math.max(1, Math.floor(local * count * 1.15) + 1));
+}
+
 /**
- * The free positioning analysis, played by the scroll: the real workbench (step strip, conversation, checklist)
- * goes through 你是谁 → 方向判断 → 找对标, each phase's messages arriving and the checklist filling and confirming.
- * In 找对标 the coach fetches the benchmark accounts' public data (no numbers are shown). `progress` is 0 → 1.
+ * The real positioning workbench, played by the scroll: the step strip, the conversation (the product's messages,
+ * question card, step confirmation) and the checklist on the right filling in. `scene` is 你是谁 / 方向判断 /
+ * 找对标; `local` how far into it (0 → 1). The latest messages stay in view at the bottom, like the live chat.
  */
-export function PositioningClipJ({ progress }: { progress: number }) {
-  const phase = Math.min(2, Math.floor(progress * 3));
-  const local = Math.min(1, progress * 3 - phase);
-  const lines = PHASES[phase];
-  // What has arrived so far in this phase; the window keeps the last four in view, like a scrolled log.
-  const visible = lines.slice(0, Math.max(1, Math.ceil(local * lines.length * 1.25))).slice(-4);
-  const state = stateAt(phase);
-  const valid = Object.fromEntries(DEMO_STEPS.map((step, index) => [step.id, index < phase || (index === phase && local > .85)]));
-  const fetched = phase === 2 ? Math.floor(Math.max(0, local - .25) / .2) : 0;
+export function PositioningClipJ({ scene, local }: { scene: number; local: number }) {
+  const current = J_TAKEOVER_SCENES[scene];
+  const lines = current.lines.slice(0, arrivedAt(local, current.lines.length));
+  const done = local >= 0.96;
+  const valid = Object.fromEntries(DEMO_STEPS.map((step, index) => [step.id, index < scene || (index === scene && done)]));
+  const state = stateAt(done ? scene : scene - 1);
+  const fetchLocal = Math.max(0, local * 3 - 1.4);
   return (
     <div className={styles.window}>
-      <div className={styles.windowBar}><span className={styles.sample}>{DEMO_LABEL}</span><b>我的定位分析</b></div>
+      <div className={styles.windowBar}><span className={styles.sample}>{DEMO_LABEL}</span><b>我的定位分析</b><span>整体规划 · 进行中</span></div>
       <div className={styles.strip}>
         {DEMO_STEPS.map((step, index) => (
-          <Button key={step.id} size="sm" variant={index === phase ? 'default' : 'outline'} tabIndex={-1}>
-            {valid[step.id] ? '✓ ' : `${index + 1} `}{step.title}
+          <Button key={step.id} size="sm" variant={index === scene ? 'default' : 'outline'} tabIndex={-1}>
+            {valid[step.id] ? <Check size={14} aria-hidden="true" /> : `${index + 1} `}{step.title}
           </Button>
         ))}
       </div>
       <div className={styles.panes}>
         <div className={styles.log}>
-          {visible.map(line => (
-            <div key={line.id} data-message-role={line.role} className={line.role === 'user' ? styles.user : styles.coach}>
-              <span className={result.agentIdentity}>{line.label}</span>
-              <MessageMarkdown className={styles.messageText} text={line.text} />
-            </div>
-          ))}
-          {phase === 2 ? (
-            <ul className={styles.fetch}>
-              {J_POSITIONING_SAMPLE.benchmarkKinds.map((kind, index) => (
-                <li key={kind} data-done={index < fetched || undefined}>
-                  {index < fetched ? <Check size={15} aria-hidden="true" /> : <Loader2 size={15} aria-hidden="true" />}
-                  {kind}<span>{index < fetched ? '已取到公开数据' : '正在抓取'}</span>
-                </li>
-              ))}
-            </ul>
-          ) : null}
+          <div className={styles.logInner}>
+            {lines.map((line, index) => <Message key={`${scene}-${index}`} line={line} step={current.title} fetchLocal={fetchLocal} />)}
+          </div>
         </div>
-        <div className={cn(result.panel, styles.checklist)}>
-          <header><h2>定位清单</h2></header>
+        <div className={`${result.panel} ${styles.checklist}`}>
+          <header><h2>定位清单</h2><p>跟着对话自动记录；每一步核对后确认一次</p></header>
           <div className={result.body}>
             <CaptureChecklist steps={DEMO_STEPS} information={demoInformation(state)} valid={valid} edits={{}}
-              selectedStepId={DEMO_STEPS[phase].id} editable={false} manual={false} locked confirmable={() => false}
+              selectedStepId={DEMO_STEPS[scene].id} editable={false} manual={false} locked confirmable={() => false}
               confirmation={() => 'none'} saveState={{}} conflicts={{}} resolving={null} onEdit={noop} onComposition={noop}
               onResolve={noop} onReview={noop} onRecoverConfirmation={noop} onKeepConflict={noop} onRetrySave={noop} />
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+function Message({ line, step, fetchLocal }: { line: TakeoverLine; step: string; fetchLocal: number }) {
+  if (line.role === 'user') {
+    return (
+      <div data-message-role="user" className={styles.user}>
+        <span className={result.agentIdentity}>你 · {step}</span>
+        <MessageMarkdown className={styles.messageText} text={line.text} />
+      </div>
+    );
+  }
+  if (line.role === 'risk') {
+    return (
+      <div data-message-role="assistant" className={styles.risk}>
+        <span className={styles.riskLabel}><AlertTriangle size={14} aria-hidden="true" />风险提示 · {step}</span>
+        <p>{line.text}</p>
+      </div>
+    );
+  }
+  return (
+    <div data-message-role="assistant" className={styles.coach}>
+      <span className={result.agentIdentity}>导师 · {step}</span>
+      <MessageMarkdown className={styles.messageText} text={line.text} />
+      {line.card ? <Card card={line.card} fetchLocal={fetchLocal} /> : null}
+    </div>
+  );
+}
+
+function Card({ card, fetchLocal }: { card: TakeoverCard; fetchLocal: number }) {
+  if (card === 'question') return <div className={styles.cardSlot}><QuestionCardView card={QUESTION_ONE} /></div>;
+  if (card === 'direction') return <div className={styles.cardSlot}><QuestionCardView card={J_DIRECTION_QUESTION as unknown as QuestionCard} /></div>;
+  if (card === 'confirm') {
+    return (
+      <div className={styles.cardSlot}>
+        <StepConfirmCard stepId="you" title={DEMO_STEPS[0].title} info={demoInformation(ready).you} edits={undefined}
+          signal={undefined} resuming={false} disabled stays={false} canConfirm={false} onConfirm={noop} onEdit={noop} onReview={noop} />
+      </div>
+    );
+  }
+  if (card === 'kinds') {
+    return (
+      <ul className={styles.kinds}>
+        {J_BENCHMARK_KINDS.map(item => <li key={item.kind}><b>{item.kind}</b><span>{item.who}</span><em>{item.learn}</em></li>)}
+      </ul>
+    );
+  }
+  if (card === 'fetch') {
+    const fetched = Math.min(J_BENCHMARK_KINDS.length, Math.floor(fetchLocal * 4));
+    return (
+      <ul className={styles.fetch}>
+        {J_BENCHMARK_KINDS.map((item, index) => (
+          <li key={item.kind} data-done={index < fetched || undefined}>
+            {index < fetched ? <Check size={15} aria-hidden="true" /> : <Loader2 size={15} aria-hidden="true" />}
+            {item.kind}<span>{index < fetched ? '已取到公开数据' : '正在抓取'}</span>
+          </li>
+        ))}
+      </ul>
+    );
+  }
+  return (
+    <div className={styles.tableCard}>
+      <p>{J_BENCHMARK_TABLE.title}</p>
+      <table>
+        <thead><tr>{J_BENCHMARK_TABLE.columns.map(column => <th key={column} scope="col">{column}</th>)}</tr></thead>
+        <tbody>
+          {J_BENCHMARK_TABLE.rows.map(row => (
+            <tr key={row[0]}>{row.map((cell, index) => (index === 0
+              ? <th key={index} scope="row">{cell}</th>
+              : <td key={index} data-missing={cell === '未取到' || undefined}>{cell}</td>))}</tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }
