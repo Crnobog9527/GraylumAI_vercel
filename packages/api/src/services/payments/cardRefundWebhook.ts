@@ -49,8 +49,10 @@ export async function handleCardRefund(db: SupabaseClient, stripe: RefundStripe,
   // An order whose monthly refund is approved or running (step 4b-2) owns its cash: external refunds (Link, Dashboard)
   // are persisted on that intent as one conflict for review, carrying the charge's whole refunded amount read from
   // Stripe (so no refund is lost, whatever the order or number of refunds), never also booked as external refunds here.
-  // A failed or canceled external refund moved no cash and must not freeze the intent.
-  const movingCash = external.filter(refund => !['failed', 'canceled'].includes(refund.status ?? ''));
+  // Only a succeeded external refund moved cash and makes the (permanent) conflict. A pending one may still fail or be
+  // canceled: it is not recorded yet, but no refund of ours is sent meanwhile (the provider read refuses a foreign
+  // refund that has not failed), and its success event records the conflict then.
+  const movingCash = external.filter(refund => refund.status === 'succeeded');
   if (match && movingCash.length) {
     const monthly = await reconcileMonthlyRefundForOrder(db, match.order.id, null, stripe as unknown as MonthlyStripe);
     if (monthly.handled) {
