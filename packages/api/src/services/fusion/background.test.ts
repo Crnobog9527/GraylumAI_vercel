@@ -166,17 +166,43 @@ describe('review background', () => {
     expect(kick).toHaveBeenCalledOnce();
   });
 
+  it.each([
+    ['https://attacker.test', 'https://graylum.test'],
+    ['https://graylum.test.attacker.test', 'https://graylum.test'],
+    ['https://graylum.test:444', 'https://graylum.test'],
+    ['http://graylum.test', 'http://graylum.test'],
+    ['https://user:pass@graylum.test', 'https://graylum.test'],
+    ['https://graylum.test', undefined],
+    ['https://graylum.test', 'not-a-url'],
+  ])('never sends credentials to an untrusted target %s', async (origin, configured) => {
+    const fetcher = vi.fn();
+    expect(await kickAdvance(origin, reviewId, 0,
+      { CRON_SECRET: 'test-only', NEXT_PUBLIC_APP_URL: configured }, fetcher)).toBe(false);
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it('accepts only the configured deployment host and refuses redirects', async () => {
+    const env = { CRON_SECRET: 'test-only', VERCEL_URL: 'current-deploy.vercel.app' };
+    const fetcher = vi.fn(async () => new Response(null, { status: 307, headers: { location: 'https://attacker.test' } }));
+    expect(await kickAdvance('https://other-deploy.vercel.app', reviewId, 0, env, fetcher)).toBe(false);
+    expect(fetcher).not.toHaveBeenCalled();
+    expect(await kickAdvance('https://current-deploy.vercel.app', reviewId, 0, env, fetcher)).toBe(false);
+    expect(fetcher).toHaveBeenCalledOnce();
+    expect(fetcher.mock.calls[0]).toEqual([new URL('https://current-deploy.vercel.app/api/fusion/advance'),
+      expect.objectContaining({ redirect: 'error' })]);
+  });
+
   it('checks the secret exactly; kicks only with a secret and a bounded hop; the daily kick stops at its time limit', async () => {
     expect(advanceAuthorized('Bearer s3cret', 's3cret')).toBe(true);
     for (const [header, secret] of [['Bearer s3creT', 's3cret'], ['s3cret', 's3cret'], [null, 's3cret'], ['Bearer ', '']] as const)
       expect(advanceAuthorized(header, secret)).toBe(false);
     const fetcher = vi.fn(async () => new Response(null, { status: 202 }));
-    expect(await kickAdvance('https://graylum.test', reviewId, 1, { CRON_SECRET: 's3cret' }, fetcher as never)).toBe(true);
+    expect(await kickAdvance('https://graylum.test', reviewId, 1, { CRON_SECRET: 's3cret', NEXT_PUBLIC_APP_URL: 'https://graylum.test' }, fetcher as never)).toBe(true);
     const [url, init] = fetcher.mock.calls[0] as unknown as [URL, RequestInit];
     expect(String(url)).toBe('https://graylum.test/api/fusion/advance');
-    expect(init).toMatchObject({ method: 'POST', body: JSON.stringify({ reviewId, hop: 1 }) });
+    expect(init).toMatchObject({ method: 'POST', redirect: 'error', body: JSON.stringify({ reviewId, hop: 1 }) });
     expect(await kickAdvance('https://graylum.test', reviewId, 0, {}, fetcher as never)).toBe(false);
-    expect(await kickAdvance('https://graylum.test', reviewId, 11, { CRON_SECRET: 's3cret' }, fetcher as never)).toBe(false);
+    expect(await kickAdvance('https://graylum.test', reviewId, 11, { CRON_SECRET: 's3cret', NEXT_PUBLIC_APP_URL: 'https://graylum.test' }, fetcher as never)).toBe(false);
     expect(fetcher).toHaveBeenCalledTimes(1);
     let clock = 0;
     const kick = vi.fn(async () => { clock += 20_000; return true; });

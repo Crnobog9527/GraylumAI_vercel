@@ -122,7 +122,16 @@ export async function kickAdvance(origin: string, reviewId: string, hop = 0,
   const secret = env.CRON_SECRET;
   if (!secret || hop > MAX_HOPS) return false;
   try {
-    const response = await fetcher(new URL('/api/fusion/advance', origin), { method: 'POST',
+    const target = new URL(origin);
+    const configured = [env.NEXT_PUBLIC_APP_URL, env.VERCEL_URL && `https://${env.VERCEL_URL}`];
+    const trusted = configured.some(value => {
+      if (!value) return false;
+      try { return new URL(value).origin === target.origin; } catch { return false; }
+    });
+    const local = ['localhost', '127.0.0.1', '[::1]'].includes(target.hostname);
+    if (!trusted || target.username || target.password
+      || (target.protocol !== 'https:' && !(local && target.protocol === 'http:'))) return false;
+    const response = await fetcher(new URL('/api/fusion/advance', target), { method: 'POST', redirect: 'error',
       headers: { authorization: `Bearer ${secret}`, 'content-type': 'application/json' },
       body: JSON.stringify(advanceRequest.parse({ reviewId, hop })), signal: AbortSignal.timeout(timeoutMs) });
     if (response.status !== 202) logger.warn('billing', 'fusion_review_kick_refused', { reviewId, status: response.status });
