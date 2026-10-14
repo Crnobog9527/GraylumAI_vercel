@@ -1,11 +1,11 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-// 0258: an open staging test window admits any signed-in actor; every other window check still applies.
+// 0257: an open staging test window admits any signed-in actor; every other window check still applies.
 import assert from 'node:assert/strict';
 import {randomUUID} from 'node:crypto';
 import {readFileSync} from 'node:fs';
 import {rpc} from '../erasure-b2a/cases.mjs';
 
-const migration=new URL('../../migrations/0258_runtime_test_window_all_actors.sql',import.meta.url);
+const migration=new URL('../../migrations/0257_runtime_test_window_all_actors.sql',import.meta.url);
 const signatures=['runtime_test_window_allowed(uuid,jsonb)','runtime_test_policy(uuid,uuid)',
   'runtime_test_actor_access(uuid)','runtime_financial_recovery(uuid,uuid,boolean)'];
 const definitions=async db=>Object.fromEntries(await Promise.all(signatures.map(async s=>

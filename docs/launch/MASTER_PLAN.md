@@ -97,7 +97,7 @@ Owner 原话（2026-10-14，总控-7 对话）：
 以下是落实范围，不是原话（实现见 [#966](https://github.com/Crnobog9527/GraylumAI_vercel/pull/966)，任务 RUNTIME-PROD）：
 
 - 不做后台"允许注册"开关。staging 的注册由 Owner 在 Supabase 后台关闭（总控已用公开的 auth settings 接口核实 `disable_signup=true`）。
-- staging 测试窗口可以设为"不限用户"（迁移 0258，`runtime_test_windows.all_actors`）：任何已登录的现有账号都能用这个窗口真实调用模型。
+- staging 测试窗口可以设为"不限用户"（迁移 0257，`runtime_test_windows.all_actors`）：任何已登录的现有账号都能用这个窗口真实调用模型。
 - 窗口的其他检查全部保留：启用、有效期、预算、模型白名单、禁止联网、密钥指纹、项目、分支和数据库主机。正式环境和隔离模式的调用路径不变。
 - 开放窗口的预算由所有用户共用（总控已确认可以接受）。
 - 取代第 1 节和第 8 节技术债表中"staging 真实调用最多 8 个白名单用户"的说法；没设为不限用户的窗口仍按原名单规则（最多 8 人）执行。

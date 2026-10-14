@@ -1,5 +1,5 @@
 -- Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved.
--- RUNTIME-TEST-OPEN (0258): a staging test window may admit every signed-in actor (Owner 2026-10-14:
+-- RUNTIME-PROD (0257): a staging test window may admit every signed-in actor (Owner 2026-10-14:
 -- "现在的这个测试白名单可以直接放开，不用限制。只要用户没法注册，他也没法使用。").
 -- all_actors=true requires an empty actor_ids list; all_actors=false keeps the original 0192 rule.
 -- Only the actor-membership test changes in four functions; enablement, expiry, budget, quote, model,
