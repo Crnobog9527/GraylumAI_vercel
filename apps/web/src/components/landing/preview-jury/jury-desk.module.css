@@ -1,15 +1,16 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 /* The stage: a caption of what is happening, the panel strip, then the document on the desk. */
 .desk {
-  display: grid; gap: 0; overflow: hidden; border: 1px solid var(--j-rule); border-radius: 10px; background: var(--j-desk);
+  display: grid; grid-template-rows: auto auto minmax(0, 1fr); gap: 0; min-height: 0; overflow: hidden;
+  border: 1px solid var(--j-rule); border-radius: 10px; background: var(--j-desk);
 }
 .caption {
-  display: grid; gap: 2px; padding: 16px 20px 14px; border-bottom: 1px solid var(--j-rule); background: var(--j-paper);
+  display: grid; gap: 2px; padding: 12px 24px 11px; border-bottom: 1px solid var(--j-rule); background: var(--j-paper);
   animation: captionIn .5s var(--j-ease) both;
 }
 .step { color: var(--j-bronze); font-size: 12.5px; font-weight: 600; font-variant-numeric: tabular-nums; }
 .caption h2 { margin: 0; color: var(--j-ink); font-size: 18px; font-weight: 600; line-height: 1.45; text-wrap: balance; }
-.caption p { margin: 2px 0 0; max-width: 46em; color: var(--j-muted); font-size: 13px; line-height: 1.6; }
+.caption p { margin: 2px 0 0; max-width: 64em; color: var(--j-muted); font-size: 13px; line-height: 1.6; }
 
 .panel {
   display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0; margin: 0; padding: 0; border-bottom: 1px solid var(--j-rule);
@@ -18,7 +19,7 @@
 .panel li { min-width: 0; }
 .panel li + li { border-left: 1px solid var(--j-rule); }
 .person {
-  display: flex; align-items: center; gap: 10px; width: 100%; min-width: 0; padding: 10px 14px; border: 0; background: none;
+  display: flex; align-items: center; gap: 10px; width: 100%; min-width: 0; padding: 8px 24px; border: 0; background: none;
   color: inherit; font: inherit; text-align: left; cursor: pointer; transition: background-color .2s;
 }
 .person:hover, .selected { background: var(--j-canvas); }
@@ -35,6 +36,9 @@
 .person[data-tone='failed'] .state { color: var(--j-critical); }
 .person[data-seat='S'] { background: color-mix(in srgb, var(--j-bronze) 4%, var(--j-paper)); }
 .person[data-seat='S']:hover, .person[data-seat='S'].selected { background: var(--j-canvas); }
+
+/* Keep the people clear of the record drawer that slides over the right edge (jury.module.css .side). */
+@media (min-width: 1024px) { .panel { padding-right: calc(min(440px, 38vw) - 12px); } .panel li:last-child { border-right: 1px solid var(--j-rule); } }
 
 @keyframes captionIn { from { opacity: 0; } }
 @keyframes pulse { 50% { opacity: .35; } }
