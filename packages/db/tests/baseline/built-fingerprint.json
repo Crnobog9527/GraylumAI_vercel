@@ -3068,7 +3068,7 @@
   "fn:report_revision_values(jsonb,jsonb,jsonb)": "c1429dcbce4d",
   "fn:report_source(uuid,uuid,uuid,uuid)": "12a302383629",
   "fn:report_source_for_read(uuid,uuid,uuid,uuid)": "d4d9dbff879b",
-  "fn:research_account_fetch_claim(uuid,uuid,uuid,text,text,uuid)": "4e09917f75bb",
+  "fn:research_account_fetch_claim(uuid,uuid,uuid,text,text,uuid)": "da58b7c07761",
   "fn:research_account_fetch_dispatch(uuid,uuid,uuid)": "f2def6fa7137",
   "fn:research_account_fetch_finish(uuid,uuid,uuid,text,jsonb)": "94f10e871db8",
   "fn:research_billing_summary(timestamp with time zone,timestamp with time zone)": "0b49f98c3209",
