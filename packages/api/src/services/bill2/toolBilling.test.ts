@@ -90,7 +90,9 @@ describe('tool result evidence', () => {
     const unknown = toolResultEvidence('call-1', p, result({ outcome: 'unknown', httpStatus: null, usage: { unit: 'call', units: null } }), hash);
     expect(unknown).toMatchObject({ toolOutcome: 'unknown', cost: null, usage: { units: null } });
     expect(unknown).not.toHaveProperty('httpStatus');
-    expect(toolResultEvidence('call-1', p, result({ outcome: 'not_sent' }), hash)).toBeNull();
+    // Refused by the adapter after dispatch was recorded: confirmed free, so the hold is released at once.
+    expect(toolResultEvidence('call-1', p, result({ outcome: 'not_sent', httpStatus: null, supplierMayCharge: false,
+      usage: { unit: 'call', units: null } }), hash)).toMatchObject({ toolOutcome: 'failed_free', cost: '0', usage: { units: null } });
   });
 
   it('never prices usage reported in another unit or for a usage route without usage', () => {

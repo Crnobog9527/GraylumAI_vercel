@@ -139,8 +139,10 @@ export function toolClaimPayload(policy: ToolCallPolicy, call: { phase: string; 
 }
 
 /**
- * The single result recorded for a dispatched call (plan §3.3, §3.4). Returns null for `not_sent`:
- * nothing reached the supplier, so the host cancels the undispatched call instead of recording one.
+ * The single result recorded for a dispatched call (plan §3.3, §3.4):
+ *   not_sent (the adapter refused before any network call, e.g. invalid input or a non-public target,
+ *     even though the call was already marked dispatched) → failed_free: nothing reached the supplier,
+ *     so it settles at 0 / 0 at once and the user's hold is released;
  *   ok / partial with official usage → delivered (user pays usage × frozen price);
  *   ok / partial without usable usage → delivered without usage (user 0, supplier cost pending);
  *   failed and documented as free → failed_free; failed but chargeable → failed_charged (platform absorbs);
@@ -151,7 +153,6 @@ export function toolResultEvidence(callId: string, policy: ToolCallPolicy, resul
   if (result.vendor !== policy.provider || `${result.vendor}:${result.route}` !== policy.model) {
     throw new ToolBillingError('TOOL_RESULT_MISMATCH');
   }
-  if (result.outcome === 'not_sent') return null;
   if (!/^[a-f0-9]{64}$/.test(sourceHash)) throw new ToolBillingError('TOOL_INPUT_INVALID');
   const pricing = policy.toolPricing;
   const officialUnits = result.usage.unit === pricing.unit && result.usage.units !== null && DECIMAL.test(result.usage.units)
@@ -159,7 +160,10 @@ export function toolResultEvidence(callId: string, policy: ToolCallPolicy, resul
   let outcome: ToolOutcome;
   let units: string | null = null;
   let cost: string | null = null;
-  if (result.outcome === 'ok' || result.outcome === 'partial') {
+  if (result.outcome === 'not_sent') {
+    outcome = 'failed_free';
+    cost = '0';
+  } else if (result.outcome === 'ok' || result.outcome === 'partial') {
     outcome = 'delivered';
     units = officialUnits;
     cost = units === null ? null : toolCostUsd(pricing, units, 'down');
