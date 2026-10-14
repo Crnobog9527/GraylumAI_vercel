@@ -113,12 +113,15 @@ export function stoppedCompletion(options: RuntimeExecutorOptions, billing: Retu
           let update=projection.appendText(message?.content??'');
           const tool=message?.tool_calls?.[0];
           if(tool)update=projection.appendToolFrame({choices:[{delta:{tool_calls:[{index:0,function:tool.function}]}}]})??update;
-          source=projection.finish(visibleText(body,context))?.source??update?.source??'final';
-          // A plain stream keeps only the first stopAt code points. When they are exactly what streamed, a later
-          // change (identity redaction after the stop point) cannot change what the user saw: accept its source.
+          // What streamed before any identity rewrite (MODEL-IDENTITY-GUARD) and from which source.
+          const streamed=projection.text,streamedSource=update?.source;
+          source=projection.finish(visibleText(body,context))?.source??streamedSource??'final';
+          // Only the first stopAt code points are kept. When they read the same before and after the rewrite, a
+          // rewrite after the stop point cannot change what the user saw: accept the source the client recorded.
           const stopAt=execution.stop!.stopAt,shown=(text:string)=>Array.from(text).slice(0,stopAt).join('');
-          if(plainStream&&(execution.stop?.source==='assistant'||execution.stop?.source==='final')
-            &&shown(visibleText(body,context))===shown(message?.content??''))source=execution.stop.source;
+          const recorded=execution.stop?.source;
+          // A final snapshot the client really received already yields 'final' above; one it claims without it does not.
+          if(recorded!==undefined&&recorded===streamedSource&&shown(visibleText(body,context))===shown(streamed))source=recorded;
         }
       }
     }catch{valid=false;}
