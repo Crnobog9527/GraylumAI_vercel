@@ -183,7 +183,7 @@ Owner 要求评审过程中让用户看到评审团的思考和互相挑刺。�
 | --- | --- | --- |
 | `review_started` | 评审开始（读报告） | `reviewers: ["A","B","C"]`, `sections: number`（报告章节数） |
 | `reviewer_started` | 某个评审开始调用 | `round`, `reviewer` |
-| `decision` | 评审的钢人判断，每个关键决定一条 | `round`, `reviewer`, `decision: "positioning"\|"audience"\|"platform"\|"monetization"`, `strongestCase`, `strongestAlternative`, `verdict: "keep"\|"change"` |
+| `decision` | 评审的双向钢人辩证，每个关键决定一条 | `round`, `reviewer`, `decision: "positioning"\|"audience"\|"platform"\|"monetization"`, `strongestCase`, `strongestAlternative`, `verdict: "keep"\|"change"` |
 | `issue` | 评审的问题，每条一条（宿主丢掉的笼统意见不出现） | `round`, `reviewer`, `section`（章节标题）, `perspective`, `severity: "critical"\|"major"\|"minor"`, `problem`（为什么）, `fix`（怎么改） |
 | `reviewer_failed` | 某个评审没给出可用意见 | `round`, `reviewer`, `reason: "format"\|"no_delivery"\|"stopped"` |
 | `disagreement` | 第 1 轮结束、发现分歧（每个有分歧的决定一条） | `decision`, `keep: ["A",...]`, `change: ["B",...]` |

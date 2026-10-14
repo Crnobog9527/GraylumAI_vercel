@@ -5,11 +5,11 @@
  * on top and the records become a panel pulled up from the bottom.
  */
 .live {
-  display: grid; grid-template-columns: 220px minmax(0, 1fr) 320px; gap: 20px;
+  display: grid; grid-template-columns: clamp(208px, 14vw, 280px) minmax(0, 1fr) clamp(320px, 23vw, 440px); gap: clamp(16px, 1.4vw, 28px);
   height: calc(100svh - var(--j-bar, 96px) - 24px); min-height: 560px;
 }
 .stage { position: relative; min-width: 0; min-height: 0; }
-.results { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 24px; align-items: start; }
+.results { display: grid; grid-template-columns: minmax(0, 1fr) clamp(300px, 23vw, 440px); gap: clamp(24px, 2vw, 40px); align-items: start; }
 
 /* Steps */
 .steps { display: grid; align-content: start; gap: 10px; min-height: 0; overflow-y: auto; scrollbar-width: thin; }
@@ -49,7 +49,9 @@
   padding: 3px 10px; border: 1px solid var(--j-rule); border-radius: 8px; background: var(--j-paper); font: inherit; font-size: 12.5px;
   font-weight: 500; cursor: pointer;
 }
-.recordsBody { min-height: 0; overflow-y: auto; scrollbar-width: thin; }
+/* The folder inside scrolls by itself (its tabs stay on top). Nothing here may scroll too: a second, nested scroller
+ * with overscroll containment swallowed the wheel, so the records looked stuck. */
+.recordsBody { display: grid; grid-template-rows: minmax(0, 1fr); min-height: 0; }
 /* In the narrow column the four tabs sit two by two, so every name stays whole. */
 @media (min-width: 1280px) { .recordsBody [role='tablist'] { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 
@@ -97,7 +99,7 @@
 
 /* Narrower computers: the records leave the right for the bottom panel; the result page drops them below. */
 @media (max-width: 1279px) {
-  .live { grid-template-columns: 200px minmax(0, 1fr); }
+  .live { grid-template-columns: 208px minmax(0, 1fr); }
   /* The records become the panel at the bottom on the result page too; the choice bar sits above it. */
   .results { --j-drawer: 64px; grid-template-columns: minmax(0, 1fr); padding-bottom: 64px; }
 }
@@ -113,6 +115,10 @@
   }
   .records[data-open='true'] .recordsHandle svg { transform: rotate(180deg); }
   .recordsHead { display: none; }
+  /* Open, the panel keeps 跟随当前 under its handle once the user has picked or scrolled a record. */
+  .records[data-open='true']:has(.recordsHead button) { grid-template-rows: auto auto minmax(0, 1fr); }
+  .records[data-open='true'] .recordsHead:has(button) { display: flex; justify-content: flex-end; }
+  .records[data-open='true'] .recordsHead > span { display: none; }
   .live { padding-bottom: 64px; }
   .records { grid-template-rows: auto minmax(0, 1fr); }
 }
