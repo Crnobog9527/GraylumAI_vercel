@@ -27,7 +27,7 @@ function fixture(state: { orders?: Record<string, Order>; sessions?: unknown[]; 
   const db = { from: vi.fn((table: string) => {
     let key = '';
     const chain = { select: vi.fn(() => chain), eq: vi.fn((_k: string, value: string) => { key = value; return chain; }),
-      is: vi.fn(() => chain), not: vi.fn(() => chain), neq: vi.fn(() => chain), in: vi.fn(() => chain),
+      is: vi.fn(() => chain), not: vi.fn(() => chain), neq: vi.fn(() => chain), in: vi.fn(() => chain), order: vi.fn(() => chain),
       // Card subscriptions with a requested stop Stripe has not confirmed (scan 4).
       limit: vi.fn(async () => ({ error: null, data: table === 'user_subscriptions' ? (state.stopping ?? []).map(id => ({ id })) : [] })),
       maybeSingle: vi.fn(async () => ({ error: null, data: orders[key] ?? null })) };
@@ -63,6 +63,12 @@ describe('PAY-STRIPE-MP daily Stripe card reconciliation', () => {
     expect(mocks.stop).toHaveBeenCalledWith(f.db, f.stripe, 'fixture', 'pro', 'sub_pro');
     expect(result).toMatchObject({ success: false, repaired: 1, findings: [{ kind: 'stop_unconfirmed', object: 'subscription',
       externalId: 'stuck', code: 'PAY_STRIPE_MP_RENEWAL_STOP_UNCONFIRMED' }] });
+    // More than a day's batch: the first 100 are retried and the scan is reported incomplete, never silently complete.
+    mocks.stop.mockReset().mockResolvedValue(undefined);
+    const many = await fixture({ stopping: Array.from({ length: 101 }, (_, i) => `s${i}`) }).run();
+    expect(mocks.stop).toHaveBeenCalledTimes(100);
+    expect(many).toMatchObject({ complete: false, repaired: 100,
+      findings: [{ kind: 'scan_incomplete', object: 'subscription', code: 'PENDING_STOPS_OVER_LIMIT' }] });
   });
   it('runs in the mode the environment configures and refuses a key of the other mode', async () => {
     mocks.scope.mockResolvedValue({ mode: 'live', merchant: 'fixture' });
@@ -91,6 +97,9 @@ describe('PAY-STRIPE-MP daily Stripe card reconciliation', () => {
     const review = fixture({ orders: { [ORDER]: card({ method_review_reason: 'founder_released' }) }, sessions: [session()] });
     await expect(review.run()).resolves.toMatchObject({ success: false,
       findings: [{ kind: 'paid_in_review', object: 'checkout', externalId: 'cs_1', orderId: ORDER }] });
+    // Replayed so the undelivered card subscription is stopped at Stripe even if its webhook gave up.
+    expect(mocks.recover).toHaveBeenCalledWith(review.db, review.stripe, 'cs_1', 'checkout.session.completed');
+    mocks.recover.mockReset();
     const stuck = fixture({ orders: { [ORDER]: card() }, sessions: [session()] });
     mocks.recover.mockResolvedValue({ orderId: ORDER });
     await expect(stuck.run()).resolves.toMatchObject({ findings: [{ kind: 'paid_not_delivered', externalId: 'cs_1' }] });

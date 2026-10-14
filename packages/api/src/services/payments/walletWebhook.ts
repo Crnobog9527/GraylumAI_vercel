@@ -7,6 +7,7 @@ import { walletMembershipTerm } from './methodMembershipTerm';
 import { logger } from '../../lib/logger';
 import { readCardPaymentEvidence, recordCardPaymentTax, type CardOrder, type CardPaymentEvidence } from './cardPaymentEvidence';
 import { stopPriorAfterUpgrade } from './cardUpgrade';
+import { stopUndeliveredSubscription } from './cardSubscriptionStop';
 
 const isCard = (method: string) => method === 'card' || method === 'card_cn';
 
@@ -108,7 +109,10 @@ export async function recoverMethodCheckout(db: SupabaseClient, stripe: Stripe, 
   // a tax bookkeeping failure can never leave the replaced Pro renewing next to the Gold.
   const failures: unknown[] = [];
   const attempt = async (step: () => Promise<unknown>) => { try { await step(); } catch (error) { failures.push(error); } };
-  if ((applied.data as { state?: string }).state === 'fulfilled') await attempt(() => stopPriorAfterUpgrade(db, stripe, order));
+  const delivered = (applied.data as { state?: string }).state === 'fulfilled';
+  if (delivered) await attempt(() => stopPriorAfterUpgrade(db, stripe, order));
+  // Paid but kept for review (not delivered): its card subscription must not renew; the prior Pro is kept.
+  else if (card) await attempt(() => stopUndeliveredSubscription(stripe, card.id));
   if ('tax' in cash) await attempt(() => recordCardPaymentTax(db, scope.merchant, order.id, cash));
   if (failures.length) throw failures[0];
   return { orderId: order.id };
