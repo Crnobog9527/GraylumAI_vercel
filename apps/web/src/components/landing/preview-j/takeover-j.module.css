@@ -117,11 +117,12 @@
 .checklist > header p { margin: 2px 0 0; color: #999; font-size: 12px; }
 .checklist > div { padding: 10px 12px !important; overflow: hidden !important; }
 
-/* The review panel (3b): the prototype's desk, scaled to the stage */
-.jury { height: 100%; overflow: hidden; border: 1px solid var(--j-line); border-radius: 20px; background: #fff; }
-.jury > * { zoom: .78; }
-@media (max-width: 767px) { .jury > * { zoom: .6; } }
-.static .jury { height: 560px; }
+/* The jury's placeholder until #998's canvas joins */
+.placeholder {
+  display: grid; place-items: center; height: 100%; min-height: 320px; border: 1.5px dashed rgba(20, 19, 18, .18); border-radius: 22px;
+  background: rgba(255, 255, 255, .6); color: var(--j-muted); font-size: 17px; font-weight: 500;
+}
+.placeholder p { margin: 0; }
 
 /* What you no longer do (3c) */
 .promises { display: grid; gap: 14px; height: 100%; margin: 0; padding: 0; list-style: none; align-content: center; }

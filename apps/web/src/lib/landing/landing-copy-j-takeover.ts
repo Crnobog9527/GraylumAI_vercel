@@ -93,3 +93,6 @@ export const J_DIRECTION_QUESTION = {
   recommended: 0,
   recommendationReason: '你亲身走过、别人替代不了，想入行的人也更愿意为具体的帮助付费。',
 } as const;
+
+/** Holds the jury's place until its new canvas version is merged (#998) and can play this case. */
+export const J_JURY_PLACEHOLDER = '评审团演示（新版制作中）';

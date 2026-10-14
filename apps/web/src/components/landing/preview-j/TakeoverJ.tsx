@@ -4,9 +4,8 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { HOW_IT_WORKS } from '@/lib/landing/landing-copy';
 import { J_TAKEOVER } from '@/lib/landing/landing-copy-j';
-import { J_TAKEOVER_SCENES } from '@/lib/landing/landing-copy-j-takeover';
+import { J_JURY_PLACEHOLDER, J_TAKEOVER_SCENES } from '@/lib/landing/landing-copy-j-takeover';
 import { cn } from '@/lib/utils';
-import { JuryClipJ } from './JuryClipJ';
 import { PositioningClipJ } from './PositioningClipJ';
 import styles from './takeover-j.module.css';
 import page from './j.module.css';
@@ -77,9 +76,11 @@ export function TakeoverJ() {
     };
   }, [locked]);
 
+  // The jury's new canvas version joins once #998 is merged and gives a 0 → 1 player with this case; until then a
+  // placeholder holds its place (controller, 2026-10-15).
   const picture = (index: number, local: number): ReactNode => (index < 3
     ? <PositioningClipJ scene={index} local={local} />
-    : <JuryClipJ progress={local} />);
+    : <div className={styles.placeholder}><p>{J_JURY_PLACEHOLDER}</p></div>);
 
   if (!locked) {
     return (
@@ -89,7 +90,7 @@ export function TakeoverJ() {
           {SIDEBAR.map((item, index) => (
             <article key={item.id} className={styles.staticStep}>
               <div className={styles.copy}><h3>{item.title}</h3><p>{item.note}</p></div>
-              <div className={styles.picture} inert>{picture(index, index < 3 ? 1 : 0.62)}</div>
+              <div className={styles.picture} inert>{picture(index, 1)}</div>
             </article>
           ))}
         </div>
