@@ -112,7 +112,8 @@ BEGIN
   RAISE EXCEPTION 'PUBLISH_MONITOR_INPUT_INVALID' USING ERRCODE='22023'; END IF;
  -- Settled attempts are kept 30 days (plan §7), then only the daily orphan sweep remains as a backstop. This runs on
  -- every daily claim, whether or not there is new work.
- DELETE FROM social_connect_requests WHERE cleaned_at IS NOT NULL AND created_at<now_at-interval '30 days';
+ DELETE FROM social_connect_requests WHERE (cleaned_at IS NOT NULL OR cleanup_attempts>=50)
+  AND created_at<now_at-interval '30 days';
  UPDATE social_connect_requests SET state='abandoned',confirm_expires_at=NULL
  WHERE (state='awaiting_callback' AND expires_at<=now_at) OR (state='pending_confirm' AND confirm_expires_at<=now_at);
  WITH picked AS (
@@ -256,10 +257,10 @@ BEGIN
    -- quarantine it and queue the disconnect, exactly like a callback that proves a takeover.
    -- Every proven takeover (re)queues the disconnect and clears any lease, so a worker claimed before it cannot report
    -- a stale result; a disconnected account needs nothing.
-   IF existing.status<>'deleting'
-    AND item->>'status' IS DISTINCT FROM 'disconnected' AND ext ~ '^[0-9a-f]{32}\.[0-9a-f]{32}$' THEN
+   -- Fails closed: a live bound account whose reference is missing, malformed or another user's is a takeover.
+   IF existing.status<>'deleting' AND item->>'status' IS DISTINCT FROM 'disconnected' THEN
     SELECT provider_ref INTO owner FROM social_monitor_settings WHERE actor_id=existing.actor_id;
-    IF owner IS NOT NULL AND split_part(ext,'.',1)<>owner THEN
+    IF owner IS NOT NULL AND (ext IS NULL OR split_part(ext,'.',1) IS DISTINCT FROM owner) THEN
      UPDATE social_connections SET status='quarantined',provider_disconnect_pending=true,deletion_attempts=0,
       lease_owner=NULL,lease_expires_at=NULL,updated_at=clock_timestamp() WHERE id=existing.id;
      taken:=taken||pid;
@@ -269,7 +270,10 @@ BEGIN
   END IF;
   -- Exactly what publish_monitor_random_hex() generates for both halves; anything else is only reported.
   IF ext IS NULL OR ext !~ '^[0-9a-f]{32}\.[0-9a-f]{32}$' THEN unknown:=unknown||pid; CONTINUE; END IF;
-  CONTINUE WHEN EXISTS(SELECT 1 FROM social_connect_requests WHERE external_id=ext AND cleaned_at IS NULL);
+  -- An attempt whose own cleanup is still retrying settles its accounts; one that exhausted its retries does not, so
+  -- the sweep takes over as the backstop.
+  CONTINUE WHEN EXISTS(SELECT 1 FROM social_connect_requests WHERE external_id=ext AND cleaned_at IS NULL
+   AND cleanup_attempts<50);
   deletable:=deletable||pid;
  END LOOP;
  RETURN jsonb_build_object('delete',to_jsonb(deletable),'unknownFormat',to_jsonb(unknown),'takenOver',to_jsonb(taken));

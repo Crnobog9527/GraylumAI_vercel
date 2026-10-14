@@ -117,7 +117,8 @@ try {
 
   // Orphan sweep decisions: bound accounts, unknown formats and unsettled attempts are never deleted.
   const open = await start(other.a, other.account);
-  const orphan = await svc('SELECT publish_monitor_orphan_classify($1) v', [j([acc('pfm_u_kept', 'x'),
+  const uRef = await v('SELECT provider_ref v FROM social_monitor_settings WHERE actor_id=$1', [u.a]);
+  const orphan = await svc('SELECT publish_monitor_orphan_classify($1) v', [j([acc('pfm_u_kept', `${uRef}.${'0'.repeat(32)}`),
     acc('pfm_dash', null), acc('pfm_weird', 'Owner-Test'), acc('pfm_open', open.externalId),
     acc('pfm_unsettled', a1.externalId), acc('pfm_settled', b1.externalId), acc('pfm_gone_user', 'f'.repeat(32) + '.' + 'e'.repeat(32)),
     acc('pfm_lookalike', 'abcdefghijklmnop.qrstuvwxyzabcdef')])]);
@@ -131,11 +132,21 @@ try {
   const sameUser = await svc('SELECT publish_monitor_orphan_classify($1) v',
     [j([acc('pfm_sweep_victim', `${victimRef}.${'0'.repeat(32)}`)])]);
   assert.deepEqual(sameUser.takenOver, []);
+  // A live bound account whose reference is missing or not Graylum's format cannot be its owner's: fails closed.
+  const nullRef = await member();
+  await connect(nullRef, 'pfm_null_ref');
+  assert.deepEqual((await svc('SELECT publish_monitor_orphan_classify($1) v',
+    [j([{ providerAccountId: 'pfm_null_ref', externalId: null, status: 'connected' }])])).takenOver, ['pfm_null_ref']);
   const swept = await svc('SELECT publish_monitor_orphan_classify($1) v',
     [j([acc('pfm_sweep_victim', `${'9'.repeat(32)}.${'0'.repeat(32)}`)])]);
   assert.deepEqual(swept.takenOver, ['pfm_sweep_victim']);
   const victimConn = await conn('pfm_sweep_victim');
   assert.deepEqual([victimConn.status, victimConn.provider_disconnect_pending], ['quarantined', true]);
+  // An attempt that exhausted its cleanup retries no longer shields its accounts from the sweep.
+  await c.query('UPDATE social_connect_requests SET cleanup_attempts=50 WHERE id=$1', [a1.requestId]);
+  assert.deepEqual((await svc('SELECT publish_monitor_orphan_classify($1) v', [j([acc('pfm_unsettled', a1.externalId)])])).delete,
+    ['pfm_unsettled']);
+  await c.query('UPDATE social_connect_requests SET cleanup_attempts=1 WHERE id=$1', [a1.requestId]);
   report.checks.push('orphan sweep deletes only unbound accounts in Graylum\'s own format whose attempt is settled or unknown; '
     + 'other formats are only reported');
 
