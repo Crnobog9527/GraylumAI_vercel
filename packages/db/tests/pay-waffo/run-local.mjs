@@ -17,6 +17,7 @@ import { stripeMpCheckoutCases } from './stripe-mp-checkout.mjs';
 import { stripeMpFulfillCases } from './stripe-mp-fulfill.mjs';
 import { stripeMpRenewalCases } from './stripe-mp-renewal.mjs';
 import { membershipExpiryStripeCases } from './membership-expiry-stripe.mjs';
+import { stripeMpExternalRefundCases } from './stripe-mp-external-refund.mjs';
 import { POSTGRES_IMAGE } from '../v3/images.mjs';
 import { buildFromFiles, installPgCronStub } from '../baseline/build-from-files.mjs';
 
@@ -52,7 +53,7 @@ try {
   for (const file of ['0204_pay_waffo_qualification.sql', '0211_pay_waffo_delivery.sql', '0214_pay_waffo_renewal_grace.sql',
     '0221_pay_stripe_mp_routing.sql', '0222_pay_stripe_mp_checkout.sql',
     '0237_pay_stripe_mp_card_packs.sql', '0238_pay_stripe_mp_renewal.sql',
-    '0243_pay_common_membership_expiry.sql']) {
+    '0243_pay_common_membership_expiry.sql', '0247_pay_stripe_mp_external_refund.sql']) {
     sql(readFileSync(resolve(root, 'packages/db/migrations', file),'utf8'));
   }
   assert.deepEqual(fingerprint(),before,'new migration repeat preserves structure');
@@ -104,6 +105,7 @@ try {
   cases.push(...await stripeMpFulfillCases({admin,service,connect}));
   cases.push(...await stripeMpRenewalCases({admin,service,connect}));
   cases.push(...await membershipExpiryStripeCases({admin,service}));
+  cases.push(...await stripeMpExternalRefundCases({admin,service,connect}));
   console.log(JSON.stringify({result:'PASS',replay:report,
     cases:['event-idempotency','event-conflict','test-live-isolation','refund-event-not-payment-dedup',
       'service-only-receipt','durable-lookup-refs-no-contact-data','route-version-cas','route-delete-denied',...scopedCases,...cases]}));
