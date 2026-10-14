@@ -84,17 +84,30 @@
 
 ### 2.1 Owner 的新决定（2026-09-27 起，2026-10-14 更新）
 
-**2026-10-14：删除定位对话后，已确认内容保留为只读**
+**2026-10-14：删除定位对话后，已确认的内容保留为只读，可以再整份删除**
 
-Owner 原话（2026-10-14，经总控-7 转达）：
+Owner 原话（2026-10-14，总控-7 对话）：
 
 > 删除定位对话后，已确认的内容保留为只读，可以再整份删除。
 
-以下是落实范围，不是原话：
+以下是落实范围，不是原话（背景见 [#946](https://github.com/Crnobog9527/GraylumAI_vercel/pull/946)、[#902](https://github.com/Crnobog9527/GraylumAI_vercel/pull/902) 验收第 6 步）：
 
-- 补充本节 2026-10-13「删除整个对话像 ChatGPT 一样瞬间完成」：定位流程的对话（侧栏"待归类"里的定位分析）也能在"⋯"里一键删除对话。删除后这个草稿进入"对话已删除"的只读状态：已确认的内容可以查看和导出（页面和导出是同一份"只含已确认内容"的列表，不带已删对话里的原话），不能再对话、修改或确认；计费授权照样撤销。一条已确认内容都没有的草稿，删除对话后从"待归类"隐藏。
-- 只读草稿可以在"⋯"里整份删除，走"稿件与成果"的删除（先显示影响），删除后不可读、从列表消失；注销同样清除。不会留下用户删不掉的内容。
-- 实施见 DATA-ERASURE 迁移 0249（PR 见本 PR）。
+- 定位对话和普通对话一样，可以从侧栏"⋯ → 删除对话"整个删除（2026-10-13"用户只能整个删除某一个聊天窗口记录"的落实）。
+- 删除后，草稿进入"对话已删除"的只读状态：已确认的步骤可以看、可以导出，不能再对话；计费授权照常撤销，不会再产生新的调用。一条已确认内容都没有的草稿从"待归类"隐藏。
+- 只读草稿可以再走"稿件与成果"的删除整份删掉，不留下用户删不掉的内容；删除和注销的清理覆盖这种状态。
+- 删除弹窗的文案不变（2026-10-13 决定）。
+
+**2026-10-14：用户在 Stripe 被全额外部退款后，不自动停止续费，转人工处理**
+
+Owner 原话（2026-10-14，总控-7 对话）：
+
+> 全额外部退款后不自动停续费，转人工处理
+
+以下是落实范围，不是原话（PAY-STRIPE-MP 第 3c 步，[#941](https://github.com/Crnobog9527/GraylumAI_vercel/pull/941)）：
+
+- "外部退款"指不是由我们的退款审批发起的 Stripe 退款（例如在 Stripe 后台手工退、经 Link 退）。全额外部退款时，系统收回这一单发放、还没用的订阅积分（不让余额变负，不够的部分记为 Graylum 承担），结束这一期，订单标成已退款；订阅不自动停止续费，发告警给人工，告警写明"该订阅仍在续费，请确认是否需要停续费"。
+- 部分外部退款只记账，转人工并告警，不自动结束会员。积分包外部退款按第 47 项和第 51 项只记录待人工处理，不自动收回积分。
+- 不改变的：我们自己发起的人工退款（第 51 项，7 天内且没用过积分、法律允许时扣 6%、税全额退还）退款成功后立即取消该订阅；拒付另按 PAY-DISPUTE-GUARD 处理。
 
 **2026-10-14：FUSION 评审团各模型各自计费、各自取整**
 
@@ -2054,7 +2067,7 @@ node scripts/plan-progress.mjs --ref origin/staging
 | | PAY-DISPUTE-GUARD | 第 51 项 X/AC/AD 已定的上线前拒付通知接收、可撤回冻结及停止续费，从收款 PR 拆出独立交付。**2026-10-12 起新订单走 Stripe（第 2.1 节 2026-10-12 决定），方向改为按 Stripe 拒付事件（`charge.dispute.*`）处理**：Stripe Managed Payments 订单由 Stripe 作为记录商户处理拒付，本任务接收它的拒付事件做通知记录、可撤回冻结和停止续费；中国大陆银行卡订阅和微信/支付宝单笔（普通 Stripe，Graylum 是卖家）的拒付由我们自己处理，同样从 Stripe 拒付事件接收。PAY-STRIPE-MP 只保证这些事件不报错（[#847 迁移方案](https://github.com/Crnobog9527/GraylumAI_vercel/pull/847)）。MP 与普通 Stripe 各自的事件、到冻结的对应和人工替代，实施时由方案细化。Waffo 的每日 GraphQL `chargebacks` 查询和邮件（[Waffo 2026-10-10 答复](https://github.com/Crnobog9527/GraylumAI_vercel/pull/752#issuecomment-6095292601)，PAY-WAFFO §3、§8）只保留给已有 Waffo 旧订单。最终判定、申诉等扩展仍归上线后 CHARGEBACK，不扩大本任务。 | PAY-STRIPE-MP | 高 | 待实施方案细化 | — |
 | | PUBLIC-SITE | 公开站上线准备（第 2.1 节 2026-10-12 域名合并、中文优先、风格统一、落地页方向决定）：app.graylum.com 并入 www.graylum.com、应用放 /app；SEO/GEO 规范与基础设置；公开页面（落地页、定价、常见问题、教程）按对话页风格重做；新落地页按全部完工后的产品来写、未验收的能力不写。具体拆分待 SEO/GEO 规范文档和域名方案定稿后细化；正式环境平台设置逐项另获 Owner 批准。 | 第一段（SEO/GEO 基础设置和台湾 6 页）现在就做（Owner 2026-10-12 8 条线排期，第 2.1 节）；新落地页的能力文案须等 D1 范围功能完成；`/app` 路由搬迁放在冻结窗口最后做；域名合并的正式环境设置另行批准 | 高 | 待实施方案细化 | — |
 | | ANALYTICS | 网站统计（第 2.1 节 2026-10-13 决定，方案 [ANALYTICS](tasks/ANALYTICS.md)）：Termly 同意弹窗（地区规则、Google Consent Mode v2、统计和广告脚本按 Termly 分类放行）；GA4 页面浏览（公开页；2026-10-13 起应用内也记，只发去掉编号的路由模板）和四个关键事件（注册、完成定位、开始付款、付款成功由服务器在 Stripe 回调履约后上报、按订单只记一次），不发邮箱、用户编号等能直接认出身份的信息，一次性密钥网址不统计；GA4 自定义渠道"AI 推荐"；注册时把首次来源写进账号资料（迁移，接入注销）；Vercel Web Analytics 看总量和中国大陆；业务数字从数据库出报表，不自研统计系统。第一步随公开站上线；第二步 Meta 像素和 Conversions API 等 Owner 投广告前再做 | 方案第 9 节已由 Owner 2026-10-13 确认（第 2.1 节）；GA4 和 Termly 账号、公开编号、Measurement Protocol 密钥由 Owner 提供（方案第 8 节）；排在官网线第一段之后（与 PUBLIC-SITE 同改根布局）；Vercel 自定义事件等 Vercel Pro | 高（PR-3 含迁移、注销和付款回调；PR-1、PR-2 只改前端） | 中 / 3（第二步另计 1–2） | — |
-| | V3-M3 → REL-1 | 完整验收和发布（第 9.3 节；正式环境没有真实用户，按新建环境发布，不做旧数据兼容和迁移）。上线清单（2026-10-12 补充，第 2.1 节）：开启 Stripe Tax 门槛监控（Stripe 正式环境设置须 Owner 批准）；核对 OpenRouter 账号和各 workspace 已关闭“允许用于训练”。2026-10-13 补充：核对首页摘要"复盘数据"的说法与 PUBLISH-MONITOR 验收结果一致（PUBLISH-MONITOR 仍是上线前置，见第 2.1 节；SEO 规范第 3.3 节）；上线前 Owner 向 Parallel 取得 Search API 零保留、不训练的书面确认，确认前隐私条款按可能用于训练写（第 2.1 节 2026-10-13 RESEARCH-TOOLS 决定）。2026-10-13 补充（总控决定，DATA-ERASURE #902）：升级 Vercel Pro 后，把删除兜底任务（account-erasure 定时任务里的对话清理）改为至少每小时一次，保证删除后 24 小时内清完（T_online）；这是上线前提，不是放宽规则。 | 以上全部；PAY-FOUNDER、PAY-NOTIFY、PAY-EVIDENCE、PAY-DISPUTE-GUARD、SKILL-I18N-HOOK | 高；生产另行批准 | 大 | V3-M3：阻塞：等第 0–4 阶段的 D1 范围全部完成（依赖"以上全部"） |
+| | V3-M3 → REL-1 | 完整验收和发布（第 9.3 节；正式环境没有真实用户，按新建环境发布，不做旧数据兼容和迁移）。上线清单（2026-10-12 补充，第 2.1 节）：开启 Stripe Tax 门槛监控（Stripe 正式环境设置须 Owner 批准）；核对 OpenRouter 账号和各 workspace 已关闭“允许用于训练”。2026-10-13 补充：核对首页摘要"复盘数据"的说法与 PUBLISH-MONITOR 验收结果一致（PUBLISH-MONITOR 仍是上线前置，见第 2.1 节；SEO 规范第 3.3 节）；上线前 Owner 向 Parallel 取得 Search API 零保留、不训练的书面确认，确认前隐私条款按可能用于训练写（第 2.1 节 2026-10-13 RESEARCH-TOOLS 决定）。2026-10-13 补充（总控决定，DATA-ERASURE #902）：升级 Vercel Pro 后，把删除兜底任务（account-erasure 定时任务里的对话清理）改为至少每小时一次，保证删除后 24 小时内清完（T_online）；这是上线前提，不是放宽规则。2026-10-14 补充（PAY-STRIPE-MP #943、#948）：正式环境的银行卡每日对账默认关闭，和打开正式环境银行卡下单一起，由 Owner 批准后设置 `STRIPE_CARD_RECONCILIATION_MODE=live`，并同时放开银行卡处理函数只认测试模式的限制；打开前确认正式环境 Stripe 门户已关闭"切换套餐"（Owner 操作）。 | 以上全部；PAY-FOUNDER、PAY-NOTIFY、PAY-EVIDENCE、PAY-DISPUTE-GUARD、SKILL-I18N-HOOK | 高；生产另行批准 | 大 | V3-M3：阻塞：等第 0–4 阶段的 D1 范围全部完成（依赖"以上全部"） |
 | **5 上线后** | INTEGRATION-BASE → V3-FEISHU、SOCIAL-SYNC | 沿用 v11 §8（C1 套餐式自动追踪已确认）。2026-10-13：SOCIAL-SYNC 并入 PUBLISH-MONITOR 上线前完成（第 2.1 节），本行只剩 INTEGRATION-BASE、V3-FEISHU | REL-1 上线 | 高 | 大 | SOCIAL-SYNC：关闭：2026-10-13 并入 PUBLISH-MONITOR 上线前完成 |
 | | CHARGEBACK | 方向（Owner 2026-10-04，第 2.1 节第 51 项，[记录 W](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5981381009)、[记录 X](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5981808905)；**上线后任务，不阻塞上线**）：拒付最终判定输了，按商品分别处理：订阅按退款规则处理这一期（扣掉还没用完的积分、终止这份订阅以后的积分发放，是创始会员的立即结束创始身份，名额不放回）；微信一次性会员结束这一期，1 年期的终止以后按月发放的积分、扣掉这一期还没用完的积分（是创始会员的同样结束创始身份）；订阅和微信一次性会员被冻结的已发积分判输扣回、判赢解冻，不动其他来源（[记录 AC](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5982525998)）；积分包扣回这个包里没用完的积分、判赢解冻，不动其他来源的积分（[记录 Z](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5982115736)）；所有拒付都不自动接受，由 Owner 人工处理（[记录 Y](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5982111397)）；赢了就解除 PAY-DISPUTE-GUARD 的冻结、恢复，按幂等处理（拒付期间被暂停的按月积分，判赢后按原发放日逐期补发，幂等，不改变原会员期限和发放日期，不延到原到期日之后）；订阅判赢后不自动恢复扣费，提醒用户自己重新订阅；判输时订阅终止（[记录 AD](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5982615688)），具体由 CHARGEBACK 方案提出、Owner 批准；一键导出申诉材料（用收款核心的同意记录，原写 PAY-WAFFO，及 PAY-EVIDENCE 的付款证据）；限制同一人反复拒付；信用卡账单商户名（由 Waffo 控制）。续费和到期提醒归 PAY-NOTIFY，拒付事件接收和可撤回冻结归 PAY-DISPUTE-GUARD，上线前完成（2026-10-09 拆分）。拒付通知方式、举证截止日和手续费（每笔 $25）已由 [Waffo 2026-10-10 答复](https://github.com/Crnobog9527/GraylumAI_vercel/pull/752#issuecomment-6095292601)；开工前仍须向 Waffo 核实要交的材料和账单商户名。2026-10-12 补充：新订单改走 Stripe（MP 订单由 Stripe 作为记录商户处理拒付，大陆通道和钱包单笔由我们处理），上文 Waffo 的通知方式、手续费、材料和账单商户名只适用于旧 Waffo 订单；按 Stripe 的做法实施时由方案细化 | PAY-STRIPE-MP、PAY-NOTIFY、PAY-EVIDENCE、PAY-DISPUTE-GUARD；拒付材料和账单商户名核实（旧 Waffo 订单仍向 Waffo 核实） | 高 | 待实施方案细化 | — |
 | | LEARN-1 | 第 6.3 节：读取用户数据、依赖数据使用同意（2026-10-12：同意开关上线先隐藏，LEARN-1 做问题案例分析时再定开关方案，第 2.1 节） | 有真实用户 | 高 | 中 | — |

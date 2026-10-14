@@ -103,7 +103,20 @@ export function useConversationErasure(leave: (sessionId: string) => void) {
   const erase = useCallback((sessionId: string, related: string[] = []) => {
     if (related.length) relatedBySession.set(sessionId, related);
     void utils.opc.conversations.cancel();
-    return runConversationErasure({ ...steps, leave }, sessionId);
+    const store = useConversationErasureStore.getState();
+    return runConversationErasure({
+      ...steps, leave,
+      // Unknown outcome: keep trying from this page; if the page is going away, the next load resumes.
+      resume: (id) => {
+        if (resumed.has(id)) return;
+        resumed.add(id);
+        void resumeConversationErasure({
+          ...steps, leave: () => undefined, wait: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+          notify: (next) => store.setNotice(next?.tone === 'notice'
+            ? laterNotice(useConversationErasureStore.getState().notice, next) : next),
+        }, id).finally(() => resumed.delete(id));
+      },
+    }, sessionId);
   }, [utils, steps, leave]);
 
   return { hidden, notice, erase };
