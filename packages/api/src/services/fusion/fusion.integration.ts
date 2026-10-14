@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { afterAll, beforeAll, expect, it } from 'vitest';
 import pg from 'pg';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { createClient } from '@supabase/supabase-js';
 import { authoritativeBilling, type BillingRpc } from '../bill2/service';
 import { openRouterAdapter } from '../bill2/openRouterAdapter';
@@ -20,6 +20,9 @@ const staging = process.env.V3_LOCAL_STAGING_SCHEMA === 'true';
 const windowId = randomUUID();
 const pairs = [['anthropic/claude-sonnet-5.5', 'anthropic'], ['google/gemini-3.8-flash', 'google-ai-studio'], ['openai/gpt-6-luna', 'openai']] as const;
 const models = pairs.map(() => randomUUID());
+// Synthetic local key; the window binds its hash exactly as staging does. Never a real credential.
+const syntheticKey = 'SYNTHETIC_LOCAL_ONLY_FUSION';
+const account = 'openrouter-key:' + createHash('sha256').update(syntheticKey).digest('hex');
 const env = { VERCEL: '1', VERCEL_PROJECT_PRODUCTION_URL: 'auth-staging.graylum.com', VERCEL_GIT_COMMIT_REF: 'staging',
   VERCEL_GIT_REPO_OWNER: 'Crnobog9527', VERCEL_GIT_REPO_SLUG: 'GraylumAI_vercel', VERCEL_PROJECT_ID: 'synthetic',
   V3_RUNTIME_STAGING_PROJECT_ID: 'synthetic', V3_RUNTIME_STAGING_DATABASE_HOST: 'synthetic.supabase.co',
@@ -64,7 +67,7 @@ beforeAll(async () => {
   const expiresAt = new Date(Date.now() + 7200000).toISOString();
   const policies = pairs.map(([model, providerSlug], i) => {
     const providerLimits = { providerSlug, contextTokens: 250000, promptUsdPerMillion: '1', completionUsdPerMillion: '1', requestUsd: '0' };
-    return { modelId: models[i], model, provider: 'openrouter', account: 'synthetic', protocol: 'openrouter-chat-v1', providerLimits,
+    return { modelId: models[i], model, provider: 'openrouter', account, protocol: 'openrouter-chat-v1', providerLimits,
       upperUsd: openRouterBound(providerLimits, 8192).upperUsd, inputLimit: 196608, outputLimit: 8192, multiplier: '3',
       automaticRetry: false, hiddenTools: false, lookupSupported: true };
   });
@@ -75,8 +78,8 @@ beforeAll(async () => {
       defaultEffort: null, supportsMaxTokens: false } };
     const reasoning = { ...config.reasoning, catalog, purposes: { interactive: { mode: 'effort', effort: 'low', wire: 'reasoning_effort' },
       review: { mode: 'effort', effort: 'low', wire: 'reasoning_effort' }, writing: { mode: 'provider_default' } } };
-    await db.query(`insert into ai_models(id,name,model_id,provider,is_active,input_limit,max_tokens,config)
-      values($1,$2,$2,'openrouter','true',250000,8192,$3)`, [models[i], model, { ...config, reasoning }]);
+    await db.query(`insert into ai_models(id,name,model_id,provider,is_active,input_limit,max_tokens,config,api_key,api_endpoint)
+      values($1,$2,$2,'openrouter','true',250000,8192,$3,$4,'https://openrouter.ai/api/v1')`, [models[i], model, { ...config, reasoning }, syntheticKey]);
   }
   const profiles = pairs.map(([model, endpointTag]) => ({ model, endpointTag, protocol: 'openrouter-chat-v1', profileVersion: 'synthetic-only',
     evidenceVersion: 'synthetic-only', admissionPath: 'empirical', templateTokens: 4096, marginTokens: 4096, maxBytes: 196608,
