@@ -13,7 +13,7 @@ import { RateLimitError } from '../lib/rateLimitError';
 import { readMethodMembership } from '../services/payments/methodMembership';
 import { assertMethodCheckoutEnvironment } from '../services/payments/methodCheckoutGate';
 import { describeWaffoFailure } from '../services/payments/waffoFailure';
-import { mapMethodPurchaseRejection } from '../services/payments/methodPurchaseError';
+import { hasUnpaidSubscription, mapMethodPurchaseRejection, MethodPurchaseRejected } from '../services/payments/methodPurchaseError';
 import { logger } from '../lib/logger';
 
 /** The client only sees a generic 503; this keeps the secret-free reason (#815 checkout had none).
@@ -65,7 +65,10 @@ export const methodPaymentProcedures = {
       logMethodPaymentFailure('method_checkout', ctx.profileId, error, { method: input.method });
       // A throttled buyer gets TOO_MANY_REQUESTS with its retry hint, which the purchase page shows as such.
       if (error instanceof RateLimitError) throw error;
-      throw mapMethodPurchaseRejection(error) ?? createSafeServiceUnavailableError(error, '暂时无法创建付款，请稍后查看原订单状态');
+      const unpaidSubscription = error instanceof MethodPurchaseRejected && error.message === 'PAY_WAFFO_MEMBERSHIP_TRANSITION_REQUIRED'
+        && ctx.hasSupabaseAdminPrivileges && await hasUnpaidSubscription(ctx.supabaseAdmin, ctx.profileId);
+      throw mapMethodPurchaseRejection(error, { unpaidSubscription })
+        ?? createSafeServiceUnavailableError(error, '暂时无法创建付款，请稍后查看原订单状态');
     }
   }),
   methodMembership: protectedProcedure.query(async ({ ctx }) => {

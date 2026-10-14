@@ -1,5 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { TRPCError } from '@trpc/server';
+import type { SupabaseClient } from '@supabase/supabase-js';
 
 type Rejection = { code: 'PRECONDITION_FAILED' | 'CONFLICT' | 'BAD_REQUEST' | 'FORBIDDEN'; message: string };
 
@@ -40,8 +41,25 @@ export function admissionError(message: unknown, cause: unknown) {
   return new Error(/^PAY_WAFFO_[A-Z_]{1,60}$/.test(code) ? code : 'PAY_WAFFO_PURCHASE_DENIED', { cause });
 }
 
-export function mapMethodPurchaseRejection(error: unknown) {
+/** Same wording as the purchase page and profile notice (#937) for a subscription whose payment failed. */
+export const UNPAID_SUBSCRIPTION_MESSAGE = '你还有一个付款没有成功的订阅（例如自动续费扣款失败）。为避免重复扣费，暂时不能购买新的套餐。'
+  + '请提交工单，我们帮你停止这个订阅或补上付款，处理好后就能重新购买。';
+
+/** `unpaidSubscription`: the buyer has a subscription whose payment failed (past_due, incomplete, unpaid). Admission
+ * refuses it with the same code as an active membership; only the wording differs, so the buyer knows what to do. */
+export function mapMethodPurchaseRejection(error: unknown, context: { unpaidSubscription?: boolean } = {}) {
   if (!(error instanceof MethodPurchaseRejected)) return null;
   const rejection = REJECTIONS[error.message]!;
-  return new TRPCError({ code: rejection.code, message: rejection.message, cause: error });
+  const message = error.message === 'PAY_WAFFO_MEMBERSHIP_TRANSITION_REQUIRED' && context.unpaidSubscription
+    ? UNPAID_SUBSCRIPTION_MESSAGE : rejection.message;
+  return new TRPCError({ code: rejection.code, message, cause: error });
+}
+
+/** Whether the buyer has a subscription whose payment failed; a failed read keeps the ordinary wording. */
+export async function hasUnpaidSubscription(db: Pick<SupabaseClient, 'from'>, userId: string) {
+  try {
+    const result = await db.from('user_subscriptions').select('id').eq('user_id', userId)
+      .in('status', ['past_due', 'incomplete', 'unpaid']).limit(1);
+    return !result.error && Array.isArray(result.data) && result.data.length > 0;
+  } catch { return false; }
 }
