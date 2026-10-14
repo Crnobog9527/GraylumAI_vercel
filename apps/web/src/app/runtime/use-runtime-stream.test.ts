@@ -5,7 +5,7 @@ import type { LiveReply } from '@/app/positioning/[draftId]/agent-turn-display';
 import { liveReplyController } from '@/app/positioning/[draftId]/live-reply-controller';
 import { STREAM_INTERRUPTED } from '@/app/positioning/[draftId]/mentor-turn';
 import { runStreamedExecution } from './use-runtime-stream';
-import { liveReplyText, liveScrollSignature } from './runtime-live-reply';
+import { liveReplyText, liveScrollSignature, withResumeStop } from './runtime-live-reply';
 
 const ID = '00000000-0000-4000-8000-000000000001';
 const delta = (text: string, offset: number): AgentTurnEvent => ({ type: 'textDelta', text, offset, rev: 1, source: 'assistant' });
@@ -69,7 +69,9 @@ describe('runStreamedExecution (runtime.executeStream on /runtime)', () => {
     const running = runStreamedExecution(live, async () => events([delta('已显示', 0)], gate,
       [delta('之后', 3), { type: 'result', result: stopped }]), ID, handlers);
     await vi.waitFor(() => expect(live.current()?.text).toBe('已显示'));
-    live.stop(ID);
+    // The stop request keeps exactly what is shown (code points) and where it came from.
+    expect(live.stop(ID)).toEqual({ executionId: ID, stopAt: 3, source: 'assistant' });
+    expect(live.stop(ID)).toBeNull();
     release();
     await expect(running).resolves.toEqual(stopped);
     expect(live.current()).toMatchObject({ text: '已显示', stopped: true });
@@ -102,5 +104,18 @@ describe('liveScrollSignature', () => {
     expect(grown).not.toBe(liveScrollSignature(reply));
     expect(liveScrollSignature({ ...reply, rev: 2 })).not.toBe(liveScrollSignature(reply));
     expect(liveScrollSignature(null)).toBe('');
+  });
+});
+
+describe('withResumeStop', () => {
+  const resuming = { id: ID + ':payg-resuming', tone: 'status' as const, busy: true, text: '正在继续…' };
+  const other = { id: ID + ':payg-outcome', tone: 'warning' as const, text: '其他' };
+  it('offers 停止 on the "正在继续…" notice only while this page streams that turn', () => {
+    const onClick = vi.fn();
+    const [stopped, untouched] = withResumeStop([resuming, other], true, { onClick, disabled: false });
+    expect(stopped.actions).toEqual([{ label: '停止', onClick, disabled: false }]);
+    expect(untouched).toBe(other);
+    stopped.actions![0].onClick();expect(onClick).toHaveBeenCalledOnce();
+    expect(withResumeStop([resuming], false, { onClick, disabled: false })[0]).toBe(resuming);
   });
 });

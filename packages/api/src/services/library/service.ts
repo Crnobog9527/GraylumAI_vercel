@@ -8,6 +8,7 @@ import { cleanupLibrary } from './cleanup';
 import { pdfUpload } from './pdfUpload';
 import { wordUpload } from './wordUpload';
 import { libraryRpc } from './rpc';
+import { scheduleErasureManifestSync } from '../accountErasure/offdbManifest';
 import { libraryStorage, type LibraryStorage } from './storage';
 
 type LibraryItem = {
@@ -19,6 +20,7 @@ type LibraryItem = {
 export type LibraryCursor = { createdAt: string; id: string };
 type LibraryList = { usedBytes: number; capacityBytes: number; uploadEnabled: boolean;
   documents: LibraryItem[]; nextCursor: LibraryCursor | null };
+type LibrarySearch = { documents: LibraryItem[]; nextCursor: LibraryCursor | null };
 type LibrarySegment = { ordinal: number; title: string; body: string; bytes: number;
   page_number: number | null; source: 'extracted' | 'recognized' };
 
@@ -30,6 +32,7 @@ export function libraryService(client: SupabaseClient, actorId: string, storage:
   const sweep = () => cleanupLibrary(client, { actorId, limit: 4, budgetMs: 5000, storage });
   const remove = async (documentId: string, unfinishedOnly = false) => {
     const result = await libraryRpc<{ status: string }>(client, 'library_delete', { a: actorId, did: documentId, unfinished_only: unfinishedOnly });
+    if (result.status === 'deleting') scheduleErasureManifestSync(client);
     await cleanupLibrary(client, { actorId, documentId, limit: 1, storage });
     return result;
   };
@@ -93,6 +96,11 @@ export function libraryService(client: SupabaseClient, actorId: string, storage:
         : await libraryRpc<LibraryList>(client, 'library_list', { a: actorId, after_id: afterId ?? null });
       await sweep();
       return result;
+    },
+    /** Own ready text documents with readable text whose file name contains `query` literally (the database escapes it). */
+    search(query: string, cursor?: LibraryCursor) {
+      return libraryRpc<LibrarySearch>(client, 'library_search', { a: actorId, q: query,
+        after_created_at: cursor?.createdAt ?? null, after_id: cursor?.id ?? null });
     },
     segments(documentId: string, version: number, start: number, count = 1) {
       return libraryRpc<LibrarySegment[]>(client, 'library_segments_range', {

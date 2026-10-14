@@ -14,6 +14,7 @@ import { findStaleChargedRounds } from '@repo/api/src/services/runtime/staleChar
 import { reconcileStripeCardPayments } from '@repo/api/src/services/payments/stripeCardReconciliation';
 import { getStripeClient } from '@repo/api/src/services/stripe';
 import { reportPaymentEvidenceConflict, reportStripeCardReconciliation } from '@/lib/payment-alert.mjs';
+import { recoverFusionFinancials } from '@repo/api/src/services/fusion/recovery';
 import { validateCronRequest } from '@/lib/cron-auth';
 
 export const runtime = 'nodejs';
@@ -26,6 +27,12 @@ const CRON_CONFIG_ERROR_MESSAGE = 'Server configuration error';
 async function runStaleRoundReconciliation(supabase: SupabaseClient) {
   try { return await findStaleChargedRounds(supabase); }
   catch { return { success: false, findings: [], total: 0, truncated: false, scanFailed: true }; }
+}
+
+/** FUSION-REVIEW: cancel undispatched calls past their dispatch deadline, recover and settle the rest. */
+async function runFusionRecovery(supabase: SupabaseClient) {
+  try { return await recoverFusionFinancials(supabase); }
+  catch { return { success: false, scanned: 0, cancelled: 0, recovered: 0, scrubbed: 0, failed: 1 }; }
 }
 
 /** Waffo daily backstop: report-only. Off until the test operations binding is explicitly enabled. */
@@ -97,16 +104,17 @@ export async function GET(request: Request) {
 
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
     logger.system.cronJob('billing-reconcile', 'started');
-    const [result, readinessAudit, erasureFinancial, waffo, staleRounds, stripeCard] = await Promise.all([
+    const [result, readinessAudit, erasureFinancial, waffo, staleRounds, stripeCard, fusion] = await Promise.all([
       runDailyBillingReconciliation(supabase),
       runBillingEngineV15ReadinessAudit(supabase),
       runErasureFinancialReconciliation(supabase),
       runWaffoReconciliation(supabase),
       runStaleRoundReconciliation(supabase),
       runStripeCardReconciliation(supabase),
+      runFusionRecovery(supabase),
     ]);
     const success = result.success && readinessAudit.success && erasureFinancial.success && waffo.success
-      && staleRounds.success && stripeCard.success;
+      && staleRounds.success && stripeCard.success && fusion.success;
 
     if (!success) {
       logger.system.cronJob(
@@ -117,12 +125,15 @@ export async function GET(request: Request) {
           ...(erasureFinancial.success ? [] : ['Erasure financial recovery pending']),
           ...(waffo.success ? [] : [`Waffo payments need manual review: ${waffo.findings.length}`]),
           ...(staleRounds.success ? [] : [`Stale charged rounds need manual review: ${staleRounds.total}`]),
-          ...(stripeCard.success ? [] : [`Stripe card payments need manual review: ${stripeCard.findings.length}`])].join(' | '),
+          ...(stripeCard.success ? [] : [`Stripe card payments need manual review: ${stripeCard.findings.length}`]),
+
+          ...(fusion.success ? [] : [`Fusion calls pending recovery: ${fusion.failed}`])].join(' | '),
         {
           erasureFinancial,
           waffo,
           staleRounds,
           stripeCard,
+          fusion,
           mismatches: result.mismatches,
           summary: result.summary,
           readinessAudit: {
@@ -160,6 +171,7 @@ export async function GET(request: Request) {
       waffo,
       staleRounds,
       stripeCard,
+      fusion,
       timestamp: new Date().toISOString(),
     }, { status: success ? 200 : 500 });
   } catch (error) {

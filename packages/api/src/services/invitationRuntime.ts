@@ -11,7 +11,7 @@ const CHINA_OFFSET_MS = 8 * 60 * 60 * 1000;
 const DEFAULT_INVITATION_SETTINGS = {
   inviterReward: 50,
   inviteeReward: 30,
-  newUserCredits: 100,
+  newUserCredits: 500,
   rebatePercent: 5,
   bindingDays: 30,
   dailyRewardLimit: 1000,

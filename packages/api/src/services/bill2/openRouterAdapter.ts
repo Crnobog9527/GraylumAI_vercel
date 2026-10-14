@@ -24,6 +24,11 @@ export function consumeOpenRouterNotStarted(error:unknown,requestHash:string,sen
  unstarted.delete(error);return true;
 }
 const requestFields=new Set(['model','stream','stream_options','store','messages','provider','max_tokens','max_completion_tokens','temperature','top_p','parallel_tool_calls','response_format','reasoning_effort','reasoning']);
+/** The only plugin value accepted: web research explicitly off (Fusion review requests, FUSION-REVIEW §4.1),
+ * since an account may default the legacy web plugin on. Never with tools; any other plugin is still denied. */
+const WEB_OFF_PLUGINS=JSON.stringify([{id:'web',enabled:false}]);
+const webOffOnly=(parsed:Record<string,unknown>)=>!('plugins' in parsed)||
+ JSON.stringify(parsed.plugins)===WEB_OFF_PLUGINS&&!('tools' in parsed)&&!('tool_choice' in parsed);
 export const sourceCall=z.object({id:z.string().min(1).max(256),type:z.literal('function'),function:z.object({name:z.literal('read_source'),arguments:z.string().max(4000)}).strict()}).strict();
 /** One tool call whose name is in a request format's allowlist. */
 export const toolCallFor=(names:ReadonlySet<string>)=>z.object({id:z.string().min(1).max(256),type:z.literal('function'),
@@ -149,7 +154,8 @@ export function openRouterAdapter(options:{credential:(identity:OpenRouterIdenti
    const cachedHistoryIndex=Array.isArray(parsed?.messages)?historyCacheIndex(parsed.messages,agentTurn&&
     identity.model.startsWith('anthropic/')&&identity.providerLimits.cacheWriteUsdPerMillion!==undefined):-1;
    // These routing constraints must already be in the frozen request bytes.
-   if(!parsed || typeof parsed!=='object' || Array.isArray(parsed) || Object.keys(parsed).some(key=>!requestFields.has(key)&&!((options.allowWorkspaceRead||agentTurn)&&key==='tools')) ||
+   if(!parsed || typeof parsed!=='object' || Array.isArray(parsed) || Object.keys(parsed).some(key=>!requestFields.has(key)&&key!=='plugins'&&!((options.allowWorkspaceRead||agentTurn)&&key==='tools')) ||
+     !webOffOnly(parsed) ||
      (parsed.tools!==undefined&&!agentTurn&&!workspaceTools.safeParse(parsed.tools).success) ||
      (agentTurn&&(parsed.parallel_tool_calls!==undefined||!Array.isArray(parsed.messages)||!agentHistoryPaired(parsed.messages))) ||
      parsed.model!==identity.model || !((parsed.stream===false&&parsed.stream_options===undefined)||(parsed.stream===true&&JSON.stringify(parsed.stream_options)===JSON.stringify({include_usage:true}))) || parsed.store!==false || !Array.isArray(parsed.messages) ||

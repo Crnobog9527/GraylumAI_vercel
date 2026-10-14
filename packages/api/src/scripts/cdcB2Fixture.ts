@@ -49,7 +49,7 @@ export async function fixture(input:ModuleSkillInput,organizerOutput?:number){
   VERCEL_GIT_REPO_SLUG:'GraylumAI_vercel',NEXT_PUBLIC_SUPABASE_URL:'https://cdclocal.supabase.co',
   V3_RUNTIME_STAGING_DATABASE_HOST:'cdclocal.supabase.co',V3_RUNTIME_STAGING_WINDOW_ID:window,V3_RUNTIME_STAGING_ENABLED:'true'});
  const module={...input,moduleId:randomUUID(),skillId:randomUUID(),revisionId:randomUUID(),requestId:randomUUID(),
-  expectedUpdatedAt:null,expectedVersion:0,module:{...input.module,model_id:ids.mentor}};
+  expectedUpdatedAt:null,expectedVersion:0,socialMediaRelated:false,module:{...input.module,model_id:ids.mentor}};
  await saveModuleSkill(admin,actor,module);
  const registration=(await db.query('select id from artifact_workflows where module_id=$1',[module.moduleId])).rows[0].id;
  const real={id:window,callPolicies:policies,creditsPerUsd:'100',multiplier:'3',expiresAt};

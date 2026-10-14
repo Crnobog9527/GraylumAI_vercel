@@ -4,6 +4,7 @@ import { TRPCError } from '@trpc/server';
 import type { z } from 'zod';
 import type { beginInput } from './content';
 import { checkRateLimitAsync } from '../../middleware/securityChecks';
+import { scheduleErasureManifestSync } from '../accountErasure/offdbManifest';
 import { cleanupLibrary } from './cleanup';
 import { libraryRpc } from './rpc';
 import type { LibraryStorage } from './storage';
@@ -19,6 +20,7 @@ export function extractedUpload(client: SupabaseClient, actorId: string, storage
   });
   const discard = async (id: string) => {
     await libraryRpc(client, 'library_delete', { a: actorId, did: id, unfinished_only: true });
+    scheduleErasureManifestSync(client);
     await cleanupLibrary(client, { actorId, documentId: id, limit: 1, storage });
   };
   const original = async (path: string) => {

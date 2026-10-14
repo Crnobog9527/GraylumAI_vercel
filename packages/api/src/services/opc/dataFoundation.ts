@@ -25,6 +25,17 @@ export const contentReaction = z.object({
   reason: z.string().trim().max(1000).optional(),
 }).strict();
 
+// Topic brief (简报) adopted from an AI execution. The server checks `original` is a verbatim
+// excerpt of that execution and records it beside the text the user actually saved.
+export const briefAdoption = z.object({
+  requestId: uuid,
+  workItemId: uuid,
+  expectedRevision: z.number().int().positive(),
+  executionId: uuid,
+  original: z.string().trim().min(1).max(20000),
+  brief: z.string().trim().min(1).max(2000),
+}).strict();
+
 type ActorRpc<T> = (name: string, args: Record<string, unknown>) => Promise<T>;
 
 // Reuse the OPC service authentication and bounded error mapping.
@@ -62,6 +73,17 @@ export function dataFoundationService<T>(rpc: ActorRpc<T>) {
         p_accounts: v.accounts,
         p_sources: v.sources ?? null,
         p_source_draft_version_id: v.sourceDraftVersionId ?? null,
+      });
+    },
+    adoptBrief(value: unknown) {
+      const v = briefAdoption.parse(value);
+      return rpc('opc_brief_adoption', {
+        p_request_id: v.requestId,
+        p_work_item_id: v.workItemId,
+        p_expected_revision: v.expectedRevision,
+        p_execution_id: v.executionId,
+        p_original: v.original,
+        p_brief: v.brief,
       });
     },
     recordReaction(value: unknown) {

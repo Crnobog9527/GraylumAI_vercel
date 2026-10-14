@@ -25,7 +25,21 @@ export type MembershipPlanButtonState = {
   canCreateCheckout: boolean;
   canChangeSubscriptionPlan: boolean;
   message: string | null;
+  /** Show a way to a support ticket (the only path that reliably clears an unpaid subscription). */
+  contactSupport?: boolean;
 };
+
+/** Where an account opens a support ticket (个人中心 · 工单). */
+export const SUPPORT_TICKET_HREF = '/profile?tab=tickets';
+
+/**
+ * The server refuses a new purchase while a subscription still has an unsuccessful payment (`resolvePaymentIssue`:
+ * Stripe `past_due`, `unpaid`, or `incomplete`, i.e. a failed renewal or a failed first payment), so the user is not
+ * charged twice. Cancelling in the Stripe portal only takes effect at period end, and eligibility checks the unpaid
+ * state first, so "stop it yourself" would not unblock the purchase; support can settle or stop it. Say that plainly.
+ */
+export const UNPAID_SUBSCRIPTION_BLOCKS_PURCHASE = '你还有一个付款没有成功的订阅（例如自动续费扣款失败）。'
+  + '为避免重复扣费，暂时不能购买新的套餐。请提交工单，我们帮你停止这个订阅或补上付款，处理好后就能重新购买。';
 
 export function getPlanEligibilityKey(planId: string, billingCycle: 'monthly' | 'yearly') {
   return `${planId}:${billingCycle}`;
@@ -87,10 +101,11 @@ export function getMembershipPlanButtonState(input: {
   if (eligibility.action === 'resolvePaymentIssue') {
     return {
       disabled: true,
-      label: '请先处理付款异常',
+      label: '请先处理旧订阅',
       canCreateCheckout: false,
       canChangeSubscriptionPlan: false,
-      message: eligibility.safeMessage,
+      message: UNPAID_SUBSCRIPTION_BLOCKS_PURCHASE,
+      contactSupport: true,
     };
   }
 
