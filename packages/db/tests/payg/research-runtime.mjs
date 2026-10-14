@@ -18,8 +18,10 @@ async function session(db,createFixture) {
   return {...f,execution,session:sessionId};
 }
 /** A research plan with one operation, linked to the session/answer and (optionally) a BILL2 tool call. */
-async function linkedOperation(db,f,callId,finish) {
-  const plan = randomUUID(), op = randomUUID(), identityHash = 'a'.repeat(64);
+async function linkedOperation(db,f,callId,finish,identity) {
+  // The operation's identity is the BILL2 call's requestHash (the same supplier request).
+  const identityHash = identity ?? (await db.query("SELECT payload->>'requestHash' h FROM bill2_calls WHERE id=$1",[callId])).rows[0].h;
+  const plan = randomUUID(), op = randomUUID();
   await rpc(db,'research_transition','create',plan,f.actor,null,{budgetUnits:1000,maxOperations:1,
     operations:[{operationId:op,identityHash,maxQuoteUnits:100}]});
   const reserved = await rpc(db,'research_transition','reserve',plan,f.actor,op,{identityHash,quoteUnits:10});
@@ -30,7 +32,7 @@ async function linkedOperation(db,f,callId,finish) {
   return {plan,op};
 }
 
-export async function researchRuntimeCases({db,report,createFixture}) {
+export async function researchRuntimeCases({db,Client,connectionString,report,createFixture}) {
   // Keyword card: selection, edits and additions; confirmed once; the same submission replays.
   {
     const f = await session(db,createFixture);
@@ -58,6 +60,11 @@ export async function researchRuntimeCases({db,report,createFixture}) {
     assert.equal((await rpc(db,'research_discovery_start',f.actor,f.session,f.execution,confirmed.confirmationId,['tiktok','x'])).discoveryId,started.discoveryId);
     await assert.rejects(rpc(db,'research_discovery_start',f.actor,f.session,f.execution,confirmed.confirmationId,['tiktok']),/RESEARCH_DISCOVERY_CONFLICT/);
     await assert.rejects(rpc(db,'research_discovery_start',f.actor,f.session,f.execution,randomUUID(),['tiktok']),/RESEARCH_NOT_CONFIRMED/);
+    const again = randomUUID();
+    await rpc(db,'research_card_create',f.actor,again,f.session,f.execution,{kind:'keywords',options:keywordOptions});
+    const second = await rpc(db,'research_card_confirm',f.actor,again,{selected:['k1']});
+    await assert.rejects(rpc(db,'research_discovery_start',f.actor,f.session,f.execution,second.confirmationId,['tiktok','tiktok']),
+      /RESEARCH_DISCOVERY_INVALID/);
     const saved = await rpc(db,'research_discovery_save',f.actor,f.session,started.discoveryId,{next:3},'running');
     assert.deepEqual(saved.cursor,{next:3});
     // Candidate card: ticks only; accounts come from the host's options; head references cannot be picked.
@@ -107,10 +114,16 @@ export async function researchRuntimeCases({db,report,createFixture}) {
     assert.notEqual(refreshed.attempt,first.attempt,'each paid attempt has its own token');
     // A late result of the first attempt cannot finish the refresh.
     await assert.rejects(rpc(db,'research_account_fetch_finish',f.actor,first.fetchId,first.attempt,'succeeded',{operations:['op-old']}),/RESEARCH_FETCH_CONFLICT/);
-    // Unknown result: the grant is already used, and the account is not fetched again.
+    // Unknown result: the grant is already used, nothing is fetched again, and the last success is still served.
     await rpc(db,'research_account_fetch_finish',f.actor,first.fetchId,refreshed.attempt,'unknown',null);
     await assert.rejects(rpc(db,'research_account_fetch_claim',f.actor,f.session,f.execution,'tiktok','alpha',grant),/RESEARCH_REFRESH_USED/);
-    assert.equal((await rpc(db,'research_account_fetch_claim',f.actor,f.session,f.execution,'tiktok','alpha',null)).claimed,false);
+    const after = await rpc(db,'research_account_fetch_claim',f.actor,f.session,f.execution,'tiktok','alpha',null);
+    assert.deepEqual([after.claimed,after.evidence],[false,{operations:['op-1']}],'a failed refresh keeps the earlier paid evidence');
+    // A refresh that succeeds replaces it.
+    const grant2 = await rpc(db,'research_refresh_create',f.actor,f.session,'tiktok','alpha');
+    const r2 = await rpc(db,'research_account_fetch_claim',f.actor,f.session,f.execution,'tiktok','alpha',grant2);
+    await rpc(db,'research_account_fetch_finish',f.actor,first.fetchId,r2.attempt,'succeeded',{operations:['op-2']});
+    assert.deepEqual((await rpc(db,'research_account_fetch_claim',f.actor,f.session,f.execution,'tiktok','alpha',null)).evidence,{operations:['op-2']});
     await assert.rejects(rpc(db,'research_refresh_create',other.actor,f.session,'tiktok','alpha'),/RESEARCH_SCOPE_DENIED|RESEARCH_REFRESH_INVALID/);
     // A confirmed free failure may be tried again.
     const b = await rpc(db,'research_account_fetch_claim',f.actor,f.session,f.execution,'x','beta',null);
@@ -121,6 +134,17 @@ export async function researchRuntimeCases({db,report,createFixture}) {
     const g = await toolFixture(createFixture,{db,actor:f.actor});
     const foreign = await claimTool(db,g,1,{},false);
     await assert.rejects(linkedOperation(db,f,foreign.id,null),/RESEARCH_LINK_CONFLICT/);
+    // Within the same answer, an operation is only tied to the call of the same request.
+    const own = await claimTool(db,f,1,{},false);
+    await assert.rejects(linkedOperation(db,f,own.id,null,'e'.repeat(64)),/RESEARCH_LINK_CONFLICT/);
+    await linkedOperation(db,f,own.id,null);
+    // Writes after a conversation was marked deleted are refused (they lock and re-check the marker).
+    const gone = await session(db,createFixture);
+    await rpc(db,'content_erasure_mark_session',gone.actor,gone.session);
+    await assert.rejects(rpc(db,'research_card_create',gone.actor,randomUUID(),gone.session,gone.execution,
+      {kind:'keywords',options:keywordOptions}),/RESEARCH_SCOPE_DENIED/);
+    await assert.rejects(rpc(db,'research_account_fetch_claim',gone.actor,gone.session,gone.execution,'tiktok','alpha',null),
+      /RESEARCH_SCOPE_DENIED/);
   }
   report.checks.push('RT-3b fetches: user message only from this session; one paid fetch per account per session (in-progress and unknown never resent, success reused); refresh grant used before sending and only once, only for its own fetched account; free failure retryable');
   }
@@ -184,6 +208,42 @@ export async function researchRuntimeCases({db,report,createFixture}) {
     assert.equal((await db.query('SELECT erased_at IS NOT NULL e FROM research_operations WHERE id=$1',[linked.op])).rows[0].e,true);
     assert.equal((await toolCallRow(db,c.id)).supplier_cost_state,'pending');
     report.checks.push('RT-3b account erasure: settled runtime search scrubbed (not skipped), host records deleted with reported counts, supplier-cost record kept');
+  }
+
+  // Concurrency with deletion, on two real connections (the lock order of research_session_owned).
+  {
+    const [deleter,writer] = [new Client({connectionString}),new Client({connectionString})];
+    await Promise.all([deleter.connect(),writer.connect()]);
+    try {
+      await Promise.all([deleter,writer].map(w=>w.query("SET statement_timeout='15s'")));
+      const pid = (await writer.query('SELECT pg_backend_pid() p')).rows[0].p;
+      const waiting = async () => (await db.query(`SELECT wait_event_type='Lock' w FROM pg_stat_activity WHERE pid=$1`,[pid])).rows[0]?.w;
+      // 1) A deletion in progress: a write arriving now waits for it, then is refused.
+      const g = await session(db,createFixture);
+      await deleter.query('BEGIN');
+      await rpc(deleter,'content_erasure_mark_session',g.actor,g.session);
+      const late = rpc(writer,'research_card_create',g.actor,randomUUID(),g.session,g.execution,{kind:'keywords',options:keywordOptions})
+        .then(()=>'created',e=>String(e.message));
+      for (let i=0;i<50&&!(await waiting());i++) await new Promise(r=>setTimeout(r,50));
+      assert.equal(await waiting(),true,'the write waits for the deletion');
+      await deleter.query('COMMIT');
+      assert.match(await late,/RESEARCH_SCOPE_DENIED/,'a write arriving during deletion is refused');
+      // 2) A write already holding its locks: the deletion waits for it, and the cleanup then removes what it wrote.
+      const h = await session(db,createFixture);
+      await writer.query('BEGIN');
+      const card = randomUUID();
+      await rpc(writer,'research_card_create',h.actor,card,h.session,h.execution,{kind:'keywords',options:keywordOptions});
+      const marking = rpc(deleter,'content_erasure_mark_session',h.actor,h.session).then(r=>r.status,e=>String(e.message));
+      await new Promise(r=>setTimeout(r,300));
+      await writer.query('COMMIT');
+      assert.equal(await marking,'deleted');
+      await rpc(db,'content_erasure_sweep_sessions',50,null,null);
+      assert.equal(await count(db,'research_selection_cards','id=$1',[card]),0,'the committed card is removed by the deletion cleanup');
+      report.checks.push('RT-3b concurrency: a research write arriving while a conversation deletion is in progress waits and is refused; a write that committed first is removed by that deletion');
+    } finally {
+      await Promise.all([deleter,writer].map(w=>w.query('ROLLBACK').catch(()=>{})));
+      await Promise.all([deleter.end(),writer.end()]);
+    }
   }
 
   for (const role of ['anon','authenticated']) {

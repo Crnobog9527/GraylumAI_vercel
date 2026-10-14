@@ -64,6 +64,8 @@ CREATE TABLE IF NOT EXISTS public.research_account_fetches (
   state text NOT NULL CHECK (state IN ('in_progress','succeeded','unknown','failed')),
   attempt uuid NOT NULL DEFAULT gen_random_uuid(),
   evidence jsonb CHECK (evidence IS NULL OR (jsonb_typeof(evidence)='object' AND octet_length(evidence::text)<=8192)),
+  -- The last successful (paid) evidence; a later refresh replaces it only when that refresh succeeds.
+  last_success jsonb CHECK (last_success IS NULL OR (jsonb_typeof(last_success)='object' AND octet_length(last_success::text)<=8192)),
   created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now(),
   UNIQUE (session_id, platform, account)
 );
@@ -84,10 +86,16 @@ DO $$ DECLARE t text; BEGIN
 END $$;
 
 -- The caller's own, live session and (when given) an execution of it; deleted or erased ones are refused.
+-- Same lock order as content_erasure_confirm / content_erasure_mark_session (profile, session, execution): the share
+-- locks conflict with their update locks, so a write either commits before a deletion takes its locks (and is then
+-- cleaned by it) or waits and sees the deletion marker here.
 CREATE OR REPLACE FUNCTION public.research_session_owned(a uuid, s uuid, e uuid) RETURNS void
 LANGUAGE plpgsql SET search_path=public,pg_temp AS $$
 BEGIN
   PERFORM bill2_actor(a);
+  PERFORM id FROM profiles WHERE id=a FOR SHARE;
+  PERFORM id FROM runtime_sessions WHERE id=s AND actor_id=a FOR SHARE;
+  IF e IS NOT NULL THEN PERFORM id FROM runtime_executions WHERE id=e AND actor_id=a FOR SHARE;END IF;
   IF NOT EXISTS(SELECT 1 FROM runtime_sessions x WHERE x.id=s AND x.actor_id=a AND x.content_deleted_at IS NULL AND x.erased_at IS NULL)
    OR (e IS NOT NULL AND NOT EXISTS(SELECT 1 FROM runtime_executions x WHERE x.id=e AND x.session_id=s AND x.actor_id=a
      AND x.content_deleted_at IS NULL AND x.erased_at IS NULL))
@@ -142,9 +150,12 @@ CREATE OR REPLACE FUNCTION public.research_card_confirm(a uuid, p_card uuid, p j
 LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
 DECLARE c research_selection_cards; items jsonb:='[]'; opt text; t text;
 BEGIN
-  SELECT * INTO c FROM research_selection_cards WHERE id=p_card FOR UPDATE;
+  -- Session lock first (erasure order), then the card.
+  SELECT * INTO c FROM research_selection_cards WHERE id=p_card;
   IF c.id IS NULL OR c.actor_id<>a THEN RAISE EXCEPTION 'RESEARCH_SCOPE_DENIED' USING ERRCODE='42501';END IF;
   PERFORM research_session_owned(a,c.session_id,NULL);
+  SELECT * INTO c FROM research_selection_cards WHERE id=p_card FOR UPDATE;
+  IF c.id IS NULL THEN RAISE EXCEPTION 'RESEARCH_SCOPE_DENIED' USING ERRCODE='42501';END IF;
   IF jsonb_typeof(p->'selected') IS DISTINCT FROM 'array' OR p-ARRAY['selected','edits','additions']<>'{}'::jsonb
    OR (c.kind='candidates' AND (p ? 'edits' OR p ? 'additions')) THEN RAISE EXCEPTION 'RESEARCH_CARD_INVALID';END IF;
   IF EXISTS(SELECT 1 FROM jsonb_array_elements(p->'selected') v WHERE jsonb_typeof(v)<>'string'
@@ -207,8 +218,10 @@ DECLARE c research_selection_cards; d research_discoveries;
 BEGIN
   PERFORM research_session_owned(a,s,e);
   SELECT * INTO c FROM research_selection_cards WHERE confirmation_id=p_confirmation AND actor_id=a AND session_id=s AND kind='keywords';
-  IF c.id IS NULL OR cardinality(p_platforms) NOT BETWEEN 1 AND 2
-   OR EXISTS(SELECT 1 FROM unnest(p_platforms) x WHERE x !~ '^[a-z]{1,20}$') THEN RAISE EXCEPTION 'RESEARCH_NOT_CONFIRMED';END IF;
+  IF c.id IS NULL THEN RAISE EXCEPTION 'RESEARCH_NOT_CONFIRMED';END IF;
+  -- Each platform once: a repeated one would pay for the same searches twice.
+  IF cardinality(p_platforms) NOT BETWEEN 1 AND 2 OR EXISTS(SELECT 1 FROM unnest(p_platforms) x WHERE x !~ '^[a-z]{1,20}$')
+   OR (SELECT count(DISTINCT x) FROM unnest(p_platforms) x)<>cardinality(p_platforms) THEN RAISE EXCEPTION 'RESEARCH_DISCOVERY_INVALID';END IF;
   INSERT INTO research_discoveries(id,actor_id,session_id,execution_id,keyword_confirmation_id,platforms,keywords)
   VALUES(gen_random_uuid(),a,s,e,p_confirmation,p_platforms,c.confirmed_items) ON CONFLICT (keyword_confirmation_id) DO NOTHING;
   SELECT * INTO d FROM research_discoveries WHERE keyword_confirmation_id=p_confirmation;
@@ -230,9 +243,10 @@ BEGIN
   RETURN jsonb_build_object('discoveryId',d.id,'keywords',d.keywords,'platforms',to_jsonb(d.platforms),'cursor',d.cursor,'state',d.state);
 END $$;
 
--- One paid fetch per platform + account per session. An existing success is reused; an attempt in progress or
--- with an unknown result is never sent again. A one-time refresh grant, consumed here before any request,
--- starts a new paid fetch. A confirmed free failure may be retried.
+-- One paid fetch per platform + account per session. An attempt in progress is never sent twice; an earlier success
+-- is reused (also after a refresh that failed or ended unknown); an unknown result without an earlier success is
+-- never resent. A one-time refresh grant, consumed here before any request, starts a new paid fetch. A confirmed
+-- free failure without an earlier success may be retried.
 CREATE OR REPLACE FUNCTION public.research_account_fetch_claim(a uuid, s uuid, e uuid, p_platform text, p_account text, p_refresh uuid)
 RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
 DECLARE f research_account_fetches; g research_refresh_grants;
@@ -249,10 +263,10 @@ BEGIN
     SELECT * INTO g FROM research_refresh_grants WHERE id=p_refresh AND actor_id=a AND session_id=s FOR UPDATE;
     IF g.id IS NULL OR g.platform<>p_platform OR g.account<>p_account THEN RAISE EXCEPTION 'RESEARCH_REFRESH_INVALID';END IF;
     IF g.used_at IS NOT NULL THEN RAISE EXCEPTION 'RESEARCH_REFRESH_USED';END IF;
-    IF f.state='in_progress' THEN RETURN jsonb_build_object('claimed',false,'fetchId',f.id,'state',f.state,'evidence',f.evidence);END IF;
+    IF f.state='in_progress' THEN RETURN jsonb_build_object('claimed',false,'fetchId',f.id,'state',f.state,'evidence',f.last_success);END IF;
     UPDATE research_refresh_grants SET used_at=clock_timestamp(),used_execution_id=e WHERE id=g.id;
-  ELSIF f.state<>'failed' THEN
-    RETURN jsonb_build_object('claimed',false,'fetchId',f.id,'state',f.state,'evidence',f.evidence);
+  ELSIF f.state='in_progress' OR f.last_success IS NOT NULL OR f.state<>'failed' THEN
+    RETURN jsonb_build_object('claimed',false,'fetchId',f.id,'state',f.state,'evidence',f.last_success);
   END IF;
   -- Every paid attempt gets its own token, so a late result of an earlier attempt can never finish this one.
   UPDATE research_account_fetches SET state='in_progress',execution_id=e,evidence=NULL,attempt=gen_random_uuid(),
@@ -264,20 +278,22 @@ CREATE OR REPLACE FUNCTION public.research_account_fetch_finish(a uuid, p_fetch 
 RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
 BEGIN
   IF p_state NOT IN ('succeeded','unknown','failed') THEN RAISE EXCEPTION 'RESEARCH_FETCH_INVALID';END IF;
-  UPDATE research_account_fetches SET state=p_state,evidence=p_evidence,updated_at=clock_timestamp()
+  UPDATE research_account_fetches SET state=p_state,evidence=p_evidence,updated_at=clock_timestamp(),
+    last_success=CASE WHEN p_state='succeeded' THEN p_evidence ELSE last_success END
   WHERE id=p_fetch AND actor_id=a AND attempt=p_attempt AND state='in_progress';
   IF NOT FOUND AND NOT EXISTS(SELECT 1 FROM research_account_fetches WHERE id=p_fetch AND actor_id=a AND attempt=p_attempt
     AND state=p_state AND evidence IS NOT DISTINCT FROM p_evidence) THEN RAISE EXCEPTION 'RESEARCH_FETCH_CONFLICT';END IF;
 END $$;
 
--- The "refresh" button: only for an account this session has already fetched successfully.
+-- The "refresh" button: only for an account this session has fetched successfully before (also after a refresh that
+-- failed or ended unknown), and not while a fetch of it is in progress.
 CREATE OR REPLACE FUNCTION public.research_refresh_create(a uuid, s uuid, p_platform text, p_account text) RETURNS uuid
 LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
 DECLARE g uuid;
 BEGIN
   PERFORM research_session_owned(a,s,NULL);
   IF NOT EXISTS(SELECT 1 FROM research_account_fetches WHERE session_id=s AND actor_id=a AND platform=p_platform
-    AND account=p_account AND state='succeeded') THEN RAISE EXCEPTION 'RESEARCH_REFRESH_INVALID';END IF;
+    AND account=p_account AND last_success IS NOT NULL AND state<>'in_progress') THEN RAISE EXCEPTION 'RESEARCH_REFRESH_INVALID';END IF;
   INSERT INTO research_refresh_grants(actor_id,session_id,platform,account) VALUES(a,s,p_platform,p_account) RETURNING id INTO g;
   RETURN g;
 END $$;
@@ -293,7 +309,10 @@ BEGIN
   THEN RAISE EXCEPTION 'RESEARCH_LINK_CONFLICT';END IF;
   UPDATE research_plans SET session_id=s,execution_id=e,discovery_id=p_discovery WHERE id=p.id AND session_id IS NULL;
   IF p_operation IS NOT NULL THEN
-    IF NOT EXISTS(SELECT 1 FROM research_operations o WHERE o.id=p_operation AND o.plan_id=p.id)
+    -- The operation and its BILL2 call describe the same supplier request: the call's requestHash is the
+    -- operation's identity hash, so an operation can never be tied to another subcall of the same answer.
+    IF NOT EXISTS(SELECT 1 FROM research_operations o JOIN bill2_calls c ON c.id=p_call
+      WHERE o.id=p_operation AND o.plan_id=p.id AND c.payload->>'requestHash'=o.identity_hash)
      OR NOT EXISTS(SELECT 1 FROM bill2_calls c JOIN bill2_runs r ON r.id=c.run_id JOIN runtime_executions x ON x.billing_run_id=r.id
        WHERE c.id=p_call AND r.actor_id=a AND c.call_kind='tool' AND x.id=e)
     THEN RAISE EXCEPTION 'RESEARCH_LINK_CONFLICT';END IF;

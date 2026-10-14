@@ -131,7 +131,7 @@ try {
   await fusionSessionlessCases({db,Client,connectionString,report,createFixture});
   await fusionAdmitCases({db,Client,connectionString,report,createFixture});
   await researchToolCases({db,Client,connectionString,report,createFixture,claim,receipt});
-  await researchRuntimeCases({db,report,createFixture});
+  await researchRuntimeCases({db,Client,connectionString,report,createFixture});
 } catch (error) {
   report.failed = String(error.stack??error);
   report.databaseError = {code:error.code,detail:error.detail,where:error.where,position:error.position};
