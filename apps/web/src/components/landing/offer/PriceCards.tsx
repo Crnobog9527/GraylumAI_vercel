@@ -64,6 +64,15 @@ export function PriceCards({
   );
 }
 
+/**
+ * The membership page opens the matching payment window from these parameters (PAY-STRIPE-MP step 5, #961); the
+ * server decides whether the $49 first month or the founder price applies. Founder is Gold yearly.
+ */
+export function purchaseHref(membershipHref: string, card: LandingCard['key'], billing: PaywallBilling) {
+  const params = new URLSearchParams({ buy: card === 'pro' ? 'pro' : 'gold', cycle: billing });
+  return `${membershipHref}${membershipHref.includes('?') ? '&' : '?'}${params}`;
+}
+
 function PriceCard({ card, billing, showResult, membershipHref }: {
   card: LandingCard; billing: PaywallBilling; showResult: boolean; membershipHref: string;
 }) {
@@ -99,7 +108,7 @@ function PriceCard({ card, billing, showResult, membershipHref }: {
 
       {quote ? (
         <div className="grid gap-2">
-          <Link href={ready ? membershipHref : '/contact'}
+          <Link href={ready ? purchaseHref(membershipHref, card.key, billing) : '/contact'}
             className={cn('rounded-xl px-4 py-3 text-center text-sm font-semibold transition-colors',
               card.recommended ? 'bg-gradient-to-r from-[#FFD700] to-[#FFA500] text-[#0A0A0A]'
                 : 'border border-[#333333] bg-[#1F1F1F] text-white hover:border-[#FFD700]')}>
