@@ -53,7 +53,7 @@ export const publishMonitorConnectRouter = router({
     const deps = postForMeDeps();
     const result = await recordCallback(ctx.supabaseAdmin, deps, ctx.profileId, input.requestId,
       input.accountIds.slice(0, MAX_CALLBACK_HINTS));
-    await disconnectTakenOver(deps, result.quarantined);
+    await disconnectTakenOver(deps, result.takenOver);
     return { requestId: result.requestId, offered: result.newAccounts.length + result.ownExisting.length,
       takenOver: result.quarantined.length };
   })),

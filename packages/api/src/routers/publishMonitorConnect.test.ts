@@ -108,12 +108,12 @@ describe('publish-monitor connect procedures', () => {
   it('callback clears the overwriting authorization at the provider for each proven takeover', async () => {
     const rpc = vi.fn().mockResolvedValue({ data: { requestId: request, platform: 'facebook', newAccounts: [],
       ownExisting: [], quarantined: ['spc_taken'], ignored: [] }, error: null });
-    mocks.responses.push(json(200, { id: 'spc_taken', platform: 'facebook', status: 'connected', external_id: EXTERNAL }),
-      json(200, {}));
+    const taken = () => json(200, { id: 'spc_taken', platform: 'facebook', status: 'connected', external_id: EXTERNAL });
+    mocks.responses.push(taken(), taken(), json(200, {}));
     await expect(caller(rpc, bound).callback({ requestId: request, accountIds: ['spc_taken'] }))
       .resolves.toEqual({ requestId: request, offered: 0, takenOver: 1 });
     expect(mocks.urls.map(u => u.replace(/^.*\/v1/, ''))).toEqual(['/social-accounts/spc_taken',
-      '/social-accounts/spc_taken/disconnect']);
+      '/social-accounts/spc_taken', '/social-accounts/spc_taken/disconnect']);
   });
 
   it('cancel cleans up; a provider failure is left for the sweep and reported', async () => {

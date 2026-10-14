@@ -67,16 +67,22 @@ export async function cleanupUnselected(client: ClientDeps, externalId: string, 
 
 /**
  * A proven takeover (plan §4.1 step 2): the database has already quarantined the previous owner's connection; the
- * overwriting authorization is now cleared at the provider too, so neither side can keep using it. The callback
- * re-read showed each of these accounts carrying this attempt's external_id, so only this user's own fresh grant
- * is revoked. Failures are logged and left for the PR-2c retry and sweep; this never throws.
+ * overwriting authorization is now cleared at the provider too, so neither side can keep using it. Each account is
+ * re-read just before disconnecting and cleared only while it still carries this attempt's external_id, so a grant
+ * the original owner made since the callback is never revoked. Anything not settled is logged for the PR-2c retry.
  */
-export async function disconnectTakenOver(client: ClientDeps, ids: string[], now: () => number = Date.now) {
+export async function disconnectTakenOver(client: ClientDeps, accounts: Array<{ id: string; externalId: string }>,
+  now: () => number = Date.now) {
   const until = now() + CLEANUP_BUDGET_MS;
   let pending = 0;
-  for (const id of ids) {
+  for (const { id, externalId } of accounts) {
     if (pending > 0 || now() >= until) { pending += 1; continue; }
     try {
+      const current = await getAccount(client, id);
+      if (current.kind === 'rejected' && current.status === 404) continue;
+      if (current.kind !== 'ok') { pending += 1; continue; }
+      // Re-authorized by someone else since the callback (for example the original owner): not ours to revoke.
+      if (current.value.externalId !== externalId) continue;
       const result = await disconnectAccount(client, id);
       // Only success or "no such account" (404) settles it; 401/403 and other refusals still need reconciliation.
       if (!(result.kind === 'ok' || (result.kind === 'rejected' && result.status === 404))) pending += 1;

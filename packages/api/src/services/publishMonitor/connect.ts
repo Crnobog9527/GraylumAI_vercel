@@ -81,7 +81,7 @@ const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 export async function recordCallback(db: Rpc, client: ClientDeps, profileId: string, requestId: string,
   hintedAccountIds: string[], wait: (ms: number) => Promise<unknown> = sleep) {
   const ids = [...new Set(hintedAccountIds)].filter(id => providerId.safeParse(id).success).slice(0, 200);
-  const candidates = [];
+  const candidates: Array<{ providerAccountId: string; platform: string; externalId: string | null }> = [];
   let waited = 0;
   for (const id of ids) {
     let account = await getAccount(client, id);
@@ -103,7 +103,12 @@ export async function recordCallback(db: Rpc, client: ClientDeps, profileId: str
   if (result.error) throw dbFailure(result.error);
   const parsed = callbackSchema.safeParse(result.data);
   if (!parsed.success) throw dbFailure(null);
-  return parsed.data;
+  // The provider facts each quarantine was decided on, so a later disconnect can check they still hold.
+  const takenOver = parsed.data.quarantined.flatMap(id => {
+    const fact = candidates.find(c => c.providerAccountId === id);
+    return fact?.externalId ? [{ id, externalId: fact.externalId }] : [];
+  });
+  return { ...parsed.data, takenOver };
 }
 
 export async function confirmConnect(db: Rpc, client: ClientDeps, profileId: string, requestId: string,

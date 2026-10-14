@@ -37,17 +37,24 @@ describe('publish-monitor connect flow helpers', () => {
     expect(result).toEqual({ deleted: ['spc_1'], kept: [], deferred: ['spc_2'] });
   });
 
-  it('takeover disconnect accepts only success or a missing account; an auth refusal stays pending', async () => {
-    expect(await disconnectTakenOver(provider([json(404, {})]).deps, ['spc_1'])).toEqual({ pending: 0 });
-    expect(await disconnectTakenOver(provider([json(403, {})]).deps, ['spc_1'])).toEqual({ pending: 1 });
-    expect(await disconnectTakenOver(provider([json(401, {})]).deps, ['spc_1'])).toEqual({ pending: 1 });
-  });
-
-  it('takeover disconnect stops at the first outage and reports what is left', async () => {
-    const p = provider([json(200, {}), json(503, {})]);
-    expect(await disconnectTakenOver(p.deps, ['spc_1', 'spc_2', 'spc_3'])).toEqual({ pending: 2 });
-    expect(p.urls.map(u => u.replace(/^.*\/v1/, ''))).toEqual(['/social-accounts/spc_1/disconnect',
-      '/social-accounts/spc_2/disconnect']);
+  it('takeover disconnect re-reads first and clears only an authorization still carrying this attempt', async () => {
+    const mine = () => json(200, { id: 'spc_1', platform: 'facebook', status: 'connected', external_id: EXTERNAL });
+    const one = [{ id: 'spc_1', externalId: EXTERNAL }];
+    const ok = provider([mine(), json(200, {})]);
+    expect(await disconnectTakenOver(ok.deps, one)).toEqual({ pending: 0 });
+    expect(ok.urls.map(u => u.replace(/^.*\/v1/, ''))).toEqual(['/social-accounts/spc_1', '/social-accounts/spc_1/disconnect']);
+    // The original owner re-authorized in between: nothing is revoked.
+    const back = provider([json(200, { id: 'spc_1', platform: 'facebook', status: 'connected',
+      external_id: 'c'.repeat(32) + '.' + 'd'.repeat(32) })]);
+    expect(await disconnectTakenOver(back.deps, one)).toEqual({ pending: 0 });
+    expect(back.urls).toHaveLength(1);
+    expect(await disconnectTakenOver(provider([json(404, {})]).deps, one)).toEqual({ pending: 0 });
+    expect(await disconnectTakenOver(provider([mine(), json(403, {})]).deps, one)).toEqual({ pending: 1 });
+    expect(await disconnectTakenOver(provider([mine(), json(401, {})]).deps, one)).toEqual({ pending: 1 });
+    // Cannot verify (outage): stop and leave the rest pending.
+    const down = provider([json(503, {})]);
+    expect(await disconnectTakenOver(down.deps, [...one, { id: 'spc_2', externalId: EXTERNAL }])).toEqual({ pending: 2 });
+    expect(down.urls).toHaveLength(1);
   });
 
   it('names stop after the first provider problem; the page still loads with account IDs', async () => {
