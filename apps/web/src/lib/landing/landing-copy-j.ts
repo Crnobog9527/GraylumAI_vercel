@@ -35,8 +35,8 @@ export const J_NOTE_ANSWERS: Readonly<Record<string, string>> = {
  * verbatim from the local quote table; until they are, each forum note shows this placeholder.
  */
 /**
- * NEW (Owner 2026-10-15: never call the AI coach "它"): the first screen's promise, sample J only; the shared
- * HERO.promise says "运营从此交给它".
+ * OWNER (2026-10-15, "副标题用 AI 教练版"): the first screen's promise without "它". The shared HERO.promise still says
+ * "运营从此交给它"; it changes with it when sample J replaces the public landing page.
  */
 export const J_HERO_PROMISE = '运营从此交给我们的 AI 教练，你只管专心输出你擅长的内容。';
 
