@@ -115,9 +115,12 @@ export function toolCallPolicy(input: {
   if (entry.usageUnit !== unit) throw new ToolBillingError('TOOL_PRICE_UNIT_MISMATCH');
   if (!/^[1-9][0-9]{0,5}$/.test(input.maxUnitsPerCall) || input.purposes.length === 0) throw new ToolBillingError('TOOL_INPUT_INVALID');
   const model = `${input.vendor}:${input.route}`;
+  // A non-USD price is only as valid as its exchange rate: freeze the earlier of the two expiries.
+  const validUntil = entry.fxValidUntil !== null && Date.parse(entry.fxValidUntil) < Date.parse(entry.validUntil)
+    ? entry.fxValidUntil : entry.validUntil;
   const toolPricing: ToolPricing = {
     unit, currency: entry.currency, price: entry.price, unitsPerPrice: entry.unitsPerPrice,
-    usdPerCurrency: entry.usdPerCurrency, entryHash: input.price.entryHash, validUntil: entry.validUntil,
+    usdPerCurrency: entry.usdPerCurrency, entryHash: input.price.entryHash, validUntil,
     maxUnitsPerCall: input.maxUnitsPerCall,
   };
   const upperUsd = toolCostUsd(toolPricing, input.maxUnitsPerCall, 'up');

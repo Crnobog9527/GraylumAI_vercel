@@ -56,6 +56,13 @@ describe('tool billing payloads', () => {
       price: widePrice, maxUnitsPerCall: '1' }).model).toBe('tikhub:/any/route');
   });
 
+  it('freezes the earlier of the price and exchange-rate expiries', () => {
+    const fx = { currency: 'CNY', usdPerCurrency: '0.14', fxSourceUrl: 'https://example.com/fx',
+      fxEffectiveAt: '2026-10-13T00:00:00Z', fxValidUntil: '2026-10-15T00:00:00Z', price: '0.07' };
+    expect(policy(entry(fx)).toolPricing.validUntil).toBe('2026-10-15T00:00:00Z');
+    expect(policy(entry({ ...fx, fxValidUntil: '2026-10-30T00:00:00Z' })).toolPricing.validUntil).toBe('2026-10-20T00:00:00Z');
+  });
+
   it('computes cost exactly like providerUsageCostUsd, including other currencies', () => {
     const cases: Array<[Partial<ProviderPrices['entries'][number]>, string]> = [
       [{ price: '1', unitsPerPrice: '1000', usageUnit: 'sku_search', provider: 'parallel', route: 'parallel:search:fast' }, '1'],

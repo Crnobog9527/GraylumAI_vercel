@@ -131,7 +131,7 @@ BEGIN
 END $$;
 
 -- Plan §3.3: a route that keeps returning results without official usage (or unknown results) is stopped.
--- After TOOL_PENDING_LIMIT pending-cost results on one route within an hour (counting only those after the
+-- After 5 pending-cost results on one route within an hour (counting only those after the
 -- route's latest metering review), the call is flagged metering_missing: bill2_payg_claim then refuses new
 -- calls on the route until an admin reviews it (bill2_payg_review_metering).
 CREATE OR REPLACE FUNCTION public.bill2_tool_pending_guard(p_call_id uuid) RETURNS void
@@ -141,8 +141,10 @@ BEGIN
   SELECT * INTO c FROM bill2_calls WHERE id=p_call_id;
   IF c.call_kind<>'tool' OR c.supplier_cost_state IS DISTINCT FROM 'pending' THEN RETURN;END IF;
   IF (SELECT count(*) FROM bill2_calls x WHERE x.call_kind='tool' AND x.model=c.model
-      AND x.supplier_cost_state='pending' AND x.created_at>clock_timestamp()-interval '1 hour'
-      AND x.created_at>coalesce((SELECT max(l.created_at) FROM user_activity_logs l
+      -- Counted by when the call became pending (its settlement; this call is not settled yet), not by when it
+      -- was created: a call settled as unknown at its recovery deadline may be up to a day old.
+      AND x.supplier_cost_state='pending' AND coalesce(x.settled_at,clock_timestamp())>clock_timestamp()-interval '1 hour'
+      AND coalesce(x.settled_at,clock_timestamp())>coalesce((SELECT max(l.created_at) FROM user_activity_logs l
         WHERE l.action='bill2_metering_review' AND l.details->>'model'=c.model),'-infinity'::timestamptz))>=5
   THEN UPDATE bill2_calls SET metering_missing=true WHERE id=c.id;END IF;
 END $$;

@@ -295,7 +295,18 @@ export async function researchToolCases({db,Client,connectionString,report,creat
     await rpc(db,'bill2_record',reopened.actor,reopened.run,next.id,result(next,'unknown',null,null));
     assert.equal((await call(db,next.id)).settled,true,'the reviewed route is usable again and earlier pending results no longer count');
     assert.equal((await db.query('SELECT metering_missing m FROM bill2_calls WHERE id=$1',[next.id])).rows[0].m,false);
-    report.checks.push('RT-2 repeated pending costs: the fifth pending result on a route within an hour stops the route; an admin metering review reopens it and resets the count');
+    // Calls settled as unknown at their recovery deadline count from that moment, however old they are.
+    const old = await make();
+    const stale = [];
+    for (let i=1;i<=5;i++) {
+      const c = await claimTool(db,old,i,{requestHash:String(i).repeat(64)});
+      await db.query("UPDATE bill2_calls SET created_at=now()-interval '23 hours',recovery_deadline=now()-interval '1 second' WHERE id=$1",[c.id]);
+      await rpc(db,'bill2_finalize',old.actor,old.run);
+      stale.push(c.id);
+    }
+    assert.equal((await db.query('SELECT bool_or(metering_missing) m FROM bill2_calls WHERE id=ANY($1::uuid[])',[stale])).rows[0].m,true,
+      'five calls settled as unknown now stop the route even though they were created long ago');
+    report.checks.push('RT-2 repeated pending costs: the fifth pending result on a route within an hour (by settlement time) stops the route; an admin metering review reopens it and resets the count');
   }
 
   // Erasure projections keep the financial shape of runs and calls with tool policies (DATA-ERASURE).
