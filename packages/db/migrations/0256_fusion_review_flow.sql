@@ -25,10 +25,12 @@ BEGIN
   RETURN to_jsonb(replace(encode(f.bytes,'base64'),E'\n',''));
 END $$;
 
+-- Source and preview are VOLATILE: the actor and readability checks they call take row locks (FOR SHARE),
+-- which PostgREST refuses for STABLE functions (it runs those in a read-only transaction).
 -- The frozen inputs of a review, read from its own immutable version: the reviewed report body, the
 -- template sections and length, and the declared steps and fields. Refused once the version is erased.
 CREATE OR REPLACE FUNCTION public.fusion_review_source(p_actor_id uuid, p_review_id uuid)
-RETURNS jsonb LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path=public,pg_temp AS $$
+RETURNS jsonb LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=public,pg_temp AS $$
 DECLARE rv fusion_reviews; ver artifact_versions; r artifact_rounds;
 BEGIN
   PERFORM bill2_actor(p_actor_id);
@@ -47,7 +49,7 @@ END $$;
 -- Sizes of a version before a review starts, for the worst-case estimate and context check: report bytes,
 -- confirmed-field bytes and the number of declared fields. Same ownership and readability rules as start.
 CREATE OR REPLACE FUNCTION public.fusion_review_preview(p_actor_id uuid, p_draft_id uuid, p_source_version_id uuid)
-RETURNS jsonb LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path=public,pg_temp AS $$
+RETURNS jsonb LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=public,pg_temp AS $$
 DECLARE d opc_drafts; ver artifact_versions; r artifact_rounds;
 BEGIN
   PERFORM bill2_actor(p_actor_id);

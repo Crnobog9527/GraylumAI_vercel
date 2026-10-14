@@ -226,6 +226,9 @@ export async function runFusionReview({db,Client,connectionString,report}) {
   assert.deepEqual(source.declared,[{stepId:'a',fieldIds:['who','pain']},{stepId:'b',fieldIds:['offer']},{stepId:'c',fieldIds:['voice']}]);
   await assert.rejects(service(db,'fusion_review_source',randomUUID(),rv5.reviewId),/./,'another actor cannot read it');
   // 0256: sizes before start (estimate input), same ownership rules; the view names each call's model.
+  // PostgREST runs STABLE functions read-only; these two take row locks, so they must be VOLATILE.
+  assert.deepEqual((await db.query(`SELECT proname,provolatile FROM pg_proc WHERE proname IN ('fusion_review_source','fusion_review_preview') ORDER BY proname`)).rows,
+    [{proname:'fusion_review_preview',provolatile:'v'},{proname:'fusion_review_source',provolatile:'v'}]);
   const preview = await service(db,'fusion_review_preview',f.actor,f.draft,f.versionId);
   assert.equal(preview.reportBytes,Buffer.byteLength(source.body));
   assert.equal(preview.fieldCount,4);assert.ok(preview.materialsBytes>0);
