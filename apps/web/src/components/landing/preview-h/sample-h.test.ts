@@ -9,7 +9,7 @@ import { metadata } from '@/app/landing/preview/h/page';
 import { SCENES } from '@/components/landing/preview-g/scenes';
 import { TILT_MAX, tiltFor } from '@/components/public-site/motion/DepthStage';
 import { DigitRoll, splitUnits } from '@/components/public-site/motion/depth-text';
-import { FINAL_ACTION, HERO, HOW_IT_WORKS, PRICE_COMPARE, VOICE_WALL } from '@/lib/landing/landing-copy';
+import { FINAL_ACTION, HERO, HERO_H, HOW_IT_WORKS, PRICE_COMPARE, VOICE_WALL } from '@/lib/landing/landing-copy';
 import { LANDING_FAQ_TITLE } from '@/lib/landing/landing-faq';
 import { FLOW_STEPS } from '@/lib/landing/landing-flow';
 import { LANDING_FEATURES, type LandingFlags } from '@/lib/landing/landing-flags';
@@ -50,6 +50,12 @@ describe('style sample H', () => {
     for (const copy of [HERO.promise, HERO.primaryCta, HERO.secondaryCta, ...data.notes.map(note => note.answer)]) {
       expect(html).toContain(escape(copy));
     }
+    // The Owner's first-screen pitch (2026-10-14), verbatim, and one CTA note on both buttons without the credits.
+    for (const copy of Object.values(HERO_H)) expect(html).toContain(escape(copy));
+    expect(html.split(HERO_H.ctaNote)).toHaveLength(3);
+    const hero = html.slice(html.indexOf('<section aria-labelledby="hero-title"'), html.indexOf('</section>'));
+    expect(hero).not.toContain('500 积分');
+    expect(hero).not.toContain('随时能看、能导出，不会收回');
     expect(html).toContain('aria-label="Pro"');
     expect(html).toContain('aria-label="Gold"');
     expect(html).toContain('id="how-it-works"');
