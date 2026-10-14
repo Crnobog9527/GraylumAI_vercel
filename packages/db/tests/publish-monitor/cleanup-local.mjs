@@ -85,6 +85,7 @@ try {
   assert.equal((await state(b1.requestId)).state, 'abandoned');
   assert.deepEqual(claimed.find(r => r.requestId === b1.requestId).candidateIds, ['pfm_b_1']);
   assert.deepEqual(await claim(), [], 'a leased attempt is not claimed twice');
+  assert.equal((await state(b1.requestId)).cleanup_attempts, 0, 'claiming alone does not use up a retry');
   report.checks.push('expired attempts are abandoned and claimed once under a lease');
 
   // Classify: only accounts carrying this attempt's external_id are acted on; own bound accounts are kept; another
@@ -113,7 +114,20 @@ try {
     acc('pfm_unsettled', a1.externalId), acc('pfm_settled', b1.externalId), acc('pfm_gone_user', 'f'.repeat(32) + '.' + 'e'.repeat(32)),
     acc('pfm_lookalike', 'abcdefghijklmnop.qrstuvwxyzabcdef')])]);
   assert.deepEqual(orphan, { delete: ['pfm_settled', 'pfm_gone_user'],
-    unknownFormat: ['pfm_dash', 'pfm_weird', 'pfm_lookalike'] });
+    unknownFormat: ['pfm_dash', 'pfm_weird', 'pfm_lookalike'], takenOver: [] });
+  // A bound account whose provider record now carries another user's reference (callback and webhook missed) is
+  // quarantined and queued for disconnect by the sweep; the same user's own reference changes nothing.
+  const sweepVictim = await member();
+  await connect(sweepVictim, 'pfm_sweep_victim');
+  const victimRef = await v('SELECT provider_ref v FROM social_monitor_settings WHERE actor_id=$1', [sweepVictim.a]);
+  const sameUser = await svc('SELECT publish_monitor_orphan_classify($1) v',
+    [j([acc('pfm_sweep_victim', `${victimRef}.${'0'.repeat(32)}`)])]);
+  assert.deepEqual(sameUser.takenOver, []);
+  const swept = await svc('SELECT publish_monitor_orphan_classify($1) v',
+    [j([acc('pfm_sweep_victim', `${'9'.repeat(32)}.${'0'.repeat(32)}`)])]);
+  assert.deepEqual(swept.takenOver, ['pfm_sweep_victim']);
+  const victimConn = await conn('pfm_sweep_victim');
+  assert.deepEqual([victimConn.status, victimConn.provider_disconnect_pending], ['quarantined', true]);
   report.checks.push('orphan sweep deletes only unbound accounts in Graylum\'s own format whose attempt is settled or unknown; '
     + 'other formats are only reported');
 
@@ -123,10 +137,13 @@ try {
   assert.equal(takeoverJob.action, 'disconnect');
   assert.equal(takeoverJob.ownerRef, await v('SELECT provider_ref v FROM social_monitor_settings WHERE actor_id=$1', [owned.a]));
   assert.deepEqual(await work(), [], 'leased work is not claimed twice');
+  assert.equal((await conn('pfm_owned')).deletion_attempts, 0, 'claiming alone does not use up a retry');
   await workFinish(takeoverJob.connectionId, 'retry', 'PROVIDER_UNAVAILABLE');
-  assert.equal((await conn('pfm_owned')).deletion_error, 'PROVIDER_UNAVAILABLE');
+  assert.deepEqual([(await conn('pfm_owned')).deletion_error, (await conn('pfm_owned')).deletion_attempts],
+    ['PROVIDER_UNAVAILABLE', 1]);
   await workFinish(takeoverJob.connectionId, 'owner_back');
-  assert.deepEqual([(await conn('pfm_owned')).provider_disconnect_pending, (await conn('pfm_owned')).status], [false, 'quarantined']);
+  assert.deepEqual([(await conn('pfm_owned')).provider_disconnect_pending, (await conn('pfm_owned')).status,
+    (await conn('pfm_owned')).deletion_attempts], [false, 'quarantined', 0], 'a settled takeover resets its retry count');
   report.checks.push('takeover disconnect is claimed under a lease with the owner reference and cleared when settled');
 
   // User disconnect: posts and snapshots go now; the row becomes an identity-free deletion record; others refused.
