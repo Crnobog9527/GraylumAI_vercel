@@ -66,8 +66,22 @@ export async function researchRuntimeCases({db,report,createFixture}) {
       options:[candidate('c1','alpha'),candidate('c2','beta'),candidate('h1','bigstar',false)]});
     await assert.rejects(rpc(db,'research_card_confirm',f.actor,cc,{selected:['c1'],additions:['x']}),/RESEARCH_CARD_INVALID/);
     await assert.rejects(rpc(db,'research_card_confirm',f.actor,cc,{selected:['h1']}),/RESEARCH_CARD_INVALID/);
+    // Two selectable candidates: the minimum is all of them; a card with more asks for at least 3.
+    await assert.rejects(rpc(db,'research_card_confirm',f.actor,cc,{selected:['c1']}),/RESEARCH_CARD_INVALID/);
     const picked = await rpc(db,'research_card_confirm',f.actor,cc,{selected:['c2','c1']});
     assert.deepEqual(picked.items.map(x=>x.account).sort(),['alpha','beta']);
+    const wide = randomUUID();
+    await rpc(db,'research_card_create',f.actor,wide,f.session,f.execution,{kind:'candidates',discoveryId:started.discoveryId,
+      options:['a','b','c','d','e','f','g','h'].map(x=>candidate('c'+x,'acct'+x))});
+    await assert.rejects(rpc(db,'research_card_confirm',f.actor,wide,{selected:['ca','cb']}),/RESEARCH_CARD_INVALID/);
+    await assert.rejects(rpc(db,'research_card_confirm',f.actor,wide,{selected:['ca','cb','cc','cd','ce','cf']}),/RESEARCH_CARD_INVALID/);
+    assert.equal((await rpc(db,'research_card_confirm',f.actor,wide,{selected:['ca','cb','cc']})).items.length,3);
+    const more = randomUUID();
+    await rpc(db,'research_card_create',f.actor,more,f.session,f.execution,{kind:'candidates',discoveryId:started.discoveryId,minSelect:1,
+      options:['i','j','k','l'].map(x=>candidate('c'+x,'acct'+x))});
+    assert.equal((await rpc(db,'research_card_confirm',f.actor,more,{selected:['ci']})).items.length,1);
+    await assert.rejects(rpc(db,'research_card_create',f.actor,randomUUID(),f.session,f.execution,{kind:'keywords',minSelect:1,
+      options:keywordOptions}),/RESEARCH_CARD_INVALID/);
     assert.ok(picked.items.every(x=>!('label' in x)&&!('selectable' in x)));
     report.checks.push('RT-3b cards: keyword card select/edit/add confirmed once (replay same, change refused); candidate card ticks only, head references not selectable, accounts from host options; discovery only from this session\'s keyword confirmation');
   }
@@ -84,21 +98,31 @@ export async function researchRuntimeCases({db,report,createFixture}) {
     assert.deepEqual(await rpc(db,'research_account_fetch_claim',f.actor,f.session,f.execution,'tiktok','alpha',null),
       {claimed:false,fetchId:first.fetchId,state:'in_progress',evidence:null});
     await assert.rejects(rpc(db,'research_refresh_create',f.actor,f.session,'tiktok','alpha'),/RESEARCH_REFRESH_INVALID/);
-    await rpc(db,'research_account_fetch_finish',f.actor,first.fetchId,'succeeded',{operations:['op-1']});
+    await rpc(db,'research_account_fetch_finish',f.actor,first.fetchId,first.attempt,'succeeded',{operations:['op-1']});
     assert.deepEqual((await rpc(db,'research_account_fetch_claim',f.actor,f.session,f.execution,'tiktok','alpha',null)).evidence,{operations:['op-1']});
     const grant = await rpc(db,'research_refresh_create',f.actor,f.session,'tiktok','alpha');
     await assert.rejects(rpc(db,'research_account_fetch_claim',f.actor,f.session,f.execution,'tiktok','beta',grant),/RESEARCH_REFRESH_INVALID/);
-    assert.equal((await rpc(db,'research_account_fetch_claim',f.actor,f.session,f.execution,'tiktok','alpha',grant)).claimed,true);
+    const refreshed = await rpc(db,'research_account_fetch_claim',f.actor,f.session,f.execution,'tiktok','alpha',grant);
+    assert.equal(refreshed.claimed,true);
+    assert.notEqual(refreshed.attempt,first.attempt,'each paid attempt has its own token');
+    // A late result of the first attempt cannot finish the refresh.
+    await assert.rejects(rpc(db,'research_account_fetch_finish',f.actor,first.fetchId,first.attempt,'succeeded',{operations:['op-old']}),/RESEARCH_FETCH_CONFLICT/);
     // Unknown result: the grant is already used, and the account is not fetched again.
-    await rpc(db,'research_account_fetch_finish',f.actor,first.fetchId,'unknown',null);
+    await rpc(db,'research_account_fetch_finish',f.actor,first.fetchId,refreshed.attempt,'unknown',null);
     await assert.rejects(rpc(db,'research_account_fetch_claim',f.actor,f.session,f.execution,'tiktok','alpha',grant),/RESEARCH_REFRESH_USED/);
     assert.equal((await rpc(db,'research_account_fetch_claim',f.actor,f.session,f.execution,'tiktok','alpha',null)).claimed,false);
     await assert.rejects(rpc(db,'research_refresh_create',other.actor,f.session,'tiktok','alpha'),/RESEARCH_SCOPE_DENIED|RESEARCH_REFRESH_INVALID/);
     // A confirmed free failure may be tried again.
     const b = await rpc(db,'research_account_fetch_claim',f.actor,f.session,f.execution,'x','beta',null);
-    await rpc(db,'research_account_fetch_finish',f.actor,b.fetchId,'failed',null);
+    await rpc(db,'research_account_fetch_finish',f.actor,b.fetchId,b.attempt,'failed',null);
     assert.equal((await rpc(db,'research_account_fetch_claim',f.actor,f.session,f.execution,'x','beta',null)).claimed,true);
-    report.checks.push('RT-3b fetches: user message only from this session; one paid fetch per account per session (in-progress and unknown never resent, success reused); refresh grant used before sending and only once, only for its own fetched account; free failure retryable');
+    {
+    const f = await session(db,createFixture);
+    const g = await toolFixture(createFixture,{db,actor:f.actor});
+    const foreign = await claimTool(db,g,1,{},false);
+    await assert.rejects(linkedOperation(db,f,foreign.id,null),/RESEARCH_LINK_CONFLICT/);
+  }
+  report.checks.push('RT-3b fetches: user message only from this session; one paid fetch per account per session (in-progress and unknown never resent, success reused); refresh grant used before sending and only once, only for its own fetched account; free failure retryable');
   }
 
   // Conversation deletion with a settled unknown search: the text goes, the supplier-cost record stays.
@@ -110,7 +134,7 @@ export async function researchRuntimeCases({db,report,createFixture}) {
     const card = randomUUID();
     await rpc(db,'research_card_create',f.actor,card,f.session,f.execution,{kind:'keywords',options:keywordOptions});
     const fetch = await rpc(db,'research_account_fetch_claim',f.actor,f.session,f.execution,'tiktok','alpha',null);
-    await rpc(db,'research_account_fetch_finish',f.actor,fetch.fetchId,'succeeded',{operations:[linked.op]});
+    await rpc(db,'research_account_fetch_finish',f.actor,fetch.fetchId,fetch.attempt,'succeeded',{operations:[linked.op]});
     await rpc(db,'research_refresh_create',f.actor,f.session,'tiktok','alpha');
     const before = (await db.query(`SELECT supplier_cost_state,supplier_cost_bound_usd::text bound,selected_cost_usd,charged_delta,
       nominal_source,metering_missing,budget_conflict,settled_at FROM bill2_calls WHERE id=$1`,[c.id])).rows[0];

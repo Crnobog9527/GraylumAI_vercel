@@ -62,6 +62,7 @@ CREATE TABLE IF NOT EXISTS public.research_account_fetches (
   platform text NOT NULL CHECK (platform ~ '^[a-z]{1,20}$'),
   account text NOT NULL CHECK (length(account) BETWEEN 1 AND 200),
   state text NOT NULL CHECK (state IN ('in_progress','succeeded','unknown','failed')),
+  attempt uuid NOT NULL DEFAULT gen_random_uuid(),
   evidence jsonb CHECK (evidence IS NULL OR (jsonb_typeof(evidence)='object' AND octet_length(evidence::text)<=8192)),
   created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now(),
   UNIQUE (session_id, platform, account)
@@ -107,7 +108,8 @@ LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
 DECLARE c research_selection_cards; o jsonb; k text:=p->>'kind'; n integer:=0;
 BEGIN
   PERFORM research_session_owned(a,s,e);
-  IF k NOT IN ('keywords','candidates') OR jsonb_typeof(p->'options') IS DISTINCT FROM 'array' THEN RAISE EXCEPTION 'RESEARCH_CARD_INVALID';END IF;
+  IF k NOT IN ('keywords','candidates') OR jsonb_typeof(p->'options') IS DISTINCT FROM 'array'
+   OR p-ARRAY['kind','options','discoveryId','minSelect']<>'{}'::jsonb THEN RAISE EXCEPTION 'RESEARCH_CARD_INVALID';END IF;
   FOR o IN SELECT value FROM jsonb_array_elements(p->'options') LOOP
     IF coalesce(o->>'id','') !~ '^[a-z0-9]{1,8}$' THEN RAISE EXCEPTION 'RESEARCH_CARD_INVALID';END IF;
     IF k='keywords' AND (o-ARRAY['id','text']<>'{}'::jsonb OR char_length(coalesce(o->>'text',''))
@@ -121,9 +123,13 @@ BEGIN
   IF (SELECT count(DISTINCT x->>'id') FROM jsonb_array_elements(p->'options') x)<>jsonb_array_length(p->'options')
    OR (k='keywords' AND n NOT BETWEEN 3 AND 5) OR (k='candidates' AND n NOT BETWEEN 1 AND 12)
    OR (k='candidates' AND NOT EXISTS(SELECT 1 FROM research_discoveries d WHERE d.id=(p->>'discoveryId')::uuid AND d.session_id=s))
+   OR (p ? 'minSelect' AND (k<>'candidates' OR coalesce(p->>'minSelect','') !~ '^[1-3]$'))
   THEN RAISE EXCEPTION 'RESEARCH_CARD_INVALID';END IF;
   INSERT INTO research_selection_cards(id,actor_id,session_id,execution_id,kind,discovery_id,options,min_select,max_select)
-  VALUES(p_card,a,s,e,k,CASE WHEN k='candidates' THEN (p->>'discoveryId')::uuid END,p->'options',1,CASE WHEN k='keywords' THEN 5 ELSE least(n,5) END)
+  -- A first candidate card asks for 3–5 picks (fewer only when fewer are offered); a follow-up card may name a
+  -- smaller minimum (minSelect) for the accounts still missing.
+  VALUES(p_card,a,s,e,k,CASE WHEN k='candidates' THEN (p->>'discoveryId')::uuid END,p->'options',
+    CASE WHEN k='keywords' THEN 1 ELSE least(n,coalesce((p->>'minSelect')::int,3)) END,CASE WHEN k='keywords' THEN 5 ELSE least(n,5) END)
   ON CONFLICT (id) DO NOTHING;
   SELECT * INTO c FROM research_selection_cards WHERE id=p_card;
   IF c.actor_id<>a OR c.session_id<>s OR c.options IS DISTINCT FROM p->'options' THEN RAISE EXCEPTION 'RESEARCH_CARD_CONFLICT';END IF;
@@ -236,7 +242,7 @@ BEGIN
   VALUES(a,s,e,p_platform,p_account,'in_progress') ON CONFLICT (session_id,platform,account) DO NOTHING RETURNING * INTO f;
   IF f.id IS NOT NULL THEN
     IF p_refresh IS NOT NULL THEN RAISE EXCEPTION 'RESEARCH_REFRESH_INVALID';END IF;
-    RETURN jsonb_build_object('claimed',true,'fetchId',f.id);
+    RETURN jsonb_build_object('claimed',true,'fetchId',f.id,'attempt',f.attempt);
   END IF;
   SELECT * INTO f FROM research_account_fetches WHERE session_id=s AND platform=p_platform AND account=p_account FOR UPDATE;
   IF p_refresh IS NOT NULL THEN
@@ -248,19 +254,20 @@ BEGIN
   ELSIF f.state<>'failed' THEN
     RETURN jsonb_build_object('claimed',false,'fetchId',f.id,'state',f.state,'evidence',f.evidence);
   END IF;
-  UPDATE research_account_fetches SET state='in_progress',execution_id=e,evidence=NULL,updated_at=clock_timestamp()
-  WHERE id=f.id RETURNING * INTO f;
-  RETURN jsonb_build_object('claimed',true,'fetchId',f.id);
+  -- Every paid attempt gets its own token, so a late result of an earlier attempt can never finish this one.
+  UPDATE research_account_fetches SET state='in_progress',execution_id=e,evidence=NULL,attempt=gen_random_uuid(),
+    updated_at=clock_timestamp() WHERE id=f.id RETURNING * INTO f;
+  RETURN jsonb_build_object('claimed',true,'fetchId',f.id,'attempt',f.attempt);
 END $$;
 
-CREATE OR REPLACE FUNCTION public.research_account_fetch_finish(a uuid, p_fetch uuid, p_state text, p_evidence jsonb) RETURNS void
-LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
+CREATE OR REPLACE FUNCTION public.research_account_fetch_finish(a uuid, p_fetch uuid, p_attempt uuid, p_state text, p_evidence jsonb)
+RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
 BEGIN
   IF p_state NOT IN ('succeeded','unknown','failed') THEN RAISE EXCEPTION 'RESEARCH_FETCH_INVALID';END IF;
   UPDATE research_account_fetches SET state=p_state,evidence=p_evidence,updated_at=clock_timestamp()
-  WHERE id=p_fetch AND actor_id=a AND state='in_progress';
-  IF NOT FOUND AND NOT EXISTS(SELECT 1 FROM research_account_fetches WHERE id=p_fetch AND actor_id=a AND state=p_state
-    AND evidence IS NOT DISTINCT FROM p_evidence) THEN RAISE EXCEPTION 'RESEARCH_FETCH_CONFLICT';END IF;
+  WHERE id=p_fetch AND actor_id=a AND attempt=p_attempt AND state='in_progress';
+  IF NOT FOUND AND NOT EXISTS(SELECT 1 FROM research_account_fetches WHERE id=p_fetch AND actor_id=a AND attempt=p_attempt
+    AND state=p_state AND evidence IS NOT DISTINCT FROM p_evidence) THEN RAISE EXCEPTION 'RESEARCH_FETCH_CONFLICT';END IF;
 END $$;
 
 -- The "refresh" button: only for an account this session has already fetched successfully.
@@ -287,7 +294,8 @@ BEGIN
   UPDATE research_plans SET session_id=s,execution_id=e,discovery_id=p_discovery WHERE id=p.id AND session_id IS NULL;
   IF p_operation IS NOT NULL THEN
     IF NOT EXISTS(SELECT 1 FROM research_operations o WHERE o.id=p_operation AND o.plan_id=p.id)
-     OR NOT EXISTS(SELECT 1 FROM bill2_calls c JOIN bill2_runs r ON r.id=c.run_id WHERE c.id=p_call AND r.actor_id=a AND c.call_kind='tool')
+     OR NOT EXISTS(SELECT 1 FROM bill2_calls c JOIN bill2_runs r ON r.id=c.run_id JOIN runtime_executions x ON x.billing_run_id=r.id
+       WHERE c.id=p_call AND r.actor_id=a AND c.call_kind='tool' AND x.id=e)
     THEN RAISE EXCEPTION 'RESEARCH_LINK_CONFLICT';END IF;
     UPDATE research_operations SET bill2_call_id=p_call WHERE id=p_operation AND bill2_call_id IS NULL;
     IF NOT EXISTS(SELECT 1 FROM research_operations WHERE id=p_operation AND bill2_call_id=p_call) THEN RAISE EXCEPTION 'RESEARCH_LINK_CONFLICT';END IF;
@@ -360,7 +368,7 @@ DO $$ DECLARE f text; BEGIN
   FOREACH f IN ARRAY ARRAY['research_card_create(uuid,uuid,uuid,uuid,jsonb)','research_card_confirm(uuid,uuid,jsonb)',
     'research_confirmation_read(uuid,uuid,uuid)','research_user_message(uuid,uuid,uuid)',
     'research_discovery_start(uuid,uuid,uuid,uuid,text[])','research_discovery_save(uuid,uuid,uuid,jsonb,text)',
-    'research_account_fetch_claim(uuid,uuid,uuid,text,text,uuid)','research_account_fetch_finish(uuid,uuid,text,jsonb)',
+    'research_account_fetch_claim(uuid,uuid,uuid,text,text,uuid)','research_account_fetch_finish(uuid,uuid,uuid,text,jsonb)',
     'research_refresh_create(uuid,uuid,text,text)','research_runtime_link(uuid,uuid,uuid,uuid,uuid,uuid,uuid)'] LOOP
     EXECUTE format('REVOKE ALL ON FUNCTION public.%s FROM PUBLIC,anon,authenticated',f);
     EXECUTE format('GRANT EXECUTE ON FUNCTION public.%s TO service_role',f);
