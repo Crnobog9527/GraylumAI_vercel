@@ -47,7 +47,10 @@ export function Statement({ event, names }: { event: JuryEvent; names: JurySeatN
             <span>{event.section}</span>
             <span className={styles.perspective}>从「{event.perspective}」的角度看</span>
           </p>
-          <p className={styles.quote}>{event.problem}</p>
+          <dl className={styles.issueBody}>
+            <div><dt>为什么</dt><dd className={styles.quote}>{event.problem}</dd></div>
+            <div data-fix><dt>怎么改</dt><dd>{event.fix}</dd></div>
+          </dl>
         </article>
       );
     case 'disagreement':
@@ -64,7 +67,7 @@ export function Statement({ event, names }: { event: JuryEvent; names: JurySeatN
     case 'response':
       return (
         <article className={styles.statement} data-kind="response">
-          <Speaker seat={event.reviewer} names={names} action={`回应 ${names[event.to]}`} />
+          <Speaker seat={event.reviewer} names={names} action={`回应 ${names[event.to]}：${DECISION_LABEL[event.decision]}`} />
           <p className={styles.restateLabel}>先把对方的观点讲到最强</p>
           <p className={styles.quote}>{event.strongestView}</p>
           <p className={styles.verdictLine}>
@@ -98,7 +101,7 @@ export function Statement({ event, names }: { event: JuryEvent; names: JurySeatN
       return (
         <article className={styles.statement} data-kind="revision">
           <Speaker seat="S" names={names} action="修订稿完成" />
-          <p className={styles.quote}>改了 {event.changedSections} 个章节、{event.changedFields} 个定位字段，可以和原稿并排对比后再决定是否采用。</p>
+          <p className={styles.quote}>改了 {event.changedSections} 个章节、{event.changedFields} 个定位字段：{event.changedSectionTitles.join('、')}。</p>
         </article>
       );
     case 'revision_failed':

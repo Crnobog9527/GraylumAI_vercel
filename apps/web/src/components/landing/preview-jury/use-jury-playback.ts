@@ -25,9 +25,11 @@ export function useJuryPlayback(lengthMs: number, enabled: boolean) {
   const [playing, setPlaying] = useState(true);
   const [speed, setSpeed] = useState(1);
   const last = useRef<number | null>(null);
+  const finished = clock >= lengthMs;
 
+  // The timer only lives while playing and before the end, so a finished replay leaves nothing running.
   useEffect(() => {
-    if (!enabled || !playing) return;
+    if (!enabled || !playing || finished) return;
     last.current = performance.now();
     const timer = window.setInterval(() => {
       const time = performance.now();
@@ -39,9 +41,8 @@ export function useJuryPlayback(lengthMs: number, enabled: boolean) {
       window.clearInterval(timer);
       last.current = null;
     };
-  }, [enabled, playing, speed, lengthMs]);
+  }, [enabled, playing, finished, speed, lengthMs]);
 
-  const finished = clock >= lengthMs;
   const restart = useCallback(() => {
     setClock(0);
     setPlaying(true);

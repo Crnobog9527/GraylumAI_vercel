@@ -48,6 +48,16 @@ describe('mock events follow the FUSION-REVIEW §2.2a contract', () => {
     }
   });
 
+  it('says why and how to fix every issue, names the decision of every response and lists the changed sections', () => {
+    for (const scenario of JURY_SCENARIOS) {
+      for (const event of scenario.arrivals.flatMap(arrival => arrival.events)) {
+        if (event.type === 'issue') expect(event.fix.length).toBeGreaterThan(0);
+        if (event.type === 'response') expect(['positioning', 'audience', 'platform', 'monetization']).toContain(event.decision);
+        if (event.type === 'revision_ready') expect(event.changedSectionTitles).toHaveLength(event.changedSections);
+      }
+    }
+  });
+
   it('has no disagreement or response when the reviewers agree, and no ruling when the revision fails', () => {
     const consensus = events('consensus').map(event => event.type);
     expect(consensus).not.toContain('disagreement');

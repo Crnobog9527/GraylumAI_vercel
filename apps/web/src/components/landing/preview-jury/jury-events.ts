@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 
 /**
- * Review-process events, shaped after FUSION-REVIEW.md §2.2a (fusionReview.events → { events, ended }, each with a fixed id).
+ * Review-process events, shaped after FUSION-REVIEW.md §2.2a (contract v3) (fusionReview.events → { events, ended }, each with a fixed id).
  * The prototype only replays mock events of these shapes; nothing here calls the backend or a model.
  * Events carry only seat codes (A/B/C, the summary is S); names come from fusionReview.panel(), never from a model.
  */
@@ -19,13 +19,19 @@ export type JuryEvent = Base & (
     type: 'decision'; round: 1 | 2; reviewer: Seat; decision: DecisionKey;
     strongestCase: string; strongestAlternative: string; verdict: Verdict;
   }
-  | { type: 'issue'; round: 1 | 2; reviewer: Seat; section: string; perspective: string; severity: Severity; problem: string }
+  | {
+    type: 'issue'; round: 1 | 2; reviewer: Seat; section: string; perspective: string; severity: Severity;
+    /** Why it is a problem. */ problem: string; /** How to fix it. */ fix: string;
+  }
   | { type: 'reviewer_failed'; round: 1 | 2; reviewer: Seat; reason: 'format' | 'no_delivery' | 'stopped' }
   | { type: 'disagreement'; decision: DecisionKey; keep: Seat[]; change: Seat[] }
-  | { type: 'response'; round: 2; reviewer: Seat; to: Seat; strongestView: string; stance: 'agree' | 'disagree' }
+  | {
+    type: 'response'; round: 2; reviewer: Seat; to: Seat; decision: DecisionKey; strongestView: string;
+    stance: 'agree' | 'disagree';
+  }
   | { type: 'summary_started'; round: 1 | 2 }
   | { type: 'adjudication'; issue: string; reviewers: Seat[]; single: boolean; adopted: boolean; reason: string }
-  | { type: 'revision_ready'; changedSections: number; changedFields: number; revisionId: string }
+  | { type: 'revision_ready'; changedSections: number; changedSectionTitles: string[]; changedFields: number; revisionId: string }
   | { type: 'revision_failed'; reason: string }
   | { type: 'review_ended'; state: string; outcome: string }
 );

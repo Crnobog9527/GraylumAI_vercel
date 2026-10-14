@@ -35,6 +35,7 @@ function FeedLine({ event, names }: { event: JuryEvent; names: JurySeatNames }) 
             <span className={styles.severity} data-severity={event.severity}>{SEVERITY_LABEL[event.severity]}</span>
             <span>{event.section}</span></p>
           <p className={styles.feedText}>{event.problem}</p>
+          <p className={styles.feedFix}>怎么改：{event.fix}</p>
           <p className={styles.feedMeta}>{names[event.reviewer]}，从「{event.perspective}」的角度看</p>
         </>
       );
@@ -47,7 +48,7 @@ function FeedLine({ event, names }: { event: JuryEvent; names: JurySeatNames }) 
       return (
         <>
           <p className={styles.feedHead}><SeatDisc seat={event.reviewer} size="sm" />{names[event.reviewer]}
-            <span>回应 {names[event.to]}：{event.stance === 'agree' ? '同意' : '不同意'}</span></p>
+            <span>回应 {names[event.to]}（{DECISION_LABEL[event.decision]}）：{event.stance === 'agree' ? '同意' : '不同意'}</span></p>
           <p className={styles.feedText}>{event.strongestView}</p>
         </>
       );
@@ -124,6 +125,9 @@ export function Outcome({ view, names }: { view: JuryView; names: JurySeatNames 
           {view.skipped.length > 0 ? '三位评审在四个关键决定上意见一致，没有开第 2 轮。' : ''}
           先和原稿并排对比，确认后再采用。
         </p>
+        <ul className={styles.changedSections} aria-label="改了哪些章节">
+          {revision.changedSectionTitles.map(title => <li key={title}>{title}</li>)}
+        </ul>
         <div className={styles.outcomeLists}>
           <div>
             <h3>采纳 {adopted.length} 条</h3>

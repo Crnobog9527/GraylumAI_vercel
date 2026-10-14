@@ -128,6 +128,11 @@
 
 .issueMeta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin: 0; font-size: 13.5px; font-weight: 600; }
 .perspective { color: var(--j-muted); font-weight: 500; }
+.issueBody { display: grid; gap: 10px; margin: 0; }
+.issueBody dt { color: var(--j-muted); font-size: 12.5px; font-weight: 600; }
+.issueBody dd { margin: 4px 0 0; }
+.issueBody div[data-fix] { padding: 12px 14px; border-left: 3px solid var(--gl-success); border-radius: 0 14px 14px 0; background: var(--gl-success-bg); }
+.issueBody div[data-fix] dd { font-size: 15px; line-height: 1.75; }
 .severity { padding: 0 8px; border-radius: 999px; font-size: 12px; font-weight: 700; line-height: 22px; white-space: nowrap; }
 .severity[data-severity='critical'] { background: var(--gl-error-bg); color: var(--gl-error); }
 .severity[data-severity='major'] { background: var(--j-gold-soft); color: var(--j-gold-text); }
@@ -200,6 +205,7 @@
 .feedHead > span:last-child { color: var(--j-muted); font-weight: 500; }
 .feedHead .stamp { min-width: 0; padding: 0 6px; font-size: 12px; border-width: 1.5px; box-shadow: none; animation: none; }
 .feedText { margin: 0; color: var(--j-body); font-size: 13.5px; line-height: 1.65; }
+.feedFix { margin: 0; color: var(--gl-success); font-size: 13px; line-height: 1.6; }
 .feedMeta { margin: 0; color: var(--j-muted); font-size: 12px; }
 
 /* Outcome */
@@ -219,6 +225,11 @@
 .outcomeBody { display: grid; gap: 12px; }
 .outcomeTitle { margin: 0; font-family: var(--j-display); font-size: clamp(24px, 2.6vw, 32px); font-weight: 900; letter-spacing: -.02em; }
 .outcomeLede { margin: 0; color: var(--j-body); font-size: 15px; line-height: 1.75; }
+.changedSections { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.changedSections li {
+  padding: 2px 12px; border: 1px solid var(--j-gold-deep); border-radius: 999px; background: #fff; color: var(--j-gold-text);
+  font-size: 13px; font-weight: 600; line-height: 1.7;
+}
 .outcomeLists { display: grid; gap: 12px; }
 @media (min-width: 768px) { .outcomeLists { grid-template-columns: 1fr 1fr; } }
 .outcomeLists h3 { margin: 0 0 4px; font-size: 14px; }
