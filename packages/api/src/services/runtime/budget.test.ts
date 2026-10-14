@@ -97,3 +97,13 @@ it('caps model work at 240s, shrinks to the shared deadline and accepts exactly 
  expect(budget.persistenceDeadline-budget.workDeadline).toBe(20000);
  expect(300000-budget.persistenceDeadline).toBe(15000);
 });
+
+it('a shorter invocation budget ends persistence at the given total and keeps the 20 s margin for work', () => {
+    let t = 0;
+    const budget = createRuntimeBudget(() => t, 30_000);
+    expect(budget.remainingPersistence()).toBe(30_000);
+    expect(() => budget.assertCanStart(9_000)).not.toThrow();
+    expect(() => budget.assertCanStart(10_000)).toThrow('RUNTIME_TIME_BUDGET_EXHAUSTED');
+    t = 30_000;
+    expect(() => budget.assertCanPersist()).toThrow('RUNTIME_TIME_BUDGET_EXHAUSTED');
+});

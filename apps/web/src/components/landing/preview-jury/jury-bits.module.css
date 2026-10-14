@@ -1,0 +1,50 @@
+/* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+/*
+ * Shared marks. Seat colours are low-saturation and only ever used for the mark, a thin rule and a faint reading
+ * tint: slate (A), moss (B), clay (C). The summary is ink on a square with a bronze rim.
+ */
+.mark {
+  --seat: var(--j-seat-a);
+  display: inline-grid; place-items: center; flex: none; width: 26px; height: 26px; border-radius: 50%;
+  background: var(--seat); color: #ffffff; font-family: var(--j-sans); font-size: 12.5px; font-weight: 600; line-height: 1;
+  box-shadow: 0 0 0 2px var(--j-paper);
+}
+.mark[data-seat='B'] { --seat: var(--j-seat-b); }
+.mark[data-seat='C'] { --seat: var(--j-seat-c); }
+.mark[data-seat='S'] {
+  --seat: var(--j-ink); border-radius: 6px; box-shadow: 0 0 0 2px var(--j-paper), 0 0 0 3px var(--j-bronze);
+}
+.mark[data-size='sm'] { width: 20px; height: 20px; font-size: 11px; }
+.mark[data-size='sm'][data-seat='S'] { border-radius: 5px; }
+.mark[data-size='lg'] { width: 34px; height: 34px; font-size: 15px; }
+
+.badge { display: inline-flex; align-items: center; gap: 7px; min-width: 0; max-width: 100%; }
+.badgeCompact { gap: 5px; }
+.name {
+  min-width: 0; overflow: hidden; color: var(--j-ink); font-size: 13.5px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap;
+}
+.badgeCompact .name { font-size: 12.5px; font-weight: 500; color: var(--j-body); }
+
+.verdict {
+  display: inline-flex; align-items: center; padding: 0 7px; border: 1px solid var(--j-rule); border-radius: 4px;
+  color: var(--j-body); font-size: 12px; font-weight: 600; line-height: 20px; white-space: nowrap;
+}
+.verdict[data-verdict='change'] { border-color: var(--j-bronze); color: var(--j-bronze); }
+
+.severity { color: var(--j-muted); font-size: 12px; white-space: nowrap; }
+.severity::before {
+  content: ''; display: inline-block; width: 6px; height: 6px; margin-right: 5px; border-radius: 50%;
+  background: currentColor; vertical-align: 1px;
+}
+.severity[data-severity='critical'] { color: var(--j-critical); font-weight: 600; }
+.severity[data-severity='major'] { color: var(--j-bronze); }
+
+.chapter { color: var(--j-muted); font-size: 12.5px; white-space: nowrap; }
+
+.seal {
+  display: inline-grid; place-items: center; padding: 1px 6px; border: 1.5px solid var(--j-ink); border-radius: 3px;
+  color: var(--j-ink); font-size: 11.5px; font-weight: 700; letter-spacing: .08em; line-height: 16px; white-space: nowrap;
+  transform: rotate(-4deg);
+}
+.seal[data-adopted='false'] { border-color: var(--j-muted); color: var(--j-muted); }
+.sealLarge { padding: 3px 9px; font-size: 13px; border-width: 2px; }

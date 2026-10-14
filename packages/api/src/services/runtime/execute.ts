@@ -7,11 +7,11 @@ import {billingClaimNotice,claimNoticeFields} from './claimNotice';
 import {stoppedCompletion} from './stoppedCompletion';
 import {NativeSession} from './nativeSession';
 import {NativeProgressProjection} from './nativeProgress';
-import {nativeVisible,nativeMetadata,prepareNativePrimary,nativeFrameProjection,
+import {visibleText,nativeMetadata,prepareNativePrimary,nativeFrameProjection,
  completedOutput,finalizeNativeSummary} from './nativeOutput';
 import {paygOwnerDatabase} from './paygOwner';
 import {executorRpc,historyGuard,terminalReplyGuard,recoverExecutorFinancial,
- preflightCodes,platformFailureReason,hash,progressEmitter,diagnosticCode,type RuntimeExecutorOptions} from './executorRpc';
+ preflightCodes,platformFailureReason,hash,progressEmitter,diagnosticCode,failBeforeDispatch,cancelWithCode,type RuntimeExecutorOptions} from './executorRpc';
 import {fitNativeRequestOutput,runtimePaygCall, type ResumeInput, type PaygWait, type PaygPosition} from './paygRuntime';
 import {beginPaygExecution, type RuntimeExecution} from './paygResume';
 import {PROMPT_CACHE_OVERHEAD_BYTES} from './promptCache';
@@ -25,7 +25,7 @@ import {logger} from '../../lib/logger';
 import {recoverOpenRouterHistory,latestHistoryTurn,assertLatestHistoryRetained} from './historyRecovery';
 import {projectOpenRouterItemsForSizing} from './openRouterHistory';
 import {AGENT_TURN_REQUEST_FORMAT,validReasoningFormat,
- STREAMING_FORMATS,historyToolNames,openRouterRequestBody} from './providerRequest';
+ PLAIN_TEXT_STREAM,streamsPrimary,historyToolNames,openRouterRequestBody} from './providerRequest';
 import {cardSources, groundedCardTool, groundedCardToolBytes, rejectSeparateCardProse} from './groundedCard';
 import {agentTurnResult} from './agentTurnResult';
 import {askQuestionTool,askQuestionToolBytes,questionMessageFromArguments,QUESTION_CONTRACT,READ_HISTORY_TOOL} from './agentTools';
@@ -86,8 +86,10 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
   const grounded=Boolean(context.hostTurnContext?.cardContract);
   let sources=cardSources(context.input,[]);
   const native=Boolean(context.nativeOutput);
-  const nativeProgress=native&&(agentTurn||Boolean(context.envelopeOrder));
-  const projectionOptions={mode:agentTurn?'agent' as const:'message-first' as const,
+  // A plain-text stream (CHAT-NATIVE-OUTPUT) projects assistant text like an Agent turn, without cards.
+  const plainStream=context.textStream===PLAIN_TEXT_STREAM;
+  const nativeProgress=native&&(agentTurn||Boolean(context.envelopeOrder)||plainStream);
+  const projectionOptions={mode:agentTurn||plainStream?'agent' as const:'message-first' as const,
    toolMessage:agentTurn&&fiveFields&&!grounded,appendCard:Boolean(context.mentorText)};
   let projection=new NativeProgressProjection(projectionOptions);
   let primaryLength=false;
@@ -107,8 +109,8 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
   let waitPoint:{epoch:number;sequence:number;requestHash:string;phase:string;state:PaygWait['state']}|undefined;
   let gateRejection:GateRejection|undefined;
   const checkAgentReply=terminalReplyGuard(agentTurn,context.tools.includes(ASK_QUESTION_TOOL),()=>{terminalReplyFailure=true;},Boolean(context.skillFile),Boolean(context.historyRead));
-  let preflightFailure:string|undefined;
-  const streaming=STREAMING_FORMATS.has(context.providerRequestFormat??'');
+  let preflightFailure:string|undefined,transportFailureCode:string|undefined;
+  const streaming=streamsPrimary(context);
   // B2a: once BILL2 reports a confirmed erasure, nothing more reaches the client.
   let accountClosed=false;
   const closed=():never=>{accountClosed=true;throw new Error('RUNTIME_ACCOUNT_CLOSED');};
@@ -210,6 +212,7 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
      return selectedPolicy.protocol==='openrouter-chat-v1' ? {usage:{sdkResponse:decoded}} : decoded;
     }catch(error){
      claimNotice??=billingClaimNotice(error);
+     transportFailureCode??=diagnosticCode(error);// first original code: the SDK wraps transport errors
      // Retain exact pre-dispatch diagnostics outside SDK wrapping, without private data.
      if(selectedPolicy.protocol==='openrouter-chat-v1'&&error instanceof Error&&preflightCodes.has(error.message))
       {preflightFailure=error.message;logger.error('api','runtime_provider_preflight_failed',{executionId,code:error.message});}
@@ -375,7 +378,7 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
     const fitted=prepareNativePrimary(body,turnMetadata,{envelopeOrder:context.envelopeOrder,appendCard:Boolean(context.mentorText),
       length:primaryLength,attachedOrganizer:Boolean(context.attachedOrganizer),executionId});
      body=fitted.body;turnMetadata=fitted.metadata;
-    if(nativeProgress){const final=projection.finish(nativeVisible(body));if(final)progress(final);}
+    if(nativeProgress){const final=projection.finish(visibleText(body,context));if(final)progress(final);}
     if(turn?.card&&JSON.parse(body).card)progress({type:'card',card:JSON.parse(body).card});
    }
    if(nativeProgress&&!accountClosed&&!moderationBlocked){const done=await finishStop(executionId,onProgress,undefined,execution.live);if(done)return done;}
@@ -462,9 +465,9 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
    }
    const capacity=error instanceof Error&&['RUNTIME_REQUIRED_CONTEXT_EXCEEDS_CAPACITY','RUNTIME_COMPLETE_REQUEST_EXCEEDS_CAPACITY'].includes(error.message);
    if((transportNotStarted||providerRejected)&&execution.live){
-    // The original grant was atomically revoked and BILL2 finalized. Reuse
-    // normal cancellation to synchronize this execution and release Session.
-    const stopped=await ownerRpc<{state:'cancelled'|'completed'|'cost_pending'}>('runtime_cancel',args).catch(()=>null);
+    // The grant was atomically revoked and BILL2 finalized; a never-started v1 transport also records why (0248).
+    const stopped=await (transportNotStarted&&!isPayg?cancelWithCode(ownerRpc,args,transportFailureCode??diagnosticCode(error))
+     :ownerRpc<{state:'cancelled'|'completed'|'cost_pending'}>('runtime_cancel',args)).catch(()=>null);
     if(stopped){
      const billingState=providerRejected?await billing.readRun(execution.runId).catch(()=>null):null;
      const noCharge=billingState?.chargedCredits===0&&['refunded','settled'].includes(billingState.state);
@@ -472,9 +475,8 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
     }
    }
    if(!execution.live)return {state:'pending' as const,...(capacity?{unavailable:'capacity' as const}:{})};
-   logger.error('api','runtime_pre_dispatch_failed',{executionId,code:diagnosticCode(error)});
-   const failed=await ownerRpc<{state:string}>('runtime_execution',{...args,p_action:'fail_before_dispatch',
-    ...(preflightFailure==='RUNTIME_PROVIDER_HISTORY_DENIED'?{p_result:{unavailable_reason:'provider_history'}}:{})}).catch(()=>null);
+   const failed=await failBeforeDispatch(ownerRpc,args,preflightFailure??transportFailureCode??diagnosticCode(error),
+    preflightFailure==='RUNTIME_PROVIDER_HISTORY_DENIED');
    if(failed?.state==='cancelled'){
     const unavailable:GateRejection|'provider_history'|'preflight'|'capacity'|undefined=gateRejection??(preflightFailure?
      preflightFailure==='RUNTIME_PROVIDER_HISTORY_DENIED'?'provider_history':'preflight':capacity?'capacity':undefined);

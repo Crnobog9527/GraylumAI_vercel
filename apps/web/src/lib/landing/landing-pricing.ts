@@ -7,8 +7,9 @@ import type { LandingFeature } from './landing-flags';
 /**
  * Price cards for the landing page in the paywall v25 card format (offer final 2026-10-13, section 4b):
  * big current price, struck-out original, tag, saving, renewal text under the button, who it fits.
- * Every number comes from the server. The Gold first-month price and the founder offer have no public
- * server answer yet; until one is passed in, those parts are not shown (never a hard-coded $49 or $496).
+ * Every number comes from the server: plans from the catalog, the Gold first month and the founder offer from
+ * settings.getPublicOffers (landing-offers.ts). When one is not passed in, that part is not shown (never a hard-coded
+ * $49 or $496).
  */
 export type LandingOffers = {
   goldFirstMonth?: number | null;
@@ -42,6 +43,8 @@ export type LandingCard = {
 export type LandingPricing = {
   cards: LandingCard[];
   yearlyBadge: string | null;
+  // The badge once the founder card is gone (the page drops it when the live seat count reaches 0).
+  yearlyBadgeWithoutFounder: string | null;
   founderOpen: boolean;
   proMonthly: number | null;
 };
@@ -137,20 +140,22 @@ export function buildLandingPricing(source: readonly PaywallPlanSource[] | undef
   const founderOpen = Boolean(gold && founder && usable(founder.price) && founder.available > 0);
   if (gold && founder && founderOpen) {
     const text = CARD_TEXT.founder;
-    const yearly = yearlyQuote(gold.price.monthly, founder.price, '创始会员 · 终身 6 折',
-      `首年 ${formatUsd(founder.price)}，之后每年按当时 Gold 月付×12 的 6 折续费，调价会提前通知，可随时取消`);
+    const yearly = yearlyQuote(gold.price.monthly, founder.price, '创始会员 · 6 折',
+      `首年 ${formatUsd(founder.price)}；只要连续续费，一直按 Gold 价格的 6 折，目前每年 ${formatUsd(founder.price)}，可随时取消`);
     cards.push({
       key: 'founder', name: text.name, recommended: false, result: text.result, fit: text.fit, cta: text.cta,
       checkoutReady: { monthly: false, yearly: true },
       quotes: { monthly: null, yearly }, missingNote: { monthly: '（创始会员只有年付）' },
     });
-    savings.push(savingPercent(gold.price.monthly, founder.price));
   }
 
-  const best = Math.max(0, ...savings);
+  const badge = (percent: number) => (percent > 0 ? `最高省 ${percent}%` : null);
+  const withoutFounder = Math.max(0, ...savings);
+  const best = founderOpen && gold && founder ? Math.max(withoutFounder, savingPercent(gold.price.monthly, founder.price)) : withoutFounder;
   return {
     cards,
-    yearlyBadge: best > 0 ? `最高省 ${best}%` : null,
+    yearlyBadge: badge(best),
+    yearlyBadgeWithoutFounder: badge(withoutFounder),
     founderOpen,
     proMonthly: pro ? pro.price.monthly : null,
   };
@@ -159,7 +164,8 @@ export function buildLandingPricing(source: readonly PaywallPlanSource[] | undef
 /** Prices for the SoftwareApplication JSON-LD; the same numbers the cards show. */
 export function landingOfferList(pricing: LandingPricing) {
   const offers = [{ name: '免费', price: 0 }];
-  for (const card of pricing.cards) {
+  // The founder offer sells out between hourly rebuilds of the cached JSON-LD, so it is never listed there.
+  for (const card of pricing.cards.filter(item => item.key !== 'founder')) {
     for (const cycle of ['monthly', 'yearly'] as const) {
       const quote = card.quotes[cycle];
       if (!quote) continue;

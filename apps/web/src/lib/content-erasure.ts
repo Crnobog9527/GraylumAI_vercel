@@ -146,6 +146,24 @@ export function forgetLocalCopies(ids: string[], stores: Array<Storage | null | 
   }
 }
 
+/** This tab's "返回当前工作" link target (set by WorkspaceFrame, read by the start page). */
+export const WORK_RETURN_KEY = 'opc-work-return';
+
+/**
+ * Drops the "返回当前工作" link when it points at deleted content. Called when the row is hidden, before the
+ * page leaves, so the page it lands on never offers a link back to what was just deleted.
+ */
+export function forgetWorkReturn(ids: string[], store: Storage | null | undefined) {
+  const wanted = ids.filter(Boolean);
+  if (!store || !wanted.length) return;
+  try {
+    const target = store.getItem(WORK_RETURN_KEY) ?? '';
+    if (wanted.some((id) => target.includes(id))) store.removeItem(WORK_RETURN_KEY);
+  } catch {
+    // Storage can be unavailable in private modes; the link then simply is not shown.
+  }
+}
+
 export const ERASURE_CHANNEL = 'graylum-content-erasure';
 
 /** Tells other open tabs to refetch, so deleted content disappears there too. */

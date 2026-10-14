@@ -4,7 +4,7 @@ import {randomUUID} from 'node:crypto';
 import {rpc} from '../erasure-b2a/cases.mjs';
 
 export async function createFixture(db,options={}) {
-  const {credits=100,q='1000',multiplier='1',threshold=1,lookupSupported=false} = options;
+  const {credits=100,q='1000',multiplier='1',threshold=1,lookupSupported=false,phase='question'} = options;
   const actor = options.actor ?? randomUUID();
   const provider = options.empirical?'openrouter':'fixture';
   const protocol = options.empirical?'openrouter-chat-v1':'fixture-cost-v1';
@@ -28,8 +28,8 @@ export async function createFixture(db,options={}) {
     tiers:options.tiers??[{minPromptTokens:0,prompt:'1',completion:'0',request:'0'}],timeOfDay:options.timeOfDay??[]};
   const identity = {policyId:'payg-local',profileVersion:'local-v1',evidenceVersion:'local-v1',
     pricingHash,endpointTag,nominalPricing,templateTokens,marginTokens};
-  const payg = {...identity,version:'v1',admissionPath:options.empirical?'empirical':'fixture',maxBytes:196608,maxMessages:32,maxTools:2,
-    maxSchemaBytes:16384,purposes:['question'],expiresAt:new Date(Date.now()+3600000).toISOString()};
+  const payg = {...identity,version:'v1',admissionPath:options.empirical?'empirical':'fixture',maxBytes:196608,maxMessages:32,maxTools:options.maxTools??2,
+    maxSchemaBytes:16384,purposes:[phase],expiresAt:new Date(Date.now()+3600000).toISOString()};
   const quote = {...identity,policyVersion:'v1',bytes,promptTokensUpper,messages:1,tools:0,schemaBytes:0};
   const promptPrice = options.promptPrice??'1';
   const completionPrice = options.completionPrice??'0';
@@ -40,7 +40,7 @@ export async function createFixture(db,options={}) {
     providerLimits:{providerSlug:endpointTag,contextTokens:100000,promptUsdPerMillion:promptPrice,
       completionUsdPerMillion:completionPrice,requestUsd:requestPrice}};
   const policy = {...base,modelId,multiplier,payg};
-  const claimPayload = {...base,phase:'question',requestHash:'b'.repeat(64),
+  const claimPayload = {...base,phase,requestHash:'b'.repeat(64),
     billingUnit:{modelId,multiplier},payg:quote};
   const policies = [policy];
   const claimPayloads = [claimPayload];
@@ -61,7 +61,7 @@ export async function createFixture(db,options={}) {
   await db.query(`INSERT INTO system_settings(key,value) VALUES('billing_payg_start_thresholds',$1::jsonb)
     ON CONFLICT(key) DO UPDATE SET value=jsonb_set(system_settings.value,'{thresholds}',
       coalesce(system_settings.value->'thresholds','[]')||(excluded.value->'thresholds'))`,
-  [{version:'local-v1',thresholds:policies.map(p=>({model:p.model,purpose:'question',credits:threshold}))}]);
+  [{version:'local-v1',thresholds:policies.map(p=>({model:p.model,purpose:phase,credits:threshold}))}]);
   if (options.empirical) {
     const windowId=randomUUID();
     payload.mode='staging_test';

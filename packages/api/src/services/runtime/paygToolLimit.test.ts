@@ -31,9 +31,16 @@ const request = (tools: RuntimeTool[]) => JSON.stringify({ model: 'model', messa
     parameters: z.toJSONSchema(tool.parameters!) } })) });
 const card = askQuestionTool(true), file = skillFileTool(async () => ''), history = mentorHistoryTool(async () => '');
 
-it('#878 regression: card, Skill file and history exceed the PAYG tool ceiling and are refused before any claim', () => {
-  expect(PAYG_MAX_TOOLS).toBe(2);
+it('#878 regression: a 2-tool profile still refuses card, Skill file and history before any claim', () => {
   expect(() => runtimePaygCall(request([card, file, history]), 'ordinary', policy, rules, 1)).toThrow('BILL2_INPUT_PROFILE_INVALID');
+});
+
+it('B1 (0250): a 3-tool profile accepts the full mentor turn with the history read', () => {
+  expect(PAYG_MAX_TOOLS).toBe(3);
+  const three = { ...policy, payg: { ...policy.payg!, maxTools: 3 } };
+  const { call } = runtimePaygCall(request([card, file, history]), 'ordinary', three, rules, 1);
+  expect(call.payg?.tools).toBe(3);
+  expect(() => runtimePaygCall(request([card, file, history, card]), 'ordinary', three, rules, 1)).toThrow('BILL2_INPUT_PROFILE_INVALID');
 });
 
 it('the PAYG mentor turn without the history read is accepted for dispatch', () => {

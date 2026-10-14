@@ -59,6 +59,11 @@ vi.mock('@repo/api/src/services/stripeFulfillment', () => ({
   upsertPaymentOrderBySession: routeMocks.upsertPaymentOrderBySession,
 }));
 
+// Card / wallet method orders are covered in services/__tests__/stripeWebhookRoute.test.ts.
+vi.mock('@repo/api/src/services/payments/walletWebhook', () => ({ recoverMethodCheckout: vi.fn().mockResolvedValue(null) }));
+vi.mock('@repo/api/src/services/payments/cardSubscriptionWebhook', () => ({
+  handleCardSubscriptionInvoice: vi.fn().mockResolvedValue(false), handleCardSubscriptionState: vi.fn().mockResolvedValue(false) }));
+vi.mock('@repo/api/src/services/payments/cardRefundWebhook', () => ({ handleCardRefund: vi.fn().mockResolvedValue(false) }));
 vi.mock('@/lib/server-log', () => ({
   logServerError: routeMocks.logServerError,
 }));
