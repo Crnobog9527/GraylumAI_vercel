@@ -17,19 +17,19 @@ describe('plan buttons', () => {
     expect(methodPlanAction({ level: 'pro', price: 29, checkoutReady: false, current: null })).toMatchObject({ label: '暂不可购买' });
     expect(methodPlanAction({ level: 'pro', price: 0, checkoutReady: true, current: null })).toMatchObject({ disabled: true });
     // A paid entitlement without a paid order row here (renewal grace, older subscription): no second purchase.
-    expect(methodPlanAction({ level: 'gold', ...ready, current: null, entitlementLevel: 'pro' }))
+    expect(methodPlanAction({ level: 'gold', ...ready, now: NOW, current: null, entitlementLevel: 'pro' }))
       .toMatchObject({ kind: 'none', label: '会员仍在有效期内', disabled: true });
-    expect(methodPlanAction({ level: 'gold', ...ready, current: null, entitlementLevel: 'free' })).toMatchObject({ kind: 'buy' });
+    expect(methodPlanAction({ level: 'gold', ...ready, now: NOW, current: null, entitlementLevel: 'free' })).toMatchObject({ kind: 'buy' });
   });
   it('turns Gold into an upgrade of the Pro subscription, and never sells a second same or lower plan', () => {
     const pro = row();
-    expect(methodPlanAction({ level: 'gold', ...ready, current: pro }))
+    expect(methodPlanAction({ level: 'gold', ...ready, now: NOW, current: pro }))
       .toEqual({ kind: 'upgrade', label: '升级到 Gold', disabled: false, priorSubscriptionId: pro.subscription_id });
     expect(methodPlanAction({ level: 'pro', ...ready, current: pro })).toMatchObject({ label: '当前方案', disabled: true });
-    expect(methodPlanAction({ level: 'gold', ...ready, current: row({ auto_renew: false, cancel_at_period_end: true }) }))
+    expect(methodPlanAction({ level: 'gold', ...ready, now: NOW, current: row({ auto_renew: false, cancel_at_period_end: true }) }))
       .toMatchObject({ kind: 'none', label: 'Pro 已停止续费，到期后可开通 Gold', disabled: true });
     // A one-time (wallet) Pro never renewed in the first place; the server allows its upgrade.
-    expect(methodPlanAction({ level: 'gold', ...ready, current: row({ auto_renew: false, payment_method: 'wechat_pay' }) }))
+    expect(methodPlanAction({ level: 'gold', ...ready, now: NOW, current: row({ auto_renew: false, payment_method: 'wechat_pay' }) }))
       .toMatchObject({ kind: 'upgrade' });
     expect(methodPlanAction({ level: 'pro', ...ready, current: row({ purchase_membership_level: 'gold' }) }))
       .toMatchObject({ label: '已是更高等级会员', disabled: true });
@@ -62,4 +62,25 @@ it('reads only well-formed landing-page buy links', () => {
   expect(read('buy=gold&cycle=yearly')).toEqual({ level: 'gold', cycle: 'yearly' });
   expect(read('buy=pro&cycle=monthly')).toEqual({ level: 'pro', cycle: 'monthly' });
   for (const query of ['', 'buy=gold', 'buy=free&cycle=monthly', 'buy=gold&cycle=weekly', 'cycle=yearly']) expect(read(query)).toBeNull();
+});
+
+describe('renewal states (backend inGrace, payment_channel)', () => {
+  const later = '2026-12-14T12:00:00Z';
+  it('treats a grace-period subscription as the current membership and waits for the renewal', () => {
+    const grace = row({ entitlement_end: '2026-10-13T20:00:00Z', inGrace: true });
+    expect(currentMethodMembership([grace], NOW)).toBe(grace);
+    expect(methodPlanAction({ level: 'gold', ...ready, now: NOW, current: grace })).toMatchObject({ label: '续费处理中，请稍后再看', disabled: true });
+    expect(describeMethodMembership(grace).status).toContain('正在等待续费扣款，24 小时内会员权益保留');
+  });
+  it('sends a renewing Waffo Pro to a ticket instead of a card upgrade', () => {
+    expect(methodPlanAction({ level: 'gold', ...ready, now: NOW, current: row({ entitlement_end: later, payment_channel: 'waffo' }) }))
+      .toMatchObject({ label: '旧订阅升级请提交工单', disabled: true });
+  });
+  it('waits for the renewal in the last 48 h 31 min of a renewing Pro', () => {
+    const soon = row({ entitlement_end: new Date(NOW + 47 * 3600_000).toISOString() });
+    expect(methodPlanAction({ level: 'gold', ...ready, now: NOW, current: soon }))
+      .toMatchObject({ label: '临近续费日，续费完成后可升级', disabled: true });
+    expect(methodPlanAction({ level: 'gold', ...ready, now: NOW, current: row({ entitlement_end: later, payment_channel: 'stripe' }) }))
+      .toMatchObject({ kind: 'upgrade' });
+  });
 });
