@@ -6,13 +6,15 @@ import type {RuntimeTool} from './runner';
 
 /** Interactive Agent turn tools (AC-1). Only the `agent-turn-v5-stream`
  * request format may carry them, and only when its frozen context lists them.
- * `read_skill_file` is available only with a frozen package binding and bounded continuation. */
+ * `read_skill_file` is available only with a frozen package binding and bounded continuation;
+ * `read_history` (R4) only shares that continuation: one read per turn. */
 export const READ_SKILL_FILE_TOOL='read_skill_file';
-export const AGENT_TOOL_NAMES:ReadonlySet<string>=new Set([ASK_QUESTION_TOOL,READ_SKILL_FILE_TOOL]);
+export const READ_HISTORY_TOOL='read_history';
+export const AGENT_TOOL_NAMES:ReadonlySet<string>=new Set([ASK_QUESTION_TOOL,READ_SKILL_FILE_TOOL,READ_HISTORY_TOOL]);
 /** The only tool of the older formats. */
 export const SOURCE_TOOL_NAMES:ReadonlySet<string>=new Set(['read_source']);
 /** At most this many tool definitions in one new-format request. */
-export const MAX_AGENT_TOOLS=2;
+export const MAX_AGENT_TOOLS=3;
 /** Stream parsing for an Agent turn response: its tool names, and up to eight
  * indexed calls kept as evidence (the Runtime executes only the first). */
 export const AGENT_STREAM_TOOLS=Object.freeze({toolNames:AGENT_TOOL_NAMES,maxCalls:8,retainUnknownNames:true});

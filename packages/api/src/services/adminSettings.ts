@@ -1,4 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import { FUSION_SETTINGS_KEY } from './fusion/settings';
 import { z } from 'zod';
 import { logger } from '../lib/logger';
 import { PAYG_START_THRESHOLDS_KEY } from './bill2/settingKeys';
@@ -17,7 +18,7 @@ import { MODEL_IDENTITY_GUARD_KEY } from './modelIdentity/guardSetting';
 const dedicatedSettingKeys = new Set([
   PAYMENT_CHANNEL_KEY, PAYG_HOST_SETTING, REPORT_SETTING, RUNTIME_RATE_LIMIT_KEY, PURPOSE_BUDGET_KEY,
   PROVIDER_PRICES_KEY, ABSORB_CONFIG_KEY, ABSORB_ACK_KEY, PAYG_START_THRESHOLDS_KEY, STOP_LOSS_KEY,
-  MODEL_IDENTITY_GUARD_KEY, PAYMENT_METHOD_ROUTES_KEY,
+  MODEL_IDENTITY_GUARD_KEY, PAYMENT_METHOD_ROUTES_KEY, FUSION_SETTINGS_KEY,
   // Read by methodPayments checkout; the settings page has no field for it.
   'payment_terms_version',
 ]);

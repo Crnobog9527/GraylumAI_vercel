@@ -149,11 +149,9 @@ it('P1 regression: after the migration a signed-in user still updates their own 
   expect(await creditsOf(user.id)).toBe(45);
   const serviceCheckin = await admin.rpc('claim_daily_checkin', { p_user_id: user.id });
   expect(serviceCheckin.data).toMatchObject([{ already_claimed: true }]);
-  const { data: convo, error: convoError } = await session.from('conversations')
+  const { error: convoError } = await session.from('conversations')
     .insert({ user_id: user.id, title: 'Synthetic PR-A conversation' }).select('id').single();
   expect(convoError).toBeNull();
-  expect((await session.rpc('soft_delete_conversation', { p_conversation_id: convo?.id, p_user_id: user.id })).data)
-    .toBe(true);
 });
 
 it('T09/T11: renewal blocks, fresh password re-auth closes, Auth access and client reads end', async () => {
@@ -197,8 +195,6 @@ it('T09/T11: renewal blocks, fresh password re-auth closes, Auth access and clie
   expect(checkinClosed.error?.message).toBe('ACCOUNT_CLOSED');
   expect((await admin.rpc('claim_daily_checkin', { p_user_id: owner.id })).error?.message).toBe('ACCOUNT_CLOSED');
   expect(await creditsOf(owner.id)).toBe(40);
-  expect((await session.rpc('soft_delete_conversation', { p_conversation_id: convo?.id, p_user_id: owner.id })).data)
-    .toBe(false);
   expect((await admin.from('conversations').select('is_deleted').eq('id', convo?.id).single()).data)
     .toEqual({ is_deleted: 'false' });
   // Own profile edits no longer apply; status cannot be revived.

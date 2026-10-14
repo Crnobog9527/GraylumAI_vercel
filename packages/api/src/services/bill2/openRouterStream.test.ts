@@ -187,3 +187,20 @@ it('E1 shape: v4 reasoning-only frames up to the deadline stay incomplete, unpri
   expect(transport).toHaveBeenCalledOnce();expect(transport.mock.calls[0]![1]!.body).toBe(frozen);
  }finally{timeout.mockRestore();vi.useRealTimers();}
 });
+
+it('CHAT-NATIVE-OUTPUT: the same call settles identically streamed or not (cost, final, tokens, text)',async()=>{
+ // A plain-text stream turn sends the unstreamed bytes plus stream/stream_options; settlement must not care.
+ const plainBody=JSON.stringify({...JSON.parse(body),stream:false,stream_options:undefined});
+ const json=JSON.stringify({id:'gen-stream',model:identity.model,choices:[{index:0,finish_reason:'stop',
+  message:{role:'assistant',content:'你好正文'}}],usage:{cost:0.0000012,prompt_tokens:3,completion_tokens:2,total_tokens:5}});
+ const streamed=adapterFor(async()=>new Response(wire,{headers:{'X-Generation-Id':'gen-stream'}}));
+ const buffered=adapterFor(async()=>new Response(json,{headers:{'X-Generation-Id':'gen-stream','content-type':'application/json'}}));
+ const a=streamed.evidence(await streamed.dispatch({input:body},identity),identity,'response');
+ const b=buffered.evidence(await buffered.dispatch({input:plainBody},identity),identity,'response');
+ for(const evidence of [a,b])expect(evidence).toMatchObject({final:true,providerId:'gen-stream',cost:'0.0000012'});
+ expect(a.cost).toBe(b.cost);expect(a.final).toBe(b.final);
+ const tokens=(e:typeof a)=>{const u=(e.usage as {sdkResponse?:{usage?:Record<string,unknown>}})?.sdkResponse?.usage;
+  return {prompt:u?.prompt_tokens,completion:u?.completion_tokens};};
+ expect(tokens(a)).toEqual(tokens(b));
+ expect(JSON.parse(a.rawBody).choices[0].message.content).toBe(JSON.parse(b.rawBody).choices[0].message.content);
+});
