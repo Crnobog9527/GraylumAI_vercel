@@ -81,8 +81,17 @@ describe('publish-monitor connect flow', () => {
       { providerAccountId: 'spc_other', platform: 'facebook', externalId: 'c'.repeat(32) + '.' + 'd'.repeat(32) },
     ]);
     expect(result.newAccounts).toEqual(['spc_new']);
+    // A short throttle is waited out on the same account; a long one fails the callback (retry later).
+    const throttled = provider([new Response('{}', { status: 429, headers: { 'retry-after': '1' } }),
+      json(200, { id: 'spc_new', platform: 'facebook', status: 'connected', external_id: EXTERNAL })]);
+    const waits: number[] = [];
+    await recordCallback(rpc({ publish_monitor_connect_callback: { data: { requestId: request, platform: 'facebook',
+      newAccounts: ['spc_new'], ownExisting: [], quarantined: [], ignored: [] } } }).db, throttled.deps, actor, request,
+      ['spc_new'], async ms => { waits.push(ms); });
+    expect([waits, throttled.urls.length]).toEqual([[1000], 2]);
     const busy = provider([json(429, {})]);
-    await expect(recordCallback(rpc({}).db, busy.deps, actor, request, ['spc_new'])).rejects.toThrow('PUBLISH_MONITOR_PROVIDER_BUSY');
+    await expect(recordCallback(rpc({}).db, busy.deps, actor, request, ['spc_new'], async () => {}))
+      .rejects.toThrow('PUBLISH_MONITOR_PROVIDER_BUSY');
   });
 
   it('re-reads the picked account and passes its current facts for the database to check', async () => {

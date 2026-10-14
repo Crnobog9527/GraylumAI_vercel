@@ -73,12 +73,23 @@ export async function startConnect(db: Rpc, client: ClientDeps, profileId: strin
  * Callback query parameters are only hints: every account is re-read from the provider and its current
  * external_id and platform are what the database compares (plan §4.1, principle 3).
  */
+// One authorization can import several pages at once; the shared limiter allows only a few calls per second, so the
+// callback waits out short throttles instead of failing (a retry would restart from the first account).
+const CALLBACK_WAIT_BUDGET_MS = 20_000;
+const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
 export async function recordCallback(db: Rpc, client: ClientDeps, profileId: string, requestId: string,
-  hintedAccountIds: string[]) {
+  hintedAccountIds: string[], wait: (ms: number) => Promise<unknown> = sleep) {
   const ids = [...new Set(hintedAccountIds)].filter(id => providerId.safeParse(id).success).slice(0, 200);
   const candidates = [];
+  let waited = 0;
   for (const id of ids) {
-    const account = await getAccount(client, id);
+    let account = await getAccount(client, id);
+    while (account.kind === 'rate_limited' && waited + account.retryAfterSeconds * 1000 <= CALLBACK_WAIT_BUDGET_MS) {
+      waited += account.retryAfterSeconds * 1000;
+      await wait(account.retryAfterSeconds * 1000);
+      account = await getAccount(client, id);
+    }
     if (account.kind === 'rate_limited') throw new ConnectError('PUBLISH_MONITOR_PROVIDER_BUSY', account.retryAfterSeconds);
     if (account.kind === 'rejected') continue;
     if (account.kind !== 'ok') throw new ConnectError('PUBLISH_MONITOR_PROVIDER_UNAVAILABLE');
