@@ -59,6 +59,11 @@ BEGIN
   END IF;
 
   FOREACH v_function IN ARRAY v_service_only_functions LOOP
+    -- The two invitation reward RPCs are dropped by 0264; once retired they must stay absent.
+    IF v_function LIKE 'public.atomic_%invitation%' AND to_regprocedure(v_function) IS NULL THEN
+      CONTINUE;
+    END IF;
+
     IF has_function_privilege('anon', v_function, 'EXECUTE') THEN
       RAISE EXCEPTION 'anon can execute service-only function: %', v_function;
     END IF;
