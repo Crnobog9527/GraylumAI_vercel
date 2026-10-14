@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 const mocks = vi.hoisted(() => ({ auth: vi.fn(), create: vi.fn(), deps: vi.fn(), run: vi.fn() }));
 vi.mock('@/lib/cron-auth', () => ({ validateCronRequest: mocks.auth }));
 vi.mock('@supabase/supabase-js', () => ({ createClient: mocks.create }));
-vi.mock('@repo/api/src/services/publishMonitor/postForMe/config', () => ({ postForMeDeps: mocks.deps }));
+vi.mock('@repo/api/src/services/publishMonitor/secrets', () => ({ loadPostForMeDeps: mocks.deps }));
 vi.mock('@repo/api/src/services/publishMonitor/socialMonitorJob', () => ({ runSocialMonitorJob: mocks.run }));
 import { GET } from './route';
 
@@ -14,7 +14,7 @@ beforeEach(() => {
   vi.stubEnv('NEXT_PUBLIC_SUPABASE_URL', 'https://synthetic.supabase.co');
   vi.stubEnv('SUPABASE_SERVICE_ROLE_KEY', 'synthetic-service-value');
   mocks.create.mockReturnValue({ synthetic: true });
-  mocks.deps.mockReturnValue({ synthetic: 'deps' });
+  mocks.deps.mockResolvedValue({ synthetic: 'deps' });
 });
 const call = () => GET(new Request('https://synthetic.test/api/cron/social-monitor'));
 
@@ -25,7 +25,7 @@ it('denies an unauthenticated call before any work', async () => {
 });
 
 it('skips cleanly when this environment has no Post for Me key', async () => {
-  mocks.deps.mockImplementation(() => { throw new Error('POSTFORME_NOT_CONFIGURED'); });
+  mocks.deps.mockResolvedValue(null);
   const res = await call();
   expect([res.status, await res.json()]).toEqual([200, { success: true, skipped: 'POSTFORME_NOT_CONFIGURED' }]);
   expect(mocks.run).not.toHaveBeenCalled();

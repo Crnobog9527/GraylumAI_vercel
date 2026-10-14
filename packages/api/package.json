@@ -23,7 +23,7 @@
     "./src/services/publishMonitor/connectFlow": "./src/services/publishMonitor/connectFlow.ts",
     "./src/services/publishMonitor/socialMonitorJob": "./src/services/publishMonitor/socialMonitorJob.ts",
     "./src/services/publishMonitor/webhook": "./src/services/publishMonitor/webhook.ts",
-    "./src/services/publishMonitor/postForMe/config": "./src/services/publishMonitor/postForMe/config.ts",
+    "./src/services/publishMonitor/secrets": "./src/services/publishMonitor/secrets.ts",
     "./src/services/ticketAutoClose": "./src/services/ticketAutoClose.ts",
     "./src/services/providerUtils": "./src/services/providerUtils.ts",
     "./src/services/diagnostics": "./src/services/diagnostics.ts",

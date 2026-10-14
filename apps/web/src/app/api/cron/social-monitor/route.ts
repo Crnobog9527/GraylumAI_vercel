@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
-import { postForMeDeps } from '@repo/api/src/services/publishMonitor/postForMe/config';
+import { loadPostForMeDeps } from '@repo/api/src/services/publishMonitor/secrets';
 import { runSocialMonitorJob } from '@repo/api/src/services/publishMonitor/socialMonitorJob';
 import { validateCronRequest } from '@/lib/cron-auth';
 
@@ -15,11 +15,9 @@ export async function GET(request: Request) {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!url || !key) return NextResponse.json({ error: 'Server configuration error' }, { status: 500 });
-  let deps;
-  try { deps = postForMeDeps(); } catch {
-    // No Post for Me key in this environment: nothing to clean at the provider yet.
-    return NextResponse.json({ success: true, skipped: 'POSTFORME_NOT_CONFIGURED' });
-  }
+  const deps = await loadPostForMeDeps().catch(() => null);
+  // No Post for Me key in this environment: nothing to clean at the provider yet.
+  if (!deps) return NextResponse.json({ success: true, skipped: 'POSTFORME_NOT_CONFIGURED' });
   try {
     const client = createClient(url, key, {
       auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
