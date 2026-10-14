@@ -32,5 +32,5 @@ export const memberCaps = (caps: Record<string, { credits: number; usd: string }
   if (!caps) return {};
   const own = members.map(member => caps[member.modelId] ?? { credits: 0, usd: '0' });
   const micros = own.reduce((sum, cap) => sum + Math.round(Number(cap.usd) * 1e6), 0);
-  return { maxCredits: own.reduce((sum, cap) => sum + cap.credits, 0), maxUsd: (micros / 1e6).toFixed(6) };
+  return { maxCredits: own.reduce((sum, cap) => sum + cap.credits, 0), maxUsd: (micros / 1e6).toFixed(6), memberCaps: own };
 };

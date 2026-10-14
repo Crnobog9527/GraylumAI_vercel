@@ -55,7 +55,9 @@ export async function admitFusionGroup(input: { admin: SupabaseClient; actorId: 
   /** The credits this group may hold, frozen with the estimate the user agreed to (#962 review). */
   maxCredits?: number;
   /** The provider cost bound of this group, frozen with the same estimate (decimal dollars). */
-  maxUsd?: string }): Promise<AdmittedFusionGroup> {
+  maxUsd?: string;
+  /** Each member's own frozen bounds, in member order: every run is also held to its own (#962 review). */
+  memberCaps?: Array<{ credits: number; usd: string }> }): Promise<AdmittedFusionGroup> {
   const { admin, actorId, members } = input;
   const env = input.env ?? process.env;
   if (!members.length || members.length > 16) throw new Error('FUSION_GROUP_INVALID');
@@ -113,6 +115,12 @@ export async function admitFusionGroup(input: { admin: SupabaseClient; actorId: 
     throw new Error('FUSION_ESTIMATE_EXCEEDED');
   }
   if (input.maxUsd !== undefined && runs.reduce((sum, run) => sum + decimal(run.upperUsd), 0n) > decimal(input.maxUsd)) {
+    throw new Error('FUSION_ESTIMATE_EXCEEDED');
+  }
+  // Per run too: one model's rise offset by another's fall keeps the totals, but a later retry of the cheaper seat
+  // could then push the review past its maximum.
+  if (input.memberCaps && runs.some((run, index) => { const cap = input.memberCaps![index];
+    return !cap || run.upperCredits > cap.credits || decimal(run.upperUsd) > decimal(cap.usd); })) {
     throw new Error('FUSION_ESTIMATE_EXCEEDED');
   }
   return toGroup(await rpc<unknown>(admin, 'fusion_group_admit', { ...groupArgs, p_runs: runs.map(({ requestId, payload }) => ({ requestId, payload })) }));
