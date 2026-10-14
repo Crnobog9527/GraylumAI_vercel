@@ -145,11 +145,14 @@ export default function TopicWorkspacePage() {
   const adoptedExecution = useRef('');
 
   const read = trpc.opc.read.useQuery({ draftId }, { enabled: Boolean(draftId) });
+  // A draft whose conversation was deleted is read-only: no topic workspace, conversation, polling or
+  // write starts. Everything below waits on the session, which stays empty until the read says otherwise.
+  const writable = Boolean(read.data && !read.data.conversationDeleted);
   const workspace = trpc.opc.topicWorkspace.useQuery(
     { draftId },
-    { enabled: Boolean(draftId), refetchInterval: 30000 },
+    { enabled: Boolean(draftId) && read.data?.conversationDeleted !== true, refetchInterval: 30000 },
   );
-  const sessionId = workspace.data?.bound ? workspace.data.sessionId : '';
+  const sessionId = writable && workspace.data?.bound ? workspace.data.sessionId : '';
   const view = trpc.runtime.view.useQuery(
     { sessionId },
     { enabled: Boolean(sessionId), refetchInterval: 5000 },
