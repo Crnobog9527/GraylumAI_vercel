@@ -130,7 +130,8 @@ export function ResearchToolsSettings() {
         <p>{researchToolsError(view.error, 'read')}</p>
         <Button variant="outline" onClick={() => { void view.refetch(); }}>重新读取</Button>
       </div> : !data || !draft ? <p>读取中…</p>
-        : <ResearchToolsPanel view={data} draft={draft} onChange={setDraft} onSave={() => { void onSave(); }}
+        : <ResearchToolsPanel view={data} draft={draft} onChange={next => { setNotice(null); setDraft(next); }}
+          onSave={() => { void onSave(); }}
           saving={save.isPending} notice={notice} failure={failure} />}
     </CardContent>
   </Card>;
