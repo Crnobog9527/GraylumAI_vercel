@@ -5,10 +5,11 @@ import { authoritativeBilling } from './service';
 import { localFixtureAdapter } from './fixtureAdapter';
 // Invitation rebates were retired (Owner 2026-10-14): finalizing touches only the billing RPC.
 it.each([{state:'settled',chargedCredits:7},{state:'refunded',chargedCredits:0},{state:'unknown',chargedCredits:null}])('finalizes through bill2_finalize only: %j',async state=>{
- const view={id:randomUUID(),preDeductId:randomUUID(),...state},rpc=vi.fn(async(_name:string,_args:Record<string,unknown>)=>({data:view,error:null}));
+ const view={id:randomUUID(),preDeductId:randomUUID(),...state},names:string[]=[];
+ const rpc=async(name:string)=>{names.push(name);return {data:view,error:null};};
  const api=authoritativeBilling({admin:{rpc},actor:async()=>randomUUID(),adapter:localFixtureAdapter('http://127.0.0.1:1')});
  await expect(api.finalizeRun(view.id)).resolves.toEqual(view);
- expect(rpc.mock.calls.map(call=>call[0])).toEqual(['bill2_finalize']);
+ expect(names).toEqual(['bill2_finalize']);
 });
 it('does not consume a bounded recovery claim when its full lookup cannot fit',async()=>{
  const {createRuntimeBudget}=await import('../runtime/budget');let clock=0;const budget=createRuntimeBudget(()=>clock);clock=221_000;
