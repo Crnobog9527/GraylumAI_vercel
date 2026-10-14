@@ -110,7 +110,8 @@ type WorkOutcome = 'deleted' | 'gone' | 'owner_changed' | 'disconnected' | 'owne
  */
 async function settle(client: ClientDeps, job: z.infer<typeof claimedWork>): Promise<[WorkOutcome, string | null]> {
   const current = await getAccount(client, job.providerAccountId);
-  if (gone(current)) return ['gone', null];
+  // A held deletion (publishes unresolved) stays held even when the account is already gone.
+  if (gone(current)) return [job.deleting && job.action === 'disconnect' ? 'disconnected' : 'gone', null];
   if (current.kind !== 'ok') return ['retry', errorCode(current)];
   const owner = current.value.externalId?.split('.')[0] ?? null;
   if (job.deleting) {
