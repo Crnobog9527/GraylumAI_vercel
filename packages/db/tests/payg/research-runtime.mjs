@@ -22,7 +22,8 @@ async function linkedOperation(db,f,callId,finish,identity) {
   // The operation's identity is the BILL2 call's requestHash (the same supplier request).
   const identityHash = identity ?? (await db.query("SELECT payload->>'requestHash' h FROM bill2_calls WHERE id=$1",[callId])).rows[0].h;
   const plan = randomUUID(), op = randomUUID();
-  await rpc(db,'research_transition','create',plan,f.actor,null,{budgetUnits:1000,maxOperations:1,
+  // A runtime plan is bound to its session and answer when it is created.
+  await rpc(db,'research_runtime_plan_create',f.actor,plan,f.session,f.execution,null,{budgetUnits:1000,maxOperations:1,
     operations:[{operationId:op,identityHash,maxQuoteUnits:100}]});
   const reserved = await rpc(db,'research_transition','reserve',plan,f.actor,op,{identityHash,quoteUnits:10});
   assert.equal((await rpc(db,'research_transition','dispatch',plan,f.actor,op,{token:reserved.token})).dispatch,true);
@@ -159,6 +160,12 @@ export async function researchRuntimeCases({db,Client,connectionString,report,cr
     const b = await rpc(db,'research_account_fetch_claim',f.actor,f.session,f.execution,'x','beta',null);
     await rpc(db,'research_account_fetch_finish',f.actor,b.fetchId,b.attempt,'failed',null);
     assert.equal((await rpc(db,'research_account_fetch_claim',f.actor,f.session,f.execution,'x','beta',null)).claimed,true);
+    // A failure the supplier charged for (platform cost) is never sent again in this session.
+    const charged = await rpc(db,'research_account_fetch_claim',f.actor,f.session,f.execution,'x','gamma',null);
+    await rpc(db,'research_account_fetch_dispatch',f.actor,charged.fetchId,charged.attempt);
+    await rpc(db,'research_account_fetch_finish',f.actor,charged.fetchId,charged.attempt,'failed_charged',null);
+    for (let i=0;i<2;i++)
+      assert.equal((await rpc(db,'research_account_fetch_claim',f.actor,f.session,f.execution,'x','gamma',null)).claimed,false);
     {
     const f = await session(db,createFixture);
     const g = await toolFixture(createFixture,{db,actor:f.actor});
@@ -168,6 +175,25 @@ export async function researchRuntimeCases({db,Client,connectionString,report,cr
     const own = await claimTool(db,f,1,{},false);
     await assert.rejects(linkedOperation(db,f,own.id,null,'e'.repeat(64)),/RESEARCH_LINK_CONFLICT/);
     await linkedOperation(db,f,own.id,null);
+    // A plan not created bound to this answer (a plain research plan) can never be linked afterwards.
+    const loose = randomUUID(), looseOp = randomUUID();
+    await rpc(db,'research_transition','create',loose,f.actor,null,{budgetUnits:1000,maxOperations:1,
+      operations:[{operationId:looseOp,identityHash:'d'.repeat(64),maxQuoteUnits:100}]});
+    await assert.rejects(rpc(db,'research_runtime_link',f.actor,loose,f.session,f.execution,null,null,null),/RESEARCH_LINK_CONFLICT/);
+    // A finished operation not yet tied to its call is still found when its answer is deleted.
+    const early = await session(db,createFixture);
+    const plan = randomUUID(), op = randomUUID();
+    await rpc(db,'research_runtime_plan_create',early.actor,plan,early.session,early.execution,null,{budgetUnits:1000,maxOperations:1,
+      operations:[{operationId:op,identityHash:'d'.repeat(64),maxQuoteUnits:100}]});
+    const reserved = await rpc(db,'research_transition','reserve',plan,early.actor,op,{identityHash:'d'.repeat(64),quoteUnits:10});
+    await rpc(db,'research_transition','dispatch',plan,early.actor,op,{token:reserved.token});
+    await rpc(db,'research_transition','finish',plan,early.actor,op,{token:reserved.token,state:'succeeded',
+      result:{items:[{fields:{followers:1}}],query:'PRIVATE_QUERY',cost:{actual:0}}});
+    const scope = await rpc(db,'content_erasure_scope',early.actor,'session',early.session);
+    const hash = (await db.query("SELECT encode(sha256(convert_to($1::jsonb::text,'utf8')),'hex') h",[scope])).rows[0].h;
+    await rpc(db,'content_erasure_confirm',early.actor,'session',early.session,hash);
+    assert.doesNotMatch(JSON.stringify((await db.query('SELECT result FROM research_operations WHERE id=$1',[op])).rows[0].result),/PRIVATE_QUERY/);
+    report.checks.push('RT-3b runtime plans are bound at creation: a plain plan cannot be linked later; an operation finished before its call link is still cleared by deleting its conversation; a charged failure is never resent');
     // A claim made before the account was closed sends nothing afterwards: dispatch re-checks the account.
     const closing = await session(db,createFixture);
     const pending = await rpc(db,'research_account_fetch_claim',closing.actor,closing.session,closing.execution,'tiktok','zeta',null);

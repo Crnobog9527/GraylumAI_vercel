@@ -71,7 +71,9 @@ CREATE TABLE IF NOT EXISTS public.research_account_fetches (
   platform text NOT NULL CHECK (platform ~ '^[a-z]{1,20}$'),
   account text NOT NULL CHECK (length(account) BETWEEN 1 AND 200),
   -- prepared: claimed, nothing sent yet (a crash here leaves it reclaimable); in_progress: marked sent, never resent.
-  state text NOT NULL CHECK (state IN ('prepared','in_progress','succeeded','unknown','failed')),
+  -- failed: confirmed free failure (may be claimed again); failed_charged: a sent request the supplier charged for
+  -- although it failed (platform cost) — like unknown, it is never sent again in this session.
+  state text NOT NULL CHECK (state IN ('prepared','in_progress','succeeded','unknown','failed','failed_charged')),
   attempt uuid NOT NULL DEFAULT gen_random_uuid(),
   evidence jsonb CHECK (evidence IS NULL OR (jsonb_typeof(evidence)='object' AND octet_length(evidence::text)<=8192)),
   -- The last successful (paid) evidence; a later refresh replaces it only when that refresh succeeds.
@@ -329,7 +331,7 @@ CREATE OR REPLACE FUNCTION public.research_account_fetch_finish(a uuid, p_fetch 
 RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
 BEGIN
   -- A success must carry its evidence: a paid result without it could be neither reused nor refreshed.
-  IF p_state NOT IN ('succeeded','unknown','failed') OR (p_state='succeeded' AND jsonb_typeof(p_evidence) IS DISTINCT FROM 'object')
+  IF p_state NOT IN ('succeeded','unknown','failed','failed_charged') OR (p_state='succeeded' AND jsonb_typeof(p_evidence) IS DISTINCT FROM 'object')
   THEN RAISE EXCEPTION 'RESEARCH_FETCH_INVALID';END IF;
   -- A sent attempt ends in any state; an attempt never sent can only end as a (free) failure.
   UPDATE research_account_fetches SET state=p_state,evidence=p_evidence,updated_at=clock_timestamp(),
@@ -355,16 +357,34 @@ BEGIN
   RETURN g;
 END $$;
 
--- Links a research plan to its session, answer and discovery, and an operation to its BILL2 call; links never move.
+-- A runtime research plan is created already bound to its session, answer and discovery, under the same locks as
+-- deletion, so every operation (dispatched or finished later) is found by deleting that conversation or answer.
+-- Runtime plans are created only here; research_runtime_link never binds a plan afterwards.
+CREATE OR REPLACE FUNCTION public.research_runtime_plan_create(a uuid, p_plan uuid, s uuid, e uuid, p_discovery uuid, p_payload jsonb)
+RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
+DECLARE p research_plans; v jsonb;
+BEGIN
+  PERFORM research_session_owned(a,s,e);
+  IF p_discovery IS NOT NULL AND NOT EXISTS(SELECT 1 FROM research_discoveries WHERE id=p_discovery AND actor_id=a AND session_id=s)
+  THEN RAISE EXCEPTION 'RESEARCH_LINK_CONFLICT';END IF;
+  SELECT * INTO p FROM research_plans WHERE id=p_plan FOR UPDATE;
+  IF p.id IS NOT NULL AND (p.actor_id<>a OR (p.session_id,p.execution_id,p.discovery_id) IS DISTINCT FROM (s,e,p_discovery))
+  THEN RAISE EXCEPTION 'RESEARCH_LINK_CONFLICT';END IF;
+  v:=research_transition('create',p_plan,a,NULL,p_payload);
+  UPDATE research_plans SET session_id=s,execution_id=e,discovery_id=p_discovery WHERE id=p_plan AND session_id IS NULL;
+  RETURN v;
+END $$;
+
+-- Links an operation of a runtime plan to its BILL2 call; links never move.
 CREATE OR REPLACE FUNCTION public.research_runtime_link(a uuid, p_plan uuid, s uuid, e uuid, p_discovery uuid, p_operation uuid, p_call uuid)
 RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
 DECLARE p research_plans;
 BEGIN
   PERFORM research_session_owned(a,s,e);
   SELECT * INTO p FROM research_plans WHERE id=p_plan AND actor_id=a FOR UPDATE;
-  IF p.id IS NULL OR (p.session_id IS NOT NULL AND (p.session_id,p.execution_id,p.discovery_id) IS DISTINCT FROM (s,e,p_discovery))
+  -- Only a plan bound at creation (research_runtime_plan_create) can be linked.
+  IF p.id IS NULL OR p.session_id IS NULL OR (p.session_id,p.execution_id,p.discovery_id) IS DISTINCT FROM (s,e,p_discovery)
   THEN RAISE EXCEPTION 'RESEARCH_LINK_CONFLICT';END IF;
-  UPDATE research_plans SET session_id=s,execution_id=e,discovery_id=p_discovery WHERE id=p.id AND session_id IS NULL;
   IF p_operation IS NOT NULL THEN
     -- The operation and its BILL2 call describe the same supplier request: the call's requestHash is the
     -- operation's identity hash, so an operation can never be tied to another subcall of the same answer.
@@ -455,7 +475,8 @@ DO $$ DECLARE f text; BEGIN
     'research_discovery_start(uuid,uuid,uuid,uuid,text[])','research_discovery_save(uuid,uuid,uuid,jsonb,text)',
     'research_account_fetch_claim(uuid,uuid,uuid,text,text,uuid)','research_account_fetch_dispatch(uuid,uuid,uuid)',
     'research_account_fetch_finish(uuid,uuid,uuid,text,jsonb)',
-    'research_refresh_create(uuid,uuid,text,text)','research_runtime_link(uuid,uuid,uuid,uuid,uuid,uuid,uuid)'] LOOP
+    'research_refresh_create(uuid,uuid,text,text)','research_runtime_link(uuid,uuid,uuid,uuid,uuid,uuid,uuid)',
+    'research_runtime_plan_create(uuid,uuid,uuid,uuid,uuid,jsonb)'] LOOP
     EXECUTE format('REVOKE ALL ON FUNCTION public.%s FROM PUBLIC,anon,authenticated',f);
     EXECUTE format('GRANT EXECUTE ON FUNCTION public.%s TO service_role',f);
   END LOOP;
