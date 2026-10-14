@@ -4,7 +4,7 @@ import { agentTurnResult } from './agentTurnResult';
 import { questionMessageFromArguments, QUESTION_CONTRACT, askQuestionTool } from './agentTools';
 import { terminalAgentReplyFailure } from './terminalAgentReply';
 import { NativeProgressProjection, type NativeTextSource } from './nativeProgress';
-import { nativeVisible, prepareNativePrimary, completedOutput } from './nativeOutput';
+import { visibleText, prepareNativePrimary, completedOutput } from './nativeOutput';
 import { stoppedResult } from './stoppedResult';
 import { runtimeContext } from './runtimeContext';
 import { paygOwnerDatabase } from './paygOwner';
@@ -72,7 +72,7 @@ export function stoppedCompletion(options: RuntimeExecutorOptions, billing: Retu
     };
     const response=decode(primary),choice=response?.choices?.[0],message=choice?.message;
     const agent=context.providerRequestFormat==='agent-turn-v5-stream';
-    const step=Boolean(context.envelopeOrder);
+    const step=Boolean(context.envelopeOrder),plainStream=context.textStream==='plain-text-v1';
     let body=typeof message?.content==='string'?message.content:'';
     let source:NativeTextSource='final',capacityLimited=false;
     let valid=Boolean(primary&&response?.model===context.model&&response?.choices?.length===1&&message
@@ -95,7 +95,8 @@ export function stoppedCompletion(options: RuntimeExecutorOptions, billing: Retu
       }
       if(valid&&!(tool&&context.hostTurnContext?.cardContract))body=agentTurnResult(body,output,Boolean(tool),tool
         ?questionMessageFromArguments(tool.function?.arguments??''):undefined,true,Boolean(context.mentorText)).body;
-    }else if(message?.tool_calls?.length)valid=false;
+    // A plain-text stream showed the prose of a tool round as it arrived: a stop there keeps that prose.
+    }else if(message?.tool_calls?.length&&!(plainStream&&body.trim()))valid=false;
     // MODEL-IDENTITY-GUARD: redact before rebuilding the projection, in the live executor's order, so the
     // stop source derived here matches the replacement snapshot the client saw (review P1).
     const identity=runtimeIdentityGuard(frozenBrandIdentity(context.instructions));
@@ -106,13 +107,18 @@ export function stoppedCompletion(options: RuntimeExecutorOptions, billing: Retu
           length:choice?.finish_reason==='length',attachedOrganizer:Boolean(context.attachedOrganizer),executionId});
         body=execution.primaryResult?.body??fitted.body;
         capacityLimited=fitted.metadata.completeness==='length_limit'&&choice?.finish_reason!=='length';
-        if(agent||step){
-          const projection=new NativeProgressProjection({mode:agent?'agent':'message-first',
+        if(agent||step||plainStream){
+          const projection=new NativeProgressProjection({mode:agent||plainStream?'agent':'message-first',
             toolMessage:agent&&Boolean(context.questionContract)&&!context.hostTurnContext?.cardContract,appendCard:Boolean(context.mentorText)});
           let update=projection.appendText(message?.content??'');
           const tool=message?.tool_calls?.[0];
           if(tool)update=projection.appendToolFrame({choices:[{delta:{tool_calls:[{index:0,function:tool.function}]}}]})??update;
-          source=projection.finish(nativeVisible(body))?.source??update?.source??'final';
+          source=projection.finish(visibleText(body,context))?.source??update?.source??'final';
+          // A plain stream keeps only the first stopAt code points. When they are exactly what streamed, a later
+          // change (identity redaction after the stop point) cannot change what the user saw: accept its source.
+          const stopAt=execution.stop!.stopAt,shown=(text:string)=>Array.from(text).slice(0,stopAt).join('');
+          if(plainStream&&(execution.stop?.source==='assistant'||execution.stop?.source==='final')
+            &&shown(visibleText(body,context))===shown(message?.content??''))source=execution.stop.source;
         }
       }
     }catch{valid=false;}

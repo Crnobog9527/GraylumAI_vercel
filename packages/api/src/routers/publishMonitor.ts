@@ -10,12 +10,12 @@ import {
 /** PUBLISH-MONITOR: a user reads and changes only their own monitoring state; off until enabled by admin. */
 type SwitchReader = Parameters<typeof assertPublishMonitorEnabled>[0];
 async function safe<T>(ctx: { hasSupabaseAdminPrivileges: boolean; supabaseAdmin: SwitchReader },
-  work: () => Promise<T>): Promise<T> {
+  work: () => Promise<T>, requireSwitch = true): Promise<T> {
   if (!ctx.hasSupabaseAdminPrivileges) {
     throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'PUBLISH_MONITOR_UNAVAILABLE' });
   }
   try {
-    await assertPublishMonitorEnabled(ctx.supabaseAdmin);
+    if (requireSwitch) await assertPublishMonitorEnabled(ctx.supabaseAdmin);
     return await work();
   } catch (cause) {
     if (cause instanceof TRPCError) throw cause;
@@ -28,7 +28,8 @@ async function safe<T>(ctx: { hasSupabaseAdminPrivileges: boolean; supabaseAdmin
 export const publishMonitorRouter = router({
   settings: protectedProcedure.query(({ ctx }) =>
     safe(ctx, () => readPublishMonitorSettings(ctx.supabaseAdmin, ctx.profileId))),
-  // Weekly automatic review is a Gold entitlement (Master Plan §2.1 item 51); turning it off is always allowed.
+  // Weekly automatic review is a Gold entitlement (Master Plan §2.1 item 51); turning it off is always allowed,
+  // even while the feature is paused, so a paused opt-in cannot come back on (and spend credits) by itself.
   setAutoReview: protectedProcedure.input(autoReviewInput).mutation(({ ctx, input }) => safe(ctx, async () => {
     if (input.enabled) {
       const entitlements = await readMembershipEntitlements(ctx.supabaseAdmin, ctx.profileId);
@@ -37,7 +38,7 @@ export const publishMonitorRouter = router({
       }
     }
     return setAutoReview(ctx.supabaseAdmin, ctx.profileId, input);
-  })),
+  }, input.enabled)),
   connections: protectedProcedure.query(({ ctx }) =>
     safe(ctx, () => listConnections(ctx.supabaseAdmin, ctx.profileId))),
 });

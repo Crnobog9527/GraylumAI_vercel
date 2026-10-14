@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button';
 import { PaywallCompareTable, PaywallPlanPicker } from './PaywallPlanPicker';
 import { formatUsd, paywallQuote, type PaywallBilling, type PaywallLevel } from './paywallPlans';
 import { usePaywallCheckout } from './usePaywallCheckout';
+import { SUPPORT_TICKET_HREF } from '@/components/profile/subscriptionPlanButtonState';
 import { REPORT_DELIVERABLES, REPORT_PAYWALL_COPY as COPY } from './reportPaywallCopy';
 
 /**
@@ -109,6 +110,8 @@ export function ReportPaywallView({ checkout, onClose }: { checkout: PaywallChec
               </Button>
               <p className="text-xs" data-testid="report-paywall-renewal" style={{ color: 'var(--text-tertiary)' }}>{quote.renewal}</p>
               {state.message ? <p role="status" className="text-sm" style={{ color: 'var(--warning)' }}>{state.message}</p> : null}
+              {state.contactSupport ? <a data-testid="report-paywall-support-ticket" href={SUPPORT_TICKET_HREF}
+                className="text-sm underline" style={{ color: 'var(--text-primary)' }}>提交工单</a> : null}
               {checkout.error ? <p role="alert" className="text-sm" style={{ color: 'var(--error)' }}>{checkout.error}</p> : null}
             </div>
           ) : null}

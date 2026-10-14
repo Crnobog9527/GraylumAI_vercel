@@ -1,5 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import {ASK_QUESTION_TOOL} from '../../shared/agentTurn';
+import {READ_HISTORY_TOOL} from './agentTools';
 
 const object=(value:unknown):value is Record<string,unknown>=>
   Boolean(value&&typeof value==='object'&&!Array.isArray(value));
@@ -9,7 +10,7 @@ const terminalFinishes=new Set(['stop','length','tool_calls','content_filter']);
  * Missing/unknown finish reasons remain pending; replay cannot repair a known
  * terminal response whose message has a malformed protocol shape. A mentor
  * turn offered no card tool (a host-opened turn) cannot run any tool call. */
-export function terminalAgentReplyFailure(response:unknown,organizer=false,cardOffered=true,skillFileOffered=false):boolean {
+export function terminalAgentReplyFailure(response:unknown,organizer=false,cardOffered=true,skillFileOffered=false,historyOffered=false):boolean {
   if(!object(response)||!Array.isArray(response.choices)||response.choices.length!==1)return false;
   const choice=response.choices[0];
   if(!object(choice)||typeof choice.finish_reason!=='string'||!terminalFinishes.has(choice.finish_reason))return false;
@@ -21,7 +22,8 @@ export function terminalAgentReplyFailure(response:unknown,organizer=false,cardO
   // v5 deliberately keeps only the first call. Later calls are ignored by the
   // runner, so an unknown later name must not invalidate an accepted first one.
   if(Array.isArray(calls)&&calls.length)return organizer||
-    !(cardOffered&&calls[0]?.function?.name===ASK_QUESTION_TOOL||skillFileOffered&&calls[0]?.function?.name==='read_skill_file');
+    !(cardOffered&&calls[0]?.function?.name===ASK_QUESTION_TOOL||skillFileOffered&&calls[0]?.function?.name==='read_skill_file'||
+      historyOffered&&calls[0]?.function?.name===READ_HISTORY_TOOL);
   return organizer&&choice.finish_reason==='stop'&&
     (message.content===null||typeof message.content==='string'&&!message.content.trim());
 }
