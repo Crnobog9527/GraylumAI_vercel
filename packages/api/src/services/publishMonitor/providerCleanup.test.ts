@@ -35,7 +35,7 @@ const far = Date.now() + 60_000;
 describe('publish-monitor provider cleanup', () => {
   it('lists every page before deleting, deletes only what the database marked and still carries the attempt', async () => {
     const d = database({
-      publish_monitor_cleanup_claim: [[{ requestId: REQ, externalId: EXT, platform: 'facebook', candidateIds: [] }]],
+      publish_monitor_cleanup_claim: [[{ requestId: REQ, lease: LEASE, externalId: EXT, platform: 'facebook', candidateIds: [] }]],
       publish_monitor_cleanup_classify: [[{ providerAccountId: 'spc_1', action: 'delete' },
         { providerAccountId: 'spc_2', action: 'keep' }, { providerAccountId: 'spc_3', action: 'delete' }]],
     });
@@ -46,16 +46,16 @@ describe('publish-monitor provider cleanup', () => {
       `GET /social-accounts?limit=100&offset=0&external_id=${encodeURIComponent(EXT)}`,
       `GET /social-accounts?limit=100&offset=2&external_id=${encodeURIComponent(EXT)}`,
       'GET /social-accounts/spc_1', 'DELETE /social-accounts/spc_1', 'GET /social-accounts/spc_3']);
-    expect(d.calls.at(-1)).toEqual(['publish_monitor_cleanup_finish', { p_request_id: REQ, p_done: true, p_error: null }]);
+    expect(d.calls.at(-1)).toEqual(['publish_monitor_cleanup_finish', { p_request_id: REQ, p_lease: LEASE, p_done: true, p_error: null }]);
   });
 
   it('a failed listing or deletion leaves the attempt for the next run', async () => {
-    const d = database({ publish_monitor_cleanup_claim: [[{ requestId: REQ, externalId: EXT, platform: 'facebook',
+    const d = database({ publish_monitor_cleanup_claim: [[{ requestId: REQ, lease: LEASE, externalId: EXT, platform: 'facebook',
       candidateIds: [] }]] });
     const p = provider([json(503, {})]);
     expect(await cleanupAttempts(d.db, p.deps, far)).toEqual({ processed: 1, settled: 0, deferred: 1 });
     expect(d.calls.map(c => c[0])).toEqual(['publish_monitor_cleanup_claim', 'publish_monitor_cleanup_finish']);
-    expect(d.calls[1]![1]).toEqual({ p_request_id: REQ, p_done: false, p_error: 'PROVIDER_LIST_FAILED' });
+    expect(d.calls[1]![1]).toEqual({ p_request_id: REQ, p_lease: LEASE, p_done: false, p_error: 'PROVIDER_LIST_FAILED' });
   });
 
   it('provider work re-reads every account and acts only while the expected owner still holds it', async () => {

@@ -63,7 +63,8 @@ async function deleteIfStill(client: ClientDeps, id: string, externalId: string)
   return removed.kind === 'ok' || gone(removed) ? 'done' : 'retry';
 }
 
-const claimedAttempt = z.object({ requestId: z.string().uuid(), externalId: z.string(), platform: z.string(),
+const claimedAttempt = z.object({ requestId: z.string().uuid(), lease: z.string().uuid(), externalId: z.string(),
+  platform: z.string(),
   candidateIds: z.array(providerId) }).strict();
 const verdict = z.object({ providerAccountId: providerId, action: z.enum(['delete', 'keep', 'skip', 'takeover']) }).strict();
 
@@ -91,7 +92,8 @@ export async function cleanupAttempts(db: Rpc, client: ClientDeps, until: number
         }
       }
     }
-    await rpc(db, 'publish_monitor_cleanup_finish', { p_request_id: attempt.requestId, p_done: error === null,
+    await rpc(db, 'publish_monitor_cleanup_finish', { p_request_id: attempt.requestId, p_lease: attempt.lease,
+      p_done: error === null,
       p_error: error }, z.unknown());
     if (error) report.deferred += 1; else report.settled += 1;
   }
