@@ -1,0 +1,191 @@
+/* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+/*
+ * Sample H, module 3: the nine scene conversations (ScenesH.tsx) on glass. Colors come from h.module.css (--h-*).
+ * Playback is pure CSS: each message, typing indicator, character and card gets its start time as a custom
+ * property, and the animations only exist under `.window[data-play]` with no reduced-motion preference.
+ */
+.scenes { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; margin-top: 28px; }
+@media (min-width: 960px) { .scenes { grid-template-columns: 236px minmax(0, 1fr); gap: 20px; align-items: start; } }
+
+.window, .aside {
+  border: 1px solid rgba(255, 255, 255, .85);
+  background: rgba(255, 255, 255, .62);
+  backdrop-filter: blur(var(--h-blur)) saturate(1.6);
+  -webkit-backdrop-filter: blur(var(--h-blur)) saturate(1.6);
+  box-shadow: inset 0 1px 0 #fff, 0 0 0 1px rgba(40, 30, 90, .05), 0 28px 56px -36px rgba(60, 40, 140, .36);
+}
+
+/* The nine titles: a glass rail on desktop, scrolling chips on a phone */
+.toc {
+  display: flex; gap: 6px; margin: 0 -16px; padding: 2px 16px 8px; overflow-x: auto; scroll-snap-type: x proximity;
+  scrollbar-width: none; border: 0; background: none; backdrop-filter: none; -webkit-backdrop-filter: none; box-shadow: none;
+}
+.toc { scroll-padding-inline: 16px; }
+.toc::-webkit-scrollbar { display: none; }
+@media (min-width: 960px) {
+  .toc {
+    position: sticky; top: 86px; flex-direction: column; gap: 2px; margin: 0; padding: 6px; overflow: visible; border-radius: 22px;
+    border: 1px solid rgba(255, 255, 255, .85); background: rgba(255, 255, 255, .55);
+    backdrop-filter: blur(var(--h-blur)) saturate(1.6); -webkit-backdrop-filter: blur(var(--h-blur)) saturate(1.6);
+    box-shadow: inset 0 1px 0 #fff, 0 0 0 1px rgba(40, 30, 90, .05), 0 28px 56px -36px rgba(60, 40, 140, .36);
+  }
+}
+.toc button {
+  position: relative; flex: none; display: flex; align-items: center; gap: 10px; min-height: 42px; padding: 6px 14px 6px 6px;
+  border: 1px solid rgba(255, 255, 255, .85); border-radius: 999px; background: rgba(255, 255, 255, .62); color: var(--h-ink);
+  font: inherit; font-size: 14px; font-weight: 500; line-height: 1.3; text-align: left; cursor: pointer; scroll-snap-align: start;
+  box-shadow: 0 0 0 1px rgba(40, 30, 90, .06); transition: background-color .25s, box-shadow .25s, transform .4s var(--h-ease);
+}
+@media (min-width: 960px) {
+  .toc button { min-height: 46px; border-color: transparent; border-radius: 15px; background: transparent; box-shadow: none; }
+  .toc button:hover { background: rgba(255, 255, 255, .7); transform: translateX(3px); }
+}
+.toc button[aria-selected='true'] { background: #fff; box-shadow: 0 0 0 1.5px var(--h-violet), 0 12px 24px -16px rgba(91, 63, 208, .6); }
+.tocIndex {
+  flex: none; display: grid; place-items: center; width: 30px; height: 30px; border-radius: 50%; background: rgba(40, 30, 90, .06);
+  color: var(--h-muted); font-size: 13px; font-weight: 700; font-variant-numeric: tabular-nums; transition: transform .5s var(--h-ease);
+}
+.toc button[aria-selected='true'] .tocIndex { background: var(--h-iris); color: var(--h-ink); transform: scale(1.08); }
+.tocTitle { white-space: nowrap; }
+
+/* One scene: chat window and its explanation */
+.panel { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; min-width: 0; perspective: 1600px; }
+@media (min-width: 1180px) { .panel { grid-template-columns: minmax(0, 1fr) 290px; gap: 20px; align-items: start; } }
+.panel[hidden] { display: none; }
+
+.window { display: flex; flex-direction: column; min-width: 0; overflow: hidden; border-radius: 24px; }
+.chrome {
+  position: relative; display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 0 16px;
+  border-bottom: 1px solid var(--h-line); background: rgba(255, 255, 255, .5); font-size: 13px;
+}
+.dots { display: none; gap: 6px; }
+.dots i { width: 10px; height: 10px; border-radius: 50%; background: #ffc2a8; }
+.dots i:nth-child(2) { background: #dccbff; }
+.dots i:nth-child(3) { background: #b2e6ee; }
+@media (min-width: 768px) { .dots { display: flex; } }
+.badge {
+  flex: none; padding: 0 8px; border-radius: 999px; background: var(--h-violet-soft); color: var(--h-violet);
+  font-size: 12px; font-weight: 600; line-height: 20px;
+}
+.chromeTitle { min-width: 0; overflow: hidden; color: var(--h-muted); text-overflow: ellipsis; white-space: nowrap; }
+.progress {
+  position: absolute; right: 0; bottom: -1px; left: 0; height: 2px; background: var(--h-iris);
+  transform: scaleX(0); transform-origin: 0 50%; opacity: 0;
+}
+
+.log { display: grid; gap: 14px; min-height: 340px; margin: 0; padding: 18px 16px 8px; list-style: none; align-content: start; }
+@media (min-width: 768px) { .log { min-height: 450px; padding: 22px 24px 10px; } }
+.message { display: grid; gap: 4px; max-width: 92%; }
+@media (min-width: 768px) { .message { max-width: 80%; } }
+.message[data-role='user'] { justify-self: end; justify-items: end; }
+.who { color: var(--h-muted); font-size: 12px; line-height: 1.4; }
+.bubble { position: relative; display: grid; gap: 10px; padding: 10px 14px; border-radius: 18px; font-size: 14.5px; line-height: 1.7; }
+.bubble > p { margin: 0; text-wrap: pretty; }
+.message[data-role='coach'] .bubble {
+  border-top-left-radius: 6px; background: rgba(255, 255, 255, .86); box-shadow: 0 0 0 1px rgba(40, 30, 90, .06), 0 10px 24px -18px rgba(60, 40, 140, .4);
+}
+.message[data-role='user'] .bubble { border-top-right-radius: 6px; background: var(--h-ink); color: #fff; }
+.typing { position: absolute; top: 14px; left: 14px; display: none; gap: 4px; }
+.typing i { width: 7px; height: 7px; border-radius: 50%; background: var(--h-violet); opacity: .5; }
+.disclaimer { margin: 0; padding: 10px 16px 14px; color: var(--h-muted); font-size: 12px; line-height: 1.6; }
+@media (min-width: 768px) { .disclaimer { padding: 10px 24px 16px; } }
+
+/* Result cards under a coach message (outside the bubble, so the bubble is only as tall as its text) */
+.cardWrap { width: 100%; margin-top: 6px; }
+.card {
+  display: grid; gap: 8px; padding: 12px; border: 1px solid rgba(40, 30, 90, .08); border-radius: 16px; background: rgba(255, 255, 255, .9);
+  box-shadow: 0 14px 30px -20px rgba(60, 40, 140, .45);
+}
+.cardTitle { margin: 0; font-size: 13.5px; font-weight: 600; line-height: 1.5; }
+.options { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.options li {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 36px; padding: 6px 10px;
+  border: 1px solid var(--h-line); border-radius: 11px; background: #fff; font-size: 13.5px; line-height: 1.5;
+}
+.options li[data-recommended='true'] { border-color: transparent; background: #fff; box-shadow: 0 0 0 1.5px var(--h-violet); }
+.options .optionOther { color: var(--h-muted); border-style: dashed; background: transparent; }
+.tag { flex: none; padding: 0 8px; border-radius: 999px; background: var(--h-ink); color: #fff; font-size: 11.5px; font-weight: 600; line-height: 20px; }
+.reason { display: flex; gap: 6px; margin: 0; color: var(--h-violet); font-size: 12.5px; line-height: 1.6; }
+.reason svg { flex: none; margin-top: 3px; }
+.sheet { display: grid; margin: 0; }
+.sheet > div { display: grid; gap: 2px; padding: 7px 0; border-top: 1px solid var(--h-line); font-size: 13.5px; line-height: 1.6; }
+@media (min-width: 640px) { .sheet > div { grid-template-columns: 8.5em minmax(0, 1fr); gap: 12px; } }
+.sheet dt { color: var(--h-muted); }
+.sheet dd { margin: 0; font-weight: 500; }
+.cardAction {
+  display: inline-flex; align-items: center; gap: 6px; width: fit-content; min-height: 32px; padding: 0 14px;
+  border-radius: 999px; background: var(--h-ink); color: #fff; font-size: 13px; font-weight: 600;
+}
+.tableScroll { overflow-x: auto; }
+.table { width: 100%; border-collapse: collapse; font-size: 13px; line-height: 1.5; white-space: nowrap; }
+.table th, .table td { padding: 7px 10px 7px 0; border-top: 1px solid var(--h-line); text-align: left; }
+.table thead th { border-top: 0; color: var(--h-muted); font-weight: 500; }
+.table tbody th { font-weight: 600; }
+.table td { color: var(--h-violet); }
+.table td[data-missing='true'] { color: var(--h-muted); }
+.caption { margin: 0; color: var(--h-muted); font-size: 12px; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.chips li { padding: 3px 10px; border: 1px solid var(--h-line); border-radius: 999px; background: #fff; font-size: 13px; line-height: 1.5; }
+.doc { background: linear-gradient(180deg, rgba(255, 238, 228, .9), rgba(250, 249, 255, .9) 60%); }
+.outline { display: grid; gap: 4px; margin: 0; padding-left: 1.1em; font-size: 13.5px; line-height: 1.65; }
+
+/* The step's verbatim copy beside the conversation */
+.aside { display: grid; gap: 12px; padding: 18px; border-radius: 24px; }
+@media (min-width: 1180px) { .aside { position: sticky; top: 86px; } }
+.asideTitle {
+  display: flex; align-items: center; gap: 10px; margin: 0; font-family: var(--h-display-face);
+  font-size: 22px; font-weight: 900; letter-spacing: -.02em; line-height: 1.2;
+}
+.asideTitle span {
+  flex: none; display: grid; place-items: center; width: 32px; height: 32px; border-radius: 50%; background: var(--h-iris);
+  color: var(--h-ink); font-size: 14px; letter-spacing: 0;
+}
+.asideDemo { margin: 0; font-size: 14.5px; font-weight: 500; line-height: 1.7; }
+.asideNote { padding-top: 12px; border-top: 1px solid var(--h-line); }
+.asideNote p { margin: 0; color: var(--h-body); font-size: 14px; line-height: 1.75; }
+.asideNote .asideLabel { margin-bottom: 4px; color: var(--h-violet); font-size: 12.5px; font-weight: 600; }
+.next {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 42px; padding: 0 16px;
+  border: 1px solid #fff; border-radius: 999px; background: rgba(255, 255, 255, .8); color: var(--h-ink); font: inherit; font-size: 14px;
+  font-weight: 600; cursor: pointer; box-shadow: 0 0 0 1px rgba(40, 30, 90, .08); transition: box-shadow .25s, transform .3s var(--h-ease);
+}
+.next:hover { box-shadow: 0 0 0 1.5px var(--h-violet); }
+.next:hover svg { transform: translateX(3px); }
+.next svg { transition: transform .3s var(--h-ease); }
+
+/* Playback */
+@media (prefers-reduced-motion: no-preference) {
+  .window[data-play] { animation: windowIn .9s var(--h-ease) both; }
+  .window[data-play] .progress { opacity: 1; animation: fill var(--total) linear both; }
+  /* Delays sit inside the shorthand: a separate animation-delay gets merged into it in the wrong order on build. */
+  .window[data-play] .message { animation: msgIn .55s var(--h-ease) var(--appear) both; }
+  .window[data-play] .message[data-role='user'] .bubble { transform-origin: 100% 0; }
+  .window[data-play] .typing {
+    display: flex; animation: typingLife calc(var(--type-start) - var(--appear)) linear var(--appear) both;
+  }
+  .window[data-play] .typing i { animation: bounce .9s ease-in-out infinite; }
+  .window[data-play] .typing i:nth-child(2) { animation-delay: .15s; }
+  .window[data-play] .typing i:nth-child(3) { animation-delay: .3s; }
+  /* Each character's delay is set inline (start + index × step); a short fade, not a 1ms step, which can end at 0. */
+  .window[data-play] .tc { animation: charIn 90ms linear both; }
+  .window[data-play] .cardWrap { animation: cardIn .7s var(--h-ease) var(--card-at) both; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .toc button, .tocIndex, .next, .next svg { transition: none; }
+}
+@keyframes windowIn {
+  from { opacity: .3; transform: translate3d(0, 16px, -80px) rotateY(-8deg); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes fill { to { transform: scaleX(1); } }
+@keyframes msgIn {
+  from { opacity: 0; transform: translate3d(0, 14px, 0) scale(.96); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes typingLife { 0%, 90% { opacity: 1; } 100% { opacity: 0; } }
+@keyframes bounce { 0%, 100% { transform: translateY(0); opacity: .4; } 50% { transform: translateY(-4px); opacity: 1; } }
+@keyframes charIn { from { opacity: 0; } to { opacity: 1; } }
+@keyframes cardIn {
+  from { opacity: 0; transform: perspective(800px) translate3d(0, 18px, 0) rotateX(14deg); }
+  to { opacity: 1; transform: none; }
+}
