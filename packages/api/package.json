@@ -57,6 +57,7 @@
     "./src/services/payments/waffoFailure": "./src/services/payments/waffoFailure.ts",
     "./src/services/payments/cardSubscriptionWebhook": "./src/services/payments/cardSubscriptionWebhook.ts",
     "./src/services/payments/cardRefundWebhook": "./src/services/payments/cardRefundWebhook.ts",
+    "./src/services/payments/stripeCardReconciliation": "./src/services/payments/stripeCardReconciliation.ts",
     "./src/services/payments/walletWebhook": "./src/services/payments/walletWebhook.ts",
     "./src/services/payments/methodMaintenance": "./src/services/payments/methodMaintenance.ts"
   },
