@@ -11,11 +11,11 @@ import page from './j.module.css';
 
 /** Where each moment starts and ends along the section's scroll, 0 → 1: three steps, the report, then the jury. */
 export const CHAPTERS = [
-  { id: 'you', from: 0, to: 0.26 },
-  { id: 'direction', from: 0.26, to: 0.46 },
-  { id: 'benchmark', from: 0.46, to: 0.66 },
-  { id: 'report', from: 0.66, to: 0.82 },
-  { id: 'jury', from: 0.82, to: 1 },
+  { id: 'you', from: 0, to: 0.2 },
+  { id: 'direction', from: 0.2, to: 0.35 },
+  { id: 'benchmark', from: 0.35, to: 0.5 },
+  { id: 'report', from: 0.5, to: 0.62 },
+  { id: 'jury', from: 0.62, to: 1 },
 ] as const;
 type ChapterId = (typeof CHAPTERS)[number]['id'];
 

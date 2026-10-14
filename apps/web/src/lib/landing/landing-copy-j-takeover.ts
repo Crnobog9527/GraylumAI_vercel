@@ -101,6 +101,3 @@ export const J_REPORT = {
   juryEntry: '开启评审团',
   juryTag: 'Gold',
 } as const;
-
-/** NEW: holds the jury's place until its canvas version is merged (#1002) and can play here. */
-export const J_JURY_PLACEHOLDER = '评审团演示（新版制作中）';

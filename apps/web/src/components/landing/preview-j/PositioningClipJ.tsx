@@ -5,6 +5,7 @@ import { AlertTriangle, Check, FileText, Loader2, Sparkles } from 'lucide-react'
 import { MessageMarkdown } from '@/components/chat/MessageMarkdown';
 import { DEMO_LABEL, DEMO_STEPS, demoInformation, summaryDemoState, type DemoState } from '@/components/landing/demo/demo-script';
 import { CaptureChecklist } from '@/components/opc/capture-checklist';
+import { JuryCanvasPlayer } from '@/components/landing/preview-jury/JuryCanvasPlayer';
 import { DraftRow } from '@/components/opc/draft-row';
 import result from '@/components/opc/positioning-result.module.css';
 import { QuestionCardView } from '@/components/opc/question-card';
@@ -13,7 +14,7 @@ import frame from '@/components/opc/workspace-frame.module.css';
 import { Button } from '@/components/ui/button';
 import { J_PERSONA, J_PERSONA_DIRECTION, J_PERSONA_KINDS, J_PERSONA_QUESTION } from '@/lib/landing/landing-copy-j-persona';
 import {
-  J_BENCHMARK_TABLE, J_JURY_PLACEHOLDER, J_REPORT, J_TAKEOVER_MOMENTS, type TakeoverCard, type TakeoverLine,
+  J_BENCHMARK_TABLE, J_REPORT, J_TAKEOVER_MOMENTS, type TakeoverCard, type TakeoverLine,
 } from '@/lib/landing/landing-copy-j-takeover';
 import { cn } from '@/lib/utils';
 import styles from './takeover-j.module.css';
@@ -126,7 +127,11 @@ function Report({ writing, local, jury }: { writing: boolean; local: number; jur
           </Button>
         </footer>
       </section>
-      {jury ? <div className={styles.placeholder} data-on={local > 0.15 || undefined}><p>{J_JURY_PLACEHOLDER}</p></div> : null}
+      {jury && local > 0.12 ? (
+        <div className={styles.juryLayer}>
+          <JuryCanvasPlayer brief progress={Math.min(1, (local - 0.12) / 0.85)} />
+        </div>
+      ) : null}
     </div>
   );
 }

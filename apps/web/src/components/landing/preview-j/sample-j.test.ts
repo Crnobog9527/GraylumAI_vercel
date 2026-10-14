@@ -172,9 +172,10 @@ describe('sample J story timing', () => {
   it('maps the scroll to the four chapters in order, ending inside the last', () => {
     expect(CHAPTERS.map(chapter => chapter.id)).toEqual(J_TAKEOVER_MOMENTS.map(moment => moment.id));
     expect(chapterAt(0)).toEqual({ id: 'you', index: 0, local: 0 });
-    expect(chapterAt(0.4).id).toBe('direction');
-    expect(chapterAt(0.6).id).toBe('benchmark');
-    expect(chapterAt(0.7).id).toBe('report');
+    expect(chapterAt(0.3).id).toBe('direction');
+    expect(chapterAt(0.45).id).toBe('benchmark');
+    expect(chapterAt(0.55).id).toBe('report');
+    expect(chapterAt(0.8).id).toBe('jury');
     expect(chapterAt(1)).toEqual({ id: 'jury', index: 4, local: 1 });
     expect(chapterAt(-1).id).toBe('you');
     // Every message of a moment has arrived before the scroll leaves it.

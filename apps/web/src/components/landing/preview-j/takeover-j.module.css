@@ -8,7 +8,7 @@
 .outer { position: relative; }
 .intro { display: grid; gap: 28px; padding-top: 112px; }
 @media (max-width: 767px) { .intro { padding-top: 72px; } }
-.takeover { position: relative; height: 720svh; }
+.takeover { position: relative; height: 960svh; }
 .stage { position: sticky; top: 0; display: grid; grid-template-rows: minmax(0, 1fr); height: 100svh; padding: 76px 0 18px; overflow: hidden; }
 .frame { display: grid; grid-template-rows: auto auto minmax(0, 1fr); gap: 14px; height: 100%; }
 .title { margin: 0; white-space: nowrap; font-size: clamp(24px, 3vw, 44px); font-weight: 600; line-height: 1.08; letter-spacing: -.04em; }
@@ -109,14 +109,9 @@
 .checklist > header p { margin: 2px 0 0; color: #999; font-size: 12px; }
 .checklist > div { padding: 10px 12px !important; overflow: hidden !important; }
 
-/* The jury's placeholder until #998's canvas joins */
-.reportLayer > .placeholder { position: absolute; inset: 20px; opacity: 0; background: rgba(255, 255, 255, .97); transition: opacity .5s; }
-.reportLayer > .placeholder[data-on] { opacity: 1; }
-.placeholder {
-  display: grid; place-items: center; height: 100%; min-height: 320px; border: 1.5px dashed rgba(20, 19, 18, .18); border-radius: 22px;
-  background: rgba(255, 255, 255, .6); color: var(--j-muted); font-size: 17px; font-weight: 500;
-}
-.placeholder p { margin: 0; }
+/* The jury (#1002's canvas, brief), opened from the report: it fills the layer over the workbench. */
+.juryLayer { position: absolute; inset: 12px; overflow: hidden; border-radius: 16px; background: #fff; box-shadow: 0 30px 60px -30px rgba(0, 0, 0, .5); }
+@media (prefers-reduced-motion: no-preference) { .juryLayer { animation: copyIn .5s var(--j-ease) both; } }
 
 @keyframes copyIn { from { opacity: 0; translate: 0 12px; } to { opacity: 1; translate: 0 0; } }
 @keyframes messageIn { from { opacity: 0; translate: 0 10px; } to { opacity: 1; translate: 0 0; } }
