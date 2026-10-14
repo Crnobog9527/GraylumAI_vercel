@@ -209,7 +209,8 @@ export function reviewFlow(deps: { admin: SupabaseClient; actorId: string;
     const src = await readSource(input.reviewId);
     const plan = await adoptionPlan(view, src);
     if (!plan) throw new Error('FUSION_REVIEW_INVALID');
-    return { view, merged: applyChoices({ originalBody: src.body, revisedBody: plan.passed.body, plan: plan.sections, choices }) };
+    return { view, merged: applyChoices({ originalBody: src.body, revisedBody: plan.passed.body, plan: plan.sections, choices,
+      maxCharacters: src.maxCharacters }) };
   }
   const recordedChoice = (view: ReviewView) => (view.adoption as { state?: string } | null | undefined)?.state === 'recorded';
   const adopted = (view: ReviewView) => {

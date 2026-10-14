@@ -13,4 +13,13 @@ describe('per-section adoption', () => {
     expect(merged.body).toBe('前言\r\n## 定位\r\n新定位\r\n##   结语\r\n原结语');
     expect(merged).toMatchObject({ adopted: ['定位'], kept: ['结语'] });
   });
+
+  it('refuses a mix of revised and original sections that exceeds the length limit, before anything is proposed', () => {
+    const original = '## 定位\n' + '甲'.repeat(50) + '\n## 结语\n' + '乙'.repeat(10);
+    const revised = '## 定位\n' + '甲'.repeat(10) + '\n## 结语\n' + '丙'.repeat(50);
+    const plan = adoptionSections({ originalBody: original, revisedBody: revised, sections: ['定位', '结语'], changedSections: ['定位', '结语'],
+      changeNotes: [{ section: '定位', wordingOnly: true, fields: [] }, { section: '结语', wordingOnly: true, fields: [] }], frozen: {}, revisedSteps: {} });
+    expect(() => applyChoices({ originalBody: original, revisedBody: revised, plan, maxCharacters: 90,
+      choices: [{ section: '定位', use: 'original' }, { section: '结语', use: 'revised', confirmedNoFactChange: true }] })).toThrow('FUSION_ADOPTION_TOO_LONG');
+  });
 });

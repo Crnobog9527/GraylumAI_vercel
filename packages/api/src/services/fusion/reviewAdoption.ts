@@ -47,7 +47,9 @@ export function adoptionSections(input: { originalBody: string; revisedBody: str
 }
 
 /** Validates the choices and builds what R14 proposes: the merged body and the fields of adopted sections. */
-export function applyChoices(input: { originalBody: string; revisedBody: string; plan: AdoptionSection[]; choices: AdoptionChoice[] }):
+export function applyChoices(input: { originalBody: string; revisedBody: string; plan: AdoptionSection[]; choices: AdoptionChoice[];
+  /** The template's length limit: a mix of revised and original sections can exceed it even when each body fits. */
+  maxCharacters?: number }):
   { body: string; fields: StepValues; adopted: string[]; kept: string[] } {
   const changed = input.plan.filter(section => section.changed);
   const choice = new Map<string, AdoptionChoice>();
@@ -69,6 +71,7 @@ export function applyChoices(input: { originalBody: string; revisedBody: string;
   for (const [title, part] of original.sections) {
     body += adopted.includes(title) ? revised.get(title)!.heading + revised.get(title)!.content : part.heading + part.content;
   }
+  if (input.maxCharacters !== undefined && [...body].length > input.maxCharacters) throw new Error('FUSION_ADOPTION_TOO_LONG');
   const fields: StepValues = {};
   for (const section of input.plan.filter(s => adopted.includes(s.section))) {
     for (const field of section.fields) if (field.after !== field.before) (fields[field.stepId] ??= {})[field.fieldId] = field.after;

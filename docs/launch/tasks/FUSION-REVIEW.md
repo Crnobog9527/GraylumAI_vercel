@@ -213,7 +213,7 @@ Owner 要求评审过程中让用户看到评审团的思考和互相挑刺。�
      会重新得到同一份 R14 提案；`expectedDiffHash` 必须等于用户看到的那份（否则 `FUSION_ADOPTION_STALE`）。`apply` 生成新的正式版本，`decline` 什么都不改。
      返回 `{ state: "recorded", versionId | null, adopted, kept }`，选择只记录一次。
   正式版本已经变了（用户在评审后改过草稿），R14 会拒绝（`REPORT_REVISION_STALE`），这份修订稿就作废了；草稿不会被锁住。
-  拒绝代号：`FUSION_ADOPTION_INCOMPLETE`、`FUSION_ADOPTION_INVALID`、`FUSION_ADOPTION_CONFIRM_REQUIRED`、`FUSION_ADOPTION_LINKED`、`FUSION_ADOPTION_STALE`、`FUSION_REVIEW_ADOPTED`。
+  拒绝代号：`FUSION_ADOPTION_INCOMPLETE`、`FUSION_ADOPTION_TOO_LONG`（选择组合后超出报告长度上限）、`FUSION_ADOPTION_INVALID`、`FUSION_ADOPTION_CONFIRM_REQUIRED`、`FUSION_ADOPTION_LINKED`、`FUSION_ADOPTION_STALE`、`FUSION_REVIEW_ADOPTED`。
 
 另外：`ended=true` 表示评审已结束，之后不会再有新事件。没有分歧时不会出现 `disagreement` 和 `response`，直接到 `summary_started`。
 
