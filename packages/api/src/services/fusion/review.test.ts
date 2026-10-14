@@ -290,6 +290,10 @@ describe('review flow', () => {
     applyRefusal.value = '';
     expect(db.review!.adoption).toMatchObject({ state: 'reserved', decision: 'apply' });
     await expect(t.flow.confirmAdoption({ ...confirm, decision: 'decline' })).rejects.toThrow('FUSION_REVIEW_ADOPTED');
+    // Different choices (even an extra, irrelevant confirmation) are refused before any R14 call.
+    await expect(t.flow.confirmAdoption({ ...confirm, choices: [{ section: '定位', use: 'revised', confirmedNoFactChange: true }],
+      decision: 'apply' })).rejects.toThrow('FUSION_REVIEW_ADOPTED');
+    expect(t.applied).toEqual([]);
     expect(t.declined).toEqual([]);
     expect(await t.flow.confirmAdoption({ ...confirm, decision: 'apply' })).toMatchObject({ state: 'recorded', adopted: ['定位'] });
     expect((await t.flow.detail(reviewId)).awaitingChoice).toBe(false);

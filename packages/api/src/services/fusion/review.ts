@@ -26,6 +26,9 @@ type Source = z.infer<typeof source>;
 /** The summary's revision that passed the host check: what R14 proposes. */
 type Passed = { round: number; body: string; steps: StepValues; changeNotes: unknown; changedSections: string[]; r14Fields: StepValues };
 const ATTEMPTS = 3;
+/** JSON with sorted keys: the database stores choices as jsonb, which does not keep key order. */
+const canonical = (value: unknown): string => JSON.stringify(value, (_key, item: unknown) => item && typeof item === 'object' && !Array.isArray(item)
+  ? Object.fromEntries(Object.entries(item as Record<string, unknown>).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))) : item);
 /** R14 refusals that retrying cannot fix; transient ones (REPORT_UNAVAILABLE, auth) are retried by the client. */
 // REPORT_REVISION_DECIDED is not here: it can mean this very decision already committed.
 const PERMANENT_REFUSALS = new Set(['REPORT_REVISION_STALE', 'REPORT_SOURCE_CONFLICT', 'CONTENT_ERASED',
@@ -328,8 +331,12 @@ export function reviewFlow(deps: { admin: SupabaseClient; actorId: string;
       if (recordedChoice(view)) return adopted(view);
       if (!merged.adopted.length || !deps.apply || !deps.decline) throw new Error('FUSION_ADOPTION_INVALID');
       // A reservation binds its decision: a retry of the same request cannot switch apply to decline or back (#962 review).
-      const reserved = view.adoption as { decision?: string } | null | undefined;
-      if (reserved && reserved.decision !== input.decision) throw new Error('FUSION_REVIEW_ADOPTED');
+      // The choices too, exactly as reserved (the database completes only an identical reservation), compared before
+      // any R14 call so a retry can never apply and then fail to record (#962 review).
+      const reserved = view.adoption as { decision?: string; choices?: unknown } | null | undefined;
+      if (reserved && (reserved.decision !== input.decision || canonical(reserved.choices) !== canonical(adoptionChoices.parse(input.choices)))) {
+        throw new Error('FUSION_REVIEW_ADOPTED');
+      }
       const proposal = await proposeMerged(view, input.requestId, merged);
       if (proposal.diffHash !== input.expectedDiffHash) throw new Error('FUSION_ADOPTION_STALE');
       // Reserve the choice under the review lock before R14 decides anything: a concurrent request is refused from
