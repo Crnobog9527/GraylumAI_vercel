@@ -3,6 +3,7 @@ import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
 import { SampleJ } from '@/components/landing/preview-j/SampleJ';
 import { resolveLandingFlags } from '@/lib/landing/landing-flags';
+import { withLocalSamplePricing } from '@/lib/dev/local-sample-pricing';
 import { buildLandingPageData } from '@/lib/landing/landing-page-data';
 import { getLandingOffers } from '@/lib/landing/landing-offers';
 import { getPublicSiteSettings } from '@/lib/public-site';
@@ -19,7 +20,10 @@ export const metadata: Metadata = { title: 'Graylum 风格样稿 J', robots: NOI
 export default async function LandingPreviewJ() {
   if (isPublicIndexingEnabled(process.env[SITE_INDEXING_ENV])) notFound();
   const [{ siteName, membershipPlans, membershipPlansStatus }, offers] = await Promise.all([getPublicSiteSettings(), getLandingOffers()]);
-  // Plan prices, the Gold first month and the founder seats come from the server, as on /landing (#987).
-  const data = buildLandingPageData(resolveLandingFlags(), membershipPlansStatus === 'available' ? membershipPlans : [], offers);
-  return <SampleJ data={data} siteName={siteName} membershipHref={buildAuthHref('/profile?tab=subscription')} />;
+  // Plan prices, the Gold first month and the founder seats come from the server, as on /landing (#987). Only a local
+  // development server without that data falls back to fixed sample prices, marked as such on the cards.
+  const priced = withLocalSamplePricing(process.env, membershipPlansStatus === 'available' ? membershipPlans : [], offers);
+  const flags = resolveLandingFlags();
+  const data = buildLandingPageData(priced.sample ? { ...flags, founder: true } : flags, priced.plans, priced.offers);
+  return <SampleJ data={data} siteName={siteName} membershipHref={buildAuthHref('/profile?tab=subscription')} samplePricing={priced.sample} />;
 }

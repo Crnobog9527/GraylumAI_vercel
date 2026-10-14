@@ -73,7 +73,8 @@
 .plans { display: grid; gap: 16px; }
 .unavailable { margin-top: 32px !important; }
 @media (min-width: 900px) { .plans { grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); } }
-.plan { display: grid; align-content: start; gap: 12px; padding: 28px; border: 1px solid var(--j-line); border-radius: 28px; background: #fff; }
+.sampleTag { position: absolute; top: -11px; right: 20px; padding: 0 9px; border-radius: 999px; background: #fde68a; color: #6b4f00; font-size: 12px; font-weight: 600; line-height: 22px; }
+.plan { position: relative; display: grid; align-content: start; gap: 12px; padding: 28px; border: 1px solid var(--j-line); border-radius: 28px; background: #fff; }
 .recommended { border: 2px solid var(--j-gold); }
 .planHead { display: flex; align-items: center; justify-content: space-between; margin: 0; }
 .planHead b { font-size: 26px; font-weight: 600; letter-spacing: -.03em; }

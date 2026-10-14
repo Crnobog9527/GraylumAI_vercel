@@ -21,9 +21,11 @@ const PRICING_PAGE = '/landing/pricing';
  * kept short, each button going straight to buying that plan (#987's links); then "先聊后买" right under them and
  * the way to the full pricing page. Every number comes from the server (landing-pricing.ts, getLandingOffers).
  */
-export function PriceJ({ pricing, rows, risk, showResult, founderSeats, membershipHref }: {
+export function PriceJ({ pricing, rows, risk, showResult, founderSeats, membershipHref, sample = false }: {
   pricing: LandingPricing; rows: readonly CompareRow[]; risk: readonly GatedText[]; showResult: Record<string, boolean>;
   founderSeats: number | null; membershipHref: string;
+  /** Local preview only: the prices are the fixed samples of lib/dev/local-sample-pricing.ts. */
+  sample?: boolean;
 }) {
   const [billing, setBilling] = useState<PaywallBilling>('monthly');
   const hasYearly = pricing.cards.some(card => card.quotes.yearly);
@@ -71,6 +73,7 @@ export function PriceJ({ pricing, rows, risk, showResult, founderSeats, membersh
                 const ready = card.checkoutReady[billing];
                 return (
                   <article key={card.key} aria-label={card.name} className={cn(styles.plan, card.recommended && styles.recommended)}>
+                    {sample ? <span className={styles.sampleTag}>本机示例数据</span> : null}
                     <p className={styles.planHead}><b>{card.name}</b>{card.recommended ? <span>推荐</span> : null}</p>
                     {showResult[card.key] ? <p className={styles.planResult}>{card.result.text}</p> : null}
                     {quote ? (

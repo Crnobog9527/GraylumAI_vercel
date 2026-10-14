@@ -31,7 +31,9 @@ export type LandingData = ReturnType<typeof buildLandingPageData>;
  * product's other scenes, the Owner's four-row comparison, price (what the usual ways cost, the plan cards,
  * "先聊后买"), the FAQ and the close. The server HTML is the finished page.
  */
-export function SampleJ({ data, siteName, membershipHref }: { data: LandingData; siteName: string; membershipHref: string }) {
+export function SampleJ({ data, siteName, membershipHref, samplePricing = false }: {
+  data: LandingData; siteName: string; membershipHref: string; samplePricing?: boolean;
+}) {
   return (
     <MotionJ className={cn(light.light, styles.page)}>
       <nav aria-label="样稿切换" className={styles.sampleBar}>
@@ -60,7 +62,7 @@ export function SampleJ({ data, siteName, membershipHref }: { data: LandingData;
         <ScenesJ steps={data.flowSteps} />
         <CompareJ />
         <PriceJ pricing={data.pricing} rows={data.compareRows} risk={data.risk} showResult={data.showResult}
-          founderSeats={data.founderSeats} membershipHref={membershipHref} />
+          founderSeats={data.founderSeats} membershipHref={membershipHref} sample={samplePricing} />
         <FaqJ groups={data.faqGroups} />
         <FinalJ showStack={data.showStack} founderSeats={data.founderSeats} />
       </main>
