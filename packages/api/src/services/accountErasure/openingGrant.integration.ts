@@ -344,8 +344,9 @@ it('0150 scrubs wait for the digest-and-close commit, preserve facts and retain 
     [conversation])).rejects.toMatchObject({ code: '42501', message: 'ERASURE_PARENT_CLEARED' });
   await expect(db.query("UPDATE conversations SET title='refill' WHERE id=$1", [conversation]))
     .rejects.toMatchObject({ code: '42501' });
-  expect((await db.query("SELECT has_function_privilege('service_role',"
-    + "'ordinary_chat_claim(uuid,uuid,jsonb,uuid)','EXECUTE') AS allowed")).rows[0].allowed).toBe(false);
+  // 0150 revoked the old chat admission; LEGACY-CLOSE 0241 dropped it.
+  expect((await db.query("SELECT to_regprocedure('public.ordinary_chat_claim(uuid,uuid,jsonb,uuid)') AS fn"))
+    .rows[0].fn).toBeNull();
   await db.query('UPDATE profiles SET email=NULL,nickname=NULL WHERE id=$1', [actor.user.id]);
   expect((await admin.auth.admin.deleteUser(actor.user.id)).error).toBeNull();
   const again = await account(actor.user.email);

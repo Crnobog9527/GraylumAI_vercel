@@ -32,8 +32,5 @@ export function artifactReuse(userClient:SupabaseClient, privateClient:SupabaseC
       const v=workSourceScope.parse(input);
       return sourceSchema.nullable().parse(await rpc('artifact_work_source',{p_project_id:v.projectId,p_round_id:v.roundId}));
     },
-    async choices(sourceVersionId:string) {
-      return z.array(z.object({id:z.string(),label:z.string()})).parse(await rpc('artifact_reference_choices',{p_source_version_id:uuid.parse(sourceVersionId)}));
-    },
   };
 }
