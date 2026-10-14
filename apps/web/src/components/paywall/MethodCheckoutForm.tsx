@@ -17,6 +17,12 @@ type Props = {
   blockedReason?: string | null;
   /** Gold first month refused by the server: let the parent switch to the standard price. */
   onGoldFirstDeclined?: () => void;
+  /** Founder seats sold out at checkout: the parent drops to the standard yearly price. */
+  onFounderSoldOut?: () => void;
+  /** A standing notice for this checkout (e.g. the founder price just sold out). */
+  notice?: string | null;
+  /** Extra rule shown under the renewal line (e.g. the founder renewal rule). */
+  fineprint?: string | null;
   testIdPrefix: string;
 };
 
@@ -74,6 +80,7 @@ export function MethodCheckoutForm(props: Props) {
         <span data-testid={`${id}-tax`} style={{ color: 'var(--text-secondary)' }}>{METHOD_COPY[method].tax}</span>
       </p>
       <p className="text-xs" data-testid={`${id}-renewal`} style={muted}>{props.renewal}</p>
+      {props.fineprint ? <p className="text-xs" data-testid={`${id}-fineprint`} style={muted}>{props.fineprint}</p> : null}
       <p className="text-xs" data-testid={`${id}-refund`} style={muted}>{CHECKOUT_COPY.refundSummary}</p>
 
       <label className="flex items-start gap-2 text-sm" style={{ color: 'var(--text-secondary)' }}>
@@ -87,11 +94,13 @@ export function MethodCheckoutForm(props: Props) {
       </label>
 
       <Button data-testid={`${id}-pay`} size="lg" className="h-auto flex-col gap-0.5 whitespace-normal py-3" disabled={!canPay}
-        onClick={() => { if (purchase && canPay) void checkout.start(purchase, method, accepted); }}>
+        onClick={() => { if (purchase && canPay) void checkout.start(purchase, method, accepted, props.onFounderSoldOut); }}>
         <b>{checkout.pending ? '正在打开付款页面…' : props.cta}</b>
         {props.ctaSub ? <span className="text-xs font-normal opacity-80">{props.ctaSub}</span> : null}
       </Button>
       {!accepted && purchase && !props.blockedReason ? <p className="text-xs" style={muted}>{CHECKOUT_COPY.termsRequired}</p> : null}
+      {props.notice ? <p role="status" data-testid={`${id}-notice`} className="text-sm" style={{ color: 'var(--warning)' }}>
+        {props.notice}</p> : null}
       {props.blockedReason ? <p role="status" className="text-sm" style={{ color: 'var(--warning)' }}>{props.blockedReason}</p> : null}
       {outcome ? (
         <div role={outcome.tone === 'error' ? 'alert' : 'status'} data-testid={`${id}-outcome`} className="grid gap-2 text-sm"

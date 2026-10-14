@@ -19,7 +19,7 @@ import { currentMethodMembership, methodPlanAction, type MethodMembershipRow } f
 import { methodTaxSummary, planCheckoutTarget } from './planCheckoutTarget';
 import { useMethodCheckout } from '@/components/paywall/useMethodCheckout';
 import { MethodCheckoutDialog, type MethodCheckoutTarget } from '@/components/paywall/MethodCheckoutDialog';
-import { CHECKOUT_COPY } from '@/components/paywall/methodCheckout';
+import { CHECKOUT_COPY, founderSeatsLeft } from '@/components/paywall/methodCheckout';
 import { pickPaywallPlans } from '@/components/paywall/paywallPlans';
 export { ProfileCatalogState, CreditPackagesSection };
 
@@ -60,6 +60,7 @@ export const SubscriptionCard = memo(function SubscriptionCard({ user: _user }: 
   const [checkoutNotice, setCheckoutNotice] = useState<CheckoutNotice | null>(null);
   const [target, setTarget] = useState<{ planId: string; cycle: 'monthly' | 'yearly' } | null>(null);
   const [firstMonthDeclined, setFirstMonthDeclined] = useState(false);
+  const [founderSoldOut, setFounderSoldOut] = useState(false);
   const syncedCheckoutSessionRef = useRef<string | null>(null);
   const checkout = useMethodCheckout();
 
@@ -181,6 +182,7 @@ export const SubscriptionCard = memo(function SubscriptionCard({ user: _user }: 
   const current = currentMethodMembership(memberships);
   const methods = checkout.methodsFor('membership_plan');
   const goldFirstMonth = checkout.entry?.goldFirstMonthEligible === true && !firstMonthDeclined;
+  const founderSeats = founderSoldOut ? 0 : founderSeatsLeft(checkout.entry);
   const sellable = useMemo(() => pickPaywallPlans(apiPlans), [apiPlans]);
   const displayPlans: PlanConfig[] = apiPlans.map(plan => ({
     id: plan.id,
@@ -202,7 +204,7 @@ export const SubscriptionCard = memo(function SubscriptionCard({ user: _user }: 
   const dialogTarget: MethodCheckoutTarget | null = (() => {
     const plan = target && sellable.find(item => item.id === target.planId);
     const action = target && actionFor(target.planId, target.cycle);
-    return plan && action ? planCheckoutTarget({ plan, billing: target.cycle, action, prior: current, goldFirstMonth }) : null;
+    return plan && action ? planCheckoutTarget({ plan, billing: target.cycle, action, prior: current, goldFirstMonth, founderSeats }) : null;
   })();
 
   return (
@@ -215,7 +217,8 @@ export const SubscriptionCard = memo(function SubscriptionCard({ user: _user }: 
       }}
     >
       <MethodCheckoutDialog target={dialogTarget} checkout={checkout} onClose={() => setTarget(null)}
-        onGoldFirstDeclined={() => setFirstMonthDeclined(true)} />
+        onGoldFirstDeclined={() => setFirstMonthDeclined(true)} onFounderSoldOut={() => setFounderSoldOut(true)}
+        notice={founderSoldOut && target?.cycle === 'yearly' && dialogTarget?.purchase.offer === 'standard' ? CHECKOUT_COPY.founderSoldOut : null} />
       {/* Header */}
       <div className="mb-6 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
         <div className="flex items-center gap-3">
@@ -301,6 +304,7 @@ export const SubscriptionCard = memo(function SubscriptionCard({ user: _user }: 
             action={checkout.open ? actionFor(plan.id, billingCycle) : null}
             taxNote={methods.length > 0 ? methodTaxSummary(methods) : null}
             firstMonth={goldFirstMonth && plan.level === 'gold' && billingCycle === 'monthly'}
+            founderSeats={plan.level === 'gold' && billingCycle === 'yearly' && checkout.open ? founderSeats : 0}
             onSelect={() => setTarget({ planId: plan.id, cycle: billingCycle })} />
         ))}
       </div>

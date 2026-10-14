@@ -23,7 +23,7 @@ type Props = {
 
 /** Billing switch and plan cards; monthly is the default (MASTER_PLAN §2.1 item 51). */
 export function PaywallPlanPicker({ plans, billing, selected, disabled, quoteOptions, onBilling, onSelect }: Props) {
-  const badge = yearlyBadge(plans);
+  const badge = yearlyBadge(plans, quoteOptions?.founderUsd ?? null);
   const yearly = plans.some(plan => paywallQuote(plan, 'yearly'));
   return (
     <fieldset className="grid min-w-0 gap-3" disabled={disabled}>

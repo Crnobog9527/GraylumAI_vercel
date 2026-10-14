@@ -6,6 +6,7 @@ import { Check, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { PaywallCompareTable, PaywallPlanPicker } from './PaywallPlanPicker';
 import { MethodCheckoutForm } from './MethodCheckoutForm';
+import { CHECKOUT_COPY, GOLD_FOUNDER_YEAR_USD } from './methodCheckout';
 import { formatUsd, paywallQuote, type PaywallBilling, type PaywallLevel } from './paywallPlans';
 import { usePaywallCheckout } from './usePaywallCheckout';
 import { REPORT_DELIVERABLES, REPORT_PAYWALL_COPY as COPY } from './reportPaywallCopy';
@@ -98,6 +99,12 @@ export function ReportPaywallView({ checkout, onClose }: { checkout: PaywallChec
                   <PaywallPlanPicker plans={checkout.plans} billing={billing} selected={plan?.level ?? 'pro'}
                     quoteOptions={checkout.quoteOptions} disabled={checkout.method.pending}
                     onBilling={chooseBilling} onSelect={setSelected} />
+                  {checkout.founderSeats > 0 && plan?.level === 'gold' ? (
+                    <p data-testid="paywall-founder-seats" className="text-sm" style={{ color: 'var(--text-secondary)' }}>
+                      <b style={{ color: 'var(--text-primary)' }}>Gold 创始会员 · 年付 {formatUsd(GOLD_FOUNDER_YEAR_USD)}</b>
+                      {' '}还剩 {checkout.founderSeats} 个名额（共 50 个），满了就关闭
+                    </p>
+                  ) : null}
                   <PaywallCompareTable plans={checkout.plans} />
                 </>
               )}
@@ -106,7 +113,9 @@ export function ReportPaywallView({ checkout, onClose }: { checkout: PaywallChec
             <MethodCheckoutForm checkout={checkout.method} purchase={purchase} testIdPrefix="report-paywall"
               price={`${formatUsd(quote.amount)} ${quote.perLabel}`} renewal={quote.renewal}
               cta={`${COPY.cta} · ${formatUsd(quote.amount)}`} ctaSub={COPY.ctaSub}
-              blockedReason={purchase ? null : COPY.notReady} onGoldFirstDeclined={checkout.declineFirstMonth} />
+              blockedReason={purchase ? null : COPY.notReady} onGoldFirstDeclined={checkout.declineFirstMonth}
+              onFounderSoldOut={checkout.markFounderSoldOut} fineprint={quote.founder ? CHECKOUT_COPY.founderRule : null}
+              notice={checkout.founderSoldOut && plan.level === 'gold' && billing === 'yearly' ? CHECKOUT_COPY.founderSoldOut : null} />
           ) : null}
 
           <ul className="flex flex-wrap gap-x-4 gap-y-1 text-xs" style={{ color: 'var(--text-tertiary)' }}>

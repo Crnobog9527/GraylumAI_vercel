@@ -8,7 +8,7 @@ import {
   type CardMethod, type MethodPurchase,
 } from './methodCheckout';
 
-export type CheckoutOutcome = { tone: 'error' | 'recovery'; message: string; goldFirstIneligible: boolean };
+export type CheckoutOutcome = { tone: 'error' | 'recovery'; message: string; goldFirstIneligible: boolean; founderSoldOut: boolean };
 
 /**
  * Membership entry and the card purchase action (`payments.methodCheckout`). One in-flight request
@@ -24,7 +24,8 @@ export function useMethodCheckout() {
   const entry = membership.data;
   const open = checkoutEntryOpen(entry);
 
-  async function start(purchase: MethodPurchase, method: CardMethod, acceptedTerms: boolean) {
+  /** `onFounderSoldOut` runs when the server says the last founder seat just went: the caller drops to the standard price. */
+  async function start(purchase: MethodPurchase, method: CardMethod, acceptedTerms: boolean, onFounderSoldOut?: () => void) {
     if (inFlight.current || redirecting || !checkoutEntryOpen(entry) || !acceptedTerms) return;
     if (!cardMethods(entry, purchase.itemType).includes(method)) return;
     inFlight.current = true;
@@ -37,10 +38,15 @@ export function useMethodCheckout() {
         window.location.assign(result.url);
         return;
       }
-      setOutcome({ tone: 'recovery', goldFirstIneligible: false,
+      setOutcome({ tone: 'recovery', goldFirstIneligible: false, founderSoldOut: false,
         message: result.state === 'recovery_required' ? CHECKOUT_COPY.recovery : CHECKOUT_COPY.badUrl });
     } catch (error) {
-      setOutcome({ tone: 'error', ...describeCheckoutError(error) });
+      const refusal = describeCheckoutError(error);
+      if (refusal.founderSoldOut && onFounderSoldOut) {
+        onFounderSoldOut();
+        return;
+      }
+      setOutcome({ tone: 'error', ...refusal });
     } finally {
       inFlight.current = false;
     }

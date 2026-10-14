@@ -4,7 +4,7 @@
 import { CheckCircle2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { formatUsd } from '@/components/paywall/paywallPlans';
-import { GOLD_FIRST_MONTH_USD } from '@/components/paywall/methodCheckout';
+import { GOLD_FIRST_MONTH_USD, GOLD_FOUNDER_YEAR_USD } from '@/components/paywall/methodCheckout';
 import type { PlanAction } from './methodPlanAction';
 
 export interface PlanConfig {
@@ -34,13 +34,15 @@ function Amount({ value, highlight }: { value: string; highlight: boolean }) {
 }
 
 /** One plan on the membership page; the button opens the card checkout dialog (or is hidden while it is closed). */
-export function MembershipPlanCard({ plan, billingCycle, action, taxNote, firstMonth, onSelect }: {
+export function MembershipPlanCard({ plan, billingCycle, action, taxNote, firstMonth, founderSeats, onSelect }: {
   plan: PlanConfig;
   billingCycle: 'monthly' | 'yearly';
   /** null while card checkout is closed: no purchase entry is shown. */
   action: PlanAction | null;
   taxNote: string | null;
   firstMonth: boolean;
+  /** Real founder seats left for this card (Gold yearly only), 0 when none. */
+  founderSeats: number;
   onSelect: () => void;
 }) {
   const highlight = Boolean(plan.recommended || plan.highlight);
@@ -65,6 +67,17 @@ export function MembershipPlanCard({ plan, billingCycle, action, taxNote, firstM
       <div className="mb-4 grid justify-items-center gap-1 text-center">
         {price === 0 ? (
           <span className="text-3xl font-bold" style={{ color: 'var(--text-primary)' }}>免费</span>
+        ) : billingCycle === 'yearly' && founderSeats > 0 ? (
+          <>
+            <div className="flex items-baseline justify-center gap-1">
+              <Amount value={formatUsd(GOLD_FOUNDER_YEAR_USD)} highlight={highlight} />
+              <span className="text-sm" style={{ color: 'var(--text-tertiary)' }}>/年</span>
+            </div>
+            <span data-testid="profile-founder-seats" className="text-sm" style={{ color: 'var(--text-secondary)' }}>
+              创始会员 · 还剩 {founderSeats} 个名额（共 50 个）
+            </span>
+            <span className="text-xs" style={{ color: 'var(--text-tertiary)' }}>标准年付 {formatUsd(price)}/年</span>
+          </>
         ) : billingCycle === 'yearly' ? (
           <>
             <div className="flex items-center gap-2">

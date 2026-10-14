@@ -4,7 +4,7 @@
  * Pure pricing presentation for the paywall (PAYWALL, design v25 in docs/launch/design/paywall/).
  * Every number comes from `settings.getMembershipPlans`; nothing here invents a price or a discount.
  * The Gold first month is shown only when `payments.methodMembership` says the account is eligible;
- * the founder offer is not shown yet.
+ * the founder Gold yearly price only while the server reports founder seats left.
  */
 export type PaywallBilling = 'monthly' | 'yearly';
 export type PaywallLevel = 'pro' | 'gold';
@@ -57,9 +57,12 @@ export function yearlySavingPercent(plan: PaywallPlanSource) {
   return percent > 0 ? percent : null;
 }
 
-/** Badge on the yearly switch: the best real saving among the shown plans, or nothing. */
-export function yearlyBadge(plans: readonly PaywallPlan[]) {
-  const best = Math.max(0, ...plans.map(plan => yearlySavingPercent(plan) ?? 0));
+/** Badge on the yearly switch: the best real saving among the shown plans, or nothing. While founder seats
+ * remain, the founder Gold price counts too (record V: "最高省 40%", then "最高省 25%" once sold out). */
+export function yearlyBadge(plans: readonly PaywallPlan[], founderUsd: number | null = null) {
+  const gold = plans.find(plan => plan.level === 'gold');
+  const founder = gold && usable(founderUsd) ? Math.floor(((gold.price.monthly * 12 - founderUsd!) / (gold.price.monthly * 12)) * 100) : 0;
+  const best = Math.max(0, founder, ...plans.map(plan => yearlySavingPercent(plan) ?? 0));
   return best > 0 ? `最高省 ${best}%` : null;
 }
 
@@ -70,10 +73,11 @@ export type PaywallQuote = {
   saving: string | null;
   renewal: string;
   checkoutReady: boolean;
+  founder?: boolean;
 };
 
-/** Gold monthly first month; the caller passes it only when the server says the account is eligible. */
-export type PaywallQuoteOptions = { goldFirstMonthUsd?: number | null };
+/** Gold monthly first month and Gold yearly founder price; the caller passes each only when the server allows it. */
+export type PaywallQuoteOptions = { goldFirstMonthUsd?: number | null; founderUsd?: number | null };
 
 /** Price, renewal and cancellation text shown next to the pay button (MASTER_PLAN §2.1 item 51). */
 export function paywallQuote(plan: PaywallPlan, billing: PaywallBilling, options: PaywallQuoteOptions = {}): PaywallQuote | null {
@@ -83,6 +87,14 @@ export function paywallQuote(plan: PaywallPlan, billing: PaywallBilling, options
     return { amount: first!, perLabel: '首月', monthlyEquivalent: `之后每月 ${monthly}`, saving: null,
       renewal: `首月 ${formatUsd(first!)}，之后每月自动续费 ${monthly}，可随时在个人中心取消，取消后用到当期结束。`,
       checkoutReady: plan.checkoutReady?.monthly === true };
+  }
+  const founder = options.founderUsd;
+  if (billing === 'yearly' && plan.level === 'gold' && usable(founder) && yearlyAvailable(plan) && founder! < plan.price.yearly) {
+    const price = formatUsd(founder!);
+    return { amount: founder!, perLabel: '/ 年', monthlyEquivalent: `相当于 ${formatUsd(Math.floor((founder! / 12) * 100) / 100)}/月`,
+      saving: `创始会员 · 比按月付 12 个月省 ${formatUsd(plan.price.monthly * 12 - founder!)}`,
+      renewal: `首年 ${price}，之后每年自动续费 ${price}，可随时在个人中心取消，取消后用到当期结束。积分分 12 个月按月发放。`,
+      checkoutReady: plan.checkoutReady?.yearly === true, founder: true };
   }
   if (billing === 'monthly') {
     const amount = plan.price.monthly;

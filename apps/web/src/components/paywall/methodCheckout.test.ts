@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { describe, expect, it } from 'vitest';
 import {
-  CHECKOUT_COPY, METHOD_COPY, cardMethods, checkoutEntryOpen, describeCheckoutError, isStripeCheckoutUrl,
+  CHECKOUT_COPY, founderSeatsLeft, METHOD_COPY, cardMethods, checkoutEntryOpen, describeCheckoutError, isStripeCheckoutUrl,
   type MethodMembershipEntry,
 } from './methodCheckout';
 
@@ -56,12 +56,13 @@ describe('refusals', () => {
       ['FORBIDDEN', '账号已停用或正在注销，不能购买。'],
       ['BAD_REQUEST', '这个优惠不适用于所选套餐，请刷新页面后重试。'],
     ]) {
-      expect(describeCheckoutError(trpcError(code, message))).toEqual({ message, goldFirstIneligible: false });
+      expect(describeCheckoutError(trpcError(code, message))).toEqual({ message, goldFirstIneligible: false,
+        founderSoldOut: message === '创始会员名额已售完。' });
     }
   });
   it('marks the Gold first-month refusal so the user can switch to the standard price', () => {
     expect(describeCheckoutError(trpcError('PRECONDITION_FAILED', 'Gold 首月优惠仅限首次购买 Gold 的账号，你的账号不符合条件。')))
-      .toEqual({ message: 'Gold 首月优惠仅限首次购买 Gold 的账号，你的账号不符合条件。', goldFirstIneligible: true });
+      .toEqual({ message: 'Gold 首月优惠仅限首次购买 Gold 的账号，你的账号不符合条件。', goldFirstIneligible: true, founderSoldOut: false });
   });
   it('gives one generic line for outages, input errors and unknown failures', () => {
     expect(describeCheckoutError(trpcError('SERVICE_UNAVAILABLE', 'whatever')).message).toBe(CHECKOUT_COPY.unavailable);
@@ -74,4 +75,11 @@ describe('refusals', () => {
     expect(describeCheckoutError(trpcError('TOO_MANY_REQUESTS', '请求过于频繁，请在 42 秒后重试')).message).toBe('请求过于频繁，请在 42 秒后重试');
     expect(describeCheckoutError(trpcError('TOO_MANY_REQUESTS', 'Too many')).message).toBe(CHECKOUT_COPY.rateLimited);
   });
+});
+
+it('counts only real positive founder seats from the server', () => {
+  expect(founderSeatsLeft(entry({ founder: { total: 50, available: 13 } }))).toBe(13);
+  expect(founderSeatsLeft(entry({ founder: { total: 50, available: 0 } }))).toBe(0);
+  expect(founderSeatsLeft(entry({ founder: { total: 50, available: -1 } }))).toBe(0);
+  expect(founderSeatsLeft(entry())).toBe(0);
 });

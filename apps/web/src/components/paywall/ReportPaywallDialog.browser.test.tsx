@@ -90,7 +90,8 @@ const PLANS = [plan('free', 0, 0), plan('pro', 29, 279), plan('gold', 69, 621)];
 const ROUTES = { version: 7, card: { enabled: true }, card_cn: { enabled: true },
   wechat_pay: { enabled: false, annualVerified: false }, alipay: { enabled: false, annualVerified: false } };
 const ENTRY = { mode: 'test', routes: ROUTES, checkoutReady: true, termsVersion: 'terms-v3', goldFirstMonthEligible: false,
-  founder: { total: 50, sold: 0, reserved: 0, available: 50 }, memberships: [] };
+  founder: { total: 50, sold: 50, reserved: 0, available: 0 }, memberships: [] };
+const WITH_SEATS = { ...ENTRY, founder: { total: 50, sold: 37, reserved: 0, available: 13 } };
 const MEMBERSHIP = { executionId: null, refusal: { text: '生成完整报告需要开通会员。', membership: true } };
 
 async function open(setup: Record<string, unknown>, width = 1280) {
@@ -405,3 +406,62 @@ it('keeps the remembered paywall while only a cached paid level is known', async
     expect(errors).toEqual([]);
   } finally { await page.close(); }
 }, 20000);
+
+it('with founder seats left, Gold yearly is the $496 founder price with the real seats and the founder offer', async () => {
+  const { page, errors } = await open({ membership: WITH_SEATS });
+  try {
+    await page.getByText('年付').click();
+    await browserExpect(page.getByText('最高省 40%')).toBeVisible();
+    await page.getByTestId('paywall-plan-gold').click();
+    await browserExpect(page.getByTestId('paywall-plan-gold')).toContainText('$496');
+    await browserExpect(page.getByTestId('paywall-plan-gold')).toContainText('创始会员 · 比按月付 12 个月省 $332');
+    await browserExpect(page.getByTestId('paywall-founder-seats')).toContainText('还剩 13 个名额（共 50 个）');
+    await browserExpect(page.getByTestId('report-paywall-renewal')).toHaveText(/首年 \$496，之后每年自动续费 \$496/);
+    await browserExpect(page.getByTestId('report-paywall-fineprint')).toContainText('以后每年都按 $496 续费');
+    // Only the server's seat count: no countdown or timer copy.
+    expect(await page.getByTestId('report-paywall').innerText()).not.toMatch(/倒计时|分钟内|今天截止|社群|徽章/);
+    await page.getByTestId('report-paywall-terms').check();
+    await page.getByTestId('report-paywall-pay').click();
+    await browserExpect(page).toHaveURL(/checkout\.stripe\.com/);
+    expect(await checkouts(page)).toMatchObject([{ itemId: 'gold-plan', billingCycle: 'yearly', offer: 'founder' }]);
+    expect(errors).toEqual([]);
+  } finally { await page.close(); }
+}, 30000);
+
+it('with no founder seats, Gold yearly is the $621 standard price and nothing mentions founders', async () => {
+  const { page, errors } = await open({});
+  try {
+    await page.getByText('年付').click();
+    await browserExpect(page.getByText('最高省 25%')).toBeVisible();
+    await page.getByTestId('paywall-plan-gold').click();
+    await browserExpect(page.getByTestId('report-paywall-pay')).toContainText('$621');
+    await browserExpect(page.getByTestId('paywall-founder-seats')).toHaveCount(0);
+    expect(await page.getByTestId('report-paywall').innerText()).not.toContain('创始');
+    await page.getByTestId('report-paywall-terms').check();
+    await page.getByTestId('report-paywall-pay').click();
+    await browserExpect(page).toHaveURL(/checkout\.stripe\.com/);
+    expect(await checkouts(page)).toMatchObject([{ itemId: 'gold-plan', billingCycle: 'yearly', offer: 'standard' }]);
+    expect(errors).toEqual([]);
+  } finally { await page.close(); }
+}, 30000);
+
+it('when the last founder seat goes during checkout, it drops to $621, says so, and only charges after a new click', async () => {
+  const { page, errors } = await open({ membership: WITH_SEATS, checkoutMode: 'error',
+    checkoutError: { code: 'CONFLICT', message: '创始会员名额已售完。' } });
+  try {
+    await page.getByText('年付').click();
+    await page.getByTestId('paywall-plan-gold').click();
+    await page.getByTestId('report-paywall-terms').check();
+    await page.getByTestId('report-paywall-pay').click();
+    await browserExpect(page.getByTestId('report-paywall-notice')).toHaveText('创始会员名额刚刚售完，已改回 Gold 年付标准价，请看清价格后再付款。');
+    await browserExpect(page.getByTestId('report-paywall-pay')).toContainText('$621');
+    await browserExpect(page.getByText('最高省 25%')).toBeVisible();
+    await browserExpect(page.getByTestId('paywall-founder-seats')).toHaveCount(0);
+    await browserExpect(page).toHaveURL('http://paywall.test/');
+    await page.evaluate(() => { Object.assign(window, { checkoutMode: 'open' }); });
+    await page.getByTestId('report-paywall-pay').click();
+    await browserExpect(page).toHaveURL(/checkout\.stripe\.com/);
+    expect((await checkouts(page) as Array<{ offer: string }>).map(item => item.offer)).toEqual(['founder', 'standard']);
+    expect(errors).toEqual([]);
+  } finally { await page.close(); }
+}, 30000);

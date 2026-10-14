@@ -23,11 +23,20 @@ export type MethodMembershipEntry = {
   checkoutReady: boolean;
   termsVersion: string | null;
   goldFirstMonthEligible: boolean;
+  founder?: { total: number; available: number };
   routes: { version: number; card: { enabled: boolean }; card_cn?: { enabled: boolean } } | null;
 };
 
 /** Gold monthly first month (Owner 2026-10-12: natural month, one-time coupon). Shown only when the server says eligible. */
 export const GOLD_FIRST_MONTH_USD = 49;
+/** Founder Gold yearly: first 50 Gold yearly buyers, renews at $496 while unbroken (MASTER_PLAN §2.1 item 51 record V; 2026-10-10). */
+export const GOLD_FOUNDER_YEAR_USD = 496;
+
+/** Real seats left from the server; never a countdown or invented scarcity. */
+export function founderSeatsLeft(entry: MethodMembershipEntry | null | undefined) {
+  const left = entry?.founder?.available;
+  return typeof left === 'number' && Number.isInteger(left) && left > 0 ? left : 0;
+}
 
 export const METHOD_COPY: Record<CardMethod, { label: string; note: string | null; tax: string }> = {
   card: { label: '国际银行卡 / Apple Pay / Google Pay', note: null, tax: '税另计，结账时按所在地计算' },
@@ -45,6 +54,9 @@ export const CHECKOUT_COPY = {
   termsRequired: '请先勾选同意《服务条款》和《退款政策》。',
   // Record W: a short refund line beside checkout; the 7-day window stays in the FAQ and terms (record AA).
   refundSummary: '退款说明：付款后还没用过这次的积分，可以申请退款，具体条件见《退款政策》。',
+  founderSoldOut: '创始会员名额刚刚售完，已改回 Gold 年付标准价，请看清价格后再付款。',
+  founderRule: '创始会员：只要连续续费不中断，以后每年都按 $496 续费。取消自动续费后，权益保留到当期结束；'
+    + '到期没有续费（银行卡扣款失败有 7 天宽限期），创始价续费资格结束，之后按当时的价格重新订阅，名额不再放出。',
   mainlandHint: '如果你在中国大陆，国际银行卡付款页会提示不支持；请回来改选“中国大陆银行卡”。',
 } as const;
 
@@ -77,7 +89,7 @@ export function isStripeCheckoutUrl(value: unknown): value is string {
   }
 }
 
-export type CheckoutRefusal = { message: string; goldFirstIneligible: boolean };
+export type CheckoutRefusal = { message: string; goldFirstIneligible: boolean; founderSoldOut: boolean };
 
 const BUSINESS_CODES = new Set(['PRECONDITION_FAILED', 'CONFLICT', 'FORBIDDEN', 'BAD_REQUEST']);
 
@@ -87,11 +99,13 @@ export function describeCheckoutError(error: unknown): CheckoutRefusal {
   const raw = error && typeof error === 'object' && 'message' in error ? error.message : '';
   const message = typeof raw === 'string' ? raw.trim() : '';
   if (code === 'TOO_MANY_REQUESTS') {
-    return { message: /频繁/.test(message) && message.length <= 80 ? message : CHECKOUT_COPY.rateLimited, goldFirstIneligible: false };
+    return { message: /频繁/.test(message) && message.length <= 80 ? message : CHECKOUT_COPY.rateLimited,
+      goldFirstIneligible: false, founderSoldOut: false };
   }
   // Input validation failures arrive as a JSON issue list; they are not a business answer to show.
   if (typeof code === 'string' && BUSINESS_CODES.has(code) && message && !message.startsWith('[') && message.length <= 200) {
-    return { message, goldFirstIneligible: code === 'PRECONDITION_FAILED' && message.includes('首月') };
+    return { message, goldFirstIneligible: code === 'PRECONDITION_FAILED' && message.includes('首月'),
+      founderSoldOut: code === 'CONFLICT' && message.includes('创始会员名额已售完') };
   }
-  return { message: CHECKOUT_COPY.unavailable, goldFirstIneligible: false };
+  return { message: CHECKOUT_COPY.unavailable, goldFirstIneligible: false, founderSoldOut: false };
 }

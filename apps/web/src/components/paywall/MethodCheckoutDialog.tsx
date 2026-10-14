@@ -14,14 +14,17 @@ export type MethodCheckoutTarget = {
   renewal: string;
   cta: string;
   details?: readonly string[];
+  fineprint?: string | null;
 };
 
 /** Confirm-and-pay dialog for the membership page and credit packs. */
-export function MethodCheckoutDialog({ target, checkout, onClose, onGoldFirstDeclined }: {
+export function MethodCheckoutDialog({ target, checkout, onClose, onGoldFirstDeclined, onFounderSoldOut, notice }: {
   target: MethodCheckoutTarget | null;
   checkout: MethodCheckout;
   onClose: () => void;
   onGoldFirstDeclined?: () => void;
+  onFounderSoldOut?: () => void;
+  notice?: string | null;
 }) {
   return (
     <Dialog open={target !== null} onOpenChange={open => { if (!open && !checkout.pending) onClose(); }}>
@@ -38,7 +41,8 @@ export function MethodCheckoutDialog({ target, checkout, onClose, onGoldFirstDec
         ) : null}
         {target ? (
           <MethodCheckoutForm checkout={checkout} purchase={target.purchase} price={target.price} renewal={target.renewal}
-            cta={target.cta} testIdPrefix="method-checkout" onGoldFirstDeclined={onGoldFirstDeclined} />
+            cta={target.cta} testIdPrefix="method-checkout" onGoldFirstDeclined={onGoldFirstDeclined}
+            onFounderSoldOut={onFounderSoldOut} notice={notice} fineprint={target.fineprint} />
         ) : null}
       </DialogContent>
     </Dialog>

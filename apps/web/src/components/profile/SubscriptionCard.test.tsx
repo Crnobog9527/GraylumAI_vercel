@@ -61,7 +61,7 @@ const plan = {
 const ROUTES = { version: 7, card: { enabled: true }, card_cn: { enabled: true },
   wechat_pay: { enabled: false, annualVerified: false }, alipay: { enabled: false, annualVerified: false } };
 const ENTRY = { mode: 'test', routes: ROUTES, checkoutReady: true, termsVersion: 'terms-v3', goldFirstMonthEligible: false,
-  founder: { total: 50, sold: 0, reserved: 0, available: 50 }, memberships: [] as unknown[] };
+  founder: { total: 50, sold: 50, reserved: 0, available: 0 }, memberships: [] as unknown[] };
 
 function queryState(overrides: Record<string, unknown> = {}) {
   return { data: [], isLoading: false, isError: false, isFetching: false, refetch: vi.fn(), ...overrides };
@@ -388,6 +388,30 @@ describe('membership page in a browser', () => {
         .toEqual([{ sessionId: 'cs_test_no', checkoutState: 'canceled' }]);
       expect(canceled.errors).toEqual([]);
     } finally { await canceled.page.close(); }
+  }, 30_000);
+
+  it('sells Gold yearly at the founder price with real seats, and falls back to $621 when they sell out at checkout', async () => {
+    const { page, errors } = await open({ membership: { ...ENTRY, founder: { total: 50, sold: 49, reserved: 0, available: 1 } },
+      checkoutError: { code: 'CONFLICT', message: '创始会员名额已售完。' } });
+    try {
+      await page.getByRole('radio', { name: '按年' }).click();
+      await browserExpect(page.getByTestId('profile-founder-seats')).toHaveText('创始会员 · 还剩 1 个名额（共 50 个）');
+      await page.getByTestId('profile-membership-plan-gold').getByRole('button', { name: '开通' }).click();
+      const dialog = page.getByTestId('method-checkout-dialog');
+      await browserExpect(dialog).toContainText('开通 Gold 创始会员 · 年付');
+      await browserExpect(page.getByTestId('method-checkout-pay')).toContainText('$496');
+      await page.getByTestId('method-checkout-terms').check();
+      await page.getByTestId('method-checkout-pay').click();
+      await browserExpect(page.getByTestId('method-checkout-notice')).toHaveText('创始会员名额刚刚售完，已改回 Gold 年付标准价，请看清价格后再付款。');
+      await browserExpect(page.getByTestId('method-checkout-pay')).toContainText('$621');
+      await browserExpect(dialog).toContainText('开通 Gold 年付');
+      await browserExpect(page.getByTestId('profile-founder-seats')).toHaveCount(0);
+      await page.evaluate(() => { (window as unknown as { __pay: { checkoutError: unknown } }).__pay.checkoutError = null; });
+      await page.getByTestId('method-checkout-pay').click();
+      await browserExpect(page).toHaveURL(/checkout\.stripe\.com/);
+      expect((sentByPage.get(page) as Array<{ offer: string }>).map(item => item.offer)).toEqual(['founder', 'standard']);
+      expect(errors).toEqual([]);
+    } finally { await page.close(); }
   }, 30_000);
 
   it('fits a 375px phone: plans and the checkout dialog without horizontal scrolling', async () => {
