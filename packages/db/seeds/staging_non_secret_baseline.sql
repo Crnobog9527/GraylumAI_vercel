@@ -69,6 +69,11 @@ SET value = EXCLUDED.value;
 -- refuse here; change such amounts through the admin catalog save, which replaces the price and its mapping together.
 DO $seed_price_guard$
 BEGIN
+  -- Take the row locks pay_common_save_catalog takes, so a concurrent catalog save cannot add a mapping after this check;
+  -- this transaction keeps them until the upserts below commit.
+  PERFORM 1 FROM public.membership_plans WHERE level IN ('free', 'pro', 'gold') ORDER BY id FOR UPDATE;
+  PERFORM 1 FROM public.credit_packages WHERE id IN ('30000000-0000-4000-8000-000000000001',
+    '30000000-0000-4000-8000-000000000002', '30000000-0000-4000-8000-000000000003') ORDER BY id FOR UPDATE;
   IF EXISTS (
     SELECT 1
     FROM (VALUES ('free', 'monthly', 0), ('free', 'yearly', 0), ('pro', 'monthly', 2900), ('pro', 'yearly', 27900),
