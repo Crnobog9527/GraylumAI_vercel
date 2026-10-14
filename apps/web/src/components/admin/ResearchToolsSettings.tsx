@@ -113,7 +113,8 @@ export function ResearchToolsSettings() {
       setNotice('联网搜索设置已保存（已回读确认）。');
     } catch (error) {
       setFailure(researchToolsError(error as Parameters<typeof researchToolsError>[0], 'save'));
-      void view.refetch();
+      const reread = await view.refetch();
+      if (reread.error) setFailure('保存没有成功，重新读取也失败了。请点“重新读取”拿到最新设置后再保存。');
     }
   }
 
@@ -129,10 +130,16 @@ export function ResearchToolsSettings() {
       {view.error && !data ? <div role="alert" className="space-y-2">
         <p>{researchToolsError(view.error, 'read')}</p>
         <Button variant="outline" onClick={() => { void view.refetch(); }}>重新读取</Button>
-      </div> : !data || !draft ? <p>读取中…</p>
-        : <ResearchToolsPanel view={data} draft={draft} onChange={next => { setNotice(null); setDraft(next); }}
+      </div> : !data || !draft ? <p>读取中…</p> : <>
+        {/* A failed reread keeps the cached data on screen; saving stays blocked until a fresh read. */}
+        {view.error && <div role="alert" className="mb-3 space-y-2" data-testid="research-tools-stale">
+          <p>{researchToolsError(view.error, 'read')} 当前显示的可能不是最新设置，读取成功前不能保存。</p>
+          <Button variant="outline" onClick={() => { void view.refetch(); }}>重新读取</Button>
+        </div>}
+        <ResearchToolsPanel view={data} draft={draft} onChange={next => { setNotice(null); setDraft(next); }}
           onSave={() => { void onSave(); }}
-          saving={save.isPending} notice={notice} failure={failure} />}
+          saving={save.isPending || Boolean(view.error)} notice={notice} failure={failure} />
+      </>}
     </CardContent>
   </Card>;
 }
