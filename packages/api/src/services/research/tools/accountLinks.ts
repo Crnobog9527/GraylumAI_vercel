@@ -82,7 +82,9 @@ export function parseProfileLink(link: string): CanonicalAccount | null {
  * Every supported profile URL is printable ASCII, so a link ends at the first other character (spaces,
  * Chinese text and full-width punctuation such as ！？：”) or ASCII sentence punctuation.
  */
-const LINK = /https?:\/\/[\x21-\x7e]+/gi;
+// A link must stand on its own: at the start of the message or after a non-ASCII-word character, so
+// `nothttps://…` or `javascript:https://…` is not a profile link.
+const LINK = /(?<![A-Za-z0-9:/._@%+-])https?:\/\/[\x21-\x7e]+/gi;
 const NOT_IN_LINK = /[<>"'()[\],;!?]/;
 /** Sentence-ending dots or colons are not part of a link; no supported handle can end with them. */
 const TRAILING = /[.:]+$/;
