@@ -12,10 +12,12 @@ export { openOrganizer } from './payg-wait';
  * `refetch` re-reads whatever the page shows of the session after every resume; `onResult`
  * sees each resume's answer before that (the report page reads its refusal code from it).
  */
-export function usePaygResume(refetch: () => Promise<unknown>, onResult?: (result: unknown) => void) {
+export function usePaygResume(refetch: () => Promise<unknown>, onResult?: (result: unknown) => void,
+  /** A page that streams its turns resumes through it (runtime.resumeStream); the default is runtime.resume. */
+  resumeCall?: (token: { executionId: string; cursor: number; epoch: number }) => Promise<unknown>) {
   const resume = trpc.runtime.resume.useMutation();
-  const latest = useRef({ call: resume.mutateAsync, refetch, onResult });
-  latest.current = { call: resume.mutateAsync, refetch, onResult };
+  const latest = useRef({ call: resumeCall ?? resume.mutateAsync, refetch, onResult });
+  latest.current = { call: resumeCall ?? resume.mutateAsync, refetch, onResult };
   const [state, setState] = useState<PaygResumeState>({ resumingId: null, blockedId: null, outcomes: {} });
   const controller = useMemo(() => paygResumeController({
     call: async token => {
