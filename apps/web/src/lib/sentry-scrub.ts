@@ -34,6 +34,8 @@ export const APP_SEGMENTS = new Set(['about', 'acceptable-use', 'access-denied',
   'verify-email', 'waffo', 'webhook', 'workbench', 'zh-tw', 'zimeiti-jingying', 'zimeiti-kecheng',
   // Style samples D, E and G (PUBLIC-SITE, /landing/preview/d, /e and /g), removed with the samples.
   'd', 'e', 'g',
+  // FUSION-REVIEW animation prototype (/landing/preview/jury), removed with the prototype.
+  'jury',
   '_next', 'static', 'chunks', 'app', 'pages', 'css', 'media']);
 const OWN_HOST = /(^|\.)graylum\.com$|\.vercel\.app$|^localhost$|^127\.0\.0\.1$/;
 
