@@ -67,6 +67,15 @@ LANGUAGE sql STABLE SET search_path=public,pg_temp AS $$
   WHERE r.actor_id=a AND r.fusion_group_id IS NOT NULL AND c.created_at>=clock_timestamp()-interval '7 days';
 $$;
 
+-- A dispatched Fusion call still in flight: unsettled and still automatically recoverable. Once its lookup
+-- budget is spent or its recovery deadline passed it waits for manual review and no longer occupies the
+-- user's review slot (its own hold is kept, FUSION-REVIEW §3.3).
+CREATE OR REPLACE FUNCTION public.fusion_call_in_flight(c bill2_calls) RETURNS boolean
+LANGUAGE sql STABLE SET search_path=public,pg_temp AS $$
+  SELECT c.dispatched_at IS NOT NULL AND c.settled_at IS NULL AND c.recovery_attempts<3
+    AND clock_timestamp()<=coalesce(c.recovery_deadline,c.created_at+interval '24 hours');
+$$;
+
 -- Start a review of the current formal version. Idempotent by request. Refuses: switch off, no
 -- permission, a stale version, another review in progress or any dispatched Fusion call not yet settled
 -- (in-flight risk counts, §3.3), the breaker, a version that ended in failure 3 times in a row, and an
@@ -98,7 +107,7 @@ BEGIN
     OR NOT content_erasure_artifact_readable(p_actor_id,ver.id) THEN RAISE EXCEPTION 'FUSION_REVIEW_STALE'; END IF;
   IF EXISTS(SELECT 1 FROM fusion_reviews WHERE actor_id=p_actor_id AND state IN ('running','paused'))
     OR EXISTS(SELECT 1 FROM bill2_calls c JOIN bill2_runs br ON br.id=c.run_id WHERE br.actor_id=p_actor_id
-      AND br.fusion_group_id IS NOT NULL AND c.dispatched_at IS NOT NULL AND c.settled_at IS NULL) THEN
+      AND br.fusion_group_id IS NOT NULL AND fusion_call_in_flight(c)) THEN
     RAISE EXCEPTION 'FUSION_REVIEW_ACTIVE'; END IF;
   usage:=fusion_review_breaker_usage(p_actor_id);
   IF (usage->>'noDeliveryCalls')::int>=coalesce((v#>>'{review,breaker,noDeliveryCalls}')::int,10)
@@ -235,7 +244,8 @@ BEGIN
   UPDATE fusion_reviews rv SET state='paused',updated_at=clock_timestamp()
   WHERE rv.state='running' AND rv.updated_at<=clock_timestamp()-p_idle
     AND NOT EXISTS(SELECT 1 FROM bill2_runs br JOIN bill2_calls c ON c.run_id=br.id WHERE br.actor_id=rv.actor_id
-      AND br.fusion_group_id IN (SELECT (x->>'groupId')::uuid FROM jsonb_array_elements(rv.steps) x) AND c.settled_at IS NULL);
+      AND br.fusion_group_id IN (SELECT (x->>'groupId')::uuid FROM jsonb_array_elements(rv.steps) x)
+      AND (fusion_call_in_flight(c) OR (c.dispatched_at IS NULL AND c.settled_at IS NULL)));
   GET DIAGNOSTICS n=ROW_COUNT;
   RETURN n;
 END $$;
@@ -247,7 +257,8 @@ DO $$ DECLARE f text; BEGIN
     EXECUTE format('REVOKE ALL ON FUNCTION public.%s FROM PUBLIC,anon,authenticated,service_role', f);
     EXECUTE format('GRANT EXECUTE ON FUNCTION public.%s TO service_role', f);
   END LOOP;
-  FOREACH f IN ARRAY ARRAY['fusion_review_settings(uuid)','fusion_review_breaker_usage(uuid)','fusion_review_view(fusion_reviews)'] LOOP
+  FOREACH f IN ARRAY ARRAY['fusion_review_settings(uuid)','fusion_review_breaker_usage(uuid)','fusion_review_view(fusion_reviews)',
+    'fusion_call_in_flight(bill2_calls)'] LOOP
     EXECUTE format('REVOKE ALL ON FUNCTION public.%s FROM PUBLIC,anon,authenticated,service_role', f);
   END LOOP;
 END $$;

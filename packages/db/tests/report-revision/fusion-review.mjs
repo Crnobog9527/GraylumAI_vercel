@@ -94,12 +94,17 @@ export async function runFusionReview({db,Client,connectionString,report}) {
   assert.equal((await rpc(db,'bill2_dispatch',f.actor,s2.run.run,c2.calls[0].id,c2.calls[0].dispatchToken)).dispatch,true);
   await service(db,'fusion_review_close',f.actor,rv2.reviewId,'stopped');
   await assert.rejects(start(db,f),/FUSION_REVIEW_ACTIVE/,'stopped review with a dispatched call still blocks');
+  // Once its automatic cost lookups are spent it waits for manual review and frees the slot (§3.3).
+  await db.query('UPDATE bill2_calls SET recovery_attempts=3 WHERE id=$1',[c2.calls[0].id]);
+  const manual = await start(db,f);
+  await service(db,'fusion_review_close',f.actor,manual.reviewId,'stopped');
+  await db.query('UPDATE bill2_calls SET recovery_attempts=0 WHERE id=$1',[c2.calls[0].id]);
   await rpc(db,'bill2_record',f.actor,s2.run.run,c2.calls[0].id,{provider:s2.run.claimPayload.provider,account:'sandbox',
     model:s2.run.claimPayload.model,protocol:s2.run.claimPayload.protocol,providerId:'generation-'+c2.calls[0].id,source:'response',
     sourceHash:'c'.repeat(64),observedAt:new Date().toISOString(),coverage:'request_total',final:true,cost:'0.0004',currency:'USD',
     usage:{inputTokens:400,outputTokens:0}});
   await rpc(db,'bill2_finalize',f.actor,s2.run.run);
-  report.checks.push('a stopped review with a dispatched, unsettled call still occupies the user slot until it settles');
+  report.checks.push('a stopped review with a dispatched, unsettled call occupies the user slot until it settles or enters manual review');
 
   // Idle pause and resume; "end review" only from paused.
   const rv3 = await start(db,f);
