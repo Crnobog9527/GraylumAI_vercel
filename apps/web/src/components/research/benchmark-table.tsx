@@ -4,6 +4,7 @@ import {
   CATEGORY_LABELS, cellSourceNumbers, cellText, COLUMNS, numberSources, type BenchmarkRow,
 } from "./benchmark-table-model";
 import { DATA_SOURCE_NOTE, MISSING_TEXT, platformLabel } from "./research-model";
+import { RefreshButton } from "./refresh-button";
 import styles from "./research-table.module.css";
 
 /**
@@ -11,7 +12,12 @@ import styles from "./research-table.module.css";
  * account. Every number cites its source number; a number the evidence cannot support reads "缺失 / 未取到".
  * On a phone each account becomes a stacked block with the column names inline.
  */
-export function BenchmarkTable({ rows, now = new Date() }: { rows: BenchmarkRow[]; now?: Date }) {
+export function BenchmarkTable({ rows, now = new Date(), onRefresh }: {
+  rows: BenchmarkRow[];
+  now?: Date;
+  /** Asks the host for a refresh grant for one row; absent = no refresh buttons (e.g. a read-only report). */
+  onRefresh?: (row: BenchmarkRow) => Promise<void>;
+}) {
   const { entries, numberOf } = numberSources(rows);
   const qualified = rows.filter(row => row.qualified).length;
   return (
@@ -39,6 +45,7 @@ export function BenchmarkTable({ rows, now = new Date() }: { rows: BenchmarkRow[
                     {row.qualified ? "合格" : "不计入"}
                   </span>
                 </span>
+                {onRefresh && <RefreshButton account={row.account} onRefresh={() => onRefresh(row)} />}
               </th>
               {COLUMNS.map(column => {
                 const value = cellText(row, column.key, now);
@@ -64,6 +71,7 @@ export function BenchmarkTable({ rows, now = new Date() }: { rows: BenchmarkRow[
           ))}
         </ol>
       )}
+      {onRefresh && <p className={styles.note}>点“刷新”会重新读取这个账号的最新数据，算一次新的查询。</p>}
       <p className={styles.note}>{DATA_SOURCE_NOTE}缺失的数字标为“{MISSING_TEXT}”，不按 0 计算。</p>
     </section>
   );

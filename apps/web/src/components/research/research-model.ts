@@ -72,7 +72,7 @@ function accountsLabel(value: unknown): { query: string; platforms: string[] } {
 }
 
 /** Query and data kind of a call; null for the free card tools, which are not searches. */
-function describeRequest(tool: ResearchToolName, rawArgs: unknown): { query: string; line: string } | null {
+export function describeRequest(tool: ResearchToolName, rawArgs: unknown): { query: string; line: string } | null {
   const args = record(rawArgs);
   switch (tool) {
     case "social_search":

@@ -7,7 +7,10 @@ import { DATA_SOURCE_NOTE, describeCall, MISSING_TEXT } from "../research-model"
 import {
   buildCandidateSubmission, buildKeywordSubmission, cardErrorText, initialKeywordDraft, keywordProblem,
 } from "../selection-card-model";
-import { CALLS, CANDIDATE_CARD, FOLLOW_UP_CARD, KEYWORD_CARD, NOW, ROWS } from "./fixtures";
+import { publicLink } from "../evidence-list";
+import { refreshErrorText } from "../refresh-button";
+import { chargeText } from "../search-charges";
+import { CALLS, CANDIDATE_CARD, CHARGES, FOLLOW_UP_CARD, KEYWORD_CARD, NOW, ROWS } from "./fixtures";
 
 describe("describeCall", () => {
   const views = CALLS.map(describeCall);
@@ -98,5 +101,22 @@ describe("benchmark table", () => {
     expect(cellSourceNumbers(ROWS[0]!, "medianViews", numberOf)).toEqual([2]);
     expect(cellSourceNumbers(ROWS[1]!, "medianViews", numberOf)).toEqual([]);
     expect(cellSourceNumbers(ROWS[1]!, "lastPublishedAt", numberOf)).toEqual([4]);
+  });
+});
+
+describe("search charges and evidence", () => {
+  it("shows an amount only for a paid search and says free otherwise", () => {
+    expect(CHARGES.map(chargeText)).toEqual(["0.3 积分", "1 积分", "没取到数据，不收费", "结果待核，不收费", "不收费（这次没有拿到用量记录）"]);
+  });
+
+  it("links only plain public http(s) sources", () => {
+    expect(publicLink("https://www.douyin.com/user/a")).toBe("https://www.douyin.com/user/a");
+    expect(publicLink("javascript:alert(1)")).toBeNull();
+    expect(publicLink("https://user:pw@example.com/")).toBeNull();
+  });
+
+  it("maps refresh errors to plain sentences", () => {
+    expect(refreshErrorText(new Error("RESEARCH_REFRESH_INVALID"))).toBe("这个账号现在不能刷新，可能正在读取中，请稍后再试。");
+    expect(refreshErrorText(new Error("boom"))).toBe("刷新没有成功，请稍后再试。");
   });
 });

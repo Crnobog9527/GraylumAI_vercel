@@ -33,3 +33,10 @@
   .table td::before{content:attr(data-label);color:#8a8a8a;font-size:12px}
   .table td>span{margin-left:auto;text-align:right}
 }
+.refresh{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-top:4px}
+.refreshButton{display:inline-flex;align-items:center;gap:4px;height:24px;padding:0 8px;border:1px solid #ececec;border-radius:999px;
+  background:#fff;color:#555;font:inherit;font-size:12px;cursor:pointer}
+.refreshButton:hover:not(:disabled){background:#f4f4f5;color:#262626}
+.refreshButton:disabled{color:#aaa;cursor:not-allowed}
+.refreshError{color:#9a3b2e;font-size:12px;font-weight:400}
+@media(max-width:480px){.refreshButton{height:32px;padding:0 12px}}

@@ -18,7 +18,7 @@ beforeAll(async () => {
   const require = createRequire(import.meta.url);
   const { build } = await import(pathToFileURL(createRequire(require.resolve("vitest/package.json")).resolve("vite")).href);
   const modules = Object.fromEntries(["../research-call-list.tsx", "../keyword-card.tsx", "../candidate-card.tsx",
-    "../benchmark-table.tsx", "./fixtures.ts"].map(path => [path, JSON.stringify(here(path))]));
+    "../benchmark-table.tsx", "../search-charges.tsx", "../evidence-list.tsx", "./fixtures.ts"].map(path => [path, JSON.stringify(here(path))]));
   const bundle = await build({ configFile: false, logLevel: "silent",
     define: { "process.env.NODE_ENV": JSON.stringify("development") },
     oxc: { jsx: { runtime: "automatic" } },
@@ -32,6 +32,8 @@ beforeAll(async () => {
           import {KeywordCardView} from ${modules["../keyword-card.tsx"]};
           import {CandidateCardView} from ${modules["../candidate-card.tsx"]};
           import {BenchmarkTable} from ${modules["../benchmark-table.tsx"]};
+          import {SearchCharges} from ${modules["../search-charges.tsx"]};
+          import {EvidenceList} from ${modules["../evidence-list.tsx"]};
           import * as f from ${modules["./fixtures.ts"]};
           window.submissions=[];
           const confirm=card=>async submission=>{window.submissions.push({card:card.cardId,submission});
@@ -47,7 +49,10 @@ beforeAll(async () => {
             e(KeywordCardView,{card:f.KEYWORD_CARD,onConfirm:confirm(f.KEYWORD_CARD)}),
             e(CandidateCardView,{card:f.CANDIDATE_CARD,onConfirm:confirm(f.CANDIDATE_CARD)}),
             e(CandidateCardView,{card:f.FOLLOW_UP_CARD,onConfirm:confirm(f.FOLLOW_UP_CARD)}),
-            e(BenchmarkTable,{rows:f.ROWS,now:f.NOW})));`;
+            e(BenchmarkTable,{rows:f.ROWS,now:f.NOW,onRefresh:async row=>{window.refreshes=(window.refreshes||0)+1;
+              await new Promise(r=>setTimeout(r,50));if(row.account==='sample_3')throw new Error('RESEARCH_REFRESH_INVALID');}}),
+            e(SearchCharges,{charges:f.CHARGES}),
+            e(EvidenceList,{entries:f.EVIDENCE})));`;
       } }],
     build: { write: false, minify: false, cssCodeSplit: false, lib: { entry, name: "ResearchCardsTest", formats: ["iife"] } },
   });
@@ -120,6 +125,23 @@ for (const width of [1440, 375]) {
       const table = page.getByRole("region", { name: "对标表" });
       await ui(table.getByText("缺失 / 未取到").first()).toBeVisible();
       await ui(table).toContainText("合格 3 个");
+      await table.getByRole("button", { name: "刷新 sample_1 的数据" }).click();
+      await ui(table.getByRole("button", { name: "刷新 sample_1 的数据" })).toHaveText("已申请刷新");
+      await ui(table.getByRole("button", { name: "刷新 sample_1 的数据" })).toBeDisabled();
+      await table.getByRole("button", { name: "刷新 sample_3 的数据" }).click();
+      await ui(table.getByRole("alert")).toHaveText("这个账号现在不能刷新，可能正在读取中，请稍后再试。");
+      expect(await page.evaluate(() => (window as unknown as { refreshes: number }).refreshes)).toBe(2);
+
+      const charges = page.getByRole("region", { name: "本次回复里的搜索" });
+      await ui(charges.getByRole("listitem")).toHaveCount(5);
+      await ui(charges).toContainText("0.3 积分");
+      await ui(charges).toContainText("结果待核，不收费");
+      const evidence = page.getByRole("region", { name: "取数记录" });
+      await ui(evidence.locator("li[class*=evidence]")).toHaveCount(3);
+      await ui(evidence.getByRole("link", { name: /javascript/ })).toHaveCount(0);
+      await ui(evidence).toContainText("另有 1 个来源");
+      const shown = (await page.textContent("main")) ?? "";
+      for (const word of ["TikHub", "Parallel", "Firecrawl", "tikhub", "美元"]) expect(shown).not.toContain(word);
       await shot(page, `research-${width}-after`);
 
       const submissions = await page.evaluate(() => (window as unknown as { submissions: unknown[] }).submissions);

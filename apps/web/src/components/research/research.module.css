@@ -79,3 +79,20 @@
   .reference{flex-wrap:wrap}
   .reference .refTag{margin-left:26px}
 }
+
+/* ---- Search charges in the credit record ---- */
+.charges{display:grid;gap:6px;font-family:var(--font-primary);color:#262626}
+.chargeList{display:grid;gap:2px;margin:0;padding:0;list-style:none}
+.chargeRow{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;padding:6px 10px;border-radius:8px;
+  background:#fafafa;font-size:13px;line-height:1.6}
+.chargeWhat{display:grid;min-width:0;overflow-wrap:anywhere}
+.chargeAmount{flex:none;color:#777;font-size:12px;text-align:right}
+.chargeAmount[data-charged="true"]{color:#262626;font-variant-numeric:tabular-nums}
+
+/* ---- Evidence in the library ---- */
+.evidenceList{display:grid;gap:8px;margin:0;padding:0;list-style:none}
+.evidence{display:grid;gap:4px;padding:10px 12px;border:1px solid #f0f0f0;border-radius:10px}
+.evidenceTop{display:flex;align-items:baseline;justify-content:space-between;gap:12px;font-size:13px;line-height:1.6}
+.sourceLinks{display:grid;gap:2px;margin:0;padding:0;list-style:none;font-size:12px;line-height:18px}
+.sourceLinks a{color:#555;overflow-wrap:anywhere}
+.evidenceBack{justify-self:start;color:#555;font-size:12px;line-height:18px}

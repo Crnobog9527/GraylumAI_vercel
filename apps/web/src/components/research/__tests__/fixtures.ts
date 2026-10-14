@@ -4,6 +4,8 @@
 import type { BenchmarkRow } from "../benchmark-table-model";
 import type { ResearchCall } from "../research-model";
 import type { CandidateCard, KeywordCard } from "../selection-card-model";
+import type { EvidenceEntry } from "../evidence-list";
+import type { SearchCharge } from "../search-charges";
 
 export const NOW = new Date("2026-10-15T08:00:00Z");
 
@@ -57,4 +59,25 @@ export const ROWS: BenchmarkRow[] = [
   { platform: "douyin", account: "sample_head_1", category: "head_reference", qualified: false, metrics: {
     followers: metric(2_350_000, ["ev20#1"]), medianViews: metric(410000, ["ev22#1"]), engagementRate: metric(0.021, ["ev22#1"]),
     postsPerWeek: metric(7, ["ev22#1"]), lastPublishedAt: { value: null, refs: [] } } },
+];
+
+export const CHARGES: SearchCharge[] = [
+  { callId: "b1", tool: "social_search", args: { platform: "douyin", keywords: ["职场穿搭"] }, settlement: "tool_usage", userCredits: "0.30" },
+  { callId: "b2", tool: "web_search", args: { query: "通勤穿搭 趋势" }, settlement: "tool_usage", userCredits: "1.00" },
+  { callId: "b3", tool: "social_account", args: { platform: "bilibili", account: "sample_b" }, settlement: "tool_failed_charged", userCredits: "0" },
+  { callId: "b4", tool: "web_fetch", args: { url: "https://example.com/article" }, settlement: "tool_unknown", userCredits: null },
+  { callId: "b5", tool: "web_search", args: { query: "胶囊衣橱" }, settlement: "tool_no_usage", userCredits: null },
+];
+
+export const EVIDENCE: EvidenceEntry[] = [
+  { evidenceId: "ev1", tool: "social_account", args: { platform: "douyin", account: "sample_1" }, state: "succeeded",
+    fetchedAt: "2026-10-14T09:30:00Z", itemCount: 28, truncated: false,
+    sourceUrls: ["https://www.douyin.com/user/sample_1", "https://www.douyin.com/video/1", "https://www.douyin.com/video/2",
+      "https://www.douyin.com/video/3", "javascript:alert(1)"],
+    conversationTitle: "职场穿搭账号定位", conversationHref: "/positioning/draft-1" },
+  { evidenceId: "ev9", tool: "web_search", args: { query: "通勤穿搭 趋势" }, state: "unknown", fetchedAt: null, itemCount: null,
+    truncated: false, sourceUrls: [], conversationTitle: "职场穿搭账号定位", conversationHref: "/positioning/draft-1" },
+  { evidenceId: "ev10", tool: "web_fetch", args: { url: "https://example.com/a/very/long/path/that/keeps/going/and/going/for/the/phone/width" },
+    state: "failed", fetchedAt: "2026-10-14T09:31:00Z", itemCount: null, truncated: false, sourceUrls: [],
+    conversationTitle: "自由对话", conversationHref: "/runtime?session=s1" },
 ];
