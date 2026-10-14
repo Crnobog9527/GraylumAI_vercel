@@ -149,7 +149,13 @@ export async function researchToolCases({db,Client,connectionString,report,creat
     const g = await make({route:f.policy.model});
     await assert.rejects(claimTool(db,g,1),/BILL2_PAYG_METERING_BLOCKED/);
     await db.query('UPDATE bill2_calls SET budget_conflict=false WHERE id=$1',[c.id]);
-    report.checks.push('RT-2 balance cap: H=min(G,A), never negative; usage above the frozen bound is absorbed and blocks the route for new claims');
+    // Usage above the unit limit blocks the route even when the rounded cost stays within the bound.
+    const tiny = await make({policy:{upperUsd:'0.000000000001',toolPricing:pricing({price:'0.000000000001'})}});
+    const t = await claimTool(db,tiny,1);
+    await rpc(db,'bill2_record',tiny.actor,tiny.run,t.id,result(t,'delivered','1.01','0.000000000001'));
+    assert.equal((await call(db,t.id)).budget_conflict,true);
+    await db.query('UPDATE bill2_calls SET budget_conflict=false WHERE id=$1',[t.id]);
+    report.checks.push('RT-2 balance cap: H=min(G,A), never negative; usage above the frozen bound or unit limit is absorbed and blocks the route for new claims');
   }
 
   // No host result after dispatch: wait, then settle as unknown at the recovery deadline.

@@ -184,7 +184,9 @@ BEGIN
   UPDATE bill2_calls SET provider_id=c.id::text,selected_cost_usd=cost,supplier_cost_state=cost_state,
     supplier_cost_bound_usd=CASE WHEN cost_state='pending' THEN c.upper_usd END,
     state=CASE WHEN cost_state='pending' THEN 'unknown' ELSE 'responded' END,
+    -- Usage above the frozen unit limit fails the route closed even when rounding keeps the USD within the bound.
     budget_conflict=budget_conflict OR coalesce(cost>c.upper_usd,false)
+      OR coalesce(units::numeric>(pricing->>'maxUnitsPerCall')::numeric,false)
   WHERE id=c.id;
   IF r.state IN ('settled','refunded') THEN
     UPDATE bill2_runs SET provider_cost_usd=(SELECT CASE WHEN count(*) FILTER(WHERE dispatched_at IS NOT NULL AND selected_cost_usd IS NULL)=0
