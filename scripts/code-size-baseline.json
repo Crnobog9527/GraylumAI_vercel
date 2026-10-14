@@ -66,7 +66,6 @@
   "packages/api/src/routers/workbench.ts": {"longLines":1},
   "packages/api/src/services/artifacts/chat.ts": {"longLines":1},
   "packages/api/src/services/artifacts/modelPolicy.ts": {"longLines":1},
-  "packages/api/src/services/artifacts/reuse.ts": {"longLines":1},
   "packages/api/src/services/artifacts/store.ts": {"longLines":6},
   "packages/api/src/services/artifacts/workbench.ts": {"longLines":4},
   "packages/api/src/services/artifacts/workflow.ts": {"longLines":2},

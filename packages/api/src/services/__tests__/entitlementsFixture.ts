@@ -2,7 +2,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { createTRPCContext } from '../../trpc';
 type ApiContext = Awaited<ReturnType<typeof createTRPCContext>>;
-import { defaultMembershipEntitlements } from '../membershipEntitlementConfig';
+import { defaultMembershipEntitlements, defaultPublishMonitorEntitlements } from '../membershipEntitlementConfig';
 export const actorId = '00000000-0000-4000-8000-00000000e001';
 export const planIds = {
   free: '00000000-0000-4000-8000-00000000e011',
@@ -15,7 +15,7 @@ export function fixture(level: 'free' | 'pro' | 'gold' = 'pro') {
     profiles: [{ id: actorId, role: 'user', status: 'active', is_deleted: 'false', membership_level: level,
       nickname: 'Test', email: 'entitlements@example.test' }],
     membership_plans: (['free', 'pro', 'gold'] as const).map(tier => ({
-      id: planIds[tier], level: tier, name: tier, is_active: 'true', ...defaultMembershipEntitlements(tier),
+      id: planIds[tier], level: tier, name: tier, is_active: 'true', ...defaultMembershipEntitlements(tier), ...defaultPublishMonitorEntitlements(tier),
       monthly_price: 100, monthly_credits: 200, allow_export: 'true', allow_batch_export: 'false',
     })),
     user_subscriptions: [], payment_orders: [], system_settings: [{ key: 'fusion_compare_max_models', value: 4 }],

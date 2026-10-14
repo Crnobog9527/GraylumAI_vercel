@@ -5,7 +5,7 @@ import { z } from 'zod';
 import { evaluateAction, getState, loadLatestMembershipFacts } from './membershipEligibility';
 import {
   entitlementRowShape, FUSION_COMPARE_SETTING, fusionCompareLimitSchema, membershipLevelSchema,
-  type MembershipLevel,
+  publishMonitorEntitlementShape, type MembershipLevel,
 } from './membershipEntitlementConfig';
 
 const profileSchema = z.object({
@@ -14,6 +14,10 @@ const profileSchema = z.object({
   is_deleted: z.literal('false'),
 });
 const planSchema = z.object({ id: z.string(), level: membershipLevelSchema, ...entitlementRowShape });
+const publishPlanSchema = z.object(publishMonitorEntitlementShape);
+const PUBLISH_COLUMNS = 'allow_publish,own_data_window_days,allow_benchmark_monitor,allow_weekly_auto_review';
+const PUBLISH_CLOSED = Object.freeze({ allow_publish: false, own_data_window_days: 0,
+  allow_benchmark_monitor: false, allow_weekly_auto_review: false });
 
 function unavailable(): never {
   throw new TRPCError({ code: 'SERVICE_UNAVAILABLE', message: 'ENTITLEMENTS_UNAVAILABLE' });
@@ -26,6 +30,14 @@ async function readPlan(client: SupabaseClient, level: MembershipLevel) {
   const parsed = z.array(planSchema).length(1).safeParse(data);
   if (error || !parsed.success) unavailable();
   return parsed.data[0]!;
+}
+
+// PUBLISH-MONITOR fields (0240) are read separately and fail closed, so a database without 0240 (deployment
+// window) or a bad value only switches these new features off and never blocks the existing entitlements.
+async function readPublishPlan(client: SupabaseClient, planId: string) {
+  const { data, error } = await client.from('membership_plans').select(PUBLISH_COLUMNS).eq('id', planId).limit(2);
+  const parsed = z.array(publishPlanSchema).length(1).safeParse(data);
+  return error || !parsed.success ? PUBLISH_CLOSED : parsed.data[0]!;
 }
 
 // A fresh read for a NEW action. This projection is not a Runtime admission token: consumers
@@ -58,6 +70,7 @@ export async function readMembershipEntitlements(client: SupabaseClient, profile
       state = 'inconsistent';
       plan = await readPlan(client, level);
     }
+    const publish = await readPublishPlan(client, plan.id);
     // Reuse the existing reasons/messages, never the checkout allowed flag as a feature permission.
     const needsAttention = ['payment_attention', 'refunded_requires_policy', 'inconsistent'].includes(state);
     const decision = evaluateAction({ ...snapshot, state, action: 'create_membership_checkout',
@@ -71,6 +84,10 @@ export async function readMembershipEntitlements(client: SupabaseClient, profile
       allowFusionCompare: plan.allow_fusion_compare,
       libraryStorageBytes: plan.library_storage_bytes,
       fusionCompareMaxModels: limit.data,
+      allowPublish: publish.allow_publish,
+      ownDataWindowDays: publish.own_data_window_days,
+      allowBenchmarkMonitor: publish.allow_benchmark_monitor,
+      allowWeeklyAutoReview: publish.allow_weekly_auto_review,
     });
   } catch (error) {
     if (error instanceof TRPCError) throw error;
