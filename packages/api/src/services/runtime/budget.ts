@@ -9,9 +9,10 @@ export const RUNTIME_PERSISTENCE_MS = 285_000;
 export const MIN_MODEL_DISPATCH_MS = 60_000;
 /** One server-created HTTP invocation budget, shared by every batched Runtime.
  * It is neither a frozen execution field nor an authority to retry/settle. */
-export function createRuntimeBudget(now:()=>number=()=>performance.now()) {
+export function createRuntimeBudget(now:()=>number=()=>performance.now(),persistenceMs=RUNTIME_PERSISTENCE_MS) {
  const startedAt=now();
- const workDeadline=startedAt+RUNTIME_WORK_MS,persistenceDeadline=startedAt+RUNTIME_PERSISTENCE_MS;
+ // A shorter invocation (e.g. a cron step) keeps the same 20s persistence margin after work.
+ const workDeadline=startedAt+persistenceMs-(RUNTIME_PERSISTENCE_MS-RUNTIME_WORK_MS),persistenceDeadline=startedAt+persistenceMs;
  return Object.freeze({
   workDeadline,persistenceDeadline,
   // AC-0 measurement of this invocation's round trips; never an authority.

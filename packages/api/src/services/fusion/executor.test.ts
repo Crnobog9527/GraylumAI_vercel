@@ -37,13 +37,20 @@ function harness(dispatch: Record<string, unknown> = { dispatched: true, observa
 }
 
 describe('Fusion executor', () => {
-  it('passes the call rate limit for every call of the batch before any hold', async () => {
+  it('takes exactly one call-gate unit per actual dispatch; claiming takes none; a refusal releases that hold', async () => {
     const h = harness();
     await h.executor.claim('group', 'review:1', 1, [run, { ...run, runId: 'run-2' }]);
-    expect(h.gate).toHaveBeenCalledWith('actor', 2, 'bill2.v2');
+    expect(h.gate).not.toHaveBeenCalled();
+    // One browser request per model: the first owns a fresh token, the others rotate; each counts once.
+    await h.executor.run(run, { runId: 'run-1', id: 'call-1', state: 'prepared', fresh: true }, () => 'usable');
+    await h.executor.run({ ...run, runId: 'run-2' }, { runId: 'run-2', id: 'call-2', state: 'prepared', fresh: false }, () => 'usable');
+    expect(h.gate).toHaveBeenCalledTimes(2);
+    expect(h.gate).toHaveBeenNthCalledWith(1, 'actor', 1, 'bill2.v2');
+    expect(h.gate).toHaveBeenNthCalledWith(2, 'actor', 1, 'bill2.v2');
     h.gate.mockResolvedValueOnce({ ok: false, reason: 'call_limited', retryAfter: 30, window: 'minute' } as never);
-    await expect(h.executor.claim('group', 'review:2', 1, [run])).rejects.toThrow();
-    expect(h.billing.claimFusionGroup).toHaveBeenCalledTimes(1);
+    h.calls.length = 0;
+    await expect(h.executor.run(run, { runId: 'run-1', id: 'call-1', state: 'prepared', fresh: false }, () => 'usable')).rejects.toThrow();
+    expect(h.calls).toEqual(['finalize', 'cancel', 'finalize']);
   });
   it('saves the body, writes the host verdict, then settles and closes the run', async () => {
     const h = harness(); const onChunk = vi.fn();
@@ -63,6 +70,7 @@ describe('Fusion executor', () => {
     const result = await h.executor.run(run, { runId: 'run-1', id: 'call-1', state: 'prepared', fresh: false }, () => 'usable');
     expect(result).toEqual({ state: 'judged', verdict: 'no_delivery' });
     expect(h.calls.slice(0, 3)).toEqual(['rotate', 'dispatch', 'fusion_call_verdict:no_delivery']);
+    expect(h.gate).toHaveBeenCalledWith('actor', 1, 'bill2.v2');
     expect(h.calls).not.toContain('fusion_call_output_save:');
   });
   it('leaves unreadable or unconfirmed responses to recovery, with no saved body and no verdict', async () => {

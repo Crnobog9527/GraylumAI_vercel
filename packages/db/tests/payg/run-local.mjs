@@ -126,7 +126,7 @@ try {
   await concurrencyCases({db,Client,connectionString,report,createFixture,claim,receipt});
   await windowConcurrencyCases({db,Client,connectionString,report,createFixture,claim});
   await fusionGroupCases({db,Client,connectionString,report,createFixture,claim});
-  await fusionSessionlessCases({db,report,createFixture});
+  await fusionSessionlessCases({db,Client,connectionString,report,createFixture});
   await fusionAdmitCases({db,Client,connectionString,report,createFixture});
 } catch (error) {
   report.failed = String(error.stack??error);

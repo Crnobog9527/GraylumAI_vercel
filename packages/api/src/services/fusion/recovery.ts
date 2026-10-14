@@ -9,7 +9,9 @@ import { logger } from '../../lib/logger';
 
 const row = z.object({ actor_id: z.string().uuid(), run_id: z.string().uuid(), call_id: z.string().uuid(),
   dispatched: z.boolean(), dispatch_deadline: z.string().nullable(), recovery: z.unknown().nullable(), created_at: z.string() });
-type Summary = { success: boolean; scanned: number; cancelled: number; recovered: number; scrubbed: number; failed: number };
+type Summary = { success: boolean; scanned: number; cancelled: number; recovered: number; scrubbed: number; failed: number;
+  /** Left for the next run when the time limit was reached. */
+  deferred: number };
 const noTransport: BillingTransport = {
   dispatch: async () => { throw new Error('FUSION_RECOVERY_NO_DISPATCH'); },
   lookup: async () => { throw new Error('FUSION_RECOVERY_LOOKUP_UNAVAILABLE'); },
@@ -21,21 +23,29 @@ const noTransport: BillingTransport = {
  * the recovery deadline). A run whose content was deleted is scrubbed again once it settled, since a
  * deletion can happen while its call is still open (#947 review). Runs one call at a time; failures stay listed. */
 export async function recoverFusionFinancials(admin: SupabaseClient, options: { limit?: number; pages?: number;
-  budget?: RuntimeBudget; now?: () => number } = {}): Promise<Summary> {
-  const summary: Summary = { success: true, scanned: 0, cancelled: 0, recovered: 0, scrubbed: 0, failed: 0 };
+  budget?: RuntimeBudget; now?: () => number; timeLimitMs?: number } = {}): Promise<Summary> {
+  const summary: Summary = { success: true, scanned: 0, cancelled: 0, recovered: 0, scrubbed: 0, failed: 0, deferred: 0 };
   const now = options.now ?? Date.now;
   const limit = options.limit ?? 50;
-  // Pages advance past calls that cannot progress yet, so they never hold back newer ones (0235).
+  // The cron route has 60 seconds in total and runs other reconciliations alongside (#954 review).
+  const stopAt = now() + (options.timeLimitMs ?? 40_000);
+  // Listing is cheap: collect the pages first. Pages advance past calls that cannot progress yet (0235).
+  const rows: Array<z.infer<typeof row>> = [];
   let cursor: { p_after_created: string; p_after_id: string } | undefined;
-  for (let page = 0; page < (options.pages ?? 10); page++) {
+  // Keep paging to the end (bounded by the time limit and a safety cap), so expired undispatched calls
+  // behind a long backlog of slow dispatched ones are still collected and released first (#954 review).
+  for (let page = 0; page < (options.pages ?? 200) && now() < stopAt; page++) {
     const listed = await admin.rpc('fusion_pending_financial_batch', { p_limit: limit, ...cursor });
     const parsed = listed.error ? undefined : z.array(row).safeParse(listed.data);
     if (!parsed?.success) return { ...summary, success: false };
-    await recoverPage(admin, parsed.data, summary, now, options.budget);
+    rows.push(...parsed.data);
     if (parsed.data.length < limit) break;
     const last = parsed.data[parsed.data.length - 1]!;
     cursor = { p_after_created: last.created_at, p_after_id: last.call_id };
   }
+  // Releasing holds of calls never dispatched is quick and must not wait behind slow receipt lookups.
+  const ordered = [...rows.filter(item => !item.dispatched), ...rows.filter(item => item.dispatched)];
+  await recoverPage(admin, ordered, summary, now, stopAt, options.budget);
   // After the financial wrap-up: reviews still in progress with every call settled and no movement for an
   // hour become paused (not an end state; 0236). Ended reviews are never touched.
   const paused = await admin.rpc('fusion_review_pause_idle', { p_idle: '1 hour' });
@@ -44,10 +54,13 @@ export async function recoverFusionFinancials(admin: SupabaseClient, options: { 
 }
 
 async function recoverPage(admin: SupabaseClient, rows: Array<z.infer<typeof row>>, summary: Summary, now: () => number,
-  shared?: RuntimeBudget) {
-  for (const item of rows) {
+  stopAt: number, shared?: RuntimeBudget) {
+  for (const [index, item] of rows.entries()) {
+    // Keep 5 seconds for the slowest single step (one lookup, settle and scrub) before the limit.
+    if (now() + 5_000 > stopAt) { summary.deferred += rows.length - index; break; }
     summary.scanned++;
-    const budget = shared ?? createRuntimeBudget();
+    // Every RPC and lookup of this row is bounded by the step's own deadline, not a fresh 285 s (#954 review).
+    const budget = shared ?? createRuntimeBudget(now, Math.max(1, stopAt - now()));
     try {
       if (!item.dispatched && (!item.dispatch_deadline || Date.parse(item.dispatch_deadline) > now())) continue;
       const adapter = item.recovery ? stagingTransport(admin, parseStagingPolicy(item.recovery), budget) : noTransport;

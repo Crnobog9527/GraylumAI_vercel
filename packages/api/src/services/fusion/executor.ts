@@ -49,15 +49,18 @@ export function fusionExecutor(deps: { billing: Billing; admin: SupabaseClient; 
     return billing.finalizeRun(runId);
   }
   return {
-    /** Every call in the batch passes the call rate limit before any hold is taken. */
-    async claim(groupId: string, stepKey: string, attempt: number, runs: AdmittedFusionRun[]) {
-      requireNewWork(await deps.callGate(actorId, runs.length, 'bill2.v2'));
-      return billing.claimFusionGroup(groupId, stepKey, attempt, runs.map(run => ({ runId: run.runId, payload: run.call })));
-    },
+    /** The atomic batch claim (full holds). The call rate limit is taken per actual dispatch in run(). */
+    claim: (groupId: string, stepKey: string, attempt: number, runs: AdmittedFusionRun[]) =>
+      billing.claimFusionGroup(groupId, stepKey, attempt, runs.map(run => ({ runId: run.runId, payload: run.call }))),
     /** Dispatch, save, judge and settle one call. judge sees the exact saved text (PR-4 validates it). */
     async run(run: AdmittedFusionRun, claimed: FusionClaimedCall, judge: (text: string) => FusionBodyVerdict,
       onChunk?: (chunk: string) => void): Promise<FusionCallOutcome> {
       deps.budget.modelCallTimeout(OPENROUTER_RESPONSE_TIMEOUT_MS);
+      // Exactly one call-gate unit per actual dispatch, whichever request dispatches it (one browser request
+      // per model, retries, replays; #954 review). A refusal releases this call's hold instead of leaving it
+      // frozen until the dispatch deadline.
+      const gate = await deps.callGate(actorId, 1, 'bill2.v2');
+      if (!gate.ok) { await settle(run.runId); requireNewWork(gate); }
       // A replayed claim carries no token: rotate one for a call that was never dispatched.
       if (!claimed.fresh && !(await billing.rotatePrepared(run.runId, claimed.id, run.call))) {
         return { state: 'pending', reason: 'not_dispatched' };
