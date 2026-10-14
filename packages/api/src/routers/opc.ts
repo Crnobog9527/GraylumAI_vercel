@@ -7,8 +7,9 @@ import { protectedProcedure, router } from "../trpc";
 import {loadStagingPolicy,assertStagingReadAccess} from '../services/runtime/stagingPolicy';
 import {executeOriginalExecution,runtimeLocalEndpoint,streamOriginalExecution} from '../services/runtime/executionStream';
 import {StagingAccessError,stagingProcedureError,stagingRpcFailure} from '../services/runtime/stagingErrors';
-import {contentReaction, topicAdoptionWithSource} from "../services/opc/dataFoundation";
+import {briefAdoption, contentReaction, topicAdoptionWithSource} from "../services/opc/dataFoundation";
 import { dedupeHandoffResults } from "../services/opc/handoff-view";
+import { conversationRename, renameConversation } from "../services/opc/conversationName";
 import {
   opcService,
   opcStart,
@@ -173,6 +174,9 @@ export const opcRouter = router({
     if (error) stagingRpcFailure(error);
     return z.array(z.object({ sessionId: z.string().uuid(), title: z.string(), lastActivityAt: z.string() })).parse(data);
   }),
+  conversationRename: procedure
+    .input(conversationRename)
+    .mutation(({ ctx, input }) => renameConversation(ctx.supabaseAdmin, ctx.user.id, input)),
   planRequestState: readProcedure
     .input(
       z
@@ -209,6 +213,9 @@ export const opcRouter = router({
   recordContentReaction: procedure
     .input(contentReaction)
     .mutation(({ctx,input}) => ctx.opc.recordReaction(input)),
+  adoptBrief: procedure
+    .input(briefAdoption)
+    .mutation(({ctx,input}) => ctx.opc.adoptBrief(input)),
   library: readProcedure
     .input(z.object({ search: z.string().max(160).default(''), from: z.string().date().nullable().default(null), to: z.string().date().nullable().default(null) }).strict())
     .query(({ ctx, input }) => ctx.opc.library(input)),

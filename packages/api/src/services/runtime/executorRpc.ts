@@ -1,6 +1,8 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import {assertPath} from '../skills/loader';
 import {SKILL_FILE_TRACE_BYTES,skillFileParameters} from './skillFile';
+import {mentorHistoryParameters} from './mentorHistory';
+import {READ_HISTORY_TOOL} from './agentTools';
 import {throwIfContentErased} from '../accountErasure/content';
 import type {RuntimeProgress} from './progress';
 import {createHash} from 'node:crypto';
@@ -35,6 +37,16 @@ export function executorRpc(options:{database:SessionRpc;actor:()=>Promise<strin
      'RUNTIME_SKILL_FILE_TOO_LARGE','RUNTIME_SKILL_FILE_CONFLICT','RUNTIME_TOOL_DENIED','RUNTIME_TOOL_CLOSED',
      'RUNTIME_TOOL_LIMIT','RUNTIME_TOOL_CONFLICT','RUNTIME_TOOL_RESULT_CONFLICT'].includes(message))
     throw new Error('RUNTIME_SKILL_FILE_REFUSED');
+   // R4: a permanent history-read refusal ends the turn; any other failure stays retryable.
+   if((name==='runtime_tool'&&args.p_name===READ_HISTORY_TOOL||name==='runtime_mentor_history')&&
+    typeof message==='string'&&['RUNTIME_MENTOR_HISTORY_DENIED','RUNTIME_MENTOR_HISTORY_REVOKED',
+     'RUNTIME_MENTOR_HISTORY_TOO_LARGE','RUNTIME_TOOL_DENIED','RUNTIME_TOOL_CLOSED','RUNTIME_TOOL_LIMIT',
+     'RUNTIME_TOOL_CONFLICT','RUNTIME_TOOL_RESULT_CONFLICT'].includes(message))
+    throw new Error('RUNTIME_HISTORY_READ_REFUSED');
+   if(name==='runtime_cancel_with_code'&&typeof result.error==='object'&&'code' in result.error
+    &&['PGRST202','42883'].includes(String(result.error.code)))throw new Error('RUNTIME_CANCEL_WITH_CODE_UNAVAILABLE');
+   // Before 0248 the database refuses the diagnostic field; the caller retries without it.
+   if(name==='runtime_execution'&&message==='RUNTIME_FAILURE_REASON_DENIED')throw new Error('RUNTIME_FAILURE_REASON_DENIED');
    if(message==='RUNTIME_TEST_WINDOW_DENIED'||message==='RUNTIME_TEST_MODEL_DENIED')
     throw new StagingAccessError('RUNTIME_PRICE_CONFIGURATION_PENDING');
    if(typeof message==='string'&&['RUNTIME_RESUME_CONFLICT','RUNTIME_RESUME_SOURCE_CHANGED',
@@ -45,6 +57,31 @@ export function executorRpc(options:{database:SessionRpc;actor:()=>Promise<strin
  }
 }
 
+/** A stable error code for logs; free text (which may quote user material) is never logged. */
+export function diagnosticCode(error:unknown):string {
+ return error instanceof Error&&/^[A-Z][A-Z0-9_]{2,80}$/.test(error.message)?error.message:'UNCLASSIFIED';
+}
+/** Ends an execution proven never to have dispatched, recording why (0248) without private data.
+ * Until 0248 is applied the database refuses the code and only the old reason is retried; a repeat is a no-op. */
+export async function failBeforeDispatch(rpc:<T>(name:string,args:Record<string,unknown>)=>Promise<T>,
+  args:Record<string,unknown>,code:string,providerHistory:boolean):Promise<{state:string}|null> {
+ logger.error('api','runtime_pre_dispatch_failed',{executionId:args.p_execution_id,code});
+ const reason:Record<string,string>=providerHistory?{unavailable_reason:'provider_history'}:{};
+ const send=(result:Record<string,string>)=>rpc<{state:string}>('runtime_execution',
+  {...args,p_action:'fail_before_dispatch',...(Object.keys(result).length?{p_result:result}:{})});
+ return send({...reason,failure_code:code})
+  .catch(refused=>refused instanceof Error&&refused.message==='RUNTIME_FAILURE_REASON_DENIED'?send(reason):null)
+  .catch(()=>null);
+}
+/** Cancels and records why in one transaction (0248); before 0248 exists, the plain cancellation runs. */
+export async function cancelWithCode(rpc:<T>(name:string,args:Record<string,unknown>)=>Promise<T>,
+  args:Record<string,unknown>,code:string):Promise<{state:'cancelled'|'completed'|'cost_pending'}> {
+ logger.error('api','runtime_pre_dispatch_failed',{executionId:args.p_execution_id,code});
+ return rpc<{state:'cancelled'|'completed'|'cost_pending'}>('runtime_cancel_with_code',{...args,p_code:code}).catch(error=>{
+  if(error instanceof Error&&error.message==='RUNTIME_CANCEL_WITH_CODE_UNAVAILABLE')return rpc('runtime_cancel',args);
+  throw error;
+ });
+}
 export const preflightCodes=new Set([
  'RUNTIME_TIME_BUDGET_EXHAUSTED',
  'RUNTIME_PROVIDER_HISTORY_DENIED',
@@ -92,12 +129,14 @@ export function historyGuard(executionId:string,failed:(code:string)=>void) {
   };
 }
 
-export function terminalReplyGuard(active:boolean,allowsCard:boolean,failed:()=>void,allowsSkillFile=false) {
+export function terminalReplyGuard(active:boolean,allowsCard:boolean,failed:()=>void,allowsSkillFile=false,allowsHistory=false) {
+  // One read per turn: a Skill file or the user's earlier messages (R4), never both.
   let fileRequested=false;
   return (response:unknown,organizer=false)=>{
     const message=(response as {choices?:Array<{message?:{tool_calls?:Array<{id?:string;type?:string;
       function?:{name?:string;arguments?:string}}>}}>})?.choices?.[0]?.message;
     const readsFile=message?.tool_calls?.[0]?.function?.name==='read_skill_file';
+    const readsHistory=message?.tool_calls?.[0]?.function?.name===READ_HISTORY_TOOL;
     let invalidFileArguments=false;
     if(readsFile){try{
       const call=message!.tool_calls![0]!,{path}=skillFileParameters.parse(JSON.parse(call.function!.arguments!));
@@ -106,11 +145,17 @@ export function terminalReplyGuard(active:boolean,allowsCard:boolean,failed:()=>
         typeof call.id!=='string'||!call.id.length||Array.from(call.id).length>256||call.id.includes('\0')||
         Buffer.from(call.id).toString('utf8')!==call.id;
      }catch{invalidFileArguments=true;}}
-    const oversized=readsFile&&Buffer.byteLength(JSON.stringify(JSON.stringify(message)))>SKILL_FILE_TRACE_BYTES;
-    if(active&&(terminalAgentReplyFailure(response,organizer,allowsCard,allowsSkillFile&&!fileRequested)||oversized||invalidFileArguments)){
+    if(readsHistory){try{
+      const call=message!.tool_calls![0]!;mentorHistoryParameters.parse(JSON.parse(call.function!.arguments!));
+      invalidFileArguments=call.type!=='function'||typeof call.id!=='string'||!call.id.length||Array.from(call.id).length>256||
+        call.id.includes('\0')||Buffer.from(call.id).toString('utf8')!==call.id;
+     }catch{invalidFileArguments=true;}}
+    const oversized=(readsFile||readsHistory)&&Buffer.byteLength(JSON.stringify(JSON.stringify(message)))>SKILL_FILE_TRACE_BYTES;
+    if(active&&(terminalAgentReplyFailure(response,organizer,allowsCard,allowsSkillFile&&!fileRequested,allowsHistory&&!fileRequested)||
+      oversized||invalidFileArguments)){
       failed();
       throw new Error('RUNTIME_TERMINAL_REPLY');
     }
-    if(active&&!organizer&&readsFile)fileRequested=true;
+    if(active&&!organizer&&(readsFile||readsHistory))fileRequested=true;
   };
 }

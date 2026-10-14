@@ -33,12 +33,8 @@ Existing `verified` rows below describe the 2026-04-28 baseline, not a fresh ful
 | `long_text_warning_threshold` | `/admin/settings` | `/chat` | Confirmation threshold changes | `admin-config.spec.ts` | `verified` |
 | `show_token_usage_stats` | `/admin/settings` | `/chat` | Token usage panel show/hide | `admin-config.spec.ts` | `verified` |
 | `chat_billing_hint` | `/admin/settings` | `/chat` | Billing hint copy updates | `admin-config.spec.ts` | `verified` |
-| `billing_credits_per_usd` | `/admin/settings` | AI chat billing runtime | Converts provider USD cost into credits for pre-deduct and settlement | `billing.test.ts`, `ai.test.ts` | `verified` |
-| `billing_token_price_multiplier` | `/admin/settings` | AI chat billing runtime | Applies runtime multiplier to token/search cost for pre-deduct and settlement | `billing.test.ts`, `ai.test.ts` | `verified` |
-| `billing_min_pre_deduct` | `/admin/settings` | AI chat billing runtime | Sets the minimum AI request pre-deduct amount | `billing.test.ts`, `ai.test.ts` | `verified` |
-| `billing_max_pre_deduct` | `/admin/settings` | AI chat billing runtime | Caps the maximum AI request pre-deduct amount | `billing.test.ts`, `ai.test.ts` | `verified` |
-| `billing_safety_margin` | `/admin/settings` | AI chat billing runtime | Adds a safety margin to estimated AI request pre-deducts | `billing.test.ts`, `ai.test.ts` | `verified` |
-| `billing_require_model_pricing` | `/admin/settings` | AI chat billing runtime | Rejects AI requests before pre-deduct when model pricing is missing or input/output price is zero | `billing.test.ts`, `ai.test.ts` | `verified` |
+| `billing_credits_per_usd` | `/admin/settings` | BILL2 runtime billing (`services/billingUnit.ts`) | Converts provider USD cost into credits (q) | `billingUnit.test.ts`, `settings.test.ts` | `verified` |
+| `billing_token_price_multiplier` | `/admin/settings` | BILL2 runtime billing (`services/billingUnit.ts`) | Site-wide default price multiplier (m); per-model overrides take precedence | `billingUnit.test.ts`, `settings.test.ts` | `verified` |
 | `enable_smart_routing` | `/admin/settings` | AI runtime, diagnostics | Routing can be enabled/disabled | `admin.spec.ts`, `chat.spec.ts`, `admin-config.spec.ts` preview effect proof | `verified` |
 | `enable_smart_search_decision` | `/admin/settings` | AI runtime | Automatic search decision can be enabled/disabled | `admin-config.spec.ts` preview effect proof via deployed `ai_usage_logs.metadata.webSearchRequested` | `verified` |
 | `checkin_day1-5` | `/admin/settings` | profile check-in dialog, claim result | Reward ladder changes | `admin-config.spec.ts`, `user-extended.spec.ts` | `verified` |
@@ -65,22 +61,14 @@ Existing `verified` rows below describe the 2026-04-28 baseline, not a fresh ful
 
 ## Billing Runtime Defaults
 
-The PR 2A billing runtime settings affect the AI chat main path for both pre-deduct and final settlement. PR 2B extends the same dynamic `ai_models` pricing + billing runtime settings path to `settleAbort`, so interrupted stream settlement no longer uses legacy hardcoded model prices. Missing or invalid values fall back to safe defaults (a failed settings read is refused instead, since BILL-UNIT #565; the Owner-approved q=100 / m=3 is applied by writing explicit rows, not by changing these defaults):
+Runtime billing reads only `billing_credits_per_usd` (q) and `billing_token_price_multiplier` (m) through `services/billingUnit.ts`. A confirmed-missing row falls back to `BILLING_UNIT_DEFAULTS`; a failed read or invalid value refuses new charges (BILL-UNIT #565). The Owner-approved q=100 / m=3 is applied by writing explicit rows, not by changing these defaults:
 
-| Setting key | Safe default |
+| Setting key | Fallback when the row is missing |
 | --- | --- |
 | `billing_credits_per_usd` | `1000` |
 | `billing_token_price_multiplier` | `1.5` |
-| `billing_min_pre_deduct` | `10` |
-| `billing_max_pre_deduct` | `10000` |
-| `billing_safety_margin` | `0.2` |
-| `billing_require_model_pricing` | `true` |
 
-When `billing_require_model_pricing=true`, missing model pricing or zero input/output model pricing rejects the AI request before pre-deduct, so no credits are charged. The same missing/zero-price guard now applies before `settleAbort` calls `atomic_abort_settle`, so an interrupted request cannot silently settle against `MODEL_PRICING`.
-
-`MODEL_PRICING`, `calculateTokenCost`, and `estimateRequestCost` remain in code as legacy / explicit fallback / test-only estimator paths. They must not be used as the default production billing path. The unused legacy `costCalculator.ts` and `streamHandler.ts` modules were removed by DEBT-QUICK.
-
-Remaining PR 2B debt: `atomic_abort_settle` does not accept arbitrary metadata, so `billing_history.abort_settle.metadata` cannot yet persist a pricing snapshot through the RPC path without a future migration. The TypeScript fallback path and abort usage log can carry the pricing/settings snapshot, but RPC-level abort-settle metadata remains a follow-up item.
+The legacy pre-deduct service (`services/billing.ts`) and its settings `billing_min_pre_deduct`, `billing_max_pre_deduct`, `billing_safety_margin` and `billing_require_model_pricing` were removed by LEGACY-CLOSE PR-A; nothing reads them. Leftover rows in `system_settings` have no effect. See [LEGACY_CLOSE_CLEANUP_PLAN.md](launch/implementation/LEGACY_CLOSE_CLEANUP_PLAN.md).
 
 ## Completion Rule
 

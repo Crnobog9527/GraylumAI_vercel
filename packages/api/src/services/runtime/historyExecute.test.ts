@@ -77,7 +77,8 @@ it.each(['fresh','frozen','replay','current','matching-latest'] as const)('histo
   if(name==='runtime_session_items'&&args.p_action==='freeze')frozen=args.p_items;
   return {data:{state:'cancelled'},error:null};
  })};
- mock.run.mockImplementation(async(o:RuntimeRunnerInput)=>{
+ // Like the real runner, a callback failure surfaces wrapped; the recorded code must still be the guard's.
+ mock.run.mockImplementation(async(o:RuntimeRunnerInput)=>{try{
   const selected=await o.selectHistory(await o.session.getItems(),mode==='current'?[bad]:[{role:'user',content:o.input}]);
   expect(selected.slice(0,-1)).toEqual(history.slice(2));
   expect(frozen).toEqual({revisions:[43,44],historyOmitted:true});
@@ -85,7 +86,7 @@ it.each(['fresh','frozen','replay','current','matching-latest'] as const)('histo
   // A later current-turn unknown item is never eligible for old-history recovery.
   expect(()=>o.filterModelInput!([...selected,bad] as never,o.instructions)).toThrow('RUNTIME_PROVIDER_HISTORY_DENIED');
   throw new Error('synthetic end');
- });
+ }catch(error){throw error instanceof Error&&error.message==='synthetic end'?error:new Error('RUNTIME_EXECUTION_PENDING');}});
  const result=await runtimeExecutor({database,actor:async()=>id,callGate:async()=>({ok:true}),adapter:{dispatch:vi.fn()} as never}).execute(id);
  expect(mock.billing.claimCall).not.toHaveBeenCalled();
  if(mode==='matching-latest')expect(mock.run).not.toHaveBeenCalled();
@@ -97,6 +98,6 @@ it.each(['fresh','frozen','replay','current','matching-latest'] as const)('histo
   expect(frozen).toBeUndefined();
   expect(result).toEqual({state:'cancelled',unavailable:'provider_history'});
   expect(database.rpc.mock.calls.find(([,args])=>args.p_action==='fail_before_dispatch')?.[1].p_result)
-   .toEqual({unavailable_reason:'provider_history'});
+   .toEqual({unavailable_reason:'provider_history',failure_code:'RUNTIME_PROVIDER_HISTORY_DENIED'});
  }
 });

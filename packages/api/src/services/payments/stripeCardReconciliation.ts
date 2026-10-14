@@ -137,23 +137,26 @@ export async function reconcileStripeCardPayments(db: SupabaseClient, stripe: St
   // 4. Card subscriptions we asked to stop (the Pro a delivered upgrade replaced, a renewal kept for review) that still
   //    renew at Stripe: the stop is retried here until Stripe confirms it, so a stop whose webhook retries ran out can
   //    never renew and charge again unnoticed. Whatever still fails is a finding (alerted).
-  const pending = await db.from('user_subscriptions').select('id').eq('payment_channel', 'stripe').is('stripe_subscription_id', null)
-    .eq('merchant_namespace', scope.merchant).eq('payment_mode', scope.mode).not('method_cancel_requested_at', 'is', null)
-    .neq('cancel_at_period_end', 'true').in('status', ['active', 'past_due', 'trialing']).order('id').limit(101);
-  if (pending.error || !Array.isArray(pending.data)) {
-    complete = false;
-    findings.push({ kind: 'scan_failed', object: 'subscription', code: 'PAY_WAFFO_PERSISTENCE_UNAVAILABLE' });
-  } else {
-    // More than a day's batch (after a Stripe outage): never report it complete; the rest is retried on the next run.
-    if (pending.data.length > 100) {
+  // Read in id order, a page at a time past the last row seen (a stop that succeeds leaves the list, so offsets would
+  // skip rows): every pending stop is retried on every run, within the time budget, never only the first page.
+  let after = '';
+  for (let page = 0; page < maxPages; page++) {
+    let query = db.from('user_subscriptions').select('id').eq('payment_channel', 'stripe').is('stripe_subscription_id', null)
+      .eq('merchant_namespace', scope.merchant).eq('payment_mode', scope.mode).not('method_cancel_requested_at', 'is', null)
+      .neq('cancel_at_period_end', 'true').in('status', ['active', 'past_due', 'trialing']);
+    if (after) query = query.gt('id', after);
+    const pending = await query.order('id').limit(100);
+    if (pending.error || !Array.isArray(pending.data)) {
       complete = false;
-      findings.push({ kind: 'scan_incomplete', object: 'subscription', code: 'PENDING_STOPS_OVER_LIMIT' });
+      findings.push({ kind: 'scan_failed', object: 'subscription', code: 'PAY_WAFFO_PERSISTENCE_UNAVAILABLE' });
+      break;
     }
-    for (const row of (pending.data as Array<{ id: string }>).slice(0, 100)) {
+    const rows = pending.data as Array<{ id: string }>;
+    for (const row of rows) {
       if (Date.now() > deadline) {
         complete = false;
         findings.push({ kind: 'scan_incomplete', object: 'subscription', code: 'TIME_BUDGET' });
-        break;
+        return { success: false, skipped: false, complete, repaired, checked, findings };
       }
       checked++;
       try {
@@ -164,6 +167,12 @@ export async function reconcileStripeCardPayments(db: SupabaseClient, stripe: St
       } catch (error) {
         findings.push({ kind: 'stop_unconfirmed', object: 'subscription', externalId: row.id, code: errorCode(error) });
       }
+    }
+    if (rows.length < 100) break;
+    after = rows[rows.length - 1]!.id;
+    if (page === maxPages - 1) {
+      complete = false;
+      findings.push({ kind: 'scan_incomplete', object: 'subscription', code: 'PENDING_STOPS_OVER_LIMIT' });
     }
   }
 

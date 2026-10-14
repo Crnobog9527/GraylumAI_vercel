@@ -26,14 +26,16 @@ export function scrubText(value: string): string {
  */
 export const APP_SEGMENTS = new Set(['about', 'acceptable-use', 'access-denied', 'account-erasure', 'admin',
   'agent-first-preview', 'ai', 'announcements', 'api', 'auth', 'auto-close', 'billing-reconcile', 'callback', 'chat',
-  'contact', 'costs', 'cron', 'diagnostics', 'f', 'faq', 'finance', 'forgot-password', 'ig-jingying', 'invitations', 'landing',
+  'connect', 'contact', 'costs', 'cron', 'diagnostics', 'f', 'faq', 'finance', 'forgot-password', 'ig-jingying', 'invitations', 'landing',
   'library', 'library-cleanup', 'login', 'maintenance', 'marketplace', 'models', 'orders', 'packages', 'performance',
-  'plan', 'positioning', 'preview', 'pricing', 'privacy', 'profile', 'prompts', 'refunds', 'register', 'release-subscription-credits',
+  'plan', 'positioning', 'preview', 'publish-monitor', 'pricing', 'privacy', 'profile', 'prompts', 'refunds', 'register', 'release-subscription-credits',
   'requests', 'reset-password', 'runtime', 'runtime-recovery', 'search', 'settings', 'shequn-jingying', 'shequn-xingxiao',
-  'skills', 'stream', 'stripe', 'terms', 'tickets', 'topics', 'transactions', 'trpc', 'tutorials', 'upload', 'users',
+  'skills', 'start', 'stream', 'stripe', 'terms', 'tickets', 'topics', 'transactions', 'trpc', 'tutorials', 'upload', 'users',
   'verify-email', 'waffo', 'webhook', 'workbench', 'zh-tw', 'zimeiti-jingying', 'zimeiti-kecheng',
-  // Style sample E (PUBLIC-SITE, /landing/preview/e), removed with the samples.
-  'e',
+  // Style samples D, E, G, H and I (PUBLIC-SITE, /landing/preview/d, /e, /g, /h and /i), removed with the samples.
+  'd', 'e', 'g', 'h', 'i',
+  // FUSION-REVIEW animation prototype (/landing/preview/jury), removed with the prototype.
+  'jury',
   '_next', 'static', 'chunks', 'app', 'pages', 'css', 'media']);
 const OWN_HOST = /(^|\.)graylum\.com$|\.vercel\.app$|^localhost$|^127\.0\.0\.1$/;
 
