@@ -78,7 +78,13 @@ BEGIN
   SELECT * INTO r FROM artifact_rounds WHERE id=ver.round_id;
   IF d.draft_id IS NULL OR ver.id IS NULL OR r.id IS NULL OR NOT content_erasure_artifact_readable(p_actor_id,ver.id) THEN
     RAISE EXCEPTION 'FUSION_REVIEW_STALE'; END IF;
+  -- Also the sizes after the escaping a real request applies (the report is a string inside the input JSON, which is
+  -- itself a string inside the request body; the materials are an object inside the input), so the estimate and the
+  -- per-call limits are priced on what is actually sent (#962 review). jsonb text has extra spaces: a safe overcount.
   RETURN jsonb_build_object('reportBytes',octet_length(coalesce(ver.report#>>'{generatedReport,body}','')),
+    'reportSentBytes',octet_length(to_jsonb(to_jsonb(coalesce(ver.report#>>'{generatedReport,body}',''))::text)::text),
+    'materialsSentBytes',octet_length(to_jsonb(coalesce((SELECT jsonb_object_agg(s.key,s.value->'information')
+      FROM jsonb_each(r.steps) s),'{}')::text)::text),
     'materialsBytes',octet_length(coalesce((SELECT jsonb_object_agg(s.key,s.value->'information') FROM jsonb_each(r.steps) s),'{}')::text),
     'fieldCount',(SELECT count(*) FROM jsonb_array_elements(r.workflow->'steps') st,
       jsonb_array_elements(coalesce(st->'information','[]')) i));

@@ -82,7 +82,7 @@ import { DECISIONS } from './hostChecks';
 const sections = ['定位', '结语'];
 const original = '## 定位\n原定位\n## 结语\n原结语';
 const admin = { rpc: async (name: string, args: Record<string, unknown>) => {
-  if (name === 'fusion_review_preview') return { data: { reportBytes: 2000, materialsBytes: 500, fieldCount: 1 }, error: null };
+  if (name === 'fusion_review_preview') return { data: { reportBytes: 2000, materialsBytes: 500, reportSentBytes: 2200, materialsSentBytes: 600, fieldCount: 1 }, error: null };
   if (name === 'fusion_review_source') return { data: { body: sourceBody.value ?? original, sections, maxCharacters: 12000, declared: [{ stepId: 's1', fieldIds: ['goal'] }] }, error: null };
   if (name === 'fusion_call_output_read') { const body = db.outputs.get(String(args.p_call_id));
     return { data: body ? { body, savedAt: db.savedAt.get(String(args.p_call_id)) } : null, error: null }; }

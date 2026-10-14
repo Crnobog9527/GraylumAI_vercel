@@ -8,14 +8,16 @@ import { PAYG_PROFILE_MAX_BYTES } from '../runtime/paygHostPolicy';
 type CallPolicy = z.infer<typeof frozenCallPolicy>;
 /** Per-call profile overheads frozen with every payg quote (template + margin tokens). */
 const PROFILE_OVERHEAD = 4096 + 4096;
-/** JSON framing of the host-built input around the snapshot. */
-const FRAMING_BYTES = 4096;
-const FIELD_BYTES = 400 * 3 + 128;
+/** JSON framing of the input, the response format and the request fields around the snapshot (as fusionRequestBytes
+ * counts them, including its fields allowance). */
+const FRAMING_BYTES = 16384;
+/** One declared field in the summary input: up to 400 characters, escaped twice (input string inside the body). */
+const FIELD_BYTES = 400 * 3 * 2 + 256;
 
 export type EstimateInput = {
   quotes: CallPolicy[]; reviewers: string[]; summary: string; maxRounds: number; maxBudgetUsd: string;
   opinionTokens: number; summaryTokens: number; instructionBytes: { reviewer: number; summary: number }; fieldCount: number;
-  /** Report + confirmed-field bytes of the reviewed version (the input snapshot). */
+  /** Report + confirmed-field bytes of the reviewed version as sent (after the request's JSON escaping). */
   snapshotBytes: number;
 };
 
@@ -24,7 +26,10 @@ export type EstimateInput = {
  * snapshot, every revised field at 400 characters and every opinion at its limit. Any model that cannot fit its
  * worst-case request refuses the whole review before anything is frozen (no silent downgrade). Above the
  * single-review budget the debate round is dropped; if even one round does not fit, the review is refused. */
-export function estimateReview(input: EstimateInput): { rounds: number; estimateUsd: string } {
+export type PhaseBytes = { review: number; debate: number; summary: number };
+export function estimateReview(input: EstimateInput): { rounds: number; estimateUsd: string;
+  /** The serialized size each phase's request may reach: the prices above assume it, and claims enforce it. */
+  requestBytes: PhaseBytes } {
   const bound = (modelId: string, outputTokens: number, bytes: number) => {
     const quote = input.quotes.find(policy => policy.modelId === modelId);
     if (!quote?.providerLimits) throw new Error('FUSION_MODEL_ADMISSION_REQUIRED');
@@ -54,7 +59,8 @@ export function estimateReview(input: EstimateInput): { rounds: number; estimate
   for (let rounds = Math.min(input.maxRounds, debateFits ? 2 : 1); rounds >= 1; rounds--) {
     const total = firstRound + (rounds > 1 ? debate : 0) + summary;
     // Rounded up to whole micro-dollars so the stored estimate is never below the computed bound.
-    if (Number.isFinite(total) && total <= budget) return { rounds, estimateUsd: (Math.ceil(total * 1e6) / 1e6).toFixed(6) };
+    if (Number.isFinite(total) && total <= budget) return { rounds, estimateUsd: (Math.ceil(total * 1e6) / 1e6).toFixed(6),
+      requestBytes: { review: reviewerBytes, debate: rounds > 1 ? debateBytes : 0, summary: summaryBytes } };
   }
   throw new Error('FUSION_BUDGET_EXCEEDED');
 }

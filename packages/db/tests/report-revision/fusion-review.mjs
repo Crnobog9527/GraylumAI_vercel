@@ -240,6 +240,9 @@ export async function runFusionReview({db,Client,connectionString,report}) {
     [{proname:'fusion_review_preview',provolatile:'v'},{proname:'fusion_review_source',provolatile:'v'}]);
   const preview = await service(db,'fusion_review_preview',f.actor,f.draft,f.versionId);
   assert.equal(preview.reportBytes,Buffer.byteLength(source.body));
+  // Sent sizes: at least what the request really carries after its double JSON escaping (#962 review).
+  assert.ok(preview.reportSentBytes>=Buffer.byteLength(JSON.stringify(JSON.stringify(source.body))));
+  assert.ok(preview.materialsSentBytes>preview.materialsBytes);
   assert.equal(preview.fieldCount,4);assert.ok(preview.materialsBytes>0);
   await assert.rejects(service(db,'fusion_review_preview',randomUUID(),f.draft,f.versionId),/./,'another actor cannot preview it');
   await assert.rejects(service(db,'fusion_review_preview',f.actor,f.draft,randomUUID()),/FUSION_REVIEW_STALE/);

@@ -19,6 +19,8 @@ import { readFusionSettings } from './settings';
 type Executor = ReturnType<typeof fusionExecutor>;
 const config = z.object({ estimateUsd: z.string(), maxRounds: z.number().int().min(1), reviewers: z.array(z.string().uuid()).min(1),
   opinionTokens: z.number().int().positive(), summaryTokens: z.number().int().positive(),
+  /** Per-phase request size the estimate priced (absent: only the byte cap applies). */
+  requestBytes: z.object({ review: z.number(), debate: z.number(), summary: z.number() }).optional(),
   summary: z.string().uuid(), skill: z.object({ skillId: z.string().uuid(), revisionId: z.string().uuid(),
     packageHash: z.string() }) }).passthrough();
 const source = z.object({ body: z.string().min(1), sections: z.array(z.string()).min(1), maxCharacters: z.number().int().positive(),
@@ -137,16 +139,21 @@ export function reviewFlow(deps: { admin: SupabaseClient; actorId: string;
     const verdictsOnly = (index: number) => ({ reviewer: reviewerLabel(index), opinion: {
       decisions: DECISIONS.map(decision => ({ decision, strongestCase: '', strongestAlternative: '', verdict: 'change' as const, basis: '' })),
       issues: [], dropped: 0 } });
-    return fusionRequestBytes(reviewerRequest(skill, context)) <= PAYG_PROFILE_MAX_BYTES
+    return fusionRequestBytes(reviewerRequest(skill, context)) <= phaseLimit(view, 'review')
       && fusionRequestBytes(summaryRequest(skill, context, cfg.reviewers.map((_, i) => verdictsOnly(i)), src.declared, frozenValues(view)))
-        <= PAYG_PROFILE_MAX_BYTES;
+        <= phaseLimit(view, 'summary');
   }
+  /** What a phase's request may reach: the billing byte cap, and the size the consented estimate priced. */
+  const phaseLimit = (view: ReviewView, phase: 'review' | 'debate' | 'summary') => {
+    const priced = config.parse(view.config).requestBytes?.[phase];
+    return Math.min(PAYG_PROFILE_MAX_BYTES, priced && priced > 0 ? priced : PAYG_PROFILE_MAX_BYTES);
+  };
   /** The least trimming that fits the byte cap: 0 = full opinions; 1 = without replies and reasoning text; 2 = also only
    * critical and major issues; 3 = also no issues (the key-decision verdicts stay). */
-  function fitted(build: (level: number) => FusionRequest): FusionRequest {
+  function fitted(build: (level: number) => FusionRequest, limit: number): FusionRequest {
     for (let level = 0; level < 3; level++) {
       const request = build(level);
-      if (fusionRequestBytes(request) <= PAYG_PROFILE_MAX_BYTES) return request;
+      if (fusionRequestBytes(request) <= limit) return request;
     }
     return build(3);
   }
@@ -170,16 +177,17 @@ export function reviewFlow(deps: { admin: SupabaseClient; actorId: string;
         const others = [...first].filter(([other]) => other !== index).map(([other, opinion]) => ({ reviewer: reviewerLabel(other), opinion }));
         return { modelId, phase: 'fusion_review' as const, request: fitted(level => debateRequest(skill, context,
           trimmed(first.get(index) ?? null, level), others.map(o => ({ ...o, opinion: trimmed(o.opinion, level)! })),
-          disputedDecisions([...first.values()]))) };
+          disputedDecisions([...first.values()])), phaseLimit(view, 'debate')) };
       });
     } else {
       const opinions = await finalOpinions(view, src);
       members = [{ modelId: cfg.summary, phase: 'fusion_summary', request: fitted(level => summaryRequest(skill, context,
-        opinions.map(o => ({ ...o, opinion: trimmed(o.opinion, level)! })), src.declared, frozenValues(view))) }];
+        opinions.map(o => ({ ...o, opinion: trimmed(o.opinion, level)! })), src.declared, frozenValues(view)), phaseLimit(view, 'summary')) }];
     }
     // Every request must fit the per-call billing byte cap as actually serialized (#962 review); a step that cannot fit
     // even fully trimmed is never claimed.
-    if (members.some(member => fusionRequestBytes(member.request) > PAYG_PROFILE_MAX_BYTES)) throw new Error('FUSION_INPUT_TOO_LARGE');
+    const limit = phaseLimit(view, at.phase === 'summary' ? 'summary' : at.round > 1 ? 'debate' : 'review');
+    if (members.some(member => fusionRequestBytes(member.request) > limit)) throw new Error('FUSION_INPUT_TOO_LARGE');
     const requestId = derivedUuid(`${view.reviewId}:${stepKey(at)}`);
     const group = await admitFusionGroup({ admin, actorId, requestId, sourceSessionId: view.sourceSessionId, members, env,
       outputTokens: { opinion: cfg.opinionTokens, summary: cfg.summaryTokens } });
@@ -253,15 +261,18 @@ export function reviewFlow(deps: { admin: SupabaseClient; actorId: string;
       const sizes = await admin.rpc('fusion_review_preview', { p_actor_id: actorId, p_draft_id: input.draftId,
         p_source_version_id: input.sourceVersionId });
       if (sizes.error) throw new Error('FUSION_REVIEW_STALE');
-      const preview = z.object({ reportBytes: z.number(), materialsBytes: z.number(), fieldCount: z.number() }).parse(sizes.data);
-      const { rounds, estimateUsd } = estimateReview({ quotes: window.callPolicies, reviewers: settings.review.reviewerModelIds,
+      const preview = z.object({ reportSentBytes: z.number(), materialsSentBytes: z.number(), fieldCount: z.number() }).passthrough()
+        .parse(sizes.data);
+      // Instructions travel as one escaped string in the body; the host-written format rules add at most a few KB.
+      const sent = (value: string) => Buffer.byteLength(JSON.stringify(value)) + 4096;
+      const { rounds, estimateUsd, requestBytes } = estimateReview({ quotes: window.callPolicies, reviewers: settings.review.reviewerModelIds,
         summary: settings.review.summaryModelId, maxRounds: settings.review.maxRounds, maxBudgetUsd: settings.review.maxBudgetUsd,
         opinionTokens: settings.review.opinionOutputTokens, summaryTokens: settings.review.summaryOutputTokens, fieldCount: preview.fieldCount,
-        snapshotBytes: preview.reportBytes + preview.materialsBytes,
-        instructionBytes: { reviewer: Buffer.byteLength(text.reviewer + text.rubric) + 2048, summary: Buffer.byteLength(text.summary + text.rubric) + 2048 } });
+        snapshotBytes: preview.reportSentBytes + preview.materialsSentBytes,
+        instructionBytes: { reviewer: sent(`${text.reviewer}\n\n${text.rubric}`), summary: sent(`${text.summary}\n\n${text.rubric}`) } });
       const view = await record.start({ requestId: input.requestId, draftId: input.draftId, sourceVersionId: input.sourceVersionId,
         config: { estimateUsd, maxRounds: rounds, reviewers: settings.review.reviewerModelIds, summary: settings.review.summaryModelId,
-          opinionTokens: settings.review.opinionOutputTokens, summaryTokens: settings.review.summaryOutputTokens, skill } });
+          opinionTokens: settings.review.opinionOutputTokens, summaryTokens: settings.review.summaryOutputTokens, skill, requestBytes } });
       // Before anything is claimed: round 1 and the most trimmed summary, measured exactly as they will be sent, must fit
       // the per-call byte cap; otherwise the review ends here with nothing charged (#962 review).
       if (view.state === 'running' && !view.steps.length && !fitsWhenSent(view, await readSource(view.reviewId), text)) {
