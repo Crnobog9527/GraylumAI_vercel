@@ -49,10 +49,19 @@ export function fusionExecutor(deps: { billing: Billing; admin: SupabaseClient; 
     return billing.finalizeRun(runId);
   }
   return {
-    /** Every call in the batch passes the call rate limit before any hold is taken. */
+    /** Each newly created call passes the call rate limit before it can be dispatched. A replayed claim
+     * creates no call and reserves nothing again (#954 review); a refusal releases the fresh holds at once. */
     async claim(groupId: string, stepKey: string, attempt: number, runs: AdmittedFusionRun[]) {
-      requireNewWork(await deps.callGate(actorId, runs.length, 'bill2.v2'));
-      return billing.claimFusionGroup(groupId, stepKey, attempt, runs.map(run => ({ runId: run.runId, payload: run.call })));
+      const claimed = await billing.claimFusionGroup(groupId, stepKey, attempt, runs.map(run => ({ runId: run.runId, payload: run.call })));
+      const fresh = claimed.calls.filter(call => call.fresh);
+      if (fresh.length) {
+        const gate = await deps.callGate(actorId, fresh.length, 'bill2.v2');
+        if (!gate.ok) {
+          for (const call of fresh) { await billing.requestCancel(call.runId); await billing.finalizeRun(call.runId); }
+          requireNewWork(gate);
+        }
+      }
+      return claimed;
     },
     /** Dispatch, save, judge and settle one call. judge sees the exact saved text (PR-4 validates it). */
     async run(run: AdmittedFusionRun, claimed: FusionClaimedCall, judge: (text: string) => FusionBodyVerdict,

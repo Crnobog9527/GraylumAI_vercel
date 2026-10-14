@@ -55,7 +55,8 @@ async function recoverPage(admin: SupabaseClient, rows: Array<z.infer<typeof row
     // Keep 5 seconds for the slowest single step (one lookup, settle and scrub) before the limit.
     if (now() + 5_000 > stopAt) { summary.deferred += rows.length - index; break; }
     summary.scanned++;
-    const budget = shared ?? createRuntimeBudget();
+    // Every RPC and lookup of this row is bounded by the step's own deadline, not a fresh 285 s (#954 review).
+    const budget = shared ?? createRuntimeBudget(now, Math.max(1, stopAt - now()));
     try {
       if (!item.dispatched && (!item.dispatch_deadline || Date.parse(item.dispatch_deadline) > now())) continue;
       const adapter = item.recovery ? stagingTransport(admin, parseStagingPolicy(item.recovery), budget) : noTransport;
