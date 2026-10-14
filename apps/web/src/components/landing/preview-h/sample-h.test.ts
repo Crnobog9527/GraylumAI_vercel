@@ -15,6 +15,7 @@ import { FLOW_STEPS } from '@/lib/landing/landing-flow';
 import { LANDING_FEATURES, type LandingFlags } from '@/lib/landing/landing-flags';
 import { buildLandingPageData } from '@/lib/landing/landing-page-data';
 import { APP_SEGMENTS } from '@/lib/sentry-scrub';
+import { isPaletteId, PALETTES } from './PaletteSwitchH';
 import { SampleH } from './SampleH';
 import { charDelay, sceneTimeline } from './scene-timing';
 
@@ -53,6 +54,10 @@ describe('style sample H', () => {
     expect(html).toContain('aria-label="Gold"');
     expect(html).toContain('id="how-it-works"');
     expect(html).toContain('data-testid="aurora-backdrop"');
+    // The palette switch renders with the first palette chosen; the page itself carries no palette attribute yet.
+    expect(html).toContain('aria-label="配色方案（样稿对比用）"');
+    expect(html.match(/aria-pressed="true"/g)).toHaveLength(1);
+    expect(html).not.toContain('data-palette=');
     // Motion is switched on by script only; the server HTML is the finished state.
     expect(html).not.toContain('data-motion');
     expect(html).not.toContain('data-play');
@@ -76,6 +81,15 @@ describe('style sample H', () => {
     expect(html).not.toContain('id="h-step-publish-tab"');
     expect(html).not.toContain('id="h-step-review-tab"');
     expect(html).toContain('id="h-step-chat-tab"');
+  });
+});
+
+describe('sample H palettes', () => {
+  it('offers three palettes and accepts only their ids', () => {
+    expect(PALETTES.map(palette => palette.id)).toEqual(['ivory', 'graphite', 'gold']);
+    expect(isPaletteId('graphite')).toBe(true);
+    expect(isPaletteId('rainbow')).toBe(false);
+    expect(isPaletteId(null)).toBe(false);
   });
 });
 
