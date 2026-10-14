@@ -98,7 +98,8 @@ export async function cleanupAttempts(db: Rpc, client: ClientDeps, until: number
   return report;
 }
 
-const claimedWork = z.object({ connectionId: z.string().uuid(), providerAccountId: providerId, deleting: z.boolean(),
+const claimedWork = z.object({ connectionId: z.string().uuid(), lease: z.string().uuid(), providerAccountId: providerId,
+  deleting: z.boolean(),
   takeoverPending: z.boolean(),
   action: z.enum(['delete', 'disconnect']), ownerRef: z.string().regex(/^[0-9a-f]{32}$/).nullable() }).strict();
 type WorkOutcome = 'deleted' | 'gone' | 'owner_changed' | 'disconnected' | 'owner_back' | 'retry';
@@ -147,7 +148,8 @@ export async function runProviderWork(db: Rpc, client: ClientDeps, until: number
     if (now() >= until) break;
     report.processed += 1;
     const [outcome, error] = await settle(client, job);
-    await rpc(db, 'publish_monitor_provider_work_finish', { p_connection_id: job.connectionId, p_outcome: outcome,
+    await rpc(db, 'publish_monitor_provider_work_finish', { p_connection_id: job.connectionId, p_lease: job.lease,
+      p_outcome: outcome,
       p_error: error }, z.unknown());
     if (outcome === 'retry') report.deferred += 1; else report.settled += 1;
   }

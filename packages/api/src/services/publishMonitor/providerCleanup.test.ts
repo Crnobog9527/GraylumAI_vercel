@@ -7,6 +7,7 @@ const EXT = 'a'.repeat(32) + '.' + 'b'.repeat(32);
 const OTHER = 'c'.repeat(32) + '.' + 'd'.repeat(32);
 const REQ = '00000000-0000-4000-8000-0000000a0001';
 const CONN = '00000000-0000-4000-8000-0000000a0002';
+const LEASE = '00000000-0000-4000-8000-0000000a0003';
 const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status });
 const acct = (id: string, external_id: string | null) => ({ id, platform: 'facebook', status: 'connected', external_id });
 const page = (accounts: unknown[], offset: number, total: number) =>
@@ -61,7 +62,7 @@ describe('publish-monitor provider cleanup', () => {
     const OWNER = 'c'.repeat(32);
     const mine = (id: string, status = 'connected') => json(200, { ...acct(id, `${OWNER}.${'e'.repeat(32)}`), status });
     const job = (id: string, deleting: boolean, action: string, ownerRef: string | null = OWNER, takeoverPending = false) =>
-      ({ connectionId: CONN, providerAccountId: id, deleting, action, ownerRef, takeoverPending });
+      ({ connectionId: CONN, lease: LEASE, providerAccountId: id, deleting, action, ownerRef, takeoverPending });
     const jobs = [
       job('spc_del', true, 'delete'), job('spc_gone', true, 'delete'), job('spc_reauthed', true, 'delete'),
       job('spc_hold', true, 'disconnect'), job('spc_back', false, 'disconnect'), job('spc_taken', false, 'disconnect'),
@@ -128,7 +129,7 @@ describe('publish-monitor provider cleanup', () => {
 
   it('stops at the time budget and leaves the rest for the next run', async () => {
     const d = database({ publish_monitor_provider_work_claim: [[
-      { connectionId: CONN, providerAccountId: 'spc_1', deleting: true, action: 'delete', ownerRef: null,
+      { connectionId: CONN, lease: LEASE, providerAccountId: 'spc_1', deleting: true, action: 'delete', ownerRef: null,
         takeoverPending: false }]] });
     expect(await runProviderWork(d.db, provider([]).deps, 0)).toEqual({ processed: 0, settled: 0, deferred: 0 });
     expect(d.calls).toEqual([]);

@@ -12,7 +12,7 @@ const migrationPath = 'packages/db/migrations/0265_publish_monitor_provider_clea
 const rpcs = ['publish_monitor_connect_callback(uuid,uuid,jsonb)', 'publish_monitor_cleanup_claim(integer,integer)',
   'publish_monitor_cleanup_classify(uuid,jsonb)', 'publish_monitor_cleanup_finish(uuid,boolean,text)',
   'publish_monitor_orphan_classify(jsonb)', 'publish_monitor_provider_work_claim(integer,integer)',
-  'publish_monitor_provider_work_finish(uuid,text,text)', 'publish_monitor_disconnect(uuid,uuid)',
+  'publish_monitor_provider_work_finish(uuid,uuid,text,text)', 'publish_monitor_disconnect(uuid,uuid)',
   'publish_monitor_provider_account_disconnected(text)'];
 const db = await localDb(), c = db.client;
 const report = { build: db.build, migration: '0265', checks: [] };
@@ -38,7 +38,9 @@ const classify = (req, accounts) => svc('SELECT publish_monitor_cleanup_classify
 const finish = (req, done, err = null) => svc('SELECT publish_monitor_cleanup_finish($1,$2,$3) v', [req, done, err]);
 const acc = (pid, ext) => ({ providerAccountId: pid, externalId: ext });
 const work = () => svc('SELECT publish_monitor_provider_work_claim(50,120) v');
-const workFinish = (id, outcome, err = null) => svc('SELECT publish_monitor_provider_work_finish($1,$2,$3) v', [id, outcome, err]);
+// job: a claimed item ({ connectionId, lease }); only the current claim's lease may report its outcome.
+const workFinish = (job, outcome, err = null) => svc('SELECT publish_monitor_provider_work_finish($1,$2,$3,$4) v',
+  [job.connectionId, job.lease, outcome, err]);
 const state = async id => (await c.query('SELECT * FROM social_connect_requests WHERE id=$1', [id])).rows[0];
 const conn = async pid => (await c.query('SELECT * FROM social_connections WHERE provider_account_id=$1', [pid])).rows[0];
 const connect = async (m, pid) => {
@@ -144,10 +146,12 @@ try {
   assert.equal(takeoverJob.ownerRef, await v('SELECT provider_ref v FROM social_monitor_settings WHERE actor_id=$1', [owned.a]));
   assert.deepEqual(await work(), [], 'leased work is not claimed twice');
   assert.equal((await conn('pfm_owned')).deletion_attempts, 0, 'claiming alone does not use up a retry');
-  await workFinish(takeoverJob.connectionId, 'retry', 'PROVIDER_UNAVAILABLE');
+  await workFinish(takeoverJob, 'retry', 'PROVIDER_UNAVAILABLE');
   assert.deepEqual([(await conn('pfm_owned')).deletion_error, (await conn('pfm_owned')).deletion_attempts],
     ['PROVIDER_UNAVAILABLE', 1]);
-  await workFinish(takeoverJob.connectionId, 'owner_back');
+  await workFinish(takeoverJob, 'owner_back');
+  assert.equal((await conn('pfm_owned')).provider_disconnect_pending, true, 'a result after the lease was released is ignored');
+  await workFinish((await work()).find(x => x.providerAccountId === 'pfm_owned'), 'owner_back');
   assert.deepEqual([(await conn('pfm_owned')).provider_disconnect_pending, (await conn('pfm_owned')).status,
     (await conn('pfm_owned')).deletion_attempts], [false, 'quarantined', 0], 'a settled takeover resets its retry count');
   // Taken over again later with the webhook missed: the sweep starts a new episode on the quarantined row, unless the
@@ -158,7 +162,7 @@ try {
   assert.deepEqual((await svc('SELECT publish_monitor_orphan_classify($1) v', [j([{ ...again, status: 'connected' }])]))
     .takenOver, ['pfm_owned']);
   assert.equal((await conn('pfm_owned')).provider_disconnect_pending, true);
-  await workFinish((await work()).find(x => x.providerAccountId === 'pfm_owned').connectionId, 'disconnected');
+  await workFinish((await work()).find(x => x.providerAccountId === 'pfm_owned'), 'disconnected');
   report.checks.push('takeover disconnect is claimed under a lease with the owner reference and cleared when settled');
 
   // User disconnect: posts and snapshots go now; the row becomes an identity-free deletion record; others refused.
@@ -180,7 +184,7 @@ try {
   const delJob = (await svc('SELECT publish_monitor_provider_work_claim(50,120) v'))
     .find(x => x.providerAccountId === 'pfm_u_kept');
   assert.deepEqual([delJob.action, delJob.deleting, delJob.ownerRef], ['delete', true, del.owner_ref]);
-  await workFinish(delJob.connectionId, 'gone');
+  await workFinish(delJob, 'gone');
   assert.equal(await conn('pfm_u_kept'), undefined, 'a confirmed provider deletion removes the record');
   report.checks.push('a user disconnects only their own connection: data removed now, identity-free record with the owner '
     + 'reference until the provider deletion is confirmed');
@@ -196,13 +200,13 @@ try {
   const hold = (await work()).find(x => x.providerAccountId === 'pfm_pub');
   assert.deepEqual([hold.action, hold.deleting], ['disconnect', true]);
   // Even "account gone" does not end a record that unresolved publishes still need.
-  await workFinish(hold.connectionId, 'gone');
+  await workFinish(hold, 'gone');
   assert.equal((await conn('pfm_pub')).provider_tokens_cleared, true, 'held, not deleted');
   assert.equal((await work()).find(x => x.providerAccountId === 'pfm_pub'), undefined, 'cleared tokens wait for results');
   await c.query("UPDATE social_publish_jobs SET state='completed' WHERE idempotency_key='pub-open-key-01'");
   const afterJob = (await work()).find(x => x.providerAccountId === 'pfm_pub');
   assert.equal(afterJob.action, 'delete');
-  await workFinish(afterJob.connectionId, 'owner_changed');
+  await workFinish(afterJob, 'owner_changed');
   assert.equal(await conn('pfm_pub'), undefined, 'a changed owner ends only our record');
   report.checks.push('with unresolved publishes a deletion only clears tokens and waits; a changed owner ends only our record');
 
@@ -224,7 +228,7 @@ try {
   assert.deepEqual([(await conn('pfm_late_take')).status, (await conn('pfm_late_take')).provider_disconnect_pending],
     ['deleting', true]);
   // A worker that claimed the deletion before the takeover was queued reports a stale result: the record is kept.
-  await workFinish((await conn('pfm_late_take')).id, 'owner_changed');
+  await workFinish({ connectionId: (await conn('pfm_late_take')).id, lease: randomUUID() }, 'owner_changed');
   assert.equal((await conn('pfm_late_take')).provider_disconnect_pending, true, 'kept for the queued disconnect');
   // A callback that proves a takeover of a deleting record queues the disconnect too.
   const lateOwner2 = await member();
