@@ -67,6 +67,25 @@ describe('PAY-STRIPE-MP external refunds of card orders', () => {
     const other = fixture([refund({ id: 're_ours', metadata: { orderId: 'another', refundIntentId: 'intent' } })]);
     await expect(other.run({ refundId: 're_ours' })).rejects.toThrow('PAYMENT_EVIDENCE_CONFLICT');
   });
+  it('routes an external refund by what it matches: a card order with a monthly refund goes to that flow, a payment no '
+    + 'local order references is alerted and acknowledged', async () => {
+    // Matches a card order whose monthly refund is running: kept on that refund as a conflict (no external booking).
+    mocks.monthly.mockResolvedValue({ handled: true, result: {} });
+    const owned = fixture([refund({ id: 're_link', amount: 1000 })]);
+    await expect(owned.run({ refundId: 're_link' })).resolves.toBe(true);
+    expect(mocks.monthly).toHaveBeenCalledWith(owned.db, 'order', null, owned.stripe);
+    expect(owned.db.rpc).not.toHaveBeenCalled();
+    expect(mocks.error).toHaveBeenCalledWith('billing', 'stripe_mp_external_refund_during_monthly_refund', expect.anything());
+    // Matches no card order and no local order references the payment: alerted for review and acknowledged.
+    mocks.monthly.mockReset().mockResolvedValue({ handled: false }); mocks.error.mockReset();
+    mocks.find.mockResolvedValue(null); mocks.ref.mockResolvedValue(undefined);
+    const unmatched = fixture([refund({ id: 're_offsite' })]);
+    await expect(unmatched.run({ refundId: 're_offsite' })).resolves.toBe(true);
+    expect(mocks.monthly).not.toHaveBeenCalled();
+    expect(mocks.error).toHaveBeenCalledWith('billing', 'stripe_mp_refund_unmatched', expect.objectContaining({ refundIds: ['re_offsite'] }));
+    expect(unmatched.alert).toHaveBeenCalledTimes(1);
+    expect(unmatched.db.rpc).not.toHaveBeenCalled();
+  });
   it('records each succeeded refund of the charge once, oldest first, against the paid period', async () => {
     const f = fixture([refund({ id: 're_2', created: 1792000100, amount: 100 }), refund({ id: 're_1' }),
       refund({ id: 're_pending', status: 'pending' })]);
