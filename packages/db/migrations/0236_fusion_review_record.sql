@@ -241,8 +241,11 @@ CREATE OR REPLACE FUNCTION public.fusion_review_pause_idle(p_idle interval) RETU
 LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
 DECLARE n integer;
 BEGIN
+  -- Never waits on a review row a claim, advance or close holds: those are skipped until the next run.
   UPDATE fusion_reviews rv SET state='paused',updated_at=clock_timestamp()
-  WHERE rv.state='running' AND rv.updated_at<=clock_timestamp()-p_idle
+  WHERE rv.id IN (SELECT id FROM fusion_reviews WHERE state='running' AND updated_at<=clock_timestamp()-p_idle
+      ORDER BY updated_at LIMIT 500 FOR UPDATE SKIP LOCKED)
+    AND rv.state='running' AND rv.updated_at<=clock_timestamp()-p_idle
     AND NOT EXISTS(SELECT 1 FROM bill2_runs br JOIN bill2_calls c ON c.run_id=br.id WHERE br.actor_id=rv.actor_id
       AND br.fusion_group_id IN (SELECT (x->>'groupId')::uuid FROM jsonb_array_elements(rv.steps) x)
       AND (fusion_call_in_flight(c) OR (c.dispatched_at IS NULL AND c.settled_at IS NULL)));
