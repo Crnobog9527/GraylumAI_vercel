@@ -43,7 +43,7 @@ export const HERO_H = {
 
 /** Sample H's "自己用通用 AI ／ 用 Graylum AI 教练" comparison, the Owner's wording of 2026-10-14 (verbatim). */
 export const H_COMPARE = {
-  title: '你需要的不只是 AI 建议，而是有人带你一步步做。',
+  title: '你需要的不只是 AI 建议，而是 AI 教练带你一步步做。',
   generic: '自己用通用 AI',
   coach: '用 Graylum AI 教练',
   rows: [
@@ -176,8 +176,8 @@ export const PRICE_COMPARE = {
 export const RISK_REVERSAL = {
   title: '先聊后买',
   points: [
-    { text: '先免费和教练聊一次：注册送 500 积分，足够把你的情况聊透、把定位整理出来。觉得有用，再开通。', needs: ['coach', 'signupGrant'] },
-    { text: '聊出来的内容随时能看、能导出，不会收回。', needs: ['coach'] },
+    { text: '先免费试用：和教练聊一次，把你的情况聊透、把定位整理出来。觉得有用，再开通。', needs: ['coach'] },
+    { text: '聊出来的内容随时能看、能导出。', needs: ['coach'] },
     { text: '积分永不过期；会员到期后，已生成的报告仍然可以看、可以导出。', needs: ['report'] },
     { text: '随时取消，用到当期结束。' },
   ] as readonly GatedText[],
