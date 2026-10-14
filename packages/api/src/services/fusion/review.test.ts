@@ -132,11 +132,15 @@ describe('review flow', () => {
       outcome: { kind: 'revised', debated: false, reviewedByPanel: false, awaitingChoice: true } });
     // Nothing reaches R14 until the user chooses section by section.
     expect(t.proposals).toEqual([]);
+    expect((await t.flow.events(String(db.review!.reviewId))).ended).toBe(false);
     const adopted = await t.flow.adopt({ reviewId: String(db.review!.reviewId), requestId: '00000000-0000-4000-8000-0000000000f1',
       choices: [{ section: '定位', use: 'revised' }] });
     expect(adopted).toEqual({ versionId: '00000000-0000-4000-8000-0000000000e1', adopted: ['定位'], kept: ['结语'] });
     expect(t.proposals).toEqual([expect.objectContaining({ body: '## 定位\n新目标\n## 结语\n原结语', fields: { s1: { goal: '新目标' } } })]);
     expect(t.applied).toEqual([expect.objectContaining({ revisionId: '00000000-0000-4000-8000-0000000000d1', expectedDiffHash: 'f'.repeat(64) })]);
+    const after = await t.flow.events(String(db.review!.reviewId));
+    expect(after.ended).toBe(true);
+    expect(after.events.at(-1)).toMatchObject({ type: 'adoption_done', adoptedSections: ['定位'] });
     // The summary saw the opinions as reviewers A, B, C, never model names.
     const summary = JSON.parse(requests.find(r => r.phase === 'fusion_summary')!.input);
     expect(summary.opinions.map((o: { reviewer: string }) => o.reviewer)).toEqual(['A', 'B', 'C']);
@@ -164,7 +168,7 @@ describe('review flow', () => {
     expect(caps.every(c => c.opinion === 1000 && c.summary === 2000)).toBe(true);
     // Progress events: derived from the record only, seats instead of model names, summaries clipped.
     const { events, ended } = await t.flow.events(String(db.review!.reviewId));
-    expect(ended).toBe(true);
+    expect(ended).toBe(false); // still waiting for the user's per-section choice
     const types = events.map(e => e.type);
     expect(types[0]).toBe('review_started');
     expect(types.filter(type => type === 'decision')).toHaveLength(24);

@@ -109,7 +109,9 @@ export function reviewEvents(input: { view: ReviewView; reviewers: string[]; sec
   timed.sort((a, b) => (a.at === b.at ? a.order - b.order : Date.parse(a.at || '1970-01-01') - Date.parse(b.at || '1970-01-01')));
   // Ended only when nothing more can appear: a stop may leave a saved body to be judged later (#962 review).
   const pending = view.calls.some(call => call.dispatched && call.verdict === null);
-  return { events: timed.map(item => item.event), ended: Boolean(view.endedAt) && !pending };
+  // A revised review still waits for the user's per-section choice, whose adoption_done event comes later (#962 review).
+  const awaitingChoice = view.state === 'completed' && (view.outcome as { kind?: string } | null)?.kind === 'revised' && !view.adoption;
+  return { events: timed.map(item => item.event), ended: Boolean(view.endedAt) && !pending && !awaitingChoice };
 }
 
 function adjudicationOf(text: string): Adjudication[] {
