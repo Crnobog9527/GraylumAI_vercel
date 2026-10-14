@@ -112,17 +112,19 @@ export async function GET(request: Request) {
 
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
     logger.system.cronJob('billing-reconcile', 'started');
-    const [result, readinessAudit, erasureFinancial, waffo, staleRounds, stripeCard, fusion] = await Promise.all([
+    const [result, readinessAudit, erasureFinancial, waffo, staleRounds, stripeCard, { fusion, fusionKick }] = await Promise.all([
       runDailyBillingReconciliation(supabase),
       runBillingEngineV15ReadinessAudit(supabase),
       runErasureFinancialReconciliation(supabase),
       runWaffoReconciliation(supabase),
       runStaleRoundReconciliation(supabase),
       runStripeCardReconciliation(supabase),
-      runFusionRecovery(supabase),
+      (async () => {
+        // Kick before recovery resets idle timestamps; do not delay the independent financial audits.
+        const fusionKick = await runFusionKick(supabase, new URL(request.url).origin);
+        return { fusionKick, fusion: await runFusionRecovery(supabase) };
+      })(),
     ]);
-    // After the recovery settled what it could: kicked reviews then continue from settled calls.
-    const fusionKick = await runFusionKick(supabase, new URL(request.url).origin);
     const success = result.success && readinessAudit.success && erasureFinancial.success && waffo.success
       && staleRounds.success && stripeCard.success && fusion.success && fusionKick.success;
 

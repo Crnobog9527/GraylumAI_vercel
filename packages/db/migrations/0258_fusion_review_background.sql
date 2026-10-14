@@ -49,12 +49,15 @@ BEGIN
   RETURN jsonb_build_object('acquired',true,'reason','acquired','actorId',rv.actor_id,'count',rv.advance_count);
 END $$;
 
--- Releases the lease only for its own holder; a later holder's lease is never cleared.
-CREATE OR REPLACE FUNCTION public.fusion_review_advance_release(p_review_id uuid, p_token uuid)
+-- Refund expected no-work stops only while releasing the same holder; stale holders cannot refund a later lease.
+DROP FUNCTION IF EXISTS public.fusion_review_advance_release(uuid,uuid);
+CREATE OR REPLACE FUNCTION public.fusion_review_advance_release(p_review_id uuid, p_token uuid, p_refund boolean DEFAULT false)
 RETURNS boolean LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=public,pg_temp AS $$
 DECLARE n integer;
 BEGIN
-  UPDATE fusion_reviews SET advance_token=NULL,advance_until=NULL WHERE id=p_review_id AND advance_token=p_token;
+  UPDATE fusion_reviews SET advance_token=NULL,advance_until=NULL,
+    advance_count=greatest(0,advance_count-CASE WHEN p_refund THEN 1 ELSE 0 END)
+    WHERE id=p_review_id AND advance_token=p_token;
   GET DIAGNOSTICS n=ROW_COUNT;
   RETURN n=1;
 END $$;
@@ -62,8 +65,9 @@ END $$;
 -- Daily backstop: reviews still running or paused, with no live lease and no movement for p_idle, that were not
 -- kicked in the last day. Marks them kicked in the same statement, so each is kicked at most once a day; rows
 -- another transaction holds are skipped (SKIP LOCKED).
+DROP FUNCTION IF EXISTS public.fusion_review_kick_stalled(interval,integer);
 CREATE OR REPLACE FUNCTION public.fusion_review_kick_stalled(p_idle interval, p_limit integer)
-RETURNS TABLE(review_id uuid) LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=public,pg_temp AS $$
+RETURNS TABLE(review_id uuid, kicked_at timestamptz) LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=public,pg_temp AS $$
 BEGIN
   IF p_idle IS NULL OR p_idle<interval '1 minute' THEN RAISE EXCEPTION 'FUSION_REVIEW_INVALID'; END IF;
   RETURN QUERY
@@ -73,21 +77,37 @@ BEGIN
       AND (advance_until IS NULL OR advance_until<=clock_timestamp())
       AND (advance_kicked_at IS NULL OR advance_kicked_at<=clock_timestamp()-interval '1 day')
       ORDER BY updated_at LIMIT least(greatest(coalesce(p_limit,20),1),100) FOR UPDATE SKIP LOCKED)
-  RETURNING rv.id;
+  RETURNING rv.id,rv.advance_kicked_at;
+END $$;
+
+-- Undo only the caller's reservation when a kick failed or was not attempted. Table access remains revoked.
+CREATE OR REPLACE FUNCTION public.fusion_review_kick_reset(p_review_id uuid, p_kicked_at timestamptz)
+RETURNS boolean LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=public,pg_temp AS $$
+DECLARE n integer;
+BEGIN
+  UPDATE fusion_reviews SET advance_kicked_at=NULL WHERE id=p_review_id AND advance_kicked_at=p_kicked_at;
+  GET DIAGNOSTICS n=ROW_COUNT;
+  RETURN n=1;
 END $$;
 
 -- The completion notice: a user's latest reviews with what the page needs to show "评审已完成，待选择" or "已暂停".
-CREATE OR REPLACE FUNCTION public.fusion_review_mine(p_actor_id uuid, p_limit integer)
+DROP FUNCTION IF EXISTS public.fusion_review_mine(uuid,integer);
+CREATE OR REPLACE FUNCTION public.fusion_review_mine(p_actor_id uuid, p_limit integer,
+  p_draft_id uuid DEFAULT NULL, p_before_created_at timestamptz DEFAULT NULL, p_before_id uuid DEFAULT NULL)
 RETURNS jsonb LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=public,pg_temp AS $$
 BEGIN
   PERFORM bill2_actor(p_actor_id);
-  RETURN coalesce((SELECT jsonb_agg(item ORDER BY created DESC, id) FROM (
+  IF (p_before_created_at IS NULL) <> (p_before_id IS NULL) THEN RAISE EXCEPTION 'FUSION_REVIEW_INVALID'; END IF;
+  RETURN coalesce((SELECT jsonb_agg(item ORDER BY created DESC, id DESC) FROM (
     SELECT rv.created_at AS created, rv.id, jsonb_build_object('reviewId',rv.id,'draftId',rv.draft_id,
-      'sourceVersionId',rv.source_version_id,'state',rv.state,'outcomeKind',rv.outcome->>'kind',
-      'awaitingChoice',rv.state='completed' AND rv.outcome->>'kind'='revised' AND coalesce(rv.adoption->>'state','')<>'recorded',
+      'sourceVersionId',rv.source_version_id,'round',rv.round,'phase',rv.phase,'state',rv.state,'outcomeKind',rv.outcome->>'kind',
+      'awaitingChoice',coalesce(rv.state='completed' AND rv.outcome->>'kind'='revised'
+        AND coalesce(rv.adoption->>'state','')<>'recorded',false),
       'createdAt',rv.created_at,'endedAt',rv.ended_at,'seenAt',rv.seen_at) AS item
     FROM fusion_reviews rv WHERE rv.actor_id=p_actor_id
-    ORDER BY rv.created_at DESC, rv.id LIMIT least(greatest(coalesce(p_limit,10),1),50)) x),'[]'::jsonb);
+      AND (p_draft_id IS NULL OR rv.draft_id=p_draft_id)
+      AND (p_before_created_at IS NULL OR (rv.created_at,rv.id)<(p_before_created_at,p_before_id))
+    ORDER BY rv.created_at DESC, rv.id DESC LIMIT least(greatest(coalesce(p_limit,10),1),50)) x),'[]'::jsonb);
 END $$;
 
 -- Marks the notice of the user's own review as seen (idempotent; the first time is kept).
@@ -106,8 +126,9 @@ DO $$
 DECLARE f text;
 BEGIN
   FOREACH f IN ARRAY ARRAY['fusion_review_advance_lease(uuid,uuid,interval,integer)',
-    'fusion_review_advance_release(uuid,uuid)','fusion_review_kick_stalled(interval,integer)',
-    'fusion_review_mine(uuid,integer)','fusion_review_mark_seen(uuid,uuid)'] LOOP
+    'fusion_review_advance_release(uuid,uuid,boolean)','fusion_review_kick_stalled(interval,integer)',
+    'fusion_review_kick_reset(uuid,timestamp with time zone)',
+    'fusion_review_mine(uuid,integer,uuid,timestamp with time zone,uuid)','fusion_review_mark_seen(uuid,uuid)'] LOOP
     EXECUTE format('REVOKE ALL ON FUNCTION public.%s FROM PUBLIC,anon,authenticated,service_role', f);
     EXECUTE format('GRANT EXECUTE ON FUNCTION public.%s TO service_role', f);
   END LOOP;

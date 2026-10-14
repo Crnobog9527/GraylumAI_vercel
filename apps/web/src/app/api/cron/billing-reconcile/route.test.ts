@@ -110,8 +110,9 @@ describe('/api/cron/billing-reconcile', () => {
     expect((await GET(new Request('https://graylum.test/api/cron/billing-reconcile'))).status).toBe(500);
   });
 
-  it('kicks stalled reviews after the Fusion recovery, from this deployment, and fails the job when the kick fails', async () => {
+  it('kicks stalled reviews before the Fusion recovery, from this deployment, and fails the job when the kick fails', async () => {
     expect((await GET(new Request('https://graylum.test/api/cron/billing-reconcile'))).status).toBe(200);
+    expect(mocks.fusionKick.mock.invocationCallOrder[0]).toBeLessThan(mocks.fusion.mock.invocationCallOrder[0]!);
     expect(mocks.fusionKick).toHaveBeenCalledWith({ client: 'service-role' }, 'https://graylum.test', { timeLimitMs: 10_000 });
     mocks.fusionKick.mockResolvedValue({ success: false, kicked: 0 });
     expect((await GET(new Request('https://graylum.test/api/cron/billing-reconcile'))).status).toBe(500);

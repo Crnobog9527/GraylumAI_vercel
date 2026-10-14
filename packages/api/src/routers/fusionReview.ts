@@ -15,7 +15,7 @@ import { reportRevisionService } from '../services/report/revisionSync';
 import { fusionExecutor } from '../services/fusion/executor';
 import { reviewFlow } from '../services/fusion/review';
 import { advanceReview, kickAdvance, withAdvanceLease } from '../services/fusion/background';
-import { ENDED_STATES } from '../services/fusion/reviewRecord';
+import { ENDED_STATES, reviewState } from '../services/fusion/reviewRecord';
 import { adoptionChoices } from '../services/fusion/reviewAdoption';
 import { readFusionSettings, PANEL_SEATS } from '../services/fusion/settings';
 
@@ -97,7 +97,12 @@ function handToServer(ctx: { scheduleAfter?: (task: () => Promise<unknown>) => v
   });
 }
 
-const mineInput = z.object({ limit: z.number().int().min(1).max(50).default(10) }).strict();
+const mineCursor = z.object({ createdAt: z.string().datetime({ offset: true }), reviewId: uuid }).strict();
+const mineInput = z.object({ limit: z.number().int().min(1).max(50).default(10), draftId: uuid.optional(),
+  cursor: mineCursor.optional() }).strict();
+const mineOutput = z.array(z.object({ reviewId: uuid, draftId: uuid, sourceVersionId: uuid, state: reviewState,
+  round: z.number().int().min(1), phase: z.enum(['review', 'summary']), outcomeKind: z.string().nullable(),
+  awaitingChoice: z.boolean(), createdAt: z.string(), endedAt: z.string().nullable(), seenAt: z.string().nullable() }));
 const startInput = z.object({ requestId: uuid, draftId: uuid, sourceVersionId: uuid }).strict();
 /** A retried start finds its review before the live-call window is required (#962 review); a new start needs it. */
 const startProcedure = protectedProcedure.input(startInput).use(async ({ ctx, input, next, path }) => {
@@ -131,10 +136,12 @@ export const fusionReviewRouter = router({
     return leased.ran ? leased.value : { skipped: true as const, reason: leased.reason };
   }),
   /** The completion notice (FUSION-BACKGROUND): the user's latest reviews, "待选择" / "已暂停" and whether seen. */
-  mine: reader.input(mineInput).query(async ({ ctx, input }) => {
-    const result = await ctx.admin.rpc('fusion_review_mine', { p_actor_id: ctx.user.id, p_limit: input.limit });
+  mine: reader.input(mineInput).output(mineOutput).query(async ({ ctx, input }) => {
+    const result = await ctx.admin.rpc('fusion_review_mine', { p_actor_id: ctx.user.id, p_limit: input.limit,
+      p_draft_id: input.draftId ?? null, p_before_created_at: input.cursor?.createdAt ?? null,
+      p_before_id: input.cursor?.reviewId ?? null });
     if (result.error) throw new Error('FUSION_REVIEW_UNAVAILABLE');
-    return result.data as unknown[];
+    return mineOutput.parse(result.data);
   }),
   markSeen: reader.input(review).mutation(async ({ ctx, input }) => {
     const result = await ctx.admin.rpc('fusion_review_mark_seen', { p_actor_id: ctx.user.id, p_review_id: input.reviewId });

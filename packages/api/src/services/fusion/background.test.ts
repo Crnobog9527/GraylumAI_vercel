@@ -13,8 +13,10 @@ const actorId = '00000000-0000-4000-8000-000000000002';
 function leaseDb(options: { count?: number; state?: string } = {}) {
   const lease = { token: null as string | null, count: options.count ?? 0 };
   const calls: string[] = [];
+  const cleared: string[] = [];
   const db = { rpc: async (name: string, args: Record<string, unknown>) => {
     calls.push(name);
+    if (name === 'fusion_review_kick_reset') { cleared.push(String(args.p_review_id)); return { data: true, error: null }; }
     if (name === 'fusion_review_advance_lease') {
       if (options.state && options.state !== 'running') return { data: { acquired: false, reason: 'ended' }, error: null };
       if (lease.token) return { data: { acquired: false, reason: 'leased', actorId }, error: null };
@@ -24,13 +26,14 @@ function leaseDb(options: { count?: number; state?: string } = {}) {
     }
     if (name === 'fusion_review_advance_release') {
       const own = lease.token === args.p_token;
-      if (own) lease.token = null;
+      if (own) { lease.token = null; if (args.p_refund) lease.count--; }
       return { data: own, error: null };
     }
-    if (name === 'fusion_review_kick_stalled') return { data: [{ review_id: reviewId }, { review_id: actorId }], error: null };
+    if (name === 'fusion_review_kick_stalled') return { data: [{ review_id: reviewId, kicked_at: '2026-10-15T00:00:00Z' },
+      { review_id: actorId, kicked_at: '2026-10-15T00:00:00Z' }], error: null };
     return { data: null, error: { message: 'unexpected' } };
   } };
-  return { db: db as unknown as SupabaseClient, lease, calls };
+  return { db: db as unknown as SupabaseClient, lease, calls, cleared };
 }
 type Call = { callId: string; dispatched: boolean };
 function fakeFlow(step: { state?: string; waiting?: 'credits' | 'calls'; calls?: Call[] }, dispatched: string[], gate?: Promise<void>) {
@@ -80,6 +83,21 @@ describe('review background', () => {
     expect(dispatched).toEqual([]);
   });
 
+  it('more than 30 credit waits still resume after top-up without exhausting the cap', async () => {
+    const { db, lease } = leaseDb({ count: MAX_ADVANCES - 1 });
+    const dispatched: string[] = [];
+    for (let i = 0; i < 35; i++) {
+      expect(await advanceReview({ admin: db, reviewId, flow: fakeFlow({ waiting: 'credits' }, dispatched) }))
+        .toEqual({ next: false, reason: 'waiting_credits' });
+    }
+    expect(lease.count).toBe(MAX_ADVANCES - 1);
+    expect(await advanceReview({ admin: db, reviewId,
+      flow: fakeFlow({ calls: [{ callId: 'resumed', dispatched: false }] }, dispatched) }))
+      .toMatchObject({ next: true, dispatched: 1 });
+    expect(dispatched).toEqual(['resumed']);
+    expect(lease.count).toBe(MAX_ADVANCES);
+  });
+
   it('a failing step stops the relay with the lease released; past the advance limit nothing runs and an alert is logged', async () => {
     const { db, lease } = leaseDb();
     const failing = () => ({ continue: async () => { throw new Error('FUSION_REVIEW_UNAVAILABLE'); } }) as never;
@@ -88,6 +106,16 @@ describe('review background', () => {
     const capped = leaseDb({ count: MAX_ADVANCES });
     expect(await advanceReview({ admin: capped.db, reviewId, flow: failing })).toEqual({ next: false, reason: 'limit' });
     expect(alerts).toContainEqual(['billing', 'fusion_review_advance_limit', { reviewId, count: MAX_ADVANCES }]);
+  });
+
+  it('clears refused and unattempted kick reservations and reports failure', async () => {
+    const { db, cleared } = leaseDb();
+    let clock = 0;
+    const kick = vi.fn(async () => { clock = 20_000; return false; });
+    expect(await kickStalledReviews(db, 'https://graylum.test', { now: () => clock, timeLimitMs: 10_000, kick }))
+      .toEqual({ success: false, kicked: 0, listed: 2 });
+    expect(cleared).toEqual([reviewId, actorId]);
+    expect(kick).toHaveBeenCalledOnce();
   });
 
   it('checks the secret exactly; kicks only with a secret and a bounded hop; the daily kick stops at its time limit', async () => {
@@ -105,6 +133,6 @@ describe('review background', () => {
     let clock = 0;
     const kick = vi.fn(async () => { clock += 20_000; return true; });
     expect(await kickStalledReviews(leaseDb().db, 'https://graylum.test', { now: () => clock, timeLimitMs: 10_000, kick }))
-      .toEqual({ success: true, kicked: 1, listed: 2 });
+      .toEqual({ success: false, kicked: 1, listed: 2 });
   });
 });

@@ -19,7 +19,7 @@ import { ENDED_STATES } from './reviewRecord';
 
 /** A lease outlives the longest step (one invocation is at most 300 s on Vercel Hobby). */
 const LEASE_TTL = '5 minutes';
-/** Every lease grant counts; past this the review is never advanced automatically again and an alert is logged
+/** Work attempts count (expected no-work stops are refunded on release); past this the review is never advanced automatically again and an alert is logged
  * (a relay bug must not call itself forever). Round 1, round 2 and the summary, each with up to 3 attempts, need at
  * most 3 × 3 + 1 grants per run; the rest covers user returns and daily kicks. */
 export const MAX_ADVANCES = 30;
@@ -49,7 +49,8 @@ export type Lease = z.infer<typeof leaseResult>;
 
 /** Runs work under the review's advance lease (0258), or returns the refusal without running it. Every advancer
  * (the relay, an old page still calling dispatch) goes through here, so two never work on one review at once. */
-export async function withAdvanceLease<T>(admin: SupabaseClient, reviewId: string, work: (lease: Lease) => Promise<T>):
+export async function withAdvanceLease<T>(admin: SupabaseClient, reviewId: string, work: (lease: Lease) => Promise<T>,
+  refund: (value: T) => boolean = () => false):
   Promise<{ ran: true; value: T } | { ran: false; reason: string }> {
   const token = randomUUID();
   const leased = await admin.rpc('fusion_review_advance_lease', { p_review_id: reviewId, p_token: token, p_ttl: LEASE_TTL,
@@ -60,8 +61,14 @@ export async function withAdvanceLease<T>(admin: SupabaseClient, reviewId: strin
     if (lease.reason === 'limit') logger.error('billing', 'fusion_review_advance_limit', { reviewId, count: lease.count });
     return { ran: false, reason: lease.reason };
   }
-  try { return { ran: true, value: await work(lease) }; }
-  finally { await admin.rpc('fusion_review_advance_release', { p_review_id: reviewId, p_token: token }); }
+  let unspent = false;
+  try {
+    const value = await work(lease);
+    unspent = refund(value);
+    return { ran: true, value };
+  } finally {
+    await admin.rpc('fusion_review_advance_release', { p_review_id: reviewId, p_token: token, p_refund: unspent });
+  }
 }
 
 /** One step of one review. Never throws for an expected stop; the caller relays only when next is true. */
@@ -88,7 +95,7 @@ export async function advanceReview(input: { admin: SupabaseClient; reviewId: st
       logger.warn('billing', 'fusion_review_advance_failed', { reviewId, code });
       return { next: false, reason: 'failed' };
     }
-  });
+  }, value => ['waiting_credits', 'in_flight', 'idle', 'ended'].includes(value.reason));
   return outcome.ran ? outcome.value : { next: false, reason: outcome.reason };
 }
 
@@ -106,13 +113,13 @@ export function advanceAuthorized(header: string | null, secret: string | undefi
 /** Asks the internal endpoint to advance a review in a fresh invocation. It answers at once (the step runs after
  * the response), so this waits only for the acceptance. Failures are logged; the backstops pick the review up. */
 export async function kickAdvance(origin: string, reviewId: string, hop = 0,
-  env: Record<string, string | undefined> = process.env, fetcher: typeof fetch = fetch): Promise<boolean> {
+  env: Record<string, string | undefined> = process.env, fetcher: typeof fetch = fetch, timeoutMs = 10_000): Promise<boolean> {
   const secret = env.CRON_SECRET;
   if (!secret || hop > MAX_HOPS) return false;
   try {
     const response = await fetcher(new URL('/api/fusion/advance', origin), { method: 'POST',
       headers: { authorization: `Bearer ${secret}`, 'content-type': 'application/json' },
-      body: JSON.stringify(advanceRequest.parse({ reviewId, hop })), signal: AbortSignal.timeout(10_000) });
+      body: JSON.stringify(advanceRequest.parse({ reviewId, hop })), signal: AbortSignal.timeout(timeoutMs) });
     if (response.status !== 202) logger.warn('billing', 'fusion_review_kick_refused', { reviewId, status: response.status });
     return response.status === 202;
   } catch {
@@ -128,11 +135,20 @@ export async function kickStalledReviews(admin: SupabaseClient, origin: string, 
   const stopAt = now() + (options.timeLimitMs ?? 15_000);
   const listed = await admin.rpc('fusion_review_kick_stalled', { p_idle: '10 minutes', p_limit: 20 });
   if (listed.error) return { success: false, kicked: 0 };
-  const ids = z.array(z.object({ review_id: uuid })).parse(listed.data).map(row => row.review_id);
+  const rows = z.array(z.object({ review_id: uuid, kicked_at: z.string() })).parse(listed.data);
   let kicked = 0;
-  for (const id of ids) {
-    if (now() >= stopAt) break;
-    if (await (options.kick ?? kickAdvance)(origin, id, 0)) kicked++;
+  let success = true;
+  for (const row of rows) {
+    let accepted = false;
+    try {
+      if (now() < stopAt) accepted = await (options.kick ?? kickAdvance)(origin, row.review_id, 0, process.env, fetch, Math.max(1, stopAt - now()));
+    } catch { /* Restore the reservation below, including a failed custom transport. */ }
+    if (accepted) { kicked++; continue; }
+    success = false;
+    // Compare the reservation timestamp: never erase a newer cron's successful kick marker.
+    const cleared = await admin.rpc('fusion_review_kick_reset',
+      { p_review_id: row.review_id, p_kicked_at: row.kicked_at });
+    if (cleared.error) logger.warn('billing', 'fusion_review_kick_reset_failed', { reviewId: row.review_id });
   }
-  return { success: true, kicked, listed: ids.length };
+  return { success, kicked, listed: rows.length };
 }
