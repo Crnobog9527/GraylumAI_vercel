@@ -32,6 +32,21 @@ export async function syncState(db: SupabaseClient, merchant: string, localSubsc
   return state;
 }
 
+/** A first card subscription payment kept for review (not delivered: e.g. an upgrade paid after its cutoff, a closed
+ * account) has no local subscription row yet, so nothing else would stop it: stop its renewal at Stripe (marked
+ * Graylum-initiated) and confirm, so the customer is never charged again for a membership they did not receive. The
+ * paid first period is left to the review (refund). A failure throws so the payment webhook is retried. */
+export async function stopUndeliveredSubscription(stripe: Stripe, subscriptionId: string) {
+  let subscription = await readSubscription(stripe, subscriptionId);
+  if (!stripeStopState(subscription).stop && !stripeStopState(subscription).canceled) {
+    await stripe.subscriptions.update(subscriptionId, { cancel_at_period_end: true,
+      cancellation_details: { comment: GRAYLUM_INITIATED_CANCEL } });
+    subscription = await readSubscription(stripe, subscriptionId);
+  }
+  const state = stripeStopState(subscription);
+  if (!state.stop && !state.canceled) throw new Error('PAY_STRIPE_MP_RENEWAL_STOP_UNCONFIRMED');
+}
+
 /** A renewal kept for review (closed or erasing account, stopped credit release, canceled locally) must not charge
  * again: stop renewal at Stripe and confirm before acknowledging. A failure throws so Stripe retries the event; the
  * renewal is deduplicated by invoice, so the retry only repeats this stop. */
