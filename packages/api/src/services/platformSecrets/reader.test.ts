@@ -97,4 +97,25 @@ describe('getPlatformSecret', () => {
     expect(await getPlatformSecret(db, 'firecrawl', { env })).toEqual({ value: env.FIRECRAWL_API_KEY, source: 'env' });
     await expect(getPlatformSecret(db, 'firecrawl', { env: {} })).rejects.toMatchObject({ code: 'PLATFORM_SECRET_NOT_CONFIGURED' });
   });
+
+  it('a read that started before a save cannot put the retired key back into the cache', async () => {
+    let release!: (reply: { data: string; error: null }) => void;
+    let value = 'tikhub-fake-retired-value-0001';
+    let slow = true;
+    const { db, calls } = client(() => slow
+      ? new Promise(resolve => { release = resolve; }) as never
+      : { data: value, error: null });
+    const early = getPlatformSecret(db, 'tikhub');
+    await Promise.resolve();
+    // The admin saves a new key on this instance while the early read is still on the wire.
+    value = 'tikhub-fake-current-value-0002';
+    invalidatePlatformSecret('tikhub');
+    slow = false;
+    expect((await getPlatformSecret(db, 'tikhub')).value).toBe(value);
+    release({ data: 'tikhub-fake-retired-value-0001', error: null });
+    expect((await early).value).toBe('tikhub-fake-retired-value-0001');
+    // Later callers keep the current key: the late, older result was not cached.
+    expect((await getPlatformSecret(db, 'tikhub')).value).toBe(value);
+    expect(calls).toHaveLength(2);
+  });
 });

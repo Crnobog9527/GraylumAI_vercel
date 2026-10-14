@@ -29,15 +29,23 @@ type RpcClient = Pick<SupabaseClient, 'rpc'>;
 // never cached and never served from an expired entry.
 const cache = new Map<PlatformSecretSlot, { value: string | null; at: number }>();
 const inflight = new Map<PlatformSecretSlot, Promise<string | null>>();
+// Bumped on every invalidation: a read that started earlier may still finish later, and must not
+// put the value it saw (possibly the retired key) back into the cache.
+const generation = new Map<PlatformSecretSlot, number>();
 
-/** Drops this instance's cached value, e.g. right after the admin saved or cleared the slot. */
+/** Drops this instance's cached value, e.g. right after the admin saved or cleared the slot. Reads
+ * already in flight still answer their own callers but cannot repopulate the cache; the next caller
+ * starts a fresh read. */
 export function invalidatePlatformSecret(slot: PlatformSecretSlot) {
+  generation.set(slot, (generation.get(slot) ?? 0) + 1);
   cache.delete(slot);
+  inflight.delete(slot);
 }
 
 export function resetPlatformSecretCacheForTests() {
   cache.clear();
   inflight.clear();
+  generation.clear();
 }
 
 async function readStored(admin: RpcClient, slot: PlatformSecretSlot, timeoutMs: number): Promise<string | null> {
@@ -63,10 +71,15 @@ async function storedValue(admin: RpcClient, slot: PlatformSecretSlot, deps: Pla
   if (hit && now() - hit.at < PLATFORM_SECRET_CACHE_MS) return hit.value;
   let pending = inflight.get(slot);
   if (!pending) {
-    pending = readStored(admin, slot, deps.timeoutMs ?? PLATFORM_SECRET_READ_TIMEOUT_MS)
-      .then(value => { cache.set(slot, { value, at: now() }); return value; })
-      .finally(() => inflight.delete(slot));
-    inflight.set(slot, pending);
+    const started = generation.get(slot) ?? 0;
+    const read: Promise<string | null> = readStored(admin, slot, deps.timeoutMs ?? PLATFORM_SECRET_READ_TIMEOUT_MS)
+      .then(value => {
+        if ((generation.get(slot) ?? 0) === started) cache.set(slot, { value, at: now() });
+        return value;
+      })
+      .finally(() => { if (inflight.get(slot) === read) inflight.delete(slot); });
+    pending = read;
+    inflight.set(slot, read);
   }
   return pending;
 }
