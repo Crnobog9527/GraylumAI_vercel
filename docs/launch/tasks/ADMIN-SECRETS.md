@@ -13,7 +13,7 @@ Owner 2026-10-14（选项 A）原话：
 
 | 归类 | 密钥 | 本任务 |
 | --- | --- | --- |
-| 业务第三方密钥（改为后台填写） | OpenRouter、Post for Me、TikHub、Parallel、Firecrawl | 做 |
+| 业务第三方密钥（改为后台填写） | OpenRouter、Post for Me（API 密钥和 Webhook 共享密钥）、TikHub、Parallel、Firecrawl | 做 |
 | 系统底层密钥（继续放 Vercel） | 数据库连接、Supabase service role、Stripe、Upstash Redis、hCaptcha、开户赠送 HMAC 等 | 不动 |
 
 **这次要做到什么**：管理员能在后台填写、替换、清除上面 5 把业务密钥；密钥在数据库里加密存放，任何接口都不把原文还给浏览器；每次改动都有审计记录；服务端有一个统一的取用工具；OpenRouter 现在明文存在 `ai_models.api_key` 里的密钥迁进加密存储，并最终删掉这一列。
@@ -39,7 +39,7 @@ staging 已装 `supabase_vault` 0.3.1（schema `vault`，2026-10-14 只读核对
 
    | 列 | 说明 |
    | --- | --- |
-   | `slot` text 主键 | 固定清单：`openrouter`、`postforme`、`tikhub`、`parallel`、`firecrawl`（CHECK 约束） |
+   | `slot` text 主键 | 固定清单：`openrouter`、`postforme`、`postforme_webhook`、`tikhub`、`parallel`、`firecrawl`（CHECK 约束）。`postforme_webhook` 是总控 2026-10-14 为 #991 的 Webhook 共享密钥追加的 |
    | `vault_secret_id` uuid | 指向 `vault.secrets.id`；清除后为空 |
    | `last4` text | 原文最后 4 位；清除后为空 |
    | `revision` bigint | 每次写入、替换、清除加 1，用于防并发覆盖 |
@@ -123,7 +123,7 @@ invalidatePlatformSecret(slot)
 
 | slot | 后备环境变量 | 理由 |
 | --- | --- | --- |
-| `postforme` | `POSTFORME_API_KEY` | #939/#971 现在读它；后备让接入 PR 和 Owner 填写后台可以各自先后完成，不会出现空档 |
+| `postforme`、`postforme_webhook` | `POSTFORME_API_KEY`、`POSTFORME_WEBHOOK_SECRET` | #939/#971 现在读它；后备让接入 PR 和 Owner 填写后台可以各自先后完成，不会出现空档 |
 | `tikhub`、`parallel`、`firecrawl` | `TIKHUB_API_KEY`、`PARALLEL_API_KEY`、`FIRECRAWL_API_KEY` | 搜索供应商的调用方还没接线（RT-3a 的适配器只接受传入的 `apiKey`）。如果 Vercel 里还没配这几个变量，后备只是不起作用 |
 | `openrouter` | **不设后备** | 新对话引擎（Runtime）现在就明确"不用环境变量"，并且要求密钥指纹等于测试窗口报价里登记的 `account`（`openrouter-key:<sha256>`）。环境变量 `OPENROUTER_API_KEY` 里的那把和后台那把不一定相同，退回去会让指纹校验失败或悄悄换了计费账号。OpenRouter 改由迁移一次性把现有密钥搬进 Vault（第 5 节），不存在空档 |
 
