@@ -364,7 +364,6 @@ export const adminRouter = router({
     const [
       profilesAggregateResult,
       ticketsResult,
-      invitationsResult,
       recentUsersResult,
       conversationsTotal,
       recentConversationsResult,
@@ -384,9 +383,6 @@ export const adminRouter = router({
         .from('tickets')
         .select('status')
         .eq('is_deleted', false),
-
-      // Invitations by status
-      ctx.supabase.from('invitations').select('status'),
 
       // Recent users (last 10)
       ctx.supabase
@@ -476,14 +472,6 @@ export const adminRouter = router({
       closed: ticketsResult.data?.filter(t => t.status === 'closed').length ?? 0,
     };
 
-    // Calculate invitation statistics
-    const invitationStats = {
-      total: invitationsResult.data?.length ?? 0,
-      active: invitationsResult.data?.filter(i => i.status === 'active').length ?? 0,
-      used: invitationsResult.data?.filter(i => i.status === 'used').length ?? 0,
-      expired: invitationsResult.data?.filter(i => i.status === 'expired').length ?? 0,
-    };
-
     // Calculate credit transactions stats
     const transactionStats = {
       totalDeductions: 0,
@@ -541,7 +529,6 @@ export const adminRouter = router({
       },
       conversations: conversationStats,
       tickets: ticketStats,
-      invitations: invitationStats,
       credits: {
         totalInSystem: totalCredits,
         transactions: transactionStats,

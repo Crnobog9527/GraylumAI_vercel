@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { Suspense, useEffect, useState, type FormEvent } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { ArrowRight, Gift, Loader2, ShieldCheck } from 'lucide-react';
+import { ArrowRight, Loader2, ShieldCheck } from 'lucide-react';
 import { createClient } from '@/lib/supabase';
 import { getSafeErrorMessage } from '@/lib/safe-error-message';
 import {
@@ -49,12 +49,10 @@ function LoginPageContent() {
     retry: false,
     refetchOnWindowFocus: false,
   });
-  const utils = trpc.useUtils();
   const [mode, setMode] = useState<AuthMode>('login');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [nickname, setNickname] = useState('');
-  const [inviteCode, setInviteCode] = useState('');
   const [selectedPlan, setSelectedPlan] = useState('');
   const [pendingAction, setPendingAction] = useState<'login' | 'signup' | 'google' | null>(null);
   const [redirectTarget, setRedirectTarget] = useState('/profile');
@@ -64,7 +62,6 @@ function LoginPageContent() {
     const action = searchParams.get('action');
     const redirect = sanitizeRedirectTarget(searchParams.get('redirect'));
     const error = searchParams.get('error');
-    const inviteParam = searchParams.get('invite');
     const planParam = searchParams.get('plan');
 
     setMode(action === 'signup' ? 'signup' : 'login');
@@ -72,13 +69,6 @@ function LoginPageContent() {
     setSelectedPlan(planParam ?? '');
     const knownEmail = restorePendingEmail(window);
     if (knownEmail) setEmail(knownEmail);
-
-    if (inviteParam) {
-      setInviteCode(inviteParam);
-      if (action !== 'signup') {
-        setMode('signup');
-      }
-    }
 
     const errorMessage = loginErrorMessage(error);
     // After a verifier mismatch the email is usually already confirmed: guide, do not alarm.
@@ -142,20 +132,6 @@ function LoginPageContent() {
     setPendingAction('signup');
     setStatus(null);
 
-    const trimmedInviteCode = inviteCode.trim();
-    if (trimmedInviteCode) {
-      try {
-        await utils.invitation.validateInvitationCode.fetch({ code: trimmedInviteCode });
-      } catch (error) {
-        setStatus({
-          tone: 'error',
-          message: getSafeErrorMessage(error, '邀请码无效或已使用。'),
-        });
-        setPendingAction(null);
-        return;
-      }
-    }
-
     const supabase = createClient();
     const emailRedirectTo = getEmailConfirmRedirect(redirectTarget);
     let captchaOptions: Awaited<ReturnType<typeof invisibleCaptchaOptions>>;
@@ -176,7 +152,6 @@ function LoginPageContent() {
         data: {
           nickname: nickname.trim() || undefined,
           display_name: nickname.trim() || undefined,
-          invite_code: trimmedInviteCode || undefined,
         },
       },
     });
@@ -192,10 +167,7 @@ function LoginPageContent() {
 
     setStatus({
       tone: 'success',
-      message:
-        trimmedInviteCode
-          ? '注册成功，邀请码将在完成邮箱验证后自动处理。'
-          : '注册成功，验证邮件已发送。请先完成邮箱验证。',
+      message: '注册成功，验证邮件已发送。请先完成邮箱验证。',
     });
 
     rememberPendingEmail(email);
@@ -402,23 +374,6 @@ function LoginPageContent() {
                             autoComplete="nickname"
                             className="h-12 rounded-2xl border-[#2d2d2d] bg-[#131313] text-white placeholder:text-[#686868]"
                           />
-                        </div>
-
-                        <div className="space-y-2">
-                          <Label htmlFor="invite-code" className="text-[#f2f2f2]">
-                            邀请码
-                          </Label>
-                          <div className="relative">
-                            <Gift className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-[#8a8a8a]" />
-                            <Input
-                              id="invite-code"
-                              value={inviteCode}
-                              onChange={(event) => setInviteCode(event.target.value)}
-                              placeholder="选填，输入好友的邀请码"
-                              autoComplete="off"
-                              className="h-12 rounded-2xl border-[#2d2d2d] bg-[#131313] pl-11 text-white placeholder:text-[#686868]"
-                            />
-                          </div>
                         </div>
                       </>
                     )}

@@ -105,51 +105,6 @@ test.describe('User Supplemental Flows', () => {
       }
     });
 
-    test('should open a real invitation dialog with a generated invitation code', async ({ page }, testInfo) => {
-      const steps: string[] = [];
-      const monitor = createIssueMonitor(page);
-      let actual = 'Invitation dialog rendered with live invitation data';
-
-      try {
-        steps.push('Open /profile?tab=profile and locate the invitation action card');
-        await gotoWithBypass(page, '/profile?tab=profile');
-        await expect(page.getByText('快捷操作')).toBeVisible({ timeout: 10000 });
-        const inviteCard = page.getByTestId('profile-invite-card');
-        await expect(inviteCard).toBeVisible({ timeout: 10000 });
-
-        steps.push('Open the invitation dialog');
-        await inviteCard.click();
-        const dialog = page.getByRole('dialog');
-        await expect(dialog).toBeVisible({ timeout: 10000 });
-        await expect(dialog.getByRole('heading', { name: '邀请好友' })).toBeVisible({ timeout: 10000 });
-
-        steps.push('Verify the generated invitation code and copy actions are present');
-        await expect(page.getByTestId('profile-invitation-code')).toBeVisible({ timeout: 15000 });
-        await expect(dialog.getByRole('button', { name: '复制邀请码' })).toBeVisible({ timeout: 10000 });
-        await expect(dialog.getByRole('button', { name: '复制链接' })).toBeVisible({ timeout: 10000 });
-
-        const blockingIssues = monitor.getIssues('P1');
-        expect(blockingIssues, JSON.stringify(blockingIssues, null, 2)).toEqual([]);
-      } catch (error) {
-        actual = error instanceof Error ? error.message : 'Unknown invitation dialog failure';
-        monitor.addAssertionIssue(actual, 'P1');
-        throw error;
-      } finally {
-        await writeFlowAudit(
-          testInfo,
-          {
-            title: 'profile-invitation-dialog',
-            role: 'user',
-            route: '/profile',
-            expected: 'Authenticated users can open a live invitation dialog, view a generated invitation code, and copy both the code and invite link.',
-          },
-          actual,
-          steps,
-          monitor.getIssues(),
-        );
-      }
-    });
-
     test('should browse marketplace modules, change sort order, and open a module detail flow', async ({ page }, testInfo) => {
       const steps: string[] = [];
       const monitor = createIssueMonitor(page);

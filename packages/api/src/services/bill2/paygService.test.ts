@@ -1,8 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-import { beforeEach, expect, it, vi } from 'vitest';
+import { expect, it, vi } from 'vitest';
 import { createHash, randomUUID } from 'node:crypto';
-const rebate = vi.hoisted(() => vi.fn(async (args: Record<string, unknown>) => { void args; return { status: 'already_applied' }; }));
-vi.mock('../invitationRebate', () => ({ applyInvitationRebateForSpend: rebate }));
 import { authoritativeBilling, type FrozenPaygRun, type FrozenRun, type FrozenCall } from './service';
 
 const actor = randomUUID(), runId = randomUUID(), modelId = randomUUID(), callId = randomUUID();
@@ -26,10 +24,9 @@ const value: FrozenPaygRun = { contractVersion: 'bill2.v2', mode: 'isolated',
 function setup(respond: (name: string) => unknown = () => ({ id: runId, state: 'prepared' })) {
   const rpc = vi.fn(async (name: string, args: Record<string, unknown>) => { void args; return { data: respond(name), error: null }; });
   const adapter = { dispatch: vi.fn(), lookup: vi.fn(), prepareDispatch: vi.fn() };
-  const api = authoritativeBilling({ admin: { rpc }, actor: async () => actor, adapter, rebateClient: {} });
+  const api = authoritativeBilling({ admin: { rpc }, actor: async () => actor, adapter });
   return { api, rpc, adapter };
 }
-beforeEach(() => rebate.mockClear());
 it('only the explicit core v2 entry accepts zero run reservation and complete PAYG policy', async () => {
   const { api, rpc } = setup();
   await api.preparePaygRun(randomUUID(), value);
@@ -80,33 +77,11 @@ it('maps waiting_credits to a stable error and creates no dispatch capability', 
   expect(rpc.mock.calls.map(([name]) => name)).toEqual(['bill2_claim']);
   expect(adapter.prepareDispatch).not.toHaveBeenCalled();
 });
-it('rebates each actual charged call using its original pre-deduct identity, never the run total', async () => {
-  const first = randomUUID(), second = randomUUID(), zero = randomUUID();
-  const { api, rpc } = setup(name => name === 'bill2_finalize'
-    ? { id: runId, contractVersion: 'bill2.v2', state: 'settled', chargedCredits: 999, preDeductId: 'never-use-run' }
-    : { id: runId, contractVersion: 'bill2.v2', state: 'settled', calls: [
-      { preDeductId: first, chargedCredits: 2 }, { preDeductId: second, chargedCredits: 3 },
-      { preDeductId: zero, chargedCredits: 0 }, { chargedCredits: 5 }, { preDeductId: randomUUID() },
-    ] });
-  await api.finalizeRun(runId);
-  expect(rpc.mock.calls.map(([name]) => name)).toEqual(['bill2_finalize', 'bill2_read']);
-  expect(rebate.mock.calls.map(([args]) => ({ id: args.preDeductId, credits: args.consumedCredits })))
-    .toEqual([{ id: first, credits: 2 }, { id: second, credits: 3 }]);
-  expect(rebate.mock.calls.every(([args]) => args.inviteeId === actor)).toBe(true);
-});
-it('v1 terminal rebates retain the run identity without an extra read', async () => {
-  const pre = randomUUID();
-  const { api, rpc } = setup(() => ({ id: runId, contractVersion: 'bill2.v1', state: 'settled', preDeductId: pre, chargedCredits: 7 }));
-  await api.finalizeRun(runId);
-  expect(rpc.mock.calls.map(([name]) => name)).toEqual(['bill2_finalize']);
-  expect(rebate).toHaveBeenCalledWith(expect.objectContaining({ preDeductId: pre, consumedCredits: 7 }));
-});
-
-it.each(['prepared', 'cost_pending', 'refunded'])('v2 %s does not issue a premature or compensated rebate', async state => {
+// Invitation rebates were retired (Owner 2026-10-14): finalizing reads nothing after settlement.
+it.each(['settled', 'prepared', 'cost_pending', 'refunded'])('v2 %s finalizes through bill2_finalize only', async state => {
   const { api, rpc } = setup(() => ({ id: runId, contractVersion: 'bill2.v2', state, chargedCredits: 9 }));
   await api.finalizeRun(runId);
   expect(rpc.mock.calls.map(([name]) => name)).toEqual(['bill2_finalize']);
-  expect(rebate).not.toHaveBeenCalled();
 });
 it('preserves a definite PAYG claim refusal and never grants a dispatch capability', async () => {
   const { api, rpc, adapter } = setup();

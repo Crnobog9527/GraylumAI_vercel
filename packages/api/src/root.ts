@@ -17,7 +17,6 @@ import { modelRouter } from './routers/model';
 import { modelReasoningRouter } from './routers/modelReasoning';
 import { modelPricingRouter } from './routers/modelPricing';
 import { billingReportRouter } from './routers/billingReport';
-import { invitationRouter } from './routers/invitation';
 import { checkinRouter } from './routers/checkin';
 import { adminRouter } from './routers/admin';
 import { modulesRouter } from './routers/modules';
@@ -52,7 +51,6 @@ export const appRouter = router({
   socialMediaFlag: socialMediaFlagRouter,
   runtimeRateLimits: runtimeRateLimitsRouter,
   modelIdentity: modelIdentityRouter,
-  invitation: invitationRouter,
   checkin: checkinRouter,
   admin: adminRouter,
   adminStaleRounds: adminStaleRoundsRouter,

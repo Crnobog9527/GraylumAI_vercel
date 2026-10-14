@@ -568,3 +568,27 @@ test.describe('Authenticated Security', () => {
     }
   });
 });
+
+// Invitation rewards were retired (Owner 2026-10-14): an old ?invite= link must open the ordinary
+// login and signup forms, never ask for or validate a code, and never reach a removed endpoint.
+test.describe('Retired invitation links', () => {
+  for (const query of ['invite=OLDCODE', 'action=signup&invite=OLDCODE']) {
+    test(`opens the normal auth form for /login?${query}`, async ({ page }) => {
+      const pageErrors: string[] = [];
+      const invitationCalls: string[] = [];
+      page.on('pageerror', (error) => pageErrors.push(error.message));
+      page.on('request', (request) => {
+        if (request.url().includes('invitation.')) invitationCalls.push(request.url());
+      });
+      await gotoWithBypass(page, `/login?${query}`);
+      const signup = query.startsWith('action=signup');
+      await expect(page.locator('form button[type="submit"]')).toContainText(signup ? '创建账户' : '登录', { timeout: 10000 });
+      await expect(page.locator('input[type="email"]')).toBeVisible();
+      if (signup) await expect(page.locator('#nickname')).toBeVisible();
+      await expect(page.locator('#invite-code')).toHaveCount(0);
+      await expect(page.getByText('邀请码')).toHaveCount(0);
+      expect(invitationCalls).toEqual([]);
+      expect(pageErrors).toEqual([]);
+    });
+  }
+});

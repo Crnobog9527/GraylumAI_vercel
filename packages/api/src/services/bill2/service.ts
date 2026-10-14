@@ -13,7 +13,6 @@ import { openRouterNotFound, type RejectionRecovery } from './openRouterNotFound
 import { openRouterEvidence } from './openRouterEvidence';
 import {consumeOpenRouterNotStarted} from './openRouterAdapter';
 import { aggregateCredits } from './decimal';
-import { applyInvitationRebateForSpend } from '../invitationRebate';
 const uuid = z.string().uuid();
 const scope = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('positioning_draft'), draftId: uuid }).strict(),
@@ -80,8 +79,6 @@ export type DispatchClaim = { id: string; state: string; dispatchToken: string |
 /** Trusted server composition only: actor comes from verified authentication, policy from the server.
  * No public route exposes raw RPC payloads or accepts a browser price/receipt. No env/fallback loading. */
 export function authoritativeBilling(deps: { budget?:RuntimeBudget; admin: BillingRpc; actor: () => Promise<string>; adapter: BillingTransport;
-  /** Existing downstream rebate, explicitly enabled only by the trusted host. */
-  rebateClient?: Parameters<typeof applyInvitationRebateForSpend>[0]['supabase'];
 }) {
   const capabilities = new Map<string, { token: string; frozen: FrozenCall; runId: string; actorId: string }>();
   const financialActors = new Map<string,string>();
@@ -122,19 +119,6 @@ export function authoritativeBilling(deps: { budget?:RuntimeBudget; admin: Billi
       // Ambiguous transaction result: inspect original identity; never redispatch or retry blindly.
       state = await readRun(runId);
       if (!['settled', 'refunded'].includes(state.state)) throw error;
-    }
-    if (state.contractVersion === 'bill2.v2' && state.state === 'settled' && deps.rebateClient) {
-      const current = await readRun(runId);
-      for (const item of current.calls ?? []) {
-        if (!item.preDeductId || !item.chargedCredits) continue;
-        await applyInvitationRebateForSpend({ supabase: deps.rebateClient, supabaseAdmin: deps.rebateClient,
-          inviteeId: financialActors.get(runId) ?? uuid.parse(await deps.actor()),
-          consumedCredits: item.chargedCredits, preDeductId: item.preDeductId });
-      }
-    } else if (state.contractVersion !== 'bill2.v2' && state.state === 'settled' && state.chargedCredits && deps.rebateClient) {
-      // Reuse the existing idempotent downstream; run identity is stable, releases/refunds never enter it.
-      await applyInvitationRebateForSpend({ supabase: deps.rebateClient, supabaseAdmin: deps.rebateClient,
-        inviteeId: financialActors.get(runId) ?? uuid.parse(await deps.actor()), consumedCredits: state.chargedCredits, preDeductId: state.preDeductId });
     }
     return state;
   }

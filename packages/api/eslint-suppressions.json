@@ -75,24 +75,6 @@
       "count": 3
     }
   },
-  "src/routers/invitation.dashboard.test.ts": {
-    "@typescript-eslint/no-explicit-any": {
-      "count": 1
-    }
-  },
-  "src/routers/invitation.test.ts": {
-    "@typescript-eslint/no-explicit-any": {
-      "count": 3
-    },
-    "@typescript-eslint/no-unused-vars": {
-      "count": 1
-    }
-  },
-  "src/routers/invitation.ts": {
-    "@typescript-eslint/no-explicit-any": {
-      "count": 2
-    }
-  },
   "src/routers/model.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 1
@@ -228,11 +210,6 @@
       "count": 2
     }
   },
-  "src/services/__tests__/invitationRebate.test.ts": {
-    "@typescript-eslint/no-explicit-any": {
-      "count": 1
-    }
-  },
   "src/services/__tests__/modulePublication.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 6
@@ -338,16 +315,6 @@
   "src/services/diagnosticsResults.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 5
-    }
-  },
-  "src/services/invitationRebate.ts": {
-    "@typescript-eslint/no-explicit-any": {
-      "count": 4
-    }
-  },
-  "src/services/invitationRuntime.ts": {
-    "@typescript-eslint/no-explicit-any": {
-      "count": 1
     }
   },
   "src/services/membershipEligibility.ts": {

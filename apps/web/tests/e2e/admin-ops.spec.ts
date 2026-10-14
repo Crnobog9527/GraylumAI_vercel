@@ -180,22 +180,6 @@ test.describe('Admin Operations Flows', () => {
         await expect(financeModelRows.first()).toBeVisible({ timeout: 10000 });
       }
 
-      steps.push('Open /admin/invitations and verify search, filter, and refresh controls');
-      await gotoWithBypass(page, '/admin/invitations');
-      await expect(page.getByTestId('admin-invitations-stat-total')).toBeVisible({ timeout: 15000 });
-      await expect(page.getByTestId('admin-invitations-records-section')).toBeVisible({ timeout: 15000 });
-      await page.getByPlaceholder('搜索邮箱或邀请码...').fill('test');
-      await page.getByTestId('admin-invitations-status-filter').click();
-      await page.getByRole('option', { name: '已发放' }).click();
-      await page.getByTestId('admin-invitations-refresh').click();
-      const invitationRows = page.locator('[data-testid^="admin-invitation-row-"]');
-      const invitationRowCount = await invitationRows.count();
-      if (invitationRowCount > 0) {
-        await expect(invitationRows.first()).toBeVisible({ timeout: 10000 });
-      } else {
-        await expect(page.getByTestId('admin-invitations-empty-state')).toBeVisible({ timeout: 10000 });
-      }
-
       steps.push('Open /admin/settings billing tab and verify only active billing fields remain in the active section');
       await gotoWithBypass(page, '/admin/settings');
       await page.getByRole('tab', { name: '积分计费' }).click();
@@ -281,7 +265,7 @@ test.describe('Admin Operations Flows', () => {
         {
           title: 'admin-operations-read-pages',
           role: 'admin',
-          route: '/admin/transactions,/admin/finance,/admin/invitations,/admin/costs,/admin/performance,/admin/tickets',
+          route: '/admin/transactions,/admin/finance,/admin/costs,/admin/performance,/admin/tickets',
           expected: 'Admin users can open the major operational read pages and interact with their primary tabs or filters without blocking issues.',
         },
         actual,
