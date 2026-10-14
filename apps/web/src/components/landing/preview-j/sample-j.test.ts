@@ -6,7 +6,7 @@ import sitemap from '@/app/sitemap';
 import { metadata } from '@/app/landing/preview/j/page';
 import { FINAL_ACTION, H_COMPARE, HERO, HERO_H, PRICE_COMPARE, RISK_REVERSAL, VOICE_WALL } from '@/lib/landing/landing-copy';
 import * as copyJ from '@/lib/landing/landing-copy-j';
-import { J_FAQ_REWORDS, J_ID_PLACEHOLDER, J_NOTE_HEADS, J_PRICE, J_SCENES, J_TAKEOVER, noteSource } from '@/lib/landing/landing-copy-j';
+import { J_FAQ_REWORDS, J_ID_PLACEHOLDER, J_NOTE_HEADS, J_PRICE, J_TAKEOVER, noteSource } from '@/lib/landing/landing-copy-j';
 import { LANDING_FEATURES, type LandingFlags } from '@/lib/landing/landing-flags';
 import { buildLandingPageData } from '@/lib/landing/landing-page-data';
 import { APP_SEGMENTS } from '@/lib/sentry-scrub';
@@ -17,6 +17,7 @@ import { WEEK_STEP_MS } from './WeekJ';
 import { J_WEEK } from '@/lib/landing/landing-copy-j-week';
 import { J_COMPARE } from '@/lib/landing/landing-copy-j-compare';
 import { J_TAKEOVER_SCENES } from '@/lib/landing/landing-copy-j-takeover';
+import { J_WORK, J_WORK_SAMPLES, J_WORK_SCENES } from '@/lib/landing/landing-copy-j-work';
 import { J_FOUNDER_BAR, J_PRICE_TOTAL } from '@/lib/landing/landing-copy-j-price';
 
 const ALL_ON = Object.fromEntries(Object.keys(LANDING_FEATURES).map(key => [key, true])) as LandingFlags;
@@ -93,18 +94,27 @@ describe('style sample J', () => {
 describe('style sample J, the later sections', () => {
   it('runs scenes, the comparison, price, FAQ and the close in order after the story', () => {
     const { html } = render();
-    const order = ['id="how-it-works"', 'id="scenes-title"', 'id="compare-title"', 'id="pricing-title"', 'id="faq-title"', 'id="final-title"']
+    const order = ['id="how-it-works"', 'id="work-title"', 'id="compare-title"', 'id="pricing-title"', 'id="faq-title"', 'id="final-title"']
       .map(mark => html.indexOf(mark));
     expect(order.every(index => index > 0)).toBe(true);
     expect([...order].sort((a, b) => a - b)).toEqual(order);
   });
 
-  it('shows the product scenes with their step copy', () => {
-    const { data, html } = render();
-    for (const id of J_SCENES.steps) {
-      const step = data.flowSteps.find(item => item.id === id);
-      if (step) expect(html).toContain(escape(step.demo));
+  it('shows all eight demos of the merged module, finished on the server, with no figures or income promise', () => {
+    const { html } = render();
+    for (const group of J_WORK.groups) expect(html).toContain(group);
+    expect(html).toContain(J_WORK.close);
+    for (const scene of J_WORK_SCENES) {
+      expect(html).toContain(scene.title);
+      expect(html).toContain(escape(scene.did));
+      expect(html).toContain(escape(scene.result));
     }
+    // The review lives in "不用自己看数据"; it is not a demo of its own any more.
+    expect(J_WORK_SCENES.map(scene => scene.id)).not.toContain('review');
+    // Nothing waits for a phase in the server HTML: every piece is already shown.
+    const work = html.slice(html.indexOf('id="work-title"'), html.indexOf('id="compare-title"'));
+    expect(work.match(/data-at=/g)?.length).toBe(work.match(/data-shown=""/g)?.length);
+    expect(JSON.stringify([J_WORK_SCENES, J_WORK_SAMPLES])).not.toMatch(/\d+\s*%|\$|保证|一定能|稳赚/);
   });
 
   it('keeps the Owner\'s four-row comparison word for word, each row over its pair of conversations', () => {

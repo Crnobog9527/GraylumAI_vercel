@@ -11,11 +11,11 @@ import { HeroJ } from './HeroJ';
 import { MotionJ } from './MotionJ';
 import type { PriceExtras } from './PlanCardsJ';
 import { PriceJ } from './PriceJ';
-import { ScenesJ } from './ScenesJ';
 import { CompareJ } from './CompareJ';
 import { FaqJ, FinalJ } from './SectionsJ';
 import { TakeoverJ } from './TakeoverJ';
 import { VoiceWallJ } from './VoiceWallJ';
+import { WorkJ } from './WorkJ';
 import styles from './j.module.css';
 
 const CHROME = SITE_CHROME['zh-Hans'];
@@ -61,7 +61,7 @@ export function SampleJ({ data, siteName, extras, samplePricing = false }: {
         <HeroJ />
         <VoiceWallJ notes={data.notes} />
         <TakeoverJ />
-        <ScenesJ steps={data.flowSteps} />
+        <WorkJ flags={extras.flags} />
         <CompareJ />
         <PriceJ pricing={data.pricing} rows={data.compareRows} risk={data.risk} showResult={data.showResult}
           founderSeats={data.founderSeats} extras={extras} sample={samplePricing} />
