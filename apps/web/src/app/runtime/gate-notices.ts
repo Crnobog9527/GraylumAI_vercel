@@ -97,10 +97,11 @@ export function userStopIds(storage: GateStopStorage | null, sessionId: string, 
 
 /**
  * A cancelled round with no saved body is finished: there is nothing left to verify or show.
- * A paused round without a saved body shows only its pause notice.
+ * A paused round without a saved body shows only its pause notice. A round still in progress shows its streamed
+ * text (or nothing yet) with its own "正在回复…" notice, never a "verifying" placeholder (CHAT-NATIVE-OUTPUT).
  */
 export function showsReply(execution: { state: string; body: string | null; primaryBody: string | null }) {
-  return !((execution.state === 'cancelled' || isPaygWaiting(execution.state)) && !(execution.body ?? execution.primaryBody));
+  return execution.state === 'completed' || Boolean(execution.body ?? execution.primaryBody);
 }
 
 /**

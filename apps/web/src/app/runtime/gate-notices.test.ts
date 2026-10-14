@@ -81,7 +81,9 @@ it('remembers nothing for other results and survives missing or failing storage'
 it('shows no "verifying" reply for a cancelled round without a body, and keeps every other reply', () => {
   expect(showsReply({ state: 'cancelled', body: null, primaryBody: null })).toBe(false);
   expect(showsReply({ state: 'cancelled', body: null, primaryBody: '已保存的主回复' })).toBe(true);
-  expect(showsReply({ state: 'running', body: null, primaryBody: null })).toBe(true);
+  // In progress: the streamed text and the turn's own notice show instead of a "verifying" placeholder.
+  expect(showsReply({ state: 'running', body: null, primaryBody: null })).toBe(false);
+  expect(showsReply({ state: 'interrupted', body: null, primaryBody: '已保存的主回复' })).toBe(true);
   expect(showsReply({ state: 'completed', body: '回复', primaryBody: null })).toBe(true);
 });
 

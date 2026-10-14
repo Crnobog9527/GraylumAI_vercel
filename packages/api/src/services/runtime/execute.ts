@@ -44,7 +44,7 @@ import { callBillingUnit } from './billingUnitAdmission';
 import type {GateRejection} from './newWorkGate';
 import {allowedOutput} from './moderation';
 import {runtimeIdentityGuard} from '../modelIdentity/runtimeGuard';
-import {POSITIONING_REFUSED,positioningRefused,endPositioningRefusal} from './positioningFallback';
+import {POSITIONING_REFUSED,positioningRefused,endPositioningRefusal,roundEmitter} from './positioningFallback';
 import {cancelledOutcome,finishCancelRequested} from './executorOutcome';
 import {frozenBrandIdentity,withBrandIdentity} from '../modelIdentity/brandIdentity';
 export function runtimeExecutor(options:RuntimeExecutorOptions){
@@ -332,7 +332,7 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
     exchange:async(_sequence,request,onChunk)=>{
      partial="";agentText="";agentCardMessage=undefined;
      projection=new NativeProgressProjection(projectionOptions);
-     const project=nativeFrameProjection(projection,update=>progress(streamingCall===undefined?update:{...update,call:streamingCall}));
+     const project=nativeFrameProjection(projection,roundEmitter(progress,()=>streamingCall,context));
      const envelope=await exchange(request,context.reportGeneration?'report':effective.role,primaryPolicy,nativeProgress&&execution.live&&onChunk?chunk=>{
       onChunk(chunk);
       try{project(chunk);}catch{logger.warn('api','runtime_native_projection_failed',{executionId});}

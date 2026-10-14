@@ -366,7 +366,10 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
     reasoning=admitReasoning(row.data,organize?'organize':'interactive',realModel(row.data).providerLimits!.providerSlug,maxOutputTokens);
    const organizerFormat=Boolean(policy.real&&!mentorStream&&(organize||attachedOrganizer));
    if(organizerFormat&&!reasoning)reasoning={parameter:'none'};
-   const providerRequestFormat=mentorStream||policy.reportGeneration?'agent-turn-v5-stream':stepStream?'serial-tools-v4-stream':organizerFormat?'serial-tools-v6-reasoning':freeChat?FREE_CHAT_REQUEST_FORMAT:'serial-tools-v2';
+   // A chosen Skill uses the PAYG-evidenced v6 format without reasoning: the same request bytes as the unevidenced v2.
+   const chosenSkill=Boolean(policy.real&&input.selection.kind==='skill'&&!mentorStream&&!stepStream&&!policy.reportGeneration);
+   if(chosenSkill&&!reasoning)reasoning={parameter:'none'};
+   const providerRequestFormat=mentorStream||policy.reportGeneration?'agent-turn-v5-stream':stepStream?'serial-tools-v4-stream':organizerFormat||chosenSkill?'serial-tools-v6-reasoning':freeChat?FREE_CHAT_REQUEST_FORMAT:'serial-tools-v2';
    const frozen={version:'runtime.v1',sdkVersion:'0.18.0',inputSelection:hostTurnContext?'scope-projection-v2':'scope-projection-v1',
     ...(hostTurnContext?{hostTurnContext,historySelection}:{}),
     ...(policy.reportGeneration?{reportGeneration:policy.reportGeneration}:{}),
