@@ -122,7 +122,7 @@ BEGIN
    true,p_auto_track,publish,publish)
   RETURNING id INTO conn;
  END IF;
- UPDATE social_connect_requests SET state='applied' WHERE id=req.id;
+ UPDATE social_connect_requests SET state='applied',confirm_expires_at=NULL WHERE id=req.id;
  RETURN jsonb_build_object('connectionId',conn,'unselected',to_jsonb(ARRAY(
   SELECT x FROM unnest(req.candidate_provider_ids) x
   WHERE x<>p_provider_account_id AND NOT EXISTS(SELECT 1 FROM social_connections c WHERE c.provider_account_id=x))));
