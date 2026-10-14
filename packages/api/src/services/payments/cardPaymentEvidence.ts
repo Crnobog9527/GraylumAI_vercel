@@ -22,7 +22,7 @@ export type CardPaymentEvidence = {
 
 /** Managed Payments tax is kept as its own fact on the order; the pre-tax amount grants the entitlement. */
 export async function recordCardPaymentTax(db: Pick<SupabaseClient, 'rpc'>, merchant: string, orderId: string,
-  evidence: CardPaymentEvidence) {
+  evidence: Pick<CardPaymentEvidence, 'paymentId' | 'tax'>) {
   const recorded = await db.rpc('pay_stripe_mp_record_tax', { p_order: orderId, p_merchant: merchant,
     p_payment: evidence.paymentId, p_tax: evidence.tax });
   if (recorded.error) throw new Error('PAY_WAFFO_FULFILLMENT_UNAVAILABLE', { cause: recorded.error });
