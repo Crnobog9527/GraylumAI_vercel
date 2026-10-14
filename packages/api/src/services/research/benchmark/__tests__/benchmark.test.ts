@@ -31,7 +31,7 @@ describe('benchmark metrics', () => {
     expect(m.followers.value).toBeNull();
     expect(m.medianViews).toEqual({ value: null, refs: [] });
     expect(m.engagementRate.value).toBeNull();
-    expect(m.missing).toEqual(['followers', 'medianViews', 'engagementRate']);
+    expect(m.missing).toEqual(['followers', 'medianViews', 'engagementRate', 'postsPerWeek']);
     expect(m.wholeHistory).toBe(true);
   });
 
@@ -45,6 +45,12 @@ describe('benchmark metrics', () => {
     expect(m.lastPublishedAt.value).toBe(daysAgo(40));
     expect(m.postsPerWeek).toMatchObject({ value: 0 });
     expect(m.postsPerWeek.refs).toHaveLength(30);
+  });
+
+  it('keeps the frequency unknown when a short page may continue, unless the list is complete', () => {
+    const short = posts(20, i => ({ publishedAt: daysAgo(i), views: 5 }));
+    expect(accountMetrics({ profile: profile(20_000), posts: short }, now).postsPerWeek.value).toBeNull();
+    expect(accountMetrics({ profile: profile(20_000), posts: short, complete: true }, now).postsPerWeek.value).toBeCloseTo((20 * 7) / 30, 6);
   });
 
   it('keeps the frequency unknown when a full page is entirely inside the window', () => {

@@ -18,6 +18,8 @@ export interface AccountEvidence {
   profile: EvidenceItem;
   /** Account posts, any order. Only the newest `postsMax` are used. */
   posts: EvidenceItem[];
+  /** The supplier said this list is the account's complete history (no further page). Unknown counts as false. */
+  complete?: boolean;
   /**
    * The item carrying followers when it is not the profile (Bilibili relation, YouTube post detail). A YouTube
    * post detail is also the newest post's only absolute publication time, so it counts for recency.
@@ -101,8 +103,9 @@ export function accountMetrics(evidence: AccountEvidence, now: Date): AccountMet
   const recent = dated.filter(post => time(post)! >= windowStart);
   // An undated post could fall inside the window, so a frequency from a partly dated list would treat it as
   // outside (as zero). Report it only when every analyzed post carries a time.
-  // A full page whose oldest post is still inside the window may hide further posts: unknown, not a low number.
-  const capped = posts.length >= BENCHMARK_RULES.postsMax && dated.length > 0 && time(dated[dated.length - 1]!)! >= windowStart;
+  // Unless the list is known to be complete, a page whose oldest post is still inside the window may hide further
+  // posts (a capped page, or a cursor-paginated one): the frequency is unknown, not a low number.
+  const capped = evidence.complete !== true && dated.length > 0 && time(dated[dated.length - 1]!)! >= windowStart;
   const frequencyKnown = posts.length > 0 && dated.length === posts.length && !capped;
   const detail = evidence.followersItem && time(evidence.followersItem) !== null ? evidence.followersItem : undefined;
   const newest = [dated[0], detail].filter((p): p is EvidenceItem => p !== undefined)
