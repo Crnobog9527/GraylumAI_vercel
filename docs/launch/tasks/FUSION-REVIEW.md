@@ -161,7 +161,7 @@
   不悄悄去掉模型、用更少的模型降级运行（评审团是管理员指定的 3–8 个模型，人数变了就改变了质量和价格）。
   运行中某个模型确认失败或结果未知不属于降级准入，按"部分失败如实展示"处理：本轮有至少 1 个成功意见就照常汇总，页面写明哪几个模型没给出意见。复用 `paygRuntime.ts` 的 `measureCallInput` / `fitNativeRequestOutput`。
 
-### 2.2a 评审过程事件（给前端动画，Owner 2026-10-14；约定第 4 版）
+### 2.2a 评审过程事件（给前端动画，Owner 2026-10-14；约定第 5 版）
 
 Owner 要求评审过程中让用户看到评审团的思考和互相挑刺。前端动画只按下面的事件播放，事件全部由服务端从**真实的评审记录和已保存的输出**推导，
 没有对应的真实数据就没有事件，不做模拟表演。
@@ -190,15 +190,25 @@ Owner 要求评审过程中让用户看到评审团的思考和互相挑刺。�
 | `response` | 第 2 轮评审回应别人，每位被回应的评审、每个关键决定一条 | `round: 2`, `reviewer`, `to`, `decision`, `strongestView`, `stance: "agree"\|"disagree"` |
 | `summary_started` | 汇总开始调用 | `round` |
 | `adjudication` | 汇总的裁决记录，每条一条 | `section`（章节标题，或"全文"）, `issue`, `reviewers: ["A",...]`, `single: boolean`, `disputed: boolean`（评审之间有没有分歧）, `opinion`（评审团最终意见）, `reason`, `fix`（建议怎么改）, `adopted: boolean`（修订稿里是否采纳） |
-| `revision_ready` | 修订稿通过宿主检查并已交给 R14 | `changedSections: number`, `changedSectionTitles: string[]`（只有标题）, `changedFields: number`, `revisionId` |
+| `revision_ready_for_choice` | 修订稿通过宿主检查，等用户逐章选择（还没交给 R14） | `changedSections: number`, `changedSectionTitles: string[]`（只有标题）, `changedFields: number` |
+| `adoption_done` | 用户逐章选完 | `adoptedSections: string[]`, `keptSections: string[]`, `versionId`（全部保留原文时为 null） |
 | `revision_failed` | 汇总没通过宿主检查 | `reason`（宿主检查代号，例如 `REVISION_NOTES`） |
 | `review_ended` | 评审结束（任何结局） | `state`, `outcome` |
 
 - **完整原文（不限 120 字）**：`fusionReview.detail({ reviewId })` 只读本人的评审，返回
   `{ reviewId, state, outcome, revisionId, seats: [{ seat, rounds: [{ round, status: "usable"|"failed"|"pending", decisions?, issues?, responses? }] }],
-  summary: { status: "usable"|"failed"|"none", sections: [{ section, changed, rulings: [{ section, issue, reviewers, single, disputed, opinion, reason, fix, adopted }] }] } }`。
+  summary: { status: "usable"|"failed"|"none", sections: [{ section, changed, wordingOnly, original?, revised?, fields: [{ stepId, fieldId, before, after }],
+  linkedSections, rulings: [{ section, issue, reviewers, single, disputed, opinion, reason, fix, adopted }] }] }, adoption, awaitingChoice }`。
+  `original` / `revised` 只在改动的章节给出全文（原文来自冻结的评审版本）；`linkedSections` 是因共用字段必须同选的章节；`adoption` 是已经做过的选择（没选为 null）。
   `decisions` 每条含 `decision / strongestCase / strongestAlternative / verdict / basis`，`issues` 每条含 `location / perspective / problem / suggestion / severity`，
   `responses` 每条含 `reviewer / decision / strongestView / stance / reason`。悬停某位评审时用 `seats`；最终结果按章节展示用 `summary.sections`（模板顺序，最后是"全文"）。只出现席位代号，不出现模型名。
+
+- **逐章选择（Owner 2026-10-14）**：`fusionReview.adopt({ reviewId, requestId, choices: [{ section, use: "revised"|"original", confirmedNoFactChange? }] })`
+  返回 `{ versionId | null, adopted, kept }`。每个改动的章节都必须明确选择；没改动的章节默认保留原文；只改表述的章节选"采用修订版"时
+  `confirmedNoFactChange` 必须为 true；`linkedSections` 里的章节必须选成一样。采用的章节合成新正文、只带这些章节声明的字段，走 R14 现有的提案和采用，
+  生成新的正式版本；全部保留原文时不生成新版本，只记录选择。同一个 `requestId` 重复提交返回同一结果，一次评审只能选一次；
+  正式版本已经变了（用户在评审后改过草稿）会被 R14 拒绝（`REPORT_REVISION_STALE`），这次修订稿就作废了（草稿不会被锁住，用户可以再开评审）。
+  拒绝代号：`FUSION_ADOPTION_INCOMPLETE`（有改动的章节没选）、`FUSION_ADOPTION_INVALID`、`FUSION_ADOPTION_CONFIRM_REQUIRED`、`FUSION_ADOPTION_LINKED`、`FUSION_REVIEW_ADOPTED`。
 
 另外：`ended=true` 表示评审已结束，之后不会再有新事件。没有分歧时不会出现 `disagreement` 和 `response`，直接到 `summary_started`。
 
