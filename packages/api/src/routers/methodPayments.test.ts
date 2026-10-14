@@ -5,6 +5,8 @@ import { router as createTRPCRouter } from '../trpc';
 import { methodPaymentProcedures } from './methodPayments';
 import { logger } from '../lib/logger';
 import { WaffoFailure } from '../services/payments/waffoFailure';
+import { RateLimitError } from '../lib/rateLimitError';
+import { assertCheckoutRateLimit } from '../services/stripe';
 const mocks = vi.hoisted(() => ({ cancel: vi.fn(), provider: vi.fn(), wallet: vi.fn(), card: vi.fn(), gateOpen: { value: false } }));
 vi.mock('../services/payments/waffoTestOperationsClient', () => ({ getWaffoTestOperationsClient: mocks.provider }));
 // Every new checkout is closed in code during PR-1; the error-mapping tests open the gate explicitly.
@@ -95,6 +97,13 @@ it('keeps every card checkout closed in production even with every switch on, an
     }
   }
   expect(mocks.wallet).not.toHaveBeenCalled(); expect(mocks.card).not.toHaveBeenCalled(); expect(mocks.provider).not.toHaveBeenCalled();
+});
+it('passes a checkout rate limit through as TOO_MANY_REQUESTS with its retry hint, not as a generic failure', async () => {
+  stubStaging(); mocks.gateOpen.value = true;
+  vi.mocked(assertCheckoutRateLimit).mockRejectedValueOnce(new RateLimitError('rate_limited', 30));
+  await expect(fixture('user', settings(true)).caller.methodCheckout(card)).rejects.toMatchObject({ code: 'TOO_MANY_REQUESTS',
+    message: '请求过于频繁，请在 30 秒后重试' });
+  expect(mocks.card).not.toHaveBeenCalled(); expect(mocks.wallet).not.toHaveBeenCalled();
 });
 it('sends card purchases past the environment gate to the Stripe card checkout, never Waffo or the wallet checkout', async () => {
   stubStaging(); mocks.gateOpen.value = true;
