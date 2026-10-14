@@ -33,6 +33,9 @@ ALTER TABLE public.bill2_calls ADD COLUMN IF NOT EXISTS supplier_cost_state text
 ALTER TABLE public.bill2_calls ADD COLUMN IF NOT EXISTS supplier_cost_bound_usd numeric;
 ALTER TABLE public.bill2_calls ADD COLUMN IF NOT EXISTS supplier_cost_reconciled_at timestamptz;
 ALTER TABLE public.bill2_calls ADD COLUMN IF NOT EXISTS supplier_cost_reconciled_by uuid;
+-- The frozen price entry hash, kept outside the payload: erasure strips toolPricing from the payload, but a
+-- metering review of a blocked route still needs it (bill2_payg_metering_review_snapshot / review_metering).
+ALTER TABLE public.bill2_calls ADD COLUMN IF NOT EXISTS tool_price_entry_hash text;
 DO $$ BEGIN
   IF NOT EXISTS(SELECT 1 FROM pg_constraint WHERE conname='bill2_calls_tool_cost_check') THEN
     ALTER TABLE public.bill2_calls ADD CONSTRAINT bill2_calls_tool_cost_check CHECK (
@@ -40,22 +43,27 @@ DO $$ BEGIN
       AND (supplier_cost_state IS NULL OR (call_kind='tool' AND supplier_cost_state IN ('pending','confirmed')))
       AND (supplier_cost_state IS DISTINCT FROM 'pending' OR (selected_cost_usd IS NULL AND supplier_cost_bound_usd>0))
       AND (supplier_cost_state IS DISTINCT FROM 'confirmed' OR selected_cost_usd>=0)
-      AND ((supplier_cost_reconciled_at IS NULL)=(supplier_cost_reconciled_by IS NULL)));
+      AND ((supplier_cost_reconciled_at IS NULL)=(supplier_cost_reconciled_by IS NULL))
+      AND ((call_kind='tool')=(tool_price_entry_hash IS NOT NULL))
+      AND (tool_price_entry_hash IS NULL OR tool_price_entry_hash ~ '^[a-f0-9]{64}$'));
   END IF;
 END $$;
 
--- The kind follows the frozen protocol at insert and never changes (erasure rewrites the payload later).
+-- The kind and the price entry hash follow the frozen payload at insert and never change (erasure rewrites the
+-- payload later).
 CREATE OR REPLACE FUNCTION public.bill2_calls_kind_guard() RETURNS trigger
 LANGUAGE plpgsql SET search_path=public,pg_temp AS $$
 BEGIN
   IF TG_OP='INSERT' THEN
     NEW.call_kind:=CASE WHEN NEW.payload->>'protocol'='research-tool-v1' THEN 'tool' ELSE 'model' END;
-  ELSIF NEW.call_kind IS DISTINCT FROM OLD.call_kind THEN RAISE EXCEPTION 'BILL2_CALL_KIND_IMMUTABLE';
+    NEW.tool_price_entry_hash:=CASE WHEN NEW.call_kind='tool' THEN NEW.payload#>>'{toolPricing,entryHash}' END;
+  ELSIF NEW.call_kind IS DISTINCT FROM OLD.call_kind OR NEW.tool_price_entry_hash IS DISTINCT FROM OLD.tool_price_entry_hash THEN
+    RAISE EXCEPTION 'BILL2_CALL_KIND_IMMUTABLE';
   END IF;
   RETURN NEW;
 END $$;
 DROP TRIGGER IF EXISTS bill2_calls_kind_guard ON public.bill2_calls;
-CREATE TRIGGER bill2_calls_kind_guard BEFORE INSERT OR UPDATE OF call_kind ON public.bill2_calls
+CREATE TRIGGER bill2_calls_kind_guard BEFORE INSERT OR UPDATE OF call_kind,tool_price_entry_hash ON public.bill2_calls
   FOR EACH ROW EXECUTE FUNCTION public.bill2_calls_kind_guard();
 
 -- USD for `units` of a frozen price, in the BILL2 12-decimal unit; the same exact arithmetic as
@@ -235,6 +243,9 @@ BEGIN
     RETURN jsonb_build_object('nominal','0','source','tool_unknown');
   END IF;
   RETURN CASE
+    -- A run closed as a confirmed failure charges the user nothing; a used lookup is absorbed by the platform.
+    WHEN e->>'toolOutcome'='delivered' AND e->>'cost' IS NOT NULL AND r.closed AND r.outcome='confirmed_failure'
+      THEN jsonb_build_object('nominal','0','source','tool_failed_charged')
     WHEN e->>'toolOutcome'='delivered' AND e->>'cost' IS NOT NULL THEN jsonb_build_object('nominal',e->>'cost','source','tool_usage')
     WHEN e->>'toolOutcome'='delivered' THEN jsonb_build_object('nominal','0','source','tool_no_usage')
     WHEN e->>'toolOutcome'='failed_free' THEN jsonb_build_object('nominal','0','source','tool_failed')
@@ -260,7 +271,10 @@ BEGIN
   PERFORM bill2_payg_lock_models(r);
   SELECT * INTO c FROM bill2_calls WHERE id=p_call_id FOR UPDATE;
   cost:=p_cost::numeric;
-  IF c.supplier_cost_state='confirmed' AND c.supplier_cost_reconciled_at IS NOT NULL AND c.selected_cost_usd=cost THEN
+  -- A replay must repeat both the amount and the evidence the audit row recorded.
+  IF c.supplier_cost_state='confirmed' AND c.supplier_cost_reconciled_at IS NOT NULL AND c.selected_cost_usd=cost
+   AND EXISTS(SELECT 1 FROM user_activity_logs l WHERE l.action='bill2_tool_cost_reconcile'
+     AND l.details->>'callId'=c.id::text AND l.details->>'evidenceHash'=p_evidence_hash) THEN
     RETURN jsonb_build_object('callId',c.id,'costUsd',c.selected_cost_usd::text,'replayed',true);END IF;
   IF c.supplier_cost_state IS DISTINCT FROM 'pending' OR c.settled_at IS NULL THEN RAISE EXCEPTION 'BILL2_TOOL_RECONCILE_INVALID';END IF;
   -- A confirmed cost above the frozen bound fails the route closed until an admin review (plan §3.5),
@@ -301,7 +315,7 @@ END $$;
 
 -- Finalize: tool calls settle from their result; zero-charge tool outcomes take the refund path;
 -- a charged tool call is described as a lookup, not a model call.
-DO $$ DECLARE src text;d text;w text;z1 text;z2 text;t text;b text; BEGIN
+DO $$ DECLARE src text;d text;w text;z1 text;z2 text;t text;b text;f text; BEGIN
   src:=pg_get_functiondef('public.bill2_payg_finalize(uuid,uuid)'::regprocedure);
   IF position('-- 0255 tool settlement' IN src)=0 THEN
     d:=$x$DECLARE r bill2_runs;c bill2_calls;$x$;
@@ -316,10 +330,18 @@ DO $$ DECLARE src text;d text;w text;z1 text;z2 text;t text;b text; BEGIN
     z2:=$x$  IF c.dispatched_at IS NOT NULL AND source<>'confirmed_failure' THEN$x$;
     t:=$x$'consumption','AI call consumption',$x$;
     b:=$x$budget_conflict=budget_conflict OR n>upper_usd OR selected_cost_usd>upper_usd$x$;
+    -- Whole-run failure (0234 text): a dispatched tool call still goes through tool settlement, so its
+    -- supplier cost stays pending with a bound (or confirmed) instead of a generic refund.
+    f:=$x$  IF c.provider_rejected OR c.dispatched_at IS NULL OR (r.closed AND r.outcome='confirmed_failure')
+   OR c.fusion_verdict$x$;
     IF array_length(string_to_array(src,d),1)<>2 OR array_length(string_to_array(src,w),1)<>2
      OR array_length(string_to_array(src,z1),1)<>2 OR array_length(string_to_array(src,z2),1)<>2
-     OR array_length(string_to_array(src,t),1)<>2 OR array_length(string_to_array(src,b),1)<>2 THEN
+     OR array_length(string_to_array(src,t),1)<>2 OR array_length(string_to_array(src,b),1)<>2
+     OR array_length(string_to_array(src,f),1)<>2 THEN
       RAISE EXCEPTION 'RESEARCH_TOOL_BILLING_SOURCE_MISMATCH: bill2_payg_finalize';END IF;
+    src:=replace(src,f,$x$  IF c.provider_rejected OR c.dispatched_at IS NULL
+   OR (r.closed AND r.outcome='confirmed_failure' AND c.payload->>'protocol' IS DISTINCT FROM 'research-tool-v1')
+   OR c.fusion_verdict$x$);
     src:=replace(src,d,d||'tool jsonb;');
     src:=replace(src,w,$x$   -- 0255 tool settlement
    IF c.payload->>'protocol'='research-tool-v1' THEN
@@ -349,7 +371,7 @@ DO $$ DECLARE src text;a text:=$x$  OR c.payload#>>'{payg,profileVersion}' IS DI
     EXECUTE replace(src,a,$x$  -- 0255 tool review
   -- (Parenthesised: inside an IF condition PL/pgSQL would otherwise end the condition at CASE's THEN.)
   OR (CASE WHEN c.call_kind='tool' THEN 'research-tool-v1' ELSE c.payload#>>'{payg,profileVersion}' END) IS DISTINCT FROM p_review->>'profileVersion'
-  OR (CASE WHEN c.call_kind='tool' THEN c.payload#>>'{toolPricing,entryHash}' ELSE c.payload#>>'{payg,evidenceVersion}' END) IS DISTINCT FROM p_review->>'evidenceVersion'$x$);
+  OR (CASE WHEN c.call_kind='tool' THEN c.tool_price_entry_hash ELSE c.payload#>>'{payg,evidenceVersion}' END) IS DISTINCT FROM p_review->>'evidenceVersion'$x$);
   END IF;
 END $$;
 
@@ -361,7 +383,7 @@ DO $$ DECLARE src text;p text:=$x$c.payload#>>'{payg,profileVersion}'$x$;e text:
     IF array_length(string_to_array(src,p),1)<>3 OR array_length(string_to_array(src,e),1)<>3 THEN
       RAISE EXCEPTION 'RESEARCH_TOOL_BILLING_SOURCE_MISMATCH: bill2_payg_metering_review_snapshot';END IF;
     src:=replace(src,p,$x$(CASE WHEN c.call_kind='tool' THEN 'research-tool-v1' ELSE c.payload#>>'{payg,profileVersion}' END)$x$);
-    src:=replace(src,e,$x$(CASE WHEN c.call_kind='tool' THEN c.payload#>>'{toolPricing,entryHash}' ELSE c.payload#>>'{payg,evidenceVersion}' END)$x$);
+    src:=replace(src,e,$x$(CASE WHEN c.call_kind='tool' THEN c.tool_price_entry_hash ELSE c.payload#>>'{payg,evidenceVersion}' END)$x$);
     EXECUTE replace(src,'DECLARE c bill2_calls;',E'DECLARE c bill2_calls; -- 0255 tool snapshot\n');
   END IF;
 END $$;
@@ -405,6 +427,22 @@ DO $$ DECLARE src text;a text:=$x$  IF entry->>'protocol' IS DISTINCT FROM 'open
     EXECUTE replace(src,a,$x$  -- 0255 tool routes
   IF NOT coalesce((entry->>'protocol'='openrouter-chat-v1' AND entry->>'provider'='openrouter')
     OR (entry->>'protocol'='research-tool-v1' AND entry->>'provider' IN ('tikhub','parallel','firecrawl')),false)$x$);
+  END IF;
+END $$;
+
+-- Automatic recovery inventory: a tool call has no lookup, so a closed run whose dispatched tool call never
+-- got a result was never listed (the closed branch waits for every cost). Once that call's recovery deadline
+-- has passed, list the run so the recovery worker finishes it and the hold is released as tool_unknown.
+DO $$ DECLARE src text;a text:=$x$ OR count(*)>0 OR (r.closed AND$x$; BEGIN
+  src:=pg_get_functiondef('public.runtime_pending_financial_batch(uuid,integer)'::regprocedure);
+  IF position('-- 0255 expired tool calls' IN src)=0 THEN
+    IF array_length(string_to_array(src,a),1)<>2 THEN RAISE EXCEPTION 'RESEARCH_TOOL_BILLING_SOURCE_MISMATCH: runtime_pending_financial_batch';END IF;
+    EXECUTE replace(src,a,$x$ OR count(*)>0 -- 0255 expired tool calls
+    OR (r.closed AND r.contract_version='bill2.v2' AND (e.state IN ('cost_pending','cancelled') OR e.result IS NOT NULL)
+     AND EXISTS(SELECT 1 FROM bill2_calls tool_call WHERE tool_call.run_id=r.id AND tool_call.call_kind='tool'
+      AND tool_call.dispatched_at IS NOT NULL AND tool_call.settled_at IS NULL
+      AND clock_timestamp()>=coalesce(tool_call.recovery_deadline,tool_call.created_at+interval '24 hours')))
+    OR (r.closed AND$x$);
   END IF;
 END $$;
 

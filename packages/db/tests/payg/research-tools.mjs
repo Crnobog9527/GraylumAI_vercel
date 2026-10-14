@@ -187,6 +187,55 @@ export async function researchToolCases({db,Client,connectionString,report,creat
     report.checks.push('RT-2 crash after dispatch: waits for its result, then settles as unknown at the recovery deadline (user 0, cost pending); a late result confirms the cost without charging; after reconciliation a late result is refused');
   }
 
+  // The same crash on a runtime-bound run, finished only through the automatic recovery inventory.
+  {
+    const f = await make();
+    const execution = (await db.query('SELECT b2a_test.bind($1) v',[f])).rows[0].v;
+    const c = await claimTool(db,f,1);
+    // The stalled execution is ended; the run closes but waits for the tool result.
+    await db.query("UPDATE runtime_executions SET state='cancelled' WHERE id=$1",[execution]);
+    assert.equal((await rpc(db,'runtime_financial_recovery',f.actor,execution,true)).state,'cost_pending');
+    const listed = async () => (await rpc(db,'runtime_pending_financial_batch',f.actor,20)).filter(x=>x.runId===f.run);
+    assert.equal((await listed()).length,0,'not listed before the recovery deadline');
+    await db.query("UPDATE bill2_calls SET recovery_deadline=now()-interval '1 second' WHERE id=$1",[c.id]);
+    const [item] = await listed();
+    assert.equal(item?.finishAllowed,true,'listed once the deadline has passed');
+    // What the recovery worker does for a finishable item (automaticRecovery.ts).
+    assert.equal((await rpc(db,'runtime_financial_recovery',f.actor,item.executionId,true)).state,'cancelled');
+    const s = await call(db,c.id);
+    assert.deepEqual([s.settled,s.charged_delta,s.nominal_source,s.supplier_cost_state],[true,0,'tool_unknown','pending']);
+    assert.equal((await financial(db,f)).credits,100);
+    assert.equal((await listed()).length,0);
+    report.checks.push('RT-2 recovery inventory: a closed run with a crashed tool call is listed after the recovery deadline and the worker releases the hold as unknown');
+  }
+
+  // A run closed as a confirmed failure while a tool call is in flight: the call keeps its supplier cost, the user pays 0.
+  {
+    const failure = {kind:'confirmed_delivery_failure',evidenceRef:'local-proof',evidenceHash:'d'.repeat(64),body:'local proof'};
+    const f = await make();
+    const used = await claimTool(db,f,1);
+    await rpc(db,'bill2_close',f.actor,f.run,'confirmed_failure',failure);
+    await rpc(db,'bill2_finalize',f.actor,f.run);
+    assert.equal((await call(db,used.id)).settled,false,'a dispatched tool call waits for its result');
+    await rpc(db,'bill2_record',f.actor,f.run,used.id,result(used,'delivered','1','0.01'));
+    await rpc(db,'bill2_finalize',f.actor,f.run);
+    const u = await call(db,used.id);
+    assert.deepEqual([u.settled,u.charged_delta,u.nominal_source,u.supplier_cost_state,Number(u.cost)],
+      [true,0,'tool_failed_charged','confirmed',0.01]);
+    assert.equal((await financial(db,f)).credits,100);
+    await conserved(db,f);
+    const g = await make();
+    const lost = await claimTool(db,g,1);
+    await rpc(db,'bill2_close',g.actor,g.run,'confirmed_failure',failure);
+    await db.query("UPDATE bill2_calls SET recovery_deadline=now()-interval '1 second' WHERE id=$1",[lost.id]);
+    assert.equal((await rpc(db,'bill2_finalize',g.actor,g.run)).state,'refunded');
+    const l = await call(db,lost.id);
+    assert.deepEqual([l.settled,l.charged_delta,l.nominal_source,l.supplier_cost_state,Number(l.bound)],[true,0,'tool_unknown','pending',0.01]);
+    assert.equal((await financial(db,g)).credits,100);
+    await conserved(db,g);
+    report.checks.push('RT-2 confirmed run failure: an in-flight tool call settles through tool settlement (user 0; a used lookup is confirmed and absorbed; a missing result is pending with its bound) instead of a generic refund');
+  }
+
   // Reconciliation fills the pending supplier cost; admin only; replay-safe.
   {
     const f = await make();
@@ -198,6 +247,8 @@ export async function researchToolCases({db,Client,connectionString,report,creat
     const before = await financial(db,f);
     assert.equal((await rpc(db,'bill2_tool_cost_reconcile',admin,c.id,'0.01','a'.repeat(64))).replayed,false);
     assert.equal((await rpc(db,'bill2_tool_cost_reconcile',admin,c.id,'0.01','a'.repeat(64))).replayed,true);
+    await assert.rejects(rpc(db,'bill2_tool_cost_reconcile',admin,c.id,'0.01','b'.repeat(64)),/BILL2_TOOL_RECONCILE_INVALID/,
+      'a replay with other evidence is refused');
     await assert.rejects(rpc(db,'bill2_tool_cost_reconcile',admin,c.id,'0.02','a'.repeat(64)),/BILL2_TOOL_RECONCILE_INVALID/);
     assert.equal((await call(db,c.id)).supplier_cost_state,'confirmed');
     assert.deepEqual(await financial(db,f),before,'user settlement never changes');
@@ -282,6 +333,11 @@ export async function researchToolCases({db,Client,connectionString,report,creat
     const admin = randomUUID();
     await db.query("INSERT INTO profiles(id,credits,role) VALUES($1,0,'admin')",[admin]);
     const flagged = ids[4];
+    // Erasure strips toolPricing from the payload; the review still works from the stored price entry hash.
+    await db.query("SET session_replication_role=replica");
+    await db.query('UPDATE bill2_calls SET payload=bill2_erasure_call_payload(payload) WHERE id=$1',[flagged]);
+    await db.query("RESET session_replication_role");
+    assert.equal((await db.query("SELECT payload ? 'toolPricing' p FROM bill2_calls WHERE id=$1",[flagged])).rows[0].p,false);
     // Same steps as the admin page: read the snapshot, then review with what it returned.
     const snap = await rpc(db,'bill2_payg_metering_review_snapshot',admin,flagged);
     assert.deepEqual([snap.profileVersion,snap.evidenceVersion,snap.reviewable,snap.meteringMissing],

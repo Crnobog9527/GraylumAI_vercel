@@ -14,7 +14,8 @@ const approvalSchema = z.object({
   cash: z.object({ chargeId: z.string(), paymentIntentId: z.string() }),
 });
 type Order = { id: string; user_id: string; payment_channel: string; payment_mode: string;
-  merchant_namespace: string; amount_total: number; currency: string; refund_approval: unknown };
+  merchant_namespace: string; amount_total: number; currency: string; refund_approval: unknown;
+  payment_method: string | null; payment_amount_facts: Array<{ kind?: string; amount?: string; evidence_ref?: string }> | null };
 export type RefundRequest = { orderId: string; ticketId: string; feePermitted: 'confirmed' | 'not_permitted';
   feeEvidence: string };
 const id = (value: string | { id: string } | null) => typeof value === 'string' ? value : value?.id;
@@ -27,10 +28,11 @@ async function rpc(db: Db, name: string, args: Record<string, unknown>) {
 }
 async function loadOrder(db: Db, orderId: string): Promise<Order> {
   const result = await db.from('payment_orders')
-    .select('id,user_id,payment_channel,payment_mode,merchant_namespace,amount_total,currency,refund_approval')
+    .select('id,user_id,payment_channel,payment_mode,merchant_namespace,amount_total,currency,refund_approval,payment_method,'
+      + 'payment_amount_facts')
     .eq('id', orderId).single();
   if (result.error || !result.data) throw new Error('PAY_REFUND_ORDER_UNKNOWN');
-  return result.data as Order;
+  return result.data as unknown as Order;
 }
 async function scopedOrder(db: Db, stripe: RefundStripe, orderId: string) {
   const order = await loadOrder(db, orderId);
@@ -51,16 +53,19 @@ async function paymentId(db: Db, order: Order) {
 export async function readPackageRefundCash(db: Db, stripe: RefundStripe, orderId: string) {
   const { order, scope } = await scopedOrder(db, stripe, orderId);
   const intentId = await paymentId(db, order);
+  // PAY-STRIPE-MP: an international card pack charged the pre-tax amount plus the tax recorded for its payment (0237).
+  const taxMinor = order.payment_method === 'card' ? recordedTax(order, intentId) : 0;
+  const charged = order.amount_total + taxMinor;
   const payment = await stripe.paymentIntents.retrieve(intentId);
   const chargeId = id(payment.latest_charge);
   if (payment.id !== intentId || payment.livemode || payment.status !== 'succeeded'
-    || payment.amount_received !== order.amount_total || payment.currency !== order.currency
+    || payment.amount_received !== charged || payment.currency !== order.currency
     || !chargeId) throw new Error('PAY_REFUND_PAYMENT_MISMATCH');
   const charge = await stripe.charges.retrieve(chargeId, { expand: ['balance_transaction'] });
   const balance = charge.balance_transaction;
   if (charge.id !== chargeId || charge.livemode || !charge.paid || !charge.captured
-    || id(charge.payment_intent) !== intentId || charge.amount !== order.amount_total
-    || charge.amount_captured !== order.amount_total || charge.currency !== order.currency
+    || id(charge.payment_intent) !== intentId || charge.amount !== charged
+    || charge.amount_captured !== charged || charge.currency !== order.currency
     || !balance || typeof balance === 'string' || !Number.isSafeInteger(balance.created)) {
     throw new Error('PAY_REFUND_CHARGE_MISMATCH');
   }
@@ -70,8 +75,14 @@ export async function readPackageRefundCash(db: Db, stripe: RefundStripe, orderI
     throw new Error('PAY_REFUND_PRIOR_REFUND_OR_DISPUTE');
   }
   return { orderId: order.id, merchant: scope.merchant, mode: scope.mode, currency: order.currency,
-    paymentIntentId: intentId, chargeId: charge.id, paidMinor: order.amount_total,
+    paymentIntentId: intentId, chargeId: charge.id, paidMinor: order.amount_total, taxMinor,
     paidAt: new Date(balance.created * 1000).toISOString(), refundedMinor: 0, refundCount: 0, disputed: false };
+}
+/** The tax recorded for this payment; without it the charged total is unknown and the refund waits. */
+function recordedTax(order: Order, paymentId: string) {
+  const facts = (order.payment_amount_facts ?? []).filter(fact => fact.kind === 'tax' && fact.evidence_ref === paymentId);
+  if (!facts.length) throw new Error('PAY_REFUND_TAX_PENDING');
+  return facts.reduce((sum, fact) => sum + Math.round(Number(fact.amount) * 100), 0);
 }
 function quoteArgs(actorId: string, input: RefundRequest, cash: unknown) {
   return { p_actor: actorId, p_order: input.orderId, p_ticket: input.ticketId, p_cash: cash,

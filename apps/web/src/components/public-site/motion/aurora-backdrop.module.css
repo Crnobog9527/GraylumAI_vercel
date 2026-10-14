@@ -1,9 +1,11 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 /*
- * AuroraBackdrop's layers. Four soft lights (peach, lilac, aqua, gold) on a pale canvas move through five states,
- * one per fifth of the page: gathered top right behind the first screen, sweeping left for the complaints, opening
- * into a wide band behind the conversations, pooling gold around the prices, and spreading warm under the close.
- * A thin light stream flows across, a perspective floor grid gives depth, and a glow follows the mouse.
+ * AuroraBackdrop's layers: light and shade on paper, not colored light. Two paper-white highlights, one
+ * low-saturation tint and one soft shade pool move through five states, one per fifth of the page (gathered top
+ * right behind the first screen, sweeping left for the complaints, a wide band behind the conversations, pooling
+ * around the prices, spreading under the close), so depth reads as brighter and darker paper. A faint sheen
+ * crosses the page, a perspective floor grid gives depth, a fine static grain gives the paper a surface, and a
+ * glow follows the mouse. Colors come from --bd-* on an ancestor (sample H's palettes); the fallbacks are neutral.
  * The lights are pre-softened radial gradients (no filter: blur), so moving them costs only compositing.
  */
 .backdrop {
@@ -15,8 +17,8 @@
   pointer-events: none;
   contain: strict;
   background:
-    radial-gradient(120% 70% at 50% -10%, #ffffff 0%, rgba(255, 255, 255, 0) 60%),
-    linear-gradient(180deg, #f9f7fd 0%, #f6f6fb 50%, #fbf7f3 100%);
+    radial-gradient(120% 70% at 50% -10%, var(--bd-top, #fff) 0%, rgba(255, 255, 255, 0) 60%),
+    linear-gradient(180deg, var(--bd-base-1, #f7f7f6) 0%, var(--bd-base-2, #f3f3f2) 50%, var(--bd-base-3, #f0f0ee) 100%);
 }
 
 .light, .floor i {
@@ -43,19 +45,23 @@
   border-radius: 50%;
   animation: drift 22s cubic-bezier(.45, 0, .55, 1) infinite alternate paused;
 }
-.peach i { background: radial-gradient(closest-side, rgba(255, 170, 128, .62), rgba(255, 170, 128, .22) 55%, rgba(255, 170, 128, 0)); }
-.lilac i { background: radial-gradient(closest-side, rgba(170, 140, 255, .55), rgba(170, 140, 255, .2) 55%, rgba(170, 140, 255, 0)); }
-.aqua i { background: radial-gradient(closest-side, rgba(110, 214, 230, .5), rgba(110, 214, 230, .18) 55%, rgba(110, 214, 230, 0)); }
-.gold i { background: radial-gradient(closest-side, rgba(255, 206, 84, .55), rgba(255, 206, 84, .2) 55%, rgba(255, 206, 84, 0)); }
-.lilac i { animation-duration: 27s; animation-direction: alternate-reverse; }
-.aqua i { animation-duration: 31s; }
-.gold i { animation-duration: 25s; animation-direction: alternate-reverse; }
+.lightA i { background: radial-gradient(closest-side, rgba(var(--bd-light, 255, 255, 255), .95), rgba(var(--bd-light, 255, 255, 255), .4) 55%,
+  rgba(var(--bd-light, 255, 255, 255), 0)); }
+.lightB i { background: radial-gradient(closest-side, rgba(var(--bd-light, 255, 255, 255), .8), rgba(var(--bd-light, 255, 255, 255), .3) 55%,
+  rgba(var(--bd-light, 255, 255, 255), 0)); }
+.tint i { background: radial-gradient(closest-side, rgba(var(--bd-tint, 200, 200, 196), .34), rgba(var(--bd-tint, 200, 200, 196), .12) 55%,
+  rgba(var(--bd-tint, 200, 200, 196), 0)); }
+.shade i { background: radial-gradient(closest-side, rgba(var(--bd-shade, 30, 30, 30), .085), rgba(var(--bd-shade, 30, 30, 30), .03) 55%,
+  rgba(var(--bd-shade, 30, 30, 30), 0)); }
+.lightB i { animation-duration: 27s; animation-direction: alternate-reverse; }
+.tint i { animation-duration: 31s; }
+.shade i { animation-duration: 25s; animation-direction: alternate-reverse; }
 
 /* First state (also the still state). */
-.peach { transform: translate(26vw, -30vh) scale(.78); }
-.lilac { transform: translate(40vw, -4vh) scale(.62); }
-.aqua { transform: translate(-40vw, 30vh) scale(.5); opacity: .7; }
-.gold { transform: translate(6vw, -42vh) scale(.46); }
+.lightA { transform: translate(26vw, -30vh) scale(.78); }
+.lightB { transform: translate(40vw, -4vh) scale(.62); }
+.tint { transform: translate(-40vw, 30vh) scale(.5); opacity: .7; }
+.shade { transform: translate(6vw, -42vh) scale(.46); }
 
 .stream {
   position: absolute;
@@ -63,8 +69,8 @@
   left: -30vw;
   width: 160vw;
   height: 26vh;
-  background: linear-gradient(90deg, rgba(255, 255, 255, 0), rgba(255, 196, 170, .32) 22%, rgba(196, 176, 255, .34) 48%,
-    rgba(150, 226, 236, .3) 72%, rgba(255, 255, 255, 0));
+  background: linear-gradient(90deg, rgba(var(--bd-light, 255, 255, 255), 0), rgba(var(--bd-light, 255, 255, 255), .7) 35%,
+    rgba(var(--bd-tint, 200, 200, 196), .16) 60%, rgba(var(--bd-light, 255, 255, 255), 0));
   mask-image: radial-gradient(50% 50% at 50% 50%, #000 20%, transparent 70%);
   transform: rotate(-9deg);
   opacity: .8;
@@ -84,8 +90,8 @@
   display: block;
   height: 220%;
   background-image:
-    linear-gradient(rgba(84, 64, 160, .09) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(84, 64, 160, .09) 1px, transparent 1px);
+    linear-gradient(rgba(var(--bd-grid, 30, 30, 30), .075) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(var(--bd-grid, 30, 30, 30), .075) 1px, transparent 1px);
   background-size: 72px 72px;
   transform-origin: 50% 0%;
   transform: rotateX(62deg) translateY(-36px);
@@ -99,17 +105,28 @@
   width: 520px;
   height: 520px;
   border-radius: 50%;
-  background: radial-gradient(closest-side, rgba(255, 255, 255, .85), rgba(206, 188, 255, .36) 45%, rgba(255, 190, 160, 0));
+  background: radial-gradient(closest-side, rgba(var(--bd-light, 255, 255, 255), .9), rgba(var(--bd-tint, 200, 200, 196), .18) 45%,
+    rgba(var(--bd-tint, 200, 200, 196), 0));
   opacity: 0;
   transition: opacity .6s, transform .7s cubic-bezier(.16, 1, .3, 1);
   will-change: transform;
 }
 
+/* Fine grain: a static noise tile, so the paper has a surface. Never animated. */
+.grain {
+  position: absolute;
+  inset: 0;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 .9 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  background-size: 160px 160px;
+  opacity: var(--bd-grain, .05);
+  mix-blend-mode: multiply;
+}
+
 .backdrop[data-motion='on'] .light i { animation-play-state: running; }
-.backdrop[data-motion='on'] .peach { animation-name: peachStates; }
-.backdrop[data-motion='on'] .lilac { animation-name: lilacStates; }
-.backdrop[data-motion='on'] .aqua { animation-name: aquaStates; }
-.backdrop[data-motion='on'] .gold { animation-name: goldStates; }
+.backdrop[data-motion='on'] .lightA { animation-name: lightAStates; }
+.backdrop[data-motion='on'] .lightB { animation-name: lightBStates; }
+.backdrop[data-motion='on'] .tint { animation-name: tintStates; }
+.backdrop[data-motion='on'] .shade { animation-name: shadeStates; }
 .backdrop[data-motion='on'] .floor i { animation-name: floorStates; }
 .backdrop[data-motion='on'] .stream { animation: flow 18s linear infinite alternate; }
 .backdrop[data-pointer='on'] .spot { opacity: 1; }
@@ -123,28 +140,28 @@
   0% { transform: rotate(-9deg) translateX(-8vw); }
   100% { transform: rotate(-4deg) translateX(10vw) translateY(10vh); }
 }
-@keyframes peachStates {
+@keyframes lightAStates {
   0% { transform: translate(26vw, -30vh) scale(.78); }
   25% { transform: translate(-34vw, -18vh) scale(.9); }
   50% { transform: translate(-30vw, 12vh) scale(1.3, .7); }
   75% { transform: translate(-20vw, 6vh) scale(.7); }
   100% { transform: translate(-6vw, 30vh) scale(1.3); }
 }
-@keyframes lilacStates {
+@keyframes lightBStates {
   0% { transform: translate(40vw, -4vh) scale(.62); }
   25% { transform: translate(-10vw, 22vh) scale(.84); }
   50% { transform: translate(18vw, 8vh) scale(1.5, .62); }
   75% { transform: translate(34vw, -14vh) scale(.62); }
   100% { transform: translate(30vw, 26vh) scale(1); }
 }
-@keyframes aquaStates {
+@keyframes tintStates {
   0% { transform: translate(-40vw, 30vh) scale(.5); opacity: .7; }
   25% { transform: translate(34vw, 6vh) scale(.7); opacity: .9; }
   50% { transform: translate(0, -6vh) scale(1.7, .6); opacity: 1; }
   75% { transform: translate(-36vw, -20vh) scale(.6); opacity: .8; }
   100% { transform: translate(-36vw, 18vh) scale(.7); opacity: .6; }
 }
-@keyframes goldStates {
+@keyframes shadeStates {
   0% { transform: translate(6vw, -42vh) scale(.46); }
   25% { transform: translate(-40vw, 30vh) scale(.5); }
   50% { transform: translate(40vw, 34vh) scale(.6); }

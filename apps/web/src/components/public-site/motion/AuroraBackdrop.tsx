@@ -7,9 +7,9 @@ import { pageProgress } from './ScrollBackdrop';
 import styles from './aurora-backdrop.module.css';
 
 /*
- * Style sample H's backdrop: soft colored light flowing over a pale canvas, a perspective floor grid for depth,
- * and (on a mouse) a glow that follows the pointer. Fixed behind the page; render it once, first inside the page
- * wrapper, and give the content `position: relative`.
+ * Style sample H's backdrop: soft light and shade moving over a pale paper with a fine grain, a perspective floor
+ * grid for depth, and (on a mouse) a glow that follows the pointer. Its colors come from --bd-* set by an ancestor.
+ * Fixed behind the page; render it once, first inside the page wrapper, and give the content `position: relative`.
  *
  * The same idea as ScrollBackdrop: the page's scroll position (0 → 1) is written to `--scroll` once per frame and
  * scrubs paused keyframes, so the light moves through one continuous set of states from the top of the page to
@@ -92,11 +92,12 @@ export function AuroraBackdrop({ className }: { className?: string }) {
 
   return (
     <div ref={ref} aria-hidden="true" data-testid="aurora-backdrop" className={cn(styles.backdrop, className)}>
-      <span className={cn(styles.light, styles.peach)}><i /></span>
-      <span className={cn(styles.light, styles.lilac)}><i /></span>
-      <span className={cn(styles.light, styles.aqua)}><i /></span>
-      <span className={cn(styles.light, styles.gold)}><i /></span>
+      <span className={cn(styles.light, styles.lightA)}><i /></span>
+      <span className={cn(styles.light, styles.lightB)}><i /></span>
+      <span className={cn(styles.light, styles.tint)}><i /></span>
+      <span className={cn(styles.light, styles.shade)}><i /></span>
       <span className={styles.stream} />
+      <span className={styles.grain} />
       <span className={styles.floor}><i /></span>
       <span ref={spotRef} className={styles.spot} />
     </div>
