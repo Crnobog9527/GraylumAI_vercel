@@ -1,0 +1,197 @@
+/* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+/*
+ * The jury room: a light, warm diorama (pale wall, oak bench and table) with four drawn people. Every movement is a
+ * pose: the arms rotate about the shoulder, the head bows, nods or bobs. Reduced motion never renders this room.
+ */
+.room {
+  --wood: #c99a62;
+  --wood-dark: #a77a46;
+  --wood-top: #e2bd8a;
+  position: relative;
+  display: grid;
+  grid-template-rows: auto auto;
+  min-height: 0;
+  overflow: hidden;
+  border-radius: 20px 20px 0 0;
+  background: linear-gradient(#f3efe6 0 58%, #e8dfcf 58% 100%);
+  isolation: isolate;
+}
+.wall { position: absolute; inset: 0 0 42% 0; display: flex; justify-content: space-between; padding: 16px 8%; z-index: -1; }
+.window {
+  width: 12%; height: 58%; border: 5px solid #fff; border-radius: 6px;
+  background: linear-gradient(160deg, #dbe9ef, #eef4f2 60%, #f6efe0);
+  box-shadow: inset 0 0 0 1px #e5ddcd;
+}
+.floor { position: absolute; inset: 58% 0 0 0; z-index: -1; background: repeating-linear-gradient(90deg, transparent 0 78px, rgba(0, 0, 0, .025) 78px 80px); }
+
+.benchArea { position: relative; display: grid; justify-items: center; padding-top: 4px; }
+.bench {
+  position: relative; z-index: 2; width: min(40%, 280px); height: 40px; margin-top: -26px;
+  border-radius: 8px 8px 2px 2px; background: linear-gradient(var(--wood-top) 0 9px, var(--wood) 9px);
+  box-shadow: 0 6px 0 var(--wood-dark);
+  display: grid; place-items: center;
+}
+.bench span { margin-top: 8px; padding: 1px 10px; border-radius: 999px; background: #ffc93c; color: #4a3500; font-size: 11.5px; font-weight: 700; }
+
+.circle {
+  position: relative; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); align-items: end;
+  padding: 0 4% 0; margin-top: 4px;
+}
+.table {
+  position: absolute; left: 6%; right: 6%; bottom: 0; height: 62px; z-index: 2;
+  border-radius: 50% 50% 0 0 / 70% 70% 0 0;
+  background: linear-gradient(var(--wood-top) 0 14px, var(--wood) 14px);
+  box-shadow: inset 0 -10px 0 var(--wood-dark);
+}
+
+/* A person is a button: hover or focus opens their record, a tap pins it. */
+.person {
+  position: relative; display: grid; justify-items: center; align-self: end; gap: 0;
+  padding: 24px 4px 0; border: 0; background: none; color: inherit; font: inherit; cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.person[data-seat='S'] { z-index: 1; padding-top: 22px; }
+.figure { position: relative; width: min(108px, 70%); height: auto; overflow: visible; }
+.person[data-seat='S'] .figure { width: 90px; }
+.circle .figure { margin-bottom: -34px; }
+.person:focus-visible { outline: none; }
+.person:focus-visible .nameTag, .personSelected .nameTag { box-shadow: 0 0 0 2px #262626; }
+
+.nameTag {
+  position: relative; z-index: 3; display: grid; justify-items: center; max-width: 100%; margin-top: 2px;
+  padding: 4px 10px 5px; border-radius: 10px; background: #fff; box-shadow: 0 1px 0 rgba(0, 0, 0, .08);
+  line-height: 1.3; transition: box-shadow .2s;
+}
+.circle .nameTag { margin-bottom: 14px; }
+.person[data-seat='S'] .nameTag { position: absolute; top: 22px; left: calc(50% + 52px); justify-items: start; margin: 0; white-space: nowrap; }
+.nameText {
+  display: -webkit-box; max-width: 10.5em; overflow: hidden; color: #262626; font-size: 13px; font-weight: 700; text-align: center;
+  -webkit-box-orient: vertical; -webkit-line-clamp: 2;
+}
+.poseText { color: #5b5b5b; font-size: 11.5px; }
+.person:hover .nameTag { box-shadow: 0 0 0 2px #ffc93c; }
+
+.bubble {
+  position: absolute; top: 0; left: 50%; z-index: 4; padding: 3px 11px; border-radius: 999px;
+  background: #fff; color: #262626; font-size: 12.5px; font-weight: 700; white-space: nowrap;
+  box-shadow: 0 2px 6px rgba(2, 4, 26, .1); transform: translateX(-50%);
+  animation: pop .45s cubic-bezier(.2, 1.4, .4, 1) both;
+}
+.bubble[data-tone='keep'] { background: #e7f3ea; color: #2f6a3b; }
+.bubble[data-tone='change'] { background: #fcebe6; color: #a23b3b; }
+.person[data-seat='S'] .bubble { top: 24px; left: calc(50% - 64px); }
+
+/* The person the stage is about stands in a soft spotlight. */
+.circle .person::before {
+  content: ''; position: absolute; left: 50%; bottom: 30px; width: 76%; height: 70%; border-radius: 50%;
+  background: radial-gradient(closest-side, rgba(255, 201, 60, .45), transparent); opacity: 0;
+  transform: translateX(-50%); transition: opacity .4s;
+}
+.circle .person:is([data-pose='speaking'], [data-pose='objecting'])::before { opacity: 1; }
+
+/* Two sides of a split, or a speaker and the one answered, lean toward each other. */
+.figure { transition: translate .6s cubic-bezier(.16, 1, .3, 1), rotate .6s cubic-bezier(.16, 1, .3, 1); }
+.person[data-face='left'] .figure { translate: -14px 0; rotate: -4deg; }
+.person[data-face='right'] .figure { translate: 14px 0; rotate: 4deg; }
+
+/* ---- parts and poses ---- */
+.head, .armLeft, .armRight, .body, .paper, .thought, .gavel, .mouth, .eyes { transform-box: view-box; }
+.head { transform-origin: 60px 66px; transition: transform .5s cubic-bezier(.16, 1, .3, 1); }
+.armLeft { transform-origin: 36px 88px; transition: transform .55s cubic-bezier(.16, 1, .3, 1); }
+.armRight { transform-origin: 84px 88px; transition: transform .55s cubic-bezier(.16, 1, .3, 1); }
+.paper, .thought, .gavel { opacity: 0; transition: opacity .3s, transform .5s; }
+.mouth { transform-origin: 60px 55px; }
+.eyes { transform-origin: 60px 45px; animation: blink 4.6s infinite; }
+.body { animation: breathe 3.6s ease-in-out infinite; transform-origin: 60px 140px; }
+
+[data-pose='reading'] .paper, [data-pose='writing'] .paper { opacity: 1; }
+[data-pose='reading'] .head { transform: translateY(3px) rotate(-3deg); }
+[data-pose='reading'] .armLeft { transform: rotate(-28deg); }
+[data-pose='reading'] .armRight { transform: rotate(28deg); }
+[data-pose='reading'] .eyes { animation: scan 1.6s ease-in-out infinite; }
+
+[data-pose='thinking'] .armRight { transform: rotate(150deg); }
+[data-pose='thinking'] .head { transform: rotate(6deg); }
+[data-pose='thinking'] .thought { opacity: 1; animation: float 1.8s ease-in-out infinite; }
+
+[data-pose='submitted'] .paper { opacity: 1; animation: handIn .7s cubic-bezier(.16, 1, .3, 1) both; }
+[data-pose='submitted'] .armLeft { transform: rotate(-22deg); }
+[data-pose='submitted'] .armRight { transform: rotate(22deg); }
+
+[data-pose='speaking'] .mouth, [data-pose='presenting'] .mouth { animation: talk .32s ease-in-out infinite alternate; }
+[data-pose='speaking'] .head { animation: bob 1.1s ease-in-out infinite; }
+[data-pose='speaking'] .armRight { transform: rotate(-38deg); }
+
+[data-pose='listening'] .head { transform: rotate(-5deg); }
+[data-pose='watching'] .head { animation: look 6s ease-in-out infinite; }
+
+[data-pose='objecting'] .armRight { transform: rotate(-165deg); animation: wave .9s ease-in-out .5s infinite alternate; }
+[data-pose='objecting'] .head { transform: rotate(-6deg); }
+[data-pose='objecting'] .mouth { animation: talk .32s ease-in-out infinite alternate; }
+
+[data-pose='nodding'] .head { animation: nod .9s ease-in-out 2; }
+[data-pose='nodding'] .armLeft { transform: rotate(-18deg); }
+
+[data-pose='absent'] .figure { filter: grayscale(1); opacity: .45; }
+[data-pose='absent'] .head { transform: translateY(4px) rotate(8deg); }
+
+[data-pose='writing'] .armRight { animation: scribble .5s ease-in-out infinite alternate; }
+[data-pose='writing'] .head { transform: translateY(3px); }
+
+[data-pose='gavel'] .gavel { opacity: 1; }
+[data-pose='gavel'] .armRight { animation: strike 5.2s cubic-bezier(.5, 0, .2, 1) both; }
+[data-pose='gavel'] ~ .bench::after, .person[data-pose='gavel'] + .bench::after {
+  content: ''; position: absolute; left: 62%; top: -6px; width: 18px; height: 18px; border-radius: 50%;
+  border: 3px solid #ffc93c; animation: ring 5.2s ease-out both;
+}
+[data-pose='presenting'] .paper { opacity: 1; transform: translateY(-14px); }
+[data-pose='presenting'] .armLeft { transform: rotate(-40deg); }
+[data-pose='presenting'] .armRight { transform: rotate(40deg); }
+[data-pose='failed'] .head { transform: rotate(10deg); }
+
+/* People walk in when the room opens. */
+.entering .person { animation: enter .8s cubic-bezier(.16, 1, .3, 1) both; }
+.entering .person[data-seat='A'] { animation-delay: .5s; }
+.entering .person[data-seat='B'] { animation-delay: .9s; }
+.entering .person[data-seat='C'] { animation-delay: 1.3s; }
+
+@keyframes enter { from { opacity: 0; translate: 0 26px; } to { opacity: 1; translate: none; } }
+@keyframes pop { from { opacity: 0; transform: translate(-50%, 6px) scale(.7); } to { opacity: 1; transform: translate(-50%, 0) scale(1); } }
+@keyframes breathe { 50% { transform: scaleY(1.012); } }
+@keyframes blink { 0%, 94%, 100% { transform: scaleY(1); } 96% { transform: scaleY(.1); } }
+@keyframes scan { 50% { transform: translateX(2px) translateY(2px); } }
+@keyframes float { 50% { transform: translateY(-3px); } }
+@keyframes handIn { from { transform: translateY(0); } 60% { transform: translateY(-10px); } to { transform: translateY(6px); } }
+@keyframes talk { from { transform: scaleY(1); } to { transform: scaleY(-.4) translateY(-2px); } }
+@keyframes bob { 50% { transform: translateY(-2px) rotate(2deg); } }
+@keyframes look { 0%, 100% { transform: rotate(0); } 30% { transform: rotate(-6deg); } 65% { transform: rotate(6deg); } }
+@keyframes wave { from { transform: rotate(-165deg); } to { transform: rotate(-150deg); } }
+@keyframes nod { 0%, 100% { transform: rotate(0); } 35% { transform: translateY(4px) rotate(2deg); } 70% { transform: translateY(-1px); } }
+@keyframes scribble { from { transform: rotate(18deg); } to { transform: rotate(26deg) translateX(2px); } }
+@keyframes strike {
+  0% { transform: rotate(0); } 12% { transform: rotate(-110deg); } 20% { transform: rotate(-20deg); }
+  26% { transform: rotate(-36deg); } 100% { transform: rotate(-24deg); }
+}
+@keyframes ring { 0%, 18% { opacity: 0; transform: scale(.3); } 22% { opacity: 1; } 40%, 100% { opacity: 0; transform: scale(2.6); } }
+
+@media (max-width: 767px) {
+  .room { min-height: 0; border-radius: 16px 16px 0 0; }
+  .wall { padding: 14px 5%; }
+  .window { width: 20%; }
+  .benchArea { padding-top: 6px; }
+  .bench { width: 56%; height: 32px; margin-top: -20px; }
+  .window { height: 46%; }
+  .person[data-seat='S'] { padding-top: 14px; }
+  .person[data-seat='S'] .figure { width: 66px; }
+  .person[data-seat='S'] .nameTag { top: 14px; left: calc(50% + 38px); width: max-content; max-width: 30vw; }
+  .person[data-seat='S'] .nameText { max-width: 100%; }
+  .person[data-seat='S'] .bubble { top: 14px; left: calc(50% - 46px); }
+  .circle { padding: 0 1%; }
+  .circle .figure { width: 92%; margin-bottom: -30px; }
+  .table { height: 58px; }
+  .person { padding-top: 24px; }
+  .nameTag { padding: 3px 6px 4px; }
+  .nameText { max-width: 6.5em; font-size: 12px; line-height: 1.25; }
+  .poseText { font-size: 11px; }
+  .bubble { font-size: 11.5px; padding: 2px 8px; }
+}

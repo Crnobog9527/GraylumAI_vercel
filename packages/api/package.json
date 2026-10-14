@@ -20,6 +20,7 @@
     "./src/types": "./src/types/index.ts",
     "./src/types/ai": "./src/types/ai.ts",
     "./src/types/billing": "./src/types/billing.ts",
+    "./src/services/publishMonitor/connectFlow": "./src/services/publishMonitor/connectFlow.ts",
     "./src/services/ticketAutoClose": "./src/services/ticketAutoClose.ts",
     "./src/services/providerUtils": "./src/services/providerUtils.ts",
     "./src/services/diagnostics": "./src/services/diagnostics.ts",
@@ -56,6 +57,8 @@
     "./src/services/payments/waffoTestOperationsClient": "./src/services/payments/waffoTestOperationsClient.ts",
     "./src/services/payments/waffoFailure": "./src/services/payments/waffoFailure.ts",
     "./src/services/payments/cardSubscriptionWebhook": "./src/services/payments/cardSubscriptionWebhook.ts",
+    "./src/services/payments/cardRefundWebhook": "./src/services/payments/cardRefundWebhook.ts",
+    "./src/services/payments/stripeCardReconciliation": "./src/services/payments/stripeCardReconciliation.ts",
     "./src/services/payments/walletWebhook": "./src/services/payments/walletWebhook.ts",
     "./src/services/payments/methodMaintenance": "./src/services/payments/methodMaintenance.ts"
   },

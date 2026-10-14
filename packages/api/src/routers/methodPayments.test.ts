@@ -78,16 +78,19 @@ const routes = (enabled: boolean) => ({ version: 4, card: { enabled }, card_cn: 
   wechat_pay: { enabled, annualVerified: true }, alipay: { enabled, annualVerified: true } });
 const settings = (enabled: boolean) => ({ payment_method_routes: routes(enabled), payment_terms_version: { version: 'terms-test' } });
 function stubStaging(production = 'auth-staging.graylum.com') {
-  vi.stubEnv('VERCEL', '1'); vi.stubEnv('VERCEL_PROJECT_PRODUCTION_URL', production);
-  vi.stubEnv('WAFFO_TEST_OPERATIONS_ENABLED', 'true');
+  const env = { VERCEL: '1', VERCEL_PROJECT_PRODUCTION_URL: 'auth-staging.graylum.com', VERCEL_GIT_COMMIT_REF: 'staging',
+  VERCEL_GIT_REPO_OWNER: 'Crnobog9527', VERCEL_GIT_REPO_SLUG: 'GraylumAI_vercel', VERCEL_PROJECT_ID: 'synthetic-staging-project',
+  V3_RUNTIME_STAGING_PROJECT_ID: 'synthetic-staging-project', NEXT_PUBLIC_SUPABASE_URL: 'https://synthetic.supabase.co',
+  V3_RUNTIME_STAGING_DATABASE_HOST: 'synthetic.supabase.co', V3_RUNTIME_STAGING_WINDOW_ID: '00000000-0000-4000-8000-000000000001', WAFFO_TEST_OPERATIONS_ENABLED: 'true' };
+  for (const [key, value] of Object.entries(env)) vi.stubEnv(key, value);
+  vi.stubEnv('VERCEL_PROJECT_PRODUCTION_URL', production);
 }
-it('keeps every card checkout closed in production and staging even with every switch on', async () => {
-  for (const host of ['app.graylum.com', 'auth-staging.graylum.com']) {
+it('keeps every card checkout closed in production even with every switch on, and on staging while the switch is off', async () => {
+  for (const [host, enabled] of [['app.graylum.com', true], ['auth-staging.graylum.com', false]] as const) {
     stubStaging(host);
     for (const method of ['card', 'card_cn'] as const) {
-      const f = fixture('user', settings(true));
+      const f = fixture('user', settings(enabled));
       await expect(f.caller.methodCheckout({ ...card, method })).rejects.toMatchObject({ code: 'SERVICE_UNAVAILABLE' });
-      expect(f.from.mock.calls.every(([table]) => table === 'profiles')).toBe(true);
       expect(f.rpc).not.toHaveBeenCalled();
     }
   }
