@@ -147,7 +147,12 @@ function focusOf(scene: Scene | null, clock: number): string | null {
     case 'divergence': return DECISION_SECTION[scene.split.decision];
     case 'response': return DECISION_SECTION[scene.response.decision];
     case 'ruling': return section(scene.ruling.section);
-    case 'revision': return scene.result.type === 'revision_ready_for_choice' ? scene.result.changedSectionTitles[0] ?? null : null;
+    case 'revision': {
+      if (scene.result.type !== 'revision_ready_for_choice') return null;
+      // Follow the redline as it moves down the report: the latest chapter whose marks have appeared.
+      const shown = scene.result.changedSectionTitles.filter((_, index) => clock - scene.start >= REDLINE.lead + index * REDLINE.gap);
+      return shown.at(-1) ?? scene.result.changedSectionTitles[0] ?? null;
+    }
     default: return null;
   }
 }

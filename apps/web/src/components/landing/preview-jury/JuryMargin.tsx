@@ -1,4 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import type { KeyboardEvent } from 'react';
 import { cn } from '@/lib/utils';
 import { DECISION_LABEL, type JurySeatNames, type Seat, type SeatCode } from './jury-events';
 import type { MarginItem, Reply } from './jury-desk';
@@ -10,11 +11,17 @@ type Props = PeekHandlers & { names: JurySeatNames };
 
 const STANCE: Record<'agree' | 'disagree', string> = { agree: '同意', disagree: '反对' };
 
-/** Hovering (or focusing) a note opens its author's full record beside the document; a tap pins it. */
+/** Hovering (or focusing) a note opens its author's full record beside the document; a tap, Enter or Space pins it. */
 function peekProps(seat: SeatCode, { onPeek, onPick }: PeekHandlers) {
   return {
     onMouseEnter: () => onPeek(seat), onMouseLeave: () => onPeek(null), onFocus: () => onPeek(seat), onBlur: () => onPeek(null),
     onClick: () => onPick(seat), tabIndex: 0, 'data-seat': seat,
+    // Notes are not buttons (they hold text), so Enter and Space are wired by hand to the same action as a tap.
+    onKeyDown: (event: KeyboardEvent<HTMLElement>) => {
+      if (event.target !== event.currentTarget || (event.key !== 'Enter' && event.key !== ' ')) return;
+      event.preventDefault();
+      onPick(seat);
+    },
   };
 }
 

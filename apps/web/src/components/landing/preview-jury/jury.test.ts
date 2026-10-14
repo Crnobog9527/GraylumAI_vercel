@@ -186,6 +186,7 @@ describe('the annotated report', () => {
     expect(salt?.kind === 'issue' && salt.stamp).toBe(false);
     expect(kinds(view.notes['第 12 章 30 天行动'])).toContain('ruling');
     const end = deskAt(scenes, playbackLength(scenes) - 1);
+    expect(end.focus).toBe(end.redline.at(-1));
     expect(end.redline).toEqual(choosable(findScenario('full').detail.summary.sections).map(item => item.section));
     const failed = buildScenes(findScenario('failed').arrivals);
     const failedEnd = deskAt(failed, playbackLength(failed) - 1);
