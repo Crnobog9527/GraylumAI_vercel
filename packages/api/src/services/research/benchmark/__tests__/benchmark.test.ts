@@ -20,6 +20,7 @@ describe('benchmark metrics', () => {
     // Median of each post's own rate (60 / views), not total interactions over median views.
     expect(m.engagementRate.value).toBeCloseTo((60 / 2400 + 60 / 2500) / 2, 9);
     expect(m.postsPerWeek.value).toBeCloseTo((16 * 7) / 30, 6);
+    expect(m.postsPerWeek.refs).toHaveLength(30);
     expect(m.lastPublishedAt.value).toBe(daysAgo(0));
     expect(m.wholeHistory).toBe(false);
     expect(m.missing).toEqual([]);
@@ -42,7 +43,13 @@ describe('benchmark metrics', () => {
     ] }, now);
     expect(m.postsAnalyzed).toBe(30);
     expect(m.lastPublishedAt.value).toBe(daysAgo(40));
-    expect(m.postsPerWeek.value).toBe(0);
+    expect(m.postsPerWeek).toMatchObject({ value: 0 });
+    expect(m.postsPerWeek.refs).toHaveLength(30);
+  });
+
+  it('keeps the frequency unknown when a full page is entirely inside the window', () => {
+    const m = accountMetrics({ profile: profile(20_000), posts: posts(30, i => ({ publishedAt: daysAgo(i * 0.5), views: 5 })) }, now);
+    expect(m.postsPerWeek).toEqual({ value: null, refs: [] });
   });
 
   it('reports no frequency when some analyzed posts are undated (never counts them as zero)', () => {
@@ -78,14 +85,19 @@ describe('benchmark classification', () => {
     expect(classifyAccount(metrics(200_001, 1), growth, now)).toEqual({ category: 'head_reference', qualified: false, excluded: null });
     expect(classifyAccount(metrics(10_000, 31), growth, now)).toMatchObject({ qualified: false, excluded: 'INACTIVE_30_DAYS' });
     expect(classifyAccount(metrics(10_000, null), growth, now)).toMatchObject({ qualified: false, excluded: 'NO_PUBLISH_TIME' });
-    expect(classifyAccount(metrics(200_000, 30), growth, now)).toEqual({ category: 'imitable', qualified: true, excluded: null });
+    expect(classifyAccount(metrics(200_000, 30), { ...growth, maxFirstPostAgeDays: 1 }, now))
+      .toEqual({ category: 'imitable', qualified: true, excluded: null });
   });
 
-  it('marks fast rising by young history or views ≥ followers × K', () => {
-    expect(classifyAccount(metrics(20_000, 1, { count: 10 }), growth, now).category).toBe('fast_rising');
-    expect(classifyAccount(metrics(20_000, 1, { views: 20_000 }), growth, now).category).toBe('fast_rising');
-    expect(classifyAccount(metrics(20_000, 1, { views: 19_999 }), growth, now).category).toBe('imitable');
-    expect(classifyAccount(metrics(20_000, 1, { views: 20_000 }), { ...growth, minViewsToFollowers: 'x' }, now).category).toBe('imitable');
+  it('marks fast rising by the earliest obtainable post within N days or views ≥ followers × K', () => {
+    const shortN = { ...growth, maxFirstPostAgeDays: 20 };
+    expect(classifyAccount(metrics(20_000, 1, { count: 10 }), shortN, now).category).toBe('fast_rising');
+    expect(classifyAccount(metrics(20_000, 1), { ...growth, maxFirstPostAgeDays: 30 }, now).category).toBe('fast_rising');
+    expect(classifyAccount(metrics(20_000, 1), { ...growth, maxFirstPostAgeDays: 29 }, now).category).toBe('imitable');
+    expect(classifyAccount(metrics(20_000, 1, { views: 20_000 }), shortN, now).category).toBe('fast_rising');
+    const old = { ...growth, maxFirstPostAgeDays: 1 };
+    expect(classifyAccount(metrics(20_000, 1, { views: 19_999 }), old, now).category).toBe('imitable');
+    expect(classifyAccount(metrics(20_000, 1, { views: 20_000 }), { ...old, minViewsToFollowers: 'x' }, now).category).toBe('imitable');
   });
 
   it('selects 8–12 qualified candidates, never head references', () => {

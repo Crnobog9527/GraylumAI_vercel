@@ -23,7 +23,7 @@ function ratio(text: string): number | null {
 /**
  * Plan §1.2 step 4. Qualified = 10k–200k followers and an update within 30 days, from fetched data only
  * (a missing number never counts as meeting a threshold). Head references (> 200k) are shown, never qualified.
- * Fast rising is a subset of imitable: the whole visible history is within N days, or the median views reach
+ * Fast rising is a subset of imitable: the earliest obtainable post is within N days, or the median views reach
  * followers × K.
  */
 export function classifyAccount(
@@ -40,8 +40,8 @@ export function classifyAccount(
     return { category: null, qualified: false, excluded: 'INACTIVE_30_DAYS' };
   }
   const earliest = metrics.earliestPublishedAt.value === null ? null : Date.parse(metrics.earliestPublishedAt.value);
-  const young = metrics.wholeHistory && earliest !== null
-    && now.getTime() - earliest <= growth.maxFirstPostAgeDays * DAY_MS;
+  // Plan §1.2: the earliest obtainable post (the oldest fetched one) within N days.
+  const young = earliest !== null && now.getTime() - earliest <= growth.maxFirstPostAgeDays * DAY_MS;
   const k = ratio(growth.minViewsToFollowers);
   const viral = k !== null && metrics.medianViews.value !== null && metrics.medianViews.value >= followers * k;
   return { category: young || viral ? 'fast_rising' : 'imitable', qualified: true, excluded: null };

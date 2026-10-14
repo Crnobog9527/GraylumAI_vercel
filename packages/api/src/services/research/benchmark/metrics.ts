@@ -101,7 +101,9 @@ export function accountMetrics(evidence: AccountEvidence, now: Date): AccountMet
   const recent = dated.filter(post => time(post)! >= windowStart);
   // An undated post could fall inside the window, so a frequency from a partly dated list would treat it as
   // outside (as zero). Report it only when every analyzed post carries a time.
-  const frequencyKnown = posts.length > 0 && dated.length === posts.length;
+  // A full page whose oldest post is still inside the window may hide further posts: unknown, not a low number.
+  const capped = posts.length >= BENCHMARK_RULES.postsMax && dated.length > 0 && time(dated[dated.length - 1]!)! >= windowStart;
+  const frequencyKnown = posts.length > 0 && dated.length === posts.length && !capped;
   const detail = evidence.followersItem && time(evidence.followersItem) !== null ? evidence.followersItem : undefined;
   const newest = [dated[0], detail].filter((p): p is EvidenceItem => p !== undefined)
     .sort((a, b) => time(b)! - time(a)!)[0];
@@ -112,7 +114,8 @@ export function accountMetrics(evidence: AccountEvidence, now: Date): AccountMet
     postsAnalyzed: posts.length,
     medianViews: metric(medianViews, viewed.map(post => post.ref)),
     engagementRate: metric(median(rates), rateRefs),
-    postsPerWeek: metric(frequencyKnown ? (recent.length * 7) / BENCHMARK_RULES.activeWithinDays : null, recent.map(post => post.ref)),
+    // Refs: every dated post checked against the window, so a computed 0 carries its evidence too.
+    postsPerWeek: metric(frequencyKnown ? (recent.length * 7) / BENCHMARK_RULES.activeWithinDays : null, dated.map(post => post.ref)),
     lastPublishedAt: newest ? { value: new Date(time(newest)!).toISOString(), refs: [newest.ref] } : { value: null, refs: [] },
     earliestPublishedAt: oldest ? { value: new Date(time(oldest)!).toISOString(), refs: [oldest.ref] } : { value: null, refs: [] },
     wholeHistory: evidence.posts.length < BENCHMARK_RULES.postsMax,
