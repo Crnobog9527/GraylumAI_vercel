@@ -165,7 +165,7 @@ export function reviewDetail(input: { view: ReviewView; reviewers: string[]; sec
       linkedSections: plan?.linkedSections ?? [], rulings: rulings.filter(item => item.section === section) };
   }).filter(group => group.rulings.length || group.changed);
   const awaiting = view.state === 'completed' && (view.outcome as { kind?: string } | null)?.kind === 'revised' && !choiceRecorded(view);
-  return { reviewId: view.reviewId, state: view.state, outcome: view.outcome, seats,
+  return { reviewId: view.reviewId, draftId: view.draftId, state: view.state, outcome: view.outcome, seats,
     summary: { status: check?.ok ? 'usable' : summaryCall ? 'failed' : 'none', sections: bySection },
     /** The user's choice once made; until then the review waits for it (no lock: the draft stays editable, and a choice
      * against a version that is no longer current is refused by R14). */
