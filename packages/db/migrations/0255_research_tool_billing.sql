@@ -79,6 +79,13 @@ BEGIN
   RETURN q/s;
 END $$;
 
+-- A tool route is not an ai_models row, but every financial projection (erasure included) types
+-- modelId as a UUID. A tool policy's modelId is therefore this fixed UUID of its route id.
+CREATE OR REPLACE FUNCTION public.bill2_tool_model_id(route text) RETURNS uuid
+LANGUAGE sql IMMUTABLE SET search_path=public,pg_temp AS $$
+  SELECT md5('bill2-research-tool:'||route)::uuid
+$$;
+
 CREATE OR REPLACE FUNCTION public.bill2_payg_zero_source(source text) RETURNS boolean
 LANGUAGE sql IMMUTABLE SET search_path=public,pg_temp AS $$
   SELECT coalesce(source IN ('confirmed_failure','tool_no_usage','tool_failed','tool_failed_charged','tool_unknown'),false)
@@ -97,7 +104,7 @@ BEGIN
    OR coalesce(p->>'phase','')='' OR coalesce(p->>'requestHash','') !~ '^[a-f0-9]{64}$'
    OR p->'automaticRetry' IS DISTINCT FROM 'false'::jsonb OR p->'hiddenTools' IS DISTINCT FROM 'false'::jsonb
    OR p->'lookupSupported' IS DISTINCT FROM 'false'::jsonb
-   OR jsonb_typeof(p->'billingUnit') IS DISTINCT FROM 'object' OR p->'billingUnit'->>'modelId' IS DISTINCT FROM p->>'model'
+   OR jsonb_typeof(p->'billingUnit') IS DISTINCT FROM 'object' OR p->'billingUnit'->>'modelId' IS DISTINCT FROM bill2_tool_model_id(p->>'model')::text
    OR jsonb_typeof(pricing) IS DISTINCT FROM 'object'
    OR pricing-ARRAY['unit','currency','price','unitsPerPrice','usdPerCurrency','entryHash','validUntil','maxUnitsPerCall']<>'{}'::jsonb
   THEN RAISE EXCEPTION 'BILL2_TOOL_QUOTE_INVALID';END IF;
@@ -312,7 +319,7 @@ DO $$ DECLARE src text;a text:=$x$  PERFORM id FROM ai_models WHERE id=(entry->>
   IF entry->>'protocol'='research-tool-v1' THEN
    IF p->>'contractVersion' IS DISTINCT FROM 'bill2.v2'
     OR coalesce(entry->>'provider','') NOT IN ('tikhub','parallel','firecrawl') OR coalesce(length(entry->>'account'),0)=0
-    OR coalesce(length(entry->>'model'),0)=0 OR entry->>'modelId' IS DISTINCT FROM entry->>'model'
+    OR coalesce(length(entry->>'model'),0)=0 OR entry->>'modelId' IS DISTINCT FROM bill2_tool_model_id(entry->>'model')::text
     OR bill2_decimal(entry->'upperUsd')<=0 OR entry->'lookupSupported' IS DISTINCT FROM 'false'::jsonb
     OR jsonb_typeof(entry->'toolPricing') IS DISTINCT FROM 'object' OR jsonb_typeof(entry->'purposes') IS DISTINCT FROM 'array'
     OR entry->>'modelId'=p->>'modelId' THEN RAISE EXCEPTION 'BILL2_CALL_POLICY_DENIED';END IF;
@@ -372,7 +379,7 @@ REVOKE ALL ON FUNCTION public.bill2_admin_call_report(timestamptz,timestamptz,in
 GRANT EXECUTE ON FUNCTION public.bill2_admin_call_report(timestamptz,timestamptz,integer) TO service_role;
 
 DO $$ DECLARE f text; BEGIN
-  FOREACH f IN ARRAY ARRAY['bill2_calls_kind_guard()','bill2_tool_cost(jsonb,text,boolean)','bill2_payg_zero_source(text)',
+  FOREACH f IN ARRAY ARRAY['bill2_calls_kind_guard()','bill2_tool_cost(jsonb,text,boolean)','bill2_tool_model_id(text)','bill2_payg_zero_source(text)',
     'bill2_payg_validate_tool_quote(bill2_runs,jsonb)','bill2_record_tool(bill2_runs,bill2_calls,jsonb,text,boolean)',
     'bill2_payg_tool_settlement(bill2_runs,bill2_calls,boolean)','bill2_tool_cost_reconcile(uuid,uuid,text,text)'] LOOP
     EXECUTE format('REVOKE ALL ON FUNCTION public.%s FROM PUBLIC,anon,authenticated,service_role',f);

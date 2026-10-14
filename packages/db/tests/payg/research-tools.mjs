@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 // RESEARCH-TOOLS RT-2 (0255): search / social-data calls on the PAYG v2 run. Synthetic fixtures only.
 import assert from 'node:assert/strict';
-import {randomUUID} from 'node:crypto';
+import {createHash,randomUUID} from 'node:crypto';
 import {rpc,closeAccount} from '../erasure-b2a/cases.mjs';
 import {conserved,financial} from './core.mjs';
 
@@ -9,8 +9,11 @@ import {conserved,financial} from './core.mjs';
 const newRoute = () => 'tikhub:/tiktok/app/v3/handler_user_profile#'+randomUUID().slice(0,8);
 const pricing = (patch={}) => ({unit:'call',currency:'USD',price:'0.01',unitsPerPrice:'1',usdPerCurrency:null,
   entryHash:'e'.repeat(64),validUntil:new Date(Date.now()+7*86400000).toISOString(),maxUnitsPerCall:'1',...patch});
+// Same fixed UUID as SQL bill2_tool_model_id and toolModelId (toolBilling.ts).
+const toolModelId = route => createHash('md5').update('bill2-research-tool:'+route).digest('hex')
+  .replace(/^(.{8})(.{4})(.{4})(.{4})(.{12})$/,'$1-$2-$3-$4-$5');
 const toolPolicy = (route,multiplier,patch={}) => ({provider:'tikhub',account:'tikhub-main',model:route,protocol:'research-tool-v1',
-  modelId:route,multiplier,lookupSupported:false,upperUsd:'0.01',purposes:['question'],toolPricing:pricing(),...patch});
+  modelId:toolModelId(route),multiplier,lookupSupported:false,upperUsd:'0.01',purposes:['question'],toolPricing:pricing(),...patch});
 const toolCall = (policy,patch={}) => ({provider:policy.provider,account:policy.account,model:policy.model,
   protocol:'research-tool-v1',phase:'question',requestHash:'d'.repeat(64),automaticRetry:false,hiddenTools:false,
   lookupSupported:false,upperUsd:policy.upperUsd,billingUnit:{modelId:policy.modelId,multiplier:policy.multiplier},
@@ -240,6 +243,23 @@ export async function researchToolCases({db,Client,connectionString,report,creat
     assert.deepEqual([s.settled,s.charged_delta,s.nominal_source,s.supplier_cost_state],[true,0,'tool_unknown','pending']);
     assert.equal((await financial(db,f)).credits,100);
     report.checks.push('RT-2 account erasure: a dispatched tool call without a result settles at 0 immediately, hold released, supplier cost pending');
+  }
+
+  // Erasure projections keep the financial shape of runs and calls with tool policies (DATA-ERASURE).
+  {
+    const f = await make();
+    const c = await claimTool(db,f,1);
+    await rpc(db,'bill2_record',f.actor,f.run,c.id,result(c,'delivered','1','0.01'));
+    const run = (await db.query('SELECT bill2_erasure_run_payload(payload) v FROM bill2_runs WHERE id=$1',[f.run])).rows[0].v;
+    const tool = run.callPolicy.find(x=>x.protocol==='research-tool-v1');
+    assert.deepEqual(Object.keys(tool).sort(),['account','lookupSupported','model','modelId','multiplier','protocol','provider','upperUsd']);
+    assert.equal(tool.modelId,f.policy.modelId);
+    const projected = (await db.query('SELECT bill2_erasure_call_payload(payload) v FROM bill2_calls WHERE id=$1',[c.id])).rows[0].v;
+    assert.deepEqual(projected.billingUnit,{modelId:f.policy.modelId,multiplier:'6'});
+    assert.equal(projected.protocol,'research-tool-v1');
+    assert.ok(!('toolPricing' in projected));
+    await assert.rejects(make({policy:{modelId:randomUUID()}}),/BILL2_CALL_POLICY_DENIED/);
+    report.checks.push('RT-2 erasure projections accept tool runs and calls (route modelId is a fixed UUID); a policy with another modelId is refused');
   }
 
   // Private helpers stay private; the reconcile entry point is service_role only.

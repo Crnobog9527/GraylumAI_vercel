@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { providerUsageCostUsd, resolveProviderPrice, type ProviderPrices } from '../billingProviderPrices';
 import type { ResearchCallResult } from '../research/vendors/types';
 import {
-  toolCallPolicy, toolClaimPayload, toolCostUsd, toolResultEvidence, ToolBillingError, type ToolPricing,
+  toolCallPolicy, toolClaimPayload, toolCostUsd, toolModelId, toolResultEvidence, ToolBillingError, type ToolPricing,
 } from './toolBilling';
 
 const at = new Date('2026-10-14T00:00:00Z');
@@ -28,14 +28,16 @@ const hash = 'c'.repeat(64);
 describe('tool billing payloads', () => {
   it('freezes the resolved price, bound and multiplier into the policy and claim', () => {
     const p = policy();
-    expect(p).toMatchObject({ provider: 'tikhub', model: 'tikhub:/tiktok/app/v3/handler_user_profile', modelId: p.model,
+    expect(p.modelId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
+    expect(p.modelId).toBe(toolModelId('tikhub:/tiktok/app/v3/handler_user_profile'));
+    expect(p).toMatchObject({ provider: 'tikhub', model: 'tikhub:/tiktok/app/v3/handler_user_profile', modelId: p.modelId,
       protocol: 'research-tool-v1', multiplier: '6', upperUsd: '0.01', lookupSupported: false,
       toolPricing: { unit: 'call', price: '0.01', unitsPerPrice: '1', usdPerCurrency: null, maxUnitsPerCall: '1',
         validUntil: '2026-10-20T00:00:00Z' } });
     expect(toolClaimPayload(p, { phase: 'question', requestHash: 'd'.repeat(64), runtimeEpoch: '3' })).toEqual({
       provider: 'tikhub', account: 'tikhub-main', model: p.model, protocol: 'research-tool-v1', phase: 'question',
       requestHash: 'd'.repeat(64), automaticRetry: false, hiddenTools: false, lookupSupported: false, upperUsd: '0.01',
-      billingUnit: { modelId: p.model, multiplier: '6' }, toolPricing: p.toolPricing, runtimeEpoch: '3' });
+      billingUnit: { modelId: p.modelId, multiplier: '6' }, toolPricing: p.toolPricing, runtimeEpoch: '3' });
     expect(() => toolClaimPayload(p, { phase: 'report', requestHash: 'd'.repeat(64) })).toThrow(ToolBillingError);
   });
 

@@ -3,6 +3,7 @@
 // (migration 0255). The host (RT-3b) freezes one policy per approved route into the run, claims each
 // subcall with toolClaimPayload, and records exactly one toolResultEvidence after the supplier answers.
 // The SQL side recomputes every amount from the frozen price; these helpers only have to agree with it.
+import { createHash } from 'node:crypto';
 import type { ResolvedProviderPrice } from '../billingProviderPrices';
 import type { ResearchCallResult, ResearchUsage, ResearchVendor } from '../research/vendors/types';
 
@@ -62,6 +63,15 @@ export class ToolBillingError extends Error {
   }
 }
 
+/**
+ * The fixed UUID standing in for a tool route's model id; equals SQL bill2_tool_model_id (0255).
+ * Financial projections, including erasure, type modelId as a UUID.
+ */
+export function toolModelId(model: string): string {
+  const hex = createHash('md5').update(`bill2-research-tool:${model}`).digest('hex');
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
 const SCALE = 1_000_000_000_000n;
 const DECIMAL = /^(0|[1-9][0-9]{0,11})(\.[0-9]{1,12})?$/;
 const scaled = (value: string) => {
@@ -113,7 +123,7 @@ export function toolCallPolicy(input: {
   const upperUsd = toolCostUsd(toolPricing, input.maxUnitsPerCall, 'up');
   if (!/[1-9]/.test(upperUsd)) throw new ToolBillingError('TOOL_BOUND_INVALID');
   return {
-    provider: input.vendor, account: input.account, model, protocol: TOOL_PROTOCOL, modelId: model,
+    provider: input.vendor, account: input.account, model, protocol: TOOL_PROTOCOL, modelId: toolModelId(model),
     multiplier: input.price.multiplier, lookupSupported: false, upperUsd, purposes: [...input.purposes], toolPricing,
   };
 }
