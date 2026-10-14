@@ -352,7 +352,6 @@ describe('seat names and static rendering', () => {
 describe('the canvas', () => {
   const scenes = buildScenes(findScenario('full').arrivals);
   const names = DEFAULT_SEAT_NAMES;
-  const at = (test: (scene: (typeof scenes)[number]) => boolean, offset = 1) => (scenes.find(test)?.start ?? 0) + offset;
 
   it('lights one thing at a time and says it in one short sentence that names no model', () => {
     for (const scenario of JURY_SCENARIOS) {
@@ -361,7 +360,7 @@ describe('the canvas', () => {
         const view = canvasAt(list, clock, resolveSeatNames(SAMPLE_PANEL));
         expect(view.caption).not.toMatch(MODEL_NAMES);
         expect(Array.from(view.caption).length).toBeLessThanOrEqual(64);
-        for (const seat of ['A', 'B', 'C', 'S'] as const) expect(view.columns[seat].length).toBeLessThanOrEqual(5);
+        for (const seat of ['A', 'B', 'C', 'S'] as const) expect(view.columns[seat].length).toBeLessThanOrEqual(6);
       }
     }
   });
@@ -397,7 +396,7 @@ describe('the canvas', () => {
     expect(card?.kind === 'stances' && card.items.find(item => item.decision === turn.response.decision)?.turned).toBe(true);
   });
 
-  it('gathers every ruling under the summary and hands the revision back to the report', () => {
+  it('threads the summary to each result only once it writes, gathers every ruling and hands the revision back', () => {
     const end = canvasAt(scenes, playbackLength(scenes) - 1, names);
     const rulings = events('full').filter(event => event.type === 'adjudication');
     const card = end.columns.S.find(item => item.kind === 'rulings');
@@ -405,8 +404,20 @@ describe('the canvas', () => {
     expect(card?.kind === 'rulings' && card.adopted).toBe(rulings.filter(event => event.type === 'adjudication' && event.adopted).length);
     expect(end.doc).toEqual({ state: 'revised', changed: choosable(findScenario('full').detail.summary.sections).length });
     expect(end.edges).toEqual([{ from: 'S', to: 'doc', tone: 'live' }]);
-    const writing = canvasAt(scenes, at(scene => scene.kind === 'writing'), names);
-    expect(writing.edges.map(edge => edge.to)).toEqual(['S', 'S', 'S']);
+    const writing = scenes.find(scene => scene.kind === 'writing');
+    if (!writing) throw new Error('expected a writing scene');
+    for (let clock = 0; clock < writing.start; clock += 500) {
+      const before = canvasAt(scenes, clock, names);
+      expect(before.joined).toEqual([]);
+      expect(before.edges.some(edge => edge.from === 'S' || edge.to === 'S')).toBe(false);
+    }
+    expect(canvasAt(scenes, writing.start + 1, names).joined).toEqual(['A']);
+    const joined = canvasAt(scenes, writing.end - 1, names);
+    expect(joined.joined).toEqual(['A', 'B', 'C']);
+    expect(joined.edges.map(edge => `${edge.from}>${edge.to}`)).toEqual(['A>S', 'B>S', 'C>S']);
+    expect(end.joined).toEqual(['A', 'B', 'C']);
+    const failedEnd = canvasAt(buildScenes(findScenario('failed').arrivals), Infinity, names);
+    expect(failedEnd.joined).toEqual(['A', 'C']);
     const failed = buildScenes(findScenario('failed').arrivals);
     expect(canvasAt(failed, playbackLength(failed) - 1, names).doc.state).toBe('failed');
     const consensus = buildScenes(findScenario('consensus').arrivals);

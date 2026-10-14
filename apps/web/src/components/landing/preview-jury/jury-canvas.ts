@@ -19,7 +19,9 @@ export type CanvasCard =
   | { kind: 'replies'; key: string; count: number; latest: { to: Seat; decision: DecisionKey; stance: Stance | null } | null }
   | { kind: 'writing'; key: string; done: boolean }
   | { kind: 'rulings'; key: string; shown: number; total: number; adopted: number; line: string | null; sealed: boolean | null }
-  | { kind: 'revision'; key: string; changed: number | null };
+  | { kind: 'revision'; key: string; changed: number | null }
+  /** What a reviewer hands to the summary: how many issues, how many key decisions it wants changed. */
+  | { kind: 'result'; key: string; issues: number; changes: number };
 
 export type Node = SeatCode | 'doc';
 /** live: the work happening now; split: two sides that disagree; flow: opinions going to the summary. */
@@ -35,11 +37,16 @@ export type CanvasView = {
   current: string | null;
   columns: Record<SeatCode, CanvasCard[]>;
   edges: Edge[];
+  /** Reviewers whose results are threaded to the summary: none until it starts writing, then one by one. */
+  joined: Seat[];
   doc: { state: 'waiting' | 'reading' | 'revised' | 'failed'; changed: number };
 };
 
 /** "评审 A 开始" but "首席主笔开始": a space only after a name ending in a Latin letter or digit. */
 const of = (name: string) => (/[A-Za-z0-9]$/.test(name) ? `${name} ` : name);
+
+/** Gap between the threads from each reviewer's result to the summary. */
+export const JOIN_STEP = 900;
 
 const emptyColumns = (): Record<SeatCode, CanvasCard[]> => ({ A: [], B: [], C: [], S: [] });
 
@@ -60,7 +67,7 @@ export function canvasAt(scenes: readonly Scene[], clock: number, names: JurySea
   const last = shown[shown.length - 1] ?? null;
   const columns = emptyColumns();
   const view: CanvasView = {
-    stage: last?.stage ?? null, caption: '评审即将开始', focus: [], current: null, columns, edges: [], doc: { state: 'waiting', changed: 0 },
+    stage: last?.stage ?? null, caption: '评审即将开始', focus: [], current: null, columns, edges: [], joined: [], doc: { state: 'waiting', changed: 0 },
   };
 
   for (const scene of shown) {
@@ -145,7 +152,6 @@ export function canvasAt(scenes: readonly Scene[], clock: number, names: JurySea
       case 'agreed':
         if (now) {
           view.caption = '三位意见一致，不用开第 2 轮';
-          view.edges = SEATS.map(seat => ({ from: seat, to: 'S', tone: 'flow' }));
         }
         break;
       case 'response': {
@@ -180,15 +186,26 @@ export function canvasAt(scenes: readonly Scene[], clock: number, names: JurySea
         }
         break;
       }
-      case 'writing':
+      case 'writing': {
         place(columns, 'S', { kind: 'writing', key: 'writing', done: !now });
+        // Each usable reviewer's result is threaded to the summary in turn; a reviewer that failed is not counted.
+        const usable = SEATS.filter(seat => !columns[seat].some(card => card.kind === 'read' && card.state === 'failed'));
+        view.joined = now ? usable.filter((_, index) => local >= index * JOIN_STEP) : usable;
+        for (const seat of usable) {
+          const issues = find(columns[seat], 'issues', 'issues');
+          const verdicts = new Map(find(columns[seat], 'decisions', 'decisions')?.marks.map(item => [item.decision, item.verdict]));
+          for (const item of find(columns[seat], 'stances', 'stances')?.items ?? []) verdicts.set(item.decision, item.verdict);
+          const changes = [...verdicts.values()].filter(verdict => verdict === 'change').length;
+          if (view.joined.includes(seat)) place(columns, seat, { kind: 'result', key: 'result', issues: issues?.total ?? 0, changes });
+        }
         if (now) {
           view.current = 'writing';
-          view.focus = ['S'];
-          view.edges = SEATS.map(seat => ({ from: seat, to: 'S', tone: 'flow' }));
+          view.focus = ['S', ...view.joined];
+          view.edges = view.joined.map(seat => ({ from: seat, to: 'S', tone: 'live' }));
           view.caption = `${of(names.S)}读完全部意见，开始汇总`;
         }
         break;
+      }
       case 'ruling': {
         const { ruling, index, total } = scene;
         const before = find(columns.S, 'rulings', 'rulings');
@@ -238,5 +255,6 @@ export function statusWord(view: CanvasView, seat: SeatCode): string {
     case 'writing': return latest.done ? '已汇总' : '汇总中';
     case 'rulings': return `裁决 ${latest.shown}/${latest.total}`;
     case 'revision': return latest.changed === null ? '未通过检查' : '修订稿已交';
+    case 'result': return '已交给汇总';
   }
 }
