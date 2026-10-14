@@ -57,21 +57,39 @@ describe('publish-monitor provider cleanup', () => {
     expect(d.calls[1]![1]).toEqual({ p_request_id: REQ, p_done: false, p_error: 'PROVIDER_LIST_FAILED' });
   });
 
-  it('provider work: deletes, treats 404 as gone, keeps an owner\'s fresh grant, retries refusals', async () => {
+  it('provider work re-reads every account and acts only while the expected owner still holds it', async () => {
+    const OWNER = 'c'.repeat(32);
+    const mine = (id: string, status = 'connected') => json(200, { ...acct(id, `${OWNER}.${'e'.repeat(32)}`), status });
+    const job = (id: string, deleting: boolean, action: string, ownerRef: string | null = OWNER) =>
+      ({ connectionId: CONN, providerAccountId: id, deleting, action, ownerRef });
     const jobs = [
-      { connectionId: CONN, providerAccountId: 'spc_del', action: 'delete', ownerRef: null },
-      { connectionId: CONN, providerAccountId: 'spc_gone', action: 'delete', ownerRef: null },
-      { connectionId: CONN, providerAccountId: 'spc_back', action: 'disconnect', ownerRef: 'c'.repeat(32) },
-      { connectionId: CONN, providerAccountId: 'spc_taken', action: 'disconnect', ownerRef: 'c'.repeat(32) },
-      { connectionId: CONN, providerAccountId: 'spc_denied', action: 'delete', ownerRef: null },
+      job('spc_del', true, 'delete'), job('spc_gone', true, 'delete'), job('spc_reauthed', true, 'delete'),
+      job('spc_hold', true, 'disconnect'), job('spc_back', false, 'disconnect'), job('spc_taken', false, 'disconnect'),
+      job('spc_done', false, 'disconnect'), job('spc_denied', true, 'delete'), job('spc_noref', true, 'delete', null),
     ];
     const d = database({ publish_monitor_provider_work_claim: [jobs] });
-    const p = provider([json(200, {}), json(404, {}), json(200, acct('spc_back', OTHER)),
-      json(200, acct('spc_taken', EXT)), json(200, {}), json(403, {})]);
-    expect(await runProviderWork(d.db, p.deps, far)).toEqual({ processed: 5, settled: 4, deferred: 1 });
+    const p = provider([
+      mine('spc_del'), json(200, {}),
+      json(404, {}),
+      json(200, acct('spc_reauthed', EXT)),
+      mine('spc_hold'), json(200, {}),
+      mine('spc_back'),
+      json(200, acct('spc_taken', EXT)), json(200, {}),
+      json(200, { ...acct('spc_done', EXT), status: 'disconnected' }),
+      mine('spc_denied'), json(403, {}),
+      mine('spc_noref'),
+    ]);
+    expect(await runProviderWork(d.db, p.deps, far)).toEqual({ processed: 9, settled: 7, deferred: 2 });
     expect(d.calls.slice(1).map(c => [c[1].p_outcome, c[1].p_error])).toEqual([['deleted', null], ['gone', null],
-      ['owner_back', null], ['disconnected', null], ['retry', 'PROVIDER_REJECTED_403']]);
-    expect(p.calls).not.toContain('POST /social-accounts/spc_back/disconnect');
+      ['owner_changed', null], ['disconnected', null], ['owner_back', null], ['disconnected', null], ['disconnected', null],
+      ['retry', 'PROVIDER_REJECTED_403'], ['retry', 'OWNER_UNKNOWN']]);
+    // Never deleted or disconnected: someone else's fresh grant, the owner's own re-authorisation, an already
+    // disconnected account, and a record whose owner is unknown.
+    for (const id of ['spc_reauthed', 'spc_back', 'spc_done', 'spc_noref']) {
+      expect(p.calls.filter(c => c.includes(id) && !c.startsWith('GET'))).toEqual([]);
+    }
+    expect(p.calls).toContain('POST /social-accounts/spc_hold/disconnect');
+    expect(p.calls).not.toContain('DELETE /social-accounts/spc_hold');
   });
 
   it('orphan sweep only reports unless deletion is enabled, and never deletes unknown formats', async () => {
@@ -89,7 +107,8 @@ describe('publish-monitor provider cleanup', () => {
 
   it('stops at the time budget and leaves the rest for the next run', async () => {
     const d = database({ publish_monitor_provider_work_claim: [[
-      { connectionId: CONN, providerAccountId: 'spc_1', action: 'delete', ownerRef: null }]] });
+      { connectionId: CONN, providerAccountId: 'spc_1', deleting: true, action: 'delete', ownerRef: null }]] });
     expect(await runProviderWork(d.db, provider([]).deps, 0)).toEqual({ processed: 0, settled: 0, deferred: 0 });
+    expect(d.calls).toEqual([]);
   });
 });
