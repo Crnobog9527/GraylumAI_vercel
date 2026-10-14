@@ -67,6 +67,7 @@ describe('publish-monitor provider cleanup', () => {
       job('spc_hold', true, 'disconnect'), job('spc_back', false, 'disconnect'), job('spc_taken', false, 'disconnect'),
       job('spc_done', false, 'disconnect'), job('spc_denied', true, 'delete'), job('spc_noref', true, 'delete', null),
       job('spc_taken_then_deleted', true, 'delete', OWNER, true),
+      job('spc_taken_held', true, 'disconnect', OWNER, true),
     ];
     const d = database({ publish_monitor_provider_work_claim: [jobs] });
     const p = provider([
@@ -80,11 +81,14 @@ describe('publish-monitor provider cleanup', () => {
       mine('spc_denied'), json(403, {}),
       mine('spc_noref'),
       json(200, acct('spc_taken_then_deleted', EXT)), json(200, {}),
+      json(200, acct('spc_taken_held', EXT)), json(200, {}),
     ]);
-    expect(await runProviderWork(d.db, p.deps, far)).toEqual({ processed: 10, settled: 8, deferred: 2 });
+    expect(await runProviderWork(d.db, p.deps, far)).toEqual({ processed: 11, settled: 9, deferred: 2 });
     expect(d.calls.slice(1).map(c => [c[1].p_outcome, c[1].p_error])).toEqual([['deleted', null], ['gone', null],
       ['owner_changed', null], ['disconnected', null], ['owner_back', null], ['disconnected', null], ['disconnected', null],
-      ['retry', 'PROVIDER_REJECTED_403'], ['retry', 'OWNER_UNKNOWN'], ['owner_changed', null]]);
+      ['retry', 'PROVIDER_REJECTED_403'], ['retry', 'OWNER_UNKNOWN'], ['owner_changed', null], ['disconnected', null]]);
+    // With unresolved publishes the record is held after the takeover disconnect, not ended.
+    expect(p.calls).toContain('POST /social-accounts/spc_taken_held/disconnect');
     // A deletion record still owing a takeover disconnect clears the overwriting authorization before it ends.
     expect(p.calls).toContain('POST /social-accounts/spc_taken_then_deleted/disconnect');
     // Never deleted or disconnected: someone else's fresh grant, the owner's own re-authorisation, an already

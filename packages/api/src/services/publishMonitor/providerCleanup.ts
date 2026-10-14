@@ -118,9 +118,11 @@ async function settle(client: ClientDeps, job: z.infer<typeof claimedWork>): Pro
     if (owner !== job.ownerRef) {
       // A proven takeover still waiting for its disconnect is cleared first; otherwise someone else authorized the
       // account legitimately since, it is theirs, and only our record ends.
-      if (!job.takeoverPending || current.value.status === 'disconnected') return ['owner_changed', null];
+      // While its owner's publishes are unresolved (action 'disconnect') the record is held, not ended.
+      const settled: WorkOutcome = job.action === 'disconnect' ? 'disconnected' : 'owner_changed';
+      if (!job.takeoverPending || current.value.status === 'disconnected') return [settled, null];
       const cleared = await disconnectAccount(client, job.providerAccountId);
-      return cleared.kind === 'ok' || gone(cleared) ? ['owner_changed', null] : ['retry', errorCode(cleared)];
+      return cleared.kind === 'ok' || gone(cleared) ? [settled, null] : ['retry', errorCode(cleared)];
     }
   } else if (job.ownerRef && owner === job.ownerRef) {
     // The original owner re-authorised since the takeover: their fresh grant is not ours to revoke.
@@ -170,7 +172,7 @@ export async function sweepOrphans(db: Rpc, client: ClientDeps, deleteEnabled: b
   }
   if (!accounts) throw new CleanupError('PUBLISH_MONITOR_CLEANUP_UNAVAILABLE');
   const decision = await rpc(db, 'publish_monitor_orphan_classify', {
-    p_accounts: accounts.map(a => ({ providerAccountId: a.id, externalId: a.externalId })),
+    p_accounts: accounts.map(a => ({ providerAccountId: a.id, externalId: a.externalId, status: a.status })),
   }, z.object({ delete: z.array(providerId), unknownFormat: z.array(providerId), takenOver: z.array(providerId) }).strict());
   const report: SweepReport = { listed: accounts.length, orphans: decision.delete.length, deleted: 0,
     unknownFormat: decision.unknownFormat.length, deferred: 0, takenOver: decision.takenOver.length };

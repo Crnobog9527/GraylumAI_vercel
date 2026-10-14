@@ -118,7 +118,8 @@ BEGIN
    AND (cleaned_at IS NULL OR (state='abandoned' AND created_at>now_at-interval '30 days'
     AND cleaned_at<now_at-interval '20 hours'))
    AND (cleanup_lease_until IS NULL OR cleanup_lease_until<=now_at)
-  ORDER BY created_at LIMIT p_limit FOR UPDATE SKIP LOCKED
+  -- Never-settled attempts first, then re-checks by how long ago they were last checked.
+  ORDER BY cleaned_at IS NOT NULL,cleaned_at NULLS FIRST,created_at LIMIT p_limit FOR UPDATE SKIP LOCKED
  ), claimed AS (
   -- Attempts are counted when a result is reported (cleanup_finish), so claimed-but-unreached rows lose nothing.
   UPDATE social_connect_requests r SET cleanup_lease_until=now_at+make_interval(secs=>p_lease_seconds)
@@ -137,7 +138,7 @@ CREATE OR REPLACE FUNCTION public.publish_monitor_cleanup_classify(p_request_id 
 LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
 DECLARE req social_connect_requests; item jsonb; pid text; existing social_connections; verdicts jsonb:='[]'; verdict text;
 BEGIN
- IF p_request_id IS NULL OR jsonb_typeof(p_accounts) IS DISTINCT FROM 'array' OR jsonb_array_length(p_accounts)>500 THEN
+ IF p_request_id IS NULL OR jsonb_typeof(p_accounts) IS DISTINCT FROM 'array' OR jsonb_array_length(p_accounts)>5000 THEN
   RAISE EXCEPTION 'PUBLISH_MONITOR_INPUT_INVALID' USING ERRCODE='22023'; END IF;
  SELECT * INTO req FROM social_connect_requests WHERE id=p_request_id FOR UPDATE;
  IF req.id IS NULL OR req.state NOT IN ('applied','abandoned') THEN
@@ -243,7 +244,10 @@ BEGIN
   IF existing.id IS NOT NULL THEN
    -- A bound account now carrying another user's reference was taken over and the callback or webhook was missed:
    -- quarantine it and queue the disconnect, exactly like a callback that proves a takeover.
-   IF existing.status NOT IN ('deleting','quarantined') AND ext ~ '^[0-9a-f]{32}\.[0-9a-f]{32}$' THEN
+   -- An already quarantined row starts a new takeover episode when its account is live again under someone else
+   -- (no disconnect pending); a disconnected account needs nothing.
+   IF existing.status<>'deleting' AND NOT (existing.status='quarantined' AND existing.provider_disconnect_pending)
+    AND item->>'status' IS DISTINCT FROM 'disconnected' AND ext ~ '^[0-9a-f]{32}\.[0-9a-f]{32}$' THEN
     SELECT provider_ref INTO owner FROM social_monitor_settings WHERE actor_id=existing.actor_id;
     IF owner IS NOT NULL AND split_part(ext,'.',1)<>owner THEN
      UPDATE social_connections SET status='quarantined',provider_disconnect_pending=true,deletion_attempts=0,
@@ -314,7 +318,9 @@ BEGIN
   -- Nothing references a deleting row: its posts and snapshots were removed when it entered 'deleting'.
   DELETE FROM social_connections WHERE id=c.id;
  ELSIF p_outcome='disconnected' AND c.status='deleting' THEN
-  UPDATE social_connections SET provider_tokens_cleared=true,deletion_error=NULL,deletion_attempts=0,lease_owner=NULL,
+  -- Held for unresolved publishes: tokens (including any overwriting takeover grant) are cleared, the record stays.
+  UPDATE social_connections SET provider_tokens_cleared=true,provider_disconnect_pending=false,deletion_error=NULL,
+   deletion_attempts=0,lease_owner=NULL,
    lease_expires_at=NULL,updated_at=clock_timestamp() WHERE id=c.id;
  ELSIF p_outcome IN ('deleted','gone','disconnected','owner_back') AND c.provider_disconnect_pending THEN
   -- A settled takeover starts the next episode with a fresh retry allowance.
