@@ -17,7 +17,7 @@ import { frozenBrandIdentity } from '../modelIdentity/brandIdentity';
 
 type StopCall = {sequence:number;requestHash:string;phase:string;dispatched:boolean;settled:boolean;responsePending?:boolean};
 export type StopExecution = RuntimeExecution & {
-  pausedReason?:string;stop?:{stopAt:number;source?:NativeTextSource};stopCalls?:StopCall[];
+  pausedReason?:string;stop?:{stopAt:number;source?:NativeTextSource;call?:number};stopCalls?:StopCall[];
 };
 /** Shared by the original HTTP, cancel host and later recovery. Never invokes the SDK,
  * tools or provider dispatch: the normal parsers reconstruct only durable receipts. */
@@ -60,8 +60,11 @@ export function stoppedCompletion(options: RuntimeExecutorOptions, billing: Retu
       if(await collect())return rpc<{state:'cost_pending'}>('runtime_execution',{...args,p_action:'stop_pending'});
     }
     const context=runtimeContext.parse(execution.context);
+    // A stop that names its round (the call whose text was on screen) keeps that round, even when a later
+    // round started before the stop arrived; an older stop without it keeps the last dispatched round.
+    const round=execution.stop?.call;
     const primary=(execution.stopCalls??[]).findLast(call=>call.dispatched
-      &&['ordinary','skill','organizer'].includes(call.phase));
+      &&['ordinary','skill','organizer'].includes(call.phase)&&(round===undefined||call.sequence===round));
     const organizer=(execution.stopCalls??[]).findLast(call=>call.dispatched&&call.phase==='attached_organizer');
     const decode=(call:StopCall|undefined)=>{
       const raw=call?raws.get(call.sequence):undefined;

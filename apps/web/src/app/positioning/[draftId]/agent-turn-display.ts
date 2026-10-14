@@ -38,6 +38,8 @@ export type LiveTextSource = "assistant" | "message" | "final";
 export type LiveReply = {
   executionId: string; text: string; phase: string; card: QuestionCard | null;
   rev: number; points: number; stalled: boolean; source?: LiveTextSource; stopped?: boolean;
+  /** BILL2 call sequence of the round the shown text came from; the stop request names it. */
+  call?: number;
   /** The stream already delivered the final result; the saved reply replaces this copy next. */
   finished?: boolean;
 };
@@ -73,7 +75,14 @@ const isCount = (value: unknown): value is number => Number.isSafeInteger(value)
  */
 const sources = new Set<unknown>(["assistant", "message", "final"]);
 
-function afterDelta(old: LiveReply, event: { text: string; offset: number; rev: number; source?: unknown }): LiveReply {
+function afterDelta(old: LiveReply, event: { text: string; offset: number; rev: number; source?: unknown; call?: unknown }): LiveReply {
+  const next = afterTextDelta(old, event);
+  // The round of the latest accepted text; a dropped frame does not move it.
+  return next !== old && !next.stalled && Number.isSafeInteger(event.call) && (event.call as number) > 0
+    ? { ...next, call: event.call as number } : next;
+}
+
+function afterTextDelta(old: LiveReply, event: { text: string; offset: number; rev: number; source?: unknown }): LiveReply {
   if (typeof event.text !== "string" || !isCount(event.offset) || !isCount(event.rev))
     return old.stalled ? old : { ...old, stalled: true };
   if (event.offset === 0) {

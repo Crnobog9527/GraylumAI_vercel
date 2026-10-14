@@ -120,7 +120,7 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
   const normalized=context.providerRequestFormat==='serial-tools-v2'||context.providerRequestFormat==='serial-tools-v6-reasoning'||streaming;
   const historyChecked=historyGuard(executionId,code=>{preflightFailure=code;});
   try{
-   let callSequence=0;
+   let callSequence=0,streamingCall:number|undefined; // streamingCall: the round whose text streams now (stop binding)
    // The SDK wraps fetch errors; retain only this verified database verdict.
    let responseConflict=false;
    let primaryPolicy=policy;
@@ -182,7 +182,7 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
        if(selectedPolicy.protocol==='openrouter-chat-v1')budget.modelCallTimeout(OPENROUTER_RESPONSE_TIMEOUT_MS);
        else budget.assertCanStart(5000);
       }catch(error){if(isPayg)pause('waiting_resume');throw error;}
-      const dispatch=await billing.dispatchOnce(claim.id!,request,onChunk);
+      streamingCall=sequence;const dispatch=await billing.dispatchOnce(claim.id!,request,onChunk);
       if(dispatch.transportNotStarted){if(isPayg)pause('waiting_resume');transportNotStarted=true;throw new Error('RUNTIME_TIME_BUDGET_EXHAUSTED');}
       if(!dispatch.dispatched){if(isPayg)pause('waiting_resume');throw new Error('RUNTIME_RESPONSE_PENDING');}
       // The receipt was stored as a financial projection only. Never read back
@@ -332,7 +332,7 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
     exchange:async(_sequence,request,onChunk)=>{
      partial="";agentText="";agentCardMessage=undefined;
      projection=new NativeProgressProjection(projectionOptions);
-     const project=nativeFrameProjection(projection,progress);
+     const project=nativeFrameProjection(projection,update=>progress(streamingCall===undefined?update:{...update,call:streamingCall}));
      const envelope=await exchange(request,context.reportGeneration?'report':effective.role,primaryPolicy,nativeProgress&&execution.live&&onChunk?chunk=>{
       onChunk(chunk);
       try{project(chunk);}catch{logger.warn('api','runtime_native_projection_failed',{executionId});}
