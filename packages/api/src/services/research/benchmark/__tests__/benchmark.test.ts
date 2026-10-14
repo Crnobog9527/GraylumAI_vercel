@@ -45,6 +45,21 @@ describe('benchmark metrics', () => {
     expect(m.postsPerWeek.value).toBe(0);
   });
 
+  it('reports no frequency when some analyzed posts are undated (never counts them as zero)', () => {
+    const m = accountMetrics({ profile: profile(20_000), posts: [item('p#1', { publishedAt: daysAgo(1), views: 5 }),
+      ...posts(10, () => ({ views: 5 }))] }, now);
+    expect(m.postsPerWeek).toEqual({ value: null, refs: [] });
+    expect(m.missing).toContain('postsPerWeek');
+    expect(m.lastPublishedAt.value).toBe(daysAgo(1));
+  });
+
+  it('uses the YouTube post detail time for recency when the list has only relative times', () => {
+    const m = accountMetrics({ profile: profile(undefined), followersItem: item('d#1', { followers: 30_000, publishedAt: daysAgo(3) }),
+      posts: posts(30, () => ({ views: 900 })) }, now);
+    expect(m.lastPublishedAt).toEqual({ value: daysAgo(3), refs: ['d#1'] });
+    expect(classifyAccount(m, growth, now)).toEqual({ category: 'imitable', qualified: true, excluded: null });
+  });
+
   it('takes followers from a separate item when the platform needs one (Bilibili relation, YouTube detail)', () => {
     const m = accountMetrics({ profile: profile(undefined), followersItem: item('e3#1', { followers: 12_345 }), posts: [] }, now);
     expect(m.followers).toEqual({ value: 12_345, refs: ['e3#1'] });

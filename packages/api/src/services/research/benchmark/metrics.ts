@@ -18,7 +18,10 @@ export interface AccountEvidence {
   profile: EvidenceItem;
   /** Account posts, any order. Only the newest `postsMax` are used. */
   posts: EvidenceItem[];
-  /** Ref of the item carrying followers when it is not the profile (Bilibili relation, YouTube post detail). */
+  /**
+   * The item carrying followers when it is not the profile (Bilibili relation, YouTube post detail). A YouTube
+   * post detail is also the newest post's only absolute publication time, so it counts for recency.
+   */
   followersItem?: EvidenceItem;
 }
 
@@ -34,7 +37,7 @@ export interface AccountMetrics {
   medianViews: Metric;
   /** Median of (likes + comments + shares that the platform reports) ÷ views, per post with views. */
   engagementRate: Metric;
-  /** Posts published in the last 30 days × 7 ÷ 30. Needs absolute publication times. */
+  /** Posts published in the last 30 days × 7 ÷ 30. Missing unless every analyzed post has an absolute time. */
   postsPerWeek: Metric;
   lastPublishedAt: { value: string | null; refs: string[] };
   /** Earliest publication time among the fetched posts. */
@@ -96,7 +99,12 @@ export function accountMetrics(evidence: AccountEvidence, now: Date): AccountMet
   const dated = posts.filter(post => time(post) !== null);
   const windowStart = now.getTime() - BENCHMARK_RULES.activeWithinDays * DAY_MS;
   const recent = dated.filter(post => time(post)! >= windowStart);
-  const newest = dated[0];
+  // An undated post could fall inside the window, so a frequency from a partly dated list would treat it as
+  // outside (as zero). Report it only when every analyzed post carries a time.
+  const frequencyKnown = posts.length > 0 && dated.length === posts.length;
+  const detail = evidence.followersItem && time(evidence.followersItem) !== null ? evidence.followersItem : undefined;
+  const newest = [dated[0], detail].filter((p): p is EvidenceItem => p !== undefined)
+    .sort((a, b) => time(b)! - time(a)!)[0];
   const oldest = dated[dated.length - 1];
 
   const result: AccountMetrics = {
@@ -104,7 +112,7 @@ export function accountMetrics(evidence: AccountEvidence, now: Date): AccountMet
     postsAnalyzed: posts.length,
     medianViews: metric(medianViews, viewed.map(post => post.ref)),
     engagementRate: metric(median(rates), rateRefs),
-    postsPerWeek: metric(dated.length ? (recent.length * 7) / BENCHMARK_RULES.activeWithinDays : null, recent.map(post => post.ref)),
+    postsPerWeek: metric(frequencyKnown ? (recent.length * 7) / BENCHMARK_RULES.activeWithinDays : null, recent.map(post => post.ref)),
     lastPublishedAt: newest ? { value: new Date(time(newest)!).toISOString(), refs: [newest.ref] } : { value: null, refs: [] },
     earliestPublishedAt: oldest ? { value: new Date(time(oldest)!).toISOString(), refs: [oldest.ref] } : { value: null, refs: [] },
     wholeHistory: evidence.posts.length < BENCHMARK_RULES.postsMax,
