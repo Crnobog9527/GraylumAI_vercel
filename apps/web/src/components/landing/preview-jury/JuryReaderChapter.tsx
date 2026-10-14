@@ -30,6 +30,7 @@ export function JuryReaderChapter({ chapter, names, adoption, compact, open, onT
         <button type="button" className={styles.line} onClick={onToggle} aria-expanded={false}>
           <span className={styles.lineTitle}>{title}</span>
           <span className={styles.lineGist}>{digest.gist}</span>
+          {(section?.rulings.length ?? 0) > 0 ? <span className={styles.lineTag}>有意见，没改</span> : null}
           <ChevronDown size={16} aria-hidden="true" />
         </button>
       </article>

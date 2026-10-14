@@ -3,12 +3,12 @@
 
 import { useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import Link from 'next/link';
-import { FastForward, Pause, Play, RotateCcw } from 'lucide-react';
+import { ArrowLeft, FastForward, Pause, Play, RotateCcw } from 'lucide-react';
 import light from '@/components/design/light-tokens.module.css';
 import { cn } from '@/lib/utils';
 import { resolveSeatNames, SAMPLE_PANEL, type JurySeatNames, type SeatCode } from './jury-events';
 import { buildScenes, formatElapsed, playbackLength, sceneAt, skippedStages, stageIndex } from './jury-scenes';
-import { findScenario, JURY_SCENARIOS, type JuryScenario, type JuryScenarioId } from './jury-scripts';
+import { findScenario, JURY_SCENARIOS, type JuryScenario } from './jury-scripts';
 import { arrivedAt, speakerOf } from './jury-progress';
 import { canvasAt } from './jury-canvas';
 import { remainingMs, remainingText, totalText } from './jury-eta';
@@ -20,10 +20,13 @@ import { JuryRecords } from './JuryRecords';
 import { JuryStatic } from './JuryStatic';
 import { JuryStepsRail } from './JuryStepsRail';
 import { useJuryPlayback, usePrefersReducedMotion } from './use-jury-playback';
+import { useRestoredStep, useReviewAddress } from './use-review-address';
 import styles from './jury.module.css';
 import layout from './jury-layout.module.css';
 
 const SPEEDS = [1, 3] as const;
+/** The account the report is for, as the breadcrumb back to the positioning analysis names it. */
+const MOCK_ACCOUNT = '小林下班做饭';
 
 /**
  * FUSION-REVIEW prototype v5: a start card saying how long the review takes; then the steps on the left, the canvas
@@ -32,7 +35,7 @@ const SPEEDS = [1, 3] as const;
  * (events, detail, adopt). Not linked anywhere and never indexed.
  */
 export function JuryPreview() {
-  const [scenarioId, setScenarioId] = useState<JuryScenarioId>('full');
+  const { scenarioId, setScenarioId, resolved } = useReviewAddress('full');
   const [sampleNames, setSampleNames] = useState(false);
   const [embed, setEmbed] = useState(false);
   const [background, setBackground] = useState(false);
@@ -48,6 +51,11 @@ export function JuryPreview() {
   );
   const settings = (
     <>
+      <nav aria-label="面包屑" className={styles.crumbs}>
+        <a href="#positioning" title="原型：真实页面会回到这份定位分析">
+          <ArrowLeft size={15} aria-hidden="true" />返回：我的定位分析 · {MOCK_ACCOUNT}
+        </a>
+      </nav>
       <h1 className={styles.title}>评审团正在审阅你的定位报告</h1>
       <div role="radiogroup" aria-label="选择评审结局" className={styles.scenarios}>
         {JURY_SCENARIOS.map(item => (
@@ -63,7 +71,7 @@ export function JuryPreview() {
 
   return (
     <div className={cn(light.light, styles.page)}>
-      {embed ? (
+      {!resolved ? null : embed ? (
         <>
           <Toolbar>{settings}</Toolbar>
           <main className={styles.main}><JuryEmbedDemo scenario={scenario.id} names={names} /></main>
@@ -112,6 +120,12 @@ function Player({ scenario, names, background, settings }: {
   const [intro, setIntro] = useState<'shown' | 'stay' | 'away'>('shown');
   const [picked, setPicked] = useState<SeatCode | null>(null);
   const skipped = skippedStages(scenes);
+  const restoreAt = playback.seek;
+  const stepNow = playback.finished ? 'end' : sceneAt(scenes, playback.clock)?.stage ?? 'start';
+  useRestoredStep(scenario.detail.reviewId, stepNow, playback.clock, clock => {
+    restoreAt(clock);
+    setIntro('stay');
+  });
 
   if (reduced) {
     const openStatic = (seat: SeatCode) => document.getElementById(`record-${seat}`)?.scrollIntoView({ block: 'start' });

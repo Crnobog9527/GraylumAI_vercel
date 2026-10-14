@@ -80,11 +80,12 @@
 }
 .chapter[data-tone='quiet']:has(> .line) { padding: 0; }
 .line {
-  display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 14px; width: 100%; padding: 12px 18px;
+  display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; align-items: center; gap: 14px; width: 100%; padding: 12px 18px;
   border: 0; border-radius: 12px; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer;
 }
 .line:hover { background: var(--j-desk); }
 .lineTitle { color: var(--j-ink); font-size: 15.5px; font-weight: 600; white-space: nowrap; }
+.lineTag { color: var(--j-muted); font-size: 12.5px; white-space: nowrap; }
 .lineGist { min-width: 0; overflow: hidden; color: var(--j-muted); font-size: 15px; text-overflow: ellipsis; white-space: nowrap; }
 .chapterHead { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .chapterHead h3 { margin: 0 6px 0 0; font-size: 19px; font-weight: 700; line-height: 1.4; }
@@ -190,7 +191,7 @@
   .chapter { scroll-margin-top: 72px; }
   .onePage div { grid-template-columns: minmax(0, 1fr); gap: 0; }
   .change p { grid-template-columns: minmax(0, 1fr); gap: 0; }
-  .line { grid-template-columns: minmax(0, 1fr) auto; }
+  .line { grid-template-columns: minmax(0, 1fr) auto auto; }
   .lineGist { grid-column: 1; grid-row: 2; }
   .bar { grid-template-columns: minmax(0, 1fr); bottom: 8px; padding: 12px; }
   .barActions button { flex: 1; padding: 0 10px; }

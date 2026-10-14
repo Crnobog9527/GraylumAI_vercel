@@ -3,7 +3,8 @@
 /**
  * The before/after of a changed chapter, cut down to what changed: the text is split into sentences (a chapter is
  * prose, one sentence reads like one short paragraph), unchanged sentences far from any change fold away, and each
- * change keeps one unchanged sentence before and after it for context.
+ * change keeps one unchanged sentence before and after it for context. A lone far sentence stays, since folding it
+ * would save nothing.
  */
 export type Hunk =
   | { type: 'context'; text: string }
@@ -44,13 +45,21 @@ export function changeHunks(before: string, after: string, context = 1): Hunk[] 
     else runs.push({ type: 'change', before: step.type === 'del' ? [step.text] : [], after: step.type === 'ins' ? [step.text] : [] });
   }
   const near = (index: number) => runs.some((run, other) => run.type === 'change' && Math.abs(other - index) <= context);
+  // Folding a single sentence saves nothing: a run of unchanged sentences folds only when two or more would hide.
+  const foldable = (index: number) => {
+    let start = index;
+    let end = index;
+    while (start > 0 && runs[start - 1].type === 'same' && !near(start - 1)) start -= 1;
+    while (end < runs.length - 1 && runs[end + 1].type === 'same' && !near(end + 1)) end += 1;
+    return end > start;
+  };
   const hunks: Hunk[] = [];
   runs.forEach((run, index) => {
     if (run.type === 'change') {
       hunks.push({ type: 'change', before: run.before.join(''), after: run.after.join('') });
       return;
     }
-    if (near(index)) { hunks.push({ type: 'context', text: run.text }); return; }
+    if (near(index) || !foldable(index)) { hunks.push({ type: 'context', text: run.text }); return; }
     const last = hunks[hunks.length - 1];
     if (last?.type === 'folded') { last.count += 1; last.text += run.text; }
     else hunks.push({ type: 'folded', count: 1, text: run.text });

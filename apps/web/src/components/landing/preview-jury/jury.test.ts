@@ -360,7 +360,8 @@ describe('seat names and static rendering', () => {
       expect(rebuilt('after')).toBe(sentences(revised).join(''));
     }
     const money = changeHunks(REVISION_TEXT['第 10 章 变现路径'].original, REVISION_TEXT['第 10 章 变现路径'].revised);
-    expect(money.map(hunk => hunk.type)).toEqual(['folded', 'context', 'change', 'context', 'folded']);
+    expect(money.map(hunk => hunk.type)).toEqual(['folded', 'context', 'change', 'context', 'context']);
+    expect(money[0]).toMatchObject({ type: 'folded', count: 2 });
   });
 
   it('estimates the time left from the measured parts, never going up', () => {
