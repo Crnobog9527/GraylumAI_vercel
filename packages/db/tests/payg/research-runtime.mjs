@@ -75,6 +75,9 @@ export async function researchRuntimeCases({db,Client,connectionString,report,cr
     // Eight ids for one account are not eight candidates.
     await assert.rejects(rpc(db,'research_card_create',f.actor,randomUUID(),f.session,f.execution,{kind:'candidates',
       discoveryId:started.discoveryId,options:['a','b','c','d','e','f','g','h'].map(x=>candidate('d'+x,'same'))}),/RESEARCH_CARD_INVALID/);
+    // ...nor when the same account is written differently (case, spaces, a leading @).
+    await assert.rejects(rpc(db,'research_card_create',f.actor,randomUUID(),f.session,f.execution,{kind:'candidates',
+      discoveryId:started.discoveryId,followUp:true,options:[candidate('v1','alpha'),candidate('v2',' @Alpha ')]}),/RESEARCH_CARD_INVALID/);
     await rpc(db,'research_card_create',f.actor,cc,f.session,f.execution,{kind:'candidates',discoveryId:started.discoveryId,followUp:true,
       options:[candidate('c1','alpha'),candidate('c2','beta'),candidate('h1','bigstar',false)]});
     await assert.rejects(rpc(db,'research_card_confirm',f.actor,cc,{selected:['c1'],additions:['x']}),/RESEARCH_CARD_INVALID/);
@@ -304,6 +307,22 @@ export async function researchRuntimeCases({db,Client,connectionString,report,cr
     const again = await rpc(db,'research_account_fetch_claim',f.actor,f.session,f.execution,'tiktok','alpha',null);
     assert.deepEqual([again.claimed,again.evidence],[false,{operations:['op-e1']}],'reused, not fetched again');
     report.checks.push('RT-3b deleting a refresh answer: the record returns to the earlier success of the remaining answer; the dropped attempt cannot finish; the next claim reuses the evidence instead of paying again');
+  }
+
+  // The same account written differently (case, spaces, a leading @) is one fetch: never fetched or paid for twice.
+  {
+    const f = await session(db,createFixture);
+    const one = await rpc(db,'research_account_fetch_claim',f.actor,f.session,f.execution,'tiktok','alpha',null);
+    assert.equal(one.claimed,true);
+    for (const written of [' Alpha ','@ALPHA','alpha'])
+      assert.equal((await rpc(db,'research_account_fetch_claim',f.actor,f.session,f.execution,'tiktok',written,null)).claimed,false,written);
+    await rpc(db,'research_account_fetch_dispatch',f.actor,one.fetchId,one.attempt);
+    await rpc(db,'research_account_fetch_finish',f.actor,one.fetchId,one.attempt,'succeeded',{operations:['op-1']});
+    const grant = await rpc(db,'research_refresh_create',f.actor,f.session,'tiktok','@Alpha');
+    const refreshed = await rpc(db,'research_account_fetch_claim',f.actor,f.session,f.execution,'tiktok',' alpha',grant);
+    assert.deepEqual([refreshed.claimed,refreshed.fetchId],[true,one.fetchId],'the refresh matches the same record');
+    assert.equal(await count(db,'research_account_fetches','session_id=$1',[f.session]),1);
+    report.checks.push('RT-3b account key: case, surrounding spaces and a leading @ name the same account for cards, fetches and refresh grants; it is fetched (and paid for) once');
   }
 
   // A runtime search whose BILL2 call is not settled yet still blocks deletion (money not final).

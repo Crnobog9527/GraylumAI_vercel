@@ -55,6 +55,10 @@ CREATE TABLE IF NOT EXISTS public.research_discoveries (
   created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS research_discoveries_session_idx ON public.research_discoveries(session_id);
+-- One account has one key however it was written (case, surrounding spaces, a leading @): cards, fetches and
+-- refresh grants all match by this key, so the same account can never be fetched and paid for twice.
+CREATE OR REPLACE FUNCTION public.research_account_key(p text) RETURNS text LANGUAGE sql IMMUTABLE
+SET search_path=public,pg_temp AS $$ SELECT ltrim(lower(btrim(p)),'@') $$;
 CREATE TABLE IF NOT EXISTS public.research_account_fetches (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(), actor_id uuid NOT NULL REFERENCES public.profiles(id),
   session_id uuid NOT NULL REFERENCES public.runtime_sessions(id),
@@ -71,7 +75,8 @@ CREATE TABLE IF NOT EXISTS public.research_account_fetches (
   -- The refresh grant a prepared attempt consumed; retrying with it after a crash takes the attempt over.
   refresh_id uuid,
   created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now(),
-  UNIQUE (session_id, platform, account)
+  account_key text GENERATED ALWAYS AS (public.research_account_key(account)) STORED CHECK (account_key<>''),
+  UNIQUE (session_id, platform, account_key)
 );
 CREATE TABLE IF NOT EXISTS public.research_refresh_grants (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(), actor_id uuid NOT NULL REFERENCES public.profiles(id),
@@ -138,7 +143,7 @@ BEGIN
   END LOOP;
   -- Option ids and, on candidate cards, platform + account are unique: one account can fill only one slot.
   IF (SELECT count(DISTINCT x->>'id') FROM jsonb_array_elements(p->'options') x)<>jsonb_array_length(p->'options')
-   OR (k='candidates' AND (SELECT count(DISTINCT (x->>'platform',x->>'account')) FROM jsonb_array_elements(p->'options') x)
+   OR (k='candidates' AND (SELECT count(DISTINCT (x->>'platform',research_account_key(x->>'account'))) FROM jsonb_array_elements(p->'options') x)
      <>jsonb_array_length(p->'options'))
    -- A first candidate card needs 8–12 selectable accounts (fewer: no card, the tool returns partial); only a
    -- follow-up card (followUp) from already found candidates may offer fewer and ask for a smaller minimum.
@@ -271,15 +276,17 @@ DECLARE f research_account_fetches; g research_refresh_grants;
 BEGIN
   PERFORM research_session_owned(a,s,e);
   INSERT INTO research_account_fetches(actor_id,session_id,execution_id,platform,account,state)
-  VALUES(a,s,e,p_platform,p_account,'prepared') ON CONFLICT (session_id,platform,account) DO NOTHING RETURNING * INTO f;
+  VALUES(a,s,e,p_platform,p_account,'prepared') ON CONFLICT (session_id,platform,account_key) DO NOTHING RETURNING * INTO f;
   IF f.id IS NOT NULL THEN
     IF p_refresh IS NOT NULL THEN RAISE EXCEPTION 'RESEARCH_REFRESH_INVALID';END IF;
     RETURN jsonb_build_object('claimed',true,'fetchId',f.id,'attempt',f.attempt);
   END IF;
-  SELECT * INTO f FROM research_account_fetches WHERE session_id=s AND platform=p_platform AND account=p_account FOR UPDATE;
+  SELECT * INTO f FROM research_account_fetches WHERE session_id=s AND platform=p_platform
+    AND account_key=research_account_key(p_account) FOR UPDATE;
   IF p_refresh IS NOT NULL THEN
     SELECT * INTO g FROM research_refresh_grants WHERE id=p_refresh AND actor_id=a AND session_id=s FOR UPDATE;
-    IF g.id IS NULL OR g.platform<>p_platform OR g.account<>p_account THEN RAISE EXCEPTION 'RESEARCH_REFRESH_INVALID';END IF;
+    IF g.id IS NULL OR g.platform<>p_platform OR research_account_key(g.account)<>research_account_key(p_account)
+    THEN RAISE EXCEPTION 'RESEARCH_REFRESH_INVALID';END IF;
     -- A grant used by an attempt that never got sent (crash before dispatch) may claim that attempt again.
     IF g.used_at IS NOT NULL AND NOT (f.state='prepared' AND f.refresh_id=g.id) THEN RAISE EXCEPTION 'RESEARCH_REFRESH_USED';END IF;
     IF f.state='in_progress' OR (f.state='prepared' AND f.refresh_id IS DISTINCT FROM g.id) THEN
@@ -336,7 +343,7 @@ DECLARE g uuid; src uuid;
 BEGIN
   PERFORM research_session_owned(a,s,NULL);
   SELECT last_success_execution_id INTO src FROM research_account_fetches WHERE session_id=s AND actor_id=a AND platform=p_platform
-    AND account=p_account AND last_success IS NOT NULL AND state NOT IN ('prepared','in_progress');
+    AND account_key=research_account_key(p_account) AND last_success IS NOT NULL AND state NOT IN ('prepared','in_progress');
   IF src IS NULL THEN RAISE EXCEPTION 'RESEARCH_REFRESH_INVALID';END IF;
   INSERT INTO research_refresh_grants(actor_id,session_id,platform,account,source_execution_id)
     VALUES(a,s,p_platform,p_account,src) RETURNING id INTO g;
@@ -434,7 +441,8 @@ DO $$ DECLARE definition text; t text; BEGIN
 END $$;
 
 DO $$ DECLARE f text; BEGIN
-  FOREACH f IN ARRAY ARRAY['research_session_owned(uuid,uuid,uuid)','research_operation_settled(research_operations)'] LOOP
+  FOREACH f IN ARRAY ARRAY['research_session_owned(uuid,uuid,uuid)','research_operation_settled(research_operations)',
+    'research_account_key(text)'] LOOP
     EXECUTE format('REVOKE ALL ON FUNCTION public.%s FROM PUBLIC,anon,authenticated,service_role',f);
   END LOOP;
   FOREACH f IN ARRAY ARRAY['research_card_create(uuid,uuid,uuid,uuid,jsonb)','research_card_confirm(uuid,uuid,jsonb)',
