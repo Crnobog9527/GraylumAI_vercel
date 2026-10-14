@@ -138,7 +138,12 @@
 @media (max-width: 767px) {
   .scroller { border-radius: 12px; }
   .board { justify-items: stretch; padding: 16px 14px 24px; }
-  .caption { margin-bottom: 14px; font-size: 18px; text-align: left; }
+  /* The sentence about now stays at the top of the screen while the page follows the work down. */
+  .caption {
+    position: sticky; top: 0; z-index: 4; margin: -16px -14px 14px; padding: 12px 14px 10px; font-size: 18px; text-align: left;
+    background: color-mix(in srgb, var(--j-canvas) 92%, transparent); backdrop-filter: blur(4px);
+  }
+  .cards li, .doc, .unchanged { scroll-margin-top: 104px; scroll-margin-bottom: 16px; }
   .doc { width: 100%; padding: 14px 16px 12px; }
   .sink + .doc, .sink + .unchanged { margin-top: 20px; }
   .doc h2 { font-size: 18px; }

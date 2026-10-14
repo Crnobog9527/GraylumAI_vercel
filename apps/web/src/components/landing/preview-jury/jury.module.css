@@ -118,6 +118,13 @@
   .closeDrawer { display: inline-flex; }
 }
 
+/* Prototype only: the embeddable canvas with its stand-in controls. */
+.embed { display: grid; gap: 10px; }
+.embedControls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 18px; font-size: 14px; }
+.embedControls label { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
+.embedControls input[type='range'] { flex: 1 1 240px; min-width: 0; accent-color: var(--j-ink); }
+@media (min-width: 768px) { .embedStage { height: calc(100svh - var(--j-bar, 96px) - 80px); min-height: 520px; } }
+
 /* Progress: eight stations on a hairline; the fill follows stations passed, never time. */
 .rail { display: grid; gap: 4px; }
 .railNow { margin: 0; color: var(--j-muted); font-size: 13px; }

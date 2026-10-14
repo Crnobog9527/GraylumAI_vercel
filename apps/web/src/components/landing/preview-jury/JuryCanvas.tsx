@@ -7,8 +7,7 @@ import {
   DECISIONS, DECISION_LABEL, SEATS, STANCE_LABEL, VERDICT_LABEL, type JurySeatNames, type Seat, type SeatCode,
 } from './jury-events';
 import { statusWord, type CanvasCard, type CanvasView, type Edge, type Node } from './jury-canvas';
-import { REVISION_TEXT } from './jury-mock-rulings';
-import { REPORT_CHAPTERS, REPORT_TITLE } from './jury-report';
+import { MOCK_REPORT, type JuryCaseReport } from './jury-case';
 import { RulingSeal, SeatMark } from './JuryBits';
 import styles from './jury-canvas.module.css';
 
@@ -16,9 +15,6 @@ type Box = { cx: number; cy: number; top: number; bottom: number; left: number; 
 type Boxes = Partial<Record<Node | `end-${SeatCode}`, Box>>;
 type Hover = { onPeek: (seat: SeatCode | null) => void; onPick: (seat: SeatCode) => void };
 
-const EXCERPT = REPORT_CHAPTERS.slice(0, 2).map(chapter => chapter.body).join(' ');
-/** The new report opens on what changed: the revised text of the first changed chapters. */
-const REVISED_EXCERPT = Object.values(REVISION_TEXT).slice(0, 2).map(text => text.revised).join(' ');
 
 /**
  * The review as a canvas: the user's report on top, the three reviewers hung under it on threads, the summary under
@@ -26,13 +22,18 @@ const REVISED_EXCERPT = Object.values(REVISION_TEXT).slice(0, 2).map(text => tex
  * person's work grows downward as a short string of cards. Only the thing happening now is lit; pointing at (or tapping) a person or a card opens their full
  * record.
  */
-export function JuryCanvas({ view, names, selected, onPeek, onPick }: {
+export function JuryCanvas({ view, names, selected, onPeek, onPick, report = MOCK_REPORT, follow = true }: {
   view: CanvasView; names: JurySeatNames; selected: SeatCode | null;
+  /** The two reports shown; the prototype's mock creator by default. */
+  report?: JuryCaseReport;
+  /** On a phone, scroll the page to keep what happens now in view. Off when the page's own scrolling drives the
+   * canvas; on a computer the canvas always scrolls inside itself. */
+  follow?: boolean;
 } & Hover) {
   const scroller = useRef<HTMLDivElement>(null);
   const board = useRef<HTMLDivElement>(null);
   const boxes = useNodeBoxes(board, `${view.caption}|${view.next.state}|${SEATS.map(seat => view.columns[seat].length).join()}`);
-  useFollowCurrent(scroller, view.current, view.focus.join());
+  useFollowCurrent(scroller, view.current, view.focus.join(), follow);
   const lane = { view, names, selected, onPeek, onPick };
 
   return (
@@ -41,10 +42,10 @@ export function JuryCanvas({ view, names, selected, onPeek, onPick }: {
         <p className={styles.caption} aria-live="polite" key={view.caption}>{view.caption}</p>
         <Wires boxes={boxes} edges={view.edges} joined={view.joined} />
         <article className={styles.doc} data-node="doc" data-state={view.doc.state}>
-          <h2>{REPORT_TITLE}</h2>
-          <p className={styles.excerpt}>{EXCERPT}</p>
+          <h2>{report.title}</h2>
+          <p className={styles.excerpt}>{report.excerpt}</p>
           <footer>
-            <span>{REPORT_CHAPTERS.length} 章</span>
+            <span>{report.chapters} 章</span>
             {view.doc.state === 'reading' ? <span className={styles.docReading}>正在被阅读</span> : null}
           </footer>
         </article>
@@ -56,10 +57,10 @@ export function JuryCanvas({ view, names, selected, onPeek, onPick }: {
         </div>
         {view.next.state === 'revised' ? (
           <article className={styles.doc} data-node="next" data-state="revised" data-current={view.current === 'next'}>
-            <h2>修订后的{REPORT_TITLE}</h2>
-            <p className={styles.excerpt}>{REVISED_EXCERPT}</p>
+            <h2>修订后的{report.title}</h2>
+            <p className={styles.excerpt}>{report.revisedExcerpt}</p>
             <footer>
-              <span>{REPORT_CHAPTERS.length} 章</span>
+              <span>{report.chapters} 章</span>
               <span className={styles.docStamp}><FileCheck2 size={14} aria-hidden="true" />修订稿改了 {view.next.changed} 章</span>
             </footer>
           </article>
@@ -234,14 +235,17 @@ function useNodeBoxes(board: RefObject<HTMLDivElement | null>, layout: string) {
 }
 
 /** Keep the card the stage is about in view inside the canvas (only when the canvas scrolls by itself). */
-function useFollowCurrent(scroller: RefObject<HTMLDivElement | null>, current: string | null, focus: string) {
+function useFollowCurrent(scroller: RefObject<HTMLDivElement | null>, current: string | null, focus: string, enabled: boolean) {
   useEffect(() => {
     const root = scroller.current;
     const target = root?.querySelector<HTMLElement>('[data-current="true"]');
     if (!root || !target) return;
     if (getComputedStyle(root).overflowY === 'visible') {
-      // On a phone the page itself scrolls: move it only once, to bring the new report into view at the end.
-      if (current === 'next') target.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      if (!enabled) return;
+      // On a phone the page itself scrolls. Follow only while the canvas is on screen, so a reader who scrolled
+      // away to the records below is left alone.
+      const rect = root.getBoundingClientRect();
+      if (rect.bottom > 0 && rect.top < window.innerHeight) target.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
       return;
     }
     if (root.scrollHeight <= root.clientHeight + 1) return;
@@ -250,7 +254,7 @@ function useFollowCurrent(scroller: RefObject<HTMLDivElement | null>, current: s
     if (top < root.scrollTop + 60 || bottom > root.scrollTop + root.clientHeight - 24) {
       root.scrollTo({ top: Math.max(0, bottom - root.clientHeight + 48), behavior: 'smooth' });
     }
-  }, [scroller, current, focus]);
+  }, [scroller, current, focus, enabled]);
 }
 
 function threadPath(from: Box, to: Box, spread: number): string {

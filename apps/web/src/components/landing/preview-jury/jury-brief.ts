@@ -1,42 +1,39 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import type { Scene } from './jury-scenes';
 
-/** How long each kept scene plays in the brief version, at 1×. */
+/** How long each key moment plays in the short version, at 1×. */
 const BRIEF_LENGTH: Partial<Record<Scene['kind'], number>> = {
-  seated: 2500, reading: 3500, steelman: 4000, divergence: 4500, agreed: 3000, response: 4500, failed: 3000,
-  writing: 3000, ruling: 3200, revision: 5000,
+  seated: 2500, reading: 4500, divergence: 4500, agreed: 3500, writing: 3500, ruling: 3200, revision: 5000,
 };
 const BRIEF_RULINGS = 3;
 
 /**
- * A shorter replay of the same review for places like the landing page: one key decision instead of four, each
- * reviewer's critique cut to its first issue, the first split and the first reply only, three rulings. Every stage
- * that happened is still shown, in the same order, played back to back from zero. It replays a finished review, so
- * it ignores arrival times; the real review page always plays the full plan.
+ * The short version for the landing page: only the key moments play — seated, reading, the first disagreement (or
+ * the agreement), the summary with its first three rulings shown, and the new report. Everything else (the key-decision
+ * cards, the critiques, the second round) still happens, but silently in no time at the end of the reading, so the
+ * result cards and counts stay true. Played back to back from zero; it replays a finished review, so arrival times
+ * are ignored. The real review page always plays the full plan.
  */
 export function briefScenes(scenes: readonly Scene[]): Scene[] {
-  const kept = scenes.filter((scene, index) => {
-    const before = scenes.slice(0, index);
-    switch (scene.kind) {
-      case 'steelman': return scene.index === 0;
-      case 'divergence': return scene.index === 0;
-      case 'response': return !before.some(item => item.kind === 'response');
-      case 'ruling': return scene.index < BRIEF_RULINGS;
-      default: return true;
-    }
-  });
   let cursor = 0;
-  return kept.map(scene => {
-    const brief: Scene = scene.kind === 'critique' ? { ...scene, issues: scene.issues.slice(0, 1) }
-      : scene.kind === 'ruling' ? { ...scene, total: Math.min(scene.total, BRIEF_RULINGS) } : scene;
-    const length = scene.kind === 'critique' ? 4500 : BRIEF_LENGTH[scene.kind] ?? scene.end - scene.start;
+  let splits = 0;
+  const out: Scene[] = [];
+  for (const scene of scenes) {
+    let length = BRIEF_LENGTH[scene.kind] ?? 0;
+    // Only the first reading round and the first split are shown; later ones play silently.
+    if (scene.kind === 'reading' && scene.round === 2) length = 0;
+    if (scene.kind === 'divergence' && splits++ > 0) length = 0;
+    // Rulings after the first three are counted but not shown, so the summary's tally stays true.
+    if (scene.kind === 'ruling' && scene.index >= BRIEF_RULINGS) length = 0;
     const start = cursor;
     cursor += length;
-    if (brief.kind === 'reading') {
-      // Submissions land inside the shorter wait, one after another.
-      const submitAt = Object.fromEntries(Object.keys(brief.submitAt).map((seat, order) => [seat, start + 1200 + order * 600]));
-      return { ...brief, submitAt, start, end: cursor };
+    const moved = { ...scene, start, end: cursor } as Scene;
+    if (moved.kind === 'reading') {
+      // Submissions land inside the shorter wait, one after another; a silent round has handed in already.
+      moved.submitAt = Object.fromEntries(Object.keys(moved.submitAt)
+        .map((seat, order) => [seat, length > 0 ? start + 1500 + order * 700 : start]));
     }
-    return { ...brief, start, end: cursor };
-  });
+    out.push(moved);
+  }
+  return out;
 }

@@ -13,6 +13,7 @@ import {
 import { DOC_HEAD, deskAt, type MarginItem } from './jury-desk';
 import { canvasAt, statusWord } from './jury-canvas';
 import { briefScenes } from './jury-brief';
+import { caseFromEvents } from './jury-case';
 import { JuryCanvasPlayer } from './JuryCanvasPlayer';
 import { diffText } from './jury-diff';
 import { REVISION_TEXT } from './jury-mock-rulings';
@@ -443,8 +444,10 @@ describe('the canvas', () => {
   });
 });
 
-describe('the brief canvas for embedding', () => {
-  it('keeps every stage in order but plays back to back from zero, much shorter than the full review', () => {
+describe('the canvas for embedding', () => {
+  const played = (list: ReturnType<typeof briefScenes>) => list.filter(scene => scene.end > scene.start);
+
+  it('plays only the key moments in the short version, back to back from zero, and ends where the full one ends', () => {
     for (const scenario of JURY_SCENARIOS) {
       const full = buildScenes(scenario.arrivals);
       const brief = briefScenes(full);
@@ -452,17 +455,39 @@ describe('the brief canvas for embedding', () => {
       brief.forEach((scene, index) => {
         if (index > 0) expect(scene.start).toBe(brief[index - 1].end);
       });
-      expect([...new Set(brief.map(scene => scene.stage))]).toEqual([...new Set(full.map(scene => scene.stage))]);
-      expect(playbackLength(brief)).toBeLessThan(playbackLength(full) / 2);
-      expect(brief.filter(scene => scene.kind === 'ruling').length).toBeLessThanOrEqual(3);
+      expect([...new Set(played(brief).map(scene => scene.stage))]).toEqual(['seated', 'reading', 'divergence', 'ruling', 'revision']);
+      expect(played(brief).filter(scene => scene.kind === 'divergence' || scene.kind === 'agreed')).toHaveLength(1);
+      expect(played(brief).filter(scene => scene.kind === 'ruling').length).toBeLessThanOrEqual(3);
+      expect(brief.filter(scene => scene.kind === 'ruling')).toHaveLength(full.filter(scene => scene.kind === 'ruling').length);
+      expect(playbackLength(brief)).toBeLessThan(playbackLength(full) / 3);
       const end = canvasAt(brief, playbackLength(brief) - 1, DEFAULT_SEAT_NAMES);
-      expect(end.next.state).toBe(scenario.id === 'failed' ? 'unchanged' : 'revised');
+      const fullEnd = canvasAt(full, playbackLength(full) - 1, DEFAULT_SEAT_NAMES);
+      expect(end.next).toEqual(fullEnd.next);
+      expect(end.joined).toEqual(fullEnd.joined);
+      for (const seat of ['A', 'B', 'C', 'S'] as const) expect(end.columns[seat].at(-1)).toEqual(fullEnd.columns[seat].at(-1));
+      for (let clock = 0; clock < playbackLength(brief); clock += 500) {
+        const view = canvasAt(brief, clock, DEFAULT_SEAT_NAMES);
+        if (view.stage !== 'reading') expect(Object.values(view.columns).flat().some(card => card.kind === 'read' && card.state === 'reading')).toBe(false);
+      }
     }
   });
 
-  it('renders the canvas alone, with the configured names and no model names', () => {
-    const html = renderToStaticMarkup(createElement(JuryCanvasPlayer, { brief: true, speed: 2, names: resolveSeatNames(SAMPLE_PANEL) }));
-    expect(html).toContain('专门挑刺的资深短视频运营与商业变现老顾问');
-    expect(html).not.toMatch(MODEL_NAMES);
+  it('freezes at the given progress, plays the passed-in case, and names no model', () => {
+    const report = { title: '定位报告：示例人物', excerpt: '开头两行。', chapters: 9, revisedExcerpt: '修订后的开头。' };
+    const data = caseFromEvents(report, events('full'));
+    const at = (progress: number) => renderToStaticMarkup(createElement(JuryCanvasPlayer, {
+      data, progress, brief: true, names: resolveSeatNames(SAMPLE_PANEL),
+    }));
+    const start = at(0);
+    const end = at(1);
+    expect(start).toContain('定位报告：示例人物');
+    expect(start).toContain('9 章');
+    expect(start).not.toContain('修订后的定位报告：示例人物');
+    expect(end).toContain('修订后的定位报告：示例人物');
+    expect(end).toContain('修订后的开头。');
+    expect(end).toContain('专门挑刺的资深短视频运营与商业变现老顾问');
+    expect(at(-1)).toBe(start);
+    expect(at(2)).toBe(end);
+    expect(end).not.toMatch(MODEL_NAMES);
   });
 });
