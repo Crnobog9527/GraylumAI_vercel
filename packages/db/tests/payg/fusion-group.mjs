@@ -13,10 +13,19 @@ async function group(db,createFixture,{n=3,credits=100,phase='fusion_review',thr
   const first = await createFixture(db,{credits,phase,threshold});
   const members = [first];
   for (let i=1;i<n;i++) members.push(await createFixture(db,{actor:first.actor,phase,threshold}));
-  const id = await rpc(db,'fusion_group_create',first.actor,randomUUID(),'review');
+  // 0235: a group is bound to its source conversation, where saved Fusion outputs live.
+  const session = randomUUID();
+  await db.query("INSERT INTO runtime_sessions(id,actor_id,scope,start_request_id,start_payload) VALUES($1,$2,$3,$4,'{}')",
+    [session,first.actor,first.payload.scope,randomUUID()]);
+  const id = await rpc(db,'fusion_group_create',first.actor,randomUUID(),'review',session);
   for (const f of members) await rpc(db,'fusion_group_attach',first.actor,id,f.run);
   const items = members.map(f=>({runId:f.run,sequence:1,payload:f.claimPayload}));
   return {actor:first.actor,id,members,items,runs:members.map(f=>f.run)};
+}
+// A verdict about a body needs the saved body (0235); no_delivery needs its absence.
+async function judgeCall(db,actor,callId,verdict) {
+  if (verdict!=='no_delivery') await rpc(db,'fusion_call_output_save',actor,callId,'synthetic review body');
+  return rpc(db,'fusion_call_verdict',actor,callId,verdict);
 }
 const claimGroup = (db,g,step='review:1',attempt=1) => rpc(db,'fusion_group_claim',g.actor,g.id,step,attempt,JSON.stringify(g.items));
 async function dispatchAll(db,g,claimed) {
@@ -72,7 +81,7 @@ export async function fusionGroupCases({db,Client,connectionString,report,create
   for (const [i,f] of exact.members.entries()) await record(db,exact,f,claimed.calls.find(c=>c.runId===f.run),'0.0004');
   await rpc(db,'bill2_finalize',exact.actor,exact.runs[0]);
   assert.equal((await calls(db,[exact.runs[0]]))[0].settled_at,null,'a Fusion call without a host verdict keeps its hold');
-  for (const c of claimed.calls) await rpc(db,'fusion_call_verdict',exact.actor,c.id,'usable');
+  for (const c of claimed.calls) await judgeCall(db,exact.actor,c.id,'usable');
   await assert.rejects(rpc(db,'fusion_call_verdict',exact.actor,claimed.calls[0].id,'format_invalid'),/FUSION_VERDICT_IMMUTABLE/);
   const clients = [new Client({connectionString}),new Client({connectionString})];
   await Promise.all(clients.map(c=>c.connect()));
@@ -114,7 +123,7 @@ export async function fusionGroupCases({db,Client,connectionString,report,create
     await dispatchAll(db,over,oc);
     const costs = ['0.01','0.0004'];
     for (const [i,f] of over.members.entries()) await record(db,over,f,oc.calls.find(c=>c.runId===f.run),costs[i]);
-    for (const c of oc.calls) await rpc(db,'fusion_call_verdict',over.actor,c.id,'usable');
+    for (const c of oc.calls) await judgeCall(db,over.actor,c.id,'usable');
     for (const i of order) await rpc(db,'bill2_finalize',over.actor,over.runs[i]);
     assert.equal(await charged(db,over.runs),10,'order '+order.join(','));
     for (const f of over.members) await conserved(db,f);
@@ -128,8 +137,8 @@ export async function fusionGroupCases({db,Client,connectionString,report,create
   const bc = await claimGroup(db,bad);
   await dispatchAll(db,bad,bc);
   for (const f of bad.members) await record(db,bad,f,bc.calls.find(c=>c.runId===f.run),'0.0004');
-  await rpc(db,'fusion_call_verdict',bad.actor,bc.calls[0].id,'format_invalid');
-  await rpc(db,'fusion_call_verdict',bad.actor,bc.calls[1].id,'usable');
+  await judgeCall(db,bad.actor,bc.calls[0].id,'format_invalid');
+  await judgeCall(db,bad.actor,bc.calls[1].id,'usable');
   for (const r of bad.runs) await rpc(db,'bill2_finalize',bad.actor,r);
   const runs = Object.fromEntries((await db.query('SELECT id,charged FROM bill2_runs WHERE id=ANY($1::uuid[])',[bad.runs])).rows.map(r=>[r.id,Number(r.charged??0)]));
   assert.equal(runs[bc.calls[0].runId],0,'format_invalid is not charged');
@@ -145,7 +154,7 @@ export async function fusionGroupCases({db,Client,connectionString,report,create
     model:nf.claimPayload.model,protocol:nf.claimPayload.protocol,providerId:'generation-second-'+nc.calls[0].id,source:'response',
     sourceHash:'e'.repeat(64),observedAt:new Date().toISOString(),coverage:'request_total',final:true,cost:'0.0004',currency:'USD',
     usage:{inputTokens:777,outputTokens:0}}).catch(()=>null);
-  await rpc(db,'fusion_call_verdict',noisy.actor,nc.calls[0].id,'format_invalid');
+  await judgeCall(db,noisy.actor,nc.calls[0].id,'format_invalid');
   await rpc(db,'bill2_finalize',noisy.actor,nf.run);
   assert.notEqual((await calls(db,noisy.runs))[0].settled_at,null,'zero-charge verdict settles despite usage conflict');
   assert.equal(await wallet(db,noisy.actor),9);
@@ -160,15 +169,6 @@ export async function fusionGroupCases({db,Client,connectionString,report,create
   const ended = (await calls(db,silent.runs))[0];
   assert.deepEqual([ended.fusion_verdict,ended.settled_at!==null],['no_delivery',true]);
   assert.equal(await wallet(db,silent.actor),9,'no saved body and no host verdict by the deadline: no_delivery, hold released');
-  // Same, but the response body was saved: billed like usable from known usage, never free.
-  const saved = await group(db,createFixture,{n:1,credits:9});
-  const svc = await claimGroup(db,saved);
-  await dispatchAll(db,saved,svc);
-  const sf = saved.members[0];
-  await rpc(db,'bill2_record',saved.actor,sf.run,svc.calls[0].id,{provider:sf.claimPayload.provider,account:'sandbox',
-    model:sf.claimPayload.model,protocol:sf.claimPayload.protocol,providerId:'generation-'+svc.calls[0].id,source:'response',
-    sourceHash:'c'.repeat(64),observedAt:new Date().toISOString(),coverage:'request_total',final:true,cost:'0.0004',currency:'USD',
-    usage:{inputTokens:400,outputTokens:0},rawBody:'{"choices":[]}'});
   // A provider receipt with a body is not delivery: without a saved execution output it stays no_delivery.
   const receiptOnly = await group(db,createFixture,{n:1,credits:9});
   const ro = await claimGroup(db,receiptOnly);
@@ -181,17 +181,7 @@ export async function fusionGroupCases({db,Client,connectionString,report,create
   await db.query("UPDATE bill2_calls SET recovery_deadline=now()-interval '1 second' WHERE id=$1",[ro.calls[0].id]);
   await rpc(db,'bill2_finalize',receiptOnly.actor,receiptOnly.runs[0]);
   assert.equal((await calls(db,receiptOnly.runs))[0].fusion_verdict,'no_delivery','receipt body alone is not a delivered result');
-  // Saved execution output (what the user sees) without a host verdict: billed like usable.
-  const sid = randomUUID();
-  await db.query("INSERT INTO runtime_sessions(id,actor_id,scope,start_request_id,start_payload) VALUES($1,$2,$3,$4,'{}')",
-    [sid,saved.actor,sf.payload.scope,randomUUID()]);
-  await db.query(`INSERT INTO runtime_executions(actor_id,session_id,request_id,payload,history_revision,state,billing_run_id,result)
-    VALUES($1,$2,$3,'{}',0,'completed',$4,'{"answer":"saved"}')`,[saved.actor,sid,randomUUID(),saved.runs[0]]);
-  await db.query("UPDATE bill2_calls SET recovery_deadline=now()-interval '1 second' WHERE id=$1",[svc.calls[0].id]);
-  await rpc(db,'bill2_finalize',saved.actor,saved.runs[0]);
-  const billed = (await calls(db,saved.runs))[0];
-  assert.deepEqual([billed.fusion_verdict,billed.settled_at!==null],['unjudged_saved',true]);
-  assert.equal(await charged(db,saved.runs),1,'saved execution output without a host verdict is billed from known usage');
+  // A saved Fusion output (0235) is what makes an unjudged call billable: see fusion-sessionless.mjs.
   report.checks.push('format_invalid verdict charges zero and releases the full hold; the usable member is charged on its own');
 
   // Content deletion (not account closure) before the verdict keeps the hold and settles nothing.
@@ -258,6 +248,7 @@ export async function fusionGroupCases({db,Client,connectionString,report,create
   const rc = await claimGroup(db,race);
   await dispatchAll(db,race,rc);
   await record(db,race,race.members[0],rc.calls[0],'0.0004');
+  await rpc(db,'fusion_call_output_save',race.actor,rc.calls[0].id,'synthetic review body');
   const [closer,judge] = [new Client({connectionString}),new Client({connectionString})];
   await Promise.all([closer.connect(),judge.connect()]);
   try {

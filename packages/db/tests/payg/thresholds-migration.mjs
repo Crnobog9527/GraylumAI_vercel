@@ -25,8 +25,9 @@ export async function thresholdMigrationCases(db,report,createFixture,claim,rece
     const config=(await db.query("SELECT value FROM system_settings WHERE key='billing_payg_start_thresholds'")).rows[0].value;
     await db.query(migration);
     await db.query(migration);
-    // 0234 (FUSION-REVIEW) adds the Fusion group check on top of 0180; re-apply it to reach the latest source.
+    // 0234/0235 (FUSION-REVIEW) patch on top of 0180; re-apply both in order to reach the latest source and grants.
     await db.query(read('0234_fusion_billing_group.sql'));
+    await db.query(read('0235_fusion_sessionless_storage.sql'));
     assert.equal(await definition(),current);
     assert.deepEqual(await acl(),permissions);
     assert.deepEqual(await snapshot(),frozen);
