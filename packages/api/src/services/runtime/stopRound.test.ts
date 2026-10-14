@@ -16,9 +16,9 @@ const response=(message:Record<string,unknown>,finish='stop')=>JSON.stringify({m
 // Round 1: prose, then a read_source call. Round 2: the answer, already started when the stop arrived.
 const raws=new Map([[1,response({content:'我先读一下资料再回答',tool_calls:[{id:'c1',function:{name:'read_source',arguments:'{}'}}]},'tool_calls')],
  [2,response({content:'根据资料，结论如下'})]]);
-function complete(stop:{stopAt:number;source:'assistant';call?:number}){
+function complete(stop:{stopAt:number;source:'assistant';call?:number},primaryResult?:{body:string;lastSequence:number}){
  const execution={executionId:id,sessionId:id,runId:id,state:'interrupted',live:false,cancelRequested:false,pausedReason:'user_stop',
-  stop,epoch:1,result:null,context,billing:{contractVersion:'bill2.v2'},
+  stop,epoch:1,result:null,context,billing:{contractVersion:'bill2.v2'},...(primaryResult?{primaryResult}:{}),
   stopCalls:[1,2].map(sequence=>({sequence,requestHash:'a'.repeat(64),phase:'ordinary',dispatched:true,settled:true}))} as StopExecution;
  const database={rpc:vi.fn(async(name:string,args:Record<string,unknown>)=>{
   if(name==='runtime_response')return {data:{rawBody:raws.get(Number(args.p_sequence))??null},error:null};
@@ -38,6 +38,11 @@ describe('stop bound to the round on screen',()=>{
  });
  it('a stop without a round (an older client) keeps the last dispatched round, as before',async()=>{
   expect(await complete({stopAt:2,source:'assistant'})).toMatchObject({state:'completed',body:'根据'});
+ });
+ it('a checkpoint of a later round is not what the user saw: saves nothing; the same round uses its checkpoint',async()=>{
+  const checkpoint={body:'根据资料，结论如下',lastSequence:2};
+  expect(await complete({stopAt:5,source:'assistant',call:1},checkpoint)).toEqual({state:'cancelled'});
+  expect(await complete({stopAt:2,source:'assistant',call:2},checkpoint)).toMatchObject({state:'completed',body:'根据'});
  });
  it('a round that was never dispatched saves nothing instead of guessing',async()=>{
   expect(await complete({stopAt:2,source:'assistant',call:7})).toEqual({state:'cancelled'});

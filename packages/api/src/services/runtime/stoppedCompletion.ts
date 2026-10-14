@@ -81,6 +81,10 @@ export function stoppedCompletion(options: RuntimeExecutorOptions, billing: Retu
     let valid=Boolean(primary&&response?.model===context.model&&response?.choices?.length===1&&message
       &&['stop','length','tool_calls'].includes(choice?.finish_reason??'')
       &&!(choice?.finish_reason==='length'&&!body.trim()&&!message?.tool_calls?.length));
+    // A checkpointed primary of another round is not what the user saw, and SQL keeps a stop only under the
+    // checkpoint: with a named round, a different checkpointed round saves nothing rather than unseen text.
+    const checkpoint=execution.primaryResult as {body?:string;lastSequence?:number}|null|undefined;
+    if(round!==undefined&&typeof checkpoint?.body==='string'&&checkpoint.lastSequence!==primary?.sequence)valid=false;
     if(valid&&agent){
       valid=!terminalAgentReplyFailure(response,false,context.tools.includes('ask_question'))
         &&!(choice?.finish_reason==='length'&&message?.tool_calls?.length);
