@@ -1,6 +1,6 @@
 # ADMIN-SECRETS：后台管理第三方业务密钥 — 实施方案
 
-> 写于 2026-10-14，依据 staging `49211928`。方案定稿前不写代码；定稿也不等于合并、迁移应用或配置变更授权。
+> 写于 2026-10-14，依据 staging `49211928`。总控 2026-10-14 已确认方案，公共机制用迁移 0259；确认时的协调安排见第 7 节。方案确认不等于合并、迁移应用或配置变更授权。
 > 本仓库是公开仓库：本文、PR 和测试里只出现假的密钥字符串，不出现任何真实密钥、真实密钥的末 4 位或指纹前缀。
 
 ## 0. Owner 决定和本任务范围
@@ -34,7 +34,7 @@ staging 已装 `supabase_vault` 0.3.1（schema `vault`，2026-10-14 只读核对
 
 ### 1.2 新增的数据库对象（迁移 0259，只放公共机制）
 
-1. `CREATE EXTENSION IF NOT EXISTS supabase_vault WITH SCHEMA vault;`（staging 上是空操作；正式环境是否已装列入 REL-1 只读核对）。
+1. 迁移**不创建扩展**（Supabase 平台自带 `supabase_vault`，归 `supabase_admin` 管理）。函数在调用时检查 `vault.secrets` 是否存在，不存在就报 `PLATFORM_SECRET_VAULT_MISSING`，不会退化成明文存放。正式库是否已装，上线前请 Owner 授权做只读核对（第 8 节）。
 2. 表 `public.platform_secrets`：每把密钥一行，**不存原文**。
 
    | 列 | 说明 |
@@ -60,11 +60,11 @@ staging 已装 `supabase_vault` 0.3.1（schema `vault`，2026-10-14 只读核对
 
 ### 1.3 本机和 CI 的测试库
 
-本机和 CI 用的是普通 PostgreSQL 镜像，没有 `supabase_vault`。仿照现有的 `pg_cron` 替身（`build-from-files.mjs` 的 `installPgCronStub`），在测试容器里装一个只用于测试的 `supabase_vault` 替身扩展：提供同名的 `vault.secrets`、`vault.decrypted_secrets`、`vault.create_secret`、`vault.update_secret`，用 pgcrypto 和一把写死在测试文件里的假主密钥加密，权限按 staging 实测的样子授予。替身只在本机和 CI 的建库流程里安装，不能应用到 staging 或正式环境。`expected-differences.json` 里的 `ext:supabase_vault` 随之按实际比对结果调整（这个清单要求一条不多一条不少）。
+本机和 CI 用的是普通 PostgreSQL 镜像，没有 `supabase_vault`。因为迁移不创建扩展、函数体只在调用时才用到 `vault`，公共的空库建库和指纹回放不受影响，`expected-differences.json` 不用改。本任务自己的数据库测试在建库后另外装一个只用于测试的 Vault 替身（`packages/db/tests/platform-secrets/vault_stub.sql`）：提供同名、同参数的 `vault.secrets`、`vault.decrypted_secrets`、`vault.create_secret`、`vault.update_secret`，用 pgcrypto 和写死在测试文件里的假主密钥加密，权限按 staging 实测的样子授予。替身不能应用到 staging 或正式环境。
 
 ## 2. 后台交互：只能写，不能读
 
-- 位置：后台设置页新增"第三方密钥"区块，组件放在单独文件 `apps/web/src/components/admin/PlatformSecretsSettings.tsx`，设置页只加几行挂载代码。
+- 位置：单独的后台子页面 `/admin/secrets`（"第三方密钥"），组件放在 `apps/web/src/components/admin/PlatformSecretsSettings.tsx`，后台侧边栏加一行入口。不改 `admin/settings/page.tsx`（总控 2026-10-14 安排，避开 #958）。
 - 每把密钥一行，显示：名称、状态、末 4 位、更新时间、更新人。状态三种：
   - **后台已填写**：显示后台那把的末 4 位；
   - **未填写，正在使用 Vercel 环境变量**（只在过渡期、且该 slot 允许后备时出现，见第 4.4 节）：显示环境变量那把的末 4 位，提示"建议在这里填写"；
@@ -172,19 +172,19 @@ invalidatePlatformSecret(slot)
 | 顺序 | PR | 风险 | 改哪里 | 可能冲突的在途 PR |
 | --- | --- | --- | --- | --- |
 | 1 | **本方案**（只改文档和 Master Plan 第 7.1 节） | — | `docs/launch/tasks/ADMIN-SECRETS.md`、Master Plan 第 7.1 节加一行 | 无 |
-| 2 | **公共机制**（迁移 0259） | high | 迁移 0259、Vault 测试替身和建库脚本、`expected-differences.json`、`built-fingerprint.json`、`services/platformSecrets/`、`routers/platformSecrets.ts`、`root.ts` 注册一行、`components/admin/PlatformSecretsSettings.tsx`、设置页挂载几行 | `root.ts`：#956、#962、#928（各加一行，后合并的一方顺手解决）；`admin/settings/page.tsx`：#958（建议 #958 先合并，公共机制再在它之后挂载） |
-| 3 | **Post for Me 接入** | high | `services/publishMonitor/postForMe/config.ts` 的 `postForMeApiKey` 改为调用 `getPlatformSecret('postforme')`（变成异步，调用处一起改）；`envValidator` 的 `POSTFORME_API_KEY` 改为可选 | #939（建立 `config.ts`）、#971（叠在其上）。建议在 #939/#971 合并之后做；如果 Post for Me 窗口愿意，也可以在它自己的下一个 PR 里顺手接入 |
-| 4 | **搜索供应商接入** | high | RT-3 接线时，调用适配器前用 `getPlatformSecret('tikhub'/'parallel'/'firecrawl')` 取 `apiKey` 传入；适配器本身不用改 | #956、#958、#959 都不需要改；真正冲突的是 RESEARCH-TOOLS 尚未开的接线 PR（RT-3b）。建议由 RESEARCH-TOOLS 窗口在接线时直接用这个工具，不另开 PR |
-| 5 | **OpenRouter OR-1** | high | 见第 5.3 节 | 改的文件和 FUSION-REVIEW（`fusion/models.ts`）、Runtime 相关在途工作相邻；开工前由总控确认当时没有在途 PR 改这些文件 |
+| 2 | **公共机制**（迁移 0259） | high | 迁移 0259、`packages/db/tests/platform-secrets/`（Vault 测试替身和数据库测试）、`built-fingerprint.json`、`services/platformSecrets/`、`routers/platformSecrets.ts`、`root.ts` 注册一行、`app/admin/secrets/page.tsx`、`components/admin/PlatformSecretsSettings.tsx`、`AdminSidebar.tsx` 一行入口 | `root.ts`：#956、#962、#928（各加一行，谁后合并谁解决） |
+| 3 | **Post for Me 接入**（总控安排：由 Post for Me 窗口在 #971 合并后顺手接入，不由本窗口做） | high | `services/publishMonitor/postForMe/config.ts` 的 `postForMeApiKey` 改为调用 `getPlatformSecret('postforme')`（变成异步，调用处一起改）；`envValidator` 的 `POSTFORME_API_KEY` 改为可选 | #939（建立 `config.ts`）、#971（叠在其上） |
+| 4 | **搜索供应商接入**（总控安排：RT-3b 接线时直接用，总控转告 RESEARCH-TOOLS 窗口） | high | RT-3 接线时，调用适配器前用 `getPlatformSecret('tikhub'/'parallel'/'firecrawl')` 取 `apiKey` 传入；适配器本身不用改 | #956、#958、#959 都不需要改；真正冲突的是 RESEARCH-TOOLS 尚未开的接线 PR（RT-3b）。建议由 RESEARCH-TOOLS 窗口在接线时直接用这个工具，不另开 PR |
+| 5 | **OpenRouter OR-1**（等总控通知再开工） | high | 见第 5.3 节 | 总控 2026-10-14：#950（0248）、#952（0250）改 Runtime 和 PAYG，#962 改 `fusion/models.ts`，0260 的窗口在改停止流程；这些合并后总控再通知 |
 | 6 | **OpenRouter OR-2** | high | 删列迁移和反向迁移脚本 | 无（OR-1 之后） |
 | 7 | **结束过渡期** | high | 删环境变量后备代码和 `envValidator` 条目 | 无 |
 
-第 4 步如果由 RESEARCH-TOOLS 窗口顺带完成，本任务的 PR 数是 6 个，否则 7 个。
+第 3、4 步由对应窗口顺带完成，本窗口负责第 2、5、6、7 步。
 
 ## 8. 正式环境
 
 - 正式环境的密钥由 Owner 本人在正式站后台填写，AI 不经手。
-- 请总控在 REL-1 清单加入（只读核对，需 Owner 授权后才能读正式库）：
+- REL-1 清单由总控加入以下核对（只读核对，正式库要在上线前请 Owner 授权后才能读）：
   1. 正式库已装 `supabase_vault`；
   2. 后台"第三方密钥"区块里 5 把密钥的状态都是"后台已填写"（只看状态和末 4 位，不读原文）；
   3. OpenRouter OR-2 已应用，正式库 `ai_models` 已没有 `api_key` 列；
