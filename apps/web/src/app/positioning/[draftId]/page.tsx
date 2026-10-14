@@ -204,10 +204,10 @@ function PositioningDraftContent({draftId}:{draftId:string}){
   useEffect(() => {
     // Mirror `infoEdits` before scheduling: the scheduler reads the ref.
     infoEditsRef.current = infoEdits;
-    if (planView || hydratedDraft !== draftId || composing.current) return;
+    if (planView || hydratedDraft !== draftId || composing.current || read.data?.conversationDeleted) return; // read-only: no save
     autosave.schedule();
     return autosave.cancel;
-  }, [planView, draftId, hydratedDraft, infoEdits]);
+  }, [planView, draftId, hydratedDraft, infoEdits, read.data?.conversationDeleted]);
   const [planRecovery, setPlanRecovery] = useState<
     "idle" | "running" | "invalid" | "unknown" | "stale"
   >("idle");
@@ -263,7 +263,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
     },
   });
   const captureResolve = trpc.opc.captureResolve.useMutation(), capturePending = trpc.opc.capturePending.useMutation();
-  const updates = useCaptureResolve({ draftId, active: !planView && hydratedDraft === draftId && snap?.state === "draft",
+  const updates = useCaptureResolve({ draftId, active: !planView && hydratedDraft === draftId && snap?.state === "draft" && !d?.conversationDeleted,
     refetch: () => read.refetch(), flush: flushInformation, setError,
     resolve: input => captureResolve.mutateAsync(input), pending: input => capturePending.mutateAsync(input) });
   // `prepareStep`/`execute`/`mentorTurn` are deliberately excluded: the Agent's own
