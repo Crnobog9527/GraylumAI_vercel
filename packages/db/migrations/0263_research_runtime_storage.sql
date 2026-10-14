@@ -133,7 +133,10 @@ BEGIN
     THEN RAISE EXCEPTION 'RESEARCH_CARD_INVALID';END IF;
     IF k='keywords' OR (o->'selectable')='true'::jsonb THEN n:=n+1;END IF;
   END LOOP;
+  -- Option ids and, on candidate cards, platform + account are unique: one account can fill only one slot.
   IF (SELECT count(DISTINCT x->>'id') FROM jsonb_array_elements(p->'options') x)<>jsonb_array_length(p->'options')
+   OR (k='candidates' AND (SELECT count(DISTINCT (x->>'platform',x->>'account')) FROM jsonb_array_elements(p->'options') x)
+     <>jsonb_array_length(p->'options'))
    -- A first candidate card needs 8–12 selectable accounts (fewer: no card, the tool returns partial); only a
    -- follow-up card (followUp) from already found candidates may offer fewer and ask for a smaller minimum.
    OR (k='keywords' AND n NOT BETWEEN 3 AND 5)
@@ -279,7 +282,10 @@ BEGIN
     IF f.state='in_progress' OR (f.state='prepared' AND f.refresh_id IS DISTINCT FROM g.id) THEN
       RETURN jsonb_build_object('claimed',false,'fetchId',f.id,'state',f.state,'evidence',f.last_success);END IF;
     UPDATE research_refresh_grants SET used_at=coalesce(used_at,clock_timestamp()),used_execution_id=coalesce(used_execution_id,e) WHERE id=g.id;
-  ELSIF f.state='in_progress' OR (f.state<>'prepared' AND (f.last_success IS NOT NULL OR f.state<>'failed')) THEN
+  -- An ordinary claim takes over only a prepared attempt not bound to a refresh grant (that one resumes with its
+  -- own grant; meanwhile the earlier evidence is reused, never a new paid fetch).
+  ELSIF f.state='in_progress' OR (f.state='prepared' AND f.refresh_id IS NOT NULL)
+    OR (f.state<>'prepared' AND (f.last_success IS NOT NULL OR f.state<>'failed')) THEN
     RETURN jsonb_build_object('claimed',false,'fetchId',f.id,'state',f.state,'evidence',f.last_success);
   END IF;
   -- Every paid attempt gets its own token, so a late result of an earlier attempt can never finish this one.

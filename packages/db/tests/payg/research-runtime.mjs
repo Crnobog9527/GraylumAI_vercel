@@ -72,6 +72,9 @@ export async function researchRuntimeCases({db,Client,connectionString,report,cr
     // A first card needs 8–12 selectable accounts; this follow-up card (followUp) offers two.
     await assert.rejects(rpc(db,'research_card_create',f.actor,randomUUID(),f.session,f.execution,{kind:'candidates',
       discoveryId:started.discoveryId,options:['a','b','c','d','e','f','g'].map(x=>candidate('n'+x,'seven'+x))}),/RESEARCH_CARD_INVALID/);
+    // Eight ids for one account are not eight candidates.
+    await assert.rejects(rpc(db,'research_card_create',f.actor,randomUUID(),f.session,f.execution,{kind:'candidates',
+      discoveryId:started.discoveryId,options:['a','b','c','d','e','f','g','h'].map(x=>candidate('d'+x,'same'))}),/RESEARCH_CARD_INVALID/);
     await rpc(db,'research_card_create',f.actor,cc,f.session,f.execution,{kind:'candidates',discoveryId:started.discoveryId,followUp:true,
       options:[candidate('c1','alpha'),candidate('c2','beta'),candidate('h1','bigstar',false)]});
     await assert.rejects(rpc(db,'research_card_confirm',f.actor,cc,{selected:['c1'],additions:['x']}),/RESEARCH_CARD_INVALID/);
@@ -135,6 +138,9 @@ export async function researchRuntimeCases({db,Client,connectionString,report,cr
     // A refresh that succeeds replaces it.
     const grant2 = await rpc(db,'research_refresh_create',f.actor,f.session,'tiktok','alpha');
     const crashedRefresh = await rpc(db,'research_account_fetch_claim',f.actor,f.session,f.execution,'tiktok','alpha',grant2);
+    // An ordinary claim cannot take over a stalled refresh: it gets the earlier evidence, no new paid fetch.
+    const plain = await rpc(db,'research_account_fetch_claim',f.actor,f.session,f.execution,'tiktok','alpha',null);
+    assert.deepEqual([plain.claimed,plain.evidence],[false,{operations:['op-1']}]);
     // A crash before sending the refresh: the same grant takes the attempt over (new token); another grant cannot.
     const r2 = await rpc(db,'research_account_fetch_claim',f.actor,f.session,f.execution,'tiktok','alpha',grant2);
     assert.equal(r2.claimed,true);
