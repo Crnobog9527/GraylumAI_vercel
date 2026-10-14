@@ -31,6 +31,7 @@ import { mentorTailNotices, mentorTurnNotice, RETRY_PENDING_NOTICE, turnNeedsRet
 import { useAutoStepRecovery, useHistoryPolling } from "./use-step-recovery";
 import { useLiveReply } from "./use-live-reply";
 import { PublishFootnote, PublishNext, ReportEntry, reportPublishes } from "./report-panel";
+import { ReadonlyDraftView } from './readonly-draft-view';
 import { InformationExport } from "./InformationExport";
 import { EXISTING_WELCOME } from "../start-entry";
 import { isStepSummaryInput, offersStepSummary, STEP_SUMMARY_INPUT, STEP_SUMMARY_LABEL, stepSummaryRequest, summaryRefusal,
@@ -132,7 +133,8 @@ function PositioningDraftContent({draftId}:{draftId:string}){
   const [planStart, setPlanStart] = useState(() => new Date().toISOString().slice(0, 10));
   const [planDays, setPlanDays] = useState(7);
   const history = trpc.runtime.view.useQuery({ sessionId: read.data?.sessionId ?? "" },
-    { enabled: Boolean(read.data?.sessionId), refetchInterval: useHistoryPolling(draftId, read.data?.snapshot?.workflow.steps ?? []) });
+    { enabled: Boolean(read.data?.sessionId) && !read.data?.conversationDeleted,
+      refetchInterval: useHistoryPolling(draftId, read.data?.snapshot?.workflow.steps ?? []) });
   const live = useLiveReply(draftId, history.data), liveReply = live.reply, stopLocal = live.stopLocal;
   const payg = usePaygResume(() => Promise.all([read.refetch(), history.refetch(), utils.credits.getBalance.invalidate()]));
   const [activeStep, setActiveStep] = useState<string | null>(null);
@@ -977,12 +979,8 @@ function PositioningDraftContent({draftId}:{draftId:string}){
     | undefined;
   if (read.isLoading || hydratedDraft !== draftId) return <main className="p-6">正在恢复定位…</main>;
   if (read.error || !d)
-    return (
-      <main className="p-6" role="alert">
-        无法读取这份定位，请检查登录和访问权限。
-        <Link href="/positioning">返回定位列表</Link>
-      </main>
-    );
+    return <main className="p-6" role="alert">无法读取这份定位，请检查登录和访问权限。<Link href="/positioning">返回定位列表</Link></main>;
+  if (d.conversationDeleted) return <ReadonlyDraftView draftId={draftId} draft={d}/>; // Owner 2026-10-14: read-only after deletion.
   if (planView) return <main className="mx-auto max-w-3xl space-y-4 p-6">
     <Link href={`/positioning/${draftId}/topics`}>进入当前选题工作</Link>
     <h1>旧计划请求恢复</h1>

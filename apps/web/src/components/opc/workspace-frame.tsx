@@ -13,6 +13,7 @@ import { StrategyOverviewDialog } from './strategy-overview-dialog';
 import { ContentErasureDialog } from './content-erasure-dialog';
 import { ConversationDeleteDialog } from './conversation-delete-dialog';
 import { ConversationRow } from './conversation-row';
+import { DraftRow, type UnassignedDraft } from './draft-row';
 import { useConversationRename } from '@/hooks/use-conversation-rename';
 import { useConversationErasure } from '@/hooks/use-conversation-erasure';
 import { useContentErasureSync } from '@/hooks/use-content-erasure';
@@ -24,7 +25,7 @@ import styles from './workspace-frame.module.css';
 type Item = {workItemId:string;sessionId:string;title:string;chatName?:string;uiRevision?:number;pinned?:boolean;archived?:boolean;deleted?:boolean;brief:string|null;day:string;revision:number;contentType?:string;lastActivityAt?:string};
 type Account = {projectId:string;platform:string;account:string;displayName?:string;uiRevision?:number;strategyDraftId?:string|null;pendingStrategyDraftId?:string|null;sourceVersionId?:string|null;sourceVersion?:number|null;profile?:Record<string,{label?:string;value?:string;status?:string}>|null;items:Item[]};
 type Business = {businessId:string;accounts:Account[]};
-type Draft = {draftId:string;businessName?:string;createdAt?:string;currentVersion?:number;state?:string};
+type Draft = UnassignedDraft&{createdAt?:string;currentVersion?:number};
 
 /** The accepted U0/U1 shell, with real owned OPC projections instead of demo state. */
 export function WorkspaceFrame({children,right,rightOpen=true,onToggleRight,activeWorkItemId,area='chat',notice,revealRight}:{
@@ -232,7 +233,11 @@ export function WorkspaceFrame({children,right,rightOpen=true,onToggleRight,acti
       onOpenMenu={event=>openRowMenu(event,'conversation:'+conversation.sessionId)} onCloseMenu={()=>setMenuId('')}
       onDelete={()=>setDeletingConversation({id:conversation.sessionId,
        name:conversationRename.titleOf(conversation.sessionId,conversation.title)})} rename={conversationRename}/>)}</details>}
-     {!archiveView&&unassigned.length>0&&<details open={groupOpen.unassigned??true} onToggle={event=>{const next=event.currentTarget.open;setGroupOpen(current=>current.unassigned===next?current:{...current,unassigned:next});}}><summary>待归类<ChevronDown size={14}/></summary>{unassigned.map(draft=><Link key={draft.draftId} className={styles.thread} href={'/positioning/'+draft.draftId}><span>{draft.businessName??'新账号'} · 定位分析</span><small>{draft.state==='published'?'已确认':'进行中'}</small></Link>)}</details>}
+     {!archiveView&&unassigned.length>0&&<details open={groupOpen.unassigned??true} onToggle={event=>{const next=event.currentTarget.open;setGroupOpen(current=>current.unassigned===next?current:{...current,unassigned:next});}}><summary>待归类<ChevronDown size={14}/></summary>{unassigned.map(draft=><DraftRow key={draft.draftId} draft={draft}
+      menuOpen={menuId==='draft:'+draft.draftId} menuPosition={menuPosition} onCloseMenu={()=>setMenuId('')}
+      onOpenMenu={event=>openRowMenu(event,'draft:'+draft.draftId)}
+      onDeleteConversation={(id,name)=>setDeletingConversation({id,name})}
+      onDeleteDraft={(id,name)=>startErasure('artifact',id,name+' · 稿件与成果')}/>)}</details>}
      <QueryNotice error={library.error||drafts.error} loading={library.isPending||drafts.isPending} label="账号与资料" retry={()=>Promise.all([library.refetch(),drafts.refetch()])}/>
      {library.isSuccess&&drafts.isSuccess&&!library.error&&!drafts.error&&(!archiveView&&!platforms.size&&!unassigned.length||archiveView&&![...platforms.values()].flat().some(account=>account.items.some(item=>item.archived&&!item.deleted)))&&<p className={styles.empty}>{archiveView?'暂无归档记录。':'完成定位并采用选题后，账号工作会出现在这里。'}</p>}
     </div>

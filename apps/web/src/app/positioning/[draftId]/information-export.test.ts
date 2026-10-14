@@ -71,3 +71,17 @@ describe('confirmed information export', () => {
     expect(() => identity(data, 'draft')).toThrow();
   });
 });
+
+describe('read-only draft after its conversation is deleted (Owner 2026-10-14)', () => {
+  it('shows and exports the same confirmed-only list, never unconfirmed or conversation text', async () => {
+    const { confirmedSections } = await import('./information-export');
+    const data = { ...exportFixture(2), conversationDeleted: true };
+    const sections = confirmedSections(data, 'draft');
+    expect(sections.map(section => section.fields.map(field => field.value))).toEqual([['中文资料0'], ['中文资料1']]);
+    const text = JSON.stringify(sections);
+    expect(text).not.toMatch(/不能导出|不可导出|内部|internal/);
+    const exported = markdown(data, 'draft', identity(data, 'draft'));
+    for (const section of sections) for (const field of section.fields) expect(exported).toContain(field.value);
+    expect(exported).not.toMatch(/不能导出|不可导出|内部|internal/);
+  });
+});

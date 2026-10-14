@@ -11,6 +11,8 @@ let css: string;
 const entry = fileURLToPath(new URL('./__frame_delete_fixture__.js', import.meta.url));
 const SESSION = '00000000-0000-4000-8000-0000000000a1';
 const WORK_SESSION = '00000000-0000-4000-8000-0000000000b2';
+const DRAFT_SESSION = '00000000-0000-4000-8000-0000000000d4';
+const DRAFT_PROJECT = '00000000-0000-4000-8000-0000000000e5';
 const OTHER = '00000000-0000-4000-8000-0000000000c3';
 
 // Everything around the list is stubbed. The deletion call is held by the page (window.erasures), so a
@@ -33,7 +35,9 @@ const stubs: Array<[(id: string) => boolean, string]> = [
         platform:'抖音',account:'测试号',strategyDraftId:'d1',sourceVersionId:'v1',sourceVersion:1,items:[]}]}]}
         :location.hash==='#work'?{businesses:[{businessId:'b1',accounts:[{projectId:'p1',platform:'抖音',account:'测试号',
         items:[{workItemId:'w1',sessionId:'${WORK_SESSION}',title:'口播稿工作',brief:null,day:'2026-10-13',revision:1}]}]}]}
-        :{accounts:[]})},list:{useQuery:()=>q([])},
+        :{accounts:[]})},list:{useQuery:()=>q(location.hash==='#drafts'?{drafts:[
+        {draftId:'d-live',sessionId:'${DRAFT_SESSION}',projectId:'p-live',businessName:'咖啡店',state:'draft'},
+        {draftId:'d-ro',sessionId:'s-ro',projectId:'${DRAFT_PROJECT}',businessName:'书店',state:'draft',conversationDeleted:true}]}:[])},
         conversations:{useQuery:()=>q([{sessionId:'${SESSION}',title:'周末选题讨论',lastActivityAt:'2026-10-13T00:00:00Z'},
           ...(location.hash==='#rename-slow'?[{sessionId:'${OTHER}',title:'第二个对话',lastActivityAt:'2026-10-12T00:00:00Z'}]:[])])},
         workUiChange:{useMutation:m},accountUiChange:{useMutation:m}},
@@ -349,6 +353,36 @@ it('rename input fits a 375px screen', () => open(375, async page => {
   expect(box && box.x >= 0 && box.x + box.width <= 375).toBe(true);
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375);
 }));
+
+it('待归类: a live positioning draft deletes its conversation in one click', () => open(1280, async page => {
+  // Bring the row into view first: the sidebar closes an open menu when it scrolls.
+  const button = page.getByRole('button', { name: '咖啡店 · 定位分析的更多操作' });
+  await button.scrollIntoViewIfNeeded();
+  await page.waitForTimeout(150);
+  await button.focus();
+  await page.keyboard.press('Enter');
+  await ui(page.getByRole('menu')).toBeVisible();
+  await page.getByRole('menuitem', { name: '删除对话' }).click();
+  const dialog = page.getByRole('dialog');
+  await ui(dialog).toContainText('删除后无法恢复');
+  await dialog.getByRole('button', { name: '删除', exact: true }).click();
+  await ui(page.getByRole('dialog')).toHaveCount(0, { timeout: 1000 });
+  expect(await held(page)).toEqual([{ sessionId: DRAFT_SESSION }]);
+}, '#drafts'));
+
+it('待归类: a read-only draft is labelled and offers deleting the whole draft through the work deletion', () => open(1280, async page => {
+  await ui(page.getByText('对话已删除 · 只读')).toBeVisible();
+  // Bring the row into view first: the sidebar closes an open menu when it scrolls.
+  const button = page.getByRole('button', { name: '书店 · 定位分析的更多操作' });
+  await button.scrollIntoViewIfNeeded();
+  await page.waitForTimeout(150);
+  await button.focus();
+  await page.keyboard.press('Enter');
+  await ui(page.getByRole('menu')).toBeVisible();
+  await ui(page.getByRole('menuitem', { name: '删除对话' })).toHaveCount(0);
+  await page.getByRole('menuitem', { name: '永久删除稿件与成果' }).click();
+  expect(await page.evaluate(() => (window as unknown as Win).opened.at(-1))).toEqual({ kind: 'artifact', id: DRAFT_PROJECT });
+}, '#drafts'));
 
 it('reaches the ⋯ button with Tab, which makes it visible', () => open(1280, async page => {
   for (let i = 0; i < 60 && !(await more(page).evaluate(el => el === document.activeElement)); i++) {
