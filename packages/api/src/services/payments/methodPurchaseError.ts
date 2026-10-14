@@ -27,6 +27,9 @@ const REJECTIONS: Record<string, Rejection> = {
   PAY_WAFFO_ACCOUNT_CLOSED: { code: 'FORBIDDEN', message: '账号已停用或正在注销，不能购买。' },
   PAY_WAFFO_OFFER_INVALID: { code: 'BAD_REQUEST', message: '这个优惠不适用于所选套餐，请刷新页面后重试。' },
   PAY_WAFFO_TRANSITION_DENIED: { code: 'BAD_REQUEST', message: '这次升级或续费请求无效，请刷新页面后重试。' },
+  // Raised before checkout (cardUpgrade): a renewing prior paid another way cannot be stopped after a card upgrade.
+  PAY_STRIPE_MP_UPGRADE_PRIOR_CHANNEL: { code: 'PRECONDITION_FAILED',
+    message: '你现在的会员不是用银行卡开通的，暂时不能用银行卡直接升级。请提交工单，我们帮你处理升级，避免重复扣费。' },
 };
 
 /** Thrown only for a refusal the admission RPC returned; the message stays the control-flow code. */

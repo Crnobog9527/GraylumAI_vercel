@@ -1,6 +1,7 @@
 import { JsonLd } from '@/components/seo/JsonLd';
 import { FinalAction } from '@/components/landing/offer/FinalAction';
 import { FlowSteps } from '@/components/landing/offer/FlowSteps';
+import { FounderSeatsProvider } from '@/components/landing/offer/LiveFounderSeats';
 import { SampleReports } from '@/components/landing/offer/SampleReports';
 import { HowItWorks } from '@/components/landing/offer/HowItWorks';
 import { OfferFaq } from '@/components/landing/offer/OfferFaq';
@@ -10,6 +11,7 @@ import { SiteShell } from '@/components/public-site/SiteShell';
 import { VoiceWall } from '@/components/landing/offer/VoiceWall';
 import { resolveLandingFlags } from '@/lib/landing/landing-flags';
 import { buildLandingPageData, HOME_DESCRIPTION, HOME_TITLE } from '@/lib/landing/landing-page-data';
+import { getLandingOffers } from '@/lib/landing/landing-offers';
 import { getPublicSiteSettings } from '@/lib/public-site';
 import { buildPageMetadata } from '@/lib/seo/metadata';
 import { faqPageJsonLd, softwareApplicationJsonLd } from '@/lib/seo/structured-data';
@@ -28,10 +30,11 @@ export function generateMetadata() {
  * Section order is fixed by the Owner: hero, sticky notes, how the coach works, price, FAQ, final action.
  */
 export default async function LandingPage() {
-  const { siteName, supportEmail, membershipPlans, membershipPlansStatus } = await getPublicSiteSettings();
+  const [{ siteName, supportEmail, membershipPlans, membershipPlansStatus }, offers] =
+    await Promise.all([getPublicSiteSettings(), getLandingOffers()]);
   const plans = membershipPlansStatus === 'available' ? membershipPlans : [];
-  // The Gold first-month price and founder seats have no public server answer yet, so no offers are passed.
-  const data = buildLandingPageData(resolveLandingFlags(), plans);
+  // Gold first month and founder seats come from the server rules (settings.getPublicOffers); absent when unavailable.
+  const data = buildLandingPageData(resolveLandingFlags(), plans, offers);
 
   return (
     <SiteShell locale="zh-Hans" supportEmail={supportEmail} siteName={siteName}>
@@ -45,16 +48,18 @@ export default async function LandingPage() {
         <FlowSteps steps={data.flowSteps} />
         <SampleReports reports={data.sampleReports} />
       </HowItWorks>
-      <PriceSection
-        pricing={data.pricing}
-        rows={data.compareRows}
-        risk={data.risk}
-        showResult={data.showResult}
-        founderSeats={data.founderSeats}
-        membershipHref={buildAuthHref('/profile?tab=subscription')}
-      />
-      <OfferFaq groups={data.faqGroups} />
-      <FinalAction showStack={data.showStack} founderSeats={data.founderSeats} note={data.finalNote} />
+      <FounderSeatsProvider initial={data.founderSeats}>
+        <PriceSection
+          pricing={data.pricing}
+          rows={data.compareRows}
+          risk={data.risk}
+          showResult={data.showResult}
+          founderSeats={data.founderSeats}
+          membershipHref={buildAuthHref('/profile?tab=subscription')}
+        />
+        <OfferFaq groups={data.faqGroups} />
+        <FinalAction showStack={data.showStack} founderSeats={data.founderSeats} note={data.finalNote} />
+      </FounderSeatsProvider>
     </SiteShell>
   );
 }

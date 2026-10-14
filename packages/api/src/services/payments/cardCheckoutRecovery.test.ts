@@ -31,7 +31,8 @@ describe('PAY-STRIPE-MP card first payment through the method recovery', () => {
   });
   it('fulfills a card subscription with the Stripe period, subscription id and pre-tax amount', async () => {
     const f = fixture();
-    await expect(f.run()).resolves.toEqual({ orderId: 'order' });
+    // The recovery reports what it saw: a delivered payment is paid, whatever the caller's older session copy said.
+    await expect(f.run()).resolves.toEqual({ orderId: 'order', checkoutStatus: null, paymentStatus: 'paid' });
     expect(mocks.card).toHaveBeenCalledWith(expect.objectContaining({ priceId: 'price_gold_month', sessionId: 'cs_card' }));
     expect(mocks.wallet).not.toHaveBeenCalled();
     expect(f.db.rpc).toHaveBeenCalledWith('pay_waffo_fulfill_payment', { p_order: 'order', p_merchant: 'fixture', p_checkout: 'cs_card',
@@ -83,7 +84,7 @@ describe('PAY-STRIPE-MP card first payment through the method recovery', () => {
         onValidatedSession?.({ status, payment_status: 'unpaid' }); return null;
       });
       const f = fixture({ payment_method: 'card_cn' });
-      await expect(f.run(eventType)).resolves.toEqual({ orderId: 'order' });
+      await expect(f.run(eventType)).resolves.toEqual({ orderId: 'order', checkoutStatus: status, paymentStatus: 'unpaid' });
       if (closes) {
         expect(f.db.rpc).toHaveBeenCalledWith('pay_waffo_observe_qualification', expect.objectContaining({ p_order: 'order',
           p_checkout: 'cs_card', p_state: 'closed_unpaid', p_amount: 0 }));

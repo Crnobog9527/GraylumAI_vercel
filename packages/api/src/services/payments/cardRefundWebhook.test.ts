@@ -2,9 +2,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type Stripe from 'stripe';
 import type { SupabaseClient } from '@supabase/supabase-js';
-const mocks = vi.hoisted(() => ({ scope: vi.fn(), find: vi.fn(), error: vi.fn() }));
+const mocks = vi.hoisted(() => ({ scope: vi.fn(), find: vi.fn(), error: vi.fn(), ref: vi.fn() }));
 vi.mock('./stripeCheckoutPersistence', () => ({ resolveStripeScope: mocks.scope }));
 vi.mock('./cardPaymentLookup', () => ({ findCardOrderForPayment: mocks.find }));
+vi.mock('./stripeReferences', () => ({ findStripeReference: mocks.ref }));
 vi.mock('../../lib/logger', () => ({ logger: { error: mocks.error } }));
 import { handleCardRefund } from './cardRefundWebhook';
 
@@ -35,6 +36,7 @@ describe('PAY-STRIPE-MP external refunds of card orders', () => {
   beforeEach(() => {
     mocks.scope.mockReset().mockResolvedValue({ mode: 'test', merchant: 'fixture' });
     mocks.find.mockReset().mockResolvedValue(match); mocks.error.mockReset();
+    mocks.ref.mockReset().mockResolvedValue({ order_id: 'order' });
   });
   it('records each succeeded refund of the charge once, oldest first, against the paid period', async () => {
     const f = fixture([refund({ id: 're_2', created: 1792000100, amount: 100 }), refund({ id: 're_1' }),
@@ -97,8 +99,26 @@ describe('PAY-STRIPE-MP external refunds of card orders', () => {
     pending.stripe.paymentIntents.retrieve.mockResolvedValue({ metadata: { orderId: '00000000-0000-4000-8000-000000000001' } });
     await expect(pending.run({ refundId: 're_1' })).rejects.toThrow('PAY_STRIPE_MP_FIRST_PAYMENT_PENDING');
     expect(pending.db.rpc).not.toHaveBeenCalled();
+    // A payment some local order references (legacy, wallet): left to the existing path.
+    mocks.ref.mockResolvedValue({ order_id: 'legacy-order' });
     const legacy = fixture([refund()]);
     await expect(legacy.run({ refundId: 're_1' })).resolves.toBe(false);
+    expect(legacy.alert).not.toHaveBeenCalled();
+  });
+  it('alerts and acknowledges a succeeded external refund of a payment no local order references at all', async () => {
+    mocks.find.mockResolvedValue(null); mocks.ref.mockResolvedValue(undefined);
+    const f = fixture([refund()]);
+    f.stripe.invoicePayments.list.mockResolvedValue({ data: [{ invoice: 'in_offsite' }] });
+    await expect(f.run({ refundId: 're_1' })).resolves.toBe(true);
+    expect(mocks.ref).toHaveBeenCalledWith(f.db, 'payment', 'pi_1', { mode: 'test', merchant: 'fixture' });
+    expect(mocks.ref).toHaveBeenCalledWith(f.db, 'invoice', 'in_offsite', { mode: 'test', merchant: 'fixture' });
+    expect(f.alert).toHaveBeenCalledTimes(1);
+    expect(mocks.error).toHaveBeenCalledWith('billing', 'stripe_mp_refund_unmatched', expect.objectContaining({ refundIds: ['re_1'] }));
+    expect(f.db.rpc).not.toHaveBeenCalled();
+    // Not succeeded (nothing refunded yet), or a refund of ours: no alert, left to the existing path.
+    const pending = fixture([refund({ status: 'pending' })]);
+    await expect(pending.run({ refundId: 're_1' })).resolves.toBe(false);
+    expect(pending.alert).not.toHaveBeenCalled();
   });
   it('reads every page of a charge\'s refunds and fails rather than acknowledging an incomplete list', async () => {
     const f = fixture([]);

@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { describe, expect, it, vi } from 'vitest';
 import {
-  buildContentErasureLines, classifyErasureError, confirmContentErasure, describeErasureResult, forgetLocalCopies,
+  buildContentErasureLines, classifyErasureError, confirmContentErasure, describeErasureResult, forgetLocalCopies, forgetWorkReturn,
   refreshAfterErasure, type ContentErasurePreview, type ContentErasureResult,
 } from './content-erasure';
 
@@ -113,6 +113,26 @@ describe('cache and local copy invalidation', () => {
     const broken = { get length(): number { throw new Error('denied'); } } as unknown as Storage;
     forgetLocalCopies([id, other, ''], [store, broken, null]);
     expect([...data.keys()]).toEqual(['other']);
+  });
+
+  it('drops the "返回当前工作" link only when it points at deleted content', () => {
+    const other = '22222222-2222-4222-8222-222222222222';
+    const data = new Map<string, string>();
+    const store = {
+      getItem: (key: string) => data.get(key) ?? null,
+      removeItem: (key: string) => { data.delete(key); },
+    } as unknown as Storage;
+    data.set('opc-work-return', `/runtime?session=${other}`);
+    forgetWorkReturn([id], store);
+    expect(data.get('opc-work-return')).toBe(`/runtime?session=${other}`);
+    forgetWorkReturn(['', id, other], store);
+    expect(data.has('opc-work-return')).toBe(false);
+    data.set('opc-work-return', `/positioning/${other}/topics`);
+    forgetWorkReturn([id, other], store);
+    expect(data.has('opc-work-return')).toBe(false);
+    const broken = { getItem: () => { throw new Error('denied'); } } as unknown as Storage;
+    expect(() => forgetWorkReturn([id], broken)).not.toThrow();
+    expect(() => forgetWorkReturn([id], null)).not.toThrow();
   });
 });
 

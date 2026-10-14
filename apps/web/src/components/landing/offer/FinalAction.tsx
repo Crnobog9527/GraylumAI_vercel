@@ -5,6 +5,7 @@ import { FINAL_ACTION } from '@/lib/landing/landing-copy';
 import { SIGNUP_CTA_HREF } from '@/lib/seo/content/shared';
 import { cn } from '@/lib/utils';
 import styles from './offer.module.css';
+import { FounderOnly, FounderSeatsLeft } from './LiveFounderSeats';
 
 /** Closing section (offer section 6): the two paths, the stack summary, founder seats, one button. */
 export function FinalAction({ showStack, founderSeats, note }: { showStack: boolean; founderSeats: number | null; note: string }) {
@@ -26,9 +27,11 @@ export function FinalAction({ showStack, founderSeats, note }: { showStack: bool
           </p>
         ) : null}
         {founderSeats !== null ? (
-          <p className="mt-4 text-base font-semibold text-[#FFD700]">
-            {FINAL_ACTION.founderLine}<span className="ml-2 text-sm font-normal text-[#B0B0B0]">还剩 {founderSeats} 个名额</span>
-          </p>
+          <FounderOnly>
+            <p className="mt-4 text-base font-semibold text-[#FFD700]">
+              {FINAL_ACTION.founderLine}<FounderSeatsLeft rendered={founderSeats} className="ml-2 text-sm font-normal text-[#B0B0B0]" />
+            </p>
+          </FounderOnly>
         ) : null}
         <Link
           href={SIGNUP_CTA_HREF}

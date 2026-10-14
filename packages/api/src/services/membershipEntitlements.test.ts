@@ -17,6 +17,23 @@ describe('new-action membership entitlements', () => {
     }
     expect(f.writes).toEqual([]);
   });
+  it.each([
+    ['free', false, 0, false, false], ['pro', true, 30, false, false], ['gold', true, 90, true, true],
+  ] as const)('reads %s publish-monitor entitlements from the plan row', async (level, publish, days, bench, review) => {
+    const result = await readMembershipEntitlements(fixture(level).client, actorId);
+    expect(result).toMatchObject({ allowPublish: publish, ownDataWindowDays: days,
+      allowBenchmarkMonitor: bench, allowWeeklyAutoReview: review });
+  });
+  it('turns only publish-monitor features off when their columns are missing or invalid', async () => {
+    for (const mutate of [(row: Record<string, unknown>) => { row.own_data_window_days = -1; },
+      (row: Record<string, unknown>) => { delete row.allow_publish; }]) {
+      const f = fixture('gold');
+      mutate(f.rows.membership_plans![2]!);
+      const result = await readMembershipEntitlements(f.client, actorId);
+      expect(result).toMatchObject({ level: 'gold', allowFusionReview: true, libraryStorageBytes: 2_000_000_000,
+        allowPublish: false, ownDataWindowDays: 0, allowBenchmarkMonitor: false, allowWeeklyAutoReview: false });
+    }
+  });
   it('uses current admin configuration independently, including free and off-sale plans', async () => {
     const f = fixture('free');
     Object.assign(f.rows.membership_plans![0]!, { allow_fusion_review: true, is_active: 'false', library_storage_bytes: 123 });
