@@ -292,7 +292,9 @@ describe('review flow', () => {
     db.calls[0]!.dispatched = true;
     db.review!.endedAt = clock.next(); db.review!.state = 'stopped';
     expect((await t.flow.events(String(db.review!.reviewId))).ended).toBe(false);
-    db.calls[0]!.verdict = 'format_invalid';
+    db.calls[0]!.verdict = 'no_delivery';
+    expect((await t.flow.events(String(db.review!.reviewId))).ended).toBe(false); // judged, but no time for its event yet
+    db.calls[0]!.settledAt = clock.next();
     expect((await t.flow.events(String(db.review!.reviewId))).ended).toBe(true);
   });
 

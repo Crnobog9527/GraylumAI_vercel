@@ -108,7 +108,10 @@ export function reviewEvents(input: { view: ReviewView; reviewers: string[]; sec
   // Database times order the events; ties keep the derivation order (seat, then item).
   timed.sort((a, b) => (a.at === b.at ? a.order - b.order : Date.parse(a.at || '1970-01-01') - Date.parse(b.at || '1970-01-01')));
   // Ended only when nothing more can appear: a stop may leave a saved body to be judged later (#962 review).
-  const pending = view.calls.some(call => call.dispatched && call.verdict === null);
+  // Still to appear: a dispatched call without a verdict, or a judged call whose event has no time yet (no saved body
+  // and not settled, e.g. a provider refusal whose settlement failed and waits for recovery) (#962 review).
+  const pending = view.calls.some(call => (call.dispatched && call.verdict === null)
+    || (call.verdict !== null && !outputs.has(call.callId) && !call.settledAt));
   // A revised review still waits for the user's per-section choice, whose adoption_done event comes later (#962 review).
   const awaitingChoice = view.state === 'completed' && (view.outcome as { kind?: string } | null)?.kind === 'revised' && !view.adoption;
   return { events: timed.map(item => item.event), ended: Boolean(view.endedAt) && !pending && !awaitingChoice };
