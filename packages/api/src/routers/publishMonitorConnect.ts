@@ -7,7 +7,9 @@ import { checkRateLimitOrThrow } from '../services/redisRateLimiter';
 import {
   cancelConnect, confirmConnect, readPending, recordCallback, startConnect,
 } from '../services/publishMonitor/connect';
-import { assertBound, cleanupUnselected, describeCandidates } from '../services/publishMonitor/connectFlow';
+import {
+  assertBound, cleanupUnselected, describeCandidates, disconnectTakenOver,
+} from '../services/publishMonitor/connectFlow';
 import { postForMeDeps } from '../services/publishMonitor/postForMe/config';
 import { guarded } from './publishMonitorGuard';
 
@@ -48,8 +50,10 @@ export const publishMonitorConnectRouter = router({
   callback: protectedProcedure.input(callbackInput).mutation(({ ctx, input }) => guarded(ctx, async () => {
     assertBound(cookieOf(ctx), input.requestId);
     await limitStep('callback', ctx.profileId);
-    const result = await recordCallback(ctx.supabaseAdmin, postForMeDeps(), ctx.profileId, input.requestId,
+    const deps = postForMeDeps();
+    const result = await recordCallback(ctx.supabaseAdmin, deps, ctx.profileId, input.requestId,
       input.accountIds.slice(0, MAX_CALLBACK_HINTS));
+    await disconnectTakenOver(deps, result.quarantined);
     return { requestId: result.requestId, offered: result.newAccounts.length + result.ownExisting.length,
       takenOver: result.quarantined.length };
   })),
@@ -71,8 +75,10 @@ export const publishMonitorConnectRouter = router({
   cancel: protectedProcedure.input(requestInput).mutation(({ ctx, input }) => guarded(ctx, async () => {
     assertBound(cookieOf(ctx), input.requestId);
     await limitStep('decide', ctx.profileId);
+    // Built before the attempt becomes final, so a missing provider key cannot fail an already-applied cancel.
+    const deps = postForMeDeps();
     const result = await cancelConnect(ctx.supabaseAdmin, ctx.profileId, input.requestId);
-    const cleanup = await cleanupUnselected(postForMeDeps(), result.externalId, result.unselected);
+    const cleanup = await cleanupUnselected(deps, result.externalId, result.unselected);
     return { cancelled: true as const, cleanupPending: cleanup.deferred.length > 0 };
   })),
 });

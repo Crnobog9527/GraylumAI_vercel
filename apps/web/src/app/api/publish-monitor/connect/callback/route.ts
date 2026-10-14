@@ -22,7 +22,10 @@ export async function GET(request: NextRequest) {
   if (!caller) return fail('MAINTENANCE');
   try {
     // Recorded even when the provider reports failure, so anything it imported is still settled (plan §4.1).
-    await caller.callback({ requestId, accountIds });
+    const recorded = await caller.callback({ requestId, accountIds });
+    // Only someone else's account came back: say so plainly instead of an empty confirmation page.
+    if (recorded.offered === 0 && recorded.takenOver > 0) return fail('PUBLISH_MONITOR_ACCOUNT_OWNED_ELSEWHERE');
+    if (recorded.takenOver > 0) page.searchParams.set('ownedElsewhere', '1');
   } catch (cause) {
     const code = errorCode(cause);
     if (code === 'LOGIN_REQUIRED') {

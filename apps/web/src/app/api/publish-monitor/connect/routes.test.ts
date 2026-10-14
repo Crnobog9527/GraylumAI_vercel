@@ -61,6 +61,17 @@ it('callback: records the cookie\'s attempt with sanitized hints, even when the 
   expect(res.headers.get('location')).toBe(`${origin}/publish-monitor/connect?request=${request}&provider=failed`);
 });
 
+it('callback: only someone else\'s account came back -> the owned-elsewhere explanation, not an empty page', async () => {
+  mocks.callback.mockResolvedValue({ requestId: request, offered: 0, takenOver: 1 });
+  const res = await GET(new NextRequest(`${origin}/api/publish-monitor/connect/callback?accountIds=spc_1`,
+    { headers: { cookie: `graylum_pm_connect=${request}` } }));
+  expect(res.headers.get('location')).toBe(`${origin}/publish-monitor/connect?error=PUBLISH_MONITOR_ACCOUNT_OWNED_ELSEWHERE`);
+  mocks.callback.mockResolvedValue({ requestId: request, offered: 1, takenOver: 1 });
+  const mixed = await GET(new NextRequest(`${origin}/api/publish-monitor/connect/callback?accountIds=spc_1,spc_2`,
+    { headers: { cookie: `graylum_pm_connect=${request}` } }));
+  expect(mixed.headers.get('location')).toBe(`${origin}/publish-monitor/connect?ownedElsewhere=1&request=${request}`);
+});
+
 it('callback: an expired login goes to login and comes back to the same callback', async () => {
   mocks.callback.mockRejectedValue(Object.assign(new Error('You must be logged in'), { code: 'UNAUTHORIZED' }));
   const res = await GET(new NextRequest(`${origin}/api/publish-monitor/connect/callback?accountIds=spc_1`,

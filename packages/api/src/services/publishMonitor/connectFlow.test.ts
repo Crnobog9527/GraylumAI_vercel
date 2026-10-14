@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { describe, expect, it } from 'vitest';
-import { boundRequestId, cleanupUnselected, describeCandidates } from './connectFlow';
+import { boundRequestId, cleanupUnselected, describeCandidates, disconnectTakenOver } from './connectFlow';
 import type { ClientDeps } from './postForMe/client';
 
 const EXTERNAL = 'a'.repeat(32) + '.' + 'b'.repeat(32);
@@ -35,6 +35,13 @@ describe('publish-monitor connect flow helpers', () => {
     const p = provider([acct('spc_1'), json(200, {})]);
     const result = await cleanupUnselected(p.deps, EXTERNAL, ['spc_1', 'spc_2'], () => (t += 30_000));
     expect(result).toEqual({ deleted: ['spc_1'], kept: [], deferred: ['spc_2'] });
+  });
+
+  it('takeover disconnect stops at the first outage and reports what is left', async () => {
+    const p = provider([json(200, {}), json(503, {})]);
+    expect(await disconnectTakenOver(p.deps, ['spc_1', 'spc_2', 'spc_3'])).toEqual({ pending: 2 });
+    expect(p.urls.map(u => u.replace(/^.*\/v1/, ''))).toEqual(['/social-accounts/spc_1/disconnect',
+      '/social-accounts/spc_2/disconnect']);
   });
 
   it('names stop after the first provider problem; the page still loads with account IDs', async () => {

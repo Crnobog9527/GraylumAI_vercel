@@ -2,7 +2,7 @@
 import { z } from 'zod';
 import { logger } from '../../lib/logger';
 import { ConnectError, type PendingConnect } from './connect';
-import { deleteAccount, getAccount, type ClientDeps } from './postForMe/client';
+import { deleteAccount, disconnectAccount, getAccount, type ClientDeps } from './postForMe/client';
 
 /**
  * PUBLISH-MONITOR PR-2b-2 (plan §4.1): ties an attempt to the browser that started it and cleans up accounts the
@@ -63,6 +63,28 @@ export async function cleanupUnselected(client: ClientDeps, externalId: string, 
     logger.warn('api', 'publish_monitor_connect_cleanup_deferred', { count: result.deferred.length });
   }
   return result;
+}
+
+/**
+ * A proven takeover (plan §4.1 step 2): the database has already quarantined the previous owner's connection; the
+ * overwriting authorization is now cleared at the provider too, so neither side can keep using it. The callback
+ * re-read showed each of these accounts carrying this attempt's external_id, so only this user's own fresh grant
+ * is revoked. Failures are logged and left for the PR-2c retry and sweep; this never throws.
+ */
+export async function disconnectTakenOver(client: ClientDeps, ids: string[], now: () => number = Date.now) {
+  const until = now() + CLEANUP_BUDGET_MS;
+  let pending = 0;
+  for (const id of ids) {
+    if (pending > 0 || now() >= until) { pending += 1; continue; }
+    try {
+      const result = await disconnectAccount(client, id);
+      if (result.kind !== 'ok' && result.kind !== 'rejected') pending += 1;
+    } catch {
+      pending += 1;
+    }
+  }
+  if (pending > 0) logger.warn('api', 'publish_monitor_takeover_disconnect_deferred', { count: pending });
+  return { pending };
 }
 
 export type CandidateView = PendingConnect['candidates'][number] & { username: string | null };

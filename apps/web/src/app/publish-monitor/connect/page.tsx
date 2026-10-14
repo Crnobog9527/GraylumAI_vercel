@@ -23,7 +23,8 @@ function Message({ title, text }: { title: string; text: string }) {
   );
 }
 
-function ConnectConfirm({ requestId, providerFailed }: { requestId: string; providerFailed: boolean }) {
+function ConnectConfirm({ requestId, providerFailed, ownedElsewhere }: { requestId: string; providerFailed: boolean;
+  ownedElsewhere: boolean }) {
   const pending = trpc.publishMonitor.connect.pending.useQuery({ requestId }, { retry: false, refetchOnWindowFocus: false });
   const confirm = trpc.publishMonitor.connect.confirm.useMutation();
   const cancel = trpc.publishMonitor.connect.cancel.useMutation();
@@ -51,6 +52,8 @@ function ConnectConfirm({ requestId, providerFailed }: { requestId: string; prov
       </CardHeader>
       <CardContent className="space-y-4">
         {providerFailed && <p className="text-sm text-[var(--text-secondary)]">授权页报告没有完成授权。</p>}
+        {ownedElsewhere && <p className="text-sm text-[var(--text-secondary)]">
+          这次带回的账号里，有的已被其他 Graylum 用户连接，没有列出。请联系对方，或换一个账号。</p>}
         {selectable.length === 0 ? <p className="text-sm">这次授权没有带回可以连接的账号，请重新连接或取消。</p> : (
           <fieldset className="space-y-2">
             <legend className="text-sm font-medium">选择 1 个账号（没选的会从连接服务里删除）</legend>
@@ -87,7 +90,8 @@ function ConnectPage() {
   return (
     <main className="mx-auto max-w-xl px-4 py-10">
       {error || !requestId ? <Message title="无法继续" text={connectErrorMessage(error)} />
-        : <ConnectConfirm requestId={requestId} providerFailed={params.get('provider') === 'failed'} />}
+        : <ConnectConfirm requestId={requestId} providerFailed={params.get('provider') === 'failed'}
+          ownedElsewhere={params.get('ownedElsewhere') === '1'} />}
     </main>
   );
 }
