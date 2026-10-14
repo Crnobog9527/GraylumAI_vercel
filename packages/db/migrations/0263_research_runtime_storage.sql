@@ -134,17 +134,20 @@ END $$;
 -- option ids only, and every account comes back from the host's own option (never from the submission).
 CREATE OR REPLACE FUNCTION public.research_card_confirm(a uuid, p_card uuid, p jsonb) RETURNS jsonb
 LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
-DECLARE c research_selection_cards; items jsonb:='[]'; id text; t text;
+DECLARE c research_selection_cards; items jsonb:='[]'; opt text; t text;
 BEGIN
   SELECT * INTO c FROM research_selection_cards WHERE id=p_card FOR UPDATE;
   IF c.id IS NULL OR c.actor_id<>a THEN RAISE EXCEPTION 'RESEARCH_SCOPE_DENIED' USING ERRCODE='42501';END IF;
   PERFORM research_session_owned(a,c.session_id,NULL);
   IF jsonb_typeof(p->'selected') IS DISTINCT FROM 'array' OR p-ARRAY['selected','edits','additions']<>'{}'::jsonb
    OR (c.kind='candidates' AND (p ? 'edits' OR p ? 'additions')) THEN RAISE EXCEPTION 'RESEARCH_CARD_INVALID';END IF;
-  FOR id IN SELECT DISTINCT value FROM jsonb_array_elements_text(p->'selected') LOOP
-    SELECT x INTO STRICT t FROM (SELECT o::text x FROM jsonb_array_elements(c.options) o WHERE o->>'id'=id) z;
+  IF EXISTS(SELECT 1 FROM jsonb_array_elements(p->'selected') v WHERE jsonb_typeof(v)<>'string'
+    OR NOT EXISTS(SELECT 1 FROM jsonb_array_elements(c.options) o WHERE o->>'id'=v#>>'{}')) THEN RAISE EXCEPTION 'RESEARCH_CARD_INVALID';END IF;
+  -- Confirmed items follow the card's own option order, not the submission order.
+  FOR opt IN SELECT o->>'id' FROM jsonb_array_elements(c.options) WITH ORDINALITY x(o,i) WHERE (p->'selected') ? (o->>'id') ORDER BY i LOOP
+    SELECT x INTO STRICT t FROM (SELECT o::text x FROM jsonb_array_elements(c.options) o WHERE o->>'id'=opt) z;
     IF c.kind='keywords' THEN
-      t:=btrim(coalesce(p->'edits'->>id,(t::jsonb)->>'text'));
+      t:=btrim(coalesce(p->'edits'->>opt,(t::jsonb)->>'text'));
       items:=items||to_jsonb(t);
     ELSE
       IF ((t::jsonb)->'selectable') IS DISTINCT FROM 'true'::jsonb THEN RAISE EXCEPTION 'RESEARCH_CARD_INVALID';END IF;

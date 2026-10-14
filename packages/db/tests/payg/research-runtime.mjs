@@ -133,11 +133,17 @@ export async function researchRuntimeCases({db,report,createFixture}) {
   {
     const f = await session(db,createFixture);
     const c = await claimTool(db,f,1);
-    await linkedOperation(db,f,c.id,null);
-    const scope = await rpc(db,'content_erasure_scope',f.actor,'session',f.session);
-    const hash = (await db.query("SELECT encode(sha256(convert_to($1::jsonb::text,'utf8')),'hex') h",[scope])).rows[0].h;
-    await assert.rejects(rpc(db,'content_erasure_confirm',f.actor,'session',f.session,hash),/CONTENT_ERASURE_BUSY/);
-    report.checks.push('RT-3b deletion waits while the linked BILL2 tool call is unsettled');
+    await linkedOperation(db,f,c.id,'unknown');
+    const erase = async () => {
+      const scope = await rpc(db,'content_erasure_scope',f.actor,'session',f.session);
+      const hash = (await db.query("SELECT encode(sha256(convert_to($1::jsonb::text,'utf8')),'hex') h",[scope])).rows[0].h;
+      return rpc(db,'content_erasure_confirm',f.actor,'session',f.session,hash);
+    };
+    await assert.rejects(erase(),/CONTENT_ERASURE_BUSY/);
+    // The same conversation becomes deletable as soon as the tool call settles (here: unknown → user 0).
+    await rpc(db,'bill2_record',f.actor,f.run,c.id,toolResult(c,'unknown',null,null));
+    assert.equal((await erase()).kind,'session');
+    report.checks.push('RT-3b deletion waits while the linked BILL2 tool call is unsettled and proceeds once it settles');
   }
 
   // Account erasure: settled runtime searches count as finished; host records deleted; counts reported.
