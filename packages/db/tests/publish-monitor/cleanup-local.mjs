@@ -117,7 +117,8 @@ try {
 
   // Orphan sweep decisions: bound accounts, unknown formats and unsettled attempts are never deleted.
   const open = await start(other.a, other.account);
-  const orphan = await svc('SELECT publish_monitor_orphan_classify($1) v', [j([acc('pfm_u_kept', 'x'),
+  const uRef = await v('SELECT provider_ref v FROM social_monitor_settings WHERE actor_id=$1', [u.a]);
+  const orphan = await svc('SELECT publish_monitor_orphan_classify($1) v', [j([acc('pfm_u_kept', `${uRef}.${'0'.repeat(32)}`),
     acc('pfm_dash', null), acc('pfm_weird', 'Owner-Test'), acc('pfm_open', open.externalId),
     acc('pfm_unsettled', a1.externalId), acc('pfm_settled', b1.externalId), acc('pfm_gone_user', 'f'.repeat(32) + '.' + 'e'.repeat(32)),
     acc('pfm_lookalike', 'abcdefghijklmnop.qrstuvwxyzabcdef')])]);
