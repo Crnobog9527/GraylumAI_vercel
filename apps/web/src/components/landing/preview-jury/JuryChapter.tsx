@@ -4,6 +4,7 @@ import { cn } from '@/lib/utils';
 import type { DetailSection, JurySeatNames, RulingFields } from './jury-events';
 import { needsConfirm, type ChoiceState, type Use } from './jury-adopt';
 import { SeatBadge } from './JuryBits';
+import { RedlineText } from './JuryDocument';
 import styles from './jury-results.module.css';
 
 /** One ruling, written so it reads on its own: the panel's opinion, why, and what to change, with who raised it. */
@@ -53,6 +54,8 @@ export function JuryChapter({ section, names, state, locked, onUse, onConfirm }:
         <>
           <details className={styles.compare}>
             <summary>对比原文和修订版{section.fields.length > 0 ? `（涉及 ${section.fields.length} 项定位内容）` : ''}</summary>
+            <p className={styles.compareLabel}>修订标记</p>
+            <RedlineText before={section.original ?? ''} after={section.revised ?? ''} className={styles.redline} />
             <div className={styles.compareGrid}>
               <div><p className={styles.compareLabel}>原文</p><p className={styles.compareText}>{section.original}</p></div>
               <div><p className={styles.compareLabel}>修订版</p><p className={cn(styles.compareText, styles.revised)}>{section.revised}</p></div>
