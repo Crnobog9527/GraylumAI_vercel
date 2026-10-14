@@ -11,10 +11,12 @@ import { PACK_MEMBERS_ONLY_NOTICE, creditPackBuyState, isPaidMember, type PackEn
 
 // 积分加油包区块
 export const CreditPackagesSection = memo(function CreditPackagesSection({
-  onBuyClick, pendingPackageId,
+  onBuyClick, pendingPackageId, checkoutOpen = true,
 }: {
   onBuyClick?: (pkg: { id: string; name?: string; credits: number; bonus_credits: number; price: number; checkout_ready?: boolean }) => void;
   pendingPackageId?: string | null;
+  /** false while card checkout is closed (payments.methodMembership): no pack can be bought. */
+  checkoutOpen?: boolean;
 }) {
   // 从 API 获取积分加油包数据
   const {
@@ -78,7 +80,7 @@ export const CreditPackagesSection = memo(function CreditPackagesSection({
         ) : packages.length === 0 ? (
           <ProfileCatalogState status="empty" />
         ) : packages.map((pkg) => {
-          const buy = creditPackBuyState({ price: pkg.price, checkoutReady: pkg.checkout_ready,
+          const buy = creditPackBuyState({ price: pkg.price, checkoutReady: pkg.checkout_ready && checkoutOpen,
             pending: pendingPackageId === pkg.id, entitlement });
           return (
           <div

@@ -2,8 +2,9 @@
 
 /**
  * Pure pricing presentation for the paywall (PAYWALL, design v25 in docs/launch/design/paywall/).
- * Every number comes from `settings.getMembershipPlans`; nothing here invents a price, a discount
- * or a first-month/founder offer (those need the PAY-WAFFO server answer and are not shown yet).
+ * Every number comes from `settings.getMembershipPlans`; nothing here invents a price or a discount.
+ * The Gold first month is shown only when `payments.methodMembership` says the account is eligible;
+ * the founder offer is not shown yet.
  */
 export type PaywallBilling = 'monthly' | 'yearly';
 export type PaywallLevel = 'pro' | 'gold';
@@ -71,8 +72,18 @@ export type PaywallQuote = {
   checkoutReady: boolean;
 };
 
+/** Gold monthly first month; the caller passes it only when the server says the account is eligible. */
+export type PaywallQuoteOptions = { goldFirstMonthUsd?: number | null };
+
 /** Price, renewal and cancellation text shown next to the pay button (MASTER_PLAN §2.1 item 51). */
-export function paywallQuote(plan: PaywallPlan, billing: PaywallBilling): PaywallQuote | null {
+export function paywallQuote(plan: PaywallPlan, billing: PaywallBilling, options: PaywallQuoteOptions = {}): PaywallQuote | null {
+  const first = options.goldFirstMonthUsd;
+  if (billing === 'monthly' && plan.level === 'gold' && usable(first) && first! < plan.price.monthly) {
+    const monthly = formatUsd(plan.price.monthly);
+    return { amount: first!, perLabel: '首月', monthlyEquivalent: `之后每月 ${monthly}`, saving: null,
+      renewal: `首月 ${formatUsd(first!)}，之后每月自动续费 ${monthly}，可随时在个人中心取消，取消后用到当期结束。`,
+      checkoutReady: plan.checkoutReady?.monthly === true };
+  }
   if (billing === 'monthly') {
     const amount = plan.price.monthly;
     return { amount, perLabel: '/ 月', monthlyEquivalent: null, saving: null,

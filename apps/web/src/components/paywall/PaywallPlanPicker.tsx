@@ -6,7 +6,7 @@ import { Check, Minus } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import {
   PLAN_EARLY_ACCESS, PLAN_FIT, PLAN_SUPPORT, formatUsd, monthlyCredits, packDiscountLabel, paywallQuote, yearlyBadge,
-  type PaywallBilling, type PaywallLevel, type PaywallPlan,
+  type PaywallBilling, type PaywallLevel, type PaywallPlan, type PaywallQuoteOptions,
 } from './paywallPlans';
 
 const LABEL: Record<PaywallLevel, string> = { pro: 'Pro', gold: 'Gold' };
@@ -16,12 +16,13 @@ type Props = {
   billing: PaywallBilling;
   selected: PaywallLevel;
   disabled: boolean;
+  quoteOptions?: PaywallQuoteOptions;
   onBilling: (billing: PaywallBilling) => void;
   onSelect: (level: PaywallLevel) => void;
 };
 
 /** Billing switch and plan cards; monthly is the default (MASTER_PLAN §2.1 item 51). */
-export function PaywallPlanPicker({ plans, billing, selected, disabled, onBilling, onSelect }: Props) {
+export function PaywallPlanPicker({ plans, billing, selected, disabled, quoteOptions, onBilling, onSelect }: Props) {
   const badge = yearlyBadge(plans);
   const yearly = plans.some(plan => paywallQuote(plan, 'yearly'));
   return (
@@ -47,7 +48,7 @@ export function PaywallPlanPicker({ plans, billing, selected, disabled, onBillin
       </div>
       <div role="radiogroup" aria-label="会员方案" className={cn('grid gap-3', plans.length > 1 && 'sm:grid-cols-2')}>
         {plans.map(plan => {
-          const quote = paywallQuote(plan, billing);
+          const quote = paywallQuote(plan, billing, quoteOptions);
           const active = selected === plan.level;
           return (
             <label key={plan.id} data-testid={`paywall-plan-${plan.level}`}

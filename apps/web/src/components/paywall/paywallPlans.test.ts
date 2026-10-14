@@ -57,3 +57,18 @@ describe('formatting', () => {
     expect(monthlyCredits(pro)).toBe(3480);
   });
 });
+
+describe('Gold first month', () => {
+  const [, goldPlan] = pickPaywallPlans([pro, gold]);
+  it('shows $49 first and the server monthly price after, only for Gold monthly when passed in', () => {
+    const quote = paywallQuote(goldPlan, 'monthly', { goldFirstMonthUsd: 49 })!;
+    expect(quote).toMatchObject({ amount: 49, perLabel: '首月', monthlyEquivalent: '之后每月 $69' });
+    expect(quote.renewal).toBe('首月 $49，之后每月自动续费 $69，可随时在个人中心取消，取消后用到当期结束。');
+  });
+  it('never applies to Pro, yearly, or when the account is not eligible', () => {
+    expect(paywallQuote(pickPaywallPlans([pro])[0], 'monthly', { goldFirstMonthUsd: 49 })!.amount).toBe(29);
+    expect(paywallQuote({ ...goldPlan, checkoutReady: { monthly: true, yearly: true } }, 'yearly', { goldFirstMonthUsd: 49 })!.amount)
+      .toBe(621);
+    expect(paywallQuote(goldPlan, 'monthly', { goldFirstMonthUsd: null })!.amount).toBe(69);
+  });
+});

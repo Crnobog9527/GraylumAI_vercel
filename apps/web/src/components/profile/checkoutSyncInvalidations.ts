@@ -4,6 +4,8 @@
  * This code is proprietary and confidential.
  */
 
+import { CHECKOUT_COPY } from '@/components/paywall/methodCheckout';
+
 type InvalidateQuery = {
   invalidate: () => Promise<unknown> | unknown;
 };
@@ -18,7 +20,7 @@ export type PostCheckoutInvalidationUtils = {
     getCreditsSummary: InvalidateQuery;
   };
   payments: {
-    getMembershipEligibilityMatrix: InvalidateQuery;
+    methodMembership: InvalidateQuery;
     listBillingRecords: InvalidateQuery;
   };
 };
@@ -30,7 +32,7 @@ export function invalidatePostCheckoutMembershipQueries(utils: PostCheckoutInval
     utils.user.getEntitlements.invalidate(),
     utils.credits.getBalance.invalidate(),
     utils.credits.getCreditsSummary.invalidate(),
-    utils.payments.getMembershipEligibilityMatrix.invalidate(),
+    utils.payments.methodMembership.invalidate(),
     utils.payments.listBillingRecords.invalidate(),
   ]);
 }
@@ -46,5 +48,6 @@ export function canceledReturnNotice(
   if (result?.paymentStatus === 'paid') {
     return { tone: 'warning' as const, message: '这笔付款已经收到，订单正在核对，处理结果会在账单记录里更新。' };
   }
-  return { tone: 'cancelled' as const, message: '你已取消本次支付，没有发生扣费。' };
+  // Stripe does not say why the user left; a mainland card refused by the international page is the common case.
+  return { tone: 'cancelled' as const, message: `你已取消本次支付，没有发生扣费。${CHECKOUT_COPY.mainlandHint}` };
 }
