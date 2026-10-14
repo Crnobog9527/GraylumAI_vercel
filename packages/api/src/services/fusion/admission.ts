@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { frozenCallSchema, frozenPaygRunSchema, type BillingRpc, type FrozenCall, type FrozenPaygRun } from '../bill2/service';
+import { decimal } from '../bill2/decimal';
 import { assertFusionEntitlement, readMembershipEntitlements } from '../membershipEntitlements';
 import { admissionDeadline } from '../runtime/admissionLimits';
 import { freezeWindowBillingUnit } from '../runtime/billingUnitAdmission';
@@ -52,7 +53,9 @@ export async function admitFusionGroup(input: { admin: SupabaseClient; actorId: 
   /** The output caps frozen at review start: later groups never use a cap raised mid-review (#962 review). */
   outputTokens?: { opinion: number; summary: number };
   /** The credits this group may hold, frozen with the estimate the user agreed to (#962 review). */
-  maxCredits?: number }): Promise<AdmittedFusionGroup> {
+  maxCredits?: number;
+  /** The provider cost bound of this group, frozen with the same estimate (decimal dollars). */
+  maxUsd?: string }): Promise<AdmittedFusionGroup> {
   const { admin, actorId, members } = input;
   const env = input.env ?? process.env;
   if (!members.length || members.length > 16) throw new Error('FUSION_GROUP_INVALID');
@@ -99,10 +102,15 @@ export async function admitFusionGroup(input: { admin: SupabaseClient; actorId: 
       scope: { kind: 'positioning_draft', draftId: uuid.parse(draftId) }, operation: 'question', modelId: member.modelId,
       sourceHash: createHash('sha256').update(JSON.stringify(context)).digest('hex'), input: context, callPolicy: [policy], rules,
       limits: { costUsd: call.upperUsd, credits: 0, maxPreDeduct: upperCredits, maxCalls: 1, deadline } });
-    return { requestId: memberRequest(input.requestId, index), payload, upperCredits };
+    return { requestId: memberRequest(input.requestId, index), payload, upperCredits, upperUsd: call.upperUsd };
   }));
   // Prices or multipliers changed since the review started: never hold more than the maximum the user was shown.
+  // Both the credits and the provider cost: a price rise offset by a lower rate or multiplier keeps the credits equal
+  // but must still not push the review past the budget it was admitted under (#962 review).
   if (input.maxCredits !== undefined && runs.reduce((sum, run) => sum + run.upperCredits, 0) > input.maxCredits) {
+    throw new Error('FUSION_ESTIMATE_EXCEEDED');
+  }
+  if (input.maxUsd !== undefined && runs.reduce((sum, run) => sum + decimal(run.upperUsd), 0n) > decimal(input.maxUsd)) {
     throw new Error('FUSION_ESTIMATE_EXCEEDED');
   }
   return toGroup(await rpc<unknown>(admin, 'fusion_group_admit', { ...groupArgs, p_runs: runs.map(({ requestId, payload }) => ({ requestId, payload })) }));

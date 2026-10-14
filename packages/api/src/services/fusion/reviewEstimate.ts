@@ -29,12 +29,17 @@ export type EstimateInput = {
  * snapshot, every revised field at 400 characters and every opinion at its limit. Any model that cannot fit its
  * worst-case request refuses the whole review before anything is frozen (no silent downgrade). Above the
  * single-review budget the debate round is dropped; if even one round does not fit, the review is refused. */
+/** Rounded up to whole micro-dollars, so a stored bound is never below the computed one. */
+const micro = (usd: number) => (Math.ceil(usd * 1e6) / 1e6).toFixed(6);
 export type PhaseBytes = { review: number; debate: number; summary: number };
 export function estimateReview(input: EstimateInput): { rounds: number; estimateUsd: string;
   /** "最多消耗 X 积分" shown before the user agrees (§3.2): every call's credit hold, each rounded up on its own. */
   estimateCredits: number;
   /** The credit holds each phase's group may freeze (a later claim above it is refused, so the shown maximum holds). */
   phaseCredits: PhaseBytes;
+  /** The provider cost bound of each phase's group, in dollars (decimal strings): a later claim above it is refused, so
+   * the review never exceeds the single-review budget it was admitted under (#962 review). */
+  phaseUsd: { review: string; debate: string; summary: string };
   /** The serialized size each phase's request may reach: the prices above assume it, and claims enforce it. */
   requestBytes: PhaseBytes } {
   const bound = (modelId: string, outputTokens: number, bytes: number) => {
@@ -71,9 +76,10 @@ export function estimateReview(input: EstimateInput): { rounds: number; estimate
   for (let rounds = Math.min(input.maxRounds, debateFits ? 2 : 1); rounds >= 1; rounds--) {
     const total = add([firstRound, rounds > 1 ? debate : add([]), summary]);
     // Rounded up to whole micro-dollars so the stored estimate is never below the computed bound.
-    if (Number.isFinite(total.usd) && total.usd <= budget) return { rounds, estimateUsd: (Math.ceil(total.usd * 1e6) / 1e6).toFixed(6),
+    if (Number.isFinite(total.usd) && total.usd <= budget) return { rounds, estimateUsd: micro(total.usd),
       estimateCredits: total.credits,
       phaseCredits: { review: firstRound.credits, debate: rounds > 1 ? debate.credits : 0, summary: summary.credits },
+      phaseUsd: { review: micro(firstRound.usd), debate: micro(rounds > 1 ? debate.usd : 0), summary: micro(summary.usd) },
       requestBytes: { review: reviewerBytes, debate: rounds > 1 ? debateBytes : 0, summary: summaryBytes } };
   }
   throw new Error('FUSION_BUDGET_EXCEEDED');

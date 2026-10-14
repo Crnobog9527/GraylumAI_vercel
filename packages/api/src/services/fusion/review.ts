@@ -22,6 +22,7 @@ const config = z.object({ estimateUsd: z.string(), maxRounds: z.number().int().m
   estimateCredits: z.number().int().positive().optional(),
   /** Per-phase group credit caps frozen with that maximum (absent on older reviews: no cap). */
   phaseCredits: z.object({ review: z.number(), debate: z.number(), summary: z.number() }).optional(),
+  phaseUsd: z.object({ review: z.string(), debate: z.string(), summary: z.string() }).optional(),
   opinionTokens: z.number().int().positive(), summaryTokens: z.number().int().positive(),
   /** Per-phase request size the estimate priced (absent: only the byte cap applies). */
   requestBytes: z.object({ review: z.number(), debate: z.number(), summary: z.number() }).optional(),
@@ -167,6 +168,7 @@ export function reviewFlow(deps: { admin: SupabaseClient; actorId: string;
     decisions: opinion.decisions.map(d => level >= 1 ? { ...d, strongestCase: '', strongestAlternative: '', basis: '' } : d),
     issues: level >= 3 ? [] : level >= 2 ? opinion.issues.filter(i => i.severity !== 'minor') : opinion.issues,
     dropped: opinion.dropped };
+  const phaseOf = (at: ReviewPosition) => at.phase === 'summary' ? 'summary' as const : at.round > 1 ? 'debate' as const : 'review' as const;
   /** Admits and claims the models of the current position that have no finished call yet. */
   async function claimStep(view: ReviewView, src: Source, at: ReviewPosition, models: string[]) {
     const cfg = config.parse(view.config);
@@ -197,7 +199,7 @@ export function reviewFlow(deps: { admin: SupabaseClient; actorId: string;
     const requestId = derivedUuid(`${view.reviewId}:${stepKey(at)}`);
     const group = await admitFusionGroup({ admin, actorId, requestId, sourceSessionId: view.sourceSessionId, members, env,
       outputTokens: { opinion: cfg.opinionTokens, summary: cfg.summaryTokens },
-      maxCredits: cfg.phaseCredits?.[at.phase === 'summary' ? 'summary' : at.round > 1 ? 'debate' : 'review'] });
+      maxCredits: cfg.phaseCredits?.[phaseOf(at)], maxUsd: cfg.phaseUsd?.[phaseOf(at)] });
     return record.claim(view.reviewId, at, group.groupId, group.runs.map(run => ({ runId: run.runId, payload: run.call })));
   }
   async function finish(view: ReviewView, state: 'completed' | 'incomplete' | 'revision_failed', outcome: Record<string, unknown>) {
@@ -275,14 +277,14 @@ export function reviewFlow(deps: { admin: SupabaseClient; actorId: string;
         .parse(sizes.data);
       // Instructions travel as one escaped string in the body; the host-written format rules add at most a few KB.
       const sent = (value: string) => Buffer.byteLength(JSON.stringify(value)) + 4096;
-      const { rounds, estimateUsd, estimateCredits, phaseCredits, requestBytes } = estimateReview({ quotes: window.callPolicies,
+      const { rounds, estimateUsd, estimateCredits, phaseCredits, phaseUsd, requestBytes } = estimateReview({ quotes: window.callPolicies,
         creditsPerUsd: window.creditsPerUsd, reviewers: settings.review.reviewerModelIds,
         summary: settings.review.summaryModelId, maxRounds: settings.review.maxRounds, maxBudgetUsd: settings.review.maxBudgetUsd,
         opinionTokens: settings.review.opinionOutputTokens, summaryTokens: settings.review.summaryOutputTokens, fieldCount: preview.fieldCount,
         snapshotBytes: preview.reportSentBytes + preview.materialsSentBytes,
         instructionBytes: { reviewer: sent(`${text.reviewer}\n\n${text.rubric}`), summary: sent(`${text.summary}\n\n${text.rubric}`) } });
       const view = await record.start({ requestId: input.requestId, draftId: input.draftId, sourceVersionId: input.sourceVersionId,
-        config: { estimateUsd, estimateCredits, phaseCredits, maxRounds: rounds, reviewers: settings.review.reviewerModelIds,
+        config: { estimateUsd, estimateCredits, phaseCredits, phaseUsd, maxRounds: rounds, reviewers: settings.review.reviewerModelIds,
           summary: settings.review.summaryModelId,
           opinionTokens: settings.review.opinionOutputTokens, summaryTokens: settings.review.summaryOutputTokens, skill, requestBytes } });
       // Before anything is claimed: round 1 and the most trimmed summary, measured exactly as they will be sent, must fit

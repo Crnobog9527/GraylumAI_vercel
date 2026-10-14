@@ -12,6 +12,7 @@ const sourceBody = vi.hoisted(() => ({ value: null as string | null }));
 const applyRefusal = vi.hoisted(() => ({ value: '' }));
 const caps = vi.hoisted(() => [] as Array<{ opinion: number; summary: number }>);
 const creditCaps = vi.hoisted(() => [] as Array<number | undefined>);
+const usdCaps = vi.hoisted(() => [] as Array<string | undefined>);
 const priceRise = vi.hoisted(() => ({ phase: '' }));
 const requests = vi.hoisted(() => [] as Array<{ modelId: string; phase: string; input: string }>);
 const clock = vi.hoisted(() => ({ t: Date.parse('2026-10-14T00:00:00Z'), next() { this.t += 1000; return new Date(this.t).toISOString(); } }));
@@ -30,9 +31,10 @@ vi.mock('./reviewPrompts', async original => ({ ...(await original<typeof import
   readReviewSkill: async () => ({ reviewer: 'review', summary: 'summarize', rubric: 'rubric' }) }));
 vi.mock('./admission', async original => ({ ...(await original<typeof import('./admission')>()),
   admitFusionGroup: async (input: { requestId: string; members: Array<{ modelId: string; phase: string; request: { input: string } }>;
-    outputTokens: { opinion: number; summary: number }; maxCredits?: number }) => {
+    outputTokens: { opinion: number; summary: number }; maxCredits?: number; maxUsd?: string }) => {
     caps.push(input.outputTokens);
     creditCaps.push(input.maxCredits);
+    usdCaps.push(input.maxUsd);
     // Prices rose after start: the real admission refuses a group above the frozen cap before freezing anything.
     if (input.members.some(m => m.phase === priceRise.phase)) throw new Error('FUSION_ESTIMATE_EXCEEDED');
     const existing = db.groups.get(input.requestId);
@@ -136,7 +138,7 @@ function setup(script: (call: Call) => string | null, refuse?: string) {
 }
 
 describe('review flow', () => {
-  beforeEach(() => { db.review = null; db.calls = []; db.outputs.clear(); db.savedAt.clear(); db.groups.clear(); requests.length = 0; caps.length = 0; creditCaps.length = 0; priceRise.phase = ''; });
+  beforeEach(() => { db.review = null; db.calls = []; db.outputs.clear(); db.savedAt.clear(); db.groups.clear(); requests.length = 0; caps.length = 0; creditCaps.length = 0; usdCaps.length = 0; priceRise.phase = ''; });
 
   it('without a split: round 1, one summary, proposes the revision to R14, never re-reviewed by the panel', async () => {
     const t = setup(call => call.phase === 'fusion_summary' ? revision('新目标') : opinion('major'));
@@ -363,11 +365,16 @@ describe('review flow', () => {
     const started = await t.flow.start({ requestId: randomUUID(), draftId: randomUUID(), sourceVersionId: randomUUID() });
     const cfg = started.config as { estimateCredits: number; phaseCredits: { review: number; debate: number; summary: number } };
     expect(cfg.estimateCredits).toBe(cfg.phaseCredits.review + cfg.phaseCredits.debate + cfg.phaseCredits.summary);
+    const usd = (started.config as { phaseUsd: Record<string, string>; estimateUsd: string });
+    expect(Number(usd.phaseUsd.review) + Number(usd.phaseUsd.debate) + Number(usd.phaseUsd.summary))
+      .toBeGreaterThanOrEqual(Number(usd.estimateUsd));
     priceRise.phase = 'fusion_summary';
     await t.runAll();
     const end = await t.flow.continue(String(db.review!.reviewId));
     expect(creditCaps[0]).toBe(cfg.phaseCredits.review);
     expect(creditCaps.at(-1)).toBe(cfg.phaseCredits.summary);
+    expect(usdCaps[0]).toBe(usd.phaseUsd.review);
+    expect(usdCaps.at(-1)).toBe(usd.phaseUsd.summary);
     expect(end.review).toMatchObject({ state: 'incomplete', outcome: { kind: 'price_changed', phase: 'summary' } });
     expect(db.calls.some(call => call.phase === 'fusion_summary')).toBe(false);
   });
