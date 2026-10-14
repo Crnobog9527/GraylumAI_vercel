@@ -542,7 +542,7 @@ export const adminRouter = router({
     };
 
     logAdminEndpointMetric('admin.getStatistics', startedAt, {
-      queryCount: 10,
+      queryCount: 9,
       countStrategy: 'planned',
       userCount: result.users.total,
       conversationTotal: result.conversations.total,
