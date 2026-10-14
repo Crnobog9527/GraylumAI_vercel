@@ -9,7 +9,7 @@ import { FIRECRAWL_ROUTE } from './firecrawl';
 import { tikhubRouteId } from './tikhub';
 import {
   RESEARCH_VENDORS, SOCIAL_KINDS, SOCIAL_PLATFORMS,
-  type ResearchVendor, type SocialPlatform,
+  type ResearchVendor, type SocialKind, type SocialPlatform,
 } from './types';
 
 export const RESEARCH_TOOLS_KEY = 'research_tools_config';
@@ -30,12 +30,44 @@ export const BENCHMARK_RULES = Object.freeze({
 });
 
 /**
- * Platforms whose adapter routes can feed a benchmark: an account profile with followers plus account
- * posts carrying absolute publication times (30-day rule). Others (Douyin, Xiaohongshu, Weibo without
- * profile routes; YouTube, Instagram without reliable times; Bilibili without followers) need RT-7 first,
- * and adding one requires a code change here, not an admin setting.
+ * Per platform, the query kinds one benchmark account needs (each kind is one billed sub-call) and which of them
+ * carries the exact follower count. A benchmark needs exact followers plus an absolute publication time for the
+ * 30-day rule. `verified` is set in code only after RT-7 checked the routes against recorded real responses
+ * (plan §6.1); an admin setting can never enable an unverified platform. Douyin, Weibo and Instagram have no
+ * benchmark route set yet.
+ *
+ * - bilibili: the profile has no followers; they come from the separate relation call.
+ * - xiaohongshu: no public view counts, so `views` is always missing.
+ * - youtube: channel videos have only relative times and abbreviated subscriber labels; one post_detail of the
+ *   newest video gives the exact followers and that video's absolute date. Other videos keep publishedAt missing.
  */
-export const BENCHMARK_CAPABLE_PLATFORMS: readonly SocialPlatform[] = Object.freeze(['tiktok', 'x']);
+export interface BenchmarkRouteSet { kinds: readonly SocialKind[]; followersFrom: SocialKind; verified: boolean }
+const routeSet = (kinds: SocialKind[], followersFrom: SocialKind, verified: boolean): Readonly<BenchmarkRouteSet> =>
+  Object.freeze({ kinds: Object.freeze(kinds), followersFrom, verified });
+export const BENCHMARK_ROUTE_KINDS: Readonly<Partial<Record<SocialPlatform, Readonly<BenchmarkRouteSet>>>> = Object.freeze({
+  tiktok: routeSet(['account_profile', 'account_posts'], 'account_profile', true),
+  x: routeSet(['account_profile', 'account_posts'], 'account_profile', true),
+  bilibili: routeSet(['account_profile', 'account_relation', 'account_posts'], 'account_relation', false),
+  xiaohongshu: routeSet(['account_profile', 'account_posts'], 'account_profile', false),
+  youtube: routeSet(['account_posts', 'post_detail'], 'post_detail', false),
+});
+
+/** RT-3a budgets at most this many sub-calls per benchmark account inside the run's 32-call ceiling. */
+export const MAX_BENCHMARK_SUBCALLS_PER_ACCOUNT = 3;
+for (const [platform, entry] of Object.entries(BENCHMARK_ROUTE_KINDS)) {
+  if (entry!.kinds.length > MAX_BENCHMARK_SUBCALLS_PER_ACCOUNT || !entry!.kinds.includes(entry!.followersFrom)) {
+    throw new Error(`BENCHMARK_ROUTE_KINDS ${platform}: too many sub-calls or followers from an unlisted kind`);
+  }
+}
+
+/** Billed sub-calls one benchmark account needs on `platform`; 0 when the platform has no benchmark route set. */
+export function benchmarkSubcallsPerAccount(platform: SocialPlatform): number {
+  return BENCHMARK_ROUTE_KINDS[platform]?.kinds.length ?? 0;
+}
+
+/** Platforms whose benchmark routes are verified (derived from the table; changing it is a code change). */
+export const BENCHMARK_CAPABLE_PLATFORMS: readonly SocialPlatform[] = Object.freeze(
+  (Object.keys(BENCHMARK_ROUTE_KINDS) as SocialPlatform[]).filter(platform => BENCHMARK_ROUTE_KINDS[platform]!.verified));
 
 /** Run ceiling enforced by bill2_payg_validate_quote (0162); subcalls must fit beside model calls. */
 export const RUN_MAX_CALLS = 32;
@@ -89,8 +121,8 @@ export const researchToolsConfigSchema = z.object({
     if (!BENCHMARK_CAPABLE_PLATFORMS.includes(platform)) {
       ctx.addIssue({ code: 'custom', path: ['benchmarkPlatforms', index], message: `${platform} routes cannot supply benchmark fields yet` });
     }
-    // A benchmark fetch needs the follower-bearing profile and the recent posts (plan §1.1, §1.2).
-    for (const kind of ['account_profile', 'account_posts'] as const) {
+    // A benchmark fetch needs every route its platform's benchmark set lists (plan §1.1, §1.2).
+    for (const kind of BENCHMARK_ROUTE_KINDS[platform]?.kinds ?? []) {
       if (!config.routes.some(entry => entry.platform === platform && entry.kind === kind)) {
         ctx.addIssue({ code: 'custom', path: ['benchmarkPlatforms', index], message: `${platform} needs a configured ${kind} route` });
       }

@@ -71,12 +71,18 @@ try {
       THEN RAISE EXCEPTION 'preview fixture entitlement defaults missing'; END IF;
   END $$;`);
   const preview = write('preview-fixture.sql', previewStatements.join('\n'));
+  const seedSql = read('packages/db/seeds/staging_non_secret_baseline.sql');
+  const priceGuard = seedSql.match(/DO \$seed_price_guard\$[\s\S]*?\$seed_price_guard\$;/)?.[0];
+  if (!priceGuard) throw new Error('seed price guard not found');
+  const guardTest = read(`${dir}/staging-seed-guard.sql`).replace('__SEED_PRICE_GUARD_STATEMENT__', () => priceGuard.slice(0, -1))
+    .replace('__SEED_PRICE_GUARD__', () => priceGuard);
   const stagingSeed = write('staging-seed.sql', [
     'DELETE FROM public.membership_plans;',
-    read('packages/db/seeds/staging_non_secret_baseline.sql'),
+    seedSql,
     read(`${dir}/staging-seed-first.sql`),
-    read('packages/db/seeds/staging_non_secret_baseline.sql'),
+    seedSql,
     read(`${dir}/staging-seed-replay.sql`),
+    guardTest,
   ].join('\n'));
   const result = spawnSync('node', ['packages/db/tests/run-db-baseline-replay.mjs', '--local-only',
     '--out', resolve(temp, 'fingerprint.json'), '--after', [cases, ...clients, `${dir}/service.sql`, `${dir}/closed-client.sql`, preview,

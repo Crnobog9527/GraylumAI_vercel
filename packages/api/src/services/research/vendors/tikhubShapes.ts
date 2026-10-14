@@ -9,6 +9,8 @@ import type { ResearchItem, SocialKind, SocialPlatform } from './types';
 export const POST_FIELDS = [
   'id', 'title', 'author', 'authorId', 'publishedAt', 'views', 'likes', 'comments', 'shares',
 ] as const;
+/** post_detail: one post plus the exact follower count of its channel. */
+export const POST_DETAIL_FIELDS = [...POST_FIELDS, 'followers'] as const;
 export const PROFILE_FIELDS = [
   'id', 'name', 'handle', 'followers', 'following', 'postsCount', 'likesTotal', 'verified',
 ] as const;
@@ -55,6 +57,46 @@ function xhsNote(item: Raw) {
   }, POST_FIELDS, text(item, ['share_info.link']));
 }
 
+function bilibiliVideo(item: Raw) {
+  const bvid = text(item, ['bvid']);
+  return toItem({
+    id: bvid ?? idText(item, ['aid']), title: clip(text(item, ['title']), TITLE_CHARS),
+    author: text(item, ['author']), authorId: idText(item, ['mid']),
+    publishedAt: timestamp(item, ['created', 'pubdate'], SOCIAL_EARLIEST_MS),
+    // Bilibili shows "--" for hidden play counts; anything that is not a plain count stays missing.
+    views: count(item, ['play']), likes: undefined, comments: count(item, ['comment']), shares: undefined,
+  }, POST_FIELDS, bvid ? `https://www.bilibili.com/video/${bvid}` : undefined);
+}
+
+/** A user's own note list (app v2). Xiaohongshu publishes no view counts: `views` is always missing, never 0. */
+function xhsPostedNote(item: Raw) {
+  const id = idText(item, ['note_id', 'id']);
+  return toItem({
+    id, title: clip(text(item, ['display_title', 'title', 'desc']), TITLE_CHARS),
+    author: text(item, ['user.nickname', 'user.name']), authorId: idText(item, ['user.userid', 'user.user_id', 'user.id']),
+    publishedAt: timestamp(item, ['create_time', 'time', 'timestamp', 'publish_time'], SOCIAL_EARLIEST_MS),
+    views: undefined, likes: count(item, ['likes', 'liked_count']),
+    comments: count(item, ['comments_count', 'comment_count']), shares: count(item, ['share_count', 'shared_count']),
+  }, POST_FIELDS, id ? `https://www.xiaohongshu.com/explore/${id}` : undefined);
+}
+
+/** Interaction counters listed as [{type:'fans', count:'1234'}, ...]; only plain digits are counts. */
+function xhsInteraction(object: Raw, type: string): number | undefined {
+  const entries = Array.isArray(object.interactions) ? object.interactions as Raw[] : [];
+  const entry = entries.find(candidate => candidate && candidate.type === type);
+  return entry ? count(entry, ['count']) : undefined;
+}
+
+function xhsProfile(object: Raw) {
+  return toItem({
+    id: idText(object, ['userid', 'user_id', 'id']), name: text(object, ['nickname', 'name']), handle: text(object, ['red_id']),
+    // Abbreviated labels ("1.2万") are not counts and stay missing.
+    followers: count(object, ['fans', 'fans_count', 'follower_count']) ?? xhsInteraction(object, 'fans'),
+    following: count(object, ['follows', 'follows_count', 'following_count']) ?? xhsInteraction(object, 'follows'),
+    postsCount: count(object, ['notes_count', 'note_count']), likesTotal: undefined, verified: undefined,
+  }, PROFILE_FIELDS);
+}
+
 function weiboPost(item: Raw) {
   const userId = idText(item, ['user.idstr', 'user.id']);
   const blog = text(item, ['mblogid']);
@@ -78,6 +120,18 @@ function youtubeVideo(item: Raw, channel: string | undefined) {
     views: displayCount(item, ['view_count', 'views']), likes: count(item, ['like_count']),
     comments: count(item, ['comment_count']), shares: undefined,
   }, POST_FIELDS, id ? `https://www.youtube.com/watch?v=${id}` : undefined);
+}
+
+/** get_video_info_v2 (need_format): absolute publish_date/published_at and the exact channel_follower_count. */
+function youtubeDetail(item: Raw) {
+  const id = idText(item, ['video_id', 'id']);
+  return toItem({
+    id, title: clip(text(item, ['title']), TITLE_CHARS),
+    author: text(item, ['author', 'channel_name']), authorId: text(item, ['channel_id']),
+    publishedAt: timestamp(item, ['published_at', 'publish_date'], SOCIAL_EARLIEST_MS),
+    views: count(item, ['view_count']), likes: count(item, ['like_count']), comments: count(item, ['comment_count']),
+    shares: undefined, followers: count(item, ['channel_follower_count']),
+  }, POST_DETAIL_FIELDS, id ? `https://www.youtube.com/watch?v=${id}` : undefined);
 }
 
 function instagramPost(item: Raw) {
@@ -147,6 +201,7 @@ const PROFILE_KEYS = ['channel_id', 'follower_count', 'followers_count', 'unique
 function usable(item: ResearchItem, kind: SocialKind): boolean {
   const f = item.fields;
   if (kind === 'account_relation') return f.followers !== undefined;
+  if (kind === 'post_detail') return f.id !== undefined && (f.publishedAt !== undefined || f.followers !== undefined);
   if (kind === 'account_profile') return (f.id !== undefined || f.handle !== undefined) && (f.followers !== undefined || f.name !== undefined);
   return f.id !== undefined && ['title', 'publishedAt', 'views', 'likes', 'comments', 'shares'].some(name => f[name] !== undefined);
 }
@@ -164,8 +219,21 @@ export function normalizeTikhub(json: unknown, platform: SocialPlatform, kind: S
     return usable(item, kind) ? [item] : [];
   }
   if (kind === 'account_profile') {
-    const found = findAll(data, object => has(object, ...PROFILE_KEYS), 20).map(profile).find(item => usable(item, kind));
+    const candidates = platform === 'xiaohongshu'
+      ? findAll(data, object => has(object, 'red_id', 'userid') && has(object, 'nickname', 'fans', 'interactions'), 20).map(xhsProfile)
+      : findAll(data, object => has(object, ...PROFILE_KEYS), 20).map(profile);
+    const found = candidates.find(item => usable(item, kind));
     return found ? [found] : [];
+  }
+  if (kind === 'post_detail') {
+    if (platform !== 'youtube') return [];
+    const found = findAll(data, o => has(o, 'video_id') && has(o, 'channel_follower_count', 'publish_date', 'published_at'), 5)
+      .map(youtubeDetail).find(item => usable(item, kind));
+    return found ? [found] : [];
+  }
+  if (platform === 'xiaohongshu' && kind === 'account_posts') {
+    return findAll(data, o => has(o, 'note_id', 'id') && has(o, 'likes', 'liked_count') && has(o, 'display_title', 'title', 'desc'))
+      .map(xhsPostedNote).filter(item => usable(item, kind));
   }
   return rawPosts(data, platform, kind === 'account_posts' ? account : undefined).filter(item => usable(item, kind));
 }
@@ -179,6 +247,8 @@ function rawPosts(data: unknown, platform: SocialPlatform, accountHandle?: strin
       return findAll(data, o => has(o, 'liked_count') && has(o, 'id', 'note_id')).map(xhsNote);
     case 'weibo':
       return findAll(data, o => has(o, 'attitudes_count') && has(o, 'created_at')).map(weiboPost);
+    case 'bilibili':
+      return findAll(data, o => has(o, 'bvid') && has(o, 'created', 'pubdate') && has(o, 'play', 'comment', 'title')).map(bilibiliVideo);
     case 'youtube': {
       const channel = text(data, ['channel.name']);
       return findAll(data, o => has(o, 'video_id', 'videoId') && has(o, 'title')).map(item => youtubeVideo(item, channel));
@@ -207,6 +277,8 @@ const EMPTY_LIST_PATHS: Partial<Record<`${SocialPlatform}:${SocialKind}`, readon
   'douyin:keyword_posts': ['data.data', 'data.business_data'],
   'xiaohongshu:keyword_posts': ['data.items', 'data.data.items'],
   'weibo:account_posts': ['data.statuses', 'data.data.statuses', 'data.data.list'],
+  'bilibili:account_posts': ['data.data.list.vlist', 'data.list.vlist'],
+  'xiaohongshu:account_posts': ['data.data.notes', 'data.notes'],
   'tiktok:keyword_posts': ['data.search_item_list', 'data.data'],
   'tiktok:account_posts': ['data.aweme_list'],
   'youtube:keyword_posts': ['data.videos', 'data.contents'],
