@@ -58,7 +58,7 @@ const CARD_TEXT = {
   },
   gold: {
     name: 'Gold',
-    result: { text: '多个账号一起做，每周 AI 教练替你看数据、调方向', needs: ['publish'] },
+    result: { text: '多个账号一起做，每周 AI 教练替你看数据、调方向', needs: ['publish', 'coach'] },
     fit: '布局多个平台、多个账号，要多角度的专业方案',
     cta: '开通 Gold',
   },

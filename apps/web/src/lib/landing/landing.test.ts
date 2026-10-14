@@ -49,6 +49,15 @@ describe('landing FAQ', () => {
 });
 
 describe('landing price cards', () => {
+  it('promises the AI coach on the Gold card and the free trial in the notes only while those are on (Owner 2026-10-14)', () => {
+    const noCoach = buildLandingPageData({ ...ALL_ON, coach: false }, []);
+    expect(noCoach.showResult.gold ?? false).toBe(false);
+    const noGrant = buildLandingPageData({ ...ALL_ON, signupGrant: false }, []);
+    expect(noGrant.heroNote).toBe('无需绑卡');
+    expect(noGrant.finalNote).toBe('无需绑卡');
+    expect(buildLandingPageData(ALL_ON, []).finalNote).toBe('无需绑卡，免费试用');
+  });
+
   const offers = { goldFirstMonth: 49, founder: { price: 496, total: 50, available: 37 } };
 
   it('matches the final card wording when the server provides every offer', () => {

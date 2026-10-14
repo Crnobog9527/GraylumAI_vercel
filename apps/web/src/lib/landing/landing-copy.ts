@@ -17,8 +17,9 @@ export const HERO = {
   promise: '运营从此交给它，你只管专心输出你擅长的内容。',
   primaryCta: '免费和教练聊聊',
   secondaryCta: '看它怎么工作',
-  // Owner 2026-10-14: the page only says "free trial", never how many credits come with sign-up.
-  note: [{ text: '无需绑卡，免费试用' }] as readonly GatedText[],
+  // Owner 2026-10-14: the page only says "free trial", never how many credits come with sign-up. The trial is the
+  // sign-up grant, so "，免费试用" leaves with it and the note falls back to "无需绑卡".
+  note: [{ text: '无需绑卡' }, { text: '，免费试用', needs: ['signupGrant'] }] as readonly GatedText[],
 } as const;
 
 /**
@@ -192,5 +193,5 @@ export const FINAL_ACTION = {
   } satisfies GatedText,
   founderLine: '前 50 位创始会员，招满为止。',
   cta: '免费和教练聊聊',
-  note: [{ text: '无需绑卡，免费试用' }] as readonly GatedText[],
+  note: [{ text: '无需绑卡' }, { text: '，免费试用', needs: ['signupGrant'] }] as readonly GatedText[],
 } as const;
