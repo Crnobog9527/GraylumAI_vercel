@@ -53,8 +53,10 @@ const DEBATE_FORMAT = [
 ].join('\n');
 const SUMMARY_FORMAT = [
   '输出要求：只输出一个 JSON 对象 {"adjudication","body","steps","changeNotes"}。',
-  'adjudication 是裁决记录：去重后的每个问题一条，issue 写问题概要，reviewers 写哪些评审提出（代号），single 标是否只有一位评审提出，'
-    + 'adopted 写是否采纳，reason 写理由（回原文核实的结果；有冲突时双方的最强理由和裁决；批评没压过原文的最强理由就不采纳、保留原文）。',
+  'adjudication 是裁决记录：去重后的每个问题一条，section 写它属于哪个章节（给出的章节标题原样照抄；涉及全文的写"全文"），issue 写问题概要，'
+    + 'reviewers 写哪些评审提出（代号 A/B/C），single 标是否只有一位评审提出，disputed 标评审之间对它是否有分歧，'
+    + 'opinion 写评审团对这一处的最终意见，reason 写理由（回原文核实的结果；有冲突时双方的最强理由和裁决），fix 写建议怎么改，'
+    + 'adopted 写修订稿里是否采纳（批评没压过原文的最强理由就不采纳、保留原文）。最终是否接受修订由用户决定。',
   'body 是修订后的完整报告，必须保留给出的全部 "## " 章节标题，顺序不变，每节都有内容。',
   'steps 必须列出给出的每一个步骤和每一个字段：没改的字段照抄 currentValue、changed=false；改了的字段 changed=true，值非空、不超过 400 字。',
   'changeNotes 对每个改动过的章节写一条：改了定位事实就在 fields 里列出对应的 stepId 和 fieldId（这些字段必须 changed=true），只改表述就 wordingOnly=true、fields 为空。',

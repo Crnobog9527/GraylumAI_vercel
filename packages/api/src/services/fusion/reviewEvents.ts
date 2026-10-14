@@ -1,5 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-import { DECISIONS, checkRevision, parseOpinion, type Opinion, type RevisionInput } from './hostChecks';
+import { DECISIONS, adjudicationSchema, checkRevision, parseOpinion, type Adjudication, type Opinion, type RevisionInput } from './hostChecks';
 import { reviewerLabel } from './reviewPrompts';
 import type { ReviewView } from './reviewRecord';
 
@@ -38,8 +38,9 @@ export function reviewEvents(input: { view: ReviewView; reviewers: string[]; sec
       const adjudication = saved ? adjudicationOf(saved.body) : [];
       // Results are shown once judged, from the save time: financial settlement may come much later or never.
       adjudication.forEach((item, i) => add(saved!.savedAt, { id: `adjudication:${round}:${i}`, type: 'adjudication',
-        issue: clip(item.issue), reviewers: item.reviewers.filter(r => /^[A-C]$/.test(r)), single: item.single, adopted: item.adopted,
-        reason: clip(item.reason) }));
+        section: item.section.replace(/^#+\s*/, '').trim(), issue: clip(item.issue), reviewers: item.reviewers.filter(r => /^[A-C]$/.test(r)),
+        single: item.single, disputed: item.disputed, adopted: item.adopted, opinion: clip(item.opinion), reason: clip(item.reason),
+        fix: clip(item.fix) }));
       continue;
     }
     const index = reviewers.indexOf(call.modelId ?? '');
@@ -106,12 +107,44 @@ export function reviewEvents(input: { view: ReviewView; reviewers: string[]; sec
   return { events: timed.map(item => item.event), ended: Boolean(view.endedAt) && !pending };
 }
 
-function adjudicationOf(text: string): Array<{ issue: string; reviewers: string[]; single: boolean; adopted: boolean; reason: string }> {
+function adjudicationOf(text: string): Adjudication[] {
   try {
     const value = JSON.parse(text.slice(text.indexOf('{'), text.lastIndexOf('}') + 1)) as { adjudication?: unknown };
     if (!Array.isArray(value.adjudication)) return [];
-    return value.adjudication.filter((item): item is { issue: string; reviewers: string[]; single: boolean; adopted: boolean; reason: string } =>
-      Boolean(item) && typeof item.issue === 'string' && Array.isArray(item.reviewers) && typeof item.single === 'boolean'
-      && typeof item.adopted === 'boolean' && typeof item.reason === 'string').slice(0, 100);
+    return value.adjudication.flatMap(item => { const parsed = adjudicationSchema.safeParse(item); return parsed.success ? [parsed.data] : []; })
+      .slice(0, 100);
   } catch { return []; }
+}
+
+/** The full, untruncated record of one review for its owner (Owner 2026-10-14: hovering a reviewer shows their whole
+ * reasoning; the result is organised section by section and the user decides). Seats only, never model names.
+ * Only judged bodies are included; a reviewer whose answer failed or is still pending shows that status. */
+export function reviewDetail(input: { view: ReviewView; reviewers: string[]; sections: string[];
+  outputs: Map<string, { body: string; savedAt: string }>; revision: RevisionInput }) {
+  const { view, reviewers, sections, outputs } = input;
+  const stepOf = (groupId: string) => view.steps.find(step => step.groupId === groupId);
+  const seats = reviewers.map((modelId, index) => {
+    const rounds = [1, 2].flatMap(round => {
+      const calls = view.calls.filter(call => call.phase === 'fusion_review' && call.modelId === modelId && stepOf(call.groupId)?.round === round);
+      if (!calls.length) return [];
+      const usable = calls.find(call => USABLE.has(String(call.verdict)));
+      const opinion = usable ? parseOpinion(outputs.get(usable.callId)?.body ?? '', { sections, debate: round > 1 }) : null;
+      const last = calls[calls.length - 1]!;
+      const status = opinion ? 'usable' : last.verdict ? 'failed' : 'pending';
+      return [{ round, status, ...(opinion ? { decisions: opinion.decisions, issues: opinion.issues,
+        ...(opinion.responses ? { responses: opinion.responses } : {}) } : {}) }];
+    });
+    return { seat: reviewerLabel(index), rounds };
+  });
+  const judged = view.calls.filter(call => call.phase === 'fusion_summary' && call.verdict);
+  const summaryCall = judged.find(call => USABLE.has(String(call.verdict))) ?? judged[judged.length - 1];
+  const text = summaryCall ? outputs.get(summaryCall.callId)?.body : undefined;
+  const check = text && summaryCall && USABLE.has(String(summaryCall.verdict)) ? checkRevision(text, input.revision) : null;
+  const rulings = check?.ok ? check.adjudication : [];
+  // Template order, then rulings about the whole report.
+  const order = [...sections, '全文'];
+  const bySection = order.map(section => ({ section, changed: check?.ok ? check.changedSections.includes(section) : false,
+    rulings: rulings.filter(item => item.section === section) })).filter(group => group.rulings.length || group.changed);
+  return { reviewId: view.reviewId, state: view.state, outcome: view.outcome, revisionId: view.revisionId, seats,
+    summary: { status: check?.ok ? 'usable' : summaryCall ? 'failed' : 'none', sections: bySection } };
 }

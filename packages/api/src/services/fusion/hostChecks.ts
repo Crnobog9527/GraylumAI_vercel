@@ -42,8 +42,13 @@ export const DEBATE_RESPONSE_FORMAT = { type: 'json_schema', json_schema: { name
   type: 'object', additionalProperties: false, required: ['decisions', 'issues', 'responses'], properties: {
     decisions: { type: 'array', items: decisionFormat }, issues: { type: 'array', items: issueFormat },
     responses: { type: 'array', items: responseFormat } } } } } as const;
-const adjudicationFormat = { type: 'object', additionalProperties: false, required: ['issue', 'reviewers', 'single', 'adopted', 'reason'],
-  properties: { issue: str, reviewers: { type: 'array', items: str }, single: { type: 'boolean' }, adopted: { type: 'boolean' }, reason: str } } as const;
+/** One ruling per merged issue, filed under a template section (or 全文 for the whole report) so the result can be
+ * shown section by section: the panel's final view, why, how to change it, who raised it and whether they split. */
+export const WHOLE_REPORT = '全文';
+const adjudicationFormat = { type: 'object', additionalProperties: false,
+  required: ['section', 'issue', 'reviewers', 'single', 'disputed', 'adopted', 'opinion', 'reason', 'fix'],
+  properties: { section: str, issue: str, reviewers: { type: 'array', items: str }, single: { type: 'boolean' }, disputed: { type: 'boolean' },
+    adopted: { type: 'boolean' }, opinion: str, reason: str, fix: str } } as const;
 export const REVISION_RESPONSE_FORMAT = { type: 'json_schema', json_schema: { name: 'review_revision', strict: true, schema: {
   type: 'object', additionalProperties: false, required: ['adjudication', 'body', 'steps', 'changeNotes'], properties: {
     adjudication: { type: 'array', items: adjudicationFormat },
@@ -113,15 +118,17 @@ export type RevisionInput = {
   declared: DeclaredStep[]; sections: string[]; maxCharacters: number;
 };
 export type RevisionResult =
-  | { ok: true; body: string; steps: StepValues; changedSections: string[]; changeNotes: ChangeNote[];
+  | { ok: true; body: string; steps: StepValues; changedSections: string[]; changeNotes: ChangeNote[]; adjudication: Adjudication[];
       /** Field changes relative to the formal version, grouped for R14 (values 1–400 characters). */
       r14Fields: StepValues }
   | { ok: false; reason: string };
 type ChangeNote = { section: string; wordingOnly: boolean; note: string; fields: Array<{ stepId: string; fieldId: string }> };
+export const adjudicationSchema = z.object({ section: z.string(), issue: z.string(), reviewers: z.array(z.string()),
+  single: z.boolean(), disputed: z.boolean(), adopted: z.boolean(), opinion: z.string(), reason: z.string(), fix: z.string() }).strip();
+export type Adjudication = z.infer<typeof adjudicationSchema>;
 const revisionSchema = z.object({
   /** Kept for administrators reviewing real cases; checked for shape only. */
-  adjudication: z.array(z.object({ issue: z.string(), reviewers: z.array(z.string()), single: z.boolean(), adopted: z.boolean(),
-    reason: z.string() }).strip()).max(200),
+  adjudication: z.array(adjudicationSchema).max(200),
   body: z.string(),
   steps: z.array(z.object({ stepId: z.string(), fields: z.array(z.object({ fieldId: z.string(), value: z.string(),
     changed: z.boolean() }).strip()) }).strip()),
@@ -149,7 +156,11 @@ export function reportSections(body: string, sections: string[], maxCharacters: 
 export function checkRevision(raw: string, input: RevisionInput): RevisionResult {
   const parsed = revisionSchema.safeParse(looseJson(raw));
   if (!parsed.success) return { ok: false, reason: 'REVISION_FORMAT' };
-  const { body, changeNotes } = parsed.data;
+  const { body, changeNotes, adjudication } = parsed.data;
+  // Every ruling is filed under a template section (or the whole report) and names only seats A/B/C.
+  for (const item of adjudication) item.section = item.section.replace(/^#+\s*/, '').trim();
+  if (adjudication.some(item => !(input.sections.includes(item.section) || item.section === WHOLE_REPORT)
+    || item.reviewers.some(reviewer => !/^[A-C]$/.test(reviewer)))) return { ok: false, reason: 'REVISION_ADJUDICATION' };
   const now = reportSections(body, input.sections, input.maxCharacters);
   const before = reportSections(input.previousBody, input.sections, Number.MAX_SAFE_INTEGER);
   if (!now || !before) return { ok: false, reason: 'REVISION_SECTIONS' };
@@ -199,5 +210,5 @@ export function checkRevision(raw: string, input: RevisionInput): RevisionResult
       (r14Fields[stepId] ??= {})[fieldId] = value;
     }
   }
-  return { ok: true, body, steps, changedSections, changeNotes, r14Fields };
+  return { ok: true, body, steps, changedSections, changeNotes, adjudication, r14Fields };
 }

@@ -161,7 +161,7 @@
   不悄悄去掉模型、用更少的模型降级运行（评审团是管理员指定的 3–8 个模型，人数变了就改变了质量和价格）。
   运行中某个模型确认失败或结果未知不属于降级准入，按"部分失败如实展示"处理：本轮有至少 1 个成功意见就照常汇总，页面写明哪几个模型没给出意见。复用 `paygRuntime.ts` 的 `measureCallInput` / `fitNativeRequestOutput`。
 
-### 2.2a 评审过程事件（给前端动画，Owner 2026-10-14；约定第 3 版）
+### 2.2a 评审过程事件（给前端动画，Owner 2026-10-14；约定第 4 版）
 
 Owner 要求评审过程中让用户看到评审团的思考和互相挑刺。前端动画只按下面的事件播放，事件全部由服务端从**真实的评审记录和已保存的输出**推导，
 没有对应的真实数据就没有事件，不做模拟表演。
@@ -189,10 +189,16 @@ Owner 要求评审过程中让用户看到评审团的思考和互相挑刺。�
 | `disagreement` | 第 1 轮结束、发现分歧（每个有分歧的决定一条） | `decision`, `keep: ["A",...]`, `change: ["B",...]` |
 | `response` | 第 2 轮评审回应别人，每位被回应的评审、每个关键决定一条 | `round: 2`, `reviewer`, `to`, `decision`, `strongestView`, `stance: "agree"\|"disagree"` |
 | `summary_started` | 汇总开始调用 | `round` |
-| `adjudication` | 汇总的裁决记录，每条一条 | `issue`, `reviewers: ["A",...]`, `single: boolean`, `adopted: boolean`, `reason` |
+| `adjudication` | 汇总的裁决记录，每条一条 | `section`（章节标题，或"全文"）, `issue`, `reviewers: ["A",...]`, `single: boolean`, `disputed: boolean`（评审之间有没有分歧）, `opinion`（评审团最终意见）, `reason`, `fix`（建议怎么改）, `adopted: boolean`（修订稿里是否采纳） |
 | `revision_ready` | 修订稿通过宿主检查并已交给 R14 | `changedSections: number`, `changedSectionTitles: string[]`（只有标题）, `changedFields: number`, `revisionId` |
 | `revision_failed` | 汇总没通过宿主检查 | `reason`（宿主检查代号，例如 `REVISION_NOTES`） |
 | `review_ended` | 评审结束（任何结局） | `state`, `outcome` |
+
+- **完整原文（不限 120 字）**：`fusionReview.detail({ reviewId })` 只读本人的评审，返回
+  `{ reviewId, state, outcome, revisionId, seats: [{ seat, rounds: [{ round, status: "usable"|"failed"|"pending", decisions?, issues?, responses? }] }],
+  summary: { status: "usable"|"failed"|"none", sections: [{ section, changed, rulings: [{ section, issue, reviewers, single, disputed, opinion, reason, fix, adopted }] }] } }`。
+  `decisions` 每条含 `decision / strongestCase / strongestAlternative / verdict / basis`，`issues` 每条含 `location / perspective / problem / suggestion / severity`，
+  `responses` 每条含 `reviewer / decision / strongestView / stance / reason`。悬停某位评审时用 `seats`；最终结果按章节展示用 `summary.sections`（模板顺序，最后是"全文"）。只出现席位代号，不出现模型名。
 
 另外：`ended=true` 表示评审已结束，之后不会再有新事件。没有分歧时不会出现 `disagreement` 和 `response`，直接到 `summary_started`。
 

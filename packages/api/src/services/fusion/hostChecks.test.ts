@@ -10,7 +10,8 @@ const base: RevisionInput = {
   declared: [{ stepId: 's1', fieldIds: ['goal', 'note'] }, { stepId: 's2', fieldIds: ['who'] }], sections, maxCharacters: 12000,
 };
 const revision = (patch: Partial<{ body: string; steps: unknown; changeNotes: unknown }> = {}) => JSON.stringify({
-  adjudication: [{ issue: '定位太泛', reviewers: ['A', 'B'], single: false, adopted: true, reason: '原文确实没写清人群' }],
+  adjudication: [{ section: '定位', issue: '定位太泛', reviewers: ['A', 'B'], single: false, disputed: false, adopted: true,
+    opinion: '定位要写清人群', reason: '原文确实没写清', fix: '点明给上班族省时间' }],
   body: report('新定位'),
   steps: [{ stepId: 's1', fields: [{ fieldId: 'goal', value: '新目标', changed: true }, { fieldId: 'note', value: '', changed: false }] },
     { stepId: 's2', fields: [{ fieldId: 'who', value: '学生', changed: false }] }],
@@ -122,6 +123,14 @@ describe('revision host check', () => {
   it('splits sections by "## " headings only', () => {
     expect(reportSections(report(), sections, 12000)?.get('受众')).toBe('原受众');
     expect(reportSections('## 定位\n\n## 受众\nx\n## 结语\ny', sections, 12000)).toBeNull();
+  });
+
+  it('files every ruling under a template section (or 全文) and names only seats A/B/C', () => {
+    const ruling = { section: '定位', issue: 'i', reviewers: ['A'], single: true, disputed: false, adopted: true, opinion: 'o', reason: 'r', fix: 'f' };
+    const withRulings = (adjudication: unknown[]) => JSON.stringify({ ...JSON.parse(revision()), adjudication });
+    expect(checkRevision(withRulings([ruling, { ...ruling, section: '## 受众' }, { ...ruling, section: '全文' }]), base).ok).toBe(true);
+    expect(checkRevision(withRulings([{ ...ruling, section: '第九章' }]), base)).toEqual({ ok: false, reason: 'REVISION_ADJUDICATION' });
+    expect(checkRevision(withRulings([{ ...ruling, reviewers: ['Claude'] }]), base)).toEqual({ ok: false, reason: 'REVISION_ADJUDICATION' });
   });
 
   it('counts a spacing-only change in a section as a change that must be declared', () => {

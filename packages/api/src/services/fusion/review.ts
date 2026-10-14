@@ -10,7 +10,7 @@ import { assertSnapshotSize } from './request';
 import { estimateReview } from './reviewEstimate';
 import { debateRequest, readReviewSkill, resolveReviewSkill, reviewerLabel, reviewerRequest, summaryRequest, type ReviewContext,
   type ReviewSkill } from './reviewPrompts';
-import { reviewEvents } from './reviewEvents';
+import { reviewDetail, reviewEvents } from './reviewEvents';
 import { ENDED_STATES, reviewRecord, type ReviewPosition, type ReviewView } from './reviewRecord';
 import { readFusionSettings } from './settings';
 
@@ -168,6 +168,17 @@ export function reviewFlow(deps: { admin: SupabaseClient; actorId: string;
       ...(revisionId ? { revisionId } : {}) });
   }
   const done = (call: ReviewView['calls'][number]) => call.verdict !== null;
+  /** Saved bodies of judged calls with their save time (the owner's own review only: reads go through the actor). */
+  async function savedOutputs(view: ReviewView) {
+    const outputs = new Map<string, { body: string; savedAt: string }>();
+    for (const call of view.calls.filter(c => c.verdict !== null)) {
+      const result = await admin.rpc('fusion_call_output_read', { p_actor_id: actorId, p_call_id: call.callId });
+      if (result.error) throw new Error('FUSION_REVIEW_UNAVAILABLE');
+      const saved = result.data as { body: string; savedAt: string } | null;
+      if (saved?.body) outputs.set(call.callId, { body: saved.body, savedAt: saved.savedAt });
+    }
+    return outputs;
+  }
 
   return {
     /** Freezes settings, Skill revision and estimate; refuses a review that cannot fit or exceeds the budget. */
@@ -269,18 +280,20 @@ export function reviewFlow(deps: { admin: SupabaseClient; actorId: string;
     },
     stop: (reviewId: string) => record.close(reviewId, 'stopped'),
     end: (reviewId: string) => record.close(reviewId, 'interrupted'),
+    /** Full record for the owner (no 120-character summaries): each seat's reasoning and the rulings by section. */
+    async detail(reviewId: string) {
+      const view = await record.read(reviewId);
+      if (!view) throw new Error('FUSION_REVIEW_DENIED');
+      const src = await readSource(reviewId);
+      return reviewDetail({ view, reviewers: config.parse(view.config).reviewers, sections: src.sections,
+        outputs: await savedOutputs(view), revision: revisionInput(view, src) });
+    },
     /** Progress events for the animation (§2.2a), derived from the record and judged outputs only. */
     async events(reviewId: string) {
       const view = await record.read(reviewId);
       if (!view) throw new Error('FUSION_REVIEW_DENIED');
       const src = await readSource(reviewId);
-      const outputs = new Map<string, { body: string; savedAt: string }>();
-      for (const call of view.calls.filter(c => c.verdict !== null)) {
-        const result = await admin.rpc('fusion_call_output_read', { p_actor_id: actorId, p_call_id: call.callId });
-        if (result.error) throw new Error('FUSION_REVIEW_UNAVAILABLE');
-        const saved = result.data as { body: string; savedAt: string } | null;
-        if (saved?.body) outputs.set(call.callId, { body: saved.body, savedAt: saved.savedAt });
-      }
+      const outputs = await savedOutputs(view);
       return reviewEvents({ view, reviewers: config.parse(view.config).reviewers, sections: src.sections, outputs,
         revision: revisionInput(view, src) });
     },

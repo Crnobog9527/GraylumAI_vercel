@@ -69,6 +69,8 @@ export const fusionReviewRouter = router({
   end: reader.input(review).mutation(({ ctx, input }) => ctx.flow.end(input.reviewId)),
   /** Progress events for the animation (FUSION-REVIEW §2.2a); clients play the ids they have not seen. */
   events: reader.input(review).query(({ ctx, input }) => ctx.flow.events(input.reviewId)),
+  /** The owner's full record (Owner 2026-10-14): every seat's complete reasoning and the rulings by section; seats only. */
+  detail: reader.input(review).query(({ ctx, input }) => ctx.flow.detail(input.reviewId)),
   /** Display names of the seats (Owner 2026-10-14): set by administrators, independent of the models; no model names. */
   panel: reader.query(async ({ ctx }) => {
     const names = (await readFusionSettings(ctx.admin)).review.displayNames;

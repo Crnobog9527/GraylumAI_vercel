@@ -84,7 +84,8 @@ const opinion = (severity: string | null, verdict: 'keep' | 'change' = 'keep', d
 const seatOf = (modelId: string) => String.fromCharCode(65 + ids.reviewers.indexOf(modelId));
 const othersOf = (modelId: string) => ['A', 'B', 'C'].filter(seat => seat !== seatOf(modelId));
 const revision = (value: string) => JSON.stringify({
-  adjudication: [{ issue: '定位太泛', reviewers: ['A', 'B'], single: false, adopted: true, reason: '原文确实没写清' }],
+  adjudication: [{ section: '定位', issue: '定位太泛', reviewers: ['A', 'B'], single: false, disputed: false, adopted: true,
+    opinion: '定位要写清人群', reason: '原文确实没写清', fix: '点明给上班族省时间' }],
   body: `## 定位\n${value}\n## 结语\n原结语`,
   steps: [{ stepId: 's1', fields: [{ fieldId: 'goal', value, changed: true }] }],
   changeNotes: [{ section: '定位', wordingOnly: false, note: '更具体', fields: [{ stepId: 's1', fieldId: 'goal' }] }] });
@@ -165,6 +166,14 @@ describe('review flow', () => {
     expect(events.find(e => e.type === 'issue')!.fix).toBeTruthy();
     expect(JSON.stringify(events)).not.toContain(ids.reviewers[0]);
     expect(new Set(events.map(e => e.id)).size).toBe(events.length);
+    // The owner's full record: complete reasoning per seat and the rulings by section, no model names.
+    const detail = await t.flow.detail(String(db.review!.reviewId));
+    expect(detail.seats.map(seat => [seat.seat, seat.rounds.map(r => r.status)])).toEqual([['A', ['usable', 'usable']],
+      ['B', ['usable', 'usable']], ['C', ['usable', 'usable']]]);
+    expect(detail.seats[1]!.rounds[0]!.issues![0]!.suggestion).toBe('写清楚给上班族的具体好处，例如下班三十分钟就能做好一顿饭');
+    expect(detail.summary.sections).toEqual([expect.objectContaining({ section: '定位', changed: true,
+      rulings: [expect.objectContaining({ opinion: '定位要写清人群', fix: '点明给上班族省时间', reviewers: ['A', 'B'] })] })]);
+    expect(JSON.stringify(detail)).not.toContain(ids.reviewers[0]);
     // Stable: reading again gives the same ids in the same order.
     expect((await t.flow.events(String(db.review!.reviewId))).events.map(e => e.id)).toEqual(events.map(e => e.id));
   });
