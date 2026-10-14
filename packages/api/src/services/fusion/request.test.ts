@@ -2,7 +2,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { openRouterAdapter } from '../bill2/openRouterAdapter';
 import { openRouterBound } from '../bill2/openRouterPolicy';
-import { FUSION_INPUT_CAP, fusionRequestBody } from './request';
+import { FUSION_INPUT_CAP, assertSnapshotSize, fusionRequestBody } from './request';
 
 const providerLimits = { providerSlug: 'anthropic', contextTokens: 200000, promptUsdPerMillion: '3', completionUsdPerMillion: '15', requestUsd: '0' };
 const policy = { modelId: '00000000-0000-4000-8000-000000000001', provider: 'openrouter', account: 'synthetic', model: 'anthropic/claude-sonnet-5.5',
@@ -27,10 +27,10 @@ describe('Fusion request bytes', () => {
     for (const model of ['perplexity/sonar', 'openrouter/auto', 'acme/search-pro', 'anthropic/claude-sonnet-5.5:online'])
       expect(() => fusionRequestBody({ ...policy, model }, request, 4096)).toThrow();
   });
-  it('rejects an input snapshot over 90000 bytes before any freeze', () => {
+  it('rejects an input snapshot (report + materials) over 90000 bytes before any freeze', () => {
     expect(FUSION_INPUT_CAP).toBe(90000);
-    expect(() => fusionRequestBody(policy, { ...request, input: '好'.repeat(30001) }, 4096)).toThrow('FUSION_INPUT_TOO_LARGE');
-    expect(() => fusionRequestBody(policy, { ...request, input: 'x'.repeat(90000) }, 4096)).not.toThrow();
+    expect(() => assertSnapshotSize('好'.repeat(29990), { a: 'x'.repeat(100) })).toThrow('FUSION_INPUT_TOO_LARGE');
+    expect(() => assertSnapshotSize('x'.repeat(89000), { a: 'x' })).not.toThrow();
   });
   it('is accepted by the provider adapter exactly as built', async () => {
     const transport = vi.fn<typeof fetch>(async () => new Response('data: [DONE]\n\n'));

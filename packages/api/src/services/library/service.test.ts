@@ -30,6 +30,14 @@ beforeEach(()=>{
     absent:vi.fn(async()=>true),remove:vi.fn()} as unknown as LibraryStorage;
 });
 describe('library service boundaries',()=>{
+  it('searches only through the database function, which binds the actor and escapes the term',async()=>{
+    rpc.mockResolvedValueOnce({data:{documents:[],nextCursor:null}});
+    const cursor={createdAt:'2026-10-14T00:00:00.000Z',id};
+    await libraryService(client,a,storage).search('周报_%',cursor);
+    expect(rpc).toHaveBeenCalledWith('library_search',{a,q:'周报_%',after_created_at:cursor.createdAt,after_id:id});
+    await libraryService(client,a,storage).search('周报');
+    expect(rpc).toHaveBeenLastCalledWith('library_search',{a,q:'周报',after_created_at:null,after_id:null});
+  });
   it('publishes image without any content transformation or model call',async()=>{
     vi.mocked(storage.inspect).mockResolvedValue({size:8,contentType:'image/png',bytes:Buffer.from([137,80,78,71,13,10,26,10])});
     await libraryService(client,a,storage).complete(id);

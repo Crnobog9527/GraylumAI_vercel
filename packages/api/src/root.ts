@@ -7,6 +7,7 @@ import { workbenchRouter } from './routers/workbench';
 import { router } from './trpc';
 import { runtimeRateLimitsRouter } from './routers/runtimeRateLimits';
 import { modelIdentityRouter } from './routers/modelIdentity';
+import { researchToolsRouter } from './routers/researchTools';
 import { mentorBudgetRouter } from './routers/mentorBudget';
 import { chatRouter } from './routers/chat';
 import { userRouter } from './routers/user';
@@ -27,8 +28,10 @@ import { paymentsRouter } from './routers/payments';
 import { skillsRouter } from './routers/skills';
 import { accountRouter } from './routers/account';
 import { dataUseRouter } from './routers/dataUse';
+import { publishMonitorRouter } from './routers/publishMonitor';
 import { adminStaleRoundsRouter } from './routers/adminStaleRounds';
 import { fusionSettingsRouter } from './routers/fusionSettings';
+import { fusionReviewRouter } from './routers/fusionReview';
 
 /**
  * 主路由器
@@ -48,9 +51,11 @@ export const appRouter = router({
   mentorBudget: mentorBudgetRouter,
   reportModel: reportModelRouter,
   fusionSettings: fusionSettingsRouter,
+  fusionReview: fusionReviewRouter,
   socialMediaFlag: socialMediaFlagRouter,
   runtimeRateLimits: runtimeRateLimitsRouter,
   modelIdentity: modelIdentityRouter,
+  researchTools: researchToolsRouter,
   invitation: invitationRouter,
   checkin: checkinRouter,
   admin: adminRouter,
@@ -65,6 +70,7 @@ export const appRouter = router({
   opc: opcRouter,
   account: accountRouter,
   dataUse: dataUseRouter,
+  publishMonitor: publishMonitorRouter,
   library: libraryRouter,
 });
 

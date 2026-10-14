@@ -8,8 +8,8 @@ const identity = {
   pricingHash: z.string().regex(/^[0-9a-f]{64}$/), endpointTag: reference,
   nominalPricing, templateTokens: tokens, marginTokens: tokens,
 };
-/** Tool definitions one PAYG call may carry; the SQL quote check (0162) enforces the same ceiling. */
-export const PAYG_MAX_TOOLS = 2;
+/** Tool definitions one PAYG call may carry (card, Skill file, history read); the SQL quote check (0250) enforces the same ceiling. */
+export const PAYG_MAX_TOOLS = 3;
 export const paygStablePolicy = z.object({
   ...identity, version: reference, admissionPath: z.enum(['fixture', 'empirical', 'tokenizer']),
   maxBytes: z.number().int().min(1).max(196_608),
@@ -21,7 +21,7 @@ export const paygStablePolicy = z.object({
 export const paygCallQuote = z.object({
   ...identity, policyVersion: reference,
   bytes: z.number().int().min(1).max(196_608), promptTokensUpper: tokens.positive(),
-  messages: z.number().int().min(1).max(128), tools: z.number().int().min(0).max(2),
+  messages: z.number().int().min(1).max(128), tools: z.number().int().min(0).max(PAYG_MAX_TOOLS),
   schemaBytes: z.number().int().min(0).max(16_384),
 }).strict().refine(value => value.promptTokensUpper === value.bytes + value.templateTokens + value.marginTokens,
   { message: 'BILL2_INPUT_BOUND_CONFLICT' })

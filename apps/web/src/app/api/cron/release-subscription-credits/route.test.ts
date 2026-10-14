@@ -23,7 +23,8 @@ it('returns anomalies and emits a single fixed-code alert without subject identi
   expect(response.status).toBe(200);
   const body = await response.json();
   expect(body.summary).toMatchObject({ anomalyCount: 1, anomalyReasons: ['PAY_COMMON_ANNUAL_CONTRACT_UNKNOWN'] });
-  expect(body.summary.methodResult).toEqual({ releasedCredits: 8970 });
+  expect(body.summary.methodResult).toEqual({ releasedCredits: 8970, settledMembershipLevels: 8970 });
+  expect(mocks.rpc).toHaveBeenCalledWith('pay_common_settle_membership_levels', { p_limit: 100 });
   expect(mocks.rpc).toHaveBeenCalledWith('pay_waffo_release_due', { p_limit: 100 });
   expect(body.summary).not.toHaveProperty('anomalies');
   expect(JSON.stringify(body)).not.toContain('private-subject');
