@@ -1,5 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { z } from 'zod';
+import type { SupabaseClient } from '@supabase/supabase-js';
+import type { RuntimeBudget } from '../services/runtime/budget';
 import { TRPCError } from '@trpc/server';
 import { protectedProcedure, router } from '../trpc';
 import { authoritativeBilling, type BillingRpc } from '../services/bill2/service';
@@ -42,21 +44,29 @@ export function revisionHooks(revisions: Pick<ReturnType<typeof reportRevisionSe
   };
 }
 
+/** What the live flow needs from the protected context. */
+type ProtectedCtx = { hasSupabaseAdminPrivileges?: boolean; supabaseAdmin?: SupabaseClient | null; user: { id: string };
+  userScopedSupabase: SupabaseClient; runtimeBudget?: RuntimeBudget; headers?: Headers | null };
+/** The live review flow: staging test window, billing, executor and call gate (one request per model call). */
+async function liveFlow(ctx: ProtectedCtx) {
+  if (!ctx.hasSupabaseAdminPrivileges || !ctx.supabaseAdmin) throw new StagingAccessError('RUNTIME_STAGING_SERVICE_UNAVAILABLE');
+  const admin = ctx.supabaseAdmin;
+  const window = await loadStagingPolicy(admin as unknown as BillingRpc, ctx.user.id, process.env);
+  const budget = ctx.runtimeBudget ?? createRuntimeBudget();
+  const actor = runtimeActor(ctx.userScopedSupabase.auth, ctx.user.id, budget, ctx.headers?.get('Authorization'));
+  const billing = authoritativeBilling({ admin: admin as unknown as BillingRpc, actor, adapter: stagingTransport(admin, window, budget), budget });
+  const executor = fusionExecutor({ billing, admin, actorId: ctx.user.id, callGate: newWorkGate(admin, 'staging').calls, budget });
+  return reviewFlow({ admin, actorId: ctx.user.id, executor, ...revisionHooks(reportRevisionService(ctx.userScopedSupabase, admin)) });
+}
+const unwrap = (cause: unknown, path: string) => reviewError(cause instanceof TRPCError && cause.cause ? cause.cause : cause, path);
+
 /** FUSION-REVIEW review API (staging test window only, like Runtime real calls). One request per model call. */
 const procedure = protectedProcedure.use(async ({ ctx, next, path }) => {
   try {
-    if (!ctx.hasSupabaseAdminPrivileges || !ctx.supabaseAdmin) throw new StagingAccessError('RUNTIME_STAGING_SERVICE_UNAVAILABLE');
-    const admin = ctx.supabaseAdmin;
-    const window = await loadStagingPolicy(admin as unknown as BillingRpc, ctx.user.id, process.env);
-    const budget = ctx.runtimeBudget ?? createRuntimeBudget();
-    const actor = runtimeActor(ctx.userScopedSupabase.auth, ctx.user.id, budget, ctx.headers?.get('Authorization'));
-    const billing = authoritativeBilling({ admin: admin as unknown as BillingRpc, actor, adapter: stagingTransport(admin, window, budget), budget });
-    const executor = fusionExecutor({ billing, admin, actorId: ctx.user.id, callGate: newWorkGate(admin, 'staging').calls, budget });
-    const flow = reviewFlow({ admin, actorId: ctx.user.id, executor, ...revisionHooks(reportRevisionService(ctx.userScopedSupabase, admin)) });
-    const result = await next({ ctx: { ...ctx, flow } });
+    const result = await next({ ctx: { ...ctx, flow: await liveFlow(ctx) } });
     if (!result.ok) throw result.error;
     return result;
-  } catch (cause) { throw reviewError(cause instanceof TRPCError && cause.cause ? cause.cause : cause, path); }
+  } catch (cause) { throw unwrap(cause, path); }
 });
 const review = z.object({ reviewId: uuid }).strict();
 
@@ -72,9 +82,23 @@ const reader = protectedProcedure.use(async ({ ctx, next, path }) => {
   } catch (cause) { throw reviewError(cause instanceof TRPCError && cause.cause ? cause.cause : cause, path); }
 });
 
+const startInput = z.object({ requestId: uuid, draftId: uuid, sourceVersionId: uuid }).strict();
+/** A retried start finds its review before the live-call window is required (#962 review); a new start needs it. */
+const startProcedure = protectedProcedure.input(startInput).use(async ({ ctx, input, next, path }) => {
+  if (ctx.hasSupabaseAdminPrivileges && ctx.supabaseAdmin) {
+    try {
+      const existing = await reviewFlow({ admin: ctx.supabaseAdmin, actorId: ctx.user.id }).replayStart(input);
+      if (existing) return next({ ctx: { ...ctx, replayed: existing } });
+    } catch (cause) { throw unwrap(cause, path); }
+  }
+  return next({ ctx: { ...ctx, replayed: null } });
+});
+
 export const fusionReviewRouter = router({
-  start: procedure.input(z.object({ requestId: uuid, draftId: uuid, sourceVersionId: uuid }).strict())
-    .mutation(({ ctx, input }) => ctx.flow.start(input)),
+  start: startProcedure.mutation(async ({ ctx, input, path }) => {
+    if (ctx.replayed) return ctx.replayed;
+    try { return await (await liveFlow(ctx)).start(input); } catch (cause) { throw unwrap(cause, path); }
+  }),
   /** Repeatable: decides and claims the next step, or returns the calls still to dispatch. */
   continue: procedure.input(review).mutation(({ ctx, input }) => ctx.flow.continue(input.reviewId)),
   dispatch: procedure.input(review.extend({ callId: uuid })).mutation(({ ctx, input }) => ctx.flow.dispatch(input.reviewId, input.callId)),

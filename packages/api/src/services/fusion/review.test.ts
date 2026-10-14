@@ -7,6 +7,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 // prompts and host checks under test are the real ones.
 type Call = { groupId: string; runId: string; callId: string; modelId: string; phase: string; dispatched: boolean;
   verdict: string | null; settled: boolean; state: string; dispatchedAt?: string; settledAt?: string };
+const raceReservation = vi.hoisted(() => ({ value: null as Record<string, unknown> | null }));
 const applyRefusal = vi.hoisted(() => ({ value: '' }));
 const caps = vi.hoisted(() => [] as Array<{ opinion: number; summary: number }>);
 const requests = vi.hoisted(() => [] as Array<{ modelId: string; phase: string; input: string }>);
@@ -47,8 +48,11 @@ vi.mock('./reviewRecord', async original => {
       outcome: null, revisionId: null, endedAt: null, adoption: null }; return view(); },
     read: async () => db.review ? view() : null,
     recordAdoption: async (_id: string, adoption: Record<string, unknown>) => {
+      // A concurrent confirmation of the same request that reserved first (test hook).
+      if (raceReservation.value && !db.review!.adoption) { db.review!.adoption = raceReservation.value; raceReservation.value = null; }
       const prior = db.review!.adoption as Record<string, unknown> | null;
       if (prior && prior.requestId !== adoption.requestId) throw new Error('FUSION_REVIEW_ADOPTED');
+      if (prior && prior.state === 'reserved' && adoption.state === 'reserved') return view(); // replay, payload unchecked
       if (prior && prior.state === 'reserved' && adoption.state === 'recorded' && adoption.decision !== prior.decision
         && adoption.decision !== 'refused') throw new Error('FUSION_REVIEW_ADOPTED');
       if (!prior || (prior.state === 'reserved' && adoption.state === 'recorded')) db.review!.adoption = { ...adoption, at: clock.next() };
@@ -297,6 +301,18 @@ describe('review flow', () => {
     expect(t.declined).toEqual([]);
     expect(await t.flow.confirmAdoption({ ...confirm, decision: 'apply' })).toMatchObject({ state: 'recorded', adopted: ['定位'] });
     expect((await t.flow.detail(reviewId)).awaitingChoice).toBe(false);
+  });
+
+  it('only the confirmation whose exact reservation was stored makes the R14 decision', async () => {
+    const t = setup(call => call.phase === 'fusion_summary' ? revision('新目标') : opinion('major'));
+    await t.flow.start({ requestId: randomUUID(), draftId: randomUUID(), sourceVersionId: randomUUID() });
+    await t.runAll(); await t.runAll(); await t.flow.continue(String(db.review!.reviewId));
+    const reviewId = String(db.review!.reviewId), requestId = randomUUID();
+    const choices = [{ section: '定位', use: 'revised' as const }];
+    raceReservation.value = { state: 'reserved', requestId, decision: 'decline', choices, at: clock.next() };
+    await expect(t.flow.confirmAdoption({ reviewId, requestId, choices, expectedDiffHash: 'f'.repeat(64), decision: 'apply' }))
+      .rejects.toThrow('FUSION_REVIEW_ADOPTED');
+    expect(t.applied).toEqual([]);
   });
 
   it('a partial panel never ends as no change: one usable reviewer that finds nothing still goes to the summary', async () => {

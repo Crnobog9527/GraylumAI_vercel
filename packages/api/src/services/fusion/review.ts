@@ -206,6 +206,8 @@ export function reviewFlow(deps: { admin: SupabaseClient; actorId: string;
   }
 
   return {
+    /** The review an earlier start with this request created (lost response), without any live-call precondition. */
+    replayStart: (input: { requestId: string; draftId: string; sourceVersionId: string }) => record.replay(input),
     /** Freezes settings, Skill revision and estimate; refuses a review that cannot fit or exceeds the budget. */
     async start(input: { requestId: string; draftId: string; sourceVersionId: string }) {
       // A retried start (lost response) gets its review back before any check that may have changed since (#962 review).
@@ -341,8 +343,13 @@ export function reviewFlow(deps: { admin: SupabaseClient; actorId: string;
       if (proposal.diffHash !== input.expectedDiffHash) throw new Error('FUSION_ADOPTION_STALE');
       // Reserve the choice under the review lock before R14 decides anything: a concurrent request is refused from
       // here on, so the formal version and the recorded choice can never disagree (#962 review).
-      await record.recordAdoption(view.reviewId, { state: 'reserved', requestId: input.requestId, choices: input.choices,
+      const won = await record.recordAdoption(view.reviewId, { state: 'reserved', requestId: input.requestId, choices: input.choices,
         decision: input.decision });
+      // A concurrent confirmation of the same request may have reserved first with other choices or another decision:
+      // only the request whose exact reservation is stored may make the external decision (#962 review).
+      const stored = won.adoption as { state?: string; decision?: string; choices?: unknown } | null | undefined;
+      if (stored?.state !== 'reserved' || stored.decision !== input.decision
+        || canonical(stored.choices) !== canonical(adoptionChoices.parse(input.choices))) throw new Error('FUSION_REVIEW_ADOPTED');
       const decisionId = derivedUuid(`${view.reviewId}:adopt:${input.requestId}:${input.decision}`);
       let versionId: string | null = null;
       try {
