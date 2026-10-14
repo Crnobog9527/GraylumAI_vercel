@@ -114,14 +114,20 @@
 }
 @media (min-width: 960px) { .wallMore { display: none; } }
 @media (max-width: 959px) { .voiceRows[data-folded] > li:nth-child(n + 4) { display: none; } }
-/* The answer arrives a beat after its note, so the reader first asks "so what would you do?". */
+/* Each row plays left to right: the note drops onto the wall, then the arrow, then the answer slides in after it.
+   Rows that arrive together follow one another (--stagger, set by MotionJ). */
 @media (prefers-reduced-motion: no-preference) {
-  .page[data-motion='on'] .voiceRow:not([data-in]) .note { opacity: 0; translate: 0 24px; }
-  .page[data-motion='on'] .voiceRow:not([data-in]) .answer { opacity: 0; translate: -12px 0; }
+  .page[data-motion='on'] .voiceRow:not([data-in]) .note { opacity: 0; translate: 0 -48px; scale: 1.04; }
   .page[data-motion='on'] .voiceRow:not([data-in]) .arrow { opacity: 0; }
-  .page[data-motion='on'] .voiceRow .arrow { transition: opacity .6s var(--j-ease) .3s; }
-  .page[data-motion='on'] .voiceRow .note { transition: opacity .7s var(--j-ease), translate .7s var(--j-ease); }
-  .page[data-motion='on'] .voiceRow .answer { transition: opacity .6s var(--j-ease) .45s, translate .6s var(--j-ease) .45s; }
+  .page[data-motion='on'] .voiceRow:not([data-in]) .answer { opacity: 0; translate: -16px 0; }
+  .page[data-motion='on'] .voiceRow .note {
+    transition: opacity .5s var(--j-ease) var(--stagger, 0ms), translate .8s cubic-bezier(.34, 1.4, .64, 1) var(--stagger, 0ms),
+      scale .8s var(--j-ease) var(--stagger, 0ms);
+  }
+  .page[data-motion='on'] .voiceRow .arrow { transition: opacity .5s var(--j-ease) calc(var(--stagger, 0ms) + 450ms); }
+  .page[data-motion='on'] .voiceRow .answer {
+    transition: opacity .6s var(--j-ease) calc(var(--stagger, 0ms) + 600ms), translate .6s var(--j-ease) calc(var(--stagger, 0ms) + 600ms);
+  }
 }
 
 /* Footer */

@@ -33,12 +33,14 @@ export function MotionJ({ className, children }: { className?: string; children:
     const root = ref.current;
     if (!root || reducedMotion() || typeof IntersectionObserver === 'undefined') return;
     const observer = new IntersectionObserver(entries => {
-      for (const entry of entries) {
-        if (!entry.isIntersecting) continue;
-        (entry.target as HTMLElement).dataset.in = '';
-        observer.unobserve(entry.target);
-      }
-    }, { rootMargin: '0px 0px -12% 0px', threshold: 0.2 });
+      // Rows that come into view together still play one after another, top to bottom.
+      entries.filter(entry => entry.isIntersecting).forEach((entry, order) => {
+        const node = entry.target as HTMLElement;
+        node.style.setProperty('--stagger', `${order * 220}ms`);
+        node.dataset.in = '';
+        observer.unobserve(node);
+      });
+    }, { rootMargin: '0px 0px -8% 0px', threshold: 0.15 });
     root.querySelectorAll<HTMLElement>('[data-row]').forEach(node => observer.observe(node));
     root.dataset.motion = 'on';
     return () => { observer.disconnect(); delete root.dataset.motion; };
