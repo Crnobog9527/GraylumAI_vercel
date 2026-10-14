@@ -1,31 +1,109 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 /*
- * Sample H's first and second screens. The first fills the screen (Buffer's strategy, Owner 2026-10-14): centred,
- * airy, and it answers what this is (H1), what it does for you (promise, who it is for), why buy (the difference
- * line) and what you get (the result) before any scrolling, then one button. The product demo and the comparison
- * open the second screen. Sizes come from the page's --h-* scale (h.module.css).
+ * Sample H's first and second screens. The first fills the screen (buffer.com as the reference, Owner 2026-10-14):
+ * a centred column answers what this is, what it does for you and for whom, why buy and what you get, every line
+ * paired with something to look at (the four kinds of people as icon chips, a two-message exchange beside the
+ * difference line), and real product pieces float around it on a wide screen with scroll parallax. The product
+ * demo and the comparison open the second screen. Sizes come from the page's --h-* scale (h.module.css).
  */
 .hero {
-  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px;
-  width: 100%; max-width: calc(880px + 2 * var(--h-gutter)); margin: 0 auto; padding: 24px var(--h-gutter) 32px;
+  position: relative; isolation: isolate; display: grid; place-items: center; width: 100%;
   /* One screen minus the header (and the sample switcher above it, which the real page does not have). */
-  min-height: calc(100svh - 104px); text-align: center;
+  min-height: calc(100svh - 104px); padding: 20px var(--h-gutter) 28px;
 }
-.hero > * { min-width: 0; max-width: 100%; margin: 0; text-wrap: balance; }
+/* A very faint grid behind the first screen only, fading out towards its edges. */
+.hero::before {
+  content: ''; position: absolute; inset: -120px 0 0; z-index: -1; pointer-events: none;
+  background:
+    linear-gradient(rgba(var(--h-shade), .05) 1px, transparent 1px) 0 0 / 48px 48px,
+    linear-gradient(90deg, rgba(var(--h-shade), .05) 1px, transparent 1px) 0 0 / 48px 48px;
+  mask-image: radial-gradient(70% 62% at 50% 46%, #000 30%, transparent 100%);
+}
+.center {
+  position: relative; z-index: 1; display: flex; flex-direction: column; align-items: center; gap: 12px;
+  width: 100%; max-width: 660px; text-align: center;
+}
+.center > * { min-width: 0; max-width: 100%; margin: 0; }
 .title {
   font-family: var(--h-display-face); font-size: var(--h-fs-hero); font-weight: 900; letter-spacing: -.02em;
-  line-height: 1.12; word-break: keep-all; perspective: 800px;
+  line-height: 1.12; text-wrap: balance; word-break: keep-all; perspective: 800px;
 }
-.promise { color: var(--h-ink); font-size: clamp(19px, 2vw, 26px); font-weight: 700; line-height: 1.5; }
-.audience { max-width: 40em; color: var(--h-muted); font-size: var(--h-fs-body); line-height: 1.7; }
-.summary { max-width: 32em; color: var(--h-body); font-size: var(--h-fs-body); font-weight: 600; line-height: 1.7; }
-.difference {
-  margin-top: 8px !important; max-width: 22em; font-family: var(--h-display-face); font-size: clamp(21px, 2.3vw, 30px);
-  font-weight: 900; letter-spacing: -.01em; line-height: 1.4;
+.promise { color: var(--h-ink); font-size: clamp(18px, 1.8vw, 24px); font-weight: 700; line-height: 1.5; text-wrap: balance; }
+
+/* Who it is for: the Owner's four questions, one chip each */
+.people { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; width: 100%; margin-top: 4px !important; padding: 0; list-style: none; }
+.people li {
+  display: flex; align-items: center; gap: 8px; min-height: 40px; padding: 7px 12px; border: 1px solid var(--h-line);
+  border-radius: 12px; background: #fff; color: var(--h-body); font-size: 14px; line-height: 1.45; text-align: left;
+  box-shadow: 0 1px 2px rgba(var(--h-shade), .04);
 }
-.result { color: var(--h-accent); font-size: var(--h-fs-lede); font-weight: 700; line-height: 1.5; }
-.actions { display: grid; justify-items: center; gap: 10px; margin-top: 10px !important; }
+.people svg { flex: none; color: var(--h-ink); }
+.summary { color: var(--h-body); font-size: var(--h-fs-body); font-weight: 600; line-height: 1.65; text-wrap: balance; }
+
+/* Why buy: the difference line beside a two-message exchange */
+.why { display: grid; gap: 12px; width: 100%; margin-top: 10px !important; }
+.difference { margin: 0; font-size: clamp(20px, 2vw, 26px); font-weight: 800; letter-spacing: -.01em; line-height: 1.45; text-wrap: balance; }
+.exchange { position: relative; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; text-align: left; }
+.exchange > div { display: grid; align-content: start; gap: 4px; padding: 10px 12px; border-radius: 14px; font-size: 13.5px; line-height: 1.6; }
+.exchange span { color: var(--h-muted); font-size: 12px; font-weight: 600; }
+.exchange p { margin: 0; }
+.generic { border: 1px dashed rgba(var(--h-shade), .22); color: var(--h-muted); }
+.coach { border: 1px solid var(--h-line); background: #fff; color: var(--h-ink); box-shadow: 0 10px 24px -18px rgba(var(--h-shade), .35); }
+.coach em {
+  justify-self: start; margin-top: 4px; padding: 2px 8px; border-radius: 8px; background: var(--h-accent-soft); color: var(--h-accent);
+  font-size: 12.5px; font-style: normal; font-weight: 600;
+}
+.exchange > .sample {
+  position: absolute; top: -9px; right: 10px; padding: 0 7px; border-radius: 999px; background: var(--gl-accent-tag); color: var(--gl-accent-tag-text);
+  font-size: 11px; font-weight: 500; line-height: 18px;
+}
+
+.result { margin-top: 6px !important; color: var(--h-ink); font-size: var(--h-fs-lede); font-weight: 700; line-height: 1.5; }
+.result::before { content: ''; display: inline-block; width: 8px; height: 8px; margin-right: 10px; border-radius: 50%; background: #ffbb17; vertical-align: 2px; }
+.actions { display: grid; justify-items: center; gap: 8px; margin-top: 8px !important; }
 .note { margin: 0; color: var(--h-muted); font-size: var(--h-fs-small); line-height: 1.6; }
+
+/* Real product pieces around the text, on a screen wide enough to hold them beside the 660px column */
+.floats { display: none; }
+@media (min-width: 1280px) {
+  .floats { position: absolute; inset: 0; z-index: 0; display: block; pointer-events: none; }
+  .float { position: absolute; width: 292px; }
+  .float[data-slot='question'] { top: 9%; left: max(28px, calc(50% - 690px)); }
+  .float[data-slot='summary'] { top: 55%; left: max(52px, calc(50% - 650px)); width: 280px; }
+  .float[data-slot='checklist'] { top: 7%; right: max(28px, calc(50% - 690px)); width: 270px; }
+  .float[data-slot='report'] { top: 58%; right: max(48px, calc(50% - 660px)); width: 268px; }
+}
+.floatCard {
+  position: relative; padding: 12px; border: 1px solid var(--h-line); border-radius: 16px; background: #fff; color: #262626;
+  font-size: 13px; text-align: left; box-shadow: 0 2px 4px rgba(var(--h-shade), .04), 0 24px 48px -28px rgba(var(--h-shade), .38);
+}
+.float[data-slot='question'] .floatCard { transform: rotate(-2deg); }
+.float[data-slot='summary'] .floatCard { transform: rotate(1.5deg); }
+.float[data-slot='checklist'] .floatCard { transform: rotate(2deg); }
+.float[data-slot='report'] .floatCard { transform: rotate(-1.5deg); }
+.sample {
+  position: absolute; top: -9px; right: 12px; z-index: 1; padding: 0 7px; border-radius: 999px; background: var(--gl-accent-tag);
+  color: var(--gl-accent-tag-text); font-size: 11px; line-height: 18px;
+}
+.message { display: grid; gap: 6px; }
+.messageTitle { margin: 0; font-weight: 700; }
+.messageList { display: grid; gap: 2px; margin: 0; padding-left: 1.1em; color: #444; line-height: 1.6; }
+.checklist { height: auto; }
+.checklist > header { padding: 2px 4px 10px !important; }
+.checklist > div { padding: 0 !important; overflow: visible !important; }
+.report { display: grid; gap: 4px; }
+.reportTitle { margin: 0 0 4px; font-size: 14px; font-weight: 700; }
+.reportHeading { margin: 6px 0 0; color: #666; font-size: 12px; font-weight: 600; }
+.reportText { margin: 0; line-height: 1.6; }
+
+@media (max-width: 767px) {
+  .center { gap: 9px; }
+  .people { gap: 6px; }
+  .people li { min-height: 0; padding: 6px 9px; font-size: 13px; gap: 6px; }
+  .people svg { width: 14px; height: 14px; }
+  .why { gap: 9px; margin-top: 4px !important; }
+  .exchange > div { padding: 8px 10px; font-size: 12.5px; }
+}
 
 /* Second screen */
 .band { display: grid; grid-template-columns: minmax(0, 1fr); gap: calc(var(--h-card-gap) * 2); }
@@ -42,12 +120,22 @@
 .table td:last-child { color: var(--h-ink); font-weight: 600; }
 @media (max-width: 767px) { .table th, .table td { padding: 10px 12px; font-size: 14px; } }
 
-/* The first screen's text slides up once on load but never starts transparent, so it paints at once. */
+/* The first screen's text slides up once on load but never starts transparent, so it paints at once; the
+   product pieces rise in after it, then drift with the scroll (depthClass.parallax). */
 @media (prefers-reduced-motion: no-preference) {
-  .promise, .audience, .summary, .difference, .result, .actions { animation: slideIn .9s var(--h-ease) both; }
+  .promise, .people, .summary, .why, .result, .actions { animation: slideIn .9s var(--h-ease) both; }
   .promise { animation-delay: .1s; }
-  .audience, .summary { animation-delay: .16s; }
-  .difference { animation-delay: .22s; }
+  .people, .summary { animation-delay: .16s; }
+  .why { animation-delay: .22s; }
   .result, .actions { animation-delay: .28s; }
+  .floatCard { animation: floatIn 1.1s var(--h-ease) both; }
+  .float[data-slot='question'] .floatCard { animation-delay: .35s; --tilt: -2deg; }
+  .float[data-slot='checklist'] .floatCard { animation-delay: .45s; --tilt: 2deg; }
+  .float[data-slot='summary'] .floatCard { animation-delay: .55s; --tilt: 1.5deg; }
+  .float[data-slot='report'] .floatCard { animation-delay: .65s; --tilt: -1.5deg; }
 }
 @keyframes slideIn { from { transform: translate3d(0, 14px, 0); } to { transform: none; } }
+@keyframes floatIn {
+  from { opacity: 0; transform: translate3d(0, 28px, 0) rotate(var(--tilt, 0deg)) scale(.96); }
+  to { opacity: 1; transform: rotate(var(--tilt, 0deg)); }
+}

@@ -1,41 +1,33 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import Link from 'next/link';
-import { ArrowRight } from 'lucide-react';
 import light from '@/components/design/light-tokens.module.css';
 import { displayFont } from '@/components/landing/preview-d/display-font';
-import { AuroraBackdrop } from '@/components/public-site/motion/AuroraBackdrop';
 import { DepthStage } from '@/components/public-site/motion/DepthStage';
-import { SplitText } from '@/components/public-site/motion/depth-text';
 import { LOGIN_HREF, SITE_CHROME } from '@/components/public-site/site-chrome';
 import { HERO, HERO_H } from '@/lib/landing/landing-copy';
 import type { buildLandingPageData } from '@/lib/landing/landing-page-data';
 import { SIGNUP_CTA_HREF } from '@/lib/seo/content/shared';
 import { cn } from '@/lib/utils';
 import { DiffBandH } from './DiffBandH';
+import { HeroH } from './HeroH';
 import { PriceH } from './PriceH';
-import { PaletteSwitchH } from './PaletteSwitchH';
 import { FaqH, FinalH, HowItWorksH, VoiceWallH } from './SectionsH';
 import styles from './h.module.css';
-import hero from './hero-h.module.css';
-import palettes from './palettes-h.module.css';
 
 const CHROME = SITE_CHROME['zh-Hans'];
 const SAMPLES = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'] as const;
 export type LandingData = ReturnType<typeof buildLandingPageData>;
 
 /**
- * Style sample H, "流光与层次": soft light and shade over a pale paper (AuroraBackdrop, one state per stretch of
- * the page from top to bottom; three candidate palettes, PaletteSwitchH), frosted-glass sheets stacked at
- * different depths, and motion throughout — the title rising in character by character, cards tilting up out of
- * depth as they scroll in and leaning toward the mouse, a glow that follows the pointer, the nine scenes typed out
- * message by message, prices rolling in like an odometer. The server HTML is the finished page; with reduced
- * motion everything is simply there.
+ * Style sample H, redesigned after the Owner's review of 2026-10-14 (buffer.com as the reference): a clean
+ * near-white page with a faint grid, a full first screen that answers the four questions with real product pieces
+ * floating around the text (HeroH), the product at work on the second screen (DiffBandH), and parallax on the
+ * pieces that suit it. The server HTML is the finished page; with reduced motion everything is simply there.
  * Copy and section order are the landing page's.
  */
 export function SampleH({ data, siteName, membershipHref }: { data: LandingData; siteName: string; membershipHref: string }) {
   return (
-    <DepthStage className={cn(light.light, displayFont.variable, palettes.palette, styles.page)}>
-      <AuroraBackdrop />
+    <DepthStage className={cn(light.light, displayFont.variable, styles.page)}>
       <nav aria-label="样稿切换" className={styles.sampleBar}>
         <span>不公开的风格样稿，文案为定稿原文</span>
         {SAMPLES.map(id => (
@@ -59,20 +51,7 @@ export function SampleH({ data, siteName, membershipHref }: { data: LandingData;
       </header>
 
       <main className={styles.main}>
-        <section aria-labelledby="hero-title" className={hero.hero}>
-          <h1 id="hero-title" className={hero.title}><SplitText text={HERO.title} mode="load" /></h1>
-          <p className={hero.promise}>{HERO.promise}</p>
-          <p className={hero.audience}>{HERO_H.audience}</p>
-          <p className={hero.summary}>{HERO_H.audienceSummary}</p>
-          <p className={hero.difference}>{HERO_H.difference}</p>
-          <p className={hero.result}>{HERO_H.result}</p>
-          <div className={hero.actions}>
-            <Link href={SIGNUP_CTA_HREF} className={cn(styles.pill, styles.pillInk, styles.pillLarge, styles.pillGlow)}>
-              {HERO.primaryCta}<ArrowRight size={17} aria-hidden="true" />
-            </Link>
-            <p className={hero.note}>{HERO_H.ctaNote}</p>
-          </div>
-        </section>
+        <HeroH />
         <DiffBandH />
 
         <VoiceWallH notes={data.notes} />
@@ -89,7 +68,6 @@ export function SampleH({ data, siteName, membershipHref }: { data: LandingData;
         </nav>
         <p>© 2026 Grayscale Luminary LLC</p>
       </footer>
-      <PaletteSwitchH />
     </DepthStage>
   );
 }

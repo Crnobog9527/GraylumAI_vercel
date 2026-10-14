@@ -1,13 +1,35 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 /*
- * Style sample H, "流光与层次" (not public). A pale paper under soft light and shade (AuroraBackdrop), frosted
- * glass sheets at several depths, and one quiet accent per palette for light edges, orbs and indicators.
- * Ink appears only in small marks: the buttons, your chat bubbles, a tag. Colors (--h-canvas, --h-ink, --h-accent,
- * --h-ring, --h-iris …) come from the palette on the page, palettes-h.module.css.
- * Density stays SaaS: headings under 6rem, sections 40–88px apart, selling content inside each section's first
- * screen. Base colors come from --gl-*; --h-* are this sample's own. Motion classes come from depth-motion.
+ * Style sample H (not public), after buffer.com: a near-white neutral page with a faint grid, white cards with a
+ * hairline and a soft offset shadow, ink for text and buttons, and the brand gold only on a few small marks
+ * (the recommended option, focus, step markers). Ink appears only in small marks: the buttons, your chat bubbles.
+ * Base colors come from --gl-*; --h-* are this sample's own. Motion classes come from depth-motion.
  */
 .page {
+  /* One neutral palette (the Owner dropped the tinted ones on 2026-10-14). Triplets are used as rgba(var(--x), a). */
+  --h-canvas: #fafaf9;
+  --h-ink: #181817;
+  --h-body: #3a3a37;
+  --h-muted: #62625e;
+  --h-shade: 24, 24, 22;
+  --h-line: rgba(var(--h-shade), .1);
+  --h-accent: #8a5a00;
+  --h-accent-rgb: 255, 187, 23;
+  --h-accent-soft: rgba(255, 187, 23, .16);
+  --h-ring: #a87200;
+  --h-selection: #ffe8a8;
+  --h-iris: linear-gradient(135deg, #ffd24d 0%, #ffbb17 100%);
+  --h-iris-conic: conic-gradient(from 0deg, rgba(255, 187, 23, 0) 0deg, #ffbb17 90deg, rgba(255, 187, 23, 0) 180deg,
+    rgba(255, 187, 23, 0) 360deg);
+  --h-mark-ink: #181817;
+  --h-note-bg: #f3f3f1;
+  --h-note-ink: #262624;
+  --h-note-meta: #5c5c58;
+  --h-doc-tint: #f1f1ee;
+  --h-dot-1: #dededa;
+  --h-dot-2: #cfcfca;
+  --h-dot-3: #ffbb17;
+  --h-ink-hover: #33332f;
   --h-ease: cubic-bezier(.16, 1, .3, 1);
   --h-display-face: var(--d-display), 'MiSans', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
   --h-blur: 20px;
@@ -50,13 +72,11 @@
 }
 .sampleBar, .header, .main, .footer { position: relative; z-index: 1; }
 
-/* Frosted glass: the one surface of this sample */
+/* The card surface: white, a hairline and a soft offset shadow */
 .glass {
-  border: 1px solid rgba(255, 255, 255, .78);
-  background: rgba(255, 255, 255, .56);
-  backdrop-filter: blur(var(--h-blur)) saturate(1.6);
-  -webkit-backdrop-filter: blur(var(--h-blur)) saturate(1.6);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .95), 0 0 0 1px rgba(var(--h-shade), .05), 0 28px 56px -34px rgba(var(--h-shade), .34);
+  border: 1px solid var(--h-line);
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(var(--h-shade), .04), 0 14px 32px -20px rgba(var(--h-shade), .22);
 }
 
 /* Sample switcher: only on the samples, not part of the design. */

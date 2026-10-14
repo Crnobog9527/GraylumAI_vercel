@@ -57,6 +57,20 @@ export const H_COMPARE = {
   ],
 } as const;
 
+/**
+ * The first screen's small exchange beside the difference line (sample H). NEW WORDING for the Owner to approve:
+ * the general AI's answer is a made-up sample of "正确的废话"; the coach's side is the demo's real question card
+ * (QUESTION_ONE in components/landing/demo/demo-script.ts, checked by a test) and its recommended option.
+ */
+export const H_HERO_EXCHANGE = {
+  label: '示例',
+  genericWho: '通用 AI',
+  generic: '做自媒体要找准定位、持续输出优质内容、多和粉丝互动。',
+  coachWho: '教练',
+  coach: '你在工作里，最常被身边的人问到的是哪类问题？',
+  coachPick: '推荐：怎么在加拿大入行做牙科助理',
+} as const;
+
 export type VoiceNote = Gated & {
   id: string;
   quote: string;
