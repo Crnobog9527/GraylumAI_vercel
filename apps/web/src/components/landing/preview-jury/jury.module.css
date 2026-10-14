@@ -91,7 +91,7 @@
   .main:has(.floorLive) { padding-bottom: 12px; }
 }
 
-.side { grid-template-rows: auto minmax(0, 1fr); scroll-margin-top: 12px; }
+.side { grid-template-rows: auto minmax(0, 1fr); scroll-margin-top: calc(var(--j-bar, 0px) + 12px); }
 .sideHint { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 0; color: var(--j-muted); font-size: 12.5px; }
 .backToRoom, .closeDrawer {
   display: none; flex: none; align-items: center; gap: 4px; min-height: 32px; padding: 0 12px; border: 1px solid var(--j-rule);
@@ -159,7 +159,8 @@
 .staticRecords h2 { margin: 0; font-size: 18px; font-weight: 600; }
 .staticColumns { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; align-items: start; }
 .staticRecord {
-  display: grid; gap: 12px; padding: 16px; border: 1px solid var(--j-rule); border-radius: 8px; background: var(--j-paper); scroll-margin-top: 12px;
+  display: grid; gap: 12px; padding: 16px; border: 1px solid var(--j-rule); border-radius: 8px; background: var(--j-paper);
+  scroll-margin-top: calc(var(--j-bar, 0px) + 12px);
 }
 .staticRecord h3 { display: flex; align-items: center; gap: 8px; margin: 0; font-size: 15px; font-weight: 600; overflow-wrap: anywhere; }
 @media (max-width: 1279px) { .staticColumns { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
@@ -167,6 +168,9 @@
 @media (max-width: 767px) {
   .toolbar, .main, .sampleBar { --j-gutter: 16px; }
   .toolbar { position: static; gap: 8px; padding-block: 12px 8px; }
+  /* The toolbar scrolls away on a phone, so scroll targets need no room for it. */
+  .floor { scroll-margin-top: 8px; }
+  .side, .staticRecord { scroll-margin-top: 12px; }
   .toolRow { display: grid; gap: 8px; }
   .title { font-size: 19px; white-space: normal; }
   .scenarios { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
