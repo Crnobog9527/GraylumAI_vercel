@@ -68,6 +68,8 @@ CREATE TABLE IF NOT EXISTS public.research_account_fetches (
   -- The last successful (paid) evidence; a later refresh replaces it only when that refresh succeeds.
   last_success jsonb CHECK (last_success IS NULL OR (jsonb_typeof(last_success)='object' AND octet_length(last_success::text)<=8192)),
   last_success_execution_id uuid REFERENCES public.runtime_executions(id),
+  -- The refresh grant a prepared attempt consumed; retrying with it after a crash takes the attempt over.
+  refresh_id uuid,
   created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now(),
   UNIQUE (session_id, platform, account)
 );
@@ -94,8 +96,9 @@ END $$;
 CREATE OR REPLACE FUNCTION public.research_session_owned(a uuid, s uuid, e uuid) RETURNS void
 LANGUAGE plpgsql SET search_path=public,pg_temp AS $$
 BEGIN
-  PERFORM bill2_actor(a);
+  -- Lock first, then check: an account closed while we waited for the lock is refused here.
   PERFORM id FROM profiles WHERE id=a FOR SHARE;
+  PERFORM bill2_actor(a);
   PERFORM id FROM runtime_sessions WHERE id=s AND actor_id=a FOR SHARE;
   IF e IS NOT NULL THEN PERFORM id FROM runtime_executions WHERE id=e AND actor_id=a FOR SHARE;END IF;
   IF NOT EXISTS(SELECT 1 FROM runtime_sessions x WHERE x.id=s AND x.actor_id=a AND x.content_deleted_at IS NULL AND x.erased_at IS NULL)
@@ -271,14 +274,16 @@ BEGIN
   IF p_refresh IS NOT NULL THEN
     SELECT * INTO g FROM research_refresh_grants WHERE id=p_refresh AND actor_id=a AND session_id=s FOR UPDATE;
     IF g.id IS NULL OR g.platform<>p_platform OR g.account<>p_account THEN RAISE EXCEPTION 'RESEARCH_REFRESH_INVALID';END IF;
-    IF g.used_at IS NOT NULL THEN RAISE EXCEPTION 'RESEARCH_REFRESH_USED';END IF;
-    IF f.state IN ('prepared','in_progress') THEN RETURN jsonb_build_object('claimed',false,'fetchId',f.id,'state',f.state,'evidence',f.last_success);END IF;
-    UPDATE research_refresh_grants SET used_at=clock_timestamp(),used_execution_id=e WHERE id=g.id;
+    -- A grant used by an attempt that never got sent (crash before dispatch) may claim that attempt again.
+    IF g.used_at IS NOT NULL AND NOT (f.state='prepared' AND f.refresh_id=g.id) THEN RAISE EXCEPTION 'RESEARCH_REFRESH_USED';END IF;
+    IF f.state='in_progress' OR (f.state='prepared' AND f.refresh_id IS DISTINCT FROM g.id) THEN
+      RETURN jsonb_build_object('claimed',false,'fetchId',f.id,'state',f.state,'evidence',f.last_success);END IF;
+    UPDATE research_refresh_grants SET used_at=coalesce(used_at,clock_timestamp()),used_execution_id=coalesce(used_execution_id,e) WHERE id=g.id;
   ELSIF f.state='in_progress' OR (f.state<>'prepared' AND (f.last_success IS NOT NULL OR f.state<>'failed')) THEN
     RETURN jsonb_build_object('claimed',false,'fetchId',f.id,'state',f.state,'evidence',f.last_success);
   END IF;
   -- Every paid attempt gets its own token, so a late result of an earlier attempt can never finish this one.
-  UPDATE research_account_fetches SET state='prepared',execution_id=e,evidence=NULL,attempt=gen_random_uuid(),
+  UPDATE research_account_fetches SET state='prepared',execution_id=e,evidence=NULL,attempt=gen_random_uuid(),refresh_id=p_refresh,
     updated_at=clock_timestamp() WHERE id=f.id RETURNING * INTO f;
   RETURN jsonb_build_object('claimed',true,'fetchId',f.id,'attempt',f.attempt);
 END $$;
@@ -286,7 +291,12 @@ END $$;
 -- Marks the attempt sent, immediately before the supplier request. Only the latest attempt can be sent, once.
 CREATE OR REPLACE FUNCTION public.research_account_fetch_dispatch(a uuid, p_fetch uuid, p_attempt uuid) RETURNS boolean
 LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
+DECLARE f research_account_fetches;
 BEGIN
+  SELECT * INTO f FROM research_account_fetches WHERE id=p_fetch AND actor_id=a;
+  IF f.id IS NULL THEN RETURN false;END IF;
+  -- Same checks and locks as every write: a closed account or a deleted conversation sends nothing.
+  PERFORM research_session_owned(a,f.session_id,NULL);
   UPDATE research_account_fetches SET state='in_progress',updated_at=clock_timestamp()
   WHERE id=p_fetch AND actor_id=a AND attempt=p_attempt AND state='prepared';
   RETURN FOUND;
@@ -295,7 +305,9 @@ END $$;
 CREATE OR REPLACE FUNCTION public.research_account_fetch_finish(a uuid, p_fetch uuid, p_attempt uuid, p_state text, p_evidence jsonb)
 RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
 BEGIN
-  IF p_state NOT IN ('succeeded','unknown','failed') THEN RAISE EXCEPTION 'RESEARCH_FETCH_INVALID';END IF;
+  -- A success must carry its evidence: a paid result without it could be neither reused nor refreshed.
+  IF p_state NOT IN ('succeeded','unknown','failed') OR (p_state='succeeded' AND jsonb_typeof(p_evidence) IS DISTINCT FROM 'object')
+  THEN RAISE EXCEPTION 'RESEARCH_FETCH_INVALID';END IF;
   -- A sent attempt ends in any state; an attempt never sent can only end as a (free) failure.
   UPDATE research_account_fetches SET state=p_state,evidence=p_evidence,updated_at=clock_timestamp(),
     last_success=CASE WHEN p_state='succeeded' THEN p_evidence ELSE last_success END,

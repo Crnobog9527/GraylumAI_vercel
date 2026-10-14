@@ -134,8 +134,15 @@ export async function researchRuntimeCases({db,Client,connectionString,report,cr
     assert.deepEqual([after.claimed,after.evidence],[false,{operations:['op-1']}],'a failed refresh keeps the earlier paid evidence');
     // A refresh that succeeds replaces it.
     const grant2 = await rpc(db,'research_refresh_create',f.actor,f.session,'tiktok','alpha');
+    const crashedRefresh = await rpc(db,'research_account_fetch_claim',f.actor,f.session,f.execution,'tiktok','alpha',grant2);
+    // A crash before sending the refresh: the same grant takes the attempt over (new token); another grant cannot.
     const r2 = await rpc(db,'research_account_fetch_claim',f.actor,f.session,f.execution,'tiktok','alpha',grant2);
+    assert.equal(r2.claimed,true);
+    assert.notEqual(r2.attempt,crashedRefresh.attempt);
+    assert.equal(await rpc(db,'research_account_fetch_dispatch',f.actor,first.fetchId,crashedRefresh.attempt),false);
     await rpc(db,'research_account_fetch_dispatch',f.actor,first.fetchId,r2.attempt);
+    await assert.rejects(rpc(db,'research_account_fetch_claim',f.actor,f.session,f.execution,'tiktok','alpha',grant2),/RESEARCH_REFRESH_USED/);
+    await assert.rejects(rpc(db,'research_account_fetch_finish',f.actor,first.fetchId,r2.attempt,'succeeded',null),/RESEARCH_FETCH_INVALID/);
     await rpc(db,'research_account_fetch_finish',f.actor,first.fetchId,r2.attempt,'succeeded',{operations:['op-2']});
     assert.deepEqual((await rpc(db,'research_account_fetch_claim',f.actor,f.session,f.execution,'tiktok','alpha',null)).evidence,{operations:['op-2']});
     await assert.rejects(rpc(db,'research_refresh_create',other.actor,f.session,'tiktok','alpha'),/RESEARCH_SCOPE_DENIED|RESEARCH_REFRESH_INVALID/);
@@ -152,6 +159,12 @@ export async function researchRuntimeCases({db,Client,connectionString,report,cr
     const own = await claimTool(db,f,1,{},false);
     await assert.rejects(linkedOperation(db,f,own.id,null,'e'.repeat(64)),/RESEARCH_LINK_CONFLICT/);
     await linkedOperation(db,f,own.id,null);
+    // A claim made before the account was closed sends nothing afterwards: dispatch re-checks the account.
+    const closing = await session(db,createFixture);
+    const pending = await rpc(db,'research_account_fetch_claim',closing.actor,closing.session,closing.execution,'tiktok','zeta',null);
+    await db.query("UPDATE profiles SET status='suspended' WHERE id=$1",[closing.actor]);
+    await assert.rejects(rpc(db,'research_account_fetch_dispatch',closing.actor,pending.fetchId,pending.attempt),/BILL2_ACTOR_DENIED/);
+    await db.query("UPDATE profiles SET status='active' WHERE id=$1",[closing.actor]);
     // Writes after a conversation was marked deleted are refused (they lock and re-check the marker).
     const gone = await session(db,createFixture);
     await rpc(db,'content_erasure_mark_session',gone.actor,gone.session);
