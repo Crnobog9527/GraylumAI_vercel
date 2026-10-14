@@ -6,6 +6,8 @@
  */
 
 /* Feature scenes: text and a conversation window side by side, alternating sides on a wide screen */
+/* Headings break between phrases, never inside a word. */
+.phrase { display: inline-block; }
 .scenes { display: grid; gap: 72px; margin: 0; padding: 0; list-style: none; }
 @media (max-width: 767px) { .scenes { gap: 48px; } }
 .scene { display: grid; gap: 24px; align-items: center; }
@@ -38,7 +40,7 @@
 .chips i { padding: 2px 10px; border: 1px solid #e3e3e0; border-radius: 999px; background: #fff; font-style: normal; }
 
 /* The four-row comparison: one plain table */
-.compareTitle { margin: 0 0 32px; max-width: 18em; font-size: clamp(30px, 4.2vw, 60px); font-weight: 600; line-height: 1.1; letter-spacing: -.045em; text-wrap: balance; }
+.compareTitle { margin: 0 0 32px; max-width: 18em; font-size: clamp(36px, 5vw, 72px); font-weight: 600; line-height: 1.08; letter-spacing: -.04em; text-wrap: balance; }
 .table { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: clamp(15px, 1.3vw, 18px); line-height: 1.6; }
 .table th { padding: 0 20px 14px 0; color: var(--j-muted); font-size: 15px; font-weight: 500; text-align: left; }
 .table th:last-child { color: var(--j-ink); font-weight: 600; }
@@ -59,8 +61,9 @@
 .compareCost .own { padding-top: 20px; }
 .compareCost .own b { font-size: clamp(22px, 2.4vw, 30px); letter-spacing: -.02em; }
 .checked { margin: 12px 0 0; color: var(--j-muted); font-size: 13px; }
-.founder { margin: 40px 0 0; font-size: 17px; font-weight: 600; }
-.founder span { margin-left: 10px; color: var(--j-muted); font-size: 14px; font-weight: 400; }
+.founder { margin: 40px 0 0; font-size: 17px; font-weight: 600; text-wrap: pretty; }
+.founder span { white-space: nowrap; }
+.founder span { display: inline-block; margin-left: 10px; color: var(--j-muted); font-size: 14px; font-weight: 400; }
 .billing { position: relative; display: grid; grid-template-columns: 1fr 1fr; width: fit-content; margin: 32px 0 20px; padding: 4px; border-radius: 999px; background: #eceae4; }
 .billing label {
   display: flex; align-items: center; justify-content: center; gap: 6px; min-height: 40px; padding: 0 20px; border-radius: 999px;
@@ -68,7 +71,7 @@
 }
 .billing label[data-on] { background: var(--j-ink); color: #fff; }
 .billing label[data-disabled] { cursor: not-allowed; opacity: .45; }
-.billing label span { padding: 0 8px; border-radius: 999px; background: #e3f3e8; color: #1a7f45; font-size: 12px; line-height: 22px; }
+.billing label span { padding: 0 8px; border-radius: 999px; background: var(--j-note); color: var(--j-note-text); font-size: 12px; line-height: 22px; }
 .billing label[data-on] span { background: rgba(255, 255, 255, .16); color: #fff; }
 .plans { display: grid; gap: 16px; }
 .unavailable { margin-top: 32px !important; }
@@ -79,8 +82,8 @@
 .planHead { display: flex; align-items: center; justify-content: space-between; margin: 0; }
 .planHead b { font-size: 26px; font-weight: 600; letter-spacing: -.03em; }
 .planHead span { padding: 0 10px; border-radius: 999px; background: var(--j-gold); color: #1a1a1a; font-size: 12.5px; font-weight: 600; line-height: 24px; }
-.planResult { margin: 0; color: var(--j-body); font-size: 15px; line-height: 1.7; }
-.planTag { width: fit-content; padding: 0 8px; border-radius: 999px; background: #e3f3e8; color: #1a7f45; font-size: 12.5px; font-weight: 600; line-height: 22px; }
+.planResult { margin: 0; color: var(--j-body); font-size: 15px; line-height: 1.7; text-wrap: pretty; }
+.planTag { width: fit-content; padding: 0 8px; border-radius: 999px; background: var(--j-note); color: var(--j-note-text); font-size: 12.5px; font-weight: 600; line-height: 22px; }
 .planPrice { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; margin: 0; }
 .planPrice b { font-size: clamp(42px, 4vw, 56px); font-weight: 600; line-height: 1; letter-spacing: -.04em; }
 .planPrice s, .planPrice span { color: var(--j-muted); font-size: 15px; }
@@ -91,7 +94,7 @@
 .planButton:hover { border-color: var(--j-ink); }
 .planNote { margin: 0; color: var(--j-muted); font-size: 13px; line-height: 1.6; }
 .planFit { margin: 0; padding-top: 12px; border-top: 1px solid var(--j-line); color: var(--j-body); font-size: 14px; }
-.risk { margin-top: 20px; padding: clamp(22px, 3vw, 36px); border-radius: 28px; background: #e5efe6; }
+.risk { margin-top: 20px; padding: clamp(22px, 3vw, 36px); border-radius: 28px; background: #eceae4; }
 .risk h3 { margin: 0 0 12px; font-size: clamp(22px, 2.2vw, 30px); font-weight: 600; letter-spacing: -.03em; }
 .risk ul { display: grid; gap: 10px; margin: 0; padding: 0; list-style: none; }
 @media (min-width: 900px) { .risk ul { grid-template-columns: 1fr 1fr; column-gap: 32px; } }

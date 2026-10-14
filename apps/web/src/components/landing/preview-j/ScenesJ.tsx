@@ -20,7 +20,9 @@ export function ScenesJ({ steps }: { steps: readonly FlowStep[] }) {
     <section aria-labelledby="scenes-title" className={page.section}>
       <div className={page.wrap}>
         <div className={page.sectionHead}>
-          <h2 id="scenes-title" className={page.display}>{J_SCENES.title}</h2>
+          <h2 id="scenes-title" className={page.display}>
+            {J_SCENES.title.split(/(?<=，)/).map(part => <span key={part} className={styles.phrase}>{part}</span>)}
+          </h2>
           <p className={page.lede}>{J_SCENES.lede}</p>
         </div>
         <ol className={styles.scenes}>

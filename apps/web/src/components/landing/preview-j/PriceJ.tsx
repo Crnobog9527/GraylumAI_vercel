@@ -47,7 +47,7 @@ export function PriceJ({ pricing, rows, risk, showResult, founderSeats, membersh
               ))}
               {pricing.proMonthly !== null ? <li className={styles.own}><b>{J_PRICE.ownPrice(formatUsd(pricing.proMonthly))}</b></li> : null}
             </ul>
-            <p className={styles.checked}>{PRICE_COMPARE.sourcesTitle}</p>
+            <p className={styles.checked}>{J_PRICE.checked}</p>
           </div>
         ) : null}
 

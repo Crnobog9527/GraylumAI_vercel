@@ -65,7 +65,7 @@
 .section { padding: 112px 0; scroll-margin-top: 72px; }
 @media (max-width: 767px) { .section { padding: 72px 0; } }
 .display {
-  margin: 0; font-size: clamp(38px, 6.2vw, 92px); font-weight: 600; line-height: 1.06; letter-spacing: -.05em;
+  margin: 0; font-size: clamp(36px, 5vw, 72px); font-weight: 600; line-height: 1.08; letter-spacing: -.04em;
   text-wrap: balance;
 }
 @media (min-width: 768px) { .display { word-break: keep-all; } }
@@ -102,6 +102,8 @@
 @media (prefers-reduced-motion: no-preference) {
   .page[data-motion='on'] .voiceRow:not([data-in]) .note { opacity: 0; translate: 0 24px; }
   .page[data-motion='on'] .voiceRow:not([data-in]) .answer { opacity: 0; translate: -12px 0; }
+  .page[data-motion='on'] .voiceRow:not([data-in]) .arrow { opacity: 0; }
+  .page[data-motion='on'] .voiceRow .arrow { transition: opacity .6s var(--j-ease) .3s; }
   .page[data-motion='on'] .voiceRow .note { transition: opacity .7s var(--j-ease), translate .7s var(--j-ease); }
   .page[data-motion='on'] .voiceRow .answer { transition: opacity .6s var(--j-ease) .45s, translate .6s var(--j-ease) .45s; }
 }

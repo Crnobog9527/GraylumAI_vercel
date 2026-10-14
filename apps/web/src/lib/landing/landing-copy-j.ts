@@ -113,6 +113,8 @@ export const J_PRICE = {
   compareTitle: '正常方案要花多少钱',
   ownPrice: (proMonthly: string) => `Graylum AI：${proMonthly}/月起`,
   sourceLabel: '出处',
+  /** NEW: the check date only (the shared note's "上线前再核对一次" is an internal reminder, not for buyers). */
+  checked: '价格于 2026-10-12 核对',
   more: '看完整价格和权益',
   unavailable: '会员方案暂时读不到，请稍后刷新，或先看价格页。',
 } as const;

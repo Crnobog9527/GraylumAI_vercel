@@ -10,7 +10,7 @@
 @media (min-width: 1024px) { .grid { grid-template-columns: minmax(0, 6fr) minmax(0, 5fr); gap: 56px; } }
 .text { display: grid; gap: 28px; justify-items: start; }
 .title {
-  display: grid; margin: 0; font-size: clamp(48px, 5.9vw, 92px); font-weight: 600; line-height: 1.02; letter-spacing: -.055em;
+  display: grid; margin: 0; font-size: clamp(48px, 5.9vw, 92px); font-weight: 600; line-height: 1.02; letter-spacing: -.04em;
   word-break: keep-all;
 }
 .title span { display: block; }
