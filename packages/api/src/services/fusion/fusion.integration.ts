@@ -91,7 +91,9 @@ beforeAll(async () => {
       messageStressSamples: 12, maxVerifiedMessages: 128, completeCells: 15, variantsPerCell: 4, maxPromptToBytes: 0.5,
       maxPromptToUpper: 0.4, outputLimit: 8192, testedOutputLimit: 512, outputSemantics: 'max-tokens-includes-reasoning',
       includesReasoning: true, cacheCovered: true, costBoundPassed: true } }));
-  const review = { ...DEFAULT_FUSION_SETTINGS.review, enabled: true, reviewerModelIds: models, summaryModelId: models[2], maxBudgetUsd: '5' };
+  const review = { ...DEFAULT_FUSION_SETTINGS.review, enabled: true, reviewerModelIds: models, summaryModelId: models[2], maxBudgetUsd: '5',
+    // Enabling requires a review Skill; group admission itself never reads it.
+    skillId: randomUUID() };
   const values: Record<string, unknown> = { runtime_payg_staging: { version: 1, enabled: true, windowId, profiles },
     billing_credits_per_usd: '100', billing_token_price_multiplier: '3', fusion_compare_max_models: 4,
     [FUSION_SETTINGS_KEY]: { ...DEFAULT_FUSION_SETTINGS, review } };
@@ -161,7 +163,11 @@ it.runIf(staging)('RUNTIME: Fusion admission refuses a disabled switch, a non-al
   const base = { admin, actorId: f.actor, sourceSessionId: f.session, env };
   await expect(admitFusionGroup({ ...base, requestId: randomUUID(), members: [{ ...members()[0]!, modelId: randomUUID() }] }))
     .rejects.toThrow('FUSION_MODEL_DENIED');
+  // A group admitted earlier (say, while the user waited for credits) is not replayed once membership lapses.
+  const earlier = randomUUID();
+  await admitFusionGroup({ ...base, requestId: earlier, members: members() });
   await db.query("update profiles set membership_level='free' where id=$1", [f.actor]);
+  await expect(admitFusionGroup({ ...base, requestId: earlier, members: members() })).rejects.toThrow();
   await expect(admitFusionGroup({ ...base, requestId: randomUUID(), members: members() })).rejects.toThrow();
   await db.query("update profiles set membership_level='gold' where id=$1", [f.actor]);
   const stored = (await db.query('select value from system_settings where key=$1', [FUSION_SETTINGS_KEY])).rows[0].value;
