@@ -353,6 +353,19 @@ DO $$ DECLARE src text;a text:=$x$  OR c.payload#>>'{payg,profileVersion}' IS DI
   END IF;
 END $$;
 
+-- The admin page first reads this snapshot to get the evidence hash and versions; tool calls answer with the
+-- same mapping as the review above (protocol name and frozen price entry hash).
+DO $$ DECLARE src text;p text:=$x$c.payload#>>'{payg,profileVersion}'$x$;e text:=$x$c.payload#>>'{payg,evidenceVersion}'$x$; BEGIN
+  src:=pg_get_functiondef('public.bill2_payg_metering_review_snapshot(uuid,uuid)'::regprocedure);
+  IF position('-- 0255 tool snapshot' IN src)=0 THEN
+    IF array_length(string_to_array(src,p),1)<>3 OR array_length(string_to_array(src,e),1)<>3 THEN
+      RAISE EXCEPTION 'RESEARCH_TOOL_BILLING_SOURCE_MISMATCH: bill2_payg_metering_review_snapshot';END IF;
+    src:=replace(src,p,$x$(CASE WHEN c.call_kind='tool' THEN 'research-tool-v1' ELSE c.payload#>>'{payg,profileVersion}' END)$x$);
+    src:=replace(src,e,$x$(CASE WHEN c.call_kind='tool' THEN c.payload#>>'{toolPricing,entryHash}' ELSE c.payload#>>'{payg,evidenceVersion}' END)$x$);
+    EXECUTE replace(src,'DECLARE c bill2_calls;',E'DECLARE c bill2_calls; -- 0255 tool snapshot\n');
+  END IF;
+END $$;
+
 -- Run creation: a tool route is not an ai_models row. Its frozen policy is checked for shape here;
 -- price, bound and purpose are checked again on every claim (bill2_payg_validate_tool_quote).
 DO $$ DECLARE src text;a text:=$x$  PERFORM id FROM ai_models WHERE id=(entry->>'modelId')::uuid AND model_id=entry->>'model'$x$; BEGIN

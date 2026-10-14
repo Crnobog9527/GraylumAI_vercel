@@ -2642,7 +2642,7 @@
   "fn:bill2_payg_financial_binding(bill2_runs)": "c6515b16f4db",
   "fn:bill2_payg_lock_models(bill2_runs)": "e34331b9c52e",
   "fn:bill2_payg_metering_hash(bill2_calls)": "f8d2d37530de",
-  "fn:bill2_payg_metering_review_snapshot(uuid,uuid)": "9af20566f313",
+  "fn:bill2_payg_metering_review_snapshot(uuid,uuid)": "6d740b6954d4",
   "fn:bill2_payg_nominal(jsonb,jsonb)": "62ad045bdebe",
   "fn:bill2_payg_prices(jsonb,bigint)": "3ce50167ab07",
   "fn:bill2_payg_review_invalidate_call()": "7b170a19a4d6",

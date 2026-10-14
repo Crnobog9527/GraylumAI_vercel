@@ -282,9 +282,12 @@ export async function researchToolCases({db,Client,connectionString,report,creat
     const admin = randomUUID();
     await db.query("INSERT INTO profiles(id,credits,role) VALUES($1,0,'admin')",[admin]);
     const flagged = ids[4];
-    const hash = (await db.query('SELECT bill2_payg_metering_hash(c) h FROM bill2_calls c WHERE id=$1',[flagged])).rows[0].h;
-    await rpc(db,'bill2_payg_review_metering',admin,flagged,randomUUID(),{expectedEvidenceHash:hash,profileVersion:'research-tool-v1',
-      evidenceVersion:f.policy.toolPricing.entryHash,reviewReference:'RT-2 local review',humanReviewed:true});
+    // Same steps as the admin page: read the snapshot, then review with what it returned.
+    const snap = await rpc(db,'bill2_payg_metering_review_snapshot',admin,flagged);
+    assert.deepEqual([snap.profileVersion,snap.evidenceVersion,snap.reviewable,snap.meteringMissing],
+      ['research-tool-v1',f.policy.toolPricing.entryHash,true,true]);
+    await rpc(db,'bill2_payg_review_metering',admin,flagged,randomUUID(),{expectedEvidenceHash:snap.evidenceHash,
+      profileVersion:snap.profileVersion,evidenceVersion:snap.evidenceVersion,reviewReference:'RT-2 local review',humanReviewed:true});
     const reopened = await make({route:f.policy.model});
     // Each fixture appends its route threshold; keep exactly one entry for this reused route.
     await db.query(`UPDATE system_settings SET value=jsonb_set(value,'{thresholds}',(
