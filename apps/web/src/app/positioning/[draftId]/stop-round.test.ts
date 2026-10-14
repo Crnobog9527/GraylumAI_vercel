@@ -24,6 +24,14 @@ describe("round on screen", () => {
     const legacy = liveReplyAfter(startLiveReply(ID), ID, delta("你好", 0, 0))!;
     expect(stopRequestFor(legacy)).toEqual({ executionId: ID, stopAt: 2, source: "assistant" });
   });
+  it("a snapshot without a round clears the stored one; a continuing delta keeps it", () => {
+    const shown = liveReplyAfter(startLiveReply(ID), ID, delta("你好", 0, 0, 1))!;
+    const continued = liveReplyAfter(shown, ID, delta("呀", 2, 0))!;
+    expect(continued).toMatchObject({ text: "你好呀", call: 1 });
+    const replaced = liveReplyAfter(continued, ID, delta("别的轮次", 0, 1))!;
+    expect(replaced.text).toBe("别的轮次");expect(replaced).not.toHaveProperty("call");
+    expect(stopRequestFor(replaced)).not.toHaveProperty("call");
+  });
   it("survives a same-tab reload so a stop on the restored text still names its round", () => {
     const store = new Map<string, string>();
     const storage = { getItem: (k: string) => store.get(k) ?? null, setItem: (k: string, v: string) => void store.set(k, v),

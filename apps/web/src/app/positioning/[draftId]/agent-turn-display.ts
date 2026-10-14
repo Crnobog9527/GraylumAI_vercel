@@ -78,8 +78,15 @@ const sources = new Set<unknown>(["assistant", "message", "final"]);
 function afterDelta(old: LiveReply, event: { text: string; offset: number; rev: number; source?: unknown; call?: unknown }): LiveReply {
   const next = afterTextDelta(old, event);
   // The round of the latest accepted text; a dropped frame does not move it.
-  return next !== old && !next.stalled && Number.isSafeInteger(event.call) && (event.call as number) > 0
-    ? { ...next, call: event.call as number } : next;
+  if (next === old || next.stalled) return next;
+  if (Number.isSafeInteger(event.call) && (event.call as number) > 0) return { ...next, call: event.call as number };
+  // A snapshot without a round (an older server) may be another round's text: the stop then names none.
+  if (event.offset === 0 && next.call !== undefined) {
+    const rest = { ...next };
+    delete rest.call;
+    return rest;
+  }
+  return next;
 }
 
 function afterTextDelta(old: LiveReply, event: { text: string; offset: number; rev: number; source?: unknown }): LiveReply {
