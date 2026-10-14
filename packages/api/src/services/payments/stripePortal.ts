@@ -14,12 +14,13 @@ export type CardPortalSubscription = { localId: string; stripeSubscriptionId: st
  * so its renewal can be restored). Returns null when the user has no open card subscription. */
 export async function loadCardPortalSubscription(db: Pick<SupabaseClient, 'from'>, userId: string, scope: StripeScope)
   : Promise<CardPortalSubscription | null> {
-  const subs = await db.from('user_subscriptions').select('id,cancel_at_period_end,current_period_end')
+  const subs = await db.from('user_subscriptions').select('id,cancel_at_period_end,current_period_end,method_cancel_requested_at')
     .eq('user_id', userId).eq('payment_channel', 'stripe').eq('merchant_namespace', scope.merchant)
     .eq('payment_mode', scope.mode).is('stripe_subscription_id', null).in('status', OPEN_STATUSES).limit(10);
   if (subs.error || !Array.isArray(subs.data)) throw new Error('PAY_COMMON_MAPPING_READ_FAILED');
   const candidates: Array<CardPortalSubscription & { renewing: boolean; end: string }> = [];
-  for (const sub of subs.data as Array<{ id: string; cancel_at_period_end: string | null; current_period_end: string }>) {
+  for (const sub of subs.data as Array<{ id: string; cancel_at_period_end: string | null; current_period_end: string;
+    method_cancel_requested_at?: string | null }>) {
     const [orders, ref] = await Promise.all([
       db.from('payment_orders').select('id').eq('user_id', userId).eq('subscription_id', sub.id)
         .in('payment_method', ['card', 'card_cn']).not('fulfilled_at', 'is', null).limit(100),
@@ -30,7 +31,10 @@ export async function loadCardPortalSubscription(db: Pick<SupabaseClient, 'from'
       throw new Error('PAY_COMMON_MAPPING_READ_FAILED');
     }
     if (!orders.data.length || !ref.data[0]?.external_id) continue;
-    candidates.push({ localId: sub.id, stripeSubscriptionId: ref.data[0].external_id, renewing: sub.cancel_at_period_end !== 'true',
+    // A stop we requested (the Pro an upgrade replaced) counts as stopping even before Stripe confirms it, so a failed
+    // stop never makes both subscriptions look renewing and the portal unavailable.
+    candidates.push({ localId: sub.id, stripeSubscriptionId: ref.data[0].external_id,
+      renewing: sub.cancel_at_period_end !== 'true' && !sub.method_cancel_requested_at,
       orderIds: new Set(orders.data.map(row => row.id as string)), end: sub.current_period_end });
   }
   const renewing = candidates.filter(c => c.renewing);
