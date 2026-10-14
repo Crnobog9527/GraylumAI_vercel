@@ -40,6 +40,10 @@ it('start: refusals come back as fixed codes', async () => {
   const res = await POST(new NextRequest(`${origin}/api/publish-monitor/connect/start`,
     { method: 'POST', headers: { origin }, body: '{}' }));
   expect([res.status, await res.json()]).toEqual([400, { error: 'PUBLISH_MONITOR_ENTITLEMENT_REQUIRED' }]);
+  mocks.start.mockRejectedValue(new Error('PUBLISH_MONITOR_PROVIDER_UNAVAILABLE'));
+  const outage = await POST(new NextRequest(`${origin}/api/publish-monitor/connect/start`,
+    { method: 'POST', headers: { origin }, body: '{}' }));
+  expect(outage.status).toBe(503);
 });
 
 it('callback: without this browser\'s cookie nothing is recorded', async () => {

@@ -78,6 +78,19 @@ describe('publish-monitor connect procedures', () => {
     expect(mocks.urls).toEqual([]);
   });
 
+  it('limits each later step per user before any provider read, and reads at most 20 hinted accounts', async () => {
+    const rpc = vi.fn();
+    mocks.rateLimit.mockRejectedValueOnce(Object.assign(new Error('slow down'), { code: 'TOO_MANY_REQUESTS' }));
+    await expect(caller(rpc, bound).callback({ requestId: request, accountIds: ['spc_1'] })).rejects.toThrow();
+    expect([rpc.mock.calls.length, mocks.urls.length]).toEqual([0, 0]);
+    expect(mocks.rateLimit).toHaveBeenCalledWith(`publish-monitor-callback:${actor}`, 'auth');
+    rpc.mockResolvedValue({ data: { requestId: request, platform: 'facebook', newAccounts: [], ownExisting: [],
+      quarantined: [], ignored: [] }, error: null });
+    for (let i = 0; i < 30; i++) mocks.responses.push(json(404, {}));
+    await caller(rpc, bound).callback({ requestId: request, accountIds: Array.from({ length: 30 }, (_, i) => `spc_${i}`) });
+    expect(mocks.urls).toHaveLength(20);
+  });
+
   it('confirm deletes only unselected accounts still carrying this attempt\'s external_id', async () => {
     const rpc = vi.fn().mockResolvedValue({ data: { connectionId: conn, externalId: EXTERNAL,
       unselected: ['spc_2', 'spc_3', 'spc_4'] }, error: null });

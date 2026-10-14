@@ -63,7 +63,7 @@ export type CandidateView = PendingConnect['candidates'][number] & { username: s
  */
 export async function describeCandidates(client: ClientDeps, pending: PendingConnect): Promise<CandidateView[]> {
   const views: CandidateView[] = [];
-  for (const candidate of pending.candidates.slice(0, 50)) {
+  for (const candidate of pending.candidates.slice(0, 20)) {
     let username: string | null = null;
     if (candidate.kind !== 'unavailable') {
       const account = await getAccount(client, candidate.providerAccountId).catch(() => null);

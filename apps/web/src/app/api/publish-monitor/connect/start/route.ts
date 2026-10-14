@@ -17,7 +17,7 @@ export async function POST(request: NextRequest) {
   } catch (cause) {
     const code = errorCode(cause);
     const status = code === 'LOGIN_REQUIRED' ? 401 : code === 'PUBLISH_MONITOR_PROVIDER_BUSY' ? 429
-      : code === 'PUBLISH_MONITOR_UNAVAILABLE' ? 503 : 400;
+      : code === 'PUBLISH_MONITOR_UNAVAILABLE' || code === 'PUBLISH_MONITOR_PROVIDER_UNAVAILABLE' ? 503 : 400;
     return NextResponse.json({ error: code }, { status });
   }
 }
