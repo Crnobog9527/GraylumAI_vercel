@@ -181,8 +181,10 @@ BEGIN
   RETURN jsonb_build_object('batch',batch,'sourceVersionId',p_source_version_id,'reviewIds',ids,'reason',btrim(p_reason));
 END $$;
 
--- Records the user's per-section choice once, for a completed review whose summary passed. The same request
--- returns the same record; another request after the first is refused. Who and when are set here, so the
+-- Records the user's per-section choice once, for a completed review whose summary passed. A request first
+-- reserves the choice (state reserved) under the row lock before R14 applies or declines anything, then records
+-- the outcome (state recorded); another request is refused from the reservation on, so only one request can make
+-- the external decision. The same request replays. Who and when are set here, so the
 -- choice is auditable: sections adopted and kept, wording-only confirmations, the R14 revision and new version.
 CREATE OR REPLACE FUNCTION public.fusion_review_adoption_record(p_actor_id uuid, p_review_id uuid, p_adoption jsonb)
 RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
@@ -194,8 +196,16 @@ BEGIN
   IF jsonb_typeof(p_adoption) IS DISTINCT FROM 'object' OR coalesce(p_adoption->>'requestId','')!~'^[0-9a-f-]{36}$'
     OR jsonb_typeof(p_adoption->'choices') IS DISTINCT FROM 'array' OR octet_length(p_adoption::text)>65536 THEN
     RAISE EXCEPTION 'FUSION_REVIEW_INVALID'; END IF;
+  IF p_adoption->>'state' IS NULL OR p_adoption->>'state' NOT IN ('reserved','recorded') THEN RAISE EXCEPTION 'FUSION_REVIEW_INVALID'; END IF;
   IF rv.adoption IS NOT NULL THEN
+    -- One request owns the choice: another is refused even while the first is only reserved (#962 review).
     IF rv.adoption->>'requestId' IS DISTINCT FROM p_adoption->>'requestId' THEN RAISE EXCEPTION 'FUSION_REVIEW_ADOPTED'; END IF;
+    -- The owner of a reservation completes it once, with the same choices; a recorded choice never changes.
+    IF rv.adoption->>'state'='reserved' AND p_adoption->>'state'='recorded' THEN
+      IF rv.adoption->'choices' IS DISTINCT FROM p_adoption->'choices' THEN RAISE EXCEPTION 'FUSION_REVIEW_ADOPTED'; END IF;
+      UPDATE fusion_reviews SET adoption=p_adoption||jsonb_build_object('by',p_actor_id,'at',clock_timestamp(),
+        'reservedAt',rv.adoption->'at'),updated_at=clock_timestamp() WHERE id=rv.id RETURNING * INTO rv;
+    END IF;
     RETURN fusion_review_view(rv);
   END IF;
   IF rv.state IS DISTINCT FROM 'completed' OR rv.outcome->>'kind' IS DISTINCT FROM 'revised' THEN RAISE EXCEPTION 'FUSION_REVIEW_INVALID'; END IF;

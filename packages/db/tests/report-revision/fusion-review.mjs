@@ -257,7 +257,7 @@ export async function runFusionReview({db,Client,connectionString,report}) {
   assert.equal(one.reviewId,rv5.reviewId);assert.ok(Array.isArray(one.outputs));
   assert.equal(await service(db,'fusion_review_admin_read',randomUUID()),null);
   // 0256: the per-section choice is recorded once, only for a completed review whose summary passed.
-  const adoption = {requestId:randomUUID(),choices:[{section:'One',use:'revised'}],adopted:['One'],kept:['Two'],revisionId:null,versionId:null};
+  const adoption = {state:'recorded',requestId:randomUUID(),choices:[{section:'One',use:'revised'}],adopted:['One'],kept:['Two'],revisionId:null,versionId:null};
   await assert.rejects(service(db,'fusion_review_adoption_record',f.actor,rv5.reviewId,adoption),/FUSION_REVIEW_INVALID/,'not a revised review');
   await db.query(`UPDATE fusion_reviews SET state='completed',outcome='{"kind":"revised"}',ended_at=now() WHERE id=$1`,[rv5.reviewId]);
   await assert.rejects(service(db,'fusion_review_adoption_record',f.actor,rv5.reviewId,{...adoption,choices:'x'}),/FUSION_REVIEW_INVALID/);
@@ -267,6 +267,17 @@ export async function runFusionReview({db,Client,connectionString,report}) {
   assert.deepEqual((await service(db,'fusion_review_adoption_record',f.actor,rv5.reviewId,adoption)).adoption,recorded.adoption,'same request replays');
   await assert.rejects(service(db,'fusion_review_adoption_record',f.actor,rv5.reviewId,{...adoption,requestId:randomUUID()}),/FUSION_REVIEW_ADOPTED/);
   assert.deepEqual((await service(db,'fusion_review_read',f.actor,rv5.reviewId)).adoption,recorded.adoption);
+  // A reservation blocks every other request before any R14 side effect, and only its owner completes it.
+  await db.query(`UPDATE fusion_reviews SET adoption=NULL WHERE id=$1`,[rv5.reviewId]);
+  const reservation = {...adoption,state:'reserved',requestId:randomUUID()};
+  await service(db,'fusion_review_adoption_record',f.actor,rv5.reviewId,reservation);
+  await assert.rejects(service(db,'fusion_review_adoption_record',f.actor,rv5.reviewId,{...adoption,requestId:randomUUID()}),/FUSION_REVIEW_ADOPTED/,
+    'another request is refused while the first is reserved');
+  await assert.rejects(service(db,'fusion_review_adoption_record',f.actor,rv5.reviewId,{...reservation,state:'recorded',choices:[]}),/FUSION_REVIEW_ADOPTED/,
+    'the reservation is completed with the same choices only');
+  const completed = await service(db,'fusion_review_adoption_record',f.actor,rv5.reviewId,{...reservation,state:'recorded'});
+  assert.equal(completed.adoption.state,'recorded');assert.ok(completed.adoption.reservedAt);
+  await assert.rejects(service(db,'fusion_review_adoption_record',f.actor,rv5.reviewId,{...adoption,state:'bogus'}),/FUSION_REVIEW_INVALID/);
   // 0256 patches fusion_review_start by anchor, keeping guards other migrations injected (0249 read-only drafts).
   const startDef = (await db.query(`SELECT pg_get_functiondef('public.fusion_review_start(uuid,uuid,uuid,uuid,jsonb)'::regprocedure) d`)).rows[0].d;
   assert.match(startDef,/AND breaker_cleared_at IS NULL/);

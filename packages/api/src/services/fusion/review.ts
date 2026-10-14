@@ -174,6 +174,7 @@ export function reviewFlow(deps: { admin: SupabaseClient; actorId: string;
     if (!plan) throw new Error('FUSION_REVIEW_INVALID');
     return { view, merged: applyChoices({ originalBody: src.body, revisedBody: plan.passed.body, plan: plan.sections, choices }) };
   }
+  const recordedChoice = (view: ReviewView) => (view.adoption as { state?: string } | null | undefined)?.state === 'recorded';
   const adopted = (view: ReviewView) => {
     const prior = view.adoption as { versionId?: string | null; adopted?: string[]; kept?: string[] };
     return { state: 'recorded' as const, versionId: prior.versionId ?? null, adopted: prior.adopted ?? [], kept: prior.kept ?? [] };
@@ -255,7 +256,9 @@ export function reviewFlow(deps: { admin: SupabaseClient; actorId: string;
           const opinions = [...(await opinionsOf(view, src, 1)).values()];
           if (!opinions.length) {
             view = await finish(view, 'incomplete', { kind: 'no_opinions' });
-          } else if (opinions.every(opinion => !opinion.issues.length && opinion.decisions.every(d => d.verdict === 'keep'))) {
+          } else if (opinions.length === cfg.reviewers.length
+            && opinions.every(opinion => !opinion.issues.length && opinion.decisions.every(d => d.verdict === 'keep'))) {
+            // Only the whole panel finding nothing ends here; a partial panel goes on to the summary (#962 review).
             view = await finish(view, 'completed', { kind: 'no_change' });
           } else if (cfg.maxRounds >= 2 && opinions.length >= 2 && hasDisagreement(opinions)) {
             // Round 2 only on a real split over a key decision (Owner 2026-10-14): each reviewer answers the others.
@@ -303,9 +306,9 @@ export function reviewFlow(deps: { admin: SupabaseClient; actorId: string;
      * applied here. Choosing to keep every section records the choice at once (nothing to confirm). */
     async adopt(input: { reviewId: string; requestId: string; choices: AdoptionChoice[] }) {
       const { view, merged } = await adoptionInput(input);
-      if (view.adoption) return adopted(view);
+      if (recordedChoice(view)) return adopted(view);
       if (!merged.adopted.length) {
-        await record.recordAdoption(view.reviewId, { requestId: input.requestId, choices: input.choices, decision: 'kept',
+        await record.recordAdoption(view.reviewId, { state: 'recorded', requestId: input.requestId, choices: input.choices, decision: 'kept',
           adopted: [], kept: merged.kept, revisionId: null, versionId: null });
         return { state: 'recorded' as const, versionId: null, adopted: [], kept: merged.kept };
       }
@@ -318,10 +321,14 @@ export function reviewFlow(deps: { admin: SupabaseClient; actorId: string;
     async confirmAdoption(input: { reviewId: string; requestId: string; choices: AdoptionChoice[]; expectedDiffHash: string;
       decision: 'apply' | 'decline' }) {
       const { view, merged } = await adoptionInput(input);
-      if (view.adoption) return adopted(view);
+      if (recordedChoice(view)) return adopted(view);
       if (!merged.adopted.length || !deps.apply || !deps.decline) throw new Error('FUSION_ADOPTION_INVALID');
       const proposal = await proposeMerged(view, input.requestId, merged);
       if (proposal.diffHash !== input.expectedDiffHash) throw new Error('FUSION_ADOPTION_STALE');
+      // Reserve the choice under the review lock before R14 decides anything: a concurrent request is refused from
+      // here on, so the formal version and the recorded choice can never disagree (#962 review).
+      await record.recordAdoption(view.reviewId, { state: 'reserved', requestId: input.requestId, choices: input.choices,
+        decision: input.decision });
       const decisionId = derivedUuid(`${view.reviewId}:adopt:${input.requestId}:${input.decision}`);
       let versionId: string | null = null;
       if (input.decision === 'apply') {
@@ -329,7 +336,7 @@ export function reviewFlow(deps: { admin: SupabaseClient; actorId: string;
           requestId: decisionId }));
       } else await deps.decline({ draftId: view.draftId, revisionId: proposal.revisionId, requestId: decisionId });
       const applied = input.decision === 'apply';
-      await record.recordAdoption(view.reviewId, { requestId: input.requestId, choices: input.choices, decision: input.decision,
+      await record.recordAdoption(view.reviewId, { state: 'recorded', requestId: input.requestId, choices: input.choices, decision: input.decision,
         adopted: applied ? merged.adopted : [], kept: applied ? merged.kept : [...merged.adopted, ...merged.kept],
         revisionId: proposal.revisionId, versionId });
       return { state: 'recorded' as const, versionId, adopted: applied ? merged.adopted : [],

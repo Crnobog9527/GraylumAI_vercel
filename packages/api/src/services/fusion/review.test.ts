@@ -46,7 +46,9 @@ vi.mock('./reviewRecord', async original => {
       outcome: null, revisionId: null, endedAt: null, adoption: null }; return view(); },
     read: async () => db.review ? view() : null,
     recordAdoption: async (_id: string, adoption: Record<string, unknown>) => {
-      if (!db.review!.adoption) db.review!.adoption = { ...adoption, at: clock.next() };
+      const prior = db.review!.adoption as Record<string, unknown> | null;
+      if (prior && prior.requestId !== adoption.requestId) throw new Error('FUSION_REVIEW_ADOPTED');
+      if (!prior || (prior.state === 'reserved' && adoption.state === 'recorded')) db.review!.adoption = { ...adoption, at: clock.next() };
       return view();
     },
     replay: async (input: { requestId: string }) => db.review && db.review.requestId === input.requestId ? view() : null,
@@ -243,6 +245,29 @@ describe('review flow', () => {
     expect(await t.flow.adopt({ reviewId, requestId, choices: [{ section: '定位', use: 'original' }, { section: '结语', use: 'original' }] })).toEqual(kept);
     await expect(t.flow.adopt({ reviewId, requestId: randomUUID(), choices: [] })).rejects.toThrow('FUSION_REVIEW_ADOPTED');
     expect(db.review!.adoption).toMatchObject({ requestId, kept: ['定位', '结语'], revisionId: null });
+  });
+
+  it('adoption: a confirmation reserves the choice before R14 applies, so a concurrent request cannot record something else', async () => {
+    const t = setup(call => call.phase === 'fusion_summary' ? revision('新目标') : opinion('major'));
+    await t.flow.start({ requestId: randomUUID(), draftId: randomUUID(), sourceVersionId: randomUUID() });
+    await t.runAll(); await t.runAll(); await t.flow.continue(String(db.review!.reviewId));
+    const reviewId = String(db.review!.reviewId);
+    const first = { reviewId, requestId: randomUUID(), choices: [{ section: '定位', use: 'revised' as const }] };
+    const order: string[] = [];
+    const record = db.review!;
+    const realApply = t.applied.push.bind(t.applied);
+    t.applied.push = (...items: unknown[]) => { order.push(`apply:${(record.adoption as { state?: string } | null)?.state}`); return realApply(...items); };
+    await t.flow.confirmAdoption({ ...first, expectedDiffHash: 'f'.repeat(64), decision: 'apply' });
+    expect(order).toEqual(['apply:reserved']);
+    await expect(t.flow.adopt({ reviewId, requestId: randomUUID(), choices: [{ section: '定位', use: 'original' }] }))
+      .rejects.toThrow('FUSION_REVIEW_ADOPTED');
+  });
+
+  it('a partial panel never ends as no change: one usable reviewer that finds nothing still goes to the summary', async () => {
+    const t = setup(call => call.phase === 'fusion_summary' ? revision('新目标') : call.modelId === ids.reviewers[0] ? opinion(null) : null);
+    await t.flow.start({ requestId: randomUUID(), draftId: randomUUID(), sourceVersionId: randomUUID() });
+    await t.runAll();
+    expect((await t.runAll()).calls.map(c => c.modelId)).toEqual([ids.summary]);
   });
 
   it('adoption: sections sharing a field are chosen together, and the merged text keeps the original for kept sections', async () => {

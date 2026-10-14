@@ -4,6 +4,9 @@ import { reviewerLabel } from './reviewPrompts';
 import type { AdoptionSection } from './reviewAdoption';
 import type { ReviewView } from './reviewRecord';
 
+/** A per-section choice counts only once recorded; a reservation is still in progress. */
+const choiceRecorded = (view: ReviewView) => (view.adoption as { state?: string } | null | undefined)?.state === 'recorded';
+
 /** Progress events for the review animation (FUSION-REVIEW §2.2a, Owner 2026-10-14). Derived only from the
  * review record and saved, judged outputs: no event without real data. Each event has a stable id; the list is
  * ordered by the database times of the calls, and a client plays the ids it has not seen yet. Text is a summary
@@ -101,8 +104,8 @@ export function reviewEvents(input: { view: ReviewView; reviewers: string[]; sec
         changedFields: Object.values(check.r14Fields).reduce((n, fields) => n + Object.keys(fields).length, 0) });
     }
     add(view.endedAt, { id: 'review_ended', type: 'review_ended', state: view.state, outcome: view.outcome });
-    const adoption = view.adoption as { at?: string; adopted?: string[]; kept?: string[]; versionId?: string | null } | null | undefined;
-    if (adoption?.at) add(adoption.at, { id: 'adoption_done', type: 'adoption_done', adoptedSections: adoption.adopted ?? [],
+    const adoption = view.adoption as { state?: string; at?: string; adopted?: string[]; kept?: string[]; versionId?: string | null } | null | undefined;
+    if (adoption?.at && adoption.state === 'recorded') add(adoption.at, { id: 'adoption_done', type: 'adoption_done', adoptedSections: adoption.adopted ?? [],
       keptSections: adoption.kept ?? [], versionId: adoption.versionId ?? null });
   }
   // Database times order the events; ties keep the derivation order (seat, then item).
@@ -113,7 +116,7 @@ export function reviewEvents(input: { view: ReviewView; reviewers: string[]; sec
   const pending = view.calls.some(call => (call.dispatched && call.verdict === null)
     || (call.verdict !== null && !outputs.has(call.callId) && !call.settledAt));
   // A revised review still waits for the user's per-section choice, whose adoption_done event comes later (#962 review).
-  const awaitingChoice = view.state === 'completed' && (view.outcome as { kind?: string } | null)?.kind === 'revised' && !view.adoption;
+  const awaitingChoice = view.state === 'completed' && (view.outcome as { kind?: string } | null)?.kind === 'revised' && !choiceRecorded(view);
   return { events: timed.map(item => item.event), ended: Boolean(view.endedAt) && !pending && !awaitingChoice };
 }
 
@@ -161,7 +164,7 @@ export function reviewDetail(input: { view: ReviewView; reviewers: string[]; sec
       ...(plan?.changed ? { original: plan.original, revised: plan.revised } : {}), fields: plan?.fields ?? [],
       linkedSections: plan?.linkedSections ?? [], rulings: rulings.filter(item => item.section === section) };
   }).filter(group => group.rulings.length || group.changed);
-  const awaiting = view.state === 'completed' && (view.outcome as { kind?: string } | null)?.kind === 'revised' && !view.adoption;
+  const awaiting = view.state === 'completed' && (view.outcome as { kind?: string } | null)?.kind === 'revised' && !choiceRecorded(view);
   return { reviewId: view.reviewId, state: view.state, outcome: view.outcome, seats,
     summary: { status: check?.ok ? 'usable' : summaryCall ? 'failed' : 'none', sections: bySection },
     /** The user's choice once made; until then the review waits for it (no lock: the draft stays editable, and a choice
