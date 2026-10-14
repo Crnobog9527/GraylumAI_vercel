@@ -15,6 +15,7 @@ import {runExecutor} from './executor.mjs';
 import {runProcessor} from './processor.mjs';
 import {runLeaves} from './leaves.mjs';
 import {runConcurrency} from './concurrency.mjs';
+import {startRedisDouble} from './redis-double.mjs';
 
 const safeupdateLibrary=process.env.ERASURE_SAFEUPDATE_LIBRARY;
 if(safeupdateLibrary && !safeupdateLibrary.startsWith('/'))throw new Error('Require absolute local safeupdate library path');
@@ -35,7 +36,7 @@ const fp=read('packages/db/tests/baseline/fingerprint.sql');
 const objectSql=fp.slice(0,fp.indexOf('-- FINAL'))+'SELECT jsonb_object_agg(k,d ORDER BY k) FROM grouped;';
 const snapshot=()=>JSON.parse(ok(sql(objectSql)));
 const report={development,safeupdate:Boolean(safeupdateLibrary),build:null,checks:[],failed:null};
-let client;let compiled;
+let client;let compiled;let redis;
 try {
  ok(docker(['run','-d','--pull=never','--name',name,'-p','127.0.0.1::5432',
   '-e','POSTGRES_DB=b2a','-e','POSTGRES_HOST_AUTH_METHOD=trust',POSTGRES_IMAGE]));
@@ -96,9 +97,16 @@ try {
  };
  for(const file of ['executor','processor'])emit(resolve(src,`services/accountErasure/${file}.ts`));
  const module=file=>pathToFileURL(resolve(compiled,`services/accountErasure/${file}.mjs`)).href;
+ // The executor syncs the off-database manifest (0227) through the existing Upstash REST client.
+ redis=await startRedisDouble();Object.assign(process.env,redis.env);
  const {runAccountErasureExecutor}=await import(module('executor'));
  await runExecutor({db:client,Client,connectionString,require,runAccountErasureExecutor,report,safeupdate:Boolean(safeupdateLibrary)});
  await runFusionExecutor({db:client,Client,connectionString,require,runAccountErasureExecutor,report});
+ const synced=[...redis.store].filter(([key])=>key.startsWith('graylum:erasure-manifest:account:'));
+ assert.ok(synced.length>0,'completed erasures reached the off-database manifest');
+ for(const [,entry] of synced)assert.deepEqual(Object.keys(JSON.parse(entry.value)).sort(),['confirmedAt','kind','profileId','targetId']);
+ assert.equal((await client.query('SELECT count(*)::int n FROM erasure_manifest_outbox WHERE synced_at IS NULL')).rows[0].n,0);
+ report.checks.push('executor syncs the off-database manifest: ids and times only, nothing left unsynced');
  await runCases(client,report);
  await runLeaves(client,report);
  await runConcurrency({db:client,Client,connectionString,report});
@@ -111,6 +119,7 @@ try {
  assert.equal(audits,'');report.checks.push('account-open policy audit unchanged');
 } catch(error) {report.failed=String(error.stack??error);process.exitCode=1;}
 finally {
+ await redis?.close();
  await client?.end();if(compiled)rmSync(compiled,{recursive:true});report.cleanup=docker(['rm','-f','-v',name]).status===0?'PASS':'FAIL';
  if(report.cleanup!=='PASS')process.exitCode=1;
  console.log(JSON.stringify(report,null,2));
