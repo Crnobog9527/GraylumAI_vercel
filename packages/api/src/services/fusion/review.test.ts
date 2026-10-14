@@ -327,6 +327,16 @@ describe('review flow', () => {
     expect(db.calls).toEqual([]);
   });
 
+  it('runs the size preflight before the first claim even when start never did (crash after the record was created)', async () => {
+    const t = setup(() => opinion('major'));
+    await t.flow.start({ requestId: randomUUID(), draftId: randomUUID(), sourceVersionId: randomUUID() });
+    sourceBody.value = `## 定位\n${'"'.repeat(100_000)}\n## 结语\n原结语`;
+    const end = await t.flow.continue(String(db.review!.reviewId));
+    sourceBody.value = null;
+    expect(end.review).toMatchObject({ state: 'incomplete', outcome: { kind: 'input_too_large' } });
+    expect(db.calls).toEqual([]);
+  });
+
   it('trims the opinions a summary carries until its serialized request fits the byte cap', async () => {
     const long = '很长的理由'.repeat(390);
     const big = JSON.stringify({ decisions: DECISIONS.map(decision => ({ decision, strongestCase: long, strongestAlternative: long,

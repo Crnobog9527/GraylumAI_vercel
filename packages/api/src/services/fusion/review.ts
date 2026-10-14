@@ -274,6 +274,14 @@ export function reviewFlow(deps: { admin: SupabaseClient; actorId: string;
       if (!view) throw new Error('FUSION_REVIEW_DENIED');
       if (ENDED_STATES.has(view.state)) return { review: view, calls: [] };
       const src = await readSource(reviewId);
+      // The start preflight again before the first claim: a start that crashed after creating the record, and was
+      // replayed, never ran it (#962 review). Nothing is claimed yet, so ending here charges nothing.
+      if (!view.steps.length && view.state === 'running') {
+        const skillText = await readReviewSkill(admin, config.parse(view.config).skill as ReviewSkill);
+        if (!fitsWhenSent(view, src, skillText)) {
+          return { review: await finish(view, 'incomplete', { kind: 'input_too_large', phase: 'review' }), calls: [] };
+        }
+      }
       await rejudge(view, src);
       view = (await record.read(reviewId))!;
       const cfg = config.parse(view.config);
