@@ -1,6 +1,6 @@
 import {
   assertUserErasable, contentTarget, contentConfirmation, previewContentErasure, confirmContentErasure,
-  conversationTarget, eraseConversation,
+  conversationTarget, eraseConversation, cleanUpConversation,
 } from '../services/accountErasure/content';
 import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
@@ -28,6 +28,11 @@ export const accountRouter = router({
   conversationErasure: protectedProcedure.input(conversationTarget).mutation(({ ctx, input }) => {
     requireServiceRole(ctx.hasSupabaseAdminPrivileges);
     return eraseConversation(ctx.supabaseAdmin, ctx.profileId, input);
+  }),
+  /** Background cleanup after conversationErasure; the cron sweep is the backstop. */
+  conversationErasureCleanup: protectedProcedure.input(conversationTarget).mutation(({ ctx, input }) => {
+    requireServiceRole(ctx.hasSupabaseAdminPrivileges);
+    return cleanUpConversation(ctx.supabaseAdmin, ctx.profileId, input);
   }),
   erasurePreview: protectedProcedure.query(async ({ ctx }) => {
     requireServiceRole(ctx.hasSupabaseAdminPrivileges);

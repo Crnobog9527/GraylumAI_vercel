@@ -2,6 +2,7 @@
 import assert from 'node:assert/strict';
 import {randomUUID} from 'node:crypto';
 import {rpc,closeAccount} from '../erasure-b2a/cases.mjs';
+import {recordLibraryProof} from './library-proof.mjs';
 export async function runConcurrency({db,Client,connectionString,report}){
  const f={actor:randomUUID()},other={actor:randomUUID()};
  for(const user of [f,other])await db.query('INSERT INTO profiles(id,credits) VALUES($1,10)',[user.actor]);
@@ -25,6 +26,7 @@ export async function runConcurrency({db,Client,connectionString,report}){
   await parallel.query('BEGIN');await parallel.query('SELECT id FROM tickets WHERE id=$1 FOR UPDATE',[ticket]);
   assert.deepEqual(await rpc(db,'account_erasure_storage_ready',f.actor),{ready:false});
   await parallel.query('ROLLBACK');
+  await recordLibraryProof(db,f);
   const cleared=await rpc(db,'account_erasure_local_cleanup',f.actor,true);
   assert.equal(cleared.remaining,0);
  }finally{await parallel.query('ROLLBACK').catch(()=>{});await parallel.end();}

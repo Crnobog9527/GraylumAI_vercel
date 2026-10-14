@@ -8,7 +8,7 @@ import { makePackage } from './fixtures/artifacts';
 export function moduleInput(): ModuleSkillInput {
   const pack = makePackage();
   return { moduleId: randomUUID(), skillId: pack.id, revisionId: pack.revisionId, requestId: pack.requestId,
-    expectedUpdatedAt: null, expectedVersion: 0, directoryName: 'synthetic-method', kind: 'document',
+    expectedUpdatedAt: null, expectedVersion: 0, directoryName: 'synthetic-method', kind: 'document', socialMediaRelated: false,
     files: pack.files, steps: [{ title: '需求', resources: ['references/step-0.md'] }, { title: '成果', resources: ['SKILL.md'] }],
     resourcePlanReviewed: true, module: { title: 'Synthetic private method', description: null, full_description: null,
       model_id: randomUUID(), platform: 'all', category: 'analysis', icon: 'Wand2', image_url: null,

@@ -40,6 +40,25 @@ it.each([
  await expect(adapter.dispatch({input:JSON.stringify({...JSON.parse(body),...patch})},identity)).rejects.toThrow('DENIED');
  expect(credential).not.toHaveBeenCalled();expect(transport).not.toHaveBeenCalled();
 });
+it('accepts only the exact web-off plugin on a tool-free request (Fusion review); ordinary requests are unchanged',async()=>{
+ const transport=vi.fn<typeof fetch>(async()=>new Response('{}'));
+ const adapter=openRouterAdapter({credential:async()=> 'LOCAL_SYNTHETIC_KEY',transport});
+ const webOff={...JSON.parse(body),plugins:[{id:'web',enabled:false}]};
+ await adapter.dispatch({input:JSON.stringify(webOff)},identity);
+ expect(JSON.parse(String(transport.mock.calls[0]?.[1]?.body)).plugins).toEqual([{id:'web',enabled:false}]);
+ await adapter.dispatch({input:body},identity);
+ expect(JSON.parse(String(transport.mock.calls[1]?.[1]?.body))).not.toHaveProperty('plugins');
+ const workspace=openRouterAdapter({allowWorkspaceRead:true,credential:async()=> 'LOCAL_SYNTHETIC_KEY',transport});
+ for(const [target,patch] of [
+  [adapter,{plugins:[{id:'web'}]}],[adapter,{plugins:[{id:'web',enabled:true}]}],[adapter,{plugins:[{enabled:false,id:'web'}]}],
+  [adapter,{plugins:[{id:'web',enabled:false},{id:'file-parser'}]}],[adapter,{plugins:[{id:'web',enabled:false,max_results:1}]}],
+  [adapter,{plugins:[{id:'web',enabled:false}],tool_choice:'none'}],[adapter,{tool_choice:'none'}],
+  [adapter,{plugins:[{id:'web',enabled:false}],tools:[]}],[workspace,{plugins:[{id:'web',enabled:false}],tools:[]}],
+ ] as const){
+  await expect(target.dispatch({input:JSON.stringify({...JSON.parse(body),...patch})},identity)).rejects.toThrow('DENIED');
+ }
+ expect(transport).toHaveBeenCalledTimes(2);
+});
 it('preserves bounded bytes on an oversized error response',async()=>{
  const transport=vi.fn(async()=>new Response('x'.repeat(65537),{status:500}));
  const adapter=openRouterAdapter({credential:async()=> 'LOCAL_SYNTHETIC_KEY',transport});
