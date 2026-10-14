@@ -55,13 +55,18 @@ export function PaletteSwitchH() {
 
   const choose = (id: PaletteId) => {
     setActive(id);
+    // Address and storage are separate: either can be unavailable without losing the other.
     try {
-      window.localStorage.setItem(STORAGE_KEY, id);
       const url = new URL(window.location.href);
       url.searchParams.set('palette', id);
       window.history.replaceState(window.history.state, '', url);
     } catch {
-      // Storage or history unavailable: the switch still works for this view.
+      // History unavailable: the switch still works for this view.
+    }
+    try {
+      window.localStorage.setItem(STORAGE_KEY, id);
+    } catch {
+      // Storage blocked or full: the address still carries the choice.
     }
   };
 
