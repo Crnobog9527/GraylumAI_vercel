@@ -116,3 +116,34 @@ it('preserves a definite PAYG claim refusal and never grants a dispatch capabili
   expect(adapter.dispatch).not.toHaveBeenCalled();
   expect(adapter.prepareDispatch).not.toHaveBeenCalled();
 });
+// 0261 transition: before the migration the database refuses a non-402 pending refusal. The same
+// response is then recorded as the plain transport observation it was before, never left unrecorded.
+it('falls back to the plain observation when the database predates the 403 pending refusal', async () => {
+  const body = '{}', refusal = JSON.stringify({ error: { code: 403, message: 'synthetic refusal' } });
+  const records: Array<{ evidenceKind?: string }> = [];
+  const { api, rpc, adapter } = setup(name => name === 'bill2_dispatch' ? { dispatch: true }
+    : name === 'bill2_read' ? { id: runId, state: 'cost_pending' } : { id: callId, state: 'prepared', dispatchToken: randomUUID() });
+  rpc.mockImplementation(async (name: string, args: Record<string, unknown>) => {
+    if (name === 'bill2_record') {
+      const evidence = args.p_evidence as { evidenceKind?: string };
+      records.push(evidence);
+      if (evidence.evidenceKind === 'provider_rejection_pending')
+        return { data: null, error: { message: 'BILL2_REJECTION_PROOF_DENIED' } } as never;
+      return { data: { id: runId, state: 'cost_pending' }, error: null };
+    }
+    if (name === 'bill2_dispatch') return { data: { dispatch: true }, error: null };
+    if (name === 'bill2_read') return { data: { id: runId, state: 'cost_pending' }, error: null };
+    return { data: { id: callId, state: 'prepared', dispatchToken: randomUUID() }, error: null };
+  });
+  const bytes = Buffer.from(refusal);
+  const observed = { rawBody: refusal, rawBodyBase64: bytes.toString('base64'),
+    sourceHash: createHash('sha256').update(bytes).digest('hex'), httpStatus: 403, complete: true, transportIssue: null,
+    generationId: 'gen-1791957271-SyntheticRefusal403' };
+  adapter.prepareDispatch.mockResolvedValue(async () => observed);
+  const frozen = frozenCall(body);
+  await api.claimPaygCall(runId, 1, { ...frozen, provider: 'openrouter', protocol: 'openrouter-chat-v1' });
+  const result = await api.dispatchOnce(callId, body);
+  expect(records.map(r => r.evidenceKind)).toEqual(['provider_rejection_pending', 'transport_observation']);
+  expect(result).toMatchObject({ dispatched: true, providerRejected: false });
+  expect(result).not.toHaveProperty('pendingReceipt');
+});
