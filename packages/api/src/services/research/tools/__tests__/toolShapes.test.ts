@@ -122,6 +122,13 @@ describe('result envelope', () => {
     expect(parsed.items[1].ref).toBe('e9#2');
   });
 
+  it('marks a result partial when only text was shortened', () => {
+    const items = [{ fields: { markdown: '字'.repeat(9000) }, missing: [] }];
+    const parsed = JSON.parse(toolEnvelope({ status: 'ok', evidenceId: 'e2', items }));
+    expect(parsed).toMatchObject({ status: 'partial', reason: 'RESULT_TRUNCATED', truncated: true });
+    expect(parsed.items).toHaveLength(1);
+  });
+
   it('keeps an explicit failure state with no items', () => {
     expect(JSON.parse(toolEnvelope({ status: 'not_confirmed', reason: 'NOT_CONFIRMED' })))
       .toMatchObject({ status: 'not_confirmed', reason: 'NOT_CONFIRMED', items: [], truncated: false });

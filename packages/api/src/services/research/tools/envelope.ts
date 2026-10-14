@@ -91,12 +91,10 @@ export function toolEnvelope(input: EnvelopeInput, maxBytes = TOOL_RESULT_MAX_BY
   if (bytes(whole) <= maxBytes) return whole;
 
   const items = full.map(item => ({ ...item, fields: shorten(item.fields) }));
-  const envelope: ToolEnvelope = { ...base, items, truncated: true };
+  // Reaching this point means text was shortened or items dropped: never report that as a complete `ok`.
+  const cutStatus = base.status === 'ok' ? { status: 'partial' as const, reason: 'RESULT_TRUNCATED', note: NOTES.partial } : {};
+  const envelope: ToolEnvelope = { ...base, ...cutStatus, items, truncated: true };
   while (items.length > 0 && bytes(JSON.stringify(envelope)) > maxBytes) items.pop();
-  // Dropped items mean the model did not see everything: never report that as a complete `ok`.
-  if (items.length < full.length && envelope.status === 'ok') {
-    Object.assign(envelope, { status: 'partial', reason: 'RESULT_TRUNCATED', note: NOTES.partial });
-  }
   const text = JSON.stringify(envelope);
   if (bytes(text) <= maxBytes) return text;
   throw new Error('RESEARCH_TOOL_RESULT_TOO_LARGE');

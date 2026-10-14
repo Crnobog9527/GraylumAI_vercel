@@ -62,6 +62,12 @@ describe('profile links', () => {
         { platform: 'x', account: 'carol' }, { platform: 'x', account: 'dan' }]);
   });
 
+  it('ends a link at full-width punctuation and Chinese text', () => {
+    expect(profileLinksIn('对标账号是 https://x.com/alice！还有“https://www.tiktok.com/@bob”和https://x.com/carol：好的？https://x.com/dan？'))
+      .toEqual([{ platform: 'x', account: 'alice' }, { platform: 'tiktok', account: 'bob' },
+        { platform: 'x', account: 'carol' }, { platform: 'x', account: 'dan' }]);
+  });
+
   it('lists distinct profile links in order, ignoring plain mentions', () => {
     expect(profileLinksIn('看 @homeideas 和 https://x.com/A_b，还有 https://x.com/a_B 以及 https://tiktok.com/@zz9'))
       .toEqual([{ platform: 'x', account: 'a_b' }, { platform: 'tiktok', account: 'zz9' }]);

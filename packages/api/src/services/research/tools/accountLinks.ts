@@ -74,7 +74,12 @@ export function parseProfileLink(link: string): CanonicalAccount | null {
   return account === null ? null : { platform: found.platform, account };
 }
 
-const LINK = /https?:\/\/[^\s<>"'，。；、）)\]】,;!?]+/gi;
+/**
+ * Every supported profile URL is printable ASCII, so a link ends at the first other character (spaces,
+ * Chinese text and full-width punctuation such as ！？：”) or ASCII sentence punctuation.
+ */
+const LINK = /https?:\/\/[\x21-\x7e]+/gi;
+const NOT_IN_LINK = /[<>"'()[\],;!?]/;
 /** Sentence-ending dots or colons are not part of a link; no supported handle can end with them. */
 const TRAILING = /[.:]+$/;
 
@@ -83,7 +88,8 @@ export function profileLinksIn(message: string): CanonicalAccount[] {
   const seen = new Set<string>();
   const found: CanonicalAccount[] = [];
   for (const match of message.matchAll(LINK)) {
-    const parsed = parseProfileLink(match[0].replace(TRAILING, ''));
+    const cut = match[0].search(NOT_IN_LINK);
+    const parsed = parseProfileLink((cut === -1 ? match[0] : match[0].slice(0, cut)).replace(TRAILING, ''));
     if (!parsed) continue;
     const key = `${parsed.platform}:${parsed.account}`;
     if (seen.has(key)) continue;
