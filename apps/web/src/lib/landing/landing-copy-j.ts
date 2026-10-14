@@ -99,3 +99,25 @@ export const J_PROMISE_SAMPLES = {
   chores: ['选模型', '写提示词'],
   packed: '已经打包进你的 AI 教练',
 } as const;
+
+/** The feature-scenes block after the story: which steps it shows (their copy is landing-flow.ts's). Title, lead NEW. */
+export const J_SCENES = {
+  title: '定位之后，它接着陪你做内容',
+  lede: '资料库记得你、按你的文风写、一次发出去、每周看复盘。下面是示例对话，人物和内容为虚构。',
+  steps: ['step-library', 'step-voice', 'step-publish', 'step-review'],
+} as const;
+
+/** The price block. "正常方案要花多少钱" is the Owner's wording; the own-price line and the link are NEW. */
+export const J_PRICE = {
+  title: '价格',
+  compareTitle: '正常方案要花多少钱',
+  ownPrice: (proMonthly: string) => `Graylum AI：${proMonthly}/月起`,
+  sourceLabel: '出处',
+  more: '看完整价格和权益',
+  unavailable: '会员方案暂时读不到，请稍后刷新，或先看价格页。',
+} as const;
+
+/** NEW (diagnosis #979 item 20): FAQ wording made less absolute, as [shown on /landing, shown on sample J]. */
+export const J_FAQ_REWORDS: readonly (readonly [string, string])[] = [
+  ['AI教练的所有功能都尽量做到了一键使用。', 'AI 教练的大部分操作都尽量做成了点一下就能完成。'],
+];

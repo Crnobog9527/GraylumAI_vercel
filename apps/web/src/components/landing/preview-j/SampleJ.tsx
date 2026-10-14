@@ -9,6 +9,9 @@ import { SIGNUP_CTA_HREF } from '@/lib/seo/content/shared';
 import { cn } from '@/lib/utils';
 import { HeroJ } from './HeroJ';
 import { MotionJ } from './MotionJ';
+import { PriceJ } from './PriceJ';
+import { ScenesJ } from './ScenesJ';
+import { CompareJ, FaqJ, FinalJ } from './SectionsJ';
 import { TakeoverJ } from './TakeoverJ';
 import { VoiceWallJ } from './VoiceWallJ';
 import styles from './j.module.css';
@@ -24,10 +27,11 @@ export type LandingData = ReturnType<typeof buildLandingPageData>;
 /**
  * Style sample J (Owner 2026-10-14, after sample H's v3): sample E's design baseline carrying sample H's content.
  * One full first screen (title, promise, button, the data-growth flywheel), the voice wall in sample F's form,
- * then "AI 教练怎么接手你的运营" as a scroll-locked story (positioning, the review panel, what you no longer do).
- * The remaining sections follow in later steps. The server HTML is the finished page.
+ * then "AI 教练怎么接手你的运营" as a scroll-locked story (positioning, the review panel, what you no longer do), the
+ * product's other scenes, the Owner's four-row comparison, price (what the usual ways cost, the plan cards,
+ * "先聊后买"), the FAQ and the close. The server HTML is the finished page.
  */
-export function SampleJ({ data, siteName }: { data: LandingData; siteName: string; membershipHref: string }) {
+export function SampleJ({ data, siteName, membershipHref }: { data: LandingData; siteName: string; membershipHref: string }) {
   return (
     <MotionJ className={cn(light.light, styles.page)}>
       <nav aria-label="样稿切换" className={styles.sampleBar}>
@@ -53,6 +57,12 @@ export function SampleJ({ data, siteName }: { data: LandingData; siteName: strin
         <HeroJ />
         <VoiceWallJ notes={data.notes} />
         <TakeoverJ />
+        <ScenesJ steps={data.flowSteps} />
+        <CompareJ />
+        <PriceJ pricing={data.pricing} rows={data.compareRows} risk={data.risk} showResult={data.showResult}
+          founderSeats={data.founderSeats} membershipHref={membershipHref} />
+        <FaqJ groups={data.faqGroups} />
+        <FinalJ showStack={data.showStack} founderSeats={data.founderSeats} />
       </main>
 
       <footer className={styles.footer}>

@@ -4,6 +4,7 @@ import { notFound } from 'next/navigation';
 import { SampleJ } from '@/components/landing/preview-j/SampleJ';
 import { resolveLandingFlags } from '@/lib/landing/landing-flags';
 import { buildLandingPageData } from '@/lib/landing/landing-page-data';
+import { getLandingOffers } from '@/lib/landing/landing-offers';
 import { getPublicSiteSettings } from '@/lib/public-site';
 import { isPublicIndexingEnabled, SITE_INDEXING_ENV } from '@/lib/robots-policy';
 import { NOINDEX_ROBOTS } from '@/lib/seo/metadata';
@@ -17,7 +18,8 @@ export const metadata: Metadata = { title: 'Graylum 风格样稿 J', robots: NOI
 
 export default async function LandingPreviewJ() {
   if (isPublicIndexingEnabled(process.env[SITE_INDEXING_ENV])) notFound();
-  const { siteName, membershipPlans, membershipPlansStatus } = await getPublicSiteSettings();
-  const data = buildLandingPageData(resolveLandingFlags(), membershipPlansStatus === 'available' ? membershipPlans : []);
+  const [{ siteName, membershipPlans, membershipPlansStatus }, offers] = await Promise.all([getPublicSiteSettings(), getLandingOffers()]);
+  // Plan prices, the Gold first month and the founder seats come from the server, as on /landing (#987).
+  const data = buildLandingPageData(resolveLandingFlags(), membershipPlansStatus === 'available' ? membershipPlans : [], offers);
   return <SampleJ data={data} siteName={siteName} membershipHref={buildAuthHref('/profile?tab=subscription')} />;
 }

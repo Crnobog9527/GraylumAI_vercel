@@ -4,9 +4,9 @@ import { describe, expect, it } from 'vitest';
 
 import sitemap from '@/app/sitemap';
 import { metadata } from '@/app/landing/preview/j/page';
-import { HERO, HERO_H, VOICE_WALL } from '@/lib/landing/landing-copy';
+import { FINAL_ACTION, H_COMPARE, HERO, HERO_H, PRICE_COMPARE, RISK_REVERSAL, VOICE_WALL } from '@/lib/landing/landing-copy';
 import * as copyJ from '@/lib/landing/landing-copy-j';
-import { J_ID_PLACEHOLDER, J_NOTE_HEADS, J_TAKEOVER, noteSource } from '@/lib/landing/landing-copy-j';
+import { J_FAQ_REWORDS, J_ID_PLACEHOLDER, J_NOTE_HEADS, J_PRICE, J_SCENES, J_TAKEOVER, noteSource } from '@/lib/landing/landing-copy-j';
 import { LANDING_FEATURES, type LandingFlags } from '@/lib/landing/landing-flags';
 import { buildLandingPageData } from '@/lib/landing/landing-page-data';
 import { APP_SEGMENTS } from '@/lib/sentry-scrub';
@@ -16,8 +16,13 @@ import { chapterAt, CHAPTERS } from './TakeoverJ';
 const ALL_ON = Object.fromEntries(Object.keys(LANDING_FEATURES).map(key => [key, true])) as LandingFlags;
 const escape = (text: string) => text.replace(/&/g, '&amp;').replace(/"/g, '&quot;');
 
+const plan = (level: string, monthly: number, yearly: number) => ({
+  id: `plan-${level}`, name: level, level, price: { monthly, yearly },
+  credits: { monthly: 1000, monthlyBonus: 0 }, discount: 0, checkoutReady: { monthly: true, yearly: true },
+});
+
 function render() {
-  const data = buildLandingPageData(ALL_ON, []);
+  const data = buildLandingPageData(ALL_ON, [plan('pro', 29, 279), plan('gold', 69, 621)]);
   return { data, html: renderToStaticMarkup(createElement(SampleJ, { data, siteName: 'Graylum', membershipHref: '/profile' })) };
 }
 
@@ -74,6 +79,61 @@ describe('style sample J', () => {
     // The long promise paragraph is never shown in one block any more.
     expect(html).not.toContain('你不用再分心研究运营技术，不用自己想选题');
     expect(JSON.stringify(copyJ)).not.toContain('程序算出来');
+  });
+});
+
+describe('style sample J, the later sections', () => {
+  it('runs scenes, the comparison, price, FAQ and the close in order after the story', () => {
+    const { html } = render();
+    const order = ['id="how-it-works"', 'id="scenes-title"', 'id="compare-title"', 'id="pricing-title"', 'id="faq-title"', 'id="final-title"']
+      .map(mark => html.indexOf(mark));
+    expect(order.every(index => index > 0)).toBe(true);
+    expect([...order].sort((a, b) => a - b)).toEqual(order);
+  });
+
+  it('shows the product scenes with their step copy', () => {
+    const { data, html } = render();
+    for (const id of J_SCENES.steps) {
+      const step = data.flowSteps.find(item => item.id === id);
+      if (step) expect(html).toContain(escape(step.demo));
+    }
+  });
+
+  it('keeps the Owner\'s four-row comparison word for word in one table', () => {
+    const { html } = render();
+    expect(html).toContain(escape(H_COMPARE.title));
+    for (const row of H_COMPARE.rows) for (const cell of [row.generic, row.coach]) expect(html).toContain(escape(cell));
+  });
+
+  it('prices the usual ways first, each with its source beside it, then the cards, then 先聊后买', () => {
+    const { html } = render();
+    const pricing = html.slice(html.indexOf('id="pricing"'), html.indexOf('id="faq"'));
+    for (const row of PRICE_COMPARE.rows) expect(pricing).toContain(escape(PRICE_COMPARE.sources[row.sourceId]));
+    expect(pricing).toContain(J_PRICE.ownPrice('$29'));
+    const anchors = pricing.indexOf(J_PRICE.compareTitle);
+    const cards = pricing.indexOf('aria-label="Pro"');
+    const risk = pricing.indexOf(RISK_REVERSAL.title);
+    expect(anchors).toBeGreaterThan(0);
+    expect(anchors).toBeLessThan(cards);
+    expect(cards).toBeLessThan(risk);
+    expect(pricing).toContain('href="/landing/pricing"');
+  });
+
+  it('opens the first question of each FAQ group and words the old "所有功能一键使用" less absolutely', () => {
+    const { data, html } = render();
+    const faq = html.slice(html.indexOf('id="faq"'), html.indexOf('id="final-title"'));
+    expect(faq.match(/<details[^>]* open=""/g)).toHaveLength(data.faqGroups.length);
+    for (const [from, to] of J_FAQ_REWORDS) {
+      expect(faq).not.toContain(from);
+      if (data.faqGroups.some(group => group.items.some(item => item.answer.some(text => text.includes(from))))) expect(faq).toContain(to);
+    }
+  });
+
+  it('closes with the two paths and the same note under the button as the first screen', () => {
+    const { html } = render();
+    const close = html.slice(html.indexOf('id="final-title"'));
+    for (const path of FINAL_ACTION.paths) expect(close).toContain(escape(path));
+    expect(close).toContain(HERO_H.ctaNote);
   });
 });
 
