@@ -13,7 +13,7 @@ const applyRefusal = vi.hoisted(() => ({ value: '' }));
 const caps = vi.hoisted(() => [] as Array<{ opinion: number; summary: number }>);
 const creditCaps = vi.hoisted(() => [] as Array<number | undefined>);
 const usdCaps = vi.hoisted(() => [] as Array<string | undefined>);
-const priceRise = vi.hoisted(() => ({ phase: '' }));
+const priceRise = vi.hoisted(() => ({ phase: '', code: 'FUSION_ESTIMATE_EXCEEDED' }));
 const requests = vi.hoisted(() => [] as Array<{ modelId: string; phase: string; input: string }>);
 const clock = vi.hoisted(() => ({ t: Date.parse('2026-10-14T00:00:00Z'), next() { this.t += 1000; return new Date(this.t).toISOString(); } }));
 const db = vi.hoisted(() => ({ review: null as Record<string, unknown> | null, calls: [] as Call[], outputs: new Map<string, string>(),
@@ -36,7 +36,7 @@ vi.mock('./admission', async original => ({ ...(await original<typeof import('./
     creditCaps.push(input.maxCredits);
     usdCaps.push(input.maxUsd);
     // Prices rose after start: the real admission refuses a group above the frozen cap before freezing anything.
-    if (input.members.some(m => m.phase === priceRise.phase)) throw new Error('FUSION_ESTIMATE_EXCEEDED');
+    if (input.members.some(m => m.phase === priceRise.phase)) throw new Error(priceRise.code);
     const existing = db.groups.get(input.requestId);
     if (existing) return { ...existing, replayed: true };
     const group = { groupId: randomUUID(), runs: input.members.map((m, index) => ({ runId: randomUUID(), index, phase: m.phase,
@@ -138,7 +138,7 @@ function setup(script: (call: Call) => string | null, refuse?: string) {
 }
 
 describe('review flow', () => {
-  beforeEach(() => { db.review = null; db.calls = []; db.outputs.clear(); db.savedAt.clear(); db.groups.clear(); requests.length = 0; caps.length = 0; creditCaps.length = 0; usdCaps.length = 0; priceRise.phase = ''; });
+  beforeEach(() => { db.review = null; db.calls = []; db.outputs.clear(); db.savedAt.clear(); db.groups.clear(); requests.length = 0; caps.length = 0; creditCaps.length = 0; usdCaps.length = 0; priceRise.phase = ''; priceRise.code = 'FUSION_ESTIMATE_EXCEEDED'; });
 
   it('without a split: round 1, one summary, proposes the revision to R14, never re-reviewed by the panel', async () => {
     const t = setup(call => call.phase === 'fusion_summary' ? revision('新目标') : opinion('major'));
@@ -377,6 +377,19 @@ describe('review flow', () => {
     expect(usdCaps.at(-1)).toBe(cfg.callCaps.summary[ids.summary]!.usd);
     expect(end.review).toMatchObject({ state: 'incomplete', outcome: { kind: 'price_changed', phase: 'summary' } });
     expect(db.calls.some(call => call.phase === 'fusion_summary')).toBe(false);
+  });
+
+  it('a setting changed after round 1 ends the review at the refused step instead of leaving it stuck', async () => {
+    const t = setup(() => opinion('major'));
+    await t.flow.start({ requestId: randomUUID(), draftId: randomUUID(), sourceVersionId: randomUUID() });
+    priceRise.phase = 'fusion_summary'; priceRise.code = 'FUSION_REVIEW_DISABLED';
+    await t.runAll();
+    const end = await t.flow.continue(String(db.review!.reviewId));
+    expect(end.review).toMatchObject({ state: 'incomplete', outcome: { kind: 'claim_refused', phase: 'summary', reason: 'FUSION_REVIEW_DISABLED' } });
+    // A transient failure is thrown for a retry, never turned into an end state.
+    db.review!.state = 'running';
+    priceRise.code = 'FUSION_ADMISSION_UNAVAILABLE';
+    await expect(t.flow.continue(String(db.review!.reviewId))).rejects.toThrow('FUSION_ADMISSION_UNAVAILABLE');
   });
 
   it('a retry of only some seats is capped by those seats alone', async () => {

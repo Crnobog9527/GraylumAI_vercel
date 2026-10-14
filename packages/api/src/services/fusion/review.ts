@@ -43,6 +43,17 @@ const PERMANENT_REFUSALS = new Set(['REPORT_REVISION_STALE', 'REPORT_SOURCE_CONF
   'REPORT_NOT_COMPLETE', 'REPORT_REVISION_UNSUPPORTED',
   // R14 replays an identical decision first (0223), so this means the proposal was decided elsewhere (#962 review).
   'REPORT_REVISION_DECIDED']);
+/** Refusals that will not clear by retrying the same claim (a size or price bound, a setting changed by an
+ * administrator, a lapsed entitlement or test window). Every claim goes through one place, so each of them ends the
+ * step instead of leaving a review that can never move (#962 review); transient failures are thrown and retried. */
+const CLAIM_REFUSALS: Record<string, string> = { FUSION_INPUT_TOO_LARGE: 'input_too_large', FUSION_ESTIMATE_EXCEEDED: 'price_changed',
+  FUSION_BUDGET_EXCEEDED: 'price_changed', FUSION_REVIEW_DISABLED: 'claim_refused', FUSION_MODEL_DENIED: 'claim_refused',
+  FUSION_MODEL_UNAVAILABLE: 'claim_refused', FUSION_MODEL_ADMISSION_REQUIRED: 'claim_refused', FUSION_MODEL_SEARCH_DENIED: 'claim_refused',
+  FUSION_PAYG_REQUIRED: 'claim_refused', FUSION_MEMBERSHIP_REQUIRED: 'claim_refused', ENTITLEMENTS_FUSION_FORBIDDEN: 'claim_refused',
+  FUSION_GROUP_DENIED: 'claim_refused', BILL2_PAYG_QUOTE_INVALID: 'claim_refused', BILL2_UNIT_MULTIPLIER_INVALID: 'claim_refused',
+  BILL2_INPUT_BOUND_CONFLICT: 'claim_refused', RUNTIME_STAGING_MODEL_DENIED: 'claim_refused', RUNTIME_STAGING_WINDOW_EXPIRED: 'claim_refused',
+  RUNTIME_STAGING_POLICY_INVALID: 'claim_refused', RUNTIME_STAGING_QUOTE_CONFLICT: 'claim_refused',
+  RUNTIME_BILLING_UNIT_MISMATCH: 'claim_refused', RUNTIME_BILLING_UNIT_WINDOW_OUTDATED: 'claim_refused' };
 const stepKey = (at: ReviewPosition) => `review:${at.round}:${at.phase}:${at.attempt}`;
 
 /** FUSION-REVIEW §2.1/§2.2 orchestration over the review record (0236): the server decides each next step;
@@ -338,15 +349,14 @@ export function reviewFlow(deps: { admin: SupabaseClient; actorId: string;
           try { claimed = await claimStep(view, src, at, pending.length ? pending : models); }
           catch (error) {
             const code = error instanceof Error ? error.message : '';
-            if (code !== 'FUSION_INPUT_TOO_LARGE' && code !== 'FUSION_ESTIMATE_EXCEEDED') throw error;
-            // A step that cannot fit the byte cap, or would hold more credits than the maximum the user agreed to, is
-            // never claimed: the debate round is skipped; round 1 (nothing charged yet) or the summary ends the review
-            // instead of failing on every continue.
+            const kind = Object.hasOwn(CLAIM_REFUSALS, code) ? CLAIM_REFUSALS[code]! : null;
+            if (!kind) throw error;
+            // A step refused for good is never claimed: the debate round is skipped; round 1 (nothing charged yet) or
+            // the summary ends the review (earlier calls are already settled) instead of failing on every continue.
             if (at.phase === 'review' && at.round > 1) {
               view = await record.advance(reviewId, at, { state: 'running', round: at.round, phase: 'summary', attempt: 1 });
             } else {
-              view = await finish(view, 'incomplete', { kind: code === 'FUSION_INPUT_TOO_LARGE' ? 'input_too_large' : 'price_changed',
-                phase: at.phase });
+              view = await finish(view, 'incomplete', { kind, phase: at.phase, ...(kind === 'claim_refused' ? { reason: code } : {}) });
             }
             continue;
           }
