@@ -539,6 +539,23 @@ it('BILL2: provider rejection v1/v2 preserves paid calls and refunds once under 
  await providerRejectionCases({db,Client:pg.Client,connectionString});
 },60000);
 
+it('BILL2: an open staging test window admits any signed-in actor and keeps every other window check',async()=>{
+ const base=new URL('../../../../db/tests/payg/',import.meta.url);
+ const load=(name:string)=>import(/* @vite-ignore */ new URL(name+'.mjs',base).href);
+ const prior=(await db.query("select value from system_settings where key='billing_payg_start_thresholds'")).rows[0];
+ const report={checks:[] as string[]};
+ try{
+  const {createFixture,claim}=await load('fixture');
+  const {allActorsWindowCases}=await load('all-actors-window');
+  await allActorsWindowCases(db,report,createFixture,claim);
+  expect(report.checks).toHaveLength(7);
+ }finally{
+  await db.query('RESET ROLE');
+  if(prior)await db.query("update system_settings set value=$1 where key='billing_payg_start_thresholds'",[prior.value]);
+  else await db.query("delete from system_settings where key='billing_payg_start_thresholds'");
+ }
+},60000);
+
 it('BILL2: persistent provider rejection view preserves history, permissions and migration guards',async()=>{
  const moduleUrl=new URL('../../../../db/tests/payg/provider-rejected-view.mjs',import.meta.url);
  const {providerRejectedViewCases}=await import(/* @vite-ignore */moduleUrl.href);
