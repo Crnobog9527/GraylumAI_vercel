@@ -14,7 +14,10 @@ export async function syncMethodCheckoutReturn(db: SupabaseClient, stripe: Strip
   if (!method.orderId) throw new Error('PAY_WAFFO_PERSISTENCE_UNAVAILABLE');
   const synced = await db.from('payment_orders').select('status,fulfilled_at').eq('id', method.orderId).eq('user_id', userId).maybeSingle();
   if (synced.error || !synced.data) throw new Error('PAY_WAFFO_PERSISTENCE_UNAVAILABLE', { cause: synced.error });
-  return { sessionId: session.id, mode: session.mode, checkoutStatus: session.status, paymentStatus: session.payment_status,
+  // Report the session as the recovery saw it: payment may have completed after the caller's own read, and a paid
+  // order kept for review must not read as "no charge".
+  return { sessionId: session.id, mode: session.mode, checkoutStatus: method.checkoutStatus ?? session.status,
+    paymentStatus: method.paymentStatus ?? session.payment_status,
     orderStatus: synced.data.status ? normalizePaymentOrderStatus(synced.data.status) : null,
     fulfilledAt: (synced.data.fulfilled_at as string | null) ?? null, stripeSubscriptionId: null, stripeInvoiceId: null };
 }
