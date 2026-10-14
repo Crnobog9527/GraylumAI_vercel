@@ -3,6 +3,8 @@ import { CHAT_ACTION, type ChatNotice } from '@/components/chat/ChatInlineNotice
 import { OUTPUT_TRUNCATED_NOTICE, PLATFORM_FAILURE_NOTICE, PROVIDER_HISTORY_NOTICE, PROVIDER_REJECTED_NOTICE,
   HISTORY_OMITTED_NOTICE } from '@/lib/runtime-gate-notice';
 import { isPaygWaiting, organizerSkipped, type PaygViewFields } from '@/lib/payg-wait';
+import { POSITIONING_REQUIRED_NOTICE } from './gate-notices';
+import { positioningRequiredNotice } from './positioning-required';
 
 /** A frozen guidance request without its execution, waiting for the user's explicit retry. */
 export const GUIDE_HELD_NOTICE = '引导请求待恢复。点“重试”会沿用原请求，不会另开一次。';
@@ -34,6 +36,8 @@ export function runtimeTurnNotices(turn: RuntimeTurn, ctx: {
   /** The execute call for this turn already returned a final state; the view has not caught up yet. */
   finished?: boolean;
   onRetry: () => void; onStop: () => void;
+  /** Guide-card navigation; tests replace it. */
+  navigate?: (href: string) => void;
 }): ChatNotice[] {
   const id = (suffix: string) => turn.executionId + ':' + suffix;
   const notices: ChatNotice[] = [];
@@ -45,6 +49,9 @@ export function runtimeTurnNotices(turn: RuntimeTurn, ctx: {
   // preflight: automatic refund (0215); platform_review: compensated after the daily review (0220).
   if ((turn.unavailableReason === 'preflight' || turn.unavailableReason === 'platform_review') && turn.state === 'cancelled')
     return [{ id: id('platform'), tone: 'warning', text: PLATFORM_FAILURE_NOTICE }];
+  // POSITIONING-GATE fallback refusal: refunded through fail_platform (0233).
+  if (turn.unavailableReason === 'positioning_required' && turn.state === 'cancelled')
+    return [positioningRequiredNotice(id('positioning'), ctx.navigate)];
   if (turn.historyOmitted)
     notices.push({ id: id('history-omitted'), tone: 'status', text: HISTORY_OMITTED_NOTICE });
   // The view names a whole-turn provider refusal; the same text the execute result showed live.
@@ -83,13 +90,16 @@ export function runtimeTurnNotices(turn: RuntimeTurn, ctx: {
 export function runtimeTailNotices(ctx: {
   error: string; heldGuide: boolean; busy: boolean; onGuide: () => void;
   lastTurn?: { open: boolean; texts: readonly string[] };
+  navigate?: (href: string) => void;
 }): ChatNotice[] {
   const notices: ChatNotice[] = [];
   if (ctx.heldGuide)
     notices.push({ id: 'guide', tone: 'warning', text: GUIDE_HELD_NOTICE, label: '引导待重试',
       actions: [{ label: CHAT_ACTION.retry, onClick: ctx.onGuide, disabled: ctx.busy }] });
   const repeated = ctx.lastTurn?.texts.includes(ctx.error) || (ctx.heldGuide && ctx.error === GUIDE_HELD_NOTICE);
-  if (ctx.error && !repeated) notices.push({ id: 'error', tone: 'error', text: ctx.error });
+  // POSITIONING-GATE: the refusal (admission or a refunded round) shows the guide card, once.
+  if (ctx.error === POSITIONING_REQUIRED_NOTICE) { if (!repeated) notices.push(positioningRequiredNotice('positioning', ctx.navigate)); }
+  else if (ctx.error && !repeated) notices.push({ id: 'error', tone: 'error', text: ctx.error });
   if (ctx.busy && !ctx.lastTurn?.open) notices.push({ id: 'busy', tone: 'status', busy: true, text: '正在处理，请稍候…' });
   return notices;
 }

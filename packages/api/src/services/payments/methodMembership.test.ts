@@ -2,7 +2,10 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { describe, it, expect, vi } from 'vitest';
 import { readMethodMembership } from './methodMembership';
-const staging = { VERCEL: '1', VERCEL_PROJECT_PRODUCTION_URL: 'auth-staging.graylum.com', WAFFO_TEST_OPERATIONS_ENABLED: 'true' };
+const staging = { VERCEL: '1', VERCEL_PROJECT_PRODUCTION_URL: 'auth-staging.graylum.com', VERCEL_GIT_COMMIT_REF: 'staging',
+  VERCEL_GIT_REPO_OWNER: 'Crnobog9527', VERCEL_GIT_REPO_SLUG: 'GraylumAI_vercel', VERCEL_PROJECT_ID: 'synthetic-staging-project',
+  V3_RUNTIME_STAGING_PROJECT_ID: 'synthetic-staging-project', NEXT_PUBLIC_SUPABASE_URL: 'https://synthetic.supabase.co',
+  V3_RUNTIME_STAGING_DATABASE_HOST: 'synthetic.supabase.co', V3_RUNTIME_STAGING_WINDOW_ID: '00000000-0000-4000-8000-000000000001', WAFFO_TEST_OPERATIONS_ENABLED: 'true' };
 const routes = (card: boolean) => ({ version: 2, card: { enabled: card },
   wechat_pay: { enabled: true, annualVerified: true }, alipay: { enabled: true, annualVerified: true } });
 function fixture(counts: Array<number | null> = [40, 3, 2], route: unknown = null,
@@ -36,11 +39,13 @@ describe('method membership read projection', () => {
       expect(q.eq).not.toHaveBeenCalledWith('payment_status', expect.anything());
     }
   });
-  it('keeps card checkout not ready everywhere until the Stripe card checkout lands (PAY-STRIPE-MP PR-1)', async () => {
-    for (const env of [staging, { ...staging, VERCEL_PROJECT_PRODUCTION_URL: 'app.graylum.com' }]) {
-      for (const enabled of [true, false]) {
-        expect((await readMethodMembership(fixture(undefined, routes(enabled)).db, 'actor', 0, env)).checkoutReady).toBe(false);
-      }
+  it('reports card checkout ready only on staging with the server switch on (PAY-STRIPE-MP 3c)', async () => {
+    const ready = async (env: typeof staging, enabled: boolean) =>
+      (await readMethodMembership(fixture(undefined, routes(enabled)).db, 'actor', 0, env)).checkoutReady;
+    expect(await ready(staging, true)).toBe(true);
+    expect(await ready(staging, false)).toBe(false);
+    for (const enabled of [true, false]) {
+      expect(await ready({ ...staging, VERCEL_PROJECT_PRODUCTION_URL: 'app.graylum.com' }, enabled)).toBe(false);
     }
   });
   it('does not present missing count as zero or hide oversold state', async () => {

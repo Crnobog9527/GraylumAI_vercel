@@ -13,6 +13,7 @@ import { controlCases } from './controls.mjs';
 import { projectionCases } from './projection.mjs';
 import { deliveryCases } from './delivery.mjs';
 import { seedLegacyWaffo, verifyAfterStripeRouting } from './compat.mjs';
+import { seedEndedMemberships, verifyEndedMemberships } from './expiry.mjs';
 import { POSTGRES_IMAGE } from '../v3/images.mjs';
 import { buildFromFiles, installPgCronStub } from '../baseline/build-from-files.mjs';
 
@@ -72,6 +73,7 @@ try {
   cases.push(...await controlCases({admin,service,connect}));
   cases.push(...await packageCases({admin,service}));
   cases.push(...await projectionCases({admin,service}));
+  const ended = await seedEndedMemberships({admin,service});
   const legacy = await seedLegacyWaffo({admin,service});
   assert.ok(deferred.length > 0, 'PAY-STRIPE-MP migrations were deferred');
   for (const path of deferred) {
@@ -81,6 +83,7 @@ try {
     assert.deepEqual(fingerprint(), once, `${path} repeat over Waffo data preserves structure`);
   }
   cases.push(...await verifyAfterStripeRouting({admin,service},legacy));
+  cases.push(...await verifyEndedMemberships({admin,service,connect},ended));
   console.log(JSON.stringify({result:'PASS',replay:report,cases}));
 } finally {
   await Promise.all(clients.map(c=>c.query('ROLLBACK').catch(()=>{})));

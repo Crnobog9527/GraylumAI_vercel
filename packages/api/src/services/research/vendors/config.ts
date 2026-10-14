@@ -1,0 +1,216 @@
+/* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+// research_tools_config (plan §5): admin switches, verified platforms and the route table. RT-1 only
+// reads and validates it; the concurrency-checked write path and admin page are RT-2b. Missing or
+// invalid configuration means every research call stays off.
+import { z } from 'zod';
+import type { SupabaseClient } from '@supabase/supabase-js';
+import { parallelRoute } from './parallel';
+import { FIRECRAWL_ROUTE } from './firecrawl';
+import { tikhubRouteId } from './tikhub';
+import {
+  RESEARCH_VENDORS, SOCIAL_KINDS, SOCIAL_PLATFORMS,
+  type ResearchVendor, type SocialKind, type SocialPlatform,
+} from './types';
+
+export const RESEARCH_TOOLS_KEY = 'research_tools_config';
+
+/**
+ * Product rules from Master Plan §3.7 (D15, R11). They are server constants, not admin settings:
+ * changing them needs a new Owner decision (plan §1).
+ */
+export const BENCHMARK_RULES = Object.freeze({
+  followersMin: 10_000,
+  followersMax: 200_000,
+  activeWithinDays: 30,
+  candidatesMin: 8,
+  candidatesMax: 12,
+  postsMin: 20,
+  postsMax: 30,
+  qualifiedMin: 3,
+});
+
+/**
+ * Per platform, the query kinds one benchmark account needs (each kind is one billed sub-call) and which of them
+ * carries the exact follower count. A benchmark needs exact followers plus an absolute publication time for the
+ * 30-day rule. `verified` is set in code only after RT-7 checked the routes against recorded real responses
+ * (plan §6.1); an admin setting can never enable an unverified platform. Douyin, Weibo and Instagram have no
+ * benchmark route set yet.
+ *
+ * - bilibili: the profile has no followers; they come from the separate relation call.
+ * - xiaohongshu: no public view counts, so `views` is always missing.
+ * - youtube: channel videos have only relative times and abbreviated subscriber labels; one post_detail of the
+ *   newest video gives the exact followers and that video's absolute date. Other videos keep publishedAt missing.
+ */
+export interface BenchmarkRouteSet { kinds: readonly SocialKind[]; followersFrom: SocialKind; verified: boolean }
+const routeSet = (kinds: SocialKind[], followersFrom: SocialKind, verified: boolean): Readonly<BenchmarkRouteSet> =>
+  Object.freeze({ kinds: Object.freeze(kinds), followersFrom, verified });
+export const BENCHMARK_ROUTE_KINDS: Readonly<Partial<Record<SocialPlatform, Readonly<BenchmarkRouteSet>>>> = Object.freeze({
+  tiktok: routeSet(['account_profile', 'account_posts'], 'account_profile', true),
+  x: routeSet(['account_profile', 'account_posts'], 'account_profile', true),
+  bilibili: routeSet(['account_profile', 'account_relation', 'account_posts'], 'account_relation', false),
+  xiaohongshu: routeSet(['account_profile', 'account_posts'], 'account_profile', false),
+  youtube: routeSet(['account_posts', 'post_detail'], 'post_detail', false),
+});
+
+/** RT-3a budgets at most this many sub-calls per benchmark account inside the run's 32-call ceiling. */
+export const MAX_BENCHMARK_SUBCALLS_PER_ACCOUNT = 3;
+for (const [platform, entry] of Object.entries(BENCHMARK_ROUTE_KINDS)) {
+  if (entry!.kinds.length > MAX_BENCHMARK_SUBCALLS_PER_ACCOUNT || !entry!.kinds.includes(entry!.followersFrom)) {
+    throw new Error(`BENCHMARK_ROUTE_KINDS ${platform}: too many sub-calls or followers from an unlisted kind`);
+  }
+}
+
+/** Billed sub-calls one benchmark account needs on `platform`; 0 when the platform has no benchmark route set. */
+export function benchmarkSubcallsPerAccount(platform: SocialPlatform): number {
+  return BENCHMARK_ROUTE_KINDS[platform]?.kinds.length ?? 0;
+}
+
+/** Platforms whose benchmark routes are verified (derived from the table; changing it is a code change). */
+export const BENCHMARK_CAPABLE_PLATFORMS: readonly SocialPlatform[] = Object.freeze(
+  (Object.keys(BENCHMARK_ROUTE_KINDS) as SocialPlatform[]).filter(platform => BENCHMARK_ROUTE_KINDS[platform]!.verified));
+
+/** Run ceiling enforced by bill2_payg_validate_quote (0162); subcalls must fit beside model calls. */
+export const RUN_MAX_CALLS = 32;
+
+const isoTime = z.string().datetime({ offset: true });
+const attestation = z.object({ by: z.string().uuid(), at: isoTime }).strict();
+const vendorSchema = z.object({ enabled: z.boolean(), hardCapAttested: attestation.nullable() }).strict()
+  .refine(v => !v.enabled || v.hardCapAttested !== null, 'A supplier can only be enabled after its platform hard cap is attested');
+/**
+ * Every adapter route is pinned to one unit per call (plan §3.5), so the frozen bound must be exactly that;
+ * a larger typo would over-reserve the user's balance. A route with a different ceiling changes this code.
+ */
+const ADAPTER_MAX_UNITS = '1';
+
+const routeSchema = z.object({
+  platform: z.enum([...SOCIAL_PLATFORMS, 'web']),
+  // web_search = Parallel fast; web_search_pro = Parallel advanced. Separate kinds keep route, request and frozen price aligned.
+  kind: z.enum([...SOCIAL_KINDS, 'web_search', 'web_search_pro', 'web_fetch']),
+  vendor: z.enum(RESEARCH_VENDORS),
+  route: z.string().min(1).max(120),
+  // Only primary routes are approved today (Bright Data backup needs a separate Owner approval, RT-9).
+  backup: z.null(),
+  maxUnitsPerCall: z.literal(ADAPTER_MAX_UNITS),
+}).strict();
+
+export const researchToolsConfigSchema = z.object({
+  version: z.literal(1),
+  enabled: z.boolean(),
+  vendors: z.object({ tikhub: vendorSchema, parallel: vendorSchema, firecrawl: vendorSchema }).strict(),
+  /** Platforms whose verified routes may be used at all. */
+  verifiedPlatforms: z.array(z.enum(SOCIAL_PLATFORMS)).max(SOCIAL_PLATFORMS.length),
+  /**
+   * Subset usable for benchmarks: it also needs reliable publication times (30-day rule). YouTube and
+   * Instagram stay out until RT-7 verifies time-bearing routes, while their other lookups remain usable.
+   */
+  benchmarkPlatforms: z.array(z.enum(SOCIAL_PLATFORMS)).max(SOCIAL_PLATFORMS.length),
+  routes: z.array(routeSchema).max(64),
+  limits: z.object({
+    maxSubcallsPerRound: z.number().int().min(1).max(RUN_MAX_CALLS - 3),
+    discoverSubcalls: z.number().int().min(1).max(RUN_MAX_CALLS - 3),
+  }).strict(),
+  recentGrowth: z.object({
+    maxFirstPostAgeDays: z.number().int().min(1).max(365),
+    minViewsToFollowers: z.string().regex(/^(0|[1-9]\d{0,3})(\.\d{1,4})?$/),
+  }).strict(),
+}).strict().superRefine((config, ctx) => {
+  config.benchmarkPlatforms.forEach((platform, index) => {
+    if (!config.verifiedPlatforms.includes(platform)) {
+      ctx.addIssue({ code: 'custom', path: ['benchmarkPlatforms', index], message: `${platform} is not a verified platform` });
+    }
+    if (!BENCHMARK_CAPABLE_PLATFORMS.includes(platform)) {
+      ctx.addIssue({ code: 'custom', path: ['benchmarkPlatforms', index], message: `${platform} routes cannot supply benchmark fields yet` });
+    }
+    // A benchmark fetch needs every route its platform's benchmark set lists (plan §1.1, §1.2).
+    for (const kind of BENCHMARK_ROUTE_KINDS[platform]?.kinds ?? []) {
+      if (!config.routes.some(entry => entry.platform === platform && entry.kind === kind)) {
+        ctx.addIssue({ code: 'custom', path: ['benchmarkPlatforms', index], message: `${platform} needs a configured ${kind} route` });
+      }
+    }
+  });
+  const seen = new Set<string>();
+  config.routes.forEach((entry, index) => {
+    const key = `${entry.platform}:${entry.kind}`;
+    if (seen.has(key)) ctx.addIssue({ code: 'custom', path: ['routes', index], message: `Duplicate route ${key}` });
+    seen.add(key);
+    if (expectedRoute(entry.platform, entry.kind, entry.vendor) !== entry.route) {
+      ctx.addIssue({ code: 'custom', path: ['routes', index, 'route'], message: `Unknown ${entry.vendor} route for ${key}` });
+    }
+  });
+});
+
+export type ResearchToolsConfig = z.infer<typeof researchToolsConfigSchema>;
+type RoutePlatform = ResearchToolsConfig['routes'][number]['platform'];
+type RouteKind = ResearchToolsConfig['routes'][number]['kind'];
+
+/** The adapter route a config entry must name; null when no verified adapter route exists. */
+function expectedRoute(platform: RoutePlatform, kind: RouteKind, vendor: ResearchVendor): string | null {
+  if (platform === 'web') {
+    if (kind === 'web_search' && vendor === 'parallel') return parallelRoute('fast');
+    if (kind === 'web_search_pro' && vendor === 'parallel') return parallelRoute('advanced');
+    if (kind === 'web_fetch' && vendor === 'firecrawl') return FIRECRAWL_ROUTE;
+    return null;
+  }
+  if (kind === 'web_search' || kind === 'web_search_pro' || kind === 'web_fetch' || vendor !== 'tikhub') return null;
+  return tikhubRouteId(platform, kind);
+}
+
+export const DISABLED_RESEARCH_TOOLS: ResearchToolsConfig = Object.freeze({
+  version: 1, enabled: false,
+  vendors: {
+    tikhub: { enabled: false, hardCapAttested: null },
+    parallel: { enabled: false, hardCapAttested: null },
+    firecrawl: { enabled: false, hardCapAttested: null },
+  },
+  verifiedPlatforms: [], benchmarkPlatforms: [], routes: [],
+  limits: { maxSubcallsPerRound: 12, discoverSubcalls: 25 },
+  recentGrowth: { maxFirstPostAgeDays: 90, minViewsToFollowers: '1' },
+}) as ResearchToolsConfig;
+
+/** Reads the stored config; absent, unreadable or invalid → everything off (fail closed). */
+export async function readResearchToolsConfig(db: SupabaseClient): Promise<{ config: ResearchToolsConfig; source: 'configured' | 'default' | 'invalid' }> {
+  try {
+    const { data, error } = await db.from('system_settings').select('value').eq('key', RESEARCH_TOOLS_KEY).maybeSingle();
+    if (error) return { config: DISABLED_RESEARCH_TOOLS, source: 'invalid' };
+    if (!data) return { config: DISABLED_RESEARCH_TOOLS, source: 'default' };
+    const raw = typeof data.value === 'string' ? JSON.parse(data.value) : data.value;
+    const parsed = researchToolsConfigSchema.safeParse(raw);
+    return parsed.success ? { config: parsed.data, source: 'configured' } : { config: DISABLED_RESEARCH_TOOLS, source: 'invalid' };
+  } catch {
+    return { config: DISABLED_RESEARCH_TOOLS, source: 'invalid' };
+  }
+}
+
+export type RouteSelection =
+  | { ok: true; vendor: ResearchVendor; route: string; maxUnitsPerCall: string }
+  | { ok: false; reason: 'RESEARCH_DISABLED' | 'PLATFORM_NOT_VERIFIED' | 'ROUTE_NOT_CONFIGURED' | 'VENDOR_DISABLED' };
+
+/**
+ * The host, not the model, picks the supplier: platform + query kind → configured primary route.
+ * `purpose: 'benchmark'` additionally requires the platform to be benchmark-eligible.
+ */
+export function selectRoute(
+  config: ResearchToolsConfig, platform: SocialPlatform | 'web', kind: RouteKind, purpose: 'general' | 'benchmark' = 'general',
+): RouteSelection {
+  if (!config.enabled) return { ok: false, reason: 'RESEARCH_DISABLED' };
+  if (platform !== 'web') {
+    const list = purpose === 'benchmark' ? config.benchmarkPlatforms : config.verifiedPlatforms;
+    if (!list.includes(platform)) return { ok: false, reason: 'PLATFORM_NOT_VERIFIED' };
+  }
+  const entry = config.routes.find(item => item.platform === platform && item.kind === kind);
+  if (!entry) return { ok: false, reason: 'ROUTE_NOT_CONFIGURED' };
+  if (!config.vendors[entry.vendor].enabled) return { ok: false, reason: 'VENDOR_DISABLED' };
+  return { ok: true, vendor: entry.vendor, route: entry.route, maxUnitsPerCall: entry.maxUnitsPerCall };
+}
+
+/**
+ * Whether official usage stayed within the frozen per-call bound. null = no official usage to compare.
+ * A false result means the route must fail closed for new calls until revalidated (plan §3.5).
+ */
+export function usageWithinBound(units: string | null, maxUnitsPerCall: string): boolean | null {
+  if (units === null) return null;
+  const [whole, fraction = ''] = units.split('.');
+  const max = BigInt(maxUnitsPerCall);
+  const used = BigInt(whole);
+  return used < max || (used === max && /^0*$/.test(fraction));
+}
