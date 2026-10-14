@@ -81,6 +81,8 @@ export async function reconcileStripeCardPayments(db: SupabaseClient, stripe: St
       return;
     }
     if (before.method_review_reason) {
+      // Replayed so an undelivered card subscription is stopped at Stripe even if its webhook gave up (idempotent).
+      await recoverMethodCheckout(db, stripe, session.id, 'checkout.session.completed');
       findings.push({ kind: 'paid_in_review', object: 'checkout', externalId: session.id, orderId });
       return;
     }
@@ -137,12 +139,17 @@ export async function reconcileStripeCardPayments(db: SupabaseClient, stripe: St
   //    never renew and charge again unnoticed. Whatever still fails is a finding (alerted).
   const pending = await db.from('user_subscriptions').select('id').eq('payment_channel', 'stripe').is('stripe_subscription_id', null)
     .eq('merchant_namespace', scope.merchant).eq('payment_mode', scope.mode).not('method_cancel_requested_at', 'is', null)
-    .neq('cancel_at_period_end', 'true').in('status', ['active', 'past_due', 'trialing']).limit(100);
+    .neq('cancel_at_period_end', 'true').in('status', ['active', 'past_due', 'trialing']).order('id').limit(101);
   if (pending.error || !Array.isArray(pending.data)) {
     complete = false;
     findings.push({ kind: 'scan_failed', object: 'subscription', code: 'PAY_WAFFO_PERSISTENCE_UNAVAILABLE' });
   } else {
-    for (const row of pending.data as Array<{ id: string }>) {
+    // More than a day's batch (after a Stripe outage): never report it complete; the rest is retried on the next run.
+    if (pending.data.length > 100) {
+      complete = false;
+      findings.push({ kind: 'scan_incomplete', object: 'subscription', code: 'PENDING_STOPS_OVER_LIMIT' });
+    }
+    for (const row of (pending.data as Array<{ id: string }>).slice(0, 100)) {
       if (Date.now() > deadline) {
         complete = false;
         findings.push({ kind: 'scan_incomplete', object: 'subscription', code: 'TIME_BUDGET' });
