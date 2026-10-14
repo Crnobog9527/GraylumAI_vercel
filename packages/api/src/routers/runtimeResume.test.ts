@@ -4,7 +4,7 @@ import { runtimeRouter } from './runtime';
 import { createRuntimeBudget } from '../services/runtime/budget';
 const id = '00000000-0000-4000-8000-000000000001';
 afterEach(() => vi.unstubAllEnvs());
-it('runtime.resume rejects a v1 execution through the real host and executor without mutation', async () => {
+function fixture() {
   vi.stubEnv('NEXT_PUBLIC_SUPABASE_URL', 'http://127.0.0.1:54321');
   vi.stubEnv('V3_RUNTIME_LOCAL_ENDPOINT', 'http://127.0.0.1:12345');
   const token = 'e30.' + Buffer.from(JSON.stringify({ exp: Math.floor(Date.now() / 1000) + 3600 }))
@@ -23,7 +23,23 @@ it('runtime.resume rejects a v1 execution through the real host and executor wit
   const caller = runtimeRouter.createCaller({ headers: new Headers(), runtimeBudget: createRuntimeBudget(),
     user: { id, email: 'fixture@example.test' }, isEmailVerified: true,
     supabase: client, supabaseAuth: client, supabaseAdmin: client, hasSupabaseAdminPrivileges: true } as never);
+  return { caller, rpc };
+}
+it('runtime.resume rejects a v1 execution through the real host and executor without mutation', async () => {
+  const { caller, rpc } = fixture();
   await expect(caller.resume({ executionId: id, cursor: 0, epoch: 0 })).rejects.toMatchObject({
+    code: 'PRECONDITION_FAILED', message: expect.stringContaining('RUNTIME_RESUME_CONFLICT'),
+  });
+  expect(rpc).toHaveBeenCalledExactlyOnceWith('runtime_execution', {
+    p_actor_id: id, p_execution_id: id, p_action: 'read',
+  });
+});
+
+// CHAT-NATIVE-OUTPUT: resumeStream is the same host call with the same cursor/epoch token; only delivery streams.
+it('runtime.resumeStream runs the same guarded resume: the same refusal, one read, no mutation', async () => {
+  const { caller, rpc } = fixture();
+  const events = await caller.resumeStream({ executionId: id, cursor: 0, epoch: 0, textProtocol: 'textDelta-v1' });
+  await expect((async () => { for await (const event of events) void event; })()).rejects.toMatchObject({
     code: 'PRECONDITION_FAILED', message: expect.stringContaining('RUNTIME_RESUME_CONFLICT'),
   });
   expect(rpc).toHaveBeenCalledExactlyOnceWith('runtime_execution', {

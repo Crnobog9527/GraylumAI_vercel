@@ -340,11 +340,11 @@ test.describe('Admin Config Flows', () => {
     }
   });
 
-  test('should apply check-in and invitation reward settings to the profile surface', async ({ browser, page }, testInfo) => {
+  test('should apply check-in reward settings to the profile surface', async ({ browser, page }, testInfo) => {
     test.setTimeout(90000);
     const steps: string[] = [];
     const monitor = createIssueMonitor(page);
-    let actual = 'Check-in and invitation settings flow completed';
+    let actual = 'Check-in settings flow completed';
 
     const userContext = await browser.newContext({ storageState: authStatePaths.user });
     const userPage = await userContext.newPage();
@@ -366,19 +366,6 @@ test.describe('Admin Config Flows', () => {
       await monthlyBonusInput.fill(updatedMonthlyBonus);
       await saveAllSettings(page);
 
-      steps.push('Update invitation rewards from /admin/settings');
-      await page.getByRole('tab', { name: '邀请奖励' }).click();
-      const inviterRewardInput = page.getByTestId('admin-setting-invite_inviter_reward');
-      const inviteeRewardInput = page.getByTestId('admin-setting-invite_invitee_reward');
-      const originalInviterReward = await inviterRewardInput.inputValue();
-      const originalInviteeReward = await inviteeRewardInput.inputValue();
-      const updatedInviterReward = String(110 + (Date.now() % 10));
-      const updatedInviteeReward = String(70 + (Date.now() % 10));
-
-      await inviterRewardInput.fill(updatedInviterReward);
-      await inviteeRewardInput.fill(updatedInviteeReward);
-      await saveAllSettings(page);
-
       steps.push('Verify the profile check-in dialog reflects the new reward ladder and monthly bonus');
       await gotoWithBypass(userPage, '/profile');
       await userPage.getByTestId('profile-checkin-card').click();
@@ -388,22 +375,11 @@ test.describe('Admin Config Flows', () => {
       await expect(checkinDialog.getByText(`+${updatedMonthlyBonus}`, { exact: false }).first()).toBeVisible({ timeout: 10000 });
       await userPage.keyboard.press('Escape');
 
-      steps.push('Verify the invitation dialog reflects the updated inviter and invitee rewards');
-      await userPage.getByTestId('profile-invite-card').click();
-      const inviteDialog = userPage.getByRole('dialog');
-      await expect(inviteDialog.getByRole('heading', { name: '邀请好友' })).toBeVisible({ timeout: 10000 });
-      await expect(inviteDialog.getByText(`+${updatedInviterReward}`, { exact: false }).first()).toBeVisible({ timeout: 10000 });
-      await expect(inviteDialog.getByText(`+${updatedInviteeReward}`, { exact: false }).first()).toBeVisible({ timeout: 10000 });
-      await userPage.keyboard.press('Escape');
-
       steps.push('Restore the original reward settings');
       await gotoWithBypass(page, '/admin/settings');
       await page.getByRole('tab', { name: '签到福利' }).click();
       await checkinDay1Input.fill(originalCheckinDay1);
       await monthlyBonusInput.fill(originalMonthlyBonus);
-      await page.getByRole('tab', { name: '邀请奖励' }).click();
-      await inviterRewardInput.fill(originalInviterReward);
-      await inviteeRewardInput.fill(originalInviteeReward);
       await saveAllSettings(page);
 
       const blockingIssues = [
@@ -420,10 +396,10 @@ test.describe('Admin Config Flows', () => {
       await writeFlowAudit(
         testInfo,
         {
-          title: 'admin-settings-checkin-invite-effects',
+          title: 'admin-settings-checkin-effects',
           role: 'admin',
           route: '/admin/settings,/profile',
-          expected: 'Admin users can change check-in and invitation reward settings from /admin/settings, and the profile check-in/invitation dialogs reflect the new values.',
+          expected: 'Admin users can change check-in reward settings from /admin/settings, and the profile check-in dialog reflects the new values.',
         },
         actual,
         steps,

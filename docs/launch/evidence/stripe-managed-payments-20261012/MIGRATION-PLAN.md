@@ -155,7 +155,8 @@ MP 只在官方列出的 80 多个国家代收代缴税（具体国家清单以�
     4. 正式回调地址订阅的事件增加 `invoice.*`、`customer.subscription.*`、`charge.refunded`、`charge.dispute.*`；如果新建回调地址，会产生新的回调密钥，属于新增凭证；
     5. 账单描述、客服邮箱、结账页里的条款和隐私链接；开通 Stripe Tax 的门槛监控（MP 不负责税务的国家，见 2.4）；
     6. 合并到 `main` 并部署。
-  - staging 沙盒：重试设置也要改成同样的规则，这一步要在 Stripe 后台点（没有对应的接口），由 Owner 或 Codex 在沙盒里操作；其余沙盒对象用脚本建立。
+    7. 打开每日去 Stripe 对账（#943）：正式环境设置 `STRIPE_CARD_RECONCILIATION_MODE=live`，默认不设（关闭），Owner 批准后才设；同时放开银行卡处理里只认测试模式的限制（和打开正式环境银行卡下单一起做）。写进 REL-1 上线清单。
+  - staging 沙盒：每日去 Stripe 对账设置 `STRIPE_CARD_RECONCILIATION_MODE=test`（staging 的 Vercel 环境变量）；重试设置也要改成同样的规则，这一步要在 Stripe 后台点（没有对应的接口），由 Owner 或 Codex 在沙盒里操作；其余沙盒对象用脚本建立。
 
 ## 六、验收计划
 

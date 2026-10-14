@@ -5,6 +5,7 @@ import { trpc } from '@/trpc/client';
 import type { LiveReply } from '@/app/positioning/[draftId]/agent-turn-display';
 import { liveReplyController, type LiveReplyController } from '@/app/positioning/[draftId]/live-reply-controller';
 import { TEXT_PROTOCOL } from '@/app/positioning/[draftId]/mentor-turn';
+import type { StopRequest } from '@/app/positioning/[draftId]/stop-reply';
 
 type OpenStream = (executionId: string) => Promise<AsyncIterable<AgentTurnEvent>>;
 
@@ -41,24 +42,31 @@ export function useRuntimeStream(sessionId: string, onResult: (executionId: stri
   // No same-tab prefix storage here: a reload shows the saved history, as before.
   const live = useMemo(() => liveReplyController({ draftId: 'runtime:' + sessionId, storage: () => null, show: setReply }),
     [sessionId]);
-  async function run(executionId: string) {
+  async function stream(executionId: string, open: OpenStream) {
     setActive(count => count + 1);
     setLast(null);
     try {
-      return await runStreamedExecution(live,
-        id => utils.client.runtime.executeStream.mutate({ executionId: id, textProtocol: TEXT_PROTOCOL }), executionId, {
-          onResult: (id, result) => { setLast({ executionId: id, result }); onResult(id, result); },
-          refreshBalance: () => void utils.credits.getBalance.invalidate(),
-        });
+      return await runStreamedExecution(live, open, executionId, {
+        onResult: (id, result) => { setLast({ executionId: id, result }); onResult(id, result); },
+        refreshBalance: () => void utils.credits.getBalance.invalidate(),
+      });
     } finally {
       setActive(count => count - 1);
     }
   }
+  const run = (executionId: string) =>
+    stream(executionId, id => utils.client.runtime.executeStream.mutate({ executionId: id, textProtocol: TEXT_PROTOCOL }));
+  /** 继续 a BILL-PAYG pause with its own cursor/epoch token; same execution, streamed like `run`. */
+  const resume = (token: { executionId: string; cursor: number; epoch: number }) =>
+    stream(token.executionId, () => utils.client.runtime.resumeStream.mutate({ ...token, textProtocol: TEXT_PROTOCOL }));
   const call: StreamCall = last ? { isSuccess: true, data: last.result, variables: { executionId: last.executionId } }
     : { isSuccess: false };
   return {
-    reply, run, call, streaming: active > 0,
-    /** 停止 freezes the shown text; the page still sends its own cancel. */
-    freeze: (executionId: string) => void live.stop(executionId),
+    reply, run, resume, call, streaming: active > 0,
+    /**
+     * 停止 freezes the shown text and returns the stop request that keeps exactly it (stopAt/source), or
+     * null when nothing streams here; the page then sends a plain cancel, as before.
+     */
+    freeze: (executionId: string): StopRequest | null => live.stop(executionId),
   };
 }

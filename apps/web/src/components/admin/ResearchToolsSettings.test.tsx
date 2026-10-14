@@ -43,6 +43,16 @@ describe('ResearchToolsPanel', () => {
     expect(markup).toContain('已登记平台硬上限：admin@example.test');
   });
 
+  it('locks every control while saving or rereading (edits then would be overwritten)', () => {
+    const v = view({ tikhub: true });
+    const markup = renderToStaticMarkup(createElement(ResearchToolsPanel, {
+      view: v, draft: toDraft(v), onChange: vi.fn(), onSave: vi.fn(), saving: true, notice: null, failure: null,
+    }));
+    expect(switchTag(markup, 'tikhub')).toMatch(/disabled=""/);
+    expect(markup).toMatch(/<textarea[^>]*disabled=""/);
+    expect(markup).toMatch(/data-testid="research-tools-save"[^>]*disabled=""|disabled=""[^>]*data-testid="research-tools-save"/);
+  });
+
   it('unlocks the switch once the admin ticks the confirmation in this save', () => {
     const v = view();
     const draft = toDraft(v);

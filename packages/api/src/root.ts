@@ -28,7 +28,9 @@ import { paymentsRouter } from './routers/payments';
 import { skillsRouter } from './routers/skills';
 import { accountRouter } from './routers/account';
 import { dataUseRouter } from './routers/dataUse';
+import { publishMonitorRouter } from './routers/publishMonitor';
 import { adminStaleRoundsRouter } from './routers/adminStaleRounds';
+import { fusionSettingsRouter } from './routers/fusionSettings';
 
 /**
  * 主路由器
@@ -47,6 +49,7 @@ export const appRouter = router({
   billingReport: billingReportRouter,
   mentorBudget: mentorBudgetRouter,
   reportModel: reportModelRouter,
+  fusionSettings: fusionSettingsRouter,
   socialMediaFlag: socialMediaFlagRouter,
   runtimeRateLimits: runtimeRateLimitsRouter,
   modelIdentity: modelIdentityRouter,
@@ -65,6 +68,7 @@ export const appRouter = router({
   opc: opcRouter,
   account: accountRouter,
   dataUse: dataUseRouter,
+  publishMonitor: publishMonitorRouter,
   library: libraryRouter,
 });
 

@@ -11,11 +11,11 @@ import type {
 export const TIKHUB_BASE = 'https://api.tikhub.io/api/v1';
 export const MAX_POSTS = 30;
 
-type AccountId = 'tiktok_handle' | 'x_handle' | 'instagram_handle' | 'numeric' | 'youtube_channel';
+type AccountId = 'tiktok_handle' | 'x_handle' | 'instagram_handle' | 'numeric' | 'youtube_channel' | 'xhs_user' | 'youtube_video';
 interface TikhubRoute {
   method: 'GET' | 'POST';
   path: string;
-  /** What `account` must look like for account routes. */
+  /** What `account` (or, for post_detail, `postId`) must look like. */
   account?: AccountId;
   params: (input: { keyword?: string; account?: string; limit: number }) => Record<string, string | number>;
 }
@@ -31,6 +31,14 @@ export const TIKHUB_ROUTES: Partial<Record<`${SocialPlatform}:${SocialKind}`, Ti
     method: 'GET', path: '/xiaohongshu/app_v2/search_notes',
     params: ({ keyword }) => ({ keyword: keyword!, page: 1, sort_type: 'general' }),
   },
+  // RT-1b (TikHub OpenAPI). Only `user_id` is sent, never a share link. TikHub documents that a wrong user id still
+  // answers 200 with Xiaohongshu's "服务异常" and is billed, so the id is checked strictly before any call.
+  'xiaohongshu:account_profile': {
+    method: 'GET', path: '/xiaohongshu/app_v2/get_user_info', account: 'xhs_user', params: ({ account }) => ({ user_id: account! }),
+  },
+  'xiaohongshu:account_posts': {
+    method: 'GET', path: '/xiaohongshu/app_v2/get_user_posted_notes', account: 'xhs_user', params: ({ account }) => ({ user_id: account! }),
+  },
   // Bilibili's profile has no follower count; followers come from a second, separately billed
   // relation call. Both paths are from TikHub's OpenAPI spec; RESEARCH-0 tested only the profile, so
   // RT-7 verifies the relation call before Bilibili can be enabled (it is not benchmark-capable yet).
@@ -39,6 +47,12 @@ export const TIKHUB_ROUTES: Partial<Record<`${SocialPlatform}:${SocialKind}`, Ti
   },
   'bilibili:account_relation': {
     method: 'GET', path: '/bilibili/web/fetch_user_relation_stat', account: 'numeric', params: ({ account }) => ({ uid: account! }),
+  },
+  // RT-1b (TikHub OpenAPI): newest-first uploads with absolute `created`, play and comment counts. V2 of this
+  // endpoint drops the comment count, so V1 is used; a user's first page is all a benchmark needs.
+  'bilibili:account_posts': {
+    method: 'GET', path: '/bilibili/web/fetch_user_post_videos', account: 'numeric',
+    params: ({ account, limit }) => ({ uid: account!, pn: 1, ps: limit, order: 'pubdate' }),
   },
   'weibo:account_posts': {
     method: 'GET', path: '/weibo/app/fetch_user_timeline', account: 'numeric',
@@ -64,9 +78,17 @@ export const TIKHUB_ROUTES: Partial<Record<`${SocialPlatform}:${SocialKind}`, Ti
     method: 'GET', path: '/youtube/web_v2/get_channel_description', account: 'youtube_channel',
     params: ({ account }) => ({ channel_id: account!, language_code: 'en', country_code: 'US' }),
   },
+  // Only relative times ("18小时前") per video: publishedAt stays missing and is never derived from them.
+  // The newest video is taken from this list's order (assumed newest first; RT-7 confirms it with real responses).
   'youtube:account_posts': {
     method: 'GET', path: '/youtube/web_v2/get_channel_videos', account: 'youtube_channel',
     params: ({ account }) => ({ channel_id: account!, need_format: 'true' }),
+  },
+  // RT-1b (TikHub OpenAPI): one video's details carry the exact channel_follower_count and an absolute publish date.
+  // A benchmark reads it once per channel, for the newest video of that channel's account_posts result (RT-3b).
+  'youtube:post_detail': {
+    method: 'GET', path: '/youtube/web_v2/get_video_info_v2', account: 'youtube_video',
+    params: ({ account }) => ({ video_id: account!, need_format: 'true' }),
   },
   'x:keyword_posts': {
     method: 'GET', path: '/twitter/web/fetch_search_timeline', params: ({ keyword }) => ({ keyword: keyword!, search_type: 'Latest' }),
@@ -94,6 +116,9 @@ const ACCOUNT_PATTERNS: Record<AccountId, RegExp> = {
   instagram_handle: /^(?!\.)(?!.*\.\.)(?!.*\.$)[A-Za-z0-9._]{1,30}$/,
   numeric: /^\d{1,20}$/,
   youtube_channel: /^UC[A-Za-z0-9_-]{22}$/,
+  // Xiaohongshu user ids are 24 lowercase hex characters (e.g. 61b46d790000000010008153).
+  xhs_user: /^[0-9a-f]{24}$/,
+  youtube_video: /^[A-Za-z0-9_-]{11}$/,
 };
 
 export interface TikhubCall {
@@ -101,6 +126,8 @@ export interface TikhubCall {
   kind: SocialKind;
   keyword?: string;
   account?: string;
+  /** The post to read for `post_detail` (a YouTube video id). */
+  postId?: string;
   limit?: number;
 }
 
@@ -124,8 +151,10 @@ export function buildTikhubRequest(call: TikhubCall): { request: VendorRequest }
     if (!keyword || [...keyword].length > 40 || /\p{Cc}/u.test(keyword)) return { reason: 'INVALID_KEYWORD' };
     return { request: requestFor(route, { keyword, limit }) };
   }
-  const account = call.account?.trim();
-  if (!account || !route.account || !ACCOUNT_PATTERNS[route.account].test(account)) return { reason: 'INVALID_ACCOUNT' };
+  const account = (call.kind === 'post_detail' ? call.postId : call.account)?.trim();
+  if (!account || !route.account || !ACCOUNT_PATTERNS[route.account].test(account)) {
+    return { reason: call.kind === 'post_detail' ? 'INVALID_POST' : 'INVALID_ACCOUNT' };
+  }
   return { request: requestFor(route, { account, limit }) };
 }
 
@@ -174,7 +203,8 @@ export async function callTikhub(call: TikhubCall, deps: VendorDeps): Promise<Re
   const all = normalizeTikhub(answer.json, call.platform, call.kind, call.account?.trim());
   // A recognized empty post list is a real, billed "no results" answer. A missing profile or an
   // unrecognized payload is not a delivery and is never reported as a successful, billable result.
-  if (all.length === 0 && call.kind !== 'account_profile' && call.kind !== 'account_relation' && hasEmptyPostList(answer.json, call.platform, call.kind)) {
+  const listKind = call.kind === 'keyword_posts' || call.kind === 'account_posts';
+  if (all.length === 0 && listKind && hasEmptyPostList(answer.json, call.platform, call.kind)) {
     return { ...base, outcome: 'ok', reason: 'NO_RESULTS', httpStatus: 200, supplierMayCharge: true, usage: { unit: 'call', units: '1' } };
   }
   if (all.length === 0) {

@@ -4,6 +4,7 @@ import {randomUUID} from 'node:crypto';
 import {ready,detach} from '../erasure-binding/cases.mjs';
 import {rpc,fixture,call,evidence,closeAccount,outcome} from '../erasure-b2a/cases.mjs';
 import {scrub,insertUsage,row} from '../erasure-ledger/cases.mjs';
+import {recordLibraryProof} from './library-proof.mjs';
 
 const cleanup=(db,f)=>rpc(db,'account_erasure_local_cleanup',f.actor,true);
 const count=async(db,table,column,id)=>(await db.query(
@@ -115,6 +116,7 @@ export async function runLeaves(db,report){
  const tokenBefore=await row(db,'token_stats',token),usageBefore=await row(db,'ai_usage_logs',usage);
  const chatBalance=(await row(db,'profiles',chat.actor)).credits;
  assert.ok(tokenBefore.content_erased_at);assert.ok(usageBefore.content_erased_at);
+ await recordLibraryProof(db,chat);
  assert.deepEqual(await cleanup(db,chat),{remaining:0,manualReview:0,errors:[]});
  assert.equal(await count(db,'conversations','id',chat.conversation),0);
  assert.equal(await count(db,'messages','id',message),0);
@@ -149,6 +151,7 @@ export async function runLeaves(db,report){
  assert.ok((await cleanup(db,batch)).remaining>0);
  assert.equal(await count(db,'messages','conversation_id',batch.conversation),1,'one invocation deletes at most 100 business leaves');
  assert.equal(await count(db,'conversations','id',batch.conversation),1);
+ await recordLibraryProof(db,batch);
  assert.deepEqual(await cleanup(db,batch),{remaining:0,manualReview:0,errors:[]});
  assert.equal(await count(db,'conversations','id',batch.conversation),0);
  assert.deepEqual(await cleanup(db,batch),{remaining:0,manualReview:0,errors:[]});

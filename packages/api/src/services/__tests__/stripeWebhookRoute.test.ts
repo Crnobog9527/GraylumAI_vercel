@@ -7,8 +7,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import Stripe from 'stripe';
 
-const walletMocks = vi.hoisted(() => ({ recover: vi.fn() }));
-vi.mock('@repo/api/src/services/payments/walletWebhook', () => ({ recoverWalletCheckout: walletMocks.recover }));
+const walletMocks = vi.hoisted(() => ({ recover: vi.fn(), invoice: vi.fn(), subscription: vi.fn(), refund: vi.fn() }));
+vi.mock('@repo/api/src/services/payments/walletWebhook', () => ({ recoverMethodCheckout: walletMocks.recover }));
+vi.mock('@repo/api/src/services/payments/cardSubscriptionWebhook', () => ({
+  handleCardSubscriptionInvoice: walletMocks.invoice, handleCardSubscriptionState: walletMocks.subscription }));
+vi.mock('@repo/api/src/services/payments/cardRefundWebhook', () => ({ handleCardRefund: walletMocks.refund }));
 
 const alertMocks = vi.hoisted(() => ({ captureMessage: vi.fn(), logServerError: vi.fn() }));
 vi.mock('../../../../../apps/web/node_modules/@sentry/nextjs', () => ({ captureMessage: alertMocks.captureMessage }));
@@ -39,7 +42,10 @@ import { handleStripeWebhookEvent, POST } from '../../../../../apps/web/src/app/
 
 describe('stripe webhook route', () => {
   beforeEach(() => {
-    walletMocks.recover.mockReset().mockResolvedValue(false);
+    walletMocks.recover.mockReset().mockResolvedValue(null);
+    walletMocks.invoice.mockReset().mockResolvedValue(false);
+    walletMocks.subscription.mockReset().mockResolvedValue(false);
+    walletMocks.refund.mockReset().mockResolvedValue(false);
     Object.values(alertMocks).forEach((mock) => mock.mockReset());
     Object.values(stripeServiceMocks).forEach((mock) => mock.mockReset());
     Object.values(stripeFulfillmentMocks).forEach((mock) => mock.mockReset());
@@ -54,6 +60,58 @@ describe('stripe webhook route', () => {
     walletMocks.recover.mockRejectedValue(new Error('timeout'));
     await expect(handleStripeWebhookEvent({} as never, event)).rejects.toThrow('timeout');
     expect(stripeFulfillmentMocks.upsertPaymentOrderBySession).not.toHaveBeenCalled();
+  });
+
+  it.each(['refund.created', 'refund.updated', 'refund.failed', 'charge.refund.updated', 'charge.refunded'])(
+    'records %s of a PAY-STRIPE-MP card order as an external refund, away from the legacy refund path', async (type) => {
+      const id = type === 'charge.refunded' ? 'ch_card' : 're_card';
+      const event = { type, data: { object: { id } } } as Stripe.Event;
+      walletMocks.refund.mockResolvedValue(true);
+      await handleStripeWebhookEvent({} as never, event);
+      expect(walletMocks.refund).toHaveBeenCalledWith({}, undefined,
+        type === 'charge.refunded' ? { chargeId: 'ch_card' } : { refundId: 're_card' }, expect.any(Function));
+      walletMocks.refund.mock.calls.at(-1)![3]();
+      expect(alertMocks.captureMessage).toHaveBeenLastCalledWith('PAY_COMMON_PAYMENT_EVIDENCE_CONFLICT',
+        expect.objectContaining({ tags: expect.objectContaining({ eventType: type }) }));
+      expect(stripeFulfillmentMocks.reconcileSubscriptionRefundFromStripeWebhook).not.toHaveBeenCalled();
+    });
+  it.each(['charge.dispute.created', 'charge.dispute.updated', 'charge.dispute.closed', 'charge.dispute.funds_withdrawn'])(
+    'acknowledges %s without touching any payment path (freezing belongs to PAY-DISPUTE-GUARD)', async (type) => {
+      await expect(handleStripeWebhookEvent({} as never, { type, data: { object: { id: 'dp_1' } } } as Stripe.Event))
+        .resolves.toBeUndefined();
+      expect(alertMocks.logServerError).toHaveBeenCalledWith('billing', 'stripe_dispute_received', { eventType: type });
+      expect(walletMocks.refund).not.toHaveBeenCalled();
+      expect(stripeFulfillmentMocks.reconcileSubscriptionRefundFromStripeWebhook).not.toHaveBeenCalled();
+    });
+  it.each(['invoice.paid', 'invoice.payment_succeeded', 'invoice.payment_failed'])(
+    'routes %s of a PAY-STRIPE-MP card subscription away from the legacy invoice path', async (type) => {
+      const event = { type, created: 1791800000, data: { object: { id: 'in_card' } } } as Stripe.Event;
+      walletMocks.invoice.mockResolvedValue(true);
+      await handleStripeWebhookEvent({} as never, event);
+      expect(walletMocks.invoice).toHaveBeenCalledWith({}, undefined, 'in_card', type, 1791800000, expect.any(Function));
+      // The review callback raises the existing payment-evidence alert for this event.
+      walletMocks.invoice.mock.calls.at(-1)![5]();
+      expect(alertMocks.captureMessage).toHaveBeenLastCalledWith('PAY_COMMON_PAYMENT_EVIDENCE_CONFLICT',
+        expect.objectContaining({ tags: expect.objectContaining({ eventType: type }) }));
+      expect(stripeFulfillmentMocks.fulfillMembershipInvoice).not.toHaveBeenCalled();
+      expect(stripeFulfillmentMocks.markMembershipInvoicePaymentFailed).not.toHaveBeenCalled();
+      walletMocks.invoice.mockRejectedValue(new Error('PAY_STRIPE_MP_CARD_SUBSCRIPTION_NOT_READY'));
+      await expect(handleStripeWebhookEvent({} as never, event)).rejects.toThrow('NOT_READY');
+      expect(stripeFulfillmentMocks.fulfillMembershipInvoice).not.toHaveBeenCalled();
+    });
+  it.each(['customer.subscription.created', 'customer.subscription.updated', 'customer.subscription.deleted'])(
+    'routes %s of a PAY-STRIPE-MP card subscription away from the legacy state sync', async (type) => {
+      const event = { type, data: { object: { id: 'sub_card' } } } as Stripe.Event;
+      walletMocks.subscription.mockResolvedValue(true);
+      await handleStripeWebhookEvent({} as never, event);
+      expect(walletMocks.subscription).toHaveBeenCalledWith({}, undefined, 'sub_card');
+      expect(stripeFulfillmentMocks.syncSubscriptionState).not.toHaveBeenCalled();
+    });
+  it('keeps legacy invoices and subscriptions on the legacy path', async () => {
+    await handleStripeWebhookEvent({} as never, { type: 'invoice.paid', data: { object: { id: 'in_legacy' } } } as Stripe.Event);
+    expect(stripeFulfillmentMocks.fulfillMembershipInvoice).toHaveBeenCalledTimes(1);
+    await handleStripeWebhookEvent({} as never, { type: 'customer.subscription.updated', data: { object: { id: 'sub_legacy' } } } as Stripe.Event);
+    expect(stripeFulfillmentMocks.syncSubscriptionState).toHaveBeenCalledTimes(1);
   });
 
   it('passes the verified asynchronous failure event into wallet reconciliation', async () => {

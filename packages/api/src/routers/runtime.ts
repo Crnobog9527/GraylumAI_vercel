@@ -153,6 +153,17 @@ export const runtimeRouter=router({
   admin:ctx.supabaseAdmin!,user:ctx.userScopedSupabase,actorId:ctx.user.id,budget:ctx.runtimeBudget,
   authorization:ctx.headers?.get('Authorization'),maintenanceEndpoint:ctx.maintenanceEndpoint,
  },input.executionId,undefined,input)),
+ // Same execution and resume token as `resume`; only the delivery streams (CHAT-NATIVE-OUTPUT).
+ resumeStream:maintenanceProcedure.input(resumeInput.extend({textProtocol:z.literal('textDelta-v1').optional()})).mutation(async function*({ctx,input}){
+  const timing=ctx.runtimeBudget?.timing;
+  const {textProtocol,...token}=input;
+  try{yield* streamOriginalExecution(onProgress=>executeOriginalExecution({
+   admin:ctx.supabaseAdmin!,user:ctx.userScopedSupabase,actorId:ctx.user.id,budget:ctx.runtimeBudget,
+   authorization:ctx.headers?.get('Authorization'),maintenanceEndpoint:ctx.maintenanceEndpoint,
+  },token.executionId,onProgress,token),timing,'runtime.resumeStream',undefined,textProtocol,
+   contentVisibilityFence(ctx.supabaseAdmin!,ctx.user.id,token.executionId));}
+  finally{timing?.release();}
+ }),
  execute:executionProcedure.mutation(options=>executeOriginal(options)),
  executeStream:executionProcedure.mutation(async function*(options){
   // The route returns before this stream ends; release this stream's reference.
