@@ -125,6 +125,16 @@ export function initialDemoState(): DemoState {
   };
 }
 
+/**
+ * The first screen's starting point: both questions already answered with the recommended options, and the step
+ * summary arriving (live). The conversation before it is the same script, so the full process stays module 3's.
+ */
+export function summaryDemoState(): DemoState {
+  let state = demoReducer(initialDemoState(), { type: 'answer', option: QUESTION_ONE.recommended ?? 0 });
+  state = demoReducer(demoReducer(state, { type: 'settled' }), { type: 'answer', option: QUESTION_TWO.recommended ?? 0 });
+  return { ...state, checklistUpdated: false };
+}
+
 export type DemoAction =
   | { type: 'answer'; option: number }
   | { type: 'free'; text: string }

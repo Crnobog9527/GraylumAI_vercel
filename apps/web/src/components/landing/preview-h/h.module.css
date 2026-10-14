@@ -11,15 +11,38 @@
   --h-ease: cubic-bezier(.16, 1, .3, 1);
   --h-display-face: var(--d-display), 'MiSans', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
   --h-blur: 20px;
+  /* Layout and type scale, measured from buffer.com (2026-10-14) and adjusted for Chinese (taller body lines,
+     no positive tracking): the table is in PR #992's description. Phone values first, desktop below. */
+  --h-max: 1280px;
+  --h-gutter: 16px;
+  --h-section: 40px;
+  --h-fs-hero: 40px;
+  --h-fs-h2: 28px;
+  --h-fs-h3: 19px;
+  --h-fs-lede: 17px;
+  --h-fs-body: 16px;
+  --h-fs-small: 13.5px;
+  --h-lh-body: 1.75;
+  --h-btn: 48px;
+  --h-btn-pad: 22px;
+  --h-card-pad: 20px;
+  --h-card-gap: 16px;
   position: relative;
   min-height: 100vh;
   overflow-x: clip;
   background: var(--h-canvas);
   color: var(--h-ink);
-  font-size: 15px;
-  line-height: 1.7;
+  font-size: var(--h-fs-body);
+  line-height: var(--h-lh-body);
 }
 @media (max-width: 767px) { .page { --h-blur: 14px; } }
+@media (min-width: 768px) {
+  .page {
+    --h-gutter: 36px; --h-section: 72px; --h-fs-hero: clamp(48px, 4.6vw, 68px); --h-fs-h2: clamp(32px, 3vw, 44px);
+    --h-fs-h3: 22px; --h-fs-lede: 20px; --h-fs-body: 17px; --h-btn: 52px; --h-btn-pad: 28px; --h-card-pad: 24px;
+    --h-card-gap: 18px;
+  }
+}
 .page ::selection { background: var(--h-selection); color: var(--h-ink); }
 .page a:focus-visible, .page button:focus-visible, .page summary:focus-visible, .billing label:focus-within {
   outline: 2px solid var(--h-ring);
@@ -45,7 +68,7 @@
 .sampleBar a[aria-current='page'] { background: var(--h-ink); color: #fff; }
 
 /* Type */
-.display, .heroTitle, .displaySmall, .planName, .whenIndex, .faqGroupTitle, .riskTitle, .planFigure {
+.display, .displaySmall, .planName, .whenIndex, .faqGroupTitle, .riskTitle, .planFigure {
   font-family: var(--h-display-face);
   font-weight: 900;
   letter-spacing: -.03em;
@@ -53,9 +76,9 @@
   text-wrap: balance;
   word-break: keep-all;
 }
-.display { margin: 0; font-size: clamp(28px, 3.4vw, 46px); perspective: 600px; }
-.displaySmall { margin: 0; font-size: clamp(21px, 2.1vw, 27px); perspective: 600px; }
-.lede { margin: 0; max-width: 34em; color: var(--h-muted); font-size: 15px; line-height: 1.75; text-wrap: pretty; }
+.display { margin: 0; font-size: var(--h-fs-h2); line-height: 1.2; perspective: 600px; }
+.displaySmall { margin: 0; font-size: var(--h-fs-h3); line-height: 1.35; perspective: 600px; }
+.lede { margin: 0; max-width: 34em; color: var(--h-muted); font-size: var(--h-fs-lede); line-height: 1.7; text-wrap: pretty; }
 
 /* Pills */
 .pill {
@@ -71,7 +94,7 @@
   backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); box-shadow: 0 0 0 1px rgba(var(--h-shade), .07);
 }
 .pillGlass:hover { background: #fff; }
-.pillLarge { min-height: 50px; padding: 0 24px; font-size: 15px; }
+.pillLarge { min-height: var(--h-btn); padding: 0 var(--h-btn-pad); font-size: 16px; }
 .pillGlow::before {
   content: ''; position: absolute; inset: -3px; z-index: -1; border-radius: inherit; background: var(--h-iris-conic);
   filter: blur(12px); opacity: .75;
@@ -98,36 +121,7 @@
 @media (min-width: 480px) { .headerLogin { display: inline-flex; } }
 @media (min-width: 900px) { .nav { display: flex; } }
 
-/* First screen: title, promise, the Owner's pitch and the actions in one column (the pitch splits into who-for and
-   how-it-differs side by side on a wide screen), then the live demo in a glass frame that tilts flat as it scrolls. */
-.main { display: grid; grid-template-columns: minmax(0, 1fr); gap: clamp(44px, 6vw, 88px); padding-bottom: 24px; }
-.hero {
-  display: grid; grid-template-columns: minmax(0, 1fr); gap: 20px; max-width: 1200px; width: 100%; margin: 0 auto;
-  padding: clamp(28px, 5vw, 64px) clamp(16px, 3vw, 24px) 0;
-}
-.hero > * { min-width: 0; }
-.heroText { display: grid; gap: 16px; justify-items: start; }
-.heroTitle { margin: 0; font-size: clamp(40px, 6vw, 88px); line-height: 1.04; perspective: 800px; }
-.heroPromise { margin: 0; max-width: 24em; color: var(--h-body); font-size: clamp(16px, 1.55vw, 20px); font-weight: 500; line-height: 1.6; text-wrap: pretty; }
-/* The Owner's first-screen pitch (HERO_H): who it is for, how a coach differs, the result. */
-.heroPitch { display: grid; gap: 10px; max-width: 36em; padding-left: 16px; border-left: 2px solid var(--h-line); }
-.heroPitch p { margin: 0; text-wrap: pretty; }
-@media (min-width: 1024px) {
-  .heroPitch { grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); column-gap: 40px; max-width: 1040px; }
-  .heroAudience { grid-row: span 3; align-self: start; }
-  .heroPitch .heroDifference { margin-top: 0; }
-  .heroResult { grid-column: 2; }
-}
-.heroAudience { display: grid; gap: 4px; color: var(--h-muted); font-size: 14.5px; line-height: 1.7; }
-.heroAudience span { color: var(--h-ink); font-weight: 600; }
-.heroPitch .heroDifference { margin-top: 6px; }
-.heroDifference { font-family: var(--h-display-face); font-size: clamp(19px, 1.9vw, 25px); font-weight: 900; letter-spacing: -.02em; line-height: 1.3; }
-.heroDifferenceBody { color: var(--h-body); font-size: 14.5px; line-height: 1.75; }
-.heroResult { color: var(--h-accent); font-size: 15.5px; font-weight: 700; }
-.heroActions { display: flex; flex-wrap: wrap; gap: 10px; }
-.heroNote { margin: 0; max-width: 40em; color: var(--h-muted); font-size: 13px; line-height: 1.65; }
-
-.heroDemo { margin-top: 8px; perspective: 1400px; }
+.main { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--h-section); padding-bottom: 24px; }
 .demoFrame {
   padding: 8px; border: 1px solid rgba(255, 255, 255, .85); border-radius: 26px; background: rgba(255, 255, 255, .45);
   backdrop-filter: blur(var(--h-blur)); -webkit-backdrop-filter: blur(var(--h-blur));
@@ -135,7 +129,7 @@
 }
 
 /* Sections */
-.section { max-width: 1200px; width: 100%; margin: 0 auto; padding: 0 clamp(16px, 3vw, 24px); scroll-margin-top: 84px; }
+.section { max-width: calc(var(--h-max) + 2 * var(--h-gutter)); width: 100%; margin: 0 auto; padding: 0 var(--h-gutter); scroll-margin-top: 84px; }
 .sheet { max-width: 1232px; padding: clamp(20px, 3vw, 40px); border-radius: 32px; }
 @media (max-width: 767px) { .sheet { margin: 0 8px; width: auto; padding: 24px 16px; border-radius: 24px; } }
 .deferred { content-visibility: auto; contain-intrinsic-size: auto 900px; }
@@ -147,6 +141,7 @@
 .promise li::before { content: ''; position: absolute; top: .72em; left: 2px; width: 6px; height: 6px; border-radius: 50%; background: var(--h-ring); }
 .promise li:last-child { color: var(--h-ink); font-weight: 600; }
 .sectionCta { display: grid; justify-items: center; gap: 10px; margin-top: 32px; text-align: center; }
+.ctaNote { margin: 0; color: var(--h-muted); font-size: var(--h-fs-small); line-height: 1.6; }
 
 /* Section 2: complaint and answer on one glass card each */
 .wall { display: grid; gap: 12px; margin: 22px 0 0; padding: 0; list-style: none; perspective: 1200px; }
@@ -323,23 +318,16 @@
 .footer a:hover { color: var(--h-ink); text-decoration: underline; text-underline-offset: 4px; }
 .footer p { margin: 0; }
 
-/* Phone: tighter header, the two buttons side by side, the three steps as a compact list */
+/* Phone: tighter header */
 @media (max-width: 767px) {
   .header { padding: 8px 8px 0; }
   .headerBar { min-height: 48px; padding: 0 5px 0 12px; }
   .headerActions .pill { min-height: 38px; padding: 0 14px; font-size: 13.5px; }
-  .heroActions { width: 100%; }
-  .heroActions .pill { flex: 1 1 0; padding: 0 12px; }
 }
 
 /* Motion that belongs to this sample's layout (the shared pieces live in depth-motion.module.css). */
 @media (prefers-reduced-motion: no-preference) {
   /* First-screen text slides but never starts transparent, so it paints (and counts as painted) at once. */
-  .heroPromise, .heroPitch, .heroActions, .heroNote { animation: slideIn .9s var(--h-ease) both; }
-  .heroPromise { animation-delay: .12s; }
-  .heroPitch { animation-delay: .16s; }
-  .heroActions { animation-delay: .22s; }
-  .heroNote { animation-delay: .28s; }
   .pillGlow::before { animation: glowPulse 3.2s ease-in-out infinite alternate; }
   .planEdge i { animation: spin 7s linear infinite; }
   .finalLight i { animation: bob 9s ease-in-out infinite alternate; }
@@ -350,7 +338,6 @@
 @media (prefers-reduced-motion: reduce) {
   .pill, .billing label, .billingThumb, .faqItem summary svg, .reportTabs button { transition: none; }
 }
-@keyframes slideIn { from { transform: translate3d(0, 14px, 0); } to { transform: none; } }
 @keyframes bob { from { transform: translate3d(0, -7px, 0); } to { transform: translate3d(0, 7px, 0); } }
 @keyframes spin { to { transform: rotate(1turn); } }
 @keyframes glowPulse { from { opacity: .45; } to { opacity: .85; } }

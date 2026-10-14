@@ -95,7 +95,7 @@ export function HowItWorksH({ promise, steps, reports, timeline }: {
         <Link href={SIGNUP_CTA_HREF} className={cn(styles.pill, styles.pillInk, styles.pillLarge, styles.pillGlow)}>
           {FINAL_ACTION.cta}<ArrowRight size={17} aria-hidden="true" />
         </Link>
-        <p className={styles.heroNote}>{HERO_H.ctaNote}</p>
+        <p className={styles.ctaNote}>{HERO_H.ctaNote}</p>
       </div>
     </section>
   );

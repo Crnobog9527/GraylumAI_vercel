@@ -41,6 +41,22 @@ export const HERO_H = {
   ctaNote: '无需绑卡，免费试用',
 } as const;
 
+/**
+ * Sample H's "自己用通用 AI ／ 用教练" table beside the difference line (diagnosis #979 item 8 B). NEW WORDING for
+ * the Owner to approve: each cell is shortened from a step note already on the page (landing-flow.ts), no new claim.
+ */
+export const H_COMPARE = {
+  caption: '自己用通用 AI 和用教练，差在哪',
+  generic: '自己用通用 AI',
+  coach: '用教练',
+  rows: [
+    { generic: '等你提问，你问得笼统它就答得笼统', coach: '按一套固定的运营方法主动问你，答案从你的情况里推出来' },
+    { generic: '会编一个"示例账号"', coach: '对标数据实时查出来、程序算出来，查不到就写"未取到"' },
+    { generic: '每开一个新窗口，你就得从头介绍自己', coach: '带着你确认过的定位、资料和文风来回答' },
+    { generic: '看不到你的数据', coach: '看你真实发出去的内容和数据，建议从数据里来' },
+  ],
+} as const;
+
 export type VoiceNote = Gated & {
   id: string;
   quote: string;

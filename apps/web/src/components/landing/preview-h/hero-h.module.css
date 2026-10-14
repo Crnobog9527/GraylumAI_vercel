@@ -1,0 +1,53 @@
+/* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+/*
+ * Sample H's first and second screens. The first fills the screen (Buffer's strategy, Owner 2026-10-14): centred,
+ * airy, and it answers what this is (H1), what it does for you (promise, who it is for), why buy (the difference
+ * line) and what you get (the result) before any scrolling, then one button. The product demo and the comparison
+ * open the second screen. Sizes come from the page's --h-* scale (h.module.css).
+ */
+.hero {
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px;
+  width: 100%; max-width: calc(880px + 2 * var(--h-gutter)); margin: 0 auto; padding: 24px var(--h-gutter) 32px;
+  /* One screen minus the header (and the sample switcher above it, which the real page does not have). */
+  min-height: calc(100svh - 104px); text-align: center;
+}
+.hero > * { min-width: 0; max-width: 100%; margin: 0; text-wrap: balance; }
+.title {
+  font-family: var(--h-display-face); font-size: var(--h-fs-hero); font-weight: 900; letter-spacing: -.02em;
+  line-height: 1.12; word-break: keep-all; perspective: 800px;
+}
+.promise { color: var(--h-ink); font-size: clamp(19px, 2vw, 26px); font-weight: 700; line-height: 1.5; }
+.audience { max-width: 40em; color: var(--h-muted); font-size: var(--h-fs-body); line-height: 1.7; }
+.summary { max-width: 32em; color: var(--h-body); font-size: var(--h-fs-body); font-weight: 600; line-height: 1.7; }
+.difference {
+  margin-top: 8px !important; max-width: 22em; font-family: var(--h-display-face); font-size: clamp(21px, 2.3vw, 30px);
+  font-weight: 900; letter-spacing: -.01em; line-height: 1.4;
+}
+.result { color: var(--h-accent); font-size: var(--h-fs-lede); font-weight: 700; line-height: 1.5; }
+.actions { display: grid; justify-items: center; gap: 10px; margin-top: 10px !important; }
+.note { margin: 0; color: var(--h-muted); font-size: var(--h-fs-small); line-height: 1.6; }
+
+/* Second screen */
+.band { display: grid; grid-template-columns: minmax(0, 1fr); gap: calc(var(--h-card-gap) * 2); }
+.band > *, .diff > * { min-width: 0; }
+.diff { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--h-card-gap); align-items: center; }
+@media (min-width: 960px) { .diff { grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: 48px; } }
+.diffBody { margin: 0; color: var(--h-body); font-size: var(--h-fs-lede); line-height: 1.8; text-wrap: pretty; }
+.table { width: 100%; table-layout: fixed; border-collapse: separate; border-spacing: 0; overflow: hidden; border-radius: 20px; font-size: 15px; line-height: 1.6; }
+.table th, .table td { padding: 12px var(--h-card-pad); text-align: left; vertical-align: top; }
+.table thead th { color: var(--h-muted); font-size: var(--h-fs-small); font-weight: 600; }
+.table th + th, .table td + td { border-left: 1px solid var(--h-line); }
+.table tbody td { border-top: 1px solid var(--h-line); }
+.table td:first-child { color: var(--h-muted); }
+.table td:last-child { color: var(--h-ink); font-weight: 600; }
+@media (max-width: 767px) { .table th, .table td { padding: 10px 12px; font-size: 14px; } }
+
+/* The first screen's text slides up once on load but never starts transparent, so it paints at once. */
+@media (prefers-reduced-motion: no-preference) {
+  .promise, .audience, .summary, .difference, .result, .actions { animation: slideIn .9s var(--h-ease) both; }
+  .promise { animation-delay: .1s; }
+  .audience, .summary { animation-delay: .16s; }
+  .difference { animation-delay: .22s; }
+  .result, .actions { animation-delay: .28s; }
+}
+@keyframes slideIn { from { transform: translate3d(0, 14px, 0); } to { transform: none; } }

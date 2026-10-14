@@ -1,21 +1,22 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import Link from 'next/link';
-import { ArrowDown, ArrowRight } from 'lucide-react';
+import { ArrowRight } from 'lucide-react';
 import light from '@/components/design/light-tokens.module.css';
-import { LazyDemo } from '@/components/landing/demo/LazyDemo';
 import { displayFont } from '@/components/landing/preview-d/display-font';
 import { AuroraBackdrop } from '@/components/public-site/motion/AuroraBackdrop';
 import { DepthStage } from '@/components/public-site/motion/DepthStage';
-import { depthClass, SplitText } from '@/components/public-site/motion/depth-text';
+import { SplitText } from '@/components/public-site/motion/depth-text';
 import { LOGIN_HREF, SITE_CHROME } from '@/components/public-site/site-chrome';
 import { HERO, HERO_H } from '@/lib/landing/landing-copy';
 import type { buildLandingPageData } from '@/lib/landing/landing-page-data';
 import { SIGNUP_CTA_HREF } from '@/lib/seo/content/shared';
 import { cn } from '@/lib/utils';
+import { DiffBandH } from './DiffBandH';
 import { PriceH } from './PriceH';
 import { PaletteSwitchH } from './PaletteSwitchH';
 import { FaqH, FinalH, HowItWorksH, VoiceWallH } from './SectionsH';
 import styles from './h.module.css';
+import hero from './hero-h.module.css';
 import palettes from './palettes-h.module.css';
 
 const CHROME = SITE_CHROME['zh-Hans'];
@@ -58,32 +59,21 @@ export function SampleH({ data, siteName, membershipHref }: { data: LandingData;
       </header>
 
       <main className={styles.main}>
-        <section aria-labelledby="hero-title" className={styles.hero}>
-          <div className={styles.heroText}>
-            <h1 id="hero-title" className={styles.heroTitle}><SplitText text={HERO.title} mode="load" /></h1>
-            <p className={styles.heroPromise}>{HERO.promise}</p>
-            <div className={styles.heroPitch}>
-              <p className={styles.heroAudience}>{HERO_H.audience}<span>{HERO_H.audienceSummary}</span></p>
-              <p className={styles.heroDifference}>{HERO_H.difference}</p>
-              <p className={styles.heroDifferenceBody}>{HERO_H.differenceBody}</p>
-              <p className={styles.heroResult}>{HERO_H.result}</p>
-            </div>
-            <div className={styles.heroActions}>
-              <Link href={SIGNUP_CTA_HREF} className={cn(styles.pill, styles.pillInk, styles.pillLarge, styles.pillGlow)}>
-                {HERO.primaryCta}<ArrowRight size={17} aria-hidden="true" />
-              </Link>
-              <a href="#how-it-works" className={cn(styles.pill, styles.pillGlass, styles.pillLarge)}>
-                {HERO.secondaryCta}<ArrowDown size={17} aria-hidden="true" />
-              </a>
-            </div>
-            <p className={styles.heroNote}>{HERO_H.ctaNote}</p>
-          </div>
-
-
-          <div className={cn(styles.heroDemo, depthClass.depth)}>
-            <div className={styles.demoFrame}><LazyDemo /></div>
+        <section aria-labelledby="hero-title" className={hero.hero}>
+          <h1 id="hero-title" className={hero.title}><SplitText text={HERO.title} mode="load" /></h1>
+          <p className={hero.promise}>{HERO.promise}</p>
+          <p className={hero.audience}>{HERO_H.audience}</p>
+          <p className={hero.summary}>{HERO_H.audienceSummary}</p>
+          <p className={hero.difference}>{HERO_H.difference}</p>
+          <p className={hero.result}>{HERO_H.result}</p>
+          <div className={hero.actions}>
+            <Link href={SIGNUP_CTA_HREF} className={cn(styles.pill, styles.pillInk, styles.pillLarge, styles.pillGlow)}>
+              {HERO.primaryCta}<ArrowRight size={17} aria-hidden="true" />
+            </Link>
+            <p className={hero.note}>{HERO_H.ctaNote}</p>
           </div>
         </section>
+        <DiffBandH />
 
         <VoiceWallH notes={data.notes} />
         <HowItWorksH promise={data.promise} steps={data.flowSteps} reports={data.sampleReports} timeline={data.timeline} />

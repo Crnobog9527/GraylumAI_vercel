@@ -9,7 +9,7 @@ import { metadata } from '@/app/landing/preview/h/page';
 import { SCENES } from '@/components/landing/preview-g/scenes';
 import { TILT_MAX, tiltFor } from '@/components/public-site/motion/DepthStage';
 import { DigitRoll, splitUnits } from '@/components/public-site/motion/depth-text';
-import { FINAL_ACTION, HERO, HERO_H, HOW_IT_WORKS, PRICE_COMPARE, RISK_REVERSAL, VOICE_WALL } from '@/lib/landing/landing-copy';
+import { FINAL_ACTION, H_COMPARE, HERO, HERO_H, HOW_IT_WORKS, PRICE_COMPARE, RISK_REVERSAL, VOICE_WALL } from '@/lib/landing/landing-copy';
 import { SIGNUP_CTA_HREF } from '@/lib/seo/content/shared';
 import { LANDING_FAQ_TITLE } from '@/lib/landing/landing-faq';
 import { FLOW_STEPS } from '@/lib/landing/landing-flow';
@@ -48,7 +48,7 @@ describe('style sample H', () => {
       .map(title => text.indexOf(title));
     expect(order.every(index => index >= 0)).toBe(true);
     expect([...order].sort((a, b) => a - b)).toEqual(order);
-    for (const copy of [HERO.promise, HERO.primaryCta, HERO.secondaryCta, ...data.notes.map(note => note.answer)]) {
+    for (const copy of [HERO.promise, HERO.primaryCta, ...data.notes.map(note => note.answer)]) {
       expect(html).toContain(escape(copy));
     }
     // The Owner's first-screen pitch (2026-10-14), verbatim, and one CTA note under every main button, without the credits.
@@ -56,6 +56,13 @@ describe('style sample H', () => {
     // First screen, end of module 3 and the close.
     expect(html.split(HERO_H.ctaNote)).toHaveLength(4);
     const hero = html.slice(html.indexOf('<section aria-labelledby="hero-title"'), html.indexOf('</section>'));
+    // The first screen answers the four questions in order: what, the benefit and who for, why, what you get.
+    const four = [HERO.title, HERO.promise, HERO_H.audience, HERO_H.audienceSummary, HERO_H.difference, HERO_H.result]
+      .map(copy => hero.indexOf(escape(copy)));
+    expect(four.every(index => index >= 0)).toBe(true);
+    expect([...four].sort((a, b) => a - b)).toEqual(four);
+    expect(hero).not.toContain(escape(HERO_H.differenceBody));
+    for (const row of H_COMPARE.rows) expect(html).toContain(escape(row.coach));
     expect(hero).not.toContain('500 积分');
     expect(hero).not.toContain('随时能看、能导出，不会收回');
     expect(html).toContain('aria-label="Pro"');
