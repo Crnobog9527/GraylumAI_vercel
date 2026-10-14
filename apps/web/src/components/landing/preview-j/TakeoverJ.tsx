@@ -11,11 +11,11 @@ import page from './j.module.css';
 
 /** Where each moment starts and ends along the section's scroll, 0 → 1: three steps, the report, then the jury. */
 export const CHAPTERS = [
-  { id: 'you', from: 0, to: 0.2 },
-  { id: 'direction', from: 0.2, to: 0.35 },
-  { id: 'benchmark', from: 0.35, to: 0.5 },
-  { id: 'report', from: 0.5, to: 0.62 },
-  { id: 'jury', from: 0.62, to: 1 },
+  { id: 'know', from: 0, to: 0.2 },
+  { id: 'diagnose', from: 0.2, to: 0.36 },
+  { id: 'plan', from: 0.36, to: 0.46 },
+  { id: 'report', from: 0.46, to: 0.6 },
+  { id: 'jury', from: 0.6, to: 1 },
 ] as const;
 type ChapterId = (typeof CHAPTERS)[number]['id'];
 
@@ -34,7 +34,7 @@ const reducedMotion = () => Boolean(window.matchMedia?.('(prefers-reduced-motion
  * "AI 教练怎么接手你的运营" (Owner 2026-10-15, round four): the real product's positioning workspace, nothing invented
  * around it. Its own step strip is the only step list; what the current moment shows is said above the window. Once
  * the visitor scrolls in, the stage holds still and the scroll plays: 你是谁 (shown as "帮你挖掘定位"), 方向判断, 找对标,
- * then the report written from the workbench footer, then the jury opened from the report. The window is a picture
+ * then the long report from the workbench footer, then the jury opened from the report. The window is a picture
  * (inert). The server HTML, no JavaScript and reduced motion get every moment stacked, finished. `intro` (the sample
  * reports) sits under the title.
  */

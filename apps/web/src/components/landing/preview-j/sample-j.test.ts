@@ -17,6 +17,7 @@ import { WEEK_LOOP_MS } from './WeekJ';
 import { J_WEEK } from '@/lib/landing/landing-copy-j-week';
 import { J_COMPARE } from '@/lib/landing/landing-copy-j-compare';
 import { J_REPORT, J_TAKEOVER_MOMENTS } from '@/lib/landing/landing-copy-j-takeover';
+import { J_STEPS } from '@/lib/landing/landing-copy-j-persona';
 import { J_SAMPLES, samplePath } from '@/lib/landing/landing-copy-j-samples';
 import { J_WORK, J_WORK_SCENES } from '@/lib/landing/landing-copy-j-work';
 import { J_PRICE_TOTAL } from '@/lib/landing/landing-copy-j-price';
@@ -84,7 +85,12 @@ describe('style sample J', () => {
       expect(html).toContain(escape(moment.note));
     }
     // The product's own steps appear in the workbench strip; the report comes from its footer, the jury from the report.
-    for (const step of ['你是谁', '方向判断', '找对标']) expect(html).toContain(step);
+    for (const step of J_STEPS) expect(html).toContain(step.title);
+    expect(html).toContain('AI 自媒体陪跑教练 · 了解你');
+    expect(html).toContain('本步小结 · ');
+    expect(html).toContain(J_REPORT.export);
+    for (const chapter of J_REPORT.chapters) expect(html).toContain(chapter.title);
+    expect(html).not.toMatch(/你是谁|方向判断/);
     expect(html).toContain(J_REPORT.generate);
     expect(html).toContain(J_REPORT.juryEntry);
     // The scenes are the demo's made-up case: no figures, no promise of income.
@@ -180,13 +186,13 @@ describe('style sample J, the later sections', () => {
 describe('sample J story timing', () => {
   it('maps the scroll to the four chapters in order, ending inside the last', () => {
     expect(CHAPTERS.map(chapter => chapter.id)).toEqual(J_TAKEOVER_MOMENTS.map(moment => moment.id));
-    expect(chapterAt(0)).toEqual({ id: 'you', index: 0, local: 0 });
-    expect(chapterAt(0.3).id).toBe('direction');
-    expect(chapterAt(0.45).id).toBe('benchmark');
+    expect(chapterAt(0)).toEqual({ id: 'know', index: 0, local: 0 });
+    expect(chapterAt(0.3).id).toBe('diagnose');
+    expect(chapterAt(0.4).id).toBe('plan');
     expect(chapterAt(0.55).id).toBe('report');
     expect(chapterAt(0.8).id).toBe('jury');
     expect(chapterAt(1)).toEqual({ id: 'jury', index: 4, local: 1 });
-    expect(chapterAt(-1).id).toBe('you');
+    expect(chapterAt(-1).id).toBe('know');
     // Every message of a moment has arrived before the scroll leaves it.
     for (const moment of J_TAKEOVER_MOMENTS) expect(arrivedAt(0.9, moment.lines.length)).toBe(moment.lines.length);
     expect(arrivedAt(0, 6)).toBe(1);

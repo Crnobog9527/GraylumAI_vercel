@@ -3,15 +3,14 @@
 
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { BarChart3, Check, Compass, Lightbulb, PenLine, Send, type LucideIcon } from 'lucide-react';
-import { DEMO_LABEL, DEMO_STEPS, demoInformation } from '@/components/landing/demo/demo-script';
-import { StepConfirmCard } from '@/components/opc/step-confirm-card';
+import { DEMO_LABEL } from '@/components/landing/demo/demo-script';
+import result from '@/components/opc/positioning-result.module.css';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { J_WEEK, type WeekCard, type WeekLine } from '@/lib/landing/landing-copy-j-week';
-import { personaState } from './PositioningClipJ';
+import { ConfirmJ, personaInformation } from './WorkbenchPartsJ';
 import styles from './week-j.module.css';
 
-const noop = () => undefined;
 const STAGE_ICONS: readonly LucideIcon[] = [Compass, Lightbulb, PenLine, Send, BarChart3];
 const LINES = J_WEEK.lines;
 const LAST_STAGE = J_WEEK.stages.length - 1;
@@ -94,7 +93,7 @@ function Message({ line, divider, live }: { line: WeekLine; divider: string | nu
         ? <p className={styles.user} data-live={live || undefined}>{line.text}</p>
         : (
           <div className={styles.coach} data-live={live || undefined}>
-            <span>AI 教练</span>
+            <span className={result.agentIdentity}><img src="/graylum-logo.png" alt="" />AI 自媒体陪跑教练{line.stage === 0 ? ' · 了解你' : ''}</span>
             <p>{line.text}</p>
             {line.card ? <Card card={line.card} /> : null}
           </div>
@@ -108,12 +107,7 @@ const trendOf = (cell: string) => (cell.startsWith('下降') ? 'down' : cell.inc
 
 function Card({ card }: { card: WeekCard }) {
   const cards: Record<WeekCard, ReactNode> = {
-    confirm: (
-      <div className={styles.confirm}>
-        <StepConfirmCard stepId="you" title={DEMO_STEPS[0].title} info={demoInformation(personaState(1)).you} edits={undefined}
-          signal={undefined} resuming={false} disabled stays={false} canConfirm={false} onConfirm={noop} onEdit={noop} onReview={noop} />
-      </div>
-    ),
+    confirm: <div className={styles.confirm}><ConfirmJ step="了解你" information={personaInformation(new Set(['goal', 'audience', 'resource']), 0)} /></div>,
     topics: (
       <ol className={styles.topics}>
         {J_WEEK.topics.items.map(item => <li key={item.title}><b>{item.title}</b><span>{item.why}</span></li>)}

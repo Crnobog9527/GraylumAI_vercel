@@ -40,79 +40,62 @@
 .sample { padding: 0 8px; border-radius: 999px; background: var(--gl-accent-tag); color: var(--gl-accent-tag-text); font-size: 11.5px; line-height: 20px; }
 .center > nav { display: grid; gap: 6px; padding-bottom: 10px; border-bottom: 1px solid #eee; }
 .center > nav > * { pointer-events: none; gap: 4px; }
-.footer { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 0 12px; border-top: 1px solid #eee; color: #999; font-size: 12px; }
+.footer { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; padding: 10px 0 12px; border-top: 1px solid #eee; }
 .footer button[data-on] { border-color: var(--j-gold); box-shadow: 0 0 0 3px rgba(255, 187, 23, .3); color: var(--j-ink); }
 .app > .checklist { min-height: 0; margin: 6px 8px 6px 8px; border-radius: 12px; background: #fff; overflow: hidden; }
 @media (max-width: 1279px) { .app { grid-template-columns: 200px minmax(0, 1fr); } .app > .checklist { display: none; } }
 @media (max-width: 860px) { .app { grid-template-columns: minmax(0, 1fr); } .rail { display: none !important; } .center { margin: 0; padding: 0 12px; border-radius: 0; } }
 
-/* The report over the workbench, then the jury opened from it */
-.reportLayer { position: absolute; inset: 0; z-index: 3; display: grid; place-items: center; padding: 20px; background: rgba(20, 19, 18, .28); }
+/* The long report over the workbench: chapter list beside a preview that scrolls through the chapters */
+.reportLayer { position: absolute; inset: 0; z-index: 3; display: grid; place-items: center; padding: 18px; background: rgba(20, 19, 18, .28); }
 .report {
-  display: grid; align-content: start; gap: 10px; width: min(640px, 100%); max-height: 100%; overflow: hidden; padding: 20px 22px;
-  border-radius: 16px; background: #fff; box-shadow: 0 30px 60px -30px rgba(0, 0, 0, .5);
+  display: grid; grid-template-rows: auto minmax(0, 1fr) auto; gap: 12px; width: min(860px, 100%); height: 100%; overflow: hidden;
+  padding: 18px 22px; border-radius: 16px; background: #fff; box-shadow: 0 30px 60px -30px rgba(0, 0, 0, .5);
 }
-.report header { display: flex; align-items: center; gap: 8px; }
+.report header { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .report header h2 { margin: 0; font-size: 17px; font-weight: 600; }
+.report header > span { color: #888; font-size: 12.5px; }
 .report header small { display: inline-flex; align-items: center; gap: 4px; margin-left: auto; color: #999; font-size: 12px; }
+.reportBody { display: grid; grid-template-columns: 190px minmax(0, 1fr); gap: 18px; min-height: 0; }
+@media (max-width: 640px) { .reportBody { grid-template-columns: minmax(0, 1fr); } .toc { display: none; } }
+.toc { display: grid; align-content: start; gap: 2px; margin: 0; padding: 0 12px 0 0; border-right: 1px solid #eee; list-style: none; font-size: 12.5px; }
+.toc li { padding: 4px 8px; border-radius: 6px; color: #aaa; }
+.toc li[data-done] { color: #555; }
+.toc li[data-on] { background: #fff7e0; color: var(--j-ink); font-weight: 600; }
+.preview { --chapter-step: 118px; position: relative; min-height: 0; overflow: hidden; mask-image: linear-gradient(transparent, #000 8%, #000 88%, transparent); }
+.preview > div { display: grid; gap: 14px; transition: translate .6s var(--j-ease); }
+.preview article { display: grid; gap: 6px; min-height: 104px; }
+.preview h3 { margin: 0; font-size: 14.5px; font-weight: 600; }
+.preview p { margin: 0; color: #444; font-size: 13.5px; line-height: 1.7; }
+.preview i { display: block; height: 7px; border-radius: 4px; background: #f0efea; }
+.preview i:last-child { width: 70%; }
 .reportIntro { margin: 0; color: #888; font-size: 12.5px; }
-.report h3 { margin: 4px 0 2px; font-size: 14px; font-weight: 600; }
-.report div > p { margin: 0; color: #444; font-size: 13.5px; line-height: 1.7; }
-@media (prefers-reduced-motion: no-preference) { .takeover .report > div:last-of-type { animation: messageIn .4s var(--j-ease) both; } }
-.report footer { display: flex; justify-content: flex-end; padding-top: 10px; border-top: 1px solid #eee; }
+.report footer { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; padding-top: 10px; border-top: 1px solid #eee; }
 .juryEntry { gap: 6px; }
 .juryEntry span { padding: 0 6px; border-radius: 999px; background: var(--j-gold); color: #1a1a1a; font-size: 11px; line-height: 18px; }
 .juryEntry[data-on] { box-shadow: 0 0 0 4px rgba(255, 187, 23, .35); }
-
-/* Static */
-.static .staticStep { display: grid; gap: 20px; padding-top: 56px; }
-.static .picture { height: auto; }
-.static .caption { align-content: start; }
-
-/* The log keeps its latest messages in view at the bottom, like the live chat. */
-.log { display: flex; flex-direction: column; justify-content: flex-end; min-height: 0; overflow: hidden; }
-.logInner { display: grid; gap: 10px; padding: 16px 18px; }
-.logInner > .user, .logInner > .coach, .logInner > .risk { display: grid; gap: 4px; padding: 10px 14px; border-radius: 12px; font-size: 14px; }
-.logInner > .user { justify-self: end; max-width: 78%; background: #f3f3f3; }
-.logInner > .coach { justify-self: start; max-width: 94%; border: 1px solid #ececec; background: #fff; }
-.logInner > .risk { justify-self: start; max-width: 94%; border: 1px solid #f3d9a4; background: #fff8e8; }
-.riskLabel { display: flex; align-items: center; gap: 6px; color: #8a5a00; font-size: 12px; font-weight: 600; }
-.risk p { margin: 0; color: #4a3a12; font-size: 14px; line-height: 1.7; }
-@media (prefers-reduced-motion: no-preference) { .takeover .logInner > div:last-child { animation: messageIn .4s var(--j-ease) both; } }
-.messageText { color: #444; font-size: 14px; line-height: 1.7; }
-.messageText p { margin: 0; }
-.messageText ol { margin: 4px 0 0; padding-left: 1.3em; }
-.cardSlot { margin-top: 6px; }
-.cardSlot section { margin: 0; }
-.kinds { display: grid; gap: 6px; margin: 6px 0 0; padding: 0; list-style: none; }
-@media (min-width: 900px) { .kinds { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
-.kinds li { display: grid; gap: 2px; padding: 10px 12px; border-radius: 10px; background: #fafaf8; font-size: 13px; }
-.kinds b { font-size: 14px; }
-.kinds span { color: #6f6e6a; }
-.kinds em { color: #333; font-style: normal; }
-.fetch { display: grid; gap: 6px; margin: 6px 0 0; padding: 10px 12px; border: 1px dashed #ddd; border-radius: 12px; list-style: none; font-size: 13.5px; }
-.fetch li { display: flex; align-items: center; gap: 8px; color: #666; }
-.fetch li span { margin-left: auto; font-size: 12px; }
-.fetch li[data-done] { color: #262626; }
-.fetch li[data-done] svg { color: #1a7f45; }
-@media (prefers-reduced-motion: no-preference) { .fetch li:not([data-done]) svg { animation: spin 1s linear infinite; } }
-.tableCard { display: grid; gap: 6px; margin-top: 6px; padding: 10px 12px; border-radius: 10px; background: #fafaf8; font-size: 13px; overflow-x: auto; }
-.tableCard > p { margin: 0; font-weight: 600; }
-.tableCard table { width: 100%; border-collapse: collapse; }
-.tableCard th, .tableCard td { padding: 5px 8px; border-bottom: 1px solid #ececea; text-align: left; white-space: nowrap; }
-.tableCard thead th { color: #888; font-weight: 500; }
-.tableCard tbody th { font-weight: 500; }
-.tableCard td { color: #1a7f45; }
-.tableCard td[data-missing] { color: #b45309; }
-.checklist > header { padding: 12px 16px !important; }
-.checklist > header h2 { font-size: 15px; }
-.checklist > header p { margin: 2px 0 0; color: #999; font-size: 12px; }
-.checklist > div { padding: 10px 12px !important; overflow: hidden !important; }
+.planRows { display: grid; gap: 6px; margin: 6px 0 0; padding: 10px 12px; border-radius: 10px; background: #fafaf8; }
+.planRows div { display: grid; grid-template-columns: 6.5em minmax(0, 1fr); gap: 10px; font-size: 13.5px; }
+.planRows dt { color: #888; }
+.planRows dd { margin: 0; }
 
 /* The jury (#1002's canvas, brief), opened from the report: it fills the layer over the workbench. */
-.juryLayer { position: absolute; inset: 12px; overflow: hidden; border-radius: 16px; background: #fff; box-shadow: 0 30px 60px -30px rgba(0, 0, 0, .5); }
+.juryLayer { position: absolute; z-index: 4; inset: 12px; overflow: hidden; border-radius: 16px; background: #fff; box-shadow: 0 30px 60px -30px rgba(0, 0, 0, .5); }
 @media (prefers-reduced-motion: no-preference) { .juryLayer { animation: copyIn .5s var(--j-ease) both; } }
 
 @keyframes copyIn { from { opacity: 0; translate: 0 12px; } to { opacity: 1; translate: 0 0; } }
 @keyframes messageIn { from { opacity: 0; translate: 0 10px; } to { opacity: 1; translate: 0 0; } }
 @keyframes spin { to { rotate: 1turn; } }
+
+/* The revised report after the jury, chapter by chapter */
+.revision { display: grid; align-content: start; gap: 12px; height: 100%; overflow: hidden; padding: 20px 24px; }
+.revision h2 { margin: 0; font-size: 18px; font-weight: 600; }
+.revision ol { display: grid; gap: 10px; margin: 0; padding: 0; list-style: none; }
+@media (min-width: 900px) { .revision ol { grid-template-columns: 1fr 1fr; } }
+.revision li { display: grid; gap: 4px; padding: 10px 12px; border: 1px solid #ececea; border-radius: 12px; font-size: 13px; line-height: 1.6; }
+@media (prefers-reduced-motion: no-preference) { .revision li:last-child { animation: messageIn .4s var(--j-ease) both; } }
+.revision b { font-size: 13.5px; }
+.revision p { display: grid; grid-template-columns: 3em minmax(0, 1fr); gap: 6px; margin: 0; }
+.revision p span { color: #999; }
+.revision p:first-of-type { color: #888; text-decoration: line-through; text-decoration-color: #ccc; }
+.revision p:last-of-type span { color: #1a7f45; font-weight: 600; }

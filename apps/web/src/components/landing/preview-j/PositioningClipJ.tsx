@@ -2,32 +2,25 @@
 'use client';
 
 import { AlertTriangle, Check, FileText, Loader2, Sparkles } from 'lucide-react';
-import { MessageMarkdown } from '@/components/chat/MessageMarkdown';
-import { DEMO_LABEL, DEMO_STEPS, demoInformation, summaryDemoState, type DemoState } from '@/components/landing/demo/demo-script';
+import { MentorMarkdown } from '@/app/positioning/[draftId]/MentorMarkdown';
+import { DEMO_LABEL } from '@/components/landing/demo/demo-script';
 import { CaptureChecklist } from '@/components/opc/capture-checklist';
-import { JuryCanvasPlayer } from '@/components/landing/preview-jury/JuryCanvasPlayer';
 import { DraftRow } from '@/components/opc/draft-row';
 import result from '@/components/opc/positioning-result.module.css';
 import { QuestionCardView } from '@/components/opc/question-card';
-import { StepConfirmCard } from '@/components/opc/step-confirm-card';
 import frame from '@/components/opc/workspace-frame.module.css';
 import { Button } from '@/components/ui/button';
-import { J_PERSONA, J_PERSONA_DIRECTION, J_PERSONA_KINDS, J_PERSONA_QUESTION } from '@/lib/landing/landing-copy-j-persona';
 import {
-  J_BENCHMARK_TABLE, J_REPORT, J_TAKEOVER_MOMENTS, type TakeoverCard, type TakeoverLine,
+  J_PERSONA, J_PERSONA_DIRECTION, J_PERSONA_KINDS, J_PERSONA_QUESTION, J_STEPS,
+} from '@/lib/landing/landing-copy-j-persona';
+import {
+  J_BENCHMARK_TABLE, J_PLAN_ROWS, J_REPORT, J_TAKEOVER_MOMENTS, type TakeoverCard, type TakeoverLine,
 } from '@/lib/landing/landing-copy-j-takeover';
 import { cn } from '@/lib/utils';
+import { ConfirmJ, JuryJ, personaInformation, filledUpTo } from './WorkbenchPartsJ';
 import styles from './takeover-j.module.css';
 
 const noop = () => undefined;
-const STEP_FIELDS = [['experience', 'time', 'audience'], ['direction', 'risk'], ['accounts']] as const;
-
-/** The checklist with this person's values for every step up to `done` (exclusive), the product's own field ids. */
-export function personaState(done: number): DemoState {
-  const values: DemoState['values'] = {};
-  STEP_FIELDS.slice(0, done).flat().forEach(id => { values[id] = { value: J_PERSONA.values[id], status: 'confirmed', nature: 'fact' }; });
-  return { ...summaryDemoState(), values, typed: [] };
-}
 
 /** How many of a moment's messages have arrived at `local` (0 → 1): the first at once, the last a little before the end. */
 export function arrivedAt(local: number, count: number) {
@@ -35,20 +28,25 @@ export function arrivedAt(local: number, count: number) {
 }
 
 /**
- * The real product's positioning workspace, played by the scroll: the workspace sidebar (新对话, the feature links,
- * the draft under 待归类), the workbench (我的定位分析, its step strip, the conversation, the footer with 生成完整报告)
- * and the 定位清单 on the right filling in. After the three steps the report is written in its own panel, and from the
- * report the jury is opened. `moment` indexes J_TAKEOVER_MOMENTS; `local` is how far into it (0 → 1).
+ * The real product's positioning workspace, played by the scroll (Owner 2026-10-15: the product as it is). The
+ * workspace sidebar (新对话, the feature links, the draft under 待归类); the workbench (我的定位分析, its own step strip
+ * 了解你 / 诊断与平台对标 / 定位与执行方案, the conversation with the product's message heads "AI 自媒体陪跑教练 · 步骤"
+ * and "本步小结", the step's confirm area, the footer with 导出已确认资料 and 生成完整报告); the 定位清单 on the right,
+ * filled as the messages name their fields. After the three steps, the long report; from the report, the jury.
  */
 export function PositioningClipJ({ moment, local }: { moment: number; local: number }) {
   const current = J_TAKEOVER_MOMENTS[moment] ?? J_TAKEOVER_MOMENTS[0];
   const step = current.step;
-  const done = local >= 0.96 || step === 3;
+  const chat = step === 3 ? J_TAKEOVER_MOMENTS[2] : current;
+  const lines = step === 3 ? chat.lines : current.lines.slice(0, arrivedAt(local, current.lines.length));
+  const shownStep = Math.min(step, 2);
+  const done = step === 3 || local >= 0.97;
   const confirmed = step === 3 ? 3 : step + (done ? 1 : 0);
-  const valid = Object.fromEntries(DEMO_STEPS.map((item, index) => [item.id, index < confirmed]));
-  const chatMoment = step === 3 ? J_TAKEOVER_MOMENTS[2] : current;
-  const lines = step === 3 ? chatMoment.lines : current.lines.slice(0, arrivedAt(local, current.lines.length));
+  const filled = filledUpTo(moment, lines);
+  const information = personaInformation(filled, confirmed);
+  const valid = Object.fromEntries(J_STEPS.map((item, index) => [item.id, index < confirmed]));
   const fetchLocal = step === 3 ? 1 : Math.max(0, local * 3 - 1.4);
+  const stepTitle = J_STEPS[shownStep].title;
   return (
     <div className={styles.app}>
       <aside className={cn(frame.rail, styles.rail)} aria-label="工作区导航">
@@ -72,75 +70,92 @@ export function PositioningClipJ({ moment, local }: { moment: number; local: num
       <section className={styles.center}>
         <header className={result.positionTop}>
           <p className={styles.appTitle}>我的定位分析</p>
-          <div className={result.positionActions}><span className={styles.sample}>{DEMO_LABEL}</span><span>整体规划 · {step === 3 ? '已确认' : '进行中'}</span></div>
+          <div className={result.positionActions}>
+            <span className={styles.sample}>{DEMO_LABEL}</span><span>整体规划 · {step === 3 ? '已确认' : '进行中'}</span>
+          </div>
         </header>
-        <nav aria-label="定位步骤" className={result.phaseStrip} style={{ gridTemplateColumns: `repeat(${DEMO_STEPS.length},minmax(0,1fr))` }}>
-          {DEMO_STEPS.map((item, index) => (
-            <Button key={item.id} size="sm" variant={index === Math.min(step, 2) ? 'default' : 'outline'} tabIndex={-1}>
-              {valid[item.id] ? <Check size={14} aria-hidden="true" /> : `${index + 1} `}{item.title}
+        <nav aria-label="定位步骤" className={result.phaseStrip} style={{ gridTemplateColumns: `repeat(${J_STEPS.length},minmax(0,1fr))` }}>
+          {J_STEPS.map((item, index) => (
+            <Button key={item.id} size="sm" variant={index === shownStep ? 'default' : 'outline'} tabIndex={-1}>
+              {valid[item.id] ? <><Check size={14} aria-hidden="true" />{item.title}</> : `${index + 1} ${item.title}`}
             </Button>
           ))}
         </nav>
         <div className={styles.log}>
           <div className={styles.logInner}>
             {lines.map((line, index) => (
-              <Message key={`${chatMoment.id}-${index}`} line={line} step={DEMO_STEPS[Math.min(step, 2)].title} fetchLocal={fetchLocal} />
+              <Message key={`${chat.id}-${index}`} line={line} step={stepTitle} fetchLocal={fetchLocal} information={information} />
             ))}
           </div>
         </div>
         <footer className={cn(result.publishBar, styles.footer)}>
-          <span>{step === 3 ? '三步都已确认' : `第 ${step + 1} 步 · 共 3 步`}</span>
-          <Button size="sm" variant="outline" tabIndex={-1} data-on={current.id === 'report' || undefined}>{J_REPORT.generate}</Button>
+          <Button size="sm" variant="outline" tabIndex={-1}>{J_REPORT.export}</Button>
+          <Button size="sm" variant={step === 3 ? 'default' : 'outline'} tabIndex={-1} data-on={current.id === 'report' || undefined}>
+            {J_REPORT.generate}
+          </Button>
         </footer>
       </section>
 
       <aside className={cn(result.panel, styles.checklist)}>
         <header><h2>定位清单</h2><p>跟着对话自动记录；每一步核对后确认一次</p></header>
         <div className={result.body}>
-          <CaptureChecklist steps={DEMO_STEPS} information={demoInformation(personaState(confirmed))} valid={valid} edits={{}}
-            selectedStepId={DEMO_STEPS[Math.min(step, 2)].id} editable={false} manual={false} locked confirmable={() => false}
-            confirmation={() => 'none'} saveState={{}} conflicts={{}} resolving={null} onEdit={noop} onComposition={noop}
-            onResolve={noop} onReview={noop} onRecoverConfirmation={noop} onKeepConflict={noop} onRetrySave={noop} />
+          <CaptureChecklist steps={J_STEPS} information={information} valid={valid} edits={{}} selectedStepId={J_STEPS[shownStep].id}
+            editable manual={false} locked confirmable={() => false} confirmation={() => 'none'} saveState={{}} conflicts={{}}
+            resolving={null} onEdit={noop} onComposition={noop} onResolve={noop} onReview={noop} onRecoverConfirmation={noop}
+            onKeepConflict={noop} onRetrySave={noop} />
         </div>
       </aside>
 
-      {step === 3 ? <Report writing={current.id === 'report'} local={local} jury={current.id === 'jury'} /> : null}
+      {step === 3 ? <Report writing={current.id === 'report'} local={local} /> : null}
+      {current.id === 'jury' ? <JuryJ local={local} /> : null}
     </div>
   );
 }
 
-/** The report panel over the workbench: written section by section, then the jury opened from it. */
-function Report({ writing, local, jury }: { writing: boolean; local: number; jury: boolean }) {
-  const shown = writing ? Math.max(1, Math.ceil(local * 1.2 * J_REPORT.sections.length)) : J_REPORT.sections.length;
+/** The long report over the workbench: its chapter list beside a preview that scrolls through the chapters. */
+function Report({ writing, local }: { writing: boolean; local: number }) {
+  const count = J_REPORT.chapters.length;
+  const reached = writing ? Math.min(count - 1, Math.floor(local * 1.1 * count)) : count - 1;
   return (
     <div className={styles.reportLayer}>
       <section className={styles.report} aria-label={J_REPORT.title}>
         <header>
-          <FileText size={16} aria-hidden="true" /><h2>{J_REPORT.title}</h2>
-          {writing && shown < J_REPORT.sections.length ? <small><Loader2 size={13} aria-hidden="true" />正在写报告…</small> : null}
+          <FileText size={16} aria-hidden="true" /><h2>{J_REPORT.title}</h2><span>{J_REPORT.size}</span>
+          {writing && reached < count - 1 ? <small><Loader2 size={13} aria-hidden="true" />正在写报告…</small> : null}
         </header>
-        <p className={styles.reportIntro}>{J_REPORT.intro}</p>
-        {J_REPORT.sections.slice(0, shown).map(section => <div key={section.title}><h3>{section.title}</h3><p>{section.body}</p></div>)}
+        <div className={styles.reportBody}>
+          <ol className={styles.toc}>
+            {J_REPORT.chapters.map((chapter, index) => (
+              <li key={chapter.title} data-on={index === reached || undefined} data-done={index < reached || undefined}>{chapter.title}</li>
+            ))}
+          </ol>
+          <div className={styles.preview}>
+            <div style={{ translate: `0 calc(${-Math.max(0, reached - 1)} * var(--chapter-step))` }}>
+              {J_REPORT.chapters.slice(0, reached + 1).map(chapter => (
+                <article key={chapter.title}><h3>{chapter.title}</h3><p>{chapter.body}</p><i aria-hidden="true" /><i aria-hidden="true" /></article>
+              ))}
+            </div>
+          </div>
+        </div>
         <footer>
-          <Button size="sm" tabIndex={-1} data-on={jury || undefined} className={styles.juryEntry}>
+          <p className={styles.reportIntro}>{J_REPORT.intro}</p>
+          <Button size="sm" tabIndex={-1} className={styles.juryEntry} data-on={!writing || undefined}>
             <Sparkles size={14} aria-hidden="true" />{J_REPORT.juryEntry}<span>{J_REPORT.juryTag}</span>
           </Button>
         </footer>
       </section>
-      {jury && local > 0.12 ? (
-        <div className={styles.juryLayer}>
-          <JuryCanvasPlayer brief progress={Math.min(1, (local - 0.12) / 0.85)} />
-        </div>
-      ) : null}
     </div>
   );
 }
 
-function Message({ line, step, fetchLocal }: { line: TakeoverLine; step: string; fetchLocal: number }) {
+function Message({ line, step, fetchLocal, information }: {
+  line: TakeoverLine; step: string; fetchLocal: number; information: ReturnType<typeof personaInformation>;
+}) {
   if (line.role === 'user') {
     return (
-      <div data-message-role="user" className={styles.user}>
-        <MessageMarkdown className={styles.messageText} text={line.text} />
+      <div data-message-role="user" className="ml-8 rounded-xl bg-[var(--bg-tertiary)] p-3">
+        <span className="text-xs text-[var(--text-secondary)]">你 · {step}</span>
+        <p className={`mt-1 whitespace-pre-wrap break-words ${result.messageBody}`}>{line.text}</p>
       </div>
     );
   }
@@ -152,26 +167,22 @@ function Message({ line, step, fetchLocal }: { line: TakeoverLine; step: string;
       </div>
     );
   }
+  const summary = line.role === 'summary';
   return (
-    <div data-message-role="assistant" className={styles.coach}>
-      <span className={result.agentIdentity}>导师 · {step}</span>
-      <MessageMarkdown className={styles.messageText} text={line.text} />
-      {line.card ? <Card card={line.card} fetchLocal={fetchLocal} /> : null}
-    </div>
+    <>
+      <div data-message-role="assistant" className="mr-4 rounded-xl border border-[var(--border-primary)] p-3">
+        <span className={result.agentIdentity}><img src="/graylum-logo.png" alt="" />{summary ? '本步小结' : 'AI 自媒体陪跑教练'} · {step}</span>
+        <MentorMarkdown className={`mt-1 ${result.messageBody}`} text={line.text} live={false} />
+        {line.card ? <Card card={line.card} fetchLocal={fetchLocal} /> : null}
+      </div>
+      {line.card === 'confirm' || line.card === 'pending' ? <ConfirmJ step={step} information={information} /> : null}
+    </>
   );
 }
 
 function Card({ card, fetchLocal }: { card: TakeoverCard; fetchLocal: number }) {
   if (card === 'question') return <div className={styles.cardSlot}><QuestionCardView card={J_PERSONA_QUESTION} /></div>;
   if (card === 'direction') return <div className={styles.cardSlot}><QuestionCardView card={J_PERSONA_DIRECTION} /></div>;
-  if (card === 'confirm') {
-    return (
-      <div className={styles.cardSlot}>
-        <StepConfirmCard stepId="you" title={DEMO_STEPS[0].title} info={demoInformation(personaState(1)).you} edits={undefined}
-          signal={undefined} resuming={false} disabled stays={false} canConfirm={false} onConfirm={noop} onEdit={noop} onReview={noop} />
-      </div>
-    );
-  }
   if (card === 'kinds') {
     return (
       <ul className={styles.kinds}>
@@ -192,20 +203,25 @@ function Card({ card, fetchLocal }: { card: TakeoverCard; fetchLocal: number }) 
       </ul>
     );
   }
-  if (card === 'report') return null;
-  return (
-    <div className={styles.tableCard}>
-      <p>{J_BENCHMARK_TABLE.title}</p>
-      <table>
-        <thead><tr>{J_BENCHMARK_TABLE.columns.map(column => <th key={column} scope="col">{column}</th>)}</tr></thead>
-        <tbody>
-          {J_BENCHMARK_TABLE.rows.map(row => (
-            <tr key={row[0]}>{row.map((cell, index) => (index === 0
-              ? <th key={index} scope="row">{cell}</th>
-              : <td key={index} data-missing={cell === '未取到' || undefined}>{cell}</td>))}</tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
+  if (card === 'plan') {
+    return <dl className={styles.planRows}>{J_PLAN_ROWS.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl>;
+  }
+  if (card === 'table') {
+    return (
+      <div className={styles.tableCard}>
+        <p>{J_BENCHMARK_TABLE.title}</p>
+        <table>
+          <thead><tr>{J_BENCHMARK_TABLE.columns.map(column => <th key={column} scope="col">{column}</th>)}</tr></thead>
+          <tbody>
+            {J_BENCHMARK_TABLE.rows.map(row => (
+              <tr key={row[0]}>{row.map((cell, index) => (index === 0
+                ? <th key={index} scope="row">{cell}</th>
+                : <td key={index} data-missing={cell === '未取到' || undefined}>{cell}</td>))}</tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    );
+  }
+  return null;
 }
