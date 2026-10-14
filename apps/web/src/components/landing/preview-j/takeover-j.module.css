@@ -1,0 +1,103 @@
+/* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+/*
+ * "AI 教练怎么接手你的运营" (TakeoverJ). Locked: a tall section whose stage sticks to the screen while the scroll
+ * drives the clips; the section is as tall as the story needs (desktop and phone alike), so the page moves on only
+ * when the story has played. Static (no JavaScript or reduced motion): the same chapters stacked, nothing pinned.
+ */
+.takeover { position: relative; height: 560svh; }
+.stage { position: sticky; top: 0; display: grid; height: 100svh; padding: 76px 0 20px; overflow: hidden; }
+.frame { display: grid; grid-template-rows: auto minmax(0, 1fr) auto; gap: 18px; height: 100%; }
+.head { display: grid; gap: 10px; }
+@media (min-width: 1024px) { .head { grid-template-columns: minmax(0, 1fr) auto; align-items: end; } }
+.title { margin: 0; font-size: clamp(30px, 4vw, 56px); font-weight: 600; line-height: 1.08; letter-spacing: -.045em; }
+.steps { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.steps li {
+  padding: 5px 12px; border: 1px solid var(--j-line); border-radius: 999px; background: #fff; color: var(--j-muted); font-size: 13px;
+  transition: background-color .3s, color .3s, border-color .3s;
+}
+.steps li[data-on] { border-color: var(--j-ink); background: var(--j-ink); color: #fff; }
+.body { display: grid; gap: 16px; min-height: 0; }
+@media (min-width: 1024px) { .body { grid-template-columns: minmax(0, 4fr) minmax(0, 8fr); gap: 40px; align-items: center; } }
+.copy { display: grid; gap: 10px; align-content: start; }
+.copy h3 { margin: 0; font-size: clamp(22px, 2.4vw, 34px); font-weight: 600; line-height: 1.2; letter-spacing: -.03em; }
+.copy p { margin: 0; color: var(--j-body); font-size: clamp(15px, 1.25vw, 17px); line-height: 1.75; }
+@media (prefers-reduced-motion: no-preference) { .takeover .copy { animation: copyIn .5s var(--j-ease) both; } }
+.picture { min-width: 0; min-height: 0; height: 100%; overflow: hidden; }
+.bar { height: 3px; overflow: hidden; border-radius: 3px; background: var(--j-line); }
+.bar i { display: block; height: 100%; background: var(--j-ink); transform-origin: 0 50%; }
+@media (max-width: 1023px) {
+  .stage { padding-top: 68px; }
+  .copy p { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 3; }
+}
+
+/* Static */
+.static .staticStep { display: grid; gap: 24px; padding-top: 56px; }
+@media (min-width: 1024px) { .static .staticStep { grid-template-columns: minmax(0, 4fr) minmax(0, 8fr); gap: 40px; } }
+.static .picture { height: auto; }
+
+/* The workbench window (3a) */
+.window {
+  position: relative; display: grid; grid-template-rows: auto auto minmax(0, 1fr); height: 100%; max-height: 640px; overflow: hidden;
+  border: 1px solid var(--j-line); border-radius: 20px; background: #fff; color: #262626;
+  box-shadow: 0 2px 4px rgba(20, 19, 18, .04), 0 30px 60px -36px rgba(20, 19, 18, .4);
+}
+.static .window { height: 560px; }
+.windowBar { display: flex; align-items: center; gap: 10px; padding: 12px 16px; border-bottom: 1px solid #eee; font-size: 13px; }
+.windowBar b { font-weight: 500; }
+.sample { padding: 0 8px; border-radius: 999px; background: var(--gl-accent-tag); color: var(--gl-accent-tag-text); font-size: 11.5px; line-height: 20px; }
+.strip { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; padding: 10px 16px; border-bottom: 1px solid #eee; }
+.strip > * { pointer-events: none; }
+.panes { display: grid; min-height: 0; }
+@media (min-width: 768px) { .panes { grid-template-columns: minmax(0, 1fr) 260px; } }
+.log { display: grid; align-content: start; gap: 10px; min-height: 0; padding: 16px; overflow: hidden; }
+.log > .user, .log > .coach { display: grid; gap: 4px; padding: 10px 14px; border-radius: 12px; font-size: 14px; }
+.log > .user { justify-self: end; max-width: 80%; background: #f3f3f3; }
+.log > .coach { justify-self: start; max-width: 92%; border: 1px solid #ececec; background: #fff; }
+@media (prefers-reduced-motion: no-preference) { .log > div:last-of-type { animation: messageIn .4s var(--j-ease) both; } }
+.fetch { display: grid; gap: 6px; margin: 0; padding: 10px 12px; border: 1px dashed #ddd; border-radius: 12px; list-style: none; font-size: 13.5px; }
+.fetch li { display: flex; align-items: center; gap: 8px; color: #666; }
+.fetch li span { margin-left: auto; font-size: 12px; }
+.fetch li[data-done] { color: #262626; }
+.fetch li[data-done] svg { color: #1a7f45; }
+@media (prefers-reduced-motion: no-preference) { .fetch li:not([data-done]) svg { animation: spin 1s linear infinite; } }
+.panes > .checklist { display: none; height: auto; min-height: 0; border-left: 1px solid #eee; overflow: hidden; }
+@media (min-width: 768px) { .panes > .checklist { display: flex; } }
+.messageText { color: #444; font-size: 14px; line-height: 1.7; }
+.messageText p { margin: 0; }
+.checklist > header { padding: 12px 16px !important; }
+.checklist > div { padding: 10px 12px !important; overflow: hidden !important; }
+
+/* The review panel (3b): the prototype's desk, scaled to the stage */
+.jury { height: 100%; overflow: hidden; border: 1px solid var(--j-line); border-radius: 20px; background: #fff; }
+.jury > * { zoom: .78; }
+@media (max-width: 767px) { .jury > * { zoom: .6; } }
+.static .jury { height: 560px; }
+
+/* What you no longer do (3c) */
+.promises { display: grid; gap: 14px; height: 100%; margin: 0; padding: 0; list-style: none; align-content: center; }
+@media (min-width: 768px) { .promises { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+.promises li {
+  display: grid; align-content: start; gap: 8px; padding: 20px; border: 1px solid var(--j-line); border-radius: 20px; background: #fff;
+  opacity: .25; transition: opacity .5s var(--j-ease), translate .5s var(--j-ease); translate: 0 16px;
+}
+.promises li[data-lit] { opacity: 1; translate: 0 0; }
+.static .promises li { opacity: 1; translate: 0 0; }
+.promises h4 { margin: 0; font-size: 20px; font-weight: 600; letter-spacing: -.02em; }
+.promises p { margin: 0; color: var(--j-body); font-size: 15px; line-height: 1.7; }
+.card { margin-top: 6px; padding: 12px; border-radius: 14px; background: #f6f6f3; }
+.mini { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; font-size: 13.5px; }
+.mini li { display: flex; align-items: center; gap: 8px; transition: opacity .3s; }
+.mini li svg { flex: none; color: var(--j-gold-text); }
+.mini li[data-done] svg { color: #1a7f45; }
+.review { display: grid; gap: 8px; margin: 0; font-size: 13.5px; }
+.review div { transition: opacity .3s; }
+.review dt { display: flex; align-items: center; gap: 6px; color: #777; font-size: 12px; }
+.review dd { margin: 0; }
+@media (max-width: 767px) {
+  .promises li { padding: 14px; }
+  .promises .card { display: none; }
+}
+
+@keyframes copyIn { from { opacity: 0; translate: 0 12px; } to { opacity: 1; translate: 0 0; } }
+@keyframes messageIn { from { opacity: 0; translate: 0 10px; } to { opacity: 1; translate: 0 0; } }
+@keyframes spin { to { rotate: 1turn; } }

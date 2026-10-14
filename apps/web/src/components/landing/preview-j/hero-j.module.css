@@ -1,0 +1,84 @@
+/* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+/*
+ * Sample J's first screen: one full screen (buffer.com's measure). The title is set very large and tight in two
+ * lines on the left (sample E's display type); the right half holds the data-growth flywheel: a gold dot travels
+ * the loop of the product's five steps, each step lights as it passes, and the curve in the middle steps up once a
+ * lap for three laps, then holds. Transform and opacity only; with reduced motion everything rests at the end.
+ */
+.hero { position: relative; display: grid; align-items: center; min-height: calc(100svh - 64px); padding: 32px 0 48px; }
+.grid { display: grid; gap: 40px; align-items: center; }
+@media (min-width: 1024px) { .grid { grid-template-columns: minmax(0, 6fr) minmax(0, 5fr); gap: 56px; } }
+.text { display: grid; gap: 28px; justify-items: start; }
+.title {
+  display: grid; margin: 0; font-size: clamp(48px, 5.9vw, 92px); font-weight: 600; line-height: 1.02; letter-spacing: -.055em;
+  word-break: keep-all;
+}
+.title span { display: block; }
+.promise { margin: 0; max-width: 22em; color: var(--j-body); font-size: clamp(19px, 1.9vw, 25px); line-height: 1.6; text-wrap: balance; }
+.actions { display: grid; justify-items: start; gap: 12px; }
+.note { margin: 0; color: var(--j-muted); font-size: 14px; }
+
+/* The flywheel */
+.wheel { position: relative; width: min(100%, 520px); aspect-ratio: 1; margin: 0 auto; }
+.ring { position: absolute; inset: 0; }
+.track { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+.track circle { fill: none; stroke: var(--j-line); stroke-width: .6; }
+.track path { fill: none; stroke: #b9b7b1; stroke-width: .5; stroke-linecap: round; stroke-linejoin: round; }
+.orbit { position: absolute; inset: 0; }
+.orbit i {
+  position: absolute; top: 9%; left: 50%; width: 14px; height: 14px; margin: -7px 0 0 -7px; border-radius: 50%; background: var(--j-gold);
+  box-shadow: 0 0 0 6px rgba(255, 187, 23, .18);
+}
+.nodes { position: absolute; inset: 0; margin: 0; padding: 0; list-style: none; }
+.nodes li {
+  position: absolute; display: flex; align-items: center; gap: 7px; padding: 9px 14px; border: 1px solid var(--j-line); border-radius: 999px;
+  background: #fff; color: var(--j-ink); font-size: 15px; font-weight: 600; white-space: nowrap; translate: -50% -50%;
+  box-shadow: 0 1px 2px rgba(20, 19, 18, .05), 0 12px 28px -18px rgba(20, 19, 18, .35);
+}
+.nodes li svg { color: var(--j-gold-text); }
+/* The last step sits low on the left; the label that leads back to the top reads "看数据复盘". */
+.core {
+  position: absolute; top: 33%; left: 27%; width: 46%; height: 34%; padding: 8px 10px; border: 1px solid var(--j-line); border-radius: 16px;
+  background: #fff; box-shadow: 0 18px 40px -26px rgba(20, 19, 18, .35);
+}
+.bars { position: absolute; inset: auto 10px 10px; display: flex; align-items: flex-end; gap: 6%; height: 72%; }
+.bars i { flex: 1; height: calc(18% + var(--b) * 17%); border-radius: 4px 4px 1px 1px; background: #ecebe6; transform-origin: 50% 100%; }
+.bars i:last-child { background: var(--j-gold); }
+.curve { position: absolute; inset: 10px; width: calc(100% - 20px); height: calc(100% - 20px); overflow: visible; }
+.curve path { fill: none; stroke: var(--j-ink); stroke-width: 1.6; vector-effect: non-scaling-stroke; stroke-linecap: round; }
+.caption { position: absolute; right: 0; bottom: -6px; left: 0; color: var(--j-muted); font-size: 13.5px; text-align: center; }
+
+@media (max-width: 1023px) {
+  .hero { min-height: 0; padding-top: 24px; }
+  .title { font-size: clamp(48px, 11vw, 92px); }
+  .wheel { width: min(100%, 420px); }
+}
+@media (max-width: 520px) {
+  .nodes li { padding: 6px 10px; gap: 5px; font-size: 13px; }
+  .nodes li svg { width: 14px; height: 14px; }
+  .caption { bottom: -14px; font-size: 12.5px; }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  /* One lap is 6s; the wheel turns three times while the curve steps up, then keeps turning slowly. */
+  .orbit { animation: turn 6s linear infinite; }
+  .nodes li { animation: lit 6s ease-out infinite; animation-delay: calc(var(--i) * 1.2s); }
+  .bars i { animation: climb 18s var(--j-ease) both; }
+  .curve path { stroke-dasharray: 160; animation: draw 18s var(--j-ease) both; }
+  .text > * { animation: rise .9s var(--j-ease) both; }
+  .text > :nth-child(2) { animation-delay: .1s; }
+  .text > :nth-child(3) { animation-delay: .2s; }
+}
+@keyframes turn { to { rotate: 1turn; } }
+@keyframes lit {
+  0%, 14% { border-color: var(--j-gold); box-shadow: 0 0 0 4px rgba(255, 187, 23, .22), 0 12px 28px -18px rgba(20, 19, 18, .35); }
+  30%, 100% { border-color: var(--j-line); }
+}
+@keyframes climb {
+  0% { scale: 1 .35; }
+  33% { scale: 1 .6; }
+  66% { scale: 1 .82; }
+  100% { scale: 1 1; }
+}
+@keyframes draw { 0% { stroke-dashoffset: 120; } 33% { stroke-dashoffset: 80; } 66% { stroke-dashoffset: 40; } 100% { stroke-dashoffset: 0; } }
+@keyframes rise { from { transform: translate3d(0, 16px, 0); } to { transform: none; } }

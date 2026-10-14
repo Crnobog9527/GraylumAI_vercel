@@ -1,0 +1,54 @@
+/* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+'use client';
+
+import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { ChevronDown } from 'lucide-react';
+import styles from './j.module.css';
+
+const reducedMotion = () => Boolean(window.matchMedia?.('(prefers-reduced-motion: reduce)').matches);
+
+/**
+ * Sample J's page wrapper. The server HTML is the finished page; after mounting, when motion is welcome, it sets
+ * `data-motion="on"` and marks each voice-wall row `data-in` as it scrolls into view (CSS plays the note, then the
+ * answer). Without JavaScript or with reduced motion nothing is hidden.
+ */
+export function MotionJ({ className, children }: { className?: string; children: ReactNode }) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const root = ref.current;
+    if (!root || reducedMotion() || typeof IntersectionObserver === 'undefined') return;
+    const observer = new IntersectionObserver(entries => {
+      for (const entry of entries) {
+        if (!entry.isIntersecting) continue;
+        (entry.target as HTMLElement).dataset.in = '';
+        observer.unobserve(entry.target);
+      }
+    }, { rootMargin: '0px 0px -12% 0px', threshold: 0.2 });
+    root.querySelectorAll<HTMLElement>('[data-row]').forEach(node => observer.observe(node));
+    root.dataset.motion = 'on';
+    return () => { observer.disconnect(); delete root.dataset.motion; };
+  }, []);
+  return <div ref={ref} className={className}>{children}</div>;
+}
+
+/** The voice wall's "看另外 N 条" on a phone: folds the list once mounted, one press unfolds it for good. */
+export function WallMoreJ({ listId, hiddenCount }: { listId: string; hiddenCount: number }) {
+  const [folded, setFolded] = useState(false);
+  useEffect(() => {
+    const list = document.getElementById(listId);
+    if (!list) return;
+    list.dataset.folded = '';
+    setFolded(true);
+  }, [listId]);
+  if (!folded) return null;
+  const unfold = () => {
+    const list = document.getElementById(listId);
+    if (list) delete list.dataset.folded;
+    setFolded(false);
+  };
+  return (
+    <button type="button" className={styles.wallMore} aria-controls={listId} aria-expanded="false" onClick={unfold}>
+      看另外 {hiddenCount} 条<ChevronDown size={16} aria-hidden="true" />
+    </button>
+  );
+}
