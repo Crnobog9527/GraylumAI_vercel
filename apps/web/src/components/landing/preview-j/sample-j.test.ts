@@ -6,19 +6,18 @@ import sitemap from '@/app/sitemap';
 import { metadata } from '@/app/landing/preview/j/page';
 import { FINAL_ACTION, H_COMPARE, HERO, HERO_H, PRICE_COMPARE, RISK_REVERSAL, VOICE_WALL } from '@/lib/landing/landing-copy';
 import * as copyJ from '@/lib/landing/landing-copy-j';
-import { J_FAQ_REWORDS, J_ID_PLACEHOLDER, J_NOTE_HEADS, J_PRICE, J_TAKEOVER, noteSource } from '@/lib/landing/landing-copy-j';
+import { J_FAQ_REWORDS, J_HERO_PROMISE, J_ID_PLACEHOLDER, J_NOTE_HEADS, J_PRICE, J_TAKEOVER, noteSource } from '@/lib/landing/landing-copy-j';
 import { LANDING_FEATURES, type LandingFlags } from '@/lib/landing/landing-flags';
 import { buildLandingPageData } from '@/lib/landing/landing-page-data';
 import { APP_SEGMENTS } from '@/lib/sentry-scrub';
 import { SampleJ } from './SampleJ';
 import { arrivedAt } from './PositioningClipJ';
 import { chapterAt, CHAPTERS } from './TakeoverJ';
-import { WEEK_STEP_MS } from './WeekJ';
-import { J_JURY_CHANGED, J_JURY_EVENTS, J_JURY_REPORT } from './jury-case-j';
+import { WEEK_LOOP_MS } from './WeekJ';
 import { J_WEEK } from '@/lib/landing/landing-copy-j-week';
 import { J_COMPARE } from '@/lib/landing/landing-copy-j-compare';
-import { J_TAKEOVER_SCENES } from '@/lib/landing/landing-copy-j-takeover';
-import { J_WORK, J_WORK_SAMPLES, J_WORK_SCENES } from '@/lib/landing/landing-copy-j-work';
+import { J_REPORT, J_TAKEOVER_MOMENTS } from '@/lib/landing/landing-copy-j-takeover';
+import { J_WORK, J_WORK_SCENES } from '@/lib/landing/landing-copy-j-work';
 import { J_FOUNDER_BAR, J_PRICE_TOTAL } from '@/lib/landing/landing-copy-j-price';
 
 const ALL_ON = Object.fromEntries(Object.keys(LANDING_FEATURES).map(key => [key, true])) as LandingFlags;
@@ -45,7 +44,8 @@ describe('style sample J', () => {
     const { html } = render();
     expect(html.match(/<h1[\s>]/g)).toHaveLength(1);
     const hero = html.slice(html.indexOf('aria-labelledby="hero-title"'), html.indexOf('aria-labelledby="voice-title"'));
-    for (const copy of [HERO.promise, HERO.primaryCta, HERO_H.ctaNote]) expect(hero).toContain(escape(copy));
+    for (const copy of [J_HERO_PROMISE, HERO.primaryCta, HERO_H.ctaNote]) expect(hero).toContain(escape(copy));
+    expect(hero).not.toContain("交给它");
     expect(hero.replace(/<[^>]+>/g, '')).toContain(HERO.title.replace(' 自', '自'));
     expect(hero).not.toContain(HERO.secondaryCta);
     // The Owner's edit mode exists only in a local development server, never in a build.
@@ -78,17 +78,22 @@ describe('style sample J', () => {
   it('tells the story as static steps in the server HTML, with the Owner\'s benchmark wording and no old claim', () => {
     const { html } = render();
     expect(html).toContain(J_TAKEOVER.benchmarkLine);
-    for (const scene of J_TAKEOVER_SCENES) {
-      expect(html).toContain(scene.title);
-      expect(html).toContain(escape(scene.note));
+    for (const moment of J_TAKEOVER_MOMENTS) {
+      expect(html).toContain(moment.caption);
+      expect(html).toContain(escape(moment.note));
     }
-    expect(html).toContain(J_TAKEOVER.juryTitle);
+    // The product's own steps appear in the workbench strip; the report comes from its footer, the jury from the report.
+    for (const step of ['你是谁', '方向判断', '找对标']) expect(html).toContain(step);
+    expect(html).toContain(J_REPORT.generate);
+    expect(html).toContain(J_REPORT.juryEntry);
     // The scenes are the demo's made-up case: no figures, no promise of income.
-    expect(JSON.stringify(J_TAKEOVER_SCENES)).not.toMatch(/\d+\s*%|\$|保证|一定能|稳赚/);
+    expect(JSON.stringify(J_TAKEOVER_MOMENTS)).not.toMatch(/\d+\s*%|\$|保证|一定能|稳赚/);
     // The long promise paragraph is never shown in one block any more.
     expect(html).not.toContain('你不用再分心研究运营技术，不用自己想选题');
     expect(JSON.stringify(copyJ)).not.toContain('程序算出来');
-    expect(JSON.stringify(J_TAKEOVER_SCENES)).not.toContain('程序算');
+    expect(JSON.stringify(J_TAKEOVER_MOMENTS)).not.toContain('程序算');
+    // One example person on the whole page (Owner 2026-10-15): the dental assistant is gone.
+    expect(html).not.toMatch(/牙科|牙助/);
   });
 });
 
@@ -101,21 +106,26 @@ describe('style sample J, the later sections', () => {
     expect([...order].sort((a, b) => a - b)).toEqual(order);
   });
 
-  it('shows all eight demos of the merged module, finished on the server, with no figures or income promise', () => {
+  it('shows all eight demos step by step, each finished on the server, with no figures or income promise', () => {
     const { html } = render();
     for (const group of J_WORK.groups) expect(html).toContain(group);
     expect(html).toContain(J_WORK.close);
     for (const scene of J_WORK_SCENES) {
       expect(html).toContain(scene.title);
-      expect(html).toContain(escape(scene.did));
       expect(html).toContain(escape(scene.result));
+      // Every demo is a walk-through of three to five steps, each with its own explanation.
+      expect(scene.steps.length).toBeGreaterThanOrEqual(3);
+      expect(scene.steps.length).toBeLessThanOrEqual(5);
+      for (const step of scene.steps) expect(step.explain.length).toBeGreaterThan(10);
+      // At rest each demo shows its last step.
+      expect(html).toContain(escape(scene.steps[scene.steps.length - 1].explain));
     }
     // The review lives in "不用自己看数据"; it is not a demo of its own any more.
     expect(J_WORK_SCENES.map(scene => scene.id)).not.toContain('review');
-    // Nothing waits for a phase in the server HTML: every piece is already shown.
-    const work = html.slice(html.indexOf('id="work-title"'), html.indexOf('id="compare-title"'));
-    expect(work.match(/data-at=/g)?.length).toBe(work.match(/data-shown=""/g)?.length);
-    expect(JSON.stringify([J_WORK_SCENES, J_WORK_SAMPLES])).not.toMatch(/\d+\s*%|\$|保证|一定能|稳赚/);
+    const text = JSON.stringify(J_WORK_SCENES).replace(/15 分钟|十五分钟/g, '');
+    expect(text).not.toMatch(/\d+\s*%|\$|\d{2,}|保证|一定能|稳赚/);
+    // The AI coach is named, never "它" (Owner 2026-10-15).
+    expect(JSON.stringify([J_WORK, J_WORK_SCENES])).not.toMatch(/它(?!们)/);
   });
 
   it('keeps the Owner\'s four-row comparison word for word, each row over its pair of conversations', () => {
@@ -160,27 +170,28 @@ describe('style sample J, the later sections', () => {
 
 describe('sample J story timing', () => {
   it('maps the scroll to the four chapters in order, ending inside the last', () => {
-    expect(CHAPTERS.map(chapter => chapter.id)).toEqual(['you', 'direction', 'benchmark', 'jury']);
+    expect(CHAPTERS.map(chapter => chapter.id)).toEqual(J_TAKEOVER_MOMENTS.map(moment => moment.id));
     expect(chapterAt(0)).toEqual({ id: 'you', index: 0, local: 0 });
     expect(chapterAt(0.4).id).toBe('direction');
     expect(chapterAt(0.6).id).toBe('benchmark');
-    expect(chapterAt(1)).toEqual({ id: 'jury', index: 3, local: 1 });
+    expect(chapterAt(0.7).id).toBe('report');
+    expect(chapterAt(1)).toEqual({ id: 'jury', index: 4, local: 1 });
     expect(chapterAt(-1).id).toBe('you');
-    // Every message of a scene has arrived before the scroll leaves it.
-    for (const scene of J_TAKEOVER_SCENES) expect(arrivedAt(0.9, scene.lines.length)).toBe(scene.lines.length);
+    // Every message of a moment has arrived before the scroll leaves it.
+    for (const moment of J_TAKEOVER_MOMENTS) expect(arrivedAt(0.9, moment.lines.length)).toBe(moment.lines.length);
     expect(arrivedAt(0, 6)).toBe(1);
   });
 
-  it('shows the first screen\'s week window at its last step on the server, with the five stages and no made-up numbers', () => {
+  it('shows the first screen\'s week window at its review on the server, the coach driving, about a minute per loop', () => {
     const { html } = render();
-    expect(html).toContain('data-step="4"');
     for (const stage of J_WEEK.stages) expect(html).toContain(stage);
-    expect(html).toContain(J_WEEK.review.rows[1][1].replace(/"/g, '&quot;'));
-    expect(WEEK_STEP_MS).toHaveLength(J_WEEK.stages.length);
-    const loop = WEEK_STEP_MS.reduce((sum, ms) => sum + ms, 0);
-    expect(loop).toBeGreaterThanOrEqual(11000);
-    expect(loop).toBeLessThanOrEqual(14000);
-    expect(JSON.stringify(J_WEEK)).not.toMatch(/\d+\s*%|\$|\d{2,}/);
+    for (const row of J_WEEK.platforms.rows) expect(html).toContain(row[2]);
+    expect(WEEK_LOOP_MS).toBeGreaterThanOrEqual(40000);
+    expect(WEEK_LOOP_MS).toBeLessThanOrEqual(60000);
+    // Every stage is a few rounds, not one question and one answer.
+    for (const index of J_WEEK.stages.keys()) expect(J_WEEK.lines.filter(line => line.stage === index).length).toBeGreaterThanOrEqual(3);
+    // No figures beyond the person's own 15 minutes and one hour.
+    expect(JSON.stringify(J_WEEK).replace(/15 分钟|十五分钟|七点/g, '')).not.toMatch(/\d+\s*%|\$|\d{2,}/);
   });
 
   it('adds the usual ways up correctly, and every plan card leads to the pricing page, never straight to checkout', () => {
@@ -211,29 +222,3 @@ describe('sample J story timing', () => {
     expect(renderToStaticMarkup(createElement(SampleJ, { data: soldOut, siteName: 'Graylum', extras }))).not.toContain(J_FOUNDER_BAR.title);
   });
 });
-
-describe('sample J jury case (for #1002\'s canvas player)', () => {
-  it('follows the full scenario\'s order and ends on a revision of the changed chapters', () => {
-    const types = J_JURY_EVENTS.map(event => event.type);
-    expect(types[0]).toBe('review_started');
-    expect(types.slice(-2)).toEqual(['revision_ready_for_choice', 'review_ended']);
-    const at = (type: (typeof types)[number]) => types.indexOf(type);
-    expect(at('disagreement')).toBeLessThan(types.lastIndexOf('reviewer_started'));
-    expect(at('summary_started')).toBeLessThan(at('adjudication'));
-    expect(new Set(J_JURY_EVENTS.map(event => event.id)).size).toBe(J_JURY_EVENTS.length);
-    const ready = J_JURY_EVENTS.find(event => event.type === 'revision_ready_for_choice');
-    expect(ready && 'changedSectionTitles' in ready ? ready.changedSectionTitles : []).toEqual([...J_JURY_CHANGED]);
-  });
-
-  it('keeps every event text within 120 characters, with no model names and no figures', () => {
-    const texts = J_JURY_EVENTS.flatMap(event => Object.entries(event)
-      .filter(([key, value]) => typeof value === 'string' && !['id', 'type', 'section', 'state', 'outcome', 'decision', 'verdict',
-        'stance', 'reviewer', 'to', 'severity', 'perspective'].includes(key))
-      .map(([, value]) => value as string));
-    expect(texts.length).toBeGreaterThan(20);
-    for (const text of texts) expect(Array.from(text).length).toBeLessThanOrEqual(120);
-    const all = JSON.stringify([J_JURY_EVENTS, J_JURY_REPORT]).replace(/第 \d+ 章|第一个 30 天计划/g, '').replace(/":\d+|j-jury-\d+/g, '');
-    expect(all).not.toMatch(/\d|GPT|Claude|Gemini|DeepSeek|Qwen|模型 [A-C]/i);
-  });
-});
-

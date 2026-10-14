@@ -4,7 +4,8 @@
  * Sample J's comparison as four side-by-side conversations (Owner 2026-10-15): the same question asked of a general
  * AI (left) and of the AI coach (right), one per row of the Owner's four-row table (H_COMPARE.rows, same order).
  * NEW WORDING for the Owner to approve. The general answers are written as a typical general chat reply, naming no
- * product; the coach's side follows the demo's made-up case (a dental assistant in Canada). No numbers.
+ * product; the coach's side follows the page's example person (J_PERSONA: an office worker, 15-minute home dishes).
+ * No figures beyond that person's own situation.
  */
 export const J_COMPARE = {
   genericName: '通用 AI',
@@ -30,9 +31,9 @@ export const J_COMPARE = {
       plan: {
         title: '本周选题',
         rows: [
-          ['做什么', '课程怎么选：我当时踩过的坑'],
-          ['为什么', '想转行的人最怕花冤枉钱，这正好是你亲身走过的路'],
-          ['怎么做', '开头讲你多花钱的那次；中间给三条判断方法；结尾问观众卡在哪一步'],
+          ['做什么', '一口锅，15 分钟两菜一汤'],
+          ['为什么', '最能证明"下班后也来得及"，正是你的定位；想省时间的上班族会收藏'],
+          ['怎么做', '开头先给出锅的成品；中间只拍手和锅，步骤配字幕；结尾问观众最想学哪道'],
         ],
       },
     },
@@ -43,6 +44,11 @@ export const J_COMPARE = {
         '能不能再介绍一下你的账号定位、目标观众，以及之前写到哪里了？',
       ],
       coach: '好，接着上次。这是我记得的：',
+      memory: [
+        ['定位档案', '下班后 15 分钟上桌的家常菜，给刚开始一个人生活的上班族'],
+        ['你的情况', '每天下班后一小时；只拍手和锅，不露脸'],
+        ['创作进度', '第一周：一口锅两菜一汤已发，下一条是冰箱剩菜三种做法'],
+      ],
     },
     {
       question: '这条发了没人看，问题在哪？',
@@ -55,8 +61,8 @@ export const J_COMPARE = {
       review: {
         title: '这条怎么改',
         rows: [
-          ['问题在哪', '大部分人在开头就划走了；看完的人收藏不少，说明内容本身有用'],
-          ['下一条怎么改', '开头直接说结论"选课先看有没有实习"，再讲你的经历'],
+          ['问题在哪', '大部分人在开头的备菜镜头就划走了；看完的人收藏不少，说明菜本身有用'],
+          ['下一条怎么改', '开头先给出锅的成品和"15 分钟"，再倒回去讲步骤'],
         ],
       },
     },

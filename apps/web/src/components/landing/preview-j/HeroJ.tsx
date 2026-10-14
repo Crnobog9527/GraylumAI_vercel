@@ -2,6 +2,7 @@
 import Link from 'next/link';
 import { ArrowRight } from 'lucide-react';
 import { HERO, HERO_H } from '@/lib/landing/landing-copy';
+import { J_HERO_PROMISE } from '@/lib/landing/landing-copy-j';
 import { SIGNUP_CTA_HREF } from '@/lib/seo/content/shared';
 import { cn } from '@/lib/utils';
 import styles from './j.module.css';
@@ -22,7 +23,7 @@ export function HeroJ() {
             <span>{HERO.title.slice(0, HERO.title.lastIndexOf(' '))}</span>
             <span>{HERO.title.slice(HERO.title.lastIndexOf(' ') + 1)}</span>
           </h1>
-          <p className={hero.promise}>{HERO.promise}</p>
+          <p className={hero.promise}>{J_HERO_PROMISE}</p>
           <div className={hero.actions}>
             <Link href={SIGNUP_CTA_HREF} className={styles.pill}>{HERO.primaryCta}<ArrowRight size={18} aria-hidden="true" /></Link>
             <p className={hero.note}>{HERO_H.ctaNote}</p>

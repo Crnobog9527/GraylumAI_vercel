@@ -2,7 +2,7 @@
 import type { CSSProperties } from 'react';
 import { MoveRight } from 'lucide-react';
 import { VOICE_WALL, type VoiceNote } from '@/lib/landing/landing-copy';
-import { J_NOTE_HEADS, J_VOICE, noteSource } from '@/lib/landing/landing-copy-j';
+import { J_NOTE_ANSWERS, J_NOTE_HEADS, J_VOICE, noteSource } from '@/lib/landing/landing-copy-j';
 import { WallMoreJ } from './MotionJ';
 import styles from './j.module.css';
 
@@ -36,7 +36,7 @@ export function VoiceWallJ({ notes }: { notes: readonly VoiceNote[] }) {
               <MoveRight className={styles.arrow} size={28} aria-hidden="true" />
               <div className={styles.answer}>
                 <p className={styles.answerHead}><i aria-hidden="true" />{J_NOTE_HEADS[note.id] ?? '教练怎么做'}</p>
-                <p>{note.answer}</p>
+                <p>{J_NOTE_ANSWERS[note.id] ?? note.answer}</p>
               </div>
             </li>
           ))}

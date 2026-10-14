@@ -7,19 +7,39 @@
 
 /** NEW: one heading per voice-wall answer, matching the pain on the left (replaces the shared "教练怎么做"). */
 export const J_NOTE_HEADS: Readonly<Record<string, string>> = {
-  p1: 'AI 教练 24 小时随时回你',
-  p2: '每一步都告诉你具体怎么做',
-  p3: '从你的经历里挖出能拍的',
-  p4: '用真实数据找到差在哪',
-  p5: 'AI 教练一直陪你往下走',
-  p7: '先替你判断，再给内容',
-  p8: '每周照着清单做就行',
+  p7: '用专业运营的眼光替你把关方向',
+  p1: '随时问随时答，答的是你自己的账号',
+  p2: '每一步都具体到能直接照做',
+  p3: '从你的日常里挖出能拍的方向',
+  p4: '用真实数据找出差距，告诉你怎么改',
+  p5: '课上完了，还有 AI 教练一直带着你',
+  p8: '每周发什么，提前替你排好',
+};
+
+/**
+ * NEW (Owner 2026-10-15): the answers under each note, sample J only. Say "我们的 AI 教练", never "它"; the heading
+ * leads with the result, the answer says in the simplest words how the AI coach does it.
+ */
+export const J_NOTE_ANSWERS: Readonly<Record<string, string>> = {
+  p7: '我们的 AI 教练不急着给你一堆内容，而是先按专业运营的方法把方向定清楚，再看真实数据判断能不能做。方向难赚钱会直接告诉你，并给出调整方案。',
+  p1: '我们的 AI 教练 24 小时在线，记得你确认过的定位，也读过你上传的资料。所以回答的是你这个账号的具体问题，不是群发的攻略。',
+  p2: '我们的 AI 教练每一步只讲三件事：现在做什么、为什么这么做、做完下一步是什么。你点头确认，才带你进入下一步。',
+  p3: '我们的 AI 教练会先问清你的经历、能投入的时间和顾虑，从里面挑出别人替代不了的那部分，定成你的方向。之后每周的选题都从这个方向出发。',
+  p4: '我们的 AI 教练会抓取对标账号和你自己账号的真实公开数据，一项项对比，找出差距在哪，再告诉你下一条具体改什么。',
+  p5: '我们的 AI 教练不是一次性的课。做完一步就告诉你下一步；中途停下也没关系，下次打开接着聊，之前的进度都记着。',
+  p8: '我们的 AI 教练按你的方向，每周提前排好要发的内容，并写清为什么发这条。你只管拍摄，标题、文案、发布和复盘交给 AI 教练。',
 };
 
 /**
  * Forum users' IDs, shown in full (Owner 2026-10-14: "论坛用户的 ID，完整显示、不放原贴连接"). They must be copied
  * verbatim from the local quote table; until they are, each forum note shows this placeholder.
  */
+/**
+ * NEW (Owner 2026-10-15: never call the AI coach "它"): the first screen's promise, sample J only; the shared
+ * HERO.promise says "运营从此交给它".
+ */
+export const J_HERO_PROMISE = '运营从此交给我们的 AI 教练，你只管专心输出你擅长的内容。';
+
 export const J_ID_PLACEHOLDER = '【用户 ID 待补】';
 export const J_NOTE_IDS: Readonly<Record<string, string>> = {
   // Checked on the live pages on 2026-10-14 (read only); the quotes still match word for word.
@@ -48,14 +68,6 @@ export const J_TAKEOVER = {
   juryTitle: '评审团帮你把关报告（Gold）',
   /** NEW, condensed from the jury prototype's own explanation. */
   juryBody: '正式报告生成后，可以开启评审团：三位评审各自读完、在页边批注，意见不一的地方辩论一轮，再逐条裁决、写出修订稿。用不用修订稿，由你逐章决定。',
-} as const;
-
-/** NEW: the sample content of the positioning clip's second and third phases (the demo's fictional case). */
-export const J_POSITIONING_SAMPLE = {
-  direction: '帮刚到加拿大的新移民，用下班时间一步步转行做牙科助理',
-  reminder: '护理和省钱话题牙医都在讲，你作为助理不占优势；主线放在你自己的入行经历上。',
-  directionReply: '方向我替你判断过了：主线讲你自己走过的入行路，帮想转行的新移民少走弯路。',
-  benchmarkKinds: ['职业转型类账号', '新移民生活类账号', '牙科从业者账号'],
 } as const;
 
 /** The voice wall's title (Owner 2026-10-14: "你是不是也这样？"; the Owner removed the lead in the live edit mode). */

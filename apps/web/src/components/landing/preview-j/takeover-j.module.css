@@ -5,79 +5,72 @@
  * while the scroll plays the story. Static (no JavaScript or reduced motion): every scene stacked, finished.
  * Phone: the sidebar becomes one row of steps above the window, the current step's note under it.
  */
-.takeover { position: relative; height: 620svh; }
-.stage { position: sticky; top: 0; display: grid; grid-template-rows: minmax(0, 1fr); height: 100svh; padding: 80px 0 20px; overflow: hidden; }
-.frame { display: grid; grid-template-rows: auto minmax(0, 1fr); gap: 20px; height: 100%; }
-.title { margin: 0; font-size: clamp(30px, 4vw, 56px); font-weight: 600; line-height: 1.08; letter-spacing: -.04em; }
-.body { display: grid; gap: 14px; min-height: 0; }
-@media (min-width: 1024px) { .body { grid-template-columns: 260px minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); gap: 28px; } }
-
-/* The sidebar: a white panel lifted off the backdrop, like H's scene list */
-.side {
-  display: grid; align-content: start; gap: 14px; padding: 10px; border: 1px solid var(--j-line); border-radius: 22px;
-  background: rgba(255, 255, 255, .82); box-shadow: var(--j-shadow); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
-}
-.side ol { display: grid; gap: 4px; margin: 0; padding: 0; list-style: none; }
-.side li { border-radius: 14px; transition: background-color .3s; }
-.side li[data-on] { background: #fff; box-shadow: 0 0 0 1.5px var(--j-gold), 0 10px 24px -16px rgba(20, 19, 18, .3); }
-.side button {
-  display: flex; align-items: center; gap: 10px; width: 100%; padding: 10px 12px; border: 0; background: none; color: var(--j-muted);
-  font: inherit; font-size: 15px; font-weight: 600; text-align: left; cursor: pointer;
-}
-.side li[data-on] button, .side li[data-done] button { color: var(--j-ink); }
-.sideIndex {
-  flex: none; display: grid; place-items: center; width: 26px; height: 26px; border-radius: 50%; background: #f0efeb; color: var(--j-muted);
-  font-size: 13px; transition: background-color .3s, color .3s;
-}
-.side li[data-on] .sideIndex { background: var(--j-gold); color: #1a1a1a; }
-.side li[data-done] .sideIndex { background: var(--j-ink); color: #fff; }
-.side li p { margin: 0; padding: 0 14px 14px 48px; color: var(--j-body); font-size: 14px; line-height: 1.7; }
-@media (prefers-reduced-motion: no-preference) { .side li p { animation: copyIn .45s var(--j-ease) both; } }
-.bar { height: 3px; margin: 0 8px 6px; overflow: hidden; border-radius: 3px; background: var(--j-line); }
+.outer { position: relative; }
+.intro { display: grid; gap: 28px; padding-top: 112px; }
+@media (max-width: 767px) { .intro { padding-top: 72px; } }
+.takeover { position: relative; height: 720svh; }
+.stage { position: sticky; top: 0; display: grid; grid-template-rows: minmax(0, 1fr); height: 100svh; padding: 76px 0 18px; overflow: hidden; }
+.frame { display: grid; grid-template-rows: auto auto minmax(0, 1fr); gap: 14px; height: 100%; }
+.title { margin: 0; white-space: nowrap; font-size: clamp(24px, 3vw, 44px); font-weight: 600; line-height: 1.08; letter-spacing: -.04em; }
+.head { display: grid; gap: 10px; }
+@media (min-width: 1024px) { .head { grid-template-columns: minmax(0, 5fr) minmax(0, 6fr); align-items: end; gap: 40px; } }
+/* What the current moment shows: outside the product window, so the product's own steps are the only step list. */
+.caption { display: grid; gap: 4px; align-content: end; }
+.caption h3 { margin: 0; font-size: clamp(19px, 1.8vw, 24px); font-weight: 600; letter-spacing: -.02em; }
+.caption p { margin: 0; color: var(--j-body); font-size: 15px; line-height: 1.7; }
+@media (prefers-reduced-motion: no-preference) { .takeover .caption { animation: copyIn .45s var(--j-ease) both; } }
+.bar { height: 3px; overflow: hidden; border-radius: 3px; background: var(--j-line); }
 .bar i { display: block; height: 100%; background: var(--j-ink); transform-origin: 0 50%; }
-.picture { min-width: 0; min-height: 0; height: 100%; overflow: hidden; }
+.picture { min-width: 0; min-height: 0; height: 100%; overflow: hidden; border: 1px solid var(--j-line); border-radius: 22px; box-shadow: var(--j-shadow-lift); }
 @media (max-width: 1023px) {
-  .stage { padding-top: 68px; }
-  .frame { gap: 12px; }
-  .title { font-size: clamp(26px, 7vw, 40px); }
-  .body { grid-template-rows: auto minmax(0, 1fr); }
-  .side { padding: 6px; gap: 6px; border-radius: 16px; }
-  .side ol { display: flex; gap: 4px; overflow: hidden; }
-  .side li { flex: 1 1 0; min-width: 0; }
-  .side button { justify-content: center; gap: 6px; padding: 7px 6px; font-size: 13px; white-space: nowrap; }
-  .sideLabel { overflow: hidden; text-overflow: ellipsis; }
-  .side li:not([data-on]) { flex: 0 0 auto; }
-  .sideIndex { width: 20px; height: 20px; font-size: 11.5px; }
-  .side li:not([data-on]) .sideLabel { display: none; }
-  .side li p { display: none; }
-  .bar { margin: 0 4px 2px; }
+  .stage { padding-top: 66px; }
+  .title { font-size: clamp(24px, 6.5vw, 36px); }
+  .caption p { font-size: 13.5px; line-height: 1.6; }
 }
+
+/* The product workspace: sidebar, workbench, 定位清单 (workspace-frame's own proportions) */
+.app { position: relative; display: grid; grid-template-columns: 220px minmax(0, 1fr) 280px; height: 100%; overflow: hidden; background: #f7f7f5; color: #262626; }
+.static .app { height: 640px; }
+.rail { display: flex !important; position: static !important; width: auto !important; box-shadow: none !important; background: transparent !important; overflow: hidden; }
+.rail nav > span { display: flex; align-items: center; gap: 9px; height: 38px; padding: 0 12px; color: #414141; font-size: 14px; }
+.rail summary { padding: 4px 8px; color: #888; font-size: 12px; list-style: none; }
+.center { display: grid; grid-template-rows: auto auto minmax(0, 1fr) auto; min-width: 0; min-height: 0; margin: 6px 0; padding: 0 18px; border-radius: 12px; background: #fff; }
+.center > header { padding: 14px 0 10px; }
+.appTitle { margin: 0; font-size: 16px; font-weight: 600; }
+.sample { padding: 0 8px; border-radius: 999px; background: var(--gl-accent-tag); color: var(--gl-accent-tag-text); font-size: 11.5px; line-height: 20px; }
+.center > nav { display: grid; gap: 6px; padding-bottom: 10px; border-bottom: 1px solid #eee; }
+.center > nav > * { pointer-events: none; gap: 4px; }
+.footer { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 0 12px; border-top: 1px solid #eee; color: #999; font-size: 12px; }
+.footer button[data-on] { border-color: var(--j-gold); box-shadow: 0 0 0 3px rgba(255, 187, 23, .3); color: var(--j-ink); }
+.app > .checklist { min-height: 0; margin: 6px 8px 6px 8px; border-radius: 12px; background: #fff; overflow: hidden; }
+@media (max-width: 1279px) { .app { grid-template-columns: 200px minmax(0, 1fr); } .app > .checklist { display: none; } }
+@media (max-width: 860px) { .app { grid-template-columns: minmax(0, 1fr); } .rail { display: none !important; } .center { margin: 0; padding: 0 12px; border-radius: 0; } }
+
+/* The report over the workbench, then the jury opened from it */
+.reportLayer { position: absolute; inset: 0; z-index: 3; display: grid; place-items: center; padding: 20px; background: rgba(20, 19, 18, .28); }
+.report {
+  display: grid; align-content: start; gap: 10px; width: min(640px, 100%); max-height: 100%; overflow: hidden; padding: 20px 22px;
+  border-radius: 16px; background: #fff; box-shadow: 0 30px 60px -30px rgba(0, 0, 0, .5);
+}
+.report header { display: flex; align-items: center; gap: 8px; }
+.report header h2 { margin: 0; font-size: 17px; font-weight: 600; }
+.report header small { display: inline-flex; align-items: center; gap: 4px; margin-left: auto; color: #999; font-size: 12px; }
+.reportIntro { margin: 0; color: #888; font-size: 12.5px; }
+.report h3 { margin: 4px 0 2px; font-size: 14px; font-weight: 600; }
+.report div > p { margin: 0; color: #444; font-size: 13.5px; line-height: 1.7; }
+@media (prefers-reduced-motion: no-preference) { .takeover .report > div:last-of-type { animation: messageIn .4s var(--j-ease) both; } }
+.report footer { display: flex; justify-content: flex-end; padding-top: 10px; border-top: 1px solid #eee; }
+.juryEntry { gap: 6px; }
+.juryEntry span { padding: 0 6px; border-radius: 999px; background: var(--j-gold); color: #1a1a1a; font-size: 11px; line-height: 18px; }
+.juryEntry[data-on] { box-shadow: 0 0 0 4px rgba(255, 187, 23, .35); }
 
 /* Static */
 .static .staticStep { display: grid; gap: 20px; padding-top: 56px; }
-@media (min-width: 1024px) { .static .staticStep { grid-template-columns: minmax(0, 4fr) minmax(0, 8fr); gap: 40px; } }
 .static .picture { height: auto; }
-.copy { display: grid; gap: 10px; align-content: start; }
-.copy h3 { margin: 0; font-size: clamp(22px, 2.4vw, 34px); font-weight: 600; line-height: 1.2; letter-spacing: -.03em; }
-.copy p { margin: 0; color: var(--j-body); font-size: clamp(15px, 1.25vw, 17px); line-height: 1.75; }
+.static .caption { align-content: start; }
 
-/* The workbench window: the product's own pieces */
-.window {
-  position: relative; display: grid; grid-template-rows: auto auto minmax(0, 1fr); height: 100%; overflow: hidden;
-  border: 1px solid var(--j-line); border-radius: 22px; background: #fff; color: #262626; box-shadow: var(--j-shadow-lift);
-}
-.static .window { height: auto; max-height: none; }
-.windowBar { display: flex; align-items: center; gap: 10px; padding: 12px 16px; border-bottom: 1px solid #eee; font-size: 13px; }
-.windowBar b { font-weight: 500; }
-.windowBar > span:last-child { margin-left: auto; color: #999; font-size: 12px; }
-.sample { padding: 0 8px; border-radius: 999px; background: var(--gl-accent-tag); color: var(--gl-accent-tag-text); font-size: 11.5px; line-height: 20px; }
-.strip { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; padding: 10px 16px; border-bottom: 1px solid #eee; }
-.strip > * { pointer-events: none; gap: 4px; }
-.panes { display: grid; grid-template-rows: minmax(0, 1fr); min-height: 0; }
-@media (min-width: 1180px) { .panes { grid-template-columns: minmax(0, 1fr) 280px; } }
 /* The log keeps its latest messages in view at the bottom, like the live chat. */
 .log { display: flex; flex-direction: column; justify-content: flex-end; min-height: 0; overflow: hidden; }
-.static .log { justify-content: flex-start; }
 .logInner { display: grid; gap: 10px; padding: 16px 18px; }
 .logInner > .user, .logInner > .coach, .logInner > .risk { display: grid; gap: 4px; padding: 10px 14px; border-radius: 12px; font-size: 14px; }
 .logInner > .user { justify-self: end; max-width: 78%; background: #f3f3f3; }
@@ -111,13 +104,14 @@
 .tableCard tbody th { font-weight: 500; }
 .tableCard td { color: #1a7f45; }
 .tableCard td[data-missing] { color: #b45309; }
-.panes > .checklist { display: none; height: auto; min-height: 0; border-left: 1px solid #eee; overflow: hidden; }
-@media (min-width: 1180px) { .panes > .checklist { display: flex; } }
 .checklist > header { padding: 12px 16px !important; }
+.checklist > header h2 { font-size: 15px; }
 .checklist > header p { margin: 2px 0 0; color: #999; font-size: 12px; }
 .checklist > div { padding: 10px 12px !important; overflow: hidden !important; }
 
 /* The jury's placeholder until #998's canvas joins */
+.reportLayer > .placeholder { position: absolute; inset: 20px; opacity: 0; background: rgba(255, 255, 255, .97); transition: opacity .5s; }
+.reportLayer > .placeholder[data-on] { opacity: 1; }
 .placeholder {
   display: grid; place-items: center; height: 100%; min-height: 320px; border: 1.5px dashed rgba(20, 19, 18, .18); border-radius: 22px;
   background: rgba(255, 255, 255, .6); color: var(--j-muted); font-size: 17px; font-weight: 500;

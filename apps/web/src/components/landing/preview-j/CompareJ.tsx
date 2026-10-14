@@ -3,9 +3,10 @@
 
 import type { ReactNode } from 'react';
 import { Bot, NotebookTabs, Sparkles } from 'lucide-react';
-import { DEMO_LABEL, QUESTION_ONE } from '@/components/landing/demo/demo-script';
+import { DEMO_LABEL } from '@/components/landing/demo/demo-script';
 import { QuestionCardView } from '@/components/opc/question-card';
-import { H_COMPARE, H_COMPARE_SAMPLES } from '@/lib/landing/landing-copy';
+import { H_COMPARE } from '@/lib/landing/landing-copy';
+import { J_PERSONA_QUESTION } from '@/lib/landing/landing-copy-j-persona';
 import { J_COMPARE } from '@/lib/landing/landing-copy-j-compare';
 import styles from './compare-j.module.css';
 import page from './j.module.css';
@@ -70,7 +71,7 @@ function Window({ name, question, generic = false, children }: {
 }
 
 function Ask() {
-  return <div className={styles.card}><QuestionCardView card={QUESTION_ONE} /></div>;
+  return <div className={styles.card}><QuestionCardView card={J_PERSONA_QUESTION} /></div>;
 }
 function Plan() {
   return <Sheet title={J_COMPARE.pairs[1].plan.title} rows={J_COMPARE.pairs[1].plan.rows} />;
@@ -79,7 +80,7 @@ function Memory() {
   return (
     <div className={styles.sheet}>
       <p className={styles.sheetTitle}><NotebookTabs size={14} />资料库</p>
-      <dl>{H_COMPARE_SAMPLES.library.map(item => <div key={item.label}><dt>{item.label}</dt><dd>{item.text}</dd></div>)}</dl>
+      <dl>{J_COMPARE.pairs[2].memory.map(([label, text]) => <div key={label}><dt>{label}</dt><dd>{text}</dd></div>)}</dl>
     </div>
   );
 }

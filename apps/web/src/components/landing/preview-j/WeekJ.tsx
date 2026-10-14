@@ -2,32 +2,40 @@
 'use client';
 
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { BarChart3, Compass, Lightbulb, PenLine, Send, type LucideIcon } from 'lucide-react';
-import { DEMO_LABEL, DEMO_STEPS, demoInformation, demoReducer, summaryDemoState } from '@/components/landing/demo/demo-script';
-import { CaptureChecklist } from '@/components/opc/capture-checklist';
-import result from '@/components/opc/positioning-result.module.css';
+import { BarChart3, Check, Compass, Lightbulb, PenLine, Send, type LucideIcon } from 'lucide-react';
+import { DEMO_LABEL, DEMO_STEPS, demoInformation } from '@/components/landing/demo/demo-script';
+import { StepConfirmCard } from '@/components/opc/step-confirm-card';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
-import { J_WEEK } from '@/lib/landing/landing-copy-j-week';
-import { cn } from '@/lib/utils';
+import { J_WEEK, type WeekCard, type WeekLine } from '@/lib/landing/landing-copy-j-week';
+import { personaState } from './PositioningClipJ';
 import styles from './week-j.module.css';
 
 const noop = () => undefined;
-const confirmed = demoReducer(demoReducer(summaryDemoState(), { type: 'settled' }), { type: 'confirm' });
 const STAGE_ICONS: readonly LucideIcon[] = [Compass, Lightbulb, PenLine, Send, BarChart3];
-/** How long each step stays on screen; one week is about 12 seconds. */
-export const WEEK_STEP_MS = [2600, 2600, 2400, 2000, 3000] as const;
-const LAST = WEEK_STEP_MS.length - 1;
+const LINES = J_WEEK.lines;
+const LAST_STAGE = J_WEEK.stages.length - 1;
+/** Where the server HTML and reduced motion rest: the review, finished. */
+const REST = LINES.findIndex(line => line.stage === LAST_STAGE);
+
+/** How long a message stays the newest before the next one arrives: long enough to read it; cards get extra time. */
+export function lineMs(line: WeekLine) {
+  return 1200 + Array.from(line.text).length * 30 + (line.card ? 1500 : 0);
+}
+/** One loop of the week, in milliseconds (the Owner asked for roughly 40–60 seconds). */
+export const WEEK_LOOP_MS = LINES.reduce((sum, line) => sum + lineMs(line), 0);
+const HOLD_MS = 4000;
 const reducedMotion = () => Boolean(window.matchMedia?.('(prefers-reduced-motion: reduce)').matches);
 
 /**
- * The first screen's product window (Owner 2026-10-15, option A): a small workbench window plays one week with the
- * coach — positioning checklist ticked, three topics with the reasons, a draft, publishing, and a week later the
- * review with the trend going up and what to change. The five stage labels around the window light up with the
- * step. It loops while on screen. The server HTML and reduced motion show the last step, still.
+ * The first screen's product window (Owner 2026-10-15, round two): one week with the AI coach as one conversation,
+ * message by message, the coach driving each stage — it asks, proposes, waits for a yes, then moves on. The five stage
+ * labels light with the stage of the newest message. It loops while on screen. The server HTML and reduced motion show
+ * the review stage, finished.
  */
 export function WeekJ() {
-  const [step, setStep] = useState<number>(LAST);
+  // -1: at rest. 0 and up: how many messages have arrived (the newest is count - 1).
+  const [count, setCount] = useState(-1);
   const [playing, setPlaying] = useState(false);
   const ref = useRef<HTMLElement>(null);
 
@@ -36,125 +44,116 @@ export function WeekJ() {
     if (!node || reducedMotion() || typeof IntersectionObserver === 'undefined') return;
     const observer = new IntersectionObserver(entries => setPlaying(entries.some(entry => entry.isIntersecting)));
     observer.observe(node);
-    setStep(0);
-    const media = window.matchMedia?.('(prefers-reduced-motion: reduce)');
-    const onPreference = () => { if (reducedMotion()) { setPlaying(false); setStep(LAST); observer.disconnect(); } };
-    media?.addEventListener?.('change', onPreference);
-    return () => { observer.disconnect(); media?.removeEventListener?.('change', onPreference); };
+    setCount(1);
+    return () => observer.disconnect();
   }, []);
 
   useEffect(() => {
-    if (!playing) return;
-    const timer = window.setTimeout(() => setStep(current => (current + 1) % WEEK_STEP_MS.length), WEEK_STEP_MS[step]);
+    if (!playing || count < 0) return;
+    const done = count >= LINES.length;
+    const timer = window.setTimeout(() => setCount(done ? 1 : count + 1), done ? HOLD_MS : lineMs(LINES[count - 1]));
     return () => window.clearTimeout(timer);
-  }, [playing, step]);
+  }, [playing, count]);
 
+  const shown = count < 0 ? LINES.slice(REST) : LINES.slice(0, count);
+  const stage = shown[shown.length - 1]?.stage ?? 0;
+  const firstOfStage = shown.findIndex(line => line.stage === stage);
   return (
-    <figure ref={ref} className={styles.stage} aria-label={J_WEEK.label} data-step={step}>
+    <figure ref={ref} className={styles.stage} aria-label={J_WEEK.label} data-stage={stage}>
       <ol className={styles.stages} aria-hidden="true">
-        {J_WEEK.stages.map((stage, index) => {
+        {J_WEEK.stages.map((name, index) => {
           const Icon = STAGE_ICONS[index];
-          return <li key={stage} data-on={index === step || undefined} data-done={index < step || undefined}><Icon size={15} strokeWidth={1.9} />{stage}</li>;
+          return <li key={name} data-on={index === stage || undefined} data-done={index < stage || undefined}><Icon size={15} strokeWidth={1.9} />{name}</li>;
         })}
       </ol>
-      <div className={styles.window} inert>
+      <div className={styles.window} inert aria-hidden="true">
         <div className={styles.chrome}>
           <span className={styles.dots}><i /><i /><i /></span>
           <span className={styles.badge}>{DEMO_LABEL}</span>
           <span className={styles.chromeTitle}>{J_WEEK.title}</span>
+          <span className={styles.chromeStage}>{J_WEEK.stages[stage]}</span>
         </div>
         <div className={styles.body}>
-          <Panel at={0} step={step}><Positioning /></Panel>
-          <Panel at={1} step={step}><Topics /></Panel>
-          <Panel at={2} step={step}><Draft /></Panel>
-          <Panel at={3} step={step}><Publish sent={step === 3} /></Panel>
-          <Panel at={4} step={step}><Review /></Panel>
+          <div className={styles.log}>
+            {shown.map((line, index) => (
+              <Message key={`${index}-${line.text}`} line={line} divider={index === firstOfStage && index > 0 ? J_WEEK.stages[line.stage] : null}
+                live={count >= 0 && index === shown.length - 1} />
+            ))}
+          </div>
         </div>
       </div>
     </figure>
   );
 }
 
-function Panel({ at, step, children }: { at: number; step: number; children: ReactNode }) {
-  return <div className={styles.panel} data-on={at === step || undefined} aria-hidden={at !== step}>{children}</div>;
-}
-function User({ text }: { text: string }) {
-  return <p className={styles.user}>{text}</p>;
-}
-function Coach({ text, children }: { text: string; children?: ReactNode }) {
-  return <div className={styles.coach}><span>AI 教练</span><p>{text}</p>{children}</div>;
-}
-
-function Positioning() {
+function Message({ line, divider, live }: { line: WeekLine; divider: string | null; live: boolean }) {
   return (
     <>
-      <User text={J_WEEK.position.user} />
-      <Coach text={J_WEEK.position.coach}>
-        <div className={cn(result.panel, styles.checklist)}>
-          <CaptureChecklist steps={DEMO_STEPS.slice(0, 1)} information={demoInformation(confirmed)} valid={{ you: true }}
-            edits={{}} selectedStepId="you" editable={false} manual={false} locked confirmable={() => false}
-            confirmation={() => 'none'} saveState={{}} conflicts={{}} resolving={null} onEdit={noop} onComposition={noop}
-            onResolve={noop} onReview={noop} onRecoverConfirmation={noop} onKeepConflict={noop} onRetrySave={noop} />
-        </div>
-      </Coach>
+      {divider ? <p className={styles.divider}><span>{divider}</span></p> : null}
+      {line.role === 'user'
+        ? <p className={styles.user} data-live={live || undefined}>{line.text}</p>
+        : (
+          <div className={styles.coach} data-live={live || undefined}>
+            <span>AI 教练</span>
+            <p>{line.text}</p>
+            {line.card ? <Card card={line.card} /> : null}
+          </div>
+        )}
     </>
   );
 }
-function Topics() {
-  return (
-    <Coach text={J_WEEK.topics.coach}>
+
+/** 上升 / 下降 / 持平, for the colour of a review cell. */
+const trendOf = (cell: string) => (cell.startsWith('下降') ? 'down' : cell.includes('上升') ? 'up' : 'flat');
+
+function Card({ card }: { card: WeekCard }) {
+  const cards: Record<WeekCard, ReactNode> = {
+    confirm: (
+      <div className={styles.confirm}>
+        <StepConfirmCard stepId="you" title={DEMO_STEPS[0].title} info={demoInformation(personaState(1)).you} edits={undefined}
+          signal={undefined} resuming={false} disabled stays={false} canConfirm={false} onConfirm={noop} onEdit={noop} onReview={noop} />
+      </div>
+    ),
+    topics: (
       <ol className={styles.topics}>
         {J_WEEK.topics.items.map(item => <li key={item.title}><b>{item.title}</b><span>{item.why}</span></li>)}
       </ol>
-      <p className={styles.why}>{J_WEEK.topics.why}</p>
-    </Coach>
-  );
-}
-function Draft() {
-  return (
-    <>
-      <User text={J_WEEK.draft.user} />
-      <Coach text={J_WEEK.draft.coach}>
-        <div className={styles.doc}>
-          <p className={styles.docTitle}>{J_WEEK.draft.title}</p>
-          {J_WEEK.draft.lines.map(line => <p key={line}>{line}</p>)}
-        </div>
-      </Coach>
-    </>
-  );
-}
-function Publish({ sent }: { sent: boolean }) {
-  return (
-    <Coach text={J_WEEK.publish.coach}>
+    ),
+    draft: (
+      <div className={styles.doc}>
+        <p className={styles.docTitle}>{J_WEEK.draft.title}</p>
+        {J_WEEK.draft.lines.map(text => <p key={text}>{text}</p>)}
+      </div>
+    ),
+    publish: (
       <div className={styles.publish}>
-        <p className={styles.docTitle}>{J_WEEK.publish.title}</p>
-        <ul>
-          {J_WEEK.publish.platforms.map(platform => (
-            <li key={platform.name}><Checkbox checked={platform.on} tabIndex={-1} />{platform.name}</li>
+        <ul>{J_WEEK.publish.platforms.map(platform => <li key={platform.name}><Checkbox checked={platform.on} tabIndex={-1} />{platform.name}</li>)}</ul>
+        <Button size="sm" tabIndex={-1}>{J_WEEK.publish.action}</Button>
+      </div>
+    ),
+    fetch: (
+      <ul className={styles.fetch}>{J_WEEK.fetch.map(text => <li key={text}><Check size={14} aria-hidden="true" />{text}</li>)}</ul>
+    ),
+    trend: (
+      <div className={styles.trend}>
+        <span>{J_WEEK.trend}</span>
+        <svg viewBox="0 0 200 50" preserveAspectRatio="none" aria-hidden="true">
+          <path className={styles.trendFill} d="M0 40 C 30 40 60 41 90 39 S 140 22 200 8 L 200 50 L 0 50 Z" />
+          <path className={styles.trendLine} d="M0 40 C 30 40 60 41 90 39 S 140 22 200 8" />
+        </svg>
+      </div>
+    ),
+    platforms: (
+      <table className={styles.table}>
+        <thead><tr>{J_WEEK.platforms.columns.map(column => <th key={column} scope="col">{column}</th>)}</tr></thead>
+        <tbody>
+          {J_WEEK.platforms.rows.map(row => (
+            <tr key={row[0]}>{row.map((cell, index) => (index === 0 ? <th key={index} scope="row">{cell}</th>
+              : <td key={index} data-trend={index === 2 ? trendOf(cell) : undefined}>{cell}</td>))}</tr>
           ))}
-        </ul>
-        <Button size="sm" className={styles.send} data-sent={sent || undefined} tabIndex={-1}>
-          <span className={styles.sendIdle}>{J_WEEK.publish.action}</span>
-          <span className={styles.sendDone}>{J_WEEK.publish.done}</span>
-        </Button>
-      </div>
-    </Coach>
-  );
-}
-function Review() {
-  return (
-    <Coach text={J_WEEK.review.coach}>
-      <div className={styles.review}>
-        <p className={styles.docTitle}>{J_WEEK.review.title}</p>
-        <div className={styles.trend}>
-          <span>{J_WEEK.review.trend}</span>
-          <svg viewBox="0 0 200 60" preserveAspectRatio="none" aria-hidden="true">
-            <path className={styles.trendFill} d="M0 54 C 40 52 60 46 90 40 S 150 18 200 8 L 200 60 L 0 60 Z" />
-            <path className={styles.trendLine} d="M0 54 C 40 52 60 46 90 40 S 150 18 200 8" />
-          </svg>
-        </div>
-        <dl>{J_WEEK.review.rows.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl>
-      </div>
-    </Coach>
-  );
+        </tbody>
+      </table>
+    ),
+  };
+  return cards[card];
 }

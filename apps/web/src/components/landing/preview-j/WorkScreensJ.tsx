@@ -1,195 +1,161 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 'use client';
 
-import type { ReactNode } from 'react';
-import { Check, FileText, Loader2, Sparkles } from 'lucide-react';
+import type { CSSProperties } from 'react';
+import { Check, Minus, Sparkles } from 'lucide-react';
 import library from '@/app/library/library.module.css';
 import { UploadPanel } from '@/components/library/my-documents-view';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
-import { J_WORK_SAMPLES as S, type WorkId } from '@/lib/landing/landing-copy-j-work';
 import type { UploadItem } from '@/hooks/use-library-uploads';
+import { J_PERSONA } from '@/lib/landing/landing-copy-j-persona';
+import type { WorkBlock } from '@/lib/landing/landing-copy-j-work';
 import styles from './work-j.module.css';
 
 const noop = () => undefined;
-/** Marks a piece that arrives at phase `at`; CSS shows it once the window's phase has reached it. */
-const at = (phase: number, step: number) => ({ 'data-at': step, 'data-shown': phase >= step ? '' : undefined });
+const FILES = ['以前发的做饭记录.txt', '小红书旧笔记.md'];
+const LIBRARY_ROWS = [
+  { title: '冰箱剩菜三种做法', draft: '待创作', published: '未发布', fresh: true },
+  { title: '一口锅两菜一汤', draft: '已定稿', published: '已发布', fresh: false },
+  { title: '超市半成品像现做', draft: '草稿', published: '未发布', fresh: false },
+];
+const PLATFORMS = [['TikTok', true], ['Instagram', true], ['YouTube', true], ['Facebook', false]] as const;
 
-/** One demo's window content at `phase` (0 → the scene's last phase). Everything is a picture (the window is inert). */
-export function WorkScreenJ({ id, phase }: { id: WorkId; phase: number }) {
-  const screens: Record<WorkId, ReactNode> = {
-    topics: <Topics phase={phase} />, method: <Method phase={phase} />, data: <Data phase={phase} />, money: <Money phase={phase} />,
-    models: <Models phase={phase} />, library: <Library phase={phase} />, voice: <Voice phase={phase} />, publish: <Publish phase={phase} />,
-  };
-  return screens[id];
-}
-
-function User({ text, shown }: { text: string; shown: ReturnType<typeof at> }) {
-  return <p className={styles.user} {...shown}>{text}</p>;
-}
-function Coach({ text, shown, children }: { text: string; shown: ReturnType<typeof at>; children?: ReactNode }) {
-  return <div className={styles.coach} {...shown}><span>AI 教练</span><p>{text}</p>{children}</div>;
-}
-function Rows({ rows }: { rows: readonly (readonly [string, string])[] }) {
-  return <dl className={styles.rows}>{rows.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl>;
-}
-
-function Topics({ phase }: { phase: number }) {
+/**
+ * One step's screen: its blocks in order, each arriving a beat after the one before (`--i`) when the step opens, so
+ * the reader follows the coach. The screen grows with its content: nothing is cut off. Everything is a picture.
+ */
+export function WorkScreenJ({ blocks }: { blocks: readonly WorkBlock[] }) {
   return (
     <div className={styles.chat}>
-      <User text={S.topics.ask} shown={at(phase, 0)} />
-      <Coach text={S.topics.reply} shown={at(phase, 1)}>
-        <ol className={styles.topics}>
-          {S.topics.items.map((item, index) => (
-            <li key={item.title} {...at(phase, index === 0 ? 1 : 2)}><b>{item.title}</b><span>{item.why}</span></li>
-          ))}
-        </ol>
-        <Button size="sm" tabIndex={-1} className={styles.adopt} data-done={phase >= 3 || undefined}>
-          {phase >= 3 ? <><Check size={14} aria-hidden="true" />{S.topics.adopted}</> : S.topics.adopt}
-        </Button>
-      </Coach>
+      {blocks.map((block, index) => (
+        <div key={index} className={styles.block} style={{ '--i': index } as CSSProperties} data-kind={block.kind}>
+          <Block block={block} />
+        </div>
+      ))}
     </div>
   );
 }
 
-function Method({ phase }: { phase: number }) {
-  return (
-    <div className={styles.chat}>
-      <User text={S.method.ask} shown={at(phase, 0)} />
-      <Coach text={S.method.reply} shown={at(phase, 1)}>
-        <dl className={styles.rows}>
-          {S.method.rows.map(([label, value], index) => (
-            <div key={label} {...at(phase, Math.min(3, 1 + index))}><dt>{label}</dt><dd>{value}</dd></div>
+function Block({ block }: { block: WorkBlock }) {
+  switch (block.kind) {
+    case 'user': return <p className={styles.user}>{block.text}</p>;
+    case 'coach': return <div className={styles.coach}><span>AI 教练</span><p>{block.text}</p></div>;
+    case 'note': return <p className={styles.note}>{block.text}</p>;
+    case 'checks':
+      return <ul className={styles.fetch}>{block.items.map(item => <li key={item} data-done=""><Check size={14} aria-hidden="true" />{item}</li>)}</ul>;
+    case 'options':
+      return (
+        <ul className={styles.options}>
+          {block.items.map(item => (
+            <li key={item.title} data-tag={item.tag || undefined}>
+              <b>{item.title}</b><span>{item.note}</span>{item.tag ? <em>{item.tag}</em> : null}
+            </li>
           ))}
-        </dl>
-      </Coach>
-    </div>
-  );
-}
-
-function Data({ phase }: { phase: number }) {
-  return (
-    <div className={styles.chat}>
-      <User text={S.data.ask} shown={at(phase, 0)} />
-      <ul className={styles.fetch} {...at(phase, 1)}>
-        {S.data.fetching.map((line, index) => (
-          <li key={line} data-done={phase >= 2 || (phase >= 1 && index === 0) || undefined}>
-            {phase >= 2 || (phase >= 1 && index === 0) ? <Check size={14} aria-hidden="true" /> : <Loader2 size={14} aria-hidden="true" />}{line}
-          </li>
-        ))}
-      </ul>
-      <Coach text={S.data.title} shown={at(phase, 2)}>
+        </ul>
+      );
+    case 'table':
+      return (
+        <div className={styles.tableWrap}>
+          {block.title ? <p className={styles.blockTitle}>{block.title}</p> : null}
+          <table className={styles.table}>
+            <thead><tr>{block.columns.map(column => <th key={column} scope="col">{column}</th>)}</tr></thead>
+            <tbody>
+              {block.rows.map(row => (
+                <tr key={row[0]}>
+                  {row.map((cell, index) => (index === 0
+                    ? <th key={index} scope="row">{cell}</th>
+                    : <td key={index} data-label={block.columns[index]}>{cell}</td>))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      );
+    case 'rows':
+      return (
+        <div className={styles.rowsWrap}>
+          {block.title ? <p className={styles.blockTitle}>{block.title}</p> : null}
+          <dl className={styles.rows}>{block.rows.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl>
+        </div>
+      );
+    case 'trend':
+      return (
         <div className={styles.trend}>
-          <span>{S.data.trend}</span>
+          <span>{block.label}</span>
           <svg viewBox="0 0 200 50" preserveAspectRatio="none" aria-hidden="true">
-            <path className={styles.trendFill} d="M0 46 C 40 44 70 40 100 32 S 160 14 200 6 L 200 50 L 0 50 Z" />
-            <path className={styles.trendLine} d="M0 46 C 40 44 70 40 100 32 S 160 14 200 6" />
+            <path className={styles.trendFill} d="M0 40 C 30 40 60 41 90 39 S 140 22 200 8 L 200 50 L 0 50 Z" />
+            <path className={styles.trendLine} d="M0 40 C 30 40 60 41 90 39 S 140 22 200 8" />
           </svg>
         </div>
-        <div {...at(phase, 3)}><Rows rows={S.data.rows} /></div>
-      </Coach>
-    </div>
-  );
+      );
+    case 'compare':
+      return (
+        <div className={styles.compare}>
+          <div><span>{block.left.label}</span><ol>{block.left.lines.map(line => <li key={line}><Minus size={13} aria-hidden="true" />{line}</li>)}</ol></div>
+          <div>
+            <span><Sparkles size={13} aria-hidden="true" />{block.right.label}</span>
+            <ol>{block.right.lines.map(line => <li key={line}>{line}</li>)}</ol>
+          </div>
+        </div>
+      );
+    case 'library': return <Library fresh={block.fresh} />;
+    case 'upload': return <Upload done={block.done} />;
+    case 'publish': return <Publish sent={block.sent} />;
+  }
 }
 
-function Money({ phase }: { phase: number }) {
-  return (
-    <div className={styles.report}>
-      <p className={styles.reportTitle}><FileText size={15} aria-hidden="true" />{S.money.title}</p>
-      <h4 {...at(phase, 0)}>{S.money.chapter}</h4>
-      <p className={styles.verdict} {...at(phase, 1)}>{S.money.verdict}</p>
-      <ol className={styles.routes} {...at(phase, 2)}>
-        {S.money.routes.map(route => <li key={route.text}><b>{route.step}</b>{route.text}</li>)}
-      </ol>
-      <p className={styles.reportNote} {...at(phase, 2)}>{S.money.note}</p>
-    </div>
-  );
-}
-
-function Models({ phase }: { phase: number }) {
-  const done = Math.min(S.models.steps.length, phase <= 0 ? 0 : phase === 1 ? 2 : S.models.steps.length);
-  return (
-    <div className={styles.chat}>
-      <User text={S.models.ask} shown={at(phase, 0)} />
-      <ul className={styles.fetch} {...at(phase, 1)}>
-        {S.models.steps.map((step, index) => (
-          <li key={step} data-done={index < done || undefined}>
-            {index < done ? <Check size={14} aria-hidden="true" /> : <Loader2 size={14} aria-hidden="true" />}{step}
-          </li>
-        ))}
-      </ul>
-      <Coach text={S.models.reply} shown={at(phase, 3)}>
-        <ol className={styles.titles}>{S.models.titles.map(title => <li key={title}>{title}</li>)}</ol>
-      </Coach>
-    </div>
-  );
-}
-
-function Library({ phase }: { phase: number }) {
+/** The library page's own catalog styles, with this person's topics. */
+function Library({ fresh }: { fresh: boolean }) {
+  const rows = LIBRARY_ROWS.filter(row => fresh || !row.fresh);
   return (
     <div className={styles.library}>
-      <div className={library.page}>
-        <header className={library.header}><span className={styles.libraryTitle}>资料库</span></header>
-        <nav className={library.tabs} aria-label="资料库分类">
-          <button type="button" role="tab" aria-selected tabIndex={-1}>选题与稿件</button>
-          <button type="button" role="tab" aria-selected={false} tabIndex={-1}>我的文档</button>
-        </nav>
-        <p className={library.intro}>{S.library.intro}</p>
-        <div className={styles.libraryRows}>
-          {S.library.items.map(item => (
-            <article key={item.title} className={library.item} {...(item.fresh ? at(phase, 1) : at(phase, 0))} data-fresh={item.fresh || undefined}>
-              <div className={library.itemOpen}>
-                <span><strong>{item.title}</strong><small>{item.type}</small></span>
-                <span>{S.library.account.platform}<small>{S.library.account.name}</small></span>
-                <span>{item.draft}</span>
-                <span>{item.published}</span>
-              </div>
-            </article>
-          ))}
-        </div>
-      </div>
-      <div className={styles.libraryChat} {...at(phase, 2)}>
-        <p className={styles.user}>{S.library.chat}</p>
-        <div className={styles.coach}><span>AI 教练</span><p>{S.library.reply}</p></div>
+      <header className={library.header}><span className={styles.libraryTitle}>资料库</span></header>
+      <nav className={library.tabs} aria-label="资料库分类">
+        <button type="button" role="tab" aria-selected tabIndex={-1}>选题与稿件</button>
+        <button type="button" role="tab" aria-selected={false} tabIndex={-1}>我的文档</button>
+      </nav>
+      <p className={library.intro}>按平台和账号查看已采用选题、稿件和当前定位。</p>
+      <div className={styles.libraryRows}>
+        {rows.map(row => (
+          <article key={row.title} className={library.item} data-fresh={(fresh && row.fresh) || undefined}>
+            <div className={library.itemOpen}>
+              <span><strong>{row.title}</strong><small>短视频</small></span>
+              <span>TikTok<small>{J_PERSONA.account}</small></span>
+              <span>{row.draft}</span>
+              <span>{row.published}</span>
+            </div>
+          </article>
+        ))}
       </div>
     </div>
   );
 }
 
-function Voice({ phase }: { phase: number }) {
-  const status = (index: number): UploadItem['status'] => (phase >= 2 ? 'done' : phase >= 1 ? (index === 0 ? 'done' : 'transfer') : 'extract');
-  const uploads: UploadItem[] = S.voice.files.map((filename, index) => ({
-    key: filename, filename, purpose: 'authored', status: status(index), progress: 0.6,
+/** The library's real upload panel, with two of this person's old writings uploading as "我本人写的". */
+function Upload({ done }: { done: boolean }) {
+  const uploads: UploadItem[] = FILES.map((filename, index) => ({
+    key: filename, filename, purpose: 'authored', status: done ? 'done' : index === 0 ? 'transfer' : 'waiting', progress: 0.6,
   }));
   return (
-    <div className={styles.voice}>
-      <div className={styles.upload}>
-        <UploadPanel uploadEnabled spaceKnown usedBytes={0} capacityBytes={500_000_000} uploads={uploads}
-          onAdd={noop} onRetry={noop} onDismiss={noop} />
-      </div>
-      <Coach text={S.voice.title} shown={at(phase, 2)}>
-        <Rows rows={S.voice.rows} />
-      </Coach>
-      <div className={styles.compare} {...at(phase, 3)}>
-        <p><span>{S.voice.beforeLabel}</span>{S.voice.before}</p>
-        <p><span><Sparkles size={13} aria-hidden="true" />{S.voice.afterLabel}</span>{S.voice.after}</p>
-      </div>
+    <div className={styles.upload}>
+      <UploadPanel uploadEnabled spaceKnown usedBytes={0} capacityBytes={500_000_000} uploads={uploads}
+        onAdd={noop} onRetry={noop} onDismiss={noop} />
     </div>
   );
 }
 
-function Publish({ phase }: { phase: number }) {
+/** Publishing, built from the product's checkbox and button (the product has no publish page yet). */
+function Publish({ sent }: { sent: boolean }) {
   return (
     <div className={styles.publish}>
-      <p className={styles.post}><FileText size={15} aria-hidden="true" />{S.publish.post}<span>已定稿</span></p>
       <ul>
-        {S.publish.platforms.map((platform, index) => (
-          <li key={platform.name}><Checkbox checked={platform.on && phase >= (index === 0 ? 0 : 1)} tabIndex={-1} />{platform.name}
-            {phase >= 2 && platform.on ? <em>已发布</em> : null}</li>
+        {PLATFORMS.map(([name, on]) => (
+          <li key={name}><Checkbox checked={on} tabIndex={-1} />{name}{sent && on ? <em>已发布</em> : null}</li>
         ))}
       </ul>
-      <Button size="sm" tabIndex={-1} className={styles.send} data-done={phase >= 2 || undefined}>
-        {phase >= 2 ? <><Check size={14} aria-hidden="true" />{S.publish.done}</> : S.publish.action}
+      <Button size="sm" tabIndex={-1} className={styles.send} data-done={sent || undefined}>
+        {sent ? <><Check size={14} aria-hidden="true" />已发出，资料库已记为已发布</> : '确认发出'}
       </Button>
     </div>
   );
