@@ -104,7 +104,9 @@ export function WorkJ({ flags }: { flags: LandingFlags }) {
             <div key={item.id} id={`j-work-${item.id}-panel`} role="tabpanel" aria-labelledby={`j-work-${item.id}-tab`}
               hidden={index !== current} className={styles.panel}>
               <div className={styles.window} inert aria-hidden="true">
-                <div className={styles.bar}><span className={styles.dots}><i /><i /><i /></span><span className={styles.badge}>{DEMO_LABEL}</span>{item.title}</div>
+                <div className={styles.bar}>
+                  <span className={styles.dots}><i /><i /><i /></span><span className={styles.badge}>{DEMO_LABEL}</span>{item.title}
+                </div>
                 <div className={styles.screen}>
                   <WorkScreenJ id={item.id} phase={index === current && phase >= 0 ? phase : item.phases - 1} />
                 </div>

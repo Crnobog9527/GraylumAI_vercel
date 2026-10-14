@@ -185,11 +185,9 @@ describe('sample J story timing', () => {
   it('adds the usual ways up correctly, and every plan card leads to the pricing page, never straight to checkout', () => {
     const amounts = (id: string) => (PRICE_COMPARE.rows.find(row => row.sourceId === id)?.price ?? '')
       .match(/\$[\d,]+(?:–[\d,]+)?/)?.[0].replace(/[$,]/g, '').split('–').map(Number) ?? [];
-    const [low, high] = amounts('consultant');
-    const tools = amounts('scheduler')[0] + amounts('benchmark')[0];
-    const money = (value: number) => `$${value.toLocaleString('en-US')}`;
-    expect(J_PRICE_TOTAL.text).toContain(`${money(low + tools)}–${money(high + tools)}`);
-    expect(J_PRICE_TOTAL.text).toContain(money(amounts('project')[0]));
+    const [low] = amounts('consultant');
+    const lowest = low + amounts('scheduler')[0] + amounts('benchmark')[0] + amounts('project')[0];
+    expect(J_PRICE_TOTAL.text).toBe(`每月约 $${lowest.toLocaleString('en-US')} 起`);
     const { html } = render();
     expect(html).toContain(J_PRICE_TOTAL.label);
     const pricing = html.slice(html.indexOf('id="pricing"'), html.indexOf('id="faq"'));

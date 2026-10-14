@@ -158,7 +158,9 @@ function Library({ phase }: { phase: number }) {
 
 function Voice({ phase }: { phase: number }) {
   const status = (index: number): UploadItem['status'] => (phase >= 2 ? 'done' : phase >= 1 ? (index === 0 ? 'done' : 'transfer') : 'extract');
-  const uploads: UploadItem[] = S.voice.files.map((filename, index) => ({ key: filename, filename, purpose: 'authored', status: status(index), progress: 0.6 }));
+  const uploads: UploadItem[] = S.voice.files.map((filename, index) => ({
+    key: filename, filename, purpose: 'authored', status: status(index), progress: 0.6,
+  }));
   return (
     <div className={styles.voice}>
       <div className={styles.upload}>

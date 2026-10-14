@@ -64,7 +64,7 @@
 }
 .topics b { font-weight: 600; }
 .topics span { color: #6f6e6a; font-size: 12.5px; }
-.why { margin: 0; padding-left: 10px; border-left: 2px solid var(--j-gold); color: #4a4946; font-size: 12.5px; }
+.why { margin: 0; padding: 6px 10px; border-radius: 8px; background: #fff7e0; color: #4a4946; font-size: 12.5px; }
 
 .doc, .publish, .review { display: grid; gap: 6px; padding: 10px 12px; border-radius: 10px; background: #fafaf8; }
 .doc p { margin: 0; font-size: 13px; }

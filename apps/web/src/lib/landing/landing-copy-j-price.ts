@@ -7,12 +7,13 @@ import type { LandingFeature } from './landing-flags';
  */
 
 /**
- * NEW: the usual ways added up, shown under the four rows only when all four are on the page. Monthly: the consultant
- * range plus the scheduler and the benchmark tool ($2,000 + $45 + $82 to $10,000 + $45 + $82); once: the set-up project.
+ * The usual ways added up, shown under the four rows only when all four are on the page. Owner 2026-10-15: one figure,
+ * "每月约 $3,637 起" — the lowest consultant fee, the scheduler, the benchmark tool and the set-up project
+ * ($2,000 + $45 + $82 + $1,510); no range, no separate one-off line.
  */
 export const J_PRICE_TOTAL = {
   label: '正常方案合计',
-  text: '每月约 $2,127–$10,127，另加一次性约 $1,510',
+  text: '每月约 $3,637 起',
   rows: ['consultant', 'project', 'scheduler', 'benchmark'],
 } as const;
 
@@ -63,7 +64,7 @@ export const J_PLAN_FEATURES: readonly { group: string; items: readonly PlanFeat
   },
 ];
 
-/** NEW: the plan cards now lead to the pricing page instead of straight to checkout (Owner 2026-10-15). */
+/** The plan cards lead to the pricing page instead of straight to checkout; button wording Owner 2026-10-15. */
 export const J_PLAN_LINK = {
-  cta: (name: string) => `看 ${name} 完整权益并开通`,
+  cta: (name: string) => `了解 ${name}`,
 } as const;
