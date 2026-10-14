@@ -5,12 +5,13 @@
  * As a pair scrolls in (MotionJ marks it `data-in`), the windows slide in from their sides, the question lands in
  * both, the general AI types, then the coach types and its work rises in. Phone: the pair stacks, general first.
  */
-.title { margin: 0 0 48px; max-width: 18em; font-size: clamp(36px, 5vw, 72px); font-weight: 600; line-height: 1.08; letter-spacing: -.04em; text-wrap: balance; }
+.title { margin: 0 0 48px; max-width: 18em; font-size: clamp(30px, 4.2vw, 60px); word-break: keep-all; font-weight: 600; line-height: 1.08; letter-spacing: -.04em; text-wrap: balance; }
 .phrase { display: inline-block; }
-.pairs { display: grid; gap: clamp(56px, 8vw, 120px); margin: 0; padding: 0; list-style: none; }
+.pairs { display: grid; gap: clamp(40px, 5vw, 72px); margin: 0; padding: 0; list-style: none; }
 @media (max-width: 767px) { .title { margin-bottom: 32px; } }
 .pair { display: grid; gap: 18px; }
-@media (min-width: 900px) { .pair { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 28px; align-items: start; } }
+@media (min-width: 900px) { .pair { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 28px; align-items: stretch; } }
+.side { grid-template-rows: auto 1fr; }
 .side { display: grid; gap: 12px; min-width: 0; }
 .claim { margin: 0; color: var(--j-body); font-size: 16px; line-height: 1.6; text-wrap: pretty; }
 .claim b { display: block; margin-bottom: 2px; color: var(--j-muted); font-size: 13px; font-weight: 600; }
@@ -18,8 +19,12 @@
 [data-side='coach'] .claim b { color: var(--j-gold-text); }
 
 /* The chat windows */
-.window { display: grid; grid-template-rows: auto 1fr auto; min-height: 380px; border-radius: 20px; overflow: hidden; font-size: 14px; line-height: 1.7; }
+.window { display: grid; grid-template-rows: auto 1fr auto; height: 100%; border-radius: 20px; overflow: hidden; font-size: 14px; line-height: 1.7; }
 .window[data-generic] { border: 1px solid #d9d8d4; background: #f1f0ed; color: #4a4946; box-shadow: var(--j-shadow); }
+.window:not([data-generic]) {
+  /* The coach window is a light product surface even on the dark band: its own tokens stay the light ones. */
+  --j-ink: #141312; --j-body: #3d3c3a; --j-muted: #63625f; --j-gold-text: #8a5a00; --j-line: #e7e6e2;
+}
 .window:not([data-generic]) { border: 1px solid var(--j-line); background: #fff; color: #262626; box-shadow: 0 0 0 1.5px rgba(255, 187, 23, .55), var(--j-shadow-lift); }
 .bar { display: flex; align-items: center; gap: 7px; margin: 0; padding: 10px 14px; border-bottom: 1px solid rgba(20, 19, 18, .08); font-size: 12.5px; font-weight: 600; }
 .window[data-generic] .bar { background: #e8e7e3; color: #6a6965; }
@@ -34,6 +39,7 @@
 .genericReply { padding: 4px 2px; white-space: pre-wrap; }
 .coachReply { display: grid; gap: 6px; padding: 10px 12px; border: 1px solid #ececea; border-radius: 12px; }
 .coachReply > p { margin: 0; }
+@media (max-width: 767px) { .composer { display: none; } }
 .composer { margin: 0 14px 14px; padding: 9px 12px; border: 1px solid rgba(20, 19, 18, .1); border-radius: 12px; background: rgba(255, 255, 255, .7); color: #a3a19b; font-size: 13px; }
 .typed { white-space: pre-wrap; }
 .work { min-width: 0; }

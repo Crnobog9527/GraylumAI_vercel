@@ -69,7 +69,9 @@ export function WorkJ({ flags }: { flags: LandingFlags }) {
     <section aria-labelledby="work-title" className={page.section} data-zone="work" data-band="tint">
       <div className={page.wrap}>
         <div className={page.sectionHead}>
-          <h2 id="work-title" className={page.display}>{J_WORK.groups[0]}</h2>
+          <h2 id="work-title" className={page.display}>
+            {J_WORK.groups[0].split(/(?<=，)/).map(part => <span key={part} className={page.phrase}>{part}</span>)}
+          </h2>
           <p className={page.lede}>{J_WORK.close}{J_WORK.lede}</p>
         </div>
         <div ref={ref} className={styles.player}>

@@ -43,7 +43,8 @@
 .chromeStage { margin-left: auto; padding: 0 8px; border-radius: 999px; background: #f3f2ee; color: var(--j-ink); font-size: 12px; font-weight: 600; line-height: 22px; }
 .body { position: relative; height: 500px; overflow: hidden; }
 /* One conversation: the newest message at the bottom, older ones scroll away above, like the live chat. */
-.log { position: absolute; inset: 0; display: flex; flex-direction: column; justify-content: flex-end; gap: 10px; padding: 16px; }
+/* Messages start at the top; once they no longer fit, WeekJ keeps the newest in view at the bottom, like the live chat. */
+.log { position: absolute; inset: 0; display: flex; flex-direction: column; justify-content: flex-start; gap: 10px; padding: 16px; overflow: hidden; }
 .log > * { flex: none; }
 .divider { display: flex; align-items: center; gap: 10px; margin: 6px 0 0; color: #999; font-size: 11.5px; }
 .divider::before, .divider::after { content: ''; flex: 1; height: 1px; background: #eee; }

@@ -20,6 +20,7 @@ export const J_SAMPLES = {
   size: '13 章 + 一句话结论 · 全文约 11,000 字',
   giveLabel: '这一章给你什么',
   keyLabel: '关键结论',
+  unfold: (count: number) => `展开全部 ${count} 章`,
   reports: [
     { slug: 'accountant', who: '会计', platform: 'YouTube', truth: false },
     { slug: 'shop', who: '小店', platform: '小红书', truth: false },

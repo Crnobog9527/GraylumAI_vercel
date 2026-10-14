@@ -3,9 +3,10 @@
 
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import Link from 'next/link';
-import { ArrowRight, FileText } from 'lucide-react';
+import { ArrowRight, ChevronDown, FileText } from 'lucide-react';
 import { J_SAMPLES, samplePath } from '@/lib/landing/landing-copy-j-samples';
 import styles from './samples-j.module.css';
+import page from './j.module.css';
 
 const reducedMotion = () => Boolean(window.matchMedia?.('(prefers-reduced-motion: reduce)').matches);
 
@@ -19,6 +20,9 @@ const reducedMotion = () => Boolean(window.matchMedia?.('(prefers-reduced-motion
 export function SamplesJ() {
   const [active, setActive] = useState(0);
   const [play, setPlay] = useState(false);
+  // A phone shows the first chapters and a button for the rest; folding only after mount keeps the server HTML whole.
+  const [folded, setFolded] = useState(false);
+  useEffect(() => { if (window.matchMedia?.('(max-width: 639px)').matches) setFolded(true); }, []);
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const node = ref.current;
@@ -33,7 +37,7 @@ export function SamplesJ() {
   return (
     <div ref={ref} className={styles.samples}>
       <div className={styles.head}>
-        <h3>{J_SAMPLES.title}</h3>
+        <h2 className={page.display}>{J_SAMPLES.title}</h2>
         <p>{J_SAMPLES.lede}</p>
       </div>
       <div role="tablist" aria-label="样例报告" className={styles.tabs}>
@@ -54,15 +58,20 @@ export function SamplesJ() {
           </div>
           <p className={styles.pending} role="status">{J_SAMPLES.pending}</p>
         </header>
-        <ol className={styles.chapters}>
+        <ol id={`j-samples-${report.slug}`} className={styles.chapters} data-folded={folded || undefined}>
           {J_SAMPLES.chapters.map((chapter, index) => (
             <li key={chapter.title} style={{ '--i': index } as CSSProperties}>
               <b>{chapter.title}</b>
               <p><span>{J_SAMPLES.giveLabel}</span>{chapter.give}</p>
-              <p className={styles.key}><span>{J_SAMPLES.keyLabel}</span><i aria-hidden="true" /><small>{J_SAMPLES.pending}</small></p>
+              <p className={styles.key}>{J_SAMPLES.keyLabel}：{J_SAMPLES.pending}</p>
             </li>
           ))}
         </ol>
+        {folded ? (
+          <button type="button" className={styles.unfold} aria-controls={`j-samples-${report.slug}`} aria-expanded="false" onClick={() => setFolded(false)}>
+            {J_SAMPLES.unfold(J_SAMPLES.chapters.length)}<ChevronDown size={16} aria-hidden="true" />
+          </button>
+        ) : null}
         <Link href={samplePath(report.slug)} className={styles.more}>{J_SAMPLES.more}<ArrowRight size={15} aria-hidden="true" /></Link>
       </article>
     </div>

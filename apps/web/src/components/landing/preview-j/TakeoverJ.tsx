@@ -12,10 +12,10 @@ import page from './j.module.css';
 /** Where each moment starts and ends along the section's scroll, 0 → 1: three steps, the report, then the jury. */
 export const CHAPTERS = [
   { id: 'know', from: 0, to: 0.2 },
-  { id: 'diagnose', from: 0.2, to: 0.36 },
-  { id: 'plan', from: 0.36, to: 0.46 },
-  { id: 'report', from: 0.46, to: 0.6 },
-  { id: 'jury', from: 0.6, to: 1 },
+  { id: 'diagnose', from: 0.2, to: 0.38 },
+  { id: 'plan', from: 0.38, to: 0.5 },
+  { id: 'report', from: 0.5, to: 0.64 },
+  { id: 'jury', from: 0.64, to: 1 },
 ] as const;
 type ChapterId = (typeof CHAPTERS)[number]['id'];
 
@@ -94,15 +94,12 @@ export function TakeoverJ({ intro }: { intro?: ReactNode }) {
   const moment = J_TAKEOVER_MOMENTS[index];
   return (
     <div className={styles.outer} data-zone="takeover">
-      {intro ? <div className={cn(page.wrap, styles.intro)}><h2 id="takeover-title" className={page.display}>{HOW_IT_WORKS.title}</h2>{intro}</div> : null}
-      <section ref={ref} id="how-it-works" aria-labelledby={intro ? undefined : 'takeover-title'} aria-label={intro ? HOW_IT_WORKS.title : undefined}
-        className={styles.takeover}>
+      {intro ? <div className={cn(page.wrap, styles.intro)}>{intro}</div> : null}
+      <section ref={ref} id="how-it-works" aria-labelledby="takeover-title" className={styles.takeover}>
         <div className={styles.stage}>
           <div className={cn(page.wrap, styles.frame)}>
             <div className={styles.head}>
-              {intro
-                ? <p className={styles.title} aria-hidden="true">{HOW_IT_WORKS.title}</p>
-                : <h2 id="takeover-title" className={styles.title}>{HOW_IT_WORKS.title}</h2>}
+              <h2 id="takeover-title" className={styles.title}>{HOW_IT_WORKS.title}</h2>
               <div className={styles.caption} aria-live="polite" key={moment.id}>
                 <h3>{moment.caption}</h3>
                 <p>{moment.note}</p>

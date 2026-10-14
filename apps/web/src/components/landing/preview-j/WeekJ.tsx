@@ -25,6 +25,7 @@ export function lineMs(line: WeekLine) {
 /** One loop of the week, in milliseconds (the Owner asked for roughly 40–60 seconds). */
 export const WEEK_LOOP_MS = LINES.reduce((sum, line) => sum + lineMs(line), 0);
 const HOLD_MS = 4000;
+const OPENING = 4;
 const reducedMotion = () => Boolean(window.matchMedia?.('(prefers-reduced-motion: reduce)').matches);
 
 /**
@@ -38,6 +39,7 @@ export function WeekJ() {
   const [count, setCount] = useState(-1);
   const [playing, setPlaying] = useState(false);
   const ref = useRef<HTMLElement>(null);
+  const logRef = useRef<HTMLDivElement>(null);
   const editing = useOwnerEditing();
 
   useEffect(() => {
@@ -45,16 +47,23 @@ export function WeekJ() {
     if (!node || reducedMotion() || typeof IntersectionObserver === 'undefined') return;
     const observer = new IntersectionObserver(entries => setPlaying(entries.some(entry => entry.isIntersecting)));
     observer.observe(node);
-    setCount(1);
+    // Open with the first two exchanges already there, so the window never starts out empty; play on from the next.
+    setCount(OPENING);
     return () => observer.disconnect();
   }, []);
 
   useEffect(() => {
     if (!playing || editing || count < 0) return;
     const done = count >= LINES.length;
-    const timer = window.setTimeout(() => setCount(done ? 1 : count + 1), done ? HOLD_MS : lineMs(LINES[count - 1]));
+    const timer = window.setTimeout(() => setCount(done ? OPENING : count + 1), done ? HOLD_MS : lineMs(LINES[count - 1]));
     return () => window.clearTimeout(timer);
   }, [playing, editing, count]);
+
+  // Keep the newest message in view once the conversation is longer than the window.
+  useEffect(() => {
+    const log = logRef.current;
+    if (log) log.scrollTop = log.scrollHeight;
+  }, [count]);
 
   const shown = count < 0 ? LINES.slice(REST) : LINES.slice(0, count);
   const stage = shown[shown.length - 1]?.stage ?? 0;
@@ -75,7 +84,7 @@ export function WeekJ() {
           <span className={styles.chromeStage}>{J_WEEK.stages[stage]}</span>
         </div>
         <div className={styles.body}>
-          <div className={styles.log}>
+          <div ref={logRef} className={styles.log}>
             {shown.map((line, index) => (
               <Message key={`${index}-${line.text}`} line={line} divider={index === firstOfStage && index > 0 ? J_WEEK.stages[line.stage] : null}
                 live={count >= 0 && index === shown.length - 1} />
