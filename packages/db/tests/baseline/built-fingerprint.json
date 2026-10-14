@@ -2738,7 +2738,7 @@
   "fn:fusion_review_claim(uuid,uuid,integer,text,integer,uuid,jsonb)": "2a6d6940c7af",
   "fn:fusion_review_close(uuid,uuid,text)": "6a9e8f2a2ba5",
   "fn:fusion_review_pause_idle(interval)": "ec58f14d548e",
-  "fn:fusion_review_preview(uuid,uuid,uuid)": "1902b55bba52",
+  "fn:fusion_review_preview(uuid,uuid,uuid)": "afeb9d4059d7",
   "fn:fusion_review_read(uuid,uuid)": "8648e142d7c1",
   "fn:fusion_review_settings(uuid)": "f221bb877dfe",
   "fn:fusion_review_skill_file(uuid,uuid,text,text)": "360da083e248",
