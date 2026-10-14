@@ -29,7 +29,8 @@ export const paygHostProfile = z.object({
   admissionPath: z.literal('empirical'),
   templateTokens: z.literal(4096), marginTokens: z.literal(4096),
   maxBytes: z.literal(196608), maxMessages: z.literal(128),
-  maxTools: z.literal(2), maxSchemaBytes: z.literal(16384),
+  // 2 until the staging profiles are updated (0250); a 2-tool profile simply leaves the history read out.
+  maxTools: z.union([z.literal(2), z.literal(3)]), maxSchemaBytes: z.literal(16384),
   purposes: z.array(phase).min(1).max(8),
   requestFormats: z.array(z.enum(['serial-tools-v2', 'serial-tools-v4-stream',
     'agent-turn-v5-stream', 'serial-tools-v6-reasoning', 'fusion-json-v1-stream'])).min(1).max(5),

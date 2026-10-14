@@ -10,7 +10,11 @@ import {
 import {
   DEFAULT_SEAT_NAMES, resolveSeatNames, SAMPLE_PANEL, SEAT_NAME_MAX, summarize, type JuryEvent,
 } from './jury-events';
-import { posesAt } from './jury-poses';
+import { DOC_HEAD, deskAt, seatStates, type MarginItem } from './jury-desk';
+import { diffText } from './jury-diff';
+import { REVISION_TEXT } from './jury-mock-rulings';
+import { REPORT_CHAPTERS } from './jury-report';
+import { seatInitials } from './JuryBits';
 import { failedSeatsAt } from './jury-progress';
 import { buildScenes, playbackLength, sceneAt, skippedStages, stageIndex } from './jury-scenes';
 import { findScenario, JURY_SCENARIOS } from './jury-scripts';
@@ -131,12 +135,107 @@ describe('one stage at a time', () => {
 
   it('shows reviewers reading until their answer arrives, and greys out a reviewer who failed', () => {
     const scenes = buildScenes(findScenario('full').arrivals);
-    expect(posesAt(sceneAt(scenes, 10_000), 10_000, []).seats.A).toMatch(/reading|thinking/);
-    expect(posesAt(sceneAt(scenes, 22_500), 22_500, []).seats.A).toBe('submitted');
+    expect(deskAt(scenes, 10_000).reading.A).toBeTruthy();
+    expect(Object.values(deskAt(scenes, 10_000).reading)).toContain(deskAt(scenes, 10_000).focus);
+    expect(deskAt(scenes, 22_500).reading.A).toBeUndefined();
+    expect(seatStates(sceneAt(scenes, 22_500), 22_500, [], false).A.text).toBe('已交卷');
     const failedScenes = buildScenes(findScenario('failed').arrivals);
     const end = playbackLength(failedScenes);
     expect(failedSeatsAt(failedScenes, end)).toEqual(['B']);
+    expect(seatStates(sceneAt(failedScenes, end), end, ['B'], false).B.tone).toBe('failed');
     expect(failedScenes.some(scene => scene.kind === 'failed' && scene.failure.reviewer === 'B')).toBe(true);
+  });
+});
+
+describe('the annotated report', () => {
+  const scenes = buildScenes(findScenario('full').arrivals);
+  const kinds = (items: MarginItem[] | undefined) => (items ?? []).map(item => item.kind);
+  const at = (test: (scene: (typeof scenes)[number]) => boolean, offset = 1) => (scenes.find(test)?.start ?? 0) + offset;
+
+  it('moves readers only down the report, so the stage never scrolls back to the top mid-read', () => {
+    const order = REPORT_CHAPTERS.map(chapter => chapter.title);
+    const reading = scenes.filter(scene => scene.kind === 'reading');
+    for (const scene of reading) {
+      let last = -1;
+      for (let clock = scene.start; clock < scene.end; clock += 500) {
+        const focus = deskAt(scenes, clock).focus;
+        if (focus === null) continue;
+        expect(order.indexOf(focus)).toBeGreaterThanOrEqual(last);
+        last = order.indexOf(focus);
+      }
+    }
+  });
+
+  it('pins each issue to the margin of its own chapter, and points the stage at that chapter', () => {
+    const critique = scenes.filter(scene => scene.kind === 'critique').at(-1);
+    if (critique?.kind !== 'critique') throw new Error('expected a critique');
+    const view = deskAt(scenes, critique.end - 1);
+    for (const issue of critique.issues) {
+      expect(view.notes[issue.section]?.some(item => item.kind === 'issue' && item.issue.id === issue.id)).toBe(true);
+    }
+    expect(view.focus).toBe(critique.issues.at(-1)?.section);
+  });
+
+  it('opens one key decision at a time beside its chapter, the earlier ones folded', () => {
+    const view = deskAt(scenes, at(scene => scene.kind === 'steelman' && scene.index === 2, 3_000));
+    const platform = view.notes['第 6 章 平台选择']?.find(item => item.kind === 'decision');
+    const positioning = view.notes['第 2 章 定位一句话']?.find(item => item.kind === 'decision');
+    expect(platform?.kind === 'decision' && platform.open).toBe(true);
+    expect(positioning?.kind === 'decision' && positioning.open).toBe(false);
+    expect(view.notes['第 10 章 变现路径']).toBeUndefined();
+  });
+
+  it('puts the two sides of a split side by side, and threads the round-2 replies under it', () => {
+    const lastReply = scenes.filter(scene => scene.kind === 'response').at(-1);
+    const view = deskAt(scenes, (lastReply?.end ?? 0) - 1);
+    const split = view.notes['第 6 章 平台选择']?.find(item => item.kind === 'split');
+    if (split?.kind !== 'split') throw new Error('expected a split');
+    expect(split.split.keep).toEqual(['B', 'C']);
+    expect(split.replies.length).toBeGreaterThan(0);
+    expect(split.replies.every(reply => reply.response.decision === 'platform')).toBe(true);
+  });
+
+  it('stamps adopted or not on the notes it rules on, then shows the redline of changed chapters', () => {
+    const ruling = scenes.filter(scene => scene.kind === 'ruling').at(-1);
+    const view = deskAt(scenes, (ruling?.end ?? 0) - 1);
+    const salt = view.notes['第 2 章 定位一句话']?.find(item => item.kind === 'issue');
+    expect(salt?.kind === 'issue' && salt.stamp).toBe(false);
+    expect(kinds(view.notes['第 12 章 30 天行动'])).toContain('ruling');
+    const end = deskAt(scenes, playbackLength(scenes) - 1);
+    expect(end.focus).toBe(end.redline.at(-1));
+    expect(end.redline).toEqual(choosable(findScenario('full').detail.summary.sections).map(item => item.section));
+    const failed = buildScenes(findScenario('failed').arrivals);
+    const failedEnd = deskAt(failed, playbackLength(failed) - 1);
+    expect(failedEnd.revisionFailed).toBe(true);
+    expect(failedEnd.redline).toEqual([]);
+    expect(failedEnd.focus).toBe(DOC_HEAD);
+    const writing = scenes.find(scene => scene.kind === 'writing');
+    if (!writing) throw new Error('expected a writing scene');
+    expect(deskAt(scenes, writing.end - 1).reading.S).toBe(REPORT_CHAPTERS.at(-1)?.title);
+  });
+
+  it('shows every note and ruling at once for reduced motion', () => {
+    const view = deskAt(scenes, 0, true);
+    const all = Object.values(view.notes).flat();
+    expect(all.filter(item => item.kind === 'issue')).toHaveLength(events('full').filter(event => event.type === 'issue').length);
+    expect(all.filter(item => item.kind === 'ruling')).toHaveLength(events('full').filter(event => event.type === 'adjudication').length);
+    expect(all.filter(item => item.kind === 'split')).toHaveLength(2);
+  });
+
+  it('marks deletions and additions so that each side rebuilds its own text', () => {
+    for (const { original, revised } of Object.values(REVISION_TEXT)) {
+      const parts = diffText(original, revised);
+      expect(parts.filter(part => part.type !== 'ins').map(part => part.text).join('')).toBe(original);
+      expect(parts.filter(part => part.type !== 'del').map(part => part.text).join('')).toBe(revised);
+    }
+  });
+});
+
+describe('seat marks', () => {
+  it('uses the first character of each name, falls back to seat letters when two collide, and keeps the summary apart', () => {
+    expect(seatInitials(DEFAULT_SEAT_NAMES)).toEqual({ A: 'A', B: 'B', C: 'C', S: '汇' });
+    expect(seatInitials(resolveSeatNames(SAMPLE_PANEL))).toEqual({ A: '专', B: '较', C: '看', S: '首' });
+    expect(seatInitials({ A: 'mia', B: 'Noah', C: 'Ivy', S: 'lead' })).toEqual({ A: 'M', B: 'N', C: 'I', S: 'L' });
   });
 });
 
