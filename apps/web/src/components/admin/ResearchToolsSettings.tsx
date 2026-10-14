@@ -144,7 +144,8 @@ export function ResearchToolsSettings() {
         </div>}
         <ResearchToolsPanel view={data} draft={draft} onChange={next => { setNotice(null); setDraft(next); }}
           onSave={() => { void onSave(); }}
-          saving={save.isPending || Boolean(view.error)} notice={notice} failure={failure} />
+          // Locked while saving and while any reread is in flight: edits made then would be replaced when it lands.
+          saving={save.isPending || view.isFetching || Boolean(view.error)} notice={notice} failure={failure} />
       </>}
     </CardContent>
   </Card>;
