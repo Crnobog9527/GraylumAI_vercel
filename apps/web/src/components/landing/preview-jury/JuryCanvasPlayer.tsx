@@ -1,12 +1,12 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 'use client';
 
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { DEFAULT_SEAT_NAMES, type JurySeatNames, type SeatCode } from './jury-events';
 import { briefScenes } from './jury-brief';
 import { canvasAt } from './jury-canvas';
 import { mockCase, type JuryCase } from './jury-case';
-import { buildScenes, playbackLength } from './jury-scenes';
+import { buildScenes, playbackLength, type Scene } from './jury-scenes';
 import { JuryCanvas } from './JuryCanvas';
 import { useJuryPlayback, usePrefersReducedMotion } from './use-jury-playback';
 import theme from './jury-theme.module.css';
@@ -31,13 +31,24 @@ export type JuryCanvasPlayerProps = {
  * itself once, or follows `progress`. With reduced motion and no `progress` it shows the last frame. On a computer
  * the canvas fills its parent's height, so give the parent one.
  */
-export function JuryCanvasPlayer({ data, progress, speed = 1, brief = false, names = DEFAULT_SEAT_NAMES, onPick }: JuryCanvasPlayerProps) {
-  const reduced = usePrefersReducedMotion();
-  const juryCase = data ?? mockCase('full');
+export function JuryCanvasPlayer({ data, brief = false, ...rest }: JuryCanvasPlayerProps) {
+  const juryCase = data ?? DEFAULT_CASE;
   const scenes = useMemo(() => {
     const full = buildScenes(juryCase.arrivals);
     return brief ? briefScenes(full) : full;
   }, [juryCase.arrivals, brief]);
+  // A new plan (another case, or the short version switched) starts again from the beginning.
+  const [plan, setPlan] = useState({ scenes, id: 0 });
+  if (plan.scenes !== scenes) setPlan({ scenes, id: plan.id + 1 });
+  return <Playing key={plan.id} scenes={scenes} report={juryCase.report} {...rest} />;
+}
+
+const DEFAULT_CASE = mockCase('full');
+
+function Playing({ scenes, report, progress, speed = 1, names = DEFAULT_SEAT_NAMES, onPick }: Omit<JuryCanvasPlayerProps, 'data' | 'brief'> & {
+  scenes: Scene[]; report: JuryCase['report'];
+}) {
+  const reduced = usePrefersReducedMotion();
   const length = playbackLength(scenes);
   const driven = progress !== undefined;
   const playback = useJuryPlayback(length, !reduced && !driven, speed);
@@ -45,7 +56,7 @@ export function JuryCanvasPlayer({ data, progress, speed = 1, brief = false, nam
   const clock = driven ? Math.min(1, Math.max(0, progress)) * last : reduced ? last : Math.min(playback.clock, last);
   return (
     <div className={theme.player}>
-      <JuryCanvas view={canvasAt(scenes, clock, names)} names={names} selected={null} report={juryCase.report} follow={!driven}
+      <JuryCanvas view={canvasAt(scenes, clock, names)} names={names} selected={null} report={report} follow={!driven}
         onPeek={() => {}} onPick={onPick} />
     </div>
   );
