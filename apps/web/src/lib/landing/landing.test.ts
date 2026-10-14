@@ -42,7 +42,8 @@ describe('landing FAQ', () => {
   it('gives the JSON-LD the same text the page shows', () => {
     const data = buildLandingPageData(ALL_ON, CATALOG);
     const shown = data.faqGroups.flatMap(group => group.items);
-    expect(data.faqItems).toEqual(shown.map(item => ({ question: item.question, answer: item.answer.join('\n') })));
+    expect(data.faqItems).toEqual(shown.filter(item => !item.needs.includes('founder'))
+      .map(item => ({ question: item.question, answer: item.answer.join('\n') })));
     expect(faqAnswerText(shown[7])).toContain('\n1. 把你现有的定位资料上传到账号资料库，再连上你的账号。\n');
   });
 });
@@ -127,7 +128,12 @@ describe('landing page data', () => {
   it('shows the full page when everything is on', () => {
     const data = buildLandingPageData(ALL_ON, CATALOG, { goldFirstMonth: 49, founder: { price: 496, total: 50, available: 12 } });
     expect(data.notes).toHaveLength(7);
-    expect(data.faqItems).toHaveLength(16);
+    expect(data.faqGroups.flatMap(group => group.items)).toHaveLength(16);
+    // Structured data is cached hourly, so it never carries the founder offer or its FAQ entries.
+    expect(data.faqItems.length).toBeLessThan(16);
+    expect(data.faqItems.map(item => item.question)).not.toContain('创始会员和普通 Gold 年付差在哪？');
+    expect(data.offerList.map(offer => offer.name).some(name => name.includes('创始'))).toBe(false);
+    expect(data.offerList.some(offer => offer.price === 496)).toBe(false);
     expect(data.compareRows).toHaveLength(4);
     expect(data.promise.map(part => part.text).join('')).toBe(
       '你不用再分心研究运营技术，不用自己想选题，也不用再为怎么变现发愁。发了内容以后，也不用自己看数据：它每周告诉你哪条有效、下周怎么调。'

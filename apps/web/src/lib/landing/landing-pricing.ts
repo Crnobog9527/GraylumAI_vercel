@@ -160,7 +160,8 @@ export function buildLandingPricing(source: readonly PaywallPlanSource[] | undef
 /** Prices for the SoftwareApplication JSON-LD; the same numbers the cards show. */
 export function landingOfferList(pricing: LandingPricing) {
   const offers = [{ name: '免费', price: 0 }];
-  for (const card of pricing.cards) {
+  // The founder offer sells out between hourly rebuilds of the cached JSON-LD, so it is never listed there.
+  for (const card of pricing.cards.filter(item => item.key !== 'founder')) {
     for (const cycle of ['monthly', 'yearly'] as const) {
       const quote = card.quotes[cycle];
       if (!quote) continue;
