@@ -29,6 +29,8 @@
 /* The short version: the sentence sits in its own bar on top of the canvas, never over a card. */
 .framed { display: grid; grid-template-rows: auto minmax(0, 1fr); gap: 8px; height: 100%; min-height: 0; }
 .framed > .scroller { min-height: 0; }
+/* Room below the last card, so the camera can always move a report sheet fully out instead of stopping it half cut. */
+@media (min-width: 768px) { .framed .board { padding-bottom: min(50vh, 420px); } }
 .captionBar {
   min-height: 1.5em; margin: 0; padding: 0 8px; color: var(--j-ink); font-size: 18px; font-weight: 600; line-height: 1.5;
   text-align: center; text-wrap: balance; animation: captionIn .45s var(--j-ease) both;
