@@ -12,7 +12,9 @@ const TRANSIENT = new Set(['FUSION_ADMISSION_UNAVAILABLE', 'FUSION_REVIEW_UNAVAI
   'FUSION_GROUP_CONFLICT', 'FUSION_REVIEW_STEP_CONFLICT', 'BILL2_CALL_CONFLICT', 'BILL2_DATABASE_UNAVAILABLE', 'ENTITLEMENTS_UNAVAILABLE',
   'RUNTIME_STAGING_SERVICE_UNAVAILABLE', 'RUNTIME_STAGING_SCHEMA_UNAVAILABLE', 'RUNTIME_STAGING_INTERNAL_ERROR',
   'RUNTIME_STAGING_AUTH_REFRESH_REQUIRED', 'RUNTIME_BILLING_UNIT_UNAVAILABLE', 'RUNTIME_BUDGET_CONFIG_UNAVAILABLE',
-  'RUNTIME_PAYG_CONFIG_UNAVAILABLE']);
+  'RUNTIME_PAYG_CONFIG_UNAVAILABLE',
+  // A price refresh that failed or is cooling down, and a price configuration still settling, retry like Runtime does.
+  'RUNTIME_PRICE_SNAPSHOT_STALE', 'RUNTIME_PRICE_CONFIGURATION_PENDING']);
 /** How a failed claim ends its step (#962 review). Every claim goes through one place, and the rule is inverted so a
  * new refusal can never leave a charged review stuck: a size or price bound has its own outcome; any other coded
  * refusal (a setting changed by an administrator, a revoked Skill, a lapsed membership or test window) ends the step
