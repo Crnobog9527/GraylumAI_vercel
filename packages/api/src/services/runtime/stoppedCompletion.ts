@@ -95,7 +95,8 @@ export function stoppedCompletion(options: RuntimeExecutorOptions, billing: Retu
       }
       if(valid&&!(tool&&context.hostTurnContext?.cardContract))body=agentTurnResult(body,output,Boolean(tool),tool
         ?questionMessageFromArguments(tool.function?.arguments??''):undefined,true,Boolean(context.mentorText)).body;
-    }else if(message?.tool_calls?.length)valid=false;
+    // A plain-text stream showed the prose of a tool round as it arrived: a stop there keeps that prose.
+    }else if(message?.tool_calls?.length&&!(plainStream&&body.trim()))valid=false;
     // MODEL-IDENTITY-GUARD: redact before rebuilding the projection, in the live executor's order, so the
     // stop source derived here matches the replacement snapshot the client saw (review P1).
     const identity=runtimeIdentityGuard(frozenBrandIdentity(context.instructions));
@@ -113,6 +114,11 @@ export function stoppedCompletion(options: RuntimeExecutorOptions, billing: Retu
           const tool=message?.tool_calls?.[0];
           if(tool)update=projection.appendToolFrame({choices:[{delta:{tool_calls:[{index:0,function:tool.function}]}}]})??update;
           source=projection.finish(visibleText(body,context))?.source??update?.source??'final';
+          // A plain stream keeps only the first stopAt code points. When they are exactly what streamed, a later
+          // change (identity redaction after the stop point) cannot change what the user saw: accept its source.
+          const stopAt=execution.stop!.stopAt,shown=(text:string)=>Array.from(text).slice(0,stopAt).join('');
+          if(plainStream&&(execution.stop?.source==='assistant'||execution.stop?.source==='final')
+            &&shown(visibleText(body,context))===shown(message?.content??''))source=execution.stop.source;
         }
       }
     }catch{valid=false;}

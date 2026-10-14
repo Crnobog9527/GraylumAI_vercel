@@ -141,3 +141,32 @@ describe('tool rounds on a marked plain-text turn',()=>{
   ]);
  });
 });
+
+describe('停止 on a marked turn: what was shown is what is kept',()=>{
+ const stopFixture=(raw:Record<string,unknown>,stop:{stopAt:number;source:'assistant'|'final'},instructions='Answer')=>{
+  const execution={executionId:id,sessionId:id,runId:id,state:'interrupted',live:false,cancelRequested:false,
+   pausedReason:'user_stop',stop,epoch:1,result:null,
+   context:{...freeChat,instructions,textStream:PLAIN_TEXT_STREAM,tools:['read_source'],workspaceContext:true},
+   billing:{contractVersion:'bill2.v2'},
+   stopCalls:[{sequence:1,requestHash:'a'.repeat(64),phase:'ordinary',dispatched:true,settled:true}],
+  } as StopExecution;
+  const database={rpc:vi.fn(async(name:string,args:Record<string,unknown>)=>{
+   if(name==='runtime_response')return {data:{rawBody:JSON.stringify({model:'synthetic/model',choices:[raw]})},error:null};
+   if(args.p_action==='complete'){const value=(args.p_result as {value:unknown}).value;return {data:{state:value?'completed':'cancelled'},error:null};}
+   return {data:structuredClone(execution),error:null};
+  })};
+  const billing={recoverReceipts:vi.fn(),finalizeRun:vi.fn(),dispatchOnce:vi.fn(),claimCall:vi.fn(),claimPaygCall:vi.fn()};
+  return stoppedCompletion({database,actor:async()=>id,callGate:vi.fn()},billing as unknown as ReturnType<typeof authoritativeBilling>);
+ };
+ it('a stop during a tool round keeps the prose that streamed before the read_source call',async()=>{
+  const complete=stopFixture({finish_reason:'tool_calls',message:{content:'我先读一下资料再回答',
+   tool_calls:[{id:'call_1',function:{name:'read_source',arguments:'{}'}}]}},{stopAt:5,source:'assistant'});
+  expect(await complete(id)).toMatchObject({state:'completed',stopped:true,body:'我先读一下'});
+ });
+ it('identity redaction after the stop point does not cancel the stop or change the kept text',async()=>{
+  const {withBrandIdentity}=await import('../modelIdentity/brandIdentity');
+  const complete=stopFixture({finish_reason:'stop',message:{content:'好的，先说结论。I am Claude.'}},{stopAt:4,source:'assistant'},
+   withBrandIdentity('Answer',true));
+  expect(await complete(id)).toMatchObject({state:'completed',stopped:true,body:'好的，先'});
+ });
+});
