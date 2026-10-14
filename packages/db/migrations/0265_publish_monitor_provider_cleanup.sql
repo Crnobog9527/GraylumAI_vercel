@@ -302,7 +302,8 @@ BEGIN
   FROM picked WHERE c.id=picked.id
   RETURNING c.id,c.actor_id,c.provider_account_id,c.status,c.owner_ref,c.provider_disconnect_pending
  )
- SELECT COALESCE(jsonb_agg(jsonb_build_object('connectionId',claimed.id,'providerAccountId',claimed.provider_account_id,
+ SELECT COALESCE(jsonb_agg(jsonb_build_object('connectionId',claimed.id,'lease',lease,
+  'providerAccountId',claimed.provider_account_id,
   'deleting',claimed.status='deleting','takeoverPending',claimed.provider_disconnect_pending,
   'action',CASE WHEN claimed.status<>'deleting' OR k.publishes_open THEN 'disconnect' ELSE 'delete' END,
   'ownerRef',CASE WHEN claimed.status='deleting' THEN claimed.owner_ref
@@ -314,21 +315,22 @@ END $$;
 -- Outcome of one claimed connection. For a deletion record: 'deleted' or 'gone' (the provider has no such account)
 -- ends it; 'owner_changed' (someone else now authorizes that account) ends our record without touching theirs;
 -- 'disconnected' marks its tokens cleared while publishes are unresolved. For a takeover: 'disconnected', 'gone' or
--- 'owner_back' settles it. 'retry' records the error for the next run.
-CREATE OR REPLACE FUNCTION public.publish_monitor_provider_work_finish(p_connection_id uuid,p_outcome text,p_error text)
+-- 'owner_back' settles it. 'retry' records the error for the next run. Only the current claim's lease may report:
+-- a result from an older claim (re-claimed after expiry, or invalidated by a newly queued takeover) changes nothing.
+CREATE OR REPLACE FUNCTION public.publish_monitor_provider_work_finish(p_connection_id uuid,p_lease uuid,p_outcome text,
+ p_error text)
 RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
 DECLARE c social_connections;
 BEGIN
- IF p_connection_id IS NULL OR p_outcome NOT IN ('deleted','gone','owner_changed','disconnected','owner_back','retry')
+ IF p_connection_id IS NULL OR p_lease IS NULL
+  OR p_outcome NOT IN ('deleted','gone','owner_changed','disconnected','owner_back','retry')
   OR (p_error IS NOT NULL AND p_error !~ '^[A-Z0-9_]{1,64}$') THEN
   RAISE EXCEPTION 'PUBLISH_MONITOR_INPUT_INVALID' USING ERRCODE='22023'; END IF;
  SELECT * INTO c FROM social_connections WHERE id=p_connection_id FOR UPDATE;
  IF c.id IS NULL THEN RETURN; END IF;
- -- A takeover queued after this job was claimed (the queueing clears the lease): the worker's outcome is stale; keep
- -- the record so the next run clears the overwriting grant first.
- IF c.status='deleting' AND c.provider_disconnect_pending AND c.lease_owner IS NULL AND p_outcome<>'gone' THEN
-  RETURN;
- END IF;
+ -- Queueing a takeover clears the lease, so a worker that claimed before it reports a stale outcome: the record and
+ -- its pending disconnect stay for the next run.
+ IF c.lease_owner IS DISTINCT FROM p_lease THEN RETURN; END IF;
  -- Unresolved publishes still need this record to reconcile: hold it instead of ending it.
  IF c.status='deleting' AND p_outcome IN ('deleted','gone','owner_changed') AND EXISTS(SELECT 1 FROM social_publish_jobs j
    WHERE j.actor_id=c.actor_id AND j.state IN ('claimed','dispatching','unknown')
