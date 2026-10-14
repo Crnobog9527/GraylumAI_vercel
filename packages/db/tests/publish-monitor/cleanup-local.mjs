@@ -10,7 +10,7 @@ import { fixtureSql } from './fixtures.mjs';
 
 const migrationPath = 'packages/db/migrations/0265_publish_monitor_provider_cleanup.sql';
 const rpcs = ['publish_monitor_connect_callback(uuid,uuid,jsonb)', 'publish_monitor_cleanup_claim(integer,integer)',
-  'publish_monitor_cleanup_classify(uuid,jsonb)', 'publish_monitor_cleanup_finish(uuid,uuid,boolean,text)',
+  'publish_monitor_cleanup_classify(uuid,uuid,jsonb)', 'publish_monitor_cleanup_finish(uuid,uuid,boolean,text)',
   'publish_monitor_orphan_classify(jsonb)', 'publish_monitor_provider_work_claim(integer,integer)',
   'publish_monitor_provider_work_finish(uuid,uuid,text,text)', 'publish_monitor_disconnect(uuid,uuid)',
   'publish_monitor_provider_account_disconnected(text)'];
@@ -38,7 +38,15 @@ const claim = async () => {
   for (const item of items) leases.set(item.requestId, item.lease);
   return items;
 };
-const classify = (req, accounts) => svc('SELECT publish_monitor_cleanup_classify($1,$2) v', [req, j(accounts)]);
+// Classification needs the current cleanup lease; attempts the test settles without a daily claim get one here.
+const classify = async (req, accounts, lease = leases.get(req)) => {
+  if (!lease) {
+    lease = randomUUID();
+    await c.query('UPDATE social_connect_requests SET cleanup_lease=$2 WHERE id=$1', [req, lease]);
+    leases.set(req, lease);
+  }
+  return svc('SELECT publish_monitor_cleanup_classify($1,$2,$3) v', [req, lease, j(accounts)]);
+};
 // Cleanup results must carry the lease of the claim that handed the attempt out; the latest one is remembered here.
 const leases = new Map();
 const finish = (req, done, err = null, lease = leases.get(req)) =>
@@ -102,6 +110,7 @@ try {
   const owned = await member();
   await connect(owned, 'pfm_owned');
   await connect(u, 'pfm_u_kept');
+  await code(classify(b1.requestId, [], randomUUID()), 'PT409');
   const verdicts = await classify(b1.requestId, [acc('pfm_b_1', b1.externalId), acc('pfm_other_ext', a1.externalId),
     acc('pfm_owned', b1.externalId), acc('pfm_u_kept', b1.externalId)]);
   assert.deepEqual(verdicts.map(x => x.action), ['delete', 'skip', 'takeover', 'keep']);
