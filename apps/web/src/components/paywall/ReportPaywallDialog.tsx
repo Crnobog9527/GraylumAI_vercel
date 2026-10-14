@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button';
 import { PaywallCompareTable, PaywallPlanPicker } from './PaywallPlanPicker';
 import { MethodCheckoutForm } from './MethodCheckoutForm';
 import { CHECKOUT_COPY, GOLD_FOUNDER_YEAR_USD } from './methodCheckout';
+import { SUPPORT_TICKET_HREF, UNPAID_SUBSCRIPTION_BLOCKS_PURCHASE } from '@/components/profile/subscriptionPlanButtonState';
 import { formatUsd, paywallQuote, type PaywallBilling, type PaywallLevel } from './paywallPlans';
 import { usePaywallCheckout } from './usePaywallCheckout';
 import { REPORT_DELIVERABLES, REPORT_PAYWALL_COPY as COPY } from './reportPaywallCopy';
@@ -110,13 +111,18 @@ export function ReportPaywallView({ checkout, onClose }: { checkout: PaywallChec
               )}
 
           {plan && quote && !checkout.loading && !checkout.catalogFailed ? (
-            <MethodCheckoutForm checkout={checkout.method} purchase={purchase} testIdPrefix="report-paywall"
-              price={`${formatUsd(quote.amount)} ${quote.perLabel}`} renewal={quote.renewal}
-              cta={`${COPY.cta} · ${formatUsd(quote.amount)}`} ctaSub={COPY.ctaSub}
-              blockedReason={purchase ? null : COPY.notReady} onGoldFirstDeclined={checkout.declineFirstMonth}
-              onFounderDeclined={checkout.declineFounder} onFounderSoldOut={checkout.markFounderSoldOut}
-              fineprint={quote.founder ? CHECKOUT_COPY.founderRule : null}
-              notice={checkout.founderSoldOut && plan.level === 'gold' && billing === 'yearly' ? CHECKOUT_COPY.founderSoldOut : null} />
+            <>
+              <MethodCheckoutForm checkout={checkout.method} purchase={purchase} testIdPrefix="report-paywall"
+                price={`${formatUsd(quote.amount)} ${quote.perLabel}`} renewal={quote.renewal}
+                cta={`${COPY.cta} · ${formatUsd(quote.amount)}`} ctaSub={COPY.ctaSub}
+                blockedReason={checkout.unpaidSubscription ? UNPAID_SUBSCRIPTION_BLOCKS_PURCHASE : purchase ? null : COPY.notReady}
+                onGoldFirstDeclined={checkout.declineFirstMonth}
+                onFounderDeclined={checkout.declineFounder} onFounderSoldOut={checkout.markFounderSoldOut}
+                fineprint={quote.founder ? CHECKOUT_COPY.founderRule : null}
+                notice={checkout.founderSoldOut && plan.level === 'gold' && billing === 'yearly' ? CHECKOUT_COPY.founderSoldOut : null} />
+              {checkout.unpaidSubscription ? <a data-testid="report-paywall-support-ticket" href={SUPPORT_TICKET_HREF}
+                className="text-sm underline" style={{ color: 'var(--text-primary)' }}>提交工单</a> : null}
+            </>
           ) : null}
 
           <ul className="flex flex-wrap gap-x-4 gap-y-1 text-xs" style={{ color: 'var(--text-tertiary)' }}>

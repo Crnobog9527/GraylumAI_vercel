@@ -9,6 +9,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vites
 const componentState = vi.hoisted(() => ({
   plansQuery: {} as Record<string, unknown>,
   membershipQuery: {} as Record<string, unknown>,
+  eligibilityQuery: { data: { entries: [] }, isLoading: false } as Record<string, unknown>,
   packagesQuery: {} as Record<string, unknown>,
   entitlementsQuery: { data: { level: 'pro' }, isError: false } as Record<string, unknown>,
 }));
@@ -26,7 +27,7 @@ vi.mock('@/trpc/client', () => {
     trpc: {
       useUtils: () => ({
         user: { getUserProfile: { invalidate }, getEntitlements: { invalidate } },
-        payments: { methodMembership: { invalidate }, listBillingRecords: { invalidate } },
+        payments: { methodMembership: { invalidate }, getMembershipEligibilityMatrix: { invalidate }, listBillingRecords: { invalidate } },
       }),
       user: { getEntitlements: { useQuery: () => componentState.entitlementsQuery } },
       settings: {
@@ -35,6 +36,7 @@ vi.mock('@/trpc/client', () => {
       },
       payments: {
         methodMembership: { useQuery: () => componentState.membershipQuery },
+        getMembershipEligibilityMatrix: { useQuery: () => componentState.eligibilityQuery },
         methodCheckout: { useMutation: mutation },
         getSubscriptionManagement: { useQuery: () => ({ data: { available: true } }) },
         createCustomerPortalSession: { useMutation: mutation },
@@ -149,6 +151,19 @@ describe('SubscriptionCard catalog availability', () => {
     expect(markup).toContain('升级到 Gold');
   });
 
+  it('explains an old subscription with an unsuccessful payment and keeps purchases closed (#937)', () => {
+    componentState.plansQuery = queryState({ data: [plan] });
+    componentState.entitlementsQuery = { data: { level: 'free' }, isError: false };
+    componentState.eligibilityQuery = { data: { entries: [{ planId: plan.id, billingCycle: 'monthly', action: 'resolvePaymentIssue',
+      reasonCode: 'PAYMENT_ATTENTION_REQUIRED', allowed: false }] }, isLoading: false };
+    const markup = renderSubscription();
+    expect(markup).toContain('data-testid="profile-unpaid-subscription-notice"');
+    expect(markup).toContain('href="/profile?tab=tickets"');
+    expect(markup).toContain('请先处理旧订阅');
+    expect(markup).not.toContain('>开通<');
+    componentState.eligibilityQuery = { data: { entries: [] }, isLoading: false };
+  });
+
   it('renders the isolated retry state as a real component', () => {
     const markup = renderToStaticMarkup(createElement(ProfileCatalogState, { status: 'unavailable', onRetry: vi.fn() }));
     expect(markup).toContain('套餐服务暂不可用');
@@ -224,7 +239,7 @@ describe('membership page in a browser', () => {
       const state = window.__pay;
       const inv = { invalidate: async () => {} };
       const utils = { user: { getUserProfile: inv, getEntitlements: inv }, credits: { getBalance: inv, getCreditsSummary: inv },
-        payments: { methodMembership: inv, listBillingRecords: inv, getSubscriptionManagement: inv } };
+        payments: { methodMembership: inv, getMembershipEligibilityMatrix: inv, listBillingRecords: inv, getSubscriptionManagement: inv } };
       const query = data => ({ data, isLoading: false, isError: false, isFetching: false, refetch() {} });
       const mutation = fn => ({ useMutation: () => { const [isPending, set] = useState(false);
         return { isPending, mutateAsync: async input => { set(true); try { return await fn(input); } finally { set(false); } } }; } });
@@ -235,6 +250,7 @@ describe('membership page in a browser', () => {
           getCreditPackages: { useQuery: () => query(state.packages) } },
         payments: {
           methodMembership: { useQuery: () => query(state.membership) },
+          getMembershipEligibilityMatrix: { useQuery: () => query({ entries: state.eligibility ?? [] }) },
           methodCheckout: mutation(async input => { state.checkouts.push(input); window.recordCheckout?.(input);
             if (state.checkoutError) throw Object.assign(new Error(state.checkoutError.message), { data: { code: state.checkoutError.code } });
             return { orderId: 'o1', state: 'open', url: 'https://checkout.stripe.com/c/pay/cs_test_9' }; }),

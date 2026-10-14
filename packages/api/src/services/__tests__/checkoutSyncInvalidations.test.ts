@@ -30,6 +30,9 @@ function createInvalidationUtils() {
       methodMembership: {
         invalidate: vi.fn().mockResolvedValue(undefined),
       },
+      getMembershipEligibilityMatrix: {
+        invalidate: vi.fn().mockResolvedValue(undefined),
+      },
       listBillingRecords: {
         invalidate: vi.fn().mockResolvedValue(undefined),
       },
@@ -48,6 +51,7 @@ describe('invalidatePostCheckoutMembershipQueries', () => {
     expect(utils.credits.getBalance.invalidate).toHaveBeenCalledTimes(1);
     expect(utils.credits.getCreditsSummary.invalidate).toHaveBeenCalledTimes(1);
     expect(utils.payments.methodMembership.invalidate).toHaveBeenCalledTimes(1);
+    expect(utils.payments.getMembershipEligibilityMatrix.invalidate).toHaveBeenCalledTimes(1);
     expect(utils.payments.listBillingRecords.invalidate).toHaveBeenCalledTimes(1);
   });
 });

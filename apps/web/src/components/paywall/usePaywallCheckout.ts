@@ -16,6 +16,9 @@ import { pickPaywallPlans, type PaywallBilling, type PaywallPlan, type PaywallQu
 export function usePaywallCheckout() {
   const plansQuery = trpc.settings.getMembershipPlans.useQuery(undefined, { staleTime: 60_000 });
   const method = useMethodCheckout();
+  // #937: an older subscription whose payment failed blocks any new purchase; say so and point to a ticket.
+  const eligibility = trpc.payments.getMembershipEligibilityMatrix.useQuery(undefined, { staleTime: 0, retry: false });
+  const unpaidSubscription = (eligibility.data?.entries ?? []).some(entry => entry.action === 'resolvePaymentIssue');
   const [firstMonthDeclined, setFirstMonthDeclined] = useState(false);
   // Set when checkout answered "founder seats sold out": the standard yearly price applies from then on.
   const [founderSoldOut, setFounderSoldOut] = useState(false);
@@ -39,7 +42,7 @@ export function usePaywallCheckout() {
   }
 
   return {
-    plans, loading: plansQuery.isLoading, catalogFailed, method, quoteOptions, purchaseFor, founderSeats, founderSoldOut,
+    plans, loading: plansQuery.isLoading, catalogFailed, method, unpaidSubscription, quoteOptions, purchaseFor, founderSeats, founderSoldOut,
     declineFirstMonth: () => setFirstMonthDeclined(true),
     markFounderSoldOut: () => setFounderSoldOut(true),
     declineFounder: () => setFounderDeclined(true),

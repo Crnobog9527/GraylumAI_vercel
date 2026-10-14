@@ -5,6 +5,7 @@ import { PRICE_COMPARE, RISK_REVERSAL, type CompareRow, type GatedText } from '@
 import type { LandingPricing } from '@/lib/landing/landing-pricing';
 import { formatUsd } from '@/components/paywall/paywallPlans';
 import { PriceCards } from './PriceCards';
+import { FounderOnly, FounderSeatsLeft } from './LiveFounderSeats';
 import { cn } from '@/lib/utils';
 import styles from './offer.module.css';
 
@@ -51,14 +52,17 @@ export function PriceSection({
         ) : null}
 
         {pricing.founderOpen ? (
-          <p className="text-center text-base font-semibold text-[#FFD700]">
-            前 50 位创始会员，招满为止
-            {founderSeats !== null ? <span className="ml-2 text-sm font-normal text-[#B0B0B0]">还剩 {founderSeats} 个名额</span> : null}
-          </p>
+          <FounderOnly>
+            <p className="text-center text-base font-semibold text-[#FFD700]">
+              前 50 位创始会员，招满为止
+              <FounderSeatsLeft rendered={founderSeats} className="ml-2 text-sm font-normal text-[#B0B0B0]" />
+            </p>
+          </FounderOnly>
         ) : null}
 
         {pricing.cards.length > 0 ? (
-          <PriceCards cards={pricing.cards} yearlyBadge={pricing.yearlyBadge} showResult={showResult} membershipHref={membershipHref} />
+          <PriceCards cards={pricing.cards} yearlyBadge={pricing.yearlyBadge} yearlyBadgeWithoutFounder={pricing.yearlyBadgeWithoutFounder}
+            showResult={showResult} membershipHref={membershipHref} />
         ) : (
           <p role="status" className="text-center text-sm text-[#9A9A9A]">
             会员方案暂时读不到，请稍后刷新，或先看<Link href="/landing/pricing" className="text-[#FFD700] underline">价格页</Link>。

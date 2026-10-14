@@ -17,7 +17,7 @@ function fixture(counts: Array<number | null> = [40, 3, 2], route: unknown = nul
   if (memberships.length) results.push({ data: subscriptions, error: null });
   results.push({ data: { value: { version: 'terms-2026-10' } }, error: null }, { data: [{ id: 'plan-gold' }], error: null },
     { data: goldOrders, error: null });
-  const queries: Array<{ eq: ReturnType<typeof vi.fn>; not: ReturnType<typeof vi.fn>; or: ReturnType<typeof vi.fn> }> = [];
+  const queries: Array<{ eq: ReturnType<typeof vi.fn>; not: ReturnType<typeof vi.fn>; or: ReturnType<typeof vi.fn>; gt: ReturnType<typeof vi.fn> }> = [];
   const from = vi.fn(() => {
     const result = results.shift();
     const query = { select: vi.fn(), eq: vi.fn(), not: vi.fn(), gt: vi.fn(), or: vi.fn(), is: vi.fn(), in: vi.fn(), order: vi.fn(), limit: vi.fn(),
@@ -67,7 +67,8 @@ describe('method membership read projection', () => {
     await expect(readMethodMembership(fixture([50, 1, 0]).db, 'actor')).rejects.toThrow('PAY_WAFFO_FOUNDER_CAPACITY_CONFLICT');
   });
   it('reports auto_renew off once the stop is confirmed, matching getEntitlements cancel_at_period_end', async () => {
-    const paid = (id: string, sub: string) => ({ id, subscription_id: sub, auto_renew: true, purchase_membership_level: 'gold' });
+    const paid = (id: string, sub: string) => ({ id, subscription_id: sub, auto_renew: true, purchase_membership_level: 'gold',
+      entitlement_end: '2026-11-01T00:00:00.000Z' });
     const f = fixture(undefined, null, [paid('o1', 's1'), paid('o2', 's2')],
       [{ id: 's1', cancel_at_period_end: 'true' }, { id: 's2', cancel_at_period_end: 'false' }]);
     const result = await readMethodMembership(f.db, 'actor', 0, staging);
@@ -75,8 +76,28 @@ describe('method membership read projection', () => {
       .toEqual([['o1', false, true], ['o2', true, false]]);
     expect(f.queries[3]?.eq).toHaveBeenCalledWith('user_id', 'actor');
   });
+  it('returns a still-renewing card subscription in its 24-hour renewal grace, marked inGrace (same rule as entitlements)', async () => {
+    const now = Date.parse('2026-10-14T12:00:00.000Z');
+    const order = (id: string, sub: string, end: string, extra: Record<string, unknown> = {}) => ({ id, subscription_id: sub,
+      auto_renew: true, purchase_membership_level: 'pro', payment_channel: 'stripe', payment_method: 'card', entitlement_end: end, ...extra });
+    const sub = (id: string, extra: Record<string, unknown> = {}) => ({ id, status: 'active', cancel_at_period_end: 'false',
+      method_cancel_requested_at: null, method_cancel_confirmed_at: null, ...extra });
+    const ended = '2026-10-14T02:00:00.000Z';
+    const f = fixture(undefined, null, [
+      order('grace', 's1', ended), order('mainland', 's2', ended, { payment_method: 'card_cn' }),
+      order('current', 's3', '2026-11-01T00:00:00.000Z'),
+      order('stopped', 's4', ended), order('stop-asked', 's5', ended), order('wallet', 's6', ended, { payment_method: 'alipay' }),
+      order('renewed-old', 's7', ended), order('renewed-new', 's7', '2026-11-14T02:00:00.000Z'),
+    ], [sub('s1'), sub('s2'), sub('s3'), sub('s4', { cancel_at_period_end: 'true' }),
+      sub('s5', { method_cancel_requested_at: '2026-10-13T00:00:00.000Z' }), sub('s6'), sub('s7')]);
+    const result = await readMethodMembership(f.db, 'actor', now, staging);
+    expect(result.memberships.map(m => [m.id, m.inGrace])).toEqual([['grace', true], ['mainland', true], ['current', false],
+      ['renewed-new', false]]);
+    // The query also reaches back 24 hours; anything older never shows.
+    expect(f.queries[1]?.gt).toHaveBeenCalledWith('entitlement_end', '2026-10-13T12:00:00.000Z');
+  });
   it('never shows a one-time purchase as renewing and fails closed on a missing subscription row', async () => {
-    const once = { id: 'o1', subscription_id: 's1', auto_renew: false };
+    const once = { id: 'o1', subscription_id: 's1', auto_renew: false, entitlement_end: '2026-11-01T00:00:00.000Z' };
     const ok = await readMethodMembership(fixture(undefined, null, [once], [{ id: 's1', cancel_at_period_end: 'false' }]).db, 'actor');
     expect(ok.memberships[0]?.auto_renew).toBe(false);
     await expect(readMethodMembership(fixture(undefined, null, [once], []).db, 'actor')).rejects.toThrow('PAY_WAFFO_MEMBERSHIP_UNAVAILABLE');

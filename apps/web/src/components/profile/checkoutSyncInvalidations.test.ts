@@ -7,7 +7,7 @@ it('refreshes the entitlement level after checkout, so a new member can buy cred
   const utils = {
     user: { getUserProfile: query(), getEntitlements: query() },
     credits: { getBalance: query(), getCreditsSummary: query() },
-    payments: { methodMembership: query(), listBillingRecords: query() },
+    payments: { methodMembership: query(), getMembershipEligibilityMatrix: query(), listBillingRecords: query() },
   };
   await invalidatePostCheckoutMembershipQueries(utils);
   expect(utils.user.getEntitlements.invalidate).toHaveBeenCalledTimes(1);

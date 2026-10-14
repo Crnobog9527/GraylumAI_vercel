@@ -2,12 +2,13 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type Stripe from 'stripe';
 import type { SupabaseClient } from '@supabase/supabase-js';
-const mocks = vi.hoisted(() => ({ scope: vi.fn(), card: vi.fn(), wallet: vi.fn(), stopPrior: vi.fn() }));
+const mocks = vi.hoisted(() => ({ scope: vi.fn(), card: vi.fn(), wallet: vi.fn(), stopPrior: vi.fn(), stopUndelivered: vi.fn() }));
 vi.mock('./stripeCheckoutPersistence', () => ({ resolveStripeScope: mocks.scope }));
 vi.mock('./cardPaymentEvidence', async importActual => ({ ...await importActual<typeof import('./cardPaymentEvidence')>(),
   readCardPaymentEvidence: mocks.card }));
 vi.mock('./walletPaymentEvidence', () => ({ readWalletPaymentEvidence: mocks.wallet }));
 vi.mock('./cardUpgrade', () => ({ stopPriorAfterUpgrade: mocks.stopPrior }));
+vi.mock('./cardSubscriptionStop', () => ({ stopUndeliveredSubscription: mocks.stopUndelivered }));
 import { recoverMethodCheckout } from './walletWebhook';
 
 function fixture(overrides: Record<string, unknown> = {}) {
@@ -30,7 +31,8 @@ describe('PAY-STRIPE-MP card first payment through the method recovery', () => {
   });
   it('fulfills a card subscription with the Stripe period, subscription id and pre-tax amount', async () => {
     const f = fixture();
-    await expect(f.run()).resolves.toEqual({ orderId: 'order' });
+    // The recovery reports what it saw: a delivered payment is paid, whatever the caller's older session copy said.
+    await expect(f.run()).resolves.toEqual({ orderId: 'order', checkoutStatus: null, paymentStatus: 'paid' });
     expect(mocks.card).toHaveBeenCalledWith(expect.objectContaining({ priceId: 'price_gold_month', sessionId: 'cs_card' }));
     expect(mocks.wallet).not.toHaveBeenCalled();
     expect(f.db.rpc).toHaveBeenCalledWith('pay_waffo_fulfill_payment', { p_order: 'order', p_merchant: 'fixture', p_checkout: 'cs_card',
@@ -48,8 +50,11 @@ describe('PAY-STRIPE-MP card first payment through the method recovery', () => {
       method_prior_subscription: 'pro-sub' }));
     const review = fixture({ method_transition: 'upgrade', method_prior_subscription: 'pro-sub' });
     review.db.rpc.mockResolvedValue({ data: { state: 'review', reason: 'upgrade_payment_after_cutoff' }, error: null });
+    mocks.stopUndelivered.mockReset();
     await review.run();
     expect(mocks.stopPrior).toHaveBeenCalledTimes(1);
+    // Paid but kept for review: the prior Pro stays, and the new (undelivered) Gold subscription is stopped at Stripe.
+    expect(mocks.stopUndelivered).toHaveBeenCalledWith({}, 'sub_1');
   });
   it('stops the replaced Pro even when recording the tax fails, and records the tax even when the stop fails', async () => {
     mocks.stopPrior.mockReset();
@@ -79,7 +84,7 @@ describe('PAY-STRIPE-MP card first payment through the method recovery', () => {
         onValidatedSession?.({ status, payment_status: 'unpaid' }); return null;
       });
       const f = fixture({ payment_method: 'card_cn' });
-      await expect(f.run(eventType)).resolves.toEqual({ orderId: 'order' });
+      await expect(f.run(eventType)).resolves.toEqual({ orderId: 'order', checkoutStatus: status, paymentStatus: 'unpaid' });
       if (closes) {
         expect(f.db.rpc).toHaveBeenCalledWith('pay_waffo_observe_qualification', expect.objectContaining({ p_order: 'order',
           p_checkout: 'cs_card', p_state: 'closed_unpaid', p_amount: 0 }));

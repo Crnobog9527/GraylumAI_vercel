@@ -32,6 +32,7 @@ beforeAll(async () => {
       settings: {getMembershipPlans: {useQuery: () => window.plansFail ? {data: window.stalePlans, isLoading: false, isError: true}
         : q(window.plans)}},
       payments: {
+        getMembershipEligibilityMatrix: {useQuery: () => q(window.matrix ?? {entries: []})},
         methodMembership: {useQuery: () => q(window.membership)},
         methodCheckout: {useMutation: () => {
           const [isPending, setPending] = useState(false);
@@ -482,6 +483,31 @@ it('lets a former founder buy Gold yearly at the standard price after the founde
     await page.getByTestId('report-paywall-pay').click();
     await browserExpect(page).toHaveURL(/checkout\.stripe\.com/);
     expect((await checkouts(page) as Array<{ offer: string }>).map(item => item.offer)).toEqual(['founder', 'standard']);
+    expect(errors).toEqual([]);
+  } finally { await page.close(); }
+}, 30000);
+
+it('explains a subscription with an unsuccessful payment, and points to a support ticket (#937)', async () => {
+  const matrix = { currentLevel: 'free', entries: ['pro-plan', 'gold-plan'].map(planId => ({ planId, billingCycle: 'monthly',
+    allowed: false, action: 'resolvePaymentIssue', reasonCode: 'PAYMENT_ATTENTION_REQUIRED', safeMessage: '' })) };
+  const { page, errors } = await open({ matrix });
+  try {
+    await page.getByTestId('report-paywall-terms').check();
+    await browserExpect(page.getByTestId('report-paywall-pay')).toBeDisabled();
+    await browserExpect(page.getByText(/你还有一个付款没有成功的订阅/)).toBeVisible();
+    const ticket = page.getByTestId('report-paywall-support-ticket');
+    await browserExpect(ticket).toHaveText('提交工单');
+    await browserExpect(ticket).toHaveAttribute('href', '/profile?tab=tickets');
+    expect(await checkouts(page)).toEqual([]);
+    expect(errors).toEqual([]);
+  } finally { await page.close(); }
+}, 30000);
+
+it('shows no support link without an unsuccessful old subscription', async () => {
+  const { page, errors } = await open({});
+  try {
+    await browserExpect(page.getByTestId('report-paywall-pay')).toBeVisible();
+    await browserExpect(page.getByTestId('report-paywall-support-ticket')).toHaveCount(0);
     expect(errors).toEqual([]);
   } finally { await page.close(); }
 }, 30000);

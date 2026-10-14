@@ -12,6 +12,9 @@ import { membershipText } from '@/lib/account-presentation';
 import { StrategyOverviewDialog } from './strategy-overview-dialog';
 import { ContentErasureDialog } from './content-erasure-dialog';
 import { ConversationDeleteDialog } from './conversation-delete-dialog';
+import { ConversationRow } from './conversation-row';
+import { DraftRow, type UnassignedDraft } from './draft-row';
+import { useConversationRename } from '@/hooks/use-conversation-rename';
 import { useConversationErasure } from '@/hooks/use-conversation-erasure';
 import { useContentErasureSync } from '@/hooks/use-content-erasure';
 import type { ContentErasureTarget } from '@/lib/content-erasure';
@@ -22,7 +25,7 @@ import styles from './workspace-frame.module.css';
 type Item = {workItemId:string;sessionId:string;title:string;chatName?:string;uiRevision?:number;pinned?:boolean;archived?:boolean;deleted?:boolean;brief:string|null;day:string;revision:number;contentType?:string;lastActivityAt?:string};
 type Account = {projectId:string;platform:string;account:string;displayName?:string;uiRevision?:number;strategyDraftId?:string|null;pendingStrategyDraftId?:string|null;sourceVersionId?:string|null;sourceVersion?:number|null;profile?:Record<string,{label?:string;value?:string;status?:string}>|null;items:Item[]};
 type Business = {businessId:string;accounts:Account[]};
-type Draft = {draftId:string;businessName?:string;createdAt?:string;currentVersion?:number;state?:string};
+type Draft = UnassignedDraft&{createdAt?:string;currentVersion?:number};
 
 /** The accepted U0/U1 shell, with real owned OPC projections instead of demo state. */
 export function WorkspaceFrame({children,right,rightOpen=true,onToggleRight,activeWorkItemId,area='chat',notice,revealRight}:{
@@ -47,7 +50,7 @@ export function WorkspaceFrame({children,right,rightOpen=true,onToggleRight,acti
  const [groupOpen,setGroupOpen]=useState<Record<string,boolean>>({});
  const discussion=useAccountDiscussion();
  const router=useRouter();
- const [erasing,setErasing]=useState<{target:ContentErasureTarget;name:string}|null>(null);
+ const [erasing,setErasing]=useState<{target:ContentErasureTarget;name:string;related?:string[]}|null>(null);
  // Leave a page whose conversation or work was just deleted, here or in another tab.
  const leaveErased=useCallback((target:ContentErasureTarget)=>{
   const session=new URL(location.href).searchParams.get('session');
@@ -57,8 +60,9 @@ export function WorkspaceFrame({children,right,rightOpen=true,onToggleRight,acti
  useContentErasureSync(leaveErased);
  const leaveConversation=useCallback((id:string)=>leaveErased({kind:'session',id}),[leaveErased]);
  const conversationErasure=useConversationErasure(leaveConversation);
- const [deletingConversation,setDeletingConversation]=useState<{id:string;name:string}|null>(null);
- function startErasure(kind:ContentErasureTarget['kind'],id:string,name:string){setMenuId('');setErasing({target:{kind,id},name});}
+ const conversationRename=useConversationRename();
+ const [deletingConversation,setDeletingConversation]=useState<{id:string;name:string;related?:string[]}|null>(null);
+ function startErasure(kind:ContentErasureTarget['kind'],id:string,name:string,related?:string[]){setMenuId('');setErasing({target:{kind,id},name,related});}
  /** The row's "⋯" menu opens below its button, kept inside the window (ChatGPT/Claude style). */
  const menuTrigger=useRef<HTMLElement|null>(null);
  // Esc closes an open row menu and returns focus to its "⋯" button.
@@ -224,20 +228,21 @@ export function WorkspaceFrame({children,right,rightOpen=true,onToggleRight,acti
       </details>;
      })}
      {!archiveView&&<QueryNotice error={conversations.error} loading={conversations.isPending} label="对话记录" retry={()=>conversations.refetch()}/>}
-     {!archiveView&&visibleConversations.length>0&&<details open={groupOpen.conversations??true} onToggle={event=>{const next=event.currentTarget.open;setGroupOpen(current=>current.conversations===next?current:{...current,conversations:next});}}><summary>对话<ChevronDown size={14}/></summary>{visibleConversations.map(conversation=><div className={styles.threadRow} key={conversation.sessionId}><Link className={styles.thread} href={'/runtime?session='+conversation.sessionId}><span>{conversation.title}</span><small>{new Date(conversation.lastActivityAt).toLocaleDateString('zh-CN')} · 对话</small></Link>
-      <button type="button" className={styles.more} aria-label={conversation.title+'的更多操作'}
-       aria-expanded={menuId==='conversation:'+conversation.sessionId}
-       onClick={event=>openRowMenu(event,'conversation:'+conversation.sessionId)}><Ellipsis size={17}/></button>
-      {menuId==='conversation:'+conversation.sessionId&&<div className={styles.workMenu} style={menuPosition} role="menu">
-       <button role="menuitem" className={styles.danger}
-        onClick={()=>{setMenuId('');setDeletingConversation({id:conversation.sessionId,name:conversation.title});}}>
-        删除对话</button></div>}
-     </div>)}</details>}
-     {!archiveView&&unassigned.length>0&&<details open={groupOpen.unassigned??true} onToggle={event=>{const next=event.currentTarget.open;setGroupOpen(current=>current.unassigned===next?current:{...current,unassigned:next});}}><summary>待归类<ChevronDown size={14}/></summary>{unassigned.map(draft=><Link key={draft.draftId} className={styles.thread} href={'/positioning/'+draft.draftId}><span>{draft.businessName??'新账号'} · 定位分析</span><small>{draft.state==='published'?'已确认':'进行中'}</small></Link>)}</details>}
+     {!archiveView&&visibleConversations.length>0&&<details open={groupOpen.conversations??true} onToggle={event=>{const next=event.currentTarget.open;setGroupOpen(current=>current.conversations===next?current:{...current,conversations:next});}}><summary>对话<ChevronDown size={14}/></summary>{visibleConversations.map(conversation=><ConversationRow key={conversation.sessionId}
+      conversation={conversation} menuOpen={menuId==='conversation:'+conversation.sessionId} menuPosition={menuPosition}
+      onOpenMenu={event=>openRowMenu(event,'conversation:'+conversation.sessionId)} onCloseMenu={()=>setMenuId('')}
+      onDelete={()=>setDeletingConversation({id:conversation.sessionId,
+       name:conversationRename.titleOf(conversation.sessionId,conversation.title)})} rename={conversationRename}/>)}</details>}
+     {!archiveView&&unassigned.length>0&&<details open={groupOpen.unassigned??true} onToggle={event=>{const next=event.currentTarget.open;setGroupOpen(current=>current.unassigned===next?current:{...current,unassigned:next});}}><summary>待归类<ChevronDown size={14}/></summary>{unassigned.map(draft=><DraftRow key={draft.draftId} draft={draft}
+      menuOpen={menuId==='draft:'+draft.draftId} menuPosition={menuPosition} onCloseMenu={()=>setMenuId('')}
+      onOpenMenu={event=>openRowMenu(event,'draft:'+draft.draftId)}
+      onDeleteConversation={(id,name)=>setDeletingConversation({id,name,related:[draft.draftId]})}
+      onDeleteDraft={(id,name)=>startErasure('artifact',id,name+' · 稿件与成果',[draft.draftId,...(draft.topicSessionId?[draft.topicSessionId]:[])])}/>)}</details>}
      <QueryNotice error={library.error||drafts.error} loading={library.isPending||drafts.isPending} label="账号与资料" retry={()=>Promise.all([library.refetch(),drafts.refetch()])}/>
      {library.isSuccess&&drafts.isSuccess&&!library.error&&!drafts.error&&(!archiveView&&!platforms.size&&!unassigned.length||archiveView&&![...platforms.values()].flat().some(account=>account.items.some(item=>item.archived&&!item.deleted)))&&<p className={styles.empty}>{archiveView?'暂无归档记录。':'完成定位并采用选题后，账号工作会出现在这里。'}</p>}
     </div>
     {discussion.error&&<p role="alert" className={styles.uiError}>{discussion.error}</p>}{uiError&&<p role="alert" className={styles.uiError}>{uiError}</p>}
+    {conversationRename.error&&<p role="alert" className={styles.uiError}>{conversationRename.error}</p>}
     {conversationErasure.notice&&<p role={conversationErasure.notice.tone==='error'?'alert':'status'} className={styles.uiError}>
      {conversationErasure.notice.text}</p>}
     <div className={styles.railBottom}><div className={styles.creditWidget}><button type="button" onClick={event=>{setFeedbackSent(false);openBottomPanel('feedback',event.currentTarget);}}><img className={styles.navIcon} src="/opc-reference/feedback.svg" alt=""/>在线反馈<img className={styles.externalIcon} src="/opc-reference/arrow-up-right.svg" alt=""/></button><button type="button" aria-expanded={bottomPanel==='credits'} onClick={event=>openBottomPanel('credits',event.currentTarget)}><img className={styles.navIcon} src="/opc-reference/wallet-color.svg" alt=""/>积分 <small>{credits.status==='ready'?credits.credits:'查看'}</small></button></div><button type="button" className={styles.profile} aria-expanded={bottomPanel==='profile'} onClick={event=>openBottomPanel('profile',event.currentTarget)}><span className={styles.avatar}>{(profile.data?.nickname??profile.data?.email??'我').slice(0,1)}</span><span>{profile.data?.nickname??profile.data?.email??'个人中心'}<small>{membershipText(profile,'普通会员','查看账户')}</small></span><ChevronDown size={14}/></button></div>
@@ -254,8 +259,8 @@ export function WorkspaceFrame({children,right,rightOpen=true,onToggleRight,acti
   {strategyAccount?.strategyDraftId&&strategyAccount.sourceVersionId&&<StrategyOverviewDialog account={{projectId:strategyAccount.projectId,platform:strategyAccount.platform,account:strategyAccount.displayName??strategyAccount.account,strategyDraftId:strategyAccount.strategyDraftId,pendingStrategyDraftId:strategyAccount.pendingStrategyDraftId,sourceVersionId:strategyAccount.sourceVersionId,currentVersion:strategyAccount.sourceVersion??undefined,profile:strategyAccount.profile}} onSaved={async()=>{const fresh=await library.refetch();const updated=((fresh.data?.businesses??[]) as Business[]).flatMap(business=>business.accounts).find(account=>account.projectId===strategyAccount.projectId);if(updated)setStrategyAccount(updated);}} onClose={()=>setStrategyAccount(null)}/>}
  {deletingConversation&&<ConversationDeleteDialog name={deletingConversation.name}
   onCancel={()=>setDeletingConversation(null)}
-  onConfirm={()=>{const id=deletingConversation.id;setDeletingConversation(null);void conversationErasure.erase(id);}}/>}
- {erasing&&<ContentErasureDialog target={erasing.target} name={erasing.name}
+  onConfirm={()=>{const {id,related}=deletingConversation;setDeletingConversation(null);void conversationErasure.erase(id,related);}}/>}
+ {erasing&&<ContentErasureDialog target={erasing.target} name={erasing.name} relatedIds={erasing.related}
   onClose={finished=>{const target=erasing.target;setErasing(null);if(finished)leaveErased(target);}}/>}
  </div>;
 }

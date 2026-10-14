@@ -7,6 +7,7 @@ import { walletMembershipTerm } from './methodMembershipTerm';
 import { logger } from '../../lib/logger';
 import { readCardPaymentEvidence, recordCardPaymentTax, type CardOrder, type CardPaymentEvidence } from './cardPaymentEvidence';
 import { stopPriorAfterUpgrade } from './cardUpgrade';
+import { stopUndeliveredSubscription } from './cardSubscriptionStop';
 
 const isCard = (method: string) => method === 'card' || method === 'card_cn';
 
@@ -38,7 +39,8 @@ export async function recoverWalletCheckout(db: SupabaseClient, stripe: Stripe, 
  * recovery after a timeout. Returns null for orders of the legacy path, and { orderId: null } for an unpaid
  * session that is not ours (acknowledged, nothing to do). */
 export async function recoverMethodCheckout(db: SupabaseClient, stripe: Stripe, sessionId: string,
-  verifiedEventType?: string): Promise<{ orderId: string | null } | null> {
+  verifiedEventType?: string): Promise<{ orderId: string | null; checkoutStatus?: Stripe.Checkout.Session['status'];
+    paymentStatus?: Stripe.Checkout.Session['payment_status'] | null } | null> {
   const scope = await resolveStripeScope(stripe);
   const refs = await db.from('payment_provider_refs').select('order_id').eq('channel', 'stripe')
     .eq('merchant_namespace', scope.merchant).eq('mode', scope.mode).eq('object_type', 'checkout').eq('external_id', sessionId).maybeSingle();
@@ -62,7 +64,7 @@ export async function recoverMethodCheckout(db: SupabaseClient, stripe: Stripe, 
   if (scope.mode !== 'test' || !['wechat_pay', 'alipay', 'card', 'card_cn'].includes(order.payment_method)) {
     throw new Error('PAY_WAFFO_PAYMENT_CONFLICT');
   }
-  let observed: { status: string | null; payment_status: string } | null = null;
+  let observed: Pick<Stripe.Checkout.Session, 'status' | 'payment_status'> | null = null;
   const onValidatedSession = (value: Stripe.Checkout.Session) => { observed = value; };
   const cash: CardPaymentEvidence | Awaited<ReturnType<typeof readWalletPaymentEvidence>> = isCard(order.payment_method)
     ? await readCardPaymentEvidence({ stripe, scope, order: order as CardOrder, sessionId, onValidatedSession,
@@ -73,7 +75,7 @@ export async function recoverMethodCheckout(db: SupabaseClient, stripe: Stripe, 
       p_checkout: recoveredSession.id, p_expires: new Date(recoveredSession.expires_at * 1000).toISOString() });
     if (bound.error) throw new Error('PAY_WAFFO_CHECKOUT_UNAVAILABLE');
   }
-  const validated = observed as { status: string | null; payment_status: string } | null;
+  const validated = observed as Pick<Stripe.Checkout.Session, 'status' | 'payment_status'> | null;
   if (!cash) {
     if (validated?.payment_status === 'unpaid' && (validated.status === 'expired'
       || validated.status === 'complete' && verifiedEventType === 'checkout.session.async_payment_failed')) {
@@ -81,7 +83,8 @@ export async function recoverMethodCheckout(db: SupabaseClient, stripe: Stripe, 
         p_mode: 'test', p_checkout: sessionId, p_state: 'closed_unpaid', p_payment: null, p_amount: 0, p_currency: 'usd', p_paid_at: null });
       if (closed.error) throw new Error('PAY_WAFFO_CHECKOUT_UNAVAILABLE');
     }
-    return { orderId: order.id };
+    // The session as this recovery validated it (newer than the caller's copy): a browser return reports it.
+    return { orderId: order.id, checkoutStatus: validated?.status ?? null, paymentStatus: validated?.payment_status ?? null };
   }
   let renewal: { originalEnd: string; eligibleUntil: string } | undefined;
   if (order.method_transition === 'founder_renewal') {
@@ -108,8 +111,11 @@ export async function recoverMethodCheckout(db: SupabaseClient, stripe: Stripe, 
   // a tax bookkeeping failure can never leave the replaced Pro renewing next to the Gold.
   const failures: unknown[] = [];
   const attempt = async (step: () => Promise<unknown>) => { try { await step(); } catch (error) { failures.push(error); } };
-  if ((applied.data as { state?: string }).state === 'fulfilled') await attempt(() => stopPriorAfterUpgrade(db, stripe, order));
+  const delivered = (applied.data as { state?: string }).state === 'fulfilled';
+  if (delivered) await attempt(() => stopPriorAfterUpgrade(db, stripe, order));
+  // Paid but kept for review (not delivered): its card subscription must not renew; the prior Pro is kept.
+  else if (card) await attempt(() => stopUndeliveredSubscription(stripe, card.id));
   if ('tax' in cash) await attempt(() => recordCardPaymentTax(db, scope.merchant, order.id, cash));
   if (failures.length) throw failures[0];
-  return { orderId: order.id };
+  return { orderId: order.id, checkoutStatus: validated?.status ?? null, paymentStatus: 'paid' as const };
 }

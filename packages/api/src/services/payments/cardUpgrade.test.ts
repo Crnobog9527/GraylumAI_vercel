@@ -35,19 +35,25 @@ describe('PAY-STRIPE-MP Pro -> Gold upgrade of a card subscription', () => {
     expect(f.db.rpc).toHaveBeenCalledWith('pay_stripe_mp_observe_subscription', { p_subscription: PRO, p_merchant: 'fixture' });
     expect(mocks.sync).not.toHaveBeenCalled();
   });
-  it('copies a stopping or past-due Pro instead, so admission refuses the upgrade with its usual answer', async () => {
+  it('copies a stopping or past-due Pro and refuses the upgrade at once, whatever an earlier observation said', async () => {
     for (const patch of [{ cancel_at_period_end: true }, { status: 'past_due' }]) {
       const f = fixture(); mocks.read.mockResolvedValue({ ...renewing, ...patch });
-      await f.run();
+      await expect(f.run()).rejects.toThrow('PAY_WAFFO_UPGRADE_WAIT');
       expect(f.db.rpc).not.toHaveBeenCalled();
       expect(mocks.sync).toHaveBeenLastCalledWith(f.db, 'fixture', PRO, expect.objectContaining(patch));
     }
   });
-  it('leaves non-card priors (wallet, legacy Stripe) to admission and refuses another user\'s subscription', async () => {
-    for (const f of [fixture({ stripe_subscription_id: 'sub_legacy', payment_channel: 'stripe' }),
-      fixture({ stripe_subscription_id: null, payment_channel: 'waffo' }), fixture(undefined, [])]) {
-      await f.run();
-      expect(mocks.read).not.toHaveBeenCalled(); expect(f.db.rpc).not.toHaveBeenCalled();
+  it('refuses a still-renewing prior paid another way (Waffo, legacy Stripe): nothing could stop it after the upgrade', async () => {
+    for (const row of [{ stripe_subscription_id: 'sub_legacy', payment_channel: 'stripe' },
+      { stripe_subscription_id: null, payment_channel: 'waffo' }]) {
+      const renewing = fixture({ ...row, user_id: 'user', cancel_at_period_end: 'false' }, []);
+      await expect(renewing.run()).rejects.toThrow('PAY_STRIPE_MP_UPGRADE_PRIOR_CHANNEL');
+      // Already stopping there: nothing left to renew, admission decides as before.
+      await expect(fixture({ ...row, user_id: 'user', cancel_at_period_end: 'true' }, []).run()).resolves.toBeUndefined();
+      // Another user's or unknown prior: admission refuses it with its usual answer.
+      await expect(fixture({ ...row, user_id: 'someone-else', cancel_at_period_end: 'false' }, []).run()).resolves.toBeUndefined();
+      await expect(fixture(null, []).run()).resolves.toBeUndefined();
+      expect(mocks.read).not.toHaveBeenCalled(); expect(renewing.db.rpc).not.toHaveBeenCalled();
     }
     mocks.read.mockResolvedValue({ ...renewing, metadata: { userId: 'someone-else' } });
     await expect(fixture().run()).rejects.toThrow('PAY_COMMON_PAYMENT_EVIDENCE_CONFLICT');

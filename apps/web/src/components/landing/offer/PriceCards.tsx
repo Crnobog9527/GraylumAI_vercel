@@ -6,6 +6,7 @@ import Link from 'next/link';
 import type { PaywallBilling } from '@/components/paywall/paywallPlans';
 import type { LandingCard } from '@/lib/landing/landing-pricing';
 import { cn } from '@/lib/utils';
+import { useFounderSeats } from './LiveFounderSeats';
 
 /**
  * Monthly / yearly switch and the price cards in the paywall v25 format (monthly by default).
@@ -14,17 +15,23 @@ import { cn } from '@/lib/utils';
 export function PriceCards({
   cards,
   yearlyBadge,
+  yearlyBadgeWithoutFounder = yearlyBadge,
   showResult,
   membershipHref,
 }: {
   cards: readonly LandingCard[];
   yearlyBadge: string | null;
+  yearlyBadgeWithoutFounder?: string | null;
   // Result lines whose capability is on, by card key.
   showResult: Record<string, boolean>;
   membershipHref: string;
 }) {
   const [billing, setBilling] = useState<PaywallBilling>('monthly');
-  const hasYearly = cards.some(card => card.quotes.yearly);
+  // The founder card leaves once the live seat count reaches 0 (LiveFounderSeats).
+  const founderGone = useFounderSeats(null) === 0;
+  const shown = founderGone ? cards.filter(card => card.key !== 'founder') : cards;
+  const badge = founderGone ? yearlyBadgeWithoutFounder : yearlyBadge;
+  const hasYearly = shown.some(card => card.quotes.yearly);
 
   return (
     <div className="grid gap-8">
@@ -38,23 +45,32 @@ export function PriceCards({
               <input type="radio" name="landing-billing" className="sr-only" value={cycle} checked={billing === cycle}
                 disabled={disabled} onChange={() => setBilling(cycle)} />
               {cycle === 'monthly' ? '月付' : '年付'}
-              {cycle === 'yearly' && yearlyBadge ? (
+              {cycle === 'yearly' && badge ? (
                 <span className={cn('rounded-full px-2 py-0.5 text-xs font-semibold',
-                  billing === cycle ? 'bg-[#0A0A0A]/15 text-[#0A0A0A]' : 'bg-[#22C55E]/15 text-[#4ADE80]')}>{yearlyBadge}</span>
+                  billing === cycle ? 'bg-[#0A0A0A]/15 text-[#0A0A0A]' : 'bg-[#22C55E]/15 text-[#4ADE80]')}>{badge}</span>
               ) : null}
             </label>
           );
         })}
       </div>
 
-      <div className={cn('mx-auto grid w-full gap-6', cards.length >= 3 ? 'max-w-6xl lg:grid-cols-3' : 'max-w-4xl md:grid-cols-2')}>
-        {cards.map(card => (
+      <div className={cn('mx-auto grid w-full gap-6', shown.length >= 3 ? 'max-w-6xl lg:grid-cols-3' : 'max-w-4xl md:grid-cols-2')}>
+        {shown.map(card => (
           <PriceCard key={card.key} card={card} billing={billing} showResult={showResult[card.key] === true}
             membershipHref={membershipHref} />
         ))}
       </div>
     </div>
   );
+}
+
+/**
+ * The membership page opens the matching payment window from these parameters (PAY-STRIPE-MP step 5, #961); the
+ * server decides whether the $49 first month or the founder price applies. Founder is Gold yearly.
+ */
+export function purchaseHref(membershipHref: string, card: LandingCard['key'], billing: PaywallBilling) {
+  const params = new URLSearchParams({ buy: card === 'pro' ? 'pro' : 'gold', cycle: billing });
+  return `${membershipHref}${membershipHref.includes('?') ? '&' : '?'}${params}`;
 }
 
 function PriceCard({ card, billing, showResult, membershipHref }: {
@@ -92,7 +108,7 @@ function PriceCard({ card, billing, showResult, membershipHref }: {
 
       {quote ? (
         <div className="grid gap-2">
-          <Link href={ready ? membershipHref : '/contact'}
+          <Link href={ready ? purchaseHref(membershipHref, card.key, billing) : '/contact'}
             className={cn('rounded-xl px-4 py-3 text-center text-sm font-semibold transition-colors',
               card.recommended ? 'bg-gradient-to-r from-[#FFD700] to-[#FFA500] text-[#0A0A0A]'
                 : 'border border-[#333333] bg-[#1F1F1F] text-white hover:border-[#FFD700]')}>

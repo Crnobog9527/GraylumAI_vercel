@@ -12,6 +12,7 @@ import { formatCreditsBalance } from '@/components/credits/balancePresentation';
 import { canceledReturnNotice, invalidatePostCheckoutMembershipQueries } from './checkoutSyncInvalidations';
 import { formatUsd, getCreditPackagePrice } from './creditPackagePrice';
 import { ProfileCatalogState } from './ProfileCatalogState';
+import { EligibilityNotices } from './EligibilityNotices';
 import { CreditPackagesSection } from './CreditPackagesSection';
 import { MembershipPlanCard, type PlanConfig } from './MembershipPlanCard';
 import { MethodMembershipSummary } from './MethodMembershipSummary';
@@ -66,6 +67,9 @@ export const SubscriptionCard = memo(function SubscriptionCard({ user: _user }: 
   const deepLinkHandled = useRef(false);
   const checkout = useMethodCheckout();
   const entitlements = trpc.user.getEntitlements.useQuery(undefined, { staleTime: 30_000 });
+  // Old-subscription notices (#937): renewal stopped, or a failed payment that blocks new purchases.
+  const eligibility = trpc.payments.getMembershipEligibilityMatrix.useQuery(undefined, { retry: false });
+  const unpaidSubscription = (eligibility.data?.entries ?? []).some(entry => entry.action === 'resolvePaymentIssue');
 
   const customerPortal = trpc.payments.createCustomerPortalSession.useMutation();
   const subscriptionManagement = trpc.payments.getSubscriptionManagement.useQuery();
@@ -201,13 +205,14 @@ export const SubscriptionCard = memo(function SubscriptionCard({ user: _user }: 
     const plan = apiPlans.find(item => item.id === planId);
     if (!plan) return null;
     return methodPlanAction({ level: plan.level, price: Number(plan.price?.[cycle]),
-      checkoutReady: plan.checkoutReady?.[cycle] === true, current, entitlementLevel: entitlements.data?.level ?? null });
+      checkoutReady: plan.checkoutReady?.[cycle] === true, current, entitlementLevel: entitlements.data?.level ?? null,
+      unpaidSubscription });
   }
 
   // Landing-page price cards link here with ?buy=&cycle=: open the same dialog the plan button opens (offers included),
   // once everything it depends on is known. Nothing opens when the plan cannot be bought; the params never replay.
   const deepLink = parseBuyDeepLink(searchParams);
-  const deepLinkReady = !plansLoading && !checkout.loading && !entitlements.isLoading;
+  const deepLinkReady = !plansLoading && !checkout.loading && !entitlements.isLoading && !eligibility.isLoading;
   useEffect(() => {
     if (!deepLink || !deepLinkReady || deepLinkHandled.current) return;
     deepLinkHandled.current = true;
@@ -292,6 +297,7 @@ export const SubscriptionCard = memo(function SubscriptionCard({ user: _user }: 
       </div>
 
       <MethodMembershipSummary rows={memberships} />
+      <EligibilityNotices entries={eligibility.data?.entries} />
 
       {checkoutNotice && (
         <div role="status" data-testid="profile-checkout-notice" className="mb-6 rounded-xl border px-4 py-3 text-sm"

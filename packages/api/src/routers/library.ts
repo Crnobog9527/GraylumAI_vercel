@@ -30,6 +30,10 @@ export const libraryRouter = router({
     cursor: z.object({ createdAt: z.iso.datetime({ offset: true }), id: z.string().uuid() }).strict().optional(),
   }).strict().refine(input => !(input.afterId && input.cursor), 'LIBRARY_INVALID_CURSOR'))
     .query(({ ctx, input }) => ctx.library.list(input.afterId, input.cursor)),
+  // UI-B picker: own documents by file name, 1–100 characters, matched literally, 50 per page.
+  search: procedure.input(z.object({ query: z.string().trim().min(1).max(100),
+    cursor: z.object({ createdAt: z.iso.datetime({ offset: true }), id: z.string().uuid() }).strict().optional(),
+  }).strict()).query(({ ctx, input }) => ctx.library.search(input.query, input.cursor)),
   segments: procedure.input(document.extend({ version: z.number().int().positive(), start: z.number().int().min(0).max(9999).default(0),
     count: z.number().int().min(1).max(50).default(1) }))
     .query(({ ctx, input }) => ctx.library.segments(input.documentId, input.version, input.start, input.count)),

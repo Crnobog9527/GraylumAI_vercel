@@ -35,11 +35,14 @@ export function methodPlanAction(input: {
   /** The server's entitlement level (`user.getEntitlements`); paid while a membership without a paid order
    * row here is still in force, e.g. renewal grace or an older subscription. */
   entitlementLevel?: string | null;
+  /** #937: an older subscription whose payment failed blocks new purchases until it is handled. */
+  unpaidSubscription?: boolean;
 }): PlanAction {
   if (!RANK[input.level]) return { kind: 'none', label: '免费方案', disabled: true };
   if (!input.checkoutReady || !Number.isFinite(input.price) || input.price <= 0) {
     return { kind: 'none', label: '暂不可购买', disabled: true };
   }
+  if (input.unpaidSubscription) return { kind: 'none', label: '请先处理旧订阅', disabled: true };
   const current = input.current;
   // Checkout would refuse a second membership; say so before the user picks a method and accepts terms.
   if (!current && RANK[input.entitlementLevel ?? '']) return { kind: 'none', label: '会员仍在有效期内', disabled: true };
