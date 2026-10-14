@@ -13,6 +13,7 @@ import { arrivedAt, speakerOf } from './jury-progress';
 import { canvasAt } from './jury-canvas';
 import { JuryCanvas } from './JuryCanvas';
 import { JuryDossier } from './JuryDossier';
+import { JuryEmbedDemo } from './JuryEmbedDemo';
 import { JuryRail } from './JuryRail';
 import { JuryResults } from './JuryResults';
 import { JuryStatic } from './JuryStatic';
@@ -32,6 +33,7 @@ const STACKED = '(max-width: 1023px)';
 export function JuryPreview() {
   const [scenarioId, setScenarioId] = useState<JuryScenarioId>('full');
   const [sampleNames, setSampleNames] = useState(false);
+  const [embed, setEmbed] = useState(false);
   const scenario = findScenario(scenarioId);
   const names = resolveSeatNames(sampleNames ? SAMPLE_PANEL : undefined);
 
@@ -49,12 +51,22 @@ export function JuryPreview() {
         <span aria-hidden="true" />
         示例名字
       </label>
+      <label className={styles.switch} title="落地页用的嵌入版">
+        <input type="checkbox" role="switch" checked={embed} onChange={event => setEmbed(event.target.checked)} />
+        <span aria-hidden="true" />
+        嵌入版
+      </label>
     </>
   );
 
   return (
     <div className={cn(light.light, styles.page)}>
-      <Player key={scenario.id} scenario={scenario} names={names} settings={settings} />
+      {embed ? (
+        <>
+          <Toolbar>{settings}</Toolbar>
+          <main className={styles.main}><JuryEmbedDemo scenario={scenario.id} names={names} /></main>
+        </>
+      ) : <Player key={scenario.id} scenario={scenario} names={names} settings={settings} />}
       <footer className={styles.sampleBar}>
         <p>
           三位评审各自读完、提出意见；意见不一的地方辩论一轮，再由{names.S}逐条裁决、写出修订稿。用不用修订稿，由你逐章决定。

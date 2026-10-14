@@ -86,6 +86,7 @@
   display: grid; justify-items: center; gap: 4px; max-width: 100%; padding: 8px 12px 6px; border: 0; border-radius: 12px;
   background: color-mix(in srgb, var(--j-canvas) 88%, transparent); color: inherit; font: inherit; cursor: pointer;
 }
+div.head, div.card { cursor: default; }
 .head:hover .who, .lane[data-selected='true'] .who { text-decoration: underline; text-underline-offset: 3px; }
 .who { max-width: 100%; overflow: hidden; color: var(--j-ink); font-size: 14px; font-weight: 600; line-height: 1.4; text-overflow: ellipsis; white-space: nowrap; }
 .status { padding: 0 9px; border-radius: 999px; background: var(--j-desk); color: var(--j-body); font-size: 12.5px; line-height: 22px; white-space: nowrap; }
@@ -138,7 +139,12 @@
 @media (max-width: 767px) {
   .scroller { border-radius: 12px; }
   .board { justify-items: stretch; padding: 16px 14px 24px; }
-  .caption { margin-bottom: 14px; font-size: 18px; text-align: left; }
+  /* The sentence about now stays at the top of the screen while the page follows the work down. */
+  .caption {
+    position: sticky; top: 0; z-index: 4; margin: -16px -14px 14px; padding: 12px 14px 10px; font-size: 18px; text-align: left;
+    background: color-mix(in srgb, var(--j-canvas) 92%, transparent); backdrop-filter: blur(4px);
+  }
+  .cards li, .doc, .unchanged { scroll-margin-top: 104px; scroll-margin-bottom: 16px; }
   .doc { width: 100%; padding: 14px 16px 12px; }
   .sink + .doc, .sink + .unchanged { margin-top: 20px; }
   .doc h2 { font-size: 18px; }
