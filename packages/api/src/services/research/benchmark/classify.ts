@@ -60,11 +60,13 @@ export interface ScoredAccount {
  */
 export function selectCandidates(accounts: ScoredAccount[]) {
   const views = (a: ScoredAccount) => a.metrics.medianViews.value ?? -1;
-  const selectable = accounts.filter(a => a.classification.qualified)
+  // One slot per account: the same account found by several keywords or a resumed discovery counts once.
+  const distinct = [...new Map(accounts.map(a => [a.key, a] as const)).values()];
+  const selectable = distinct.filter(a => a.classification.qualified)
     .sort((a, b) => Number(b.classification.category === 'fast_rising') - Number(a.classification.category === 'fast_rising')
       || views(b) - views(a) || a.key.localeCompare(b.key))
     .slice(0, BENCHMARK_RULES.candidatesMax);
-  const headReferences = accounts.filter(a => a.classification.category === 'head_reference');
+  const headReferences = distinct.filter(a => a.classification.category === 'head_reference');
   return { selectable, headReferences, enough: selectable.length >= BENCHMARK_RULES.candidatesMin };
 }
 

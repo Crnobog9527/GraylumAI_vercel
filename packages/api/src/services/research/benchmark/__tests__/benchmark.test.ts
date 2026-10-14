@@ -125,6 +125,10 @@ describe('benchmark classification', () => {
     expect(many.selectable).toHaveLength(12);
     expect(many.selectable[0]!.metrics.medianViews.value).toBe(114);
     expect(qualifiedCount([...scored(2, 50_000), ...scored(2, 50_000)])).toBe(2);
+    // The same 4 accounts found twice are still 4 candidates: not enough for a card.
+    const twice = selectCandidates([...scored(4, 50_000), ...scored(4, 50_000)]);
+    expect(twice).toMatchObject({ enough: false });
+    expect(twice.selectable).toHaveLength(4);
   });
 });
 
