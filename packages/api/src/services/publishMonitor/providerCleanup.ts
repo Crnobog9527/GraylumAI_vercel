@@ -118,11 +118,11 @@ async function settle(client: ClientDeps, job: z.infer<typeof claimedWork>): Pro
   if (job.deleting) {
     if (!job.ownerRef) return ['retry', 'OWNER_UNKNOWN'];
     if (owner !== job.ownerRef) {
-      // A proven takeover still waiting for its disconnect is cleared first; otherwise someone else authorized the
-      // account legitimately since, it is theirs, and only our record ends.
-      // While its owner's publishes are unresolved (action 'disconnect') the record is held, not ended.
+      // While this record holds the provider account ID no other Graylum connection can bind it, so a different
+      // owner is always an unconfirmed overwrite: its grant is cleared before the record ends (or is held while its
+      // owner's publishes are unresolved, action 'disconnect').
       const settled: WorkOutcome = job.action === 'disconnect' ? 'disconnected' : 'owner_changed';
-      if (!job.takeoverPending || current.value.status === 'disconnected') return [settled, null];
+      if (current.value.status === 'disconnected') return [settled, null];
       const cleared = await disconnectAccount(client, job.providerAccountId);
       return cleared.kind === 'ok' || gone(cleared) ? [settled, null] : ['retry', errorCode(cleared)];
     }
