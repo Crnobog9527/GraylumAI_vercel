@@ -1,5 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { MessageMarkdown } from '@/components/chat/MessageMarkdown';
+import { CHAT_ACTION, type ChatNotice } from '@/components/chat/ChatInlineNotice';
 import type { LiveReply } from '@/app/positioning/[draftId]/agent-turn-display';
 import { isOpenTurn } from './runtime-notices';
 import workStyles from './runtime-work.module.css';
@@ -34,4 +35,14 @@ export function PendingLiveReply({ text }: { text: string | null }) {
     <div className={workStyles.agentIdentity}><img src="/graylum-logo.png" alt=""/><span>Graylum · AI 自媒体陪跑教练</span></div>
     <LiveReplyText text={text}/>
   </div>;
+}
+
+/**
+ * "继续" streams a paused turn's remaining reply: its "正在继续…" notice offers 停止 for as long as this page
+ * reads that stream, so a resumed reply can be stopped and keep what is shown like any other turn.
+ */
+export function withResumeStop(notices: ChatNotice[], streamingHere: boolean, stop: { onClick: () => void; disabled: boolean }) {
+  if (!streamingHere) return notices;
+  return notices.map(notice => notice.id.endsWith(':payg-resuming')
+    ? { ...notice, actions: [{ label: CHAT_ACTION.stop, onClick: stop.onClick, disabled: stop.disabled }] } : notice);
 }

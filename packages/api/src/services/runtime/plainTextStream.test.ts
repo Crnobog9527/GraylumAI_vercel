@@ -121,3 +121,23 @@ describe('停止 on a marked plain-text turn',()=>{
   expect(await f.complete(id)).toEqual({state:'cancelled'});
  });
 });
+
+describe('tool rounds on a marked plain-text turn',()=>{
+ it('the next round replaces the prelude shown before a read_source call instead of appending to it',async()=>{
+  const {NativeProgressProjection,NativeTextTransport}=await import('./nativeProgress');
+  const {nativeFrameProjection}=await import('./nativeOutput');
+  const transport=new NativeTextTransport(),events:unknown[]=[];
+  // execute.ts builds a new projection (and frame projection) for every exchange of the primary turn.
+  const round=(content:string)=>{
+   const project=nativeFrameProjection(new NativeProgressProjection({mode:'agent'}),update=>transport.push(update));
+   project(JSON.stringify({choices:[{delta:{content}}]}));
+   events.push(transport.flush());
+  };
+  round('我先读一下资料。');round('最终回答');
+  expect(events).toEqual([
+   {type:'textDelta',offset:0,text:'我先读一下资料。',rev:0,source:'assistant'},
+   // A snapshot (offset 0, new rev): the browser replaces the prelude with the final answer.
+   {type:'textDelta',offset:0,text:'最终回答',rev:1,source:'assistant'},
+  ]);
+ });
+});

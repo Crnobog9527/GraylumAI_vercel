@@ -28,7 +28,7 @@ import { finishedExecution } from '@/lib/finished-execution';
 import { isOrganizerPendingError } from '@/lib/payg-wait';
 import { usePaygResume } from '@/lib/use-payg-resume';
 import { useRuntimeStream } from './use-runtime-stream';
-import { LiveReplyText, PendingLiveReply, liveReplyText, liveScrollSignature } from './runtime-live-reply';
+import { LiveReplyText, PendingLiveReply, liveReplyText, liveScrollSignature, withResumeStop } from './runtime-live-reply';
 
 type VideoChoice='both'|'storyboard'|'editing';
 type VideoOperation={workItemId:string;choice?:VideoChoice;script:{requestId:string;executionId:string;expectedVersion:number};followup:{requestId:string;input:string;selection:{kind:'skill';moduleId:string;revisionId:string};executionId?:string};package:{requestId:string;expectedStoryboardVersion:number;expectedEditingVersion:number};sourceScriptId?:string;held?:boolean};
@@ -350,7 +350,8 @@ function RuntimeWorkspace({routeSession,routeModule}:{routeSession:string;routeM
      {workItem&&contentType!=='unknown'&&e.state==='completed'&&e.skillExecution&&!e.input?.startsWith('[OPC_VIDEO_PACKAGE_V1]')&&!e.input?.startsWith('[OPC_WORK_CONTINUE_V1]')&&<div className="mt-3 flex flex-wrap gap-2">{versions.some(v=>v.kind===(isVideo?'script':'brief')&&v.executionId===e.executionId)?<Link className="underline" href={'/library?item='+workItem.workItemId+'&return='+sessionId}>{isVideo?'这版口播稿已定稿':'已采用为草稿'} · 查看</Link>:<Button disabled={busy} onClick={()=>finalizeScript(e.executionId)}>{isVideo?'将这条回复定稿为口播稿':'采用为当前草稿'}</Button>}</div>}
      {workItem&&contentType==='unknown'&&e.state==='completed'&&e.skillExecution&&e.contentAvailable&&!e.input?.startsWith('[OPC_WORK_CONTINUE_V1]')&&!e.input?.startsWith('[OPC_VIDEO_PACKAGE_V1]')&&<div className="mt-2">{saved.data?.find((result:{artifactId:string;version:number})=>result.artifactId===e.executionId)?<p role="status">已保存成果 · 第 {saved.data.find((result:{artifactId:string;version:number})=>result.artifactId===e.executionId)?.version} 版</p>:<Button variant="outline" disabled={saveWorkResult.isPending} onClick={()=>persistSkillResult(e.executionId)}>保存 Skill 成果</Button>}</div>}
      <LiveReplyText text={liveReplyText(runner.reply,e.executionId,e)}/>
-     <ChatNoticeList notices={[...turnNotices(e),...payg.turnNotices(e,busy)]}/>
+     <ChatNoticeList notices={[...turnNotices(e),...withResumeStop(payg.turnNotices(e,busy),
+      runner.streaming&&runner.reply?.executionId===e.executionId,{onClick:()=>void stop(e.executionId),disabled:cancel.isPending})]}/>
     </div></div>
    </article></div>)}
    {isVideo&&currentScript&&videoPromptEnded&&(!currentStoryboard||!currentEditing)&&<Button variant="outline" onClick={()=>{localStorage.removeItem('opc-video-ended:'+currentScript.id);setVideoUiRevision(v=>v+1);}}>继续这版口播稿的分镜或剪辑</Button>}
