@@ -130,6 +130,23 @@ BEGIN
    OR bill2_unit_multiplier(p->'billingUnit'->'multiplier')>r.multiplier THEN RAISE EXCEPTION 'BILL2_PAYG_BOUND_MISMATCH';END IF;
 END $$;
 
+-- Plan §3.3: a route that keeps returning results without official usage (or unknown results) is stopped.
+-- After TOOL_PENDING_LIMIT pending-cost results on one route within an hour (counting only those after the
+-- route's latest metering review), the call is flagged metering_missing: bill2_payg_claim then refuses new
+-- calls on the route until an admin reviews it (bill2_payg_review_metering).
+CREATE OR REPLACE FUNCTION public.bill2_tool_pending_guard(p_call_id uuid) RETURNS void
+LANGUAGE plpgsql SET search_path=public,pg_temp AS $$
+DECLARE c bill2_calls;
+BEGIN
+  SELECT * INTO c FROM bill2_calls WHERE id=p_call_id;
+  IF c.call_kind<>'tool' OR c.supplier_cost_state IS DISTINCT FROM 'pending' THEN RETURN;END IF;
+  IF (SELECT count(*) FROM bill2_calls x WHERE x.call_kind='tool' AND x.model=c.model
+      AND x.supplier_cost_state='pending' AND x.created_at>clock_timestamp()-interval '1 hour'
+      AND x.created_at>coalesce((SELECT max(l.created_at) FROM user_activity_logs l
+        WHERE l.action='bill2_metering_review' AND l.details->>'model'=c.model),'-infinity'::timestamptz))>=5
+  THEN UPDATE bill2_calls SET metering_missing=true WHERE id=c.id;END IF;
+END $$;
+
 -- The host writes exactly one result per tool call. Called from bill2_record after its locks,
 -- ownership, dispatch and duplicate checks; never callable directly.
 CREATE OR REPLACE FUNCTION public.bill2_record_tool(r bill2_runs, c bill2_calls, e jsonb, h text, erasing boolean) RETURNS jsonb
@@ -188,6 +205,7 @@ BEGIN
     budget_conflict=budget_conflict OR coalesce(cost>c.upper_usd,false)
       OR coalesce(units::numeric>(pricing->>'maxUnitsPerCall')::numeric,false)
   WHERE id=c.id;
+  PERFORM bill2_tool_pending_guard(c.id);
   IF r.state IN ('settled','refunded') THEN
     UPDATE bill2_runs SET provider_cost_usd=(SELECT CASE WHEN count(*) FILTER(WHERE dispatched_at IS NOT NULL AND selected_cost_usd IS NULL)=0
       THEN coalesce(sum(selected_cost_usd),0) END FROM bill2_calls WHERE run_id=r.id),version=version+1 WHERE id=r.id;
@@ -211,6 +229,7 @@ BEGIN
     -- then settle as unknown so the user's hold is never kept beyond that.
     IF NOT erasing AND clock_timestamp()<coalesce(c.recovery_deadline,c.created_at+interval '24 hours') THEN RETURN NULL;END IF;
     UPDATE bill2_calls SET supplier_cost_state='pending',supplier_cost_bound_usd=upper_usd,state='unknown' WHERE id=c.id;
+    PERFORM bill2_tool_pending_guard(c.id);
     RETURN jsonb_build_object('nominal','0','source','tool_unknown');
   END IF;
   RETURN CASE
@@ -315,6 +334,20 @@ $x$||w||$x$
   END IF;
 END $$;
 
+-- Metering review: a tool call has no token profile; its review names the tool protocol and the frozen
+-- price entry hash, so a route stopped by overuse or repeated pending costs can be reviewed and reopened.
+DO $$ DECLARE src text;a text:=$x$  OR c.payload#>>'{payg,profileVersion}' IS DISTINCT FROM p_review->>'profileVersion'
+  OR c.payload#>>'{payg,evidenceVersion}' IS DISTINCT FROM p_review->>'evidenceVersion'$x$; BEGIN
+  src:=pg_get_functiondef('public.bill2_payg_review_metering(uuid,uuid,uuid,jsonb)'::regprocedure);
+  IF position('-- 0255 tool review' IN src)=0 THEN
+    IF array_length(string_to_array(src,a),1)<>2 THEN RAISE EXCEPTION 'RESEARCH_TOOL_BILLING_SOURCE_MISMATCH: bill2_payg_review_metering';END IF;
+    EXECUTE replace(src,a,$x$  -- 0255 tool review
+  -- (Parenthesised: inside an IF condition PL/pgSQL would otherwise end the condition at CASE's THEN.)
+  OR (CASE WHEN c.call_kind='tool' THEN 'research-tool-v1' ELSE c.payload#>>'{payg,profileVersion}' END) IS DISTINCT FROM p_review->>'profileVersion'
+  OR (CASE WHEN c.call_kind='tool' THEN c.payload#>>'{toolPricing,entryHash}' ELSE c.payload#>>'{payg,evidenceVersion}' END) IS DISTINCT FROM p_review->>'evidenceVersion'$x$);
+  END IF;
+END $$;
+
 -- Run creation: a tool route is not an ai_models row. Its frozen policy is checked for shape here;
 -- price, bound and purpose are checked again on every claim (bill2_payg_validate_tool_quote).
 DO $$ DECLARE src text;a text:=$x$  PERFORM id FROM ai_models WHERE id=(entry->>'modelId')::uuid AND model_id=entry->>'model'$x$; BEGIN
@@ -387,7 +420,8 @@ GRANT EXECUTE ON FUNCTION public.bill2_admin_call_report(timestamptz,timestamptz
 DO $$ DECLARE f text; BEGIN
   FOREACH f IN ARRAY ARRAY['bill2_calls_kind_guard()','bill2_tool_cost(jsonb,text,boolean)','bill2_tool_model_id(text)','bill2_payg_zero_source(text)',
     'bill2_payg_validate_tool_quote(bill2_runs,jsonb)','bill2_record_tool(bill2_runs,bill2_calls,jsonb,text,boolean)',
-    'bill2_payg_tool_settlement(bill2_runs,bill2_calls,boolean)','bill2_tool_cost_reconcile(uuid,uuid,text,text)'] LOOP
+    'bill2_payg_tool_settlement(bill2_runs,bill2_calls,boolean)','bill2_tool_cost_reconcile(uuid,uuid,text,text)',
+    'bill2_tool_pending_guard(uuid)'] LOOP
     EXECUTE format('REVOKE ALL ON FUNCTION public.%s FROM PUBLIC,anon,authenticated,service_role',f);
   END LOOP;
   GRANT EXECUTE ON FUNCTION public.bill2_tool_cost_reconcile(uuid,uuid,text,text) TO service_role;

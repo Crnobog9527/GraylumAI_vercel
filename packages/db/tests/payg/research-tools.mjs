@@ -266,6 +266,38 @@ export async function researchToolCases({db,Client,connectionString,report,creat
     report.checks.push('RT-2 account erasure: a dispatched tool call without a result settles at 0 immediately, hold released, supplier cost pending');
   }
 
+  // Repeated pending-cost results stop the route; an admin metering review reopens it.
+  {
+    const f = await make();
+    const ids = [];
+    for (let i=1;i<=5;i++) {
+      const c = await claimTool(db,f,i,{requestHash:String(i).repeat(64)});
+      await rpc(db,'bill2_record',f.actor,f.run,c.id,result(c,i%2?'unknown':'delivered',null,null));
+      ids.push(c.id);
+    }
+    assert.deepEqual((await db.query('SELECT metering_missing m FROM bill2_calls WHERE id=ANY($1::uuid[]) ORDER BY sequence',[ids])).rows.map(r=>r.m),
+      [false,false,false,false,true],'the fifth pending result within an hour flags the route');
+    assert.equal((await financial(db,f)).credits,100,'the user is never charged for these');
+    await assert.rejects(claimTool(db,await make({route:f.policy.model}),1),/BILL2_PAYG_METERING_BLOCKED/);
+    const admin = randomUUID();
+    await db.query("INSERT INTO profiles(id,credits,role) VALUES($1,0,'admin')",[admin]);
+    const flagged = ids[4];
+    const hash = (await db.query('SELECT bill2_payg_metering_hash(c) h FROM bill2_calls c WHERE id=$1',[flagged])).rows[0].h;
+    await rpc(db,'bill2_payg_review_metering',admin,flagged,randomUUID(),{expectedEvidenceHash:hash,profileVersion:'research-tool-v1',
+      evidenceVersion:f.policy.toolPricing.entryHash,reviewReference:'RT-2 local review',humanReviewed:true});
+    const reopened = await make({route:f.policy.model});
+    // Each fixture appends its route threshold; keep exactly one entry for this reused route.
+    await db.query(`UPDATE system_settings SET value=jsonb_set(value,'{thresholds}',(
+      SELECT jsonb_agg(x) FROM jsonb_array_elements(value->'thresholds') x WHERE x->>'model'<>$1)
+      ||jsonb_build_array(jsonb_build_object('model',$1::text,'purpose','question','credits',1)))
+      WHERE key='billing_payg_start_thresholds'`,[f.policy.model]);
+    const next = await claimTool(db,reopened,1);
+    await rpc(db,'bill2_record',reopened.actor,reopened.run,next.id,result(next,'unknown',null,null));
+    assert.equal((await call(db,next.id)).settled,true,'the reviewed route is usable again and earlier pending results no longer count');
+    assert.equal((await db.query('SELECT metering_missing m FROM bill2_calls WHERE id=$1',[next.id])).rows[0].m,false);
+    report.checks.push('RT-2 repeated pending costs: the fifth pending result on a route within an hour stops the route; an admin metering review reopens it and resets the count');
+  }
+
   // Erasure projections keep the financial shape of runs and calls with tool policies (DATA-ERASURE).
   {
     const f = await make();
