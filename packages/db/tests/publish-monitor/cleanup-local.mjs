@@ -213,8 +213,9 @@ try {
   report.checks.push('a provider-side disconnect moves only that connection to re-authorisation');
 
   // An account overwritten after its owner's record began deleting is queued for disconnect, not skipped.
-  await connect(other, 'pfm_late_take');
-  await svc('SELECT publish_monitor_disconnect($1,$2) v', [other.a, (await conn('pfm_late_take')).id]);
+  const lateOwner = await member();
+  await connect(lateOwner, 'pfm_late_take');
+  await svc('SELECT publish_monitor_disconnect($1,$2) v', [lateOwner.a, (await conn('pfm_late_take')).id]);
   const taker = await start(u.a, u.account);
   await c.query("UPDATE social_connect_requests SET state='abandoned' WHERE id=$1", [taker.requestId]);
   const lateVerdict = await classify(taker.requestId, [acc('pfm_late_take', taker.externalId)]);
