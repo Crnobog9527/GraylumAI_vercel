@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 -- FUSION-REVIEW PR-4b: read-only helpers for the review flow. Number allocated by the controller.
--- All three are service-role only with a fixed search_path; none writes anything.
+-- All are service-role only with a fixed search_path; none writes anything.
 BEGIN;
 
 -- The review Skill is uploaded through the existing Skill publication but is not attached to any module, so
@@ -94,9 +94,37 @@ LANGUAGE sql STABLE SET search_path=public,pg_temp AS $$
       WHERE br.actor_id=rv.actor_id AND br.fusion_group_id IN (SELECT (x->>'groupId')::uuid FROM jsonb_array_elements(rv.steps) x)),'[]'));
 $$;
 
+-- Administrators look back at real reviews to tune the panel (Owner 2026-10-14 "边用边调"). Newest first, keyset
+-- paged by (created_at, id); totals are provider cost and credits charged. Bodies are only in the single read.
+CREATE OR REPLACE FUNCTION public.fusion_review_admin_list(p_limit integer, p_before_created timestamptz DEFAULT NULL,
+  p_before_id uuid DEFAULT NULL)
+RETURNS jsonb LANGUAGE sql STABLE SECURITY DEFINER SET search_path=public,pg_temp AS $$
+  SELECT coalesce(jsonb_agg(x ORDER BY (x->>'createdAt')::timestamptz DESC, x->>'reviewId' DESC),'[]') FROM (
+    SELECT jsonb_build_object('reviewId',rv.id,'actorId',rv.actor_id,'draftId',rv.draft_id,'state',rv.state,'outcome',rv.outcome,
+      'round',rv.round,'createdAt',rv.created_at,'endedAt',rv.ended_at,'reviewers',rv.config->'reviewers','summary',rv.config->'summary',
+      'costUsd',coalesce((SELECT sum(coalesce(c.selected_cost_usd,0)) FROM bill2_runs br JOIN bill2_calls c ON c.run_id=br.id
+        WHERE br.actor_id=rv.actor_id AND br.fusion_group_id IN (SELECT (s->>'groupId')::uuid FROM jsonb_array_elements(rv.steps) s)),0),
+      'chargedCredits',coalesce((SELECT sum(coalesce(br.charged,0)) FROM bill2_runs br
+        WHERE br.actor_id=rv.actor_id AND br.fusion_group_id IN (SELECT (s->>'groupId')::uuid FROM jsonb_array_elements(rv.steps) s)),0)) x
+    FROM fusion_reviews rv
+    WHERE p_before_created IS NULL OR (rv.created_at,rv.id)<(p_before_created,coalesce(p_before_id,'ffffffff-ffff-ffff-ffff-ffffffffffff'::uuid))
+    ORDER BY rv.created_at DESC, rv.id DESC LIMIT least(greatest(coalesce(p_limit,20),1),100)) q;
+$$;
+
+-- One review with every call's saved output and cost, for the administrator's look-back. Outputs already erased
+-- with the draft or account are simply absent.
+CREATE OR REPLACE FUNCTION public.fusion_review_admin_read(p_review_id uuid)
+RETURNS jsonb LANGUAGE sql STABLE SECURITY DEFINER SET search_path=public,pg_temp AS $$
+  SELECT fusion_review_view(rv)||jsonb_build_object('actorId',rv.actor_id,'createdAt',rv.created_at,'outputs',
+    coalesce((SELECT jsonb_agg(jsonb_build_object('callId',c.id,'costUsd',c.selected_cost_usd,'body',o.body) ORDER BY c.created_at,c.id)
+      FROM bill2_runs br JOIN bill2_calls c ON c.run_id=br.id LEFT JOIN fusion_call_outputs o ON o.call_id=c.id
+      WHERE br.actor_id=rv.actor_id AND br.fusion_group_id IN (SELECT (s->>'groupId')::uuid FROM jsonb_array_elements(rv.steps) s)),'[]'))
+  FROM fusion_reviews rv WHERE rv.id=p_review_id;
+$$;
+
 DO $$ DECLARE f text; BEGIN
   FOREACH f IN ARRAY ARRAY['fusion_review_skill_file(uuid,uuid,text,text)','fusion_review_source(uuid,uuid)',
-    'fusion_review_preview(uuid,uuid,uuid)',
+    'fusion_review_preview(uuid,uuid,uuid)','fusion_review_admin_list(integer,timestamptz,uuid)','fusion_review_admin_read(uuid)',
     'fusion_review_unjudged(integer)'] LOOP
     EXECUTE format('REVOKE ALL ON FUNCTION public.%s FROM PUBLIC,anon,authenticated,service_role', f);
     EXECUTE format('GRANT EXECUTE ON FUNCTION public.%s TO service_role', f);

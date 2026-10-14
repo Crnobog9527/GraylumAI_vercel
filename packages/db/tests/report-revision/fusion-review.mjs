@@ -215,7 +215,8 @@ export async function runFusionReview({db,Client,connectionString,report}) {
     try {
       for (const [sql,args] of [['SELECT fusion_review_skill_file($1,$2,$3,$4)',[f.skill,f.revision,'b'.repeat(64),'review.md']],
         ['SELECT fusion_review_source($1,$2)',[f.actor,randomUUID()]],['SELECT fusion_review_unjudged(10)',[]],
-        ['SELECT fusion_review_preview($1,$2,$3)',[f.actor,f.draft,f.versionId]]])
+        ['SELECT fusion_review_preview($1,$2,$3)',[f.actor,f.draft,f.versionId]],
+        ['SELECT fusion_review_admin_list(10)',[]],['SELECT fusion_review_admin_read($1)',[randomUUID()]]])
         await assert.rejects(db.query(sql,args),/permission denied/,role+' '+sql);
     } finally { await db.query('RESET ROLE'); }
   }
@@ -236,7 +237,18 @@ export async function runFusionReview({db,Client,connectionString,report}) {
   await assert.rejects(service(db,'fusion_review_preview',f.actor,f.draft,randomUUID()),/FUSION_REVIEW_STALE/);
   const named = await service(db,'fusion_review_read',f.actor,rv5.reviewId);
   assert.ok(named.calls.length>0 && named.calls.every(c => 'modelId' in c),'calls carry their model');
-  report.checks.push('0256: review Skill reader matches skill, revision and package hash, service role only; frozen source, preview sizes, unjudged list, model per call');
+  assert.ok(named.calls.every(c => 'dispatchedAt' in c && 'settledAt' in c),'calls carry their dispatch and settlement times');
+  // 0256: administrator look-back, newest first and keyset paged; one review with its calls' outputs.
+  const listed = await service(db,'fusion_review_admin_list',100);
+  assert.ok(listed.some(r => r.reviewId===rv5.reviewId && r.actorId===f.actor && 'costUsd' in r && 'chargedCredits' in r));
+  const page1 = await service(db,'fusion_review_admin_list',1);
+  assert.equal(page1.length,1);
+  const page2 = await service(db,'fusion_review_admin_list',1,page1[0].createdAt,page1[0].reviewId);
+  assert.ok(page2.every(r => r.reviewId!==page1[0].reviewId),'keyset paging moves past the previous page');
+  const one = await service(db,'fusion_review_admin_read',rv5.reviewId);
+  assert.equal(one.reviewId,rv5.reviewId);assert.ok(Array.isArray(one.outputs));
+  assert.equal(await service(db,'fusion_review_admin_read',randomUUID()),null);
+  report.checks.push('0256: review Skill reader matches skill, revision and package hash, service role only; frozen source, preview sizes, unjudged list, model and times per call, admin look-back');
 
   // Erasure: deleting the draft deletes its reviews; account erasure removes and counts them.
   const before = Number((await db.query('SELECT count(*) v FROM fusion_reviews WHERE actor_id=$1',[f.actor])).rows[0].v);

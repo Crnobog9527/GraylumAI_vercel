@@ -1,4 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import { z } from 'zod';
 import { TRPCError } from '@trpc/server';
 import { adminProcedure, router } from '../trpc';
 import { fusionSettings } from '../services/fusion/settings';
@@ -18,4 +19,20 @@ export const fusionSettingsRouter = router({
   get: adminProcedure.query(({ ctx }) => safe(() => fusionSettingsView(ctx.supabase))),
   update: adminProcedure.input(fusionSettings).mutation(({ ctx, input }) =>
     safe(() => saveFusionSettings(ctx.supabase, ctx.user.id, input))),
+  /** Look-back at real reviews (Owner 2026-10-14 "边用边调"): newest first, keyset paged. */
+  reviews: adminProcedure.input(z.object({ limit: z.number().int().min(1).max(100).default(20),
+    before: z.object({ createdAt: z.string().datetime({ offset: true }), reviewId: z.string().uuid() }).strict().optional() }).strict())
+    .query(({ ctx, input }) => safe(async () => {
+      const result = await ctx.supabase.rpc('fusion_review_admin_list', { p_limit: input.limit,
+        p_before_created: input.before?.createdAt ?? null, p_before_id: input.before?.reviewId ?? null });
+      if (result.error) throw new Error('FUSION_SETTINGS_UNAVAILABLE');
+      return result.data as unknown[];
+    })),
+  /** One review with each call's saved output, model and cost. */
+  review: adminProcedure.input(z.object({ reviewId: z.string().uuid() }).strict()).query(({ ctx, input }) => safe(async () => {
+    const result = await ctx.supabase.rpc('fusion_review_admin_read', { p_review_id: input.reviewId });
+    if (result.error) throw new Error('FUSION_SETTINGS_UNAVAILABLE');
+    if (!result.data) throw new Error('FUSION_REVIEW_NOT_FOUND');
+    return result.data as Record<string, unknown>;
+  })),
 });
