@@ -5,18 +5,24 @@ import { trpc } from '@/trpc/client';
 import { useAfterContentErasure } from '@/hooks/use-content-erasure';
 import { REVIEW_NOTICE, laterNotice, runConversationErasure } from '@/lib/conversation-erasure';
 import {
-  forgetPending, rememberPending, resumeConversationErasure,
+  forgetPending, pendingRelated, rememberPending, resumeConversationErasure,
 } from '@/lib/pending-conversation-erasure';
+import { forgetLocalCopies } from '@/lib/content-erasure';
 import { PENDING_AT_LOAD, useConversationErasureStore } from '@/stores/conversation-erasure';
 
 type Row = { sessionId: string; title: string; lastActivityAt: string };
 /** Rows taken out of the cached list, so a failure can put them back where they were. */
 const removed = new Map<string, { row: Row; index: number }>();
+/** Other IDs whose local copies go with a conversation being deleted (e.g. a positioning draft). */
+const relatedBySession = new Map<string, string[]>();
 /** Deletions from before this page load that have been re-sent (each once per load). */
 const resumed = new Set<string>();
 
 function tabStorage(): Storage | null {
   try { return typeof window === 'undefined' ? null : window.sessionStorage; } catch { return null; }
+}
+function localStore(): Storage | null {
+  try { return typeof window === 'undefined' ? null : window.localStorage; } catch { return null; }
 }
 
 /**
@@ -36,13 +42,14 @@ export function useConversationErasure(leave: (sessionId: string) => void) {
     return {
       hide: (id: string) => {
         store.hide(id);
-        rememberPending(tabStorage(), id);
+        rememberPending(tabStorage(), id, Date.now(), relatedBySession.get(id) ?? []);
         const rows = utils.opc.conversations.getData();
         const index = rows?.findIndex((row) => row.sessionId === id) ?? -1;
         if (rows && index >= 0) removed.set(id, { row: rows[index], index });
         utils.opc.conversations.setData(undefined, (current) => current?.filter((row) => row.sessionId !== id));
       },
       restore: (id: string) => {
+        relatedBySession.delete(id);
         forgetPending(tabStorage(), id);
         const saved = removed.get(id);
         removed.delete(id);
@@ -54,6 +61,10 @@ export function useConversationErasure(leave: (sessionId: string) => void) {
       },
       erase: (id: string) => utils.client.account.conversationErasure.mutate({ sessionId: id }),
       afterErased: (id: string) => {
+        // Unsaved edits kept under a related ID (opc-edit:<draftId>) go with the deleted conversation.
+        const related = relatedBySession.get(id) ?? pendingRelated(tabStorage(), id);
+        relatedBySession.delete(id);
+        if (related.length) forgetLocalCopies(related, [tabStorage(), localStore()]);
         forgetPending(tabStorage(), id);
         removed.delete(id);
         void afterErasure({ kind: 'session', id });
@@ -88,7 +99,8 @@ export function useConversationErasure(leave: (sessionId: string) => void) {
     }
   }, [steps, leave]);
 
-  const erase = useCallback((sessionId: string) => {
+  const erase = useCallback((sessionId: string, related: string[] = []) => {
+    if (related.length) relatedBySession.set(sessionId, related);
     void utils.opc.conversations.cancel();
     return runConversationErasure({ ...steps, leave }, sessionId);
   }, [utils, steps, leave]);

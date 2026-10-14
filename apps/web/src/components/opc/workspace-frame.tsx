@@ -50,7 +50,7 @@ export function WorkspaceFrame({children,right,rightOpen=true,onToggleRight,acti
  const [groupOpen,setGroupOpen]=useState<Record<string,boolean>>({});
  const discussion=useAccountDiscussion();
  const router=useRouter();
- const [erasing,setErasing]=useState<{target:ContentErasureTarget;name:string}|null>(null);
+ const [erasing,setErasing]=useState<{target:ContentErasureTarget;name:string;related?:string[]}|null>(null);
  // Leave a page whose conversation or work was just deleted, here or in another tab.
  const leaveErased=useCallback((target:ContentErasureTarget)=>{
   const session=new URL(location.href).searchParams.get('session');
@@ -61,8 +61,8 @@ export function WorkspaceFrame({children,right,rightOpen=true,onToggleRight,acti
  const leaveConversation=useCallback((id:string)=>leaveErased({kind:'session',id}),[leaveErased]);
  const conversationErasure=useConversationErasure(leaveConversation);
  const conversationRename=useConversationRename();
- const [deletingConversation,setDeletingConversation]=useState<{id:string;name:string}|null>(null);
- function startErasure(kind:ContentErasureTarget['kind'],id:string,name:string){setMenuId('');setErasing({target:{kind,id},name});}
+ const [deletingConversation,setDeletingConversation]=useState<{id:string;name:string;related?:string[]}|null>(null);
+ function startErasure(kind:ContentErasureTarget['kind'],id:string,name:string,related?:string[]){setMenuId('');setErasing({target:{kind,id},name,related});}
  /** The row's "⋯" menu opens below its button, kept inside the window (ChatGPT/Claude style). */
  const menuTrigger=useRef<HTMLElement|null>(null);
  // Esc closes an open row menu and returns focus to its "⋯" button.
@@ -236,8 +236,8 @@ export function WorkspaceFrame({children,right,rightOpen=true,onToggleRight,acti
      {!archiveView&&unassigned.length>0&&<details open={groupOpen.unassigned??true} onToggle={event=>{const next=event.currentTarget.open;setGroupOpen(current=>current.unassigned===next?current:{...current,unassigned:next});}}><summary>待归类<ChevronDown size={14}/></summary>{unassigned.map(draft=><DraftRow key={draft.draftId} draft={draft}
       menuOpen={menuId==='draft:'+draft.draftId} menuPosition={menuPosition} onCloseMenu={()=>setMenuId('')}
       onOpenMenu={event=>openRowMenu(event,'draft:'+draft.draftId)}
-      onDeleteConversation={(id,name)=>setDeletingConversation({id,name})}
-      onDeleteDraft={(id,name)=>startErasure('artifact',id,name+' · 稿件与成果')}/>)}</details>}
+      onDeleteConversation={(id,name)=>setDeletingConversation({id,name,related:[draft.draftId]})}
+      onDeleteDraft={(id,name)=>startErasure('artifact',id,name+' · 稿件与成果',[draft.draftId])}/>)}</details>}
      <QueryNotice error={library.error||drafts.error} loading={library.isPending||drafts.isPending} label="账号与资料" retry={()=>Promise.all([library.refetch(),drafts.refetch()])}/>
      {library.isSuccess&&drafts.isSuccess&&!library.error&&!drafts.error&&(!archiveView&&!platforms.size&&!unassigned.length||archiveView&&![...platforms.values()].flat().some(account=>account.items.some(item=>item.archived&&!item.deleted)))&&<p className={styles.empty}>{archiveView?'暂无归档记录。':'完成定位并采用选题后，账号工作会出现在这里。'}</p>}
     </div>
@@ -259,8 +259,8 @@ export function WorkspaceFrame({children,right,rightOpen=true,onToggleRight,acti
   {strategyAccount?.strategyDraftId&&strategyAccount.sourceVersionId&&<StrategyOverviewDialog account={{projectId:strategyAccount.projectId,platform:strategyAccount.platform,account:strategyAccount.displayName??strategyAccount.account,strategyDraftId:strategyAccount.strategyDraftId,pendingStrategyDraftId:strategyAccount.pendingStrategyDraftId,sourceVersionId:strategyAccount.sourceVersionId,currentVersion:strategyAccount.sourceVersion??undefined,profile:strategyAccount.profile}} onSaved={async()=>{const fresh=await library.refetch();const updated=((fresh.data?.businesses??[]) as Business[]).flatMap(business=>business.accounts).find(account=>account.projectId===strategyAccount.projectId);if(updated)setStrategyAccount(updated);}} onClose={()=>setStrategyAccount(null)}/>}
  {deletingConversation&&<ConversationDeleteDialog name={deletingConversation.name}
   onCancel={()=>setDeletingConversation(null)}
-  onConfirm={()=>{const id=deletingConversation.id;setDeletingConversation(null);void conversationErasure.erase(id);}}/>}
- {erasing&&<ContentErasureDialog target={erasing.target} name={erasing.name}
+  onConfirm={()=>{const {id,related}=deletingConversation;setDeletingConversation(null);void conversationErasure.erase(id,related);}}/>}
+ {erasing&&<ContentErasureDialog target={erasing.target} name={erasing.name} relatedIds={erasing.related}
   onClose={finished=>{const target=erasing.target;setErasing(null);if(finished)leaveErased(target);}}/>}
  </div>;
 }

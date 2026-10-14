@@ -51,7 +51,7 @@ const stubs: Array<[(id: string) => boolean, string]> = [
   [id => id.endsWith('/hooks/use-content-erasure'), `export const useContentErasureSync=()=>{};
     export const useAfterContentErasure=()=>async target=>{window.erased.push(target)};`],
   [id => id.endsWith('/content-erasure-dialog'), `import React from 'react';
-    export function ContentErasureDialog(p){window.opened.push(p.target);return React.createElement('div',{role:'dialog'},'确认弹窗')}`],
+    export function ContentErasureDialog(p){window.opened.push(p.target);window.openedRelated.push(p.relatedIds??[]);return React.createElement('div',{role:'dialog'},'确认弹窗')}`],
 ];
 
 beforeAll(async () => {
@@ -70,7 +70,7 @@ beforeAll(async () => {
       if (id.startsWith('\0stub')) return stubs[Number(id.slice(5))][1];
       if (id === entry) return `import React from 'react'; import {createRoot} from 'react-dom/client';
         import {WorkspaceFrame} from ${JSON.stringify(source)};
-        window.opened=[];window.erasures=[];window.replaced=[];window.erased=[];window.cleanups=[];window.renames=[];
+        window.opened=[];window.openedRelated=[];window.erasures=[];window.replaced=[];window.erased=[];window.cleanups=[];window.renames=[];
         const root=createRoot(document.getElementById('root'));
         const frame=()=>React.createElement(WorkspaceFrame,null,'对话内容');
         root.render(frame());
@@ -355,6 +355,7 @@ it('rename input fits a 375px screen', () => open(375, async page => {
 }));
 
 it('待归类: a live positioning draft deletes its conversation in one click', () => open(1280, async page => {
+  await page.evaluate(() => sessionStorage.setItem('opc-edit:d-live', 'UNSAVED_DRAFT_EDIT'));
   // Bring the row into view first: the sidebar closes an open menu when it scrolls.
   const button = page.getByRole('button', { name: '咖啡店 · 定位分析的更多操作' });
   await button.scrollIntoViewIfNeeded();
@@ -368,6 +369,10 @@ it('待归类: a live positioning draft deletes its conversation in one click', 
   await dialog.getByRole('button', { name: '删除', exact: true }).click();
   await ui(page.getByRole('dialog')).toHaveCount(0, { timeout: 1000 });
   expect(await held(page)).toEqual([{ sessionId: DRAFT_SESSION }]);
+  // Unsaved edits of this draft are kept under its draft ID; they go once the deletion succeeds.
+  expect(await page.evaluate(() => sessionStorage.getItem('opc-edit:d-live'))).toBe('UNSAVED_DRAFT_EDIT');
+  await answer(page, true);
+  await ui.poll(() => page.evaluate(() => sessionStorage.getItem('opc-edit:d-live'))).toBeNull();
 }, '#drafts'));
 
 it('待归类: a read-only draft is labelled and offers deleting the whole draft through the work deletion', () => open(1280, async page => {
@@ -382,6 +387,7 @@ it('待归类: a read-only draft is labelled and offers deleting the whole draft
   await ui(page.getByRole('menuitem', { name: '删除对话' })).toHaveCount(0);
   await page.getByRole('menuitem', { name: '永久删除稿件与成果' }).click();
   expect(await page.evaluate(() => (window as unknown as Win).opened.at(-1))).toEqual({ kind: 'artifact', id: DRAFT_PROJECT });
+  expect(await page.evaluate(() => (window as unknown as { openedRelated: string[][] }).openedRelated.at(-1))).toEqual(['d-ro']);
 }, '#drafts'));
 
 it('reaches the ⋯ button with Tab, which makes it visible', () => open(1280, async page => {

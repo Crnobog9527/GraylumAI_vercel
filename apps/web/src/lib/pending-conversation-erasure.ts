@@ -12,8 +12,28 @@ import { REVIEW_NOTICE, type ConversationNotice } from '@/lib/conversation-erasu
 const PREFIX = 'graylum-pending-conversation-erasure:';
 const MAX_AGE_MS = 10 * 60 * 1000;
 
-export function rememberPending(store: Storage | null, sessionId: string, now = Date.now()) {
-  try { store?.setItem(PREFIX + sessionId, String(now)); } catch { /* The server state is authoritative. */ }
+/** `related`: other IDs whose local copies go with this conversation (e.g. a positioning draft's edits). */
+export function rememberPending(store: Storage | null, sessionId: string, now = Date.now(), related: string[] = []) {
+  try { store?.setItem(PREFIX + sessionId, JSON.stringify({ at: now, related })); } catch { /* The server state is authoritative. */ }
+}
+
+function parseEntry(raw: string | null): { at: number; related: string[] } | null {
+  if (raw === null) return null;
+  try {
+    const value: unknown = JSON.parse(raw);
+    if (typeof value === 'number') return { at: value, related: [] };
+    if (value && typeof value === 'object' && typeof (value as { at?: unknown }).at === 'number') {
+      const related = (value as { related?: unknown }).related;
+      return { at: (value as { at: number }).at,
+        related: Array.isArray(related) ? related.filter((id): id is string => typeof id === 'string') : [] };
+    }
+  } catch { /* Malformed entries are dropped by readPending. */ }
+  return null;
+}
+
+/** Related IDs remembered with a pending deletion, for clearing their local copies after a reload. */
+export function pendingRelated(store: Storage | null, sessionId: string): string[] {
+  try { return parseEntry(store?.getItem(PREFIX + sessionId) ?? null)?.related ?? []; } catch { return []; }
 }
 
 export function forgetPending(store: Storage | null, sessionId: string) {
@@ -31,7 +51,7 @@ export function readPending(store: Storage | null, now = Date.now()): string[] {
       if (key?.startsWith(PREFIX)) keys.push(key);
     }
     for (const key of keys) {
-      const at = Number(store.getItem(key));
+      const at = parseEntry(store.getItem(key))?.at ?? NaN;
       const id = key.slice(PREFIX.length);
       if (Number.isFinite(at) && now - at < MAX_AGE_MS && /^[0-9a-f-]{36}$/.test(id)) found.push(id);
       else store.removeItem(key);
