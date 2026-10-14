@@ -159,7 +159,7 @@ export function SceneBody({ scene, names, clock }: Props) {
     }
     case 'failed':
       return (
-        <Heading step={scene.failure.round === 2 ? '第 2 轮辩论' : '挑刺'} title={`${names[scene.failure.reviewer]}这一轮没有给出可用意见`}
+        <Heading step={scene.failure.round === 2 ? '第 2 轮辩论' : '挑刺'} title={`${names[scene.failure.reviewer]} 这一轮没有给出可用意见`}
           note={`${FAILED_REASON_LABEL[scene.failure.reason]}。其他评审的意见照常交给${names.S}。`} />
       );
     case 'writing':

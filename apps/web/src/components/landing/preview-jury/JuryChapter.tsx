@@ -45,7 +45,9 @@ export function JuryChapter({ section, names, state, locked, onUse, onConfirm }:
         <span className={styles.changeTag} data-changed={section.changed}>{section.changed ? '修订稿改了这一章' : '修订稿没改这一章'}</span>
         {section.wordingOnly ? <span className={styles.flagSoft}>只改了表述</span> : null}
       </header>
-      {section.rulings.length > 0 ? <ul className={styles.rulings}>{section.rulings.map(item => <Ruling key={item.issue} ruling={item} names={names} />)}</ul> : null}
+      {section.rulings.length > 0 ? (
+        <ul className={styles.rulings}>{section.rulings.map(item => <Ruling key={item.issue} ruling={item} names={names} />)}</ul>
+      ) : null}
 
       {section.changed ? (
         <>

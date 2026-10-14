@@ -64,7 +64,10 @@
 }
 .circle .nameTag { margin-bottom: 14px; }
 .person[data-seat='S'] .nameTag { position: absolute; top: 22px; left: calc(50% + 52px); justify-items: start; margin: 0; white-space: nowrap; }
-.nameText { max-width: 13em; overflow: hidden; color: #262626; font-size: 13px; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
+.nameText {
+  display: -webkit-box; max-width: 10.5em; overflow: hidden; color: #262626; font-size: 13px; font-weight: 700; text-align: center;
+  -webkit-box-orient: vertical; -webkit-line-clamp: 2;
+}
 .poseText { color: #5b5b5b; font-size: 11.5px; }
 .person:hover .nameTag { box-shadow: 0 0 0 2px #ffc93c; }
 
@@ -180,7 +183,7 @@
   .window { height: 46%; }
   .person[data-seat='S'] { padding-top: 14px; }
   .person[data-seat='S'] .figure { width: 66px; }
-  .person[data-seat='S'] .nameTag { top: 14px; left: calc(50% + 38px); max-width: 30vw; }
+  .person[data-seat='S'] .nameTag { top: 14px; left: calc(50% + 38px); width: max-content; max-width: 30vw; }
   .person[data-seat='S'] .nameText { max-width: 100%; }
   .person[data-seat='S'] .bubble { top: 14px; left: calc(50% - 46px); }
   .circle { padding: 0 1%; }
@@ -188,7 +191,7 @@
   .table { height: 58px; }
   .person { padding-top: 24px; }
   .nameTag { padding: 3px 6px 4px; }
-  .nameText { max-width: 6.5em; font-size: 12px; }
+  .nameText { max-width: 6.5em; font-size: 12px; line-height: 1.25; }
   .poseText { font-size: 11px; }
   .bubble { font-size: 11.5px; padding: 2px 8px; }
 }

@@ -209,7 +209,8 @@ describe('seat names and static rendering', () => {
     for (const section of choosable(detail.summary.sections)) expect(html).toContain(section.section);
     expect(html.match(/采用修订版/g)?.length).toBe(choosable(detail.summary.sections).length);
     expect(html).toContain('建议怎么改');
-    const failed = renderToStaticMarkup(createElement(JuryResults, { detail: findScenario('failed').detail, names: DEFAULT_SEAT_NAMES, onOpenRecord: () => {} }));
+    const failedDetail = findScenario('failed').detail;
+    const failed = renderToStaticMarkup(createElement(JuryResults, { detail: failedDetail, names: DEFAULT_SEAT_NAMES, onOpenRecord: () => {} }));
     expect(failed).toContain('修订稿没有生成成功');
     expect(failed).not.toContain('采用修订版');
   });

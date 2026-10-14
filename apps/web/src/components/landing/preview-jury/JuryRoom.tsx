@@ -25,7 +25,8 @@ export function JuryRoom({ names, poses, selected, entering, onPeek, onPick }: {
     return (
       <button
         key={code} type="button" className={cn(styles.person, selected === code && styles.personSelected)} data-seat={code}
-        data-pose={pose} data-face={code === 'S' ? undefined : poses.face[code]} aria-pressed={selected === code} aria-label={`${names[code]}：${POSE_LINE[pose]}。查看这位的完整记录`}
+        data-pose={pose} data-face={code === 'S' ? undefined : poses.face[code]} aria-pressed={selected === code}
+        aria-label={`${names[code]}：${POSE_LINE[pose]}。查看这位的完整记录`}
         onMouseEnter={() => onPeek(code)} onMouseLeave={() => onPeek(null)} onFocus={() => onPeek(code)} onBlur={() => onPeek(null)}
         onClick={() => onPick(code)}
       >
