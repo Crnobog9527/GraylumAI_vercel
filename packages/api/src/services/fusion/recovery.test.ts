@@ -28,6 +28,14 @@ function admin(rows: unknown[], options: { deleted?: string[]; failFinalize?: st
 }
 
 describe('Fusion daily recovery', () => {
+  it('collects expired undispatched calls behind a long backlog of dispatched ones', async () => {
+    const backlog = Array.from({ length: 30 }, (_, i) => item(100 + i, true, -60));
+    const a = admin([...backlog, item(99, false, -1)]);
+    const summary = await recoverFusionFinancials(a.db, { limit: 10, now: () => now, budget: createRuntimeBudget() });
+    expect(a.calls.filter(c => c.startsWith('fusion_pending_financial_batch')).length).toBe(4);
+    expect(a.calls.findIndex(c => c === `bill2_cancel:${id(99)}`)).toBeLessThan(a.calls.findIndex(c => c === `bill2_finalize:${id(100)}`));
+    expect(summary).toMatchObject({ cancelled: 1, recovered: 30 });
+  });
   it('cancels expired undispatched calls before slow lookups and stops at the time limit', async () => {
     let clock = now;
     const a = admin([item(20, true, -60), item(21, true, -60), item(22, false, -1)]);

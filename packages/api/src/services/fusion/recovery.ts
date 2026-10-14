@@ -32,7 +32,9 @@ export async function recoverFusionFinancials(admin: SupabaseClient, options: { 
   // Listing is cheap: collect the pages first. Pages advance past calls that cannot progress yet (0235).
   const rows: Array<z.infer<typeof row>> = [];
   let cursor: { p_after_created: string; p_after_id: string } | undefined;
-  for (let page = 0; page < (options.pages ?? 10) && now() < stopAt; page++) {
+  // Keep paging to the end (bounded by the time limit and a safety cap), so expired undispatched calls
+  // behind a long backlog of slow dispatched ones are still collected and released first (#954 review).
+  for (let page = 0; page < (options.pages ?? 200) && now() < stopAt; page++) {
     const listed = await admin.rpc('fusion_pending_financial_batch', { p_limit: limit, ...cursor });
     const parsed = listed.error ? undefined : z.array(row).safeParse(listed.data);
     if (!parsed?.success) return { ...summary, success: false };
