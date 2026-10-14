@@ -6,14 +6,12 @@ import { cn } from '@/lib/utils';
 import styles from './i-reveal.module.css';
 
 /*
- * Sample I's section transitions. Give a section `data-i-reveal` and `reveal.section`; its children with
+ * Sample I's section transitions. Give a section `data-i-reveal` and `reveal.section` (from ./i-reveal); its children with
  * `reveal.rise` (or `reveal.pop`) then come in one after another with a short spring, ordered by their `--d`
  * style value, when the section reaches the screen, and each road between sections draws itself.
  * <IRevealRoot /> (once per page) arms this only when JavaScript runs and reduced motion is off, so without
  * either everything is simply there.
  */
-
-export const reveal = { section: styles.reveal, rise: styles.rise, pop: styles.pop };
 
 export function IRevealRoot() {
   useEffect(() => {

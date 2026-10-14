@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import Link from 'next/link';
 import { ArrowRight, Plus } from 'lucide-react';
-import { reveal } from '@/components/public-site/motion/IReveal';
+import { reveal } from '@/components/public-site/motion/i-reveal';
 import { FINAL_ACTION, HOW_IT_WORKS, VOICE_WALL, type GatedText, type VoiceNote } from '@/lib/landing/landing-copy';
 import { LANDING_FAQ_TITLE, type LandingFaqGroup } from '@/lib/landing/landing-faq';
 import type { FlowStep } from '@/lib/landing/landing-flow';

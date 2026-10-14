@@ -4,7 +4,7 @@ import { Check } from 'lucide-react';
 import { formatUsd } from '@/components/paywall/paywallPlans';
 import { PRICE_COMPARE, RISK_REVERSAL } from '@/lib/landing/landing-copy';
 import { cn } from '@/lib/utils';
-import { reveal } from '@/components/public-site/motion/IReveal';
+import { reveal } from '@/components/public-site/motion/i-reveal';
 import { PlanCards } from './PlanCardsI';
 import { order, type LandingData } from './shared';
 import styles from './i.module.css';
