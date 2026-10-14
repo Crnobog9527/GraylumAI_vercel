@@ -90,7 +90,7 @@ export function reviewFlow(deps: { admin: SupabaseClient; actorId: string;
   async function contextOf(view: ReviewView, src: Source, round: number): Promise<{ context: ReviewContext; current: StepValues }> {
     const before = round > 1 ? await passedRevision(view, src, round - 1) : null;
     return { current: before?.steps ?? frozenValues(view), context: { report: before?.body ?? src.body, materials: view.materials,
-      sections: src.sections, ...(before ? { previous: { steps: before.steps, changeNotes: before.changeNotes } } : {}) } };
+      sections: src.sections, maxCharacters: src.maxCharacters, ...(before ? { previous: { steps: before.steps, changeNotes: before.changeNotes } } : {}) } };
   }
   /** Admits and claims the models of the current position that have no finished call yet. */
   async function claimStep(view: ReviewView, src: Source, at: ReviewPosition, models: string[]) {

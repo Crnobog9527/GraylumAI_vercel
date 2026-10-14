@@ -48,7 +48,13 @@ const SUMMARY_FORMAT = [
   'changeNotes 对每个改动过的章节写一条：改了定位事实就在 fields 里列出对应的 stepId 和 fieldId（这些字段必须 changed=true），只改表述就 wordingOnly=true、fields 为空。',
 ].join('\n');
 
+/** Host-written length rule: counted in characters (as the host check counts), headings included. */
+const lengthRule = (max: number) =>
+  `body 全文（含章节标题）不能超过 ${max} 个字符，超过就算修订失败；原报告已经接近上限时，改写要精简，不要扩写。`;
+
 export type ReviewContext = { report: string; materials: unknown; sections: string[];
+  /** The template's length limit in characters; the host check refuses a longer body, so the model is told the number. */
+  maxCharacters: number;
   /** Round 2 onward: the last revision that passed, as the base for steps (§2.2). */
   previous?: { steps: StepValues; changeNotes: unknown } };
 
@@ -64,7 +70,7 @@ export function summaryRequest(skill: ReviewSkillText, context: ReviewContext, o
   declared: Array<{ stepId: string; fieldIds: string[] }>, current: StepValues): FusionRequest {
   const steps = declared.map(step => ({ stepId: step.stepId, fields: step.fieldIds.map(fieldId =>
     ({ fieldId, currentValue: current[step.stepId]?.[fieldId] ?? '' })) }));
-  return { instructions: `${skill.summary}\n\n${skill.rubric}\n\n${SUMMARY_FORMAT}`,
+  return { instructions: `${skill.summary}\n\n${skill.rubric}\n\n${SUMMARY_FORMAT}\n${lengthRule(context.maxCharacters)}`,
     input: JSON.stringify({ report: context.report, materials: context.materials, sections: context.sections, steps,
       opinions: opinions.map((opinion, index) => ({ reviewer: String.fromCharCode(65 + index), issues: opinion.issues })),
       ...(context.previous ? { previousChangeNotes: context.previous.changeNotes,

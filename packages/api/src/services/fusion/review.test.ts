@@ -53,6 +53,7 @@ vi.mock('./reviewRecord', async original => {
   }) };
 });
 import { reviewFlow } from './review';
+import { summaryRequest } from './reviewPrompts';
 
 const sections = ['定位', '结语'];
 const original = '## 定位\n原定位\n## 结语\n原结语';
@@ -140,6 +141,12 @@ describe('review flow', () => {
     await t.flow.continue(String(db.review!.reviewId));
     expect(db.calls.map(c => c.verdict)).toEqual(['format_invalid', 'format_invalid']);
     expect(db.review).toMatchObject({ state: 'incomplete' });
+  });
+
+  it('tells the summary model the exact length limit the host check enforces (staging run: 10888 → 16522 characters)', () => {
+    const request = summaryRequest({ reviewer: 'r', summary: 's', rubric: 'b' },
+      { report: original, materials: {}, sections, maxCharacters: 12000 }, [], [{ stepId: 's1', fieldIds: ['goal'] }], { s1: { goal: '旧目标' } });
+    expect(request.instructions).toContain('不能超过 12000 个字符');
   });
 
   it('stop ends the review; continue then claims nothing', async () => {
