@@ -19,7 +19,7 @@ const flow=[step('a','Audience',[],[field('who','Who'),field('pain','Pain',false
 const initial={a:{who:info('Busy parents'),pain:info('No time','deferred','hypothesis')},b:{offer:info('Meal plans')},c:{voice:info('Warm')}};
 
 /** A positioning round finalized through R5, so its formal version carries a generated report. */
-async function seed(db,maxLength=20000,minLength=1) {
+export async function seed(db,maxLength=20000,minLength=1) {
  const base=await fixture(db);
  const f=(await db.query('SELECT d7_test.artifacts($1) v',[base.actor])).rows[0].v;
  const project=randomUUID(),round=randomUUID(),execution=randomUUID(),session=randomUUID();
@@ -136,6 +136,8 @@ export async function runCases({db,Client,connectionString,report}) {
  assert.equal(formal.sections.find(s=>s.stepId==='a').body,'Who\nBusy working parents\n\nPain\nNo time');
  const old=(await db.query('SELECT report FROM artifact_versions WHERE id=$1',[f.versionId])).rows[0].report;
  assert.equal(old.generatedReport.body,original,'the earlier formal version is kept');
+ // 0225: the earlier version stays viewable and exportable after an R14 sync opens a new round.
+ assert.equal(await rpc(db,'content_erasure_artifact_readable',f.actor,f.versionId),true,'the earlier version stays readable');
  assert.equal(await rpc(db,'opc_source_allowed',f.actor,done.versionId),true);
  assert.equal((await rpc(db,'opc_topic_consent',f.actor,f.draft,done.versionId)).sourceVersionId,done.versionId);
  assert.deepEqual(await apply(db,f,rv,{request:applyRequest}),done,'apply replay');
