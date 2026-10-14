@@ -77,12 +77,20 @@ export async function recoverFusionFinancials(admin: SupabaseClient, options: { 
     cursor = { p_after_created: last.created_at, p_after_id: last.call_id };
   }
   // Releasing holds of calls never dispatched is quick and must not wait behind slow receipt lookups.
-  // A full page of unjudged calls may hide more: then the only dispatched calls that settle this run are the ones
-  // judged again above (expired, never dispatched holds are always released), so none is billed before its body is
-  // judged, and a lasting backlog still drains a page per run instead of holding credits indefinitely (#962 review).
+  // A full page of unjudged calls may hide more. Then a dispatched call settles this run only when it was judged again
+  // above or has no saved body at all (only a saved body can be unjudged), so none is billed before its body is judged
+  // and a lasting backlog never holds unrelated calls' credits (#962 review). Expired undispatched holds always release.
   const listedAll = !unjudged.error && Array.isArray(unjudged.data) && unjudged.data.length < UNJUDGED_PAGE;
-  const settleable = rows.filter(item => !unsettleable.has(item.call_id)
-    && (listedAll || !item.dispatched || rejudged.has(item.call_id)));
+  const hidden = new Set<string>();
+  if (!listedAll) {
+    for (const item of rows) {
+      if (!item.dispatched || rejudged.has(item.call_id) || unsettleable.has(item.call_id)) continue;
+      if (now() + 10_000 > stopAt) { hidden.add(item.call_id); continue; }
+      const saved = await bounded(admin.rpc('fusion_call_output_read', { p_actor_id: item.actor_id, p_call_id: item.call_id }));
+      if (saved.error || saved.data !== null) hidden.add(item.call_id);
+    }
+  }
+  const settleable = rows.filter(item => !unsettleable.has(item.call_id) && !hidden.has(item.call_id));
   summary.deferred += rows.length - settleable.length;
   const ordered = [...settleable.filter(item => !item.dispatched), ...settleable.filter(item => item.dispatched)];
   await recoverPage(admin, ordered, summary, now, stopAt, options.budget);
