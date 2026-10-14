@@ -2965,7 +2965,7 @@
   "fn:publish_monitor_erasure_scrub(uuid)": "c2165cfa984a",
   "fn:publish_monitor_orphan_classify(jsonb)": "4b67c15e437a",
   "fn:publish_monitor_provider_account_disconnected(text)": "5f267253b35b",
-  "fn:publish_monitor_provider_work_claim(integer,integer)": "f09fc83349d2",
+  "fn:publish_monitor_provider_work_claim(integer,integer)": "078335278c63",
   "fn:publish_monitor_provider_work_finish(uuid,uuid,text,text)": "b2dca139830d",
   "fn:publish_monitor_random_hex()": "59e9d8455660",
   "fn:publish_monitor_set_auto_review(uuid,boolean)": "9342ea1c4874",
