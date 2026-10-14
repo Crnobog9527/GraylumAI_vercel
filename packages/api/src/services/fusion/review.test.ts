@@ -7,6 +7,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 // prompts and host checks under test are the real ones.
 type Call = { groupId: string; runId: string; callId: string; modelId: string; phase: string; dispatched: boolean;
   verdict: string | null; settled: boolean; state: string; dispatchedAt?: string; settledAt?: string };
+const caps = vi.hoisted(() => [] as Array<{ opinion: number; summary: number }>);
 const requests = vi.hoisted(() => [] as Array<{ modelId: string; phase: string; input: string }>);
 const clock = vi.hoisted(() => ({ t: Date.parse('2026-10-14T00:00:00Z'), next() { this.t += 1000; return new Date(this.t).toISOString(); } }));
 const db = vi.hoisted(() => ({ review: null as Record<string, unknown> | null, calls: [] as Call[], outputs: new Map<string, string>(),
@@ -22,7 +23,9 @@ vi.mock('./reviewPrompts', async original => ({ ...(await original<typeof import
   resolveReviewSkill: async () => ({ skillId: '00000000-0000-4000-8000-0000000000c1', revisionId: '00000000-0000-4000-8000-0000000000c2', packageHash: 'a'.repeat(64) }),
   readReviewSkill: async () => ({ reviewer: 'review', summary: 'summarize', rubric: 'rubric' }) }));
 vi.mock('./admission', async original => ({ ...(await original<typeof import('./admission')>()),
-  admitFusionGroup: async (input: { requestId: string; members: Array<{ modelId: string; phase: string; request: { input: string } }> }) => {
+  admitFusionGroup: async (input: { requestId: string; members: Array<{ modelId: string; phase: string; request: { input: string } }>;
+    outputTokens: { opinion: number; summary: number } }) => {
+    caps.push(input.outputTokens);
     const existing = db.groups.get(input.requestId);
     if (existing) return { ...existing, replayed: true };
     const group = { groupId: randomUUID(), runs: input.members.map((m, index) => ({ runId: randomUUID(), index, phase: m.phase,
@@ -69,11 +72,14 @@ const admin = { rpc: async (name: string, args: Record<string, unknown>) => {
   if (name === 'fusion_call_verdict') { const call = db.calls.find(c => c.callId === args.p_call_id)!; call.verdict = String(args.p_verdict); return { data: call.verdict, error: null }; }
   throw new Error('unexpected ' + name);
 } } as unknown as SupabaseClient;
-const opinion = (severity: string | null, verdict: 'keep' | 'change' = 'keep', debate = false) => JSON.stringify({
+const opinion = (severity: string | null, verdict: 'keep' | 'change' = 'keep', debate: boolean | string[] = false) => JSON.stringify({
   decisions: DECISIONS.map(decision => ({ decision, strongestCase: '最强理由', strongestAlternative: '最强替代', verdict, basis: '依据' })),
   issues: severity ? [{ location: '定位', perspective: '目标受众：上班族', problem: '定位太泛，上班族看不出能得到什么具体的好处和结果',
     suggestion: '写清楚给上班族的具体好处，例如下班三十分钟就能做好一顿饭', severity }] : [],
-  ...(debate ? { responses: [{ reviewer: 'A', decision: 'positioning', strongestView: '对方认为受众应该更窄', stance: 'agree', reason: '有道理' }] } : {}) });
+  ...(debate ? { responses: (debate === true ? [] : debate).flatMap(seat => DECISIONS.map(decision =>
+    ({ reviewer: seat, decision, strongestView: `${seat} 在这个决定上的最强观点`, stance: 'agree', reason: '有道理' }))) } : {}) });
+const seatOf = (modelId: string) => String.fromCharCode(65 + ids.reviewers.indexOf(modelId));
+const othersOf = (modelId: string) => ['A', 'B', 'C'].filter(seat => seat !== seatOf(modelId));
 const revision = (value: string) => JSON.stringify({
   adjudication: [{ issue: '定位太泛', reviewers: ['A', 'B'], single: false, adopted: true, reason: '原文确实没写清' }],
   body: `## 定位\n${value}\n## 结语\n原结语`,
@@ -101,7 +107,7 @@ function setup(script: (call: Call) => string | null) {
 }
 
 describe('review flow', () => {
-  beforeEach(() => { db.review = null; db.calls = []; db.outputs.clear(); db.groups.clear(); requests.length = 0; });
+  beforeEach(() => { db.review = null; db.calls = []; db.outputs.clear(); db.groups.clear(); requests.length = 0; caps.length = 0; });
 
   it('without a split: round 1, one summary, proposes the revision to R14, never re-reviewed by the panel', async () => {
     const t = setup(call => call.phase === 'fusion_summary' ? revision('新目标') : opinion('major'));
@@ -123,7 +129,7 @@ describe('review flow', () => {
 
   it('with a split over a key decision: a debate round where each reviewer sees the others, then one summary', async () => {
     const t = setup(call => call.phase === 'fusion_summary' ? revision('新目标')
-      : db.review!.round === 2 ? opinion('major', 'change', true)
+      : db.review!.round === 2 ? opinion('major', 'change', othersOf(call.modelId))
       : opinion('major', call.modelId === ids.reviewers[0] ? 'change' : 'keep'));
     await t.flow.start({ requestId: randomUUID(), draftId: randomUUID(), sourceVersionId: randomUUID() });
     await t.runAll();
@@ -138,6 +144,8 @@ describe('review flow', () => {
     expect((await t.flow.continue(String(db.review!.reviewId))).review).toMatchObject({ state: 'completed',
       outcome: { kind: 'revised', debated: true } });
     expect(t.proposals).toHaveLength(1);
+    // Later groups are admitted with the output caps frozen at start, not the current settings.
+    expect(caps.every(c => c.opinion === 1000 && c.summary === 2000)).toBe(true);
     // Progress events: derived from the record only, seats instead of model names, summaries clipped.
     const { events, ended } = await t.flow.events(String(db.review!.reviewId));
     expect(ended).toBe(true);
@@ -149,12 +157,29 @@ describe('review flow', () => {
     expect(types.indexOf('response')).toBeLessThan(types.indexOf('summary_started'));
     expect(types.slice(-3)).toEqual(['adjudication', 'revision_ready', 'review_ended']);
     expect(events.find(e => e.type === 'revision_ready')).toMatchObject({ changedSectionTitles: ['定位'], changedSections: 1 });
-    expect(events.find(e => e.type === 'response')).toMatchObject({ decision: 'positioning', to: 'A' });
+    expect(events.find(e => e.type === 'response')).toMatchObject({ decision: 'positioning' });
+    expect(events.filter(e => e.type === 'response')).toHaveLength(3 * 2 * 4);
     expect(events.find(e => e.type === 'issue')!.fix).toBeTruthy();
     expect(JSON.stringify(events)).not.toContain(ids.reviewers[0]);
     expect(new Set(events.map(e => e.id)).size).toBe(events.length);
     // Stable: reading again gives the same ids in the same order.
     expect((await t.flow.events(String(db.review!.reviewId))).events.map(e => e.id)).toEqual(events.map(e => e.id));
+  });
+
+  it('judges a debate answer unusable unless it answers every other reviewer on every disputed decision exactly once', async () => {
+    const t = setup(call => call.phase === 'fusion_summary' ? revision('新目标')
+      : db.review!.round === 2 ? (call.modelId === ids.reviewers[1] ? opinion('major', 'change', ['A']) // misses C
+        : call.modelId === ids.reviewers[2] ? opinion('major', 'change', ['A', 'B', 'C']) // answers itself
+        : opinion('major', 'change', othersOf(call.modelId)))
+      : opinion('major', call.modelId === ids.reviewers[0] ? 'change' : 'keep'));
+    await t.flow.start({ requestId: randomUUID(), draftId: randomUUID(), sourceVersionId: randomUUID() });
+    await t.runAll(); await t.runAll();
+    const second = db.calls.filter(c => (db.review!.steps as Array<{ groupId: string; round: number }>).find(s => s.groupId === c.groupId)?.round === 2
+      && c.phase === 'fusion_review');
+    expect(second.map(c => c.verdict)).toEqual(['usable', 'format_invalid', 'format_invalid']);
+    // The debate request names exactly the pairs to answer.
+    const toB = JSON.parse(requests.filter(r => r.phase === 'fusion_review')[4]!.input);
+    expect(toB.respondTo).toHaveLength(2 * 4);
   });
 
   it('ends at once when every reviewer keeps every decision and finds nothing; never proposes', async () => {

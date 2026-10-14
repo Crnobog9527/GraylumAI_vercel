@@ -41,6 +41,18 @@ describe('review opinions', () => {
     expect(parseOpinion(JSON.stringify(debate), { sections, debate: true })?.responses).toHaveLength(1);
   });
 
+  it('requires a debate answer to cover exactly the expected reviewer and decision pairs', () => {
+    const response = (reviewer: string, decision: string) => ({ reviewer, decision, strongestView: '最强观点', stance: 'agree', reason: '理由' });
+    const expected = [{ reviewer: 'A', decision: 'audience' }, { reviewer: 'C', decision: 'audience' }];
+    const answer = (responses: unknown[]) => parseOpinion(JSON.stringify({ decisions: decisions(), issues: [], responses }),
+      { sections, debate: true, responses: expected });
+    expect(answer([response('A', 'audience'), response('C', 'audience')])).not.toBeNull();
+    expect(answer([response('A', 'audience')])).toBeNull();
+    expect(answer([response('A', 'audience'), response('A', 'audience')])).toBeNull();
+    expect(answer([response('A', 'audience'), response('B', 'audience')])).toBeNull();
+    expect(answer([response('A', 'audience'), response('C', 'audience'), response('C', 'platform')])).toBeNull();
+  });
+
   it('drops vague issues one by one and keeps the opinion', () => {
     const vague = [{ ...issue, location: '第三部分' }, { ...issue, problem: '太泛了' }, { ...issue, suggestion: '优化一下' },
       { ...issue, suggestion: issue.problem + '。' }];

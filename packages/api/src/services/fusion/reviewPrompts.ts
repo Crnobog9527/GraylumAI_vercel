@@ -48,7 +48,7 @@ const REVIEWER_FORMAT = [
 ].join('\n');
 const DEBATE_FORMAT = [
   '这是第 2 轮：评审之间对关键决定有分歧。input.others 是其他评审的第 1 轮意见，input.mine 是你自己的第 1 轮意见。',
-  '针对每位其他评审在每个有分歧的关键决定上的观点，各写一条 responses：reviewer 写对方的代号，decision 写是哪个关键决定，strongestView 先把对方的观点讲到最强，stance 写 agree 或 disagree，reason 写理由。',
+  'input.respondTo 列出了你必须回应的每一对（评审代号 + 关键决定）：每一对正好写一条 responses，不多不少，不回应自己。reviewer 写对方的代号，decision 写这个关键决定，strongestView 先把对方在这个决定上的观点讲到最强，stance 写 agree 或 disagree，reason 写理由。',
   '然后重新给出你自己的 decisions 和 issues（格式同第 1 轮），可以保留、修改或撤回第 1 轮的意见。',
 ].join('\n');
 const SUMMARY_FORMAT = [
@@ -81,10 +81,12 @@ export function reviewerRequest(skill: ReviewSkillText, context: ReviewContext):
 
 /** Round 2, only on disagreement: each reviewer sees the others' round-1 opinions and answers them. */
 export function debateRequest(skill: ReviewSkillText, context: ReviewContext, mine: Opinion | null,
-  others: Array<{ reviewer: string; opinion: Opinion }>): FusionRequest {
+  others: Array<{ reviewer: string; opinion: Opinion }>, disputed: string[]): FusionRequest {
   return { instructions: `${skill.reviewer}\n\n${skill.rubric}\n\n${REVIEWER_FORMAT}\n${DEBATE_FORMAT}`,
     input: JSON.stringify({ report: context.report, materials: context.materials, sections: context.sections,
-      mine: mine ? shown(mine) : null, others: others.map(item => ({ reviewer: item.reviewer, ...shown(item.opinion) })) }),
+      mine: mine ? shown(mine) : null, others: others.map(item => ({ reviewer: item.reviewer, ...shown(item.opinion) })),
+      // Exactly these pairs must be answered, each once: every other reviewer on every disputed decision.
+      respondTo: others.flatMap(item => disputed.map(decision => ({ reviewer: item.reviewer, decision }))) }),
     responseFormat: DEBATE_RESPONSE_FORMAT as unknown as Record<string, unknown> };
 }
 

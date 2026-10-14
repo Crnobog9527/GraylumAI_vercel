@@ -48,7 +48,9 @@ export async function replayFusionGroup(admin: SupabaseClient, actorId: string, 
  * budget in one transaction, creates the group and its runs, and replays the first admission for the
  * same request. The early checks here only give a clear reason before any work is frozen. */
 export async function admitFusionGroup(input: { admin: SupabaseClient; actorId: string; requestId: string;
-  sourceSessionId: string; members: FusionMember[]; env?: Record<string, string | undefined> }): Promise<AdmittedFusionGroup> {
+  sourceSessionId: string; members: FusionMember[]; env?: Record<string, string | undefined>;
+  /** The output caps frozen at review start: later groups never use a cap raised mid-review (#962 review). */
+  outputTokens?: { opinion: number; summary: number } }): Promise<AdmittedFusionGroup> {
   const { admin, actorId, members } = input;
   const env = input.env ?? process.env;
   if (!members.length || members.length > 16) throw new Error('FUSION_GROUP_INVALID');
@@ -74,7 +76,8 @@ export async function admitFusionGroup(input: { admin: SupabaseClient; actorId: 
   const models = await Promise.all(members.map(member => {
     const row = (rows.data as FusionModelRow[]).find(candidate => candidate.id === member.modelId);
     if (!row) throw new Error('FUSION_MODEL_UNAVAILABLE');
-    const tokens = member.phase === 'fusion_review' ? settings.review.opinionOutputTokens : settings.review.summaryOutputTokens;
+    const caps = input.outputTokens ?? { opinion: settings.review.opinionOutputTokens, summary: settings.review.summaryOutputTokens };
+    const tokens = member.phase === 'fusion_review' ? caps.opinion : caps.summary;
     return admitFusionModel(admin, window, row, member.phase, tokens, deadline, env);
   }));
   const priced = await freezeStagingPaygPricing(admin, models.map(model => model.policy));

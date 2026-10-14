@@ -73,16 +73,28 @@ const squash = (value: string) => value.replace(/[\s\p{P}]/gu, '');
  * decisions steelmanned exactly once (and, in a debate round, a response). Vague issues are dropped one by
  * one rather than failing the opinion: a section that is not a template title, a "why" or "how" under
  * MIN_REASON_CHARACTERS, or a "how" that only repeats the "why". */
-export function parseOpinion(raw: string, rules: { sections: string[]; debate?: boolean }): Opinion | null {
+export function parseOpinion(raw: string, rules: { sections: string[]; debate?: boolean;
+  /** Debate round: every other reviewer × every disputed decision, each answered exactly once (#962 review). */
+  responses?: Array<{ reviewer: string; decision: string }> }): Opinion | null {
   const parsed = rawOpinion.safeParse(looseJson(raw));
   if (!parsed.success) return null;
   const { decisions, issues, responses } = parsed.data;
   if (decisions.length !== DECISIONS.length || new Set(decisions.map(d => d.decision)).size !== DECISIONS.length) return null;
   if (rules.debate && !responses?.length) return null;
+  if (rules.debate && rules.responses) {
+    const expected = new Set(rules.responses.map(pair => `${pair.reviewer}:${pair.decision}`));
+    const given = (responses ?? []).map(response => `${response.reviewer}:${response.decision}`);
+    if (given.length !== expected.size || new Set(given).size !== given.length || given.some(key => !expected.has(key))) return null;
+  }
   const kept = issues.filter(issue => rules.sections.includes(issue.location.replace(/^#+\s*/, '').trim())
     && length(issue.problem) >= MIN_REASON_CHARACTERS && length(issue.suggestion) >= MIN_REASON_CHARACTERS
     && squash(issue.problem) !== squash(issue.suggestion));
   return { decisions, issues: kept, ...(rules.debate ? { responses } : {}), dropped: issues.length - kept.length };
+}
+
+/** The key decisions reviewers split over (some keep, some change). */
+export function disputedDecisions(opinions: Opinion[]): Array<(typeof DECISIONS)[number]> {
+  return DECISIONS.filter(decision => new Set(opinions.map(o => o.decisions.find(d => d.decision === decision)?.verdict)).size > 1);
 }
 
 /** Reviewers disagree when, for one key decision, some keep it and some would change it (round 2 trigger). */

@@ -63,8 +63,10 @@ export const fusionReviewRouter = router({
   /** Repeatable: decides and claims the next step, or returns the calls still to dispatch. */
   continue: procedure.input(review).mutation(({ ctx, input }) => ctx.flow.continue(input.reviewId)),
   dispatch: procedure.input(review.extend({ callId: uuid })).mutation(({ ctx, input }) => ctx.flow.dispatch(input.reviewId, input.callId)),
-  stop: procedure.input(review).mutation(({ ctx, input }) => ctx.flow.stop(input.reviewId)),
-  end: procedure.input(review).mutation(({ ctx, input }) => ctx.flow.end(input.reviewId)),
+  // Closing only cancels and releases in the database: it must work even after the staging call window is
+  // closed or switched off, so a user can always stop and free the review slot (#962 review).
+  stop: reader.input(review).mutation(({ ctx, input }) => ctx.flow.stop(input.reviewId)),
+  end: reader.input(review).mutation(({ ctx, input }) => ctx.flow.end(input.reviewId)),
   /** Progress events for the animation (FUSION-REVIEW §2.2a); clients play the ids they have not seen. */
   events: reader.input(review).query(({ ctx, input }) => ctx.flow.events(input.reviewId)),
   /** Display names of the seats (Owner 2026-10-14): set by administrators, independent of the models; no model names. */
