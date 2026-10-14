@@ -16,5 +16,9 @@ describe('review estimate', () => {
       instructionBytes: { reviewer: 60_000, summary: 1_000 } }).rounds).toBe(1);
     // A summary that cannot fit the cap: refused at start, before round 1 is charged.
     expect(() => estimateReview({ ...base, opinionTokens: 32768 })).toThrow('FUSION_INPUT_TOO_LARGE');
+    // With one round allowed, an oversized debate payload is never bounded (no context refusal for an unused round).
+    const small = [...ids, 's'].map(id => ({ ...quote(id), providerLimits: { ...quote(id).providerLimits, contextTokens: 120_000 } }));
+    expect(estimateReview({ ...base, quotes: small as never, maxRounds: 1, opinionTokens: 4000, summaryTokens: 4096, fieldCount: 0,
+      instructionBytes: { reviewer: 60_000, summary: 1_000 } }).rounds).toBe(1);
   });
 });

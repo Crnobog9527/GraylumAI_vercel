@@ -46,7 +46,9 @@ export function estimateReview(input: EstimateInput): { rounds: number; estimate
   if (reviewerBytes > PAYG_PROFILE_MAX_BYTES || summaryBytes > PAYG_PROFILE_MAX_BYTES) throw new Error('FUSION_INPUT_TOO_LARGE');
   const debateFits = debateBytes <= PAYG_PROFILE_MAX_BYTES;
   const firstRound = input.reviewers.reduce((sum, id) => sum + bound(id, input.opinionTokens, reviewerBytes), 0);
-  const debate = input.reviewers.reduce((sum, id) => sum + bound(id, input.opinionTokens, debateBytes), 0);
+  // Only bound the debate when a second round is possible; an unused debate payload must not refuse a one-round plan.
+  const debate = input.maxRounds >= 2 && debateFits
+    ? input.reviewers.reduce((sum, id) => sum + bound(id, input.opinionTokens, debateBytes), 0) : 0;
   const summary = bound(input.summary, input.summaryTokens, summaryBytes);
   const budget = Number(input.maxBudgetUsd);
   for (let rounds = Math.min(input.maxRounds, debateFits ? 2 : 1); rounds >= 1; rounds--) {

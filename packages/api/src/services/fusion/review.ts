@@ -5,7 +5,7 @@ import type { BillingRpc } from '../bill2/service';
 import { loadStagingPolicy } from '../runtime/stagingPolicy';
 import { admitFusionGroup, derivedUuid, replayFusionGroup, type FusionMember } from './admission';
 import { fusionExecutor, type FusionBodyVerdict } from './executor';
-import { checkRevision, disputedDecisions, hasDisagreement, parseOpinion, type DeclaredStep, type Opinion, type StepValues } from './hostChecks';
+import { checkRevision, DECISIONS, disputedDecisions, hasDisagreement, parseOpinion, type DeclaredStep, type Opinion, type StepValues } from './hostChecks';
 import { assertSnapshotSize, fusionRequestBytes, type FusionRequest } from './request';
 import { PAYG_PROFILE_MAX_BYTES } from '../runtime/paygHostPolicy';
 import { estimateReview } from './reviewEstimate';
@@ -130,6 +130,17 @@ export function reviewFlow(deps: { admin: SupabaseClient; actorId: string;
   }
   const contextOf = (view: ReviewView, src: Source): ReviewContext => ({ report: src.body, materials: view.materials,
     sections: src.sections, maxCharacters: src.maxCharacters });
+  /** Round 1 as sent, and the summary at its deepest trimming (verdicts only, which claimStep can always fall back to). */
+  function fitsWhenSent(view: ReviewView, src: Source, skill: Awaited<ReturnType<typeof readReviewSkill>>) {
+    const context = contextOf(view, src);
+    const cfg = config.parse(view.config);
+    const verdictsOnly = (index: number) => ({ reviewer: reviewerLabel(index), opinion: {
+      decisions: DECISIONS.map(decision => ({ decision, strongestCase: '', strongestAlternative: '', verdict: 'change' as const, basis: '' })),
+      issues: [], dropped: 0 } });
+    return fusionRequestBytes(reviewerRequest(skill, context)) <= PAYG_PROFILE_MAX_BYTES
+      && fusionRequestBytes(summaryRequest(skill, context, cfg.reviewers.map((_, i) => verdictsOnly(i)), src.declared, frozenValues(view)))
+        <= PAYG_PROFILE_MAX_BYTES;
+  }
   /** The least trimming that fits the byte cap: 0 = full opinions; 1 = without replies and reasoning text; 2 = also only
    * critical and major issues; 3 = also no issues (the key-decision verdicts stay). */
   function fitted(build: (level: number) => FusionRequest): FusionRequest {
@@ -247,9 +258,15 @@ export function reviewFlow(deps: { admin: SupabaseClient; actorId: string;
         opinionTokens: settings.review.opinionOutputTokens, summaryTokens: settings.review.summaryOutputTokens, fieldCount: preview.fieldCount,
         snapshotBytes: preview.reportBytes + preview.materialsBytes,
         instructionBytes: { reviewer: Buffer.byteLength(text.reviewer + text.rubric) + 2048, summary: Buffer.byteLength(text.summary + text.rubric) + 2048 } });
-      return record.start({ requestId: input.requestId, draftId: input.draftId, sourceVersionId: input.sourceVersionId,
+      const view = await record.start({ requestId: input.requestId, draftId: input.draftId, sourceVersionId: input.sourceVersionId,
         config: { estimateUsd, maxRounds: rounds, reviewers: settings.review.reviewerModelIds, summary: settings.review.summaryModelId,
           opinionTokens: settings.review.opinionOutputTokens, summaryTokens: settings.review.summaryOutputTokens, skill } });
+      // Before anything is claimed: round 1 and the most trimmed summary, measured exactly as they will be sent, must fit
+      // the per-call byte cap; otherwise the review ends here with nothing charged (#962 review).
+      if (view.state === 'running' && !view.steps.length && !fitsWhenSent(view, await readSource(view.reviewId), text)) {
+        return finish(view, 'incomplete', { kind: 'input_too_large', phase: 'review' });
+      }
+      return view;
     },
     /** Idempotent: re-judges saved bodies, claims the current step once, or decides the next step / end state. */
     async continue(reviewId: string): Promise<{ review: ReviewView; calls: ReviewView['calls']; waiting?: 'credits' | 'calls' }> {

@@ -318,11 +318,12 @@ describe('review flow', () => {
 
   it('a report too large for a request ends the review before anything is claimed or charged', async () => {
     const t = setup(() => opinion('major'));
-    await t.flow.start({ requestId: randomUUID(), draftId: randomUUID(), sourceVersionId: randomUUID() });
-    sourceBody.value = `## 定位\n${'"'.repeat(200_000)}\n## 结语\n原结语`;
-    const end = await t.flow.continue(String(db.review!.reviewId));
+    // Escaped size counts: 100k quotes become 400k bytes once nested in the request JSON.
+    sourceBody.value = `## 定位\n${'"'.repeat(100_000)}\n## 结语\n原结语`;
+    const started = await t.flow.start({ requestId: randomUUID(), draftId: randomUUID(), sourceVersionId: randomUUID() });
     sourceBody.value = null;
-    expect(end.review).toMatchObject({ state: 'incomplete', outcome: { kind: 'input_too_large', phase: 'review' } });
+    expect(started).toMatchObject({ state: 'incomplete', outcome: { kind: 'input_too_large', phase: 'review' } });
+    expect((await t.flow.continue(String(db.review!.reviewId))).calls).toEqual([]);
     expect(db.calls).toEqual([]);
   });
 
