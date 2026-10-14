@@ -9,9 +9,9 @@ import { cn } from '@/lib/utils';
 import { resolveSeatNames, SAMPLE_PANEL, type JurySeatNames, type SeatCode } from './jury-events';
 import { buildScenes, formatElapsed, playbackLength, sceneAt, skippedStages } from './jury-scenes';
 import { findScenario, JURY_SCENARIOS, type JuryScenario, type JuryScenarioId } from './jury-scripts';
-import { arrivedAt, failedSeatsAt, speakerOf } from './jury-progress';
-import { deskAt } from './jury-desk';
-import { JuryDesk } from './JuryDesk';
+import { arrivedAt, speakerOf } from './jury-progress';
+import { canvasAt } from './jury-canvas';
+import { JuryCanvas } from './JuryCanvas';
 import { JuryDossier } from './JuryDossier';
 import { JuryRail } from './JuryRail';
 import { JuryResults } from './JuryResults';
@@ -25,7 +25,7 @@ const SPEEDS = [1, 3] as const;
 const STACKED = '(max-width: 1023px)';
 
 /**
- * FUSION-REVIEW prototype v3: the review as annotations on the user's report. One stage at a time, each person with
+ * FUSION-REVIEW prototype v4: the review as a canvas around the user's report. One thing lit at a time, each person with
  * their own record, and a result page where the user picks the revision or the original chapter by chapter. Mock data in the
  * shapes of FUSION-REVIEW.md §2.2a (events, detail, adopt). Not linked anywhere and never indexed.
  */
@@ -60,7 +60,7 @@ export function JuryPreview() {
           三位评审各自读完、在页边批注；意见不一的地方辩论一轮，再由{names.S}逐条裁决、写出修订稿。用不用修订稿，由你逐章决定。
         </p>
         <p>
-          不公开的评审团动画原型（第 3 版）：模拟数据，按真实评审的事件顺序和等待时长播放。
+          不公开的评审团动画原型（第 4 版，画布）：模拟数据，按真实评审的事件顺序和等待时长播放。
           <Link href="/landing/preview/g">样稿 G</Link>
         </p>
       </footer>
@@ -121,7 +121,6 @@ function Player({ scenario, names, settings }: { scenario: JuryScenario; names: 
   const clock = playback.clock;
   const ended = playback.finished;
   const scene = sceneAt(scenes, clock);
-  const failed = failedSeatsAt(scenes, clock);
   // Pointing only counts while the desk is on screen: once it is gone no leave event may come to clear it.
   const pointed = ended ? null : peek;
   const seat = pointed ?? pinned ?? speakerOf(scene) ?? 'A';
@@ -165,16 +164,16 @@ function Player({ scenario, names, settings }: { scenario: JuryScenario; names: 
           {ended ? (
             <JuryResults detail={scenario.detail} names={names} onOpenRecord={openRecord} />
           ) : (
-            <JuryDesk scene={scene} view={deskAt(scenes, clock)} names={names} clock={clock} failed={failed} selected={pointed ?? pinned}
+            <JuryCanvas view={canvasAt(scenes, clock, names)} names={names} selected={pointed ?? pinned}
               onPeek={drawer.setPeek} onPick={code => (pinned === code ? drawer.close() : openRecord(code))} />
           )}
         </div>
         <aside className={styles.side} data-open={open} ref={dossierRef} aria-label="评审记录"
           onMouseEnter={drawer.hold} onMouseLeave={() => drawer.setPeek(null)} onFocus={drawer.hold} onBlur={leaveDrawer}>
           <p className={styles.sideHint}>
-            <span>指向（手机上点一下）评审或页边批注，看这位的完整记录{pinned ? '' : '；点一下可以固定'}</span>
+            <span>指向（手机上点一下）评审或卡片，看这位的完整记录{pinned ? '' : '；点一下可以固定'}</span>
             <button type="button" className={styles.backToRoom} onClick={() => stageRef.current?.scrollIntoView({ behavior: 'smooth' })}>
-              回到报告
+              回到画布
             </button>
             <button type="button" className={styles.closeDrawer} onClick={drawer.close} aria-label="收起记录">
               <X size={15} aria-hidden="true" />收起

@@ -29,8 +29,8 @@
   background: var(--j-canvas);
   color: var(--j-ink);
   font-family: var(--j-sans);
-  font-size: 15px;
-  line-height: 1.7;
+  font-size: 17px;
+  line-height: 1.75;
 }
 .page ::selection { background: #e2e2e2; color: var(--j-ink); }
 .page button:focus-visible, .page a:focus-visible, .page input:focus-visible + span, .page select:focus-visible {
