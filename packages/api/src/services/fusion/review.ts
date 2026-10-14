@@ -288,7 +288,8 @@ export function reviewFlow(deps: { admin: SupabaseClient; actorId: string;
       const src = await readSource(reviewId);
       // The start preflight again before the first claim: a start that crashed after creating the record, and was
       // replayed, never ran it (#962 review). Nothing is claimed yet, so ending here charges nothing.
-      if (!view.steps.length && view.state === 'running') {
+      // Paused too: an idle zero-step review is paused by the daily job and resumed by its first claim (#962 review).
+      if (!view.steps.length && (view.state === 'running' || view.state === 'paused')) {
         const skillText = await readReviewSkill(admin, config.parse(view.config).skill as ReviewSkill);
         if (!fitsWhenSent(view, src, skillText)) {
           return { review: await finish(view, 'incomplete', { kind: 'input_too_large', phase: 'review' }), calls: [] };
