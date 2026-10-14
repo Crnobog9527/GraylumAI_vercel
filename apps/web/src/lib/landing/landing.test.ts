@@ -118,7 +118,7 @@ describe('landing page data', () => {
     expect(data.faqItems).toHaveLength(14);
     expect(data.faqItems.map(item => item.question)).not.toContain('为什么创始会员只有 50 个名额？');
     expect(data.compareRows).toHaveLength(4);
-    expect(data.heroNote).toContain('注册送 500 积分');
+    expect(data.heroNote).toBe('无需绑卡，免费试用');
     // No public price answer yet: no founder card, no seats, Gold monthly stays at the catalog price.
     expect(data.pricing.cards.map(card => card.key)).toEqual(['pro', 'gold']);
     expect(data.founderSeats).toBeNull();
@@ -141,8 +141,8 @@ describe('landing page data', () => {
     );
     expect(data.founderSeats).toBe(12);
     expect(data.showStack).toBe(true);
-    expect(data.heroNote).toBe('免费注册，不用绑卡。注册送 500 积分。聊出来的内容随时能看、能导出，不会收回。');
-    expect(data.finalNote).toBe('不用绑卡 · 注册送 500 积分 · 聊出来的内容不会收回');
+    expect(data.heroNote).toBe('无需绑卡，免费试用');
+    expect(data.finalNote).toBe('无需绑卡，免费试用');
     expect(data.risk).toHaveLength(4);
   });
 
