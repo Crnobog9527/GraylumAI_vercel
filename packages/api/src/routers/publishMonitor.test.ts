@@ -28,4 +28,14 @@ describe('publish-monitor automatic review switch', () => {
     await expect(caller(vi.fn(), false).setAutoReview({ enabled: true }))
       .rejects.toMatchObject({ code: 'FORBIDDEN', message: 'PUBLISH_MONITOR_DISABLED' });
   });
+
+  it('disconnect works while paused and refuses a connection that is not the user\'s own', async () => {
+    const id = '00000000-0000-4000-8000-0000000f0002';
+    const rpc = vi.fn().mockResolvedValue({ data: { connectionId: id, providerCleanup: true }, error: null });
+    await expect(caller(rpc, false).disconnect({ connectionId: id })).resolves.toEqual({ connectionId: id, providerCleanup: true });
+    expect(rpc).toHaveBeenCalledWith('publish_monitor_disconnect', { a: actor, p_connection_id: id });
+    const foreign = vi.fn().mockResolvedValue({ data: null, error: { message: 'PUBLISH_MONITOR_CONNECTION_NOT_FOUND' } });
+    await expect(caller(foreign, true).disconnect({ connectionId: id }))
+      .rejects.toMatchObject({ code: 'NOT_FOUND', message: 'PUBLISH_MONITOR_CONNECTION_NOT_FOUND' });
+  });
 });
