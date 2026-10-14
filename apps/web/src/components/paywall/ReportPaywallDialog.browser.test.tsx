@@ -418,7 +418,9 @@ it('with founder seats left, Gold yearly is the $496 founder price with the real
     await browserExpect(page.getByTestId('paywall-plan-gold')).toContainText('创始会员 · 比按月付 12 个月省 $332');
     await browserExpect(page.getByTestId('paywall-founder-seats')).toContainText('还剩 13 个名额（共 50 个）');
     await browserExpect(page.getByTestId('report-paywall-renewal')).toHaveText(/首年 \$496，之后每年自动续费 \$496/);
-    await browserExpect(page.getByTestId('report-paywall-fineprint')).toContainText('以后每年都按 $496 续费');
+    await browserExpect(page.getByTestId('report-paywall-fineprint')).toContainText('创始会员终身 6 折续费（只要连续续费不中断）');
+    // The benefit itself never hard-codes a future amount (item 51); only the renewal line states today's charge.
+    await browserExpect(page.getByTestId('report-paywall-fineprint')).not.toContainText('$');
     // Only the server's seat count: no countdown or timer copy.
     expect(await page.getByTestId('report-paywall').innerText()).not.toMatch(/倒计时|分钟内|今天截止|社群|徽章/);
     await page.getByTestId('report-paywall-terms').check();
