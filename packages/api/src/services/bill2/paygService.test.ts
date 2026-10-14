@@ -147,3 +147,16 @@ it('falls back to the plain observation when the database predates the 403 pendi
   expect(result).toMatchObject({ dispatched: true, providerRejected: false });
   expect(result).not.toHaveProperty('pendingReceipt');
 });
+// B1 (0250): the restored three-tool mentor call reaches bill2_claim; a fourth tool is refused before any RPC.
+it.each([[3, true], [4, false]] as const)('claims a PAYG call carrying %s tool definitions: %s', async (tools, reaches) => {
+  const { api, rpc } = setup(() => ({ id: callId, state: 'prepared', dispatchToken: randomUUID() }));
+  const frozen = frozenCall('{}');
+  const claim = api.claimPaygCall(runId, 1, { ...frozen, payg: { ...frozen.payg!, tools } });
+  if (reaches) {
+    expect(await claim).toEqual({ id: callId, state: 'prepared' });
+    expect((rpc.mock.calls[0]![1].p_payload as { payg: { tools: number } }).payg.tools).toBe(3);
+  } else {
+    await expect(claim).rejects.toThrow();
+    expect(rpc).not.toHaveBeenCalled();
+  }
+});
