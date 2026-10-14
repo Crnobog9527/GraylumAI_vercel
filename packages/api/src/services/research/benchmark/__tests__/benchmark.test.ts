@@ -32,7 +32,13 @@ describe('benchmark metrics', () => {
     expect(m.medianViews).toEqual({ value: null, refs: [] });
     expect(m.engagementRate.value).toBeNull();
     expect(m.missing).toEqual(['followers', 'medianViews', 'engagementRate', 'postsPerWeek']);
-    expect(m.wholeHistory).toBe(true);
+    expect(m.wholeHistory).toBe(false);
+  });
+
+  it('leaves engagement unknown when a counter is missing (e.g. Bilibili has no likes or shares)', () => {
+    const m = accountMetrics({ profile: profile(20_000), posts: posts(5, i => ({ publishedAt: daysAgo(i), views: 100, comments: 3 })) }, now);
+    expect(m.engagementRate).toEqual({ value: null, refs: [] });
+    expect(accountMetrics({ profile: profile(20_000), posts: [], complete: true }, now).wholeHistory).toBe(true);
   });
 
   it('uses only the newest 30 posts and ignores future-dated or undated posts for recency', () => {

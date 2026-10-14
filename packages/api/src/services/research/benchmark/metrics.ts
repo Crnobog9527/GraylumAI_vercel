@@ -37,14 +37,14 @@ export interface AccountMetrics {
   followers: Metric;
   postsAnalyzed: number;
   medianViews: Metric;
-  /** Median of (likes + comments + shares that the platform reports) ÷ views, per post with views. */
+  /** Median of (likes + comments + shares) ÷ views over posts that report views and all three counters. */
   engagementRate: Metric;
   /** Posts published in the last 30 days × 7 ÷ 30. Missing unless every analyzed post has an absolute time. */
   postsPerWeek: Metric;
   lastPublishedAt: { value: string | null; refs: string[] };
   /** Earliest publication time among the fetched posts. */
   earliestPublishedAt: { value: string | null; refs: string[] };
-  /** Fewer than postsMax posts came back, so the fetched posts are the account's whole visible history. */
+  /** The supplier confirmed the fetched posts are the account's whole visible history (`complete`). */
   wholeHistory: boolean;
   missing: string[];
 }
@@ -92,9 +92,10 @@ export function accountMetrics(evidence: AccountEvidence, now: Date): AccountMet
   const rateRefs: string[] = [];
   for (const post of viewed) {
     const views = num(post, 'views')!;
-    const parts = ['likes', 'comments', 'shares'].map(field => num(post, field)).filter((v): v is number => v !== null);
-    if (views === 0 || parts.length === 0) continue;
-    rates.push(parts.reduce((a, b) => a + b, 0) / views);
+    // A missing counter is never counted as zero: such a post does not enter the rate (Bilibili lacks likes/shares).
+    const parts = ['likes', 'comments', 'shares'].map(field => num(post, field));
+    if (views === 0 || parts.some(v => v === null)) continue;
+    rates.push((parts as number[]).reduce((a, b) => a + b, 0) / views);
     rateRefs.push(post.ref);
   }
 
@@ -121,7 +122,7 @@ export function accountMetrics(evidence: AccountEvidence, now: Date): AccountMet
     postsPerWeek: metric(frequencyKnown ? (recent.length * 7) / BENCHMARK_RULES.activeWithinDays : null, dated.map(post => post.ref)),
     lastPublishedAt: newest ? { value: new Date(time(newest)!).toISOString(), refs: [newest.ref] } : { value: null, refs: [] },
     earliestPublishedAt: oldest ? { value: new Date(time(oldest)!).toISOString(), refs: [oldest.ref] } : { value: null, refs: [] },
-    wholeHistory: evidence.posts.length < BENCHMARK_RULES.postsMax,
+    wholeHistory: evidence.complete === true,
     missing: [],
   };
   for (const key of ['followers', 'medianViews', 'engagementRate', 'postsPerWeek'] as const) {
