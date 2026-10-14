@@ -36,6 +36,9 @@ export async function readReviewSkill(admin: SupabaseClient, skill: ReviewSkill)
     rubric: await read(REVIEW_SKILL_FILES.rubric) };
 }
 
+/** Users see only the seat names (Owner 2026-10-14): no text may name the model or its maker. A prompt rule only; an
+ * output filter belongs to the model-identity answer replacement (see the PR's after-launch list). */
+const NO_SELF_IDENTITY = '任何文字里都不要提到你是哪个模型、哪家公司开发的，也不要用"作为某某模型"这类说法；评审之间只用代号 A/B/C 互称。';
 /** Host-written format rules appended to the Skill text: the schema is also enforced by response_format. */
 const REVIEWER_FORMAT = [
   '输出要求：只输出一个 JSON 对象 {"decisions":[...],"issues":[...]}。',
@@ -45,6 +48,7 @@ const REVIEWER_FORMAT = [
     + `problem（为什么有问题，至少 ${MIN_REASON_CHARACTERS} 个字）、suggestion（具体怎么改，至少 ${MIN_REASON_CHARACTERS} 个字，不能只是重复问题）、severity（critical、major 或 minor）。`,
   '章节对不上、理由或改法太笼统的条目会被宿主丢掉。没有需要改的地方时 issues 为空数组。',
   '只依据给出的报告和资料，不要联网，需要外部核实的说法标为"待核实"。',
+  NO_SELF_IDENTITY,
 ].join('\n');
 const DEBATE_FORMAT = [
   '这是第 2 轮：评审之间对关键决定有分歧。input.others 是其他评审的第 1 轮意见，input.mine 是你自己的第 1 轮意见。',
@@ -54,6 +58,7 @@ const DEBATE_FORMAT = [
   '然后重新给出你自己的 decisions 和 issues（格式同第 1 轮），可以保留、修改或撤回第 1 轮的意见。',
 ].join('\n');
 const SUMMARY_FORMAT = [
+  NO_SELF_IDENTITY,
   '输出要求：只输出一个 JSON 对象 {"adjudication","body","steps","changeNotes"}。',
   'adjudication 是裁决记录：去重后的每个问题一条，section 写它属于哪个章节（给出的章节标题原样照抄；涉及全文的写"全文"），issue 写问题概要，'
     + 'reviewers 写哪些评审提出（代号 A/B/C），single 标是否只有一位评审提出，disputed 标评审之间对它是否有分歧，'

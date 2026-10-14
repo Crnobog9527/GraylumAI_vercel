@@ -416,6 +416,7 @@ describe('review flow', () => {
       { report: original, materials: {}, sections, maxCharacters: 12000 }, [], [{ stepId: 's1', fieldIds: ['goal'] }], { s1: { goal: '旧目标' } });
     expect(request.instructions).toContain('不能超过 12000 个字符');
     expect(request.instructions).toContain('逐字照抄原文');
+    expect(request.instructions).toContain('不要提到你是哪个模型');
   });
 
   it('stop ends the review; continue then claims nothing', async () => {
