@@ -91,7 +91,9 @@ beforeAll(async () => {
       messageStressSamples: 12, maxVerifiedMessages: 128, completeCells: 15, variantsPerCell: 4, maxPromptToBytes: 0.5,
       maxPromptToUpper: 0.4, outputLimit: 8192, testedOutputLimit: 512, outputSemantics: 'max-tokens-includes-reasoning',
       includesReasoning: true, cacheCovered: true, costBoundPassed: true } }));
-  const review = { ...DEFAULT_FUSION_SETTINGS.review, enabled: true, reviewerModelIds: models, summaryModelId: models[2], maxBudgetUsd: '5' };
+  const review = { ...DEFAULT_FUSION_SETTINGS.review, enabled: true, reviewerModelIds: models, summaryModelId: models[2], maxBudgetUsd: '5',
+    // Enabling requires a review Skill; group admission itself never reads it.
+    skillId: randomUUID() };
   const values: Record<string, unknown> = { runtime_payg_staging: { version: 1, enabled: true, windowId, profiles },
     billing_credits_per_usd: '100', billing_token_price_multiplier: '3', fusion_compare_max_models: 4,
     [FUSION_SETTINGS_KEY]: { ...DEFAULT_FUSION_SETTINGS, review } };

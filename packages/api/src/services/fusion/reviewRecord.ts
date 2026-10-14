@@ -28,7 +28,9 @@ const refusals = new Set(['FUSION_REVIEW_DISABLED', 'FUSION_MEMBERSHIP_REQUIRED'
   'REPORT_ENTITLEMENTS_UNAVAILABLE', 'FUSION_REVIEW_STALE', 'FUSION_REVIEW_ACTIVE', 'FUSION_REVIEW_BREAKER',
   'FUSION_REVIEW_VERSION_BLOCKED', 'FUSION_BUDGET_EXCEEDED', 'FUSION_REVIEW_CONFLICT', 'FUSION_REVIEW_INVALID',
   'FUSION_REVIEW_DENIED', 'FUSION_REVIEW_ENDED', 'FUSION_REVIEW_STEP_CONFLICT', 'FUSION_GROUP_DENIED', 'FUSION_GROUP_CONFLICT',
-  'FUSION_GROUP_INVALID', 'BILL2_CALL_CONFLICT', 'BILL2_RUN_DENIED']);
+  'FUSION_GROUP_INVALID', 'BILL2_CALL_CONFLICT', 'BILL2_RUN_DENIED',
+  // The losing side of a concurrent adoption: the conflict, never a generic failure (#962 review).
+  'FUSION_REVIEW_ADOPTED']);
 
 export function reviewRecord(admin: SupabaseClient, actorId: string) {
   async function rpc(name: string, args: Record<string, unknown>): Promise<unknown> {
