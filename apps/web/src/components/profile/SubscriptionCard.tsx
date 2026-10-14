@@ -63,6 +63,7 @@ export const SubscriptionCard = memo(function SubscriptionCard({ user: _user }: 
   const [founderSoldOut, setFounderSoldOut] = useState(false);
   const syncedCheckoutSessionRef = useRef<string | null>(null);
   const checkout = useMethodCheckout();
+  const entitlements = trpc.user.getEntitlements.useQuery(undefined, { staleTime: 30_000 });
 
   const customerPortal = trpc.payments.createCustomerPortalSession.useMutation();
   const subscriptionManagement = trpc.payments.getSubscriptionManagement.useQuery();
@@ -198,7 +199,7 @@ export const SubscriptionCard = memo(function SubscriptionCard({ user: _user }: 
     const plan = apiPlans.find(item => item.id === planId);
     if (!plan) return null;
     return methodPlanAction({ level: plan.level, price: Number(plan.price?.[cycle]),
-      checkoutReady: plan.checkoutReady?.[cycle] === true, current });
+      checkoutReady: plan.checkoutReady?.[cycle] === true, current, entitlementLevel: entitlements.data?.level ?? null });
   }
 
   const dialogTarget: MethodCheckoutTarget | null = (() => {

@@ -16,6 +16,10 @@ describe('plan buttons', () => {
     expect(methodPlanAction({ level: 'free', ...ready, current: null })).toMatchObject({ kind: 'none', disabled: true });
     expect(methodPlanAction({ level: 'pro', price: 29, checkoutReady: false, current: null })).toMatchObject({ label: '暂不可购买' });
     expect(methodPlanAction({ level: 'pro', price: 0, checkoutReady: true, current: null })).toMatchObject({ disabled: true });
+    // A paid entitlement without a paid order row here (renewal grace, older subscription): no second purchase.
+    expect(methodPlanAction({ level: 'gold', ...ready, current: null, entitlementLevel: 'pro' }))
+      .toMatchObject({ kind: 'none', label: '会员仍在有效期内', disabled: true });
+    expect(methodPlanAction({ level: 'gold', ...ready, current: null, entitlementLevel: 'free' })).toMatchObject({ kind: 'buy' });
   });
   it('turns Gold into an upgrade of the Pro subscription, and never sells a second same or lower plan', () => {
     const pro = row();

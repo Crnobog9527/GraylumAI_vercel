@@ -32,12 +32,17 @@ export type PlanAction =
 
 export function methodPlanAction(input: {
   level: string; price: number; checkoutReady: boolean; current: MethodMembershipRow | null;
+  /** The server's entitlement level (`user.getEntitlements`); paid while a membership without a paid order
+   * row here is still in force, e.g. renewal grace or an older subscription. */
+  entitlementLevel?: string | null;
 }): PlanAction {
   if (!RANK[input.level]) return { kind: 'none', label: '免费方案', disabled: true };
   if (!input.checkoutReady || !Number.isFinite(input.price) || input.price <= 0) {
     return { kind: 'none', label: '暂不可购买', disabled: true };
   }
   const current = input.current;
+  // Checkout would refuse a second membership; say so before the user picks a method and accepts terms.
+  if (!current && RANK[input.entitlementLevel ?? '']) return { kind: 'none', label: '会员仍在有效期内', disabled: true };
   if (!current) return { kind: 'buy', label: '开通', disabled: false };
   if (current.purchase_membership_level === input.level) return { kind: 'none', label: '当前方案', disabled: true };
   if (current.purchase_membership_level === 'pro' && input.level === 'gold') {
