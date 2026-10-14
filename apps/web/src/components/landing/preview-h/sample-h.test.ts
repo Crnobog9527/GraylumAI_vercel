@@ -9,15 +9,14 @@ import { metadata } from '@/app/landing/preview/h/page';
 import { SCENES } from '@/components/landing/preview-g/scenes';
 import { TILT_MAX, tiltFor } from '@/components/public-site/motion/DepthStage';
 import { DigitRoll, splitUnits } from '@/components/public-site/motion/depth-text';
-import { FINAL_ACTION, H_EXPERT, H_HERO_EXCHANGE, HERO, HERO_H, HOW_IT_WORKS, PRICE_COMPARE, RISK_REVERSAL, VOICE_WALL } from '@/lib/landing/landing-copy';
+import { FINAL_ACTION, H_COMPARE, HERO, HERO_H, HOW_IT_WORKS, PRICE_COMPARE, RISK_REVERSAL, VOICE_WALL } from '@/lib/landing/landing-copy';
 import { SIGNUP_CTA_HREF } from '@/lib/seo/content/shared';
 import { LANDING_FAQ_TITLE } from '@/lib/landing/landing-faq';
 import { FLOW_STEPS } from '@/lib/landing/landing-flow';
 import { LANDING_FEATURES, type LandingFlags } from '@/lib/landing/landing-flags';
 import { buildLandingPageData } from '@/lib/landing/landing-page-data';
 import { APP_SEGMENTS } from '@/lib/sentry-scrub';
-import { QUESTION_ONE } from '@/components/landing/demo/demo-script';
-import { audienceParts } from './HeroH';
+import { audienceParts } from './ScreensH';
 import { SampleH } from './SampleH';
 import { charDelay, sceneTimeline } from './scene-timing';
 
@@ -53,18 +52,19 @@ describe('style sample H', () => {
       expect(html).toContain(escape(copy));
     }
     // The Owner's first-screen pitch (2026-10-14), verbatim, and one CTA note under every main button, without the credits.
-    const shown = [HERO_H.audience, HERO_H.audienceSummary, HERO_H.difference, HERO_H.result, HERO_H.ctaNote];
+    const shown = [HERO_H.audience, HERO_H.audienceSummary, HERO_H.difference, HERO_H.ctaNote];
     for (const copy of shown) expect(html).toContain(escape(copy));
     // First screen, end of module 3 and the close.
     expect(html.split(HERO_H.ctaNote)).toHaveLength(4);
-    const hero = html.slice(html.indexOf('<section aria-labelledby="hero-title"'), html.indexOf('aria-labelledby="expert-title"'));
-    // The first screen answers the four questions in order: what, the benefit and who for, why, what you get.
-    const four = [HERO.title, HERO.promise, HERO_H.audience, HERO_H.audienceSummary, HERO_H.difference, HERO_H.result]
-      .map(copy => hero.indexOf(escape(copy)));
-    expect(four.every(index => index >= 0)).toBe(true);
-    expect([...four].sort((a, b) => a - b)).toEqual(four);
-    expect(hero).not.toContain(escape(HERO_H.differenceBody));
-    for (const label of H_EXPERT.layers) expect(html).toContain(label);
+    const hero = html.slice(html.indexOf('<section aria-labelledby="hero-title"'), html.indexOf('aria-labelledby="audience-title"'));
+    // Option A: the first screen holds only the title, the promise, the button and its note (and the product).
+    for (const copy of [HERO.title, HERO.promise, HERO.primaryCta, HERO_H.ctaNote]) expect(hero).toContain(escape(copy));
+    for (const copy of [HERO_H.audienceSummary, HERO_H.difference]) expect(hero).not.toContain(escape(copy));
+    // One idea per screen after it: who it is for, then why not a general AI with the Owner's comparison.
+    const screens = [HERO_H.audienceSummary, HERO_H.difference, H_COMPARE.title].map(copy => html.indexOf(escape(copy)));
+    expect(screens.every(index => index > 0)).toBe(true);
+    expect([...screens].sort((a, b) => a - b)).toEqual(screens);
+    for (const row of H_COMPARE.rows) for (const cell of [row.generic, row.coach]) expect(html).toContain(escape(cell));
     expect(hero).not.toContain('500 积分');
     expect(hero).not.toContain('随时能看、能导出，不会收回');
     expect(html).toContain('aria-label="Pro"');
@@ -116,11 +116,6 @@ describe('sample H first screen', () => {
     const parts = audienceParts(HERO_H.audience);
     expect(parts).toHaveLength(4);
     expect(parts.join('')).toBe(HERO_H.audience);
-  });
-
-  it('quotes the demo\'s real question card and its recommended option in the exchange', () => {
-    expect(H_HERO_EXCHANGE.coach).toBe(QUESTION_ONE.question);
-    expect(H_HERO_EXCHANGE.coachPick).toBe(`推荐：${QUESTION_ONE.options[QUESTION_ONE.recommended ?? 0]}`);
   });
 });
 

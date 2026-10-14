@@ -8,8 +8,8 @@ import { HERO, HERO_H } from '@/lib/landing/landing-copy';
 import type { buildLandingPageData } from '@/lib/landing/landing-page-data';
 import { SIGNUP_CTA_HREF } from '@/lib/seo/content/shared';
 import { cn } from '@/lib/utils';
-import { DiffBandH } from './DiffBandH';
 import { HeroH } from './HeroH';
+import { AudienceH, WhyH } from './ScreensH';
 import { PriceH } from './PriceH';
 import { FaqH, FinalH, HowItWorksH, VoiceWallH } from './SectionsH';
 import styles from './h.module.css';
@@ -19,10 +19,10 @@ const SAMPLES = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'] as const;
 export type LandingData = ReturnType<typeof buildLandingPageData>;
 
 /**
- * Style sample H, redesigned after the Owner's review of 2026-10-14 (buffer.com as the reference): a clean
- * near-white page with a faint grid, a full first screen that answers the four questions with real product pieces
- * floating around the text (HeroH), the product at work on the second screen (DiffBandH), and parallax on the
- * pieces that suit it. The server HTML is the finished page; with reduced motion everything is simply there.
+ * Style sample H, redesigned after the Owner's review of 2026-10-14 (buffer.com as the reference, option A): a clean
+ * near-white page; a quiet first screen (title, promise, button, one large view of the real product), then one idea
+ * per screen — who it is for (AudienceH), why not a general AI (WhyH) — and the rest of the landing page's sections.
+ * The server HTML is the finished page; with reduced motion everything is simply there.
  * Copy and section order are the landing page's.
  */
 export function SampleH({ data, siteName, membershipHref }: { data: LandingData; siteName: string; membershipHref: string }) {
@@ -52,7 +52,8 @@ export function SampleH({ data, siteName, membershipHref }: { data: LandingData;
 
       <main className={styles.main}>
         <HeroH />
-        <DiffBandH />
+        <AudienceH />
+        <WhyH />
 
         <VoiceWallH notes={data.notes} />
         <HowItWorksH promise={data.promise} steps={data.flowSteps} reports={data.sampleReports} timeline={data.timeline} />

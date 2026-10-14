@@ -41,33 +41,34 @@ export const HERO_H = {
   ctaNote: '无需绑卡，免费试用',
 } as const;
 
-/**
- * Sample H's "expert experience" block (Owner 2026-10-14: the coach's questions, knowledge base, Skills and
- * judgement come from a vertical social-media specialist's nine years; that is what a general AI cannot give).
- * The heading and body are PLACEHOLDERS until the Owner writes them; the flow's labels use only the Owner's terms.
- */
-export const H_EXPERT = {
-  titlePlaceholder: '【标题：待 Owner 定稿】',
-  bodyPlaceholder: '【说明：待 Owner 定稿。核心意思：教练的提问方法、知识库、Skill 和判断标准，来自一位垂类社媒运营专家 9 年的经验。】',
-  flowLabel: '经验怎么进到每一次对话',
-  years: '9 年',
-  source: '垂类社媒运营经验',
-  layers: ['知识库', 'Skill', '判断标准'],
-  outputs: ['每一次提问', '每一条建议'],
+/** Sample H's "自己用通用 AI ／ 用 Graylum AI 教练" comparison, the Owner's wording of 2026-10-14 (verbatim). */
+export const H_COMPARE = {
+  title: '你需要的不只是 AI 建议，而是有人带你一步步做。',
+  generic: '自己用通用 AI',
+  coach: '用 Graylum AI 教练',
+  rows: [
+    { generic: '不知道该问什么，只能东问一句、西问一句', coach: '主动了解你的情况，一步步帮你找到适合的方向' },
+    { generic: '给你一大堆选题和建议，却不知道哪个适合自己', coach: '帮你判断该做什么，告诉你为什么、具体怎么做' },
+    { generic: '换个对话窗口，又得重新解释自己的情况', coach: '记住你的定位、目标和创作进度，接着上次继续做' },
+    { generic: '发了内容没人看，拿着数据也不知道问题在哪', coach: '分析你真实发布的数据，告诉你哪里有问题、下一条怎么改' },
+  ],
 } as const;
 
 /**
- * The first screen's small exchange beside the difference line (sample H). NEW WORDING for the Owner to approve:
- * the general AI's answer is a made-up sample of "正确的废话"; the coach's side is the demo's real question card
- * (QUESTION_ONE in components/landing/demo/demo-script.ts, checked by a test) and its recommended option.
+ * The made-up example (示例) inside the comparison's product pieces. NEW WORDING for the Owner to approve; it follows
+ * the landing demo's fictional case (demo-script.ts) and carries no numbers.
  */
-export const H_HERO_EXCHANGE = {
-  label: '示例',
-  genericWho: '通用 AI',
-  generic: '做自媒体要找准定位、持续输出优质内容、多和粉丝互动。',
-  coachWho: '教练',
-  coach: '你在工作里，最常被身边的人问到的是哪类问题？',
-  coachPick: '推荐：怎么在加拿大入行做牙科助理',
+export const H_COMPARE_SAMPLES = {
+  library: [
+    { label: '定位档案', text: '帮刚到加拿大的新移民，用下班时间一步步转行做牙科助理' },
+    { label: '目标', text: '先做出 30 天能坚持更新的内容' },
+    { label: '创作进度', text: '第 1 周：讲清你自己是怎么入行的' },
+  ],
+  review: [
+    { label: '哪里做得好', text: '开头直接讲你自己的入行经历' },
+    { label: '哪里要改', text: '结尾没有告诉观众下一步做什么' },
+    { label: '下一条怎么改', text: '讲入行要准备的证书，结尾留一个问题' },
+  ],
 } as const;
 
 export type VoiceNote = Gated & {
