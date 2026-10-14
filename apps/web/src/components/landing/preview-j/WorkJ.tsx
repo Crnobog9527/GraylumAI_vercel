@@ -121,7 +121,7 @@ export function WorkJ({ flags }: { flags: LandingFlags }) {
                   <p>{shown.explain}</p>
                   <div className={styles.result}><p className={styles.asideLabel}>{J_WORK.resultLabel}</p><p>{item.result}</p></div>
                   <button type="button" className={styles.next} onClick={() => choose((index + 1) % scenes.length)}>
-                    {J_WORK.next}：{scenes[(index + 1) % scenes.length].title}<ArrowRight size={16} aria-hidden="true" />
+                    <span>{J_WORK.next}：{scenes[(index + 1) % scenes.length].title}</span><ArrowRight size={16} aria-hidden="true" />
                   </button>
                 </aside>
               </div>

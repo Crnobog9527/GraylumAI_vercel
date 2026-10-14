@@ -2,9 +2,10 @@
 import type { WorkScene } from './landing-copy-j-work';
 
 /**
- * "这些事，不用你再操心": the five demos, step by step (Owner 2026-10-15). The page's example person: an office worker
- * with one hour after work, "下班后 15 分钟家常菜". NEW WORDING for the Owner to approve. No figures beyond the person's
- * own situation; trends are 上升 / 下降 / 持平; earning is a judgment and a suggestion, never a promise.
+ * "这些事，不用你再操心": the five demos, step by step (Owner 2026-10-15, round five: "每一步至少有用户说 → 教练做了
+ * 什么 → 给出的结果 → 用户确认 → 进入下一步"). The page's example person: an office worker with one hour after work,
+ * "下班后 15 分钟家常菜". NEW WORDING for the Owner to approve. No figures beyond the person's own situation; trends are
+ * 上升 / 下降 / 持平; earning is a judgment and a suggestion, never a promise.
  */
 export const J_WORK_CARE: readonly WorkScene[] = [
   {
@@ -12,22 +13,23 @@ export const J_WORK_CARE: readonly WorkScene[] = [
     result: '每周打开就有排好的选题和理由，不用对着空白页发愁，也不会越做越偏离定位。',
     steps: [
       {
-        label: '读定位、受众和上周数据',
+        label: '先读定位、受众和上周数据',
         explain: '排选题前，AI 教练先读你的定位档案、受众和上周的真实数据，选题从这三样出发，不凭空想。',
         blocks: [
           { kind: 'user', text: '下周发什么？' },
-          { kind: 'coach', text: '先看三样东西，再给你排：' },
-          { kind: 'checks', items: ['定位：下班后 15 分钟上桌的家常菜', '受众：刚开始一个人生活的上班族', '上周数据：剩菜那条收藏最多，开头长的那条完播下降'] },
+          { kind: 'checks', title: 'AI 教练先读了这些', items: ['定位：下班后 15 分钟上桌的家常菜', '受众：刚开始一个人生活的上班族', '上周数据：剩菜那条收藏上升，开头长的那条完播下降'] },
+          { kind: 'coach', text: '看完了。上周最受欢迎的是"省事"，开头长的内容留不住人。我按这两点先列候选方向，你看要不要我接着排？' },
+          { kind: 'user', text: '好，排吧。' },
         ],
       },
       {
         label: '列出候选，说明去留',
         explain: '每个候选方向都写清留下或淘汰的理由：和定位合不合、上周数据怎么样、你下班后一小时拍不拍得完。',
         blocks: [
-          { kind: 'coach', text: '候选方向有六个，我留下三个：' },
+          { kind: 'coach', text: '候选方向有六个，我留下三个，淘汰三个，理由都写在后面：' },
           {
             kind: 'options', items: [
-              { title: '冰箱剩菜', note: '上周收藏最多的一类，继续做', tag: '留下' },
+              { title: '冰箱剩菜', note: '上周收藏上升最快的一类，继续做', tag: '留下' },
               { title: '一口锅系列', note: '最能证明"下班后也来得及"', tag: '留下' },
               { title: '超市半成品改造', note: '上班族最常买，搜的人多', tag: '留下' },
               { title: '周末大餐', note: '超出一小时，和定位冲突', tag: '淘汰' },
@@ -35,13 +37,15 @@ export const J_WORK_CARE: readonly WorkScene[] = [
               { title: '厨具测评', note: '现在信任还不够，放到后面', tag: '淘汰' },
             ],
           },
+          { kind: 'user', text: '同意，就这三个方向。' },
+          { kind: 'coach', text: '好，接下来从这三个方向里各挑一条，排进下周。' },
         ],
       },
       {
         label: '排出下周三条',
         explain: '三条按从浅到深排，优先搜的人多、你一小时内拍得完的；每条写清开头钩子、拍法要点和适合的平台。',
         blocks: [
-          { kind: 'coach', text: '按从浅到深、搜的人多不多、能不能拍完，排好下周三条：' },
+          { kind: 'checks', title: 'AI 教练排的依据', items: ['从浅到深：先上手快的，再到需要准备的', '搜的人多不多：优先上班族常搜的', '能不能拍完：每条都在下班后一小时内'] },
           {
             kind: 'table', columns: ['选题', '开头钩子', '拍法要点', '发哪里'], rows: [
               ['冰箱剩菜三种做法', '"别扔，剩菜也能变新菜"', '先拍剩菜，再拍成品', 'TikTok、Instagram'],
@@ -49,13 +53,15 @@ export const J_WORK_CARE: readonly WorkScene[] = [
               ['超市半成品像现做', '"这盘是半成品，看得出来吗？"', '改造前后同框', 'Instagram'],
             ],
           },
+          { kind: 'coach', text: '下周就这三条。有哪条不想拍，直接说。' },
         ],
       },
       {
-        label: '你想换一条',
+        label: '你想换一条，先讲代价',
         explain: '你想改，AI 教练给出替代方案，也把换了的代价说清楚，由你来权衡。',
         blocks: [
           { kind: 'user', text: '第三条我不太想拍半成品，换个别的吧。' },
+          { kind: 'checks', title: 'AI 教练比较了替代方案', items: ['周日备菜：收藏多，但要占周末一小时', '一人份小火锅：好拍，但季节性强'] },
           { kind: 'coach', text: '可以换成"周日备菜，工作日更快"。代价是：要占周末一小时；这类内容收藏多、转发少，涨关注会慢一些。要换吗？' },
           { kind: 'user', text: '那还是留着半成品那条。' },
         ],
@@ -64,8 +70,12 @@ export const J_WORK_CARE: readonly WorkScene[] = [
         label: '采用，进资料库和日历',
         explain: '采用以后，三条选题自动进资料库和发布日历，后面写稿、发布、复盘都接着用。',
         blocks: [
-          { kind: 'coach', text: '好，三条都已采用，放进资料库，排进下周日历：' },
-          { kind: 'table', columns: ['哪天', '选题', '状态'], rows: [['周二', '冰箱剩菜三种做法', '待创作'], ['周四', '一口锅两菜一汤', '待创作'], ['周六', '超市半成品像现做', '待创作']] },
+          { kind: 'user', text: '就这三条，采用。' },
+          {
+            kind: 'table', title: '已放进资料库和下周日历', columns: ['哪天', '选题', '状态'],
+            rows: [['周二', '冰箱剩菜三种做法', '待创作'], ['周四', '一口锅两菜一汤', '待创作'], ['周六', '超市半成品像现做', '待创作']],
+          },
+          { kind: 'coach', text: '都排好了。周二那条要不要我现在先写稿？' },
         ],
       },
     ],
@@ -78,7 +88,8 @@ export const J_WORK_CARE: readonly WorkScene[] = [
         label: '账号名、简介、头像',
         explain: '账号的三件套每一项都给出建议和理由：让刷到的人一眼看懂你是谁、能帮他什么。',
         blocks: [
-          { kind: 'coach', text: '先把账号门面定好，每项都有理由：' },
+          { kind: 'user', text: '账号还没设置，名字简介怎么写？' },
+          { kind: 'checks', title: 'AI 教练先读了这些', items: ['你的定位和受众', '同路人类对标账号的名字和简介写法', '你不露脸的要求'] },
           {
             kind: 'table', columns: ['项目', '建议', '理由'], rows: [
               ['名字', '下班后 15 分钟家常菜', '名字就是卖点，搜"快手菜""下班做饭"的人一眼看懂'],
@@ -86,6 +97,7 @@ export const J_WORK_CARE: readonly WorkScene[] = [
               ['头像', '一口锅的特写', '不露脸也认得出，和内容一致'],
             ],
           },
+          { kind: 'user', text: '就用这个。' },
         ],
       },
       {
@@ -93,6 +105,7 @@ export const J_WORK_CARE: readonly WorkScene[] = [
         explain: '具体到一条视频的结构：开头怎么留住人、中间什么节奏、结尾怎么引导互动，每一段都说为什么。',
         blocks: [
           { kind: 'user', text: '第一条怎么拍？' },
+          { kind: 'checks', title: 'AI 教练的判断依据', items: ['你的观众多在下班路上刷手机，耐心短', '对标账号里，先给成品的开头更留得住人'] },
           {
             kind: 'table', columns: ['段落', '怎么做', '为什么'], rows: [
               ['开头前三秒', '先给出锅的成品，说一句"下班十五分钟，两菜一汤"', '先让人看到结果，才会停下来'],
@@ -100,6 +113,7 @@ export const J_WORK_CARE: readonly WorkScene[] = [
               ['结尾', '问"你最想学哪道？"', '引导留言，也给下一条找到题目'],
             ],
           },
+          { kind: 'coach', text: '分镜写进稿子里了。接着把封面和标题定下来？' },
         ],
       },
       {
@@ -114,6 +128,8 @@ export const J_WORK_CARE: readonly WorkScene[] = [
               { title: '只放文字标题', note: '最省事，但点开的人会少', tag: '' },
             ],
           },
+          { kind: 'user', text: '用第一个。' },
+          { kind: 'coach', text: '好。最后定发布时间和话题标签。' },
         ],
       },
       {
@@ -126,7 +142,8 @@ export const J_WORK_CARE: readonly WorkScene[] = [
               ['话题标签', '#快手菜 #一人食 #下班做饭：一个大类、一个人群、一个场景，各取一个'],
             ],
           },
-          { kind: 'coach', text: '这些都记进了这条的发布设置，发的时候直接带上。' },
+          { kind: 'user', text: '记下了。' },
+          { kind: 'coach', text: '这些都存进了这条的发布设置，发的时候直接带上，不用你再记。' },
         ],
       },
     ],
@@ -139,8 +156,9 @@ export const J_WORK_CARE: readonly WorkScene[] = [
         label: '抓取各平台一周数据',
         explain: '先把你这周在各个平台发的内容和数据都读进来，看的是真实数据，不是猜。',
         blocks: [
-          { kind: 'coach', text: '一周到了，先读取你这周在三个平台的数据：' },
-          { kind: 'checks', items: ['TikTok：三条视频的数据已读取', 'Instagram：三条帖子的数据已读取', 'YouTube：一条视频的数据已读取'] },
+          { kind: 'user', text: '这周发完了，帮我看看效果。' },
+          { kind: 'checks', title: 'AI 教练读取了这周的数据', items: ['TikTok：三条视频的数据', 'Instagram：三条帖子的数据', 'YouTube：一条视频的数据'] },
+          { kind: 'coach', text: '三个平台的数据都读完了，先看整周的走势。' },
         ],
       },
       {
@@ -148,14 +166,13 @@ export const J_WORK_CARE: readonly WorkScene[] = [
         explain: '先看整周的走势，找出哪一天、哪一条让数据变了。',
         blocks: [
           { kind: 'trend', label: '这周的互动走势' },
-          { kind: 'coach', text: '前半周持平，"冰箱剩菜"那条发出后明显上升，之后一直没掉下来。' },
+          { kind: 'coach', text: '前半周持平，"冰箱剩菜"那条发出后明显上升，之后一直没掉下来。说明观众要的是"省事"。再分平台细看。' },
         ],
       },
       {
         label: '分平台看关键指标',
         explain: '不同平台看的指标不同：短视频看完播和互动，图文看收藏和分享，长视频看完播。',
         blocks: [
-          { kind: 'coach', text: '再分平台看各自最要紧的指标：' },
           {
             kind: 'table', columns: ['平台', '看什么', '这周'], rows: [
               ['TikTok', '完播、互动', '都上升'],
@@ -163,11 +180,12 @@ export const J_WORK_CARE: readonly WorkScene[] = [
               ['YouTube', '完播', '下降：开头太长'],
             ],
           },
+          { kind: 'coach', text: 'YouTube 的问题出在开头：前面的备菜镜头太长，很多人没看到成品就走了。' },
         ],
       },
       {
         label: '结论和下周怎么调',
-        explain: '最后给出结论和下周的调整，并等你点头，再按这个排下周的选题。',
+        explain: '最后给出结论和下周的调整，等你点头，再按这个排下周的选题。',
         blocks: [
           {
             kind: 'rows', title: '本周复盘', rows: [
@@ -189,7 +207,9 @@ export const J_WORK_CARE: readonly WorkScene[] = [
         label: '先判断能不能变现',
         explain: '先判断这个方向能不能赚钱、靠什么赚；方向难赚钱会直接说。',
         blocks: [
-          { kind: 'coach', text: '先说判断：这个方向能变现，但不靠等广告。你的观众要的是"省时间"，愿意为省时间的工具和方法花钱。' },
+          { kind: 'user', text: '这个账号以后能赚钱吗？' },
+          { kind: 'checks', title: 'AI 教练先看了这些', items: ['你的受众：愿意为省时间花钱', '同类账号常见的变现方式', '你现在的阶段：刚开始，还没有粉丝'] },
+          { kind: 'coach', text: '能，但不靠等广告。你的观众要的是"省时间"，愿意为省时间的工具和方法花钱。我把几条路放在一起比一比。' },
         ],
       },
       {
@@ -203,12 +223,14 @@ export const J_WORK_CARE: readonly WorkScene[] = [
               ['接品牌广告', '高：要有稳定的粉丝和数据', '较慢'],
             ],
           },
+          { kind: 'user', text: '那我先做哪个？' },
         ],
       },
       {
         label: '推荐一条，分阶段走',
         explain: '推荐一条最适合你的路径，按先后分阶段写清楚，每个阶段做什么。',
         blocks: [
+          { kind: 'coach', text: '先做门槛最低的带货，同时攒信任，再往后走：' },
           {
             kind: 'rows', title: '推荐路线', rows: [
               ['先', '用免费内容攒信任，视频里顺带推荐你真在用的锅和调料'],
@@ -216,14 +238,16 @@ export const J_WORK_CARE: readonly WorkScene[] = [
               ['之后', '把常做的菜整理成一人食菜谱合集'],
             ],
           },
+          { kind: 'user', text: '可以，就这么走。' },
         ],
       },
       {
         label: '写明风险，不承诺收入',
         explain: '风险写在明处；这是根据你的定位做的判断和建议，不承诺收入。',
         blocks: [
-          { kind: 'rows', title: '风险', rows: [['选品', '只推荐自己用过的，不然会伤信任'], ['平台规则', '各平台开通带货有门槛，开通前先查规则']] },
+          { kind: 'rows', title: '要注意的风险', rows: [['选品', '只推荐自己用过的，不然会伤信任'], ['平台规则', '各平台开通带货有门槛，开通前先查规则']] },
           { kind: 'note', text: '这是根据你的定位做的判断和建议，不代表收入承诺。' },
+          { kind: 'coach', text: '这条路线已经写进你的报告"变现路径"一章，之后每月复盘时再看要不要调。' },
         ],
       },
     ],
@@ -235,22 +259,27 @@ export const J_WORK_CARE: readonly WorkScene[] = [
       {
         label: '你只说一句话',
         explain: '你只说要做什么，不用说明你是谁、账号是什么风格，也不用挑模型。',
-        blocks: [{ kind: 'user', text: '帮我把这条稿子改得更口语一点，再出三个标题。' }],
+        blocks: [
+          { kind: 'user', text: '帮我把这条稿子改得更口语一点，再出三个标题。' },
+          { kind: 'coach', text: '好，我先读你的资料，再动手。' },
+        ],
       },
       {
         label: 'AI 教练自己做了这些',
         explain: '读文风、读定位、读稿子、选能力，这些 AI 教练自己做完，不用你一步步交代。',
         blocks: [
-          { kind: 'checks', items: ['读取你的文风画像', '读取定位档案和这条稿子', '选用改写和起标题的能力', '按你的文风改写，按平台起标题'] },
+          { kind: 'checks', title: 'AI 教练自己做了这些', items: ['读取你的文风画像：短句、先讲经历', '读取定位档案和这条稿子', '选用改写和起标题的能力', '按你的文风改写，按平台起标题'] },
+          { kind: 'coach', text: '改好了，标题也按三个平台的习惯起了。' },
         ],
       },
       {
         label: '结果和为什么这样写',
         explain: '给出结果，也说清为什么这样写，你知道每一处改动的理由。',
         blocks: [
-          { kind: 'coach', text: '改好了。三个标题：' },
-          { kind: 'checks', items: ['下班十五分钟，一口锅两菜一汤', '一个人吃饭，也别对付', '剩菜别扔，这样做像新菜'] },
+          { kind: 'checks', title: '三个标题', items: ['下班十五分钟，一口锅两菜一汤', '一个人吃饭，也别对付', '剩菜别扔，这样做像新菜'] },
           { kind: 'rows', rows: [['为什么', '保留你常用的"我"和短句；标题都落在"快"和"省事"上，这是你的卖点']] },
+          { kind: 'user', text: '用第一个标题。' },
+          { kind: 'coach', text: '已换上，稿子存进资料库了。' },
         ],
       },
       {

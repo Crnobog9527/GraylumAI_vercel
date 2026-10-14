@@ -77,18 +77,34 @@
   display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 44px; margin-top: 6px; padding: 0 16px;
   border: 1px solid var(--j-line); border-radius: 999px; background: #fff; color: var(--j-ink); font: inherit; font-size: 14px; font-weight: 500; cursor: pointer;
 }
-.next:hover { border-color: var(--j-ink); }
+.next { position: relative; overflow: hidden; white-space: nowrap; border-color: var(--j-ink); background: var(--j-ink); color: #fff; }
+.next span { overflow: hidden; text-overflow: ellipsis; }
+.next svg { flex: none; }
+.next:hover { background: #33322f; }
+@media (prefers-reduced-motion: no-preference) {
+  /* A light sweeps across now and then, and the arrow nudges forward: it invites the click without shouting. */
+  .next::after {
+    content: ''; position: absolute; inset: 0; background: linear-gradient(100deg, transparent 30%, rgba(255, 214, 102, .55) 50%, transparent 70%);
+    translate: -100% 0; animation: sweep 3.2s var(--j-ease) 1s infinite;
+  }
+  .next svg { animation: nudge 1.6s var(--j-ease) infinite; }
+}
+@keyframes sweep { 0%, 55% { translate: -100% 0; } 100% { translate: 100% 0; } }
+@keyframes nudge { 0%, 60%, 100% { translate: 0 0; } 30% { translate: 4px 0; } }
 
 /* The step's blocks */
 .chat { display: grid; align-content: start; gap: 10px; padding: 16px; }
 .block { display: grid; min-width: 0; }
 .block[data-kind='user'] { justify-items: end; }
-.user { max-width: 80%; margin: 0; padding: 9px 13px; border-radius: 14px; background: #f3f3f1; font-size: 14px; line-height: 1.65; }
+.user { display: grid; gap: 2px; max-width: 80%; margin: 0; padding: 9px 13px; border-radius: 12px; background: #f3f3f1; font-size: 14px; line-height: 1.65; }
+.user > span { color: #8a8a87; font-size: 12px; }
+.user > p { margin: 0; }
 .coach { display: grid; gap: 4px; min-width: 0; padding: 10px 13px 12px; border: 1px solid #ececea; border-radius: 14px; font-size: 14px; line-height: 1.65; }
-.coach > span { color: #8a8a87; font-size: 11.5px; }
+
 .coach > p { margin: 0; }
 .note { margin: 0; color: #888; font-size: 12.5px; }
 .blockTitle { margin: 0 0 6px; color: var(--j-ink); font-size: 13px; font-weight: 600; }
+.doing { display: grid; gap: 4px; }
 .fetch { display: grid; gap: 6px; margin: 0; padding: 10px 12px; border: 1px dashed #ddd; border-radius: 12px; list-style: none; font-size: 13.5px; }
 .fetch li { display: flex; align-items: flex-start; gap: 8px; }
 .fetch li svg { flex: none; margin-top: 3px; color: #1a7f45; }

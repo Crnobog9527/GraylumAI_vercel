@@ -4,6 +4,7 @@
 import type { CSSProperties } from 'react';
 import { Check, Minus, Sparkles } from 'lucide-react';
 import library from '@/app/library/library.module.css';
+import result from '@/components/opc/positioning-result.module.css';
 import { UploadPanel } from '@/components/library/my-documents-view';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -39,11 +40,22 @@ export function WorkScreenJ({ blocks }: { blocks: readonly WorkBlock[] }) {
 
 function Block({ block }: { block: WorkBlock }) {
   switch (block.kind) {
-    case 'user': return <p className={styles.user}>{block.text}</p>;
-    case 'coach': return <div className={styles.coach}><span>AI 教练</span><p>{block.text}</p></div>;
+    case 'user': return <div className={styles.user}><span>你</span><p>{block.text}</p></div>;
+    case 'coach':
+      return (
+        <div className={styles.coach}>
+          <span className={result.agentIdentity}><img src="/graylum-logo.png" alt="" />AI 自媒体陪跑教练</span>
+          <p>{block.text}</p>
+        </div>
+      );
     case 'note': return <p className={styles.note}>{block.text}</p>;
     case 'checks':
-      return <ul className={styles.fetch}>{block.items.map(item => <li key={item} data-done=""><Check size={14} aria-hidden="true" />{item}</li>)}</ul>;
+      return (
+        <div className={styles.doing}>
+          {block.title ? <p className={styles.blockTitle}>{block.title}</p> : null}
+          <ul className={styles.fetch}>{block.items.map(item => <li key={item} data-done=""><Check size={14} aria-hidden="true" />{item}</li>)}</ul>
+        </div>
+      );
     case 'options':
       return (
         <ul className={styles.options}>

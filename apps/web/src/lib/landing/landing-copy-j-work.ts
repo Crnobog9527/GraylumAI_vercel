@@ -15,7 +15,7 @@ import { J_WORK_MAKE } from './landing-copy-j-work-make';
 export type WorkBlock =
   | { kind: 'user'; text: string }
   | { kind: 'coach'; text: string }
-  | { kind: 'checks'; items: readonly string[] }
+  | { kind: 'checks'; title?: string; items: readonly string[] }
   | { kind: 'options'; items: readonly { title: string; note: string; tag: '留下' | '淘汰' | '推荐' | '' }[] }
   | { kind: 'table'; title?: string; columns: readonly string[]; rows: readonly (readonly string[])[] }
   | { kind: 'rows'; title?: string; rows: readonly (readonly [string, string])[] }
