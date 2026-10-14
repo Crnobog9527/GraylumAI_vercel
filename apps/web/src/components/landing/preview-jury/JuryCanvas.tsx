@@ -64,7 +64,7 @@ export function JuryCanvas({ view, names, selected, onPeek, onPick }: {
             </footer>
           </article>
         ) : view.next.state === 'unchanged' ? (
-          <p className={styles.unchanged}><FileX2 size={15} aria-hidden="true" />原文没有任何改动</p>
+          <p className={styles.unchanged} data-current={view.current === 'next'}><FileX2 size={15} aria-hidden="true" />原文没有任何改动</p>
         ) : null}
       </div>
     </div>

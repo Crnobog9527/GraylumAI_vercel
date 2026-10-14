@@ -35,7 +35,8 @@
   box-shadow: 4px 4px 0 -1px var(--j-paper), 4px 4px 0 0 var(--j-rule), 0 18px 32px -24px rgba(0, 0, 0, .3);
   transition: border-color .4s, box-shadow .4s;
 }
-.sink + .doc, .sink + .unchanged { margin-top: 64px; }
+.sink + .doc { margin-top: 64px; }
+.sink + .unchanged { margin-top: 24px; }
 .unchanged {
   position: relative; z-index: 2; display: inline-flex; align-items: center; gap: 8px; margin-bottom: 0; padding: 10px 18px;
   border: 1px dashed var(--j-ink-soft); border-radius: 8px; background: var(--j-paper); color: var(--j-muted); font-size: 15px;

@@ -234,7 +234,7 @@ export function canvasAt(scenes: readonly Scene[], clock: number, names: JurySea
         if (!ok) place(columns, 'S', { kind: 'revision', key: 'revision', changed });
         view.next = { state: ok ? 'revised' : 'unchanged', changed: changed ?? 0 };
         if (now) {
-          view.current = ok ? 'next' : 'revision';
+          view.current = 'next';
           view.focus = ['S'];
           view.edges = ok ? [{ from: 'S', to: 'next', tone: 'live' }] : [];
           view.caption = ok ? `修订稿写好了：改了 ${changed} 章，用不用由你逐章决定` : '修订稿没有通过检查，三位评审的意见仍可参考';
