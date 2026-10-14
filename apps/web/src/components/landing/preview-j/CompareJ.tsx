@@ -1,9 +1,10 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 'use client';
 
-import type { ReactNode } from 'react';
-import { Bot, NotebookTabs, Sparkles } from 'lucide-react';
+import type { CSSProperties, ReactNode } from 'react';
+import { Bot, NotebookTabs } from 'lucide-react';
 import { DEMO_LABEL } from '@/components/landing/demo/demo-script';
+import result from '@/components/opc/positioning-result.module.css';
 import { QuestionCardView } from '@/components/opc/question-card';
 import { H_COMPARE } from '@/lib/landing/landing-copy';
 import { J_PERSONA_QUESTION } from '@/lib/landing/landing-copy-j-persona';
@@ -11,12 +12,25 @@ import { J_COMPARE } from '@/lib/landing/landing-copy-j-compare';
 import styles from './compare-j.module.css';
 import page from './j.module.css';
 
+/** Typing pace: how long each character takes, and the beats between the parts of one pair (milliseconds). */
+const PER_CHAR = 22;
+const ASKED = 300;
+const BEAT = 500;
+
+/** When each part of a pair plays: the question, the general AI's reply, then the coach's reply and its work. */
+export function pairTiming(generic: string, coach: string) {
+  const genericStart = ASKED + BEAT;
+  const coachStart = genericStart + Array.from(generic).length * PER_CHAR + BEAT;
+  const workAt = coachStart + Array.from(coach).length * PER_CHAR + 200;
+  return { genericStart, coachStart, workAt };
+}
+
 /**
- * The Owner's four-row comparison as four pairs of conversations (Owner 2026-10-15): one question, asked of a
- * general AI on the left and of the AI coach on the right. The left gets the usual list of everything; the right
- * gets the coach's work — the question card, a decided topic with why and how, its memory of you, a read of the
- * real data. Each row's own words (the Owner's) sit above its pair. The windows are pictures (inert); the rows'
- * text carries the meaning.
+ * The Owner's four-row comparison as four pairs of real chat windows (Owner 2026-10-15, round five: "不够突出"). As each
+ * pair scrolls in, the two windows slide in from their sides; the same question is sent to both; the general AI types
+ * out its usual list, then the AI coach types its answer and its piece of work rises in under it. Each row's own words
+ * (the Owner's) sit above its window. The windows are pictures (inert); the rows' text carries the meaning. The server
+ * HTML and reduced motion show every reply in full.
  */
 export function CompareJ() {
   const work: readonly ReactNode[] = [<Ask key="ask" />, <Plan key="plan" />, <Memory key="memory" />, <Review key="review" />];
@@ -29,19 +43,24 @@ export function CompareJ() {
         <ol className={styles.pairs}>
           {J_COMPARE.pairs.map((pair, index) => {
             const row = H_COMPARE.rows[index];
+            const generic = pair.generic.join('\n');
+            const timing = pairTiming(generic, pair.coach);
             return (
-              <li key={pair.question} data-row="" className={styles.pair}>
+              <li key={pair.question} data-row="" className={styles.pair} style={{
+                '--generic-at': `${timing.genericStart}ms`, '--coach-at': `${timing.coachStart}ms`, '--work-at': `${timing.workAt}ms`,
+              } as CSSProperties}>
                 <div className={styles.side} data-side="generic">
                   <p className={styles.claim}><b>{H_COMPARE.generic}</b>{row.generic}</p>
                   <Window name={J_COMPARE.genericName} question={pair.question} generic>
-                    <div className={styles.genericReply}>{pair.generic.map(line => <p key={line}>{line}</p>)}</div>
+                    <div className={styles.genericReply}><Typed text={generic} start={timing.genericStart} /></div>
                   </Window>
                 </div>
                 <div className={styles.side} data-side="coach">
                   <p className={styles.claim}><b>{H_COMPARE.coach}</b>{row.coach}</p>
                   <Window name={J_COMPARE.coachName} question={pair.question}>
                     <div className={styles.coachReply}>
-                      <p>{pair.coach}</p>
+                      <span className={result.agentIdentity}><img src="/graylum-logo.png" alt="" />AI 自媒体陪跑教练</span>
+                      <p><Typed text={pair.coach} start={timing.coachStart} /></p>
                       <div className={styles.work}>{work[index]}</div>
                     </div>
                   </Window>
@@ -55,17 +74,32 @@ export function CompareJ() {
   );
 }
 
+/** A reply typed out: every character on its own delay; the finished text takes its place from the start. */
+function Typed({ text, start }: { text: string; start: number }) {
+  return (
+    <span className={styles.typed}>
+      {Array.from(text).map((char, index) => (
+        char === '\n' ? <br key={index} /> : <span key={index} style={{ '--d': `${start + index * PER_CHAR}ms` } as CSSProperties}>{char}</span>
+      ))}
+    </span>
+  );
+}
+
 function Window({ name, question, generic = false, children }: {
   name: string; question: string; generic?: boolean; children: ReactNode;
 }) {
   return (
     <div className={styles.window} data-generic={generic || undefined} inert aria-hidden="true">
       <p className={styles.bar}>
-        {generic ? <Bot size={14} /> : <Sparkles size={14} />}<span>{name}</span>
-        {generic ? null : <i>{DEMO_LABEL}</i>}
+        <span className={styles.dots}><i /><i /><i /></span>
+        {generic ? <Bot size={14} /> : <img src="/graylum-logo.png" alt="" />}<span>{name}</span>
+        {generic ? null : <i className={styles.badge}>{DEMO_LABEL}</i>}
       </p>
-      <p className={styles.question}>{question}</p>
-      {children}
+      <div className={styles.chat}>
+        <p className={styles.question}><span>你</span>{question}</p>
+        {children}
+      </div>
+      <p className={styles.composer}>{generic ? '给通用 AI 发消息' : '和 AI 教练聊聊'}</p>
     </div>
   );
 }

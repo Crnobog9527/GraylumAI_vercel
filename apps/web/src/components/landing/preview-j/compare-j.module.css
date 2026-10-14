@@ -1,40 +1,46 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 /*
- * The comparison as conversation pairs (CompareJ). Left: the general AI's window, flat and grey, its reply a list
- * of everything. Right: the coach's window, white and lifted, its reply ending in a piece of work. Each side's own
- * line (the Owner's row) sits above its window. Phone: the pair stacks, general first. On scroll-in the general
- * side comes first, the coach's a beat later, its work last.
+ * The comparison as pairs of real chat windows (CompareJ). Both windows carry the same weight — the general AI's is a
+ * plain grey chat, the coach's the product's own look with its gold mark — so the eye compares answers, not frames.
+ * As a pair scrolls in (MotionJ marks it `data-in`), the windows slide in from their sides, the question lands in
+ * both, the general AI types, then the coach types and its work rises in. Phone: the pair stacks, general first.
  */
 .title { margin: 0 0 48px; max-width: 18em; font-size: clamp(36px, 5vw, 72px); font-weight: 600; line-height: 1.08; letter-spacing: -.04em; text-wrap: balance; }
-.pairs { display: grid; gap: 56px; margin: 0; padding: 0; list-style: none; }
-@media (max-width: 767px) { .pairs { gap: 40px; } .title { margin-bottom: 32px; } }
-.pair { display: grid; gap: 16px; }
-@media (min-width: 900px) { .pair { grid-template-columns: minmax(0, 5fr) minmax(0, 6fr); gap: 28px; align-items: start; } }
+.phrase { display: inline-block; }
+.pairs { display: grid; gap: clamp(56px, 8vw, 120px); margin: 0; padding: 0; list-style: none; }
+@media (max-width: 767px) { .title { margin-bottom: 32px; } }
+.pair { display: grid; gap: 18px; }
+@media (min-width: 900px) { .pair { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 28px; align-items: start; } }
 .side { display: grid; gap: 12px; min-width: 0; }
 .claim { margin: 0; color: var(--j-body); font-size: 16px; line-height: 1.6; text-wrap: pretty; }
 .claim b { display: block; margin-bottom: 2px; color: var(--j-muted); font-size: 13px; font-weight: 600; }
 [data-side='coach'] .claim { color: var(--j-ink); font-weight: 600; }
 [data-side='coach'] .claim b { color: var(--j-gold-text); }
 
-.window { display: grid; gap: 10px; padding: 14px; border-radius: 20px; font-size: 14px; line-height: 1.7; }
-.window[data-generic] { border: 1px dashed rgba(20, 19, 18, .2); background: rgba(240, 239, 236, .7); color: #5d5c58; }
-.window:not([data-generic]) { border: 1px solid var(--j-line); background: #fff; color: #262626; box-shadow: var(--j-shadow-lift); }
-.bar { display: flex; align-items: center; gap: 6px; margin: 0; color: #8a8a87; font-size: 12.5px; }
-.bar svg { flex: none; }
-.window:not([data-generic]) .bar svg { color: var(--j-gold-text); }
-.bar i { margin-left: auto; padding: 0 7px; border-radius: 999px; background: var(--gl-accent-tag); color: var(--gl-accent-tag-text); font-size: 11px; font-style: normal; line-height: 19px; }
-.question { justify-self: end; max-width: 85%; margin: 0; padding: 8px 12px; border-radius: 14px; background: #fff; color: #262626; }
+/* The chat windows */
+.window { display: grid; grid-template-rows: auto 1fr auto; min-height: 380px; border-radius: 20px; overflow: hidden; font-size: 14px; line-height: 1.7; }
+.window[data-generic] { border: 1px solid #d9d8d4; background: #f1f0ed; color: #4a4946; box-shadow: var(--j-shadow); }
+.window:not([data-generic]) { border: 1px solid var(--j-line); background: #fff; color: #262626; box-shadow: 0 0 0 1.5px rgba(255, 187, 23, .55), var(--j-shadow-lift); }
+.bar { display: flex; align-items: center; gap: 7px; margin: 0; padding: 10px 14px; border-bottom: 1px solid rgba(20, 19, 18, .08); font-size: 12.5px; font-weight: 600; }
+.window[data-generic] .bar { background: #e8e7e3; color: #6a6965; }
+.bar img { width: 16px; height: 16px; border-radius: 4px; }
+.dots { display: flex; gap: 4px; margin-right: 4px; }
+.dots i { width: 7px; height: 7px; border-radius: 50%; background: rgba(20, 19, 18, .15); }
+.badge { margin-left: auto; padding: 0 7px; border-radius: 999px; background: var(--gl-accent-tag); color: var(--gl-accent-tag-text); font-size: 11px; font-style: normal; font-weight: 500; line-height: 19px; }
+.chat { display: grid; align-content: start; gap: 10px; padding: 14px; }
+.question { display: grid; gap: 2px; justify-self: end; max-width: 85%; margin: 0; padding: 8px 12px; border-radius: 12px; background: #fff; }
 .window:not([data-generic]) .question { background: #f3f3f1; }
-.genericReply, .coachReply { display: grid; gap: 6px; }
-.genericReply p, .coachReply > p { margin: 0; }
-.genericReply { padding: 4px 2px; }
-.coachReply { padding: 10px 12px; border: 1px solid #ececea; border-radius: 14px; }
+.question span { color: #8a8a87; font-size: 12px; }
+.genericReply { padding: 4px 2px; white-space: pre-wrap; }
+.coachReply { display: grid; gap: 6px; padding: 10px 12px; border: 1px solid #ececea; border-radius: 12px; }
+.coachReply > p { margin: 0; }
+.composer { margin: 0 14px 14px; padding: 9px 12px; border: 1px solid rgba(20, 19, 18, .1); border-radius: 12px; background: rgba(255, 255, 255, .7); color: #a3a19b; font-size: 13px; }
+.typed { white-space: pre-wrap; }
 .work { min-width: 0; }
 
 .card { min-width: 0; }
 .card section { margin: 0; box-shadow: none; }
 .card section p, .card section button { font-size: 13px; }
-.phrase { display: inline-block; }
 .sheet { display: grid; gap: 6px; padding: 10px 12px; border-radius: 10px; background: #fafaf8; }
 .sheetTitle { display: flex; align-items: center; gap: 6px; margin: 0; color: var(--j-ink); font-size: 13px; font-weight: 600; }
 .sheetTitle svg { color: var(--j-gold-text); }
@@ -43,11 +49,20 @@
 .sheet dt { color: #888; }
 .sheet dd { margin: 0; }
 
+/* The play: slide in from the sides, then type */
 @media (prefers-reduced-motion: no-preference) {
-  [data-motion='on'] .pair:not([data-in]) [data-side='generic'] { opacity: 0; translate: 0 20px; }
-  [data-motion='on'] .pair:not([data-in]) [data-side='coach'] { opacity: 0; translate: 0 28px; }
-  [data-motion='on'] .pair:not([data-in]) .work { opacity: 0; translate: 0 10px; }
-  [data-motion='on'] .pair [data-side] { transition: opacity .7s var(--j-ease), translate .7s var(--j-ease); }
-  [data-motion='on'] .pair [data-side='coach'] { transition-delay: .35s; }
-  [data-motion='on'] .pair .work { transition: opacity .6s var(--j-ease) 1s, translate .6s var(--j-ease) 1s; }
+  [data-motion='on'] .pair [data-side] { transition: opacity .8s var(--j-ease), translate 1s var(--j-ease); }
+  [data-motion='on'] .pair:not([data-in]) [data-side='generic'] { opacity: 0; translate: -48px 0; }
+  [data-motion='on'] .pair:not([data-in]) [data-side='coach'] { opacity: 0; translate: 48px 0; }
+  [data-motion='on'] .pair [data-side='coach'] { transition-delay: .15s; }
+  [data-motion='on'] .pair .question { opacity: 0; translate: 0 8px; }
+  [data-motion='on'] .pair[data-in] .question { animation: land .4s var(--j-ease) 300ms both; }
+  [data-motion='on'] .pair .typed span { opacity: 0; }
+  [data-motion='on'] .pair[data-in] .typed span { animation: show .01s linear var(--d) forwards; }
+  [data-motion='on'] .pair .coachReply { opacity: 0; }
+  [data-motion='on'] .pair[data-in] .coachReply { animation: land .4s var(--j-ease) calc(var(--coach-at) - 300ms) both; }
+  [data-motion='on'] .pair .work { opacity: 0; translate: 0 10px; }
+  [data-motion='on'] .pair[data-in] .work { animation: land .6s var(--j-ease) var(--work-at) both; }
 }
+@keyframes land { from { opacity: 0; translate: 0 8px; } to { opacity: 1; translate: 0 0; } }
+@keyframes show { to { opacity: 1; } }
