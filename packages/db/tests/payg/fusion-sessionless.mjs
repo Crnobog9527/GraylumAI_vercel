@@ -30,7 +30,7 @@ const receipt = (db,g,f,c,cost='0.0004') => rpc(db,'bill2_record',g.actor,f.run,
   observedAt:new Date().toISOString(),coverage:'request_total',final:true,cost,currency:'USD',usage:{inputTokens:Math.round(Number(cost)*1e6),outputTokens:0}});
 const callOf = (g,f) => g.calls.find(c=>c.runId===f.run);
 
-export async function fusionSessionlessCases({db,report,createFixture}) {
+export async function fusionSessionlessCases({db,Client,connectionString,report,createFixture}) {
   // Saved output: idempotent, conflicting body refused, readable while the conversation exists.
   const g = await sessionGroup(db,createFixture);
   const c0 = callOf(g,g.members[0]);
@@ -41,6 +41,23 @@ export async function fusionSessionlessCases({db,report,createFixture}) {
   await assert.rejects(rpc(db,'fusion_call_output_save',randomUUID(),c0.id,'review A'),/./);
   assert.equal((await rpc(db,'fusion_call_output_read',g.actor,c0.id)).body,'review A');
   report.checks.push('Fusion output save is idempotent, refuses a different body and another user; readable while the conversation exists');
+
+  // A read overlapping a deletion waits for the conversation lock and then returns nothing.
+  const racing = await sessionGroup(db,createFixture,{n:1,credits:9});
+  const rcall = callOf(racing,racing.members[0]);
+  await rpc(db,'fusion_call_output_save',racing.actor,rcall.id,'racing body');
+  const [deleting,reading] = [new Client({connectionString}),new Client({connectionString})];
+  await Promise.all([deleting.connect(),reading.connect()]);
+  try {
+    await deleting.query('BEGIN');
+    await deleting.query('UPDATE runtime_sessions SET content_deleted_at=now() WHERE id=$1',[racing.session]);
+    await deleting.query('DELETE FROM fusion_call_outputs WHERE call_id=$1',[rcall.id]);
+    const pending = reading.query('SELECT fusion_call_output_read($1,$2) v',[racing.actor,rcall.id]).then(r=>r.rows[0].v);
+    await new Promise(r=>setTimeout(r,300));
+    await deleting.query('COMMIT');
+    assert.equal(await pending,null,'the overlapping read returns nothing once the deletion committed');
+  } finally { await deleting.end(); await reading.end(); }
+  report.checks.push('an output read overlapping a deletion waits on the conversation lock and returns nothing after it commits');
 
   // Unjudged at the recovery deadline: a saved Fusion output is billed like usable; none is no_delivery.
   for (const f of g.members) await receipt(db,g,f,callOf(g,f));
@@ -147,6 +164,24 @@ export async function fusionSessionlessCases({db,report,createFixture}) {
   await assert.rejects(rpc(db,'fusion_group_create',del.actor,randomUUID(),'review',del.session),/FUSION_GROUP_DENIED/);
   report.checks.push('deleting the source conversation deletes its Fusion outputs, closes and scrubs the group runs (user_stopped at known cost; late receipt settles), refuses new outputs and groups');
 
+  // Deletion overlapping a claim that holds a Fusion run fails fast (NOWAIT) instead of deadlocking,
+  // and succeeds once the claim committed.
+  const busy = await sessionGroup(db,createFixture,{n:1,credits:9});
+  const [holder,deleter] = [new Client({connectionString}),new Client({connectionString})];
+  await Promise.all([holder.connect(),deleter.connect()]);
+  try {
+    await holder.query('BEGIN');
+    await holder.query('SELECT id FROM bill2_runs WHERE id=$1 FOR UPDATE',[busy.runs[0]]);
+    await deleter.query("SET lock_timeout='5s'");
+    const started = Date.now();
+    await assert.rejects(deleter.query('SELECT content_erasure_mark_session($1,$2)',[busy.actor,busy.session]),/CONTENT_ERASURE_BUSY/,'the existing retryable busy refusal');
+    assert.ok(Date.now()-started<4000,'fails fast rather than waiting');
+    await holder.query('COMMIT');
+    await deleter.query('SELECT content_erasure_mark_session($1,$2)',[busy.actor,busy.session]);
+    assert.equal(await outputs(db,busy.actor),0);
+  } finally { await holder.end(); await deleter.end(); }
+  report.checks.push('conversation deletion overlapping a held Fusion run fails fast (NOWAIT, retryable) and succeeds afterwards');
+
   // A run cannot join a group whose source conversation was deleted.
   const extra = await createFixture(db,{actor:del.actor,phase:'fusion_review'});
   await assert.rejects(rpc(db,'fusion_group_attach',del.actor,del.id,extra.run),/FUSION_GROUP_DENIED/);
@@ -172,9 +207,13 @@ export async function fusionSessionlessCases({db,report,createFixture}) {
   assert.equal(await outputs(db,acct.actor),0);
   report.checks.push('account erasure removes Fusion outputs; body-remaining proof counts them until removed');
 
-  // The sourceless 0234 group form is not callable by the service role.
+  // Admission is the only group-construction path the service role can call.
   await db.query('SET ROLE service_role');
-  try { await assert.rejects(db.query("SELECT fusion_group_create($1,$2,'review')",[g.actor,randomUUID()]),/permission denied/); }
-  finally { await db.query('RESET ROLE'); }
-  report.checks.push('service role must bind a group to a source conversation');
+  try {
+    for (const [sql,args] of [["SELECT fusion_group_create($1,$2,'review')",[g.actor,randomUUID()]],
+      ["SELECT fusion_group_create($1,$2,'review',$3)",[g.actor,randomUUID(),g.session]],
+      ['SELECT fusion_group_attach($1,$2,$3)',[g.actor,g.id,g.runs[0]]]])
+      await assert.rejects(db.query(sql,args),/permission denied/);
+  } finally { await db.query('RESET ROLE'); }
+  report.checks.push('service role cannot create or attach groups directly; only admission builds them');
 }

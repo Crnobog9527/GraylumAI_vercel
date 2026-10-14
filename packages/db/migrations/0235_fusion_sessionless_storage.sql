@@ -88,6 +88,11 @@ BEGIN
   SELECT * INTO g FROM fusion_billing_groups WHERE actor_id=p_actor_id AND request_id=p_request_id;
   IF g.id IS NOT NULL THEN
     IF g.kind<>p_kind OR g.source_session_id IS DISTINCT FROM p_source_session_id THEN RAISE EXCEPTION 'FUSION_GROUP_CONFLICT'; END IF;
+    -- The replay returns frozen private requests: take the conversation's share lock first and refuse
+    -- once it is deleted, so a replay never returns content a committed deletion removed.
+    PERFORM 1 FROM runtime_sessions WHERE id=g.source_session_id AND actor_id=p_actor_id
+      AND content_deleted_at IS NULL AND erased_at IS NULL FOR SHARE;
+    IF NOT FOUND THEN RAISE EXCEPTION 'FUSION_GROUP_DENIED'; END IF;
     RETURN jsonb_build_object('groupId',g.id,'replayed',true,'runs',coalesce((SELECT jsonb_agg(jsonb_build_object(
       'runId',r.id,'fusion',r.payload#>'{input,fusion}') ORDER BY (r.payload#>>'{input,fusion,index}')::int)
       FROM bill2_runs r WHERE r.fusion_group_id=g.id AND r.actor_id=p_actor_id),'[]'));
@@ -130,6 +135,20 @@ BEGIN
   RETURN jsonb_build_object('groupId',gid,'replayed',false,'runs',out);
 END $$;
 
+-- A run admitted through fusion_group_admit carries its frozen call: the group claim must claim exactly
+-- that call (phase, request hash, quote), under the run locks it already holds (#947 review).
+DO $$ DECLARE src text; a text; BEGIN
+  src:=pg_get_functiondef('public.fusion_group_claim(uuid,uuid,text,integer,jsonb)'::regprocedure);
+  IF position('{input,fusion,call}' IN src)=0 THEN
+    a:=$x$      res:=bill2_claim(p_actor_id, (item->>'runId')::uuid, (item->>'sequence')::int, item->'payload');$x$;
+    IF array_length(string_to_array(src,a),1)<>2 THEN RAISE EXCEPTION 'FUSION_SOURCE_MISMATCH: fusion_group_claim'; END IF;
+    EXECUTE replace(src,a,$x$      IF EXISTS(SELECT 1 FROM bill2_runs br WHERE br.id=(item->>'runId')::uuid
+        AND br.payload#>'{input,fusion,call}' IS NOT NULL AND br.payload#>'{input,fusion,call}' IS DISTINCT FROM item->'payload') THEN
+        RAISE EXCEPTION 'FUSION_GROUP_CONFLICT'; END IF;
+$x$||a);
+  END IF;
+END $$;
+
 -- Saved output: idempotent for the same body; only for a dispatched call of a grouped run whose
 -- source conversation still exists. The call row lock orders this with settlement and erasure.
 CREATE OR REPLACE FUNCTION public.fusion_call_output_save(p_actor_id uuid, p_call_id uuid, p_body text)
@@ -161,15 +180,21 @@ BEGIN
   RETURN jsonb_build_object('callId',c.id,'bodyHash',h,'savedAt',o.saved_at);
 END $$;
 
-CREATE OR REPLACE FUNCTION public.fusion_call_output_read(p_actor_id uuid, p_call_id uuid)
-RETURNS jsonb LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path=public,pg_temp AS $$
+-- Reads take the source conversation's share lock first (deletion takes it for update), then read the
+-- body afresh: a read either completes before a deletion commits or sees it and returns nothing.
+-- The function changed from STABLE to VOLATILE while unmerged; row locks need a volatile function.
+DROP FUNCTION IF EXISTS public.fusion_call_output_read(uuid,uuid);
+CREATE FUNCTION public.fusion_call_output_read(p_actor_id uuid, p_call_id uuid)
+RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
 DECLARE o fusion_call_outputs; s runtime_sessions;
 BEGIN
   PERFORM bill2_actor(p_actor_id);
+  SELECT s2.* INTO s FROM runtime_sessions s2 JOIN fusion_billing_groups g ON g.source_session_id=s2.id
+    JOIN bill2_runs r ON r.fusion_group_id=g.id JOIN bill2_calls c ON c.run_id=r.id
+    WHERE c.id=p_call_id AND g.actor_id=p_actor_id FOR SHARE OF s2;
+  IF s.id IS NULL OR s.content_deleted_at IS NOT NULL OR s.erased_at IS NOT NULL THEN RETURN NULL; END IF;
   SELECT * INTO o FROM fusion_call_outputs WHERE call_id=p_call_id AND actor_id=p_actor_id;
   IF o.call_id IS NULL THEN RETURN NULL; END IF;
-  SELECT s2.* INTO s FROM runtime_sessions s2 JOIN fusion_billing_groups g ON g.source_session_id=s2.id WHERE g.id=o.group_id;
-  IF s.id IS NULL OR s.content_deleted_at IS NOT NULL OR s.erased_at IS NOT NULL THEN RETURN NULL; END IF;
   RETURN jsonb_build_object('callId',o.call_id,'body',o.body,'bodyHash',o.body_hash,'savedAt',o.saved_at);
 END $$;
 
@@ -204,13 +229,18 @@ LANGUAGE sql STABLE SECURITY DEFINER SET search_path=public,pg_temp AS $$
 $$;
 
 DO $$ DECLARE f text; BEGIN
-  FOREACH f IN ARRAY ARRAY['fusion_group_create(uuid,uuid,text,uuid)','fusion_group_admit(uuid,uuid,text,uuid,jsonb)','fusion_call_output_save(uuid,uuid,text)',
+  FOREACH f IN ARRAY ARRAY['fusion_group_admit(uuid,uuid,text,uuid,jsonb)','fusion_call_output_save(uuid,uuid,text)',
     'fusion_call_output_read(uuid,uuid)','fusion_pending_financial_batch(integer,timestamptz,uuid)'] LOOP
     EXECUTE format('REVOKE ALL ON FUNCTION public.%s FROM PUBLIC,anon,authenticated,service_role', f);
     EXECUTE format('GRANT EXECUTE ON FUNCTION public.%s TO service_role', f);
   END LOOP;
-  -- The sourceless 0234 form is for local fixtures only.
-  REVOKE EXECUTE ON FUNCTION public.fusion_group_create(uuid,uuid,text) FROM service_role;
+  -- Admission is the only service-callable way to build a group, so the switch, membership, allowlist,
+  -- budget and frozen-call checks cannot be skipped (#947 review). Group creation and attaching stay
+  -- internal (fusion_group_admit calls them as owner); the group claim stays callable and checks frozen calls.
+  FOREACH f IN ARRAY ARRAY['fusion_group_create(uuid,uuid,text,uuid)','fusion_group_create(uuid,uuid,text)',
+    'fusion_group_attach(uuid,uuid,uuid)'] LOOP
+    EXECUTE format('REVOKE ALL ON FUNCTION public.%s FROM PUBLIC,anon,authenticated,service_role', f);
+  END LOOP;
 END $$;
 
 -- Content deletion ends an unjudged dispatched call as user_stopped (billable at known cost, FUSION-REVIEW
@@ -259,6 +289,13 @@ DO $$ DECLARE src text; a text; BEGIN
     a:=$x$ UPDATE runtime_scope_material m SET request=NULL,content=NULL,content_hash=NULL,erased_at=stamp$x$;
     IF array_length(string_to_array(src,a),1)<>2 THEN RAISE EXCEPTION 'FUSION_SOURCE_MISMATCH: content_erasure_confirm'; END IF;
     EXECUTE replace(src,a,$x$ -- 0235 fusion outputs
+ -- Like the session/project locks above, take the Fusion run locks up front with NOWAIT: a concurrent group
+ -- claim holds a run and then the profile, so waiting here could deadlock; failing fast lets the caller
+ -- (or the deletion sweep) retry once the claim committed (#947 review).
+ PERFORM r.id FROM bill2_runs r JOIN fusion_billing_groups g ON g.id=r.fusion_group_id
+  WHERE g.actor_id=a AND (g.source_session_id=ANY(sessions)
+   OR g.source_session_id IN (SELECT d.session_id FROM opc_drafts d WHERE d.actor_id=a AND d.project_id=ANY(projects)))
+  ORDER BY r.id FOR UPDATE OF r NOWAIT;
  FOR row IN SELECT r.id,r.closed FROM bill2_runs r JOIN fusion_billing_groups g ON g.id=r.fusion_group_id
   WHERE g.actor_id=a AND (g.source_session_id=ANY(sessions)
    OR g.source_session_id IN (SELECT d.session_id FROM opc_drafts d WHERE d.actor_id=a AND d.project_id=ANY(projects))) ORDER BY r.id LOOP
