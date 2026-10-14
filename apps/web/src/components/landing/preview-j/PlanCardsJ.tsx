@@ -4,7 +4,7 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { Check, Minus, Star } from 'lucide-react';
-import type { PaywallBilling } from '@/components/paywall/paywallPlans';
+import { formatUsd, type PaywallBilling } from '@/components/paywall/paywallPlans';
 import { allOn, type LandingFlags } from '@/lib/landing/landing-flags';
 import { J_FOUNDER_BAR, J_PLAN_FEATURES, J_PLAN_LINK } from '@/lib/landing/landing-copy-j-price';
 import type { CardQuote, LandingCard, LandingPricing } from '@/lib/landing/landing-pricing';
@@ -17,6 +17,7 @@ export const PRICING_PAGE = '/landing/pricing';
 /** What the J price section needs beyond the shared landing data: read on the server in the preview page. */
 export type PriceExtras = {
   founderTotal: number | null;
+  founderPrice: number | null;
   credits: Partial<Record<'pro' | 'gold', number>>;
   flags: LandingFlags;
 };
@@ -25,7 +26,7 @@ export type PriceExtras = {
  * Paywall v25's founder bar: only while the server says seats are left; before anyone joins it reads "首批开放", after
  * that "已加入 N 位 · 还剩 M" with a meter.
  */
-export function FounderBarJ({ left, total }: { left: number | null; total: number | null }) {
+export function FounderBarJ({ left, total, price }: { left: number | null; total: number | null; price: number | null }) {
   if (left === null || left <= 0) return null;
   const joined = total !== null ? Math.max(0, total - left) : 0;
   return (
@@ -36,6 +37,7 @@ export function FounderBarJ({ left, total }: { left: number | null; total: numbe
         {joined > 0 && total ? <i className={styles.meter}><i style={{ width: `${Math.round((joined / total) * 100)}%` }} /></i> : null}
         {joined > 0 ? J_FOUNDER_BAR.joined(joined, left) : J_FOUNDER_BAR.fresh(total ?? left)}
       </span>
+      {price !== null ? <span className={styles.founderRule}>{J_FOUNDER_BAR.rule(formatUsd(price))}</span> : null}
     </p>
   );
 }
@@ -54,7 +56,7 @@ export function PlanCardsJ({ pricing, showResult, founderSeats, extras, sample }
   const hasYearly = cards.some(card => card.quotes.yearly);
   return (
     <>
-      <FounderBarJ left={founderSeats} total={extras.founderTotal} />
+      <FounderBarJ left={founderSeats} total={extras.founderTotal} price={extras.founderPrice} />
       <div role="radiogroup" aria-label="计费周期" className={styles.billing}>
         {(['monthly', 'yearly'] as const).map(cycle => (
           <label key={cycle} data-on={billing === cycle || undefined} data-disabled={(cycle === 'yearly' && !hasYearly) || undefined}>

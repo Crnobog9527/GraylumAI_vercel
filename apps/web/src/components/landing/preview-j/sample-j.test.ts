@@ -27,7 +27,7 @@ const plan = (level: string, monthly: number, yearly: number) => ({
 
 function render() {
   const data = buildLandingPageData(ALL_ON, [plan('pro', 29, 279), plan('gold', 69, 621)]);
-  return { data, html: renderToStaticMarkup(createElement(SampleJ, { data, siteName: 'Graylum', extras: { founderTotal: null, credits: { pro: 1000, gold: 1000 }, flags: ALL_ON } })) };
+  return { data, html: renderToStaticMarkup(createElement(SampleJ, { data, siteName: 'Graylum', extras: { founderTotal: null, founderPrice: null, credits: { pro: 1000, gold: 1000 }, flags: ALL_ON } })) };
 }
 
 describe('style sample J', () => {
@@ -182,10 +182,13 @@ describe('sample J story timing', () => {
   it('shows the founder bar in the v25 form only while seats are left', () => {
     const offers = { founder: { price: 496, total: 50, available: 37 } };
     const data = buildLandingPageData(ALL_ON, [plan('pro', 29, 279), plan('gold', 69, 621)], offers);
-    const extras = { founderTotal: 50, credits: {}, flags: ALL_ON };
+    const extras = { founderTotal: 50, founderPrice: 496, credits: {}, flags: ALL_ON };
     const html = renderToStaticMarkup(createElement(SampleJ, { data, siteName: 'Graylum', extras }));
     expect(html).toContain(J_FOUNDER_BAR.title);
     expect(html).toContain(J_FOUNDER_BAR.joined(13, 37));
+    expect(html).toContain(J_FOUNDER_BAR.rule('$496'));
+    // Owner 2026-10-14 (MASTER_PLAN 2.1, as in #987): the founder price is never called "终身".
+    expect(html).not.toContain('终身');
     const soldOut = buildLandingPageData(ALL_ON, [plan('pro', 29, 279), plan('gold', 69, 621)],
       { founder: { price: 496, total: 50, available: 0 } });
     expect(renderToStaticMarkup(createElement(SampleJ, { data: soldOut, siteName: 'Graylum', extras }))).not.toContain(J_FOUNDER_BAR.title);

@@ -66,7 +66,7 @@ export function SampleJ({ data, siteName, extras, samplePricing = false }: {
         <PriceJ pricing={data.pricing} rows={data.compareRows} risk={data.risk} showResult={data.showResult}
           founderSeats={data.founderSeats} extras={extras} sample={samplePricing} />
         <FaqJ groups={data.faqGroups} />
-        <FinalJ showStack={data.showStack} founderSeats={data.founderSeats} founderTotal={extras.founderTotal} />
+        <FinalJ showStack={data.showStack} founderSeats={data.founderSeats} founderTotal={extras.founderTotal} founderPrice={extras.founderPrice} />
       </main>
 
       <footer className={styles.footer}>

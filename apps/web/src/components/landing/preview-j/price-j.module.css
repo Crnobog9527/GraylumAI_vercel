@@ -66,6 +66,7 @@
 }
 .founderBar svg { color: var(--j-gold-text); }
 .founderBar b { font-weight: 700; }
+.founderRule { flex-basis: 100%; color: #8a6a2a; font-size: 13px; }
 .slots { display: inline-flex; align-items: center; gap: 8px; margin-left: 8px; font-size: 13px; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .meter { display: block; width: 80px; height: 6px; overflow: hidden; border-radius: 999px; background: #f2dfb5; }
 .meter i { display: block; height: 100%; background: linear-gradient(90deg, #c8901a, var(--j-gold)); }

@@ -16,12 +16,16 @@ export const J_PRICE_TOTAL = {
   rows: ['consultant', 'project', 'scheduler', 'benchmark'],
 } as const;
 
-/** The founder bar in paywall v25's wording (pricing page, founderBar): shown only while seats are left. */
+/**
+ * The founder bar in paywall v25's form (pricing page, founderBar): shown only while seats are left. Wording per
+ * MASTER_PLAN 2.1 (Owner 2026-10-14, as in #987): never "终身"; the renewal line is the shared card's own.
+ */
 export const J_FOUNDER_BAR = {
-  title: 'Gold 创始会员 · 年付终身 6 折',
+  title: 'Gold 创始会员 · 连续续费一直 6 折',
+  rule: (price: string) => `首年 ${price}；只要连续续费，一直按 Gold 价格的 6 折，目前每年 ${price}`,
   joined: (joined: number, left: number) => `已加入 ${joined} 位 · 还剩 ${left}`,
   fresh: (total: number) => `首批开放 · 共 ${total} 个名额`,
-  goldTag: '创始会员 · 终身 6 折',
+  goldTag: '创始会员 · 连续续费一直 6 折',
   seatsLeft: (left: number) => `还剩 ${left} 个名额`,
 } as const;
 

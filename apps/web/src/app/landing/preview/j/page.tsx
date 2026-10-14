@@ -30,6 +30,6 @@ export default async function LandingPreviewJ() {
   const credits = Object.fromEntries(pickPaywallPlans(priced.plans)
     .filter(plan => plan.level === 'pro' || plan.level === 'gold')
     .map(plan => [plan.level, monthlyCredits(plan)]));
-  const extras = { founderTotal: priced.offers.founder?.total ?? null, credits, flags: flagsUsed };
+  const extras = { founderTotal: priced.offers.founder?.total ?? null, founderPrice: priced.offers.founder?.price ?? null, credits, flags: flagsUsed };
   return <SampleJ data={data} siteName={siteName} extras={extras} samplePricing={priced.sample} />;
 }

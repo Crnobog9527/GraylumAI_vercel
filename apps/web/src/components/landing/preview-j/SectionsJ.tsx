@@ -40,8 +40,8 @@ export function FaqJ({ groups }: { groups: readonly LandingFaqGroup[] }) {
 }
 
 /** The close: the two paths, what you get, the founder seats while they last, and the one button. */
-export function FinalJ({ showStack, founderSeats, founderTotal }: {
-  showStack: boolean; founderSeats: number | null; founderTotal: number | null;
+export function FinalJ({ showStack, founderSeats, founderTotal, founderPrice }: {
+  showStack: boolean; founderSeats: number | null; founderTotal: number | null; founderPrice: number | null;
 }) {
   return (
     <section aria-labelledby="final-title" className={page.section} data-zone="final">
@@ -52,7 +52,7 @@ export function FinalJ({ showStack, founderSeats, founderTotal }: {
             {FINAL_ACTION.paths.map((path, index) => <li key={path} data-path={index === 0 ? 'alone' : 'coach'}>{path}</li>)}
           </ul>
           {showStack ? <p className={styles.stack}><b>{FINAL_ACTION.stackLabel}</b>{FINAL_ACTION.stack.text}</p> : null}
-          <FounderBarJ left={founderSeats} total={founderTotal} />
+          <FounderBarJ left={founderSeats} total={founderTotal} price={founderPrice} />
           <Link href={SIGNUP_CTA_HREF} className={page.pill}>{FINAL_ACTION.cta}<ArrowRight size={18} aria-hidden="true" /></Link>
           <p className={styles.finalNote}>{HERO_H.ctaNote}</p>
         </div>
