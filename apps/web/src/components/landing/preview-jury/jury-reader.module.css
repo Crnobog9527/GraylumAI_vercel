@@ -99,6 +99,9 @@
 .why b { display: inline-block; min-width: 4.5em; color: var(--j-bronze); font-size: 14.5px; }
 
 .compare { display: grid; gap: 8px; }
+.whole { margin: 0; color: var(--j-body); font-family: var(--j-serif); line-height: 1.9; }
+.whole del { color: var(--j-muted); text-decoration-color: rgba(0, 0, 0, .3); }
+.whole mark { padding: 1px 2px; border-radius: 3px; background: var(--j-bronze-soft); color: var(--j-ink); }
 .context { margin: 0; color: var(--j-muted); }
 .change { display: grid; gap: 6px; }
 .change p { display: grid; grid-template-columns: 3em minmax(0, 1fr); gap: 10px; margin: 0; padding: 10px 14px; border-radius: 8px; }
@@ -144,7 +147,7 @@
 
 /* The bar that stays at the bottom while choosing. */
 .bar {
-  position: sticky; bottom: 12px; z-index: 6; display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 8px 14px;
+  position: sticky; bottom: calc(var(--j-drawer, 0px) + 12px); z-index: 6; display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 8px 14px;
   padding: 12px 16px; border: 1px solid var(--j-rule); border-radius: 10px; background: var(--j-paper); box-shadow: var(--j-lift);
 }
 .count { font-size: 15.5px; font-weight: 700; font-variant-numeric: tabular-nums; }
@@ -193,7 +196,7 @@
   .change p { grid-template-columns: minmax(0, 1fr); gap: 0; }
   .line { grid-template-columns: minmax(0, 1fr) auto auto; }
   .lineGist { grid-column: 1; grid-row: 2; }
-  .bar { grid-template-columns: minmax(0, 1fr); bottom: 8px; padding: 12px; }
+  .bar { grid-template-columns: minmax(0, 1fr); bottom: calc(var(--j-drawer, 0px) + 8px); padding: 12px; }
   .barActions button { flex: 1; padding: 0 10px; }
   .option { flex: 1; justify-content: center; }
   .diff li { grid-template-columns: minmax(0, 1fr); }

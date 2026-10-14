@@ -98,23 +98,23 @@
 /* Narrower computers: the records leave the right for the bottom panel; the result page drops them below. */
 @media (max-width: 1279px) {
   .live { grid-template-columns: 200px minmax(0, 1fr); }
-  .results { grid-template-columns: minmax(0, 1fr); }
-  .results .records { position: static; max-height: none; }
+  /* The records become the panel at the bottom on the result page too; the choice bar sits above it. */
+  .results { --j-drawer: 64px; grid-template-columns: minmax(0, 1fr); padding-bottom: 64px; }
 }
 @media (max-width: 1279px) {
-  .live .records {
-    position: fixed; right: 0; bottom: 0; left: 0; z-index: 25; max-height: 64px; padding: 0 16px 12px; border-radius: 16px 16px 0 0;
+  .live .records, .results .records {
+    position: fixed; top: auto; right: 0; bottom: 0; left: 0; z-index: 25; max-height: 64px; padding: 0 16px 12px; border-radius: 16px 16px 0 0;
     background: var(--j-paper); box-shadow: 0 -12px 32px -18px rgba(0, 0, 0, .3); transition: max-height .3s var(--j-ease);
   }
-  .live .records[data-open='true'] { max-height: 64svh; }
-  .live .recordsHandle {
+  .live .records[data-open='true'], .results .records[data-open='true'] { max-height: 64svh; }
+  .recordsHandle {
     display: flex; align-items: center; justify-content: center; gap: 6px; width: 100%; min-height: 52px; border: 0; background: none;
     color: var(--j-ink); font: inherit; font-size: 15px; font-weight: 700; cursor: pointer;
   }
-  .live .records[data-open='true'] .recordsHandle svg { transform: rotate(180deg); }
-  .live .recordsHead { display: none; }
+  .records[data-open='true'] .recordsHandle svg { transform: rotate(180deg); }
+  .recordsHead { display: none; }
   .live { padding-bottom: 64px; }
-  .live .records { grid-template-rows: auto minmax(0, 1fr); }
+  .records { grid-template-rows: auto minmax(0, 1fr); }
 }
 /* Phone: the steps become one line on top. */
 @media (max-width: 1023px) {

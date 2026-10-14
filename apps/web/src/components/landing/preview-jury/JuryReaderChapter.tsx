@@ -5,7 +5,7 @@ import { ChevronDown, Gavel, Link2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { DetailIssue, DetailSection, JurySeatNames, RulingFields, Seat } from './jury-events';
 import { firstSentence, needsConfirm } from './jury-adopt';
-import { changeHunks } from './jury-hunks';
+import { changeHunks, type Hunk } from './jury-hunks';
 import type { ReaderChapter } from './jury-reader';
 import type { Adoption } from './use-adoption';
 import { SeatBadge, SeverityTag } from './JuryBits';
@@ -48,7 +48,7 @@ export function JuryReaderChapter({ chapter, names, adoption, compact, open, onT
           <button type="button" className={styles.fold} onClick={onToggle} aria-expanded={open}>{open ? '收起' : '展开'}</button>
         ) : null}
       </header>
-      {changed && section ? <Changed section={section} names={names} adoption={adoption} /> : (
+      {changed && section ? <Changed section={section} names={names} adoption={adoption} full={!compact} /> : (
         <>
           <p className={styles.gist}>{digest.gist}</p>
           <ul className={styles.points}>{digest.points.map(point => <li key={point}>{point}</li>)}</ul>
@@ -71,7 +71,9 @@ function FullText({ body }: { body: string }) {
   );
 }
 
-function Changed({ section, names, adoption }: { section: DetailSection; names: JurySeatNames; adoption: Adoption | null }) {
+function Changed({ section, names, adoption, full }: {
+  section: DetailSection; names: JurySeatNames; adoption: Adoption | null; full: boolean;
+}) {
   const primary = section.rulings.find(item => item.adopted) ?? section.rulings[0];
   const hunks = changeHunks(section.original ?? '', section.revised ?? '');
   const choice = adoption?.state[section.section];
@@ -83,6 +85,7 @@ function Changed({ section, names, adoption }: { section: DetailSection; names: 
           <p><b>为什么</b>{firstSentence(primary.reason)}</p>
         </div>
       ) : null}
+      {full ? <WholeRevision hunks={hunks} /> : (
       <div className={styles.compare}>
         {hunks.map((hunk, index) => hunk.type === 'context' ? <p key={index} className={styles.context}>{hunk.text}</p>
           : hunk.type === 'folded' ? <Folded key={index} count={hunk.count} text={hunk.text} />
@@ -93,6 +96,7 @@ function Changed({ section, names, adoption }: { section: DetailSection; names: 
               </div>
             ))}
       </div>
+      )}
       {section.fields.length > 0 ? (
         <ul className={styles.fields} aria-label="涉及的定位内容">
           {section.fields.map(item => (
@@ -128,6 +132,17 @@ function Changed({ section, names, adoption }: { section: DetailSection; names: 
         </fieldset>
       ) : null}
     </>
+  );
+}
+
+/** "看全文": the chapter's whole revised text in one piece, deleted sentences struck through, new ones marked. */
+function WholeRevision({ hunks }: { hunks: Hunk[] }) {
+  return (
+    <p className={styles.whole} aria-label="修订后全文，删掉的句子划线，新增的句子标亮">
+      {hunks.map((hunk, index) => hunk.type === 'change' ? (
+        <span key={index}>{hunk.before ? <del>{hunk.before}</del> : null}{hunk.after ? <mark>{hunk.after}</mark> : null}</span>
+      ) : <span key={index}>{hunk.text}</span>)}
+    </p>
   );
 }
 
