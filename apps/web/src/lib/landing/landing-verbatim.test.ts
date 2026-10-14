@@ -3,6 +3,7 @@ import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { LANDING_FAQ } from './landing-faq';
 import { FLOW_STEPS } from './landing-flow';
+import { buildLandingPricing } from './landing-pricing';
 
 // The Owner's final copy as committed in docs; the page must quote it word for word.
 const ONE_PAGE = readFileSync(
@@ -27,5 +28,19 @@ describe('landing copy matches the final offer', () => {
       expect(faq).toContain(`**${item.question}**`);
       for (const paragraph of item.answer) expect(faq).toContain(paragraph);
     }
+  });
+
+  it('quotes the price cards\' result and "适合谁" lines verbatim (Pro | Gold | 创始会员)', () => {
+    const plan = (level: string, monthly: number, yearly: number) => ({
+      id: level, name: level, level, price: { monthly, yearly },
+      credits: { monthly: 1000, monthlyBonus: 0 }, discount: 0, checkoutReady: { monthly: true, yearly: true },
+    });
+    const { cards } = buildLandingPricing([plan('pro', 29, 279), plan('gold', 69, 621)],
+      { goldFirstMonth: 49, founder: { price: 496, total: 50, available: 10 } });
+    const row = (label: string) => ONE_PAGE.split('\n').find(line => line.startsWith(`| ${label} |`))!
+      .replace(/^\||\|$/g, '').split('|').map(cell => cell.trim()).slice(1);
+    expect(cards.map(card => card.key)).toEqual(['pro', 'gold', 'founder']);
+    expect(cards.map(card => card.result.text)).toEqual(row('第一行（结果）'));
+    expect(cards.map(card => card.fit)).toEqual(row('适合谁'));
   });
 });
