@@ -21,8 +21,8 @@ const ids = { reviewers: ['00000000-0000-4000-8000-0000000000a1', '00000000-0000
 vi.mock('./settings', () => ({ readFusionSettings: async () => ({ version: 1, compare: { enabled: false }, review: { enabled: true,
   reviewerModelIds: ids.reviewers, summaryModelId: ids.summary, skillId: '00000000-0000-4000-8000-0000000000c1', maxRounds: 2,
   opinionOutputTokens: 1000, summaryOutputTokens: 2000, maxBudgetUsd: '5', dispatchMinutes: 10, breaker: { platformUsd: '2', noDeliveryCalls: 10 } } }) }));
-vi.mock('../runtime/stagingPolicy', () => ({ loadStagingPolicy: async () => ({ callPolicies: [...ids.reviewers, ids.summary].map(modelId => ({ modelId,
-  outputLimit: 8192, providerLimits: { providerSlug: 'x', contextTokens: 400000, promptUsdPerMillion: '0.1', completionUsdPerMillion: '0.1', requestUsd: '0' } })) }) }));
+vi.mock('../runtime/stagingPolicy', () => ({ loadStagingPolicy: async () => ({ creditsPerUsd: '100', callPolicies: [...ids.reviewers, ids.summary].map(modelId => ({ modelId,
+  multiplier: '3', outputLimit: 8192, providerLimits: { providerSlug: 'x', contextTokens: 400000, promptUsdPerMillion: '0.1', completionUsdPerMillion: '0.1', requestUsd: '0' } })) }) }));
 vi.mock('./reviewPrompts', async original => ({ ...(await original<typeof import('./reviewPrompts')>()),
   resolveReviewSkill: async () => ({ skillId: '00000000-0000-4000-8000-0000000000c1', revisionId: '00000000-0000-4000-8000-0000000000c2', packageHash: 'a'.repeat(64) }),
   readReviewSkill: async () => ({ reviewer: 'review', summary: 'summarize', rubric: 'rubric' }) }));
@@ -278,10 +278,14 @@ describe('review flow', () => {
     await t.runAll(); await t.runAll(); await t.flow.continue(String(db.review!.reviewId));
     const reviewId = String(db.review!.reviewId);
     applyRefusal.value = 'REPORT_REVISION_STALE';
-    await expect(t.flow.confirmAdoption({ reviewId, requestId: randomUUID(), choices: [{ section: '定位', use: 'revised' }],
-      expectedDiffHash: 'f'.repeat(64), decision: 'apply' })).rejects.toThrow('REPORT_REVISION_STALE');
+    const confirm = { reviewId, requestId: randomUUID(), choices: [{ section: '定位', use: 'revised' as const }],
+      expectedDiffHash: 'f'.repeat(64), decision: 'apply' as const };
+    await expect(t.flow.confirmAdoption(confirm)).rejects.toThrow('REPORT_REVISION_STALE');
     applyRefusal.value = '';
     expect(db.review!.adoption).toMatchObject({ state: 'recorded', decision: 'refused', refusal: 'REPORT_REVISION_STALE', adopted: [] });
+    // A retry after a lost error response gets the same refusal, never an apparent success with everything kept.
+    await expect(t.flow.confirmAdoption(confirm)).rejects.toThrow('REPORT_REVISION_STALE');
+    await expect(t.flow.adopt(confirm)).rejects.toThrow('REPORT_REVISION_STALE');
   });
 
   it('a retry of a reserved confirmation cannot switch its decision', async () => {

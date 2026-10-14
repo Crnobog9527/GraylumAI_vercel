@@ -18,6 +18,8 @@ import { readFusionSettings } from './settings';
 
 type Executor = ReturnType<typeof fusionExecutor>;
 const config = z.object({ estimateUsd: z.string(), maxRounds: z.number().int().min(1), reviewers: z.array(z.string().uuid()).min(1),
+  /** "最多消耗 X 积分" (§3.2), shown before the user agrees; absent on reviews started before it was recorded. */
+  estimateCredits: z.number().int().positive().optional(),
   opinionTokens: z.number().int().positive(), summaryTokens: z.number().int().positive(),
   /** Per-phase request size the estimate priced (absent: only the byte cap applies). */
   requestBytes: z.object({ review: z.number(), debate: z.number(), summary: z.number() }).optional(),
@@ -222,7 +224,10 @@ export function reviewFlow(deps: { admin: SupabaseClient; actorId: string;
   }
   const recordedChoice = (view: ReviewView) => (view.adoption as { state?: string } | null | undefined)?.state === 'recorded';
   const adopted = (view: ReviewView) => {
-    const prior = view.adoption as { versionId?: string | null; adopted?: string[]; kept?: string[] };
+    const prior = view.adoption as { versionId?: string | null; adopted?: string[]; kept?: string[]; decision?: string; refusal?: string };
+    // A permanent R14 refusal stays a refusal on every retry: a lost error response must not read as a completed
+    // adoption with everything kept (#962 review).
+    if (prior.decision === 'refused') throw new Error(prior.refusal || 'FUSION_REVIEW_ADOPTED');
     return { state: 'recorded' as const, versionId: prior.versionId ?? null, adopted: prior.adopted ?? [], kept: prior.kept ?? [] };
   };
   /** The same request and choices always propose the same R14 revision (R14 is idempotent by request). */
@@ -265,13 +270,14 @@ export function reviewFlow(deps: { admin: SupabaseClient; actorId: string;
         .parse(sizes.data);
       // Instructions travel as one escaped string in the body; the host-written format rules add at most a few KB.
       const sent = (value: string) => Buffer.byteLength(JSON.stringify(value)) + 4096;
-      const { rounds, estimateUsd, requestBytes } = estimateReview({ quotes: window.callPolicies, reviewers: settings.review.reviewerModelIds,
+      const { rounds, estimateUsd, estimateCredits, requestBytes } = estimateReview({ quotes: window.callPolicies,
+        creditsPerUsd: window.creditsPerUsd, reviewers: settings.review.reviewerModelIds,
         summary: settings.review.summaryModelId, maxRounds: settings.review.maxRounds, maxBudgetUsd: settings.review.maxBudgetUsd,
         opinionTokens: settings.review.opinionOutputTokens, summaryTokens: settings.review.summaryOutputTokens, fieldCount: preview.fieldCount,
         snapshotBytes: preview.reportSentBytes + preview.materialsSentBytes,
         instructionBytes: { reviewer: sent(`${text.reviewer}\n\n${text.rubric}`), summary: sent(`${text.summary}\n\n${text.rubric}`) } });
       const view = await record.start({ requestId: input.requestId, draftId: input.draftId, sourceVersionId: input.sourceVersionId,
-        config: { estimateUsd, maxRounds: rounds, reviewers: settings.review.reviewerModelIds, summary: settings.review.summaryModelId,
+        config: { estimateUsd, estimateCredits, maxRounds: rounds, reviewers: settings.review.reviewerModelIds, summary: settings.review.summaryModelId,
           opinionTokens: settings.review.opinionOutputTokens, summaryTokens: settings.review.summaryOutputTokens, skill, requestBytes } });
       // Before anything is claimed: round 1 and the most trimmed summary, measured exactly as they will be sent, must fit
       // the per-call byte cap; otherwise the review ends here with nothing charged (#962 review).
