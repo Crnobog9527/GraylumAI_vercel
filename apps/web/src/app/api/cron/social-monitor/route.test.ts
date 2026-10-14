@@ -1,0 +1,50 @@
+/* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
+const mocks = vi.hoisted(() => ({ auth: vi.fn(), create: vi.fn(), deps: vi.fn(), run: vi.fn() }));
+vi.mock('@/lib/cron-auth', () => ({ validateCronRequest: mocks.auth }));
+vi.mock('@supabase/supabase-js', () => ({ createClient: mocks.create }));
+vi.mock('@repo/api/src/services/publishMonitor/postForMe/config', () => ({ postForMeDeps: mocks.deps }));
+vi.mock('@repo/api/src/services/publishMonitor/socialMonitorJob', () => ({ runSocialMonitorJob: mocks.run }));
+import { GET } from './route';
+
+afterEach(() => vi.unstubAllEnvs());
+beforeEach(() => {
+  vi.resetAllMocks();
+  vi.stubEnv('NEXT_PUBLIC_SUPABASE_URL', 'https://synthetic.supabase.co');
+  vi.stubEnv('SUPABASE_SERVICE_ROLE_KEY', 'synthetic-service-value');
+  mocks.create.mockReturnValue({ synthetic: true });
+  mocks.deps.mockReturnValue({ synthetic: 'deps' });
+});
+const call = () => GET(new Request('https://synthetic.test/api/cron/social-monitor'));
+
+it('denies an unauthenticated call before any work', async () => {
+  mocks.auth.mockReturnValue(new Response('Unauthorized', { status: 401 }));
+  expect((await call()).status).toBe(401);
+  expect(mocks.run).not.toHaveBeenCalled();
+});
+
+it('skips cleanly when this environment has no Post for Me key', async () => {
+  mocks.deps.mockImplementation(() => { throw new Error('POSTFORME_NOT_CONFIGURED'); });
+  const res = await call();
+  expect([res.status, await res.json()]).toEqual([200, { success: true, skipped: 'POSTFORME_NOT_CONFIGURED' }]);
+  expect(mocks.run).not.toHaveBeenCalled();
+});
+
+it('runs the job within its 240-second budget and fails the run when a step failed', async () => {
+  const now = Date.now();
+  mocks.run.mockResolvedValue({ providerWork: null, attempts: null, sweep: null, sweepDeleteEnabled: false,
+    failures: ['sweep'] });
+  const res = await call();
+  expect(res.status).toBe(500);
+  const until = mocks.run.mock.calls[0]![2] as number;
+  expect(until - now).toBeGreaterThanOrEqual(239_000);
+  expect(until - now).toBeLessThanOrEqual(241_000);
+});
+
+it('is scheduled once a day, apart from the other daily jobs', () => {
+  const config = JSON.parse(readFileSync('vercel.json', 'utf8'));
+  expect(config.crons).toContainEqual({ path: '/api/cron/social-monitor', schedule: '0 7 * * *' });
+  const hours = config.crons.map((c: { schedule: string }) => c.schedule);
+  expect(new Set(hours).size).toBe(hours.length);
+});
