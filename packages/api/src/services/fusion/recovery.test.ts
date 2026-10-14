@@ -28,6 +28,21 @@ function admin(rows: unknown[], options: { deleted?: string[]; failFinalize?: st
 }
 
 describe('Fusion daily recovery', () => {
+  it('cancels expired undispatched calls before slow lookups and stops at the time limit', async () => {
+    let clock = now;
+    const a = admin([item(20, true, -60), item(21, true, -60), item(22, false, -1)]);
+    type Rpc = (name: string, args: Record<string, unknown>) => Promise<unknown>;
+    const fake = a.db as unknown as { rpc: Rpc };
+    const original = fake.rpc.bind(fake);
+    fake.rpc = (name, args) => {
+      if (name === 'bill2_finalize') clock += 20_000; // each settle takes 20 s here
+      return original(name, args);
+    };
+    const summary = await recoverFusionFinancials(a.db, { now: () => clock, timeLimitMs: 40_000, budget: createRuntimeBudget() });
+    expect(a.calls.findIndex(c => c.startsWith('bill2_cancel'))).toBeLessThan(a.calls.findIndex(c => c === `bill2_finalize:${id(20)}`));
+    expect(summary).toMatchObject({ cancelled: 1, deferred: 1, scanned: 2 });
+    expect(summary.recovered).toBe(1);
+  });
   it('pages past calls that stay pending, so newer calls are reached', async () => {
     const stuck = [item(10, true, -60), item(11, true, -60)];
     const a = admin([...stuck, item(12, false, -1)], { failFinalize: id(10) });
