@@ -164,6 +164,8 @@ invalidatePlatformSecret(slot)
    - `scripts/check-staging-db-readiness.mjs`（第 415 行统计 `api_key is not null`，第 674 行输出）改成统计 `platform_secret_status()` 里已填写的密钥数量；
    - `docs/runbooks/STAGING_REPRODUCIBILITY.md` 第 263、302、480 行对应的说明；
    - `packages/db/tests/run-ai-models-column-grants.mjs`（0142 列级授权的测试）按删列后的结构调整或退役。
+   - `packages/db/seeds/staging_non_secret_baseline.sql`（INSERT 列表和冲突更新里的 `api_key`，第 232–237、302–307 行附近）去掉这一列，并确认它在新结构上仍可重复执行（`packages/db/tests/entitlements/run-local.mjs` 会重复加载它）。
+   - 开工时再用 grep 全仓核对一遍 `api_key`，以上清单以核对结果为准。
 4. 回滚：数据已在 Vault，不会丢。PR 里附一份**不应用**的反向迁移：重新加回 `api_key` 列，并用 `platform_secret_read('openrouter')` 填回去，配合撤回 OR-1 的代码使用。按 AGENTS.md 第 4 节，需要保留的数据不能用"撤回代码"代替恢复，这份脚本就是恢复方式。
 
 ## 6. 删除和注销
