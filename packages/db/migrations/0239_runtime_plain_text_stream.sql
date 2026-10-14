@@ -15,7 +15,7 @@ DO $migration$
 DECLARE definition text; source_md5 text; patched text;
 BEGIN
  definition:=pg_get_functiondef('public.runtime_execution(uuid,uuid,text,jsonb)'::regprocedure);source_md5:=md5(definition);
- IF source_md5='__TARGET_MD5_RECOMPUTE_AFTER_0238__' THEN RETURN;END IF;
+ IF source_md5='6f66e0feeaba637dae8f96acdf2c4e00' THEN RETURN;END IF;
  IF source_md5<>'7525ae8d4e450dd8f03db7fa77e89453' THEN RAISE EXCEPTION 'PLAIN_TEXT_STREAM_SOURCE_MISMATCH: runtime_execution(uuid,uuid,text,jsonb)';END IF;
  IF (length(definition)-length(replace(definition,$a1$   OR (e.payload->>'providerRequestFormat' IS DISTINCT FROM 'agent-turn-v5-stream'
     AND e.payload->>'envelopeOrder' IS DISTINCT FROM 'message-first-v1') THEN RETURN runtime_cancel(p_actor_id,e.id);END IF;$a1$,'')))
@@ -29,7 +29,7 @@ BEGIN
     AND e.payload->>'textStream' IS DISTINCT FROM 'plain-text-v1') THEN RETURN runtime_cancel(p_actor_id,e.id);END IF;$b1$);
  EXECUTE definition;
  patched:=md5(pg_get_functiondef('public.runtime_execution(uuid,uuid,text,jsonb)'::regprocedure));
- IF patched<>'__TARGET_MD5_RECOMPUTE_AFTER_0238__' THEN RAISE EXCEPTION 'PLAIN_TEXT_STREAM_TARGET_MISMATCH: %',patched;END IF;
+ IF patched<>'6f66e0feeaba637dae8f96acdf2c4e00' THEN RAISE EXCEPTION 'PLAIN_TEXT_STREAM_TARGET_MISMATCH: %',patched;END IF;
 END $migration$;
 DO $migration$
 DECLARE definition text;
