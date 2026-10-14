@@ -59,7 +59,11 @@ export async function recoverFusionFinancials(admin: SupabaseClient, options: { 
   const rejudged = new Set<string>();
   for (const [reviewId, { actorId, callIds }] of reviews) {
     if (now() + 10_000 > stopAt) { callIds.forEach(id => unsettleable.add(id)); continue; }
-    try { await reviewFlow({ admin, actorId }).rejudge(reviewId); summary.rejudged++; callIds.forEach(id => rejudged.add(id)); }
+    try {
+      // Every call of the review that now has a verdict, including ones past this listing page (#962 review).
+      for (const callId of await reviewFlow({ admin, actorId }).rejudge(reviewId)) rejudged.add(callId);
+      summary.rejudged++;
+    }
     catch { summary.failed++; summary.success = false; callIds.forEach(id => unsettleable.add(id)); }
   }
   // Listing is cheap: collect the pages first. Pages advance past calls that cannot progress yet (0235).

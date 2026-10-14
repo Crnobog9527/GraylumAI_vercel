@@ -5,9 +5,14 @@ import { createRuntimeBudget } from '../runtime/budget';
 import { recoverFusionFinancials } from './recovery';
 
 const rejudged = vi.hoisted(() => [] as string[]);
+const judgedNow = vi.hoisted(() => ({ ids: [] as string[] }));
 const failRejudge = vi.hoisted(() => ({ value: false }));
 vi.mock('./review', () => ({ reviewFlow: (deps: { actorId: string }) => ({
-  rejudge: async (reviewId: string) => { if (failRejudge.value) throw new Error('down'); rejudged.push(`${deps.actorId}:${reviewId}`); } }) }));
+  rejudge: async (reviewId: string) => {
+    if (failRejudge.value) throw new Error('down');
+    rejudged.push(`${deps.actorId}:${reviewId}`);
+    return judgedNow.ids;
+  } }) }));
 
 const id = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
 const now = Date.parse('2026-10-14T00:00:00Z');
@@ -66,12 +71,16 @@ describe('Fusion daily recovery', () => {
     // 50 unjudged rows (a full page): the first belongs to run 11, the rest to calls with no pending row here.
     const unjudged = Array.from({ length: 50 }, (_, i) => ({ actor_id: id(100), review_id: id(300), call_id: id(i === 0 ? 500 : 600 + i),
       run_id: id(i === 0 ? 11 : 700 + i), phase: 'fusion_review', round: 1 }));
-    // Run 10 has no saved body (cannot be unjudged); run 12 has one that may be past the page.
-    const a = admin([item(10, true, -60), { ...item(11, true, -60), call_id: id(500) }, item(12, true, -60)],
-      { unjudged, saved: [id(62)] });
+    // Run 10 has no saved body (cannot be unjudged); run 12 has one that may be past the page; run 13 belongs to the
+    // same review, past the page, and the review-wide re-judging just judged it.
+    judgedNow.ids = [id(500), id(63)];
+    const a = admin([item(10, true, -60), { ...item(11, true, -60), call_id: id(500) }, item(12, true, -60), item(13, true, -60)],
+      { unjudged, saved: [id(62), id(63)] });
     const summary = await recoverFusionFinancials(a.db, { now: () => now, budget: createRuntimeBudget() });
+    judgedNow.ids = [];
     expect(a.calls).toContain(`bill2_finalize:${id(11)}`);
     expect(a.calls).toContain(`bill2_finalize:${id(10)}`);
+    expect(a.calls).toContain(`bill2_finalize:${id(13)}`);
     expect(a.calls).not.toContain(`bill2_finalize:${id(12)}`);
     expect(summary).toMatchObject({ rejudged: 1, deferred: 1 });
   });

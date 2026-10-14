@@ -127,7 +127,10 @@ export function reviewFlow(deps: { admin: SupabaseClient; actorId: string;
     return checkRevision(text, revisionInput(view, src)).ok ? 'usable' : 'revision_invalid';
   }
   /** Saved but never judged (a crash between save and verdict): judge again with the frozen check. */
-  async function rejudge(view: ReviewView, src: Source) {
+  /** Judges every saved, unjudged call of the review; returns every call of it that now has a verdict, so the daily
+   * recovery can settle all of them, not only those on its listing page (#962 review). */
+  async function rejudge(view: ReviewView, src: Source): Promise<string[]> {
+    const judged = view.calls.filter(c => c.verdict !== null).map(c => c.callId);
     for (const call of view.calls.filter(c => c.verdict === null && c.dispatched)) {
       const text = await outputOf(call.callId);
       if (!text) continue;
@@ -135,7 +138,9 @@ export function reviewFlow(deps: { admin: SupabaseClient; actorId: string;
       const verdict = await judgeText(view, src, call, step.round, text);
       const result = await admin.rpc('fusion_call_verdict', { p_actor_id: actorId, p_call_id: call.callId, p_verdict: verdict });
       if (result.error && !/FUSION_VERDICT_IMMUTABLE/.test(String(result.error.message))) throw new Error('FUSION_REVIEW_UNAVAILABLE');
+      judged.push(call.callId);
     }
+    return judged;
   }
   const contextOf = (view: ReviewView, src: Source): ReviewContext => ({ report: src.body, materials: view.materials,
     sections: src.sections, maxCharacters: src.maxCharacters });
@@ -477,9 +482,9 @@ export function reviewFlow(deps: { admin: SupabaseClient; actorId: string;
       return reviewEvents({ view, reviewers: config.parse(view.config).reviewers, sections: src.sections, outputs,
         revision: revisionInput(view, src) });
     },
-    rejudge: async (reviewId: string) => {
+    rejudge: async (reviewId: string): Promise<string[]> => {
       const view = await record.read(reviewId);
-      if (view) await rejudge(view, await readSource(reviewId));
+      return view ? rejudge(view, await readSource(reviewId)) : [];
     },
   };
 }
