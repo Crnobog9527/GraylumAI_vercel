@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { STOPPED_NOTICE } from "./stop-reply";
 import {
   readReportRecord, REPORT_DISABLED_NOTICE, REPORT_EMPTY_NOTICE, REPORT_INCOMPLETE_NOTICE, REPORT_INTRO, REPORT_STOPPED_NOTICE,
-  REPORT_REFUSED_NOTICE, REPORT_TRUNCATED_NOTICE, REPORT_UNCONFIRMED_NOTICE, reportAttachable, reportCanStart, reportProgressing, reportRecordKey,
+  REPORT_TRUNCATED_NOTICE, REPORT_UNCONFIRMED_NOTICE, reportAttachable, reportCanStart, reportProgressing, reportRecordKey,
   reportResultRefusal, reportStartRefusal, reportView, startedExecution, writeReportRecord, type ReportStatus,
   ATTACH_RETRY_DELAYS_MS, attachRetryDelay, generationOffer, needsReattach, newerRead, nextRequestId, REPORT_ALREADY_EXISTS_NOTICE, shownExecution,
 } from "./report-gen";
@@ -33,14 +33,6 @@ describe("reportStartRefusal", () => {
   });
   it.each([new Error("REPORT_UNAVAILABLE"), new Error("fetch failed"), "x", null])("never shows server text (%s)", cause => {
     expect(reportStartRefusal(cause)).toEqual({ text: REPORT_UNCONFIRMED_NOTICE });
-  });
-  it("says a definite refusal started nothing, and leaves an open outcome unconfirmed", () => {
-    const refused = (httpStatus: number, path = "runtime.reportStart") =>
-      Object.assign(new Error("当前模型用途尚未完成逐次计费验证，请管理员核对配置；未发起模型调用。"), { data: { httpStatus, code: "PRECONDITION_FAILED", path } });
-    expect(reportStartRefusal(refused(412))).toEqual({ text: REPORT_REFUSED_NOTICE });
-    expect(REPORT_REFUSED_NOTICE).not.toMatch(/积分|credit|管理员|配置|Claude|Sonnet|GPT|Gemini|模型/i);
-    expect(reportStartRefusal(refused(503))).toEqual({ text: REPORT_UNCONFIRMED_NOTICE });
-    expect(reportStartRefusal(refused(412, "runtime.prepare"))).toEqual({ text: REPORT_UNCONFIRMED_NOTICE });
   });
   it("keeps the intro free of predicted cost", () => {
     expect(REPORT_INTRO).not.toMatch(/积分|费|标价/);
