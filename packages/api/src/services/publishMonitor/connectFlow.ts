@@ -78,7 +78,8 @@ export async function disconnectTakenOver(client: ClientDeps, ids: string[], now
     if (pending > 0 || now() >= until) { pending += 1; continue; }
     try {
       const result = await disconnectAccount(client, id);
-      if (result.kind !== 'ok' && result.kind !== 'rejected') pending += 1;
+      // Only success or "no such account" (404) settles it; 401/403 and other refusals still need reconciliation.
+      if (!(result.kind === 'ok' || (result.kind === 'rejected' && result.status === 404))) pending += 1;
     } catch {
       pending += 1;
     }

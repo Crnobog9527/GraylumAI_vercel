@@ -37,6 +37,12 @@ describe('publish-monitor connect flow helpers', () => {
     expect(result).toEqual({ deleted: ['spc_1'], kept: [], deferred: ['spc_2'] });
   });
 
+  it('takeover disconnect accepts only success or a missing account; an auth refusal stays pending', async () => {
+    expect(await disconnectTakenOver(provider([json(404, {})]).deps, ['spc_1'])).toEqual({ pending: 0 });
+    expect(await disconnectTakenOver(provider([json(403, {})]).deps, ['spc_1'])).toEqual({ pending: 1 });
+    expect(await disconnectTakenOver(provider([json(401, {})]).deps, ['spc_1'])).toEqual({ pending: 1 });
+  });
+
   it('takeover disconnect stops at the first outage and reports what is left', async () => {
     const p = provider([json(200, {}), json(503, {})]);
     expect(await disconnectTakenOver(p.deps, ['spc_1', 'spc_2', 'spc_3'])).toEqual({ pending: 2 });
