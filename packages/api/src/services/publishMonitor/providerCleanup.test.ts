@@ -105,6 +105,16 @@ describe('publish-monitor provider cleanup', () => {
     expect(enabled.calls).not.toContain('DELETE /social-accounts/spc_dash');
   });
 
+  it('the sweep starts no listing page after the deadline and decides nothing on a partial list', async () => {
+    let t = 0;
+    const p = provider([page([acct('spc_1', EXT)], 0, 300)]);
+    const d = database({});
+    expect(await sweepOrphans(d.db, p.deps, true, 10, () => (t += 6)))
+      .toEqual({ listed: 0, orphans: 0, deleted: 0, unknownFormat: 0, deferred: 0, incomplete: true });
+    expect(p.calls).toHaveLength(1);
+    expect(d.calls).toEqual([]);
+  });
+
   it('stops at the time budget and leaves the rest for the next run', async () => {
     const d = database({ publish_monitor_provider_work_claim: [[
       { connectionId: CONN, providerAccountId: 'spc_1', deleting: true, action: 'delete', ownerRef: null }]] });
