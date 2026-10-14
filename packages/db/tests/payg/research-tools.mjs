@@ -198,6 +198,8 @@ export async function researchToolCases({db,Client,connectionString,report,creat
     const before = await financial(db,f);
     assert.equal((await rpc(db,'bill2_tool_cost_reconcile',admin,c.id,'0.01','a'.repeat(64))).replayed,false);
     assert.equal((await rpc(db,'bill2_tool_cost_reconcile',admin,c.id,'0.01','a'.repeat(64))).replayed,true);
+    await assert.rejects(rpc(db,'bill2_tool_cost_reconcile',admin,c.id,'0.01','b'.repeat(64)),/BILL2_TOOL_RECONCILE_INVALID/,
+      'a replay with other evidence is refused');
     await assert.rejects(rpc(db,'bill2_tool_cost_reconcile',admin,c.id,'0.02','a'.repeat(64)),/BILL2_TOOL_RECONCILE_INVALID/);
     assert.equal((await call(db,c.id)).supplier_cost_state,'confirmed');
     assert.deepEqual(await financial(db,f),before,'user settlement never changes');
@@ -282,6 +284,11 @@ export async function researchToolCases({db,Client,connectionString,report,creat
     const admin = randomUUID();
     await db.query("INSERT INTO profiles(id,credits,role) VALUES($1,0,'admin')",[admin]);
     const flagged = ids[4];
+    // Erasure strips toolPricing from the payload; the review still works from the stored price entry hash.
+    await db.query("SET session_replication_role=replica");
+    await db.query('UPDATE bill2_calls SET payload=bill2_erasure_call_payload(payload) WHERE id=$1',[flagged]);
+    await db.query("RESET session_replication_role");
+    assert.equal((await db.query("SELECT payload ? 'toolPricing' p FROM bill2_calls WHERE id=$1",[flagged])).rows[0].p,false);
     // Same steps as the admin page: read the snapshot, then review with what it returned.
     const snap = await rpc(db,'bill2_payg_metering_review_snapshot',admin,flagged);
     assert.deepEqual([snap.profileVersion,snap.evidenceVersion,snap.reviewable,snap.meteringMissing],
