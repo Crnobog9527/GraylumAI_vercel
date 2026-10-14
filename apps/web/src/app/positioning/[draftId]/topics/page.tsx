@@ -10,8 +10,7 @@
  * dedicated Runtime Session, and the turn identity that authorizes spending.
  * A proposal only becomes a plan version through the existing save/adopt
  * transactions, so nothing here creates accounts, publishes content or spends
- * without an explicit user action.
- */
+ * without an explicit user action. A draft whose conversation was deleted is read-only (Owner 2026-10-14). */
 import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
@@ -23,6 +22,7 @@ import { WorkComposer, useFreeConversation } from '@/components/opc/work-compose
 import { WorkspaceFrame } from '@/components/opc/workspace-frame';
 import composerStyles from '@/components/opc/work-composer.module.css';
 import topicStyles from './topic-candidates.module.css';
+import { ReadonlyDraftView } from '../readonly-draft-view';
 import { trpc } from '@/trpc/client';
 import { planItem, opcPlan, opcHandoff, opcTopicTurn, opcTopicDraft, opcAdoptTopics } from '@repo/api/src/shared/opcRequests';
 import { consentedTopicIds } from './adoption-consent';
@@ -477,8 +477,8 @@ export default function TopicWorkspacePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [executions, candidate, pending, busy, read.data?.handoffs, accountList.data, accountList.isFetching, accountList.error]);
 
-  if (read.isLoading || workspace.isLoading)
-    return <main className="p-6">正在读取选题工作空间…</main>;
+  if (read.isLoading || workspace.isLoading) return <main className="p-6">正在读取选题工作空间…</main>;
+  if (read.data?.conversationDeleted) return <ReadonlyDraftView draftId={draftId} draft={read.data}/>;
   if (read.error || workspace.error)
     return (
       <main className="p-6">

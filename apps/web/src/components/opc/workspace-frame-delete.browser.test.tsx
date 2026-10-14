@@ -71,6 +71,7 @@ beforeAll(async () => {
       if (id === entry) return `import React from 'react'; import {createRoot} from 'react-dom/client';
         import {WorkspaceFrame} from ${JSON.stringify(source)};
         window.opened=[];window.openedRelated=[];window.erasures=[];window.replaced=[];window.erased=[];window.cleanups=[];window.renames=[];
+        new BroadcastChannel('graylum-content-erasure').onmessage=event=>window.erased.push(event.data);
         const root=createRoot(document.getElementById('root'));
         const frame=()=>React.createElement(WorkspaceFrame,null,'对话内容');
         root.render(frame());
@@ -145,7 +146,7 @@ it.each([1280, 375])('removes the row and closes the dialog at once, before the 
     expect(await page.evaluate(() => (window as unknown as Win).opened)).toEqual([]);
     await answer(page, true);
     await ui(page.getByText('周末选题讨论')).toHaveCount(0);
-    await ui.poll(() => page.evaluate(() => (window as unknown as Win).erased)).toEqual([{ kind: 'session', id: SESSION }]);
+    await ui.poll(() => page.evaluate(() => (window as unknown as Win).erased)).toEqual([{ kind: 'session', id: SESSION, relatedIds: [] }]);
     // Physical cleanup starts in the background only after the server confirmed the deletion.
     await ui.poll(() => page.evaluate(() => (window as unknown as Win).cleanups)).toEqual([{ sessionId: SESSION }]);
     await ui(page.getByRole('alert')).toHaveCount(0);
@@ -373,6 +374,9 @@ it('待归类: a live positioning draft deletes its conversation in one click', 
   expect(await page.evaluate(() => sessionStorage.getItem('opc-edit:d-live'))).toBe('UNSAVED_DRAFT_EDIT');
   await answer(page, true);
   await ui.poll(() => page.evaluate(() => sessionStorage.getItem('opc-edit:d-live'))).toBeNull();
+  // Other open tabs are told too, with the draft ID, so a tab on the same draft drops its edits.
+  await ui.poll(() => page.evaluate(() => (window as unknown as Win).erased))
+    .toEqual([{ kind: 'session', id: DRAFT_SESSION, relatedIds: ['d-live'] }]);
 }, '#drafts'));
 
 it('待归类: a read-only draft is labelled and offers deleting the whole draft through the work deletion', () => open(1280, async page => {
