@@ -21,7 +21,7 @@ const CH9 = '第 9 章 内容支柱';
 const CH10 = '第 10 章 变现路径';
 const CH12 = '第 12 章 30 天行动';
 
-const TEXT: Record<string, { original: string; revised: string }> = {
+export const REVISION_TEXT: Record<string, { original: string; revised: string }> = {
   [CH3]: {
     original: '和同类账号相比，你的内容更快：每道菜 15 分钟以内上桌。',
     revised: '和同类账号相比，你快在备菜：周日一次切配，工作日三天复用，每道菜 15 分钟以内上桌。',
@@ -57,7 +57,7 @@ type SectionPlan = { rulings: RulingFields[]; fields?: FieldChange[]; wordingOnl
 function sections(plan: Record<string, SectionPlan>): DetailSection[] {
   return REPORT_SECTIONS.map(section => {
     const entry = plan[section];
-    const text = TEXT[section];
+    const text = REVISION_TEXT[section];
     const changed = Boolean(entry && text && entry.rulings.some(item => item.adopted));
     return {
       section, changed, rulings: entry?.rulings ?? [], wordingOnly: Boolean(changed && entry?.wordingOnly),

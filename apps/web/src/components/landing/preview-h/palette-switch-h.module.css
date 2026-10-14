@@ -1,0 +1,47 @@
+/* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+/* PaletteSwitchH: a small glass pill pinned to the bottom of the screen, sample-only, not part of the design.
+   .room sits after the footer and is as tall as the pill plus its gap, so the page can scroll the footer clear. */
+.room { position: relative; z-index: 1; height: calc(72px + env(safe-area-inset-bottom)); }
+.switch {
+  position: fixed;
+  bottom: max(14px, env(safe-area-inset-bottom));
+  left: 50%;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px;
+  border: 1px solid rgba(255, 255, 255, .85);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, .78);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  box-shadow: 0 0 0 1px rgba(var(--h-shade), .08), 0 16px 32px -18px rgba(var(--h-shade), .45);
+  transform: translateX(-50%);
+  font-size: 13px;
+  line-height: 1;
+  white-space: nowrap;
+}
+.label { padding: 0 8px 0 10px; color: var(--h-muted); }
+.switch button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 34px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--h-ink);
+  font: inherit;
+  font-weight: 500;
+  cursor: pointer;
+}
+.switch button:hover { background: rgba(var(--h-shade), .06); }
+.switch button[aria-pressed='true'] { background: var(--h-ink); color: #fff; }
+.switch button:focus-visible { outline: 2px solid var(--h-ring); outline-offset: 2px; }
+.switch i { width: 12px; height: 12px; border-radius: 50%; box-shadow: inset 0 0 0 1px rgba(0, 0, 0, .12); }
+.switch [data-swatch='ivory'] i { background: linear-gradient(135deg, #f6f2ea 50%, #82632c 50%); }
+.switch [data-swatch='graphite'] i { background: linear-gradient(135deg, #eff1f3 50%, #3e5873 50%); }
+.switch [data-swatch='gold'] i { background: linear-gradient(135deg, #f4f4f2 50%, #ffbb17 50%); }
+@media (max-width: 479px) { .label { display: none; } .switch button { padding: 0 10px; } }

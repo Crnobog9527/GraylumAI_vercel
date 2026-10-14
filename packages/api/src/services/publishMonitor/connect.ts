@@ -81,7 +81,7 @@ const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 export async function recordCallback(db: Rpc, client: ClientDeps, profileId: string, requestId: string,
   hintedAccountIds: string[], wait: (ms: number) => Promise<unknown> = sleep) {
   const ids = [...new Set(hintedAccountIds)].filter(id => providerId.safeParse(id).success).slice(0, 200);
-  const candidates = [];
+  const candidates: Array<{ providerAccountId: string; platform: string; externalId: string | null }> = [];
   let waited = 0;
   for (const id of ids) {
     let account = await getAccount(client, id);
@@ -91,7 +91,9 @@ export async function recordCallback(db: Rpc, client: ClientDeps, profileId: str
       account = await getAccount(client, id);
     }
     if (account.kind === 'rate_limited') throw new ConnectError('PUBLISH_MONITOR_PROVIDER_BUSY', account.retryAfterSeconds);
-    if (account.kind === 'rejected') continue;
+    // Only "no such account" (404) is skipped; 401/403 means our key or access is broken, so stop before the
+    // attempt is consumed and let the callback be retried.
+    if (account.kind === 'rejected' && account.status === 404) continue;
     if (account.kind !== 'ok') throw new ConnectError('PUBLISH_MONITOR_PROVIDER_UNAVAILABLE');
     // A disconnected provider account has no usable authorization; it is never offered for confirmation.
     if (account.value.status !== 'connected') continue;
@@ -103,7 +105,12 @@ export async function recordCallback(db: Rpc, client: ClientDeps, profileId: str
   if (result.error) throw dbFailure(result.error);
   const parsed = callbackSchema.safeParse(result.data);
   if (!parsed.success) throw dbFailure(null);
-  return parsed.data;
+  // The provider facts each quarantine was decided on, so a later disconnect can check they still hold.
+  const takenOver = parsed.data.quarantined.flatMap(id => {
+    const fact = candidates.find(c => c.providerAccountId === id);
+    return fact?.externalId ? [{ id, externalId: fact.externalId }] : [];
+  });
+  return { ...parsed.data, takenOver };
 }
 
 export async function confirmConnect(db: Rpc, client: ClientDeps, profileId: string, requestId: string,
@@ -111,7 +118,7 @@ export async function confirmConnect(db: Rpc, client: ClientDeps, profileId: str
   // Re-read just before applying: the database rejects the confirmation if the authorization moved since the callback.
   const account = await getAccount(client, providerId.parse(providerAccountId));
   if (account.kind === 'rate_limited') throw new ConnectError('PUBLISH_MONITOR_PROVIDER_BUSY', account.retryAfterSeconds);
-  if (account.kind === 'rejected') throw new ConnectError('PUBLISH_MONITOR_AUTHORIZATION_CHANGED');
+  if (account.kind === 'rejected' && account.status === 404) throw new ConnectError('PUBLISH_MONITOR_AUTHORIZATION_CHANGED');
   if (account.kind !== 'ok') throw new ConnectError('PUBLISH_MONITOR_PROVIDER_UNAVAILABLE');
   const current = { providerAccountId: account.value.id, platform: account.value.platform,
     externalId: account.value.externalId, status: account.value.status };
