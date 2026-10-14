@@ -96,6 +96,7 @@ const revision = (value: string) => JSON.stringify({
 function setup(script: (call: Call) => string | null, refuse?: string) {
   const proposals: unknown[] = [];
   const applied: unknown[] = [];
+  const declined: unknown[] = [];
   const executor = { run: vi.fn(async (_run: unknown, claimed: { id: string }, judge: (text: string) => string) => {
     const call = db.calls.find(c => c.callId === claimed.id)!;
     call.dispatched = true; call.dispatchedAt = clock.next();
@@ -107,14 +108,15 @@ function setup(script: (call: Call) => string | null, refuse?: string) {
   }) };
   const flow = reviewFlow({ admin, actorId: randomUUID(), executor: executor as never,
     propose: async input => { if (refuse) throw new Error(refuse); proposals.push(input);
-      return { revisionId: '00000000-0000-4000-8000-0000000000d1', diffHash: 'f'.repeat(64) }; },
-    apply: async input => { applied.push(input); return { versionId: '00000000-0000-4000-8000-0000000000e1' }; } });
+      return { revisionId: '00000000-0000-4000-8000-0000000000d1', diffHash: 'f'.repeat(64), diff: { changes: [], cascade: [] } }; },
+    apply: async input => { applied.push(input); return { versionId: '00000000-0000-4000-8000-0000000000e1' }; },
+    decline: async input => { declined.push(input); return null; } });
   const runAll = async () => {
     const step = await flow.continue(String(db.review!.reviewId));
     for (const call of step.calls) await flow.dispatch(String(db.review!.reviewId), call.callId);
     return step;
   };
-  return { flow, proposals, applied, runAll };
+  return { flow, proposals, applied, declined, runAll };
 }
 
 describe('review flow', () => {
@@ -133,10 +135,18 @@ describe('review flow', () => {
     // Nothing reaches R14 until the user chooses section by section.
     expect(t.proposals).toEqual([]);
     expect((await t.flow.events(String(db.review!.reviewId))).ended).toBe(false);
-    const adopted = await t.flow.adopt({ reviewId: String(db.review!.reviewId), requestId: '00000000-0000-4000-8000-0000000000f1',
-      choices: [{ section: '定位', use: 'revised' }] });
-    expect(adopted).toEqual({ versionId: '00000000-0000-4000-8000-0000000000e1', adopted: ['定位'], kept: ['结语'] });
-    expect(t.proposals).toEqual([expect.objectContaining({ body: '## 定位\n新目标\n## 结语\n原结语', fields: { s1: { goal: '新目标' } } })]);
+    const choice = { reviewId: String(db.review!.reviewId), requestId: '00000000-0000-4000-8000-0000000000f1',
+      choices: [{ section: '定位', use: 'revised' as const }] };
+    // Step 1 only proposes and returns the diff (with cascade) for the user to see; nothing is applied yet.
+    const proposed = await t.flow.adopt(choice);
+    expect(proposed).toMatchObject({ state: 'proposed', diffHash: 'f'.repeat(64), diff: { cascade: [] }, adopted: ['定位'], kept: ['结语'] });
+    expect(t.applied).toEqual([]);
+    await expect(t.flow.confirmAdoption({ ...choice, expectedDiffHash: 'e'.repeat(64), decision: 'apply' })).rejects.toThrow('FUSION_ADOPTION_STALE');
+    const adopted = await t.flow.confirmAdoption({ ...choice, expectedDiffHash: 'f'.repeat(64), decision: 'apply' });
+    expect(adopted).toEqual({ state: 'recorded', versionId: '00000000-0000-4000-8000-0000000000e1', adopted: ['定位'], kept: ['结语'] });
+    // Both steps propose the same R14 request (R14 replays it), so the user applies exactly the diff they saw.
+    expect(new Set(t.proposals.map(p => JSON.stringify(p))).size).toBe(1);
+    expect(t.proposals[0]).toEqual(expect.objectContaining({ body: '## 定位\n新目标\n## 结语\n原结语', fields: { s1: { goal: '新目标' } } }));
     expect(t.applied).toEqual([expect.objectContaining({ revisionId: '00000000-0000-4000-8000-0000000000d1', expectedDiffHash: 'f'.repeat(64) })]);
     const after = await t.flow.events(String(db.review!.reviewId));
     expect(after.ended).toBe(true);
@@ -228,9 +238,9 @@ describe('review flow', () => {
       .rejects.toThrow('FUSION_ADOPTION_INVALID');
     const requestId = randomUUID();
     const kept = await t.flow.adopt({ reviewId, requestId, choices: [{ section: '定位', use: 'original' }, { section: '结语', use: 'original' }] });
-    expect(kept).toEqual({ versionId: null, adopted: [], kept: ['定位', '结语'] });
+    expect(kept).toEqual({ state: 'recorded', versionId: null, adopted: [], kept: ['定位', '结语'] });
     expect(t.proposals).toEqual([]);
-    expect(await t.flow.adopt({ reviewId, requestId, choices: [] })).toEqual(kept);
+    expect(await t.flow.adopt({ reviewId, requestId, choices: [{ section: '定位', use: 'original' }, { section: '结语', use: 'original' }] })).toEqual(kept);
     await expect(t.flow.adopt({ reviewId, requestId: randomUUID(), choices: [] })).rejects.toThrow('FUSION_REVIEW_ADOPTED');
     expect(db.review!.adoption).toMatchObject({ requestId, kept: ['定位', '结语'], revisionId: null });
   });

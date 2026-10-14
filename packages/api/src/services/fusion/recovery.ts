@@ -25,6 +25,8 @@ const noTransport: BillingTransport = {
  * receipt lookup with its original binding and then settles (verdict rules of 0234/0235 apply, including
  * the recovery deadline). A run whose content was deleted is scrubbed again once it settled, since a
  * deletion can happen while its call is still open (#947 review). Runs one call at a time; failures stay listed. */
+const UNJUDGED_PAGE = 50;
+
 export async function recoverFusionFinancials(admin: SupabaseClient, options: { limit?: number; pages?: number;
   budget?: RuntimeBudget; now?: () => number; timeLimitMs?: number } = {}): Promise<Summary> {
   const summary: Summary = { success: true, scanned: 0, cancelled: 0, recovered: 0, scrubbed: 0, failed: 0, deferred: 0, rejudged: 0 };
@@ -41,15 +43,22 @@ export async function recoverFusionFinancials(admin: SupabaseClient, options: { 
   if (paused.error) summary.success = false;
   // Before settlement: a body saved but never judged (a crash between save and verdict) is judged again with
   // the frozen host check, so the deadline rule never bills a malformed body as unjudged_saved (§3.3, #954).
-  const unjudged = await bounded(admin.rpc('fusion_review_unjudged', { p_limit: 50 }));
-  const reviews = new Map<string, string>();
+  const unjudged = await bounded(admin.rpc('fusion_review_unjudged', { p_limit: UNJUDGED_PAGE }));
+  const reviews = new Map<string, { actorId: string; callIds: string[] }>();
   if (unjudged.error) summary.success = false;
-  else for (const item of z.array(z.object({ actor_id: z.string().uuid(), review_id: z.string().uuid() }).passthrough())
-    .safeParse(unjudged.data).data ?? []) reviews.set(item.review_id, item.actor_id);
-  for (const [reviewId, actorId] of reviews) {
-    if (now() + 10_000 > stopAt) break;
+  else for (const item of z.array(z.object({ actor_id: z.string().uuid(), review_id: z.string().uuid(), call_id: z.string().uuid() })
+    .passthrough()).safeParse(unjudged.data).data ?? []) {
+    const entry = reviews.get(item.review_id) ?? { actorId: item.actor_id, callIds: [] };
+    entry.callIds.push(item.call_id);
+    reviews.set(item.review_id, entry);
+  }
+  // Calls whose saved body was not re-judged this run must not settle now: past the deadline the settlement would
+  // treat them as unjudged_saved and bill a body that may be malformed (#962 review). They wait for the next run.
+  const unsettleable = new Set<string>();
+  for (const [reviewId, { actorId, callIds }] of reviews) {
+    if (now() + 10_000 > stopAt) { callIds.forEach(id => unsettleable.add(id)); continue; }
     try { await reviewFlow({ admin, actorId }).rejudge(reviewId); summary.rejudged++; }
-    catch { summary.failed++; summary.success = false; }
+    catch { summary.failed++; summary.success = false; callIds.forEach(id => unsettleable.add(id)); }
   }
   // Listing is cheap: collect the pages first. Pages advance past calls that cannot progress yet (0235).
   // Keep paging (each call bounded, stopping before the per-item reserve) so expired undispatched calls
@@ -66,7 +75,12 @@ export async function recoverFusionFinancials(admin: SupabaseClient, options: { 
     cursor = { p_after_created: last.created_at, p_after_id: last.call_id };
   }
   // Releasing holds of calls never dispatched is quick and must not wait behind slow receipt lookups.
-  const ordered = [...rows.filter(item => !item.dispatched), ...rows.filter(item => item.dispatched)];
+  // A full page of unjudged calls may hide more: then no dispatched call settles this run (only expired, never
+  // dispatched holds are released), so none is billed before its body is judged.
+  const listedAll = !unjudged.error && Array.isArray(unjudged.data) && unjudged.data.length < UNJUDGED_PAGE;
+  const settleable = rows.filter(item => !unsettleable.has(item.call_id) && (listedAll || !item.dispatched));
+  summary.deferred += rows.length - settleable.length;
+  const ordered = [...settleable.filter(item => !item.dispatched), ...settleable.filter(item => item.dispatched)];
   await recoverPage(admin, ordered, summary, now, stopAt, options.budget);
   return summary;
 }

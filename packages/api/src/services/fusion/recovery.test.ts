@@ -5,8 +5,9 @@ import { createRuntimeBudget } from '../runtime/budget';
 import { recoverFusionFinancials } from './recovery';
 
 const rejudged = vi.hoisted(() => [] as string[]);
+const failRejudge = vi.hoisted(() => ({ value: false }));
 vi.mock('./review', () => ({ reviewFlow: (deps: { actorId: string }) => ({
-  rejudge: async (reviewId: string) => { rejudged.push(`${deps.actorId}:${reviewId}`); } }) }));
+  rejudge: async (reviewId: string) => { if (failRejudge.value) throw new Error('down'); rejudged.push(`${deps.actorId}:${reviewId}`); } }) }));
 
 const id = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
 const now = Date.parse('2026-10-14T00:00:00Z');
@@ -46,6 +47,17 @@ describe('Fusion daily recovery', () => {
     expect(rejudged).toEqual([`${id(100)}:${id(300)}`]);
     expect(summary.rejudged).toBe(1);
     expect(a.calls.indexOf('fusion_review_unjudged:')).toBeLessThan(a.calls.findIndex(c => c.startsWith('bill2_finalize')));
+  });
+  it('keeps calls of a review whose re-judging failed out of this settlement pass', async () => {
+    rejudged.length = 0;
+    failRejudge.value = true;
+    const a = admin([item(10, true, -60), { ...item(11, true, -60), call_id: id(500) }],
+      { unjudged: [{ actor_id: id(100), review_id: id(300), call_id: id(500), run_id: id(11), phase: 'fusion_review', round: 1 }] });
+    const summary = await recoverFusionFinancials(a.db, { now: () => now, budget: createRuntimeBudget() });
+    failRejudge.value = false;
+    expect(a.calls).toContain(`bill2_finalize:${id(10)}`);
+    expect(a.calls).not.toContain(`bill2_finalize:${id(11)}`);
+    expect(summary).toMatchObject({ failed: 1, deferred: 1, success: false });
   });
   it('runs the idle-pause step first, so a backlog can never crowd it out', async () => {
     let clock = now;

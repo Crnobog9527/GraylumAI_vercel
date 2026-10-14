@@ -37,9 +37,10 @@ export function reviewFlow(deps: { admin: SupabaseClient; actorId: string;
   env?: Record<string, string | undefined>;
   /** R14 reportRevisionPropose / Apply with the user's own client (they require the user's verified identity). */
   propose?: (input: { draftId: string; requestId: string; sourceVersionId: string; body: string; fields: StepValues }) =>
-    Promise<{ revisionId: string; diffHash: string }>;
+    Promise<{ revisionId: string; diffHash: string; diff: unknown }>;
   apply?: (input: { draftId: string; revisionId: string; requestId: string; expectedDiffHash: string }) =>
-    Promise<{ versionId: string | null }> }) {
+    Promise<{ versionId: string | null }>;
+  decline?: (input: { draftId: string; revisionId: string; requestId: string }) => Promise<unknown> }) {
   const { admin, actorId } = deps;
   const env = deps.env ?? process.env;
   const record = reviewRecord(admin, actorId);
@@ -159,6 +160,30 @@ export function reviewFlow(deps: { admin: SupabaseClient; actorId: string;
     return { passed, sections: adoptionSections({ originalBody: src.body, revisedBody: passed.body, sections: src.sections,
       changedSections: passed.changedSections, changeNotes: notes, frozen: frozenValues(view), revisedSteps: passed.steps }) };
   }
+  /** The validated choices of a revised review and the merged text they produce (both steps recompute it). */
+  async function adoptionInput(input: { reviewId: string; requestId: string; choices: AdoptionChoice[] }) {
+    const choices = adoptionChoices.parse(input.choices);
+    const view = await record.read(input.reviewId);
+    if (!view) throw new Error('FUSION_REVIEW_DENIED');
+    const prior = view.adoption as { requestId?: string } | null | undefined;
+    if (prior && prior.requestId !== input.requestId) throw new Error('FUSION_REVIEW_ADOPTED');
+    if (view.state !== 'completed' || (view.outcome as { kind?: string } | null)?.kind !== 'revised') throw new Error('FUSION_REVIEW_INVALID');
+    // The original text comes from the frozen version (its hash is checked); the revision is re-checked.
+    const src = await readSource(input.reviewId);
+    const plan = await adoptionPlan(view, src);
+    if (!plan) throw new Error('FUSION_REVIEW_INVALID');
+    return { view, merged: applyChoices({ originalBody: src.body, revisedBody: plan.passed.body, plan: plan.sections, choices }) };
+  }
+  const adopted = (view: ReviewView) => {
+    const prior = view.adoption as { versionId?: string | null; adopted?: string[]; kept?: string[] };
+    return { state: 'recorded' as const, versionId: prior.versionId ?? null, adopted: prior.adopted ?? [], kept: prior.kept ?? [] };
+  };
+  /** The same request and choices always propose the same R14 revision (R14 is idempotent by request). */
+  async function proposeMerged(view: ReviewView, requestId: string, merged: { body: string; fields: StepValues }) {
+    if (!deps.propose) throw new Error('FUSION_REVIEW_UNAVAILABLE');
+    return deps.propose({ draftId: view.draftId, requestId: derivedUuid(`${view.reviewId}:adopt:${requestId}:propose`),
+      sourceVersionId: view.sourceVersionId, body: merged.body, fields: merged.fields });
+  }
   const done = (call: ReviewView['calls'][number]) => call.verdict !== null;
   /** Saved bodies of judged calls with their save time (the owner's own review only: reads go through the actor). */
   async function savedOutputs(view: ReviewView) {
@@ -273,35 +298,42 @@ export function reviewFlow(deps: { admin: SupabaseClient; actorId: string;
     },
     stop: (reviewId: string) => record.close(reviewId, 'stopped'),
     end: (reviewId: string) => record.close(reviewId, 'interrupted'),
-    /** Per-section adoption: every changed section is taken from the revision or kept; the merged text and the fields
-     * of adopted sections go through R14 propose + apply (a new formal version), and the choice is recorded once. */
+    /** Per-section adoption, step 1: validates the choices and, when any section is adopted, proposes the merged text
+     * to R14 and returns its diff (field changes and the cascade of dependent steps) for the user to see. Nothing is
+     * applied here. Choosing to keep every section records the choice at once (nothing to confirm). */
     async adopt(input: { reviewId: string; requestId: string; choices: AdoptionChoice[] }) {
-      const choices = adoptionChoices.parse(input.choices);
-      const view = await record.read(input.reviewId);
-      if (!view) throw new Error('FUSION_REVIEW_DENIED');
-      const prior = view.adoption as { requestId?: string; versionId?: string | null; adopted?: string[]; kept?: string[] } | null | undefined;
-      if (prior) {
-        if (prior.requestId !== input.requestId) throw new Error('FUSION_REVIEW_ADOPTED');
-        return { versionId: prior.versionId ?? null, adopted: prior.adopted ?? [], kept: prior.kept ?? [] };
+      const { view, merged } = await adoptionInput(input);
+      if (view.adoption) return adopted(view);
+      if (!merged.adopted.length) {
+        await record.recordAdoption(view.reviewId, { requestId: input.requestId, choices: input.choices, decision: 'kept',
+          adopted: [], kept: merged.kept, revisionId: null, versionId: null });
+        return { state: 'recorded' as const, versionId: null, adopted: [], kept: merged.kept };
       }
-      if (view.state !== 'completed' || (view.outcome as { kind?: string } | null)?.kind !== 'revised') throw new Error('FUSION_REVIEW_INVALID');
-      // The original text comes from the frozen version (its hash is checked); the revision is re-checked.
-      const src = await readSource(input.reviewId);
-      const plan = await adoptionPlan(view, src);
-      if (!plan) throw new Error('FUSION_REVIEW_INVALID');
-      const merged = applyChoices({ originalBody: src.body, revisedBody: plan.passed.body, plan: plan.sections, choices });
-      let revisionId: string | null = null, versionId: string | null = null;
-      if (merged.adopted.length) {
-        if (!deps.propose || !deps.apply) throw new Error('FUSION_REVIEW_UNAVAILABLE');
-        const proposal = await deps.propose({ draftId: view.draftId, requestId: derivedUuid(`${view.reviewId}:adopt:${input.requestId}:propose`),
-          sourceVersionId: view.sourceVersionId, body: merged.body, fields: merged.fields });
-        revisionId = proposal.revisionId;
-        ({ versionId } = await deps.apply({ draftId: view.draftId, revisionId, expectedDiffHash: proposal.diffHash,
-          requestId: derivedUuid(`${view.reviewId}:adopt:${input.requestId}:apply`) }));
-      }
-      await record.recordAdoption(view.reviewId, { requestId: input.requestId, choices, adopted: merged.adopted, kept: merged.kept,
-        revisionId, versionId });
-      return { versionId, adopted: merged.adopted, kept: merged.kept };
+      const proposal = await proposeMerged(view, input.requestId, merged);
+      return { state: 'proposed' as const, revisionId: proposal.revisionId, diff: proposal.diff, diffHash: proposal.diffHash,
+        adopted: merged.adopted, kept: merged.kept };
+    },
+    /** Step 2: the user, having seen the diff, applies it (a new formal version) or declines it (nothing changes).
+     * The same choices re-propose idempotently; the diff must be the one the user saw. Recorded once. */
+    async confirmAdoption(input: { reviewId: string; requestId: string; choices: AdoptionChoice[]; expectedDiffHash: string;
+      decision: 'apply' | 'decline' }) {
+      const { view, merged } = await adoptionInput(input);
+      if (view.adoption) return adopted(view);
+      if (!merged.adopted.length || !deps.apply || !deps.decline) throw new Error('FUSION_ADOPTION_INVALID');
+      const proposal = await proposeMerged(view, input.requestId, merged);
+      if (proposal.diffHash !== input.expectedDiffHash) throw new Error('FUSION_ADOPTION_STALE');
+      const decisionId = derivedUuid(`${view.reviewId}:adopt:${input.requestId}:${input.decision}`);
+      let versionId: string | null = null;
+      if (input.decision === 'apply') {
+        ({ versionId } = await deps.apply({ draftId: view.draftId, revisionId: proposal.revisionId, expectedDiffHash: proposal.diffHash,
+          requestId: decisionId }));
+      } else await deps.decline({ draftId: view.draftId, revisionId: proposal.revisionId, requestId: decisionId });
+      const applied = input.decision === 'apply';
+      await record.recordAdoption(view.reviewId, { requestId: input.requestId, choices: input.choices, decision: input.decision,
+        adopted: applied ? merged.adopted : [], kept: applied ? merged.kept : [...merged.adopted, ...merged.kept],
+        revisionId: proposal.revisionId, versionId });
+      return { state: 'recorded' as const, versionId, adopted: applied ? merged.adopted : [],
+        kept: applied ? merged.kept : [...merged.adopted, ...merged.kept] };
     },
     /** Full record for the owner (no 120-character summaries): each seat's reasoning and the rulings by section. */
     async detail(reviewId: string) {

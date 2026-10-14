@@ -18,7 +18,7 @@ import { readFusionSettings, PANEL_SEATS } from '../services/fusion/settings';
 const uuid = z.string().uuid();
 const forbidden = new Set(['FUSION_REVIEW_DISABLED', 'FUSION_MEMBERSHIP_REQUIRED', 'REPORT_MEMBERSHIP_REQUIRED', 'FUSION_REVIEW_BREAKER']);
 const conflict = new Set(['FUSION_REVIEW_ACTIVE', 'FUSION_REVIEW_ENDED', 'FUSION_REVIEW_STEP_CONFLICT', 'FUSION_REVIEW_STALE',
-  'FUSION_REVIEW_ADOPTED', 'REPORT_REVISION_STALE', 'REPORT_SOURCE_CONFLICT', 'REPORT_REVISION_DECIDED',
+  'FUSION_REVIEW_ADOPTED', 'FUSION_ADOPTION_STALE', 'REPORT_REVISION_STALE', 'REPORT_SOURCE_CONFLICT', 'REPORT_REVISION_DECIDED',
   'FUSION_REVIEW_VERSION_BLOCKED', 'FUSION_REVIEW_CONFLICT']);
 /** Exact Fusion refusals keep their code for the page; anything else goes through the staging error mapping. */
 function reviewError(cause: unknown, path: string): TRPCError {
@@ -41,8 +41,9 @@ const procedure = protectedProcedure.use(async ({ ctx, next, path }) => {
     const executor = fusionExecutor({ billing, admin, actorId: ctx.user.id, callGate: newWorkGate(admin, 'staging').calls, budget });
     const revisions = reportRevisionService(ctx.userScopedSupabase, admin);
     const flow = reviewFlow({ admin, actorId: ctx.user.id, executor,
-      propose: async input => { const r = await revisions.propose(input); return { revisionId: r.revisionId, diffHash: r.diffHash }; },
-      apply: async input => ({ versionId: (await revisions.apply(input)).versionId }) });
+      propose: async input => { const r = await revisions.propose(input); return { revisionId: r.revisionId, diffHash: r.diffHash, diff: r.diff }; },
+      apply: async input => ({ versionId: (await revisions.apply(input)).versionId }),
+      decline: input => revisions.decline(input) });
     const result = await next({ ctx: { ...ctx, flow } });
     if (!result.ok) throw result.error;
     return result;
@@ -56,7 +57,7 @@ const reader = protectedProcedure.use(async ({ ctx, next, path }) => {
     if (!ctx.hasSupabaseAdminPrivileges || !ctx.supabaseAdmin) throw new StagingAccessError('RUNTIME_STAGING_SERVICE_UNAVAILABLE');
     const revisions = reportRevisionService(ctx.userScopedSupabase, ctx.supabaseAdmin);
     const flow = reviewFlow({ admin: ctx.supabaseAdmin, actorId: ctx.user.id,
-      propose: async input => { const r = await revisions.propose(input); return { revisionId: r.revisionId, diffHash: r.diffHash }; },
+      propose: async input => { const r = await revisions.propose(input); return { revisionId: r.revisionId, diffHash: r.diffHash, diff: r.diff }; },
       apply: async input => ({ versionId: (await revisions.apply(input)).versionId }) });
     const result = await next({ ctx: { ...ctx, admin: ctx.supabaseAdmin, flow } });
     if (!result.ok) throw result.error;
@@ -78,6 +79,10 @@ export const fusionReviewRouter = router({
   events: reader.input(review).query(({ ctx, input }) => ctx.flow.events(input.reviewId)),
   /** Per-section adoption (Owner 2026-10-14): R14 propose + apply only, no model call, so no staging call window is needed. */
   adopt: reader.input(review.extend({ requestId: uuid, choices: adoptionChoices })).mutation(({ ctx, input }) => ctx.flow.adopt(input)),
+  /** Step 2 after the user saw the R14 diff and cascade: apply (new formal version) or decline (nothing changes). */
+  confirmAdoption: reader.input(review.extend({ requestId: uuid, choices: adoptionChoices,
+    expectedDiffHash: z.string().regex(/^[a-f0-9]{64}$/), decision: z.enum(['apply', 'decline']) }))
+    .mutation(({ ctx, input }) => ctx.flow.confirmAdoption(input)),
   /** The owner's full record (Owner 2026-10-14): every seat's complete reasoning and the rulings by section; seats only. */
   detail: reader.input(review).query(({ ctx, input }) => ctx.flow.detail(input.reviewId)),
   /** Display names of the seats (Owner 2026-10-14): set by administrators, independent of the models; no model names. */

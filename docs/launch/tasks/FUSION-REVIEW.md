@@ -161,7 +161,7 @@
   不悄悄去掉模型、用更少的模型降级运行（评审团是管理员指定的 3–8 个模型，人数变了就改变了质量和价格）。
   运行中某个模型确认失败或结果未知不属于降级准入，按"部分失败如实展示"处理：本轮有至少 1 个成功意见就照常汇总，页面写明哪几个模型没给出意见。复用 `paygRuntime.ts` 的 `measureCallInput` / `fitNativeRequestOutput`。
 
-### 2.2a 评审过程事件（给前端动画，Owner 2026-10-14；约定第 5 版）
+### 2.2a 评审过程事件（给前端动画，Owner 2026-10-14；约定第 6 版）
 
 Owner 要求评审过程中让用户看到评审团的思考和互相挑刺。前端动画只按下面的事件播放，事件全部由服务端从**真实的评审记录和已保存的输出**推导，
 没有对应的真实数据就没有事件，不做模拟表演。
@@ -203,12 +203,17 @@ Owner 要求评审过程中让用户看到评审团的思考和互相挑刺。�
   `decisions` 每条含 `decision / strongestCase / strongestAlternative / verdict / basis`，`issues` 每条含 `location / perspective / problem / suggestion / severity`，
   `responses` 每条含 `reviewer / decision / strongestView / stance / reason`。悬停某位评审时用 `seats`；最终结果按章节展示用 `summary.sections`（模板顺序，最后是"全文"）。只出现席位代号，不出现模型名。
 
-- **逐章选择（Owner 2026-10-14）**：`fusionReview.adopt({ reviewId, requestId, choices: [{ section, use: "revised"|"original", confirmedNoFactChange? }] })`
-  返回 `{ versionId | null, adopted, kept }`。每个改动的章节都必须明确选择；没改动的章节默认保留原文；只改表述的章节选"采用修订版"时
-  `confirmedNoFactChange` 必须为 true；`linkedSections` 里的章节必须选成一样。采用的章节合成新正文、只带这些章节声明的字段，走 R14 现有的提案和采用，
-  生成新的正式版本；全部保留原文时不生成新版本，只记录选择。同一个 `requestId` 重复提交返回同一结果，一次评审只能选一次；
-  正式版本已经变了（用户在评审后改过草稿）会被 R14 拒绝（`REPORT_REVISION_STALE`），这次修订稿就作废了（草稿不会被锁住，用户可以再开评审）。
-  拒绝代号：`FUSION_ADOPTION_INCOMPLETE`（有改动的章节没选）、`FUSION_ADOPTION_INVALID`、`FUSION_ADOPTION_CONFIRM_REQUIRED`、`FUSION_ADOPTION_LINKED`、`FUSION_REVIEW_ADOPTED`。
+- **逐章选择（Owner 2026-10-14），分两步**：
+  1. `fusionReview.adopt({ reviewId, requestId, choices: [{ section, use: "revised"|"original", confirmedNoFactChange? }] })`：校验选择。每个改动的章节都必须明确选择；
+     没改动的默认保留原文；只改表述的章节选"采用修订版"时 `confirmedNoFactChange` 必须为 true；`linkedSections` 里的章节必须选成一样。
+     有采用的章节时，把合成的新正文和这些章节声明的字段交给 R14 提案，返回 `{ state: "proposed", revisionId, diff, diffHash, adopted, kept }`，
+     `diff` 就是 R14 的字段差异，包括 `cascade`（会被一起确认的后续步骤），页面必须把它展示给用户；这一步**不改动**正式版本。
+     全部保留原文时直接记录选择，返回 `{ state: "recorded", versionId: null, adopted: [], kept }`。
+  2. `fusionReview.confirmAdoption({ reviewId, requestId, choices, expectedDiffHash, decision: "apply"|"decline" })`：同一个 `requestId` 和 `choices`
+     会重新得到同一份 R14 提案；`expectedDiffHash` 必须等于用户看到的那份（否则 `FUSION_ADOPTION_STALE`）。`apply` 生成新的正式版本，`decline` 什么都不改。
+     返回 `{ state: "recorded", versionId | null, adopted, kept }`，选择只记录一次。
+  正式版本已经变了（用户在评审后改过草稿），R14 会拒绝（`REPORT_REVISION_STALE`），这份修订稿就作废了；草稿不会被锁住。
+  拒绝代号：`FUSION_ADOPTION_INCOMPLETE`、`FUSION_ADOPTION_INVALID`、`FUSION_ADOPTION_CONFIRM_REQUIRED`、`FUSION_ADOPTION_LINKED`、`FUSION_ADOPTION_STALE`、`FUSION_REVIEW_ADOPTED`。
 
 另外：`ended=true` 表示评审已结束，之后不会再有新事件。没有分歧时不会出现 `disagreement` 和 `response`，直接到 `summary_started`。
 
