@@ -8,7 +8,8 @@ import { closeAccount } from '../erasure-b2a/cases.mjs';
 
 const migrationPath = 'packages/db/migrations/0246_publish_monitor_connect.sql';
 const rpcs = ['publish_monitor_connect_start(uuid,uuid,text[])', 'publish_monitor_connect_callback(uuid,uuid,jsonb)',
-  'publish_monitor_connect_confirm(uuid,uuid,text,boolean,jsonb)'];
+  'publish_monitor_connect_confirm(uuid,uuid,text,boolean,jsonb)', 'publish_monitor_connect_pending(uuid,uuid)',
+  'publish_monitor_connect_cancel(uuid,uuid)'];
 const db = await localDb(), c = db.client;
 const report = { build: db.build, migration: '0246', checks: [] };
 const v = async (sql, args = []) => (await c.query(sql, args)).rows[0]?.v;
@@ -22,6 +23,8 @@ const callback = (a, req, cands) => svc('SELECT publish_monitor_connect_callback
 // current = the provider facts the server re-read just before confirming; defaults to "unchanged since callback".
 const confirm = (a, req, pid, track = true, current) => svc('SELECT publish_monitor_connect_confirm($1,$2,$3,$4,$5) v',
   [a, req, pid, track, JSON.stringify(current ?? { providerAccountId: pid, platform: 'facebook', externalId: '$REQ', status: 'connected' })]);
+const pending = (a, req) => svc('SELECT publish_monitor_connect_pending($1,$2) v', [a, req]);
+const cancel = (a, req) => svc('SELECT publish_monitor_connect_cancel($1,$2) v', [a, req]);
 const ext = async req => v('SELECT external_id v FROM social_connect_requests WHERE id=$1', [req]);
 const confirmLive = async (a, req, pid, track = true) => confirm(a, req, pid, track,
   { providerAccountId: pid, platform: 'facebook', externalId: await ext(req), status: 'connected' });
@@ -69,7 +72,7 @@ try {
   }
   for (const f of rpcs) assert.equal(await v("SELECT has_function_privilege('service_role',$1,'execute') v", [f]), true);
   assert.equal(await v("SELECT has_function_privilege('service_role','publish_monitor_random_hex()','execute') v"), false);
-  report.checks.push('three RPCs for service_role only; fixed search_path; clients have no access');
+  report.checks.push('five RPCs for service_role only; fixed search_path; clients have no access');
 
   const u = await member(), other = await member();
   const s1 = await start(u.a, u.account);
@@ -102,6 +105,32 @@ try {
   report.checks.push('callback only considers accounts carrying this attempt\'s exact external_id and platform; '
     + 'stale, foreign and replayed callbacks change nothing');
 
+  // Confirmation page read: own pending attempt only, page fields only, nothing about other users or credentials.
+  const page = await pending(u.a, s2.requestId);
+  assert.deepEqual(Object.keys(page).sort(), ['candidates', 'confirmExpiresAt', 'permissions', 'platform', 'requestId', 'target']);
+  assert.deepEqual(page.target, { accountProjectId: u.account, platform: 'facebook', accountKey: `pm-${u.account}`,
+    businessName: 'business' });
+  assert.deepEqual(page.candidates, [{ providerAccountId: 'pfm_new_1', kind: 'new' }, { providerAccountId: 'pfm_new_2', kind: 'new' }]);
+  assert.deepEqual(page.permissions, ['feeds']);
+  assert.ok(!JSON.stringify(page).includes(s2.externalId.split('.')[0]), 'the provider reference is not shown');
+  await code(pending(other.a, s2.requestId), 'PT409');
+  await code(cancel(other.a, s2.requestId), 'PT409');
+  await code(pending(u.a, s1.requestId), 'PT409');
+  await code(pending(u.a, randomUUID()), 'PT409');
+  await c.query("UPDATE social_connect_requests SET confirm_expires_at=now()-interval '1 second' WHERE id=$1", [s2.requestId]);
+  await code(pending(u.a, s2.requestId), 'PT409');
+  await c.query("UPDATE social_connect_requests SET confirm_expires_at=now()+interval '10 minutes' WHERE id=$1", [s2.requestId]);
+  // Cancel: another user's attempt imported pfm_other_new; cancelling returns it for provider re-check and deletion.
+  const oc = await start(other.a, other.account);
+  await callback(other.a, oc.requestId, [cand('pfm_other_new', oc.externalId)]);
+  assert.deepEqual(await cancel(other.a, oc.requestId), { externalId: oc.externalId, unselected: ['pfm_other_new'] });
+  assert.equal(await v('SELECT state v FROM social_connect_requests WHERE id=$1', [oc.requestId]), 'abandoned');
+  await code(cancel(other.a, oc.requestId), 'PT409');
+  await code(confirmLive(other.a, oc.requestId, 'pfm_other_new'), 'PT409');
+  await code(pending(other.a, oc.requestId), 'PT409');
+  report.checks.push('the confirmation page reads only the actor\'s own unexpired pending attempt and only page fields; '
+    + 'cancel abandons only the actor\'s own open attempt and returns its new accounts for provider cleanup');
+
   await code(confirmLive(u.a, s2.requestId, 'pfm_victim'), 'PT409');
   await code(confirmLive(other.a, s2.requestId, 'pfm_new_1'), 'PT409');
   // Taken over between callback and confirm: the provider now shows another attempt's value, or a disconnected account.
@@ -111,6 +140,8 @@ try {
     { providerAccountId: 'pfm_new_1', platform: 'facebook', externalId: s2.externalId, status: 'disconnected' }), 'PT409');
   const done = await confirmLive(u.a, s2.requestId, 'pfm_new_1', false);
   assert.deepEqual(done.unselected, ['pfm_new_2']);
+  assert.equal(done.externalId, s2.externalId);
+  await code(pending(u.a, s2.requestId), 'PT409');
   const row = (await c.query('SELECT * FROM social_connections WHERE id=$1', [done.connectionId])).rows[0];
   assert.deepEqual([row.actor_id, row.account_project_id, row.platform, row.status, row.consent_read, row.consent_auto_track,
     row.consent_publish, row.provider_can_publish], [u.a, u.account, 'facebook', 'connected', true, false, false, false]);
@@ -122,6 +153,8 @@ try {
   const s3 = await start(u.a, u.account, ['feeds', 'posts']);
   const cb3 = await callback(u.a, s3.requestId, [cand('pfm_victim', s3.externalId), cand('pfm_new_1', s3.externalId)]);
   assert.deepEqual([cb3.quarantined, cb3.ownExisting], [['pfm_victim'], ['pfm_new_1']]);
+  assert.deepEqual((await pending(u.a, s3.requestId)).candidates, [{ providerAccountId: 'pfm_new_1', kind: 'target' }],
+    'a quarantined other user\'s account is never offered');
   assert.equal(await v("SELECT status v FROM social_connections WHERE provider_account_id='pfm_victim'"), 'quarantined');
   await code(confirmLive(u.a, s3.requestId, 'pfm_victim'), 'PT409');
   const upgraded = await confirmLive(u.a, s3.requestId, 'pfm_new_1', true);

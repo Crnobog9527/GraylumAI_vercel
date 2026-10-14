@@ -141,18 +141,64 @@ BEGIN
   RETURNING id INTO conn;
  END IF;
  UPDATE social_connect_requests SET state='applied',confirm_expires_at=NULL WHERE id=req.id;
- RETURN jsonb_build_object('connectionId',conn,'unselected',to_jsonb(ARRAY(
+ -- externalId lets the server re-check each unselected account at the provider before deleting it (plan §4.1).
+ RETURN jsonb_build_object('connectionId',conn,'externalId',req.external_id,'unselected',to_jsonb(ARRAY(
   SELECT x FROM unnest(req.candidate_provider_ids) x
   WHERE x<>p_provider_account_id AND NOT EXISTS(SELECT 1 FROM social_connections c WHERE c.provider_account_id=x))));
+END $$;
+
+-- What the confirmation page shows: only the actor's own attempt, only while it awaits confirmation and is not
+-- expired. Candidates carry no other brand's or user's details: a new account, the target's own connection, or
+-- unavailable (bound to another brand, being deleted, or taken by someone else since the callback).
+CREATE OR REPLACE FUNCTION public.publish_monitor_connect_pending(a uuid,p_request_id uuid) RETURNS jsonb
+LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path=public,pg_temp AS $$
+DECLARE req social_connect_requests; acct opc_accounts; business_name text;
+BEGIN
+ IF p_request_id IS NULL THEN RAISE EXCEPTION 'PUBLISH_MONITOR_INPUT_INVALID' USING ERRCODE='22023'; END IF;
+ PERFORM publish_monitor_actor(a);
+ SELECT * INTO req FROM social_connect_requests WHERE id=p_request_id AND actor_id=a;
+ IF req.id IS NULL OR req.state<>'pending_confirm' OR req.confirm_expires_at<=clock_timestamp()
+  OR req.target_account_project_id IS NULL THEN
+  RAISE EXCEPTION 'PUBLISH_MONITOR_REQUEST_INVALID' USING ERRCODE='PT409'; END IF;
+ SELECT * INTO acct FROM opc_accounts WHERE project_id=req.target_account_project_id AND actor_id=a;
+ SELECT name INTO business_name FROM opc_businesses WHERE id=acct.business_id AND actor_id=a;
+ RETURN jsonb_build_object('requestId',req.id,'platform',req.platform,'permissions',to_jsonb(req.permissions),
+  'confirmExpiresAt',req.confirm_expires_at,
+  'target',jsonb_build_object('accountProjectId',acct.project_id,'platform',acct.platform,'accountKey',acct.account_key,
+   'businessName',business_name),
+  'candidates',COALESCE((SELECT jsonb_agg(jsonb_build_object('providerAccountId',x,'kind',
+    CASE WHEN c.id IS NULL THEN 'new'
+     WHEN c.actor_id=a AND c.account_project_id=req.target_account_project_id AND c.status<>'deleting' THEN 'target'
+     ELSE 'unavailable' END) ORDER BY o)
+   FROM unnest(req.candidate_provider_ids) WITH ORDINALITY u(x,o)
+   LEFT JOIN social_connections c ON c.provider_account_id=x),'[]'::jsonb));
+END $$;
+
+-- The user declined on the confirmation page (or left before the callback). Nothing is bound; new accounts this
+-- attempt imported are returned, with the attempt's external_id, for the server to re-check and delete.
+CREATE OR REPLACE FUNCTION public.publish_monitor_connect_cancel(a uuid,p_request_id uuid) RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
+DECLARE req social_connect_requests;
+BEGIN
+ IF p_request_id IS NULL THEN RAISE EXCEPTION 'PUBLISH_MONITOR_INPUT_INVALID' USING ERRCODE='22023'; END IF;
+ PERFORM publish_monitor_actor(a);
+ SELECT * INTO req FROM social_connect_requests WHERE id=p_request_id AND actor_id=a FOR UPDATE;
+ IF req.id IS NULL OR req.state NOT IN ('awaiting_callback','pending_confirm') THEN
+  RAISE EXCEPTION 'PUBLISH_MONITOR_REQUEST_INVALID' USING ERRCODE='PT409'; END IF;
+ UPDATE social_connect_requests SET state='abandoned',confirm_expires_at=NULL WHERE id=req.id;
+ RETURN jsonb_build_object('externalId',req.external_id,'unselected',to_jsonb(ARRAY(
+  SELECT x FROM unnest(req.candidate_provider_ids) x
+  WHERE NOT EXISTS(SELECT 1 FROM social_connections c WHERE c.provider_account_id=x))));
 END $$;
 
 DO $$ DECLARE f regprocedure; BEGIN
  FOR f IN SELECT p.oid::regprocedure FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
   WHERE n.nspname='public' AND p.proname IN ('publish_monitor_random_hex','publish_monitor_connect_start',
-   'publish_monitor_connect_callback','publish_monitor_connect_confirm') LOOP
+   'publish_monitor_connect_callback','publish_monitor_connect_confirm','publish_monitor_connect_pending',
+   'publish_monitor_connect_cancel') LOOP
   EXECUTE format('REVOKE ALL ON FUNCTION %s FROM PUBLIC,anon,authenticated,service_role',f);
   IF split_part(f::text,'(',1) IN ('publish_monitor_connect_start','publish_monitor_connect_callback',
-   'publish_monitor_connect_confirm') THEN
+   'publish_monitor_connect_confirm','publish_monitor_connect_pending','publish_monitor_connect_cancel') THEN
    EXECUTE format('GRANT EXECUTE ON FUNCTION %s TO service_role',f);END IF;
  END LOOP;
 END $$;

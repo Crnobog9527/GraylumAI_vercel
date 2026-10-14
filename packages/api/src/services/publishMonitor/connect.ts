@@ -38,7 +38,16 @@ const startSchema = z.object({ requestId: uuid, externalId: z.string(), platform
   permissions: z.array(z.enum(['feeds', 'posts'])) }).strict();
 const callbackSchema = z.object({ requestId: uuid, platform: z.string(), newAccounts: z.array(providerId),
   ownExisting: z.array(providerId), quarantined: z.array(providerId), ignored: z.array(providerId) }).strict();
-const confirmSchema = z.object({ connectionId: uuid, unselected: z.array(providerId) }).strict();
+const externalId = z.string().regex(/^[a-z0-9]{16,64}\.[a-z0-9]{16,64}$/);
+const confirmSchema = z.object({ connectionId: uuid, externalId, unselected: z.array(providerId) }).strict();
+const cancelSchema = z.object({ externalId, unselected: z.array(providerId) }).strict();
+const pendingSchema = z.object({ requestId: uuid, platform: z.string(), permissions: z.array(z.enum(['feeds', 'posts'])),
+  confirmExpiresAt: z.string(),
+  target: z.object({ accountProjectId: uuid, platform: z.string(), accountKey: z.string(),
+    businessName: z.string().nullable() }).strict(),
+  candidates: z.array(z.object({ providerAccountId: providerId, kind: z.enum(['new', 'target', 'unavailable']) }).strict()),
+}).strict();
+export type PendingConnect = z.infer<typeof pendingSchema>;
 
 export type StartInput = { accountProjectId: string; publish: boolean;
   connectionType?: AuthUrlInput['connectionType']; bluesky?: AuthUrlInput['bluesky'] };
@@ -100,6 +109,24 @@ export async function confirmConnect(db: Rpc, client: ClientDeps, profileId: str
     p_current: current });
   if (result.error) throw dbFailure(result.error);
   const parsed = confirmSchema.safeParse(result.data);
+  if (!parsed.success) throw dbFailure(null);
+  return parsed.data;
+}
+
+/** The actor's own attempt waiting on the confirmation page; refused once applied, cancelled or expired. */
+export async function readPending(db: Rpc, profileId: string, requestId: string): Promise<PendingConnect> {
+  const result = await db.rpc('publish_monitor_connect_pending', { a: uuid.parse(profileId), p_request_id: uuid.parse(requestId) });
+  if (result.error) throw dbFailure(result.error);
+  const parsed = pendingSchema.safeParse(result.data);
+  if (!parsed.success) throw dbFailure(null);
+  return parsed.data;
+}
+
+/** The user declined. Nothing is bound; the attempt's new accounts come back for provider cleanup. */
+export async function cancelConnect(db: Rpc, profileId: string, requestId: string) {
+  const result = await db.rpc('publish_monitor_connect_cancel', { a: uuid.parse(profileId), p_request_id: uuid.parse(requestId) });
+  if (result.error) throw dbFailure(result.error);
+  const parsed = cancelSchema.safeParse(result.data);
   if (!parsed.success) throw dbFailure(null);
   return parsed.data;
 }
