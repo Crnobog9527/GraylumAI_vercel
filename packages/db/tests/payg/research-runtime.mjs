@@ -230,7 +230,30 @@ export async function researchRuntimeCases({db,Client,connectionString,report,cr
     const hash = (await db.query("SELECT encode(sha256(convert_to($1::jsonb::text,'utf8')),'hex') h",[scope])).rows[0].h;
     await rpc(db,'content_erasure_confirm',f.actor,'answer',f.execution,hash);
     assert.equal(await count(db,'research_account_fetches','id=$1',[one.fetchId]),0,'the record carrying E1 evidence is deleted with E1');
-    report.checks.push('RT-3b answer deletion: the fetch record goes with the answer that produced its last successful evidence, even after a later failed refresh');
+    assert.equal(await count(db,'research_refresh_grants','id=$1',[grant]),0,'the grant made from E1 evidence is deleted with E1');
+    report.checks.push('RT-3b answer deletion: the fetch record and its refresh grants go with the answer that produced its last successful evidence, even after a later failed refresh');
+  }
+
+  // Deleting the answer that used a refresh grant deletes that grant; an unused grant goes with its source answer.
+  {
+    const f = await session(db,createFixture);
+    const e2 = randomUUID();
+    await db.query(`INSERT INTO runtime_executions(id,actor_id,session_id,request_id,payload,history_revision,state)
+      VALUES($1,$2,$3,gen_random_uuid(),'{}',0,'interrupted')`,[e2,f.actor,f.session]);
+    const one = await rpc(db,'research_account_fetch_claim',f.actor,f.session,f.execution,'tiktok','alpha',null);
+    await rpc(db,'research_account_fetch_dispatch',f.actor,one.fetchId,one.attempt);
+    await rpc(db,'research_account_fetch_finish',f.actor,one.fetchId,one.attempt,'succeeded',{operations:['op-e1']});
+    const used = await rpc(db,'research_refresh_create',f.actor,f.session,'tiktok','alpha');
+    const two = await rpc(db,'research_account_fetch_claim',f.actor,f.session,e2,'tiktok','alpha',used);
+    await rpc(db,'research_account_fetch_dispatch',f.actor,two.fetchId,two.attempt);
+    await rpc(db,'research_account_fetch_finish',f.actor,two.fetchId,two.attempt,'succeeded',{operations:['op-e2']});
+    const unused = await rpc(db,'research_refresh_create',f.actor,f.session,'tiktok','alpha');
+    assert.equal((await db.query('SELECT source_execution_id::text s FROM research_refresh_grants WHERE id=$1',[unused])).rows[0].s,e2);
+    const scope = await rpc(db,'content_erasure_scope',f.actor,'answer',e2);
+    const hash = (await db.query("SELECT encode(sha256(convert_to($1::jsonb::text,'utf8')),'hex') h",[scope])).rows[0].h;
+    await rpc(db,'content_erasure_confirm',f.actor,'answer',e2,hash);
+    assert.equal(await count(db,'research_refresh_grants','id=ANY($1)',[[used,unused]]),0,'used and unused grants of E2 deleted');
+    report.checks.push('RT-3b answer deletion: refresh grants used by the deleted answer, and unused grants made from its evidence, are deleted');
   }
 
   // A runtime search whose BILL2 call is not settled yet still blocks deletion (money not final).

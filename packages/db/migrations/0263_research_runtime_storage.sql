@@ -81,6 +81,9 @@ CREATE TABLE IF NOT EXISTS public.research_refresh_grants (
   created_at timestamptz NOT NULL DEFAULT now(),
   CHECK ((used_at IS NULL)=(used_execution_id IS NULL))
 );
+-- The answer whose successful evidence the grant refreshes: deleting that answer deletes the grant (with the
+-- fetch record), like deleting the answer that used it.
+ALTER TABLE public.research_refresh_grants ADD COLUMN IF NOT EXISTS source_execution_id uuid REFERENCES public.runtime_executions(id);
 CREATE INDEX IF NOT EXISTS research_refresh_session_idx ON public.research_refresh_grants(session_id);
 DO $$ DECLARE t text; BEGIN
   FOREACH t IN ARRAY ARRAY['research_selection_cards','research_discoveries','research_account_fetches','research_refresh_grants'] LOOP
@@ -327,12 +330,14 @@ END $$;
 -- failed or ended unknown), and not while a fetch of it is in progress.
 CREATE OR REPLACE FUNCTION public.research_refresh_create(a uuid, s uuid, p_platform text, p_account text) RETURNS uuid
 LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
-DECLARE g uuid;
+DECLARE g uuid; src uuid;
 BEGIN
   PERFORM research_session_owned(a,s,NULL);
-  IF NOT EXISTS(SELECT 1 FROM research_account_fetches WHERE session_id=s AND actor_id=a AND platform=p_platform
-    AND account=p_account AND last_success IS NOT NULL AND state NOT IN ('prepared','in_progress')) THEN RAISE EXCEPTION 'RESEARCH_REFRESH_INVALID';END IF;
-  INSERT INTO research_refresh_grants(actor_id,session_id,platform,account) VALUES(a,s,p_platform,p_account) RETURNING id INTO g;
+  SELECT last_success_execution_id INTO src FROM research_account_fetches WHERE session_id=s AND actor_id=a AND platform=p_platform
+    AND account=p_account AND last_success IS NOT NULL AND state NOT IN ('prepared','in_progress');
+  IF src IS NULL THEN RAISE EXCEPTION 'RESEARCH_REFRESH_INVALID';END IF;
+  INSERT INTO research_refresh_grants(actor_id,session_id,platform,account,source_execution_id)
+    VALUES(a,s,p_platform,p_account,src) RETURNING id INTO g;
   RETURN g;
 END $$;
 
@@ -378,7 +383,8 @@ $x$||f);
     definition:=replace(definition,d,$x$ DELETE FROM research_selection_cards WHERE actor_id=a AND (session_id=ANY(sessions) OR execution_id=ANY(ids));
  DELETE FROM research_account_fetches WHERE actor_id=a AND (session_id=ANY(sessions) OR execution_id=ANY(ids)
    OR last_success_execution_id=ANY(ids));
- DELETE FROM research_refresh_grants WHERE actor_id=a AND session_id=ANY(sessions);
+ DELETE FROM research_refresh_grants WHERE actor_id=a AND (session_id=ANY(sessions)
+   OR used_execution_id=ANY(ids) OR source_execution_id=ANY(ids));
  DELETE FROM research_discoveries WHERE actor_id=a AND (session_id=ANY(sessions) OR execution_id=ANY(ids));
 $x$||d);
     EXECUTE definition;
