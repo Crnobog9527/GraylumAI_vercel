@@ -383,6 +383,12 @@ DO $$ DECLARE definition text; f text; b text; d text; BEGIN
 $x$||f);
     definition:=replace(definition,b,$x$(NOT research_operation_settled(research_operations) OR (pre_deduct_id IS NOT NULL AND charged_credits IS NULL))$x$);
     definition:=replace(definition,d,$x$ DELETE FROM research_selection_cards WHERE actor_id=a AND (session_id=ANY(sessions) OR execution_id=ANY(ids));
+ -- Deleting only the answer of a later refresh keeps the earlier success of a remaining answer: the record goes back
+ -- to that success (the refresh attempt is dropped and can never finish), so it is reused and never paid for again.
+ UPDATE research_account_fetches SET state='succeeded',execution_id=last_success_execution_id,evidence=last_success,
+   attempt=gen_random_uuid(),refresh_id=NULL,updated_at=clock_timestamp()
+ WHERE actor_id=a AND execution_id=ANY(ids) AND last_success IS NOT NULL
+   AND NOT coalesce(last_success_execution_id=ANY(ids),false) AND NOT coalesce(session_id=ANY(sessions),false);
  DELETE FROM research_account_fetches WHERE actor_id=a AND (session_id=ANY(sessions) OR execution_id=ANY(ids)
    OR last_success_execution_id=ANY(ids));
  DELETE FROM research_refresh_grants WHERE actor_id=a AND (session_id=ANY(sessions)

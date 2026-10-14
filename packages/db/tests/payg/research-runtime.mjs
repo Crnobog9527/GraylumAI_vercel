@@ -283,6 +283,29 @@ export async function researchRuntimeCases({db,Client,connectionString,report,cr
     report.checks.push('RT-3b refresh resumed by another answer: the grant follows the answer holding the attempt; deleting the earlier answer keeps it, deleting the resuming answer deletes it');
   }
 
+  // Deleting only the answer of a later refresh (sent, result unknown) keeps the earlier success: no new paid fetch.
+  {
+    const f = await session(db,createFixture);
+    const e2 = randomUUID();
+    await db.query(`INSERT INTO runtime_executions(id,actor_id,session_id,request_id,payload,history_revision,state)
+      VALUES($1,$2,$3,gen_random_uuid(),'{}',0,'interrupted')`,[e2,f.actor,f.session]);
+    const one = await rpc(db,'research_account_fetch_claim',f.actor,f.session,f.execution,'tiktok','alpha',null);
+    await rpc(db,'research_account_fetch_dispatch',f.actor,one.fetchId,one.attempt);
+    await rpc(db,'research_account_fetch_finish',f.actor,one.fetchId,one.attempt,'succeeded',{operations:['op-e1']});
+    const grant = await rpc(db,'research_refresh_create',f.actor,f.session,'tiktok','alpha');
+    const two = await rpc(db,'research_account_fetch_claim',f.actor,f.session,e2,'tiktok','alpha',grant);
+    await rpc(db,'research_account_fetch_dispatch',f.actor,two.fetchId,two.attempt);
+    const scope = await rpc(db,'content_erasure_scope',f.actor,'answer',e2);
+    const hash = (await db.query("SELECT encode(sha256(convert_to($1::jsonb::text,'utf8')),'hex') h",[scope])).rows[0].h;
+    await rpc(db,'content_erasure_confirm',f.actor,'answer',e2,hash);
+    const row = (await db.query('SELECT state,execution_id::text e,evidence,refresh_id FROM research_account_fetches WHERE id=$1',[one.fetchId])).rows[0];
+    assert.deepEqual(row,{state:'succeeded',e:f.execution,evidence:{operations:['op-e1']},refresh_id:null},'back to the E1 success');
+    await assert.rejects(rpc(db,'research_account_fetch_finish',f.actor,two.fetchId,two.attempt,'succeeded',{operations:['op-e2']}),/RESEARCH_FETCH_CONFLICT/);
+    const again = await rpc(db,'research_account_fetch_claim',f.actor,f.session,f.execution,'tiktok','alpha',null);
+    assert.deepEqual([again.claimed,again.evidence],[false,{operations:['op-e1']}],'reused, not fetched again');
+    report.checks.push('RT-3b deleting a refresh answer: the record returns to the earlier success of the remaining answer; the dropped attempt cannot finish; the next claim reuses the evidence instead of paying again');
+  }
+
   // A runtime search whose BILL2 call is not settled yet still blocks deletion (money not final).
   {
     const f = await session(db,createFixture);
