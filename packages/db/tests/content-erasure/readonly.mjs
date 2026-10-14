@@ -59,6 +59,7 @@ export async function runReadonly({db,report}){
  assert.equal(after.draftId,confirmed.draft_id);assert.ok(after.snapshot,'confirmed work is still readable');
  assert.doesNotMatch(JSON.stringify(after),/READONLY_PRIVATE_(QUESTION|REPLY)/,'nothing said in the deleted conversation comes back');
  const list=(await listed(db,f.actor)).filter(x=>x.draftId!==base.draft_id);
+ assert.ok(list.every(x=>'topicSessionId' in x),'entries carry the topic workspace session (null without one)');
  assert.deepEqual(list.map(x=>[x.draftId,x.conversationDeleted]),[[confirmed.draft_id,true]],
   'confirmed draft listed as read-only; the one with nothing confirmed is hidden');
  assert.equal(await rpc(db,'bill2_scope_allowed',f.actor,{kind:'positioning_draft',draftId:confirmed.draft_id}),false,

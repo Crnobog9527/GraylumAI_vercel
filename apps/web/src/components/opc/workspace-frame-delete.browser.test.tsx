@@ -37,7 +37,7 @@ const stubs: Array<[(id: string) => boolean, string]> = [
         items:[{workItemId:'w1',sessionId:'${WORK_SESSION}',title:'口播稿工作',brief:null,day:'2026-10-13',revision:1}]}]}]}
         :{accounts:[]})},list:{useQuery:()=>q(location.hash==='#drafts'?{drafts:[
         {draftId:'d-live',sessionId:'${DRAFT_SESSION}',projectId:'p-live',businessName:'咖啡店',state:'draft'},
-        {draftId:'d-ro',sessionId:'s-ro',projectId:'${DRAFT_PROJECT}',businessName:'书店',state:'draft',conversationDeleted:true}]}:[])},
+        {draftId:'d-ro',sessionId:'s-ro',projectId:'${DRAFT_PROJECT}',businessName:'书店',state:'draft',conversationDeleted:true,topicSessionId:'t-ro'}]}:[])},
         conversations:{useQuery:()=>q([{sessionId:'${SESSION}',title:'周末选题讨论',lastActivityAt:'2026-10-13T00:00:00Z'},
           ...(location.hash==='#rename-slow'?[{sessionId:'${OTHER}',title:'第二个对话',lastActivityAt:'2026-10-12T00:00:00Z'}]:[])])},
         workUiChange:{useMutation:m},accountUiChange:{useMutation:m}},
@@ -391,7 +391,7 @@ it('待归类: a read-only draft is labelled and offers deleting the whole draft
   await ui(page.getByRole('menuitem', { name: '删除对话' })).toHaveCount(0);
   await page.getByRole('menuitem', { name: '永久删除稿件与成果' }).click();
   expect(await page.evaluate(() => (window as unknown as Win).opened.at(-1))).toEqual({ kind: 'artifact', id: DRAFT_PROJECT });
-  expect(await page.evaluate(() => (window as unknown as { openedRelated: string[][] }).openedRelated.at(-1))).toEqual(['d-ro']);
+  expect(await page.evaluate(() => (window as unknown as { openedRelated: string[][] }).openedRelated.at(-1))).toEqual(['d-ro', 't-ro']);
 }, '#drafts'));
 
 it('reaches the ⋯ button with Tab, which makes it visible', () => open(1280, async page => {

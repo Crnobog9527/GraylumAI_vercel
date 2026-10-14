@@ -7,7 +7,7 @@ import styles from './workspace-frame.module.css';
 
 export type UnassignedDraft = {
   draftId: string; sessionId?: string; projectId?: string; businessName?: string; state?: string;
-  conversationDeleted?: boolean;
+  conversationDeleted?: boolean; topicSessionId?: string | null;
 };
 
 /**

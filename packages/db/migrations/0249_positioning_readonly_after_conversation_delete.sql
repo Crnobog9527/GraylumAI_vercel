@@ -5,7 +5,8 @@
 -- "conversation deleted" state: own draft, its session deleted, its work (project) not deleted. Drafts
 -- with nothing confirmed stay hidden from the list. A read-only draft is removed as a whole through
 -- the existing work deletion (content_erasure_confirm 'artifact' on its project), after which the
--- existing CONTENT_ERASED guard of opc_query applies and it leaves the list.
+-- existing CONTENT_ERASED guard of opc_query applies and it leaves the list. List entries also carry
+-- the draft's topic workspace session, so the page can clear that workspace's local copies on deletion.
 
 CREATE OR REPLACE FUNCTION public.opc_draft_readonly(a uuid,draft uuid)
 RETURNS boolean LANGUAGE sql STABLE SECURITY DEFINER SET search_path=public,pg_temp AS $$
@@ -43,7 +44,8 @@ DO $$ DECLARE source text;sig text;needle text;replacement text;marker text; BEG
   'readonly flag'),
  ('opc_query_before_mentor_basis(uuid,uuid)',
   $n$'roundId',round_id,'mode',mode)),'[]') FROM opc_drafts WHERE actor_id=p_actor_id AND NOT EXISTS(SELECT 1 FROM bill2_drafts b WHERE b.id=opc_drafts.draft_id AND b.revoked)),$n$,
-  $r$'roundId',round_id,'mode',mode,'conversationDeleted',opc_draft_readonly(p_actor_id,draft_id))),'[]') FROM opc_drafts
+  $r$'roundId',round_id,'mode',mode,'conversationDeleted',opc_draft_readonly(p_actor_id,draft_id),
+   'topicSessionId',(SELECT t.session_id FROM opc_topic_workspaces t WHERE t.draft_id=opc_drafts.draft_id AND t.actor_id=p_actor_id))),'[]') FROM opc_drafts
    WHERE actor_id=p_actor_id AND (NOT EXISTS(SELECT 1 FROM bill2_drafts b WHERE b.id=opc_drafts.draft_id AND b.revoked)
     OR (opc_draft_readonly(p_actor_id,draft_id) AND opc_draft_has_confirmed(draft_id)))),$r$,'readonly list'),
  ('opc_historical_reach(uuid,uuid,text)',

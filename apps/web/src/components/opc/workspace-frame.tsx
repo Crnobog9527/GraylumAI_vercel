@@ -237,7 +237,7 @@ export function WorkspaceFrame({children,right,rightOpen=true,onToggleRight,acti
       menuOpen={menuId==='draft:'+draft.draftId} menuPosition={menuPosition} onCloseMenu={()=>setMenuId('')}
       onOpenMenu={event=>openRowMenu(event,'draft:'+draft.draftId)}
       onDeleteConversation={(id,name)=>setDeletingConversation({id,name,related:[draft.draftId]})}
-      onDeleteDraft={(id,name)=>startErasure('artifact',id,name+' · 稿件与成果',[draft.draftId])}/>)}</details>}
+      onDeleteDraft={(id,name)=>startErasure('artifact',id,name+' · 稿件与成果',[draft.draftId,...(draft.topicSessionId?[draft.topicSessionId]:[])])}/>)}</details>}
      <QueryNotice error={library.error||drafts.error} loading={library.isPending||drafts.isPending} label="账号与资料" retry={()=>Promise.all([library.refetch(),drafts.refetch()])}/>
      {library.isSuccess&&drafts.isSuccess&&!library.error&&!drafts.error&&(!archiveView&&!platforms.size&&!unassigned.length||archiveView&&![...platforms.values()].flat().some(account=>account.items.some(item=>item.archived&&!item.deleted)))&&<p className={styles.empty}>{archiveView?'暂无归档记录。':'完成定位并采用选题后，账号工作会出现在这里。'}</p>}
     </div>
