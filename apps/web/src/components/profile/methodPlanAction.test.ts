@@ -22,6 +22,11 @@ describe('plan buttons', () => {
     expect(methodPlanAction({ level: 'gold', ...ready, current: pro }))
       .toEqual({ kind: 'upgrade', label: '升级到 Gold', disabled: false, priorSubscriptionId: pro.subscription_id });
     expect(methodPlanAction({ level: 'pro', ...ready, current: pro })).toMatchObject({ label: '当前方案', disabled: true });
+    expect(methodPlanAction({ level: 'gold', ...ready, current: row({ auto_renew: false, cancel_at_period_end: true }) }))
+      .toMatchObject({ kind: 'none', label: 'Pro 已停止续费，到期后可开通 Gold', disabled: true });
+    // A one-time (wallet) Pro never renewed in the first place; the server allows its upgrade.
+    expect(methodPlanAction({ level: 'gold', ...ready, current: row({ auto_renew: false, payment_method: 'wechat_pay' }) }))
+      .toMatchObject({ kind: 'upgrade' });
     expect(methodPlanAction({ level: 'pro', ...ready, current: row({ purchase_membership_level: 'gold' }) }))
       .toMatchObject({ label: '已是更高等级会员', disabled: true });
   });

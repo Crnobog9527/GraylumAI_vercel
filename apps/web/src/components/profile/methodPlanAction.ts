@@ -41,6 +41,9 @@ export function methodPlanAction(input: {
   if (!current) return { kind: 'buy', label: '开通', disabled: false };
   if (current.purchase_membership_level === input.level) return { kind: 'none', label: '当前方案', disabled: true };
   if (current.purchase_membership_level === 'pro' && input.level === 'gold') {
+    // A card Pro whose renewal is already stopped cannot be upgraded (0222/0251 need it still renewing);
+    // Gold can be bought normally once that Pro ends.
+    if (current.cancel_at_period_end) return { kind: 'none', label: 'Pro 已停止续费，到期后可开通 Gold', disabled: true };
     return { kind: 'upgrade', label: '升级到 Gold', disabled: false, priorSubscriptionId: current.subscription_id };
   }
   return { kind: 'none', label: '已是更高等级会员', disabled: true };
