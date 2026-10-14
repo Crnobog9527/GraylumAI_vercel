@@ -12,8 +12,7 @@
   transition: border-color .4s, box-shadow .4s;
 }
 .card p { margin: 0; }
-.card[tabindex], .line[tabindex], .sideEntry[tabindex], .reply[tabindex] { cursor: pointer; }
-.card:focus-visible, .line:focus-visible, .sideEntry:focus-visible, .reply:focus-visible { outline: 2px solid var(--j-ink); outline-offset: 2px; }
+.card[data-seat], .line[data-seat], .sideEntry[data-seat], .reply[data-seat] { cursor: pointer; }
 .current { border-color: var(--j-ink-soft); box-shadow: var(--j-lift); }
 
 .cardHead { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; min-width: 0; }
