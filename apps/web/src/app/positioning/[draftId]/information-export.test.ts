@@ -84,4 +84,16 @@ describe('read-only draft after its conversation is deleted (Owner 2026-10-14)',
     for (const section of sections) for (const field of section.fields) expect(exported).toContain(field.value);
     expect(exported).not.toMatch(/不能导出|不可导出|内部|internal/);
   });
+
+  it('keeps the body of a confirmed step whose fields were not confirmed; the normal export is unchanged', async () => {
+    const { confirmedSections } = await import('./information-export');
+    const base = exportFixture(1);
+    const data = { ...base, information: { s0: { schema: base.information.s0.schema, values: {} } },
+      snapshot: { ...base.snapshot, steps: { s0: { version: 2, reviewVersion: 0, valid: true, body: '已确认的步骤结论' } } } };
+    expect(confirmedSections({ ...data, conversationDeleted: true }, 'draft'))
+      .toEqual([{ title: '步骤1', fields: [{ title: '本步结论', value: '已确认的步骤结论', nature: '已确认' }] }]);
+    const readonly = { ...data, conversationDeleted: true };
+    expect(markdown(readonly, 'draft', identity(readonly, 'draft'))).toContain('已确认的步骤结论');
+    expect(confirmedSections(data, 'draft')).toEqual([]);
+  });
 });

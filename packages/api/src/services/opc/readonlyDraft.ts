@@ -6,7 +6,7 @@ type Field = { id?: unknown; title?: unknown };
 type Value = { value?: unknown; status?: unknown; nature?: unknown };
 type Raw = {
   conversationDeleted?: unknown; draftId?: unknown; projectId?: unknown; roundId?: unknown; sessionId?: unknown;
-  snapshot?: { state?: unknown; workflow?: { steps?: Field[] }; steps?: Record<string, { version?: unknown; reviewVersion?: unknown; valid?: unknown }> };
+  snapshot?: { state?: unknown; workflow?: { steps?: Field[] }; steps?: Record<string, { version?: unknown; reviewVersion?: unknown; valid?: unknown; body?: unknown }> };
   information?: Record<string, { schema?: Field[]; values?: Record<string, Value> | null }> | null;
 };
 
@@ -15,8 +15,8 @@ const count = (value: unknown) => typeof value === 'number' && Number.isInteger(
 
 /**
  * The only response for a draft whose conversation was deleted (Owner 2026-10-14: confirmed content
- * stays read-only). Built on the server from the full read: step titles, step state and confirmed
- * field values only. Unconfirmed or suggested values, notes, turns, plans, handoffs and reports never
+ * stays read-only). Built on the server from the full read: step titles, step state, the body of a
+ * confirmed step and confirmed field values only. Unconfirmed or suggested values, notes, turns, plans, handoffs and reports never
  * leave the server, so nothing the read-only page does not show can be recovered by calling the API.
  */
 export function readonlyDraftProjection(raw: Raw) {
@@ -29,7 +29,10 @@ export function readonlyDraftProjection(raw: Raw) {
       workflow: { steps },
       steps: Object.fromEntries(steps.map((step) => {
         const state = raw.snapshot?.steps?.[step.id];
-        return [step.id, { version: count(state?.version), reviewVersion: count(state?.reviewVersion), valid: state?.valid === true }];
+        const valid = state?.valid === true;
+        return [step.id, { version: count(state?.version), reviewVersion: count(state?.reviewVersion), valid,
+          // A confirmed step keeps what was confirmed, even when its fields were not confirmed one by one.
+          ...(valid && typeof state?.body === 'string' && state.body.trim() ? { body: state.body } : {}) }];
       })),
     },
     information: Object.fromEntries(steps.map((step) => {

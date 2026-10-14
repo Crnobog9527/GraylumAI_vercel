@@ -12,7 +12,7 @@ const readSchema = z.object({
     workflow: z.object({ steps: z.array(field) }),
     steps: z.record(z.string(), z.object({
       version: z.number().int().nonnegative(), reviewVersion: z.number().int().nonnegative(),
-      valid: z.boolean(),
+      valid: z.boolean(), body: z.string().optional(),
     })),
   }),
   information: z.record(z.string(), z.object({
@@ -63,6 +63,9 @@ export type ConfirmedSection = { title: string; fields: Array<{ title: string; v
  */
 export function confirmedSections(raw: unknown, draftId: string): ConfirmedSection[] {
   const p = projection(raw, draftId);
+  // A draft whose conversation was deleted also keeps the body of each confirmed step: it may be the
+  // only confirmed content (fields deferred). The server sends it for confirmed steps only.
+  const stepBodies = (raw as { conversationDeleted?: unknown } | null)?.conversationDeleted === true;
   const natures: Record<string, string> = { fact: '事实', hypothesis: '假设', decision: '决定', unknown: '未标注' };
   return p.steps.flatMap(step => {
     const fields = step.schema.flatMap(field => {
@@ -70,7 +73,9 @@ export function confirmedSections(raw: unknown, draftId: string): ConfirmedSecti
       if (answer?.status !== 'confirmed' || !answer.value.trim()) return [];
       return [{ title: field.title, value: answer.value, nature: natures[answer.nature ?? 'unknown'] ?? '未标注' }];
     });
-    return fields.length ? [{ title: step.title, fields }] : [];
+    const body = stepBodies && step.state.valid && step.state.body?.trim()
+      ? [{ title: '本步结论', value: step.state.body, nature: '已确认' }] : [];
+    return fields.length || body.length ? [{ title: step.title, fields: [...body, ...fields] }] : [];
   });
 }
 

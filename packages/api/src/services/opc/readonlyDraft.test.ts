@@ -23,6 +23,15 @@ describe('readonlyDraftProjection', () => {
     expect(projection.conversationDeleted).toBe(true);
   });
 
+  it('keeps the body of a confirmed step, but not of an unconfirmed one', () => {
+    const steps = { s1: { version: 2, reviewVersion: 0, valid: true, body: '已确认的步骤结论' },
+      s2: { version: 1, reviewVersion: 0, valid: false, body: 'UNCONFIRMED_STEP_BODY' } };
+    const projection = readonlyDraftProjection({ ...full, snapshot: { ...full.snapshot,
+      workflow: { steps: [{ id: 's1', title: '目标' }, { id: 's2', title: '受众' }] }, steps } });
+    expect(projection.snapshot.steps.s1).toEqual({ version: 2, reviewVersion: 0, valid: true, body: '已确认的步骤结论' });
+    expect(JSON.stringify(projection)).not.toMatch(/UNCONFIRMED_STEP_BODY/);
+  });
+
   it('tolerates missing parts', () => {
     expect(readonlyDraftProjection({ conversationDeleted: true }).information).toEqual({});
   });
