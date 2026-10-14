@@ -2,10 +2,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type Stripe from 'stripe';
 import type { SupabaseClient } from '@supabase/supabase-js';
-const mocks = vi.hoisted(() => ({ scope: vi.fn(), recover: vi.fn(), conflict: vi.fn() }));
+const mocks = vi.hoisted(() => ({ scope: vi.fn(), recover: vi.fn(), conflict: vi.fn(), monthly: vi.fn() }));
 vi.mock('./stripeCheckoutPersistence', () => ({ resolveStripeScope: mocks.scope }));
 vi.mock('./walletWebhook', () => ({ recoverMethodCheckout: mocks.recover }));
 vi.mock('./stripeConflictEvidence', () => ({ recordStripeInvoiceConflict: mocks.conflict }));
+vi.mock('./monthlyRefundWebhook', () => ({ syncMonthlyRefundSubscription: mocks.monthly }));
 import { handleCardSubscriptionInvoice, handleCardSubscriptionState } from './cardSubscriptionWebhook';
 
 const orderId = '00000000-0000-4000-8000-000000000001';
@@ -39,6 +40,17 @@ describe('PAY-STRIPE-MP card subscription webhooks', () => {
   beforeEach(() => {
     mocks.scope.mockReset().mockResolvedValue({ mode: 'test', merchant: 'fixture' });
     mocks.recover.mockReset().mockResolvedValue({ orderId }); mocks.conflict.mockReset().mockResolvedValue(undefined);
+    mocks.monthly.mockReset().mockResolvedValue(false);
+  });
+  it('leaves a subscription held by our approved monthly refund to that flow (step 4b-2)', async () => {
+    const f = fixture({ subscriptionRef: { subscription_id: 'local_sub' }, order: cardOrder });
+    f.raw.subscriptions.retrieve.mockResolvedValue({ object: 'subscription', id: 'sub_1', livemode: false, status: 'canceled',
+      cancel_at: null, cancel_at_period_end: false, cancellation_details: { comment: 'graylum_initiated' },
+      items: { data: [{ current_period_end: 1794472954 }] } });
+    mocks.monthly.mockResolvedValue(true);
+    await expect(handleCardSubscriptionState(f.db, f.stripe, 'sub_1')).resolves.toBe(true);
+    expect(mocks.monthly).toHaveBeenCalledWith(f.db, f.stripe, 'sub_1');
+    expect(f.rpc).not.toHaveBeenCalled();
   });
   it('confirms the first invoice through the same first-payment recovery (mapped checkout)', async () => {
     const f = fixture({ subscriptionRef: { subscription_id: 'local_sub' }, order: cardOrder, checkoutRef: { external_id: 'cs_mapped' } });

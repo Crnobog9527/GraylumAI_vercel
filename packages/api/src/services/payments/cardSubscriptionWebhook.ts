@@ -8,6 +8,7 @@ import { stripePreTaxAmount } from './purchaseFacts';
 import { recordStripeInvoiceConflict } from './stripeConflictEvidence';
 import { recordCardPaymentTax } from './cardPaymentEvidence';
 import { readSubscription, stopRenewalAfterReview, stripeStopState, syncState } from './cardSubscriptionStop';
+import { syncMonthlyRefundSubscription } from './monthlyRefundWebhook';
 import { PAYMENT_EVIDENCE_CONFLICT } from './stripeWebhookError';
 import { logger } from '../../lib/logger';
 
@@ -144,6 +145,9 @@ export async function handleCardSubscriptionState(db: SupabaseClient, stripe: St
     if (state.stop || state.canceled) throw new Error('PAY_STRIPE_MP_FIRST_PAYMENT_PENDING');
     return true;
   }
+  // While our approved monthly refund holds it (step 4b-2), that flow owns the subscription: it observes the change and
+  // finishes the refund; the ordinary sync would be refused by the hold (0193 source guard).
+  if (await syncMonthlyRefundSubscription(db, stripe, subscriptionId)) return true;
   await syncState(db, scope.merchant, order.localSubscriptionId, subscription);
   return true;
 }

@@ -55,6 +55,21 @@ describe('non-executing monthly refund progression', () => {
     f.seen.subscription.status = 'canceled';
     expect(run(f)).toMatchObject({ kind: 'finalize_success', refundId: 're_fixture', executable: false });
   });
+  it('runs a card order with tax (PAY-STRIPE-MP) end to end: refunds pre-tax less fee plus tax, then cancels', () => {
+    const stopped = stoppedFixture(1380);
+    expect(stopped.intent.terms).toMatchObject({ paidMinor: 6900, feeMinor: 414, taxMinor: 1380, netMinor: 7866 });
+    stopped.intent.started.refund = now;
+    expect(run(stopped)).toMatchObject({ kind: 'provider_request', stage: 'refund', parameters: { charge: 'ch_fixture', amount: 7866 } });
+    const f = refundFixture('succeeded', 1380);
+    expect(run(f)).toMatchObject({ kind: 'record_refund', status: 'succeeded' });
+    record(f); f.intent.started.cancel = now;
+    expect(run(f)).toMatchObject({ kind: 'provider_request', stage: 'cancel', operation: 'cancel_subscription' });
+    f.seen.subscription.status = 'canceled';
+    expect(run(f)).toMatchObject({ kind: 'finalize_success', refundId: 're_fixture' });
+    // A refund amount that does not match pre-tax less fee plus the tax is never executed.
+    const tampered = stoppedFixture(1380); tampered.intent.terms.netMinor = 6486; refreshVersion(tampered);
+    expect(run(tampered)).toMatchObject({ kind: 'review_required', reason: 'amount_mismatch' });
+  });
   it.each(['pending', 'requires_action'] as const)('records %s without releasing or prematurely canceling', status => {
     const f = refundFixture(status);
     expect(run(f)).toMatchObject({ kind: 'record_refund', status }); record(f);
