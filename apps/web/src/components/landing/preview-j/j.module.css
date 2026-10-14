@@ -63,6 +63,11 @@
 .pillSmall { min-height: 40px; padding: 0 18px; background: #141312; color: #fff; font-size: 14px; }
 .pillSmallLight { min-height: 40px; padding: 0 18px; border: 1px solid var(--j-line); background: #fff; color: var(--j-ink); font-size: 14px; }
 @media (max-width: 420px) { .brand { font-size: 18px; } .pillSmall, .pillSmallLight { min-height: 36px; padding: 0 12px; font-size: 13px; } }
+/* The narrowest phones (320): a smaller wordmark and tighter buttons, so the brand never runs into 登录. */
+@media (max-width: 360px) {
+  .headerInner { gap: 8px; } .brand { gap: 7px; font-size: 16px; } .brand img { width: 24px; height: 24px; } .nav { gap: 4px; }
+  .pillSmall, .pillSmallLight { padding: 0 9px; font-size: 12.5px; }
+}
 .page a:focus-visible, .page button:focus-visible, .page summary:focus-visible { outline: 2px solid var(--j-ink); outline-offset: 3px; }
 
 /* Section bands (Owner 2026-10-15: "背景单调、容易视觉疲劳"): some modules sit on their own large rounded panel, inset
