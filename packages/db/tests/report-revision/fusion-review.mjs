@@ -52,6 +52,12 @@ export async function runFusionReview({db,Client,connectionString,report}) {
   assert.deepEqual(rv.materials.a.pain,{value:'No time',status:'deferred'});
   assert.match(rv.materialsHash,/^[a-f0-9]{64}$/);
   assert.deepEqual(await start(db,f,request),rv,'same request returns the same review');
+  // The host's replay probe: an empty config returns a known request and never creates a review (#962 review).
+  assert.deepEqual(await start(db,f,request,{}),rv,'empty-config probe replays a known request');
+  const probeCount = Number((await db.query('SELECT count(*) v FROM fusion_reviews WHERE actor_id=$1',[f.actor])).rows[0].v);
+  await assert.rejects(start(db,f,randomUUID(),{}),/FUSION_REVIEW_INVALID/);
+  assert.equal(Number((await db.query('SELECT count(*) v FROM fusion_reviews WHERE actor_id=$1',[f.actor])).rows[0].v),probeCount,
+    'an unknown request probe creates nothing');
   await assert.rejects(start(db,f),/FUSION_REVIEW_ACTIVE/,'one review in progress per user');
   // The copy lives on the record (a published round is immutable; later edits open a new round).
   const reread = await service(db,'fusion_review_read',f.actor,rv.reviewId);

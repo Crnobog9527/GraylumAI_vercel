@@ -43,6 +43,17 @@ export function reviewRecord(admin: SupabaseClient, actorId: string) {
     start: (input: { requestId: string; draftId: string; sourceVersionId: string; config: Record<string, unknown> & { estimateUsd: string } }) =>
       view(rpc('fusion_review_start', { p_request_id: uuid.parse(input.requestId), p_draft_id: uuid.parse(input.draftId),
         p_source_version_id: uuid.parse(input.sourceVersionId), p_config: input.config })),
+    /** The review an earlier start with this request created, or null. The database answers a known request
+     * before it reads anything else, and refuses an empty config before any write, so this never creates one. */
+    async replay(input: { requestId: string; draftId: string; sourceVersionId: string }): Promise<ReviewView | null> {
+      try {
+        return await view(rpc('fusion_review_start', { p_request_id: uuid.parse(input.requestId), p_draft_id: uuid.parse(input.draftId),
+          p_source_version_id: uuid.parse(input.sourceVersionId), p_config: {} }));
+      } catch (error) {
+        if (error instanceof Error && error.message === 'FUSION_REVIEW_INVALID') return null;
+        throw error;
+      }
+    },
     async read(reviewId: string): Promise<ReviewView | null> {
       const value = await rpc('fusion_review_read', { p_review_id: uuid.parse(reviewId) });
       return value === null ? null : reviewView.parse(value);

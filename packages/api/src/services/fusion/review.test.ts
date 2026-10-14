@@ -40,11 +40,12 @@ vi.mock('./reviewRecord', async original => {
   const real = await original<typeof import('./reviewRecord')>();
   const view = () => ({ ...db.review!, calls: db.calls.map(c => ({ ...c })) });
   return { ...real, reviewRecord: () => ({
-    start: async (input: { config: unknown }) => { db.review = { reviewId: randomUUID(), state: 'running', round: 1, phase: 'review', attempt: 1,
+    start: async (input: { config: unknown; requestId: string }) => { db.review = { reviewId: randomUUID(), requestId: input.requestId, state: 'running', round: 1, phase: 'review', attempt: 1,
       draftId: randomUUID(), sourceVersionId: randomUUID(), sourceSessionId: randomUUID(), versionHash: 'h',
       materials: { s1: { goal: { value: '旧目标', status: 'confirmed' } } }, materialsHash: 'a'.repeat(64), config: input.config, steps: [],
       outcome: null, revisionId: null, endedAt: null }; return view(); },
     read: async () => db.review ? view() : null,
+    replay: async (input: { requestId: string }) => db.review && db.review.requestId === input.requestId ? view() : null,
     claim: async (_id: string, at: { round: number; phase: string; attempt: number }, groupId: string, items: Array<{ runId: string; payload: { model: string } }>) => {
       const key = `review:${at.round}:${at.phase}:${at.attempt}`;
       (db.review!.steps as unknown[]).push({ ...at, groupId, stepKey: key, claimedAt: clock.next() });
@@ -205,6 +206,28 @@ describe('review flow', () => {
     expect(events.filter(e => e.type === 'decision')).toHaveLength(12);
     expect(events.filter(e => e.type === 'adjudication')).toHaveLength(1);
     expect(events.map(e => e.type)).toContain('revision_ready');
+  });
+
+  it('a retried start returns the existing review before any check that may have changed', async () => {
+    const t = setup(() => opinion('major'));
+    const requestId = randomUUID();
+    const first = await t.flow.start({ requestId, draftId: randomUUID(), sourceVersionId: randomUUID() });
+    const settings = await import('./settings');
+    const spy = vi.spyOn(settings, 'readFusionSettings');
+    const again = await t.flow.start({ requestId, draftId: randomUUID(), sourceVersionId: randomUUID() });
+    expect(again.reviewId).toBe(first.reviewId);
+    expect(spy).not.toHaveBeenCalled();
+  });
+
+  it('keeps the event stream open while a saved body still awaits its verdict after a stop', async () => {
+    const t = setup(() => opinion('major'));
+    await t.flow.start({ requestId: randomUUID(), draftId: randomUUID(), sourceVersionId: randomUUID() });
+    await t.flow.continue(String(db.review!.reviewId));
+    db.calls[0]!.dispatched = true;
+    db.review!.endedAt = clock.next(); db.review!.state = 'stopped';
+    expect((await t.flow.events(String(db.review!.reviewId))).ended).toBe(false);
+    db.calls[0]!.verdict = 'format_invalid';
+    expect((await t.flow.events(String(db.review!.reviewId))).ended).toBe(true);
   });
 
   it('ends at once when every reviewer keeps every decision and finds nothing; never proposes', async () => {

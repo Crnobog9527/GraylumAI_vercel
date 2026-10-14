@@ -101,7 +101,9 @@ export function reviewEvents(input: { view: ReviewView; reviewers: string[]; sec
   }
   // Database times order the events; ties keep the derivation order (seat, then item).
   timed.sort((a, b) => (a.at === b.at ? a.order - b.order : Date.parse(a.at || '1970-01-01') - Date.parse(b.at || '1970-01-01')));
-  return { events: timed.map(item => item.event), ended: Boolean(view.endedAt) };
+  // Ended only when nothing more can appear: a stop may leave a saved body to be judged later (#962 review).
+  const pending = view.calls.some(call => call.dispatched && call.verdict === null);
+  return { events: timed.map(item => item.event), ended: Boolean(view.endedAt) && !pending };
 }
 
 function adjudicationOf(text: string): Array<{ issue: string; reviewers: string[]; single: boolean; adopted: boolean; reason: string }> {

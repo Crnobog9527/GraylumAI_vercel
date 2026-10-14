@@ -137,8 +137,11 @@ export function reportSections(body: string, sections: string[], maxCharacters: 
   const titles = parts.filter((_, index) => index % 2 === 1).map(title => title.trim());
   if (titles.length !== sections.length || titles.some((title, index) => title !== sections[index])) return null;
   const map = new Map<string, string>();
-  titles.forEach((title, index) => map.set(title, (parts[index * 2 + 2] ?? '').trim()));
-  return [...map.values()].every(content => content.length > 0) ? map : null;
+  // Raw contents are compared, so even a spacing or blank-line change must be declared (#962 review); only the
+  // non-empty test trims.
+  // Only the line break that ends the heading line and the one before the next heading are separators.
+  titles.forEach((title, index) => map.set(title, (parts[index * 2 + 2] ?? '').replace(/^\r?\n/, '').replace(/\r?\n$/, '')));
+  return [...map.values()].every(content => content.trim().length > 0) ? map : null;
 }
 
 /** The summary's revision (§2.2 第 1 层): template sections, every declared step and field exactly once,

@@ -172,6 +172,9 @@ export function reviewFlow(deps: { admin: SupabaseClient; actorId: string;
   return {
     /** Freezes settings, Skill revision and estimate; refuses a review that cannot fit or exceeds the budget. */
     async start(input: { requestId: string; draftId: string; sourceVersionId: string }) {
+      // A retried start (lost response) gets its review back before any check that may have changed since (#962 review).
+      const existing = await record.replay(input);
+      if (existing) return existing;
       const settings = await readFusionSettings(admin);
       if (!settings.review.enabled) throw new Error('FUSION_REVIEW_DISABLED');
       if (!settings.review.skillId || !settings.review.summaryModelId || !settings.review.maxBudgetUsd) throw new Error('FUSION_REVIEW_INCOMPLETE');

@@ -123,4 +123,9 @@ describe('revision host check', () => {
     expect(reportSections(report(), sections, 12000)?.get('受众')).toBe('原受众');
     expect(reportSections('## 定位\n\n## 受众\nx\n## 结语\ny', sections, 12000)).toBeNull();
   });
+
+  it('counts a spacing-only change in a section as a change that must be declared', () => {
+    const spaced = revision({ body: report('新定位', '原受众\n') });
+    expect(checkRevision(spaced, base)).toEqual({ ok: false, reason: 'REVISION_NOTES' });
+  });
 });
