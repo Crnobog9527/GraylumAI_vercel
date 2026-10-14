@@ -51,6 +51,8 @@ export async function createFixture(db,options={}) {
     policies.push({...policy,modelId:secondId,model:secondModel,multiplier:options.secondMultiplier});
     claimPayloads.push({...claimPayload,model:secondModel,billingUnit:{modelId:secondId,multiplier:options.secondMultiplier}});
   }
+  // RESEARCH-TOOLS: frozen tool-route policies on the same run (research-tools.mjs).
+  policies.push(...(options.extraPolicies??[]));
   const runMultiplier = String(Math.max(Number(multiplier),Number(options.secondMultiplier??multiplier)));
   const payload = {contractVersion:'bill2.v2',mode:'isolated',scope:{kind:'positioning_draft',draftId:draft},
     operation:'question',modelId,sourceHash:'a'.repeat(64),input:{text:'PAYG_LOCAL_PRIVATE_CANARY'},callPolicy:policies,

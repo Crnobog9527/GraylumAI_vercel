@@ -5,19 +5,24 @@ import { describe, expect, it } from 'vitest';
 import sitemap from '@/app/sitemap';
 import { metadata } from '@/app/landing/preview/jury/page';
 import {
-  ADOPT_ERROR_LABEL, choosable, isComplete, linkedGroup, mockConfirm, mockPropose, needsConfirm, setConfirmed, setUse, toChoices, type ChoiceState,
+  ADOPT_ERROR_LABEL, choosable, firstSentence, isComplete, keyPoints, linkedGroup, mockConfirm, mockPropose, needsConfirm, setConfirmed, setUse, toChoices, type ChoiceState,
 } from './jury-adopt';
 import {
   DEFAULT_SEAT_NAMES, resolveSeatNames, SAMPLE_PANEL, SEAT_NAME_MAX, summarize, type JuryEvent,
 } from './jury-events';
-import { DOC_HEAD, deskAt, seatStates, type MarginItem } from './jury-desk';
+import { DOC_HEAD, deskAt, type MarginItem } from './jury-desk';
+import { canvasAt, statusWord } from './jury-canvas';
+import { briefScenes } from './jury-brief';
+import { caseFromEvents } from './jury-case';
+import { JuryCanvasPlayer } from './JuryCanvasPlayer';
 import { diffText } from './jury-diff';
 import { REVISION_TEXT } from './jury-mock-rulings';
 import { REPORT_CHAPTERS } from './jury-report';
 import { seatInitials } from './JuryBits';
 import { failedSeatsAt } from './jury-progress';
-import { buildScenes, playbackLength, sceneAt, skippedStages, stageIndex } from './jury-scenes';
+import { buildScenes, playbackLength, skippedStages, stageIndex } from './jury-scenes';
 import { findScenario, JURY_SCENARIOS } from './jury-scripts';
+import { REPORT_SECTIONS } from './jury-mock-reviews';
 import { JuryResults } from './JuryResults';
 import { JuryStatic } from './JuryStatic';
 
@@ -138,11 +143,11 @@ describe('one stage at a time', () => {
     expect(deskAt(scenes, 10_000).reading.A).toBeTruthy();
     expect(Object.values(deskAt(scenes, 10_000).reading)).toContain(deskAt(scenes, 10_000).focus);
     expect(deskAt(scenes, 22_500).reading.A).toBeUndefined();
-    expect(seatStates(sceneAt(scenes, 22_500), 22_500, [], false).A.text).toBe('已交卷');
+    expect(statusWord(canvasAt(scenes, 22_500, DEFAULT_SEAT_NAMES), 'A')).toBe('已交卷');
     const failedScenes = buildScenes(findScenario('failed').arrivals);
     const end = playbackLength(failedScenes);
     expect(failedSeatsAt(failedScenes, end)).toEqual(['B']);
-    expect(seatStates(sceneAt(failedScenes, end), end, ['B'], false).B.tone).toBe('failed');
+    expect(statusWord(canvasAt(failedScenes, end, DEFAULT_SEAT_NAMES), 'B')).toBe('未计入');
     expect(failedScenes.some(scene => scene.kind === 'failed' && scene.failure.reviewer === 'B')).toBe(true);
   });
 });
@@ -318,16 +323,178 @@ describe('seat names and static rendering', () => {
     }
   });
 
-  it('shows the final opinion, reason and fix of each chapter, with a revised/original choice per changed chapter', () => {
+  it('opens with the short version only: how many chapters changed and at most three points, chapters on request', () => {
     const { detail } = findScenario('full');
     const html = renderToStaticMarkup(createElement(JuryResults, { detail, names: DEFAULT_SEAT_NAMES, onOpenRecord: () => {} }));
-    for (const section of choosable(detail.summary.sections)) expect(html).toContain(section.section);
-    expect(html.match(/采用修订版/g)?.length).toBe(choosable(detail.summary.sections).length);
-    expect(html).toContain('建议怎么改');
+    const changed = choosable(detail.summary.sections).length;
+    expect(html).toContain(`修订稿改了 ${changed} 章`);
+    const points = keyPoints(detail, REPORT_SECTIONS);
+    expect(points.length).toBeGreaterThan(0);
+    expect(points.length).toBeLessThanOrEqual(3);
+    for (const point of points) expect(html).toContain(point.text);
+    expect(html).not.toContain('采用修订版');
+    expect(html).toContain('逐章看');
     expect(html).toContain('其余 6 章评审团没有意见');
     const failedDetail = findScenario('failed').detail;
     const failed = renderToStaticMarkup(createElement(JuryResults, { detail: failedDetail, names: DEFAULT_SEAT_NAMES, onOpenRecord: () => {} }));
     expect(failed).toContain('修订稿没有生成成功');
     expect(failed).not.toContain('采用修订版');
+    expect(keyPoints(failedDetail, REPORT_SECTIONS)[0]?.text).toBeTruthy();
+  });
+
+  it('ranks debated rulings first among the key points, and cuts a chapter\'s reason to its first sentence', () => {
+    const { detail } = findScenario('full');
+    const adopted = detail.summary.sections.flatMap(item => item.rulings).filter(item => item.adopted);
+    const top = keyPoints(detail, REPORT_SECTIONS)[0];
+    expect(adopted.find(item => item.opinion === top.text)?.disputed).toBe(adopted.some(item => item.disputed));
+    expect(firstSentence('先这样。再那样。')).toBe('先这样。');
+    expect(firstSentence('只有一句')).toBe('只有一句');
+  });
+});
+
+describe('the canvas', () => {
+  const scenes = buildScenes(findScenario('full').arrivals);
+  const names = DEFAULT_SEAT_NAMES;
+
+  it('lights one thing at a time and says it in one short sentence that names no model', () => {
+    for (const scenario of JURY_SCENARIOS) {
+      const list = buildScenes(scenario.arrivals);
+      for (let clock = 0; clock < playbackLength(list); clock += 1000) {
+        const view = canvasAt(list, clock, resolveSeatNames(SAMPLE_PANEL));
+        expect(view.caption).not.toMatch(MODEL_NAMES);
+        expect(Array.from(view.caption).length).toBeLessThanOrEqual(64);
+        for (const seat of ['A', 'B', 'C', 'S'] as const) expect(view.columns[seat].length).toBeLessThanOrEqual(6);
+      }
+    }
+  });
+
+  it('says what each reviewer is doing now in the word under its mark, also while the second round reads', () => {
+    const second = scenes.find(scene => scene.kind === 'reading' && scene.round === 2);
+    if (second?.kind !== 'reading') throw new Error('expected a second reading round');
+    const view = canvasAt(scenes, second.start + 1, names);
+    for (const seat of ['A', 'B', 'C'] as const) {
+      expect(statusWord(view, seat)).toBe('在读');
+      expect(view.columns[seat].at(-1)?.key).toBe('read-2');
+      expect(view.columns[seat].some(card => card.key === 'read-1')).toBe(false);
+    }
+    expect(statusWord(canvasAt(scenes, second.end - 1, names), 'A')).toBe('已交卷');
+  });
+
+  it('threads each reviewer to the report while reading, and shows only the current issue in words', () => {
+    const reading = canvasAt(scenes, 10_000, names);
+    expect(reading.doc.state).toBe('reading');
+    expect(reading.next.state).toBe('none');
+    expect(reading.edges.every(edge => edge.from === 'doc')).toBe(true);
+    const critique = scenes.find(scene => scene.kind === 'critique');
+    if (critique?.kind !== 'critique') throw new Error('expected a critique');
+    const during = canvasAt(scenes, critique.end - 1, names);
+    const card = during.columns[critique.seat].find(item => item.kind === 'issues');
+    expect(card?.kind === 'issues' && card.shown).toBe(critique.issues.length);
+    expect(card?.kind === 'issues' && card.line).toBeTruthy();
+    expect(during.focus).toEqual([critique.seat]);
+    const after = canvasAt(scenes, critique.end + 1, names).columns[critique.seat].find(item => item.kind === 'issues');
+    expect(after?.kind === 'issues' && after.line).toBeNull();
+  });
+
+  it('draws a split between the two sides of a disagreement, and turns a stance when a reply changes the verdict', () => {
+    const divergence = scenes.find(scene => scene.kind === 'divergence');
+    if (divergence?.kind !== 'divergence') throw new Error('expected a divergence');
+    const view = canvasAt(scenes, divergence.start + 1, names);
+    const { keep, change } = divergence.split;
+    expect(view.edges).toHaveLength(keep.length * change.length);
+    expect(view.edges.every(edge => edge.tone === 'split' && keep.includes(edge.from as never) && change.includes(edge.to as never))).toBe(true);
+    const splits = scenes.flatMap(scene => (scene.kind === 'divergence' ? [scene.split] : []));
+    const sideOf = (seat: string, decision: string) => (splits.find(item => item.decision === decision)?.keep.includes(seat as never) ? 'keep' : 'change');
+    const turn = scenes.find(scene => scene.kind === 'response' && scene.verdictNow !== null
+      && sideOf(scene.response.reviewer, scene.response.decision) !== scene.verdictNow);
+    if (turn?.kind !== 'response') throw new Error('expected a reply that changes a verdict');
+    const card = canvasAt(scenes, turn.end - 1, names).columns[turn.response.reviewer].find(item => item.kind === 'stances');
+    expect(card?.kind === 'stances' && card.items.find(item => item.decision === turn.response.decision)?.turned).toBe(true);
+  });
+
+  it('threads the summary to each result only once it writes, then writes the revision as a new report under it', () => {
+    const end = canvasAt(scenes, playbackLength(scenes) - 1, names);
+    const rulings = events('full').filter(event => event.type === 'adjudication');
+    const card = end.columns.S.find(item => item.kind === 'rulings');
+    expect(card?.kind === 'rulings' && card.total).toBe(rulings.length);
+    expect(card?.kind === 'rulings' && card.adopted).toBe(rulings.filter(event => event.type === 'adjudication' && event.adopted).length);
+    expect(end.next).toEqual({ state: 'revised', changed: choosable(findScenario('full').detail.summary.sections).length });
+    expect(end.doc.state).toBe('waiting');
+    expect(end.edges).toEqual([{ from: 'S', to: 'next', tone: 'live' }]);
+    const writing = scenes.find(scene => scene.kind === 'writing');
+    if (!writing) throw new Error('expected a writing scene');
+    for (let clock = 0; clock < writing.start; clock += 500) {
+      const before = canvasAt(scenes, clock, names);
+      expect(before.joined).toEqual([]);
+      expect(before.edges.some(edge => edge.from === 'S' || edge.to === 'S')).toBe(false);
+    }
+    expect(canvasAt(scenes, writing.start + 1, names).joined).toEqual(['A']);
+    const joined = canvasAt(scenes, writing.end - 1, names);
+    expect(joined.joined).toEqual(['A', 'B', 'C']);
+    expect(joined.edges.map(edge => `${edge.from}>${edge.to}`)).toEqual(['A>S', 'B>S', 'C>S']);
+    expect(end.joined).toEqual(['A', 'B', 'C']);
+    const failedEnd = canvasAt(buildScenes(findScenario('failed').arrivals), Infinity, names);
+    expect(failedEnd.joined).toEqual(['A', 'C']);
+    const failed = buildScenes(findScenario('failed').arrivals);
+    const unchanged = canvasAt(failed, playbackLength(failed) - 1, names);
+    expect(unchanged.next.state).toBe('unchanged');
+    expect(unchanged.edges).toEqual([]);
+    const consensus = buildScenes(findScenario('consensus').arrivals);
+    expect(consensus.some(scene => scene.kind === 'response')).toBe(false);
+  });
+});
+
+describe('the canvas for embedding', () => {
+  const played = (list: ReturnType<typeof briefScenes>) => list.filter(scene => scene.end > scene.start);
+
+  it('plays only the key moments in the short version, back to back from zero, and ends where the full one ends', () => {
+    for (const scenario of JURY_SCENARIOS) {
+      const full = buildScenes(scenario.arrivals);
+      const brief = briefScenes(full);
+      expect(brief[0]?.start).toBe(0);
+      brief.forEach((scene, index) => {
+        if (index > 0) expect(scene.start).toBe(brief[index - 1].end);
+      });
+      expect([...new Set(played(brief).map(scene => scene.stage))]).toEqual(['seated', 'reading', 'divergence', 'ruling', 'revision']);
+      expect(played(brief).filter(scene => scene.kind === 'divergence' || scene.kind === 'agreed')).toHaveLength(1);
+      expect(played(brief).filter(scene => scene.kind === 'ruling').length).toBeLessThanOrEqual(3);
+      expect(brief.filter(scene => scene.kind === 'ruling')).toHaveLength(full.filter(scene => scene.kind === 'ruling').length);
+      expect(playbackLength(brief)).toBeLessThan(playbackLength(full) / 3);
+      const end = canvasAt(brief, playbackLength(brief) - 1, DEFAULT_SEAT_NAMES);
+      const fullEnd = canvasAt(full, playbackLength(full) - 1, DEFAULT_SEAT_NAMES);
+      expect(end.next).toEqual(fullEnd.next);
+      expect(end.joined).toEqual(fullEnd.joined);
+      for (const seat of ['A', 'B', 'C', 'S'] as const) expect(end.columns[seat].at(-1)).toEqual(fullEnd.columns[seat].at(-1));
+      for (let clock = 0; clock < playbackLength(brief); clock += 500) {
+        const view = canvasAt(brief, clock, DEFAULT_SEAT_NAMES);
+        if (view.stage !== 'reading') expect(Object.values(view.columns).flat().some(card => card.kind === 'read' && card.state === 'reading')).toBe(false);
+      }
+    }
+  });
+
+  it('freezes at the given progress, plays the passed-in case, and names no model', () => {
+    const report = { title: '定位报告：示例人物', excerpt: '开头两行。', chapters: 9, revisedExcerpt: '修订后的开头。' };
+    const data = caseFromEvents(report, events('full'));
+    const at = (progress: number) => renderToStaticMarkup(createElement(JuryCanvasPlayer, {
+      data, progress, brief: true, names: resolveSeatNames(SAMPLE_PANEL),
+    }));
+    const start = at(0);
+    const end = at(1);
+    expect(start).toContain('定位报告：示例人物');
+    expect(start).toContain('9 章');
+    expect(start).not.toContain('修订后的定位报告：示例人物');
+    expect(end).toContain('修订后的定位报告：示例人物');
+    expect(end).toContain('修订后的开头。');
+    expect(end).toContain('专门挑刺的资深短视频运营与商业变现老顾问');
+    expect(at(-1)).toBe(start);
+    expect(at(2)).toBe(end);
+    expect(end).not.toMatch(MODEL_NAMES);
+  });
+
+  it('is plain content without onPick, and clickable people and cards with it', () => {
+    const plain = renderToStaticMarkup(createElement(JuryCanvasPlayer, { progress: 0.5, brief: true }));
+    expect(plain).not.toContain('<button');
+    const clickable = renderToStaticMarkup(createElement(JuryCanvasPlayer, { progress: 0.5, brief: true, onPick: () => {} }));
+    expect(clickable.match(/<button/g)?.length).toBeGreaterThanOrEqual(4);
   });
 });

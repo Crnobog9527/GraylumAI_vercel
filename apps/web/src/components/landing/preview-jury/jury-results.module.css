@@ -1,8 +1,8 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-/* The result page: decisions first, then chapter by chapter with the user's choice. Calm, dense, readable. */
+/* The result page, read in steps: the short version, then one chapter at a time, each one line until opened. */
 .results { display: grid; gap: 20px; animation: rise .6s cubic-bezier(.16, 1, .3, 1) both; }
 .top {
-  display: grid; gap: 10px; padding: 22px clamp(16px, 3vw, 28px); border: 1px solid var(--j-rule); border-top: 3px solid var(--j-ink);
+  display: grid; gap: 14px; padding: 24px clamp(16px, 3vw, 32px); border: 1px solid var(--j-ink-soft);
   border-radius: 8px; background: var(--j-paper); color: var(--j-ink);
 }
 .top h2 { margin: 0; font-size: clamp(20px, 2.4vw, 28px); font-weight: 600; line-height: 1.3; text-wrap: balance; }
@@ -35,7 +35,7 @@
 }
 .chapterChanged { border-color: var(--j-ink-soft); box-shadow: inset 4px 0 0 var(--j-bronze); }
 .chapterHead { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
-.chapterHead h3 { margin: 0 4px 0 0; font-size: 17px; font-weight: 600; }
+.chapterHead h3 { margin: 0 4px 0 0; font-size: 18px; font-weight: 600; }
 .changeTag { padding: 0 9px; border-radius: 999px; font-size: 12px; font-weight: 700; }
 .changeTag[data-changed='true'] { background: var(--j-bronze-soft); color: var(--j-bronze); }
 .changeTag[data-changed='false'] { background: var(--j-desk); color: var(--j-muted); }
@@ -121,6 +121,37 @@
 .done { display: flex; align-items: flex-start; gap: 10px; padding: 14px 16px; border-radius: 8px; background: var(--j-desk); color: var(--j-ink); }
 .done p { margin: 0; font-size: 15px; font-weight: 700; }
 
+/* The short version: the 1–3 points that matter most, numbered because they are ranked. */
+.points { display: grid; gap: 8px; }
+.points h3 { margin: 0; color: var(--j-muted); font-size: 14px; font-weight: 600; }
+.points ol { display: grid; gap: 10px; margin: 0; padding: 0; list-style: none; counter-reset: point; }
+.points li { display: grid; grid-template-columns: 28px minmax(0, 1fr); column-gap: 10px; counter-increment: point; }
+.points li::before {
+  content: counter(point); grid-row: span 2; display: grid; place-items: center; width: 28px; height: 28px; margin-top: 1px;
+  border-radius: 50%; background: var(--j-ink); color: var(--j-paper); font-size: 14px; font-weight: 700;
+}
+.points p { margin: 0; color: var(--j-ink); font-size: 17px; font-weight: 600; line-height: 1.75; max-width: 40em; }
+.points span { color: var(--j-muted); font-size: 13px; }
+
+.fold { border: 1px solid var(--j-rule); border-radius: 8px; background: var(--j-paper); }
+.fold > summary { padding: 14px 18px; font-size: 16px; font-weight: 600; cursor: pointer; }
+.fold > summary:focus-visible { outline: 2px solid var(--j-ink); outline-offset: -2px; border-radius: 8px; }
+.fold > .decisions { padding: 0 14px 14px; }
+
+.gistBlock { display: grid; gap: 2px; }
+.gist { margin: 0; max-width: 42em; color: var(--j-ink); font-size: 17px; font-weight: 600; line-height: 1.75; }
+.gistWhy { margin: 0; max-width: 46em; color: var(--j-body); font-size: 17px; line-height: 1.75; }
+.inFold { padding: 0 14px 12px; }
+
+.reveal { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; padding: 4px 0; }
+.reveal .primary { display: inline-flex; align-items: center; gap: 6px; min-height: 44px; padding: 0 20px; font-size: 15px; }
+.textButton {
+  padding: 0; border: 0; background: none; color: var(--j-muted); font: inherit; font-size: 14px; text-decoration: underline;
+  text-underline-offset: 3px; cursor: pointer;
+}
+.textButton:hover { color: var(--j-ink); }
+.chapters > .chapter { animation: rise .5s cubic-bezier(.16, 1, .3, 1) both; }
+
 @keyframes rise { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: none; } }
 
 @media (max-width: 1023px) { .decisions { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
@@ -142,4 +173,4 @@
   .diff li { grid-template-columns: minmax(0, 1fr); }
   .reviewActions button { flex: 1 1 100%; }
 }
-@media (prefers-reduced-motion: reduce) { .results { animation: none; } }
+@media (prefers-reduced-motion: reduce) { .results, .chapters > .chapter { animation: none; } }

@@ -21,10 +21,10 @@ export function usePrefersReducedMotion(): boolean {
  * motion) and follows wall time even when a background tab throttles the timer, so after a return the replay
  * shows what arrived meanwhile instead of lagging behind; pausing is the only thing that stops it.
  */
-export function useJuryPlayback(lengthMs: number, enabled: boolean) {
+export function useJuryPlayback(lengthMs: number, enabled: boolean, initialSpeed = 1) {
   const [clock, setClock] = useState(0);
   const [playing, setPlaying] = useState(true);
-  const [speed, setSpeed] = useState(1);
+  const [speed, setSpeed] = useState(initialSpeed);
   const last = useRef<number | null>(null);
   const finished = clock >= lengthMs;
 

@@ -31,6 +31,7 @@ import { dataUseRouter } from './routers/dataUse';
 import { publishMonitorRouter } from './routers/publishMonitor';
 import { adminStaleRoundsRouter } from './routers/adminStaleRounds';
 import { fusionSettingsRouter } from './routers/fusionSettings';
+import { fusionReviewRouter } from './routers/fusionReview';
 
 /**
  * 主路由器
@@ -50,6 +51,7 @@ export const appRouter = router({
   mentorBudget: mentorBudgetRouter,
   reportModel: reportModelRouter,
   fusionSettings: fusionSettingsRouter,
+  fusionReview: fusionReviewRouter,
   socialMediaFlag: socialMediaFlagRouter,
   runtimeRateLimits: runtimeRateLimitsRouter,
   modelIdentity: modelIdentityRouter,

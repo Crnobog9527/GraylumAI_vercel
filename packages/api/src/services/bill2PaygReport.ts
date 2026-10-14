@@ -16,6 +16,10 @@ export type PaygReportFields = {
   platform_margin_cache_read_usd?: string | null;
   platform_margin_cache_write_usd?: string | null;
   platform_margin_other_usd?: string | null;
+  /** 0255 (RESEARCH-TOOLS): tool calls carry their supplier cost state apart from the user settlement. */
+  call_kind?: string | null;
+  supplier_cost_state?: string | null;
+  supplier_cost_bound_usd?: string | null;
 };
 type Row = PaygReportFields & {
   call_id: string; provider: string; model: string; purpose: string | null;
@@ -42,6 +46,8 @@ const credits = (value: number | string | null | undefined): number => {
   if (!Number.isSafeInteger(n) || n < 0) throw new Error('Invalid credits');
   return n;
 };
+/** Tool outcomes that settle at 0 for the user (0255): the supplier cost is confirmed or pending. */
+const TOOL_ZERO_SOURCES = new Set(['tool_no_usage', 'tool_failed', 'tool_failed_charged', 'tool_unknown']);
 export const isPaygContract = (version: PaygReportFields['contract_version']): boolean =>
   version === 'bill2.v2' || version === 'v2' || version === '2' || version === 2;
 type Rational = { n: bigint; d: bigint };
@@ -74,12 +80,16 @@ function project(row: Row) {
   const cap = credits(row.platform_absorbed_cap_credits);
   const bound = credits(row.platform_absorbed_bound_credits);
   if (charged + cap + bound !== theoretical) throw new Error('Credit conservation failed');
-  if (row.nominal_source !== 'nominal' && row.nominal_source !== 'actual_fallback') throw new Error('Unknown nominal source');
+  // tool_usage: the user nominal is the confirmed usage cost, so the margin is zero and has no cache split.
+  if (row.nominal_source !== 'nominal' && row.nominal_source !== 'actual_fallback' && row.nominal_source !== 'tool_usage') {
+    throw new Error('Unknown nominal source');
+  }
+  if (row.nominal_source === 'tool_usage' && (row.supplier_cost_state !== 'confirmed' || n !== c)) throw new Error('Invalid tool settlement');
   const capEquivalent = equivalent(cap, row);
   const boundEquivalent = equivalent(bound, row);
   const fallback = row.nominal_source === 'actual_fallback';
   const pieces = [row.platform_margin_cache_read_usd, row.platform_margin_cache_write_usd, row.platform_margin_other_usd];
-  const split = !fallback && pieces.every(v => v !== null && v !== undefined) ? pieces.map(amount) : null;
+  const split = !fallback && row.nominal_source !== 'tool_usage' && pieces.every(v => v !== null && v !== undefined) ? pieces.map(amount) : null;
   // The write-premium column is signed: a cost increase is a negative margin component.
   if (split && split.reduce((sum, v) => sum + v, 0n) !== n - c) throw new Error('Margin conservation failed');
   return { callId: row.call_id, provider: row.provider, model: row.model, purpose: row.purpose ?? 'unknown',
@@ -102,6 +112,10 @@ export function buildPaygReport(rows: readonly Row[]) {
     callId: string; provider: string; model: string; officialCostUsd: string | null; providerCostKnown: boolean;
     nominalCostUsd: string; chargedCredits: number; netChargedCredits: number;
   }> = [];
+  const releasedToolCalls: Array<{
+    callId: string; provider: string; model: string; nominalSource: string; officialCostUsd: string | null;
+    providerCostKnown: boolean; supplierCostBoundUsd: string | null;
+  }> = [];
   let invalidCalls = 0;
   const seen = new Set<string>();
   for (const row of rows) {
@@ -122,6 +136,25 @@ export function buildPaygReport(rows: readonly Row[]) {
           officialCostUsd: cost === null ? null : text(cost), providerCostKnown: cost !== null,
           nominalCostUsd: '0', chargedCredits: 0, netChargedCredits: 0 });
         else releasedUnsentCalls += 1;
+      } catch { invalidCalls += 1; }
+      continue;
+    }
+    if (row.nominal_source && TOOL_ZERO_SOURCES.has(row.nominal_source)) {
+      try {
+        const pending = row.supplier_cost_state === 'pending';
+        const cost = row.selected_cost_usd === null ? null : amount(row.selected_cost_usd);
+        const bound = row.supplier_cost_bound_usd === null || row.supplier_cost_bound_usd === undefined
+          ? null : amount(row.supplier_cost_bound_usd);
+        if (!row.settled_at || amount(row.nominal_cost_usd) !== 0n || credits(row.charged_delta) !== 0
+          || credits(row.theoretical_delta) !== 0 || credits(row.compensation_credits ?? 0) !== 0
+          || credits(row.platform_absorbed_cap_credits) !== 0 || credits(row.platform_absorbed_bound_credits) !== 0
+          || (pending ? cost !== null || bound === null || bound <= 0n
+            : row.supplier_cost_state !== 'confirmed' || cost === null || cost < 0n)) {
+          throw new Error('Invalid tool evidence');
+        }
+        releasedToolCalls.push({ callId: row.call_id, provider: row.provider, model: row.model,
+          nominalSource: row.nominal_source, officialCostUsd: cost === null ? null : text(cost),
+          providerCostKnown: cost !== null, supplierCostBoundUsd: bound === null ? null : text(bound) });
       } catch { invalidCalls += 1; }
       continue;
     }
@@ -166,7 +199,12 @@ export function buildPaygReport(rows: readonly Row[]) {
     }
     groups.set(key, group);
   }
-  return { calls, unsettledCalls, releasedUnsentCalls, releasedFailureCalls, invalidCalls, complete: invalidCalls === 0,
+  // Plan §3.4: confirmed supplier costs only; pending ones are counted with their bounds, never as costs.
+  const pendingTools = releasedToolCalls.filter(call => !call.providerCostKnown);
+  const pendingSupplierCost = { calls: pendingTools.length,
+    boundUsd: text(pendingTools.reduce((sum, call) => sum + amount(call.supplierCostBoundUsd), 0n)) };
+  return { calls, unsettledCalls, releasedUnsentCalls, releasedFailureCalls, releasedToolCalls, pendingSupplierCost,
+    invalidCalls, complete: invalidCalls === 0,
     groups: [...groups.values()].map(({
       c, n, fallbackMargin, nominalMargin, capEquivalent, boundEquivalent, readMargin, writeMargin, otherMargin, ...group
     }) => ({ ...group,

@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { trpc } from '@/trpc/client';
 import {
-  Save, RefreshCw, Settings, CreditCard, Gift, Users, Sliders, Crown,
+  Save, RefreshCw, Settings, CreditCard, Gift, Sliders, Crown,
   AlertTriangle, MessageSquare
 } from 'lucide-react';
 import { Button } from "@/components/ui/button";
@@ -58,18 +58,6 @@ const defaultSettings: Record<string, { value: string; type: 'string' | 'number'
   checkin_day4: { value: '20', type: 'number', label: '签到第4天', description: '第4天签到奖励积分' },
   checkin_day5: { value: '25', type: 'number', label: '签到第5天', description: '第5天签到奖励积分（之后重置）' },
   checkin_monthly_bonus: { value: '50', type: 'number', label: '月度全勤奖', description: '当月签到满30天额外奖励' },
-
-  // Referral / Invite (10项)
-  invite_inviter_reward: { value: '50', type: 'number', label: '邀请人奖励', description: '成功邀请1人注册，邀请人获得的积分' },
-  invite_invitee_reward: { value: '30', type: 'number', label: '被邀请人奖励', description: '被邀请人注册额外获得的积分' },
-  invite_rebate_percent: { value: '5', type: 'number', label: '消费返利比例%', description: '被邀请人30天内消费，邀请人获得的返利比例' },
-  invite_binding_days: { value: '30', type: 'number', label: '双向绑定期(天)', description: '被邀请人消费返利的有效期' },
-  invite_daily_reward_limit: { value: '1000', type: 'number', label: '每日奖励上限', description: '单用户每日邀请奖励积分上限' },
-  invite_monthly_count_limit: { value: '50', type: 'number', label: '每月邀请上限', description: '单用户每月有效邀请人数上限' },
-  invite_total_reward_limit: { value: '50000', type: 'number', label: '总奖励封顶', description: '单用户邀请奖励总积分上限' },
-  invite_same_ip_hour_limit: { value: '3', type: 'number', label: '同IP小时限制', description: '同一IP每小时最多注册账号数' },
-  invite_same_ip_day_limit: { value: '5', type: 'number', label: '同IP日限制', description: '同一IP每天最多注册账号数' },
-  invite_risk_auto_reject: { value: 'true', type: 'boolean', label: '高风险自动拒绝', description: '高风险邀请自动拒绝发放奖励' },
 };
 
 // 设置分组
@@ -77,7 +65,6 @@ const settingGroups = {
   general: ['site_name', 'support_email', 'maintenance_mode'],
   billing: ['new_user_credits', 'billing_credits_per_usd', 'billing_token_price_multiplier'],
   checkin: ['checkin_day1', 'checkin_day2', 'checkin_day3', 'checkin_day4', 'checkin_day5', 'checkin_monthly_bonus'],
-  referral: ['invite_inviter_reward', 'invite_invitee_reward', 'invite_rebate_percent', 'invite_binding_days', 'invite_daily_reward_limit', 'invite_monthly_count_limit', 'invite_total_reward_limit', 'invite_same_ip_hour_limit', 'invite_same_ip_day_limit', 'invite_risk_auto_reject'],
   experience: ['home_show_onboarding', 'home_show_featured_modules'],
   features: ['primary_model_id', 'v3_summary_model_id', 'v3_summary_max_tokens', 'search_surcharge_credits', 'max_input_characters'],
 };
@@ -284,10 +271,6 @@ export default function AdminSettingsPage() {
             <Gift className="h-4 w-4" />
             签到福利
           </TabsTrigger>
-          <TabsTrigger value="referral" className="shrink-0 gap-2 data-[state=active]:bg-[var(--color-primary)] data-[state=active]:text-black">
-            <Users className="h-4 w-4" />
-            邀请奖励
-          </TabsTrigger>
           <TabsTrigger value="experience" className="shrink-0 gap-2 data-[state=active]:bg-[var(--color-primary)] data-[state=active]:text-black">
             <MessageSquare className="h-4 w-4" />
             页面体验
@@ -391,32 +374,6 @@ export default function AdminSettingsPage() {
             </CardHeader>
             <CardContent className="space-y-2">
               {renderSettingGroup(settingGroups.checkin)}
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        {/* Referral Tab */}
-        <TabsContent value="referral">
-          <Card data-testid="admin-settings-referral-section" style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
-            <CardHeader>
-              <CardTitle style={{ color: 'var(--text-primary)' }}>邀请奖励设置</CardTitle>
-              <CardDescription style={{ color: 'var(--text-tertiary)' }}>
-                配置邀请注册奖励、消费返利和防刷限制
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div
-                className="p-4 rounded-lg mb-4"
-                style={{ background: 'var(--success-bg)', border: '1px solid var(--success)' }}
-              >
-                <p className="text-sm" style={{ color: 'var(--success)' }}>
-                  <strong>邀请规则：</strong>用户通过邀请码邀请好友注册，双方都能获得积分奖励
-                </p>
-                <p className="text-xs mt-1" style={{ color: 'var(--success)', opacity: 0.8 }}>
-                  被邀请人在绑定期内的消费，邀请人可获得一定比例返利
-                </p>
-              </div>
-              {renderSettingGroup(settingGroups.referral)}
             </CardContent>
           </Card>
         </TabsContent>
