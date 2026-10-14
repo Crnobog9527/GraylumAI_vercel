@@ -96,7 +96,7 @@ export function PlanCardsJ({ pricing, showResult, founderSeats, extras, sample }
 function Price({ quote, founder }: { quote: CardQuote; founder: number | null }) {
   return (
     <div className={styles.priceBlock}>
-      {founder !== null ? <span className={styles.planTag}>{J_FOUNDER_BAR.goldTag}</span> : quote.tag ? <span className={styles.planTag}>{quote.tag}</span> : null}
+      {founder !== null || quote.tag ? <span className={styles.planTag}>{founder !== null ? J_FOUNDER_BAR.goldTag : quote.tag}</span> : null}
       <p className={styles.planPrice}>{quote.strike ? <s>{quote.strike}</s> : null}<b>{quote.price}</b><span>{quote.per}</span></p>
       {quote.saving || founder !== null ? (
         <p className={styles.saving}>{[quote.saving, founder !== null ? J_FOUNDER_BAR.seatsLeft(founder) : null].filter(Boolean).join(' · ')}</p>
