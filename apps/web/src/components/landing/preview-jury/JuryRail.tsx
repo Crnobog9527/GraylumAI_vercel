@@ -27,7 +27,7 @@ export function JuryRail({ stage, skipped, ended, onJump }: {
               <button type="button" className={styles.railStop} disabled={!onJump || skip}
                 onClick={() => onJump?.(item.key)} title={`跳到「${item.label}」（原型）`}>
                 <span className={styles.railDot} aria-hidden="true" />
-                <span className={styles.railLabel}>{item.label}{skip ? <small>没有分歧，跳过</small> : null}</span>
+                <span className={styles.railLabel}>{item.label}{skip ? <small title="没有分歧，跳过">跳过</small> : null}</span>
               </button>
             </li>
           );

@@ -28,8 +28,20 @@ const valid = (): ResearchToolsConfig => ({
   recentGrowth: { maxFirstPostAgeDays: 90, minViewsToFollowers: '1' },
 });
 
-function dbReturning(value: unknown, error: unknown = null): SupabaseClient {
-  const chain = { select: () => chain, eq: () => chain, maybeSingle: async () => ({ data: value === undefined ? null : { value }, error }) };
+/** `revisionText` is what PostgreSQL's value->>'revision' would return (defaults to the JSON value as text). */
+function dbReturning(value: unknown, error: unknown = null, revisionText?: string | null): SupabaseClient {
+  let columns = '';
+  const pgText = () => {
+    if (revisionText !== undefined) return revisionText;
+    const raw = (typeof value === 'string' ? (() => { try { return JSON.parse(value); } catch { return null; } })() : value) as { revision?: unknown } | null;
+    const r = raw?.revision;
+    return r === undefined || r === null ? null : typeof r === 'string' ? r : JSON.stringify(r);
+  };
+  const chain = {
+    select: (c: string) => { columns = c; return chain; }, eq: () => chain,
+    maybeSingle: async () => ({ error, data: value === undefined ? null
+      : columns.includes('revision:') ? { value, revision: pgText() } : { value } }),
+  };
   return { from: () => chain } as unknown as SupabaseClient;
 }
 
@@ -69,11 +81,23 @@ describe('research_tools_config', () => {
   });
 
   it('fails closed when the setting is absent, unreadable or invalid', async () => {
-    expect(await readResearchToolsConfig(dbReturning(undefined))).toEqual({ config: DISABLED_RESEARCH_TOOLS, source: 'default' });
+    expect(await readResearchToolsConfig(dbReturning(undefined)))
+      .toEqual({ config: DISABLED_RESEARCH_TOOLS, source: 'default', revision: 0, updatedBy: null, updatedAt: null });
     expect(await readResearchToolsConfig(dbReturning(null, { message: 'down' }))).toMatchObject({ source: 'invalid', config: { enabled: false } });
     expect(await readResearchToolsConfig(dbReturning({ version: 2 }))).toMatchObject({ source: 'invalid', config: { enabled: false } });
     expect(await readResearchToolsConfig(dbReturning('{broken'))).toMatchObject({ source: 'invalid' });
-    expect(await readResearchToolsConfig(dbReturning(JSON.stringify(valid())))).toMatchObject({ source: 'configured', config: { enabled: true } });
+    const stored = { ...valid(), revision: 3, updatedBy: attested.by, updatedAt: '2026-10-14T00:00:00.000000Z' };
+    expect(await readResearchToolsConfig(dbReturning(JSON.stringify(stored))))
+      .toMatchObject({ source: 'configured', revision: 3, updatedBy: attested.by, config: { enabled: true } });
+    // A value without the writer's revision/author was not written by 0254: fail closed, keep its revision visible.
+    expect(await readResearchToolsConfig(dbReturning(valid()))).toMatchObject({ source: 'invalid', config: { enabled: false } });
+    expect(await readResearchToolsConfig(dbReturning({ ...stored, enabled: 'yes' }))).toMatchObject({ source: 'invalid', revision: 3 });
+    // Same revision rule as the 0254 SQL, so a repair save never conflicts.
+    for (const [revision, expected] of [['01', 0], ['1e3', 0], [true, 0], [1.5, 0], ['7', 7], [-1, 0]] as const) {
+      expect((await readResearchToolsConfig(dbReturning({ ...stored, enabled: 'yes', revision }))).revision).toBe(expected);
+    }
+    // JSON decoding turns a stored 1.0 into 1, but PostgreSQL sees "1.0" and uses 0: follow PostgreSQL.
+    expect((await readResearchToolsConfig(dbReturning({ ...stored, enabled: 'yes', revision: 1 }, null, '1.0'))).revision).toBe(0);
   });
 });
 
