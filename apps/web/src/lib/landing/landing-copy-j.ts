@@ -94,23 +94,12 @@ export const J_FAQ_REWORDS: readonly (readonly [string, string])[] = [
 ];
 
 /**
- * NEW (Owner 2026-10-15: "推他一把"): the close, written from what the visitor wants after the whole page — a direction
- * settled today, without going it alone. Three versions for the Owner to choose from; the page shows `versions[0]`.
- * No exaggeration, no promise of income, and the AI coach is never "它".
+ * OWNER (2026-10-15, "结尾文案用 A"): the close — title, line, button and the note under it. Replaces the three drafts;
+ * never "它", no credit amount.
  */
 export const J_FINAL = {
-  versions: [
-    {
-      title: '今天就把你的方向定下来',
-      line: '和 AI 教练聊一次，把你适合做什么、给谁看、第一周发哪几条理清楚。先免费试，觉得有用再开通。',
-    },
-    {
-      title: '下班后的一小时，从今天起不再自己摸索',
-      line: 'AI 教练陪你把定位、选题、发布和复盘一步步做下来，你只管拍。',
-    },
-    {
-      title: '别再一个人对着空白页想发什么',
-      line: '先免费聊一次：AI 教练会问清你的情况，告诉你适合做什么，以及第一周发哪几条、为什么。',
-    },
-  ],
+  title: '还没想好做什么？正好从这里开始',
+  line: '不用先想清楚，也不用先有作品。把你的工作、能投入的时间和一点想法说给 AI 教练，AI 教练帮你理出适合你的方向，还有第一周可以先发哪几条。',
+  cta: '免费开始聊',
+  note: '先免费试，觉得有用再开通。',
 } as const;

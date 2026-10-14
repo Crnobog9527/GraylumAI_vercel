@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 
 import sitemap from '@/app/sitemap';
 import { metadata } from '@/app/landing/preview/j/page';
-import { FINAL_ACTION, H_COMPARE, HERO, HERO_H, PRICE_COMPARE, RISK_REVERSAL, VOICE_WALL } from '@/lib/landing/landing-copy';
+import { H_COMPARE, HERO, HERO_H, PRICE_COMPARE, RISK_REVERSAL, VOICE_WALL } from '@/lib/landing/landing-copy';
 import * as copyJ from '@/lib/landing/landing-copy-j';
 import { J_FAQ_REWORDS, J_FINAL, J_HERO_PROMISE, J_ID_PLACEHOLDER, J_NOTE_HEADS, J_PRICE, J_TAKEOVER, noteSource } from '@/lib/landing/landing-copy-j';
 import { LANDING_FEATURES, type LandingFlags } from '@/lib/landing/landing-flags';
@@ -174,11 +174,7 @@ describe('style sample J, the later sections', () => {
   it('closes with one push from the visitor\'s side, the button and the same note as the first screen', () => {
     const { html } = render();
     const close = html.slice(html.indexOf('id="final-title"'));
-    expect(close).toContain(J_FINAL.versions[0].title);
-    expect(close).toContain(J_FINAL.versions[0].line);
-    expect(close).toContain(FINAL_ACTION.cta);
-    expect(close).toContain(HERO_H.ctaNote);
-    expect(J_FINAL.versions.length).toBeGreaterThanOrEqual(2);
+    for (const text of [J_FINAL.title, J_FINAL.line, J_FINAL.cta, J_FINAL.note]) expect(close).toContain(text);
     expect(JSON.stringify(J_FINAL)).not.toMatch(/它|保证|一定能|稳赚|月入/);
   });
 });

@@ -1,7 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import Link from 'next/link';
 import { ArrowRight, Plus } from 'lucide-react';
-import { FINAL_ACTION, HERO_H } from '@/lib/landing/landing-copy';
 import { J_FAQ_REWORDS, J_FINAL } from '@/lib/landing/landing-copy-j';
 import { LANDING_FAQ_TITLE, type LandingFaqGroup } from '@/lib/landing/landing-faq';
 import { SIGNUP_CTA_HREF } from '@/lib/seo/content/shared';
@@ -43,15 +42,14 @@ export function FaqJ({ groups }: { groups: readonly LandingFaqGroup[] }) {
  * button, the same note as the first screen. The founder offer is no longer on this page.
  */
 export function FinalJ() {
-  const final = J_FINAL.versions[0];
   return (
     <section aria-labelledby="final-title" className={page.section} data-zone="final">
       <div className={page.wrap}>
         <div className={styles.final}>
-          <h2 id="final-title" className={page.display}>{final.title}</h2>
-          <p className={styles.finalLine}>{final.line}</p>
-          <Link href={SIGNUP_CTA_HREF} className={page.pill}>{FINAL_ACTION.cta}<ArrowRight size={18} aria-hidden="true" /></Link>
-          <p className={styles.finalNote}>{HERO_H.ctaNote}</p>
+          <h2 id="final-title" className={page.display}>{J_FINAL.title}</h2>
+          <p className={styles.finalLine}>{J_FINAL.line}</p>
+          <Link href={SIGNUP_CTA_HREF} className={page.pill}>{J_FINAL.cta}<ArrowRight size={18} aria-hidden="true" /></Link>
+          <p className={styles.finalNote}>{J_FINAL.note}</p>
         </div>
       </div>
     </section>
