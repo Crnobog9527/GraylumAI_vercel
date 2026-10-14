@@ -141,6 +141,8 @@ export async function runFusionReview({db,Client,connectionString,report}) {
     assert.equal((await service(db,'fusion_review_advance',f.actor,winner,{round:1,phase:'review',attempt:1},to)).state,'completed');
     await assert.rejects(service(db,'fusion_review_advance',f.actor,winner,{round:1,phase:'review',attempt:1},
       {state:'incomplete',outcome:{kind:'no_opinions'}}),/FUSION_REVIEW_ENDED/);
+    await assert.rejects(service(db,'fusion_review_advance',f.actor,winner,{round:1,phase:'review',attempt:1},
+      {...to,revisionId:randomUUID()}),/FUSION_REVIEW_ENDED/,'a replay naming another revision is refused');
   } finally { await Promise.all(clients.map(c=>c.end())); }
   report.checks.push('two concurrent starts for one user create one review; an end state is idempotent and final');
 

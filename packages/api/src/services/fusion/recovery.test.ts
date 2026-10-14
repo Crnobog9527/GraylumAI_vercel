@@ -40,6 +40,17 @@ describe('Fusion daily recovery', () => {
     const late = admin([]);
     await recoverFusionFinancials(late.db, { now: () => now, timeLimitMs: 4_000, budget: createRuntimeBudget() });
     expect(late.calls).not.toContain('fusion_review_pause_idle:');
+    // A backlog stops 10 s before the limit, so the pause keeps its own window.
+    let clock = now;
+    const busy = admin(Array.from({ length: 12 }, (_, i) => item(200 + i, true, -60)));
+    const original = (busy.db as unknown as { rpc: (n: string, a: Record<string, unknown>) => unknown }).rpc.bind(busy.db);
+    (busy.db as unknown as { rpc: (n: string, a: Record<string, unknown>) => unknown }).rpc = (n, a) => {
+      if (n === 'bill2_finalize') clock += 4_000; // within the 5 s per-item assumption
+      return original(n, a);
+    };
+    await recoverFusionFinancials(busy.db, { now: () => clock, timeLimitMs: 40_000, budget: createRuntimeBudget() });
+    expect(busy.calls).toContain('fusion_review_pause_idle:');
+    expect(busy.calls.filter(c => c.startsWith('bill2_finalize')).length).toBeLessThan(12);
   });
   it('collects expired undispatched calls behind a long backlog of dispatched ones', async () => {
     const backlog = Array.from({ length: 30 }, (_, i) => item(100 + i, true, -60));

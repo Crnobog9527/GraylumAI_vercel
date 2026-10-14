@@ -195,7 +195,8 @@ BEGIN
   SELECT * INTO rv FROM fusion_reviews WHERE id=p_review_id AND actor_id=p_actor_id FOR UPDATE;
   IF rv.id IS NULL THEN RAISE EXCEPTION 'FUSION_REVIEW_DENIED'; END IF;
   IF rv.state NOT IN ('running','paused') THEN
-    IF rv.state=target AND rv.outcome IS NOT DISTINCT FROM p_to->'outcome' THEN RETURN fusion_review_view(rv); END IF;
+    IF rv.state=target AND rv.outcome IS NOT DISTINCT FROM p_to->'outcome'
+      AND rv.revision_id IS NOT DISTINCT FROM nullif(p_to->>'revisionId','')::uuid THEN RETURN fusion_review_view(rv); END IF;
     RAISE EXCEPTION 'FUSION_REVIEW_ENDED';
   END IF;
   IF rv.round::text IS DISTINCT FROM p_from->>'round' OR rv.phase IS DISTINCT FROM p_from->>'phase'

@@ -60,8 +60,9 @@ export async function recoverFusionFinancials(admin: SupabaseClient, options: { 
 async function recoverPage(admin: SupabaseClient, rows: Array<z.infer<typeof row>>, summary: Summary, now: () => number,
   stopAt: number, shared?: RuntimeBudget) {
   for (const [index, item] of rows.entries()) {
-    // Keep 5 seconds for the slowest single step (one lookup, settle and scrub) before the limit.
-    if (now() + 5_000 > stopAt) { summary.deferred += rows.length - index; break; }
+    // Keep 5 seconds for the slowest single step (one lookup, settle and scrub), plus a separate 5-second
+    // window for the idle-pause step that follows, so a lasting backlog never crowds it out.
+    if (now() + 10_000 > stopAt) { summary.deferred += rows.length - index; break; }
     summary.scanned++;
     // Every RPC and lookup of this row is bounded by the step's own deadline, not a fresh 285 s (#954 review).
     const budget = shared ?? createRuntimeBudget(now, Math.max(1, stopAt - now()));
