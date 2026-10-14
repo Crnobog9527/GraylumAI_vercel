@@ -147,7 +147,7 @@ export default function TopicWorkspacePage() {
   const read = trpc.opc.read.useQuery({ draftId }, { enabled: Boolean(draftId) });
   // Read-only draft (conversation deleted): no topic workspace, conversation, polling or write starts.
   const workspace = trpc.opc.topicWorkspace.useQuery({ draftId },
-    { enabled: Boolean(draftId) && read.data?.conversationDeleted !== true, refetchInterval: 30000 });
+    { enabled: Boolean(draftId && read.data && !read.data.conversationDeleted), refetchInterval: 30000 });
   const sessionId = read.data && !read.data.conversationDeleted && workspace.data?.bound ? workspace.data.sessionId : '';
   const view = trpc.runtime.view.useQuery(
     { sessionId },
