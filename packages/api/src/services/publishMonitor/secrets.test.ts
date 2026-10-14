@@ -21,7 +21,9 @@ describe('publish-monitor secrets (until ADMIN-SECRETS #975 merges)', () => {
   });
 
   it('rejects malformed values and reports a missing key as not configured', async () => {
-    expect(await readPostForMeApiKey({ POSTFORME_API_KEY: 'sk-wrong' })).toBeNull();
+    await expect(readPostForMeApiKey({ POSTFORME_API_KEY: 'sk-wrong' })).rejects.toThrow('POSTFORME_KEY_INVALID');
+    await expect(loadPostForMeDeps({ POSTFORME_API_KEY: 'sk-wrong' })).rejects.toThrow('POSTFORME_KEY_INVALID');
+    expect(await readPostForMeApiKey({ POSTFORME_API_KEY: '  ' })).toBeNull();
     expect(await readPostForMeWebhookSecret({ POSTFORME_WEBHOOK_SECRET: 'short' })).toBeNull();
     expect(await loadPostForMeDeps({})).toBeNull();
   });

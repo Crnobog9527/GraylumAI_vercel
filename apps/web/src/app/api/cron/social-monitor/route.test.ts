@@ -50,6 +50,13 @@ it('runs the job within its 240-second budget and fails the run when a step fail
     error: 'FAILED_STEPS:sweep' }));
 });
 
+it('a configured but invalid key fails the run instead of skipping it', async () => {
+  mocks.deps.mockRejectedValue(new Error('POSTFORME_KEY_INVALID'));
+  expect((await call()).status).toBe(500);
+  expect(mocks.finish).toHaveBeenCalledWith(expect.objectContaining({ status: 'error', error: 'POSTFORME_KEY_INVALID' }));
+  expect(mocks.run).not.toHaveBeenCalled();
+});
+
 it('a failed run-record write fails the response instead of reporting success', async () => {
   mocks.run.mockResolvedValue({ providerWork: null, attempts: null, sweep: null, sweepDeleteEnabled: false, failures: [] });
   mocks.finish.mockRejectedValueOnce(new Error('write failed'));

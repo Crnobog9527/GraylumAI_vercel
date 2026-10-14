@@ -23,9 +23,15 @@ function environmentFallbackAllowed(env: Env): boolean {
 }
 const productionLike = (env: Env) => !environmentFallbackAllowed(env);
 
+export class PostForMeKeyInvalid extends Error {
+  constructor() { super('POSTFORME_KEY_INVALID'); }
+}
+
+/** null when no key is set; a key that is set but malformed is an error, so jobs fail visibly instead of skipping. */
 export async function readPostForMeApiKey(env: Env = process.env): Promise<string | null> {
   if (productionLike(env)) return null;
-  try { return postForMeApiKey(env as NodeJS.ProcessEnv); } catch { return null; }
+  if (!env.POSTFORME_API_KEY?.trim()) return null;
+  try { return postForMeApiKey(env as NodeJS.ProcessEnv); } catch { throw new PostForMeKeyInvalid(); }
 }
 
 export async function readPostForMeWebhookSecret(env: Env = process.env): Promise<string | null> {

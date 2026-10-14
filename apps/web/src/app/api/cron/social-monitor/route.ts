@@ -30,7 +30,12 @@ export async function GET(request: Request) {
   // A failed final write fails the response too, so a "running" record never sits behind a reported success.
   const finish = (status: 'success' | 'error', summary: Record<string, unknown>, error: string | null = null) =>
     finishScheduledJobRun({ supabase: client, runId, status, summary, error });
-  const deps = await loadPostForMeDeps().catch(() => null);
+  // A missing key skips the run; a configured but invalid key fails it (caught below), so monitoring sees it.
+  let deps: Awaited<ReturnType<typeof loadPostForMeDeps>>;
+  try { deps = await loadPostForMeDeps(); } catch {
+    await finish('error', {}, 'POSTFORME_KEY_INVALID').catch(() => undefined);
+    return NextResponse.json({ error: 'Social monitor job failed' }, { status: 500 });
+  }
   // No Post for Me key in this environment: nothing to clean at the provider yet.
   try {
     if (!deps) {

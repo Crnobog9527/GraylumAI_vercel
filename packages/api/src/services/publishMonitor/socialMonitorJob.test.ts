@@ -10,7 +10,7 @@ function db(switchValue: unknown, failing: string[] = []) {
     rpc: async (name: string) => {
       calls.push(name);
       if (failing.includes(name)) return { data: null, error: { message: 'x' } };
-      if (name === 'publish_monitor_orphan_classify') return { data: { delete: [], unknownFormat: [] }, error: null };
+      if (name === 'publish_monitor_orphan_classify') return { data: { delete: [], unknownFormat: [], takenOver: [] }, error: null };
       return { data: [], error: null };
     },
     from: () => ({ select() { return this; }, eq() { return this; },
