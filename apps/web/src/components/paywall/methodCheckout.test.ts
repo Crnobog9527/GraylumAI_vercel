@@ -88,3 +88,8 @@ it('counts only real positive founder seats from the server', () => {
   expect(founderSeatsLeft(entry({ founder: { total: 50, available: -1 } }))).toBe(0);
   expect(founderSeatsLeft(entry())).toBe(0);
 });
+
+it('states the account-wide refund condition beside checkout, without the 7-day window (record AA)', () => {
+  expect(CHECKOUT_COPY.refundSummary).toContain('整个账户没有用过任何积分（包括之前的和赠送的积分）');
+  expect(CHECKOUT_COPY.refundSummary).not.toMatch(/这次的积分|7 天/);
+});

@@ -131,7 +131,7 @@ it('a membership refusal opens the paywall with server prices, monthly by defaul
     await browserExpect(page.getByTestId('report-paywall-pay')).toContainText('生成我的完整报告 · $29');
     await browserExpect(page.getByTestId('report-paywall-renewal')).toHaveText('每月自动续费 $29，可随时在个人中心取消，取消后用到当期结束。');
     // Record W: a short refund line beside checkout, without the 7-day window (that stays in the FAQ and terms).
-    await browserExpect(page.getByTestId('report-paywall-refund')).toHaveText('退款说明：付款后还没用过这次的积分，可以申请退款，具体条件见《退款政策》。');
+    await browserExpect(page.getByTestId('report-paywall-refund')).toHaveText('退款说明：从这次付款起，整个账户没有用过任何积分（包括之前的和赠送的积分）才可以申请退款；续费不退款。具体条件见《退款政策》。');
     // Owner copy rules: no credit-cost estimate, no model names, no 7-day refund promise, no countdown, no tax amount.
     const text = await dialog.innerText();
     expect(text).not.toMatch(/预计|消耗|模型|7 天|倒计时|首月 \$49|创始|税额/);

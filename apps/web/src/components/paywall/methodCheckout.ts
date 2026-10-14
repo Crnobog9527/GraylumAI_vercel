@@ -52,8 +52,9 @@ export const CHECKOUT_COPY = {
   rateLimited: '下单太频繁了，请稍等一分钟再试。',
   closed: '银行卡付款暂未开放，请稍后再来。',
   termsRequired: '请先勾选同意《服务条款》和《退款政策》。',
-  // Record W: a short refund line beside checkout; the 7-day window stays in the FAQ and terms (record AA).
-  refundSummary: '退款说明：付款后还没用过这次的积分，可以申请退款，具体条件见《退款政策》。',
+  // Record W: a short refund line beside checkout. Record AA: the whole account must have used no credits since this
+  // payment (older and gifted credits included). The 7-day window stays in the FAQ and terms.
+  refundSummary: '退款说明：从这次付款起，整个账户没有用过任何积分（包括之前的和赠送的积分）才可以申请退款；续费不退款。具体条件见《退款政策》。',
   founderSoldOut: '创始会员名额刚刚售完，已改回 Gold 年付标准价，请看清价格后再付款。',
   founderRule: '创始会员：只要连续续费不中断，以后每年都按 $496 续费。取消自动续费后，权益保留到当期结束；'
     + '到期没有续费（银行卡扣款失败有 7 天宽限期），创始价续费资格结束，之后按当时的价格重新订阅，名额不再放出。',
