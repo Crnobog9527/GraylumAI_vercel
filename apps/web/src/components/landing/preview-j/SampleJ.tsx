@@ -13,6 +13,7 @@ import type { PriceExtras } from './PlanCardsJ';
 import { PriceJ } from './PriceJ';
 import { CompareJ } from './CompareJ';
 import { FaqJ, FinalJ } from './SectionsJ';
+import { SamplesJ } from './SamplesJ';
 import { TakeoverJ } from './TakeoverJ';
 import { VoiceWallJ } from './VoiceWallJ';
 import { WorkJ } from './WorkJ';
@@ -60,7 +61,7 @@ export function SampleJ({ data, siteName, extras, samplePricing = false }: {
       <main>
         <HeroJ />
         <VoiceWallJ notes={data.notes} />
-        <TakeoverJ />
+        <TakeoverJ intro={extras.showSamples ? <SamplesJ /> : undefined} />
         <WorkJ flags={extras.flags} />
         <CompareJ />
         <PriceJ pricing={data.pricing} rows={data.compareRows} risk={data.risk} showResult={data.showResult}

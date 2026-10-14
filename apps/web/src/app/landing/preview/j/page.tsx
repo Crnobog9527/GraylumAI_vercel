@@ -30,6 +30,11 @@ export default async function LandingPreviewJ() {
   const credits = Object.fromEntries(pickPaywallPlans(priced.plans)
     .filter(plan => plan.level === 'pro' || plan.level === 'gold')
     .map(plan => [plan.level, monthlyCredits(plan)]));
-  const extras = { founderTotal: priced.offers.founder?.total ?? null, founderPrice: priced.offers.founder?.price ?? null, credits, flags: flagsUsed };
+  // The sample reports are not generated yet: their placeholder shows only in a local development preview, or once the
+  // landing flag is turned on (off on staging and production by default).
+  const showSamples = flags.sampleReports || process.env.NODE_ENV === 'development';
+  const extras = {
+    founderTotal: priced.offers.founder?.total ?? null, founderPrice: priced.offers.founder?.price ?? null, credits, flags: flagsUsed, showSamples,
+  };
   return <SampleJ data={data} siteName={siteName} extras={extras} samplePricing={priced.sample} />;
 }

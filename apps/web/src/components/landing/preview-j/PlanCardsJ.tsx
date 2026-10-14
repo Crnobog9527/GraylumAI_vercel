@@ -20,6 +20,8 @@ export type PriceExtras = {
   founderPrice: number | null;
   credits: Partial<Record<'pro' | 'gold', number>>;
   flags: LandingFlags;
+  /** The sample reports: in a local development preview, or when the `sampleReports` flag is on. */
+  showSamples?: boolean;
 };
 
 /**

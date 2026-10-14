@@ -1,0 +1,32 @@
+/* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+/*
+ * The four sample reports (SamplesJ): four report cards side by side on a wide screen, two by two on a tablet, one
+ * under the other on a phone. Until the reports exist, each excerpt is a quiet grey line under its real heading and
+ * the card says plainly "样例报告生成中".
+ */
+.samples { display: grid; gap: 22px; }
+.head { display: grid; gap: 6px; }
+.head h3 { margin: 0; font-size: clamp(22px, 2.2vw, 30px); font-weight: 600; letter-spacing: -.03em; }
+.head p { margin: 0; color: var(--j-body); font-size: 15.5px; line-height: 1.7; }
+.cards { display: grid; gap: 14px; margin: 0; padding: 0; list-style: none; }
+@media (min-width: 640px) { .cards { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (min-width: 1100px) { .cards { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+.card {
+  display: grid; align-content: start; gap: 12px; height: 100%; padding: 18px; border: 1px solid var(--j-line); border-radius: 18px;
+  background: #fff; box-shadow: var(--j-shadow);
+}
+.card header { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.card header svg { color: var(--j-gold-text); }
+.card header b { font-size: 16px; }
+.card header span { color: var(--j-muted); font-size: 13px; }
+.card header em { margin-left: auto; padding: 0 8px; border-radius: 999px; background: #fff4d6; color: #8a5a00; font-size: 11.5px; font-style: normal; line-height: 21px; }
+.pending { margin: 0; padding: 6px 10px; border: 1px dashed #e0c98f; border-radius: 8px; background: #fffaf0; color: #8a5a00; font-size: 12.5px; text-align: center; }
+.card section { display: grid; gap: 6px; padding-top: 10px; border-top: 1px solid var(--j-line); }
+.card h4 { margin: 0; color: var(--j-ink); font-size: 13.5px; font-weight: 600; }
+.line { display: block; height: 8px; border-radius: 4px; background: #efeee9; }
+.line[data-short] { width: 62%; }
+@media (prefers-reduced-motion: no-preference) {
+  .line { background: linear-gradient(90deg, #efeee9 30%, #f7f6f2 50%, #efeee9 70%) 0 0 / 300% 100%; animation: wait 2.4s linear infinite; }
+}
+@keyframes wait { from { background-position: 100% 0; } to { background-position: 0 0; } }
+.more { display: inline-flex; align-items: center; gap: 5px; margin-top: 4px; color: var(--j-ink); font-size: 14px; font-weight: 500; text-underline-offset: 4px; }

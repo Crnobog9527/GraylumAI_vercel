@@ -17,6 +17,7 @@ import { WEEK_LOOP_MS } from './WeekJ';
 import { J_WEEK } from '@/lib/landing/landing-copy-j-week';
 import { J_COMPARE } from '@/lib/landing/landing-copy-j-compare';
 import { J_REPORT, J_TAKEOVER_MOMENTS } from '@/lib/landing/landing-copy-j-takeover';
+import { J_SAMPLES, samplePath } from '@/lib/landing/landing-copy-j-samples';
 import { J_WORK, J_WORK_SCENES } from '@/lib/landing/landing-copy-j-work';
 import { J_FOUNDER_BAR, J_PRICE_TOTAL } from '@/lib/landing/landing-copy-j-price';
 
@@ -223,3 +224,23 @@ describe('sample J story timing', () => {
     expect(renderToStaticMarkup(createElement(SampleJ, { data: soldOut, siteName: 'Graylum', extras }))).not.toContain(J_FOUNDER_BAR.title);
   });
 });
+
+describe('sample J sample reports', () => {
+  it('stays off unless the preview or the flag turns it on, and then shows the four groups as placeholders', () => {
+    const { data, html } = render();
+    expect(html).not.toContain(J_SAMPLES.title);
+    const extras = { founderTotal: null, founderPrice: null, credits: {}, flags: ALL_ON, showSamples: true };
+    const shown = renderToStaticMarkup(createElement(SampleJ, { data, siteName: 'Graylum', extras }));
+    expect(shown).toContain(J_SAMPLES.title);
+    for (const report of J_SAMPLES.reports) {
+      expect(shown).toContain(`${report.who} · ${report.platform}`);
+      expect(shown).toContain(`href="${samplePath(report.slug)}"`);
+    }
+    expect(shown.split(J_SAMPLES.pending).length - 1).toBe(J_SAMPLES.reports.length);
+    expect(J_SAMPLES.reports.filter(report => report.truth).map(report => report.slug)).toEqual(['student']);
+    // Opening the takeover module: the samples come before the workspace.
+    expect(shown.indexOf(J_SAMPLES.title)).toBeLessThan(shown.indexOf('我的定位分析'));
+    expect(shown.indexOf(J_SAMPLES.title)).toBeGreaterThan(shown.indexOf('id="voice-title"'));
+  });
+});
+

@@ -94,12 +94,15 @@ export function TakeoverJ({ intro }: { intro?: ReactNode }) {
   const moment = J_TAKEOVER_MOMENTS[index];
   return (
     <div className={styles.outer} data-zone="takeover">
-      {intro ? <div className={cn(page.wrap, styles.intro)}><h2 className={page.display}>{HOW_IT_WORKS.title}</h2>{intro}</div> : null}
-      <section ref={ref} id="how-it-works" aria-labelledby="takeover-title" className={styles.takeover}>
+      {intro ? <div className={cn(page.wrap, styles.intro)}><h2 id="takeover-title" className={page.display}>{HOW_IT_WORKS.title}</h2>{intro}</div> : null}
+      <section ref={ref} id="how-it-works" aria-labelledby={intro ? undefined : 'takeover-title'} aria-label={intro ? HOW_IT_WORKS.title : undefined}
+        className={styles.takeover}>
         <div className={styles.stage}>
           <div className={cn(page.wrap, styles.frame)}>
             <div className={styles.head}>
-              <h2 id="takeover-title" className={styles.title}>{HOW_IT_WORKS.title}</h2>
+              {intro
+                ? <p className={styles.title} aria-hidden="true">{HOW_IT_WORKS.title}</p>
+                : <h2 id="takeover-title" className={styles.title}>{HOW_IT_WORKS.title}</h2>}
               <div className={styles.caption} aria-live="polite" key={moment.id}>
                 <h3>{moment.caption}</h3>
                 <p>{moment.note}</p>
