@@ -70,6 +70,7 @@ export function stageOf(event: JuryEvent): StageKey | null {
     case 'reviewer_started': return event.round === 2 ? 'debate' : 'reading';
     case 'decision': return 'steelman';
     case 'issue': return event.round === 2 ? 'debate' : 'critique';
+    case 'reviewer_failed': return event.round === 2 ? 'debate' : 'critique';
     case 'disagreement': return 'divergence';
     case 'response': return 'debate';
     case 'summary_started': case 'adjudication': return 'ruling';

@@ -140,4 +140,16 @@ describe('seat names', () => {
     expect(html).toContain('修订稿已完成');
     expect(html).not.toMatch(/claude|gpt|gemini|sonnet|deepseek|qwen/i);
   });
+
+  it('keeps every spoken event in the static list, including a reviewer who failed', () => {
+    for (const scenario of JURY_SCENARIOS) {
+      const timed = scheduleReveals(scenario.arrivals);
+      const view = deriveView(timed, playbackLength(timed));
+      const html = renderToStaticMarkup(createElement(StaticReplay, { timed, view, names: DEFAULT_SEAT_NAMES }));
+      expect(html.match(/<article/g)?.length).toBe(view.feed.length);
+    }
+    const timed = timedOf('failed');
+    const html = renderToStaticMarkup(createElement(StaticReplay, { timed, view: deriveView(timed, playbackLength(timed)), names: DEFAULT_SEAT_NAMES }));
+    expect(html).toContain('没有给出可用意见');
+  });
 });
