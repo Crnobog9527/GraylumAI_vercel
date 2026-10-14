@@ -26,6 +26,9 @@ type Source = z.infer<typeof source>;
 /** The summary's revision that passed the host check: what R14 proposes. */
 type Passed = { round: number; body: string; steps: StepValues; changeNotes: unknown; changedSections: string[]; r14Fields: StepValues };
 const ATTEMPTS = 3;
+/** R14 refusals that retrying cannot fix; transient ones (REPORT_UNAVAILABLE, auth) are retried by the client. */
+const PERMANENT_REFUSALS = new Set(['REPORT_REVISION_STALE', 'REPORT_SOURCE_CONFLICT', 'REPORT_REVISION_DECIDED', 'CONTENT_ERASED',
+  'REPORT_NOT_COMPLETE', 'REPORT_REVISION_UNSUPPORTED']);
 const stepKey = (at: ReviewPosition) => `review:${at.round}:${at.phase}:${at.attempt}`;
 
 /** FUSION-REVIEW §2.1/§2.2 orchestration over the review record (0236): the server decides each next step;
@@ -331,10 +334,21 @@ export function reviewFlow(deps: { admin: SupabaseClient; actorId: string;
         decision: input.decision });
       const decisionId = derivedUuid(`${view.reviewId}:adopt:${input.requestId}:${input.decision}`);
       let versionId: string | null = null;
-      if (input.decision === 'apply') {
-        ({ versionId } = await deps.apply({ draftId: view.draftId, revisionId: proposal.revisionId, expectedDiffHash: proposal.diffHash,
-          requestId: decisionId }));
-      } else await deps.decline({ draftId: view.draftId, revisionId: proposal.revisionId, requestId: decisionId });
+      try {
+        if (input.decision === 'apply') {
+          ({ versionId } = await deps.apply({ draftId: view.draftId, revisionId: proposal.revisionId, expectedDiffHash: proposal.diffHash,
+            requestId: decisionId }));
+        } else await deps.decline({ draftId: view.draftId, revisionId: proposal.revisionId, requestId: decisionId });
+      } catch (error) {
+        // R14 refuses for good (a newer formal version, erased content...): finish the reservation as refused, with
+        // nothing adopted, so the review does not wait for a choice forever (#962 review). Transient errors retry.
+        const code = error instanceof Error ? error.message : '';
+        if (!PERMANENT_REFUSALS.has(code)) throw error;
+        await record.recordAdoption(view.reviewId, { state: 'recorded', requestId: input.requestId, choices: input.choices,
+          decision: 'refused', refusal: code, adopted: [], kept: [...merged.adopted, ...merged.kept], revisionId: proposal.revisionId,
+          versionId: null });
+        throw error;
+      }
       const applied = input.decision === 'apply';
       await record.recordAdoption(view.reviewId, { state: 'recorded', requestId: input.requestId, choices: input.choices, decision: input.decision,
         adopted: applied ? merged.adopted : [], kept: applied ? merged.kept : [...merged.adopted, ...merged.kept],

@@ -7,6 +7,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 // prompts and host checks under test are the real ones.
 type Call = { groupId: string; runId: string; callId: string; modelId: string; phase: string; dispatched: boolean;
   verdict: string | null; settled: boolean; state: string; dispatchedAt?: string; settledAt?: string };
+const applyRefusal = vi.hoisted(() => ({ value: '' }));
 const caps = vi.hoisted(() => [] as Array<{ opinion: number; summary: number }>);
 const requests = vi.hoisted(() => [] as Array<{ modelId: string; phase: string; input: string }>);
 const clock = vi.hoisted(() => ({ t: Date.parse('2026-10-14T00:00:00Z'), next() { this.t += 1000; return new Date(this.t).toISOString(); } }));
@@ -111,7 +112,8 @@ function setup(script: (call: Call) => string | null, refuse?: string) {
   const flow = reviewFlow({ admin, actorId: randomUUID(), executor: executor as never,
     propose: async input => { if (refuse) throw new Error(refuse); proposals.push(input);
       return { revisionId: '00000000-0000-4000-8000-0000000000d1', diffHash: 'f'.repeat(64), diff: { changes: [], cascade: [] } }; },
-    apply: async input => { applied.push(input); return { versionId: '00000000-0000-4000-8000-0000000000e1' }; },
+    apply: async input => { if (applyRefusal.value) throw new Error(applyRefusal.value); applied.push(input);
+      return { versionId: '00000000-0000-4000-8000-0000000000e1' }; },
     decline: async input => { declined.push(input); return null; } });
   const runAll = async () => {
     const step = await flow.continue(String(db.review!.reviewId));
@@ -261,6 +263,19 @@ describe('review flow', () => {
     expect(order).toEqual(['apply:reserved']);
     await expect(t.flow.adopt({ reviewId, requestId: randomUUID(), choices: [{ section: '定位', use: 'original' }] }))
       .rejects.toThrow('FUSION_REVIEW_ADOPTED');
+  });
+
+  it('a reservation that R14 refuses for good is finished as refused, so the review stops waiting', async () => {
+    const t = setup(call => call.phase === 'fusion_summary' ? revision('新目标') : opinion('major'));
+    await t.flow.start({ requestId: randomUUID(), draftId: randomUUID(), sourceVersionId: randomUUID() });
+    await t.runAll(); await t.runAll(); await t.flow.continue(String(db.review!.reviewId));
+    const reviewId = String(db.review!.reviewId);
+    applyRefusal.value = 'REPORT_REVISION_STALE';
+    await expect(t.flow.confirmAdoption({ reviewId, requestId: randomUUID(), choices: [{ section: '定位', use: 'revised' }],
+      expectedDiffHash: 'f'.repeat(64), decision: 'apply' })).rejects.toThrow('REPORT_REVISION_STALE');
+    applyRefusal.value = '';
+    expect(db.review!.adoption).toMatchObject({ state: 'recorded', decision: 'refused', refusal: 'REPORT_REVISION_STALE', adopted: [] });
+    expect((await t.flow.detail(reviewId)).awaitingChoice).toBe(false);
   });
 
   it('a partial panel never ends as no change: one usable reviewer that finds nothing still goes to the summary', async () => {

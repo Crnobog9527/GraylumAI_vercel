@@ -133,6 +133,12 @@ describe('revision host check', () => {
     expect(checkRevision(withRulings([{ ...ruling, reviewers: ['Claude'] }]), base)).toEqual({ ok: false, reason: 'REVISION_ADJUDICATION' });
   });
 
+  it('refuses a revision that changes the text before the first heading', () => {
+    const withPreamble = { ...base, previousBody: '前言\n' + report() };
+    expect(checkRevision(revision({ body: '改过的前言\n' + report('新定位') }), withPreamble)).toEqual({ ok: false, reason: 'REVISION_PREAMBLE' });
+    expect(checkRevision(revision({ body: '前言\n' + report('新定位') }), withPreamble).ok).toBe(true);
+  });
+
   it('counts a spacing-only change in a section as a change that must be declared', () => {
     const spaced = revision({ body: report('新定位', '原受众\n') });
     expect(checkRevision(spaced, base)).toEqual({ ok: false, reason: 'REVISION_NOTES' });

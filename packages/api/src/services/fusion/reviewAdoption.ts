@@ -14,12 +14,15 @@ type Note = { section: string; wordingOnly: boolean; fields: Array<{ stepId: str
 export type AdoptionSection = { section: string; changed: boolean; wordingOnly: boolean; original: string; revised: string;
   fields: Array<{ stepId: string; fieldId: string; before: string; after: string }>; linkedSections: string[] };
 
-const HEADING = /^##[ \t]+([^\r\n]+)\r?$/m;
-/** Raw parts as written: the text before the first heading, then each section's title and raw content. */
+/** The whole heading line is captured, so a kept section is rebuilt byte for byte (tabs, spaces, CRLF; #962 review). */
+const HEADING = /^(##[ \t]+[^\r\n]+\r?)$/m;
+/** Raw parts as written: the text before the first heading, then each section's heading line and raw content. */
 function rawSections(body: string) {
   const parts = body.split(HEADING);
-  const sections = new Map<string, { title: string; content: string }>();
-  for (let i = 1; i < parts.length; i += 2) sections.set(parts[i]!.trim(), { title: parts[i]!, content: parts[i + 1] ?? '' });
+  const sections = new Map<string, { heading: string; content: string }>();
+  for (let i = 1; i < parts.length; i += 2) {
+    sections.set(parts[i]!.replace(/^##[ \t]+/, '').trim(), { heading: parts[i]!, content: parts[i + 1] ?? '' });
+  }
   return { preamble: parts[0] ?? '', sections };
 }
 const shown = (content: string) => content.replace(/^\r?\n/, '').replace(/\r?\n$/, '');
@@ -64,7 +67,7 @@ export function applyChoices(input: { originalBody: string; revisedBody: string;
   const original = rawSections(input.originalBody), revised = rawSections(input.revisedBody).sections;
   let body = original.preamble;
   for (const [title, part] of original.sections) {
-    body += `## ${part.title}${adopted.includes(title) ? revised.get(title)!.content : part.content}`;
+    body += adopted.includes(title) ? revised.get(title)!.heading + revised.get(title)!.content : part.heading + part.content;
   }
   const fields: StepValues = {};
   for (const section of input.plan.filter(s => adopted.includes(s.section))) {

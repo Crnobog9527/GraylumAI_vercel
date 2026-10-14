@@ -165,6 +165,10 @@ export function checkRevision(raw: string, input: RevisionInput): RevisionResult
   const now = reportSections(body, input.sections, input.maxCharacters);
   const before = reportSections(input.previousBody, input.sections, Number.MAX_SAFE_INTEGER);
   if (!now || !before) return { ok: false, reason: 'REVISION_SECTIONS' };
+  // Text before the first heading belongs to no section and cannot be chosen per section: it must stay as it was
+  // (#962 review), so what the user sees is exactly what adoption rebuilds.
+  const preamble = (text: string) => text.split(/^##[ \t]+[^\r\n]+\r?$/m)[0] ?? '';
+  if (preamble(body) !== preamble(input.previousBody)) return { ok: false, reason: 'REVISION_PREAMBLE' };
   const declared = new Map(input.declared.map(step => [step.stepId, new Set(step.fieldIds)]));
   const seen = new Set<string>();
   const steps: StepValues = {};
