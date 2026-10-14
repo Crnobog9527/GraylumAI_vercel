@@ -350,7 +350,9 @@ describe('seat names and static rendering', () => {
       chapter, names: DEFAULT_SEAT_NAMES, adoption: null, compact: false, open: true, onToggle: () => {},
     }));
     expect(full).not.toContain('收起');
-    expect(full).toContain('看这一章全文');
+    // 看全文 shows the whole report: the chapter's own text in place, not behind a fold.
+    expect(full).toContain(chapter.body);
+    expect(full).not.toContain('看这一章全文');
     const failedDetail = findScenario('failed').detail;
     const failed = renderToStaticMarkup(createElement(JuryReader, { detail: failedDetail, names: DEFAULT_SEAT_NAMES }));
     expect(failed).toContain('修订稿没有生成成功，原文没有任何改动');

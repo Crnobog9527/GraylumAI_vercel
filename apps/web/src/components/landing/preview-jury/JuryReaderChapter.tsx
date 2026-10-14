@@ -55,15 +55,17 @@ export function JuryReaderChapter({ chapter, names, adoption, compact, open, onT
           <ul className={styles.points}>{digest.points.map(point => <li key={point}>{point}</li>)}</ul>
           {issues.length > 0 ? <Issues issues={issues} names={names} /> : null}
           {(section?.rulings.length ?? 0) > 0 ? <Rulings rulings={section?.rulings ?? []} names={names} /> : null}
-          {flagged || open ? <FullText body={chapter.body} /> : null}
+          {flagged || open ? <FullText body={chapter.body} expanded={!compact} /> : null}
         </>
       )}
     </article>
   );
 }
 
-function FullText({ body }: { body: string }) {
+/** The chapter's own text: shown in place in 看全文 (the whole report, one click away), behind a fold otherwise. */
+function FullText({ body, expanded }: { body: string; expanded: boolean }) {
   if (!body) return null;
+  if (expanded) return <p className={styles.fullText}>{body}</p>;
   return (
     <details className={styles.more}>
       <summary>看这一章全文</summary>
