@@ -5,6 +5,7 @@ import { admissionDeadline } from '../runtime/admissionLimits';
 import { stagingRuntimeWindow } from '../runtime/stagingEnvironment';
 import { parseStagingPolicy } from '../runtime/stagingPolicy';
 import { admitFusionModel, FUSION_MODEL_COLUMNS, type FusionModelRow } from './models';
+import { readReviewSkill, resolveReviewSkill } from './reviewPrompts';
 import { fusionSettings, readFusionSettings, writeFusionSettings, type FusionSettings } from './settings';
 
 /** Administrator save. Every listed model must be a plain model (no built-in search); turning the
@@ -27,6 +28,8 @@ export async function saveFusionSettings(db: SupabaseClient, actorId: string, va
     const vendors = new Set(settings.review.reviewerModelIds.map(id => models.find(row => row.id === id)?.model_id.split('/')[0]));
     if (settings.review.reviewerModelIds.length > 1 && vendors.size === 1) warnings.push('FUSION_REVIEWERS_SAME_PROVIDER');
     if (settings.review.enabled) {
+      // The selected Skill must be published with a readable package, or every start would fail (#962 review).
+      if (settings.review.skillId) await readReviewSkill(db, await resolveReviewSkill(db, settings.review.skillId));
       const windowId = stagingRuntimeWindow(env);
       // Administrators need not be test-call actors; this admin-only read admits no call.
       const result = await db.rpc('report_model_window', { p_actor_id: actorId, p_window_id: windowId });

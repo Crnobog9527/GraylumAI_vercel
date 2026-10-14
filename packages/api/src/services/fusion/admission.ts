@@ -50,7 +50,9 @@ export async function replayFusionGroup(admin: SupabaseClient, actorId: string, 
 export async function admitFusionGroup(input: { admin: SupabaseClient; actorId: string; requestId: string;
   sourceSessionId: string; members: FusionMember[]; env?: Record<string, string | undefined>;
   /** The output caps frozen at review start: later groups never use a cap raised mid-review (#962 review). */
-  outputTokens?: { opinion: number; summary: number } }): Promise<AdmittedFusionGroup> {
+  outputTokens?: { opinion: number; summary: number };
+  /** The credits this group may hold, frozen with the estimate the user agreed to (#962 review). */
+  maxCredits?: number }): Promise<AdmittedFusionGroup> {
   const { admin, actorId, members } = input;
   const env = input.env ?? process.env;
   if (!members.length || members.length > 16) throw new Error('FUSION_GROUP_INVALID');
@@ -97,9 +99,13 @@ export async function admitFusionGroup(input: { admin: SupabaseClient; actorId: 
       scope: { kind: 'positioning_draft', draftId: uuid.parse(draftId) }, operation: 'question', modelId: member.modelId,
       sourceHash: createHash('sha256').update(JSON.stringify(context)).digest('hex'), input: context, callPolicy: [policy], rules,
       limits: { costUsd: call.upperUsd, credits: 0, maxPreDeduct: upperCredits, maxCalls: 1, deadline } });
-    return { requestId: memberRequest(input.requestId, index), payload };
+    return { requestId: memberRequest(input.requestId, index), payload, upperCredits };
   }));
-  return toGroup(await rpc<unknown>(admin, 'fusion_group_admit', { ...groupArgs, p_runs: runs }));
+  // Prices or multipliers changed since the review started: never hold more than the maximum the user was shown.
+  if (input.maxCredits !== undefined && runs.reduce((sum, run) => sum + run.upperCredits, 0) > input.maxCredits) {
+    throw new Error('FUSION_ESTIMATE_EXCEEDED');
+  }
+  return toGroup(await rpc<unknown>(admin, 'fusion_group_admit', { ...groupArgs, p_runs: runs.map(({ requestId, payload }) => ({ requestId, payload })) }));
 }
 
 function toGroup(value: unknown): AdmittedFusionGroup {

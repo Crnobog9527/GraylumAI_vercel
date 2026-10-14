@@ -20,6 +20,8 @@ type Executor = ReturnType<typeof fusionExecutor>;
 const config = z.object({ estimateUsd: z.string(), maxRounds: z.number().int().min(1), reviewers: z.array(z.string().uuid()).min(1),
   /** "最多消耗 X 积分" (§3.2), shown before the user agrees; absent on reviews started before it was recorded. */
   estimateCredits: z.number().int().positive().optional(),
+  /** Per-phase group credit caps frozen with that maximum (absent on older reviews: no cap). */
+  phaseCredits: z.object({ review: z.number(), debate: z.number(), summary: z.number() }).optional(),
   opinionTokens: z.number().int().positive(), summaryTokens: z.number().int().positive(),
   /** Per-phase request size the estimate priced (absent: only the byte cap applies). */
   requestBytes: z.object({ review: z.number(), debate: z.number(), summary: z.number() }).optional(),
@@ -37,7 +39,9 @@ const canonical = (value: unknown): string => JSON.stringify(value, (_key, item:
 /** R14 refusals that retrying cannot fix; transient ones (REPORT_UNAVAILABLE, auth) are retried by the client. */
 // REPORT_REVISION_DECIDED is not here: it can mean this very decision already committed.
 const PERMANENT_REFUSALS = new Set(['REPORT_REVISION_STALE', 'REPORT_SOURCE_CONFLICT', 'CONTENT_ERASED',
-  'REPORT_NOT_COMPLETE', 'REPORT_REVISION_UNSUPPORTED']);
+  'REPORT_NOT_COMPLETE', 'REPORT_REVISION_UNSUPPORTED',
+  // R14 replays an identical decision first (0223), so this means the proposal was decided elsewhere (#962 review).
+  'REPORT_REVISION_DECIDED']);
 const stepKey = (at: ReviewPosition) => `review:${at.round}:${at.phase}:${at.attempt}`;
 
 /** FUSION-REVIEW §2.1/§2.2 orchestration over the review record (0236): the server decides each next step;
@@ -192,7 +196,8 @@ export function reviewFlow(deps: { admin: SupabaseClient; actorId: string;
     if (members.some(member => fusionRequestBytes(member.request) > limit)) throw new Error('FUSION_INPUT_TOO_LARGE');
     const requestId = derivedUuid(`${view.reviewId}:${stepKey(at)}`);
     const group = await admitFusionGroup({ admin, actorId, requestId, sourceSessionId: view.sourceSessionId, members, env,
-      outputTokens: { opinion: cfg.opinionTokens, summary: cfg.summaryTokens } });
+      outputTokens: { opinion: cfg.opinionTokens, summary: cfg.summaryTokens },
+      maxCredits: cfg.phaseCredits?.[at.phase === 'summary' ? 'summary' : at.round > 1 ? 'debate' : 'review'] });
     return record.claim(view.reviewId, at, group.groupId, group.runs.map(run => ({ runId: run.runId, payload: run.call })));
   }
   async function finish(view: ReviewView, state: 'completed' | 'incomplete' | 'revision_failed', outcome: Record<string, unknown>) {
@@ -270,14 +275,15 @@ export function reviewFlow(deps: { admin: SupabaseClient; actorId: string;
         .parse(sizes.data);
       // Instructions travel as one escaped string in the body; the host-written format rules add at most a few KB.
       const sent = (value: string) => Buffer.byteLength(JSON.stringify(value)) + 4096;
-      const { rounds, estimateUsd, estimateCredits, requestBytes } = estimateReview({ quotes: window.callPolicies,
+      const { rounds, estimateUsd, estimateCredits, phaseCredits, requestBytes } = estimateReview({ quotes: window.callPolicies,
         creditsPerUsd: window.creditsPerUsd, reviewers: settings.review.reviewerModelIds,
         summary: settings.review.summaryModelId, maxRounds: settings.review.maxRounds, maxBudgetUsd: settings.review.maxBudgetUsd,
         opinionTokens: settings.review.opinionOutputTokens, summaryTokens: settings.review.summaryOutputTokens, fieldCount: preview.fieldCount,
         snapshotBytes: preview.reportSentBytes + preview.materialsSentBytes,
         instructionBytes: { reviewer: sent(`${text.reviewer}\n\n${text.rubric}`), summary: sent(`${text.summary}\n\n${text.rubric}`) } });
       const view = await record.start({ requestId: input.requestId, draftId: input.draftId, sourceVersionId: input.sourceVersionId,
-        config: { estimateUsd, estimateCredits, maxRounds: rounds, reviewers: settings.review.reviewerModelIds, summary: settings.review.summaryModelId,
+        config: { estimateUsd, estimateCredits, phaseCredits, maxRounds: rounds, reviewers: settings.review.reviewerModelIds,
+          summary: settings.review.summaryModelId,
           opinionTokens: settings.review.opinionOutputTokens, summaryTokens: settings.review.summaryOutputTokens, skill, requestBytes } });
       // Before anything is claimed: round 1 and the most trimmed summary, measured exactly as they will be sent, must fit
       // the per-call byte cap; otherwise the review ends here with nothing charged (#962 review).
@@ -316,12 +322,17 @@ export function reviewFlow(deps: { admin: SupabaseClient; actorId: string;
           let claimed;
           try { claimed = await claimStep(view, src, at, pending.length ? pending : models); }
           catch (error) {
-            if (!(error instanceof Error) || error.message !== 'FUSION_INPUT_TOO_LARGE') throw error;
-            // A step that cannot fit the byte cap is never claimed: the debate round is skipped; round 1 (nothing charged
-            // yet) or the summary ends the review instead of failing on every continue.
+            const code = error instanceof Error ? error.message : '';
+            if (code !== 'FUSION_INPUT_TOO_LARGE' && code !== 'FUSION_ESTIMATE_EXCEEDED') throw error;
+            // A step that cannot fit the byte cap, or would hold more credits than the maximum the user agreed to, is
+            // never claimed: the debate round is skipped; round 1 (nothing charged yet) or the summary ends the review
+            // instead of failing on every continue.
             if (at.phase === 'review' && at.round > 1) {
               view = await record.advance(reviewId, at, { state: 'running', round: at.round, phase: 'summary', attempt: 1 });
-            } else view = await finish(view, 'incomplete', { kind: 'input_too_large', phase: at.phase });
+            } else {
+              view = await finish(view, 'incomplete', { kind: code === 'FUSION_INPUT_TOO_LARGE' ? 'input_too_large' : 'price_changed',
+                phase: at.phase });
+            }
             continue;
           }
           view = (await record.read(reviewId))!;

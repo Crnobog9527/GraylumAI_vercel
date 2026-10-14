@@ -11,6 +11,8 @@ const raceReservation = vi.hoisted(() => ({ value: null as Record<string, unknow
 const sourceBody = vi.hoisted(() => ({ value: null as string | null }));
 const applyRefusal = vi.hoisted(() => ({ value: '' }));
 const caps = vi.hoisted(() => [] as Array<{ opinion: number; summary: number }>);
+const creditCaps = vi.hoisted(() => [] as Array<number | undefined>);
+const priceRise = vi.hoisted(() => ({ phase: '' }));
 const requests = vi.hoisted(() => [] as Array<{ modelId: string; phase: string; input: string }>);
 const clock = vi.hoisted(() => ({ t: Date.parse('2026-10-14T00:00:00Z'), next() { this.t += 1000; return new Date(this.t).toISOString(); } }));
 const db = vi.hoisted(() => ({ review: null as Record<string, unknown> | null, calls: [] as Call[], outputs: new Map<string, string>(),
@@ -28,8 +30,11 @@ vi.mock('./reviewPrompts', async original => ({ ...(await original<typeof import
   readReviewSkill: async () => ({ reviewer: 'review', summary: 'summarize', rubric: 'rubric' }) }));
 vi.mock('./admission', async original => ({ ...(await original<typeof import('./admission')>()),
   admitFusionGroup: async (input: { requestId: string; members: Array<{ modelId: string; phase: string; request: { input: string } }>;
-    outputTokens: { opinion: number; summary: number } }) => {
+    outputTokens: { opinion: number; summary: number }; maxCredits?: number }) => {
     caps.push(input.outputTokens);
+    creditCaps.push(input.maxCredits);
+    // Prices rose after start: the real admission refuses a group above the frozen cap before freezing anything.
+    if (input.members.some(m => m.phase === priceRise.phase)) throw new Error('FUSION_ESTIMATE_EXCEEDED');
     const existing = db.groups.get(input.requestId);
     if (existing) return { ...existing, replayed: true };
     const group = { groupId: randomUUID(), runs: input.members.map((m, index) => ({ runId: randomUUID(), index, phase: m.phase,
@@ -131,7 +136,7 @@ function setup(script: (call: Call) => string | null, refuse?: string) {
 }
 
 describe('review flow', () => {
-  beforeEach(() => { db.review = null; db.calls = []; db.outputs.clear(); db.savedAt.clear(); db.groups.clear(); requests.length = 0; caps.length = 0; });
+  beforeEach(() => { db.review = null; db.calls = []; db.outputs.clear(); db.savedAt.clear(); db.groups.clear(); requests.length = 0; caps.length = 0; creditCaps.length = 0; priceRise.phase = ''; });
 
   it('without a split: round 1, one summary, proposes the revision to R14, never re-reviewed by the panel', async () => {
     const t = setup(call => call.phase === 'fusion_summary' ? revision('新目标') : opinion('major'));
@@ -288,6 +293,17 @@ describe('review flow', () => {
     await expect(t.flow.adopt(confirm)).rejects.toThrow('REPORT_REVISION_STALE');
   });
 
+  it('a proposal decided through the R14 route first finishes the reservation instead of blocking it forever', async () => {
+    const t = setup(call => call.phase === 'fusion_summary' ? revision('新目标') : opinion('major'));
+    await t.flow.start({ requestId: randomUUID(), draftId: randomUUID(), sourceVersionId: randomUUID() });
+    await t.runAll(); await t.runAll(); await t.flow.continue(String(db.review!.reviewId));
+    applyRefusal.value = 'REPORT_REVISION_DECIDED';
+    await expect(t.flow.confirmAdoption({ reviewId: String(db.review!.reviewId), requestId: randomUUID(),
+      choices: [{ section: '定位', use: 'revised' }], expectedDiffHash: 'f'.repeat(64), decision: 'apply' })).rejects.toThrow('REPORT_REVISION_DECIDED');
+    applyRefusal.value = '';
+    expect(db.review!.adoption).toMatchObject({ state: 'recorded', decision: 'refused', refusal: 'REPORT_REVISION_DECIDED' });
+  });
+
   it('a retry of a reserved confirmation cannot switch its decision', async () => {
     const t = setup(call => call.phase === 'fusion_summary' ? revision('新目标') : opinion('major'));
     await t.flow.start({ requestId: randomUUID(), draftId: randomUUID(), sourceVersionId: randomUUID() });
@@ -340,6 +356,20 @@ describe('review flow', () => {
     sourceBody.value = null;
     expect(end.review).toMatchObject({ state: 'incomplete', outcome: { kind: 'input_too_large' } });
     expect(db.calls).toEqual([]);
+  });
+
+  it('never holds more credits than the maximum shown at start: a pricier later step ends the review uncharged', async () => {
+    const t = setup(() => opinion('major'));
+    const started = await t.flow.start({ requestId: randomUUID(), draftId: randomUUID(), sourceVersionId: randomUUID() });
+    const cfg = started.config as { estimateCredits: number; phaseCredits: { review: number; debate: number; summary: number } };
+    expect(cfg.estimateCredits).toBe(cfg.phaseCredits.review + cfg.phaseCredits.debate + cfg.phaseCredits.summary);
+    priceRise.phase = 'fusion_summary';
+    await t.runAll();
+    const end = await t.flow.continue(String(db.review!.reviewId));
+    expect(creditCaps[0]).toBe(cfg.phaseCredits.review);
+    expect(creditCaps.at(-1)).toBe(cfg.phaseCredits.summary);
+    expect(end.review).toMatchObject({ state: 'incomplete', outcome: { kind: 'price_changed', phase: 'summary' } });
+    expect(db.calls.some(call => call.phase === 'fusion_summary')).toBe(false);
   });
 
   it('trims the opinions a summary carries until its serialized request fits the byte cap', async () => {

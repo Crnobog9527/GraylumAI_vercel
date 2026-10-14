@@ -33,6 +33,8 @@ export type PhaseBytes = { review: number; debate: number; summary: number };
 export function estimateReview(input: EstimateInput): { rounds: number; estimateUsd: string;
   /** "最多消耗 X 积分" shown before the user agrees (§3.2): every call's credit hold, each rounded up on its own. */
   estimateCredits: number;
+  /** The credit holds each phase's group may freeze (a later claim above it is refused, so the shown maximum holds). */
+  phaseCredits: PhaseBytes;
   /** The serialized size each phase's request may reach: the prices above assume it, and claims enforce it. */
   requestBytes: PhaseBytes } {
   const bound = (modelId: string, outputTokens: number, bytes: number) => {
@@ -71,6 +73,7 @@ export function estimateReview(input: EstimateInput): { rounds: number; estimate
     // Rounded up to whole micro-dollars so the stored estimate is never below the computed bound.
     if (Number.isFinite(total.usd) && total.usd <= budget) return { rounds, estimateUsd: (Math.ceil(total.usd * 1e6) / 1e6).toFixed(6),
       estimateCredits: total.credits,
+      phaseCredits: { review: firstRound.credits, debate: rounds > 1 ? debate.credits : 0, summary: summary.credits },
       requestBytes: { review: reviewerBytes, debate: rounds > 1 ? debateBytes : 0, summary: summaryBytes } };
   }
   throw new Error('FUSION_BUDGET_EXCEEDED');
