@@ -12,9 +12,9 @@ const reducedMotion = () => Boolean(window.matchMedia?.('(prefers-reduced-motion
 
 /**
  * The four sample reports as a walkthrough (Owner 2026-10-15): pick a report; its cover comes first (who, platform,
- * how long), then every chapter of the real report lights up in turn with what it gives you and its key conclusion,
- * so the visitor sees the whole set of answers they would get. The reports are not generated yet: every conclusion
- * is a clearly marked placeholder. The caller shows this block only in a local preview or behind the flag. With
+ * how long), then every chapter of the real report lights up in turn with what it gives you,
+ * so the visitor sees the whole set of answers they would get. The reports are not generated yet: the cover carries
+ * one clearly marked placeholder tag. The caller shows this block only in a local preview or behind the flag. With
  * reduced motion, everything is simply there.
  */
 export function SamplesJ() {
@@ -63,7 +63,6 @@ export function SamplesJ() {
             <li key={chapter.title} style={{ '--i': index } as CSSProperties}>
               <b>{chapter.title}</b>
               <p><span>{J_SAMPLES.giveLabel}</span>{chapter.give}</p>
-              <p className={styles.key}>{J_SAMPLES.keyLabel}：{J_SAMPLES.pending}</p>
             </li>
           ))}
         </ol>

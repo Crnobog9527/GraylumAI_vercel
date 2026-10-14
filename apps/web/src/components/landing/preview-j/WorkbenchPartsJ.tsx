@@ -2,12 +2,12 @@
 'use client';
 
 import { JuryCanvasPlayer } from '@/components/landing/preview-jury/JuryCanvasPlayer';
-import { REVISION_TEXT } from '@/components/landing/preview-jury/jury-mock-rulings';
 import { resolveSeatNames, SAMPLE_PANEL } from '@/components/landing/preview-jury/jury-events';
 import type { FieldValue, StepInformation } from '@/components/opc/capture-state';
 import { StepConfirmCard } from '@/components/opc/step-confirm-card';
 import { J_FIELDS, J_FIELD_VALUES, J_STEPS } from '@/lib/landing/landing-copy-j-persona';
 import { J_REVISION, J_TAKEOVER_MOMENTS, type TakeoverLine } from '@/lib/landing/landing-copy-j-takeover';
+import { J_JURY_CASE } from './jury-case-j';
 import styles from './takeover-j.module.css';
 
 const noop = () => undefined;
@@ -48,25 +48,26 @@ export function ConfirmJ({ step, information }: { step: string; information: Rec
 }
 
 /**
- * The jury opened from the report: #1002's canvas (brief) with the prototype's sample names, played by the scroll;
+ * The jury opened from the report: #1002's canvas (brief) with the prototype's sample names and this report's chapters,
+ * played by the scroll;
  * then the revised report chapter by chapter, each change shown as 改前 → 改后.
  */
 export function JuryJ({ local }: { local: number }) {
   if (local <= 0.08) return null;
   const play = Math.min(1, (local - 0.08) / 0.62);
-  const changes = Object.entries(REVISION_TEXT);
+  const changes = J_REVISION.changes;
   const shown = local < 0.72 ? 0 : Math.min(changes.length, Math.ceil((local - 0.72) / 0.18 * changes.length));
   return (
     <div className={styles.juryLayer}>
-      {shown === 0 ? <JuryCanvasPlayer brief progress={play} names={SEAT_NAMES} /> : (
+      {shown === 0 ? <JuryCanvasPlayer data={J_JURY_CASE} brief progress={play} names={SEAT_NAMES} /> : (
         <section className={styles.revision} aria-label={J_REVISION.title}>
           <h2>{J_REVISION.title}</h2>
           <ol>
-            {changes.slice(0, shown).map(([chapter, text]) => (
-              <li key={chapter}>
-                <b>{chapter}</b>
-                <p><span>{J_REVISION.before}</span>{text.original}</p>
-                <p><span>{J_REVISION.after}</span>{text.revised}</p>
+            {changes.slice(0, shown).map(change => (
+              <li key={change.chapter}>
+                <b>{change.chapter}</b>
+                <p><span>{J_REVISION.before}</span>{change.original}</p>
+                <p><span>{J_REVISION.after}</span>{change.revised}</p>
               </li>
             ))}
           </ol>

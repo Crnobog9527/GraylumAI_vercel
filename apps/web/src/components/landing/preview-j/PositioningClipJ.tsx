@@ -11,8 +11,7 @@ import { QuestionCardView } from '@/components/opc/question-card';
 import frame from '@/components/opc/workspace-frame.module.css';
 import { Button } from '@/components/ui/button';
 import {
-  J_PERSONA, J_PERSONA_DIRECTION, J_PERSONA_KINDS, J_PERSONA_QUESTION, J_STEPS,
-} from '@/lib/landing/landing-copy-j-persona';
+  J_PERSONA, J_PERSONA_DIRECTION, J_PERSONA_KINDS, J_PERSONA_QUESTION, J_QUESTION_HEADING, J_STEPS } from '@/lib/landing/landing-copy-j-persona';
 import {
   J_BENCHMARK_TABLE, J_PLAN_ROWS, J_REPORT, J_TAKEOVER_MOMENTS, type TakeoverCard, type TakeoverLine,
 } from '@/lib/landing/landing-copy-j-takeover';
@@ -181,8 +180,8 @@ function Message({ line, step, fetchLocal, information }: {
 }
 
 function Card({ card, fetchLocal }: { card: TakeoverCard; fetchLocal: number }) {
-  if (card === 'question') return <div className={styles.cardSlot}><QuestionCardView card={J_PERSONA_QUESTION} /></div>;
-  if (card === 'direction') return <div className={styles.cardSlot}><QuestionCardView card={J_PERSONA_DIRECTION} /></div>;
+  if (card === 'question') return <div className={styles.cardSlot}><QuestionCardView card={J_PERSONA_QUESTION} heading={J_QUESTION_HEADING} /></div>;
+  if (card === 'direction') return <div className={styles.cardSlot}><QuestionCardView card={J_PERSONA_DIRECTION} heading={J_QUESTION_HEADING} /></div>;
   if (card === 'kinds') {
     return (
       <ul className={styles.kinds}>

@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 /*
  * The sample report walkthrough (SamplesJ): four tabs, one report at a time — its cover, then its chapters lighting up
- * one after another in a grid, each with what it gives you and its key conclusion (a marked placeholder until the
+ * one after another in a grid, each with what it gives you (the cover carries a marked placeholder until the
  * reports exist). The light comes in with the scroll; with reduced motion every chapter is simply there.
  */
 .samples { display: grid; gap: 20px; }
@@ -34,7 +34,6 @@
 .chapters b { font-size: 15px; }
 .chapters p { display: grid; gap: 2px; margin: 0; color: var(--j-body); font-size: 13.5px; line-height: 1.6; }
 .chapters p span { color: var(--j-muted); font-size: 12px; }
-.chapters .key { display: block; padding-top: 6px; border-top: 1px dashed #ececea; color: #b49451; font-size: 12px; }
 .chapters li { padding: 10px 12px; }
 .chapters[data-folded] > li:nth-child(n + 7) { display: none; }
 .unfold {

@@ -112,7 +112,7 @@ export const J_PLAN_ROWS: readonly (readonly [string, string])[] = [
  */
 export const J_REPORT = {
   title: '完整运营策略报告',
-  intro: '所有步骤都已确认。导师会根据你确认的全部信息写一份完整报告，边写边显示。',
+  intro: '所有步骤都已确认。AI 教练会根据你确认的全部信息写一份完整报告，边写边显示。',
   generate: '生成完整报告',
   export: '导出已确认资料',
   size: '13 章 + 一句话结论 · 全文约 11,000 字',
@@ -136,9 +136,33 @@ export const J_REPORT = {
   juryTag: 'Gold',
 } as const;
 
-/** NEW: after the jury, the revised report chapter by chapter (the changes are #1002's default case, REVISION_TEXT). */
+/** The report chapter with this numbered title ("3 受众"), as the table of contents shows it. */
+const chapter = (title: string) => J_REPORT.chapters.find(item => item.title === title)?.body ?? '';
+
+/**
+ * NEW: after the jury, the revised report chapter by chapter. The six chapters are the ones the panel raised (their
+ * places mapped onto this report's 13 chapters, see jury-case-j.ts); "改前" is this report's own text.
+ */
 export const J_REVISION = {
   title: '修订后的定位报告：改了这 6 章',
   before: '改前',
   after: '改后',
-} as const;
+  changes: [
+    { chapter: '3 受众', original: chapter('3 受众'),
+      revised: '刚开始一个人生活的上班族：多在晚上七八点到家，厨房只有单灶和小冰箱，最常因为太累、买菜麻烦、一个人吃不完而放弃做饭。'
+        + '以后可以扩展的人群：想控制饮食的健身新手。' },
+    { chapter: '4 平台选择', original: chapter('4 平台选择'),
+      revised: 'TikTok 和 Instagram 短视频起量；YouTube 放把几条短视频合起来的长视频，留住搜索流量。'
+        + '前两个月三个平台发同一条视频，按各自的数据再决定在哪里加重。' },
+    { chapter: '6 账号定位', original: chapter('6 账号定位'),
+      revised: '下班后 15 分钟上桌的家常菜，快在备菜：周日一次切配，工作日三天复用。人设是"会做饭的同事"，说话直接，不炫技。' },
+    { chapter: '8 内容规划', original: chapter('8 内容规划'),
+      revised: '三条内容线：一口锅系列、冰箱剩菜、备菜和收纳（换掉超市半成品改造）；每条线的选题池和发布节奏。' },
+    { chapter: '10 变现路径', original: chapter('10 变现路径'),
+      revised: '第一个月先上线免费的一周菜单，用报名表找到愿意付钱的人；第三个月按报名情况决定要不要出付费的备菜指南。'
+        + '带货清单放到第二步。' },
+    { chapter: '12 见效时间', original: chapter('12 见效时间'),
+      revised: '前两个月每周三更、周末集中拍两条备用，重在稳定更新和找准开头；每周日花二十分钟把评论区的问题排进下周选题。'
+        + '第三个月起再看哪类内容值得加码。' },
+  ],
+};

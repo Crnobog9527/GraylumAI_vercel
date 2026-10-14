@@ -4,9 +4,9 @@
  * Sample J's four sample reports as a walkthrough (Owner 2026-10-15, round five: "给这个地方的样例报告做一个解读……至少能让
  * 他有个框架，知道这份分析报告拿到的到底是一个什么样的结果，以及值不值得付费"). Each report opens on its cover, then its
  * chapters light up one by one in the real report's order (13 numbered chapters plus 一句话结论, about 11,000
- * characters: paywall v25 595-601, REPORT_GEN_PLAN), each with what the chapter gives you and one key conclusion.
+ * characters: paywall v25 595-601, REPORT_GEN_PLAN), each with what the chapter gives you.
  * The groups and platforms are the Owner's; the reports' own conclusions come from the research window after RT-7 and
- * are not written here — until then each shows "样例报告生成中". Shown only in a local development preview or when the
+ * are not written here — until then the cover shows "样例报告生成中". Shown only in a local development preview or when the
  * landing flag `sampleReports` is on (off on staging and production).
  */
 export const J_SAMPLES = {
@@ -19,7 +19,6 @@ export const J_SAMPLES = {
   coverLabel: '完整运营策略报告',
   size: '13 章 + 一句话结论 · 全文约 11,000 字',
   giveLabel: '这一章给你什么',
-  keyLabel: '关键结论',
   unfold: (count: number) => `展开全部 ${count} 章`,
   reports: [
     { slug: 'accountant', who: '会计', platform: 'YouTube', truth: false },

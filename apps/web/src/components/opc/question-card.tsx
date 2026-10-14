@@ -28,6 +28,7 @@ export function QuestionCardView({
   onOther,
   docked = false,
   onDismiss,
+  heading = '导师提问',
 }: {
   card: QuestionCard;
   /** Temporarily not sendable, for example while another reply is running. */
@@ -39,12 +40,14 @@ export function QuestionCardView({
   docked?: boolean;
   /** Folds a docked card away; a one-line placeholder in the conversation shows it again. */
   onDismiss?: () => void;
+  /** The card's heading; the public site calls the mentor "AI 教练". */
+  heading?: string;
 }) {
   const reasonId = useId();
   const reasonIndex = card.recommendationReason ? card.recommended : null;
   return (
-    <section aria-label="导师提问" data-question-card="open" className={cn(styles.card, docked && styles.docked)}>
-      <p className={styles.head}>导师提问</p>
+    <section aria-label={heading} data-question-card="open" className={cn(styles.card, docked && styles.docked)}>
+      <p className={styles.head}>{heading}</p>
       <p className={styles.question}>{card.question}</p>
       <div role="group" aria-label="建议选项" className={styles.options}>
         {card.options.map((option, index) => (

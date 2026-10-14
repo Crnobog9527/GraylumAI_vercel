@@ -137,7 +137,7 @@ describe('style sample J, the later sections', () => {
 
   it('keeps the Owner\'s four-row comparison word for word, each row over its pair of conversations', () => {
     const { html } = render();
-    for (const phrase of H_COMPARE.title.split(/(?<=，)/)) expect(html).toContain(escape(phrase));
+    for (const phrase of H_COMPARE.title.split(/(?<=，)|(?=带你)/)) expect(html).toContain(escape(phrase));
     for (const row of H_COMPARE.rows) for (const cell of [row.generic, row.coach]) expect(html).toContain(escape(cell));
     expect(J_COMPARE.pairs).toHaveLength(H_COMPARE.rows.length);
     for (const pair of J_COMPARE.pairs) expect(html.split(escape(pair.question)).length - 1).toBeGreaterThanOrEqual(2);
@@ -229,8 +229,9 @@ describe('sample J sample reports', () => {
     expect(shown).toContain(J_SAMPLES.size);
     for (const chapter of J_SAMPLES.chapters) expect(shown).toContain(chapter.title);
     expect(J_SAMPLES.chapters).toHaveLength(14);
-    // Nothing of the reports themselves is made up: every key conclusion waits for the real report.
-    expect(shown.split(J_SAMPLES.pending).length - 1).toBe(J_SAMPLES.chapters.length + 1);
+    // Nothing of the reports themselves is made up: one placeholder on the cover, not one per chapter card.
+    expect(shown.split(J_SAMPLES.pending).length - 1).toBe(1);
+    expect(shown).not.toContain('关键结论');
     expect(J_SAMPLES.reports.filter(report => report.truth).map(report => report.slug)).toEqual(['student']);
     // Opening the takeover module: the samples come before the workspace.
     expect(shown.indexOf(J_SAMPLES.title)).toBeLessThan(shown.indexOf('我的定位分析'));

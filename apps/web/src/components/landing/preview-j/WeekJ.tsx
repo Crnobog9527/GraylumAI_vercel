@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 'use client';
 
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { BarChart3, Check, Compass, Lightbulb, PenLine, Send, type LucideIcon } from 'lucide-react';
 import { DEMO_LABEL } from '@/components/landing/demo/demo-script';
 import result from '@/components/opc/positioning-result.module.css';
@@ -59,10 +59,15 @@ export function WeekJ() {
     return () => window.clearTimeout(timer);
   }, [playing, editing, count]);
 
-  // Keep the newest message in view once the conversation is longer than the window.
-  useEffect(() => {
+  // Once the conversation is longer than the window, keep the newest messages and drop whole older ones from the top,
+  // so the window always starts on the top of a message (never half a line) and the newest one stays in view.
+  useLayoutEffect(() => {
     const log = logRef.current;
-    if (log) log.scrollTop = log.scrollHeight;
+    if (!log) return;
+    const fit = () => fitNewest(log);
+    fit();
+    window.addEventListener('resize', fit);
+    return () => window.removeEventListener('resize', fit);
   }, [count]);
 
   const shown = count < 0 ? LINES.slice(REST) : LINES.slice(0, count);
@@ -94,6 +99,23 @@ export function WeekJ() {
       </div>
     </figure>
   );
+}
+
+/** Hide the oldest messages that do not fit whole above the newest ones; the window then shows from a message's top. */
+function fitNewest(log: HTMLElement) {
+  const items = Array.from(log.children) as HTMLElement[];
+  for (const item of items) item.style.display = '';
+  const style = getComputedStyle(log);
+  const room = log.clientHeight - parseFloat(style.paddingTop) - parseFloat(style.paddingBottom);
+  const gap = parseFloat(style.rowGap) || 0;
+  let used = 0;
+  for (let index = items.length - 1; index >= 0; index -= 1) {
+    used += items[index].offsetHeight + (index < items.length - 1 ? gap : 0);
+    if (used > room && index < items.length - 1) {
+      for (const item of items.slice(0, index + 1)) item.style.display = 'none';
+      return;
+    }
+  }
 }
 
 function Message({ line, divider, live }: { line: WeekLine; divider: string | null; live: boolean }) {

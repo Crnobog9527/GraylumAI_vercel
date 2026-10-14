@@ -7,7 +7,7 @@ import { DEMO_LABEL } from '@/components/landing/demo/demo-script';
 import result from '@/components/opc/positioning-result.module.css';
 import { QuestionCardView } from '@/components/opc/question-card';
 import { H_COMPARE } from '@/lib/landing/landing-copy';
-import { J_PERSONA_QUESTION } from '@/lib/landing/landing-copy-j-persona';
+import { J_PERSONA_QUESTION, J_QUESTION_HEADING } from '@/lib/landing/landing-copy-j-persona';
 import { J_COMPARE } from '@/lib/landing/landing-copy-j-compare';
 import styles from './compare-j.module.css';
 import page from './j.module.css';
@@ -38,7 +38,7 @@ export function CompareJ() {
     <section aria-labelledby="compare-title" className={page.section} data-zone="compare" data-band="ink">
       <div className={page.wrap}>
         <h2 id="compare-title" className={styles.title}>
-          {H_COMPARE.title.split(/(?<=，)/).map(part => <span key={part} className={styles.phrase}>{part}</span>)}
+          {H_COMPARE.title.split(/(?<=，)|(?=带你)/).map(part => <span key={part} className={styles.phrase}>{part}</span>)}
         </h2>
         <ol className={styles.pairs}>
           {J_COMPARE.pairs.map((pair, index) => {
@@ -105,7 +105,7 @@ function Window({ name, question, generic = false, children }: {
 }
 
 function Ask() {
-  return <div className={styles.card}><QuestionCardView card={J_PERSONA_QUESTION} /></div>;
+  return <div className={styles.card}><QuestionCardView card={J_PERSONA_QUESTION} heading={J_QUESTION_HEADING} /></div>;
 }
 function Plan() {
   return <Sheet title={J_COMPARE.pairs[1].plan.title} rows={J_COMPARE.pairs[1].plan.rows} />;

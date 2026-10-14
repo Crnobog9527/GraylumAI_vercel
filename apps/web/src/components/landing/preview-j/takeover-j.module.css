@@ -58,8 +58,12 @@
 .report header > span { color: #888; font-size: 12.5px; }
 .report header small { display: inline-flex; align-items: center; gap: 4px; margin-left: auto; color: #999; font-size: 12px; }
 .reportBody { display: grid; grid-template-columns: 190px minmax(0, 1fr); gap: 18px; min-height: 0; }
+.toc {
+  display: grid; align-content: start; gap: 2px; min-height: 0; margin: 0; padding: 0 12px 0 0; overflow-y: auto; border-right: 1px solid #eee;
+  list-style: none; font-size: 12.5px; scrollbar-width: thin;
+}
+/* A phone has no room for the list beside the text: only the scrolling preview stays (after .toc, so it wins). */
 @media (max-width: 640px) { .reportBody { grid-template-columns: minmax(0, 1fr); } .toc { display: none; } }
-.toc { display: grid; align-content: start; gap: 2px; margin: 0; padding: 0 12px 0 0; border-right: 1px solid #eee; list-style: none; font-size: 12.5px; }
 .toc li { padding: 4px 8px; border-radius: 6px; color: #aaa; }
 .toc li[data-done] { color: #555; }
 .toc li[data-on] { background: #fff7e0; color: var(--j-ink); font-weight: 600; }
