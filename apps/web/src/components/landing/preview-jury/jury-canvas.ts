@@ -9,7 +9,8 @@ import { BEAT, type Scene, type StageKey } from './jury-scenes';
 /**
  * Pure read-out of the canvas at a clock time. The report sits in the middle; each person's work grows downward
  * under their mark as a short string of cards that only carry a status word, a count and at most one line of
- * opinion. Lines between the report and the marks light up for what is happening now. Full text lives in the records.
+ * opinion. Lines between the report and the marks light up for what is happening now; the revision is a new report
+ * under the summary. Full text lives in the records.
  */
 export type CanvasCard =
   | { kind: 'read'; key: string; round: 1 | 2; state: 'reading' | 'done' | 'failed' }
@@ -23,7 +24,8 @@ export type CanvasCard =
   /** What a reviewer hands to the summary: how many issues, how many key decisions it wants changed. */
   | { kind: 'result'; key: string; issues: number; changes: number };
 
-export type Node = SeatCode | 'doc';
+/** doc: the report under review, on top; next: the revised report the summary writes, at the bottom. */
+export type Node = SeatCode | 'doc' | 'next';
 /** live: the work happening now; split: two sides that disagree; flow: opinions going to the summary. */
 export type Edge = { from: Node; to: Node; tone: 'live' | 'split' | 'flow' };
 
@@ -39,7 +41,9 @@ export type CanvasView = {
   edges: Edge[];
   /** Reviewers whose results are threaded to the summary: none until it starts writing, then one by one. */
   joined: Seat[];
-  doc: { state: 'waiting' | 'reading' | 'revised' | 'failed'; changed: number };
+  doc: { state: 'waiting' | 'reading' };
+  /** Under the summary: the revised report once written, or a note that the original stays unchanged. */
+  next: { state: 'none' | 'revised' | 'unchanged'; changed: number };
 };
 
 /** "评审 A 开始" but "首席主笔开始": a space only after a name ending in a Latin letter or digit. */
@@ -67,7 +71,8 @@ export function canvasAt(scenes: readonly Scene[], clock: number, names: JurySea
   const last = shown[shown.length - 1] ?? null;
   const columns = emptyColumns();
   const view: CanvasView = {
-    stage: last?.stage ?? null, caption: '评审即将开始', focus: [], current: null, columns, edges: [], joined: [], doc: { state: 'waiting', changed: 0 },
+    stage: last?.stage ?? null, caption: '评审即将开始', focus: [], current: null, columns, edges: [], joined: [], doc: { state: 'waiting' },
+    next: { state: 'none', changed: 0 },
   };
 
   for (const scene of shown) {
@@ -225,12 +230,13 @@ export function canvasAt(scenes: readonly Scene[], clock: number, names: JurySea
       case 'revision': {
         const ok = scene.result.type === 'revision_ready_for_choice';
         const changed = scene.result.type === 'revision_ready_for_choice' ? scene.result.changedSections : null;
-        place(columns, 'S', { kind: 'revision', key: 'revision', changed });
-        view.doc = { state: ok ? 'revised' : 'failed', changed: changed ?? 0 };
+        // A revision becomes the new report under the summary; only a failed one stays a card in its column.
+        if (!ok) place(columns, 'S', { kind: 'revision', key: 'revision', changed });
+        view.next = { state: ok ? 'revised' : 'unchanged', changed: changed ?? 0 };
         if (now) {
-          view.current = 'revision';
+          view.current = ok ? 'next' : 'revision';
           view.focus = ['S'];
-          view.edges = [{ from: 'S', to: 'doc', tone: 'live' }];
+          view.edges = ok ? [{ from: 'S', to: 'next', tone: 'live' }] : [];
           view.caption = ok ? `修订稿写好了：改了 ${changed} 章，用不用由你逐章决定` : '修订稿没有通过检查，三位评审的意见仍可参考';
         }
         break;
@@ -242,6 +248,7 @@ export function canvasAt(scenes: readonly Scene[], clock: number, names: JurySea
 
 /** The status word under a person's mark. */
 export function statusWord(view: CanvasView, seat: SeatCode): string {
+  if (seat === 'S' && view.next.state === 'revised') return '修订稿已交';
   const cards = view.columns[seat];
   const latest = cards[cards.length - 1];
   if (cards.some(card => card.kind === 'read' && card.state === 'failed')) return '未计入';

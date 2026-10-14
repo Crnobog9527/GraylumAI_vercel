@@ -7,27 +7,31 @@ import {
   DECISIONS, DECISION_LABEL, SEATS, STANCE_LABEL, VERDICT_LABEL, type JurySeatNames, type Seat, type SeatCode,
 } from './jury-events';
 import { statusWord, type CanvasCard, type CanvasView, type Edge, type Node } from './jury-canvas';
+import { REVISION_TEXT } from './jury-mock-rulings';
 import { REPORT_CHAPTERS, REPORT_TITLE } from './jury-report';
 import { RulingSeal, SeatMark } from './JuryBits';
 import styles from './jury-canvas.module.css';
 
 type Box = { cx: number; cy: number; top: number; bottom: number; left: number; right: number };
-type Boxes = Partial<Record<Node | `end-${SeatCode}` | 'board', Box>>;
+type Boxes = Partial<Record<Node | `end-${SeatCode}`, Box>>;
 type Hover = { onPeek: (seat: SeatCode | null) => void; onPick: (seat: SeatCode) => void };
 
 const EXCERPT = REPORT_CHAPTERS.slice(0, 2).map(chapter => chapter.body).join(' ');
+/** The new report opens on what changed: the revised text of the first changed chapters. */
+const REVISED_EXCERPT = Object.values(REVISION_TEXT).slice(0, 2).map(text => text.revised).join(' ');
 
 /**
  * The review as a canvas: the user's report on top, the three reviewers hung under it on threads, the summary under
- * them (threaded to their results only once it starts writing), and each person's work growing downward as a short string of cards. Only the thing happening now is lit;
- * pointing at (or tapping) a person or a card opens their full record.
+ * them (threaded to their results only once it starts writing) and the revised report under the summary. Each
+ * person's work grows downward as a short string of cards. Only the thing happening now is lit; pointing at (or tapping) a person or a card opens their full
+ * record.
  */
 export function JuryCanvas({ view, names, selected, onPeek, onPick }: {
   view: CanvasView; names: JurySeatNames; selected: SeatCode | null;
 } & Hover) {
   const scroller = useRef<HTMLDivElement>(null);
   const board = useRef<HTMLDivElement>(null);
-  const boxes = useNodeBoxes(board, `${view.caption}|${SEATS.map(seat => view.columns[seat].length).join()}`);
+  const boxes = useNodeBoxes(board, `${view.caption}|${view.next.state}|${SEATS.map(seat => view.columns[seat].length).join()}`);
   useFollowCurrent(scroller, view.current, view.focus.join());
   const lane = { view, names, selected, onPeek, onPick };
 
@@ -41,11 +45,7 @@ export function JuryCanvas({ view, names, selected, onPeek, onPick }: {
           <p className={styles.excerpt}>{EXCERPT}</p>
           <footer>
             <span>{REPORT_CHAPTERS.length} 章</span>
-            {view.doc.state === 'revised' ? (
-              <span className={styles.docStamp}><FileCheck2 size={14} aria-hidden="true" />修订稿改了 {view.doc.changed} 章</span>
-            ) : view.doc.state === 'failed' ? (
-              <span className={styles.docStamp} data-failed="true"><FileX2 size={14} aria-hidden="true" />修订稿未通过检查</span>
-            ) : view.doc.state === 'reading' ? <span className={styles.docReading}>正在被阅读</span> : null}
+            {view.doc.state === 'reading' ? <span className={styles.docReading}>正在被阅读</span> : null}
           </footer>
         </article>
         <div className={styles.lanes}>
@@ -54,6 +54,18 @@ export function JuryCanvas({ view, names, selected, onPeek, onPick }: {
         <div className={styles.sink}>
           <Lane seat="S" {...lane} />
         </div>
+        {view.next.state === 'revised' ? (
+          <article className={styles.doc} data-node="next" data-state="revised" data-current={view.current === 'next'}>
+            <h2>修订后的{REPORT_TITLE}</h2>
+            <p className={styles.excerpt}>{REVISED_EXCERPT}</p>
+            <footer>
+              <span>{REPORT_CHAPTERS.length} 章</span>
+              <span className={styles.docStamp}><FileCheck2 size={14} aria-hidden="true" />修订稿改了 {view.next.changed} 章</span>
+            </footer>
+          </article>
+        ) : view.next.state === 'unchanged' ? (
+          <p className={styles.unchanged}><FileX2 size={15} aria-hidden="true" />原文没有任何改动</p>
+        ) : null}
       </div>
     </div>
   );
@@ -192,7 +204,7 @@ function Line({ icon, text, muted, accent }: { icon: ReactNode; text: string; mu
   );
 }
 
-/** Where each node sits on the board (marks, the bottom of each column, the board itself), re-measured as cards arrive. */
+/** Where each node sits on the board (the reports, the marks, the bottom of each column), re-measured as cards arrive. */
 function useNodeBoxes(board: RefObject<HTMLDivElement | null>, layout: string) {
   const [boxes, setBoxes] = useState<Boxes>({});
   const measure = useCallback(() => {
@@ -203,7 +215,7 @@ function useNodeBoxes(board: RefObject<HTMLDivElement | null>, layout: string) {
       cx: rect.left - origin.left + rect.width / 2, cy: rect.top - origin.top + rect.height / 2,
       top: rect.top - origin.top, bottom: rect.bottom - origin.top, left: rect.left - origin.left, right: rect.right - origin.left,
     });
-    const next: Boxes = { board: box(origin) };
+    const next: Boxes = {};
     root.querySelectorAll<HTMLElement>('[data-node]').forEach(element => { next[element.dataset.node as Node] = box(element.getBoundingClientRect()); });
     root.querySelectorAll<HTMLElement>('[data-node-end]').forEach(element => {
       next[`end-${element.dataset.nodeEnd as SeatCode}`] = box(element.getBoundingClientRect());
@@ -225,9 +237,14 @@ function useNodeBoxes(board: RefObject<HTMLDivElement | null>, layout: string) {
 function useFollowCurrent(scroller: RefObject<HTMLDivElement | null>, current: string | null, focus: string) {
   useEffect(() => {
     const root = scroller.current;
-    if (!root || root.scrollHeight <= root.clientHeight + 1 || getComputedStyle(root).overflowY === 'visible') return;
-    const target = root.querySelector<HTMLElement>('[data-current="true"]');
-    if (!target) return;
+    const target = root?.querySelector<HTMLElement>('[data-current="true"]');
+    if (!root || !target) return;
+    if (getComputedStyle(root).overflowY === 'visible') {
+      // On a phone the page itself scrolls: move it only once, to bring the new report into view at the end.
+      if (current === 'next') target.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      return;
+    }
+    if (root.scrollHeight <= root.clientHeight + 1) return;
     const top = target.getBoundingClientRect().top - root.getBoundingClientRect().top + root.scrollTop;
     const bottom = top + target.offsetHeight;
     if (top < root.scrollTop + 60 || bottom > root.scrollTop + root.clientHeight - 24) {
@@ -250,36 +267,31 @@ function arcPath(from: Box, to: Box): string {
   return `M ${from.cx} ${from.top} C ${from.cx} ${y - lift}, ${to.cx} ${y - lift}, ${to.cx} ${to.top}`;
 }
 
-/** The revision going back: out of the summary's right side, up the right of the canvas, into the report's side. */
-function returnPath(summary: Box, doc: Box, board: Box, outer: Box): string {
-  const reach = Math.min(board.right - 12, outer.right + 36);
-  return `M ${summary.right} ${summary.cy} C ${reach} ${summary.cy}, ${reach} ${doc.cy}, ${doc.right} ${doc.cy}`;
-}
-
 /**
  * The threads: the report to each reviewer always (faint); each reviewer's result to the summary only once it starts
- * writing; then whatever is lit now.
+ * writing; the summary to the new report it writes; then whatever is lit now.
  */
 function Wires({ boxes, edges, joined }: { boxes: Boxes; edges: readonly Edge[]; joined: readonly Seat[] }) {
-  const { doc, board, S: summary } = boxes;
-  if (!doc || !board || !summary || SEATS.some(seat => !boxes[seat] || !boxes[`end-${seat}`])) {
+  const { doc, S: summary } = boxes;
+  if (!doc || !summary || SEATS.some(seat => !boxes[seat] || !boxes[`end-${seat}`])) {
     return <svg className={styles.wires} aria-hidden="true" />;
   }
   const spread = (seat: Seat) => (SEATS.indexOf(seat) - 1) * 28;
   const join = (seat: Seat) => threadPath(boxes[`end-${seat}`] as Box, summary, 0);
   const path = (edge: Edge) => {
-    if (edge.from === 'S' && edge.to === 'doc') return returnPath(summary, doc, board, boxes['end-C'] as Box);
+    if (edge.to === 'next') return boxes.next && boxes['end-S'] ? threadPath(boxes['end-S'], boxes.next, 0) : '';
     if (edge.from === 'doc') return threadPath(doc, boxes[edge.to] as Box, spread(edge.to as Seat));
     if (edge.to === 'S') return join(edge.from as Seat);
-    return arcPath(boxes[edge.from] as Box, boxes[edge.to] as Box);
+    const from = boxes[edge.from];
+    const to = boxes[edge.to];
+    return from && to ? arcPath(from, to) : '';
   };
   return (
     <svg className={styles.wires} aria-hidden="true">
       {SEATS.map(seat => <path key={seat} d={threadPath(doc, boxes[seat] as Box, spread(seat))} className={styles.thread} />)}
       {joined.map(seat => <path key={`join-${seat}`} d={join(seat)} className={styles.thread} />)}
       {edges.map(edge => (
-        <path key={`${edge.from}-${edge.to}`} d={path(edge)} className={styles.lit} data-tone={edge.tone}
-          data-reverse={edge.to === 'doc'} />
+        <path key={`${edge.from}-${edge.to}`} d={path(edge)} className={styles.lit} data-tone={edge.tone} />
       ))}
     </svg>
   );

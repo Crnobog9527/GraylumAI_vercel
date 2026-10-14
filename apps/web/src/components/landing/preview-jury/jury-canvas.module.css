@@ -35,6 +35,12 @@
   box-shadow: 4px 4px 0 -1px var(--j-paper), 4px 4px 0 0 var(--j-rule), 0 18px 32px -24px rgba(0, 0, 0, .3);
   transition: border-color .4s, box-shadow .4s;
 }
+.sink + .doc, .sink + .unchanged { margin-top: 64px; }
+.unchanged {
+  position: relative; z-index: 2; display: inline-flex; align-items: center; gap: 8px; margin-bottom: 0; padding: 10px 18px;
+  border: 1px dashed var(--j-ink-soft); border-radius: 8px; background: var(--j-paper); color: var(--j-muted); font-size: 15px;
+  animation: captionIn .45s var(--j-ease) both;
+}
 .doc h2 { margin: 0; font-family: var(--j-serif); font-size: 20px; font-weight: 700; line-height: 1.45; }
 .excerpt {
   display: -webkit-box; margin: 0; overflow: hidden; color: var(--j-muted); font-family: var(--j-serif); font-size: 15px; line-height: 1.75;
@@ -133,6 +139,7 @@
   .board { justify-items: stretch; padding: 16px 14px 24px; }
   .caption { margin-bottom: 14px; font-size: 18px; text-align: left; }
   .doc { width: 100%; padding: 14px 16px 12px; }
+  .sink + .doc, .sink + .unchanged { margin-top: 20px; }
   .doc h2 { font-size: 18px; }
   .wires { display: none; }
   .lanes {
@@ -147,6 +154,6 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .caption, .docStamp, .cards li, .quote { animation: none; }
+  .caption, .docStamp, .cards li, .quote, .unchanged { animation: none; }
   .lit, .pulse::after, .docReading::before { animation: none; }
 }

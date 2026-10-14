@@ -368,6 +368,7 @@ describe('the canvas', () => {
   it('threads each reviewer to the report while reading, and shows only the current issue in words', () => {
     const reading = canvasAt(scenes, 10_000, names);
     expect(reading.doc.state).toBe('reading');
+    expect(reading.next.state).toBe('none');
     expect(reading.edges.every(edge => edge.from === 'doc')).toBe(true);
     const critique = scenes.find(scene => scene.kind === 'critique');
     if (critique?.kind !== 'critique') throw new Error('expected a critique');
@@ -396,14 +397,15 @@ describe('the canvas', () => {
     expect(card?.kind === 'stances' && card.items.find(item => item.decision === turn.response.decision)?.turned).toBe(true);
   });
 
-  it('threads the summary to each result only once it writes, gathers every ruling and hands the revision back', () => {
+  it('threads the summary to each result only once it writes, then writes the revision as a new report under it', () => {
     const end = canvasAt(scenes, playbackLength(scenes) - 1, names);
     const rulings = events('full').filter(event => event.type === 'adjudication');
     const card = end.columns.S.find(item => item.kind === 'rulings');
     expect(card?.kind === 'rulings' && card.total).toBe(rulings.length);
     expect(card?.kind === 'rulings' && card.adopted).toBe(rulings.filter(event => event.type === 'adjudication' && event.adopted).length);
-    expect(end.doc).toEqual({ state: 'revised', changed: choosable(findScenario('full').detail.summary.sections).length });
-    expect(end.edges).toEqual([{ from: 'S', to: 'doc', tone: 'live' }]);
+    expect(end.next).toEqual({ state: 'revised', changed: choosable(findScenario('full').detail.summary.sections).length });
+    expect(end.doc.state).toBe('waiting');
+    expect(end.edges).toEqual([{ from: 'S', to: 'next', tone: 'live' }]);
     const writing = scenes.find(scene => scene.kind === 'writing');
     if (!writing) throw new Error('expected a writing scene');
     for (let clock = 0; clock < writing.start; clock += 500) {
@@ -419,7 +421,9 @@ describe('the canvas', () => {
     const failedEnd = canvasAt(buildScenes(findScenario('failed').arrivals), Infinity, names);
     expect(failedEnd.joined).toEqual(['A', 'C']);
     const failed = buildScenes(findScenario('failed').arrivals);
-    expect(canvasAt(failed, playbackLength(failed) - 1, names).doc.state).toBe('failed');
+    const unchanged = canvasAt(failed, playbackLength(failed) - 1, names);
+    expect(unchanged.next.state).toBe('unchanged');
+    expect(unchanged.edges).toEqual([]);
     const consensus = buildScenes(findScenario('consensus').arrivals);
     expect(consensus.some(scene => scene.kind === 'response')).toBe(false);
   });
