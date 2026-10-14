@@ -363,6 +363,10 @@ it('a refusal before admission releases its envelope and gives the text back; af
   expect(storage.getItem('key')).toBe(raw);expect(isReleasedRefusal(cause)).toBe(false);
  }
  expect(releaseRejectedAnswer(storage,'key','a',refusal(412),text=>restored.push(text))).toBe(false); // callers that do not say: kept
+ const pending=Object.assign(new Error('RUNTIME_ORGANIZER_PENDING：上一轮整理尚未完成，新消息尚未准入，请先处理原任务。'),
+  {data:{httpStatus:412,code:'PRECONDITION_FAILED',path:'opc.mentorTurnStream'}});
+ expect(releaseRejectedAnswer(storage,'key','a',pending,text=>restored.push(text),false)).toBe(false); // waits for the organizer
+ expect(storage.getItem('key')).toBe(raw);
  const cause=refusal(412);
  expect(isRefusedBeforeAdmission(cause,false)).toBe(true);
  expect(releaseRejectedAnswer(storage,'key','a',cause,text=>restored.push(text),false)).toBe(true);

@@ -3,7 +3,7 @@ import { CHAT_ACTION, type ChatNotice } from '@/components/chat/ChatInlineNotice
 import { PROVIDER_REJECTED_NOTICE, gateAdmissionNotice, gateResultNotice } from '@/lib/runtime-gate-notice';
 import { inFlight } from '@/app/runtime/runtime-notices';
 import { definiteRefusal, definiteRefusalNotice } from '@/app/runtime/gate-notices';
-import { hostNotice, isPaygWaiting } from '@/lib/payg-wait';
+import { hostNotice, isOrganizerPendingError, isPaygWaiting } from '@/lib/payg-wait';
 
 /** Fixed wording for a failed topic operation; the pending operation itself is kept by the caller. */
 export function topicFailureMessage(cause: unknown) {
@@ -26,10 +26,11 @@ export function topicFailureMessage(cause: unknown) {
 /**
  * A topic turn the server definitely refused before admitting it (an HTTP 4xx such as a missing billing
  * profile): nothing exists to recover, so the caller releases it instead of holding it as unknown.
- * A request-identity conflict keeps its own handling.
+ * A request-identity conflict and a pending earlier organizer keep their own handling.
  */
 export function topicTurnRefused(cause: unknown) {
-  return definiteRefusal(cause)?.path === 'opc.topicTurn' && !(cause as Error).message.includes('OPC_REQUEST_CONFLICT');
+  return definiteRefusal(cause)?.path === 'opc.topicTurn' && !(cause as Error).message.includes('OPC_REQUEST_CONFLICT')
+    && !isOrganizerPendingError(cause); // waits for the earlier organizer (payg-wait), never a release
 }
 
 /**

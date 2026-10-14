@@ -4,7 +4,7 @@ import { OPENING_INPUT, openingRequestId } from "@repo/api/src/shared/opcQuestio
 import { RUNTIME_INPUT_TOO_LONG_MESSAGE } from "../../../../../../packages/api/src/shared/runtimeInputMessages";
 import { STEP_SUMMARY_PREFIX, SUMMARY_REFUSALS } from "./step-summary";
 import { gateResultNotice, PROVIDER_HISTORY_NOTICE } from "@/lib/runtime-gate-notice";
-import { blockedAdmission, hostNotice, type PaygViewFields } from "@/lib/payg-wait";
+import { blockedAdmission, hostNotice, isOrganizerPendingError, type PaygViewFields } from "@/lib/payg-wait";
 import { definiteRefusal } from "@/app/runtime/gate-notices";
 
 /** One mentor turn as sent to `opc.mentorTurnStream` (same input as `opc.prepareStep`). */
@@ -275,9 +275,11 @@ export function isInputTooLong(error: unknown): boolean {
 
 const releasedRefusals = new WeakSet<object>();
 
-/** Refused before admission (an HTTP 4xx before the `admitted` event): no execution exists, so nothing is kept. */
+/** Refused before admission (an HTTP 4xx before the `admitted` event): no execution exists, so nothing is kept.
+ * A pending earlier organizer is a wait, not a refusal: its request stays for the payg-wait resume. */
 export function isRefusedBeforeAdmission(error: unknown, admitted: boolean): boolean {
-  return !admitted && ["opc.mentorTurnStream", "opc.prepareStep"].includes(definiteRefusal(error)?.path ?? "");
+  return !admitted && ["opc.mentorTurnStream", "opc.prepareStep"].includes(definiteRefusal(error)?.path ?? "")
+    && !isOrganizerPendingError(error);
 }
 
 /** A refusal whose request was released by releaseRejectedAnswer: its notice must not say the request is kept. */
