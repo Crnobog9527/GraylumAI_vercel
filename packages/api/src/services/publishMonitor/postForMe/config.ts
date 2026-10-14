@@ -40,7 +40,9 @@ export function sharedLimiter(env: NodeJS.ProcessEnv = process.env): Limiter {
       try {
         if (!shared) {
           const { url, token } = redisEnvironment(env);
-          const redis = new Redis({ url, token, retry: { retries: 0 } });
+          // Each Redis request is cancelled at the same deadline, so a stalled Upstash call cannot linger and later
+          // take a token for a provider call that was never admitted.
+          const redis = new Redis({ url, token, retry: { retries: 0 }, signal: () => AbortSignal.timeout(DEADLINE_MS) });
           const common = { redis, analytics: false, timeout: 0 } as const;
           shared = {
             minute: new Ratelimit({ ...common, limiter: Ratelimit.slidingWindow(SHARED_PER_MINUTE, '1 m'),

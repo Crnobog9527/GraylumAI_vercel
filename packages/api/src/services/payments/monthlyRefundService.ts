@@ -7,6 +7,7 @@ import { planMonthlyRefundStep, type MonthlyRefundIntent, type MonthlyRefundObse
 import { evidence, objectId, readMonthlyProvider, refundFact, stageKey, type MonthlyStripe } from './monthlyRefundProvider';
 import { monthlyRefundPolicyReason } from './monthlyRefundError';
 import { resolveStripeScope } from './stripeCheckoutPersistence';
+import { GRAYLUM_INITIATED_CANCEL } from './purchaseFacts';
 
 export type MonthlyDb = Pick<SupabaseClient, 'from' | 'rpc'>;
 type StoredIntent = MonthlyRefundIntent & {
@@ -138,10 +139,13 @@ export async function executeMonthlyRefund(db: MonthlyDb, stripe: MonthlyStripe,
           metadata: { orderId, refundIntentId: i.id } }, { idempotencyKey: stageKey(i, 'refund') });
         await recordMonthlyRefund(db, stripe, orderId, refund);
       } else if (decision.stage === 'cancel') {
-        await stripe.subscriptions.cancel(i.terms.providerSubscriptionId, { invoice_now: false, prorate: false });
+        // Graylum's own cancellation: never read as the buyer opting out (founder window, PAY-STRIPE-MP).
+        await stripe.subscriptions.cancel(i.terms.providerSubscriptionId, { invoice_now: false, prorate: false,
+          cancellation_details: { comment: GRAYLUM_INITIATED_CANCEL } });
       } else {
         await stripe.subscriptions.update(i.terms.providerSubscriptionId, {
           cancel_at_period_end: decision.stage === 'stop_renewal',
+          ...(decision.stage === 'stop_renewal' ? { cancellation_details: { comment: GRAYLUM_INITIATED_CANCEL } } : {}),
           metadata: { graylum_monthly_refund_intent: i.id },
         }, { idempotencyKey: stageKey(i, decision.stage) });
       }

@@ -82,6 +82,20 @@ export async function sourceCases({admin}) {
       assert.equal(cardPack.purchase_snapshot.tax_behavior,'exclusive');
       assert.equal((await pack2('card')).rows[0].id,cardPack.id,'repeated submit returns the same pending order');
       await assert.rejects(()=>pack2('alipay'),/PURCHASE_PENDING/);
+      // 0237: an international card pack is a one-time Stripe payment and is granted like a wallet pack.
+      const packExpiry=new Date(Date.now()+1800000),packCheckout=`cs_pack_${cardPack.id}`;
+      await admin.query('SELECT pay_waffo_claim_checkout($1,$2,$3,$4,$5)',[user,cardPack.id,'fixture',
+        {orderId:cardPack.id,userId:user,method:'card',merchant:'fixture',mode:'test',providerRequest:{fixture:true}},packExpiry]);
+      await admin.query('SELECT pay_waffo_bind_checkout($1,$2,$3,$4,$5)',[user,cardPack.id,'fixture',packCheckout,packExpiry]);
+      const creditsBefore=(await admin.query('SELECT credits FROM profiles WHERE id=$1',[user])).rows[0].credits;
+      const packPaid=new Date();
+      const payPack=(amount,subscription=null)=>admin.query(`SELECT pay_waffo_fulfill_payment($1,'fixture',$2,$3,$4,'usd',$5,$6,NULL,NULL) v`,
+        [cardPack.id,packCheckout,`pi_pack_${cardPack.id}`,amount,packPaid,subscription]);
+      await assert.rejects(()=>payPack(890+160),/PAYMENT_FACT_MISMATCH/,'a tax-inclusive amount is not the pre-tax order amount');
+      await assert.rejects(()=>payPack(890,'sub_pack'),/PAYMENT_CONFLICT/,'a pack never carries a subscription');
+      assert.equal((await payPack(890)).rows[0].v.state,'fulfilled');
+      assert.equal((await payPack(890)).rows[0].v.duplicate,true);
+      assert.equal((await admin.query('SELECT credits FROM profiles WHERE id=$1',[user])).rows[0].credits,creditsBefore+990);
     }
     if(channel==='waffo' && cycle==='monthly') for(const [externalMode,staleStatus] of [
       ['test','canceled'],['test','active'],['test','trialing'],['test','active-current'],['live','active'],[null,'trialing'],
@@ -111,7 +125,7 @@ export async function sourceCases({admin}) {
     await admin.query("UPDATE subscription_credit_grants SET accounting_state='review_required',accounting_review_reason='refund review' WHERE id=$1",[grant]);
     await assert.rejects(()=>rpc('bill2_prepare',[user,randomUUID(),payload]));
   }
-  return ['stripe-mp-card-pack-one-time','stripe-mp-card-cn-pack-denied','stripe-mp-card-pack-repeat-same-order','waffo-month-bill2-reserve-settle-release','waffo-year-bill2-reserve-settle-release',
+  return ['stripe-mp-card-pack-one-time','stripe-mp-card-pack-granted-once','stripe-mp-card-pack-pre-tax-only','stripe-mp-card-cn-pack-denied','stripe-mp-card-pack-repeat-same-order','waffo-month-bill2-reserve-settle-release','waffo-year-bill2-reserve-settle-release',
     'wallet-year-bill2-reserve-settle-release','source-refund-review-isolation','internal-member-wallet-pack-eligibility','frozen-source-amount-guard',
     'external-member-after-internal-expiry','stale-internal-only-denied','cross-mode-membership-denied','expired-active-internal-history','expired-trialing-internal-history',
     'effective-membership-ambiguity-still-denied','legacy-duplicate-renewal-guard-preserved'];

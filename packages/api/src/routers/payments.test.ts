@@ -41,6 +41,9 @@ vi.mock('../lib/logger', () => ({
   logger: loggerState,
 }));
 
+const methodState = vi.hoisted(() => ({ recover: vi.fn(async () => null as { orderId: string } | null) }));
+vi.mock('../services/payments/walletWebhook', () => ({ recoverMethodCheckout: methodState.recover }));
+
 vi.mock('../services/stripeFulfillment', () => ({
   fulfillCreditPackageOrder: vi.fn(),
   fulfillMembershipInvoice: vi.fn(),
@@ -3623,5 +3626,42 @@ describe('PAY-1 Customer Portal', () => {
     const caller = paymentsRouter.createCaller({ user: null, headers: new Headers(), supabase: h.supabase } as any);
     await expect(caller.createCustomerPortalSession({})).rejects.toMatchObject({ code: 'UNAUTHORIZED' });
     expect(h.create).not.toHaveBeenCalled();
+  });
+});
+
+describe('PAY-STRIPE-MP browser checkout return', () => {
+  beforeEach(() => { methodState.recover.mockReset().mockResolvedValue(null); vi.mocked(upsertPaymentOrderBySession).mockReset();
+    vi.mocked(fulfillPaidMembershipCheckoutSession).mockReset(); });
+  function harness(order: { status: string; fulfilled_at: string | null } | null) {
+    const session = { id: 'cs_card', mode: 'subscription', status: 'complete', payment_status: 'paid',
+      client_reference_id: 'user-1', metadata: { userId: 'user-1', orderId: '00000000-0000-4000-8000-000000000009' } };
+    stripeState.getStripeClient.mockReturnValue({ checkout: { sessions: { retrieve: vi.fn().mockResolvedValue(session) } } });
+    const eq = vi.fn(() => chain);
+    const chain = { select: vi.fn(() => chain), eq, maybeSingle: vi.fn().mockResolvedValue({ data: order, error: null }) };
+    const admin = { from: vi.fn((table: string) => { if (table !== 'payment_orders') throw new Error(table); return chain; }), rpc: vi.fn() };
+    const profile = { id: 'user-1', role: 'user', status: 'active', nickname: 'User', email: 'user@example.com' };
+    const user = { from(table: string) {
+      if (table === 'profiles') return createSingleQueryBuilder(Promise.resolve({ data: profile, error: null }));
+      throw new Error(`Unexpected user table ${table}`);
+    } };
+    const caller = createProtectedCaller({ supabase: user, supabaseAdmin: admin });
+    return { caller, eq, admin };
+  }
+  it('syncs a card or wallet order through the method recovery, never the legacy recording', async () => {
+    methodState.recover.mockResolvedValue({ orderId: 'order-card' });
+    const h = harness({ status: 'completed', fulfilled_at: '2026-10-13T00:00:00.000Z' });
+    await expect(h.caller.syncCheckoutSession({ sessionId: 'cs_card' })).resolves.toEqual({ sessionId: 'cs_card', mode: 'subscription',
+      checkoutStatus: 'complete', paymentStatus: 'paid', orderStatus: 'completed', fulfilledAt: '2026-10-13T00:00:00.000Z',
+      stripeSubscriptionId: null, stripeInvoiceId: null });
+    expect(methodState.recover).toHaveBeenCalledWith(h.admin, expect.anything(), 'cs_card');
+    expect(h.eq).toHaveBeenCalledWith('user_id', 'user-1');
+    expect(upsertPaymentOrderBySession).not.toHaveBeenCalled();
+    expect(fulfillPaidMembershipCheckoutSession).not.toHaveBeenCalled();
+  });
+  it('does not fall through to the legacy path when the method recovery fails', async () => {
+    methodState.recover.mockRejectedValue(new Error('PAY_WAFFO_PAYMENT_CONFLICT'));
+    const h = harness(null);
+    await expect(h.caller.syncCheckoutSession({ sessionId: 'cs_card' })).rejects.toBeTruthy();
+    expect(upsertPaymentOrderBySession).not.toHaveBeenCalled();
   });
 });

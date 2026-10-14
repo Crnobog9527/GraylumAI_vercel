@@ -169,7 +169,8 @@ try {
     external_id,state,expires_at) VALUES($1,$2,$3,'x','{feeds}',$4,'awaiting_callback',now()+interval '10 minutes')`,
   [user.a, user.business, user.account, 'a'.repeat(16) + '.' + 'b'.repeat(16)]);
   await c.query(`INSERT INTO social_publish_jobs(actor_id,business_id,idempotency_key,request_fingerprint,targets,state)
-    VALUES($1,$2,'unknown-key-01',repeat('c',64),'[{"platform":"x"}]','unknown')`, [user.a, user.business]);
+    VALUES($1,$2,'unknown-key-01',repeat('c',64),'[{"platform":"x"}]','unknown'),
+    ($1,$2,'claimed-key-01',repeat('d',64),'[{"platform":"x"}]','claimed')`, [user.a, user.business]);
   await closeAccount(c, { actor: user.a });
   await code(asService(() => v('SELECT publish_monitor_set_auto_review($1,false) v', [user.a])), '42501');
   assert.ok(Number(await v('SELECT publish_monitor_erasure_remaining($1) v', [user.a])) > 0);
@@ -187,6 +188,9 @@ try {
   assert.equal(kept.provider_account_id, 'pfm_own_1', 'provider ID stays reserved until provider cleanup');
   assert.equal(await v("SELECT count(*)::int v FROM social_publish_jobs WHERE actor_id=$1 AND state='completed'", [user.a]), 0);
   assert.equal(await v("SELECT business_id IS NULL v FROM social_publish_jobs WHERE actor_id=$1 AND state='unknown'", [user.a]), true);
+  // A claimed job holds frozen credits and slots: kept (without brand links) until publishing releases them.
+  assert.equal(await v("SELECT business_id IS NULL AND work_item_id IS NULL v FROM social_publish_jobs"
+    + " WHERE actor_id=$1 AND state='claimed'", [user.a]), true);
   assert.equal(await v('SELECT business_id IS NULL AND target_account_project_id IS NULL v FROM social_connect_requests'
     + ' WHERE actor_id=$1', [user.a]), true);
   // Brand rows must prune exactly as they do for a user who never used publish-monitor (control).

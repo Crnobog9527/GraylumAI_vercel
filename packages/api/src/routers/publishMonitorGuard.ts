@@ -27,12 +27,12 @@ function toTrpc(cause: unknown): TRPCError {
 }
 
 export async function guarded<T>(ctx: { hasSupabaseAdminPrivileges: boolean; supabaseAdmin: SwitchReader },
-  work: () => Promise<T>): Promise<T> {
+  work: () => Promise<T>, requireSwitch = true): Promise<T> {
   if (!ctx.hasSupabaseAdminPrivileges) {
     throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'PUBLISH_MONITOR_UNAVAILABLE' });
   }
   try {
-    await assertPublishMonitorEnabled(ctx.supabaseAdmin);
+    if (requireSwitch) await assertPublishMonitorEnabled(ctx.supabaseAdmin);
     return await work();
   } catch (cause) {
     throw toTrpc(cause);
