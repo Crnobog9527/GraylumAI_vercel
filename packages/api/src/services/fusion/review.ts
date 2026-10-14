@@ -14,6 +14,7 @@ import { debateRequest, readReviewSkill, resolveReviewSkill, reviewerLabel, revi
 import { reviewDetail, reviewEvents } from './reviewEvents';
 import { adoptionChoices, adoptionSections, applyChoices, type AdoptionChoice } from './reviewAdoption';
 import { ENDED_STATES, reviewRecord, type ReviewPosition, type ReviewView } from './reviewRecord';
+import { CLAIM_REFUSALS, memberCaps, PERMANENT_REFUSALS } from './reviewLimits';
 import { readFusionSettings } from './settings';
 
 type Executor = ReturnType<typeof fusionExecutor>;
@@ -37,23 +38,6 @@ const ATTEMPTS = 3;
 /** JSON with sorted keys: the database stores choices as jsonb, which does not keep key order. */
 const canonical = (value: unknown): string => JSON.stringify(value, (_key, item: unknown) => item && typeof item === 'object' && !Array.isArray(item)
   ? Object.fromEntries(Object.entries(item as Record<string, unknown>).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))) : item);
-/** R14 refusals that retrying cannot fix; transient ones (REPORT_UNAVAILABLE, auth) are retried by the client. */
-// REPORT_REVISION_DECIDED is not here: it can mean this very decision already committed.
-const PERMANENT_REFUSALS = new Set(['REPORT_REVISION_STALE', 'REPORT_SOURCE_CONFLICT', 'CONTENT_ERASED',
-  'REPORT_NOT_COMPLETE', 'REPORT_REVISION_UNSUPPORTED',
-  // R14 replays an identical decision first (0223), so this means the proposal was decided elsewhere (#962 review).
-  'REPORT_REVISION_DECIDED']);
-/** Refusals that will not clear by retrying the same claim (a size or price bound, a setting changed by an
- * administrator, a lapsed entitlement or test window). Every claim goes through one place, so each of them ends the
- * step instead of leaving a review that can never move (#962 review); transient failures are thrown and retried. */
-const CLAIM_REFUSALS: Record<string, string> = { FUSION_INPUT_TOO_LARGE: 'input_too_large', FUSION_ESTIMATE_EXCEEDED: 'price_changed',
-  FUSION_BUDGET_EXCEEDED: 'price_changed', FUSION_REVIEW_DISABLED: 'claim_refused', FUSION_MODEL_DENIED: 'claim_refused',
-  FUSION_MODEL_UNAVAILABLE: 'claim_refused', FUSION_MODEL_ADMISSION_REQUIRED: 'claim_refused', FUSION_MODEL_SEARCH_DENIED: 'claim_refused',
-  FUSION_PAYG_REQUIRED: 'claim_refused', FUSION_MEMBERSHIP_REQUIRED: 'claim_refused', ENTITLEMENTS_FUSION_FORBIDDEN: 'claim_refused',
-  FUSION_GROUP_DENIED: 'claim_refused', BILL2_PAYG_QUOTE_INVALID: 'claim_refused', BILL2_UNIT_MULTIPLIER_INVALID: 'claim_refused',
-  BILL2_INPUT_BOUND_CONFLICT: 'claim_refused', RUNTIME_STAGING_MODEL_DENIED: 'claim_refused', RUNTIME_STAGING_WINDOW_EXPIRED: 'claim_refused',
-  RUNTIME_STAGING_POLICY_INVALID: 'claim_refused', RUNTIME_STAGING_QUOTE_CONFLICT: 'claim_refused',
-  RUNTIME_BILLING_UNIT_MISMATCH: 'claim_refused', RUNTIME_BILLING_UNIT_WINDOW_OUTDATED: 'claim_refused' };
 const stepKey = (at: ReviewPosition) => `review:${at.round}:${at.phase}:${at.attempt}`;
 
 /** FUSION-REVIEW §2.1/§2.2 orchestration over the review record (0236): the server decides each next step;
@@ -184,14 +168,6 @@ export function reviewFlow(deps: { admin: SupabaseClient; actorId: string;
     decisions: opinion.decisions.map(d => level >= 1 ? { ...d, strongestCase: '', strongestAlternative: '', basis: '' } : d),
     issues: level >= 3 ? [] : level >= 2 ? opinion.issues.filter(i => i.severity !== 'minor') : opinion.issues,
     dropped: opinion.dropped };
-  /** The bounds of exactly the members claimed now: a retry of some seats gets only theirs (#962 review). A member
-   * without a frozen bound (a phase the estimate did not allow) gets zero, so it can never be claimed. */
-  const memberCaps = (caps: Record<string, { credits: number; usd: string }> | undefined, members: FusionMember[]) => {
-    if (!caps) return {};
-    const own = members.map(member => caps[member.modelId] ?? { credits: 0, usd: '0' });
-    const micros = own.reduce((sum, cap) => sum + Math.round(Number(cap.usd) * 1e6), 0);
-    return { maxCredits: own.reduce((sum, cap) => sum + cap.credits, 0), maxUsd: (micros / 1e6).toFixed(6) };
-  };
   const phaseOf = (at: ReviewPosition) => at.phase === 'summary' ? 'summary' as const : at.round > 1 ? 'debate' as const : 'review' as const;
   /** Admits and claims the models of the current position that have no finished call yet. */
   async function claimStep(view: ReviewView, src: Source, at: ReviewPosition, models: string[]) {
