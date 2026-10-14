@@ -80,6 +80,7 @@ function Player({ scenario, names }: { scenario: JuryScenario; names: JurySeatNa
 
   const openRecord = useCallback((seat: SeatCode) => {
     setPinned(seat);
+    setPeek(null);
     const target = dossierRef.current;
     if (target && window.matchMedia('(max-width: 1023px)').matches) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }, []);
@@ -97,7 +98,8 @@ function Player({ scenario, names }: { scenario: JuryScenario; names: JurySeatNa
   const ended = playback.finished;
   const scene = sceneAt(scenes, clock);
   const poses = posesAt(scene, clock, failedSeatsAt(scenes, clock));
-  const seat = peek ?? pinned ?? speakerOf(scene) ?? 'A';
+  // Pointing only counts while the room is on screen: once it is gone no leave event may come to clear it.
+  const seat = (ended ? null : peek) ?? pinned ?? speakerOf(scene) ?? 'A';
   const arrived = arrivedAt(scenario.arrivals, ended ? Infinity : clock);
 
   return (
