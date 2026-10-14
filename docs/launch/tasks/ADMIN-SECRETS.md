@@ -9,7 +9,7 @@ Owner 2026-10-14（选项 A）原话：
 
 > 业务第三方密钥改为后台填写，加密存放、只写不读；系统底层密钥继续放 Vercel
 
-这条决定由总控写进 Master Plan 第 2.1 节，本文只引用。
+这条决定由总控写进 Master Plan 第 2.1 节（日期、原话、取代的旧做法：业务第三方密钥放 Vercel 环境变量、OpenRouter 密钥存 `ai_models.api_key`）。本文只引用；在 2.1 节补记之前，以本节原话为依据。
 
 | 归类 | 密钥 | 本任务 |
 | --- | --- | --- |
@@ -152,14 +152,19 @@ invalidatePlatformSecret(slot)
 **OR-1（high，迁移号届时由总控分配）——搬进 Vault，代码改读 Vault，列保留**
 1. 迁移：如果 `platform_secrets` 里还没有 `openrouter`，并且 `ai_models` 里非空的 `api_key` 去掉首尾空白后**恰好只有一种值**，就在数据库内部把它写进 Vault（原文不出数据库），`updated_by` 为空，写一条 `platform_secret_migrate` 审计。有两种以上不同的值时迁移报错停止，由总控请 Owner 决定用哪把；一行都没有时什么也不做（正式环境可能就是这种情况，由 Owner 在后台填写）。可以重复执行：已经有 `openrouter` 时直接跳过。
 2. 代码：5.1 列出的读取点全部改成 `getPlatformSecret('openrouter')`；指纹校验逻辑原样保留，只换密钥来源。后台模型页去掉密钥输入框，改成指向"第三方密钥"区块；`routers/model.ts` 不再接收和写入 `api_key`。`providerUtils` 的 `OPENROUTER_API_KEY` 后备删掉，`envValidator` 不再要求它。
-3. `ai_models.api_key` 列和里面的值**暂时保留**，作为回滚依据。
+3. `ai_models.api_key` 列暂时保留，但**它不是可靠的回滚依据**：OR-1 上线后管理员在后台替换 OpenRouter 密钥，Vault 会更新而这一列不会，列里可能是已经作废的旧密钥。所以回滚时必须先把 Vault 里的当前值写回这一列（见第 5 步），不能直接撤回代码。OR-1 到 OR-2 之间应尽量短。
+   另外：仓库里 9 个集成测试和测试夹具直接往 `ai_models.api_key` 写测试值，OR-1 要把它们改成通过 `platform_secret_set` 写入测试用的 Vault 替身（开工时用 grep 全仓核对一遍）。
 4. 验证：本机集成测试（Runtime 恢复、评审团准入、定位前置判断改读 Vault 后行为不变）；staging 应用迁移后用现有测试窗口做一次真实调用（在已批准的测试预算内），确认没有 `RUNTIME_PROVIDER_BINDING_DENIED`。
-5. 回滚：撤回代码即可，列里的值还在。
+5. 回滚：先在数据库里执行 PR 附带的回滚脚本（不随迁移自动执行）：用 `platform_secret_read('openrouter')` 取 Vault 里的当前值，写回所有 OpenRouter 模型行的 `api_key`（原文只在数据库内部流转），再撤回代码。这样不管 OR-1 之后有没有在后台换过密钥，撤回后用的都是当前有效的那把。回滚脚本在 OR-1 的本机测试里覆盖"上线后换过密钥再回滚"这一情况。
 
 **OR-2（high）——删掉明文列**
 1. 前提：OR-1 已在 staging 部署并验证通过，正式环境的 Vault 里也已有 OpenRouter 密钥（或者确认正式环境本来就没有）。
 2. 迁移：先把 `api_key` 全部置空，再 `ALTER TABLE ai_models DROP COLUMN IF EXISTS api_key`；同时清理 0142 留下的列级授权写法，避免以后的迁移再引用这一列。可重复执行。
-3. 回滚：数据已在 Vault，不会丢。PR 里附一份**不应用**的反向迁移：重新加回 `api_key` 列，并用 `platform_secret_read('openrouter')` 填回去，配合撤回 OR-1 的代码使用。按 AGENTS.md 第 4 节，需要保留的数据不能用"撤回代码"代替恢复，这份脚本就是恢复方式。
+3. 同一个 PR 里改掉还引用这一列的工具和文档，否则删列后会直接报错：
+   - `scripts/check-staging-db-readiness.mjs`（第 415 行统计 `api_key is not null`，第 674 行输出）改成统计 `platform_secret_status()` 里已填写的密钥数量；
+   - `docs/runbooks/STAGING_REPRODUCIBILITY.md` 第 263、302、480 行对应的说明；
+   - `packages/db/tests/run-ai-models-column-grants.mjs`（0142 列级授权的测试）按删列后的结构调整或退役。
+4. 回滚：数据已在 Vault，不会丢。PR 里附一份**不应用**的反向迁移：重新加回 `api_key` 列，并用 `platform_secret_read('openrouter')` 填回去，配合撤回 OR-1 的代码使用。按 AGENTS.md 第 4 节，需要保留的数据不能用"撤回代码"代替恢复，这份脚本就是恢复方式。
 
 ## 6. 删除和注销
 
