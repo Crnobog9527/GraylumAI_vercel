@@ -77,7 +77,8 @@ LANGUAGE sql STABLE SECURITY DEFINER SET search_path=public,pg_temp AS $$
   ORDER BY c.created_at, c.id LIMIT least(greatest(coalesce(p_limit,50),1),200);
 $$;
 
--- The review view also names each call's model (the flow re-claims only models without a finished call).
+-- The review view also names each call's model (the flow re-claims only models without a finished call) and
+-- its dispatch and settlement times (the progress events are ordered by them).
 -- Same signature and grants as 0236.
 CREATE OR REPLACE FUNCTION public.fusion_review_view(rv fusion_reviews) RETURNS jsonb
 LANGUAGE sql STABLE SET search_path=public,pg_temp AS $$
@@ -88,7 +89,7 @@ LANGUAGE sql STABLE SET search_path=public,pg_temp AS $$
     -- Per call: its run, verdict and whether it settled, for continueReview.
     'calls',coalesce((SELECT jsonb_agg(jsonb_build_object('groupId',br.fusion_group_id,'runId',br.id,'callId',c.id,'modelId',br.payload->>'modelId',
       'phase',c.payload->>'phase','dispatched',c.dispatched_at IS NOT NULL,'verdict',c.fusion_verdict,
-      'settled',c.settled_at IS NOT NULL,'state',c.state) ORDER BY c.created_at,c.id)
+      'settled',c.settled_at IS NOT NULL,'state',c.state,'dispatchedAt',c.dispatched_at,'settledAt',c.settled_at) ORDER BY c.created_at,c.id)
       FROM bill2_runs br JOIN bill2_calls c ON c.run_id=br.id
       WHERE br.actor_id=rv.actor_id AND br.fusion_group_id IN (SELECT (x->>'groupId')::uuid FROM jsonb_array_elements(rv.steps) x)),'[]'));
 $$;

@@ -5,21 +5,48 @@ import { z } from 'zod';
  * inputs, so recovery can redo them with the same result. They never call a model or the database. */
 
 export const SEVERITIES = ['critical', 'major', 'minor'] as const;
+/** The four key decisions every reviewer steelmans both ways (Owner 2026-10-14). */
+export const DECISIONS = ['positioning', 'audience', 'platform', 'monetization'] as const;
+export const VERDICTS = ['keep', 'change'] as const;
 const text = (max: number) => z.string().trim().min(1).max(max);
-export const opinionSchema = z.object({
-  issues: z.array(z.object({ location: text(200), problem: text(2000), suggestion: text(2000),
-    severity: z.enum(SEVERITIES) }).strip()).max(50),
-}).strip();
-export type Opinion = z.infer<typeof opinionSchema>;
+const length = (value: string) => [...value].length;
+const decisionSchema = z.object({ decision: z.enum(DECISIONS), strongestCase: text(2000), strongestAlternative: text(2000),
+  verdict: z.enum(VERDICTS), basis: text(2000) }).strip();
+const issueSchema = z.object({ location: text(200), perspective: text(200), problem: text(2000), suggestion: text(2000),
+  severity: z.enum(SEVERITIES) }).strip();
+const responseSchema = z.object({ reviewer: text(8), strongestView: text(2000), stance: z.enum(['agree', 'disagree']),
+  reason: text(2000) }).strip();
+const rawOpinion = z.object({ decisions: z.array(decisionSchema).max(8), issues: z.array(issueSchema).max(50),
+  responses: z.array(responseSchema).max(16).optional() }).strip();
+export type Opinion = { decisions: Array<z.infer<typeof decisionSchema>>; issues: Array<z.infer<typeof issueSchema>>;
+  responses?: Array<z.infer<typeof responseSchema>>;
+  /** Vague issues the host dropped (wrong section, too short, or "why" equal to "how"). */
+  dropped: number };
 
 /** JSON response formats sent with each request (strict schema mode). */
+const str = { type: 'string' } as const;
+const decisionFormat = { type: 'object', additionalProperties: false,
+  required: ['decision', 'strongestCase', 'strongestAlternative', 'verdict', 'basis'], properties: {
+    decision: { type: 'string', enum: [...DECISIONS] }, strongestCase: str, strongestAlternative: str,
+    verdict: { type: 'string', enum: [...VERDICTS] }, basis: str } } as const;
+const issueFormat = { type: 'object', additionalProperties: false,
+  required: ['location', 'perspective', 'problem', 'suggestion', 'severity'], properties: {
+    location: str, perspective: str, problem: str, suggestion: str, severity: { type: 'string', enum: [...SEVERITIES] } } } as const;
+const responseFormat = { type: 'object', additionalProperties: false, required: ['reviewer', 'strongestView', 'stance', 'reason'],
+  properties: { reviewer: str, strongestView: str, stance: { type: 'string', enum: ['agree', 'disagree'] }, reason: str } } as const;
 export const OPINION_RESPONSE_FORMAT = { type: 'json_schema', json_schema: { name: 'review_opinion', strict: true, schema: {
-  type: 'object', additionalProperties: false, required: ['issues'], properties: { issues: { type: 'array', items: {
-    type: 'object', additionalProperties: false, required: ['location', 'problem', 'suggestion', 'severity'], properties: {
-      location: { type: 'string' }, problem: { type: 'string' }, suggestion: { type: 'string' },
-      severity: { type: 'string', enum: [...SEVERITIES] } } } } } } } } as const;
+  type: 'object', additionalProperties: false, required: ['decisions', 'issues'], properties: {
+    decisions: { type: 'array', items: decisionFormat }, issues: { type: 'array', items: issueFormat } } } } } as const;
+/** Round 2 (only on disagreement): the same opinion plus a response to each other reviewer. */
+export const DEBATE_RESPONSE_FORMAT = { type: 'json_schema', json_schema: { name: 'review_debate', strict: true, schema: {
+  type: 'object', additionalProperties: false, required: ['decisions', 'issues', 'responses'], properties: {
+    decisions: { type: 'array', items: decisionFormat }, issues: { type: 'array', items: issueFormat },
+    responses: { type: 'array', items: responseFormat } } } } } as const;
+const adjudicationFormat = { type: 'object', additionalProperties: false, required: ['issue', 'reviewers', 'single', 'adopted', 'reason'],
+  properties: { issue: str, reviewers: { type: 'array', items: str }, single: { type: 'boolean' }, adopted: { type: 'boolean' }, reason: str } } as const;
 export const REVISION_RESPONSE_FORMAT = { type: 'json_schema', json_schema: { name: 'review_revision', strict: true, schema: {
-  type: 'object', additionalProperties: false, required: ['body', 'steps', 'changeNotes'], properties: {
+  type: 'object', additionalProperties: false, required: ['adjudication', 'body', 'steps', 'changeNotes'], properties: {
+    adjudication: { type: 'array', items: adjudicationFormat },
     body: { type: 'string' },
     steps: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['stepId', 'fields'], properties: {
       stepId: { type: 'string' }, fields: { type: 'array', items: { type: 'object', additionalProperties: false,
@@ -38,12 +65,30 @@ function looseJson(raw: string): unknown {
   return undefined;
 }
 
-/** A review opinion, or null when it is not usable (the call is then judged format_invalid). */
-export function parseOpinion(raw: string): Opinion | null {
-  const parsed = opinionSchema.safeParse(looseJson(raw));
-  return parsed.success ? parsed.data : null;
+/** "Why" and "how" each need some substance; shorter is treated as vague. */
+export const MIN_REASON_CHARACTERS = 20;
+const squash = (value: string) => value.replace(/[\s\p{P}]/gu, '');
+
+/** A review opinion, or null when it is not usable (the call is then judged format_invalid): all four key
+ * decisions steelmanned exactly once (and, in a debate round, a response). Vague issues are dropped one by
+ * one rather than failing the opinion: a section that is not a template title, a "why" or "how" under
+ * MIN_REASON_CHARACTERS, or a "how" that only repeats the "why". */
+export function parseOpinion(raw: string, rules: { sections: string[]; debate?: boolean }): Opinion | null {
+  const parsed = rawOpinion.safeParse(looseJson(raw));
+  if (!parsed.success) return null;
+  const { decisions, issues, responses } = parsed.data;
+  if (decisions.length !== DECISIONS.length || new Set(decisions.map(d => d.decision)).size !== DECISIONS.length) return null;
+  if (rules.debate && !responses?.length) return null;
+  const kept = issues.filter(issue => rules.sections.includes(issue.location.replace(/^#+\s*/, '').trim())
+    && length(issue.problem) >= MIN_REASON_CHARACTERS && length(issue.suggestion) >= MIN_REASON_CHARACTERS
+    && squash(issue.problem) !== squash(issue.suggestion));
+  return { decisions, issues: kept, ...(rules.debate ? { responses } : {}), dropped: issues.length - kept.length };
 }
-export const hasCritical = (opinions: Opinion[]) => opinions.some(opinion => opinion.issues.some(issue => issue.severity === 'critical'));
+
+/** Reviewers disagree when, for one key decision, some keep it and some would change it (round 2 trigger). */
+export function hasDisagreement(opinions: Opinion[]): boolean {
+  return DECISIONS.some(decision => new Set(opinions.map(o => o.decisions.find(d => d.decision === decision)?.verdict)).size > 1);
+}
 
 /** Field values per step: {stepId: {fieldId: value}}. */
 export type StepValues = Record<string, Record<string, string>>;
@@ -62,6 +107,9 @@ export type RevisionResult =
   | { ok: false; reason: string };
 type ChangeNote = { section: string; wordingOnly: boolean; note: string; fields: Array<{ stepId: string; fieldId: string }> };
 const revisionSchema = z.object({
+  /** Kept for administrators reviewing real cases; checked for shape only. */
+  adjudication: z.array(z.object({ issue: z.string(), reviewers: z.array(z.string()), single: z.boolean(), adopted: z.boolean(),
+    reason: z.string() }).strip()).max(200),
   body: z.string(),
   steps: z.array(z.object({ stepId: z.string(), fields: z.array(z.object({ fieldId: z.string(), value: z.string(),
     changed: z.boolean() }).strip()) }).strip()),
@@ -69,7 +117,6 @@ const revisionSchema = z.object({
     fields: z.array(z.object({ stepId: z.string(), fieldId: z.string() }).strip()).default([]) }).strip()),
 }).strip();
 const FIELD_LIMIT = 400;
-const length = (value: string) => [...value].length;
 
 /** "## Title" sections in order; null when the body does not have exactly the template sections. */
 export function reportSections(body: string, sections: string[], maxCharacters: number): Map<string, string> | null {

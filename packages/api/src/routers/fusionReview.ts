@@ -12,6 +12,7 @@ import { StagingAccessError, stagingProcedureError } from '../services/runtime/s
 import { reportRevisionService } from '../services/report/revisionSync';
 import { fusionExecutor } from '../services/fusion/executor';
 import { reviewFlow } from '../services/fusion/review';
+import { readFusionSettings, PANEL_SEATS } from '../services/fusion/settings';
 
 const uuid = z.string().uuid();
 const forbidden = new Set(['FUSION_REVIEW_DISABLED', 'FUSION_MEMBERSHIP_REQUIRED', 'REPORT_MEMBERSHIP_REQUIRED', 'FUSION_REVIEW_BREAKER']);
@@ -46,6 +47,16 @@ const procedure = protectedProcedure.use(async ({ ctx, next, path }) => {
 });
 const review = z.object({ reviewId: uuid }).strict();
 
+/** Reads only (events, panel names): no staging window, executor or billing is needed to look. */
+const reader = protectedProcedure.use(async ({ ctx, next, path }) => {
+  try {
+    if (!ctx.hasSupabaseAdminPrivileges || !ctx.supabaseAdmin) throw new StagingAccessError('RUNTIME_STAGING_SERVICE_UNAVAILABLE');
+    const result = await next({ ctx: { ...ctx, admin: ctx.supabaseAdmin, flow: reviewFlow({ admin: ctx.supabaseAdmin, actorId: ctx.user.id }) } });
+    if (!result.ok) throw result.error;
+    return result;
+  } catch (cause) { throw reviewError(cause instanceof TRPCError && cause.cause ? cause.cause : cause, path); }
+});
+
 export const fusionReviewRouter = router({
   start: procedure.input(z.object({ requestId: uuid, draftId: uuid, sourceVersionId: uuid }).strict())
     .mutation(({ ctx, input }) => ctx.flow.start(input)),
@@ -54,4 +65,11 @@ export const fusionReviewRouter = router({
   dispatch: procedure.input(review.extend({ callId: uuid })).mutation(({ ctx, input }) => ctx.flow.dispatch(input.reviewId, input.callId)),
   stop: procedure.input(review).mutation(({ ctx, input }) => ctx.flow.stop(input.reviewId)),
   end: procedure.input(review).mutation(({ ctx, input }) => ctx.flow.end(input.reviewId)),
+  /** Progress events for the animation (FUSION-REVIEW §2.2a); clients play the ids they have not seen. */
+  events: reader.input(review).query(({ ctx, input }) => ctx.flow.events(input.reviewId)),
+  /** Display names of the seats (Owner 2026-10-14): set by administrators, independent of the models; no model names. */
+  panel: reader.query(async ({ ctx }) => {
+    const names = (await readFusionSettings(ctx.admin)).review.displayNames;
+    return { reviewers: PANEL_SEATS.map((seat, i) => ({ seat, name: names.reviewers[i]! })), summary: { seat: 'S', name: names.summary } };
+  }),
 });

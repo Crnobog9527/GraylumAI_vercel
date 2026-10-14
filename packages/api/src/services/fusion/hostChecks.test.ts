@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { describe, expect, it } from 'vitest';
-import { checkRevision, hasCritical, parseOpinion, reportSections, type RevisionInput } from './hostChecks';
+import { checkRevision, DECISIONS, hasDisagreement, parseOpinion, reportSections, type RevisionInput } from './hostChecks';
 
 const sections = ['定位', '受众', '结语'];
 const report = (a = '原定位', b = '原受众', c = '原结语') => `## 定位\n${a}\n## 受众\n${b}\n## 结语\n${c}`;
@@ -10,6 +10,7 @@ const base: RevisionInput = {
   declared: [{ stepId: 's1', fieldIds: ['goal', 'note'] }, { stepId: 's2', fieldIds: ['who'] }], sections, maxCharacters: 12000,
 };
 const revision = (patch: Partial<{ body: string; steps: unknown; changeNotes: unknown }> = {}) => JSON.stringify({
+  adjudication: [{ issue: '定位太泛', reviewers: ['A', 'B'], single: false, adopted: true, reason: '原文确实没写清人群' }],
   body: report('新定位'),
   steps: [{ stepId: 's1', fields: [{ fieldId: 'goal', value: '新目标', changed: true }, { fieldId: 'note', value: '', changed: false }] },
     { stepId: 's2', fields: [{ fieldId: 'who', value: '学生', changed: false }] }],
@@ -17,16 +18,42 @@ const revision = (patch: Partial<{ body: string; steps: unknown; changeNotes: un
   ...patch,
 });
 
+const decisions = (verdict: 'keep' | 'change' = 'keep') => DECISIONS.map(decision => ({ decision,
+  strongestCase: '原方案最强的理由', strongestAlternative: '最强的替代方案', verdict, basis: '依据' }));
+const issue = { location: '定位', perspective: '目标受众：上班族', problem: '定位只写了"分享生活"，上班族看不出能得到什么具体好处',
+  suggestion: '改成"下班 30 分钟做出一顿饭"，直接点明给上班族省时间这个好处', severity: 'critical' as const };
+const rules = { sections };
+
 describe('review opinions', () => {
-  it('parses plain, fenced and embedded JSON; refuses malformed or out-of-schema output', () => {
-    const opinion = { issues: [{ location: '定位', problem: '太泛', suggestion: '写清人群', severity: 'critical' as const }] };
-    expect(parseOpinion(JSON.stringify(opinion))).toEqual(opinion);
-    expect(parseOpinion('意见如下：\n```json\n' + JSON.stringify(opinion) + '\n```')).toEqual(opinion);
-    expect(parseOpinion('前言 ' + JSON.stringify({ issues: [] }) + ' 结尾')).toEqual({ issues: [] });
-    expect(parseOpinion('not json')).toBeNull();
-    expect(parseOpinion(JSON.stringify({ issues: [{ ...opinion.issues[0], severity: 'blocker' }] }))).toBeNull();
-    expect(hasCritical([opinion])).toBe(true);
-    expect(hasCritical([{ issues: [] }])).toBe(false);
+  it('parses plain, fenced and embedded JSON; refuses malformed, out-of-schema or incomplete steelman output', () => {
+    const opinion = { decisions: decisions(), issues: [issue] };
+    expect(parseOpinion(JSON.stringify(opinion), rules)).toEqual({ ...opinion, dropped: 0 });
+    expect(parseOpinion('意见如下：\n```json\n' + JSON.stringify(opinion) + '\n```', rules)).toEqual({ ...opinion, dropped: 0 });
+    expect(parseOpinion('前言 ' + JSON.stringify({ decisions: decisions(), issues: [] }) + ' 结尾', rules)?.issues).toEqual([]);
+    expect(parseOpinion('not json', rules)).toBeNull();
+    expect(parseOpinion(JSON.stringify({ ...opinion, issues: [{ ...issue, severity: 'blocker' }] }), rules)).toBeNull();
+    // Every key decision steelmanned exactly once.
+    expect(parseOpinion(JSON.stringify({ ...opinion, decisions: decisions().slice(1) }), rules)).toBeNull();
+    expect(parseOpinion(JSON.stringify({ ...opinion, decisions: [...decisions().slice(1), decisions()[1]] }), rules)).toBeNull();
+    // A debate answer must respond to someone.
+    expect(parseOpinion(JSON.stringify(opinion), { sections, debate: true })).toBeNull();
+    const debate = { ...opinion, responses: [{ reviewer: 'B', strongestView: 'B 认为受众应该更窄', stance: 'disagree', reason: '理由' }] };
+    expect(parseOpinion(JSON.stringify(debate), { sections, debate: true })?.responses).toHaveLength(1);
+  });
+
+  it('drops vague issues one by one and keeps the opinion', () => {
+    const vague = [{ ...issue, location: '第三部分' }, { ...issue, problem: '太泛了' }, { ...issue, suggestion: '优化一下' },
+      { ...issue, suggestion: issue.problem + '。' }];
+    const parsed = parseOpinion(JSON.stringify({ decisions: decisions(), issues: [...vague, { ...issue, location: '## 受众' }] }), rules);
+    expect(parsed?.dropped).toBe(4);
+    expect(parsed?.issues).toHaveLength(1);
+  });
+
+  it('detects a split over a key decision', () => {
+    const keep = parseOpinion(JSON.stringify({ decisions: decisions('keep'), issues: [] }), rules)!;
+    const change = parseOpinion(JSON.stringify({ decisions: decisions('change'), issues: [] }), rules)!;
+    expect(hasDisagreement([keep, keep])).toBe(false);
+    expect(hasDisagreement([keep, change])).toBe(true);
   });
 });
 

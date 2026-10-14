@@ -18,11 +18,11 @@ export type EstimateInput = {
   snapshotBytes: number;
 };
 
-/** Worst-case total of one review (FUSION-REVIEW §3.2): rounds × (Σ reviewer upper bounds + summary upper bound),
- * with the actual input snapshot (report at most the larger of itself and the summary output, §2.2), every
- * revised field at 400 characters and every opinion at its limit. Any model that
- * cannot fit its worst-case request refuses the whole review before anything is frozen (no silent downgrade).
- * Above the single-review budget the rounds are reduced; not even one round fits → refused. */
+/** Worst-case total of one review (FUSION-REVIEW §3.2, Owner 2026-10-14 mechanism): round-1 reviewers, the
+ * debate round (only on disagreement, but always budgeted when allowed) and one summary, with the actual input
+ * snapshot, every revised field at 400 characters and every opinion at its limit. Any model that cannot fit its
+ * worst-case request refuses the whole review before anything is frozen (no silent downgrade). Above the
+ * single-review budget the debate round is dropped; if even one round does not fit, the review is refused. */
 export function estimateReview(input: EstimateInput): { rounds: number; estimateUsd: string } {
   const bound = (modelId: string, outputTokens: number, bytes: number) => {
     const quote = input.quotes.find(policy => policy.modelId === modelId);
@@ -34,15 +34,20 @@ export function estimateReview(input: EstimateInput): { rounds: number; estimate
   };
   const steps = input.fieldCount * FIELD_BYTES;
   if (input.snapshotBytes > FUSION_INPUT_CAP) throw new Error('FUSION_INPUT_TOO_LARGE');
-  // From round 2 the report is the previous revision, at most the summary's output (4 bytes per token).
-  const report = Math.max(input.snapshotBytes, input.summaryTokens * 4 + input.snapshotBytes);
-  const reviewerBytes = input.instructionBytes.reviewer + report + steps + FRAMING_BYTES;
-  const summaryBytes = input.instructionBytes.summary + report + 2 * steps + FRAMING_BYTES
-    + input.reviewers.length * input.opinionTokens * 4;
-  const round = input.reviewers.reduce((sum, id) => sum + bound(id, input.opinionTokens, reviewerBytes), 0)
-    + bound(input.summary, input.summaryTokens, summaryBytes);
-  const rounds = Math.min(input.maxRounds, Math.floor(Number(input.maxBudgetUsd) / round));
-  if (!Number.isFinite(round) || rounds < 1) throw new Error('FUSION_BUDGET_EXCEEDED');
-  // Rounded up to whole micro-dollars so the stored estimate is never below the computed bound.
-  return { rounds, estimateUsd: (Math.ceil(rounds * round * 1e6) / 1e6).toFixed(6) };
+  const opinionBytes = input.opinionTokens * 4;
+  const reviewerBytes = input.instructionBytes.reviewer + input.snapshotBytes + FRAMING_BYTES;
+  // Debate round: the reviewer also reads its own and every other reviewer's round-1 opinion.
+  const debateBytes = reviewerBytes + input.reviewers.length * opinionBytes;
+  const summaryBytes = input.instructionBytes.summary + input.snapshotBytes + 2 * steps + FRAMING_BYTES
+    + input.reviewers.length * opinionBytes;
+  const firstRound = input.reviewers.reduce((sum, id) => sum + bound(id, input.opinionTokens, reviewerBytes), 0);
+  const debate = input.reviewers.reduce((sum, id) => sum + bound(id, input.opinionTokens, debateBytes), 0);
+  const summary = bound(input.summary, input.summaryTokens, summaryBytes);
+  const budget = Number(input.maxBudgetUsd);
+  for (let rounds = Math.min(input.maxRounds, 2); rounds >= 1; rounds--) {
+    const total = firstRound + (rounds > 1 ? debate : 0) + summary;
+    // Rounded up to whole micro-dollars so the stored estimate is never below the computed bound.
+    if (Number.isFinite(total) && total <= budget) return { rounds, estimateUsd: (Math.ceil(total * 1e6) / 1e6).toFixed(6) };
+  }
+  throw new Error('FUSION_BUDGET_EXCEEDED');
 }

@@ -1,7 +1,8 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { z } from 'zod';
-import { OPINION_RESPONSE_FORMAT, REVISION_RESPONSE_FORMAT, type Opinion, type StepValues } from './hostChecks';
+import { DEBATE_RESPONSE_FORMAT, MIN_REASON_CHARACTERS, OPINION_RESPONSE_FORMAT, REVISION_RESPONSE_FORMAT, type Opinion,
+  type StepValues } from './hostChecks';
 import type { FusionRequest } from './request';
 
 /** Files of the review Skill package (FUSION-REVIEW §4.3). Their text is private and published through the
@@ -37,12 +38,23 @@ export async function readReviewSkill(admin: SupabaseClient, skill: ReviewSkill)
 
 /** Host-written format rules appended to the Skill text: the schema is also enforced by response_format. */
 const REVIEWER_FORMAT = [
-  '输出要求：只输出一个 JSON 对象 {"issues":[{"location","problem","suggestion","severity"}]}。',
-  'severity 只能是 critical、major、minor。没有问题时 issues 为空数组。',
+  '输出要求：只输出一个 JSON 对象 {"decisions":[...],"issues":[...]}。',
+  'decisions 必须正好 4 条，decision 分别是 positioning（定位）、audience（受众）、platform（平台）、monetization（变现路径），各一条：'
+    + 'strongestCase 写原报告这样选的最强理由，strongestAlternative 写最强的替代方案，verdict 写 keep（原方案更站得住）或 change（替代方案更好或原方案有漏洞），basis 写判断依据。',
+  'issues 只放需要改的地方，每条都要写：location（必须是给出的章节标题之一，原样照抄）、perspective（从哪类受众或"用户本人"的角度）、'
+    + `problem（为什么有问题，至少 ${MIN_REASON_CHARACTERS} 个字）、suggestion（具体怎么改，至少 ${MIN_REASON_CHARACTERS} 个字，不能只是重复问题）、severity（critical、major 或 minor）。`,
+  '章节对不上、理由或改法太笼统的条目会被宿主丢掉。没有需要改的地方时 issues 为空数组。',
   '只依据给出的报告和资料，不要联网，需要外部核实的说法标为"待核实"。',
 ].join('\n');
+const DEBATE_FORMAT = [
+  '这是第 2 轮：评审之间对关键决定有分歧。input.others 是其他评审的第 1 轮意见，input.mine 是你自己的第 1 轮意见。',
+  '对每位其他评审写一条 responses：reviewer 写对方的代号，strongestView 先把对方的观点讲到最强，stance 写 agree 或 disagree，reason 写理由。',
+  '然后重新给出你自己的 decisions 和 issues（格式同第 1 轮），可以保留、修改或撤回第 1 轮的意见。',
+].join('\n');
 const SUMMARY_FORMAT = [
-  '输出要求：只输出一个 JSON 对象 {"body","steps","changeNotes"}。',
+  '输出要求：只输出一个 JSON 对象 {"adjudication","body","steps","changeNotes"}。',
+  'adjudication 是裁决记录：去重后的每个问题一条，issue 写问题概要，reviewers 写哪些评审提出（代号），single 标是否只有一位评审提出，'
+    + 'adopted 写是否采纳，reason 写理由（回原文核实的结果；有冲突时双方的最强理由和裁决；批评没压过原文的最强理由就不采纳、保留原文）。',
   'body 是修订后的完整报告，必须保留给出的全部 "## " 章节标题，顺序不变，每节都有内容。',
   'steps 必须列出给出的每一个步骤和每一个字段：没改的字段照抄 currentValue、changed=false；改了的字段 changed=true，值非空、不超过 400 字。',
   'changeNotes 对每个改动过的章节写一条：改了定位事实就在 fields 里列出对应的 stepId 和 fieldId（这些字段必须 changed=true），只改表述就 wordingOnly=true、fields 为空。',
@@ -55,26 +67,33 @@ const lengthRule = (max: number) =>
 
 export type ReviewContext = { report: string; materials: unknown; sections: string[];
   /** The template's length limit in characters; the host check refuses a longer body, so the model is told the number. */
-  maxCharacters: number;
-  /** Round 2 onward: the last revision that passed, as the base for steps (§2.2). */
-  previous?: { steps: StepValues; changeNotes: unknown } };
+  maxCharacters: number };
+/** Reviewers are labelled A, B, C… by their position in the frozen panel, never by model name (§2.2). */
+export const reviewerLabel = (index: number) => String.fromCharCode(65 + index);
+const shown = (opinion: Opinion) => ({ decisions: opinion.decisions, issues: opinion.issues,
+  ...(opinion.responses ? { responses: opinion.responses } : {}) });
 
 export function reviewerRequest(skill: ReviewSkillText, context: ReviewContext): FusionRequest {
   return { instructions: `${skill.reviewer}\n\n${skill.rubric}\n\n${REVIEWER_FORMAT}`,
-    input: JSON.stringify({ report: context.report, materials: context.materials, sections: context.sections,
-      ...(context.previous ? { previousRevision: context.previous } : {}) }),
+    input: JSON.stringify({ report: context.report, materials: context.materials, sections: context.sections }),
     responseFormat: OPINION_RESPONSE_FORMAT as unknown as Record<string, unknown> };
 }
 
-/** Reviewers are labelled A, B, C… for the summary model, never by model name (§2.2). */
-export function summaryRequest(skill: ReviewSkillText, context: ReviewContext, opinions: Opinion[],
+/** Round 2, only on disagreement: each reviewer sees the others' round-1 opinions and answers them. */
+export function debateRequest(skill: ReviewSkillText, context: ReviewContext, mine: Opinion | null,
+  others: Array<{ reviewer: string; opinion: Opinion }>): FusionRequest {
+  return { instructions: `${skill.reviewer}\n\n${skill.rubric}\n\n${REVIEWER_FORMAT}\n${DEBATE_FORMAT}`,
+    input: JSON.stringify({ report: context.report, materials: context.materials, sections: context.sections,
+      mine: mine ? shown(mine) : null, others: others.map(item => ({ reviewer: item.reviewer, ...shown(item.opinion) })) }),
+    responseFormat: DEBATE_RESPONSE_FORMAT as unknown as Record<string, unknown> };
+}
+
+export function summaryRequest(skill: ReviewSkillText, context: ReviewContext, opinions: Array<{ reviewer: string; opinion: Opinion }>,
   declared: Array<{ stepId: string; fieldIds: string[] }>, current: StepValues): FusionRequest {
   const steps = declared.map(step => ({ stepId: step.stepId, fields: step.fieldIds.map(fieldId =>
     ({ fieldId, currentValue: current[step.stepId]?.[fieldId] ?? '' })) }));
   return { instructions: `${skill.summary}\n\n${skill.rubric}\n\n${SUMMARY_FORMAT}\n${lengthRule(context.maxCharacters)}`,
     input: JSON.stringify({ report: context.report, materials: context.materials, sections: context.sections, steps,
-      opinions: opinions.map((opinion, index) => ({ reviewer: String.fromCharCode(65 + index), issues: opinion.issues })),
-      ...(context.previous ? { previousChangeNotes: context.previous.changeNotes,
-        note: 'steps 以 currentValue 为基准修改，资料只作原始事实参考。' } : {}) }),
+      opinions: opinions.map(item => ({ reviewer: item.reviewer, ...shown(item.opinion) })) }),
     responseFormat: REVISION_RESPONSE_FORMAT as unknown as Record<string, unknown> };
 }

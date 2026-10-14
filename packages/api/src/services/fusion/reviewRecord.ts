@@ -18,7 +18,8 @@ const reviewView = z.object({
     claimedAt: z.string() })),
   outcome: z.unknown().nullable(), revisionId: uuid.nullable(), endedAt: z.string().nullable(),
   calls: z.array(z.object({ groupId: uuid, runId: uuid, callId: uuid, modelId: uuid, phase: z.string(), dispatched: z.boolean(),
-    verdict: z.string().nullable(), settled: z.boolean(), state: z.string() })),
+    verdict: z.string().nullable(), settled: z.boolean(), state: z.string(),
+    dispatchedAt: z.string().nullable().optional(), settledAt: z.string().nullable().optional() })),
 });
 export type ReviewView = z.infer<typeof reviewView>;
 const refusals = new Set(['FUSION_REVIEW_DISABLED', 'FUSION_MEMBERSHIP_REQUIRED', 'REPORT_MEMBERSHIP_REQUIRED',

@@ -5,10 +5,12 @@ import type { BillingRpc } from '../bill2/service';
 import { loadStagingPolicy } from '../runtime/stagingPolicy';
 import { admitFusionGroup, derivedUuid, replayFusionGroup, type FusionMember } from './admission';
 import { fusionExecutor, type FusionBodyVerdict } from './executor';
-import { checkRevision, hasCritical, parseOpinion, type DeclaredStep, type Opinion, type StepValues } from './hostChecks';
+import { checkRevision, hasDisagreement, parseOpinion, type DeclaredStep, type Opinion, type StepValues } from './hostChecks';
 import { assertSnapshotSize } from './request';
 import { estimateReview } from './reviewEstimate';
-import { readReviewSkill, resolveReviewSkill, reviewerRequest, summaryRequest, type ReviewContext, type ReviewSkill } from './reviewPrompts';
+import { debateRequest, readReviewSkill, resolveReviewSkill, reviewerLabel, reviewerRequest, summaryRequest, type ReviewContext,
+  type ReviewSkill } from './reviewPrompts';
+import { reviewEvents } from './reviewEvents';
 import { ENDED_STATES, reviewRecord, type ReviewPosition, type ReviewView } from './reviewRecord';
 import { readFusionSettings } from './settings';
 
@@ -19,7 +21,7 @@ const config = z.object({ estimateUsd: z.string(), maxRounds: z.number().int().m
 const source = z.object({ body: z.string().min(1), sections: z.array(z.string()).min(1), maxCharacters: z.number().int().positive(),
   declared: z.array(z.object({ stepId: z.string(), fieldIds: z.array(z.string()) })) });
 type Source = z.infer<typeof source>;
-/** Revision accepted in a round: the base of the next round and, at the end, what R14 proposes. */
+/** The summary's revision that passed the host check: what R14 proposes. */
 type Passed = { round: number; body: string; steps: StepValues; changeNotes: unknown; r14Fields: StepValues };
 const ATTEMPTS = 3;
 const stepKey = (at: ReviewPosition) => `review:${at.round}:${at.phase}:${at.attempt}`;
@@ -54,27 +56,41 @@ export function reviewFlow(deps: { admin: SupabaseClient; actorId: string;
     const groups = new Set(view.steps.filter(step => step.round === round && step.phase === phase).map(step => step.groupId));
     return view.calls.filter(call => groups.has(call.groupId));
   };
-  /** The revision that passed in the latest summary up to `round` (deterministically re-checked). */
-  async function passedRevision(view: ReviewView, src: Source, round: number): Promise<Passed | null> {
-    for (let r = round; r >= 1; r--) {
-      const call = callsAt(view, r, 'summary').find(c => ['usable', 'unjudged_saved'].includes(String(c.verdict)));
-      if (!call) continue;
-      const text = await outputOf(call.callId);
-      const before = r > 1 ? await passedRevision(view, src, r - 1) : null;
-      const result = text ? checkRevision(text, revisionInput(view, src, before)) : null;
-      if (result?.ok) return { round: r, body: result.body, steps: result.steps, changeNotes: result.changeNotes, r14Fields: result.r14Fields };
-      return null;
-    }
-    return null;
+  /** The summary revision that passed (one summary per review, after round 1 or the debate round). */
+  async function passedRevision(view: ReviewView, src: Source): Promise<Passed | null> {
+    const call = view.calls.find(c => c.phase === 'fusion_summary' && ['usable', 'unjudged_saved'].includes(String(c.verdict)));
+    const text = call ? await outputOf(call.callId) : null;
+    const result = text ? checkRevision(text, revisionInput(view, src)) : null;
+    if (!result?.ok) return null;
+    const round = view.steps.find(step => step.groupId === call!.groupId)?.round ?? 1;
+    return { round, body: result.body, steps: result.steps, changeNotes: result.changeNotes, r14Fields: result.r14Fields };
   }
-  const revisionInput = (view: ReviewView, src: Source, before: Passed | null) => ({
-    previousBody: before?.body ?? src.body, previousSteps: before?.steps ?? frozenValues(view), frozenSteps: frozenValues(view),
+  const revisionInput = (view: ReviewView, src: Source) => ({
+    previousBody: src.body, previousSteps: frozenValues(view), frozenSteps: frozenValues(view),
     declared: src.declared as DeclaredStep[], sections: src.sections, maxCharacters: src.maxCharacters });
+  const opinionRules = (src: Source, round: number) => ({ sections: src.sections, debate: round > 1 });
+  /** Usable opinions of one review round, keyed by the reviewer's position in the frozen panel. */
+  async function opinionsOf(view: ReviewView, src: Source, round: number): Promise<Map<number, Opinion>> {
+    const cfg = config.parse(view.config);
+    const found = new Map<number, Opinion>();
+    for (const call of callsAt(view, round, 'review').filter(c => ['usable', 'unjudged_saved'].includes(String(c.verdict)))) {
+      const parsed = parseOpinion((await outputOf(call.callId)) ?? '', opinionRules(src, round));
+      const index = cfg.reviewers.indexOf(call.modelId ?? '');
+      if (parsed && index >= 0) found.set(index, parsed);
+    }
+    return found;
+  }
+  /** What the summary sees: each reviewer's debate answer when it gave one, else its round-1 opinion. */
+  async function finalOpinions(view: ReviewView, src: Source) {
+    const first = await opinionsOf(view, src, 1);
+    const second = view.round > 1 || view.steps.some(step => step.round > 1) ? await opinionsOf(view, src, 2) : new Map<number, Opinion>();
+    const indexes = [...new Set([...first.keys(), ...second.keys()])].sort((a, b) => a - b);
+    return indexes.map(index => ({ reviewer: reviewerLabel(index), opinion: (second.get(index) ?? first.get(index))! }));
+  }
   /** The frozen host check for one saved body (also used by recovery, §3.3). */
   async function judgeText(view: ReviewView, src: Source, phase: string, round: number, text: string): Promise<FusionBodyVerdict> {
-    if (phase === 'fusion_review') return parseOpinion(text) ? 'usable' : 'format_invalid';
-    const before = round > 1 ? await passedRevision(view, src, round - 1) : null;
-    return checkRevision(text, revisionInput(view, src, before)).ok ? 'usable' : 'revision_invalid';
+    if (phase === 'fusion_review') return parseOpinion(text, opinionRules(src, round)) ? 'usable' : 'format_invalid';
+    return checkRevision(text, revisionInput(view, src)).ok ? 'usable' : 'revision_invalid';
   }
   /** Saved but never judged (a crash between save and verdict): judge again with the frozen check. */
   async function rejudge(view: ReviewView, src: Source) {
@@ -87,26 +103,27 @@ export function reviewFlow(deps: { admin: SupabaseClient; actorId: string;
       if (result.error && !/FUSION_VERDICT_IMMUTABLE/.test(String(result.error.message))) throw new Error('FUSION_REVIEW_UNAVAILABLE');
     }
   }
-  async function contextOf(view: ReviewView, src: Source, round: number): Promise<{ context: ReviewContext; current: StepValues }> {
-    const before = round > 1 ? await passedRevision(view, src, round - 1) : null;
-    return { current: before?.steps ?? frozenValues(view), context: { report: before?.body ?? src.body, materials: view.materials,
-      sections: src.sections, maxCharacters: src.maxCharacters, ...(before ? { previous: { steps: before.steps, changeNotes: before.changeNotes } } : {}) } };
-  }
+  const contextOf = (view: ReviewView, src: Source): ReviewContext => ({ report: src.body, materials: view.materials,
+    sections: src.sections, maxCharacters: src.maxCharacters });
   /** Admits and claims the models of the current position that have no finished call yet. */
   async function claimStep(view: ReviewView, src: Source, at: ReviewPosition, models: string[]) {
     const cfg = config.parse(view.config);
     const skill = await readReviewSkill(admin, cfg.skill as ReviewSkill);
-    const { context, current } = await contextOf(view, src, at.round);
+    const context = contextOf(view, src);
     assertSnapshotSize(context.report, context.materials);
     let members: FusionMember[];
-    if (at.phase === 'review') members = models.map(modelId => ({ modelId, phase: 'fusion_review', request: reviewerRequest(skill, context) }));
-    else {
-      const opinions: Opinion[] = [];
-      for (const call of callsAt(view, at.round, 'review').filter(c => ['usable', 'unjudged_saved'].includes(String(c.verdict)))) {
-        const parsed = parseOpinion((await outputOf(call.callId)) ?? '');
-        if (parsed) opinions.push(parsed);
-      }
-      members = [{ modelId: cfg.summary, phase: 'fusion_summary', request: summaryRequest(skill, context, opinions, src.declared, current) }];
+    if (at.phase === 'review' && at.round === 1) {
+      members = models.map(modelId => ({ modelId, phase: 'fusion_review', request: reviewerRequest(skill, context) }));
+    } else if (at.phase === 'review') {
+      const first = await opinionsOf(view, src, 1);
+      members = models.map(modelId => {
+        const index = cfg.reviewers.indexOf(modelId);
+        const others = [...first].filter(([other]) => other !== index).map(([other, opinion]) => ({ reviewer: reviewerLabel(other), opinion }));
+        return { modelId, phase: 'fusion_review' as const, request: debateRequest(skill, context, first.get(index) ?? null, others) };
+      });
+    } else {
+      members = [{ modelId: cfg.summary, phase: 'fusion_summary', request: summaryRequest(skill, context, await finalOpinions(view, src),
+        src.declared, frozenValues(view)) }];
     }
     const requestId = derivedUuid(`${view.reviewId}:${stepKey(at)}`);
     const group = await admitFusionGroup({ admin, actorId, requestId, sourceSessionId: view.sourceSessionId, members, env });
@@ -121,7 +138,7 @@ export function reviewFlow(deps: { admin: SupabaseClient; actorId: string;
         sourceVersionId: view.sourceVersionId, body: revision.body, fields: revision.r14Fields }));
     }
     const at = { round: view.round, phase: view.phase, attempt: view.attempt };
-    return record.advance(view.reviewId, at, { state, outcome: { ...outcome, ...(revision ? { revisedInRound: revision.round } : {}) },
+    return record.advance(view.reviewId, at, { state, outcome,
       ...(revisionId ? { revisionId } : {}) });
   }
   const done = (call: ReviewView['calls'][number]) => call.verdict !== null;
@@ -177,30 +194,29 @@ export function reviewFlow(deps: { admin: SupabaseClient; actorId: string;
           view = await record.advance(reviewId, at, { state: 'running', round: at.round, phase: at.phase, attempt: at.attempt + 1 });
           continue;
         }
-        const usable = here.filter(call => ['usable', 'unjudged_saved'].includes(String(call.verdict)));
-        if (at.phase === 'review') {
-          const opinions: Opinion[] = [];
-          for (const call of usable) { const parsed = parseOpinion((await outputOf(call.callId)) ?? ''); if (parsed) opinions.push(parsed); }
-          const previous = at.round > 1 ? await passedRevision(view, src, at.round - 1) : null;
+        if (at.phase === 'review' && at.round === 1) {
+          const opinions = [...(await opinionsOf(view, src, 1)).values()];
           if (!opinions.length) {
-            view = await finish(view, 'incomplete', { kind: 'no_opinions' }, previous);
-          } else if (at.round === 1 && opinions.every(opinion => !opinion.issues.length)) {
+            view = await finish(view, 'incomplete', { kind: 'no_opinions' }, null);
+          } else if (opinions.every(opinion => !opinion.issues.length && opinion.decisions.every(d => d.verdict === 'keep'))) {
             view = await finish(view, 'completed', { kind: 'no_change' }, null);
-          } else if (at.round > 1 && !hasCritical(opinions)) {
-            view = await finish(view, 'completed', { kind: 'consensus' }, previous);
+          } else if (cfg.maxRounds >= 2 && opinions.length >= 2 && hasDisagreement(opinions)) {
+            // Round 2 only on a real split over a key decision (Owner 2026-10-14): each reviewer answers the others.
+            view = await record.advance(reviewId, at, { state: 'running', round: 2, phase: 'review', attempt: 1 });
           } else {
-            view = await record.advance(reviewId, at, { state: 'running', round: at.round, phase: 'summary', attempt: 1 });
+            view = await record.advance(reviewId, at, { state: 'running', round: 1, phase: 'summary', attempt: 1 });
           }
           continue;
         }
-        const passed = usable.length ? await passedRevision(view, src, at.round) : null;
-        if (!passed || passed.round !== at.round) {
-          view = await finish(view, 'revision_failed', { kind: 'revision_failed' }, at.round > 1 ? await passedRevision(view, src, at.round - 1) : null);
-        } else if (at.round >= cfg.maxRounds) {
-          view = await finish(view, 'completed', { kind: 'round_limit', reviewedByPanel: false }, passed);
-        } else {
-          view = await record.advance(reviewId, at, { state: 'running', round: at.round + 1, phase: 'review', attempt: 1 });
+        if (at.phase === 'review') {
+          view = await record.advance(reviewId, at, { state: 'running', round: at.round, phase: 'summary', attempt: 1 });
+          continue;
         }
+        const passed = await passedRevision(view, src);
+        view = passed
+          // The final revision is never re-reviewed by the panel (§8.1, Owner 2026-10-13 选 A): the user confirms it.
+          ? await finish(view, 'completed', { kind: 'revised', debated: at.round > 1, reviewedByPanel: false }, passed)
+          : await finish(view, 'revision_failed', { kind: 'revision_failed' }, null);
       }
       return { review: view, calls: [] };
     },
@@ -215,16 +231,27 @@ export function reviewFlow(deps: { admin: SupabaseClient; actorId: string;
       const run = group?.runs.find(r => r.runId === call.runId);
       if (!run) throw new Error('FUSION_REVIEW_STEP_CONFLICT');
       const src = await readSource(reviewId);
-      // The frozen check is synchronous once its inputs (the previous passed revision) are resolved.
-      const before = run.phase === 'fusion_summary' && step.round > 1 ? await passedRevision(view, src, step.round - 1) : null;
       const judge = (text: string): FusionBodyVerdict => run.phase === 'fusion_review'
-        ? (parseOpinion(text) ? 'usable' : 'format_invalid')
-        : (checkRevision(text, revisionInput(view, src, before)).ok ? 'usable' : 'revision_invalid');
+        ? (parseOpinion(text, opinionRules(src, step.round)) ? 'usable' : 'format_invalid')
+        : (checkRevision(text, revisionInput(view, src)).ok ? 'usable' : 'revision_invalid');
       if (!deps.executor) throw new Error('FUSION_REVIEW_UNAVAILABLE');
       return deps.executor.run(run, { runId: call.runId, id: callId, state: call.state, fresh: false }, judge, onChunk);
     },
     stop: (reviewId: string) => record.close(reviewId, 'stopped'),
     end: (reviewId: string) => record.close(reviewId, 'interrupted'),
+    /** Progress events for the animation (§2.2a), derived from the record and judged outputs only. */
+    async events(reviewId: string) {
+      const view = await record.read(reviewId);
+      if (!view) throw new Error('FUSION_REVIEW_DENIED');
+      const src = await readSource(reviewId);
+      const outputs = new Map<string, string>();
+      for (const call of view.calls.filter(c => c.verdict !== null)) {
+        const text = await outputOf(call.callId);
+        if (text) outputs.set(call.callId, text);
+      }
+      return reviewEvents({ view, reviewers: config.parse(view.config).reviewers, sections: src.sections, outputs,
+        revision: revisionInput(view, src) });
+    },
     rejudge: async (reviewId: string) => {
       const view = await record.read(reviewId);
       if (view) await rejudge(view, await readSource(reviewId));
