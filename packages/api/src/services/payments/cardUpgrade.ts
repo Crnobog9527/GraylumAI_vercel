@@ -11,7 +11,7 @@ import { PAYMENT_EVIDENCE_CONFLICT } from './stripeWebhookError';
  * used, so the Pro term stays intact and a refunded Gold falls back to it (0243 settles the level). */
 
 /** The Stripe subscription of a card (Managed Payments / mainland) subscription, or null for any other kind. */
-async function cardStripeSubscription(db: Pick<SupabaseClient, 'from'>, scope: StripeScope, localId: string) {
+export async function cardStripeSubscription(db: Pick<SupabaseClient, 'from'>, scope: StripeScope, localId: string) {
   const [sub, ref] = await Promise.all([
     db.from('user_subscriptions').select('stripe_subscription_id,payment_channel').eq('id', localId).maybeSingle(),
     db.from('payment_provider_refs').select('external_id').eq('subscription_id', localId).eq('object_type', 'subscription')
