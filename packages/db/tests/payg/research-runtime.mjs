@@ -314,15 +314,23 @@ export async function researchRuntimeCases({db,Client,connectionString,report,cr
     const f = await session(db,createFixture);
     const one = await rpc(db,'research_account_fetch_claim',f.actor,f.session,f.execution,'tiktok','alpha',null);
     assert.equal(one.claimed,true);
+    await rpc(db,'research_account_fetch_dispatch',f.actor,one.fetchId,one.attempt);
+    // Sent once: any other spelling of the same account finds that fetch and never sends again.
     for (const written of [' Alpha ','@ALPHA','alpha'])
       assert.equal((await rpc(db,'research_account_fetch_claim',f.actor,f.session,f.execution,'tiktok',written,null)).claimed,false,written);
-    await rpc(db,'research_account_fetch_dispatch',f.actor,one.fetchId,one.attempt);
     await rpc(db,'research_account_fetch_finish',f.actor,one.fetchId,one.attempt,'succeeded',{operations:['op-1']});
     const grant = await rpc(db,'research_refresh_create',f.actor,f.session,'tiktok','@Alpha');
     const refreshed = await rpc(db,'research_account_fetch_claim',f.actor,f.session,f.execution,'tiktok',' alpha',grant);
     assert.deepEqual([refreshed.claimed,refreshed.fetchId],[true,one.fetchId],'the refresh matches the same record');
     assert.equal(await count(db,'research_account_fetches','session_id=$1',[f.session]),1);
-    report.checks.push('RT-3b account key: case, surrounding spaces and a leading @ name the same account for cards, fetches and refresh grants; it is fetched (and paid for) once');
+    // Case-sensitive ids stay apart: two YouTube channel ids differing only in case are two channels.
+    const yt = 'UCabcdefghijklmnopqrstuv';
+    const lower = await rpc(db,'research_account_fetch_claim',f.actor,f.session,f.execution,'youtube',yt,null);
+    await rpc(db,'research_account_fetch_dispatch',f.actor,lower.fetchId,lower.attempt);
+    const upper = await rpc(db,'research_account_fetch_claim',f.actor,f.session,f.execution,'youtube',yt.toUpperCase(),null);
+    assert.deepEqual([upper.claimed,upper.fetchId===lower.fetchId],[true,false]);
+    assert.equal((await rpc(db,'research_account_fetch_claim',f.actor,f.session,f.execution,'youtube',' '+yt+' ',null)).claimed,false);
+    report.checks.push('RT-3b account key: on TikTok, X and Instagram, case, surrounding spaces and a leading @ name the same account for cards, fetches and refresh grants (fetched and paid for once); case-sensitive ids (YouTube channel) stay distinct');
   }
 
   // A runtime search whose BILL2 call is not settled yet still blocks deletion (money not final).
