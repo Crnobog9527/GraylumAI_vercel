@@ -39,16 +39,6 @@
 .chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; }
 .chips i { padding: 2px 10px; border: 1px solid #e3e3e0; border-radius: 999px; background: #fff; font-style: normal; }
 
-/* The four-row comparison: one plain table */
-.compareTitle { margin: 0 0 32px; max-width: 18em; font-size: clamp(36px, 5vw, 72px); font-weight: 600; line-height: 1.08; letter-spacing: -.04em; text-wrap: balance; }
-.table { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: clamp(15px, 1.3vw, 18px); line-height: 1.6; }
-.table th { padding: 0 20px 14px 0; color: var(--j-muted); font-size: 15px; font-weight: 500; text-align: left; }
-.table th:last-child { color: var(--j-ink); font-weight: 600; }
-.table td { padding: 20px 20px 20px 0; border-top: 1px solid var(--j-line); vertical-align: top; }
-.table td:first-child { color: var(--j-muted); }
-.table td:last-child { font-weight: 600; }
-@media (max-width: 639px) { .table th, .table td { padding-right: 12px; font-size: 14.5px; } }
-
 /* Price */
 .compareCost { margin-top: 40px; padding: clamp(24px, 3vw, 40px); border-radius: 28px; border: 1px solid var(--j-line); background: #fff; box-shadow: var(--j-shadow); }
 .compareCost h3 { margin: 0 0 16px; font-size: clamp(20px, 2vw, 26px); font-weight: 600; letter-spacing: -.02em; }

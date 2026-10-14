@@ -14,6 +14,7 @@ import { SampleJ } from './SampleJ';
 import { chapterAt, CHAPTERS } from './TakeoverJ';
 import { WEEK_STEP_MS } from './WeekJ';
 import { J_WEEK } from '@/lib/landing/landing-copy-j-week';
+import { J_COMPARE } from '@/lib/landing/landing-copy-j-compare';
 
 const ALL_ON = Object.fromEntries(Object.keys(LANDING_FEATURES).map(key => [key, true])) as LandingFlags;
 const escape = (text: string) => text.replace(/&/g, '&amp;').replace(/"/g, '&quot;');
@@ -101,10 +102,12 @@ describe('style sample J, the later sections', () => {
     }
   });
 
-  it('keeps the Owner\'s four-row comparison word for word in one table', () => {
+  it('keeps the Owner\'s four-row comparison word for word, each row over its pair of conversations', () => {
     const { html } = render();
-    expect(html).toContain(escape(H_COMPARE.title));
+    for (const phrase of H_COMPARE.title.split(/(?<=，)/)) expect(html).toContain(escape(phrase));
     for (const row of H_COMPARE.rows) for (const cell of [row.generic, row.coach]) expect(html).toContain(escape(cell));
+    expect(J_COMPARE.pairs).toHaveLength(H_COMPARE.rows.length);
+    for (const pair of J_COMPARE.pairs) expect(html.split(escape(pair.question)).length - 1).toBeGreaterThanOrEqual(2);
   });
 
   it('prices the usual ways first, each with its source beside it, then the cards, then 先聊后买', () => {

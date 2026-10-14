@@ -1,0 +1,53 @@
+/* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+/*
+ * The comparison as conversation pairs (CompareJ). Left: the general AI's window, flat and grey, its reply a list
+ * of everything. Right: the coach's window, white and lifted, its reply ending in a piece of work. Each side's own
+ * line (the Owner's row) sits above its window. Phone: the pair stacks, general first. On scroll-in the general
+ * side comes first, the coach's a beat later, its work last.
+ */
+.title { margin: 0 0 48px; max-width: 18em; font-size: clamp(36px, 5vw, 72px); font-weight: 600; line-height: 1.08; letter-spacing: -.04em; text-wrap: balance; }
+.pairs { display: grid; gap: 56px; margin: 0; padding: 0; list-style: none; }
+@media (max-width: 767px) { .pairs { gap: 40px; } .title { margin-bottom: 32px; } }
+.pair { display: grid; gap: 16px; }
+@media (min-width: 900px) { .pair { grid-template-columns: minmax(0, 5fr) minmax(0, 6fr); gap: 28px; align-items: start; } }
+.side { display: grid; gap: 12px; min-width: 0; }
+.claim { margin: 0; color: var(--j-body); font-size: 16px; line-height: 1.6; text-wrap: pretty; }
+.claim b { display: block; margin-bottom: 2px; color: var(--j-muted); font-size: 13px; font-weight: 600; }
+[data-side='coach'] .claim { color: var(--j-ink); font-weight: 600; }
+[data-side='coach'] .claim b { color: var(--j-gold-text); }
+
+.window { display: grid; gap: 10px; padding: 14px; border-radius: 20px; font-size: 14px; line-height: 1.7; }
+.window[data-generic] { border: 1px dashed rgba(20, 19, 18, .2); background: rgba(240, 239, 236, .7); color: #5d5c58; }
+.window:not([data-generic]) { border: 1px solid var(--j-line); background: #fff; color: #262626; box-shadow: var(--j-shadow-lift); }
+.bar { display: flex; align-items: center; gap: 6px; margin: 0; color: #8a8a87; font-size: 12.5px; }
+.bar svg { flex: none; }
+.window:not([data-generic]) .bar svg { color: var(--j-gold-text); }
+.bar i { margin-left: auto; padding: 0 7px; border-radius: 999px; background: var(--gl-accent-tag); color: var(--gl-accent-tag-text); font-size: 11px; font-style: normal; line-height: 19px; }
+.question { justify-self: end; max-width: 85%; margin: 0; padding: 8px 12px; border-radius: 14px; background: #fff; color: #262626; }
+.window:not([data-generic]) .question { background: #f3f3f1; }
+.genericReply, .coachReply { display: grid; gap: 6px; }
+.genericReply p, .coachReply > p { margin: 0; }
+.genericReply { padding: 4px 2px; }
+.coachReply { padding: 10px 12px; border: 1px solid #ececea; border-radius: 14px; }
+.work { min-width: 0; }
+
+.card { min-width: 0; }
+.card section { margin: 0; box-shadow: none; }
+.card section p, .card section button { font-size: 13px; }
+.phrase { display: inline-block; }
+.sheet { display: grid; gap: 6px; padding: 10px 12px; border-radius: 10px; background: #fafaf8; }
+.sheetTitle { display: flex; align-items: center; gap: 6px; margin: 0; color: var(--j-ink); font-size: 13px; font-weight: 600; }
+.sheetTitle svg { color: var(--j-gold-text); }
+.sheet dl { display: grid; gap: 6px; margin: 0; }
+.sheet dl div { display: grid; grid-template-columns: 6em minmax(0, 1fr); gap: 10px; font-size: 13.5px; }
+.sheet dt { color: #888; }
+.sheet dd { margin: 0; }
+
+@media (prefers-reduced-motion: no-preference) {
+  [data-motion='on'] .pair:not([data-in]) [data-side='generic'] { opacity: 0; translate: 0 20px; }
+  [data-motion='on'] .pair:not([data-in]) [data-side='coach'] { opacity: 0; translate: 0 28px; }
+  [data-motion='on'] .pair:not([data-in]) .work { opacity: 0; translate: 0 10px; }
+  [data-motion='on'] .pair [data-side] { transition: opacity .7s var(--j-ease), translate .7s var(--j-ease); }
+  [data-motion='on'] .pair [data-side='coach'] { transition-delay: .35s; }
+  [data-motion='on'] .pair .work { transition: opacity .6s var(--j-ease) 1s, translate .6s var(--j-ease) 1s; }
+}

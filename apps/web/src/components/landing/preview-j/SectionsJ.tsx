@@ -1,29 +1,12 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import Link from 'next/link';
 import { ArrowRight, Plus } from 'lucide-react';
-import { FINAL_ACTION, H_COMPARE, HERO_H } from '@/lib/landing/landing-copy';
+import { FINAL_ACTION, HERO_H } from '@/lib/landing/landing-copy';
 import { J_FAQ_REWORDS } from '@/lib/landing/landing-copy-j';
 import { LANDING_FAQ_TITLE, type LandingFaqGroup } from '@/lib/landing/landing-faq';
 import { SIGNUP_CTA_HREF } from '@/lib/seo/content/shared';
 import styles from './sections-j.module.css';
 import page from './j.module.css';
-
-/** The Owner's four-row comparison, word for word, as one plain table (no pictures, no extra blocks). */
-export function CompareJ() {
-  return (
-    <section aria-labelledby="compare-title" className={page.section} data-zone="compare">
-      <div className={page.wrap}>
-        <h2 id="compare-title" className={styles.compareTitle}>{H_COMPARE.title}</h2>
-        <table className={styles.table}>
-          <thead><tr><th scope="col">{H_COMPARE.generic}</th><th scope="col">{H_COMPARE.coach}</th></tr></thead>
-          <tbody>
-            {H_COMPARE.rows.map(row => <tr key={row.coach}><td>{row.generic}</td><td>{row.coach}</td></tr>)}
-          </tbody>
-        </table>
-      </div>
-    </section>
-  );
-}
 
 /** Applies sample J's softened FAQ wording (J_FAQ_REWORDS) to one answer paragraph. */
 export function rewordFaq(text: string) {
