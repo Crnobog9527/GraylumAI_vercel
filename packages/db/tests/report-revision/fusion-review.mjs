@@ -182,6 +182,19 @@ export async function runFusionReview({db,Client,connectionString,report}) {
   await settings(db);
   report.checks.push('a version is blocked after 3 failed ends in a row; the 7-day breaker refuses new reviews');
 
+  // Deletion overlapping a held review row fails fast (retryable) instead of deadlocking.
+  const busyReview = (await db.query('SELECT id FROM fusion_reviews WHERE actor_id=$1 LIMIT 1',[f.actor])).rows[0].id;
+  const [holder,deleter] = [new Client({connectionString}),new Client({connectionString})];
+  await Promise.all([holder.connect(),deleter.connect()]);
+  try {
+    await holder.query('BEGIN');
+    await holder.query('SELECT id FROM fusion_reviews WHERE id=$1 FOR UPDATE',[busyReview]);
+    await deleter.query("SET lock_timeout='5s'");
+    await assert.rejects(erase(deleter,f,'artifact',f.project),/CONTENT_ERASURE_BUSY/);
+    await holder.query('ROLLBACK');
+  } finally { await holder.end(); await deleter.end(); }
+  report.checks.push('draft deletion overlapping a held review row fails fast with the retryable busy refusal');
+
   // Erasure: deleting the draft deletes its reviews; account erasure removes and counts them.
   const before = Number((await db.query('SELECT count(*) v FROM fusion_reviews WHERE actor_id=$1',[f.actor])).rows[0].v);
   assert.ok(before>=1);

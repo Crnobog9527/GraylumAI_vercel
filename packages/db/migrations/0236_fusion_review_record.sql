@@ -296,6 +296,10 @@ DO $$ DECLARE src text; a text; BEGIN
     a:=$x$ -- 0235 fusion outputs$x$;
     IF array_length(string_to_array(src,a),1)<>2 THEN RAISE EXCEPTION 'FUSION_SOURCE_MISMATCH: content_erasure_confirm 0236'; END IF;
     EXECUTE replace(src,a,$x$ -- 0236 fusion reviews
+ -- NOWAIT like the session/project/run locks: a claim holding a review row fails this fast (retryable
+ -- CONTENT_ERASURE_BUSY) instead of a deadlock (#955 review).
+ PERFORM fr.id FROM fusion_reviews fr WHERE fr.actor_id=a AND (fr.project_id=ANY(projects) OR fr.source_session_id=ANY(sessions)
+  OR fr.source_version_id=ANY(versions)) ORDER BY fr.id FOR UPDATE NOWAIT;
  DELETE FROM fusion_reviews fr WHERE fr.actor_id=a AND (fr.project_id=ANY(projects) OR fr.source_session_id=ANY(sessions)
   OR fr.source_version_id=ANY(versions));
 $x$||a);
