@@ -6,6 +6,7 @@ import Link from 'next/link';
 import type { PaywallBilling } from '@/components/paywall/paywallPlans';
 import type { LandingCard } from '@/lib/landing/landing-pricing';
 import { cn } from '@/lib/utils';
+import { useFounderSeats } from './LiveFounderSeats';
 
 /**
  * Monthly / yearly switch and the price cards in the paywall v25 format (monthly by default).
@@ -24,7 +25,10 @@ export function PriceCards({
   membershipHref: string;
 }) {
   const [billing, setBilling] = useState<PaywallBilling>('monthly');
-  const hasYearly = cards.some(card => card.quotes.yearly);
+  // The founder card leaves once the live seat count reaches 0 (LiveFounderSeats).
+  const founderGone = useFounderSeats(null) === 0;
+  const shown = founderGone ? cards.filter(card => card.key !== 'founder') : cards;
+  const hasYearly = shown.some(card => card.quotes.yearly);
 
   return (
     <div className="grid gap-8">
@@ -47,8 +51,8 @@ export function PriceCards({
         })}
       </div>
 
-      <div className={cn('mx-auto grid w-full gap-6', cards.length >= 3 ? 'max-w-6xl lg:grid-cols-3' : 'max-w-4xl md:grid-cols-2')}>
-        {cards.map(card => (
+      <div className={cn('mx-auto grid w-full gap-6', shown.length >= 3 ? 'max-w-6xl lg:grid-cols-3' : 'max-w-4xl md:grid-cols-2')}>
+        {shown.map(card => (
           <PriceCard key={card.key} card={card} billing={billing} showResult={showResult[card.key] === true}
             membershipHref={membershipHref} />
         ))}

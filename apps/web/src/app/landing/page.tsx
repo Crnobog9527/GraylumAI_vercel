@@ -1,6 +1,7 @@
 import { JsonLd } from '@/components/seo/JsonLd';
 import { FinalAction } from '@/components/landing/offer/FinalAction';
 import { FlowSteps } from '@/components/landing/offer/FlowSteps';
+import { FounderSeatsProvider } from '@/components/landing/offer/LiveFounderSeats';
 import { SampleReports } from '@/components/landing/offer/SampleReports';
 import { HowItWorks } from '@/components/landing/offer/HowItWorks';
 import { OfferFaq } from '@/components/landing/offer/OfferFaq';
@@ -47,16 +48,18 @@ export default async function LandingPage() {
         <FlowSteps steps={data.flowSteps} />
         <SampleReports reports={data.sampleReports} />
       </HowItWorks>
-      <PriceSection
-        pricing={data.pricing}
-        rows={data.compareRows}
-        risk={data.risk}
-        showResult={data.showResult}
-        founderSeats={data.founderSeats}
-        membershipHref={buildAuthHref('/profile?tab=subscription')}
-      />
-      <OfferFaq groups={data.faqGroups} />
-      <FinalAction showStack={data.showStack} founderSeats={data.founderSeats} note={data.finalNote} />
+      <FounderSeatsProvider initial={data.founderSeats}>
+        <PriceSection
+          pricing={data.pricing}
+          rows={data.compareRows}
+          risk={data.risk}
+          showResult={data.showResult}
+          founderSeats={data.founderSeats}
+          membershipHref={buildAuthHref('/profile?tab=subscription')}
+        />
+        <OfferFaq groups={data.faqGroups} />
+        <FinalAction showStack={data.showStack} founderSeats={data.founderSeats} note={data.finalNote} />
+      </FounderSeatsProvider>
     </SiteShell>
   );
 }
