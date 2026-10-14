@@ -20,24 +20,27 @@ const INSTAGRAM_RESERVED = new Set(['p', 'reel', 'reels', 'explore', 'stories', 
 const hostIs = (host: string, ...domains: string[]) => domains.some(domain => host === domain || host === `www.${domain}`
   || host === `m.${domain}` || host === `mobile.${domain}`);
 
-/** Account candidate from one URL; null when it is not a recognised profile link. */
+/**
+ * Account candidate from one URL; null when it is not a recognised profile link. The path must be the
+ * profile itself: a post, video or sub-page link (x.com/a/status/1, tiktok.com/@a/video/1) does not
+ * confirm the account.
+ */
 function fromUrl(url: URL): { platform: SocialPlatform; raw: string } | null {
   const host = url.hostname.toLowerCase();
   const parts = url.pathname.split('/').filter(Boolean).map(part => decodeURIComponent(part));
+  const only = (length: number) => parts.length === length;
   if (hostIs(host, 'tiktok.com')) {
-    return parts[0]?.startsWith('@') ? { platform: 'tiktok', raw: parts[0].slice(1) } : null;
+    return only(1) && parts[0].startsWith('@') ? { platform: 'tiktok', raw: parts[0].slice(1) } : null;
   }
   if (hostIs(host, 'x.com', 'twitter.com')) {
-    return parts[0] && !X_RESERVED.has(parts[0].toLowerCase()) ? { platform: 'x', raw: parts[0] } : null;
+    return only(1) && !X_RESERVED.has(parts[0].toLowerCase()) ? { platform: 'x', raw: parts[0] } : null;
   }
   if (hostIs(host, 'instagram.com')) {
-    return parts[0] && !INSTAGRAM_RESERVED.has(parts[0].toLowerCase()) ? { platform: 'instagram', raw: parts[0] } : null;
+    return only(1) && !INSTAGRAM_RESERVED.has(parts[0].toLowerCase()) ? { platform: 'instagram', raw: parts[0] } : null;
   }
-  if (hostIs(host, 'youtube.com')) {
-    return parts[0] === 'channel' && parts[1] ? { platform: 'youtube', raw: parts[1] } : null;
-  }
-  if (host === 'space.bilibili.com') return parts[0] ? { platform: 'bilibili', raw: parts[0] } : null;
-  if (hostIs(host, 'weibo.com', 'weibo.cn')) return parts[0] === 'u' && parts[1] ? { platform: 'weibo', raw: parts[1] } : null;
+  if (hostIs(host, 'youtube.com')) return only(2) && parts[0] === 'channel' ? { platform: 'youtube', raw: parts[1] } : null;
+  if (host === 'space.bilibili.com') return only(1) ? { platform: 'bilibili', raw: parts[0] } : null;
+  if (hostIs(host, 'weibo.com', 'weibo.cn')) return only(2) && parts[0] === 'u' ? { platform: 'weibo', raw: parts[1] } : null;
   return null;
 }
 

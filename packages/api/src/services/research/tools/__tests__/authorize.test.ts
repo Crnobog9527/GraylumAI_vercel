@@ -21,7 +21,7 @@ function store(overrides: Partial<{ used: boolean; message: string }> = {}): Aut
     candidateConfirmation: vi.fn(async (s, id) => (mine(s) && id === ids.candidate
       ? [{ platform: 'tiktok' as const, account: 'homeideas' }, { platform: 'x' as const, account: 'tidyroom' }] : null)),
     userMessage: vi.fn(async (s, id) => (mine(s) && id === ids.message
-      ? overrides.message ?? '对标账号：https://www.tiktok.com/@HomeIdeas?lang=en 还有 https://x.com/TidyRoom/status/1 ' : null)),
+      ? overrides.message ?? '对标账号：https://www.tiktok.com/@HomeIdeas?lang=en 还有 https://x.com/TidyRoom/ ' : null)),
     refreshGrant: vi.fn(async (s, id) => (mine(s) && id === ids.refresh
       ? { platform: 'tiktok' as const, account: 'homeideas', used: overrides.used ?? false } : null)),
   };
@@ -41,7 +41,10 @@ describe('profile links', () => {
       .toEqual({ platform: 'youtube', account: 'UCabcdefghijklmnopqrstuv' });
     for (const link of ['https://x.com/home', 'https://www.instagram.com/p/abc', 'https://www.tiktok.com/discover',
       'https://www.youtube.com/@someone', 'https://www.douyin.com/user/abc', 'https://evil.example/@homeideas',
-      'https://user:pw@x.com/tidyroom', 'ftp://x.com/tidyroom', 'https://x.com/%E0%A4%A']) {
+      'https://user:pw@x.com/tidyroom', 'ftp://x.com/tidyroom', 'https://x.com/%E0%A4%A',
+      'https://x.com/tidyroom/status/123', 'https://www.tiktok.com/@homeideas/video/1', 'https://www.instagram.com/tidy_room/reels',
+      'https://space.bilibili.com/123456/video', 'https://weibo.com/u/7654321/home',
+      'https://www.youtube.com/channel/UCabcdefghijklmnopqrstuv/videos']) {
       expect(parseProfileLink(link)).toBeNull();
     }
   });
@@ -88,6 +91,12 @@ describe('benchmark_fetch authorization', () => {
       const args = fetchArgs([account], { kind: 'user_message', messageId: ids.message });
       expect(await authorizeBenchmarkFetch(scope, args, s)).toEqual({ ok: false, reason: 'NOT_CONFIRMED' });
     }
+  });
+
+  it('does not treat a post link as confirming its author', async () => {
+    const args = fetchArgs([{ platform: 'x', account: 'tidyroom' }], { kind: 'user_message', messageId: ids.message });
+    expect(await authorizeBenchmarkFetch(scope, args, store({ message: '看这条 https://x.com/TidyRoom/status/123' })))
+      .toEqual({ ok: false, reason: 'NOT_CONFIRMED' });
   });
 
   it('ignores a bare account name without a link', async () => {
