@@ -60,12 +60,13 @@ describe('publish-monitor provider cleanup', () => {
   it('provider work re-reads every account and acts only while the expected owner still holds it', async () => {
     const OWNER = 'c'.repeat(32);
     const mine = (id: string, status = 'connected') => json(200, { ...acct(id, `${OWNER}.${'e'.repeat(32)}`), status });
-    const job = (id: string, deleting: boolean, action: string, ownerRef: string | null = OWNER) =>
-      ({ connectionId: CONN, providerAccountId: id, deleting, action, ownerRef });
+    const job = (id: string, deleting: boolean, action: string, ownerRef: string | null = OWNER, takeoverPending = false) =>
+      ({ connectionId: CONN, providerAccountId: id, deleting, action, ownerRef, takeoverPending });
     const jobs = [
       job('spc_del', true, 'delete'), job('spc_gone', true, 'delete'), job('spc_reauthed', true, 'delete'),
       job('spc_hold', true, 'disconnect'), job('spc_back', false, 'disconnect'), job('spc_taken', false, 'disconnect'),
       job('spc_done', false, 'disconnect'), job('spc_denied', true, 'delete'), job('spc_noref', true, 'delete', null),
+      job('spc_taken_then_deleted', true, 'delete', OWNER, true),
     ];
     const d = database({ publish_monitor_provider_work_claim: [jobs] });
     const p = provider([
@@ -78,11 +79,14 @@ describe('publish-monitor provider cleanup', () => {
       json(200, { ...acct('spc_done', EXT), status: 'disconnected' }),
       mine('spc_denied'), json(403, {}),
       mine('spc_noref'),
+      json(200, acct('spc_taken_then_deleted', EXT)), json(200, {}),
     ]);
-    expect(await runProviderWork(d.db, p.deps, far)).toEqual({ processed: 9, settled: 7, deferred: 2 });
+    expect(await runProviderWork(d.db, p.deps, far)).toEqual({ processed: 10, settled: 8, deferred: 2 });
     expect(d.calls.slice(1).map(c => [c[1].p_outcome, c[1].p_error])).toEqual([['deleted', null], ['gone', null],
       ['owner_changed', null], ['disconnected', null], ['owner_back', null], ['disconnected', null], ['disconnected', null],
-      ['retry', 'PROVIDER_REJECTED_403'], ['retry', 'OWNER_UNKNOWN']]);
+      ['retry', 'PROVIDER_REJECTED_403'], ['retry', 'OWNER_UNKNOWN'], ['owner_changed', null]]);
+    // A deletion record still owing a takeover disconnect clears the overwriting authorization before it ends.
+    expect(p.calls).toContain('POST /social-accounts/spc_taken_then_deleted/disconnect');
     // Never deleted or disconnected: someone else's fresh grant, the owner's own re-authorisation, an already
     // disconnected account, and a record whose owner is unknown.
     for (const id of ['spc_reauthed', 'spc_back', 'spc_done', 'spc_noref']) {
@@ -117,7 +121,8 @@ describe('publish-monitor provider cleanup', () => {
 
   it('stops at the time budget and leaves the rest for the next run', async () => {
     const d = database({ publish_monitor_provider_work_claim: [[
-      { connectionId: CONN, providerAccountId: 'spc_1', deleting: true, action: 'delete', ownerRef: null }]] });
+      { connectionId: CONN, providerAccountId: 'spc_1', deleting: true, action: 'delete', ownerRef: null,
+        takeoverPending: false }]] });
     expect(await runProviderWork(d.db, provider([]).deps, 0)).toEqual({ processed: 0, settled: 0, deferred: 0 });
     expect(d.calls).toEqual([]);
   });

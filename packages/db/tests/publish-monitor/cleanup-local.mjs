@@ -100,7 +100,13 @@ try {
   assert.deepEqual([taken.status, taken.provider_disconnect_pending, taken.actor_id], ['quarantined', true, owned.a]);
   assert.equal((await conn('pfm_u_kept')).status, 'connected');
   await finish(b1.requestId, true);
-  await code(classify(b1.requestId, []), 'PT409');
+  // A settled abandoned attempt is checked again daily for 30 days (its consent link never expires): not right away,
+  // but after a day; an attempt older than 30 days is not.
+  assert.equal((await claim()).some(r => r.requestId === b1.requestId), false);
+  await c.query("UPDATE social_connect_requests SET cleaned_at=now()-interval '21 hours',cleanup_lease_until=NULL WHERE id=$1",
+    [b1.requestId]);
+  assert.equal((await claim()).some(r => r.requestId === b1.requestId), true);
+  await finish(b1.requestId, true);
   await finish(a1.requestId, false, 'PROVIDER_UNAVAILABLE');
   assert.deepEqual([(await state(a1.requestId)).cleaned_at, (await state(a1.requestId)).cleanup_error],
     [null, 'PROVIDER_UNAVAILABLE']);
@@ -134,7 +140,7 @@ try {
   // Provider work: takeover disconnect carries the original owner's reference; deletion rows are removed on success.
   const jobs = await work();
   const takeoverJob = jobs.find(x => x.providerAccountId === 'pfm_owned');
-  assert.equal(takeoverJob.action, 'disconnect');
+  assert.deepEqual([takeoverJob.action, takeoverJob.takeoverPending], ['disconnect', true]);
   assert.equal(takeoverJob.ownerRef, await v('SELECT provider_ref v FROM social_monitor_settings WHERE actor_id=$1', [owned.a]));
   assert.deepEqual(await work(), [], 'leased work is not claimed twice');
   assert.equal((await conn('pfm_owned')).deletion_attempts, 0, 'claiming alone does not use up a retry');
@@ -207,8 +213,8 @@ try {
   const kept = await state(late.requestId);
   assert.deepEqual([kept.state, kept.business_id, kept.target_account_project_id, kept.cleaned_at],
     ['abandoned', null, null, null], 'an erased user\'s unsettled attempt keeps its cleanup record');
-  // The 30-day purge runs on every daily claim, even with no new work.
-  await c.query("UPDATE social_connect_requests SET cleaned_at=now()-interval '31 days' WHERE id=$1", [b1.requestId]);
+  // The 30-day purge (counted from when the attempt was made) runs on every daily claim, even with no new work.
+  await c.query("UPDATE social_connect_requests SET created_at=now()-interval '31 days' WHERE id=$1", [b1.requestId]);
   await claim();
   assert.equal(await state(b1.requestId), undefined);
   report.checks.push('erasure completes while unsettled attempts keep their cleanup record; the 30-day purge runs daily');

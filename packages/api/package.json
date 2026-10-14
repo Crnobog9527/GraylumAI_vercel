@@ -30,6 +30,8 @@
     "./src/services/diagnostics": "./src/services/diagnostics.ts",
     "./src/services/stripe": "./src/services/stripe.ts",
     "./src/services/payments/stripeWebhookError": "./src/services/payments/stripeWebhookError.ts",
+    "./src/services/payments/publicOffers": "./src/services/payments/publicOffers.ts",
+    "./src/routers/publicOffers": "./src/routers/publicOffers.ts",
     "./src/services/stripeFulfillment": "./src/services/stripeFulfillment.ts",
     "./src/services/subscriptionCreditGrants": "./src/services/subscriptionCreditGrants.ts",
     "./src/services/accountErasure/financialRecovery": "./src/services/accountErasure/financialRecovery.ts",

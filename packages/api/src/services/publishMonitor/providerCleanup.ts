@@ -99,6 +99,7 @@ export async function cleanupAttempts(db: Rpc, client: ClientDeps, until: number
 }
 
 const claimedWork = z.object({ connectionId: z.string().uuid(), providerAccountId: providerId, deleting: z.boolean(),
+  takeoverPending: z.boolean(),
   action: z.enum(['delete', 'disconnect']), ownerRef: z.string().regex(/^[0-9a-f]{32}$/).nullable() }).strict();
 type WorkOutcome = 'deleted' | 'gone' | 'owner_changed' | 'disconnected' | 'owner_back' | 'retry';
 
@@ -114,8 +115,13 @@ async function settle(client: ClientDeps, job: z.infer<typeof claimedWork>): Pro
   const owner = current.value.externalId?.split('.')[0] ?? null;
   if (job.deleting) {
     if (!job.ownerRef) return ['retry', 'OWNER_UNKNOWN'];
-    // Someone else authorized this account since: it is theirs now; only our record ends.
-    if (owner !== job.ownerRef) return ['owner_changed', null];
+    if (owner !== job.ownerRef) {
+      // A proven takeover still waiting for its disconnect is cleared first; otherwise someone else authorized the
+      // account legitimately since, it is theirs, and only our record ends.
+      if (!job.takeoverPending || current.value.status === 'disconnected') return ['owner_changed', null];
+      const cleared = await disconnectAccount(client, job.providerAccountId);
+      return cleared.kind === 'ok' || gone(cleared) ? ['owner_changed', null] : ['retry', errorCode(cleared)];
+    }
   } else if (job.ownerRef && owner === job.ownerRef) {
     // The original owner re-authorised since the takeover: their fresh grant is not ours to revoke.
     return ['owner_back', null];
