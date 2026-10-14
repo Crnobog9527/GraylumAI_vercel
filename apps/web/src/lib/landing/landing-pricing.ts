@@ -7,8 +7,9 @@ import type { LandingFeature } from './landing-flags';
 /**
  * Price cards for the landing page in the paywall v25 card format (offer final 2026-10-13, section 4b):
  * big current price, struck-out original, tag, saving, renewal text under the button, who it fits.
- * Every number comes from the server. The Gold first-month price and the founder offer have no public
- * server answer yet; until one is passed in, those parts are not shown (never a hard-coded $49 or $496).
+ * Every number comes from the server: plans from the catalog, the Gold first month and the founder offer from
+ * settings.getPublicOffers (landing-offers.ts). When one is not passed in, that part is not shown (never a hard-coded
+ * $49 or $496).
  */
 export type LandingOffers = {
   goldFirstMonth?: number | null;
