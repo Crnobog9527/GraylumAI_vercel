@@ -72,5 +72,8 @@ describe('publish-monitor connect flow helpers', () => {
     const p = provider([acct('spc_1', { username: 'one' }), json(503, {})]);
     expect((await describeCandidates(p.deps, pending)).map(c => c.username)).toEqual(['one', null, null]);
     expect(p.urls).toHaveLength(2);
+    const refused = provider([json(403, {})]);
+    expect((await describeCandidates(refused.deps, pending)).map(c => c.username)).toEqual([null, null, null]);
+    expect(refused.urls).toHaveLength(1);
   });
 });

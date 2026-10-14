@@ -112,7 +112,7 @@ export async function describeCandidates(client: ClientDeps, pending: PendingCon
     if (lookups && candidate.kind !== 'unavailable' && now() < until) {
       const account = await getAccount(client, candidate.providerAccountId).catch(() => null);
       if (account?.kind === 'ok' && account.value.platform === pending.platform) username = account.value.username;
-      else if (account?.kind !== 'rejected') lookups = false;
+      else if (!(account?.kind === 'rejected' && account.status === 404)) lookups = false;
     }
     views.push({ ...candidate, username });
   }
