@@ -2,6 +2,7 @@
 import assert from 'node:assert/strict';
 import {randomUUID} from 'node:crypto';
 import {rpc,closeAccount} from '../erasure-b2a/cases.mjs';
+import {recordLibraryProof} from './library-proof.mjs';
 
 const fresh=async db=>{
  const actor=randomUUID();
@@ -93,6 +94,7 @@ export async function runCases(db,report){
  assert.equal((await begin(db,drain,drainId)).ready,false);
  assert.equal((await request(db,drain)).auth_delete_started_at,null);
  await assert.rejects(cleanup(db,drain,null),/ERASURE_INVALID_STORAGE_PROOF/);
+ await recordLibraryProof(db,drain);
  cleaned=await cleanup(db,drain);
  assert.deepEqual(cleaned,{remaining:0,manualReview:0,errors:[]});
  assert.equal((await db.query('SELECT count(*)::int n FROM ticket_replies WHERE ticket_id=$1',[ticket])).rows[0].n,0);
@@ -151,6 +153,7 @@ export async function runCases(db,report){
   await assert.rejects(db.query(`UPDATE payment_orders SET checkout_request=$2,purchase_change_request=$3,
    request_erased_at=clock_timestamp(),amount_total=99999 WHERE id=$1`,[id,checkoutSafe,changeSafe]),/ERASURE_ENVELOPE_DENIED/);
   assert.equal((await row()).request_erased_at,null);
+  await recordLibraryProof(db,f);
   assert.deepEqual(await cleanup(db,f),{remaining:0,manualReview:0,errors:[]});
   const after=await row();
   assert.deepEqual(after.checkout_request,checkoutSafe);assert.deepEqual(after.purchase_change_request,changeSafe);
@@ -198,6 +201,7 @@ export async function runCases(db,report){
  report.checks.push('progress capability: service-only issue/read, immutable token, wrong token/request and expired token denied');
  await assert.rejects(begin(db,minimal,randomUUID()),/ERASURE_IDENTITY_MISMATCH/);
  await assert.rejects(finish(db,minimal,rid,true),/ERASURE_IDENTITY_MISMATCH/);
+ await recordLibraryProof(db,minimal);
  assert.deepEqual(await cleanup(db,minimal),{remaining:0,manualReview:0,errors:[]});
  const claim=await role(db,'service_role',()=>begin(db,minimal,rid));
  assert.deepEqual(claim,{ready:true,alreadyDeleted:false,started:true,claimed:true,requestId:rid});
