@@ -4,7 +4,7 @@
 --     only a pending refusal until a later lookup proves not_found or no_cost; then it settles at
 --     zero cost exactly like a 402. 402 itself is unchanged. Controller 2026-10-14 (G1).
 -- (B) Existing rule (V3-BILL-2 §unknown outcome, FUSION-REVIEW §3.3): once automatic recovery has
---     ended, an administrator enters the verified provider cost (0 when the provider generated
+--     ended (its deadline passed), an administrator enters the verified provider cost (0 when the provider generated
 --     nothing) with a reason; the call then settles once through the unchanged min(c,U) fallback.
 -- (C) A read-only list of such calls for the daily reconciliation alert and the admin page.
 -- No automatic release, no new charge formula; finalize itself is not modified.
@@ -41,12 +41,14 @@ BEGIN
  END IF;
 END $$;
 
--- A dispatched, unsettled PAYG call with no known cost whose automatic recovery has ended.
+-- A dispatched, unsettled PAYG call with no known cost whose automatic recovery has ended. Only the
+-- deadline ends it: attempts are counted when a lookup starts and claims continue until the deadline.
+-- After it bill2_recovery_claim grants no lookup; ten more minutes let one already started finish.
 CREATE OR REPLACE FUNCTION public.bill2_payg_call_stuck(c bill2_calls,r bill2_runs) RETURNS boolean
 LANGUAGE sql SET search_path=public,pg_temp AS $$
  SELECT r.contract_version='bill2.v2' AND r.state='cost_pending' AND NOT r.conflict
   AND c.dispatched_at IS NOT NULL AND c.settled_at IS NULL AND c.selected_cost_usd IS NULL AND NOT c.provider_rejected
-  AND (c.recovery_attempts>=3 OR clock_timestamp()>=coalesce(c.recovery_deadline,c.created_at+interval '24 hours'))
+  AND clock_timestamp()>=coalesce(c.recovery_deadline,c.created_at+interval '24 hours')+interval '10 minutes'
 $$;
 
 CREATE OR REPLACE FUNCTION public.bill2_payg_stuck_calls(p_limit integer DEFAULT 100) RETURNS jsonb

@@ -91,10 +91,16 @@ export async function runCases({db,Client,connectionString,report}) {
  await denied(settle(z.sc.id,'0'),'BILL2_ADMIN_SETTLE_NOT_READY');
  const listed=async()=> (await rpc(db,'bill2_payg_stuck_calls',100)).calls.map(x=>x.callId);
  assert.ok(!(await listed()).includes(z.sc.id),'not listed while automatic recovery may still run');
+ // Three attempts alone do not end recovery (the third lookup may still be running); the deadline does.
  await db.query('UPDATE bill2_calls SET recovery_attempts=3 WHERE id=$1',[z.sc.id]);
+ assert.ok(!(await listed()).includes(z.sc.id));await denied(settle(z.sc.id,'0'),'BILL2_ADMIN_SETTLE_NOT_READY');
+ await db.query("UPDATE bill2_calls SET recovery_deadline=clock_timestamp()-interval '5 minutes' WHERE id=$1",[z.sc.id]);
+ assert.ok(!(await listed()).includes(z.sc.id),'a lookup started just before the deadline gets ten minutes to finish');
+ await db.query("UPDATE bill2_calls SET recovery_attempts=3,recovery_deadline=clock_timestamp()-interval '11 minutes' WHERE id=$1",[z.sc.id]);
+ assert.equal(await rpc(db,'bill2_recovery_claim',z.s.actor,z.s.run,z.sc.id),null,'after the deadline no lookup can start');
  const entry=(await rpc(db,'bill2_payg_stuck_calls',100)).calls.find(x=>x.callId===z.sc.id);
  assert.ok(entry);assert.ok(!JSON.stringify(entry).includes('rawBody'));
- report.checks.push('a dispatched call with unknown cost stays cost_pending and is listed only after automatic recovery ended');
+ report.checks.push('a dispatched call with unknown cost stays cost_pending; three attempts or a fresh deadline are not enough; listed only ten minutes after the recovery deadline');
 
  await denied(settle(z.sc.id,'0','供应商确认',randomUUID(),z.s.actor),'BILL2_ADMIN_SETTLE_DENIED');
  await denied(settle(z.sc.id,'0','   '),'BILL2_ADMIN_SETTLE_DENIED');
@@ -114,7 +120,7 @@ export async function runCases({db,Client,connectionString,report}) {
  report.checks.push('admin settles a verified cost of 0 once: hold released to the exact pre-call balance, audit written with reason and balances, repeat returns the same result, a changed repeat conflicts, a settled call is no longer listed');
 
  const n=await stuck();
- await db.query('UPDATE bill2_calls SET recovery_deadline=clock_timestamp()-interval \'1 minute\' WHERE id=$1',[n.sc.id]);
+ await db.query("UPDATE bill2_calls SET recovery_attempts=3,recovery_deadline=clock_timestamp()-interval '11 minutes' WHERE id=$1",[n.sc.id]);
  const charged=await settle(n.sc.id,'0.001');
  assert.ok(charged.chargedDelta>0);assert.ok(await balance(db,n.s)<n.before);assert.ok(await balance(db,n.s)>=n.hold);
  assert.equal((await call(db,n.sc)).metering_missing,true);
@@ -127,7 +133,7 @@ export async function runCases({db,Client,connectionString,report}) {
   evidenceKind:'transport_observation',providerId:'gen-fusion-'+fc.id,cost:null,final:false,currency:'USD',source:'response',
   coverage:'request_total',observedAt:new Date().toISOString(),sourceHash:'e'.repeat(64),rejectedReason:'incomplete_stream'});
  await rpc(db,'bill2_cancel',fz.actor,fz.run);await rpc(db,'bill2_finalize',fz.actor,fz.run);
- await db.query('UPDATE bill2_calls SET recovery_attempts=3 WHERE id=$1',[fc.id]);
+ await db.query("UPDATE bill2_calls SET recovery_attempts=3,recovery_deadline=clock_timestamp()-interval '11 minutes' WHERE id=$1",[fc.id]);
  assert.equal((await run(db,fz)).state,'cost_pending');assert.equal(await balance(db,fz),fhold);
  const fusion=await settle(fc.id,'0');
  assert.equal(fusion.creditsAfter,100);assert.equal(await balance(db,fz),100);
@@ -142,7 +148,7 @@ export async function runCases({db,Client,connectionString,report}) {
   evidenceKind:'transport_observation',providerId:'gen-stuck-'+cb.id,cost:null,final:false,currency:'USD',source:'response',
   coverage:'request_total',observedAt:new Date().toISOString(),sourceHash:'e'.repeat(64),rejectedReason:'incomplete_stream'});
  await rpc(db,'bill2_cancel',owner,sb.run);await rpc(db,'bill2_finalize',owner,sb.run);
- await db.query('UPDATE bill2_calls SET recovery_attempts=3 WHERE id IN ($1,$2)',[pa.sc.id,cb.id]);
+ await db.query("UPDATE bill2_calls SET recovery_attempts=3,recovery_deadline=clock_timestamp()-interval '11 minutes' WHERE id IN ($1,$2)",[pa.sc.id,cb.id]);
  await db.query("UPDATE profiles SET role='admin' WHERE id=$1",[owner]);
  const ownerHeld=await balance(db,pa.s);
  const one=new Client({connectionString}),two=new Client({connectionString});
