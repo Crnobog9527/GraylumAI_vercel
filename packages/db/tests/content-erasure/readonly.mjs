@@ -65,7 +65,33 @@ export async function runReadonly({db,report}){
   'no new writes or model calls');
  const other=await fixture(db);
  await assert.rejects(rpc(db,'opc_query',other.actor,confirmed.draft_id),/OPC_DENIED/);
- report.checks.push('conversation deleted: confirmed draft read-only and listed; empty draft hidden; writes revoked; other account denied');
+ // Every draft write refuses the read-only draft on the server, including those without a scope check.
+ const id=randomUUID(),v=randomUUID();
+ for(const [name,args] of [
+  ['opc_save_plan',[f.actor,confirmed.draft_id,id,0,v,[]]],
+  ['opc_handoff_b1',[f.actor,confirmed.draft_id,id,id,[]]],
+  ['opc_handoff',[f.actor,confirmed.draft_id,id,id,[]]],
+  ['opc_adopt_topics',[f.actor,confirmed.draft_id,id,0,v,[],[]]],
+  ['opc_revise',[f.actor,confirmed.draft_id,id,confirmed.round_id]],
+  ['opc_save_result',[f.actor,confirmed.draft_id,id,'s',id]],
+  ['opc_topic_bind',[f.actor,confirmed.draft_id,id,v]],
+  ['opc_topic_consent',[f.actor,confirmed.draft_id,v]],
+  ['opc_topic_draft_save',[f.actor,confirmed.draft_id,id,0,v,[]]],
+  ['opc_topic_material',[f.actor,confirmed.draft_id,id,'x']],
+ ]){
+  await assert.rejects(rpc(db,name,...args.map(x=>Array.isArray(x)?JSON.stringify(x):x)),/CONTENT_ERASED/,name);
+ }
+ report.checks.push('conversation deleted: confirmed draft read-only and listed; empty draft hidden; every draft write refused; other account denied');
+
+ // A draft attached to an account (the fixture's base draft is its account's strategy) leaves the account
+ // row once its conversation is deleted and shows up in the list as read-only, where it can be deleted whole.
+ const strategyOf=async()=>(await rpc(db,'opc_library',f.actor,'',null,null)).businesses.flatMap(b=>b.accounts)
+  .map(account=>account.strategyDraftId);
+ assert.ok((await strategyOf()).includes(base.draft_id),'fixture: base draft is an account strategy');
+ await deleteConversation(db,f.actor,base.session_id);
+ assert.ok(!(await strategyOf()).includes(base.draft_id),'no longer attached to the account row');
+ assert.ok((await listed(db,f.actor)).some(x=>x.draftId===base.draft_id&&x.conversationDeleted),'listed as read-only');
+ report.checks.push('an account-attached draft moves to the list as read-only after its conversation is deleted');
 
  // The read-only draft can be deleted as a whole through the existing work deletion.
  const preview=await rpc(db,'content_erasure_preview',f.actor,'artifact',confirmed.project_id);

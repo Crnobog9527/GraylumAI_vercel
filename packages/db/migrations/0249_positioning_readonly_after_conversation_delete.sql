@@ -62,3 +62,26 @@ DO $$ DECLARE source text;sig text;needle text;replacement text;marker text; BEG
   END IF;
  END LOOP;
 END $$;
+
+-- Read-only is enforced by the server, not only by the page: every draft write that does not
+-- already check the draft's billing scope refuses a read-only draft first (same narrow-guard
+-- method as 0201). Writes that check the scope are already refused, because it stays revoked.
+DO $$ DECLARE sig text;source text;guard text:=
+ ' IF opc_draft_readonly(p_actor_id,p_draft_id) THEN RAISE EXCEPTION ''CONTENT_ERASED'' USING ERRCODE=''42501''; END IF; -- 0249 read-only';
+BEGIN
+ FOREACH sig IN ARRAY ARRAY[
+  'opc_adopt_topics(uuid,uuid,uuid,bigint,uuid,jsonb,jsonb)','opc_handoff(uuid,uuid,uuid,uuid,jsonb)',
+  'opc_handoff_b1(uuid,uuid,uuid,uuid,jsonb)','opc_revise(uuid,uuid,uuid,uuid)',
+  'opc_save_plan(uuid,uuid,uuid,bigint,uuid,jsonb)','opc_save_result(uuid,uuid,uuid,text,uuid)',
+  'opc_topic_bind(uuid,uuid,uuid,uuid)','opc_topic_consent(uuid,uuid,uuid)',
+  'opc_topic_draft_save(uuid,uuid,uuid,bigint,uuid,jsonb)','opc_topic_material(uuid,uuid,uuid,text)'] LOOP
+  source:=pg_get_functiondef(('public.'||sig)::regprocedure);
+  IF position('-- 0249 read-only' IN source)=0 THEN
+   IF position('BEGIN' IN source)=0 THEN RAISE EXCEPTION 'OPC_READONLY_SOURCE_MISMATCH: %',sig; END IF;
+   EXECUTE regexp_replace(source,'\mBEGIN\M',E'BEGIN\n'||guard);
+  END IF;
+  -- Never skip silently: every listed write must now carry the guard.
+  IF position('-- 0249 read-only' IN pg_get_functiondef(('public.'||sig)::regprocedure))=0 THEN
+   RAISE EXCEPTION 'OPC_READONLY_GUARD_MISSING: %',sig; END IF;
+ END LOOP;
+END $$;
