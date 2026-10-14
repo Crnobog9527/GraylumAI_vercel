@@ -1,32 +1,46 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 /*
- * The four sample reports (SamplesJ): four report cards side by side on a wide screen, two by two on a tablet, one
- * under the other on a phone. Until the reports exist, each excerpt is a quiet grey line under its real heading and
- * the card says plainly "样例报告生成中".
+ * The sample report walkthrough (SamplesJ): four tabs, one report at a time — its cover, then its chapters lighting up
+ * one after another in a grid, each with what it gives you and its key conclusion (a marked placeholder until the
+ * reports exist). The light comes in with the scroll; with reduced motion every chapter is simply there.
  */
-.samples { display: grid; gap: 22px; }
+.samples { display: grid; gap: 20px; }
 .head { display: grid; gap: 6px; }
 .head h3 { margin: 0; font-size: clamp(22px, 2.2vw, 30px); font-weight: 600; letter-spacing: -.03em; }
 .head p { margin: 0; color: var(--j-body); font-size: 15.5px; line-height: 1.7; }
-.cards { display: grid; gap: 14px; margin: 0; padding: 0; list-style: none; }
-@media (min-width: 640px) { .cards { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-@media (min-width: 1100px) { .cards { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
-.card {
-  display: grid; align-content: start; gap: 12px; height: 100%; padding: 18px; border: 1px solid var(--j-line); border-radius: 18px;
-  background: #fff; box-shadow: var(--j-shadow);
+.tabs { display: flex; flex-wrap: wrap; gap: 8px; }
+.tabs button {
+  display: inline-flex; align-items: center; gap: 6px; min-height: 44px; padding: 0 16px; border: 1px solid var(--j-line); border-radius: 999px;
+  background: #fff; color: var(--j-body); font: inherit; font-size: 14.5px; cursor: pointer; transition: border-color .2s, background-color .2s;
 }
-.card header { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
-.card header svg { color: var(--j-gold-text); }
-.card header b { font-size: 16px; }
-.card header span { color: var(--j-muted); font-size: 13px; }
-.card header em { margin-left: auto; padding: 0 8px; border-radius: 999px; background: #fff4d6; color: #8a5a00; font-size: 11.5px; font-style: normal; line-height: 21px; }
-.pending { margin: 0; padding: 6px 10px; border: 1px dashed #e0c98f; border-radius: 8px; background: #fffaf0; color: #8a5a00; font-size: 12.5px; text-align: center; }
-.card section { display: grid; gap: 6px; padding-top: 10px; border-top: 1px solid var(--j-line); }
-.card h4 { margin: 0; color: var(--j-ink); font-size: 13.5px; font-weight: 600; }
-.line { display: block; height: 8px; border-radius: 4px; background: #efeee9; }
-.line[data-short] { width: 62%; }
+.tabs button span { color: var(--j-muted); font-size: 13px; }
+.tabs button em { padding: 0 7px; border-radius: 999px; background: #fff4d6; color: #8a5a00; font-size: 11.5px; font-style: normal; line-height: 20px; }
+.tabs button[aria-selected='true'] { border-color: var(--j-ink); background: var(--j-ink); color: #fff; }
+.tabs button[aria-selected='true'] span { color: rgba(255, 255, 255, .7); }
+.report { display: grid; gap: 16px; padding: clamp(18px, 2.4vw, 28px); border: 1px solid var(--j-line); border-radius: 24px; background: #fff; box-shadow: var(--j-shadow-lift); }
+.cover { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 4px 14px; align-items: center; padding-bottom: 16px; border-bottom: 1px solid var(--j-line); }
+.cover > svg { color: var(--j-gold-text); }
+.cover h4 { margin: 0; font-size: clamp(20px, 2vw, 26px); font-weight: 600; letter-spacing: -.02em; }
+.coverLabel { display: flex; align-items: center; gap: 8px; margin: 0; color: var(--j-muted); font-size: 13px; }
+.coverLabel em { padding: 0 7px; border-radius: 999px; background: #fff4d6; color: #8a5a00; font-size: 11.5px; font-style: normal; line-height: 20px; }
+.size { margin: 2px 0 0; color: var(--j-body); font-size: 14px; }
+.pending { grid-column: 1 / -1; margin: 8px 0 0; padding: 6px 10px; border: 1px dashed #e0c98f; border-radius: 8px; background: #fffaf0; color: #8a5a00; font-size: 12.5px; text-align: center; }
+@media (min-width: 900px) { .cover { grid-template-columns: auto minmax(0, 1fr) auto; } .pending { grid-column: auto; margin: 0; } }
+.chapters { display: grid; gap: 10px; margin: 0; padding: 0; list-style: none; }
+@media (min-width: 640px) { .chapters { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (min-width: 1100px) { .chapters { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+.chapters li { display: grid; align-content: start; gap: 6px; padding: 12px 14px; border: 1px solid #ececea; border-radius: 14px; background: #fcfcfb; }
+.chapters li:nth-child(11) { border-color: #f0d9a8; background: #fffaf0; }
+.chapters b { font-size: 15px; }
+.chapters p { display: grid; gap: 2px; margin: 0; color: var(--j-body); font-size: 13.5px; line-height: 1.6; }
+.chapters p span { color: var(--j-muted); font-size: 12px; }
+.key { padding-top: 6px; border-top: 1px dashed #ececea; }
+.key i { display: block; height: 7px; border-radius: 4px; background: #efeee9; }
+.key small { color: #b49451; font-size: 11.5px; }
+.more { display: inline-flex; align-items: center; gap: 5px; justify-self: start; color: var(--j-ink); font-size: 14.5px; font-weight: 500; text-underline-offset: 4px; }
 @media (prefers-reduced-motion: no-preference) {
-  .line { background: linear-gradient(90deg, #efeee9 30%, #f7f6f2 50%, #efeee9 70%) 0 0 / 300% 100%; animation: wait 2.4s linear infinite; }
+  .report:not([data-play]) .chapters li { opacity: .25; }
+  .report[data-play] .chapters li { animation: light .6s var(--j-ease) both; animation-delay: calc(var(--i) * 220ms + 300ms); }
+  .report[data-play] .cover { animation: light .6s var(--j-ease) both; }
 }
-@keyframes wait { from { background-position: 100% 0; } to { background-position: 0 0; } }
-.more { display: inline-flex; align-items: center; gap: 5px; margin-top: 4px; color: var(--j-ink); font-size: 14px; font-weight: 500; text-underline-offset: 4px; }
+@keyframes light { from { opacity: .2; translate: 0 10px; } to { opacity: 1; translate: 0 0; } }

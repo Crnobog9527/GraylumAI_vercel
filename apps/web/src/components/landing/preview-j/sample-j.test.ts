@@ -227,11 +227,14 @@ describe('sample J sample reports', () => {
     const extras = { flags: ALL_ON, showSamples: true };
     const shown = renderToStaticMarkup(createElement(SampleJ, { data, siteName: 'Graylum', extras }));
     expect(shown).toContain(J_SAMPLES.title);
-    for (const report of J_SAMPLES.reports) {
-      expect(shown).toContain(`${report.who} · ${report.platform}`);
-      expect(shown).toContain(`href="${samplePath(report.slug)}"`);
-    }
-    expect(shown.split(J_SAMPLES.pending).length - 1).toBe(J_SAMPLES.reports.length);
+    // Four reports to switch between; the first opens on its cover and every chapter of the real report.
+    for (const report of J_SAMPLES.reports) expect(shown).toContain(`<b>${report.who}</b><span>${report.platform}</span>`);
+    expect(shown).toContain(`href="${samplePath(J_SAMPLES.reports[0].slug)}"`);
+    expect(shown).toContain(J_SAMPLES.size);
+    for (const chapter of J_SAMPLES.chapters) expect(shown).toContain(chapter.title);
+    expect(J_SAMPLES.chapters).toHaveLength(14);
+    // Nothing of the reports themselves is made up: every key conclusion waits for the real report.
+    expect(shown.split(J_SAMPLES.pending).length - 1).toBe(J_SAMPLES.chapters.length + 1);
     expect(J_SAMPLES.reports.filter(report => report.truth).map(report => report.slug)).toEqual(['student']);
     // Opening the takeover module: the samples come before the workspace.
     expect(shown.indexOf(J_SAMPLES.title)).toBeLessThan(shown.indexOf('我的定位分析'));
