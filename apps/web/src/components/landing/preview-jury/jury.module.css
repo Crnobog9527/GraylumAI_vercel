@@ -1,7 +1,8 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 /*
  * Jury prototype shell (not public). Sample G's language: warm grey canvas, white rounded sheets, pill controls,
- * gold for the ceremony's marks and ink for small accents. The stage itself lives in jury-stage.module.css.
+ * gold for the ceremony's marks and ink for small accents. The room, the table top, the records and the result page
+ * have their own modules.
  */
 .page {
   --j-canvas: #f5f5f2;
@@ -99,9 +100,59 @@
 .layout > * { min-width: 0; }
 @media (min-width: 1024px) {
   .layout { grid-template-columns: minmax(0, 8fr) minmax(0, 4fr); gap: 20px; align-items: start; }
-  .side { position: sticky; top: 16px; }
+  .side { position: sticky; top: 16px; max-height: calc(100vh - 32px); }
 }
-.floor, .side { display: grid; gap: 16px; align-content: start; }
+.floor, .side { display: grid; gap: 10px; align-content: start; min-height: 0; }
+.side { grid-template-rows: auto minmax(0, 1fr); scroll-margin-top: 12px; }
+.sideHint { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 0; color: var(--j-muted); font-size: 12.5px; }
+.backToRoom {
+  display: none; flex: none; min-height: 32px; padding: 0 12px; border: 1px solid var(--j-line); border-radius: 999px; background: #fff;
+  color: var(--j-ink); font: inherit; font-size: 12.5px; cursor: pointer;
+}
+@media (max-width: 1023px) { .backToRoom { display: inline-flex; align-items: center; } }
+.floor { scroll-margin-top: 8px; }
+.stage { display: grid; border-radius: 20px; box-shadow: 0 2px 14px rgba(2, 4, 26, .07); }
+
+/* Progress: eight stations on a track; the fill follows stations passed, never time. */
+.rail { display: grid; gap: 8px; }
+.railNow { margin: 0; color: var(--j-muted); font-size: 13.5px; }
+.railNow strong { margin-left: 4px; color: var(--j-ink); }
+.track { height: 6px; overflow: hidden; border-radius: 999px; background: var(--j-line); }
+.track span {
+  display: block; height: 100%; border-radius: inherit; background: var(--j-gold-deep);
+  transform-origin: left; transition: transform .8s var(--j-ease);
+}
+.rail ol { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 4px; margin: 0; padding: 0; list-style: none; }
+.rail li { display: grid; text-align: center; }
+.railStop {
+  display: grid; justify-items: center; gap: 4px; padding: 2px 0; border: 0; border-radius: 8px; background: none;
+  color: inherit; font: inherit; cursor: pointer;
+}
+.railStop:disabled { cursor: default; }
+.railStop:not(:disabled):hover .railLabel { color: var(--j-ink); }
+.railDot { width: 12px; height: 12px; border-radius: 50%; background: #fff; box-shadow: inset 0 0 0 2px var(--j-line); }
+.rail li[data-state='done'] .railDot { background: var(--j-gold-deep); box-shadow: none; }
+.rail li[data-state='current'] .railDot { background: var(--j-ink); box-shadow: 0 0 0 4px var(--j-gold-soft); }
+.rail li[data-state='skipped'] .railDot { background: repeating-linear-gradient(45deg, #ddd 0 2px, #fff 2px 4px); }
+.railLabel { display: grid; color: var(--j-muted); font-size: 12.5px; line-height: 1.35; }
+.rail li[data-state='current'] .railLabel { color: var(--j-ink); font-weight: 800; }
+.railLabel small { color: #8a8a8a; font-size: 11px; }
+
+/* Reduced motion: everything at once, one block per stage, one column per person. */
+.static { display: grid; gap: 28px; }
+.staticStages { display: grid; gap: 18px; margin: 0; padding: 0; list-style: none; }
+.staticStage { display: grid; gap: 10px; }
+.staticStage h2, .staticRecords h2 { display: flex; align-items: center; gap: 10px; margin: 0; font-size: 19px; font-weight: 900; }
+.staticStage h2 span {
+  display: inline-grid; place-items: center; width: 28px; height: 28px; border-radius: 50%; background: var(--j-ink); color: #fff; font-size: 14px;
+}
+.staticStage > div { border: 1px solid var(--j-line); border-top-width: 1px; border-radius: 16px; min-height: 0; }
+.staticEmpty { margin: 0; color: var(--j-muted); font-size: 14px; }
+.staticRecords { display: grid; gap: 12px; }
+.staticColumns { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; align-items: start; }
+.staticRecord { display: grid; gap: 12px; padding: 16px; border: 1px solid var(--j-line); border-radius: 16px; background: #fff; scroll-margin-top: 12px; }
+.staticRecord h3 { margin: 0; font-size: 16px; overflow-wrap: anywhere; }
+@media (max-width: 1279px) { .staticColumns { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 
 /* Phone (375): stacked, controls full width, the scenario picker scrolls sideways instead of wrapping. */
 @media (max-width: 767px) {
@@ -113,7 +164,11 @@
   .scenarios button { flex: none; padding: 0 12px; font-size: 13px; }
   .main { gap: 12px; padding: 14px 12px 48px; }
   .transport { display: grid; gap: 8px; }
-  .transportActions > button { padding: 0 12px; }
+  .transportActions > button { min-height: 34px; padding: 0 11px; font-size: 13px; }
+  .rail ol { grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 2px; }
+  .railLabel { display: none; }
+  .staticColumns { grid-template-columns: minmax(0, 1fr); }
+  .stage { border-radius: 16px; }
 }
 
 @media (prefers-reduced-motion: reduce) {
