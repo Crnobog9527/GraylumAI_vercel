@@ -41,7 +41,8 @@ const settlement = z.object({ callId: z.uuid(), runId: z.uuid(), actorId: z.uuid
   verifiedCostUsd: z.union([z.string(), z.number()]), nominalCostUsd: z.union([z.string(), z.number()]).nullable(),
   chargedDelta: z.number().int().nullable(), runState: z.string(), runCharged: z.number().int().nullable(),
   actualRestore: z.number().int().nullable(), creditsBefore: z.number().int().nullable(),
-  creditsAfter: z.number().int().nullable(), settledAt: z.string(), auditId: z.uuid() }).strict();
+  creditsAfter: z.number().int().nullable(), settledAt: z.string(),
+  executionId: z.uuid().nullable(), executionState: z.string().nullable(), auditId: z.uuid() }).strict();
 
 function databaseError(error: unknown): never {
   const message = typeof error === 'object' && error !== null && 'message' in error ? error.message : null;

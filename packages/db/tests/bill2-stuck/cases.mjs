@@ -163,6 +163,37 @@ export async function runCases({db,Client,connectionString,report}) {
  assert.equal((await call(db,pa.sc)).settled_at!==null&&(await call(db,cb)).settled_at!==null,true);
  report.checks.push('one admin settling two of their own stuck calls in overlapping transactions: both complete (no lock-upgrade deadlock)');
 
+ // Two administrators settling each other's stuck calls at the same time (cross-account lock order).
+ const x=await stuck(),y=await stuck();
+ await db.query("UPDATE bill2_calls SET recovery_attempts=3,recovery_deadline=clock_timestamp()-interval '11 minutes' WHERE id IN ($1,$2)",[x.sc.id,y.sc.id]);
+ await db.query("UPDATE profiles SET role='admin' WHERE id IN ($1,$2)",[x.s.actor,y.s.actor]);
+ const cx=new Client({connectionString}),cy=new Client({connectionString});
+ await cx.connect();await cy.connect();
+ try {
+  for(const c of [cx,cy]){await c.query('BEGIN');await c.query("SET LOCAL lock_timeout='20s'");}
+  const cross=(c,admin,id)=>rpc(c,'bill2_payg_admin_settle_call',admin,randomUUID(),id,'0','交叉释放').then(()=>c.query('COMMIT'));
+  await Promise.all([cross(cx,x.s.actor,y.sc.id),cross(cy,y.s.actor,x.sc.id)]);
+ } finally {await cx.query('ROLLBACK').catch(()=>null);await cy.query('ROLLBACK').catch(()=>null);await cx.end();await cy.end();}
+ assert.equal(await balance(db,x.s),100);assert.equal(await balance(db,y.s),100);
+ report.checks.push('two administrators settling each other\'s calls concurrently both complete (profiles locked in id order)');
+
+ // A Runtime-bound stuck call: settlement also finishes the execution and releases the session.
+ const rt=await fixture(db,'v2');
+ await db.query('SELECT b2a_test.bind($1)',[rt]);
+ const rc=await claim(db,rt);
+ await record(db,rt,rc,{provider:'openrouter',account:'sandbox',model:rt.claimPayload.model,protocol:'openrouter-chat-v1',
+  evidenceKind:'transport_observation',providerId:'gen-runtime-'+rc.id,cost:null,final:false,currency:'USD',source:'response',
+  coverage:'request_total',observedAt:new Date().toISOString(),sourceHash:'e'.repeat(64),rejectedReason:'incomplete_stream'});
+ await rpc(db,'bill2_cancel',rt.actor,rt.run);await rpc(db,'bill2_finalize',rt.actor,rt.run);
+ await db.query("UPDATE bill2_calls SET recovery_attempts=3,recovery_deadline=clock_timestamp()-interval '11 minutes' WHERE id=$1",[rc.id]);
+ const bound=(await db.query('SELECT e.id,e.state,s.active_execution FROM runtime_executions e JOIN runtime_sessions s ON s.id=e.session_id WHERE e.billing_run_id=$1',[rt.run])).rows[0];
+ assert.equal(bound.active_execution,bound.id);assert.notEqual(bound.state,'cancelled');
+ const done=await settle(rc.id,'0');
+ const after=(await db.query('SELECT e.state,s.active_execution FROM runtime_executions e JOIN runtime_sessions s ON s.id=e.session_id WHERE e.id=$1',[bound.id])).rows[0];
+ assert.equal(after.state,'cancelled');assert.equal(after.active_execution,null);
+ assert.equal(done.executionId,bound.id);assert.equal(done.executionState,'cancelled');assert.equal(await balance(db,rt),100);
+ report.checks.push('a Runtime-bound stuck call: settlement ends the execution as cancelled and releases the session');
+
  const grants=await db.query(`SELECT f,r,has_function_privilege(r,f,'EXECUTE') ok FROM unnest(ARRAY[
   'public.bill2_payg_stuck_calls(integer)','public.bill2_payg_admin_settle_call(uuid,uuid,uuid,numeric,text)']) f,
   unnest(ARRAY['anon','authenticated','service_role']) r ORDER BY f,r`);

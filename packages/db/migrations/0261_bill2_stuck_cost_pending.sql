@@ -74,24 +74,31 @@ END $$;
 CREATE OR REPLACE FUNCTION public.bill2_payg_admin_settle_call(p_admin_id uuid,p_request_id uuid,p_call_id uuid,
  p_verified_cost_usd numeric,p_reason text) RETURNS jsonb
 LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
-DECLARE c bill2_calls;r bill2_runs;prior user_activity_logs;reason text:=btrim(coalesce(p_reason,''));
- before_credits bigint;after_credits bigint;before_state jsonb;result jsonb;
+DECLARE c bill2_calls;r bill2_runs;e runtime_executions;prior user_activity_logs;reason text:=btrim(coalesce(p_reason,''));
+ before_credits bigint;after_credits bigint;before_state jsonb;result jsonb;terminal text;
 BEGIN
  IF NOT EXISTS(SELECT 1 FROM profiles WHERE id=p_admin_id AND role='admin' AND status='active' AND is_deleted='false')
  THEN RAISE EXCEPTION 'BILL2_ADMIN_SETTLE_DENIED' USING ERRCODE='42501';END IF;
  IF p_request_id IS NULL OR p_call_id IS NULL OR p_verified_cost_usd IS NULL OR p_verified_cost_usd<0
   OR p_verified_cost_usd>1000 OR scale(p_verified_cost_usd)>12 OR length(reason) NOT BETWEEN 1 AND 500
  THEN RAISE EXCEPTION 'BILL2_ADMIN_SETTLE_DENIED';END IF;
- -- Same order as record/finalize and the metering review: run, sorted model locks, call, receipts, profile.
+ -- Runtime writers lock session -> execution -> run; then the order of record/finalize: run, sorted
+ -- model locks, call, receipts, and both profiles in id order (admin and account may differ).
+ SELECT * INTO e FROM runtime_executions WHERE billing_run_id=(SELECT run_id FROM bill2_calls WHERE id=p_call_id);
+ IF e.id IS NOT NULL THEN
+  PERFORM id FROM runtime_sessions WHERE id=e.session_id FOR UPDATE;
+  SELECT * INTO e FROM runtime_executions WHERE id=e.id FOR UPDATE;
+ END IF;
  SELECT * INTO r FROM bill2_runs WHERE id=(SELECT run_id FROM bill2_calls WHERE id=p_call_id) FOR UPDATE;
  IF r.id IS NULL OR r.contract_version<>'bill2.v2' THEN RAISE EXCEPTION 'BILL2_ADMIN_SETTLE_DENIED';END IF;
  PERFORM bill2_payg_lock_models(r);
  SELECT * INTO c FROM bill2_calls WHERE id=p_call_id AND run_id=r.id FOR UPDATE;
  PERFORM id FROM bill2_receipts WHERE call_id=c.id ORDER BY id FOR UPDATE;
- -- FOR UPDATE, not SHARE: finalize later updates the account profile, which may be this same admin,
- -- and two settlements holding SHARE would deadlock upgrading it.
- PERFORM id FROM profiles WHERE id=p_admin_id AND role='admin' AND status='active' AND is_deleted='false' FOR UPDATE;
- IF NOT FOUND THEN RAISE EXCEPTION 'BILL2_ADMIN_SETTLE_DENIED' USING ERRCODE='42501';END IF;
+ -- FOR UPDATE in id order: finalize updates the account profile (possibly this admin); a shared lock
+ -- would deadlock on upgrade, and an admin-first order would invert against another admin's settlement.
+ PERFORM id FROM profiles WHERE id IN (p_admin_id,r.actor_id) ORDER BY id FOR UPDATE;
+ IF NOT EXISTS(SELECT 1 FROM profiles WHERE id=p_admin_id AND role='admin' AND status='active' AND is_deleted='false')
+ THEN RAISE EXCEPTION 'BILL2_ADMIN_SETTLE_DENIED' USING ERRCODE='42501';END IF;
  SELECT * INTO prior FROM user_activity_logs WHERE id=p_request_id;
  IF prior.id IS NOT NULL THEN
   IF prior.action<>'bill2_admin_settle_call' OR prior.admin_id IS DISTINCT FROM p_admin_id
@@ -111,11 +118,18 @@ BEGIN
  SELECT * INTO c FROM bill2_calls WHERE id=p_call_id;
  SELECT * INTO r FROM bill2_runs WHERE id=r.id;
  IF c.settled_at IS NULL THEN RAISE EXCEPTION 'BILL2_ADMIN_SETTLE_INCOMPLETE';END IF;
+ -- A Runtime-bound run finishes its execution and releases the session, exactly as the p_finish branch
+ -- of runtime_financial_recovery does for a settled run; an erased account is left to erasure.
+ IF e.id IS NOT NULL AND r.state IN ('settled','refunded') AND NOT coalesce(bill2_erasure_closed(r.actor_id,coalesce(r.pre_deduct_id,r.id)),false) THEN
+  terminal:=CASE WHEN e.result IS NULL THEN 'cancelled' ELSE 'completed' END;
+  IF e.state IS DISTINCT FROM terminal THEN UPDATE runtime_executions SET state=terminal WHERE id=e.id RETURNING * INTO e;END IF;
+  UPDATE runtime_sessions SET active_execution=NULL WHERE id=e.session_id AND active_execution=e.id;
+ END IF;
  SELECT credits INTO after_credits FROM profiles WHERE id=r.actor_id;
  result:=jsonb_build_object('callId',c.id,'runId',r.id,'actorId',r.actor_id,'verifiedCostUsd',p_verified_cost_usd,
   'nominalCostUsd',c.nominal_cost_usd,'chargedDelta',c.charged_delta,'runState',r.state,'runCharged',r.charged,
   'actualRestore',r.actual_restore,'creditsBefore',before_credits,'creditsAfter',after_credits,'settledAt',c.settled_at,
-  'auditId',p_request_id);
+  'executionId',e.id,'executionState',e.state,'auditId',p_request_id);
  INSERT INTO user_activity_logs(id,user_id,admin_id,action,action_type,details)
  VALUES(p_request_id,r.actor_id,p_admin_id,'bill2_admin_settle_call','admin',jsonb_build_object(
   'callId',c.id,'runId',r.id,'model',c.model,'verifiedCostUsd',p_verified_cost_usd,'reason',reason,

@@ -18,7 +18,8 @@ it('keeps the daily reconciliation failing while any stuck call exists, includin
 it('settles with a verified decimal cost and a reason; maps refusals without leaking database detail', async () => {
   const input = { callId: id, requestId: id, verifiedCostUsd: '0', reason: '供应商确认没有生成' };
   const result = { callId: id, runId: id, actorId: id, verifiedCostUsd: 0, nominalCostUsd: 0, chargedDelta: 0, runState: 'settled',
-    runCharged: 0, actualRestore: 48, creditsBefore: 8630, creditsAfter: 8678, settledAt: '2026-10-14T08:00:00Z', auditId: id };
+    runCharged: 0, actualRestore: 48, creditsBefore: 8630, creditsAfter: 8678, settledAt: '2026-10-14T08:00:00Z',
+    executionId: null, executionState: null, auditId: id };
   const ok = db(result);
   expect(await settleStuckCall(ok, id, input)).toEqual(result);
   expect(ok.rpc).toHaveBeenCalledWith('bill2_payg_admin_settle_call', { p_admin_id: id, p_request_id: id, p_call_id: id,
