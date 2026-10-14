@@ -83,10 +83,9 @@ export const J_FLYWHEEL = {
   caption: '每转一圈，按数据调整一次，账号往上走一步',
 } as const;
 
-/** The voice wall's title and lead (Owner 2026-10-14: "你是不是也这样？", the lead without "左边／右边"; lead NEW). */
+/** The voice wall's title (Owner 2026-10-14: "你是不是也这样？"; the Owner removed the lead in the live edit mode). */
 export const J_VOICE = {
   title: '你是不是也这样？',
-  lede: '这些是公开论坛和媒体报道里的原话。每一条旁边，是教练怎么帮你解决。',
 } as const;
 
 /** The pictures in "不用自己想选题 / 不用研究运营技术": from the demo's sample report (demo-script.ts REPORT_BODY). */

@@ -25,7 +25,6 @@ export function VoiceWallJ({ notes }: { notes: readonly VoiceNote[] }) {
       <div className={styles.wrap}>
         <div className={styles.sectionHead}>
           <h2 id="voice-title" className={styles.display}>{J_VOICE.title}</h2>
-          <p className={styles.lede}>{J_VOICE.lede}</p>
         </div>
         <ol id="j-voice-wall" className={styles.voiceRows}>
           {ordered.map((note, index) => (
