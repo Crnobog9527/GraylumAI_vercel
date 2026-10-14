@@ -1,0 +1,53 @@
+/* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+/* The stage: a caption of what is happening, the panel strip, then the document on the desk. */
+.desk {
+  display: grid; gap: 0; overflow: hidden; border: 1px solid var(--j-rule); border-radius: 10px; background: var(--j-desk);
+}
+.caption {
+  display: grid; gap: 2px; padding: 16px 20px 14px; border-bottom: 1px solid var(--j-rule); background: var(--j-paper);
+  animation: captionIn .5s var(--j-ease) both;
+}
+.step { color: var(--j-bronze); font-size: 12.5px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.caption h2 { margin: 0; color: var(--j-ink); font-size: 18px; font-weight: 600; line-height: 1.45; text-wrap: balance; }
+.caption p { margin: 2px 0 0; max-width: 46em; color: var(--j-muted); font-size: 13px; line-height: 1.6; }
+
+.panel {
+  display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0; margin: 0; padding: 0; border-bottom: 1px solid var(--j-rule);
+  background: var(--j-paper); list-style: none;
+}
+.panel li { min-width: 0; }
+.panel li + li { border-left: 1px solid var(--j-rule); }
+.person {
+  display: flex; align-items: center; gap: 10px; width: 100%; min-width: 0; padding: 10px 14px; border: 0; background: none;
+  color: inherit; font: inherit; text-align: left; cursor: pointer; transition: background-color .2s;
+}
+.person:hover, .selected { background: var(--j-canvas); }
+.person:focus-visible { outline: 2px solid var(--j-ink); outline-offset: -2px; }
+.person[data-tone='failed'] > span:first-child { filter: grayscale(1); opacity: .45; }
+.who { display: grid; min-width: 0; line-height: 1.35; }
+.name { overflow: hidden; color: var(--j-ink); font-size: 13.5px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.state { color: var(--j-muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.person[data-tone='active'] .state { color: var(--j-ink); }
+.person[data-tone='active'] .state::before {
+  content: ''; display: inline-block; width: 6px; height: 6px; margin-right: 6px; border-radius: 50%; background: var(--j-bronze);
+  vertical-align: 1px; animation: pulse 1.6s ease-in-out infinite;
+}
+.person[data-tone='failed'] .state { color: var(--j-critical); }
+.person[data-seat='S'] { background: color-mix(in srgb, var(--j-bronze) 4%, var(--j-paper)); }
+.person[data-seat='S']:hover, .person[data-seat='S'].selected { background: var(--j-canvas); }
+
+@keyframes captionIn { from { opacity: 0; } }
+@keyframes pulse { 50% { opacity: .35; } }
+
+@media (max-width: 767px) {
+  .caption { padding: 14px 14px 12px; }
+  .caption h2 { font-size: 16.5px; }
+  .panel { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .panel li:nth-child(3) { border-left: 0; }
+  .panel li:nth-child(n + 3) { border-top: 1px solid var(--j-rule); }
+  .person { gap: 8px; padding: 8px 10px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .caption, .person[data-tone='active'] .state::before { animation: none; }
+}
