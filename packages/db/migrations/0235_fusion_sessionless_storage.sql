@@ -229,13 +229,18 @@ LANGUAGE sql STABLE SECURITY DEFINER SET search_path=public,pg_temp AS $$
 $$;
 
 DO $$ DECLARE f text; BEGIN
-  FOREACH f IN ARRAY ARRAY['fusion_group_create(uuid,uuid,text,uuid)','fusion_group_admit(uuid,uuid,text,uuid,jsonb)','fusion_call_output_save(uuid,uuid,text)',
+  FOREACH f IN ARRAY ARRAY['fusion_group_admit(uuid,uuid,text,uuid,jsonb)','fusion_call_output_save(uuid,uuid,text)',
     'fusion_call_output_read(uuid,uuid)','fusion_pending_financial_batch(integer,timestamptz,uuid)'] LOOP
     EXECUTE format('REVOKE ALL ON FUNCTION public.%s FROM PUBLIC,anon,authenticated,service_role', f);
     EXECUTE format('GRANT EXECUTE ON FUNCTION public.%s TO service_role', f);
   END LOOP;
-  -- The sourceless 0234 form is for local fixtures only.
-  REVOKE EXECUTE ON FUNCTION public.fusion_group_create(uuid,uuid,text) FROM service_role;
+  -- Admission is the only service-callable way to build a group, so the switch, membership, allowlist,
+  -- budget and frozen-call checks cannot be skipped (#947 review). Group creation and attaching stay
+  -- internal (fusion_group_admit calls them as owner); the group claim stays callable and checks frozen calls.
+  FOREACH f IN ARRAY ARRAY['fusion_group_create(uuid,uuid,text,uuid)','fusion_group_create(uuid,uuid,text)',
+    'fusion_group_attach(uuid,uuid,uuid)'] LOOP
+    EXECUTE format('REVOKE ALL ON FUNCTION public.%s FROM PUBLIC,anon,authenticated,service_role', f);
+  END LOOP;
 END $$;
 
 -- Content deletion ends an unjudged dispatched call as user_stopped (billable at known cost, FUSION-REVIEW

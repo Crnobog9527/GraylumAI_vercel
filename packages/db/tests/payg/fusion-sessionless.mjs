@@ -207,9 +207,13 @@ export async function fusionSessionlessCases({db,Client,connectionString,report,
   assert.equal(await outputs(db,acct.actor),0);
   report.checks.push('account erasure removes Fusion outputs; body-remaining proof counts them until removed');
 
-  // The sourceless 0234 group form is not callable by the service role.
+  // Admission is the only group-construction path the service role can call.
   await db.query('SET ROLE service_role');
-  try { await assert.rejects(db.query("SELECT fusion_group_create($1,$2,'review')",[g.actor,randomUUID()]),/permission denied/); }
-  finally { await db.query('RESET ROLE'); }
-  report.checks.push('service role must bind a group to a source conversation');
+  try {
+    for (const [sql,args] of [["SELECT fusion_group_create($1,$2,'review')",[g.actor,randomUUID()]],
+      ["SELECT fusion_group_create($1,$2,'review',$3)",[g.actor,randomUUID(),g.session]],
+      ['SELECT fusion_group_attach($1,$2,$3)',[g.actor,g.id,g.runs[0]]]])
+      await assert.rejects(db.query(sql,args),/permission denied/);
+  } finally { await db.query('RESET ROLE'); }
+  report.checks.push('service role cannot create or attach groups directly; only admission builds them');
 }
