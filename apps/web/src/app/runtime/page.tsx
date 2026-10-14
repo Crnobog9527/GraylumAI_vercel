@@ -1,7 +1,8 @@
 'use client';
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { Suspense,useEffect,useState,useRef,useMemo } from 'react';
-import { useSearchParams } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { classifyErasureError } from '@/lib/content-erasure';
 import { Bot,Plus } from 'lucide-react';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
@@ -80,6 +81,10 @@ function RuntimeWorkspace({routeSession,routeModule}:{routeSession:string;routeM
  function updateInput(value:string){setInput(value);if(sessionId)localStorage.setItem('opc-runtime-input:'+sessionId,value);}
  const choices=trpc.runtime.choices.useQuery(sessionId?{sessionId}:undefined);
  const view=trpc.runtime.view.useQuery({sessionId},{enabled:Boolean(sessionId),refetchInterval:5000});
+ const router=useRouter();
+ // A deleted conversation (here, in another tab, or just before a reload) never stays open: start a new one.
+ const erased=Boolean(view.error)&&classifyErasureError(view.error,'preview').type==='gone';
+ useEffect(()=>{if(erased)router.replace('/positioning');},[erased,router]);
  // A resumed turn may settle charges: re-read the balance as each streamed turn does.
  const payg=usePaygResume(()=>Promise.all([view.refetch(),utils.credits.getBalance.invalidate()]));
  const saved=trpc.opc.workResults.useQuery({sessionId},{enabled:Boolean(sessionId&&view.data?.scope?.kind==='work_item')});

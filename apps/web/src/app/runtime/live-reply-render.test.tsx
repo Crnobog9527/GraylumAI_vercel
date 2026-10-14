@@ -5,7 +5,7 @@ const state=vi.hoisted(()=>({executions:[] as unknown[],reply:null as unknown,se
  invalidated:[] as string[]}));
 const turn=vi.hoisted(()=>(executionId:string,stateName:string,input:string,body:string|null=null)=>({executionId,state:stateName,input,body,primaryBody:null,
  organizerComplete:null,skillExecution:false,needsTask:false,unavailableReason:null,contentAvailable:true}));
-vi.mock('next/navigation',()=>({useSearchParams:()=>new URLSearchParams('session=00000000-0000-4000-8000-000000000001')}));
+vi.mock('next/navigation',()=>({useRouter:()=>({replace(){},push(){}}),useSearchParams:()=>new URLSearchParams('session=00000000-0000-4000-8000-000000000001')}));
 vi.mock('@/components/opc/workspace-frame',()=>({WorkspaceFrame:({children}:{children:React.ReactNode})=>children}));
 vi.mock('@/components/opc/work-composer',()=>({WorkComposer:()=>null}));
 vi.mock('@/components/opc/content-editor',()=>({ContentEditor:()=>null}));
