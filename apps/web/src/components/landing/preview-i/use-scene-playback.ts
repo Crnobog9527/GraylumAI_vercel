@@ -60,7 +60,8 @@ export function useScenePlayback(lines: readonly Line[], key: string, target: Re
     return () => media.removeEventListener?.('change', sync);
   }, []);
 
-  // Start only once the conversation is on screen; with reduced motion never start.
+  // Start only once the conversation is on screen; with reduced motion never start. The ref moves to the newly
+  // chosen scene's window, so a scene switch before playback started re-observes the new window.
   useEffect(() => {
     const node = target.current;
     if (!node || seen || reduced) return;
@@ -71,7 +72,7 @@ export function useScenePlayback(lines: readonly Line[], key: string, target: Re
     }, { threshold: 0.3 });
     observer.observe(node);
     return () => observer.disconnect();
-  }, [target, seen, reduced]);
+  }, [target, seen, reduced, key]);
 
   useEffect(() => {
     if (!seen || reduced) {

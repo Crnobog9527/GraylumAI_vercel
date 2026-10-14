@@ -22,8 +22,12 @@ beforeAll(async () => {
         const lines=[{role:'coach',text:'${'这是一句很长的教练回答。'.repeat(12)}'},{role:'user',text:'好'}];
         function App(){
           const ref=React.useRef(null);
-          const {playback}=useScenePlayback(lines,'scene',ref);
-          return <div ref={ref} data-testid="state">{playback?playback.phase:'all'}</div>;
+          const [key,setKey]=React.useState('a');
+          const {playback}=useScenePlayback(lines,key,ref);
+          const far=location.hash==='#far';
+          return <><button onClick={()=>setKey('b')}>switch</button>
+            <p data-testid="state">{playback?playback.phase:'all'}</p>
+            {key==='a'?<div ref={ref} style={{marginTop:far?5000:0,height:40}}>a</div>:<div ref={ref} style={{height:40}}>b</div>}</>;
         }
         createRoot(document.getElementById('root')).render(<App/>);`;
     } }],
@@ -36,10 +40,10 @@ beforeAll(async () => {
 }, 30000);
 afterAll(async () => { await browser?.close(); });
 
-async function open(reducedMotion: 'reduce' | 'no-preference') {
+async function open(reducedMotion: 'reduce' | 'no-preference', hash = '') {
   const page = await browser.newPage({ reducedMotion });
   await page.route('**/*', route => route.fulfill({ contentType: 'text/html', body: '<div id="root"></div>' }));
-  await page.goto('http://localhost/playback');
+  await page.goto(`http://localhost/playback${hash}`);
   await page.addScriptTag({ content: code });
   return page;
 }
@@ -61,5 +65,15 @@ it('never starts playback when reduced motion is on from the start', async () =>
   try {
     await page.waitForTimeout(1200);
     expect(await state(page)).toBe('all');
+  } finally { await page.close(); }
+});
+
+it('plays the newly chosen scene when the visitor switches before the first one reached the screen', async () => {
+  const page = await open('no-preference', '#far');
+  try {
+    await page.waitForTimeout(800);
+    expect(await state(page)).toBe('all');
+    await page.getByRole('button', { name: 'switch' }).click();
+    await expect.poll(() => state(page)).toMatch(/thinking|typing/);
   } finally { await page.close(); }
 });
