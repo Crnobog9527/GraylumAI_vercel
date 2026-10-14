@@ -57,7 +57,7 @@ export type ToolOutcome = 'delivered' | 'failed_free' | 'failed_charged' | 'unkn
 
 export class ToolBillingError extends Error {
   constructor(readonly code: 'TOOL_PRICE_NOT_CHARGEABLE' | 'TOOL_PRICE_EXPIRY_REQUIRED' | 'TOOL_PRICE_UNIT_MISMATCH'
-    | 'TOOL_BOUND_INVALID' | 'TOOL_INPUT_INVALID' | 'TOOL_RESULT_MISMATCH') {
+    | 'TOOL_BOUND_INVALID' | 'TOOL_INPUT_INVALID' | 'TOOL_RESULT_MISMATCH' | 'TOOL_PRICE_ROUTE_MISMATCH') {
     super(code);
   }
 }
@@ -97,6 +97,9 @@ export function toolCallPolicy(input: {
 }): ToolCallPolicy {
   const { entry } = input.price;
   if (entry.includedInReceipt || entry.provider !== input.vendor) throw new ToolBillingError('TOOL_PRICE_NOT_CHARGEABLE');
+  // An exact-route price belongs to that route only; a provider-wide price must really be the wide entry.
+  if (input.price.matchedBy === 'route' ? entry.route !== input.route
+    : entry.route !== null || !entry.appliesToUnlistedRoutes) throw new ToolBillingError('TOOL_PRICE_ROUTE_MISMATCH');
   if (entry.validUntil === null) throw new ToolBillingError('TOOL_PRICE_EXPIRY_REQUIRED');
   const unit = VENDOR_USAGE_UNIT[input.vendor];
   if (entry.usageUnit !== unit) throw new ToolBillingError('TOOL_PRICE_UNIT_MISMATCH');

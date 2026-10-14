@@ -45,6 +45,13 @@ describe('tool billing payloads', () => {
     expect(() => policy(entry({ usageUnit: 'credit' }))).toThrow('TOOL_PRICE_UNIT_MISMATCH');
     expect(() => policy(entry({ price: '0' }))).toThrow('TOOL_BOUND_INVALID');
     expect(() => policy(entry(), '0')).toThrow('TOOL_INPUT_INVALID');
+    // A price resolved for one route cannot freeze another route of the same vendor.
+    expect(() => toolCallPolicy({ vendor: 'tikhub', account: 'tikhub-main', route: '/tiktok/app/v3/fetch_user_post_videos',
+      purposes: ['question'], price: resolve(), maxUnitsPerCall: '1' })).toThrow('TOOL_PRICE_ROUTE_MISMATCH');
+    const wide = entry({ route: null, appliesToUnlistedRoutes: true });
+    const widePrice = resolveProviderPrice({ version: 1, entries: [wide] }, { provider: 'tikhub', route: '/any/route' }, '6', at);
+    expect(toolCallPolicy({ vendor: 'tikhub', account: 'tikhub-main', route: '/any/route', purposes: ['question'],
+      price: widePrice, maxUnitsPerCall: '1' }).model).toBe('tikhub:/any/route');
   });
 
   it('computes cost exactly like providerUsageCostUsd, including other currencies', () => {
