@@ -34,8 +34,9 @@ export const READ_STEP = 2600;
 export const STEEL_ROW = { lead: 900, gap: 650 } as const;
 export const REDLINE = { lead: 400, gap: 700 } as const;
 
+/** A reader moves down the report one chapter per step and stays on the last chapter; it never jumps back to the top. */
 const chapterAt = (local: number, offset: number) =>
-  REPORT_CHAPTERS[(Math.floor(Math.max(0, local) / READ_STEP) + offset) % REPORT_CHAPTERS.length].title;
+  REPORT_CHAPTERS[Math.min(REPORT_CHAPTERS.length - 1, Math.floor(Math.max(0, local) / READ_STEP) + offset)].title;
 
 export function issueIndexAt(scene: Extract<Scene, { kind: 'critique' }>, clock: number): number {
   const elapsed = clock - scene.start - BEAT.issueLead;

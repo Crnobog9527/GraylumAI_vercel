@@ -13,6 +13,7 @@ import {
 import { deskAt, seatStates, type MarginItem } from './jury-desk';
 import { diffText } from './jury-diff';
 import { REVISION_TEXT } from './jury-mock-rulings';
+import { REPORT_CHAPTERS } from './jury-report';
 import { seatInitials } from './JuryBits';
 import { failedSeatsAt } from './jury-progress';
 import { buildScenes, playbackLength, sceneAt, skippedStages, stageIndex } from './jury-scenes';
@@ -150,6 +151,20 @@ describe('the annotated report', () => {
   const scenes = buildScenes(findScenario('full').arrivals);
   const kinds = (items: MarginItem[] | undefined) => (items ?? []).map(item => item.kind);
   const at = (test: (scene: (typeof scenes)[number]) => boolean, offset = 1) => (scenes.find(test)?.start ?? 0) + offset;
+
+  it('moves readers only down the report, so the stage never scrolls back to the top mid-read', () => {
+    const order = REPORT_CHAPTERS.map(chapter => chapter.title);
+    const reading = scenes.filter(scene => scene.kind === 'reading');
+    for (const scene of reading) {
+      let last = -1;
+      for (let clock = scene.start; clock < scene.end; clock += 500) {
+        const focus = deskAt(scenes, clock).focus;
+        if (focus === null) continue;
+        expect(order.indexOf(focus)).toBeGreaterThanOrEqual(last);
+        last = order.indexOf(focus);
+      }
+    }
+  });
 
   it('pins each issue to the margin of its own chapter, and points the stage at that chapter', () => {
     const critique = scenes.filter(scene => scene.kind === 'critique').at(-1);
