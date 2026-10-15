@@ -65,7 +65,18 @@ describe('library read execution', () => {
     expect(replay).not.toContain('原文');
   });
 
-  it('replays a frozen index or refusal as it was, without a database read', async () => {
+  it('checks a frozen index before replay so a deleted filename is never sent again', async () => {
+    const index = {kind: 'library_index', documents: [{documentId: doc, title: 'PRIVATE_NAME.md', version: 2}]};
+    for (const visible of [true, false]) {
+      const ownerRpc = vi.fn(async () => visible);
+      const result = await readLibrary({ownerRpc: ownerRpc as never, executionId: execution, query: '',
+        saved: {result: index}, toolArgs});
+      expect(ownerRpc).toHaveBeenCalledWith('runtime_library_visible', {p_execution_id: execution, p_result: index});
+      expect(JSON.parse(result)).toEqual(visible ? index : {kind: 'unavailable', reason: 'source_deleted'});
+    }
+  });
+
+  it('replays a frozen refusal as it was, without a database read', async () => {
     const ownerRpc = vi.fn();
     const refusal = {kind: 'unavailable', reason: 'read_limit'};
     expect(JSON.parse(await readLibrary({ownerRpc: ownerRpc as never, executionId: execution, query: '',

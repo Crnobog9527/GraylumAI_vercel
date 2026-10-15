@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import assert from 'node:assert/strict';
-import {rpc,closeAccount,outcome} from '../erasure-b2a/cases.mjs';
+import {rpc,closeAccount,outcome,evidence} from '../erasure-b2a/cases.mjs';
 import {runtimeFixture} from '../content-erasure/cases.mjs';
 const one=async(db,text,args=[])=>(await db.query(text,args)).rows[0]?.v;
 const denied=async(promise,code)=>{await assert.rejects(promise,error=>String(error.message).includes(code),code);};
@@ -90,9 +90,27 @@ export async function runCases({db,Client,connectionString,report}) {
  for(let i=0;i<8;i++)await store(db,budget,'r'+i,await read(db,a,budget,'doc-1/segment-'+(i+1)));
  assert.deepEqual(await read(db,a,budget,'doc-1/segment-9'),{kind:'unavailable',reason:'read_limit'});
  report.checks.push('an escaped segment stays within 16,384 bytes; the ninth read of an execution is refused');
+ let escapedReads=0;
+ for(;escapedReads<8;escapedReads++){
+  const value=await read(db,a,heavy,'doc-1/segment-1');
+  if(value.reason==='read_limit')break;
+  await store(db,heavy,'escaped-'+escapedReads,value);
+ }
+ const escapedBytes=Number(await one(db,`SELECT sum(octet_length(to_jsonb(result::text)::text)) v
+  FROM runtime_tool_calls WHERE execution_id=$1`,[heavy]));
+ assert.ok(escapedReads<8&&escapedBytes<=65536,'serialized byte budget stops before the read-count limit');
+ assert.deepEqual(await read(db,a,heavy,'doc-1/segment-1'),{kind:'unavailable',reason:'read_limit'});
+ report.checks.push('cumulative budget counts the same escaped representation as individual results');
+
 
  // Storing and replaying: the guard and the visibility check follow the document.
  const reader=await exec(db,a,sid,[ref(notes)]);
+ const frozenIndex=await read(db,a,reader);
+ assert.equal(await rpc(db,'runtime_library_visible',a,reader,frozenIndex),true);
+ assert.equal(await rpc(db,'runtime_library_visible',other,reader,frozenIndex),false);
+ await db.query('UPDATE library_documents SET content_version=2 WHERE id=$1',[notes]);
+ assert.equal(await rpc(db,'runtime_library_visible',a,reader,frozenIndex),false,'version drift invalidates the frozen index');
+ await db.query('UPDATE library_documents SET content_version=1 WHERE id=$1',[notes]);
  const copy=await read(db,a,reader,'doc-1/segment-1');
  await store(db,reader,'c1',copy);
  assert.equal(await rpc(db,'runtime_library_visible',a,reader,copy),true);
@@ -120,6 +138,7 @@ export async function runCases({db,Client,connectionString,report}) {
  await denied(exec(db,a,sid,[ref(notes)]),'LIB_REFERENCE_NOT_FOUND');
  await denied(store(db,reader,'late',copy),'LIB_REFERENCE_REVOKED');
  assert.equal(await rpc(db,'runtime_library_visible',a,reader,copy),false);
+ assert.equal(await rpc(db,'runtime_library_visible',a,reader,frozenIndex),false,'deleted index cannot replay its filename');
  assert.equal((await read(db,a,reader)).documents[0].available,false);
  report.checks.push('a deletion in progress blocks reads, new references and storing a read; after it commits every path answers deleted');
 
@@ -152,8 +171,37 @@ export async function runCases({db,Client,connectionString,report}) {
  assert.ok(await one(db,'SELECT propagated_at IS NOT NULL v FROM runtime_library_references WHERE execution_id=$1',[f.execution]));
  assert.equal(await one(db,"SELECT result IS NOT NULL v FROM runtime_tool_calls WHERE execution_id=$1 AND call_id='l1'",[running]),true);
  assert.ok(await one(db,'SELECT propagated_at IS NULL v FROM runtime_library_references WHERE execution_id=$1',[running]));
+ assert.equal(await one(db,'SELECT unavailable_reason v FROM runtime_executions WHERE id=$1',[running]),'source_deleted');
  assert.equal((await rpc(db,'runtime_library_propagate',f.actor,10)).processed,0,'repeat finds nothing new');
- report.checks.push('after deletion: a settled execution keeps its answer and exact money; its frozen read, non-user history and receipt bodies are removed; a running execution waits untouched; repeat is a no-op');
+ report.checks.push('after deletion: a settled execution keeps its answer and exact money; its frozen read, non-user history and receipt bodies are removed; a running execution is source-deleted while financial cleanup waits; repeat is a no-op');
+
+ // Late completions must fail closed even if cleanup has not yet propagated the deletion.
+ for(const propagate of [false,true]){
+  const pending=await runtimeFixture(db,{dispatched:true});
+  const deleted=await doc(db,pending.actor,'Late.md');
+  await db.query('INSERT INTO runtime_library_references(execution_id,actor_id,document_id,content_version,ordinal) VALUES($1,$2,$3,1,1)',
+   [pending.execution,pending.actor,deleted]);
+  const deleting=new Client({connectionString});await deleting.connect();
+  try{
+   await deleting.query('BEGIN');await deleting.query('SET LOCAL ROLE service_role');
+   await deleting.query('SELECT public.library_delete($1,$2,false,false,false)',[pending.actor,deleted]);
+   await db.query('BEGIN');await db.query("SET LOCAL lock_timeout='300ms'");
+   await assert.rejects(rpc(db,'runtime_execution',pending.actor,pending.execution,'complete',outcome),error=>error.code==='55P03');
+   await db.query('ROLLBACK');await deleting.query('COMMIT');
+  }finally{await deleting.end();}
+  if(propagate)await rpc(db,'runtime_library_propagate',pending.actor,10);
+  const result=await rpc(db,'runtime_execution',pending.actor,pending.execution,'complete',outcome);
+  assert.equal(result.state,'cost_pending','unknown provider cost remains pending, not refunded');
+  assert.equal(await one(db,'SELECT result IS NULL v FROM runtime_executions WHERE id=$1',[pending.execution]),true);
+  const view=await rpc(db,'runtime_execution',pending.actor,pending.execution,'read',null);
+  assert.equal(view.unavailableReason,'source_deleted');assert.equal(view.result,null);
+  await rpc(db,'bill2_record',pending.actor,pending.run,pending.call.id,evidence(pending.call));
+  await rpc(db,'runtime_financial_recovery',pending.actor,pending.execution,true);
+  assert.equal(await one(db,'SELECT state v FROM runtime_executions WHERE id=$1',[pending.execution]),'cancelled');
+  assert.equal(await one(db,'SELECT result IS NULL v FROM runtime_executions WHERE id=$1',[pending.execution]),true);
+  assert.equal(await one(db,'SELECT active_execution IS NULL v FROM runtime_sessions WHERE id=$1',[pending.session]),true);
+ }
+ report.checks.push('late completion never persists or shows an answer, before or after propagation; unknown cost waits then settles and releases session');
 
  // Account erasure owns and prunes the rows; only service_role reaches the functions; nobody reaches the table.
  assert.equal(await rpc(db,'erasure_business_owner','runtime_library_references',{actor_id:a}),a);

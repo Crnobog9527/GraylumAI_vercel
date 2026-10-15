@@ -35,7 +35,7 @@ export async function readLibrary(options: {
   const {ownerRpc, executionId, query, saved, toolArgs} = options;
   if (saved.result !== null) {
     const kind = (saved.result as {kind?: unknown}).kind;
-    if (kind === 'library_directory' || kind === 'library_segment') {
+    if (kind === 'library_index' || kind === 'library_directory' || kind === 'library_segment') {
       const visible = await ownerRpc<boolean>('runtime_library_visible', {p_execution_id: executionId, p_result: saved.result});
       if (visible !== true) return JSON.stringify(SOURCE_DELETED);
     }

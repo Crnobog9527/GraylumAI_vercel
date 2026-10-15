@@ -94,7 +94,7 @@ BEGIN
  IF m IS NULL THEN RETURN jsonb_build_object('kind','unavailable','reason','unknown_query'); END IF;
  SELECT * INTO ref FROM runtime_library_references WHERE execution_id=e.id AND ordinal=m[1]::smallint;
  IF ref.execution_id IS NULL THEN RETURN jsonb_build_object('kind','unavailable','reason','unknown_query'); END IF;
- SELECT count(*),coalesce(sum(octet_length(t.result::text)),0) INTO reads,used FROM runtime_tool_calls t
+ SELECT count(*),coalesce(sum(octet_length(to_jsonb(t.result::text)::text)),0) INTO reads,used FROM runtime_tool_calls t
   WHERE t.execution_id=e.id AND t.name='read_source' AND t.result->>'kind' IN ('library_directory','library_segment');
  IF reads>=8 OR used>=65536 THEN RETURN jsonb_build_object('kind','unavailable','reason','read_limit'); END IF;
  SELECT * INTO d FROM library_documents WHERE id=ref.document_id AND actor_id=p_actor_id FOR SHARE;
@@ -123,7 +123,7 @@ BEGIN
   END LOOP;
  END IF;
  IF octet_length(to_jsonb(result::text)::text)>16384 THEN RAISE EXCEPTION 'LIB_REFERENCE_RESULT_TOO_LARGE'; END IF;
- IF used+octet_length(result::text)>65536 THEN RETURN jsonb_build_object('kind','unavailable','reason','read_limit'); END IF;
+ IF used+octet_length(to_jsonb(result::text)::text)>65536 THEN RETURN jsonb_build_object('kind','unavailable','reason','read_limit'); END IF;
  RETURN result;
 END $$;
 
@@ -132,6 +132,15 @@ CREATE OR REPLACE FUNCTION public.runtime_library_visible(p_actor_id uuid,p_exec
 RETURNS boolean LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
 BEGIN
  PERFORM bill2_actor(p_actor_id);
+ IF p_result->>'kind'='library_index' THEN
+  RETURN EXISTS(SELECT 1 FROM runtime_executions e WHERE e.id=p_execution_id AND e.actor_id=p_actor_id
+   AND e.erased_at IS NULL AND e.content_deleted_at IS NULL)
+   AND EXISTS(SELECT 1 FROM runtime_library_references r WHERE r.execution_id=p_execution_id AND r.actor_id=p_actor_id)
+   AND NOT EXISTS(SELECT 1 FROM runtime_library_references r LEFT JOIN library_documents d
+    ON d.id=r.document_id AND d.actor_id=r.actor_id
+    WHERE r.execution_id=p_execution_id AND (r.actor_id<>p_actor_id OR d.id IS NULL OR d.deleted_at IS NOT NULL
+     OR d.status<>'ready' OR d.content_version<>r.content_version));
+ END IF;
  RETURN EXISTS(SELECT 1 FROM runtime_executions e
   JOIN runtime_library_references r ON r.execution_id=e.id AND r.actor_id=e.actor_id
   JOIN library_documents d ON d.id=r.document_id AND d.actor_id=r.actor_id
@@ -163,7 +172,7 @@ CREATE TRIGGER runtime_library_tool_guard BEFORE INSERT OR UPDATE OF result ON p
 -- referenced a document now deleting or gone: erase their frozen document reads and non-user session history
 -- through the existing erasure allow-lists, and once the billing run is closed project its receipts to their
 -- financial fields with account_erasure_scrub_receipts. Running executions wait: their reads are already
--- refused. Amounts and the shown answer are untouched.
+-- refused and their source is marked unavailable. Amounts and previously completed answers are untouched.
 CREATE OR REPLACE FUNCTION public.runtime_library_propagate(p_actor_id uuid DEFAULT NULL,p_limit integer DEFAULT 20)
 RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
 DECLARE target record; e runtime_executions; b bill2_runs; stamp timestamptz:=clock_timestamp(); scrub jsonb;
@@ -184,7 +193,10 @@ BEGIN
     UPDATE runtime_library_references SET propagated_at=stamp WHERE execution_id=e.id AND propagated_at IS NULL;
     done:=done+1; CONTINUE;
    END IF;
-   IF e.state NOT IN ('completed','cancelled') THEN waiting:=waiting+1; CONTINUE; END IF;
+   IF e.state NOT IN ('completed','cancelled') THEN
+    UPDATE runtime_executions SET unavailable_reason=coalesce(unavailable_reason,'source_deleted') WHERE id=e.id;
+    waiting:=waiting+1; CONTINUE;
+   END IF;
    IF e.billing_run_id IS NOT NULL THEN
     SELECT * INTO b FROM bill2_runs WHERE id=e.billing_run_id FOR UPDATE NOWAIT;
    END IF;
@@ -214,6 +226,40 @@ BEGIN
  END LOOP;
  RETURN jsonb_build_object('processed',done,'waiting',waiting);
 END $$;
+
+-- Check again at execution entry, even before asynchronous cleanup has run. Referenced executions
+-- take the deletion profile lock before session/run locks; settlement stores no late answer.
+DO $migration$
+DECLARE definition text; anchor text; replacement text; entry_anchor text; entry_patch text;
+BEGIN
+ definition:=pg_get_functiondef('public.runtime_execution(uuid,uuid,text,jsonb)'::regprocedure);
+ IF position('-- 0262 library source deleted' IN definition)=0 THEN
+  anchor:=$a$ IF e.unavailable_reason IS NOT NULL AND p_action IN ('begin','read') THEN$a$;
+  replacement:=$b$ -- 0262 library source deleted
+ IF e.state NOT IN ('completed','cancelled') AND EXISTS(
+  SELECT 1 FROM runtime_library_references r LEFT JOIN library_documents d
+   ON d.id=r.document_id AND d.actor_id=r.actor_id
+  WHERE r.execution_id=e.id AND (d.id IS NULL OR d.deleted_at IS NOT NULL OR d.status='deleting')) THEN
+  UPDATE runtime_executions SET unavailable_reason=coalesce(unavailable_reason,'source_deleted')
+   WHERE id=e.id RETURNING * INTO e;
+ END IF;
+ IF e.unavailable_reason='source_deleted' AND p_action NOT IN ('begin','read') THEN
+  RETURN runtime_cancel(p_actor_id,e.id);
+ END IF;
+$b$||anchor;
+  IF length(definition)-length(replace(definition,anchor,''))<>length(anchor) THEN
+   RAISE EXCEPTION 'LIBRARY_REFERENCE_RUNTIME_SOURCE_MISMATCH'; END IF;
+  entry_anchor:=$a$ PERFORM bill2_actor(p_actor_id);$a$;
+  entry_patch:=entry_anchor||$b$
+ IF EXISTS(SELECT 1 FROM runtime_library_references WHERE execution_id=p_execution_id AND actor_id=p_actor_id) THEN
+  PERFORM id FROM profiles WHERE id=p_actor_id FOR UPDATE;
+ END IF;
+$b$;
+  IF length(definition)-length(replace(definition,entry_anchor,''))<>length(entry_anchor) THEN
+   RAISE EXCEPTION 'LIBRARY_REFERENCE_RUNTIME_ENTRY_MISMATCH'; END IF;
+  EXECUTE replace(replace(definition,anchor,replacement),entry_anchor,entry_patch);
+ END IF;
+END $migration$;
 
 -- Account erasure: the reference rows hold no content; prune them before their executions.
 DO $$
