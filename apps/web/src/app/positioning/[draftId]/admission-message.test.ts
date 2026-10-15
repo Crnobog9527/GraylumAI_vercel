@@ -1,6 +1,8 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import {expect,it} from 'vitest';
 import {admissionMessage} from './admission-message';
+import {releaseRejectedAnswer} from './mentor-turn';
+import {DEFINITE_REFUSAL_NOTICE} from '@/app/runtime/gate-notices';
 import {RUNTIME_INPUT_TOO_LONG_MESSAGE} from '../../../../../../packages/api/src/shared/runtimeInputMessages';
 const message='本次操作所需模型尚未获准用于当前测试窗口，请联系管理员。';
 it.each(['PRECONDITION_FAILED','FORBIDDEN'].flatMap(code=>['opc.prepareStep','opc.mentorTurnStream'].map(path=>[code,path])))('presents a structured %s admission refusal from %s while retaining the same request',(code,path)=>{
@@ -53,4 +55,14 @@ it.each(['opc.prepareStep','opc.mentorTurnStream','runtime.prepare'])('asks to s
  const result=admissionMessage(Object.assign(new Error(RUNTIME_INPUT_TOO_LONG_MESSAGE),{data:{code:'PRECONDITION_FAILED',path}}));
  expect(result).toBe(RUNTIME_INPUT_TOO_LONG_MESSAGE);expect(result).toContain('请分几次发送');expect(result).toContain('没有扣费');
  expect(result).not.toContain('原请求与输入已保留');expect(result).not.toContain('诊断编号');
+});
+
+it('a refusal released before admission says why and never claims the request is kept',()=>{
+ const values=new Map([['key',JSON.stringify({request:{draftId:'d',stepId:'s',requestId:'a',input:'回答'}})]]);
+ const storage={getItem:(key:string)=>values.get(key)??null,setItem:()=>{},removeItem:(key:string)=>{values.delete(key);}};
+ const release=(cause:Error)=>{values.set('key',JSON.stringify({request:{draftId:'d',stepId:'s',requestId:'a',input:'回答'}}));
+  expect(releaseRejectedAnswer(storage,'key','a',cause,undefined,false)).toBe(true);return admissionMessage(cause);};
+ expect(release(Object.assign(new Error(message),{data:{httpStatus:412,code:'PRECONDITION_FAILED',path:'opc.mentorTurnStream'}}))).toBe(message);
+ expect(release(Object.assign(new Error('{"issues":[]}'),{data:{httpStatus:400,code:'BAD_REQUEST',path:'opc.mentorTurnStream'}}))).toBe(DEFINITE_REFUSAL_NOTICE);
+ expect(release(Object.assign(new Error(RUNTIME_INPUT_TOO_LONG_MESSAGE),{data:{httpStatus:412,code:'PRECONDITION_FAILED',path:'opc.prepareStep'}}))).toBe(RUNTIME_INPUT_TOO_LONG_MESSAGE);
 });

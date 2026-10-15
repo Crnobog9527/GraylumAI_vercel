@@ -8,6 +8,7 @@ import {
 } from './jury-events';
 import { statusWord, type CanvasCard, type CanvasView, type Edge, type Node } from './jury-canvas';
 import { MOCK_REPORT, type JuryCaseReport } from './jury-case';
+import { frameTop, type Span } from './jury-frame';
 import { RulingSeal, SeatMark } from './JuryBits';
 import styles from './jury-canvas.module.css';
 
@@ -23,24 +24,30 @@ type Hover = { onPeek: (seat: SeatCode | null) => void; onPick?: (seat: SeatCode
  * person's work grows downward as a short string of cards. Only the thing happening now is lit; pointing at (or tapping) a person or a card opens their full
  * record.
  */
-export function JuryCanvas({ view, names, selected, onPeek, onPick, report = MOCK_REPORT, follow = true }: {
+export function JuryCanvas({ view, names, selected, onPeek, onPick, report = MOCK_REPORT, follow = true, captionAbove = false }: {
   view: CanvasView; names: JurySeatNames; selected: SeatCode | null;
   /** The two reports shown; the prototype's mock creator by default. */
   report?: JuryCaseReport;
   /** On a phone, scroll the page to keep what happens now in view. Off when the page's own scrolling drives the
    * canvas; on a computer the canvas always scrolls inside itself. */
   follow?: boolean;
+  /** Put the sentence about now in a bar above the canvas instead of floating over it, so it never covers a report
+   * card's title (the short version embedded on the landing page). */
+  captionAbove?: boolean;
 } & Hover) {
   const scroller = useRef<HTMLDivElement>(null);
   const board = useRef<HTMLDivElement>(null);
   const boxes = useNodeBoxes(board, `${view.caption}|${view.next.state}|${SEATS.map(seat => view.columns[seat].length).join()}`);
-  useFollowCurrent(scroller, view.current, view.focus.join(), follow);
+  useFollowCurrent(scroller, view.current, view.focus.join(), follow, captionAbove);
   const lane = { view, names, selected, onPeek, onPick };
 
-  return (
+  const caption = (
+    <p className={captionAbove ? styles.captionBar : styles.caption} aria-live="polite" key={view.caption}>{view.caption}</p>
+  );
+  const canvas = (
     <div className={styles.scroller} ref={scroller}>
       <div className={styles.board} ref={board}>
-        <p className={styles.caption} aria-live="polite" key={view.caption}>{view.caption}</p>
+        {captionAbove ? null : caption}
         <Wires boxes={boxes} edges={view.edges} joined={view.joined} />
         <article className={styles.doc} data-node="doc" data-state={view.doc.state}>
           <h2>{report.title}</h2>
@@ -71,6 +78,7 @@ export function JuryCanvas({ view, names, selected, onPeek, onPick, report = MOC
       </div>
     </div>
   );
+  return captionAbove ? <div className={styles.framed}>{caption}{canvas}</div> : canvas;
 }
 
 /** One person: their mark with a status word, and their work hanging under it. The summary waits faintly until it writes. */
@@ -248,8 +256,13 @@ function useNodeBoxes(board: RefObject<HTMLDivElement | null>, layout: string) {
   return boxes;
 }
 
-/** Keep the card the stage is about in view inside the canvas (only when the canvas scrolls by itself). */
-function useFollowCurrent(scroller: RefObject<HTMLDivElement | null>, current: string | null, focus: string, enabled: boolean) {
+/**
+ * Keep the card the stage is about in view inside the canvas (only when the canvas scrolls by itself). With `framed`
+ * (the short version) a report sheet never stops cut in half at the top edge.
+ */
+function useFollowCurrent(
+  scroller: RefObject<HTMLDivElement | null>, current: string | null, focus: string, enabled: boolean, framed: boolean,
+) {
   useEffect(() => {
     const root = scroller.current;
     const target = root?.querySelector<HTMLElement>('[data-current="true"]');
@@ -263,12 +276,20 @@ function useFollowCurrent(scroller: RefObject<HTMLDivElement | null>, current: s
       return;
     }
     if (root.scrollHeight <= root.clientHeight + 1) return;
-    const top = target.getBoundingClientRect().top - root.getBoundingClientRect().top + root.scrollTop;
-    const bottom = top + target.offsetHeight;
-    if (top < root.scrollTop + 60 || bottom > root.scrollTop + root.clientHeight - 24) {
-      root.scrollTo({ top: Math.max(0, bottom - root.clientHeight + 48), behavior: 'smooth' });
+    const origin = root.getBoundingClientRect().top - root.scrollTop;
+    const span = (element: HTMLElement): Span => {
+      const rect = element.getBoundingClientRect();
+      return { top: rect.top - origin, bottom: rect.bottom - origin };
+    };
+    const { top, bottom } = span(target);
+    const moves = top < root.scrollTop + 60 || bottom > root.scrollTop + root.clientHeight - 24;
+    let want = moves ? Math.max(0, bottom - root.clientHeight + 48) : root.scrollTop;
+    if (framed) {
+      const sheets = Array.from(root.querySelectorAll<HTMLElement>('[data-node="doc"], [data-node="next"]'), span);
+      want = frameTop({ want, height: root.clientHeight, max: root.scrollHeight - root.clientHeight, target: { top, bottom }, sheets });
     }
-  }, [scroller, current, focus, enabled]);
+    if (Math.abs(want - root.scrollTop) > 1) root.scrollTo({ top: want, behavior: 'smooth' });
+  }, [scroller, current, focus, enabled, framed]);
 }
 
 function threadPath(from: Box, to: Box, spread: number): string {

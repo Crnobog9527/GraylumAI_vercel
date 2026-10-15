@@ -10,7 +10,7 @@ import type { MockArrival } from './jury-scripts';
 export const STAGES = [
   { key: 'seated', label: '入席' },
   { key: 'reading', label: '各自审阅' },
-  { key: 'steelman', label: '钢人判断' },
+  { key: 'steelman', label: '双向钢人辩证' },
   { key: 'critique', label: '挑刺' },
   { key: 'divergence', label: '找分歧' },
   { key: 'debate', label: '第 2 轮辩论' },
