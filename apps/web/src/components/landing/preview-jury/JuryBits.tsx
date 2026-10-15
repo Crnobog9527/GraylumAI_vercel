@@ -25,10 +25,13 @@ export function SeatMark({ seat, names, size = 'md' }: { seat: SeatCode; names: 
   );
 }
 
-/** The mark with the name beside it; long names are cut with an ellipsis and kept whole in the tooltip. */
-export function SeatBadge({ seat, names, compact }: { seat: SeatCode; names: JurySeatNames; compact?: boolean }) {
+/**
+ * The mark with the name beside it; long names are cut with an ellipsis and kept whole in the tooltip, or, with
+ * `whole`, wrap onto more lines.
+ */
+export function SeatBadge({ seat, names, compact, whole }: { seat: SeatCode; names: JurySeatNames; compact?: boolean; whole?: boolean }) {
   return (
-    <span className={cn(styles.badge, compact && styles.badgeCompact)} title={names[seat]}>
+    <span className={cn(styles.badge, compact && styles.badgeCompact, whole && styles.badgeWhole)} title={names[seat]}>
       <SeatMark seat={seat} names={names} size={compact ? 'sm' : 'md'} />
       <span className={styles.name}>{names[seat]}</span>
     </span>

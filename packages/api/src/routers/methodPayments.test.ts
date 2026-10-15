@@ -5,6 +5,8 @@ import { router as createTRPCRouter } from '../trpc';
 import { methodPaymentProcedures } from './methodPayments';
 import { logger } from '../lib/logger';
 import { WaffoFailure } from '../services/payments/waffoFailure';
+import { RateLimitError } from '../lib/rateLimitError';
+import { assertCheckoutRateLimit } from '../services/stripe';
 const mocks = vi.hoisted(() => ({ cancel: vi.fn(), provider: vi.fn(), wallet: vi.fn(), card: vi.fn(), gateOpen: { value: false } }));
 vi.mock('../services/payments/waffoTestOperationsClient', () => ({ getWaffoTestOperationsClient: mocks.provider }));
 // Every new checkout is closed in code during PR-1; the error-mapping tests open the gate explicitly.
@@ -21,7 +23,7 @@ vi.mock('../services/stripe', () => ({ assertCheckoutRateLimit: vi.fn(), getStri
 const router = createTRPCRouter(methodPaymentProcedures);
 const userId = '00000000-0000-4000-8000-000000000001';
 const subscriptionId = '00000000-0000-4000-8000-000000000002';
-function fixture(role = 'user', settings?: Record<string, unknown>) {
+function fixture(role = 'user', settings?: Record<string, unknown>, unpaidSubscriptions?: unknown[]) {
   const profile = { id: userId, nickname: 'Fixture', role, status: 'active', is_deleted: 'false', membership_level: 'free', email: 'fixture@example.test' };
   const rpc = vi.fn().mockResolvedValue({ error: null, data: { dispatch: true, subscriptionId,
     providerId: 'ORD_original', merchant: 'fixture', mode: 'test' } });
@@ -30,6 +32,10 @@ function fixture(role = 'user', settings?: Record<string, unknown>) {
       let key = '';
       const chain = { select: () => chain, eq: (_: string, value: string) => { key = value; return chain; },
         maybeSingle: async () => ({ data: key in settings ? { value: settings[key] } : null, error: null }) };
+      return chain;
+    }
+    if (table === 'user_subscriptions' && unpaidSubscriptions) {
+      const chain = { select: () => chain, eq: () => chain, in: () => chain, limit: async () => ({ data: unpaidSubscriptions, error: null }) };
       return chain;
     }
     if (table !== 'profiles') throw new Error('Unexpected settings/provider lookup while checkout is closed');
@@ -96,6 +102,13 @@ it('keeps every card checkout closed in production even with every switch on, an
   }
   expect(mocks.wallet).not.toHaveBeenCalled(); expect(mocks.card).not.toHaveBeenCalled(); expect(mocks.provider).not.toHaveBeenCalled();
 });
+it('passes a checkout rate limit through as TOO_MANY_REQUESTS with its retry hint, not as a generic failure', async () => {
+  stubStaging(); mocks.gateOpen.value = true;
+  vi.mocked(assertCheckoutRateLimit).mockRejectedValueOnce(new RateLimitError('rate_limited', 30));
+  await expect(fixture('user', settings(true)).caller.methodCheckout(card)).rejects.toMatchObject({ code: 'TOO_MANY_REQUESTS',
+    message: '请求过于频繁，请在 30 秒后重试' });
+  expect(mocks.card).not.toHaveBeenCalled(); expect(mocks.wallet).not.toHaveBeenCalled();
+});
 it('sends card purchases past the environment gate to the Stripe card checkout, never Waffo or the wallet checkout', async () => {
   stubStaging(); mocks.gateOpen.value = true;
   for (const method of ['card', 'card_cn'] as const) {
@@ -146,6 +159,15 @@ it('answers an expected admission refusal with a typed error and plain message, 
   mocks.wallet.mockRejectedValueOnce(new MethodPurchaseRejected('PAY_WAFFO_GOLD_FIRST_INELIGIBLE'));
   await expect(fixture('user', settings(true)).caller.methodCheckout(wallet)).rejects.toMatchObject({
     code: 'PRECONDITION_FAILED', message: expect.stringContaining('首月优惠仅限首次购买') });
+  // A subscription whose payment failed (past_due / incomplete) is refused with the same code, in words that say what
+  // to do (same as the purchase page and profile notice, #937).
+  mocks.wallet.mockRejectedValueOnce(new MethodPurchaseRejected('PAY_WAFFO_MEMBERSHIP_TRANSITION_REQUIRED'));
+  await expect(fixture('user', settings(true), [{ id: 'sub-past-due' }]).caller.methodCheckout(wallet)).rejects.toMatchObject({
+    code: 'PRECONDITION_FAILED', message: '你还有一个付款没有成功的订阅（例如自动续费扣款失败）。为避免重复扣费，暂时不能购买新的套餐。'
+      + '请提交工单，我们帮你停止这个订阅或补上付款，处理好后就能重新购买。' });
+  mocks.wallet.mockRejectedValueOnce(new MethodPurchaseRejected('PAY_WAFFO_MEMBERSHIP_TRANSITION_REQUIRED'));
+  await expect(fixture('user', settings(true), []).caller.methodCheckout(wallet)).rejects.toMatchObject({
+    code: 'PRECONDITION_FAILED', message: '你已有生效中的会员，不能重复购买。会员到期前无需再次付款。' });
   // The same code text without the admission marker (e.g. a server fault) is still a 503.
   mocks.wallet.mockRejectedValueOnce(new Error('PAY_WAFFO_MEMBERSHIP_TRANSITION_REQUIRED'));
   await expect(fixture('user', settings(true)).caller.methodCheckout(wallet)).rejects.toMatchObject({ code: 'SERVICE_UNAVAILABLE' });

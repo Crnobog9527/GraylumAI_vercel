@@ -2,11 +2,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type Stripe from 'stripe';
 import type { SupabaseClient } from '@supabase/supabase-js';
-const mocks = vi.hoisted(() => ({ scope: vi.fn(), find: vi.fn(), error: vi.fn(), ref: vi.fn() }));
+const mocks = vi.hoisted(() => ({ scope: vi.fn(), find: vi.fn(), error: vi.fn(), monthly: vi.fn(), ref: vi.fn() }));
 vi.mock('./stripeCheckoutPersistence', () => ({ resolveStripeScope: mocks.scope }));
 vi.mock('./cardPaymentLookup', () => ({ findCardOrderForPayment: mocks.find }));
 vi.mock('./stripeReferences', () => ({ findStripeReference: mocks.ref }));
 vi.mock('../../lib/logger', () => ({ logger: { error: mocks.error } }));
+vi.mock('./monthlyRefundWebhook', () => ({ reconcileMonthlyRefundForOrder: mocks.monthly }));
 import { handleCardRefund } from './cardRefundWebhook';
 
 const refund = (patch: Record<string, unknown> = {}) => ({ object: 'refund', id: 're_1', charge: 'ch_1', payment_intent: 'pi_1',
@@ -36,7 +37,56 @@ describe('PAY-STRIPE-MP external refunds of card orders', () => {
   beforeEach(() => {
     mocks.scope.mockReset().mockResolvedValue({ mode: 'test', merchant: 'fixture' });
     mocks.find.mockReset().mockResolvedValue(match); mocks.error.mockReset();
+    mocks.monthly.mockReset().mockResolvedValue({ handled: false });
     mocks.ref.mockReset().mockResolvedValue({ order_id: 'order' });
+  });
+  it('records our approved monthly refund of a card subscription through the monthly refund flow (step 4b-2)', async () => {
+    const ours = refund({ id: 're_ours', amount: 5390, metadata: { orderId: 'order', refundIntentId: 'intent' } });
+    mocks.monthly.mockResolvedValue({ handled: true, result: {} });
+    const f = fixture([ours]);
+    await expect(f.run({ refundId: 're_ours' })).resolves.toBe(true);
+    expect(mocks.monthly).toHaveBeenCalledWith(f.db, 'order', 're_ours', f.stripe);
+    expect(f.db.rpc).not.toHaveBeenCalled(); expect(f.alert).not.toHaveBeenCalled();
+    // An external refund (Link, Dashboard) while our monthly refund is approved or running is persisted on that intent
+    // as a conflict for review, never also booked as an external refund.
+    // Several external refunds are kept as one aggregate read from the charge (refund id null), not one slot each.
+    mocks.monthly.mockReset().mockImplementation(async (_db: unknown, _order: string, refundId: string | null) =>
+      ({ handled: refundId === null }));
+    const during = fixture([refund({ id: 're_link', amount: 1000 }), refund({ id: 're_dash', amount: 500, created: 1792000100 })]);
+    await expect(during.run({ chargeId: 'ch_1' })).resolves.toBe(true);
+    expect(mocks.monthly).toHaveBeenCalledTimes(1);
+    expect(mocks.monthly).toHaveBeenCalledWith(during.db, 'order', null, during.stripe);
+    // A failed, canceled or still pending external refund has not moved cash: the running refund is not frozen by it
+    // (a pending one that later succeeds is recorded by its success event).
+    mocks.monthly.mockClear();
+    const failed = fixture([refund({ id: 're_failed', status: 'failed' }), refund({ id: 're_canceled', status: 'canceled' }),
+      refund({ id: 're_pending', status: 'pending', created: 1792000200 }), refund({ id: 're_action', status: 'requires_action' })]);
+    await failed.run({ chargeId: 'ch_1' });
+    expect(mocks.monthly).not.toHaveBeenCalledWith(failed.db, 'order', null, failed.stripe);
+    expect(during.db.rpc).not.toHaveBeenCalled();
+    expect(during.alert).toHaveBeenCalledTimes(1);
+    // A refund of ours naming another order is a conflict, never recorded.
+    const other = fixture([refund({ id: 're_ours', metadata: { orderId: 'another', refundIntentId: 'intent' } })]);
+    await expect(other.run({ refundId: 're_ours' })).rejects.toThrow('PAYMENT_EVIDENCE_CONFLICT');
+  });
+  it('routes an external refund by what it matches: a card order with a monthly refund goes to that flow, a payment no '
+    + 'local order references is alerted and acknowledged', async () => {
+    // Matches a card order whose monthly refund is running: kept on that refund as a conflict (no external booking).
+    mocks.monthly.mockResolvedValue({ handled: true, result: {} });
+    const owned = fixture([refund({ id: 're_link', amount: 1000 })]);
+    await expect(owned.run({ refundId: 're_link' })).resolves.toBe(true);
+    expect(mocks.monthly).toHaveBeenCalledWith(owned.db, 'order', null, owned.stripe);
+    expect(owned.db.rpc).not.toHaveBeenCalled();
+    expect(mocks.error).toHaveBeenCalledWith('billing', 'stripe_mp_external_refund_during_monthly_refund', expect.anything());
+    // Matches no card order and no local order references the payment: alerted for review and acknowledged.
+    mocks.monthly.mockReset().mockResolvedValue({ handled: false }); mocks.error.mockReset();
+    mocks.find.mockResolvedValue(null); mocks.ref.mockResolvedValue(undefined);
+    const unmatched = fixture([refund({ id: 're_offsite' })]);
+    await expect(unmatched.run({ refundId: 're_offsite' })).resolves.toBe(true);
+    expect(mocks.monthly).not.toHaveBeenCalled();
+    expect(mocks.error).toHaveBeenCalledWith('billing', 'stripe_mp_refund_unmatched', expect.objectContaining({ refundIds: ['re_offsite'] }));
+    expect(unmatched.alert).toHaveBeenCalledTimes(1);
+    expect(unmatched.db.rpc).not.toHaveBeenCalled();
   });
   it('records each succeeded refund of the charge once, oldest first, against the paid period', async () => {
     const f = fixture([refund({ id: 're_2', created: 1792000100, amount: 100 }), refund({ id: 're_1' }),
@@ -47,6 +97,15 @@ describe('PAY-STRIPE-MP external refunds of card orders', () => {
     expect(f.db.rpc).toHaveBeenCalledWith('pay_stripe_mp_record_external_refund', { p_order: 'order', p_merchant: 'fixture',
       p_payment: 'in_1', p_refund: 're_1', p_amount: 4900, p_currency: 'usd', p_refunded_at: '2026-10-14T17:46:40.000Z' });
     expect(f.alert).not.toHaveBeenCalled();
+  });
+  it('never treats our own approved refund that kept the 6% fee (a partial refund at Stripe) as an external refund', async () => {
+    // 4b-1: pre-tax 940 - fee 56 + tax 188 = 1072 of a 1128 charge, created with our refundIntentId.
+    for (const input of [{ refundId: 're_ours' }, { chargeId: 'ch_1' }]) {
+      const f = fixture([refund({ id: 're_ours', amount: 1072, metadata: { orderId: 'order', refundIntentId: 'intent' } })]);
+      await expect(f.run(input)).resolves.toBe(false);
+      expect(f.db.rpc).not.toHaveBeenCalled();
+      expect(f.alert).not.toHaveBeenCalled();
+    }
   });
   it('leaves refunds we initiated (approval flows) to the existing path', async () => {
     const f = fixture([refund({ metadata: { refundIntentId: 'intent', orderId: 'order' } })]);

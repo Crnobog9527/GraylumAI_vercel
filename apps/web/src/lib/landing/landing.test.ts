@@ -49,6 +49,15 @@ describe('landing FAQ', () => {
 });
 
 describe('landing price cards', () => {
+  it('promises the AI coach on the Gold card and the free trial in the notes only while those are on (Owner 2026-10-14)', () => {
+    const noCoach = buildLandingPageData({ ...ALL_ON, coach: false }, []);
+    expect(noCoach.showResult.gold ?? false).toBe(false);
+    const noGrant = buildLandingPageData({ ...ALL_ON, signupGrant: false }, []);
+    expect(noGrant.heroNote).toBe('无需绑卡');
+    expect(noGrant.finalNote).toBe('无需绑卡');
+    expect(buildLandingPageData(ALL_ON, []).finalNote).toBe('无需绑卡，免费试用');
+  });
+
   const offers = { goldFirstMonth: 49, founder: { price: 496, total: 50, available: 37 } };
 
   it('matches the final card wording when the server provides every offer', () => {
@@ -118,7 +127,7 @@ describe('landing page data', () => {
     expect(data.faqItems).toHaveLength(14);
     expect(data.faqItems.map(item => item.question)).not.toContain('为什么创始会员只有 50 个名额？');
     expect(data.compareRows).toHaveLength(4);
-    expect(data.heroNote).toContain('注册送 500 积分');
+    expect(data.heroNote).toBe('无需绑卡，免费试用');
     // No public price answer yet: no founder card, no seats, Gold monthly stays at the catalog price.
     expect(data.pricing.cards.map(card => card.key)).toEqual(['pro', 'gold']);
     expect(data.founderSeats).toBeNull();
@@ -141,8 +150,8 @@ describe('landing page data', () => {
     );
     expect(data.founderSeats).toBe(12);
     expect(data.showStack).toBe(true);
-    expect(data.heroNote).toBe('免费注册，不用绑卡。注册送 500 积分。聊出来的内容随时能看、能导出，不会收回。');
-    expect(data.finalNote).toBe('不用绑卡 · 注册送 500 积分 · 聊出来的内容不会收回');
+    expect(data.heroNote).toBe('无需绑卡，免费试用');
+    expect(data.finalNote).toBe('无需绑卡，免费试用');
     expect(data.risk).toHaveLength(4);
   });
 

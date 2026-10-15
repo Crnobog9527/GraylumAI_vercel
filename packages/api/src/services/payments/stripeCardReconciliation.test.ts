@@ -2,12 +2,15 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type Stripe from 'stripe';
 import type { SupabaseClient } from '@supabase/supabase-js';
-const mocks = vi.hoisted(() => ({ scope: vi.fn(), ref: vi.fn(), recover: vi.fn(), invoice: vi.fn(), refund: vi.fn() }));
+const mocks = vi.hoisted(() => ({ scope: vi.fn(), ref: vi.fn(), recover: vi.fn(), invoice: vi.fn(), refund: vi.fn(),
+  stripeId: vi.fn(), stop: vi.fn() }));
 vi.mock('./stripeCheckoutPersistence', () => ({ resolveStripeScope: mocks.scope }));
 vi.mock('./stripeReferences', () => ({ findStripeReference: mocks.ref }));
 vi.mock('./walletWebhook', () => ({ recoverMethodCheckout: mocks.recover }));
 vi.mock('./cardSubscriptionWebhook', () => ({ handleCardSubscriptionInvoice: mocks.invoice }));
 vi.mock('./cardRefundWebhook', () => ({ handleCardRefund: mocks.refund }));
+vi.mock('./cardUpgrade', () => ({ cardStripeSubscription: mocks.stripeId }));
+vi.mock('./cardSubscriptionStop', () => ({ stopRenewalAfterReview: mocks.stop }));
 import { reconcileStripeCardPayments } from './stripeCardReconciliation';
 
 const ORDER = '00000000-0000-4000-8000-000000000001';
@@ -16,14 +19,19 @@ type Order = { payment_channel: string; payment_method: string; fulfilled_at: st
   payment_amount_facts: Array<{ kind: string }> };
 
 function fixture(state: { orders?: Record<string, Order>; sessions?: unknown[]; invoices?: unknown[]; refunds?: unknown[];
-  recorded?: Set<string> } = {}) {
+  recorded?: Set<string>; stopping?: string[] } = {}) {
   const orders = state.orders ?? {};
   const recorded = state.recorded ?? new Set<string>();
   mocks.ref.mockImplementation(async (_db: unknown, type: string, external: string) =>
     recorded.has(`${type}:${external}`) ? { order_id: ORDER } : undefined);
-  const db = { from: vi.fn(() => {
-    let key = '';
+  const db = { from: vi.fn((table: string) => {
+    let key = '', after = '';
     const chain = { select: vi.fn(() => chain), eq: vi.fn((_k: string, value: string) => { key = value; return chain; }),
+      is: vi.fn(() => chain), not: vi.fn(() => chain), neq: vi.fn(() => chain), in: vi.fn(() => chain), order: vi.fn(() => chain),
+      gt: vi.fn((_k: string, value: string) => { after = value; return chain; }),
+      // Card subscriptions with a requested stop Stripe has not confirmed (scan 4), in id order after the cursor.
+      limit: vi.fn(async (n: number) => ({ error: null, data: table === 'user_subscriptions'
+        ? [...(state.stopping ?? [])].sort().filter(id => id > after).slice(0, n).map(id => ({ id })) : [] })),
       maybeSingle: vi.fn(async () => ({ error: null, data: orders[key] ?? null })) };
     return chain;
   }) };
@@ -45,7 +53,33 @@ const session = (patch: Record<string, unknown> = {}) => ({ id: 'cs_1', payment_
 describe('PAY-STRIPE-MP daily Stripe card reconciliation', () => {
   beforeEach(() => {
     mocks.scope.mockReset().mockResolvedValue({ mode: 'test', merchant: 'fixture' });
-    for (const mock of [mocks.recover, mocks.invoice, mocks.refund]) mock.mockReset();
+    for (const mock of [mocks.recover, mocks.invoice, mocks.refund, mocks.stop]) mock.mockReset();
+    mocks.stripeId.mockReset().mockImplementation(async (_db: unknown, _scope: unknown, local: string) => `sub_${local}`);
+  });
+  it('retries a requested stop Stripe has not confirmed (an upgrade-replaced Pro) and reports one that still fails', async () => {
+    mocks.stop.mockImplementation(async (_db: unknown, _stripe: unknown, _merchant: string, local: string) => {
+      if (local === 'stuck') throw new Error('PAY_STRIPE_MP_RENEWAL_STOP_UNCONFIRMED');
+    });
+    const f = fixture({ stopping: ['pro', 'stuck'] });
+    const result = await f.run();
+    expect(mocks.stop).toHaveBeenCalledWith(f.db, f.stripe, 'fixture', 'pro', 'sub_pro');
+    expect(result).toMatchObject({ success: false, repaired: 1, findings: [{ kind: 'stop_unconfirmed', object: 'subscription',
+      externalId: 'stuck', code: 'PAY_STRIPE_MP_RENEWAL_STOP_UNCONFIRMED' }] });
+    // More than one page (after a Stripe outage): every pending stop is retried, page after page, even when the first
+    // page keeps failing; beyond the page cap the scan is reported incomplete, never silently complete.
+    mocks.stop.mockReset().mockImplementation(async (_db: unknown, _stripe: unknown, _merchant: string, local: string) => {
+      if (local < 's050') throw new Error('PAY_STRIPE_MP_RENEWAL_STOP_UNCONFIRMED');
+    });
+    const ids = Array.from({ length: 150 }, (_, i) => `s${String(i).padStart(3, '0')}`);
+    const many = await fixture({ stopping: ids }).run();
+    expect(mocks.stop).toHaveBeenCalledTimes(150);
+    expect(many).toMatchObject({ complete: true, repaired: 100 });
+    expect(many.findings.filter(item => item.kind === 'stop_unconfirmed')).toHaveLength(50);
+    mocks.stop.mockReset().mockResolvedValue(undefined);
+    const capped = await fixture({ stopping: ids }).run({ maxPages: 1 });
+    expect(mocks.stop).toHaveBeenCalledTimes(100);
+    expect(capped).toMatchObject({ complete: false,
+      findings: [{ kind: 'scan_incomplete', object: 'subscription', code: 'PENDING_STOPS_OVER_LIMIT' }] });
   });
   it('runs in the mode the environment configures and refuses a key of the other mode', async () => {
     mocks.scope.mockResolvedValue({ mode: 'live', merchant: 'fixture' });
@@ -74,6 +108,9 @@ describe('PAY-STRIPE-MP daily Stripe card reconciliation', () => {
     const review = fixture({ orders: { [ORDER]: card({ method_review_reason: 'founder_released' }) }, sessions: [session()] });
     await expect(review.run()).resolves.toMatchObject({ success: false,
       findings: [{ kind: 'paid_in_review', object: 'checkout', externalId: 'cs_1', orderId: ORDER }] });
+    // Replayed so the undelivered card subscription is stopped at Stripe even if its webhook gave up.
+    expect(mocks.recover).toHaveBeenCalledWith(review.db, review.stripe, 'cs_1', 'checkout.session.completed');
+    mocks.recover.mockReset();
     const stuck = fixture({ orders: { [ORDER]: card() }, sessions: [session()] });
     mocks.recover.mockResolvedValue({ orderId: ORDER });
     await expect(stuck.run()).resolves.toMatchObject({ findings: [{ kind: 'paid_not_delivered', externalId: 'cs_1' }] });

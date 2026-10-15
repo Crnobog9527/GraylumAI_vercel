@@ -5,16 +5,18 @@ import { admissionDeadline } from '../runtime/admissionLimits';
 import { stagingRuntimeWindow } from '../runtime/stagingEnvironment';
 import { parseStagingPolicy } from '../runtime/stagingPolicy';
 import { admitFusionModel, FUSION_MODEL_COLUMNS, type FusionModelRow } from './models';
+import { readReviewSkill, resolveReviewSkill } from './reviewPrompts';
 import { fusionSettings, readFusionSettings, writeFusionSettings, type FusionSettings } from './settings';
 
 /** Administrator save. Every listed model must be a plain model (no built-in search); turning the
  * review mode on also requires each model to pass the same billing admission as a real review. */
 export async function saveFusionSettings(db: SupabaseClient, actorId: string, value: unknown,
-  env: Record<string, string | undefined> = process.env): Promise<FusionSettings> {
+  env: Record<string, string | undefined> = process.env): Promise<{ settings: FusionSettings; warnings: string[] }> {
   const parsed = fusionSettings.safeParse(value);
   if (!parsed.success) throw new Error(parsed.error.issues.find(issue => issue.message.startsWith('FUSION_'))?.message
     ?? 'FUSION_SETTINGS_INVALID');
   const settings = parsed.data;
+  const warnings: string[] = [];
   const ids = [...settings.review.reviewerModelIds, ...(settings.review.summaryModelId ? [settings.review.summaryModelId] : [])];
   if (ids.length) {
     const rows = await db.from('ai_models').select(FUSION_MODEL_COLUMNS).in('id', [...new Set(ids)]);
@@ -22,7 +24,12 @@ export async function saveFusionSettings(db: SupabaseClient, actorId: string, va
     const models = rows.data as FusionModelRow[];
     if (ids.some(id => !models.some(row => row.id === id))) throw new Error('FUSION_MODEL_UNAVAILABLE');
     if (models.some(row => !isPlainOpenRouterModel(row.model_id))) throw new Error('FUSION_MODEL_SEARCH_DENIED');
+    // A hint, never a refusal (总控 2026-10-14): all three reviewers from one company.
+    const vendors = new Set(settings.review.reviewerModelIds.map(id => models.find(row => row.id === id)?.model_id.split('/')[0]));
+    if (settings.review.reviewerModelIds.length > 1 && vendors.size === 1) warnings.push('FUSION_REVIEWERS_SAME_PROVIDER');
     if (settings.review.enabled) {
+      // The selected Skill must be published with a readable package, or every start would fail (#962 review).
+      if (settings.review.skillId) await readReviewSkill(db, await resolveReviewSkill(db, settings.review.skillId));
       const windowId = stagingRuntimeWindow(env);
       // Administrators need not be test-call actors; this admin-only read admits no call.
       const result = await db.rpc('report_model_window', { p_actor_id: actorId, p_window_id: windowId });
@@ -39,7 +46,7 @@ export async function saveFusionSettings(db: SupabaseClient, actorId: string, va
       }
     }
   }
-  return writeFusionSettings(db, settings);
+  return { settings: await writeFusionSettings(db, settings), warnings };
 }
 
 export const fusionSettingsView = (db: SupabaseClient) => readFusionSettings(db);

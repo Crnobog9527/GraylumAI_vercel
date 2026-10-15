@@ -459,6 +459,7 @@ button,input,select,textarea{font:inherit}
     <div>
       <h1>Graylum 付费墙 v2</h1>
       <p><b>唯一版本来源</b>（取代设计窗口的定稿 QLdBcaYM…，那份留作历史）。八个触发场景，价格都是 Owner 定的实际售价；注册赠送 500 积分、积分包三档已于 10-04 定（实测后可能再调）。标"待定"的是本轮新提的方案，等 Owner 确认。</p>
+      <p><b>2026-10-14 Owner 改</b>：对用户的文字不写注册赠送的积分数额（实测后可能调整），免费方案写「免费试用」；下方免费卡已按此改。实际赠送数额仍由迁移 0230 决定。</p>
     </div>
     <span class="ver">唯一版本 v25 · 更新于 2026-10-04 · 不含产品代码</span>
   </header>
@@ -960,7 +961,7 @@ function pricing(){
     </div>
     <div class="bill" role="radiogroup" aria-label="计费周期"><label><input type="radio" name="pbill" id="pb-m" value="month" ${!y?'checked':''}>月付</label><label><input type="radio" name="pbill" id="pb-y" value="year" ${y?'checked':''}>年付 <span class="save">${yearBadge()}</span></label></div>
     <div class="tiers">
-      <div class="tier"><h3>免费</h3><p class="who">先体验，看看它懂不懂你</p><div class="pr"><b>$0</b></div><div class="was">注册即送 500 积分</div>
+      <div class="tier"><h3>免费</h3><p class="who">先体验，看看它懂不懂你</p><div class="pr"><b>$0</b></div><div class="was">免费试用</div>
         <h4>可以做</h4><ul><li>${IC.ck()}<span>做完报告前的全部定位步骤</span></li><li>${IC.ck()}<span>查看、导出已确认的定位信息</span></li><li>${IC.ck()}<span>1 个定位档案</span></li><li>${IC.ck()}<span>客服 48 小时内回复</span></li></ul>
         <h4>不包含</h4><ul><li class="no">${IC.dash()}<span>完整运营策略报告</span></li><li class="no">${IC.dash()}<span>购买积分包</span></li><li class="no">${IC.dash()}<span>多模型专家评审团</span></li></ul>
         <button class="btn" type="button">免费开始</button></div>
