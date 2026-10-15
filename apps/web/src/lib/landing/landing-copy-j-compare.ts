@@ -3,9 +3,10 @@
 /**
  * Sample J's comparison, plan A (Owner 2026-10-15: "两个模块按 A 改"): only how the two work differently, short enough
  * to see at once. Four pairs, one per difference (asks you first / judges and gives reasons / remembers you / speaks
- * from real data); the same question to both. The general AI's side is a typical general chat reply, naming no
- * product (NEW). The AI coach's side is the coach's own words from the real sample conversations of 2026-10-15
- * (sample-reports, transcript.md), cut with "……" but not reworded; `source` names the conversation.
+ * from real data); the same question to both, except the first: there the coach opens, as it does in the product.
+ * The general AI's side is a typical general chat reply, naming no product (NEW). The AI coach's side is the coach's
+ * own words from the real sample conversations of 2026-10-15 (sample-reports, transcript.md), cut with "……" but not
+ * reworded; `source` names the conversation.
  */
 export const J_COMPARE = {
   genericName: '通用 AI',
@@ -14,11 +15,14 @@ export const J_COMPARE = {
   sourceLabel: '原话出自样例对话',
   pairs: [
     {
-      theme: '主动问你',
+      /** OWNER (via the controller, 2026-10-15): the real order: the general AI waits; the coach speaks first. */
+      theme: '通用 AI 等你问，AI 教练先问你',
       question: '我想做自媒体，不知道从哪开始。',
       generic: ['可以先选一个领域：穿搭、美食、旅行、知识分享……', '然后保持日更，多蹭热点。'],
-      coach: '我先问最重要的一件事：你做这个账号，最希望它最后给你带来什么？……有人只想每月多点零花，有人想靠它找到客户，'
-        + '有人想全职，三种人的做法完全不同。',
+      /** The coach opens the conversation: no question from you in its window. */
+      coachFirst: true,
+      coach: '我是你的定位教练。接下来我先花十几分钟了解你的情况，一次只问一个问题，你想到什么说什么。……'
+        + '我先问最重要的一件事：你做这个账号，最希望它最后给你带来什么？',
       source: '留学生 · Instagram',
     },
     {
@@ -33,7 +37,8 @@ export const J_COMPARE = {
       theme: '记得你的情况',
       question: '要不要我露个脸更可信？',
       generic: ['真人出镜能明显增加信任感，', '建议尝试露脸拍摄，展示真实的自己。'],
-      coach: '不用露脸。你说过不想露脸，这是你的边界，方案就按这个来。……可信度靠的是"每样东西都在我家真用过"和整理前后的对比，不靠脸。',
+      coach: '不用露脸。你说过不想露脸，这是你的边界，方案就按这个来。……'
+        + '可信度靠的是"每样东西都在我家真用过"和整理前后的对比，不靠脸。',
       source: '好物副业 · TikTok',
     },
     {

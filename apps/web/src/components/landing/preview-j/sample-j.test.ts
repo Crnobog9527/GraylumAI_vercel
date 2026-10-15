@@ -19,7 +19,7 @@ import { J_COMPARE } from '@/lib/landing/landing-copy-j-compare';
 import { J_REPORT, J_TAKEOVER_MOMENTS } from '@/lib/landing/landing-copy-j-takeover';
 import { J_STEPS } from '@/lib/landing/landing-copy-j-persona';
 import { J_SAMPLES } from '@/lib/landing/landing-copy-j-samples';
-import { SAMPLE_CHAPTERS } from '@/lib/landing/sample-reports';
+import { loadSampleReport, SAMPLE_CHAPTERS } from '@/lib/landing/sample-reports';
 import { J_WORK, J_WORK_SCENES } from '@/lib/landing/landing-copy-j-work';
 import { J_PRICE_TOTAL } from '@/lib/landing/landing-copy-j-price';
 
@@ -149,9 +149,11 @@ describe('style sample J, the later sections', () => {
   it('compares how the two work (plan A): four differences, the same question to both, the coach in its own words', () => {
     const { html } = render();
     for (const phrase of H_COMPARE.title.split(/(?<=，)|(?=带你)/)) expect(html).toContain(escape(phrase));
-    expect(J_COMPARE.pairs.map(pair => pair.theme)).toEqual(['主动问你', '帮你判断，讲清理由', '记得你的情况', '用真实数据说话']);
+    expect(J_COMPARE.pairs.map(pair => pair.theme)).toEqual(['通用 AI 等你问，AI 教练先问你', '帮你判断，讲清理由', '记得你的情况', '用真实数据说话']);
     for (const pair of J_COMPARE.pairs) {
-      expect(html.split(escape(pair.question)).length - 1).toBeGreaterThanOrEqual(2);
+      // The same question in both windows, except the first row: there the coach speaks first, nobody asked.
+      const first = 'coachFirst' in pair && pair.coachFirst;
+      expect(html.split(escape(pair.question)).length - 1).toBe(first ? 1 : 2);
       expect(html).toContain(`${J_COMPARE.sourceLabel}：${pair.source}`);
       // Short: one or two lines a side.
       expect(pair.generic.length).toBeLessThanOrEqual(2);
@@ -237,7 +239,7 @@ describe('sample J story timing', () => {
 });
 
 describe('sample J sample reports', () => {
-  it('stays off unless the preview or the flag turns it on, and then shows the four real reports chapter by chapter', () => {
+  it('stays off unless the preview or the flag turns it on, and then shows the four real reports chapter by chapter', async () => {
     const { data, html } = render();
     expect(html).not.toContain(J_SAMPLES.title);
     const extras = { flags: ALL_ON, showSamples: true };
@@ -262,6 +264,8 @@ describe('sample J sample reports', () => {
     expect(shown).toContain(J_SAMPLES.generated(first.generatedAt));
     for (const chapter of first.chapters) expect(shown).toContain(chapter.key.replace(/"/g, '&quot;'));
     expect(shown).not.toContain('样例报告生成中');
+    // The reports promise only what the product does today (no "创作助手", no thumbnails made for you).
+    for (const report of J_SAMPLES.reports) expect(await loadSampleReport(report.slug)).not.toMatch(/创作助手|缩略图由/);
     // The four reports differ: no key conclusion is shared between two of them.
     const keys = J_SAMPLES.reports.flatMap(report => SAMPLE_CHAPTERS[report.slug].chapters.map(chapter => chapter.key));
     expect(new Set(keys).size).toBe(keys.length);

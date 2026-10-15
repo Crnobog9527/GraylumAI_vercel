@@ -16,9 +16,10 @@ const ASKED = 300;
 const BEAT = 500;
 
 /** When each part of a pair plays: the question, the general AI's reply, then the coach's reply. */
-export function pairTiming(generic: string, coach: string) {
+export function pairTiming(generic: string, coach: string, coachFirst = false) {
   const genericStart = ASKED + BEAT;
-  const coachStart = genericStart + Array.from(generic).length * PER_CHAR + BEAT;
+  // The coach that opens the conversation does not wait for a question, nor for the general AI.
+  const coachStart = coachFirst ? BEAT : genericStart + Array.from(generic).length * PER_CHAR + BEAT;
   const done = coachStart + Array.from(coach).length * PER_CHAR;
   return { genericStart, coachStart, done };
 }
@@ -46,7 +47,8 @@ export function CompareJ() {
           <ol className={styles.pairs}>
             {J_COMPARE.pairs.map(pair => {
               const generic = pair.generic.join('\n');
-              const timing = pairTiming(generic, pair.coach);
+              const first = 'coachFirst' in pair && pair.coachFirst;
+              const timing = pairTiming(generic, pair.coach, first);
               return (
                 <li key={pair.theme} data-row="" className={styles.pair} style={{
                   '--generic-at': `${timing.genericStart}ms`, '--coach-at': `${timing.coachStart}ms`,
@@ -59,7 +61,7 @@ export function CompareJ() {
                   </div>
                   <div className={styles.cell} data-side="coach">
                     <div inert aria-hidden="true">
-                      <p className={styles.question}><span>你</span>{pair.question}</p>
+                      {first ? null : <p className={styles.question}><span>你</span>{pair.question}</p>}
                       <div className={styles.coachReply}>
                         <span className={result.agentIdentity}><img src="/graylum-logo.png" alt="" />AI 自媒体陪跑教练</span>
                         <p><Typed text={pair.coach} start={timing.coachStart} /></p>
