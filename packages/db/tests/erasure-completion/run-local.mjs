@@ -19,11 +19,8 @@ import {startRedisDouble} from './redis-double.mjs';
 
 const safeupdateLibrary=process.env.ERASURE_SAFEUPDATE_LIBRARY;
 if(safeupdateLibrary && !safeupdateLibrary.startsWith('/'))throw new Error('Require absolute local safeupdate library path');
-// Temporary draft support while the append-only migration number is assigned.
-const candidate=process.argv.includes('--payment-envelope-candidate');
-const argumentsWithoutCandidate=process.argv.slice(2).filter(arg=>arg!=='--payment-envelope-candidate');
-const development=argumentsWithoutCandidate.join(' ')==='--local-only --development';
-if ((!development && argumentsWithoutCandidate.join(' ') !== '--local-only') || process.env.CI) throw new Error('Require --local-only');
+const development=process.argv.slice(2).join(' ')==='--local-only --development';
+if ((!development && process.argv.slice(2).join(' ') !== '--local-only') || process.env.CI) throw new Error('Require --local-only');
 const root=resolve(import.meta.dirname,'../../../..');
 const read=path=>readFileSync(resolve(root,path),'utf8');
 const run=(cmd,args,input)=>spawnSync(cmd,args,{input,encoding:'utf8',cwd:root,
@@ -38,7 +35,7 @@ const sql=input=>docker(['exec','-i',name,'psql','-X','-qAt','-U','postgres','-d
 const fp=read('packages/db/tests/baseline/fingerprint.sql');
 const objectSql=fp.slice(0,fp.indexOf('-- FINAL'))+'SELECT jsonb_object_agg(k,d ORDER BY k) FROM grouped;';
 const snapshot=()=>JSON.parse(ok(sql(objectSql)));
-const report={development,candidate,safeupdate:Boolean(safeupdateLibrary),build:null,checks:[],failed:null};
+const report={development,safeupdate:Boolean(safeupdateLibrary),build:null,checks:[],failed:null};
 let client;let compiled;let redis;
 try {
  ok(docker(['run','-d','--pull=never','--name',name,'-p','127.0.0.1::5432',
@@ -75,14 +72,6 @@ try {
   applyServerOnly:input=>outcome(docker(['exec',name,'psql','-X','-qAt','-U','postgres','-d','b2a','-c',input])),
   fingerprint:development?undefined:snapshot});
  assert.equal(report.build.failed,null);
- if(candidate){
-  const candidateSql=read('packages/db/tests/erasure-completion/payment-envelope-candidate.sql');
-  ok(sql(candidateSql));
-  const once=snapshot();
-  ok(sql(candidateSql));
-  assert.deepEqual(snapshot(),once,'payment envelope candidate replay exact');
-  report.checks.push('unnumbered payment envelope SQL candidate applied twice; catalog unchanged on repeat');
- }
  const require=createRequire(resolve(root,'packages/api/package.json'));
  const {Client}=require('pg');
  const address=ok(docker(['port',name,'5432/tcp']));assert.match(address,/^127\.0\.0\.1:\d+$/);

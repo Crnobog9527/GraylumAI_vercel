@@ -1,5 +1,6 @@
 -- Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved.
--- Candidate only: move into an assigned append-only migration after queue coordination.
+-- 0264: preserve frozen payment request evidence while removing personal content.
+-- No row rewrite. Existing cleanup applies the projection; completed erasure requires forward repair.
 -- No data mutation or privilege change. Original erasure guard remains authoritative.
 CREATE OR REPLACE FUNCTION public.erasure_payment_envelope(v jsonb,k text)
 RETURNS jsonb LANGUAGE plpgsql IMMUTABLE SET search_path=public,pg_temp AS $$
