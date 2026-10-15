@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {randomUUID} from 'node:crypto';
 import {rpc,closeAccount} from '../erasure-b2a/cases.mjs';
 import {recordLibraryProof} from './library-proof.mjs';
+import {runPaymentWrappers} from './payment-wrappers.mjs';
 
 const fresh=async db=>{
  const actor=randomUUID();
@@ -179,6 +180,8 @@ export async function runCases(db,report){
   assert.equal((await begin(db,f,rid)).ready,false);
  }
  report.checks.push('terminal envelopes: fixed projection, price/tax/hash unchanged, first-marker finance tamper/refill denied; malformed numbers retained/manual');
+
+ await runPaymentWrappers(db,report,{fresh,order,close,cleanup,begin,finish});
 
  const minimal=await fresh(db),rid=await close(db,minimal);
  for(const name of ['anon','authenticated'])await role(db,name,async()=>{
