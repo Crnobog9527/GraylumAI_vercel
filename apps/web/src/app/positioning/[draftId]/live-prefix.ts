@@ -18,7 +18,7 @@ import { codePoints, startLiveReply, type LiveReply, type LiveTextSource } from 
  * consumes the mark at once, so a later copy of this tab cannot reuse it.
  */
 export type LivePrefix = {
-  executionId: string; text: string; rev: number; reload?: true; source?: LiveTextSource; stopped?: true;
+  executionId: string; text: string; rev: number; reload?: true; source?: LiveTextSource; stopped?: true; call?: number;
 };
 
 type PrefixStorage = Pick<Storage, "getItem" | "setItem" | "removeItem">;
@@ -45,7 +45,8 @@ function remove(storage: PrefixStorage, key: string) {
 export function saveLivePrefix(storage: PrefixStorage, draftId: string, reply: LiveReply, reload = false): boolean {
   const key = livePrefixKey(draftId);
   const value: LivePrefix = { executionId: reply.executionId, text: reply.text, rev: reply.rev, ...(reload ? { reload: true } : {}),
-    ...(reply.source ? { source: reply.source } : {}), ...(reply.stopped ? { stopped: true } : {}) };
+    ...(reply.source ? { source: reply.source } : {}), ...(reply.stopped ? { stopped: true } : {}),
+    ...(reply.call ? { call: reply.call } : {}) };
   try {
     storage.setItem(key, JSON.stringify(value));
     return true;
@@ -67,7 +68,8 @@ function parsePrefix(raw: string | null): LivePrefix | null {
       !Number.isSafeInteger(value.rev) || (value.rev as number) < 0) return null;
     const source = value.source === "assistant" || value.source === "message" || value.source === "final" ? value.source : undefined;
     return { executionId: value.executionId, text: value.text, rev: value.rev as number, ...(value.reload === true ? { reload: true } : {}),
-      ...(source ? { source } : {}), ...(value.stopped === true ? { stopped: true } : {}) };
+      ...(source ? { source } : {}), ...(value.stopped === true ? { stopped: true } : {}),
+      ...(Number.isSafeInteger(value.call) && (value.call as number) > 0 ? { call: value.call as number } : {}) };
   } catch {
     return null;
   }
@@ -120,7 +122,7 @@ export function takeLivePrefix(storage: PrefixStorage, draftId: string): LiveRep
   }
   const reply: LiveReply = { ...startLiveReply(prefix.executionId), text: prefix.text, points: codePoints(prefix.text),
     rev: prefix.rev, phase: "waiting", stalled: true, ...(prefix.source ? { source: prefix.source } : {}),
-    ...(prefix.stopped ? { stopped: true } : {}) };
+    ...(prefix.stopped ? { stopped: true } : {}), ...(prefix.call ? { call: prefix.call } : {}) };
   if (!saveLivePrefix(storage, draftId, reply)) return null;
   return reply;
 }
