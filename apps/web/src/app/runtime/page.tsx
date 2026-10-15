@@ -20,7 +20,7 @@ import {
 import { QueryNotice } from '@/components/opc/query-notice';
 import { trpc } from '@/trpc/client';
 import {
- OUTPUT_TRUNCATED_NOTICE, definiteRefusal, definiteRefusalNotice, gateStopNotices, rememberGateStop, rememberUserStop, userStopIds,
+ OUTPUT_TRUNCATED_NOTICE, definiteRefusal, definiteRefusalNotice, gateStopNotices, rememberGateStop, rememberUserStop, forgetUserStop, userStopIds,
  runtimeAdmissionNotice, runtimeExecutionNotice, showsReply,
  videoGateError, videoGateNotice,
 } from './gate-notices';
@@ -278,9 +278,12 @@ function RuntimeWorkspace({routeSession,routeModule}:{routeSession:string;routeM
  async function stop(executionId:string){setError('');rememberUserStop(browserSession(),sessionId,executionId);
   setUserStops(ids=>ids.includes(executionId)?ids:[...ids,executionId]);
   const request=runner.freeze(executionId);
-  try{await cancel.mutateAsync(request??{executionId});await view.refetch();}catch{setError('取消状态待核实，请读取原任务。');}}
+  try{await cancel.mutateAsync(request??{executionId});}catch{forgetUserStop(browserSession(),sessionId,executionId);
+   setUserStops(ids=>ids.filter(id=>id!==executionId));setError('取消状态待核实，请读取原任务。');}
+  try{await view.refetch();}catch{/* The view query shows its own read error. */}}
  async function recover(executionId:string){setError('');try{const executed=await runner.run(executionId);if('unavailable' in executed&&executed.unavailable==='capacity'){markCapacity(executionId);setError('原请求的必要材料超过模型输入容量，无法继续发送。已有内容已保留；请点“停止”后缩短材料再发送。');}await view.refetch();}catch{setError('暂时无法恢复，请保留原任务。');}}
- const executions=view.data?.executions as Array<{executionId:string;createdAt?:string;state:string;input:string|null;body:string|null;primaryBody:string|null;organizerComplete:boolean|null;skillExecution:boolean;needsTask:boolean;unavailableReason:string|null;historyOmitted?:boolean;contentAvailable:boolean;cursor?:number|null;epoch?:number|null;remainingCalls?:number|null}>|undefined;
+ const executions=view.data?.executions as Array<{executionId:string;createdAt?:string;state:string;input:string|null;body:string|null;primaryBody:string|null;organizerComplete:boolean|null;skillExecution:boolean;needsTask:boolean;unavailableReason:string|null;historyOmitted?:boolean;contentAvailable:boolean;userStopPending?:boolean;stopped?:boolean;
+  billing?:{pausedReason?:string|null;cancelRequested?:boolean}|null;cursor?:number|null;epoch?:number|null;remainingCalls?:number|null}>|undefined;
  const capacitySignature=executions?.map(e=>e.executionId+':'+e.state).join('|');
  useEffect(()=>{setGateStops(gateStopNotices(browserSession(),sessionId,executions??[]));setUserStops(userStopIds(browserSession(),sessionId,executions??[]));
  // eslint-disable-next-line react-hooks/exhaustive-deps

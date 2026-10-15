@@ -17,10 +17,26 @@ export const USER_STOP_NOTICE = '已停止，保留原记录。';
 export const ENDED_NOTICE = '这一轮没有完成，已结束。原记录已保留，不会自动重试；可以重新发送。';
 export const CAPACITY_NOTICE = '本次必要材料超过模型输入容量，原请求和已完成内容已保留。停止后可缩短材料再新发请求。';
 
-export type RuntimeTurn = PaygViewFields & {
+/** What runtime_view says about a user stop (0171/0172): pending, saved (`stopped`), or the v2 pause reason. */
+export type StopSignals = {
+  userStopPending?: boolean; stopped?: boolean;
+  billing?: { pausedReason?: string | null; cancelRequested?: boolean } | null;
+};
+
+export type RuntimeTurn = PaygViewFields & StopSignals & {
   executionId: string; state: string; primaryBody: string | null; organizerComplete: boolean | null;
   needsTask: boolean; unavailableReason: string | null; historyOmitted?: boolean;
 };
+
+/**
+ * The user stopped this round: this tab's own record, or the server's record of a user stop.
+ * A stop that keeps the shown text ends `completed` with pausedReason `user_stop` (#973), so the
+ * final state alone never says whether the user stopped it.
+ */
+export function stoppedByUser(turn: StopSignals, local?: boolean) {
+  return Boolean(local || turn.userStopPending || turn.stopped === true
+    || (turn.billing?.pausedReason === 'user_stop' && turn.billing.cancelRequested !== true));
+}
 
 const open = (state: string) => state !== 'completed' && state !== 'cancelled';
 /** Execution states the view shows while a call is about to run or running. */
@@ -42,6 +58,8 @@ export function runtimeTurnNotices(turn: RuntimeTurn, ctx: {
   const id = (suffix: string) => turn.executionId + ':' + suffix;
   const notices: ChatNotice[] = [];
   const skipped = organizerSkipped(turn);
+  const stopped = stoppedByUser(turn, ctx.userStopped);
+  const userStop: ChatNotice = { id: id('stopped'), tone: 'status', text: USER_STOP_NOTICE };
   if (turn.primaryBody && !turn.organizerComplete && !skipped) notices.push({ id: id('organizer'), tone: 'status', text: '主回复已保存，附属整理未完成。' });
   // Both reasons say "not charged"; only a finished (cancelled) round may show them.
   if (turn.unavailableReason === 'provider_history' && turn.state === 'cancelled')
@@ -58,13 +76,23 @@ export function runtimeTurnNotices(turn: RuntimeTurn, ctx: {
   if (turn.state === 'cancelled' && !skipped)
     notices.push(ctx.gateStop ? { id: id('cancelled'), tone: 'warning', text: ctx.gateStop }
       : turn.unavailableReason === 'provider_rejected' ? { id: id('cancelled'), tone: 'warning', text: PROVIDER_REJECTED_NOTICE }
-      : ctx.userStopped ? { id: id('cancelled'), tone: 'status', text: USER_STOP_NOTICE } : { id: id('cancelled'), tone: 'warning', text: ENDED_NOTICE });
+      : stopped ? userStop : { id: id('cancelled'), tone: 'warning', text: ENDED_NOTICE });
+  // A stop that kept the shown text is saved as a completed round; it still says 已停止.
+  if (turn.state === 'completed' && stopped) notices.push(userStop);
   if (turn.needsTask)
     notices.push({ id: id('task'), tone: 'warning', text: '当前入口暂不支持这个 Skill 的任务选择。可点“停止”后使用普通对话。' });
   if (turn.unavailableReason === 'output_truncated') notices.push({ id: id('truncated'), tone: 'warning', text: OUTPUT_TRUNCATED_NOTICE });
   if (turn.unavailableReason === 'latest_unavailable')
     notices.push({ id: id('latest'), tone: 'warning', text: '本次未取得搜索资料，无法提供已核实的最新信息。' });
   if (!open(turn.state) || isPaygWaiting(turn.state)) return notices;
+  // A stopped round still being saved is not unfinished: no 回复尚未完成, no 重试 or 停止. Only a
+  // cost still being verified keeps its own notice below. An `interrupted` round left by a lost save
+  // offers 重试, which only finishes the saved stop (never a new call).
+  if (stopped && turn.state !== 'cost_pending') {
+    const finish = { label: CHAT_ACTION.retry, onClick: ctx.onRetry, disabled: ctx.busy };
+    notices.push(turn.state === 'interrupted' && !ctx.busy ? { ...userStop, actions: [finish] } : userStop);
+    return notices;
+  }
   const capacity = ctx.capacity;
   const stop = { label: CHAT_ACTION.stop, onClick: ctx.onStop, disabled: ctx.stopping };
   // A finished call matters only while the view still shows the turn in flight; any other re-read
