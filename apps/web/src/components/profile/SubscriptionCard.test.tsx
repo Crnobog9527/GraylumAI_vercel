@@ -190,6 +190,16 @@ describe('SubscriptionCard catalog availability', () => {
     expect(renderToStaticMarkup(createElement(CreditPackagesSection, { checkoutOpen: true }))).toContain('>购买<');
   });
 
+  it('keeps packs closed while the membership waits for its renewal charge (grace keeps access, not packs)', () => {
+    componentState.packagesQuery = queryState({ data: [{ id: 'package', name: '积分包', credits: 990, bonus_credits: 0, price: 9.9,
+      checkout_ready: true }] });
+    componentState.entitlementsQuery = { data: { level: 'pro' }, isError: false };
+    const grace = renderToStaticMarkup(createElement(CreditPackagesSection, { renewalGrace: true }));
+    expect(grace).toContain('续费完成后可购买');
+    expect(grace).toContain('data-testid="profile-credit-packages-renewal-grace"');
+    expect(grace).not.toContain('>购买<');
+  });
+
   it('shows a member the discounted price they pay, with the real list price struck through', () => {
     componentState.packagesQuery = queryState({ data: [{ id: 'package', name: '积分包', credits: 100, bonus_credits: 0, price: 1, checkout_ready: true }] });
     componentState.plansQuery = queryState({ data: [{ ...plan, discount: 0.1 }, { ...plan, id: 'plan-gold', level: 'gold', discount: 0.2 }] });
@@ -235,8 +245,13 @@ describe('membership page in a local browser', () => {
     const fixtureId = fileURLToPath(new URL('./__pay_mp_browser_fixture__.js', import.meta.url));
     const source = fileURLToPath(new URL('./SubscriptionCard.tsx', import.meta.url));
     const mock = `
-      import {useState} from 'react';
+      import {useEffect, useState} from 'react';
       const state = window.__pay;
+      // window.__payRefetch(): every methodMembership reader re-renders with the current state.membership (a refetch).
+      const refetchers = new Set();
+      window.__payRefetch = () => refetchers.forEach(fn => fn(n => n + 1));
+      const useRefetchable = () => { const [, force] = useState(0);
+        useEffect(() => { refetchers.add(force); return () => { refetchers.delete(force); }; }, []); };
       const inv = { invalidate: async () => {} };
       const utils = { user: { getUserProfile: inv, getEntitlements: inv }, credits: { getBalance: inv, getCreditsSummary: inv },
         payments: { methodMembership: inv, getMembershipEligibilityMatrix: inv, listBillingRecords: inv, getSubscriptionManagement: inv } };
@@ -249,7 +264,7 @@ describe('membership page in a local browser', () => {
         settings: { getMembershipPlans: { useQuery: () => query(state.plans) },
           getCreditPackages: { useQuery: () => query(state.packages) } },
         payments: {
-          methodMembership: { useQuery: () => query(state.membership) },
+          methodMembership: { useQuery: () => { useRefetchable(); return query(state.membership); } },
           getMembershipEligibilityMatrix: { useQuery: () => query({ entries: state.eligibility ?? [] }) },
           methodCheckout: mutation(async input => { state.checkouts.push(input); window.recordCheckout?.(input);
             if (state.checkoutError) throw Object.assign(new Error(state.checkoutError.message), { data: { code: state.checkoutError.code } });
@@ -322,6 +337,37 @@ describe('membership page in a local browser', () => {
       await browserExpect(page).toHaveURL('https://checkout.stripe.com/c/pay/cs_test_9');
       expect(sentByPage.get(page)).toEqual([{ itemType: 'membership_plan', itemId: 'plan-pro', billingCycle: 'monthly', offer: 'standard',
         method: 'card', routingVersion: 7, acceptedTerms: true, termsVersion: 'terms-v3' }]);
+      expect(errors).toEqual([]);
+    } finally { await page.close(); }
+  }, 30_000);
+
+  it('clears the ticked terms when a newer terms version arrives, and sends the version that was ticked', async () => {
+    const { page, errors } = await open({});
+    try {
+      await page.getByTestId('profile-membership-plan-pro').getByRole('button', { name: '开通' }).click();
+      await page.getByTestId('method-checkout-terms').check();
+      await browserExpect(page.getByTestId('method-checkout-pay')).toBeEnabled();
+      // methodMembership refetched (staleTime 0) with newly published terms; any re-render shows it.
+      await page.evaluate(() => { const win = window as unknown as { __pay: { membership: object }; __payRefetch: () => void };
+        win.__pay.membership = { ...win.__pay.membership, termsVersion: 'terms-v4' }; win.__payRefetch(); });
+      await browserExpect(page.getByTestId('method-checkout-terms')).not.toBeChecked();
+      await browserExpect(page.getByTestId('method-checkout-pay')).toBeDisabled();
+      await page.getByTestId('method-checkout-terms').check();
+      await page.getByTestId('method-checkout-pay').click();
+      await browserExpect(page).toHaveURL('https://checkout.stripe.com/c/pay/cs_test_9');
+      expect(sentByPage.get(page)).toEqual([expect.objectContaining({ method: 'card', acceptedTerms: true, termsVersion: 'terms-v4' })]);
+      expect(errors).toEqual([]);
+    } finally { await page.close(); }
+  }, 30_000);
+
+  it('lets a one-time wallet Pro upgrade to Gold and says it never renewed', async () => {
+    const walletPro = { ...proMember, payment_method: 'wechat_pay', payment_channel: 'stripe', auto_renew: false, cancel_at_period_end: true };
+    const { page, errors } = await open({ level: 'pro', membership: { ...ENTRY, memberships: [walletPro] } });
+    try {
+      await browserExpect(page.getByTestId('profile-method-memberships')).toContainText('不自动续费');
+      await browserExpect(page.getByTestId('profile-method-memberships')).not.toContainText('已停止续费');
+      await page.getByRole('button', { name: '升级到 Gold' }).click();
+      await browserExpect(page.getByTestId('method-checkout-dialog')).toContainText('原 Pro 是一次性购买，用到本期结束，不退差价。');
       expect(errors).toEqual([]);
     } finally { await page.close(); }
   }, 30_000);

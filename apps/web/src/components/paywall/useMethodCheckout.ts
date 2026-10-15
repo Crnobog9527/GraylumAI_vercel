@@ -29,15 +29,18 @@ export function useMethodCheckout() {
   const entry = membership.data;
   const open = checkoutEntryOpen(entry);
 
-  /** `onFounderSoldOut` runs when the server says the last founder seat just went: the caller drops to the standard price. */
-  async function start(purchase: MethodPurchase, method: CardMethod, acceptedTerms: boolean, onFounderSoldOut?: () => void) {
-    if (inFlight.current || redirecting || !checkoutEntryOpen(entry) || !acceptedTerms) return;
+  /** `acceptedTermsVersion` is the terms version the user ticked; nothing is sent unless it is still the published one.
+   * `onFounderSoldOut` runs when the server says the last founder seat just went: the caller drops to the standard price. */
+  async function start(purchase: MethodPurchase, method: CardMethod, acceptedTermsVersion: string | null,
+    onFounderSoldOut?: () => void) {
+    if (inFlight.current || redirecting || !checkoutEntryOpen(entry) || !acceptedTermsVersion
+      || acceptedTermsVersion !== entry.termsVersion) return;
     if (!cardMethods(entry, purchase.itemType).includes(method) || locked.has(purchaseLockKey(purchase))) return;
     inFlight.current = true;
     setOutcome(null);
     try {
       const result = await mutation.mutateAsync({ ...purchase, method, routingVersion: entry.routes.version,
-        acceptedTerms: true, termsVersion: entry.termsVersion });
+        acceptedTerms: true, termsVersion: acceptedTermsVersion });
       if (result.state === 'open' && isStripeCheckoutUrl(result.url)) {
         setRedirecting(true);
         window.location.assign(result.url);

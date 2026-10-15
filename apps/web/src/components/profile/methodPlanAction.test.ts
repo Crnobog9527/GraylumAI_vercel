@@ -28,9 +28,13 @@ describe('plan buttons', () => {
     expect(methodPlanAction({ level: 'pro', ...ready, current: pro })).toMatchObject({ label: '当前方案', disabled: true });
     expect(methodPlanAction({ level: 'gold', ...ready, now: NOW, current: row({ auto_renew: false, cancel_at_period_end: true }) }))
       .toMatchObject({ kind: 'none', label: 'Pro 已停止续费，到期后可开通 Gold', disabled: true });
-    // A one-time (wallet) Pro never renewed in the first place; the server allows its upgrade.
-    expect(methodPlanAction({ level: 'gold', ...ready, now: NOW, current: row({ auto_renew: false, payment_method: 'wechat_pay' }) }))
-      .toMatchObject({ kind: 'upgrade' });
+    // A one-time (wallet) Pro never renewed in the first place; the server allows its upgrade. 0211 stores it with
+    // cancel_at_period_end=true, which methodMembership reports as is.
+    for (const payment_method of ['wechat_pay', 'alipay']) {
+      const wallet = row({ auto_renew: false, cancel_at_period_end: true, payment_method, payment_channel: 'stripe' });
+      expect(methodPlanAction({ level: 'gold', ...ready, now: NOW, current: wallet }))
+        .toEqual({ kind: 'upgrade', label: '升级到 Gold', disabled: false, priorSubscriptionId: wallet.subscription_id });
+    }
     expect(methodPlanAction({ level: 'pro', ...ready, current: row({ purchase_membership_level: 'gold' }) }))
       .toMatchObject({ label: '已是更高等级会员', disabled: true });
   });
@@ -48,8 +52,10 @@ describe('membership summary', () => {
     expect(describeMethodMembership(row({ auto_renew: false, cancel_at_period_end: true, payment_method: 'card_cn' })))
       .toMatchObject({ method: '中国大陆银行卡', status: '已停止续费，会员权益用到 2026-11-14' });
     expect(describeMethodMembership(row({ purchase_membership_level: 'gold', offer_kind: 'founder', billing_cycle: 'yearly',
-      auto_renew: false, payment_method: 'wechat_pay' }))).toEqual({ title: 'Gold · 创始会员 · 年付', method: '微信支付',
+      auto_renew: false, cancel_at_period_end: true, payment_method: 'wechat_pay' }))).toEqual({ title: 'Gold · 创始会员 · 年付', method: '微信支付',
       status: '不自动续费，会员权益用到 2026-11-14' });
+    expect(describeMethodMembership(row({ auto_renew: false, cancel_at_period_end: true, payment_method: 'alipay' })).status)
+      .toBe('不自动续费，会员权益用到 2026-11-14');
   });
   it('keeps the founder label after a founder renewal (0238 offer_kind founder_renewal)', () => {
     expect(describeMethodMembership(row({ purchase_membership_level: 'gold', offer_kind: 'founder_renewal', billing_cycle: 'yearly' })).title)

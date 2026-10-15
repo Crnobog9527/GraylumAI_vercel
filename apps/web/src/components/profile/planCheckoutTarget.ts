@@ -2,7 +2,7 @@
 import { formatUsd, paywallQuote, type PaywallBilling, type PaywallPlan } from '@/components/paywall/paywallPlans';
 import { CHECKOUT_COPY, GOLD_FIRST_MONTH_USD, GOLD_FOUNDER_YEAR_USD, METHOD_COPY, type CardMethod } from '@/components/paywall/methodCheckout';
 import type { MethodCheckoutTarget } from '@/components/paywall/MethodCheckoutDialog';
-import type { MethodMembershipRow, PlanAction } from './methodPlanAction';
+import { isOneTimeMembership, type MethodMembershipRow, type PlanAction } from './methodPlanAction';
 
 const CYCLE: Record<PaywallBilling, string> = { monthly: '月付', yearly: '年付' };
 
@@ -21,7 +21,8 @@ export function planCheckoutTarget(input: {
   if (!quote) return null;
   const upgrade = action.kind === 'upgrade' && action.priorSubscriptionId;
   const details = upgrade ? [
-    '原 Pro 订阅到本期结束后停止续费，不退差价。',
+    input.prior && isOneTimeMembership(input.prior) ? '原 Pro 是一次性购买，用到本期结束，不退差价。'
+      : '原 Pro 订阅到本期结束后停止续费，不退差价。',
     input.prior?.billing_cycle === 'yearly' ? '已有积分全部保留，Pro 年付还没发完的积分继续按月发完。' : '已有积分全部保留。',
   ] : undefined;
   return {

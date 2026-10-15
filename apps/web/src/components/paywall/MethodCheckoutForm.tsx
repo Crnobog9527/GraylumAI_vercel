@@ -39,7 +39,11 @@ export function MethodCheckoutForm(props: Props) {
   const { checkout, purchase, testIdPrefix: id } = props;
   const methods = purchase ? checkout.methodsFor(purchase.itemType) : checkout.methodsFor('membership_plan');
   const [picked, setPicked] = useState<CardMethod>('card');
-  const [accepted, setAccepted] = useState(false);
+  // Consent is to one terms version: if methodMembership refetches a newer one (e.g. after reading the terms in
+  // another tab), the box clears and must be ticked again for that version.
+  const [acceptedVersion, setAcceptedVersion] = useState<string | null>(null);
+  const termsVersion = checkout.entry?.termsVersion ?? null;
+  const accepted = acceptedVersion !== null && acceptedVersion === termsVersion;
   const method = methods.includes(picked) ? picked : methods[0];
   const purchaseKey = purchase ? JSON.stringify(purchase) : '';
   const { clearOutcome } = checkout;
@@ -89,7 +93,7 @@ export function MethodCheckoutForm(props: Props) {
 
       <label className="flex items-start gap-2 text-sm" style={{ color: 'var(--text-secondary)' }}>
         <input type="checkbox" data-testid={`${id}-terms`} className="mt-1" checked={accepted}
-          disabled={checkout.pending} onChange={event => setAccepted(event.target.checked)} />
+          disabled={checkout.pending} onChange={event => setAcceptedVersion(event.target.checked ? termsVersion : null)} />
         <span>
           我已阅读并同意
           <a className="underline" href={TERMS_LINKS.terms} target="_blank" rel="noopener noreferrer">《服务条款》</a>和
@@ -98,7 +102,7 @@ export function MethodCheckoutForm(props: Props) {
       </label>
 
       <Button data-testid={`${id}-pay`} size="lg" className="h-auto flex-col gap-0.5 whitespace-normal py-3" disabled={!canPay}
-        onClick={() => { if (purchase && canPay) void checkout.start(purchase, method, accepted, props.onFounderSoldOut); }}>
+        onClick={() => { if (purchase && canPay) void checkout.start(purchase, method, acceptedVersion, props.onFounderSoldOut); }}>
         <b>{checkout.pending ? '正在打开付款页面…' : props.cta}</b>
         {props.ctaSub ? <span className="text-xs font-normal opacity-80">{props.ctaSub}</span> : null}
       </Button>

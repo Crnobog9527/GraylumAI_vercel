@@ -25,6 +25,13 @@ const UPGRADE_RENEWAL_WINDOW_MS = (48 * 60 + 31) * 60 * 1000;
 
 const RANK: Record<string, number> = { pro: 1, gold: 2 };
 
+/** WeChat Pay / Alipay sell one-time terms (0221: never auto_renew). 0211 stores their subscription row with
+ * cancel_at_period_end=true, so `cancel_at_period_end` alone cannot tell "never renewed" from "renewal stopped". */
+const ONE_TIME_METHODS = new Set(['wechat_pay', 'alipay']);
+export function isOneTimeMembership(row: Pick<MethodMembershipRow, 'payment_method'>) {
+  return ONE_TIME_METHODS.has(row.payment_method);
+}
+
 /** The highest paid level still in force; the server only returns memberships that have not ended. */
 export function currentMethodMembership(rows: readonly MethodMembershipRow[] | null | undefined, now = Date.now()) {
   const live = (rows ?? []).filter(row => RANK[row.purchase_membership_level]
@@ -59,8 +66,8 @@ export function methodPlanAction(input: {
   if (current.purchase_membership_level === input.level) return { kind: 'none', label: '当前方案', disabled: true };
   if (current.purchase_membership_level === 'pro' && input.level === 'gold') {
     // A card Pro whose renewal is already stopped cannot be upgraded (0222/0251 need it still renewing);
-    // Gold can be bought normally once that Pro ends.
-    if (current.cancel_at_period_end) return { kind: 'none', label: 'Pro 已停止续费，到期后可开通 Gold', disabled: true };
+    // Gold can be bought normally once that Pro ends. A one-time wallet Pro never renewed: 0222 admits its upgrade.
+    if (current.cancel_at_period_end && !isOneTimeMembership(current)) return { kind: 'none', label: 'Pro 已停止续费，到期后可开通 Gold', disabled: true };
     // Card upgrades only: the server refuses a renewing Waffo Pro and asks for a support ticket.
     if (current.auto_renew && current.payment_channel === 'waffo') return { kind: 'none', label: '旧订阅升级请提交工单', disabled: true };
     if (current.auto_renew && Date.parse(current.entitlement_end) - (input.now ?? Date.now()) <= UPGRADE_RENEWAL_WINDOW_MS) {
@@ -90,7 +97,7 @@ export function describeMethodMembership(row: MethodMembershipRow) {
   const end = formatDate(row.entitlement_end);
   const status = row.inGrace ? `本期已于 ${end} 到期，正在等待续费扣款，24 小时内会员权益保留`
     : row.auto_renew ? `自动续费中，本期到 ${end}`
-    : row.cancel_at_period_end ? `已停止续费，会员权益用到 ${end}` : `不自动续费，会员权益用到 ${end}`;
+    : row.cancel_at_period_end && !isOneTimeMembership(row) ? `已停止续费，会员权益用到 ${end}` : `不自动续费，会员权益用到 ${end}`;
   return { title, method: METHOD_LABEL[row.payment_method] ?? '其他方式', status };
 }
 

@@ -7,11 +7,11 @@ import { Button } from '@/components/ui/button';
 import { trpc } from '@/trpc/client';
 import { CreditPackagePriceTag } from './creditPackagePrice';
 import { ProfileCatalogState } from './ProfileCatalogState';
-import { PACK_MEMBERS_ONLY_NOTICE, creditPackBuyState, isPaidMember, type PackEntitlement } from './creditPackageGate';
+import { PACK_MEMBERS_ONLY_NOTICE, PACK_RENEWAL_GRACE_NOTICE, creditPackBuyState, isPaidMember, type PackEntitlement } from './creditPackageGate';
 
 // 积分加油包区块
 export const CreditPackagesSection = memo(function CreditPackagesSection({
-  onBuyClick, pendingPackageId, checkoutOpen = true,
+  onBuyClick, pendingPackageId, checkoutOpen = true, renewalGrace = false,
 }: {
   /** `level` is the entitlement level the card priced the pack with, so the dialog shows the same amount. */
   onBuyClick?: (pkg: { id: string; name?: string; credits: number; bonus_credits: number; price: number; checkout_ready?: boolean },
@@ -19,6 +19,8 @@ export const CreditPackagesSection = memo(function CreditPackagesSection({
   pendingPackageId?: string | null;
   /** false while card checkout is closed (payments.methodMembership): no pack can be bought. */
   checkoutOpen?: boolean;
+  /** The current paid membership is waiting for its renewal charge: access stays, packs do not (0214). */
+  renewalGrace?: boolean;
 }) {
   // 从 API 获取积分加油包数据
   const {
@@ -67,6 +69,11 @@ export const CreditPackagesSection = memo(function CreditPackagesSection({
           {PACK_MEMBERS_ONLY_NOTICE}
         </p>
       )}
+      {renewalGrace && isPaidMember(entitlement) && (
+        <p data-testid="profile-credit-packages-renewal-grace" className="mb-4 text-sm" style={{ color: 'var(--text-secondary)' }}>
+          {PACK_RENEWAL_GRACE_NOTICE}
+        </p>
+      )}
 
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
         {isLoading ? (
@@ -83,7 +90,7 @@ export const CreditPackagesSection = memo(function CreditPackagesSection({
           <ProfileCatalogState status="empty" />
         ) : packages.map((pkg) => {
           const buy = creditPackBuyState({ price: pkg.price, checkoutReady: pkg.checkout_ready && checkoutOpen,
-            pending: pendingPackageId === pkg.id, entitlement });
+            pending: pendingPackageId === pkg.id, entitlement, renewalGrace });
           return (
           <div
             key={pkg.id}

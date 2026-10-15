@@ -423,7 +423,8 @@ export const CreditStatsCard = memo(function CreditStatsCard({ user }: { user: M
 
       {/* 积分加油包 */}
       {hasVerifiedBalance && (
-        <CreditPackagesSection onBuyClick={handlePackageBuy} checkoutOpen={checkout.methodsFor('credit_package').length > 0} />
+        <CreditPackagesSection onBuyClick={handlePackageBuy} checkoutOpen={checkout.methodsFor('credit_package').length > 0}
+          renewalGrace={currentMethodMembership(checkout.entry?.memberships as MethodMembershipRow[] | undefined)?.inGrace === true} />
       )}
 
       <MethodCheckoutDialog target={packTarget} checkout={checkout} onClose={() => setPackTarget(null)} />
