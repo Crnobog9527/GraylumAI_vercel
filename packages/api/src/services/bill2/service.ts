@@ -99,6 +99,9 @@ export function authoritativeBilling(deps: { budget?:RuntimeBudget; admin: Billi
     const result=await (financialNames.has(name)&&query.abortSignal ? query.abortSignal(AbortSignal.timeout(Math.min(10_000,remaining))) : query);
     if (result.error) {
       if (name === 'bill2_claim' || name === 'bill2_dispatch' || name === 'fusion_group_claim') throw claimFailure(result.error);
+      // Before 0261 the database refuses a non-402 pending refusal; dispatch then records the plain observation.
+      if (name === 'bill2_record' && (result.error as { message?: unknown }).message === 'BILL2_REJECTION_PROOF_DENIED')
+        throw new Error('BILL2_REJECTION_PROOF_DENIED');
       throw new Error('BILL2_DATABASE_UNAVAILABLE');
     }
     return result.data as T;
@@ -281,7 +284,14 @@ export function authoritativeBilling(deps: { budget?:RuntimeBudget; admin: Billi
       }
       await early; // Owned by this invocation; database transport shares its persistence deadline.
       try {
-        const saved = await recordReceipt(capability.runId, callId, evidence);
+        let saved: RunView;
+        try { saved = await recordReceipt(capability.runId, callId, evidence); }
+        catch (error) {
+          if (!(error instanceof Error) || error.message !== 'BILL2_REJECTION_PROOF_DENIED' || !observation
+            || observation.httpStatus === 402 || !('evidenceKind' in evidence) || evidence.evidenceKind !== 'provider_rejection_pending') throw error;
+          evidence = providerEvidence(observation, identity, 'response');
+          saved = await recordReceipt(capability.runId, callId, evidence);
+        }
         if (saved.accountClosed) return { dispatched: true, accountClosed: true as const };
         if (saved.contentDeleted) return { dispatched: true, contentDeleted: true as const };
         if ('evidenceKind' in evidence && evidence.evidenceKind === 'provider_rejection_pending') {
