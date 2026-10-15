@@ -46,7 +46,8 @@ END $$;
 -- After it bill2_recovery_claim grants no lookup; ten more minutes let one already started finish.
 CREATE OR REPLACE FUNCTION public.bill2_payg_call_stuck(c bill2_calls,r bill2_runs) RETURNS boolean
 LANGUAGE sql SET search_path=public,pg_temp AS $$
- SELECT r.contract_version='bill2.v2' AND r.state='cost_pending' AND NOT r.conflict
+ -- Research tools use their own deadline settlement and supplier-cost reconciliation (0255).
+ SELECT r.contract_version='bill2.v2' AND c.call_kind='model' AND r.state='cost_pending' AND NOT r.conflict
   AND c.dispatched_at IS NOT NULL AND c.settled_at IS NULL AND c.selected_cost_usd IS NULL AND NOT c.provider_rejected
   AND clock_timestamp()>=coalesce(c.recovery_deadline,c.created_at+interval '24 hours')+interval '10 minutes'
 $$;

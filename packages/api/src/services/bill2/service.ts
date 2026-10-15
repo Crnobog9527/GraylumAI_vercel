@@ -301,13 +301,14 @@ export function authoritativeBilling(deps: { budget?:RuntimeBudget; admin: Billi
       }
       catch { return { dispatched: true,
         providerRejected: 'evidenceKind' in evidence &&
-          ['provider_rejection', 'provider_rejection_pending'].includes(String(evidence.evidenceKind)),
+          evidence.evidenceKind === 'provider_rejection',
         pendingReceipt: { runId: capability.runId, callId, evidence } }; }
+      // A pending refusal is never a host no_delivery verdict; SQL recovery owns lookup confirmation.
       // Confirmation can still commit after this receipt. Every later Runtime
       // read/write then refuses the actor (bill2_actor), so no content reaches SDK/history/result.
       return { dispatched: true, observation,
         providerRejected: 'evidenceKind' in evidence &&
-          ['provider_rejection', 'provider_rejection_pending'].includes(String(evidence.evidenceKind)) };
+          evidence.evidenceKind === 'provider_rejection' };
     },
     closeRun: (runId: string, outcome: 'delivered' | 'confirmed_failure' | 'cancelled' | 'unknown', result: unknown = null) =>
       rpc<RunView>('bill2_close', { p_run_id: uuid.parse(runId), p_outcome: outcome, p_result: result }),
