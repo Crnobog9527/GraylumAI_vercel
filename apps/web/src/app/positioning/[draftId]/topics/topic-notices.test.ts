@@ -1,8 +1,10 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { expect, it, vi } from 'vitest';
 import { runtimeGateMessages } from '../../../../../../../packages/api/src/shared/runtimeGateMessages';
-import { topicExecutionNotice, topicFailureMessage, topicTurnOutcome, topicOpenTurnNotice, topicRejectedTurn, topicTurnShows } from './topic-notices';
+import { topicExecutionNotice, topicFailureMessage, topicTurnOutcome, topicOpenTurnNotice, topicRejectedTurn, topicTurnRefused, topicTurnShows } from './topic-notices';
 import { PROVIDER_REJECTED_NOTICE } from '@/lib/runtime-gate-notice';
+import { DEFINITE_REFUSAL_NOTICE } from '@/app/runtime/gate-notices';
+import { RUNTIME_PAYG_PROFILE_REQUIRED_MESSAGE } from '../../../../../../../packages/api/src/shared/runtimeAdmissionMessages';
 
 const turnRefusal = (code: string, message: string) =>
   Object.assign(new Error(message), { data: { code, path: 'opc.topicTurn', retryAfter: 60 } });
@@ -92,4 +94,25 @@ it('shows the host notice first but keeps the typed input only after a gate stop
   expect(topicTurnOutcome({ state: 'cancelled', unavailable: 'paused' })).toEqual({ notice: runtimeGateMessages.paused, keepInput: true });
   expect(topicTurnOutcome({ state: 'completed' })).toEqual({ notice: null, keepInput: false });
   expect(topicTurnOutcome({ state: 'waiting_credits', notice: '余额不足，任务已暂停，请补充积分后继续。' })).toEqual({ notice: null, keepInput: false });
+});
+
+const refused = (httpStatus: number, code: string, message: string, path = 'opc.topicTurn') =>
+  Object.assign(new Error(message), { data: { httpStatus, code, path } });
+
+it('a topic turn refused before admission says why and is released, never shown as unknown', () => {
+  const payg = refused(412, 'PRECONDITION_FAILED', RUNTIME_PAYG_PROFILE_REQUIRED_MESSAGE);
+  expect(topicFailureMessage(payg)).toBe(RUNTIME_PAYG_PROFILE_REQUIRED_MESSAGE);
+  expect(topicTurnRefused(payg)).toBe(true);
+  const other = refused(412, 'PRECONDITION_FAILED', '当前测试窗口已过期。');
+  expect(topicFailureMessage(other)).toBe(DEFINITE_REFUSAL_NOTICE);
+  expect(topicTurnRefused(other)).toBe(true);
+});
+
+it('keeps unknown outcomes, rate limits, identity conflicts and other procedures held', () => {
+  for (const cause of [refused(503, 'SERVICE_UNAVAILABLE', 'x'), refused(500, 'INTERNAL_SERVER_ERROR', 'x'),
+    refused(429, 'TOO_MANY_REQUESTS', runtimeGateMessages.minute), refused(409, 'CONFLICT', 'OPC_REQUEST_CONFLICT'),
+    refused(412, 'PRECONDITION_FAILED', 'x', 'opc.saveTopicDraft'), new Error('network'),
+    refused(412, 'PRECONDITION_FAILED', 'RUNTIME_ORGANIZER_PENDING：上一轮整理尚未完成，新消息尚未准入，请先处理原任务。')])
+    expect(topicTurnRefused(cause)).toBe(false);
+  expect(topicFailureMessage(refused(503, 'SERVICE_UNAVAILABLE', 'x'))).toContain('状态待核实');
 });

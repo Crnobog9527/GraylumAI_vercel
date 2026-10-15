@@ -20,7 +20,7 @@ import {
 import { QueryNotice } from '@/components/opc/query-notice';
 import { trpc } from '@/trpc/client';
 import {
- OUTPUT_TRUNCATED_NOTICE, definiteRefusal, gateStopNotices, rememberGateStop, rememberUserStop, userStopIds,
+ OUTPUT_TRUNCATED_NOTICE, definiteRefusal, definiteRefusalNotice, gateStopNotices, rememberGateStop, rememberUserStop, userStopIds,
  runtimeAdmissionNotice, runtimeExecutionNotice, showsReply,
  videoGateError, videoGateNotice,
 } from './gate-notices';
@@ -187,7 +187,8 @@ function RuntimeWorkspace({routeSession,routeModule}:{routeSession:string;routeM
   // The outcome may be unknown (reply lost), so the record and request id stay for a replaying resend.
   if(!stored)restoreInput();
   if(isOrganizerPendingError(cause)){payg.block();await view.refetch();return;}
-  setError(gate??'请求状态待核实。请读取原任务状态，不要重新发送相同内容。');await view.refetch();}}
+  // A definite refusal of an unstored send says so; the same text keeps its request id and can be sent again.
+  setError(gate??(stored?null:definiteRefusalNotice(cause,['runtime.prepare']))??'请求状态待核实。请读取原任务状态，不要重新发送相同内容。');await view.refetch();}}
  const initialSend=useRef(false);
  useEffect(()=>{
   if(initialSend.current||!sessionId||!input.trim()||!workContextReady||!choices.data||!activeSelection||busy)return;

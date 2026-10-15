@@ -10,6 +10,13 @@ describe('monthly first purchase approval material (not approval)', () => {
     expect(result).toMatchObject({ status: 'eligible', quote: { executable: false,
       terms: { plan, basisMinor: 6900, feeMinor: 414, netMinor: 6486, credits: 8970 } } });
   });
+  it('adds a card order\'s tax in full to the refund; the fee stays on the pre-tax amount (PAY-STRIPE-MP)', () => {
+    const { policy, binding } = quoteInput();
+    const card = prepareMonthlyRefundQuote(policy, { ...binding, taxMinor: 1380 });
+    expect(card).toMatchObject({ status: 'eligible', quote: { terms: { basisMinor: 6900, feeMinor: 414, taxMinor: 1380, netMinor: 7866 } } });
+    const legacy = prepareMonthlyRefundQuote(policy, binding);
+    expect(legacy.status === 'eligible' && 'taxMinor' in legacy.quote.terms).toBe(false);
+  });
   it.each(['yearly', 'one_time', 'unknown'])('rejects unsupported %s cycle', billingCycle => {
     const { policy, binding } = quoteInput(); binding.billingCycle = billingCycle;
     expect(prepareMonthlyRefundQuote(policy, binding)).toMatchObject({ status: 'review_required', executable: false });

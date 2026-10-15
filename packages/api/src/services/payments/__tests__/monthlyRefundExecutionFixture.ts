@@ -29,9 +29,9 @@ export function quoteInput() {
   };
   return { policy, binding };
 }
-export function executionFixture() {
+export function executionFixture(taxMinor?: number) {
   const input = quoteInput();
-  const result = prepareMonthlyRefundQuote(input.policy, input.binding);
+  const result = prepareMonthlyRefundQuote(input.policy, { ...input.binding, taxMinor });
   if (result.status !== 'eligible') throw new Error('Fixture is not eligible');
   const intent: MonthlyRefundIntent = {
     id: '00000000-0000-4000-8000-000000000002', terms: result.quote.terms, versionHash: result.quote.versionHash,
@@ -46,21 +46,22 @@ export function executionFixture() {
   };
   return { intent, seen };
 }
-export function claimedFixture() {
-  const f = executionFixture();
+export function claimedFixture(taxMinor?: number) {
+  const f = executionFixture(taxMinor);
   f.intent.claimedAt = now;
   f.seen.local.hold = 'held';
   return f;
 }
-export function stoppedFixture() {
-  const f = claimedFixture();
+export function stoppedFixture(taxMinor?: number) {
+  const f = claimedFixture(taxMinor);
   f.intent.started.stop_renewal = now;
   f.seen.subscription.cancelAtPeriodEnd = true;
   f.seen.subscription.renewalOwnership = 'intent';
   return f;
 }
-export function refundFixture(status: MonthlyRefundObservation['refunds']['rows'][number]['status'] = 'succeeded') {
-  const f = stoppedFixture();
+export function refundFixture(status: MonthlyRefundObservation['refunds']['rows'][number]['status'] = 'succeeded',
+  taxMinor?: number) {
+  const f = stoppedFixture(taxMinor);
   f.intent.started.refund = now;
   f.seen.refunds.rows.push({ id: 're_fixture', intentId: f.intent.id, orderId: f.intent.terms.orderId,
     chargeId: 'ch_fixture', paymentIntentId: 'pi_fixture', currency: 'usd', amount: f.intent.terms.netMinor,

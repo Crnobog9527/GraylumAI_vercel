@@ -2,7 +2,6 @@
 import { describe, expect, it } from 'vitest';
 import { runtimeGateMessages } from '../../../../../packages/api/src/shared/runtimeGateMessages';
 import { RUNTIME_INPUT_TOO_LONG_MESSAGE } from '../../../../../packages/api/src/shared/runtimeInputMessages';
-import { RUNTIME_PAYG_PROFILE_REQUIRED_MESSAGE } from '../../../../../packages/api/src/shared/runtimeAdmissionMessages';
 import {
   OUTPUT_TRUNCATED_NOTICE, rememberUserStop, runtimeAdmissionNotice, runtimeExecutionNotice, userStopIds, videoGateError, videoGateNotice,
 } from './gate-notices';
@@ -87,7 +86,8 @@ it('shows no "verifying" reply for a cancelled round without a body, and keeps e
   expect(showsReply({ state: 'completed', body: '回复', primaryBody: null })).toBe(true);
 });
 
-import { definiteRefusal } from './gate-notices';
+import { DEFINITE_REFUSAL_NOTICE, definiteRefusal, definiteRefusalNotice } from './gate-notices';
+import { RUNTIME_PAYG_PROFILE_REQUIRED_MESSAGE } from '../../../../../packages/api/src/shared/runtimeAdmissionMessages';
 
 const structured = (httpStatus: number, code: string, path = 'runtime.prepare') =>
   Object.assign(new Error('fixed refusal'), { data: { httpStatus, code, path } });
@@ -106,6 +106,14 @@ it('leaves every uncertain or retryable failure open', () => {
   expect(definiteRefusal(new Error('network'))).toBeNull();
   expect(definiteRefusal(Object.assign(new Error('x'), { data: { code: 'PRECONDITION_FAILED' } }))).toBeNull();
   expect(definiteRefusal('PRECONDITION_FAILED')).toBeNull();
+});
+
+it('names a definite refusal of the given procedures only with shared fixed texts', () => {
+  const payg = Object.assign(new Error(RUNTIME_PAYG_PROFILE_REQUIRED_MESSAGE), { data: { httpStatus: 412, code: 'PRECONDITION_FAILED', path: 'runtime.prepare' } });
+  expect(definiteRefusalNotice(payg, ['runtime.prepare'])).toBe(RUNTIME_PAYG_PROFILE_REQUIRED_MESSAGE);
+  expect(definiteRefusalNotice(structured(412, 'PRECONDITION_FAILED'), ['runtime.prepare'])).toBe(DEFINITE_REFUSAL_NOTICE);
+  expect(definiteRefusalNotice(structured(412, 'PRECONDITION_FAILED'), ['opc.topicTurn'])).toBeNull();
+  expect(definiteRefusalNotice(structured(503, 'SERVICE_UNAVAILABLE'), ['runtime.prepare'])).toBeNull();
 });
 
 describe('user stops', () => {

@@ -11,7 +11,11 @@ import { getWaffoTestOperationsClient } from '@repo/api/src/services/payments/wa
 import { closeExpiredWaffoCheckouts } from '@repo/api/src/services/payments/waffoCardCheckout';
 import { describeWaffoFailure } from '@repo/api/src/services/payments/waffoFailure';
 import { findStaleChargedRounds } from '@repo/api/src/services/runtime/staleChargedRounds';
+import { reconcileStripeCardPayments } from '@repo/api/src/services/payments/stripeCardReconciliation';
+import { getStripeClient } from '@repo/api/src/services/stripe';
+import { reportPaymentEvidenceConflict, reportStripeCardReconciliation } from '@/lib/payment-alert.mjs';
 import { recoverFusionFinancials } from '@repo/api/src/services/fusion/recovery';
+import { kickStalledReviews } from '@repo/api/src/services/fusion/background';
 import { validateCronRequest } from '@/lib/cron-auth';
 
 export const runtime = 'nodejs';
@@ -32,6 +36,13 @@ async function runFusionRecovery(supabase: SupabaseClient) {
   catch { return { success: false, scanned: 0, cancelled: 0, recovered: 0, scrubbed: 0, failed: 1 }; }
 }
 
+/** FUSION-BACKGROUND daily backstop: reviews that stopped moving get one fresh step each (each at most once a day).
+ * The step itself runs in its own invocation; this only asks for it, within a short time limit. */
+async function runFusionKick(supabase: SupabaseClient, origin: string) {
+  try { return await kickStalledReviews(supabase, origin, { timeLimitMs: 10_000 }); }
+  catch { return { success: false, kicked: 0 }; }
+}
+
 /** Waffo daily backstop: report-only. Off until the test operations binding is explicitly enabled. */
 async function runWaffoReconciliation(supabase: SupabaseClient) {
   if (process.env.WAFFO_TEST_OPERATIONS_ENABLED !== 'true') return { success: true, skipped: true, findings: [] };
@@ -43,6 +54,43 @@ async function runWaffoReconciliation(supabase: SupabaseClient) {
   } catch (error) {
     logger.error('billing', 'pay_waffo_reconciliation_failed', describeWaffoFailure(error));
     return { success: false, skipped: false, findings: [{ kind: 'scan_failed', refundCandidate: false }] };
+  }
+}
+
+/** PAY-STRIPE-MP: repairs card orders whose webhook was lost; unrepaired items alert. Off unless the environment sets
+ * STRIPE_CARD_RECONCILIATION_MODE to the Stripe mode it must run with (staging: test; production: live, enabled only
+ * with Owner approval at launch, REL-1). A key of the other mode is refused and alerted, never scanned. */
+async function runStripeCardReconciliation(supabase: SupabaseClient) {
+  const expectedMode = process.env.STRIPE_CARD_RECONCILIATION_MODE;
+  if (!expectedMode) return { success: true, skipped: true, findings: [] };
+  if (expectedMode !== 'test' && expectedMode !== 'live') {
+    // A typo must not look like the intentional "off": it is a configuration failure, alerted.
+    const findings = [{ kind: 'scan_failed' as const, code: 'STRIPE_CARD_RECONCILIATION_MODE_INVALID' }];
+    reportStripeCardReconciliation(findings);
+    return { success: false, skipped: false, findings };
+  }
+  let stripe;
+  try { stripe = getStripeClient(); } catch {
+    const findings = [{ kind: 'scan_failed' as const, code: 'STRIPE_NOT_CONFIGURED' }];
+    reportStripeCardReconciliation(findings);
+    return { success: false, skipped: false, findings };
+  }
+  try {
+    // A stalled Stripe request (default timeout 80 s) must not outlive the cron's 60 s: stop waiting after 50 s and report
+    // an incomplete scan. Work cut off mid-way is safe; every repair is idempotent and is retried the next day.
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const result = await Promise.race([
+      reconcileStripeCardPayments(supabase, stripe, { expectedMode, alert: () => reportPaymentEvidenceConflict('billing-reconcile') }),
+      new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('STRIPE_CARD_RECONCILIATION_TIMEOUT')), 50_000); }),
+    ]).finally(() => clearTimeout(timer));
+    reportStripeCardReconciliation(result.findings);
+    return result;
+  } catch (error) {
+    const code = error instanceof Error && /^[A-Z][A-Z0-9_]{2,80}$/.test(error.message) ? error.message : 'UNEXPECTED';
+    logger.error('billing', 'stripe_card_reconciliation_failed', { code });
+    const findings = [{ kind: 'scan_failed' as const, code }];
+    reportStripeCardReconciliation(findings);
+    return { success: false, skipped: false, findings };
   }
 }
 
@@ -64,16 +112,21 @@ export async function GET(request: Request) {
 
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
     logger.system.cronJob('billing-reconcile', 'started');
-    const [result, readinessAudit, erasureFinancial, waffo, staleRounds, fusion] = await Promise.all([
+    const [result, readinessAudit, erasureFinancial, waffo, staleRounds, stripeCard, { fusion, fusionKick }] = await Promise.all([
       runDailyBillingReconciliation(supabase),
       runBillingEngineV15ReadinessAudit(supabase),
       runErasureFinancialReconciliation(supabase),
       runWaffoReconciliation(supabase),
       runStaleRoundReconciliation(supabase),
-      runFusionRecovery(supabase),
+      runStripeCardReconciliation(supabase),
+      (async () => {
+        // Kick before recovery resets idle timestamps; do not delay the independent financial audits.
+        const fusionKick = await runFusionKick(supabase, new URL(request.url).origin);
+        return { fusionKick, fusion: await runFusionRecovery(supabase) };
+      })(),
     ]);
     const success = result.success && readinessAudit.success && erasureFinancial.success && waffo.success
-      && staleRounds.success && fusion.success;
+      && staleRounds.success && stripeCard.success && fusion.success && fusionKick.success;
 
     if (!success) {
       logger.system.cronJob(
@@ -84,12 +137,17 @@ export async function GET(request: Request) {
           ...(erasureFinancial.success ? [] : ['Erasure financial recovery pending']),
           ...(waffo.success ? [] : [`Waffo payments need manual review: ${waffo.findings.length}`]),
           ...(staleRounds.success ? [] : [`Stale charged rounds need manual review: ${staleRounds.total}`]),
-          ...(fusion.success ? [] : [`Fusion calls pending recovery: ${fusion.failed}`])].join(' | '),
+          ...(stripeCard.success ? [] : [`Stripe card payments need manual review: ${stripeCard.findings.length}`]),
+
+          ...(fusion.success ? [] : [`Fusion calls pending recovery: ${fusion.failed}`]),
+          ...(fusionKick.success ? [] : ['Fusion review kick failed'])].join(' | '),
         {
           erasureFinancial,
           waffo,
           staleRounds,
+          stripeCard,
           fusion,
+          fusionKick,
           mismatches: result.mismatches,
           summary: result.summary,
           readinessAudit: {
@@ -126,7 +184,9 @@ export async function GET(request: Request) {
       erasureFinancial,
       waffo,
       staleRounds,
+      stripeCard,
       fusion,
+      fusionKick,
       timestamp: new Date().toISOString(),
     }, { status: success ? 200 : 500 });
   } catch (error) {

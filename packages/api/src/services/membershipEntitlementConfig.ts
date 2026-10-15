@@ -16,6 +16,22 @@ export const entitlementInputShape = {
   allowFusionCompare: z.boolean().optional(),
   libraryStorageBytes: storageBytesSchema.optional(),
 };
+// PUBLISH-MONITOR (migration 0240, Master Plan §2.1 item 51). Read-only here: values change by migration
+// until the admin editor gains these fields.
+export const publishMonitorEntitlementShape = {
+  allow_publish: z.boolean(),
+  own_data_window_days: z.number().int().min(0).max(365),
+  allow_benchmark_monitor: z.boolean(),
+  allow_weekly_auto_review: z.boolean(),
+};
+export function defaultPublishMonitorEntitlements(level: MembershipLevel) {
+  return {
+    allow_publish: level !== 'free',
+    own_data_window_days: { free: 0, pro: 30, gold: 90 }[level],
+    allow_benchmark_monitor: level === 'gold',
+    allow_weekly_auto_review: level === 'gold',
+  };
+}
 export type EntitlementPatch = {
   allowFusionReview?: boolean;
   allowFusionCompare?: boolean;

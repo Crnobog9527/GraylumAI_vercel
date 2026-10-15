@@ -188,3 +188,27 @@ it.each(['RUNTIME_NEW_CALLS_STOPPED', 'RUNTIME_USER_DAILY_USD_LIMIT', 'RUNTIME_S
     expect(result).toMatchObject({ notice: expect.stringMatching(/[\u4e00-\u9fff]/) });
     expect(mock.billing.dispatchOnce).not.toHaveBeenCalled();
   });
+
+// 0248: the pre-dispatch cancellation carries a stable code; before the migration it retries without it.
+it.each(['applied','pending'] as const)('records the pre-dispatch failure code (0248 %s)', async migration => {
+  const f = fixture(); f.fund();
+  const { BillingClaimRejection } = await import('../bill2/claimFailure');
+  mock.billing.claimPaygCall.mockImplementation(async () => { throw new BillingClaimRejection('BILL2_START_THRESHOLD_UNCONFIGURED'); });
+  const rpc = f.database.rpc.getMockImplementation()!;
+  f.database.rpc.mockImplementation(async (name, args) => {
+    if (args.p_action === 'fail_before_dispatch') {
+      const value = (args.p_result as { value?: Record<string, unknown> } | undefined)?.value;
+      if (migration === 'pending' && value && 'failure_code' in value)
+        return { data: null as never, error: { message: 'RUNTIME_FAILURE_REASON_DENIED' } as never };
+      return { data: { state: 'cancelled' } as never, error: null };
+    }
+    return rpc(name, args);
+  });
+  const result = await runtimeExecutor(f.options).execute(id);
+  expect(result).toMatchObject({ state: 'cancelled' });
+  const sent = f.database.rpc.mock.calls.filter(([, args]) => args.p_action === 'fail_before_dispatch')
+    .map(([, args]) => (args.p_result as { value?: unknown } | undefined)?.value ?? null);
+  expect(sent[0]).toEqual({ failure_code: 'BILL2_START_THRESHOLD_UNCONFIGURED' });
+  expect(sent).toHaveLength(migration === 'pending' ? 2 : 1);
+  if (migration === 'pending') expect(sent[1]).toBeNull();
+});

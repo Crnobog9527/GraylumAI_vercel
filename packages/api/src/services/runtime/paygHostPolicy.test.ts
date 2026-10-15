@@ -186,3 +186,12 @@ it('requires a 32768-authorized profile and sufficient context; rejects cap plus
  f.profile.outputLimit=32769;
  expect(paygHostProfile.safeParse(f.profile).success).toBe(false);
 });
+// B1 (0250): profiles move from 2 to 3 tools without a gap; anything above 3 stays a configuration error.
+it.each([2,3] as const)('accepts a %s-tool profile and freezes it unchanged',async maxTools=>{
+  const f=fixture();f.profile.maxTools=maxTools;
+  expect((await f.run())?.[0].payg).toMatchObject({maxTools});
+});
+it('refuses a profile above the 3-tool ceiling',async()=>{
+  const f=fixture();(f.profile as {maxTools:number}).maxTools=4;
+  await expect(f.run()).rejects.toThrow();
+});
