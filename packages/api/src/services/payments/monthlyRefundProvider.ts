@@ -67,6 +67,8 @@ async function renewalOwnership(stripe: MonthlyStripe, intent: MonthlyRefundInte
 /** Full original-channel read before each mutation; no current catalog or client evidence. */
 export async function readMonthlyProvider(stripe: MonthlyStripe, intent: MonthlyRefundIntent) {
   const t = intent.terms;
+  // A card order (PAY-STRIPE-MP) was charged the pre-tax amount plus its tax.
+  const charged = t.paidMinor + (t.taxMinor ?? 0);
   const scope = await resolveStripeScope(stripe);
   evidence(scope.mode === 'test' && scope.merchant === t.merchant);
   const [sub, pi, charge] = await Promise.all([
@@ -75,12 +77,15 @@ export async function readMonthlyProvider(stripe: MonthlyStripe, intent: Monthly
   ]);
   evidence(sub.id === t.providerSubscriptionId && sub.livemode === false
     && pi.id === t.paymentIntentId && pi.livemode === false && pi.status === 'succeeded'
-    && pi.amount_received === t.paidMinor && pi.currency === t.currency && objectId(pi.latest_charge) === t.chargeId
+    && pi.amount_received === charged && pi.currency === t.currency && objectId(pi.latest_charge) === t.chargeId
     && charge.id === t.chargeId && charge.livemode === false && charge.paid && charge.captured
-    && charge.amount === t.paidMinor && charge.amount_captured === t.paidMinor && charge.currency === t.currency
+    && charge.amount === charged && charge.amount_captured === charged && charge.currency === t.currency
     && objectId(charge.payment_intent) === t.paymentIntentId && objectId(sub.customer)
     && objectId(charge.customer) === objectId(sub.customer) && objectId(pi.customer) === objectId(sub.customer));
-  const refunds = await all(cursor => stripe.refunds.list({ charge: t.chargeId, limit: 100, starting_after: cursor }));
+  // An external refund (no metadata of this intent) that failed or was canceled moved no cash: it is not this intent's
+  // evidence and must not block it. Any other foreign refund still fails the read (a conflict for review).
+  const refunds = (await all(cursor => stripe.refunds.list({ charge: t.chargeId, limit: 100, starting_after: cursor })))
+    .filter(row => row.metadata?.refundIntentId === intent.id || !['failed', 'canceled'].includes(row.status ?? ''));
   evidence(refunds.length <= 1);
   const rows = refunds.map(row => refundFact(row, t, intent.id));
   const item = sub.items.data[0];
@@ -95,7 +100,7 @@ export async function readMonthlyProvider(stripe: MonthlyStripe, intent: Monthly
   ]);
   const original = invoices.filter(row => row.id === t.invoiceId);
   const originalValid = original.length === 1 && original[0].livemode === false && original[0].status === 'paid'
-    && original[0].amount_paid === t.paidMinor && original[0].currency === t.currency
+    && original[0].amount_paid === charged && original[0].currency === t.currency
     && objectId(original[0].parent?.subscription_details?.subscription) === sub.id;
   const clear = originalValid && invoices.every(row => row.livemode === false
     && (row.id === t.invoiceId || row.status === 'void' || row.status === 'uncollectible'))

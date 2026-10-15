@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 'use client';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { trpc } from '@/trpc/client';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -40,7 +40,7 @@ export function PlatformSecretRow({ item, draft, pending, notice, failure, onDra
       最近一次修改：{item.updatedByEmail ?? '系统'}，{changedAt}
     </p>}
     <form className="flex flex-wrap items-center gap-2" autoComplete="off"
-      onSubmit={event => { event.preventDefault(); if (draft.trim()) onSave(); }}>
+      onSubmit={event => { event.preventDefault(); if (!pending && draft.trim()) onSave(); }}>
       <Input type="password" autoComplete="new-password" spellCheck={false} className="max-w-md"
         aria-label={`${info.name} 新密钥`} data-testid={`platform-secret-${item.slot}-input`}
         placeholder={item.configured ? '输入新密钥以替换' : `粘贴密钥${info.hint ? `（${info.hint}）` : ''}`}
@@ -62,11 +62,14 @@ export function PlatformSecretsSettings() {
   const save = trpc.platformSecrets.set.useMutation();
   const clear = trpc.platformSecrets.clear.useMutation();
   const [drafts, setDrafts] = useState<Partial<Record<PlatformSecretSlot, string>>>({});
+  const running = useRef(false);
   const [busy, setBusy] = useState<PlatformSecretSlot | null>(null);
   const [messages, setMessages] = useState<Partial<Record<PlatformSecretSlot, { notice?: string; failure?: string }>>>({});
   const [confirmClear, setConfirmClear] = useState<PlatformSecretItem | null>(null);
 
   async function run(item: PlatformSecretItem, action: 'save' | 'clear') {
+    if (running.current) return;
+    running.current = true;
     setBusy(item.slot);
     setMessages(m => ({ ...m, [item.slot]: {} }));
     try {
@@ -75,14 +78,16 @@ export function PlatformSecretsSettings() {
         : await clear.mutateAsync({ slot: item.slot, expectedRevision: item.revision });
       utils.platformSecrets.status.setData(undefined, result);
       const next = result.slots.find(s => s.slot === item.slot);
-      setMessages(m => ({ ...m, [item.slot]: { notice: action === 'save'
-        ? `已保存，末 4 位 ${next?.last4 ?? ''}（已回读确认，1 分钟内全站生效）。` : '已清除（1 分钟内全站生效）。' } }));
+      setMessages(m => ({ ...m, [item.slot]: { notice: result.statusRefreshFailed
+        ? `已${action === 'save' ? '保存' : '清除'}，但操作人信息刷新失败，请刷新页面。` : action === 'save'
+        ? `已保存，末 4 位 ${next?.last4 ?? ''}（1 分钟内全站生效）。` : '已清除（1 分钟内全站生效）。' } }));
     } catch (error) {
       setMessages(m => ({ ...m, [item.slot]: { failure: platformSecretError(error as never, action) } }));
       void view.refetch();
     } finally {
       // The typed key leaves the page whatever the outcome.
       setDrafts(d => ({ ...d, [item.slot]: '' }));
+      running.current = false;
       setBusy(null);
     }
   }
@@ -100,7 +105,7 @@ export function PlatformSecretsSettings() {
         <p>{platformSecretError(view.error, 'read')}</p>
         <Button variant="outline" onClick={() => { void view.refetch(); }}>重新读取</Button>
       </div> : !view.data ? <p>读取中…</p> : view.data.slots.map(item => <PlatformSecretRow key={item.slot} item={item}
-        draft={drafts[item.slot] ?? ''} pending={busy === item.slot}
+        draft={drafts[item.slot] ?? ''} pending={busy !== null}
         notice={messages[item.slot]?.notice ?? null} failure={messages[item.slot]?.failure ?? null}
         onDraft={value => setDrafts(d => ({ ...d, [item.slot]: value }))}
         onSave={() => { void run(item, 'save'); }} onClear={() => setConfirmClear(item)} />)}

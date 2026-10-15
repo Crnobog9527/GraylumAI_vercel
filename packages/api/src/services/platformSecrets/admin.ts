@@ -49,10 +49,12 @@ function mapWriteError(code: string | undefined, action: string): never {
 
 /** Admin view: per slot, whether it is filled, its last four characters, who and when, and the
  * transition fallback (whether the environment variable exists and its last four characters). */
-export async function platformSecretsView(db: SupabaseClient, env: Record<string, string | undefined> = process.env) {
+export async function platformSecretsView(db: SupabaseClient,
+  env: Record<string, string | undefined> = process.env, committedStatus?: unknown) {
   let rows: z.infer<typeof statusSchema>;
   try {
-    const { data, error } = await db.rpc('platform_secret_status');
+    const { data, error } = committedStatus === undefined
+      ? await db.rpc('platform_secret_status') : { data: committedStatus, error: null };
     if (error) return unavailable();
     rows = statusSchema.parse(data);
   } catch (error) {
@@ -61,12 +63,20 @@ export async function platformSecretsView(db: SupabaseClient, env: Record<string
   }
   const ids = [...new Set(rows.map(row => row.updatedBy).filter((id): id is string => id !== null))];
   let emails = new Map<string, string | null>();
+  let statusRefreshFailed = false;
   if (ids.length) {
-    const people = await db.from('profiles').select('id,email').in('id', ids);
-    if (people.error) return unavailable();
-    emails = new Map((people.data ?? []).map(p => [p.id as string, (p.email as string | null) ?? null]));
+    try {
+      const people = await db.from('profiles').select('id,email').in('id', ids);
+      if (people.error) return unavailable();
+      emails = new Map((people.data ?? []).map(p => [p.id as string, (p.email as string | null) ?? null]));
+    } catch {
+      // The writer already committed. Missing operator metadata must not turn success into failure.
+      if (committedStatus === undefined) return unavailable();
+      statusRefreshFailed = true;
+    }
   }
   return {
+    statusRefreshFailed,
     slots: rows.map(row => {
       const envName = PLATFORM_SECRET_ENV_FALLBACK[row.slot];
       const envValue = envFallbackValue(row.slot, env);
@@ -96,6 +106,7 @@ export async function setPlatformSecret(db: SupabaseClient, actorId: string,
   if (result.error) return mapWriteError(result.error.code, 'set');
   invalidatePlatformSecret(slot);
   logger.info('security', 'platform_secret_saved', { slot, actorId });
+  return platformSecretsView(db, process.env, result.data);
 }
 
 export async function clearPlatformSecret(db: SupabaseClient, actorId: string,
@@ -108,4 +119,5 @@ export async function clearPlatformSecret(db: SupabaseClient, actorId: string,
   if (result.error) return mapWriteError(result.error.code, 'clear');
   invalidatePlatformSecret(slot);
   logger.info('security', 'platform_secret_cleared', { slot, actorId });
+  return platformSecretsView(db, process.env, result.data);
 }

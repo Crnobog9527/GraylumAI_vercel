@@ -12,7 +12,7 @@ const OPENROUTER = `sk-or-v1-${CANARY}-fake-0000c3d4`;
 
 type Row = { slot: string; configured: boolean; last4: string | null; revision: number; updatedBy: string | null;
   updatedAt: string | null };
-function harness(role: 'admin' | 'user' | 'anonymous', options: { failCode?: string } = {}) {
+function harness(role: 'admin' | 'user' | 'anonymous', options: { failCode?: string; failStatus?: boolean; failEmail?: 'error' | 'throw' } = {}) {
   const vault = new Map<string, string>();
   const rows = new Map<string, Row>(PLATFORM_SECRET_SLOTS.map(slot =>
     [slot, { slot, configured: false, last4: null, revision: 0, updatedBy: null, updatedAt: null }]));
@@ -21,7 +21,10 @@ function harness(role: 'admin' | 'user' | 'anonymous', options: { failCode?: str
   const query: Record<string, unknown> = {};
   query.select = () => query;
   query.eq = () => query;
-  query.in = async () => ({ data: [{ id: ACTOR, email: 'admin@example.test' }], error: null });
+  query.in = async () => {
+    if (options.failEmail === 'throw') throw new Error('profile unavailable');
+    return { data: [{ id: ACTOR, email: 'admin@example.test' }], error: options.failEmail ? { code: 'XX000' } : null };
+  };
   query.single = async () => ({ data: { id: ACTOR, role, status: 'active', is_deleted: 'false', credits: 0,
     nickname: 'Synthetic', email: 'admin@example.test' }, error: null });
   const db = {
@@ -29,7 +32,7 @@ function harness(role: 'admin' | 'user' | 'anonymous', options: { failCode?: str
     rpc(name: string, args: Record<string, unknown>) {
       calls.push([name, args]);
       const reply = (() => {
-        if (name === 'platform_secret_status') return { data: status(), error: null };
+        if (name === 'platform_secret_status') return { data: status(), error: options.failStatus ? { code: 'XX000' } : null };
         if (name === 'platform_secret_read') return { data: vault.get(args.p_slot as string) ?? null, error: null };
         if (options.failCode) return { data: null, error: { code: options.failCode, message: 'failed' } };
         const row = rows.get(args.p_slot as string)!;
@@ -147,4 +150,26 @@ it('shows the transition fallback: environment present with its last four charac
     expect(slots.find(s => s.slot === 'openrouter')).toMatchObject({ source: 'none', envFallback: null });
     expect(JSON.stringify(slots)).not.toContain('fakeenvironment');
   } finally { vi.unstubAllEnvs(); }
+});
+
+
+it('uses committed writer metadata without a second status RPC', async () => {
+  const f = harness('admin', { failStatus: true });
+  const saved = await f.caller.set({ slot: 'openrouter', value: OPENROUTER, expectedRevision: 0 });
+  expect(saved.slots[0]).toMatchObject({ configured: true, revision: 1, last4: 'c3d4' });
+  const cleared = await f.caller.clear({ slot: 'openrouter', expectedRevision: 1 });
+  expect(cleared.slots[0]).toMatchObject({ configured: false, revision: 2, last4: null });
+  expect(f.calls.map(([name]) => name)).toEqual(['platform_secret_set', 'platform_secret_clear']);
+});
+
+it.each(['error', 'throw'] as const)('keeps successful writes when operator lookup returns %s', async failEmail => {
+  const f = harness('admin', { failEmail });
+  const saved = await f.caller.set({ slot: 'openrouter', value: OPENROUTER, expectedRevision: 0 });
+  expect(saved.statusRefreshFailed).toBe(true);
+  expect(saved.slots[0]).toMatchObject({ configured: true, revision: 1, last4: 'c3d4', updatedByEmail: null });
+  const cleared = await f.caller.clear({ slot: 'openrouter', expectedRevision: 1 });
+  expect(cleared.statusRefreshFailed).toBe(true);
+  expect(cleared.slots[0]).toMatchObject({ configured: false, revision: 2 });
+  await expect(f.caller.status()).rejects.toMatchObject({ code: 'SERVICE_UNAVAILABLE' });
+  expect(JSON.stringify([saved, cleared, logged])).not.toContain(CANARY);
 });

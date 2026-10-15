@@ -6,7 +6,7 @@ import {
 } from './reader';
 
 // Fake values only.
-const STORED = 'sk-or-v1-fake-stored-0000aaaa';
+const STORED = 'or-test-stored-0000aaaa';
 const ENV_KEY = 'pfm_test_fakeenvvalue1234';
 
 function client(reply: () => { data: unknown; error: { code?: string } | null } | Promise<never>) {

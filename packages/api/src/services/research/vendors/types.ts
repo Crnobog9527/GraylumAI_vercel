@@ -11,8 +11,11 @@ export const SOCIAL_PLATFORMS = [
 ] as const;
 export type SocialPlatform = typeof SOCIAL_PLATFORMS[number];
 
-/** `account_relation` is a separate, separately billed follower lookup for platforms whose profile omits it (Bilibili). */
-export const SOCIAL_KINDS = ['keyword_posts', 'account_profile', 'account_posts', 'account_relation'] as const;
+/**
+ * `account_relation` is a separate, separately billed follower lookup for platforms whose profile omits it (Bilibili).
+ * `post_detail` reads one post by its id (YouTube: exact channel followers and an absolute publish date, RT-1b).
+ */
+export const SOCIAL_KINDS = ['keyword_posts', 'account_profile', 'account_posts', 'account_relation', 'post_detail'] as const;
 export type SocialKind = typeof SOCIAL_KINDS[number];
 
 /** One whitelisted item. `missing` lists whitelisted fields the supplier did not provide. */

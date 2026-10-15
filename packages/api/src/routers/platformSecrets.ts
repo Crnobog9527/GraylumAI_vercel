@@ -8,11 +8,9 @@ import {
 export const platformSecretsRouter = router({
   status: adminProcedure.query(({ ctx }) => platformSecretsView(ctx.supabase)),
   set: adminProcedure.input(platformSecretSetSchema).mutation(async ({ ctx, input }) => {
-    await setPlatformSecret(ctx.supabase, ctx.user.id, input);
-    return platformSecretsView(ctx.supabase);
+    return setPlatformSecret(ctx.supabase, ctx.user.id, input);
   }),
   clear: adminProcedure.input(platformSecretClearSchema).mutation(async ({ ctx, input }) => {
-    await clearPlatformSecret(ctx.supabase, ctx.user.id, input);
-    return platformSecretsView(ctx.supabase);
+    return clearPlatformSecret(ctx.supabase, ctx.user.id, input);
   }),
 });

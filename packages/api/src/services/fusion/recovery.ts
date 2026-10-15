@@ -6,10 +6,13 @@ import { createRuntimeBudget, type RuntimeBudget } from '../runtime/budget';
 import { parseStagingPolicy } from '../runtime/stagingPolicy';
 import { stagingTransport } from '../runtime/stagingTransport';
 import { logger } from '../../lib/logger';
+import { reviewFlow } from './review';
 
 const row = z.object({ actor_id: z.string().uuid(), run_id: z.string().uuid(), call_id: z.string().uuid(),
   dispatched: z.boolean(), dispatch_deadline: z.string().nullable(), recovery: z.unknown().nullable(), created_at: z.string() });
 type Summary = { success: boolean; scanned: number; cancelled: number; recovered: number; scrubbed: number; failed: number;
+  /** Reviews whose saved, unjudged bodies were judged again before settlement. */
+  rejudged: number;
   /** Left for the next run when the time limit was reached. */
   deferred: number };
 const noTransport: BillingTransport = {
@@ -22,9 +25,11 @@ const noTransport: BillingTransport = {
  * receipt lookup with its original binding and then settles (verdict rules of 0234/0235 apply, including
  * the recovery deadline). A run whose content was deleted is scrubbed again once it settled, since a
  * deletion can happen while its call is still open (#947 review). Runs one call at a time; failures stay listed. */
+const UNJUDGED_PAGE = 50;
+
 export async function recoverFusionFinancials(admin: SupabaseClient, options: { limit?: number; pages?: number;
   budget?: RuntimeBudget; now?: () => number; timeLimitMs?: number } = {}): Promise<Summary> {
-  const summary: Summary = { success: true, scanned: 0, cancelled: 0, recovered: 0, scrubbed: 0, failed: 0, deferred: 0 };
+  const summary: Summary = { success: true, scanned: 0, cancelled: 0, recovered: 0, scrubbed: 0, failed: 0, deferred: 0, rejudged: 0 };
   const now = options.now ?? Date.now;
   const limit = options.limit ?? 50;
   // The cron route has 60 seconds in total and runs other reconciliations alongside (#954 review).
@@ -36,6 +41,46 @@ export async function recoverFusionFinancials(admin: SupabaseClient, options: { 
   // a lasting backlog below can never crowd it out; a review settled later in this run pauses on the next one.
   const paused = await bounded(admin.rpc('fusion_review_pause_idle', { p_idle: '1 hour' }));
   if (paused.error) summary.success = false;
+  // Before settlement: a body saved but never judged (a crash between save and verdict) is judged again with
+  // the frozen host check, so the deadline rule never bills a malformed body as unjudged_saved (§3.3, #954).
+  // Judging a call removes it from the listing, so listing again reaches the calls behind it: keep going until a
+  // page is not full, so the whole backlog is judged and settles today (#962 review). Reviews whose re-judging failed
+  // stay at the front; the next listing asks past them (up to the function's 200-row maximum).
+  const unsettleable = new Set<string>();
+  // Calls with a verdict now: every call of each re-judged review, including ones past a listing page.
+  const rejudged = new Set<string>();
+  const attempted = new Set<string>();
+  let listedAll = false;
+  let listingFailed = false;
+  for (let pass = 0; pass < 50 && now() + 10_000 <= stopAt; pass++) {
+    const pageLimit = Math.min(200, UNJUDGED_PAGE + unsettleable.size);
+    const unjudged = await bounded(admin.rpc('fusion_review_unjudged', { p_limit: pageLimit }));
+    const listed = unjudged.error ? undefined : z.array(z.object({ actor_id: z.string().uuid(), review_id: z.string().uuid(),
+      call_id: z.string().uuid() }).passthrough()).safeParse(unjudged.data).data;
+    if (!listed) { listingFailed = true; break; }
+    const reviews = new Map<string, { actorId: string; callIds: string[] }>();
+    for (const item of listed) {
+      if (attempted.has(item.review_id)) continue;
+      const entry = reviews.get(item.review_id) ?? { actorId: item.actor_id, callIds: [] };
+      entry.callIds.push(item.call_id);
+      reviews.set(item.review_id, entry);
+    }
+    if (listed.length < pageLimit) listedAll = true;
+    // Calls whose saved body was not re-judged this run must not settle now: past the deadline the settlement would
+    // treat them as unjudged_saved and bill a body that may be malformed (#962 review). They wait for the next run.
+    for (const [reviewId, { actorId, callIds }] of reviews) {
+      attempted.add(reviewId);
+      if (now() + 10_000 > stopAt) { callIds.forEach(id => unsettleable.add(id)); listedAll = false; continue; }
+      try {
+        for (const callId of await reviewFlow({ admin, actorId }).rejudge(reviewId)) rejudged.add(callId);
+        summary.rejudged++;
+      }
+      catch { summary.failed++; summary.success = false; callIds.forEach(id => unsettleable.add(id)); }
+    }
+    // Done when everything is listed, or nothing new can be reached (only failed reviews remain in front).
+    if (listedAll || !reviews.size || pageLimit === 200 && listed.every(item => attempted.has(item.review_id))) break;
+  }
+  if (listingFailed) summary.success = false;
   // Listing is cheap: collect the pages first. Pages advance past calls that cannot progress yet (0235).
   // Keep paging (each call bounded, stopping before the per-item reserve) so expired undispatched calls
   // behind a long backlog of slow dispatched ones are still collected and released first (#954 review).
@@ -51,7 +96,21 @@ export async function recoverFusionFinancials(admin: SupabaseClient, options: { 
     cursor = { p_after_created: last.created_at, p_after_id: last.call_id };
   }
   // Releasing holds of calls never dispatched is quick and must not wait behind slow receipt lookups.
-  const ordered = [...rows.filter(item => !item.dispatched), ...rows.filter(item => item.dispatched)];
+  // When the backlog could not be listed to its end (time, a failed listing, or 200 failing calls in front), a
+  // dispatched call settles this run only when it has a verdict from above or no saved body at all (only a saved body
+  // can be unjudged), so none is billed before its body is judged (#962 review). Expired undispatched holds always release.
+  const hidden = new Set<string>();
+  if (!listedAll) {
+    for (const item of rows) {
+      if (!item.dispatched || rejudged.has(item.call_id) || unsettleable.has(item.call_id)) continue;
+      if (now() + 10_000 > stopAt) { hidden.add(item.call_id); continue; }
+      const saved = await bounded(admin.rpc('fusion_call_output_read', { p_actor_id: item.actor_id, p_call_id: item.call_id }));
+      if (saved.error || saved.data !== null) hidden.add(item.call_id);
+    }
+  }
+  const settleable = rows.filter(item => !unsettleable.has(item.call_id) && !hidden.has(item.call_id));
+  summary.deferred += rows.length - settleable.length;
+  const ordered = [...settleable.filter(item => !item.dispatched), ...settleable.filter(item => item.dispatched)];
   await recoverPage(admin, ordered, summary, now, stopAt, options.budget);
   return summary;
 }
