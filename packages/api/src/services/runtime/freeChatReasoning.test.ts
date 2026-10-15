@@ -139,11 +139,10 @@ it.each([['auto',true],['ordinary',false]] as const)('%s (real=%s) keeps its ori
  expect(admitted.context).not.toHaveProperty('reasoning');
 });
 
-it('CHAT-NATIVE-OUTPUT: a free-chat turn under the POSITIONING-GATE fallback rule stays buffered',async()=>{
- // Its reply may be the hidden refusal marker, which must never stream to the user (#900).
+it('CHAT-NATIVE-OUTPUT: a free-chat turn under the POSITIONING-GATE fallback rule streams too (marker held by roundEmitter)',async()=>{
  const gated=await fixture(true,true).service.prepare({...fixture().input});
- expect(gated.context).toMatchObject({providerRequestFormat:'serial-tools-v6-reasoning',positioningGate:'fallback-v1'});
- expect(gated.context).not.toHaveProperty('textStream');
+ expect(gated.context).toMatchObject({providerRequestFormat:'serial-tools-v6-reasoning',positioningGate:'fallback-v1',
+  textStream:'plain-text-v1'});
  const open=await fixture().service.prepare(fixture().input);
  expect(open.context).toMatchObject({providerRequestFormat:'serial-tools-v6-reasoning',textStream:'plain-text-v1'});
 });
