@@ -9,6 +9,9 @@ import { J_PERSONA } from './landing-copy-j-persona';
  * report. What the current moment shows is said outside the window (`caption`, `note`). NEW WORDING for the Owner to
  * approve, except where marked.
  */
+/** The bold lead of a risk the coach writes as its own message (the product has no separate risk box). */
+export const J_RISK_LABEL = '风险提示';
+
 export type TakeoverCard = 'question' | 'pending' | 'confirm' | 'direction' | 'kinds' | 'fetch' | 'table' | 'plan';
 export type TakeoverLine = {
   role: 'user' | 'coach' | 'summary' | 'risk'; text: string; card?: TakeoverCard; fills?: readonly string[];

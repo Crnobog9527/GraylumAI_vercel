@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 'use client';
 
-import { AlertTriangle, Check, FileText, Loader2, Sparkles } from 'lucide-react';
+import { Check, FileText, Loader2, Sparkles } from 'lucide-react';
 import { MentorMarkdown } from '@/app/positioning/[draftId]/MentorMarkdown';
 import { DEMO_LABEL } from '@/components/landing/demo/demo-script';
 import { CaptureChecklist } from '@/components/opc/capture-checklist';
@@ -13,7 +13,7 @@ import { Button } from '@/components/ui/button';
 import {
   J_PERSONA, J_PERSONA_DIRECTION, J_PERSONA_KINDS, J_PERSONA_QUESTION, J_QUESTION_HEADING, J_STEPS } from '@/lib/landing/landing-copy-j-persona';
 import {
-  J_BENCHMARK_TABLE, J_PLAN_ROWS, J_REPORT, J_TAKEOVER_MOMENTS, type TakeoverCard, type TakeoverLine,
+  J_BENCHMARK_TABLE, J_PLAN_ROWS, J_REPORT, J_RISK_LABEL, J_TAKEOVER_MOMENTS, type TakeoverCard, type TakeoverLine,
 } from '@/lib/landing/landing-copy-j-takeover';
 import { cn } from '@/lib/utils';
 import { ConfirmJ, JuryJ, personaInformation, filledUpTo } from './WorkbenchPartsJ';
@@ -158,20 +158,14 @@ function Message({ line, step, fetchLocal, information }: {
       </div>
     );
   }
-  if (line.role === 'risk') {
-    return (
-      <div data-message-role="assistant" className={styles.risk}>
-        <span className={styles.riskLabel}><AlertTriangle size={14} aria-hidden="true" />风险提示 · {step}</span>
-        <p>{line.text}</p>
-      </div>
-    );
-  }
+  // The product has no separate risk box: the coach writes the risk as its own message, led by a bold label.
+  const text = line.role === 'risk' ? `**${J_RISK_LABEL}**：${line.text}` : line.text;
   const summary = line.role === 'summary';
   return (
     <>
       <div data-message-role="assistant" className="mr-4 rounded-xl border border-[var(--border-primary)] p-3">
         <span className={result.agentIdentity}><img src="/graylum-logo.png" alt="" />{summary ? '本步小结' : 'AI 自媒体陪跑教练'} · {step}</span>
-        <MentorMarkdown className={`mt-1 ${result.messageBody}`} text={line.text} live={false} />
+        <MentorMarkdown className={`mt-1 ${result.messageBody}`} text={text} live={false} />
         {line.card ? <Card card={line.card} fetchLocal={fetchLocal} /> : null}
       </div>
       {line.card === 'confirm' || line.card === 'pending' ? <ConfirmJ step={step} information={information} /> : null}

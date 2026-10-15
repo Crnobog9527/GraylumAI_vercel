@@ -88,6 +88,38 @@
 .juryLayer { position: absolute; z-index: 4; inset: 0; overflow: hidden; background: #fff; }
 @media (prefers-reduced-motion: no-preference) { .juryLayer { animation: copyIn .5s var(--j-ease) both; } }
 
+/* The conversation (rules lost in the round-five rebuild, restored 2026-10-15): one even gap between messages, the
+   latest kept in view at the bottom like the live chat; cards sit a little below their message's text. */
+.log { display: flex; flex-direction: column; justify-content: flex-end; min-height: 0; overflow: hidden; }
+.logInner { display: grid; gap: 12px; padding: 14px 2px 16px; }
+@media (prefers-reduced-motion: no-preference) { .takeover .logInner > :last-child { animation: messageIn .4s var(--j-ease) both; } }
+.cardSlot { margin-top: 8px; }
+.cardSlot section { margin: 0; }
+.kinds { display: grid; gap: 6px; margin: 8px 0 0; padding: 0; list-style: none; }
+@media (min-width: 900px) { .kinds { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+.kinds li { display: grid; gap: 2px; padding: 10px 12px; border-radius: 10px; background: #fafaf8; font-size: 13px; }
+.kinds b { font-size: 14px; }
+.kinds span { color: #6f6e6a; }
+.kinds em { color: #333; font-style: normal; }
+.fetch { display: grid; gap: 6px; margin: 8px 0 0; padding: 10px 12px; border: 1px dashed #ddd; border-radius: 12px; list-style: none; font-size: 13.5px; }
+.fetch li { display: flex; align-items: center; gap: 8px; color: #666; }
+.fetch li span { margin-left: auto; font-size: 12px; }
+.fetch li[data-done] { color: #262626; }
+.fetch li[data-done] svg { color: #1a7f45; }
+@media (prefers-reduced-motion: no-preference) { .fetch li:not([data-done]) svg { animation: spin 1s linear infinite; } }
+.tableCard { display: grid; gap: 6px; margin-top: 8px; padding: 10px 12px; border-radius: 10px; background: #fafaf8; font-size: 13px; overflow-x: auto; }
+.tableCard > p { margin: 0; font-weight: 600; }
+.tableCard table { width: 100%; border-collapse: collapse; }
+.tableCard th, .tableCard td { padding: 5px 8px; border-bottom: 1px solid #ececea; text-align: left; white-space: nowrap; }
+.tableCard thead th { color: #888; font-weight: 500; }
+.tableCard tbody th { font-weight: 500; }
+.tableCard td { color: #1a7f45; }
+.tableCard td[data-missing] { color: #b45309; }
+/* Static (reduced motion): the moments one under another. */
+.static .staticStep { display: grid; gap: 20px; padding-top: 56px; }
+.static .picture { height: auto; }
+.static .caption { align-content: start; }
+
 @keyframes copyIn { from { opacity: 0; translate: 0 12px; } to { opacity: 1; translate: 0 0; } }
 @keyframes messageIn { from { opacity: 0; translate: 0 10px; } to { opacity: 1; translate: 0 0; } }
 @keyframes spin { to { rotate: 1turn; } }
