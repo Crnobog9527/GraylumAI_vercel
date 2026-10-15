@@ -20,3 +20,13 @@ export function reportAnnualReleaseAnomalies(anomalies) {
     extra: { count: anomalies.length, reasons: [...new Set(anomalies.map(item => item.reason))] },
   });
 }
+
+// PAY-STRIPE-MP daily Stripe card backstop: fixed code, counts and bounded kinds only (no order or Stripe ids).
+export function reportStripeCardReconciliation(findings) {
+  if (!findings.length) return;
+  const code = 'PAY_STRIPE_MP_RECONCILIATION_REVIEW_REQUIRED';
+  captureMessage(code, {
+    level: 'error', fingerprint: [code], tags: { category: 'billing', code },
+    extra: { count: findings.length, kinds: [...new Set(findings.map(item => item.kind))] },
+  });
+}

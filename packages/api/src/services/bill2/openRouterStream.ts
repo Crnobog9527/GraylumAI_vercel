@@ -43,7 +43,9 @@ export function openRouterStream(model:string,headerId?:string,onChunk?:(chunk:s
      if(value!==null&&typeof value!=='string'||typeof value==='string'&&value.length>256)return reject();
      if(old[key]!==undefined&&old[key]!==value)return reject();old[key]=value;
     }else{
-     if(typeof value!=='string'||value.length>65536)return reject();old[key]=String(old[key]??'')+value;
+     // A provider may emit the entire opaque signature in one detail delta.
+     if(typeof value!=='string'||value.length>OPENROUTER_RESPONSE_BYTE_LIMIT)return reject();
+     old[key]=String(old[key]??'')+value;
      if(String(old[key]).length>OPENROUTER_RESPONSE_BYTE_LIMIT)return reject();
     }
    }
@@ -54,8 +56,8 @@ export function openRouterStream(model:string,headerId?:string,onChunk?:(chunk:s
   if(!frame.length)return;const data=frame.join('\n');frame=[];
   if(done)return reject();
   if(data==='[DONE]'){done=true;return;}
-  if(++frameCount>OPENROUTER_STREAM_FRAME_LIMIT||Buffer.byteLength(data)>65536)return reject();
-  const exact=parseExactJson(data);const value:unknown=JSON.parse(data);
+  if(++frameCount>OPENROUTER_STREAM_FRAME_LIMIT||Buffer.byteLength(data)>OPENROUTER_RESPONSE_BYTE_LIMIT)return reject();
+  const exact=parseExactJson(data,OPENROUTER_RESPONSE_BYTE_LIMIT);const value:unknown=JSON.parse(data);
   if(!object(value)||!object(exact))return reject();
   if(value.error)return reject('provider_stream_error');
   if(!id(value.id)||typeof value.model!=='string')return reject();

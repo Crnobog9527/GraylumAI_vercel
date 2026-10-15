@@ -11,7 +11,7 @@ import {visibleText,nativeMetadata,prepareNativePrimary,nativeFrameProjection,
  completedOutput,finalizeNativeSummary} from './nativeOutput';
 import {paygOwnerDatabase} from './paygOwner';
 import {executorRpc,historyGuard,terminalReplyGuard,recoverExecutorFinancial,
- preflightCodes,platformFailureReason,hash,progressEmitter,diagnosticCode,type RuntimeExecutorOptions} from './executorRpc';
+ preflightCodes,platformFailureReason,hash,progressEmitter,diagnosticCode,failBeforeDispatch,cancelWithCode,type RuntimeExecutorOptions} from './executorRpc';
 import {fitNativeRequestOutput,runtimePaygCall, type ResumeInput, type PaygWait, type PaygPosition} from './paygRuntime';
 import {beginPaygExecution, type RuntimeExecution} from './paygResume';
 import {PROMPT_CACHE_OVERHEAD_BYTES} from './promptCache';
@@ -44,7 +44,7 @@ import { callBillingUnit } from './billingUnitAdmission';
 import type {GateRejection} from './newWorkGate';
 import {allowedOutput} from './moderation';
 import {runtimeIdentityGuard} from '../modelIdentity/runtimeGuard';
-import {POSITIONING_REFUSED,positioningRefused,endPositioningRefusal} from './positioningFallback';
+import {POSITIONING_REFUSED,positioningRefused,endPositioningRefusal,roundEmitter} from './positioningFallback';
 import {cancelledOutcome,finishCancelRequested} from './executorOutcome';
 import {frozenBrandIdentity,withBrandIdentity} from '../modelIdentity/brandIdentity';
 export function runtimeExecutor(options:RuntimeExecutorOptions){
@@ -109,7 +109,7 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
   let waitPoint:{epoch:number;sequence:number;requestHash:string;phase:string;state:PaygWait['state']}|undefined;
   let gateRejection:GateRejection|undefined;
   const checkAgentReply=terminalReplyGuard(agentTurn,context.tools.includes(ASK_QUESTION_TOOL),()=>{terminalReplyFailure=true;},Boolean(context.skillFile),Boolean(context.historyRead));
-  let preflightFailure:string|undefined;
+  let preflightFailure:string|undefined,transportFailureCode:string|undefined;
   const streaming=streamsPrimary(context);
   // B2a: once BILL2 reports a confirmed erasure, nothing more reaches the client.
   let accountClosed=false;
@@ -120,7 +120,7 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
   const normalized=context.providerRequestFormat==='serial-tools-v2'||context.providerRequestFormat==='serial-tools-v6-reasoning'||streaming;
   const historyChecked=historyGuard(executionId,code=>{preflightFailure=code;});
   try{
-   let callSequence=0;
+   let callSequence=0,streamingCall:number|undefined; // streamingCall: the round whose text streams now (stop binding)
    // The SDK wraps fetch errors; retain only this verified database verdict.
    let responseConflict=false;
    let primaryPolicy=policy;
@@ -182,7 +182,7 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
        if(selectedPolicy.protocol==='openrouter-chat-v1')budget.modelCallTimeout(OPENROUTER_RESPONSE_TIMEOUT_MS);
        else budget.assertCanStart(5000);
       }catch(error){if(isPayg)pause('waiting_resume');throw error;}
-      const dispatch=await billing.dispatchOnce(claim.id!,request,onChunk);
+      streamingCall=sequence;const dispatch=await billing.dispatchOnce(claim.id!,request,onChunk);
       if(dispatch.transportNotStarted){if(isPayg)pause('waiting_resume');transportNotStarted=true;throw new Error('RUNTIME_TIME_BUDGET_EXHAUSTED');}
       if(!dispatch.dispatched){if(isPayg)pause('waiting_resume');throw new Error('RUNTIME_RESPONSE_PENDING');}
       // The receipt was stored as a financial projection only. Never read back
@@ -212,6 +212,7 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
      return selectedPolicy.protocol==='openrouter-chat-v1' ? {usage:{sdkResponse:decoded}} : decoded;
     }catch(error){
      claimNotice??=billingClaimNotice(error);
+     transportFailureCode??=diagnosticCode(error);// first original code: the SDK wraps transport errors
      // Retain exact pre-dispatch diagnostics outside SDK wrapping, without private data.
      if(selectedPolicy.protocol==='openrouter-chat-v1'&&error instanceof Error&&preflightCodes.has(error.message))
       {preflightFailure=error.message;logger.error('api','runtime_provider_preflight_failed',{executionId,code:error.message});}
@@ -332,7 +333,7 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
     exchange:async(_sequence,request,onChunk)=>{
      partial="";agentText="";agentCardMessage=undefined;
      projection=new NativeProgressProjection(projectionOptions);
-     const project=nativeFrameProjection(projection,progress);
+     const project=nativeFrameProjection(projection,roundEmitter(progress,()=>streamingCall,context));
      const envelope=await exchange(request,context.reportGeneration?'report':effective.role,primaryPolicy,nativeProgress&&execution.live&&onChunk?chunk=>{
       onChunk(chunk);
       try{project(chunk);}catch{logger.warn('api','runtime_native_projection_failed',{executionId});}
@@ -464,9 +465,9 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
    }
    const capacity=error instanceof Error&&['RUNTIME_REQUIRED_CONTEXT_EXCEEDS_CAPACITY','RUNTIME_COMPLETE_REQUEST_EXCEEDS_CAPACITY'].includes(error.message);
    if((transportNotStarted||providerRejected)&&execution.live){
-    // The original grant was atomically revoked and BILL2 finalized. Reuse
-    // normal cancellation to synchronize this execution and release Session.
-    const stopped=await ownerRpc<{state:'cancelled'|'completed'|'cost_pending'}>('runtime_cancel',args).catch(()=>null);
+    // The grant was atomically revoked and BILL2 finalized; a never-started v1 transport also records why (0248).
+    const stopped=await (transportNotStarted&&!isPayg?cancelWithCode(ownerRpc,args,transportFailureCode??diagnosticCode(error))
+     :ownerRpc<{state:'cancelled'|'completed'|'cost_pending'}>('runtime_cancel',args)).catch(()=>null);
     if(stopped){
      const billingState=providerRejected?await billing.readRun(execution.runId).catch(()=>null):null;
      const noCharge=billingState?.chargedCredits===0&&['refunded','settled'].includes(billingState.state);
@@ -474,9 +475,8 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
     }
    }
    if(!execution.live)return {state:'pending' as const,...(capacity?{unavailable:'capacity' as const}:{})};
-   logger.error('api','runtime_pre_dispatch_failed',{executionId,code:diagnosticCode(error)});
-   const failed=await ownerRpc<{state:string}>('runtime_execution',{...args,p_action:'fail_before_dispatch',
-    ...(preflightFailure==='RUNTIME_PROVIDER_HISTORY_DENIED'?{p_result:{unavailable_reason:'provider_history'}}:{})}).catch(()=>null);
+   const failed=await failBeforeDispatch(ownerRpc,args,preflightFailure??transportFailureCode??diagnosticCode(error),
+    preflightFailure==='RUNTIME_PROVIDER_HISTORY_DENIED');
    if(failed?.state==='cancelled'){
     const unavailable:GateRejection|'provider_history'|'preflight'|'capacity'|undefined=gateRejection??(preflightFailure?
      preflightFailure==='RUNTIME_PROVIDER_HISTORY_DENIED'?'provider_history':'preflight':capacity?'capacity':undefined);

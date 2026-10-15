@@ -17,7 +17,7 @@ import { frozenBrandIdentity } from '../modelIdentity/brandIdentity';
 
 type StopCall = {sequence:number;requestHash:string;phase:string;dispatched:boolean;settled:boolean;responsePending?:boolean};
 export type StopExecution = RuntimeExecution & {
-  pausedReason?:string;stop?:{stopAt:number;source?:NativeTextSource};stopCalls?:StopCall[];
+  pausedReason?:string;stop?:{stopAt:number;source?:NativeTextSource;call?:number};stopCalls?:StopCall[];
 };
 /** Shared by the original HTTP, cancel host and later recovery. Never invokes the SDK,
  * tools or provider dispatch: the normal parsers reconstruct only durable receipts. */
@@ -60,8 +60,11 @@ export function stoppedCompletion(options: RuntimeExecutorOptions, billing: Retu
       if(await collect())return rpc<{state:'cost_pending'}>('runtime_execution',{...args,p_action:'stop_pending'});
     }
     const context=runtimeContext.parse(execution.context);
+    // A stop that names its round (the call whose text was on screen) keeps that round, even when a later
+    // round started before the stop arrived; an older stop without it keeps the last dispatched round.
+    const round=execution.stop?.call;
     const primary=(execution.stopCalls??[]).findLast(call=>call.dispatched
-      &&['ordinary','skill','organizer'].includes(call.phase));
+      &&['ordinary','skill','organizer'].includes(call.phase)&&(round===undefined||call.sequence===round));
     const organizer=(execution.stopCalls??[]).findLast(call=>call.dispatched&&call.phase==='attached_organizer');
     const decode=(call:StopCall|undefined)=>{
       const raw=call?raws.get(call.sequence):undefined;
@@ -78,6 +81,10 @@ export function stoppedCompletion(options: RuntimeExecutorOptions, billing: Retu
     let valid=Boolean(primary&&response?.model===context.model&&response?.choices?.length===1&&message
       &&['stop','length','tool_calls'].includes(choice?.finish_reason??'')
       &&!(choice?.finish_reason==='length'&&!body.trim()&&!message?.tool_calls?.length));
+    // A checkpointed primary of another round is not what the user saw, and SQL keeps a stop only under the
+    // checkpoint: with a named round, a different checkpointed round saves nothing rather than unseen text.
+    const checkpoint=execution.primaryResult as {body?:string;lastSequence?:number}|null|undefined;
+    if(round!==undefined&&typeof checkpoint?.body==='string'&&checkpoint.lastSequence!==primary?.sequence)valid=false;
     if(valid&&agent){
       valid=!terminalAgentReplyFailure(response,false,context.tools.includes('ask_question'))
         &&!(choice?.finish_reason==='length'&&message?.tool_calls?.length);
@@ -113,12 +120,15 @@ export function stoppedCompletion(options: RuntimeExecutorOptions, billing: Retu
           let update=projection.appendText(message?.content??'');
           const tool=message?.tool_calls?.[0];
           if(tool)update=projection.appendToolFrame({choices:[{delta:{tool_calls:[{index:0,function:tool.function}]}}]})??update;
-          source=projection.finish(visibleText(body,context))?.source??update?.source??'final';
-          // A plain stream keeps only the first stopAt code points. When they are exactly what streamed, a later
-          // change (identity redaction after the stop point) cannot change what the user saw: accept its source.
+          // What streamed before any identity rewrite (MODEL-IDENTITY-GUARD) and from which source.
+          const streamed=projection.text,streamedSource=update?.source;
+          source=projection.finish(visibleText(body,context))?.source??streamedSource??'final';
+          // Only the first stopAt code points are kept. When they read the same before and after the rewrite, a
+          // rewrite after the stop point cannot change what the user saw: accept the source the client recorded.
           const stopAt=execution.stop!.stopAt,shown=(text:string)=>Array.from(text).slice(0,stopAt).join('');
-          if(plainStream&&(execution.stop?.source==='assistant'||execution.stop?.source==='final')
-            &&shown(visibleText(body,context))===shown(message?.content??''))source=execution.stop.source;
+          const recorded=execution.stop?.source;
+          // A final snapshot the client really received already yields 'final' above; one it claims without it does not.
+          if(recorded!==undefined&&recorded===streamedSource&&shown(visibleText(body,context))===shown(streamed))source=recorded;
         }
       }
     }catch{valid=false;}

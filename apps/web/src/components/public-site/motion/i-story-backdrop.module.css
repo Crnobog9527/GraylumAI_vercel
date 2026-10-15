@@ -1,0 +1,140 @@
+/* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+/*
+ * IStoryBackdrop and its line art (IStoryScene). The panorama is a strip along the bottom of the screen, wider
+ * than the screen; --p (0 → 1) pans it from the first chapter to the last. The sky layer pans at under half that
+ * speed and a warm light fades in, so the page goes from morning blue to afternoon gold. Only transform and
+ * opacity move. Light theme only, like every public page.
+ */
+.backdrop {
+  --p: 0;
+  --s-ink: #23304d;
+  --s-mint: #2bb5a0;
+  --s-mint-soft: #d4f3ec;
+  --s-coral: #ff6b4a;
+  --s-coral-soft: #ffe0d6;
+  --s-sun: #ffc53d;
+  --s-lilac: #c8b8ff;
+  --s-lilac-soft: #ece6ff;
+  --s-skin: #ffe2cf;
+  --s-ground: #e3f4ec;
+  --s-height: 30vh;
+  --s-width: max(270vh, 180vw);
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  pointer-events: none;
+  contain: strict;
+  background: linear-gradient(180deg, #eaf4ff 0%, #f6faff 55%, #fffaf3 100%);
+}
+@media (max-width: 767px) {
+  .backdrop { --s-height: 22vh; --s-width: max(198vh, 180vw); }
+}
+
+.warm {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(90% 70% at 85% 100%, rgba(255, 197, 61, .32), rgba(255, 107, 74, .08) 55%, transparent 75%);
+  opacity: calc(.15 + var(--p) * .85);
+  will-change: opacity;
+}
+
+.track, .skyTrack {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  height: var(--s-height);
+  will-change: transform;
+}
+.track { width: var(--s-width); opacity: .88; transform: translate3d(calc(var(--p) * (100vw - var(--s-width))), 0, 0); }
+.skyTrack {
+  bottom: calc(var(--s-height) * .45);
+  width: calc(var(--s-width) * .5 + 50vw);
+  opacity: .9;
+  transform: translate3d(calc(var(--p) * (50vw - var(--s-width) * .5)), 0, 0);
+}
+.scene, .sky { display: block; width: 100%; height: 100%; overflow: visible; }
+
+/* Strokes and fills */
+.line, .thin, .handle, .check, .ray, .bird, .twinkleLine {
+  fill: none; stroke: var(--s-ink); stroke-linecap: round; stroke-linejoin: round;
+}
+.line { stroke-width: 3.5; }
+.thin, .bird, .twinkleLine { stroke-width: 2.5; }
+.handle { stroke-width: 7; }
+.check { stroke: var(--s-mint); stroke-width: 4; }
+.ray { stroke: var(--s-sun); stroke-width: 5; }
+.shirt, .skin, .hair, .paper, .coach, .cloud, .mintSoft, .coralSoft, .lilacSoft, .coralFill, .lens, .sun, .leaf,
+.mintTile, .coralTile, .sunTile, .lilacTile, .heart, .heartLate, .bubbleRise, .dash, .ring {
+  stroke: var(--s-ink); stroke-width: 3; stroke-linejoin: round;
+}
+.shirt { fill: var(--s-mint); }
+.skin { fill: var(--s-skin); }
+.hair { fill: var(--s-ink); }
+.paper { fill: #fff; }
+.coach { fill: var(--s-coral); }
+.cloud { fill: #fff; }
+.mintSoft { fill: var(--s-mint-soft); }
+.coralSoft { fill: var(--s-coral-soft); }
+.lilacSoft { fill: var(--s-lilac-soft); }
+.coralFill { fill: var(--s-coral); }
+.lens { fill: rgba(255, 255, 255, .45); stroke-width: 6; }
+.sun { fill: var(--s-sun); }
+.leaf { fill: var(--s-mint-soft); stroke-width: 2.5; }
+.mintTile { fill: var(--s-mint); }
+.coralTile { fill: var(--s-coral); }
+.sunTile { fill: var(--s-sun); }
+.lilacTile { fill: var(--s-lilac); }
+.heart, .heartLate { fill: var(--s-coral); stroke-width: 2; }
+.bubbleRise { fill: var(--s-mint-soft); stroke-width: 2; }
+.dash { fill: none; stroke-width: 1.5; stroke-dasharray: 2 2; }
+.ring { fill: none; stroke: var(--s-sun); stroke-width: 7; }
+.dot { fill: var(--s-ink); }
+.sparkle, .twinkleStar, .twinkleStarLate { fill: var(--s-sun); stroke: var(--s-ink); stroke-width: 2; stroke-linejoin: round; }
+.ground { fill: var(--s-ground); }
+.road { fill: none; stroke: #fff; stroke-width: 5; stroke-linecap: round; stroke-dasharray: 18 16; }
+.cloudFar { fill: #fff; stroke: #c9d8ee; stroke-width: 3; }
+.sunFar { fill: var(--s-sun); stroke: var(--s-ink); stroke-width: 3; }
+
+/* Idle motion: off until the backdrop is live and the page has gone idle (IStoryBackdrop sets data-ambient). */
+.breathe, .bob, .sway, .twinkle, .twinkleStar, .twinkleStarLate, .twinkleLine, .pop, .popLate, .heart, .heartLate,
+.bubbleRise, .drift, .spin {
+  transform-box: fill-box;
+  transform-origin: 50% 100%;
+}
+.spin { transform-origin: 50% 50%; }
+.backdrop[data-ambient='on'] .breathe { animation: i-breathe 3.6s ease-in-out infinite; }
+.backdrop[data-ambient='on'] .bob { animation: i-bob 2.8s ease-in-out infinite; }
+.backdrop[data-ambient='on'] .sway { animation: i-sway 4.2s ease-in-out infinite; }
+.backdrop[data-ambient='on'] .twinkle,
+.backdrop[data-ambient='on'] .twinkleStar,
+.backdrop[data-ambient='on'] .twinkleLine { animation: i-twinkle 1.8s ease-in-out infinite; }
+.backdrop[data-ambient='on'] .twinkleStarLate { animation: i-twinkle 1.8s ease-in-out .9s infinite; }
+.backdrop[data-ambient='on'] .pop { animation: i-pop 4s cubic-bezier(.34, 1.56, .64, 1) infinite; }
+.backdrop[data-ambient='on'] .popLate { animation: i-pop 4s cubic-bezier(.34, 1.56, .64, 1) .7s infinite; }
+.backdrop[data-ambient='on'] .heart { animation: i-rise 3.2s ease-out infinite; }
+.backdrop[data-ambient='on'] .heartLate { animation: i-rise 3.2s ease-out 1.1s infinite; }
+.backdrop[data-ambient='on'] .bubbleRise { animation: i-rise 3.2s ease-out 2.1s infinite; }
+.backdrop[data-ambient='on'] .drift { animation: i-drift 9s ease-in-out infinite alternate; }
+.backdrop[data-ambient='on'] .spin { animation: i-spin 24s linear infinite; }
+
+@keyframes i-breathe { 50% { transform: scaleY(1.018); } }
+@keyframes i-bob { 50% { transform: translateY(-7px) rotate(-3deg); } }
+@keyframes i-sway { 0%, 100% { transform: rotate(-3deg); } 50% { transform: rotate(3deg); } }
+@keyframes i-twinkle { 50% { opacity: .25; transform: scale(.82); } }
+@keyframes i-pop {
+  0%, 8% { opacity: 0; transform: scale(.6); }
+  18%, 80% { opacity: 1; transform: scale(1); }
+  92%, 100% { opacity: 0; transform: scale(.9); }
+}
+@keyframes i-rise {
+  0% { opacity: 0; transform: translateY(14px) scale(.6); }
+  20% { opacity: 1; transform: translateY(0) scale(1); }
+  100% { opacity: 0; transform: translateY(-60px) scale(1.05); }
+}
+@keyframes i-drift { to { transform: translateX(36px); } }
+@keyframes i-spin { to { transform: rotate(360deg); } }
+
+@media (prefers-reduced-motion: reduce) {
+  .backdrop * { animation: none !important; }
+}

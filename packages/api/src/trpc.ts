@@ -46,6 +46,10 @@ export const createTRPCContext = async (opts: {
   runtimeBudget?: RuntimeBudget;
   user?: User | null;
   supabaseAuth?: ApiSupabaseClient | null;
+  /** Runs work after the response (Next after(), Vercel waitUntil); absent outside a route handler. */
+  scheduleAfter?: (task: () => Promise<unknown>) => void;
+  /** This deployment's origin, for internal relays (FUSION-BACKGROUND). */
+  origin?: string;
 }) => {
   const runtimeBudget=opts.runtimeBudget??createRuntimeBudget();
   const budgetFetch=withRuntimeBudget(runtimeBudget,fetch,true);

@@ -156,3 +156,19 @@ it.each([undefined, 'bill2.v1'] as const)('preserves v1 unavailable for %s contr
   expect(mock.remaining).not.toHaveBeenCalled();
   expect(mock.limit).not.toHaveBeenCalled();
 });
+it('counts supplier calls per endpoint and fails closed', async () => {
+  const { checkVendorRateLimit: check } = await import('./redisRateLimiter');
+  expect(await check('tikhub:/a', 10, '1 s')).toBe(true);
+  expect(mock.construct).toHaveBeenCalledWith(expect.objectContaining({
+    limiter: { count: 10, duration: '1 s' }, prefix: 'graylum:ratelimit:vendor:1s:', analytics: false, timeout: 0,
+  }));
+  expect(mock.limit.mock.calls.at(-1)?.[1]).toBe('tikhub:/a');
+  mock.limit.mockResolvedValueOnce({ success: false, reset: Date.now() + 1000 });
+  expect(await check('tikhub:/a', 10, '1 s')).toBe(false);
+  mock.limit.mockResolvedValueOnce({ success: true, reason: 'timeout', reset: 0 });
+  expect(await check('tikhub:/a', 10, '1 s')).toBe(false);
+  mock.limit.mockRejectedValueOnce(new Error('synthetic'));
+  expect(await check('tikhub:/a', 10, '1 s')).toBe(false);
+  expect(await check('', 10, '1 s')).toBe(false);
+  expect(await check('tikhub:/a', 0, '1 s')).toBe(false);
+});
