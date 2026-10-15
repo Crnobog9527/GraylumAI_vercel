@@ -307,7 +307,7 @@ export const SubscriptionCard = memo(function SubscriptionCard({ user: _user }: 
   function generateDefaultFeatures(plan: any): string[] {
     const features: string[] = [];
     if (plan.level === 'free') {
-      features.push('注册赠送500积分（一次性）');
+      features.push('新用户可以免费试用');
     } else {
       if (plan.credits?.monthly) {
         features.push(`月度积分${plan.credits.monthly}积分`);

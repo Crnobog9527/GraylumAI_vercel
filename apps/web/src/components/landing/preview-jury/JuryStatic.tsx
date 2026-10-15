@@ -5,7 +5,7 @@ import type { Scene } from './jury-scenes';
 import { SeatMark } from './JuryBits';
 import { JuryDocument } from './JuryDocument';
 import { DOSSIER_SEATS, DossierBody, type Arrived } from './JuryDossier';
-import { JuryResults } from './JuryResults';
+import { JuryReader } from './JuryReader';
 import styles from './jury.module.css';
 
 /**
@@ -40,7 +40,7 @@ export function JuryStatic({ scenes, detail, names, skipped, onOpenRecord }: {
           ))}
         </div>
       </section>
-      <JuryResults detail={detail} names={names} onOpenRecord={onOpenRecord} />
+      <JuryReader detail={detail} names={names} />
     </div>
   );
 }

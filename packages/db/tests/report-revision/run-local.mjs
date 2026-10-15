@@ -10,6 +10,7 @@ import {POSTGRES_IMAGE} from '../v3/images.mjs';
 import {buildFromFiles,installPgCronStub} from '../baseline/build-from-files.mjs';
 import {runCases} from './cases.mjs';
 import {runFusionReview} from './fusion-review.mjs';
+import {runFusionBackground} from './fusion-background.mjs';
 const development=process.argv.slice(2).join(' ')==='--local-only --development';
 if ((!development && process.argv.slice(2).join(' ') !== '--local-only') || process.env.CI) throw new Error('Require --local-only');
 const root=resolve(import.meta.dirname,'../../../..');
@@ -59,6 +60,7 @@ try {
  await client.query(read('packages/db/tests/content-erasure/fixture.sql'));
  await runCases({db:client,Client,connectionString,report});
  await runFusionReview({db:client,Client,connectionString,report});
+ await runFusionBackground({db:client,Client,connectionString,report});
  const audits=ok(sql(read('packages/db/tests/account-open-policy-audit.sql')));
  assert.equal(audits,'');report.checks.push('account-open policy audit unchanged');
 } catch(error) {report.failed=String(error.stack??error);process.exitCode=1;}

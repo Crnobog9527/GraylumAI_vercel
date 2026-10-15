@@ -28,7 +28,7 @@ export async function createFixture(db,options={}) {
     tiers:options.tiers??[{minPromptTokens:0,prompt:'1',completion:'0',request:'0'}],timeOfDay:options.timeOfDay??[]};
   const identity = {policyId:'payg-local',profileVersion:'local-v1',evidenceVersion:'local-v1',
     pricingHash,endpointTag,nominalPricing,templateTokens,marginTokens};
-  const payg = {...identity,version:'v1',admissionPath:options.empirical?'empirical':'fixture',maxBytes:196608,maxMessages:32,maxTools:2,
+  const payg = {...identity,version:'v1',admissionPath:options.empirical?'empirical':'fixture',maxBytes:196608,maxMessages:32,maxTools:options.maxTools??2,
     maxSchemaBytes:16384,purposes:[phase],expiresAt:new Date(Date.now()+3600000).toISOString()};
   const quote = {...identity,policyVersion:'v1',bytes,promptTokensUpper,messages:1,tools:0,schemaBytes:0};
   const promptPrice = options.promptPrice??'1';
@@ -51,6 +51,8 @@ export async function createFixture(db,options={}) {
     policies.push({...policy,modelId:secondId,model:secondModel,multiplier:options.secondMultiplier});
     claimPayloads.push({...claimPayload,model:secondModel,billingUnit:{modelId:secondId,multiplier:options.secondMultiplier}});
   }
+  // RESEARCH-TOOLS: frozen tool-route policies on the same run (research-tools.mjs).
+  policies.push(...(options.extraPolicies??[]));
   const runMultiplier = String(Math.max(Number(multiplier),Number(options.secondMultiplier??multiplier)));
   const payload = {contractVersion:'bill2.v2',mode:'isolated',scope:{kind:'positioning_draft',draftId:draft},
     operation:'question',modelId,sourceHash:'a'.repeat(64),input:{text:'PAYG_LOCAL_PRIVATE_CANARY'},callPolicy:policies,

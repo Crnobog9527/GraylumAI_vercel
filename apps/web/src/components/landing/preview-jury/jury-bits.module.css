@@ -6,7 +6,7 @@
 .mark {
   --seat: var(--j-seat-a);
   display: inline-grid; place-items: center; flex: none; width: 26px; height: 26px; border-radius: 50%;
-  background: var(--seat); color: #fffdf8; font-family: var(--j-sans); font-size: 12.5px; font-weight: 600; line-height: 1;
+  background: var(--seat); color: #ffffff; font-family: var(--j-sans); font-size: 12.5px; font-weight: 600; line-height: 1;
   box-shadow: 0 0 0 2px var(--j-paper);
 }
 .mark[data-seat='B'] { --seat: var(--j-seat-b); }
@@ -24,6 +24,8 @@
   min-width: 0; overflow: hidden; color: var(--j-ink); font-size: 13.5px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap;
 }
 .badgeCompact .name { font-size: 12.5px; font-weight: 500; color: var(--j-body); }
+/* Where the name is the label itself (the record tabs), it wraps instead of being cut. */
+.badgeWhole .name { overflow: visible; line-height: 1.35; white-space: normal; overflow-wrap: anywhere; }
 
 .verdict {
   display: inline-flex; align-items: center; padding: 0 7px; border: 1px solid var(--j-rule); border-radius: 4px;

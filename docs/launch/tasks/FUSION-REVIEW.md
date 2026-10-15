@@ -25,7 +25,7 @@
 ## 1. 目标、做完的标准、不做什么
 
 - **目标**：报告 v1 出来后，有权限的会员可以开启"多模型专家评审团"。多个模型并行评审、汇总修订、多轮直到共识或到轮数上限，
-  用户看到各模型的意见（显示真实模型名，Master Plan 第 2.1 节身份保护的 Fusion 例外）、最终修订稿和修改说明，
+  用户看到各评审席位的意见（只显示管理员配置的席位名，不显示模型名，Owner 2026-10-14；取代原来"显示真实模型名"）、最终修订稿和修改说明，
   和原稿并排对比，采用后按 R14 同步到定位字段。
 - **做完的标准**：第 6 节每个 PR 的验收全部通过；FUSION.md 必测项按第 7 节改写后的版本全部通过；
   staging 上用真实模型完整跑通至少 2 次评审（含一次多轮），每一次模型读取都能对上一条冻结和一条结算。
@@ -72,22 +72,32 @@
 
 ### 2.2 一次评审的流程
 
+> **2026-10-14 Owner 决定改写本节流程**（Master Plan 第 2.1 节 2026-10-14 条）：取代下面原来"每轮评审修订稿、没有关键意见就结束"的多轮流程。
+> 原流程图和"第 k 轮看修订稿 k-1"相关的段落保留作为历史，以本框为准。
+
 ```
-报告 v1（REPORT-GEN 生成、R5 定稿发布的不可变定位版本 sourceVersionId）
+报告 v1（不可变定位版本 sourceVersionId）
   └─ 用户看到"最多消耗 X 积分"并同意 → startReview（准入、冻结配置、建运行单）
-       第 1 轮：评审团 N 个并行（输入：评审 Skill + 报告 v1 + 资料快照）→ 意见清单
-                至少一个评审解析通过、且所有解析通过的评审都没有任何意见 → 结束，"评审团认为无需修改"，不调汇总
-                否则汇总 1 个（输入：评审 Skill + 报告 v1 + 资料快照 + 本轮成功的意见）→ 修订稿 1
-                （第 1 轮只要有意见就一定汇总，不按 critical 提前停）
-       第 k 轮（k ≥ 2）：评审团看修订稿 k-1
-                没有任何"关键"意见 → 结束，最终版 = 修订稿 k-1
-                否则汇总 → 修订稿 k
-       到轮数上限 → 结束，最终版 = 最后一份通过宿主检查的修订稿
-  └─ 用户看意见、最终版、修改说明，和原稿并排对比
+       第 1 轮：3 个评审席位（A/B/C）并行，各自独立：
+                视角 = 报告里的每一类受众 + 用户本人（不设固定角色）
+                4 个关键决定（定位、受众、平台、变现路径）各写最强理由、最强替代、保留还是改、依据（双向钢人）
+                问题清单：每条写章节、角度、为什么、怎么改、严重程度；笼统的由宿主丢掉
+                没有可用意见 → 结束"未完成"
+                所有评审都保留全部决定、也没有问题 → 结束"评审团认为无需修改"，不调汇总
+       第 2 轮（只在分歧时）：某个关键决定有人保留、有人要改 → 每个评审看到别人的第 1 轮意见，
+                先把对方观点讲到最强再表态，重新给出自己的判断和问题
+       汇总（只一次）：用每个评审最新的意见（第 2 轮没给出就用第 1 轮）→ 裁决记录 + 修订稿
+                去重、排序、标出只有一人提的问题；回原文核实才采纳；冲突先写双方最强理由再裁决；
+                批评压不过原文最强理由就保留原文
+                通过宿主检查 → 结束"已修订"（未经评审团复核，第 8.1 节）→ 交给 R14；不通过 → "修订失败"
+  └─ 用户看意见、裁决、最终版、修改说明，和原稿并排对比
        采用 → R14 reportRevisionPropose → 展示差异和连带步骤 → apply / decline
 ```
 
-- **"资料"是什么**：评审对象是 R5 定稿发布的那个不可变定位版本（也是 R14 要求的 `sourceVersionId`）。
+原流程（已被上面取代）：
+
+```
+报告 v1（REPORT-GEN 生成- **"资料"是什么**：评审对象是 R5 定稿发布的那个不可变定位版本（也是 R14 要求的 `sourceVersionId`）。
   两个输入来自同一个版本、互不重复：
   - **报告** = 版本里的 `generatedReport` 正文（`0206` 的 `report_final_snapshot` 在发布时写入；第 2 轮起换成上一份修订稿）。
   - **资料快照** = 各步骤的已确认字段。版本表本身只存章节正文和哈希（`0066` 写入的 `artifact_versions.report`），不存逐字段值，
@@ -140,7 +150,7 @@
   意见仍可参考"。想再试只能重新开始一次新评审（新的预告和同意、新的运行单）。汇总结果未知时状态是"待核对"，核对结果按第 3.3 节"结果未知怎么收尾"处理：
   正文已经保存下来的才算成功、照常做宿主检查再继续；正文没保存下来的（不论供应商那边是否收了费）都按失败处理。`continueReview` 对结束状态重复调用都返回同一个结果，不再派发任何调用。
 - **评审内部隐藏模型身份**：汇总模型看到的意见标成"评审 A/B/C"（借 llm-council 的思路，减少偏向），
-  用户界面显示真实模型名。
+  用户界面也只显示管理员配置的席位名（默认"评审 A/B/C""汇总"），不显示模型名（Owner 2026-10-14，取代原来"显示真实模型名"）。
 - **停止条件**：第 2 轮起某一轮评审团没有任何 `critical` 意见（这时已经有上一份修订稿，直接作为最终版）；第 1 轮按上面的流程图
   （没有任何意见才停，否则一定汇总）；或到达冻结的轮数上限；或汇总失败。不会无限重试，确认失败的调用不自动重发
   （BILL2 `automaticRetry=false` 不变）。
@@ -150,6 +160,62 @@
   （按汇总回答里这两部分的上限计）。装不下先按规则调低意见上限；仍有任何一个评审模型或汇总模型装不下，就在冻结前拒绝**整次评审**并说明原因，
   不悄悄去掉模型、用更少的模型降级运行（评审团是管理员指定的 3–8 个模型，人数变了就改变了质量和价格）。
   运行中某个模型确认失败或结果未知不属于降级准入，按"部分失败如实展示"处理：本轮有至少 1 个成功意见就照常汇总，页面写明哪几个模型没给出意见。复用 `paygRuntime.ts` 的 `measureCallInput` / `fitNativeRequestOutput`。
+
+### 2.2a 评审过程事件（给前端动画，Owner 2026-10-14；约定第 6 版）
+
+Owner 要求评审过程中让用户看到评审团的思考和互相挑刺。前端动画只按下面的事件播放，事件全部由服务端从**真实的评审记录和已保存的输出**推导，
+没有对应的真实数据就没有事件，不做模拟表演。
+
+- **怎么取**：`fusionReview.events({ reviewId })` 返回 `{ events, ended }`，每次返回这次评审到目前为止的全部事件（一次评审最多一两百条）。
+  每个事件有固定不变的 `id`；列表按数据库里记录的真实时间排序（同一时刻按席位、条目顺序）。前端只播放还没见过的 `id`，
+  按列表顺序播放。三个评审是并行的，谁先完成谁的事件就先出现；用 `id` 去重，就不会因为并发而重播或漏播。
+  刷新页面后重新读一遍，按已播放的 `id` 接着播（或者直接以静态方式展示已发生的事件）。不加新表，也不依赖流式连接。
+- **席位名**：`fusionReview.panel()` 返回 `{ reviewers: [{ seat: "A", name }, …], summary: { seat: "S", name } }`。名字由管理员在 Fusion 设置里改
+  （默认"评审 A/B/C""汇总"，最多 20 个字），和选用哪个模型无关；事件里只放席位代号，前端按代号显示名字。
+- **什么时候出现**：某个评审开始调用时出 `reviewer_started`；它的回答通过宿主检查后，这个评审的 `decision` / `issue` / `response` 一次性全部出现
+  （前端可以逐条播放，但只能播放已经拿到的事件）；没有通过时出 `reviewer_failed`。汇总同理。
+- **文字限制**：所有文字字段都是摘要，最长 120 个字符（超出截断并以"…"结尾），不放报告全文和完整意见。评审只用席位代号 A/B/C（汇总是 S），
+  不出现模型名。
+
+公共字段：`{ id: string, type: string, round?: 1 | 2, reviewer?: "A" | "B" | "C" }`，其余字段见下表。
+
+| type | 什么时候 | 其他字段 |
+| --- | --- | --- |
+| `review_started` | 评审开始（读报告） | `reviewers: ["A","B","C"]`, `sections: number`（报告章节数） |
+| `reviewer_started` | 某个评审开始调用 | `round`, `reviewer` |
+| `decision` | 评审的双向钢人辩证，每个关键决定一条 | `round`, `reviewer`, `decision: "positioning"\|"audience"\|"platform"\|"monetization"`, `strongestCase`, `strongestAlternative`, `verdict: "keep"\|"change"` |
+| `issue` | 评审的问题，每条一条（宿主丢掉的笼统意见不出现） | `round`, `reviewer`, `section`（章节标题）, `perspective`, `severity: "critical"\|"major"\|"minor"`, `problem`（为什么）, `fix`（怎么改） |
+| `reviewer_failed` | 某个评审没给出可用意见 | `round`, `reviewer`, `reason: "format"\|"no_delivery"\|"stopped"` |
+| `disagreement` | 第 1 轮结束、发现分歧（每个有分歧的决定一条） | `decision`, `keep: ["A",...]`, `change: ["B",...]` |
+| `response` | 第 2 轮评审回应别人，每位被回应的评审、每个关键决定一条 | `round: 2`, `reviewer`, `to`, `decision`, `strongestView`, `stance: "agree"\|"disagree"` |
+| `summary_started` | 汇总开始调用 | `round` |
+| `adjudication` | 汇总的裁决记录，每条一条 | `section`（章节标题，或"全文"）, `issue`, `reviewers: ["A",...]`, `single: boolean`, `disputed: boolean`（评审之间有没有分歧）, `opinion`（评审团最终意见）, `reason`, `fix`（建议怎么改）, `adopted: boolean`（修订稿里是否采纳） |
+| `revision_ready_for_choice` | 修订稿通过宿主检查，等用户逐章选择（还没交给 R14） | `changedSections: number`, `changedSectionTitles: string[]`（只有标题）, `changedFields: number` |
+| `adoption_done` | 用户逐章选完 | `adoptedSections: string[]`, `keptSections: string[]`, `versionId`（全部保留原文时为 null） |
+| `revision_failed` | 汇总没通过宿主检查 | `reason`（宿主检查代号，例如 `REVISION_NOTES`） |
+| `review_ended` | 评审结束（任何结局） | `state`, `outcome` |
+
+- **完整原文（不限 120 字）**：`fusionReview.detail({ reviewId })` 只读本人的评审，返回
+  `{ reviewId, state, outcome, revisionId, seats: [{ seat, rounds: [{ round, status: "usable"|"failed"|"pending", decisions?, issues?, responses? }] }],
+  summary: { status: "usable"|"failed"|"none", sections: [{ section, changed, wordingOnly, original?, revised?, fields: [{ stepId, fieldId, before, after }],
+  linkedSections, rulings: [{ section, issue, reviewers, single, disputed, opinion, reason, fix, adopted }] }] }, adoption, awaitingChoice }`。
+  `original` / `revised` 只在改动的章节给出全文（原文来自冻结的评审版本）；`linkedSections` 是因共用字段必须同选的章节；`adoption` 是已经做过的选择（没选为 null）。
+  `decisions` 每条含 `decision / strongestCase / strongestAlternative / verdict / basis`，`issues` 每条含 `location / perspective / problem / suggestion / severity`，
+  `responses` 每条含 `reviewer / decision / strongestView / stance / reason`。悬停某位评审时用 `seats`；最终结果按章节展示用 `summary.sections`（模板顺序，最后是"全文"）。只出现席位代号，不出现模型名。
+
+- **逐章选择（Owner 2026-10-14），分两步**：
+  1. `fusionReview.adopt({ reviewId, requestId, choices: [{ section, use: "revised"|"original", confirmedNoFactChange? }] })`：校验选择。每个改动的章节都必须明确选择；
+     没改动的默认保留原文；只改表述的章节选"采用修订版"时 `confirmedNoFactChange` 必须为 true；`linkedSections` 里的章节必须选成一样。
+     有采用的章节时，把合成的新正文和这些章节声明的字段交给 R14 提案，返回 `{ state: "proposed", revisionId, diff, diffHash, adopted, kept }`，
+     `diff` 就是 R14 的字段差异，包括 `cascade`（会被一起确认的后续步骤），页面必须把它展示给用户；这一步**不改动**正式版本。
+     全部保留原文时直接记录选择，返回 `{ state: "recorded", versionId: null, adopted: [], kept }`。
+  2. `fusionReview.confirmAdoption({ reviewId, requestId, choices, expectedDiffHash, decision: "apply"|"decline" })`：同一个 `requestId` 和 `choices`
+     会重新得到同一份 R14 提案；`expectedDiffHash` 必须等于用户看到的那份（否则 `FUSION_ADOPTION_STALE`）。`apply` 生成新的正式版本，`decline` 什么都不改。
+     返回 `{ state: "recorded", versionId | null, adopted, kept }`，选择只记录一次。
+  正式版本已经变了（用户在评审后改过草稿），R14 会拒绝（`REPORT_REVISION_STALE`），这份修订稿就作废了；草稿不会被锁住。
+  拒绝代号：`FUSION_ADOPTION_INCOMPLETE`、`FUSION_ADOPTION_TOO_LONG`（选择组合后超出报告长度上限）、`FUSION_ADOPTION_INVALID`、`FUSION_ADOPTION_CONFIRM_REQUIRED`、`FUSION_ADOPTION_LINKED`、`FUSION_ADOPTION_STALE`、`FUSION_REVIEW_ADOPTED`。
+
+另外：`ended=true` 表示评审已结束，之后不会再有新事件。没有分歧时不会出现 `disagreement` 和 `response`，直接到 `summary_started`。
 
 ### 2.3 和 FUSION-COMPARE 共用哪些模块
 
@@ -191,6 +257,8 @@
 
 ### 3.2 "Fusion 多模型单次上界"的定义
 
+- **一次评审的总预估（2026-10-14 新流程）**：第 1 轮 3 个评审上界之和 + 第 2 轮 3 个评审上界之和（输入另加全部第 1 轮意见的上限；只在允许第 2 轮时计入）
+  + 1 次汇总上界（输入另加全部意见的上限）。超过单次评审预算就先去掉第 2 轮；只剩第 1 轮仍超就拒绝开始。不再有"每轮一次汇总"。
 - **自研以后，每一次供应商调用只对应一个模型**。单个调用的上界照旧：`runtimePaygCall` 算出的
   `输入上限 × 输入单价 + 回答上限 × 输出单价`（名义价格快照、倍数、q 都随运行单冻结）。
 - **"一组调用"**：同一轮同一阶段同时发出的调用。评审团阶段是 N 个评审调用；汇总阶段只有 1 个。
@@ -213,6 +281,7 @@
   2026-10-14 起按计费组实现（第 3.4 节）：每个 Fusion 运行单只有一次调用（组领取只接受第 1 次调用），过期补领、下一轮和汇总都新建运行单，
   所以单个运行单的 `max_calls` 不会被补领占满；上面的 `轮数上限 × (N + 1) ≤ 32` 改为对整次评审的运行单数量的限制，由 PR-3/PR-4 的准入检查。
 - **运行前预告**：显示"最多消耗 X 积分"= 总预估换算的积分，用户同意后才开始（Master Plan 第 4.1 节）。
+  实现（#962）：开始评审时按每次调用各自冻结的积分（各自向上取整、按各模型倍数）加总，存为 `config.estimateCredits` 并随评审返回，界面直接显示这个数。同时按阶段和模型存下每次调用自己的积分上限和美元上限（`config.callCaps`）；每次领取（包括只补领部分席位）只能用被领取的那几个模型的上限之和。之后价格或倍数变了，某一步要冻结的积分或供应商成本上界超过这个和就不领取：第 2 轮跳过，第 1 轮或汇总则结束为未完成（`price_changed`），已显示的上限不会被突破。所有领取都走同一个入口，规则是反过来写的：只列出临时故障（服务暂时不可用、冲突、要重新登录等）和没有代码的异常，抛出后下次重试；其他任何带代码的拒绝（大小或价格上限、管理员中途改设置或关闭评审团、评审 Skill 下架、会员或测试窗口失效，以及以后新增的拒绝）都结束这一步，结束原因分别是 `input_too_large`、`price_changed`、`claim_refused`（附拒绝代码），评审不会卡在进行中。
 
 ### 3.3 三种结局和部分结算
 
@@ -330,13 +399,15 @@
 
 - 评审和汇总的每个请求**显式关闭联网**，复用现有 `services/openRouterSearch.ts` 的 `openRouterSearchParameters(model, false)`：
   它拒绝 `openrouter/`、`perplexity/` 开头和名字带 `search` / `sonar` 的内置搜索模型（`isPlainOpenRouterModel`），并在请求里写明
-  `plugins: [{id: 'web', enabled: false}]`、`tools: []`、`tool_choice: 'none'`——不能只靠"不传 plugins"，因为 workspace 可能默认开着旧的 web 插件。
+  `plugins: [{id: 'web', enabled: false}]`，并且请求里完全不带 `tools` 和 `tool_choice` 字段——不能只靠"不传 plugins"，因为 workspace 可能默认开着旧的 web 插件。
+  （PR-3b #954 实施时定为不带工具字段：没有工具定义，模型就没有工具可调；共用适配器对 Fusion 请求只放行 web 插件关闭这一种 plugins，
+  带任何 `tools` 或 `tool_choice` 的请求一律拒绝，比写 `tools: []` 更严。本节原来写的 `tools: []`、`tool_choice: 'none'` 按此更正。）
   请求里也不带 `web_search_options`、不用 `:online` 后缀。请求在算 `requestHash` 前由宿主组装，执行时按冻结的请求发出。
 - 这项检查在三处都做：后台 Fusion 设置保存评审模型、汇总模型时；`startReview` 和组领取准入时；每次组装请求时。不通过就拒绝，不悄悄换模型。
 - 数据库 `runtime_tool` 对 Fusion 用途的执行拒绝任何工具调用（包括 R4 的 `read_history`），防止以后改代码时误加。
 - 不用 OpenRouter 的 `openrouter:fusion` 服务端工具（#852 实测关不掉联网），也不用 `openrouter/` 开头的元模型
   （`docs/ENGINEERING.md` 第 6 节本来就这么写，不用改）。
-- 验收：一次完整评审的请求日志里，每个请求都是 `tools: []`、`tool_choice: 'none'`、web 插件显式关闭；后台选 `perplexity/*`、`*sonar*`
+- 验收：一次完整评审的请求日志里，每个请求都不带 `tools` / `tool_choice`、web 插件显式关闭；后台选 `perplexity/*`、`*sonar*`
   等内置搜索模型做评审或汇总时，保存和准入都被拒；用量里 `web_search_requests` 为 0；返回内容里没有网页引用。
 
 ### 4.2 定位 Skill 第 12 版 `review-rubric.md` 怎么改
@@ -366,7 +437,7 @@
 | --- | --- | --- | --- |
 | R14 [#849](https://github.com/Crnobog9527/GraylumAI_vercel/pull/849)（评审修订稿同步回字段，迁移 0223） | FUSION-REVIEW 只调用它的 `reportRevisionPropose / Read / Latest / Apply / Decline`，不改它 | 不改 `services/report/revisionSync.ts`、`0223`、`report_revision`；修订稿存 R14 的 `artifact_requests`，评审记录只存 `revisionId` | #849 合并后才开 PR-4。确认界面必须把差异里的 `cascade`（会被一起确认的后续步骤）明白展示给用户，列为 PR-5 验收项 |
 | R4 [#878](https://github.com/Crnobog9527/GraylumAI_vercel/pull/878)（导师按需读早期原话，迁移 0228） | 评审不用 `read_history`，没有功能依赖；只是都改 runtime 准入和执行 | 它改 `admission.ts`、`execute.ts`、`agentTools.ts`、`runtimeContext.ts`、`executorRpc.ts`、`runtime_tool`。PR-3 也要改前两个文件和 `runtime_tool` | PR-3 排在 #878 合并之后，开工时同步 staging；PR-1、PR-2 不碰这些文件，可以先做 |
-| MODEL-IDENTITY-GUARD [#829](https://github.com/Crnobog9527/GraylumAI_vercel/pull/829)（品牌身份说明，2026-10-13 已合并） | 评审团是身份保护的例外：评审和汇总请求**不加**品牌身份说明（否则模型会自称 Graylum，和界面上显示的真实模型名矛盾）；评审接口返回真实模型名；以后的"回答替换"（该任务 PR 4）跳过 Fusion 评审执行 | 它改 `admission.ts`、`execute.ts`、`matching.ts`、`generation.ts`。PR-3 的组准入自己组装系统消息，复用 #829 的开关读取函数但不调用加说明的函数 | #829 已合并，所以由 PR-3 加"Fusion 评审跳过"的判断和测试；以后的回答替换 PR 若晚于 PR-3 合并，由它加对评审执行的跳过（身份说明不出现在评审请求里；回答替换不作用于评审执行） |
+| MODEL-IDENTITY-GUARD [#829](https://github.com/Crnobog9527/GraylumAI_vercel/pull/829)（品牌身份说明，2026-10-13 已合并） | 评审团是身份保护的例外：评审和汇总请求**不加**品牌身份说明（否则模型会自称 Graylum，和评审身份矛盾）；评审接口和用户界面只用席位，不返回模型名（Owner 2026-10-14）；以后的"回答替换"（该任务 PR 4）跳过 Fusion 评审执行 | 它改 `admission.ts`、`execute.ts`、`matching.ts`、`generation.ts`。PR-3 的组准入自己组装系统消息，复用 #829 的开关读取函数但不调用加说明的函数 | #829 已合并，所以由 PR-3 加"Fusion 评审跳过"的判断和测试；以后的回答替换 PR 若晚于 PR-3 合并，由它加对评审执行的跳过（身份说明不出现在评审请求里；回答替换不作用于评审执行） |
 
 另外：
 - DATA-ERASURE：评审记录、各模型意见（附属会话里的执行输出）、修订稿登记进注销和删除清单（`0201_content_erasure.sql` 的 `content_erasure_scope`）。
@@ -388,6 +459,7 @@
 | PR-3b | Fusion 执行器（TS）：组准入（数据库事务 `fusion_group_admit` 放在 0235，TS 负责冻结每个模型的请求和调用后交给它；对比模式等 FUSION-COMPARE 定模型清单后再准入）、每次调用前走 RATE-LIMIT callGate 和预算检查、单次调用不带工具、输入快照复用 90000 B 上限、不加品牌身份说明；流式转发（复用 bill2 dispatchOnce 的 onChunk）；适配器只放行 `plugins=[{id:'web',enabled:false}]`；计费用途加 fusion_*（报价和起步门槛有默认配置，没配置明确拒绝）；Fusion 设置后端；恢复批次接入每天的 billing-reconcile（过派发期限未派发的取消、已派发的查回执后结算、内容已删的运行单结算后再清理一次） | 高 | 否 | PR-3a |
 | PR-4 | （2026-10-14 拆成两个 PR：PR-4a 评审记录和状态机，迁移 0236；PR-4b 评审流程和真实模型验收）评审流程后端：评审 Skill 包（第 4.3 节，从 PR-0 移来）、多轮、汇总、宿主检查、停止条件、`continueReview`、总预估和最高预算、R14 propose 接入、评审记录（新表，理由见下） | 高 | 是 | PR-3、#849 |
 | PR-5 | 评审界面和后台设置界面：入口、预告、进度、意见、修订稿对比、采用（R14 差异含 cascade；最终修订稿"未经评审团复核"时逐章勾选后才能采用、可只作报告文本保存）、"待核对冻结 N 积分"提示；后台评审团/汇总模型/轮数/意见长度/最高预算 | 普通（只改前端） | 否 | PR-4 |
+| FUSION-PROFILE（**开放前必做**，总控 2026-10-14） | 按 #665 的方法给评审团用到的每个模型实测每次调用计费档案（`runtime_payg_staging`）：`fusion_review` / `fusion_summary` 用途、`fusion-json-v1-stream` 请求格式、各自的思考档位和输出上限，留实测证据；同时比较候选汇总模型能否按要求控制中文全文长度、逐章照抄未改部分并完整写出修改说明（PR-4b 实测：Gemini 3.8 Flash 两次把 10888 字扩到 16000 多字；Sonnet 5.5 长度合格但漏声明 4 个小改动章节），据此定默认汇总模型。评审团对用户开放之前必须做完；PR-4b 验收时临时借用的档案（只在已有档案上加 Fusion 用途和格式、实测数字不动，跑完原样恢复）**不能作为正式依据** | 高（计费配置） | 否 | PR-4b |
 
 **为什么 PR-4 要新表**：评审进度（第几轮、哪个阶段、每个评审执行的结局、最终版是哪份修订稿）是产品状态，不是计费状态；
 `bill2_runs` 只放钱，`artifact_requests` 由 R14 存修订稿，`runtime_executions` 只管单次执行。现有表放不下"多轮多阶段"的关系，
@@ -406,7 +478,7 @@
 | PR-3a | 结果保存幂等、读出；未判定到期时有 Fusion 结果按 unjudged_saved 收费、没有按 no_delivery；恢复批次只列出组内未结算的运行单 | 同一结果重复保存返回同一结果，内容不同报冲突 | 删对话与保存结果按会话行锁排序 | **删掉主会话后查不到它的 Fusion 结果**，组内运行单被标记、关闭、清洗；还没派发的调用退回冻结，已派发但回执或成本未知的调用按第 3.3 节保留冻结，等迟到回执或恢复流程按 user_stopped 结算（不提前退款）；删后不能再保存结果、不能再建组；**账号注销清掉 Fusion 结果**、正文剩余计数覆盖；库外删除清单沿用会话删除那条（0227/0231），备份恢复后重放会话删除时会再次清掉 |
 | PR-3b | 每次模型调用都经过 callGate 和预算检查（不能因为不走会话而绕开）；单次调用请求里没有工具字段、web 插件显式关闭；输入超过 90000 B 在冻结前拒绝 | 组准入按请求编号幂等 | 两个组准入同时进行只成功一个；开关、权限与准入同时变化按事务内读到的为准 | 适配器：只有 `plugins=[{id:'web',enabled:false}]` 能通过，其他 plugins 和 tool_choice 照样被拒，普通对话行为不变；用户点停止、刷新页面后恢复、供应商回执晚到都能结算、不卡冻结；fusion_* 用途没配置报价或门槛时明确拒绝（报价来自每次调用的计费档案，没列这个用途就拒绝；组领取用整组上界代替起步门槛，0234）；删对话时还没结算的 Fusion 运行单，定时恢复结算后再清理一次（#947 审查） |
 | PR-4 | 真实模型完整跑 2 次（含一次第 2 轮无关键意见提前结束）；每次模型读取对应一条冻结和一条结算；最终版通过模板章节和字段检查；R14 propose 拿到差异 | `continueReview` 重复调用、刷新页面都不新建调用、不重复收费 | 同一报告版本同时点两次开始只有一个评审 | 某评审确认失败或结果未知时不进汇总；格式不合格的评审意见和没通过检查的修订稿计入应收 0、冻结全退；进程在"保存响应→宿主校验→结算"任意两步之间中断，恢复后判定和收费与不中断时一致、每个调用只结算一次（每日恢复和 `continueReview` 在到期结算前，用冻结的校验版本对"有正文、没判定"的调用重做判定，格式不合格或修订不合格不会被到期规则当成 unjudged_saved 收费，#954 审查）；评审调用全部派发后点停止，评审记录变为"已停止"，已派发调用只结算，之后反复调用 `continueReview` 和停止都返回同一终态、不派发汇总或下一轮；停止和 `continueReview` 并发时不会在停止之后再派发新调用；全部失败时不派发汇总、不收汇总费；轮数上限为 1 时最终修订稿标为"未经评审团复核"，"只改表述"的章节不逐个勾选就不能采用、可以只作报告文本保存；第 1 轮修订改了字段、第 2 轮仍有 critical 再汇总时，最终 `steps` 保留第 1 轮的改动（不被旧快照覆盖回去）；汇总修订稿删了章节、或 `steps` 漏了任何声明的步骤或字段（含跨步骤同名字段）、或改动章节和 `changeNotes` 声明对不上时按修订稿失败处理、不收汇总费，评审结束为"修订失败"、首轮失败时只展示意见和原稿，之后重复调用 `continueReview` 返回同一结束状态、不再派发；首轮所有意见为空时不调汇总；全部评审失败或全部解析失败时结束为"评审未完成"、不调汇总、不显示"无需修改"、重复调用返回同一终态；任一模型上下文装不下时整次评审在冻结前被拒、不降级运行；评审开始后步骤被改，评审仍用冻结版本、内容哈希不变；在两阶段之间关页面或断网，回来能接着做完；到轮数上限停止；同一用户在两个报告上同时开评审只成功一个；第 2 轮保留第 1 轮已改的字段时 changed=false 通过、交给 R14 的变化里仍包含它；非必填空值字段（状态 unknown）原样保留时修订稿通过、不要求编值，把它改成非空值时 changed=true 才通过；同一用户反复触发零收费结局（超时断线无正文、格式不合格等）达到熔断上限后不能再开评审、已进行的照常收尾；同一版本连续 3 次以失败结束后不能再开评审；过期补领后跑完剩下的汇总和下一轮，不触发调用次数上限；一次完整评审（多个附属会话）后整账号注销能完成不卡住；**在途风险也计入熔断**：评审被停止或进入终态后，只要这个用户还有已派发、未收尾的 Fusion 调用，就仍算占用"进行中"名额（单用户一个进行中评审的判断以"评审进行中或还有未收尾的 Fusion 调用"为准），派发后停止再立刻重开同一版本或另一报告的评审被拒，等旧调用全部收尾后才能开；对账先于用户回来运行时，评审变为"已暂停"而非终态，用户回来后 `continueReview` 能补领并跑完汇总，已付费的意见不丢、不重复收费；"已暂停"不会自动到期终止，用户点"结束评审"后变为终态并最终取整；评审已"已停止"时对账收尾后仍保持"已停止"、不变成"已暂停"，之后 `continueReview` 仍被拒；用户点"结束评审"和"继续"并发：两条路径与停止、组领取统一锁顺序（先锁评审记录、再锁运行单、最后锁用户余额），结果只能是完整继续（新一组调用正常派发）或完整关闭（不建新调用、运行单最终取整），不会出现新调用落在已关闭运行单或终态评审上；有正文、缺用量的调用按 BILL2 契约第 37 行处理（c 已知按 `min(c,U)` 收费；c 未知保留冻结并占"进行中"名额），不新增免费路径 |
-| PR-5 | 预告、进度、意见（真实模型名）、修订稿对比、采用和差异（含 cascade）在 staging 真实浏览器走通；手机宽度可用 | 采用按钮连点只同步一次 | 两个标签页同时采用只有一个成功，另一个看到已处理 | 余额不足、某模型待核对、评审关闭（定位以 v1 结束、无入口无报错）三种状态显示正确；Codex 按交接做交互验证 |
+| PR-5 | 预告、进度动画（按第 2.2a 节事件）、意见（席位名，不显示模型名）、修订稿对比、采用和差异（含 cascade）在 staging 真实浏览器走通；手机宽度可用 | 采用按钮连点只同步一次 | 两个标签页同时采用只有一个成功，另一个看到已处理 | 余额不足、某模型待核对、评审关闭（定位以 v1 结束、无入口无报错）三种状态显示正确；**后台换评审团模型或关闭评审时，如果有评审正在进行，保存前提示"有 N 个评审正在进行，保存后它们的后续轮次会失败"**（总控 2026-10-14；进行中的评审可以用 `fusionSettings.reviews` 列表按状态统计）；**评审之间没有分歧、跳过第 2 轮直接汇总的路径**（PR-4b 两次真实评审都出现了分歧，这条只有单元测试；总控 2026-10-14：不专门花钱验，上线后自然出现，由 Codex 在页面验收时一起看）；Codex 按交接做交互验证 |
 
 ### 6.2 测试预算
 
@@ -425,7 +497,7 @@
 - 必测项 6、7：评审和对比一样逐个模型按三种结局判断。
 - 必测项 11：停止条件按第 2.2 节。
 - 必测项 12、14：OpenRouter Fusion 专用，删除；由"逐个调用结算"和第 4.1 节的不联网验收代替。
-- 新增：普通单调用领取函数拒绝 Fusion 用途（第 3.2 节"不放行"）；评审请求不带品牌身份说明、评审界面显示真实模型名（第 5 节）。
+- 新增：普通单调用领取函数拒绝 Fusion 用途（第 3.2 节"不放行"）；评审请求不带品牌身份说明、评审界面只显示席位名（第 5 节，Owner 2026-10-14）。
 
 ## 8. Owner 的决定（2026-10-13，全部选 A）
 
@@ -450,6 +522,7 @@
 ## 9. 发现的问题（不在本任务范围，交总控）
 
 - 身份保护的 Fusion 例外是否也覆盖对比模式（对外名称"多模型专家评审团"同时指两种模式，但 Owner 原话只说评审团），FUSION-COMPARE 开工前需要确认。
+- BILL2：OpenRouter 在生成前明确拒绝（例：403"This model is not available in your region"）时，回执记成"流未完成"而不是"供应商拒绝"，冻结要等人工核对才释放（PR-4b 本机实测发现，总控 2026-10-14 另排小任务）。
 - 汇总要一次输出 12000 字全文 + 字段值，输出 token 约为只出全文的 1.5–2 倍，可能接近单请求 300 秒。PR-4 用真实模型实测；
   超时时按既定的"修订失败"流程收尾（汇总不收费）。把汇总拆成"全文"和"字段值"两次收费调用会提高价格上限、改变流程，
   只作为备选方案，由总控提给 Owner 批准后才能实施；实施窗口不能自行启用。

@@ -17,12 +17,9 @@ export const HERO = {
   promise: '运营从此交给它，你只管专心输出你擅长的内容。',
   primaryCta: '免费和教练聊聊',
   secondaryCta: '看它怎么工作',
-  // One sentence in the final copy, split so the 500-credit promise can wait for the grant change.
-  note: [
-    { text: '免费注册，不用绑卡。' },
-    { text: '注册送 500 积分。', needs: ['signupGrant'] },
-    { text: '聊出来的内容随时能看、能导出，不会收回。' },
-  ] as readonly GatedText[],
+  // Owner 2026-10-14: the page only says "free trial", never how many credits come with sign-up. The trial is the
+  // sign-up grant, so "，免费试用" leaves with it and the note falls back to "无需绑卡".
+  note: [{ text: '无需绑卡' }, { text: '，免费试用', needs: ['signupGrant'] }] as readonly GatedText[],
 } as const;
 
 export type VoiceNote = Gated & {
@@ -130,8 +127,8 @@ export const PRICE_COMPARE = {
 export const RISK_REVERSAL = {
   title: '先聊后买',
   points: [
-    { text: '先免费和教练聊一次：注册送 500 积分，足够把你的情况聊透、把定位整理出来。觉得有用，再开通。', needs: ['coach', 'signupGrant'] },
-    { text: '聊出来的内容随时能看、能导出，不会收回。', needs: ['coach'] },
+    { text: '先免费试用：和教练聊一次，把你的情况聊透、把定位整理出来。觉得有用，再开通。', needs: ['coach', 'signupGrant'] },
+    { text: '聊出来的内容随时能看、能导出。', needs: ['coach'] },
     { text: '积分永不过期；会员到期后，已生成的报告仍然可以看、可以导出。', needs: ['report'] },
     { text: '随时取消，用到当期结束。' },
   ] as readonly GatedText[],
@@ -150,9 +147,5 @@ export const FINAL_ACTION = {
   } satisfies GatedText,
   founderLine: '前 50 位创始会员，招满为止。',
   cta: '免费和教练聊聊',
-  note: [
-    { text: '不用绑卡' },
-    { text: '注册送 500 积分', needs: ['signupGrant'] },
-    { text: '聊出来的内容不会收回' },
-  ] as readonly GatedText[],
+  note: [{ text: '无需绑卡' }, { text: '，免费试用', needs: ['signupGrant'] }] as readonly GatedText[],
 } as const;
