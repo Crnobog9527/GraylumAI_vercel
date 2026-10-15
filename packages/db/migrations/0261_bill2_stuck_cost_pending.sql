@@ -114,6 +114,13 @@ BEGIN
   'runCharged',r.charged,'credits',before_credits);
  -- The verified cost is the known c of the existing rule; finalize settles it once via min(c,U).
  UPDATE bill2_calls SET selected_cost_usd=p_verified_cost_usd,state='responded' WHERE id=c.id;
+ -- Recovery has expired. A crashed Runtime may never have closed its run; finish it through
+ -- the existing close/cancel paths before finalizing, so settlement can release its session.
+ IF e.id IS NOT NULL AND NOT r.closed
+  AND NOT coalesce(bill2_erasure_closed(r.actor_id,coalesce(r.pre_deduct_id,r.id)),false) THEN
+  IF e.result IS NOT NULL THEN PERFORM bill2_close(r.actor_id,r.id,'delivered',e.result);
+  ELSE PERFORM bill2_cancel(r.actor_id,r.id);END IF;
+ END IF;
  PERFORM bill2_finalize(r.actor_id,r.id);
  SELECT * INTO c FROM bill2_calls WHERE id=p_call_id;
  SELECT * INTO r FROM bill2_runs WHERE id=r.id;
