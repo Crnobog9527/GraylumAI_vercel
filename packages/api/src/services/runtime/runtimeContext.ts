@@ -12,6 +12,9 @@ import {ASK_QUESTION_TOOL} from '../../shared/agentTurn';
 import {frozenPurposeBudget,FROZEN_OUTPUT_CAP} from './purposeBudgets';
 import {matchingPlan} from './matching';
 import {reasoningPolicy} from './reasoningPolicy';
+/** Library documents the user referenced with @: each the caller's own document at the version they chose. */
+export const libraryReferences=z.array(z.object({documentId:z.string().uuid(),version:z.number().int().positive()}).strict())
+ .min(1).max(5).refine(items=>new Set(items.map(item=>item.documentId.toLowerCase())).size===items.length,'LIB_REFERENCE_INVALID');
 export const runtimeContext=z.object({
  version:z.literal('runtime.v1'),sdkVersion:z.literal('0.18.0'),role:z.enum(['ordinary','skill','organizer']),
  input:z.string().min(1).max(20000),instructions:z.string().max(262144),model:z.string().min(1),
@@ -42,11 +45,14 @@ export const runtimeContext=z.object({
  workspaceContext:z.boolean().optional(),opcTurnToken:z.string().uuid().optional(),matching:matchingPlan.optional(),scopeMaterial:z.unknown().optional(),
  answeredCard:z.unknown().optional(),request:z.unknown().optional(),
  moduleId:z.string().uuid().optional(),skillId:z.string().uuid().optional(),revisionId:z.string().uuid().optional(),sources:z.array(z.unknown()).optional(),
+ // LIB-4: frozen with the execution by runtime_library_references_freeze (0262); read through read_source.
+ libraryReferences:libraryReferences.optional(),
 }).strict().superRefine((context, ctx) => {
  if (context.reportGeneration && (context.role !== 'skill' || context.historyItems !== 0 || context.maxTurns !== 1
    || context.tools.length || context.maxToolCalls || context.network !== 'deny' || context.attachedOrganizer
    || context.scopeMaterial || context.workspaceContext || context.promptCache || context.hostTurnContext
-   || context.historySelection || context.sources?.length || context.purposeBudget?.purpose !== 'report'))
+   || context.historySelection || context.sources?.length || context.libraryReferences
+   || context.purposeBudget?.purpose !== 'report'))
   ctx.addIssue({code:'custom',message:'REPORT_CONTEXT_INVALID'});
  if(Boolean(context.skillFile)!==context.tools.includes('read_skill_file')||context.skillFile&&
   (context.role!=='skill'||context.providerRequestFormat!=='agent-turn-v5-stream'||

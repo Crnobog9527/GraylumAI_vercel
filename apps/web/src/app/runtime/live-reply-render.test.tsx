@@ -62,3 +62,9 @@ it('continues (继续) a paused turn over the streamed resume with its own token
  await state.resumeCall!(token);
  expect(state.resume).toHaveBeenCalledExactlyOnceWith(token);
 });
+
+it('a running turn with nothing shown yet (or held back) shows only its notice, never a "verifying" placeholder',()=>{
+ state.executions=[turn('e1','running','你好')];state.reply=live('e1','');
+ const html=renderToStaticMarkup(<RuntimePage/>);
+ expect(html).not.toContain('正在核实结果');expect(html).toContain('正在回复…');
+});
