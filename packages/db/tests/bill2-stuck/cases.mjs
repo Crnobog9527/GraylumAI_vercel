@@ -190,13 +190,16 @@ export async function runCases({db,Client,connectionString,report}) {
  report.checks.push('two administrators settling each other\'s calls concurrently both complete (profiles locked in id order)');
 
  // A Runtime-bound stuck call: settlement also finishes the execution and releases the session.
+ for (const closeBeforeSettlement of [true,false]) {
  const rt=await fixture(db,'v2');
  await db.query('SELECT b2a_test.bind($1)',[rt]);
  const rc=await claim(db,rt);
  await record(db,rt,rc,{provider:'openrouter',account:'sandbox',model:rt.claimPayload.model,protocol:'openrouter-chat-v1',
   evidenceKind:'transport_observation',providerId:'gen-runtime-'+rc.id,cost:null,final:false,currency:'USD',source:'response',
   coverage:'request_total',observedAt:new Date().toISOString(),sourceHash:'e'.repeat(64),rejectedReason:'incomplete_stream'});
- await rpc(db,'bill2_cancel',rt.actor,rt.run);await rpc(db,'bill2_finalize',rt.actor,rt.run);
+ if (closeBeforeSettlement) await rpc(db,'bill2_cancel',rt.actor,rt.run);
+ await rpc(db,'bill2_finalize',rt.actor,rt.run);
+ assert.equal((await run(db,rt)).closed,closeBeforeSettlement);
  await db.query("UPDATE bill2_calls SET recovery_attempts=3,recovery_deadline=clock_timestamp()-interval '11 minutes' WHERE id=$1",[rc.id]);
  const bound=(await db.query('SELECT e.id,e.state,s.active_execution FROM runtime_executions e JOIN runtime_sessions s ON s.id=e.session_id WHERE e.billing_run_id=$1',[rt.run])).rows[0];
  assert.equal(bound.active_execution,bound.id);assert.notEqual(bound.state,'cancelled');
@@ -204,7 +207,9 @@ export async function runCases({db,Client,connectionString,report}) {
  const after=(await db.query('SELECT e.state,s.active_execution FROM runtime_executions e JOIN runtime_sessions s ON s.id=e.session_id WHERE e.id=$1',[bound.id])).rows[0];
  assert.equal(after.state,'cancelled');assert.equal(after.active_execution,null);
  assert.equal(done.executionId,bound.id);assert.equal(done.executionState,'cancelled');assert.equal(await balance(db,rt),100);
- report.checks.push('a Runtime-bound stuck call: settlement ends the execution as cancelled and releases the session');
+ assert.equal((await run(db,rt)).closed,true);
+ report.checks.push(`Runtime-bound stuck call (${closeBeforeSettlement?'closed':'crashed before close'}): settlement closes run, cancels execution and releases session`);
+ }
 
  const grants=await db.query(`SELECT f,r,has_function_privilege(r,f,'EXECUTE') ok FROM unnest(ARRAY[
   'public.bill2_payg_stuck_calls(integer)','public.bill2_payg_admin_settle_call(uuid,uuid,uuid,numeric,text)']) f,
