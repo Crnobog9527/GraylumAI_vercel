@@ -18,6 +18,7 @@ export type ToolClaim =
   | { state: 'replayed'; callId: string };
 
 export interface ToolSubcallBilling {
+  readonly runId: string;
   claim(sequence: number, payload: ToolClaimPayload): Promise<ToolClaim>;
   /** true only when this process may send the request now. */
   dispatch(callId: string, token: string): Promise<boolean>;
@@ -37,6 +38,7 @@ export function toolSubcallBilling(deps: { admin: BillingRpc; actorId: string; r
     return result.data;
   }
   return {
+    runId,
     async claim(sequence, payload) {
       const raw = await call('bill2_claim', { p_sequence: z.number().int().positive().parse(sequence), p_payload: payload });
       // The balance cannot cover this call's bound: nothing is held or sent (the id is null then).

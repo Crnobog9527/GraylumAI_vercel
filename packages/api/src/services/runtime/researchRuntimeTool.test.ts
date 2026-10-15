@@ -93,7 +93,7 @@ function fixture(limit = 12) {
     refreshCreate: vi.fn<RuntimeResearchStore['refreshCreate']>().mockResolvedValue(refreshId),
   } satisfies RuntimeResearchStore;
   const dummySubcall: SubcallContext = {
-    policies: [], billing: { claim: vi.fn(), dispatch: vi.fn(), record: vi.fn() }, evidence,
+    policies: [], billing: { runId: id, claim: vi.fn(), dispatch: vi.fn(), record: vi.fn() }, evidence,
     nextSequence: vi.fn(), phase: 'question', secrets: vi.fn(), rateCounter: vi.fn(), newId: vi.fn(),
   };
   const ctx: ResearchToolContext = { scope: { userId: id, sessionId: id }, executionId: id,

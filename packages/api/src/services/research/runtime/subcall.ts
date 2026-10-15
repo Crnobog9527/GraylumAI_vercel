@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 // RESEARCH-TOOLS RT-3b: one supplier subcall, end to end (plan §2.4, §3.2–3.4, §4.3, §6.1).
 // Order: route and frozen price → key → supplier rate limit → BILL2 claim (hold) → evidence record (bound to the
-// answer) → BILL2 dispatch → supplier → evidence result → BILL2 tool_result → evidence↔call link.
+// answer) → evidence↔call link → BILL2 dispatch → supplier → evidence result → BILL2 tool_result.
 // Nothing is sent unless every earlier step passed. A sent request is never resent or switched to another supplier.
 import { createHash } from 'node:crypto';
 import { BillingClaimRejection } from '../../bill2/claimFailure';
@@ -114,6 +114,8 @@ export async function runSubcall(context: SubcallContext, request: SupplierReque
   const opened = await context.evidence.open(operationId, identity, microUnits(policy.upperUsd));
   // The claimed call stays undispatched (never sent); the run releases its hold when it closes.
   if (!opened) return { sent: false, stop: 'NOT_DISPATCHED', budget: false };
+  // Bind before any supplier dispatch so crash recovery and erasure can always identify this call.
+  await context.evidence.link(operationId, claim.callId);
   if (!await context.billing.dispatch(claim.callId, claim.token)) {
     await context.evidence.finish(operationId, opened.token, 'failed', { reason: 'NOT_DISPATCHED', cost: { actual: 0 } });
     return { sent: false, stop: 'NOT_DISPATCHED', budget: false };
@@ -140,12 +142,12 @@ export async function runSubcall(context: SubcallContext, request: SupplierReque
     items: result.items, truncated: result.truncated, usage: result.usage,
     httpStatus: result.httpStatus, supplierMayCharge: result.supplierMayCharge, ...context.metadata,
     cost: { actual: evidence.cost === null ? null : Number(evidence.cost) },
+    billing: { runId: context.billing.runId, callId: claim.callId, receipt: evidence },
   }); } catch (error) { storageError = error; }
   // A storage outage must not discard known supplier cost. Persist the financial receipt even when evidence failed.
   const receipt = storageError && evidence.toolOutcome === 'delivered'
     ? { ...evidence, toolOutcome: evidence.cost === null ? 'unknown' as const : 'failed_charged' as const } : evidence;
   const saved = await context.billing.record(claim.callId, receipt);
-  await context.evidence.link(operationId, claim.callId);
   if (storageError) throw storageError;
   if (preSendError) throw preSendError;
   if (saved.accountClosed) return { sent: false, stop: 'ACCOUNT_CLOSED', budget: false };

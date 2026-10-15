@@ -1,0 +1,113 @@
+/* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import { describe, expect, it, vi } from 'vitest';
+import type { ToolCallPolicy } from '../../bill2/toolBilling';
+import type { ToolSubcallBilling } from '../../bill2/toolSubcall';
+import { DISABLED_RESEARCH_TOOLS, researchToolsConfigSchema } from '../vendors/config';
+import { tikhubRouteId } from '../vendors/tikhub';
+import type { ResearchCallResult } from '../vendors/types';
+import { benchmarkFetch } from './benchmarkFetch';
+import type { FetchClaim, FetchState, RuntimeResearchStore } from './store';
+import type { EvidencePort, VendorCalls } from './subcall';
+import { stableResearchId, type ResearchToolContext } from './toolContext';
+
+const id = '11111111-1111-4111-8111-111111111111';
+const account = { platform: 'tiktok' as const, account: 'alice' };
+const args = { accounts: [account], source: { kind: 'candidate' as const, confirmationId: id } };
+const now = new Date('2026-10-15T00:00:00.000Z');
+const kinds = ['account_profile', 'account_posts'] as const;
+
+function fixture() {
+  const vendor = { enabled: true, hardCapAttested: { by: id, at: now.toISOString() } };
+  const config = researchToolsConfigSchema.parse({ ...DISABLED_RESEARCH_TOOLS, enabled: true,
+    vendors: { tikhub: vendor, parallel: vendor, firecrawl: vendor },
+    verifiedPlatforms: ['tiktok'], benchmarkPlatforms: ['tiktok'],
+    routes: kinds.map(kind => ({ platform: 'tiktok', kind, vendor: 'tikhub', route: tikhubRouteId('tiktok', kind),
+      backup: null, maxUnitsPerCall: '1' })),
+  });
+  const policies: ToolCallPolicy[] = kinds.map(kind => ({
+    provider: 'tikhub', account: 'tikhub-main', model: `tikhub:${tikhubRouteId('tiktok', kind)}`,
+    protocol: 'research-tool-v1', modelId: id, multiplier: '6', lookupSupported: false, upperUsd: '0.01', purposes: ['question'],
+    toolPricing: { unit: 'call', currency: 'USD', price: '0.01', unitsPerPrice: '1', usdPerCurrency: null,
+      entryHash: 'a'.repeat(64), validUntil: '2026-12-01T00:00:00Z', maxUnitsPerCall: '1' },
+  }));
+  const operations = new Map<string, { state: string; result?: unknown }>();
+  const evidence = {
+    open: vi.fn<EvidencePort['open']>(async operationId => {
+      if (operations.has(operationId)) return null;
+      operations.set(operationId, { state: 'dispatched' });
+      return { token: 'token' };
+    }),
+    finish: vi.fn<EvidencePort['finish']>(async (operationId, _token, state, result) => {
+      operations.set(operationId, { state, result });
+    }),
+    link: vi.fn<EvidencePort['link']>().mockResolvedValue(undefined),
+  };
+  let state: FetchState = 'prepared';
+  let attempt = 0;
+  const fetchClaim = vi.fn(async (): Promise<FetchClaim> => {
+    // 0263 research_account_fetch_claim rotates attempt on every prepared takeover.
+    // It never hands an in_progress/unknown/paid terminal fetch back to the caller.
+    if (!['prepared', 'failed'].includes(state)) return { claimed: false, fetchId: id, state, evidence: null };
+    state = 'prepared';
+    return { claimed: true, fetchId: id, attempt: `attempt-${++attempt}` };
+  });
+  const fetchDispatch = vi.fn(async () => { state = 'in_progress'; return true; });
+  const fetchFinish = vi.fn<RuntimeResearchStore['fetchFinish']>(async (_id, _attempt, finalState) => { state = finalState; });
+  const store = { authorization: { candidateConfirmation: vi.fn().mockResolvedValue([account]) },
+    evidence: () => evidence, fetchClaim, fetchDispatch, fetchFinish } as unknown as RuntimeResearchStore;
+  let sequence = 0;
+  const billing = {
+    runId: id,
+    claim: vi.fn<ToolSubcallBilling['claim']>(async () => ({ state: 'claimed', callId: `call-${++sequence}`, token: 'token' })),
+    dispatch: vi.fn<ToolSubcallBilling['dispatch']>().mockResolvedValue(true),
+    record: vi.fn<ToolSubcallBilling['record']>().mockResolvedValue({ accountClosed: false, contentDeleted: false }),
+  };
+  const tikhub = vi.fn<VendorCalls['tikhub']>(async (call): Promise<ResearchCallResult> => ({
+    vendor: 'tikhub', route: tikhubRouteId(call.platform, call.kind)!, outcome: 'ok', reason: null, httpStatus: 200,
+    supplierMayCharge: true, usage: { unit: 'call', units: '1' }, truncated: false, fetchedAt: now.toISOString(),
+    items: [{ fields: call.kind === 'account_profile' ? { followers: 50000 }
+      : { id: 'post', publishedAt: now.toISOString(), views: 50000, likes: 100, comments: 20, shares: 5 }, missing: [] }],
+  }));
+  const ctx: ResearchToolContext = { scope: { userId: id, sessionId: id }, executionId: id, config, store,
+    emit: vi.fn(), now: () => now, subcall: { policies, billing, evidence, nextSequence: () => sequence + 1,
+      phase: 'question', secrets: async () => 'test-key', rateCounter: async () => true,
+      newId: () => id, now: () => now, vendors: { tikhub, parallel: vi.fn(), firecrawl: vi.fn() } } };
+  const run = () => benchmarkFetch(ctx, args, { left: 10, used: 0 });
+  return { ctx, run, evidence, billing, tikhub, fetchClaim, fetchDispatch, fetchFinish, operations };
+}
+
+describe('benchmark prepared fetch recovery uses database attempt rotation', () => {
+  it.each(['false', 'throw'] as const)('recovers after beforeSend %s with a new stable operation', async mode => {
+    const f = fixture();
+    f.ctx.subcall.beforeSend = mode === 'throw' ? vi.fn().mockRejectedValue(new Error('pre-send failure'))
+      : vi.fn().mockResolvedValue(false);
+    if (mode === 'throw') await expect(f.run()).rejects.toThrow('pre-send failure');
+    else expect(JSON.parse(await f.run())).toMatchObject({ status: 'partial' });
+    const oldId = stableResearchId(id, 'attempt-1', 'account_profile');
+    expect(f.operations.get(oldId)).toMatchObject({ state: 'failed', result: {
+      outcome: 'not_sent', supplierMayCharge: false, cost: { actual: 0 },
+    } });
+    expect(f.tikhub).not.toHaveBeenCalled();
+    expect(f.fetchDispatch).not.toHaveBeenCalled();
+    expect(f.fetchFinish).not.toHaveBeenCalled();
+    f.ctx.subcall.beforeSend = vi.fn().mockResolvedValue(true);
+    expect(JSON.parse(await f.run())).toMatchObject({ status: 'ok' });
+    const newId = stableResearchId(id, 'attempt-2', 'account_profile');
+    expect(newId).not.toBe(oldId);
+    expect(f.operations.get(newId)?.state).toBe('succeeded');
+    expect(f.evidence.open.mock.calls.filter(([operationId]) => operationId === oldId)).toHaveLength(1);
+    expect(f.tikhub).toHaveBeenCalledTimes(2);
+    expect(f.fetchClaim).toHaveBeenCalledTimes(2);
+  });
+
+  it('never resends an unknown supplier attempt on another tool invocation', async () => {
+    const f = fixture();
+    f.tikhub.mockRejectedValueOnce(new Error('supplier timed out after send'));
+    expect(JSON.parse(await f.run())).toMatchObject({ status: 'partial' });
+    expect(f.fetchFinish).toHaveBeenCalledWith(id, 'attempt-1', 'unknown', null);
+    expect(JSON.parse(await f.run())).toMatchObject({ status: 'partial' });
+    expect(f.tikhub).toHaveBeenCalledTimes(1);
+    expect(f.billing.claim).toHaveBeenCalledTimes(1);
+    expect(f.evidence.open).toHaveBeenCalledTimes(1);
+  });
+});

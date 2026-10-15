@@ -23,6 +23,7 @@ const result: ResearchCallResult = {
 
 function fixture() {
   const billing = {
+    runId: '22222222-2222-4222-8222-222222222222',
     claim: vi.fn<ToolSubcallBilling['claim']>().mockResolvedValue({ state: 'claimed', callId: 'call-1', token: 'claim-token' }),
     dispatch: vi.fn<ToolSubcallBilling['dispatch']>().mockResolvedValue(true),
     record: vi.fn<ToolSubcallBilling['record']>().mockResolvedValue({ accountClosed: false, contentDeleted: false }),
@@ -58,7 +59,8 @@ describe('research subcall safety and accounting', () => {
     expect(f.evidence.finish).toHaveBeenCalledWith('operation-1', 'evidence-token', 'succeeded',
       expect.objectContaining({ cost: { actual: 0.001 }, items: result.items }));
     expect(f.evidence.link).toHaveBeenCalledWith('operation-1', 'call-1');
-    expect(f.evidence.open.mock.invocationCallOrder[0]).toBeLessThan(f.billing.dispatch.mock.invocationCallOrder[0]!);
+    expect(f.evidence.open.mock.invocationCallOrder[0]).toBeLessThan(f.evidence.link.mock.invocationCallOrder[0]!);
+    expect(f.evidence.link.mock.invocationCallOrder[0]).toBeLessThan(f.billing.dispatch.mock.invocationCallOrder[0]!);
     expect(f.billing.dispatch.mock.invocationCallOrder[0]).toBeLessThan(f.vendors.parallel.mock.invocationCallOrder[0]!);
     expect(f.vendors.tikhub).not.toHaveBeenCalled();
     expect(f.vendors.firecrawl).not.toHaveBeenCalled();
@@ -72,6 +74,26 @@ describe('research subcall safety and accounting', () => {
     expect(await runSubcall(f.context, request)).toEqual({ sent: false, stop, budget: stop === 'VENDOR_RATE_LIMITED' });
     expect(f.billing.claim).not.toHaveBeenCalled();
     expect(f.evidence.open).not.toHaveBeenCalled();
+    expect(f.vendors.parallel).not.toHaveBeenCalled();
+  });
+
+  it('persists the exact billing receipt before a record outage so replay can reconcile without repricing', async () => {
+    const f = fixture();
+    f.billing.record.mockRejectedValue(new Error('record unavailable'));
+    await expect(runSubcall(f.context, request)).rejects.toThrow('record unavailable');
+    const saved = f.evidence.finish.mock.calls[0]![3] as { billing: unknown };
+    expect(saved.billing).toEqual({ runId: f.billing.runId, callId: 'call-1', receipt: f.billing.record.mock.calls[0]![1] });
+    expect(f.evidence.finish.mock.invocationCallOrder[0]).toBeLessThan(f.billing.record.mock.invocationCallOrder[0]!);
+    expect(f.evidence.link).toHaveBeenCalledWith('operation-1', 'call-1');
+    expect(f.vendors.parallel).toHaveBeenCalledTimes(1);
+  });
+
+  it('never dispatches or contacts the supplier if the original call link cannot be saved', async () => {
+    const f = fixture();
+    f.evidence.link.mockRejectedValue(new Error('link unavailable'));
+    await expect(runSubcall(f.context, request)).rejects.toThrow('link unavailable');
+    expect(f.billing.dispatch).not.toHaveBeenCalled();
+    expect(f.billing.record).not.toHaveBeenCalled();
     expect(f.vendors.parallel).not.toHaveBeenCalled();
   });
 
@@ -157,12 +179,12 @@ describe('research subcall safety and accounting', () => {
     expect(f.vendors.parallel).toHaveBeenCalledTimes(1);
   });
 
-  it('does not deliver, resend or link when billing recording fails', async () => {
+  it('does not deliver or resend when billing recording fails, but retains the original call link', async () => {
     const f = fixture();
     f.billing.record.mockRejectedValue(new Error('record unavailable'));
     await expect(runSubcall(f.context, request)).rejects.toThrow('record unavailable');
     expect(f.vendors.parallel).toHaveBeenCalledTimes(1);
-    expect(f.evidence.link).not.toHaveBeenCalled();
+    expect(f.evidence.link).toHaveBeenCalledWith('operation-1', 'call-1');
   });
 
   it.each(['accountClosed', 'contentDeleted'] as const)('suppresses delivery after %s while keeping cost recorded', async field => {

@@ -1,4 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import { z } from 'zod';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { BillingRpc } from '../../bill2/service';
 import { throwIfContentErased } from '../../accountErasure/content';
@@ -125,13 +126,46 @@ export function databaseRuntimeResearchStore(deps: {
       },
     };
   }
+  async function readOperation(id: string): Promise<RuntimeOperation | null> {
+    const operation = await read<RuntimeOperation | null>('operation', id);
+    if (!operation?.result) return operation;
+    const terminal = ['succeeded', 'failed', 'unknown'].includes(operation.state);
+    if (!Object.hasOwn(operation.result, 'billing')) {
+      if (terminal && (Object.hasOwn(operation.result, 'outcome') || Object.hasOwn(operation.result, 'items'))) {
+        throw new Error('RESEARCH_STATE_UNAVAILABLE');
+      }
+      return operation;
+    }
+    if (operation.resultAccess === 'restricted' || !terminal) {
+      throw new Error('RESEARCH_STATE_UNAVAILABLE');
+    }
+    const saved = z.object({ runId: z.string().uuid(), callId: z.string().uuid(),
+      receipt: z.record(z.string(), z.unknown()),
+    }).safeParse(operation.result.billing);
+    if (!saved.success) throw new Error('RESEARCH_STATE_UNAVAILABLE');
+    const plan = await read<RuntimePlan | null>('plan', id);
+    if (!plan?.executionId) throw new Error('RESEARCH_SCOPE_DENIED');
+    // Validate the original answer, request hash and call owner before recording its saved receipt.
+    // Never bind a recovered operation to the current answer or its billing run.
+    await rpc('research_runtime_link', { a, p_plan: id, s, e: plan.executionId,
+      p_discovery: plan.discoveryId, p_operation: id, p_call: saved.data.callId });
+    const recorded = await rpc<unknown>('bill2_record', { p_actor_id: a, p_run_id: saved.data.runId,
+      p_call_id: saved.data.callId, p_evidence: saved.data.receipt });
+    const view = z.object({ accountClosed: z.boolean().optional(), contentDeleted: z.boolean().optional() })
+      .safeParse(recorded);
+    if (!view.success) throw new Error('RESEARCH_STATE_UNAVAILABLE');
+    if (view.data.accountClosed || view.data.contentDeleted) {
+      throwIfContentErased({ code: '42501', message: 'CONTENT_ERASED' });
+    }
+    return operation;
+  }
   return {
     authorization, evidence,
     async cancelUnsentPlan(id: string) {
       if (!await read<RuntimePlan | null>('plan', id)) throw new Error('RESEARCH_SCOPE_DENIED');
       await transition('cancel', id);
     },
-    readOperation: (id: string) => read<RuntimeOperation | null>('operation', id),
+    readOperation,
     readPlan: (id: string) => read<RuntimePlan | null>('plan', id),
     createCard: (id: string, payload: CardPayload) => rpc<SelectionCard>('research_card_create', { a, p_card: id, s, e, p: payload }),
     async confirmCard(id: string, payload: { selected: string[]; edits?: Record<string, string>; additions?: string[] }) {
