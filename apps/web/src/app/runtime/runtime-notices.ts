@@ -3,7 +3,7 @@ import { CHAT_ACTION, type ChatNotice } from '@/components/chat/ChatInlineNotice
 import { OUTPUT_TRUNCATED_NOTICE, PLATFORM_FAILURE_NOTICE, PROVIDER_HISTORY_NOTICE, PROVIDER_REJECTED_NOTICE,
   HISTORY_OMITTED_NOTICE } from '@/lib/runtime-gate-notice';
 import { isPaygWaiting, organizerSkipped, type PaygViewFields } from '@/lib/payg-wait';
-import { POSITIONING_REQUIRED_NOTICE } from './gate-notices';
+import { POSITIONING_REQUIRED_NOTICE, forgetUserStop, rememberUserStop } from './gate-notices';
 import { positioningRequiredNotice } from './positioning-required';
 
 /** A frozen guidance request without its execution, waiting for the user's explicit retry. */
@@ -36,6 +36,31 @@ export type RuntimeTurn = PaygViewFields & StopSignals & {
 export function stoppedByUser(turn: StopSignals, local?: boolean) {
   return Boolean(local || turn.userStopPending || turn.stopped === true
     || (turn.billing?.pausedReason === 'user_stop' && turn.billing.cancelRequested !== true));
+}
+
+/**
+ * After a failed stop request, the re-read view proves the server recorded neither a stop nor a
+ * cancellation: the round is still open with no stop or cancel signal. Only then may the page drop
+ * this tab's stop record. A lost re-read (no turn) or any recorded stop keeps it.
+ */
+export function stopNotRecorded(turn: (StopSignals & { state: string }) | undefined) {
+  return Boolean(turn && open(turn.state) && !stoppedByUser(turn) && turn.billing?.cancelRequested !== true);
+}
+
+/**
+ * Stop one round, remembering it in this tab first so it says 已停止 from the click on. A failed request
+ * may still have been recorded (a lost answer), so the record is dropped only when the re-read view
+ * proves it was not (stopNotRecorded). Resolves true when the stop request failed.
+ */
+export async function stopWithRecord(at: { storage: Storage | null; sessionId: string; executionId: string },
+  cancel: () => Promise<unknown>, reread: () => Promise<{ isError: boolean; data?: { executions?: unknown } }>) {
+  rememberUserStop(at.storage, at.sessionId, at.executionId);
+  const failed = await cancel().then(() => false, () => true);
+  const view = await reread();
+  const turns = view.data?.executions as Array<StopSignals & { executionId: string; state: string }> | undefined;
+  if (failed && !view.isError && stopNotRecorded(turns?.find(turn => turn.executionId === at.executionId)))
+    forgetUserStop(at.storage, at.sessionId, at.executionId);
+  return failed;
 }
 
 const open = (state: string) => state !== 'completed' && state !== 'cancelled';

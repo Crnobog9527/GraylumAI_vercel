@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { describe, expect, it, vi } from "vitest";
 import { OUTPUT_TRUNCATED_NOTICE, PROVIDER_HISTORY_NOTICE, PROVIDER_REJECTED_NOTICE, HISTORY_OMITTED_NOTICE } from "@/lib/runtime-gate-notice";
-import { CAPACITY_NOTICE, ENDED_NOTICE, GUIDE_HELD_NOTICE, USER_STOP_NOTICE, runtimeTailNotices, runtimeTurnNotices, type RuntimeTurn } from "./runtime-notices";
+import { CAPACITY_NOTICE, ENDED_NOTICE, GUIDE_HELD_NOTICE, USER_STOP_NOTICE, runtimeTailNotices, runtimeTurnNotices, stopWithRecord, type RuntimeTurn } from "./runtime-notices";
 
 const turn = (extra: Partial<RuntimeTurn> = {}): RuntimeTurn => ({
   executionId: "e1", state: "completed", primaryBody: null, organizerComplete: null, needsTask: false, unavailableReason: null, ...extra,
@@ -238,5 +238,45 @@ describe("positioning refusal turn", () => {
     const notices = runtimeTurnNotices(turn({ state: "cancelled", unavailableReason: "positioning_required" }), ctx());
     expect(notices.map(n => n.text)).toEqual([POSITIONING_REQUIRED_NOTICE]);
     expect(notices[0]!.text).not.toBe(ENDED_NOTICE);
+  });
+});
+
+// #1013 review: a failed stop request may still have been recorded (lost answer), so this tab's record
+// is dropped only when a successful re-read proves the server recorded neither a stop nor a cancel.
+describe("stopWithRecord", () => {
+  const store = () => { const m = new Map<string, string>(); return Object.assign(Object.create(null), {
+    getItem: (k: string) => m.get(k) ?? null, setItem: (k: string, v: string) => void m.set(k, v), removeItem: (k: string) => void m.delete(k),
+  }) as Storage; };
+  const at = (storage: Storage) => ({ storage, sessionId: "s", executionId: "e1" });
+  const key = "opc-runtime-user-stop:s:e1";
+  const view = (execution: Record<string, unknown> | null, isError = false) => async () =>
+    ({ isError, data: execution ? { executions: [{ executionId: "e1", ...execution }] } : undefined });
+  const fail = () => Promise.reject(new Error("timeout"));
+
+  it("keeps the record when the stop succeeds", async () => {
+    const storage = store();
+    expect(await stopWithRecord(at(storage), async () => ({}), view({ state: "running", userStopPending: true }))).toBe(false);
+    expect(storage.getItem(key)).toBe("1");
+  });
+
+  it("keeps the record when the request failed but the re-read cannot tell", async () => {
+    const storage = store();
+    expect(await stopWithRecord(at(storage), fail, view(null, true))).toBe(true);
+    expect(storage.getItem(key)).toBe("1");
+  });
+
+  it("keeps the record when the re-read shows the server recorded the stop or a cancel", async () => {
+    for (const execution of [{ state: "running", userStopPending: true }, { state: "completed", stopped: true },
+      { state: "running", billing: { cancelRequested: true } }, { state: "cancelled" }]) {
+      const storage = store();
+      await stopWithRecord(at(storage), fail, view(execution));
+      expect(storage.getItem(key)).toBe("1");
+    }
+  });
+
+  it("drops the record only when the re-read proves nothing was recorded", async () => {
+    const storage = store();
+    expect(await stopWithRecord(at(storage), fail, view({ state: "running", billing: { cancelRequested: false } }))).toBe(true);
+    expect(storage.getItem(key)).toBeNull();
   });
 });

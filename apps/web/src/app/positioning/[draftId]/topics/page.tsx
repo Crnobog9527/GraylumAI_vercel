@@ -28,8 +28,8 @@ import { planItem, opcPlan, opcHandoff, opcTopicTurn, opcTopicDraft, opcAdoptTop
 import { consentedTopicIds } from './adoption-consent';
 import { useTopicOpening } from './use-topic-opening';
 import { tabSession, topicFailureMessage, topicTurnOutcome, topicOpenTurnNotice, topicRejectedTurn, topicTurnRefused, topicTurnShows } from './topic-notices';
-import { forgetUserStop, rememberUserStop, userStopIds } from '@/app/runtime/gate-notices';
-import type { StopSignals } from '@/app/runtime/runtime-notices';
+import { userStopIds } from '@/app/runtime/gate-notices';
+import { stopWithRecord, type StopSignals } from '@/app/runtime/runtime-notices';
 import { finishedExecution } from '@/lib/finished-execution';
 import { isOrganizerPendingError, isPaygWaiting, type PaygViewFields } from '@/lib/payg-wait';
 import { usePaygResume } from '@/lib/use-payg-resume';
@@ -369,10 +369,9 @@ export default function TopicWorkspacePage() {
     ready: Boolean(sessionId && view.data && !busy && !pending && workspace.data?.sourceAllowed), send: request => void perform({ kind: 'chat', request }) });
 
   async function stop(executionId: string) {
-    setError(''); rememberUserStop(tabSession(), sessionId, executionId); // 已停止 from the click on, and after a reload
-    try { await cancel.mutateAsync({ executionId }); }
-    catch { forgetUserStop(tabSession(), sessionId, executionId); setError('取消状态待核实，请读取原任务。'); }
-    await view.refetch();
+    setError(''); // 已停止 from the click on, and after a reload; a failed stop keeps it until a re-read proves otherwise
+    if (await stopWithRecord({ storage: tabSession(), sessionId, executionId }, () => cancel.mutateAsync({ executionId }), () => view.refetch()))
+      setError('取消状态待核实，请读取原任务。');
   }
 
   async function recover(executionId: string) {
