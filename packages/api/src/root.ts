@@ -8,6 +8,7 @@ import { workbenchRouter } from './routers/workbench';
 import { router } from './trpc';
 import { runtimeRateLimitsRouter } from './routers/runtimeRateLimits';
 import { modelIdentityRouter } from './routers/modelIdentity';
+import { platformSecretsRouter } from './routers/platformSecrets';
 import { researchToolsRouter } from './routers/researchTools';
 import { mentorBudgetRouter } from './routers/mentorBudget';
 import { chatRouter } from './routers/chat';
@@ -56,6 +57,7 @@ export const appRouter = router({
   socialMediaFlag: socialMediaFlagRouter,
   runtimeRateLimits: runtimeRateLimitsRouter,
   modelIdentity: modelIdentityRouter,
+  platformSecrets: platformSecretsRouter,
   researchTools: researchToolsRouter,
   research: researchRouter,
   invitation: invitationRouter,
