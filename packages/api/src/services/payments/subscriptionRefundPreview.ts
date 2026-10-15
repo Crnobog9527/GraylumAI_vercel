@@ -27,6 +27,22 @@ function scopeMatches(row: { channel?: string; payment_channel?: string | null; 
   return (row.channel ?? row.payment_channel) === 'stripe' && (row.mode ?? row.payment_mode) === 'test'
     && row.merchant_namespace === order.merchant_namespace;
 }
+// PAY-STRIPE-MP: a card subscription order (0222) maps its invoices as 'payment' references, and an international
+// card (Managed Payments) charged the pre-tax amount_total plus the tax recorded for that invoice (0237).
+const isCard = (order: Pick<PreviewOrder, 'payment_method'>) => order.payment_method === 'card' || order.payment_method === 'card_cn';
+function recordedTax(order: PreviewOrder, invoiceId: string) {
+  if (order.payment_method !== 'card') return 0;
+  const facts = (Array.isArray(order.payment_amount_facts) ? order.payment_amount_facts as Array<Record<string, unknown>> : [])
+    .filter(fact => fact.kind === 'tax' && fact.evidence_ref === invoiceId);
+  requireEvidence(facts.length, 'PAY_REFUND_TAX_PENDING');
+  return facts.reduce((sum, fact) => sum + Math.round(Number(fact.amount) * 100), 0);
+}
+// A card checkout row is created before payment. Only one Stripe confirmed closed unpaid (0204 'released') is left out
+// of history; an open one may already be paid at Stripe before its webhook lands, so it still counts.
+const tookMoney = (order: PreviewOrder, refs: SubscriptionRefundEvidence['refs']) => !isCard(order)
+  || order.qualification_state !== 'released' || Boolean(order.fulfilled_at)
+  || ['paid', 'refunded', 'partially_refunded'].includes(order.payment_status ?? '')
+  || refs.some(row => row.order_id === order.id && ['payment', 'invoice'].includes(row.object_type));
 function mapped(evidence: SubscriptionRefundEvidence, order: PreviewOrder, kind: string, key: 'order_id' | 'subscription_id', id: string) {
   const refs = evidence.refs.filter(row => row.object_type === kind && row[key] === id);
   requireEvidence(refs.length === 1 && scopeMatches(refs[0], order), 'PAY_REFUND_MAPPING_UNRESOLVED');
@@ -68,13 +84,15 @@ async function readInvoiceHistory(stripe: SubscriptionRefundStripe, evidence: Su
         // Open/draft invoices may still complete. They cannot prove a closed history.
         requireEvidence(['paid', 'void', 'uncollectible'].includes(invoice.status ?? ''), 'PAY_REFUND_PROVIDER_HISTORY_UNRESOLVED');
         if (invoice.status !== 'paid') continue;
-        const matches = evidence.refs.filter(row => row.object_type === 'invoice' && row.external_id === invoice.id
-          && scopeMatches(row, order));
+        const matches = evidence.refs.filter(row => ['invoice', 'payment'].includes(row.object_type)
+          && row.external_id === invoice.id && scopeMatches(row, order));
         requireEvidence(matches.length === 1, 'PAY_REFUND_MEMBERSHIP_HISTORY_UNRESOLVED');
         const local = evidence.orders.find(row => row.id === matches[0].order_id);
         const at = invoice.status_transitions?.paid_at;
-        requireEvidence(local && local.subscription_id === subscription.id && scopeMatches(local, order)
-          && local.amount_total === invoice.amount_paid && local.currency === invoice.currency
+        requireEvidence(local && (matches[0].object_type === 'payment') === isCard(local), 'PAY_REFUND_MEMBERSHIP_HISTORY_UNRESOLVED');
+        requireEvidence(local.subscription_id === subscription.id && scopeMatches(local, order)
+          && local.amount_total !== null && local.amount_total + recordedTax(local, invoice.id) === invoice.amount_paid
+          && local.currency === invoice.currency
           && Number.isSafeInteger(at) && at! > 0, 'PAY_REFUND_INVOICE_MISMATCH');
         invoices.push({ id: invoice.id, orderId: local.id, paidAt: new Date(at! * 1000).toISOString(),
           billingReason: invoice.billing_reason });
@@ -88,7 +106,7 @@ async function readInvoiceHistory(stripe: SubscriptionRefundStripe, evidence: Su
   }
   // No missing mapping, legacy paid row, unfulfilled or ambiguous purchase may
   // disappear because a current subscription list happens to look empty.
-  for (const local of evidence.orders) {
+  for (const local of evidence.orders.filter(row => tookMoney(row, evidence.refs))) {
     requireEvidence(local.user_id === order.user_id && scopeMatches(local, order)
       && invoices.filter(invoice => invoice.orderId === local.id).length === 1,
     'PAY_REFUND_MEMBERSHIP_HISTORY_UNRESOLVED');
@@ -103,30 +121,33 @@ async function providerFacts(stripe: SubscriptionRefundStripe, evidence: Subscri
   requireEvidence(invoice, 'PAY_REFUND_INVOICE_MISSING');
   // Subscription Checkout does not necessarily persist a PaymentIntent ref.
   // The immutable original invoice ref and its authoritative payment bind cash.
+  const taxMinor = recordedTax(order, invoice.id);
+  const charged = order.amount_total! + taxMinor;
   const payments = await stripe.invoicePayments.list({ invoice: invoice.id, limit: 100 });
   requireEvidence(payments.has_more === false && payments.data.length === 1, 'PAY_REFUND_INVOICE_PAYMENT_UNRESOLVED');
   const payment = payments.data[0];
   const intentId = objectId(payment.payment.payment_intent);
   requireEvidence(payment.object === 'invoice_payment' && payment.livemode === false && payment.status === 'paid'
     && objectId(payment.invoice) === invoice.id && payment.payment.type === 'payment_intent' && intentId
-    && payment.amount_paid === order.amount_total && payment.currency === order.currency
+    && payment.amount_paid === charged && payment.currency === order.currency
     && Number.isSafeInteger(payment.status_transitions?.paid_at), 'PAY_REFUND_INVOICE_PAYMENT_MISMATCH');
   const intent = await stripe.paymentIntents.retrieve(intentId);
   const chargeId = objectId(intent.latest_charge);
   requireEvidence(intent.id === intentId && intent.livemode === false && intent.status === 'succeeded'
-    && intent.amount_received === order.amount_total && intent.currency === order.currency && chargeId,
+    && intent.amount_received === charged && intent.currency === order.currency && chargeId,
   'PAY_REFUND_PAYMENT_MISMATCH');
   const charge = await stripe.charges.retrieve(chargeId, { expand: ['balance_transaction'] });
   const balance = charge.balance_transaction;
   requireEvidence(charge.id === chargeId && charge.livemode === false && charge.paid === true && charge.captured === true
-    && objectId(charge.payment_intent) === intentId && charge.amount === order.amount_total
-    && charge.amount_captured === order.amount_total && charge.currency === order.currency
+    && objectId(charge.payment_intent) === intentId && charge.amount === charged
+    && charge.amount_captured === charged && charge.currency === order.currency
     && balance && typeof balance !== 'string' && Number.isSafeInteger(balance.created), 'PAY_REFUND_CHARGE_MISMATCH');
   const refunds = await stripe.refunds.list({ charge: chargeId, limit: 1 });
   requireEvidence(refunds.has_more === false && refunds.data.length === 0 && charge.amount_refunded === 0
     && charge.disputed === false, 'PAY_REFUND_PRIOR_REFUND_OR_DISPUTE');
+  // paidMinor is the pre-tax basis of the refund and its fee; a card order's tax (0 for a mainland card) is refunded in full.
   const cash = { paymentIntentId: intentId, chargeId, paidMinor: order.amount_total!, currency: order.currency,
-    paidAt: new Date(balance.created * 1000).toISOString() };
+    paidAt: new Date(balance.created * 1000).toISOString(), ...(isCard(order) ? { taxMinor } : {}) };
   // Different payment/capture times are ambiguous for the 168-hour boundary.
   requireEvidence(new Date(payment.status_transitions.paid_at! * 1000).toISOString() === cash.paidAt
     && invoice.paidAt === cash.paidAt, 'PAY_REFUND_PAYMENT_TIME_UNRESOLVED');

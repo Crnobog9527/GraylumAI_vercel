@@ -381,3 +381,28 @@ export async function checkRuntimeRateLimit(
     return { success: false, reason: 'unavailable', retryAfter: 60 };
   }
 }
+
+/**
+ * Supplier-side limit (RESEARCH-TOOLS plan §5): one counter per supplier + endpoint, shared by all
+ * serverless instances. Returns false when over the limit or when Redis cannot answer (fail closed).
+ */
+const vendorLimiters = new Map<string, Ratelimit>();
+export async function checkVendorRateLimit(key: string, limit: number, window: '1 s' | '1 m'): Promise<boolean> {
+  try {
+    if (!key || !Number.isSafeInteger(limit) || limit < 1) throw new Error('INVALID_VENDOR_LIMIT');
+    const id = `${window}:${limit}`;
+    let limiter = vendorLimiters.get(id);
+    if (!limiter) {
+      limiter = new Ratelimit({
+        redis: getRedis(), limiter: Ratelimit.slidingWindow(limit, window),
+        prefix: `graylum:ratelimit:vendor:${window.replace(' ', '')}:`,
+        analytics: false, ephemeralCache: false, timeout: 0,
+      });
+      vendorLimiters.set(id, limiter);
+    }
+    return (await limitWithDeadline(limiter, key)).success;
+  } catch {
+    logger.error('security', 'vendor_rate_limit_unavailable_denying_request');
+    return false;
+  }
+}
