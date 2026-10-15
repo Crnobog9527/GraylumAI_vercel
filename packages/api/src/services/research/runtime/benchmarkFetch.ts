@@ -22,13 +22,6 @@ export async function benchmarkFetch(ctx: ResearchToolContext, args: ResearchToo
       partial = true;
       continue;
     }
-    // The complete account must fit before claiming its once-only paid fetch.
-    if (budget.left < routes.kinds.length) {
-      partial = true;
-      stopReason = 'ROUND_LIMIT';
-      stopBudget = true;
-      break;
-    }
     const claim = await ctx.store.fetchClaim(account.platform, account.account,
       args.source.kind === 'refresh' ? args.source.refreshId : undefined);
     if (!claim.claimed) {
@@ -36,6 +29,13 @@ export async function benchmarkFetch(ctx: ResearchToolContext, args: ResearchToo
         evidence: JSON.stringify(claim.evidence) }, missing: [] });
       else partial = true;
       continue;
+    }
+    // Cached evidence is free. Only a newly claimed attempt needs a full account allowance.
+    if (budget.left < routes.kinds.length) {
+      partial = true;
+      stopReason = 'ROUND_LIMIT';
+      stopBudget = true;
+      break;
     }
     let dispatched = false;
     let supplierStarted = false;

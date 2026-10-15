@@ -32,7 +32,9 @@ export function researchRuntimeTools(ctx: ResearchToolContext): RuntimeTool[] {
       if (!parsed.success) return toolEnvelope({ status: 'not_confirmed', reason: 'INVALID_ARGUMENTS' });
       if (!ctx.config.enabled) return toolEnvelope({ status: 'unavailable', reason: 'RESEARCH_DISABLED' });
       const allowance = admitSubcalls(subcallNeed(name, parsed.data, ctx.config), remaining);
-      if (allowance.exhausted && name !== 'web_search' && name !== 'web_fetch') return toolEnvelope({ status: 'budget_exhausted', reason: 'ROUND_LIMIT' });
+      if (allowance.exhausted && !['web_search', 'web_fetch', 'benchmark_fetch'].includes(name)) {
+        return toolEnvelope({ status: 'budget_exhausted', reason: 'ROUND_LIMIT' });
+      }
       const budget = { left: allowance.allowed, used: 0 };
       try {
         if (name === 'propose_keywords') {

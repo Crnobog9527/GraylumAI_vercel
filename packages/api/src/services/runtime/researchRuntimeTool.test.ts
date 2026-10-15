@@ -288,10 +288,11 @@ describe('benchmark fetch cache and refresh', () => {
     expect(subcall).toHaveBeenCalledTimes(1);
   });
 
-  it('requires enough budget for the whole account before claiming its paid fetch', async () => {
+  it('requires enough budget for the whole account before dispatching its paid fetch', async () => {
     const f = fixture(1);
     expect(await f.execute('benchmark_fetch', fetchArgs)).toMatchObject({ status: 'budget_exhausted', reason: 'ROUND_LIMIT' });
-    expect(f.store.fetchClaim).not.toHaveBeenCalled();
+    expect(f.store.fetchClaim).toHaveBeenCalledTimes(1);
+    expect(f.store.fetchDispatch).not.toHaveBeenCalled();
     expect(subcall).not.toHaveBeenCalled();
   });
 
@@ -560,6 +561,39 @@ describe('full 25-subcall benchmark discovery', () => {
   });
 });
 
+
+describe('discovery continues beyond an insufficient first author batch', () => {
+  it('advances saved author progress and reuses paid operations until eight candidates qualify', async () => {
+    const f = fixture(25);
+    f.setAuthors(25);
+    const original = subcall.getMockImplementation()!;
+    subcall.mockImplementation(async (context, request) => {
+      const outcome = await original(context, request);
+      if (outcome.sent && request.vendor === 'tikhub' && request.call.kind === 'account_profile') {
+        const number = Number(request.call.account?.replace('author', ''));
+        // Only the last eight lexical authors qualify (first 15 include fewer than eight).
+        const qualified = ['author3', 'author4', 'author5', 'author6', 'author7', 'author8', 'author9', 'author24']
+          .includes(request.call.account ?? '');
+        outcome.result.items = [item({ followers: qualified ? 50000 : 100 + number })];
+        f.operations.set(context.newId(), { state: 'succeeded', identityHash: requestIdentity(request),
+          result: { ...outcome.result } });
+      }
+      return outcome;
+    });
+    expect(await f.execute('benchmark_discover', discoveryArgs)).toMatchObject({ status: 'partial',
+      reason: 'CANDIDATE_SCAN_INCOMPLETE', continue: true });
+    expect(f.store.createCard).not.toHaveBeenCalled();
+    expect(f.discoveries.get(discoveryId)?.cursor).toMatchObject({ authorCursor: 15, authorLimit: 25 });
+    const firstIds = subcall.mock.calls.map(([context]) => context.newId());
+    f.ctx.executionId = refreshId;
+    expect(await f.makeExecute()('benchmark_discover', { discoveryId })).toMatchObject({ status: 'ok', continue: false });
+    expect(subcall).toHaveBeenCalledTimes(28); // 3 keyword queries + 25 different authors across two rounds.
+    const ids = subcall.mock.calls.map(([context]) => context.newId());
+    expect(new Set(ids).size).toBe(28);
+    expect(ids.slice(0, firstIds.length)).toEqual(firstIds);
+    expect(f.store.createCard.mock.calls[0]?.[1].options).toHaveLength(8);
+  });
+});
 
 describe('candidate card total option ceiling', () => {
   it('fits twelve qualified accounts plus head references into twelve total options', async () => {

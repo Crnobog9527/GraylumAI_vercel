@@ -6,6 +6,7 @@ import { DISABLED_RESEARCH_TOOLS, researchToolsConfigSchema } from '../vendors/c
 import { tikhubRouteId } from '../vendors/tikhub';
 import type { ResearchCallResult } from '../vendors/types';
 import { benchmarkFetch } from './benchmarkFetch';
+import { researchRuntimeTools } from '../../runtime/researchRuntimeTool';
 import type { FetchClaim, FetchState, RuntimeResearchStore } from './store';
 import type { EvidencePort, VendorCalls } from './subcall';
 import { stableResearchId, type ResearchToolContext } from './toolContext';
@@ -109,5 +110,39 @@ describe('benchmark prepared fetch recovery uses database attempt rotation', () 
     expect(f.tikhub).toHaveBeenCalledTimes(1);
     expect(f.billing.claim).toHaveBeenCalledTimes(1);
     expect(f.evidence.open).toHaveBeenCalledTimes(1);
+  });
+});
+
+
+describe('benchmark cached evidence does not consume a supplier allowance', () => {
+  it('returns paid cached evidence through the tool factory with no allowance remaining', async () => {
+    const f = fixture();
+    f.ctx.config.limits.maxSubcallsPerRound = 0;
+    const cached = { ...account, metrics: { followers: 50000 }, fetchedAt: now.toISOString() };
+    f.fetchClaim.mockResolvedValue({ claimed: false, fetchId: id, state: 'succeeded', evidence: cached });
+    const tool = researchRuntimeTools(f.ctx).find(tool => tool.name === 'benchmark_fetch')!;
+    const result = JSON.parse(await tool.execute(args, 'cached-call'));
+    expect(result).toMatchObject({ status: 'ok', reason: null });
+    expect(result.items).toHaveLength(1);
+    expect(JSON.parse(result.items[0].fields.evidence)).toEqual(cached);
+    expect(f.fetchClaim).toHaveBeenCalledTimes(1);
+    expect(f.fetchDispatch).not.toHaveBeenCalled();
+    expect(f.billing.claim).not.toHaveBeenCalled();
+    expect(f.tikhub).not.toHaveBeenCalled();
+  });
+
+  it('keeps newly claimed work unsent when the remaining allowance is zero', async () => {
+    const f = fixture();
+    f.ctx.config.limits.maxSubcallsPerRound = 0;
+    const tool = researchRuntimeTools(f.ctx).find(tool => tool.name === 'benchmark_fetch')!;
+    expect(JSON.parse(await tool.execute(args, 'new-call')))
+      .toMatchObject({ status: 'budget_exhausted', reason: 'ROUND_LIMIT', items: [] });
+    expect(f.fetchClaim).toHaveBeenCalledTimes(1);
+    expect(f.fetchDispatch).not.toHaveBeenCalled();
+    expect(f.fetchFinish).not.toHaveBeenCalled();
+    expect(f.billing.claim).not.toHaveBeenCalled();
+    expect(f.evidence.open).not.toHaveBeenCalled();
+    expect(f.tikhub).not.toHaveBeenCalled();
+    expect(JSON.parse(await f.run())).toMatchObject({ status: 'ok' });
   });
 });

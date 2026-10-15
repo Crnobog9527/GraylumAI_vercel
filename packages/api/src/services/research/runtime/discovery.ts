@@ -90,7 +90,6 @@ export async function discover(ctx: ResearchToolContext, args: ResearchToolArgs<
   if (d.platforms.some(p => !socialRequest(ctx, p, 'keyword_posts', { keyword: d!.keywords[0] }))) {
     return toolEnvelope({ status: 'not_supported', reason: 'PLATFORM_NOT_VERIFIED' });
   }
-  const cap = ctx.config.limits.discoverSubcalls;
   let index = 0;
   let complete = true;
   let stopped = false;
@@ -98,11 +97,12 @@ export async function discover(ctx: ResearchToolContext, args: ResearchToolArgs<
   let stopBudget = false;
   const posts = new Map<SocialPlatform, EvidenceItem[]>();
   const found: FoundAccount[] = [];
+  let authorCursor = 0;
+  let authorLimit = z.number().int().positive().safeParse(d.cursor.authorLimit).data ?? 15;
   for (const platform of d.platforms) {
     const entries: EvidenceItem[] = [];
     posts.set(platform, entries);
     for (const keyword of d.keywords) {
-      if (index >= cap) { complete = false; break; }
       const request = socialRequest(ctx, platform, 'keyword_posts', { keyword })!;
       const result = await step(ctx, d, budget, index++, request);
       complete &&= result.complete;
@@ -118,9 +118,9 @@ export async function discover(ctx: ResearchToolContext, args: ResearchToolArgs<
   }
   if (!stopped) {
     // Rank across platforms, then spend at most the remaining discovery subcall cap on profiles.
-    const authors = d.platforms.flatMap(platform => aggregateAuthors(posts.get(platform) ?? [], 15)
+    const authors = d.platforms.flatMap(platform => aggregateAuthors(posts.get(platform) ?? [], (posts.get(platform) ?? []).length)
       .map(author => ({ ...author, platform }))).sort((a, b) => b.appearances - a.appearances || b.interactions - a.interactions);
-    for (const author of authors.slice(0, Math.min(15, Math.max(0, cap - index)))) {
+    for (const author of authors.slice(0, authorLimit)) {
       const account = canonicalAccount(author.platform, author.authorId);
       if (!account) continue;
       const request = socialRequest(ctx, author.platform, 'account_profile', { account });
@@ -133,6 +133,7 @@ export async function discover(ctx: ResearchToolContext, args: ResearchToolArgs<
         stopBudget = result.budget === true;
         break;
       }
+      authorCursor += 1;
       const profile = result.items[0];
       if (!profile) continue;
       const metrics = accountMetrics({ profile: { ...profile, ref: `${result.operationId}#1` },
@@ -140,15 +141,22 @@ export async function discover(ctx: ResearchToolContext, args: ResearchToolArgs<
       found.push({ key: `${author.platform}:${account}`, platform: author.platform, account,
         evidenceRef: `${result.operationId}#1`, metrics, classification: classifyAccount(metrics, ctx.config.recentGrowth, ctx.now()) });
     }
+    if (!stopped && !selectCandidates(found).enough && authorLimit < authors.length) {
+      // A later batch only reads old operations and spends this round's allowance on new authors.
+      authorLimit = Math.min(authorLimit + 15, authors.length);
+      stopped = true;
+      stopReason = 'CANDIDATE_SCAN_INCOMPLETE';
+    }
   }
   // Reconstruct from stable operations each time; the saved candidates support free follow-up cards.
-  await ctx.store.discoverySave(d.discoveryId, { accounts: found, attempted: index }, stopped ? 'running' : 'completed');
+  await ctx.store.discoverySave(d.discoveryId, { accounts: found, attempted: index, authorCursor, authorLimit }, stopped ? 'running' : 'completed');
   const shown = !stopped && await card(ctx, d.discoveryId, found, false, '');
-  const blockedWithoutData = stopped && stopReason !== 'ROUND_LIMIT' && found.length === 0;
+  const resumable = stopReason === 'ROUND_LIMIT' || stopReason === 'CANDIDATE_SCAN_INCOMPLETE';
+  const blockedWithoutData = stopped && !resumable && found.length === 0;
   return toolEnvelope({ status: blockedWithoutData ? (stopBudget ? 'budget_exhausted' : 'unavailable')
     : complete && shown ? 'ok' : 'partial',
     reason: stopped ? stopReason : shown ? (complete ? null : 'DISCOVERY_PARTIAL') : 'NOT_ENOUGH_CANDIDATES',
-    discoveryId: d.discoveryId, continue: stopped && stopReason === 'ROUND_LIMIT',
+    discoveryId: d.discoveryId, continue: stopped && resumable,
     items: found.map(a => ({ fields: { platform: a.platform, account: a.account,
       evidenceRef: a.evidenceRef, category: a.classification.category ?? 'excluded' }, missing: a.metrics.missing })) });
 }
