@@ -5,6 +5,7 @@
  * it while our own price rises beside it in gold. With reduced motion everything is simply there, and the total keeps
  * its line so the contrast still reads.
  */
+h2.title { margin-bottom: clamp(32px, 4vw, 56px); }
 .compareCost { padding: clamp(24px, 3vw, 44px); border: 1px solid var(--j-line); border-radius: 28px; background: #fff; box-shadow: var(--j-shadow); }
 .compareCost h3 { margin: 0 0 16px; font-size: clamp(20px, 2vw, 26px); font-weight: 600; letter-spacing: -.02em; }
 .compareCost ul { display: grid; margin: 0; padding: 0; list-style: none; }
@@ -24,11 +25,30 @@
   content: ''; position: absolute; left: -4px; right: -4px; top: 52%; height: 2px; border-radius: 2px; background: #b45309;
   transform-origin: 0 50%;
 }
-.own { min-width: 0; display: grid; gap: 14px; justify-items: start; padding: 22px 24px; border-radius: 20px; background: #fffaf0; box-shadow: 0 0 0 1.5px var(--j-gold); }
+/* Our price: a warm box whose gold edge slowly travels round it (a conic border under the padding-box fill). */
+@property --edge { syntax: '<angle>'; inherits: false; initial-value: 0deg; }
+.own {
+  min-width: 0; display: grid; gap: 16px; justify-items: start; padding: 24px 26px; border: 1.5px solid transparent; border-radius: 20px;
+  background:
+    linear-gradient(160deg, #fffdf6, #fff6e0) padding-box,
+    conic-gradient(from var(--edge), #f3d58a, #c8962a, #ffe9a8, #b9861f, #f3d58a) border-box;
+  box-shadow: 0 24px 50px -30px rgba(138, 90, 0, .45), inset 0 1px 0 rgba(255, 255, 255, .8);
+}
 .own p { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin: 0; }
 .own b { font-size: clamp(22px, 5.6vw, 42px); font-weight: 600; letter-spacing: -.03em; white-space: nowrap; }
+/* The figure: ink at rest; one gold highlight passes over it as it lands (the gradient's two ends are both ink). */
+.price {
+  background: linear-gradient(100deg, var(--j-ink) 42%, #d9a531 50%, #fff1c2 52%, #d9a531 54%, var(--j-ink) 62%) 100% 0 / 260% 100% no-repeat;
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+}
+/* The button: a fine gold line inside, and a sheen that crosses it on hover. */
+.cta { position: relative; overflow: hidden; box-shadow: inset 0 0 0 1px rgba(255, 199, 77, .35), 0 12px 24px -14px rgba(20, 19, 18, .6); }
+.cta svg { color: #ffd77a; }
+.cta::after {
+  content: ''; position: absolute; inset: 0 auto 0 -60%; width: 50%; pointer-events: none;
+  background: linear-gradient(100deg, transparent, rgba(255, 231, 170, .38), transparent); translate: 0 0;
+}
 .own a { white-space: nowrap; }
-.sampleTag { padding: 0 9px; border-radius: 999px; background: #fde68a; color: #6b4f00; font-size: 12px; font-weight: 600; line-height: 22px; }
 .checked { margin: 14px 0 0; color: var(--j-muted); font-size: 13px; }
 
 @media (prefers-reduced-motion: no-preference) {
@@ -40,4 +60,10 @@
   [data-motion='on'] .versus:not([data-in]) .total b::after { scale: 0 1; }
   [data-motion='on'] .versus .own { transition: opacity .6s var(--j-ease) .9s, scale .8s cubic-bezier(.34, 1.56, .64, 1) .9s; }
   [data-motion='on'] .versus:not([data-in]) .own { opacity: 0; scale: .92; }
+  [data-motion='on'] .own { animation: edge 9s linear infinite; }
+  [data-motion='on'] .versus[data-in] .price { animation: glint 1.4s var(--j-ease) 1.7s both; }
+  .cta::after { transition: translate .8s var(--j-ease); }
+  .cta:hover::after, .cta:focus-visible::after { translate: 320% 0; }
 }
+@keyframes edge { to { --edge: 360deg; } }
+@keyframes glint { from { background-position: 100% 0; } to { background-position: 0 0; } }

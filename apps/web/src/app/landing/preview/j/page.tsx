@@ -20,7 +20,7 @@ export default async function LandingPreviewJ() {
   if (isPublicIndexingEnabled(process.env[SITE_INDEXING_ENV])) notFound();
   const [{ siteName, membershipPlans, membershipPlansStatus }, offers] = await Promise.all([getPublicSiteSettings(), getLandingOffers()]);
   // The Pro price ("$29/月起") comes from the server catalog, as on /landing (#987). Only a local development server
-  // without that data falls back to the fixed sample prices, marked as such.
+  // without that data falls back to the paywall's final prices (not marked on the page: Owner 2026-10-15).
   const priced = withLocalSamplePricing(process.env, membershipPlansStatus === 'available' ? membershipPlans : [], offers);
   const flags = resolveLandingFlags();
   // Owner 2026-10-15: the founder offer is off the home page, so its FAQ entries go with it.
@@ -29,5 +29,5 @@ export default async function LandingPreviewJ() {
   // The sample reports are not generated yet: their placeholder shows only in a local development preview, or once the
   // landing flag is turned on (off on staging and production by default).
   const extras = { flags: flagsUsed, showSamples: flags.sampleReports || process.env.NODE_ENV === 'development' };
-  return <SampleJ data={data} siteName={siteName} extras={extras} samplePricing={priced.sample} />;
+  return <SampleJ data={data} siteName={siteName} extras={extras} />;
 }

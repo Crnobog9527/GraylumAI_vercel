@@ -25,19 +25,23 @@ export function lineMs(line: WeekLine) {
 /** One loop of the week, in milliseconds (the Owner asked for roughly 40–60 seconds). */
 export const WEEK_LOOP_MS = LINES.reduce((sum, line) => sum + lineMs(line), 0);
 const HOLD_MS = 4000;
+/** After a visitor picks a module, how long the window rests at its end before the loop carries on. */
+export const CLICK_HOLD_MS = 12000;
 const OPENING = 4;
 const reducedMotion = () => Boolean(window.matchMedia?.('(prefers-reduced-motion: reduce)').matches);
 
 /**
  * The first screen's product window (Owner 2026-10-15, round two): one week with the AI coach as one conversation,
  * message by message, the coach driving each stage — it asks, proposes, waits for a yes, then moves on. The five stage
- * labels light with the stage of the newest message. It loops while on screen. The server HTML and reduced motion show
- * the review stage, finished.
+ * labels light with the stage of the newest message, and each is a button: it plays that module from its start (Owner
+ * 2026-10-15, round six). It loops while on screen. The server HTML and reduced motion show the review stage, finished.
  */
 export function WeekJ() {
   // -1: at rest. 0 and up: how many messages have arrived (the newest is count - 1).
   const [count, setCount] = useState(-1);
   const [playing, setPlaying] = useState(false);
+  // The module a visitor picked: it plays from its start; at its end the window rests, then the loop carries on.
+  const [focus, setFocus] = useState<number | null>(null);
   const ref = useRef<HTMLElement>(null);
   const logRef = useRef<HTMLDivElement>(null);
   const editing = useOwnerEditing();
@@ -55,9 +59,22 @@ export function WeekJ() {
   useEffect(() => {
     if (!playing || editing || count < 0) return;
     const done = count >= LINES.length;
-    const timer = window.setTimeout(() => setCount(done ? OPENING : count + 1), done ? HOLD_MS : lineMs(LINES[count - 1]));
+    const leaving = focus !== null && (done || LINES[count].stage !== focus);
+    const wait = leaving ? CLICK_HOLD_MS : done ? HOLD_MS : lineMs(LINES[count - 1]);
+    const timer = window.setTimeout(() => {
+      if (leaving) setFocus(null);
+      setCount(done ? OPENING : count + 1);
+    }, wait);
     return () => window.clearTimeout(timer);
-  }, [playing, editing, count]);
+  }, [playing, editing, count, focus]);
+
+  /** Play one module from its first message (the current one too: it starts again). Reduced motion: show it finished. */
+  const pick = (index: number) => {
+    const first = LINES.findIndex(line => line.stage === index);
+    const last = first + LINES.filter(line => line.stage === index).length - 1;
+    setFocus(index);
+    setCount(reducedMotion() ? last + 1 : first + 1);
+  };
 
   // Once the conversation is longer than the window, keep the newest messages and drop whole older ones from the top,
   // so the window always starts on the top of a message (never half a line) and the newest one stays in view.
@@ -75,10 +92,16 @@ export function WeekJ() {
   const firstOfStage = shown.findIndex(line => line.stage === stage);
   return (
     <figure ref={ref} className={styles.stage} aria-label={J_WEEK.label} data-stage={stage}>
-      <ol className={styles.stages} aria-hidden="true">
+      <ol className={styles.stages} aria-label={J_WEEK.pickLabel}>
         {J_WEEK.stages.map((name, index) => {
           const Icon = STAGE_ICONS[index];
-          return <li key={name} data-on={index === stage || undefined} data-done={index < stage || undefined}><Icon size={15} strokeWidth={1.9} />{name}</li>;
+          return (
+            <li key={name} data-on={index === stage || undefined} data-done={index < stage || undefined}>
+              <button type="button" aria-current={index === stage ? 'step' : undefined} onClick={() => pick(index)}>
+                <Icon size={15} strokeWidth={1.9} aria-hidden="true" />{name}
+              </button>
+            </li>
+          );
         })}
       </ol>
       <div className={styles.window} inert aria-hidden="true">

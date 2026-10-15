@@ -12,6 +12,8 @@ export type WeekLine = { stage: number; role: 'user' | 'coach'; text: string; ca
 
 export const J_WEEK = {
   label: '示例：AI 教练陪一位上班族走完一周（帮你挖掘定位、选题、创作、发布、复盘）',
+  /** NEW (Owner 2026-10-15, round six): the five labels are buttons; this names the group for screen readers. */
+  pickLabel: '点一个模块，从头看 AI 教练怎么做',
   title: '下班后 15 分钟家常菜 · 第一周',
   /** "帮你挖掘定位" is the landing page's name for the product step 你是谁 (Owner 2026-10-15). */
   stages: ['帮你挖掘定位', '选题', '创作', '发布', '复盘'],

@@ -12,12 +12,23 @@
 }
 .stages { position: absolute; inset: 0; z-index: 2; margin: 0; padding: 0; list-style: none; pointer-events: none; }
 .stages li {
-  position: absolute; display: flex; align-items: center; gap: 6px; padding: 7px 13px; border: 1px solid var(--j-line);
+  position: absolute; display: flex; padding: 0; border: 1px solid var(--j-line); pointer-events: auto;
   border-radius: 999px; background: #fff; color: var(--j-muted); font-size: 14px; font-weight: 600; white-space: nowrap;
   box-shadow: 0 1px 2px rgba(20, 19, 18, .05), 0 10px 24px -16px rgba(20, 19, 18, .35); translate: -50% -50%;
   transition: color .4s, border-color .4s, box-shadow .4s, scale .5s var(--j-ease);
 }
 .stages li svg { color: #a3a19b; transition: color .4s; }
+/* Each label is a button that plays its module (Owner 2026-10-15): it lifts and darkens under the pointer. */
+.stages button {
+  display: flex; align-items: center; gap: 6px; padding: 7px 13px; border: 0; border-radius: 999px; background: none; color: inherit;
+  font: inherit; cursor: pointer;
+}
+.stages button:focus-visible { outline: 2px solid var(--j-ink); outline-offset: 3px; }
+.stages li:not([data-on]):hover {
+  border-color: rgba(20, 19, 18, .35); color: var(--j-ink); box-shadow: 0 1px 2px rgba(20, 19, 18, .06), 0 14px 28px -14px rgba(20, 19, 18, .45);
+}
+.stages li:hover svg { color: var(--j-gold-text); }
+.stages li:active { scale: .97; }
 .stages li[data-done] { color: var(--j-ink); }
 .stages li[data-on] {
   border-color: var(--j-gold); color: var(--j-ink); scale: 1.08;
@@ -110,7 +121,8 @@
   .stage::before { display: none; }
   .stages { position: static; display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; margin-bottom: 14px; }
   .stages { flex-wrap: nowrap; gap: 4px; }
-  .stages li { position: static; translate: none; padding: 4px 9px; font-size: 12.5px; }
+  .stages li { position: static; translate: none; font-size: 12.5px; }
+  .stages button { padding: 4px 9px; }
   .stages li svg { display: none; }
   .stages li[data-on] { scale: 1; }
   .window { max-height: 420px; mask-image: linear-gradient(#000 82%, transparent); }
