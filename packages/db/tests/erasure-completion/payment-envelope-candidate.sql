@@ -183,7 +183,9 @@ BEGIN
     OR provider->>'mode' IS DISTINCT FROM o->>'mode'
     OR provider->'metadata'->>'itemId' IS DISTINCT FROM o->>'item_id'
     OR provider->'metadata'->>'itemType' IS DISTINCT FROM o->>'item_type'
-    OR provider->'metadata'->>'billingCycle' IS DISTINCT FROM o->>'billing_cycle' THEN
+    OR provider->'metadata'->>'billingCycle' IS DISTINCT FROM o->>'billing_cycle'
+    OR (provider ? 'discounts') IS DISTINCT FROM
+      (o->>'offer_kind'='gold_first30' AND o->>'mode'='subscription') THEN
     RAISE EXCEPTION 'ERASURE_PAYMENT_REQUEST_REVIEW';
    END IF;
   END IF;
