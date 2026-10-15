@@ -10,7 +10,7 @@ import type { ResearchCandidateOption } from '../../../shared/researchTurn';
 import type { ResearchItem, SocialPlatform } from '../vendors/types';
 import { executeResearchCall, socialRequest, stableResearchId, type ResearchToolContext, type ToolAllowance } from './toolContext';
 import type { DiscoveryRecord } from './store';
-import type { SupplierRequest } from './subcall';
+import { requestIdentity, type SupplierRequest } from './subcall';
 
 const itemSchema = z.object({ url: z.string().optional(), fields: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])),
   missing: z.array(z.string()) });
@@ -41,6 +41,9 @@ async function step(ctx: ResearchToolContext, d: DiscoveryRecord, budget: ToolAl
     operationId = stableResearchId(operationId, 'unsent-successor');
     prior = await ctx.store.readOperation(operationId);
     if (recovery === 19) return { operationId, items: [], complete: false, stopped: true, reason: 'NOT_DISPATCHED' };
+  }
+  if (prior && prior.identityHash !== requestIdentity(request)) {
+    return { operationId, items: [], complete: false, stopped: true, reason: 'OPERATION_IDENTITY_MISMATCH' };
   }
   if (prior && prior.state !== 'prepared') {
     const parsed = z.array(itemSchema).safeParse(prior.result?.items);

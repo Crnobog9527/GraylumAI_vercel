@@ -2,7 +2,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { researchRuntimeTools } from './researchRuntimeTool';
 import { requestIdentity, runSubcall, type SubcallContext } from '../research/runtime/subcall';
-import { stableResearchId, type ResearchToolContext } from '../research/runtime/toolContext';
+import { socialRequest, stableResearchId, type ResearchToolContext } from '../research/runtime/toolContext';
 import type { DiscoveryRecord, FetchClaim, RuntimeOperation, RuntimePlan, RuntimeResearchStore } from '../research/runtime/store';
 import type { ToolEnvelope } from '../research/tools/envelope';
 import { DISABLED_RESEARCH_TOOLS, researchToolsConfigSchema } from '../research/vendors/config';
@@ -191,6 +191,17 @@ describe('positioning research tool factory', () => {
     expect(await f.makeExecute()('web_search', { query: 'different topic' }, 'paid-call'))
       .toMatchObject({ status: 'unavailable', reason: 'OPERATION_IDENTITY_MISMATCH' });
     expect(f.supplierCalls).toHaveBeenCalledTimes(1);
+  });
+
+  it('refuses discovery replay when the same operation index no longer describes the same request', async () => {
+    const f = fixture();
+    await f.execute('benchmark_discover', discoveryArgs);
+    const sent = f.supplierCalls.mock.calls.length;
+    const operationId = stableResearchId(discoveryId, '0');
+    f.operations.set(operationId, { ...f.operations.get(operationId)!, identityHash: 'f'.repeat(64) });
+    const resumed = await f.makeExecute()('benchmark_discover', { discoveryId });
+    expect(resumed).toMatchObject({ status: 'unavailable', reason: 'OPERATION_IDENTITY_MISMATCH', continue: false, items: [] });
+    expect(f.supplierCalls).toHaveBeenCalledTimes(sent);
   });
 
   it('requires real keyword and account authorization, not model-supplied identifiers', async () => {
@@ -386,7 +397,7 @@ describe('durable benchmark discovery and free follow-up', () => {
   it.each(['dispatched', 'unknown', 'failed'] as const)('does not resend a %s operation on discovery resume', async state => {
     const f = fixture();
     f.discoveries.set(discoveryId, { discoveryId, keywords: ['one'], platforms: ['tiktok'], cursor: {}, state: 'running' });
-    f.operations.set(stableResearchId(discoveryId, '0'), { state });
+    f.operations.set(stableResearchId(discoveryId, '0'), { state, identityHash: requestIdentity(socialRequest(f.ctx, 'tiktok', 'keyword_posts', { keyword: 'one' })!) });
     expect(await f.execute('benchmark_discover', { discoveryId })).toMatchObject({ status: 'partial', continue: false });
     expect(subcall).not.toHaveBeenCalled();
     expect(f.store.createCard).not.toHaveBeenCalled();
@@ -422,7 +433,8 @@ describe('durable benchmark discovery and free follow-up', () => {
     f.operations.set(oldId, { state: 'prepared', executionId: refreshId });
     f.store.cancelUnsentPlan.mockImplementation(async key => {
       f.plans.set(key, { ...f.plans.get(key)!, cancelled: true });
-      f.operations.set(key, { state: 'dispatched', executionId: refreshId });
+      f.operations.set(key, { state: 'dispatched', executionId: refreshId,
+        identityHash: requestIdentity(socialRequest(f.ctx, 'tiktok', 'keyword_posts', { keyword: 'one' })!) });
     });
     expect(await f.execute('benchmark_discover', { discoveryId })).toMatchObject({ status: 'partial' });
     expect(f.store.cancelUnsentPlan).toHaveBeenCalledWith(oldId);
@@ -490,7 +502,7 @@ describe('full 25-subcall benchmark discovery', () => {
     subcall.mockImplementation(async (context, request) => {
       const outcome = await successfulCall(context, request);
       if (!unknown || context.newId() !== stableResearchId(discoveryId, '13') || !outcome.sent) return outcome;
-      f.operations.set(context.newId(), { state: 'unknown', result: { items: [] } });
+      f.operations.set(context.newId(), { state: 'unknown', identityHash: requestIdentity(request), result: { items: [] } });
       return { ...outcome, result: { ...outcome.result, outcome: 'unknown', reason: 'TIMEOUT', httpStatus: null,
         items: [], usage: { ...outcome.result.usage, units: null } } };
     });
@@ -559,7 +571,7 @@ describe('candidate card total option ceiling', () => {
       if (outcome.sent && request.vendor === 'tikhub' && request.call.kind === 'account_profile'
         && ['author7', 'author8', 'author9'].includes(request.call.account ?? '')) {
         outcome.result.items = [item({ followers: 500000 })];
-        f.operations.set(context.newId(), { state: 'succeeded', result: { items: outcome.result.items } });
+        f.operations.set(context.newId(), { state: 'succeeded', identityHash: requestIdentity(request), result: { items: outcome.result.items } });
       }
       return outcome;
     });
