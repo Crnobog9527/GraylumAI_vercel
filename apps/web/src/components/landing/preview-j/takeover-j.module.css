@@ -124,15 +124,7 @@
 @keyframes messageIn { from { opacity: 0; translate: 0 10px; } to { opacity: 1; translate: 0 0; } }
 @keyframes spin { to { rotate: 1turn; } }
 
-/* The revised report after the jury, chapter by chapter */
-.revision { display: grid; align-content: start; gap: 12px; height: 100%; overflow: hidden; padding: 20px 24px; }
-.revision h2 { margin: 0; font-size: 18px; font-weight: 600; }
-.revision ol { display: grid; gap: 10px; margin: 0; padding: 0; list-style: none; }
-@media (min-width: 900px) { .revision ol { grid-template-columns: 1fr 1fr; } }
-.revision li { display: grid; gap: 4px; padding: 10px 12px; border: 1px solid #ececea; border-radius: 12px; font-size: 13px; line-height: 1.6; }
-@media (prefers-reduced-motion: no-preference) { .revision li:last-child { animation: messageIn .4s var(--j-ease) both; } }
-.revision b { font-size: 13.5px; }
-.revision p { display: grid; grid-template-columns: 3em minmax(0, 1fr); gap: 6px; margin: 0; }
-.revision p span { color: #999; }
-.revision p:first-of-type { color: #888; text-decoration: line-through; text-decoration-color: #ccc; }
-.revision p:last-of-type span { color: #1a7f45; font-weight: 600; }
+/* The finished review as the real result page (JuryReader), moved up by the scroll so all of it passes by. */
+.result { position: absolute; inset: 0; overflow: hidden auto; padding: 18px 22px 28px; background: var(--j-canvas); scrollbar-width: none; }
+.result::-webkit-scrollbar { display: none; }
+@media (prefers-reduced-motion: no-preference) { .result { animation: copyIn .5s var(--j-ease) both; } }

@@ -1,13 +1,18 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 'use client';
 
+import { useLayoutEffect, useRef } from 'react';
 import { JuryCanvasPlayer } from '@/components/landing/preview-jury/JuryCanvasPlayer';
+import { JuryReader } from '@/components/landing/preview-jury/JuryReader';
 import { resolveSeatNames, SAMPLE_PANEL } from '@/components/landing/preview-jury/jury-events';
 import type { FieldValue, StepInformation } from '@/components/opc/capture-state';
 import { StepConfirmCard } from '@/components/opc/step-confirm-card';
 import { J_FIELDS, J_FIELD_VALUES, J_STEPS } from '@/lib/landing/landing-copy-j-persona';
-import { J_REVISION, J_TAKEOVER_MOMENTS, type TakeoverLine } from '@/lib/landing/landing-copy-j-takeover';
+import { J_JURY_RESULT_LABEL, J_TAKEOVER_MOMENTS, type TakeoverLine } from '@/lib/landing/landing-copy-j-takeover';
 import { J_JURY_CASE } from './jury-case-j';
+import { J_JURY_DETAIL, J_READER_REPORT } from './jury-reader-j';
+import theme from '@/components/landing/preview-jury/jury-theme.module.css';
+import { cn } from '@/lib/utils';
 import styles from './takeover-j.module.css';
 
 const noop = () => undefined;
@@ -49,30 +54,36 @@ export function ConfirmJ({ step, information }: { step: string; information: Rec
 
 /**
  * The jury opened from the report: #1002's canvas (brief) with the prototype's sample names and this report's chapters,
- * played by the scroll;
- * then the revised report chapter by chapter, each change shown as 改前 → 改后.
+ * played by the scroll; then the finished review as the real result page (#1004's JuryReader: "30 秒看懂", the changed
+ * chapters lit, only changes or the whole text, the confirm bar), carrying this page's report. The scroll walks down
+ * the result page, so the whole of what the review gives you passes by.
  */
 export function JuryJ({ local }: { local: number }) {
   if (local <= 0.08) return null;
   const play = Math.min(1, (local - 0.08) / 0.62);
-  const changes = J_REVISION.changes;
-  const shown = local < 0.72 ? 0 : Math.min(changes.length, Math.ceil((local - 0.72) / 0.18 * changes.length));
+  const reading = local < 0.72 ? -1 : Math.min(1, (local - 0.72) / 0.26);
   return (
     <div className={styles.juryLayer}>
-      {shown === 0 ? <JuryCanvasPlayer data={J_JURY_CASE} brief progress={play} names={SEAT_NAMES} /> : (
-        <section className={styles.revision} aria-label={J_REVISION.title}>
-          <h2>{J_REVISION.title}</h2>
-          <ol>
-            {changes.slice(0, shown).map(change => (
-              <li key={change.chapter}>
-                <b>{change.chapter}</b>
-                <p><span>{J_REVISION.before}</span>{change.original}</p>
-                <p><span>{J_REVISION.after}</span>{change.revised}</p>
-              </li>
-            ))}
-          </ol>
-        </section>
+      {reading < 0 ? <JuryCanvasPlayer data={J_JURY_CASE} brief progress={play} names={SEAT_NAMES} /> : (
+        <ResultJ reading={reading} />
       )}
+    </div>
+  );
+}
+
+/**
+ * The result page in the layer, in the jury's own theme. The layer scrolls it (not a transform), so the page's sticky
+ * contents and confirm bar stay put the way they do on the real page; `reading` 0 → 1 runs from its top to its end.
+ */
+function ResultJ({ reading }: { reading: number }) {
+  const frame = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const node = frame.current;
+    if (node) node.scrollTop = Math.round((node.scrollHeight - node.clientHeight) * reading);
+  }, [reading]);
+  return (
+    <div ref={frame} className={cn(theme.theme, styles.result)} aria-label={J_JURY_RESULT_LABEL}>
+      <JuryReader detail={J_JURY_DETAIL} names={SEAT_NAMES} report={J_READER_REPORT} prototype={false} />
     </div>
   );
 }

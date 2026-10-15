@@ -24,7 +24,7 @@ const CHAPTER_MAP: Record<string, string> = {
 };
 
 /** "3 受众" → "第 3 章 受众", the canvas's way of naming a place. */
-const asCanvasPlace = (title: string) => title.replace(/^(\d+) /, '第 $1 章 ');
+export const asCanvasPlace = (title: string) => title.replace(/^(\d+) /, '第 $1 章 ');
 
 /** Every prototype chapter name in the text, also the short "第 6 章" form, moved to this report's numbering. */
 export function mapChapters(text: string): string {
@@ -36,6 +36,20 @@ export function mapChapters(text: string): string {
   });
 }
 
+/**
+ * The prototype's creator posts on 小红书 and tries 抖音; this page's person grows on TikTok and Instagram and keeps
+ * search traffic on YouTube. Each platform moves to the one that plays the same part (search, recommendation, the
+ * second channel), so the panel's debate still reads true for this person.
+ */
+const PLATFORM_MAP: Record<string, string> = { 小红书: 'YouTube', 抖音: 'TikTok', 视频号: 'Instagram' };
+
+/** Chapters and platforms of the prototype's review, moved to this page's report and person. */
+export function mapText(text: string): string {
+  let out = mapChapters(text);
+  for (const [from, to] of Object.entries(PLATFORM_MAP)) out = out.split(from).join(to);
+  return out;
+}
+
 const prototype = mockCase('full');
 
 export const J_JURY_CASE: JuryCase = {
@@ -45,5 +59,5 @@ export const J_JURY_CASE: JuryCase = {
     chapters: J_REPORT.chapters.length - 1,
     revisedExcerpt: J_REVISION.changes.slice(0, 2).map(item => item.revised).join(' '),
   },
-  arrivals: JSON.parse(mapChapters(JSON.stringify(prototype.arrivals))) as JuryCase['arrivals'],
+  arrivals: JSON.parse(mapText(JSON.stringify(prototype.arrivals))) as JuryCase['arrivals'],
 };

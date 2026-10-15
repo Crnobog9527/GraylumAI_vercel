@@ -130,7 +130,7 @@ export const J_REPORT = {
     { title: '7 账号三件套', body: `名字：${J_PERSONA.account}；简介：一个人也好好吃饭，下班后 15 分钟上桌；头像：一口锅的特写。` },
     { title: '8 内容规划', body: '三条内容线：一口锅系列、冰箱剩菜、超市半成品改造；每条线的选题池和发布节奏。' },
     { title: '9 运营手册', body: '开头怎么拍、标题怎么起、标签怎么选、评论怎么回；每一项都写了做法和理由。' },
-    { title: '10 变现路径', body: '先做厨具和食材带货清单，再出一周菜单和备菜指南，之后整理成一人食菜谱合集；每一阶段的门槛和风险。' },
+    { title: '10 变现路径', body: '先做厨具和食材带货清单，再出一周菜单和备菜指南，之后整理成一人食菜谱合集，价格参照同类账号先定一个区间；每一阶段的门槛和风险。' },
     { title: '11 合规提醒', body: '只推荐自己用过的产品；合作内容明确标注；不做减肥和医疗建议。' },
     { title: '12 见效时间', body: '前两个月重在稳定更新和找准开头；第三个月起再看哪类内容值得加码。' },
     { title: '13 待验证的假设', body: '"省事"比"好吃"更能留住人；不露脸也能建立信任。每周复盘时逐条验证。' },
@@ -143,13 +143,13 @@ export const J_REPORT = {
 const chapter = (title: string) => J_REPORT.chapters.find(item => item.title === title)?.body ?? '';
 
 /**
- * NEW: after the jury, the revised report chapter by chapter. The six chapters are the ones the panel raised (their
- * places mapped onto this report's 13 chapters, see jury-case-j.ts); "改前" is this report's own text.
+ * NEW: what the jury's revision changes, chapter by chapter, shown on the result page (JuryReader, jury-reader-j.ts).
+ * The six chapters are the ones the panel raised (mapped onto this report's 13 chapters, see jury-case-j.ts); the
+ * original is this report's own text.
  */
+export const J_JURY_RESULT_LABEL = '评审完成后的结果页';
+
 export const J_REVISION = {
-  title: '修订后的定位报告：改了这 6 章',
-  before: '改前',
-  after: '改后',
   changes: [
     { chapter: '3 受众', original: chapter('3 受众'),
       revised: '刚开始一个人生活的上班族：多在晚上七八点到家，厨房只有单灶和小冰箱，最常因为太累、买菜麻烦、一个人吃不完而放弃做饭。'

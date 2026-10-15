@@ -6,8 +6,9 @@ import { ArrowDownToLine, Check, Circle } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { JuryDetail, JurySeatNames } from './jury-events';
 import { keyPoints } from './jury-adopt';
-import { REPORT_SECTIONS } from './jury-mock-reviews';
-import { flaggedChapters, readerChapters, readingMinutes, summaryLines, type ReaderChapter } from './jury-reader';
+import {
+  flaggedChapters, PROTOTYPE_REPORT, readerChapters, readingMinutes, summaryLines, type ReaderChapter, type ReaderReport,
+} from './jury-reader';
 import { useAdoption, type Adoption, type Stale } from './use-adoption';
 import { useReadingProgress } from './use-reading-progress';
 import { ChoiceBar, Done, Review } from './JuryReaderActions';
@@ -20,11 +21,15 @@ type Mode = 'changes' | 'all';
  * The result page as the whole report, made easy to read: first "30 秒看懂" (the report on one page, the three changes
  * that matter most, and what to do next), then the chapters as cards. Changed chapters stand out and open with only
  * what changed; the rest stay quiet. A contents list on the left tracks progress and choices; a bar at the bottom
- * confirms. The chapter-by-chapter choice in two steps is unchanged (use-adoption.ts).
+ * confirms. The chapter-by-chapter choice in two steps is unchanged (use-adoption.ts). `report` is the report being read:
+ * the prototype's mock report unless a caller passes its own (keep it stable, e.g. a module constant). `prototype`
+ * false hides the prototype's own test switch (a page that only shows the result, like the landing page).
  */
-export function JuryReader({ detail, names }: { detail: JuryDetail; names: JurySeatNames }) {
+export function JuryReader({ detail, names, report = PROTOTYPE_REPORT, prototype = true }: {
+  detail: JuryDetail; names: JurySeatNames; report?: ReaderReport; prototype?: boolean;
+}) {
   const failed = detail.summary.status !== 'usable';
-  const chapters = useMemo(() => readerChapters(detail), [detail]);
+  const chapters = useMemo(() => readerChapters(detail, report), [detail, report]);
   const flagged = flaggedChapters(chapters);
   const adoption = useAdoption(detail);
   const [mode, setMode] = useState<Mode>('changes');
@@ -44,14 +49,14 @@ export function JuryReader({ detail, names }: { detail: JuryDetail; names: JuryS
     <div className={styles.reader}>
       <Toc chapters={chapters} adoption={failed ? null : adoption} progress={progress} onJump={jump} onNext={nextChange} />
       <div className={styles.column}>
-        <Glance detail={detail} chapters={chapters} adoption={failed ? null : adoption} onJump={jump} />
+        <Glance detail={detail} report={report} chapters={chapters} adoption={failed ? null : adoption} onJump={jump} />
         <div className={styles.modeRow}>
           <div role="radiogroup" aria-label="显示哪些章节" className={styles.mode}>
             {([['changes', failed ? '只看有意见的章节' : '只看改动'], ['all', '看全文']] as const).map(([key, label]) => (
               <button key={key} type="button" role="radio" aria-checked={mode === key} onClick={() => setMode(key)}>{label}</button>
             ))}
           </div>
-          {failed || adoption.result ? null : <StaleSwitch value={adoption.stale} onChange={adoption.setStale} />}
+          {failed || adoption.result || !prototype ? null : <StaleSwitch value={adoption.stale} onChange={adoption.setStale} />}
         </div>
         <div className={styles.chapters} id="jury-reader-chapters">
           {chapters.map(chapter => (
@@ -67,17 +72,17 @@ export function JuryReader({ detail, names }: { detail: JuryDetail; names: JuryS
 }
 
 /** "30 秒看懂": the report on one page, the changes that matter most, and the one next step. */
-function Glance({ detail, chapters, adoption, onJump }: {
-  detail: JuryDetail; chapters: readonly ReaderChapter[]; adoption: Adoption | null; onJump: (title: string) => void;
+function Glance({ detail, report, chapters, adoption, onJump }: {
+  detail: JuryDetail; report: ReaderReport; chapters: readonly ReaderChapter[]; adoption: Adoption | null; onJump: (title: string) => void;
 }) {
   const failed = !adoption;
   const flagged = flaggedChapters(chapters).length;
-  const points = keyPoints(detail, REPORT_SECTIONS);
+  const points = keyPoints(detail, report.sections);
   return (
     <section className={styles.glance} aria-labelledby="jury-glance-title">
       <h2 id="jury-glance-title">{failed ? '修订稿没有生成成功，原文没有任何改动' : '30 秒看懂'}</h2>
       <dl className={styles.onePage}>
-        {summaryLines(detail).map(line => (
+        {summaryLines(detail, report).map(line => (
           <div key={line.label}>
             <dt>{line.label}</dt>
             <dd>{line.text}{line.revised ? <span className={styles.revisedMark}>修订后</span> : null}</dd>
@@ -104,7 +109,7 @@ function Glance({ detail, chapters, adoption, onJump }: {
         </span>
         <span className={styles.nextFacts}>
           {adoption ? <b>已选 {adoption.done}/{adoption.total}</b> : null}
-          <span>预计阅读约 {readingMinutes(detail, chapters)} 分钟</span>
+          <span>预计阅读约 {readingMinutes(detail, chapters, report)} 分钟</span>
         </span>
       </p>
     </section>
