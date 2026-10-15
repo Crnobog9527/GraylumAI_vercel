@@ -108,7 +108,8 @@ function next(intent: MonthlyRefundIntent, seen: MonthlyRefundObservation, now: 
   const money = calculateRefundMoney({ paidMinor: terms.paidMinor, refundedMinor: 0,
     basisMinor: terms.paidMinor, feePermitted: terms.feePermitted === 'confirmed' });
   if (terms.basisMinor !== money.basisMinor || terms.feeMinor !== money.feeMinor
-    || terms.netMinor !== money.netMinor) return review('amount_mismatch');
+    // A card order (PAY-STRIPE-MP) also gets its tax back in full: the fee stays on the pre-tax amount.
+    || terms.netMinor !== money.netMinor + (terms.taxMinor ?? 0)) return review('amount_mismatch');
   if (monthlyRefundVersion(terms) !== intent.versionHash || local.approvalVersion !== intent.versionHash) {
     return review('approval_changed');
   }

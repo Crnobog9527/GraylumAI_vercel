@@ -14,25 +14,28 @@ import type { buildLandingPageData } from '@/lib/landing/landing-page-data';
 import { SIGNUP_CTA_HREF } from '@/lib/seo/content/shared';
 import { cn } from '@/lib/utils';
 import { PriceH } from './PriceH';
+import { PaletteSwitchH } from './PaletteSwitchH';
 import { FaqH, FinalH, HowItWorksH, VoiceWallH } from './SectionsH';
 import styles from './h.module.css';
+import palettes from './palettes-h.module.css';
 
 const CHROME = SITE_CHROME['zh-Hans'];
 const SAMPLES = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'] as const;
 export type LandingData = ReturnType<typeof buildLandingPageData>;
 
 /**
- * Style sample H, "流光与层次": soft colored light flowing over a pale page (AuroraBackdrop, one state per stretch
- * of the page from top to bottom), frosted-glass sheets stacked at different depths, and motion throughout —
- * the title rising in character by character, cards tilting up out of depth as they scroll in and leaning toward
- * the mouse, a glow that follows the pointer, the nine scenes typed out message by message, prices rolling in
- * like an odometer. The server HTML is the finished page; with reduced motion everything is simply there.
+ * Style sample H, "流光与层次": soft light and shade over a pale paper (AuroraBackdrop, one state per stretch of
+ * the page from top to bottom; three candidate palettes, PaletteSwitchH), frosted-glass sheets stacked at
+ * different depths, and motion throughout — the title rising in character by character, cards tilting up out of
+ * depth as they scroll in and leaning toward the mouse, a glow that follows the pointer, the nine scenes typed out
+ * message by message, prices rolling in like an odometer. The server HTML is the finished page; with reduced
+ * motion everything is simply there.
  * Copy and section order are the landing page's.
  */
 export function SampleH({ data, siteName, membershipHref }: { data: LandingData; siteName: string; membershipHref: string }) {
   const previewSteps = data.flowSteps.slice(0, 3);
   return (
-    <DepthStage className={cn(light.light, displayFont.variable, styles.page)}>
+    <DepthStage className={cn(light.light, displayFont.variable, palettes.palette, styles.page)}>
       <AuroraBackdrop />
       <nav aria-label="样稿切换" className={styles.sampleBar}>
         <span>不公开的风格样稿，文案为定稿原文</span>
@@ -106,6 +109,7 @@ export function SampleH({ data, siteName, membershipHref }: { data: LandingData;
         </nav>
         <p>© 2026 Grayscale Luminary LLC</p>
       </footer>
+      <PaletteSwitchH />
     </DepthStage>
   );
 }

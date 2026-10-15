@@ -1,0 +1,35 @@
+/* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+/*
+ * The jury's colours, type and motion as variables, shared by the prototype page and the canvas embedded on its own
+ * (the landing page), so the canvas looks the same wherever it sits.
+ */
+.theme {
+  --j-canvas: #fafafa;
+  --j-desk: #f3f3f3;
+  --j-paper: #ffffff;
+  --j-ink: #1c1c1c;
+  --j-body: #3a3a3a;
+  --j-muted: #6b6b6b;
+  --j-rule: #e5e5e5;
+  --j-ink-soft: #cccccc;
+  --j-bronze: #82632c;
+  --j-bronze-soft: rgba(130, 99, 44, .1);
+  --j-seat-a: #56677d;
+  --j-seat-b: #5f7258;
+  --j-seat-c: #8c6152;
+  --j-critical: #9a3b2e;
+  --j-lift: 0 10px 24px -14px rgba(0, 0, 0, .28);
+  --j-ease: cubic-bezier(.22, 1, .36, 1);
+  --j-serif: 'Songti SC', 'Noto Serif SC', 'Source Han Serif SC', 'STSong', serif;
+  --j-sans: 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', system-ui, sans-serif;
+}
+
+/* The canvas embedded on its own: themed, filling its parent's height. */
+.player {
+  composes: theme;
+  height: 100%;
+  color: var(--j-ink);
+  font-family: var(--j-sans);
+  font-size: 17px;
+  line-height: 1.75;
+}

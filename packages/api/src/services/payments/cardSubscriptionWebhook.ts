@@ -4,9 +4,11 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { resolveStripeScope } from './stripeCheckoutPersistence';
 import { recoverMethodCheckout } from './walletWebhook';
 import { freezePurchaseSnapshot } from './contracts';
-import { GRAYLUM_INITIATED_CANCEL, stripePreTaxAmount } from './purchaseFacts';
+import { stripePreTaxAmount } from './purchaseFacts';
 import { recordStripeInvoiceConflict } from './stripeConflictEvidence';
 import { recordCardPaymentTax } from './cardPaymentEvidence';
+import { readSubscription, stopRenewalAfterReview, stripeStopState, syncState } from './cardSubscriptionStop';
+import { syncMonthlyRefundSubscription } from './monthlyRefundWebhook';
 import { PAYMENT_EVIDENCE_CONFLICT } from './stripeWebhookError';
 import { logger } from '../../lib/logger';
 
@@ -56,49 +58,6 @@ async function orderCheckoutSession(db: SupabaseClient, stripe: Stripe, scope: {
   const matches = sessions.data.filter(session => session.metadata?.orderId === order.id);
   if (matches.length !== 1 || sessions.has_more) throw new Error('PAY_WAFFO_CHECKOUT_UNAVAILABLE');
   return matches[0]!.id;
-}
-
-/** "Stopped" means no further renewal: cancel_at_period_end, or a cancel_at exactly at the current paid-period end
- * (a later cancel_at still renews in between, so it is not a stop). */
-function stripeStopState(subscription: Stripe.Subscription) {
-  const item = subscription.items?.data?.length === 1 ? subscription.items.data[0] : null;
-  const stopAtEnd = subscription.cancel_at_period_end === true
-    || (subscription.cancel_at !== null && item !== null && subscription.cancel_at === item.current_period_end);
-  return { stop: stopAtEnd, canceled: subscription.status === 'canceled' || subscription.status === 'incomplete_expired' };
-}
-
-async function readSubscription(stripe: Stripe, subscriptionId: string) {
-  const subscription = await stripe.subscriptions.retrieve(subscriptionId);
-  if (subscription.object !== 'subscription' || subscription.id !== subscriptionId || subscription.livemode) {
-    throw new Error(PAYMENT_EVIDENCE_CONFLICT);
-  }
-  return subscription;
-}
-
-async function syncState(db: SupabaseClient, merchant: string, localSubscriptionId: string, subscription: Stripe.Subscription) {
-  const state = stripeStopState(subscription);
-  // Only a cancellation the buyer asked for ends the founder renewal window; retry exhaustion does not.
-  const result = await db.rpc('pay_stripe_mp_sync_subscription', { p_subscription: localSubscriptionId, p_merchant: merchant,
-    p_cancel_at_period_end: state.stop, p_canceled: state.canceled,
-    p_user_canceled: state.canceled && subscription.cancellation_details?.reason === 'cancellation_requested'
-      && subscription.cancellation_details?.comment !== GRAYLUM_INITIATED_CANCEL });
-  if (result.error) throw new Error('PAY_STRIPE_MP_RENEWAL_UNAVAILABLE', { cause: result.error });
-  return state;
-}
-
-/** A renewal kept for review (closed or erasing account, stopped credit release, canceled locally) must not charge
- * again: stop renewal at Stripe and confirm before acknowledging. A failure throws so Stripe retries the event; the
- * renewal is deduplicated by invoice, so the retry only repeats this stop. */
-async function stopRenewalAfterReview(db: SupabaseClient, stripe: Stripe, merchant: string, localSubscriptionId: string,
-  subscriptionId: string) {
-  let subscription = await readSubscription(stripe, subscriptionId);
-  if (!stripeStopState(subscription).stop && !stripeStopState(subscription).canceled) {
-    await stripe.subscriptions.update(subscriptionId, { cancel_at_period_end: true,
-      cancellation_details: { comment: GRAYLUM_INITIATED_CANCEL } });
-    subscription = await readSubscription(stripe, subscriptionId);
-  }
-  const state = await syncState(db, merchant, localSubscriptionId, subscription);
-  if (!state.stop && !state.canceled) throw new Error('PAY_STRIPE_MP_RENEWAL_STOP_UNCONFIRMED');
 }
 
 /** A paid renewal invoice: one line, the next period, pre-tax amount (Managed Payments adds tax on top). */
@@ -186,6 +145,9 @@ export async function handleCardSubscriptionState(db: SupabaseClient, stripe: St
     if (state.stop || state.canceled) throw new Error('PAY_STRIPE_MP_FIRST_PAYMENT_PENDING');
     return true;
   }
+  // While our approved monthly refund holds it (step 4b-2), that flow owns the subscription: it observes the change and
+  // finishes the refund; the ordinary sync would be refused by the hold (0193 source guard).
+  if (await syncMonthlyRefundSubscription(db, stripe, subscriptionId)) return true;
   await syncState(db, scope.merchant, order.localSubscriptionId, subscription);
   return true;
 }
