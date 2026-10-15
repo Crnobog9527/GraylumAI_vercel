@@ -3,9 +3,10 @@ import {describe,it,expect,vi} from 'vitest';
 import {createHash,randomBytes} from 'node:crypto';
 import {gzipSync} from 'node:zlib';
 import {decodeOpenRouterStreamObservation} from './openRouterEvidence';
-import {openRouterStream,OPENROUTER_STREAM_BYTE_LIMIT} from './openRouterStream';
+import {openRouterStream,OPENROUTER_STREAM_BYTE_LIMIT,OPENROUTER_STREAM_FRAME_LIMIT} from './openRouterStream';
 import {openRouterAdapter} from './openRouterAdapter';
 import {openRouterBound} from './openRouterPolicy';
+import {OPENROUTER_RESPONSE_BYTE_LIMIT as responseLimit} from './responseCapacity';
 const identity={provider:'openrouter',account:'test',model:'test/model',protocol:'openrouter-chat-v1',providerLimits:{providerSlug:'synthetic',contextTokens:10000,promptUsdPerMillion:'2',completionUsdPerMillion:'0',requestUsd:'0'},outputLimit:100,upperUsd:'0.02'} as const;
 const body=JSON.stringify({model:identity.model,stream:true,stream_options:{include_usage:true},store:false,messages:[],max_tokens:100,provider:openRouterBound(identity.providerLimits,identity.outputLimit).routing});
 const chunk=(delta:Record<string,unknown>,finish:string|null=null,extra:Record<string,unknown>={})=>JSON.stringify({id:'gen-stream',model:identity.model,choices:[{index:0,delta,finish_reason:finish}],...extra});
@@ -203,4 +204,62 @@ it('CHAT-NATIVE-OUTPUT: the same call settles identically streamed or not (cost,
   return {prompt:u?.prompt_tokens,completion:u?.completion_tokens};};
  expect(tokens(a)).toEqual(tokens(b));
  expect(JSON.parse(a.rawBody).choices[0].message.content).toBe(JSON.parse(b.rawBody).choices[0].message.content);
+});
+
+// Synthetic only: reproduce the signature length diagnosed on #1003 without private evidence.
+it.each([false,true])('accepts a large Claude signature through adapter/evidence (fragmented=%s)',async fragmented=>{
+ const signature='s'.repeat(83513);
+ const detail={type:'reasoning.text',index:0,format:'anthropic-claude-v1',signature};
+ const input=frame(chunk({reasoning:'synthetic thought',reasoning_details:[detail]}))+wire;
+ const bytes=new TextEncoder().encode(input);let at=0;
+ const transport=vi.fn<typeof fetch>(async()=>new Response(fragmented?new ReadableStream({pull(c){
+  if(at===bytes.length)c.close();else{const next=Math.min(at+4093,bytes.length);c.enqueue(bytes.slice(at,next));at=next;}
+ }}):input));
+ const adapter=adapterFor(transport),observation=await adapter.dispatch({input:body},identity);
+ const evidence=adapter.evidence(observation,identity,'response');
+ expect(observation.complete).toBe(true);
+ expect(evidence).toMatchObject({final:true,cost:'0.0000012',providerId:'gen-stream'});
+ expect(JSON.parse(evidence.rawBody).choices[0].message).toMatchObject({
+  content:'你好正文',reasoning_details:[detail],
+ });
+ expect(decodeOpenRouterStreamObservation(observation).toString()).toBe(input);
+ expect(transport).toHaveBeenCalledOnce();
+});
+it.each([0,1])('checks the exact SSE data byte bound, including multibyte text (+%s)',extra=>{
+ // Unknown top-level metadata is ignored in the aggregate but still consumes frame bytes.
+ const base=chunk({content:'好'},null,{padding:''});
+ const data=chunk({content:'好'},null,{padding:'x'.repeat(responseLimit-Buffer.byteLength(base)+extra)});
+ expect(Buffer.byteLength(data)).toBe(responseLimit+extra);
+ const parser=openRouterStream(identity.model);parser.push(frame(data)+terminal+accounting+end);
+ if(extra)expect(parser.result()).toMatchObject({error:'invalid_stream'});
+ else expect(parser.result()).toHaveProperty('sdkResponse');
+});
+it.each(['single field','accumulated field','aggregate','missing DONE','identity'])(
+ 'rejects oversized or invalid long-signature streams: %s',async mode=>{
+ const detail=(signature:string)=>frame(chunk({reasoning_details:[{
+  type:'reasoning.text',index:0,format:'anthropic-claude-v1',signature,
+ }]}));
+ let input=detail('s'.repeat(83513))+wire;
+ if(mode==='single field')input=detail('s'.repeat(responseLimit+1))+wire;
+ if(mode==='accumulated field')input=detail('s'.repeat(responseLimit/2))+detail('s'.repeat(responseLimit/2+1))+wire;
+ if(mode==='aggregate')input=detail('s'.repeat(responseLimit/2))+frame(chunk({content:'x'.repeat(responseLimit/2)}))+wire;
+ if(mode==='missing DONE')input=input.slice(0,-end.length);
+ if(mode==='identity')input=detail('s'.repeat(83513))+frame(chunk({},null,{id:'gen-other'}))+wire;
+ const adapter=adapterFor(async()=>new Response(input)),observation=await adapter.dispatch({input:body},identity);
+ const evidence=adapter.evidence(observation,identity,'response');
+ expect(evidence).toMatchObject({final:false,cost:null});
+ if(mode==='aggregate')expect(evidence).toMatchObject({rejectedReason:'aggregate_limit'});
+ if(mode==='missing DONE')expect(evidence).toMatchObject({rejectedReason:'incomplete_stream'});
+ if(mode==='identity')expect(evidence).toMatchObject({rejectedReason:'identity_or_response_mismatch'});
+ if(mode==='single field'||mode==='accumulated field')expect(observation.transportIssue).toBe('invalid_stream');
+});
+
+it('still enforces the event-count bound after accepting a large signature',()=>{
+ const parser=openRouterStream(identity.model);
+ parser.push(frame(chunk({reasoning_details:[{type:'reasoning.text',index:0,signature:'s'.repeat(83513)}]})));
+ const empty=frame(chunk({}));
+ for(let i=1;i<OPENROUTER_STREAM_FRAME_LIMIT;i++)parser.push(empty);
+ expect(parser.error).toBeNull();
+ parser.push(empty);
+ expect(parser.result()).toMatchObject({error:'invalid_stream'});
 });
