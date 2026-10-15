@@ -80,6 +80,8 @@ BEGIN
   OR NOT EXISTS(SELECT 1 FROM runtime_library_references r WHERE r.execution_id=e.id)
  THEN RAISE EXCEPTION 'LIB_REFERENCE_READ_DENIED'; END IF;
  IF coalesce(p_query,'')='' THEN
+  PERFORM d.id FROM library_documents d JOIN runtime_library_references r ON r.document_id=d.id AND r.actor_id=d.actor_id
+   WHERE r.execution_id=e.id ORDER BY d.id FOR SHARE OF d;
   SELECT jsonb_build_object('kind','library_index','documents',coalesce(jsonb_agg(jsonb_build_object(
     'ref','doc-'||r.ordinal,'documentId',r.document_id,'version',r.content_version,
     'title',CASE WHEN x.id IS NULL OR x.deleted_at IS NOT NULL OR x.status<>'ready' THEN NULL ELSE left(x.filename,160) END,
@@ -155,8 +157,14 @@ CREATE OR REPLACE FUNCTION public.runtime_library_tool_guard() RETURNS trigger
 LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
 DECLARE a uuid; d library_documents;
 BEGIN
- IF coalesce(NEW.result->>'kind','') NOT IN ('library_directory','library_segment') THEN RETURN NEW; END IF;
+ IF coalesce(NEW.result->>'kind','') NOT IN ('library_index','library_directory','library_segment') THEN RETURN NEW; END IF;
  SELECT actor_id INTO a FROM runtime_executions WHERE id=NEW.execution_id;
+ IF NEW.result->>'kind'='library_index' THEN
+  PERFORM x.id FROM library_documents x JOIN runtime_library_references r ON r.document_id=x.id AND r.actor_id=x.actor_id
+   WHERE r.execution_id=NEW.execution_id ORDER BY x.id FOR SHARE OF x;
+  IF NOT runtime_library_visible(a,NEW.execution_id,NEW.result) THEN RAISE EXCEPTION 'LIB_REFERENCE_REVOKED'; END IF;
+  RETURN NEW;
+ END IF;
  SELECT * INTO d FROM library_documents WHERE id::text=NEW.result->>'documentId' AND actor_id=a FOR SHARE;
  IF d.id IS NULL OR d.deleted_at IS NOT NULL OR d.status<>'ready' OR d.content_version::text<>NEW.result->>'version'
   OR NOT EXISTS(SELECT 1 FROM runtime_library_references r WHERE r.execution_id=NEW.execution_id

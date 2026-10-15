@@ -113,6 +113,7 @@ export async function runCases({db,Client,connectionString,report}) {
  await db.query('UPDATE library_documents SET content_version=1 WHERE id=$1',[notes]);
  const copy=await read(db,a,reader,'doc-1/segment-1');
  await store(db,reader,'c1',copy);
+ await store(db,reader,'index1',frozenIndex);
  assert.equal(await rpc(db,'runtime_library_visible',a,reader,copy),true);
  assert.equal(await rpc(db,'runtime_library_visible',other,reader,copy),false);
  await denied(store(db,reader,'forged',{...copy,documentId:guide}),'LIB_REFERENCE_REVOKED');
@@ -132,11 +133,18 @@ export async function runCases({db,Client,connectionString,report}) {
   await db.query('BEGIN');await db.query("SET LOCAL lock_timeout='300ms'");
   await assert.rejects(db.query("UPDATE runtime_tool_calls SET result=$2 WHERE execution_id=$1 AND call_id='c1'",[reader,copy]),error=>error.code==='55P03');
   await db.query('ROLLBACK');
+  await db.query('BEGIN');await db.query("SET LOCAL lock_timeout='300ms'");
+  await assert.rejects(read(db,a,reader),error=>error.code==='55P03');
+  await db.query('ROLLBACK');
+  await db.query('BEGIN');await db.query("SET LOCAL lock_timeout='300ms'");
+  await assert.rejects(store(db,reader,'index-race',frozenIndex),error=>error.code==='55P03');
+  await db.query('ROLLBACK');
   await deleter.query('COMMIT');
  } finally {await deleter.end();}
  assert.deepEqual(await read(db,a,reader,'doc-1/segment-2'),{kind:'unavailable',reason:'source_deleted',ref:'doc-1'});
  await denied(exec(db,a,sid,[ref(notes)]),'LIB_REFERENCE_NOT_FOUND');
  await denied(store(db,reader,'late',copy),'LIB_REFERENCE_REVOKED');
+ await denied(store(db,reader,'late-index',frozenIndex),'LIB_REFERENCE_REVOKED');
  assert.equal(await rpc(db,'runtime_library_visible',a,reader,copy),false);
  assert.equal(await rpc(db,'runtime_library_visible',a,reader,frozenIndex),false,'deleted index cannot replay its filename');
  assert.equal((await read(db,a,reader)).documents[0].available,false);
