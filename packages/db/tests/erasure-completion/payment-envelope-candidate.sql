@@ -153,7 +153,7 @@ END $$;
 
 CREATE OR REPLACE FUNCTION public.erasure_envelope_transition(o jsonb,n jsonb)
 RETURNS boolean LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path=public,pg_temp AS $$
-DECLARE wrapper jsonb:=o->'checkout_request'; provider jsonb:=wrapper->'providerRequest';
+DECLARE wrapper jsonb:=o->'checkout_request'; provider jsonb:=wrapper->'providerRequest'; price text;
 BEGIN
  -- Validate the owning financial row before the existing guard permits the first erasure marker.
  IF o->>'request_erased_at' IS NULL AND n->>'request_erased_at' IS NOT NULL
@@ -165,9 +165,17 @@ BEGIN
    OR wrapper->>'method' IS DISTINCT FROM o->>'payment_method' THEN
    RAISE EXCEPTION 'ERASURE_PAYMENT_REQUEST_REVIEW';
   END IF;
+  SELECT external_id INTO price FROM payment_provider_refs
+   WHERE id=(o->>'price_ref_id')::uuid AND channel=o->>'payment_channel'
+    AND merchant_namespace=o->>'merchant_namespace' AND mode=o->>'payment_mode' AND object_type='price';
+  IF price IS NULL OR price IS DISTINCT FROM
+    coalesce(provider->>'productId',provider->'metadata'->>'priceId') THEN
+   RAISE EXCEPTION 'ERASURE_PAYMENT_REQUEST_REVIEW';
+  END IF;
   IF provider ? 'productId' THEN
    IF o->>'payment_channel' IS DISTINCT FROM 'waffo' OR o->>'item_type' IS DISTINCT FROM 'membership_plan'
-    OR o->>'mode' IS DISTINCT FROM 'subscription' THEN
+    OR o->>'mode' IS DISTINCT FROM 'subscription'
+    OR provider->'withTrial' IS DISTINCT FROM to_jsonb(o->>'offer_kind'='gold_first30') THEN
     RAISE EXCEPTION 'ERASURE_PAYMENT_REQUEST_REVIEW';
    END IF;
   ELSE
