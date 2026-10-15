@@ -43,11 +43,14 @@ export const J_NAV = {
   label: '主导航',
   product: { label: '产品', links: PRODUCT },
   places: [TUTORIALS, { label: '价格', href: '/landing/pricing' }, FAQ, { label: '关于我们', href: '/about' }],
-  /** English has no pages yet: SEO_GEO_SPEC forbids links and hreflang to /en before it is live, so it shows, unlinked. */
+  /**
+   * OWNER (2026-10-15): one globe button with the current language's short name, opening a menu of full names.
+   * English has no pages yet: SEO_GEO_SPEC forbids links and hreflang to /en before it is live, so it shows, unlinked.
+   */
   languages: [
-    { label: '简体', href: SIMPLIFIED_HOME_HREF, lang: 'zh-Hans', current: true },
-    { label: '繁體', href: '/zh-tw', lang: 'zh-TW', current: false },
-    { label: 'English', href: null, lang: 'en', current: false },
+    { label: '简体中文', short: '简体', href: SIMPLIFIED_HOME_HREF, lang: 'zh-Hans', current: true },
+    { label: '繁體中文', short: '繁體', href: '/zh-tw', lang: 'zh-TW', current: false },
+    { label: 'English', short: 'English', href: null, lang: 'en', current: false },
   ],
   soon: '即将推出',
   languageLabel: '语言',

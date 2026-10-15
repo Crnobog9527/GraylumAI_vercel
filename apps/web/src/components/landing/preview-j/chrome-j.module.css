@@ -21,7 +21,6 @@
 .item:hover, .menu[data-open] > .item { background: rgba(20, 19, 18, .05); color: var(--j-ink); }
 .item svg { color: var(--j-muted); transition: rotate .2s var(--j-ease); }
 .menu[data-open] > .item svg { rotate: 180deg; }
-.item:focus-visible, .burger:focus-visible, .panel a:focus-visible, .languages a:focus-visible { outline: 2px solid var(--j-ink); outline-offset: 2px; }
 
 /* A menu hangs below its button; the gap above it is bridged so moving the pointer down does not close it. */
 .menu { position: relative; }
@@ -39,13 +38,33 @@
 @media (prefers-reduced-motion: no-preference) { .panel:not([hidden]) { animation: drop .18s var(--j-ease) both; } }
 @keyframes drop { from { opacity: 0; translate: -50% -4px; } }
 
-.languages { display: inline-flex; align-items: center; padding: 3px; border: 1px solid var(--j-line); border-radius: 999px; background: #fff; }
-.languages a { padding: 3px 10px; border-radius: 999px; color: var(--j-muted); font-size: 13px; text-decoration: none; }
-.languages a[aria-current='page'] { background: var(--j-ink); color: #fff; }
-.languages a:not([aria-current]):hover { color: var(--j-ink); }
-/* English before /en exists: shown, not a link, marked as coming. */
-.soon { display: inline-flex; align-items: center; gap: 5px; padding: 3px 8px 3px 10px; color: #b3b1ab; font-size: 13px; cursor: default; }
-.soon small { padding: 0 6px; border-radius: 999px; background: #f1f0ec; color: var(--j-muted); font-size: 11px; line-height: 17px; }
+.item:focus-visible, .burger:focus-visible, .panel a:focus-visible { outline: 2px solid var(--j-ink); outline-offset: 2px; }
+
+/* The language switch: a globe with the current language; a light card opens below (above in the footer). */
+.lang { position: relative; }
+.langButton {
+  display: inline-flex; align-items: center; gap: 6px; min-height: 36px; padding: 0 10px; border: 1px solid transparent; border-radius: 999px;
+  background: none; color: var(--j-body); font: inherit; font-size: 14px; cursor: pointer; transition: background-color .2s, color .2s;
+}
+.langButton:hover, .langButton[aria-expanded='true'] { background: rgba(20, 19, 18, .05); color: var(--j-ink); }
+.langButton:focus-visible, .langMenu a:focus-visible { outline: 2px solid var(--j-ink); outline-offset: 2px; }
+.langChevron { color: var(--j-muted); transition: rotate .2s var(--j-ease); }
+.langButton[aria-expanded='true'] .langChevron { rotate: 180deg; }
+.langMenu {
+  position: absolute; top: calc(100% + 8px); right: 0; z-index: 45; display: grid; gap: 2px; min-width: 200px; padding: 6px;
+  border: 1px solid var(--j-line); border-radius: 14px; background: #fff;
+  box-shadow: 0 1px 2px rgba(20, 19, 18, .05), 0 24px 48px -24px rgba(20, 19, 18, .4);
+}
+.lang[data-up] .langMenu { top: auto; right: auto; bottom: calc(100% + 8px); left: 0; }
+.langMenu a, .langSoon { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 9px 12px; border-radius: 9px; font-size: 14.5px; }
+.langMenu a { color: var(--j-ink); text-decoration: none; }
+.langMenu a:hover, .langMenu a:focus-visible { background: #f6f5f1; }
+.langMenu a[aria-checked='true'] { font-weight: 600; }
+.langMenu a svg { color: var(--j-gold-text); }
+.langSoon { color: #b3b1ab; cursor: default; }
+.langSoon small { padding: 0 7px; border-radius: 999px; background: #f1f0ec; color: var(--j-muted); font-size: 11.5px; line-height: 19px; }
+@media (prefers-reduced-motion: no-preference) { .langMenu:not([hidden]) { animation: pop .16s var(--j-ease) both; } }
+@keyframes pop { from { opacity: 0; scale: .97; } }
 
 .burger {
   display: inline-grid; place-items: center; width: 40px; height: 40px; border: 1px solid var(--j-line); border-radius: 999px;

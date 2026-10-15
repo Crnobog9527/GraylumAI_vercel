@@ -33,8 +33,10 @@ describe('style sample J, round six (Owner 2026-10-15)', () => {
     expect(html).not.toContain('样例报告');
     expect(html).not.toContain('href="/tutorials"');
     expect(html).toContain('>免费试用<');
-    expect(html).toContain('简体');
-    expect(html).toContain('繁體');
+    // One globe button with the current language; the menu lists the full names, the current one checked.
+    expect(html).toMatch(/aria-haspopup="menu"[^>]*aria-label="语言：简体中文"/);
+    expect(html).toContain('href="/zh-tw"');
+    expect(html).toMatch(/aria-checked="true"[^>]*><span>简体中文<\/span>/);
     // English shows as coming, with no link and no hreflang to /en (SEO_GEO_SPEC).
     expect(html).toContain('English');
     expect(html).toContain('即将推出');

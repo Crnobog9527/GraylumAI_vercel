@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import Link from 'next/link';
 import { J_FOOTER } from '@/lib/landing/landing-copy-j-chrome';
-import { Languages } from './SiteHeaderJ';
+import { LanguageMenuJ } from './LanguageMenuJ';
 import styles from './chrome-j.module.css';
 import page from './j.module.css';
 
@@ -28,7 +28,7 @@ export function SiteFooterJ() {
           <p className={styles.definition}>
             <img src="/graylum-logo.svg" alt="" aria-hidden="true" width={24} height={24} />{J_FOOTER.definition}
           </p>
-          <Languages />
+          <LanguageMenuJ up full />
           <p className={styles.rights}>{J_FOOTER.rights}</p>
         </div>
       </div>

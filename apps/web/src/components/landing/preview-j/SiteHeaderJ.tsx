@@ -7,6 +7,7 @@ import { ChevronDown, Menu, X } from 'lucide-react';
 import { SIGNUP_CTA_HREF } from '@/lib/seo/content/shared';
 import { J_NAV, type ChromeLink } from '@/lib/landing/landing-copy-j-chrome';
 import { cn } from '@/lib/utils';
+import { LanguageMenuJ } from './LanguageMenuJ';
 import styles from './chrome-j.module.css';
 import page from './j.module.css';
 
@@ -40,7 +41,7 @@ export function SiteHeaderJ({ siteName }: { siteName: string }) {
           {J_NAV.places.map(link => <Link key={link.href} href={link.href} className={styles.item}>{link.label}</Link>)}
         </nav>
         <div className={styles.end}>
-          <Languages className={styles.desktopOnly} />
+          <LanguageMenuJ className={styles.desktopOnly} />
           <Link href={J_NAV.login.href} className={cn(page.pillSmallLight, styles.desktopOnly)}>{J_NAV.login.label}</Link>
           <Link href={SIGNUP_CTA_HREF} className={page.pillSmall}>{J_NAV.cta}</Link>
           <button type="button" className={styles.burger} aria-expanded={drawer} aria-controls={drawerId}
@@ -60,7 +61,7 @@ export function SiteHeaderJ({ siteName }: { siteName: string }) {
               <Link key={link.href} href={link.href} onClick={() => setDrawer(false)}>{link.label}</Link>
             ))}
           </div>
-          <Languages className={styles.drawerLanguages} />
+          <LanguageMenuJ up full className={styles.drawerLanguages} />
         </nav>
       </div>
     </header>
@@ -86,23 +87,6 @@ function Menu_({ id, label, links, open, setOpen, wide = false }: {
           </Link>
         ))}
       </div>
-    </div>
-  );
-}
-
-/** 简体 / 繁體 / English. English has no pages yet: it shows as "即将推出" with no link (SEO_GEO_SPEC). */
-export function Languages({ className }: { className?: string }) {
-  return (
-    <div className={cn(styles.languages, className)} role="group" aria-label={J_NAV.languageLabel}>
-      {J_NAV.languages.map(item => (item.href ? (
-        <Link key={item.lang} href={item.href} hrefLang={item.lang} lang={item.lang} aria-current={item.current ? 'page' : undefined}>
-          {item.label}
-        </Link>
-      ) : (
-        <span key={item.lang} lang={item.lang} aria-disabled="true" title={J_NAV.soon} className={styles.soon}>
-          {item.label}<small>{J_NAV.soon}</small>
-        </span>
-      )))}
     </div>
   );
 }
