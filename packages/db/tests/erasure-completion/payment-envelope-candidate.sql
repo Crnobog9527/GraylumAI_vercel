@@ -4,7 +4,7 @@
 CREATE OR REPLACE FUNCTION public.erasure_payment_envelope(v jsonb,k text)
 RETURNS jsonb LANGUAGE plpgsql IMMUTABLE SET search_path=public,pg_temp AS $$
 DECLARE ids jsonb:='{"orderId":"id","userId":"id","itemId":"id","itemType":"id","billingCycle":"id","priceId":"id","upgradeAttemptId":"id"}';
- shape jsonb; amount jsonb; wrapper jsonb; provider jsonb;
+ shape jsonb; amount jsonb; wrapper jsonb; provider jsonb; facts jsonb; nested jsonb; line jsonb;
 BEGIN
  IF v IS NULL OR v='null'::jsonb THEN RETURN v; END IF;
  -- PAY-WAFFO / method checkout stores a test-mode transport envelope around provider facts.
@@ -38,10 +38,89 @@ BEGIN
     RAISE EXCEPTION 'ERASURE_PAYMENT_REQUEST_REVIEW';
    END IF;
   ELSIF provider->>'mode' IN ('subscription','payment') AND NOT (provider ? 'productId') THEN
-   -- Recursion handles only the known original Stripe schema, never another transport envelope.
-   IF provider ?| ARRAY['providerRequest','merchant','method'] THEN
+   -- Only the complete shapes emitted by buildStripeCheckoutRequest may authorize erasure.
+   IF provider ?| ARRAY['providerRequest','merchant','method']
+    OR jsonb_typeof(provider->'line_items') IS DISTINCT FROM 'array'
+    OR jsonb_typeof(provider->'metadata') IS DISTINCT FROM 'object'
+    OR jsonb_typeof(provider->'expires_at') IS DISTINCT FROM 'number'
+    OR coalesce(provider->>'expires_at','') !~ '^[1-9][0-9]*$'
+    OR provider->>'client_reference_id' IS DISTINCT FROM v->>'userId' THEN
     RAISE EXCEPTION 'ERASURE_PAYMENT_REQUEST_REVIEW';
    END IF;
+   facts:=erasure_ledger_value(provider->'metadata',ids);
+   IF NOT (facts ?& ARRAY['orderId','userId','itemId','itemType','billingCycle','priceId'])
+    OR EXISTS(SELECT 1 FROM jsonb_each(facts) WHERE value='null'::jsonb)
+    OR facts->>'orderId' IS DISTINCT FROM v->>'orderId'
+    OR facts->>'userId' IS DISTINCT FROM v->>'userId'
+    OR facts->>'itemType' NOT IN ('membership_plan','credit_package')
+    OR facts->>'billingCycle' NOT IN ('one_time','monthly','yearly')
+    OR facts->>'itemType'='credit_package' AND facts->>'billingCycle'<>'one_time'
+    OR facts->>'itemType'='membership_plan' AND facts->>'billingCycle'='one_time'
+    OR provider->>'mode' IS DISTINCT FROM (CASE
+      WHEN v->>'method' IN ('card','card_cn') AND facts->>'itemType'='membership_plan'
+      THEN 'subscription' ELSE 'payment' END)
+    OR jsonb_array_length(provider->'line_items')<>1 THEN
+    RAISE EXCEPTION 'ERASURE_PAYMENT_REQUEST_REVIEW';
+   END IF;
+   line:=provider->'line_items'->0;
+   IF jsonb_typeof(line) IS DISTINCT FROM 'object' OR line->'quantity' IS DISTINCT FROM '1'::jsonb THEN
+    RAISE EXCEPTION 'ERASURE_PAYMENT_REQUEST_REVIEW';
+   END IF;
+   IF line ? 'price' THEN
+    IF line->>'price' IS DISTINCT FROM facts->>'priceId' OR line ? 'price_data' THEN
+     RAISE EXCEPTION 'ERASURE_PAYMENT_REQUEST_REVIEW';
+    END IF;
+   ELSIF jsonb_typeof(line->'price_data') IS DISTINCT FROM 'object'
+    OR jsonb_typeof(line->'price_data'->'unit_amount') IS DISTINCT FROM 'number'
+    OR coalesce(line->'price_data'->>'unit_amount','') !~ '^[0-9]+$'
+    OR coalesce(line->'price_data'->>'currency','') !~ '^[a-z]{3}$' THEN
+    RAISE EXCEPTION 'ERASURE_PAYMENT_REQUEST_REVIEW';
+   END IF;
+   IF provider->>'mode'='subscription' THEN
+    IF v->>'method' NOT IN ('card','card_cn') OR facts->>'itemType'<>'membership_plan'
+     OR facts->>'billingCycle' NOT IN ('monthly','yearly') OR NOT (line ? 'price')
+     OR provider ? 'payment_intent_data' THEN
+     RAISE EXCEPTION 'ERASURE_PAYMENT_REQUEST_REVIEW';
+    END IF;
+    nested:=provider->'subscription_data'->'metadata';
+   ELSE
+    IF provider ? 'subscription_data' OR provider ? 'discounts' THEN
+     RAISE EXCEPTION 'ERASURE_PAYMENT_REQUEST_REVIEW';
+    END IF;
+    nested:=provider->'payment_intent_data'->'metadata';
+   END IF;
+   IF jsonb_typeof(nested) IS DISTINCT FROM 'object'
+    OR erasure_ledger_value(nested,ids) IS DISTINCT FROM facts THEN
+    RAISE EXCEPTION 'ERASURE_PAYMENT_REQUEST_REVIEW';
+   END IF;
+   IF v->>'method'='card' THEN
+    IF provider->'managed_payments'->'enabled' IS DISTINCT FROM 'true'::jsonb
+     OR provider ?| ARRAY['payment_method_types','payment_method_options','billing_address_collection'] THEN
+     RAISE EXCEPTION 'ERASURE_PAYMENT_REQUEST_REVIEW';
+    END IF;
+   ELSE
+    IF provider ? 'managed_payments'
+     OR provider->'payment_method_types' IS DISTINCT FROM
+       jsonb_build_array(CASE WHEN v->>'method'='card_cn' THEN 'card' ELSE v->>'method' END) THEN
+     RAISE EXCEPTION 'ERASURE_PAYMENT_REQUEST_REVIEW';
+    END IF;
+    IF v->>'method'='card_cn' AND provider->>'billing_address_collection' IS DISTINCT FROM 'required'
+     OR v->>'method' IN ('alipay','wechat_pay') AND provider->>'mode'<>'payment'
+     OR v->>'method'='wechat_pay' AND provider->'payment_method_options'->'wechat_pay'->>'client' IS DISTINCT FROM 'web'
+     OR v->>'method'<>'wechat_pay' AND provider ? 'payment_method_options' THEN
+     RAISE EXCEPTION 'ERASURE_PAYMENT_REQUEST_REVIEW';
+    END IF;
+   END IF;
+   IF provider ? 'discounts' THEN
+    IF jsonb_typeof(provider->'discounts') IS DISTINCT FROM 'array' THEN
+     RAISE EXCEPTION 'ERASURE_PAYMENT_REQUEST_REVIEW';
+    END IF;
+    IF jsonb_array_length(provider->'discounts')<>1
+     OR coalesce(provider->'discounts'->0->>'coupon','') !~ '^[A-Za-z0-9_-]{1,200}$' THEN
+     RAISE EXCEPTION 'ERASURE_PAYMENT_REQUEST_REVIEW';
+    END IF;
+   END IF;
+   -- Recursion projects the validated original Stripe schema, never another wrapper.
    provider:=erasure_payment_envelope(provider,'checkout');
   ELSE
    RAISE EXCEPTION 'ERASURE_PAYMENT_REQUEST_REVIEW';

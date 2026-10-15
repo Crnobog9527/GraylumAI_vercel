@@ -4,19 +4,29 @@ import {rpc} from '../erasure-b2a/cases.mjs';
 import {recordLibraryProof} from './library-proof.mjs';
 
 export async function runPaymentWrappers(db,report,{fresh,order,close,cleanup,begin,finish}) {
- const stripe={mode:'subscription',line_items:[{price:'price_fixture',quantity:1}],
+ const metadata={orderId:'order_fixture',userId:'user_fixture',itemId:'item_fixture',
+  itemType:'membership_plan',billingCycle:'monthly',priceId:'price_fixture'};
+ const stripe={client_reference_id:'user_fixture',expires_at:1791331200,mode:'subscription',line_items:[{price:'price_fixture',quantity:1}],
   managed_payments:{enabled:true},discounts:[{coupon:'coupon_fixture'}],
-  metadata:{orderId:'order_fixture'},subscription_data:{metadata:{orderId:'order_fixture'}}};
+  metadata,subscription_data:{metadata}};
  const waffo={productId:'PROD_fixture',currency:'USD',withTrial:true,expiresInSeconds:1800,
   includePaymentMethods:['card'],orderMerchantExternalId:'order_fixture',metadata:{orderId:'order_fixture'}};
- const wallet={mode:'payment',payment_method_types:['wechat_pay'],line_items:[{price:'price_fixture',quantity:1}],
+ const wallet={client_reference_id:'user_fixture',expires_at:1791331200,metadata,
+  payment_intent_data:{metadata},mode:'payment',payment_method_types:['wechat_pay'],line_items:[{price:'price_fixture',quantity:1}],
   payment_method_options:{wechat_pay:{client:'web'}}};
- for (const [provider,method] of [[waffo,'card'],[stripe,'card'],[wallet,'wechat_pay']]) {
+ for (const [provider,method] of [[waffo,'card'],[stripe,'card'],[wallet,'wechat_pay'],
+  [{...stripe,managed_payments:undefined,payment_method_types:['card'],billing_address_collection:'required'},'card_cn'],
+  [{...wallet,payment_method_types:['alipay'],payment_method_options:undefined},'alipay']]) {
   const f=await fresh(db);
+  if(provider.mode){
+   provider.client_reference_id=f.actor;
+   provider.metadata={...metadata,userId:f.actor};
+   provider[provider.mode==='subscription'?'subscription_data':'payment_intent_data']={metadata:provider.metadata};
+  }
   const safe={orderId:'order_fixture',userId:f.actor,method,merchant:'synthetic',mode:'test',providerRequest:provider};
   const dirty={...safe,body:'PRIVATE',providerRequest:{...provider,buyerIdentity:'PRIVATE',successUrl:'PRIVATE',
    success_url:'PRIVATE',customer_email:'PRIVATE',metadata:{...provider.metadata,private:'PRIVATE'}}};
-  const expected={...safe,providerRequest:{...provider,metadata:provider.metadata??{}}};
+  const expected=JSON.parse(JSON.stringify({...safe,providerRequest:{...provider,metadata:provider.metadata??{}}}));
   const id=await order(db,f,{}, {checkout:dirty});
   const row=async()=>(await db.query('SELECT * FROM payment_orders WHERE id=$1',[id])).rows[0];
   const requestId=await close(db,f);
@@ -38,7 +48,11 @@ export async function runPaymentWrappers(db,report,{fresh,order,close,cleanup,be
  }
  const wrapper={orderId:'order_fixture',userId:'user_fixture',method:'card',merchant:'synthetic',mode:'test',providerRequest:waffo};
  for (const invalid of [
-  {...wrapper,mode:'live'}, {...wrapper,providerRequest:null}, {...wrapper,providerRequest:{unknown:true}},
+  {...wrapper,mode:'live'}, {...wrapper,providerRequest:{mode:'payment'}},
+  {...wrapper,method:'wechat_pay',providerRequest:stripe},
+  {...wrapper,providerRequest:{...stripe,expires_at:null}},
+  {...wrapper,providerRequest:{...stripe,metadata:{...metadata,userId:'other'}}},
+  {...wrapper,providerRequest:{...stripe,line_items:null}}, {...wrapper,providerRequest:null}, {...wrapper,providerRequest:{unknown:true}},
   {...wrapper,providerRequest:{...waffo,expiresInSeconds:'1800'}},
   {...wrapper,providerRequest:{...waffo,withTrial:'true'}},
   {...wrapper,providerRequest:{...stripe,line_items:[{quantity:'1'}]}},
