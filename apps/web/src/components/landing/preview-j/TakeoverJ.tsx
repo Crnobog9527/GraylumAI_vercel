@@ -34,8 +34,9 @@ const reducedMotion = () => Boolean(window.matchMedia?.('(prefers-reduced-motion
  * "AI 教练怎么接手你的运营" (Owner 2026-10-15, round four): the real product's positioning workspace, nothing invented
  * around it. Its own step strip is the only step list; what the current moment shows is said above the window. Once
  * the visitor scrolls in, the stage holds still and the scroll plays: 你是谁 (shown as "帮你挖掘定位"), 方向判断, 找对标,
- * then the long report from the workbench footer, then the jury opened from the report. The window is a picture
- * (inert). The server HTML, no JavaScript and reduced motion get every moment stacked, finished. `intro` (the sample
+ * then the long report from the workbench footer, then the jury opened from the report. The workspace is a picture
+ * (inert); the report window and the jury's result page on top of it can be scrolled and clicked. The server HTML,
+ * no JavaScript and reduced motion get every moment stacked, finished. `intro` (the sample
  * reports) sits under the title.
  */
 export function TakeoverJ({ intro }: { intro?: ReactNode }) {
@@ -82,7 +83,7 @@ export function TakeoverJ({ intro }: { intro?: ReactNode }) {
           {J_TAKEOVER_MOMENTS.map((moment, index) => (
             <article key={moment.id} className={styles.staticStep}>
               <div className={styles.caption}><h3>{moment.caption}</h3><p>{moment.note}</p></div>
-              <div className={styles.picture} inert><PositioningClipJ moment={index} local={1} /></div>
+              <div className={styles.picture}><PositioningClipJ moment={index} local={1} /></div>
             </article>
           ))}
         </div>
@@ -106,7 +107,7 @@ export function TakeoverJ({ intro }: { intro?: ReactNode }) {
               </div>
             </div>
             <div className={styles.bar} aria-hidden="true"><i style={{ transform: `scaleX(${progress})` }} /></div>
-            <div className={styles.picture} inert data-chapter={moment.id}><PositioningClipJ moment={index} local={local} /></div>
+            <div className={styles.picture} data-chapter={moment.id}><PositioningClipJ moment={index} local={local} /></div>
           </div>
         </div>
       </section>

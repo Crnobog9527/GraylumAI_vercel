@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useMemo, useState, type RefObject } from 'react';
 import { ArrowDownToLine, Check, Circle } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { JuryDetail, JurySeatNames } from './jury-events';
@@ -23,10 +23,12 @@ type Mode = 'changes' | 'all';
  * what changed; the rest stay quiet. A contents list on the left tracks progress and choices; a bar at the bottom
  * confirms. The chapter-by-chapter choice in two steps is unchanged (use-adoption.ts). `report` is the report being read:
  * the prototype's mock report unless a caller passes its own (keep it stable, e.g. a module constant). `prototype`
- * false hides the prototype's own test switch (a page that only shows the result, like the landing page).
+ * false hides the prototype's own test switch (a page that only shows the result, like the landing page). `scrollRoot`
+ * is the box the page scrolls in when it is not the window (the landing page's frame): jumps and reading progress then
+ * move that box only, never the page around it.
  */
-export function JuryReader({ detail, names, report = PROTOTYPE_REPORT, prototype = true }: {
-  detail: JuryDetail; names: JurySeatNames; report?: ReaderReport; prototype?: boolean;
+export function JuryReader({ detail, names, report = PROTOTYPE_REPORT, prototype = true, scrollRoot }: {
+  detail: JuryDetail; names: JurySeatNames; report?: ReaderReport; prototype?: boolean; scrollRoot?: RefObject<HTMLElement | null>;
 }) {
   const failed = detail.summary.status !== 'usable';
   const chapters = useMemo(() => readerChapters(detail, report), [detail, report]);
@@ -34,14 +36,23 @@ export function JuryReader({ detail, names, report = PROTOTYPE_REPORT, prototype
   const adoption = useAdoption(detail);
   const [mode, setMode] = useState<Mode>('changes');
   const [opened, setOpened] = useState<string[]>([]);
-  const progress = useReadingProgress('jury-reader-chapters');
+  const progress = useReadingProgress('jury-reader-chapters', scrollRoot);
   const toggle = (title: string) => setOpened(list => (list.includes(title) ? list.filter(item => item !== title) : [...list, title]));
+  /** Where the reading line is: the top of the scrolling box (or of the window, under its sticky bar). */
+  const lineTop = () => (scrollRoot?.current?.getBoundingClientRect().top ?? 0) + (scrollRoot?.current ? 24 : 140);
   const jump = (title: string) => {
     if (!opened.includes(title)) setOpened(list => [...list, title]);
-    requestAnimationFrame(() => document.getElementById(`chapter-${title}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
+    requestAnimationFrame(() => {
+      const node = document.getElementById(`chapter-${title}`);
+      const box = scrollRoot?.current;
+      if (!node) return;
+      if (!box) { node.scrollIntoView({ behavior: 'smooth', block: 'start' }); return; }
+      const top = node.getBoundingClientRect().top - box.getBoundingClientRect().top + box.scrollTop - 12;
+      box.scrollTo({ top, behavior: 'smooth' });
+    });
   };
   const nextChange = () => {
-    const below = flagged.find(chapter => (document.getElementById(`chapter-${chapter.title}`)?.getBoundingClientRect().top ?? 0) > 140);
+    const below = flagged.find(chapter => (document.getElementById(`chapter-${chapter.title}`)?.getBoundingClientRect().top ?? 0) > lineTop());
     jump((below ?? flagged[0]).title);
   };
 

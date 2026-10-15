@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 'use client';
 
-import { useLayoutEffect, useRef } from 'react';
+import { useLayoutEffect, useRef, useState } from 'react';
 import { JuryCanvasPlayer } from '@/components/landing/preview-jury/JuryCanvasPlayer';
 import { JuryReader } from '@/components/landing/preview-jury/JuryReader';
 import { resolveSeatNames, SAMPLE_PANEL } from '@/components/landing/preview-jury/jury-events';
@@ -73,17 +73,22 @@ export function JuryJ({ local }: { local: number }) {
 
 /**
  * The result page in the layer, in the jury's own theme. The layer scrolls it (not a transform), so the page's sticky
- * contents and confirm bar stay put the way they do on the real page; `reading` 0 → 1 runs from its top to its end.
+ * contents and confirm bar stay put as on the real page. Until the visitor touches it, the page scroll walks it from
+ * top to end (`reading` 0 → 1); once the visitor scrolls it, clicks or uses the keys, it is theirs: it scrolls
+ * normally, "跳到下一处改动" and the contents move this frame only (JuryReader's scrollRoot), never the page.
  */
 function ResultJ({ reading }: { reading: number }) {
   const frame = useRef<HTMLDivElement>(null);
+  const [mine, setMine] = useState(false);
   useLayoutEffect(() => {
     const node = frame.current;
-    if (node) node.scrollTop = Math.round((node.scrollHeight - node.clientHeight) * reading);
-  }, [reading]);
+    if (node && !mine) node.scrollTop = Math.round((node.scrollHeight - node.clientHeight) * reading);
+  }, [reading, mine]);
+  const takeOver = () => setMine(true);
   return (
-    <div ref={frame} className={cn(theme.theme, styles.result)} aria-label={J_JURY_RESULT_LABEL}>
-      <JuryReader detail={J_JURY_DETAIL} names={SEAT_NAMES} report={J_READER_REPORT} prototype={false} />
+    <div ref={frame} className={cn(theme.theme, styles.result)} aria-label={J_JURY_RESULT_LABEL}
+      onWheel={takeOver} onTouchMove={takeOver} onKeyDown={takeOver} onPointerDown={takeOver}>
+      <JuryReader detail={J_JURY_DETAIL} names={SEAT_NAMES} report={J_READER_REPORT} prototype={false} scrollRoot={frame} />
     </div>
   );
 }

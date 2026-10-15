@@ -29,7 +29,7 @@ export const J_READER_REPORT: ReaderReport = {
   ])),
   summary: [
     { label: '定位', section: place('6 账号定位'), original: '下班后 15 分钟上桌的中式家常菜，给刚开始一个人生活的上班族',
-      revised: '同上，快在备菜：买菜当天把三顿的料分好，工作日复用，每条全程计时' },
+      revised: '下班后 15 分钟上桌的中式家常菜；快在备菜：买菜当天把三顿的料分好，工作日复用，每条全程计时' },
     { label: '受众', section: place('3 受众'), original: '刚开始一个人生活的上班族',
       revised: '刚开始一个人生活的上班族；补上放弃做饭的原因，健身新手留作以后扩展' },
     { label: '平台', section: place('4 平台选择'), original: 'TikTok 为主，同步 Instagram Reels；YouTube 只放 Shorts 和合集',

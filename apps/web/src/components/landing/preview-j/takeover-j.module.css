@@ -64,10 +64,15 @@
 }
 /* A phone has no room for the list beside the text: only the scrolling preview stays (after .toc, so it wins). */
 @media (max-width: 640px) { .reportBody { grid-template-columns: minmax(0, 1fr); } .toc { display: none; } }
-.toc li { padding: 4px 8px; border-radius: 6px; color: #aaa; }
+.toc li { border-radius: 6px; color: #aaa; }
+.toc button { width: 100%; padding: 4px 8px; border: 0; border-radius: 6px; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.toc button:not(:disabled):hover { background: #f6f5f1; color: var(--j-ink); }
+.toc button:disabled { cursor: default; }
+.toc button:focus-visible { outline: 2px solid var(--j-ink); outline-offset: 1px; }
 .toc li[data-done] { color: #555; }
 .toc li[data-on] { background: #fff7e0; color: var(--j-ink); font-weight: 600; }
-.preview { position: relative; min-height: 0; overflow: hidden; padding-right: 4px; }
+.preview { position: relative; min-height: 0; overflow-y: auto; padding-right: 6px; scrollbar-width: thin; }
+.preview:focus-visible { outline: 2px solid var(--j-ink); outline-offset: 2px; border-radius: 6px; }
 .preview article { display: grid; gap: 6px; padding-bottom: 18px; }
 .preview article + article { padding-top: 14px; border-top: 1px solid #f0efea; }
 .preview h3 { margin: 0; font-size: 15px; font-weight: 600; }
@@ -123,6 +128,8 @@
 @keyframes spin { to { rotate: 1turn; } }
 
 /* The finished review as the real result page (JuryReader), moved up by the scroll so all of it passes by. */
-.result { position: absolute; inset: 0; overflow: hidden auto; padding: 18px 22px 28px; background: var(--j-canvas); scrollbar-width: none; }
-.result::-webkit-scrollbar { display: none; }
+.result {
+  position: absolute; inset: 0; overflow: hidden auto; padding: 18px 22px 48px; background: var(--j-canvas);
+  scrollbar-width: thin;
+}
 @media (prefers-reduced-motion: no-preference) { .result { animation: copyIn .5s var(--j-ease) both; } }

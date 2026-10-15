@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 'use client';
 
-import { useLayoutEffect, useRef } from 'react';
+import { useLayoutEffect, useRef, useState } from 'react';
 import { Check, FileText, Loader2, Sparkles } from 'lucide-react';
 import { MentorMarkdown } from '@/app/positioning/[draftId]/MentorMarkdown';
 import { DEMO_LABEL } from '@/components/landing/demo/demo-script';
@@ -49,7 +49,7 @@ export function PositioningClipJ({ moment, local }: { moment: number; local: num
   const stepTitle = J_STEPS[shownStep].title;
   return (
     <div className={styles.app}>
-      <aside className={cn(frame.rail, styles.rail)} aria-label="工作区导航">
+      <aside className={cn(frame.rail, styles.rail)} aria-label="工作区导航" inert>
         <span className={frame.newConversation}><img className={frame.newConversationIcon} src="/opc-reference/new-chat.svg" alt="" />新对话</span>
         <nav className={frame.railNav}>
           <span><img className={frame.navIcon} src="/opc-reference/squares-four.svg" alt="" />功能广场</span>
@@ -67,7 +67,7 @@ export function PositioningClipJ({ moment, local }: { moment: number; local: num
         </div>
       </aside>
 
-      <section className={styles.center}>
+      <section className={styles.center} inert>
         <header className={result.positionTop}>
           <p className={styles.appTitle}>我的定位分析</p>
           <div className={result.positionActions}>
@@ -96,7 +96,7 @@ export function PositioningClipJ({ moment, local }: { moment: number; local: num
         </footer>
       </section>
 
-      <aside className={cn(result.panel, styles.checklist)}>
+      <aside className={cn(result.panel, styles.checklist)} inert>
         <header><h2>定位清单</h2><p>跟着对话自动记录；每一步核对后确认一次</p></header>
         <div className={result.body}>
           <CaptureChecklist steps={J_STEPS} information={information} valid={valid} edits={{}} selectedStepId={J_STEPS[shownStep].id}
@@ -114,8 +114,9 @@ export function PositioningClipJ({ moment, local }: { moment: number; local: num
 
 /**
  * The long report over the workbench: the chapter list beside the report itself (this person's real report, as
- * Markdown), written out chapter by chapter as the scroll moves: the chapter being written streams in, and the text
- * follows it like the live page. When it is finished it rests on its first page.
+ * Markdown), written out chapter by chapter as the scroll moves, the chapter being written streaming in. The text
+ * follows the writing only until the visitor scrolls it or picks a chapter; from then on it scrolls normally. The
+ * chapter list jumps to any chapter already written.
  */
 function Report({ writing, local }: { writing: boolean; local: number }) {
   const count = J_REPORT.chapters.length;
@@ -123,10 +124,19 @@ function Report({ writing, local }: { writing: boolean; local: number }) {
   const reached = Math.min(count - 1, Math.floor(position));
   const share = position >= count ? 1 : position - reached;
   const pane = useRef<HTMLDivElement>(null);
+  const [follow, setFollow] = useState(true);
   useLayoutEffect(() => {
     const node = pane.current;
-    if (node) node.scrollTop = writing ? node.scrollHeight : 0;
-  }, [writing, reached, share]);
+    if (node && writing && follow) node.scrollTop = node.scrollHeight;
+  }, [writing, follow, reached, share]);
+  const takeOver = () => setFollow(false);
+  const open = (index: number) => {
+    const node = pane.current;
+    const target = node?.querySelector<HTMLElement>(`[data-chapter-index="${index}"]`);
+    if (!node || !target) return;
+    setFollow(false);
+    node.scrollTo({ top: target.offsetTop - 8, behavior: 'smooth' });
+  };
   return (
     <div className={styles.reportLayer}>
       <section className={styles.report} aria-label={J_REPORT.title}>
@@ -137,15 +147,18 @@ function Report({ writing, local }: { writing: boolean; local: number }) {
         <div className={styles.reportBody}>
           <ol className={styles.toc}>
             {J_REPORT.chapters.map((chapter, index) => (
-              <li key={chapter.title} data-on={index === reached || undefined} data-done={index < reached || undefined}>{chapter.title}</li>
+              <li key={chapter.title} data-on={index === reached || undefined} data-done={index < reached || undefined}>
+                <button type="button" disabled={index > reached} onClick={() => open(index)}>{chapter.title}</button>
+              </li>
             ))}
           </ol>
-          <div ref={pane} className={styles.preview}>
+          <div ref={pane} className={styles.preview} tabIndex={0} aria-label={J_REPORT.title}
+            onWheel={takeOver} onTouchMove={takeOver} onKeyDown={takeOver} onPointerDown={takeOver}>
             {J_REPORT.chapters.slice(0, reached + 1).map((chapter, index) => {
               const last = index === reached;
               const text = last && share < 1 ? chapter.body.slice(0, Math.round(chapter.body.length * share)) : chapter.body;
               return (
-                <article key={chapter.title}>
+                <article key={chapter.title} data-chapter-index={index}>
                   <h3>{chapter.title}</h3>
                   <MentorMarkdown className={result.messageBody} text={text} live={writing && last && share < 1} />
                 </article>
