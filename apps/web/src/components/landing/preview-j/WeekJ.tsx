@@ -7,6 +7,7 @@ import { DEMO_LABEL } from '@/components/landing/demo/demo-script';
 import result from '@/components/opc/positioning-result.module.css';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
+import { J_FIELDS } from '@/lib/landing/landing-copy-j-persona';
 import { J_WEEK, type WeekCard, type WeekLine } from '@/lib/landing/landing-copy-j-week';
 import { ConfirmJ, personaInformation } from './WorkbenchPartsJ';
 import { useOwnerEditing } from './use-owner-editing';
@@ -163,7 +164,7 @@ const trendOf = (cell: string) => (cell.startsWith('下降') ? 'down' : cell.inc
 
 function Card({ card }: { card: WeekCard }) {
   const cards: Record<WeekCard, ReactNode> = {
-    confirm: <div className={styles.confirm}><ConfirmJ step="了解你" information={personaInformation(new Set(['goal', 'audience', 'resource']), 0)} /></div>,
+    confirm: <div className={styles.confirm}><ConfirmJ step="了解你" information={personaInformation(new Set(J_FIELDS.s1.map(item => item.id)), 0)} /></div>,
     topics: (
       <ol className={styles.topics}>
         {J_WEEK.topics.items.map(item => <li key={item.title}><b>{item.title}</b><span>{item.why}</span></li>)}

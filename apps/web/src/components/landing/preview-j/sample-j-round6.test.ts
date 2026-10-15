@@ -60,3 +60,33 @@ describe('style sample J, round six (Owner 2026-10-15)', () => {
     expect(J_PENDING_PAGES).toContain('/refund');
   });
 });
+
+describe('style sample J, round seven: the takeover follows the real conversation (Owner 2026-10-15)', () => {
+  it('runs 8, 7 and 6 lines, every required field filled by its step\'s summary, clicked answers equal to the options', async () => {
+    const { J_TAKEOVER_MOMENTS } = await import('@/lib/landing/landing-copy-j-takeover');
+    const { J_FIELDS, J_FIELD_VALUES, J_PERSONA_DIRECTION, J_PERSONA_GOAL, J_STEPS } = await import('@/lib/landing/landing-copy-j-persona');
+    const steps = J_TAKEOVER_MOMENTS.slice(0, 3);
+    expect(steps.map(step => step.lines.length)).toEqual([8, 7, 6]);
+    steps.forEach((moment, index) => {
+      const filled = new Set(moment.lines.flatMap(line => line.fills ?? []));
+      // The real Skill declares every field required.
+      for (const field of J_FIELDS[J_STEPS[index].id]) {
+        expect(field.required).toBe(true);
+        expect(filled.has(field.id)).toBe(true);
+        expect(J_FIELD_VALUES[field.id]?.value.length).toBeGreaterThan(4);
+      }
+      // A step ends on its summary with the confirm area; no confirm area hangs under a question any more.
+      expect(moment.lines[moment.lines.length - 1]).toMatchObject({ role: 'summary', card: 'confirm' });
+      expect(moment.lines.filter(line => line.card === 'confirm')).toHaveLength(1);
+    });
+    // An option clicked is sent as the user's message, word for word (question-card.tsx).
+    const know = steps[0].lines;
+    const goalAt = know.findIndex(line => line.card === 'goal');
+    expect(J_PERSONA_GOAL.options).toContain(know[goalAt + 1].text);
+    const diagnose = steps[1].lines;
+    const directionAt = diagnose.findIndex(line => line.card === 'direction');
+    expect(J_PERSONA_DIRECTION.options).toContain(diagnose[directionAt + 1].text);
+    // No @handle from the report's profile kit ("它" appears only for the account, in the Skill's own question).
+    expect(JSON.stringify(J_TAKEOVER_MOMENTS)).not.toMatch(/@[A-Za-z0-9]/);
+  });
+});

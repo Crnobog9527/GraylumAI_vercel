@@ -12,9 +12,10 @@ import { QuestionCardView } from '@/components/opc/question-card';
 import frame from '@/components/opc/workspace-frame.module.css';
 import { Button } from '@/components/ui/button';
 import {
-  J_PERSONA, J_PERSONA_DIRECTION, J_PERSONA_KINDS, J_PERSONA_QUESTION, J_QUESTION_HEADING, J_STEPS } from '@/lib/landing/landing-copy-j-persona';
+  J_PERSONA, J_PERSONA_DIRECTION, J_PERSONA_GOAL, J_PERSONA_KINDS, J_PERSONA_ON_CAMERA, J_QUESTION_HEADING, J_STEPS,
+} from '@/lib/landing/landing-copy-j-persona';
 import {
-  J_BENCHMARK_TABLE, J_PLAN_ROWS, J_REPORT, J_RISK_LABEL, J_TAKEOVER_MOMENTS, type TakeoverCard, type TakeoverLine,
+  J_BENCHMARK_TABLE, J_PLAN_ROWS, J_REPORT, J_TAKEOVER_MOMENTS, type TakeoverCard, type TakeoverLine,
 } from '@/lib/landing/landing-copy-j-takeover';
 import { cn } from '@/lib/utils';
 import { ConfirmJ, JuryJ, personaInformation, filledUpTo } from './WorkbenchPartsJ';
@@ -25,6 +26,14 @@ const noop = () => undefined;
 /** How many of a moment's messages have arrived at `local` (0 → 1): the first at once, the last a little before the end. */
 export function arrivedAt(local: number, count: number) {
   return Math.min(count, Math.max(1, Math.floor(local * count * 1.15) + 1));
+}
+
+/** How far the newest message has been read, 0 to 1: a short hold after it arrives, then on to its end. */
+function readThrough(local: number, count: number) {
+  const position = local * count * 1.15;
+  const arrived = arrivedAt(local, count);
+  const share = arrived < count ? position - Math.floor(position) : Math.min(1, (position - (count - 1)) / (count * 1.15 - (count - 1)));
+  return Math.min(1, Math.max(0, (share - 0.25) / 0.6));
 }
 
 /**
@@ -39,6 +48,17 @@ export function PositioningClipJ({ moment, local }: { moment: number; local: num
   const step = current.step;
   const chat = step === 3 ? J_TAKEOVER_MOMENTS[2] : current;
   const lines = step === 3 ? chat.lines : current.lines.slice(0, arrivedAt(local, current.lines.length));
+  // The chat follows the newest message: it arrives with its top in view, then, as the scroll goes on before the next
+  // one, the rest of it (its card, the confirm area) rolls into view. Never past the end.
+  const log = useRef<HTMLDivElement>(null);
+  const reading = step === 3 ? 1 : readThrough(local, current.lines.length);
+  useLayoutEffect(() => {
+    const node = log.current;
+    const last = node?.querySelector<HTMLElement>('[data-line]:last-of-type');
+    if (!node || !last) return;
+    const extra = Math.max(0, last.offsetHeight + 24 - node.clientHeight);
+    node.scrollTop = Math.min(node.scrollHeight - node.clientHeight, Math.max(0, last.offsetTop - 12 + extra * reading));
+  }, [moment, lines.length, reading]);
   const shownStep = Math.min(step, 2);
   const done = step === 3 || local >= 0.97;
   const confirmed = step === 3 ? 3 : step + (done ? 1 : 0);
@@ -81,10 +101,12 @@ export function PositioningClipJ({ moment, local }: { moment: number; local: num
             </Button>
           ))}
         </nav>
-        <div className={styles.log}>
+        <div ref={log} className={styles.log}>
           <div className={styles.logInner}>
             {lines.map((line, index) => (
-              <Message key={`${chat.id}-${index}`} line={line} step={stepTitle} fetchLocal={fetchLocal} information={information} />
+              <div key={`${chat.id}-${index}`} data-line="" className={styles.line}>
+                <Message line={line} step={stepTitle} fetchLocal={fetchLocal} information={information} />
+              </div>
             ))}
           </div>
         </div>
@@ -188,8 +210,7 @@ function Message({ line, step, fetchLocal, information }: {
       </div>
     );
   }
-  // The product has no separate risk box: the coach writes the risk as its own message, led by a bold label.
-  const text = line.role === 'risk' ? `**${J_RISK_LABEL}**：${line.text}` : line.text;
+  const text = line.text;
   const summary = line.role === 'summary';
   return (
     <>
@@ -198,21 +219,14 @@ function Message({ line, step, fetchLocal, information }: {
         <MentorMarkdown className={`mt-1 ${result.messageBody}`} text={text} live={false} />
         {line.card ? <Card card={line.card} fetchLocal={fetchLocal} /> : null}
       </div>
-      {line.card === 'confirm' || line.card === 'pending' ? <ConfirmJ step={step} information={information} /> : null}
+      {line.card === 'confirm' ? <ConfirmJ step={step} information={information} /> : null}
     </>
   );
 }
 
 function Card({ card, fetchLocal }: { card: TakeoverCard; fetchLocal: number }) {
-  if (card === 'question') return <div className={styles.cardSlot}><QuestionCardView card={J_PERSONA_QUESTION} heading={J_QUESTION_HEADING} /></div>;
-  if (card === 'direction') return <div className={styles.cardSlot}><QuestionCardView card={J_PERSONA_DIRECTION} heading={J_QUESTION_HEADING} /></div>;
-  if (card === 'kinds') {
-    return (
-      <ul className={styles.kinds}>
-        {J_PERSONA_KINDS.map(item => <li key={item.kind}><b>{item.kind}</b><span>{item.who}</span><em>{item.learn}</em></li>)}
-      </ul>
-    );
-  }
+  const question = { goal: J_PERSONA_GOAL, camera: J_PERSONA_ON_CAMERA, direction: J_PERSONA_DIRECTION }[card as 'goal'];
+  if (question) return <div className={styles.cardSlot}><QuestionCardView card={question} heading={J_QUESTION_HEADING} /></div>;
   if (card === 'fetch') {
     const fetched = Math.min(J_PERSONA_KINDS.length, Math.floor(fetchLocal * 4));
     return (

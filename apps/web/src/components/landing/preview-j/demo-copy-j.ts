@@ -1,6 +1,8 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { J_COMPARE } from '@/lib/landing/landing-copy-j-compare';
-import { J_PERSONA, J_PERSONA_DIRECTION, J_PERSONA_KINDS, J_PERSONA_QUESTION } from '@/lib/landing/landing-copy-j-persona';
+import {
+  J_PERSONA, J_PERSONA_DIRECTION, J_PERSONA_GOAL, J_PERSONA_KINDS, J_PERSONA_ON_CAMERA,
+} from '@/lib/landing/landing-copy-j-persona';
 import { J_BENCHMARK_TABLE, J_PLAN_ROWS, J_REPORT, J_TAKEOVER_MOMENTS } from '@/lib/landing/landing-copy-j-takeover';
 import { J_WEEK } from '@/lib/landing/landing-copy-j-week';
 import { J_WORK_SCENES } from '@/lib/landing/landing-copy-j-work';
@@ -34,7 +36,7 @@ export function demoCopyGroups(): DemoCopyGroup[] {
       title: 'AI 教练怎么接手你的运营', source: 'landing-copy-j-takeover.ts / landing-copy-j-persona.ts',
       items: [
         ...collectText(J_TAKEOVER_MOMENTS, 'J_TAKEOVER_MOMENTS'),
-        ...collectText({ J_PERSONA, J_PERSONA_QUESTION, J_PERSONA_DIRECTION, J_PERSONA_KINDS }, 'persona'),
+        ...collectText({ J_PERSONA, J_PERSONA_GOAL, J_PERSONA_ON_CAMERA, J_PERSONA_DIRECTION, J_PERSONA_KINDS }, 'persona'),
         // The report's chapters are the real generated report (not page copy): only their titles are editable here.
         ...collectText({ J_BENCHMARK_TABLE, J_PLAN_ROWS, J_REPORT: { ...J_REPORT, chapters: J_REPORT.chapters.map(({ title }) => ({ title })) } },
           'takeover'),

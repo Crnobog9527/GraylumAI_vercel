@@ -93,17 +93,12 @@
 
 /* The conversation (rules lost in the round-five rebuild, restored 2026-10-15): one even gap between messages, the
    latest kept in view at the bottom like the live chat; cards sit a little below their message's text. */
-.log { display: flex; flex-direction: column; justify-content: flex-end; min-height: 0; overflow: hidden; }
-.logInner { display: grid; gap: 12px; padding: 14px 2px 16px; }
+.log { position: relative; min-height: 0; overflow: hidden; }
+.logInner { display: flex; flex-direction: column; justify-content: flex-end; gap: 12px; min-height: 100%; padding: 14px 2px 16px; }
+.line { display: grid; gap: 12px; }
 @media (prefers-reduced-motion: no-preference) { .takeover .logInner > :last-child { animation: messageIn .4s var(--j-ease) both; } }
 .cardSlot { margin-top: 8px; }
 .cardSlot section { margin: 0; }
-.kinds { display: grid; gap: 6px; margin: 8px 0 0; padding: 0; list-style: none; }
-@media (min-width: 900px) { .kinds { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
-.kinds li { display: grid; gap: 2px; padding: 10px 12px; border-radius: 10px; background: #fafaf8; font-size: 13px; }
-.kinds b { font-size: 14px; }
-.kinds span { color: #6f6e6a; }
-.kinds em { color: #333; font-style: normal; }
 .fetch { display: grid; gap: 6px; margin: 8px 0 0; padding: 10px 12px; border: 1px dashed #ddd; border-radius: 12px; list-style: none; font-size: 13.5px; }
 .fetch li { display: flex; align-items: center; gap: 8px; color: #666; }
 .fetch li span { margin-left: auto; font-size: 12px; }
