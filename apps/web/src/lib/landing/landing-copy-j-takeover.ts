@@ -1,4 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import { OFFICE_WORKER_REPORT } from './sample-reports/office-worker';
+import { plainText } from './sample-reports/report-markdown';
 import { J_PERSONA } from './landing-copy-j-persona';
 
 /**
@@ -118,54 +120,30 @@ export const J_REPORT = {
   intro: '所有步骤都已确认。AI 教练会根据你确认的全部信息写一份完整报告，边写边显示。',
   generate: '生成完整报告',
   export: '导出已确认资料',
-  size: '13 章 + 一句话结论 · 全文约 11,000 字',
-  chapters: [
-    { title: '一句话结论', body: `${J_PERSONA.values.direction}。先用短视频起量，变现先走厨具和食材带货。` },
-    { title: '1 现状盘点', body: '会做二十多道家常菜，多数 15 分钟上桌；每天下班后一小时；不露脸。优势是快，短板是还没有发过内容。' },
-    { title: '2 目标和可行性', body: '目标是先做成能长期更新的副业账号。每周两条在一小时内做得到，前两个月以稳定更新为主。' },
-    { title: '3 受众', body: '刚开始一个人生活的上班族：下班晚、怕麻烦、不想天天点外卖，最在意"快"和"省事"。' },
-    { title: '4 平台选择', body: 'TikTok 和 Instagram 短视频起量；YouTube 放把几条短视频合起来的长视频，留住搜索流量。' },
-    { title: '5 对标账号分析', body: '同路人、同观众、同品类三类各看什么、学什么、哪些不要学；数据来自公开接口。' },
-    { title: '6 账号定位', body: '下班后 15 分钟上桌的家常菜；人设是"会做饭的同事"，说话直接，不炫技。' },
-    { title: '7 账号三件套', body: `名字：${J_PERSONA.account}；简介：一个人也好好吃饭，下班后 15 分钟上桌；头像：一口锅的特写。` },
-    { title: '8 内容规划', body: '三条内容线：一口锅系列、冰箱剩菜、超市半成品改造；每条线的选题池和发布节奏。' },
-    { title: '9 运营手册', body: '开头怎么拍、标题怎么起、标签怎么选、评论怎么回；每一项都写了做法和理由。' },
-    { title: '10 变现路径', body: '先做厨具和食材带货清单，再出一周菜单和备菜指南，之后整理成一人食菜谱合集，价格参照同类账号先定一个区间；每一阶段的门槛和风险。' },
-    { title: '11 合规提醒', body: '只推荐自己用过的产品；合作内容明确标注；不做减肥和医疗建议。' },
-    { title: '12 见效时间', body: '前两个月重在稳定更新和找准开头；第三个月起再看哪类内容值得加码。' },
-    { title: '13 待验证的假设', body: '"省事"比"好吃"更能留住人；不露脸也能建立信任。每周复盘时逐条验证。' },
-  ],
+  /** The real original: about 9,500 characters without spaces (sample-reports meta). */
+  size: '13 章 + 一句话结论 · 全文约 9,500 字',
+  /** The real original report of this person (sample-reports/office-worker.ts), chapter by chapter, as Markdown. */
+  chapters: OFFICE_WORKER_REPORT.original.map(chapter => ({ title: chapter.title, body: chapter.markdown })),
   juryEntry: '开启评审团',
   juryTag: 'Gold',
 } as const;
 
-/** The report chapter with this numbered title ("3 受众"), as the table of contents shows it. */
-const chapter = (title: string) => J_REPORT.chapters.find(item => item.title === title)?.body ?? '';
-
 /**
- * NEW: what the jury's revision changes, chapter by chapter, shown on the result page (JuryReader, jury-reader-j.ts).
- * The six chapters are the ones the panel raised (mapped onto this report's 13 chapters, see jury-case-j.ts); the
- * original is this report's own text.
+ * What the jury's revision changed (the real review of 2026-10-15: review.md and report-revised.md). Six chapters
+ * changed in substance: 三 受众, 四 平台选择, 六 账号定位, 八 内容规划, 十 变现路径, 十二 见效时间; the original and the
+ * revised text are the reports' own, as plain prose for the result page.
  */
+/** NEW: the result page's name for screen readers. */
 export const J_JURY_RESULT_LABEL = '评审完成后的结果页';
 
+const SUBSTANTIVE = ['3 受众', '4 平台选择', '6 账号定位', '8 内容规划', '10 变现路径', '12 见效时间'] as const;
+const markdownOf = (list: readonly { title: string; markdown: string }[], title: string) =>
+  list.find(chapter => chapter.title === title)?.markdown ?? '';
+
 export const J_REVISION = {
-  changes: [
-    { chapter: '3 受众', original: chapter('3 受众'),
-      revised: '刚开始一个人生活的上班族：多在晚上七八点到家，厨房只有单灶和小冰箱，最常因为太累、买菜麻烦、一个人吃不完而放弃做饭。'
-        + '以后可以扩展的人群：想控制饮食的健身新手。' },
-    { chapter: '4 平台选择', original: chapter('4 平台选择'),
-      revised: 'TikTok 和 Instagram 短视频起量；YouTube 放把几条短视频合起来的长视频，留住搜索流量。'
-        + '前两个月三个平台发同一条视频，按各自的数据再决定在哪里加重。' },
-    { chapter: '6 账号定位', original: chapter('6 账号定位'),
-      revised: '下班后 15 分钟上桌的家常菜，快在备菜：周日一次切配，工作日三天复用。人设是"会做饭的同事"，说话直接，不炫技。' },
-    { chapter: '8 内容规划', original: chapter('8 内容规划'),
-      revised: '三条内容线：一口锅系列、冰箱剩菜、备菜和收纳（换掉超市半成品改造）；每条线的选题池和发布节奏。' },
-    { chapter: '10 变现路径', original: chapter('10 变现路径'),
-      revised: '第一个月先上线免费的一周菜单，用报名表找到愿意付钱的人；第三个月按报名情况决定要不要出付费的备菜指南。'
-        + '带货清单放到第二步。' },
-    { chapter: '12 见效时间', original: chapter('12 见效时间'),
-      revised: '前两个月每周三更、周末集中拍两条备用，重在稳定更新和找准开头；每周日花二十分钟把评论区的问题排进下周选题。'
-        + '第三个月起再看哪类内容值得加码。' },
-  ],
+  changes: SUBSTANTIVE.map(chapter => ({
+    chapter,
+    original: plainText(markdownOf(OFFICE_WORKER_REPORT.original, chapter)),
+    revised: plainText(markdownOf(OFFICE_WORKER_REPORT.revised, chapter)),
+  })),
 };

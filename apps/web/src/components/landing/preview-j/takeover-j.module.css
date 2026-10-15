@@ -67,13 +67,11 @@
 .toc li { padding: 4px 8px; border-radius: 6px; color: #aaa; }
 .toc li[data-done] { color: #555; }
 .toc li[data-on] { background: #fff7e0; color: var(--j-ink); font-weight: 600; }
-.preview { --chapter-step: 118px; position: relative; min-height: 0; overflow: hidden; mask-image: linear-gradient(transparent, #000 8%, #000 88%, transparent); }
-.preview > div { display: grid; gap: 14px; transition: translate .6s var(--j-ease); }
-.preview article { display: grid; gap: 6px; min-height: 104px; }
-.preview h3 { margin: 0; font-size: 14.5px; font-weight: 600; }
-.preview p { margin: 0; color: #444; font-size: 13.5px; line-height: 1.7; }
-.preview i { display: block; height: 7px; border-radius: 4px; background: #f0efea; }
-.preview i:last-child { width: 70%; }
+.preview { position: relative; min-height: 0; overflow: hidden; padding-right: 4px; }
+.preview article { display: grid; gap: 6px; padding-bottom: 18px; }
+.preview article + article { padding-top: 14px; border-top: 1px solid #f0efea; }
+.preview h3 { margin: 0; font-size: 15px; font-weight: 600; }
+.preview table { font-size: 12.5px; }
 .reportIntro { margin: 0; color: #888; font-size: 12.5px; }
 .report footer { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; padding-top: 10px; border-top: 1px solid #eee; }
 .juryEntry { gap: 6px; }

@@ -1,63 +1,79 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-import { mockCase, type JuryCase } from '@/components/landing/preview-jury/jury-case';
+import type { JuryCase } from '@/components/landing/preview-jury/jury-case';
+import {
+  summarize, type DetailRound, type JuryEvent, type RulingFields, type Seat,
+} from '@/components/landing/preview-jury/jury-events';
 import { J_REPORT, J_REVISION } from '@/lib/landing/landing-copy-j-takeover';
+import { OFFICE_WORKER_REPORT } from '@/lib/landing/sample-reports/office-worker';
+import { plainText } from '@/lib/landing/sample-reports/report-markdown';
+import { asCanvasPlace, J_REVIEW_SEATS, J_REVIEW_SPLITS, J_RULINGS } from './jury-review-j';
+
+export { asCanvasPlace };
 
 /**
- * #1002's prototype report uses its own chapter names ("第 4 章 受众画像"); sample J's report has the real 13 chapters
- * ("3 受众"). So that the canvas, the report and the revised chapters name the same places, the prototype's review is
- * replayed with each of its chapters moved to the closest chapter of this report. The shared canvas is not changed.
+ * The jury canvas (#1002's, brief) playing this page's real review (jury-review-j.ts): the reports it shows are this
+ * person's original and revised reports; the events are made from the review the way the backend makes them (texts
+ * cut to 120 characters), arriving on the prototype's timing. The shared canvas is not changed.
  */
-const CHAPTER_MAP: Record<string, string> = {
-  '第 1 章 你是谁': '1 现状盘点',
-  '第 2 章 定位一句话': '6 账号定位',
-  '第 3 章 差异化': '6 账号定位',
-  '第 4 章 受众画像': '3 受众',
-  '第 5 章 同类账号': '5 对标账号分析',
-  '第 6 章 平台选择': '4 平台选择',
-  '第 7 章 人设与语气': '7 账号三件套',
-  '第 8 章 选题方向': '8 内容规划',
-  '第 9 章 内容支柱': '8 内容规划',
-  '第 10 章 变现路径': '10 变现路径',
-  '第 11 章 风险与边界': '11 合规提醒',
-  '第 12 章 30 天行动': '12 见效时间',
-  '第 13 章 结语': '13 待验证的假设',
-};
+type Draft = JuryEvent extends infer E ? E extends JuryEvent ? Omit<E, 'id'> : never : never;
 
-/** "3 受众" → "第 3 章 受众", the canvas's way of naming a place. */
-export const asCanvasPlace = (title: string) => title.replace(/^(\d+) /, '第 $1 章 ');
+const SEATS = ['A', 'B', 'C'] as const;
+const roundOf = (seat: Seat, round: 1 | 2) =>
+  J_REVIEW_SEATS.find(item => item.seat === seat)?.rounds.find(item => item.round === round) as DetailRound;
 
-/** Every prototype chapter name in the text, also the short "第 6 章" form, moved to this report's numbering. */
-export function mapChapters(text: string): string {
-  let out = text;
-  for (const [from, to] of Object.entries(CHAPTER_MAP)) out = out.split(from).join(asCanvasPlace(to));
-  return out.replace(/第 (\d+) 章(?! )/g, (whole, number: string) => {
-    const full = Object.keys(CHAPTER_MAP).find(name => name.startsWith(`第 ${number} 章 `));
-    return full ? asCanvasPlace(CHAPTER_MAP[full]).replace(/ \S+$/, '') : whole;
-  });
+function roundEvents(reviewer: Seat, round: DetailRound): Draft[] {
+  return [
+    ...(round.responses ?? []).map((item): Draft => ({
+      type: 'response', round: 2, reviewer, to: item.reviewer, decision: item.decision, stance: item.stance,
+      strongestView: summarize(item.strongestView),
+    })),
+    ...(round.decisions ?? []).map((item): Draft => ({
+      type: 'decision', round: round.round, reviewer, decision: item.decision, verdict: item.verdict,
+      strongestCase: summarize(item.strongestCase), strongestAlternative: summarize(item.strongestAlternative),
+    })),
+    ...(round.issues ?? []).map((item): Draft => ({
+      type: 'issue', round: round.round, reviewer, section: item.location, perspective: item.perspective, severity: item.severity,
+      problem: summarize(item.problem), fix: summarize(item.suggestion),
+    })),
+  ];
 }
 
-/**
- * The prototype's creator posts on 小红书 and tries 抖音; this page's person grows on TikTok and Instagram and keeps
- * search traffic on YouTube. Each platform moves to the one that plays the same part (search, recommendation, the
- * second channel), so the panel's debate still reads true for this person.
- */
-const PLATFORM_MAP: Record<string, string> = { 小红书: 'YouTube', 抖音: 'TikTok', 视频号: 'Instagram' };
+const ruling = (item: RulingFields): Draft => ({
+  type: 'adjudication', ...item, issue: summarize(item.issue), opinion: summarize(item.opinion),
+  reason: summarize(item.reason), fix: summarize(item.fix),
+});
 
-/** Chapters and platforms of the prototype's review, moved to this page's report and person. */
-export function mapText(text: string): string {
-  let out = mapChapters(text);
-  for (const [from, to] of Object.entries(PLATFORM_MAP)) out = out.split(from).join(to);
-  return out;
-}
+const changed = J_REVISION.changes.map(change => asCanvasPlace(change.chapter));
+const STEPS: [number, Draft[]][] = [
+  [0, [{ type: 'review_started', reviewers: [...SEATS], sections: 13 }]],
+  [900, SEATS.map((reviewer): Draft => ({ type: 'reviewer_started', round: 1, reviewer }))],
+  [21_000, roundEvents('A', roundOf('A', 1))],
+  [27_500, roundEvents('C', roundOf('C', 1))],
+  [30_500, [...roundEvents('B', roundOf('B', 1)), ...J_REVIEW_SPLITS.map((split): Draft => ({ type: 'disagreement', ...split }))]],
+  [35_000, SEATS.map((reviewer): Draft => ({ type: 'reviewer_started', round: 2, reviewer }))],
+  [52_000, roundEvents('A', roundOf('A', 2))],
+  [57_500, roundEvents('B', roundOf('B', 2))],
+  [61_000, [...roundEvents('C', roundOf('C', 2)), { type: 'summary_started', round: 2 }]],
+  [96_000, [
+    ...J_RULINGS.map(ruling),
+    { type: 'revision_ready_for_choice', changedSections: changed.length, changedSectionTitles: changed, changedFields: 0 },
+    { type: 'review_ended', state: 'completed', outcome: 'revised' },
+  ]],
+];
 
-const prototype = mockCase('full');
+let count = 0;
+const arrivals = STEPS.map(([atMs, drafts]) => ({
+  atMs, events: drafts.map(draft => ({ ...draft, id: `landing-j-${++count}` }) as JuryEvent),
+}));
+
+const conclusion = (list: readonly { markdown: string }[]) => plainText(list[0]?.markdown ?? '');
 
 export const J_JURY_CASE: JuryCase = {
   report: {
     title: J_REPORT.title,
-    excerpt: J_REPORT.chapters.slice(0, 2).map(item => item.body).join(' '),
+    excerpt: conclusion(OFFICE_WORKER_REPORT.original),
     chapters: J_REPORT.chapters.length - 1,
-    revisedExcerpt: J_REVISION.changes.slice(0, 2).map(item => item.revised).join(' '),
+    revisedExcerpt: conclusion(OFFICE_WORKER_REPORT.revised),
   },
-  arrivals: JSON.parse(mapText(JSON.stringify(prototype.arrivals))) as JuryCase['arrivals'],
+  arrivals,
 };

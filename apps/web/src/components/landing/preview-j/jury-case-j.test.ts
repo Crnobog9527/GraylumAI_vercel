@@ -7,8 +7,9 @@ import { J_PERSONA_QUESTION, J_QUESTION_HEADING } from '@/lib/landing/landing-co
 import { J_REPORT, J_REVISION } from '@/lib/landing/landing-copy-j-takeover';
 import { JuryReader } from '@/components/landing/preview-jury/JuryReader';
 import { resolveSeatNames, SAMPLE_PANEL } from '@/components/landing/preview-jury/jury-events';
-import { J_JURY_CASE, mapChapters } from './jury-case-j';
+import { J_JURY_CASE } from './jury-case-j';
 import { J_JURY_DETAIL, J_READER_REPORT } from './jury-reader-j';
+import { plainText } from '@/lib/landing/sample-reports/report-markdown';
 
 /** "3 受众" as the canvas names it: "第 3 章 受众". */
 const canvasPlace = (title: string) => title.replace(/^(\d+) /, '第 $1 章 ');
@@ -19,12 +20,12 @@ describe('sample J names the report chapters one way everywhere', () => {
     expect(J_REVISION.changes).toHaveLength(6);
     for (const change of J_REVISION.changes) {
       expect(titles).toContain(change.chapter);
-      expect(change.original).toBe(J_REPORT.chapters.find(item => item.title === change.chapter)?.body);
+      expect(change.original).toBe(plainText(J_REPORT.chapters.find(item => item.title === change.chapter)?.body ?? ''));
       expect(change.revised).not.toBe(change.original);
     }
   });
 
-  it('the jury canvas plays with the report chapters, none of the prototype ones', () => {
+  it('the jury canvas plays the real review, on this report\'s chapters', () => {
     const text = JSON.stringify(J_JURY_CASE.arrivals);
     for (const old of REPORT_SECTIONS.filter(name => name !== '全文')) {
       if (!J_REPORT.chapters.some(item => canvasPlace(item.title) === old)) expect(text).not.toContain(old);
@@ -32,15 +33,13 @@ describe('sample J names the report chapters one way everywhere', () => {
     const places = new Set([...text.matchAll(/第 \d+ 章 [^"，。：、」\s]+/g)].map(match => match[0]));
     const known = new Set(J_REPORT.chapters.map(item => canvasPlace(item.title)));
     for (const place of places) expect(known.has(place)).toBe(true);
-    // Every chapter the panel raises is one the revision changes.
-    const revised = new Set(J_REVISION.changes.map(change => canvasPlace(change.chapter)));
-    for (const place of places) expect(revised.has(place)).toBe(true);
+    // The prototype's own review (another person, another platform) is gone.
+    for (const old of ['少油少盐', '小红书', '抖音', '视频号']) expect(text).not.toContain(old);
+    // Nine rulings: seven taken, two turned down because they clash with what the person said.
+    const rulings = J_JURY_CASE.arrivals.flatMap(arrival => arrival.events).filter(event => event.type === 'adjudication');
+    expect(rulings).toHaveLength(9);
+    expect(rulings.filter(event => event.type === 'adjudication' && !event.adopted)).toHaveLength(2);
     expect(J_JURY_CASE.report.chapters).toBe(13);
-  });
-
-  it('short chapter references move with the full names', () => {
-    expect(mapChapters('第 6 章提到你')).toBe('第 4 章提到你');
-    expect(mapChapters('第 4 章 受众画像')).toBe('第 3 章 受众');
   });
 
   it('the public site calls the question card the AI coach\'s', () => {

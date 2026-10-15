@@ -24,8 +24,6 @@
 .coverLabel { display: flex; align-items: center; gap: 8px; margin: 0; color: var(--j-muted); font-size: 13px; }
 .coverLabel em { padding: 0 7px; border-radius: 999px; background: #fff4d6; color: #8a5a00; font-size: 11.5px; font-style: normal; line-height: 20px; }
 .size { margin: 2px 0 0; color: var(--j-body); font-size: 14px; }
-.pending { grid-column: 1 / -1; margin: 8px 0 0; padding: 6px 10px; border: 1px dashed #e0c98f; border-radius: 8px; background: #fffaf0; color: #8a5a00; font-size: 12.5px; text-align: center; }
-@media (min-width: 900px) { .cover { grid-template-columns: auto minmax(0, 1fr) auto; } .pending { grid-column: auto; margin: 0; } }
 .chapters { display: grid; gap: 10px; margin: 0; padding: 0; list-style: none; }
 @media (min-width: 640px) { .chapters { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (min-width: 1100px) { .chapters { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
@@ -34,13 +32,25 @@
 .chapters b { font-size: 15px; }
 .chapters p { display: grid; gap: 2px; margin: 0; color: var(--j-body); font-size: 13.5px; line-height: 1.6; }
 .chapters p span { color: var(--j-muted); font-size: 12px; }
+.chapters .key { padding-top: 6px; border-top: 1px dashed #ececea; color: var(--j-ink); font-weight: 500; }
+.chapters .key span { color: var(--j-gold-text); font-weight: 600; }
 .chapters li { padding: 10px 12px; }
 .chapters[data-folded] > li:nth-child(n + 7) { display: none; }
 .unfold {
   display: flex; align-items: center; justify-content: center; gap: 6px; min-height: 44px; border: 1px solid var(--j-line); border-radius: 999px;
   background: #fff; color: var(--j-ink); font: inherit; font-size: 15px; font-weight: 500; cursor: pointer;
 }
-.more { display: inline-flex; align-items: center; gap: 5px; justify-self: start; color: var(--j-ink); font-size: 14.5px; font-weight: 500; text-underline-offset: 4px; }
+.more {
+  display: inline-flex; align-items: center; gap: 6px; justify-self: start; min-height: 44px; padding: 0 18px; border: 1px solid var(--j-ink);
+  border-radius: 999px; background: #fff; color: var(--j-ink); font: inherit; font-size: 15px; font-weight: 500; cursor: pointer;
+}
+.more:hover, .more[aria-expanded='true'] { background: var(--j-ink); color: #fff; }
+.more:focus-visible, .full:focus-visible { outline: 2px solid var(--j-ink); outline-offset: 3px; }
+/* The whole report, read in place: a quiet sheet that scrolls on its own. */
+.full { max-height: min(70vh, 720px); overflow-y: auto; overscroll-behavior: contain; padding: clamp(16px, 2.4vw, 28px); border: 1px solid var(--j-line);
+  border-radius: 16px; background: #fcfcfb; }
+.full table { font-size: 13px; }
+.loading { margin: 0; color: var(--j-muted); font-size: 14px; }
 @media (prefers-reduced-motion: no-preference) {
   .report:not([data-play]) .chapters li { opacity: .25; }
   .report[data-play] .chapters li { animation: light .6s var(--j-ease) both; animation-delay: calc(var(--i) * 220ms + 300ms); }

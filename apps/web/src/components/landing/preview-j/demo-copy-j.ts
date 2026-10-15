@@ -35,7 +35,9 @@ export function demoCopyGroups(): DemoCopyGroup[] {
       items: [
         ...collectText(J_TAKEOVER_MOMENTS, 'J_TAKEOVER_MOMENTS'),
         ...collectText({ J_PERSONA, J_PERSONA_QUESTION, J_PERSONA_DIRECTION, J_PERSONA_KINDS }, 'persona'),
-        ...collectText({ J_BENCHMARK_TABLE, J_PLAN_ROWS, J_REPORT }, 'takeover'),
+        // The report's chapters are the real generated report (not page copy): only their titles are editable here.
+        ...collectText({ J_BENCHMARK_TABLE, J_PLAN_ROWS, J_REPORT: { ...J_REPORT, chapters: J_REPORT.chapters.map(({ title }) => ({ title })) } },
+          'takeover'),
       ],
     },
     ...J_WORK_SCENES.map(scene => ({

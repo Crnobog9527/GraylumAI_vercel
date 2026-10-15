@@ -1,6 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 'use client';
 
+import { useLayoutEffect, useRef } from 'react';
 import { Check, FileText, Loader2, Sparkles } from 'lucide-react';
 import { MentorMarkdown } from '@/app/positioning/[draftId]/MentorMarkdown';
 import { DEMO_LABEL } from '@/components/landing/demo/demo-script';
@@ -111,16 +112,27 @@ export function PositioningClipJ({ moment, local }: { moment: number; local: num
   );
 }
 
-/** The long report over the workbench: its chapter list beside a preview that scrolls through the chapters. */
+/**
+ * The long report over the workbench: the chapter list beside the report itself (this person's real report, as
+ * Markdown), written out chapter by chapter as the scroll moves: the chapter being written streams in, and the text
+ * follows it like the live page. When it is finished it rests on its first page.
+ */
 function Report({ writing, local }: { writing: boolean; local: number }) {
   const count = J_REPORT.chapters.length;
-  const reached = writing ? Math.min(count - 1, Math.floor(local * 1.1 * count)) : count - 1;
+  const position = writing ? Math.min(count, local * 1.1 * count) : count;
+  const reached = Math.min(count - 1, Math.floor(position));
+  const share = position >= count ? 1 : position - reached;
+  const pane = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const node = pane.current;
+    if (node) node.scrollTop = writing ? node.scrollHeight : 0;
+  }, [writing, reached, share]);
   return (
     <div className={styles.reportLayer}>
       <section className={styles.report} aria-label={J_REPORT.title}>
         <header>
           <FileText size={16} aria-hidden="true" /><h2>{J_REPORT.title}</h2><span>{J_REPORT.size}</span>
-          {writing && reached < count - 1 ? <small><Loader2 size={13} aria-hidden="true" />正在写报告…</small> : null}
+          {writing && position < count ? <small><Loader2 size={13} aria-hidden="true" />正在写报告…</small> : null}
         </header>
         <div className={styles.reportBody}>
           <ol className={styles.toc}>
@@ -128,12 +140,17 @@ function Report({ writing, local }: { writing: boolean; local: number }) {
               <li key={chapter.title} data-on={index === reached || undefined} data-done={index < reached || undefined}>{chapter.title}</li>
             ))}
           </ol>
-          <div className={styles.preview}>
-            <div style={{ translate: `0 calc(${-Math.max(0, reached - 1)} * var(--chapter-step))` }}>
-              {J_REPORT.chapters.slice(0, reached + 1).map(chapter => (
-                <article key={chapter.title}><h3>{chapter.title}</h3><p>{chapter.body}</p><i aria-hidden="true" /><i aria-hidden="true" /></article>
-              ))}
-            </div>
+          <div ref={pane} className={styles.preview}>
+            {J_REPORT.chapters.slice(0, reached + 1).map((chapter, index) => {
+              const last = index === reached;
+              const text = last && share < 1 ? chapter.body.slice(0, Math.round(chapter.body.length * share)) : chapter.body;
+              return (
+                <article key={chapter.title}>
+                  <h3>{chapter.title}</h3>
+                  <MentorMarkdown className={result.messageBody} text={text} live={writing && last && share < 1} />
+                </article>
+              );
+            })}
           </div>
         </div>
         <footer>

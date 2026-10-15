@@ -1,10 +1,12 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 'use client';
 
-import { useEffect, useRef, useState, type CSSProperties } from 'react';
-import Link from 'next/link';
-import { ArrowRight, ChevronDown, FileText } from 'lucide-react';
-import { J_SAMPLES, samplePath } from '@/lib/landing/landing-copy-j-samples';
+import { useEffect, useId, useRef, useState, type CSSProperties } from 'react';
+import { ChevronDown, ChevronUp, FileText } from 'lucide-react';
+import { MentorMarkdown } from '@/app/positioning/[draftId]/MentorMarkdown';
+import result from '@/components/opc/positioning-result.module.css';
+import { J_SAMPLES } from '@/lib/landing/landing-copy-j-samples';
+import { loadSampleReport, SAMPLE_CHAPTERS } from '@/lib/landing/sample-reports';
 import styles from './samples-j.module.css';
 import page from './j.module.css';
 
@@ -12,10 +14,9 @@ const reducedMotion = () => Boolean(window.matchMedia?.('(prefers-reduced-motion
 
 /**
  * The four sample reports as a walkthrough (Owner 2026-10-15): pick a report; its cover comes first (who, platform,
- * how long), then every chapter of the real report lights up in turn with what it gives you,
- * so the visitor sees the whole set of answers they would get. The reports are not generated yet: the cover carries
- * one clearly marked placeholder tag. The caller shows this block only in a local preview or behind the flag. With
- * reduced motion, everything is simply there.
+ * when it was generated), then every chapter of the real report lights up in turn with what it gives this person and
+ * its key conclusion. "看完整报告" opens the whole report in place, read-only and scrollable (loaded on demand). The
+ * caller shows this block only in a local preview or behind the flag. With reduced motion, everything is simply there.
  */
 export function SamplesJ() {
   const [active, setActive] = useState(0);
@@ -34,6 +35,7 @@ export function SamplesJ() {
     return () => observer.disconnect();
   }, []);
   const report = J_SAMPLES.reports[active];
+  const data = SAMPLE_CHAPTERS[report.slug];
   return (
     <div ref={ref} className={styles.samples}>
       <div className={styles.head}>
@@ -54,15 +56,15 @@ export function SamplesJ() {
           <div>
             <p className={styles.coverLabel}>{J_SAMPLES.coverLabel}{report.truth ? <em>{J_SAMPLES.truthTag}</em> : null}</p>
             <h4>{report.who} · {report.platform}</h4>
-            <p className={styles.size}>{J_SAMPLES.size}</p>
+            <p className={styles.size}>{J_SAMPLES.size} · {J_SAMPLES.generated(data.generatedAt)}</p>
           </div>
-          <p className={styles.pending} role="status">{J_SAMPLES.pending}</p>
         </header>
         <ol id={`j-samples-${report.slug}`} className={styles.chapters} data-folded={folded || undefined}>
-          {J_SAMPLES.chapters.map((chapter, index) => (
-            <li key={chapter.title} style={{ '--i': index } as CSSProperties}>
-              <b>{chapter.title}</b>
-              <p><span>{J_SAMPLES.giveLabel}</span>{chapter.give}</p>
+          {J_SAMPLES.chapters.map((title, index) => (
+            <li key={title} style={{ '--i': index } as CSSProperties}>
+              <b>{title}</b>
+              <p><span>{J_SAMPLES.giveLabel}</span>{data.chapters[index]?.give}</p>
+              <p className={styles.key}><span>{J_SAMPLES.keyLabel}</span>{data.chapters[index]?.key}</p>
             </li>
           ))}
         </ol>
@@ -71,8 +73,32 @@ export function SamplesJ() {
             {J_SAMPLES.unfold(J_SAMPLES.chapters.length)}<ChevronDown size={16} aria-hidden="true" />
           </button>
         ) : null}
-        <Link href={samplePath(report.slug)} className={styles.more}>{J_SAMPLES.more}<ArrowRight size={15} aria-hidden="true" /></Link>
+        <FullReport slug={report.slug} />
       </article>
     </div>
+  );
+}
+
+/** The whole report, opened in place: read-only, scrollable, loaded the first time it is opened. */
+function FullReport({ slug }: { slug: string }) {
+  const [open, setOpen] = useState(false);
+  const [text, setText] = useState<string | null>(null);
+  const panelId = useId();
+  useEffect(() => {
+    if (!open || text !== null) return;
+    let live = true;
+    void loadSampleReport(slug).then(markdown => { if (live) setText(markdown); });
+    return () => { live = false; };
+  }, [open, slug, text]);
+  return (
+    <>
+      <button type="button" className={styles.more} aria-expanded={open} aria-controls={panelId} onClick={() => setOpen(value => !value)}>
+        {open ? J_SAMPLES.less : J_SAMPLES.more}{open ? <ChevronUp size={15} aria-hidden="true" /> : <ChevronDown size={15} aria-hidden="true" />}
+      </button>
+      <div id={panelId} className={styles.full} hidden={!open} tabIndex={-1}>
+        {text === null ? <p className={styles.loading}>{J_SAMPLES.loading}</p>
+          : <MentorMarkdown className={result.messageBody} text={text} live={false} />}
+      </div>
+    </>
   );
 }
