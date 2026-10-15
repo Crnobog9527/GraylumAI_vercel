@@ -80,8 +80,9 @@ BEGIN
   OR NOT EXISTS(SELECT 1 FROM runtime_library_references r WHERE r.execution_id=e.id)
  THEN RAISE EXCEPTION 'LIB_REFERENCE_READ_DENIED'; END IF;
  IF coalesce(p_query,'')='' THEN
-  PERFORM d.id FROM library_documents d JOIN runtime_library_references r ON r.document_id=d.id AND r.actor_id=d.actor_id
-   WHERE r.execution_id=e.id ORDER BY d.id FOR SHARE OF d;
+  PERFORM document.id FROM library_documents document
+   JOIN runtime_library_references r ON r.document_id=document.id AND r.actor_id=document.actor_id
+   WHERE r.execution_id=e.id ORDER BY document.id FOR SHARE OF document;
   SELECT jsonb_build_object('kind','library_index','documents',coalesce(jsonb_agg(jsonb_build_object(
     'ref','doc-'||r.ordinal,'documentId',r.document_id,'version',r.content_version,
     'title',CASE WHEN x.id IS NULL OR x.deleted_at IS NOT NULL OR x.status<>'ready' THEN NULL ELSE left(x.filename,160) END,
