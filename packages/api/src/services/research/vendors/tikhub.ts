@@ -131,6 +131,12 @@ export interface TikhubCall {
   limit?: number;
 }
 
+/** Account identifier rule for a platform's account routes; null when no account route exists. */
+export function accountPatternFor(platform: SocialPlatform): RegExp | null {
+  const route = TIKHUB_ROUTES[`${platform}:account_profile`] ?? TIKHUB_ROUTES[`${platform}:account_posts`];
+  return route?.account ? ACCOUNT_PATTERNS[route.account] : null;
+}
+
 export function tikhubRouteId(platform: SocialPlatform, kind: SocialKind): string | null {
   return TIKHUB_ROUTES[`${platform}:${kind}`]?.path ?? null;
 }

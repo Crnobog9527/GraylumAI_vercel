@@ -45,7 +45,7 @@ const NOTICE_COLORS: Record<CheckoutNotice['tone'], [string, string]> = {
 
 // 根据计划配置生成默认特性列表
 function generateDefaultFeatures(plan: { level: string; credits?: { monthly?: number }; discount?: number }): string[] {
-  if (plan.level === 'free') return ['注册赠送积分（一次性）'];
+  if (plan.level === 'free') return ['新用户可以免费试用'];
   const features: string[] = [];
   if (plan.credits?.monthly) features.push(`月度积分${plan.credits.monthly}积分`);
   if (plan.discount && plan.discount > 0) features.push(`购买加油包享受${Math.round((1 - plan.discount) * 100) / 10}折`);

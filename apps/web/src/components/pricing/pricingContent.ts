@@ -12,7 +12,7 @@ export const PRICING_COPY = {
   lede: '注册就能免费开始做定位；需要完整的运营策略报告、更多积分时，再开通会员。',
   freeName: '免费',
   freeFit: '先试试，看 Graylum 能不能帮到你',
-  freePoints: ['注册赠送积分，可以开始做定位', '已确认的信息免费保留、可以导出', '生成完整运营策略报告需要开通会员'],
+  freePoints: ['免费试用，可以开始做定位', '已确认的信息免费保留、可以导出', '生成完整运营策略报告需要开通会员'],
   freeCta: '免费注册',
   memberCta: '开通会员',
   contactCta: '联系我们',

@@ -9,13 +9,22 @@ export const FUSION_SETTINGS_KEY = 'fusion_settings';
 /** BILL2 keeps 32 calls per run; one review uses at most rounds × (reviewers + 1) runs (FUSION-REVIEW §3.2). */
 export const FUSION_MAX_REVIEW_CALLS = 32;
 const usd = z.string().regex(/^(0|[1-9]\d{0,3})(\.\d{1,6})?$/).refine(value => Number(value) > 0);
+/** Panel display names (Owner 2026-10-14): shown in the review animation, stored apart from the model choice, so
+ * changing a model never changes a name. Trimmed, control characters removed, 1–20 characters. */
+export const PANEL_SEATS = ['A', 'B', 'C'] as const;
+export const DEFAULT_PANEL_NAMES = { reviewers: ['评审 A', '评审 B', '评审 C'], summary: '汇总' };
+const panelName = z.string().transform(value => value.replace(/[\p{Cc}\p{Cf}]/gu, '').trim())
+  .refine(value => [...value].length >= 1 && [...value].length <= 20, { message: 'FUSION_PANEL_NAME_INVALID' });
+const panelNames = z.object({ reviewers: z.array(panelName).length(PANEL_SEATS.length), summary: panelName }).strict();
 const review = z.object({
   enabled: z.boolean(),
-  reviewerModelIds: z.array(z.string().uuid()).max(8),
+  /** Exactly three seats (A, B, C) when enabled (Owner 2026-10-14: "三家最强的模型"). */
+  reviewerModelIds: z.array(z.string().uuid()).max(PANEL_SEATS.length),
   summaryModelId: z.string().uuid().nullable(),
   /** The review Skill is chosen here and frozen per run (PR-4). */
   skillId: z.string().uuid().nullable(),
-  maxRounds: z.number().int().min(1).max(8),
+  /** 1 = no debate round; 2 = a debate round when reviewers split over a key decision (Owner 2026-10-14). */
+  maxRounds: z.number().int().min(1).max(2),
   /** Per opinion, reasoning tokens included; set explicitly on every review request. */
   opinionOutputTokens: z.number().int().min(512).max(PURPOSE_OUTPUT_CAP),
   summaryOutputTokens: z.number().int().min(1024).max(PURPOSE_OUTPUT_CAP),
@@ -25,11 +34,13 @@ const review = z.object({
   dispatchMinutes: z.number().int().min(1).max(60),
   /** Platform-borne cost breaker per user over 7 days (§3.3); used by review admission (PR-4). */
   breaker: z.object({ platformUsd: usd, noDeliveryCalls: z.number().int().min(1).max(1000) }).strict(),
+  displayNames: panelNames.default(DEFAULT_PANEL_NAMES),
 }).strict().superRefine((value, context) => {
   const issue = (message: string) => context.addIssue({ code: 'custom', message });
   if (new Set(value.reviewerModelIds).size !== value.reviewerModelIds.length) issue('FUSION_REVIEWERS_DUPLICATE');
   if (value.maxRounds * (value.reviewerModelIds.length + 1) > FUSION_MAX_REVIEW_CALLS) issue('FUSION_REVIEW_CALLS_EXCEEDED');
-  if (value.enabled && (value.reviewerModelIds.length < 3 || !value.summaryModelId || !value.maxBudgetUsd)) {
+  if (value.enabled && (value.reviewerModelIds.length !== PANEL_SEATS.length || !value.summaryModelId || !value.maxBudgetUsd
+    || !value.skillId)) {
     issue('FUSION_REVIEW_INCOMPLETE');
   }
 });
@@ -44,8 +55,10 @@ export type FusionSettings = z.infer<typeof fusionSettings>;
 export const DEFAULT_FUSION_SETTINGS: FusionSettings = {
   version: 1,
   review: { enabled: false, reviewerModelIds: [], summaryModelId: null, skillId: null, maxRounds: 2,
-    opinionOutputTokens: 4096, summaryOutputTokens: Math.min(16384, PURPOSE_OUTPUT_CAP), maxBudgetUsd: null,
-    dispatchMinutes: 10, breaker: { platformUsd: '2', noDeliveryCalls: 10 } },
+    opinionOutputTokens: 4096,
+    // The summary writes the whole report plus a ruling per issue: 16384 was cut off in a staging run (#962).
+    summaryOutputTokens: PURPOSE_OUTPUT_CAP, maxBudgetUsd: null,
+    dispatchMinutes: 10, breaker: { platformUsd: '2', noDeliveryCalls: 10 }, displayNames: DEFAULT_PANEL_NAMES },
   compare: { enabled: false },
 };
 

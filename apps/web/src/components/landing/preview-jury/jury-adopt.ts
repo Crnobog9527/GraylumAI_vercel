@@ -143,3 +143,29 @@ export function issuesByChapter(detail: JuryDetail, order: readonly string[]): {
 export function issueCount(detail: JuryDetail): number {
   return detail.seats.reduce((sum, { rounds }) => sum + rounds.reduce((inner, round) => inner + (round.issues?.length ?? 0), 0), 0);
 }
+
+/** The first sentence of a text, for the one-line view of a chapter. */
+export function firstSentence(text: string): string {
+  const match = /^.*?[。！？](?=.)/u.exec(text);
+  return match ? match[0] : text;
+}
+
+const SEVERITY_ORDER = ['critical', 'major', 'minor'] as const;
+
+/**
+ * The 1–3 points shown before any chapter: the summary's adopted rulings, the debated ones first, then those more
+ * reviewers raised. Without a summary, the most severe issues.
+ */
+export function keyPoints(detail: JuryDetail, order: readonly string[], limit = 3): { section: string; text: string }[] {
+  if (detail.summary.status === 'usable') {
+    return detail.summary.sections.flatMap(item => item.rulings).filter(item => item.adopted)
+      .map((item, index) => ({ item, index }))
+      .sort((left, right) => Number(right.item.disputed) - Number(left.item.disputed)
+        || right.item.reviewers.length - left.item.reviewers.length || left.index - right.index)
+      .slice(0, limit).map(({ item }) => ({ section: item.section, text: item.opinion }));
+  }
+  return issuesByChapter(detail, order).flatMap(group => group.items)
+    .map((item, index) => ({ item, index }))
+    .sort((left, right) => SEVERITY_ORDER.indexOf(left.item.severity) - SEVERITY_ORDER.indexOf(right.item.severity) || left.index - right.index)
+    .slice(0, limit).map(({ item }) => ({ section: item.location, text: firstSentence(item.problem) }));
+}

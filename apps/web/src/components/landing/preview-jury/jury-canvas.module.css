@@ -1,0 +1,184 @@
+/* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+/*
+ * The canvas: a dotted drafting surface, the report as one sheet of paper in the middle, threads down to each person,
+ * and their work hanging under them. Only what happens now is lit (ink thread, ink-bordered card); the rest stays grey.
+ */
+.scroller {
+  position: relative; min-height: 0; border: 1px solid var(--j-rule); border-radius: 14px;
+  background-color: var(--j-canvas);
+  background-image: radial-gradient(circle, #dedede 1px, transparent 1.2px);
+  background-size: 22px 22px;
+}
+@media (min-width: 768px) {
+  .scroller { height: 100%; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; }
+}
+.board { position: relative; display: grid; justify-items: center; padding: 22px clamp(16px, 2vw, 40px) 48px; }
+
+.caption {
+  position: relative; z-index: 2; max-width: 34em; min-height: 1.75em; margin: 0 0 18px; color: var(--j-ink);
+  font-size: 20px; font-weight: 600; line-height: 1.5; text-align: center; text-wrap: balance;
+  animation: captionIn .45s var(--j-ease) both;
+}
+/* The sentence about now stays in view while the canvas scrolls under it. */
+@media (min-width: 768px) {
+  .caption {
+    position: sticky; top: 10px; z-index: 4; padding: 4px 16px; border-radius: 999px;
+    background: color-mix(in srgb, var(--j-canvas) 90%, transparent); backdrop-filter: blur(4px);
+  }
+}
+/* The short version: the sentence sits in its own bar on top of the canvas, never over a card. */
+.framed { display: grid; grid-template-rows: auto minmax(0, 1fr); gap: 8px; height: 100%; min-height: 0; }
+.framed > .scroller { min-height: 0; }
+/* Room below the last card, so the camera can always move a report sheet fully out instead of stopping it half cut. */
+@media (min-width: 768px) { .framed .board { padding-bottom: min(50vh, 420px); } }
+.captionBar {
+  min-height: 1.5em; margin: 0; padding: 0 8px; color: var(--j-ink); font-size: 18px; font-weight: 600; line-height: 1.5;
+  text-align: center; text-wrap: balance; animation: captionIn .45s var(--j-ease) both;
+}
+@media (max-width: 767px) { .captionBar { font-size: 16px; text-align: left; } }
+@keyframes captionIn { from { opacity: 0; transform: translateY(6px); } }
+
+/* The report: one sheet with a second sheet peeking out under it. */
+.doc {
+  position: relative; z-index: 2; display: grid; gap: 8px; width: min(100%, clamp(520px, 52%, 680px)); padding: 18px 24px 14px;
+  border: 1px solid var(--j-rule); border-radius: 6px; background: var(--j-paper);
+  box-shadow: 4px 4px 0 -1px var(--j-paper), 4px 4px 0 0 var(--j-rule), 0 18px 32px -24px rgba(0, 0, 0, .3);
+  transition: border-color .4s, box-shadow .4s;
+}
+.sink + .doc { margin-top: 64px; }
+.sink + .unchanged { margin-top: 24px; }
+.unchanged {
+  position: relative; z-index: 2; display: inline-flex; align-items: center; gap: 8px; margin-bottom: 0; padding: 10px 18px;
+  border: 1px dashed var(--j-ink-soft); border-radius: 8px; background: var(--j-paper); color: var(--j-muted); font-size: 15px;
+  animation: captionIn .45s var(--j-ease) both;
+}
+.doc h2 { margin: 0; font-family: var(--j-serif); font-size: 20px; font-weight: 700; line-height: 1.45; }
+.excerpt {
+  display: -webkit-box; margin: 0; overflow: hidden; color: var(--j-muted); font-family: var(--j-serif); font-size: 15px; line-height: 1.75;
+  -webkit-box-orient: vertical; -webkit-line-clamp: 2;
+}
+.doc footer { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px; color: var(--j-muted); font-size: 13px; }
+.doc[data-state='reading'] { border-color: var(--j-ink-soft); }
+.doc[data-state='revised'] { border-color: var(--j-ink); }
+.docReading { display: inline-flex; align-items: center; gap: 6px; }
+.docReading::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: var(--j-bronze); animation: blink 1.4s ease-in-out infinite; }
+.docStamp {
+  display: inline-flex; align-items: center; gap: 5px; padding: 1px 9px; border: 1.5px solid var(--j-ink); border-radius: 4px;
+  color: var(--j-ink); font-weight: 700; animation: stamp .5s var(--j-ease) both;
+}
+.docStamp[data-failed='true'] { border-color: var(--j-muted); color: var(--j-muted); }
+@keyframes stamp { from { opacity: 0; transform: scale(1.25) rotate(-3deg); } }
+@keyframes blink { 50% { opacity: .25; } }
+
+/* Threads. */
+.wires { position: absolute; inset: 0; z-index: 1; width: 100%; height: 100%; overflow: visible; pointer-events: none; }
+.thread { fill: none; stroke: #d4d4d4; stroke-width: 1.25; }
+.lit { fill: none; stroke: var(--j-ink); stroke-width: 2; stroke-linecap: round; stroke-dasharray: 7 7; animation: flow 1.1s linear infinite; }
+.lit[data-reverse='true'] { animation-direction: reverse; }
+.lit[data-tone='split'] { stroke: var(--j-bronze); stroke-dasharray: 2 6; animation: none; }
+.lit[data-tone='flow'] { stroke: var(--j-body); }
+@keyframes flow { to { stroke-dashoffset: -28; } }
+
+/* People: three reviewers side by side under the report, the summary centred under them. */
+.lanes {
+  position: relative; z-index: 2; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: clamp(16px, 2.4vw, 56px); width: min(100%, 1280px); margin-top: 84px;
+}
+/* A name on two lines must not push that reviewer's cards below the others: the three share the head row. */
+@media (min-width: 768px) {
+  .lanes { row-gap: 10px; }
+  .lanes > .lane { grid-row: span 2; grid-template-rows: subgrid; }
+  .lanes .head { align-content: start; }
+}
+.sink { position: relative; z-index: 2; display: grid; justify-items: center; width: min(100%, 400px); margin-top: 72px; }
+.sink .lane { width: 100%; }
+.lane { display: grid; gap: 10px; align-content: start; justify-items: center; min-width: 0; transition: opacity .35s; }
+.lane[data-dim='true'] { opacity: .42; }
+.lane[data-waiting='true'] { opacity: .32; }
+.lane[data-folded='true'] .cards li:not(:last-child) { display: none; }
+.lane[data-dim='true']:hover, .lane[data-selected='true'] { opacity: 1; }
+
+.head {
+  display: grid; justify-items: center; gap: 4px; max-width: 100%; padding: 8px 12px 6px; border: 0; border-radius: 12px;
+  background: color-mix(in srgb, var(--j-canvas) 88%, transparent); color: inherit; font: inherit; cursor: pointer;
+}
+div.head, div.card { cursor: default; }
+.head:hover .who, .lane[data-selected='true'] .who { text-decoration: underline; text-underline-offset: 3px; }
+/* Names are shown whole (up to 20 characters), wrapping onto a second line rather than being cut. */
+.who { max-width: 100%; color: var(--j-ink); font-size: 14px; font-weight: 600; line-height: 1.4; text-align: center; text-wrap: balance; overflow-wrap: anywhere; }
+.status { padding: 0 9px; border-radius: 999px; background: var(--j-desk); color: var(--j-body); font-size: 12.5px; line-height: 22px; white-space: nowrap; }
+
+/* Each person's work: a short string of cards on a vertical thread. */
+.cards { position: relative; display: grid; gap: 10px; width: 100%; max-width: 360px; margin: 0; padding: 0; list-style: none; }
+.cards li::before { content: ''; position: absolute; top: -10px; left: 50%; width: 1px; height: 10px; background: var(--j-ink-soft); }
+.cards li { position: relative; animation: cardIn .5s var(--j-ease) both; }
+@keyframes cardIn { from { opacity: 0; transform: translateY(-8px); } }
+.card {
+  display: grid; gap: 6px; width: 100%; padding: 10px 12px; border: 1px solid var(--j-rule); border-radius: 10px; background: var(--j-paper);
+  color: var(--j-ink); font: inherit; text-align: left; cursor: pointer; transition: border-color .3s, box-shadow .3s;
+}
+.card:hover { border-color: var(--j-ink-soft); }
+.cards li[data-current='true'] .card { border-color: var(--j-ink); box-shadow: var(--j-lift); }
+.line { display: flex; align-items: center; gap: 7px; min-width: 0; font-size: 14.5px; font-weight: 600; line-height: 1.5; }
+.line[data-muted='true'] { color: var(--j-muted); font-weight: 500; }
+.line[data-accent='true'] { color: var(--j-bronze); }
+.icon { display: inline-grid; flex: none; color: var(--j-muted); }
+.line[data-accent='true'] .icon { color: var(--j-bronze); }
+.pulse { display: block; height: 2px; overflow: hidden; border-radius: 2px; background: var(--j-rule); }
+.pulse::after { content: ''; display: block; width: 36%; height: 100%; background: var(--j-ink); animation: sweep 1.6s var(--j-ease) infinite; }
+@keyframes sweep { from { transform: translateX(-100%); } to { transform: translateX(280%); } }
+
+.chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.chip {
+  display: inline-flex; align-items: baseline; gap: 4px; padding: 0 7px; border: 1px dashed var(--j-ink-soft); border-radius: 6px;
+  color: var(--j-muted); font-size: 12.5px; line-height: 22px;
+}
+.chip[data-verdict='keep'], .chip[data-verdict='change'] { border-style: solid; border-color: var(--j-rule); color: var(--j-body); }
+.chip b { font-weight: 700; }
+.chip[data-verdict='change'] b { color: var(--j-bronze); }
+.chip[data-current='true'] { border-color: var(--j-ink); color: var(--j-ink); }
+
+.dots { display: flex; flex-wrap: wrap; gap: 5px; }
+.dots i { width: 8px; height: 8px; border-radius: 50%; box-shadow: inset 0 0 0 1.5px var(--j-ink-soft); transition: background-color .3s; }
+.dots i[data-severity='critical'] { background: var(--j-critical); box-shadow: none; }
+.dots i[data-severity='major'] { background: var(--j-bronze); box-shadow: none; }
+.dots i[data-severity='minor'] { background: var(--j-muted); box-shadow: none; }
+
+.quote {
+  display: -webkit-box; overflow: hidden; color: var(--j-body); font-size: 14.5px; font-weight: 400; line-height: 1.65;
+  -webkit-box-orient: vertical; -webkit-line-clamp: 3; animation: captionIn .4s var(--j-ease) both;
+}
+.stance { margin-left: 8px; color: var(--j-ink); font-weight: 700; }
+.quote em { display: block; color: var(--j-muted); font-size: 12.5px; font-style: normal; }
+.quote > span:last-child { margin-left: 6px; vertical-align: 1px; }
+
+/* Phone: the report on top, then each person in turn down one thread; dimmed people show only their latest card. */
+@media (max-width: 767px) {
+  .scroller { border-radius: 12px; }
+  .board { justify-items: stretch; padding: 16px 14px 24px; }
+  /* The sentence about now stays at the top of the screen while the page follows the work down. */
+  .caption {
+    position: sticky; top: 0; z-index: 4; margin: -16px -14px 14px; padding: 12px 14px 10px; font-size: 18px; text-align: left;
+    background: color-mix(in srgb, var(--j-canvas) 92%, transparent); backdrop-filter: blur(4px);
+  }
+  .cards li, .doc, .unchanged { scroll-margin-top: 104px; scroll-margin-bottom: 16px; }
+  .doc { width: 100%; padding: 14px 16px 12px; }
+  .sink + .doc, .sink + .unchanged { margin-top: 20px; }
+  .doc h2 { font-size: 18px; }
+  .wires { display: none; }
+  .lanes {
+    grid-template-columns: minmax(0, 1fr); gap: 16px; margin: 14px 0 0 12px; padding: 4px 0 0 16px; border-left: 1px solid var(--j-ink-soft);
+  }
+  .lane { justify-items: stretch; }
+  .sink { display: block; width: auto; margin: 16px 0 0 12px; padding: 4px 0 0 16px; border-left: 1px dashed var(--j-ink-soft); }
+  .head { grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; justify-items: start; gap: 10px; margin-left: -34px; padding: 0; background: none; }
+  .who { text-align: left; }
+  .cards { max-width: none; }
+  .cards li::before { display: none; }
+  .lane[data-dim='true'] .cards li:not(:last-child) { display: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .caption, .captionBar, .docStamp, .cards li, .quote, .unchanged { animation: none; }
+  .lit, .pulse::after, .docReading::before { animation: none; }
+}
