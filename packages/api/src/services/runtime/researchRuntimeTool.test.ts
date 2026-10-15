@@ -345,3 +345,83 @@ describe('durable benchmark discovery and free follow-up', () => {
     expect(subcall).toHaveBeenCalledTimes(11);
   });
 });
+
+describe('full 25-subcall benchmark discovery', () => {
+  it.each([false, true])('reuses durable evidence across 12-call rounds (middle profile unknown: %s)', async unknown => {
+    const f = fixture(12);
+    const keywords = ['one', 'two', 'three', 'four', 'five'];
+    f.ctx.config = researchToolsConfigSchema.parse({ ...f.ctx.config,
+      verifiedPlatforms: ['tiktok', 'x'], benchmarkPlatforms: ['tiktok', 'x'],
+      routes: [...f.ctx.config.routes,
+        ...(['keyword_posts', 'account_profile', 'account_posts'] as const).map(kind => ({
+          platform: 'x', kind, vendor: 'tikhub', route: tikhubRouteId('x', kind), backup: null, maxUnitsPerCall: '1',
+        })),
+      ],
+    });
+    f.store.authorization.keywordConfirmation.mockResolvedValue({ keywords });
+    f.store.discoveryStart.mockImplementation(async (_confirmation, platforms) => {
+      const d: DiscoveryRecord = { discoveryId, keywords, platforms, cursor: {}, state: 'running' };
+      f.discoveries.set(discoveryId, d);
+      return d;
+    });
+    const successfulCall = subcall.getMockImplementation()!;
+    subcall.mockImplementation(async (context, request) => {
+      const outcome = await successfulCall(context, request);
+      if (!unknown || context.newId() !== stableResearchId(discoveryId, '13') || !outcome.sent) return outcome;
+      f.operations.set(context.newId(), { state: 'unknown', result: { items: [] } });
+      return { ...outcome, result: { ...outcome.result, outcome: 'unknown', reason: 'TIMEOUT', httpStatus: null,
+        items: [], usage: { ...outcome.result.usage, units: null } } };
+    });
+
+    expect(await f.execute('benchmark_discover', { keywordConfirmationId: id, platforms: ['tiktok', 'x'] }))
+      .toMatchObject({ status: 'partial', reason: 'ROUND_LIMIT', continue: true });
+    expect(subcall).toHaveBeenCalledTimes(12);
+    expect(f.store.createCard).not.toHaveBeenCalled();
+    const firstIds = subcall.mock.calls.map(([context]) => context.newId());
+
+    f.ctx.executionId = refreshId;
+    expect(await f.makeExecute()('benchmark_discover', { discoveryId }))
+      .toMatchObject({ status: 'partial', reason: 'ROUND_LIMIT', continue: true });
+    expect(subcall).toHaveBeenCalledTimes(24);
+    expect(f.store.createCard).not.toHaveBeenCalled();
+
+    f.ctx.executionId = '44444444-4444-4444-8444-444444444444';
+    const completed = await f.makeExecute()('benchmark_discover', { discoveryId });
+    expect(completed).toMatchObject({ status: unknown ? 'partial' : 'ok',
+      reason: unknown ? 'DISCOVERY_PARTIAL' : null, continue: false });
+    expect(subcall).toHaveBeenCalledTimes(25);
+    expect(f.discoveries.get(discoveryId)).toMatchObject({ state: 'completed', cursor: { attempted: 25 } });
+
+    const requests = subcall.mock.calls.map(([, request]) => request);
+    const searches = requests.filter(request => request.vendor === 'tikhub' && request.call.kind === 'keyword_posts');
+    const profiles = requests.filter(request => request.vendor === 'tikhub' && request.call.kind === 'account_profile');
+    expect(searches).toHaveLength(10);
+    expect(profiles).toHaveLength(15);
+    for (const platform of ['tiktok', 'x']) {
+      expect(searches.flatMap(request => request.vendor === 'tikhub' && request.call.platform === platform
+        ? [request.call.keyword] : [])).toEqual(keywords);
+    }
+    // Five searches per platform all contain the same eight authors: each chosen author is fetched only once.
+    const profileKeys = profiles.flatMap(request => request.vendor === 'tikhub'
+      ? [`${request.call.platform}:${request.call.account}`] : []);
+    expect(new Set(profileKeys).size).toBe(15);
+    expect(profileKeys).toEqual([
+      ...Array.from({ length: 8 }, (_, i) => `tiktok:author${i}`),
+      ...Array.from({ length: 7 }, (_, i) => `x:author${i}`),
+    ]);
+    const allIds = subcall.mock.calls.map(([context]) => context.newId());
+    expect(allIds).toEqual(Array.from({ length: 25 }, (_, i) => stableResearchId(discoveryId, String(i))));
+    expect(new Set(allIds).size).toBe(25);
+    for (const operationId of firstIds) expect(f.store.readOperation).toHaveBeenCalledWith(operationId);
+    const candidates = f.store.createCard.mock.calls[0]?.[1].options ?? [];
+    expect(candidates.filter(option => option.selectable).length).toBeGreaterThanOrEqual(8);
+    expect(f.store.createCard.mock.calls[0]?.[0]).toBe(stableResearchId(discoveryId, 'first-card'));
+
+    // A further recovery reads the same completed evidence, including unknown, without buying any more calls.
+    expect(await f.makeExecute()('benchmark_discover', { discoveryId })).toMatchObject({
+      status: unknown ? 'partial' : 'ok', continue: false,
+    });
+    expect(subcall).toHaveBeenCalledTimes(25);
+    expect(f.store.discoveryStart).toHaveBeenCalledTimes(1);
+  });
+});

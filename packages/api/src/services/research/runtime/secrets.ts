@@ -12,12 +12,12 @@ const ENV_NAMES: Readonly<Record<ResearchVendor, string>> = Object.freeze({
 export type SecretReader = (vendor: ResearchVendor) => Promise<string | null>;
 
 /** Vercel production (VERCEL_ENV or VERCEL_TARGET_ENV) never uses the environment fallback. */
-export function isProductionDeployment(env: NodeJS.ProcessEnv = process.env): boolean {
+export function isProductionDeployment(env: Readonly<Record<string, string | undefined>> = process.env): boolean {
   return env.VERCEL_ENV === 'production' || env.VERCEL_TARGET_ENV === 'production';
 }
 
 /** The placeholder reader: environment variable outside production, otherwise no key. Never logs the value. */
-export function environmentSecretReader(env: NodeJS.ProcessEnv = process.env): SecretReader {
+export function environmentSecretReader(env: Readonly<Record<string, string | undefined>> = process.env): SecretReader {
   return async vendor => {
     if (isProductionDeployment(env)) return null;
     const value = env[ENV_NAMES[vendor]]?.trim();
