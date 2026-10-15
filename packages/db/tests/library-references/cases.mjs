@@ -144,7 +144,9 @@ export async function runCases({db,Client,connectionString,report}) {
  assert.deepEqual(await read(db,a,reader,'doc-1/segment-2'),{kind:'unavailable',reason:'source_deleted',ref:'doc-1'});
  await denied(exec(db,a,sid,[ref(notes)]),'LIB_REFERENCE_NOT_FOUND');
  await denied(store(db,reader,'late',copy),'LIB_REFERENCE_REVOKED');
- await denied(store(db,reader,'late-index',frozenIndex),'LIB_REFERENCE_REVOKED');
+ await store(db,reader,'late-index',frozenIndex);
+ assert.deepEqual(await one(db,"SELECT result v FROM runtime_tool_calls WHERE execution_id=$1 AND call_id='late-index'",[reader]),
+  {kind:'unavailable',reason:'source_deleted'},'a stale first index is stored as unavailable without its filename');
  assert.equal(await rpc(db,'runtime_library_visible',a,reader,copy),false);
  assert.equal(await rpc(db,'runtime_library_visible',a,reader,frozenIndex),false,'deleted index cannot replay its filename');
  assert.equal((await read(db,a,reader)).documents[0].available,false);

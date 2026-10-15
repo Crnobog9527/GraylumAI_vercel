@@ -162,7 +162,9 @@ BEGIN
  IF NEW.result->>'kind'='library_index' THEN
   PERFORM x.id FROM library_documents x JOIN runtime_library_references r ON r.document_id=x.id AND r.actor_id=x.actor_id
    WHERE r.execution_id=NEW.execution_id ORDER BY x.id FOR SHARE OF x;
-  IF NOT runtime_library_visible(a,NEW.execution_id,NEW.result) THEN RAISE EXCEPTION 'LIB_REFERENCE_REVOKED'; END IF;
+  IF NOT runtime_library_visible(a,NEW.execution_id,NEW.result) THEN
+   NEW.result:=jsonb_build_object('kind','unavailable','reason','source_deleted');
+  END IF;
   RETURN NEW;
  END IF;
  SELECT * INTO d FROM library_documents WHERE id::text=NEW.result->>'documentId' AND actor_id=a FOR SHARE;
