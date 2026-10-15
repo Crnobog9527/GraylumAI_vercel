@@ -1,0 +1,137 @@
+/* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+/*
+ * The review page in three columns: the steps on the left, the canvas in the middle, each person's record on the
+ * right. While the review plays the three fill the window under the toolbar; on a phone the steps shrink to one line
+ * on top and the records become a panel pulled up from the bottom.
+ */
+.live {
+  display: grid; grid-template-columns: 220px minmax(0, 1fr) 320px; gap: 20px;
+  height: calc(100svh - var(--j-bar, 96px) - 24px); min-height: 560px;
+}
+.stage { position: relative; min-width: 0; min-height: 0; }
+.results { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 24px; align-items: start; }
+
+/* Steps */
+.steps { display: grid; align-content: start; gap: 10px; min-height: 0; overflow-y: auto; scrollbar-width: thin; }
+.stepsNow { display: none; }
+.steps ol { position: relative; display: grid; gap: 2px; margin: 0; padding: 0; list-style: none; }
+.steps ol::before { content: ''; position: absolute; top: 14px; bottom: 14px; left: 13px; width: 1px; background: var(--j-rule); }
+.steps li button {
+  position: relative; display: grid; grid-template-columns: 12px minmax(0, 1fr); gap: 12px; width: 100%; padding: 8px 8px 8px 8px;
+  border: 0; border-radius: 10px; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer;
+}
+.steps li button:disabled { cursor: default; }
+.steps li button:not(:disabled):hover { background: var(--j-desk); }
+.steps li[data-state='current'] button { background: var(--j-paper); box-shadow: 0 0 0 1px var(--j-ink-soft), var(--j-lift); }
+.stepDot { width: 11px; height: 11px; margin: 7px 0 0 1px; border-radius: 50%; background: var(--j-paper); box-shadow: inset 0 0 0 1.5px var(--j-ink-soft); }
+.steps li[data-state='done'] .stepDot { background: var(--j-ink); box-shadow: none; }
+.steps li[data-state='current'] .stepDot { background: var(--j-bronze); box-shadow: 0 0 0 4px var(--j-bronze-soft); }
+.steps li[data-state='skipped'] .stepDot { background: repeating-linear-gradient(45deg, var(--j-ink-soft) 0 1.5px, var(--j-paper) 1.5px 3px); }
+.stepBody { display: grid; gap: 1px; min-width: 0; }
+.stepLabel { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; color: var(--j-muted); font-size: 15px; font-weight: 600; line-height: 1.5; }
+.stepLabel small { color: var(--j-muted); font-size: 12px; font-weight: 400; }
+.steps li[data-state='current'] .stepLabel, .steps li[data-state='done'] .stepLabel { color: var(--j-ink); }
+.stepLeft { color: var(--j-bronze) !important; font-weight: 600 !important; }
+.stepWhat { color: var(--j-body); font-size: 13.5px; line-height: 1.55; }
+.stepWhy { color: var(--j-muted); font-size: 12.5px; line-height: 1.55; }
+.steps li[data-state='todo'] .stepWhat, .steps li[data-state='skipped'] .stepWhat { color: var(--j-muted); }
+.steps li:not([data-state='current']) .stepWhy { display: none; }
+
+/* Records */
+.records {
+  display: grid; grid-template-rows: auto minmax(0, 1fr); gap: 8px; min-height: 0; padding: 12px; border: 1px solid var(--j-rule);
+  border-radius: 14px; background: var(--j-canvas);
+}
+.results .records { position: sticky; top: calc(var(--j-bar, 0px) + 16px); max-height: calc(100svh - var(--j-bar, 96px) - 32px); }
+.recordsHandle { display: none; }
+.recordsHead { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 14px; font-weight: 700; }
+.recordsHead button {
+  padding: 3px 10px; border: 1px solid var(--j-rule); border-radius: 8px; background: var(--j-paper); font: inherit; font-size: 12.5px;
+  font-weight: 500; cursor: pointer;
+}
+.recordsBody { min-height: 0; overflow-y: auto; scrollbar-width: thin; }
+/* In the narrow column the four tabs sit two by two, so every name stays whole. */
+@media (min-width: 1280px) { .recordsBody [role='tablist'] { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+
+/* Start card */
+.introLayer {
+  position: absolute; inset: 0; z-index: 10; display: grid; place-items: start center; padding: 72px 16px 16px; border-radius: 14px;
+  background: color-mix(in srgb, var(--j-canvas) 55%, transparent); backdrop-filter: blur(2px);
+  animation: fadeIn .3s var(--j-ease) both;
+}
+.intro {
+  display: grid; gap: 10px; width: min(480px, 100%); padding: 26px 28px 22px; border: 1px solid var(--j-ink-soft); border-radius: 14px;
+  background: var(--j-paper); box-shadow: 0 30px 60px -30px rgba(0, 0, 0, .35); animation: cardUp .45s var(--j-ease) both;
+}
+.introIcon { color: var(--j-bronze); }
+.intro h2 { margin: 0; font-size: 21px; font-weight: 700; line-height: 1.4; }
+.intro p { margin: 0; color: var(--j-body); font-size: 16px; line-height: 1.75; }
+.introActions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; margin-top: 6px; }
+.introPrimary, .introSecondary {
+  min-height: 42px; padding: 0 20px; border-radius: 9px; font: inherit; font-size: 15px; font-weight: 700; cursor: pointer;
+}
+.introPrimary { border: 0; background: var(--j-ink); color: var(--j-paper); }
+.introSecondary { border: 1px solid var(--j-rule); background: var(--j-paper); color: var(--j-ink); }
+@keyframes fadeIn { from { opacity: 0; } }
+@keyframes cardUp { from { opacity: 0; transform: translateY(10px); } }
+
+/* Prototype: the workbench while the review runs in the background. */
+.away { position: relative; min-height: calc(100svh - var(--j-bar, 96px) - 40px); }
+.workbench {
+  display: grid; justify-items: start; gap: 8px; max-width: 560px; padding: 28px; border: 1px dashed var(--j-ink-soft); border-radius: 14px;
+  color: var(--j-muted);
+}
+.workbench h2 { margin: 0; color: var(--j-ink); font-size: 20px; }
+.workbench p { margin: 0; }
+.statusTag {
+  position: fixed; right: 24px; bottom: 24px; z-index: 30; display: inline-flex; align-items: center; gap: 8px; padding: 10px 16px;
+  border: 1px solid var(--j-ink-soft); border-radius: 999px; background: var(--j-paper); color: var(--j-ink); font: inherit; font-size: 14.5px;
+  font-weight: 600; box-shadow: var(--j-lift); cursor: pointer;
+}
+.statusTag[data-done='true'] { border-color: var(--j-ink); background: var(--j-ink); color: var(--j-paper); }
+.spin { animation: spin 1.2s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.steps li button:focus-visible, .recordsHead button:focus-visible, .recordsHandle:focus-visible, .introPrimary:focus-visible,
+.introSecondary:focus-visible, .statusTag:focus-visible { outline: 2px solid var(--j-ink); outline-offset: 2px; }
+
+/* Narrower computers: the records leave the right for the bottom panel; the result page drops them below. */
+@media (max-width: 1279px) {
+  .live { grid-template-columns: 200px minmax(0, 1fr); }
+  /* The records become the panel at the bottom on the result page too; the choice bar sits above it. */
+  .results { --j-drawer: 64px; grid-template-columns: minmax(0, 1fr); padding-bottom: 64px; }
+}
+@media (max-width: 1279px) {
+  .live .records, .results .records {
+    position: fixed; top: auto; right: 0; bottom: 0; left: 0; z-index: 25; max-height: 64px; padding: 0 16px 12px; border-radius: 16px 16px 0 0;
+    background: var(--j-paper); box-shadow: 0 -12px 32px -18px rgba(0, 0, 0, .3); transition: max-height .3s var(--j-ease);
+  }
+  .live .records[data-open='true'], .results .records[data-open='true'] { max-height: 64svh; }
+  .recordsHandle {
+    display: flex; align-items: center; justify-content: center; gap: 6px; width: 100%; min-height: 52px; border: 0; background: none;
+    color: var(--j-ink); font: inherit; font-size: 15px; font-weight: 700; cursor: pointer;
+  }
+  .records[data-open='true'] .recordsHandle svg { transform: rotate(180deg); }
+  .recordsHead { display: none; }
+  .live { padding-bottom: 64px; }
+  .records { grid-template-rows: auto minmax(0, 1fr); }
+}
+/* Phone: the steps become one line on top. */
+@media (max-width: 1023px) {
+  .live { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); }
+  .steps { overflow: visible; }
+  .stepsNow {
+    display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px 12px; margin: 0; color: var(--j-muted); font-size: 14.5px;
+  }
+  .stepsNow b { color: var(--j-ink); }
+  .stepsNow > span + span { color: var(--j-bronze); font-weight: 600; }
+  .steps ol { display: none; }
+  .introLayer { position: fixed; z-index: 40; place-items: center; border-radius: 0; }
+  .statusTag { right: 16px; bottom: 16px; left: 16px; justify-content: center; }
+}
+/* On a phone the page scrolls, not the canvas. */
+@media (max-width: 767px) { .live { height: auto; min-height: 0; } }
+@media (prefers-reduced-motion: reduce) {
+  .introLayer, .intro, .spin { animation: none; }
+  .live .records { transition: none; }
+}

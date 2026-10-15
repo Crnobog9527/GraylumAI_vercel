@@ -399,6 +399,12 @@ export function reviewFlow(deps: { admin: SupabaseClient; actorId: string;
       if (!deps.executor) throw new Error('FUSION_REVIEW_UNAVAILABLE');
       return deps.executor.run(run, { runId: call.runId, id: callId, state: call.state, fresh: false }, judge, onChunk);
     },
+    /** The review as it stands, without advancing it (the page reads while the server advances). */
+    async read(reviewId: string) {
+      const view = await record.read(reviewId);
+      if (!view) throw new Error('FUSION_REVIEW_DENIED');
+      return view;
+    },
     stop: (reviewId: string) => record.close(reviewId, 'stopped'),
     end: (reviewId: string) => record.close(reviewId, 'interrupted'),
     /** Per-section adoption, step 1: validates the choices and, when any section is adopted, proposes the merged text
