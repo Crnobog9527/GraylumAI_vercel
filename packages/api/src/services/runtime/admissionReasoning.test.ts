@@ -325,3 +325,22 @@ it('new cap freezes the new quote while an old execution and organizer retain th
  expect(JSON.stringify(await next.prepare(f.input))).toBe(oldBytes);
  expect(old.context.maxOutputTokens).toBe(8192);
 });
+
+it('CHAT-NATIVE-OUTPUT: a chosen Skill without an organizer freezes the evidenced v6 format, reasoning none, and streams',async()=>{
+ activateSyntheticStepSkill();
+ const f=fixture();
+ for(const quote of f.policy.real.callPolicies)quote.upperUsd=openRouterBound(quote.providerLimits,quote.outputLimit).upperUsd;
+ const service=runtimeAdmissionService(f.user,f.admin,{...f.policy,mentorStream:false,stepStream:false});
+ const admitted=await service.prepare({...f.input,organizeAfter:false,selection:{kind:'skill' as const,moduleId,revisionId}});
+ const context=runtimeContext.parse(admitted.context);
+ expect(context).toMatchObject({role:'skill',providerRequestFormat:'serial-tools-v6-reasoning',reasoning:{parameter:'none'},
+  textStream:'plain-text-v1'});
+ expect(context).not.toHaveProperty('attachedOrganizer');
+ // Reasoning none adds no field: the request bytes equal the former unevidenced v2 request.
+ const policy=f.policy.real.callPolicies.find(quote=>quote.modelId===context.modelId)!;
+ const sdk=JSON.stringify({model:context.model,messages:[{role:'user',content:'x'}],stream:false});
+ const asV6=JSON.parse(openRouterRequestBody(sdk,{context:{...context,textStream:undefined},policy,phase:'skill',primaryDialogue:true}));
+ const asV2=JSON.parse(openRouterRequestBody(sdk,{context:{...context,textStream:undefined,providerRequestFormat:'serial-tools-v2',reasoning:undefined},
+  policy,phase:'skill',primaryDialogue:true}));
+ expect(asV6).toEqual(asV2);
+});
