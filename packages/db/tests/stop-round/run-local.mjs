@@ -53,9 +53,31 @@ try{
  const def=(await db.query('SELECT pg_get_functiondef($1::regprocedure) d',[sig])).rows[0].d;
  await db.query(migration);await db.query(migration);
  assert.equal((await db.query('SELECT pg_get_functiondef($1::regprocedure) d',[sig])).rows[0].d,def);
- await db.query(def.replace('BEGIN','BEGIN\n -- synthetic source drift'));
- await assert.rejects(db.query(migration),/STOP_ROUND_SOURCE_MISMATCH/);await db.query('ROLLBACK');
+ const sourceAnchor="   OR EXISTS(SELECT 1 FROM jsonb_object_keys(p_result) k WHERE k NOT IN ('stopAt','source'))";
+ const patchedAnchor=`   -- 0260 stop round
+   OR (p_result ? 'source' AND p_result->>'source' NOT IN ('assistant','message','final'))
+   OR (p_result ? 'call' AND (jsonb_typeof(p_result->'call') IS DISTINCT FROM 'number'
+    OR coalesce(p_result->>'call','') !~ '^[1-9][0-9]{0,8}$'))
+   OR EXISTS(SELECT 1 FROM jsonb_object_keys(p_result) k WHERE k NOT IN ('stopAt','source','call'))`;
+ const originalAnchor="   OR (p_result ? 'source' AND p_result->>'source' NOT IN ('assistant','message','final'))\n"+sourceAnchor;
+ assert.ok(def.includes(patchedAnchor),'the patch and marker are present');
+ assert.ok(def.includes('-- 0248 failure_code'),'0248 is preserved');
+ const prior=def.replace(patchedAnchor,originalAnchor);
+ const unrelated=prior.replace('BEGIN','BEGIN\n -- synthetic unrelated change');
+ await db.query(unrelated);await db.query(migration);
+ assert.equal((await db.query('SELECT pg_get_functiondef($1::regprocedure) d',[sig])).rows[0].d,
+  def.replace('BEGIN','BEGIN\n -- synthetic unrelated change'),'unrelated source changes survive');
+ await db.query(migration);
+ const later=def.replace('BEGIN','BEGIN\n -- synthetic later patch');
+ await db.query(later);await db.query(migration);
+ assert.equal((await db.query('SELECT pg_get_functiondef($1::regprocedure) d',[sig])).rows[0].d,later);
+ for(const bad of [prior.replace(sourceAnchor,sourceAnchor.replace("'source'","'unexpected'")),
+  prior.replace(originalAnchor,originalAnchor+'\n'+originalAnchor)]){
+  await db.query(bad);
+  await assert.rejects(db.query(migration),/STOP_ROUND_ANCHOR_1/);await db.query('ROLLBACK');
+  assert.equal((await db.query('SELECT pg_get_functiondef($1::regprocedure) d',[sig])).rows[0].d,bad);
+ }
  await db.query(def);
- report.checks.push('migration twice unchanged; changed source rejected transactionally');
+ report.checks.push('marker replay preserves 0248 and later changes; missing/duplicate anchors reject transactionally');
 }catch(error){report.failed=String(error)+"\n"+error.stack;process.exitCode=1;}
 finally{await database.close();console.log(JSON.stringify(report,null,2));}
