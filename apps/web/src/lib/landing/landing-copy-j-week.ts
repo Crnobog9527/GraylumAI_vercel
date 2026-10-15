@@ -27,10 +27,10 @@ export const J_WEEK = {
       stage: 0, role: 'coach', card: 'confirm',
       text: '"下班后 15 分钟上桌"就是你的卖点。不露脸也行，只拍手和锅。我再补两件你没提的：拍摄会让做饭时间翻倍，所以先每周两条；变现先走厨具和食材，不靠等广告。请核对：',
     },
-    { stage: 1, role: 'coach', card: 'topics', text: '定位确认了。我按定位排了下周三条选题，你看行不行：' },
-    { stage: 1, role: 'user', text: '第三条周日备菜，我周末不一定有空。' },
+    { stage: 1, role: 'coach', card: 'topics', text: '定位确认了。我按定位排了下周两条选题，你看行不行：' },
+    { stage: 1, role: 'user', text: '第二条周日备菜，我周末不一定有空。' },
     { stage: 1, role: 'coach', text: '那换成"冰箱剩菜三种做法"，同样 15 分钟内，还能顺手带出一口好用的锅。确认就排进日程？' },
-    { stage: 1, role: 'user', text: '可以，就这三条。' },
+    { stage: 1, role: 'user', text: '可以，就这两条。' },
     { stage: 2, role: 'coach', card: 'draft', text: '第一条的口播稿写好了，按你说话的习惯，句子短：' },
     { stage: 2, role: 'coach', text: '开头我建议先给出锅的成品镜头，再倒回去讲步骤，刷到的人更容易停下来。这样拍可以吗？' },
     { stage: 2, role: 'user', text: '好，就这么拍。' },
@@ -51,7 +51,6 @@ export const J_WEEK = {
   topics: {
     items: [
       { title: '一口锅，15 分钟两菜一汤', why: '最能证明"下班后也来得及"' },
-      { title: '超市半成品怎么做得像现做', why: '上班族最常买，搜的人多' },
       { title: '周日备菜，工作日更快', why: '收藏型内容，适合涨关注' },
     ],
   },

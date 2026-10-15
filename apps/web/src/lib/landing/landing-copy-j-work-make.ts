@@ -14,28 +14,14 @@ export const J_WORK_MAKE: readonly WorkScene[] = [
         label: '资料库里存着什么',
         explain: '你采用的选题、写好的稿件和当前定位，都按平台和账号存在资料库里，状态一眼能看清。',
         blocks: [
-          { kind: 'user', text: '我之前的选题和稿子都在哪？' },
           { kind: 'library', fresh: false },
-          { kind: 'coach', text: '都在资料库里，按平台和账号分好了，状态一眼能看清：哪条待创作、哪条已定稿、哪条已发布。' },
         ],
       },
       {
         label: '新采用的选题进来',
         explain: '在对话里点了"采用"的选题，会自动出现在资料库，标着"待创作"，不用你手动整理。',
         blocks: [
-          { kind: 'user', text: '"冰箱剩菜三种做法"采用。' },
           { kind: 'library', fresh: true },
-          { kind: 'coach', text: '已放进资料库，标着"待创作"。下次你开新对话说一句"写周二那条"，我就知道是哪条。' },
-        ],
-      },
-      {
-        label: '新对话直接接上',
-        explain: '开一个新对话，AI 教练直接读资料库：你的定位、文风和做到哪一步都记着，接着往下做。',
-        blocks: [
-          { kind: 'user', text: '新对话：接着写周二那条。' },
-          { kind: 'checks', title: 'AI 教练从资料库读取了', items: ['定位档案：下班后 15 分钟家常菜', '文风画像：短句，先讲自己的经历', '上周复盘：剩菜类收藏最多'] },
-          { kind: 'coach', text: '好，周二是"冰箱剩菜三种做法"。开头先拍剩菜，再给成品；稿子按你的文风写，第一版马上给你。' },
-          { kind: 'user', text: '好。' },
         ],
       },
     ],

@@ -39,7 +39,8 @@ export const J_WORK = {
   close: '拍摄、出镜、录音这些要你本人来，其余交给我们的 AI 教练。',
   lede: '下面是示例：人物和内容为虚构，界面是真实产品的界面。',
   rightLabel: '这一步在做什么',
-  resultLabel: '用了之后',
+  /** NEW (Owner 2026-10-15, plan A): what you get comes first, the process after it. */
+  resultLabel: '你拿到什么',
   next: '下一个',
   /** NEW (Owner 2026-10-15, round six): the button walks the small steps first; "下一个" only on a demo's last step. */
   nextStep: '下一步',

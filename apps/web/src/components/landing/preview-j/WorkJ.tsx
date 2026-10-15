@@ -22,7 +22,8 @@ const reducedMotion = () => Boolean(window.matchMedia?.('(prefers-reduced-motion
  * the right what this step does and what you get. While nobody has touched it and it is on screen, each step stays
  * seven seconds and the demos follow one another; a click takes over. Round six (Owner 2026-10-15): a hint above, the
  * demos as cards, a pointer beside the playing step, one pulse when the player first comes into view, and the button
- * walks the small steps before it moves to the next demo. The server HTML and reduced motion show each
+ * walks the small steps before it moves to the next demo. Plan A (Owner 2026-10-15): what you get leads the panel,
+ * the step's process follows, short; remembering you and judging for you are left to the comparison above. The server HTML and reduced motion show each
  * demo's last step (the other demos `hidden`), nothing moving.
  */
 export function WorkJ({ flags }: { flags: LandingFlags }) {
@@ -132,11 +133,13 @@ export function WorkJ({ flags }: { flags: LandingFlags }) {
                     <WorkScreenJ blocks={shown.blocks} />
                   </div>
                 </div>
-                <aside className={styles.aside} aria-live="polite">
-                  <p className={styles.asideLabel}>{J_WORK.rightLabel}</p>
-                  <h3>{shown.label}</h3>
-                  <p>{shown.explain}</p>
+                <aside className={styles.aside}>
                   <div className={styles.result}><p className={styles.asideLabel}>{J_WORK.resultLabel}</p><p>{item.result}</p></div>
+                  <div className={styles.step} aria-live="polite">
+                    <p className={styles.asideLabel}>{J_WORK.rightLabel}</p>
+                    <h3>{shown.label}</h3>
+                    <p>{shown.explain}</p>
+                  </div>
                   <NextButton scenes={scenes} index={index} at={at} onGo={choose} />
                 </aside>
               </div>

@@ -123,13 +123,21 @@ describe('style sample J, the later sections', () => {
     for (const scene of J_WORK_SCENES) {
       expect(html).toContain(scene.title);
       expect(html).toContain(escape(scene.result));
-      // Every demo is a walk-through of three to five steps, each with its own explanation.
-      expect(scene.steps.length).toBeGreaterThanOrEqual(3);
+      // Every demo is a short walk-through (plan A: the process is kept brief), each step with its own explanation.
+      expect(scene.steps.length).toBeGreaterThanOrEqual(2);
       expect(scene.steps.length).toBeLessThanOrEqual(5);
       for (const step of scene.steps) expect(step.explain.length).toBeGreaterThan(10);
       // At rest each demo shows its last step.
       expect(html).toContain(escape(scene.steps[scene.steps.length - 1].explain));
     }
+    // Plan A: what you get leads each demo; remembering you and judging for you are shown by the comparison, not here.
+    expect(html.indexOf(J_WORK.resultLabel)).toBeLessThan(html.indexOf(J_WORK.rightLabel));
+    const steps = J_WORK_SCENES.flatMap(scene => scene.steps.map(step => step.label));
+    expect(steps).not.toContain('新对话直接接上');
+    expect(steps).not.toContain('你想换一条，先讲代价');
+    expect(steps).not.toContain('对比：自己用通用 AI');
+    // The person posts twice a week (the real report): no third weekly slot.
+    expect(JSON.stringify(J_WORK_SCENES)).not.toMatch(/下周三条|'周六'/);
     // The review lives in "不用自己看数据"; it is not a demo of its own any more.
     expect(J_WORK_SCENES.map(scene => scene.id)).not.toContain('review');
     const text = JSON.stringify(J_WORK_SCENES).replace(/15 分钟|十五分钟/g, '');
