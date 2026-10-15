@@ -34,7 +34,7 @@ export async function runPaymentWrappers(db,report,{fresh,order,close,cleanup,be
   assert.deepEqual(await rpc(db,'erasure_payment_envelope',expected,'checkout'),expected,'projection idempotent');
   await assert.rejects(db.query('UPDATE payment_orders SET checkout_request=$2 WHERE id=$1',[id,dirty]),/ERASURE_ENVELOPE_REFILL/);
   assert.equal((await begin(db,f,requestId)).ready,true);
-  assert.equal((await finish(db,f,requestId,true)).completed,true);
+  assert.equal((await finish(db,f,requestId,true)).stage,'completed');
  }
  const wrapper={orderId:'order_fixture',userId:'user_fixture',method:'card',merchant:'synthetic',mode:'test',providerRequest:waffo};
  for (const invalid of [

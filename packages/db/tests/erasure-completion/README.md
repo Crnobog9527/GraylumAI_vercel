@@ -22,3 +22,17 @@
   当前提供后端POST查询；尚未将凭证保存/展示接入前端。无凭证不通过公开requestId查询。
 - `completed` 仅表示本服务在线业务范围的前提及模拟/注入Auth不存在确认，不代表备份、日志平台或第三方已清。
   真实部署、第三方与日志/备份留存仍须另行授权和有效证据。
+
+## #936 支付 wrapper 修复候选（待迁移编号）
+
+当前 draft 使用 `payment-envelope-candidate.sql` 保存最小函数替换，尚未加入正式迁移账本。
+- 红测：`node packages/db/tests/erasure-completion/run-local.mjs --local-only`
+- 候选验证：`node packages/db/tests/erasure-completion/run-local.mjs --local-only --payment-envelope-candidate`
+
+候选命令仍完整建库并执行组合测试，随后将候选 SQL 应用两次核对目录一致；不接触远端。
+覆盖 Waffo、新 Stripe card/coupon、WeChat wrapper，旧 Stripe 原始格式沿用现有测试；
+检查完整注销、隐私字段移除、原财务列不变、擦除后禁止回填、坏格式保留并阻止 Auth 删除。
+
+迁移编号由 #1006 协调，正式收口时把候选 SQL 移至已分配的追加迁移，移除本临时 flag，
+重建 built-fingerprint 并运行正式命令；本候选验证不能替代最终迁移历史位置回放或 CI。
+不改变表、权限或外部付款状态；保留现有 guard。个人内容擦除不可逆，事实产生后只能向前修复。
