@@ -46,6 +46,7 @@ export interface SubcallContext {
   vendors?: VendorCalls;
   newId: () => string;
   now?: () => Date;
+  metadata?: { toolName: string; args: Record<string, unknown> };
 }
 
 /** Why nothing (or nothing usable) came back, as the tool envelope reports it. */
@@ -121,13 +122,19 @@ export async function runSubcall(context: SubcallContext, request: SupplierReque
   catch { result = unknownResult(request, request.vendor, context.now); }
 
   const evidence = toolResultEvidence(claim.callId, policy, result, sha256(JSON.stringify(result)));
-  await context.evidence.finish(operationId, opened.token, OPERATION_STATE[result.outcome], {
+  let storageError: unknown;
+  try { await context.evidence.finish(operationId, opened.token, OPERATION_STATE[result.outcome], {
     vendor: result.vendor, route: result.route, outcome: result.outcome, reason: result.reason, fetchedAt: result.fetchedAt,
-    items: result.items, truncated: result.truncated,
+    items: result.items, truncated: result.truncated, usage: result.usage,
+    httpStatus: result.httpStatus, supplierMayCharge: result.supplierMayCharge, ...context.metadata,
     cost: { actual: evidence.cost === null ? null : Number(evidence.cost) },
-  });
-  const saved = await context.billing.record(claim.callId, evidence);
+  }); } catch (error) { storageError = error; }
+  // A storage outage must not discard known supplier cost. Persist the financial receipt even when evidence failed.
+  const receipt = storageError && evidence.toolOutcome === 'delivered'
+    ? { ...evidence, toolOutcome: evidence.cost === null ? 'unknown' as const : 'failed_charged' as const } : evidence;
+  const saved = await context.billing.record(claim.callId, receipt);
   await context.evidence.link(operationId, claim.callId);
+  if (storageError) throw storageError;
   if (saved.accountClosed) return { sent: false, stop: 'ACCOUNT_CLOSED', budget: false };
   if (saved.contentDeleted) return { sent: false, stop: 'CONTENT_DELETED', budget: false };
   return { sent: true, result, operationId, callId: claim.callId };
