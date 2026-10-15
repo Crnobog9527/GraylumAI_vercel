@@ -139,18 +139,24 @@ export async function runCases({db,Client,connectionString,report}) {
  report.checks.push('public claim rejects a second call while the first is unsettled, creates no second hold, and the sole stuck call can be settled');
 
  // The staging instance: Fusion review calls in cancelled runs (verdict user_stopped, no cost).
+ for (const closeBeforeSettlement of [true,false]) {
  const fz=await fixture(db,'v2'),fc=await claim(db,fz),fhold=await balance(db,fz);
  await db.query("UPDATE bill2_calls SET payload=jsonb_set(payload,'{phase}','\"fusion_review\"') WHERE id=$1",[fc.id]);
  await record(db,fz,fc,{provider:'openrouter',account:'sandbox',model:fz.claimPayload.model,protocol:'openrouter-chat-v1',
   evidenceKind:'transport_observation',providerId:'gen-fusion-'+fc.id,cost:null,final:false,currency:'USD',source:'response',
   coverage:'request_total',observedAt:new Date().toISOString(),sourceHash:'e'.repeat(64),rejectedReason:'incomplete_stream'});
- await rpc(db,'bill2_cancel',fz.actor,fz.run);await rpc(db,'bill2_finalize',fz.actor,fz.run);
+ if (closeBeforeSettlement) await rpc(db,'bill2_cancel',fz.actor,fz.run);
+ await rpc(db,'bill2_finalize',fz.actor,fz.run);
+ assert.equal((await run(db,fz)).closed,closeBeforeSettlement);
  await db.query("UPDATE bill2_calls SET recovery_attempts=3,recovery_deadline=clock_timestamp()-interval '11 minutes' WHERE id=$1",[fc.id]);
  assert.equal((await run(db,fz)).state,'cost_pending');assert.equal(await balance(db,fz),fhold);
  const fusion=await settle(fc.id,'0');
  assert.equal(fusion.creditsAfter,100);assert.equal(await balance(db,fz),100);
  assert.equal((await call(db,fc)).fusion_verdict,'user_stopped');
- report.checks.push('the staging shape (Fusion review call, cancelled run, verdict user_stopped, cost unknown) settles at 0 and restores the balance');
+ assert.equal((await run(db,fz)).closed,true);
+ assert.ok(['settled','refunded'].includes((await run(db,fz)).state));
+ report.checks.push(`sessionless Fusion (${closeBeforeSettlement?'closed':'crashed before close'}): manual settlement closes run and restores balance`);
+ }
 
  // Two settlements by one admin of that admin's own two stuck calls overlap without deadlocking
  // (the staging repair shape: account A is itself the administrator).
