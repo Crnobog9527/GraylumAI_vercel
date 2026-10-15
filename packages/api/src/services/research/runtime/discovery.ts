@@ -58,7 +58,8 @@ async function card(ctx: ResearchToolContext, discoveryId: string, accounts: Fou
   const selection = selectCandidates(remaining);
   if ((!followUp && !selection.enough) || selection.selectable.length === 0) return false;
   const selectable = new Set(selection.selectable.map(a => a.key));
-  const ordered = [...selection.selectable, ...(!followUp ? selection.headReferences.slice(0, 3) : [])] as FoundAccount[];
+  const references = !followUp ? selection.headReferences.slice(0, 3) : [];
+  const ordered = [...selection.selectable.slice(0, 12 - references.length), ...references] as FoundAccount[];
   const options: ResearchCandidateOption[] = ordered
     .map((a, i) => ({ id: `c${i}`, platform: a.platform, account: a.account, evidenceRef: a.evidenceRef,
       label: a.account, selectable: selectable.has(a.key) }));

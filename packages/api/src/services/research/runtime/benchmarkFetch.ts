@@ -30,7 +30,16 @@ export async function benchmarkFetch(ctx: ResearchToolContext, args: ResearchToo
       else partial = true;
       continue;
     }
-    if (!await ctx.store.fetchDispatch(claim.fetchId, claim.attempt)) { partial = true; continue; }
+    let dispatched = false;
+    let supplierStarted = false;
+    const fetchContext = { ...ctx, subcall: { ...ctx.subcall,
+      beforeSend: async () => {
+        if (ctx.subcall.beforeSend && !await ctx.subcall.beforeSend()) return false;
+        if (!dispatched) dispatched = await ctx.store.fetchDispatch(claim.fetchId, claim.attempt);
+        return dispatched;
+      },
+      onSupplierDispatch: () => { ctx.subcall.onSupplierDispatch?.(); supplierStarted = true; },
+    } };
     const results: Partial<Record<SocialKind, EvidenceItem[]>> = {};
     let charged = false;
     let unknown = false;
@@ -41,7 +50,7 @@ export async function benchmarkFetch(ctx: ResearchToolContext, args: ResearchToo
         const request = socialRequest(ctx, account.platform, kind,
           { account: account.account, ...(typeof postId === 'string' ? { postId } : {}) });
         if (!request) { failed = true; break; }
-        const outcome = await executeResearchCall(ctx, budget, request,
+        const outcome = await executeResearchCall(fetchContext, budget, request,
           stableResearchId(claim.fetchId, claim.attempt, kind), 'benchmark_fetch', args);
         if (!outcome.sent) { failed = true; break; }
         charged ||= outcome.result.supplierMayCharge;
@@ -52,7 +61,13 @@ export async function benchmarkFetch(ctx: ResearchToolContext, args: ResearchToo
       const profile = results.account_profile?.[0] ?? results.post_detail?.[0];
       const posts = results.account_posts;
       if (failed || !profile || !posts) {
-        await ctx.store.fetchFinish(claim.fetchId, claim.attempt, unknown ? 'unknown' : charged ? 'failed_charged' : 'failed', null);
+        if (dispatched) {
+          await ctx.store.fetchFinish(claim.fetchId, claim.attempt, unknown ? 'unknown' : charged ? 'failed_charged' : 'failed', null);
+        }
+        if (profile) {
+          const metrics = accountMetrics({ profile, posts: posts ?? [], followersItem: results[routes.followersFrom]?.[0] }, ctx.now());
+          rows.push({ fields: { ...account, evidence: JSON.stringify({ ...account, metrics, partial: true }) }, missing: metrics.missing });
+        }
         partial = true;
         continue;
       }
@@ -63,7 +78,8 @@ export async function benchmarkFetch(ctx: ResearchToolContext, args: ResearchToo
       rows.push({ fields: { ...account, evidence: JSON.stringify(evidence) }, missing: metrics.missing });
     } catch (error) {
       // A failure after dispatch can conceal a supplier response. Never make this attempt retryable.
-      await ctx.store.fetchFinish(claim.fetchId, claim.attempt, 'unknown', null);
+      // Keep an unsent prepared attempt recoverable (including its original refresh grant).
+      if (dispatched) await ctx.store.fetchFinish(claim.fetchId, claim.attempt, supplierStarted ? 'unknown' : 'failed', null);
       throw error;
     }
   }

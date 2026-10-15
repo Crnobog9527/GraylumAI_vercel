@@ -182,3 +182,50 @@ describe('research subcall safety and accounting', () => {
     expect(requestIdentity({ ...request, route: 'other' })).not.toBe(identity);
   });
 });
+
+describe('supplier dispatch boundary hooks', () => {
+  it.each(['false', 'throw'] as const)('never sends and records zero failed_free when beforeSend returns %s', async mode => {
+    const f = fixture();
+    const failure = new Error('fetch dispatch unavailable');
+    f.context.beforeSend = mode === 'throw' ? vi.fn().mockRejectedValue(failure) : vi.fn().mockResolvedValue(false);
+    const started = vi.fn();
+    f.context.onSupplierDispatch = started;
+    if (mode === 'throw') await expect(runSubcall(f.context, request)).rejects.toBe(failure);
+    else expect(await runSubcall(f.context, request)).toMatchObject({ result: { outcome: 'not_sent', supplierMayCharge: false } });
+    expect(f.vendors.parallel).not.toHaveBeenCalled();
+    expect(f.vendors.tikhub).not.toHaveBeenCalled();
+    expect(f.vendors.firecrawl).not.toHaveBeenCalled();
+    expect(started).not.toHaveBeenCalled();
+    expect(f.billing.record).toHaveBeenCalledWith('call-1', expect.objectContaining({ toolOutcome: 'failed_free', cost: '0' }));
+    expect(f.evidence.finish).toHaveBeenCalledWith('operation-1', 'evidence-token', 'failed',
+      expect.objectContaining({ outcome: 'not_sent', cost: { actual: 0 } }));
+    expect(f.billing.dispatch.mock.invocationCallOrder[0]).toBeLessThan(vi.mocked(f.context.beforeSend).mock.invocationCallOrder[0]!);
+  });
+
+  it('marks supplier start synchronously only after permission and immediately before calling the vendor', async () => {
+    const f = fixture();
+    const order: string[] = [];
+    f.billing.dispatch.mockImplementation(async () => { order.push('bill2-dispatch'); return true; });
+    f.context.beforeSend = vi.fn(async () => { order.push('before-send'); return true; });
+    f.context.onSupplierDispatch = vi.fn(() => { order.push('supplier-dispatch'); });
+    f.vendors.parallel.mockImplementation(async () => { order.push('vendor'); return result; });
+    await runSubcall(f.context, request);
+    expect(order).toEqual(['bill2-dispatch', 'before-send', 'supplier-dispatch', 'vendor']);
+    expect(f.context.onSupplierDispatch).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(['claim', 'rate-limit', 'evidence-open'] as const)('does not consume the fetch dispatch boundary after %s failure', async stage => {
+    const f = fixture();
+    f.context.beforeSend = vi.fn().mockResolvedValue(true);
+    f.context.onSupplierDispatch = vi.fn();
+    if (stage === 'claim') f.billing.claim.mockRejectedValue(new Error('claim unavailable'));
+    if (stage === 'rate-limit') f.context.rateCounter = vi.fn().mockRejectedValue(new Error('counter unavailable'));
+    if (stage === 'evidence-open') f.evidence.open.mockRejectedValue(new Error('evidence unavailable'));
+    if (stage === 'rate-limit') expect(await runSubcall(f.context, request)).toMatchObject({ stop: 'VENDOR_RATE_LIMITED' });
+    else await expect(runSubcall(f.context, request)).rejects.toThrow('unavailable');
+    expect(f.context.beforeSend).not.toHaveBeenCalled();
+    expect(f.context.onSupplierDispatch).not.toHaveBeenCalled();
+    expect(f.vendors.parallel).not.toHaveBeenCalled();
+    expect(f.billing.record).not.toHaveBeenCalled();
+  });
+});

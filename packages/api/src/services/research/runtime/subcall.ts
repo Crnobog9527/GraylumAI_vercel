@@ -47,6 +47,8 @@ export interface SubcallContext {
   newId: () => string;
   now?: () => Date;
   metadata?: { toolName: string; args: Record<string, unknown> };
+  beforeSend?: () => Promise<boolean>;
+  onSupplierDispatch?: () => void;
 }
 
 /** Why nothing (or nothing usable) came back, as the tool envelope reports it. */
@@ -118,8 +120,18 @@ export async function runSubcall(context: SubcallContext, request: SupplierReque
   }
 
   let result: ResearchCallResult;
-  try { result = await send(request, apiKey, context.vendors ?? REAL_VENDORS, context.now); }
-  catch { result = unknownResult(request, request.vendor, context.now); }
+  let preSendError: unknown;
+  let permitted = true;
+  try { permitted = await context.beforeSend?.() ?? true; }
+  catch (error) { permitted = false; preSendError = error; }
+  if (!permitted) {
+    result = { ...unknownResult(request, request.vendor, context.now), outcome: 'not_sent',
+      reason: 'FETCH_NOT_DISPATCHED', supplierMayCharge: false, usage: { unit: policy.toolPricing.unit, units: '0' } };
+  } else {
+    context.onSupplierDispatch?.();
+    try { result = await send(request, apiKey, context.vendors ?? REAL_VENDORS, context.now); }
+    catch { result = unknownResult(request, request.vendor, context.now); }
+  }
 
   const evidence = toolResultEvidence(claim.callId, policy, result, sha256(JSON.stringify(result)));
   let storageError: unknown;
@@ -135,6 +147,7 @@ export async function runSubcall(context: SubcallContext, request: SupplierReque
   const saved = await context.billing.record(claim.callId, receipt);
   await context.evidence.link(operationId, claim.callId);
   if (storageError) throw storageError;
+  if (preSendError) throw preSendError;
   if (saved.accountClosed) return { sent: false, stop: 'ACCOUNT_CLOSED', budget: false };
   if (saved.contentDeleted) return { sent: false, stop: 'CONTENT_DELETED', budget: false };
   return { sent: true, result, operationId, callId: claim.callId };

@@ -41,6 +41,7 @@ function config(limit = 12) {
 }
 
 function fixture(limit = 12) {
+  const supplierCalls = vi.fn();
   const operations = new Map<string, RuntimeOperation>();
   const plans = new Map<string, RuntimePlan>();
   const discoveries = new Map<string, DiscoveryRecord>();
@@ -98,6 +99,13 @@ function fixture(limit = 12) {
   let authorCount = 8;
   subcall.mockImplementation(async (context, request) => {
     const operationId = context.newId();
+    if (context.beforeSend && !await context.beforeSend()) {
+      return { sent: true, operationId, callId: id, result: { vendor: request.vendor, route: request.route,
+        outcome: 'not_sent', reason: 'FETCH_NOT_DISPATCHED', httpStatus: null, supplierMayCharge: false,
+        usage: { unit: 'call', units: '0' }, items: [], truncated: false, fetchedAt: now.toISOString() } };
+    }
+    context.onSupplierDispatch?.();
+    supplierCalls(request);
     const items = request.vendor !== 'tikhub' ? [item({ title: 'web evidence' })]
       : request.call.kind === 'keyword_posts' ? Array.from({ length: authorCount }, (_, i) => post(`author${i}`))
       : request.call.kind === 'account_profile' ? [item({ followers: 50000 })] : [post()];
@@ -114,7 +122,7 @@ function fixture(limit = 12) {
       return JSON.parse(await tool.execute(args, callId)) as ToolEnvelope;
     };
   };
-  return { ctx, store, operations, plans, discoveries, fetches, makeExecute,
+  return { ctx, store, operations, plans, discoveries, fetches, supplierCalls, makeExecute,
     execute: makeExecute(), setAuthors: (count: number) => { authorCount = count; } };
 }
 
@@ -224,9 +232,13 @@ describe('benchmark fetch cache and refresh', () => {
 
   it('records unknown and does not automatically resend it on a later fetch', async () => {
     const f = fixture();
-    subcall.mockImplementationOnce(async (context, request) => ({ sent: true, operationId: context.newId(), callId: id,
+    subcall.mockImplementationOnce(async (context, request) => {
+      await context.beforeSend?.();
+      context.onSupplierDispatch?.();
+      f.supplierCalls(request);
+      return { sent: true, operationId: context.newId(), callId: id,
       result: { vendor: request.vendor, route: request.route, outcome: 'unknown', reason: 'TIMEOUT', httpStatus: null,
-        supplierMayCharge: true, usage: { unit: 'call', units: null }, items: [], truncated: false, fetchedAt: now.toISOString() } }));
+        supplierMayCharge: true, usage: { unit: 'call', units: null }, items: [], truncated: false, fetchedAt: now.toISOString() } }; });
     expect(await f.execute('benchmark_fetch', fetchArgs)).toMatchObject({ status: 'partial' });
     expect(f.store.fetchFinish).toHaveBeenCalledWith(id, 'first-attempt', 'unknown', null);
     expect(await f.execute('benchmark_fetch', fetchArgs)).toMatchObject({ status: 'partial' });
@@ -244,8 +256,45 @@ describe('benchmark fetch cache and refresh', () => {
     const f = fixture();
     f.store.fetchDispatch.mockResolvedValue(false);
     expect(await f.execute('benchmark_fetch', fetchArgs)).toMatchObject({ status: 'partial' });
-    expect(subcall).not.toHaveBeenCalled();
+    expect(subcall).toHaveBeenCalledTimes(1);
+    expect(f.supplierCalls).not.toHaveBeenCalled();
   });
+
+  it.each(['VENDOR_RATE_LIMITED', 'KEY_MISSING', 'BALANCE_LOW'] as const)(
+    'keeps an unsent %s refresh prepared for a later retry', async stop => {
+    const f = fixture();
+    f.store.authorization.refreshGrant.mockResolvedValue({ ...account, used: false });
+    subcall.mockResolvedValueOnce({ sent: false, stop, budget: stop !== 'KEY_MISSING' });
+    const args = { accounts: [account], source: { kind: 'refresh', refreshId } };
+    expect(await f.execute('benchmark_fetch', args)).toMatchObject({ status: 'partial' });
+    expect(f.store.fetchDispatch).not.toHaveBeenCalled();
+    expect(f.store.fetchFinish).not.toHaveBeenCalled();
+    expect(f.supplierCalls).not.toHaveBeenCalled();
+    expect(await f.makeExecute()('benchmark_fetch', args)).toMatchObject({ status: 'ok' });
+    expect(f.store.fetchDispatch).toHaveBeenCalledWith(id, refreshId);
+  });
+
+  it.each(['claim', 'rate-limit', 'evidence-open'])('keeps the original refresh recoverable on pre-send %s errors', async stage => {
+    const f = fixture();
+    f.store.authorization.refreshGrant.mockResolvedValue({ ...account, used: false });
+    const failure = new Error(`${stage} unavailable`);
+    subcall.mockRejectedValueOnce(failure);
+    const args = { accounts: [account], source: { kind: 'refresh', refreshId } };
+    await expect(f.execute('benchmark_fetch', args)).rejects.toBe(failure);
+    expect(f.store.fetchDispatch).not.toHaveBeenCalled();
+    expect(f.store.fetchFinish).not.toHaveBeenCalled();
+    expect(f.supplierCalls).not.toHaveBeenCalled();
+    expect(f.fetches.size).toBe(0);
+    expect(await f.makeExecute()('benchmark_fetch', args)).toMatchObject({ status: 'ok' });
+    expect(f.store.fetchClaim.mock.calls).toEqual([
+      ['tiktok', 'alice', refreshId], ['tiktok', 'alice', refreshId],
+    ]);
+    expect(f.store.fetchDispatch).toHaveBeenCalledTimes(1);
+    expect(f.store.fetchDispatch).toHaveBeenCalledWith(id, refreshId);
+    expect(f.store.fetchFinish).toHaveBeenCalledWith(id, refreshId, 'succeeded', expect.any(Object));
+    expect(f.supplierCalls).toHaveBeenCalledTimes(2);
+  });
+
 });
 
 describe('durable benchmark discovery and free follow-up', () => {
@@ -423,5 +472,30 @@ describe('full 25-subcall benchmark discovery', () => {
     });
     expect(subcall).toHaveBeenCalledTimes(25);
     expect(f.store.discoveryStart).toHaveBeenCalledTimes(1);
+  });
+});
+
+
+describe('candidate card total option ceiling', () => {
+  it('fits twelve qualified accounts plus head references into twelve total options', async () => {
+    const f = fixture(20);
+    f.setAuthors(15);
+    const successfulCall = subcall.getMockImplementation()!;
+    subcall.mockImplementation(async (context, request) => {
+      const outcome = await successfulCall(context, request);
+      if (outcome.sent && request.vendor === 'tikhub' && request.call.kind === 'account_profile'
+        && ['author7', 'author8', 'author9'].includes(request.call.account ?? '')) {
+        outcome.result.items = [item({ followers: 500000 })];
+        f.operations.set(context.newId(), { state: 'succeeded', result: { items: outcome.result.items } });
+      }
+      return outcome;
+    });
+    expect(await f.execute('benchmark_discover', discoveryArgs)).toMatchObject({ status: 'ok' });
+    const options = f.store.createCard.mock.calls[0]?.[1].options ?? [];
+    expect(options).toHaveLength(12);
+    expect(options.filter(option => option.selectable)).toHaveLength(9);
+    expect(options.filter(option => !option.selectable)).toHaveLength(3);
+    expect(options.filter(option => !option.selectable).map(option => option.account).sort())
+      .toEqual(['author7', 'author8', 'author9']);
   });
 });
