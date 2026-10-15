@@ -79,6 +79,9 @@ BEGIN
  IF e.id IS NULL OR e.state<>'running' OR e.erased_at IS NOT NULL OR e.content_deleted_at IS NOT NULL
   OR NOT EXISTS(SELECT 1 FROM runtime_library_references r WHERE r.execution_id=e.id)
  THEN RAISE EXCEPTION 'LIB_REFERENCE_READ_DENIED'; END IF;
+ SELECT count(*),coalesce(sum(octet_length(to_jsonb(t.result::text)::text)),0) INTO reads,used FROM runtime_tool_calls t
+  WHERE t.execution_id=e.id AND t.name='read_source' AND t.result->>'kind' IN ('library_index','library_directory','library_segment');
+ IF reads>=8 OR used>=65536 THEN RETURN jsonb_build_object('kind','unavailable','reason','read_limit'); END IF;
  IF coalesce(p_query,'')='' THEN
   PERFORM document.id FROM library_documents document
    JOIN runtime_library_references r ON r.document_id=document.id AND r.actor_id=document.actor_id
@@ -91,15 +94,16 @@ BEGIN
    ORDER BY r.ordinal),'[]'))
   INTO result FROM runtime_library_references r LEFT JOIN library_documents x ON x.id=r.document_id AND x.actor_id=r.actor_id
   WHERE r.execution_id=e.id;
+  IF octet_length(to_jsonb(result::text)::text)>16384
+   OR used+octet_length(to_jsonb(result::text)::text)>65536 THEN
+   RETURN jsonb_build_object('kind','unavailable','reason','read_limit'); END IF;
   RETURN result;
  END IF;
  m:=regexp_match(p_query,'^doc-([1-5])(?:/(page|segment)-([1-9][0-9]{0,4}))?$');
  IF m IS NULL THEN RETURN jsonb_build_object('kind','unavailable','reason','unknown_query'); END IF;
  SELECT * INTO ref FROM runtime_library_references WHERE execution_id=e.id AND ordinal=m[1]::smallint;
  IF ref.execution_id IS NULL THEN RETURN jsonb_build_object('kind','unavailable','reason','unknown_query'); END IF;
- SELECT count(*),coalesce(sum(octet_length(to_jsonb(t.result::text)::text)),0) INTO reads,used FROM runtime_tool_calls t
-  WHERE t.execution_id=e.id AND t.name='read_source' AND t.result->>'kind' IN ('library_directory','library_segment');
- IF reads>=8 OR used>=65536 THEN RETURN jsonb_build_object('kind','unavailable','reason','read_limit'); END IF;
+
  SELECT * INTO d FROM library_documents WHERE id=ref.document_id AND actor_id=p_actor_id FOR SHARE;
  IF d.id IS NULL OR d.deleted_at IS NOT NULL OR d.status<>'ready' THEN
   RETURN jsonb_build_object('kind','unavailable','reason','source_deleted','ref','doc-'||ref.ordinal); END IF;
@@ -156,10 +160,18 @@ END $$;
 -- (or a version change) is never saved, and a saved read is always found by the deletion cleanup below.
 CREATE OR REPLACE FUNCTION public.runtime_library_tool_guard() RETURNS trigger
 LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
-DECLARE a uuid; d library_documents;
+DECLARE a uuid; d library_documents; reads integer; used bigint;
 BEGIN
  IF coalesce(NEW.result->>'kind','') NOT IN ('library_index','library_directory','library_segment') THEN RETURN NEW; END IF;
- SELECT actor_id INTO a FROM runtime_executions WHERE id=NEW.execution_id;
+ -- runtime_tool already owns this lock; also serialize direct trigger writes on the same execution.
+ SELECT actor_id INTO a FROM runtime_executions WHERE id=NEW.execution_id FOR NO KEY UPDATE;
+ SELECT count(*),coalesce(sum(octet_length(to_jsonb(t.result::text)::text)),0) INTO reads,used
+  FROM runtime_tool_calls t WHERE t.execution_id=NEW.execution_id AND t.call_id<>NEW.call_id
+   AND t.name='read_source' AND t.result->>'kind' IN ('library_index','library_directory','library_segment');
+ IF reads>=8 OR octet_length(to_jsonb(NEW.result::text)::text)>16384
+  OR used+octet_length(to_jsonb(NEW.result::text)::text)>65536 THEN
+  NEW.result:=jsonb_build_object('kind','unavailable','reason','read_limit');RETURN NEW;
+ END IF;
  IF NEW.result->>'kind'='library_index' THEN
   PERFORM x.id FROM library_documents x JOIN runtime_library_references r ON r.document_id=x.id AND r.actor_id=x.actor_id
    WHERE r.execution_id=NEW.execution_id ORDER BY x.id FOR SHARE OF x;
@@ -175,8 +187,11 @@ BEGIN
  THEN RAISE EXCEPTION 'LIB_REFERENCE_REVOKED'; END IF;
  RETURN NEW;
 END $$;
+-- Acquire the execution write lock before content_erasure_parent_guard takes its shared lock.
+-- PostgreSQL orders same-event triggers by name; this avoids concurrent shared-lock upgrades.
 DROP TRIGGER IF EXISTS runtime_library_tool_guard ON public.runtime_tool_calls;
-CREATE TRIGGER runtime_library_tool_guard BEFORE INSERT OR UPDATE OF result ON public.runtime_tool_calls
+DROP TRIGGER IF EXISTS a_runtime_library_tool_guard ON public.runtime_tool_calls;
+CREATE TRIGGER a_runtime_library_tool_guard BEFORE INSERT OR UPDATE OF result ON public.runtime_tool_calls
  FOR EACH ROW WHEN (NEW.name='read_source' AND NEW.result IS NOT NULL) EXECUTE FUNCTION public.runtime_library_tool_guard();
 
 -- Deletion cleanup (called by library cleanup; p_actor_id NULL = every account). For finished executions that
@@ -269,6 +284,22 @@ $b$;
   IF length(definition)-length(replace(definition,entry_anchor,''))<>length(entry_anchor) THEN
    RAISE EXCEPTION 'LIBRARY_REFERENCE_RUNTIME_ENTRY_MISMATCH'; END IF;
   EXECUTE replace(replace(definition,anchor,replacement),entry_anchor,entry_patch);
+ END IF;
+END $migration$;
+
+-- Return the row accepted by BEFORE triggers, never the unguarded caller input.
+DO $migration$
+DECLARE definition text; anchor text;
+BEGIN
+ definition:=pg_get_functiondef('public.runtime_tool(uuid,uuid,text,text,jsonb,text,jsonb)'::regprocedure);
+ IF position('-- 0262 return guarded tool result' IN definition)=0 THEN
+  anchor:=$a$   UPDATE runtime_tool_calls SET result=p_result WHERE execution_id=e.id AND call_id=p_call_id;
+   RETURN jsonb_build_object('execute',false,'result',p_result);$a$;
+  IF array_length(string_to_array(definition,anchor),1)<>2 THEN
+   RAISE EXCEPTION 'LIBRARY_REFERENCE_TOOL_SOURCE_MISMATCH';END IF;
+  EXECUTE replace(definition,anchor,$b$   -- 0262 return guarded tool result
+   UPDATE runtime_tool_calls SET result=p_result WHERE execution_id=e.id AND call_id=p_call_id RETURNING * INTO t;
+   RETURN jsonb_build_object('execute',false,'result',t.result);$b$);
  END IF;
 END $migration$;
 

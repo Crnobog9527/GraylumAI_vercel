@@ -102,6 +102,42 @@ export async function runCases({db,Client,connectionString,report}) {
  assert.deepEqual(await read(db,a,heavy,'doc-1/segment-1'),{kind:'unavailable',reason:'read_limit'});
  report.checks.push('cumulative budget counts the same escaped representation as individual results');
 
+ const indexBudget=await exec(db,a,sid,[ref(guide)]);
+ await store(db,indexBudget,'index',await read(db,a,indexBudget));
+ for(let i=0;i<7;i++)await store(db,indexBudget,'body-'+i,await read(db,a,indexBudget,'doc-1/segment-1'));
+ assert.deepEqual(await read(db,a,indexBudget),{kind:'unavailable',reason:'read_limit'});
+ assert.deepEqual(await read(db,a,indexBudget,'doc-1'),{kind:'unavailable',reason:'read_limit'});
+ for(const byteLimit of [false,true]){
+  const concurrent=await exec(db,a,sid,[ref(byteLimit?big:guide)]);
+  const value=await read(db,a,concurrent,'doc-1/segment-1');
+  const bytes=Number(await one(db,'SELECT octet_length(to_jsonb($1::jsonb::text)::text) v',[value]));
+  const maximum=byteLimit?Math.floor(65536/bytes):8;
+  for(let i=0;i<maximum-1;i++)await store(db,concurrent,'prior-'+i,value);
+  const contenders=[new Client({connectionString}),new Client({connectionString})];
+  await Promise.all(contenders.map(c=>c.connect()));
+  try{await Promise.all(contenders.map((c,i)=>store(c,concurrent,'race-'+i,value)));}
+  finally{await Promise.all(contenders.map(c=>c.end()));}
+  const results=(await db.query("SELECT result FROM runtime_tool_calls WHERE execution_id=$1 AND call_id LIKE 'race-%'",[concurrent])).rows;
+  assert.equal(results.filter(x=>x.result.reason==='read_limit').length,1,'only one concurrent result fits');
+  const usage=(await db.query(`SELECT count(*)::int n,sum(octet_length(to_jsonb(result::text)::text))::int bytes
+   FROM runtime_tool_calls WHERE execution_id=$1 AND result->>'kind' IN ('library_index','library_directory','library_segment')`,[concurrent])).rows[0];
+  assert.ok(usage.n<=8&&usage.bytes<=65536);
+ }
+ report.checks.push('index counts toward the same eight-read budget; concurrent commits cannot exceed count or serialized bytes');
+
+ // Exercise runtime_tool itself: its return must be the guarded row, not the pre-trigger argument.
+ const tool=await runtimeFixture(db,{}),toolDoc=await doc(db,tool.actor,'TOOL_PRIVATE_NAME.md');
+ await db.query(`UPDATE runtime_executions SET state='running',payload=payload||'{"tools":["read_source"],"maxToolCalls":8}'::jsonb WHERE id=$1`,[tool.execution]);
+ await db.query('INSERT INTO runtime_library_references(execution_id,actor_id,document_id,content_version,ordinal) VALUES($1,$2,$3,1,1)',
+  [tool.execution,tool.actor,toolDoc]);
+ await rpc(db,'runtime_tool',tool.actor,tool.execution,'first-index','read_source',{query:'library'},'claim',null);
+ const initialIndex=await read(db,tool.actor,tool.execution);
+ await del(db,tool.actor,toolDoc);
+ const committedIndex=await rpc(db,'runtime_tool',tool.actor,tool.execution,'first-index','read_source',{query:'library'},'complete',initialIndex);
+ assert.deepEqual(committedIndex.result,{kind:'unavailable',reason:'source_deleted'});
+ report.checks.push('real runtime_tool completion returns the guarded result without a deleted filename');
+
+
 
  // Storing and replaying: the guard and the visibility check follow the document.
  const reader=await exec(db,a,sid,[ref(notes)]);
