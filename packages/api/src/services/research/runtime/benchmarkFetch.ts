@@ -14,6 +14,8 @@ export async function benchmarkFetch(ctx: ResearchToolContext, args: ResearchToo
   if (!authorization.ok) return toolEnvelope({ status: 'not_confirmed', reason: authorization.reason });
   const rows: ResearchItem[] = [];
   let partial = false;
+  let stopReason: string | null = null;
+  let stopBudget = false;
   for (const account of authorization.accounts) {
     const routes = BENCHMARK_ROUTE_KINDS[account.platform];
     if (!routes?.verified || routes.kinds.some(kind => !socialRequest(ctx, account.platform, kind, { account: account.account }))) {
@@ -21,7 +23,12 @@ export async function benchmarkFetch(ctx: ResearchToolContext, args: ResearchToo
       continue;
     }
     // The complete account must fit before claiming its once-only paid fetch.
-    if (budget.left < routes.kinds.length) { partial = true; break; }
+    if (budget.left < routes.kinds.length) {
+      partial = true;
+      stopReason = 'ROUND_LIMIT';
+      stopBudget = true;
+      break;
+    }
     const claim = await ctx.store.fetchClaim(account.platform, account.account,
       args.source.kind === 'refresh' ? args.source.refreshId : undefined);
     if (!claim.claimed) {
@@ -52,7 +59,12 @@ export async function benchmarkFetch(ctx: ResearchToolContext, args: ResearchToo
         if (!request) { failed = true; break; }
         const outcome = await executeResearchCall(fetchContext, budget, request,
           stableResearchId(claim.fetchId, claim.attempt, kind), 'benchmark_fetch', args);
-        if (!outcome.sent) { failed = true; break; }
+        if (!outcome.sent) {
+          failed = true;
+          stopReason = outcome.stop;
+          stopBudget = outcome.budget;
+          break;
+        }
         charged ||= outcome.result.supplierMayCharge;
         unknown ||= outcome.result.outcome === 'unknown';
         if (!['ok', 'partial'].includes(outcome.result.outcome)) { failed = true; break; }
@@ -69,6 +81,7 @@ export async function benchmarkFetch(ctx: ResearchToolContext, args: ResearchToo
           rows.push({ fields: { ...account, evidence: JSON.stringify({ ...account, metrics, partial: true }) }, missing: metrics.missing });
         }
         partial = true;
+        if (stopReason) break;
         continue;
       }
       const metrics = accountMetrics({ profile, posts, followersItem: results[routes.followersFrom]?.[0] }, ctx.now());
@@ -83,5 +96,6 @@ export async function benchmarkFetch(ctx: ResearchToolContext, args: ResearchToo
       throw error;
     }
   }
-  return toolEnvelope({ status: partial ? 'partial' : 'ok', reason: partial ? 'ACCOUNT_DATA_INCOMPLETE' : null, items: rows });
+  return toolEnvelope({ status: stopReason && rows.length === 0 ? (stopBudget ? 'budget_exhausted' : 'unavailable')
+    : partial ? 'partial' : 'ok', reason: stopReason ?? (partial ? 'ACCOUNT_DATA_INCOMPLETE' : null), items: rows });
 }

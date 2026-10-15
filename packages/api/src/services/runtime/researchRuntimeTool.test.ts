@@ -279,7 +279,7 @@ describe('benchmark fetch cache and refresh', () => {
 
   it('requires enough budget for the whole account before claiming its paid fetch', async () => {
     const f = fixture(1);
-    expect(await f.execute('benchmark_fetch', fetchArgs)).toMatchObject({ status: 'partial' });
+    expect(await f.execute('benchmark_fetch', fetchArgs)).toMatchObject({ status: 'budget_exhausted', reason: 'ROUND_LIMIT' });
     expect(f.store.fetchClaim).not.toHaveBeenCalled();
     expect(subcall).not.toHaveBeenCalled();
   });
@@ -298,12 +298,28 @@ describe('benchmark fetch cache and refresh', () => {
     f.store.authorization.refreshGrant.mockResolvedValue({ ...account, used: false });
     subcall.mockResolvedValueOnce({ sent: false, stop, budget: stop !== 'KEY_MISSING' });
     const args = { accounts: [account], source: { kind: 'refresh', refreshId } };
-    expect(await f.execute('benchmark_fetch', args)).toMatchObject({ status: 'partial' });
+    expect(await f.execute('benchmark_fetch', args)).toMatchObject({
+      status: stop === 'KEY_MISSING' ? 'unavailable' : 'budget_exhausted', reason: stop,
+    });
     expect(f.store.fetchDispatch).not.toHaveBeenCalled();
     expect(f.store.fetchFinish).not.toHaveBeenCalled();
     expect(f.supplierCalls).not.toHaveBeenCalled();
     expect(await f.makeExecute()('benchmark_fetch', args)).toMatchObject({ status: 'ok' });
     expect(f.store.fetchDispatch).toHaveBeenCalledWith(id, refreshId);
+  });
+
+  it('retains fetched profile data and the balance stop without trying another account', async () => {
+    const f = fixture();
+    const secondAccount = { ...account, account: 'bob' };
+    f.store.authorization.candidateConfirmation.mockResolvedValue([account, secondAccount]);
+    const successful = subcall.getMockImplementation()!;
+    subcall.mockImplementationOnce(successful).mockResolvedValueOnce({ sent: false, stop: 'BALANCE_LOW', budget: true });
+    const result = await f.execute('benchmark_fetch', { ...fetchArgs, accounts: [account, secondAccount] });
+    expect(result).toMatchObject({ status: 'partial', reason: 'BALANCE_LOW' });
+    expect(result.items).toHaveLength(1);
+    expect(result.items[0].fields.account).toBe('alice');
+    expect(f.store.fetchClaim).toHaveBeenCalledTimes(1);
+    expect(subcall).toHaveBeenCalledTimes(2);
   });
 
   it.each(['claim', 'rate-limit', 'evidence-open'])('keeps the original refresh recoverable on pre-send %s errors', async stage => {
@@ -330,6 +346,31 @@ describe('benchmark fetch cache and refresh', () => {
 });
 
 describe('durable benchmark discovery and free follow-up', () => {
+  it.each(['VENDOR_RATE_LIMITED', 'KEY_MISSING', 'BALANCE_LOW', 'NOT_DISPATCHED'] as const)(
+    'preserves discovery stop %s without requesting automatic continuation', async stop => {
+      const f = fixture();
+      const budget = stop === 'BALANCE_LOW' || stop === 'VENDOR_RATE_LIMITED';
+      subcall.mockResolvedValueOnce({ sent: false, stop, budget });
+      expect(await f.execute('benchmark_discover', discoveryArgs)).toMatchObject({
+        status: budget ? 'budget_exhausted' : 'unavailable', reason: stop, continue: false, discoveryId,
+      });
+      expect(subcall).toHaveBeenCalledTimes(1);
+      expect(f.supplierCalls).not.toHaveBeenCalled();
+      expect(f.discoveries.get(discoveryId)?.state).toBe('running');
+    });
+
+  it('keeps already discovered accounts when balance runs out, without automatic continuation', async () => {
+    const f = fixture();
+    const successful = subcall.getMockImplementation()!;
+    subcall.mockImplementation(async (context, request) => context.newId() === stableResearchId(discoveryId, '4')
+      ? { sent: false, stop: 'BALANCE_LOW', budget: true } : successful(context, request));
+    const result = await f.execute('benchmark_discover', discoveryArgs);
+    expect(result).toMatchObject({ status: 'partial', reason: 'BALANCE_LOW', continue: false });
+    expect(result.items).toHaveLength(1);
+    expect(subcall).toHaveBeenCalledTimes(5);
+    expect(f.store.createCard).not.toHaveBeenCalled();
+  });
+
   it('resumes across rounds from stable operation IDs without resending completed searches', async () => {
     const f = fixture(2);
     expect(await f.execute('benchmark_discover', discoveryArgs)).toMatchObject({ status: 'partial', continue: true, discoveryId });

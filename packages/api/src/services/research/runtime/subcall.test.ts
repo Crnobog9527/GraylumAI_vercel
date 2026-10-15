@@ -93,8 +93,20 @@ describe('research subcall safety and accounting', () => {
     f.evidence.link.mockRejectedValue(new Error('link unavailable'));
     await expect(runSubcall(f.context, request)).rejects.toThrow('link unavailable');
     expect(f.billing.dispatch).not.toHaveBeenCalled();
-    expect(f.billing.record).not.toHaveBeenCalled();
+    expect(f.billing.record).toHaveBeenCalledWith('call-1', expect.objectContaining({ toolOutcome: 'failed_free', cost: '0' }));
+    expect(f.evidence.finish).toHaveBeenCalledWith('operation-1', 'evidence-token', 'failed',
+      expect.objectContaining({ outcome: 'not_sent', reason: 'LOCAL_PRE_SEND_FAILED', cost: { actual: 0 } }));
     expect(f.vendors.parallel).not.toHaveBeenCalled();
+  });
+
+  it('records a zero-cost terminal result when BILL2 dispatch fails locally before any supplier request', async () => {
+    const f = fixture();
+    f.billing.dispatch.mockRejectedValue(new Error('dispatch response lost'));
+    await expect(runSubcall(f.context, request)).rejects.toThrow('dispatch response lost');
+    expect(f.vendors.parallel).not.toHaveBeenCalled();
+    expect(f.evidence.finish).toHaveBeenCalledWith('operation-1', 'evidence-token', 'failed',
+      expect.objectContaining({ outcome: 'not_sent', cost: { actual: 0 }, billing: expect.objectContaining({ runId: f.billing.runId }) }));
+    expect(f.billing.record).toHaveBeenCalledWith('call-1', expect.objectContaining({ toolOutcome: 'failed_free', cost: '0' }));
   });
 
   it('fails closed if the rate counter is unavailable', async () => {
@@ -130,7 +142,9 @@ describe('research subcall safety and accounting', () => {
     if (failure.endsWith('error')) await expect(runSubcall(f.context, request)).rejects.toThrow('unavailable');
     else expect(await runSubcall(f.context, request)).toMatchObject({ sent: false, stop: 'NOT_DISPATCHED' });
     expect(f.vendors.parallel).not.toHaveBeenCalled();
-    expect(f.billing.record).not.toHaveBeenCalled();
+    if (failure === 'dispatch-error') expect(f.billing.record).toHaveBeenCalledWith('call-1',
+      expect.objectContaining({ toolOutcome: 'failed_free', cost: '0' }));
+    else expect(f.billing.record).not.toHaveBeenCalled();
     if (failure === 'dispatch-false') expect(f.evidence.finish).toHaveBeenCalledWith(
       'operation-1', 'evidence-token', 'failed', { reason: 'NOT_DISPATCHED', cost: { actual: 0 } });
   });

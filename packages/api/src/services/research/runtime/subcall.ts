@@ -114,23 +114,28 @@ export async function runSubcall(context: SubcallContext, request: SupplierReque
   const opened = await context.evidence.open(operationId, identity, microUnits(policy.upperUsd));
   // The claimed call stays undispatched (never sent); the run releases its hold when it closes.
   if (!opened) return { sent: false, stop: 'NOT_DISPATCHED', budget: false };
-  // Bind before any supplier dispatch so crash recovery and erasure can always identify this call.
-  await context.evidence.link(operationId, claim.callId);
-  if (!await context.billing.dispatch(claim.callId, claim.token)) {
-    await context.evidence.finish(operationId, opened.token, 'failed', { reason: 'NOT_DISPATCHED', cost: { actual: 0 } });
-    return { sent: false, stop: 'NOT_DISPATCHED', budget: false };
-  }
-
   let result: ResearchCallResult;
   let preSendError: unknown;
-  let permitted = true;
-  try { permitted = await context.beforeSend?.() ?? true; }
-  catch (error) { permitted = false; preSendError = error; }
+  let permitted = false;
+  let unsentReason = 'FETCH_NOT_DISPATCHED';
+  try {
+    // Bind before any supplier dispatch so recovery and erasure can identify this call.
+    await context.evidence.link(operationId, claim.callId);
+    if (!await context.billing.dispatch(claim.callId, claim.token)) {
+      await context.evidence.finish(operationId, opened.token, 'failed', { reason: 'NOT_DISPATCHED', cost: { actual: 0 } });
+      return { sent: false, stop: 'NOT_DISPATCHED', budget: false };
+    }
+    permitted = await context.beforeSend?.() ?? true;
+    if (permitted) context.onSupplierDispatch?.();
+  } catch (error) {
+    permitted = false;
+    preSendError = error;
+    unsentReason = 'LOCAL_PRE_SEND_FAILED';
+  }
   if (!permitted) {
     result = { ...unknownResult(request, request.vendor, context.now), outcome: 'not_sent',
-      reason: 'FETCH_NOT_DISPATCHED', supplierMayCharge: false, usage: { unit: policy.toolPricing.unit, units: '0' } };
+      reason: unsentReason, supplierMayCharge: false, usage: { unit: policy.toolPricing.unit, units: '0' } };
   } else {
-    context.onSupplierDispatch?.();
     try { result = await send(request, apiKey, context.vendors ?? REAL_VENDORS, context.now); }
     catch { result = unknownResult(request, request.vendor, context.now); }
   }

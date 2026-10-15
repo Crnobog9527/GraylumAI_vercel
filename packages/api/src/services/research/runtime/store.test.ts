@@ -121,6 +121,37 @@ describe('saved research receipt recovery', () => {
     expect(records[0]).toEqual(records[1]);
     expect(records[0][1].p_evidence).toEqual(receipt);
   });
+  it('accepts only a saved free failure with the exact database unsent verdict', async () => {
+    const freeReceipt = { ...receipt, toolOutcome: 'failed_free', cost: '0' };
+    const prior = { state: 'failed', result: { outcome: 'not_sent', items: [],
+      billing: { runId, callId, receipt: freeReceipt } } };
+    const { store, rpc } = harness([prior, plan, null, new Error('BILL2_CALL_NOT_DISPATCHED')]);
+    expect(await store.readOperation('operation')).toEqual(prior);
+    expect(rpc.mock.calls.map(([name]) => name)).toEqual([
+      'research_runtime_read', 'research_runtime_read', 'research_runtime_link', 'bill2_record',
+    ]);
+    expect(rpc.mock.calls[3][1]).toEqual({ p_actor_id: 'actor', p_run_id: runId,
+      p_call_id: callId, p_evidence: freeReceipt });
+  });
+  it.each([
+    ['delivered', 'BILL2_CALL_NOT_DISPATCHED'],
+    ['unknown', 'BILL2_CALL_NOT_DISPATCHED'],
+    ['failed_charged', 'BILL2_CALL_NOT_DISPATCHED'],
+    ['failed_free', 'prefix BILL2_CALL_NOT_DISPATCHED'],
+    ['failed_free', 'BILL2_CALL_NOT_DISPATCHED suffix'],
+    ['failed_free', 'BILL2_DATABASE_UNAVAILABLE'],
+  ])('refuses the unsent exception for outcome %s and error %s', async (toolOutcome, message) => {
+    const prior = { ...operation, result: { ...result, billing: { runId, callId, receipt: { ...receipt, toolOutcome } } } };
+    const { store } = harness([prior, plan, null, new Error(message)]);
+    await expect(store.readOperation('operation')).rejects.toThrow('RESEARCH_STATE_UNAVAILABLE');
+  });
+  it('does not mistake an unsent error from binding validation for billing proof', async () => {
+    const prior = { ...operation, result: { ...result,
+      billing: { runId, callId, receipt: { ...receipt, toolOutcome: 'failed_free' } } } };
+    const { store, rpc } = harness([prior, plan, new Error('BILL2_CALL_NOT_DISPATCHED')]);
+    await expect(store.readOperation('operation')).rejects.toThrow('RESEARCH_STATE_UNAVAILABLE');
+    expect(rpc).toHaveBeenCalledTimes(3);
+  });
   it.each(['failed', 'unknown'])('recovers the receipt for a %s terminal result too', async state => {
     const prior = { ...operation, state };
     const { store, rpc } = harness([prior, plan, null, {}]);

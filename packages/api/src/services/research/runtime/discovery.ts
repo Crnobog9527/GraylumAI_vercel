@@ -15,7 +15,10 @@ import type { SupplierRequest } from './subcall';
 const itemSchema = z.object({ url: z.string().optional(), fields: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])),
   missing: z.array(z.string()) });
 interface FoundAccount extends ScoredAccount { platform: SocialPlatform; account: string; evidenceRef: string }
-interface StepResult { items: ResearchItem[]; operationId: string; complete: boolean; stopped: boolean }
+interface StepResult {
+  items: ResearchItem[]; operationId: string; complete: boolean; stopped: boolean;
+  reason?: string; budget?: boolean;
+}
 
 /** The operation is the durable cursor. A crash after dispatch never causes another supplier request. */
 async function step(ctx: ResearchToolContext, d: DiscoveryRecord, budget: ToolAllowance,
@@ -31,24 +34,25 @@ async function step(ctx: ResearchToolContext, d: DiscoveryRecord, budget: ToolAl
       prior = await ctx.store.readOperation(operationId);
       plan = await ctx.store.readPlan(operationId);
       if (prior?.state === 'prepared' || (!prior && !plan?.cancelled)) {
-        return { operationId, items: [], complete: false, stopped: true };
+        return { operationId, items: [], complete: false, stopped: true, reason: 'NOT_DISPATCHED' };
       }
     }
     if (prior?.state !== 'cancelled' && !(plan?.cancelled && !prior)) break;
     operationId = stableResearchId(operationId, 'unsent-successor');
     prior = await ctx.store.readOperation(operationId);
-    if (recovery === 19) return { operationId, items: [], complete: false, stopped: true };
+    if (recovery === 19) return { operationId, items: [], complete: false, stopped: true, reason: 'NOT_DISPATCHED' };
   }
   if (prior && prior.state !== 'prepared') {
     const parsed = z.array(itemSchema).safeParse(prior.result?.items);
     return { operationId, items: parsed.success ? parsed.data : [],
       complete: prior.state === 'succeeded' && parsed.success, stopped: false };
   }
-  if (budget.left === 0) return { operationId, items: [], complete: false, stopped: true };
+  if (budget.left === 0) return { operationId, items: [], complete: false, stopped: true, reason: 'ROUND_LIMIT', budget: true };
   const outcome = await executeResearchCall(ctx, budget, request, operationId, 'benchmark_discover',
     { discoveryId: d.discoveryId }, d.discoveryId);
   return { operationId, items: outcome.sent ? outcome.result.items : [],
-    complete: outcome.sent && ['ok', 'partial'].includes(outcome.result.outcome), stopped: !outcome.sent };
+    complete: outcome.sent && ['ok', 'partial'].includes(outcome.result.outcome), stopped: !outcome.sent,
+    ...(!outcome.sent ? { reason: outcome.stop, budget: outcome.budget } : {}) };
 }
 
 async function card(ctx: ResearchToolContext, discoveryId: string, accounts: FoundAccount[], followUp: boolean, callId: string) {
@@ -87,6 +91,8 @@ export async function discover(ctx: ResearchToolContext, args: ResearchToolArgs<
   let index = 0;
   let complete = true;
   let stopped = false;
+  let stopReason: string | undefined;
+  let stopBudget = false;
   const posts = new Map<SocialPlatform, EvidenceItem[]>();
   const found: FoundAccount[] = [];
   for (const platform of d.platforms) {
@@ -97,7 +103,12 @@ export async function discover(ctx: ResearchToolContext, args: ResearchToolArgs<
       const request = socialRequest(ctx, platform, 'keyword_posts', { keyword })!;
       const result = await step(ctx, d, budget, index++, request);
       complete &&= result.complete;
-      if (result.stopped) { stopped = true; break; }
+      if (result.stopped) {
+        stopped = true;
+        stopReason = result.reason;
+        stopBudget = result.budget === true;
+        break;
+      }
       entries.push(...result.items.map((item, i) => ({ ...item, ref: `${result.operationId}#${i + 1}` })));
     }
     if (stopped) break;
@@ -113,7 +124,12 @@ export async function discover(ctx: ResearchToolContext, args: ResearchToolArgs<
       if (!request) { complete = false; continue; }
       const result = await step(ctx, d, budget, index++, request);
       complete &&= result.complete;
-      if (result.stopped) { stopped = true; break; }
+      if (result.stopped) {
+        stopped = true;
+        stopReason = result.reason;
+        stopBudget = result.budget === true;
+        break;
+      }
       const profile = result.items[0];
       if (!profile) continue;
       const metrics = accountMetrics({ profile: { ...profile, ref: `${result.operationId}#1` },
@@ -125,9 +141,11 @@ export async function discover(ctx: ResearchToolContext, args: ResearchToolArgs<
   // Reconstruct from stable operations each time; the saved candidates support free follow-up cards.
   await ctx.store.discoverySave(d.discoveryId, { accounts: found, attempted: index }, stopped ? 'running' : 'completed');
   const shown = !stopped && await card(ctx, d.discoveryId, found, false, '');
-  return toolEnvelope({ status: complete && shown ? 'ok' : 'partial',
-    reason: stopped ? 'ROUND_LIMIT' : shown ? (complete ? null : 'DISCOVERY_PARTIAL') : 'NOT_ENOUGH_CANDIDATES',
-    discoveryId: d.discoveryId, continue: stopped,
+  const blockedWithoutData = stopped && stopReason !== 'ROUND_LIMIT' && found.length === 0;
+  return toolEnvelope({ status: blockedWithoutData ? (stopBudget ? 'budget_exhausted' : 'unavailable')
+    : complete && shown ? 'ok' : 'partial',
+    reason: stopped ? stopReason : shown ? (complete ? null : 'DISCOVERY_PARTIAL') : 'NOT_ENOUGH_CANDIDATES',
+    discoveryId: d.discoveryId, continue: stopped && stopReason === 'ROUND_LIMIT',
     items: found.map(a => ({ fields: { platform: a.platform, account: a.account,
       evidenceRef: a.evidenceRef, category: a.classification.category ?? 'excluded' }, missing: a.metrics.missing })) });
 }

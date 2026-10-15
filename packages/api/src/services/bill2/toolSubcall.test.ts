@@ -109,6 +109,18 @@ describe('actor-bound tool subcall billing RPCs', () => {
     expect(rpc).toHaveBeenCalledTimes(2);
   });
 
+  it('accepts only exact not-dispatched confirmation for a zero-cost unsent receipt', async () => {
+    const { rpc, billing } = fixture();
+    rpc.mockResolvedValue({ data: null, error: { message: 'BILL2_CALL_NOT_DISPATCHED' } });
+    await expect(billing.record(callId, { ...evidence, toolOutcome: 'failed_free', cost: '0', usage: { unit: 'sku_search', units: null } }))
+      .resolves.toEqual({ accountClosed: false, contentDeleted: false });
+    expect(rpc).toHaveBeenCalledTimes(1);
+    await expect(billing.record(callId, evidence)).rejects.toThrow('BILL2_DATABASE_UNAVAILABLE');
+    rpc.mockResolvedValue({ data: null, error: { message: 'ambiguous dispatch state' } });
+    await expect(billing.record(callId, { ...evidence, toolOutcome: 'failed_free', cost: '0' }))
+      .rejects.toThrow('BILL2_DATABASE_UNAVAILABLE');
+  });
+
   it('retains account and content deletion signals after a successful record', async () => {
     const { rpc, billing } = fixture();
     rpc.mockResolvedValue({ data: { accountClosed: true, contentDeleted: true }, error: null });

@@ -33,6 +33,10 @@ export function toolSubcallBilling(deps: { admin: BillingRpc; actorId: string; r
     const result = await deps.admin.rpc(name, { ...args, p_run_id: runId, p_actor_id: actor });
     if (result.error) {
       if (name === 'bill2_claim' || name === 'bill2_dispatch') throw claimFailure(result.error);
+      const receipt = args.p_evidence as ReturnType<typeof toolResultEvidence> | undefined;
+      // An authoritative not-dispatched response confirms zero supplier/user cost; no receipt is needed.
+      if (name === 'bill2_record' && receipt?.toolOutcome === 'failed_free' && receipt.cost === '0'
+        && z.object({ message: z.literal('BILL2_CALL_NOT_DISPATCHED') }).safeParse(result.error).success) return {};
       throw new Error('BILL2_DATABASE_UNAVAILABLE');
     }
     return result.data;

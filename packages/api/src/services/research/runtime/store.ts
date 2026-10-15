@@ -149,10 +149,15 @@ export function databaseRuntimeResearchStore(deps: {
     // Never bind a recovered operation to the current answer or its billing run.
     await rpc('research_runtime_link', { a, p_plan: id, s, e: plan.executionId,
       p_discovery: plan.discoveryId, p_operation: id, p_call: saved.data.callId });
-    const recorded = await rpc<unknown>('bill2_record', { p_actor_id: a, p_run_id: saved.data.runId,
+    const recorded = await admin.rpc('bill2_record', { p_actor_id: a, p_run_id: saved.data.runId,
       p_call_id: saved.data.callId, p_evidence: saved.data.receipt });
+    // A saved free failure plus the database's exact unsent verdict proves 0/0; never dispatch just
+    // to create a receipt. Every other failure (including delivered + unsent) stays fail-closed.
+    const unsent = z.object({ message: z.literal('BILL2_CALL_NOT_DISPATCHED') }).safeParse(recorded.error);
+    if (saved.data.receipt.toolOutcome === 'failed_free' && saved.data.receipt.cost === '0' && unsent.success) return operation;
+    check(recorded.error);
     const view = z.object({ accountClosed: z.boolean().optional(), contentDeleted: z.boolean().optional() })
-      .safeParse(recorded);
+      .safeParse(recorded.data);
     if (!view.success) throw new Error('RESEARCH_STATE_UNAVAILABLE');
     if (view.data.accountClosed || view.data.contentDeleted) {
       throwIfContentErased({ code: '42501', message: 'CONTENT_ERASED' });
