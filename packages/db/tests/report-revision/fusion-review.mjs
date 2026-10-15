@@ -2,8 +2,8 @@
 // FUSION-REVIEW PR-4a (0236): the review record — start, claim inside the review lock, advance, stop/end,
 // idle pause, in-flight risk, breaker, version block and erasure. No model call.
 import assert from 'node:assert/strict';
-import {randomUUID} from 'node:crypto';
-import {rpc,closeAccount} from '../erasure-b2a/cases.mjs';
+import {randomUUID,createHash} from 'node:crypto';
+import {rpc,closeAccount,fixture} from '../erasure-b2a/cases.mjs';
 import {erase} from '../content-erasure/cases.mjs';
 import {createFixture} from '../payg/fixture.mjs';
 import {seed} from './cases.mjs';
@@ -52,6 +52,12 @@ export async function runFusionReview({db,Client,connectionString,report}) {
   assert.deepEqual(rv.materials.a.pain,{value:'No time',status:'deferred'});
   assert.match(rv.materialsHash,/^[a-f0-9]{64}$/);
   assert.deepEqual(await start(db,f,request),rv,'same request returns the same review');
+  // The host's replay probe: an empty config returns a known request and never creates a review (#962 review).
+  assert.deepEqual(await start(db,f,request,{}),rv,'empty-config probe replays a known request');
+  const probeCount = Number((await db.query('SELECT count(*) v FROM fusion_reviews WHERE actor_id=$1',[f.actor])).rows[0].v);
+  await assert.rejects(start(db,f,randomUUID(),{}),/FUSION_REVIEW_INVALID/);
+  assert.equal(Number((await db.query('SELECT count(*) v FROM fusion_reviews WHERE actor_id=$1',[f.actor])).rows[0].v),probeCount,
+    'an unknown request probe creates nothing');
   await assert.rejects(start(db,f),/FUSION_REVIEW_ACTIVE/,'one review in progress per user');
   // The copy lives on the record (a published round is immutable; later edits open a new round).
   const reread = await service(db,'fusion_review_read',f.actor,rv.reviewId);
@@ -163,6 +169,9 @@ export async function runFusionReview({db,Client,connectionString,report}) {
   await service(db,'fusion_review_close',f.actor,rv5.reviewId,'stopped');
   const waiting = (await db.query('SELECT fusion_verdict,settled_at FROM bill2_calls WHERE id=$1',[c5.id])).rows[0];
   assert.deepEqual(waiting,{fusion_verdict:null,settled_at:null},'a saved, unjudged body waits for the host verdict');
+  const unjudged = (await db.query('SELECT * FROM fusion_review_unjudged(200)')).rows;
+  assert.ok(unjudged.some(r=>r.call_id===c5.id && r.review_id===rv5.reviewId && r.phase==='fusion_review' && r.round===1),
+    '0256: recovery lists saved, unjudged calls with their review position');
   await rpc(db,'fusion_call_verdict',f.actor,c5.id,'format_invalid');
   await rpc(db,'bill2_finalize',f.actor,s5.run.run);
   const judged = (await db.query('SELECT fusion_verdict,settled_at,charged_delta FROM bill2_calls WHERE id=$1',[c5.id])).rows[0];
@@ -196,6 +205,119 @@ export async function runFusionReview({db,Client,connectionString,report}) {
     await holder.query('ROLLBACK');
   } finally { await holder.end(); await deleter.end(); }
   report.checks.push('draft deletion overlapping a held review row fails fast with the retryable busy refusal');
+
+  // 0256: the review Skill reader needs the Skill id, revision id and package hash all to match; service role only.
+  const body = Buffer.from('# Review prompt\nOnly the given report.');
+  await db.query(`INSERT INTO skill_package_files(revision_id,path,bytes,byte_length,media_type,file_hash)
+    VALUES($1,'review.md',$2,$3,'text/markdown',$4)`,[f.revision,body,body.length,createHash('sha256').update(body).digest('hex')]);
+  const read = (skill,revision,hash,path) => service(db,'fusion_review_skill_file',skill,revision,hash,path);
+  assert.equal(Buffer.from(await read(f.skill,f.revision,'b'.repeat(64),'review.md'),'base64').toString(),body.toString());
+  assert.deepEqual(await read(f.skill,f.revision,'b'.repeat(64),null),{});
+  for (const [skill,revision,hash] of [[f.skill,f.revision,'c'.repeat(64)],[randomUUID(),f.revision,'b'.repeat(64)],[f.skill,randomUUID(),'b'.repeat(64)]])
+    await assert.rejects(read(skill,revision,hash,'review.md'),/FUSION_REVIEW_SKILL_UNAVAILABLE/);
+  await assert.rejects(read(f.skill,f.revision,'b'.repeat(64),'missing.md'),/FUSION_REVIEW_SKILL_UNAVAILABLE/);
+  for (const role of ['anon','authenticated']) {
+    await db.query('SET ROLE '+role);
+    try {
+      for (const [sql,args] of [['SELECT fusion_review_skill_file($1,$2,$3,$4)',[f.skill,f.revision,'b'.repeat(64),'review.md']],
+        ['SELECT fusion_review_source($1,$2)',[f.actor,randomUUID()]],['SELECT fusion_review_unjudged(10)',[]],
+        ['SELECT fusion_review_preview($1,$2,$3)',[f.actor,f.draft,f.versionId]],
+        ['SELECT fusion_review_admin_list(10)',[]],['SELECT fusion_review_admin_read($1)',[randomUUID()]],
+        ['SELECT fusion_review_breaker_clear($1,$2,$3)',[f.actor,f.versionId,'test']],
+        ['SELECT fusion_review_adoption_record($1,$2,$3)',[f.actor,randomUUID(),'{}']]])
+        await assert.rejects(db.query(sql,args),/permission denied/,role+' '+sql);
+    } finally { await db.query('RESET ROLE'); }
+  }
+  // 0256: the frozen source of a review comes from its own version.
+  const source = await service(db,'fusion_review_source',f.actor,rv5.reviewId);
+  assert.equal(source.body,'## One\nOriginal report.\n## Two\nKnown limitations.');
+  assert.deepEqual(source.sections,['One','Two']);assert.equal(source.maxCharacters,12000);
+  assert.deepEqual(source.declared,[{stepId:'a',fieldIds:['who','pain']},{stepId:'b',fieldIds:['offer']},{stepId:'c',fieldIds:['voice']}]);
+  await assert.rejects(service(db,'fusion_review_source',randomUUID(),rv5.reviewId),/./,'another actor cannot read it');
+  // 0256: sizes before start (estimate input), same ownership rules; the view names each call's model.
+  // PostgREST runs STABLE functions read-only; these two take row locks, so they must be VOLATILE.
+  assert.deepEqual((await db.query(`SELECT proname,provolatile FROM pg_proc WHERE proname IN ('fusion_review_source','fusion_review_preview') ORDER BY proname`)).rows,
+    [{proname:'fusion_review_preview',provolatile:'v'},{proname:'fusion_review_source',provolatile:'v'}]);
+  const preview = await service(db,'fusion_review_preview',f.actor,f.draft,f.versionId);
+  assert.equal(preview.reportBytes,Buffer.byteLength(source.body));
+  // Sent sizes: at least what the request really carries after its double JSON escaping (#962 review).
+  assert.ok(preview.reportSentBytes>=Buffer.byteLength(JSON.stringify(JSON.stringify(source.body))));
+  assert.ok(preview.materialsSentBytes>preview.materialsBytes);
+  assert.equal(preview.fieldCount,4);assert.ok(preview.materialsBytes>0);
+  await assert.rejects(service(db,'fusion_review_preview',randomUUID(),f.draft,f.versionId),/./,'another actor cannot preview it');
+  await assert.rejects(service(db,'fusion_review_preview',f.actor,f.draft,randomUUID()),/FUSION_REVIEW_STALE/);
+  const named = await service(db,'fusion_review_read',f.actor,rv5.reviewId);
+  assert.ok(named.calls.length>0 && named.calls.every(c => 'modelId' in c),'calls carry their model');
+  assert.ok(named.calls.every(c => 'dispatchedAt' in c && 'settledAt' in c),'calls carry their dispatch and settlement times');
+  // 0256: administrator look-back, newest first and keyset paged; one review with its calls' outputs.
+  const listed = await service(db,'fusion_review_admin_list',100);
+  assert.ok(listed.some(r => r.reviewId===rv5.reviewId && r.actorId===f.actor && 'costUsd' in r && 'chargedCredits' in r));
+  const page1 = await service(db,'fusion_review_admin_list',1);
+  assert.equal(page1.length,1);
+  const page2 = await service(db,'fusion_review_admin_list',1,page1[0].createdAt,page1[0].reviewId);
+  assert.ok(page2.every(r => r.reviewId!==page1[0].reviewId),'keyset paging moves past the previous page');
+  const one = await service(db,'fusion_review_admin_read',rv5.reviewId);
+  assert.equal(one.reviewId,rv5.reviewId);assert.ok(Array.isArray(one.outputs));
+  assert.equal(await service(db,'fusion_review_admin_read',randomUUID()),null);
+  // 0256: the per-section choice is recorded once, only for a completed review whose summary passed.
+  const adoption = {state:'recorded',requestId:randomUUID(),choices:[{section:'One',use:'revised'}],adopted:['One'],kept:['Two'],revisionId:null,versionId:null};
+  await assert.rejects(service(db,'fusion_review_adoption_record',f.actor,rv5.reviewId,adoption),/FUSION_REVIEW_INVALID/,'not a revised review');
+  await db.query(`UPDATE fusion_reviews SET state='completed',outcome='{"kind":"revised"}',ended_at=now() WHERE id=$1`,[rv5.reviewId]);
+  await assert.rejects(service(db,'fusion_review_adoption_record',f.actor,rv5.reviewId,{...adoption,choices:'x'}),/FUSION_REVIEW_INVALID/);
+  await assert.rejects(service(db,'fusion_review_adoption_record',randomUUID(),rv5.reviewId,adoption),/./,'another actor cannot record');
+  const recorded = await service(db,'fusion_review_adoption_record',f.actor,rv5.reviewId,adoption);
+  assert.equal(recorded.adoption.requestId,adoption.requestId);assert.equal(recorded.adoption.by,f.actor);assert.ok(recorded.adoption.at);
+  assert.deepEqual((await service(db,'fusion_review_adoption_record',f.actor,rv5.reviewId,adoption)).adoption,recorded.adoption,'same request replays');
+  await assert.rejects(service(db,'fusion_review_adoption_record',f.actor,rv5.reviewId,{...adoption,requestId:randomUUID()}),/FUSION_REVIEW_ADOPTED/);
+  assert.deepEqual((await service(db,'fusion_review_read',f.actor,rv5.reviewId)).adoption,recorded.adoption);
+  // A reservation blocks every other request before any R14 side effect, and only its owner completes it.
+  await db.query(`UPDATE fusion_reviews SET adoption=NULL WHERE id=$1`,[rv5.reviewId]);
+  const reservation = {...adoption,state:'reserved',requestId:randomUUID(),decision:'apply'};
+  await service(db,'fusion_review_adoption_record',f.actor,rv5.reviewId,reservation);
+  await assert.rejects(service(db,'fusion_review_adoption_record',f.actor,rv5.reviewId,{...adoption,requestId:randomUUID()}),/FUSION_REVIEW_ADOPTED/,
+    'another request is refused while the first is reserved');
+  await assert.rejects(service(db,'fusion_review_adoption_record',f.actor,rv5.reviewId,{...reservation,state:'recorded',choices:[]}),/FUSION_REVIEW_ADOPTED/,
+    'the reservation is completed with the same choices only');
+  await assert.rejects(service(db,'fusion_review_adoption_record',f.actor,rv5.reviewId,{...reservation,state:'recorded',decision:'decline'}),
+    /FUSION_REVIEW_ADOPTED/,'the reserved decision cannot change');
+  await assert.rejects(service(db,'fusion_review_adoption_record',f.actor,rv5.reviewId,{...reservation,state:'recorded',decision:'refused'}),
+    /FUSION_REVIEW_ADOPTED/,'refused needs the refusal code');
+  const completed = await service(db,'fusion_review_adoption_record',f.actor,rv5.reviewId,{...reservation,state:'recorded'});
+  assert.equal(completed.adoption.state,'recorded');assert.ok(completed.adoption.reservedAt);
+  await assert.rejects(service(db,'fusion_review_adoption_record',f.actor,rv5.reviewId,{...adoption,state:'bogus'}),/FUSION_REVIEW_INVALID/);
+  // 0256 patches fusion_review_start by anchor, keeping guards other migrations injected (0249 read-only drafts).
+  const startDef = (await db.query(`SELECT pg_get_functiondef('public.fusion_review_start(uuid,uuid,uuid,uuid,jsonb)'::regprocedure) d`)).rows[0].d;
+  assert.match(startDef,/AND breaker_cleared_at IS NULL/);
+  if ((await db.query(`SELECT to_regproc('public.opc_draft_readonly') IS NOT NULL v`)).rows[0].v)
+    assert.match(startDef,/-- 0249 read-only/,'the 0249 read-only draft guard survives the 0256 patch');
+  // 0256: the administrator breaker clear marks counted failures of one version (with a reason) and never deletes.
+  await assert.rejects(service(db,'fusion_review_breaker_clear',f.actor,f.versionId,'reason'),/FUSION_ADMIN_REQUIRED/);
+  const adminId = (await fixture(db)).actor;
+  await db.query(`UPDATE profiles SET role='admin',status='active' WHERE id=$1`,[adminId]);
+  await assert.rejects(service(db,'fusion_review_breaker_clear',adminId,f.versionId,'   '),/FUSION_REVIEW_INVALID/);
+  const failedIds = (await db.query(`SELECT id FROM fusion_reviews WHERE source_version_id=$1 AND state IN ('incomplete','revision_failed')
+    AND breaker_cleared_at IS NULL ORDER BY created_at,id`,[f.versionId])).rows.map(r => r.id);
+  const totalBefore = Number((await db.query('SELECT count(*) v FROM fusion_reviews WHERE source_version_id=$1',[f.versionId])).rows[0].v);
+  const cleared = await service(db,'fusion_review_breaker_clear',adminId,f.versionId,'  测试评审，设置已调好  ');
+  assert.deepEqual(cleared.reviewIds,failedIds,'marks exactly the counted failures of this version');
+  assert.equal(cleared.reason,'测试评审，设置已调好');
+  assert.equal(Number((await db.query('SELECT count(*) v FROM fusion_reviews WHERE source_version_id=$1',[f.versionId])).rows[0].v),totalBefore,'nothing deleted');
+  const audit = (await db.query('SELECT DISTINCT breaker_cleared_by::text by, breaker_clear_batch::text batch FROM fusion_reviews WHERE breaker_clear_batch=$1',
+    [cleared.batch])).rows;
+  assert.deepEqual(audit,[{by:adminId,batch:cleared.batch}]);
+  assert.deepEqual((await service(db,'fusion_review_breaker_clear',adminId,f.versionId,'again')).reviewIds,[],'already marked ones are not marked twice');
+  assert.ok((await service(db,'fusion_review_admin_list',100)).some(r => r.breakerCleared?.batch===cleared.batch));
+  // Three marked failures no longer block; three new unmarked failures block again.
+  await db.query(`INSERT INTO fusion_reviews(actor_id,request_id,draft_id,project_id,source_session_id,source_version_id,version_hash,materials,
+      materials_hash,config,state,round,phase,attempt,ended_at,created_at)
+    SELECT actor_id,gen_random_uuid(),draft_id,project_id,source_session_id,source_version_id,version_hash,materials,materials_hash,config,
+      'revision_failed',1,'summary',1,now(),now()+make_interval(secs=>g) FROM fusion_reviews, generate_series(1,3) g
+    WHERE id=$1`,[rv5.reviewId]);
+  await assert.rejects(start(db,f),/FUSION_REVIEW_VERSION_BLOCKED/,'three new unmarked failures block again');
+  await service(db,'fusion_review_breaker_clear',adminId,f.versionId,'unblock for the next check');
+  await assert.doesNotReject(async () => { const rv = await start(db,f); await service(db,'fusion_review_close',f.actor,rv.reviewId,'stopped'); },
+    'after marking, a review can start');
+  report.checks.push('0256: review Skill reader matches skill, revision and package hash, service role only; frozen source, preview sizes, unjudged list, model and times per call, admin look-back, admin breaker clear, per-section adoption record');
 
   // Erasure: deleting the draft deletes its reviews; account erasure removes and counts them.
   const before = Number((await db.query('SELECT count(*) v FROM fusion_reviews WHERE actor_id=$1',[f.actor])).rows[0].v);

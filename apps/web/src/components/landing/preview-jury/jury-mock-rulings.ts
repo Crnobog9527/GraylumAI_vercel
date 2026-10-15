@@ -21,7 +21,7 @@ const CH9 = '第 9 章 内容支柱';
 const CH10 = '第 10 章 变现路径';
 const CH12 = '第 12 章 30 天行动';
 
-const TEXT: Record<string, { original: string; revised: string }> = {
+export const REVISION_TEXT: Record<string, { original: string; revised: string }> = {
   [CH3]: {
     original: '和同类账号相比，你的内容更快：每道菜 15 分钟以内上桌。',
     revised: '和同类账号相比，你快在备菜：周日一次切配，工作日三天复用，每道菜 15 分钟以内上桌。',
@@ -41,14 +41,19 @@ const TEXT: Record<string, { original: string; revised: string }> = {
     revised: '三个内容支柱：15 分钟晚饭、一周不重样、备菜和收纳。',
   },
   [CH10]: {
-    original: '变现路径：先接厨具和半成品品牌合作；之后推出付费食谱，价格参照同类账号先定一个区间。',
-    revised: '变现路径：第一个月上线免费周菜单，用报名表收集愿意付钱的人；第三个月按报名情况决定是否推出付费版。'
-      + '品牌合作放到第二步。',
+    original: '这一章回答：账号什么时候、靠什么开始有收入。收入来源按先易后难排列。前三个月的重点是验证，不是规模。'
+      + '变现路径：先接厨具和半成品品牌合作；之后推出付费食谱，价格参照同类账号先定一个区间。'
+      + '所有合作都要先自己用过，并在内容里标注。每个月底回看一次收入和粉丝反馈。',
+    revised: '这一章回答：账号什么时候、靠什么开始有收入。收入来源按先易后难排列。前三个月的重点是验证，不是规模。'
+      + '变现路径：第一个月上线免费周菜单，用报名表收集愿意付钱的人；第三个月按报名情况决定是否推出付费版。'
+      + '品牌合作放到第二步。所有合作都要先自己用过，并在内容里标注。每个月底回看一次收入和粉丝反馈。',
   },
   [CH12]: {
-    original: '前两周每天更新一条；第三周开始接触品牌。',
-    revised: '每周三更（周二、周四、周日），周末集中拍两条备用；第一周上线免费周菜单报名表；'
-      + '每周日花二十分钟整理评论区问题，排进下周选题。',
+    original: '这一章是开号后 30 天的具体安排。每周末花半小时复盘播放和评论。前两周每天更新一条；第三周开始接触品牌。'
+      + '30 天结束时，按第 13 章的标准决定要不要调整方向。',
+    revised: '这一章是开号后 30 天的具体安排。每周末花半小时复盘播放和评论。'
+      + '每周三更（周二、周四、周日），周末集中拍两条备用；第一周上线免费周菜单报名表；'
+      + '每周日花二十分钟整理评论区问题，排进下周选题。30 天结束时，按第 13 章的标准决定要不要调整方向。',
   },
 };
 
@@ -57,7 +62,7 @@ type SectionPlan = { rulings: RulingFields[]; fields?: FieldChange[]; wordingOnl
 function sections(plan: Record<string, SectionPlan>): DetailSection[] {
   return REPORT_SECTIONS.map(section => {
     const entry = plan[section];
-    const text = TEXT[section];
+    const text = REVISION_TEXT[section];
     const changed = Boolean(entry && text && entry.rulings.some(item => item.adopted));
     return {
       section, changed, rulings: entry?.rulings ?? [], wordingOnly: Boolean(changed && entry?.wordingOnly),

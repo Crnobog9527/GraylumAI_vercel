@@ -4,7 +4,8 @@ import { OPENING_INPUT, openingRequestId } from "@repo/api/src/shared/opcQuestio
 import { RUNTIME_INPUT_TOO_LONG_MESSAGE } from "../../../../../../packages/api/src/shared/runtimeInputMessages";
 import { STEP_SUMMARY_PREFIX, SUMMARY_REFUSALS } from "./step-summary";
 import { gateResultNotice, PROVIDER_HISTORY_NOTICE } from "@/lib/runtime-gate-notice";
-import { blockedAdmission, hostNotice, type PaygViewFields } from "@/lib/payg-wait";
+import { blockedAdmission, hostNotice, isOrganizerPendingError, type PaygViewFields } from "@/lib/payg-wait";
+import { definiteRefusal } from "@/app/runtime/gate-notices";
 
 /** One mentor turn as sent to `opc.mentorTurnStream` (same input as `opc.prepareStep`). */
 export type MentorRequest = {
@@ -272,17 +273,35 @@ export function isInputTooLong(error: unknown): boolean {
   return Boolean(data && typeof data === "object" && data.code === "PRECONDITION_FAILED");
 }
 
+const releasedRefusals = new WeakSet<object>();
+
+/** Refused before admission (an HTTP 4xx before the `admitted` event): no execution exists, so nothing is kept.
+ * A pending earlier organizer is a wait, not a refusal: its request stays for the payg-wait resume. */
+export function isRefusedBeforeAdmission(error: unknown, admitted: boolean): boolean {
+  return !admitted && ["opc.mentorTurnStream", "opc.prepareStep"].includes(definiteRefusal(error)?.path ?? "")
+    && !isOrganizerPendingError(error);
+}
+
+/** A refusal whose request was released by releaseRejectedAnswer: its notice must not say the request is kept. */
+export function isReleasedRefusal(error: unknown): boolean {
+  return Boolean(error && typeof error === "object" && releasedRefusals.has(error));
+}
+
 /** A definite pre-admission refusal releases only its own envelope, never an unknown outcome.
- * A too-long refusal also hands the original text back so the user can shorten or split it. */
+ * A too-long refusal, or any other refusal before admission, also hands the original text back.
+ * `admitted`: the turn already had its execution, so a later failure is never a pre-admission refusal. */
 export function releaseRejectedAnswer(storage: EnvelopeStorage, key: string, requestId: string, error: unknown,
-  restoreInput?: (input: string) => void): boolean {
+  restoreInput?: (input: string) => void, admitted = true): boolean {
   const raw = storage.getItem(key);
   const request = raw ? parseStepEnvelope(raw)?.request : undefined;
   // Any version of the marker: the server refuses all but the current one, so a stale retained one is released too.
   const summaryRefused = error instanceof Error && SUMMARY_REFUSALS.has(error.message) && Boolean(request?.input.startsWith(STEP_SUMMARY_PREFIX));
-  if (!isAnswerSourceDenied(error) && !summaryRefused && !isInputTooLong(error)) return false;
+  const refused = isRefusedBeforeAdmission(error, admitted);
+  if (!isAnswerSourceDenied(error) && !summaryRefused && !isInputTooLong(error) && !refused) return false;
   if (request?.requestId !== requestId) return true;
   storage.removeItem(key);
-  if (isInputTooLong(error)) restoreInput?.(request.input);
+  if (refused && error && typeof error === "object") releasedRefusals.add(error);
+  // A summary click carries the host marker, never words to put back in the box.
+  if (isInputTooLong(error) || refused && !request.input.startsWith(STEP_SUMMARY_PREFIX)) restoreInput?.(request.input);
   return true;
 }

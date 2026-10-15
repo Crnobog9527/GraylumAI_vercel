@@ -6,6 +6,8 @@ import { readWalletPaymentEvidence } from './walletPaymentEvidence';
 import { walletMembershipTerm } from './methodMembershipTerm';
 import { logger } from '../../lib/logger';
 import { readCardPaymentEvidence, recordCardPaymentTax, type CardOrder, type CardPaymentEvidence } from './cardPaymentEvidence';
+import { stopPriorAfterUpgrade } from './cardUpgrade';
+import { stopUndeliveredSubscription } from './cardSubscriptionStop';
 
 const isCard = (method: string) => method === 'card' || method === 'card_cn';
 
@@ -104,6 +106,16 @@ export async function recoverMethodCheckout(db: SupabaseClient, stripe: Stripe, 
     p_start: term?.start ?? null, p_end: term?.end ?? null,
   });
   if (applied.error || !applied.data) throw new Error('PAY_WAFFO_FULFILLMENT_UNAVAILABLE');
-  if ('tax' in cash) await recordCardPaymentTax(db, scope.merchant, order.id, cash);
+  // A delivered Pro -> Gold upgrade stops the prior card subscription at period end (PAY-STRIPE-MP step 4a). Every
+  // replay of a delivered payment comes back 'fulfilled' and repeats both steps; neither failure skips the other, so
+  // a tax bookkeeping failure can never leave the replaced Pro renewing next to the Gold.
+  const failures: unknown[] = [];
+  const attempt = async (step: () => Promise<unknown>) => { try { await step(); } catch (error) { failures.push(error); } };
+  const delivered = (applied.data as { state?: string }).state === 'fulfilled';
+  if (delivered) await attempt(() => stopPriorAfterUpgrade(db, stripe, order));
+  // Paid but kept for review (not delivered): its card subscription must not renew; the prior Pro is kept.
+  else if (card) await attempt(() => stopUndeliveredSubscription(stripe, card.id));
+  if ('tax' in cash) await attempt(() => recordCardPaymentTax(db, scope.merchant, order.id, cash));
+  if (failures.length) throw failures[0];
   return { orderId: order.id, checkoutStatus: validated?.status ?? null, paymentStatus: 'paid' as const };
 }

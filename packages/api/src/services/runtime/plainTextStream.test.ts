@@ -28,17 +28,17 @@ const send=(context:Record<string,unknown>,stream:boolean)=>JSON.parse(openRoute
  sdkRequest(Boolean(context.reasoning),stream),{context:runtimeContext.parse(context),policy,phase:String(context.role),primaryDialogue:true}));
 
 describe('frozen plain-text stream marker',()=>{
- it('is accepted only on native plain replies: free chat v6 and Skill v2',()=>{
+ it('is accepted only on native plain replies: free chat v6, a chosen Skill (v6, or v2 frozen before) ',()=>{
   expect(runtimeContext.safeParse({...freeChat,textStream:PLAIN_TEXT_STREAM}).success).toBe(true);
   expect(runtimeContext.safeParse({...skill,textStream:PLAIN_TEXT_STREAM}).success).toBe(true);
+  expect(runtimeContext.safeParse({...freeChat,role:'skill',reasoning:{parameter:'none'},textStream:PLAIN_TEXT_STREAM}).success).toBe(true);
+  expect(runtimeContext.safeParse({...freeChat,positioningGate:'fallback-v1',textStream:PLAIN_TEXT_STREAM}).success).toBe(true);
   for(const context of [
    {...freeChat,nativeOutput:undefined},
-   {...freeChat,role:'skill'},
    {...skill,role:'ordinary'},
    {...skill,providerRequestFormat:'serial-tools-v4-stream',envelopeOrder:'message-first-v1',reasoning:{effort:'low'}},
    {...skill,providerRequestFormat:'agent-turn-v5-stream',reasoning:{effort:'low'}},
    {...freeChat,attachedOrganizer:{modelId:id,model:'synthetic/organizer',maxOutputTokens:100}},
-   {...freeChat,positioningGate:'fallback-v1'},
   ])expect(runtimeContext.safeParse({...context,textStream:PLAIN_TEXT_STREAM}).success).toBe(false);
   expect(runtimeContext.safeParse({...freeChat,textStream:'plain-text-v2'}).success).toBe(false);
   expect(plainTextStreamAllowed({...skill,matching:{}})).toBe(false);
@@ -168,5 +168,51 @@ describe('停止 on a marked turn: what was shown is what is kept',()=>{
   const complete=stopFixture({finish_reason:'stop',message:{content:'好的，先说结论。I am Claude.'}},{stopAt:4,source:'assistant'},
    withBrandIdentity('Answer',true));
   expect(await complete(id)).toMatchObject({state:'completed',stopped:true,body:'好的，先'});
+ });
+});
+
+describe('POSITIONING-GATE fallback rounds stream with the refusal marker held back',()=>{
+ const run=async(pieces:string[],context:Record<string,unknown>)=>{
+  const {roundEmitter,POSITIONING_FALLBACK}=await import('./positioningFallback');
+  const {NativeProgressProjection}=await import('./nativeProgress');
+  const shown:Array<{text:string;delta:string;replace:boolean;call?:number}>=[];
+  const projection=new NativeProgressProjection({mode:'agent'});
+  const emit=roundEmitter(update=>shown.push(update),()=>3,{textStream:PLAIN_TEXT_STREAM,...context,
+   ...(context.positioningGate===true?{positioningGate:POSITIONING_FALLBACK}:{})});
+  for(const piece of pieces){const update=projection.appendText(piece);if(update)emit(update);}
+  return shown;
+ };
+ it('a refusal marker, even split into pieces or after spaces, never reaches the user',async()=>{
+  expect(await run(['[[GRAY','LUM_POSITIONING','_REQUIRED]]'],{positioningGate:true})).toEqual([]);
+  expect(await run(['  [[GRAYLUM_POSITIONING_REQUIRED]]'],{positioningGate:true})).toEqual([]);
+ });
+ it('an ordinary answer streams with nothing lost: the held start goes out as one snapshot, then deltas',async()=>{
+  const shown=await run(['[','[注','意]这','是正文'],{positioningGate:true});
+  expect(shown[0]).toMatchObject({text:'[[注',delta:'[[注',replace:true,call:3});
+  expect(shown.at(-1)?.text).toBe('[[注意]这是正文');
+  expect(shown.slice(1).every(update=>!update.replace)).toBe(true);
+  // A start that cannot be the marker goes out at once.
+  expect((await run(['你好'],{positioningGate:true}))[0]).toMatchObject({text:'你好',replace:true});
+ });
+ it('a round without the fallback rule is not held',async()=>{
+  expect((await run(['[['],{}))[0]).toMatchObject({text:'[[',call:3});
+ });
+ it('a stop after the held start rebuilds exactly the text the user saw',async()=>{
+  const shown=await run(['[','[注','意]这','是正文'],{positioningGate:true});
+  const screen=shown.at(-1)!.text;
+  const execution={executionId:id,sessionId:id,runId:id,state:'interrupted',live:false,cancelRequested:false,pausedReason:'user_stop',
+   stop:{stopAt:Array.from(screen).length-2,source:'assistant',call:1},epoch:1,result:null,
+   context:{...freeChat,textStream:PLAIN_TEXT_STREAM,positioningGate:'fallback-v1'},billing:{contractVersion:'bill2.v2'},
+   stopCalls:[{sequence:1,requestHash:'a'.repeat(64),phase:'ordinary',dispatched:true,settled:true}]} as StopExecution;
+  const raw=JSON.stringify({model:'synthetic/model',choices:[{finish_reason:'stop',message:{content:'[[注意]这是正文'}}]});
+  const database={rpc:vi.fn(async(name:string,args:Record<string,unknown>)=>{
+   if(name==='runtime_response')return {data:{rawBody:raw},error:null};
+   if(args.p_action==='complete'){const value=(args.p_result as {value:unknown}).value;return {data:{state:value?'completed':'cancelled'},error:null};}
+   return {data:structuredClone(execution),error:null};
+  })};
+  const billing={recoverReceipts:vi.fn(),finalizeRun:vi.fn(),dispatchOnce:vi.fn(),claimCall:vi.fn(),claimPaygCall:vi.fn()};
+  const result=await stoppedCompletion({database,actor:async()=>id,callGate:vi.fn()},
+   billing as unknown as ReturnType<typeof authoritativeBilling>)(id);
+  expect(result).toMatchObject({state:'completed',stopped:true,body:Array.from(screen).slice(0,-2).join('')});
  });
 });

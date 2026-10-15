@@ -63,6 +63,7 @@ vi.mock('@repo/api/src/services/stripeFulfillment', () => ({
 vi.mock('@repo/api/src/services/payments/walletWebhook', () => ({ recoverMethodCheckout: vi.fn().mockResolvedValue(null) }));
 vi.mock('@repo/api/src/services/payments/cardSubscriptionWebhook', () => ({
   handleCardSubscriptionInvoice: vi.fn().mockResolvedValue(false), handleCardSubscriptionState: vi.fn().mockResolvedValue(false) }));
+vi.mock('@repo/api/src/services/payments/cardRefundWebhook', () => ({ handleCardRefund: vi.fn().mockResolvedValue(false) }));
 vi.mock('@/lib/server-log', () => ({
   logServerError: routeMocks.logServerError,
 }));

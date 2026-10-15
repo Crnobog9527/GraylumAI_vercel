@@ -29,7 +29,7 @@ export function buildLandingPageData(flags: LandingFlags, plans: readonly Paywal
 
   return {
     heroNote: visibleItems(flags, HERO.note).map(part => part.text).join(''),
-    finalNote: visibleItems(flags, FINAL_ACTION.note).map(part => part.text).join(' · '),
+    finalNote: visibleItems(flags, FINAL_ACTION.note).map(part => part.text).join(''),
     notes: visibleItems(flags, VOICE_WALL.notes),
     promise: visibleItems(flags, HOW_IT_WORKS.promise),
     flowSteps: visibleItems(flags, FLOW_STEPS),
@@ -42,7 +42,10 @@ export function buildLandingPageData(flags: LandingFlags, plans: readonly Paywal
     founderSeats,
     showStack: allOn(flags, FINAL_ACTION.stack.needs),
     faqGroups,
-    faqItems: faqGroups.flatMap(group => group.items.map(item => ({ question: item.question, answer: faqAnswerText(item) }))),
+    // JSON-LD is cached with the hourly page, while founder seats sell out in between (the page hides them live, see
+    // LiveFounderSeats): structured data leaves the founder offer and its FAQ entries out.
+    faqItems: faqGroups.flatMap(group => group.items.filter(item => !item.needs.includes('founder'))
+      .map(item => ({ question: item.question, answer: faqAnswerText(item) }))),
     offerList: landingOfferList(pricing),
   };
 }

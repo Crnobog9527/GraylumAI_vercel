@@ -1,174 +1,121 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 /*
- * Jury prototype shell (not public). Sample G's language: warm grey canvas, white rounded sheets, pill controls,
- * gold for the ceremony's marks and ink for small accents. The room, the table top, the records and the result page
- * have their own modules.
+ * Jury prototype shell (not public), v3 "annotated review". Neutral near-white like the landing page (Owner 2026-10-14,
+ * after buffer.com): white paper on a near-white canvas, neutral ink and greys, the bronze accent only on small marks,
+ * and three muted seat colours that only mark who wrote what. Hairline rules, one serif for the report itself and the
+ * system sans for everything around it.
  */
 .page {
-  --j-canvas: #f5f5f2;
-  --j-ink: var(--gl-text);
-  --j-body: var(--gl-text-body);
-  --j-line: #e4e4df;
-  --j-muted: #5b5b5b;
-  --j-gold: #ffc93c;
-  --j-gold-deep: #e8a800;
-  --j-gold-soft: #fff4cc;
-  --j-gold-text: #6e4c00;
-  --j-ease: cubic-bezier(.16, 1, .3, 1);
-  --j-display: 'MiSans', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
-  position: relative;
+  composes: theme from './jury-theme.module.css';
   min-height: 100vh;
   overflow-x: clip;
-  background:
-    radial-gradient(60% 40% at 50% 0%, rgba(255, 201, 60, .16), transparent 70%),
-    var(--j-canvas);
+  background: var(--j-canvas);
   color: var(--j-ink);
-  font-size: 15px;
-  line-height: 1.7;
+  font-family: var(--j-sans);
+  font-size: 17px;
+  line-height: 1.75;
 }
-.page ::selection { background: var(--j-gold); color: var(--j-ink); }
-.page button:focus-visible, .page a:focus-visible, .page input:focus-visible + span {
+.page ::selection { background: #e2e2e2; color: var(--j-ink); }
+.page button:focus-visible, .page a:focus-visible, .page input:focus-visible + span, .page select:focus-visible {
   outline: 2px solid var(--j-ink);
-  outline-offset: 3px;
+  outline-offset: 2px;
 }
 
-.sampleBar {
-  display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 4px 12px;
-  padding: 6px 16px; border-bottom: 1px solid var(--j-line); background: rgba(255, 255, 255, .7);
-  color: var(--j-muted); font-size: 12px; line-height: 1.5;
+/* Wide like a workspace (Owner 2026-10-15): the landing page's 32px gutters (16 on a phone), but the content keeps
+ * spreading up to 1840 so a large screen is not a narrow strip with empty sides. */
+.toolbar, .main, .sampleBar {
+  --j-gutter: 32px; --j-content: 1840px;
+  width: 100%; max-width: calc(var(--j-content) + 2 * var(--j-gutter)); margin-inline: auto; padding-inline: var(--j-gutter);
 }
-.sampleBar a { padding: 1px 9px; border-radius: 999px; color: var(--j-muted); text-decoration: none; }
-.sampleBar a:hover { background: #fff; color: var(--j-ink); }
 
-.header {
-  display: grid; gap: 16px; max-width: 1200px; margin: 0 auto;
-  padding: clamp(24px, 4vw, 48px) clamp(16px, 3vw, 24px) 0;
+/* One toolbar: title, ending, sample names, transport, then the eight stations. Sticky so the stage can fill the rest. */
+.toolbar {
+  position: sticky; top: 0; z-index: 20; display: grid; gap: 6px; max-width: none; padding-block: 8px 6px;
+  border-bottom: 1px solid var(--j-rule); background: color-mix(in srgb, var(--j-canvas) 94%, transparent);
+  backdrop-filter: blur(6px);
 }
-@media (min-width: 1024px) {
-  .header { grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); column-gap: 48px; align-items: end; }
-}
-.titleBlock { display: grid; gap: 8px; }
-.title {
-  margin: 0; font-family: var(--j-display); font-size: clamp(28px, 3.4vw, 44px); font-weight: 900;
-  letter-spacing: -.03em; line-height: 1.08; text-wrap: balance; word-break: keep-all;
-}
-.subtitle { margin: 0; max-width: 34em; color: var(--j-muted); font-size: 15px; line-height: 1.75; text-wrap: pretty; }
+.toolbar > * { width: 100%; max-width: var(--j-content); margin-inline: auto; }
+.toolRow { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; }
+.crumbs { flex: 1 0 100%; }
+.crumbs a { display: inline-flex; align-items: center; gap: 6px; color: var(--j-muted); font-size: 13.5px; text-decoration: none; }
+.crumbs a:hover { color: var(--j-ink); text-decoration: underline; text-underline-offset: 3px; }
+.title { margin: 0 auto 0 0; font-size: 16px; font-weight: 600; letter-spacing: -.005em; line-height: 1.3; white-space: nowrap; }
 
-.controls { display: grid; gap: 10px; justify-items: start; }
-@media (min-width: 1024px) { .controls { justify-items: end; } }
-.scenarios {
-  display: flex; flex-wrap: wrap; gap: 4px; padding: 3px; border: 1px solid var(--j-line); border-radius: 999px; background: #fff;
+.scenarios, .speeds {
+  display: flex; flex-wrap: wrap; gap: 2px; padding: 2px; border: 1px solid var(--j-rule); border-radius: 8px; background: var(--j-paper);
 }
 .scenarios button, .speeds button {
-  min-height: 36px; padding: 0 14px; border: 0; border-radius: 999px; background: transparent; color: var(--j-muted);
-  font: inherit; font-size: 13.5px; font-weight: 500; cursor: pointer; transition: background-color .2s, color .2s;
+  min-height: 30px; padding: 0 11px; border: 0; border-radius: 6px; background: transparent; color: var(--j-muted);
+  font: inherit; font-size: 13px; cursor: pointer; transition: background-color .2s, color .2s;
 }
-.scenarios button[aria-checked='true'], .speeds button[aria-checked='true'] { background: var(--j-ink); color: #fff; }
-.scenarios button:not([aria-checked='true']):hover, .speeds button:not([aria-checked='true']):hover { color: var(--j-ink); }
+.scenarios button[aria-checked='true'], .speeds button[aria-checked='true'] { background: var(--j-ink); color: var(--j-paper); }
+.scenarios button:not([aria-checked='true']):hover, .speeds button:not([aria-checked='true']):hover { color: var(--j-ink); background: var(--j-canvas); }
 
-.switch { display: inline-flex; align-items: center; gap: 8px; color: var(--j-body); font-size: 13.5px; cursor: pointer; }
+.switch { display: inline-flex; align-items: center; gap: 8px; color: var(--j-body); font-size: 13px; white-space: nowrap; cursor: pointer; }
 .switch input { position: absolute; opacity: 0; pointer-events: none; }
 .switch span {
-  position: relative; flex: none; width: 34px; height: 20px; border-radius: 999px; background: #d6d6d0;
-  transition: background-color .2s;
+  position: relative; flex: none; width: 32px; height: 18px; border-radius: 999px; background: var(--j-ink-soft); transition: background-color .2s;
 }
 .switch span::after {
-  content: ''; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: #fff;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, .2); transition: transform .25s var(--j-ease);
+  content: ''; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%; background: var(--j-paper);
+  transition: transform .25s var(--j-ease);
 }
-.switch input:checked + span { background: var(--j-gold-deep); }
+.switch input:checked + span { background: var(--j-ink); }
 .switch input:checked + span::after { transform: translateX(14px); }
 
-.main {
-  display: grid; gap: 16px; max-width: 1200px; margin: 0 auto;
-  padding: 20px clamp(16px, 3vw, 24px) 64px;
+.transport { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding-left: 14px; border-left: 1px solid var(--j-rule); }
+.transport > button {
+  display: inline-flex; align-items: center; gap: 6px; min-height: 32px; padding: 0 11px; border: 1px solid var(--j-rule);
+  border-radius: 8px; background: var(--j-paper); color: var(--j-ink); font: inherit; font-size: 13px; white-space: nowrap; cursor: pointer;
 }
+.transport > button:hover { border-color: var(--j-ink-soft); }
+.elapsed { min-width: 7.5em; color: var(--j-muted); font-size: 13px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.speeds button { min-height: 26px; padding: 0 9px; }
 
-.transport { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px 16px; }
-.hint { margin: 0; color: var(--j-muted); font-size: 13.5px; }
-.transportActions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
-.transportActions > button {
-  display: inline-flex; align-items: center; gap: 6px; min-height: 36px; padding: 0 14px; border: 1px solid var(--j-line);
-  border-radius: 999px; background: #fff; color: var(--j-ink); font: inherit; font-size: 13.5px; font-weight: 500; cursor: pointer;
-}
-.transportActions > button:hover { border-color: var(--j-ink); }
-.elapsed { margin-right: 4px; color: var(--j-muted); font-size: 13px; font-variant-numeric: tabular-nums; }
-.speeds { display: flex; padding: 2px; border: 1px solid var(--j-line); border-radius: 999px; background: #fff; }
-.speeds button { min-height: 30px; padding: 0 10px; }
+.main { display: grid; padding-block: 12px 48px; }
 
-.layout { display: grid; gap: 16px; }
-.layout > * { min-width: 0; }
-@media (min-width: 1024px) {
-  .layout { grid-template-columns: minmax(0, 8fr) minmax(0, 4fr); gap: 20px; align-items: start; }
-  .side { position: sticky; top: 16px; max-height: calc(100vh - 32px); }
-}
-.floor, .side { display: grid; gap: 10px; align-content: start; min-height: 0; }
-.side { grid-template-rows: auto minmax(0, 1fr); scroll-margin-top: 12px; }
-.sideHint { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 0; color: var(--j-muted); font-size: 12.5px; }
-.backToRoom {
-  display: none; flex: none; min-height: 32px; padding: 0 12px; border: 1px solid var(--j-line); border-radius: 999px; background: #fff;
-  color: var(--j-ink); font: inherit; font-size: 12.5px; cursor: pointer;
-}
-@media (max-width: 1023px) { .backToRoom { display: inline-flex; align-items: center; } }
-.floor { scroll-margin-top: 8px; }
-.stage { display: grid; border-radius: 20px; box-shadow: 0 2px 14px rgba(2, 4, 26, .07); }
+/* Prototype only: the embeddable canvas with its stand-in controls. */
+.embed { display: grid; gap: 10px; }
+.embedControls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 18px; font-size: 14px; }
+.embedControls label { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
+.embedControls input[type='range'] { flex: 1 1 240px; min-width: 0; accent-color: var(--j-ink); }
+@media (min-width: 768px) { .embedStage { height: calc(100svh - var(--j-bar, 96px) - 80px); min-height: 520px; } }
 
-/* Progress: eight stations on a track; the fill follows stations passed, never time. */
-.rail { display: grid; gap: 8px; }
-.railNow { margin: 0; color: var(--j-muted); font-size: 13.5px; }
-.railNow strong { margin-left: 4px; color: var(--j-ink); }
-.track { height: 6px; overflow: hidden; border-radius: 999px; background: var(--j-line); }
-.track span {
-  display: block; height: 100%; border-radius: inherit; background: var(--j-gold-deep);
-  transform-origin: left; transition: transform .8s var(--j-ease);
-}
-.rail ol { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 4px; margin: 0; padding: 0; list-style: none; }
-.rail li { display: grid; text-align: center; }
-.railStop {
-  display: grid; justify-items: center; gap: 4px; padding: 2px 0; border: 0; border-radius: 8px; background: none;
-  color: inherit; font: inherit; cursor: pointer;
-}
-.railStop:disabled { cursor: default; }
-.railStop:not(:disabled):hover .railLabel { color: var(--j-ink); }
-.railDot { width: 12px; height: 12px; border-radius: 50%; background: #fff; box-shadow: inset 0 0 0 2px var(--j-line); }
-.rail li[data-state='done'] .railDot { background: var(--j-gold-deep); box-shadow: none; }
-.rail li[data-state='current'] .railDot { background: var(--j-ink); box-shadow: 0 0 0 4px var(--j-gold-soft); }
-.rail li[data-state='skipped'] .railDot { background: repeating-linear-gradient(45deg, #ddd 0 2px, #fff 2px 4px); }
-.railLabel { display: grid; color: var(--j-muted); font-size: 12.5px; line-height: 1.35; }
-.rail li[data-state='current'] .railLabel { color: var(--j-ink); font-weight: 800; }
-.railLabel small { color: #8a8a8a; font-size: 11px; }
 
-/* Reduced motion: everything at once, one block per stage, one column per person. */
+.sampleBar {
+  display: grid; gap: 4px; padding-block: 20px 28px; border-top: 1px solid var(--j-rule); color: var(--j-muted); font-size: 12.5px; line-height: 1.6;
+}
+.sampleBar p { margin: 0; max-width: 60em; }
+.sampleBar a { margin-left: 8px; color: var(--j-muted); }
+.sampleBar a:hover { color: var(--j-ink); }
+
+/* Reduced motion: the whole annotated report at once, then each person's record and the result page. */
 .static { display: grid; gap: 28px; }
-.staticStages { display: grid; gap: 18px; margin: 0; padding: 0; list-style: none; }
-.staticStage { display: grid; gap: 10px; }
-.staticStage h2, .staticRecords h2 { display: flex; align-items: center; gap: 10px; margin: 0; font-size: 19px; font-weight: 900; }
-.staticStage h2 span {
-  display: inline-grid; place-items: center; width: 28px; height: 28px; border-radius: 50%; background: var(--j-ink); color: #fff; font-size: 14px;
-}
-.staticStage > div { border: 1px solid var(--j-line); border-top-width: 1px; border-radius: 16px; min-height: 0; }
-.staticEmpty { margin: 0; color: var(--j-muted); font-size: 14px; }
+.staticLead { margin: 0; color: var(--j-muted); font-size: 13.5px; }
+.staticDesk { padding: 18px clamp(8px, 2vw, 20px) 22px 0; border: 1px solid var(--j-rule); border-radius: 10px; background: var(--j-desk); }
 .staticRecords { display: grid; gap: 12px; }
+.staticRecords h2 { margin: 0; font-size: 18px; font-weight: 600; }
 .staticColumns { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; align-items: start; }
-.staticRecord { display: grid; gap: 12px; padding: 16px; border: 1px solid var(--j-line); border-radius: 16px; background: #fff; scroll-margin-top: 12px; }
-.staticRecord h3 { margin: 0; font-size: 16px; overflow-wrap: anywhere; }
+.staticRecord {
+  display: grid; gap: 12px; padding: 16px; border: 1px solid var(--j-rule); border-radius: 8px; background: var(--j-paper);
+  scroll-margin-top: calc(var(--j-bar, 0px) + 12px);
+}
+.staticRecord h3 { display: flex; align-items: center; gap: 8px; margin: 0; font-size: 15px; font-weight: 600; overflow-wrap: anywhere; }
 @media (max-width: 1279px) { .staticColumns { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 
-/* Phone (375): stacked, controls full width, the scenario picker scrolls sideways instead of wrapping. */
 @media (max-width: 767px) {
-  .header { padding-top: 20px; }
-  .title { font-size: 26px; }
-  .subtitle { font-size: 14px; }
-  .controls { justify-items: stretch; }
+  .toolbar, .main, .sampleBar { --j-gutter: 16px; }
+  .toolbar { position: static; gap: 8px; padding-block: 12px 8px; }
+  /* The toolbar scrolls away on a phone, so scroll targets need no room for it. */
+  .staticRecord { scroll-margin-top: 12px; }
+  .toolRow { display: grid; gap: 8px; }
+  .title { font-size: 19px; white-space: normal; }
   .scenarios { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
-  .scenarios button { flex: none; padding: 0 12px; font-size: 13px; }
-  .main { gap: 12px; padding: 14px 12px 48px; }
-  .transport { display: grid; gap: 8px; }
-  .transportActions > button { min-height: 34px; padding: 0 11px; font-size: 13px; }
-  .rail ol { grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 2px; }
-  .railLabel { display: none; }
+  .scenarios button { flex: none; }
+  .transport { padding-left: 0; border-left: 0; }
+  .main { gap: 12px; padding-block: 12px 40px; }
+  .staticDesk { padding: 10px 0 12px; }
   .staticColumns { grid-template-columns: minmax(0, 1fr); }
-  .stage { border-radius: 16px; }
 }
 
 @media (prefers-reduced-motion: reduce) {

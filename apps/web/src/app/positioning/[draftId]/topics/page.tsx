@@ -10,8 +10,7 @@
  * dedicated Runtime Session, and the turn identity that authorizes spending.
  * A proposal only becomes a plan version through the existing save/adopt
  * transactions, so nothing here creates accounts, publishes content or spends
- * without an explicit user action.
- */
+ * without an explicit user action. A draft whose conversation was deleted is read-only (Owner 2026-10-14). */
 import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
@@ -23,10 +22,12 @@ import { WorkComposer, useFreeConversation } from '@/components/opc/work-compose
 import { WorkspaceFrame } from '@/components/opc/workspace-frame';
 import composerStyles from '@/components/opc/work-composer.module.css';
 import topicStyles from './topic-candidates.module.css';
+import { ReadonlyDraftView } from '../readonly-draft-view';
 import { trpc } from '@/trpc/client';
 import { planItem, opcPlan, opcHandoff, opcTopicTurn, opcTopicDraft, opcAdoptTopics } from '@repo/api/src/shared/opcRequests';
 import { consentedTopicIds } from './adoption-consent';
-import { topicFailureMessage, topicTurnOutcome, topicOpenTurnNotice, topicRejectedTurn, topicTurnShows } from './topic-notices';
+import { useTopicOpening } from './use-topic-opening';
+import { topicFailureMessage, topicTurnOutcome, topicOpenTurnNotice, topicRejectedTurn, topicTurnRefused, topicTurnShows } from './topic-notices';
 import { finishedExecution } from '@/lib/finished-execution';
 import { isOrganizerPendingError, isPaygWaiting, type PaygViewFields } from '@/lib/payg-wait';
 import { usePaygResume } from '@/lib/use-payg-resume';
@@ -131,7 +132,6 @@ export default function TopicWorkspacePage() {
   const [outgoing, setOutgoing] = useState<{ text: string; executionId?: string } | null>(null);
   const [pending, setPending] = useState<Operation | null>(null);
   const operationBusy = useRef(false);
-  const openingAttempt = useRef('');
   const [working, setWorking] = useState(false);
   const [candidate, setCandidate] = useState<{ body: PlanItem[]; requestId: string } | null>(null);
   const [adopted, setAdopted] = useState<
@@ -145,11 +145,10 @@ export default function TopicWorkspacePage() {
   const adoptedExecution = useRef('');
 
   const read = trpc.opc.read.useQuery({ draftId }, { enabled: Boolean(draftId) });
-  const workspace = trpc.opc.topicWorkspace.useQuery(
-    { draftId },
-    { enabled: Boolean(draftId), refetchInterval: 30000 },
-  );
-  const sessionId = workspace.data?.bound ? workspace.data.sessionId : '';
+  // Read-only draft (conversation deleted): no topic workspace, conversation, polling or write starts.
+  const workspace = trpc.opc.topicWorkspace.useQuery({ draftId },
+    { enabled: Boolean(draftId && read.data && !read.data.conversationDeleted), refetchInterval: 30000 });
+  const sessionId = read.data && !read.data.conversationDeleted && workspace.data?.bound ? workspace.data.sessionId : '';
   const view = trpc.runtime.view.useQuery(
     { sessionId },
     { enabled: Boolean(sessionId), refetchInterval: 5000 },
@@ -340,11 +339,13 @@ export default function TopicWorkspacePage() {
         } catch (cause) {
           setOutgoing(old => old?.executionId ? old : null); if (!reached) back(); // Not admitted: the text goes back.
           const message = cause instanceof Error ? cause.message : '';
-          if (definiteRejections.has(message)) {
+          // A refused, never-admitted turn is released like any definite rejection; its text is already back in the box.
+          const refusedTurn = op.kind === 'chat' && !reached && topicTurnRefused(cause) && !definiteRejections.has(message);
+          if (definiteRejections.has(message) || refusedTurn) {
             localStorage.setItem(storageKey + ':rejected:' + op.request.requestId, JSON.stringify(op));
             localStorage.removeItem(storageKey);
             setPending(null);
-            setError(message === 'OPC_BUSINESS_CONFLICT' ? '这个账号已属于另一项业务，本次没有采用。请展开选题，修改为当前业务的账号后再采用；原请求已保留。' : '本次请求已明确拒绝（' + message + '），未提交此项修改。请核对刷新后的计划与账号，再明确重试。');
+            setError(refusedTurn ? topicFailureMessage(cause) : message === 'OPC_BUSINESS_CONFLICT' ? '这个账号已属于另一项业务，本次没有采用。请展开选题，修改为当前业务的账号后再采用；原请求已保留。' : '本次请求已明确拒绝（' + message + '），未提交此项修改。请核对刷新后的计划与账号，再明确重试。');
           } else if (isOrganizerPendingError(cause)) { localStorage.removeItem(storageKey); setPending(null); payg.block(); }
           else setError(topicFailureMessage(cause));
         }
@@ -361,19 +362,9 @@ export default function TopicWorkspacePage() {
     await perform({ kind: 'chat', request: { draftId, requestId: crypto.randomUUID(), input: input.trim() }, candidateAtSend:visible?structuredClone(visible):null }, true);
   }
 
-  // Opening is authorized by the persisted consent, never by this page/URL.
-  // All tabs recover the exact same ID/input. Existing conversations without
-  // that consent remain passive until an explicit action.
   const opening = workspace.data?.opening as (ChatRequest & { executionId?: string | null }) | null | undefined;
-  useEffect(() => {
-    if (!opening || !sessionId || !view.data || busy || pending || !workspace.data?.sourceAllowed) return;
-    if (openingAttempt.current === opening.requestId) return;
-    const already = opening.executionId || view.data.executions?.some((e: { input?: string | null }) => e.input === opening.input);
-    openingAttempt.current = opening.requestId;
-    if (!already) void perform({ kind: 'chat', request: { draftId: opening.draftId, requestId: opening.requestId, input: opening.input } });
-    // One attempt per mounted accepted intent; failures expose explicit recovery.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [opening?.requestId, sessionId, view.data, pending, busy]);
+  const refusedOpening = useTopicOpening({ opening, storageKey, executions: view.data?.executions,
+    ready: Boolean(sessionId && view.data && !busy && !pending && workspace.data?.sourceAllowed), send: request => void perform({ kind: 'chat', request }) });
 
   async function stop(executionId: string) {
     setError('');
@@ -477,8 +468,8 @@ export default function TopicWorkspacePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [executions, candidate, pending, busy, read.data?.handoffs, accountList.data, accountList.isFetching, accountList.error]);
 
-  if (read.isLoading || workspace.isLoading)
-    return <main className="p-6">正在读取选题工作空间…</main>;
+  if (read.isLoading || workspace.isLoading) return <main className="p-6">正在读取选题工作空间…</main>;
+  if (read.data?.conversationDeleted) return <ReadonlyDraftView draftId={draftId} draft={read.data}/>;
   if (read.error || workspace.error)
     return (
       <main className="p-6">
@@ -549,7 +540,7 @@ export default function TopicWorkspacePage() {
               <div className="mx-auto flex min-h-48 max-w-xl flex-col items-center justify-center px-6 py-10 text-center">
                 <img className="mb-3 h-8 w-8" src="/graylum-logo.png" alt="" />
                 <p className="text-sm text-[var(--text-tertiary)]">
-                  {opening ? '正在恢复你已同意的首轮选题请求。' : '说一句你想先解决的问题，例如「先给我一版第一周选题，我再改」。'}
+                  {opening && refusedOpening !== opening.requestId ? '正在恢复你已同意的首轮选题请求。' : '说一句你想先解决的问题，例如「先给我一版第一周选题，我再改」。'}
                 </p>
               </div>
             )}
