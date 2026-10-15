@@ -182,7 +182,7 @@ invalidatePlatformSecret(slot)
 
 **OR-2（high）——删掉明文列**
 1. 前提：OR-1 已在 staging 部署并验证通过，正式环境的 Vault 里也已有 OpenRouter 密钥（或者确认正式环境本来就没有）。
-2. 迁移：先把 `api_key` 全部置空，再 `ALTER TABLE ai_models DROP COLUMN IF EXISTS api_key`；同时清理 0142 留下的列级授权写法，避免以后的迁移再引用这一列。可重复执行。
+2. 迁移：在一个 `DO` 块里先查 `information_schema.columns` 确认 `ai_models.api_key` 还存在，**只有存在时**才把它全部置空并 `ALTER TABLE ai_models DROP COLUMN api_key`；列已经不在时整段跳过（不能只靠 `DROP COLUMN IF EXISTS`，否则第二次执行时前面的置空语句会先报 `undefined_column`）。同时清理 0142 留下的列级授权写法，避免以后的迁移再引用这一列。测试里在建库回放中连续执行两次，确认第二次不报错、结构不变。
 3. 同一个 PR 里改掉还引用这一列的工具和文档，否则删列后会直接报错：
    - `scripts/check-staging-db-readiness.mjs`（统计 `api_key is not null` 的地方）改成统计 `platform_secret_status()` 里已填写的密钥数量；
    - `docs/runbooks/STAGING_REPRODUCIBILITY.md` 里对应的说明；
@@ -266,7 +266,7 @@ invalidatePlatformSecret(slot)
 
 改动和步骤见第 5.3 节 OR-2。
 
-验收：删列迁移可重复执行；第 5.3 节 OR-2 第 3 项列出的工具、测试和种子都已同步，并在新结构上通过；附带不应用的反向迁移，并在本机验证能恢复。
+验收：删列迁移可重复执行（列已删除后再次执行不报错、结构不变）；第 5.3 节 OR-2 第 3 项列出的工具、测试和种子都已同步，并在新结构上通过；附带不应用的反向迁移，并在本机验证能恢复。
 
 ### T-END — 结束过渡期（PFM、RT、OR-1、OR-2 都完成后）
 
