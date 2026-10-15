@@ -105,7 +105,8 @@ BEGIN
      RAISE EXCEPTION 'ERASURE_PAYMENT_REQUEST_REVIEW';
     END IF;
     IF v->>'method'='card_cn' AND provider->>'billing_address_collection' IS DISTINCT FROM 'required'
-     OR v->>'method' IN ('alipay','wechat_pay') AND provider->>'mode'<>'payment'
+     OR v->>'method' IN ('alipay','wechat_pay') AND
+      (provider->>'mode'<>'payment' OR provider->>'customer_creation' IS DISTINCT FROM 'always')
      OR v->>'method'='wechat_pay' AND provider->'payment_method_options'->'wechat_pay'->>'client' IS DISTINCT FROM 'web'
      OR v->>'method'<>'wechat_pay' AND provider ? 'payment_method_options' THEN
      RAISE EXCEPTION 'ERASURE_PAYMENT_REQUEST_REVIEW';
@@ -167,13 +168,17 @@ BEGIN
   END IF;
   SELECT external_id INTO price FROM payment_provider_refs
    WHERE id=(o->>'price_ref_id')::uuid AND channel=o->>'payment_channel'
-    AND merchant_namespace=o->>'merchant_namespace' AND mode=o->>'payment_mode' AND object_type='price';
+    AND merchant_namespace=o->>'merchant_namespace' AND mode=o->>'payment_mode' AND object_type='price'
+    AND billing_cycle=o->>'billing_cycle'
+    AND CASE o->>'item_type' WHEN 'membership_plan' THEN membership_plan_id::text=o->>'item_id'
+      WHEN 'credit_package' THEN credit_package_id::text=o->>'item_id' ELSE false END;
   IF price IS NULL OR price IS DISTINCT FROM
     coalesce(provider->>'productId',provider->'metadata'->>'priceId') THEN
    RAISE EXCEPTION 'ERASURE_PAYMENT_REQUEST_REVIEW';
   END IF;
   IF provider ? 'productId' THEN
-   IF o->>'payment_channel' IS DISTINCT FROM 'waffo' OR o->>'item_type' IS DISTINCT FROM 'membership_plan'
+   IF lower(provider->>'currency') IS DISTINCT FROM o->>'currency'
+    OR o->>'payment_channel' IS DISTINCT FROM 'waffo' OR o->>'item_type' IS DISTINCT FROM 'membership_plan'
     OR o->>'mode' IS DISTINCT FROM 'subscription'
     OR provider->'withTrial' IS DISTINCT FROM to_jsonb(o->>'offer_kind'='gold_first30') THEN
     RAISE EXCEPTION 'ERASURE_PAYMENT_REQUEST_REVIEW';
@@ -186,6 +191,18 @@ BEGIN
     OR provider->'metadata'->>'billingCycle' IS DISTINCT FROM o->>'billing_cycle'
     OR (provider ? 'discounts') IS DISTINCT FROM
       (o->>'offer_kind'='gold_first30' AND o->>'mode'='subscription') THEN
+    RAISE EXCEPTION 'ERASURE_PAYMENT_REQUEST_REVIEW';
+   END IF;
+   IF provider->'line_items'->0 ? 'price_data' AND
+    ((provider->'line_items'->0->'price_data'->>'unit_amount')::numeric IS DISTINCT FROM (o->>'amount_total')::numeric
+     OR provider->'line_items'->0->'price_data'->>'currency' IS DISTINCT FROM o->>'currency') THEN
+    RAISE EXCEPTION 'ERASURE_PAYMENT_REQUEST_REVIEW';
+   END IF;
+   IF provider ? 'discounts' AND NOT EXISTS(SELECT 1 FROM payment_provider_refs
+    WHERE channel=o->>'payment_channel' AND merchant_namespace=o->>'merchant_namespace'
+     AND mode=o->>'payment_mode' AND object_type='coupon' AND offer_kind=o->>'offer_kind'
+     AND membership_plan_id::text=o->>'item_id' AND billing_cycle=o->>'billing_cycle'
+     AND external_id=provider->'discounts'->0->>'coupon') THEN
     RAISE EXCEPTION 'ERASURE_PAYMENT_REQUEST_REVIEW';
    END IF;
   END IF;
