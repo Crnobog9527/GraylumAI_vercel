@@ -8,6 +8,8 @@
  * (Graylum bears the model cost, Owner 2026-10-12 supplement).
  */
 import { POSITIONING_REQUIRED, POSITIONING_REQUIRED_REASON } from '../../shared/positioningGate';
+import type { NativeTextUpdate } from './nativeProgress';
+import { PLAIN_TEXT_STREAM } from './providerRequest';
 
 export const POSITIONING_FALLBACK = 'fallback-v1' as const;
 export const POSITIONING_MARKER = '[[GRAYLUM_POSITIONING_REQUIRED]]';
@@ -52,4 +54,29 @@ export async function endPositioningRefusal(rpc: Rpc, args: { p_execution_id: st
   if (ended?.state === 'cost_pending') return { state: 'cost_pending' as const };
   await rpc('runtime_execution', { ...args, p_action: 'interrupt' }).catch(() => {});
   return { state: 'pending' as const };
+}
+
+/**
+ * The text emitter of one primary round (execute.ts makes one per exchange).
+ *
+ * - Every update names its round: the BILL2 call sequence streaming now, so a stop binds to what was shown.
+ * - A POSITIONING-GATE fallback round streams too (Owner 2026-10-03: all chat streams), but its reply may be the
+ *   hidden refusal marker, which must never reach the user (#900). While the round's text could still be that
+ *   marker, nothing is sent; once it cannot be, the text so far goes out as one snapshot and the rest streams
+ *   as usual. A marker reply is never shown: the executor ends that round before any final text is sent.
+ */
+export function roundEmitter(emit:(update:NativeTextUpdate)=>void,call:()=>number|undefined,
+ context:{positioningGate?:string;textStream?:string}):(update:NativeTextUpdate)=>void{
+ let holding=context.positioningGate===POSITIONING_FALLBACK&&context.textStream===PLAIN_TEXT_STREAM;
+ return update=>{
+  const round=call(),tagged=round===undefined?update:{...update,call:round};
+  if(holding){
+   const start=update.text.trimStart();
+   if(POSITIONING_MARKER.startsWith(start)||start.startsWith(POSITIONING_MARKER))return;
+   holding=false;
+   emit({...tagged,delta:update.text,replace:true});
+   return;
+  }
+  emit(tagged);
+ };
 }
