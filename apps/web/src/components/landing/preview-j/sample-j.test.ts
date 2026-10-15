@@ -253,21 +253,27 @@ describe('sample J sample reports', () => {
     // Four reports to switch between; the first opens on its cover and every chapter of the real report.
     for (const report of J_SAMPLES.reports) expect(shown).toContain(`<b>${report.who}</b><span>${report.platform}</span>`);
     expect(shown).toContain(J_SAMPLES.size);
-    for (const chapter of J_SAMPLES.chapters) expect(shown).toContain(chapter);
-    expect(J_SAMPLES.chapters).toHaveLength(14);
-    // The reports are real: each has 14 chapter cards with what that person gets, dated, the people marked fictional.
+    // Round seven: three layers. The 10-second card, the five key chapters, then the whole report.
+    for (const label of [J_SAMPLES.glance.title, J_SAMPLES.overview.title, J_SAMPLES.full.open]) expect(shown).toContain(label);
     for (const report of J_SAMPLES.reports) {
       const data = SAMPLE_CHAPTERS[report.slug];
       expect(data.chapters).toHaveLength(14);
-      for (const chapter of data.chapters) {
-        expect(chapter.give.length).toBeGreaterThan(5);
-        expect(chapter.key.length).toBeGreaterThan(5);
-        expect(`${chapter.give}${chapter.key}`).not.toMatch(/@[A-Za-z0-9]|https?:|它/);
-      }
+      for (const text of [data.summary.who, data.summary.what, data.summary.money, data.summary.first]) expect(text.length).toBeGreaterThan(8);
+      for (const chapter of data.chapters) expect(`${chapter.give}${chapter.key}`).not.toMatch(/@[A-Za-z0-9]|https?:|它/);
+      expect(JSON.stringify(data.summary)).not.toMatch(/@[A-Za-z0-9]|https?:|它/);
     }
+    // Only the student's card carries the coach's warning.
+    expect(J_SAMPLES.reports.filter(report => SAMPLE_CHAPTERS[report.slug].summary.truth).map(report => report.slug)).toEqual(['student']);
     const first = SAMPLE_CHAPTERS[J_SAMPLES.reports[0].slug];
     expect(shown).toContain(J_SAMPLES.generated(first.generatedAt));
-    for (const chapter of first.chapters) expect(shown).toContain(chapter.key.replace(/"/g, '&quot;'));
+    expect(shown).toContain(escape(first.summary.what));
+    // Five key chapters, not all thirteen: each with its one-line conclusion.
+    expect(J_SAMPLES.overview.picks).toHaveLength(5);
+    for (const index of J_SAMPLES.overview.picks) {
+      expect(shown).toContain(J_SAMPLES.chapters[index]);
+      expect(shown).toContain(escape(first.chapters[index].key));
+    }
+    expect(shown).not.toContain(escape(first.chapters[7].key));
     expect(shown).not.toContain('样例报告生成中');
     // The reports promise only what the product does today (no "创作助手", no thumbnails made for you).
     for (const report of J_SAMPLES.reports) expect(await loadSampleReport(report.slug)).not.toMatch(/创作助手|缩略图由/);

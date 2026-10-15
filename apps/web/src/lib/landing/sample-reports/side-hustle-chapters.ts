@@ -6,6 +6,13 @@
  */
 export const SAMPLE_SIDE_HUSTLE = {
   generatedAt: '2026-10-15',
+  /** The 10-second card (Owner 2026-10-15, round seven), from the report's 一句话结论 and the person's card. */
+  summary: {
+    who: '做物流运营的上班族，下班后每天约 1 小时，不想露脸',
+    what: 'TikTok 英文号：只拍手，讲租房小空间的低预算解法；给住小公寓、预算有限的年轻租房族看',
+    money: '起步只做 TikTok Shop 联盟佣金，品牌寄样和自己选品放后面；教练判断：可行但难',
+    first: '本周改好名字、头像和简介，周六重拍那条一万多播放的衣柜视频',
+  },
   chapters: [
     { give: '一句话说清你该做什么号、靠什么赚第一笔钱',
       key: '英文、只拍手的租房小空间低预算解法号，用仓库式整理做出差别；起步只做 TikTok Shop 联盟佣金。判断：可行但难。' },

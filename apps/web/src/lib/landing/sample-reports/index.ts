@@ -10,7 +10,9 @@ import { SAMPLE_STUDENT } from './student-chapters';
  * the whole report, loaded only when a visitor opens it (the texts are long).
  */
 export type SampleChapter = { give: string; key: string };
-export type SampleData = { generatedAt: string; chapters: readonly SampleChapter[] };
+/** The 10-second card: who, what content for whom, how it earns, this week's first step (and the coach's warning). */
+export type SampleSummary = { who: string; truth?: string; what: string; money: string; first: string };
+export type SampleData = { generatedAt: string; summary: SampleSummary; chapters: readonly SampleChapter[] };
 
 export const SAMPLE_CHAPTERS: Record<string, SampleData> = {
   accountant: SAMPLE_ACCOUNTANT,
