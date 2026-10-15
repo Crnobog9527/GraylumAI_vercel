@@ -13,17 +13,27 @@
 }
 .group { display: grid; gap: 2px; }
 .groupTitle { margin: 0 0 6px; padding: 0 10px; color: var(--j-muted); font-size: 12.5px; font-weight: 600; }
-.sceneItem { border-radius: 14px; }
-.sceneItem[data-open] { background: #fff; box-shadow: 0 0 0 1.5px var(--j-gold), 0 8px 20px -14px rgba(20, 19, 18, .35); }
+/* Each demo is a card that reads as clickable: white, an edge, a chevron that moves on hover (Owner 2026-10-15). */
+.sceneItem { border: 1px solid var(--j-line); border-radius: 14px; background: #fff; transition: border-color .2s, box-shadow .2s; }
+.sceneItem + .sceneItem { margin-top: 6px; }
+.sceneItem:not([data-open]):hover { border-color: rgba(20, 19, 18, .3); box-shadow: 0 10px 22px -16px rgba(20, 19, 18, .45); }
+.sceneItem[data-open] { border-color: var(--j-gold); box-shadow: 0 0 0 1px var(--j-gold), 0 8px 20px -14px rgba(20, 19, 18, .35); }
 .sceneItem > button {
-  display: block; width: 100%; padding: 10px 12px; border: 0; border-radius: 12px; background: none; color: var(--j-body); font: inherit;
-  font-size: 15px; font-weight: 500; text-align: left; cursor: pointer;
+  display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; padding: 11px 12px; border: 0;
+  border-radius: 12px; background: none; color: var(--j-body); font: inherit; font-size: 15px; font-weight: 500; text-align: left; cursor: pointer;
 }
-.sceneItem > button:hover { background: #f4f3ef; }
+.sceneItem > button svg { flex: none; color: var(--j-muted); transition: translate .2s var(--j-ease), rotate .2s var(--j-ease); }
+.sceneItem > button:hover svg { translate: 3px 0; color: var(--j-ink); }
 .sceneItem[data-open] > button { color: var(--j-ink); font-weight: 600; }
-.sceneItem[data-open] > button:hover { background: none; }
-.steps { display: grid; gap: 2px; margin: 0; padding: 0 6px 8px; list-style: none; }
+.sceneItem[data-open] > button svg { rotate: 90deg; color: var(--j-gold-text); }
+.sceneItem[data-open] > button:hover svg { translate: 0 0; }
+/* The line above the player. */
+.hint { display: flex; align-items: center; gap: 8px; margin: 0 0 14px; color: var(--j-ink); font-size: 15px; font-weight: 500; }
+.hint svg { color: var(--j-gold-text); }
+.steps { display: grid; gap: 2px; margin: 0; padding: 0 6px 8px 24px; list-style: none; }
 .steps li { position: relative; }
+/* A hand points at the playing step and moves with it. */
+.pointer { position: absolute; left: -19px; top: 8px; rotate: 90deg; color: var(--j-gold-text); pointer-events: none; }
 .steps button {
   display: flex; align-items: flex-start; gap: 8px; width: 100%; padding: 6px 8px; border: 0; border-radius: 8px; background: none;
   color: var(--j-muted); font: inherit; font-size: 13.5px; line-height: 1.5; text-align: left; cursor: pointer;
@@ -38,15 +48,26 @@
 .steps li[data-on] button { color: var(--j-ink); font-weight: 600; }
 .steps li[data-on] button span { background: var(--j-gold); color: #1a1a1a; }
 .progress { position: absolute; left: 34px; right: 8px; bottom: 1px; height: 2px; border-radius: 2px; background: var(--j-gold); transform-origin: 0 50%; }
-@media (prefers-reduced-motion: no-preference) { .progress { animation: fill linear both; } }
+@media (prefers-reduced-motion: no-preference) {
+  .progress { animation: fill linear both; }
+  .pointer { animation: pointIn .35s var(--j-ease) both, point 1.6s var(--j-ease) .35s infinite; }
+  .player[data-pulse] .steps li[data-on] button { animation: pulse 1.2s ease-out 2; }
+}
+@keyframes pointIn { from { opacity: 0; translate: -6px 0; } }
+@keyframes point { 0%, 60%, 100% { translate: 0 0; } 30% { translate: 3px 0; } }
+@keyframes pulse { from { box-shadow: 0 0 0 0 rgba(255, 187, 23, .55); } to { box-shadow: 0 0 0 12px rgba(255, 187, 23, 0); } }
 @keyframes fill { from { transform: scaleX(0); } to { transform: scaleX(1); } }
 @media (max-width: 1099px) {
   .list { display: block; padding: 8px; border-radius: 16px; }
   .group { display: contents; }
   .groupTitle { display: none; }
-  .sceneItem { display: inline-block; vertical-align: top; }
+  .sceneItem { display: inline-block; vertical-align: top; margin: 3px; }
+  .sceneItem + .sceneItem { margin-top: 3px; }
   .sceneItem[data-open] { display: block; margin: 6px 0; }
   .sceneItem > button { width: auto; padding: 7px 12px; font-size: 14px; white-space: nowrap; }
+  .sceneItem:not([data-open]) > button svg { display: none; }
+  .pointer { display: none; }
+  .steps { padding-left: 6px; }
 }
 
 .panel { display: grid; gap: 16px; min-width: 0; }

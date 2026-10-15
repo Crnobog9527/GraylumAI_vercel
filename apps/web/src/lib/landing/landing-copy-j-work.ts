@@ -41,6 +41,10 @@ export const J_WORK = {
   rightLabel: '这一步在做什么',
   resultLabel: '用了之后',
   next: '下一个',
+  /** NEW (Owner 2026-10-15, round six): the button walks the small steps first; "下一个" only on a demo's last step. */
+  nextStep: '下一步',
+  /** NEW (Owner 2026-10-15, round six): the line above the player, so nobody scrolls past without trying it. */
+  hint: '点左边任意一项，看 AI 教练怎么接手',
 } as const;
 
 export const J_WORK_SCENES: readonly WorkScene[] = [...J_WORK_CARE, ...J_WORK_MAKE];

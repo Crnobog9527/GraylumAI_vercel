@@ -2,7 +2,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { ArrowRight } from 'lucide-react';
+import { ArrowRight, ChevronRight, MousePointerClick, Pointer } from 'lucide-react';
 import { DEMO_LABEL } from '@/components/landing/demo/demo-script';
 import { allOn, type LandingFlags } from '@/lib/landing/landing-flags';
 import { J_WORK, J_WORK_SCENES } from '@/lib/landing/landing-copy-j-work';
@@ -13,13 +13,16 @@ import page from './j.module.css';
 
 /** How long each step stays on screen while the demos play on their own (the Owner asked for six to eight seconds). */
 export const WORK_STEP_MS = 7000;
+const PULSE_MS = 2400;
 const reducedMotion = () => Boolean(window.matchMedia?.('(prefers-reduced-motion: reduce)').matches);
 
 /**
  * The merged module (Owner 2026-10-15), sample H's layout: on the left the demos in two groups, the open one unfolded
  * into its steps (each step can be clicked to look again); in the middle the real product playing the open step; on
  * the right what this step does and what you get. While nobody has touched it and it is on screen, each step stays
- * seven seconds and the demos follow one another; a click takes over. The server HTML and reduced motion show each
+ * seven seconds and the demos follow one another; a click takes over. Round six (Owner 2026-10-15): a hint above, the
+ * demos as cards, a pointer beside the playing step, one pulse when the player first comes into view, and the button
+ * walks the small steps before it moves to the next demo. The server HTML and reduced motion show each
  * demo's last step (the other demos `hidden`), nothing moving.
  */
 export function WorkJ({ flags }: { flags: LandingFlags }) {
@@ -29,6 +32,9 @@ export function WorkJ({ flags }: { flags: LandingFlags }) {
   const [step, setStep] = useState(-1);
   const [auto, setAuto] = useState(true);
   const [visible, setVisible] = useState(false);
+  // The first time the player scrolls into view, the open step pulses once: there is something to click here.
+  const [pulse, setPulse] = useState(false);
+  const pulsed = useRef(false);
   const ref = useRef<HTMLDivElement>(null);
   const editing = useOwnerEditing();
 
@@ -39,6 +45,11 @@ export function WorkJ({ flags }: { flags: LandingFlags }) {
       const shown = entries.some(entry => entry.isIntersecting);
       setVisible(shown);
       if (shown) setStep(current => (current < 0 ? 0 : current));
+      if (shown && !pulsed.current) {
+        pulsed.current = true;
+        setPulse(true);
+        window.setTimeout(() => setPulse(false), PULSE_MS);
+      }
     }, { rootMargin: '-25% 0px -25% 0px' });
     observer.observe(node);
     return () => observer.disconnect();
@@ -74,18 +85,22 @@ export function WorkJ({ flags }: { flags: LandingFlags }) {
           </h2>
           <p className={page.lede}>{J_WORK.close}{J_WORK.lede}</p>
         </div>
-        <div ref={ref} className={styles.player}>
+        <p className={styles.hint}><MousePointerClick size={17} aria-hidden="true" />{J_WORK.hint}</p>
+        <div ref={ref} className={styles.player} data-pulse={pulse || undefined}>
           <nav className={styles.list} aria-label={J_WORK.groups.join('；')}>
             {[0, 1].map(group => (
               <div key={group} className={styles.group}>
                 <p className={styles.groupTitle}>{J_WORK.groups[group]}</p>
                 {scenes.map((item, index) => (item.group !== group ? null : (
                   <div key={item.id} className={styles.sceneItem} data-open={index === current || undefined}>
-                    <button type="button" aria-current={index === current ? 'true' : undefined} onClick={() => choose(index)}>{item.title}</button>
+                    <button type="button" aria-current={index === current ? 'true' : undefined} onClick={() => choose(index)}>
+                      {item.title}<ChevronRight size={16} aria-hidden="true" />
+                    </button>
                     {index === current ? (
                       <ol className={styles.steps}>
                         {item.steps.map((one, at) => (
                           <li key={one.label} data-on={at === open || undefined} data-done={at < open || undefined}>
+                            {at === open ? <Pointer key={`pointer-${current}-${open}`} className={styles.pointer} size={16} aria-hidden="true" /> : null}
                             <button type="button" onClick={() => choose(index, at)} aria-current={at === open ? 'step' : undefined}>
                               <span aria-hidden="true">{at + 1}</span>{one.label}
                             </button>
@@ -122,9 +137,7 @@ export function WorkJ({ flags }: { flags: LandingFlags }) {
                   <h3>{shown.label}</h3>
                   <p>{shown.explain}</p>
                   <div className={styles.result}><p className={styles.asideLabel}>{J_WORK.resultLabel}</p><p>{item.result}</p></div>
-                  <button type="button" className={styles.next} onClick={() => choose((index + 1) % scenes.length)}>
-                    <span>{J_WORK.next}：{scenes[(index + 1) % scenes.length].title}</span><ArrowRight size={16} aria-hidden="true" />
-                  </button>
+                  <NextButton scenes={scenes} index={index} at={at} onGo={choose} />
                 </aside>
               </div>
             );
@@ -132,5 +145,21 @@ export function WorkJ({ flags }: { flags: LandingFlags }) {
         </div>
       </div>
     </section>
+  );
+}
+
+/** Walks the small steps one by one; only on a demo's last step does it move on to the next demo (Owner 2026-10-15). */
+function NextButton({ scenes, index, at, onGo }: {
+  scenes: typeof J_WORK_SCENES; index: number; at: number; onGo: (scene: number, step?: number) => void;
+}) {
+  const steps = scenes[index].steps;
+  const lastStep = at >= steps.length - 1;
+  const nextScene = (index + 1) % scenes.length;
+  const label = lastStep ? `${J_WORK.next}：${scenes[nextScene].title}` : `${J_WORK.nextStep}：${steps[at + 1].label}`;
+  return (
+    <button type="button" className={styles.next} data-scene={lastStep || undefined}
+      onClick={() => (lastStep ? onGo(nextScene) : onGo(index, at + 1))}>
+      <span>{label}</span><ArrowRight size={16} aria-hidden="true" />
+    </button>
   );
 }
