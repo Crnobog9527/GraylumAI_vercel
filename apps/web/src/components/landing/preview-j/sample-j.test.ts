@@ -149,7 +149,12 @@ describe('style sample J, the later sections', () => {
   it('compares how the two work (plan A): four differences, the same question to both, the coach in its own words', () => {
     const { html } = render();
     for (const phrase of H_COMPARE.title.split(/(?<=，)|(?=带你)/)) expect(html).toContain(escape(phrase));
-    expect(J_COMPARE.pairs.map(pair => pair.theme)).toEqual(['通用 AI 等你问，AI 教练先问你', '帮你判断，讲清理由', '记得你的情况', '用真实数据说话']);
+    // Round seven: no shared label column; each window has its own note under each exchange.
+    expect(J_COMPARE.pairs.map(pair => pair.coachNote)).toEqual(['先问你，弄清你要什么', '说真话，讲理由', '记得你的边界', '用真实数据']);
+    for (const pair of J_COMPARE.pairs) {
+      expect(html).toContain(`<b>${J_COMPARE.genericNoteLabel}</b>${escape(pair.genericNote)}`);
+      expect(html).toContain(`<b>${J_COMPARE.coachNoteLabel}</b>${escape(pair.coachNote)}`);
+    }
     for (const pair of J_COMPARE.pairs) {
       // The same question in both windows, except the first row: there the coach speaks first, nobody asked.
       const first = 'coachFirst' in pair && pair.coachFirst;

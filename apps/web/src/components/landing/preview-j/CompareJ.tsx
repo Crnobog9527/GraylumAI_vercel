@@ -26,8 +26,9 @@ export function pairTiming(generic: string, coach: string, coachFirst = false) {
 
 /**
  * The comparison, plan A (Owner 2026-10-15): only how the two work differently, all four on one screen. Two chat
- * windows side by side, a general AI and the AI coach, each holding the same four exchanges; the left column names
- * the difference each row shows. As a row scrolls in, the question lands in both windows, the general AI types its
+ * windows side by side, a general AI and the AI coach, each holding the same four exchanges; under each exchange
+ * its window's own note (round seven: what the general AI gives you, how the coach differs), never one label for
+ * both. As a row scrolls in, the question lands in both windows, the general AI types its
  * usual two lines, then the coach types its answer, its own words from a real sample conversation (named under it).
  * The windows are pictures (inert); the text carries the meaning. Server HTML and reduced motion show everything.
  */
@@ -40,7 +41,6 @@ export function CompareJ() {
         </h2>
         <div className={styles.board}>
           <div className={styles.heads} aria-hidden="true">
-            <span />
             <WindowBar name={J_COMPARE.genericName} generic />
             <WindowBar name={J_COMPARE.coachName} />
           </div>
@@ -50,14 +50,16 @@ export function CompareJ() {
               const first = 'coachFirst' in pair && pair.coachFirst;
               const timing = pairTiming(generic, pair.coach, first);
               return (
-                <li key={pair.theme} data-row="" className={styles.pair} style={{
+                <li key={pair.question} data-row="" className={styles.pair} style={{
                   '--generic-at': `${timing.genericStart}ms`, '--coach-at': `${timing.coachStart}ms`,
                 } as CSSProperties}>
-                  <p className={styles.theme}>{pair.theme}</p>
-                  <div className={styles.cell} data-side="generic" inert aria-hidden="true">
-                    <p className={styles.mobileName}><Bot size={13} />{J_COMPARE.genericName}</p>
-                    <p className={styles.question}><span>你</span>{pair.question}</p>
-                    <div className={styles.genericReply}><Typed text={generic} start={timing.genericStart} /></div>
+                  <div className={styles.cell} data-side="generic">
+                    <div inert aria-hidden="true">
+                      <p className={styles.mobileName}><Bot size={13} />{J_COMPARE.genericName}</p>
+                      <p className={styles.question}><span>你</span>{pair.question}</p>
+                      <div className={styles.genericReply}><Typed text={generic} start={timing.genericStart} /></div>
+                    </div>
+                    <p className={styles.note} data-side="generic"><b>{J_COMPARE.genericNoteLabel}</b>{pair.genericNote}</p>
                   </div>
                   <div className={styles.cell} data-side="coach">
                     <div inert aria-hidden="true">
@@ -67,7 +69,10 @@ export function CompareJ() {
                         <p><Typed text={pair.coach} start={timing.coachStart} /></p>
                       </div>
                     </div>
-                    <p className={styles.source}>{J_COMPARE.sourceLabel}：{pair.source}</p>
+                    <div className={styles.foot}>
+                      <p className={styles.note} data-side="coach"><b>{J_COMPARE.coachNoteLabel}</b>{pair.coachNote}</p>
+                      <p className={styles.source}>{J_COMPARE.sourceLabel}：{pair.source}</p>
+                    </div>
                   </div>
                 </li>
               );
