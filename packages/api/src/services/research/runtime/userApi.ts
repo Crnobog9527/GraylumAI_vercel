@@ -9,7 +9,7 @@ interface Db {
 }
 const id = z.string().uuid();
 const optionId = z.string().regex(/^[a-z0-9]{1,8}$/);
-const keyword = z.string().trim().min(1).max(40).refine(value => !/\p{Cc}/u.test(value));
+const keyword = z.string().trim().min(1).refine(value => [...value].length <= 40 && !/\p{Cc}/u.test(value));
 export const confirmationInput = z.object({
   cardId: id,
   selected: z.array(optionId).max(24),

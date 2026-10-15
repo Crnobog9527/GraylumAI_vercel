@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { researchRuntimeTools } from './researchRuntimeTool';
-import { runSubcall, type SubcallContext } from '../research/runtime/subcall';
+import { requestIdentity, runSubcall, type SubcallContext } from '../research/runtime/subcall';
 import { stableResearchId, type ResearchToolContext } from '../research/runtime/toolContext';
 import type { DiscoveryRecord, FetchClaim, RuntimeOperation, RuntimePlan, RuntimeResearchStore } from '../research/runtime/store';
 import type { ToolEnvelope } from '../research/tools/envelope';
@@ -10,7 +10,9 @@ import { tikhubRouteId } from '../research/vendors/tikhub';
 import { FIRECRAWL_ROUTE } from '../research/vendors/firecrawl';
 import type { ResearchItem } from '../research/vendors/types';
 
-vi.mock('../research/runtime/subcall', () => ({ runSubcall: vi.fn() }));
+vi.mock('../research/runtime/subcall', async importOriginal => ({
+  ...await importOriginal<typeof import('../research/runtime/subcall')>(), runSubcall: vi.fn(),
+}));
 const subcall = vi.mocked(runSubcall);
 const id = '11111111-1111-4111-8111-111111111111';
 const discoveryId = '22222222-2222-4222-8222-222222222222';
@@ -109,7 +111,8 @@ function fixture(limit = 12) {
     const items = request.vendor !== 'tikhub' ? [item({ title: 'web evidence' })]
       : request.call.kind === 'keyword_posts' ? Array.from({ length: authorCount }, (_, i) => post(`author${i}`))
       : request.call.kind === 'account_profile' ? [item({ followers: 50000 })] : [post()];
-    operations.set(operationId, { state: 'succeeded', result: { items } });
+    operations.set(operationId, { state: 'succeeded', identityHash: requestIdentity(request),
+      result: { items, outcome: 'ok', reason: null, fetchedAt: now.toISOString(), truncated: false } });
     return { sent: true, operationId, callId: id, result: { vendor: request.vendor, route: request.route,
       outcome: 'ok', reason: null, httpStatus: 200, supplierMayCharge: true,
       usage: { unit: 'call', units: '1' }, items, truncated: false, fetchedAt: now.toISOString() } };
@@ -159,6 +162,35 @@ describe('positioning research tool factory', () => {
     const f = fixture();
     expect(await f.execute(name as string, args as Record<string, unknown>)).toMatchObject({ status: 'not_confirmed', reason: 'INVALID_ARGUMENTS' });
     expect(subcall).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['web_search', { query: 'topic' }], ['web_fetch', { url: 'https://example.com' }],
+  ])('replays durable %s evidence after worker loss without sending or spending another allowance', async (name, args) => {
+    const f = fixture(1);
+    const first = await f.execute(name as string, args, 'paid-call');
+    expect(first.status).toBe('ok');
+    // Same worker with exhausted allowance, then a fresh resumed worker reading persisted evidence.
+    expect(await f.execute(name as string, args, 'paid-call')).toEqual(first);
+    expect(await f.makeExecute()(name as string, args, 'paid-call')).toEqual(first);
+    expect(f.supplierCalls).toHaveBeenCalledTimes(1);
+    expect(subcall).toHaveBeenCalledTimes(1);
+  });
+
+  it('never resends or substitutes an incomplete, malformed, or mismatched web operation', async () => {
+    const f = fixture();
+    const operationId = stableResearchId(id, 'paid-call');
+    await f.execute('web_search', { query: 'topic' }, 'paid-call');
+    const prior = f.operations.get(operationId)!;
+    for (const state of ['dispatched', 'unknown', 'failed', 'cancelled'] as const) {
+      f.operations.set(operationId, { ...prior, state, result: null });
+      expect(await f.makeExecute()('web_search', { query: 'topic' }, 'paid-call'))
+        .toMatchObject({ status: 'unavailable', reason: 'PROVIDER_RESULT_UNKNOWN' });
+    }
+    f.operations.set(operationId, prior);
+    expect(await f.makeExecute()('web_search', { query: 'different topic' }, 'paid-call'))
+      .toMatchObject({ status: 'unavailable', reason: 'OPERATION_IDENTITY_MISMATCH' });
+    expect(f.supplierCalls).toHaveBeenCalledTimes(1);
   });
 
   it('requires real keyword and account authorization, not model-supplied identifiers', async () => {

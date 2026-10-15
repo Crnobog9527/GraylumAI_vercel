@@ -10,7 +10,13 @@ import { parallelModeFor } from '../research/vendors/parallel';
 import { benchmarkFetch } from '../research/runtime/benchmarkFetch';
 import { discover, moreCandidates } from '../research/runtime/discovery';
 import { executeResearchCall, stableResearchId, type ResearchToolContext } from '../research/runtime/toolContext';
-import type { SupplierRequest } from '../research/runtime/subcall';
+import { requestIdentity, type SupplierRequest } from '../research/runtime/subcall';
+
+const savedWebResult = z.object({
+  outcome: z.enum(['ok', 'partial', 'failed', 'not_sent', 'unknown']), reason: z.string().nullable(),
+  fetchedAt: z.string(), truncated: z.boolean(), items: z.array(z.object({ url: z.string().optional(),
+    fields: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])), missing: z.array(z.string()) })),
+});
 
 // SDK requires object parameters; the authoritative strict union is parsed before execution.
 const discoveryParameters = z.object({ keywordConfirmationId: z.string().uuid().optional(),
@@ -26,7 +32,7 @@ export function researchRuntimeTools(ctx: ResearchToolContext): RuntimeTool[] {
       if (!parsed.success) return toolEnvelope({ status: 'not_confirmed', reason: 'INVALID_ARGUMENTS' });
       if (!ctx.config.enabled) return toolEnvelope({ status: 'unavailable', reason: 'RESEARCH_DISABLED' });
       const allowance = admitSubcalls(subcallNeed(name, parsed.data, ctx.config), remaining);
-      if (allowance.exhausted) return toolEnvelope({ status: 'budget_exhausted', reason: 'ROUND_LIMIT' });
+      if (allowance.exhausted && name !== 'web_search' && name !== 'web_fetch') return toolEnvelope({ status: 'budget_exhausted', reason: 'ROUND_LIMIT' });
       const budget = { left: allowance.allowed, used: 0 };
       try {
         if (name === 'propose_keywords') {
@@ -53,7 +59,21 @@ export function researchRuntimeTools(ctx: ResearchToolContext): RuntimeTool[] {
           if (!route.ok) return toolEnvelope({ status: 'unavailable', reason: route.reason });
           request = { vendor: 'firecrawl', route: route.route, url: args.url };
         }
-        const outcome = await executeResearchCall(ctx, budget, request, stableResearchId(ctx.executionId, callId), name, raw);
+        const operationId = stableResearchId(ctx.executionId, callId);
+        const prior = await ctx.store.readOperation(operationId);
+        if (prior && prior.identityHash !== requestIdentity(request)) {
+          return toolEnvelope({ status: 'unavailable', reason: 'OPERATION_IDENTITY_MISMATCH' });
+        }
+        if (prior && prior.state !== 'prepared') {
+          const saved = savedWebResult.safeParse(prior.result);
+          if (!['succeeded', 'failed', 'unknown'].includes(prior.state) || !saved.success) {
+            return toolEnvelope({ status: 'unavailable', reason: 'PROVIDER_RESULT_UNKNOWN' });
+          }
+          return toolEnvelope({ ...statusForOutcome(saved.data), items: saved.data.items,
+            evidenceId: operationId, fetchedAt: saved.data.fetchedAt, truncated: saved.data.truncated });
+        }
+        if (allowance.exhausted) return toolEnvelope({ status: 'budget_exhausted', reason: 'ROUND_LIMIT' });
+        const outcome = await executeResearchCall(ctx, budget, request, operationId, name, raw);
         return outcome.sent ? toolEnvelope({ ...statusForOutcome(outcome.result), items: outcome.result.items,
           evidenceId: outcome.operationId, fetchedAt: outcome.result.fetchedAt, truncated: outcome.result.truncated })
           : toolEnvelope({ status: outcome.budget ? 'budget_exhausted' : 'unavailable', reason: outcome.stop });

@@ -17,6 +17,35 @@ describe('research user API', () => {
       a: actor, p_card: id, p: { selected: ['a'], additions: ['猫'] },
     });
   });
+  it.each([21, 40])('reads and confirms keywords with %i Unicode code points', async length => {
+    const text = '🐈'.repeat(length);
+    const client = db([{ cardId: id, kind: 'keywords', options: [{ id: 'a', text }],
+      minSelect: 1, maxSelect: 5, confirmationId: other, items: [text] }]);
+    const cards = await researchCards(client, actor, id);
+    expect(cards.items[0].options).toEqual([{ id: 'a', text }]);
+    expect(cards.items[0].items).toEqual([text]);
+    client.rpc.mockResolvedValue({ data: { cardId: id, confirmationId: other, kind: 'keywords', items: [text] }, error: null });
+    for (const submission of [{ selected: ['a'], edits: { a: text } }, { selected: [], additions: [text] }]) {
+      const confirmation = await confirmResearchCard(client, actor, { cardId: id, ...submission });
+      expect(confirmation.items).toEqual([text]);
+      expect(client.rpc).toHaveBeenLastCalledWith('research_card_confirm', {
+        a: actor, p_card: id, p: submission,
+      });
+    }
+  });
+  it.each(['🐈'.repeat(41), '猫\u0000', '   '])('rejects invalid keyword input and persisted output: %j', async text => {
+    const client = db(null);
+    for (const submission of [{ edits: { a: text } }, { additions: [text] }]) {
+      await expect(confirmResearchCard(client, actor, { cardId: id, selected: ['a'], ...submission })).rejects.toThrow();
+    }
+    expect(client.rpc).not.toHaveBeenCalled();
+    client.rpc.mockResolvedValue({ data: [{ cardId: id, kind: 'keywords', options: [{ id: 'a', text }],
+      minSelect: 1, maxSelect: 5, confirmationId: null, items: null }], error: null });
+    await expect(researchCards(client, actor, id)).rejects.toMatchObject({ message: 'RESEARCH_UNAVAILABLE' });
+    client.rpc.mockResolvedValue({ data: { cardId: id, confirmationId: other, kind: 'keywords', items: [text] }, error: null });
+    await expect(confirmResearchCard(client, actor, { cardId: id, selected: ['a'] }))
+      .rejects.toMatchObject({ message: 'RESEARCH_UNAVAILABLE' });
+  });
   it('rejects malformed confirmations before sending anything', async () => {
     const client = db(null);
     await expect(confirmResearchCard(client, actor, { cardId: id, selected: ['bad id'] })).rejects.toThrow();
