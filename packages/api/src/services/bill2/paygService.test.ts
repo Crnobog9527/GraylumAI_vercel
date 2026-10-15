@@ -181,7 +181,9 @@ it.each(['timeout', 'nonzero'])('keeps a 403 pending refusal unconfirmed after l
   else adapter.lookup.mockResolvedValue(observed(JSON.stringify({data: {id: generationId, model: frozen.model,
     finish_reason: 'stop', total_cost: 0.001, native_tokens_prompt: 1, native_tokens_completion: 1}}), 200));
   await api.claimPaygCall(runId, 1, frozen);
-  expect(await api.dispatchOnce(callId, '{}')).toMatchObject({dispatched: true, providerRejected: false});
+  expect(await api.dispatchOnce(callId, '{}')).toMatchObject({
+    dispatched: true, providerRejected: true, providerRejectionPending: true,
+  });
   expect(adapter.lookup).toHaveBeenCalledOnce();
   const evidence = rpc.mock.calls.filter(([name]) => name === 'bill2_record').map(([,args]) => args.p_evidence);
   expect(evidence[0]).toMatchObject({evidenceKind: 'provider_rejection_pending'});
