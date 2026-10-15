@@ -481,4 +481,132 @@ DO $$ DECLARE f text; BEGIN
     EXECUTE format('GRANT EXECUTE ON FUNCTION public.%s TO service_role',f);
   END LOOP;
 END $$;
+
+-- Host-only scoped reads. All tables remain inaccessible, including to service_role.
+CREATE OR REPLACE FUNCTION public.research_runtime_read(a uuid,s uuid,e uuid,p_kind text,p_id uuid)
+RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
+DECLARE v jsonb;
+BEGIN
+  PERFORM research_session_owned(a,s,e);
+  CASE p_kind
+  WHEN 'operation' THEN
+    SELECT jsonb_build_object('identityHash',o.identity_hash,'state',o.state,'result',o.result,'executionId',p.execution_id) INTO v
+    FROM research_operations o JOIN research_plans p ON p.id=o.plan_id
+    JOIN runtime_executions x ON x.id=p.execution_id AND x.actor_id=a AND x.session_id=s
+    WHERE o.id=p_id AND p.actor_id=a AND p.session_id=s AND o.erased_at IS NULL AND p.erased_at IS NULL
+    AND x.content_deleted_at IS NULL AND x.erased_at IS NULL;
+  WHEN 'plan' THEN
+    SELECT jsonb_build_object('executionId',p.execution_id,'discoveryId',p.discovery_id,'operations',p.operations,
+      'budgetUnits',p.budget_units,'cancelled',p.cancelled) INTO v FROM research_plans p
+    JOIN runtime_executions x ON x.id=p.execution_id AND x.actor_id=a AND x.session_id=s
+    WHERE p.id=p_id AND p.actor_id=a AND p.session_id=s AND p.erased_at IS NULL
+    AND x.content_deleted_at IS NULL AND x.erased_at IS NULL;
+  WHEN 'discovery' THEN
+    SELECT jsonb_build_object('discoveryId',d.id,'keywords',d.keywords,'platforms',d.platforms,'cursor',d.cursor,'state',d.state)
+    INTO v FROM research_discoveries d
+    JOIN runtime_executions x ON x.id=d.execution_id AND x.actor_id=a AND x.session_id=s
+    WHERE d.id=p_id AND d.actor_id=a AND d.session_id=s AND x.content_deleted_at IS NULL AND x.erased_at IS NULL;
+  WHEN 'refresh' THEN
+    SELECT jsonb_build_object('platform',g.platform,'account',g.account,'used',g.used_at IS NOT NULL AND NOT EXISTS(
+      SELECT 1 FROM research_account_fetches f WHERE f.actor_id=a AND f.session_id=s AND f.refresh_id=g.id
+      AND f.state='prepared' AND f.platform=g.platform AND f.account_key=research_account_key(g.platform,g.account)))
+    INTO v FROM research_refresh_grants g
+    JOIN runtime_executions x ON x.id=g.source_execution_id AND x.actor_id=a AND x.session_id=s
+    WHERE g.id=p_id AND g.actor_id=a AND g.session_id=s AND x.content_deleted_at IS NULL AND x.erased_at IS NULL
+    AND (g.used_execution_id IS NULL OR EXISTS(SELECT 1 FROM runtime_executions u WHERE u.id=g.used_execution_id
+      AND u.actor_id=a AND u.session_id=s AND u.content_deleted_at IS NULL AND u.erased_at IS NULL));
+  WHEN 'selected' THEN
+    SELECT coalesce(jsonb_agg(item),'[]'::jsonb) INTO v FROM research_selection_cards c
+    JOIN runtime_executions x ON x.id=c.execution_id AND x.actor_id=a AND x.session_id=s
+    CROSS JOIN LATERAL jsonb_array_elements(c.confirmed_items) item
+    WHERE c.actor_id=a AND c.session_id=s AND c.discovery_id=p_id AND c.kind='candidates' AND c.confirmation_id IS NOT NULL
+    AND x.content_deleted_at IS NULL AND x.erased_at IS NULL;
+  WHEN 'card' THEN
+    SELECT jsonb_build_object('cardId',c.id,'kind',c.kind,'options',c.options,'minSelect',c.min_select,'maxSelect',c.max_select,
+      'confirmationId',c.confirmation_id,'items',c.confirmed_items)
+    INTO v FROM research_selection_cards c
+    JOIN runtime_executions x ON x.id=c.execution_id AND x.actor_id=a AND x.session_id=s
+    WHERE c.id=p_id AND c.actor_id=a AND c.session_id=s AND x.content_deleted_at IS NULL AND x.erased_at IS NULL;
+  ELSE RAISE EXCEPTION 'RESEARCH_READ_INVALID';
+  END CASE;
+  RETURN v;
+END $$;
+REVOKE ALL ON FUNCTION public.research_runtime_read(uuid,uuid,uuid,text,uuid) FROM PUBLIC,anon,authenticated;
+GRANT EXECUTE ON FUNCTION public.research_runtime_read(uuid,uuid,uuid,text,uuid) TO service_role;
+
+-- User-facing reads: service-only, actor-scoped, live content only. No supplier/cost columns leave these RPCs.
+CREATE OR REPLACE FUNCTION public.research_user_tool_charges(a uuid,p_transaction uuid) RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
+DECLARE tx credit_transactions; output jsonb;
+BEGIN
+ PERFORM bill2_actor(a);
+ SELECT * INTO tx FROM credit_transactions WHERE id=p_transaction AND user_id=a;
+ IF tx.id IS NULL THEN RAISE EXCEPTION 'RESEARCH_SCOPE_DENIED' USING ERRCODE='42501';END IF;
+ SELECT coalesce(jsonb_agg(jsonb_build_object('callId',c.id,'toolName',o.result->>'toolName','args',o.result->'args',
+  'source',CASE WHEN c.nominal_source IN ('tool_usage','tool_no_usage','tool_failed','tool_failed_charged','tool_unknown')
+    THEN c.nominal_source END,
+  -- Same frozen call multiplier and run conversion as settlement, before its cumulative ceil.
+  'credits',CASE WHEN c.settled_at IS NOT NULL AND c.nominal_source LIKE 'tool_%'
+    THEN (c.nominal_cost_usd*bill2_unit_multiplier(c.payload->'billingUnit'->'multiplier')*r.credits_per_usd)::text END
+ ) ORDER BY c.sequence,c.id),'[]'::jsonb) INTO output
+ FROM bill2_calls c JOIN bill2_runs r ON r.id=c.run_id
+ JOIN runtime_executions x ON x.billing_run_id=r.id AND x.actor_id=a
+ JOIN runtime_sessions s ON s.id=x.session_id AND s.actor_id=a
+ LEFT JOIN LATERAL (SELECT evidence.result FROM research_operations evidence
+  JOIN research_plans p ON p.id=evidence.plan_id AND p.execution_id=x.id AND p.actor_id=a AND p.erased_at IS NULL
+  WHERE evidence.bill2_call_id=c.id AND evidence.erased_at IS NULL) o ON true
+ WHERE r.id=tx.bill2_run_id AND r.actor_id=a AND c.call_kind='tool'
+ AND x.content_deleted_at IS NULL AND x.erased_at IS NULL AND s.content_deleted_at IS NULL AND s.erased_at IS NULL;
+ RETURN output;
+END $$;
+
+CREATE OR REPLACE FUNCTION public.research_user_evidence(a uuid,p_limit integer,p_cursor_time timestamptz,p_cursor_id uuid)
+RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
+DECLARE output jsonb;
+BEGIN
+ PERFORM bill2_actor(a);
+ IF p_limit NOT BETWEEN 1 AND 101 OR (p_cursor_time IS NULL)<>(p_cursor_id IS NULL)
+ THEN RAISE EXCEPTION 'RESEARCH_SCOPE_DENIED' USING ERRCODE='42501';END IF;
+ SELECT coalesce(jsonb_agg(row ORDER BY stamp DESC,oid DESC),'[]'::jsonb) INTO output FROM (
+  SELECT o.created_at stamp,o.id oid,jsonb_build_object(
+   'operationId',o.id,'toolName',o.result->>'toolName','args',o.result->'args','state',o.state,
+   'fetchedAt',o.result->>'fetchedAt',
+   'itemCount',CASE WHEN jsonb_typeof(o.result->'items')='array' THEN jsonb_array_length(o.result->'items') END,
+   'truncated',o.result->'truncated',
+   'sources',coalesce((SELECT jsonb_agg(item->>'url') FROM jsonb_array_elements(
+     CASE WHEN jsonb_typeof(o.result->'items')='array' THEN o.result->'items' ELSE '[]'::jsonb END) item
+     WHERE jsonb_typeof(item->'url')='string'),'[]'::jsonb),
+   'sessionId',s.id,'sessionTitle',coalesce(n.name,(SELECT left(nullif(btrim(t.payload->>'input'),''),80)
+     FROM runtime_executions t WHERE t.session_id=s.id AND t.actor_id=a
+     AND t.content_deleted_at IS NULL AND t.erased_at IS NULL ORDER BY t.created_at,t.id LIMIT 1)),
+   'createdAt',o.created_at) row
+  FROM research_operations o JOIN research_plans p ON p.id=o.plan_id AND p.actor_id=a
+  JOIN runtime_sessions s ON s.id=p.session_id AND s.actor_id=a
+  JOIN runtime_executions x ON x.id=p.execution_id AND x.actor_id=a AND x.session_id=s.id
+  LEFT JOIN runtime_session_names n ON n.session_id=s.id AND n.actor_id=a
+  WHERE o.erased_at IS NULL AND p.erased_at IS NULL AND x.content_deleted_at IS NULL AND x.erased_at IS NULL
+   AND s.content_deleted_at IS NULL AND s.erased_at IS NULL AND o.state IN ('succeeded','failed','unknown')
+   AND (p_cursor_time IS NULL OR (o.created_at,o.id)<(p_cursor_time,p_cursor_id))
+  ORDER BY o.created_at DESC,o.id DESC LIMIT p_limit
+ ) records;
+ RETURN output;
+END $$;
+
+CREATE OR REPLACE FUNCTION public.research_user_cards(a uuid,s uuid) RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
+DECLARE output jsonb;
+BEGIN
+ PERFORM research_session_owned(a,s,NULL);
+ SELECT coalesce(jsonb_agg(jsonb_build_object('cardId',c.id,'kind',c.kind,'options',c.options,
+  'minSelect',c.min_select,'maxSelect',c.max_select,'confirmationId',c.confirmation_id,'items',c.confirmed_items)
+  ORDER BY c.created_at,c.id),'[]'::jsonb) INTO output FROM research_selection_cards c
+ JOIN runtime_executions x ON x.id=c.execution_id AND x.actor_id=a AND x.session_id=s
+ WHERE c.actor_id=a AND c.session_id=s AND x.content_deleted_at IS NULL AND x.erased_at IS NULL;
+ RETURN output;
+END $$;
+REVOKE ALL ON FUNCTION public.research_user_tool_charges(uuid,uuid),public.research_user_evidence(uuid,integer,timestamptz,uuid),
+ public.research_user_cards(uuid,uuid) FROM PUBLIC,anon,authenticated;
+GRANT EXECUTE ON FUNCTION public.research_user_tool_charges(uuid,uuid),public.research_user_evidence(uuid,integer,timestamptz,uuid),
+ public.research_user_cards(uuid,uuid) TO service_role;
+
 COMMIT;
