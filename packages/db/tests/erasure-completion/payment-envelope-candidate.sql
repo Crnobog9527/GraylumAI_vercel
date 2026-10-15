@@ -150,3 +150,41 @@ BEGIN
  END LOOP;
  RETURN erasure_ledger_value(v,shape);
 END $$;
+
+CREATE OR REPLACE FUNCTION public.erasure_envelope_transition(o jsonb,n jsonb)
+RETURNS boolean LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path=public,pg_temp AS $$
+DECLARE wrapper jsonb:=o->'checkout_request'; provider jsonb:=wrapper->'providerRequest';
+BEGIN
+ -- Validate the owning financial row before the existing guard permits the first erasure marker.
+ IF o->>'request_erased_at' IS NULL AND n->>'request_erased_at' IS NOT NULL
+  AND wrapper ?| ARRAY['providerRequest','merchant','method'] THEN
+  IF wrapper->>'orderId' IS DISTINCT FROM o->>'id'
+   OR wrapper->>'userId' IS DISTINCT FROM o->>'user_id'
+   OR wrapper->>'merchant' IS DISTINCT FROM o->>'merchant_namespace'
+   OR wrapper->>'mode' IS DISTINCT FROM o->>'payment_mode'
+   OR wrapper->>'method' IS DISTINCT FROM o->>'payment_method' THEN
+   RAISE EXCEPTION 'ERASURE_PAYMENT_REQUEST_REVIEW';
+  END IF;
+  IF provider ? 'productId' THEN
+   IF o->>'payment_channel' IS DISTINCT FROM 'waffo' OR o->>'item_type' IS DISTINCT FROM 'membership_plan'
+    OR o->>'mode' IS DISTINCT FROM 'subscription' THEN
+    RAISE EXCEPTION 'ERASURE_PAYMENT_REQUEST_REVIEW';
+   END IF;
+  ELSE
+   IF o->>'payment_channel' IS DISTINCT FROM 'stripe'
+    OR provider->>'mode' IS DISTINCT FROM o->>'mode'
+    OR provider->'metadata'->>'itemId' IS DISTINCT FROM o->>'item_id'
+    OR provider->'metadata'->>'itemType' IS DISTINCT FROM o->>'item_type'
+    OR provider->'metadata'->>'billingCycle' IS DISTINCT FROM o->>'billing_cycle' THEN
+    RAISE EXCEPTION 'ERASURE_PAYMENT_REQUEST_REVIEW';
+   END IF;
+  END IF;
+ END IF;
+ RETURN o->>'request_erased_at' IS NULL AND n->>'request_erased_at' IS NOT NULL
+  AND erasure_payment_terminal(o)
+  AND EXISTS(SELECT 1 FROM account_erasure_requests WHERE profile_id=(o->>'user_id')::uuid)
+  AND (o-ARRAY['checkout_request','purchase_change_request','request_erased_at'])=
+      (n-ARRAY['checkout_request','purchase_change_request','request_erased_at'])
+  AND n->'checkout_request' IS NOT DISTINCT FROM erasure_payment_envelope(o->'checkout_request','checkout')
+  AND n->'purchase_change_request' IS NOT DISTINCT FROM erasure_payment_envelope(o->'purchase_change_request','change');
+END $$;
