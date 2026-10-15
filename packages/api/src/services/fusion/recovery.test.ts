@@ -1,14 +1,24 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { createRuntimeBudget } from '../runtime/budget';
 import { recoverFusionFinancials } from './recovery';
+
+const rejudged = vi.hoisted(() => [] as string[]);
+const judgedNow = vi.hoisted(() => ({ ids: [] as string[] }));
+const failRejudge = vi.hoisted(() => ({ value: false }));
+vi.mock('./review', () => ({ reviewFlow: (deps: { actorId: string }) => ({
+  rejudge: async (reviewId: string) => {
+    if (failRejudge.value) throw new Error('down');
+    rejudged.push(`${deps.actorId}:${reviewId}`);
+    return judgedNow.ids;
+  } }) }));
 
 const id = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
 const now = Date.parse('2026-10-14T00:00:00Z');
 const item = (n: number, dispatched: boolean, minutes: number) => ({ actor_id: id(100), run_id: id(n), call_id: id(n + 50), dispatched,
   dispatch_deadline: new Date(now + minutes * 60_000).toISOString(), recovery: null, created_at: `2026-10-13T00:00:${String(n).padStart(2, '0')}.000001Z` });
-function admin(rows: unknown[], options: { deleted?: string[]; failFinalize?: string } = {}) {
+function admin(rows: unknown[], options: { deleted?: string[]; failFinalize?: string; unjudged?: unknown[] | ((limit: number) => unknown[]); saved?: string[] } = {}) {
   const calls: string[] = [];
   const db = { rpc(name: string, args: Record<string, unknown>) {
     calls.push(`${name}:${String(args.p_run_id ?? '')}`);
@@ -22,6 +32,10 @@ function admin(rows: unknown[], options: { deleted?: string[]; failFinalize?: st
       return Promise.resolve({ data: { id: args.p_run_id, state: 'unknown', closed: false }, error: null });
     if (name === 'bill2_finalize' || name === 'bill2_read') return Promise.resolve({ data: { id: args.p_run_id, state: 'settled', closed: true,
       contentDeleted: options.deleted?.includes(String(args.p_run_id)) ?? false }, error: null });
+    if (name === 'fusion_call_output_read') return Promise.resolve({ data: options.saved?.includes(String(args.p_call_id))
+      ? { callId: args.p_call_id, body: 'x' } : null, error: null });
+    if (name === 'fusion_review_unjudged') return Promise.resolve({ data: typeof options.unjudged === 'function'
+      ? options.unjudged(Number(args.p_limit)) : options.unjudged ?? [], error: null });
     if (name === 'fusion_review_pause_idle') {
       // Like the real query builder: cancellable with an abort signal.
       const result = Promise.resolve({ data: 0, error: null });
@@ -33,6 +47,60 @@ function admin(rows: unknown[], options: { deleted?: string[]; failFinalize?: st
 }
 
 describe('Fusion daily recovery', () => {
+  it('re-judges saved, unjudged review bodies once per review before any settlement', async () => {
+    rejudged.length = 0;
+    const row = (call: number) => ({ actor_id: id(100), review_id: id(300), call_id: id(call), run_id: id(call + 1), phase: 'fusion_review', round: 1 });
+    const a = admin([item(10, true, -60)], { unjudged: [row(400), row(402)] });
+    const summary = await recoverFusionFinancials(a.db, { now: () => now, budget: createRuntimeBudget() });
+    expect(rejudged).toEqual([`${id(100)}:${id(300)}`]);
+    expect(summary.rejudged).toBe(1);
+    expect(a.calls.indexOf('fusion_review_unjudged:')).toBeLessThan(a.calls.findIndex(c => c.startsWith('bill2_finalize')));
+  });
+  it('keeps calls of a review whose re-judging failed out of this settlement pass', async () => {
+    rejudged.length = 0;
+    failRejudge.value = true;
+    const a = admin([item(10, true, -60), { ...item(11, true, -60), call_id: id(500) }],
+      { unjudged: [{ actor_id: id(100), review_id: id(300), call_id: id(500), run_id: id(11), phase: 'fusion_review', round: 1 }] });
+    const summary = await recoverFusionFinancials(a.db, { now: () => now, budget: createRuntimeBudget() });
+    failRejudge.value = false;
+    expect(a.calls).toContain(`bill2_finalize:${id(10)}`);
+    expect(a.calls).not.toContain(`bill2_finalize:${id(11)}`);
+    expect(summary).toMatchObject({ failed: 1, deferred: 1, success: false });
+  });
+  it('on a full page of unjudged calls, settles calls judged again now or with no saved body; defers other saved ones', async () => {
+    rejudged.length = 0;
+    // 50 unjudged rows (a full page): the first belongs to run 11, the rest to calls with no pending row here.
+    const unjudged = Array.from({ length: 50 }, (_, i) => ({ actor_id: id(100), review_id: id(300), call_id: id(i === 0 ? 500 : 600 + i),
+      run_id: id(i === 0 ? 11 : 700 + i), phase: 'fusion_review', round: 1 }));
+    // Run 10 has no saved body (cannot be unjudged); run 12 has one that may be past the page; run 13 belongs to the
+    // same review, past the page, and the review-wide re-judging just judged it.
+    judgedNow.ids = [id(500), id(63)];
+    const a = admin([item(10, true, -60), { ...item(11, true, -60), call_id: id(500) }, item(12, true, -60), item(13, true, -60)],
+      { unjudged, saved: [id(62), id(63)] });
+    const summary = await recoverFusionFinancials(a.db, { now: () => now, budget: createRuntimeBudget() });
+    judgedNow.ids = [];
+    expect(a.calls).toContain(`bill2_finalize:${id(11)}`);
+    expect(a.calls).toContain(`bill2_finalize:${id(10)}`);
+    expect(a.calls).toContain(`bill2_finalize:${id(13)}`);
+    expect(a.calls).not.toContain(`bill2_finalize:${id(12)}`);
+    expect(summary).toMatchObject({ rejudged: 1, deferred: 1 });
+  });
+  it('lists again after judging, so a backlog longer than a page is judged and settles in the same run', async () => {
+    rejudged.length = 0;
+    // 120 unjudged calls, one review each; judging a review removes its call from the listing, like the real query.
+    const backlog = Array.from({ length: 120 }, (_, i) => ({ actor_id: id(100), review_id: id(1000 + i), call_id: id(2000 + i),
+      run_id: id(3000 + i), phase: 'fusion_review', round: 1 }));
+    const judged = () => new Set(rejudged.map(entry => entry.split(':')[1]));
+    // The last call of the backlog has a pending financial row; its body is saved.
+    const a = admin([{ ...item(14, true, -60), call_id: id(2119) }],
+      { unjudged: limit => backlog.filter(b => !judged().has(b.review_id)).slice(0, limit), saved: [id(2119)] });
+    judgedNow.ids = [];
+    const summary = await recoverFusionFinancials(a.db, { now: () => now, budget: createRuntimeBudget() });
+    expect(summary.rejudged).toBe(120);
+    expect(a.calls.filter(c => c.startsWith('fusion_review_unjudged')).length).toBe(3);
+    // Everything was listed, so the saved body was judged above and the call settles today.
+    expect(a.calls).toContain(`bill2_finalize:${id(14)}`);
+  });
   it('runs the idle-pause step first, so a backlog can never crowd it out', async () => {
     let clock = now;
     const busy = admin(Array.from({ length: 12 }, (_, i) => item(200 + i, true, -60)));

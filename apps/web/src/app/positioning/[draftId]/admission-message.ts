@@ -1,5 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-import {isAnswerSourceDenied,isInputTooLong} from "./mentor-turn";
+import {isAnswerSourceDenied,isInputTooLong,isReleasedRefusal} from "./mentor-turn";
+import {DEFINITE_REFUSAL_NOTICE} from "@/app/runtime/gate-notices";
 import {STEP_SUMMARY_REFUSED} from "./step-summary";
 import {gateAdmissionNotice} from "@/lib/runtime-gate-notice";
 import {isOrganizerPendingError,ORGANIZER_PENDING_NOTICE} from "@/lib/payg-wait";
@@ -22,6 +23,9 @@ export function admissionMessage(cause:unknown):string|null {
  if(gate)return gate;
  if(!(cause instanceof Error)||!('data' in cause)||!cause.data||typeof cause.data!=='object')return null;
  const data=cause.data as {code?:unknown;path?:unknown};
+ // Refused before admission and released: say why, never that the request is kept.
+ if(isReleasedRefusal(cause))return isInputTooLong(cause)?RUNTIME_INPUT_TOO_LONG_MESSAGE
+  :['PRECONDITION_FAILED','FORBIDDEN'].includes(String(data.code))?cause.message:DEFINITE_REFUSAL_NOTICE;
  if(!admissionPaths.includes(String(data.path)))return null;
  if(data.code==='SERVICE_UNAVAILABLE')return '服务暂时不可用，请稍后再试。'+retained;
  if(!['PRECONDITION_FAILED','FORBIDDEN'].includes(String(data.code)))return null;

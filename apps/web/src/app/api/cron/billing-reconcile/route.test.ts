@@ -17,6 +17,7 @@ const mocks = vi.hoisted(() => ({
   stripeClient: vi.fn(),
   reportStripeCard: vi.fn(),
   fusion: vi.fn(),
+  fusionKick: vi.fn(),
 }));
 
 vi.mock('@repo/api/src/services/payments/waffoReconciliation', () => ({ reconcileWaffoPayments: mocks.waffo }));
@@ -27,6 +28,7 @@ vi.mock('@repo/api/src/services/stripe', () => ({ getStripeClient: mocks.stripeC
 vi.mock('@/lib/payment-alert.mjs', () => ({ reportStripeCardReconciliation: mocks.reportStripeCard,
   reportPaymentEvidenceConflict: vi.fn() }));
 vi.mock('@repo/api/src/services/fusion/recovery', () => ({ recoverFusionFinancials: mocks.fusion }));
+vi.mock('@repo/api/src/services/fusion/background', () => ({ kickStalledReviews: mocks.fusionKick }));
 vi.mock('@repo/api/src/services/payments/waffoCardCheckout', () => ({ closeExpiredWaffoCheckouts: mocks.closeExpired }));
 
 vi.mock('@supabase/supabase-js', () => ({
@@ -94,6 +96,7 @@ describe('/api/cron/billing-reconcile', () => {
     mocks.stripeClient.mockReturnValue({ client: 'stripe' });
     mocks.stripeCard.mockResolvedValue({ success: true, skipped: true, findings: [] });
     mocks.fusion.mockResolvedValue({ success: true, scanned: 0, cancelled: 0, recovered: 0, scrubbed: 0, failed: 0 });
+    mocks.fusionKick.mockResolvedValue({ success: true, kicked: 0, listed: 0 });
   });
 
   it('runs the Fusion recovery step and fails the job while a Fusion call stays pending', async () => {
@@ -105,6 +108,17 @@ describe('/api/cron/billing-reconcile', () => {
     expect(await response.json()).toMatchObject({ fusion: { failed: 1 } });
     mocks.fusion.mockRejectedValue(new Error('unexpected'));
     expect((await GET(new Request('https://graylum.test/api/cron/billing-reconcile'))).status).toBe(500);
+  });
+
+  it('kicks stalled reviews before the Fusion recovery, from this deployment, and fails the job when the kick fails', async () => {
+    expect((await GET(new Request('https://graylum.test/api/cron/billing-reconcile'))).status).toBe(200);
+    expect(mocks.fusionKick.mock.invocationCallOrder[0]).toBeLessThan(mocks.fusion.mock.invocationCallOrder[0]!);
+    expect(mocks.fusionKick).toHaveBeenCalledWith({ client: 'service-role' }, 'https://graylum.test', { timeLimitMs: 10_000 });
+    mocks.fusionKick.mockResolvedValue({ success: false, kicked: 0 });
+    expect((await GET(new Request('https://graylum.test/api/cron/billing-reconcile'))).status).toBe(500);
+    mocks.fusionKick.mockRejectedValue(new Error('unexpected'));
+    const response = await GET(new Request('https://graylum.test/api/cron/billing-reconcile'));
+    expect(await response.json()).toMatchObject({ fusionKick: { success: false } });
   });
 
   it('rejects unauthorized invocation before creating a privileged client', async () => {

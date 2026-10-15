@@ -6,31 +6,14 @@
  * system sans for everything around it.
  */
 .page {
-  --j-canvas: #fafafa;
-  --j-desk: #f3f3f3;
-  --j-paper: #ffffff;
-  --j-ink: #1c1c1c;
-  --j-body: #3a3a3a;
-  --j-muted: #6b6b6b;
-  --j-rule: #e5e5e5;
-  --j-ink-soft: #cccccc;
-  --j-bronze: #82632c;
-  --j-bronze-soft: rgba(130, 99, 44, .1);
-  --j-seat-a: #56677d;
-  --j-seat-b: #5f7258;
-  --j-seat-c: #8c6152;
-  --j-critical: #9a3b2e;
-  --j-lift: 0 10px 24px -14px rgba(0, 0, 0, .28);
-  --j-ease: cubic-bezier(.22, 1, .36, 1);
-  --j-serif: 'Songti SC', 'Noto Serif SC', 'Source Han Serif SC', 'STSong', serif;
-  --j-sans: 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', system-ui, sans-serif;
+  composes: theme from './jury-theme.module.css';
   min-height: 100vh;
   overflow-x: clip;
   background: var(--j-canvas);
   color: var(--j-ink);
   font-family: var(--j-sans);
-  font-size: 15px;
-  line-height: 1.7;
+  font-size: 17px;
+  line-height: 1.75;
 }
 .page ::selection { background: #e2e2e2; color: var(--j-ink); }
 .page button:focus-visible, .page a:focus-visible, .page input:focus-visible + span, .page select:focus-visible {
@@ -38,8 +21,12 @@
   outline-offset: 2px;
 }
 
-/* Width rule shared with the landing page (#992): content at most 1280 wide, 36px gutters on a computer, 16 on a phone. */
-.toolbar, .main, .sampleBar { --j-gutter: 36px; width: 100%; max-width: calc(1280px + 2 * var(--j-gutter)); margin-inline: auto; padding-inline: var(--j-gutter); }
+/* Wide like a workspace (Owner 2026-10-15): the landing page's 32px gutters (16 on a phone), but the content keeps
+ * spreading up to 1840 so a large screen is not a narrow strip with empty sides. */
+.toolbar, .main, .sampleBar {
+  --j-gutter: 32px; --j-content: 1840px;
+  width: 100%; max-width: calc(var(--j-content) + 2 * var(--j-gutter)); margin-inline: auto; padding-inline: var(--j-gutter);
+}
 
 /* One toolbar: title, ending, sample names, transport, then the eight stations. Sticky so the stage can fill the rest. */
 .toolbar {
@@ -47,8 +34,11 @@
   border-bottom: 1px solid var(--j-rule); background: color-mix(in srgb, var(--j-canvas) 94%, transparent);
   backdrop-filter: blur(6px);
 }
-.toolbar > * { width: 100%; max-width: 1280px; margin-inline: auto; }
+.toolbar > * { width: 100%; max-width: var(--j-content); margin-inline: auto; }
 .toolRow { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; }
+.crumbs { flex: 1 0 100%; }
+.crumbs a { display: inline-flex; align-items: center; gap: 6px; color: var(--j-muted); font-size: 13.5px; text-decoration: none; }
+.crumbs a:hover { color: var(--j-ink); text-decoration: underline; text-underline-offset: 3px; }
 .title { margin: 0 auto 0 0; font-size: 16px; font-weight: 600; letter-spacing: -.005em; line-height: 1.3; white-space: nowrap; }
 
 .scenarios, .speeds {
@@ -83,66 +73,14 @@
 .speeds button { min-height: 26px; padding: 0 9px; }
 
 .main { display: grid; padding-block: 12px 48px; }
-.floor, .side { display: grid; gap: 10px; align-content: start; min-width: 0; min-height: 0; }
-.floor { scroll-margin-top: calc(var(--j-bar, 0px) + 8px); }
-/* While the review plays, the stage is the window: 100svh less the toolbar, with the report scrolling inside it. */
-@media (min-width: 768px) {
-  .floorLive { height: calc(100svh - var(--j-bar, 96px) - 24px); grid-template-rows: minmax(0, 1fr); }
-  .main:has(.floorLive) { padding-bottom: 12px; }
-}
 
-.side { grid-template-rows: auto minmax(0, 1fr); scroll-margin-top: calc(var(--j-bar, 0px) + 12px); }
-.sideHint { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 0; color: var(--j-muted); font-size: 12.5px; }
-.backToRoom, .closeDrawer {
-  display: none; flex: none; align-items: center; gap: 4px; min-height: 32px; padding: 0 12px; border: 1px solid var(--j-rule);
-  border-radius: 8px; background: var(--j-paper); color: var(--j-ink); font: inherit; font-size: 12.5px; cursor: pointer;
-}
-@media (max-width: 1023px) {
-  .main { gap: 14px; }
-  .backToRoom { display: inline-flex; }
-}
-/*
- * On a computer each person's record is a drawer over the stage's right edge, aligned with the content column: out
- * while a person or note is pointed at (or pinned by a click), away otherwise, so the report keeps the width.
- */
-@media (min-width: 1024px) {
-  .side {
-    position: fixed; z-index: 15; top: calc(var(--j-bar, 96px) + 12px); bottom: 12px;
-    right: max(var(--j-gutter), calc((100vw - 1280px) / 2)); width: min(440px, 38vw); padding: 12px;
-    border: 1px solid var(--j-rule); border-radius: 12px; background: var(--j-canvas);
-    box-shadow: 0 24px 48px -24px rgba(0, 0, 0, .28), 0 2px 6px -2px rgba(0, 0, 0, .08);
-    opacity: 0; visibility: hidden; transform: translateX(24px);
-    transition: transform .32s var(--j-ease), opacity .2s, visibility 0s .32s;
-  }
-  .side[data-open='true'] { opacity: 1; visibility: visible; transform: none; transition: transform .32s var(--j-ease), opacity .2s; }
-  .closeDrawer { display: inline-flex; }
-}
+/* Prototype only: the embeddable canvas with its stand-in controls. */
+.embed { display: grid; gap: 10px; }
+.embedControls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 18px; font-size: 14px; }
+.embedControls label { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
+.embedControls input[type='range'] { flex: 1 1 240px; min-width: 0; accent-color: var(--j-ink); }
+@media (min-width: 768px) { .embedStage { height: calc(100svh - var(--j-bar, 96px) - 80px); min-height: 520px; } }
 
-/* Progress: eight stations on a hairline; the fill follows stations passed, never time. */
-.rail { display: grid; gap: 4px; }
-.railNow { margin: 0; color: var(--j-muted); font-size: 13px; }
-.railNow strong { margin-left: 4px; color: var(--j-ink); font-weight: 600; }
-.track { height: 2px; overflow: hidden; background: var(--j-rule); }
-.track span { display: block; height: 100%; background: var(--j-ink); transform-origin: left; transition: transform .8s var(--j-ease); }
-.rail ol { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 4px; margin: 0; padding: 0; list-style: none; }
-.rail li { display: grid; min-width: 0; }
-.railStop {
-  display: flex; align-items: center; gap: 6px; min-width: 0; padding: 1px 0; border: 0; background: none; color: inherit; font: inherit;
-  text-align: left; cursor: pointer;
-}
-.railStop:disabled { cursor: default; }
-.railStop:not(:disabled):hover .railLabel { color: var(--j-ink); }
-.railDot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--j-paper); box-shadow: inset 0 0 0 1.5px var(--j-ink-soft); }
-.rail li[data-state='done'] .railDot { background: var(--j-ink); box-shadow: none; }
-.rail li[data-state='current'] .railDot { background: var(--j-bronze); box-shadow: 0 0 0 3px var(--j-bronze-soft); }
-.rail li[data-state='skipped'] .railDot { background: repeating-linear-gradient(45deg, var(--j-ink-soft) 0 1.5px, var(--j-paper) 1.5px 3px); }
-.railLabel {
-  display: flex; align-items: baseline; gap: 4px; min-width: 0; overflow: hidden; color: var(--j-muted); font-size: 12.5px; line-height: 1.35;
-  white-space: nowrap; text-overflow: ellipsis;
-}
-.rail li[data-state='current'] .railLabel { color: var(--j-ink); font-weight: 600; }
-.railLabel small { color: var(--j-muted); font-size: 11px; font-weight: 400; }
-@media (min-width: 768px) { .railNow { display: none; } }
 
 .sampleBar {
   display: grid; gap: 4px; padding-block: 20px 28px; border-top: 1px solid var(--j-rule); color: var(--j-muted); font-size: 12.5px; line-height: 1.6;
@@ -169,20 +107,17 @@
   .toolbar, .main, .sampleBar { --j-gutter: 16px; }
   .toolbar { position: static; gap: 8px; padding-block: 12px 8px; }
   /* The toolbar scrolls away on a phone, so scroll targets need no room for it. */
-  .floor { scroll-margin-top: 8px; }
-  .side, .staticRecord { scroll-margin-top: 12px; }
+  .staticRecord { scroll-margin-top: 12px; }
   .toolRow { display: grid; gap: 8px; }
   .title { font-size: 19px; white-space: normal; }
   .scenarios { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
   .scenarios button { flex: none; }
   .transport { padding-left: 0; border-left: 0; }
   .main { gap: 12px; padding-block: 12px 40px; }
-  .railLabel { display: none; }
-  .railStop { justify-content: center; }
   .staticDesk { padding: 10px 0 12px; }
   .staticColumns { grid-template-columns: minmax(0, 1fr); }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .scenarios button, .speeds button, .switch span, .switch span::after, .track span, .side { transition: none; }
+  .scenarios button, .speeds button, .switch span, .switch span::after { transition: none; }
 }
