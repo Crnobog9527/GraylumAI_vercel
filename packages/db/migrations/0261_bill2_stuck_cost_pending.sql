@@ -114,8 +114,11 @@ BEGIN
   'runCharged',r.charged,'credits',before_credits);
  -- The verified cost is the known c of the existing rule; finalize settles it once via min(c,U).
  UPDATE bill2_calls SET selected_cost_usd=p_verified_cost_usd,state='responded' WHERE id=c.id;
- -- Recovery has expired. A crashed Runtime or sessionless Fusion may have left its run open; use
- -- the existing close/cancel paths before finalizing, including when no execution is bound.
+ -- Preserve the existing expired Fusion verdict (including no_delivery) before maintenance
+ -- cancellation can mark the run user_stopped. Finalize owns the saved-output and refund rules.
+ PERFORM bill2_finalize(r.actor_id,r.id);
+ -- A crashed Runtime or sessionless Fusion may still have an open run. Close it, then finalize
+ -- again to reach the terminal run state; settled calls cannot be charged twice.
  IF NOT r.closed
   AND NOT coalesce(bill2_erasure_closed(r.actor_id,coalesce(r.pre_deduct_id,r.id)),false) THEN
   IF e.result IS NOT NULL THEN PERFORM bill2_close(r.actor_id,r.id,'delivered',e.result);

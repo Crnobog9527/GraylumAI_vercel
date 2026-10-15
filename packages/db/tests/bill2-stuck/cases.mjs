@@ -138,10 +138,19 @@ export async function runCases({db,Client,connectionString,report}) {
  assert.equal(await balance(db,sequential),100,'the sole pending call settles independently');
  report.checks.push('public claim rejects a second call while the first is unsettled, creates no second hold, and the sole stuck call can be settled');
 
- // The staging instance: Fusion review calls in cancelled runs (verdict user_stopped, no cost).
- for (const closeBeforeSettlement of [true,false]) {
- const fz=await fixture(db,'v2'),fc=await claim(db,fz),fhold=await balance(db,fz);
- await db.query("UPDATE bill2_calls SET payload=jsonb_set(payload,'{phase}','\"fusion_review\"') WHERE id=$1",[fc.id]);
+ // Maintenance must preserve the existing delivery verdict before closing a crashed Fusion run.
+ for (const mode of ['user_stop','crashed_empty','crashed_saved']) for (const verifiedCost of ['0','0.001']) {
+ const closeBeforeSettlement=mode==='user_stop';
+ const fz=await createFixture(db,{empirical:true,bytes:2000,lookupSupported:true,phase:'fusion_review'});
+ const session=randomUUID();
+ await db.query("INSERT INTO runtime_sessions(id,actor_id,scope,start_request_id,start_payload) VALUES($1,$2,$3,$4,'{}')",
+  [session,fz.actor,fz.payload.scope,randomUUID()]);
+ const group=await rpc(db,'fusion_group_create',fz.actor,randomUUID(),'review',session);
+ await rpc(db,'fusion_group_attach',fz.actor,group,fz.run);
+ const claimed=await rpc(db,'fusion_group_claim',fz.actor,group,'review:1',1,JSON.stringify([{runId:fz.run,sequence:1,payload:fz.claimPayload}]));
+ const fc=claimed.calls[0],fhold=await balance(db,fz);
+ assert.equal((await rpc(db,'bill2_dispatch',fz.actor,fz.run,fc.id,fc.dispatchToken)).dispatch,true);
+ if (mode==='crashed_saved') await rpc(db,'fusion_call_output_save',fz.actor,fc.id,'synthetic saved review');
  await record(db,fz,fc,{provider:'openrouter',account:'sandbox',model:fz.claimPayload.model,protocol:'openrouter-chat-v1',
   evidenceKind:'transport_observation',providerId:'gen-fusion-'+fc.id,cost:null,final:false,currency:'USD',source:'response',
   coverage:'request_total',observedAt:new Date().toISOString(),sourceHash:'e'.repeat(64),rejectedReason:'incomplete_stream'});
@@ -150,12 +159,18 @@ export async function runCases({db,Client,connectionString,report}) {
  assert.equal((await run(db,fz)).closed,closeBeforeSettlement);
  await db.query("UPDATE bill2_calls SET recovery_attempts=3,recovery_deadline=clock_timestamp()-interval '11 minutes' WHERE id=$1",[fc.id]);
  assert.equal((await run(db,fz)).state,'cost_pending');assert.equal(await balance(db,fz),fhold);
- const fusion=await settle(fc.id,'0');
- assert.equal(fusion.creditsAfter,100);assert.equal(await balance(db,fz),100);
- assert.equal((await call(db,fc)).fusion_verdict,'user_stopped');
+ const fusion=await settle(fc.id,verifiedCost);
+ const expectedVerdict=closeBeforeSettlement?'user_stopped':mode==='crashed_saved'?'unjudged_saved':'no_delivery';
+ assert.equal((await call(db,fc)).fusion_verdict,expectedVerdict);
+ assert.equal(Number((await call(db,fc)).selected_cost_usd),Number(verifiedCost));
+ if (expectedVerdict!=='no_delivery' && verifiedCost!=='0') {
+  assert.ok(fusion.chargedDelta>0);assert.ok(await balance(db,fz)<100);
+ } else {
+  assert.equal(fusion.chargedDelta,0);assert.equal(fusion.creditsAfter,100);assert.equal(await balance(db,fz),100);
+ }
  assert.equal((await run(db,fz)).closed,true);
  assert.ok(['settled','refunded'].includes((await run(db,fz)).state));
- report.checks.push(`sessionless Fusion (${closeBeforeSettlement?'closed':'crashed before close'}): manual settlement closes run and restores balance`);
+ report.checks.push(`sessionless Fusion (${mode}): cost ${verifiedCost}, preserves ${expectedVerdict}, closes run with correct balance`);
  }
 
  // Two settlements by one admin of that admin's own two stuck calls overlap without deadlocking
