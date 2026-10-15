@@ -1,5 +1,5 @@
 import { fetchRequestHandler } from '@trpc/server/adapters/fetch';
-import { type NextRequest } from 'next/server';
+import { after, type NextRequest } from 'next/server';
 import { createServerClient } from '@supabase/ssr';
 import { createClient } from '@supabase/supabase-js';
 import { appRouter } from '@repo/api/src/root';
@@ -51,7 +51,7 @@ async function isMaintenanceModeEnabled(budgetFetch:typeof fetch): Promise<boole
 
 // Streamed procedures keep running after the Response is returned; each one
 // releases its own timing reference when its execution settles.
-const STREAMED_PROCEDURES = new Set(['runtime.executeStream', 'opc.mentorTurnStream']);
+const STREAMED_PROCEDURES = new Set(['runtime.executeStream', 'runtime.resumeStream', 'opc.mentorTurnStream']);
 
 const handler = async (req: NextRequest) => {
   // Before authentication/maintenance: batched procedures share this deadline.
@@ -137,6 +137,8 @@ async function handleTrpc(req: NextRequest, runtimeBudget: ReturnType<typeof cre
       runtimeBudget,
       user,
       supabaseAuth: authClient,
+      scheduleAfter: (task) => after(task),
+      origin: new URL(req.url).origin,
     }),
   });
 }

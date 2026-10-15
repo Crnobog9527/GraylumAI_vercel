@@ -28,7 +28,7 @@ const nextId='10000000-0000-4000-8000-000000000007';
 const low={mode:'effort',effort:'low',wire:'reasoning_effort'} as const;
 type ModelConfig={pricing:unknown;reasoning?:ReasoningConfig};
 type Admitted={executionId:string;context:Record<string,unknown>;billing:Record<string,unknown>};
-function fixture(real=true){
+function fixture(real=true,gate=false){
  const models:Array<{id:string;model_id:string;config:ModelConfig}>=[
   {id:dialogue,model_id:'synthetic/dialogue',config:configuredReasoning('synthetic/dialogue',low)},
   {id:unset,model_id:'synthetic/unset',config:{pricing:configuredReasoning('synthetic/unset').pricing}},
@@ -39,6 +39,7 @@ function fixture(real=true){
   if(name==='runtime_session_context')return {data:{scope:{kind:'positioning_draft',draftId:sessionId},
    dialogueModelId:dialogue,dialogueModel:'synthetic/dialogue'},error:null};
   if(name==='runtime_admission_replay')return {data:frozen.get(args.p_request_id)??null,error:null};
+  if(name==='runtime_positioning_gate')return {data:{positioned:false,refusals24h:0},error:null};
   if(name==='runtime_admit'){
    const result={executionId:args.p_request_id,context:structuredClone(args.p_payload),billing:structuredClone(args.p_billing)};
    frozen.set(args.p_request_id,result);return {data:result,error:null};
@@ -59,7 +60,8 @@ function fixture(real=true){
    automaticRetry:false as const,hiddenTools:false as const,lookupSupported:true};
  });
  const policy={...(real?{real:{id:sessionId,creditsPerUsd:'1000',multiplier:'1',expiresAt:'2030-01-01',callPolicies:quotes}}:{}),
-  account:'synthetic',costPerCall:'0.02',creditsPerUsd:'1000',multiplier:'1',maxCalls:2,maxOutputTokens:8192,inputBytes:32000,historyItems:10};
+  account:'synthetic',costPerCall:'0.02',creditsPerUsd:'1000',multiplier:'1',maxCalls:2,maxOutputTokens:8192,inputBytes:32000,historyItems:10,
+  ...(gate?{positioningGate:{classify:async()=>'allow' as const}}:{})};
  const service=runtimeAdmissionService(user,admin,policy);
  const input={sessionId,requestId,input:'Synthetic free question',selection:{kind:'ordinary' as const,modelId:dialogue},network:'deny'};
  return {models,service,input,frozen,rpc,quotes,reads:()=>reads};
@@ -73,10 +75,15 @@ it('real free chat freezes v6 with the configured interactive reasoning and bind
  const context=runtimeContext.parse(admitted.context);
  expect(context).toMatchObject({role:'ordinary',providerRequestFormat:'serial-tools-v6-reasoning',reasoning:{effort:'low'}});
  expect(context).not.toHaveProperty('attachedOrganizer');
+ // CHAT-NATIVE-OUTPUT: a new free-chat turn streams its plain reply; the format is still v6.
+ expect(context.textStream).toBe('plain-text-v1');
  expect(admitted.billing.sourceHash).toBe(createHash('sha256').update(JSON.stringify(admitted.context)).digest('hex'));
  const policy=f.quotes[0]!;
  const sent=JSON.parse(openRouterRequestBody(sdk(context.model,context.reasoning),{context,policy,phase:'ordinary',primaryDialogue:true}));
  expect(sent.reasoning_effort).toBe('low');expect(sent.stream).toBe(false);
+ const streamed=JSON.parse(openRouterRequestBody(JSON.stringify({...JSON.parse(sdk(context.model,context.reasoning)),stream:true,
+  stream_options:{include_usage:true}}),{context,policy,phase:'ordinary',primaryDialogue:true}));
+ expect(streamed.stream).toBe(true);expect(streamed.reasoning_effort).toBe('low');
  // The SDK request must carry exactly the frozen setting.
  expect(()=>openRouterRequestBody(sdk(context.model,undefined),{context,policy,phase:'ordinary',primaryDialogue:true}))
   .toThrow('RUNTIME_PROVIDER_BINDING_DENIED');
@@ -110,6 +117,8 @@ it('attached organizer keeps its own organize reasoning while the free-chat turn
  const admitted=await f.service.prepare({...f.input,organizeAfter:true});
  expect(admitted.context).toMatchObject({providerRequestFormat:'serial-tools-v6-reasoning',reasoning:{effort:'low'},
   attachedOrganizer:{modelId:organizer,reasoning:{parameter:'reasoning',value:{enabled:false}}}});
+ // A turn with an attached organizer stays buffered (no stream marker).
+ expect(admitted.context).not.toHaveProperty('textStream');
  const context=runtimeContext.parse(admitted.context),organizerPolicy=f.quotes[2]!;
  const attached=JSON.parse(openRouterRequestBody(sdk(organizerPolicy.model,context.attachedOrganizer!.reasoning),
   {context,policy:organizerPolicy,phase:'attached_organizer',primaryDialogue:false}));
@@ -128,4 +137,12 @@ it.each([['auto',true],['ordinary',false]] as const)('%s (real=%s) keeps its ori
  const admitted=await f.service.prepare({...f.input,selection:{kind,modelId:dialogue}});
  expect(admitted.context.providerRequestFormat).toBe(real?'serial-tools-v2':undefined);
  expect(admitted.context).not.toHaveProperty('reasoning');
+});
+
+it('CHAT-NATIVE-OUTPUT: a free-chat turn under the POSITIONING-GATE fallback rule streams too (marker held by roundEmitter)',async()=>{
+ const gated=await fixture(true,true).service.prepare({...fixture().input});
+ expect(gated.context).toMatchObject({providerRequestFormat:'serial-tools-v6-reasoning',positioningGate:'fallback-v1',
+  textStream:'plain-text-v1'});
+ const open=await fixture().service.prepare(fixture().input);
+ expect(open.context).toMatchObject({providerRequestFormat:'serial-tools-v6-reasoning',textStream:'plain-text-v1'});
 });

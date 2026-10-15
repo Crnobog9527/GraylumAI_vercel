@@ -2,15 +2,19 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
-import { md5Patch, supersededPatch, withoutMd5Patch } from '../../packages/db/tests/content-erasure/md5-chain.mjs';
+import { markerPatches, md5Patch, supersededPatch, withoutMd5Patch } from '../../packages/db/tests/content-erasure/md5-chain.mjs';
 
 const root = new URL('../../', import.meta.url);
 const migration = name => ({ name, sql: readFileSync(new URL('packages/db/migrations/' + name, root), 'utf8') });
 const p0215 = migration('0215_runtime_platform_failure_refund.sql');
 const p0233 = migration('0233_runtime_positioning_refusal_refund.sql');
+const p0239 = migration('0239_runtime_plain_text_stream.sql');
+const p0248 = migration('0248_runtime_failure_code.sql');
 const marker = migration('0231_content_erasure_instant_session.sql');
 const FN = 'runtime_execution(uuid,uuid,text,jsonb)';
 const at = md5 => async signature => { assert.equal(signature, FN); return md5; };
+const present = markers => async (signature, text) => { assert.equal(signature, FN); return markers.includes(text); };
+const unreachable = async () => assert.fail('the md5 is not consulted once marker patches extend the chain');
 
 test('reads the md5 patches 0215 and 0233 declare, and nothing from text-marker migrations', () => {
   assert.deepEqual(md5Patch(p0215.sql), { signature: FN, source: '0aff2bcc606bee432509e1eebfcfca43', target: '3312aaac174e973ac33c29ff2c75dd20' });
@@ -55,8 +59,44 @@ test('leaves out only the md5 block, keeping every other statement of the migrat
   assert.match(rest, /COMMIT;\s*$/);
 });
 
+test('leaves out only the md5 block when the migration has other DO blocks (0239)', () => {
+  const rest = withoutMd5Patch(p0239.sql);
+  assert.doesNotMatch(rest, /source_md5/);
+  assert.match(rest, /runtime_stale_charged_rounds\(timestamptz,integer\)/);
+  assert.match(rest, /^BEGIN;/m);
+  assert.match(rest, /COMMIT;\s*$/);
+});
+
 test('does not skip when the md5 block cannot be isolated exactly', async () => {
-  const doubled = { name: '0215_doubled.sql', sql: p0215.sql.replace('COMMIT;', 'DO $migration$ BEGIN NULL; END $migration$;\nCOMMIT;') };
+  const block = p0215.sql.match(/DO \$migration\$[\s\S]*?END \$migration\$;\n?/)[0];
+  const doubled = { name: '0215_doubled.sql', sql: p0215.sql.replace('COMMIT;', block + 'COMMIT;') };
   assert.equal(withoutMd5Patch(doubled.sql), null);
   assert.deepEqual(await supersededPatch([doubled, p0233], 0, at('7525ae8d4e450dd8f03db7fa77e89453')), { skip: false });
+  const outside = { name: '0215_outside.sql', sql: p0215.sql.replaceAll('$migration$', '$x$') };
+  assert.equal(withoutMd5Patch(outside.sql), null);
+});
+
+test('reads the text-marker patch 0248 applies to runtime_execution, and none from md5 or other-function migrations', () => {
+  assert.deepEqual(markerPatches(p0248.sql, FN), ['-- 0248 failure_code']);
+  assert.deepEqual(markerPatches(p0239.sql, FN), []);
+  assert.deepEqual(markerPatches(p0239.sql, 'runtime_stale_charged_rounds(timestamptz,integer)'), []);
+  assert.deepEqual(markerPatches(marker.sql, FN), []);
+});
+
+test('a later text-marker patch extends the chain: every md5 patch is skipped once its marker is present', async () => {
+  const files = [p0215, p0233, p0239, p0248];
+  for (const [index, name] of [[0, '0215'], [1, '0233'], [2, '0239']]) {
+    const result = await supersededPatch(files, index, unreachable, present(['-- 0248 failure_code']));
+    assert.equal(result.skip, true, name);
+    assert.match(result.reason, new RegExp(`${name}_.*markers present: -- 0248 failure_code;.*0248_runtime_failure_code\\.sql \\(marker\\)`));
+    assert.equal(result.rest, withoutMd5Patch(files[index].sql));
+  }
+});
+
+test('does not skip when the marker is absent, or when an md5 patch follows a marker patch', async () => {
+  const files = [p0215, p0233, p0239, p0248];
+  for (const index of [0, 1, 2]) assert.deepEqual(await supersededPatch(files, index, unreachable, present([])), { skip: false });
+  const after = { name: '0299_md5_after_marker.sql', sql: p0239.sql.replaceAll('7525ae8d4e450dd8f03db7fa77e89453', '6f66e0feeaba637dae8f96acdf2c4e00')
+    .replaceAll("'6f66e0feeaba637dae8f96acdf2c4e00' THEN RETURN", "'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee' THEN RETURN") };
+  assert.deepEqual(await supersededPatch([...files, after], 0, unreachable, present(['-- 0248 failure_code'])), { skip: false });
 });

@@ -18,11 +18,12 @@ export const UNORGANIZED_NOTICE = "本轮未整理";
 export const STOPPED_EMPTY_NOTICE = "已停止，本轮没有保存回复。";
 export const STOP_UNCONFIRMED_NOTICE = "停止请求暂未确认。已显示的内容保留，请稍后查看这条回复的结果，不会重复扣费。";
 
-export type StopRequest = { executionId: string; stopAt: number; source?: LiveTextSource };
+export type StopRequest = { executionId: string; stopAt: number; source?: LiveTextSource; call?: number };
 
 /** The stop request for what `reply` shows now. */
 export function stopRequestFor(reply: LiveReply): StopRequest {
-  return { executionId: reply.executionId, stopAt: Array.from(reply.text).length, ...(reply.source ? { source: reply.source } : {}) };
+  return { executionId: reply.executionId, stopAt: Array.from(reply.text).length, ...(reply.source ? { source: reply.source } : {}),
+    ...(reply.call ? { call: reply.call } : {}) };
 }
 
 type StopView = {

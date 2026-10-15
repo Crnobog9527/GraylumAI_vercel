@@ -1,0 +1,73 @@
+/* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+/* Sample I's first-screen illustration (HeroArtI.tsx). Colors are the page's --i-* tokens (i.module.css). */
+.art { display: block; width: 100%; height: auto; overflow: visible; }
+
+.shadow { fill: var(--i-ink); opacity: .07; }
+.draw, .drawThick, .avatar, .ink {
+  fill: none; stroke: var(--i-ink); stroke-linecap: round; stroke-linejoin: round;
+}
+.draw { stroke-width: 4; stroke-dasharray: 1; }
+.drawThick { fill: #fff; stroke-width: 5; stroke-dasharray: 1; }
+.avatar { fill: var(--i-mint-soft); stroke-width: 3.5; stroke-dasharray: 1; }
+.ink { stroke-width: 4; }
+.stat { fill: var(--i-sky); }
+.slot { fill: none; stroke: var(--i-ink); stroke-opacity: .28; stroke-width: 2; stroke-dasharray: 5 5; }
+.mintTile, .coralTile, .sunTile, .lilacTile { stroke: var(--i-ink); stroke-width: 3; }
+.mintTile { fill: var(--i-mint); }
+.coralTile { fill: var(--i-coral); }
+.sunTile { fill: var(--i-sun); }
+.lilacTile { fill: var(--i-lilac); }
+.coachBody { fill: var(--i-coral); stroke: var(--i-ink); stroke-width: 4; stroke-linejoin: round; stroke-dasharray: 1; }
+.eye { fill: var(--i-ink); }
+.bubbleBody { fill: #fff; stroke: var(--i-ink); stroke-width: 3.5; }
+.typing { fill: var(--i-ink); }
+.star, .twinkle, .twinkleLate { fill: var(--i-sun); stroke: var(--i-ink); stroke-width: 3; stroke-linejoin: round; }
+
+/* Motion (skipped with reduced motion: the finished picture stays). */
+.mintTile, .coralTile, .sunTile, .lilacTile, .coach, .bubble, .typing, .doubt, .star, .twinkle, .twinkleLate, .phone {
+  transform-box: fill-box;
+  transform-origin: 50% 50%;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .draw, .drawThick, .avatar, .coachBody { animation: i-draw 1.5s cubic-bezier(.65, 0, .35, 1) both; }
+  .avatar { animation-delay: .5s; }
+  .coachBody { animation-delay: .7s; }
+  .phone { animation: i-float 6s ease-in-out 1.6s infinite; }
+  .mintTile, .coralTile, .sunTile, .lilacTile {
+    animation: i-tile 9s cubic-bezier(.34, 1.56, .64, 1) infinite both;
+    animation-delay: calc(1.4s + var(--n) * .32s);
+  }
+  .doubt { animation: i-doubt 9s ease-in-out 1.4s infinite both; }
+  .star { animation: i-star 9s cubic-bezier(.34, 1.56, .64, 1) 1.4s infinite both; }
+  .coach { transform-origin: 50% 100%; animation: i-bob 2.6s ease-in-out infinite; }
+  .bubble { transform-origin: 0% 100%; animation: i-bubble 9s cubic-bezier(.34, 1.56, .64, 1) .9s infinite both; }
+  .typing { animation: i-dot 1s ease-in-out calc(var(--n) * .15s) infinite; }
+  .twinkle { animation: i-twinkle 2s ease-in-out infinite; }
+  .twinkleLate { animation: i-twinkle 2s ease-in-out 1s infinite; }
+}
+
+@keyframes i-draw { from { stroke-dashoffset: 1; } to { stroke-dashoffset: 0; } }
+@keyframes i-float { 50% { transform: translateY(-8px) rotate(-1deg); } }
+@keyframes i-tile {
+  0%, 2% { opacity: 0; transform: scale(.3) rotate(-12deg); }
+  9%, 74% { opacity: 1; transform: none; }
+  82%, 100% { opacity: 0; transform: scale(.85); }
+}
+@keyframes i-doubt {
+  0%, 18% { opacity: 1; transform: none; }
+  30%, 84% { opacity: 0; transform: translateY(-14px) scale(.8); }
+  94%, 100% { opacity: 1; transform: none; }
+}
+@keyframes i-star {
+  0%, 30% { opacity: 0; transform: scale(.2) rotate(-40deg); }
+  38%, 76% { opacity: 1; transform: none; }
+  84%, 100% { opacity: 0; transform: scale(.6); }
+}
+@keyframes i-bob { 50% { transform: translateY(-8px) rotate(-4deg); } }
+@keyframes i-bubble {
+  0% { opacity: 0; transform: scale(.4); }
+  6%, 80% { opacity: 1; transform: none; }
+  88%, 100% { opacity: 0; transform: scale(.8); }
+}
+@keyframes i-dot { 50% { transform: translateY(-6px); opacity: .5; } }
+@keyframes i-twinkle { 50% { opacity: .3; transform: scale(.75) rotate(20deg); } }

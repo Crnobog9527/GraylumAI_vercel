@@ -41,7 +41,7 @@ import {assertFrozenPayloads} from './payloadSize';
 import {freezeWindowBillingUnit} from './billingUnitAdmission';
 import {newWorkGate,readAdmissionSettings,requireNewWork} from './newWorkGate';
 import {requireAllowedInput} from './moderation';
-import {FREE_CHAT_REQUEST_FORMAT} from './providerRequest';
+import {FREE_CHAT_REQUEST_FORMAT,PLAIN_TEXT_STREAM,plainTextStreamAllowed} from './providerRequest';
 import {admissionDeadline,admittedOutputLimit} from './admissionLimits';
 import {admitPricing} from './pricingAdmission';
 import {freezeStagingPaygPricing} from './paygPricing';
@@ -366,8 +366,11 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
     reasoning=admitReasoning(row.data,organize?'organize':'interactive',realModel(row.data).providerLimits!.providerSlug,maxOutputTokens);
    const organizerFormat=Boolean(policy.real&&!mentorStream&&(organize||attachedOrganizer));
    if(organizerFormat&&!reasoning)reasoning={parameter:'none'};
-   const providerRequestFormat=mentorStream||policy.reportGeneration?'agent-turn-v5-stream':stepStream?'serial-tools-v4-stream':organizerFormat?'serial-tools-v6-reasoning':freeChat?FREE_CHAT_REQUEST_FORMAT:'serial-tools-v2';
-   const context={version:'runtime.v1',sdkVersion:'0.18.0',inputSelection:hostTurnContext?'scope-projection-v2':'scope-projection-v1',
+   // A chosen Skill uses the PAYG-evidenced v6 format without reasoning: the same request bytes as the unevidenced v2.
+   const chosenSkill=Boolean(policy.real&&input.selection.kind==='skill'&&!mentorStream&&!stepStream&&!policy.reportGeneration);
+   if(chosenSkill&&!reasoning)reasoning={parameter:'none'};
+   const providerRequestFormat=mentorStream||policy.reportGeneration?'agent-turn-v5-stream':stepStream?'serial-tools-v4-stream':organizerFormat||chosenSkill?'serial-tools-v6-reasoning':freeChat?FREE_CHAT_REQUEST_FORMAT:'serial-tools-v2';
+   const frozen={version:'runtime.v1',sdkVersion:'0.18.0',inputSelection:hostTurnContext?'scope-projection-v2':'scope-projection-v1',
     ...(hostTurnContext?{hostTurnContext,historySelection}:{}),
     ...(policy.reportGeneration?{reportGeneration:policy.reportGeneration}:{}),
     ...(promptCache?{promptCache}:{}),
@@ -389,6 +392,8 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
     maxToolCalls:mentorStream?(opening||stepSummary&&!skillFile?0:1):
      (searchAllowed?1:0)+(workspaceContext?Math.min(2,primaryTurns-1):input.sources.length),
     request,...(policy.answeredCard?{answeredCard:policy.answeredCard}:{}),...(revisionId?{moduleId,skillId,revisionId}:{}),sources:input.sources};
+   // CHAT-NATIVE-OUTPUT: free chat and a chosen Skill stream their plain reply; the format and billing profile stay as they were.
+   const context:typeof frozen&{textStream?:typeof PLAIN_TEXT_STREAM}=plainTextStreamAllowed(frozen)?{...frozen,textStream:PLAIN_TEXT_STREAM}:frozen;
    const selectedIds=new Set([modelId,...(attachedOrganizer?[attachedOrganizer.modelId]:[]),...candidates.map(c=>c.modelId)]);
    const realCalls=policy.real?.callPolicies.filter(c=>selectedIds.has(c.modelId));
    const costPerCall=realCalls?.reduce((upper,c)=>decimal(c.upperUsd)>decimal(upper)?c.upperUsd:upper,'0')??policy.costPerCall;
