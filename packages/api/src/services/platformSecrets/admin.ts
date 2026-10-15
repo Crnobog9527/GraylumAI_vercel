@@ -67,7 +67,7 @@ export async function platformSecretsView(db: SupabaseClient,
   if (ids.length) {
     try {
       const people = await db.from('profiles').select('id,email').in('id', ids);
-      if (people.error) return unavailable();
+      if (people.error) throw new Error('PLATFORM_SECRET_METADATA_UNAVAILABLE');
       emails = new Map((people.data ?? []).map(p => [p.id as string, (p.email as string | null) ?? null]));
     } catch {
       // The writer already committed. Missing operator metadata must not turn success into failure.
