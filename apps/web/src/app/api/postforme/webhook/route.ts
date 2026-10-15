@@ -8,7 +8,12 @@ export const runtime = 'nodejs';
 
 /** Post for Me events (plan §4.1); authenticated by the shared secret header, answered within the provider's timeout. */
 export async function POST(request: Request) {
-  const secret = await readPostForMeWebhookSecret().catch(() => null);
-  const result = await handlePostForMeWebhook(request, secret ?? undefined, createServiceRoleSupabaseClient);
-  return NextResponse.json(result.body, { status: result.status });
+  try {
+    const client = createServiceRoleSupabaseClient();
+    const secret = await readPostForMeWebhookSecret(client);
+    const result = await handlePostForMeWebhook(request, secret ?? undefined, () => client);
+    return NextResponse.json(result.body, { status: result.status });
+  } catch {
+    return NextResponse.json({ ok: false, error: 'UNAVAILABLE' }, { status: 503 });
+  }
 }

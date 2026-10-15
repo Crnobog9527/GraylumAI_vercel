@@ -69,3 +69,12 @@ it('is scheduled once a day, apart from the other daily jobs', () => {
   const hours = config.crons.map((c: { schedule: string }) => c.schedule);
   expect(new Set(hours).size).toBe(hours.length);
 });
+
+it('records unavailable Vault as an error, never as an unconfigured successful skip', async () => {
+  mocks.deps.mockRejectedValue(new Error('PLATFORM_SECRET_UNAVAILABLE'));
+  const res = await call();
+  expect(res.status).toBe(500);
+  expect(mocks.deps).toHaveBeenCalledWith({ synthetic: true });
+  expect(mocks.finish).toHaveBeenCalledWith(expect.objectContaining({ status: 'error', error: 'PLATFORM_SECRET_UNAVAILABLE' }));
+  expect(mocks.run).not.toHaveBeenCalled();
+});

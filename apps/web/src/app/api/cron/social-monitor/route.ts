@@ -32,8 +32,9 @@ export async function GET(request: Request) {
     finishScheduledJobRun({ supabase: client, runId, status, summary, error });
   // A missing key skips the run; a configured but invalid key fails it (caught below), so monitoring sees it.
   let deps: Awaited<ReturnType<typeof loadPostForMeDeps>>;
-  try { deps = await loadPostForMeDeps(); } catch {
-    await finish('error', {}, 'POSTFORME_KEY_INVALID').catch(() => undefined);
+  try { deps = await loadPostForMeDeps(client); } catch (error) {
+    await finish('error', {}, error instanceof Error && error.message === 'POSTFORME_KEY_INVALID'
+      ? 'POSTFORME_KEY_INVALID' : 'PLATFORM_SECRET_UNAVAILABLE').catch(() => undefined);
     return NextResponse.json({ error: 'Social monitor job failed' }, { status: 500 });
   }
   // No Post for Me key in this environment: nothing to clean at the provider yet.

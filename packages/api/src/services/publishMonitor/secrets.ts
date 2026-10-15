@@ -1,16 +1,13 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-import { postForMeApiKey, sharedLimiter } from './postForMe/config';
+import { sharedLimiter } from './postForMe/config';
 import type { ClientDeps } from './postForMe/client';
 
-/**
- * Where PUBLISH-MONITOR gets its Post for Me secrets. Owner decision (ADMIN-SECRETS #975, migration 0259): third-party
- * keys are entered in the admin, not in Vercel environment variables.
- *
- * 未完成 / UNFINISHED: #975 is not merged yet. Until it is, these readers only use the server environment, and only
- * outside the real production site (staging project, previews and local testing). In production they report "not configured", so nothing depends on
- * environment variables there. After #975 merges, replace the bodies with its admin secret reader (slot 'postforme'
- * for the API key, and a webhook-secret slot to be added there) and keep the environment fallback non-production only.
- */
+import { getPlatformSecret, PlatformSecretError } from '../platformSecrets/reader';
+import { validPlatformSecret } from '../platformSecrets/slots';
+import { PostForMeNotConfigured } from './postForMe/config';
+
+/** One reader for connect, cleanup and webhooks: Vault first; environment fallback only outside production. */
+type Admin = Parameters<typeof getPlatformSecret>[0];
 type Env = Record<string, string | undefined>;
 // The separate staging project serves the staging branch from Vercel's "production" environment
 // (docs/DEPLOYMENT.md), so the label alone cannot tell staging from the real production site. The fallback is
@@ -21,27 +18,41 @@ function environmentFallbackAllowed(env: Env): boolean {
   if (env.VERCEL_ENV === 'preview' || env.VERCEL_ENV === 'development') return true;
   return env.VERCEL_PROJECT_PRODUCTION_URL === STAGING_PRODUCTION_URL && env.VERCEL_GIT_COMMIT_REF === 'staging';
 }
-const productionLike = (env: Env) => !environmentFallbackAllowed(env);
+
 
 export class PostForMeKeyInvalid extends Error {
   constructor() { super('POSTFORME_KEY_INVALID'); }
 }
 
-/** null when no key is set; a key that is set but malformed is an error, so jobs fail visibly instead of skipping. */
-export async function readPostForMeApiKey(env: Env = process.env): Promise<string | null> {
-  if (productionLike(env)) return null;
-  if (!env.POSTFORME_API_KEY?.trim()) return null;
-  try { return postForMeApiKey(env as NodeJS.ProcessEnv); } catch { throw new PostForMeKeyInvalid(); }
+/** Only a confirmed empty slot is missing. A failed Vault read must never fall back or skip cleanup. */
+async function readSecret(admin: Admin, slot: 'postforme' | 'postforme_webhook', env: Env, timeoutMs?: number) {
+  try {
+    const secret = await getPlatformSecret(admin, slot, { env: environmentFallbackAllowed(env) ? env : {}, timeoutMs });
+    if (!validPlatformSecret(slot, secret.value)) throw new PostForMeKeyInvalid();
+    return secret.value;
+  } catch (error) {
+    if (error instanceof PlatformSecretError && error.code === 'PLATFORM_SECRET_NOT_CONFIGURED') return null;
+    throw error;
+  }
 }
 
-export async function readPostForMeWebhookSecret(env: Env = process.env): Promise<string | null> {
-  if (productionLike(env)) return null;
-  const secret = env.POSTFORME_WEBHOOK_SECRET?.trim();
-  return secret && secret.length >= 16 ? secret : null;
+export async function readPostForMeApiKey(admin: Admin, env: Env = process.env): Promise<string | null> {
+  return readSecret(admin, 'postforme', env);
 }
 
-/** Client dependencies for server jobs, or null when this environment has no Post for Me key. */
-export async function loadPostForMeDeps(env: Env = process.env): Promise<ClientDeps | null> {
-  const apiKey = await readPostForMeApiKey(env);
+export async function readPostForMeWebhookSecret(admin: Admin, env: Env = process.env): Promise<string | null> {
+  // Leave 700 ms for the handler write within the provider's approximately one-second deadline.
+  return readSecret(admin, 'postforme_webhook', env, 200);
+}
+
+/** Client dependencies for jobs, or null when the key is genuinely unconfigured. */
+export async function loadPostForMeDeps(admin: Admin, env: Env = process.env): Promise<ClientDeps | null> {
+  const apiKey = await readPostForMeApiKey(admin, env);
   return apiKey ? { apiKey, limiter: sharedLimiter(env as NodeJS.ProcessEnv) } : null;
+}
+
+export async function requirePostForMeDeps(admin: Admin): Promise<ClientDeps> {
+  const deps = await loadPostForMeDeps(admin);
+  if (!deps) throw new PostForMeNotConfigured();
+  return deps;
 }
