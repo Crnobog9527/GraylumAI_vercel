@@ -26,6 +26,36 @@ export async function runCases({db,Client,connectionString,report}) {
  const a=await one(db,'SELECT ws_test.actor() v'),sid=await one(db,'SELECT ws_test.free_session($1) v',[a]);
  const guide=await doc(db,a,'Guide.md',30),notes=await doc(db,a,'Notes.md',2);
 
+ // Review regressions exercise both bounded refusals through real RPCs before the main suite.
+ const refusalFailures=[];
+ try{
+  const large=await doc(db,a,'EscapedTitles.md',25);
+  await db.query('UPDATE library_document_segments SET title=$2 WHERE document_id=$1',
+   [large,String.fromCharCode(34,92).repeat(80)]);
+  const largeExecution=await exec(db,a,sid,[ref(large)]);
+  assert.deepEqual(await read(db,a,largeExecution,'doc-1'),{kind:'unavailable',reason:'read_limit'});
+  report.checks.push('oversized escaped directory page returns read_limit instead of an internal database error');
+ }catch(error){refusalFailures.push('oversized directory: '+error.message);}
+ for(const query of ['doc-1','doc-1/segment-1']){
+  try{
+   const f=await runtimeFixture(db,{}),d=await doc(db,f.actor,'LATE_PRIVATE_NAME.md');
+   await db.query(`UPDATE runtime_executions SET state='running',payload=payload||'{"tools":["read_source"],"maxToolCalls":8}'::jsonb WHERE id=$1`,[f.execution]);
+   await db.query('INSERT INTO runtime_library_references(execution_id,actor_id,document_id,content_version,ordinal) VALUES($1,$2,$3,1,1)',
+    [f.execution,f.actor,d]);
+   await rpc(db,'runtime_tool',f.actor,f.execution,'late','read_source',{query},'claim',null);
+   const value=await read(db,f.actor,f.execution,query);
+   await del(db,f.actor,d);
+   const completed=await rpc(db,'runtime_tool',f.actor,f.execution,'late','read_source',{query},'complete',value);
+   assert.deepEqual(completed.result,{kind:'unavailable',reason:'source_deleted'});
+   assert.equal(completed.execute,false);
+   assert.deepEqual(await one(db,"SELECT result v FROM runtime_tool_calls WHERE execution_id=$1 AND call_id='late'",[f.execution]),
+    completed.result);
+   assert.ok(!JSON.stringify(completed).includes('LATE_PRIVATE_NAME'));
+   report.checks.push('non-PAYG '+query+' deletion race commits and returns source_deleted without content');
+  }catch(error){refusalFailures.push(query+' deletion: '+error.message);}
+ }
+ assert.deepEqual(refusalFailures,[],'bounded refusal regressions');
+
  // Freezing: rows in reference order, only for executions that carry references.
  const e=await exec(db,a,sid,[ref(guide),ref(notes)]);
  assert.deepEqual((await db.query('SELECT document_id,ordinal,content_version FROM runtime_library_references WHERE execution_id=$1 ORDER BY ordinal',[e]))
@@ -214,6 +244,7 @@ export async function runCases({db,Client,connectionString,report}) {
  assert.equal(await rpc(db,'runtime_library_visible',a,reader,copy),true);
  assert.equal(await rpc(db,'runtime_library_visible',other,reader,copy),false);
  await denied(store(db,reader,'forged',{...copy,documentId:guide}),'LIB_REFERENCE_REVOKED');
+ await denied(store(db,reader,'forged-version',{...copy,version:2}),'LIB_REFERENCE_REVOKED');
  report.checks.push('a frozen read is visible to its owner only; a read of an unreferenced document cannot be stored');
 
  // Deletion and reading or freezing are strictly ordered on the document row lock.
@@ -240,7 +271,9 @@ export async function runCases({db,Client,connectionString,report}) {
  } finally {await deleter.end();}
  assert.deepEqual(await read(db,a,reader,'doc-1/segment-2'),{kind:'unavailable',reason:'source_deleted',ref:'doc-1'});
  await denied(exec(db,a,sid,[ref(notes)]),'LIB_REFERENCE_NOT_FOUND');
- await denied(store(db,reader,'late',copy),'LIB_REFERENCE_REVOKED');
+ await store(db,reader,'late',copy);
+ assert.deepEqual(await one(db,"SELECT result v FROM runtime_tool_calls WHERE execution_id=$1 AND call_id='late'",[reader]),
+  {kind:'unavailable',reason:'source_deleted'});
  await store(db,reader,'late-index',frozenIndex);
  assert.deepEqual(await one(db,"SELECT result v FROM runtime_tool_calls WHERE execution_id=$1 AND call_id='late-index'",[reader]),
   {kind:'unavailable',reason:'source_deleted'},'a stale first index is stored as unavailable without its filename');

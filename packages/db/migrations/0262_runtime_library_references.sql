@@ -129,7 +129,8 @@ BEGIN
    EXIT WHEN octet_length(to_jsonb(result::text)::text)<=16384;
   END LOOP;
  END IF;
- IF octet_length(to_jsonb(result::text)::text)>16384 THEN RAISE EXCEPTION 'LIB_REFERENCE_RESULT_TOO_LARGE'; END IF;
+ IF octet_length(to_jsonb(result::text)::text)>16384 THEN
+  RETURN jsonb_build_object('kind','unavailable','reason','read_limit'); END IF;
  IF used+octet_length(to_jsonb(result::text)::text)>65536 THEN RETURN jsonb_build_object('kind','unavailable','reason','read_limit'); END IF;
  RETURN result;
 END $$;
@@ -181,10 +182,12 @@ BEGIN
   RETURN NEW;
  END IF;
  SELECT * INTO d FROM library_documents WHERE id::text=NEW.result->>'documentId' AND actor_id=a FOR SHARE;
- IF d.id IS NULL OR d.deleted_at IS NOT NULL OR d.status<>'ready' OR d.content_version::text<>NEW.result->>'version'
-  OR NOT EXISTS(SELECT 1 FROM runtime_library_references r WHERE r.execution_id=NEW.execution_id
-   AND r.document_id=d.id AND r.content_version=d.content_version)
+ IF NOT EXISTS(SELECT 1 FROM runtime_library_references r WHERE r.execution_id=NEW.execution_id
+  AND r.document_id::text=NEW.result->>'documentId' AND r.content_version::text=NEW.result->>'version')
  THEN RAISE EXCEPTION 'LIB_REFERENCE_REVOKED'; END IF;
+ IF d.id IS NULL OR d.deleted_at IS NOT NULL OR d.status<>'ready' OR d.content_version::text<>NEW.result->>'version' THEN
+  NEW.result:=jsonb_build_object('kind','unavailable','reason','source_deleted');
+ END IF;
  RETURN NEW;
 END $$;
 -- Acquire the execution write lock before content_erasure_parent_guard takes its shared lock.
