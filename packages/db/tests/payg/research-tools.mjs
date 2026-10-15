@@ -177,13 +177,23 @@ export async function researchToolCases({db,Client,connectionString,report,creat
     // Once an admin has reconciled a call, a later result is refused and the reconciled cost stays.
     const g = await make();
     const d = await claimTool(db,g,1);
-    await db.query("UPDATE bill2_calls SET recovery_deadline=now()-interval '1 second' WHERE id=$1",[d.id]);
+    await rpc(db,'bill2_cancel',g.actor,g.run);
     await rpc(db,'bill2_finalize',g.actor,g.run);
     const admin = randomUUID();
     await db.query("INSERT INTO profiles(id,credits,role) VALUES($1,0,'admin')",[admin]);
+    await db.query("UPDATE bill2_calls SET recovery_deadline=now()-interval '11 minutes' WHERE id=$1",[d.id]);
+    assert.ok(!(await rpc(db,'bill2_payg_stuck_calls',100)).calls.some(x=>x.callId===d.id));
+    await assert.rejects(rpc(db,'bill2_payg_admin_settle_call',admin,randomUUID(),d.id,'0.005','tool crash'),
+      /BILL2_ADMIN_SETTLE_NOT_READY/);
+    assert.equal((await call(db,d.id)).cost,null,'generic settlement cannot overwrite tool supplier state');
+    await rpc(db,'bill2_finalize',g.actor,g.run);
+    assert.equal((await financial(db,g)).credits,100,'tool deadline settlement releases the full hold');
+    assert.equal((await call(db,d.id)).nominal_source,'tool_unknown');
+    assert.equal((await call(db,d.id)).supplier_cost_state,'pending');
     await rpc(db,'bill2_tool_cost_reconcile',admin,d.id,'0.005','a'.repeat(64));
     await assert.rejects(rpc(db,'bill2_record',g.actor,g.run,d.id,result(d,'delivered','1','0.01')),/BILL2_TOOL_RECEIPT_CONFLICT/);
     assert.equal(Number((await call(db,d.id)).cost),0.005);
+    assert.equal((await financial(db,g)).credits,100,'supplier reconciliation never charges the user again');
     report.checks.push('RT-2 crash after dispatch: waits for its result, then settles as unknown at the recovery deadline (user 0, cost pending); a late result confirms the cost without charging; after reconciliation a late result is refused');
   }
 
