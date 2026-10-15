@@ -24,15 +24,22 @@ describe('style sample J, round six (Owner 2026-10-15)', () => {
     expect(html).not.toContain('本机示例数据');
   });
 
-  it('the header carries the planned places, the language switch, 登录 and the button, without headings', () => {
+  it('the header is the Owner\'s: 产品 menu, 教程 (the blog), 价格, 常见问题, 关于我们, languages, 登录, 免费试用', () => {
     const html = renderToStaticMarkup(createElement(SiteHeaderJ, { siteName: 'Graylum' }));
-    for (const label of [J_NAV.product.label, J_NAV.samples.label, J_NAV.pricing.label, J_NAV.resources.label, J_NAV.about.label]) {
-      expect(html).toContain(label);
-    }
-    for (const link of [...J_NAV.product.links, ...J_NAV.resources.links]) expect(html).toContain(`href="${link.href}"`);
+    expect(html).toContain(J_NAV.product.label);
+    for (const link of [...J_NAV.product.links, ...J_NAV.places]) expect(html).toContain(`href="${link.href}"`);
+    expect(J_NAV.places.map(link => link.label)).toEqual(['教程', '价格', '常见问题', '关于我们']);
+    expect(J_NAV.places[0].href).toBe('/blog');
+    expect(html).not.toContain('样例报告');
+    expect(html).not.toContain('href="/tutorials"');
+    expect(html).toContain('>免费试用<');
     expect(html).toContain('简体');
     expect(html).toContain('繁體');
-    expect(html).toContain('免费和教练聊聊');
+    // English shows as coming, with no link and no hreflang to /en (SEO_GEO_SPEC).
+    expect(html).toContain('English');
+    expect(html).toContain('即将推出');
+    expect(html).not.toMatch(/href="\/en/);
+    expect(html).not.toMatch(/hrefLang="en"|hreflang="en"/i);
     expect(html).not.toMatch(/<h[1-6]/);
   });
 
@@ -45,6 +52,9 @@ describe('style sample J, round six (Owner 2026-10-15)', () => {
     expect(html).toContain(ONE_LINE_DEFINITION['zh-Hans']);
     expect(html).toContain('© 2026 Grayscale Luminary LLC');
     expect(html).not.toMatch(/<h[1-6]/);
+    expect(html).toContain('用户案例');
+    expect(html).toContain('href="/landing/samples"');
+    expect(html).not.toMatch(/href="\/en/);
     expect(J_PENDING_PAGES).toContain('/refund');
   });
 });

@@ -3,9 +3,11 @@ import { LOGIN_HREF, SIMPLIFIED_HOME_HREF } from '@/components/public-site/site-
 import { ONE_LINE_DEFINITION } from '@/lib/seo/site';
 
 /**
- * Sample J's full header and footer (the controller's plan of 2026-10-15, round six; the Owner has not confirmed it
- * yet). Labels are NEW unless marked. Pages that do not exist yet link to their planned address and are listed in
- * `J_PENDING_PAGES`, so the PR can name them; this sample does not build them.
+ * Sample J's full header and footer, as the Owner set them on 2026-10-15 (replacing the controller's first plan).
+ * Labels are the Owner's; the menu notes are NEW. Pages that do not exist yet link to their planned address and are
+ * listed in `J_PENDING_PAGES`, so the PR can name them; this sample does not build them. "教程" is the blog (Owner:
+ * "就是博客"; SEO_GEO_SPEC section 14 approved /blog). The old /tutorials page (four generic cards from 2026-03) is
+ * not linked any more.
  */
 export type ChromeLink = { label: string; href: string; note?: string };
 
@@ -34,25 +36,24 @@ const PRODUCT: ChromeLink[] = [
   { label: '数据复盘', href: PLANNED.review, note: '读真实数据，告诉你下周怎么调' },
 ];
 
-const RESOURCES: ChromeLink[] = [
-  { label: '博客', href: PLANNED.blog },
-  { label: '教程', href: '/tutorials' },
-  { label: '常见问题', href: '/faq' },
-];
+const TUTORIALS: ChromeLink = { label: '教程', href: PLANNED.blog };
+const FAQ: ChromeLink = { label: '常见问题', href: '/faq' };
 
 export const J_NAV = {
   label: '主导航',
   product: { label: '产品', links: PRODUCT },
-  samples: { label: '样例报告', href: PLANNED.samples },
-  pricing: { label: '价格', href: '/landing/pricing' },
-  resources: { label: '资源', links: RESOURCES },
-  about: { label: '关于我们', href: '/about' },
+  places: [TUTORIALS, { label: '价格', href: '/landing/pricing' }, FAQ, { label: '关于我们', href: '/about' }],
+  /** English has no pages yet: SEO_GEO_SPEC forbids links and hreflang to /en before it is live, so it shows, unlinked. */
   languages: [
     { label: '简体', href: SIMPLIFIED_HOME_HREF, lang: 'zh-Hans', current: true },
     { label: '繁體', href: '/zh-tw', lang: 'zh-TW', current: false },
+    { label: 'English', href: null, lang: 'en', current: false },
   ],
+  soon: '即将推出',
   languageLabel: '语言',
   login: { label: '登录', href: LOGIN_HREF },
+  /** OWNER (2026-10-15): the header's button only; the first screen and the close keep "免费和教练聊聊". */
+  cta: '免费试用',
   menu: '菜单',
   close: '关闭菜单',
 } as const;
@@ -62,11 +63,11 @@ export const J_FOOTER = {
   columns: [
     { title: '产品', links: [
       { label: '功能介绍', href: PLANNED.features },
-      { label: '样例报告', href: PLANNED.samples },
       { label: '评审团', href: PLANNED.jury },
       { label: '价格', href: '/landing/pricing' },
     ] },
-    { title: '资源', links: [...RESOURCES, { label: '自媒體', href: '/zh-tw' }] },
+    /** 用户案例 is the sample reports. */
+    { title: '资源', links: [TUTORIALS, { label: '用户案例', href: PLANNED.samples }, FAQ] },
     { title: '公司', links: [
       { label: '关于我们', href: '/about' },
       { label: '联系我们', href: '/contact' },
@@ -84,7 +85,7 @@ export const J_FOOTER = {
   rights: '© 2026 Grayscale Luminary LLC',
 } as const;
 
-/** Pages the header and footer link to that do not exist yet (for the PR's "待建页面" list). */
+/** Pages the header and footer link to that do not exist yet (for the PR's "待建页面" list); /en is not linked at all. */
 export const J_PENDING_PAGES = [
   PLANNED.features, PLANNED.positioning, PLANNED.content, PLANNED.jury, PLANNED.library, PLANNED.publish, PLANNED.review,
   PLANNED.samples, PLANNED.blog, PLANNED.refund, PLANNED.cookies,

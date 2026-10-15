@@ -6,18 +6,17 @@ import Link from 'next/link';
 import { ChevronDown, Menu, X } from 'lucide-react';
 import { SIGNUP_CTA_HREF } from '@/lib/seo/content/shared';
 import { J_NAV, type ChromeLink } from '@/lib/landing/landing-copy-j-chrome';
-import { HERO } from '@/lib/landing/landing-copy';
 import { cn } from '@/lib/utils';
 import styles from './chrome-j.module.css';
 import page from './j.module.css';
 
 /**
- * Sample J's full header (round six, the controller's plan of 2026-10-15): 产品 and 资源 open a menu (on hover or
- * click, Escape and outside clicks close it), then 样例报告, 价格, 关于我们, the language switch, 登录 and the button.
- * Below 1100px everything but the logo and the button folds into a menu.
+ * Sample J's full header (the Owner's, 2026-10-15): 产品 opens a menu (on hover or click; Escape and outside clicks
+ * close it), then 教程, 价格, 常见问题, 关于我们; on the right the language switch, 登录 and 免费试用. Below 1100px
+ * everything but the logo and the button folds into a menu.
  */
 export function SiteHeaderJ({ siteName }: { siteName: string }) {
-  const [open, setOpen] = useState<'product' | 'resources' | null>(null);
+  const [open, setOpen] = useState<'product' | null>(null);
   const [drawer, setDrawer] = useState(false);
   const ref = useRef<HTMLElement>(null);
   const drawerId = useId();
@@ -38,15 +37,12 @@ export function SiteHeaderJ({ siteName }: { siteName: string }) {
         </Link>
         <nav className={styles.desktop} aria-label={J_NAV.label}>
           <Menu_ id="product" label={J_NAV.product.label} links={J_NAV.product.links} open={open} setOpen={setOpen} wide />
-          <Link href={J_NAV.samples.href} className={styles.item}>{J_NAV.samples.label}</Link>
-          <Link href={J_NAV.pricing.href} className={styles.item}>{J_NAV.pricing.label}</Link>
-          <Menu_ id="resources" label={J_NAV.resources.label} links={J_NAV.resources.links} open={open} setOpen={setOpen} />
-          <Link href={J_NAV.about.href} className={styles.item}>{J_NAV.about.label}</Link>
+          {J_NAV.places.map(link => <Link key={link.href} href={link.href} className={styles.item}>{link.label}</Link>)}
         </nav>
         <div className={styles.end}>
           <Languages className={styles.desktopOnly} />
           <Link href={J_NAV.login.href} className={cn(page.pillSmallLight, styles.desktopOnly)}>{J_NAV.login.label}</Link>
-          <Link href={SIGNUP_CTA_HREF} className={page.pillSmall}>{HERO.primaryCta}</Link>
+          <Link href={SIGNUP_CTA_HREF} className={page.pillSmall}>{J_NAV.cta}</Link>
           <button type="button" className={styles.burger} aria-expanded={drawer} aria-controls={drawerId}
             aria-label={drawer ? J_NAV.close : J_NAV.menu} onClick={() => setDrawer(value => !value)}>
             {drawer ? <X size={20} aria-hidden="true" /> : <Menu size={20} aria-hidden="true" />}
@@ -55,14 +51,12 @@ export function SiteHeaderJ({ siteName }: { siteName: string }) {
       </div>
       <div id={drawerId} className={styles.drawer} hidden={!drawer}>
         <nav className={page.wrap} aria-label={J_NAV.label}>
-          {[J_NAV.product, J_NAV.resources].map(group => (
-            <div key={group.label} className={styles.drawerGroup}>
-              <p>{group.label}</p>
-              {group.links.map(link => <Link key={link.href} href={link.href} onClick={() => setDrawer(false)}>{link.label}</Link>)}
-            </div>
-          ))}
           <div className={styles.drawerGroup}>
-            {[J_NAV.samples, J_NAV.pricing, J_NAV.about, J_NAV.login].map(link => (
+            <p>{J_NAV.product.label}</p>
+            {J_NAV.product.links.map(link => <Link key={link.href} href={link.href} onClick={() => setDrawer(false)}>{link.label}</Link>)}
+          </div>
+          <div className={styles.drawerGroup}>
+            {[...J_NAV.places, J_NAV.login].map(link => (
               <Link key={link.href} href={link.href} onClick={() => setDrawer(false)}>{link.label}</Link>
             ))}
           </div>
@@ -74,8 +68,8 @@ export function SiteHeaderJ({ siteName }: { siteName: string }) {
 }
 
 function Menu_({ id, label, links, open, setOpen, wide = false }: {
-  id: 'product' | 'resources'; label: string; links: readonly ChromeLink[];
-  open: string | null; setOpen: (value: 'product' | 'resources' | null) => void; wide?: boolean;
+  id: 'product'; label: string; links: readonly ChromeLink[];
+  open: string | null; setOpen: (value: 'product' | null) => void; wide?: boolean;
 }) {
   const panelId = useId();
   const shown = open === id;
@@ -96,14 +90,19 @@ function Menu_({ id, label, links, open, setOpen, wide = false }: {
   );
 }
 
-function Languages({ className }: { className?: string }) {
+/** 简体 / 繁體 / English. English has no pages yet: it shows as "即将推出" with no link (SEO_GEO_SPEC). */
+export function Languages({ className }: { className?: string }) {
   return (
     <div className={cn(styles.languages, className)} role="group" aria-label={J_NAV.languageLabel}>
-      {J_NAV.languages.map(item => (
+      {J_NAV.languages.map(item => (item.href ? (
         <Link key={item.lang} href={item.href} hrefLang={item.lang} lang={item.lang} aria-current={item.current ? 'page' : undefined}>
           {item.label}
         </Link>
-      ))}
+      ) : (
+        <span key={item.lang} lang={item.lang} aria-disabled="true" title={J_NAV.soon} className={styles.soon}>
+          {item.label}<small>{J_NAV.soon}</small>
+        </span>
+      )))}
     </div>
   );
 }

@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 /*
- * Sample J's header and footer (SiteHeaderJ, SiteFooterJ). Header: logo, the five places in the middle (two open a
+ * Sample J's header and footer (SiteHeaderJ, SiteFooterJ). Header: logo, the five places in the middle (产品 opens a
  * menu), the language switch, 登录 and the button on the right; below 1100px a menu button replaces the middle and
  * the button stays. Footer: four quiet columns over a base line with the definition and the copyright.
  */
@@ -43,6 +43,9 @@
 .languages a { padding: 3px 10px; border-radius: 999px; color: var(--j-muted); font-size: 13px; text-decoration: none; }
 .languages a[aria-current='page'] { background: var(--j-ink); color: #fff; }
 .languages a:not([aria-current]):hover { color: var(--j-ink); }
+/* English before /en exists: shown, not a link, marked as coming. */
+.soon { display: inline-flex; align-items: center; gap: 5px; padding: 3px 8px 3px 10px; color: #b3b1ab; font-size: 13px; cursor: default; }
+.soon small { padding: 0 6px; border-radius: 999px; background: #f1f0ec; color: var(--j-muted); font-size: 11px; line-height: 17px; }
 
 .burger {
   display: inline-grid; place-items: center; width: 40px; height: 40px; border: 1px solid var(--j-line); border-radius: 999px;
