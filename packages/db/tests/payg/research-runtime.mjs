@@ -2,6 +2,7 @@
 // RESEARCH-TOOLS RT-3b storage (0263): selection cards, discoveries, one paid fetch per account, refresh grants,
 // evidence links, and their erasure. Synthetic fixtures only.
 import assert from 'node:assert/strict';
+import {accountEvidence} from './research-runtime-regressions.mjs';
 import {randomUUID} from 'node:crypto';
 import {rpc,closeAccount} from '../erasure-b2a/cases.mjs';
 import {toolFixture,claimTool,toolResult,toolCallRow} from './research-tools.mjs';
@@ -124,27 +125,27 @@ export async function researchRuntimeCases({db,Client,connectionString,report,cr
     assert.deepEqual(await rpc(db,'research_account_fetch_claim',f.actor,f.session,f.execution,'tiktok','alpha',null),
       {claimed:false,fetchId:first.fetchId,state:'in_progress',evidence:null});
     await assert.rejects(rpc(db,'research_refresh_create',f.actor,f.session,'tiktok','alpha'),/RESEARCH_REFRESH_INVALID/);
-    await rpc(db,'research_account_fetch_finish',f.actor,first.fetchId,first.attempt,'succeeded',{operations:['op-1']});
-    assert.deepEqual((await rpc(db,'research_account_fetch_claim',f.actor,f.session,f.execution,'tiktok','alpha',null)).evidence,{operations:['op-1']});
+    await rpc(db,'research_account_fetch_finish',f.actor,first.fetchId,first.attempt,'succeeded',accountEvidence('op-1'));
+    assert.deepEqual((await rpc(db,'research_account_fetch_claim',f.actor,f.session,f.execution,'tiktok','alpha',null)).evidence,accountEvidence('op-1'));
     const grant = await rpc(db,'research_refresh_create',f.actor,f.session,'tiktok','alpha');
     await assert.rejects(rpc(db,'research_account_fetch_claim',f.actor,f.session,f.execution,'tiktok','beta',grant),/RESEARCH_REFRESH_INVALID/);
     const refreshed = await rpc(db,'research_account_fetch_claim',f.actor,f.session,f.execution,'tiktok','alpha',grant);
     assert.equal(refreshed.claimed,true);
     assert.notEqual(refreshed.attempt,first.attempt,'each paid attempt has its own token');
     // A late result of the first attempt cannot finish the refresh.
-    await assert.rejects(rpc(db,'research_account_fetch_finish',f.actor,first.fetchId,first.attempt,'succeeded',{operations:['op-old']}),/RESEARCH_FETCH_CONFLICT/);
+    await assert.rejects(rpc(db,'research_account_fetch_finish',f.actor,first.fetchId,first.attempt,'succeeded',accountEvidence('op-old')),/RESEARCH_FETCH_CONFLICT/);
     // Unknown result: the grant is already used, nothing is fetched again, and the last success is still served.
     assert.equal(await rpc(db,'research_account_fetch_dispatch',f.actor,first.fetchId,refreshed.attempt),true);
     await rpc(db,'research_account_fetch_finish',f.actor,first.fetchId,refreshed.attempt,'unknown',null);
     await assert.rejects(rpc(db,'research_account_fetch_claim',f.actor,f.session,f.execution,'tiktok','alpha',grant),/RESEARCH_REFRESH_USED/);
     const after = await rpc(db,'research_account_fetch_claim',f.actor,f.session,f.execution,'tiktok','alpha',null);
-    assert.deepEqual([after.claimed,after.evidence],[false,{operations:['op-1']}],'a failed refresh keeps the earlier paid evidence');
+    assert.deepEqual([after.claimed,after.evidence],[false,accountEvidence('op-1')],'a failed refresh keeps the earlier paid evidence');
     // A refresh that succeeds replaces it.
     const grant2 = await rpc(db,'research_refresh_create',f.actor,f.session,'tiktok','alpha');
     const crashedRefresh = await rpc(db,'research_account_fetch_claim',f.actor,f.session,f.execution,'tiktok','alpha',grant2);
     // An ordinary claim cannot take over a stalled refresh: it gets the earlier evidence, no new paid fetch.
     const plain = await rpc(db,'research_account_fetch_claim',f.actor,f.session,f.execution,'tiktok','alpha',null);
-    assert.deepEqual([plain.claimed,plain.evidence],[false,{operations:['op-1']}]);
+    assert.deepEqual([plain.claimed,plain.evidence],[false,accountEvidence('op-1')]);
     // A crash before sending the refresh: the same grant takes the attempt over (new token); another grant cannot.
     const r2 = await rpc(db,'research_account_fetch_claim',f.actor,f.session,f.execution,'tiktok','alpha',grant2);
     assert.equal(r2.claimed,true);
@@ -153,8 +154,8 @@ export async function researchRuntimeCases({db,Client,connectionString,report,cr
     await rpc(db,'research_account_fetch_dispatch',f.actor,first.fetchId,r2.attempt);
     await assert.rejects(rpc(db,'research_account_fetch_claim',f.actor,f.session,f.execution,'tiktok','alpha',grant2),/RESEARCH_REFRESH_USED/);
     await assert.rejects(rpc(db,'research_account_fetch_finish',f.actor,first.fetchId,r2.attempt,'succeeded',null),/RESEARCH_FETCH_INVALID/);
-    await rpc(db,'research_account_fetch_finish',f.actor,first.fetchId,r2.attempt,'succeeded',{operations:['op-2']});
-    assert.deepEqual((await rpc(db,'research_account_fetch_claim',f.actor,f.session,f.execution,'tiktok','alpha',null)).evidence,{operations:['op-2']});
+    await rpc(db,'research_account_fetch_finish',f.actor,first.fetchId,r2.attempt,'succeeded',accountEvidence('op-2'));
+    assert.deepEqual((await rpc(db,'research_account_fetch_claim',f.actor,f.session,f.execution,'tiktok','alpha',null)).evidence,accountEvidence('op-2'));
     await assert.rejects(rpc(db,'research_refresh_create',other.actor,f.session,'tiktok','alpha'),/RESEARCH_SCOPE_DENIED|RESEARCH_REFRESH_INVALID/);
     // A confirmed free failure may be tried again.
     const b = await rpc(db,'research_account_fetch_claim',f.actor,f.session,f.execution,'x','beta',null);
@@ -221,7 +222,7 @@ export async function researchRuntimeCases({db,Client,connectionString,report,cr
     await rpc(db,'research_card_create',f.actor,card,f.session,f.execution,{kind:'keywords',options:keywordOptions});
     const fetch = await rpc(db,'research_account_fetch_claim',f.actor,f.session,f.execution,'tiktok','alpha',null);
     await rpc(db,'research_account_fetch_dispatch',f.actor,fetch.fetchId,fetch.attempt);
-    await rpc(db,'research_account_fetch_finish',f.actor,fetch.fetchId,fetch.attempt,'succeeded',{operations:[linked.op]});
+    await rpc(db,'research_account_fetch_finish',f.actor,fetch.fetchId,fetch.attempt,'succeeded',accountEvidence(linked.op));
     await rpc(db,'research_refresh_create',f.actor,f.session,'tiktok','alpha');
     const before = (await db.query(`SELECT supplier_cost_state,supplier_cost_bound_usd::text bound,selected_cost_usd,charged_delta,
       nominal_source,metering_missing,budget_conflict,settled_at FROM bill2_calls WHERE id=$1`,[c.id])).rows[0];
@@ -249,7 +250,7 @@ export async function researchRuntimeCases({db,Client,connectionString,report,cr
       VALUES($1,$2,$3,gen_random_uuid(),'{}',0,'interrupted')`,[e2,f.actor,f.session]);
     const one = await rpc(db,'research_account_fetch_claim',f.actor,f.session,f.execution,'tiktok','alpha',null);
     await rpc(db,'research_account_fetch_dispatch',f.actor,one.fetchId,one.attempt);
-    await rpc(db,'research_account_fetch_finish',f.actor,one.fetchId,one.attempt,'succeeded',{operations:['op-e1']});
+    await rpc(db,'research_account_fetch_finish',f.actor,one.fetchId,one.attempt,'succeeded',accountEvidence('op-e1'));
     const grant = await rpc(db,'research_refresh_create',f.actor,f.session,'tiktok','alpha');
     const two = await rpc(db,'research_account_fetch_claim',f.actor,f.session,e2,'tiktok','alpha',grant);
     await rpc(db,'research_account_fetch_dispatch',f.actor,two.fetchId,two.attempt);
@@ -271,11 +272,11 @@ export async function researchRuntimeCases({db,Client,connectionString,report,cr
       VALUES($1,$2,$3,gen_random_uuid(),'{}',0,'interrupted')`,[e2,f.actor,f.session]);
     const one = await rpc(db,'research_account_fetch_claim',f.actor,f.session,f.execution,'tiktok','alpha',null);
     await rpc(db,'research_account_fetch_dispatch',f.actor,one.fetchId,one.attempt);
-    await rpc(db,'research_account_fetch_finish',f.actor,one.fetchId,one.attempt,'succeeded',{operations:['op-e1']});
+    await rpc(db,'research_account_fetch_finish',f.actor,one.fetchId,one.attempt,'succeeded',accountEvidence('op-e1'));
     const used = await rpc(db,'research_refresh_create',f.actor,f.session,'tiktok','alpha');
     const two = await rpc(db,'research_account_fetch_claim',f.actor,f.session,e2,'tiktok','alpha',used);
     await rpc(db,'research_account_fetch_dispatch',f.actor,two.fetchId,two.attempt);
-    await rpc(db,'research_account_fetch_finish',f.actor,two.fetchId,two.attempt,'succeeded',{operations:['op-e2']});
+    await rpc(db,'research_account_fetch_finish',f.actor,two.fetchId,two.attempt,'succeeded',accountEvidence('op-e2'));
     const unused = await rpc(db,'research_refresh_create',f.actor,f.session,'tiktok','alpha');
     assert.equal((await db.query('SELECT source_execution_id::text s FROM research_refresh_grants WHERE id=$1',[unused])).rows[0].s,e2);
     const scope = await rpc(db,'content_erasure_scope',f.actor,'answer',e2);
@@ -293,7 +294,7 @@ export async function researchRuntimeCases({db,Client,connectionString,report,cr
       VALUES($1,$2,$3,gen_random_uuid(),'{}',0,'interrupted')`,[id,f.actor,f.session]);
     const one = await rpc(db,'research_account_fetch_claim',f.actor,f.session,f.execution,'tiktok','alpha',null);
     await rpc(db,'research_account_fetch_dispatch',f.actor,one.fetchId,one.attempt);
-    await rpc(db,'research_account_fetch_finish',f.actor,one.fetchId,one.attempt,'succeeded',{operations:['op-e1']});
+    await rpc(db,'research_account_fetch_finish',f.actor,one.fetchId,one.attempt,'succeeded',accountEvidence('op-e1'));
     const grant = await rpc(db,'research_refresh_create',f.actor,f.session,'tiktok','alpha');
     assert.equal((await rpc(db,'research_account_fetch_claim',f.actor,f.session,e2,'tiktok','alpha',grant)).claimed,true);
     const resumed = await rpc(db,'research_account_fetch_claim',f.actor,f.session,e3,'tiktok','alpha',grant);
@@ -320,7 +321,7 @@ export async function researchRuntimeCases({db,Client,connectionString,report,cr
       VALUES($1,$2,$3,gen_random_uuid(),'{}',0,'interrupted')`,[e2,f.actor,f.session]);
     const one = await rpc(db,'research_account_fetch_claim',f.actor,f.session,f.execution,'tiktok','alpha',null);
     await rpc(db,'research_account_fetch_dispatch',f.actor,one.fetchId,one.attempt);
-    await rpc(db,'research_account_fetch_finish',f.actor,one.fetchId,one.attempt,'succeeded',{operations:['op-e1']});
+    await rpc(db,'research_account_fetch_finish',f.actor,one.fetchId,one.attempt,'succeeded',accountEvidence('op-e1'));
     const grant = await rpc(db,'research_refresh_create',f.actor,f.session,'tiktok','alpha');
     const two = await rpc(db,'research_account_fetch_claim',f.actor,f.session,e2,'tiktok','alpha',grant);
     await rpc(db,'research_account_fetch_dispatch',f.actor,two.fetchId,two.attempt);
@@ -328,10 +329,10 @@ export async function researchRuntimeCases({db,Client,connectionString,report,cr
     const hash = (await db.query("SELECT encode(sha256(convert_to($1::jsonb::text,'utf8')),'hex') h",[scope])).rows[0].h;
     await rpc(db,'content_erasure_confirm',f.actor,'answer',e2,hash);
     const row = (await db.query('SELECT state,execution_id::text e,evidence,refresh_id FROM research_account_fetches WHERE id=$1',[one.fetchId])).rows[0];
-    assert.deepEqual(row,{state:'succeeded',e:f.execution,evidence:{operations:['op-e1']},refresh_id:null},'back to the E1 success');
-    await assert.rejects(rpc(db,'research_account_fetch_finish',f.actor,two.fetchId,two.attempt,'succeeded',{operations:['op-e2']}),/RESEARCH_FETCH_CONFLICT/);
+    assert.deepEqual(row,{state:'succeeded',e:f.execution,evidence:accountEvidence('op-e1'),refresh_id:null},'back to the E1 success');
+    await assert.rejects(rpc(db,'research_account_fetch_finish',f.actor,two.fetchId,two.attempt,'succeeded',accountEvidence('op-e2')),/RESEARCH_FETCH_CONFLICT/);
     const again = await rpc(db,'research_account_fetch_claim',f.actor,f.session,f.execution,'tiktok','alpha',null);
-    assert.deepEqual([again.claimed,again.evidence],[false,{operations:['op-e1']}],'reused, not fetched again');
+    assert.deepEqual([again.claimed,again.evidence],[false,accountEvidence('op-e1')],'reused, not fetched again');
     report.checks.push('RT-3b deleting a refresh answer: the record returns to the earlier success of the remaining answer; the dropped attempt cannot finish; the next claim reuses the evidence instead of paying again');
   }
 
@@ -344,7 +345,7 @@ export async function researchRuntimeCases({db,Client,connectionString,report,cr
     // Sent once: any other spelling of the same account finds that fetch and never sends again.
     for (const written of [' Alpha ','@ALPHA','alpha'])
       assert.equal((await rpc(db,'research_account_fetch_claim',f.actor,f.session,f.execution,'tiktok',written,null)).claimed,false,written);
-    await rpc(db,'research_account_fetch_finish',f.actor,one.fetchId,one.attempt,'succeeded',{operations:['op-1']});
+    await rpc(db,'research_account_fetch_finish',f.actor,one.fetchId,one.attempt,'succeeded',accountEvidence('op-1'));
     const grant = await rpc(db,'research_refresh_create',f.actor,f.session,'tiktok','@Alpha');
     const refreshed = await rpc(db,'research_account_fetch_claim',f.actor,f.session,f.execution,'tiktok',' alpha',grant);
     assert.deepEqual([refreshed.claimed,refreshed.fetchId],[true,one.fetchId],'the refresh matches the same record');

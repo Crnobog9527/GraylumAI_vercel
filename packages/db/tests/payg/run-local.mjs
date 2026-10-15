@@ -25,6 +25,7 @@ import {fusionGroupCases} from './fusion-group.mjs';
 import {fusionSessionlessCases} from './fusion-sessionless.mjs';
 import {fusionAdmitCases} from './fusion-admit.mjs';
 import {researchToolCases} from './research-tools.mjs';
+import {researchRuntimeRegressionCases} from './research-runtime-regressions.mjs';
 import {researchRuntimeCases} from './research-runtime.mjs';
 import {researchRuntimeReadCases} from './research-runtime-reads.mjs';
 
@@ -132,6 +133,7 @@ try {
   await fusionSessionlessCases({db,Client,connectionString,report,createFixture});
   await fusionAdmitCases({db,Client,connectionString,report,createFixture});
   await researchToolCases({db,Client,connectionString,report,createFixture,claim,receipt});
+  await researchRuntimeRegressionCases({db,report,createFixture});
   await researchRuntimeCases({db,Client,connectionString,report,createFixture});
   await researchRuntimeReadCases({db,report,createFixture});
 } catch (error) {

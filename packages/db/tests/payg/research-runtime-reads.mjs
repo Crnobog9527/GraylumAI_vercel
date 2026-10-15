@@ -1,6 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 // RT-3b host reads and user projections. Synthetic fixtures; caller supplies the admitted local database.
 import assert from 'node:assert/strict';
+import {accountEvidence} from './research-runtime-regressions.mjs';
 import {randomUUID} from 'node:crypto';
 import {rpc} from '../erasure-b2a/cases.mjs';
 import {toolFixture,claimTool,toolResult} from './research-tools.mjs';
@@ -122,7 +123,7 @@ export async function researchRuntimeReadCases({db,report,createFixture}) {
   // A used refresh is readable as resumable only while its own attempt is still prepared.
   const fetch = await rpc(db,'research_account_fetch_claim',f.actor,f.session,f.execution,'tiktok','alpha',null);
   await rpc(db,'research_account_fetch_dispatch',f.actor,fetch.fetchId,fetch.attempt);
-  await rpc(db,'research_account_fetch_finish',f.actor,fetch.fetchId,fetch.attempt,'succeeded',{operations:[op.id]});
+  await rpc(db,'research_account_fetch_finish',f.actor,fetch.fetchId,fetch.attempt,'succeeded',accountEvidence(op.id));
   const grant = await rpc(db,'research_refresh_create',f.actor,f.session,'tiktok','alpha');
   assert.equal((await host(db,f,'refresh',grant)).used,false);
   assert.equal(await host(db,other,'refresh',grant),null);

@@ -247,6 +247,7 @@ BEGIN
   PERFORM research_session_owned(a,s,e);
   SELECT * INTO c FROM research_selection_cards WHERE confirmation_id=p_confirmation AND actor_id=a AND session_id=s AND kind='keywords';
   IF c.id IS NULL THEN RAISE EXCEPTION 'RESEARCH_NOT_CONFIRMED';END IF;
+  PERFORM research_session_owned(a,s,c.execution_id);
   -- Each platform once: a repeated one would pay for the same searches twice.
   IF cardinality(p_platforms) NOT BETWEEN 1 AND 2 OR EXISTS(SELECT 1 FROM unnest(p_platforms) x WHERE x !~ '^[a-z]{1,20}$')
    OR (SELECT count(DISTINCT x) FROM unnest(p_platforms) x)<>cardinality(p_platforms) THEN RAISE EXCEPTION 'RESEARCH_DISCOVERY_INVALID';END IF;
@@ -291,6 +292,7 @@ BEGIN
   SELECT * INTO f FROM research_account_fetches WHERE session_id=s AND platform=p_platform
     AND account_key=research_account_key(p_platform,p_account) FOR UPDATE;
   IF p_refresh IS NOT NULL THEN
+    IF f.state='failed_charged' THEN RAISE EXCEPTION 'RESEARCH_REFRESH_INVALID';END IF;
     SELECT * INTO g FROM research_refresh_grants WHERE id=p_refresh AND actor_id=a AND session_id=s FOR UPDATE;
     IF g.id IS NULL OR g.platform<>p_platform OR research_account_key(g.platform,g.account)<>research_account_key(p_platform,p_account)
     THEN RAISE EXCEPTION 'RESEARCH_REFRESH_INVALID';END IF;
@@ -329,10 +331,32 @@ END $$;
 
 CREATE OR REPLACE FUNCTION public.research_account_fetch_finish(a uuid, p_fetch uuid, p_attempt uuid, p_state text, p_evidence jsonb)
 RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
+DECLARE f research_account_fetches; metric text;
 BEGIN
   -- A success must carry its evidence: a paid result without it could be neither reused nor refreshed.
   IF p_state NOT IN ('succeeded','unknown','failed','failed_charged') OR (p_state='succeeded' AND jsonb_typeof(p_evidence) IS DISTINCT FROM 'object')
   THEN RAISE EXCEPTION 'RESEARCH_FETCH_INVALID';END IF;
+  IF p_state='succeeded' THEN
+    SELECT * INTO f FROM research_account_fetches WHERE id=p_fetch AND actor_id=a;
+    -- The host cache is accountMetrics + classification; query/source/call records remain in research_operations.
+    IF p_evidence->>'platform' IS DISTINCT FROM f.platform
+     OR research_account_key(f.platform,p_evidence->>'account') IS DISTINCT FROM f.account_key
+     OR jsonb_typeof(p_evidence->'fetchedAt') IS DISTINCT FROM 'string'
+     OR NOT pg_input_is_valid(p_evidence->>'fetchedAt','timestamp with time zone')
+     OR jsonb_typeof(p_evidence->'metrics') IS DISTINCT FROM 'object'
+     OR jsonb_typeof(p_evidence->'metrics'->'postsAnalyzed') IS DISTINCT FROM 'number'
+     OR jsonb_typeof(p_evidence->'metrics'->'missing') IS DISTINCT FROM 'array'
+     OR jsonb_typeof(p_evidence->'metrics'->'wholeHistory') IS DISTINCT FROM 'boolean'
+     OR jsonb_typeof(p_evidence->'classification'->'qualified') IS DISTINCT FROM 'boolean'
+     OR NOT coalesce(p_evidence->'classification' ?& ARRAY['category','excluded'],false)
+    THEN RAISE EXCEPTION 'RESEARCH_FETCH_INVALID';END IF;
+    FOREACH metric IN ARRAY ARRAY['followers','medianViews','engagementRate','postsPerWeek','lastPublishedAt','earliestPublishedAt'] LOOP
+      IF jsonb_typeof(p_evidence->'metrics'->metric) IS DISTINCT FROM 'object'
+       OR NOT (p_evidence->'metrics'->metric ? 'value')
+       OR jsonb_typeof(p_evidence->'metrics'->metric->'refs') IS DISTINCT FROM 'array'
+      THEN RAISE EXCEPTION 'RESEARCH_FETCH_INVALID';END IF;
+    END LOOP;
+  END IF;
   -- A sent attempt ends in any state; an attempt never sent can only end as a (free) failure.
   UPDATE research_account_fetches SET state=p_state,evidence=p_evidence,updated_at=clock_timestamp(),
     last_success=CASE WHEN p_state='succeeded' THEN p_evidence ELSE last_success END,
@@ -350,7 +374,7 @@ DECLARE g uuid; src uuid;
 BEGIN
   PERFORM research_session_owned(a,s,NULL);
   SELECT last_success_execution_id INTO src FROM research_account_fetches WHERE session_id=s AND actor_id=a AND platform=p_platform
-    AND account_key=research_account_key(p_platform,p_account) AND last_success IS NOT NULL AND state NOT IN ('prepared','in_progress');
+    AND account_key=research_account_key(p_platform,p_account) AND last_success IS NOT NULL AND state NOT IN ('prepared','in_progress','failed_charged');
   IF src IS NULL THEN RAISE EXCEPTION 'RESEARCH_REFRESH_INVALID';END IF;
   INSERT INTO research_refresh_grants(actor_id,session_id,platform,account,source_execution_id)
     VALUES(a,s,p_platform,p_account,src) RETURNING id INTO g;
@@ -410,14 +434,27 @@ DO $$ DECLARE definition text; f text; b text; d text; BEGIN
      OR array_length(string_to_array(definition,d),1)<>2 THEN
       RAISE EXCEPTION 'RESEARCH_RUNTIME_SOURCE_MISMATCH: content_erasure_confirm';END IF;
     definition:=replace(definition,f,$x$ -- 0263 runtime research: conversation searches have no artifact evidence.
- research_ids:=research_ids||ARRAY(SELECT o.id FROM research_operations o JOIN research_plans p ON p.id=o.plan_id
-  WHERE p.actor_id=a AND (p.session_id=ANY(sessions) OR p.execution_id=ANY(ids)) AND NOT o.id=ANY(research_ids));
-$x$||f);
+ research_plan_ids:=ARRAY(SELECT p.id FROM research_plans p WHERE p.actor_id=a AND (p.session_id=ANY(sessions) OR p.execution_id=ANY(ids) OR p.discovery_id IN (
+   SELECT d.id FROM research_discoveries d JOIN research_selection_cards c ON c.confirmation_id=d.keyword_confirmation_id
+   WHERE c.actor_id=a AND (c.session_id=ANY(sessions) OR c.execution_id=ANY(ids)))));
+ research_ids:=research_ids||ARRAY(SELECT o.id FROM research_operations o
+  WHERE o.plan_id=ANY(research_plan_ids) AND NOT o.id=ANY(research_ids));
+ research_plan_ids:=research_plan_ids||ARRAY(SELECT DISTINCT plan_id FROM research_operations WHERE id=ANY(research_ids));
+$x$);
     definition:=replace(definition,b,$x$(NOT research_operation_settled(research_operations) OR (pre_deduct_id IS NOT NULL AND charged_credits IS NULL))$x$);
-    definition:=replace(definition,d,$x$ DELETE FROM research_selection_cards WHERE actor_id=a AND (session_id=ANY(sessions) OR execution_id=ANY(ids));
+    definition:=replace(definition,d,$x$ -- Bound plans include approved operations that were never reserved; erasing them prevents late reserve.
+ UPDATE research_plans p SET operations=NULL,erased_at=stamp WHERE p.actor_id=a AND p.erased_at IS NULL AND (p.session_id=ANY(sessions) OR p.execution_id=ANY(ids) OR p.discovery_id IN (
+   SELECT d.id FROM research_discoveries d JOIN research_selection_cards c ON c.confirmation_id=d.keyword_confirmation_id
+   WHERE c.actor_id=a AND (c.session_id=ANY(sessions) OR c.execution_id=ANY(ids))));
+ WITH removed AS (
+  DELETE FROM research_discoveries d WHERE d.actor_id=a AND (d.session_id=ANY(sessions) OR d.execution_id=ANY(ids)
+   OR d.keyword_confirmation_id IN (SELECT confirmation_id FROM research_selection_cards
+    WHERE actor_id=a AND (session_id=ANY(sessions) OR execution_id=ANY(ids)))) RETURNING id
+ ) DELETE FROM research_selection_cards WHERE actor_id=a AND
+  (session_id=ANY(sessions) OR execution_id=ANY(ids) OR discovery_id IN (SELECT id FROM removed));
  -- Deleting only the answer of a later refresh keeps the earlier success of a remaining answer: the record goes back
  -- to that success (the refresh attempt is dropped and can never finish), so it is reused and never paid for again.
- UPDATE research_account_fetches SET state='succeeded',execution_id=last_success_execution_id,evidence=last_success,
+ UPDATE research_account_fetches SET state=CASE WHEN state='failed_charged' THEN state ELSE 'succeeded' END,execution_id=last_success_execution_id,evidence=last_success,
    attempt=gen_random_uuid(),refresh_id=NULL,updated_at=clock_timestamp()
  WHERE actor_id=a AND execution_id=ANY(ids) AND last_success IS NOT NULL
    AND NOT coalesce(last_success_execution_id=ANY(ids),false) AND NOT coalesce(session_id=ANY(sessions),false);
@@ -504,6 +541,8 @@ BEGIN
   WHEN 'discovery' THEN
     SELECT jsonb_build_object('discoveryId',d.id,'keywords',d.keywords,'platforms',d.platforms,'cursor',d.cursor,'state',d.state)
     INTO v FROM research_discoveries d
+    JOIN research_selection_cards c ON c.confirmation_id=d.keyword_confirmation_id AND c.actor_id=a
+    JOIN runtime_executions src ON src.id=c.execution_id AND src.content_deleted_at IS NULL AND src.erased_at IS NULL
     JOIN runtime_executions x ON x.id=d.execution_id AND x.actor_id=a AND x.session_id=s
     WHERE d.id=p_id AND d.actor_id=a AND d.session_id=s AND x.content_deleted_at IS NULL AND x.erased_at IS NULL;
   WHEN 'refresh' THEN
