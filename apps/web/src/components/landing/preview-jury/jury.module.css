@@ -21,8 +21,12 @@
   outline-offset: 2px;
 }
 
-/* Width rule shared with the landing page (#992): content at most 1280 wide, 36px gutters on a computer, 16 on a phone. */
-.toolbar, .main, .sampleBar { --j-gutter: 36px; width: 100%; max-width: calc(1280px + 2 * var(--j-gutter)); margin-inline: auto; padding-inline: var(--j-gutter); }
+/* Wide like a workspace (Owner 2026-10-15): the landing page's 32px gutters (16 on a phone), but the content keeps
+ * spreading up to 1840 so a large screen is not a narrow strip with empty sides. */
+.toolbar, .main, .sampleBar {
+  --j-gutter: 32px; --j-content: 1840px;
+  width: 100%; max-width: calc(var(--j-content) + 2 * var(--j-gutter)); margin-inline: auto; padding-inline: var(--j-gutter);
+}
 
 /* One toolbar: title, ending, sample names, transport, then the eight stations. Sticky so the stage can fill the rest. */
 .toolbar {
@@ -30,7 +34,7 @@
   border-bottom: 1px solid var(--j-rule); background: color-mix(in srgb, var(--j-canvas) 94%, transparent);
   backdrop-filter: blur(6px);
 }
-.toolbar > * { width: 100%; max-width: 1280px; margin-inline: auto; }
+.toolbar > * { width: 100%; max-width: var(--j-content); margin-inline: auto; }
 .toolRow { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; }
 .crumbs { flex: 1 0 100%; }
 .crumbs a { display: inline-flex; align-items: center; gap: 6px; color: var(--j-muted); font-size: 13.5px; text-decoration: none; }
