@@ -126,6 +126,18 @@ export async function runCases({db,Client,connectionString,report}) {
  assert.equal((await call(db,n.sc)).metering_missing,true);
  report.checks.push('a verified non-zero cost settles through the unchanged min(c,U) fallback and is flagged metering_missing');
 
+ // A run cannot reach two unresolved calls through the public claim RPC.
+ const sequential=await fixture(db,'v2'),first=await claim(db,sequential);
+ const sequentialHeld=await balance(db,sequential);
+ await denied(claim(db,sequential,2),'BILL2_CALL_PENDING');
+ assert.equal((await db.query('SELECT count(*)::int n FROM bill2_calls WHERE run_id=$1',[sequential.run])).rows[0].n,1);
+ assert.equal(await balance(db,sequential),sequentialHeld,'rejected next claim cannot hold more credits');
+ await rpc(db,'bill2_cancel',sequential.actor,sequential.run);await rpc(db,'bill2_finalize',sequential.actor,sequential.run);
+ await db.query("UPDATE bill2_calls SET recovery_deadline=clock_timestamp()-interval '11 minutes' WHERE id=$1",[first.id]);
+ await settle(first.id,'0');
+ assert.equal(await balance(db,sequential),100,'the sole pending call settles independently');
+ report.checks.push('public claim rejects a second call while the first is unsettled, creates no second hold, and the sole stuck call can be settled');
+
  // The staging instance: Fusion review calls in cancelled runs (verdict user_stopped, no cost).
  const fz=await fixture(db,'v2'),fc=await claim(db,fz),fhold=await balance(db,fz);
  await db.query("UPDATE bill2_calls SET payload=jsonb_set(payload,'{phase}','\"fusion_review\"') WHERE id=$1",[fc.id]);
