@@ -1,8 +1,8 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 /*
  * Sample J's price section: only the comparison (Owner 2026-10-15). The rows drop in one after another as the table
- * scrolls in (MotionJ marks each `data-row` with `data-in`); then the usual ways' total dims and a line runs through
- * it while our own price rises beside it in gold. With reduced motion everything is simply there, and the total keeps
+ * scrolls in, their figures adding up (PriceJ); then the total adds up, a line strikes it (data-phase="strike") and
+ * only then our own price rises beside it in gold (data-phase="own"). With reduced motion everything is simply there, and the total keeps
  * its line so the contrast still reads.
  */
 h2.title { margin-bottom: clamp(32px, 4vw, 56px); }
@@ -52,16 +52,18 @@ h2.title { margin-bottom: clamp(32px, 4vw, 56px); }
 .checked { margin: 14px 0 0; color: var(--j-muted); font-size: 13px; }
 
 @media (prefers-reduced-motion: no-preference) {
-  [data-motion='on'] .compareCost li { transition: opacity .6s var(--j-ease), translate .7s var(--j-ease); transition-delay: calc(var(--i, 0) * 180ms); }
-  [data-motion='on'] .compareCost li:not([data-in]) { opacity: 0; translate: 0 -18px; }
-  [data-motion='on'] .versus .total b { transition: color .6s .5s; }
-  [data-motion='on'] .versus:not([data-in]) .total b { color: var(--j-ink); }
-  [data-motion='on'] .versus .total b::after { transition: scale .6s var(--j-ease) .6s; }
-  [data-motion='on'] .versus:not([data-in]) .total b::after { scale: 0 1; }
-  [data-motion='on'] .versus .own { transition: opacity .6s var(--j-ease) .9s, scale .8s cubic-bezier(.34, 1.56, .64, 1) .9s; }
-  [data-motion='on'] .versus:not([data-in]) .own { opacity: 0; scale: .92; }
+  /* The rows drop in one after another as their figures add up (PriceJ sets data-play on the list). */
+  .compareCost li { transition: opacity .6s var(--j-ease), translate .7s var(--j-ease); transition-delay: calc(var(--i, 0) * 180ms); }
+  [data-motion='on'] .compareCost ul:not([data-play]) li { opacity: 0; translate: 0 -18px; }
+  /* The total: dark while it adds up, then a line strikes it and it greys; only then our price rises. */
+  .versus .total b { transition: color .5s; }
+  .versus:is([data-phase='wait'], [data-phase='count']) .total b { color: var(--j-ink); }
+  .versus .total b::after { transition: scale .6s var(--j-ease); }
+  .versus:is([data-phase='wait'], [data-phase='count']) .total b::after { scale: 0 1; }
+  .versus .own { transition: opacity .6s var(--j-ease), scale .8s cubic-bezier(.34, 1.56, .64, 1); }
+  .versus:is([data-phase='wait'], [data-phase='count'], [data-phase='strike']) .own { opacity: 0; scale: .92; }
   [data-motion='on'] .own { animation: edge 9s linear infinite; }
-  [data-motion='on'] .versus[data-in] .price { animation: glint 1.4s var(--j-ease) 1.7s both; }
+  .versus[data-phase='own'] .price { animation: glint 1.4s var(--j-ease) .6s both; }
   .cta::after { transition: translate .8s var(--j-ease); }
   .cta:hover::after, .cta:focus-visible::after { translate: 320% 0; }
 }
