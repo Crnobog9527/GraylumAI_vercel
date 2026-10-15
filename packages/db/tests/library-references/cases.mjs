@@ -1,9 +1,11 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import assert from 'node:assert/strict';
+import {randomUUID} from 'node:crypto';
+import {createFixture,claim as paygClaim} from '../payg/fixture.mjs';
 import {rpc,closeAccount,outcome,evidence} from '../erasure-b2a/cases.mjs';
 import {runtimeFixture} from '../content-erasure/cases.mjs';
 const one=async(db,text,args=[])=>(await db.query(text,args)).rows[0]?.v;
-const denied=async(promise,code)=>{await assert.rejects(promise,error=>String(error.message).includes(code),code);};
+const denied=async(promise,code)=>{await assert.rejects(promise,error=>{if(!String(error.message).includes(code))throw error;return true;},code);};
 const doc=(db,a,name,n=3,status='ready',version=1,kind='document')=>
  one(db,'SELECT lr_test.doc($1,$2,$3,$4,$5,$6) v',[a,name,n,status,version,kind]);
 const exec=(db,a,sid,refs=null,state='running')=>
@@ -124,6 +126,65 @@ export async function runCases({db,Client,connectionString,report}) {
   assert.ok(usage.n<=8&&usage.bytes<=65536);
  }
  report.checks.push('index counts toward the same eight-read budget; concurrent commits cannot exceed count or serialized bytes');
+
+ // The real PAYG owner wrapper must return safe tool content after source deletion.
+ const paidFixture=async()=>{
+  const f=await createFixture(db,{empirical:true,lookupSupported:true});
+  f.execution=await one(db,'SELECT b2a_test.bind($1) v',[f]);
+  f.session=await one(db,'SELECT session_id v FROM runtime_executions WHERE id=$1',[f.execution]);
+  await db.query(`UPDATE runtime_executions SET payload=payload||'{"tools":["read_source"],"maxToolCalls":8}'::jsonb WHERE id=$1`,[f.execution]);
+  f.call=await paygClaim(db,f);
+  f.epoch=Number(await one(db,'SELECT runtime_epoch v FROM bill2_runs WHERE id=$1',[f.run]));
+  f.document=await doc(db,f.actor,'PAYG_PRIVATE_NAME.md');
+  await db.query('INSERT INTO runtime_library_references(execution_id,actor_id,document_id,content_version,ordinal) VALUES($1,$2,$3,1,1)',
+   [f.execution,f.actor,f.document]);
+  return f;
+ };
+ const paid=await paidFixture();
+ const toolValue={callId:'paid-index',name:'read_source',arguments:{query:'library'}};
+ await rpc(db,'runtime_execution',paid.actor,paid.execution,'owner_tool',{epoch:paid.epoch,value:{...toolValue,action:'claim'}});
+ const paidIndex=await read(db,paid.actor,paid.execution);
+ await del(db,paid.actor,paid.document);
+ await denied(rpc(db,'runtime_execution',paid.actor,paid.execution,'owner_tool',
+  {epoch:paid.epoch+1,value:{...toolValue,action:'complete',result:paidIndex}}),'RUNTIME_RESUME_CONFLICT');
+ const paidResult=await rpc(db,'runtime_execution',paid.actor,paid.execution,'owner_tool',
+  {epoch:paid.epoch,value:{...toolValue,action:'complete',result:paidIndex}});
+ assert.deepEqual(paidResult.result,{kind:'unavailable',reason:'source_deleted'});
+ assert.equal(paidResult.execute,false);
+ assert.ok(!JSON.stringify(paidResult).includes('PAYG_PRIVATE_NAME'));
+ assert.equal(await one(db,'SELECT result IS NULL v FROM runtime_executions WHERE id=$1',[paid.execution]),true);
+ report.checks.push('real PAYG owner_tool completion after deletion returns source_deleted, not undefined or the original index');
+
+ // Hold the same session lock as manual settlement, then start a real client read.
+ // It must wait without taking the profile lock, so the settlement can finish without a cycle.
+ const locked=await paidFixture();
+ await rpc(db,'bill2_record',locked.actor,locked.run,locked.call.id,{provider:'openrouter',account:'sandbox',
+  model:locked.claimPayload.model,protocol:'openrouter-chat-v1',providerId:'gen-lock-'+locked.call.id,
+  evidenceKind:'transport_observation',cost:null,final:false,currency:'USD',source:'response',coverage:'request_total',
+  observedAt:new Date().toISOString(),sourceHash:'e'.repeat(64),rejectedReason:'incomplete_stream'});
+ await rpc(db,'bill2_finalize',locked.actor,locked.run);
+ await db.query("UPDATE bill2_calls SET recovery_deadline=clock_timestamp()-interval '11 minutes' WHERE id=$1",[locked.call.id]);
+ await db.query("UPDATE profiles SET role='admin' WHERE id=$1",[locked.actor]);
+ const polling=new Client({connectionString});await polling.connect();
+ let reading;
+ try{
+  const pid=(await polling.query('SELECT pg_backend_pid() pid')).rows[0].pid;
+  await db.query('BEGIN');await db.query("SET LOCAL lock_timeout='750ms'");
+  await db.query('SELECT id FROM runtime_sessions WHERE id=$1 FOR UPDATE',[locked.session]);
+  reading=rpc(polling,'runtime_execution',locked.actor,locked.execution,'read',null).then(value=>({value}),error=>({error}));
+  let blocked=false;
+  for(let i=0;i<100&&!blocked;i++){
+   blocked=await one(db,'SELECT cardinality(pg_blocking_pids($1))>0 v',[pid]);
+   if(!blocked)await new Promise(resolve=>setTimeout(resolve,10));
+  }
+  assert.equal(blocked,true,'the real read is waiting on the held session');
+  await rpc(db,'bill2_payg_admin_settle_call',locked.actor,randomUUID(),locked.call.id,'0','local lock-order regression');
+  await db.query('COMMIT');
+  const observed=await reading;
+  assert.equal(observed.error,undefined);
+  assert.equal(await one(db,'SELECT active_execution IS NULL v FROM runtime_sessions WHERE id=$1',[locked.session]),true);
+ }finally{await db.query('ROLLBACK');await reading;await polling.end();}
+ report.checks.push('manual settlement and a blocked real Runtime read use session/execution/run before profile, without deadlock');
 
  // Exercise runtime_tool itself: its return must be the guarded row, not the pre-trigger argument.
  const tool=await runtimeFixture(db,{}),toolDoc=await doc(db,tool.actor,'TOOL_PRIVATE_NAME.md');

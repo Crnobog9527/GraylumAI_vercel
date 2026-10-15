@@ -160,3 +160,32 @@ it.each([[3, true], [4, false]] as const)('claims a PAYG call carrying %s tool d
     expect(rpc).not.toHaveBeenCalled();
   }
 });
+
+// A pending refusal is not a host no_delivery verdict, regardless of the immediate lookup outcome.
+it.each(['timeout', 'nonzero'])('keeps a 403 pending refusal unconfirmed after lookup %s', async outcome => {
+  const frozen = {...frozenCall('{}'), provider: 'openrouter', protocol: 'openrouter-chat-v1' as const};
+  const generationId = 'gen-synthetic';
+  const observed = (rawBody: string, httpStatus: number) => ({rawBody, httpStatus, complete: true,
+    rawBodyBase64: Buffer.from(rawBody).toString('base64'), transportIssue: null,
+    sourceHash: createHash('sha256').update(rawBody).digest('hex')});
+  const {api, rpc, adapter} = setup(name => {
+    if (name === 'bill2_dispatch') return {dispatch: true};
+    if (name === 'bill2_pending_calls') return [callId];
+    if (name === 'bill2_recovery_claim') return {...frozen, providerId: generationId, rejectionRecovery: {}};
+    if (name === 'bill2_record' || name === 'bill2_read') return {id: runId, state: 'cost_pending'};
+    return {id: callId, state: 'prepared', dispatchToken: randomUUID()};
+  });
+  adapter.prepareDispatch.mockResolvedValue(async () => ({...observed(
+    JSON.stringify({error: {code: 403, message: 'refused'}}), 403), generationId}));
+  if (outcome === 'timeout') adapter.lookup.mockRejectedValue(new Error('timeout'));
+  else adapter.lookup.mockResolvedValue(observed(JSON.stringify({data: {id: generationId, model: frozen.model,
+    finish_reason: 'stop', total_cost: 0.001, native_tokens_prompt: 1, native_tokens_completion: 1}}), 200));
+  await api.claimPaygCall(runId, 1, frozen);
+  expect(await api.dispatchOnce(callId, '{}')).toMatchObject({
+    dispatched: true, providerRejected: true, providerRejectionPending: true,
+  });
+  expect(adapter.lookup).toHaveBeenCalledOnce();
+  const evidence = rpc.mock.calls.filter(([name]) => name === 'bill2_record').map(([,args]) => args.p_evidence);
+  expect(evidence[0]).toMatchObject({evidenceKind: 'provider_rejection_pending'});
+  expect(evidence[1]).toMatchObject(outcome === 'timeout' ? {cost: null} : {cost: '0.001'});
+});

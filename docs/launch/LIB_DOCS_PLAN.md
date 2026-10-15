@@ -387,7 +387,8 @@ UI-B 的前端骨架已合入 staging（[#871](https://github.com/Crnobog9527/Gr
 
 **LIB-4 分阶段验收（总控 2026-10-15，[#981 决定](https://github.com/Crnobog9527/GraylumAI_vercel/pull/981#issuecomment-6191763625)）：**
 4a（0262）保持默认关闭，明确标为「未完成、未验收」，不改准入和宿主执行器接线。
-4b 必须验证：来源删除后，宿主不展示晚到正文，包含流式 progress；用真实 executor 回归证明，
+4b 必须验证：来源删除后进行中的执行失效，宿主不展示晚到正文，包含流式 progress；
+接线必须保留冻结索引/目录/正文重放前的可见性复核，并用真实 executor 回归证明，
 不能退回非流式，也不能只隐藏最终正文。4a 的 SQL 结果为空仅证明不保存和数据库不返回，不能代替此项验收。
 这一步复用 #766 正在做的单条删除边界（`erased_at`、`erasure_update_allowed`、BILL2 财务投影），不另写一套。
 

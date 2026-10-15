@@ -46,7 +46,8 @@ END $$;
 -- After it bill2_recovery_claim grants no lookup; ten more minutes let one already started finish.
 CREATE OR REPLACE FUNCTION public.bill2_payg_call_stuck(c bill2_calls,r bill2_runs) RETURNS boolean
 LANGUAGE sql SET search_path=public,pg_temp AS $$
- SELECT r.contract_version='bill2.v2' AND r.state='cost_pending' AND NOT r.conflict
+ -- Research tools use their own deadline settlement and supplier-cost reconciliation (0255).
+ SELECT r.contract_version='bill2.v2' AND c.call_kind='model' AND r.state='cost_pending' AND NOT r.conflict
   AND c.dispatched_at IS NOT NULL AND c.settled_at IS NULL AND c.selected_cost_usd IS NULL AND NOT c.provider_rejected
   AND clock_timestamp()>=coalesce(c.recovery_deadline,c.created_at+interval '24 hours')+interval '10 minutes'
 $$;
@@ -114,8 +115,11 @@ BEGIN
   'runCharged',r.charged,'credits',before_credits);
  -- The verified cost is the known c of the existing rule; finalize settles it once via min(c,U).
  UPDATE bill2_calls SET selected_cost_usd=p_verified_cost_usd,state='responded' WHERE id=c.id;
- -- Recovery has expired. A crashed Runtime or sessionless Fusion may have left its run open; use
- -- the existing close/cancel paths before finalizing, including when no execution is bound.
+ -- Preserve the existing expired Fusion verdict (including no_delivery) before maintenance
+ -- cancellation can mark the run user_stopped. Finalize owns the saved-output and refund rules.
+ PERFORM bill2_finalize(r.actor_id,r.id);
+ -- A crashed Runtime or sessionless Fusion may still have an open run. Close it, then finalize
+ -- again to reach the terminal run state; settled calls cannot be charged twice.
  IF NOT r.closed
   AND NOT coalesce(bill2_erasure_closed(r.actor_id,coalesce(r.pre_deduct_id,r.id)),false) THEN
   IF e.result IS NOT NULL THEN PERFORM bill2_close(r.actor_id,r.id,'delivered',e.result);

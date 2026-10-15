@@ -300,12 +300,15 @@ export function authoritativeBilling(deps: { budget?:RuntimeBudget; admin: Billi
         }
       }
       catch { return { dispatched: true,
+        providerRejectionPending: 'evidenceKind' in evidence && evidence.evidenceKind === 'provider_rejection_pending',
         providerRejected: 'evidenceKind' in evidence &&
           ['provider_rejection', 'provider_rejection_pending'].includes(String(evidence.evidenceKind)),
         pendingReceipt: { runId: capability.runId, callId, evidence } }; }
+      // Keep Runtime rejection handling; Fusion must distinguish a pending refusal from no_delivery.
       // Confirmation can still commit after this receipt. Every later Runtime
       // read/write then refuses the actor (bill2_actor), so no content reaches SDK/history/result.
       return { dispatched: true, observation,
+        providerRejectionPending: 'evidenceKind' in evidence && evidence.evidenceKind === 'provider_rejection_pending',
         providerRejected: 'evidenceKind' in evidence &&
           ['provider_rejection', 'provider_rejection_pending'].includes(String(evidence.evidenceKind)) };
     },

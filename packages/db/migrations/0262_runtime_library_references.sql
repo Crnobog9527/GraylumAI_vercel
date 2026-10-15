@@ -254,7 +254,7 @@ BEGIN
 END $$;
 
 -- Check again at execution entry, even before asynchronous cleanup has run. Referenced executions
--- take the deletion profile lock before session/run locks; settlement stores no late answer.
+-- take the deletion profile lock after session/execution/run, matching manual settlement.
 DO $migration$
 DECLARE definition text; anchor text; replacement text; entry_anchor text; entry_patch text;
 BEGIN
@@ -270,12 +270,24 @@ BEGIN
    WHERE id=e.id RETURNING * INTO e;
  END IF;
  IF e.unavailable_reason='source_deleted' AND p_action NOT IN ('begin','read') THEN
+  IF p_action='owner_tool' THEN
+   -- Preserve the PAYG owner fence before taking the deletion cancellation path.
+   IF b.contract_version<>'bill2.v2' THEN RAISE EXCEPTION 'RUNTIME_ACTION_DENIED';END IF;
+   IF coalesce(p_result->>'epoch','') !~ '^[1-9][0-9]*$'
+    OR (p_result->>'epoch')::bigint IS DISTINCT FROM b.runtime_epoch
+    OR (e.state IN ('prepared','waiting_credits','waiting_resume','cancelled') AND b.paused_reason IS DISTINCT FROM 'user_stop')
+    OR EXISTS(SELECT 1 FROM jsonb_object_keys(p_result) k WHERE k NOT IN ('epoch','value'))
+   THEN RAISE EXCEPTION 'RUNTIME_RESUME_CONFLICT';END IF;
+   IF coalesce(p_result->'value'->>'action','') NOT IN ('claim','complete') THEN RAISE EXCEPTION 'RUNTIME_ACTION_DENIED';END IF;
+   v:=runtime_cancel(p_actor_id,e.id);
+   RETURN v||jsonb_build_object('execute',false,'result',jsonb_build_object('kind','unavailable','reason','source_deleted'));
+  END IF;
   RETURN runtime_cancel(p_actor_id,e.id);
  END IF;
 $b$||anchor;
   IF length(definition)-length(replace(definition,anchor,''))<>length(anchor) THEN
    RAISE EXCEPTION 'LIBRARY_REFERENCE_RUNTIME_SOURCE_MISMATCH'; END IF;
-  entry_anchor:=$a$ PERFORM bill2_actor(p_actor_id);$a$;
+  entry_anchor:=$a$ SELECT * INTO b FROM bill2_runs WHERE id=e.billing_run_id FOR UPDATE;$a$;
   entry_patch:=entry_anchor||$b$
  IF EXISTS(SELECT 1 FROM runtime_library_references WHERE execution_id=p_execution_id AND actor_id=p_actor_id) THEN
   PERFORM id FROM profiles WHERE id=p_actor_id FOR UPDATE;
