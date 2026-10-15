@@ -18,7 +18,8 @@ import { J_WEEK } from '@/lib/landing/landing-copy-j-week';
 import { J_COMPARE } from '@/lib/landing/landing-copy-j-compare';
 import { J_REPORT, J_TAKEOVER_MOMENTS } from '@/lib/landing/landing-copy-j-takeover';
 import { J_STEPS } from '@/lib/landing/landing-copy-j-persona';
-import { J_SAMPLES, samplePath } from '@/lib/landing/landing-copy-j-samples';
+import { J_SAMPLES } from '@/lib/landing/landing-copy-j-samples';
+import { SAMPLE_CHAPTERS } from '@/lib/landing/sample-reports';
 import { J_WORK, J_WORK_SCENES } from '@/lib/landing/landing-copy-j-work';
 import { J_PRICE_TOTAL } from '@/lib/landing/landing-copy-j-price';
 
@@ -56,7 +57,7 @@ describe('style sample J', () => {
 
   it('puts every voice-wall note, verbatim, beside a heading of its own and P7 first', () => {
     const { data, html } = render();
-    const wall = html.slice(html.indexOf('aria-labelledby="voice-title"'), html.indexOf('id="how-it-works"'));
+    const wall = html.slice(html.indexOf('aria-labelledby="voice-title"'), html.indexOf('id="compare-title"'));
     for (const note of data.notes) {
       expect(wall).toContain(escape(note.quote));
       expect(J_NOTE_HEADS[note.id]).toBeTruthy();
@@ -90,7 +91,8 @@ describe('style sample J', () => {
     expect(html).toContain('本步小结 · ');
     expect(html).toContain(J_REPORT.export);
     for (const chapter of J_REPORT.chapters) expect(html).toContain(chapter.title);
-    expect(html).not.toMatch(/你是谁|方向判断/);
+    // The old demo's step names (the real report may still say "搞不清你是谁" in its own text).
+    expect(html).not.toMatch(/· (?:你是谁|方向判断)|>(?:\d )?(?:你是谁|方向判断)</);
     expect(html).toContain(J_REPORT.generate);
     expect(html).toContain(J_REPORT.juryEntry);
     // The scenes are the demo's made-up case: no figures, no promise of income.
@@ -105,9 +107,10 @@ describe('style sample J', () => {
 });
 
 describe('style sample J, the later sections', () => {
-  it('runs scenes, the comparison, price, FAQ and the close in order after the story', () => {
+  it('runs the Owner\'s order (plan A): voice wall, comparison, the story, the work, price, FAQ and the close', () => {
     const { html } = render();
-    const order = ['id="how-it-works"', 'id="work-title"', 'id="compare-title"', 'id="pricing-title"', 'id="faq-title"', 'id="final-title"']
+    const order = ['id="voice-title"', 'id="compare-title"', 'id="how-it-works"', 'id="work-title"', 'id="pricing-title"', 'id="faq-title"',
+      'id="final-title"']
       .map(mark => html.indexOf(mark));
     expect(order.every(index => index > 0)).toBe(true);
     expect([...order].sort((a, b) => a - b)).toEqual(order);
@@ -135,12 +138,21 @@ describe('style sample J, the later sections', () => {
     expect(JSON.stringify([J_WORK, J_WORK_SCENES])).not.toMatch(/它(?!们)/);
   });
 
-  it('keeps the Owner\'s four-row comparison word for word, each row over its pair of conversations', () => {
+  it('compares how the two work (plan A): four differences, the same question to both, the coach in its own words', () => {
     const { html } = render();
     for (const phrase of H_COMPARE.title.split(/(?<=，)|(?=带你)/)) expect(html).toContain(escape(phrase));
-    for (const row of H_COMPARE.rows) for (const cell of [row.generic, row.coach]) expect(html).toContain(escape(cell));
-    expect(J_COMPARE.pairs).toHaveLength(H_COMPARE.rows.length);
-    for (const pair of J_COMPARE.pairs) expect(html.split(escape(pair.question)).length - 1).toBeGreaterThanOrEqual(2);
+    expect(J_COMPARE.pairs.map(pair => pair.theme)).toEqual(['主动问你', '帮你判断，讲清理由', '记得你的情况', '用真实数据说话']);
+    for (const pair of J_COMPARE.pairs) {
+      expect(html.split(escape(pair.question)).length - 1).toBeGreaterThanOrEqual(2);
+      expect(html).toContain(`${J_COMPARE.sourceLabel}：${pair.source}`);
+      // Short: one or two lines a side.
+      expect(pair.generic.length).toBeLessThanOrEqual(2);
+      expect(Array.from(pair.coach).length).toBeLessThanOrEqual(120);
+    }
+    // Not the cooking person of the takeover, and no product pieces under the replies any more.
+    expect(J_COMPARE.pairs.map(pair => pair.source)).not.toContain('上班族 · 家常菜');
+    const compare = html.slice(html.indexOf('id="compare-title"'), html.indexOf('id="how-it-works"'));
+    expect(compare).not.toContain('资料库');
   });
 
   it('prices only the usual ways against ours, with the way to the pricing page; no plans, founder offer or 先聊后买', () => {
@@ -217,7 +229,7 @@ describe('sample J story timing', () => {
 });
 
 describe('sample J sample reports', () => {
-  it('stays off unless the preview or the flag turns it on, and then shows the four groups as placeholders', () => {
+  it('stays off unless the preview or the flag turns it on, and then shows the four real reports chapter by chapter', () => {
     const { data, html } = render();
     expect(html).not.toContain(J_SAMPLES.title);
     const extras = { flags: ALL_ON, showSamples: true };
@@ -225,13 +237,26 @@ describe('sample J sample reports', () => {
     expect(shown).toContain(J_SAMPLES.title);
     // Four reports to switch between; the first opens on its cover and every chapter of the real report.
     for (const report of J_SAMPLES.reports) expect(shown).toContain(`<b>${report.who}</b><span>${report.platform}</span>`);
-    expect(shown).toContain(`href="${samplePath(J_SAMPLES.reports[0].slug)}"`);
     expect(shown).toContain(J_SAMPLES.size);
-    for (const chapter of J_SAMPLES.chapters) expect(shown).toContain(chapter.title);
+    for (const chapter of J_SAMPLES.chapters) expect(shown).toContain(chapter);
     expect(J_SAMPLES.chapters).toHaveLength(14);
-    // Nothing of the reports themselves is made up: one placeholder on the cover, not one per chapter card.
-    expect(shown.split(J_SAMPLES.pending).length - 1).toBe(1);
-    expect(shown).not.toContain('关键结论');
+    // The reports are real: each has 14 chapter cards with what that person gets, dated, the people marked fictional.
+    for (const report of J_SAMPLES.reports) {
+      const data = SAMPLE_CHAPTERS[report.slug];
+      expect(data.chapters).toHaveLength(14);
+      for (const chapter of data.chapters) {
+        expect(chapter.give.length).toBeGreaterThan(5);
+        expect(chapter.key.length).toBeGreaterThan(5);
+        expect(`${chapter.give}${chapter.key}`).not.toMatch(/@[A-Za-z0-9]|https?:|它/);
+      }
+    }
+    const first = SAMPLE_CHAPTERS[J_SAMPLES.reports[0].slug];
+    expect(shown).toContain(J_SAMPLES.generated(first.generatedAt));
+    for (const chapter of first.chapters) expect(shown).toContain(chapter.key.replace(/"/g, '&quot;'));
+    expect(shown).not.toContain('样例报告生成中');
+    // The four reports differ: no key conclusion is shared between two of them.
+    const keys = J_SAMPLES.reports.flatMap(report => SAMPLE_CHAPTERS[report.slug].chapters.map(chapter => chapter.key));
+    expect(new Set(keys).size).toBe(keys.length);
     expect(J_SAMPLES.reports.filter(report => report.truth).map(report => report.slug)).toEqual(['student']);
     // Opening the takeover module: the samples come before the workspace.
     expect(shown.indexOf(J_SAMPLES.title)).toBeLessThan(shown.indexOf('我的定位分析'));

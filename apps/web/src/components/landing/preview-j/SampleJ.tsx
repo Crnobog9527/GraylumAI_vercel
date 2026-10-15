@@ -27,10 +27,9 @@ export type LandingData = ReturnType<typeof buildLandingPageData>;
 
 /**
  * Style sample J (Owner 2026-10-14, after sample H's v3): sample E's design baseline carrying sample H's content.
- * One full first screen (title, promise, button, the data-growth flywheel), the voice wall in sample F's form,
- * then "AI 教练怎么接手你的运营" as a scroll-locked story (positioning, the review panel, what you no longer do), the
- * product's other scenes, the Owner's four-row comparison, price (what the usual ways cost, the plan cards,
- * "先聊后买"), the FAQ and the close. The server HTML is the finished page.
+ * Order (Owner 2026-10-15, plan A): the first screen, the voice wall (the pain), the comparison (why a general AI does
+ * not solve it), "AI 教练怎么接手你的运营" as a scroll-locked story opened by the sample reports, "这些事，不用你再操心"
+ * (the work it takes off your hands), price, the FAQ and the close. The server HTML is the finished page.
  */
 export function SampleJ({ data, siteName, extras }: {
   data: LandingData; siteName: string; extras: PageExtras;
@@ -48,9 +47,9 @@ export function SampleJ({ data, siteName, extras }: {
       <main>
         <HeroJ />
         <VoiceWallJ notes={data.notes} />
+        <CompareJ />
         <TakeoverJ intro={extras.showSamples ? <SamplesJ /> : undefined} />
         <WorkJ flags={extras.flags} />
-        <CompareJ />
         <PriceJ proMonthly={data.pricing.proMonthly} rows={data.compareRows} />
         <FaqJ groups={data.faqGroups} />
         <FinalJ />
