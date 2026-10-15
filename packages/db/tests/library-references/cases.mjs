@@ -211,7 +211,7 @@ export async function runCases({db,Client,connectionString,report}) {
   assert.equal(await one(db,'SELECT result IS NULL v FROM runtime_executions WHERE id=$1',[pending.execution]),true);
   assert.equal(await one(db,'SELECT active_execution IS NULL v FROM runtime_sessions WHERE id=$1',[pending.session]),true);
  }
- report.checks.push('late completion never persists or shows an answer, before or after propagation; unknown cost waits then settles and releases session');
+ report.checks.push('late completion never persists an answer and database read returns no result, before or after propagation; host display awaits 4b; unknown cost waits then settles and releases session');
 
  // Account erasure owns and prunes the rows; only service_role reaches the functions; nobody reaches the table.
  assert.equal(await rpc(db,'erasure_business_owner','runtime_library_references',{actor_id:a}),a);
