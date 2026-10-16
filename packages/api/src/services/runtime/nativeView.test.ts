@@ -72,31 +72,40 @@ it('answers another actor\'s, missing or out-of-scope sessions with one indistin
   .rejects.toMatchObject({code:'NOT_FOUND',message:'RUNTIME_SESSION_NOT_FOUND'});
 });
 
-describe('LIB-4b: a paused round whose referenced document was deleted', () => {
-  const waiting = { executionId: 'waiting', state: 'waiting_credits', contentAvailable: true, primaryBody: 'PRIVATE_DOC_ANSWER' };
-  function source(read: { data?: unknown; error?: unknown }) {
-    let views = 0;
-    const rpc = vi.fn(async (name: string) => {
-      if (name === 'runtime_execution') return { data: null, error: null, ...read };
-      views++;
-      const executions = views === 1 ? [waiting, { ...visible, executionId: 'done' }]
-        : [{ ...waiting, primaryBody: null, unavailableReason: 'source_deleted', contentAvailable: false }];
+describe('LIB-4b: a paused round shows no body once its referenced source is gone', () => {
+  const round = (executionId: string, body: string) => ({ executionId, state: 'waiting_credits', contentAvailable: true, primaryBody: body });
+  const refs = { libraryReferences: [{ documentId: 'd', version: 1 }] };
+  // reads: per execution the runtime_execution answer; marked: executions SQL marks source_deleted on that read.
+  function source(reads: Record<string, { data?: unknown; error?: unknown }>, visible = true) {
+    const marked = new Set<string>();
+    const rpc = vi.fn(async (name: string, args: { p_execution_id?: string }) => {
+      if (name === 'runtime_execution') {
+        const read = reads[args.p_execution_id!]!;
+        if ((read.data as { unavailableReason?: string } | undefined)?.unavailableReason === 'source_deleted') marked.add(args.p_execution_id!);
+        return { data: null, error: null, ...read };
+      }
+      if (name === 'runtime_library_visible') return { data: visible, error: null };
+      const executions = [round('a', 'PRIVATE_A'), round('b', 'PRIVATE_B'), round('c', 'KEPT_C')]
+        .map(e => marked.has(e.executionId) ? { ...e, primaryBody: null, unavailableReason: 'source_deleted' } : e);
       return { data: { sessionId: session, executions }, error: null };
     });
     return { db: { rpc } as unknown as SupabaseClient, rpc };
   }
-  it('is read once through runtime_execution and the view is reread without its body', async () => {
-    const f = source({ data: { unavailableReason: 'source_deleted' } });
-    const view = await readNativeRuntimeView(f.db, actor, session);
-    expect(JSON.stringify(view)).not.toContain('PRIVATE_DOC_ANSWER');
-    expect(f.rpc.mock.calls.map(([name]) => name)).toEqual(['runtime_view', 'runtime_execution', 'runtime_view']);
-    expect(f.rpc).toHaveBeenCalledWith('runtime_execution', { p_actor_id: actor, p_execution_id: 'waiting', p_action: 'read' });
+  const plain = { data: { unavailableReason: null, context: {} } };
+  it('a deletion marked by the read is reread; a failed read stays hidden across that reread', async () => {
+    const f = source({ a: { error: { message: 'RUNTIME_SCOPE_DENIED' } }, b: { data: { unavailableReason: 'source_deleted' } }, c: plain });
+    const text = JSON.stringify(await readNativeRuntimeView(f.db, actor, session));
+    expect(text).not.toMatch(/PRIVATE_A|PRIVATE_B/);expect(text).toContain('KEPT_C');
+    expect(f.rpc.mock.calls.filter(([name]) => name === 'runtime_view')).toHaveLength(2);
+    expect(f.rpc).toHaveBeenCalledWith('runtime_execution', { p_actor_id: actor, p_execution_id: 'a', p_action: 'read' });
   });
-  it('keeps the body of a round whose sources are live, and hides it when its state cannot be read', async () => {
-    const live = source({ data: { unavailableReason: null } });
-    expect(JSON.stringify(await readNativeRuntimeView(live.db, actor, session))).toContain('PRIVATE_DOC_ANSWER');
-    expect(live.rpc).toHaveBeenCalledTimes(2);
-    const broken = source({ error: { message: 'RUNTIME_SCOPE_DENIED' } });
-    expect(JSON.stringify(await readNativeRuntimeView(broken.db, actor, session))).not.toContain('PRIVATE_DOC_ANSWER');
+  it('a referencing round whose document changed version is hidden; rounds without references are not rechecked', async () => {
+    const f = source({ a: { data: { unavailableReason: null, context: refs } }, b: plain, c: plain }, false);
+    const text = JSON.stringify(await readNativeRuntimeView(f.db, actor, session));
+    expect(text).not.toContain('PRIVATE_A');expect(text).toMatch(/PRIVATE_B[\s\S]*KEPT_C/);
+    expect(f.rpc.mock.calls.filter(([name]) => name === 'runtime_library_visible')).toHaveLength(1);
+    expect(f.rpc.mock.calls.filter(([name]) => name === 'runtime_view')).toHaveLength(1);
+    const live = source({ a: { data: { unavailableReason: null, context: refs } }, b: plain, c: plain }, true);
+    expect(JSON.stringify(await readNativeRuntimeView(live.db, actor, session))).toContain('PRIVATE_A');
   });
 });
