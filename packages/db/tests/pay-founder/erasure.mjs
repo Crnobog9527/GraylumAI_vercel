@@ -17,9 +17,10 @@ export async function founderErasureCases({ v, code, ok, fx, now, day }) {
   assert.equal(await listed(), 2);
   const remaining = a => v('SELECT account_erasure_business_remaining($1)::int v', [a]);
   assert.ok(await remaining(member) >= 2);
-  const before = await remaining(member);
 
   await v('SELECT account_erasure_confirm($1,$2) v', [member, randomUUID()]);
+  // Measured after closing: other leaves (e.g. the library storage proof) also count once a request exists.
+  const before = await remaining(member);
   assert.equal(await listed(), 1, 'a closing account leaves the wall in the confirming transaction');
   assert.equal(await v("SELECT revoke_reason v FROM data_use_consents WHERE profile_id=$1 AND purpose='founder_wall'"
     + ' ORDER BY granted_at DESC LIMIT 1', [member]), 'account_erasure');
