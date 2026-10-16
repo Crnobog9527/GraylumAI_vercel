@@ -13,6 +13,6 @@ BEGIN
  IF v IS NULL THEN RAISE EXCEPTION 'OPENROUTER_KEY_ROLLBACK_SLOT_EMPTY' USING ERRCODE='55000'; END IF;
  -- OpenRouter rows: no endpoint (defaults to OpenRouter) or the OpenRouter endpoint.
  UPDATE ai_models SET api_key=v
-  WHERE coalesce(btrim(api_endpoint),'')='' OR api_endpoint ILIKE 'https://openrouter.ai/%';
+  WHERE coalesce(btrim(api_endpoint),'')='' OR btrim(api_endpoint) ILIKE 'https://openrouter.ai/%';
 END $$;
 COMMIT;

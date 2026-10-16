@@ -74,15 +74,16 @@ try {
   report.checks.push('a value platform_secret_set would refuse is refused here too');
 
   // Rollback after the admin replaced the key: the CURRENT key goes back into every OpenRouter row.
-  await reset(); const a = await model(KEY), b = await model(KEY, 'https://openrouter.ai/api/v1'), other = await model(null, 'https://api.example.test/v1');
+  await reset(); const a = await model(KEY), b = await model(KEY, 'https://openrouter.ai/api/v1'), padded = await model(KEY, '  https://openrouter.ai/api/v1/chat/completions '),
+    other = await model(null, 'https://api.example.test/v1');
   await migrate();
   const admin = randomUUID();
   await c.query("INSERT INTO profiles(id,credits,role,status,is_deleted) VALUES($1,0,'admin','active',false)", [admin]);
   await c.query('SELECT platform_secret_set($1,$2,$3,$4)', ['openrouter', REPLACED, 1, admin]);
   await c.query(read(rollbackPath));
   const keys = Object.fromEntries((await c.query('SELECT id,api_key FROM ai_models')).rows.map(row => [row.id, row.api_key]));
-  assert.deepEqual(keys, { [a]: REPLACED, [b]: REPLACED, [other]: null });
-  report.checks.push('rollback after a replacement writes the current key (not the retired one) into OpenRouter rows only');
+  assert.deepEqual(keys, { [a]: REPLACED, [b]: REPLACED, [padded]: REPLACED, [other]: null });
+  report.checks.push('rollback after a replacement writes the current key (not the retired one) into OpenRouter rows only, padded endpoints included');
 
   await c.query("UPDATE platform_secrets SET vault_secret_id=NULL,last4=NULL WHERE slot='openrouter'");
   assert.match((await failure(c.query(read(rollbackPath))))?.message ?? '', /OPENROUTER_KEY_ROLLBACK_SLOT_EMPTY/);
