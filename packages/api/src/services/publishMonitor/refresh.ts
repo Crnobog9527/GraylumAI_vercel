@@ -99,70 +99,117 @@ async function settle(run: Run, outcome: Exclude<RefreshOutcome, 'stale'>, error
 
 const stale = (run: Run): RefreshResult => ({ outcome: 'stale', pages: run.pages, inserted: run.inserted, error: null });
 
+/** Why reading stops early: a settle outcome with its error code, or a claim that is no longer ours. */
+type Stop = { outcome: Exclude<RefreshOutcome, 'stale'>; error: string | null } | { outcome: 'stale' };
+
+/**
+ * The provider account must still carry the owner's reference (plan §4.1). Checked again after every feed read and
+ * before its posts are written, so a re-authorisation by someone else mid-refresh never stores their posts here.
+ */
+async function ownership(client: ClientDeps, claim: RefreshClaim): Promise<Stop | null> {
+  const account = await getAccount(client, claim.providerAccountId);
+  if (account.kind !== 'ok') return { outcome: outcomeFor(account), error: errorCode(account) };
+  if (account.value.status === 'disconnected') return { outcome: 'rejected', error: 'PROVIDER_DISCONNECTED' };
+  if (account.value.externalId?.split('.')[0] !== claim.ownerRef) return { outcome: 'taken_over', error: null };
+  return null;
+}
+
 /**
  * Refreshes one claimed connection within the owner's data window (days > 0; the caller checks the entitlement).
- * 1. The provider account must still carry the owner's reference (plan §4.1: checked before every read).
+ * 1. The provider account must still carry the owner's reference, before the first read and after every read.
  * 2. Discovery: newest pages until a page holds an already known post, every dated post is older than the window, the
  *    provider has no more pages, or the daily page cap is reached. An interrupted discovery resumes from its cursor.
- * 3. Known posts due on their observation schedule are read by post ID in small batches.
- * No new page starts after `until`; the lease is then released with the cursor kept.
+ * 3. Known posts due on their observation schedule are read by post ID in small batches. A platform that ignores the
+ *    ID filter (its answer holds posts that were not asked for) is paged through instead, until every due post was
+ *    seen, the feed ends or leaves the window, or the cap is reached (plan §4.1).
+ * Every feed page counts against the daily cap, empty ones included. No new page starts after `until`; the lease is
+ * then released with the cursor kept.
  */
 export async function refreshConnection(db: Rpc, client: ClientDeps, claim: RefreshClaim, windowDays: number,
   pageCap: number, until: number, now: Clock = Date.now): Promise<RefreshResult> {
   const run: Run = { db, claim, pages: 0, inserted: 0 };
   if (!claim.ownerRef) return settle(run, 'failed', 'OWNER_REF_MISSING');
   if (now() >= until) return settle(run, 'release');
-  const account = await getAccount(client, claim.providerAccountId);
-  if (account.kind !== 'ok') return settle(run, outcomeFor(account), errorCode(account));
-  if (account.value.status === 'disconnected') return settle(run, 'rejected', 'PROVIDER_DISCONNECTED');
-  if (account.value.externalId?.split('.')[0] !== claim.ownerRef) return settle(run, 'taken_over');
+  const stop = (reason: Stop) => reason.outcome === 'stale' ? stale(run) : settle(run, reason.outcome, reason.error);
+  const before = await ownership(client, claim);
+  if (before) return stop(before);
 
   const cutoff = now() - windowDays * 86_400_000;
   const inWindow = (post: NormalizedPost) => post.postedAt === null || Date.parse(post.postedAt) >= cutoff;
+  let budget = pageCap - claim.pagesUsed;
+  /** One feed page read and confirmed as still the owner's; budget and deadline are checked first. */
+  const read = async (query: Parameters<typeof readFeedPage>[3]): Promise<FeedPage | Stop | 'rejected_cursor'> => {
+    if (budget <= 0) return { outcome: 'partial', error: 'PAGE_CAP' };
+    if (now() >= until) return { outcome: 'release', error: null };
+    const page: Outcome<FeedPage> = await readFeedPage(client, claim.providerAccountId, claim.platform, query);
+    budget -= 1;
+    if (page.kind !== 'ok') {
+      return query?.cursor && page.kind === 'rejected' && outcomeFor(page) === 'failed' ? 'rejected_cursor'
+        : { outcome: outcomeFor(page), error: errorCode(page) };
+    }
+    return await ownership(client, claim) ?? page.value;
+  };
+  const isPage = (value: FeedPage | Stop | 'rejected_cursor'): value is FeedPage => typeof value === 'object' && 'posts' in value;
+  const scope = (posts: NormalizedPost[]) => {
+    const dated = posts.filter(post => post.postedAt !== null);
+    return { kept: posts.filter(inWindow), pastWindow: dated.length > 0 && dated.every(post => !inWindow(post)) };
+  };
+
   let cursor = claim.cursor;
   let resuming = cursor !== null;
-  let budget = pageCap - claim.pagesUsed;
   let first = true;
   for (;;) {
-    if (budget <= 0) return settle(run, 'partial', 'PAGE_CAP');
-    if (now() >= until) return settle(run, 'release');
-    const page: Outcome<FeedPage> = await readFeedPage(client, claim.providerAccountId, claim.platform, { cursor });
-    if (page.kind !== 'ok' && first && resuming && outcomeFor(page) === 'failed' && page.kind === 'rejected') {
+    const page = await read({ cursor });
+    if (page === 'rejected_cursor' && first && resuming) {
       // A saved cursor the provider no longer accepts: start discovery again from the newest page.
-      budget -= 1;
       cursor = null;
       resuming = false;
       continue;
     }
-    if (page.kind !== 'ok') return settle(run, outcomeFor(page), errorCode(page));
-    budget -= 1;
-    const value = page.value;
-    // An empty first page is never proof of "no posts" (plan §4.1); the database applies the empty-list rules.
-    if (first && !resuming && value.posts.length === 0 && value.rejected === 0) return settle(run, 'empty');
+    if (page === 'rejected_cursor') return settle(run, 'failed', 'PROVIDER_CURSOR_REJECTED');
+    if (!isPage(page)) return stop(page);
+    // An empty first page is never proof of "no posts" (plan §4.1); it is recorded (page count) and the database
+    // applies the empty-list rules.
+    if (first && !resuming && page.posts.length === 0 && page.rejected === 0) {
+      if (!await write(run, [], null, false)) return stale(run);
+      return settle(run, 'empty');
+    }
     first = false;
-    const kept = value.posts.filter(inWindow);
-    const dated = value.posts.filter(post => post.postedAt !== null);
-    const pastWindow = dated.length > 0 && dated.every(post => !inWindow(post));
-    const more = value.hasMore && !pastWindow;
-    const written = await write(run, kept, more ? value.nextCursor : null, true);
+    const { kept, pastWindow } = scope(page.posts);
+    const more = page.hasMore && !pastWindow;
+    const written = await write(run, kept, more ? page.nextCursor : null, true);
     if (!written) return stale(run);
     if (!more || written.existing > 0) break;
-    cursor = value.nextCursor;
+    cursor = page.nextCursor;
   }
 
-  // Known posts due today that discovery did not reach. Platforms without post-ID filtering simply return their feed
-  // again; those posts are upserted like any other (window applied), so nothing is duplicated.
   const due = await call(db, 'publish_monitor_refresh_due', { p_connection_id: claim.connectionId, p_lease: claim.lease,
     p_refresh_id: claim.refreshId, p_window_days: windowDays, p_limit: DUE_LIMIT }, z.array(z.string()).nullable());
   if (due === null) return stale(run);
-  for (let i = 0; i < due.length; i += DUE_BATCH) {
-    if (budget <= 0) return settle(run, 'partial', 'PAGE_CAP');
-    if (now() >= until) return settle(run, 'release');
-    const page = await readFeedPage(client, claim.providerAccountId, claim.platform,
-      { platformPostIds: due.slice(i, i + DUE_BATCH), limit: DUE_BATCH });
-    if (page.kind !== 'ok') return settle(run, outcomeFor(page), errorCode(page));
-    budget -= 1;
-    if (!await write(run, page.value.posts.filter(inWindow), null, false)) return stale(run);
+  const waiting = new Set(due);
+  for (let i = 0; i < due.length && waiting.size > 0; i += DUE_BATCH) {
+    const asked = due.slice(i, i + DUE_BATCH).filter(id => waiting.has(id));
+    if (asked.length === 0) continue;
+    const page = await read({ platformPostIds: asked, limit: DUE_BATCH });
+    if (page === 'rejected_cursor') return settle(run, 'failed', 'PROVIDER_REJECTED');
+    if (!isPage(page)) return stop(page);
+    const askedSet = new Set(asked);
+    const filtered = page.posts.every(post => askedSet.has(post.platformPostId));
+    if (!await write(run, scope(page.posts).kept, null, false)) return stale(run);
+    for (const post of page.posts) waiting.delete(post.platformPostId);
+    if (filtered) continue;
+    // The filter was ignored: page through the feed for the rest (cursor not saved; discovery owns the cursor).
+    let next: string | null = page.hasMore ? page.nextCursor : null;
+    while (next !== null && waiting.size > 0) {
+      const more = await read({ cursor: next });
+      if (more === 'rejected_cursor') return settle(run, 'failed', 'PROVIDER_CURSOR_REJECTED');
+      if (!isPage(more)) return stop(more);
+      const { kept, pastWindow } = scope(more.posts);
+      if (!await write(run, kept, null, false)) return stale(run);
+      for (const post of more.posts) waiting.delete(post.platformPostId);
+      next = more.hasMore && !pastWindow ? more.nextCursor : null;
+    }
+    break;
   }
   return settle(run, 'done');
 }

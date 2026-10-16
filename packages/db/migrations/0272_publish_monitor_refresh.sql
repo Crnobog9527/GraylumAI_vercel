@@ -17,6 +17,8 @@ ALTER TABLE public.social_connections ADD COLUMN IF NOT EXISTS empty_day date;
 -- Provider pages read on pages_day (daily cap shared by the job and manual refreshes, plan §4.1).
 ALTER TABLE public.social_connections ADD COLUMN IF NOT EXISTS pages_day date;
 ALTER TABLE public.social_connections ADD COLUMN IF NOT EXISTS pages_used integer NOT NULL DEFAULT 0;
+-- Last UTC day a refresh failed: refresh_attempts counts consecutive failed days, once per day.
+ALTER TABLE public.social_connections ADD COLUMN IF NOT EXISTS fail_day date;
 -- Last manual refresh by the user: at most one per connection per hour (plan §5.1).
 ALTER TABLE public.social_connections ADD COLUMN IF NOT EXISTS manual_refresh_at timestamptz;
 DO $$
@@ -237,7 +239,7 @@ BEGIN
  ELSIF p_outcome IN ('done','partial') THEN
   UPDATE social_connections SET refresh_day=today,refresh_state=CASE p_outcome WHEN 'done' THEN 'ok' ELSE 'partial' END,
    refresh_error=NULL,last_success_at=clock_timestamp(),
-   refresh_attempts=0,empty_streak=0,empty_day=NULL,
+   refresh_attempts=0,fail_day=NULL,empty_streak=0,empty_day=NULL,
    refresh_id=CASE WHEN p_outcome='done' THEN NULL ELSE refresh_id END,
    refresh_cursor=CASE WHEN p_outcome='done' THEN NULL ELSE refresh_cursor END,
    lease_owner=NULL,lease_expires_at=NULL,updated_at=clock_timestamp() WHERE id=c.id;
@@ -248,12 +250,16 @@ BEGIN
   had_posts:=c.last_success_at IS NOT NULL AND EXISTS(SELECT 1 FROM social_posts WHERE connection_id=c.id);
   streak:=CASE WHEN c.empty_day=today THEN c.empty_streak WHEN c.empty_day=today-1 THEN c.empty_streak+1 ELSE 1 END;
   UPDATE social_connections SET empty_streak=LEAST(streak,1000),empty_day=today,refresh_day=today,refresh_error=NULL,
+   refresh_attempts=0,fail_day=NULL,
    refresh_state=CASE WHEN had_posts THEN 'not_fetched' WHEN streak>=7 THEN 'reauth_suggested' ELSE 'no_posts_yet' END,
    status=CASE WHEN had_posts AND streak>=2 THEN 'reauth_required' ELSE status END,
    refresh_id=NULL,refresh_cursor=NULL,lease_owner=NULL,lease_expires_at=NULL,updated_at=clock_timestamp() WHERE id=c.id;
  ELSIF p_outcome='failed' THEN
-  UPDATE social_connections SET refresh_day=today,refresh_state=CASE WHEN refresh_attempts+1>=3 THEN 'failed'
-    ELSE 'not_fetched' END,refresh_error=COALESCE(p_error,'PROVIDER_FAILED'),refresh_attempts=LEAST(refresh_attempts+1,1000),
+  -- Consecutive failed UTC days, counted once per day however often the job or the user retries; a day without a
+  -- failure (done, partial, empty) breaks the run. Three in a row show "data update failed".
+  streak:=CASE WHEN c.fail_day=today THEN c.refresh_attempts WHEN c.fail_day=today-1 THEN c.refresh_attempts+1 ELSE 1 END;
+  UPDATE social_connections SET refresh_day=today,fail_day=today,refresh_attempts=LEAST(streak,1000),
+   refresh_state=CASE WHEN streak>=3 THEN 'failed' ELSE 'not_fetched' END,refresh_error=COALESCE(p_error,'PROVIDER_FAILED'),
    lease_owner=NULL,lease_expires_at=NULL,updated_at=clock_timestamp() WHERE id=c.id;
  ELSIF p_outcome='rejected' THEN
   UPDATE social_connections SET status='reauth_required',refresh_day=today,refresh_state='not_fetched',

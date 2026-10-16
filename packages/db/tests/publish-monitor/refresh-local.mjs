@@ -51,7 +51,7 @@ const finish = (k, outcome, err = null) => svc('SELECT publish_monitor_refresh_f
 const ago = days => new Date(Date.now() - days * 86_400_000).toISOString();
 // Moves a connection to "yesterday" so the next claim sees a new UTC day.
 const nextDay = id => c.query(`UPDATE social_connections SET refresh_day=refresh_day-1,empty_day=empty_day-1,
-  pages_day=pages_day-1 WHERE id=$1`, [id]);
+  pages_day=pages_day-1,fail_day=fail_day-1 WHERE id=$1`, [id]);
 
 try {
   await c.query(fixtureSql);
@@ -150,6 +150,12 @@ try {
     const kk = await claimOf(cfail);
     await page(kk, [post(`f${d}`, ago(1))], 'cx');
     await finish(kk, 'failed', 'PROVIDER_FAILED_500');
+    if (d === 2) {
+      // A second failure the same day (the user's manual refresh) is not a second failed day.
+      await finish(await svc('SELECT publish_monitor_refresh_request($1,$2,60) v', [fm.a, cfail]), 'failed', 'PROVIDER_FAILED_500');
+      await c.query('UPDATE social_connections SET manual_refresh_at=NULL WHERE id=$1', [cfail]);
+    }
+    assert.equal((await row(cfail)).refresh_attempts, d);
     assert.equal((await row(cfail)).refresh_state, d >= 3 ? 'failed' : 'not_fetched');
     await nextDay(cfail);
   }
@@ -157,7 +163,15 @@ try {
   const kr = await claimOf(cfail);
   await finish(kr, 'rejected', 'PROVIDER_REJECTED_401');
   assert.equal((await row(cfail)).status, 'reauth_required');
-  report.checks.push('failures keep data and cursor and show "failed" after three days; a 401 asks to re-authorise');
+  // An empty day in between breaks the run of failed days.
+  const gm = await member(), cg = await connection(gm);
+  await finish(await claimOf(cg), 'failed', 'PROVIDER_FAILED_500');
+  await nextDay(cg);
+  await finish(await claimOf(cg), 'empty');
+  await nextDay(cg);
+  await finish(await claimOf(cg), 'failed', 'PROVIDER_FAILED_500');
+  assert.deepEqual([(await row(cg)).refresh_attempts, (await row(cg)).refresh_state], [1, 'not_fetched']);
+  report.checks.push('failures count once per day, consecutive days only; "failed" after three; a 401 asks to re-authorise');
 
   // Takeover proven by the read check: quarantined with the provider disconnect queued (same as 0265).
   const tm = await member(), ct = await connection(tm);

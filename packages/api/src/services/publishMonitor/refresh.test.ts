@@ -19,13 +19,15 @@ const account = (externalId = `${OWNER}.${'b'.repeat(32)}`, status = 'connected'
   json(200, { id: 'spc_1', platform: 'youtube', status, external_id: externalId });
 
 type Page = { status?: number; posts?: unknown[]; cursor?: string | null };
-function provider(pages: Page[], accountResponse: () => Response = () => account()) {
+function provider(pages: Page[], accountResponse: () => Response = () => account(), ignoreIdFilter = false) {
   const urls: string[] = [];
   const deps: ClientDeps = { apiKey: 'pfm_test_FAKEKEY000000000000', limiter: { acquire: async () => ({ ok: true }) },
     fetchImpl: async input => {
       const url = String(input);
       urls.push(url);
       if (url.includes('/social-accounts/')) return accountResponse();
+      const ids = new URL(url).searchParams.getAll('platform_post_id');
+      if (ids.length && !ignoreIdFilter) return json(200, { data: ids.map(id => post(id, 2)), meta: { has_more: false } });
       const page = pages.shift() ?? { posts: [] };
       if (page.status) return json(page.status, { error: 'x' });
       return json(200, { data: page.posts ?? [], meta: { cursor: page.cursor ?? null, has_more: Boolean(page.cursor) } });
@@ -80,10 +82,35 @@ describe('publish-monitor refresh of one connection', () => {
     expect(finished(busy.calls)).toEqual([['release', 'PROVIDER_BUSY']]);
   });
 
-  it('an empty first page is reported as empty for the database rules, not as zero posts written', async () => {
+  it('an empty first page counts against the daily cap and is reported as empty for the database rules', async () => {
     const db = database();
     expect((await run(db, provider([{ posts: [] }]).deps)).outcome).toBe('empty');
-    expect(db.calls.some(c => c.name === 'publish_monitor_refresh_page')).toBe(false);
+    const pages = db.calls.filter(c => c.name === 'publish_monitor_refresh_page');
+    expect(pages.map(c => [c.args.p_posts, c.args.p_save_cursor])).toEqual([[[], false]]);
+  });
+
+  it('ownership is checked again after every read: a takeover mid-refresh stores nothing from that page', async () => {
+    const db = database();
+    let reads = 0;
+    const p = provider([{ posts: [post('a', 1)], cursor: 'c2' }, { posts: [post('theirs', 1)], cursor: 'c3' }],
+      () => (reads++ < 2 ? account() : account(`${'c'.repeat(32)}.${'d'.repeat(32)}`)));
+    expect((await run(db, p.deps)).outcome).toBe('taken_over');
+    const written = db.calls.filter(c => c.name === 'publish_monitor_refresh_page')
+      .flatMap(c => (c.args.p_posts as Array<{ platformPostId: string }>).map(x => x.platformPostId));
+    expect(written).toEqual(['a']);
+  });
+
+  it('a platform that ignores the post-ID filter is paged through until every due post was seen', async () => {
+    const db = database({ known: ['k'], due: ['old1', 'old2'] });
+    const p = provider([{ posts: [post('k', 1)] }, { posts: [post('k', 1)], cursor: 'f2' },
+      { posts: [post('old1', 10)], cursor: 'f3' }, { posts: [post('old2', 20)], cursor: 'f4' }, { posts: [post('never', 25)] }],
+    undefined, true);
+    expect((await run(db, p.deps)).outcome).toBe('done');
+    const feeds = p.urls.filter(u => u.includes('/social-account-feeds/'));
+    expect(feeds.length).toBe(4);
+    const written = db.calls.filter(c => c.name === 'publish_monitor_refresh_page')
+      .flatMap(c => (c.args.p_posts as Array<{ platformPostId: string }>).map(x => x.platformPostId));
+    expect(written).toEqual(expect.arrayContaining(['old1', 'old2']));
   });
 
   it('discovery stops at the first page holding a known post and saves the cursor with each page', async () => {
@@ -131,7 +158,7 @@ describe('publish-monitor refresh of one connection', () => {
   it('known posts due today are read by ID in batches after discovery', async () => {
     const due = Array.from({ length: 25 }, (_, i) => `due${i}`);
     const db = database({ known: ['k'], due });
-    const p = provider([{ posts: [post('k', 1)] }, { posts: [] }, { posts: [] }]);
+    const p = provider([{ posts: [post('k', 1)] }]);
     expect((await run(db, p.deps)).outcome).toBe('done');
     const batches = p.urls.filter(u => u.includes('platform_post_id'));
     expect(batches.map(u => new URL(u).searchParams.getAll('platform_post_id').length)).toEqual([20, 5]);
