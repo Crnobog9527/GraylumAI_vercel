@@ -10,6 +10,8 @@ import { getSafeErrorMessage, isAdminPermissionError } from '@/lib/safe-error-me
 import {
   Sheet,
   SheetContent,
+  SheetDescription,
+  SheetTitle,
   SheetTrigger,
 } from '@/components/ui/sheet';
 
@@ -147,6 +149,8 @@ export default function AdminGuard({ children }: AdminGuardProps) {
               className="w-[88vw] max-w-80 p-0"
               style={{ background: 'var(--bg-primary)', borderColor: 'var(--border-primary)' }}
             >
+              <SheetTitle className="sr-only">后台菜单</SheetTitle>
+              <SheetDescription className="sr-only">选择要进入的后台栏目</SheetDescription>
               <AdminSidebar mobile onNavigate={() => setMobileNavOpen(false)} />
             </SheetContent>
           </Sheet>
