@@ -177,15 +177,29 @@ describe('SubscriptionCard catalog availability', () => {
   });
 
   it.each([0, -1])('disables purchase for a %s dollar credit package', (price) => {
-    componentState.packagesQuery = queryState({ data: [{ id: 'package', name: '积分包', credits: 10, bonus_credits: 0, price, checkout_ready: true }] });
+    componentState.packagesQuery = queryState({ data: [{ id: 'package', name: '积分包', credits: 10, bonus_credits: 0, price, checkout_ready: true, member_checkout_ready: { pro: true, gold: true } }] });
     const markup = renderToStaticMarkup(createElement(CreditPackagesSection, {}));
     expect(markup).toContain('暂不可购买');
     expect(markup).toContain('disabled=""');
   });
 
+  it('opens member packs on the member-tier price card checkout charges, not the legacy generic price (#961 step 10)', () => {
+    // Staging after 0211: active packs have only Pro/Gold tier prices, so the legacy flag is false.
+    componentState.packagesQuery = queryState({ data: [{ id: 'package', name: '积分包', credits: 990, bonus_credits: 0, price: 9.9,
+      checkout_ready: false, member_checkout_ready: { pro: false, gold: true } }] });
+    componentState.entitlementsQuery = { data: { level: 'gold' }, isError: false };
+    expect(renderToStaticMarkup(createElement(CreditPackagesSection, { checkoutOpen: true }))).toContain('>购买<');
+    // A tier without its own price cannot be charged (0222 PAY_WAFFO_PRICE_MAPPING_MISSING): closed for that member.
+    componentState.entitlementsQuery = { data: { level: 'pro' }, isError: false };
+    expect(renderToStaticMarkup(createElement(CreditPackagesSection, { checkoutOpen: true }))).toContain('暂不可购买');
+    // A free user still sees the members-only answer while any tier can be bought.
+    componentState.entitlementsQuery = { data: { level: 'free' }, isError: false };
+    expect(renderToStaticMarkup(createElement(CreditPackagesSection, { checkoutOpen: true }))).toContain('开通会员后可购买');
+  });
+
   it('closes credit-pack purchases while card checkout is closed', () => {
     componentState.packagesQuery = queryState({ data: [{ id: 'package', name: '积分包', credits: 990, bonus_credits: 0, price: 9.9,
-      checkout_ready: true }] });
+      checkout_ready: true, member_checkout_ready: { pro: true, gold: true } }] });
     componentState.entitlementsQuery = { data: { level: 'gold' }, isError: false };
     expect(renderToStaticMarkup(createElement(CreditPackagesSection, { checkoutOpen: false }))).toContain('暂不可购买');
     expect(renderToStaticMarkup(createElement(CreditPackagesSection, { checkoutOpen: true }))).toContain('>购买<');
@@ -193,7 +207,7 @@ describe('SubscriptionCard catalog availability', () => {
 
   it('keeps packs closed while the membership waits for its renewal charge (grace keeps access, not packs)', () => {
     componentState.packagesQuery = queryState({ data: [{ id: 'package', name: '积分包', credits: 990, bonus_credits: 0, price: 9.9,
-      checkout_ready: true }] });
+      checkout_ready: true, member_checkout_ready: { pro: true, gold: true } }] });
     componentState.entitlementsQuery = { data: { level: 'pro' }, isError: false };
     const grace = renderToStaticMarkup(createElement(CreditPackagesSection, { renewalGrace: true }));
     expect(grace).toContain('续费完成后可购买');
@@ -202,7 +216,7 @@ describe('SubscriptionCard catalog availability', () => {
   });
 
   it('shows a member the discounted price they pay, with the real list price struck through', () => {
-    componentState.packagesQuery = queryState({ data: [{ id: 'package', name: '积分包', credits: 100, bonus_credits: 0, price: 1, checkout_ready: true }] });
+    componentState.packagesQuery = queryState({ data: [{ id: 'package', name: '积分包', credits: 100, bonus_credits: 0, price: 1, checkout_ready: true, member_checkout_ready: { pro: true, gold: true } }] });
     componentState.plansQuery = queryState({ data: [{ ...plan, discount: 0.1 }, { ...plan, id: 'plan-gold', level: 'gold', discount: 0.2 }] });
     const member = renderToStaticMarkup(createElement(CreditPackagesSection, {}));
     expect(member).toMatch(/data-testid="profile-credit-package-price"[^>]*>\$0\.90<del/);
@@ -215,7 +229,7 @@ describe('SubscriptionCard catalog availability', () => {
 
   it('free users see packs but cannot buy them, with the members-only notice', () => {
     componentState.packagesQuery = queryState({ data: [{ id: 'package', name: '积分包', credits: 990, bonus_credits: 0, price: 9.9,
-      checkout_ready: true }] });
+      checkout_ready: true, member_checkout_ready: { pro: true, gold: true } }] });
     componentState.entitlementsQuery = { data: { level: 'free' }, isError: false };
     const free = renderToStaticMarkup(createElement(CreditPackagesSection, {}));
     expect(free).toContain('开通会员后可购买');
@@ -418,7 +432,7 @@ describe('membership page in a local browser', () => {
     // The profile still says pro (CreditStatsCard user), the server entitlement says gold: both card and dialog use gold.
     const { page, errors } = await open({ level: 'gold', membership: { ...ENTRY, memberships: [proMember] },
       packages: [{ id: '00000000-0000-4000-8000-0000000000bb', name: '990 积分', credits: 990, bonus_credits: 0, price: 9.9,
-        checkout_ready: true }] });
+        checkout_ready: true, member_checkout_ready: { pro: true, gold: true } }] });
     try {
       await page.getByRole('button', { name: '购买', exact: true }).click();
       await browserExpect(page.getByTestId('method-checkout-method-card')).toBeVisible();
