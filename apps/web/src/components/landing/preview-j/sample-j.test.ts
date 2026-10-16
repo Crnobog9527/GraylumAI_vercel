@@ -116,9 +116,9 @@ describe('style sample J', () => {
 });
 
 describe('style sample J, the later sections', () => {
-  it('runs the Owner\'s order (plan A): voice wall, comparison, the story, the work, price, FAQ and the close', () => {
+  it('runs the Owner\'s order (2026-10-16): voice wall, the story, the work, comparison, price, FAQ and the close', () => {
     const { html } = render();
-    const order = ['id="voice-title"', 'id="compare-title"', 'id="how-it-works"', 'id="work-title"', 'id="pricing-title"', 'id="faq-title"',
+    const order = ['id="voice-title"', 'id="how-it-works"', 'id="work-title"', 'id="compare-title"', 'id="pricing-title"', 'id="faq-title"',
       'id="final-title"']
       .map(mark => html.indexOf(mark));
     expect(order.every(index => index > 0)).toBe(true);
@@ -290,9 +290,9 @@ describe('sample J sample reports', () => {
     const keys = J_SAMPLES.reports.flatMap(report => SAMPLE_CHAPTERS[report.slug].chapters.map(chapter => chapter.key));
     expect(new Set(keys).size).toBe(keys.length);
     expect(J_SAMPLES.reports.filter(report => report.truth).map(report => report.slug)).toEqual(['student']);
-    // Opening the takeover module: the samples come before the workspace.
-    expect(shown.indexOf(J_SAMPLES.title)).toBeLessThan(shown.indexOf('我的定位分析'));
-    expect(shown.indexOf(J_SAMPLES.title)).toBeGreaterThan(shown.indexOf('id="voice-title"'));
+    // Owner 2026-10-16: the samples are their own module, after the takeover story and before the work.
+    expect(shown.indexOf(J_SAMPLES.title)).toBeGreaterThan(shown.indexOf('我的定位分析'));
+    expect(shown.indexOf(J_SAMPLES.title)).toBeLessThan(shown.indexOf('id="work-title"'));
   });
 });
 

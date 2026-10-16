@@ -11,7 +11,7 @@ import type { PageExtras } from './extras-j';
 import { PriceJ } from './PriceJ';
 import { CompareJ } from './CompareJ';
 import { FaqJ, FinalJ } from './SectionsJ';
-import { SamplesJ } from './SamplesJ';
+import { SamplesSectionJ } from './SamplesJ';
 import { SiteFooterJ } from './SiteFooterJ';
 import { SiteHeaderJ } from './SiteHeaderJ';
 import { TakeoverJ } from './TakeoverJ';
@@ -28,9 +28,9 @@ export type LandingData = ReturnType<typeof buildLandingPageData>;
 
 /**
  * Style sample J (Owner 2026-10-14, after sample H's v3): sample E's design baseline carrying sample H's content.
- * Order (Owner 2026-10-15, plan A): the first screen, the voice wall (the pain), the comparison (why a general AI does
- * not solve it), "AI 教练怎么接手你的运营" as a scroll-locked story opened by the sample reports, "这些事，不用你再操心"
- * (the work it takes off your hands), price, the FAQ and the close. The server HTML is the finished page.
+ * Order (Owner 2026-10-16, by region number): the first screen, the voice wall (the pain), "AI 教练怎么接手你的运营"
+ * as a scroll-locked story, the sample reports, "这些事，不用你再操心" (the work it takes off your hands), the
+ * comparison (why a general AI does not solve it), price, the FAQ and the close. The server HTML is the finished page.
  */
 export function SampleJ({ data, siteName, extras }: {
   data: LandingData; siteName: string; extras: PageExtras;
@@ -48,9 +48,10 @@ export function SampleJ({ data, siteName, extras }: {
       <main>
         <HeroJ note={data.heroNote} />
         <VoiceWallJ notes={data.notes} />
-        <CompareJ />
-        <TakeoverJ intro={extras.showSamples ? <SamplesJ /> : undefined} />
+        <TakeoverJ />
+        {extras.showSamples ? <SamplesSectionJ /> : null}
         <WorkJ flags={extras.flags} />
+        <CompareJ />
         <PriceJ proMonthly={data.pricing.proMonthly} rows={data.compareRows} />
         <FaqJ groups={data.faqGroups} />
         <FinalJ freeTrial={allOn(extras.flags, ['signupGrant'])} />

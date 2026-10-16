@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 'use client';
 
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { HOW_IT_WORKS } from '@/lib/landing/landing-copy';
 import { J_TAKEOVER_MOMENTS } from '@/lib/landing/landing-copy-j-takeover';
 import { cn } from '@/lib/utils';
@@ -36,10 +36,10 @@ const reducedMotion = () => Boolean(window.matchMedia?.('(prefers-reduced-motion
  * the visitor scrolls in, the stage holds still and the scroll plays: 你是谁 (shown as "帮你挖掘定位"), 方向判断, 找对标,
  * then the long report from the workbench footer, then the jury opened from the report. The workspace is a picture
  * (inert); the report window and the jury's result page on top of it can be scrolled and clicked. The server HTML,
- * no JavaScript and reduced motion get every moment stacked, finished. `intro` (the sample
- * reports) sits under the title.
+ * no JavaScript and reduced motion get every moment stacked, finished. The sample reports are their own module after
+ * this one (Owner 2026-10-16).
  */
-export function TakeoverJ({ intro }: { intro?: ReactNode }) {
+export function TakeoverJ() {
   const ref = useRef<HTMLElement>(null);
   const [locked, setLocked] = useState(false);
   const [progress, setProgress] = useState(0);
@@ -76,10 +76,9 @@ export function TakeoverJ({ intro }: { intro?: ReactNode }) {
 
   if (!locked) {
     return (
-      <section id="how-it-works" aria-labelledby="takeover-title" className={cn(page.section, styles.static)} data-zone="takeover" data-region="接手演示">
+      <section id="how-it-works" aria-labelledby="takeover-title" className={cn(page.section, styles.static)} data-zone="takeover" data-region="接手动画">
         <div className={page.wrap}>
           <h2 id="takeover-title" className={page.display}>{HOW_IT_WORKS.title}</h2>
-          {intro}
           {J_TAKEOVER_MOMENTS.map((moment, index) => (
             <article key={moment.id} className={styles.staticStep} data-region="接手步骤">
               <div className={styles.caption}><h3>{moment.caption}</h3><p>{moment.note}</p></div>
@@ -94,9 +93,8 @@ export function TakeoverJ({ intro }: { intro?: ReactNode }) {
   const { index, local } = chapterAt(progress);
   const moment = J_TAKEOVER_MOMENTS[index];
   return (
-    <div className={styles.outer} data-zone="takeover" data-region="接手演示">
-      {intro ? <div className={cn(page.wrap, styles.intro)}>{intro}</div> : null}
-      <section ref={ref} id="how-it-works" aria-labelledby="takeover-title" className={styles.takeover} data-region="接手动画">
+    <div className={styles.outer} data-zone="takeover" data-region="接手动画">
+      <section ref={ref} id="how-it-works" aria-labelledby="takeover-title" className={styles.takeover}>
         <div className={styles.stage}>
           <div className={cn(page.wrap, styles.frame)}>
             <div className={styles.head}>

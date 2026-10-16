@@ -56,8 +56,11 @@ describe('region numbers of the style samples', () => {
 
   it('samples J and H name their modules in page order (the numbers come from that order, not the markup)', () => {
     const data = buildLandingPageData(ALL_ON, [plan('pro', 29, 279), plan('gold', 69, 621)]);
-    const j = names(renderToStaticMarkup(createElement(SampleJ, { data, siteName: 'Graylum', extras: { flags: ALL_ON } })));
-    expect(inOrder(j, ['首屏', '用户心声', '对比区', '接手演示', '省心事项', '价格', '常见问题', '结尾行动', '页脚'])).toBe(true);
+    const extras = { flags: ALL_ON, showSamples: true };
+    const j = names(renderToStaticMarkup(createElement(SampleJ, { data, siteName: 'Graylum', extras })));
+    // Owner 2026-10-16: the takeover story, then the sample reports as their own module, then the work, then the comparison.
+    const modules = ['首屏', '用户心声', '接手动画', '样例报告', '省心事项', '对比区', '价格', '常见问题', '结尾行动', '页脚'];
+    expect(j.filter(name => modules.includes(name))).toEqual(modules);
     expect(j.join()).not.toMatch(/\d/);
     const h = names(renderToStaticMarkup(createElement(SampleH, { data, siteName: 'Graylum', membershipHref: '/profile' })));
     expect(inOrder(h, ['首屏', '适合谁', '为什么不用通用 AI', '用户心声', '怎么用', '价格', '常见问题', '结尾行动', '页脚'])).toBe(true);

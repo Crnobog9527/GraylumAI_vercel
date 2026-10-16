@@ -6,8 +6,6 @@
  * Phone: the sidebar becomes one row of steps above the window, the current step's note under it.
  */
 .outer { position: relative; }
-.intro { display: grid; gap: 28px; padding-top: 112px; }
-@media (max-width: 767px) { .intro { padding-top: 72px; } }
 .takeover { position: relative; height: 600svh; }
 @media (max-width: 767px) { .takeover { height: 520svh; } }
 .stage { position: sticky; top: 0; display: grid; grid-template-rows: minmax(0, 1fr); height: 100svh; padding: 76px 0 18px; overflow: hidden; }

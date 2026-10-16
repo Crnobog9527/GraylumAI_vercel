@@ -21,7 +21,16 @@ const reducedMotion = () => Boolean(window.matchMedia?.('(prefers-reduced-motion
  * "15 秒看清概览", the five chapters that matter most, lit one after another with one conclusion each (pause it or
  * pick one); and the whole report, with a chapter list that jumps within it. The caller shows this block only in a
  * local preview or behind the flag. Server HTML and reduced motion show every layer finished.
+ * Its own module since 2026-10-16 (Owner): after "AI 教练怎么接手你的运营", on that module's backdrop.
  */
+export function SamplesSectionJ() {
+  return (
+    <section aria-label={J_SAMPLES.title} className={page.section} data-zone="takeover" data-region="样例报告">
+      <div className={page.wrap}><SamplesJ /></div>
+    </section>
+  );
+}
+
 export function SamplesJ() {
   const [active, setActive] = useState(0);
   // A report the visitor picked plays its overview at once; the first one waits until it scrolls into view.
@@ -29,7 +38,7 @@ export function SamplesJ() {
   const report = J_SAMPLES.reports[active];
   const data = SAMPLE_CHAPTERS[report.slug];
   return (
-    <div className={styles.samples} data-region="样例报告">
+    <div className={styles.samples}>
       <div className={styles.head}>
         <h2 className={page.display}>{J_SAMPLES.title}</h2>
         <p>{J_SAMPLES.lede}</p>
