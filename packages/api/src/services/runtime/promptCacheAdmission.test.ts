@@ -30,7 +30,8 @@ function fixture(model='anthropic/test',write:string|undefined='2.5',real=true,i
   upperUsd:openRouterBound(providerLimits,100).upperUsd,inputLimit:32000,outputLimit:100,
   automaticRetry:false as const,hiddenTools:false as const,lookupSupported:true};
  const row={id:modelId,model_id:model,is_active:'true',provider:real?'openrouter':'fixture',max_tokens:1000,input_limit:32000,
-  config:pricingConfig(model,'synthetic/fp8','2','0')};
+  // A real chosen Skill freezes the administrator's interactive reasoning, like free chat.
+  config:{...pricingConfig(model,'synthetic/fp8','2','0'),reasoning:configuredReasoning(model).reasoning}};
  const configReads=vi.fn();let saved:unknown=null;
  const rpc=vi.fn(async(name:string,args:Record<string,unknown>)=>{
   if(name==='runtime_session_context')return {data:{scope:{kind:'positioning_draft',draftId:actor}},error:null};

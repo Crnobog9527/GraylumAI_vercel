@@ -270,7 +270,7 @@ it.each([false,true])('real Skill admission freezes step streaming and leaves pl
  const context=runtimeContext.parse(admitted.context);
  expect(context).toMatchObject({role:'skill',moduleId,skillId,revisionId,nativeOutput:'native-output-v1',
   providerRequestFormat:step?'serial-tools-v4-stream':'serial-tools-v6-reasoning',
-  reasoning:step?{parameter:'reasoning',value:{max_tokens:2048}}:{parameter:'none'},
+  reasoning:{parameter:'reasoning',value:{max_tokens:2048}},
   attachedOrganizer:{modelId:organizer,reasoning:{parameter:'reasoning',value:{enabled:false}}},
  });
  expect(STREAMING_FORMATS.has(context.providerRequestFormat!)).toBe(step);
@@ -288,7 +288,7 @@ it.each([false,true])('real Skill admission freezes step streaming and leaves pl
  expect(primary.stream).toBe(step);
  expect(attached.stream).toBe(false);
  expect(attached.reasoning).toEqual({enabled:false});
- if(step)expect(primary.reasoning).toEqual({max_tokens:2048});
+ expect(primary.reasoning).toEqual({max_tokens:2048});
  expect(admitted.billing.sourceHash).toBe(createHash('sha256').update(JSON.stringify(admitted.context)).digest('hex'));
  const bytes=JSON.stringify(admitted);
  f.models[0]!.config.reasoning.purposes={};
@@ -326,21 +326,20 @@ it('new cap freezes the new quote while an old execution and organizer retain th
  expect(old.context.maxOutputTokens).toBe(8192);
 });
 
-it('CHAT-NATIVE-OUTPUT: a chosen Skill without an organizer freezes the evidenced v6 format, reasoning none, and streams',async()=>{
+it('CHAT-NATIVE-OUTPUT: a chosen Skill without an organizer freezes the evidenced v6 format, the interactive reasoning, and streams',async()=>{
  activateSyntheticStepSkill();
  const f=fixture();
  for(const quote of f.policy.real.callPolicies)quote.upperUsd=openRouterBound(quote.providerLimits,quote.outputLimit).upperUsd;
  const service=runtimeAdmissionService(f.user,f.admin,{...f.policy,mentorStream:false,stepStream:false});
  const admitted=await service.prepare({...f.input,organizeAfter:false,selection:{kind:'skill' as const,moduleId,revisionId}});
  const context=runtimeContext.parse(admitted.context);
- expect(context).toMatchObject({role:'skill',providerRequestFormat:'serial-tools-v6-reasoning',reasoning:{parameter:'none'},
+ expect(context).toMatchObject({role:'skill',providerRequestFormat:'serial-tools-v6-reasoning',reasoning:{effort:'none'},
   textStream:'plain-text-v1'});
  expect(context).not.toHaveProperty('attachedOrganizer');
- // Reasoning none adds no field: the request bytes equal the former unevidenced v2 request.
+ // Same as free chat: the request carries exactly the administrator's interactive reasoning field.
  const policy=f.policy.real.callPolicies.find(quote=>quote.modelId===context.modelId)!;
- const sdk=JSON.stringify({model:context.model,messages:[{role:'user',content:'x'}],stream:false});
- const asV6=JSON.parse(openRouterRequestBody(sdk,{context:{...context,textStream:undefined},policy,phase:'skill',primaryDialogue:true}));
- const asV2=JSON.parse(openRouterRequestBody(sdk,{context:{...context,textStream:undefined,providerRequestFormat:'serial-tools-v2',reasoning:undefined},
-  policy,phase:'skill',primaryDialogue:true}));
- expect(asV6).toEqual(asV2);
+ const sdk=(fields:object)=>JSON.stringify({model:context.model,messages:[{role:'user',content:'x'}],stream:false,...fields});
+ const request={context:{...context,textStream:undefined},policy,phase:'skill',primaryDialogue:true};
+ expect(JSON.parse(openRouterRequestBody(sdk(frozenReasoningFields(context.reasoning)),request)).reasoning_effort).toBe('none');
+ expect(()=>openRouterRequestBody(sdk({}),request)).toThrow('RUNTIME_PROVIDER_BINDING_DENIED');
 });
