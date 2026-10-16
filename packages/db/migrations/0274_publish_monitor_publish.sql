@@ -1,6 +1,6 @@
 -- Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved.
 -- PUBLISH-MONITOR PR-5 (docs/launch/tasks/PUBLISH-MONITOR.md §2.1, §6, §9 items 7/8/17/18): one-click publishing.
--- Number pending from the controller.
+-- Number 0274 assigned by the controller.
 --
 -- A publish job moves claimed -> dispatching -> (unknown) -> completed | failed, or claimed -> released:
 --   claimed      the idempotency key, the request fingerprint, the global slots and the credit hold are taken; nothing

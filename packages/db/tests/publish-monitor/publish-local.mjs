@@ -1,5 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-// Local-only PUBLISH-MONITOR PR-5 (0269) verification: idempotency, targets, slots, credit hold and settlement,
+// Local-only PUBLISH-MONITOR PR-5 (0274) verification: idempotency, targets, slots, credit hold and settlement,
 // dispatch ownership checks, reconciliation, manual review and erasure. No provider is involved.
 // Run: node packages/db/tests/publish-monitor/publish-local.mjs --local-only
 import assert from 'node:assert/strict';
@@ -9,7 +9,7 @@ import { localDb, read, root } from '../runtime-view-perf/local-db.mjs';
 import { closeAccount } from '../erasure-b2a/cases.mjs';
 import { fixtureSql } from './fixtures.mjs';
 
-const migrationPath = 'packages/db/migrations/0269_publish_monitor_publish.sql';
+const migrationPath = 'packages/db/migrations/0274_publish_monitor_publish.sql';
 const entry = ['publish_monitor_publish_claim(uuid,text,text,uuid,uuid,uuid[])', 'publish_monitor_publish_dispatch(uuid,uuid,jsonb)',
   'publish_monitor_publish_release(uuid,text)', 'publish_monitor_publish_unknown(uuid,text)',
   'publish_monitor_publish_record(uuid,text,jsonb)', 'publish_monitor_publish_webhook_result(text,text,boolean,text)',
@@ -21,7 +21,7 @@ const internal = ['publish_monitor_publish_price()', 'publish_monitor_publish_cr
   'publish_monitor_quota_period()', 'publish_monitor_publish_view(social_publish_jobs)',
   'publish_monitor_publish_close(social_publish_jobs,integer,text,text)', 'publish_monitor_publish_lock(uuid)'];
 const db = await localDb(), c = db.client;
-const report = { build: db.build, migration: '0269', checks: [] };
+const report = { build: db.build, migration: '0274', checks: [] };
 const v = async (sql, args = [], client = c) => (await client.query(sql, args)).rows[0]?.v;
 const code = async (promise, expected) => {
   const error = await promise.then(() => null, e => e);
@@ -84,7 +84,7 @@ try {
   const before = await v(catalogSql);
   await c.query(read(migrationPath));
   assert.deepEqual(await v(catalogSql), before);
-  report.checks.push('0269 runs twice with an unchanged catalog');
+  report.checks.push('0274 runs twice with an unchanged catalog');
 
   for (const f of [...entry, ...internal]) {
     for (const role of ['anon', 'authenticated']) {
@@ -266,6 +266,31 @@ try {
   }
   await code(claim(r, 'key-rej-0009', fp('9'), [r.connections[0].id]), 'PUBLISH_MONITOR_TOO_MANY_REJECTIONS');
   report.checks.push('repeated definite refusals pause the user\'s new submissions');
+
+  // Disconnecting a connection with an open publish: only disconnect at the provider, the hold stays until the result,
+  // then the job settles normally and the deletion proceeds (plan §4.1, #990 convention: targets carry connectionId).
+  const d = await member(12);
+  const dj = await claim(d, 'key-disc-0001', fp('l'), d.connections.map(x => x.id));
+  assert.equal(await credits(d.a), 0, 'the whole balance can be held, never more');
+  await dispatch(d, dj.id);
+  await svc('SELECT publish_monitor_publish_unknown($1,$2) v', [dj.id, 'PUBLISH_MONITOR_RESULT_UNKNOWN']);
+  await svc('SELECT publish_monitor_disconnect($1,$2) v', [d.a, d.connections[0].id]);
+  const work = async pid => (await svc('SELECT publish_monitor_provider_work_claim(50,120) v')).find(x => x.providerAccountId === pid);
+  assert.equal((await work(d.connections[0].provider)).action, 'disconnect', 'an open publish holds the provider deletion');
+  assert.equal(await credits(d.a), 0, 'disconnecting keeps the hold');
+  await record(dj.id, 'sp_disc', { [d.connections[0].id]: { status: 'published' }, [d.connections[1].id]: { status: 'failed' } });
+  assert.equal(await credits(d.a), 6, 'settled for the one published platform; the rest returned');
+  assert.equal((await job(dj.id)).state, 'completed');
+  await c.query('UPDATE social_connections SET lease_owner=NULL,lease_expires_at=NULL WHERE provider_account_id=$1',
+    [d.connections[0].provider]);
+  assert.equal((await work(d.connections[0].provider)).action, 'delete', 'once settled the deletion goes ahead');
+  // A claimed (never sent) job whose connection was disconnected is released at dispatch, not sent.
+  const d2 = await member(100, ['x']);
+  const cj = await claim(d2, 'key-disc-0002', fp('m'), [d2.connections[0].id]);
+  await svc('SELECT publish_monitor_disconnect($1,$2) v', [d2.a, d2.connections[0].id]);
+  assert.deepEqual([(await dispatch(d2, cj.id)).dispatch, await credits(d2.a)], [false, 100]);
+  report.checks.push('disconnect with an open publish keeps the hold and delays provider deletion until settled; a claimed '
+    + 'job on a disconnected account is released; holds never exceed the balance');
 
   // Erasure: an open job keeps only its check fields, still settles afterwards, and then disappears.
   const e = await member();

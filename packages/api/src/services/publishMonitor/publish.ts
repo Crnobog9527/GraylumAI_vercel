@@ -7,7 +7,7 @@ import { getAccount, type ClientDeps, type Outcome } from './postForMe/client';
 import { createPost, createUploadUrl, findPostByExternalId, listPostResults, type UploadSlot } from './postForMe/posts';
 
 /**
- * PUBLISH-MONITOR PR-5 one-click publishing (plan §2.1, §6, §9 items 7/8/17/18; migration 0269).
+ * PUBLISH-MONITOR PR-5 one-click publishing (plan §2.1, §6, §9 items 7/8/17/18; migration 0274).
  * The database owns every decision (idempotency, targets, slots, credits, states); this layer reads and writes
  * Post for Me. The caption and media URLs only pass through this request: nothing of them is stored or logged.
  */
