@@ -159,8 +159,9 @@ it('RUNTIME: a research mentor turn claims the subcall between its model calls, 
     expect(await calls()).toEqual(paid.map(c => ({ ...c })));
     expect(supplier.calls).toBe(1);
     expect(f.requests).toHaveLength(2);
-    const run = (await f.db.query('select state,charged_credits from bill2_runs where id=$1', [f.admitted.runId])).rows[0];
+    const run = (await f.db.query(`select r.charged,p.credits from bill2_runs r,profiles p where r.id=$1 and p.id=$2`,
+      [f.admitted.runId, f.actor])).rows[0];
     // (0.003 + 0.005 + 0.003) × 1000 × 1 = 11 credits, rounded once for the whole turn.
-    expect(run).toMatchObject({ state: 'settled', charged_credits: 11 });
+    expect(run).toEqual({ charged: 11, credits: 1000 - 11 });
   } finally { await f.close(); }
 }, 60000);
