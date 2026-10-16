@@ -319,6 +319,18 @@ try {
   await claim();
   assert.equal(await state(b1.requestId), undefined);
   report.checks.push('erasure completes while unsettled attempts keep their cleanup record; the 30-day purge runs daily');
+  // Erasure of a quarantined connection whose takeover disconnect exhausted its retries starts a fresh deletion.
+  const quar = await member();
+  await connect(quar, 'pfm_erase_quar');
+  await c.query(`UPDATE social_connections SET status='quarantined',provider_disconnect_pending=true,deletion_attempts=50,
+    deletion_error='PROVIDER_RETRY' WHERE provider_account_id='pfm_erase_quar'`);
+  await closeAccount(c, { actor: quar.a });
+  for (let i = 0; i < 10; i++) await c.query('SELECT account_erasure_local_cleanup($1,true)', [quar.a]);
+  const erasing = await conn('pfm_erase_quar');
+  assert.deepEqual([erasing.status, erasing.deletion_attempts, erasing.deletion_error], ['deleting', 0, null],
+    'erasure does not inherit an exhausted takeover retry count');
+  assert.ok((await work()).some(x => x.providerAccountId === 'pfm_erase_quar'), 'the erasure deletion is claimable');
+  report.checks.push('erasure resets the retry count of a quarantined connection so its provider deletion is claimed');
   assert.equal(db.sql(read('packages/db/tests/account-open-policy-audit.sql')), '');
   report.checks.push('account-open policy audit returns zero rows');
 } catch (error) { report.failed = String(error.stack ?? error); process.exitCode = 1; }
