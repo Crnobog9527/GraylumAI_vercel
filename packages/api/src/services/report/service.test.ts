@@ -91,6 +91,16 @@ it('SQL OPC_CAPTURE_PENDING survives admission and the report error boundary', a
     organizeAfter:false,sources:[],network:'deny'}).catch(reportError))
     .rejects.toMatchObject({code:'BAD_REQUEST',message:'OPC_CAPTURE_PENDING'});
 });
+it('SQL REPORT_BENCHMARKS_REQUIRED survives admission and the report error boundary', async () => {
+  const admin = { rpc: async () => ({ data: null, error: {code:'P0001',message:'REPORT_BENCHMARKS_REQUIRED'} }) } as unknown as SupabaseClient;
+  const admission = runtimeAdmissionService(user as unknown as SupabaseClient, admin, { ...policy,
+    reportGeneration: {version:1,projectId:id,roundId:id,evidenceIds:[],snapshotHash:'a'.repeat(64),
+      packageHash:'b'.repeat(64),workflowHash:'c'.repeat(64),templateHash:'d'.repeat(64),sections:['One'],maxCharacters:12000},
+  });
+  await expect(admission.prepare({sessionId:id,requestId:id,input:'report',selection:{kind:'ordinary',modelId:id},
+    organizeAfter:false,sources:[],network:'deny'}).catch(reportError))
+    .rejects.toMatchObject({code:'BAD_REQUEST',message:'REPORT_BENCHMARKS_REQUIRED'});
+});
 it.each([[{ enabled: true }, true], [null, false], [{ enabled: false }, false], ['{"enabled":true}', false], [{ enabled: true, extra: 1 }, false]])(
   'reportEnabled reads the same strict switch as start (%j)', async (value, expected) => {
     const query = { select: () => query, eq: () => query, maybeSingle: async () => ({ data: value === null ? null : { value }, error: null }) };

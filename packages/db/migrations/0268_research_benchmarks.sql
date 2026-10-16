@@ -1,0 +1,256 @@
+-- Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved.
+-- RESEARCH-TOOLS RT-4b: the host-owned benchmark table and the report gate
+-- (docs/launch/implementation/RESEARCH_TOOLS_PLAN.md §1.2–§1.5, §4.3; tasks/RESEARCH-TOOLS.md must-tests 3, 5, 6, 10).
+--   * research_benchmarks: one row per fetched account of a session. Its numeric columns are copied only from the
+--     successful fetch cache that benchmark_fetch computes from supplier evidence (research_account_fetches.last_success),
+--     by a trigger; no function takes these numbers as input, and no client role can write the table. Every number is
+--     checked against the research operation items its evidence refs name (same actor, same session, not erased):
+--     followers and publication times must equal the item fields, median views and engagement rate must equal the
+--     median recomputed from those items. A row whose evidence does not check out is kept as unqualified
+--     (EVIDENCE_UNVERIFIED) with no numbers. A qualified row must also satisfy the product thresholds (10k–200k
+--     followers, an update within 30 days of the fetch), enforced by a table CHECK.
+--   * The report gate lives in report_admission_check (the REPORT-GEN admission checkpoint): a positioning
+--     (positioning_draft) session always needs at least 3 qualified rows produced in this session; any other Skill
+--     only when its workflow declares reportGeneration.minQualifiedBenchmarks (raised to at least 3).
+-- Erasure: deleting a conversation, an answer (the one that produced the row) or an artifact whose evidence a row uses,
+-- and account erasure, delete the rows. Rows hold no money.
+-- Function patches are text-marker patches (packages/db/tests/content-erasure/md5-chain.mjs).
+-- Compatibility: a new table and functions; old code never reads them. Repeatable: IF NOT EXISTS, CREATE OR REPLACE,
+-- DROP TRIGGER IF EXISTS, marker-skipped patches. Recovery: drop the trigger, functions and table, and restore
+-- report_admission_check, content_erasure_confirm and account_erasure_scrub_content from their previous definitions;
+-- the rows are re-derivable from research_account_fetches.
+BEGIN;
+SET LOCAL lock_timeout='5s';
+
+CREATE TABLE IF NOT EXISTS public.research_benchmarks (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  fetch_id uuid NOT NULL UNIQUE REFERENCES public.research_account_fetches(id) ON DELETE CASCADE,
+  actor_id uuid NOT NULL REFERENCES public.profiles(id),
+  session_id uuid NOT NULL REFERENCES public.runtime_sessions(id),
+  -- The answer whose paid fetch produced the evidence (research_account_fetches.last_success_execution_id).
+  execution_id uuid NOT NULL REFERENCES public.runtime_executions(id),
+  platform text NOT NULL CHECK (platform ~ '^[a-z]{1,20}$'),
+  account text NOT NULL CHECK (length(account) BETWEEN 1 AND 200),
+  followers numeric CHECK (followers >= 0),
+  median_views numeric CHECK (median_views >= 0),
+  engagement_rate numeric CHECK (engagement_rate >= 0),
+  posts_per_week numeric CHECK (posts_per_week >= 0),
+  last_published_at timestamptz,
+  earliest_published_at timestamptz,
+  posts_analyzed integer NOT NULL CHECK (posts_analyzed BETWEEN 0 AND 30),
+  category text CHECK (category IN ('head_reference','imitable','fast_rising')),
+  qualified boolean NOT NULL,
+  excluded text CHECK (excluded IN ('FOLLOWERS_MISSING','FOLLOWERS_BELOW_MIN','NO_PUBLISH_TIME','INACTIVE_30_DAYS','NO_POSTS',
+    'EVIDENCE_UNVERIFIED')),
+  -- Per number, the evidence refs (`<research operation id>#<item>`) it was computed from.
+  refs jsonb NOT NULL CHECK (jsonb_typeof(refs)='object' AND octet_length(refs::text)<=8192),
+  -- Every research operation the refs name: deleting any of them deletes the row.
+  operation_ids uuid[] NOT NULL,
+  missing text[] NOT NULL,
+  fetched_at timestamptz NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now(),
+  CHECK ((category IS NULL) = (excluded IS NOT NULL)),
+  CHECK (NOT qualified OR (category IN ('imitable','fast_rising') AND followers BETWEEN 10000 AND 200000
+    AND posts_analyzed > 0 AND last_published_at >= fetched_at - interval '30 days 5 minutes')),
+  CHECK (category IS DISTINCT FROM 'head_reference' OR (NOT qualified AND followers > 200000)),
+  CHECK (excluded IS DISTINCT FROM 'EVIDENCE_UNVERIFIED' OR (followers IS NULL AND median_views IS NULL
+    AND engagement_rate IS NULL AND posts_per_week IS NULL AND last_published_at IS NULL AND earliest_published_at IS NULL))
+);
+CREATE INDEX IF NOT EXISTS research_benchmarks_session_idx ON public.research_benchmarks(session_id);
+CREATE INDEX IF NOT EXISTS research_benchmarks_execution_idx ON public.research_benchmarks(execution_id);
+CREATE INDEX IF NOT EXISTS research_benchmarks_operations_idx ON public.research_benchmarks USING gin(operation_ids);
+ALTER TABLE public.research_benchmarks ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.research_benchmarks FROM PUBLIC,anon,authenticated,service_role;
+
+-- The research operation item an evidence ref names, when it belongs to this actor's session and is still live.
+CREATE OR REPLACE FUNCTION public.research_benchmark_item(a uuid, s uuid, ref text) RETURNS jsonb
+LANGUAGE plpgsql STABLE SET search_path=public,pg_temp AS $$
+DECLARE op uuid; n integer; v jsonb;
+BEGIN
+  IF ref IS NULL OR ref !~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}#[1-9][0-9]{0,4}$' THEN RETURN NULL;END IF;
+  op:=split_part(ref,'#',1)::uuid;n:=split_part(ref,'#',2)::integer;
+  SELECT o.result->'items'->(n-1)->'fields' INTO v
+  FROM research_operations o JOIN research_plans p ON p.id=o.plan_id
+  WHERE o.id=op AND p.actor_id=a AND p.session_id=s AND o.state='succeeded' AND o.erased_at IS NULL AND p.erased_at IS NULL
+    AND jsonb_typeof(o.result->'items')='array' AND n<=jsonb_array_length(o.result->'items');
+  RETURN CASE WHEN jsonb_typeof(v)='object' THEN v END;
+END $$;
+
+-- The row for a fetch's current success, or no row. Called by the trigger only.
+CREATE OR REPLACE FUNCTION public.research_benchmark_project(f research_account_fetches) RETURNS void
+LANGUAGE plpgsql SET search_path=public,pg_temp AS $$
+DECLARE e jsonb:=f.last_success; m jsonb; c jsonb; refs jsonb:='{}'; ops uuid[]:='{}'; key text; ref text; item jsonb;
+  ok boolean:=true; expected double precision; actual double precision;
+BEGIN
+  IF e IS NULL OR f.last_success_execution_id IS NULL OR f.account IS NULL THEN
+    DELETE FROM research_benchmarks WHERE fetch_id=f.id;
+    RETURN;
+  END IF;
+  -- research_account_fetch_finish already validated the shape of a successful cache.
+  m:=e->'metrics';c:=e->'classification';
+  FOREACH key IN ARRAY ARRAY['followers','medianViews','engagementRate','postsPerWeek','lastPublishedAt','earliestPublishedAt'] LOOP
+    refs:=refs||jsonb_build_object(key,m->key->'refs');
+    FOR ref IN SELECT jsonb_array_elements_text(m->key->'refs') LOOP
+      item:=research_benchmark_item(f.actor_id,f.session_id,ref);
+      IF item IS NULL THEN ok:=false;
+      ELSE ops:=ops||(split_part(ref,'#',1))::uuid;END IF;
+    END LOOP;
+  END LOOP;
+  -- Single-item numbers equal the item field they name.
+  IF ok AND m->'followers'->'value'<>'null'::jsonb THEN
+    item:=research_benchmark_item(f.actor_id,f.session_id,m->'followers'->'refs'->>0);
+    ok:=jsonb_array_length(m->'followers'->'refs')=1 AND jsonb_typeof(item->'followers')='number'
+      AND (item->>'followers')::numeric=(m->'followers'->>'value')::numeric;
+  END IF;
+  FOREACH key IN ARRAY ARRAY['lastPublishedAt','earliestPublishedAt'] LOOP
+    IF ok AND m->key->'value'<>'null'::jsonb THEN
+      item:=research_benchmark_item(f.actor_id,f.session_id,m->key->'refs'->>0);
+      ok:=jsonb_array_length(m->key->'refs')=1 AND jsonb_typeof(item->'publishedAt')='string'
+        AND pg_input_is_valid(item->>'publishedAt','timestamp with time zone')
+        AND abs(extract(epoch FROM (item->>'publishedAt')::timestamptz-(m->key->>'value')::timestamptz))<0.001;
+    END IF;
+  END LOOP;
+  -- Medians are recomputed from the items (same rule as accountMetrics: the middle value, or the mean of the two).
+  IF ok AND m->'medianViews'->'value'<>'null'::jsonb THEN
+    SELECT bool_and(jsonb_typeof(x->'views')='number'),percentile_cont(0.5) WITHIN GROUP (ORDER BY (x->>'views')::double precision)
+      INTO ok,actual FROM (SELECT research_benchmark_item(f.actor_id,f.session_id,r) x
+        FROM jsonb_array_elements_text(m->'medianViews'->'refs') r) z;
+    expected:=(m->'medianViews'->>'value')::double precision;
+    ok:=coalesce(ok,false) AND abs(actual-expected)<=1e-9*greatest(1,abs(expected));
+  END IF;
+  IF ok AND m->'engagementRate'->'value'<>'null'::jsonb THEN
+    SELECT bool_and(jsonb_typeof(x->'views')='number' AND (x->>'views')::numeric>0 AND jsonb_typeof(x->'likes')='number'
+        AND jsonb_typeof(x->'comments')='number' AND jsonb_typeof(x->'shares')='number'),
+      percentile_cont(0.5) WITHIN GROUP (ORDER BY ((x->>'likes')::double precision+(x->>'comments')::double precision
+        +(x->>'shares')::double precision)/nullif((x->>'views')::double precision,0))
+      INTO ok,actual FROM (SELECT research_benchmark_item(f.actor_id,f.session_id,r) x
+        FROM jsonb_array_elements_text(m->'engagementRate'->'refs') r) z;
+    expected:=(m->'engagementRate'->>'value')::double precision;
+    ok:=coalesce(ok,false) AND abs(actual-expected)<=1e-9*greatest(1,abs(expected));
+  END IF;
+  -- The category must agree with the thresholds the numbers support.
+  IF ok THEN
+    ok:=CASE
+      WHEN c->>'category'='head_reference' THEN (m->'followers'->>'value')::numeric>200000
+      WHEN c->>'category' IN ('imitable','fast_rising') THEN (m->'followers'->>'value')::numeric BETWEEN 10000 AND 200000
+        AND (m->>'postsAnalyzed')::integer>0 AND m->'lastPublishedAt'->'value'<>'null'::jsonb
+        AND (m->'lastPublishedAt'->>'value')::timestamptz>=(e->>'fetchedAt')::timestamptz-interval '30 days 5 minutes'
+      ELSE NOT coalesce((c->'qualified')::boolean,false) END;
+  END IF;
+  INSERT INTO research_benchmarks AS b(fetch_id,actor_id,session_id,execution_id,platform,account,followers,median_views,
+    engagement_rate,posts_per_week,last_published_at,earliest_published_at,posts_analyzed,category,qualified,excluded,
+    refs,operation_ids,missing,fetched_at)
+  VALUES(f.id,f.actor_id,f.session_id,f.last_success_execution_id,f.platform,f.account,
+    CASE WHEN ok THEN (m->'followers'->>'value')::numeric END,CASE WHEN ok THEN (m->'medianViews'->>'value')::numeric END,
+    CASE WHEN ok THEN (m->'engagementRate'->>'value')::numeric END,CASE WHEN ok THEN (m->'postsPerWeek'->>'value')::numeric END,
+    CASE WHEN ok THEN (m->'lastPublishedAt'->>'value')::timestamptz END,
+    CASE WHEN ok THEN (m->'earliestPublishedAt'->>'value')::timestamptz END,
+    (m->>'postsAnalyzed')::integer,
+    CASE WHEN ok THEN c->>'category' END,ok AND (c->'qualified')::boolean,
+    CASE WHEN ok THEN c->>'excluded' ELSE 'EVIDENCE_UNVERIFIED' END,
+    refs,ARRAY(SELECT DISTINCT x FROM unnest(ops) x ORDER BY x),
+    ARRAY(SELECT jsonb_array_elements_text(m->'missing')),(e->>'fetchedAt')::timestamptz)
+  ON CONFLICT (fetch_id) DO UPDATE SET execution_id=excluded.execution_id,account=excluded.account,
+    followers=excluded.followers,median_views=excluded.median_views,engagement_rate=excluded.engagement_rate,
+    posts_per_week=excluded.posts_per_week,last_published_at=excluded.last_published_at,
+    earliest_published_at=excluded.earliest_published_at,posts_analyzed=excluded.posts_analyzed,category=excluded.category,
+    qualified=excluded.qualified,excluded=excluded.excluded,refs=excluded.refs,operation_ids=excluded.operation_ids,
+    missing=excluded.missing,fetched_at=excluded.fetched_at,updated_at=clock_timestamp();
+END $$;
+
+CREATE OR REPLACE FUNCTION public.research_benchmark_sync() RETURNS trigger
+LANGUAGE plpgsql SET search_path=public,pg_temp AS $$
+BEGIN
+  PERFORM research_benchmark_project(NEW);
+  RETURN NULL;
+END $$;
+DROP TRIGGER IF EXISTS research_benchmarks_from_fetch ON public.research_account_fetches;
+CREATE TRIGGER research_benchmarks_from_fetch
+  AFTER INSERT OR UPDATE OF last_success,last_success_execution_id,account ON public.research_account_fetches
+  FOR EACH ROW EXECUTE FUNCTION public.research_benchmark_sync();
+
+-- Qualified accounts produced in this session by its own live answers (one per platform + account).
+CREATE OR REPLACE FUNCTION public.research_benchmark_qualified(a uuid, s uuid) RETURNS integer
+LANGUAGE sql STABLE SET search_path=public,pg_temp AS $$
+  SELECT count(*)::integer FROM research_benchmarks b
+  JOIN runtime_executions x ON x.id=b.execution_id AND x.actor_id=a AND x.session_id=s
+  WHERE b.actor_id=a AND b.session_id=s AND b.qualified AND x.content_deleted_at IS NULL AND x.erased_at IS NULL
+$$;
+
+-- How many qualified benchmark accounts a report needs (0: no gate). Positioning reports always need the product
+-- minimum of 3; another Skill only when it declares reportGeneration.minQualifiedBenchmarks, never below 3.
+CREATE OR REPLACE FUNCTION public.research_benchmark_required(scope jsonb, spec jsonb) RETURNS integer
+LANGUAGE sql IMMUTABLE SET search_path=public,pg_temp AS $$
+  SELECT CASE
+    WHEN jsonb_typeof(spec->'minQualifiedBenchmarks')='number' THEN greatest(3,least(12,(spec->>'minQualifiedBenchmarks')::numeric))::integer
+    WHEN spec ? 'minQualifiedBenchmarks' OR scope->>'kind'='positioning_draft' THEN 3
+    ELSE 0 END
+$$;
+
+-- The host-computed table for report facts: this session's live rows, no supplier cost or raw evidence.
+CREATE OR REPLACE FUNCTION public.research_benchmark_rows(a uuid, s uuid) RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
+DECLARE output jsonb;
+BEGIN
+  PERFORM research_session_owned(a,s,NULL);
+  SELECT coalesce(jsonb_agg(jsonb_build_object('platform',b.platform,'account',b.account,'followers',b.followers,
+    'medianViews',b.median_views,'engagementRate',b.engagement_rate,'postsPerWeek',b.posts_per_week,
+    'lastPublishedAt',b.last_published_at,'postsAnalyzed',b.posts_analyzed,'category',b.category,'qualified',b.qualified,
+    'excluded',b.excluded,'missing',to_jsonb(b.missing),'fetchedAt',b.fetched_at)
+    ORDER BY b.qualified DESC,b.followers DESC NULLS LAST,b.platform,b.account),'[]'::jsonb) INTO output
+  FROM (SELECT b.* FROM research_benchmarks b
+    JOIN runtime_executions x ON x.id=b.execution_id AND x.actor_id=a AND x.session_id=s
+    WHERE b.actor_id=a AND b.session_id=s AND x.content_deleted_at IS NULL AND x.erased_at IS NULL
+    ORDER BY b.qualified DESC,b.followers DESC NULLS LAST,b.platform,b.account LIMIT 30) b;
+  RETURN output;
+END $$;
+
+-- Report gate, after every existing report refusal so those keep their codes.
+DO $$ DECLARE definition text; t text; BEGIN
+  definition:=pg_get_functiondef('public.report_admission_check(uuid,uuid,jsonb,jsonb)'::regprocedure);
+  IF position('-- 0268 benchmark gate' IN definition)=0 THEN
+    t:=$x$  RAISE EXCEPTION 'OPC_CAPTURE_PENDING';END IF;$x$;
+    IF array_length(string_to_array(definition,t),1)<>2 THEN
+      RAISE EXCEPTION 'RESEARCH_BENCHMARK_SOURCE_MISMATCH: report_admission_check';END IF;
+    EXECUTE replace(definition,t,t||$x$
+ -- 0268 benchmark gate: qualified benchmark accounts of this session (RESEARCH_TOOLS_PLAN §1.5).
+ IF research_benchmark_qualified(a,sid)<research_benchmark_required((SELECT scope FROM runtime_sessions WHERE id=sid),spec) THEN
+  RAISE EXCEPTION 'REPORT_BENCHMARKS_REQUIRED';END IF;$x$);
+  END IF;
+END $$;
+
+-- Content erasure: rows of a deleted conversation or answer, or built on erased research evidence.
+DO $$ DECLARE definition text; d text; BEGIN
+  definition:=pg_get_functiondef('public.content_erasure_confirm(uuid,text,uuid,text)'::regprocedure);
+  IF position('-- 0268 benchmarks' IN definition)=0 THEN
+    d:=$x$ -- Same terminal-result cost projection as account erasure; original amounts and charge IDs stay intact.$x$;
+    IF array_length(string_to_array(definition,d),1)<>2 THEN
+      RAISE EXCEPTION 'RESEARCH_BENCHMARK_SOURCE_MISMATCH: content_erasure_confirm';END IF;
+    EXECUTE replace(definition,d,$x$ -- 0268 benchmarks: derived numbers go with their answer, conversation or evidence.
+ DELETE FROM research_benchmarks WHERE actor_id=a AND (session_id=ANY(sessions) OR execution_id=ANY(ids)
+   OR operation_ids && research_ids);
+$x$||d);
+  END IF;
+END $$;
+
+DO $$ DECLARE definition text; r text; BEGIN
+  definition:=pg_get_functiondef('public.account_erasure_scrub_content(uuid)'::regprocedure);
+  IF position('-- 0268 benchmarks' IN definition)=0 THEN
+    -- Before 0263's fetch deletion (which would cascade), so the count is the rows actually removed.
+    r:=$x$  -- 0263 runtime research$x$;
+    IF array_length(string_to_array(definition,r),1)<>2 THEN
+      RAISE EXCEPTION 'RESEARCH_BENCHMARK_SOURCE_MISMATCH: account_erasure_scrub_content';END IF;
+    EXECUTE replace(definition,r,$x$  -- 0268 benchmarks
+  DELETE FROM research_benchmarks WHERE actor_id=p_profile_id;
+  GET DIAGNOSTICS n=ROW_COUNT;counts:=counts||jsonb_build_object('research_benchmarks_deleted',n);
+$x$||r);
+  END IF;
+END $$;
+
+REVOKE ALL ON FUNCTION public.research_benchmark_item(uuid,uuid,text),public.research_benchmark_project(research_account_fetches),
+  public.research_benchmark_sync(),public.research_benchmark_qualified(uuid,uuid),public.research_benchmark_required(jsonb,jsonb)
+  FROM PUBLIC,anon,authenticated,service_role;
+REVOKE ALL ON FUNCTION public.research_benchmark_rows(uuid,uuid) FROM PUBLIC,anon,authenticated;
+GRANT EXECUTE ON FUNCTION public.research_benchmark_rows(uuid,uuid) TO service_role;
+
+COMMIT;

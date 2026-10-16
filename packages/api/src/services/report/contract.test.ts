@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { expect, it, vi } from 'vitest';
 import { randomUUID } from 'node:crypto';
-import { confirmedReportFacts, completeReportCandidate, frozenReport, REPORT_FACT_BYTES } from './contract';
+import { benchmarkReportFacts, confirmedReportFacts, completeReportCandidate, frozenReport, reportManifest, REPORT_FACT_BYTES } from './contract';
 import { frozenPurposeBudget, PURPOSE_INPUT_CAPS, PURPOSE_OUTPUT_CAP } from '../runtime/purposeBudgets';
 import { runRuntime } from '../runtime/runner';
 import type { ArtifactSnapshot } from '../artifacts/public';
@@ -73,4 +73,20 @@ it('frozen report rejects tools, history, cache and organizer', () => {
   for (const override of [{ historyItems: 1 }, { tools: ['search'] }, { maxTurns: 2 }, { workspaceContext: true }]) {
     expect(runtimeContext.safeParse({ ...base, ...override }).success).toBe(false);
   }
+});
+it('benchmark facts come only from the host table rows; malformed rows fail closed', () => {
+  const row = { platform: 'tiktok', account: 'alpha', followers: 50000, medianViews: null, engagementRate: 0.002, postsPerWeek: 1.4,
+    lastPublishedAt: '2026-10-15T00:00:00+00:00', postsAnalyzed: 12, category: 'imitable', qualified: true, excluded: null,
+    missing: ['medianViews'], fetchedAt: '2026-10-16T00:00:00+00:00' };
+  expect(benchmarkReportFacts([])).toBeNull();
+  expect(JSON.parse(benchmarkReportFacts([row])!)).toEqual([row]);
+  for (const bad of [null, [{ ...row, followers: -1 }], [{ ...row, interpretation: 'model text' }], Array(31).fill(row)]) {
+    expect(() => benchmarkReportFacts(bad)).toThrow('REPORT_UNAVAILABLE');
+  }
+});
+it('a Skill may declare a benchmark minimum for its report; the host raises it to 3 in SQL', () => {
+  const base = { resources: ['report.md'], sections: ['One'], maxCharacters: 12000 };
+  expect(reportManifest.safeParse(base).success).toBe(true);
+  expect(reportManifest.parse({ ...base, minQualifiedBenchmarks: 3 }).minQualifiedBenchmarks).toBe(3);
+  for (const value of [0, 13, 2.5, '3']) expect(reportManifest.safeParse({ ...base, minQualifiedBenchmarks: value }).success).toBe(false);
 });
