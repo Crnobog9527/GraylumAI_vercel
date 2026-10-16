@@ -56,7 +56,9 @@ export interface AccountMetrics {
  */
 export function suppliedWholeHistory(profile: EvidenceItem | undefined, posts: EvidenceItem[]): boolean {
   const total = profile ? num(profile, 'postsCount') : null;
-  return total !== null && posts.length >= total;
+  // Distinct post identities only: a repeated entry must not make a short list look complete.
+  const ids = new Set(posts.map(post => post.fields.id).filter(id => typeof id === 'string' && id.length > 0));
+  return total !== null && ids.size === posts.length && ids.size >= total;
 }
 
 const num = (item: EvidenceItem, field: string): number | null => {

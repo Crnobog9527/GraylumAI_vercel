@@ -130,7 +130,14 @@ BEGIN
   -- no more posts than were analyzed (suppliedWholeHistory in research/benchmark/metrics.ts).
   IF ok AND (m->'wholeHistory')::boolean THEN
     item:=research_benchmark_item(f.actor_id,f.session_id,research_benchmark_operation_id(f.id,f.attempt,'account_profile')::text||'#1');
-    ok:=coalesce(jsonb_typeof(item->'postsCount')='number' AND (m->>'postsAnalyzed')::numeric>=(item->>'postsCount')::numeric,false);
+    ok:=coalesce(jsonb_typeof(item->'postsCount')='number' AND (m->>'postsAnalyzed')::numeric>=(item->>'postsCount')::numeric,false)
+      -- ...counting distinct post ids: every item carries one and none repeats (as suppliedWholeHistory).
+      AND coalesce((SELECT count(*)=count(DISTINCT x->'fields'->>'id') AND coalesce(bool_and(jsonb_typeof(x->'fields'->'id')='string'
+          AND length(x->'fields'->>'id')>0),true) AND count(DISTINCT x->'fields'->>'id')>=(item->>'postsCount')::numeric
+        FROM research_operations o JOIN research_plans p ON p.id=o.plan_id
+        CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(o.result->'items')='array' THEN o.result->'items' ELSE '[]' END) x
+        WHERE o.id=research_benchmark_operation_id(f.id,f.attempt,'account_posts') AND p.actor_id=f.actor_id
+          AND p.session_id=f.session_id AND o.state='succeeded' AND o.erased_at IS NULL),false);
   END IF;
   -- Single-item numbers equal the item field they name.
   IF ok AND m->'followers'->'value'<>'null'::jsonb THEN

@@ -165,7 +165,7 @@ describe('benchmark fetch: the 20-post minimum and its new-account exception (Ow
       vendor: 'tikhub', route: tikhubRouteId(call.platform, call.kind)!, outcome: 'ok', reason: null, httpStatus: 200,
       supplierMayCharge: true, usage: { unit: 'call', units: '1' }, truncated: false, fetchedAt: now.toISOString(),
       items: call.kind === 'account_profile' ? [{ fields: profile, missing: [] }]
-        : Array.from({ length: posts }, (_, i) => ({ fields: { id: `p${i}`, publishedAt: now.toISOString(), views: 900,
+        : Array.from({ length: Math.abs(posts) }, (_, i) => ({ fields: { id: posts < 0 ? 'same' : `p${i}`, publishedAt: now.toISOString(), views: 900,
           likes: 10, comments: 2, shares: 1 }, missing: [] })),
     }));
   const saved = (f: ReturnType<typeof fixture>) => f.fetchFinish.mock.calls.at(-1)![3] as
@@ -176,12 +176,13 @@ describe('benchmark fetch: the 20-post minimum and its new-account exception (Ow
     ['the profile reports more posts than were returned', { followers: 50000, postsCount: 40 }, 3, false, 'TOO_FEW_POSTS'],
     ['the profile has no post count', { followers: 50000 }, 3, false, 'TOO_FEW_POSTS'],
     ['20 posts were analyzed', { followers: 50000, postsCount: 400 }, 20, true, null],
+    ['repeated entries of one post are not a whole history', { followers: 50000, postsCount: 3 }, -3, false, 'TOO_FEW_POSTS'],
   ] as const)('%s', async (_case, profile, posts, qualified, excluded) => {
     const f = fixture();
     respond(f, profile, posts);
     expect(JSON.parse(await f.run())).toMatchObject({ status: 'ok' });
-    expect(saved(f).metrics.postsAnalyzed).toBe(posts);
+    expect(saved(f).metrics.postsAnalyzed).toBe(Math.abs(posts));
     expect(saved(f).classification).toMatchObject({ qualified, excluded });
-    expect(saved(f).metrics.wholeHistory).toBe('postsCount' in profile && profile.postsCount <= posts);
+    expect(saved(f).metrics.wholeHistory).toBe('postsCount' in profile && posts > 0 && profile.postsCount <= posts);
   });
 });

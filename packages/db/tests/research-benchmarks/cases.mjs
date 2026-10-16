@@ -40,7 +40,7 @@ const stableId = (...parts) => {
   const h = createHash('sha256').update(JSON.stringify(parts)).digest('hex');
   return `${h.slice(0,8)}-${h.slice(8,12)}-4${h.slice(13,16)}-a${h.slice(17,20)}-${h.slice(20,32)}`;
 };
-const post = (days,views,extra={}) => ({publishedAt:new Date(Date.now()-days*DAY).toISOString(),views,likes:10,comments:5,shares:1,...extra});
+const post = (days,views,extra={}) => ({id:randomUUID(),publishedAt:new Date(Date.now()-days*DAY).toISOString(),views,likes:10,comments:5,shares:1,...extra});
 
 export async function runCases({db,Client,connectionString,report}) {
   const {accountMetrics,classifyAccount,qualifyFetchedAccount,suppliedWholeHistory} = await benchmarkCode();
@@ -80,7 +80,7 @@ export async function runCases({db,Client,connectionString,report}) {
     assert.deepEqual([...row.operation_ids].sort(),[good.profile,good.postOp].sort());
     // Xiaohongshu-like posts without views: no median, no rate, never 0.
     const noViews = await fetchAccount(f,e,'noviews',{followers:30000,
-      posts:[{publishedAt:new Date(Date.now()-DAY).toISOString(),likes:3}]});
+      posts:[{id:randomUUID(),publishedAt:new Date(Date.now()-DAY).toISOString(),likes:3}]});
     const [blank] = await rows(db,'fetch_id=$1',[noViews.fetchId]);
     assert.deepEqual([blank.median_views,blank.engagement_rate,blank.qualified],[null,null,true]);
     assert.ok(blank.missing.includes('medianViews')&&blank.missing.includes('engagementRate'));
@@ -116,6 +116,14 @@ export async function runCases({db,Client,connectionString,report}) {
     assert.deepEqual([(await get(full)).qualified,(await get(full)).posts_analyzed],[true,20]);
     assert.deepEqual([(await get(forged)).excluded,(await get(forged)).qualified],['EVIDENCE_UNVERIFIED',false]);
     assert.deepEqual([(await get(claimed)).excluded,(await get(claimed)).qualified],['EVIDENCE_UNVERIFIED',false]);
+    // Repeated entries are not more posts: 3 copies of one post never make a 3-post "whole history".
+    const one = post(1,9000);
+    const repeated = await fetchAccount(f,e,'repeated',{followers:50000,posts:[one,one,one],complete:true});
+    assert.equal(repeated.evidence.metrics.wholeHistory,false);
+    assert.deepEqual([(await get(repeated)).excluded,(await get(repeated)).qualified],['TOO_FEW_POSTS',false]);
+    const forcedWhole = await fetchAccount(f,e,'forcedwhole',{followers:50000,posts:[one,one,one],complete:true,
+      tamper:x=>{x.metrics.wholeHistory=true;x.classification={category:'imitable',qualified:true,excluded:null};return x;}});
+    assert.deepEqual([(await get(forcedWhole)).excluded,(await get(forcedWhole)).qualified],['EVIDENCE_UNVERIFIED',false]);
     // A whole-history claim whose profile item is missing altogether is a failed check, not an error on the paid fetch.
     // (No number cites anything, so only the whole-history check can fail: the profile operation does not exist.)
     const orphan = await fetchAccount(f,e,'orphan',{followers:null,posts:[],complete:true,profileOp:randomUUID()});
