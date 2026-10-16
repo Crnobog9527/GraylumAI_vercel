@@ -3,6 +3,7 @@
 
 import { useRef, useState, type ReactNode } from 'react';
 import { Gavel, Loader2, Save } from 'lucide-react';
+import { useQuery } from '@tanstack/react-query';
 import { trpc } from '@/trpc/client';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -11,7 +12,7 @@ import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { modelLabel } from './reportModelView';
 import {
-  affectsRunning, draftProblems, runningCount, SEAT_CODES, settingsErrorText, TOKEN_LIMITS, toSaved, warningText,
+  affectsRunning, allSkills, countRunning, draftProblems, REVIEW_PAGE, SEAT_CODES, settingsErrorText, TOKEN_LIMITS, toSaved, warningText,
   type FusionSettingsValue, type ReviewSettings,
 } from './fusionReviewSettingsView';
 
@@ -69,8 +70,10 @@ function ReviewForm({ saved, onSaved, notice, setNotice }: {
   // Checked by the Fusion admission for each purpose (not the report one), the same check a save of an enabled panel runs.
   const models = trpc.fusionSettings.models.useQuery(undefined, { staleTime: 0, retry: false });
   const names = trpc.settings.getSummaryModels.useQuery({ use: 'skill' });
-  const skills = trpc.skills.list.useQuery(undefined, { retry: false });
   const utils = trpc.useUtils();
+  // Every Skill, not only the first page of 50.
+  const skills = useQuery({ queryKey: ['fusion-review-settings', 'skills'], retry: false,
+    queryFn: async () => ({ skills: await allSkills(offset => utils.skills.list.fetch({ offset })) }) });
   const update = trpc.fusionSettings.update.useMutation();
   const inFlight = useRef(false);
   const set = (patch: Partial<ReviewSettings>) => { setReview(value => ({ ...value, ...patch })); setNotice(null); };
@@ -86,7 +89,7 @@ function ReviewForm({ saved, onSaved, notice, setNotice }: {
     setNotice(null);
     try {
       if (affectsRunning(saved.review, review)) {
-        const running = runningCount(await utils.fusionSettings.reviews.fetch({ limit: 100 }));
+        const running = await countRunning(before => utils.fusionSettings.reviews.fetch({ limit: REVIEW_PAGE, ...(before ? { before } : {}) }));
         if (running > 0 && !window.confirm(`有 ${running} 个评审正在进行，保存后它们的后续轮次会失败。确定保存吗？`)) return;
       }
       const result = await update.mutateAsync(toSaved(saved, review));

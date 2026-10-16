@@ -57,7 +57,9 @@ async function adminWindow(db: SupabaseClient, actorId: string, env: Record<stri
 
 /** Refusals that mean "this model may not do this", as opposed to an outage. */
 const NOT_ELIGIBLE = new Set(['FUSION_MODEL_UNAVAILABLE', 'FUSION_MODEL_SEARCH_DENIED', 'FUSION_MODEL_ADMISSION_REQUIRED', 'FUSION_PAYG_REQUIRED',
-  'RUNTIME_REASONING_CONFIG_INVALID', 'RUNTIME_REASONING_NOT_CONFIGURED', 'RUNTIME_REASONING_ROUTE_MISMATCH']);
+  'RUNTIME_REASONING_CONFIG_INVALID', 'RUNTIME_REASONING_NOT_CONFIGURED', 'RUNTIME_REASONING_ROUTE_MISMATCH',
+  // No per-call billing profile entry for this purpose and output size: an ordinary-only model, not an outage.
+  'RUNTIME_PAYG_PROFILE_REQUIRED']);
 
 /** The models an administrator can pick for the panel (FUSION-REVIEW PR-5): the window's models, each checked by the
  * same admission a save of an enabled panel uses, for the reviewer and the summary purpose separately. Read-only. */

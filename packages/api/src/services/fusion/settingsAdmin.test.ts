@@ -26,7 +26,8 @@ import { fusionModelOptions, saveFusionSettings } from './settingsAdmin';
 function id(n: number) { return `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`; }
 const enabled = { ...DEFAULT_FUSION_SETTINGS, review: { ...DEFAULT_FUSION_SETTINGS.review, enabled: true,
   reviewerModelIds: [id(1), id(2), id(3)], summaryModelId: id(4), maxBudgetUsd: '3', skillId: id(5) } };
-const models = ['anthropic/a', 'google/b', 'openai/c', 'openai/d'].map((model_id, i) => ({ id: id(i + 1), model_id, name: `模型 ${i + 1}` }));
+const models = ['anthropic/a', 'google/b', 'openai/c', 'openai/d', 'openai/e'].map((model_id, i) => ({ id: id(i + 1), model_id,
+  name: `模型 ${i + 1}` }));
 const db = { from: () => ({ select: () => ({ in: async () => ({ data: models, error: null }),
   eq: () => ({ maybeSingle: async () => ({ data: null, error: null }) }) }) }),
   rpc: async () => ({ data: {}, error: null }) } as unknown as SupabaseClient;
@@ -45,7 +46,9 @@ describe('Fusion settings save', () => {
 describe('Fusion model choices', () => {
   it('lists the window\'s models with what each may do, by the same Fusion admission a save uses', async () => {
     skill.refuse = new Map([[`${id(2)}:fusion_summary`, 'FUSION_PAYG_REQUIRED'], [`${id(3)}:fusion_review`, 'FUSION_MODEL_SEARCH_DENIED'],
-      [`${id(3)}:fusion_summary`, 'FUSION_MODEL_SEARCH_DENIED'], [`${id(4)}:fusion_review`, 'FUSION_MODEL_ADMISSION_REQUIRED']]);
+      [`${id(3)}:fusion_summary`, 'FUSION_MODEL_SEARCH_DENIED'], [`${id(4)}:fusion_review`, 'FUSION_MODEL_ADMISSION_REQUIRED'],
+      // An ordinary-only model (no Fusion profile entry) is left out; it never blanks the list (#1044 review).
+      [`${id(5)}:fusion_review`, 'RUNTIME_PAYG_PROFILE_REQUIRED'], [`${id(5)}:fusion_summary`, 'RUNTIME_PAYG_PROFILE_REQUIRED']]);
     const window = { callPolicies: models.map(model => ({ modelId: model.id })), expiresAt: '2030-01-01T00:00:00Z' };
     const result = await fusionModelOptions(db, id(7), {}, window as never);
     expect(result.models).toEqual([

@@ -72,7 +72,36 @@ export function affectsRunning(saved: ReviewSettings, next: ReviewSettings): boo
     || saved.reviewerModelIds.join() !== next.reviewerModelIds.filter(Boolean).join();
 }
 
-/** Reviews still running or paused among the newest ones of the administrator look-back list (fusionSettings.reviews). */
+/** Reviews still running or paused in one page of the administrator look-back list (fusionSettings.reviews). */
 export function runningCount(list: unknown): number {
   return Array.isArray(list) ? list.filter(item => ['running', 'paused'].includes(String((item as { state?: unknown }).state))).length : 0;
+}
+
+type Cursor = { createdAt: string; reviewId: string };
+export const REVIEW_PAGE = 100;
+/** Every running or paused review, walking the whole look-back list page by page (newest first, keyset): an older
+ * paused review behind many finished ones still counts. Stops at maxPages; the count is then a lower bound. */
+export async function countRunning(page: (before?: Cursor) => Promise<unknown>, maxPages = 50): Promise<number> {
+  let total = 0;
+  let before: Cursor | undefined;
+  for (let at = 0; at < maxPages; at++) {
+    const rows = await page(before);
+    if (!Array.isArray(rows)) return total;
+    total += runningCount(rows);
+    const last = rows[rows.length - 1] as Partial<Cursor> | undefined;
+    if (rows.length < REVIEW_PAGE || !last?.createdAt || !last.reviewId) return total;
+    before = { createdAt: last.createdAt, reviewId: last.reviewId };
+  }
+  return total;
+}
+
+/** Every Skill, following skills.list's pages of 50 until its total. */
+export async function allSkills<T>(page: (offset: number) => Promise<{ skills: T[]; total: number }>, maxPages = 40): Promise<T[]> {
+  const all: T[] = [];
+  for (let at = 0; at < maxPages; at++) {
+    const { skills, total } = await page(all.length);
+    all.push(...skills);
+    if (!skills.length || all.length >= total) break;
+  }
+  return all;
 }
