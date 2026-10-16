@@ -27,7 +27,7 @@ export const recognitionFailInput = z.object({ documentId, kind, position }).str
 export type RecognitionStatus = 'pending' | 'running' | 'complete' | 'paused' | 'over_limit' | 'settling' | 'failed';
 /** `positions` are PDF page numbers (format pdf) or Word image numbers in document order (format docx). */
 export type RecognitionPending = Array<{ documentId: string; format: 'pdf' | 'docx'; contentVersion: number; positions: number[] }>;
-export type RecognitionSave = { saved: boolean; status: RecognitionStatus; contentVersion: number; code?: 'LIBRARY_SPACE' };
+export type RecognitionSave = { saved: boolean; status: RecognitionStatus; contentVersion: number; code?: 'LIBRARY_SPACE' | 'LIBRARY_TEXT_LIMIT' };
 
 /** Same segmentation as extracted text: paragraphs up to 8,192 bytes, titled with the page or image number. */
 export function recognizedSegments(text: string, unit: z.infer<typeof recognitionKind>, page: number) {

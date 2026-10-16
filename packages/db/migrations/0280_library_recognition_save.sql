@@ -96,8 +96,14 @@ BEGIN
    OR position(chr(12) in s->>'body')>0 THEN RAISE EXCEPTION 'LIBRARY_INVALID'; END IF;
   total:=total+octet_length(s->>'body');
  END LOOP;
- IF total>400000 OR (SELECT count(*) FROM library_document_segments WHERE document_id=did)+n>10000
-  THEN RAISE EXCEPTION 'LIBRARY_TEXT_LIMIT'; END IF;
+ IF total>400000 THEN RAISE EXCEPTION 'LIBRARY_INVALID'; END IF;
+ -- A document holds at most 10,000 segments and 10,000,000 segment bytes (library_upload_reservations CHECK).
+ -- A unit that cannot fit is marked failed, not left pending, so the page does not retry it forever.
+ IF (SELECT count(*) FROM library_document_segments WHERE document_id=did)+n>10000
+  OR (SELECT segment_hold FROM library_upload_reservations WHERE document_id=did)+total>10000000 THEN
+  UPDATE library_recognition_units SET status='failed' WHERE document_id=did AND unit_kind=kind AND position=pos;
+  RETURN jsonb_build_object('saved',false,'status','failed','contentVersion',d.content_version,'code','LIBRARY_TEXT_LIMIT');
+ END IF;
  IF library_usage(a)+total>library_capacity(a) THEN
   UPDATE library_recognition_units SET status='paused' WHERE document_id=did AND unit_kind=kind AND position=pos;
   RETURN jsonb_build_object('saved',false,'status','paused','contentVersion',d.content_version,'code','LIBRARY_SPACE');
