@@ -108,7 +108,8 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
   let waitPoint:{epoch:number;sequence:number;requestHash:string;phase:string;state:PaygWait['state']}|undefined;
   let gateRejection:GateRejection|undefined;
   const research=researchExecution({research:context.research,tools:context.tools,execution,executionId,actorId:await options.actor(),
-   database:options.database,emit:event=>progress(event),canSend:()=>{try{budget.assertCanStart(5000);return true;}catch{return false;}}});
+   database:options.database,emit:event=>progress(event),onClosed:()=>{accountClosed=true;},
+   canSend:()=>{try{budget.assertCanStart(5000);return true;}catch{return false;}}});
   const checkAgentReply=terminalReplyGuard(agentTurn,context.tools.includes(ASK_QUESTION_TOOL),()=>{terminalReplyFailure=true;},
    Boolean(context.skillFile),Boolean(context.historyRead),research?.tools.map(tool=>tool.name));
   let preflightFailure:string|undefined,transportFailureCode:string|undefined;

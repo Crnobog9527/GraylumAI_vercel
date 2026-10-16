@@ -46,7 +46,7 @@ const execution = (live: boolean) => ({ sessionId, runId, epoch: 4, live,
 function build(live: boolean, db: ReturnType<typeof database>, canSend = () => true) {
   const events: ResearchTurnEvent[] = [];
   const built = researchExecution({ research, tools: ['ask_question', 'web_search'], execution: execution(live), executionId,
-    actorId: actor, database: db, emit: event => events.push(event), canSend, now: () => now })!;
+    actorId: actor, database: db, emit: event => events.push(event), onClosed: () => {}, canSend, now: () => now })!;
   return { built, events };
 }
 afterEach(() => { vi.unstubAllEnvs(); vi.unstubAllGlobals(); resetPlatformSecretCacheForTests(); });
@@ -54,7 +54,7 @@ afterEach(() => { vi.unstubAllEnvs(); vi.unstubAllGlobals(); resetPlatformSecret
 describe('researchExecution (RT-3b PR-3)', () => {
   it('offers nothing without frozen research, and only the frozen tools with it', () => {
     expect(researchExecution({ research: undefined, tools: ['ask_question'], execution: execution(true), executionId, actorId: actor,
-      database: database([]), emit: () => {}, canSend: () => true })).toBeNull();
+      database: database([]), emit: () => {}, onClosed: () => {}, canSend: () => true })).toBeNull();
     const { built } = build(true, database([]));
     expect(built.tools.map(tool => tool.name)).toEqual(['web_search']);
     expect(built.reserve).toBe(RESEARCH_RESULT_RESERVE_BYTES);
@@ -183,7 +183,7 @@ describe('#1029 review fixes', () => {
     expect(schema).not.toContain('"pro"');
     const withPro = researchExecution({ research: { ...research, routes: [...research.routes,
       { platform: 'web', kind: 'web_search_pro', vendor: 'parallel', route: 'parallel:search:advanced', backup: null, maxUnitsPerCall: '1' }] },
-    tools: ['web_search'], execution: execution(true), executionId, actorId: actor, database: database([]), emit: () => {}, canSend: () => true })!;
+    tools: ['web_search'], execution: execution(true), executionId, actorId: actor, database: database([]), emit: () => {}, onClosed: () => {}, canSend: () => true })!;
     expect(JSON.stringify(z.toJSONSchema(withPro.tools[0]!.parameters!))).toContain('"pro"');
     expect(withPro.definitionBytes).toBeGreaterThan(built.definitionBytes);
   });

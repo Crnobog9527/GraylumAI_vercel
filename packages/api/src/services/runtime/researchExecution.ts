@@ -37,6 +37,8 @@ export function researchExecution(input: {
   execution: Pick<RuntimeExecution, 'sessionId' | 'runId' | 'epoch' | 'billing' | 'live'>;
   executionId: string; actorId: string; database: SessionRpc;
   emit: (event: ResearchTurnEvent) => void;
+  /** BILL2 confirmed account or content erasure while recording a subcall: nothing more may reach the client. */
+  onClosed: () => void;
   /** false = the round's time budget cannot cover another supplier request; nothing is sent. */
   canSend: () => boolean;
   now?: () => Date;
@@ -51,9 +53,16 @@ export function researchExecution(input: {
   };
   const scope = { userId: input.actorId, sessionId: execution.sessionId, executionId: input.executionId };
   const store = databaseRuntimeResearchStore({ admin: input.database, scope });
-  const billing = toolSubcallBilling({ admin: input.database, actorId: input.actorId, runId: execution.runId });
+  const recorded = toolSubcallBilling({ admin: input.database, actorId: input.actorId, runId: execution.runId });
+  let closed = false;
+  const billing: typeof recorded = { ...recorded, async record(callId, evidence) {
+    const saved = await recorded.record(callId, evidence);
+    if (saved.accountClosed || saved.contentDeleted) { closed = true; input.onClosed(); }
+    return saved;
+  } };
   const ctx: ResearchToolContext = {
-    scope, executionId: input.executionId, config: frozenResearchConfig(research), store, emit: input.emit,
+    scope, executionId: input.executionId, config: frozenResearchConfig(research), store,
+    emit: event => { if (!closed) input.emit(event); },
     now: input.now ?? (() => new Date()),
     subcall: {
       policies: toolCallPolicies(execution.billing.callPolicy),
@@ -70,7 +79,12 @@ export function researchExecution(input: {
     },
   };
   return {
-    tools: researchRuntimeTools(ctx, names),
+    // After a confirmed erasure the tool call ends the turn instead of handing a result to the model.
+    tools: researchRuntimeTools(ctx, names).map(tool => ({ ...tool, async execute(args, callId) {
+      const result = await tool.execute(args, callId);
+      if (closed) throw new Error('RUNTIME_ACCOUNT_CLOSED');
+      return result;
+    } })),
     definitionBytes: researchToolBytes(names, fastSearchOnly(ctx.config)), reserve: research.reserve,
     async isSubcall(sequence) {
       const call = (await readCalls()).find(item => item.sequence === sequence);
