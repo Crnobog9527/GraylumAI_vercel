@@ -37,8 +37,9 @@ const reducedMotion = () => Boolean(window.matchMedia?.('(prefers-reduced-motion
  * labels light with the stage of the newest message, and each is a button: it plays that module from its start (Owner
  * 2026-10-15, round six). It loops while on screen. The server HTML and reduced motion show the review stage, finished.
  * `still` (sample K, Owner 2026-10-17): one stage's messages as a still picture, no stage buttons, nothing playing.
+ * `fromTop` (sample M): a still picture keeps the stage's first messages and lets the later ones run off the bottom.
  */
-export function WeekJ({ still }: { still?: number } = {}) {
+export function WeekJ({ still, fromTop = false }: { still?: number; fromTop?: boolean } = {}) {
   // -1: at rest. 0 and up: how many messages have arrived (the newest is count - 1).
   const [count, setCount] = useState(-1);
   const [playing, setPlaying] = useState(false);
@@ -83,11 +84,12 @@ export function WeekJ({ still }: { still?: number } = {}) {
   useLayoutEffect(() => {
     const log = logRef.current;
     if (!log) return;
+    if (fromTop) return;
     const fit = () => fitNewest(log);
     fit();
     window.addEventListener('resize', fit);
     return () => window.removeEventListener('resize', fit);
-  }, [count]);
+  }, [count, fromTop]);
 
   const shown = still !== undefined ? LINES.filter(line => line.stage === still) : count < 0 ? LINES.slice(REST) : LINES.slice(0, count);
   const stage = shown[shown.length - 1]?.stage ?? 0;
