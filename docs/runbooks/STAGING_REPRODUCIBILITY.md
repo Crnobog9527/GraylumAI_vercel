@@ -349,13 +349,12 @@ RPC/functions:
 - `atomic_finalize_ai_success`
 - `atomic_finalize_ai_failure`
 - `atomic_finalize_ai_abort`
-- `atomic_apply_invitation_rebate`
 - `atomic_apply_credit_ledger_entry`
-- `atomic_claim_invitation_code`
 - `atomic_fulfill_credit_package`
 - `atomic_fulfill_membership_invoice`
-- `validate_invitation_code`
 - `is_admin` decision and final owner-approved posture
+- Retired by migration 0266 (#988) and expected absent: `atomic_apply_invitation_rebate`,
+  `atomic_claim_invitation_code`, `validate_invitation_code`
 
 Policies and grants:
 
