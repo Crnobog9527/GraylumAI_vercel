@@ -45,7 +45,9 @@ import type {GateRejection} from './newWorkGate';
 import {allowedOutput} from './moderation';
 import {runtimeIdentityGuard} from '../modelIdentity/runtimeGuard';
 import {POSITIONING_REFUSED,positioningRefused,endPositioningRefusal,roundEmitter} from './positioningFallback';
-import {cancelledOutcome,finishCancelRequested} from './executorOutcome';
+import {cancelledOutcome,finishCancelRequested,cancelRound} from './executorOutcome';
+import {injectContentSource,ContentSourceRefusal} from './contentSource';
+import {CONTENT_SOURCE_MESSAGES} from '../../shared/contentSourceMessages';
 import {frozenBrandIdentity,withBrandIdentity} from '../modelIdentity/brandIdentity';
 export function runtimeExecutor(options:RuntimeExecutorOptions){
  if(typeof options.callGate!=='function')throw new Error('RUNTIME_CALL_GATE_REQUIRED');
@@ -219,7 +221,8 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
      throw error;
     }
    };
-   let effective={model:context.model,instructions:context.instructions,maxOutputTokens:context.maxOutputTokens,role:context.role};
+   let effective={model:context.model,instructions:context.instructions,maxOutputTokens:context.maxOutputTokens,role:context.role,
+    contentSource:context.sourceContent?.kind};
    if(context.matching){
     // Matching is also billable: reject unusable latest history before any call.
     if(normalized){
@@ -246,7 +249,7 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
      const selectedPolicy=execution.billing.callPolicy.find(p=>p.modelId===candidate.modelId&&p.model===candidate.model);
      if(!selectedPolicy)throw new Error('RUNTIME_MODEL_DENIED');
      primaryPolicy=selectedPolicy;
-     effective={model:candidate.model,instructions,maxOutputTokens:candidate.outputLimit,role:'skill'};
+     effective={model:candidate.model,instructions,maxOutputTokens:candidate.outputLimit,role:'skill',contentSource:candidate.contentSource};
     }
    }
    effective.instructions=withPrimaryAddenda(effective.instructions,context);
@@ -261,6 +264,9 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
     Buffer.byteLength(JSON.stringify(tools.map(t=>({name:t.name,description:t.description})))))+
     (context.skillFile?skillFileToolBytes():0)+(context.historyRead?mentorHistoryToolBytes():0)+
     (context.historySelection?.markerReserveBytes??(context.promptCache?PROMPT_CACHE_OVERHEAD_BYTES:0));
+   // A2: a derived-content Skill gets its saved source in this call's instructions, read and recorded in one transaction.
+   if(effective.role==='skill'&&effective.contentSource)
+    effective.instructions=await injectContentSource(ownerRpc,args,effective.contentSource,effective.instructions,context,primaryPolicy.inputLimit,toolBytes);
    const preserveHistoricalMaterial=Boolean(context.sources?.length)||requestsHistoricalComparison(context.input);
    const primarySequence=callSequence;
    let agentText="";
@@ -423,6 +429,7 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
   }catch(error){
    claimNotice??=billingClaimNotice(error);
    if(error instanceof Error&&error.message===POSITIONING_REFUSED)return endPositioningRefusal(ownerRpc,args,isPayg);
+   if(error instanceof ContentSourceRefusal)return {...await cancelRound(ownerRpc,args),code:error.code,notice:CONTENT_SOURCE_MESSAGES[error.code]};
    if(nativeProgress&&!accountClosed&&!moderationBlocked){const done=await finishStop(executionId,onProgress,undefined,execution.live);if(done)return done;}
    if(nativeProgress&&execution.live&&projection.text&&!waitPoint){const correction=projection.finish(INVALID_REPLY_NOTICE);if(correction)progress(correction);}
    if(waitPoint){
@@ -437,20 +444,12 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
     return {state:stopped.state,code:reportFailure,...claimNoticeFields(claimNotice)};
    }
    if(accountClosed)return {state:'pending' as const};
-   if(moderationBlocked){
-    // A cancellation failure propagates; never rewrite a moderation block as pending
-    // or retry an ambiguous durable cancellation here.
-    const stopped=await ownerRpc<{state:'cancelled'|'cost_pending'}>('runtime_cancel',args);
-    return {state:stopped.state};
-   }
+   if(moderationBlocked)return cancelRound(ownerRpc,args);
    if(terminalReplyFailure){
     // The persisted reply proves this execution cannot continue, including a
     // replay after owner loss. Cancellation retains receipts/checkpoints and
     // settles known costs once; unknown transport outcomes never reach here.
-    try{
-     const stopped=await ownerRpc<{state:'cancelled'|'cost_pending'}>('runtime_cancel',args);
-     return {state:stopped.state};
-    }catch{/* Reconcile the original execution on recovery; never redispatch. */}
+    try{return await cancelRound(ownerRpc,args);}catch{/* Reconcile the original execution on recovery; never redispatch. */}
    }
    if((execution.live||execution.state==='interrupted')&&error instanceof Error&&error.message==='RUNTIME_OUTPUT_TRUNCATED'){
     logger.error('api','runtime_output_truncated',{executionId});
