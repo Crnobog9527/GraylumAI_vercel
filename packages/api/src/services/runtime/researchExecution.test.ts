@@ -8,6 +8,7 @@ import { toolCallPolicy } from '../bill2/toolBilling';
 import { streamOriginalExecution } from './executionStream';
 import type { RuntimeProgress } from './progress';
 import type { ResearchTurnEvent } from '../../shared/researchTurn';
+import { resetPlatformSecretCacheForTests } from '../platformSecrets/reader';
 
 vi.mock('../redisRateLimiter', () => ({ checkVendorRateLimit: vi.fn(async () => true) }));
 
@@ -32,6 +33,8 @@ function database(calls: Array<{ id: string; sequence: number; providerId: strin
   const rpc = vi.fn(async (name: string, ...rest: [Record<string, unknown>]) => {
     void rest;
     if (name === 'bill2_read') return { data: { id: runId, calls }, error: null };
+    // The admin slot is not filled: the transition fallback (PARALLEL_API_KEY) applies.
+    if (name === 'platform_secret_read') return { data: null, error: null };
     if (name === 'research_runtime_read') return { data: null, error: null };
     if (name === 'bill2_claim') return { data: claim, error: null };
     throw new Error(`unexpected ${name}`);
@@ -46,7 +49,7 @@ function build(live: boolean, db: ReturnType<typeof database>, canSend = () => t
     actorId: actor, database: db, emit: event => events.push(event), canSend, now: () => now })!;
   return { built, events };
 }
-afterEach(() => { vi.unstubAllEnvs(); vi.unstubAllGlobals(); });
+afterEach(() => { vi.unstubAllEnvs(); vi.unstubAllGlobals(); resetPlatformSecretCacheForTests(); });
 
 describe('researchExecution (RT-3b PR-3)', () => {
   it('offers nothing without frozen research, and only the frozen tools with it', () => {

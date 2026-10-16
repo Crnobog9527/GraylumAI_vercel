@@ -71,10 +71,11 @@ describe('research subcall safety and accounting', () => {
     expect(f.vendors.firecrawl).not.toHaveBeenCalled();
   });
 
-  it.each(['ROUTE_NOT_FROZEN', 'KEY_MISSING', 'VENDOR_RATE_LIMITED'] as const)('does not claim or send after %s', async stop => {
+  it.each(['ROUTE_NOT_FROZEN', 'KEY_MISSING', 'KEY_UNAVAILABLE', 'VENDOR_RATE_LIMITED'] as const)('does not claim or send after %s', async stop => {
     const f = fixture();
     if (stop === 'ROUTE_NOT_FROZEN') f.context.policies = [];
     if (stop === 'KEY_MISSING') f.context.secrets = vi.fn().mockResolvedValue(null);
+    if (stop === 'KEY_UNAVAILABLE') f.context.secrets = vi.fn().mockRejectedValue(new Error('RESEARCH_KEY_UNAVAILABLE'));
     if (stop === 'VENDOR_RATE_LIMITED') f.context.rateCounter = vi.fn().mockResolvedValue(false);
     expect(await runSubcall(f.context, request)).toEqual({ sent: false, stop, budget: stop === 'VENDOR_RATE_LIMITED' });
     expect(f.billing.claim).not.toHaveBeenCalled();

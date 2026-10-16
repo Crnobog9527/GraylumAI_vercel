@@ -9,7 +9,7 @@ import { toolCallPolicies } from '../bill2/runPolicies';
 import { toolSubcallBilling } from '../bill2/toolSubcall';
 import { checkVendorRateLimit } from '../redisRateLimiter';
 import { databaseRuntimeResearchStore } from '../research/runtime/store';
-import { environmentSecretReader } from '../research/runtime/secrets';
+import { platformSecretReader } from '../research/runtime/secrets';
 import type { ResearchToolContext } from '../research/runtime/toolContext';
 import { POSITIONING_RESEARCH_TOOLS, type ResearchToolName } from '../research/tools/schemas';
 import type { RuntimeExecution } from './paygResume';
@@ -63,7 +63,7 @@ export function researchExecution(input: {
       // Claims on a run are serial (one owner, no unsettled call), so the next free slot is the count plus one.
       nextSequence: async () => (await readCalls()).length + 1,
       phase: research.phase, ...(execution.epoch !== undefined ? { runtimeEpoch: execution.epoch } : {}),
-      secrets: environmentSecretReader(), rateCounter: checkVendorRateLimit,
+      secrets: platformSecretReader(input.database), rateCounter: checkVendorRateLimit,
       newId: () => { throw new Error('RESEARCH_OPERATION_ID_REQUIRED'); },
       beforeSend: async () => input.canSend(),
       ...(input.now ? { now: input.now } : {}),
