@@ -161,3 +161,9 @@ it('RT-3b PR-2: a refresh is refused while research is off, before admission',as
   expect(captured.policy).toBeUndefined();
  }finally{research.enabled=true;}
 });
+it.each(['step','plan'])('RT-3b PR-2: a %s request carrying a refresh grant is refused before any work',async purpose=>{
+ const f=fixture();
+ await expect(f.service.prepareStep({...request,purpose,organizeAfter:false,researchRefreshId:'10000000-0000-4000-8000-000000000009'}))
+  .rejects.toThrow('OPC_RESEARCH_REFRESH_INVALID');
+ expect(f.reads).toEqual([]);expect(captured.policy).toBeUndefined();
+});

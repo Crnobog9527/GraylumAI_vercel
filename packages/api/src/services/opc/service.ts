@@ -72,6 +72,7 @@ export function opcService(user: SupabaseClient, admin: SupabaseClient, real?:St
       const stepSummary = readStepSummaryRequest(v);
       const updatedFieldIds = readChecklistUpdatedInput(v.input);
       if (updatedFieldIds && (v.purpose !== "mentor" || v.answerSource)) throw new Error("OPC_STEP_DENIED");
+      if (v.researchRefreshId && v.purpose !== "mentor") throw new Error("OPC_RESEARCH_REFRESH_INVALID");
       let d = await rpc("opc_query", { p_draft_id: v.draftId });
       let snapshot = await workbenchService(user, admin).read(d.projectId, d.roundId);
       if (
@@ -90,8 +91,7 @@ export function opcService(user: SupabaseClient, admin: SupabaseClient, real?:St
       if (resolved.error) throw new Error("OPC_DENIED");
       // Host openings share the ordinary Session, recovery and billing path.
       const opening = v.purpose === "mentor" && isOpeningInput(v.input);
-      if (isOpeningInput(v.input) && v.purpose !== "mentor")
-        throw new Error("OPC_STEP_DENIED");
+      if (isOpeningInput(v.input) && v.purpose !== "mentor") throw new Error("OPC_STEP_DENIED");
       if (opening && v.organizeAfter) throw new Error("OPC_STEP_DENIED");
       // Keep the original request identity; only new admissions attach opening extraction.
       const organizeAfter = opening || v.organizeAfter;
