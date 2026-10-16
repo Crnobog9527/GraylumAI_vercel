@@ -8,6 +8,7 @@ import { packageHash, packageHashPayload, sha256, type PackageDescriptor } from 
 import { validatePublication } from './publication';
 import { validateWorkflow,informationSchema } from '../artifacts/workflow';
 import { RUNTIME_MODEL_COLUMNS, runtimeModelOption } from '../models/runtimeEligibility';
+import { openRouterKeyConfigured } from '../models/openRouterKey';
 import { parseWorkflowManifest, workflowManifestPath } from './workflowManifest';
 import { readSocialMediaFlag, saveSocialMediaFlag } from './socialMediaFlag';
 import { isPositioningWorkflow } from '../opc/positioningWorkflow';
@@ -100,7 +101,7 @@ export async function saveModuleSkill(db: SupabaseClient, actorId: string, value
   const cleared = choice === false && value.expectedUpdatedAt !== null ? await clearSocialFlag(db, value.moduleId) : undefined;
   const model = await db.from('ai_models').select(RUNTIME_MODEL_COLUMNS).eq('id',value.module.model_id).single();
   if(model.error || !model.data) throw new Error('请选择已配置的对话模型');
-  const option=runtimeModelOption(model.data,'skill');
+  const option=runtimeModelOption(model.data,'skill',await openRouterKeyConfigured(db));
   if(!option.available) throw new Error(option.reason ?? '对话模型配置不完整');
   const { descriptor, files, workflow } = prepared;
   const { data, error } = await db.rpc('admin_publish_skill_module', {

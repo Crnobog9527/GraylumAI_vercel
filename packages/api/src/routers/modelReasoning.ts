@@ -10,6 +10,7 @@ import { createSafeInternalError } from '../lib/publicError';
 import { readOpenRouterCatalog } from '../services/models/openRouterCatalog';
 import { RUNTIME_MODEL_COLUMNS } from '../services/models/runtimeEligibility';
 import { TryRefused, tryReasoning } from '../services/models/tryReasoning';
+import { readOpenRouterKey } from '../services/models/openRouterKey';
 import { REASONING_PURPOSES, checkReasoningConfig, purposeSettings, readReasoningConfig, type ReasoningConfig } from '../shared/modelReasoning';
 import { diffPricing, readPricingSnapshot, type PricingSnapshot } from '../shared/modelPricing';
 
@@ -74,7 +75,10 @@ export const modelReasoningRouter = router({
         throw new TRPCError({ code: 'TOO_MANY_REQUESTS', message: `同一个模型 ${TRY_INTERVAL_MS / 1000} 秒内只能试一次，请稍后再试` });
       try {
         lastTry.set(input.modelId, now);
-        const result = await tryReasoning(data, input.purpose);
+        let key: string | undefined;
+        try { key = await readOpenRouterKey(ctx.supabase); }
+        catch { lastTry.delete(input.modelId); throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: '暂时无法读取第三方密钥，请稍后重试' }); }
+        const result = await tryReasoning(data, key, input.purpose);
         logger.info('api', 'model_reasoning_try', { modelId: input.modelId, purpose: input.purpose, ok: result.ok, httpStatus: result.httpStatus,
           firstTextMs: result.firstTextMs, totalMs: result.totalMs, reasoningTokens: result.reasoningTokens, costUsd: result.costUsd,
           finishReason: result.finishReason, error: result.error });

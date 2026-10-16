@@ -2,6 +2,14 @@ import { TRPCError } from '@trpc/server';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { modelRouter } from './model';
 
+// ADMIN-SECRETS OR-1: one platform OpenRouter key for every model.
+const platformKey = vi.hoisted(() => ({ value: 'sk-or-test' as string | undefined }));
+vi.mock('../services/models/openRouterKey', () => ({
+  readOpenRouterKey: async () => platformKey.value,
+  openRouterKeyConfigured: async () => platformKey.value !== undefined,
+}));
+afterEach(() => { platformKey.value = 'sk-or-test'; });
+
 function createSingleQueryBuilder(result: Promise<unknown>) {
   return {
     select() {
@@ -161,8 +169,7 @@ describe('modelRouter error sanitization', () => {
         name: 'OpenRouter',
         modelId: 'gpt-4o',
         provider: 'openai',
-        apiKey: 'sk-or-test',
-      }),
+        }),
     ).rejects.toMatchObject<Partial<TRPCError>>({
       code: 'INTERNAL_SERVER_ERROR',
       message: '创建模型失败，请稍后重试',
@@ -331,7 +338,6 @@ describe('modelRouter error sanitization', () => {
       name: 'OpenRouter',
       model_id: 'gpt-4o',
       provider: 'openai' as const,
-      api_key: 'sk-or-test',
       api_endpoint: 'https://openrouter.ai/api/v1',
       config: null,
     };
@@ -391,7 +397,6 @@ describe('modelRouter error sanitization', () => {
       name: 'OpenRouter',
       modelId: 'gpt-4o',
       provider: 'openai',
-      apiKey: 'sk-or-test',
       apiEndpoint: 'https://openrouter.ai/api/v1',
     });
 
@@ -541,7 +546,6 @@ describe('modelRouter error sanitization', () => {
       name: 'Claude 4.6 Opus',
       modelId: 'anthropic/claude-opus-4.6',
       provider: 'openai',
-      apiKey: 'sk-or-test',
       apiEndpoint: 'https://openrouter.ai/api/v1/chat/completions',
     });
 
@@ -584,14 +588,12 @@ describe('modelRouter error sanitization', () => {
                   {
                     id: 'model-1',
                     name: 'Model 1', provider: 'openai', model_id: 'qwen/qwen3.8-27b', api_endpoint: '', token_counting_supported: 'false',
-                    api_key: 'sk-test',
                     config: { connection_status: 'connected', last_tested: '2026-03-29T00:00:00.000Z' },
                     is_active: 'true',
                   },
                   {
                     id: 'model-2',
                     name: 'Model 2', provider: 'openai', model_id: 'openai/gpt-5.6-luna', api_endpoint: '', token_counting_supported: 'false',
-                    api_key: null,
                     config: {},
                     is_active: 'false',
                   },
@@ -621,14 +623,20 @@ describe('modelRouter error sanitization', () => {
       }),
       expect.objectContaining({
         id: 'model-2',
-        hasApiKey: false,
-        connectionStatus: 'no_key',
+        hasApiKey: true,
+        connectionStatus: 'untested',
       }),
+    ]);
+    platformKey.value = undefined;
+    expect((await caller.getAdminModelsDashboard()).connectionStatus).toEqual([
+      expect.objectContaining({ id: 'model-1', hasApiKey: false, connectionStatus: 'connected' }),
+      expect.objectContaining({ id: 'model-2', hasApiKey: false, connectionStatus: 'no_key' }),
     ]);
   });
 
-  it('marks testConnection as no_key and persists sanitized diagnostics when the model has no API key', async () => {
+  it('marks testConnection as no_key and persists sanitized diagnostics when the platform key is not filled in', async () => {
     const updatePayloads: Array<Record<string, unknown>> = [];
+    platformKey.value = undefined;
 
     const supabase = {
       from(table: string) {
@@ -653,7 +661,6 @@ describe('modelRouter error sanitization', () => {
             name: 'No Key Model',
             model_id: 'anthropic/claude-sonnet-4.6',
             provider: 'openai',
-            api_key: null,
             api_endpoint: 'https://openrouter.ai/api/v1/chat/completions',
             config: {},
           });
@@ -669,12 +676,12 @@ describe('modelRouter error sanitization', () => {
     expect(result).toMatchObject({
       success: false,
       status: 'no_key',
-      error: 'API 密钥未配置',
+      error: 'OpenRouter 密钥未填写，请到后台“第三方密钥”页填写',
     });
     expect(updatePayloads).toHaveLength(1);
     expect(updatePayloads[0].config).toMatchObject({
       connection_status: 'no_key',
-      last_error: 'API 密钥未配置',
+      last_error: 'OpenRouter 密钥未填写，请到后台“第三方密钥”页填写',
       last_error_detail: null,
     });
   });

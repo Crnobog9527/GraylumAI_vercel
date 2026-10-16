@@ -6,7 +6,7 @@
  */
 
 import { router, adminProcedure } from '../trpc';
-import { getConfiguredProviderApiKeySource } from '../services/providerUtils';
+import { openRouterKeyConfigured } from '../services/models/openRouterKey';
 import { z } from 'zod';
 import { TRPCError } from '@trpc/server';
 import { DiagnosticsService, type DiagnosticCategory } from '../services/diagnostics';
@@ -99,28 +99,18 @@ async function getDiagnosticsHealthCheck(supabase: any, supabaseAdmin: any) {
     checks.aiModels = { ok: false, message: '模型配置读取异常，请检查服务端日志' };
   }
 
-  const configuredKeySource = getConfiguredProviderApiKeySource();
-  const hasEnvApiKey = Boolean(configuredKeySource?.startsWith('env:'));
-  let hasDbApiKey = false;
+  // The platform OpenRouter key (admin third-party keys page, OR-1); no environment fallback.
   try {
-    const { data: modelsWithKey } = await supabaseAdmin
-      .from('ai_models')
-      .select('api_key')
-      .eq('is_active', 'true')
-      .not('api_key', 'is', null);
-    hasDbApiKey = (modelsWithKey?.length ?? 0) > 0 &&
-      modelsWithKey!.some((model: { api_key?: string | null }) => Boolean(model.api_key && model.api_key.length > 0));
+    const hasApiKey = await openRouterKeyConfigured(supabaseAdmin);
+    checks.apiKey = {
+      ok: hasApiKey,
+      message: hasApiKey
+        ? 'OK (已配置)'
+        : 'OpenRouter 密钥未填写，请到后台“第三方密钥”页填写',
+    };
   } catch {
-    // ignore database lookup failures and rely on env result
+    checks.apiKey = { ok: false, message: '暂时无法读取第三方密钥状态，请检查服务端日志' };
   }
-
-  const hasApiKey = hasEnvApiKey || hasDbApiKey;
-  checks.apiKey = {
-    ok: hasApiKey,
-    message: hasApiKey
-      ? 'OK (已配置)'
-      : 'API 密钥未配置，请检查服务配置',
-  };
 
   const allOk = Object.values(checks).every((check) => check.ok);
   const failedCount = Object.values(checks).filter((check) => !check.ok).length;

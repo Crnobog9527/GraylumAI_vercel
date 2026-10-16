@@ -8,7 +8,7 @@ import { testRuntimeStopLoss } from './runtime/stopLossMonitor';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { getRateLimiter, DEFAULT_RATE_LIMIT_CONFIGS } from './rateLimiter';
 import { testBillingPrededuct, testBillingIdempotency, testBillingReconcile } from './diagnosticsBilling';
-import { getConfiguredProviderApiKeySource } from './providerUtils';
+import { openRouterKeyConfigured } from './models/openRouterKey';
 import { logger } from '../lib/logger';
 import { realModelUsedOrStored } from './modelIdentity/usageAliases';
 import { readDiagnosticSummary, readDiagnosticTestHistory, readLatestDiagnosticResults } from './diagnosticsResults';
@@ -120,24 +120,25 @@ async function testAIModelStatus(ctx: DiagnosticContext): Promise<DiagnosticTest
       // 获取所有启用的模型
       const { data: models, error } = await ctx.supabaseAdmin
         .from('ai_models')
-        .select('id, name, model_id, provider, is_active, api_key, config')
+        .select('id, name, model_id, provider, is_active, config')
         .eq('is_active', 'true');
 
       if (error) throw error;
+      // One platform OpenRouter key for every model (admin third-party keys page, OR-1).
+      const hasKey = await openRouterKeyConfigured(ctx.supabaseAdmin);
 
       const modelResults = await Promise.all((models || []).map(async (model) => {
         const config = (model.config as Record<string, unknown> | null) ?? {};
         const connectionStatus = typeof config.connection_status === 'string'
           ? config.connection_status
           : null;
-        const hasKey = !!model.api_key || !!getConfiguredProviderApiKeySource();
 
         return {
           id: model.id,
           name: model.name,
           modelId: model.model_id,
           status: !hasKey ? 'missing_key' : connectionStatus ?? 'untested',
-          message: !hasKey ? '缺少 API 密钥' : (connectionStatus ? `最近连接状态: ${connectionStatus}` : '尚未执行连接测试'),
+          message: !hasKey ? '缺少 OpenRouter 密钥（后台“第三方密钥”页）' : (connectionStatus ? `最近连接状态: ${connectionStatus}` : '尚未执行连接测试'),
         };
       }));
 
