@@ -24,6 +24,7 @@
     "./src/services/publishMonitor/socialMonitorJob": "./src/services/publishMonitor/socialMonitorJob.ts",
     "./src/services/publishMonitor/webhook": "./src/services/publishMonitor/webhook.ts",
     "./src/services/publishMonitor/secrets": "./src/services/publishMonitor/secrets.ts",
+    "./src/services/publishMonitor/manualImport": "./src/services/publishMonitor/manualImport.ts",
     "./src/services/scheduledJobRuns": "./src/services/scheduledJobRuns.ts",
     "./src/services/ticketAutoClose": "./src/services/ticketAutoClose.ts",
     "./src/services/providerUtils": "./src/services/providerUtils.ts",

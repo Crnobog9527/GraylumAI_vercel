@@ -2,6 +2,7 @@
 import { describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({ entitlements: vi.fn() }));
 vi.mock('../services/membershipEntitlements', () => ({ readMembershipEntitlements: mocks.entitlements }));
+vi.mock('../services/redisRateLimiter', () => ({ checkRateLimitOrThrow: vi.fn().mockResolvedValue(undefined) }));
 import { publishMonitorRouter } from './publishMonitor';
 
 const actor = '00000000-0000-4000-8000-0000000f0001';
@@ -64,5 +65,20 @@ describe('publish-monitor own data (PR-3a)', () => {
     const foreign = vi.fn().mockResolvedValue({ data: null, error: { message: 'PUBLISH_MONITOR_WORK_ITEM_MISMATCH' } });
     await expect(caller(foreign, true).linkPost({ postId: actor, workItemId: actor }))
       .rejects.toMatchObject({ code: 'FORBIDDEN', message: 'PUBLISH_MONITOR_WORK_ITEM_MISMATCH' });
+  });
+});
+
+describe('publish-monitor manual import (PR-3b)', () => {
+  it('needs a data window and the feature switch; invalid rows are a bad request', async () => {
+    const input = { accountProjectId: actor, origin: 'table' as const, rows: [{ postKey: 'p', url: null, postedAt: null,
+      titleExcerpt: null, metrics: { likes: 1 } }] };
+    mocks.entitlements.mockResolvedValue({ ownDataWindowDays: 0 });
+    await expect(caller(vi.fn(), true).manualImport(input)).rejects.toMatchObject({ code: 'FORBIDDEN' });
+    mocks.entitlements.mockResolvedValue({ ownDataWindowDays: 30 });
+    await expect(caller(vi.fn(), false).manualImport(input)).rejects.toMatchObject({ message: 'PUBLISH_MONITOR_DISABLED' });
+    const rpc = vi.fn().mockResolvedValue({ data: { connectionId: actor, inserted: 1, updated: 0 }, error: null });
+    await expect(caller(rpc, true).manualImport(input)).resolves.toEqual({ connectionId: actor, inserted: 1, updated: 0 });
+    await expect(caller(vi.fn(), true).manualImport({ ...input, rows: [{ ...input.rows[0]!, metrics: { likes: -1 } }] }))
+      .rejects.toMatchObject({ code: 'BAD_REQUEST' });
   });
 });
