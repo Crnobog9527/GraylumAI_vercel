@@ -7,17 +7,20 @@ it('refreshes the entitlement level after checkout, so a new member can buy cred
   const utils = {
     user: { getUserProfile: query(), getEntitlements: query() },
     credits: { getBalance: query(), getCreditsSummary: query() },
-    payments: { getMembershipEligibilityMatrix: query(), listBillingRecords: query() },
+    payments: { methodMembership: query(), getMembershipEligibilityMatrix: query(), listBillingRecords: query() },
   };
   await invalidatePostCheckoutMembershipQueries(utils);
   expect(utils.user.getEntitlements.invalidate).toHaveBeenCalledTimes(1);
   expect(utils.user.getUserProfile.invalidate).toHaveBeenCalledTimes(1);
+  // The membership page and the purchase entry read paid memberships from methodMembership.
+  expect(utils.payments.methodMembership.invalidate).toHaveBeenCalledTimes(1);
 });
 
 it('does not tell a user who paid in another tab that nothing was charged', () => {
   expect(canceledReturnNotice({ fulfilledAt: '2026-10-13T00:00:00.000Z', orderStatus: 'completed' }).tone).toBe('success');
   expect(canceledReturnNotice({ fulfilledAt: null, orderStatus: 'completed' }).tone).toBe('success');
-  expect(canceledReturnNotice({ fulfilledAt: null, orderStatus: 'canceled' })).toEqual({ tone: 'cancelled', message: '你已取消本次支付，没有发生扣费。' });
+  expect(canceledReturnNotice({ fulfilledAt: null, orderStatus: 'canceled' })).toEqual({ tone: 'cancelled',
+    message: '你已取消本次支付，没有发生扣费。如果你在中国大陆，国际银行卡付款页会提示不支持；请回来改选“中国大陆银行卡”。' });
   expect(canceledReturnNotice(undefined).tone).toBe('cancelled');
   // Paid but kept for review: never "no charge".
   expect(canceledReturnNotice({ fulfilledAt: null, orderStatus: 'pending', paymentStatus: 'paid' }).tone).toBe('warning');

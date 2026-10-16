@@ -12,7 +12,7 @@
 @media (min-width: 768px) {
   .scroller { height: 100%; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; }
 }
-.board { position: relative; display: grid; justify-items: center; padding: 22px clamp(16px, 3vw, 40px) 48px; }
+.board { position: relative; display: grid; justify-items: center; padding: 22px clamp(16px, 2vw, 40px) 48px; }
 
 .caption {
   position: relative; z-index: 2; max-width: 34em; min-height: 1.75em; margin: 0 0 18px; color: var(--j-ink);
@@ -26,11 +26,21 @@
     background: color-mix(in srgb, var(--j-canvas) 90%, transparent); backdrop-filter: blur(4px);
   }
 }
+/* The short version: the sentence sits in its own bar on top of the canvas, never over a card. */
+.framed { display: grid; grid-template-rows: auto minmax(0, 1fr); gap: 8px; height: 100%; min-height: 0; }
+.framed > .scroller { min-height: 0; }
+/* Room below the last card, so the camera can always move a report sheet fully out instead of stopping it half cut. */
+@media (min-width: 768px) { .framed .board { padding-bottom: min(50vh, 420px); } }
+.captionBar {
+  min-height: 1.5em; margin: 0; padding: 0 8px; color: var(--j-ink); font-size: 18px; font-weight: 600; line-height: 1.5;
+  text-align: center; text-wrap: balance; animation: captionIn .45s var(--j-ease) both;
+}
+@media (max-width: 767px) { .captionBar { font-size: 16px; text-align: left; } }
 @keyframes captionIn { from { opacity: 0; transform: translateY(6px); } }
 
 /* The report: one sheet with a second sheet peeking out under it. */
 .doc {
-  position: relative; z-index: 2; display: grid; gap: 8px; width: min(520px, 100%); padding: 18px 24px 14px;
+  position: relative; z-index: 2; display: grid; gap: 8px; width: min(100%, clamp(520px, 52%, 680px)); padding: 18px 24px 14px;
   border: 1px solid var(--j-rule); border-radius: 6px; background: var(--j-paper);
   box-shadow: 4px 4px 0 -1px var(--j-paper), 4px 4px 0 0 var(--j-rule), 0 18px 32px -24px rgba(0, 0, 0, .3);
   transition: border-color .4s, box-shadow .4s;
@@ -72,9 +82,15 @@
 /* People: three reviewers side by side under the report, the summary centred under them. */
 .lanes {
   position: relative; z-index: 2; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: clamp(18px, 3vw, 48px); width: min(100%, 1040px); margin-top: 84px;
+  gap: clamp(16px, 2.4vw, 56px); width: min(100%, 1280px); margin-top: 84px;
 }
-.sink { position: relative; z-index: 2; display: grid; justify-items: center; width: min(100%, 320px); margin-top: 72px; }
+/* A name on two lines must not push that reviewer's cards below the others: the three share the head row. */
+@media (min-width: 768px) {
+  .lanes { row-gap: 10px; }
+  .lanes > .lane { grid-row: span 2; grid-template-rows: subgrid; }
+  .lanes .head { align-content: start; }
+}
+.sink { position: relative; z-index: 2; display: grid; justify-items: center; width: min(100%, 400px); margin-top: 72px; }
 .sink .lane { width: 100%; }
 .lane { display: grid; gap: 10px; align-content: start; justify-items: center; min-width: 0; transition: opacity .35s; }
 .lane[data-dim='true'] { opacity: .42; }
@@ -86,12 +102,14 @@
   display: grid; justify-items: center; gap: 4px; max-width: 100%; padding: 8px 12px 6px; border: 0; border-radius: 12px;
   background: color-mix(in srgb, var(--j-canvas) 88%, transparent); color: inherit; font: inherit; cursor: pointer;
 }
+div.head, div.card { cursor: default; }
 .head:hover .who, .lane[data-selected='true'] .who { text-decoration: underline; text-underline-offset: 3px; }
-.who { max-width: 100%; overflow: hidden; color: var(--j-ink); font-size: 14px; font-weight: 600; line-height: 1.4; text-overflow: ellipsis; white-space: nowrap; }
+/* Names are shown whole (up to 20 characters), wrapping onto a second line rather than being cut. */
+.who { max-width: 100%; color: var(--j-ink); font-size: 14px; font-weight: 600; line-height: 1.4; text-align: center; text-wrap: balance; overflow-wrap: anywhere; }
 .status { padding: 0 9px; border-radius: 999px; background: var(--j-desk); color: var(--j-body); font-size: 12.5px; line-height: 22px; white-space: nowrap; }
 
 /* Each person's work: a short string of cards on a vertical thread. */
-.cards { position: relative; display: grid; gap: 10px; width: 100%; max-width: 270px; margin: 0; padding: 0; list-style: none; }
+.cards { position: relative; display: grid; gap: 10px; width: 100%; max-width: 360px; margin: 0; padding: 0; list-style: none; }
 .cards li::before { content: ''; position: absolute; top: -10px; left: 50%; width: 1px; height: 10px; background: var(--j-ink-soft); }
 .cards li { position: relative; animation: cardIn .5s var(--j-ease) both; }
 @keyframes cardIn { from { opacity: 0; transform: translateY(-8px); } }
@@ -138,7 +156,12 @@
 @media (max-width: 767px) {
   .scroller { border-radius: 12px; }
   .board { justify-items: stretch; padding: 16px 14px 24px; }
-  .caption { margin-bottom: 14px; font-size: 18px; text-align: left; }
+  /* The sentence about now stays at the top of the screen while the page follows the work down. */
+  .caption {
+    position: sticky; top: 0; z-index: 4; margin: -16px -14px 14px; padding: 12px 14px 10px; font-size: 18px; text-align: left;
+    background: color-mix(in srgb, var(--j-canvas) 92%, transparent); backdrop-filter: blur(4px);
+  }
+  .cards li, .doc, .unchanged { scroll-margin-top: 104px; scroll-margin-bottom: 16px; }
   .doc { width: 100%; padding: 14px 16px 12px; }
   .sink + .doc, .sink + .unchanged { margin-top: 20px; }
   .doc h2 { font-size: 18px; }
@@ -149,12 +172,13 @@
   .lane { justify-items: stretch; }
   .sink { display: block; width: auto; margin: 16px 0 0 12px; padding: 4px 0 0 16px; border-left: 1px dashed var(--j-ink-soft); }
   .head { grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; justify-items: start; gap: 10px; margin-left: -34px; padding: 0; background: none; }
+  .who { text-align: left; }
   .cards { max-width: none; }
   .cards li::before { display: none; }
   .lane[data-dim='true'] .cards li:not(:last-child) { display: none; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .caption, .docStamp, .cards li, .quote, .unchanged { animation: none; }
+  .caption, .captionBar, .docStamp, .cards li, .quote, .unchanged { animation: none; }
   .lit, .pulse::after, .docReading::before { animation: none; }
 }

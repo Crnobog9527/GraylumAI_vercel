@@ -6,6 +6,7 @@ import {
   meteringReviewInput, reviewMetering, meteringReviewSnapshotInput, meteringReviewSnapshot,
 } from '../services/bill2/meteringReview';
 import { buildBill2ModelReport, type Bill2CallReportRow } from '../services/bill2ModelReport';
+import { findStuckPaygCalls, settleStuckCall, settleStuckCallInput } from '../services/bill2/stuckCalls';
 
 import {
   absorbConfigSchema, absorbAckInput, readAbsorbConfig, saveAbsorbConfig,
@@ -21,6 +22,10 @@ export const billingReportRouter = router({
     .query(({ ctx, input }) => meteringReviewSnapshot(ctx.supabase, ctx.user.id, input.callId)),
   reviewMetering: adminProcedure.input(meteringReviewInput)
     .mutation(({ ctx, input }) => reviewMetering(ctx.supabase, ctx.user.id, input)),
+  // 0261: calls whose cost never became known after automatic recovery; settled by a verified cost.
+  stuckPaygCalls: adminProcedure.query(({ ctx }) => findStuckPaygCalls(ctx.supabase)),
+  settleStuckPaygCall: adminProcedure.input(settleStuckCallInput)
+    .mutation(({ ctx, input }) => settleStuckCall(ctx.supabase, ctx.user.id, input)),
   platformAbsorbConfig: adminProcedure.query(({ ctx }) => readAbsorbConfig(ctx.supabase)),
   savePlatformAbsorbConfig: adminProcedure.input(absorbConfigSchema)
     .mutation(({ ctx, input }) => saveAbsorbConfig(ctx.supabase, input)),

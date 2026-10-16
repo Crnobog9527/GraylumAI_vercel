@@ -7,18 +7,16 @@ import {
   DECISIONS, DECISION_LABEL, SEATS, STANCE_LABEL, VERDICT_LABEL, type JurySeatNames, type Seat, type SeatCode,
 } from './jury-events';
 import { statusWord, type CanvasCard, type CanvasView, type Edge, type Node } from './jury-canvas';
-import { REVISION_TEXT } from './jury-mock-rulings';
-import { REPORT_CHAPTERS, REPORT_TITLE } from './jury-report';
+import { MOCK_REPORT, type JuryCaseReport } from './jury-case';
+import { frameTop, type Span } from './jury-frame';
 import { RulingSeal, SeatMark } from './JuryBits';
 import styles from './jury-canvas.module.css';
 
 type Box = { cx: number; cy: number; top: number; bottom: number; left: number; right: number };
 type Boxes = Partial<Record<Node | `end-${SeatCode}`, Box>>;
-type Hover = { onPeek: (seat: SeatCode | null) => void; onPick: (seat: SeatCode) => void };
+/** Without onPick the people and cards are plain text, not buttons that do nothing. */
+type Hover = { onPeek: (seat: SeatCode | null) => void; onPick?: (seat: SeatCode) => void };
 
-const EXCERPT = REPORT_CHAPTERS.slice(0, 2).map(chapter => chapter.body).join(' ');
-/** The new report opens on what changed: the revised text of the first changed chapters. */
-const REVISED_EXCERPT = Object.values(REVISION_TEXT).slice(0, 2).map(text => text.revised).join(' ');
 
 /**
  * The review as a canvas: the user's report on top, the three reviewers hung under it on threads, the summary under
@@ -26,25 +24,36 @@ const REVISED_EXCERPT = Object.values(REVISION_TEXT).slice(0, 2).map(text => tex
  * person's work grows downward as a short string of cards. Only the thing happening now is lit; pointing at (or tapping) a person or a card opens their full
  * record.
  */
-export function JuryCanvas({ view, names, selected, onPeek, onPick }: {
+export function JuryCanvas({ view, names, selected, onPeek, onPick, report = MOCK_REPORT, follow = true, captionAbove = false }: {
   view: CanvasView; names: JurySeatNames; selected: SeatCode | null;
+  /** The two reports shown; the prototype's mock creator by default. */
+  report?: JuryCaseReport;
+  /** On a phone, scroll the page to keep what happens now in view. Off when the page's own scrolling drives the
+   * canvas; on a computer the canvas always scrolls inside itself. */
+  follow?: boolean;
+  /** Put the sentence about now in a bar above the canvas instead of floating over it, so it never covers a report
+   * card's title (the short version embedded on the landing page). */
+  captionAbove?: boolean;
 } & Hover) {
   const scroller = useRef<HTMLDivElement>(null);
   const board = useRef<HTMLDivElement>(null);
   const boxes = useNodeBoxes(board, `${view.caption}|${view.next.state}|${SEATS.map(seat => view.columns[seat].length).join()}`);
-  useFollowCurrent(scroller, view.current, view.focus.join());
+  useFollowCurrent(scroller, view.current, view.focus.join(), follow, captionAbove);
   const lane = { view, names, selected, onPeek, onPick };
 
-  return (
+  const caption = (
+    <p className={captionAbove ? styles.captionBar : styles.caption} aria-live="polite" key={view.caption}>{view.caption}</p>
+  );
+  const canvas = (
     <div className={styles.scroller} ref={scroller}>
       <div className={styles.board} ref={board}>
-        <p className={styles.caption} aria-live="polite" key={view.caption}>{view.caption}</p>
+        {captionAbove ? null : caption}
         <Wires boxes={boxes} edges={view.edges} joined={view.joined} />
         <article className={styles.doc} data-node="doc" data-state={view.doc.state}>
-          <h2>{REPORT_TITLE}</h2>
-          <p className={styles.excerpt}>{EXCERPT}</p>
+          <h2>{report.title}</h2>
+          <p className={styles.excerpt}>{report.excerpt}</p>
           <footer>
-            <span>{REPORT_CHAPTERS.length} 章</span>
+            <span>{report.chapters} 章</span>
             {view.doc.state === 'reading' ? <span className={styles.docReading}>正在被阅读</span> : null}
           </footer>
         </article>
@@ -56,10 +65,10 @@ export function JuryCanvas({ view, names, selected, onPeek, onPick }: {
         </div>
         {view.next.state === 'revised' ? (
           <article className={styles.doc} data-node="next" data-state="revised" data-current={view.current === 'next'}>
-            <h2>修订后的{REPORT_TITLE}</h2>
-            <p className={styles.excerpt}>{REVISED_EXCERPT}</p>
+            <h2>修订后的{report.title}</h2>
+            <p className={styles.excerpt}>{report.revisedExcerpt}</p>
             <footer>
-              <span>{REPORT_CHAPTERS.length} 章</span>
+              <span>{report.chapters} 章</span>
               <span className={styles.docStamp}><FileCheck2 size={14} aria-hidden="true" />修订稿改了 {view.next.changed} 章</span>
             </footer>
           </article>
@@ -69,6 +78,7 @@ export function JuryCanvas({ view, names, selected, onPeek, onPick }: {
       </div>
     </div>
   );
+  return captionAbove ? <div className={styles.framed}>{caption}{canvas}</div> : canvas;
 }
 
 /** One person: their mark with a status word, and their work hanging under it. The summary waits faintly until it writes. */
@@ -82,12 +92,11 @@ function Lane({ seat, view, names, selected, onPeek, onPick }: {
   return (
     <section className={styles.lane} data-seat={seat} data-dim={dim} data-folded={folded} data-selected={selected === seat} data-node-end={seat}
       data-waiting={seat === 'S' && view.columns.S.length === 0} aria-label={names[seat]}>
-      <button type="button" className={styles.head} data-node={seat} title={`${names[seat]}：看完整记录`}
-        onMouseEnter={() => onPeek(seat)} onMouseLeave={() => onPeek(null)} onClick={() => onPick(seat)}>
+      <Press className={styles.head} data-node={seat} title={`${names[seat]}：看完整记录`} seat={seat} onPeek={onPeek} onPick={onPick}>
         <SeatMark seat={seat} names={names} size="lg" />
         <span className={styles.who}>{names[seat]}</span>
         <span className={styles.status}>{statusWord(view, seat)}</span>
-      </button>
+      </Press>
       <ol className={styles.cards}>
         {view.columns[seat].map((card, index, list) => {
           const current = view.current === card.key && !dim;
@@ -95,15 +104,29 @@ function Lane({ seat, view, names, selected, onPeek, onPick }: {
           const compact = !current && index < list.length - 1;
           return (
             <li key={card.key} data-current={current}>
-              <button type="button" className={styles.card} data-kind={card.kind}
-                onMouseEnter={() => onPeek(seat)} onMouseLeave={() => onPeek(null)} onClick={() => onPick(seat)}>
+              <Press className={styles.card} data-kind={card.kind}
+                seat={seat} onPeek={onPeek} onPick={onPick}>
                 <CardBody card={card} names={names} compact={compact} />
-              </button>
+              </Press>
             </li>
           );
         })}
       </ol>
     </section>
+  );
+}
+
+/** A person or card: a button that opens the record when the canvas has onPick, otherwise plain content. */
+function Press({ seat, onPeek, onPick, title, children, ...rest }: {
+  seat: SeatCode; onPeek: Hover['onPeek']; onPick?: Hover['onPick']; title?: string; children: ReactNode;
+  className: string; 'data-node'?: string; 'data-kind'?: string;
+}) {
+  if (!onPick) return <div {...rest}>{children}</div>;
+  return (
+    <button type="button" {...rest} title={title}
+      onMouseEnter={() => onPeek(seat)} onMouseLeave={() => onPeek(null)} onClick={() => onPick(seat)}>
+      {children}
+    </button>
   );
 }
 
@@ -233,24 +256,40 @@ function useNodeBoxes(board: RefObject<HTMLDivElement | null>, layout: string) {
   return boxes;
 }
 
-/** Keep the card the stage is about in view inside the canvas (only when the canvas scrolls by itself). */
-function useFollowCurrent(scroller: RefObject<HTMLDivElement | null>, current: string | null, focus: string) {
+/**
+ * Keep the card the stage is about in view inside the canvas (only when the canvas scrolls by itself). With `framed`
+ * (the short version) a report sheet never stops cut in half at the top edge.
+ */
+function useFollowCurrent(
+  scroller: RefObject<HTMLDivElement | null>, current: string | null, focus: string, enabled: boolean, framed: boolean,
+) {
   useEffect(() => {
     const root = scroller.current;
     const target = root?.querySelector<HTMLElement>('[data-current="true"]');
     if (!root || !target) return;
     if (getComputedStyle(root).overflowY === 'visible') {
-      // On a phone the page itself scrolls: move it only once, to bring the new report into view at the end.
-      if (current === 'next') target.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      if (!enabled) return;
+      // On a phone the page itself scrolls. Follow only while the canvas is on screen, so a reader who scrolled
+      // away to the records below is left alone.
+      const rect = root.getBoundingClientRect();
+      if (rect.bottom > 0 && rect.top < window.innerHeight) target.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
       return;
     }
     if (root.scrollHeight <= root.clientHeight + 1) return;
-    const top = target.getBoundingClientRect().top - root.getBoundingClientRect().top + root.scrollTop;
-    const bottom = top + target.offsetHeight;
-    if (top < root.scrollTop + 60 || bottom > root.scrollTop + root.clientHeight - 24) {
-      root.scrollTo({ top: Math.max(0, bottom - root.clientHeight + 48), behavior: 'smooth' });
+    const origin = root.getBoundingClientRect().top - root.scrollTop;
+    const span = (element: HTMLElement): Span => {
+      const rect = element.getBoundingClientRect();
+      return { top: rect.top - origin, bottom: rect.bottom - origin };
+    };
+    const { top, bottom } = span(target);
+    const moves = top < root.scrollTop + 60 || bottom > root.scrollTop + root.clientHeight - 24;
+    let want = moves ? Math.max(0, bottom - root.clientHeight + 48) : root.scrollTop;
+    if (framed) {
+      const sheets = Array.from(root.querySelectorAll<HTMLElement>('[data-node="doc"], [data-node="next"]'), span);
+      want = frameTop({ want, height: root.clientHeight, max: root.scrollHeight - root.clientHeight, target: { top, bottom }, sheets });
     }
-  }, [scroller, current, focus]);
+    if (Math.abs(want - root.scrollTop) > 1) root.scrollTo({ top: want, behavior: 'smooth' });
+  }, [scroller, current, focus, enabled, framed]);
 }
 
 function threadPath(from: Box, to: Box, spread: number): string {

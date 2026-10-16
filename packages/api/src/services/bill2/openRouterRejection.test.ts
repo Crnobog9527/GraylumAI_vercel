@@ -51,3 +51,20 @@ it('accepts audited harmless envelope fields without dropping financial guards',
   expect(openRouterRejection(observation(value),identity,requestHash)).toBeNull();
  }
 });
+
+// 0261: other complete pre-generation refusals are only pending proofs, confirmed later by a lookup.
+const refusal=(code:number,metadata?:unknown)=>({error:{code,message:'synthetic refusal',...(metadata===undefined?{}:{metadata})}});
+const withId=(o:TransportObservation,httpStatus:number)=>({...o,httpStatus,generationId:'gen-synthetic-1'});
+it.each([400,401,403,422,429])('treats a complete HTTP %s refusal with a generation id as a pending proof only',status=>{
+ for(const stream of [false,true])for(const metadata of [undefined,{provider_name:null,reasons:['region']}])
+  expect(openRouterRejection(withId(observation(refusal(status,metadata),stream),status),identity,requestHash))
+   .toMatchObject({evidenceKind:'provider_rejection_pending',providerId:'gen-synthetic-1',cost:null,final:false});
+ // Without a generation id nothing can confirm it, so it is never a proof.
+ expect(openRouterRejection({...observation(refusal(status)),httpStatus:status},identity,requestHash)).toBeNull();
+});
+it.each([
+ [403,refusal(402)],[403,{...refusal(403),choices:[]}],[403,refusal(403,'text')],[403,{error:{code:403}}],
+ [408,refusal(408)],[404,refusal(404)],[500,refusal(500)],[503,refusal(503)],
+])('rejects HTTP %s with a body that is not an exclusive refusal %#',(status,body)=>{
+ expect(openRouterRejection(withId(observation(body),status),identity,requestHash)).toBeNull();
+});

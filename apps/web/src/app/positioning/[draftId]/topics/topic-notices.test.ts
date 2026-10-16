@@ -1,8 +1,11 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { expect, it, vi } from 'vitest';
 import { runtimeGateMessages } from '../../../../../../../packages/api/src/shared/runtimeGateMessages';
-import { topicExecutionNotice, topicFailureMessage, topicTurnOutcome, topicOpenTurnNotice, topicRejectedTurn, topicTurnShows } from './topic-notices';
+import { topicExecutionNotice, topicFailureMessage, topicTurnOutcome, topicOpenTurnNotice, topicRejectedTurn, topicTurnRefused, topicTurnShows } from './topic-notices';
 import { PROVIDER_REJECTED_NOTICE } from '@/lib/runtime-gate-notice';
+import { DEFINITE_REFUSAL_NOTICE } from '@/app/runtime/gate-notices';
+import { USER_STOP_NOTICE } from '@/app/runtime/runtime-notices';
+import { RUNTIME_PAYG_PROFILE_REQUIRED_MESSAGE } from '../../../../../../../packages/api/src/shared/runtimeAdmissionMessages';
 
 const turnRefusal = (code: string, message: string) =>
   Object.assign(new Error(message), { data: { code, path: 'opc.topicTurn', retryAfter: 60 } });
@@ -92,4 +95,58 @@ it('shows the host notice first but keeps the typed input only after a gate stop
   expect(topicTurnOutcome({ state: 'cancelled', unavailable: 'paused' })).toEqual({ notice: runtimeGateMessages.paused, keepInput: true });
   expect(topicTurnOutcome({ state: 'completed' })).toEqual({ notice: null, keepInput: false });
   expect(topicTurnOutcome({ state: 'waiting_credits', notice: '余额不足，任务已暂停，请补充积分后继续。' })).toEqual({ notice: null, keepInput: false });
+});
+
+const refused = (httpStatus: number, code: string, message: string, path = 'opc.topicTurn') =>
+  Object.assign(new Error(message), { data: { httpStatus, code, path } });
+
+it('a topic turn refused before admission says why and is released, never shown as unknown', () => {
+  const payg = refused(412, 'PRECONDITION_FAILED', RUNTIME_PAYG_PROFILE_REQUIRED_MESSAGE);
+  expect(topicFailureMessage(payg)).toBe(RUNTIME_PAYG_PROFILE_REQUIRED_MESSAGE);
+  expect(topicTurnRefused(payg)).toBe(true);
+  const other = refused(412, 'PRECONDITION_FAILED', '当前测试窗口已过期。');
+  expect(topicFailureMessage(other)).toBe(DEFINITE_REFUSAL_NOTICE);
+  expect(topicTurnRefused(other)).toBe(true);
+});
+
+it('keeps unknown outcomes, rate limits, identity conflicts and other procedures held', () => {
+  for (const cause of [refused(503, 'SERVICE_UNAVAILABLE', 'x'), refused(500, 'INTERNAL_SERVER_ERROR', 'x'),
+    refused(429, 'TOO_MANY_REQUESTS', runtimeGateMessages.minute), refused(409, 'CONFLICT', 'OPC_REQUEST_CONFLICT'),
+    refused(412, 'PRECONDITION_FAILED', 'x', 'opc.saveTopicDraft'), new Error('network'),
+    refused(412, 'PRECONDITION_FAILED', 'RUNTIME_ORGANIZER_PENDING：上一轮整理尚未完成，新消息尚未准入，请先处理原任务。')])
+    expect(topicTurnRefused(cause)).toBe(false);
+  expect(topicFailureMessage(refused(503, 'SERVICE_UNAVAILABLE', 'x'))).toContain('状态待核实');
+});
+
+// #973 Codex step 3: a stopped topic turn says 已停止 from the click on, never 回复尚未完成.
+it('a stopped topic turn says 已停止 in every state and never reads as unfinished', () => {
+  const ctx = (extra = {}) => ({ busy: false, finished: null, stopping: false, onRetry: vi.fn(), onStop: vi.fn(), ...extra });
+  const savedStop = { billing: { pausedReason: 'user_stop', cancelRequested: false } };
+  const cases = [
+    topicOpenTurnNotice({ executionId: 'e', state: 'running' }, ctx({ userStopped: true })),
+    topicOpenTurnNotice({ executionId: 'e', state: 'running', userStopPending: true }, ctx()),
+    topicOpenTurnNotice({ executionId: 'e', state: 'cancelled' }, ctx({ userStopped: true })),
+    topicOpenTurnNotice({ executionId: 'e', state: 'completed', stopped: true, ...savedStop }, ctx()),
+  ];
+  for (const notice of cases) {
+    expect(notice).toMatchObject({ tone: 'status', text: USER_STOP_NOTICE });
+    expect(notice?.actions).toBeUndefined();
+  }
+  // A save the server left interrupted offers 重试 to finish it.
+  const interrupted = topicOpenTurnNotice({ executionId: 'e', state: 'interrupted', userStopPending: true }, ctx());
+  expect(interrupted?.text).toBe(USER_STOP_NOTICE);
+  expect(interrupted?.actions?.map(action => action.label)).toEqual(['重试']);
+  // A stop only this tab knows about offers no 重试: without the server's record it could resume charged work.
+  const unconfirmed = topicOpenTurnNotice({ executionId: 'e', state: 'interrupted' }, ctx({ userStopped: true }));
+  expect(unconfirmed).toMatchObject({ text: USER_STOP_NOTICE });
+  expect(unconfirmed?.actions).toBeUndefined();
+  // A cost still being verified keeps its own notice and retry.
+  expect(topicOpenTurnNotice({ executionId: 'e', state: 'cost_pending', userStopPending: true }, ctx())?.text).toBe('费用待核实；重试只核对原调用。');
+  // Without any stop record nothing changes: a finished turn shows nothing, an open one is still unfinished.
+  expect(topicOpenTurnNotice({ executionId: 'e', state: 'completed' }, ctx())).toBeNull();
+  expect(topicOpenTurnNotice({ executionId: 'e', state: 'cancelled' }, ctx())).toBeNull();
+  expect(topicOpenTurnNotice({ executionId: 'e', state: 'running' }, ctx())?.text).toBe('回复尚未完成，原请求已保留。');
+  // An ordinary cancellation that once paused for a stop is not a user stop.
+  const cancelledPause = { billing: { pausedReason: 'user_stop', cancelRequested: true } };
+  expect(topicOpenTurnNotice({ executionId: 'e', state: 'cancelled', ...cancelledPause }, ctx())).toBeNull();
 });

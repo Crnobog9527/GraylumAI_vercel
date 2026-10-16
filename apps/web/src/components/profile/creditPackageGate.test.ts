@@ -12,6 +12,11 @@ describe('creditPackBuyState', () => {
     expect(creditPackBuyState({ ...base, entitlement: ready('free') })).toEqual({ disabled: true, label: '开通会员后可购买' });
     expect(creditPackBuyState({ ...base, entitlement: ready(null) })).toEqual({ disabled: true, label: '开通会员后可购买' });
   });
+  it('keeps packs closed during the 24-hour renewal grace, which keeps access but not pack eligibility (0214)', () => {
+    expect(creditPackBuyState({ ...base, entitlement: ready('pro'), renewalGrace: true }))
+      .toEqual({ disabled: true, label: '续费完成后可购买' });
+    expect(creditPackBuyState({ ...base, entitlement: ready('gold'), renewalGrace: false })).toEqual({ disabled: false, label: '购买' });
+  });
   it('never enables while membership is unknown', () => {
     expect(creditPackBuyState({ ...base, entitlement: { status: 'loading' } }).disabled).toBe(true);
     expect(creditPackBuyState({ ...base, entitlement: { status: 'error' } })).toEqual({ disabled: true, label: '暂时无法确认会员状态' });

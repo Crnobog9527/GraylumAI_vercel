@@ -12,6 +12,9 @@ import {
 } from './jury-events';
 import { DOC_HEAD, deskAt, type MarginItem } from './jury-desk';
 import { canvasAt, statusWord } from './jury-canvas';
+import { briefScenes } from './jury-brief';
+import { caseFromEvents } from './jury-case';
+import { JuryCanvasPlayer } from './JuryCanvasPlayer';
 import { diffText } from './jury-diff';
 import { REVISION_TEXT } from './jury-mock-rulings';
 import { REPORT_CHAPTERS } from './jury-report';
@@ -20,7 +23,11 @@ import { failedSeatsAt } from './jury-progress';
 import { buildScenes, playbackLength, skippedStages, stageIndex } from './jury-scenes';
 import { findScenario, JURY_SCENARIOS } from './jury-scripts';
 import { REPORT_SECTIONS } from './jury-mock-reviews';
-import { JuryResults } from './JuryResults';
+import { JuryReader } from './JuryReader';
+import { JuryReaderChapter } from './JuryReaderChapter';
+import { changeHunks, sentences } from './jury-hunks';
+import { remainingMs, remainingText, totalText } from './jury-eta';
+import { readerChapters, readingMinutes, summaryLines } from './jury-reader';
 import { JuryStatic } from './JuryStatic';
 
 const events = (id: string): JuryEvent[] => findScenario(id).arrivals.flatMap(arrival => arrival.events);
@@ -320,23 +327,71 @@ describe('seat names and static rendering', () => {
     }
   });
 
-  it('opens with the short version only: how many chapters changed and at most three points, chapters on request', () => {
+  it('opens with 30 秒看懂, shows changed chapters open with their choice and the rest as one line', () => {
     const { detail } = findScenario('full');
-    const html = renderToStaticMarkup(createElement(JuryResults, { detail, names: DEFAULT_SEAT_NAMES, onOpenRecord: () => {} }));
-    const changed = choosable(detail.summary.sections).length;
-    expect(html).toContain(`修订稿改了 ${changed} 章`);
-    const points = keyPoints(detail, REPORT_SECTIONS);
-    expect(points.length).toBeGreaterThan(0);
-    expect(points.length).toBeLessThanOrEqual(3);
-    for (const point of points) expect(html).toContain(point.text);
-    expect(html).not.toContain('采用修订版');
-    expect(html).toContain('逐章看');
-    expect(html).toContain('其余 6 章评审团没有意见');
+    const html = renderToStaticMarkup(createElement(JuryReader, { detail, names: DEFAULT_SEAT_NAMES }));
+    const changed = choosable(detail.summary.sections);
+    expect(html).toContain('30 秒看懂');
+    for (const line of summaryLines(detail)) expect(html).toContain(line.text);
+    expect(summaryLines(detail)).toHaveLength(4);
+    expect(html).toContain(`评审改了 ${changed.length} 章，最重要的 3 条`);
+    for (const point of keyPoints(detail, REPORT_SECTIONS)) expect(html).toContain(point.text);
+    expect(html).toContain(`已选 0/${changed.length}`);
+    expect(html).toContain(`预计阅读约 ${readingMinutes(detail, readerChapters(detail))} 分钟`);
+    expect(html.match(/采用修订版/g)?.length).toBe(changed.length);
+    expect(html).toContain('只看改动');
+    expect(html).toContain('确认');
+    // An unchanged chapter is one line: its title and what it says, no full text.
+    expect(html).toContain('第 5 章 同类账号');
+    expect(html.match(/看这一章全文/g) ?? []).toHaveLength(0);
+    const chapter = readerChapters(detail).find(item => !item.section?.changed && !item.issues.length);
+    if (!chapter) throw new Error('expected an unchanged chapter');
+    const full = renderToStaticMarkup(createElement(JuryReaderChapter, {
+      chapter, names: DEFAULT_SEAT_NAMES, adoption: null, compact: false, open: true, onToggle: () => {},
+    }));
+    expect(full).not.toContain('收起');
+    // 看全文 shows the whole report: the chapter's own text in place, not behind a fold.
+    expect(full).toContain(chapter.body);
+    expect(full).not.toContain('看这一章全文');
     const failedDetail = findScenario('failed').detail;
-    const failed = renderToStaticMarkup(createElement(JuryResults, { detail: failedDetail, names: DEFAULT_SEAT_NAMES, onOpenRecord: () => {} }));
-    expect(failed).toContain('修订稿没有生成成功');
+    const failed = renderToStaticMarkup(createElement(JuryReader, { detail: failedDetail, names: DEFAULT_SEAT_NAMES }));
+    expect(failed).toContain('修订稿没有生成成功，原文没有任何改动');
     expect(failed).not.toContain('采用修订版');
+    expect(failed).not.toContain('已选 0/');
     expect(keyPoints(failedDetail, REPORT_SECTIONS)[0]?.text).toBeTruthy();
+  });
+
+  it('shows only the changed sentences of a chapter, one sentence of context around each, the rest folded', () => {
+    for (const { original, revised } of Object.values(REVISION_TEXT)) {
+      const hunks = changeHunks(original, revised);
+      expect(hunks.some(hunk => hunk.type === 'change')).toBe(true);
+      const rebuilt = (side: 'before' | 'after') => hunks.map(hunk => (hunk.type === 'change' ? hunk[side] : hunk.text)).join('');
+      expect(rebuilt('before')).toBe(sentences(original).join(''));
+      expect(rebuilt('after')).toBe(sentences(revised).join(''));
+    }
+    const money = changeHunks(REVISION_TEXT['第 10 章 变现路径'].original, REVISION_TEXT['第 10 章 变现路径'].revised);
+    expect(money.map(hunk => hunk.type)).toEqual(['folded', 'context', 'change', 'context', 'context']);
+    expect(money[0]).toMatchObject({ type: 'folded', count: 2 });
+  });
+
+  it('estimates the time left from the measured parts, never going up', () => {
+    const full = buildScenes(findScenario('full').arrivals);
+    const consensus = buildScenes(findScenario('consensus').arrivals);
+    expect(remainingMs(full, 0)).toBe(210_000);
+    expect(remainingMs(consensus, 0)).toBe(150_000);
+    expect(totalText(full)).toBe('约 3–4 分钟');
+    expect(totalText(consensus)).toBe('约 2–3 分钟');
+    let last = Infinity;
+    for (let clock = 0; clock <= playbackLength(full); clock += 1000) {
+      const left = remainingMs(full, clock);
+      expect(left).toBeLessThanOrEqual(last);
+      last = left;
+    }
+    expect(remainingMs(full, playbackLength(full))).toBe(0);
+    expect(remainingText(150_000)).toBe('还剩约 2 分 30 秒');
+    expect(remainingText(120_000)).toBe('还剩约 2 分钟');
+    expect(remainingText(41_000)).toBe('还剩约 50 秒');
+    expect(remainingText(5_000)).toBe('马上就好');
   });
 
   it('ranks debated rulings first among the key points, and cuts a chapter\'s reason to its first sentence', () => {
@@ -438,5 +493,60 @@ describe('the canvas', () => {
     expect(unchanged.edges).toEqual([]);
     const consensus = buildScenes(findScenario('consensus').arrivals);
     expect(consensus.some(scene => scene.kind === 'response')).toBe(false);
+  });
+});
+
+describe('the canvas for embedding', () => {
+  const played = (list: ReturnType<typeof briefScenes>) => list.filter(scene => scene.end > scene.start);
+
+  it('plays only the key moments in the short version, back to back from zero, and ends where the full one ends', () => {
+    for (const scenario of JURY_SCENARIOS) {
+      const full = buildScenes(scenario.arrivals);
+      const brief = briefScenes(full);
+      expect(brief[0]?.start).toBe(0);
+      brief.forEach((scene, index) => {
+        if (index > 0) expect(scene.start).toBe(brief[index - 1].end);
+      });
+      expect([...new Set(played(brief).map(scene => scene.stage))]).toEqual(['seated', 'reading', 'divergence', 'ruling', 'revision']);
+      expect(played(brief).filter(scene => scene.kind === 'divergence' || scene.kind === 'agreed')).toHaveLength(1);
+      expect(played(brief).filter(scene => scene.kind === 'ruling').length).toBeLessThanOrEqual(3);
+      expect(brief.filter(scene => scene.kind === 'ruling')).toHaveLength(full.filter(scene => scene.kind === 'ruling').length);
+      expect(playbackLength(brief)).toBeLessThan(playbackLength(full) / 3);
+      const end = canvasAt(brief, playbackLength(brief) - 1, DEFAULT_SEAT_NAMES);
+      const fullEnd = canvasAt(full, playbackLength(full) - 1, DEFAULT_SEAT_NAMES);
+      expect(end.next).toEqual(fullEnd.next);
+      expect(end.joined).toEqual(fullEnd.joined);
+      for (const seat of ['A', 'B', 'C', 'S'] as const) expect(end.columns[seat].at(-1)).toEqual(fullEnd.columns[seat].at(-1));
+      for (let clock = 0; clock < playbackLength(brief); clock += 500) {
+        const view = canvasAt(brief, clock, DEFAULT_SEAT_NAMES);
+        if (view.stage !== 'reading') expect(Object.values(view.columns).flat().some(card => card.kind === 'read' && card.state === 'reading')).toBe(false);
+      }
+    }
+  });
+
+  it('freezes at the given progress, plays the passed-in case, and names no model', () => {
+    const report = { title: '定位报告：示例人物', excerpt: '开头两行。', chapters: 9, revisedExcerpt: '修订后的开头。' };
+    const data = caseFromEvents(report, events('full'));
+    const at = (progress: number) => renderToStaticMarkup(createElement(JuryCanvasPlayer, {
+      data, progress, brief: true, names: resolveSeatNames(SAMPLE_PANEL),
+    }));
+    const start = at(0);
+    const end = at(1);
+    expect(start).toContain('定位报告：示例人物');
+    expect(start).toContain('9 章');
+    expect(start).not.toContain('修订后的定位报告：示例人物');
+    expect(end).toContain('修订后的定位报告：示例人物');
+    expect(end).toContain('修订后的开头。');
+    expect(end).toContain('专门挑刺的资深短视频运营与商业变现老顾问');
+    expect(at(-1)).toBe(start);
+    expect(at(2)).toBe(end);
+    expect(end).not.toMatch(MODEL_NAMES);
+  });
+
+  it('is plain content without onPick, and clickable people and cards with it', () => {
+    const plain = renderToStaticMarkup(createElement(JuryCanvasPlayer, { progress: 0.5, brief: true }));
+    expect(plain).not.toContain('<button');
+    const clickable = renderToStaticMarkup(createElement(JuryCanvasPlayer, { progress: 0.5, brief: true, onPick: () => {} }));
+    expect(clickable.match(/<button/g)?.length).toBeGreaterThanOrEqual(4);
   });
 });
