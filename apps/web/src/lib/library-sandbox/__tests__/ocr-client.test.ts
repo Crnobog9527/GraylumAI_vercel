@@ -51,6 +51,18 @@ describe('recognition client', () => {
     expect(run.mock.calls[0]![0].allowWasm).toBe(true);
   });
 
+  it('reports a lone image that times out as that page\'s result, including the last of a batch', async () => {
+    run.mockResolvedValueOnce({ pages: Array.from({ length: 8 }, (_, i) => page(String(i))) })
+      .mockRejectedValueOnce(new SandboxError('SANDBOX_TIMEOUT'));
+    const { recognizeImagesInBrowser } = await import('../ocr/client');
+    const seen: number[] = [];
+    const pages = await recognizeImagesInBrowser(Array.from({ length: 9 }, (_, i) => new Blob([String(i)])),
+      { onPage: (index) => seen.push(index) });
+    expect(pages[8]).toEqual({ ok: false, code: 'SANDBOX_TIMEOUT' });
+    expect(seen).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8]);
+    expect(run).toHaveBeenCalledTimes(2);
+  });
+
   it('does not retry other failures', async () => {
     run.mockRejectedValueOnce(new SandboxError('SANDBOX_PROTOCOL'));
     const { recognizeImagesInBrowser } = await import('../ocr/client');
