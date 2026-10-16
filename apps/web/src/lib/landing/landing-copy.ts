@@ -36,8 +36,6 @@ export const HERO_H = {
     { text: '内容发出去后，它根据真实数据每周和你复盘：哪里做得好、哪里要改、下一步做什么。', needs: ['publish'] },
   ] as readonly GatedText[],
   result: '你只管输出内容，运营交给它。',
-  /** Under every "免费和教练聊聊" button on sample H (first screen and the close). */
-  ctaNote: '无需绑卡，免费试用',
 } as const;
 
 /** Sample H's "自己用通用 AI ／ 用 Graylum AI 教练" comparison, the Owner's wording of 2026-10-14 (verbatim). */

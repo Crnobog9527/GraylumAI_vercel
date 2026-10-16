@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 
 import sitemap from '@/app/sitemap';
 import { metadata } from '@/app/landing/preview/j/page';
-import { H_COMPARE, HERO, HERO_H, PRICE_COMPARE, RISK_REVERSAL, VOICE_WALL } from '@/lib/landing/landing-copy';
+import { H_COMPARE, HERO, PRICE_COMPARE, RISK_REVERSAL, VOICE_WALL } from '@/lib/landing/landing-copy';
 import * as copyJ from '@/lib/landing/landing-copy-j';
 import { J_FAQ_REWORDS, J_FINAL, J_HERO_PROMISE, J_ID_PLACEHOLDER, J_NOTE_HEADS, J_PRICE, J_TAKEOVER, noteSource } from '@/lib/landing/landing-copy-j';
 import { LANDING_FEATURES, type LandingFlags } from '@/lib/landing/landing-flags';
@@ -44,10 +44,14 @@ describe('style sample J', () => {
   });
 
   it('keeps the first screen to the final title, promise, button and note, with one H1', () => {
-    const { html } = render();
+    const { data, html } = render();
     expect(html.match(/<h1[\s>]/g)).toHaveLength(1);
     const hero = html.slice(html.indexOf('aria-labelledby="hero-title"'), html.indexOf('aria-labelledby="voice-title"'));
-    for (const copy of [J_HERO_PROMISE, HERO.primaryCta, HERO_H.ctaNote]) expect(hero).toContain(escape(copy));
+    for (const copy of [J_HERO_PROMISE, HERO.primaryCta, data.heroNote]) expect(hero).toContain(escape(copy));
+    // The note is the flag-filtered one: without the sign-up grant there is no free trial to promise.
+    const off = buildLandingPageData({ ...ALL_ON, signupGrant: false }, [plan('pro', 29, 279)]);
+    const offHtml = renderToStaticMarkup(createElement(SampleJ, { data: off, siteName: 'Graylum', extras: { flags: ALL_ON } }));
+    expect(offHtml.slice(offHtml.indexOf('aria-labelledby="hero-title"'), offHtml.indexOf('aria-labelledby="voice-title"'))).not.toContain('免费试用');
     expect(hero).not.toContain("交给它");
     expect(hero.replace(/<[^>]+>/g, '')).toContain(HERO.title.replace(' 自', '自'));
     expect(hero).not.toContain(HERO.secondaryCta);

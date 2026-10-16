@@ -4,7 +4,7 @@ import type { CSSProperties } from 'react';
 import { ArrowRight } from 'lucide-react';
 import { LazyDemo } from '@/components/landing/demo/LazyDemo';
 import { depthClass, SplitText } from '@/components/public-site/motion/depth-text';
-import { HERO, HERO_H } from '@/lib/landing/landing-copy';
+import { HERO } from '@/lib/landing/landing-copy';
 import { SIGNUP_CTA_HREF } from '@/lib/seo/content/shared';
 import { cn } from '@/lib/utils';
 import styles from './h.module.css';
@@ -17,7 +17,7 @@ import hero from './hero-h.module.css';
  * On a desktop the text, the button and most of the product fit the first screen; on a phone the product peeks in
  * under the button, inviting the scroll.
  */
-export function HeroH() {
+export function HeroH({ note }: { note: string }) {
   return (
     <section aria-labelledby="hero-title" className={hero.hero}>
       <div className={hero.center}>
@@ -27,7 +27,7 @@ export function HeroH() {
           <Link href={SIGNUP_CTA_HREF} className={cn(styles.pill, styles.pillInk, styles.pillLarge)}>
             {HERO.primaryCta}<ArrowRight size={17} aria-hidden="true" />
           </Link>
-          <p className={hero.note}>{HERO_H.ctaNote}</p>
+          <p className={hero.note}>{note}</p>
         </div>
       </div>
       <div className={cn(hero.product, depthClass.parallax)} style={{ '--speed': 0.3 } as CSSProperties}>

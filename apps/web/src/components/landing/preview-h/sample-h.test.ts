@@ -52,13 +52,14 @@ describe('style sample H', () => {
       expect(html).toContain(escape(copy));
     }
     // The Owner's first-screen pitch (2026-10-14), verbatim, and one CTA note under every main button, without the credits.
-    const shown = [HERO_H.audience, HERO_H.audienceSummary, HERO_H.difference, HERO_H.ctaNote];
+    const shown = [HERO_H.audience, HERO_H.audienceSummary, HERO_H.difference, data.heroNote];
     for (const copy of shown) expect(html).toContain(escape(copy));
     // First screen, end of module 3 and the close.
-    expect(html.split(HERO_H.ctaNote)).toHaveLength(4);
+    expect(data.heroNote).toBe('无需绑卡，免费试用');
+    expect(html.split(data.heroNote)).toHaveLength(4);
     const hero = html.slice(html.indexOf('<section aria-labelledby="hero-title"'), html.indexOf('aria-labelledby="audience-title"'));
     // Option A: the first screen holds only the title, the promise, the button and its note (and the product).
-    for (const copy of [HERO.title, HERO.promise, HERO.primaryCta, HERO_H.ctaNote]) expect(hero).toContain(escape(copy));
+    for (const copy of [HERO.title, HERO.promise, HERO.primaryCta, data.heroNote]) expect(hero).toContain(escape(copy));
     for (const copy of [HERO_H.audienceSummary, HERO_H.difference]) expect(hero).not.toContain(escape(copy));
     // One idea per screen after it: who it is for, then why not a general AI with the Owner's comparison.
     const screens = [HERO_H.audienceSummary, HERO_H.difference, H_COMPARE.title].map(copy => html.indexOf(escape(copy)));
@@ -108,6 +109,12 @@ describe('style sample H', () => {
     expect(html).not.toContain('id="h-step-publish-tab"');
     expect(html).not.toContain('id="h-step-review-tab"');
     expect(html).toContain('id="h-step-chat-tab"');
+  });
+
+  it('drops "免费试用" from every CTA note when the sign-up grant is off', () => {
+    const { data, html } = render({ ...ALL_ON, signupGrant: false });
+    expect(data.heroNote).toBe('无需绑卡');
+    expect(html).not.toContain('免费试用');
   });
 
   it('keeps the weekly-review promise behind the publish flag, like the other needs-publish copy', () => {

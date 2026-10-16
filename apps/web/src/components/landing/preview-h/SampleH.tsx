@@ -4,7 +4,7 @@ import light from '@/components/design/light-tokens.module.css';
 import { displayFont } from '@/components/landing/preview-d/display-font';
 import { DepthStage } from '@/components/public-site/motion/DepthStage';
 import { LOGIN_HREF, SITE_CHROME } from '@/components/public-site/site-chrome';
-import { HERO, HERO_H } from '@/lib/landing/landing-copy';
+import { HERO } from '@/lib/landing/landing-copy';
 import type { buildLandingPageData } from '@/lib/landing/landing-page-data';
 import { SIGNUP_CTA_HREF } from '@/lib/seo/content/shared';
 import { cn } from '@/lib/utils';
@@ -51,15 +51,16 @@ export function SampleH({ data, siteName, membershipHref }: { data: LandingData;
       </header>
 
       <main className={styles.main}>
-        <HeroH />
+        <HeroH note={data.heroNote} />
         <AudienceH />
         <WhyH />
 
         <VoiceWallH notes={data.notes} />
-        <HowItWorksH promise={data.promise} steps={data.flowSteps} reports={data.sampleReports} timeline={data.timeline} />
+        <HowItWorksH promise={data.promise} steps={data.flowSteps} reports={data.sampleReports} timeline={data.timeline}
+          note={data.heroNote} />
         <PriceH data={data} membershipHref={membershipHref} />
         <FaqH groups={data.faqGroups} />
-        <FinalH showStack={data.showStack} founderSeats={data.founderSeats} note={HERO_H.ctaNote} />
+        <FinalH showStack={data.showStack} founderSeats={data.founderSeats} note={data.heroNote} />
       </main>
 
       <footer className={styles.footer}>

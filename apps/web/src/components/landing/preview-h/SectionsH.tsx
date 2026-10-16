@@ -3,7 +3,7 @@ import Link from 'next/link';
 import type { CSSProperties } from 'react';
 import { ArrowRight, Plus } from 'lucide-react';
 import { depthClass, SplitText } from '@/components/public-site/motion/depth-text';
-import { FINAL_ACTION, HERO_H, HOW_IT_WORKS, VOICE_WALL, type GatedText, type VoiceNote } from '@/lib/landing/landing-copy';
+import { FINAL_ACTION, HOW_IT_WORKS, VOICE_WALL, type GatedText, type VoiceNote } from '@/lib/landing/landing-copy';
 import { LANDING_FAQ_TITLE, type LandingFaqGroup } from '@/lib/landing/landing-faq';
 import type { FlowStep } from '@/lib/landing/landing-flow';
 import type { SampleReport } from '@/lib/landing/landing-samples';
@@ -62,11 +62,13 @@ export function VoiceWallH({ notes }: { notes: readonly VoiceNote[] }) {
  * Section 3: the promise (its sentences as points, the words unchanged), the nine steps as conversations, the sample
  * reports, "什么时候拿到什么", and the main button again for the moment interest is highest.
  */
-export function HowItWorksH({ promise, steps, reports, timeline }: {
+export function HowItWorksH({ promise, steps, reports, timeline, note }: {
   promise: readonly GatedText[];
   steps: readonly FlowStep[];
   reports: readonly SampleReport[];
   timeline: readonly GatedText[];
+  /** The CTA note, already filtered by the flags (data.heroNote: "，免费试用" only with the sign-up grant). */
+  note: string;
 }) {
   return (
     <section id="how-it-works" aria-labelledby="how-title" className={cn(styles.section, styles.sheet, styles.glass)}>
@@ -95,7 +97,7 @@ export function HowItWorksH({ promise, steps, reports, timeline }: {
         <Link href={SIGNUP_CTA_HREF} className={cn(styles.pill, styles.pillInk, styles.pillLarge, styles.pillGlow)}>
           {FINAL_ACTION.cta}<ArrowRight size={17} aria-hidden="true" />
         </Link>
-        <p className={styles.ctaNote}>{HERO_H.ctaNote}</p>
+        <p className={styles.ctaNote}>{note}</p>
       </div>
     </section>
   );

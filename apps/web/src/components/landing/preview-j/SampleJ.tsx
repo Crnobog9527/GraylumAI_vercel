@@ -45,7 +45,7 @@ export function SampleJ({ data, siteName, extras }: {
       <SiteHeaderJ siteName={siteName} />
 
       <main>
-        <HeroJ />
+        <HeroJ note={data.heroNote} />
         <VoiceWallJ notes={data.notes} />
         <CompareJ />
         <TakeoverJ intro={extras.showSamples ? <SamplesJ /> : undefined} />
