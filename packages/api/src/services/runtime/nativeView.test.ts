@@ -1,5 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-import { expect, it, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { readNativeRuntimeView } from './nativeView';
 const actor = '10000000-0000-4000-8000-000000000001';
@@ -70,4 +70,33 @@ it('answers another actor\'s, missing or out-of-scope sessions with one indistin
  const db={rpc:vi.fn(async()=>({data:null,error:{code:'P0001',message:'RUNTIME_SCOPE_DENIED'}}))};
  await expect(readNativeRuntimeView(db as unknown as SupabaseClient,actor,session))
   .rejects.toMatchObject({code:'NOT_FOUND',message:'RUNTIME_SESSION_NOT_FOUND'});
+});
+
+describe('LIB-4b: a paused round whose referenced document was deleted', () => {
+  const waiting = { executionId: 'waiting', state: 'waiting_credits', contentAvailable: true, primaryBody: 'PRIVATE_DOC_ANSWER' };
+  function source(read: { data?: unknown; error?: unknown }) {
+    let views = 0;
+    const rpc = vi.fn(async (name: string) => {
+      if (name === 'runtime_execution') return { data: null, error: null, ...read };
+      views++;
+      const executions = views === 1 ? [waiting, { ...visible, executionId: 'done' }]
+        : [{ ...waiting, primaryBody: null, unavailableReason: 'source_deleted', contentAvailable: false }];
+      return { data: { sessionId: session, executions }, error: null };
+    });
+    return { db: { rpc } as unknown as SupabaseClient, rpc };
+  }
+  it('is read once through runtime_execution and the view is reread without its body', async () => {
+    const f = source({ data: { unavailableReason: 'source_deleted' } });
+    const view = await readNativeRuntimeView(f.db, actor, session);
+    expect(JSON.stringify(view)).not.toContain('PRIVATE_DOC_ANSWER');
+    expect(f.rpc.mock.calls.map(([name]) => name)).toEqual(['runtime_view', 'runtime_execution', 'runtime_view']);
+    expect(f.rpc).toHaveBeenCalledWith('runtime_execution', { p_actor_id: actor, p_execution_id: 'waiting', p_action: 'read' });
+  });
+  it('keeps the body of a round whose sources are live, and hides it when its state cannot be read', async () => {
+    const live = source({ data: { unavailableReason: null } });
+    expect(JSON.stringify(await readNativeRuntimeView(live.db, actor, session))).toContain('PRIVATE_DOC_ANSWER');
+    expect(live.rpc).toHaveBeenCalledTimes(2);
+    const broken = source({ error: { message: 'RUNTIME_SCOPE_DENIED' } });
+    expect(JSON.stringify(await readNativeRuntimeView(broken.db, actor, session))).not.toContain('PRIVATE_DOC_ANSWER');
+  });
 });
