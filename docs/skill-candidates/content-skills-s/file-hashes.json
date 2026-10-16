@@ -1,0 +1,16 @@
+[
+  {
+    "package": "short-video-script",
+    "path": "EVALS.md",
+    "mediaType": "text/markdown",
+    "bytes": 2093,
+    "sha256": "108e4cf967ba1a8ed6b62372dce5fcd8d85213639c640efd5f2d634554dd97e4"
+  },
+  {
+    "package": "short-video-script",
+    "path": "SKILL.md",
+    "mediaType": "text/markdown",
+    "bytes": 11585,
+    "sha256": "98b48b1b78c8c463c9acd7c384b31df15078b1435a55d355c0318fc4562d2795"
+  }
+]
