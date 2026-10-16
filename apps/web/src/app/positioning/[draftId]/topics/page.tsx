@@ -27,11 +27,11 @@ import { trpc } from '@/trpc/client';
 import { planItem, opcPlan, opcHandoff, opcTopicTurn, opcTopicDraft, opcAdoptTopics } from '@repo/api/src/shared/opcRequests';
 import { consentedTopicIds } from './adoption-consent';
 import { useTopicOpening } from './use-topic-opening';
-import { tabSession, topicFailureMessage, topicTurnOutcome, topicOpenTurnNotice, topicRejectedTurn, topicTurnRefused, topicTurnShows } from './topic-notices';
+import { tabSession, topicFailureMessage, topicReplyText, topicTurnOutcome, topicOpenTurnNotice, topicTurnRefused, topicTurnShows } from './topic-notices';
 import { userStopIds } from '@/app/runtime/gate-notices';
 import { stopWithRecord, type StopSignals } from '@/app/runtime/runtime-notices';
 import { finishedExecution } from '@/lib/finished-execution';
-import { isOrganizerPendingError, isPaygWaiting, type PaygViewFields } from '@/lib/payg-wait';
+import { isOrganizerPendingError, type PaygViewFields } from '@/lib/payg-wait';
 import { usePaygResume } from '@/lib/use-payg-resume';
 import { useTopicInput } from './topic-input';
 
@@ -100,12 +100,6 @@ function parseCandidate(text: string | null | undefined): PlanItem[] | null {
     }
   }
   return null;
-}
-
-/** The user-facing text of a reply without the machine-readable plan block. */
-function replyProse(text: string | null | undefined) {
-  if (!text) return '正在核实结果，请保留本次对话。';
-  return text.replace(/```(?:json)?\s*(?:\[[\s\S]*?\]|\{[\s\S]*?\})\s*```/g, '').trim() || text.trim();
 }
 
 function parseAdoption(text: string | null | undefined): string[] | null {
@@ -557,8 +551,7 @@ export default function TopicWorkspacePage() {
                     <img className={topicStyles.agentAvatar} src="/graylum-logo.png" alt="" />
                     <div className={topicStyles.assistantMessage}>
                       <span className={topicStyles.agentName}>Graylum · AI 自媒体陪跑教练</span>
-                      {!((topicRejectedTurn(e) || isPaygWaiting(e.state)) && !(e.body ?? e.primaryBody)) && <MessageMarkdown className={topicStyles.reply}
-                        text={e.contentAvailable ? replyProse(e.body ?? e.primaryBody) : '来源已不可用，暂不展示此内容。'} />}
+                      {topicReplyText(e) !== null && <MessageMarkdown className={topicStyles.reply} text={topicReplyText(e)!} />}
                       <ChatNoticeList notices={[openTurnNotice(e), ...payg.turnNotices(e, busy)]} />
                       {e.state === 'completed' &&
                         (() => {

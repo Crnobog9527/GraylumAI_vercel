@@ -1,10 +1,10 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { expect, it, vi } from 'vitest';
 import { runtimeGateMessages } from '../../../../../../../packages/api/src/shared/runtimeGateMessages';
-import { topicExecutionNotice, topicFailureMessage, topicTurnOutcome, topicOpenTurnNotice, topicRejectedTurn, topicTurnRefused, topicTurnShows } from './topic-notices';
+import { topicExecutionNotice, topicFailureMessage, topicReplyText, topicTurnOutcome, topicOpenTurnNotice, topicRejectedTurn, topicTurnRefused, topicTurnShows } from './topic-notices';
 import { PROVIDER_REJECTED_NOTICE } from '@/lib/runtime-gate-notice';
 import { DEFINITE_REFUSAL_NOTICE } from '@/app/runtime/gate-notices';
-import { USER_STOP_NOTICE } from '@/app/runtime/runtime-notices';
+import { ENDED_NOTICE, USER_STOP_NOTICE } from '@/app/runtime/runtime-notices';
 import { RUNTIME_PAYG_PROFILE_REQUIRED_MESSAGE } from '../../../../../../../packages/api/src/shared/runtimeAdmissionMessages';
 
 const turnRefusal = (code: string, message: string) =>
@@ -69,9 +69,10 @@ it('shows the provider refusal under a cancelled turn after a reload, without ac
     { busy: false, finished: null, stopping: false, onRetry: vi.fn(), onStop: vi.fn() });
   expect(refused).toEqual({ id: 'e', tone: 'warning', text: PROVIDER_REJECTED_NOTICE });
   expect(topicRejectedTurn({ state: 'cancelled', unavailableReason: 'provider_rejected' })).toBe(true);
+  // Any other cancelled turn the server ended says so, like free conversation (ENDED_NOTICE), never nothing.
   for (const unavailableReason of ['something_new', null, undefined]) {
     expect(topicOpenTurnNotice({ executionId: 'e', state: 'cancelled', unavailableReason },
-      { busy: false, finished: null, stopping: false, onRetry: vi.fn(), onStop: vi.fn() })).toBeNull();
+      { busy: false, finished: null, stopping: false, onRetry: vi.fn(), onStop: vi.fn() })).toEqual({ id: 'e', tone: 'warning', text: ENDED_NOTICE });
     expect(topicRejectedTurn({ state: 'cancelled', unavailableReason })).toBe(false);
   }
   expect(topicExecutionNotice({ unavailable: 'provider_rejected' })).toBe(PROVIDER_REJECTED_NOTICE);
@@ -142,11 +143,37 @@ it('a stopped topic turn says 已停止 in every state and never reads as unfini
   expect(unconfirmed?.actions).toBeUndefined();
   // A cost still being verified keeps its own notice and retry.
   expect(topicOpenTurnNotice({ executionId: 'e', state: 'cost_pending', userStopPending: true }, ctx())?.text).toBe('费用待核实；重试只核对原调用。');
-  // Without any stop record nothing changes: a finished turn shows nothing, an open one is still unfinished.
+  // Without any stop record it never says 已停止: a completed turn shows nothing, a cancelled one that it ended,
+  // an open one is still unfinished.
   expect(topicOpenTurnNotice({ executionId: 'e', state: 'completed' }, ctx())).toBeNull();
-  expect(topicOpenTurnNotice({ executionId: 'e', state: 'cancelled' }, ctx())).toBeNull();
+  expect(topicOpenTurnNotice({ executionId: 'e', state: 'cancelled' }, ctx())?.text).toBe(ENDED_NOTICE);
   expect(topicOpenTurnNotice({ executionId: 'e', state: 'running' }, ctx())?.text).toBe('回复尚未完成，原请求已保留。');
   // An ordinary cancellation that once paused for a stop is not a user stop.
   const cancelledPause = { billing: { pausedReason: 'user_stop', cancelRequested: true } };
-  expect(topicOpenTurnNotice({ executionId: 'e', state: 'cancelled', ...cancelledPause }, ctx())).toBeNull();
+  expect(topicOpenTurnNotice({ executionId: 'e', state: 'cancelled', ...cancelledPause }, ctx())?.text).toBe(ENDED_NOTICE);
+});
+
+// A turn stopped before its first word is cancelled, refunded and closed: nothing is left to verify.
+it('never shows the verifying placeholder for a finished turn without a reply (execution 4ae0eb5b)', () => {
+  const stoppedEarly = { executionId: 'e', state: 'cancelled', body: null, primaryBody: null, contentAvailable: true,
+    unavailableReason: null, billing: { pausedReason: null, cancelRequested: true } };
+  expect(topicReplyText(stoppedEarly)).toBeNull();
+  // Reopened in another browser: the server ended it, the turn says so.
+  expect(topicOpenTurnNotice(stoppedEarly, { busy: false, finished: null, stopping: false, onRetry: vi.fn(), onStop: vi.fn() }))
+    .toEqual({ id: 'e', tone: 'warning', text: ENDED_NOTICE });
+  // The tab that clicked 停止 keeps 已停止.
+  expect(topicOpenTurnNotice(stoppedEarly, { busy: false, finished: null, stopping: false, userStopped: true, onRetry: vi.fn(), onStop: vi.fn() })?.text)
+    .toBe(USER_STOP_NOTICE);
+  // In progress without text yet: only its own 正在回复… notice; a pause only its pause notice.
+  for (const state of ['prepared', 'running', 'interrupted', 'cost_pending', 'waiting_credits', 'waiting_resume'])
+    expect(topicReplyText({ ...stoppedEarly, state })).toBeNull();
+  for (const state of ['cancelled', 'completed', 'running']) {
+    const text = topicReplyText({ ...stoppedEarly, state, body: '回复' });
+    expect(text).toBe('回复');
+    expect(text).not.toContain('正在核实');
+  }
+  expect(topicReplyText({ ...stoppedEarly, state: 'interrupted', primaryBody: '主回复' })).toBe('主回复');
+  expect(topicReplyText({ ...stoppedEarly, state: 'completed', body: '说明\n```json\n[{"id":"x"}]\n```' })).toBe('说明');
+  expect(topicReplyText({ ...stoppedEarly, state: 'completed', body: '回复', contentAvailable: false })).toBe('来源已不可用，暂不展示此内容。');
+  expect(topicReplyText({ ...stoppedEarly, state: 'completed' })).toBe('');
 });
