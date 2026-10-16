@@ -83,7 +83,7 @@ describe('style sample L (sample K, second round, Owner 2026-10-17)', () => {
 
   it('moves every group\'s sample report as a card that opens in a dialog (off unless the preview or the flag shows them)', () => {
     const html = render();
-    expect(L_REPORTS.length).toBe(12);
+    expect(L_REPORTS.length).toBe(14);
     for (const report of L_REPORTS) expect(html).toContain(`<b>${escape(report.who)}</b>${escape(report.platform)}`);
     expect(html).toContain('<dialog');
     expect(render(ALL_ON, false)).not.toContain('id="samples-title"');

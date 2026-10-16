@@ -133,7 +133,7 @@ export const L_OPS = {
 
 /**
  * 4: every group's sample report (Owner 2026-10-17: "尽量把我们能覆盖的人群的案例都放上去"): sample J's four, then the
- * eight generated on 2026-10-17 (the groups the Owner chose; tab names as delivered).
+ * ten generated on 2026-10-17 (the groups the Owner chose; tab names as delivered).
  */
 export const L_REPORTS: readonly { slug: string; who: string; platform: string; truth: boolean }[] = [
   ...J_SAMPLES.reports,
@@ -145,6 +145,8 @@ export const L_REPORTS: readonly { slug: string; who: string; platform: string; 
   { slug: 'restaurant', who: '餐饮老板 · 本地获客', platform: '抖音同城', truth: true },
   { slug: 'solo-founder', who: '一人公司创业者（新加坡）', platform: 'X', truth: true },
   { slug: 'course-creator', who: '知识付费博主', platform: '小红书 + 视频号', truth: true },
+  { slug: 'realtor', who: '地产经纪（澳洲）', platform: '小红书 + YouTube', truth: false },
+  { slug: 'handmade', who: '手作品牌创始人（台湾）', platform: 'Instagram', truth: true },
 ];
 
 /** 4: the sample reports as a moving row of cards. */
