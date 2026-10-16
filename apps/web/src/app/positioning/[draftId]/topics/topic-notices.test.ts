@@ -177,3 +177,11 @@ it('never shows the verifying placeholder for a finished turn without a reply (e
   expect(topicReplyText({ ...stoppedEarly, state: 'completed', body: '回复', contentAvailable: false })).toBe('来源已不可用，暂不展示此内容。');
   expect(topicReplyText({ ...stoppedEarly, state: 'completed' })).toBe('');
 });
+
+// #1035 review: a PAYG turn whose main reply is saved but whose organizer was skipped keeps only its own notice.
+it('does not say 已结束 under a saved reply whose organizer was skipped', () => {
+  const skipped = { executionId: 'e', state: 'cancelled', primaryBody: '主回复', organizerComplete: false, remainingCalls: 0 };
+  expect(topicOpenTurnNotice(skipped, { busy: false, finished: null, stopping: false, onRetry: vi.fn(), onStop: vi.fn() })).toBeNull();
+  expect(topicOpenTurnNotice({ ...skipped, remainingCalls: 1 }, { busy: false, finished: null, stopping: false, onRetry: vi.fn(), onStop: vi.fn() })?.text)
+    .toBe(ENDED_NOTICE);
+});

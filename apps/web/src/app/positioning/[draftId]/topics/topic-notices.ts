@@ -3,7 +3,7 @@ import { CHAT_ACTION, type ChatNotice } from '@/components/chat/ChatInlineNotice
 import { PROVIDER_REJECTED_NOTICE, gateAdmissionNotice, gateResultNotice } from '@/lib/runtime-gate-notice';
 import { ENDED_NOTICE, USER_STOP_NOTICE, inFlight, stopRecovery, stoppedByUser, type StopSignals } from '@/app/runtime/runtime-notices';
 import { definiteRefusal, definiteRefusalNotice, showsReply } from '@/app/runtime/gate-notices';
-import { hostNotice, isOrganizerPendingError, isPaygWaiting } from '@/lib/payg-wait';
+import { hostNotice, isOrganizerPendingError, isPaygWaiting, organizerSkipped, type PaygViewFields } from '@/lib/payg-wait';
 
 /** This tab's sessionStorage, where the page remembers the stops its user asked for (display only). */
 export function tabSession() {
@@ -75,15 +75,16 @@ export function topicTurnShows(last: { state: string; unavailableReason?: string
  * up it still reads as running, never as 回复尚未完成. A BILL-PAYG pause has its own notice (payg-wait.ts).
  * A turn the user stopped (`userStopped` is this tab's record; stoppedByUser also reads the view) says
  * 已停止 from the click on, whether it ends cancelled or completed, and is never 回复尚未完成.
- * Any other cancelled turn the server ended says so (ENDED_NOTICE), like free conversation.
+ * Any other cancelled turn the server ended says so (ENDED_NOTICE), like free conversation, unless only its organizer was skipped.
  */
-export function topicOpenTurnNotice(e: { executionId: string; state: string; unavailableReason?: string | null } & StopSignals, ctx: {
+export function topicOpenTurnNotice(e: { executionId: string; state: string; unavailableReason?: string | null } & StopSignals & PaygViewFields, ctx: {
   busy: boolean; finished: string | null; stopping: boolean; userStopped?: boolean; onRetry: () => void; onStop: () => void;
 }): ChatNotice | null {
   if (topicRejectedTurn(e)) return { id: e.executionId, tone: 'warning', text: PROVIDER_REJECTED_NOTICE };
   const stopped = stoppedByUser(e, ctx.userStopped);
   const userStop: ChatNotice = { id: e.executionId, tone: 'status', text: USER_STOP_NOTICE };
-  if (e.state === 'cancelled') return stopped ? userStop : { id: e.executionId, tone: 'warning', text: ENDED_NOTICE };
+  // A saved reply whose organizer was skipped keeps only its own notice (payg-wait.ts), like runtimeTurnNotices.
+  if (e.state === 'cancelled') return stopped ? userStop : organizerSkipped(e) ? null : { id: e.executionId, tone: 'warning', text: ENDED_NOTICE };
   if (e.state === 'completed') return stopped ? userStop : null;
   if (isPaygWaiting(e.state)) return null;
   // Still being saved: no 重试 or 停止; a server-confirmed `interrupted` save offers 重试 (stopRecovery).
