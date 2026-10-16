@@ -10,7 +10,7 @@ import {pricingConfig} from '../__tests__/fixtures/runtimePricing';
 import {agentTurnInstructions,AGENT_TURN_STABLE_PREFIX,AGENT_TURN_STABLE_PREFIX_CHARS} from '../opc/agentTurnPrompt';
 import {PROMPT_CACHE_OVERHEAD_BYTES} from './promptCache';
 import {BRAND_IDENTITY_INSTRUCTIONS} from '../modelIdentity/brandIdentity';
-import {testIdentityGuard} from '../__tests__/fixtures/runtimeGates';
+import {testIdentityGuard,testPrimaryModel} from '../__tests__/fixtures/runtimeGates';
 const skill='Pinned skill 正文';
 // MODEL-IDENTITY-GUARD: the switch defaults on, so the brand identity leads the frozen system text.
 const brand=BRAND_IDENTITY_INSTRUCTIONS+'\n';
@@ -20,6 +20,7 @@ vi.mock('./billingUnitAdmission',async original=>({
  ...(await original<typeof import('./billingUnitAdmission')>()),freezeWindowBillingUnit:async()=>undefined,
 }));
 const actor='10000000-0000-4000-8000-000000000001',modelId='10000000-0000-4000-8000-000000000002';
+testPrimaryModel.id=modelId;
 const revisionId='10000000-0000-4000-8000-000000000003',moduleId='10000000-0000-4000-8000-000000000004';
 const requestId='10000000-0000-4000-8000-000000000005';
 const host=()=>agentTurnInstructions();

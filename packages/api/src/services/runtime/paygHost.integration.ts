@@ -81,7 +81,9 @@ export function registerPaygHostTests(db:pg.Client,fixture:()=>Promise<Fixture>)
   const finalProfiles=entry==='mentor-final-profile'
    ?JSON.parse(readFileSync(new URL('../../../../../docs/launch/evidence/payg-profile-final.json',import.meta.url),'utf8'))
      .profiles.map((p:Record<string,unknown>)=>({...p,expiresAt})):profiles;
+  // UI-MODEL: real free chat runs on the administrator's primary model (the request's modelId is ignored).
   const values={runtime_payg_staging:{version:1,enabled:true,windowId,profiles:finalProfiles},billing_credits_per_usd:'100',
+   primary_model_id:f.mentorModel,
    billing_token_price_multiplier:'3',
    ...(entry==='mentor-final-profile'?{runtime_purpose_budgets:{version:2,
     interactive:{inputBytes:90000,historyItems:100},organize:{inputBytes:64000,historyItems:100},
