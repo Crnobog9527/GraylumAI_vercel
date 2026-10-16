@@ -16,31 +16,19 @@ import { CALLS, CANDIDATE_CARD, CHARGES, FOLLOW_UP_CARD, KEYWORD_CARD, NOW, ROWS
 describe("describeCall", () => {
   const views = CALLS.map(describeCall);
 
-  it("maps results to 成功 / 未取到 / 待核 and a running call to 正在搜", () => {
-    expect(views.map(view => view?.state)).toEqual(["success", "success", "pending", "missing", "running", undefined]);
+  it("maps the four stream states to 成功 / 未取到 / 待核 and 正在搜", () => {
+    expect(views.map(view => view.state)).toEqual(["success", "success", "pending", "missing", "running"]);
   });
 
   it("says what was searched and which kind of data, without suppliers, routes or costs", () => {
-    expect(views[0]).toMatchObject({ query: "小红书 职场穿搭 博主 2026", line: "网页搜索" });
-    expect(views[1]).toMatchObject({ line: "抖音、小红书 · 找对标账号", detail: "已取到一部分，还在继续找。" });
-    expect(views[2]).toMatchObject({ query: "sample_style_a、sample_style_b", line: "抖音 · 账号资料和近期作品" });
-    expect(views[4]).toMatchObject({ query: "office outfit、capsule wardrobe", line: "TikTok · 关键词作品" });
+    expect(views[0]).toMatchObject({ query: "小红书 职场穿搭 博主 2026", line: "网页搜索", detail: null });
+    expect(views[1]).toMatchObject({ line: "抖音 · 关键词作品" });
+    expect(views[2]).toMatchObject({ line: "抖音 · 近期作品", detail: "这次没有拿到确定结果，正在核对。" });
+    expect(views[3]).toMatchObject({ line: "B 站 · 粉丝数", detail: "这次没有取到数据。" });
     const shown = JSON.stringify(views);
     for (const word of ["tikhub", "parallel", "firecrawl", "TikHub", "Parallel", "Firecrawl", "美元", "积分", "$"]) {
       expect(shown).not.toContain(word);
     }
-  });
-
-  it("explains an unsupported platform and an unconfirmed request in plain words", () => {
-    expect(views[3]?.detail).toBe("暂不支持这个平台的数据。");
-    const unconfirmed = describeCall({ id: "x", tool: "benchmark_discover", args: { discoveryId: "d" },
-      result: { status: "not_confirmed", reason: "NOT_CONFIRMED" } });
-    expect(unconfirmed).toMatchObject({ state: "missing", query: "继续找对标候选" });
-  });
-
-  it("keeps an empty result apart from missing data", () => {
-    expect(describeCall({ id: "x", tool: "web_search", args: { query: "q" }, result: { status: "ok", reason: "NO_RESULTS" } }))
-      .toMatchObject({ state: "success", detail: "没有找到相关内容。" });
   });
 
   it("uses the Owner-approved source sentence", () => {

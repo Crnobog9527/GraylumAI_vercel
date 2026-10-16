@@ -8,11 +8,10 @@ const ICONS: Record<CallState, typeof Check> = { running: Loader2, success: Chec
 
 /**
  * Every research call of a reply, one compact row each: what was searched, which kind of data, and the result
- * (成功 / 未取到 / 待核). Free card tools are not searches and are left out. No supplier names, no costs.
+ * (成功 / 未取到 / 待核), from the stream's `research_call` events. No supplier names, no costs.
  */
 export function ResearchCallList({ calls }: { calls: ResearchCall[] }) {
-  const rows = calls.map(call => ({ id: call.id, view: describeCall(call) }))
-    .filter((row): row is { id: string; view: NonNullable<ReturnType<typeof describeCall>> } => row.view !== null);
+  const rows = calls.map(call => ({ id: call.callId, view: describeCall(call) }));
   if (rows.length === 0) return null;
   return (
     <ul aria-label="搜索记录" className={styles.calls}>

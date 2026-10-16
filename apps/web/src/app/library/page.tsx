@@ -12,9 +12,9 @@ import { VersionCompare } from '@/components/opc/version-compare';
 import { StrategyOverviewDialog } from '@/components/opc/strategy-overview-dialog';
 import { MyDocuments } from '@/components/library/my-documents';
 import { LibraryEvidence } from '@/components/research/library-evidence';
+import { libraryTabFromParam, libraryTabParam, type LibraryTab } from './library-tab';
 import styles from './library.module.css';
 
-type LibraryTab='topics'|'documents'|'evidence';
 const INTRO:Record<LibraryTab,string>={documents:'上传和管理你自己写的文章和参考资料。',
  topics:'按平台和账号查看已采用选题、稿件和当前定位。',evidence:'AI 教练在对话里查过的公开数据和来源。'};
 
@@ -70,10 +70,11 @@ export default function LibraryPage(){
  const [tab,setTab]=useState<LibraryTab>('topics');
  // Once opened, 我的文档 stays mounted (hidden) so switching tabs never drops an upload or its recovery state.
  const [documentsOpened,setDocumentsOpened]=useState(false);
- useEffect(()=>{if(new URL(location.href).searchParams.get('tab')==='documents'){setTab('documents');setDocumentsOpened(true);}},[]);
+ useEffect(()=>{const next=libraryTabFromParam(new URL(location.href).searchParams.get('tab'));
+  if(next!=='topics'){setTab(next);if(next==='documents')setDocumentsOpened(true);}},[]);
  function chooseTab(next:LibraryTab){
   setTab(next);if(next==='documents')setDocumentsOpened(true);const url=new URL(location.href);
-  if(next==='documents')url.searchParams.set('tab','documents');else url.searchParams.delete('tab');
+  const param=libraryTabParam(next);if(param)url.searchParams.set('tab',param);else url.searchParams.delete('tab');
   history.replaceState(history.state,'',url);
  }
  const [search,setSearch]=useState(''),[selectedProject,setSelectedProject]=useState(''),[statusFilter,setStatusFilter]=useState<'all'|'new'|'draft'|'final'|'published'>('all'),[sortOrder,setSortOrder]=useState<'updated'|'created'|'scheduled'>('updated'),[page,setPage]=useState(1),[error,setError]=useState(''),[returnHref,setReturnHref]=useState('/positioning'),[focusedItemId,setFocusedItemId]=useState(''),[hydrated,setHydrated]=useState(false);

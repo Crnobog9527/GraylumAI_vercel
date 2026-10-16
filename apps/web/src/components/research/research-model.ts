@@ -1,11 +1,11 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 // RESEARCH-TOOLS RT-5: what the conversation shows for research tool calls, selection cards and the benchmark
 // table (docs/launch/implementation/RESEARCH_TOOLS_PLAN.md §1.2–§1.6, §2.1–§2.2). Shapes follow the host
-// contracts: tool names and the result envelope from RT-3a, card and confirmation shapes from the RT-3b card
-// functions, account numbers from RT-4a. Pure functions only. Supplier names, route ids and costs never reach
+// contracts: call events and cards from RT-3b `shared/researchTurn.ts`, tool names from RT-3a, card confirmations
+// from the RT-3b card functions, account numbers from RT-4a. Pure functions only. Supplier names, route ids and costs never reach
 // the page.
 import type { ResearchToolName } from "../../../../../packages/api/src/services/research/tools/schemas";
-import type { ToolEnvelope } from "../../../../../packages/api/src/services/research/tools/envelope";
+import type { ResearchTurnEvent } from "../../../../../packages/api/src/shared/researchTurn";
 import type { SocialPlatform } from "../../../../../packages/api/src/services/research/vendors/types";
 
 /** Owner-approved wording (2026-10-15) wherever the page says where benchmark numbers come from. */
@@ -24,14 +24,8 @@ export const platformLabel = (platform: string): string =>
 // Research calls in the conversation
 // ---------------------------------------------------------------------------
 
-/** One research tool call as the conversation knows it: the model's arguments and, once done, the envelope. */
-export interface ResearchCall {
-  id: string;
-  tool: ResearchToolName;
-  args: unknown;
-  /** Absent while the call is still running. */
-  result?: Pick<ToolEnvelope, "status" | "reason"> & Partial<Pick<ToolEnvelope, "truncated" | "continue">>;
-}
+/** One research call as the Agent turn stream reports it (RT-3b `ResearchTurnEvent`, type `research_call`). */
+export type ResearchCall = Omit<Extract<ResearchTurnEvent, { type: "research_call" }>, "type">;
 
 export type CallState = "running" | "success" | "missing" | "pending";
 export const CALL_STATE_LABELS: Record<CallState, string> = {
@@ -44,9 +38,14 @@ export interface CallView {
   /** Which kind of data the call reads, e.g. "抖音 · 关键词作品"; never a supplier or route id. */
   line: string;
   state: CallState;
-  /** One plain sentence for anything other than a full success. */
+  /** One plain sentence for anything other than a success. */
   detail: string | null;
 }
+
+export const DATA_KIND_LABELS: Record<ResearchCall["dataKind"], string> = {
+  keyword_posts: "关键词作品", account_profile: "账号资料", account_posts: "近期作品",
+  account_relation: "粉丝数", post_detail: "作品详情", web_search: "网页搜索", web_fetch: "网页正文",
+};
 
 const record = (value: unknown): Record<string, unknown> =>
   value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
@@ -99,42 +98,18 @@ export function describeRequest(tool: ResearchToolName, rawArgs: unknown): { que
   }
 }
 
-const BUDGET_DETAIL = "这一轮的查询次数已用完，没有发出请求。";
-const MISSING_DETAILS: Record<string, string> = {
-  PROVIDER_FAILED: "这次没有取到数据。",
-  PLATFORM_NOT_VERIFIED: "暂不支持这个平台的数据。",
-  ROUTE_NOT_SUPPORTED: "暂不支持这个平台的数据。",
-  NO_PUBLISH_TIME: "这个平台拿不到作品发布时间，暂不支持对标。",
-  BALANCE_LOW: "余额不足，没有发出请求。",
-  VENDOR_RATE_LIMITED: "查询太频繁，这次没有发出请求，请稍后再试。",
-};
-
-/** The row a call shows. Statuses follow RT-3a `statusForOutcome`: an unknown supplier result is `待核`. */
-export function describeCall(call: ResearchCall): CallView | null {
-  const request = describeRequest(call.tool, call.args);
-  if (!request) return null;
-  const result = call.result;
-  if (!result) return { ...request, state: "running", detail: null };
-  const reason = result.reason ?? "";
-  switch (result.status) {
-    case "ok":
-      return { ...request, state: "success", detail: reason === "NO_RESULTS" ? "没有找到相关内容。" : null };
-    case "partial":
-      return {
-        ...request, state: "success",
-        detail: result.continue ? "已取到一部分，还在继续找。" : "只取到一部分，缺的部分没有补。",
-      };
-    case "unavailable":
-      return reason === "PROVIDER_RESULT_UNKNOWN"
-        ? { ...request, state: "pending", detail: "这次没有拿到确定结果，正在核对。" }
-        : { ...request, state: "missing", detail: MISSING_DETAILS[reason] ?? "这次没有取到数据。" };
-    case "not_supported":
-      return { ...request, state: "missing", detail: MISSING_DETAILS[reason] ?? "暂不支持这个平台的数据。" };
-    case "not_confirmed":
-      return { ...request, state: "missing", detail: "需要你先在卡片里确认，或贴出账号主页链接。" };
-    case "budget_exhausted":
-      return { ...request, state: "missing", detail: MISSING_DETAILS[reason] ?? BUDGET_DETAIL };
-    default:
-      return { ...request, state: "missing", detail: "这次没有取到数据。" };
+/**
+ * The row a call shows. The host already reduced the result to four states: an unknown supplier result is
+ * `待核`, a failure `未取到`. Free card tools never arrive as calls.
+ */
+export function describeCall(call: ResearchCall): CallView {
+  const kind = DATA_KIND_LABELS[call.dataKind] ?? "数据";
+  const line = call.platform === "web" ? kind : `${platformLabel(call.platform)} · ${kind}`;
+  const base = { query: call.query, line };
+  switch (call.state) {
+    case "running": return { ...base, state: "running", detail: null };
+    case "succeeded": return { ...base, state: "success", detail: null };
+    case "unknown": return { ...base, state: "pending", detail: "这次没有拿到确定结果，正在核对。" };
+    default: return { ...base, state: "missing", detail: "这次没有取到数据。" };
   }
 }

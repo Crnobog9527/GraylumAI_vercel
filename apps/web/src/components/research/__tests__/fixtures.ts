@@ -10,16 +10,16 @@ import type { SearchCharge } from "../search-charges";
 export const NOW = new Date("2026-10-15T08:00:00Z");
 
 export const CALLS: ResearchCall[] = [
-  { id: "c1", tool: "web_search", args: { query: "小红书 职场穿搭 博主 2026", mode: "fast" }, result: { status: "ok", reason: null } },
-  { id: "c2", tool: "benchmark_discover", args: { keywordConfirmationId: "11111111-1111-4111-8111-111111111111",
-    platforms: ["douyin", "xiaohongshu"] }, result: { status: "partial", reason: null, continue: true } },
-  { id: "c3", tool: "benchmark_fetch", args: { accounts: [{ platform: "douyin", account: "sample_style_a" },
-    { platform: "douyin", account: "sample_style_b" }], source: { kind: "candidate", confirmationId: "22222222-2222-4222-8222-222222222222" } },
-  result: { status: "unavailable", reason: "PROVIDER_RESULT_UNKNOWN" } },
-  { id: "c4", tool: "social_account", args: { platform: "instagram", account: "sample_ig" },
-    result: { status: "not_supported", reason: "PLATFORM_NOT_VERIFIED" } },
-  { id: "c5", tool: "social_search", args: { platform: "tiktok", keywords: ["office outfit", "capsule wardrobe"] } },
-  { id: "c6", tool: "propose_keywords", args: { keywords: ["职场穿搭", "通勤穿搭", "胶囊衣橱"] } },
+  { callId: "c1", toolName: "web_search", args: { query: "小红书 职场穿搭 博主 2026" }, query: "小红书 职场穿搭 博主 2026",
+    platform: "web", dataKind: "web_search", state: "succeeded", evidenceId: "ev30" },
+  { callId: "c2", toolName: "benchmark_discover", args: { platforms: ["douyin"] }, query: "职场穿搭",
+    platform: "douyin", dataKind: "keyword_posts", state: "succeeded", evidenceId: "ev31" },
+  { callId: "c3", toolName: "benchmark_fetch", args: {}, query: "sample_style_a",
+    platform: "douyin", dataKind: "account_posts", state: "unknown" },
+  { callId: "c4", toolName: "social_account", args: {}, query: "sample_b",
+    platform: "bilibili", dataKind: "account_relation", state: "failed" },
+  { callId: "c5", toolName: "social_search", args: {}, query: "office outfit、capsule wardrobe",
+    platform: "tiktok", dataKind: "keyword_posts", state: "running" },
 ];
 
 export const KEYWORD_CARD: KeywordCard = {

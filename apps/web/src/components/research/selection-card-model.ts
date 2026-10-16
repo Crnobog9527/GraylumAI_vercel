@@ -3,26 +3,19 @@
 // (`research_card_create` / `research_card_confirm`): the host owns options and limits, the page only builds a
 // submission the host checks again. A keyword card takes picks, edits and additions; a candidate card takes
 // option ids only.
-import type { SocialPlatform } from "../../../../../packages/api/src/services/research/vendors/types";
+import type {
+  ResearchCandidateOption, ResearchSelectionCard,
+} from "../../../../../packages/api/src/shared/researchTurn";
 
 /** Same bounds as the host: keywords are 1–40 characters without control characters. */
 export const KEYWORD_MAX_CHARS = 40;
 
-export interface KeywordOption { id: string; text: string }
-export interface CandidateOption {
-  id: string;
-  platform: SocialPlatform;
-  account: string;
-  evidenceRef: string;
-  label?: string;
-  /** False for head references: shown, never selectable. */
-  selectable: boolean;
-}
-
-interface CardBase { cardId: string; minSelect: number; maxSelect: number }
-export type KeywordCard = CardBase & { kind: "keywords"; options: KeywordOption[] };
-export type CandidateCard = CardBase & { kind: "candidates"; options: CandidateOption[]; followUp?: boolean };
-export type SelectionCard = KeywordCard | CandidateCard;
+/** The card the stream sends (`research_card`); `selectable` is false for head references. */
+export type SelectionCard = ResearchSelectionCard;
+export type KeywordCard = Extract<SelectionCard, { kind: "keywords" }>;
+export type CandidateCard = Extract<SelectionCard, { kind: "candidates" }>;
+export type KeywordOption = KeywordCard["options"][number];
+export type CandidateOption = ResearchCandidateOption;
 
 export type ConfirmedCandidate = Omit<CandidateOption, "label" | "selectable">;
 export type CardConfirmation =
