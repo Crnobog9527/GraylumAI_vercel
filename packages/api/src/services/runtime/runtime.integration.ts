@@ -1607,6 +1607,8 @@ it('RUNTIME: real published source revocation excludes derived Session history w
  const login=await user.auth.signInWithPassword({email,password});if(login.error)throw login.error;
  async function workflow(social:boolean){
   const pack=makePackage(),moduleId=randomUUID(),registration='runtime-source-'+randomUUID(),flow=makeWorkflow(social?6:1,social);
+  // Only a positioning workflow opens a workbench round (CONTENT-CONVERSATION-DRIVEN G): the started source declares its questions.
+  if(social)flow.steps.forEach((step,i)=>{step.information=[{id:'field'+i,title:'Field '+i,required:false,...(i===0?{profileKey:'audience'}:{})}];});
   await db.query('insert into skills(id,skill_key,created_by) values($1,$2,$3)',[pack.id,registration,actor]);
   await db.query('insert into modules(id,title,skill_id,active) values($1,$2,$3,true)',[moduleId,registration,pack.id]);
   await publishSkillPackage(admin,actor,pack);
