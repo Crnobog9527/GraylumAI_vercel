@@ -64,9 +64,18 @@ export function WorkComposer({value,onChange,onSend,disabled=false,sendDisabled=
    <input ref={fileInput} type="file" aria-label="选择附件" accept=".txt,.md,.csv,.json,.log" multiple hidden onChange={event=>void addFiles(event.target.files)}/>
    <div className={styles.menuAnchor}><button type="button" aria-label="使用技能" disabled={disabled} aria-expanded={menu==='skills'} onClick={toggleSkills}><Box size={18}/></button>{menu==='skills'&&<div className={styles.skillMenu} role="dialog" aria-label="使用技能"><div className={styles.skillHead}><strong>使用技能</strong><button type="button" aria-label="关闭技能菜单" onClick={()=>setMenu(null)}><X size={16}/></button></div><label className={styles.skillSearch}><Search size={16}/><input aria-label="搜索技能" placeholder="搜索技能" value={query} onChange={event=>setQuery(event.target.value)}/></label><div className={styles.skillList}>{choices.isLoading?<p role="status">正在读取技能…</p>:choices.error?<QueryNotice error={choices.error} label="技能列表" retry={()=>choices.refetch()}/>:<>{skills.map(skill=><button type="button" key={skill.moduleId} onClick={()=>changeSkill(skill.moduleId)}><span className={styles.skillGlyph}><Box size={16}/></span><span><strong>{skill.name}</strong><small>{onSkillChange?'加载到本对话，不自动发送':'使用此技能开展独立对话'}</small></span></button>)}{!skills.length&&<p>没有匹配的可用技能</p>}</>}</div><div className={styles.skillFoot}><Link href="/workbench/marketplace">浏览功能广场</Link></div></div>}</div>
   </div><div className={styles.toolRight}>{nearLimit&&<span>{value.length} / {maxLength}</span>}
-  {selected&&<span>{choices.data?.skills.find(skill=>skill.moduleId===selected)?.name??'已选择技能'}</span>}<button type="button" aria-label="发送" className={styles.send} disabled={cannotSend} onClick={sendAndFocus}><ArrowUp size={18}/></button></div></div>
+  {selected&&<span>{choices.data?.skills.find(skill=>skill.moduleId===selected)?.name??'已选择技能'}</span>}<ModelSlot/><button type="button" aria-label="发送" className={styles.send} disabled={cannotSend} onClick={sendAndFocus}><ArrowUp size={18}/></button></div></div>
  </div>{reading&&<p role="status" className={styles.note}>正在读取附件…</p>}{error&&<p role="alert" className={styles.note}>{error}</p>}{note&&<p className={styles.note}>{note}</p>}</div>;
 }
+
+/**
+ * UI-MODEL (Owner 2026-10-03, plan §2.1 item 50): the model position stays in the box but only shows Auto.
+ * Users cannot switch; the backend picks the model by purpose, the same for every plan. Plain text, not a control.
+ */
+export function ModelSlot(){
+ return <span className={styles.model} title={MODEL_SLOT_HINT}>Auto<span className={styles.srOnly}>{'，'+MODEL_SLOT_HINT}</span></span>;
+}
+export const MODEL_SLOT_HINT='模型由系统按用途自动选择';
 
 /**
  * Files added to the message, readable in the box: each file's own lines between a start and an end marker.
