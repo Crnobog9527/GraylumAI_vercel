@@ -164,6 +164,10 @@ export async function discover(ctx: ResearchToolContext, args: ResearchToolArgs<
 export async function moreCandidates(ctx: ResearchToolContext, discoveryId: string, callId: string) {
   const d = await ctx.store.discoveryRead(discoveryId);
   if (!d) return toolEnvelope({ status: 'not_confirmed', reason: 'DISCOVERY_NOT_FOUND' });
+  // A follow-up only replaces accounts picked from a confirmed card; it never stands in for the 8-candidate first card.
+  if ((await ctx.store.selectedAccounts(discoveryId)).length === 0) {
+    return toolEnvelope({ status: 'not_confirmed', reason: 'NO_CONFIRMED_SELECTION', discoveryId });
+  }
   const accounts = (d.cursor.accounts ?? []) as FoundAccount[];
   const shown = await card(ctx, discoveryId, accounts, true, callId);
   return toolEnvelope({ status: shown ? 'ok' : 'partial', reason: shown ? null : 'NOT_ENOUGH_CANDIDATES', discoveryId });

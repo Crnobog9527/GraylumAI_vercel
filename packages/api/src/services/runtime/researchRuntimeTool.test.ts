@@ -464,6 +464,16 @@ describe('durable benchmark discovery and free follow-up', () => {
     expect(subcall).toHaveBeenCalledTimes(10);
   });
 
+  it('refuses a follow-up card before any initial candidate selection was confirmed', async () => {
+    const f = fixture();
+    f.setAuthors(7);
+    await f.execute('benchmark_discover', discoveryArgs);
+    expect(await f.execute('propose_more_candidates', { discoveryId }, 'more'))
+      .toMatchObject({ status: 'not_confirmed', reason: 'NO_CONFIRMED_SELECTION' });
+    expect(f.store.createCard).not.toHaveBeenCalled();
+    expect(subcall).toHaveBeenCalledTimes(10);
+  });
+
   it('creates a stable initial card and excludes already selected accounts from a free follow-up', async () => {
     const f = fixture(11);
     expect(await f.execute('benchmark_discover', discoveryArgs)).toMatchObject({ status: 'ok', continue: false });
