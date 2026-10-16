@@ -95,6 +95,12 @@ export async function loadConfiguredStripePrices(input: Omit<Parameters<typeof l
   }
 }
 
+/** The only packs 0222 card checkout sells, as (price cents, credits, bonus); anything else is PAY_WAFFO_CATALOG_NOT_READY. */
+const SELLABLE_MEMBER_PACKS = new Set(['990:990:0', '2990:2990:0', '9990:9990:1000']);
+export function isSellableMemberPack(pack: { price: number; credits_amount: number; bonus_credits?: number | null }) {
+  return SELLABLE_MEMBER_PACKS.has(`${pack.price}:${pack.credits_amount}:${pack.bonus_credits ?? 0}`);
+}
+
 /**
  * Pro/Gold pack prices (0211 tiers) that card checkout charges: 0222 admission picks exactly one current
  * `package` price of the buyer's tier in the connected test account. Key `${packageId}:${tier}` → chargeable.

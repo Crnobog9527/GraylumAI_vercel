@@ -15,7 +15,7 @@ import { z } from 'zod';
 import { TRPCError } from '@trpc/server';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { isStripeCheckoutConfigured } from '../services/stripe';
-import { loadConfiguredStripePrices, loadMemberPackReadiness } from '../services/payments/stripeCatalog';
+import { isSellableMemberPack, loadConfiguredStripePrices, loadMemberPackReadiness } from '../services/payments/stripeCatalog';
 import {
   LAUNCH_BASELINE_SETTING_KEY,
   parseLaunchBaselineAt,
@@ -401,8 +401,8 @@ export const settingsRouter = router({
       paymentChannel: selectedChannel?.channel ?? null,
       checkout_ready: stripeReady && pkg.price > 0 && hasConfiguredStripePriceId(priceRefs.get(`${pkg.id}:one_time`) ?? null),
       member_checkout_ready: {
-        pro: pkg.price > 0 && memberReady.get(`${pkg.id}:pro`) === true,
-        gold: pkg.price > 0 && memberReady.get(`${pkg.id}:gold`) === true,
+        pro: isSellableMemberPack(pkg) && memberReady.get(`${pkg.id}:pro`) === true,
+        gold: isSellableMemberPack(pkg) && memberReady.get(`${pkg.id}:gold`) === true,
       },
     }));
   }),

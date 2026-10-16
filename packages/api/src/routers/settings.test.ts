@@ -528,7 +528,8 @@ describe('public catalog availability', () => {
 
   it('reports the Pro/Gold pack prices card checkout charges, apart from the legacy channel and generic price', async () => {
     // Staging after 0211: only tier prices exist, and the legacy channel selection does not matter to card checkout.
-    const pack = { ...validCreditPackage, stripe_price_id: null, member_prices: { pro: 'price_pro', gold: 'price_gold' } };
+    const pack = { ...validCreditPackage, price: 990, credits_amount: 990, bonus_credits: 0, stripe_price_id: null,
+      member_prices: { pro: 'price_pro', gold: 'price_gold' } };
     const packages = await createPublicCatalogCaller('credit_packages', Promise.resolve({ data: [pack], error: null }),
       { channel: 'waffo', version: 2 }).getCreditPackages();
     expect(packages[0]).toMatchObject({ checkout_ready: false, member_checkout_ready: { pro: true, gold: true } });
@@ -539,6 +540,12 @@ describe('public catalog availability', () => {
     const free = await createPublicCatalogCaller('credit_packages', Promise.resolve({ data: [{ ...pack, price: 0 }],
       error: null })).getCreditPackages();
     expect(free[0]).toMatchObject({ member_checkout_ready: { pro: false, gold: false } });
+    // 0222 sells only its three catalog tuples (PAY_WAFFO_CATALOG_NOT_READY otherwise): an edited pack is not for sale.
+    for (const edited of [{ credits_amount: 1000 }, { bonus_credits: 10 }, { price: 1990, credits_amount: 1990 }]) {
+      const rows = await createPublicCatalogCaller('credit_packages', Promise.resolve({ data: [{ ...pack, ...edited }],
+        error: null })).getCreditPackages();
+      expect(rows[0]).toMatchObject({ member_checkout_ready: { pro: false, gold: false } });
+    }
   });
 
   it('returns [] only for a successful empty active credit package catalog', async () => {
