@@ -80,11 +80,20 @@ export function gateStopNotices(storage: GateStopStorage | null, sessionId: stri
 const userStopKey = (sessionId: string, executionId: string) => 'opc-runtime-user-stop:' + sessionId + ':' + executionId;
 
 /**
- * The server keeps no "the user asked" flag in the view, so this browser remembers the stops its user
- * requested; only those cancelled rounds say 已停止. Call it before the cancel request.
+ * A plain cancel leaves no "the user asked" flag in the view (only a stop that keeps the shown text
+ * records pausedReason user_stop), so this browser remembers the stops its user requested; a cancelled
+ * round says 已停止 only then. Call it before the cancel request.
  */
 export function rememberUserStop(storage: GateStopStorage | null, sessionId: string, executionId: string) {
   try { storage?.setItem(userStopKey(sessionId, executionId), '1'); } catch { /* The round then shows the neutral ended notice. */ }
+}
+
+/**
+ * A stop request that failed: the round goes back to its open notice and 重试, unless the view shows the
+ * server recorded the stop after all (stoppedByUser reads that too).
+ */
+export function forgetUserStop(storage: Pick<Storage, 'removeItem'> | null, sessionId: string, executionId: string) {
+  try { storage?.removeItem(userStopKey(sessionId, executionId)); } catch { /* Nothing stored to remove. */ }
 }
 
 /** Execution ids of rounds whose stop this browser's user requested. */

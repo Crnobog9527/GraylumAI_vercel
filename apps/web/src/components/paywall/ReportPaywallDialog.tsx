@@ -5,15 +5,17 @@ import { useEffect, useRef, useState } from 'react';
 import { Check, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { PaywallCompareTable, PaywallPlanPicker } from './PaywallPlanPicker';
+import { MethodCheckoutForm } from './MethodCheckoutForm';
+import { CHECKOUT_COPY, GOLD_FOUNDER_YEAR_USD } from './methodCheckout';
+import { SUPPORT_TICKET_HREF, UNPAID_SUBSCRIPTION_BLOCKS_PURCHASE } from '@/components/profile/subscriptionPlanButtonState';
 import { formatUsd, paywallQuote, type PaywallBilling, type PaywallLevel } from './paywallPlans';
 import { usePaywallCheckout } from './usePaywallCheckout';
-import { SUPPORT_TICKET_HREF } from '@/components/profile/subscriptionPlanButtonState';
 import { REPORT_DELIVERABLES, REPORT_PAYWALL_COPY as COPY } from './reportPaywallCopy';
 
 /**
  * Scene 1 of the paywall design v25: a free user who confirmed every step asks for the report.
  * Left: what the report gives (nothing already confirmed is lost). Right: plans from the server
- * and the existing checkout. No credit-cost estimate, no model names, no consent switch the
+ * and the card checkout (`payments.methodCheckout`). No credit-cost estimate, no model names, no consent switch the
  * backend lacks (design README "文案规则").
  */
 export function ReportPaywallDialog({ onClose }: { onClose: () => void }) {
@@ -30,15 +32,15 @@ export function ReportPaywallView({ checkout, onClose }: { checkout: PaywallChec
   useEffect(() => { dialog.current?.focus(); }, []);
 
   const plan = checkout.plans.find(item => item.level === selected) ?? checkout.plans[0];
-  const quote = plan ? paywallQuote(plan, billing) : null;
-  const state = plan && quote ? checkout.buttonState(plan, billing) : null;
+  const quote = plan ? paywallQuote(plan, billing, checkout.quoteOptions) : null;
+  const purchase = plan && quote ? checkout.purchaseFor(plan, billing) : null;
   const lowest = checkout.plans.length ? Math.min(...checkout.plans.map(item => item.price.monthly)) : null;
 
   function chooseBilling(next: PaywallBilling) {
     setBilling(next);
     // Keep a plan that has a price for the chosen cycle selected.
-    if (plan && !paywallQuote(plan, next)) {
-      const other = checkout.plans.find(item => paywallQuote(item, next));
+    if (plan && !paywallQuote(plan, next, checkout.quoteOptions)) {
+      const other = checkout.plans.find(item => paywallQuote(item, next, checkout.quoteOptions));
       if (other) setSelected(other.level);
     }
   }
@@ -96,24 +98,31 @@ export function ReportPaywallView({ checkout, onClose }: { checkout: PaywallChec
               : (
                 <>
                   <PaywallPlanPicker plans={checkout.plans} billing={billing} selected={plan?.level ?? 'pro'}
-                    disabled={checkout.pending} onBilling={chooseBilling} onSelect={setSelected} />
+                    quoteOptions={checkout.quoteOptions} disabled={checkout.method.pending}
+                    onBilling={chooseBilling} onSelect={setSelected} />
+                  {checkout.founderSeats > 0 && plan?.level === 'gold' && billing === 'yearly' ? (
+                    <p data-testid="paywall-founder-seats" className="text-sm" style={{ color: 'var(--text-secondary)' }}>
+                      <b style={{ color: 'var(--text-primary)' }}>Gold 创始会员 · 年付 {formatUsd(GOLD_FOUNDER_YEAR_USD)}</b>
+                      {' '}还剩 {checkout.founderSeats} 个名额（共 50 个），满了就关闭
+                    </p>
+                  ) : null}
                   <PaywallCompareTable plans={checkout.plans} />
                 </>
               )}
 
-          {plan && quote && state && !checkout.loading && !checkout.catalogFailed ? (
-            <div className="grid gap-2">
-              <Button data-testid="report-paywall-pay" size="lg" className="h-auto flex-col gap-0.5 py-3" disabled={state.disabled}
-                onClick={() => void checkout.startCheckout(plan, billing)}>
-                <b>{checkout.pending ? '正在打开支付页面…' : `${COPY.cta} · ${formatUsd(quote.amount)}`}</b>
-                <span className="text-xs font-normal opacity-80">{COPY.ctaSub}</span>
-              </Button>
-              <p className="text-xs" data-testid="report-paywall-renewal" style={{ color: 'var(--text-tertiary)' }}>{quote.renewal}</p>
-              {state.message ? <p role="status" className="text-sm" style={{ color: 'var(--warning)' }}>{state.message}</p> : null}
-              {state.contactSupport ? <a data-testid="report-paywall-support-ticket" href={SUPPORT_TICKET_HREF}
+          {plan && quote && !checkout.loading && !checkout.catalogFailed ? (
+            <>
+              <MethodCheckoutForm checkout={checkout.method} purchase={purchase} testIdPrefix="report-paywall"
+                price={`${formatUsd(quote.amount)} ${quote.perLabel}`} renewal={quote.renewal}
+                cta={`${COPY.cta} · ${formatUsd(quote.amount)}`} ctaSub={COPY.ctaSub}
+                blockedReason={checkout.unpaidSubscription ? UNPAID_SUBSCRIPTION_BLOCKS_PURCHASE : purchase ? null : COPY.notReady}
+                onGoldFirstDeclined={checkout.declineFirstMonth}
+                onFounderDeclined={checkout.declineFounder} onFounderSoldOut={checkout.markFounderSoldOut}
+                fineprint={quote.founder ? CHECKOUT_COPY.founderRule : null}
+                notice={checkout.founderSoldOut && plan.level === 'gold' && billing === 'yearly' ? CHECKOUT_COPY.founderSoldOut : null} />
+              {checkout.unpaidSubscription ? <a data-testid="report-paywall-support-ticket" href={SUPPORT_TICKET_HREF}
                 className="text-sm underline" style={{ color: 'var(--text-primary)' }}>提交工单</a> : null}
-              {checkout.error ? <p role="alert" className="text-sm" style={{ color: 'var(--error)' }}>{checkout.error}</p> : null}
-            </div>
+            </>
           ) : null}
 
           <ul className="flex flex-wrap gap-x-4 gap-y-1 text-xs" style={{ color: 'var(--text-tertiary)' }}>
