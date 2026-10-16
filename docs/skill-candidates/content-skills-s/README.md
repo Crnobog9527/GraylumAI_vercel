@@ -19,7 +19,7 @@ Owner 2026-10-17（总控转达）：这批是**测试用的第一版**，Owner 
 ## 包结构和声明字段
 
 - 每个包：`SKILL.md`（对话时加载的唯一文件，自成一体）+ `workflow.yaml`（固定字段）+ `EVALS.md`（验收用例，不进对话）。管理员发布时每个文件的 `requires` 为空（`modulePublication.ts`），所以不放需要另外读取的参考文件。
-- `workflow.yaml` 按 G / A2 窗口（G #1026，A2 分支 `claude/ccd-a2-content-source`）给的格式写：`kind: document`，一步、资源只有 `SKILL.md`，不写 `information` / `profileKey`（写了会被当成定位类）。非定位 Skill 的这一步只作为工作顺序，不开强引导。
+- `workflow.yaml` 按 G / A2 窗口（G #1026，A2 #1036；规则文档随 A2 写在 `docs/launch/implementation/CONTENT_SKILL_RULES.md`）给的格式写：`kind: document`，一步、资源只有 `SKILL.md`，不写 `information` / `profileKey`（写了会被当成定位类）。非定位 Skill 的这一步只作为工作顺序，不开强引导。
 
   | 包名 | `workflow.yaml` |
   | --- | --- |
@@ -35,7 +35,7 @@ Owner 2026-10-17（总控转达）：这批是**测试用的第一版**，Owner 
 
 1. 用后台现有的管理员 Skill 包发布，每个目录（目录名等于 `name`）上传一次，生成新的不可变版本。
    `short-video-script`、`post-and-article` 现在就能发布。`video-storyboard`、`video-editing-guide` 带 `contentSource`，
-   **要等 A2 合并并部署到 staging 后再发布**；之前发布会被拒（"workflow.yaml 的步骤或问题声明无效"）。不要为了先发布删掉这个字段：没有它，选题窗口不会注入定稿口播稿或分镜。
+   **要等 A2（#1036）合并并部署到 staging 后再发布**；之前发布会被拒（"workflow.yaml 的步骤或问题声明无效"）。不要为了先发布删掉这个字段：没有它，选题窗口不会注入定稿口播稿或分镜。
 2. 新建模块时"与社交媒体相关"选"是"，不开强引导。
 3. 发布后从 staging 读回逐文件哈希，和 `file-hashes.json` 核对。
 4. 真实模型行为（按意图匹配和四个包的产出）在 #621 第 11.3 节付费小评测和 staging 验收里跑，之前一律 NOT_RUN；按意图加载要等 A3 合并后才会在对话里生效。
