@@ -173,7 +173,11 @@ it.runIf(staging)('RUNTIME: library document deleted after admission and before 
  const f=await fixture(),p=await provider({early:'x',late:'y'});
  try{
   const admitted=await f.admit();expect(admitted.error).toBeNull();const executionId=admitted.data.executionId;
+  // 0279: read-only, an execution is listed only while one of its frozen references is gone.
+  const gone=(ids:string[])=>rpc('runtime_library_sources_gone',{p_actor_id:f.actorId,p_execution_ids:ids});
+  expect(await gone([executionId,randomUUID()])).toEqual([]);
   await rpc('library_delete',{a:f.actorId,did:f.documentId});
+  expect(await gone([executionId,randomUUID()])).toEqual([executionId]);
   // Deletion finds the frozen reference although no tool call exists yet (LIB_DOCS_PLAN 6.1).
   const s=stream(f,executionId,p.adapter);await s.done.catch(()=>{});
   expect(p.bodies).toHaveLength(0);
@@ -201,6 +205,7 @@ it.runIf(staging)('RUNTIME: library read replayed in recovery is rechecked and a
    [executionId])).rows[0].n).toBe(1);
   // The document changes version (e.g. a recognized page); the frozen segment is no longer at the referenced version.
   await db.query('update library_documents set content_version=2 where id=$1',[f.documentId]);
+  expect(await rpc('runtime_library_sources_gone',{p_actor_id:f.actorId,p_execution_ids:[executionId]})).toEqual([executionId]);
   // Recovery replays the SDK from the stored round: the saved read is rechecked before it reaches the model again.
   const checks:unknown[]=[];
   const database={rpc:async(name:string,args:Record<string,unknown>)=>{

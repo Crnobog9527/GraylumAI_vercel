@@ -72,57 +72,30 @@ it('answers another actor\'s, missing or out-of-scope sessions with one indistin
   .rejects.toMatchObject({code:'NOT_FOUND',message:'RUNTIME_SESSION_NOT_FOUND'});
 });
 
-describe('LIB-4b: a paused round shows no body once its referenced source is gone', () => {
-  const round = (executionId: string, body: string) => ({ executionId, state: 'waiting_credits', contentAvailable: true, primaryBody: body });
-  const refs = { libraryReferences: [{ documentId: 'd', version: 1 }] };
-  // reads: per execution the runtime_execution answer; marked: executions SQL marks source_deleted on that read.
-  function source(reads: Record<string, { data?: unknown; error?: unknown }>, visible = true) {
-    const marked = new Set<string>();
-    const rpc = vi.fn(async (name: string, args: { p_execution_id?: string }) => {
-      if (name === 'runtime_execution') {
-        const read = reads[args.p_execution_id!]!;
-        if ((read.data as { unavailableReason?: string } | undefined)?.unavailableReason === 'source_deleted') marked.add(args.p_execution_id!);
-        return { data: null, error: null, ...read };
-      }
-      if (name === 'runtime_library_visible') return { data: visible, error: null };
-      const executions = [round('a', 'PRIVATE_A'), round('b', 'PRIVATE_B'), round('c', 'KEPT_C')]
-        .map(e => marked.has(e.executionId) ? { ...e, primaryBody: null, unavailableReason: 'source_deleted' } : e);
-      return { data: { sessionId: session, executions }, error: null };
-    });
+describe('LIB-4b: unfinished rounds show no body once a referenced source is gone', () => {
+  const rows = [
+    { executionId: 'waiting', state: 'waiting_credits', contentAvailable: true, primaryBody: 'GONE_WAITING' },
+    { executionId: 'interrupted', state: 'interrupted', contentAvailable: true, primaryBody: 'KEPT_INTERRUPTED' },
+    { executionId: 'running', state: 'running', contentAvailable: true, primaryBody: 'GONE_RUNNING' },
+    { executionId: 'marked', state: 'cost_pending', unavailableReason: 'source_deleted', primaryBody: 'GONE_MARKED' },
+    { ...visible, executionId: 'done', body: 'KEPT_DONE' },
+    { executionId: 'stopped', state: 'cancelled', contentAvailable: true, body: 'KEPT_STOPPED' },
+    { executionId: 'empty', state: 'waiting_resume', contentAvailable: true, primaryBody: null },
+  ];
+  function source(gone: { data?: unknown; error?: unknown }) {
+    const rpc = vi.fn(async (name: string) => name === 'runtime_view'
+      ? { data: { sessionId: session, executions: structuredClone(rows) }, error: null } : { data: null, error: null, ...gone });
     return { db: { rpc } as unknown as SupabaseClient, rpc };
   }
-  const plain = { data: { unavailableReason: null, context: {} } };
-  it('a deletion marked by the read is reread; a failed read stays hidden across that reread', async () => {
-    const f = source({ a: { error: { message: 'RUNTIME_SCOPE_DENIED' } }, b: { data: { unavailableReason: 'source_deleted' } }, c: plain });
+  it('asks once, read-only, about every unfinished round that shows a body and hides the gone ones', async () => {
+    const f = source({ data: ['waiting', 'running'] });
     const text = JSON.stringify(await readNativeRuntimeView(f.db, actor, session));
-    expect(text).not.toMatch(/PRIVATE_A|PRIVATE_B/);expect(text).toContain('KEPT_C');
-    expect(f.rpc.mock.calls.filter(([name]) => name === 'runtime_view')).toHaveLength(2);
-    expect(f.rpc).toHaveBeenCalledWith('runtime_execution', { p_actor_id: actor, p_execution_id: 'a', p_action: 'read' });
+    expect(text).not.toMatch(/GONE_/);expect(text).toMatch(/KEPT_INTERRUPTED[\s\S]*KEPT_DONE[\s\S]*KEPT_STOPPED/);
+    expect(f.rpc.mock.calls).toEqual([['runtime_view', { p_actor_id: actor, p_session_id: session }],
+      ['runtime_library_sources_gone', { p_actor_id: actor, p_execution_ids: ['waiting', 'interrupted', 'running'] }]]);
   });
-  it('a referencing round whose document changed version is hidden; rounds without references are not rechecked', async () => {
-    const f = source({ a: { data: { unavailableReason: null, context: refs } }, b: plain, c: plain }, false);
-    const text = JSON.stringify(await readNativeRuntimeView(f.db, actor, session));
-    expect(text).not.toContain('PRIVATE_A');expect(text).toMatch(/PRIVATE_B[\s\S]*KEPT_C/);
-    expect(f.rpc.mock.calls.filter(([name]) => name === 'runtime_library_visible')).toHaveLength(1);
-    expect(f.rpc.mock.calls.filter(([name]) => name === 'runtime_view')).toHaveLength(1);
-    const live = source({ a: { data: { unavailableReason: null, context: refs } }, b: plain, c: plain }, true);
-    expect(JSON.stringify(await readNativeRuntimeView(live.db, actor, session))).toContain('PRIVATE_A');
-  });
-  it('a running round is probed read-only, never read through runtime_execution', async () => {
-    const view = (executions: unknown[]) => ({ data: { sessionId: session, executions }, error: null });
-    for (const [probe, visible, shown] of [
-      [{ error: { message: 'LIB_REFERENCE_READ_DENIED' } }, false, true],
-      [{ data: { kind: 'unavailable', reason: 'unknown_query' } }, true, true],
-      [{ data: { kind: 'unavailable', reason: 'unknown_query' } }, false, false],
-      [{ error: { message: 'timeout' } }, true, false],
-    ] as const) {
-      const rpc = vi.fn(async (name: string) => name === 'runtime_view'
-        ? view([{ executionId: 'r', state: 'running', contentAvailable: true, primaryBody: 'RUNNING_BODY' }])
-        : name === 'runtime_library_read' ? { data: null, error: null, ...probe } : { data: visible, error: null });
-      const text = JSON.stringify(await readNativeRuntimeView({ rpc } as unknown as SupabaseClient, actor, session));
-      expect(text.includes('RUNNING_BODY')).toBe(shown);
-      expect(rpc.mock.calls.map(([name]) => name)).not.toContain('runtime_execution');
-      expect(rpc).toHaveBeenCalledWith('runtime_library_read', { p_actor_id: actor, p_execution_id: 'r', p_query: 'doc-0' });
-    }
+  it('fails closed for unfinished rounds when the check is unavailable, keeping finished answers', async () => {
+    const text = JSON.stringify(await readNativeRuntimeView(source({ error: { code: '57014' } }).db, actor, session));
+    expect(text).not.toMatch(/GONE_|KEPT_INTERRUPTED/);expect(text).toMatch(/KEPT_DONE[\s\S]*KEPT_STOPPED/);
   });
 });
