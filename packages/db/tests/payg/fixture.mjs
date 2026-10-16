@@ -11,7 +11,10 @@ export async function createFixture(db,options={}) {
   const bytes = options.bytes??100;
   const templateTokens = options.templateTokens??4096;
   const marginTokens = options.marginTokens??4096;
-  const promptTokensUpper = bytes+templateTokens+marginTokens;
+  // LIB-2d (0278): options.image = {width,height,dataUrlBytes,imageUsd}; bytes then stays the text part.
+  const image = options.image ? {dataUrlBytes:options.image.dataUrlBytes,width:options.image.width,height:options.image.height,
+    tokensUpper:options.image.tokensUpper??2*Math.ceil(options.image.width/14)*Math.ceil(options.image.height/14)+2048} : null;
+  const promptTokensUpper = bytes+templateTokens+marginTokens+(image?image.tokensUpper:0);
   if (!options.actor) {
     await db.query('INSERT INTO profiles(id,credits) VALUES($1,$2)',[actor,credits]);
     await db.query(`INSERT INTO credit_transactions(user_id,amount,type,ledger_type,reason_code,source_type,
@@ -29,16 +32,20 @@ export async function createFixture(db,options={}) {
   const identity = {policyId:'payg-local',profileVersion:'local-v1',evidenceVersion:'local-v1',
     pricingHash,endpointTag,nominalPricing,templateTokens,marginTokens};
   const payg = {...identity,version:'v1',admissionPath:options.empirical?'empirical':'fixture',maxBytes:196608,maxMessages:32,maxTools:options.maxTools??2,
-    maxSchemaBytes:16384,purposes:[phase],expiresAt:new Date(Date.now()+3600000).toISOString()};
-  const quote = {...identity,policyVersion:'v1',bytes,promptTokensUpper,messages:1,tools:0,schemaBytes:0};
+    maxSchemaBytes:16384,purposes:[phase],expiresAt:new Date(Date.now()+3600000).toISOString(),
+    ...(image?{imageInput:options.image.imageInput??{maxDataUrlBytes:819223,maxEdge:1600}}:{})};
+  const quote = {...identity,policyVersion:'v1',bytes:bytes+(image?image.dataUrlBytes:0),promptTokensUpper,messages:1,tools:0,schemaBytes:0,
+    ...(image?{image}:{})};
   const promptPrice = options.promptPrice??'1';
   const completionPrice = options.completionPrice??'0';
   const requestPrice = options.requestPrice??'0';
-  const upperUsd = options.upperUsd??(promptTokensUpper*Number(promptPrice)/1e6+1000*Number(completionPrice)/1e6+Number(requestPrice)).toFixed(12);
+  const imageUsd = image ? options.image.imageUsd??'0' : null;
+  const upperUsd = options.upperUsd??(promptTokensUpper*Number(promptPrice)/1e6+1000*Number(completionPrice)/1e6+Number(requestPrice)
+    +(image?image.tokensUpper*Number(imageUsd):0)).toFixed(12);
   const base = {provider,account:'sandbox',model,protocol,upperUsd,
-    inputLimit:promptTokensUpper,outputLimit:1000,automaticRetry:false,hiddenTools:false,lookupSupported,
+    inputLimit:image?1000000:promptTokensUpper,outputLimit:1000,automaticRetry:false,hiddenTools:false,lookupSupported,
     providerLimits:{providerSlug:endpointTag,contextTokens:100000,promptUsdPerMillion:promptPrice,
-      completionUsdPerMillion:completionPrice,requestUsd:requestPrice}};
+      completionUsdPerMillion:completionPrice,requestUsd:requestPrice,...(imageUsd===null||options.image.omitImageUsd?{}:{imageUsd})}};
   const policy = {...base,modelId,multiplier,payg};
   const claimPayload = {...base,phase,requestHash:'b'.repeat(64),
     billingUnit:{modelId,multiplier},payg:quote};
@@ -54,8 +61,8 @@ export async function createFixture(db,options={}) {
   // RESEARCH-TOOLS: frozen tool-route policies on the same run (research-tools.mjs).
   policies.push(...(options.extraPolicies??[]));
   const runMultiplier = String(Math.max(Number(multiplier),Number(options.secondMultiplier??multiplier)));
-  const payload = {contractVersion:'bill2.v2',mode:'isolated',scope:{kind:'positioning_draft',draftId:draft},
-    operation:'question',modelId,sourceHash:'a'.repeat(64),input:{text:'PAYG_LOCAL_PRIVATE_CANARY'},callPolicy:policies,
+  const payload = {contractVersion:'bill2.v2',mode:'isolated',scope:options.scope??{kind:'positioning_draft',draftId:draft},
+    operation:options.operation??'question',modelId,sourceHash:'a'.repeat(64),input:{text:'PAYG_LOCAL_PRIVATE_CANARY'},callPolicy:policies,
     rules:{version:'v1',quoteVersion:'local-v1',creditsPerUsd:q,multiplier:runMultiplier,fx:{},
       billingUnit:{version:'bill-unit-v2',creditsPerUsd:q,defaultMultiplier:multiplier,hash:'f'.repeat(64)}},
     limits:{costUsd:'0.1',credits:0,maxPreDeduct:0,maxCalls:8,deadline:new Date(Date.now()+3600000).toISOString()}};

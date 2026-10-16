@@ -1,5 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-import { expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
+import { syntheticJpeg } from '../__tests__/fixtures/syntheticJpeg';
 import { runtimePaygCall } from './paygRuntime';
 import type { FrozenPaygRun } from '../bill2/service';
 import { openRouterBound } from '../bill2/openRouterPolicy';
@@ -53,4 +54,32 @@ it.each([8192,32768])('reserves exact request-based money for frozen O=%i withou
  expect(call.inputLimit).toBe(196608);expect(call.outputLimit).toBe(outputLimit);
  const tooLarge=JSON.stringify({...JSON.parse(body),max_tokens:outputLimit+1});
  expect(()=>runtimePaygCall(tooLarge,'ordinary',frozen,rules,1,true)).toThrow('RUNTIME_COMPLETE_REQUEST_EXCEEDS_CAPACITY');
+});
+
+describe('LIB-2d image calls', () => {
+  const jpeg = syntheticJpeg(1600, 1131);
+  const url = 'data:image/jpeg;base64,' + jpeg.toString('base64');
+  const imagePolicy = structuredClone(policy);
+  imagePolicy.inputLimit = 1_000_000;
+  imagePolicy.providerLimits = { ...limits, imageUsd: '0' };
+  imagePolicy.payg = { ...imagePolicy.payg!, purposes: ['ordinary', 'library_ocr'], imageInput: { maxDataUrlBytes: 819_223, maxEdge: 1600 } };
+  const body = JSON.stringify({ model: 'model', messages: [{ role: 'user', content: [{ type: 'text', text: '识别这一页' },
+    { type: 'image_url', image_url: { url } }] }] });
+  it('quotes text bytes plus the image token ceiling and keeps the whole body in bytes', () => {
+    const { call } = runtimePaygCall(body, 'library_ocr', imagePolicy, rules, 1);
+    const bytes = Buffer.byteLength(body), tokens = 2 * 115 * 81 + 2048;
+    expect(call.payg).toMatchObject({ bytes, image: { dataUrlBytes: Buffer.byteLength(url), width: 1600, height: 1131, tokensUpper: tokens },
+      promptTokensUpper: bytes - Buffer.byteLength(url) + tokens + 8192 });
+    const text = JSON.stringify({ model: 'model', messages: [{ role: 'user', content: 'plain' }] });
+    expect(runtimePaygCall(text, 'ordinary', imagePolicy, rules, 1).call.payg).not.toHaveProperty('image');
+  });
+  it('refuses an image on another purpose or on a route without an image allowance', () => {
+    expect(() => runtimePaygCall(body, 'ordinary', imagePolicy, rules, 1)).toThrow('BILL2_IMAGE_DENIED');
+    const textRoute = structuredClone(imagePolicy);
+    delete textRoute.payg!.imageInput;
+    expect(() => runtimePaygCall(body, 'library_ocr', textRoute, rules, 1)).toThrow('BILL2_IMAGE_DENIED');
+    const unpriced = structuredClone(imagePolicy);
+    delete unpriced.providerLimits!.imageUsd;
+    expect(() => runtimePaygCall(body, 'library_ocr', unpriced, rules, 1)).toThrow('BILL2_IMAGE_PRICE_REQUIRED');
+  });
 });
