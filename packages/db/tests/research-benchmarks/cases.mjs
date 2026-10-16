@@ -141,6 +141,8 @@ export async function runCases({db,Client,connectionString,report}) {
       // No frequency to cross-check: the count must still equal this attempt's own posts operation.
       postsAnalyzedHigh: x => {x.metrics.postsAnalyzed=20;x.metrics.postsPerWeek={value:null,refs:[]};return x;},
       cappedFrequency: x => {x.metrics.wholeHistory=false;return x;},
+      // A chosen subset (one strong post) with its honestly computed median is still not the fetch's median.
+      medianSubset: x => {const ref=x.metrics.medianViews.refs[1];x.metrics.medianViews={value:11000,refs:[ref]};return x;},
       category: x => {x.classification={category:'imitable',qualified:true,excluded:null};x.metrics.followers.value=5000;return x;},
     };
     for (const [name,tamper] of Object.entries(forged)) {
@@ -181,7 +183,7 @@ export async function runCases({db,Client,connectionString,report}) {
     await db.query('BEGIN');
     try {
       await db.query('SET LOCAL ROLE service_role');
-      assert.equal((await db.query('SELECT research_benchmark_rows($1,$2) v',[f.actor,f.session])).rows[0].v.rows.length,16);
+      assert.equal((await db.query('SELECT research_benchmark_rows($1,$2) v',[f.actor,f.session])).rows[0].v.rows.length,17);
     } finally {await db.query('ROLLBACK');}
     await assert.rejects(db.query(`UPDATE research_benchmarks SET qualified=true,category='imitable',excluded=NULL,followers=5000,
       last_published_at=now(),posts_analyzed=1 WHERE fetch_id=$1`,[got.fetchId]),/check constraint/);
@@ -293,6 +295,15 @@ export async function runCases({db,Client,connectionString,report}) {
     const refreshed = await fetchAccount(f,e2,'fresh',{followers:60000,posts:[post(1,7000)],refresh:grant});
     const [row] = await rows(db,'fetch_id=$1',[refreshed.fetchId]);
     assert.deepEqual([Number(row.followers),Number(row.median_views),row.execution_id],[60000,7000,e2]);
+    // A later refresh that fails or ends unknown keeps the row of the retained success, verified as before.
+    for (const outcome of ['failed','unknown']) {
+      const keepGrant = await rpc(db,'research_refresh_create',f.actor,f.session,'tiktok','fresh');
+      const retry = await rpc(db,'research_account_fetch_claim',f.actor,f.session,await answer(db,f),'tiktok','fresh',keepGrant);
+      assert.equal(await rpc(db,'research_account_fetch_dispatch',f.actor,retry.fetchId,retry.attempt),true);
+      await rpc(db,'research_account_fetch_finish',f.actor,retry.fetchId,retry.attempt,outcome,null);
+      const [kept] = await rows(db,'fetch_id=$1',[refreshed.fetchId]);
+      assert.deepEqual([kept.qualified,kept.excluded,Number(kept.followers),kept.execution_id],[true,null,60000,e2],outcome);
+    }
     await erase(db,f,'answer',e2);
     assert.equal((await rows(db,'session_id=$1',[f.session])).length,0);
     // The rows the report reads exclude deleted answers and carry no supplier cost.

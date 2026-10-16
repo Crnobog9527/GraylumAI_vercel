@@ -97,7 +97,7 @@ $$;
 CREATE OR REPLACE FUNCTION public.research_benchmark_project(f research_account_fetches) RETURNS void
 LANGUAGE plpgsql SET search_path=public,pg_temp AS $$
 DECLARE e jsonb:=f.last_success; m jsonb; c jsonb; refs jsonb:='{}'; ops uuid[]:='{}'; key text; ref text; item jsonb;
-  ok boolean:=true; expected double precision; actual double precision;
+  ok boolean:=true; expected double precision; actual double precision; viewed text[]; rated text[];
 BEGIN
   IF e IS NULL OR f.last_success_execution_id IS NULL OR f.account IS NULL THEN
     DELETE FROM research_benchmarks WHERE fetch_id=f.id;
@@ -136,6 +136,30 @@ BEGIN
         AND abs(extract(epoch FROM (item->>'publishedAt')::timestamptz-(m->key->>'value')::timestamptz))<0.001;
     END IF;
   END LOOP;
+  -- The medians cite exactly the eligible posts, not a chosen subset: of this attempt's own account_posts items, the
+  -- newest 30 (accountMetrics: dated newest first, then undated in supplier order; a time over 5 minutes ahead is
+  -- missing), those with views (median), and those with views > 0 and all three counters (engagement).
+  IF ok THEN
+    WITH items AS (
+      SELECT t.i,t.x->'fields' fl,CASE WHEN jsonb_typeof(t.x->'fields'->'publishedAt')='string'
+          AND pg_input_is_valid(t.x->'fields'->>'publishedAt','timestamp with time zone')
+          AND (t.x->'fields'->>'publishedAt')::timestamptz<=(e->>'fetchedAt')::timestamptz+interval '5 minutes'
+        THEN (t.x->'fields'->>'publishedAt')::timestamptz END published
+      FROM research_operations o JOIN research_plans p ON p.id=o.plan_id
+      CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(o.result->'items')='array' THEN o.result->'items' ELSE '[]' END)
+        WITH ORDINALITY t(x,i)
+      WHERE o.id=research_benchmark_operation_id(f.id,f.attempt,'account_posts') AND p.actor_id=f.actor_id
+        AND p.session_id=f.session_id AND o.state='succeeded' AND o.erased_at IS NULL
+    ), analyzed AS (SELECT * FROM items ORDER BY published DESC NULLS LAST,i LIMIT 30)
+    SELECT coalesce(array_agg(r ORDER BY r) FILTER (WHERE v),'{}'),coalesce(array_agg(r ORDER BY r) FILTER (WHERE v AND rate),'{}')
+      INTO viewed,rated FROM (SELECT research_benchmark_operation_id(f.id,f.attempt,'account_posts')::text||'#'||i r,
+        jsonb_typeof(fl->'views')='number' AND (fl->>'views')::numeric>=0 v,
+        coalesce((fl->>'views')::numeric>0,false) AND jsonb_typeof(fl->'likes')='number' AND (fl->>'likes')::numeric>=0
+        AND jsonb_typeof(fl->'comments')='number' AND (fl->>'comments')::numeric>=0
+        AND jsonb_typeof(fl->'shares')='number' AND (fl->>'shares')::numeric>=0 rate FROM analyzed) z;
+    ok:=ARRAY(SELECT jsonb_array_elements_text(m->'medianViews'->'refs') ORDER BY 1)=viewed
+      AND ARRAY(SELECT jsonb_array_elements_text(m->'engagementRate'->'refs') ORDER BY 1)=rated;
+  END IF;
   -- Medians are recomputed from the items (same rule as accountMetrics: the middle value, or the mean of the two).
   IF ok AND m->'medianViews'->'value'<>'null'::jsonb THEN
     SELECT bool_and(jsonb_typeof(x->'views')='number'),percentile_cont(0.5) WITHIN GROUP (ORDER BY (x->>'views')::double precision)
@@ -220,10 +244,22 @@ BEGIN
   PERFORM research_benchmark_project(NEW);
   RETURN NULL;
 END $$;
+-- Only when the success itself changes: research_account_fetch_finish also writes last_success unchanged when a refresh
+-- fails or ends unknown, under the refresh's new attempt; that must not re-check the retained success against it.
+-- A new fetch row never carries a success, so inserts need no projection.
 DROP TRIGGER IF EXISTS research_benchmarks_from_fetch ON public.research_account_fetches;
 CREATE TRIGGER research_benchmarks_from_fetch
-  AFTER INSERT OR UPDATE OF last_success,last_success_execution_id,account ON public.research_account_fetches
-  FOR EACH ROW EXECUTE FUNCTION public.research_benchmark_sync();
+  AFTER UPDATE OF last_success,last_success_execution_id,account ON public.research_account_fetches
+  FOR EACH ROW WHEN (OLD.last_success IS DISTINCT FROM NEW.last_success
+    OR OLD.last_success_execution_id IS DISTINCT FROM NEW.last_success_execution_id OR OLD.account IS DISTINCT FROM NEW.account)
+  EXECUTE FUNCTION public.research_benchmark_sync();
+-- Successful caches stored before this migration get their rows now (the current attempt is checked as for a new one;
+-- a cache whose later refresh failed may not verify and then stays unqualified until refreshed).
+DO $$ DECLARE f research_account_fetches; BEGIN
+  FOR f IN SELECT * FROM research_account_fetches WHERE last_success IS NOT NULL ORDER BY id LOOP
+    PERFORM research_benchmark_project(f);
+  END LOOP;
+END $$;
 
 -- The fetch cache (0263) accepts the new exclusion of a fetched account with too few posts (Owner 2026-10-16, A).
 DO $$ DECLARE definition text; t text; BEGIN
