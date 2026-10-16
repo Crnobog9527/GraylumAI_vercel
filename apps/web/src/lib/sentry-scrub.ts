@@ -26,7 +26,7 @@ export function scrubText(value: string): string {
  */
 export const APP_SEGMENTS = new Set(['about', 'acceptable-use', 'access-denied', 'account-erasure', 'admin',
   'agent-first-preview', 'ai', 'announcements', 'api', 'auth', 'auto-close', 'billing-reconcile', 'callback', 'chat',
-  'advance', 'fusion', 'connect', 'contact', 'costs', 'cron', 'diagnostics', 'f', 'faq', 'finance', 'forgot-password', 'ig-jingying', 'invitations', 'landing',
+  'advance', 'fusion', 'connect', 'contact', 'costs', 'cron', 'diagnostics', 'f', 'faq', 'finance', 'forgot-password', 'ig-jingying', 'landing',
   'library', 'library-cleanup', 'login', 'maintenance', 'marketplace', 'models', 'orders', 'packages', 'performance',
   'plan', 'positioning', 'preview', 'publish-monitor', 'pricing', 'privacy', 'profile', 'prompts', 'refunds', 'register', 'release-subscription-credits',
   'requests', 'reset-password', 'runtime', 'runtime-recovery', 'search', 'secrets', 'settings', 'shequn-jingying', 'shequn-xingxiao',

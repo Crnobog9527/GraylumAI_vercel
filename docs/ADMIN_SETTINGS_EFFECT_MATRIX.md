@@ -39,16 +39,16 @@ Existing `verified` rows below describe the 2026-04-28 baseline, not a fresh ful
 | `enable_smart_search_decision` | `/admin/settings` | AI runtime | Automatic search decision can be enabled/disabled | `admin-config.spec.ts` preview effect proof via deployed `ai_usage_logs.metadata.webSearchRequested` | `verified` |
 | `checkin_day1-5` | `/admin/settings` | profile check-in dialog, claim result | Reward ladder changes | `admin-config.spec.ts`, `user-extended.spec.ts` | `verified` |
 | `checkin_monthly_bonus` | `/admin/settings` | profile check-in dialog/result | Monthly bonus amount changes | `admin-config.spec.ts`, `user-extended.spec.ts` | `verified` |
-| `invite_inviter_reward` | `/admin/settings` | profile invite dialog, invite claim result | Inviter reward amount changes | `admin-config.spec.ts`, `user-supplemental.spec.ts` | `verified` |
-| `invite_invitee_reward` | `/admin/settings` | signup success + invite dialog | Invitee reward amount changes | `admin-config.spec.ts`, `user-supplemental.spec.ts` | `verified` |
-| `invite_rebate_percent` | `/admin/settings` | billing rebate path | Invite rebate changes | `invitationRebate.test.ts`, `admin-config.spec.ts` | `verified` |
-| `invite_binding_days` | `/admin/settings` | billing rebate path | Rebate binding window changes | `invitationRebate.test.ts`, `admin-config.spec.ts` | `verified` |
-| `invite_daily_reward_limit` | `/admin/settings` | invite claim path | Daily cap changes | `invitationRuntime.ts`, `invitationRebate.test.ts` | `verified` |
-| `invite_monthly_count_limit` | `/admin/settings` | invite claim path | Monthly cap changes | `invitationRuntime.ts`, `invitationRebate.test.ts` | `verified` |
-| `invite_total_reward_limit` | `/admin/settings` | invite claim path | Lifetime cap changes | `invitationRuntime.ts`, `invitationRebate.test.ts` | `verified` |
-| `invite_same_ip_hour_limit` | `/admin/settings` | signup/invite claim path | Hourly same-IP cap changes | `invitationRuntime.ts`, `invitationRebate.test.ts` | `verified` |
-| `invite_same_ip_day_limit` | `/admin/settings` | signup/invite claim path | Daily same-IP cap changes | `invitationRuntime.ts`, `invitationRebate.test.ts` | `verified` |
-| `invite_risk_auto_reject` | `/admin/settings` | invite claim path | High-risk invite auto-reject behavior changes | `invitationRuntime.ts`, `invitationRebate.test.ts` | `verified` |
+| `invite_inviter_reward` | `/admin/settings` (tab removed after #958) | none — invitation rewards retired 2026-10-14 (#988, migration 0266) | No effect; no reward, rebate or claim path remains | `credit-guard-paths.sql` (no invitation RPC, tables read-only) | `retired-reference` |
+| `invite_invitee_reward` | `/admin/settings` (tab removed after #958) | none — invitation rewards retired 2026-10-14 (#988, migration 0266) | No effect; no reward, rebate or claim path remains | `credit-guard-paths.sql` (no invitation RPC, tables read-only) | `retired-reference` |
+| `invite_rebate_percent` | `/admin/settings` (tab removed after #958) | none — invitation rewards retired 2026-10-14 (#988, migration 0266) | No effect; no reward, rebate or claim path remains | `credit-guard-paths.sql` (no invitation RPC, tables read-only) | `retired-reference` |
+| `invite_binding_days` | `/admin/settings` (tab removed after #958) | none — invitation rewards retired 2026-10-14 (#988, migration 0266) | No effect; no reward, rebate or claim path remains | `credit-guard-paths.sql` (no invitation RPC, tables read-only) | `retired-reference` |
+| `invite_daily_reward_limit` | `/admin/settings` (tab removed after #958) | none — invitation rewards retired 2026-10-14 (#988, migration 0266) | No effect; no reward, rebate or claim path remains | `credit-guard-paths.sql` (no invitation RPC, tables read-only) | `retired-reference` |
+| `invite_monthly_count_limit` | `/admin/settings` (tab removed after #958) | none — invitation rewards retired 2026-10-14 (#988, migration 0266) | No effect; no reward, rebate or claim path remains | `credit-guard-paths.sql` (no invitation RPC, tables read-only) | `retired-reference` |
+| `invite_total_reward_limit` | `/admin/settings` (tab removed after #958) | none — invitation rewards retired 2026-10-14 (#988, migration 0266) | No effect; no reward, rebate or claim path remains | `credit-guard-paths.sql` (no invitation RPC, tables read-only) | `retired-reference` |
+| `invite_same_ip_hour_limit` | `/admin/settings` (tab removed after #958) | none — invitation rewards retired 2026-10-14 (#988, migration 0266) | No effect; no reward, rebate or claim path remains | `credit-guard-paths.sql` (no invitation RPC, tables read-only) | `retired-reference` |
+| `invite_same_ip_day_limit` | `/admin/settings` (tab removed after #958) | none — invitation rewards retired 2026-10-14 (#988, migration 0266) | No effect; no reward, rebate or claim path remains | `credit-guard-paths.sql` (no invitation RPC, tables read-only) | `retired-reference` |
+| `invite_risk_auto_reject` | `/admin/settings` (tab removed after #958) | none — invitation rewards retired 2026-10-14 (#988, migration 0266) | No effect; no reward, rebate or claim path remains | `credit-guard-paths.sql` (no invitation RPC, tables read-only) | `retired-reference` |
 
 ## Reference / Compatibility Settings
 

@@ -29,16 +29,13 @@ const requiredFunctionTargets = [
   'atomic_finalize_ai_success',
   'atomic_finalize_ai_failure',
   'atomic_finalize_ai_abort',
-  'atomic_apply_invitation_rebate',
   'atomic_apply_credit_ledger_entry',
-  'atomic_claim_invitation_code',
   'atomic_fulfill_credit_package',
   'atomic_fulfill_membership_invoice',
-  'validate_invitation_code',
 ];
-
-const optionalFunctionTargets = ['is_admin'];
-const functionTargets = [...requiredFunctionTargets, ...optionalFunctionTargets];
+// is_admin is optional; the invitation reward RPCs were retired by 0266 and must be absent.
+const retiredFunctionTargets = ['atomic_apply_invitation_rebate', 'atomic_claim_invitation_code', 'validate_invitation_code'];
+const functionTargets = [...requiredFunctionTargets, 'is_admin', ...retiredFunctionTargets];
 
 const tableTargets = [
   'conversations',
@@ -524,8 +521,8 @@ function buildDriftSummary(readiness, environment) {
 }
 
 function findUnsafeFunctionPosture(functions) {
-  const findings = [];
-  const isAdminFunction = functions.find((fn) => fn.name === 'is_admin');
+  const findings = functions.filter((fn) => retiredFunctionTargets.includes(fn.name) && fn.exists)
+    .map((fn) => `retired function still present: ${fn.name}`), isAdminFunction = functions.find((fn) => fn.name === 'is_admin');
 
   if (!isAdminFunction?.exists) {
     return findings;
@@ -654,7 +651,7 @@ function printHumanReport(report) {
     writeStdout(`- is_admin EXECUTE authenticated: ${yesNo(isAdminFunction.grants.authenticatedExecute)}`);
     writeStdout(`- is_admin EXECUTE service_role: ${yesNo(isAdminFunction.grants.serviceRoleExecute)}`);
   }
-  writeStdout(`- is_admin posture warnings: ${listOrNone(report.drift.unsafeFunctionPosture)}`);
+  writeStdout(`- function posture warnings (is_admin, retired RPCs): ${listOrNone(report.drift.unsafeFunctionPosture)}`);
   writeStdout('');
   writeStdout('Grant review');
   writeStdout(`- client-role grants to review: ${report.drift.unsafeGrants.length}`);
