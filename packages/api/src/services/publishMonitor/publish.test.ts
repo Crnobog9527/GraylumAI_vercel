@@ -192,6 +192,21 @@ describe('reconcile publishes (simulated provider)', () => {
     warn.mockRestore();
   });
 
+  it('drains batch after batch until nothing is due, within the time budget', async () => {
+    const full = Array.from({ length: 50 }, () => item('release'));
+    const d = database({ publish_monitor_publish_reconcile_claim: [full, [item('release')]],
+      publish_monitor_publish_release: Array.from({ length: 51 }, () => view('released')) });
+    const report = await reconcilePublishes(d.db, provider([]).deps, Date.now() + 60_000);
+    expect(report).toMatchObject({ processed: 51, settled: 51 });
+    expect(d.names().filter(n => n === 'publish_monitor_publish_reconcile_claim')).toHaveLength(2);
+    let clock = 0;
+    const timed = database({ publish_monitor_publish_reconcile_claim: [full, full],
+      publish_monitor_publish_release: Array.from({ length: 100 }, () => view('released')) });
+    const stopped = await reconcilePublishes(timed.db, provider([]).deps, 10, () => clock++);
+    expect(stopped.processed).toBeLessThan(50);
+    expect(timed.names().filter(n => n === 'publish_monitor_publish_reconcile_claim')).toHaveLength(1);
+  });
+
   it('does not start work after the deadline', async () => {
     const d = database({});
     expect(await reconcilePublishes(d.db, provider([]).deps, Date.now() - 1)).toEqual({ processed: 0, settled: 0,

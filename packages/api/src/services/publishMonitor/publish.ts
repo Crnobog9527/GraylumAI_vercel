@@ -19,7 +19,8 @@ export const MAX_CAPTION = 5000;
 const media = z.object({
   // The public URL Post for Me returned with the upload slot; a retry must upload again (plan §2.1).
   mediaUrl: z.string().url().max(2048),
-  // Identifies the file for the idempotency fingerprint, so a re-upload of the same file is the same request.
+  // Identifies the file for the idempotency fingerprint, so a re-upload of the same file is the same request. The browser
+  // hashes the size plus the first and last 4 MB (bounded memory for large videos); identity only, not integrity.
   sha256: z.string().regex(/^[0-9a-f]{64}$/),
   size: z.number().int().positive().max(5 * 1024 ** 3),
   mimeType: z.string().regex(/^(image|video)\/[a-z0-9.+-]{1,64}$/),
@@ -196,35 +197,51 @@ const reconcileItem = z.object({ jobId: uuid, lease: uuid, action: z.enum(['rele
     .strict()) }).strict();
 export type ReconcileReport = { processed: number; settled: number; deferred: number; manual: number };
 
-/** Daily job step: release expired claims and reconcile every dispatched job that has no final result yet. */
+/**
+ * Daily job step: release expired claims and reconcile every dispatched job that has no final result yet.
+ * On staging (Vercel Hobby) the job runs once a day, so results mostly arrive earlier through the provider webhook and
+ * the user's own refresh; the 2-minute-to-4-hour backoff takes full effect once the job runs every 10 minutes after
+ * the Vercel Pro upgrade (plan §8, REL-1).
+ */
 export async function reconcilePublishes(db: Rpc, deps: ClientDeps, until: number,
   now: () => number = Date.now): Promise<ReconcileReport> {
   const report: ReconcileReport = { processed: 0, settled: 0, deferred: 0, manual: 0 };
-  if (now() >= until) return report;
-  const items = await rpc(db, 'publish_monitor_publish_reconcile_claim', { p_limit: 50, p_lease_seconds: 300 },
-    z.array(reconcileItem));
-  for (const item of items) {
-    if (now() >= until) break;
-    report.processed += 1;
-    if (item.action === 'release') {
-      await rpc(db, 'publish_monitor_publish_release', { p_job: item.jobId, p_code: 'PUBLISH_MONITOR_CLAIM_EXPIRED' }, jobView);
-      report.settled += 1;
-      continue;
+  // Drain batch after batch until nothing is due or the time budget ends: every handled job either settles, releases
+  // its lease, or gets a later next_check_at, so a later claim never returns it again in the same run.
+  for (let batch = 0; batch < MAX_BATCHES && now() < until; batch += 1) {
+    const items = await rpc(db, 'publish_monitor_publish_reconcile_claim', { p_limit: BATCH, p_lease_seconds: 300 },
+      z.array(reconcileItem));
+    for (const item of items) {
+      if (now() >= until) return report;
+      await reconcileOne(db, deps, item, report);
     }
-    const checked = await checkWithProvider(db, deps, item.jobId, item.providerPostId, item.targets);
-    if (checked.learned) {
-      report.settled += 1;
-      await rpc(db, 'publish_monitor_publish_unlease', { p_job: item.jobId, p_lease: item.lease }, z.unknown());
-      continue;
-    }
-    const later = await rpc(db, 'publish_monitor_publish_check_later', { p_job: item.jobId, p_lease: item.lease,
-      p_code: checked.code }, jobView);
-    if (later.manualReview) {
-      report.manual += 1;
-      logger.warn('api', 'publish_monitor_publish_manual_review', { jobId: item.jobId });
-    } else report.deferred += 1;
+    if (items.length < BATCH) break;
   }
   return report;
+}
+
+const BATCH = 50;
+const MAX_BATCHES = 40;
+
+async function reconcileOne(db: Rpc, deps: ClientDeps, item: z.infer<typeof reconcileItem>, report: ReconcileReport) {
+  report.processed += 1;
+  if (item.action === 'release') {
+    await rpc(db, 'publish_monitor_publish_release', { p_job: item.jobId, p_code: 'PUBLISH_MONITOR_CLAIM_EXPIRED' }, jobView);
+    report.settled += 1;
+    return;
+  }
+  const checked = await checkWithProvider(db, deps, item.jobId, item.providerPostId, item.targets);
+  if (checked.learned) {
+    report.settled += 1;
+    await rpc(db, 'publish_monitor_publish_unlease', { p_job: item.jobId, p_lease: item.lease }, z.unknown());
+    return;
+  }
+  const later = await rpc(db, 'publish_monitor_publish_check_later', { p_job: item.jobId, p_lease: item.lease,
+    p_code: checked.code }, jobView);
+  if (later.manualReview) {
+    report.manual += 1;
+    logger.warn('api', 'publish_monitor_publish_manual_review', { jobId: item.jobId });
+  } else report.deferred += 1;
 }
 
 /** An upload slot for the browser, requested only after the user confirmed the disclosure (plan §2.1). */
