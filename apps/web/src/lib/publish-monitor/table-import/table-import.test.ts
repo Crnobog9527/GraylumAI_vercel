@@ -28,6 +28,10 @@ describe('CSV', () => {
     expect(grid).toEqual({ header: ['标题', '播放量'], rows: [['a; "b"\nc', '1,234'], ['x', '5']] });
   });
 
+  it('detects the separator outside quotes', () => {
+    expect(parseCsv(utf8('"Post, title";Likes\n"a, b";3\n'))).toEqual({ header: ['Post, title', 'Likes'], rows: [['a, b', '3']] });
+  });
+
   it('falls back to GB18030 for Chinese exports', () => {
     const gbk = new Uint8Array([0xb2, 0xa5, 0xb7, 0xc5, 0x2c, 0x61, 0x0a, 0x31, 0x2c, 0x32]); // "播放,a\n1,2"
     expect(parseCsv(gbk).header).toEqual(['播放', 'a']);
@@ -77,6 +81,9 @@ describe('column mapping and rows', () => {
   it('suggests fields from common Chinese and English headers and leaves unknown columns unmapped', () => {
     expect(suggestMapping(['作品链接', '发布时间', '作品标题', '播放量', '点赞数', '评论', '收藏', '完播率', '奇怪的列', 'Shares']))
       .toEqual(['url', 'postedAt', 'title', 'views', 'likes', 'comments', 'saves', 'completion_rate', null, 'shares']);
+    // Other measures and identifiers are never guessed from a contained word.
+    expect(suggestMapping(['总播放时长', '平均播放量', '账号ID', '发布时间段', '总播放量']))
+      .toEqual([null, null, null, null, 'views']);
   });
 
   it('parses Chinese units and percentages; blanks stay absent; nonsense is reported, never guessed', () => {
@@ -85,7 +92,11 @@ describe('column mapping and rows', () => {
       .toEqual([12000, 3400, 2000, undefined, undefined, 45, null, null]);
     expect([parseDate('2026年10月1日'), parseDate('2026/10/01 08:30'), parseDate('46296'), parseDate('昨天')])
       // Dates without a zone are read in the browser's local time, as the user's export shows them.
-      .toEqual([new Date(2026, 9, 1).toISOString(), new Date(2026, 9, 1, 8, 30).toISOString(), expect.stringMatching(/^2026-/), null]);
+      .toEqual([new Date(2026, 9, 1).toISOString(), new Date(2026, 9, 1, 8, 30).toISOString(),
+        new Date(2026, 9, 1).toISOString(), null]);
+    // Impossible dates are refused, not rolled over; an explicit zone is honoured.
+    expect([parseDate('2026-02-30'), parseDate('2026-10-01T25:00:00Z'), parseDate('2026-10-01T08:00:00+08:00')])
+      .toEqual([null, null, '2026-10-01T00:00:00.000Z']);
   });
 
   it('builds confirmable rows: needs a post ID or link and a metric; bad cells are listed by line', () => {

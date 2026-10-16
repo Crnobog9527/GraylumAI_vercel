@@ -52,10 +52,17 @@ function decodeText(bytes: Uint8Array): string {
   }
 }
 
+/** The separator used most often outside quotes in the first record (comma on a tie). */
 function delimiterOf(text: string): string {
-  const firstLine = text.slice(0, Math.max(text.indexOf('\n'), 0) || text.length);
-  const counts = [',', ';', '\t'].map(d => [d, firstLine.split(d).length] as const);
-  return counts.sort((a, b) => b[1] - a[1])[0]![0];
+  const counts: Record<string, number> = { ',': 0, ';': 0, '\t': 0 };
+  let quoted = false;
+  for (let i = 0; i < text.length && i < 65_536; i += 1) {
+    const ch = text[i]!;
+    if (ch === '"') quoted = !quoted;
+    else if (!quoted && (ch === '\n' || ch === '\r')) break;
+    else if (!quoted && ch in counts) counts[ch]! += 1;
+  }
+  return [',', ';', '\t'].reduce((best, d) => (counts[d]! > counts[best]! ? d : best), ',');
 }
 
 /** RFC 4180 CSV: quoted fields with doubled quotes and embedded newlines; comma, semicolon or tab delimited. */

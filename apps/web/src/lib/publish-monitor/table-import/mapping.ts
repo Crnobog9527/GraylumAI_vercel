@@ -35,8 +35,16 @@ const SYNONYMS: Record<Field, string[]> = {
 };
 
 const normalize = (header: string) => header.toLowerCase().replace(/[\s_\-()（）:：/.·]+/g, '');
+/** A header with one of these measures something else (duration, a rate, an average): never a contained match. */
+const OTHER_MEASURE = ['时长', '率', '平均', '人均', '均', 'duration', 'rate', 'avg', 'average', 'time'];
+/** Only these fields may be suggested from a contained phrase; identifiers and dates need an exact header. */
+const CONTAINED: ReadonlySet<Field> = new Set(['url', 'title', ...MANUAL_METRICS]);
 
-/** Exact (normalised) synonym first, then a contained synonym; each field is suggested for one column at most. */
+/**
+ * Exact (normalised) synonym first, then a contained synonym of at least three characters; each field is suggested
+ * for one column at most. A contained match never maps an identifier or date, and never a header that names another
+ * measure (for example 总播放时长 is a duration, not views): those stay unmapped for the user to choose.
+ */
 export function suggestMapping(header: string[]): Mapping {
   const mapping: Mapping = header.map(() => null);
   const taken = new Set<Field>();
@@ -45,7 +53,11 @@ export function suggestMapping(header: string[]): Mapping {
       if (mapping[column]) return;
       const key = normalize(name);
       if (!key) return;
-      const field = FIELDS.find(f => !taken.has(f) && SYNONYMS[f].some(s => (exact ? key === s : s.length >= 2 && key.includes(s))));
+      const field = FIELDS.find(f => !taken.has(f) && SYNONYMS[f].some(s => {
+        if (exact) return key === s;
+        if (!CONTAINED.has(f) || s.length < 3 || !key.includes(s)) return false;
+        return f === 'completion_rate' || !OTHER_MEASURE.some(word => key.includes(word));
+      }));
       if (field) { mapping[column] = field; taken.add(field); }
     });
   }
@@ -70,21 +82,39 @@ export function parseNumber(raw: string, percent: boolean): number | null | unde
   return Number.isFinite(scaled) ? Math.round(scaled * 100) / 100 : null;
 }
 
-/** ISO-like text, "2026/10/01 12:00", "2026年10月1日", or an Excel serial day (XLSX dates). */
+/** Local calendar time to an ISO instant, refusing impossible dates (2026-02-30) instead of rolling them over. */
+function localInstant(y: number, mo: number, d: number, h = 0, mi = 0, sec = 0): string | null {
+  const date = new Date(y, mo - 1, d, h, mi, sec);
+  const same = date.getFullYear() === y && date.getMonth() === mo - 1 && date.getDate() === d && date.getHours() === h
+    && date.getMinutes() === mi && date.getSeconds() === sec;
+  return same && y >= 2000 && y <= 2100 ? date.toISOString() : null;
+}
+
+/**
+ * "2026-10-01", "2026/10/01 12:00", "2026年10月1日", "2026-10-01T08:30:00+08:00", or an Excel serial day (XLSX dates).
+ * Dates without a zone, and Excel serials (which carry none), are read in the browser's local time, as the user's
+ * export shows them. Impossible dates are refused.
+ */
 export function parseDate(raw: string): string | null | undefined {
   const text = raw.trim();
   if (!text || text === '-') return undefined;
   if (/^\d{5}(\.\d+)?$/.test(text)) {
     const serial = Number(text);
-    // Excel day 25569 is 1970-01-01; only plausible recent dates are accepted.
-    return serial > 36526 && serial < 73051 ? new Date(Math.round((serial - 25569) * 86_400_000)).toISOString() : null;
+    if (serial <= 36526 || serial >= 73051) return null;
+    // Excel day 25569 is 1970-01-01; read the serial's calendar fields, then place them in local time.
+    const utc = new Date(Math.round((serial - 25569) * 86_400) * 1000);
+    return localInstant(utc.getUTCFullYear(), utc.getUTCMonth() + 1, utc.getUTCDate(), utc.getUTCHours(),
+      utc.getUTCMinutes(), utc.getUTCSeconds());
   }
-  const cn = /^(\d{4})年(\d{1,2})月(\d{1,2})日(?:\s*(\d{1,2}):(\d{2}))?$/.exec(text);
-  const normalized = cn ? `${cn[1]}-${cn[2]!.padStart(2, '0')}-${cn[3]!.padStart(2, '0')}T${(cn[4] ?? '0').padStart(2, '0')}:${cn[5] ?? '00'}:00`
-    : text.replace(/^(\d{4})\/(\d{1,2})\/(\d{1,2})/, (_, y, m, d) => `${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`)
-      .replace(/^(\d{4}-\d{2}-\d{2}) (\d)/, '$1T$2');
-  const ms = Date.parse(normalized);
-  return Number.isFinite(ms) && /^\d{4}-\d{2}-\d{2}/.test(normalized) ? new Date(ms).toISOString() : null;
+  const zoned = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.\d{1,3})?)?(Z|[+-]\d{2}:\d{2})$/.exec(text);
+  if (zoned) {
+    if (!localInstant(+zoned[1]!, +zoned[2]!, +zoned[3]!, 12)) return null;
+    if (+zoned[4]! > 23 || +zoned[5]! > 59 || +(zoned[6] ?? 0) > 59) return null;
+    return new Date(text).toISOString();
+  }
+  const parts = /^(\d{4})[-/年](\d{1,2})[-/月](\d{1,2})日?(?:[ T](\d{1,2}):(\d{2})(?::(\d{2}))?)?$/.exec(text);
+  if (!parts) return null;
+  return localInstant(+parts[1]!, +parts[2]!, +parts[3]!, +(parts[4] ?? 0), +(parts[5] ?? 0), +(parts[6] ?? 0));
 }
 
 /**

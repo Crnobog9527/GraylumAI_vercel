@@ -22,8 +22,17 @@ const metricValue = z.number().finite().nonnegative().max(MAX_COUNT);
 const metrics = z.partialRecord(z.enum(MANUAL_METRICS), metricValue)
   .refine(value => Object.keys(value).length > 0, 'METRICS_EMPTY')
   .refine(value => value.completion_rate === undefined || value.completion_rate <= 100, 'COMPLETION_RATE');
-const iso = z.string().max(64).refine(value => Number.isFinite(Date.parse(value)), 'DATE')
-  .transform(value => new Date(value).toISOString());
+const ISO = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.\d{1,3})?)?(Z|[+-]\d{2}:\d{2})$/;
+/** An ISO instant with a zone and a real calendar date: 2026-02-30 is refused, never rolled over. */
+function strictInstant(value: string): boolean {
+  const m = ISO.exec(value);
+  if (!m) return false;
+  const [y, mo, d, h, mi, s] = [m[1], m[2], m[3], m[4], m[5], m[6] ?? '0'].map(Number) as number[];
+  const day = new Date(Date.UTC(y!, mo! - 1, d!));
+  return y! >= 2000 && y! <= 2100 && day.getUTCMonth() === mo! - 1 && day.getUTCDate() === d! && h! < 24 && mi! < 60
+    && s! < 60;
+}
+const iso = z.string().max(64).refine(strictInstant, 'DATE').transform(value => new Date(value).toISOString());
 
 export const manualRow = z.object({
   /** The platform post ID when known, otherwise the post link. */
