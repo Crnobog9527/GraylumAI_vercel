@@ -2,7 +2,7 @@
 
 /**
  * PP-OCRv6 text recognition pre- and post-processing (LIB-2d), pure functions. A text box is scaled to a
- * height of 48 pixels, its red channel normalised to [-1, 1] and repeated into three channels; the model's
+ * height of 48 pixels and its BGR channels normalised to [-1, 1]; the model's
  * per-step class scores are decoded greedily (CTC). Class 0 is the CTC blank, classes 1…N are the official
  * dictionary, class N + 1 is a space. Settings follow the evaluated configuration.
  */
@@ -23,13 +23,19 @@ export function recognitionWidth(width: number, height: number): number {
   return Math.max(MIN_WIDTH, Math.round((RECOGNITION_HEIGHT * width) / height));
 }
 
-/** CHW tensor (3 × 48 × width) from the RGBA pixels of the resized box. */
+/**
+ * CHW tensor (3 × 48 × width) from the RGBA pixels of the resized box, in the model's BGR channel order
+ * (official inference.yml: `img_mode: BGR`), each channel scaled to [-1, 1]. All three channels are kept, so
+ * text that differs from its background only in green or blue (red text on white) is still visible.
+ */
 export function recognitionTensor(rgba: Uint8ClampedArray, width: number): Float32Array {
   const size = width * RECOGNITION_HEIGHT;
   const tensor = new Float32Array(3 * size);
-  for (let i = 0, p = 0; i < size; i++, p += 4) tensor[i] = rgba[p]! / 127.5 - 1;
-  tensor.copyWithin(size, 0, size);
-  tensor.copyWithin(2 * size, 0, size);
+  for (let i = 0, p = 0; i < size; i++, p += 4) {
+    tensor[i] = rgba[p + 2]! / 127.5 - 1;
+    tensor[size + i] = rgba[p + 1]! / 127.5 - 1;
+    tensor[2 * size + i] = rgba[p]! / 127.5 - 1;
+  }
   return tensor;
 }
 
