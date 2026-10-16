@@ -171,7 +171,8 @@ export function useLibraryUploads(onSettled: () => void, onDisabled: () => void)
     const { plain, word, pdf } = apiRef.current;
     return settleFailedAttempt(plain, item.attempt, (documentId) => {
       if (item.contentType === WORD_MIME) {
-        return word.complete({ documentId, headings: (item.prepared as PreparedWord | undefined)?.headings ?? [] });
+        const prepared = item.prepared as PreparedWord | undefined;
+        return word.complete({ documentId, headings: prepared?.headings ?? [], ...(prepared?.images ? { images: prepared.images } : {}) });
       }
       if (item.contentType === PDF_MIME) {
         // Pages are always prepared before begin; without them the result cannot be re-checked, so keep the item.

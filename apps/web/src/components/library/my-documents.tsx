@@ -5,6 +5,7 @@ import { toast } from 'sonner';
 import { trpc } from '@/trpc/client';
 import { useLibraryDocuments, type LibraryDocument } from '@/hooks/use-library-documents';
 import { useLibraryUploads } from '@/hooks/use-library-uploads';
+import { useScanRecognition } from '@/hooks/use-scan-recognition';
 import { libraryErrorMessage } from '@/lib/library-documents/format';
 import { isSignedStorageUrl, startDownload } from '@/lib/library-documents/signed-url';
 import { DocumentList, SpacePanel, UploadPanel } from './my-documents-view';
@@ -15,7 +16,9 @@ import styles from './my-documents.module.css';
 export function MyDocuments() {
   const library = useLibraryDocuments();
   const { reload, markDisabled } = library;
-  const uploads = useLibraryUploads(useCallback(() => { void reload(); }, [reload]), markDisabled);
+  const scan = useScanRecognition(useCallback(() => { void reload(); }, [reload]));
+  const { start: startScan } = scan;
+  const uploads = useLibraryUploads(useCallback(() => { void reload(); startScan(); }, [reload, startScan]), markDisabled);
   const download = trpc.library.download.useMutation();
   const [opened, setOpened] = useState<LibraryDocument | null>(null);
   const [confirming, setConfirming] = useState<LibraryDocument | null>(null);
@@ -23,11 +26,11 @@ export function MyDocuments() {
   const [busyId, setBusyId] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!uploads.busy) return;
+    if (!uploads.busy && !scan.busy) return;
     const warn = (event: BeforeUnloadEvent) => { event.preventDefault(); };
     window.addEventListener('beforeunload', warn);
     return () => window.removeEventListener('beforeunload', warn);
-  }, [uploads.busy]);
+  }, [uploads.busy, scan.busy]);
 
   async function onDownload(doc: LibraryDocument) {
     setBusyId(doc.id);
@@ -75,7 +78,7 @@ export function MyDocuments() {
       <button type="button" className={styles.linkButton} onClick={() => { void library.reload(); }}>重试</button>
     </p>}
     {library.pending && <p role="status" className={styles.hint}>正在读取我的文档…</p>}
-    <DocumentList documents={library.documents} ready={ready} busyId={busyId}
+    <DocumentList documents={library.documents} ready={ready} busyId={busyId} scan={scan.progress}
       onOpen={setOpened} onDownload={onDownload} onPurpose={onPurpose}
       onDelete={(doc) => { setDeleteState({ pending: false, error: '' }); setConfirming(doc); }}/>
     {(library.hasMore || library.moreState.error) && ready && <div className={styles.more}>

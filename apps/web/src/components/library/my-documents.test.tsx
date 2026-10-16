@@ -28,6 +28,7 @@ vi.mock('@/trpc/client', () => ({
       completePdfUpload: { useMutation: mutation },
       abandonUpload: { useMutation: mutation }, delete: { useMutation: mutation },
       setPurpose: { useMutation: mutation }, download: { useMutation: mutation }, preview: { useMutation: mutation },
+      saveRecognizedPage: { useMutation: mutation }, failRecognizedPage: { useMutation: mutation },
     },
   },
 }));
