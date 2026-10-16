@@ -31,13 +31,14 @@ export type PublishMonitorConnection = z.infer<typeof connectionSchema>;
 export const autoReviewInput = z.object({ enabled: z.boolean() }).strict();
 
 export type PublishMonitorErrorCode = 'PUBLISH_MONITOR_DISABLED' | 'PUBLISH_MONITOR_ACCOUNT_CLOSED'
-  | 'PUBLISH_MONITOR_UNAVAILABLE';
+  | 'PUBLISH_MONITOR_CONNECTION_NOT_FOUND' | 'PUBLISH_MONITOR_UNAVAILABLE';
 export class PublishMonitorError extends Error {
   constructor(readonly code: PublishMonitorErrorCode) { super(code); }
 }
 function failure(error: { message?: string } | null | undefined): PublishMonitorError {
-  return new PublishMonitorError(error?.message?.includes('PUBLISH_MONITOR_ACCOUNT_CLOSED')
-    ? 'PUBLISH_MONITOR_ACCOUNT_CLOSED' : 'PUBLISH_MONITOR_UNAVAILABLE');
+  const known = (['PUBLISH_MONITOR_ACCOUNT_CLOSED', 'PUBLISH_MONITOR_CONNECTION_NOT_FOUND'] as const)
+    .find(code => error?.message?.includes(code));
+  return new PublishMonitorError(known ?? 'PUBLISH_MONITOR_UNAVAILABLE');
 }
 
 /** The feature stays off until an admin explicitly enables it; a missing or malformed value means off. */
@@ -70,6 +71,20 @@ export async function listConnections(db: Db, profileId: string): Promise<Publis
   const result = await db.rpc('publish_monitor_connections', { a: uuid.parse(profileId) });
   if (result.error) throw failure(result.error);
   const parsed = z.array(connectionSchema).safeParse(result.data);
+  if (!parsed.success) throw failure(null);
+  return parsed.data;
+}
+
+export const disconnectInput = z.object({ connectionId: uuid }).strict();
+
+/**
+ * "Disconnect and delete" (plan §4.1): the user's posts and snapshots for this connection are removed now; a Post for
+ * Me connection becomes an identity-free deletion record that the daily job deletes at the provider (PR-2c).
+ */
+export async function disconnectConnection(db: Rpc, profileId: string, input: z.infer<typeof disconnectInput>) {
+  const result = await db.rpc('publish_monitor_disconnect', { a: uuid.parse(profileId), p_connection_id: input.connectionId });
+  if (result.error) throw failure(result.error);
+  const parsed = z.object({ connectionId: uuid, providerCleanup: z.boolean() }).strict().safeParse(result.data);
   if (!parsed.success) throw failure(null);
   return parsed.data;
 }

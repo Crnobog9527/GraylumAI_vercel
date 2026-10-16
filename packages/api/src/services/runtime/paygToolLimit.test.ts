@@ -9,6 +9,9 @@ import { askQuestionTool } from './agentTools';
 import { skillFileTool } from './skillFile';
 import { mentorHistoryTool } from './mentorHistory';
 import type { RuntimeTool } from './runner';
+import { researchRuntimeTools } from './researchRuntimeTool';
+import { DISABLED_RESEARCH_TOOLS } from '../research/vendors/config';
+import type { ResearchToolContext } from '../research/runtime/toolContext';
 const modelId = '10000000-0000-4000-8000-000000000001';
 const pricingHash = 'a'.repeat(64);
 const limits = { providerSlug: 'local', contextTokens: 300000, promptUsdPerMillion: '1.25',
@@ -36,11 +39,25 @@ it('#878 regression: a 2-tool profile still refuses card, Skill file and history
 });
 
 it('B1 (0250): a 3-tool profile accepts the full mentor turn with the history read', () => {
-  expect(PAYG_MAX_TOOLS).toBe(3);
   const three = { ...policy, payg: { ...policy.payg!, maxTools: 3 } };
   const { call } = runtimePaygCall(request([card, file, history]), 'ordinary', three, rules, 1);
   expect(call.payg?.tools).toBe(3);
   expect(() => runtimePaygCall(request([card, file, history, card]), 'ordinary', three, rules, 1)).toThrow('BILL2_INPUT_PROFILE_INVALID');
+});
+
+it('RT-3b PR-2 (0267): a 9-tool profile accepts the mentor turn with all six research tools, never ten', () => {
+  expect(PAYG_MAX_TOOLS).toBe(9);
+  const research = researchRuntimeTools({ config: DISABLED_RESEARCH_TOOLS } as unknown as ResearchToolContext);
+  expect(research).toHaveLength(6);
+  const nine = { ...policy, payg: { ...policy.payg!, maxTools: 9 } };
+  const { call } = runtimePaygCall(request([card, file, history, ...research]), 'ordinary', nine, rules, 1);
+  expect(call.payg?.tools).toBe(9);
+  expect(() => runtimePaygCall(request([card, file, history, ...research, card]), 'ordinary', nine, rules, 1))
+    .toThrow('BILL2_INPUT_PROFILE_INVALID');
+  // A run frozen with a 3-tool profile keeps refusing the research tools.
+  const three = { ...policy, payg: { ...policy.payg!, maxTools: 3 } };
+  expect(() => runtimePaygCall(request([card, file, history, research[0]!]), 'ordinary', three, rules, 1))
+    .toThrow('BILL2_INPUT_PROFILE_INVALID');
 });
 
 it('the PAYG mentor turn without the history read is accepted for dispatch', () => {

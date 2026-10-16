@@ -16,8 +16,8 @@ function harness(responses: unknown[] = []) {
 }
 
 describe('runtime research storage boundary', () => {
-  it('binds one subcall before reserving and dispatching; preserves micro-USD / USD units', async () => {
-    const { store, rpc } = harness([{}, { claimed: true, token: 'token' }, { dispatch: true }, {}, {}]);
+  it('binds one subcall and only reserves on open; dispatch and cancel are separate steps (#1005 P2)', async () => {
+    const { store, rpc } = harness([{}, { claimed: true, token: 'token' }, {}, { dispatch: true }, {}, {}]);
     const evidence = store.evidence('discovery');
     expect(await evidence.open('operation', 'identity', 2000)).toEqual({ token: 'token' });
     expect(rpc.mock.calls).toEqual([
@@ -26,16 +26,35 @@ describe('runtime research storage boundary', () => {
           operations: [{ operationId: 'operation', identityHash: 'identity', maxQuoteUnits: 2000 }] } }],
       ['research_transition', { p_action: 'reserve', p_plan_id: 'operation', p_actor_id: 'actor',
         p_operation_id: 'operation', p_payload: { identityHash: 'identity', quoteUnits: 2000 } }],
+    ]);
+    await evidence.link('operation', 'call');
+    expect(await evidence.dispatch('operation', 'token')).toBe(true);
+    await evidence.finish('operation', 'token', 'succeeded', { cost: { actual: 0.002 } });
+    await evidence.cancel('operation');
+    expect(rpc.mock.calls.slice(2)).toEqual([
+      ['research_runtime_link', { a: 'actor', p_plan: 'operation', s: 'session',
+        e: 'answer', p_discovery: 'discovery', p_operation: 'operation', p_call: 'call' }],
       ['research_transition', { p_action: 'dispatch', p_plan_id: 'operation', p_actor_id: 'actor',
         p_operation_id: 'operation', p_payload: { token: 'token' } }],
+      ['research_transition', expect.objectContaining({
+        p_action: 'finish', p_payload: { token: 'token', state: 'succeeded', result: { cost: { actual: 0.002 } } } })],
+      ['research_transition', { p_action: 'cancel', p_plan_id: 'operation', p_actor_id: 'actor',
+        p_operation_id: 'operation', p_payload: {} }],
     ]);
-    await evidence.finish('operation', 'token', 'succeeded', { cost: { actual: 0.002 } });
-    await evidence.link('operation', 'call');
-    expect(rpc.mock.calls[3]).toEqual(['research_transition', expect.objectContaining({
-      p_payload: { token: 'token', state: 'succeeded', result: { cost: { actual: 0.002 } } },
-    })]);
-    expect(rpc.mock.calls[4]).toEqual(['research_runtime_link', { a: 'actor', p_plan: 'operation', s: 'session',
-      e: 'answer', p_discovery: 'discovery', p_operation: 'operation', p_call: 'call' }]);
+  });
+  it('closes a dispatched operation with no result and no BILL2 link as unsent (#1005 P2)', async () => {
+    const { store, rpc } = harness([{ state: 'dispatched', result: null }, true, { state: 'dispatched', result: null }, false]);
+    expect(await store.readOperation('stuck')).toEqual({ state: 'cancelled', result: null });
+    expect(rpc.mock.calls[1]).toEqual(['research_runtime_close_unsent', { a: 'actor', s: 'session', p_operation: 'stuck' }]);
+    // A linked (possibly sent) operation stays dispatched: never resent.
+    expect(await store.readOperation('linked')).toEqual({ state: 'dispatched', result: null });
+  });
+  it('reads one settled call charge of this answer only, through the scoped 0267 RPC', async () => {
+    const { store, rpc } = harness([{ source: 'tool_usage', credits: '1.25' }, null, { credits: 'NaN' }]);
+    expect(await store.callCharge('call')).toBe('1.25');
+    expect(rpc.mock.calls[0]).toEqual(['research_runtime_call_charge', { a: 'actor', s: 'session', e: 'answer', p_call: 'call' }]);
+    expect(await store.callCharge('foreign')).toBeNull();
+    await expect(store.callCharge('bad')).rejects.toThrow('RESEARCH_STATE_UNAVAILABLE');
   });
   it('does not dispatch a replay or a denied reservation', async () => {
     const { store, rpc } = harness([{}, { claimed: false, state: 'unknown' }]);
@@ -190,9 +209,10 @@ describe('saved research receipt recovery', () => {
   });
   it('preserves empty and nonterminal reads without inventing receipts', async () => {
     const old = { state: 'dispatched', result: null };
-    const { store, rpc } = harness([old, null]);
+    const { store, rpc } = harness([old, false, null]);
     expect(await store.readOperation('old')).toEqual(old);
     expect(await store.readOperation('missing')).toBeNull();
-    expect(rpc.mock.calls.every(([name]) => name === 'research_runtime_read')).toBe(true);
+    expect(rpc.mock.calls.map(([name]) => name)).toEqual(['research_runtime_read', 'research_runtime_close_unsent',
+      'research_runtime_read']);
   });
 });

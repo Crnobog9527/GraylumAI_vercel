@@ -33,13 +33,24 @@ function fixture() {
   }));
   const operations = new Map<string, { state: string; result?: unknown }>();
   const evidence = {
+    // 0065 research_transition: reserve keeps a prepared operation; dispatch moves it on once.
     open: vi.fn<EvidencePort['open']>(async operationId => {
-      if (operations.has(operationId)) return null;
-      operations.set(operationId, { state: 'dispatched' });
+      const prior = operations.get(operationId);
+      if (prior && prior.state !== 'prepared') return null;
+      operations.set(operationId, { state: 'prepared' });
       return { token: 'token' };
     }),
+    dispatch: vi.fn<EvidencePort['dispatch']>(async operationId => {
+      if (operations.get(operationId)?.state !== 'prepared') return false;
+      operations.set(operationId, { state: 'dispatched' });
+      return true;
+    }),
     finish: vi.fn<EvidencePort['finish']>(async (operationId, _token, state, result) => {
+      if (operations.get(operationId)?.state !== 'dispatched') throw new Error('invalid finish');
       operations.set(operationId, { state, result });
+    }),
+    cancel: vi.fn<EvidencePort['cancel']>(async operationId => {
+      if (operations.get(operationId)?.state === 'prepared') operations.set(operationId, { state: 'cancelled' });
     }),
     link: vi.fn<EvidencePort['link']>().mockResolvedValue(undefined),
   };
@@ -55,7 +66,8 @@ function fixture() {
   const fetchDispatch = vi.fn(async () => { state = 'in_progress'; return true; });
   const fetchFinish = vi.fn<RuntimeResearchStore['fetchFinish']>(async (_id, _attempt, finalState) => { state = finalState; });
   const store = { authorization: { candidateConfirmation: vi.fn().mockResolvedValue([account]) },
-    evidence: () => evidence, fetchClaim, fetchDispatch, fetchFinish } as unknown as RuntimeResearchStore;
+    evidence: () => evidence, fetchClaim, fetchDispatch, fetchFinish,
+    callCharge: vi.fn().mockResolvedValue(null) } as unknown as RuntimeResearchStore;
   let sequence = 0;
   const billing = {
     runId: id,

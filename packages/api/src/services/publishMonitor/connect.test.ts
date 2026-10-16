@@ -94,6 +94,12 @@ describe('publish-monitor connect flow', () => {
     await expect(recordCallback(refused.db, provider([json(401, {})]).deps, actor, request, ['spc_new']))
       .rejects.toThrow('PUBLISH_MONITOR_PROVIDER_UNAVAILABLE');
     expect(refused.calls).toEqual([]);
+    // Hints supplied but all gone or disconnected: a late callback of an older attempt, refused unconsumed.
+    const late = rpc({});
+    await expect(recordCallback(late.db, provider([json(404, {}),
+      json(200, { id: 'spc_off', platform: 'facebook', status: 'disconnected', external_id: EXTERNAL })]).deps,
+    actor, request, ['spc_a', 'spc_off'])).rejects.toThrow('PUBLISH_MONITOR_CALLBACK_STALE');
+    expect(late.calls).toEqual([]);
     const busy = provider([json(429, {})]);
     await expect(recordCallback(rpc({}).db, busy.deps, actor, request, ['spc_new'], async () => {}))
       .rejects.toThrow('PUBLISH_MONITOR_PROVIDER_BUSY');

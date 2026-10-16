@@ -2,8 +2,8 @@
 
 import { memo, useEffect, useRef, useState } from 'react';
 import {
-  Pencil, Crown, Coins, Plus, RefreshCw, Key, Users, Headphones,
-  Loader2, Check, X, Camera, MessageCircle, Copy, Gift, CalendarCheck
+  Pencil, Crown, Coins, Plus, RefreshCw, Key, Headphones,
+  Loader2, Check, X, Camera, MessageCircle, CalendarCheck
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -488,8 +488,6 @@ export const QuickActionsCard = memo(function QuickActionsCard({
   const utils = trpc.useUtils();
   const [checkinDialogOpen, setCheckinDialogOpen] = useState(false);
   const [checkinFeedback, setCheckinFeedback] = useState<{ tone: 'success' | 'error'; text: string } | null>(null);
-  const [inviteDialogOpen, setInviteDialogOpen] = useState(false);
-  const [inviteFeedback, setInviteFeedback] = useState<string | null>(null);
   const { data: checkinStatus, isLoading: isCheckinLoading } =
     trpc.checkin.getCheckinStatus.useQuery(undefined, {
       refetchOnWindowFocus: false,
@@ -527,21 +525,6 @@ export const QuickActionsCard = memo(function QuickActionsCard({
       });
     },
   });
-  const { data: invitationDashboard, isLoading: isInviteLoading } =
-    trpc.invitation.getMyInvitationDashboard.useQuery(undefined, {
-      enabled: inviteDialogOpen,
-      refetchOnWindowFocus: false,
-    });
-
-  const handleCopyInviteValue = async (value: string, successMessage: string) => {
-    try {
-      await navigator.clipboard.writeText(value);
-      setInviteFeedback(successMessage);
-    } catch {
-      setInviteFeedback('复制失败，请手动选择并复制。');
-    }
-  };
-
   const handleClaimCheckin = async () => {
     setCheckinFeedback(null);
 
@@ -566,7 +549,7 @@ export const QuickActionsCard = memo(function QuickActionsCard({
         }}
       >
         <h3 className="font-semibold mb-6" style={{ color: 'var(--text-primary)' }}>快捷操作</h3>
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         {/* 每日签到 */}
         <div
           className="p-4 rounded-xl cursor-pointer transition-[border-color,box-shadow,transform] duration-200 motion-reduce:transition-none hover:-translate-y-0.5 hover:shadow-[0_10px_24px_rgba(0,0,0,0.18)]"
@@ -630,39 +613,6 @@ export const QuickActionsCard = memo(function QuickActionsCard({
           <p className="text-sm mb-3 min-h-[40px]" style={{ color: 'var(--text-tertiary)' }}>管理登录方式和密码设置</p>
           <div className="text-sm font-medium flex items-center gap-1" style={{ color: 'var(--color-primary)' }}>
             前往设置
-            <span>→</span>
-          </div>
-        </div>
-
-        {/* 邀请好友 */}
-        <div
-          className="p-4 rounded-xl cursor-pointer transition-[border-color,box-shadow,transform] duration-200 motion-reduce:transition-none hover:-translate-y-0.5 hover:shadow-[0_10px_24px_rgba(0,0,0,0.18)]"
-          data-testid="profile-invite-card"
-          style={{
-            background: 'var(--bg-primary)',
-            border: '1px solid var(--border-primary)'
-          }}
-          onClick={() => {
-            setInviteFeedback(null);
-            setInviteDialogOpen(true);
-          }}
-        >
-          <div
-            className="w-10 h-10 rounded-lg flex items-center justify-center mb-3"
-            style={{ background: 'rgba(34, 197, 94, 0.1)', border: '1px solid rgba(34, 197, 94, 0.2)' }}
-          >
-            <Users className="h-5 w-5" style={{ color: 'var(--success)' }} />
-          </div>
-          <h4 className="font-medium mb-1" style={{ color: 'var(--text-primary)' }}>邀请好友</h4>
-          <p className="text-sm mb-3 min-h-[40px]" style={{ color: 'var(--text-tertiary)' }}>邀请好友注册，获得积分奖励</p>
-          <div
-            className="inline-block text-xs px-2 py-0.5 rounded mb-3"
-            style={{ background: 'rgba(34, 197, 94, 0.1)', color: 'var(--success)' }}
-          >
-            +50积分
-          </div>
-          <div className="text-sm font-medium flex items-center gap-1" style={{ color: 'var(--color-primary)' }}>
-            生成邀请码
             <span>→</span>
           </div>
         </div>
@@ -830,159 +780,6 @@ export const QuickActionsCard = memo(function QuickActionsCard({
         </DialogContent>
       </Dialog>
 
-      <Dialog open={inviteDialogOpen} onOpenChange={setInviteDialogOpen}>
-        <DialogContent
-          className="border"
-          style={{
-            background: 'var(--bg-secondary)',
-            borderColor: 'var(--border-primary)',
-            color: 'var(--text-primary)',
-          }}
-        >
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2" style={{ color: 'var(--text-primary)' }}>
-              <Gift className="h-5 w-5" style={{ color: 'var(--success)' }} />
-              邀请好友
-            </DialogTitle>
-            <DialogDescription style={{ color: 'var(--text-tertiary)' }}>
-              使用你的邀请码邀请好友注册。好友完成注册后，双方都会获得积分奖励。
-            </DialogDescription>
-          </DialogHeader>
-
-          {isInviteLoading ? (
-            <div className="flex items-center justify-center py-12" data-testid="profile-invite-loading">
-              <Loader2 className="h-6 w-6 animate-spin" style={{ color: 'var(--color-primary)' }} />
-            </div>
-          ) : invitationDashboard ? (
-            <div className="space-y-5">
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-                <div className="rounded-xl p-4" style={{ background: 'var(--bg-primary)', border: '1px solid var(--border-primary)' }}>
-                  <div className="text-sm mb-1" style={{ color: 'var(--text-tertiary)' }}>邀请奖励</div>
-                  <div className="text-2xl font-bold" style={{ color: 'var(--success)' }}>
-                    +{invitationDashboard.rewards.inviterReward}
-                  </div>
-                </div>
-                <div className="rounded-xl p-4" style={{ background: 'var(--bg-primary)', border: '1px solid var(--border-primary)' }}>
-                  <div className="text-sm mb-1" style={{ color: 'var(--text-tertiary)' }}>好友奖励</div>
-                  <div className="text-2xl font-bold" style={{ color: 'var(--color-primary)' }}>
-                    +{invitationDashboard.rewards.inviteeReward}
-                  </div>
-                </div>
-                <div className="rounded-xl p-4" style={{ background: 'var(--bg-primary)', border: '1px solid var(--border-primary)' }}>
-                  <div className="text-sm mb-1" style={{ color: 'var(--text-tertiary)' }}>累计邀请</div>
-                  <div className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>
-                    {invitationDashboard.summary.totalInvites}
-                  </div>
-                </div>
-              </div>
-
-              <div className="rounded-2xl p-4" style={{ background: 'var(--bg-primary)', border: '1px solid var(--border-primary)' }}>
-                <div className="mb-2 text-sm" style={{ color: 'var(--text-tertiary)' }}>我的邀请码</div>
-                <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-                  <code
-                    data-testid="profile-invitation-code"
-                    className="flex-1 rounded-xl px-4 py-3 text-base font-semibold tracking-[0.18em]"
-                    style={{
-                      background: 'rgba(255,255,255,0.03)',
-                      border: '1px solid var(--border-primary)',
-                      color: 'var(--text-primary)',
-                    }}
-                  >
-                    {invitationDashboard.invitationCode}
-                  </code>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={() =>
-                      handleCopyInviteValue(invitationDashboard.invitationCode, '邀请码已复制。')
-                    }
-                    className="gap-2"
-                  >
-                    <Copy className="h-4 w-4" />
-                    复制邀请码
-                  </Button>
-                </div>
-                <div className="mt-3 text-sm" style={{ color: 'var(--text-tertiary)' }}>
-                  邀请链接：
-                </div>
-                <div className="mt-2 flex flex-col gap-3 sm:flex-row sm:items-center">
-                  <input
-                    readOnly
-                    value={invitationDashboard.inviteLink}
-                    className="h-11 flex-1 rounded-xl border px-3 text-sm"
-                    style={{
-                      background: 'rgba(255,255,255,0.03)',
-                      borderColor: 'var(--border-primary)',
-                      color: 'var(--text-primary)',
-                    }}
-                  />
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={() =>
-                      handleCopyInviteValue(invitationDashboard.inviteLink, '邀请链接已复制。')
-                    }
-                    className="gap-2"
-                  >
-                    <Copy className="h-4 w-4" />
-                    复制链接
-                  </Button>
-                </div>
-                {inviteFeedback && (
-                  <p className="mt-3 text-sm" style={{ color: 'var(--success)' }}>
-                    {inviteFeedback}
-                  </p>
-                )}
-              </div>
-
-              <div className="rounded-2xl p-4" style={{ background: 'var(--bg-primary)', border: '1px solid var(--border-primary)' }}>
-                <div className="mb-3 flex items-center justify-between">
-                  <h4 className="font-medium" style={{ color: 'var(--text-primary)' }}>最近邀请记录</h4>
-                  <span className="text-sm" style={{ color: 'var(--text-tertiary)' }}>
-                    已奖励 {invitationDashboard.summary.rewardedInvites} 人
-                  </span>
-                </div>
-                {invitationDashboard.records.length > 0 ? (
-                  <div className="space-y-3">
-                    {invitationDashboard.records.map((record) => (
-                      <div
-                        key={record.id}
-                        className="flex items-center justify-between rounded-xl px-4 py-3"
-                        style={{ background: 'rgba(255,255,255,0.03)' }}
-                      >
-                        <div>
-                          <div className="font-medium" style={{ color: 'var(--text-primary)' }}>
-                            {record.invitee_email || '待完成注册'}
-                          </div>
-                          <div className="text-sm" style={{ color: 'var(--text-tertiary)' }}>
-                            {new Date(record.created_at).toLocaleString('zh-CN')}
-                          </div>
-                        </div>
-                        <div className="text-right">
-                          <div className="text-sm font-medium" style={{ color: 'var(--success)' }}>
-                            +{record.inviter_reward}
-                          </div>
-                          <div className="text-xs uppercase tracking-[0.18em]" style={{ color: 'var(--text-tertiary)' }}>
-                            {record.status}
-                          </div>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="text-sm" style={{ color: 'var(--text-tertiary)' }}>
-                    还没有邀请记录。把邀请码发给好友后，这里会显示注册结果。
-                  </p>
-                )}
-              </div>
-            </div>
-          ) : (
-            <p className="py-8 text-sm" style={{ color: 'var(--text-tertiary)' }}>
-              暂时无法加载邀请信息，请稍后重试。
-            </p>
-          )}
-        </DialogContent>
-      </Dialog>
     </>
   );
 });

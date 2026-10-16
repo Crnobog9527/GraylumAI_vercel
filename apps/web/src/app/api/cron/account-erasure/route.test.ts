@@ -82,5 +82,5 @@ it('uses daily 05:00 UTC cleanup without overlapping existing cron schedules', (
   const config = JSON.parse(readFileSync('vercel.json', 'utf8'));
   expect(config.crons).toContainEqual({ path: '/api/cron/account-erasure', schedule: '0 5 * * *' });
   expect(config.crons.filter((cron: { path: string }) => cron.path !== '/api/cron/account-erasure')
-    .map((cron: { schedule: string }) => cron.schedule)).toEqual(['0 2 * * *', '0 3 * * *', '0 4 * * *', '0 10 * * *', '0 6 * * *']);
+    .map((cron: { schedule: string }) => cron.schedule)).toEqual(['0 2 * * *', '0 3 * * *', '0 4 * * *', '0 10 * * *', '0 6 * * *', '0 7 * * *']);
 });

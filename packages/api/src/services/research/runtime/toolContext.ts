@@ -42,11 +42,14 @@ export async function executeResearchCall(ctx: ResearchToolContext, budget: Tool
     : request.vendor === 'parallel' ? { query: request.query, platform: 'web' as const, dataKind: 'web_search' as const }
       : { query: request.url, platform: 'web' as const, dataKind: 'web_fetch' as const };
   ctx.emit({ type: 'research_call', callId: operationId, toolName, args, ...display, state: 'running' });
+  // Each subcall saves what it actually asked for, so charges and evidence rows describe it exactly.
   const outcome = await runSubcall({ ...ctx.subcall, newId: () => operationId,
-    evidence: ctx.store.evidence(discoveryId), metadata: { toolName, args } }, request);
+    evidence: ctx.store.evidence(discoveryId), metadata: { toolName, args, call: display } }, request);
+  // The user's own settled credits for this subcall; a read failure only hides the amount (null).
+  const credits = outcome.sent ? await ctx.store.callCharge(outcome.callId).catch(() => null) : undefined;
   ctx.emit({ type: 'research_call', callId: operationId, toolName, args, ...display,
     state: outcome.sent ? (outcome.result.outcome === 'unknown' ? 'unknown'
       : ['ok', 'partial'].includes(outcome.result.outcome) ? 'succeeded' : 'failed') : 'failed',
-    ...(outcome.sent ? { evidenceId: outcome.operationId } : {}) });
+    ...(outcome.sent ? { evidenceId: outcome.operationId, credits } : {}) });
   return outcome;
 }
