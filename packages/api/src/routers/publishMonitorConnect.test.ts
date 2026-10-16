@@ -2,15 +2,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
-  entitlements: vi.fn(), rateLimit: vi.fn(), responses: [] as Response[], urls: [] as string[],
+  entitlements: vi.fn(), rateLimit: vi.fn(), deps: vi.fn(), responses: [] as Response[], urls: [] as string[],
 }));
 vi.mock('../services/membershipEntitlements', () => ({ readMembershipEntitlements: mocks.entitlements }));
 vi.mock('../services/redisRateLimiter', () => ({ checkRateLimitOrThrow: mocks.rateLimit }));
-vi.mock('../services/publishMonitor/postForMe/config', () => ({
-  PostForMeNotConfigured: class extends Error {},
-  postForMeDeps: () => ({ apiKey: 'pfm_test_FAKEKEY000000000000', limiter: { acquire: async () => ({ ok: true }) },
-    fetchImpl: async (url: string) => { mocks.urls.push(url); return mocks.responses.shift() ?? new Response('{}', { status: 500 }); } }),
-}));
+vi.mock('../services/publishMonitor/secrets', () => ({ requirePostForMeDeps: mocks.deps }));
 import { publishMonitorConnectRouter } from './publishMonitorConnect';
 
 const actor = '00000000-0000-4000-8000-0000000c0001';
@@ -36,6 +32,9 @@ function caller(rpc: ReturnType<typeof vi.fn>, cookie?: string, switchOn = true)
 const bound = `other=1; graylum_pm_connect=${request}`;
 
 beforeEach(() => {
+  mocks.deps.mockReset().mockResolvedValue({ apiKey: 'pfm_test_FAKEKEY000000000000',
+    limiter: { acquire: async () => ({ ok: true }) },
+    fetchImpl: async (url: string) => { mocks.urls.push(url); return mocks.responses.shift() ?? new Response('{}', { status: 500 }); } });
   mocks.responses.length = 0; mocks.urls.length = 0;
   mocks.entitlements.mockResolvedValue({ ownDataWindowDays: 30, allowPublish: true });
   mocks.rateLimit.mockResolvedValue({ success: true });
@@ -137,4 +136,13 @@ describe('publish-monitor connect procedures', () => {
       { providerAccountId: 'spc_9', kind: 'unavailable', username: null }]);
     expect(mocks.urls).toHaveLength(1);
   });
+});
+
+it('does not cancel or call the provider when the unified secret reader is unavailable', async () => {
+  const rpc = vi.fn();
+  mocks.deps.mockRejectedValueOnce(new Error('PLATFORM_SECRET_UNAVAILABLE'));
+  await expect(caller(rpc, bound).cancel({ requestId: request })).rejects.toMatchObject({
+    code: 'INTERNAL_SERVER_ERROR', message: 'PUBLISH_MONITOR_UNAVAILABLE' });
+  expect(rpc).not.toHaveBeenCalled();
+  expect(mocks.urls).toEqual([]);
 });
