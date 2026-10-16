@@ -12,7 +12,7 @@ import { estimateReview } from './reviewEstimate';
 import { debateRequest, readReviewSkill, resolveReviewSkill, reviewerLabel, reviewerRequest, summaryRequest, type ReviewContext,
   type ReviewSkill } from './reviewPrompts';
 import { reviewDetail, reviewEvents } from './reviewEvents';
-import { adoptionChoices, adoptionSections, applyChoices, type AdoptionChoice } from './reviewAdoption';
+import { adoptionChoices, adoptionSections, applyChoices, sectionTexts, type AdoptionChoice } from './reviewAdoption';
 import { ENDED_STATES, reviewRecord, type ReviewPosition, type ReviewView } from './reviewRecord';
 import { claimOutcome, memberCaps, PERMANENT_REFUSALS } from './reviewLimits';
 import { readFusionSettings } from './settings';
@@ -476,8 +476,10 @@ export function reviewFlow(deps: { admin: SupabaseClient; actorId: string;
       const view = await record.read(reviewId);
       if (!view) throw new Error('FUSION_REVIEW_DENIED');
       const src = await readSource(reviewId);
-      return reviewDetail({ view, reviewers: config.parse(view.config).reviewers, sections: src.sections,
+      const detail = reviewDetail({ view, reviewers: config.parse(view.config).reviewers, sections: src.sections,
         outputs: await savedOutputs(view), revision: revisionInput(view, src), adoption: (await adoptionPlan(view, src))?.sections ?? null });
+      // The reviewed (frozen) report by chapter: the result page shows the whole report, not only the changed chapters.
+      return { ...detail, chapters: sectionTexts(src.body, src.sections) };
     },
     /** Progress events for the animation (§2.2a), derived from the record and judged outputs only. */
     async events(reviewId: string) {

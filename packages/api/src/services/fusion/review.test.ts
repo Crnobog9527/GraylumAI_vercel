@@ -222,6 +222,8 @@ describe('review flow', () => {
       fields: [{ stepId: 's1', fieldId: 'goal', before: '旧目标', after: '新目标' }], linkedSections: [],
       rulings: [expect.objectContaining({ opinion: '定位要写清人群', fix: '点明给上班族省时间', reviewers: ['A', 'B'] })] })]);
     expect(JSON.stringify(detail)).not.toContain(ids.reviewers[0]);
+    // The whole reviewed report by chapter, from the frozen version, for the result page.
+    expect(detail.chapters).toEqual([{ section: '定位', body: '原定位' }, { section: '结语', body: '原结语' }]);
     // Stable: reading again gives the same ids in the same order.
     expect((await t.flow.events(String(db.review!.reviewId))).events.map(e => e.id)).toEqual(events.map(e => e.id));
   });
