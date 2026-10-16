@@ -44,6 +44,12 @@ const call: Call = ((name: keyof Api, ...args: unknown[]) => page.evaluate(
 beforeAll(async () => {
   harness = await startHarness();
   for (const name of FIXTURES) harness.samples.set(name, readFileSync(new URL(`./ocr-fixtures/${name}.jpg`, import.meta.url)));
+  // A real JPEG whose frame header claims 30,000 × 30,000 pixels.
+  const huge = Buffer.from(readFileSync(new URL('./ocr-fixtures/q33.jpg', import.meta.url)));
+  const sof = huge.findIndex((byte, i) => byte === 0xff && huge[i + 1]! >= 0xc0 && huge[i + 1]! <= 0xc2);
+  huge.writeUInt16BE(30_000, sof + 5);
+  huge.writeUInt16BE(30_000, sof + 7);
+  harness.samples.set('huge-header', huge);
   page = await harness.open();
 }, 120_000);
 afterAll(async () => { await harness?.close(); }, 30_000);
@@ -87,6 +93,11 @@ describe('recognition sandbox (Chromium)', () => {
     expect(accuracy(expected.q29!, (flipped as { text: string }).text)).toBeGreaterThanOrEqual(0.95);
     expect(garbage).toEqual({ ok: false, code: 'IMAGE_INVALID' });
   }, 180_000);
+
+  it('refuses an image that is huge in pixels from its header, before decoding it', async () => {
+    const outcome = await call('recognizeSamples', ['huge-header']);
+    expect((outcome as { value: OcrPage[] }).value).toEqual([{ ok: false, code: 'INPUT_TOO_LARGE' }]);
+  }, 120_000);
 
   it('refuses a model file whose SHA-256 does not match', async () => {
     harness.tamperOcrAsset = 'rec.onnx';
