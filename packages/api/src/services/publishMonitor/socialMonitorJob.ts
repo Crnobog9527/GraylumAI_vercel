@@ -22,13 +22,24 @@ export type SocialMonitorReport = {
   sweepDeleteEnabled: boolean; pruned: number | null; refresh: RefreshReport | null; failures: string[];
 };
 
+/** Strictly true or off; a setting that cannot be read is reported as a failure, never as "off". */
 async function switchOn(db: Db, key: string): Promise<boolean> {
   const { data, error } = await db.from('system_settings').select('value').eq('key', key).maybeSingle();
-  return !error && data?.value === true;
+  if (error) throw new Error('SETTING_UNAVAILABLE');
+  return data?.value === true;
 }
 
 /** Deleting orphans is opt-in per environment; a missing, unreadable or non-true value means report only. */
-const sweepDeleteEnabled = (db: Db) => switchOn(db, ORPHAN_SWEEP_DELETE_SWITCH);
+// Deleting orphans stays opt-in: an unreadable setting means report only, as before.
+const sweepDeleteEnabled = (db: Db) => switchOn(db, ORPHAN_SWEEP_DELETE_SWITCH).catch(() => false);
+
+/**
+ * Retention only (plan §7), for an environment without a Post for Me key: snapshots already stored must still expire
+ * after 100 days. Database only, no provider call.
+ */
+export async function runSocialMonitorRetention(db: Db, until: number, now: () => number = Date.now) {
+  return { pruned: await pruneSnapshots(db, until, now) };
+}
 
 /**
  * Order matters under the time budget: retention (database only), provider deletions owed to users, attempts that can
@@ -39,7 +50,7 @@ export async function runSocialMonitorJob(db: Db, client: ClientDeps, until: num
   now: () => number = Date.now): Promise<SocialMonitorReport> {
   const report: SocialMonitorReport = { providerWork: null, attempts: null, sweep: null, sweepDeleteEnabled: false,
     pruned: null, refresh: null, failures: [] };
-  try { report.pruned = await pruneSnapshots(db); } catch { report.failures.push('prune'); }
+  try { report.pruned = await pruneSnapshots(db, until, now); } catch { report.failures.push('prune'); }
   try { report.providerWork = await runProviderWork(db, client, until, now); } catch { report.failures.push('provider_work'); }
   try { report.attempts = await cleanupAttempts(db, client, until, now); } catch { report.failures.push('attempts'); }
   if (now() < until) {

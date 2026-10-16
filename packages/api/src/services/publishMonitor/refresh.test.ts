@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { describe, expect, it } from 'vitest';
 import type { ClientDeps } from './postForMe/client';
-import { refreshConnection, runRefresh, type RefreshClaim } from './refresh';
+import { pruneSnapshots, refreshConnection, runRefresh, type RefreshClaim } from './refresh';
 
 const OWNER = 'a'.repeat(32);
 const NOW = Date.parse('2026-10-17T12:00:00Z');
@@ -193,6 +193,19 @@ describe('publish-monitor refresh of one connection', () => {
     const db = database({ stale: true });
     expect((await run(db, provider([{ posts: [post('x', 1)] }]).deps)).outcome).toBe('stale');
     expect(finished(db.calls)).toEqual([]);
+  });
+
+  it('a page whose every entry is unreadable is counted and settled as failed, never as success', async () => {
+    const db = database();
+    await run(db, provider([{ posts: [{ bogus: true }, { platform_post_id: '' }] }]).deps);
+    expect(finished(db.calls)).toEqual([['failed', 'PROVIDER_RESPONSE_SHAPE']]);
+    expect(db.calls.filter(c => c.name === 'publish_monitor_refresh_page').map(c => c.args.p_posts)).toEqual([[]]);
+  });
+
+  it('retention drains expired snapshots in batches until fewer than a batch remain', async () => {
+    const left = [20_000, 20_000, 7];
+    const rpc = async () => ({ data: left.shift() ?? 0, error: null });
+    expect(await pruneSnapshots({ rpc } as never, NOW + 60_000, () => NOW)).toBe(40_007);
   });
 
   it('a missing owner reference never reads', async () => {
