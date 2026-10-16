@@ -2343,6 +2343,8 @@ node scripts/plan-progress.mjs --ref origin/staging
 | | LIB-EXT（资料库扩展） | 全文检索或 pgvector、音频和视频、Agent 看图、Google Drive / Notion 导入（PDF 和图片已于 2026-10-10 移入 LIB-DOCS，第 2.1 节，[#770 决定记录](https://github.com/Crnobog9527/GraylumAI_vercel/pull/770#issuecomment-6095169943)） | LIB-DOCS | 高 | 大 | — |
 | | I18N-EN | 产品英文版（第 2.1 节 2026-10-12 多语言决定）：产品界面英文化、语言切换提示条、英文 Skill 用户可见文字、英文网站页面（/en）；Skill 内核仍以简体中文为唯一原版。上线前只做 SKILL-I18N-HOOK 打底。 | REL-1 上线、SKILL-I18N-HOOK | 高 | 中 | — |
 
+**已应用到 staging 的迁移**（总控记录，2026-10-16）：0263（version 20261016094713）、0264（20261016110732）、0265（20261016141209）、0266（20261016145300，邀请码下线，按"先部署代码、再应用迁移"的顺序做，记录在 [#988](https://github.com/Crnobog9527/GraylumAI_vercel/pull/988) 评论里）、0267（20261016153437）。正式环境一律另获批准。
+
 **迁移编号预分配**（2026-10-17，由总控按 PR 分配，实际以各 PR 的迁移文件为准；迁移账本要求编号连续，按编号顺序应用到 staging）：
 
 | 编号 | 对应 PR / 任务 |
