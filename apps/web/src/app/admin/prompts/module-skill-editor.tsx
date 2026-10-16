@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { parseWorkflowManifest, workflowManifestPath, type WorkflowManifest } from '@repo/api/skills/workflowManifest';
+import { isPositioningWorkflow } from '@repo/api/opc/positioningWorkflow';
 export { ModuleSettings } from '@/components/admin/ModuleSettings';
 
 export type SkillForm = {
@@ -47,6 +48,18 @@ export async function readSkillFiles(files: FileList | File[]) {
   return { directoryName: [...roots][0] ?? '', files: result, workflow };
 }
 
+/**
+ * Owner 2026-10-13 (CONTENT-CONVERSATION-DRIVEN G): only a positioning Skill (every step declares questions and one
+ * feeds the positioning profile) runs as a guided step flow. The editor states which one this Skill is, and flags a
+ * Skill that looks guided but is not, so the administrator can confirm it.
+ */
+export function guidanceNote(steps: SkillForm['steps']): string {
+  if (isPositioningWorkflow({ steps })) return '定位 Skill：在“定位”入口按步骤强引导（提问卡、每步确认）。';
+  if (steps.length && steps.every(step => (step.information ?? []).length > 0))
+    return '请确认：每一步都声明了问题，但没有问题带 profileKey，所以这不是定位 Skill，不会按步骤强引导，'
+      + '步骤只作为 AI 在自由对话里的工作顺序。如果它应当是定位 Skill，请在 workflow.yaml 里给问题加上 profileKey 后重新导入。';
+  return '不是定位 Skill：步骤只作为 AI 在自由对话里的工作顺序，不出现步骤工作区、提问卡和确认卡。';
+}
 export function ModuleSkillEditor({ value, onChange, error, onError, onReadingChange, disabled = false, isNew = false }: {
   value: SkillForm; onChange: (next: SkillForm) => void; error: string; onError: (message: string) => void;
   onReadingChange: (reading: boolean) => void; disabled?: boolean; isNew?: boolean;
@@ -93,8 +106,9 @@ export function ModuleSkillEditor({ value, onChange, error, onError, onReadingCh
     </label>
     {value.files.length > 0 && <details><summary>已载入 {value.files.length} 个文件</summary><ul className="text-xs break-all">{value.files.map(f => <li key={f.path}>{f.path}</li>)}</ul></details>}
     <p className="text-sm text-[var(--text-secondary)]">{declaredWorkflow
-      ? '步骤顺序、名称与问题由 Skill 包中的 workflow.yaml 声明。重新上传并发布后，新定位自动采用新版本。只有定位 Skill（每一步都声明了问题，且有问题带 profileKey）按步骤强引导；其他 Skill 的步骤只作为 AI 在自由对话里的工作顺序，不出现步骤工作区和确认卡。'
+      ? '步骤顺序、名称与问题由 Skill 包中的 workflow.yaml 声明。重新上传并发布后，新定位自动采用新版本。'
       : '当前包没有 workflow.yaml：只重新上传 SKILL.md 不会改变步骤或问题。请在 Skill 包中加入 workflow.yaml；旧包仍可沿用原有手动步骤配置。'}</p>
+    <p className="text-sm" data-testid="skill-guidance">{guidanceNote(value.steps)}</p>
     {value.steps.map((step, i) => <div key={i} className="space-y-2 rounded border border-[var(--border-primary)] p-3">
       <div className="flex gap-2 items-center"><span>{i + 1}.</span>
         <Input aria-label={`步骤 ${i + 1} 名称`} value={step.title} disabled={declaredWorkflow} onChange={e => patch({ steps: value.steps.map((s,j) => j === i ? { ...s, title: e.target.value } : s) })} />
