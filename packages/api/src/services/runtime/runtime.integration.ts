@@ -1599,6 +1599,40 @@ it('RUNTIME: lost dispatch commit response preserves unknown identity without ne
  }finally{await new Promise<void>((resolve,reject)=>server.close(error=>error?reject(error):resolve()));}
 });
 
+it('RUNTIME: only a positioning workflow opens a guided step workspace through opc.start or workbench.start',async()=>{
+ // CONTENT-CONVERSATION-DRIVEN G (Owner 2026-10-13): every other Skill runs in free chat; its steps are a work guide.
+ const password='Local-'+randomUUID()+'!',email=randomUUID()+'@example.test';
+ const created=await admin.auth.admin.createUser({email,password,email_confirm:true});if(created.error)throw created.error;
+ const actor=created.data.user.id;await db.query("insert into profiles(id,email,credits,role) values($1,$2,500,'admin')",[actor,email]);
+ const user=createClient(process.env.V3_LOCAL_REST!,process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,{auth:{persistSession:false}});
+ const login=await user.auth.signInWithPassword({email,password});if(login.error)throw login.error;
+ async function register(kind:'positioning'|'plain'|'unmapped'){
+  const pack=makePackage(),moduleId=randomUUID(),registration='guided-'+kind+'-'+randomUUID(),flow=makeWorkflow(2);
+  if(kind!=='plain')flow.steps.forEach((step,i)=>{step.information=[{id:'field'+i,title:'Field '+i,required:false,
+   ...(kind==='positioning'&&i===0?{profileKey:'audience'}:{})}];});
+  await db.query('insert into skills(id,skill_key,created_by) values($1,$2,$3)',[pack.id,registration,actor]);
+  await db.query('insert into modules(id,title,skill_id,active) values($1,$2,$3,true)',[moduleId,registration,pack.id]);
+  await publishSkillPackage(admin,actor,pack);
+  await db.query('insert into artifact_workflows(id,module_id,skill_id,revision_id,workflow,label,enabled) values($1,$2,$3,$4,$5,$6,true)',
+   [registration,moduleId,pack.id,pack.revisionId,flow,registration]);
+  return registration;
+ }
+ const service=workbenchService(user,admin);
+ const start=(registration:string)=>{const id=randomUUID();return service.start({projectId:id,roundId:id,requestId:id,registration,account:null});};
+ const draft=(registration:string)=>rpc('opc_start_b1',{p_actor_id:actor,p_request_id:randomUUID(),p_registration:registration,p_mode:'manual'});
+ const projects=async()=>(await db.query('select count(*)::int n from artifact_projects where actor_id=$1',[actor])).rows[0].n;
+ for(const kind of ['plain','unmapped'] as const){
+  const registration=await register(kind);
+  await expect(draft(registration)).rejects.toThrow('OPC_METHOD_INFORMATION_REQUIRED');
+  await expect(start(registration)).rejects.toThrow('ARTIFACT_INVALID_WORKFLOW');
+ }
+ expect(await projects()).toBe(0);
+ const positioning=await register('positioning');
+ expect((await draft(positioning)).draftId).toEqual(expect.any(String));
+ await expect(start(positioning)).resolves.toEqual({roundId:expect.any(String)});
+ expect(await projects()).toBe(2);
+});
+
 it('RUNTIME: real published source revocation excludes derived Session history without deleting originals',async()=>{
  const password='Local-'+randomUUID()+'!',email=randomUUID()+'@example.test';
  const created=await admin.auth.admin.createUser({email,password,email_confirm:true});if(created.error)throw created.error;
@@ -1607,6 +1641,8 @@ it('RUNTIME: real published source revocation excludes derived Session history w
  const login=await user.auth.signInWithPassword({email,password});if(login.error)throw login.error;
  async function workflow(social:boolean){
   const pack=makePackage(),moduleId=randomUUID(),registration='runtime-source-'+randomUUID(),flow=makeWorkflow(social?6:1,social);
+  // Only a positioning workflow opens a workbench round (CONTENT-CONVERSATION-DRIVEN G): the started source declares its questions.
+  if(social)flow.steps.forEach((step,i)=>{step.information=[{id:'field'+i,title:'Field '+i,required:false,...(i===0?{profileKey:'audience'}:{})}];});
   await db.query('insert into skills(id,skill_key,created_by) values($1,$2,$3)',[pack.id,registration,actor]);
   await db.query('insert into modules(id,title,skill_id,active) values($1,$2,$3,true)',[moduleId,registration,pack.id]);
   await publishSkillPackage(admin,actor,pack);
