@@ -26,8 +26,15 @@ function provider(pages: Page[], accountResponse: () => Response = () => account
       const url = String(input);
       urls.push(url);
       if (url.includes('/social-accounts/')) return accountResponse();
-      const ids = new URL(url).searchParams.getAll('platform_post_id');
-      if (ids.length && !ignoreIdFilter) return json(200, { data: ids.map(id => post(id, 2)), meta: { has_more: false } });
+      const params = new URL(url).searchParams;
+      const ids = params.getAll('platform_post_id');
+      if (ids.length && !ignoreIdFilter) {
+        // Like Facebook with metrics: at most 10 posts per filtered page, then a cursor.
+        const offset = Number(params.get('cursor')?.replace('ids', '') ?? 0);
+        const slice = ids.slice(offset, offset + 10);
+        const more = offset + 10 < ids.length;
+        return json(200, { data: slice.map(id => post(id, 2)), meta: { has_more: more, cursor: more ? `ids${offset + 10}` : null } });
+      }
       const page = pages.shift() ?? { posts: [] };
       if (page.status) return json(page.status, { error: 'x' });
       return json(200, { data: page.posts ?? [], meta: { cursor: page.cursor ?? null, has_more: Boolean(page.cursor) } });
@@ -156,6 +163,9 @@ describe('publish-monitor refresh of one connection', () => {
     expect((await run(retry, q.deps, { cursor: 'expired' })).outcome).toBe('done');
     const feeds = q.urls.filter(u => u.includes('/social-account-feeds/'));
     expect([feeds[0]!.includes('cursor=expired'), feeds[1]!.includes('cursor=')]).toEqual([true, false]);
+    // The refused cursor is cleared in the database together with counting that read.
+    const first = retry.calls.find(c => c.name === 'publish_monitor_refresh_page')!;
+    expect([first.args.p_posts, first.args.p_cursor, first.args.p_save_cursor]).toEqual([[], null, true]);
   });
 
   it('known posts due today are read by ID in batches after discovery', async () => {
@@ -164,7 +174,19 @@ describe('publish-monitor refresh of one connection', () => {
     const p = provider([{ posts: [post('k', 1)] }]);
     expect((await run(db, p.deps)).outcome).toBe('done');
     const batches = p.urls.filter(u => u.includes('platform_post_id'));
-    expect(batches.map(u => new URL(u).searchParams.getAll('platform_post_id').length)).toEqual([20, 5]);
+    // A filtered answer paged at 10 is followed until every asked post was seen.
+    expect(batches.map(u => new URL(u).searchParams.getAll('platform_post_id').length)).toEqual([20, 20, 5]);
+    const written = db.calls.filter(c => c.name === 'publish_monitor_refresh_page')
+      .flatMap(c => (c.args.p_posts as Array<{ platformPostId: string }>).map(x => x.platformPostId));
+    expect(due.every(id => written.includes(id))).toBe(true);
+  });
+
+  it('a page whose ownership re-check fails is still counted against the daily cap', async () => {
+    const db = database();
+    let reads = 0;
+    const p = provider([{ posts: [post('a', 1)] }], () => (reads++ < 1 ? account() : json(500, { error: 'x' })));
+    expect((await run(db, p.deps)).outcome).toBe('failed');
+    expect(db.calls.filter(c => c.name === 'publish_monitor_refresh_page').map(c => c.args.p_posts)).toEqual([[]]);
   });
 
   it('a claim taken over by someone else stops without settling', async () => {
