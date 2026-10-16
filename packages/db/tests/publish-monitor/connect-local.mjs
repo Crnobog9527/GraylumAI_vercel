@@ -5,6 +5,7 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { localDb, read } from '../runtime-view-perf/local-db.mjs';
 import { closeAccount } from '../erasure-b2a/cases.mjs';
+import { fixtureSql, laterRedefinitions } from './fixtures.mjs';
 
 const migrationPath = 'packages/db/migrations/0246_publish_monitor_connect.sql';
 const rpcs = ['publish_monitor_connect_start(uuid,uuid,text[])', 'publish_monitor_connect_callback(uuid,uuid,jsonb)',
@@ -28,25 +29,6 @@ const cancel = (a, req) => svc('SELECT publish_monitor_connect_cancel($1,$2) v',
 const ext = async req => v('SELECT external_id v FROM social_connect_requests WHERE id=$1', [req]);
 const confirmLive = async (a, req, pid, track = true) => confirm(a, req, pid, track,
   { providerAccountId: pid, platform: 'facebook', externalId: await ext(req), status: 'connected' });
-const fixtureSql = `CREATE SCHEMA IF NOT EXISTS pm_test;
-CREATE OR REPLACE FUNCTION pm_test.member(a uuid,plat text) RETURNS uuid LANGUAGE plpgsql AS $$
-DECLARE sk uuid:=gen_random_uuid();m uuid:=gen_random_uuid();rev uuid:=gen_random_uuid();p uuid:=gen_random_uuid();
- r uuid:=gen_random_uuid();v uuid:=gen_random_uuid();ac uuid:=gen_random_uuid();bus uuid:=gen_random_uuid();
-BEGIN
- INSERT INTO skills(id,skill_key,content_kind) VALUES(sk,'pm-'||sk,'directory');
- INSERT INTO modules(id,title,skill_id,active) VALUES(m,'PM fixture',sk,true);
- INSERT INTO skill_revisions(id,skill_id,version,content,content_hash,published_by) VALUES(rev,sk,1,'fixture',repeat('a',64),a);
- INSERT INTO skill_packages(revision_id,skill_id,request_id,manifest,package_hash,entry_hash,expected_version,actor_id)
- VALUES(rev,sk,gen_random_uuid(),'{}',repeat('b',64),repeat('a',64),0,a);
- INSERT INTO artifact_projects(id,actor_id,module_id,skill_id,account,work_title,current_version)
- VALUES(p,a,m,sk,'source-'||p,'source title',1),(ac,a,m,sk,'account-'||ac,'account title',0);
- INSERT INTO artifact_rounds(id,project_id,revision_id,package_hash,workflow,workflow_hash,template_hash,state,steps)
- VALUES(r,p,rev,repeat('b',64),'{}',repeat('c',64),repeat('d',64),'published','{}');
- INSERT INTO artifact_versions(id,project_id,round_id,version,report,report_hash,evidence_ids) VALUES(v,p,r,1,'{}',repeat('e',64),'[]');
- INSERT INTO opc_businesses(id,actor_id,name,current_source_version_id) VALUES(bus,a,'business',v);
- INSERT INTO opc_accounts(project_id,actor_id,platform,account_key,source_version_id,business_id) VALUES(ac,a,plat,'pm-'||ac,v,bus);
- RETURN ac;
-END $$;`;
 const member = async (plat = 'facebook') => {
   const a = randomUUID();
   await c.query('INSERT INTO profiles(id,credits) VALUES($1,0)', [a]);
@@ -59,7 +41,8 @@ try {
   const fingerprint = read('packages/db/tests/baseline/fingerprint.sql');
   const catalogSql = fingerprint.slice(0, fingerprint.indexOf('-- FINAL')) + 'SELECT jsonb_object_agg(k,d ORDER BY k) v FROM grouped;';
   const before = await v(catalogSql);
-  await c.query(read(migrationPath));
+  // Later migrations redefine some 0246 functions; reapplying the chain in order must converge.
+  for (const path of [migrationPath, ...laterRedefinitions('0246')]) await c.query(read(path));
   assert.deepEqual(await v(catalogSql), before);
   report.checks.push('0246 reapplication preserves the complete catalog');
 

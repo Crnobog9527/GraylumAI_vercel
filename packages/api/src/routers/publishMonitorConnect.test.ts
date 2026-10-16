@@ -87,8 +87,11 @@ describe('publish-monitor connect procedures', () => {
     rpc.mockResolvedValue({ data: { requestId: request, platform: 'facebook', newAccounts: [], ownExisting: [],
       quarantined: [], ignored: [] }, error: null });
     for (let i = 0; i < 30; i++) mocks.responses.push(json(404, {}));
-    await caller(rpc, bound).callback({ requestId: request, accountIds: Array.from({ length: 30 }, (_, i) => `spc_${i}`) });
+    // None of the hinted accounts exists: refused as a stale callback, without consuming the attempt.
+    await expect(caller(rpc, bound).callback({ requestId: request,
+      accountIds: Array.from({ length: 30 }, (_, i) => `spc_${i}`) })).rejects.toMatchObject({ code: 'CONFLICT' });
     expect(mocks.urls).toHaveLength(20);
+    expect(rpc).not.toHaveBeenCalled();
   });
 
   it('confirm deletes only unselected accounts still carrying this attempt\'s external_id', async () => {

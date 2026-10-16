@@ -3,7 +3,7 @@ import { TRPCError } from '@trpc/server';
 import { protectedProcedure, router } from '../trpc';
 import { readMembershipEntitlements } from '../services/membershipEntitlements';
 import {
-  autoReviewInput, listConnections, readPublishMonitorSettings, setAutoReview,
+  autoReviewInput, disconnectConnection, disconnectInput, listConnections, readPublishMonitorSettings, setAutoReview,
 } from '../services/publishMonitor/foundation';
 import { publishMonitorConnectRouter } from './publishMonitorConnect';
 import { guarded as safe } from './publishMonitorGuard';
@@ -26,5 +26,8 @@ export const publishMonitorRouter = router({
   }, input.enabled)),
   connections: protectedProcedure.query(({ ctx }) =>
     safe(ctx, () => listConnections(ctx.supabaseAdmin, ctx.profileId))),
+  // Always allowed, even while the feature is paused: a user can always remove their data.
+  disconnect: protectedProcedure.input(disconnectInput).mutation(({ ctx, input }) =>
+    safe(ctx, () => disconnectConnection(ctx.supabaseAdmin, ctx.profileId, input), false)),
   connect: publishMonitorConnectRouter,
 });
