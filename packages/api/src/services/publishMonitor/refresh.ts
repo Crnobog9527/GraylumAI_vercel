@@ -1,0 +1,213 @@
+/* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import type { SupabaseClient } from '@supabase/supabase-js';
+import { z } from 'zod';
+import { getAccount, readFeedPage, type ClientDeps, type Outcome } from './postForMe/client';
+import type { FeedPage, NormalizedPost } from './postForMe/normalize';
+
+/**
+ * PUBLISH-MONITOR PR-3a (plan §4.1 bounded refresh, §8 daily job): reads the user's own Post for Me posts into daily
+ * snapshots. The database owns progress (lease, refresh number, cursor, daily page count); this layer reads one page at a
+ * time and writes it before reading the next, so an interruption resumes after the last written page. Reading the
+ * user's own data is free (Owner 2026-10-13): nothing here freezes or charges credits.
+ */
+type Rpc = Pick<SupabaseClient, 'rpc'>;
+type Db = Pick<SupabaseClient, 'rpc' | 'from'>;
+type Clock = () => number;
+const uuid = z.string().uuid();
+export const PAGE_CAP_SETTING = 'publish_monitor_daily_page_cap';
+export const DEFAULT_PAGE_CAP = 10;
+export const JOB_LEASE_SECONDS = 300;
+const DUE_BATCH = 20;
+const DUE_LIMIT = 200;
+
+export const claimSchema = z.object({
+  connectionId: uuid, actorId: uuid, lease: uuid, refreshId: uuid, cursor: z.string().max(2048).nullable(),
+  providerAccountId: z.string().regex(/^[A-Za-z0-9_-]{1,128}$/), platform: z.string().regex(/^[a-z0-9_-]{1,32}$/),
+  ownerRef: z.string().regex(/^[0-9a-f]{32}$/).nullable(), pagesUsed: z.number().int().min(0),
+  knownPosts: z.number().int().min(0),
+}).strict();
+export type RefreshClaim = z.infer<typeof claimSchema>;
+
+export type RefreshOutcome = 'done' | 'partial' | 'empty' | 'failed' | 'rejected' | 'taken_over' | 'entitlement'
+  | 'release' | 'stale';
+export type RefreshResult = { outcome: RefreshOutcome; pages: number; inserted: number; error: string | null };
+
+export class RefreshError extends Error {
+  constructor(readonly code: 'PUBLISH_MONITOR_REFRESH_UNAVAILABLE') { super(code); }
+}
+
+async function call<T>(db: Rpc, name: string, args: Record<string, unknown>, schema: z.ZodType<T>): Promise<T> {
+  const result = await db.rpc(name, args);
+  if (result.error) throw new RefreshError('PUBLISH_MONITOR_REFRESH_UNAVAILABLE');
+  const parsed = schema.safeParse(result.data);
+  if (!parsed.success) throw new RefreshError('PUBLISH_MONITOR_REFRESH_UNAVAILABLE');
+  return parsed.data;
+}
+
+/** Admin page cap per connection and day; a missing or malformed value falls back to the default. */
+export async function readPageCap(db: Pick<SupabaseClient, 'from'>): Promise<number> {
+  const { data, error } = await db.from('system_settings').select('value').eq('key', PAGE_CAP_SETTING).maybeSingle();
+  const value = error ? null : data?.value;
+  return typeof value === 'number' && Number.isInteger(value) && value >= 1 && value <= 100 ? value : DEFAULT_PAGE_CAP;
+}
+
+const errorCode = (outcome: Exclude<Outcome<unknown>, { kind: 'ok' }>) => outcome.kind === 'rejected'
+  ? `PROVIDER_REJECTED_${outcome.status}` : outcome.kind === 'unknown' ? 'PROVIDER_NO_ANSWER'
+  : outcome.kind === 'failed' ? (outcome.status ? `PROVIDER_FAILED_${outcome.status}` : 'PROVIDER_RESPONSE_SHAPE')
+  : 'PROVIDER_BUSY';
+
+/** Which settle outcome a provider answer that is not ok leads to (plan §4.1: 5xx is "not fetched", never "deleted"). */
+function outcomeFor(outcome: Exclude<Outcome<unknown>, { kind: 'ok' }>): Exclude<RefreshOutcome, 'stale'> {
+  if (outcome.kind === 'rate_limited') return 'release';
+  // Post for Me answers 500 for a missing account (measured), so only an explicit refusal of the grant (401/403) or a
+  // missing account (404) asks the owner to re-authorise; other client errors (a stale cursor, a bad filter) are ours.
+  if (outcome.kind === 'rejected') {
+    if (outcome.status === 429) return 'release';
+    return [401, 403, 404].includes(outcome.status) ? 'rejected' : 'failed';
+  }
+  return 'failed';
+}
+
+function toRow(post: NormalizedPost) {
+  return { platformPostId: post.platformPostId, url: post.url, postedAt: post.postedAt, postedAtSource: post.postedAtSource,
+    titleExcerpt: post.titleExcerpt, metrics: post.metrics, breakdowns: post.breakdowns, missingFields: post.missingFields };
+}
+
+const pageResult = z.union([
+  z.object({ stale: z.literal(true) }).strict(),
+  z.object({ stale: z.literal(false), inserted: z.number().int().min(0), existing: z.number().int().min(0) }).strict(),
+]);
+
+type Run = { db: Rpc; claim: RefreshClaim; pages: number; inserted: number };
+
+/** Writes one page; false when the claim is no longer current (another worker, a webhook or a disconnect took over). */
+async function write(run: Run, posts: NormalizedPost[], cursor: string | null, saveCursor: boolean) {
+  const result = await call(run.db, 'publish_monitor_refresh_page', { p_connection_id: run.claim.connectionId,
+    p_lease: run.claim.lease, p_refresh_id: run.claim.refreshId, p_posts: posts.map(toRow), p_cursor: cursor,
+    p_save_cursor: saveCursor }, pageResult);
+  run.pages += 1;
+  if (result.stale) return null;
+  run.inserted += result.inserted;
+  return result;
+}
+
+async function settle(run: Run, outcome: Exclude<RefreshOutcome, 'stale'>, error: string | null = null): Promise<RefreshResult> {
+  const current = await call(run.db, 'publish_monitor_refresh_finish', { p_connection_id: run.claim.connectionId,
+    p_lease: run.claim.lease, p_refresh_id: run.claim.refreshId, p_outcome: outcome, p_error: error }, z.boolean());
+  return { outcome: current ? outcome : 'stale', pages: run.pages, inserted: run.inserted, error };
+}
+
+const stale = (run: Run): RefreshResult => ({ outcome: 'stale', pages: run.pages, inserted: run.inserted, error: null });
+
+/**
+ * Refreshes one claimed connection within the owner's data window (days > 0; the caller checks the entitlement).
+ * 1. The provider account must still carry the owner's reference (plan §4.1: checked before every read).
+ * 2. Discovery: newest pages until a page holds an already known post, every dated post is older than the window, the
+ *    provider has no more pages, or the daily page cap is reached. An interrupted discovery resumes from its cursor.
+ * 3. Known posts due on their observation schedule are read by post ID in small batches.
+ * No new page starts after `until`; the lease is then released with the cursor kept.
+ */
+export async function refreshConnection(db: Rpc, client: ClientDeps, claim: RefreshClaim, windowDays: number,
+  pageCap: number, until: number, now: Clock = Date.now): Promise<RefreshResult> {
+  const run: Run = { db, claim, pages: 0, inserted: 0 };
+  if (!claim.ownerRef) return settle(run, 'failed', 'OWNER_REF_MISSING');
+  if (now() >= until) return settle(run, 'release');
+  const account = await getAccount(client, claim.providerAccountId);
+  if (account.kind !== 'ok') return settle(run, outcomeFor(account), errorCode(account));
+  if (account.value.status === 'disconnected') return settle(run, 'rejected', 'PROVIDER_DISCONNECTED');
+  if (account.value.externalId?.split('.')[0] !== claim.ownerRef) return settle(run, 'taken_over');
+
+  const cutoff = now() - windowDays * 86_400_000;
+  const inWindow = (post: NormalizedPost) => post.postedAt === null || Date.parse(post.postedAt) >= cutoff;
+  let cursor = claim.cursor;
+  let resuming = cursor !== null;
+  let budget = pageCap - claim.pagesUsed;
+  let first = true;
+  for (;;) {
+    if (budget <= 0) return settle(run, 'partial', 'PAGE_CAP');
+    if (now() >= until) return settle(run, 'release');
+    const page: Outcome<FeedPage> = await readFeedPage(client, claim.providerAccountId, claim.platform, { cursor });
+    if (page.kind !== 'ok' && first && resuming && outcomeFor(page) === 'failed' && page.kind === 'rejected') {
+      // A saved cursor the provider no longer accepts: start discovery again from the newest page.
+      budget -= 1;
+      cursor = null;
+      resuming = false;
+      continue;
+    }
+    if (page.kind !== 'ok') return settle(run, outcomeFor(page), errorCode(page));
+    budget -= 1;
+    const value = page.value;
+    // An empty first page is never proof of "no posts" (plan §4.1); the database applies the empty-list rules.
+    if (first && !resuming && value.posts.length === 0 && value.rejected === 0) return settle(run, 'empty');
+    first = false;
+    const kept = value.posts.filter(inWindow);
+    const dated = value.posts.filter(post => post.postedAt !== null);
+    const pastWindow = dated.length > 0 && dated.every(post => !inWindow(post));
+    const more = value.hasMore && !pastWindow;
+    const written = await write(run, kept, more ? value.nextCursor : null, true);
+    if (!written) return stale(run);
+    if (!more || written.existing > 0) break;
+    cursor = value.nextCursor;
+  }
+
+  // Known posts due today that discovery did not reach. Platforms without post-ID filtering simply return their feed
+  // again; those posts are upserted like any other (window applied), so nothing is duplicated.
+  const due = await call(db, 'publish_monitor_refresh_due', { p_connection_id: claim.connectionId, p_lease: claim.lease,
+    p_refresh_id: claim.refreshId, p_window_days: windowDays, p_limit: DUE_LIMIT }, z.array(z.string()).nullable());
+  if (due === null) return stale(run);
+  for (let i = 0; i < due.length; i += DUE_BATCH) {
+    if (budget <= 0) return settle(run, 'partial', 'PAGE_CAP');
+    if (now() >= until) return settle(run, 'release');
+    const page = await readFeedPage(client, claim.providerAccountId, claim.platform,
+      { platformPostIds: due.slice(i, i + DUE_BATCH), limit: DUE_BATCH });
+    if (page.kind !== 'ok') return settle(run, outcomeFor(page), errorCode(page));
+    budget -= 1;
+    if (!await write(run, page.value.posts.filter(inWindow), null, false)) return stale(run);
+  }
+  return settle(run, 'done');
+}
+
+export type WindowLookup = (actorId: string) => Promise<number>;
+export type RefreshReport = { claimed: number; outcomes: Partial<Record<RefreshOutcome, number>> };
+
+/**
+ * Daily job step (plan §8): claims due connections in small batches and refreshes them one by one until the deadline.
+ * A user whose plan has no data window is settled as "entitlement" without any provider call. A rate-limited read
+ * releases its lease and ends this run's refresh step: the shared bucket is empty, later connections would fail too.
+ */
+export async function runRefresh(db: Db, client: ClientDeps, windowFor: WindowLookup, until: number,
+  now: Clock = Date.now): Promise<RefreshReport> {
+  const report: RefreshReport = { claimed: 0, outcomes: {} };
+  const pageCap = await readPageCap(db);
+  const windows = new Map<string, number>();
+  while (now() < until) {
+    const batch = await call(db, 'publish_monitor_refresh_claim', { p_limit: 10, p_lease_seconds: JOB_LEASE_SECONDS },
+      z.array(claimSchema));
+    if (batch.length === 0) break;
+    report.claimed += batch.length;
+    let stop = false;
+    for (const claim of batch) {
+      let result: RefreshResult;
+      if (stop || now() >= until) {
+        result = await settle({ db, claim, pages: 0, inserted: 0 }, 'release');
+      } else {
+        if (!windows.has(claim.actorId)) windows.set(claim.actorId, await windowFor(claim.actorId).catch(() => -1));
+        const days = windows.get(claim.actorId)!;
+        // -1: the entitlement could not be read; leave the connection for the next run instead of guessing.
+        result = days < 0 ? await settle({ db, claim, pages: 0, inserted: 0 }, 'release')
+          : days === 0 ? await settle({ db, claim, pages: 0, inserted: 0 }, 'entitlement')
+          : await refreshConnection(db, client, claim, days, pageCap, until, now);
+        // Rate limit, deadline or an unreadable entitlement: the next claim would hand the same rows back.
+        if (result.outcome === 'release') stop = true;
+      }
+      report.outcomes[result.outcome] = (report.outcomes[result.outcome] ?? 0) + 1;
+    }
+    if (stop) break;
+  }
+  return report;
+}
+
+/** Retention (plan §7): removes snapshots older than 100 days, a bounded number per run. */
+export function pruneSnapshots(db: Rpc): Promise<number> {
+  return call(db, 'publish_monitor_snapshot_prune', { p_limit: 20_000 }, z.number().int().min(0));
+}

@@ -20,6 +20,9 @@ BEGIN
  RETURN ac;
 END $$;`;
 
+// PR-3a refresh migration (file name; number assigned by the controller).
+export const REFRESH_MIGRATION = 'NNNN_publish_monitor_refresh.sql';
+
 // Migrations after `from` that redefine its functions, so a reapplication check replays the chain in order.
 const CHAIN = {
   '0240': ['packages/db/migrations/0265_publish_monitor_provider_cleanup.sql'],
