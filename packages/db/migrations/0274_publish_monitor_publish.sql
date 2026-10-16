@@ -242,7 +242,7 @@ END $$;
 -- a disconnected or unreadable one just stops this job.
 CREATE OR REPLACE FUNCTION public.publish_monitor_publish_dispatch(a uuid,p_job uuid,p_observed jsonb) RETURNS jsonb
 LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
-DECLARE j social_publish_jobs;ok boolean;mine text;t jsonb;o jsonb;taken boolean:=false;
+DECLARE j social_publish_jobs;ok boolean;mine text;tgt jsonb;o jsonb;taken boolean:=false;
 BEGIN
  PERFORM publish_monitor_actor(a);
  IF jsonb_typeof(p_observed) IS DISTINCT FROM 'object' THEN
@@ -260,11 +260,11 @@ BEGIN
    AND c.provider_account_id=t->>'providerAccountId' AND c.status='connected' AND c.consent_publish AND c.provider_can_publish;
  IF ok THEN
   SELECT provider_ref INTO mine FROM social_monitor_settings WHERE actor_id=a;
-  FOR t IN SELECT * FROM jsonb_array_elements(j.targets) LOOP
-   o:=p_observed->(t->>'providerAccountId');
+  FOR tgt IN SELECT * FROM jsonb_array_elements(j.targets) LOOP
+   o:=p_observed->(tgt->>'providerAccountId');
    IF jsonb_typeof(o->'ownerRef')='string' AND mine IS NOT NULL AND o->>'ownerRef'<>mine THEN
     UPDATE social_connections SET status='quarantined',provider_disconnect_pending=true,deletion_attempts=0,lease_owner=NULL,
-     lease_expires_at=NULL,updated_at=clock_timestamp() WHERE id=(t->>'connectionId')::uuid AND status='connected';
+     lease_expires_at=NULL,updated_at=clock_timestamp() WHERE id=(tgt->>'connectionId')::uuid AND status='connected';
     taken:=true;
    ELSIF mine IS NULL OR o->'connected' IS DISTINCT FROM 'true'::jsonb OR o->>'ownerRef' IS DISTINCT FROM mine THEN
     ok:=false;

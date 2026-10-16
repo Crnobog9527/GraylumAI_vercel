@@ -39,15 +39,15 @@ const job = id => c.query('SELECT * FROM social_publish_jobs WHERE id=$1', [id])
 
 // A member with one brand and accounts on several platforms; each account gets a publish-ready connection.
 const extraAccountSql = `CREATE OR REPLACE FUNCTION pm_test.extra_account(a uuid,plat text) RETURNS uuid LANGUAGE plpgsql AS $$
-DECLARE src opc_accounts;ap artifact_projects;id uuid:=gen_random_uuid();
+DECLARE src opc_accounts;ap artifact_projects;nid uuid:=gen_random_uuid();
 BEGIN
  SELECT * INTO src FROM opc_accounts WHERE actor_id=a LIMIT 1;
- SELECT * INTO ap FROM artifact_projects WHERE id=src.project_id;
+ SELECT * INTO ap FROM artifact_projects p WHERE p.id=src.project_id;
  INSERT INTO artifact_projects(id,actor_id,module_id,skill_id,account,work_title,current_version)
- VALUES(id,a,ap.module_id,ap.skill_id,'account-'||id,'account title',0);
+ VALUES(nid,a,ap.module_id,ap.skill_id,'account-'||nid,'account title',0);
  INSERT INTO opc_accounts(project_id,actor_id,platform,account_key,source_version_id,business_id)
- VALUES(id,a,plat,'pm-'||id,src.source_version_id,src.business_id);
- RETURN id;
+ VALUES(nid,a,plat,'pm-'||nid,src.source_version_id,src.business_id);
+ RETURN nid;
 END $$;`;
 let seq = 0;
 async function member(balance = 100, platforms = ['x', 'youtube']) {
@@ -145,7 +145,7 @@ try {
   assert.equal(sent.dispatch, true);
   assert.equal(sent.state, 'dispatching');
   assert.equal((await dispatch(u, first.id)).dispatch, false, 'a dispatching job is never dispatched again');
-  await code(svc('SELECT publish_monitor_publish_release($1,$2) v', [first.id, 'X']), 'PUBLISH_MONITOR_INPUT_INVALID');
+  await code(svc('SELECT publish_monitor_publish_release($1,$2) v', [first.id, 'bad code']), 'PUBLISH_MONITOR_INPUT_INVALID');
   let after = await record(first.id, 'sp_first', { [ids[0]]: { status: 'published', url: 'https://x.com/s/1' } });
   assert.equal(after.state, 'unknown');
   assert.equal(await credits(u.a), 88, 'nothing settles while a target is still pending');
@@ -211,13 +211,13 @@ try {
     + 'keep their hold until an admin records "not sent"');
 
   // Dispatch re-checks the provider owner: another owner's reference quarantines the connection; no post is sent.
-  const taken = await claim(u, 'key-taken-001', fp('g'), ids);
+  const taken = await claim(u, 'key-taken-001', fp('1'), ids);
   const res = await dispatch(u, taken.id, observed(u, { [u.connections[1].provider]: { ownerRef: REF, connected: true } }));
   assert.deepEqual([res.dispatch, res.state, res.errorCode], [false, 'released', 'PUBLISH_MONITOR_ACCOUNT_OWNER_CHANGED']);
   assert.deepEqual(await c.query('SELECT status,provider_disconnect_pending FROM social_connections WHERE id=$1', [ids[1]])
     .then(r => r.rows[0]), { status: 'quarantined', provider_disconnect_pending: true });
   assert.equal(await credits(u.a), 94);
-  const gone = await claim(u, 'key-gone-0001', fp('h'), [ids[0]]);
+  const gone = await claim(u, 'key-gone-0001', fp('2'), [ids[0]]);
   const res2 = await dispatch(u, gone.id, observed(u, { [u.connections[0].provider]: { ownerRef: null, connected: false } }));
   assert.deepEqual([res2.dispatch, res2.errorCode], [false, 'PUBLISH_MONITOR_TARGET_CHANGED']);
   assert.equal((await c.query('SELECT status FROM social_connections WHERE id=$1', [ids[0]])).rows[0].status, 'connected');
@@ -225,7 +225,7 @@ try {
     + 'deleted account just stops the job; both release hold and slots');
 
   // Webhook results take the same idempotent path.
-  const hook = await claim(other, 'key-hook-0001', fp('i'), [other.connections[0].id]);
+  const hook = await claim(other, 'key-hook-0001', fp('3'), [other.connections[0].id]);
   await dispatch(other, hook.id);
   await record(hook.id, 'sp_hook', {});
   assert.equal(await svc('SELECT publish_monitor_publish_webhook_result($1,$2,true,$3) v', ['sp_hook', 'pfm_nobody', 'https://a.b/c']),
@@ -248,8 +248,8 @@ try {
     await x.connect();
     return x;
   }));
-  const raced = await Promise.allSettled([claim(a1, 'key-race-0001', fp('j'), [a1.connections[0].id], conns[0]),
-    claim(a2, 'key-race-0002', fp('j'), [a2.connections[0].id], conns[1])]);
+  const raced = await Promise.allSettled([claim(a1, 'key-race-0001', fp('4'), [a1.connections[0].id], conns[0]),
+    claim(a2, 'key-race-0002', fp('4'), [a2.connections[0].id], conns[1])]);
   await Promise.all(conns.map(x => x.end()));
   assert.equal(raced.filter(x => x.status === 'fulfilled').length, 1);
   assert.match(String(raced.find(x => x.status === 'rejected').reason.message), /PUBLISH_MONITOR_QUOTA_EXHAUSTED/);
@@ -270,7 +270,7 @@ try {
   // Disconnecting a connection with an open publish: only disconnect at the provider, the hold stays until the result,
   // then the job settles normally and the deletion proceeds (plan §4.1, #990 convention: targets carry connectionId).
   const d = await member(12);
-  const dj = await claim(d, 'key-disc-0001', fp('l'), d.connections.map(x => x.id));
+  const dj = await claim(d, 'key-disc-0001', fp('6'), d.connections.map(x => x.id));
   assert.equal(await credits(d.a), 0, 'the whole balance can be held, never more');
   await dispatch(d, dj.id);
   await svc('SELECT publish_monitor_publish_unknown($1,$2) v', [dj.id, 'PUBLISH_MONITOR_RESULT_UNKNOWN']);
@@ -286,7 +286,7 @@ try {
   assert.equal((await work(d.connections[0].provider)).action, 'delete', 'once settled the deletion goes ahead');
   // A claimed (never sent) job whose connection was disconnected is released at dispatch, not sent.
   const d2 = await member(100, ['x']);
-  const cj = await claim(d2, 'key-disc-0002', fp('m'), [d2.connections[0].id]);
+  const cj = await claim(d2, 'key-disc-0002', fp('7'), [d2.connections[0].id]);
   await svc('SELECT publish_monitor_disconnect($1,$2) v', [d2.a, d2.connections[0].id]);
   assert.deepEqual([(await dispatch(d2, cj.id)).dispatch, await credits(d2.a)], [false, 100]);
   report.checks.push('disconnect with an open publish keeps the hold and delays provider deletion until settled; a claimed '
@@ -294,7 +294,7 @@ try {
 
   // Erasure: an open job keeps only its check fields, still settles afterwards, and then disappears.
   const e = await member();
-  const open = await claim(e, 'key-erase-001', fp('k'), e.connections.map(x => x.id));
+  const open = await claim(e, 'key-erase-001', fp('5'), e.connections.map(x => x.id));
   await dispatch(e, open.id);
   await svc('SELECT publish_monitor_publish_unknown($1,$2) v', [open.id, 'PUBLISH_MONITOR_RESULT_UNKNOWN']);
   await closeAccount(c, { actor: e.a });
