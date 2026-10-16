@@ -124,6 +124,15 @@ export async function admitResearchTurn(input: ResearchAdmissionInput): Promise<
   return { research, tools, policies: used.map(({ policy }) => policy) };
 }
 
+/** true when the check passes, false when only the required context does not fit; other errors propagate. */
+export function fitsCapacity(check: () => void): boolean {
+  try { check(); return true; }
+  catch (error) {
+    if (error instanceof Error && error.message === 'RUNTIME_REQUIRED_CONTEXT_EXCEEDS_CAPACITY') return false;
+    throw error;
+  }
+}
+
 const SCALE = 1_000_000_000_000n;
 const usd = (value: bigint) => `${value / SCALE}.${(value % SCALE).toString().padStart(12, '0')}`;
 

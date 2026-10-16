@@ -52,7 +52,7 @@ import {runAutomaticFinancialRecovery} from './automaticRecovery';
 import {readPositioningGate,judgePositioning,windowBoundKey,refusePositioning,POSITIONING_REFUSAL_CAP,
  type PositioningGatePolicy} from './positioningGate';
 import {POSITIONING_FALLBACK,POSITIONING_FALLBACK_INSTRUCTIONS} from './positioningFallback';
-import {attachResearchTurn} from './researchAdmission';
+import {attachResearchTurn,fitsCapacity} from './researchAdmission';
 
 const uuid=z.string().uuid();
 export const runtimeMaterialInput=z.object({sessionId:uuid,requestId:uuid,expectedRevision:z.number().int().nonnegative(),
@@ -456,9 +456,8 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
    }
    // RT-3b PR-3: a positioning mentor turn may also offer the research tools (admin switch, priced routes, room left).
    if(policy.researchTools&&mentorStream&&!opening&&hostTurnContext&&!stepSummary&&billing.contractVersion==='bill2.v2'&&
-    await attachResearchTurn({admin,real:policy.real,context,billing,fits:extra=>{
-     try{requireCapacity(instructions+positioningRule,Boolean(skillFile),currentInput,historyRead,extra);return true;}
-     catch(error){if(error instanceof Error&&error.message==='RUNTIME_REQUIRED_CONTEXT_EXCEEDS_CAPACITY')return false;throw error;}}}))
+    await attachResearchTurn({admin,real:policy.real,context,billing,
+     fits:extra=>fitsCapacity(()=>requireCapacity(instructions+positioningRule,Boolean(skillFile),currentInput,historyRead,extra))}))
     billing.sourceHash=createHash('sha256').update(JSON.stringify(context)).digest('hex');
    // Both SQL CHECKs measure jsonb::text, not JSON.stringify or model input.
    // This runs before runtime_admit, which atomically creates the execution/reservation.
