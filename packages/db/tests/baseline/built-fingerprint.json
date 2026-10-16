@@ -2089,7 +2089,7 @@
   "con:model_usage_aliases.model_usage_aliases_model_key": "d76a0c396825",
   "con:model_usage_aliases.model_usage_aliases_pkey": "276cb6eac4b1",
   "con:modules.modules_created_by_profiles_id_fk": "1dade65d039b",
-  "con:modules.modules_display_translations_shape": "e68ed37c756f",
+  "con:modules.modules_display_translations_shape": "f1cf78fdf29f",
   "con:modules.modules_link_module_id_fkey": "16bdfebdfbbe",
   "con:modules.modules_model_id_ai_models_id_fk": "2b0699b7e101",
   "con:modules.modules_pkey": "4c6419b37043",

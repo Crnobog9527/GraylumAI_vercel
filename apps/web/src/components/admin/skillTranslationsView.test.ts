@@ -36,6 +36,15 @@ it('starts empty for labels whose Chinese changed after the English was saved', 
     .toEqual({ 'field:step-1:goal': 'Goal' });
 });
 
+it('shows a repeated report section title once, so its single translation is never overwritten', () => {
+  const repeated = { ...source, reportSections: ['定位结论', '执行方案', '定位结论'] };
+  expect(translationRows(repeated).filter(row => row.kind === '报告章节标题').map(row => row.original)).toEqual(['定位结论', '执行方案']);
+  const draft = draftFrom(repeated, { reportSections: { 定位结论: 'Positioning' } });
+  expect(draft).toEqual({ 'section:0': 'Positioning' });
+  expect(translationsFrom(repeated, { ...draft, 'section:1': 'Plan' })).toEqual({ reportSections: { 定位结论: 'Positioning', 执行方案: 'Plan' } });
+  expect(translationsFrom(repeated, { 'section:0': '' })).toEqual({});
+});
+
 it('flags multi-line or over-long inputs before saving', () => {
   const rows = translationRows(source);
   expect(invalidTranslation(rows, { 'step:step-1': 'ok' })).toBeUndefined();

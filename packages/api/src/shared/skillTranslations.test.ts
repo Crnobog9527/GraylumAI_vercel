@@ -77,3 +77,23 @@ it('accepts only single-line labels of at most 160 characters, and only known lo
   expect(skillDisplayTranslations.safeParse({ fr: {} }).success).toBe(false);
   expect(skillDisplayTranslations.safeParse({ en: { reportTitle: e('标题', 'Report') } }).success).toBe(true);
 });
+
+it('the largest translation set a valid workflow allows fits the 2 MB database limit (0273)', () => {
+  // workflowSchema maxima: 32 steps x 24 fields, 64 report sections, ids up to 64 characters, labels up to 160
+  // UTF-16 units (at most 3 UTF-8 bytes each); jsonb text adds a space after every ':' and ','.
+  const label = (n: number) => String(n).padStart(160, '汉');
+  const id = (n: number) => 'a' + String(n).padStart(63, '0');
+  const steps = Array.from({ length: 32 }, (_, s) => ({ id: id(s), title: label(s),
+    information: Array.from({ length: 24 }, (_, f) => ({ id: id(f), title: label(1000 + f) })) }));
+  const largest = skillDisplaySource({ steps, report: { title: label(9) },
+    reportGeneration: { sections: Array.from({ length: 64 }, (_, i) => label(2000 + i)) } });
+  const e = (original: string) => ({ original, text: label(7) });
+  const value = skillLocaleTranslations.parse({ reportTitle: e(largest.reportTitle),
+    steps: Object.fromEntries(largest.steps.map(step => [step.id, e(step.title)])),
+    fields: Object.fromEntries(largest.steps.map(step => [step.id, Object.fromEntries(step.fields.map(f => [f.id, e(f.title)]))])),
+    reportSections: Object.fromEntries(largest.reportSections.map(title => [title, label(8)])) });
+  expect(unknownTranslationKeys(largest, value)).toEqual([]);
+  const json = JSON.stringify({ en: value });
+  const separators = (json.match(/[:,]/g) ?? []).length;
+  expect(Buffer.byteLength(json) + separators).toBeLessThan(2097152);
+});

@@ -20,6 +20,8 @@ export function skillTranslationsErrorText(error: unknown) {
 export type TranslationRow = { key: string; kind: string; original: string };
 export type TranslationDraft = Record<string, string>;
 
+const sectionTitles = (source: SkillDisplaySource) => [...new Set(source.reportSections)];
+
 export function translationRows(source: SkillDisplaySource): TranslationRow[] {
   return [
     { key: 'reportTitle', kind: '报告标题', original: source.reportTitle },
@@ -27,7 +29,8 @@ export function translationRows(source: SkillDisplaySource): TranslationRow[] {
       { key: `step:${step.id}`, kind: `第 ${index + 1} 步名称`, original: step.title },
       ...step.fields.map(field => ({ key: `field:${step.id}:${field.id}`, kind: `第 ${index + 1} 步字段`, original: field.title })),
     ]),
-    ...source.reportSections.map((title, index) => ({ key: `section:${index}`, kind: '报告章节标题', original: title })),
+    // Sections are translated by their title, so a repeated title is one row (reportManifest allows repeats).
+    ...sectionTitles(source).map((title, index) => ({ key: `section:${index}`, kind: '报告章节标题', original: title })),
   ];
 }
 
@@ -48,7 +51,7 @@ export function draftFrom(source: SkillDisplaySource, saved: SkillLocaleTranslat
     const fields = own(saved?.fields, step.id);
     for (const field of step.fields) put(`field:${step.id}:${field.id}`, own(fields, field.id), field.title);
   }
-  source.reportSections.forEach((title, index) => put(`section:${index}`, own(saved?.reportSections, title), title));
+  sectionTitles(source).forEach((title, index) => put(`section:${index}`, own(saved?.reportSections, title), title));
   return draft;
 }
 
@@ -66,7 +69,7 @@ export function translationsFrom(source: SkillDisplaySource, draft: TranslationD
       if (text) (fields[step.id] ??= {})[field.id] = { original: field.title, text };
     }
   }
-  source.reportSections.forEach((title, index) => {
+  sectionTitles(source).forEach((title, index) => {
     const text = value(`section:${index}`);
     if (text) reportSections[title] = text;
   });

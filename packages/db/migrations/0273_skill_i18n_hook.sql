@@ -13,9 +13,11 @@ BEGIN;
 ALTER TABLE public.modules ADD COLUMN IF NOT EXISTS display_translations jsonb NOT NULL DEFAULT '{}'::jsonb;
 COMMENT ON COLUMN public.modules.display_translations IS
  'SKILL-I18N-HOOK: per-locale display translations of user-visible Skill labels; the workflow stays the Chinese original.';
+-- 2 MB covers the largest translation set the API accepts (32 steps x 24 fields, 64 report sections, each with a
+-- 160-character original and translation), so a valid save never fails here.
 ALTER TABLE public.modules DROP CONSTRAINT IF EXISTS modules_display_translations_shape;
 ALTER TABLE public.modules ADD CONSTRAINT modules_display_translations_shape CHECK (
- jsonb_typeof(display_translations)='object' AND octet_length(display_translations::text)<=65536);
+ jsonb_typeof(display_translations)='object' AND octet_length(display_translations::text)<=2097152);
 -- Client roles have an explicit public-column allowlist; never grant this column to them.
 REVOKE SELECT (display_translations), INSERT (display_translations), UPDATE (display_translations),
  REFERENCES (display_translations) ON public.modules FROM anon, authenticated;

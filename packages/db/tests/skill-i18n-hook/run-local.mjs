@@ -33,8 +33,9 @@ try {
   for (const bad of ['[]', '"text"', '1', 'null']) await code(c.query(`UPDATE modules SET display_translations='${bad}'::jsonb WHERE id=$1`,
     [moduleId]), '23514');
   await code(c.query('UPDATE modules SET display_translations=NULL WHERE id=$1', [moduleId]), '23502');
-  await code(set({ en: { reportTitle: 'x'.repeat(70000) } }), '23514');
-  report.checks.push('allow: an object of translations; deny: non-objects, null and values over 64 KB');
+  await set({ en: { reportTitle: 'x'.repeat(2000000) } });
+  await code(set({ en: { reportTitle: 'x'.repeat(2100000) } }), '23514');
+  report.checks.push('allow: an object of translations; deny: non-objects, null and values over 2 MB');
 
   for (const role of ['anon', 'authenticated']) {
     for (const p of ['SELECT', 'INSERT', 'UPDATE', 'REFERENCES']) {
