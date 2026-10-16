@@ -339,7 +339,7 @@ PR-A 留给后续 PR 的必做事项：
 |research_operations ([0065][m0065],[0071][m0071],[0263][m0263])|M 调用身份/报价预扣收费/时间状态，D result|artifact_evidence.operation_id 先处理；未知不重试；0263 起记 bill2_call_id，关联的计费调用已结算即视为结清（用户侧已按 0 或实际结算，供应商成本待确认和上限仍留在 bill2_calls）|
 |research_selection_cards ([0263][m0263])|D 整行（选项和确认内容：关键词原文、候选账号）|删会话、删回答（本回答发出的卡）和注销时直接删除；不含财务|
 |research_discoveries ([0263][m0263])|D 整行（确认的关键词、发现进度）|删会话、删回答（本回答发起的）和注销时直接删除；先于 cards 无 FK 依赖|
-|research_account_fetches ([0263][m0263])|D 整行（平台、账号标识、证据编号）|删会话、删回答和注销时直接删除；证据正文在 research_operations 按上一行清|
+|research_account_fetches ([0263][m0263])|D 账号原文、证据及回答关联；会话内防重试散列|删会话和注销时整行删除；删回答时 charged/unknown 失败仅留无正文的会话级拒绝重试记录，清空账号原文、证据、回答及授权关联并撤销旧令牌；证据正文在 research_operations 按上一行清|
 |research_refresh_grants ([0263][m0263])|D 整行（平台、账号标识、使用时间）|删会话和注销时直接删除|
 |artifact_projects ([0066][m0066],[0080][m0080],[0107][m0107])|D account/work_title；必要下游依赖留 tombstone|所有 rounds/versions/evidence/OPC/其他 source_project_id 后，source_project 自引用倒序|
 |artifact_rounds ([0066][m0066])|D workflow 中混入的私文/steps 全部正文|confirmations/candidates/versions/requests/OPC/link/chat 后；固定轮 guard 要改|

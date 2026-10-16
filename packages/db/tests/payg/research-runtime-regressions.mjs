@@ -1,8 +1,9 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import assert from 'node:assert/strict';
 import {randomUUID} from 'node:crypto';
-import {rpc} from '../erasure-b2a/cases.mjs';
+import {rpc,closeAccount} from '../erasure-b2a/cases.mjs';
 import {toolFixture} from './research-tools.mjs';
+import {hostCaches} from './research-runtime-host-cache.mjs';
 
 // Same cache contract as benchmarkFetch/accountMetrics; raw query/source/call evidence stays in operations.
 export const accountEvidence = (ref='op-1',platform='tiktok',account='alpha') => ({
@@ -91,6 +92,47 @@ export async function researchRuntimeRegressionCases({db,report,createFixture}) 
       assert.equal((await rpc(db,'research_account_fetch_claim',f.actor,f.session,f.execution,'tiktok','alpha',null)).claimed,false);
     };
     await refused();await erase(db,f,'answer',e2);await refused();
+  });
+  for(const state of ['failed_charged','unknown']) for(const boundary of ['session','account']) {
+    await check('RT-3b '+state+' tombstone clears payload, blocks answer retry, removed with '+boundary,async()=>{
+      const f=await fixture(db,createFixture),e2=await answer(db,f);
+      const fetch=await rpc(db,'research_account_fetch_claim',f.actor,f.session,f.execution,'tiktok','@Alpha',null);
+      await rpc(db,'research_account_fetch_dispatch',f.actor,fetch.fetchId,fetch.attempt);
+      await rpc(db,'research_account_fetch_finish',f.actor,fetch.fetchId,fetch.attempt,state,{private:'erase me'});
+      await erase(db,f,'answer',f.execution);
+      const row=(await db.query('SELECT * FROM research_account_fetches WHERE id=$1',[fetch.fetchId])).rows[0];
+      assert.ok(row,'sent failure survives answer deletion');
+      for(const key of ['account','execution_id','evidence','last_success','last_success_execution_id','refresh_id']) assert.equal(row[key],null,key);
+      assert.match(row.account_key,/^[a-f0-9]{64}$/);assert.notEqual(row.attempt,fetch.attempt);
+      assert.equal((await rpc(db,'research_account_fetch_claim',f.actor,f.session,e2,'tiktok',' alpha ',null)).claimed,false);
+      await assert.rejects(rpc(db,'research_refresh_create',f.actor,f.session,'tiktok','alpha'),/RESEARCH_REFRESH_INVALID/);
+      await assert.rejects(rpc(db,'research_account_fetch_finish',f.actor,fetch.fetchId,fetch.attempt,state,{private:'late'}),/RESEARCH_FETCH_CONFLICT/);
+      if(boundary==='session') await erase(db,f,'session',f.session);
+      else {await closeAccount(db,f);await db.query('SELECT account_erasure_scrub_content($1)',[f.actor]);}
+      assert.equal((await db.query('SELECT count(*)::int n FROM research_account_fetches WHERE id=$1',[fetch.fetchId])).rows[0].n,0);
+    });
+  }
+  await check('RT-3b full metric value and classification contracts reject invalid paid caches',async()=>{
+    const f=await fixture(db,createFixture),fetch=await rpc(db,'research_account_fetch_claim',f.actor,f.session,f.execution,'tiktok','alpha',null);
+    await rpc(db,'research_account_fetch_dispatch',f.actor,fetch.fetchId,fetch.attempt);
+    const bad=[];
+    for(const value of ['bad',-1,{},true]) {const e=accountEvidence();e.metrics.followers.value=value;bad.push(e);}
+    for(const value of [-1,0.5,31]) {const e=accountEvidence();e.metrics.postsAnalyzed=value;bad.push(e);}
+    for(const refs of [[42],[''],[null]]) {const e=accountEvidence();e.metrics.followers.refs=refs;bad.push(e);}
+    for(const value of ['invalid',42,'infinity']) {const e=accountEvidence();e.metrics.lastPublishedAt={value,refs:['op#1']};bad.push(e);}
+    for(const missing of [[42],['bogus']]) {const e=accountEvidence();e.metrics.missing=missing;bad.push(e);}
+    for(const classification of [{qualified:true,category:null,excluded:null},
+      {qualified:false,category:null,excluded:'bogus'}, {qualified:true,category:'head_reference',excluded:null},
+      {qualified:true,category:'imitable',excluded:'NO_POSTS'}]) bad.push({...accountEvidence(),classification});
+    for(const evidence of bad) await assert.rejects(rpc(db,'research_account_fetch_finish',f.actor,fetch.fetchId,fetch.attempt,'succeeded',evidence),/RESEARCH_FETCH_INVALID/);
+  });
+  await check('RT-3b SQL accepts actual accountMetrics/classifyAccount producer results',async()=>{
+    for(const evidence of await hostCaches()) {
+      const f=await fixture(db,createFixture),fetch=await rpc(db,'research_account_fetch_claim',f.actor,f.session,f.execution,'tiktok','alpha',null);
+      await rpc(db,'research_account_fetch_dispatch',f.actor,fetch.fetchId,fetch.attempt);
+      await rpc(db,'research_account_fetch_finish',f.actor,fetch.fetchId,fetch.attempt,'succeeded',evidence);
+      assert.deepEqual((await rpc(db,'research_account_fetch_claim',f.actor,f.session,f.execution,'tiktok','alpha',null)).evidence,evidence);
+    }
   });
   assert.deepEqual(failures,[],'RT-3b review regressions');
 }

@@ -67,9 +67,9 @@ $$;
 CREATE TABLE IF NOT EXISTS public.research_account_fetches (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(), actor_id uuid NOT NULL REFERENCES public.profiles(id),
   session_id uuid NOT NULL REFERENCES public.runtime_sessions(id),
-  execution_id uuid NOT NULL REFERENCES public.runtime_executions(id),
+  execution_id uuid REFERENCES public.runtime_executions(id),
   platform text NOT NULL CHECK (platform ~ '^[a-z]{1,20}$'),
-  account text NOT NULL CHECK (length(account) BETWEEN 1 AND 200),
+  account text CHECK (length(account) BETWEEN 1 AND 200 AND research_account_key(platform,account)<>''),
   -- prepared: claimed, nothing sent yet (a crash here leaves it reclaimable); in_progress: marked sent, never resent.
   -- failed: confirmed free failure (may be claimed again); failed_charged: a sent request the supplier charged for
   -- although it failed (platform cost) — like unknown, it is never sent again in this session.
@@ -82,7 +82,8 @@ CREATE TABLE IF NOT EXISTS public.research_account_fetches (
   -- The refresh grant a prepared attempt consumed; retrying with it after a crash takes the attempt over.
   refresh_id uuid,
   created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now(),
-  account_key text GENERATED ALWAYS AS (public.research_account_key(platform,account)) STORED CHECK (account_key<>''),
+  -- A session-scoped digest survives answer deletion without retaining the account spelling or payload.
+  account_key text NOT NULL CHECK (account_key ~ '^[a-f0-9]{64}$'),
   UNIQUE (session_id, platform, account_key)
 );
 CREATE TABLE IF NOT EXISTS public.research_refresh_grants (
@@ -283,14 +284,14 @@ RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp A
 DECLARE f research_account_fetches; g research_refresh_grants;
 BEGIN
   PERFORM research_session_owned(a,s,e);
-  INSERT INTO research_account_fetches(actor_id,session_id,execution_id,platform,account,state)
-  VALUES(a,s,e,p_platform,p_account,'prepared') ON CONFLICT (session_id,platform,account_key) DO NOTHING RETURNING * INTO f;
+  INSERT INTO research_account_fetches(actor_id,session_id,execution_id,platform,account,account_key,state)
+  VALUES(a,s,e,p_platform,p_account,encode(sha256(convert_to(s::text||':'||research_account_key(p_platform,p_account),'utf8')),'hex'),'prepared') ON CONFLICT (session_id,platform,account_key) DO NOTHING RETURNING * INTO f;
   IF f.id IS NOT NULL THEN
     IF p_refresh IS NOT NULL THEN RAISE EXCEPTION 'RESEARCH_REFRESH_INVALID';END IF;
     RETURN jsonb_build_object('claimed',true,'fetchId',f.id,'attempt',f.attempt);
   END IF;
   SELECT * INTO f FROM research_account_fetches WHERE session_id=s AND platform=p_platform
-    AND account_key=research_account_key(p_platform,p_account) FOR UPDATE;
+    AND account_key=encode(sha256(convert_to(s::text||':'||research_account_key(p_platform,p_account),'utf8')),'hex') FOR UPDATE;
   IF p_refresh IS NOT NULL THEN
     IF f.state='failed_charged' THEN RAISE EXCEPTION 'RESEARCH_REFRESH_INVALID';END IF;
     SELECT * INTO g FROM research_refresh_grants WHERE id=p_refresh AND actor_id=a AND session_id=s FOR UPDATE;
@@ -340,7 +341,7 @@ BEGIN
     SELECT * INTO f FROM research_account_fetches WHERE id=p_fetch AND actor_id=a;
     -- The host cache is accountMetrics + classification; query/source/call records remain in research_operations.
     IF p_evidence->>'platform' IS DISTINCT FROM f.platform
-     OR research_account_key(f.platform,p_evidence->>'account') IS DISTINCT FROM f.account_key
+     OR research_account_key(f.platform,p_evidence->>'account') IS DISTINCT FROM research_account_key(f.platform,f.account)
      OR jsonb_typeof(p_evidence->'fetchedAt') IS DISTINCT FROM 'string'
      OR NOT pg_input_is_valid(p_evidence->>'fetchedAt','timestamp with time zone')
      OR jsonb_typeof(p_evidence->'metrics') IS DISTINCT FROM 'object'
@@ -356,6 +357,41 @@ BEGIN
        OR jsonb_typeof(p_evidence->'metrics'->metric->'refs') IS DISTINCT FROM 'array'
       THEN RAISE EXCEPTION 'RESEARCH_FETCH_INVALID';END IF;
     END LOOP;
+    IF (p_evidence->'metrics'->>'postsAnalyzed')::numeric NOT BETWEEN 0 AND 30
+     OR trunc((p_evidence->'metrics'->>'postsAnalyzed')::numeric)<>(p_evidence->'metrics'->>'postsAnalyzed')::numeric
+     OR NOT isfinite((p_evidence->>'fetchedAt')::timestamptz)
+     OR EXISTS(SELECT 1 FROM jsonb_array_elements(p_evidence->'metrics'->'missing') x
+       WHERE jsonb_typeof(x)<>'string' OR x#>>'{}' NOT IN ('followers','medianViews','engagementRate','postsPerWeek','lastPublishedAt'))
+    THEN RAISE EXCEPTION 'RESEARCH_FETCH_INVALID';END IF;
+    FOREACH metric IN ARRAY ARRAY['followers','medianViews','engagementRate','postsPerWeek','lastPublishedAt','earliestPublishedAt'] LOOP
+      IF EXISTS(SELECT 1 FROM jsonb_array_elements(p_evidence->'metrics'->metric->'refs') x
+         WHERE jsonb_typeof(x)<>'string' OR length(btrim(x#>>'{}'))=0)
+       OR ((p_evidence->'metrics'->metric->'value'='null'::jsonb)
+         IS DISTINCT FROM (jsonb_array_length(p_evidence->'metrics'->metric->'refs')=0))
+      THEN RAISE EXCEPTION 'RESEARCH_FETCH_INVALID';END IF;
+      IF p_evidence->'metrics'->metric->'value'<>'null'::jsonb THEN
+        IF metric IN ('lastPublishedAt','earliestPublishedAt') THEN
+          IF jsonb_typeof(p_evidence->'metrics'->metric->'value')<>'string'
+           OR NOT pg_input_is_valid(p_evidence->'metrics'->metric->>'value','timestamp with time zone')
+          THEN RAISE EXCEPTION 'RESEARCH_FETCH_INVALID';END IF;
+          IF NOT isfinite((p_evidence->'metrics'->metric->>'value')::timestamptz)
+          THEN RAISE EXCEPTION 'RESEARCH_FETCH_INVALID';END IF;
+        ELSE
+          IF jsonb_typeof(p_evidence->'metrics'->metric->'value')<>'number'
+          THEN RAISE EXCEPTION 'RESEARCH_FETCH_INVALID';END IF;
+          IF (p_evidence->'metrics'->metric->>'value')::numeric NOT BETWEEN 0 AND 1.7976931348623157e308
+          THEN RAISE EXCEPTION 'RESEARCH_FETCH_INVALID';END IF;
+        END IF;
+      END IF;
+    END LOOP;
+    -- Classification is a tagged union: a known category with no exclusion, or an unqualified exclusion.
+    IF NOT coalesce((p_evidence->'classification'->>'category' IN ('head_reference','imitable','fast_rising')
+       AND p_evidence->'classification'->'excluded'='null'::jsonb
+       AND (p_evidence->'classification'->>'category'<>'head_reference' OR p_evidence->'classification'->'qualified'='false'::jsonb))
+      OR (p_evidence->'classification'->'category'='null'::jsonb
+       AND p_evidence->'classification'->'qualified'='false'::jsonb
+       AND p_evidence->'classification'->>'excluded' IN ('FOLLOWERS_MISSING','FOLLOWERS_BELOW_MIN','NO_PUBLISH_TIME','INACTIVE_30_DAYS','NO_POSTS')),false)
+    THEN RAISE EXCEPTION 'RESEARCH_FETCH_INVALID';END IF;
   END IF;
   -- A sent attempt ends in any state; an attempt never sent can only end as a (free) failure.
   UPDATE research_account_fetches SET state=p_state,evidence=p_evidence,updated_at=clock_timestamp(),
@@ -374,7 +410,7 @@ DECLARE g uuid; src uuid;
 BEGIN
   PERFORM research_session_owned(a,s,NULL);
   SELECT last_success_execution_id INTO src FROM research_account_fetches WHERE session_id=s AND actor_id=a AND platform=p_platform
-    AND account_key=research_account_key(p_platform,p_account) AND last_success IS NOT NULL AND state NOT IN ('prepared','in_progress','failed_charged');
+    AND account_key=encode(sha256(convert_to(s::text||':'||research_account_key(p_platform,p_account),'utf8')),'hex') AND last_success IS NOT NULL AND state NOT IN ('prepared','in_progress','failed_charged');
   IF src IS NULL THEN RAISE EXCEPTION 'RESEARCH_REFRESH_INVALID';END IF;
   INSERT INTO research_refresh_grants(actor_id,session_id,platform,account,source_execution_id)
     VALUES(a,s,p_platform,p_account,src) RETURNING id INTO g;
@@ -458,6 +494,12 @@ $x$);
    attempt=gen_random_uuid(),refresh_id=NULL,updated_at=clock_timestamp()
  WHERE actor_id=a AND execution_id=ANY(ids) AND last_success IS NOT NULL
    AND NOT coalesce(last_success_execution_id=ANY(ids),false) AND NOT coalesce(session_id=ANY(sessions),false);
+ -- A sent charged/unknown result must not become payable again when only its answer is removed.
+ -- Retain only the session-scoped digest and terminal state; revoke late completion tokens and all private payload.
+ UPDATE research_account_fetches SET execution_id=NULL,account=NULL,evidence=NULL,last_success=NULL,
+   last_success_execution_id=NULL,refresh_id=NULL,attempt=gen_random_uuid(),updated_at=stamp
+ WHERE actor_id=a AND state IN ('failed_charged','unknown')
+   AND (execution_id=ANY(ids) OR last_success_execution_id=ANY(ids)) AND NOT coalesce(session_id=ANY(sessions),false);
  DELETE FROM research_account_fetches WHERE actor_id=a AND (session_id=ANY(sessions) OR execution_id=ANY(ids)
    OR last_success_execution_id=ANY(ids));
  DELETE FROM research_refresh_grants WHERE actor_id=a AND (session_id=ANY(sessions)
@@ -548,7 +590,7 @@ BEGIN
   WHEN 'refresh' THEN
     SELECT jsonb_build_object('platform',g.platform,'account',g.account,'used',g.used_at IS NOT NULL AND NOT EXISTS(
       SELECT 1 FROM research_account_fetches f WHERE f.actor_id=a AND f.session_id=s AND f.refresh_id=g.id
-      AND f.state='prepared' AND f.platform=g.platform AND f.account_key=research_account_key(g.platform,g.account)))
+      AND f.state='prepared' AND f.platform=g.platform AND f.account_key=encode(sha256(convert_to(s::text||':'||research_account_key(g.platform,g.account),'utf8')),'hex')))
     INTO v FROM research_refresh_grants g
     JOIN runtime_executions x ON x.id=g.source_execution_id AND x.actor_id=a AND x.session_id=s
     WHERE g.id=p_id AND g.actor_id=a AND g.session_id=s AND x.content_deleted_at IS NULL AND x.erased_at IS NULL
