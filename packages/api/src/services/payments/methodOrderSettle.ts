@@ -6,6 +6,8 @@ import { CHECKOUT_ABSENCE_GRACE_SECONDS, findCheckoutForOrder } from './stripeCh
 import { recoverMethodCheckout } from './walletWebhook';
 
 const DAY = 86400;
+// One day short of Stripe's 30-day event retention, so a window near the edge is never trusted.
+const EVENT_RETENTION_SECONDS = 29 * DAY;
 // Admission and claim run in one request, seconds apart: an older never-claimed order was stranded by a failure in
 // between (e.g. a missing price mapping). A release racing a live claim is refused by the database either way.
 export const UNCLAIMED_GRACE_SECONDS = 600;
@@ -73,7 +75,11 @@ export async function settleMethodOrder(db: SupabaseClient, stripe: Stripe, scop
   // Complete but unpaid: an async payment still processing, or one that failed with its webhook lost. Only Stripe's own
   // failure event settles it; the webhook's recovery then re-reads the session and closes only a complete, unpaid one.
   const since = seconds(order.method_dispatched_at ?? order.created_at)! - 300;
-  if (!await asyncPaymentFailed(stripe, sessionId, since)) return 'open';
+  if (!await asyncPaymentFailed(stripe, sessionId, since)) {
+    // Stripe lists only the last 30 days of events: past that, a missing failure event proves nothing. Manual review.
+    if (since < now - EVENT_RETENTION_SECONDS) throw new Error('PAY_COMMON_CHECKOUT_RECONCILIATION_REQUIRED');
+    return 'open';
+  }
   const failed = await recoverMethodCheckout(db, stripe, sessionId, 'checkout.session.async_payment_failed');
   return failed?.paymentStatus === 'paid' ? 'paid' : 'closed';
 }

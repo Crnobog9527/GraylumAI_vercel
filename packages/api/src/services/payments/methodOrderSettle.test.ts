@@ -81,6 +81,10 @@ describe('#961 closing new-method orders that can no longer be paid', () => {
     mocks.recover.mockReset().mockResolvedValue({ orderId: ORDER, checkoutStatus: 'complete', paymentStatus: 'unpaid' });
     await expect(settleMethodOrder(pending.db, pending.stripe, scope, order(), NOW)).resolves.toBe('open');
     expect(mocks.recover).toHaveBeenCalledTimes(1);
+    // Beyond Stripe's 30-day event list, no failure event proves nothing: manual review, never "still processing".
+    await expect(settleMethodOrder(pending.db, pending.stripe, scope, order(), NOW + 29 * 86400))
+      .rejects.toThrow('PAY_COMMON_CHECKOUT_RECONCILIATION_REQUIRED');
+    expect(pending.rpc).not.toHaveBeenCalled();
   });
 
   it('a session found at Stripe without its local mapping goes through the same recovery, never a blind close', async () => {
