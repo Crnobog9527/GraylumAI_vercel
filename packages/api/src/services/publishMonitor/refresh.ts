@@ -137,20 +137,28 @@ export async function refreshConnection(db: Rpc, client: ClientDeps, claim: Refr
   const cutoff = now() - windowDays * 86_400_000;
   const inWindow = (post: NormalizedPost) => post.postedAt === null || Date.parse(post.postedAt) >= cutoff;
   let budget = pageCap - claim.pagesUsed;
-  /** One feed page read and confirmed as still the owner's; budget and deadline are checked first. */
-  const read = async (query: Parameters<typeof readFeedPage>[3]): Promise<FeedPage | Stop | 'rejected_cursor'> => {
+  /**
+   * One feed page read and confirmed as still the owner's; budget and deadline are checked first. Every read that
+   * reached the provider is counted in the persistent daily cap at once (a failed read, or a page whose ownership
+   * re-check failed, is recorded as an empty page); a page that passes is counted when its posts are written. The
+   * shared limiter refusing a read means no provider call was made. A refused saved discovery cursor is cleared in the
+   * same write, so it is never tried again.
+   */
+  const read = async (query: Parameters<typeof readFeedPage>[3], savedCursor = false)
+    : Promise<FeedPage | Stop | 'rejected_cursor'> => {
     if (budget <= 0) return { outcome: 'partial', error: 'PAGE_CAP' };
     if (now() >= until) return { outcome: 'release', error: null };
     const page: Outcome<FeedPage> = await readFeedPage(client, claim.providerAccountId, claim.platform, query);
     budget -= 1;
-    // A read that reached the provider counts against the persistent daily cap even when it failed (the shared
-    // limiter refusing it means no provider call was made).
-    if (page.kind !== 'ok' && page.kind !== 'rate_limited' && !await write(run, [], null, false)) return { outcome: 'stale' };
+    if (page.kind === 'rate_limited') return { outcome: 'release', error: errorCode(page) };
     if (page.kind !== 'ok') {
-      return query?.cursor && page.kind === 'rejected' && outcomeFor(page) === 'failed' ? 'rejected_cursor'
-        : { outcome: outcomeFor(page), error: errorCode(page) };
+      const cursorRefused = Boolean(query?.cursor) && page.kind === 'rejected' && outcomeFor(page) === 'failed';
+      if (!await write(run, [], null, cursorRefused && savedCursor)) return { outcome: 'stale' };
+      return cursorRefused ? 'rejected_cursor' : { outcome: outcomeFor(page), error: errorCode(page) };
     }
-    return await ownership(client, claim) ?? page.value;
+    const stopped = await ownership(client, claim);
+    if (stopped) return await write(run, [], null, false) ? stopped : { outcome: 'stale' };
+    return page.value;
   };
   const isPage = (value: FeedPage | Stop | 'rejected_cursor'): value is FeedPage => typeof value === 'object' && 'posts' in value;
   const scope = (posts: NormalizedPost[]) => {
@@ -162,7 +170,7 @@ export async function refreshConnection(db: Rpc, client: ClientDeps, claim: Refr
   let resuming = cursor !== null;
   let first = true;
   for (;;) {
-    const page = await read({ cursor });
+    const page = await read({ cursor }, first && resuming);
     if (page === 'rejected_cursor' && first && resuming) {
       // A saved cursor the provider no longer accepts: start discovery again from the newest page.
       cursor = null;
@@ -193,16 +201,23 @@ export async function refreshConnection(db: Rpc, client: ClientDeps, claim: Refr
   for (let i = 0; i < due.length && waiting.size > 0; i += DUE_BATCH) {
     const asked = due.slice(i, i + DUE_BATCH).filter(id => waiting.has(id));
     if (asked.length === 0) continue;
-    const page = await read({ platformPostIds: asked, limit: DUE_BATCH });
-    if (page === 'rejected_cursor') return settle(run, 'failed', 'PROVIDER_REJECTED');
-    if (!isPage(page)) return stop(page);
     const askedSet = new Set(asked);
-    const filtered = page.posts.every(post => askedSet.has(post.platformPostId));
-    if (!await write(run, scope(page.posts).kept, null, false)) return stale(run);
-    for (const post of page.posts) waiting.delete(post.platformPostId);
+    let filtered = true;
+    // A filtered answer can itself be paged (Facebook returns at most 10 posts with metrics): follow its cursor until
+    // every asked post was seen. An answer holding posts that were not asked for means the filter was ignored.
+    let next: string | null = null;
+    for (let firstPage = true; firstPage || next !== null; firstPage = false) {
+      const page = await read({ platformPostIds: asked, limit: DUE_BATCH, cursor: next });
+      if (page === 'rejected_cursor') return settle(run, 'failed', 'PROVIDER_CURSOR_REJECTED');
+      if (!isPage(page)) return stop(page);
+      filtered = page.posts.every(post => askedSet.has(post.platformPostId));
+      if (!await write(run, scope(page.posts).kept, null, false)) return stale(run);
+      for (const post of page.posts) waiting.delete(post.platformPostId);
+      if (!filtered) { next = page.hasMore ? page.nextCursor : null; break; }
+      next = asked.some(id => waiting.has(id)) && page.hasMore ? page.nextCursor : null;
+    }
     if (filtered) continue;
     // The filter was ignored: page through the feed for the rest (cursor not saved; discovery owns the cursor).
-    let next: string | null = page.hasMore ? page.nextCursor : null;
     while (next !== null && waiting.size > 0) {
       const more = await read({ cursor: next });
       if (more === 'rejected_cursor') return settle(run, 'failed', 'PROVIDER_CURSOR_REJECTED');
