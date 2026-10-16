@@ -10,7 +10,14 @@ function fixture(role = 'admin', options: Options = {}) {
   const workflow = { ...makeWorkflow(2, true), steps: makeWorkflow(2, true).steps.map((step, i) =>
     i === 0 ? { ...step, information: [{ id: 'goal', title: '目标', required: true }] } : step) };
   const writes: Record<string, unknown>[] = [];
-  const db = { from(table: string) {
+  const rpcs: Record<string, unknown>[] = [];
+  const db = { async rpc(name: string, args: Record<string, unknown>) {
+    // Stand-in for 0273 admin_skill_display_workflow (its role checks run in the local database test).
+    if (name !== 'admin_skill_display_workflow') throw new Error('Unexpected rpc');
+    rpcs.push(args);
+    if (options.missing) return { data: null, error: { code: 'P0001', message: 'SKILL_TRANSLATIONS_MODULE_NOT_FOUND' } };
+    return { data: options.unpublished ? null : options.badWorkflow ? { steps: 'x' } : workflow, error: null };
+  }, from(table: string) {
     let patch: Record<string, unknown> | undefined, version: unknown;
     const q = {
       select() { return q; },
@@ -23,8 +30,7 @@ function fixture(role = 'admin', options: Options = {}) {
       },
       async single() { return { data: { id: id(1), role, status: 'active', credits: 0 }, error: null }; },
       then(resolve: (v: unknown) => unknown) {
-        if (table === 'artifact_workflows') return Promise.resolve(resolve({ error: null,
-          data: options.unpublished ? [] : [{ workflow: options.badWorkflow ? { steps: 'x' } : workflow }] }));
+        if (table === 'artifact_workflows') throw new Error('artifact_workflows is closed to service_role (0067)');
         if (!patch) throw new Error('Unexpected query');
         // The auth middleware's own profile touch-up is not part of this setting.
         if (table !== 'modules') return Promise.resolve(resolve({ data: [], error: null }));
@@ -41,7 +47,7 @@ function fixture(role = 'admin', options: Options = {}) {
     supabaseAdmin: db, hasSupabaseAdminPrivileges: true } as never);
   const save = (translations: object, version = module.updated_at, extra: object = {}) => caller.update({
     moduleId: module.id, locale: 'en', translations, expectedModuleUpdatedAt: version, ...extra } as never);
-  return { caller, module, writes, save };
+  return { caller, module, writes, save, rpcs };
 }
 
 it('admin reads the published labels, saves English, and gets the new module version', async () => {
@@ -58,6 +64,8 @@ it('admin reads the published labels, saves English, and gets the new module ver
   // Clearing every input removes the locale; the Chinese originals show again.
   expect((await f.save({}, saved.moduleUpdatedAt)).translations).toEqual({});
   expect(f.writes).toHaveLength(2);
+  // The workflow is read as the calling administrator, never by querying the closed table.
+  expect(f.rpcs.every(args => args.p_actor_id === id(1) && args.p_module_id === f.module.id)).toBe(true);
 });
 
 it('refuses a save from an editor opened before another change, without writing', async () => {

@@ -16,15 +16,17 @@ function stored(value: unknown): SkillDisplayTranslations {
 }
 
 /** The module, its translations and the labels of its one enabled workflow (null before the first publication). */
-export async function readSkillTranslations(db: SupabaseClient, moduleId: string) {
+export async function readSkillTranslations(db: SupabaseClient, actorId: string, moduleId: string) {
   const module = await db.from('modules').select('id,display_translations,updated_at').eq('id', moduleId).maybeSingle();
   if (module.error) throw new Error('SKILL_TRANSLATIONS_UNAVAILABLE');
   if (!module.data) throw new Error('SKILL_TRANSLATIONS_MODULE_NOT_FOUND');
-  const workflows = await db.from('artifact_workflows').select('workflow').eq('module_id', moduleId).eq('enabled', true);
-  if (workflows.error || (workflows.data?.length ?? 0) > 1) throw new Error('SKILL_TRANSLATIONS_UNAVAILABLE');
+  // artifact_workflows is closed to service_role (0067); 0273 reads the enabled workflow for administrators only.
+  const published = await db.rpc('admin_skill_display_workflow', { p_actor_id: actorId, p_module_id: moduleId });
+  if (published.error?.message === 'SKILL_TRANSLATIONS_MODULE_NOT_FOUND') throw new Error('SKILL_TRANSLATIONS_MODULE_NOT_FOUND');
+  if (published.error) throw new Error('SKILL_TRANSLATIONS_UNAVAILABLE');
   let source: SkillDisplaySource | null = null;
-  if (workflows.data?.length) {
-    const workflow = workflowSchema.safeParse(workflows.data[0]!.workflow);
+  if (published.data !== null && published.data !== undefined) {
+    const workflow = workflowSchema.safeParse(published.data);
     if (!workflow.success) throw new Error('SKILL_TRANSLATIONS_UNAVAILABLE');
     source = skillDisplaySource(workflow.data);
   }
@@ -47,10 +49,10 @@ function compact(value: SkillLocaleTranslations): SkillLocaleTranslations | unde
  * Replaces one locale's translations. Compare-and-set on the module version the editor opened, so it never
  * overwrites a newer save; every key must name a label of the currently published workflow.
  */
-export async function saveSkillTranslations(db: SupabaseClient, input: {
+export async function saveSkillTranslations(db: SupabaseClient, actorId: string, input: {
   moduleId: string; locale: SkillDisplayLocale; translations: SkillLocaleTranslations; expectedModuleUpdatedAt: string;
 }) {
-  const current = await readSkillTranslations(db, input.moduleId);
+  const current = await readSkillTranslations(db, actorId, input.moduleId);
   if (!current.source) throw new Error('SKILL_TRANSLATIONS_NOT_PUBLISHED');
   if (unknownTranslationKeys(current.source, input.translations).length) throw new Error('SKILL_TRANSLATIONS_UNKNOWN_KEY');
   const next: SkillDisplayTranslations = { ...current.translations };

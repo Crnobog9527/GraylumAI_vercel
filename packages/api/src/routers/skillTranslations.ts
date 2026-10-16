@@ -16,9 +16,9 @@ async function safe<T>(work: () => Promise<T>): Promise<T> {
 /** SKILL-I18N-HOOK: administrators only; users see translations once I18N-EN ships the English interface. */
 export const skillTranslationsRouter = router({
   get: adminProcedure.input(moduleInput).query(({ ctx, input }) =>
-    safe(() => readSkillTranslations(ctx.supabase, input.moduleId))),
+    safe(() => readSkillTranslations(ctx.supabase, ctx.profileId, input.moduleId))),
   update: adminProcedure.input(moduleInput.extend({
     locale: z.enum(SKILL_DISPLAY_LOCALES), translations: skillLocaleTranslations,
     expectedModuleUpdatedAt: z.string().min(1).max(64),
-  }).strict()).mutation(({ ctx, input }) => safe(() => saveSkillTranslations(ctx.supabase, input))),
+  }).strict()).mutation(({ ctx, input }) => safe(() => saveSkillTranslations(ctx.supabase, ctx.profileId, input))),
 });
