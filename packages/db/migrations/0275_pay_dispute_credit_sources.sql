@@ -96,9 +96,13 @@ BEGIN
   WHERE g.user_id=p_user AND g.status='granted' AND g.accounting_state='trusted' AND g.credits_granted>g.consumed_amount)
  SELECT 'subscription_grant',x.id,x.left_,x.period_start,x.covering,NOT x.blocked AND NOT x.unknown,x.blocked FROM grants x
  UNION ALL
- SELECT 'credit_package',s.id,s.credits_granted-s.consumed_amount,s.granted_at,false,
-  NOT EXISTS(SELECT 1 FROM credit_source_reviews r WHERE r.source_kind='credit_package' AND r.source_id=s.id),false
- FROM credit_package_sources s WHERE s.user_id=p_user AND s.status='granted' AND s.credits_granted>s.consumed_amount;
+ -- A pack whose order ended as refunded without a clawback (0247 external refund "pack_review")
+ -- keeps its credits in the balance for a person to settle: held back, never consumed or restored to.
+ SELECT 'credit_package',p.id,p.left_,p.granted_at,false,NOT p.refunded AND NOT p.unknown,p.refunded FROM (
+  SELECT s.id,s.credits_granted-s.consumed_amount AS left_,s.granted_at,
+   EXISTS(SELECT 1 FROM payment_orders o WHERE o.id=s.order_id AND o.status IN ('refunded','partially_refunded')) AS refunded,
+   EXISTS(SELECT 1 FROM credit_source_reviews r WHERE r.source_kind='credit_package' AND r.source_id=s.id) AS unknown
+  FROM credit_package_sources s WHERE s.user_id=p_user AND s.status='granted' AND s.credits_granted>s.consumed_amount) p;
 END $$;
 
 -- p_n>0: p_n credits have just left the balance outside the current period; record where from.
@@ -166,7 +170,8 @@ BEGIN
    ok:=FOUND;
   ELSIF src.source_kind='credit_package' THEN
    UPDATE credit_package_sources SET consumed_amount=consumed_amount-x,updated_at=clock_timestamp()
-   WHERE id=src.source_id AND status='granted' AND consumed_amount>=x;
+   WHERE id=src.source_id AND status='granted' AND consumed_amount>=x
+    AND NOT EXISTS(SELECT 1 FROM payment_orders o WHERE o.id=order_id AND o.status IN ('refunded','partially_refunded'));
    ok:=FOUND;
   END IF;
   INSERT INTO credit_source_entries(user_id,pre_deduct_id,source_kind,source_id,amount,applied,reason)

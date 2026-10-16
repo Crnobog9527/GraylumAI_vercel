@@ -152,7 +152,20 @@ try {
   await c.query(`INSERT INTO credit_transactions(user_id,amount,type,ledger_type,source_order_id,idempotency_key)
     VALUES($1,200,'purchase','grant',$2,$3)`, [u3, r.order, 'pay-common:package:' + r.order + ':other']);
   assert.equal(await v('SELECT count(*)::int v FROM credit_package_sources WHERE order_id=$1', [r.order]), 1, 'other keys never create a source');
-  report.checks.push('pack refund clawback reverses the source, failed-refund restoration re-grants it, unrelated keys are ignored');
+  // External (Link) refund of a pack ends the order without a clawback: the pack is held back, not consumed.
+  const u6 = await profile(50);
+  const ext = await pack(u6, 100);
+  p = await reserve(u6, 20);
+  await c.query("UPDATE payment_orders SET status='refunded',payment_status='refunded' WHERE id=$1", [ext.order]);
+  const p2 = await reserve(u6, 40);
+  assert.deepEqual([await balance(u6), await packUsed(ext.source), await unattributed(u6)], [90, 0, 50],
+    'after the external refund only the 30 unattributed credits are used; the pack stays held');
+  assert.equal(await v("SELECT count(*)::int v FROM credit_source_entries WHERE pre_deduct_id=$1 AND source_kind='unattributed' AND NOT applied", [p2]), 1,
+    'the 10 beyond the unattributed balance are recorded as not attributable');
+  await refund(u6, p2);
+  assert.equal(await packUsed(ext.source), 0);
+  report.checks.push('pack refund clawback reverses the source, failed-refund restoration re-grants it, unrelated keys are ignored;'
+    + ' an externally refunded pack (no clawback) is held back and never consumed');
 
   // Compensation after settlement returns the other part to the pack it came from.
   const u4 = await profile(0);
