@@ -3,19 +3,27 @@
 
 import { useEffect } from 'react';
 import { trpc } from '@/trpc/client';
-import { ENDED } from './review-adapter';
+import { ENDED, type RawDetail, type RawEvents, type RawPanel } from './review-adapter';
 
 /** How often the page reads new events while the review runs, and hands the review to the server again. */
 const EVENTS_MS = 4_000;
 const DETAIL_MS = 15_000;
 const NUDGE_MS = 30_000;
 
+export type LiveReview = {
+  detail: { data: RawDetail | undefined; error: { message: string; data?: { code?: string } | null } | null; refetch: () => Promise<unknown> };
+  events: { data: RawEvents | undefined };
+  panel: { data: RawPanel | undefined };
+  /** Nothing more will run. */
+  ended: boolean;
+};
+
 /**
  * Everything the review page reads. The server advances the review (FUSION-BACKGROUND); the page only reads: the
  * events for the animation, the owner's full record, and the seat names. While the review runs, `continue` hands it
  * to the server again now and then (a no-op while the server holds it); it never claims or pays for a call.
  */
-export function useLiveReview(reviewId: string) {
+export function useLiveReview(reviewId: string): LiveReview {
   const detail = trpc.fusionReview.detail.useQuery({ reviewId }, {
     retry: 1, refetchOnWindowFocus: false,
     refetchInterval: query => (query.state.data && ENDED.has(query.state.data.state) ? false : DETAIL_MS),
@@ -44,5 +52,8 @@ export function useLiveReview(reviewId: string) {
   const refetchDetail = detail.refetch;
   useEffect(() => { if (count > 0) void refetchDetail(); }, [count, refetchDetail]);
 
-  return { detail, events, panel, ended };
+  return {
+    detail: { data: detail.data, error: detail.error, refetch: detail.refetch },
+    events: { data: events.data }, panel: { data: panel.data }, ended,
+  };
 }

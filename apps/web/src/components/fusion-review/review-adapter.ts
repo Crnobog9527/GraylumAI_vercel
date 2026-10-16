@@ -10,6 +10,7 @@ type Outputs = inferRouterOutputs<AppRouter>['fusionReview'];
 export type RawDetail = Outputs['detail'];
 export type RawEvents = Outputs['events'];
 export type MineItem = Outputs['mine'][number];
+export type RawPanel = Outputs['panel'];
 
 /** Review states with nothing more to run (the backend's ENDED_STATES). */
 export const ENDED = new Set(['stopped', 'interrupted', 'revision_failed', 'incomplete', 'completed']);
@@ -28,7 +29,7 @@ export function toJuryDetail(raw: RawDetail): JuryDetail {
     reviewId: raw.reviewId, state: raw.state, outcome: kindOf(raw.outcome), revisionId: null,
     seats: raw.seats.filter(item => isSeat(item.seat)) as JuryDetail['seats'],
     summary: raw.summary as JuryDetail['summary'],
-    adoption: (raw.adoption && (raw.adoption as { state?: string }).state === 'recorded' ? raw.adoption : null) as JuryDetail['adoption'],
+    adoption: recordedChoice(raw.adoption),
     awaitingChoice: raw.awaitingChoice,
   };
 }
@@ -53,6 +54,14 @@ export function toCaseReport(raw: Pick<RawDetail, 'chapters' | 'summary'>, accou
 
 const KNOWN = new Set<JuryEvent['type']>(['review_started', 'reviewer_started', 'decision', 'issue', 'reviewer_failed', 'disagreement',
   'response', 'summary_started', 'adjudication', 'revision_ready_for_choice', 'revision_failed', 'review_ended', 'adoption_done']);
+
+/** The stored choice once recorded (a reservation is still in progress); a decline stays a decline after a reload. */
+function recordedChoice(value: unknown): JuryDetail['adoption'] {
+  const stored = value as { state?: string; decision?: string; versionId?: string | null; adopted?: string[]; kept?: string[] } | null;
+  if (stored?.state !== 'recorded') return null;
+  return { state: 'recorded', versionId: stored.versionId ?? null, adopted: stored.adopted ?? [], kept: stored.kept ?? [],
+    ...(stored.decision === 'decline' ? { declined: true } : {}) };
+}
 
 /** Events the page can play: known types whose seats are seats the page draws. Anything else is skipped, not guessed. */
 export function playableEvents(list: RawEvents['events']): JuryEvent[] {
@@ -101,6 +110,9 @@ const START_ERROR: Record<string, string> = {
   FUSION_REVIEW_VERSION_BLOCKED: '这份报告连续 3 次评审没有完成，已暂停对它评审，请联系客服。',
   FUSION_REVIEW_STALE: '报告有更新，或者还没有生成定位报告。请刷新页面，生成报告后再试。',
   FUSION_REVIEW_CONFLICT: '没能开始评审，请刷新页面后再试。',
+  FUSION_REVIEW_ESTIMATE_CHANGED: '模型价格刚刚有变化，最多消耗的积分也变了。请看一下新的数字，再决定要不要开始。',
+  FUSION_INPUT_TOO_LARGE: '报告和资料太长，评审团一次读不完，暂时不能评审。',
+  FUSION_REVIEW_CONTEXT: '报告和资料太长，评审团一次读不完，暂时不能评审。',
 };
 export const startErrorText = (code: string) => START_ERROR[code] ?? '没能开始评审，请稍后再试。';
 

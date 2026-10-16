@@ -88,7 +88,9 @@ async function open(state: string, opts: { draftId?: string; width?: number } = 
         : name === 'fusionReview.adopt' ? { state: 'proposed', revisionId: 'rev', diffHash: 'a'.repeat(64), adopted: ['定位'], kept: [],
           diff: { changes: [{ stepId: 's', stepTitle: '定位', fieldId: 'f', fieldTitle: '一句话定位', before: { value: '旧', status: 'confirmed' },
             after: { value: '新', status: 'confirmed' } }], cascade: [] } }
-          : name === 'fusionReview.confirmAdoption' ? { state: 'recorded', versionId: 'v2', adopted: ['定位'], kept: [] }
+          : name === 'fusionReview.confirmAdoption' ? (JSON.parse(route.request().postData() ?? '{}').decision === 'decline'
+            ? { state: 'recorded', versionId: null, adopted: [], kept: ['定位'] }
+            : { state: 'recorded', versionId: 'v2', adopted: ['定位'], kept: [] })
             : name === 'fusionReview.continue' ? { review: {}, calls: [], background: true } : { seen: true };
     await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ result: { data: result } }) });
   });
@@ -157,6 +159,7 @@ it('does not show a review that belongs to another analysis', async () => {
 /** The positioning page's entry, on its own: the switch, the newest review of this analysis, and start. */
 async function openEntry(answers: { enabled: boolean; mine?: unknown[]; refuse?: string }) {
   const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+  const starts: unknown[] = [];
   page.setDefaultTimeout(5000);
   const errors: string[] = [];
   const calls: Record<string, number> = {};
@@ -166,20 +169,24 @@ async function openEntry(answers: { enabled: boolean; mine?: unknown[]; refuse?:
     if (path === '/') return route.fulfill({ contentType: 'text/html', body: '<div id="root"></div>' });
     const name = path.split('/').pop() ?? '';
     calls[name] = (calls[name] ?? 0) + 1;
-    if (name === 'fusionReview.start') await new Promise(done => setTimeout(done, 300));
+    if (name === 'fusionReview.start') {
+      starts.push(JSON.parse(route.request().postData() ?? '{}'));
+      await new Promise(done => setTimeout(done, 300));
+    }
     if (name === 'fusionReview.start' && answers.refuse) {
       return route.fulfill({ status: 403, contentType: 'application/json', body: JSON.stringify({ error: { message: answers.refuse,
         code: -32603, data: { code: 'FORBIDDEN', httpStatus: 403, path: 'fusionReview.start' } } }) });
     }
     const result = name === 'fusionReview.available' ? { enabled: answers.enabled } : name === 'fusionReview.mine' ? answers.mine ?? []
-      : name === 'fusionReview.panel' ? PANEL : name === 'fusionReview.start' ? { reviewId: REVIEW, state: 'running' } : {};
+      : name === 'fusionReview.panel' ? PANEL : name === 'fusionReview.start' ? { reviewId: REVIEW, state: 'running' }
+        : name === 'fusionReview.estimate' ? { estimateCredits: 1280, maxRounds: 2, reviewers: 3 } : {};
     await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ result: { data: result } }) });
   });
   await page.goto('http://localhost/#entry');
   await page.addScriptTag({ content: code });
   await ui(page.getByText('定位页脚')).toBeVisible({ timeout: 8000 });
   await page.waitForLoadState('networkidle');
-  return { page, errors, calls };
+  return { page, errors, calls, starts };
 }
 const mineItem = (state: string, awaitingChoice = false) => ({ reviewId: REVIEW, draftId: DRAFT, sourceVersionId: REVIEW, state, round: 1,
   phase: 'review', outcomeKind: null, awaitingChoice, createdAt: '2026-10-16T00:00:00.000000+00:00', endedAt: null, seenAt: null });
@@ -194,14 +201,18 @@ it('shows no entry and no error when the jury is switched off', async () => {
 }, 30000);
 
 it('starts one review with the panel\'s names and opens its page; a running one is linked instead', async () => {
-  const { page, errors, calls } = await openEntry({ enabled: true });
+  const { page, errors, calls, starts } = await openEntry({ enabled: true });
   try {
+    expect(calls['fusionReview.estimate'] ?? 0).toBe(0); // nothing is estimated until the user opens the card
     await page.getByRole('button', { name: '请评审团审阅报告' }).click();
     await ui(page.getByText(/3 位评审（目标用户、操盘手、挑刺审核人）/)).toBeVisible();
+    // The maximum is shown before the user agrees, and start carries exactly that maximum.
+    await ui(page.getByText('这次评审最多消耗 1,280 积分，实际用多少扣多少。')).toBeVisible();
     await page.getByRole('button', { name: '开始评审' }).dblclick();
     await page.waitForFunction(() => Boolean((window as unknown as { __pushed?: string }).__pushed));
     expect(await page.evaluate(() => (window as unknown as { __pushed?: string }).__pushed)).toBe(`/positioning/${DRAFT}/review/${REVIEW}`);
     expect(calls['fusionReview.start']).toBe(1);
+    expect(starts).toEqual([expect.objectContaining({ draftId: DRAFT, sourceVersionId: REVIEW, acceptedCredits: 1280 })]);
     expect(errors).toEqual([]);
   } finally { await page.close(); }
   const running = await openEntry({ enabled: true, mine: [mineItem('running')] });
@@ -218,6 +229,20 @@ it('explains a refused start in plain words and keeps the page usable', async ()
     await page.getByRole('button', { name: '请评审团审阅报告' }).click();
     await page.getByRole('button', { name: '开始评审' }).click();
     await ui(page.getByRole('alert')).toHaveText('评审团是会员功能，开通会员后可以使用。');
+    expect(errors).toEqual([]);
+  } finally { await page.close(); }
+}, 30000);
+
+it('says a declined revision was declined, not that every chapter was kept', async () => {
+  const { page, errors, calls } = await open('completed');
+  try {
+    await ui(page.getByRole('heading', { name: '评审团的结果' })).toBeVisible({ timeout: 8000 });
+    await page.getByText('采用修订版').first().click();
+    await page.getByRole('button', { name: '确认', exact: true }).click();
+    await page.getByRole('button', { name: '放弃这次修改' }).click();
+    await ui(page.getByText(/你放弃了这次修改/)).toBeVisible({ timeout: 5000 });
+    await ui(page.getByText(/你选择全部保留原文/)).toHaveCount(0);
+    expect(calls['fusionReview.confirmAdoption']).toBe(1);
     expect(errors).toEqual([]);
   } finally { await page.close(); }
 }, 30000);

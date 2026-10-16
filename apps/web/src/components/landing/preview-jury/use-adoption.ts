@@ -80,7 +80,8 @@ export function useAdoption(detail: JuryDetail, actions: AdoptActions = MOCK_ADO
     setError(null);
     const recorded = await actions.confirm({ requestId: requestId.current, choices: toChoices(state, sections), proposal, decision });
     clear();
-    setResult(recorded);
+    // A decline answers like "everything kept"; remember it was a decline so the page says so.
+    setResult(decision === 'decline' ? { ...recorded, declined: true } : recorded);
   });
 
   return {

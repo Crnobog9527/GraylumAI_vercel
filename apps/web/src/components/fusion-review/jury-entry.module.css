@@ -13,3 +13,4 @@
 .card p { margin: 0; }
 .actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
 .error { color: var(--color-destructive); }
+.cap b { font-variant-numeric: tabular-nums; }
