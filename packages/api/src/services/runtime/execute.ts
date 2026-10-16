@@ -109,7 +109,8 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
   let gateRejection:GateRejection|undefined;
   const research=researchExecution({research:context.research,tools:context.tools,execution,executionId,actorId:await options.actor(),
    database:options.database,emit:event=>progress(event),canSend:()=>{try{budget.assertCanStart(5000);return true;}catch{return false;}}});
-  const checkAgentReply=terminalReplyGuard(agentTurn,context.tools.includes(ASK_QUESTION_TOOL),()=>{terminalReplyFailure=true;},Boolean(context.skillFile),Boolean(context.historyRead),research?.tools.map(tool=>tool.name));
+  const checkAgentReply=terminalReplyGuard(agentTurn,context.tools.includes(ASK_QUESTION_TOOL),()=>{terminalReplyFailure=true;},
+   Boolean(context.skillFile),Boolean(context.historyRead),research?.tools.map(tool=>tool.name));
   let preflightFailure:string|undefined,transportFailureCode:string|undefined;
   const streaming=streamsPrimary(context);
   // B2a: once BILL2 reports a confirmed erasure, nothing more reaches the client.
@@ -295,7 +296,8 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
      logger.warn('api','runtime_history_prefix_omitted',{executionId,omittedItems:originalCount-history.length});
     }
     const selectionOptions={instructions:effective.instructions,inputBytes:Math.min(primaryPolicy.inputLimit,context.purposeBudget?.inputBytes??Infinity),
-     historyItems:context.historyItems,toolBytes:toolBytes+Math.max(context.skillFileReserve??0,context.historyRead?.reserve??0)+(research?.reserve??0),...sizing,
+     historyItems:context.historyItems,
+     toolBytes:toolBytes+Math.max(context.skillFileReserve??0,context.historyRead?.reserve??0)+(research?.reserve??0),...sizing,
      projectHistoryItem:(item:unknown)=>context.hostTurnContext?
       projectHostTurnItem(item,context.scopeMaterial,preserveHistoricalMaterial,projectSupersededScopeItem):
       legacyInput||preserveHistoricalMaterial?item:projectSupersededScopeItem(item,context.scopeMaterial)};
@@ -384,7 +386,8 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
     await ownerRpc('runtime_execution',{...args,p_action:'checkpoint_primary',p_result:{body,lastSequence:callSequence,...turnMetadata}});
     if(native&&(turnMetadata.completeness==='length_limit'||turnMetadata.envelopeCompact))summary='';
     else {
-    const organizer=context.attachedOrganizer,organizerPolicy=modelCallPolicies(execution.billing.callPolicy).find(p=>p.modelId===organizer.modelId&&p.model===organizer.model);
+    const organizer=context.attachedOrganizer;
+    const organizerPolicy=modelCallPolicies(execution.billing.callPolicy).find(p=>p.modelId===organizer.modelId&&p.model===organizer.model);
     if(!organizerPolicy)throw new Error('RUNTIME_ORGANIZER_DENIED');
     const instructions=organizer.instructions ?? 'Organize this operation result. Preserve provenance and uncertainty. Do not add new facts.';
     const organizerInput=organizer.input ? organizer.input+'\n\nPrimary assistant reply:\n'+body : body;

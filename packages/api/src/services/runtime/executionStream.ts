@@ -178,7 +178,13 @@ export async function* streamOriginalExecution(run:(onProgress:(event:RuntimePro
    else textEvent={type:'text',text:event.text};
   }
   else if(event.type==='card'){if(!cardSeen){cardSeen=true;cardEvent=event;}}
-  else if(event.type==='research_call'||event.type==='research_card'){if(researchSeen++<RESEARCH_EVENT_LIMIT)researchEvents.push(event);}
+  else if(event.type==='research_call'||event.type==='research_card'){
+   if(researchSeen++<RESEARCH_EVENT_LIMIT){
+    // Text written before this call is delivered before it: the queue keeps the turn's order.
+    if(textEvent){researchEvents.push(nativePending?transport.flush()!:textEvent);nativePending=false;textEvent=undefined;}
+    researchEvents.push(event);
+   }
+  }
   else phaseEvent=event;wake();})
   .then(result=>{resultEvent={type:'result',result};},error=>{failure=error;}).finally(()=>{done=true;wake();});
  const idle=(ms?:number)=>new Promise<void>(resolve=>{
@@ -194,7 +200,11 @@ export async function* streamOriginalExecution(run:(onProgress:(event:RuntimePro
     if((event.type==='text'||event.type==='textDelta')&&event.text)timing?.mark('firstPublicText');
     await visible?.();yield event;
    }
-   else if(researchEvents.length){const event=researchEvents.shift()!;await visible?.();yield event;}
+   else if(researchEvents.length){
+    const event=researchEvents.shift()!;
+    if((event.type==='text'||event.type==='textDelta')&&event.text){timing?.mark('firstPublicText');lastText=now();}
+    await visible?.();yield event;
+   }
    else if(cardEvent){const event=cardEvent;cardEvent=undefined;await visible?.();yield event;}
    else if(phaseEvent){const event=phaseEvent;phaseEvent=undefined;await visible?.();yield event;}
    else if(resultEvent){const event=resultEvent;resultEvent=undefined;await visible?.();yield event;}

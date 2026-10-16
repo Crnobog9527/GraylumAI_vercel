@@ -43,7 +43,8 @@ const decimalText = z.string().regex(/^(0|[1-9][0-9]{0,11})(\.[0-9]{1,12})?$/);
 /** A frozen tool-route policy as the run stores it (0255 run creation and claim checks); read back at execution. */
 export const frozenToolPolicy = z.object({
   provider: z.enum(['tikhub', 'parallel', 'firecrawl']), account: z.string().min(1).max(120), model: z.string().min(1).max(160),
-  protocol: z.literal(TOOL_PROTOCOL), modelId: z.string().uuid(), multiplier: z.string().min(1).max(32),
+  // md5-shaped like SQL bill2_tool_model_id: no RFC version bits, so not z.uuid(); the refine pins it to the route.
+  protocol: z.literal(TOOL_PROTOCOL), modelId: z.string().regex(/^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/), multiplier: z.string().min(1).max(32),
   lookupSupported: z.literal(false), upperUsd: decimalText, purposes: z.array(z.string().min(1).max(64)).min(1).max(8),
   toolPricing: z.object({
     unit: z.enum(['call', 'sku_search', 'credit']), currency: z.string().min(1).max(8), price: decimalText,

@@ -13,7 +13,7 @@ import {frozenPurposeBudget,FROZEN_OUTPUT_CAP} from './purposeBudgets';
 import {matchingPlan} from './matching';
 import {reasoningPolicy} from './reasoningPolicy';
 import {frozenResearchTurn} from './researchTurn';
-import {POSITIONING_RESEARCH_TOOLS} from '../research/tools/schemas';
+import {POSITIONING_RESEARCH_TOOLS} from '../research/tools/names';
 /** Library documents the user referenced with @: each the caller's own document at the version they chose. */
 export const libraryReferences=z.array(z.object({documentId:z.string().uuid(),version:z.number().int().positive()}).strict())
  .min(1).max(5).refine(items=>new Set(items.map(item=>item.documentId.toLowerCase())).size===items.length,'LIB_REFERENCE_INVALID');
@@ -58,12 +58,12 @@ export const runtimeContext=z.object({
    || context.historySelection || context.sources?.length || context.libraryReferences
    || context.purposeBudget?.purpose !== 'report'))
   ctx.addIssue({code:'custom',message:'REPORT_CONTEXT_INVALID'});
- // A research slot adds one tool call and the model call that reads its result.
+ // A research slot adds one tool call and the model call that reads its result (a card turn already has one tool call).
  const researchSlot=context.research?1:0;
  if(Boolean(context.research)!==context.tools.some(name=>(POSITIONING_RESEARCH_TOOLS as readonly string[]).includes(name))||context.research&&
-  (!context.opcTurnToken||!context.hostTurnContext||context.hostTurnContext.opening||context.hostTurnContext.stepSummary||
+  (!context.hostTurnContext||context.hostTurnContext.opening||context.hostTurnContext.stepSummary||
    context.providerRequestFormat!=='agent-turn-v5-stream'||!context.tools.includes(ASK_QUESTION_TOOL)||context.network!=='deny'||
-   context.maxTurns!==1+(context.skillFile?1:0)+researchSlot||context.maxToolCalls!==(context.skillFile?1:0)+researchSlot))
+   context.maxTurns!==2+(context.skillFile?1:0)||context.maxToolCalls!==2))
   ctx.addIssue({code:'custom',message:'RUNTIME_RESEARCH_CONTEXT_INVALID'});
  if(Boolean(context.skillFile)!==context.tools.includes('read_skill_file')||context.skillFile&&
   (context.role!=='skill'||context.providerRequestFormat!=='agent-turn-v5-stream'||

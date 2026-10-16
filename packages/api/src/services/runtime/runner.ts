@@ -4,7 +4,7 @@ import OpenAI from 'openai';
 import { z } from 'zod';
 import {OPENROUTER_RESPONSE_TIMEOUT_MS} from '../bill2/openRouterPolicy';
 import {matchesFrozenReasoning,type ReasoningPolicy} from './reasoningPolicy';
-import {POSITIONING_RESEARCH_TOOLS} from '../research/tools/schemas';
+import {POSITIONING_RESEARCH_TOOLS} from '../research/tools/names';
 const RESEARCH_SLOT_TOOLS:ReadonlySet<string>=new Set(POSITIONING_RESEARCH_TOOLS);
 
 export type RuntimeTool = {

@@ -3,7 +3,7 @@ import {z} from 'zod';
 import {AGENT_TURN_MESSAGE_LIMIT,ASK_QUESTION_TOOL,MAX_OPTIONS,MIN_OPTIONS,OPTION_MAX_CHARS,QUESTION_MAX_CHARS} from '../../shared/agentTurn';
 import {parseQuestionCard,questionCardSchema,questionToolCardSchema,questionMessageSchema,type QuestionCard} from '../../shared/agentTurn';
 import type {RuntimeTool} from './runner';
-import {POSITIONING_RESEARCH_TOOLS} from '../research/tools/schemas';
+import {POSITIONING_RESEARCH_TOOLS} from '../research/tools/names';
 
 /** Interactive Agent turn tools (AC-1). Only the `agent-turn-v5-stream`
  * request format may carry them, and only when its frozen context lists them.
