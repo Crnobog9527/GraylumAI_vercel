@@ -54,7 +54,7 @@
         },
         {
           "name": "INVITE-ABUSE",
-          "plain": "防止用小号反复刷邀请奖励。"
+          "plain": "下线已取消的邀请码送积分（联盟营销上线后再做）。"
         },
         {
           "name": "DEP-BATCH-A",

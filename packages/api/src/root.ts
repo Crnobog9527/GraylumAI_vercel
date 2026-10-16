@@ -1,3 +1,4 @@
+import { researchRouter } from './routers/research';
 import { libraryRouter } from './routers/library';
 import { reportModelRouter } from './routers/reportModel';
 import { socialMediaFlagRouter } from './routers/socialMediaFlag';
@@ -58,6 +59,7 @@ export const appRouter = router({
   modelIdentity: modelIdentityRouter,
   platformSecrets: platformSecretsRouter,
   researchTools: researchToolsRouter,
+  research: researchRouter,
   invitation: invitationRouter,
   checkin: checkinRouter,
   admin: adminRouter,

@@ -22,3 +22,15 @@
   当前提供后端POST查询；尚未将凭证保存/展示接入前端。无凭证不通过公开requestId查询。
 - `completed` 仅表示本服务在线业务范围的前提及模拟/注入Auth不存在确认，不代表备份、日志平台或第三方已清。
   真实部署、第三方与日志/备份留存仍须另行授权和有效证据。
+
+## #936 支付 wrapper 修复（0264）
+
+`0264_erasure_payment_wrappers.sql` 替换现有函数，沿正常文件建库链执行。
+运行：`node packages/db/tests/erasure-completion/run-local.mjs --local-only`。
+共享回放在迁移自己的历史位置连续应用两次并核对目录一致；不接触远端。
+覆盖 Waffo、新 Stripe card/coupon、card_cn、WeChat 和 Alipay wrapper；旧 Stripe 原始格式沿用现有测试。
+检查完整注销、隐私字段移除、原财务列不变、擦除后禁止回填、坏格式保留并阻止 Auth 删除。
+
+0264 按 #1006 总控分配，须在 0261–0263 合并后同步正式链，重建 built-fingerprint 并完成正式回放。
+未完成的执行状态以 PR #1011 交接记录为准，旧候选验证不能替代正式迁移历史位置验证。
+不改变表、权限或外部付款状态；保留现有 guard。个人内容擦除不可逆，事实产生后只能向前修复。
