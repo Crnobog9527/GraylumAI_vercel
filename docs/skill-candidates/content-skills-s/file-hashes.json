@@ -1,5 +1,19 @@
 [
   {
+    "package": "post-and-article",
+    "path": "EVALS.md",
+    "mediaType": "text/markdown",
+    "bytes": 1391,
+    "sha256": "457a2b3a7f185fa1183654cfc53e8ecef4e7eefea4b81902f74093f9a57411ca"
+  },
+  {
+    "package": "post-and-article",
+    "path": "SKILL.md",
+    "mediaType": "text/markdown",
+    "bytes": 9047,
+    "sha256": "ecce518c4cf8b1576681ec39928b5eb034181ad4717623b492ed8e48afb9c23b"
+  },
+  {
     "package": "short-video-script",
     "path": "EVALS.md",
     "mediaType": "text/markdown",
@@ -12,5 +26,33 @@
     "mediaType": "text/markdown",
     "bytes": 11585,
     "sha256": "98b48b1b78c8c463c9acd7c384b31df15078b1435a55d355c0318fc4562d2795"
+  },
+  {
+    "package": "video-editing-guide",
+    "path": "EVALS.md",
+    "mediaType": "text/markdown",
+    "bytes": 1243,
+    "sha256": "4e2deaadd123b7cfb185264cf60820f491f1e61d255079f4deacaace5ffbe050"
+  },
+  {
+    "package": "video-editing-guide",
+    "path": "SKILL.md",
+    "mediaType": "text/markdown",
+    "bytes": 7198,
+    "sha256": "c11869c1ee10253356b5136e36e20cc1e941161fc9903779fb90fcce67e3f660"
+  },
+  {
+    "package": "video-storyboard",
+    "path": "EVALS.md",
+    "mediaType": "text/markdown",
+    "bytes": 1282,
+    "sha256": "6e8653054b0bb14d46be8179125bf91167753b4107732557ce731a462bca21dc"
+  },
+  {
+    "package": "video-storyboard",
+    "path": "SKILL.md",
+    "mediaType": "text/markdown",
+    "bytes": 7789,
+    "sha256": "37345aa5ebeef2a6722917e9f66c819d22bea65d09edb4c0d1406a363defd89b"
   }
 ]
