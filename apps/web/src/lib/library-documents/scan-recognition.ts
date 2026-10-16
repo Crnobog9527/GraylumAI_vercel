@@ -12,7 +12,7 @@ import { PDF_RENDER_LIMITS } from '@/lib/library-sandbox/limits';
 /** `positions` are PDF page numbers (pdf) or Word image numbers in document order (docx). */
 export type PendingDocument = { documentId: string; format: 'pdf' | 'docx'; contentVersion: number; positions: number[] };
 export type UnitKind = 'pdf_page' | 'word_image';
-export type SaveResult = { saved: boolean; status: string; contentVersion: number; code?: 'LIBRARY_SPACE' };
+export type SaveResult = { saved: boolean; status: string; contentVersion: number; code?: 'LIBRARY_SPACE' | 'LIBRARY_TEXT_LIMIT' };
 export type ScanApi = {
   pending(): Promise<PendingDocument[]>;
   original(documentId: string): Promise<Blob>;
@@ -81,6 +81,8 @@ export async function runScanRecognition(api: ScanApi, signal: AbortSignal,
             return 'paused';
           }
           version = saved.contentVersion;
+          // The server could not keep it (the document's text limit): counted as not recognised.
+          if (!saved.saved && saved.status === 'failed') progress.failed += 1;
         }
         progress.done += 1;
         report();

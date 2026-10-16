@@ -78,6 +78,12 @@ describe('scan recognition driver', () => {
     await runScanRecognition(pdf, new AbortController().signal, () => undefined);
     expect(vi.mocked(pdf.save).mock.calls[0]![0]).toMatchObject({ kind: 'pdf_page' });
   });
+  it('counts a unit the server marks failed (text limit) as not recognised', async () => {
+    const calls = api({ save: vi.fn(async () => ({ saved: false, status: 'failed', contentVersion: 1, code: 'LIBRARY_TEXT_LIMIT' as const })) });
+    const seen: ScanProgress[] = [];
+    await runScanRecognition(calls, new AbortController().signal, (_, p) => seen.push(p));
+    expect(seen.at(-1)).toEqual({ done: 2, total: 2, failed: 2, state: 'done' });
+  });
   it('describes progress in one plain line', () => {
     expect(scanProgressText({ done: 3, total: 12, failed: 0, state: 'running' })).toBe('正在识别扫描页 3/12');
     expect(scanProgressText({ done: 12, total: 12, failed: 2, state: 'done' })).toBe('扫描页识别完成，2 页没能识别');
