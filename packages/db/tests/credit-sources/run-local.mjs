@@ -37,21 +37,24 @@ const pack = async (user, credits, key = 'pay-common:package:', at = iso(0)) => 
   [order, user, item, snap, at, credits]);
   await addCredits(user, credits);
   await c.query(`INSERT INTO credit_transactions(user_id,amount,type,ledger_type,source_order_id,idempotency_key,created_at)
-    VALUES($1,$2,'purchase','grant',$3,$4||$3::text,$5)`, [user, credits, order, key, at]);
-  return { order, source: await v('SELECT id v FROM credit_package_sources WHERE order_id=$1', [order]) };
+    VALUES($1,$2,'purchase','grant',$3,$4,$5)`, [user, credits, order, key + order, at]);
+  // Before 0275 (backfill rehearsal) the source table does not exist yet.
+  const exists = await v("SELECT to_regclass('public.credit_package_sources') IS NOT NULL v");
+  return { order, source: exists ? await v('SELECT id v FROM credit_package_sources WHERE order_id=$1', [order]) : null };
 };
 const period = async (user, credits, startMs, endMs, consumed = 0) => {
   const grant = randomUUID(), subscription = 'sub_' + randomUUID(), invoice = 'in_' + randomUUID();
+  const start = iso(startMs), end = iso(endMs);
   await c.query(`INSERT INTO membership_plans(id,name,level,allow_fusion_review,allow_fusion_compare,library_storage_bytes)
     VALUES($1,'Local fixture','pro',true,true,500000000) ON CONFLICT(level) DO NOTHING`, [randomUUID()]);
   const plan = await v("SELECT id v FROM membership_plans WHERE level='pro'");
   await c.query(`INSERT INTO user_subscriptions(user_id,stripe_subscription_id,membership_plan_id,billing_cycle,
     current_period_start,current_period_end,status) VALUES($1,$2,$3,'monthly',$4,$5,'active')`,
-  [user, subscription, plan, iso(startMs), iso(endMs)]);
+  [user, subscription, plan, start, end]);
   await c.query(`INSERT INTO subscription_credit_grants(id,user_id,stripe_subscription_id,membership_plan_id,billing_cycle,
     grant_type,grant_period_key,period_start,period_end,total_periods,stripe_invoice_id,credits_granted,consumed_amount,idempotency_key)
     VALUES($1,$2,$3,$4,'monthly','monthly_invoice',$5,$6,$7,1,$8,$9,$10,$11)`,
-  [grant, user, subscription, plan, 'invoice:' + invoice, iso(startMs), iso(endMs), invoice, credits, consumed, 'grant:' + invoice]);
+  [grant, user, subscription, plan, 'invoice:' + invoice, start, end, invoice, credits, consumed, 'grant:' + invoice]);
   await addCredits(user, credits - consumed);
   return { grant, subscription };
 };
@@ -147,7 +150,7 @@ try {
     VALUES($1,200,'refund','adjustment','refund_failed_restore','stripe_refund',$2,'pay-common:refund-restore:'||gen_random_uuid())`, [u3, r.order]);
   assert.equal(await v('SELECT status v FROM credit_package_sources WHERE id=$1', [r.source]), 'granted');
   await c.query(`INSERT INTO credit_transactions(user_id,amount,type,ledger_type,source_order_id,idempotency_key)
-    VALUES($1,200,'purchase','grant',$2,'pay-common:package:'||$2::text||':other')`, [u3, r.order]);
+    VALUES($1,200,'purchase','grant',$2,$3)`, [u3, r.order, 'pay-common:package:' + r.order + ':other']);
   assert.equal(await v('SELECT count(*)::int v FROM credit_package_sources WHERE order_id=$1', [r.order]), 1, 'other keys never create a source');
   report.checks.push('pack refund clawback reverses the source, failed-refund restoration re-grants it, unrelated keys are ignored');
 
@@ -161,7 +164,7 @@ try {
   const callRow = { id: call, run_id: run, pre_deduct_id: p, settled_at: new Date().toISOString(), charged_delta: 40 };
   await c.query("ALTER TABLE credit_transactions DISABLE TRIGGER ALL");
   await c.query(`INSERT INTO credit_transactions(user_id,amount,type,ledger_type,reason_code,bill2_call_id,idempotency_key)
-    VALUES($1,0,'adjustment','spend','bill2_spend',$2,'fixture-spend:'||$2::text)`, [u4, call]);
+    VALUES($1,0,'adjustment','spend','bill2_spend',$2,$3)`, [u4, call, 'fixture-spend:' + call]);
   // Synthetic run/call rows exist only as records: foreign-key triggers stay off for this one call.
   assert.equal(await v('SELECT bill2_payg_compensate(jsonb_populate_record(NULL::bill2_runs,$1),jsonb_populate_record(NULL::bill2_calls,$2)) v',
     [runRow, callRow]), 40);
@@ -184,7 +187,7 @@ try {
 
   // Balance results are identical with and without the hooks (same scenario on the predecessor functions).
   const scenario = async () => {
-    const u = await profile(300); await pack(u, 500, 'pay-common:package:', iso(-hour)); await period(u, 200, -hour, hour);
+    const u = await profile(300); await pack(u, 500, 'pay-common:package:', iso(-hour)); await period(u, 200, -24 * hour, 24 * hour);
     const out = [];
     let x = await reserve(u, 600); await settle(u, x, 650); out.push(await balance(u));
     x = await reserve(u, 100); await refund(u, x); out.push(await balance(u));
@@ -199,8 +202,9 @@ try {
     catch (error) { return ['refused', error.message]; }
   };
   // One settled use, with the spend row BILL2 writes alongside it.
-  const use = async user => {
-    await settle(user, await reserve(user, 10), 10);
+  // The monthly fixture's period is not a canonical pre-deduct window (before and after 0275), so it records the spend row only.
+  const use = async (user, reservation = true) => {
+    if (reservation) await settle(user, await reserve(user, 10), 10);
     await c.query("INSERT INTO credit_transactions(user_id,amount,type,ledger_type) VALUES($1,-10,'deduction','spend')", [user]);
   };
   const eligibility = async () => {
@@ -211,7 +215,7 @@ try {
       out.push(await outcome('SELECT pay_common_package_refund_quote($1,$2,$3,$4,$5,$6) v',
         [f.actor, f.order, f.ticket, f.cash, 'confirmed', 'fixture:law']));
       const m = await v('SELECT monthly_test.fixture() v');
-      if (used) await use(m.user);
+      if (used) await use(m.user, false);
       out.push(await outcome('SELECT pay_common_monthly_refund_approve($1,$2,$3,$4) v', [m.actor, m.order, m.terms, 'a'.repeat(64)]));
     }
     assert.equal(out[0][0], 'ok', JSON.stringify(out));
