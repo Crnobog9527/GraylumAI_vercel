@@ -14,6 +14,13 @@
     "sha256": "ecce518c4cf8b1576681ec39928b5eb034181ad4717623b492ed8e48afb9c23b"
   },
   {
+    "package": "post-and-article",
+    "path": "workflow.yaml",
+    "mediaType": "text/yaml",
+    "bytes": 78,
+    "sha256": "0f988025ddb710ecd894847b4ffaeb372593a6f7a2907f0e6e34558ea9379d84"
+  },
+  {
     "package": "short-video-script",
     "path": "EVALS.md",
     "mediaType": "text/markdown",
@@ -26,6 +33,13 @@
     "mediaType": "text/markdown",
     "bytes": 11585,
     "sha256": "98b48b1b78c8c463c9acd7c384b31df15078b1435a55d355c0318fc4562d2795"
+  },
+  {
+    "package": "short-video-script",
+    "path": "workflow.yaml",
+    "mediaType": "text/yaml",
+    "bytes": 72,
+    "sha256": "0ef8b6197210165648bfcca36cac727819e52239f58f824e142571d8dd2acca7"
   },
   {
     "package": "video-editing-guide",
@@ -42,6 +56,13 @@
     "sha256": "c11869c1ee10253356b5136e36e20cc1e941161fc9903779fb90fcce67e3f660"
   },
   {
+    "package": "video-editing-guide",
+    "path": "workflow.yaml",
+    "mediaType": "text/yaml",
+    "bytes": 101,
+    "sha256": "d0da3e94a62ad10c115118a54c3597c05b3c7652fa514672cdb75acf67d306c1"
+  },
+  {
     "package": "video-storyboard",
     "path": "EVALS.md",
     "mediaType": "text/markdown",
@@ -54,5 +75,12 @@
     "mediaType": "text/markdown",
     "bytes": 7789,
     "sha256": "37345aa5ebeef2a6722917e9f66c819d22bea65d09edb4c0d1406a363defd89b"
+  },
+  {
+    "package": "video-storyboard",
+    "path": "workflow.yaml",
+    "mediaType": "text/yaml",
+    "bytes": 91,
+    "sha256": "1f181e7d404175f28e178a102483bec894cf7e4cca4d893fb6f15054d895d918"
   }
 ]
