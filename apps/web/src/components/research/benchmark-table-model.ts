@@ -52,7 +52,8 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 export function formatLastUpdate(value: string | null, now: Date): string {
   const ms = value === null ? Number.NaN : Date.parse(value);
   if (!Number.isFinite(ms)) return MISSING_TEXT;
-  const date = new Date(ms).toISOString().slice(0, 10);
+  // The viewer's own calendar date, not UTC's.
+  const date = new Date(ms).toLocaleDateString("sv-SE");
   const days = Math.max(0, Math.floor((now.getTime() - ms) / DAY_MS));
   return `${date}（${days === 0 ? "今天" : `${days} 天前`}）`;
 }

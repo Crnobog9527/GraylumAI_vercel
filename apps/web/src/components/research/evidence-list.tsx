@@ -41,10 +41,15 @@ export function publicLink(url: string): string | null {
   }
 }
 
-const formatTime = (value: string | null) => {
+/** Fetch time in the viewer's own time zone, e.g. "2026-10-17 02:00". */
+export function formatEvidenceTime(value: string | null, timeZone?: string): string {
   const ms = value === null ? Number.NaN : Date.parse(value);
-  return Number.isFinite(ms) ? new Date(ms).toISOString().slice(0, 16).replace("T", " ") : "—";
-};
+  if (!Number.isFinite(ms)) return "—";
+  return new Date(ms).toLocaleString("sv-SE", {
+    year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false,
+    ...(timeZone ? { timeZone } : {}),
+  });
+}
 
 export function EvidenceList({ entries, children }: { entries: EvidenceEntry[]; children?: ReactNode }) {
   const rows = entries.flatMap(entry => {
@@ -68,7 +73,7 @@ export function EvidenceList({ entries, children }: { entries: EvidenceEntry[]; 
                 </div>
                 <p className={styles.callMeta}>
                   <span>{request.line}</span>
-                  <span>取数时间 {formatTime(entry.fetchedAt)}</span>
+                  <span>取数时间 {formatEvidenceTime(entry.fetchedAt)}</span>
                   {entry.itemCount !== null && <span>{entry.itemCount} 条{entry.truncated ? "（已截取）" : ""}</span>}
                   <span>编号 {entry.evidenceId}</span>
                 </p>

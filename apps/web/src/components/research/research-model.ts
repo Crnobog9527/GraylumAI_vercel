@@ -62,9 +62,10 @@ function pageLabel(url: string): string {
   }
 }
 
-function accountsLabel(value: unknown): { query: string; platforms: string[] } {
+function accountsLabel(value: unknown): { query: string; platforms: string[]; count: number } {
   const accounts = Array.isArray(value) ? value.map(record) : [];
   return {
+    count: accounts.length,
     query: accounts.map(account => text(account.account)).filter(Boolean).join("、"),
     platforms: [...new Set(accounts.map(account => platformLabel(text(account.platform))).filter(Boolean))],
   };
@@ -90,8 +91,13 @@ export function describeRequest(tool: ResearchToolName, rawArgs: unknown): { que
       };
     }
     case "benchmark_fetch": {
-      const { query, platforms } = accountsLabel(args.accounts);
-      return { query, line: `${platforms.join("、") || "对标账号"} · 账号资料和近期作品` };
+      // Charge and evidence rows store the whole tool call's arguments, so one billed lookup cannot tell which of
+      // several selected accounts it read: name the account only when there is just one.
+      const { query, platforms, count } = accountsLabel(args.accounts);
+      return {
+        query: count > 1 ? `选中的对标账号（共 ${count} 个）` : query,
+        line: `${platforms.join("、") || "对标账号"} · 账号资料和近期作品`,
+      };
     }
     default:
       return null;

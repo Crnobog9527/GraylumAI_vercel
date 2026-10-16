@@ -7,7 +7,8 @@ import { DATA_SOURCE_NOTE, describeCall, MISSING_TEXT } from "../research-model"
 import {
   buildCandidateSubmission, buildKeywordSubmission, cardErrorText, initialKeywordDraft, keywordProblem,
 } from "../selection-card-model";
-import { publicLink } from "../evidence-list";
+import { formatEvidenceTime, publicLink } from "../evidence-list";
+import { describeRequest } from "../research-model";
 import { refreshErrorText } from "../refresh-button";
 import { chargeText } from "../search-charges";
 import { toEvidenceEntries, toSearchCharges } from "../research-api";
@@ -132,5 +133,19 @@ describe("server rows from research.toolCharges and research.evidence", () => {
     expect(rest).toEqual([]);
     expect(entry).toMatchObject({ evidenceId: "o1", truncated: false, conversationTitle: "未命名对话", sourceUrls: ["https://x.test/a"] });
     expect(entry).not.toHaveProperty("conversationHref");
+  });
+});
+
+describe("review round 2", () => {
+  it("shows evidence times in the viewer's time zone", () => {
+    expect(formatEvidenceTime("2026-10-16T18:00:00Z", "Asia/Shanghai")).toBe("2026-10-17 02:00");
+    expect(formatEvidenceTime("2026-10-16T18:00:00Z", "America/New_York")).toBe("2026-10-16 14:00");
+    expect(formatEvidenceTime(null)).toBe("—");
+  });
+
+  it("does not repeat every selected account on each billed fetch", () => {
+    const accounts = [{ platform: "douyin", account: "a" }, { platform: "douyin", account: "b" }];
+    expect(describeRequest("benchmark_fetch", { accounts })?.query).toBe("选中的对标账号（共 2 个）");
+    expect(describeRequest("benchmark_fetch", { accounts: accounts.slice(0, 1) })?.query).toBe("a");
   });
 });
