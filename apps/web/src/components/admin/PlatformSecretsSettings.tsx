@@ -96,7 +96,7 @@ export function PlatformSecretsSettings() {
     <CardHeader>
       <CardTitle>第三方密钥</CardTitle>
       <CardDescription>
-        模型、搜索和发布服务的密钥。保存后加密存放，任何人都不能在这里看到原文，只显示最后 4 位；
+        模型、搜索、发布和提醒邮件服务的密钥。保存后加密存放，任何人都不能在这里看到原文，只显示最后 4 位；
         每次保存、替换、清除都会记录操作人和时间。数据库、支付等系统密钥仍在 Vercel 设置，不在这里。
       </CardDescription>
     </CardHeader>

@@ -5,9 +5,14 @@
 // Run: node packages/db/tests/platform-secrets/run-local.mjs --local-only
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
+import { readdirSync } from 'node:fs';
 import { localDb, read } from '../runtime-view-perf/local-db.mjs';
 
 const migrationPath = 'packages/db/migrations/0259_platform_secrets.sql';
+// PAY-NOTIFY extends the slot list in place (adds 'resend'); reapplying 0259 alone restores six slots.
+const slotExtensions = readdirSync(new URL('../../migrations/', import.meta.url))
+  .filter(f => f.endsWith('_payment_notices.sql')).map(f => `packages/db/migrations/${f}`);
+const reapply = async () => { for (const path of [migrationPath, ...slotExtensions]) await c.query(read(path)); };
 const db = await localDb(), c = db.client;
 const report = { build: db.build, migration: '0259', checks: [] };
 const v = async (sql, args = []) => (await c.query(sql, args)).rows[0]?.v;
@@ -39,7 +44,7 @@ try {
   const fingerprint = read('packages/db/tests/baseline/fingerprint.sql');
   const catalogSql = fingerprint.slice(0, fingerprint.indexOf('-- FINAL')) + 'SELECT jsonb_object_agg(k,d ORDER BY k) v FROM grouped;';
   const before = await v(catalogSql);
-  await c.query(read(migrationPath));
+  await reapply();
   assert.deepEqual(await v(catalogSql), before);
   report.checks.push('0259 reapplication after the full chain preserves the complete catalog');
 
@@ -93,7 +98,7 @@ try {
   report.checks.push('deny: user, suspended, deleted and unknown actors; invalid input refused without echoing it; no audit');
 
   const first = await set('openrouter', fake('a1b2'), 0, admin);
-  assert.equal(first.length, 6);
+  assert.equal(first.length, 6 + slotExtensions.length);
   assert.ok(!JSON.stringify(first).includes(CANARY));
   const s1 = await status('openrouter');
   assert.deepEqual({ ...s1, updatedAt: null }, { slot: 'openrouter', configured: true, last4: 'a1b2', revision: 1,
@@ -173,7 +178,7 @@ try {
   }
   report.checks.push('one audit row per change with slot and last 4 only; no value anywhere outside Vault ciphertext');
 
-  await c.query(read(migrationPath));
+  await reapply();
   assert.equal(await v("SELECT platform_secret_read('openrouter') v"), fake('e5f6'));
   report.checks.push('reapplying 0259 with data present keeps the stored secrets');
 
