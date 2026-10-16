@@ -6,6 +6,7 @@ import {runtimeAdmissionService} from './admission';
 import {OPENING_INPUT} from '../../shared/opcQuestions';
 import {PURPOSE_OUTPUT_CAP} from './purposeBudgets';
 import {configuredReasoning} from '../__tests__/fixtures/runtimeReasoning';
+import {testPrimaryModel} from '../__tests__/fixtures/runtimeGates';
 import {packageHash,sha256,type SkillSource} from '../skills/loader';
 import {runtimeContext} from './runtimeContext';
 import {openRouterRequestBody,STREAMING_FORMATS} from './providerRequest';
@@ -24,6 +25,7 @@ const requestId='10000000-0000-4000-8000-000000000006',nextId='10000000-0000-400
 const moduleId='10000000-0000-4000-8000-000000000008',skillId='10000000-0000-4000-8000-000000000009';
 const revisionId='10000000-0000-4000-8000-000000000010';
 function fixture(budgetConfig?:unknown){
+ testPrimaryModel.id=first;
  const models=[{id:first,model_id:'synthetic/first'}, {id:second,model_id:'synthetic/second'}, {id:organizer,model_id:'synthetic/organizer'}].map(m=>({...m,provider:'openrouter',is_active:'true',max_tokens:8192,input_limit:32000,config:configuredReasoning(m.model_id)}));
  models[1]!.config=configuredReasoning(models[1]!.model_id,{mode:'budget',maxTokens:2048});
  const settings=[{key:'v3_summary_model_id',value:organizer},{key:'v3_summary_max_tokens',value:'4096'}];
@@ -56,7 +58,9 @@ it('new model selection reads that model setting; replay bypasses changed config
  const f=fixture();
  const old=await f.service.prepare(f.input),original=structuredClone(old);
  expect(old.context.reasoning).toEqual({effort:'none'});
- const next=await f.service.prepare({...f.input,requestId:nextId,selection:{kind:'ordinary',modelId:second}});
+ // UI-MODEL: free chat follows the administrator's primary model; the request's modelId is ignored.
+ testPrimaryModel.id=second;
+ const next=await f.service.prepare({...f.input,requestId:nextId,selection:{kind:'ordinary',modelId:first}});
  expect(next.context.model).toBe('synthetic/second');
  expect(next.context.reasoning).toEqual({parameter:'reasoning',value:{max_tokens:2048}});
  expect(next.billing.sourceHash).not.toBe(old.billing.sourceHash);
@@ -343,4 +347,15 @@ it('CHAT-NATIVE-OUTPUT: a chosen Skill without an organizer freezes the evidence
  const asV2=JSON.parse(openRouterRequestBody(sdk,{context:{...context,textStream:undefined,providerRequestFormat:'serial-tools-v2',reasoning:undefined},
   policy,phase:'skill',primaryDialogue:true}));
  expect(asV6).toEqual(asV2);
+});
+
+// UI-MODEL: the request's modelId is never a fallback for the administrator's primary model.
+it.each([
+ ['unset',undefined,'RUNTIME_STAGING_MODEL_DENIED'],
+ ['outside the window','10000000-0000-4000-8000-000000000099','RUNTIME_STAGING_MODEL_DENIED'],
+] as const)('real free chat with the primary model %s is refused before any reservation',async(_name,primary,code)=>{
+ const f=fixture();testPrimaryModel.id=primary;
+ // The request names an approved model; it must not be used as a fallback.
+ await expect(f.service.prepare({...f.input,organizeAfter:false,selection:{kind:'ordinary',modelId:first}})).rejects.toThrow(code);
+ expect(f.rpc.mock.calls.some(([name])=>name==='runtime_admit')).toBe(false);
 });

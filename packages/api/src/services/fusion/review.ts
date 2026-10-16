@@ -1,21 +1,18 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { z } from 'zod';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import type { BillingRpc } from '../bill2/service';
-import { loadStagingPolicy } from '../runtime/stagingPolicy';
 import { admitFusionGroup, derivedUuid, replayFusionGroup, type FusionMember } from './admission';
 import { fusionExecutor, type FusionBodyVerdict } from './executor';
 import { checkRevision, DECISIONS, disputedDecisions, hasDisagreement, parseOpinion, type DeclaredStep, type Opinion, type StepValues } from './hostChecks';
 import { assertSnapshotSize, fusionRequestBytes, type FusionRequest } from './request';
 import { PAYG_PROFILE_MAX_BYTES } from '../runtime/paygHostPolicy';
-import { estimateReview } from './reviewEstimate';
-import { debateRequest, readReviewSkill, resolveReviewSkill, reviewerLabel, reviewerRequest, summaryRequest, type ReviewContext,
+import { debateRequest, readReviewSkill, reviewerLabel, reviewerRequest, summaryRequest, type ReviewContext,
   type ReviewSkill } from './reviewPrompts';
 import { reviewDetail, reviewEvents } from './reviewEvents';
-import { adoptionChoices, adoptionSections, applyChoices, type AdoptionChoice } from './reviewAdoption';
+import { adoptionChoices, adoptionSections, applyChoices, sectionTexts, type AdoptionChoice } from './reviewAdoption';
 import { ENDED_STATES, reviewRecord, type ReviewPosition, type ReviewView } from './reviewRecord';
 import { claimOutcome, memberCaps, PERMANENT_REFUSALS } from './reviewLimits';
-import { readFusionSettings } from './settings';
+import { planReview } from './reviewPlan';
 
 type Executor = ReturnType<typeof fusionExecutor>;
 const config = z.object({ estimateUsd: z.string(), maxRounds: z.number().int().min(1), reviewers: z.array(z.string().uuid()).min(1),
@@ -256,33 +253,25 @@ export function reviewFlow(deps: { admin: SupabaseClient; actorId: string;
     return outputs;
   }
 
+  const plan = (input: { draftId: string; sourceVersionId: string }) => planReview({ admin, actorId, env, ...input });
+
   return {
     /** The review an earlier start with this request created (lost response), without any live-call precondition. */
     replayStart: (input: { requestId: string; draftId: string; sourceVersionId: string }) => record.replay(input),
-    /** Freezes settings, Skill revision and estimate; refuses a review that cannot fit or exceeds the budget. */
-    async start(input: { requestId: string; draftId: string; sourceVersionId: string }) {
+    /** What a start would freeze and hold at most, computed exactly as start does, without creating anything: the page
+     * shows "最多消耗 X 积分" from it before the user agrees (FUSION-REVIEW §3.2, Master Plan §4.1). */
+    async estimate(input: { draftId: string; sourceVersionId: string }) {
+      const { settings, rounds, estimateCredits } = await plan(input);
+      return { estimateCredits, maxRounds: rounds, reviewers: settings.review.reviewerModelIds.length };
+    },
+    /** Freezes settings, Skill revision and estimate; refuses a review that cannot fit or exceeds the budget. A start
+     * that carries the maximum the user agreed to is refused when the maximum is now higher (prices changed meanwhile). */
+    async start(input: { requestId: string; draftId: string; sourceVersionId: string; acceptedCredits?: number }) {
       // A retried start (lost response) gets its review back before any check that may have changed since (#962 review).
       const existing = await record.replay(input);
       if (existing) return existing;
-      const settings = await readFusionSettings(admin);
-      if (!settings.review.enabled) throw new Error('FUSION_REVIEW_DISABLED');
-      if (!settings.review.skillId || !settings.review.summaryModelId || !settings.review.maxBudgetUsd) throw new Error('FUSION_REVIEW_INCOMPLETE');
-      const skill = await resolveReviewSkill(admin, settings.review.skillId);
-      const text = await readReviewSkill(admin, skill);
-      const window = await loadStagingPolicy(admin as unknown as BillingRpc, actorId, env);
-      const sizes = await admin.rpc('fusion_review_preview', { p_actor_id: actorId, p_draft_id: input.draftId,
-        p_source_version_id: input.sourceVersionId });
-      if (sizes.error) throw new Error('FUSION_REVIEW_STALE');
-      const preview = z.object({ reportSentBytes: z.number(), materialsSentBytes: z.number(), fieldCount: z.number() }).passthrough()
-        .parse(sizes.data);
-      // Instructions travel as one escaped string in the body; the host-written format rules add at most a few KB.
-      const sent = (value: string) => Buffer.byteLength(JSON.stringify(value)) + 4096;
-      const { rounds, estimateUsd, estimateCredits, callCaps, requestBytes } = estimateReview({ quotes: window.callPolicies,
-        creditsPerUsd: window.creditsPerUsd, reviewers: settings.review.reviewerModelIds,
-        summary: settings.review.summaryModelId, maxRounds: settings.review.maxRounds, maxBudgetUsd: settings.review.maxBudgetUsd,
-        opinionTokens: settings.review.opinionOutputTokens, summaryTokens: settings.review.summaryOutputTokens, fieldCount: preview.fieldCount,
-        snapshotBytes: preview.reportSentBytes + preview.materialsSentBytes,
-        instructionBytes: { reviewer: sent(`${text.reviewer}\n\n${text.rubric}`), summary: sent(`${text.summary}\n\n${text.rubric}`) } });
+      const { settings, skill, text, rounds, estimateUsd, estimateCredits, callCaps, requestBytes } = await plan(input);
+      if (input.acceptedCredits !== undefined && estimateCredits > input.acceptedCredits) throw new Error('FUSION_REVIEW_ESTIMATE_CHANGED');
       const view = await record.start({ requestId: input.requestId, draftId: input.draftId, sourceVersionId: input.sourceVersionId,
         config: { estimateUsd, estimateCredits, callCaps, maxRounds: rounds, reviewers: settings.review.reviewerModelIds,
           summary: settings.review.summaryModelId,
@@ -476,8 +465,11 @@ export function reviewFlow(deps: { admin: SupabaseClient; actorId: string;
       const view = await record.read(reviewId);
       if (!view) throw new Error('FUSION_REVIEW_DENIED');
       const src = await readSource(reviewId);
-      return reviewDetail({ view, reviewers: config.parse(view.config).reviewers, sections: src.sections,
+      const detail = reviewDetail({ view, reviewers: config.parse(view.config).reviewers, sections: src.sections,
         outputs: await savedOutputs(view), revision: revisionInput(view, src), adoption: (await adoptionPlan(view, src))?.sections ?? null });
+      // The reviewed (frozen) report by chapter: the result page shows the whole report, not only the changed chapters.
+      const text = sectionTexts(src.body, src.sections);
+      return { ...detail, chapters: text.chapters, preamble: text.preamble };
     },
     /** Progress events for the animation (§2.2a), derived from the record and judged outputs only. */
     async events(reviewId: string) {

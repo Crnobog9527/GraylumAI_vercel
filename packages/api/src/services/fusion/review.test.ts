@@ -142,6 +142,20 @@ function setup(script: (call: Call) => string | null, refuse?: string) {
 describe('review flow', () => {
   beforeEach(() => { db.review = null; db.calls = []; db.outputs.clear(); db.savedAt.clear(); db.groups.clear(); requests.length = 0; caps.length = 0; creditCaps.length = 0; usdCaps.length = 0; memberCapsSeen.length = 0; priceRise.phase = ''; priceRise.code = 'FUSION_ESTIMATE_EXCEEDED'; });
 
+  it('estimates the maximum a start would hold without creating anything, and refuses a start above what the user agreed to', async () => {
+    const t = setup(call => call.phase === 'fusion_summary' ? revision('新目标') : opinion('major'));
+    const input = { draftId: randomUUID(), sourceVersionId: randomUUID() };
+    const estimate = await t.flow.estimate(input);
+    expect(estimate).toMatchObject({ maxRounds: 2, reviewers: ids.reviewers.length });
+    expect(estimate.estimateCredits).toBeGreaterThan(0);
+    expect(db.review).toBeNull();
+    await expect(t.flow.start({ requestId: randomUUID(), ...input, acceptedCredits: estimate.estimateCredits - 1 }))
+      .rejects.toThrow('FUSION_REVIEW_ESTIMATE_CHANGED');
+    expect(db.review).toBeNull();
+    const started = await t.flow.start({ requestId: randomUUID(), ...input, acceptedCredits: estimate.estimateCredits });
+    expect(started.config).toMatchObject({ estimateCredits: estimate.estimateCredits });
+  });
+
   it('without a split: round 1, one summary, proposes the revision to R14, never re-reviewed by the panel', async () => {
     const t = setup(call => call.phase === 'fusion_summary' ? revision('新目标') : opinion('major'));
     const started = await t.flow.start({ requestId: randomUUID(), draftId: randomUUID(), sourceVersionId: randomUUID() });
@@ -222,6 +236,9 @@ describe('review flow', () => {
       fields: [{ stepId: 's1', fieldId: 'goal', before: '旧目标', after: '新目标' }], linkedSections: [],
       rulings: [expect.objectContaining({ opinion: '定位要写清人群', fix: '点明给上班族省时间', reviewers: ['A', 'B'] })] })]);
     expect(JSON.stringify(detail)).not.toContain(ids.reviewers[0]);
+    // The whole reviewed report by chapter, from the frozen version, for the result page.
+    expect(detail.chapters).toEqual([{ section: '定位', body: '原定位' }, { section: '结语', body: '原结语' }]);
+    expect(detail.preamble).toBe('');
     // Stable: reading again gives the same ids in the same order.
     expect((await t.flow.events(String(db.review!.reviewId))).events.map(e => e.id)).toEqual(events.map(e => e.id));
   });

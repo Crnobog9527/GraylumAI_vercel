@@ -40,6 +40,7 @@ import {PURPOSE_OUTPUT_CAP,readPurposeBudgets} from './purposeBudgets';
 import {assertFrozenPayloads} from './payloadSize';
 import {freezeWindowBillingUnit} from './billingUnitAdmission';
 import {newWorkGate,readAdmissionSettings,requireNewWork} from './newWorkGate';
+import {serverChatModel} from './serverChatModel';
 import {requireAllowedInput} from './moderation';
 import {FREE_CHAT_REQUEST_FORMAT,PLAIN_TEXT_STREAM,plainTextStreamAllowed} from './providerRequest';
 import {admissionDeadline,admittedOutputLimit} from './admissionLimits';
@@ -191,7 +192,7 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
    let skillChars=0;
    let skillFile:SkillFileBinding|undefined,skillFileReserve=0;
    let skillId:string|undefined,moduleId:string|undefined,revisionId:string|undefined;
-   if(input.selection.kind==='ordinary'||input.selection.kind==='auto')modelId=input.selection.modelId;
+   if(input.selection.kind==='ordinary'||input.selection.kind==='auto')modelId=policy.real?serverChatModel(await settings):input.selection.modelId;
    else if(input.selection.kind==='skill'){
     const module=await admin.from('modules').select('id,active,skill_id,model_id,report_model_id,social_media_related')
      .eq('id',input.selection.moduleId).single();
