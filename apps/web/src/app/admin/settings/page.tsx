@@ -26,6 +26,7 @@ import { MentorBudgetTabContent, MentorBudgetTabTrigger } from '@/components/adm
 import { changedSettings, mergeReadSettings } from './changedSettings';
 import { MembershipPlanPermissions } from '@/components/admin/MembershipPlanPermissions';
 import { FUSION_COMPARE_SETTING_KEY, FusionCompareSetting } from '@/components/admin/FusionCompareSetting';
+import { FusionReviewSettings } from '@/components/admin/FusionReviewSettings';
 import { PaymentChannelSetting } from '@/components/admin/PaymentChannelSetting';
 import type { MembershipPlanRow } from '@/components/admin/membershipEntitlementDraft';
 
@@ -415,6 +416,7 @@ export default function AdminSettingsPage() {
           <div className="space-y-6">
             <MembershipPlanPermissions plans={(membershipPlans ?? []) as MembershipPlanRow[]} onSaved={reloadDashboard} />
             <FusionCompareSetting saved={savedSettings?.[FUSION_COMPARE_SETTING_KEY]} onSaved={reloadDashboard} />
+            <FusionReviewSettings />
           </div>
         </TabsContent>
         <MentorBudgetTabContent onOpenFeatures={() => setTab('features')} />

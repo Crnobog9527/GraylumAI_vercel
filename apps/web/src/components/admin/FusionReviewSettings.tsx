@@ -1,0 +1,181 @@
+/* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+'use client';
+
+import { useRef, useState, type ReactNode } from 'react';
+import { Gavel, Loader2, Save } from 'lucide-react';
+import { trpc } from '@/trpc/client';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Switch } from '@/components/ui/switch';
+import { modelLabel } from './reportModelView';
+import {
+  affectsRunning, draftProblems, runningCount, SEAT_CODES, settingsErrorText, TOKEN_LIMITS, toSaved, warningText,
+  type FusionSettingsValue, type ReviewSettings,
+} from './fusionReviewSettingsView';
+
+const cardStyle = { background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' };
+const muted = { color: 'var(--text-tertiary)' };
+const selectClass = 'h-9 w-full rounded-md border px-2 text-sm';
+const selectStyle = { background: 'var(--bg-primary)', borderColor: 'var(--border-primary)', color: 'var(--text-primary)' };
+
+/**
+ * 评审团设置（FUSION-REVIEW PR-5，Master Plan §4.5）：开关、3 位评审和汇总用哪个模型、评审 Skill、轮数、意见和汇总长度、
+ * 单次预算、每位评审和汇总的显示名。整份设置一起保存（fusionSettings.update），服务端会再校验模型和 Skill；
+ * 换模型、换 Skill 或关掉评审团时，先提示正在进行的评审后续轮次会失败。
+ */
+export function FusionReviewSettings() {
+  const settings = trpc.fusionSettings.get.useQuery(undefined, { staleTime: 0, retry: false });
+  if (settings.isLoading) return <SettingsCard><p style={muted}>正在读取评审团设置…</p></SettingsCard>;
+  if (!settings.data) {
+    return (
+      <SettingsCard>
+        <p role="alert" style={{ color: 'var(--color-destructive)' }}>{settingsErrorText(settings.error)}</p>
+        <Button variant="outline" onClick={() => void settings.refetch()}>重新读取</Button>
+      </SettingsCard>
+    );
+  }
+  return <ReviewForm key={JSON.stringify(settings.data.review)} saved={settings.data} onSaved={() => settings.refetch()} />;
+}
+
+function SettingsCard({ children }: { children: ReactNode }) {
+  return (
+    <Card data-testid="admin-settings-fusion-review" style={cardStyle}>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2" style={{ color: 'var(--text-primary)' }}>
+          <Gavel className="h-5 w-5" style={{ color: 'var(--color-primary)' }} />评审团设置
+        </CardTitle>
+        <CardDescription style={muted}>
+          定位报告出来后，3 位评审各自提意见、意见不一时辩论一轮，再由汇总写出修订稿。用户只看到这里设置的显示名，看不到模型名。
+          保存后新开始的评审使用新设置。
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-5">{children}</CardContent>
+    </Card>
+  );
+}
+
+function ReviewForm({ saved, onSaved }: { saved: FusionSettingsValue; onSaved: () => Promise<unknown> }) {
+  const [review, setReview] = useState<ReviewSettings>(() => ({ ...saved.review,
+    reviewerModelIds: SEAT_CODES.map((_, index) => saved.review.reviewerModelIds[index] ?? '') }));
+  const [notice, setNotice] = useState<{ tone: 'ok' | 'error'; text: string } | null>(null);
+  const models = trpc.reportModel.options.useQuery(undefined, { staleTime: 0, retry: false });
+  const names = trpc.settings.getSummaryModels.useQuery({ use: 'skill' });
+  const skills = trpc.skills.list.useQuery(undefined, { retry: false });
+  const utils = trpc.useUtils();
+  const update = trpc.fusionSettings.update.useMutation();
+  const inFlight = useRef(false);
+  const set = (patch: Partial<ReviewSettings>) => { setReview(value => ({ ...value, ...patch })); setNotice(null); };
+  const problems = draftProblems(review);
+  const dirty = JSON.stringify(toSaved(saved, review).review) !== JSON.stringify(saved.review);
+  const options = models.data?.models ?? [];
+  const published = (skills.data?.skills ?? []).filter(skill => skill.status === 'published');
+
+  async function save() {
+    if (inFlight.current || !dirty || problems.length) return;
+    inFlight.current = true;
+    setNotice(null);
+    try {
+      if (affectsRunning(saved.review, review)) {
+        const running = runningCount(await utils.fusionSettings.reviews.fetch({ limit: 100 }));
+        if (running > 0 && !window.confirm(`有 ${running} 个评审正在进行，保存后它们的后续轮次会失败。确定保存吗？`)) return;
+      }
+      const result = await update.mutateAsync(toSaved(saved, review));
+      setNotice({ tone: 'ok', text: result.warnings.length ? result.warnings.map(warningText).join(' ') : '已保存。新开始的评审使用这个设置。' });
+      await onSaved();
+    } catch (error) {
+      setNotice({ tone: 'error', text: settingsErrorText(error) });
+    } finally {
+      inFlight.current = false;
+    }
+  }
+
+  const modelSelect = (id: string, value: string, onChange: (value: string) => void) => (
+    <select id={id} className={selectClass} style={selectStyle} value={value} onChange={event => onChange(event.target.value)}>
+      <option value="">未选择</option>
+      {options.map(model => <option key={model.id} value={model.id}>{model.name}</option>)}
+      {value && !options.some(model => model.id === value)
+        ? <option value={value}>{modelLabel(value, names.data)}（当前不可用）</option> : null}
+    </select>
+  );
+  const nameInput = (id: string, value: string, onChange: (value: string) => void) => (
+    <Input id={id} value={value} maxLength={40} onChange={event => onChange(event.target.value)} />
+  );
+
+  return (
+    <SettingsCard>
+      <div className="flex items-center gap-3">
+        <Switch id="fusion-review-enabled" checked={review.enabled} onCheckedChange={enabled => set({ enabled })} />
+        <Label htmlFor="fusion-review-enabled" style={{ color: 'var(--text-secondary)' }}>开启评审团（关掉后定位页不显示入口）</Label>
+      </div>
+      {models.error ? <p role="alert" style={{ color: 'var(--color-destructive)' }}>模型列表读不到：测试窗口可能没开或已过期。</p> : null}
+      <fieldset className="grid gap-3 sm:grid-cols-2">
+        <legend className="mb-2 text-sm font-medium" style={{ color: 'var(--text-secondary)' }}>评审席位（模型和显示名分开保存，换模型不会改名字）</legend>
+        {SEAT_CODES.map((seat, index) => (
+          <div key={seat} className="space-y-1.5 rounded-md border p-3" style={{ borderColor: 'var(--border-primary)' }}>
+            <Label htmlFor={`fusion-seat-${seat}`}>评审 {seat} 的显示名</Label>
+            {nameInput(`fusion-seat-${seat}`, review.displayNames.reviewers[index] ?? '', name => set({ displayNames: { ...review.displayNames,
+              reviewers: review.displayNames.reviewers.map((item, at) => (at === index ? name : item)) } }))}
+            <Label htmlFor={`fusion-model-${seat}`}>模型</Label>
+            {modelSelect(`fusion-model-${seat}`, review.reviewerModelIds[index] ?? '', id => set({
+              reviewerModelIds: review.reviewerModelIds.map((item, at) => (at === index ? id : item)) }))}
+          </div>
+        ))}
+        <div className="space-y-1.5 rounded-md border p-3" style={{ borderColor: 'var(--border-primary)' }}>
+          <Label htmlFor="fusion-seat-S">汇总的显示名</Label>
+          {nameInput('fusion-seat-S', review.displayNames.summary, summary => set({ displayNames: { ...review.displayNames, summary } }))}
+          <Label htmlFor="fusion-model-S">模型</Label>
+          {modelSelect('fusion-model-S', review.summaryModelId ?? '', id => set({ summaryModelId: id || null }))}
+        </div>
+      </fieldset>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <div className="space-y-1.5">
+          <Label htmlFor="fusion-skill">评审 Skill（只列已发布的）</Label>
+          <select id="fusion-skill" className={selectClass} style={selectStyle} value={review.skillId ?? ''}
+            onChange={event => set({ skillId: event.target.value || null })}>
+            <option value="">未选择</option>
+            {published.map(skill => <option key={skill.id} value={skill.id}>{skill.skill_key}（第 {skill.published_version} 版）</option>)}
+            {review.skillId && !published.some(skill => skill.id === review.skillId)
+              ? <option value={review.skillId}>当前 Skill 未发布或读不到</option> : null}
+          </select>
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="fusion-rounds">最多几轮</Label>
+          <select id="fusion-rounds" className={selectClass} style={selectStyle} value={review.maxRounds}
+            onChange={event => set({ maxRounds: Number(event.target.value) })}>
+            <option value={1}>1 轮（不辩论）</option>
+            <option value={2}>2 轮（意见不一时辩论一轮）</option>
+          </select>
+        </div>
+        <NumberField id="fusion-opinion" label={`每位评审的意见长度（${TOKEN_LIMITS.opinion.min}–${TOKEN_LIMITS.opinion.max} token，含思考）`}
+          value={review.opinionOutputTokens} onChange={opinionOutputTokens => set({ opinionOutputTokens })} />
+        <NumberField id="fusion-summary" label={`汇总的输出长度（${TOKEN_LIMITS.summary.min}–${TOKEN_LIMITS.summary.max} token）`}
+          value={review.summaryOutputTokens} onChange={summaryOutputTokens => set({ summaryOutputTokens })} />
+        <div className="space-y-1.5">
+          <Label htmlFor="fusion-budget">单次评审预算上限（美元）</Label>
+          <Input id="fusion-budget" inputMode="decimal" placeholder="例如 0.5" value={review.maxBudgetUsd ?? ''}
+            onChange={event => set({ maxBudgetUsd: event.target.value })} />
+          <p className="text-xs" style={muted}>一次评审预估超过这个数就不开始。用户看到的「最多消耗多少积分」按实际模型价格算，不是这个数。</p>
+        </div>
+      </div>
+      {problems.length ? <ul role="alert" className="list-disc pl-5 text-sm" style={{ color: 'var(--color-destructive)' }}>
+        {problems.map(problem => <li key={problem}>{problem}</li>)}</ul> : null}
+      {notice ? <p role={notice.tone === 'error' ? 'alert' : 'status'} className="text-sm"
+        style={{ color: notice.tone === 'error' ? 'var(--color-destructive)' : 'var(--text-secondary)' }}>{notice.text}</p> : null}
+      <Button onClick={() => void save()} disabled={!dirty || problems.length > 0 || update.isPending}>
+        {update.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}保存评审团设置
+      </Button>
+    </SettingsCard>
+  );
+}
+
+function NumberField({ id, label, value, onChange }: { id: string; label: string; value: number; onChange: (value: number) => void }) {
+  return (
+    <div className="space-y-1.5">
+      <Label htmlFor={id}>{label}</Label>
+      <Input id={id} type="number" inputMode="numeric" value={Number.isFinite(value) ? value : ''}
+        onChange={event => onChange(event.target.value === '' ? Number.NaN : Number(event.target.value))} />
+    </div>
+  );
+}
