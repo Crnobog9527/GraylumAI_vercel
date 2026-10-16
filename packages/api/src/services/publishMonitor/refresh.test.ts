@@ -77,9 +77,12 @@ describe('publish-monitor refresh of one connection', () => {
     const down = database();
     await run(down, provider([{ status: 500 }]).deps);
     expect(finished(down.calls)).toEqual([['failed', 'PROVIDER_FAILED_500']]);
+    // The failed read still counts against the persistent daily cap.
+    expect(down.calls.filter(c => c.name === 'publish_monitor_refresh_page').map(c => c.args.p_posts)).toEqual([[]]);
     const busy = database();
     await run(busy, provider([{ status: 429 }]).deps);
     expect(finished(busy.calls)).toEqual([['release', 'PROVIDER_BUSY']]);
+    expect(busy.calls.some(c => c.name === 'publish_monitor_refresh_page')).toBe(false);
   });
 
   it('an empty first page counts against the daily cap and is reported as empty for the database rules', async () => {

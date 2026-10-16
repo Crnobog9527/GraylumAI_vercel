@@ -185,7 +185,10 @@ BEGIN
    metrics=EXCLUDED.metrics,missing_fields=EXCLUDED.missing_fields,breakdowns=EXCLUDED.breakdowns,
    evidence_ref=EXCLUDED.evidence_ref;
  END LOOP;
- UPDATE social_connections SET refresh_cursor=CASE WHEN p_save_cursor THEN p_cursor ELSE refresh_cursor END,
+ -- Discovery ends at the first page holding a known post: its next cursor is not kept, so a refresh finished later
+ -- (or settled partial by the due-post phase) starts tomorrow's discovery from the newest page again.
+ UPDATE social_connections SET refresh_cursor=CASE WHEN NOT p_save_cursor THEN refresh_cursor WHEN existing>0 THEN NULL
+   ELSE p_cursor END,
   pages_used=CASE WHEN pages_day=today THEN LEAST(pages_used+1,1000) ELSE 1 END,pages_day=today,
   updated_at=clock_timestamp()
  WHERE id=c.id;

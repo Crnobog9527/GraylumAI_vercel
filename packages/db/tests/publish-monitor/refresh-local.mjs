@@ -87,11 +87,14 @@ try {
   // Page writes are idempotent: re-reading the same page adds no post and no second snapshot for the day.
   const p1 = [post('v1', ago(1)), post('v2', null)];
   assert.deepEqual(await page(k, p1, 'c2'), { stale: false, inserted: 2, existing: 0 });
+  assert.equal((await row(cu)).refresh_cursor, 'c2');
   assert.deepEqual(await page(k, p1, 'c2'), { stale: false, inserted: 0, existing: 2 });
   assert.equal(await v('SELECT count(*)::int v FROM social_posts WHERE connection_id=$1', [cu]), 2);
   assert.equal(await v('SELECT count(*)::int v FROM social_metric_snapshots WHERE connection_id=$1', [cu]), 2);
+  assert.equal((await row(cu)).refresh_cursor, null, 'discovery ends at a known post: tomorrow starts from the newest page');
+  await page(k, [post('v3', ago(2))], 'c2');
   const r1 = await row(cu);
-  assert.deepEqual([r1.refresh_cursor, r1.pages_used], ['c2', 2]);
+  assert.deepEqual([r1.refresh_cursor, r1.pages_used], ['c2', 3]);
   assert.deepEqual(await v(`SELECT missing_fields v FROM social_metric_snapshots s JOIN social_posts p ON p.id=s.post_id
     WHERE p.platform_post_id='v1'`), ['likes'], 'missing fields are listed, not written as zero');
   report.checks.push('page writes upsert posts and one snapshot per post per day; the cursor is saved with the page');
@@ -108,7 +111,7 @@ try {
   assert.equal(await claimOf(cu), undefined, 'settled for today');
   await nextDay(cu);
   const k2 = await claimOf(cu);
-  assert.deepEqual([k2.refreshId, k2.cursor, k2.knownPosts, k2.pagesUsed], [k.refreshId, 'c2', 2, 0]);
+  assert.deepEqual([k2.refreshId, k2.cursor, k2.knownPosts, k2.pagesUsed], [k.refreshId, 'c2', 3, 0]);
   await finish(k2, 'done');
   r2 = await row(cu);
   assert.deepEqual([r2.refresh_state, r2.refresh_cursor, r2.refresh_id, r2.refresh_attempts], ['ok', null, null, 0]);
@@ -120,7 +123,7 @@ try {
   await finish(k3, 'empty');
   r2 = await row(cu);
   assert.deepEqual([r2.status, r2.refresh_state, r2.empty_streak], ['connected', 'not_fetched', 1]);
-  assert.equal(await v('SELECT count(*)::int v FROM social_posts WHERE connection_id=$1', [cu]), 2, 'old data kept');
+  assert.equal(await v('SELECT count(*)::int v FROM social_posts WHERE connection_id=$1', [cu]), 3, 'old data kept');
   await nextDay(cu);
   k3 = await claimOf(cu);
   await finish(k3, 'empty');
