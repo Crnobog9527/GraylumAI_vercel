@@ -60,12 +60,22 @@ describe('recognition service', () => {
 });
 
 describe('Word image anchors', () => {
-  it('counts the segments that start before each image', async () => {
-    const { wordImageAnchors } = await import('./wordContent');
-    const segments = [{ title: '', body: '第一段\n' }, { title: '', body: '第二段\n' }, { title: '', body: '第三段' }];
-    expect(wordImageAnchors(segments, [{ offset: 0 }, { offset: 4 }, { offset: 6 }, { offset: 11 }])).toEqual(
-      [{ anchor: 0 }, { anchor: 1 }, { anchor: 2 }, { anchor: 3 }]);
-    expect(() => wordImageAnchors(segments, [{ offset: 6 }, { offset: 4 }])).toThrow('LIBRARY_INVALID');
-    expect(() => wordImageAnchors(segments, [{ offset: 12 }])).toThrow('LIBRARY_INVALID');
+  it('ends a segment at each image so its text lands exactly at the image', async () => {
+    const { wordSegmentsWithImages } = await import('./wordContent');
+    const text = '第一段\n第二段\n第三段';
+    const { segments, anchors } = wordSegmentsWithImages(Buffer.from(text), [], [{ offset: 0 }, { offset: 4 }, { offset: 6 }, { offset: 11 }]);
+    // Without blank lines the paragraphs would share one segment; image offsets split them.
+    expect(segments.map((s) => s.body)).toEqual(['第一段\n', '第二', '段\n第三段']);
+    expect(segments.map((s) => s.body).join('')).toBe(text);
+    expect(anchors).toEqual([{ anchor: 0 }, { anchor: 1 }, { anchor: 2 }, { anchor: 3 }]);
+  });
+  it('keeps headings as titles and refuses offsets out of order or past the text', async () => {
+    const { wordSegmentsWithImages } = await import('./wordContent');
+    const text = '标题\n正文一\n正文二';
+    const { segments, anchors } = wordSegmentsWithImages(Buffer.from(text), [{ offset: 3, level: 1, text: '正文一' }], [{ offset: 7 }]);
+    expect(segments).toEqual([{ title: '', body: '标题\n' }, { title: '正文一', body: '正文一\n' }, { title: '正文一', body: '正文二' }]);
+    expect(anchors).toEqual([{ anchor: 2 }]);
+    expect(() => wordSegmentsWithImages(Buffer.from(text), [], [{ offset: 6 }, { offset: 4 }])).toThrow('LIBRARY_INVALID');
+    expect(() => wordSegmentsWithImages(Buffer.from(text), [], [{ offset: 99 }])).toThrow('LIBRARY_INVALID');
   });
 });

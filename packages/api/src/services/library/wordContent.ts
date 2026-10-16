@@ -12,20 +12,14 @@ export const wordHeadings = z.array(z.object({
 export const wordImages = z.array(z.object({ offset: z.number().int().min(0).max(MAX_BYTES) }).strict()).max(500);
 export const wordCompleteInput = z.object({ documentId: z.string().uuid(), headings: wordHeadings, images: wordImages.optional() }).strict();
 
-/** For each image, how many segments start before it: its recognised text is inserted right there (0280). Segment
- * bodies are contiguous slices of the extracted text, so a segment starts where the previous bodies end. */
-export function wordImageAnchors(segments: Segment[], images: z.infer<typeof wordImages>): Array<{ anchor: number }> {
+/** Segments plus, for each image, how many segments come before it (0280): its recognised text goes right there.
+ * Each image offset is also a segment boundary, so text before and after an inline image never share a segment. */
+export function wordSegmentsWithImages(bytes: Uint8Array, headings: z.infer<typeof wordHeadings>, images: z.infer<typeof wordImages>) {
   const parsed = wordImages.safeParse(images);
   if (!parsed.success) throw new Error('LIBRARY_INVALID');
-  const starts: number[] = [];
-  let at = 0;
-  for (const segment of segments) { starts.push(at); at += segment.body.length; }
-  let last = -1;
-  return parsed.data.map(({ offset }) => {
-    if (offset < last || offset > at) throw new Error('LIBRARY_INVALID');
-    last = offset;
-    return { anchor: starts.filter((start) => start < offset).length };
-  });
+  const anchors: Array<{ anchor: number }> = [];
+  const segments = wordSegments(bytes, headings, parsed.data.map((image) => image.offset), (count) => anchors.push({ anchor: count }));
+  return { segments, anchors };
 }
 
 export function wordFilename(filename: string) {
@@ -34,7 +28,8 @@ export function wordFilename(filename: string) {
 }
 
 /** Offsets are UTF-16 indices into exactly the browser's extracted text. Never parse Word or markup. */
-export function wordSegments(bytes: Uint8Array, rawHeadings: z.infer<typeof wordHeadings>): Segment[] {
+export function wordSegments(bytes: Uint8Array, rawHeadings: z.infer<typeof wordHeadings>, breaks: number[] = [],
+  onBreak: (segmentsBefore: number) => void = () => undefined): Segment[] {
   const parsed = wordHeadings.safeParse(rawHeadings);
   if (!parsed.success) throw new Error('LIBRARY_HEADINGS');
   if (!bytes.length || bytes.length > MAX_BYTES) throw new Error('LIBRARY_TEXT_LIMIT');
@@ -75,12 +70,21 @@ export function wordSegments(bytes: Uint8Array, rawHeadings: z.infer<typeof word
     }
     flush();
   };
+  // Headings change the title; breaks (LIB-2d image offsets, in order) only end the current segment.
+  let previous = -1;
+  for (const at of breaks) {
+    if (!Number.isInteger(at) || at < previous || at > text.length) throw new Error('LIBRARY_INVALID');
+    previous = at;
+  }
+  const events = [...parsed.data.map((h) => ({ at: h.offset, heading: h })),
+    ...breaks.map((at) => ({ at, heading: null }))].sort((a, b) => a.at - b.at || (a.heading ? 1 : -1));
   let offset = 0;
   let title = '';
-  for (const h of parsed.data) {
-    append(text.slice(offset, h.offset), title);
-    offset = h.offset;
-    title = h.text;
+  for (const event of events) {
+    append(text.slice(offset, event.at), title);
+    offset = event.at;
+    if (event.heading) title = event.heading.text;
+    else onBreak(segments.length);
   }
   append(text.slice(offset), title);
   return segments;
