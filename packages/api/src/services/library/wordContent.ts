@@ -17,6 +17,11 @@ export const wordCompleteInput = z.object({ documentId: z.string().uuid(), headi
 export function wordSegmentsWithImages(bytes: Uint8Array, headings: z.infer<typeof wordHeadings>, images: z.infer<typeof wordImages>) {
   const parsed = wordImages.safeParse(images);
   if (!parsed.success) throw new Error('LIBRARY_INVALID');
+  // A Word file that is only images has no text: every image sits before the (absent) first segment.
+  if (!bytes.length) {
+    if (!parsed.data.length || headings.length || parsed.data.some((image) => image.offset !== 0)) throw new Error('LIBRARY_INVALID');
+    return { segments: [], anchors: parsed.data.map(() => ({ anchor: 0 })) };
+  }
   const anchors: Array<{ anchor: number }> = [];
   const segments = wordSegments(bytes, headings, parsed.data.map((image) => image.offset), (count) => anchors.push({ anchor: count }));
   return { segments, anchors };

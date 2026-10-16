@@ -23,7 +23,7 @@ export function wordUpload(client: SupabaseClient, actorId: string, storage: Lib
         // LIB-2d (0280): segments also end at each image, and the publisher creates one recognition unit per image.
         const { segments, anchors } = wordSegmentsWithImages(bytes, input.headings, input.images);
         return { rpc: 'library_word_publish', args: { segments, images: anchors } };
-      });
+      }, (input.images?.length ?? 0) > 0);
     },
   };
 }
