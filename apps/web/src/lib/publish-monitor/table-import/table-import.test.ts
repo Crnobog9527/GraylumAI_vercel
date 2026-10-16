@@ -73,6 +73,17 @@ describe('XLSX', () => {
     expect((await parseTable('a.csv', utf8('PK,views\np1,10'))).header).toEqual(['PK', 'views']);
   });
 
+  it('marks a 1904-system workbook so its date serials are read from the right epoch', async () => {
+    const book = new Uint8Array(zipFixture([
+      { name: 'xl/workbook.xml', body: `${HEAD}<workbook xmlns:r="r"><workbookPr date1904="1"/><sheets><sheet r:id="rId1"/></sheets></workbook>` },
+      { name: 'xl/_rels/workbook.xml.rels', body: `${HEAD}<Relationships><Relationship Id="rId1" Target="worksheets/sheet1.xml"/></Relationships>` },
+      { name: 'xl/worksheets/sheet1.xml', body: `${HEAD}<worksheet><sheetData><row r="1"><c r="A1"><v>1</v></c></row><row r="2"><c r="A2"><v>44834</v></c></row></sheetData></worksheet>` },
+    ]));
+    const grid = await parseXlsx(book);
+    expect(grid.date1904).toBe(true);
+    expect(parseDate('44834', true)).toBe(new Date(2026, 9, 1).toISOString());
+  });
+
   it('caps rows in a worksheet', async () => {
     const rows = Array.from({ length: TABLE_LIMITS.maxRows + 2 }, (_, i) => `<row r="${i + 1}"><c r="A${i + 1}"><v>${i}</v></c></row>`);
     expect(await code(() => parseXlsx(xlsx(rows.join(''))))).toBe('TABLE_TOO_MANY_ROWS');
@@ -115,5 +126,9 @@ describe('column mapping and rows', () => {
     expect(built.errors.map(e => [e.line, e.code])).toEqual([[3, 'POST_KEY_MISSING'], [4, 'METRICS_EMPTY'],
       [5, 'NUMBER_INVALID'], [6, 'URL_INVALID']]);
     expect(buildRows(grid, ['url', 'views', 'views']).duplicateFields).toEqual(['views']);
+    // A post key longer than the stored identity is refused, never shortened into another post's key.
+    const long = `https://example.com/${'a'.repeat(300)}`;
+    expect(buildRows({ header: ['链接', '播放量'], rows: [[long, '1']] }, ['url', 'views']).errors.map(e => e.code))
+      .toEqual(['POST_KEY_TOO_LONG']);
   });
 });

@@ -25,7 +25,9 @@ export class TableImportError extends Error {
 const fail = (code: TableErrorCode): never => { throw new TableImportError(code); };
 
 /** First row is the header; every row has exactly `header.length` cells (missing cells are ''). */
-export type Grid = { header: string[]; rows: string[][] };
+export type Grid = { header: string[]; rows: string[][];
+  /** XLSX only: the workbook counts date serials from 1904 (workbookPr date1904), not from 1900. */
+  date1904?: boolean };
 
 function finish(lines: string[][]): Grid {
   const nonEmpty = lines.filter(line => line.some(cell => cell.trim() !== ''));
@@ -180,7 +182,10 @@ export async function parseXlsx(bytes: Uint8Array): Promise<Grid> {
       }
       lines[rowIndex] = Array.from({ length: line.length }, (_, i) => line[i] ?? '');
     }
-    return finish(Array.from({ length: lines.length }, (_, i) => lines[i] ?? []));
+    const workbook = part(parts, 'xl/workbook.xml') ?? '';
+    const pr = /<workbookPr\b[^>]*>/.exec(workbook)?.[0] ?? '';
+    const date1904 = /\sdate1904="(1|true)"/.test(pr);
+    return { ...finish(Array.from({ length: lines.length }, (_, i) => lines[i] ?? [])), ...(date1904 ? { date1904 } : {}) };
   } catch (error) {
     if (error instanceof TableImportError) throw error;
     // Every ZIP or XML guard refusal (bomb, ratio, DTD, depth, encoding...) is an unreadable table to the user.

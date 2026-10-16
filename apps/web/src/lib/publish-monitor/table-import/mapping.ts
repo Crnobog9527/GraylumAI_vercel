@@ -64,7 +64,7 @@ export function suggestMapping(header: string[]): Mapping {
   return mapping;
 }
 
-export type RowError = { line: number; code: 'POST_KEY_MISSING' | 'NUMBER_INVALID' | 'DATE_INVALID' | 'URL_INVALID'
+export type RowError = { line: number; code: 'POST_KEY_MISSING' | 'POST_KEY_TOO_LONG' | 'NUMBER_INVALID' | 'DATE_INVALID' | 'URL_INVALID'
   | 'METRICS_EMPTY'; column?: number };
 export type BuiltRows = { rows: ManualRow[]; errors: RowError[]; duplicateFields: Field[] };
 
@@ -95,13 +95,14 @@ function localInstant(y: number, mo: number, d: number, h = 0, mi = 0, sec = 0):
  * Dates without a zone, and Excel serials (which carry none), are read in the browser's local time, as the user's
  * export shows them. Impossible dates are refused.
  */
-export function parseDate(raw: string): string | null | undefined {
+export function parseDate(raw: string, date1904 = false): string | null | undefined {
   const text = raw.trim();
   if (!text || text === '-') return undefined;
   if (/^\d{5}(\.\d+)?$/.test(text)) {
-    const serial = Number(text);
+    // A 1904-system workbook counts 1,462 days fewer for the same date.
+    const serial = Number(text) + (date1904 ? 1462 : 0);
     if (serial <= 36526 || serial >= 73051) return null;
-    // Excel day 25569 is 1970-01-01; read the serial's calendar fields, then place them in local time.
+    // Excel day 25569 (1900 system) is 1970-01-01; read the serial's calendar fields, then place them in local time.
     const utc = new Date(Math.round((serial - 25569) * 86_400) * 1000);
     return localInstant(utc.getUTCFullYear(), utc.getUTCMonth() + 1, utc.getUTCDate(), utc.getUTCHours(),
       utc.getUTCMinutes(), utc.getUTCSeconds());
@@ -148,7 +149,7 @@ export function buildRows(grid: Grid, mapping: Mapping): BuiltRows {
           url = parsed.href;
         } catch { errors.push({ line, code: 'URL_INVALID', column }); broken = true; }
       } else if (field === 'postedAt') {
-        const date = parseDate(cell);
+        const date = parseDate(cell, grid.date1904);
         if (date === null) { errors.push({ line, code: 'DATE_INVALID', column }); broken = true; } else postedAt = date ?? null;
       } else {
         const value = parseNumber(cell, field === 'completion_rate');
@@ -161,8 +162,10 @@ export function buildRows(grid: Grid, mapping: Mapping): BuiltRows {
     if (broken) return;
     const postKey = postId ?? url;
     if (!postKey) { errors.push({ line, code: 'POST_KEY_MISSING' }); return; }
+    // The key identifies the post: shortening it could merge two different posts, so a longer one is refused.
+    if (String(postKey).length > 256) { errors.push({ line, code: 'POST_KEY_TOO_LONG' }); return; }
     if (Object.keys(metrics).length === 0) { errors.push({ line, code: 'METRICS_EMPTY' }); return; }
-    rows.push({ postKey: String(postKey).slice(0, 256), url, postedAt, titleExcerpt: title ? [...String(title)].slice(0, 120).join('') : null,
+    rows.push({ postKey: String(postKey), url, postedAt, titleExcerpt: title ? [...String(title)].slice(0, 120).join('') : null,
       metrics });
   });
   return { rows, errors, duplicateFields };
