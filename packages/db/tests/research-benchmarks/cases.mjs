@@ -3,6 +3,7 @@
 // Synthetic fixtures only; metrics come from the real accountMetrics/classifyAccount.
 import assert from 'node:assert/strict';
 import {createHash,randomUUID} from 'node:crypto';
+import {readFileSync} from 'node:fs';
 import {rpc,closeAccount} from '../erasure-b2a/cases.mjs';
 import {seed} from '../report-finalization/cases.mjs';
 import {benchmarkCode} from '../payg/research-runtime-host-cache.mjs';
@@ -142,13 +143,16 @@ export async function runCases({db,Client,connectionString,report}) {
       postsAnalyzedHigh: x => {x.metrics.postsAnalyzed=20;x.metrics.postsPerWeek={value:null,refs:[]};return x;},
       cappedFrequency: x => {x.metrics.wholeHistory=false;return x;},
       // A chosen subset (one strong post) with its honestly computed median is still not the fetch's median.
+      // One recent post cited 20 times "proves" a weekly frequency the 20 analyzed posts do not have.
+      repeatedFrequencyRef: x => {const ref=x.metrics.postsPerWeek.refs[0];x.metrics.postsPerWeek={value:20*7/30,refs:Array(20).fill(ref)};return x;},
       medianSubset: x => {const ref=x.metrics.medianViews.refs[1];x.metrics.medianViews={value:11000,refs:[ref]};return x;},
       category: x => {x.classification={category:'imitable',qualified:true,excluded:null};x.metrics.followers.value=5000;return x;},
     };
     for (const [name,tamper] of Object.entries(forged)) {
       const followers = name==='category'?5000:50000;
       // A full page of 30 posts all inside the window: only the whole history makes its frequency known.
-      const posts = name==='cappedFrequency' ? Array.from({length:30},(_,i)=>post(i*0.5+0.1,10000)) : imitable.posts;
+      const posts = name==='cappedFrequency' ? Array.from({length:30},(_,i)=>post(i*0.5+0.1,10000))
+        : name==='repeatedFrequencyRef' ? Array.from({length:20},(_,i)=>post(i<10?i+1:40+i,10000)) : imitable.posts;
       const got = await fetchAccount(f,e,'forged'+name.toLowerCase(),{...imitable,posts,followers,tamper});
       const [row] = await rows(db,'fetch_id=$1',[got.fetchId]);
       assert.deepEqual([row.excluded,row.qualified,row.category,row.followers,row.median_views,row.last_published_at],
@@ -183,7 +187,7 @@ export async function runCases({db,Client,connectionString,report}) {
     await db.query('BEGIN');
     try {
       await db.query('SET LOCAL ROLE service_role');
-      assert.equal((await db.query('SELECT research_benchmark_rows($1,$2) v',[f.actor,f.session])).rows[0].v.rows.length,17);
+      assert.equal((await db.query('SELECT research_benchmark_rows($1,$2) v',[f.actor,f.session])).rows[0].v.rows.length,18);
     } finally {await db.query('ROLLBACK');}
     await assert.rejects(db.query(`UPDATE research_benchmarks SET qualified=true,category='imitable',excluded=NULL,followers=5000,
       last_published_at=now(),posts_analyzed=1 WHERE fetch_id=$1`,[got.fetchId]),/check constraint/);
@@ -278,6 +282,9 @@ export async function runCases({db,Client,connectionString,report}) {
     await db.query(`INSERT INTO artifact_evidence(id,project_id,kind,operation_id,payload,content_hash)
       VALUES(gen_random_uuid(),$1,'supplier',$2,'{}',repeat('a',64))`,[project,linked.postOp]);
     await erase(db,g,'artifact',project);
+    assert.deepEqual((await rows(db,'session_id=$1',[g.session])).map(r=>r.fetch_id),[kept.fetchId]);
+    // Running 0268 again (its backfill re-projects every cache) never brings back the row of erased evidence.
+    await db.query(readFileSync(new URL('../../migrations/0268_research_benchmarks.sql',import.meta.url),'utf8'));
     assert.deepEqual((await rows(db,'session_id=$1',[g.session])).map(r=>r.fetch_id),[kept.fetchId]);
     // Account erasure removes every row and reports the count.
     await fetchAccount(g,ge,'more',imitable);

@@ -97,7 +97,7 @@ $$;
 CREATE OR REPLACE FUNCTION public.research_benchmark_project(f research_account_fetches) RETURNS void
 LANGUAGE plpgsql SET search_path=public,pg_temp AS $$
 DECLARE e jsonb:=f.last_success; m jsonb; c jsonb; refs jsonb:='{}'; ops uuid[]:='{}'; key text; ref text; item jsonb;
-  ok boolean:=true; expected double precision; actual double precision; viewed text[]; rated text[];
+  ok boolean:=true; expected double precision; actual double precision; viewed text[]; rated text[]; analyzed_refs text[];
 BEGIN
   IF e IS NULL OR f.last_success_execution_id IS NULL OR f.account IS NULL THEN
     DELETE FROM research_benchmarks WHERE fetch_id=f.id;
@@ -105,6 +105,16 @@ BEGIN
   END IF;
   -- research_account_fetch_finish already validated the shape of a successful cache.
   m:=e->'metrics';c:=e->'classification';
+  -- Numbers built on erased research evidence go with it (content erasure deletes such rows): never (re)create one,
+  -- not even as an unverified row, e.g. when the migration backfills a cache whose evidence was erased since.
+  IF EXISTS(SELECT 1 FROM research_operations o WHERE o.erased_at IS NOT NULL AND o.id IN (
+      SELECT split_part(r,'#',1)::uuid FROM jsonb_each(m) k
+      CROSS JOIN LATERAL jsonb_array_elements_text(CASE WHEN jsonb_typeof(k.value->'refs')='array' THEN k.value->'refs' ELSE '[]' END) r
+      WHERE r ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}#[1-9][0-9]{0,4}$'
+      UNION SELECT research_benchmark_operation_id(f.id,f.attempt,k) FROM unnest(ARRAY['account_profile','account_posts']) k)) THEN
+    DELETE FROM research_benchmarks WHERE fetch_id=f.id;
+    RETURN;
+  END IF;
   FOREACH key IN ARRAY ARRAY['followers','medianViews','engagementRate','postsPerWeek','lastPublishedAt','earliestPublishedAt'] LOOP
     refs:=refs||jsonb_build_object(key,m->key->'refs');
     FOR ref IN SELECT jsonb_array_elements_text(m->key->'refs') LOOP
@@ -151,14 +161,18 @@ BEGIN
       WHERE o.id=research_benchmark_operation_id(f.id,f.attempt,'account_posts') AND p.actor_id=f.actor_id
         AND p.session_id=f.session_id AND o.state='succeeded' AND o.erased_at IS NULL
     ), analyzed AS (SELECT * FROM items ORDER BY published DESC NULLS LAST,i LIMIT 30)
-    SELECT coalesce(array_agg(r ORDER BY r) FILTER (WHERE v),'{}'),coalesce(array_agg(r ORDER BY r) FILTER (WHERE v AND rate),'{}')
-      INTO viewed,rated FROM (SELECT research_benchmark_operation_id(f.id,f.attempt,'account_posts')::text||'#'||i r,
+    SELECT coalesce(array_agg(r ORDER BY r) FILTER (WHERE v),'{}'),coalesce(array_agg(r ORDER BY r) FILTER (WHERE v AND rate),'{}'),
+        coalesce(array_agg(r ORDER BY r),'{}')
+      INTO viewed,rated,analyzed_refs FROM (SELECT research_benchmark_operation_id(f.id,f.attempt,'account_posts')::text||'#'||i r,
         jsonb_typeof(fl->'views')='number' AND (fl->>'views')::numeric>=0 v,
         coalesce((fl->>'views')::numeric>0,false) AND jsonb_typeof(fl->'likes')='number' AND (fl->>'likes')::numeric>=0
         AND jsonb_typeof(fl->'comments')='number' AND (fl->>'comments')::numeric>=0
         AND jsonb_typeof(fl->'shares')='number' AND (fl->>'shares')::numeric>=0 rate FROM analyzed) z;
     ok:=ARRAY(SELECT jsonb_array_elements_text(m->'medianViews'->'refs') ORDER BY 1)=viewed
-      AND ARRAY(SELECT jsonb_array_elements_text(m->'engagementRate'->'refs') ORDER BY 1)=rated;
+      AND ARRAY(SELECT jsonb_array_elements_text(m->'engagementRate'->'refs') ORDER BY 1)=rated
+      -- A known weekly frequency cites every analyzed post once (all of them are dated).
+      AND (m->'postsPerWeek'->'value'='null'::jsonb
+        OR ARRAY(SELECT jsonb_array_elements_text(m->'postsPerWeek'->'refs') ORDER BY 1)=analyzed_refs);
   END IF;
   -- Medians are recomputed from the items (same rule as accountMetrics: the middle value, or the mean of the two).
   IF ok AND m->'medianViews'->'value'<>'null'::jsonb THEN
