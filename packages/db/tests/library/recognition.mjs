@@ -131,8 +131,19 @@ export async function verifyRecognition(admin, one, two) {
   assert.equal((await wordSave(2, 2, 'img2')).saved, true);
   assert.equal((await wordSave(1, 3, 'img1')).saved, true);
   const order = (await admin.query('SELECT body,source,page_number FROM library_document_segments WHERE document_id=$1 ORDER BY ordinal', [docx])).rows;
-  assert.deepEqual(order.map((r) => r.body), ['A', 'img2', 'img1', 'B', 'C', 'img3']);
+  assert.deepEqual(order.map((r) => r.body), ['A', 'img1', 'img2', 'B', 'C', 'img3'], 'shared anchor keeps image order');
   assert.ok(order.filter((r) => r.source === 'recognized').every((r) => r.page_number === null));
+  // A Word file that is only images: empty text, no segments, one unit per image.
+  const pictures = (await value(one, "SELECT library_upload_begin($1,$2,'p.docx','docx','reference',5) v", [a, randomUUID()])).documentId;
+  await one.query('SELECT library_word_text_begin($1,$2,5)', [a, pictures]);
+  await assert.rejects(one.query(`SELECT library_word_publish($1,$2,5,3,'[]','[{"anchor":0}]')`, [a, pictures]), /LIBRARY_INVALID/);
+  assert.equal((await value(one, `SELECT library_word_publish($1,$2,5,0,'[]','[{"anchor":0},{"anchor":0}]') v`, [a, pictures])).status, 'ready');
+  assert.equal(await value(admin, "SELECT count(*)::int v FROM library_recognition_units WHERE document_id=$1 AND status='pending'", [pictures]), 2);
+  assert.equal((await save(one, 2, 1, [{ title: '图片 2（识别）', body: 'second' }], a, pictures, 'word_image')).saved, true);
+  assert.equal((await save(one, 1, 2, [{ title: '图片 1（识别）', body: 'first' }], a, pictures, 'word_image')).saved, true);
+  assert.deepEqual((await admin.query('SELECT body FROM library_document_segments WHERE document_id=$1 ORDER BY ordinal', [pictures])).rows
+    .map((r) => r.body), ['first', 'second']);
+
   // The original five-argument publisher still works and creates no image units.
   const plain = (await value(one, "SELECT library_upload_begin($1,$2,'b.docx','docx','reference',5) v", [a, randomUUID()])).documentId;
   await one.query('SELECT library_word_text_begin($1,$2,5)', [a, plain]);

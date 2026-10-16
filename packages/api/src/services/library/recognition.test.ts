@@ -69,6 +69,12 @@ describe('Word image anchors', () => {
     expect(segments.map((s) => s.body).join('')).toBe(text);
     expect(anchors).toEqual([{ anchor: 0 }, { anchor: 1 }, { anchor: 2 }, { anchor: 3 }]);
   });
+  it('accepts a Word file that is only images, with every image at the start', async () => {
+    const { wordSegmentsWithImages } = await import('./wordContent');
+    expect(wordSegmentsWithImages(Buffer.alloc(0), [], [{ offset: 0 }, { offset: 0 }])).toEqual({ segments: [], anchors: [{ anchor: 0 }, { anchor: 0 }] });
+    expect(() => wordSegmentsWithImages(Buffer.alloc(0), [], [])).toThrow('LIBRARY_INVALID');
+    expect(() => wordSegmentsWithImages(Buffer.alloc(0), [], [{ offset: 1 }])).toThrow('LIBRARY_INVALID');
+  });
   it('keeps headings as titles and refuses offsets out of order or past the text', async () => {
     const { wordSegmentsWithImages } = await import('./wordContent');
     const text = '标题\n正文一\n正文二';

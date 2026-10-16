@@ -20,20 +20,41 @@ LANGUAGE sql STABLE SET search_path=public,pg_temp AS $$
  SELECT EXISTS(SELECT 1 FROM system_settings WHERE key='library_scan_recognition_enabled' AND value::jsonb='true'::jsonb)
 $$;
 
+-- Which unit a recognised segment came from (NULL for extracted text): keeps Word images that share an anchor in
+-- image order whatever order they are saved in.
+ALTER TABLE public.library_document_segments ADD COLUMN IF NOT EXISTS unit_position integer;
+ALTER TABLE public.library_document_segments DROP CONSTRAINT IF EXISTS library_document_segments_unit_position_check;
+ALTER TABLE public.library_document_segments ADD CONSTRAINT library_document_segments_unit_position_check
+ CHECK((source='recognized') = (unit_position IS NOT NULL) AND (unit_position IS NULL OR unit_position BETWEEN 1 AND 500));
+
 -- Word publish with its images (offsets already turned into anchors by the service): the first 50 are recognised,
 -- later ones are over the per-file limit (LIB_DOCS_PLAN 4.1/4.4). Text and segments follow the original publisher.
 CREATE OR REPLACE FUNCTION public.library_word_publish(a uuid,did uuid,actual bigint,text_actual bigint,segments jsonb,images jsonb)
 RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
-DECLARE result jsonb; i jsonb; n integer:=0; last_anchor integer:=0; count_segments integer;
+DECLARE result jsonb; i jsonb; n integer:=0; last_anchor integer:=0; count_segments integer; d library_documents; r library_upload_reservations;
 BEGIN
- IF jsonb_typeof(images) IS DISTINCT FROM 'array' OR jsonb_array_length(images)>500 THEN RAISE EXCEPTION 'LIBRARY_INVALID'; END IF;
+ IF jsonb_typeof(images) IS DISTINCT FROM 'array' OR jsonb_array_length(images)>500
+  OR jsonb_typeof(segments) IS DISTINCT FROM 'array' THEN RAISE EXCEPTION 'LIBRARY_INVALID'; END IF;
  count_segments:=jsonb_array_length(segments);
  FOR i IN SELECT value FROM jsonb_array_elements(images) LOOP
   IF jsonb_typeof(i->'anchor') IS DISTINCT FROM 'number' OR (i->>'anchor') !~ '^(0|[1-9][0-9]{0,4})$'
    OR (i->>'anchor')::integer<last_anchor OR (i->>'anchor')::integer>count_segments THEN RAISE EXCEPTION 'LIBRARY_INVALID'; END IF;
   last_anchor:=(i->>'anchor')::integer;
  END LOOP;
- result:=library_word_publish(a,did,actual,text_actual,segments);
+ IF count_segments>0 OR jsonb_array_length(images)=0 THEN
+  result:=library_word_publish(a,did,actual,text_actual,segments);
+ ELSE
+  -- A Word file that is only images: an empty text object and no segments, checked like the original publisher.
+  PERFORM library_actor(a);
+  SELECT * INTO d FROM library_documents WHERE id=did AND actor_id=a FOR UPDATE;
+  IF d.id IS NULL OR d.deleted_at IS NOT NULL OR d.status NOT IN ('uploading','ready') THEN RAISE EXCEPTION 'LIBRARY_NOT_FOUND'; END IF;
+  IF d.format IS DISTINCT FROM 'docx' THEN RAISE EXCEPTION 'LIBRARY_TYPE'; END IF;
+  IF d.status='ready' THEN RETURN jsonb_build_object('documentId',did,'status','ready'); END IF;
+  SELECT * INTO r FROM library_upload_reservations WHERE document_id=did;
+  IF r.text_path IS NULL OR r.text_hold<>10000000 OR r.text_guard_until IS NULL OR text_actual IS DISTINCT FROM 0
+   THEN RAISE EXCEPTION 'LIBRARY_INVALID'; END IF;
+  result:=library_publish(a,did,actual,'[]'::jsonb);
+ END IF;
  IF NOT EXISTS(SELECT 1 FROM library_recognition_units WHERE document_id=did) THEN
   FOR i IN SELECT value FROM jsonb_array_elements(images) LOOP
    n:=n+1;
@@ -111,16 +132,20 @@ BEGIN
  IF kind='pdf_page' THEN
   SELECT count(*) INTO at_ordinal FROM library_document_segments WHERE document_id=did AND page_number<=pos;
  ELSE
-  -- Before the extracted segment the image precedes (after any earlier image text already placed there).
+  -- Before the extracted segment the image precedes. Images sharing this anchor sit right before it in image
+  -- order, so this image goes before the ones with a higher position that are already saved.
   SELECT coalesce((SELECT ordinal FROM library_document_segments WHERE document_id=did AND source='extracted'
    ORDER BY ordinal OFFSET u.anchor LIMIT 1),(SELECT count(*) FROM library_document_segments WHERE document_id=did))
+   -(SELECT count(*) FROM library_document_segments s JOIN library_recognition_units x ON x.document_id=s.document_id
+     AND x.unit_kind='word_image' AND x.position=s.unit_position
+     WHERE s.document_id=did AND s.source='recognized' AND x.anchor=u.anchor AND x.position>pos)
   INTO at_ordinal;
  END IF;
  -- Ordinals stay contiguous: later segments move up by n through a range no ordinal uses.
  UPDATE library_document_segments SET ordinal=ordinal+100000 WHERE document_id=did AND ordinal>=at_ordinal;
  FOR s IN SELECT value FROM jsonb_array_elements(segments) LOOP
-  INSERT INTO library_document_segments(document_id,actor_id,ordinal,title,body,page_number,source)
-  VALUES(did,a,at_ordinal+idx,s->>'title',s->>'body',CASE WHEN kind='pdf_page' THEN pos END,'recognized'); idx:=idx+1;
+  INSERT INTO library_document_segments(document_id,actor_id,ordinal,title,body,page_number,source,unit_position)
+  VALUES(did,a,at_ordinal+idx,s->>'title',s->>'body',CASE WHEN kind='pdf_page' THEN pos END,'recognized',pos); idx:=idx+1;
  END LOOP;
  UPDATE library_document_segments SET ordinal=ordinal-100000+n WHERE document_id=did AND ordinal>=100000;
  UPDATE library_upload_reservations SET segment_hold=segment_hold+total WHERE document_id=did;
