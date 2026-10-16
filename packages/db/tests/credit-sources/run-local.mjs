@@ -6,13 +6,13 @@ import { randomUUID } from 'node:crypto';
 import pg from 'pg';
 import { localDb, read } from '../runtime-view-perf/local-db.mjs';
 
-const migrationPath = 'packages/db/migrations/0299_pay_dispute_credit_sources.sql';
+const migrationPath = 'packages/db/migrations/0275_pay_dispute_credit_sources.sql';
 const MARK = ' -- PR-D0 credit sources';
 const HOOKED = ['atomic_pre_deduct(uuid,integer,text,uuid)', 'bill2_legacy_settle(uuid,uuid,integer,jsonb,jsonb)',
   'bill2_legacy_refund(uuid,uuid,text)', 'bill2_legacy_abort_settle(uuid,uuid,integer,jsonb,text,text)',
   'bill2_payg_compensate(bill2_runs,bill2_calls)'];
 const db = await localDb(), c = db.client;
-const report = { build: db.build, migration: '0299', checks: [] };
+const report = { build: db.build, migration: '0275', checks: [] };
 const v = async (sql, args = [], client = c) => (await client.query(sql, args)).rows[0]?.v;
 const fingerprint = read('packages/db/tests/baseline/fingerprint.sql');
 const catalog = () => v(fingerprint.slice(0, fingerprint.indexOf('-- FINAL')) + 'SELECT jsonb_object_agg(k,d ORDER BY k) v FROM grouped;');
@@ -84,12 +84,12 @@ const unhook = async () => {
 };
 
 try {
-  // Full chain applied 0299 once; a second run is a structural and data no-op.
+  // Full chain applied 0275 once; a second run is a structural and data no-op.
   const after = await catalog();
   await c.query(read(migrationPath));
   assert.deepEqual(await catalog(), after);
   for (const fn of HOOKED) assert.equal(await v("SELECT (length(d)-length(replace(d,'PR-D0 credit sources','')))/20 v FROM pg_get_functiondef($1::regprocedure) d", ['public.' + fn]), 1, fn);
-  report.checks.push('0299 reapplication after the full chain preserves the catalog; each of 5 functions hooked exactly once');
+  report.checks.push('0275 reapplication after the full chain preserves the catalog; each of 5 functions hooked exactly once');
 
   // Packs from both grant paths become sources; unattributed credits are used first, then packs oldest first.
   const u1 = await profile(500);
@@ -190,18 +190,46 @@ try {
     x = await reserve(u, 100); await refund(u, x); out.push(await balance(u));
     x = await reserve(u, 200); await abort(u, x, 50); out.push(await balance(u));
     out.push(await v("SELECT jsonb_agg(jsonb_build_array(operation_type,amount) ORDER BY created_at) v FROM billing_history WHERE user_id=$1", [u]));
+    out.push(await eligibility());
     return out;
   };
+  // Refund eligibility (pack and first-month subscription), fresh and after one settled use.
+  const outcome = async (sql, args) => {
+    try { const q = await v(sql, args); return ['ok', q.credits, q.netMinor ?? null, q.feeMinor ?? null]; }
+    catch (error) { return ['refused', error.message]; }
+  };
+  // One settled use, with the spend row BILL2 writes alongside it.
+  const use = async user => {
+    await settle(user, await reserve(user, 10), 10);
+    await c.query("INSERT INTO credit_transactions(user_id,amount,type,ledger_type) VALUES($1,-10,'deduction','spend')", [user]);
+  };
+  const eligibility = async () => {
+    const out = [];
+    for (const used of [false, true]) {
+      const f = await v('SELECT refund_test.fixture() v');
+      if (used) await use(f.user);
+      out.push(await outcome('SELECT pay_common_package_refund_quote($1,$2,$3,$4,$5,$6) v',
+        [f.actor, f.order, f.ticket, f.cash, 'confirmed', 'fixture:law']));
+      const m = await v('SELECT monthly_test.fixture() v');
+      if (used) await use(m.user);
+      out.push(await outcome('SELECT pay_common_monthly_refund_approve($1,$2,$3,$4) v', [m.actor, m.order, m.terms, 'a'.repeat(64)]));
+    }
+    assert.equal(out[0][0], 'ok', JSON.stringify(out));
+    assert.equal(out[2][0], 'refused', JSON.stringify(out));
+    return out;
+  };
+  await c.query(read('packages/db/tests/package-refund/fixture.sql'));
+  await c.query(read('packages/db/tests/monthly-refund/fixture.sql'));
   const hooked = await scenario();
   await unhook();
   const before = await scenario();
-  assert.deepEqual(hooked, before, 'balances and billing history amounts unchanged');
-  // Recovery is the predecessor definitions; re-applying 0299 hooks them again without re-running the backfill.
+  assert.deepEqual(hooked, before, 'balances, billing history amounts and refund eligibility unchanged');
+  // Recovery is the predecessor definitions; re-applying 0275 hooks them again without re-running the backfill.
   await c.query(read(migrationPath));
   assert.deepEqual(await catalog(), after);
-  report.checks.push('same balances and billing history with and without the hooks; recovery = predecessor definitions, reapply restores the exact catalog');
+  report.checks.push('same balances, per-step charges and pack/monthly refund eligibility (fresh: allowed; after use: refused) with and without the hooks; recovery = predecessor definitions, reapply restores the exact catalog');
 
-  // Backfill on a database that predates 0299: provable sources tracked, others marked "source unknown".
+  // Backfill on a database that predates 0275: provable sources tracked, others marked "source unknown".
   await unhook();
   await c.query('DROP TABLE credit_source_entries, credit_source_reviews, credit_package_sources');
   await c.query('DROP TRIGGER credit_package_source_track ON credit_transactions');
