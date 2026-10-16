@@ -6,7 +6,8 @@
 --     upper bound already counts the request bytes (tool definitions included); maxSchemaBytes (16384) is unchanged.
 --   * research_runtime_close_unsent: an operation left dispatched with no result and no BILL2 link was provably
 --     never sent (the supplier is contacted only after the link and BILL2 dispatch). It is closed as cancelled so a
---     stable discovery cursor moves to its successor instead of staying stuck (#1005 P2).
+--     stable discovery cursor moves to its successor instead of staying stuck (#1005 P2). research_runtime_link now
+--     refuses a not-yet-linked cancelled operation, so a late link can never follow a closeout.
 --   * research_runtime_call_charge: the user credits of one settled tool call of the current answer, for the
 --     research_call stream event (same frozen multiplier and run conversion as research_user_tool_charges).
 --   * research_user_tool_charges / research_user_evidence also return each subcall's own query, platform and
@@ -43,6 +44,35 @@ BEGIN
   UPDATE research_operations SET state='cancelled' WHERE id=o.id;
   UPDATE research_plans SET cancelled=true WHERE id=p.id;
   RETURN true;
+END $$;
+
+-- Links an operation of a runtime plan to its BILL2 call; links never move. 0267: an operation not linked yet is
+-- refused once it is cancelled (by the closeout, or by a plan cancel while still prepared). Together with research_runtime_close_unsent (same plan lock) a worker
+-- that dispatched on the research side before linking (pre-0267 order) can never link, dispatch BILL2 or send
+-- after the closeout handed its operation to a successor. Re-verifying an existing link (recovery) is unchanged.
+CREATE OR REPLACE FUNCTION public.research_runtime_link(a uuid, p_plan uuid, s uuid, e uuid, p_discovery uuid, p_operation uuid, p_call uuid)
+RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
+DECLARE p research_plans;
+BEGIN
+  PERFORM research_session_owned(a,s,e);
+  SELECT * INTO p FROM research_plans WHERE id=p_plan AND actor_id=a FOR UPDATE;
+  -- Only a plan bound at creation (research_runtime_plan_create) can be linked.
+  IF p.id IS NULL OR p.session_id IS NULL OR (p.session_id,p.execution_id,p.discovery_id) IS DISTINCT FROM (s,e,p_discovery)
+  THEN RAISE EXCEPTION 'RESEARCH_LINK_CONFLICT';END IF;
+  IF p_operation IS NOT NULL THEN
+    IF EXISTS(SELECT 1 FROM research_operations o WHERE o.id=p_operation AND o.plan_id=p.id AND o.bill2_call_id IS NULL
+      AND o.state='cancelled')
+    THEN RAISE EXCEPTION 'RESEARCH_LINK_CONFLICT';END IF;
+    -- The operation and its BILL2 call describe the same supplier request: the call's requestHash is the
+    -- operation's identity hash, so an operation can never be tied to another subcall of the same answer.
+    IF NOT EXISTS(SELECT 1 FROM research_operations o JOIN bill2_calls c ON c.id=p_call
+      WHERE o.id=p_operation AND o.plan_id=p.id AND c.payload->>'requestHash'=o.identity_hash)
+     OR NOT EXISTS(SELECT 1 FROM bill2_calls c JOIN bill2_runs r ON r.id=c.run_id JOIN runtime_executions x ON x.billing_run_id=r.id
+       WHERE c.id=p_call AND r.actor_id=a AND c.call_kind='tool' AND x.id=e)
+    THEN RAISE EXCEPTION 'RESEARCH_LINK_CONFLICT';END IF;
+    UPDATE research_operations SET bill2_call_id=p_call WHERE id=p_operation AND bill2_call_id IS NULL;
+    IF NOT EXISTS(SELECT 1 FROM research_operations WHERE id=p_operation AND bill2_call_id=p_call) THEN RAISE EXCEPTION 'RESEARCH_LINK_CONFLICT';END IF;
+  END IF;
 END $$;
 
 CREATE OR REPLACE FUNCTION public.research_runtime_call_charge(a uuid, s uuid, e uuid, p_call uuid) RETURNS jsonb
@@ -121,10 +151,12 @@ BEGIN
  RETURN output;
 END $$;
 
-REVOKE ALL ON FUNCTION public.research_runtime_close_unsent(uuid,uuid,uuid),public.research_runtime_call_charge(uuid,uuid,uuid,uuid),
+REVOKE ALL ON FUNCTION public.research_runtime_link(uuid,uuid,uuid,uuid,uuid,uuid,uuid),
+ public.research_runtime_close_unsent(uuid,uuid,uuid),public.research_runtime_call_charge(uuid,uuid,uuid,uuid),
  public.research_user_tool_charges(uuid,uuid),public.research_user_evidence(uuid,integer,timestamptz,uuid)
  FROM PUBLIC,anon,authenticated;
-GRANT EXECUTE ON FUNCTION public.research_runtime_close_unsent(uuid,uuid,uuid),public.research_runtime_call_charge(uuid,uuid,uuid,uuid),
+GRANT EXECUTE ON FUNCTION public.research_runtime_link(uuid,uuid,uuid,uuid,uuid,uuid,uuid),
+ public.research_runtime_close_unsent(uuid,uuid,uuid),public.research_runtime_call_charge(uuid,uuid,uuid,uuid),
  public.research_user_tool_charges(uuid,uuid),public.research_user_evidence(uuid,integer,timestamptz,uuid)
  TO service_role;
 

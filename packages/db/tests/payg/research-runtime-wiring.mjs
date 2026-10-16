@@ -58,6 +58,28 @@ export async function researchRuntimeWiringCases({db,report,createFixture}) {
   assert.deepEqual(await state(db,stuck),{state:'cancelled',empty:true,cancelled:true});
   report.checks.push('0267: dispatched + no result + no link closes once as cancelled (plan cancelled); other actors/sessions cannot close it');
 
+  // A pre-0267 worker dispatches on the research side before linking. Once closed, that late link is refused, so the
+  // old worker can never dispatch BILL2 or contact the supplier for an operation the closeout handed to a successor.
+  {
+    const h = await session(db,createFixture);
+    const late = await claimTool(db,h,1,{},false);
+    const raced = await operation(db,h,{callId:null});
+    await db.query('SET ROLE service_role');
+    try { assert.equal(await rpc(db,'research_runtime_close_unsent',h.actor,h.session,raced),true); }
+    finally { await db.query('RESET ROLE'); }
+    await db.query("UPDATE research_operations SET identity_hash=(SELECT payload->>'requestHash' FROM bill2_calls WHERE id=$2) WHERE id=$1",
+      [raced,late.id]);
+    await assert.rejects(rpc(db,'research_runtime_link',h.actor,raced,h.session,h.execution,null,raced,late.id),/RESEARCH_LINK_CONFLICT/);
+    assert.equal((await db.query('SELECT bill2_call_id FROM research_operations WHERE id=$1',[raced])).rows[0].bill2_call_id,null);
+    // A prepared operation cancelled with its plan cannot be linked either; an already linked one may be re-verified.
+    const unsent = await operation(db,h,{dispatch:false});
+    await rpc(db,'research_transition','cancel',unsent,h.actor,unsent,{});
+    await db.query("UPDATE research_operations SET identity_hash=(SELECT payload->>'requestHash' FROM bill2_calls WHERE id=$2) WHERE id=$1",
+      [unsent,late.id]);
+    await assert.rejects(rpc(db,'research_runtime_link',h.actor,unsent,h.session,h.execution,null,unsent,late.id),/RESEARCH_LINK_CONFLICT/);
+  }
+  report.checks.push('0267: a late link of a closed or cancelled, unlinked operation is refused before any BILL2 dispatch');
+
   // A linked (possibly sent) or finished operation is never closed; a prepared one is left for the normal path.
   const c = await claimTool(db,f,1);
   const linked = await operation(db,f,{callId:c.id});
