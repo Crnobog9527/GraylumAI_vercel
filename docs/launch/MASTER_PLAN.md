@@ -84,6 +84,20 @@
 
 ### 2.1 Owner 的新决定（2026-09-27 起，2026-10-14 更新）
 
+**2026-10-17：首批创作 Skill 先放一批测试版到 staging，内容以后由 Owner 一对一优化；Skill 的替换、调用和触发规则现在定好**
+
+Owner 原话（2026-10-17，总控-8 对话，由总控转达给 CONTENT-CONVERSATION-DRIVEN 的 S 窗口）：
+
+> 这些平台的 skill 呢，我后边再单独着重一对一地优化。你现在先生成一批放在上面，我们做测试就行了。但是后续 skill 的替换，以及 skill 的调用规则、触发规则对吧，这些底层不变的东西，你可以现在就定好。
+
+以下是落实范围，不是原话：
+
+- 首批四个创作 Skill（口播稿、分镜、剪辑建议、图文 / 文章）按测试版写完，由总控发布到 **staging** 做测试，不再逐个请 Owner 看样例。
+  清单和发布步骤见 [`docs/skill-candidates/content-skills-s/`](../skill-candidates/content-skills-s/README.md)（[#1021](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1021)）。
+- 取代：[#621 方案](CONTENT_CONVERSATION_DRIVEN_PLAN.md) 第 14 节 Q2 里"Owner 看过样例再发布"中**发布到 staging 测试**的那部分。
+  作为正式版本发布（包括正式环境）仍按 Q2：Owner 看过样例并单独确认。
+- Skill 的替换、调用和触发规则由 G / A2 定稿（[#1026](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1026)、[#1036](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1036)），以后换 Skill 内容不改代码。
+
 **2026-10-14：业务第三方密钥改为在管理员后台填写，加密存放、只写不读；系统底层密钥继续放 Vercel**
 
 Owner 原话（2026-10-14，总控-7 对话，对总控给出的选项回复"A"；选项 A 原文）：
