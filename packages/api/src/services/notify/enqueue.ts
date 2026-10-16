@@ -4,7 +4,8 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { PaymentNoticeError } from './sender';
 import type { PaymentNoticeKind, PaymentNoticeParams } from './templates';
 
-const enqueued = z.object({ id: z.string().uuid(), state: z.string(), created: z.boolean() }).strict();
+// id null: the account is being erased and gets no new notices.
+const enqueued = z.object({ id: z.string().uuid().nullable(), state: z.string(), created: z.boolean() }).strict();
 
 /**
  * Records one reminder for (kind, sourceRef, dueKey), e.g. ('wallet_founder_expiry', order id,

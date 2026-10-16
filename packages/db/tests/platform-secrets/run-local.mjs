@@ -153,7 +153,8 @@ try {
   assert.equal(await readSecret('postforme_webhook'), `whsecret-${CANARY}-fake-k1l2`);
   assert.equal(await readSecret('postforme'), null);
   assert.deepEqual((await v('SELECT platform_secret_status() v')).map(row => row.slot),
-    ['openrouter', 'postforme', 'postforme_webhook', 'tikhub', 'parallel', 'firecrawl']);
+    ['openrouter', 'postforme', 'postforme_webhook', 'tikhub', 'parallel', 'firecrawl',
+      ...(slotExtensions.length ? ['resend'] : [])]);
   await clear('postforme_webhook', 1, admin);
   assert.equal(await readSecret('postforme_webhook'), null);
   report.checks.push('postforme_webhook is its own slot: set, read and clear without touching postforme');

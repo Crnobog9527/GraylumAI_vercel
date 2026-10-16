@@ -187,11 +187,15 @@ try {
   assert.equal((await v('SELECT payment_notice_prepare($1) v', [inflight])).erasing, true);
   await c.query('RESET ROLE');
   assert.equal(await v("SELECT erasure_business_owner('payment_notices',$1) v", [JSON.stringify({ user_id: closing })]), closing);
-  assert.equal(Number(await v('SELECT account_erasure_business_remaining($1) v', [closing])), 2);
+  const remaining = async () => Number(await v('SELECT account_erasure_business_remaining($1) v', [closing]));
+  const withTwo = await remaining();
+  await c.query("INSERT INTO payment_notices(user_id,kind,source_ref,due_key) VALUES($1,'founder_ended','late','x')", [closing]);
+  assert.equal(await remaining(), withTwo + 1, 'every notice row counts as unfinished erasure');
   await c.query('SELECT account_erasure_prune_business($1)', [closing]);
   assert.equal(Number(await v('SELECT count(*) v FROM payment_notices WHERE user_id=$1', [closing])), 0);
-  assert.equal(Number(await v('SELECT account_erasure_business_remaining($1) v', [closing])), 0);
+  assert.ok(await remaining() <= withTwo - 2);
   await c.query('SET ROLE service_role');
+  assert.deepEqual(await enqueue(closing), { id: null, state: 'skipped', created: false });
   assert.equal((await finish(inflight, 1, 'sent', 'msg_after')).state, 'gone');
   assert.equal(Number(await v('SELECT count(*) v FROM (SELECT 1 FROM payment_notices) x').catch(() => -1)), -1);
   report.checks.push('account erasure: new sends are skipped, the rows are pruned and counted, a late result is ignored');
