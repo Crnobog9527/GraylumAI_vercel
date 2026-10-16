@@ -26,7 +26,6 @@ import {frozenCallPolicy, type FrozenPaygRun, type FrozenRun} from '../bill2/ser
 import { selectRuntimeHistory, fixtureInputCapacity, runtimeScopeInput } from './context';
 import { activateRuntimeCandidate, discoverRuntimeCandidates, fittingCandidates, matchingInput, MATCH_INSTRUCTIONS } from './matching';
 import { withPrimaryAddenda } from './primaryInstructions';
-import { sourceToolBytes } from './sourceRuntimeTool';
 import { type ReasoningPolicy } from './reasoningPolicy';
 import { admitReasoning } from './reasoningAdmission';
 import type {AnsweredCard} from '../opc/answerCard';
@@ -51,7 +50,7 @@ import {runAutomaticFinancialRecovery} from './automaticRecovery';
 import {readPositioningGate,judgePositioning,windowBoundKey,refusePositioning,POSITIONING_REFUSAL_CAP,
  type PositioningGatePolicy} from './positioningGate';
 import {POSITIONING_FALLBACK,POSITIONING_FALLBACK_INSTRUCTIONS} from './positioningFallback';
-import {admitLibraryReferences,libraryReferenceInput,libraryReserveBytes,readSourceSlots,throwLibraryRefusal} from './libraryAdmission';
+import {admitLibraryReferences,candidateToolBytes,libraryReferenceInput,libraryReserveBytes,readSourceSlots,throwLibraryRefusal} from './libraryAdmission';
 
 const uuid=z.string().uuid();
 export const runtimeMaterialInput=z.object({sessionId:uuid,requestId:uuid,expectedRevision:z.number().int().nonnegative(),
@@ -341,7 +340,7 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
    libraryBytes=libraryReserveBytes(libraryReferences,sourceTools,workspaceContext);
    // The executor sizes a selected Skill with these exact tool descriptions plus the same cache/marker overhead.
    if(candidates.length)candidates=await fittingCandidates(candidates,candidate=>activateRuntimeCandidate(user,admin,candidate,brandIdentity),
-    {input:currentInput,inputBytes,toolBytes:sourceToolBytes(sourceTools,workspaceContext)+libraryBytes+
+    {input:currentInput,inputBytes,toolBytes:candidateToolBytes(libraryReferences,sourceTools,workspaceContext)+
      (historySelection?.markerReserveBytes??(promptCache?PROMPT_CACHE_OVERHEAD_BYTES:0)),
      instructions:skill=>withPrimaryAddenda(skill,{workspaceContext,network:input.network,libraryReferences,
       ...(positioningFallback?{positioningGate:POSITIONING_FALLBACK}:{})})});

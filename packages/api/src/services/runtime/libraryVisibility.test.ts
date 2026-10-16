@@ -4,6 +4,7 @@ import type {SupabaseClient} from '@supabase/supabase-js';
 import {executionVisibility} from './libraryVisibility';
 import {streamOriginalExecution,type ExecutionStreamEvent} from './executionStream';
 import type {RuntimeProgress} from './progress';
+import {observeContext} from './executorRpc';
 
 const actor='10000000-0000-4000-8000-000000000001',execution='10000000-0000-4000-8000-000000000002';
 function database(state:{live:boolean;error?:boolean}){
@@ -61,4 +62,14 @@ it('the stream shows nothing produced after the deletion: text, native deltas, p
  await expect(rest).rejects.toMatchObject({message:expect.stringMatching(/^LIB_SOURCE_DELETED：/)});
  expect(JSON.stringify(seen)).toContain('Early');
  expect(JSON.stringify(seen)).not.toMatch(/LATE_PRIVATE|organizer|result/);
+});
+
+it('the executor reports references as soon as the execution is read, before recovery branches; never for a completed answer',()=>{
+ const seen:unknown[]=[];
+ const options={onContext:(context:{libraryReferences?:unknown[]})=>{seen.push(context.libraryReferences);}} as Parameters<typeof observeContext>[0];
+ const references=[{documentId:execution,version:1}];
+ for(const state of ['running','cost_pending','waiting_resume','cancelled'])observeContext(options,{state,context:{libraryReferences:references}});
+ observeContext(options,{state:'completed',context:{libraryReferences:references}});
+ observeContext(options,{state:'running',context:{}});
+ expect(seen).toEqual([references,references,references,references,undefined]);
 });

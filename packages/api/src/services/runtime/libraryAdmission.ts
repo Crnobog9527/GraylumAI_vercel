@@ -64,6 +64,12 @@ export function readSourceSlots(references:LibraryReference[],primaryTurns:numbe
  return references.length?Math.max(otherSlots,Math.min(LIBRARY_READS,primaryTurns-1)):otherSlots;
 }
 
+/** A matched Skill's sizing: its instructions already carry LIBRARY_INSTRUCTIONS (withPrimaryAddenda), so only the
+ * read_source description (with the library guide when referenced) and the one-result reserve are added. */
+export function candidateToolBytes(references:LibraryReference[],tools:string[],workspaceContext:boolean){
+ return sourceToolBytes(tools,workspaceContext,references.length>0)+(references.length?LIBRARY_RESULT_BYTES:0);
+}
+
 /** Bytes a referencing turn needs beyond its required context: read_source's description, the library instructions and
  * one maximal read result. The executor sizes the same description and addendum; the result is the admission reserve. */
 export function libraryReserveBytes(references:LibraryReference[],tools:string[],workspaceContext:boolean){

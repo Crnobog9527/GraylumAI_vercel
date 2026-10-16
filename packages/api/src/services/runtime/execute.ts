@@ -10,7 +10,7 @@ import {NativeProgressProjection} from './nativeProgress';
 import {visibleText,nativeMetadata,prepareNativePrimary,nativeFrameProjection,
  completedOutput,finalizeNativeSummary} from './nativeOutput';
 import {paygOwnerDatabase} from './paygOwner';
-import {executorRpc,historyGuard,terminalReplyGuard,recoverExecutorFinancial,observedContext,
+import {executorRpc,historyGuard,terminalReplyGuard,recoverExecutorFinancial,observeContext,
  preflightCodes,platformFailureReason,hash,progressEmitter,diagnosticCode,failBeforeDispatch,cancelWithCode,type RuntimeExecutorOptions} from './executorRpc';
 import {fitNativeRequestOutput,runtimePaygCall, type ResumeInput, type PaygWait, type PaygPosition} from './paygRuntime';
 import {beginPaygExecution, type RuntimeExecution} from './paygResume';
@@ -65,7 +65,7 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
    resumePricing:options.resumePricing,read:(action,value)=>rpc<RuntimeExecution>('runtime_execution',
     {...args,p_action:action,...(value?{p_result:value}:{})})});
   if(started.wait)return started.wait;
-  const {execution,resumedGate}=started;
+  const {execution,resumedGate}=started;observeContext(options,execution);
   const stopped=await finishStop(executionId,onProgress,execution);if(stopped)return stopped;
   const isPayg=execution.billing?.contractVersion==='bill2.v2';
   const ownerDatabase=isPayg?paygOwnerDatabase(options.database,{executionId,epoch:execution.epoch!}):options.database;
@@ -79,7 +79,7 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
    const recovered=await ownerRpc<{state:'completed'|'cost_pending'}>('runtime_execution',{...args,p_action:'complete',p_result:execution.result});
    return {...completedOutput(execution.result,execution.context,onProgress),state:recovered.state};
   }
-  const context=observedContext(options,runtimeContext.parse(execution.context));
+  const context=runtimeContext.parse(execution.context);
   if(!validReasoningFormat(context))throw new Error('RUNTIME_CONTEXT_INVALID');
   const agentTurn=context.providerRequestFormat===AGENT_TURN_REQUEST_FORMAT;
   const fiveFields=Boolean(context.questionContract);

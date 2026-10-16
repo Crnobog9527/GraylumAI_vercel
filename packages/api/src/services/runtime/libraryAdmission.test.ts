@@ -3,7 +3,8 @@ import {it,expect,vi} from 'vitest';
 import type {SupabaseClient} from '@supabase/supabase-js';
 import {runtimeAdmissionService,runtimeAdmission} from './admission';
 import {stagingProcedureError} from './stagingErrors';
-import {LIBRARY_AGENT_READ_KEY,normalizeLibraryReferences} from './libraryAdmission';
+import {LIBRARY_AGENT_READ_KEY,LIBRARY_RESULT_BYTES,candidateToolBytes,libraryReserveBytes,normalizeLibraryReferences} from './libraryAdmission';
+import {sourceToolBytes} from './sourceRuntimeTool';
 import {LIBRARY_INSTRUCTIONS,withPrimaryAddenda} from './primaryInstructions';
 
 // LIB-4b admission: the separate `references` field, the server switch, refusals before any charge and the frozen shape.
@@ -123,4 +124,11 @@ it('the executor appends the library instructions only for an execution with ref
  expect(withPrimaryAddenda('base',{libraryReferences:[{documentId:doc(1),version:1}]})).toBe('base'+LIBRARY_INSTRUCTIONS);
  expect(withPrimaryAddenda('base',{})).toBe('base');
  expect(withPrimaryAddenda('base',{libraryReferences:[]})).toBe('base');
+});
+
+it('a matched Skill counts the library tool text and reserve once; its instructions already carry the addendum',()=>{
+ const refs=[{documentId:doc(1),version:1}];
+ expect(candidateToolBytes(refs,['read_source'],true)).toBe(sourceToolBytes(['read_source'],true,true)+LIBRARY_RESULT_BYTES);
+ expect(candidateToolBytes([],['read_source'],true)).toBe(sourceToolBytes(['read_source'],true));
+ expect(libraryReserveBytes(refs,['read_source'],true)-candidateToolBytes(refs,['read_source'],true)).toBe(Buffer.byteLength(LIBRARY_INSTRUCTIONS));
 });
