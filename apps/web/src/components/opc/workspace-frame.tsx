@@ -14,6 +14,7 @@ import { ContentErasureDialog } from './content-erasure-dialog';
 import { ConversationDeleteDialog } from './conversation-delete-dialog';
 import { ConversationRow } from './conversation-row';
 import { DraftRow, type UnassignedDraft } from './draft-row';
+import { draftMark, latestByDraft } from '@/components/fusion-review/review-adapter';
 import { useConversationRename } from '@/hooks/use-conversation-rename';
 import { useConversationErasure } from '@/hooks/use-conversation-erasure';
 import { useContentErasureSync } from '@/hooks/use-content-erasure';
@@ -155,6 +156,9 @@ export function WorkspaceFrame({children,right,rightOpen=true,onToggleRight,acti
  }
  const assigned=new Set([...platforms.values()].flat().map(account=>account.strategyDraftId).filter(Boolean));
  const unassigned=((drafts.data?.drafts??[]) as Draft[]).filter(draft=>!assigned.has(draft.draftId));
+ // The jury's mark on a draft row; the jury may be off or unreachable, which simply shows no mark.
+ const reviews=trpc.fusionReview.mine.useQuery({limit:50},{enabled:unassigned.length>0,retry:false,staleTime:30_000});
+ const reviewMarks=latestByDraft(Array.isArray(reviews.data)?reviews.data:[]);
  async function changeRecord(item:Item,action:'rename'|'pin'|'unpin'|'archive'|'restore'|'delete',name?:string){
   if(changeWorkUi.isPending)return;
   const key='opc-work-ui:'+item.workItemId;
@@ -233,7 +237,7 @@ export function WorkspaceFrame({children,right,rightOpen=true,onToggleRight,acti
       onOpenMenu={event=>openRowMenu(event,'conversation:'+conversation.sessionId)} onCloseMenu={()=>setMenuId('')}
       onDelete={()=>setDeletingConversation({id:conversation.sessionId,
        name:conversationRename.titleOf(conversation.sessionId,conversation.title)})} rename={conversationRename}/>)}</details>}
-     {!archiveView&&unassigned.length>0&&<details open={groupOpen.unassigned??true} onToggle={event=>{const next=event.currentTarget.open;setGroupOpen(current=>current.unassigned===next?current:{...current,unassigned:next});}}><summary>待归类<ChevronDown size={14}/></summary>{unassigned.map(draft=><DraftRow key={draft.draftId} draft={draft}
+     {!archiveView&&unassigned.length>0&&<details open={groupOpen.unassigned??true} onToggle={event=>{const next=event.currentTarget.open;setGroupOpen(current=>current.unassigned===next?current:{...current,unassigned:next});}}><summary>待归类<ChevronDown size={14}/></summary>{unassigned.map(draft=><DraftRow key={draft.draftId} draft={draft} review={draftMark(reviewMarks.get(draft.draftId))?.label}
       menuOpen={menuId==='draft:'+draft.draftId} menuPosition={menuPosition} onCloseMenu={()=>setMenuId('')}
       onOpenMenu={event=>openRowMenu(event,'draft:'+draft.draftId)}
       onDeleteConversation={(id,name)=>setDeletingConversation({id,name,related:[draft.draftId]})}

@@ -18,9 +18,12 @@ import { STOP_SAVING_NOTICE, STOP_UNCONFIRMED_NOTICE } from "./stop-reply";
 export { PublishFootnote, PublishNext, reportPublishes } from "./report-publish";
 import { ReportDocumentPanel } from "./report-document-panel";
 import { REPORT_DOC_TEXT } from "./report-document";
+import { JuryEntry } from "@/components/fusion-review/JuryEntry";
 
 type Props = {
   draftId: string; sessionId: string; projectId: string; roundId: string; confirmed: boolean; busy: boolean;
+  /** The formal version's report (opc.read), for the jury entry next to this one. */
+  report?: { available?: boolean; id?: string | null } | null;
   /** After 定稿: refresh the page and ask, explicitly, whether to start the first-week topics. */
   onTopics: () => void;
 };
@@ -44,12 +47,15 @@ function RoundReportEntry(props: Props) {
   // and coming back in this tab. A saved report of this round keeps its own dialog.
   const paywall = useReportPaywallMemory({ draftId: props.draftId, roundId: props.roundId,
     refusedForMembership: Boolean(report.refusal?.membership), hasReport: Boolean(report.executionId) });
-  if (!report.executionId && (!canGenerate || report.refusal?.hideEntry)) return null;
+  // The jury (FUSION-REVIEW) sits next to it: it reviews the report of the formal version, whatever this entry shows.
+  const jury = <JuryEntry draftId={props.draftId} report={props.report} busy={props.busy} />;
+  if (!report.executionId && (!canGenerate || report.refusal?.hideEntry)) return jury;
   return (
     <>
       <Button variant="outline" disabled={props.busy} onClick={() => setOpen(true)}>
         {report.executionId ? REPORT_TITLE : REPORT_ACTION.start}
       </Button>
+      {jury}
       {open && (paywall ? <ReportPaywallDialog onClose={() => setOpen(false)} />
         : <ReportDialog report={report} busy={props.busy} onClose={() => setOpen(false)}
           onTopics={() => { setOpen(false); props.onTopics(); }} />)}

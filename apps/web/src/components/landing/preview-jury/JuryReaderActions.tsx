@@ -15,7 +15,8 @@ export function ChoiceBar({ adoption }: { adoption: Adoption }) {
       <span className={styles.count} data-complete={done === total}>已选 {done}/{total}</span>
       <div className={styles.barActions}>
         <button type="button" className={styles.secondary} onClick={adoption.putOff}>先不选，稍后回来</button>
-        <button type="button" className={styles.primary} onClick={adoption.propose} aria-disabled={done < total}>确认</button>
+        <button type="button" className={styles.primary} onClick={adoption.propose} aria-disabled={done < total}
+          disabled={adoption.busy}>确认</button>
       </div>
       {error ? <p className={styles.error} role="alert">{error}</p> : null}
       {later ? <p className={styles.later}><Clock3 size={14} aria-hidden="true" />已选的章节会保存在这台设备上；你可以先去改草稿，回来接着选。</p> : null}
@@ -66,8 +67,8 @@ export function Review({ proposal, adoption }: { proposal: AdoptProposed; adopti
       {adoption.error ? <p className={styles.error} role="alert">{adoption.error}</p> : null}
       <div className={styles.reviewActions}>
         <button type="button" className={styles.secondary} onClick={adoption.back}>返回修改选择</button>
-        <button type="button" className={styles.secondary} onClick={() => adoption.confirm('decline')}>放弃这次修改</button>
-        <button type="button" className={styles.primary} onClick={() => adoption.confirm('apply')}>确认采用，生成新版本</button>
+        <button type="button" className={styles.secondary} disabled={adoption.busy} onClick={() => adoption.confirm('decline')}>放弃这次修改</button>
+        <button type="button" className={styles.primary} disabled={adoption.busy} onClick={() => adoption.confirm('apply')}>确认采用，生成新版本</button>
       </div>
     </section>
   );
