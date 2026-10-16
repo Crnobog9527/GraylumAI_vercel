@@ -131,7 +131,16 @@ for (const p of pages) {
   const spec = buildSpec(p);
   const gt = await page.evaluate(renderPage, { spec, cat: p.cat, W, H });
   await page.evaluate(() => document.fonts.ready);
-  const used = await page.evaluate((f) => document.fonts.check(`33px "${f}"`), spec.font);
+  // document.fonts.check() is true for a missing local font too; compare widths against two fallbacks instead.
+  const used = await page.evaluate((f) => {
+    const x = new OffscreenCanvas(10, 10).getContext('2d'), sample = '城市生活随笔，每周一早上回顾数据 Ag';
+    return ['monospace', 'serif'].some((fallback) => {
+      x.font = `33px ${fallback}`;
+      const plain = x.measureText(sample).width;
+      x.font = `33px "${f}", ${fallback}`;
+      return x.measureText(sample).width !== plain;
+    });
+  }, spec.font);
   const png = (await page.screenshot({ clip: { x: 0, y: 0, width: W, height: H } })).toString('base64');
   const d = recipe(p.base, rng(p.seed * 7));
   const first = await page.evaluate(degrade, { png, d, seed: p.seed * 13 });
