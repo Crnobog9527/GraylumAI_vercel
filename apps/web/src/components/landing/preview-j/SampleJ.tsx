@@ -3,6 +3,7 @@ import dynamic from 'next/dynamic';
 import Link from 'next/link';
 import light from '@/components/design/light-tokens.module.css';
 import type { buildLandingPageData } from '@/lib/landing/landing-page-data';
+import { allOn } from '@/lib/landing/landing-flags';
 import { cn } from '@/lib/utils';
 import { HeroJ } from './HeroJ';
 import { MotionJ } from './MotionJ';
@@ -52,7 +53,7 @@ export function SampleJ({ data, siteName, extras }: {
         <WorkJ flags={extras.flags} />
         <PriceJ proMonthly={data.pricing.proMonthly} rows={data.compareRows} />
         <FaqJ groups={data.faqGroups} />
-        <FinalJ />
+        <FinalJ freeTrial={allOn(extras.flags, ['signupGrant'])} />
       </main>
 
       <SiteFooterJ />

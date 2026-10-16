@@ -52,6 +52,11 @@ describe('style sample J', () => {
     const off = buildLandingPageData({ ...ALL_ON, signupGrant: false }, [plan('pro', 29, 279)]);
     const offHtml = renderToStaticMarkup(createElement(SampleJ, { data: off, siteName: 'Graylum', extras: { flags: ALL_ON } }));
     expect(offHtml.slice(offHtml.indexOf('aria-labelledby="hero-title"'), offHtml.indexOf('aria-labelledby="voice-title"'))).not.toContain('免费试用');
+    // The close's "先免费试" goes with the grant too.
+    const flagsOff = { ...ALL_ON, signupGrant: false };
+    const closeOff = renderToStaticMarkup(createElement(SampleJ, { data: off, siteName: 'Graylum', extras: { flags: flagsOff } }));
+    expect(closeOff).not.toContain(J_FINAL.note);
+    expect(html).toContain(J_FINAL.note);
     expect(hero).not.toContain("交给它");
     expect(hero.replace(/<[^>]+>/g, '')).toContain(HERO.title.replace(' 自', '自'));
     expect(hero).not.toContain(HERO.secondaryCta);

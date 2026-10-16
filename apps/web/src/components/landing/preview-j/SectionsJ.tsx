@@ -41,7 +41,8 @@ export function FaqJ({ groups }: { groups: readonly LandingFaqGroup[] }) {
  * The close (Owner 2026-10-15): one push from the visitor's side — the result they want after the whole page, one
  * button, the same note as the first screen. The founder offer is no longer on this page.
  */
-export function FinalJ() {
+/** The close. "先免费试" is a free-trial promise: it shows only while the sign-up grant that pays for the trial is on. */
+export function FinalJ({ freeTrial }: { freeTrial: boolean }) {
   return (
     <section aria-labelledby="final-title" className={page.section} data-zone="final">
       <div className={page.wrap}>
@@ -49,7 +50,7 @@ export function FinalJ() {
           <h2 id="final-title" className={page.display}>{J_FINAL.title}</h2>
           <p className={styles.finalLine}>{J_FINAL.line}</p>
           <Link href={SIGNUP_CTA_HREF} className={page.pill}>{J_FINAL.cta}<ArrowRight size={18} aria-hidden="true" /></Link>
-          <p className={styles.finalNote}>{J_FINAL.note}</p>
+          {freeTrial ? <p className={styles.finalNote}>{J_FINAL.note}</p> : null}
         </div>
       </div>
     </section>
