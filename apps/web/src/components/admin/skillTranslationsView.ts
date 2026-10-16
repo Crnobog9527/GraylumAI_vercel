@@ -74,7 +74,6 @@ export function translationsFrom(source: SkillDisplaySource, draft: TranslationD
 export function invalidTranslation(rows: TranslationRow[], draft: TranslationDraft): TranslationRow | undefined {
   return rows.find(row => {
     const text = draft[row.key]?.trim();
-    // eslint-disable-next-line no-control-regex
     return text ? text.length > 160 || /[\r\n\x00-\x1f]/.test(text) : false;
   });
 }

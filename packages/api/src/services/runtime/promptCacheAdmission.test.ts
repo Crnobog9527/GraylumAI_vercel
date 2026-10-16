@@ -11,6 +11,7 @@ import {agentTurnInstructions,AGENT_TURN_STABLE_PREFIX,AGENT_TURN_STABLE_PREFIX_
 import {PROMPT_CACHE_OVERHEAD_BYTES} from './promptCache';
 import {BRAND_IDENTITY_INSTRUCTIONS} from '../modelIdentity/brandIdentity';
 import {testIdentityGuard} from '../__tests__/fixtures/runtimeGates';
+import {REPLY_LANGUAGE_INSTRUCTIONS} from './primaryInstructions';
 const skill='Pinned skill 正文';
 // MODEL-IDENTITY-GUARD: the switch defaults on, so the brand identity leads the frozen system text.
 const brand=BRAND_IDENTITY_INSTRUCTIONS+'\n';
@@ -90,7 +91,9 @@ it('ordinary role is never marked even on Anthropic with a write price',async()=
 });
 it('reserves marker bytes during admission at the input capacity boundary',async()=>{
  const instructions=brand+skill+'\n'+host();
- const oldLimit=Buffer.byteLength(JSON.stringify({instructions,messages:[{role:'user',content:'user facts'}]}))+1024;
+ // The executor appends the reply-language rule (SKILL-I18N-HOOK); admission sizes it as well.
+ const oldLimit=Buffer.byteLength(JSON.stringify({instructions:instructions+REPLY_LANGUAGE_INSTRUCTIONS,
+  messages:[{role:'user',content:'user facts'}]}))+1024;
  const f=fixture('anthropic/test','2.5',true,oldLimit);
  await expect(f.service.prepare(f.input)).rejects.toThrow('RUNTIME_REQUIRED_CONTEXT_EXCEEDS_CAPACITY');
  expect(f.rpc.mock.calls.some(([name])=>name==='runtime_admit')).toBe(false);

@@ -2,6 +2,7 @@
 import {describe, expect, it} from 'vitest';
 import {REPLY_LANGUAGE_INSTRUCTIONS,withPrimaryAddenda} from './primaryInstructions';
 import {sourceToolBytes} from './sourceRuntimeTool';
+import {agentTurnInstructions} from '../opc/agentTurnPrompt';
 
 describe('workspace context instructions', () => {
   it('lets free conversations read confirmed positioning through read_source', () => {
@@ -35,17 +36,21 @@ describe('reply language (SKILL-I18N-HOOK)', () => {
     const text=withPrimaryAddenda('完整的中文 Skill 正文',{});
     // Appended after the Skill, so cached Skill prefixes are unchanged.
     expect(text.startsWith('完整的中文 Skill 正文\nReply language (host rule)')).toBe(true);
-    expect(text).toContain("in the user's language");
-    expect(text).toContain('question-card option and report text');
-    expect(text).toContain('Traditional Chinese with Taiwan usage');
-    expect(text).toContain('explicit request from the user for a particular language takes precedence');
-    expect(text).toContain('Simplified Chinese if that is unclear');
+    expect(text).toContain("write replies, questions, card options and reports in the user's language");
+    expect(text).toContain('Traditional Chinese uses Taiwan usage');
+    expect(text).toContain('A language the user explicitly asks for wins');
+    expect(text).toContain('else Simplified Chinese');
     // Report headings are checked verbatim (report/contract.ts), so they must stay as written.
-    expect(text).toContain('required report headings, ids and JSON keys) unchanged');
+    expect(text).toContain('Keep required exact strings (report headings, ids, JSON keys) unchanged');
   });
 
   it('applies with every other addendum, exactly once', () => {
     const text=withPrimaryAddenda('base',{workspaceContext:true,network:'require_latest',positioningGate:'fallback-v1'});
     expect(text.split('Reply language (host rule)')).toHaveLength(2);
+  });
+
+  it('leaves positioning mentor turns unchanged; their host rules already say so', () => {
+    expect(withPrimaryAddenda('base',{mentorText:'append-card-v1'})).toBe('base');
+    expect(agentTurnInstructions()).toContain("Reply in the user's language");
   });
 });

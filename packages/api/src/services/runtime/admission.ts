@@ -244,7 +244,7 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
    // gated turn always keeps the fallback rule, since Decisions does not see earlier turns ("好的，那帮我写三条").
    const positioningFallback=gated&&await judgePositioning(policy.positioningGate!,{text:input.input,apiKey},capped);
    // The executor appends these rules (withPrimaryAddenda); admission sizes them too, so a fitting turn never fails later.
-   const positioningRule=REPLY_LANGUAGE_INSTRUCTIONS+(positioningFallback?POSITIONING_FALLBACK_INSTRUCTIONS:'');
+   const positioningRule=(mentorStream?'':REPLY_LANGUAGE_INSTRUCTIONS)+(positioningFallback?POSITIONING_FALLBACK_INSTRUCTIONS:'');
    if(input.selection.kind==='organizer')modelConfiguration(()=>assertSeparateSummaryModel(session.dialogueModel,row.data.model_id));
    let attachedOrganizer:{
     modelId:string;model:string;maxOutputTokens:number;inputBytes?:number;historyItems?:number;reasoning?:ReasoningPolicy;instructions?:string;input?:string

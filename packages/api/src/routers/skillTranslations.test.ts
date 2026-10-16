@@ -6,7 +6,7 @@ import { makeWorkflow } from '../services/__tests__/fixtures/artifacts';
 const id = (n: number) => `10000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
 type Options = { missing?: boolean; readError?: boolean; unpublished?: boolean; badWorkflow?: boolean; stored?: unknown };
 function fixture(role = 'admin', options: Options = {}) {
-  const module = { id: id(2), display_translations: options.stored ?? {}, updated_at: '2026-10-16T00:00:00.000+00:00' };
+  const module = { id: id(2), display_translations: (options.stored ?? {}) as unknown, updated_at: '2026-10-16T00:00:00.000+00:00' };
   const workflow = { ...makeWorkflow(2, true), steps: makeWorkflow(2, true).steps.map((step, i) =>
     i === 0 ? { ...step, information: [{ id: 'goal', title: '目标', required: true }] } : step) };
   const writes: Record<string, unknown>[] = [];
