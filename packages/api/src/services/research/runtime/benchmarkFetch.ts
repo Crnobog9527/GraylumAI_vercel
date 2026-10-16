@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { accountMetrics, type EvidenceItem } from '../benchmark/metrics';
-import { classifyAccount } from '../benchmark/classify';
+import { classifyAccount, qualifyFetchedAccount } from '../benchmark/classify';
 import { authorizeBenchmarkFetch } from '../tools/authorize';
 import { toolEnvelope } from '../tools/envelope';
 import type { ResearchToolArgs } from '../tools/schemas';
@@ -85,7 +85,7 @@ export async function benchmarkFetch(ctx: ResearchToolContext, args: ResearchToo
         continue;
       }
       const metrics = accountMetrics({ profile, posts, followersItem: results[routes.followersFrom]?.[0] }, ctx.now());
-      const classification = classifyAccount(metrics, ctx.config.recentGrowth, ctx.now());
+      const classification = qualifyFetchedAccount(metrics, classifyAccount(metrics, ctx.config.recentGrowth, ctx.now()));
       const evidence = { ...account, metrics, classification, fetchedAt: ctx.now().toISOString() };
       await ctx.store.fetchFinish(claim.fetchId, claim.attempt, 'succeeded', evidence);
       rows.push({ fields: { ...account, evidence: JSON.stringify(evidence) }, missing: metrics.missing });

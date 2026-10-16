@@ -25,8 +25,8 @@ export async function benchmarkCode() {
     const dir='services/research/benchmark/';
     for(const file of ['metrics','classify'])emit(resolve(src,dir+file+'.ts'));
     const {accountMetrics}=await import(pathToFileURL(resolve(compiled,dir+'metrics.mjs')).href);
-    const {classifyAccount}=await import(pathToFileURL(resolve(compiled,dir+'classify.mjs')).href);
-    return {accountMetrics,classifyAccount};
+    const {classifyAccount,qualifyFetchedAccount}=await import(pathToFileURL(resolve(compiled,dir+'classify.mjs')).href);
+    return {accountMetrics,classifyAccount,qualifyFetchedAccount};
   } finally {rmSync(compiled,{recursive:true,force:true});}
 }
 export async function hostCaches() {

@@ -2,7 +2,7 @@
 // RESEARCH-TOOLS RT-4b (0268): benchmark table from fetched evidence only, its erasure, and the report gate.
 // Synthetic fixtures only; metrics come from the real accountMetrics/classifyAccount.
 import assert from 'node:assert/strict';
-import {randomUUID} from 'node:crypto';
+import {createHash,randomUUID} from 'node:crypto';
 import {rpc,closeAccount} from '../erasure-b2a/cases.mjs';
 import {seed} from '../report-finalization/cases.mjs';
 import {benchmarkCode} from '../payg/research-runtime-host-cache.mjs';
@@ -24,8 +24,8 @@ async function erase(db,f,kind,id) {
   return rpc(db,'content_erasure_confirm',f.actor,kind,id,hash);
 }
 /** A succeeded research operation of this answer holding `items` (what a supplier subcall stores). */
-async function operation(db,f,e,items) {
-  const plan = randomUUID(), op = randomUUID(), identityHash = 'e'.repeat(64);
+async function operation(db,f,e,items,op=randomUUID()) {
+  const plan = randomUUID(), identityHash = 'e'.repeat(64);
   await rpc(db,'research_runtime_plan_create',f.actor,plan,f.session,e,null,{budgetUnits:1000,maxOperations:1,
     operations:[{operationId:op,identityHash,maxQuoteUnits:100}]});
   const reserved = await rpc(db,'research_transition','reserve',plan,f.actor,op,{identityHash,quoteUnits:10});
@@ -34,22 +34,30 @@ async function operation(db,f,e,items) {
     result:{items:items.map(fields=>({fields,missing:[]})),cost:{actual:0}}});
   return op;
 }
+/** stableResearchId (research/runtime/toolContext.ts); pinned to the same sample value as its unit test. */
+const stableId = (...parts) => {
+  const h = createHash('sha256').update(JSON.stringify(parts)).digest('hex');
+  return `${h.slice(0,8)}-${h.slice(8,12)}-4${h.slice(13,16)}-a${h.slice(17,20)}-${h.slice(20,32)}`;
+};
 const post = (days,views,extra={}) => ({publishedAt:new Date(Date.now()-days*DAY).toISOString(),views,likes:10,comments:5,shares:1,...extra});
 
 export async function runCases({db,Client,connectionString,report}) {
-  const {accountMetrics,classifyAccount} = await benchmarkCode();
+  const {accountMetrics,classifyAccount,qualifyFetchedAccount} = await benchmarkCode();
   /** Supplier evidence → benchmark_fetch's own computation → the fetch cache, exactly as the tool does it. */
-  async function fetchAccount(f,e,account,{followers,posts,tamper,refresh,profileOp,deferFinish}) {
-    const profile = profileOp ?? await operation(db,f,e,[followers===null?{}:{followers}]);
-    const postOp = await operation(db,f,e,posts);
-    const now = new Date();
-    const metrics = accountMetrics({profile:{ref:profile+'#1',fields:followers===null?{}:{followers},missing:[]},
-      posts:posts.map((fields,i)=>({ref:`${postOp}#${i+1}`,fields,missing:[]})),complete:true},now);
-    let evidence = {platform:'tiktok',account,metrics,classification:classifyAccount(metrics,growth,now),fetchedAt:now.toISOString()};
-    if (tamper) evidence = tamper(structuredClone(evidence));
+  async function fetchAccount(f,e,account,{followers,posts,tamper,refresh,profileOp,deferFinish,complete=true}) {
+    // As benchmark_fetch: claim and mark sent, then one subcall per kind under its stable operation id.
     const claim = await rpc(db,'research_account_fetch_claim',f.actor,f.session,e,'tiktok',account,refresh??null);
     assert.equal(claim.claimed,true);
     assert.equal(await rpc(db,'research_account_fetch_dispatch',f.actor,claim.fetchId,claim.attempt),true);
+    const profile = profileOp ?? await operation(db,f,e,[followers===null?{}:{followers}],
+      stableId(claim.fetchId,claim.attempt,'account_profile'));
+    const postOp = await operation(db,f,e,posts,stableId(claim.fetchId,claim.attempt,'account_posts'));
+    const now = new Date();
+    const metrics = accountMetrics({profile:{ref:profile+'#1',fields:followers===null?{}:{followers},missing:[]},
+      posts:posts.map((fields,i)=>({ref:`${postOp}#${i+1}`,fields,missing:[]})),complete},now);
+    let evidence = {platform:'tiktok',account,metrics,fetchedAt:now.toISOString(),
+      classification:qualifyFetchedAccount(metrics,classifyAccount(metrics,growth,now))};
+    if (tamper) evidence = tamper(structuredClone(evidence));
     const finish = (client=db) => rpc(client,'research_account_fetch_finish',f.actor,claim.fetchId,claim.attempt,'succeeded',evidence);
     if (!deferFinish) await finish();
     return {fetchId:claim.fetchId,evidence,postOp,profile,finish};
@@ -87,6 +95,24 @@ export async function runCases({db,Client,connectionString,report}) {
     assert.equal((await rows(db,'session_id=$1',[f.session])).length,5);
   });
 
+  await check('RT-4b fewer than 20 analyzed posts qualify only as the whole history (Owner 2026-10-16, A)', async () => {
+    const f = await seed(db), e = await answer(db,f);
+    const few = [post(1,9000),post(2,10000),post(3,11000)];
+    const twenty = Array.from({length:20},(_,i)=>post(i+1,10000+i));
+    const short = await fetchAccount(f,e,'short',{followers:50000,posts:few,complete:false});
+    const whole = await fetchAccount(f,e,'newaccount',{followers:50000,posts:few,complete:true});
+    const full = await fetchAccount(f,e,'twenty',{followers:50000,posts:twenty,complete:false});
+    const forged = await fetchAccount(f,e,'forgedshort',{followers:50000,posts:few,complete:false,
+      tamper:x=>{x.classification={category:'imitable',qualified:true,excluded:null};return x;}});
+    const get = async x => (await rows(db,'fetch_id=$1',[x.fetchId]))[0];
+    assert.deepEqual([(await get(short)).excluded,(await get(short)).qualified],['TOO_FEW_POSTS',false]);
+    assert.deepEqual([(await get(whole)).qualified,(await get(whole)).whole_history],[true,true]);
+    assert.deepEqual([(await get(full)).qualified,(await get(full)).posts_analyzed],[true,20]);
+    assert.deepEqual([(await get(forged)).excluded,(await get(forged)).qualified],['EVIDENCE_UNVERIFIED',false]);
+    assert.equal(await qualified(db,f),2);
+    await assert.rejects(db.query(`UPDATE research_benchmarks SET whole_history=false WHERE fetch_id=$1`,[whole.fetchId]),/check constraint/);
+  });
+
   await check('RT-4b numbers not backed by the evidence items never enter the table (must-test 5)', async () => {
     const f = await seed(db), e = await answer(db,f), other = await seed(db);
     const foreign = await operation(db,other,await answer(db,other),[{followers:50000}]);
@@ -101,19 +127,29 @@ export async function runCases({db,Client,connectionString,report}) {
       postsPerWeek: x => {x.metrics.postsPerWeek.value=7;return x;},
       postsAnalyzed: x => {x.metrics.postsAnalyzed=30;return x;},
       postsAnalyzedLow: x => {x.metrics.postsAnalyzed=1;x.metrics.postsPerWeek={value:null,refs:[]};return x;},
+      cappedFrequency: x => {x.metrics.wholeHistory=false;return x;},
       category: x => {x.classification={category:'imitable',qualified:true,excluded:null};x.metrics.followers.value=5000;return x;},
     };
     for (const [name,tamper] of Object.entries(forged)) {
       const followers = name==='category'?5000:50000;
-      const got = await fetchAccount(f,e,'forged'+name.toLowerCase(),{...imitable,followers,tamper});
+      // A full page of 30 posts all inside the window: only the whole history makes its frequency known.
+      const posts = name==='cappedFrequency' ? Array.from({length:30},(_,i)=>post(i*0.5+0.1,10000)) : imitable.posts;
+      const got = await fetchAccount(f,e,'forged'+name.toLowerCase(),{...imitable,posts,followers,tamper});
       const [row] = await rows(db,'fetch_id=$1',[got.fetchId]);
       assert.deepEqual([row.excluded,row.qualified,row.category,row.followers,row.median_views,row.last_published_at],
         ['EVIDENCE_UNVERIFIED',false,null,null,null,null],name);
     }
+    // Another account fetched in this same session cannot lend its evidence either.
+    const neighbour = await fetchAccount(f,e,'neighbour',imitable);
+    const crossed = await fetchAccount(f,e,'crossed',{...imitable,profileOp:neighbour.profile});
+    assert.equal((await rows(db,'fetch_id=$1',[crossed.fetchId]))[0].excluded,'EVIDENCE_UNVERIFIED');
+    assert.equal((await rows(db,'fetch_id=$1',[neighbour.fetchId]))[0].qualified,true);
+    assert.equal((await db.query("SELECT research_benchmark_operation_id('00000000-0000-4000-8000-000000000001',"
+      +"'00000000-0000-4000-8000-000000000002','account_profile') v")).rows[0].v,'3f40c5bf-153d-4715-afd9-a006774ffa94');
     // Evidence of another user's session cannot back this session's numbers.
     const got = await fetchAccount(f,e,'foreign',{...imitable,profileOp:foreign});
     assert.equal((await rows(db,'fetch_id=$1',[got.fetchId]))[0].excluded,'EVIDENCE_UNVERIFIED');
-    assert.equal(await qualified(db,f),0);
+    assert.equal(await qualified(db,f),1,'only the honest neighbour');
     // No role but the owner writes the table or calls its writers; the qualified CHECK is the last line.
     for (const role of ['anon','authenticated','service_role']) {
       for (const statement of ['SELECT 1 FROM research_benchmarks LIMIT 1',
@@ -132,7 +168,7 @@ export async function runCases({db,Client,connectionString,report}) {
     await db.query('BEGIN');
     try {
       await db.query('SET LOCAL ROLE service_role');
-      assert.equal((await db.query('SELECT research_benchmark_rows($1,$2) v',[f.actor,f.session])).rows[0].v.rows.length,12);
+      assert.equal((await db.query('SELECT research_benchmark_rows($1,$2) v',[f.actor,f.session])).rows[0].v.rows.length,15);
     } finally {await db.query('ROLLBACK');}
     await assert.rejects(db.query(`UPDATE research_benchmarks SET qualified=true,category='imitable',excluded=NULL,followers=5000,
       last_published_at=now(),posts_analyzed=1 WHERE fetch_id=$1`,[got.fetchId]),/check constraint/);

@@ -19,7 +19,8 @@
 -- (and without benchmark rows): only the qualified-count gate applies to those. New code on an old database treats the
 -- missing research_benchmark_rows as an empty table. Repeatable: IF NOT EXISTS, CREATE OR REPLACE,
 -- DROP TRIGGER IF EXISTS, marker-skipped patches. Recovery: drop the trigger, functions and table, and restore
--- report_admission_check, bill2_payg_claim, content_erasure_confirm and account_erasure_scrub_content from their previous definitions;
+-- report_admission_check, bill2_payg_claim, research_account_fetch_finish, content_erasure_confirm and account_erasure_scrub_content
+-- from their previous definitions;
 -- the rows are re-derivable from research_account_fetches.
 BEGIN;
 SET LOCAL lock_timeout='5s';
@@ -43,7 +44,9 @@ CREATE TABLE IF NOT EXISTS public.research_benchmarks (
   category text CHECK (category IN ('head_reference','imitable','fast_rising')),
   qualified boolean NOT NULL,
   excluded text CHECK (excluded IN ('FOLLOWERS_MISSING','FOLLOWERS_BELOW_MIN','NO_PUBLISH_TIME','INACTIVE_30_DAYS','NO_POSTS',
-    'EVIDENCE_UNVERIFIED')),
+    'TOO_FEW_POSTS','EVIDENCE_UNVERIFIED')),
+  -- The supplier confirmed the analyzed posts are the account's whole history (metrics.wholeHistory).
+  whole_history boolean NOT NULL DEFAULT false,
   -- Per number, the evidence refs (`<research operation id>#<item>`) it was computed from.
   refs jsonb NOT NULL CHECK (jsonb_typeof(refs)='object' AND octet_length(refs::text)<=8192),
   -- Every research operation the refs name: deleting any of them deletes the row.
@@ -53,7 +56,9 @@ CREATE TABLE IF NOT EXISTS public.research_benchmarks (
   created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now(),
   CHECK ((category IS NULL) = (excluded IS NOT NULL)),
   CHECK (NOT qualified OR (category IN ('imitable','fast_rising') AND followers BETWEEN 10000 AND 200000
-    AND posts_analyzed > 0 AND last_published_at >= fetched_at - interval '30 days 5 minutes')),
+    AND posts_analyzed > 0 AND last_published_at >= fetched_at - interval '30 days 5 minutes'
+    -- Owner 2026-10-16 ("同意 RT-4b 作品条数选 A"): at least 20 analyzed posts, unless that is the whole history.
+    AND (posts_analyzed >= 20 OR whole_history))),
   CHECK (category IS DISTINCT FROM 'head_reference' OR (NOT qualified AND followers > 200000)),
   CHECK (excluded IS DISTINCT FROM 'EVIDENCE_UNVERIFIED' OR (followers IS NULL AND median_views IS NULL
     AND engagement_rate IS NULL AND posts_per_week IS NULL AND last_published_at IS NULL AND earliest_published_at IS NULL))
@@ -78,6 +83,16 @@ BEGIN
   RETURN CASE WHEN jsonb_typeof(v)='object' THEN v END;
 END $$;
 
+-- The research operation id benchmark_fetch gives one supplier subcall of a fetch attempt: stableResearchId(fetchId,
+-- attempt, kind) in research/runtime/toolContext.ts (sha256 of the JSON array, laid out as a v4-style uuid).
+CREATE OR REPLACE FUNCTION public.research_benchmark_operation_id(p_fetch uuid, p_attempt uuid, p_kind text) RETURNS uuid
+LANGUAGE sql IMMUTABLE SET search_path=public,pg_temp AS $$
+  SELECT (substr(h,1,8)||'-'||substr(h,9,4)||'-4'||substr(h,14,3)||'-a'||substr(h,18,3)||'-'||substr(h,21,12))::uuid
+  -- JSON.stringify spelling (no spaces); uuids and the fixed kind names need no escaping.
+  FROM (SELECT encode(sha256(convert_to('["'||p_fetch::text||'","'||p_attempt::text||'","'||p_kind||'"]','utf8')),'hex') h) z
+  WHERE p_kind ~ '^[a-z_]{1,40}$'
+$$;
+
 -- The row for a fetch's current success, or no row. Called by the trigger only.
 CREATE OR REPLACE FUNCTION public.research_benchmark_project(f research_account_fetches) RETURNS void
 LANGUAGE plpgsql SET search_path=public,pg_temp AS $$
@@ -98,6 +113,9 @@ BEGIN
       ELSE ops:=ops||(split_part(ref,'#',1))::uuid;END IF;
     END LOOP;
   END LOOP;
+  -- Every cited operation is a subcall of this very fetch attempt (not another account fetched in the same session).
+  ok:=ok AND ops<@ARRAY(SELECT research_benchmark_operation_id(f.id,f.attempt,k)
+    FROM unnest(ARRAY['account_profile','account_posts','account_relation','post_detail']) k);
   -- Single-item numbers equal the item field they name.
   IF ok AND m->'followers'->'value'<>'null'::jsonb THEN
     item:=research_benchmark_item(f.actor_id,f.session_id,m->'followers'->'refs'->>0);
@@ -139,7 +157,12 @@ BEGIN
       count(*) FILTER (WHERE (x->>'publishedAt')::timestamptz>=(e->>'fetchedAt')::timestamptz-interval '30 days 5 minutes')
       INTO ok,actual,expected FROM (SELECT research_benchmark_item(f.actor_id,f.session_id,r) x
         FROM jsonb_array_elements_text(m->'postsPerWeek'->'refs') r) z;
+    -- Known only for the whole history, or when the oldest analyzed post is already outside the window (a page whose
+    -- oldest post is still inside may hide more posts: accountMetrics reports the frequency as unknown).
     ok:=coalesce(ok,false) AND jsonb_array_length(m->'postsPerWeek'->'refs')=(m->>'postsAnalyzed')::integer
+      AND ((m->'wholeHistory')::boolean OR (SELECT min((x->>'publishedAt')::timestamptz) FROM (
+        SELECT research_benchmark_item(f.actor_id,f.session_id,r) x FROM jsonb_array_elements_text(m->'postsPerWeek'->'refs') r) z)
+        <(e->>'fetchedAt')::timestamptz-interval '30 days')
       AND round((m->'postsPerWeek'->>'value')::numeric*30/7,6) BETWEEN actual AND expected
       AND round((m->'postsPerWeek'->>'value')::numeric*30/7,6)=trunc(round((m->'postsPerWeek'->>'value')::numeric*30/7,6));
   END IF;
@@ -157,17 +180,19 @@ BEGIN
       WHEN c->>'category' IN ('imitable','fast_rising') THEN (m->'followers'->>'value')::numeric BETWEEN 10000 AND 200000
         AND (m->>'postsAnalyzed')::integer>0 AND m->'lastPublishedAt'->'value'<>'null'::jsonb
         AND (m->'lastPublishedAt'->>'value')::timestamptz>=(e->>'fetchedAt')::timestamptz-interval '30 days 5 minutes'
+        AND ((m->>'postsAnalyzed')::integer>=20 OR (m->'wholeHistory')::boolean)
       ELSE NOT coalesce((c->'qualified')::boolean,false) END;
   END IF;
   INSERT INTO research_benchmarks AS b(fetch_id,actor_id,session_id,execution_id,platform,account,followers,median_views,
-    engagement_rate,posts_per_week,last_published_at,earliest_published_at,posts_analyzed,category,qualified,excluded,
-    refs,operation_ids,missing,fetched_at)
+    engagement_rate,posts_per_week,last_published_at,earliest_published_at,posts_analyzed,whole_history,category,qualified,
+    excluded,refs,operation_ids,missing,fetched_at)
   VALUES(f.id,f.actor_id,f.session_id,f.last_success_execution_id,f.platform,f.account,
     CASE WHEN ok THEN (m->'followers'->>'value')::numeric END,CASE WHEN ok THEN (m->'medianViews'->>'value')::numeric END,
     CASE WHEN ok THEN (m->'engagementRate'->>'value')::numeric END,CASE WHEN ok THEN (m->'postsPerWeek'->>'value')::numeric END,
     CASE WHEN ok THEN (m->'lastPublishedAt'->>'value')::timestamptz END,
     CASE WHEN ok THEN (m->'earliestPublishedAt'->>'value')::timestamptz END,
     CASE WHEN ok THEN (m->>'postsAnalyzed')::integer ELSE 0 END,
+    ok AND (m->'wholeHistory')::boolean,
     CASE WHEN ok THEN c->>'category' END,ok AND (c->'qualified')::boolean,
     CASE WHEN ok THEN c->>'excluded' ELSE 'EVIDENCE_UNVERIFIED' END,
     refs,ARRAY(SELECT DISTINCT x FROM unnest(ops) x ORDER BY x),
@@ -175,7 +200,8 @@ BEGIN
   ON CONFLICT (fetch_id) DO UPDATE SET execution_id=excluded.execution_id,account=excluded.account,
     followers=excluded.followers,median_views=excluded.median_views,engagement_rate=excluded.engagement_rate,
     posts_per_week=excluded.posts_per_week,last_published_at=excluded.last_published_at,
-    earliest_published_at=excluded.earliest_published_at,posts_analyzed=excluded.posts_analyzed,category=excluded.category,
+    earliest_published_at=excluded.earliest_published_at,posts_analyzed=excluded.posts_analyzed,whole_history=excluded.whole_history,
+    category=excluded.category,
     qualified=excluded.qualified,excluded=excluded.excluded,refs=excluded.refs,operation_ids=excluded.operation_ids,
     missing=excluded.missing,fetched_at=excluded.fetched_at,updated_at=clock_timestamp();
 END $$;
@@ -190,6 +216,19 @@ DROP TRIGGER IF EXISTS research_benchmarks_from_fetch ON public.research_account
 CREATE TRIGGER research_benchmarks_from_fetch
   AFTER INSERT OR UPDATE OF last_success,last_success_execution_id,account ON public.research_account_fetches
   FOR EACH ROW EXECUTE FUNCTION public.research_benchmark_sync();
+
+-- The fetch cache (0263) accepts the new exclusion of a fetched account with too few posts (Owner 2026-10-16, A).
+DO $$ DECLARE definition text; t text; BEGIN
+  definition:=pg_get_functiondef('public.research_account_fetch_finish(uuid,uuid,uuid,text,jsonb)'::regprocedure);
+  IF position('-- 0268 too few posts' IN definition)=0 THEN
+    t:=$x$IN ('FOLLOWERS_MISSING','FOLLOWERS_BELOW_MIN','NO_PUBLISH_TIME','INACTIVE_30_DAYS','NO_POSTS')),false)$x$;
+    IF array_length(string_to_array(definition,t),1)<>2 THEN
+      RAISE EXCEPTION 'RESEARCH_BENCHMARK_SOURCE_MISMATCH: research_account_fetch_finish';END IF;
+    EXECUTE replace(definition,t,$x$IN ('FOLLOWERS_MISSING','FOLLOWERS_BELOW_MIN','NO_PUBLISH_TIME','INACTIVE_30_DAYS','NO_POSTS',
+       -- 0268 too few posts
+       'TOO_FEW_POSTS')),false)$x$);
+  END IF;
+END $$;
 
 -- Qualified accounts produced in this session by its own live answers (one per platform + account).
 CREATE OR REPLACE FUNCTION public.research_benchmark_qualified(a uuid, s uuid) RETURNS integer
@@ -309,7 +348,8 @@ END $$;
 
 REVOKE ALL ON FUNCTION public.research_benchmark_item(uuid,uuid,text),public.research_benchmark_project(research_account_fetches),
   public.research_benchmark_sync(),public.research_benchmark_qualified(uuid,uuid),public.research_benchmark_required(jsonb,jsonb),
-  public.research_benchmark_table(uuid,uuid),public.research_benchmark_report_current(uuid,uuid,jsonb)
+  public.research_benchmark_table(uuid,uuid),public.research_benchmark_report_current(uuid,uuid,jsonb),
+  public.research_benchmark_operation_id(uuid,uuid,text)
   FROM PUBLIC,anon,authenticated,service_role;
 REVOKE ALL ON FUNCTION public.research_benchmark_rows(uuid,uuid) FROM PUBLIC,anon,authenticated;
 GRANT EXECUTE ON FUNCTION public.research_benchmark_rows(uuid,uuid) TO service_role;
