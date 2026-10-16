@@ -29,14 +29,15 @@ const policy = toolCallPolicy({ vendor: 'parallel', account: 'research-local', r
       pricingBasis: 'list', sourceUrl: 'https://example.com/p', evidenceHash: 'a'.repeat(64), verifiedAt: '2026-10-01T00:00:00Z',
       validUntil: '2026-11-01T00:00:00Z', chargeCondition: 'per call', includedInReceipt: false, priceMultiplier: null } } });
 
-function database(calls: Array<{ id: string; sequence: number; providerId: string | null }>, claim: unknown = { state: 'waiting_credits' }) {
+function database(calls: Array<{ id: string; sequence: number; providerId: string | null }>, claim: unknown = { state: 'waiting_credits' },
+  toolCalls: string[] = []) {
   const rpc = vi.fn(async (name: string, ...rest: [Record<string, unknown>]) => {
-    void rest;
     if (name === 'bill2_read') return { data: { id: runId, calls }, error: null };
     // The admin slot is not filled: the transition fallback (PARALLEL_API_KEY) applies.
     if (name === 'platform_secret_read') return { data: null, error: null };
     if (name === 'research_runtime_read') return { data: null, error: null };
     if (name === 'bill2_claim') return { data: claim, error: null };
+    if (name === 'research_runtime_call_charge') return { data: toolCalls.includes(String(rest[0].p_call)) ? { source: null, credits: null } : null, error: null };
     throw new Error(`unexpected ${name}`);
   });
   return { rpc };
@@ -91,14 +92,19 @@ describe('researchExecution (RT-3b PR-3)', () => {
     expect(fetch).not.toHaveBeenCalled();
   });
 
-  it('recognises a slot as a subcall only by its own recorded receipt', async () => {
+  it('recognises a slot as a subcall by the database\'s call kind, also without a receipt (#1029 P1)', async () => {
     const db = database([{ id: callId(1), sequence: 1, providerId: 'gen-1' }, { id: callId(2), sequence: 2, providerId: callId(2) },
-      { id: callId(3), sequence: 3, providerId: null }]);
+      { id: callId(3), sequence: 3, providerId: null }, { id: callId(4), sequence: 4, providerId: null }],
+    undefined, [callId(2), callId(3)]);
     const { built } = build(true, db);
     expect(await built.isSubcall(1)).toBe(false);
     expect(await built.isSubcall(2)).toBe(true);
-    expect(await built.isSubcall(3)).toBe(false);
+    // Claimed, then cancelled by recovery before any receipt: still this answer's tool call.
+    expect(await built.isSubcall(3)).toBe(true);
+    // An unrecorded model call is never skipped.
     expect(await built.isSubcall(4)).toBe(false);
+    expect(await built.isSubcall(5)).toBe(false);
+    expect(db.rpc).toHaveBeenCalledWith('research_runtime_call_charge', { a: actor, s: sessionId, e: executionId, p_call: callId(3) });
   });
 });
 

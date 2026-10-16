@@ -2,7 +2,7 @@
 // RESEARCH-TOOLS RT-3b PR-3: the research tools of one admitted positioning mentor turn, built from its frozen
 // context and run only. The actor comes from the trusted runtime; tool prices, routes and the subcall allowance
 // come from the run, never from the model or current settings. Each subcall claims the run's next free BILL2
-// sequence; a model call that finds a recorded subcall in its slot moves past it (responseAfterResearch).
+// sequence; a model call that finds one of this answer's subcalls in its slot moves past it (responseAfterResearch).
 import { z } from 'zod';
 import type { ResearchTurnEvent } from '../../shared/researchTurn';
 import { toolCallPolicies } from '../bill2/runPolicies';
@@ -28,7 +28,7 @@ export interface ResearchExecution {
   definitionBytes: number;
   /** Input kept free in the first call for one tool result and the reply after it. */
   reserve: number;
-  /** Whether a BILL2 slot holds a recorded research subcall: its receipt's provider id is the call itself (0255). */
+  /** Whether a BILL2 slot holds a research subcall of this answer (0267 call_kind='tool'), with or without a receipt. */
   isSubcall(sequence: number): Promise<boolean>;
 }
 
@@ -88,15 +88,21 @@ export function researchExecution(input: {
     definitionBytes: researchToolBytes(names, fastSearchOnly(ctx.config)), reserve: research.reserve,
     async isSubcall(sequence) {
       const call = (await readCalls()).find(item => item.sequence === sequence);
-      return Boolean(call && call.providerId === call.id);
+      if (!call) return false;
+      // An object for a tool call of this answer in any state (also one recovery cancelled before its receipt), null otherwise.
+      const kind = await input.database.rpc('research_runtime_call_charge',
+        { a: input.actorId, s: execution.sessionId, e: input.executionId, p_call: call.id });
+      if (kind.error) throw new Error('RESEARCH_STATE_UNAVAILABLE');
+      return kind.data !== null && typeof kind.data === 'object';
     },
   };
 }
 
 /**
  * The stored response of a model call, or null when its slot is still free. After a research tool the local
- * sequence lags behind the subcalls that tool claimed (on replay it claims none), so a slot holding a recorded
- * subcall is skipped. Anything else that conflicts (a different model request, an unrecorded call) still fails.
+ * sequence lags behind the subcalls that tool claimed (on replay it claims none), so a slot holding one of this
+ * answer's subcalls (settled, pending or cancelled without a receipt) is skipped; a tool slot never holds a model
+ * response, and SQL still refuses a new claim while any call is unsettled. Any other conflict still fails.
  */
 export async function responseAfterResearch<T>(respond: (sequence: number) => Promise<T>, start: number,
   research: Pick<ResearchExecution, 'isSubcall'> | null, maxCalls: number): Promise<{ sequence: number; existing: T }> {
