@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { describe, expect, it, vi } from "vitest";
 import { OUTPUT_TRUNCATED_NOTICE, PROVIDER_HISTORY_NOTICE, PROVIDER_REJECTED_NOTICE, HISTORY_OMITTED_NOTICE } from "@/lib/runtime-gate-notice";
-import { CAPACITY_NOTICE, ENDED_NOTICE, GUIDE_HELD_NOTICE, USER_STOP_NOTICE, runtimeTailNotices, runtimeTurnNotices, type RuntimeTurn } from "./runtime-notices";
+import { CAPACITY_NOTICE, ENDED_NOTICE, GUIDE_HELD_NOTICE, USER_STOP_NOTICE, runtimeTailNotices, runtimeTurnNotices, stopWithRecord, type RuntimeTurn } from "./runtime-notices";
 
 const turn = (extra: Partial<RuntimeTurn> = {}): RuntimeTurn => ({
   executionId: "e1", state: "completed", primaryBody: null, organizerComplete: null, needsTask: false, unavailableReason: null, ...extra,
@@ -41,6 +41,70 @@ describe("runtimeTurnNotices", () => {
     const ended = runtimeTurnNotices(turn({ state: "cancelled" }), ctx())[0];
     expect(ended).toMatchObject({ tone: "warning", text: ENDED_NOTICE });
     expect(ended.text).not.toContain("已停止");
+  });
+
+  // #973 Codex step 3: a stop that keeps the shown text ends completed with pausedReason user_stop.
+  describe("a round the user stopped", () => {
+    const savedStop = { stopped: true, billing: { pausedReason: "user_stop", cancelRequested: false } };
+    const only = (notices: ReturnType<typeof runtimeTurnNotices>) => notices.map(notice => notice.text);
+
+    it("says 已停止 the moment 停止 is clicked, while the view still shows it running", () => {
+      for (const busy of [false, true]) {
+        const notices = runtimeTurnNotices(turn({ state: "running" }), ctx({ userStopped: true, busy }));
+        expect(notices).toEqual([expect.objectContaining({ tone: "status", text: USER_STOP_NOTICE })]);
+        expect(notices[0].actions).toBeUndefined();
+      }
+    });
+
+    it("keeps 已停止 while the server saves the stop, with no 回复尚未完成", () => {
+      for (const state of ["prepared", "running"])
+        expect(only(runtimeTurnNotices(turn({ state, userStopPending: true }), ctx()))).toEqual([USER_STOP_NOTICE]);
+      // A save left interrupted offers 重试, which only finishes the saved stop.
+      const [interrupted] = runtimeTurnNotices(turn({ state: "interrupted", userStopPending: true }), ctx());
+      expect(interrupted.text).toBe(USER_STOP_NOTICE);
+      expect(labels(interrupted)).toEqual(["重试"]);
+      expect(labels(runtimeTurnNotices(turn({ state: "interrupted", billing: { pausedReason: "user_stop" } }), ctx())[0])).toEqual(["重试"]);
+    });
+
+    it("never offers 重试 on a stop only this tab knows about (#1013 review)", () => {
+      // Without the server's record a retry could resume ordinary, charged provider work.
+      for (const extra of [{}, { billing: { pausedReason: "user_stop", cancelRequested: true } }]) {
+        const [notice] = runtimeTurnNotices(turn({ state: "interrupted", ...extra }), ctx({ userStopped: true }));
+        expect(notice.text).toBe(USER_STOP_NOTICE);
+        expect(notice.actions).toBeUndefined();
+      }
+    });
+
+    it("says 已停止 for completed + user_stop, also after a reload without this tab's record", () => {
+      expect(only(runtimeTurnNotices(turn({ state: "completed", ...savedStop }), ctx()))).toEqual([USER_STOP_NOTICE]);
+      expect(only(runtimeTurnNotices(turn({ state: "completed", billing: savedStop.billing }), ctx()))).toEqual([USER_STOP_NOTICE]);
+      expect(only(runtimeTurnNotices(turn({ state: "completed" }), ctx({ userStopped: true })))).toEqual([USER_STOP_NOTICE]);
+    });
+
+    it("says 已停止 for a cancelled stop from the view's own record too", () => {
+      expect(only(runtimeTurnNotices(turn({ state: "cancelled", billing: savedStop.billing }), ctx()))).toEqual([USER_STOP_NOTICE]);
+    });
+
+    it("leaves every other state as it was", () => {
+      // Ordinary completed round: nothing.
+      expect(runtimeTurnNotices(turn({ state: "completed", billing: { pausedReason: null, cancelRequested: false } }), ctx())).toEqual([]);
+      // An ordinary cancellation that once paused for a stop is not a user stop.
+      expect(only(runtimeTurnNotices(turn({ state: "cancelled", billing: { pausedReason: "user_stop", cancelRequested: true } }), ctx())))
+        .toEqual([ENDED_NOTICE]);
+      // A really unfinished round keeps 回复尚未完成 with 重试 and 停止.
+      const [open] = runtimeTurnNotices(turn({ state: "interrupted" }), ctx());
+      expect(open.text).toBe("回复尚未完成，原请求已保留。");
+      expect(labels(open)).toEqual(["重试", "停止"]);
+      // A cost still being verified keeps its own notice, stopped or not.
+      for (const extra of [{}, { userStopPending: true }])
+        expect(only(runtimeTurnNotices(turn({ state: "cost_pending", ...extra }), ctx()))).toEqual(["费用待核实；重试只核对原调用。"]);
+      // A BILL-PAYG pause carries its own notice (payg-wait.ts), stopped or not.
+      for (const state of ["waiting_credits", "waiting_resume"])
+        expect(runtimeTurnNotices(turn({ state, billing: { pausedReason: "insufficient_credits" } }), ctx())).toEqual([]);
+      // Refusal reasons keep their own wording ahead of a stale stop record.
+      expect(only(runtimeTurnNotices(turn({ state: "cancelled", unavailableReason: "provider_rejected" }), ctx({ userStopped: true }))))
+        .toEqual([PROVIDER_REJECTED_NOTICE]);
+    });
   });
 
   it("shows output truncation once, with the shared wording", () => {
@@ -184,5 +248,45 @@ describe("positioning refusal turn", () => {
     const notices = runtimeTurnNotices(turn({ state: "cancelled", unavailableReason: "positioning_required" }), ctx());
     expect(notices.map(n => n.text)).toEqual([POSITIONING_REQUIRED_NOTICE]);
     expect(notices[0]!.text).not.toBe(ENDED_NOTICE);
+  });
+});
+
+// #1013 review: a failed stop request may still have been recorded (lost answer), so this tab's record
+// is dropped only when a successful re-read proves the server recorded neither a stop nor a cancel.
+describe("stopWithRecord", () => {
+  const store = () => { const m = new Map<string, string>(); return Object.assign(Object.create(null), {
+    getItem: (k: string) => m.get(k) ?? null, setItem: (k: string, v: string) => void m.set(k, v), removeItem: (k: string) => void m.delete(k),
+  }) as Storage; };
+  const at = (storage: Storage) => ({ storage, sessionId: "s", executionId: "e1" });
+  const key = "opc-runtime-user-stop:s:e1";
+  const view = (execution: Record<string, unknown> | null, isError = false) => async () =>
+    ({ isError, data: execution ? { executions: [{ executionId: "e1", ...execution }] } : undefined });
+  const fail = () => Promise.reject(new Error("timeout"));
+
+  it("keeps the record when the stop succeeds", async () => {
+    const storage = store();
+    expect(await stopWithRecord(at(storage), async () => ({}), view({ state: "running", userStopPending: true }))).toBe(false);
+    expect(storage.getItem(key)).toBe("1");
+  });
+
+  it("keeps the record when the request failed but the re-read cannot tell", async () => {
+    const storage = store();
+    expect(await stopWithRecord(at(storage), fail, view(null, true))).toBe(true);
+    expect(storage.getItem(key)).toBe("1");
+  });
+
+  it("keeps the record when the re-read shows the server recorded the stop or a cancel", async () => {
+    for (const execution of [{ state: "running", userStopPending: true }, { state: "completed", stopped: true },
+      { state: "running", billing: { cancelRequested: true } }, { state: "cancelled" }]) {
+      const storage = store();
+      await stopWithRecord(at(storage), fail, view(execution));
+      expect(storage.getItem(key)).toBe("1");
+    }
+  });
+
+  it("drops the record only when the re-read proves nothing was recorded", async () => {
+    const storage = store();
+    expect(await stopWithRecord(at(storage), fail, view({ state: "running", billing: { cancelRequested: false } }))).toBe(true);
+    expect(storage.getItem(key)).toBeNull();
   });
 });

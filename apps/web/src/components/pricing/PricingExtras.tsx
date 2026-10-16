@@ -19,6 +19,7 @@ export function PricingCreditPacks({ packages, plans, failed }: {
       <div className="grid gap-1">
         <h2 className="text-xl font-semibold" style={{ color: 'var(--text-primary)' }}>{COPY.packsTitle}</h2>
         <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>{COPY.packsLede}</p>
+        <p data-testid="pricing-packs-tax" className="text-xs" style={{ color: 'var(--text-tertiary)' }}>{COPY.packsTaxNote}</p>
         {discounts.length ? <p className="text-sm" style={{ color: 'var(--text-tertiary)' }}>
           {COPY.packsMemberDiscount}：{discounts.join(' · ')}</p> : null}
       </div>
