@@ -63,6 +63,16 @@ describe("runtimeTurnNotices", () => {
       const [interrupted] = runtimeTurnNotices(turn({ state: "interrupted", userStopPending: true }), ctx());
       expect(interrupted.text).toBe(USER_STOP_NOTICE);
       expect(labels(interrupted)).toEqual(["重试"]);
+      expect(labels(runtimeTurnNotices(turn({ state: "interrupted", billing: { pausedReason: "user_stop" } }), ctx())[0])).toEqual(["重试"]);
+    });
+
+    it("never offers 重试 on a stop only this tab knows about (#1013 review)", () => {
+      // Without the server's record a retry could resume ordinary, charged provider work.
+      for (const extra of [{}, { billing: { pausedReason: "user_stop", cancelRequested: true } }]) {
+        const [notice] = runtimeTurnNotices(turn({ state: "interrupted", ...extra }), ctx({ userStopped: true }));
+        expect(notice.text).toBe(USER_STOP_NOTICE);
+        expect(notice.actions).toBeUndefined();
+      }
     });
 
     it("says 已停止 for completed + user_stop, also after a reload without this tab's record", () => {

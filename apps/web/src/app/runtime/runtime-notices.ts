@@ -39,6 +39,15 @@ export function stoppedByUser(turn: StopSignals, local?: boolean) {
 }
 
 /**
+ * An `interrupted` round whose user stop the server recorded: 重试 then only finishes saving it, since the
+ * executor never dispatches for a user_stop round. This tab's record alone (an unconfirmed stop) never
+ * qualifies: without the server's record a retry could resume ordinary, charged provider work.
+ */
+export function stopRecovery(turn: StopSignals & { state: string }) {
+  return turn.state === 'interrupted' && stoppedByUser(turn);
+}
+
+/**
  * After a failed stop request, the re-read view proves the server recorded neither a stop nor a
  * cancellation: the round is still open with no stop or cancel signal. Only then may the page drop
  * this tab's stop record. A lost re-read (no turn) or any recorded stop keeps it.
@@ -112,10 +121,10 @@ export function runtimeTurnNotices(turn: RuntimeTurn, ctx: {
   if (!open(turn.state) || isPaygWaiting(turn.state)) return notices;
   // A stopped round still being saved is not unfinished: no 回复尚未完成, no 重试 or 停止. Only a
   // cost still being verified keeps its own notice below. An `interrupted` round left by a lost save
-  // offers 重试, which only finishes the saved stop (never a new call).
+  // offers 重试 only once the server confirmed the stop (stopRecovery): then it only finishes the save.
   if (stopped && turn.state !== 'cost_pending') {
     const finish = { label: CHAT_ACTION.retry, onClick: ctx.onRetry, disabled: ctx.busy };
-    notices.push(turn.state === 'interrupted' && !ctx.busy ? { ...userStop, actions: [finish] } : userStop);
+    notices.push(stopRecovery(turn) && !ctx.busy ? { ...userStop, actions: [finish] } : userStop);
     return notices;
   }
   const capacity = ctx.capacity;

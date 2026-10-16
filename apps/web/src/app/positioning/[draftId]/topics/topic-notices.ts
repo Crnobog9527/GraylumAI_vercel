@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { CHAT_ACTION, type ChatNotice } from '@/components/chat/ChatInlineNotice';
 import { PROVIDER_REJECTED_NOTICE, gateAdmissionNotice, gateResultNotice } from '@/lib/runtime-gate-notice';
-import { USER_STOP_NOTICE, inFlight, stoppedByUser, type StopSignals } from '@/app/runtime/runtime-notices';
+import { USER_STOP_NOTICE, inFlight, stopRecovery, stoppedByUser, type StopSignals } from '@/app/runtime/runtime-notices';
 import { definiteRefusal, definiteRefusalNotice } from '@/app/runtime/gate-notices';
 import { hostNotice, isOrganizerPendingError, isPaygWaiting } from '@/lib/payg-wait';
 
@@ -84,9 +84,9 @@ export function topicOpenTurnNotice(e: { executionId: string; state: string; una
   const userStop: ChatNotice = { id: e.executionId, tone: 'status', text: USER_STOP_NOTICE };
   if (e.state === 'completed' || e.state === 'cancelled') return stopped ? userStop : null;
   if (isPaygWaiting(e.state)) return null;
-  // Still being saved: no 重试 or 停止; an `interrupted` save offers 重试, which only finishes the stop.
+  // Still being saved: no 重试 or 停止; a server-confirmed `interrupted` save offers 重试 (stopRecovery).
   if (stopped && e.state !== 'cost_pending')
-    return e.state === 'interrupted' && !ctx.busy ? { ...userStop, actions: [{ label: CHAT_ACTION.retry, onClick: ctx.onRetry }] } : userStop;
+    return stopRecovery(e) && !ctx.busy ? { ...userStop, actions: [{ label: CHAT_ACTION.retry, onClick: ctx.onRetry }] } : userStop;
   // A finished call matters only while the view still shows the turn in flight (inFlight).
   const settling = ctx.finished === e.executionId && inFlight(e.state);
   const running = (ctx.busy || settling) && e.state !== 'cost_pending';

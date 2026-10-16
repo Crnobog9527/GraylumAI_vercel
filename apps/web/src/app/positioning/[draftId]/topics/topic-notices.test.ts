@@ -136,6 +136,10 @@ it('a stopped topic turn says 已停止 in every state and never reads as unfini
   const interrupted = topicOpenTurnNotice({ executionId: 'e', state: 'interrupted', userStopPending: true }, ctx());
   expect(interrupted?.text).toBe(USER_STOP_NOTICE);
   expect(interrupted?.actions?.map(action => action.label)).toEqual(['重试']);
+  // A stop only this tab knows about offers no 重试: without the server's record it could resume charged work.
+  const unconfirmed = topicOpenTurnNotice({ executionId: 'e', state: 'interrupted' }, ctx({ userStopped: true }));
+  expect(unconfirmed).toMatchObject({ text: USER_STOP_NOTICE });
+  expect(unconfirmed?.actions).toBeUndefined();
   // A cost still being verified keeps its own notice and retry.
   expect(topicOpenTurnNotice({ executionId: 'e', state: 'cost_pending', userStopPending: true }, ctx())?.text).toBe('费用待核实；重试只核对原调用。');
   // Without any stop record nothing changes: a finished turn shows nothing, an open one is still unfinished.
