@@ -1,7 +1,7 @@
 -- Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved.
 -- PUBLISH-MONITOR PR-3a (docs/launch/tasks/PUBLISH-MONITOR.md §4.1 bounded refresh and empty-list rules, §7 retention,
 -- §8 daily job, §9 items 3/4/11/20): refresh progress, daily snapshots, the 30/90-day data window and manual refresh.
--- Number NNNN assigned by the controller. Progress lives on the existing rows (plan §8: no new queue tables). Reading the
+-- Number 0272 assigned by the controller. Progress lives on the existing rows (plan §8: no new queue tables). Reading the
 -- user's own Post for Me data is free (Owner 2026-10-13), so nothing here freezes or charges credits.
 BEGIN;
 SET LOCAL lock_timeout='5s';
