@@ -187,7 +187,8 @@ LANGUAGE sql IMMUTABLE SET search_path=public,pg_temp AS $$
     ELSE 0 END
 $$;
 
--- The host-computed table for report facts: this session's live rows, no supplier cost or raw evidence.
+-- The host-computed table for report facts: this session's live rows, no supplier cost or raw evidence, and the hash
+-- report admission re-checks (the rows a report is admitted with are exactly the rows still present).
 CREATE OR REPLACE FUNCTION public.research_benchmark_rows(a uuid, s uuid) RETURNS jsonb
 LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
 DECLARE output jsonb;
@@ -202,7 +203,7 @@ BEGIN
     JOIN runtime_executions x ON x.id=b.execution_id AND x.actor_id=a AND x.session_id=s
     WHERE b.actor_id=a AND b.session_id=s AND x.content_deleted_at IS NULL AND x.erased_at IS NULL
     ORDER BY b.qualified DESC,b.followers DESC NULLS LAST,b.platform,b.account LIMIT 30) b;
-  RETURN output;
+  RETURN jsonb_build_object('rows',output,'hash',encode(sha256(convert_to(output::text,'utf8')),'hex'));
 END $$;
 
 -- Report gate, after every existing report refusal so those keep their codes.
@@ -215,7 +216,11 @@ DO $$ DECLARE definition text; t text; BEGIN
     EXECUTE replace(definition,t,t||$x$
  -- 0268 benchmark gate: qualified benchmark accounts of this session (RESEARCH_TOOLS_PLAN §1.5).
  IF research_benchmark_qualified(a,sid)<research_benchmark_required((SELECT scope FROM runtime_sessions WHERE id=sid),spec) THEN
-  RAISE EXCEPTION 'REPORT_BENCHMARKS_REQUIRED';END IF;$x$);
+  RAISE EXCEPTION 'REPORT_BENCHMARKS_REQUIRED';END IF;
+ -- The benchmark rows frozen into the report instructions must still be the current ones (deleted or refreshed since:
+ -- conflict), checked under the same locks as deletion, like snapshotHash above.
+ IF (research_benchmark_rows(a,sid)->>'hash') IS DISTINCT FROM context#>>'{reportGeneration,benchmarkHash}' THEN
+  RAISE EXCEPTION 'REPORT_SOURCE_CONFLICT';END IF;$x$);
   END IF;
 END $$;
 

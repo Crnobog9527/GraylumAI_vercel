@@ -78,11 +78,15 @@ it('benchmark facts come only from the host table rows; malformed rows fail clos
   const row = { platform: 'tiktok', account: 'alpha', followers: 50000, medianViews: null, engagementRate: 0.002, postsPerWeek: 1.4,
     lastPublishedAt: '2026-10-15T00:00:00+00:00', postsAnalyzed: 12, category: 'imitable', qualified: true, excluded: null,
     missing: ['medianViews'], fetchedAt: '2026-10-16T00:00:00+00:00' };
-  expect(benchmarkReportFacts([])).toBeNull();
-  expect(JSON.parse(benchmarkReportFacts([row])!)).toEqual([row]);
-  for (const bad of [null, [{ ...row, followers: -1 }], [{ ...row, interpretation: 'model text' }], Array(31).fill(row)]) {
+  const hash = 'f'.repeat(64);
+  expect(benchmarkReportFacts({ rows: [], hash })).toEqual({ serialized: null, hash });
+  expect(JSON.parse(benchmarkReportFacts({ rows: [row], hash }).serialized!)).toEqual([row]);
+  for (const bad of [null, [row], { rows: [row] }, { rows: [row], hash: 'x' }, { rows: [{ ...row, followers: -1 }], hash },
+    { rows: [{ ...row, interpretation: 'model text' }], hash }, { rows: Array(31).fill(row), hash }]) {
     expect(() => benchmarkReportFacts(bad)).toThrow('REPORT_UNAVAILABLE');
   }
+  expect(frozenReport.safeParse({ ...report, benchmarkHash: hash }).success).toBe(true);
+  expect(frozenReport.safeParse({ ...report, benchmarkHash: 'x' }).success).toBe(false);
 });
 it('a Skill may declare a benchmark minimum for its report; the host raises it to 3 in SQL', () => {
   const base = { resources: ['report.md'], sections: ['One'], maxCharacters: 12000 };

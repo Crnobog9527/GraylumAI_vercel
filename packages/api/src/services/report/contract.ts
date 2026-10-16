@@ -21,6 +21,8 @@ export const frozenReport = z.object({
   evidenceIds: z.array(z.string().uuid()).max(2048).default([]),
   snapshotHash: hash, packageHash: hash, workflowHash: hash, templateHash: hash,
   sections: reportManifest.shape.sections, maxCharacters: reportManifest.shape.maxCharacters,
+  /** Hash of the benchmark rows in the instructions; SQL admission refuses when the current rows differ. */
+  benchmarkHash: hash.optional(),
 }).strict();
 export type FrozenReport = z.infer<typeof frozenReport>;
 export const reportStart = z.object({
@@ -51,13 +53,14 @@ const benchmarkRow = z.object({
   excluded: z.string().nullable(), missing: z.array(z.string()), fetchedAt: z.string(),
 }).strict();
 /**
- * The host benchmark table (research_benchmark_rows, computed from fetched evidence only) as report facts, or null
- * when the session has none. The report reads benchmark numbers from here, never from model output (plan §1.4).
+ * The host benchmark table (research_benchmark_rows, computed from fetched evidence only) as report facts (null when
+ * the session has none) and its hash, which the frozen report carries into SQL admission. The report reads benchmark
+ * numbers from here, never from model output (plan §1.4).
  */
-export function benchmarkReportFacts(rows: unknown): string | null {
-  const parsed = z.array(benchmarkRow).max(30).safeParse(rows);
+export function benchmarkReportFacts(table: unknown): { serialized: string | null; hash: string } {
+  const parsed = z.object({ rows: z.array(benchmarkRow).max(30), hash }).strict().safeParse(table);
   if (!parsed.success) throw new Error('REPORT_UNAVAILABLE');
-  return parsed.data.length ? JSON.stringify(parsed.data) : null;
+  return { serialized: parsed.data.rows.length ? JSON.stringify(parsed.data.rows) : null, hash: parsed.data.hash };
 }
 
 /** Structure validation only; never guesses user intent or supplies missing sections. */

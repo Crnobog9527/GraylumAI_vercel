@@ -128,17 +128,18 @@ export async function runCases({db,report}) {
     await db.query('BEGIN');
     try {
       await db.query('SET LOCAL ROLE service_role');
-      assert.equal((await db.query('SELECT research_benchmark_rows($1,$2) v',[f.actor,f.session])).rows[0].v.length,9);
+      assert.equal((await db.query('SELECT research_benchmark_rows($1,$2) v',[f.actor,f.session])).rows[0].v.rows.length,9);
     } finally {await db.query('ROLLBACK');}
     await assert.rejects(db.query(`UPDATE research_benchmarks SET qualified=true,category='imitable',excluded=NULL,followers=5000,
       last_published_at=now(),posts_analyzed=1 WHERE fetch_id=$1`,[got.fetchId]),/check constraint/);
   });
 
   // Report gate: same admission checkpoint as every other report refusal (report_admission_check).
-  const gate = async f => {
+  const gate = async (f,benchmarkHash) => {
     const source = await rpc(db,'report_source',f.actor,f.session,f.project,f.round);
+    if (benchmarkHash===undefined) benchmarkHash = (await rpc(db,'research_benchmark_rows',f.actor,f.session)).hash;
     const context = {reportGeneration:{snapshotHash:source.snapshotHash,projectId:f.project,roundId:f.round,
-      sections:['One','Two'],maxCharacters:12000},role:'skill',maxTurns:1,historyItems:0,network:'deny',tools:[],sources:[],
+      sections:['One','Two'],maxCharacters:12000,...(benchmarkHash?{benchmarkHash}:{})},role:'skill',maxTurns:1,historyItems:0,network:'deny',tools:[],sources:[],
       purposeBudget:{purpose:'report'},revisionId:f.revision,moduleId:f.module};
     return db.query('SELECT report_admission_check($1,$2,$3,$4)',[f.actor,f.session,context,{contractVersion:'bill2.v2'}]);
   };
@@ -158,6 +159,16 @@ export async function runCases({db,report}) {
     await assert.rejects(gate(f),/REPORT_BENCHMARKS_REQUIRED/,'a head reference never counts');
     const e2 = await answer(db,f);
     await fetchAccount(f,e2,'a3',imitable);
+    await gate(f);
+    // The rows frozen into the report must still be current at admission: a fourth row deleted after they were read
+    // (the gate count still passes) is a source conflict, never a report that carries erased data.
+    const e3 = await answer(db,f);
+    await fetchAccount(f,e3,'a4',imitable);
+    const frozen = (await rpc(db,'research_benchmark_rows',f.actor,f.session)).hash;
+    await gate(f,frozen);
+    await erase(db,f,'answer',e3);
+    await assert.rejects(gate(f,frozen),/REPORT_SOURCE_CONFLICT/);
+    await assert.rejects(gate(f,null),/REPORT_SOURCE_CONFLICT/,'a report without the hash is refused');
     await gate(f);
     // Deleting the answer that produced one qualified row drops it below 3: refused again.
     await erase(db,f,'answer',e2);
@@ -213,7 +224,7 @@ export async function runCases({db,report}) {
     assert.equal((await rows(db,'session_id=$1',[f.session])).length,0);
     // The rows the report reads exclude deleted answers and carry no supplier cost.
     await fetchAccount(f,e,'again',imitable);
-    const facts = await rpc(db,'research_benchmark_rows',f.actor,f.session);
+    const facts = (await rpc(db,'research_benchmark_rows',f.actor,f.session)).rows;
     assert.deepEqual(facts.map(x=>[x.account,x.qualified]),[['again',true]]);
     assert.ok(!JSON.stringify(facts).includes('cost'));
   });
