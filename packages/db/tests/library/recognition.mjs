@@ -89,6 +89,13 @@ export async function verifyRecognition(admin, one, two) {
   await admin.query("UPDATE membership_plans SET library_storage_bytes=100000000 WHERE level='free'");
   assert.equal((await save(one, 4, 2, page(4, 'longer'), a, race)).saved, true);
 
+  // A unit that would push the document past the 10 MB segment limit is marked failed, not retried forever.
+  const full = await pdf(a);
+  await admin.query('UPDATE library_upload_reservations SET segment_hold=9999998 WHERE document_id=$1', [full]);
+  assert.deepEqual(await save(one, 2, 1, page(2, 'abc'), a, full), { saved: false, status: 'failed', contentVersion: 1, code: 'LIBRARY_TEXT_LIMIT' });
+  assert.deepEqual(await save(one, 2, 1, page(2, 'abc'), a, full), { saved: false, status: 'failed', contentVersion: 1 });
+  assert.equal(await value(admin, "SELECT count(*)::int v FROM library_document_segments WHERE document_id=$1 AND source='recognized'", [full]), 0);
+
   // A page the browser could not read is marked failed; it cannot be saved afterwards, and completed pages stay complete.
   const failing = await pdf(a);
   assert.deepEqual(await value(one, "SELECT library_recognition_fail($1,$2,'pdf_page',2) v", [a, failing]), { status: 'failed' });
