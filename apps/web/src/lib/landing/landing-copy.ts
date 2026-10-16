@@ -30,9 +30,11 @@ export const HERO_H = {
   audience: '手里有专业，想做知识付费？开了店，想引流获客？想把自媒体做成副业，或者转型全职博主？',
   audienceSummary: '想做自媒体，却没人教过你怎么运营，连第一步都不知道迈向哪？从这里开始。',
   difference: '通用 AI 给你正确的废话，你需要的是一个带你做的教练。',
-  differenceBody:
-    'Graylum AI 先了解你的情况，帮你判断方向；再告诉你每一步做什么、为什么。'
-    + '内容发出去后，它根据真实数据每周和你复盘：哪里做得好、哪里要改、下一步做什么。',
+  /** The weekly review needs publishing and real data: like every other `needs: ['publish']` line, it goes with the flag. */
+  differenceBody: [
+    { text: 'Graylum AI 先了解你的情况，帮你判断方向；再告诉你每一步做什么、为什么。' },
+    { text: '内容发出去后，它根据真实数据每周和你复盘：哪里做得好、哪里要改、下一步做什么。', needs: ['publish'] },
+  ] as readonly GatedText[],
   result: '你只管输出内容，运营交给它。',
   /** Under every "免费和教练聊聊" button on sample H (first screen and the close). */
   ctaNote: '无需绑卡，免费试用',

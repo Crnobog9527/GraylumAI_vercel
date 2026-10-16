@@ -109,6 +109,16 @@ describe('style sample H', () => {
     expect(html).not.toContain('id="h-step-review-tab"');
     expect(html).toContain('id="h-step-chat-tab"');
   });
+
+  it('keeps the weekly-review promise behind the publish flag, like the other needs-publish copy', () => {
+    const review = HERO_H.differenceBody.find(part => part.text.includes('每周和你复盘'));
+    expect(review?.needs).toContain('publish');
+    expect(render(ALL_ON).data.differenceBody).toContain('每周和你复盘');
+    const off = render({ ...ALL_ON, publish: false });
+    expect(off.data.differenceBody).not.toContain('每周和你复盘');
+    expect(off.data.differenceBody).toContain('Graylum AI 先了解你的情况');
+    expect(off.html).not.toContain('每周和你复盘');
+  });
 });
 
 describe('sample H first screen', () => {
