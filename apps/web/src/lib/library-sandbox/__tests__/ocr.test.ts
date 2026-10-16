@@ -23,7 +23,8 @@ describe('detection', () => {
   });
   it('normalises RGB with ImageNet mean and deviation, channel first', () => {
     const t = detectionTensor(new Uint8ClampedArray([255, 0, 128, 255]), 1, 1);
-    expect([...t].map((v) => Number(v.toFixed(3)))).toEqual([2.249, -2.036, 0.426]);
+    // BGR order: B = 128 with the first mean/deviation, then G = 0, then R = 255.
+    expect([...t].map((v) => Number(v.toFixed(3)))).toEqual([0.074, -2.036, 2.64]);
   });
   it('turns connected text pixels into padded boxes in original coordinates and drops specks', () => {
     const size = { width: 64, height: 32, inputWidth: 64, inputHeight: 32, ratio: 0.5 };
@@ -56,6 +57,10 @@ describe('recognition', () => {
     const t = recognitionTensor(new Uint8ClampedArray(48 * 1 * 4).fill(255), 1);
     expect(t.length).toBe(3 * 48);
     expect(t.every((v) => v === 1)).toBe(true);
+    // Red text on white differs only in G and B: those planes must not be flat.
+    const red = recognitionTensor(new Uint8ClampedArray(Array.from({ length: 48 }, (_, i) => (i % 2 ? [255, 255, 255, 255] : [255, 0, 0, 255])).flat()), 1);
+    expect(new Set(red.subarray(0, 48)).size).toBe(2);
+    expect(new Set(red.subarray(96, 144)).size).toBe(1);
   });
 });
 

@@ -38,12 +38,12 @@ export function detectionSize(width: number, height: number): DetectionSize {
   return { width: w, height: h, inputWidth: Math.ceil(w / 32) * 32, inputHeight: Math.ceil(h / 32) * 32, ratio };
 }
 
-/** CHW float tensor from RGBA pixels of the padded input canvas. */
+/** CHW float tensor from RGBA pixels of the padded input canvas, BGR channel order as in the official inference.yml. */
 export function detectionTensor(rgba: Uint8ClampedArray, width: number, height: number): Float32Array {
   const size = width * height;
   const tensor = new Float32Array(3 * size);
   for (let i = 0, p = 0; i < size; i++, p += 4) {
-    for (let c = 0; c < 3; c++) tensor[c * size + i] = (rgba[p + c]! / 255 - MEAN[c]!) / STD[c]!;
+    for (let c = 0; c < 3; c++) tensor[c * size + i] = (rgba[p + 2 - c]! / 255 - MEAN[c]!) / STD[c]!;
   }
   return tensor;
 }

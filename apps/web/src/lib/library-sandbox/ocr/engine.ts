@@ -35,13 +35,16 @@ export async function createOcrEngine(parts: OcrModelParts) {
   const rec = await ort.InferenceSession.create(new Uint8Array(copy(parts.rec)), options);
   const dictionary = new TextDecoder('utf-8', { fatal: true }).decode(parts.dict).split('\n');
 
-  async function run(session: ort.InferenceSession, data: Float32Array, dims: number[]) {
+  /** Runs a model and hands its first output to `read`; every input and output tensor is released afterwards. */
+  async function run<T>(session: ort.InferenceSession, data: Float32Array, dims: number[], read: (output: ort.Tensor) => T): Promise<T> {
     const input = new ort.Tensor('float32', data, dims);
+    let outputs: ort.InferenceSession.OnnxValueMapType | undefined;
     try {
-      const output = await session.run({ [session.inputNames[0]!]: input });
-      return output[session.outputNames[0]!]!;
+      outputs = await session.run({ [session.inputNames[0]!]: input });
+      return read(outputs[session.outputNames[0]!] as ort.Tensor);
     } finally {
       input.dispose();
+      for (const value of Object.values(outputs ?? {})) (value as ort.Tensor).dispose();
     }
   }
 
@@ -51,8 +54,8 @@ export async function createOcrEngine(parts: OcrModelParts) {
     const ctx = context(padded);
     ctx.drawImage(canvas, 0, 0, canvas.width, canvas.height, 0, 0, size.width, size.height);
     const rgba = ctx.getImageData(0, 0, size.inputWidth, size.inputHeight).data;
-    const probability = await run(det, detectionTensor(rgba, size.inputWidth, size.inputHeight), [1, 3, size.inputHeight, size.inputWidth]);
-    return detectionBoxes(probability.data as Float32Array, size, canvas.width, canvas.height);
+    return run(det, detectionTensor(rgba, size.inputWidth, size.inputHeight), [1, 3, size.inputHeight, size.inputWidth],
+      (probability) => detectionBoxes(probability.data as Float32Array, size, canvas.width, canvas.height));
   }
 
   async function read(source: OffscreenCanvas, box: Box) {
@@ -68,10 +71,11 @@ export async function createOcrEngine(parts: OcrModelParts) {
       ctx.rotate(-Math.PI / 2);
     } else ctx.scale(width / w, RECOGNITION_HEIGHT / h);
     ctx.drawImage(source, box.x, box.y, box.width, box.height, 0, 0, box.width, box.height);
-    const scores = await run(rec, recognitionTensor(ctx.getImageData(0, 0, width, RECOGNITION_HEIGHT).data, width),
-      [1, 3, RECOGNITION_HEIGHT, width]);
-    const [, steps, classes] = scores.dims as number[];
-    return decodeCtc(scores.data as Float32Array, steps!, classes!, dictionary);
+    return run(rec, recognitionTensor(ctx.getImageData(0, 0, width, RECOGNITION_HEIGHT).data, width), [1, 3, RECOGNITION_HEIGHT, width],
+      (scores) => {
+        const [, steps, classes] = scores.dims as number[];
+        return decodeCtc(scores.data as Float32Array, steps!, classes!, dictionary);
+      });
   }
 
   async function pass(canvas: OffscreenCanvas) {
