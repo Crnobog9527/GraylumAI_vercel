@@ -77,15 +77,32 @@ describe('research user API', () => {
     const client = db([{ callId: id, toolName: 'web_search', args: { query: 'cats' },
       source: 'tool_usage', credits: '0.123456789012345678', vendor: 'private', supplierCost: '99' }]);
     expect(await researchToolCharges(client, actor, other)).toEqual({ items: [{ callId: id,
-      toolName: 'web_search', args: { query: 'cats' }, source: 'tool_usage', credits: '0.123456789012345678' }] });
+      toolName: 'web_search', args: { query: 'cats' }, query: null, platform: null, dataKind: null,
+      source: 'tool_usage', credits: '0.123456789012345678' }] });
     expect(client.rpc).toHaveBeenCalledWith('research_user_tool_charges', { a: actor, p_transaction: other });
   });
   it('does not fabricate old metadata or leak extra args', async () => {
     const client = db([{ callId: id, toolName: null, args: null, source: null, credits: null },
       { callId: other, toolName: 'web_search', args: { query: 'cats', vendor: 'private' }, source: 'tool_unknown', credits: '0' }]);
     const result = await researchToolCharges(client, actor, id);
-    expect(result.items[0]).toEqual({ callId: id, toolName: null, args: null, source: null, credits: null });
+    expect(result.items[0]).toEqual({ callId: id, toolName: null, args: null, query: null, platform: null, dataKind: null,
+      source: null, credits: null });
     expect(result.items[1].args).toBeNull();
+  });
+  it('RT-3b PR-2: returns each subcall\'s own query, platform and dataKind; unknown values become null', async () => {
+    const charges = db([
+      { callId: id, toolName: 'benchmark_fetch', args: null, query: 'alice', platform: 'tiktok', dataKind: 'account_posts',
+        source: 'tool_usage', credits: '1' },
+      { callId: other, toolName: 'web_search', args: null, query: 'x'.repeat(5000), platform: 'myspace', dataKind: 'dump',
+        source: 'tool_usage', credits: '1' }]);
+    const items = (await researchToolCharges(charges, actor, id)).items;
+    expect(items[0]).toMatchObject({ query: 'alice', platform: 'tiktok', dataKind: 'account_posts' });
+    expect(items[1]).toMatchObject({ query: null, platform: null, dataKind: null });
+    const row = { operationId: id, toolName: 'web_fetch', args: { url: 'https://example.com' }, state: 'succeeded',
+      query: 'https://example.com', platform: 'web', dataKind: 'web_fetch', fetchedAt: null, itemCount: 1, truncated: false,
+      sources: [], sessionId: other, sessionTitle: null, createdAt: '2026-10-15T00:00:00Z' };
+    const evidence = await researchEvidence(db([row]), actor, { limit: 20 });
+    expect(evidence.items[0]).toMatchObject({ query: 'https://example.com', platform: 'web', dataKind: 'web_fetch' });
   });
   it('paginates by time plus id and filters unsafe public links', async () => {
     const row = { operationId: id, toolName: 'web_search', args: { query: 'cats' }, state: 'succeeded',

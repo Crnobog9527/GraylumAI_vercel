@@ -66,6 +66,7 @@ export function researchRuntimeTools(ctx: ResearchToolContext): RuntimeTool[] {
         if (prior && prior.identityHash !== requestIdentity(request)) {
           return toolEnvelope({ status: 'unavailable', reason: 'OPERATION_IDENTITY_MISMATCH' });
         }
+        if (prior?.state === 'cancelled') return toolEnvelope({ status: 'unavailable', reason: 'NOT_DISPATCHED' });
         if (prior && prior.state !== 'prepared') {
           const saved = savedWebResult.safeParse(prior.result);
           if (!['succeeded', 'failed', 'unknown'].includes(prior.state) || !saved.success) {
