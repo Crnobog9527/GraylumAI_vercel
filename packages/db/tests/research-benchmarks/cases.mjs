@@ -42,19 +42,21 @@ const stableId = (...parts) => {
 const post = (days,views,extra={}) => ({publishedAt:new Date(Date.now()-days*DAY).toISOString(),views,likes:10,comments:5,shares:1,...extra});
 
 export async function runCases({db,Client,connectionString,report}) {
-  const {accountMetrics,classifyAccount,qualifyFetchedAccount} = await benchmarkCode();
+  const {accountMetrics,classifyAccount,qualifyFetchedAccount,suppliedWholeHistory} = await benchmarkCode();
   /** Supplier evidence → benchmark_fetch's own computation → the fetch cache, exactly as the tool does it. */
   async function fetchAccount(f,e,account,{followers,posts,tamper,refresh,profileOp,deferFinish,complete=true}) {
     // As benchmark_fetch: claim and mark sent, then one subcall per kind under its stable operation id.
     const claim = await rpc(db,'research_account_fetch_claim',f.actor,f.session,e,'tiktok',account,refresh??null);
     assert.equal(claim.claimed,true);
     assert.equal(await rpc(db,'research_account_fetch_dispatch',f.actor,claim.fetchId,claim.attempt),true);
-    const profile = profileOp ?? await operation(db,f,e,[followers===null?{}:{followers}],
-      stableId(claim.fetchId,claim.attempt,'account_profile'));
+    // The profile's own post count decides "whole history", as in production (complete: it reports exactly these).
+    const fields = {...(followers===null?{}:{followers}),postsCount:complete?posts.length:posts.length+50};
+    const profile = profileOp ?? await operation(db,f,e,[fields],stableId(claim.fetchId,claim.attempt,'account_profile'));
     const postOp = await operation(db,f,e,posts,stableId(claim.fetchId,claim.attempt,'account_posts'));
     const now = new Date();
-    const metrics = accountMetrics({profile:{ref:profile+'#1',fields:followers===null?{}:{followers},missing:[]},
-      posts:posts.map((fields,i)=>({ref:`${postOp}#${i+1}`,fields,missing:[]})),complete},now);
+    const items = posts.map((fields,i)=>({ref:`${postOp}#${i+1}`,fields,missing:[]}));
+    const profileItem = {ref:profile+'#1',fields,missing:[]};
+    const metrics = accountMetrics({profile:profileItem,posts:items,complete:suppliedWholeHistory(profileItem,items)},now);
     let evidence = {platform:'tiktok',account,metrics,fetchedAt:now.toISOString(),
       classification:qualifyFetchedAccount(metrics,classifyAccount(metrics,growth,now))};
     if (tamper) evidence = tamper(structuredClone(evidence));
@@ -104,11 +106,15 @@ export async function runCases({db,Client,connectionString,report}) {
     const full = await fetchAccount(f,e,'twenty',{followers:50000,posts:twenty,complete:false});
     const forged = await fetchAccount(f,e,'forgedshort',{followers:50000,posts:few,complete:false,
       tamper:x=>{x.classification={category:'imitable',qualified:true,excluded:null};return x;}});
+    // Claiming the whole history while the profile reports more posts is refused too.
+    const claimed = await fetchAccount(f,e,'claimedwhole',{followers:50000,posts:few,complete:false,
+      tamper:x=>{x.metrics.wholeHistory=true;x.classification={category:'imitable',qualified:true,excluded:null};return x;}});
     const get = async x => (await rows(db,'fetch_id=$1',[x.fetchId]))[0];
     assert.deepEqual([(await get(short)).excluded,(await get(short)).qualified],['TOO_FEW_POSTS',false]);
     assert.deepEqual([(await get(whole)).qualified,(await get(whole)).whole_history],[true,true]);
     assert.deepEqual([(await get(full)).qualified,(await get(full)).posts_analyzed],[true,20]);
     assert.deepEqual([(await get(forged)).excluded,(await get(forged)).qualified],['EVIDENCE_UNVERIFIED',false]);
+    assert.deepEqual([(await get(claimed)).excluded,(await get(claimed)).qualified],['EVIDENCE_UNVERIFIED',false]);
     assert.equal(await qualified(db,f),2);
     await assert.rejects(db.query(`UPDATE research_benchmarks SET whole_history=false WHERE fetch_id=$1`,[whole.fetchId]),/check constraint/);
   });

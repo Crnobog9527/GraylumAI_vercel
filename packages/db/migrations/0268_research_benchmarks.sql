@@ -116,6 +116,12 @@ BEGIN
   -- Every cited operation is a subcall of this very fetch attempt (not another account fetched in the same session).
   ok:=ok AND ops<@ARRAY(SELECT research_benchmark_operation_id(f.id,f.attempt,k)
     FROM unnest(ARRAY['account_profile','account_posts','account_relation','post_detail']) k);
+  -- A whole-history claim (the new-account exception to the 20-post minimum) needs this fetch's own profile to report
+  -- no more posts than were analyzed (suppliedWholeHistory in research/benchmark/metrics.ts).
+  IF ok AND (m->'wholeHistory')::boolean THEN
+    item:=research_benchmark_item(f.actor_id,f.session_id,research_benchmark_operation_id(f.id,f.attempt,'account_profile')::text||'#1');
+    ok:=jsonb_typeof(item->'postsCount')='number' AND (m->>'postsAnalyzed')::numeric>=(item->>'postsCount')::numeric;
+  END IF;
   -- Single-item numbers equal the item field they name.
   IF ok AND m->'followers'->'value'<>'null'::jsonb THEN
     item:=research_benchmark_item(f.actor_id,f.session_id,m->'followers'->'refs'->>0);

@@ -49,6 +49,16 @@ export interface AccountMetrics {
   missing: string[];
 }
 
+/**
+ * The fetched posts are the account's whole history when the profile's own post count (`postsCount`, whitelisted by
+ * the TikHub adapter) is no more than the posts returned. No count, no claim: an unknown history is never "whole".
+ * 0268 re-checks this against the same profile item before a row may use it.
+ */
+export function suppliedWholeHistory(profile: EvidenceItem | undefined, posts: EvidenceItem[]): boolean {
+  const total = profile ? num(profile, 'postsCount') : null;
+  return total !== null && posts.length >= total;
+}
+
 const num = (item: EvidenceItem, field: string): number | null => {
   const value = item.fields[field];
   return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : null;
