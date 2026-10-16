@@ -30,16 +30,18 @@ const encoder = new TextEncoder();
 export function prepareWord(
   extraction: { text: string; headings: WordHeading[]; images?: Array<{ offset: number }> },
 ): { ok: true; prepared: PreparedWord } | { ok: false; message: string } {
-  if (!extraction.text.trim()) return { ok: false, message: '这个 Word 文件里没有可以读取的文字。' };
-  const bytes = encoder.encode(extraction.text);
+  const recognise = isLibraryScanRecognitionEnabled() && !!extraction.images?.length;
+  // A Word file that is only images (a typical scanned Word) uploads empty text; its images are recognised later.
+  const imagesOnly = !extraction.text.trim();
+  if (imagesOnly && !recognise) return { ok: false, message: '这个 Word 文件里没有可以读取的文字。' };
+  const bytes = encoder.encode(imagesOnly ? '' : extraction.text);
   if (bytes.length > LIBRARY_MAX_BYTES) return { ok: false, message: '文字内容太多，超出了可以处理的上限，请拆分后再上传。' };
-  const headings = extraction.headings
+  const headings = imagesOnly ? [] : extraction.headings
     .filter((heading) => encoder.encode(heading.text).length <= HEADING_MAX_BYTES)
     .slice(0, HEADING_MAX_COUNT)
     .map(({ offset, level, text }) => ({ offset, level, text }));
   // Images become recognition units only when browser recognition is built in (the server switch decides the rest).
-  const images = isLibraryScanRecognitionEnabled() && extraction.images?.length
-    ? extraction.images.map(({ offset }) => ({ offset })) : undefined;
+  const images = recognise ? extraction.images!.map(({ offset }) => ({ offset: imagesOnly ? 0 : offset })) : undefined;
   return { ok: true, prepared: { text: new Blob([bytes], { type: 'text/plain' }), headings, ...(images ? { images } : {}) } };
 }
 

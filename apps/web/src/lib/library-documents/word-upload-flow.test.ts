@@ -116,6 +116,10 @@ describe('prepareWord image offsets (LIB-2d)', () => {
     try {
       const result = prepareWord(extraction);
       expect(result.ok && result.prepared.images).toEqual([{ offset: 2 }]);
+      // Only images (blank text): uploaded as empty text, every image at the start.
+      const pictures = prepareWord({ ...extraction, text: ' \n ' });
+      expect(pictures.ok && pictures.prepared.images).toEqual([{ offset: 0 }]);
+      expect(pictures.ok && pictures.prepared.text.size).toBe(0);
     } finally {
       vi.unstubAllEnvs();
     }
