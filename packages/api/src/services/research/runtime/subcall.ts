@@ -47,9 +47,10 @@ export interface SubcallContext {
   policies: readonly ToolCallPolicy[];
   billing: ToolSubcallBilling;
   evidence: EvidencePort;
-  nextSequence: () => number;
+  /** The run's next free BILL2 sequence; model calls and subcalls share one contiguous sequence (0162). */
+  nextSequence: () => number | Promise<number>;
   phase: string;
-  runtimeEpoch?: string;
+  runtimeEpoch?: number;
   secrets: SecretReader;
   rateCounter: VendorCounter;
   vendors?: VendorCalls;
@@ -109,8 +110,8 @@ export async function runSubcall(context: SubcallContext, request: SupplierReque
   const identity = requestIdentity(request);
   let claim;
   try {
-    claim = await context.billing.claim(context.nextSequence(), toolClaimPayload(policy, {
-      phase: context.phase, requestHash: identity, ...(context.runtimeEpoch ? { runtimeEpoch: context.runtimeEpoch } : {}),
+    claim = await context.billing.claim(await context.nextSequence(), toolClaimPayload(policy, {
+      phase: context.phase, requestHash: identity, ...(context.runtimeEpoch !== undefined ? { runtimeEpoch: context.runtimeEpoch } : {}),
     }));
   } catch (error) {
     if (error instanceof BillingClaimRejection) return { sent: false, stop: `CLAIM_${error.reason}`, budget: false };

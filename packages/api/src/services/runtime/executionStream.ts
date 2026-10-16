@@ -156,6 +156,9 @@ export type ExecutionStreamEvent=RuntimeProgress|NativeTextDelta|{type:'result';
  * reply length. The first text is sent at once; the final text always
  * precedes the result. */
 export const TEXT_EVENT_INTERVAL_MS=100;
+/** RT-3b PR-3: research events are discrete and kept in order (a turn sends at most ~60); beyond this they are
+ * dropped from display only. Cards and evidence stay readable through the research API. */
+export const RESEARCH_EVENT_LIMIT=128;
 
 /** Bounded ephemeral delivery of one execution's progress. SQL remains the
  * execution and billing authority. Disconnect discards display progress, not
@@ -168,19 +171,22 @@ export async function* streamOriginalExecution(run:(onProgress:(event:RuntimePro
  let nativePending=false;
  let textEvent:ExecutionStreamEvent|undefined,phaseEvent:ExecutionStreamEvent|undefined,resultEvent:ExecutionStreamEvent|undefined;
  let cardEvent:ExecutionStreamEvent|undefined,cardSeen=false;
+ const researchEvents:ExecutionStreamEvent[]=[];let researchSeen=0;
  let done=false,failure:unknown,wake:()=>void=()=>{},lastText:number|undefined;
  const pending=run(event=>{if(event.type==='text'){
    if(textProtocol&&'delta' in event){transport.push(event);nativePending=true;textEvent=event;}
    else textEvent={type:'text',text:event.text};
   }
-  else if(event.type==='card'){if(!cardSeen){cardSeen=true;cardEvent=event;}}else phaseEvent=event;wake();})
+  else if(event.type==='card'){if(!cardSeen){cardSeen=true;cardEvent=event;}}
+  else if(event.type==='research_call'||event.type==='research_card'){if(researchSeen++<RESEARCH_EVENT_LIMIT)researchEvents.push(event);}
+  else phaseEvent=event;wake();})
   .then(result=>{resultEvent={type:'result',result};},error=>{failure=error;}).finally(()=>{done=true;wake();});
  const idle=(ms?:number)=>new Promise<void>(resolve=>{
   const timer=ms===undefined?undefined:setTimeout(resolve,ms);
   wake=()=>{if(timer!==undefined)clearTimeout(timer);resolve();};
  });
  try{
-  while(!done||textEvent||cardEvent||phaseEvent||resultEvent){
+  while(!done||textEvent||researchEvents.length||cardEvent||phaseEvent||resultEvent){
    if(textEvent){
     const wait=(done&&!nativePending)||lastText===undefined?0:lastText+TEXT_EVENT_INTERVAL_MS-now();
     if(wait>0){await idle(wait);continue;}
@@ -188,6 +194,7 @@ export async function* streamOriginalExecution(run:(onProgress:(event:RuntimePro
     if((event.type==='text'||event.type==='textDelta')&&event.text)timing?.mark('firstPublicText');
     await visible?.();yield event;
    }
+   else if(researchEvents.length){const event=researchEvents.shift()!;await visible?.();yield event;}
    else if(cardEvent){const event=cardEvent;cardEvent=undefined;await visible?.();yield event;}
    else if(phaseEvent){const event=phaseEvent;phaseEvent=undefined;await visible?.();yield event;}
    else if(resultEvent){const event=resultEvent;resultEvent=undefined;await visible?.();yield event;}

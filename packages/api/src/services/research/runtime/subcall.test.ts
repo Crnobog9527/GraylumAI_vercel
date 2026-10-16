@@ -40,7 +40,7 @@ function fixture() {
     tikhub: vi.fn<VendorCalls['tikhub']>(), firecrawl: vi.fn<VendorCalls['firecrawl']>(),
   };
   const context: SubcallContext = {
-    policies: [policy], billing, evidence, nextSequence: vi.fn(() => 1), phase: 'question', runtimeEpoch: '3',
+    policies: [policy], billing, evidence, nextSequence: vi.fn(() => 1), phase: 'question', runtimeEpoch: 3,
     secrets: vi.fn().mockResolvedValue('test-key'), rateCounter: vi.fn().mockResolvedValue(true),
     vendors, newId: vi.fn(() => 'operation-1'), now: () => new Date(result.fetchedAt),
   };
@@ -52,7 +52,7 @@ describe('research subcall safety and accounting', () => {
     const f = fixture();
     expect(await runSubcall(f.context, request)).toEqual({ sent: true, result, operationId: 'operation-1', callId: 'call-1' });
     expect(f.billing.claim).toHaveBeenCalledWith(1, expect.objectContaining({ requestHash: requestIdentity(request),
-      runtimeEpoch: '3', automaticRetry: false, upperUsd: '0.002', phase: 'question' }));
+      runtimeEpoch: 3, automaticRetry: false, upperUsd: '0.002', phase: 'question' }));
     expect(f.evidence.open).toHaveBeenCalledWith('operation-1', requestIdentity(request), 2000);
     expect(f.vendors.parallel).toHaveBeenCalledWith('research', { apiKey: 'test-key', now: f.context.now }, 'fast');
     expect(f.billing.record).toHaveBeenCalledWith('call-1', expect.objectContaining({
