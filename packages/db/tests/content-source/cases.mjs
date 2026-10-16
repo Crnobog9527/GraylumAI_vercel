@@ -1,5 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-// CONTENT-CONVERSATION-DRIVEN A2 (migration MIGRATION): derived-content source checkpoint, availability, D7, saves.
+// CONTENT-CONVERSATION-DRIVEN A2 (migration 0276): derived-content source checkpoint, availability, D7, saves.
 import assert from 'node:assert/strict';
 import {randomUUID} from 'node:crypto';
 import {rpc,fixture,outcome,call,evidence} from '../erasure-b2a/cases.mjs';

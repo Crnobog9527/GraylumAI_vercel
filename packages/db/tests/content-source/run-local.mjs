@@ -1,5 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-// Local-only CONTENT-CONVERSATION-DRIVEN A2 (migration MIGRATION) verification. No database URL,
+// Local-only CONTENT-CONVERSATION-DRIVEN A2 (migration 0276) verification. No database URL,
 // environment secret or remote host is accepted.
 import assert from 'node:assert/strict';
 import {spawnSync} from 'node:child_process';
@@ -26,7 +26,7 @@ const sql=input=>docker(['exec','-i',name,'psql','-X','-qAt','-U','postgres','-d
 const fp=read('packages/db/tests/baseline/fingerprint.sql');
 const objectSql=fp.slice(0,fp.indexOf('-- FINAL'))+'SELECT jsonb_object_agg(k,d ORDER BY k) FROM grouped;';
 const snapshot=()=>JSON.parse(ok(sql(objectSql)));
-const migrationPath='packages/db/migrations/0269_content_derived_source.sql';
+const migrationPath='packages/db/migrations/0276_content_derived_source.sql';
 const report={build:null,checks:[],failed:null};
 let client;
 try {
@@ -50,8 +50,8 @@ try {
  client=new Client({connectionString:`postgres://postgres@${address}/a2`});await client.connect();
  const finalCatalog=snapshot();
  ok(sql(read(migrationPath)));
- assert.deepEqual(snapshot(),finalCatalog,'repeat MIGRATION preserves the complete final catalog');
- report.checks.push('MIGRATION reapplication preserves the full catalog');
+ assert.deepEqual(snapshot(),finalCatalog,'repeat 0276 preserves the complete final catalog');
+ report.checks.push('0276 reapplication preserves the full catalog');
  for(const fixture of ['packages/db/tests/erasure-b2a/fixture.sql','packages/db/tests/content-erasure/fixture.sql',
   'packages/db/tests/content-source/fixture.sql'])ok(sql(read(fixture)));
  const helpers=await runCases(client,report);
