@@ -10,7 +10,7 @@ import {NativeProgressProjection} from './nativeProgress';
 import {visibleText,nativeMetadata,prepareNativePrimary,nativeFrameProjection,
  completedOutput,finalizeNativeSummary} from './nativeOutput';
 import {paygOwnerDatabase} from './paygOwner';
-import {executorRpc,historyGuard,terminalReplyGuard,recoverExecutorFinancial,
+import {executorRpc,historyGuard,terminalReplyGuard,recoverExecutorFinancial,observedContext,
  preflightCodes,platformFailureReason,hash,progressEmitter,diagnosticCode,failBeforeDispatch,cancelWithCode,type RuntimeExecutorOptions} from './executorRpc';
 import {fitNativeRequestOutput,runtimePaygCall, type ResumeInput, type PaygWait, type PaygPosition} from './paygRuntime';
 import {beginPaygExecution, type RuntimeExecution} from './paygResume';
@@ -79,7 +79,7 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
    const recovered=await ownerRpc<{state:'completed'|'cost_pending'}>('runtime_execution',{...args,p_action:'complete',p_result:execution.result});
    return {...completedOutput(execution.result,execution.context,onProgress),state:recovered.state};
   }
-  const context=runtimeContext.parse(execution.context);
+  const context=observedContext(options,runtimeContext.parse(execution.context));
   if(!validReasoningFormat(context))throw new Error('RUNTIME_CONTEXT_INVALID');
   const agentTurn=context.providerRequestFormat===AGENT_TURN_REQUEST_FORMAT;
   const fiveFields=Boolean(context.questionContract);

@@ -51,6 +51,7 @@ import {runAutomaticFinancialRecovery} from './automaticRecovery';
 import {readPositioningGate,judgePositioning,windowBoundKey,refusePositioning,POSITIONING_REFUSAL_CAP,
  type PositioningGatePolicy} from './positioningGate';
 import {POSITIONING_FALLBACK,POSITIONING_FALLBACK_INSTRUCTIONS} from './positioningFallback';
+import {admitLibraryReferences,libraryReferenceInput,libraryReserveBytes,readSourceSlots,throwLibraryRefusal} from './libraryAdmission';
 
 const uuid=z.string().uuid();
 export const runtimeMaterialInput=z.object({sessionId:uuid,requestId:uuid,expectedRevision:z.number().int().nonnegative(),
@@ -61,7 +62,8 @@ export const runtimeAdmission=z.object({sessionId:uuid,requestId:uuid,input:z.st
   z.object({kind:z.literal('auto'),modelId:uuid}).strict(),
   z.object({kind:z.literal('skill'),moduleId:uuid,revisionId:uuid,task:z.string().max(128).optional()}).strict(),
   z.object({kind:z.literal('organizer')}).strict(),
- ]),sources:z.array(z.object({projectId:uuid,roundId:uuid,sourceVersionId:uuid,hash:z.string().regex(/^[a-f0-9]{64}$/)}).strict()).max(1).default([]),network:z.enum(['deny','allow','require_latest']).default('allow')}).strict();
+ ]),sources:z.array(z.object({projectId:uuid,roundId:uuid,sourceVersionId:uuid,hash:z.string().regex(/^[a-f0-9]{64}$/)}).strict()).max(1).default([]),
+ references:libraryReferenceInput,network:z.enum(['deny','allow','require_latest']).default('allow')}).strict();
 /** Deployment policy is server configuration, never request input.
  * Real admission requires the separately loaded, enabled Staging window. */
 export type LocalRuntimePolicy={
@@ -112,6 +114,7 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
  async function query(name:string,args:Record<string,unknown>){
   const r=await admin.rpc(name,{...args,p_actor_id:await actor()});
   if(r.error)throwIfContentBindingRefused(r.error);
+  if(name==='runtime_admit')throwLibraryRefusal(r.error);
   if(name==='runtime_admit'&&r.error&&['P0001','PT400'].includes(r.error.code)&&
    (['400: insufficient credits','insufficient credits'].includes(r.error.message)||
     /^积分不足: 需要 [0-9]+, 当前 [0-9]+$/.test(r.error.message)))
@@ -133,6 +136,7 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
   revokeMaterial(sessionId:string,revision:number){return query('runtime_material',{p_session_id:uuid.parse(sessionId),p_action:'revoke',p_expected_revision:z.number().int().positive().parse(revision)});},
   prepare:(value:unknown)=>timedAdmission(async()=>{
    const request=runtimeAdmission.parse(value);
+   if(!request.references?.length)delete request.references;// old clients' stored request stays byte-identical
    const input=policy.resolvedInput === undefined ? request : {...request,input:policy.resolvedInput};
    const actorId=await actor();
    if(policy.real&&(input.network!=='deny'||policy.searchEnabled))throw new Error('RUNTIME_REAL_SEARCH_DISABLED');
@@ -142,6 +146,8 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
    const settings=readAdmissionSettings(admin);
    const replay=await query('runtime_admission_replay',{p_request_id:input.requestId,p_request:request});
    if(replay)return replay;
+   // LIB-4b: shape and switch before any paid work; runtime_admit checks and freezes each document (0262).
+   const libraryReferences=await admitLibraryReferences(admin,request,policy);
    // POSITIONING-GATE: the positioning read overlaps the checks below (one round trip); OPC turns, reports and
    // organizing are never gated, so they never read it.
    const positioning=policy.positioningGate&&!policy.opcTurnToken&&!policy.reportGeneration&&input.selection.kind!=='organizer'
@@ -289,7 +295,8 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
    const inputLimit=inputCapacity(row.data,maxOutputTokens,inputBytes);
    const cardBytes=hostTurnContext?.cardContract?groundedCardToolBytes():askQuestionToolBytes(true);
    // One read slot: the continuation reserve is the larger of the two possible results.
-   const admissionToolBytes=(file:boolean,history=false)=>(mentorStream&&!stepSummary?cardBytes:policy.searchEnabled?2048:0)+
+   let libraryBytes=0;
+   const admissionToolBytes=(file:boolean,history=false)=>libraryBytes+(mentorStream&&!stepSummary?cardBytes:policy.searchEnabled?2048:0)+
     (file?skillFileToolBytes()+(history?mentorHistoryToolBytes()+Math.max(skillFileReserve,MENTOR_HISTORY_RESERVE_BYTES):skillFileReserve):0)+
     (historySelection?.markerReserveBytes??(promptCache?PROMPT_CACHE_OVERHEAD_BYTES:0));
    const requireCapacity=(text:string,file:boolean,content=currentInput,history=false)=>selectRuntimeHistory([], [{role:'user',content}],
@@ -330,21 +337,22 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
     workspaceContext=!capability.error&&capability.data===true;
    }
    // All dropped: no paid match; the turn is admitted exactly as an ordinary selection.
-   const sourceTools=[...(searchAllowed?['search']:[]),...(input.sources.length||workspaceContext?['read_source']:[])];
+   const sourceTools=[...(searchAllowed?['search']:[]),...(input.sources.length||workspaceContext||libraryReferences.length?['read_source']:[])];
+   libraryBytes=libraryReserveBytes(libraryReferences,sourceTools,workspaceContext);
    // The executor sizes a selected Skill with these exact tool descriptions plus the same cache/marker overhead.
    if(candidates.length)candidates=await fittingCandidates(candidates,candidate=>activateRuntimeCandidate(user,admin,candidate,brandIdentity),
-    {input:currentInput,inputBytes,toolBytes:sourceToolBytes(sourceTools,workspaceContext)+
+    {input:currentInput,inputBytes,toolBytes:sourceToolBytes(sourceTools,workspaceContext)+libraryBytes+
      (historySelection?.markerReserveBytes??(promptCache?PROMPT_CACHE_OVERHEAD_BYTES:0)),
-     instructions:skill=>withPrimaryAddenda(skill,{workspaceContext,network:input.network,
+     instructions:skill=>withPrimaryAddenda(skill,{workspaceContext,network:input.network,libraryReferences,
       ...(positioningFallback?{positioningGate:POSITIONING_FALLBACK}:{})})});
    const primaryTurns=maxCalls-(attachedOrganizer?1:0)-(searchAllowed?1:0)-(candidates.length?1:0);
-   if(primaryTurns<(searchAllowed||input.sources.length||workspaceContext?2:1))throw new Error('RUNTIME_CALL_BUDGET');
+   if(primaryTurns<(searchAllowed||input.sources.length||workspaceContext||libraryReferences.length?2:1))throw new Error('RUNTIME_CALL_BUDGET');
    // Splitting only helps when a modest message still fits; otherwise this is a configuration failure (500).
    const refuseLongInput=(check:(text:string)=>void)=>{
     try{check(input.input);}
     catch(error){
      if(!(error instanceof Error)||error.message!=='RUNTIME_REQUIRED_CONTEXT_EXCEEDS_CAPACITY')throw error;
-     check('x'.repeat(SPLIT_INPUT_BYTES));
+     try{check('x'.repeat(SPLIT_INPUT_BYTES));}catch(cause){if(libraryBytes)throw new StagingAccessError('LIB_REFERENCE_CAPACITY');throw cause;}
      throw new StagingAccessError('RUNTIME_INPUT_TOO_LONG');
     }
    };
@@ -384,13 +392,13 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
     modelId,...(attachedOrganizer?{attachedOrganizer}:{}),maxOutputTokens,maxTurns:primaryTurns,historyItems,network:input.network,
     // Freeze the purpose ceiling; each selected model keeps its own call-policy limit.
     ...(budgets||policy.reportGeneration?{purposeBudget:{purpose,inputBytes,historyItems}}:{}),
-    ...(skillFile?{skillFile,skillFileReserve}:{}),
+    ...(skillFile?{skillFile,skillFileReserve}:{}),...(libraryReferences.length?{libraryReferences}:{}),
     ...(historyRead?{historyRead:{version:MENTOR_HISTORY_VERSION,reserve:MENTOR_HISTORY_RESERVE_BYTES}}:{}),
     tools:mentorStream?(opening?[]:[...(stepSummary?[]:[ASK_QUESTION_TOOL]),...(skillFile?['read_skill_file']:[]),
      ...(historyRead?[READ_HISTORY_TOOL]:[])]):
      sourceTools,
     maxToolCalls:mentorStream?(opening||stepSummary&&!skillFile?0:1):
-     (searchAllowed?1:0)+(workspaceContext?Math.min(2,primaryTurns-1):input.sources.length),
+     (searchAllowed?1:0)+readSourceSlots(libraryReferences,primaryTurns,workspaceContext?Math.min(2,primaryTurns-1):input.sources.length),
     request,...(policy.answeredCard?{answeredCard:policy.answeredCard}:{}),...(revisionId?{moduleId,skillId,revisionId}:{}),sources:input.sources};
    // CHAT-NATIVE-OUTPUT: free chat and a chosen Skill stream their plain reply; the format and billing profile stay as they were.
    const context:typeof frozen&{textStream?:typeof PLAIN_TEXT_STREAM}=plainTextStreamAllowed(frozen)?{...frozen,textStream:PLAIN_TEXT_STREAM}:frozen;

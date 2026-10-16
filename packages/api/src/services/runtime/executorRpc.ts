@@ -21,7 +21,13 @@ import type {SessionRpc} from './session';
  */
 export type RuntimeExecutorOptions={budget?:RuntimeBudget;database:SessionRpc;actor:()=>Promise<string>;
  resumePricing?:(policies:FrozenRun['callPolicy'])=>Promise<void>;
- callGate:RuntimeCallGate;endpoint?:string;adapter?:BillingTransport;activateSkill?:(candidate:MatchCandidate)=>Promise<string>};
+ callGate:RuntimeCallGate;endpoint?:string;adapter?:BillingTransport;activateSkill?:(candidate:MatchCandidate)=>Promise<string>;
+ /** LIB-4b: told the frozen context of an execution about to run, before any progress (libraryVisibility.ts). */
+ onContext?:(context:{libraryReferences?:unknown[]})=>void};
+/** Report the parsed context to the host's visibility fence and return it unchanged. */
+export function observedContext<T extends {libraryReferences?:unknown[]}>(options:RuntimeExecutorOptions,context:T):T{
+ options.onContext?.(context);return context;
+}
 export function executorRpc(options:{database:SessionRpc;actor:()=>Promise<string>}) {
  return async function rpc<T>(name:string,args:Record<string,unknown>,database=options.database):Promise<T>{
   const result=await database.rpc(name,{...args,p_actor_id:z.string().uuid().parse(await options.actor())});
