@@ -42,7 +42,7 @@ INSERT INTO guard_results SELECT 'BILL2 pre-deduct (service_role) + settle refun
   p.credits = b.credits + 15 FROM public.profiles p, guard_balance b
   WHERE p.id = '00000000-0000-4000-8000-00000000c001';
 
--- 4. Invitation rewards were retired (0264): no reward RPC remains, and service_role can no longer
+-- 4. Invitation rewards were retired (0266): no reward RPC remains, and service_role can no longer
 -- write the archived invitation tables, so no path can credit an inviter or invitee.
 CREATE TEMP TABLE invitation_write_denied(ok boolean);
 GRANT INSERT ON invitation_write_denied TO service_role;

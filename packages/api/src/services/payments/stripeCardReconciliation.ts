@@ -6,6 +6,8 @@ import { findStripeReference } from './stripeReferences';
 import { recoverMethodCheckout } from './walletWebhook';
 import { handleCardSubscriptionInvoice } from './cardSubscriptionWebhook';
 import { handleCardRefund } from './cardRefundWebhook';
+import { cardStripeSubscription } from './cardUpgrade';
+import { stopRenewalAfterReview } from './cardSubscriptionStop';
 import type { StripeScope } from './purchaseFacts';
 
 const id = (value: string | { id: string } | null | undefined) => typeof value === 'string' ? value : value?.id ?? null;
@@ -14,9 +16,9 @@ const DAY = 86400;
 
 export type StripeCardFinding = {
   kind: 'paid_not_delivered' | 'paid_in_review' | 'renewal_not_recorded' | 'refund_not_recorded' | 'tax_not_recorded'
-    | 'repair_failed'
+    | 'repair_failed' | 'stop_unconfirmed'
     | 'scan_incomplete' | 'scan_failed';
-  object?: 'checkout' | 'invoice' | 'refund'; externalId?: string; orderId?: string; code?: string;
+  object?: 'checkout' | 'invoice' | 'refund' | 'subscription'; externalId?: string; orderId?: string; code?: string;
 };
 type Listed<T> = { data: T[]; has_more: boolean };
 type Options = { expectedMode: StripeScope['mode']; now?: Date; days?: number; maxPages?: number; budgetMs?: number;
@@ -79,6 +81,8 @@ export async function reconcileStripeCardPayments(db: SupabaseClient, stripe: St
       return;
     }
     if (before.method_review_reason) {
+      // Replayed so an undelivered card subscription is stopped at Stripe even if its webhook gave up (idempotent).
+      await recoverMethodCheckout(db, stripe, session.id, 'checkout.session.completed');
       findings.push({ kind: 'paid_in_review', object: 'checkout', externalId: session.id, orderId });
       return;
     }
@@ -129,6 +133,48 @@ export async function reconcileStripeCardPayments(db: SupabaseClient, stripe: St
       findings.push({ kind: 'refund_not_recorded', object: 'refund', externalId: object.id });
     }
   });
+
+  // 4. Card subscriptions we asked to stop (the Pro a delivered upgrade replaced, a renewal kept for review) that still
+  //    renew at Stripe: the stop is retried here until Stripe confirms it, so a stop whose webhook retries ran out can
+  //    never renew and charge again unnoticed. Whatever still fails is a finding (alerted).
+  // Read in id order, a page at a time past the last row seen (a stop that succeeds leaves the list, so offsets would
+  // skip rows): every pending stop is retried on every run, within the time budget, never only the first page.
+  let after = '';
+  for (let page = 0; page < maxPages; page++) {
+    let query = db.from('user_subscriptions').select('id').eq('payment_channel', 'stripe').is('stripe_subscription_id', null)
+      .eq('merchant_namespace', scope.merchant).eq('payment_mode', scope.mode).not('method_cancel_requested_at', 'is', null)
+      .neq('cancel_at_period_end', 'true').in('status', ['active', 'past_due', 'trialing']);
+    if (after) query = query.gt('id', after);
+    const pending = await query.order('id').limit(100);
+    if (pending.error || !Array.isArray(pending.data)) {
+      complete = false;
+      findings.push({ kind: 'scan_failed', object: 'subscription', code: 'PAY_WAFFO_PERSISTENCE_UNAVAILABLE' });
+      break;
+    }
+    const rows = pending.data as Array<{ id: string }>;
+    for (const row of rows) {
+      if (Date.now() > deadline) {
+        complete = false;
+        findings.push({ kind: 'scan_incomplete', object: 'subscription', code: 'TIME_BUDGET' });
+        return { success: false, skipped: false, complete, repaired, checked, findings };
+      }
+      checked++;
+      try {
+        const stripeId = await cardStripeSubscription(db, scope, row.id);
+        if (!stripeId) throw new Error('PAY_COMMON_MAPPING_READ_FAILED');
+        await stopRenewalAfterReview(db, stripe, scope.merchant, row.id, stripeId);
+        repaired++;
+      } catch (error) {
+        findings.push({ kind: 'stop_unconfirmed', object: 'subscription', externalId: row.id, code: errorCode(error) });
+      }
+    }
+    if (rows.length < 100) break;
+    after = rows[rows.length - 1]!.id;
+    if (page === maxPages - 1) {
+      complete = false;
+      findings.push({ kind: 'scan_incomplete', object: 'subscription', code: 'PENDING_STOPS_OVER_LIMIT' });
+    }
+  }
 
   return { success: findings.length === 0, skipped: false, complete, repaired, checked, findings };
 }

@@ -29,6 +29,8 @@ export const monthlyRefundTermsSchema = z.object({
   paidMinor: amount.positive(),
   basisMinor: amount.positive(),
   feeMinor: amount,
+  // PAY-STRIPE-MP card orders only (0 for a mainland card): the tax charged on top, refunded in full (0253).
+  taxMinor: amount.optional(),
   netMinor: amount.positive(),
   credits: amount.positive().max(2147483647),
   feePermitted: z.enum(['confirmed', 'not_permitted']),
@@ -57,6 +59,7 @@ type Binding = {
   periodEnd: string;
   originalCancelAtPeriodEnd: boolean;
   credits: number;
+  taxMinor?: number;
   feeEvidence: string;
   snapshot: unknown;
 };
@@ -93,7 +96,8 @@ export function prepareMonthlyRefundQuote(policy: RefundPolicyInput, binding: Bi
     paidAt: policy.order.paidAt, submittedAt: policy.ticket.submittedAt, periodEnd: binding.periodEnd,
     originalCancelAtPeriodEnd: binding.originalCancelAtPeriodEnd,
     paidMinor: policy.order.paidMinor, basisMinor: evaluation.quote!.basisMinor,
-    feeMinor: evaluation.quote!.feeMinor, netMinor: evaluation.quote!.netMinor, credits: binding.credits,
+    feeMinor: evaluation.quote!.feeMinor, ...(binding.taxMinor === undefined ? {} : { taxMinor: binding.taxMinor }),
+    netMinor: evaluation.quote!.netMinor + (binding.taxMinor ?? 0), credits: binding.credits,
     feePermitted: policy.feePermitted, feeEvidence: binding.feeEvidence,
     evidenceRefs: evaluation.evidenceRefs, snapshot: snapshot.data,
   });

@@ -15,6 +15,8 @@ import { reconcileStripeCardPayments } from '@repo/api/src/services/payments/str
 import { getStripeClient } from '@repo/api/src/services/stripe';
 import { reportPaymentEvidenceConflict, reportStripeCardReconciliation } from '@/lib/payment-alert.mjs';
 import { recoverFusionFinancials } from '@repo/api/src/services/fusion/recovery';
+import { findStuckPaygCalls } from '@repo/api/src/services/bill2/stuckCalls';
+import { kickStalledReviews } from '@repo/api/src/services/fusion/background';
 import { validateCronRequest } from '@/lib/cron-auth';
 
 export const runtime = 'nodejs';
@@ -35,7 +37,20 @@ async function runFusionRecovery(supabase: SupabaseClient) {
   catch { return { success: false, scanned: 0, cancelled: 0, recovered: 0, scrubbed: 0, failed: 1 }; }
 }
 
+/** FUSION-BACKGROUND daily backstop: reviews that stopped moving get one fresh step each (each at most once a day).
+ * The step itself runs in its own invocation; this only asks for it, within a short time limit. */
+async function runFusionKick(supabase: SupabaseClient, origin: string) {
+  try { return await kickStalledReviews(supabase, origin, { timeLimitMs: 10_000 }); }
+  catch { return { success: false, kicked: 0 }; }
+}
+
 /** Waffo daily backstop: report-only. Off until the test operations binding is explicitly enabled. */
+// 0261: stuck calls keep this daily job failing (alerting) until an administrator settles them.
+async function runStuckCallScan(supabase: SupabaseClient) {
+  try { return await findStuckPaygCalls(supabase); }
+  catch { return { success: false, calls: [], total: 0, truncated: false, scanFailed: true }; }
+}
+
 async function runWaffoReconciliation(supabase: SupabaseClient) {
   if (process.env.WAFFO_TEST_OPERATIONS_ENABLED !== 'true') return { success: true, skipped: true, findings: [] };
   try {
@@ -104,17 +119,22 @@ export async function GET(request: Request) {
 
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
     logger.system.cronJob('billing-reconcile', 'started');
-    const [result, readinessAudit, erasureFinancial, waffo, staleRounds, stripeCard, fusion] = await Promise.all([
+    const [result, readinessAudit, erasureFinancial, waffo, staleRounds, stripeCard, { fusion, fusionKick }, stuckCalls] = await Promise.all([
       runDailyBillingReconciliation(supabase),
       runBillingEngineV15ReadinessAudit(supabase),
       runErasureFinancialReconciliation(supabase),
       runWaffoReconciliation(supabase),
       runStaleRoundReconciliation(supabase),
       runStripeCardReconciliation(supabase),
-      runFusionRecovery(supabase),
+      (async () => {
+        // Kick before recovery resets idle timestamps; do not delay the independent financial audits.
+        const fusionKick = await runFusionKick(supabase, new URL(request.url).origin);
+        return { fusionKick, fusion: await runFusionRecovery(supabase) };
+      })(),
+      runStuckCallScan(supabase),
     ]);
     const success = result.success && readinessAudit.success && erasureFinancial.success && waffo.success
-      && staleRounds.success && stripeCard.success && fusion.success;
+      && staleRounds.success && stripeCard.success && fusion.success && fusionKick.success && stuckCalls.success;
 
     if (!success) {
       logger.system.cronJob(
@@ -127,13 +147,17 @@ export async function GET(request: Request) {
           ...(staleRounds.success ? [] : [`Stale charged rounds need manual review: ${staleRounds.total}`]),
           ...(stripeCard.success ? [] : [`Stripe card payments need manual review: ${stripeCard.findings.length}`]),
 
-          ...(fusion.success ? [] : [`Fusion calls pending recovery: ${fusion.failed}`])].join(' | '),
+          ...(fusion.success ? [] : [`Fusion calls pending recovery: ${fusion.failed}`]),
+          ...(stuckCalls.success ? [] : [`PAYG calls with unknown cost need manual settlement: ${stuckCalls.total}`]),
+          ...(fusionKick.success ? [] : ['Fusion review kick failed'])].join(' | '),
         {
           erasureFinancial,
           waffo,
           staleRounds,
           stripeCard,
           fusion,
+          stuckCalls,
+          fusionKick,
           mismatches: result.mismatches,
           summary: result.summary,
           readinessAudit: {
@@ -172,6 +196,8 @@ export async function GET(request: Request) {
       staleRounds,
       stripeCard,
       fusion,
+      stuckCalls,
+      fusionKick,
       timestamp: new Date().toISOString(),
     }, { status: success ? 200 : 500 });
   } catch (error) {

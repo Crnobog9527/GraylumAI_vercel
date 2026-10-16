@@ -17,15 +17,20 @@ const reviewView = z.object({
   steps: z.array(z.object({ round: z.number(), phase: z.string(), attempt: z.number(), groupId: uuid, stepKey: z.string(),
     claimedAt: z.string() })),
   outcome: z.unknown().nullable(), revisionId: uuid.nullable(), endedAt: z.string().nullable(),
-  calls: z.array(z.object({ groupId: uuid, runId: uuid, callId: uuid, phase: z.string(), dispatched: z.boolean(),
-    verdict: z.string().nullable(), settled: z.boolean(), state: z.string() })),
+  /** The user's per-section choice (0256), once made. */
+  adoption: z.record(z.string(), z.unknown()).nullable().optional(),
+  calls: z.array(z.object({ groupId: uuid, runId: uuid, callId: uuid, modelId: uuid, phase: z.string(), dispatched: z.boolean(),
+    verdict: z.string().nullable(), settled: z.boolean(), state: z.string(),
+    dispatchedAt: z.string().nullable().optional(), settledAt: z.string().nullable().optional() })),
 });
 export type ReviewView = z.infer<typeof reviewView>;
 const refusals = new Set(['FUSION_REVIEW_DISABLED', 'FUSION_MEMBERSHIP_REQUIRED', 'REPORT_MEMBERSHIP_REQUIRED',
   'REPORT_ENTITLEMENTS_UNAVAILABLE', 'FUSION_REVIEW_STALE', 'FUSION_REVIEW_ACTIVE', 'FUSION_REVIEW_BREAKER',
   'FUSION_REVIEW_VERSION_BLOCKED', 'FUSION_BUDGET_EXCEEDED', 'FUSION_REVIEW_CONFLICT', 'FUSION_REVIEW_INVALID',
   'FUSION_REVIEW_DENIED', 'FUSION_REVIEW_ENDED', 'FUSION_REVIEW_STEP_CONFLICT', 'FUSION_GROUP_DENIED', 'FUSION_GROUP_CONFLICT',
-  'FUSION_GROUP_INVALID', 'BILL2_CALL_CONFLICT', 'BILL2_RUN_DENIED']);
+  'FUSION_GROUP_INVALID', 'BILL2_CALL_CONFLICT', 'BILL2_RUN_DENIED',
+  // The losing side of a concurrent adoption: the conflict, never a generic failure (#962 review).
+  'FUSION_REVIEW_ADOPTED']);
 
 export function reviewRecord(admin: SupabaseClient, actorId: string) {
   async function rpc(name: string, args: Record<string, unknown>): Promise<unknown> {
@@ -42,6 +47,20 @@ export function reviewRecord(admin: SupabaseClient, actorId: string) {
     start: (input: { requestId: string; draftId: string; sourceVersionId: string; config: Record<string, unknown> & { estimateUsd: string } }) =>
       view(rpc('fusion_review_start', { p_request_id: uuid.parse(input.requestId), p_draft_id: uuid.parse(input.draftId),
         p_source_version_id: uuid.parse(input.sourceVersionId), p_config: input.config })),
+    /** The review an earlier start with this request created, or null. The database answers a known request
+     * before it reads anything else, and refuses an empty config before any write, so this never creates one. */
+    async replay(input: { requestId: string; draftId: string; sourceVersionId: string }): Promise<ReviewView | null> {
+      try {
+        return await view(rpc('fusion_review_start', { p_request_id: uuid.parse(input.requestId), p_draft_id: uuid.parse(input.draftId),
+          p_source_version_id: uuid.parse(input.sourceVersionId), p_config: {} }));
+      } catch (error) {
+        if (error instanceof Error && error.message === 'FUSION_REVIEW_INVALID') return null;
+        throw error;
+      }
+    },
+    /** Writes the per-section choice once; the same request returns the same record. */
+    recordAdoption: (reviewId: string, adoption: Record<string, unknown>) =>
+      view(rpc('fusion_review_adoption_record', { p_review_id: uuid.parse(reviewId), p_adoption: adoption })),
     async read(reviewId: string): Promise<ReviewView | null> {
       const value = await rpc('fusion_review_read', { p_review_id: uuid.parse(reviewId) });
       return value === null ? null : reviewView.parse(value);

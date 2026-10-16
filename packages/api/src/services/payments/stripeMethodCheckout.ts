@@ -7,6 +7,7 @@ import { prepareMethodPurchase, methodPurchaseInputSchema } from './methodPurcha
 import { majorToCents } from './purchaseFacts';
 import { resolveStripeScope } from './stripeCheckoutPersistence';
 import { buildStripeCheckoutRequest, dispatchStripeCheckoutIntent, type StripeCardCheckout } from './stripeCheckoutIntent';
+import { observeUpgradePrior } from './cardUpgrade';
 
 type Input = {
   db: SupabaseClient; stripe: Stripe; userId: string; appUrl: string; termsVersion: string;
@@ -124,5 +125,9 @@ export async function createStripeMethodCheckout(input: Input) {
 
 export async function createStripeCardCheckout(input: Input) {
   if (input.purchase.method !== 'card' && input.purchase.method !== 'card_cn') throw new Error('PAY_WAFFO_METHOD_DENIED');
+  // Upgrade of a renewing card Pro: admission needs a fresh provider observation of it (0251).
+  if (input.purchase.transition === 'upgrade' && input.purchase.priorSubscriptionId) {
+    await observeUpgradePrior(input.db, input.stripe, input.userId, input.purchase.priorSubscriptionId);
+  }
   return createStripeMethodCheckout(input);
 }

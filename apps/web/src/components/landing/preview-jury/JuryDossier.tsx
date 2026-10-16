@@ -25,11 +25,11 @@ export function JuryDossier({ detail, names, seat, arrived, onSelect, live }: {
         {DOSSIER_SEATS.map(code => (
           <button key={code} type="button" role="tab" aria-selected={code === seat} id={`dossier-tab-${code}`}
             aria-controls="dossier-panel" onClick={() => onSelect(code)} className={styles.tab} data-seat={code}>
-            <SeatBadge seat={code} names={names} compact />
+            <SeatBadge seat={code} names={names} compact whole />
           </button>
         ))}
       </div>
-      <div id="dossier-panel" role="tabpanel" aria-labelledby={`dossier-tab-${seat}`} className={styles.panel} key={seat}>
+      <div id="dossier-panel" role="tabpanel" aria-labelledby={`dossier-tab-${seat}`} className={styles.panel} key={seat} tabIndex={0}>
         <DossierBody detail={detail} names={names} seat={seat} arrived={arrived} live={live} />
       </div>
     </section>

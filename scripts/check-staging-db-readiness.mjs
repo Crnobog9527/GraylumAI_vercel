@@ -33,7 +33,7 @@ const requiredFunctionTargets = [
   'atomic_fulfill_credit_package',
   'atomic_fulfill_membership_invoice',
 ];
-// is_admin is optional; the invitation reward RPCs were retired by 0264 and must be absent.
+// is_admin is optional; the invitation reward RPCs were retired by 0266 and must be absent.
 const retiredFunctionTargets = ['atomic_apply_invitation_rebate', 'atomic_claim_invitation_code', 'validate_invitation_code'];
 const functionTargets = [...requiredFunctionTargets, 'is_admin', ...retiredFunctionTargets];
 
