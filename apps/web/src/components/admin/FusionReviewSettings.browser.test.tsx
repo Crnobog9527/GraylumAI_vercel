@@ -14,7 +14,8 @@ const SAVED = { version: 1, compare: { enabled: false }, review: {
   enabled: true, reviewerModelIds: [M(1), M(2), M(3)], summaryModelId: M(4), skillId: M(5), maxRounds: 2, opinionOutputTokens: 4096,
   summaryOutputTokens: 32768, maxBudgetUsd: '0.5', dispatchMinutes: 10, breaker: { platformUsd: '2', noDeliveryCalls: 10 },
   displayNames: { reviewers: ['目标用户', '操盘手', '挑刺审核人'], summary: '主笔' } } };
-const MODELS = { models: [1, 2, 3, 4, 6].map(n => ({ id: M(n), name: `模型 ${n}`, model: `vendor${n}/model` })) };
+// Fusion admission per purpose: model 8 may only write the summary, so it is no reviewer choice.
+const MODELS = { models: [1, 2, 3, 4, 6, 8].map(n => ({ id: M(n), name: `模型 ${n}`, review: n !== 8, summary: n === 4 || n === 8 })) };
 const SKILLS = { total: 2, skills: [
   { id: M(5), skill_key: 'fusion-review', status: 'published', published_version: 3 },
   { id: M(7), skill_key: 'draft-skill', status: 'draft', published_version: 0 },
@@ -58,6 +59,7 @@ async function open(opts: { running?: number; refuse?: string; warnings?: string
   const updates: unknown[] = [];
   const dialogs: string[] = [];
   const calls: Record<string, number> = {};
+  let stored: typeof SAVED | null = null;
   page.on('pageerror', error => errors.push(error.message));
   await page.route('**/*', async route => {
     const path = new URL(route.request().url()).pathname;
@@ -66,12 +68,13 @@ async function open(opts: { running?: number; refuse?: string; warnings?: string
     calls[name] = (calls[name] ?? 0) + 1;
     if (name === 'fusionSettings.update') {
       updates.push(JSON.parse(route.request().postData() ?? '{}'));
+      if (!opts.refuse) stored = updates[updates.length - 1] as typeof SAVED; // the read-back returns what was saved
       if (opts.refuse) {
         return route.fulfill({ status: 400, contentType: 'application/json', body: JSON.stringify({ error: { message: opts.refuse,
           code: -32600, data: { code: 'BAD_REQUEST', httpStatus: 400, path: name } } }) });
       }
     }
-    const result = name === 'fusionSettings.get' ? SAVED : name === 'reportModel.options' ? MODELS : name === 'skills.list' ? SKILLS
+    const result = name === 'fusionSettings.get' ? (stored ?? SAVED) : name === 'fusionSettings.models' ? MODELS : name === 'skills.list' ? SKILLS
       : name === 'settings.getSummaryModels' ? [] : name === 'fusionSettings.reviews'
         ? Array.from({ length: opts.running ?? 0 }, () => ({ state: 'running' })).concat([{ state: 'completed' }])
         : name === 'fusionSettings.update' ? { settings: SAVED, warnings: opts.warnings ?? [] } : null;
@@ -86,10 +89,16 @@ async function open(opts: { running?: number; refuse?: string; warnings?: string
 it('shows the saved panel, lists only published Skills, and saves a renamed seat without asking about running reviews', async () => {
   const { page, errors, updates, calls } = await open({ running: 2 });
   try {
-    expect(await page.locator('#fusion-skill option').allTextContents()).toEqual(['未选择', 'fusion-review（第 3 版）']);
+    await ui(page.locator('#fusion-skill option')).toHaveText(['未选择', 'fusion-review（第 3 版）']);
+    await ui(page.locator('#fusion-model-A option')).toHaveText(['未选择', '模型 1', '模型 2', '模型 3', '模型 4', '模型 6']);
+    await ui(page.locator('#fusion-model-S option')).toHaveText(['未选择', '模型 4', '模型 8']);
     await ui(page.getByRole('button', { name: '保存评审团设置' })).toBeDisabled();
     await page.getByLabel('汇总的显示名').fill('  首席主笔 ');
     await page.getByRole('button', { name: '保存评审团设置' }).click();
+    await ui(page.getByText('已保存。新开始的评审使用这个设置。')).toBeVisible();
+    // The form re-reads the saved value and remounts; the notice stays.
+    await ui(page.getByLabel('汇总的显示名')).toHaveValue('首席主笔');
+    await page.waitForTimeout(500);
     await ui(page.getByText('已保存。新开始的评审使用这个设置。')).toBeVisible();
     expect(calls['fusionSettings.reviews'] ?? 0).toBe(0);
     expect(updates).toEqual([expect.objectContaining({ review: expect.objectContaining({
@@ -111,6 +120,8 @@ it('warns how many reviews are running before a model change, and saves nothing 
     page.once('dialog', dialog => void dialog.accept());
     await page.getByRole('button', { name: '保存评审团设置' }).click();
     await ui(page.getByText(/同一家公司/)).toBeVisible();
+    await page.waitForTimeout(500);
+    await ui(page.getByText(/同一家公司/)).toBeVisible(); // still there after the read-back
     expect(updates).toEqual([expect.objectContaining({ review: expect.objectContaining({ reviewerModelIds: [M(1), M(2), M(6)] }) })]);
     expect(errors).toEqual([]);
   } finally { await page.close(); }

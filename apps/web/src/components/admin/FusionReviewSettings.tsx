@@ -27,6 +27,8 @@ const selectStyle = { background: 'var(--bg-primary)', borderColor: 'var(--borde
  */
 export function FusionReviewSettings() {
   const settings = trpc.fusionSettings.get.useQuery(undefined, { staleTime: 0, retry: false });
+  // Outside the keyed form: the form remounts with the saved value, and the notice (and any warning) must stay.
+  const [notice, setNotice] = useState<Notice | null>(null);
   if (settings.isLoading) return <SettingsCard><p style={muted}>正在读取评审团设置…</p></SettingsCard>;
   if (!settings.data) {
     return (
@@ -36,7 +38,8 @@ export function FusionReviewSettings() {
       </SettingsCard>
     );
   }
-  return <ReviewForm key={JSON.stringify(settings.data.review)} saved={settings.data} onSaved={() => settings.refetch()} />;
+  return <ReviewForm key={JSON.stringify(settings.data.review)} saved={settings.data} onSaved={() => settings.refetch()}
+    notice={notice} setNotice={setNotice} />;
 }
 
 function SettingsCard({ children }: { children: ReactNode }) {
@@ -56,11 +59,15 @@ function SettingsCard({ children }: { children: ReactNode }) {
   );
 }
 
-function ReviewForm({ saved, onSaved }: { saved: FusionSettingsValue; onSaved: () => Promise<unknown> }) {
+type Notice = { tone: 'ok' | 'error'; text: string };
+
+function ReviewForm({ saved, onSaved, notice, setNotice }: {
+  saved: FusionSettingsValue; onSaved: () => Promise<unknown>; notice: Notice | null; setNotice: (notice: Notice | null) => void;
+}) {
   const [review, setReview] = useState<ReviewSettings>(() => ({ ...saved.review,
     reviewerModelIds: SEAT_CODES.map((_, index) => saved.review.reviewerModelIds[index] ?? '') }));
-  const [notice, setNotice] = useState<{ tone: 'ok' | 'error'; text: string } | null>(null);
-  const models = trpc.reportModel.options.useQuery(undefined, { staleTime: 0, retry: false });
+  // Checked by the Fusion admission for each purpose (not the report one), the same check a save of an enabled panel runs.
+  const models = trpc.fusionSettings.models.useQuery(undefined, { staleTime: 0, retry: false });
   const names = trpc.settings.getSummaryModels.useQuery({ use: 'skill' });
   const skills = trpc.skills.list.useQuery(undefined, { retry: false });
   const utils = trpc.useUtils();
@@ -69,7 +76,8 @@ function ReviewForm({ saved, onSaved }: { saved: FusionSettingsValue; onSaved: (
   const set = (patch: Partial<ReviewSettings>) => { setReview(value => ({ ...value, ...patch })); setNotice(null); };
   const problems = draftProblems(review);
   const dirty = JSON.stringify(toSaved(saved, review).review) !== JSON.stringify(saved.review);
-  const options = models.data?.models ?? [];
+  const reviewers = (models.data?.models ?? []).filter(model => model.review);
+  const summaries = (models.data?.models ?? []).filter(model => model.summary);
   const published = (skills.data?.skills ?? []).filter(skill => skill.status === 'published');
 
   async function save() {
@@ -91,12 +99,12 @@ function ReviewForm({ saved, onSaved }: { saved: FusionSettingsValue; onSaved: (
     }
   }
 
-  const modelSelect = (id: string, value: string, onChange: (value: string) => void) => (
+  const modelSelect = (id: string, value: string, onChange: (value: string) => void, options: readonly { id: string; name: string }[]) => (
     <select id={id} className={selectClass} style={selectStyle} value={value} onChange={event => onChange(event.target.value)}>
       <option value="">未选择</option>
       {options.map(model => <option key={model.id} value={model.id}>{model.name}</option>)}
       {value && !options.some(model => model.id === value)
-        ? <option value={value}>{modelLabel(value, names.data)}（当前不可用）</option> : null}
+        ? <option value={value}>{modelLabel(value, names.data)}{models.data ? '（当前不可用）' : ''}</option> : null}
     </select>
   );
   const nameInput = (id: string, value: string, onChange: (value: string) => void) => (
@@ -119,14 +127,14 @@ function ReviewForm({ saved, onSaved }: { saved: FusionSettingsValue; onSaved: (
               reviewers: review.displayNames.reviewers.map((item, at) => (at === index ? name : item)) } }))}
             <Label htmlFor={`fusion-model-${seat}`}>模型</Label>
             {modelSelect(`fusion-model-${seat}`, review.reviewerModelIds[index] ?? '', id => set({
-              reviewerModelIds: review.reviewerModelIds.map((item, at) => (at === index ? id : item)) }))}
+              reviewerModelIds: review.reviewerModelIds.map((item, at) => (at === index ? id : item)) }), reviewers)}
           </div>
         ))}
         <div className="space-y-1.5 rounded-md border p-3" style={{ borderColor: 'var(--border-primary)' }}>
           <Label htmlFor="fusion-seat-S">汇总的显示名</Label>
           {nameInput('fusion-seat-S', review.displayNames.summary, summary => set({ displayNames: { ...review.displayNames, summary } }))}
           <Label htmlFor="fusion-model-S">模型</Label>
-          {modelSelect('fusion-model-S', review.summaryModelId ?? '', id => set({ summaryModelId: id || null }))}
+          {modelSelect('fusion-model-S', review.summaryModelId ?? '', id => set({ summaryModelId: id || null }), summaries)}
         </div>
       </fieldset>
       <div className="grid gap-3 sm:grid-cols-2">
@@ -137,7 +145,7 @@ function ReviewForm({ saved, onSaved }: { saved: FusionSettingsValue; onSaved: (
             <option value="">未选择</option>
             {published.map(skill => <option key={skill.id} value={skill.id}>{skill.skill_key}（第 {skill.published_version} 版）</option>)}
             {review.skillId && !published.some(skill => skill.id === review.skillId)
-              ? <option value={review.skillId}>当前 Skill 未发布或读不到</option> : null}
+              ? <option value={review.skillId}>{skills.data ? '当前 Skill 未发布或读不到' : '正在读取 Skill…'}</option> : null}
           </select>
         </div>
         <div className="space-y-1.5">
