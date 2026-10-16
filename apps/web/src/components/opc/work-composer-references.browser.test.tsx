@@ -95,6 +95,26 @@ it('switched off: @ is plain text, no menu, no library request, Enter sends as b
   await ui(box(page).locator('.library-reference')).toHaveCount(0);
 }));
 
+it('UI-MODEL: the box shows a read-only Auto next to send; clicking it opens nothing and Tab skips it', () => open(false, async page => {
+  const auto = page.locator('[title="模型由系统按用途自动选择"]');
+  await ui(auto).toBeVisible();
+  // Screen readers hear "Auto，模型由系统按用途自动选择"; sighted users see only Auto.
+  await ui(auto).toHaveText('Auto，模型由系统按用途自动选择');
+  expect((await auto.boundingBox())!.width).toBeLessThan(60);
+  await auto.click();
+  await ui(page.getByRole('dialog')).toHaveCount(0);
+  await ui(page.getByRole('button', { name: /Auto|模型/ })).toHaveCount(0);
+  await box(page).click();
+  await page.keyboard.type('你好');
+  await page.keyboard.press('Tab');
+  expect(await page.evaluate(() => document.activeElement?.getAttribute('aria-label'))).not.toMatch(/Auto|模型/);
+  // Narrow screen: the chip stays on one line beside send without pushing the row wider than the box.
+  await page.setViewportSize({ width: 360, height: 760 });
+  const [chip, send] = await Promise.all([auto.boundingBox(), page.getByRole('button', { name: '发送' }).boundingBox()]);
+  expect(chip && send && chip.x + chip.width <= send.x && Math.abs(chip.y + chip.height / 2 - (send.y + send.height / 2)) < 4).toBe(true);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+}));
+
 it('lists only ready documents that match, and picks with the arrow keys and Enter instead of sending', () => open(true, async page => {
   await page.keyboard.type('参考@周报');
   await ui(menu(page)).toBeVisible();
