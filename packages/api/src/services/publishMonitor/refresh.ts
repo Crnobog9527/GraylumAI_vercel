@@ -143,6 +143,9 @@ export async function refreshConnection(db: Rpc, client: ClientDeps, claim: Refr
     if (now() >= until) return { outcome: 'release', error: null };
     const page: Outcome<FeedPage> = await readFeedPage(client, claim.providerAccountId, claim.platform, query);
     budget -= 1;
+    // A read that reached the provider counts against the persistent daily cap even when it failed (the shared
+    // limiter refusing it means no provider call was made).
+    if (page.kind !== 'ok' && page.kind !== 'rate_limited' && !await write(run, [], null, false)) return { outcome: 'stale' };
     if (page.kind !== 'ok') {
       return query?.cursor && page.kind === 'rejected' && outcomeFor(page) === 'failed' ? 'rejected_cursor'
         : { outcome: outcomeFor(page), error: errorCode(page) };
