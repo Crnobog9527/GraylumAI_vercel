@@ -25,7 +25,7 @@ describe('publish-monitor manual import', () => {
     const rpc = vi.fn().mockResolvedValue(ok);
     const bad = [{ metrics: { bogus: 1 } }, { metrics: { likes: -1 } }, { metrics: { likes: '3' } },
       { metrics: { completion_rate: 101 } }, { url: 'http://example.com/a' }, { url: 'https://127.0.0.1/a' }, { metrics: {} },
-      { postedAt: 'yesterday' }, { postedAt: '2026-02-30T00:00:00Z' }, { postedAt: '2026-10-01' }];
+      { postedAt: 'yesterday' }, { postedAt: '2026-02-30T00:00:00Z' }, { postedAt: '2026-10-01' }, { postedAt: '2026-10-01T00:00:00+99:99' }];
     for (const over of bad) {
       expect(await code(importManualRows({ rpc } as never, actor, { accountProjectId: account, origin: 'table',
         rows: [row(over)] } as never))).toBe('PUBLISH_MONITOR_IMPORT_INVALID');

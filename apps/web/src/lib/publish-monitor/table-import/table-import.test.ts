@@ -69,6 +69,8 @@ describe('XLSX', () => {
     ]));
     expect(await code(() => parseXlsx(escape))).toBe('TABLE_MALFORMED');
     expect(await code(() => parseTable('a.pdf', utf8('x')))).toBe('TABLE_FORMAT_UNSUPPORTED');
+    // A CSV that merely starts with "PK" is still a CSV.
+    expect((await parseTable('a.csv', utf8('PK,views\np1,10'))).header).toEqual(['PK', 'views']);
   });
 
   it('caps rows in a worksheet', async () => {
@@ -95,8 +97,8 @@ describe('column mapping and rows', () => {
       .toEqual([new Date(2026, 9, 1).toISOString(), new Date(2026, 9, 1, 8, 30).toISOString(),
         new Date(2026, 9, 1).toISOString(), null]);
     // Impossible dates are refused, not rolled over; an explicit zone is honoured.
-    expect([parseDate('2026-02-30'), parseDate('2026-10-01T25:00:00Z'), parseDate('2026-10-01T08:00:00+08:00')])
-      .toEqual([null, null, '2026-10-01T00:00:00.000Z']);
+    expect([parseDate('2026-02-30'), parseDate('2026-10-01T25:00:00Z'), parseDate('2026-10-01T00:00:00+99:99'),
+      parseDate('2026-10-01T08:00:00+08:00')]).toEqual([null, null, null, '2026-10-01T00:00:00.000Z']);
   });
 
   it('builds confirmable rows: needs a post ID or link and a metric; bad cells are listed by line', () => {

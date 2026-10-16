@@ -29,8 +29,9 @@ function strictInstant(value: string): boolean {
   if (!m) return false;
   const [y, mo, d, h, mi, s] = [m[1], m[2], m[3], m[4], m[5], m[6] ?? '0'].map(Number) as number[];
   const day = new Date(Date.UTC(y!, mo! - 1, d!));
+  const offset = /^[+-](\d{2}):(\d{2})$/.exec(m[7]!);
   return y! >= 2000 && y! <= 2100 && day.getUTCMonth() === mo! - 1 && day.getUTCDate() === d! && h! < 24 && mi! < 60
-    && s! < 60;
+    && s! < 60 && (!offset || (+offset[1]! <= 14 && +offset[2]! < 60)) && Number.isFinite(Date.parse(value));
 }
 const iso = z.string().max(64).refine(strictInstant, 'DATE').transform(value => new Date(value).toISOString());
 

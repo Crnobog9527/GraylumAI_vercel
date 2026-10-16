@@ -193,7 +193,8 @@ export async function parseXlsx(bytes: Uint8Array): Promise<Grid> {
 
 /** By file name and content: XLSX starts with a ZIP header, anything else is read as CSV text. */
 export async function parseTable(name: string, bytes: Uint8Array): Promise<Grid> {
-  const zip = bytes[0] === 0x50 && bytes[1] === 0x4b;
+  // A real ZIP local-file header, not just text that happens to start with "PK".
+  const zip = bytes[0] === 0x50 && bytes[1] === 0x4b && bytes[2] === 0x03 && bytes[3] === 0x04;
   if (/\.xlsx$/i.test(name) || zip) {
     if (!zip) fail('TABLE_MALFORMED');
     return parseXlsx(bytes);

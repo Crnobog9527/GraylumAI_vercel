@@ -110,7 +110,10 @@ export function parseDate(raw: string): string | null | undefined {
   if (zoned) {
     if (!localInstant(+zoned[1]!, +zoned[2]!, +zoned[3]!, 12)) return null;
     if (+zoned[4]! > 23 || +zoned[5]! > 59 || +(zoned[6] ?? 0) > 59) return null;
-    return new Date(text).toISOString();
+    const offset = /^[+-](\d{2}):(\d{2})$/.exec(zoned[7]!);
+    if (offset && (+offset[1]! > 14 || +offset[2]! > 59)) return null;
+    const ms = Date.parse(text);
+    return Number.isFinite(ms) ? new Date(ms).toISOString() : null;
   }
   const parts = /^(\d{4})[-/年](\d{1,2})[-/月](\d{1,2})日?(?:[ T](\d{1,2}):(\d{2})(?::(\d{2}))?)?$/.exec(text);
   if (!parts) return null;
