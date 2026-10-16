@@ -12,7 +12,13 @@ const ITEM = { id: ID, kind: 'wallet_founder_expiry', state: 'manual', manualRea
 
 function harness(role: 'admin' | 'user' | 'anonymous', replies: Record<string, { data: unknown; error: unknown }> = {}) {
   const calls: Array<[string, Record<string, unknown>]> = [];
+  const query: Record<string, unknown> = {};
+  query.select = () => query;
+  query.eq = () => query;
+  query.single = async () => ({ data: { id: ACTOR, role, status: 'active', is_deleted: 'false', credits: 0,
+    nickname: 'Synthetic', email: 'admin@example.test' }, error: null });
   const db = {
+    from: (table: string) => { if (table !== 'profiles') throw new Error(table); return query; },
     rpc(name: string, args: Record<string, unknown>) {
       calls.push([name, args]);
       const reply = replies[name] ?? { data: null, error: { code: 'XX000' } };
