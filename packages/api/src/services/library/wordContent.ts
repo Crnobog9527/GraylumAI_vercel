@@ -8,7 +8,25 @@ export const wordHeadings = z.array(z.object({
   offset: z.number().int().min(0).max(MAX_BYTES), level: z.number().int().min(1).max(9),
   text: z.string().min(1).max(512),
 }).strict()).max(10_000);
-export const wordCompleteInput = z.object({ documentId: z.string().uuid(), headings: wordHeadings }).strict();
+/** LIB-2d: UTF-16 offsets of the document's images in the extracted text, in order (LIB-2b `DocxImage.offset`). */
+export const wordImages = z.array(z.object({ offset: z.number().int().min(0).max(MAX_BYTES) }).strict()).max(500);
+export const wordCompleteInput = z.object({ documentId: z.string().uuid(), headings: wordHeadings, images: wordImages.optional() }).strict();
+
+/** For each image, how many segments start before it: its recognised text is inserted right there (0280). Segment
+ * bodies are contiguous slices of the extracted text, so a segment starts where the previous bodies end. */
+export function wordImageAnchors(segments: Segment[], images: z.infer<typeof wordImages>): Array<{ anchor: number }> {
+  const parsed = wordImages.safeParse(images);
+  if (!parsed.success) throw new Error('LIBRARY_INVALID');
+  const starts: number[] = [];
+  let at = 0;
+  for (const segment of segments) { starts.push(at); at += segment.body.length; }
+  let last = -1;
+  return parsed.data.map(({ offset }) => {
+    if (offset < last || offset > at) throw new Error('LIBRARY_INVALID');
+    last = offset;
+    return { anchor: starts.filter((start) => start < offset).length };
+  });
+}
 
 export function wordFilename(filename: string) {
   if (!/\.docx$/i.test(filename) || Buffer.byteLength(filename) > 1024

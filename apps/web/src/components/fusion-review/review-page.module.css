@@ -1,0 +1,29 @@
+/* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+/* The real review page: the prototype's page, toolbar and stage, plus the few states a real review has. */
+
+.main { composes: main from '../landing/preview-jury/jury.module.css'; }
+
+.state { margin: 48px auto; max-width: 560px; color: var(--j-muted); text-align: center; }
+.state a, .linkButton {
+  margin-left: 8px; padding: 0; border: 0; background: none; color: var(--j-ink); font: inherit; text-decoration: underline;
+  text-underline-offset: 3px; cursor: pointer;
+}
+
+.notice {
+  margin: 0 0 12px; padding: 10px 14px; border: 1px solid var(--j-rule); border-radius: 10px; background: var(--j-paper);
+  color: var(--j-ink); font-size: 15px;
+}
+
+.controls { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
+.toolButton {
+  display: inline-flex; align-items: center; gap: 6px; min-height: 32px; padding: 0 11px; border: 1px solid var(--j-rule);
+  border-radius: 8px; background: var(--j-paper); color: var(--j-ink); font: inherit; font-size: 13px; white-space: nowrap; cursor: pointer;
+}
+.toolButton:hover:not(:disabled) { border-color: var(--j-ink-soft); }
+.toolButton:disabled { opacity: .55; cursor: default; }
+
+.paused {
+  display: flex; flex: 1 0 100%; flex-wrap: wrap; align-items: center; gap: 6px 12px; margin: 4px 0 0; padding: 8px 12px;
+  border: 1px solid var(--j-rule); border-radius: 10px; background: var(--j-paper); font-size: 14px; line-height: 1.6;
+}
+.inlineError { color: var(--j-critical); font-size: 13px; }
