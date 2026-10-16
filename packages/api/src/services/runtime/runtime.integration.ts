@@ -1603,7 +1603,7 @@ it('RUNTIME: only a positioning workflow opens a guided step workspace through o
  // CONTENT-CONVERSATION-DRIVEN G (Owner 2026-10-13): every other Skill runs in free chat; its steps are a work guide.
  const password='Local-'+randomUUID()+'!',email=randomUUID()+'@example.test';
  const created=await admin.auth.admin.createUser({email,password,email_confirm:true});if(created.error)throw created.error;
- const actor=created.data.user.id;await db.query("insert into profiles(id,email,credits) values($1,$2,500)",[actor,email]);
+ const actor=created.data.user.id;await db.query("insert into profiles(id,email,credits,role) values($1,$2,500,'admin')",[actor,email]);
  const user=createClient(process.env.V3_LOCAL_REST!,process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,{auth:{persistSession:false}});
  const login=await user.auth.signInWithPassword({email,password});if(login.error)throw login.error;
  async function register(kind:'positioning'|'plain'|'unmapped'){
