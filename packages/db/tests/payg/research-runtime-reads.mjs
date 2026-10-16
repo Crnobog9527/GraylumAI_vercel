@@ -80,7 +80,7 @@ export async function researchRuntimeReadCases({db,report,createFixture}) {
     assert.equal((await rpc(db,'research_user_evidence',f.actor,10,null,null)).length,1);
     const charges = await rpc(db,'research_user_tool_charges',f.actor,tx);
     assert.equal(charges.length,1);
-    assert.deepEqual(Object.keys(charges[0]).sort(),['args','callId','credits','source','toolName']);
+    assert.deepEqual(Object.keys(charges[0]).sort(),['args','callId','credits','dataKind','platform','query','source','toolName']);
     assert.equal(charges[0].callId,c.id);
     assert.equal(charges[0].source,'tool_usage');
     assert.equal(Number(charges[0].credits),1.25,'unrounded frozen nominal contribution, not the integer ledger deduction');
@@ -111,7 +111,7 @@ export async function researchRuntimeReadCases({db,report,createFixture}) {
   assert.deepEqual([...first,...second].map(x=>x.operationId),[...ids].sort().reverse());
   assert.deepEqual(await rpc(db,'research_user_evidence',f.actor,2,last.createdAt,last.operationId),second);
   assert.deepEqual(Object.keys(first[0]).sort(),['operationId','toolName','args','state','fetchedAt','itemCount','truncated',
-    'sources','sessionId','sessionTitle','createdAt'].sort());
+    'sources','sessionId','sessionTitle','createdAt','query','platform','dataKind'].sort());
   assert.deepEqual(first[0].sources,['https://example.com/source']);
   assert.equal(first[0].itemCount,1);
   assert.doesNotMatch(JSON.stringify(first),/PRIVATE_BODY|PRIVATE_SECRET|cost|supplier/i);

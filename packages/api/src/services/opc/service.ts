@@ -32,6 +32,7 @@ export { opcGenerate } from "./answerCard";
 const uuid = z.string().uuid();
 import {opcStart, opcTopicBind} from './start';
 import {isPositioningWorkflow} from './positioningWorkflow';
+import {researchRefreshContext, withResearchRefresh} from './researchRefresh';
 export {opcStart, opcTopicBind} from './start';
 export function opcService(user: SupabaseClient, admin: SupabaseClient, real?:StagingPolicy, resumeWaitingOrganizer?:ResumeWaitingOrganizer) {
   async function rpc(name: string, args: Record<string, unknown>) {
@@ -72,10 +73,7 @@ export function opcService(user: SupabaseClient, admin: SupabaseClient, real?:St
       const updatedFieldIds = readChecklistUpdatedInput(v.input);
       if (updatedFieldIds && (v.purpose !== "mentor" || v.answerSource)) throw new Error("OPC_STEP_DENIED");
       let d = await rpc("opc_query", { p_draft_id: v.draftId });
-      let snapshot = await workbenchService(user, admin).read(
-        d.projectId,
-        d.roundId,
-      );
+      let snapshot = await workbenchService(user, admin).read(d.projectId, d.roundId);
       if (
         (v.purpose !== "plan"
           ? snapshot.state !== "draft"
@@ -197,8 +195,9 @@ export function opcService(user: SupabaseClient, admin: SupabaseClient, real?:St
         captureConfirmed = Object.fromEntries(snapshot.workflow.steps.map(step => [step.id, Boolean(frozenSteps[step.id]?.valid)]));
         if (!opening && !answeredCard) runtimeRequest.selection.task = questionTask(captureFocus(captureInformation[v.stepId]!));
       }
-      const hostTurnContext = v.purpose === "mentor"
-        ? captureHostContext(snapshot.workflow.steps, captureInformation, v.stepId, opening, updatedFieldIds, captureConfirmed, stepSummary) : undefined;
+      const hostTurnContext = v.purpose === "mentor" ? withResearchRefresh(captureHostContext(snapshot.workflow.steps, captureInformation,
+        v.stepId, opening, updatedFieldIds, captureConfirmed, stepSummary), await researchRefreshContext(admin,
+        (await user.auth.getUser()).data.user!.id, d.sessionId, v, {opening, stepSummary: Boolean(stepSummary)})) : undefined;
       let organizerInstructions = v.purpose === "mentor" && organizeAfter
         ? ORGANIZER_INSTRUCTIONS : undefined;
       if (organizerInstructions) organizerInstructions += "\n" + ANSWER_CARD_RULE;

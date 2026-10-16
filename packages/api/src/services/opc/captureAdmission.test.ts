@@ -12,6 +12,8 @@ const captured=vi.hoisted(()=>({policy:undefined as LocalRuntimePolicy|undefined
 vi.mock('../runtime/admission',()=>({runtimeAdmissionService:(_u:unknown,_a:unknown,p:LocalRuntimePolicy)=>{
  captured.policy=p;return {prepare:async(request:unknown)=>{captured.request=request;return {executionId:id};}};
 }}));
+const research=vi.hoisted(()=>({enabled:true}));
+vi.mock('../research/vendors/config',()=>({readResearchToolsConfig:async()=>({config:{enabled:research.enabled}})}));
 vi.mock('../artifacts/workbench',()=>({workbenchService:()=>({read:async()=>({state:'draft',revisionId:id,
  workflow:{steps:[{id:'first',title:'First',information:schema}]},steps:{first:{valid:false}}})})}));
 function fixture(saved:unknown=null,replay:unknown=null, frozen?:Record<string, unknown>) {
@@ -23,7 +25,7 @@ function fixture(saved:unknown=null,replay:unknown=null, frozen?:Record<string, 
    values:{goal:{value:'Already known',status:'provisional'}}}}},
    artifact_query:{moduleId:id,workflow:{steps:[{id:'first',resources:[]}]}},runtime_admission_replay:replay,
    runtime_session_context:{waitingOrganizer:null,scopeMaterial:{revision:1,content:{work:{roundId:id,steps:{first:{information:{goal:{value:'Already known',status:'provisional'}},...frozen}}}}}},opc_capture_apply:{processed:[],remaining:0,hasMore:false},
-   opc_step_material:{revision:1,turnToken:id},runtime_execution:{sessionId:id,context:saved},runtime_view:{executions:[{executionId:sourceId,state:'completed',
+   opc_step_material:{revision:1,turnToken:id},research_runtime_read:{platform:'tiktok',account:'@Alice',used:false},runtime_execution:{sessionId:id,context:saved},runtime_view:{executions:[{executionId:sourceId,state:'completed',
     request:{draftId:id,stepId:'first',purpose:'mentor',questionId:'goal'},
     body:JSON.stringify({format:'agent-turn.v1',message:'Choose',card:{question:'Platform?',options:['A','B'],recommended:null}})}]}};
   if(!(name in map))throw new Error(name);
@@ -140,4 +142,22 @@ it('summary mixed with organizer or answer identity fails before any database ad
    .rejects.toThrow('OPC_STEP_SUMMARY_INVALID');
   expect(f.reads).toEqual([]);
  }
+});
+it('RT-3b PR-2: a checked refresh grant is frozen host context, never part of the replay request identity',async()=>{
+ const refreshId='10000000-0000-4000-8000-000000000009';
+ const f=fixture();
+ await f.service.prepareStep({...request,researchRefreshId:refreshId});
+ expect(captured.policy!.hostTurnContext!.researchRefresh).toMatchObject({refreshId,platform:'tiktok',account:'alice'});
+ expect(JSON.stringify(captured.request)).not.toContain(refreshId);
+ expect(f.rpc.mock.calls.find(([name])=>name==='research_runtime_read')![1]).toEqual({a:id,s:id,e:null,p_kind:'refresh',p_id:refreshId});
+ await fixture().service.prepareStep(request);
+ expect(captured.policy!.hostTurnContext).not.toHaveProperty('researchRefresh');
+});
+it('RT-3b PR-2: a refresh is refused while research is off, before admission',async()=>{
+ research.enabled=false;
+ try{
+  await expect(fixture().service.prepareStep({...request,researchRefreshId:'10000000-0000-4000-8000-000000000009'}))
+   .rejects.toThrow('OPC_RESEARCH_REFRESH_UNAVAILABLE');
+  expect(captured.policy).toBeUndefined();
+ }finally{research.enabled=true;}
 });

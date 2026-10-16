@@ -76,7 +76,7 @@
   "packages/api/src/services/billingReconciliation.ts": {"lines":1902,"longLines":5},
   "packages/api/src/services/diagnostics.ts": {"lines":613},
   "packages/api/src/services/membershipEligibility.ts": {"lines":727},
-  "packages/api/src/services/opc/service.ts": {"lines":537,"longLines":12},
+  "packages/api/src/services/opc/service.ts": {"lines":536,"longLines":12},
   "packages/api/src/services/openRouterSearch.ts": {"longLines":1},
   "packages/api/src/services/providerUsage.ts": {"longLines":9},
   "packages/api/src/services/providerUtils.ts": {"longLines":1},
