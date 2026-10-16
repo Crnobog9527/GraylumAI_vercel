@@ -468,7 +468,8 @@ export function reviewFlow(deps: { admin: SupabaseClient; actorId: string;
       const detail = reviewDetail({ view, reviewers: config.parse(view.config).reviewers, sections: src.sections,
         outputs: await savedOutputs(view), revision: revisionInput(view, src), adoption: (await adoptionPlan(view, src))?.sections ?? null });
       // The reviewed (frozen) report by chapter: the result page shows the whole report, not only the changed chapters.
-      return { ...detail, chapters: sectionTexts(src.body, src.sections) };
+      const text = sectionTexts(src.body, src.sections);
+      return { ...detail, chapters: text.chapters, preamble: text.preamble };
     },
     /** Progress events for the animation (§2.2a), derived from the record and judged outputs only. */
     async events(reviewId: string) {

@@ -26,12 +26,13 @@ export type LiveReview = {
 export function useLiveReview(reviewId: string): LiveReview {
   const detail = trpc.fusionReview.detail.useQuery({ reviewId }, {
     retry: 1, refetchOnWindowFocus: false,
-    refetchInterval: query => (query.state.data && ENDED.has(query.state.data.state) ? false : DETAIL_MS),
+    // An ended review waiting for the chapter choice is still read now and then: a choice made in another tab shows here.
+    refetchInterval: query => (query.state.data && ENDED.has(query.state.data.state) && !query.state.data.awaitingChoice ? false : DETAIL_MS),
   });
   const ended = Boolean(detail.data && ENDED.has(detail.data.state));
   const events = trpc.fusionReview.events.useQuery({ reviewId }, {
     retry: 1, refetchOnWindowFocus: false,
-    // A review that ended may still wait for the user's chapter choice; nothing more plays, so stop reading.
+    // After review_ended nothing more plays; the chapter choice is read from the detail, so the events can stop.
     refetchInterval: query => (query.state.data?.ended || query.state.data?.events.some(event => event.type === 'review_ended')
       ? false : EVENTS_MS),
   });

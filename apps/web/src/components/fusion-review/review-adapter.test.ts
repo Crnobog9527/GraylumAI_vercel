@@ -41,9 +41,10 @@ describe('review page data', () => {
   it('reads the outcome kind, keeps only a recorded choice, and turns chapters into the reader\'s report', () => {
     const raw = { reviewId: 'r', draftId: 'd', state: 'completed', outcome: { kind: 'revised', debated: true }, seats: [{ seat: 'A', rounds: [] }],
       summary: { status: 'usable', sections: [] }, adoption: { state: 'reserved' }, awaitingChoice: true,
-      chapters: [{ section: '定位', body: '正文。' }] } as unknown as RawDetail;
+      chapters: [{ section: '定位', body: '正文。' }], preamble: '' } as unknown as RawDetail;
     expect(toJuryDetail(raw)).toMatchObject({ outcome: 'revised', adoption: null, awaitingChoice: true, seats: [{ seat: 'A' }] });
     expect(toReaderSource(raw).chapters).toEqual([{ title: '定位', number: '', name: '定位', body: '正文。' }]);
+    expect(toReaderSource({ ...raw, preamble: '# 定位报告' }).chapters.map(item => item.title)).toEqual(['报告开头', '定位']);
   });
 
   it('says how a review ended in plain words, and why a start was refused', () => {

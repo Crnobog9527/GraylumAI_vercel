@@ -35,9 +35,13 @@ export function toJuryDetail(raw: RawDetail): JuryDetail {
 }
 
 /** The reviewed report by chapter, as the result page reads it. Real reports have no reading aids yet. */
-export function toReaderSource(raw: Pick<RawDetail, 'chapters'>): ReaderSource {
-  return { chapters: raw.chapters.map(item => ({ title: item.section, number: '', name: item.section, body: item.body })) };
+export function toReaderSource(raw: Pick<RawDetail, 'chapters' | 'preamble'>): ReaderSource {
+  const chapters = raw.chapters.map(item => ({ title: item.section, number: '', name: item.section, body: item.body }));
+  // The text before the first chapter (a title or introduction) is part of the reviewed report too.
+  const opening = raw.preamble ? [{ title: REPORT_OPENING, number: '', name: REPORT_OPENING, body: raw.preamble }] : [];
+  return { chapters: [...opening, ...chapters] };
 }
+export const REPORT_OPENING = '报告开头';
 
 const excerpt = (texts: readonly string[]) => texts.map(text => firstSentence(text.replace(/\s+/g, ' ').trim())).filter(Boolean).join(' ');
 
