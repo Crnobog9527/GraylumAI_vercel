@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import {describe, expect, it} from 'vitest';
-import {REPLY_LANGUAGE_INSTRUCTIONS,withPrimaryAddenda} from './primaryInstructions';
+import {REPLY_LANGUAGE,REPLY_LANGUAGE_INSTRUCTIONS,withPrimaryAddenda} from './primaryInstructions';
 import {sourceToolBytes} from './sourceRuntimeTool';
 import {agentTurnInstructions} from '../opc/agentTurnPrompt';
 
@@ -26,14 +26,15 @@ describe('workspace context instructions', () => {
     expect(text).not.toContain('intended positioning or account is ambiguous');
   });
 
-  it('adds only the reply-language rule for conversations without workspace context', () => {
-    expect(withPrimaryAddenda('base',{})).toBe('base'+REPLY_LANGUAGE_INSTRUCTIONS);
+  it('adds nothing for conversations without workspace context beyond the frozen reply-language rule', () => {
+    expect(withPrimaryAddenda('base',{})).toBe('base');
+    expect(withPrimaryAddenda('base',{replyLanguage:REPLY_LANGUAGE})).toBe('base'+REPLY_LANGUAGE_INSTRUCTIONS);
   });
 });
 
 describe('reply language (SKILL-I18N-HOOK)', () => {
   it('answers in the user language even though the Skill is written in Chinese', () => {
-    const text=withPrimaryAddenda('完整的中文 Skill 正文',{});
+    const text=withPrimaryAddenda('完整的中文 Skill 正文',{replyLanguage:REPLY_LANGUAGE});
     // Appended after the Skill, so cached Skill prefixes are unchanged.
     expect(text.startsWith('完整的中文 Skill 正文\nReply language (host rule)')).toBe(true);
     expect(text).toContain("write replies, questions, card options and reports in the user's language");
@@ -45,12 +46,19 @@ describe('reply language (SKILL-I18N-HOOK)', () => {
   });
 
   it('applies with every other addendum, exactly once', () => {
-    const text=withPrimaryAddenda('base',{workspaceContext:true,network:'require_latest',positioningGate:'fallback-v1'});
+    const text=withPrimaryAddenda('base',{workspaceContext:true,network:'require_latest',positioningGate:'fallback-v1',
+      replyLanguage:REPLY_LANGUAGE});
     expect(text.split('Reply language (host rule)')).toHaveLength(2);
   });
 
+  it('leaves contexts admitted before this rule byte-identical, so their crash replay keeps its request hash', () => {
+    expect(withPrimaryAddenda('base',{workspaceContext:true})).not.toContain('Reply language');
+    expect(withPrimaryAddenda('base',{replyLanguage:'reply-language-v0'})).toBe('base');
+  });
+
   it('also applies to positioning mentor turns, whose host rules carry only the short version', () => {
-    expect(withPrimaryAddenda('base',{mentorText:'append-card-v1'} as never)).toBe('base'+REPLY_LANGUAGE_INSTRUCTIONS);
+    expect(withPrimaryAddenda('base',{mentorText:'append-card-v1',replyLanguage:REPLY_LANGUAGE} as never))
+      .toBe('base'+REPLY_LANGUAGE_INSTRUCTIONS);
     expect(agentTurnInstructions()).toContain("Reply in the user's language");
     expect(agentTurnInstructions()).not.toContain('Taiwan usage');
   });
