@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-import { createHash } from 'node:crypto';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { RUNTIME_MODEL_COLUMNS, runtimeModelOption, type RuntimeModelRow } from '../models/runtimeEligibility';
+import { openRouterAccount, readOpenRouterKey } from '../models/openRouterKey';
 import type { z } from 'zod';
 import type { frozenCallPolicy } from '../bill2/service';
 import { PURPOSE_OUTPUT_CAP } from '../bill2/responseCapacity';
@@ -15,7 +15,7 @@ import type { StagingPolicy } from '../runtime/stagingPolicy';
 export const FUSION_REQUEST_FORMAT = 'fusion-json-v1-stream';
 export type FusionPhase = 'fusion_review' | 'fusion_summary';
 export type FusionModelRow = RuntimeModelRow & { provider: string; is_active: string; input_limit: number; max_tokens: number };
-/** Includes the stored key and endpoint, checked here only and never returned. */
+/** Includes the endpoint; the OpenRouter key is the platform secret (OR-1), checked here only and never returned. */
 export const FUSION_MODEL_COLUMNS = RUNTIME_MODEL_COLUMNS;
 type CallPolicy = z.infer<typeof frozenCallPolicy>;
 /** The host profile entry, before admission freezes its current prices (freezeStagingPaygPricing). */
@@ -36,10 +36,10 @@ export async function admitFusionModel(db: SupabaseClient, window: StagingPolicy
   // The stored transport must be able to dispatch (key, OpenRouter endpoint, id, limits, reasoning config),
   // and the key must be the one the window's quote is bound to, as stagingTransport checks at dispatch:
   // otherwise credits would be held for calls that can never be sent (#954 review).
-  if (!runtimeModelOption(row, 'organizer').available) throw new Error('FUSION_MODEL_UNAVAILABLE');
+  const key = await readOpenRouterKey(db).catch(() => undefined);
+  if (!runtimeModelOption(row, 'organizer', key !== undefined).available) throw new Error('FUSION_MODEL_UNAVAILABLE');
   const quote = window.callPolicies.find(policy => policy.modelId === row.id);
-  const key = row.api_key?.trim() ?? '';
-  if (quote && quote.account !== 'openrouter-key:' + createHash('sha256').update(key).digest('hex')) {
+  if (quote && quote.account !== openRouterAccount(key ?? '')) {
     throw new Error('FUSION_MODEL_ADMISSION_REQUIRED');
   }
   if (!quote || quote.model !== row.model_id || !quote.providerLimits

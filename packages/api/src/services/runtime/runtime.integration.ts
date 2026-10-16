@@ -5,6 +5,7 @@ import { configuredReasoning } from '../__tests__/fixtures/runtimeReasoning';
 import { beforeAll, afterAll, it, expect, vi } from 'vitest';
 import {logger} from '../../lib/logger';
 import { randomUUID, createHash } from 'node:crypto';
+import { clearTestOpenRouterKey, seedTestOpenRouterKey } from '../models/openRouterKey.testing';
 import pg from 'pg';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { PostgresSession } from './session';
@@ -454,7 +455,8 @@ it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true').each(['disabled','expired
  const user=createClient(process.env.V3_LOCAL_REST!,process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,{auth:{persistSession:false}});
  const login=await user.auth.signInWithPassword({email,password});if(login.error)throw login.error;
  const f=await fixture(created.data.user.id),model=randomUUID(),windowId=randomUUID(),key='SYNTHETIC_RECOVERY_ORIGINAL';
- await db.query("insert into ai_models(id,name,model_id,provider,is_active,api_endpoint,api_key) values($1,'Synthetic recovery','test/recovery','openai','true','https://openrouter.ai/api/v1',$2)",[model,key]);
+ await db.query("insert into ai_models(id,name,model_id,provider,is_active,api_endpoint) values($1,'Synthetic recovery','test/recovery','openai','true','https://openrouter.ai/api/v1')",[model]);
+ await seedTestOpenRouterKey(db,key);
  const policy={...f.billing.callPolicy[0],modelId:model,provider:'openrouter',account:'openrouter-key:'+createHash('sha256').update(key).digest('hex'),model:'test/recovery',protocol:'openrouter-chat-v1',providerLimits:{providerSlug:'synthetic',contextTokens:10000,promptUsdPerMillion:'2',completionUsdPerMillion:'0',requestUsd:'0'}};
  await db.query("insert into runtime_test_windows(id,enabled,actor_ids,call_policies,credits_per_usd,multiplier,max_cost_usd,max_calls,expires_at) values($1,true,$2,$3,1000,1,0.02,1,now()+interval '2 hours')",[windowId,[f.actorId],JSON.stringify([policy])]);
  const context={version:'runtime.v1',sdkVersion:'0.18.0',role:'ordinary',input:'hello',instructions:'Synthetic receipt recovery',model:'test/recovery',maxOutputTokens:100,maxTurns:1,historyItems:0,network:'deny',tools:[]};
@@ -585,7 +587,9 @@ it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true')('RUNTIME: staging window 
 },30000);
 it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true').each(['missing','mismatched'])('RUNTIME: staging %s credential fails before dispatch and releases only the unsent reservation',async(kind)=>{
  const f=await fixture(),model=randomUUID(),windowId=randomUUID(),key='SYNTHETIC_EXPECTED';
- await db.query("insert into ai_models(id,name,model_id,provider,is_active,api_endpoint,api_key) values($1,'Synthetic preflight','test/preflight','openai','true','https://openrouter.ai/api/v1',$2)",[model,kind==='missing'?null:'SYNTHETIC_OTHER']);
+ await db.query("insert into ai_models(id,name,model_id,provider,is_active,api_endpoint) values($1,'Synthetic preflight','test/preflight','openai','true','https://openrouter.ai/api/v1')",[model]);
+ // ADMIN-SECRETS OR-1: the platform OpenRouter key is either not filled in or is another key than the window quoted.
+ if(kind==='missing')await clearTestOpenRouterKey(db);else await seedTestOpenRouterKey(db,'SYNTHETIC_OTHER');
  const policy={...f.billing.callPolicy[0],modelId:model,provider:'openrouter',account:'openrouter-key:'+createHash('sha256').update(key).digest('hex'),model:'test/preflight',protocol:'openrouter-chat-v1',providerLimits:{providerSlug:'synthetic',contextTokens:10000,promptUsdPerMillion:'2',completionUsdPerMillion:'0',requestUsd:'0'}};
  await db.query("insert into runtime_test_windows(id,enabled,actor_ids,call_policies,credits_per_usd,multiplier,max_cost_usd,max_calls,expires_at) values($1,true,$2,$3,1000,1,0.02,1,now()+interval '2 hours')",[windowId,[f.actorId],JSON.stringify([policy])]);
  const context={version:'runtime.v1',sdkVersion:'0.18.0',role:'ordinary',input:'hello',instructions:'Synthetic preflight',model:'test/preflight',maxOutputTokens:100,maxTurns:1,historyItems:0,network:'deny',tools:[]};

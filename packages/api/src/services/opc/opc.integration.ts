@@ -16,6 +16,7 @@ import { OPENING_INPUT, confirmQuestionValues } from "../../shared/opcQuestions"
 import { agentTurnBody } from "../../shared/agentTurn";
 import { OPENING_EXTRACTION_RULE } from "./agentTurnPrompt";
 import type { Page } from "../../../../../apps/web/node_modules/@playwright/test";
+import { seedTestOpenRouterKey } from "../models/openRouterKey.testing";
 const connectionString = process.env.V3_LOCAL_DB!;
 if (
   !connectionString?.startsWith("postgres://postgres@127.0.0.1:") ||
@@ -1412,6 +1413,7 @@ it.skipIf(!process.env.V3_REAL_SKILL_INPUT)(
       "insert into ai_models(id,name,model_id,provider,is_active,api_key,api_endpoint,max_tokens,input_limit,token_counting_supported,tokenizer_family) values($1,'Runtime local','qwen/qwen3.8-27b','openai','true','LOCAL_ONLY','',4096,128000,'false','openai')",
       [model],
     );
+    await seedTestOpenRouterKey(sql, "LOCAL_ONLY");
     await saveModuleSkill(admin, f.owner, input);
     const stored = await admin.rpc("admin_read_skill_module", {
       p_actor_id: f.owner,
@@ -2477,6 +2479,7 @@ it.runIf(process.env.V3_LOCAL_STAGING_HOST === "true")(
         [quote.modelId, quote.model, key, JSON.stringify(config)],
       );
     }
+    await seedTestOpenRouterKey(sql, key);
     await sql.query("update modules set model_id=$1 where id=$2", [modelId, f.moduleId]);
     await sql.query(
       "insert into system_settings(key,value) values('v3_summary_model_id',to_jsonb($1::text)),('v3_summary_max_tokens','128'::jsonb) on conflict(key) do update set value=excluded.value",
@@ -3719,6 +3722,7 @@ it("OPC: a published revision's per-field elicitation reaches the read schema an
       "insert into ai_models(id,name,model_id,provider,is_active,api_key,api_endpoint,max_tokens,input_limit,token_counting_supported,tokenizer_family,config) values($1,'Stage B local','qwen/qwen3.8-27b','openai','true','LOCAL_ONLY','',4096,128000,'false','openai',$2)",
       [model, JSON.stringify(configuredReasoning("qwen/qwen3.8-27b"))],
     );
+    await seedTestOpenRouterKey(sql, "LOCAL_ONLY");
     const moduleId = randomUUID();
     await saveModuleSkill(admin, f.owner, {
       moduleId, skillId: pack.id, revisionId: pack.revisionId, requestId: pack.requestId,

@@ -22,6 +22,7 @@ import { aggregateCredits, decimal } from '../bill2/decimal';
 import type {StagingPolicy} from './stagingPolicy';
 import { throwIfContentBindingRefused } from '../opc/contentBindingError';
 import {StagingAccessError,stagingRpcFailure} from './stagingErrors';
+import {readOpenRouterKey} from '../models/openRouterKey';
 import {frozenCallPolicy, type FrozenPaygRun, type FrozenRun} from '../bill2/service';
 import { selectRuntimeHistory, fixtureInputCapacity, runtimeScopeInput } from './context';
 import { activateRuntimeCandidate, discoverRuntimeCandidates, fittingCandidates, matchingInput, MATCH_INSTRUCTIONS } from './matching';
@@ -231,14 +232,14 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
     instructions=withBrandIdentity(instructions,true);
     if(skillChars)skillChars+=BRAND_IDENTITY_INSTRUCTIONS.length+1;
    }
-   const row=await admin.from('ai_models').select('id,model_id,provider,is_active,max_tokens,input_limit,config,api_endpoint,api_key')
+   const row=await admin.from('ai_models').select('id,model_id,provider,is_active,max_tokens,input_limit,config,api_endpoint')
     .eq('id',modelId).single();
    // Match the actual administrator model to the enabled protocol and exact quote. Never substitute a default model.
    if(policy.real&&row.error){if(row.error.code==='PGRST116')throw unavailableModel();stagingRpcFailure(row.error);}
    if(row.error||row.data?.is_active!=='true'||(!policy.real&&row.data.provider!=='fixture'))throw unavailableModel();
-   // The OpenRouter key of this same row serves Decisions (no extra read); it never travels further.
-   const apiKey=policy.real?windowBoundKey(row.data,realModel(row.data).account):undefined;
-   delete (row.data as {api_key?:unknown}).api_key;
+   // The platform OpenRouter key bound to this window serves Decisions; it never travels further. An unreadable key
+   // only makes Decisions unavailable (conservative verdict), never another key.
+   const apiKey=policy.real?windowBoundKey(row.data,await readOpenRouterKey(admin).catch(()=>undefined),realModel(row.data).account):undefined;
    if(policy.real)realModel(row.data);
    // Decisions judges every other gated message, including a non-social Skill turning to social media; an admitted
    // gated turn always keeps the fallback rule, since Decisions does not see earlier turns ("好的，那帮我写三条").

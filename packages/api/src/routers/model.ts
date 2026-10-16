@@ -2,22 +2,22 @@ import { inferTokenCountingMetadata, withTokenCountingMetadata } from '../servic
 import { router, adminProcedure } from '../trpc';
 import { z } from 'zod';
 import { TRPCError } from '@trpc/server';
+import type { SupabaseClient } from '@supabase/supabase-js';
 import { createSafeInternalError } from '../lib/publicError';
 import { logger } from '../lib/logger';
 import {
-  getConfiguredProviderApiKey,
   getOpenAICompatibleHeaders,
   normalizeOpenAICompatibleEndpoint,
   usesOpenAICompatibleApi as usesOpenAICompatibleProvider,
 } from '../services/providerUtils';
 import { mergeConnectionState, withStoredManagedKeys } from '../services/models/modelConfig';
+import { openRouterKeyConfigured, readOpenRouterKey } from '../services/models/openRouterKey';
 
 type PersistedModel = {
   id: string;
   name: string;
   model_id: string;
   provider: 'anthropic' | 'openai' | 'google' | 'custom' | 'builtin' | null;
-  api_key?: string | null;
   api_endpoint?: string | null;
   config?: Record<string, unknown> | null;
 };
@@ -44,9 +44,10 @@ type AdminModelRow = Omit<PersistedModel, 'config'> & {
   config?: Record<string, unknown> | null;
 };
 
-function stripSensitiveModelFields<T extends { api_key?: string | null }>(model: T): Omit<T, 'api_key'> {
-  const { api_key: _apiKey, ...safeModel } = model;
-  for (const key of ['input_token_cost', 'output_token_cost', 'input_token_cost_above_200k',
+// `.select()` after an insert/update still returns the legacy api_key column (dropped in OR-2); never send it.
+function stripSensitiveModelFields<T extends object>(model: T): Omit<T, 'api_key'> {
+  const safeModel = { ...model };
+  for (const key of ['api_key', 'input_token_cost', 'output_token_cost', 'input_token_cost_above_200k',
     'output_token_cost_above_200k', 'web_search_cost']) Reflect.deleteProperty(safeModel, key);
   return safeModel;
 }
@@ -74,16 +75,15 @@ function logModelEndpointMetric(
   });
 }
 
+/** `hasApiKey`: the one platform OpenRouter key (admin third-party keys page, OR-1), the same for every model. */
 function buildConnectionStatusFromModels(data: Array<{
   id: string;
   name: string;
-  api_key?: string | null;
   config?: Record<string, unknown> | null;
   is_active: string;
-}>) {
+}>, hasApiKey: boolean) {
   return data.map((model) => {
     const config = (model.config as Record<string, unknown> | null) ?? {};
-    const hasApiKey = !!model.api_key;
 
     return {
       id: model.id,
@@ -97,6 +97,11 @@ function buildConnectionStatusFromModels(data: Array<{
       lastError: typeof config.last_error === 'string' ? config.last_error : null,
     };
   });
+}
+
+async function platformKeyConfigured(supabase: Pick<SupabaseClient, 'rpc'>) {
+  try { return await openRouterKeyConfigured(supabase); }
+  catch (error) { throw createModelOperationError('读取第三方密钥状态', error); }
 }
 
 async function persistConnectionState(
@@ -116,12 +121,24 @@ async function verifyAndPersistConnection(
   supabase: any,
   model: PersistedModel,
 ): Promise<ConnectionCheckResult> {
-  const apiKey = getConfiguredProviderApiKey(model.api_key);
+  let apiKey: string | undefined;
+  try {
+    apiKey = await readOpenRouterKey(supabase);
+  } catch {
+    const result: ConnectionCheckResult = {
+      success: false,
+      status: 'error',
+      error: '暂时无法读取第三方密钥，请稍后重试',
+      internalError: 'platform_secret_unavailable',
+    };
+    await persistConnectionState(supabase, model, result);
+    return result;
+  }
   if (!apiKey) {
     const result: ConnectionCheckResult = {
       success: false,
       status: 'no_key',
-      error: 'API 密钥未配置',
+      error: 'OpenRouter 密钥未填写，请到后台“第三方密钥”页填写',
     };
     await persistConnectionState(supabase, model, result);
     return result;
@@ -171,7 +188,7 @@ async function verifyAndPersistConnection(
       const result: ConnectionCheckResult = {
         success: true,
         status: 'configured',
-        message: 'API 密钥已保存，请配置 OpenAI / OpenRouter 兼容 endpoint 后再测试连接',
+        message: '请配置 OpenAI / OpenRouter 兼容 endpoint 后再测试连接',
       };
       await persistConnectionState(supabase, model, result);
       return result;
@@ -216,7 +233,7 @@ export const modelRouter = router({
   getAvailableModels: adminProcedure.query(async ({ ctx }) => {
     const { data, error } = await ctx.supabase
       .from('ai_models')
-      .select('id, name, model_id, provider, api_key, api_endpoint, description, max_tokens, input_limit, enable_web_search, token_counting_supported, token_counting_method, tokenizer_family, is_active, config, created_at, updated_at')
+      .select('id, name, model_id, provider, api_endpoint, description, max_tokens, input_limit, enable_web_search, token_counting_supported, token_counting_method, tokenizer_family, is_active, config, created_at, updated_at')
       .order('created_at', { ascending: false });
 
     if (error) {
@@ -230,7 +247,7 @@ export const modelRouter = router({
     const startedAt = Date.now();
     const { data, error } = await ctx.supabase
       .from('ai_models')
-      .select('id, name, model_id, provider, api_key, api_endpoint, description, max_tokens, input_limit, enable_web_search, token_counting_supported, token_counting_method, tokenizer_family, is_active, config, created_at, updated_at')
+      .select('id, name, model_id, provider, api_endpoint, description, max_tokens, input_limit, enable_web_search, token_counting_supported, token_counting_method, tokenizer_family, is_active, config, created_at, updated_at')
       .order('created_at', { ascending: false });
 
     if (error) {
@@ -238,16 +255,9 @@ export const modelRouter = router({
     }
 
     const models = (data ?? []) as AdminModelRow[];
-    const connectionSource = models as Array<{
-      id: string;
-      name: string;
-      api_key?: string | null;
-      config?: Record<string, unknown> | null;
-      is_active: string;
-    }>;
     const result = {
       models: models.map((model) => stripSensitiveModelFields(withTokenCountingMetadata(model))),
-      connectionStatus: buildConnectionStatusFromModels(connectionSource),
+      connectionStatus: buildConnectionStatusFromModels(models, await platformKeyConfigured(ctx.supabase)),
     };
 
     logModelEndpointMetric('model.getAdminModelsDashboard', startedAt, {
@@ -264,7 +274,6 @@ export const modelRouter = router({
       name: z.string().min(1).max(100),
       modelId: z.string().min(1).max(100),
       provider: z.enum(['anthropic', 'openai', 'google', 'custom', 'builtin']).default('openai'),
-      apiKey: z.string().optional(),
       apiEndpoint: z.string().optional(),
       description: z.string().optional(),
       enableWebSearch: z.boolean().default(false),
@@ -282,7 +291,6 @@ export const modelRouter = router({
           name: input.name,
           model_id: input.modelId,
           provider: input.provider,
-          api_key: input.apiKey,
           api_endpoint: input.apiEndpoint,
           description: input.description,
           enable_web_search: input.enableWebSearch ? 'true' : 'false',
@@ -312,7 +320,6 @@ export const modelRouter = router({
       name: z.string().min(1).max(100).optional(),
       modelId: z.string().min(1).max(100).optional(),
       provider: z.enum(['anthropic', 'openai', 'google', 'custom', 'builtin']).optional(),
-      apiKey: z.string().optional(),
       apiEndpoint: z.string().optional(),
       description: z.string().optional(),
       enableWebSearch: z.boolean().optional(),
@@ -335,7 +342,6 @@ export const modelRouter = router({
       if (input.name !== undefined) updateData.name = input.name;
       if (input.modelId !== undefined) updateData.model_id = input.modelId;
       if (input.provider !== undefined) updateData.provider = input.provider;
-      if (input.apiKey !== undefined) updateData.api_key = input.apiKey;
       if (input.apiEndpoint !== undefined) updateData.api_endpoint = input.apiEndpoint;
       if (input.description !== undefined) updateData.description = input.description;
       if (input.enableWebSearch !== undefined) updateData.enable_web_search = input.enableWebSearch ? 'true' : 'false';
@@ -366,7 +372,6 @@ export const modelRouter = router({
         throw createModelOperationError('更新模型', error);
       }
       const shouldVerifyConnection =
-        input.apiKey !== undefined ||
         input.apiEndpoint !== undefined ||
         input.modelId !== undefined ||
         input.provider !== undefined;
@@ -423,7 +428,7 @@ export const modelRouter = router({
       // Get model details
       const { data: model, error: fetchError } = await ctx.supabase
         .from('ai_models')
-        .select('id, name, model_id, provider, api_key, api_endpoint, config')
+        .select('id, name, model_id, provider, api_endpoint, config')
         .eq('id', input.id)
         .single();
 
@@ -443,7 +448,7 @@ export const modelRouter = router({
     const startedAt = Date.now();
     const { data, error } = await ctx.supabase
       .from('ai_models')
-      .select('id, name, api_key, config, is_active')
+      .select('id, name, config, is_active')
       .order('name');
 
     if (error) {
@@ -453,10 +458,9 @@ export const modelRouter = router({
     const result = buildConnectionStatusFromModels((data ?? []) as Array<{
       id: string;
       name: string;
-      api_key?: string | null;
       config?: Record<string, unknown> | null;
       is_active: string;
-    }>);
+    }>, await platformKeyConfigured(ctx.supabase));
 
     logModelEndpointMetric('model.getConnectionStatus', startedAt, {
       queryCount: 1,
