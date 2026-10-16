@@ -20,6 +20,8 @@ export type MethodPurchase = {
 
 /** The fields of `payments.methodMembership` the purchase entry reads. */
 export type MethodMembershipEntry = {
+  /** Payment mode the server sells in; only 'test' (Stripe test mode, no real money) may use the interim refund link. */
+  mode?: string;
   checkoutReady: boolean;
   termsVersion: string | null;
   goldFirstMonthEligible: boolean;
@@ -43,7 +45,21 @@ export const METHOD_COPY: Record<CardMethod, { label: string; note: string | nul
   card_cn: { label: '中国大陆银行卡', note: '仅限中国大陆用户', tax: '不另收税' },
 };
 
-export const TERMS_LINKS = { terms: '/terms', refund: '/faq' } as const;
+/**
+ * MASTER_PLAN §2.1 item 51 record W: checkout links both the terms and a separate refund policy. The policy text is the
+ * Owner's (not written here); set its page path once it is published. Until then only Stripe test mode may link the
+ * FAQ refund answer as an interim, and real-money checkout stays closed (checkoutEntryOpen).
+ */
+export const REFUND_POLICY_PATH: string | null = null;
+const INTERIM_TEST_REFUND_PATH = '/faq';
+
+export const TERMS_LINKS = { terms: '/terms' } as const;
+
+/** The refund-policy link for this entry, or null when checkout must stay closed for lack of one. */
+export function refundPolicyHref(entry: Pick<MethodMembershipEntry, 'mode'> | null | undefined, policyPath = REFUND_POLICY_PATH) {
+  if (policyPath) return policyPath;
+  return entry?.mode === 'test' ? INTERIM_TEST_REFUND_PATH : null;
+}
 
 export const CHECKOUT_COPY = {
   unavailable: '暂时无法创建付款，请稍后查看原订单状态',
@@ -68,7 +84,7 @@ export function checkoutEntryOpen(entry: MethodMembershipEntry | null | undefine
   termsVersion: string; routes: NonNullable<MethodMembershipEntry['routes']>;
 } {
   return Boolean(entry && entry.checkoutReady === true && typeof entry.termsVersion === 'string'
-    && entry.termsVersion.length > 0 && entry.routes);
+    && entry.termsVersion.length > 0 && entry.routes && refundPolicyHref(entry) !== null);
 }
 
 /** Card methods the routes allow for this item; the mainland card only sells membership subscriptions. */

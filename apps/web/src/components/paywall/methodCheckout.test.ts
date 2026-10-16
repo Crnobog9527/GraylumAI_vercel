@@ -1,12 +1,12 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { describe, expect, it } from 'vitest';
 import {
-  CHECKOUT_COPY, founderSeatsLeft, METHOD_COPY, cardMethods, checkoutEntryOpen, describeCheckoutError, isStripeCheckoutUrl,
+  CHECKOUT_COPY, REFUND_POLICY_PATH, refundPolicyHref, founderSeatsLeft, METHOD_COPY, cardMethods, checkoutEntryOpen, describeCheckoutError, isStripeCheckoutUrl,
   type MethodMembershipEntry,
 } from './methodCheckout';
 
 const entry = (patch: Partial<MethodMembershipEntry> = {}): MethodMembershipEntry => ({
-  checkoutReady: true, termsVersion: 'terms-2026-10', goldFirstMonthEligible: true,
+  mode: 'test', checkoutReady: true, termsVersion: 'terms-2026-10', goldFirstMonthEligible: true,
   routes: { version: 7, card: { enabled: true }, card_cn: { enabled: true } }, ...patch,
 });
 const trpcError = (code: string, message: string) => Object.assign(new Error(message), { data: { code } });
@@ -19,6 +19,17 @@ describe('purchase entry', () => {
     expect(checkoutEntryOpen(entry({ termsVersion: '' }))).toBe(false);
     expect(checkoutEntryOpen(entry({ routes: null }))).toBe(false);
     expect(checkoutEntryOpen(undefined)).toBe(false);
+  });
+  it('never takes real money without a published refund policy page (record W)', () => {
+    // No policy page yet: live mode stays closed, a missing mode counts as live, test mode links the FAQ interim.
+    expect(REFUND_POLICY_PATH).toBeNull();
+    expect(checkoutEntryOpen(entry({ mode: 'live' }))).toBe(false);
+    expect(checkoutEntryOpen(entry({ mode: undefined }))).toBe(false);
+    expect(refundPolicyHref({ mode: 'live' })).toBeNull();
+    expect(refundPolicyHref({ mode: 'test' })).toBe('/faq');
+    // Once the Owner's policy page is published its path is used in every mode.
+    expect(refundPolicyHref({ mode: 'live' }, '/refund-policy')).toBe('/refund-policy');
+    expect(refundPolicyHref({ mode: 'test' }, '/refund-policy')).toBe('/refund-policy');
   });
   it('offers the mainland card for memberships only, and only switched-on methods', () => {
     expect(cardMethods(entry(), 'membership_plan')).toEqual(['card', 'card_cn']);

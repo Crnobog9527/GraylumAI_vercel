@@ -3,7 +3,7 @@
 
 import { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
-import { CHECKOUT_COPY, METHOD_COPY, TERMS_LINKS, type CardMethod, type MethodPurchase } from './methodCheckout';
+import { CHECKOUT_COPY, METHOD_COPY, TERMS_LINKS, refundPolicyHref, type CardMethod, type MethodPurchase } from './methodCheckout';
 import type { MethodCheckout } from './useMethodCheckout';
 
 type Props = {
@@ -97,7 +97,8 @@ export function MethodCheckoutForm(props: Props) {
         <span>
           我已阅读并同意
           <a className="underline" href={TERMS_LINKS.terms} target="_blank" rel="noopener noreferrer">《服务条款》</a>和
-          <a className="underline" href={TERMS_LINKS.refund} target="_blank" rel="noopener noreferrer">《退款政策》</a>
+          <a className="underline"
+            data-testid={`${id}-refund-link`} href={refundPolicyHref(checkout.entry) ?? undefined} target="_blank" rel="noopener noreferrer">《退款政策》</a>
         </span>
       </label>
 
