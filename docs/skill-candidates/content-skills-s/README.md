@@ -34,7 +34,7 @@ Owner 2026-10-17（总控转达）：这批是**测试用的第一版**，Owner 
 
 ## 发布到 staging（由总控安排）
 
-授权：Owner 2026-10-17（总控转达）同意把这批作为测试版先放到 staging 做测试，不再逐个看样例（原话："你现在先生成一批放在上面，我们做测试就行了"）。这只覆盖 staging 测试；以后作为正式版本发布（含正式环境），仍按 #621 第 14 节 Q2 由 Owner 看过样例并单独确认。
+授权：Owner 2026-10-17（总控转达）同意把这批作为测试版先放到 staging 做测试，不再逐个看样例（原话："你现在先生成一批放在上面，我们做测试就行了"）。这条决定记在 [Master Plan 第 2.1 节](../../launch/MASTER_PLAN.md) 2026-10-17 条。这只覆盖 staging 测试；以后作为正式版本发布（含正式环境），仍按 #621 第 14 节 Q2 由 Owner 看过样例并单独确认。
 
 1. 用后台现有的管理员 Skill 包发布，每个目录（目录名等于 `name`）上传一次，生成新的不可变版本。
    `short-video-script`、`post-and-article` 现在就能发布。`video-storyboard`、`video-editing-guide` 带 `contentSource`，
