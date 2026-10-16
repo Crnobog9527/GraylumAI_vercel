@@ -41,6 +41,16 @@ export async function reportEnabled(admin: SupabaseClient) {
   const enabled: unknown = setting.data?.value;
   return z.object({ enabled: z.literal(true) }).strict().safeParse(enabled).success;
 }
+/**
+ * Host-computed benchmark numbers for report facts (the qualified-count gate itself is in SQL report admission).
+ * Rollout: before 0268 the RPC does not exist (PGRST202); the report is then built as before, with no rows or hash.
+ */
+export async function reportBenchmarks(admin: SupabaseClient, actorId: string, sessionId: string) {
+  const rows = await admin.rpc('research_benchmark_rows', { a: actorId, s: sessionId });
+  if (rows.error?.code === 'PGRST202') return { serialized: null, hash: undefined };
+  if (rows.error) throw new Error('REPORT_UNAVAILABLE');
+  return benchmarkReportFacts(rows.data);
+}
 export function reportService(user: SupabaseClient, admin: SupabaseClient, policy: LocalRuntimePolicy) {
   async function actor() {
     const auth = await user.auth.getUser();
@@ -96,10 +106,7 @@ export function reportService(user: SupabaseClient, admin: SupabaseClient, polic
         if (existing && reportBlocksNewStart(existing.saved)) throw new Error('REPORT_ALREADY_EXISTS');
         const snapshot = snapshotSchema.parse(source.snapshot);
         const facts = confirmedReportFacts(snapshot);
-        // Host-computed benchmark numbers; the qualified-count gate itself is in SQL report admission.
-        const rows = await admin.rpc('research_benchmark_rows', { a: await actor(), s: input.sessionId });
-        if (rows.error) throw new Error('REPORT_UNAVAILABLE');
-        const benchmarks = benchmarkReportFacts(rows.data);
+        const benchmarks = await reportBenchmarks(admin, await actor(), input.sessionId);
         const reportGeneration = frozenReport.parse({ version: 1, projectId: input.projectId, roundId: input.roundId,
           evidenceIds: [...new Set(Object.values(snapshot.steps).flatMap(step => [...step.evidenceIds, ...step.provenanceIds]))],
           snapshotHash: source.snapshotHash, packageHash: snapshot.packageHash, workflowHash: snapshot.workflowHash,

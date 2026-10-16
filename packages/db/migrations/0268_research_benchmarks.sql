@@ -15,9 +15,11 @@
 -- Erasure: deleting a conversation, an answer (the one that produced the row) or an artifact whose evidence a row uses,
 -- and account erasure, delete the rows. Rows hold no money.
 -- Function patches are text-marker patches (packages/db/tests/content-erasure/md5-chain.mjs).
--- Compatibility: a new table and functions; old code never reads them. Repeatable: IF NOT EXISTS, CREATE OR REPLACE,
+-- Compatibility: a new table and functions; old code never reads them. Old code freezes reports without benchmarkHash
+-- (and without benchmark rows): only the qualified-count gate applies to those. New code on an old database treats the
+-- missing research_benchmark_rows as an empty table. Repeatable: IF NOT EXISTS, CREATE OR REPLACE,
 -- DROP TRIGGER IF EXISTS, marker-skipped patches. Recovery: drop the trigger, functions and table, and restore
--- report_admission_check, content_erasure_confirm and account_erasure_scrub_content from their previous definitions;
+-- report_admission_check, bill2_payg_claim, content_erasure_confirm and account_erasure_scrub_content from their previous definitions;
 -- the rows are re-derivable from research_account_fetches.
 BEGIN;
 SET LOCAL lock_timeout='5s';
@@ -233,6 +235,22 @@ BEGIN
   RETURN research_benchmark_table(a,s);
 END $$;
 
+-- The benchmark rows frozen into a report's instructions must still be the current ones (deleted or refreshed since:
+-- conflict). Run at report admission and at every report model-call claim (a report may wait for credits or resume).
+-- Callers hold the session (runtime_admit) or the run (bill2_payg_claim); share-locking this session's fetch and
+-- benchmark rows first makes a finish, refresh or deletion either commit before the hash is read or wait for the caller.
+-- Order as deletion: session, then fetch and benchmark rows. A report frozen without a hash (code before 0268) carries
+-- no benchmark rows, so there is nothing to compare; the qualified-count gate applies to it all the same.
+CREATE OR REPLACE FUNCTION public.research_benchmark_report_current(a uuid, s uuid, frozen jsonb) RETURNS void
+LANGUAGE plpgsql SET search_path=public,pg_temp AS $$
+BEGIN
+  IF frozen IS NULL OR NOT frozen ? 'benchmarkHash' THEN RETURN;END IF;
+  PERFORM 1 FROM research_account_fetches WHERE session_id=s FOR SHARE;
+  PERFORM 1 FROM research_benchmarks WHERE session_id=s FOR SHARE;
+  IF (research_benchmark_table(a,s)->>'hash') IS DISTINCT FROM frozen->>'benchmarkHash' THEN
+    RAISE EXCEPTION 'REPORT_SOURCE_CONFLICT';END IF;
+END $$;
+
 -- Report gate, after every existing report refusal so those keep their codes.
 DO $$ DECLARE definition text; t text; BEGIN
   definition:=pg_get_functiondef('public.report_admission_check(uuid,uuid,jsonb,jsonb)'::regprocedure);
@@ -244,13 +262,20 @@ DO $$ DECLARE definition text; t text; BEGIN
  -- 0268 benchmark gate: qualified benchmark accounts of this session (RESEARCH_TOOLS_PLAN §1.5).
  IF research_benchmark_qualified(a,sid)<research_benchmark_required((SELECT scope FROM runtime_sessions WHERE id=sid),spec) THEN
   RAISE EXCEPTION 'REPORT_BENCHMARKS_REQUIRED';END IF;
- -- The benchmark rows frozen into the report instructions must still be the current ones (deleted or refreshed since:
- -- conflict). runtime_admit holds the session FOR UPDATE, so no new fetch can be claimed; share-locking this session's
- -- fetch rows first makes a finish (and its benchmark trigger) either commit before the hash is read or wait for this
- -- admission. Same order as deletion: session, then fetch rows.
- PERFORM 1 FROM research_account_fetches WHERE session_id=sid FOR SHARE;
- IF (research_benchmark_table(a,sid)->>'hash') IS DISTINCT FROM context#>>'{reportGeneration,benchmarkHash}' THEN
-  RAISE EXCEPTION 'REPORT_SOURCE_CONFLICT';END IF;$x$);
+ PERFORM research_benchmark_report_current(a,sid,context->'reportGeneration');$x$);
+  END IF;
+END $$;
+
+-- Report model-call claims re-check the frozen rows, next to the existing snapshotHash re-check.
+DO $$ DECLARE definition text; t text; BEGIN
+  definition:=pg_get_functiondef('public.bill2_payg_claim(uuid,uuid,integer,jsonb)'::regprocedure);
+  IF position('-- 0268 benchmark claim' IN definition)=0 THEN
+    t:=$x$IS DISTINCT FROM r.payload#>>'{input,reportGeneration,snapshotHash}' THEN RAISE EXCEPTION 'REPORT_SOURCE_CONFLICT';END IF;$x$;
+    IF array_length(string_to_array(definition,t),1)<>2 THEN
+      RAISE EXCEPTION 'RESEARCH_BENCHMARK_SOURCE_MISMATCH: bill2_payg_claim';END IF;
+    EXECUTE replace(definition,t,t||$x$
+  -- 0268 benchmark claim
+  PERFORM research_benchmark_report_current(a,r.session_ref,r.payload#>'{input,reportGeneration}');$x$);
   END IF;
 END $$;
 
@@ -284,7 +309,7 @@ END $$;
 
 REVOKE ALL ON FUNCTION public.research_benchmark_item(uuid,uuid,text),public.research_benchmark_project(research_account_fetches),
   public.research_benchmark_sync(),public.research_benchmark_qualified(uuid,uuid),public.research_benchmark_required(jsonb,jsonb),
-  public.research_benchmark_table(uuid,uuid)
+  public.research_benchmark_table(uuid,uuid),public.research_benchmark_report_current(uuid,uuid,jsonb)
   FROM PUBLIC,anon,authenticated,service_role;
 REVOKE ALL ON FUNCTION public.research_benchmark_rows(uuid,uuid) FROM PUBLIC,anon,authenticated;
 GRANT EXECUTE ON FUNCTION public.research_benchmark_rows(uuid,uuid) TO service_role;

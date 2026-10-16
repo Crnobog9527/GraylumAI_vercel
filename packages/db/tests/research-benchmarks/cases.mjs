@@ -173,8 +173,20 @@ export async function runCases({db,Client,connectionString,report}) {
     await gate(f,frozen);
     await erase(db,f,'answer',e3);
     await assert.rejects(gate(f,frozen),/REPORT_SOURCE_CONFLICT/);
-    await assert.rejects(gate(f,null),/REPORT_SOURCE_CONFLICT/,'a report without the hash is refused');
+    // A report frozen by code before 0268 carries no rows and no hash: only the count gate applies (rollout order).
+    await gate(f,null);
     await gate(f);
+    // Every report model-call claim re-checks the same frozen rows (a report may wait for credits or resume).
+    const claimDefinition = (await db.query(
+      "SELECT pg_get_functiondef('public.bill2_payg_claim(uuid,uuid,integer,jsonb)'::regprocedure) d")).rows[0].d;
+    const branch = claimDefinition.slice(claimDefinition.indexOf("IF r.payload#>'{input,reportGeneration}' IS NOT NULL THEN"));
+    assert.match(branch.slice(0,branch.indexOf(' END IF;\n')+1200),
+      /research_benchmark_report_current\(a,r\.session_ref,r\.payload#>'\{input,reportGeneration\}'\)/);
+    const current = async frozen => db.query('SELECT research_benchmark_report_current($1,$2,$3)',[f.actor,f.session,frozen]);
+    const now = (await rpc(db,'research_benchmark_rows',f.actor,f.session)).hash;
+    await current({benchmarkHash:now});
+    await current({});
+    await assert.rejects(current({benchmarkHash:frozen}),/REPORT_SOURCE_CONFLICT/);
     // Deleting the answer that produced one qualified row drops it below 3: refused again.
     await erase(db,f,'answer',e2);
     assert.equal((await rows(db,'execution_id=$1',[e2])).length,0);

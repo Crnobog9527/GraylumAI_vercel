@@ -2,7 +2,7 @@
 import { expect, it, vi } from 'vitest';
 import { randomUUID } from 'node:crypto';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { REPORT_REQUEST_INPUT, reportEnabled, reportService, reportError } from './service';
+import { REPORT_REQUEST_INPUT, reportBenchmarks, reportEnabled, reportService, reportError } from './service';
 import { runtimeAdmissionService } from '../runtime/admission';
 const id = randomUUID();
 const input = { sessionId: id, projectId: id, roundId: id, requestId: id };
@@ -211,4 +211,15 @@ it.each([
   ['private database failure', 'REPORT_UNAVAILABLE'],
 ])('report boundary maps %s to a stable public code', (internal, expected) => {
   expect(() => reportError(new Error(internal))).toThrow(expected);
+});
+it('benchmark facts: rows and hash from the host RPC; an older database without it builds the report as before', async () => {
+  type Result = { data: unknown; error: { code: string; message: string } | null };
+  const rpc = vi.fn(async (): Promise<Result> => ({ data: { rows: [], hash: 'f'.repeat(64) }, error: null }));
+  const admin = { rpc } as unknown as SupabaseClient;
+  expect(await reportBenchmarks(admin, id, id)).toEqual({ serialized: null, hash: 'f'.repeat(64) });
+  expect(rpc).toHaveBeenCalledWith('research_benchmark_rows', { a: id, s: id });
+  rpc.mockResolvedValueOnce({ data: null, error: { code: 'PGRST202', message: 'Could not find the function' } });
+  expect(await reportBenchmarks(admin, id, id)).toEqual({ serialized: null, hash: undefined });
+  rpc.mockResolvedValueOnce({ data: null, error: { code: '42501', message: 'RESEARCH_SCOPE_DENIED' } });
+  await expect(reportBenchmarks(admin, id, id)).rejects.toThrow('REPORT_UNAVAILABLE');
 });
