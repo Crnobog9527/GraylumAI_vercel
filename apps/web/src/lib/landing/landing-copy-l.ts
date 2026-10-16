@@ -37,22 +37,98 @@ export const L_NOTE_REGIONS: Readonly<Record<string, string>> = {
 };
 
 /**
- * 3: daily operations, not positioning (Owner 2026-10-17). Each step is a stage of sample J's week (J_WEEK, by its
- * stage index), shown as the coach's real conversation; it plays on by itself and every step can be clicked.
+ * 3: one week of operations as one conversation (Owner 2026-10-17: show the coach testing openings and turning a winner
+ * into a series in the animation; "只需要你在动画里面去展示"). The page's own person (下班后 15 分钟家常菜). The A/B
+ * comparison and the series are what the positioning Skill already guides in conversation (operations: change one or
+ * two variables a week; scale a proven template into a series); there is no automatic testing tool, so the person
+ * pastes their own numbers. Publishing to several platforms closes the week only with the `publish` flag. The figures
+ * are the example's. NEW wording.
  */
+export type OpsCard =
+  | { kind: 'topics'; items: readonly { title: string; why: string }[] }
+  | { kind: 'draft'; title: string; lines: readonly string[]; shots: string }
+  | { kind: 'test'; variants: readonly { name: string; opening: string }[]; measure: string }
+  | { kind: 'result'; columns: readonly string[]; rows: readonly (readonly string[])[]; winner: string }
+  | { kind: 'series'; items: readonly string[]; extra: string };
+export type OpsLine = { role: 'user' | 'coach'; text: string; card?: OpsCard; needs?: readonly LandingFeature[]; without?: LandingFeature };
+
 export const L_OPS = {
   /** The plan's main line. */
   lede: '你只管用大白话和教练说，账号的细节全交给它。',
+  title: '下班后 15 分钟家常菜 · 这一周',
+  /** Under the steps: what the week leaves you with. */
+  close: '你只是聊了几句，下周做什么、为什么，都清楚了。',
   /** How long each step stays before the next one (milliseconds). */
-  stepMs: 7000,
+  stepMs: 8000,
   pause: '暂停',
   play: '继续播放',
   steps: [
-    { stage: 1, label: '排选题', line: '按你的定位排好这周的选题，每条说清为什么值得拍；你说不行，它当场换。', needs: ['content'] },
-    { stage: 2, label: '写口播稿和分镜', line: '按你说话的习惯写好口播稿，再给分镜和开头怎么拍的建议。', needs: ['content'] },
-    { stage: 3, label: '一次发多个平台', line: '每个平台的标题和标签分别改好，你确认一次就一起发出。', needs: ['publish'] },
-    { stage: 4, label: '看数据，定下周', line: '读取各平台的数据，告诉你哪条有效、哪里留不住人，下周怎么调。', needs: ['publish'] },
-  ] as readonly { stage: number; label: string; line: string; needs: readonly LandingFeature[] }[],
+    {
+      label: '排选题', line: '你问一句"这周拍什么"，它按你的定位和对标账号给出三个选题，每个都说清为什么值得拍。', needs: ['content'],
+      lines: [
+        { role: 'user', text: '这周拍什么？' },
+        {
+          role: 'coach', text: '按你的定位和对标账号里收藏最多的几类题，这周我建议这三个：',
+          card: { kind: 'topics', items: [
+            { title: '一口锅，15 分钟两菜一汤', why: '最能证明"下班后也来得及"，对标账号同类题收藏最高' },
+            { title: '冰箱剩菜三种做法', why: '接上你说的"青菜三天吃不完"，一人住的人最有共鸣' },
+            { title: '超市半成品改造', why: '最省事，适合累的那几天' },
+          ] },
+        },
+      ],
+    },
+    {
+      label: '写口播稿和分镜', line: '你挑一个，它写好口播稿和分镜，句子短、像你说话。', needs: ['content'],
+      lines: [
+        { role: 'user', text: '先拍第一个。' },
+        { role: 'coach', text: '口播稿按你的文风写好了：句子短，不说"家人们"，也没有 AI 腔。', needs: ['voice'] },
+        { role: 'coach', text: '口播稿按你平时说话的习惯写好了：句子短，不说"家人们"。', without: 'voice' },
+        {
+          role: 'coach', text: '分镜也排好了：',
+          card: { kind: 'draft', title: '口播稿（节选）', lines: [
+            '下班到家七点，这顿饭我十五分钟搞定。',
+            '一口锅，先炒菜，再借锅底的油煮汤。',
+          ], shots: '分镜：成品 → 备菜 → 下锅 → 装盘，只拍手和锅' },
+        },
+      ],
+    },
+    {
+      label: '设计对比测试', line: '它让你拍两版，只改开头一处，下周就知道哪种开头更留得住人。', needs: ['content'],
+      lines: [
+        {
+          role: 'coach', text: '这条拍两版，别的都一样，只改开头。下周比收藏和评论：',
+          card: { kind: 'test', variants: [
+            { name: 'A 版', opening: '先说结论："十五分钟，两菜一汤。"' },
+            { name: 'B 版', opening: '先讲故事："上周加班到九点，冰箱里只剩一把青菜……"' },
+          ], measure: '一次只改一个地方，才看得出是开头起的作用' },
+        },
+        { role: 'user', text: '好，两版都拍。' },
+      ],
+    },
+    {
+      label: '一周后看结果', line: '一周后你把数字贴给它，它告诉你哪版赢了、为什么，下次怎么写。', needs: ['content'],
+      lines: [
+        { role: 'user', text: 'A 版收藏 186、评论 23；B 版收藏 74、评论 31。' },
+        {
+          role: 'coach', text: 'A 版赢了，收藏是 B 版的两倍多：大家把它当菜谱存下来。B 版评论多一点，故事能引人说话，但没让人想收藏。',
+          card: { kind: 'result', columns: ['', '收藏', '评论'], rows: [['A 版 先说结论', '186', '23'], ['B 版 先讲故事', '74', '31']],
+            winner: '以后开头先给结论，故事放到结尾，两样都要' },
+        },
+      ],
+    },
+    {
+      label: '做成系列', line: '赢的那条做成系列，再改一版图文，下周计划直接排好。', needs: ['content'],
+      lines: [
+        {
+          role: 'coach', text: '把赢的那条做成"一口锅 15 分钟"系列，下周排三期：',
+          card: { kind: 'series', items: ['第 1 期：番茄炒蛋 + 紫菜蛋花汤', '第 2 期：青椒肉丝 + 冬瓜汤', '第 3 期：蒜蓉青菜 + 剩饭蛋炒饭'],
+            extra: '第 1 期再改一版图文：步骤拆成六张图，方便收藏' },
+        },
+        { role: 'coach', text: '三期都排进下周了。确认一次，就一起发到 TikTok、Instagram 和 YouTube。', needs: ['publish'] },
+        { role: 'user', text: '可以，就这么排。' },
+      ],
+    },
+  ] as readonly { label: string; line: string; needs: readonly LandingFeature[]; lines: readonly OpsLine[] }[],
 } as const;
 
 /**

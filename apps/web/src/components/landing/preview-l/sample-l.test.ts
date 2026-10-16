@@ -7,7 +7,6 @@ import { SampleJ } from '@/components/landing/preview-j/SampleJ';
 import { SampleK } from '@/components/landing/preview-k/SampleK';
 import { J_PRICE } from '@/lib/landing/landing-copy-j';
 import { J_PRICE_TOTAL } from '@/lib/landing/landing-copy-j-price';
-import { J_SAMPLES } from '@/lib/landing/landing-copy-j-samples';
 import { J_WEEK } from '@/lib/landing/landing-copy-j-week';
 import { L_CARE, L_COMPARE_NEXT, L_COMPARE_TITLE, L_HERO_FLOW, L_NOTE_REGIONS, L_OPS, L_REPORTS } from '@/lib/landing/landing-copy-l';
 import { loadSampleReport, SAMPLE_CHAPTERS } from '@/lib/landing/sample-reports';
@@ -60,15 +59,26 @@ describe('style sample L (sample K, second round, Owner 2026-10-17)', () => {
     for (const note of VOICE_WALL.notes.filter(item => item.source.startsWith('Reddit'))) expect(L_NOTE_REGIONS[note.id]).toBe('英文论坛');
   });
 
-  it('makes region 3 daily operations from the real week conversation: clickable steps, no claims the product lacks', () => {
+  it('tells region 3 as one week: topics, script, a test of two openings, the result you paste in, a series', () => {
     const html = render();
     const ops = html.slice(html.indexOf('id="ops-title"'), html.indexOf('id="samples-title"'));
     expect(ops).toContain(L_OPS.lede);
+    expect(ops).toContain(L_OPS.close);
     expect((ops.match(/role="tab"/g) ?? []).length).toBe(L_OPS.steps.length);
-    expect(ops).toContain(escape(J_WEEK.topics.items[0].title));
-    for (const word of ['AB 测试', 'A/B', '延伸']) expect(html).not.toContain(word);
-    expect(render({ ...ALL_ON, publish: false }).match(/role="tab"/g)?.length).toBe(
-      L_OPS.steps.filter(step => !step.needs.includes('publish')).length + J_SAMPLES.reports.length * 0);
+    for (const step of L_OPS.steps) expect(ops).toContain(step.label);
+    // The first step's conversation is in the server HTML.
+    expect(ops).toContain(escape(L_OPS.steps[0].lines[0].text));
+    // The numbers come from the person, not from the product reading the platforms by itself.
+    const result = L_OPS.steps.find(step => step.label === '一周后看结果');
+    expect(result?.lines[0].role).toBe('user');
+    expect(JSON.stringify(L_OPS.steps)).not.toContain('读取');
+  });
+
+  it('shows the voice and publishing lines of the week only with their flags', () => {
+    const lines = L_OPS.steps.flatMap(step => step.lines);
+    expect(lines.filter(line => line.needs?.includes('voice'))).toHaveLength(1);
+    expect(lines.filter(line => line.without === 'voice')).toHaveLength(1);
+    expect(lines.some(line => line.needs?.includes('publish'))).toBe(true);
   });
 
   it('moves every group\'s sample report as a card that opens in a dialog (off unless the preview or the flag shows them)', () => {

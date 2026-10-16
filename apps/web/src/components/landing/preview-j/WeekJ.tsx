@@ -37,9 +37,8 @@ const reducedMotion = () => Boolean(window.matchMedia?.('(prefers-reduced-motion
  * labels light with the stage of the newest message, and each is a button: it plays that module from its start (Owner
  * 2026-10-15, round six). It loops while on screen. The server HTML and reduced motion show the review stage, finished.
  * `still` (sample K, Owner 2026-10-17): one stage's messages as a still picture, no stage buttons, nothing playing.
- * `wide` (sample L): the window alone at its container's full width, without the loop around it.
  */
-export function WeekJ({ still, wide = false }: { still?: number; wide?: boolean } = {}) {
+export function WeekJ({ still }: { still?: number } = {}) {
   // -1: at rest. 0 and up: how many messages have arrived (the newest is count - 1).
   const [count, setCount] = useState(-1);
   const [playing, setPlaying] = useState(false);
@@ -94,8 +93,7 @@ export function WeekJ({ still, wide = false }: { still?: number; wide?: boolean 
   const stage = shown[shown.length - 1]?.stage ?? 0;
   const firstOfStage = shown.findIndex(line => line.stage === stage);
   return (
-    <figure ref={ref} className={styles.stage} aria-label={J_WEEK.label} data-stage={stage} data-wide={wide || undefined}
-      data-region="一周演示">
+    <figure ref={ref} className={styles.stage} aria-label={J_WEEK.label} data-stage={stage} data-region="一周演示">
       {still !== undefined ? null : <ol className={styles.stages} aria-label={J_WEEK.pickLabel}>
         {J_WEEK.stages.map((name, index) => {
           const Icon = STAGE_ICONS[index];

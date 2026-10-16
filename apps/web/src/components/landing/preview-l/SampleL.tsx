@@ -51,7 +51,7 @@ export function SampleL({ data, siteName, extras }: { data: LandingData; siteNam
       <main data-calm="">
         <HeroL note={data.heroNote} flags={extras.flags} />
         <VoiceWallJ notes={data.notes} open regions={L_NOTE_REGIONS} />
-        <OpsL steps={visibleItems(extras.flags, L_OPS.steps)} />
+        <OpsL steps={visibleItems(extras.flags, L_OPS.steps)} flags={extras.flags} />
         {extras.showSamples ? <SamplesL /> : null}
         <CareL flags={extras.flags} />
         <CompareJ title={L_COMPARE_TITLE} picks={L_COMPARE_PICKS} next={L_COMPARE_NEXT} />

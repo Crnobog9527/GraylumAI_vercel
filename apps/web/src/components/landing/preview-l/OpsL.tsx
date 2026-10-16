@@ -5,22 +5,23 @@ import { useEffect, useId, useRef, useState, type CSSProperties } from 'react';
 import { Pause, Play } from 'lucide-react';
 import k from '@/components/landing/preview-k/k.module.css';
 import page from '@/components/landing/preview-j/j.module.css';
-import { WeekJ } from '@/components/landing/preview-j/WeekJ';
 import { HOW_IT_WORKS } from '@/lib/landing/landing-copy';
+import type { LandingFlags } from '@/lib/landing/landing-flags';
 import { L_OPS } from '@/lib/landing/landing-copy-l';
+import { OpsChatL } from './OpsChatL';
 import styles from './l.module.css';
 
 type Step = (typeof L_OPS.steps)[number];
 const reducedMotion = () => Boolean(window.matchMedia?.('(prefers-reduced-motion: reduce)').matches);
 
 /**
- * Region 3, daily operations (Owner 2026-10-17): you talk in plain words, the coach does the account's work. The steps
- * play on by themselves once on screen — each shows its progress — and every step can be clicked; the pointer over the
- * section, keyboard focus in it or the pause button holds it. Each step is the coach's real conversation for that part
- * of sample J's week, in a wide window. Reduced motion: no autoplay. Only the current window is built (it measures its
- * messages to fit them).
+ * Region 3, one week of operations (Owner 2026-10-17): you talk in plain words, the coach does the account's work —
+ * topics, the script, a test of two openings, reading the result you paste in, a series from the winner. The steps play
+ * on by themselves once on screen — each shows its progress — and every step can be clicked; the pointer over the
+ * section, keyboard focus in it or the pause button holds it. Each step is that part of the week's conversation in a
+ * wide window. Reduced motion: no autoplay.
  */
-export function OpsL({ steps }: { steps: readonly Step[] }) {
+export function OpsL({ steps, flags }: { steps: readonly Step[]; flags: LandingFlags }) {
   const [active, setActive] = useState(0);
   const [seen, setSeen] = useState(false);
   const [held, setHeld] = useState(false);
@@ -58,7 +59,7 @@ export function OpsL({ steps }: { steps: readonly Step[] }) {
         <div className={styles.opsBar}>
           <div role="tablist" aria-label={HOW_IT_WORKS.title} className={styles.opsSteps}>
             {steps.map((step, index) => (
-              <button key={step.stage} type="button" role="tab" id={`${base}-tab-${index}`} aria-controls={`${base}-panel`}
+              <button key={step.label} type="button" role="tab" id={`${base}-tab-${index}`} aria-controls={`${base}-panel`}
                 aria-selected={index === active} tabIndex={index === active ? 0 : -1}
                 onClick={() => setActive(index)}
                 onKeyDown={event => {
@@ -83,8 +84,9 @@ export function OpsL({ steps }: { steps: readonly Step[] }) {
         </div>
         <div role="tabpanel" id={`${base}-panel`} aria-labelledby={`${base}-tab-${active}`} className={styles.opsPanel}>
           <p className={styles.opsLine}>{current.line}</p>
-          <WeekJ key={current.stage} still={current.stage} wide />
+          <OpsChatL key={current.label} step={current} stepName={current.label} flags={flags} />
         </div>
+        <p className={styles.opsClose}>{L_OPS.close}</p>
       </div>
     </section>
   );

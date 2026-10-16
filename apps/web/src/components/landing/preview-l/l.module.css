@@ -111,3 +111,22 @@
 .care svg { color: var(--j-gold-text); }
 @media (max-width: 899px) { .care svg { display: none; } }
 .care span { color: var(--j-body); font-size: 16px; line-height: 1.7; }
+
+/* Region 3's chat window: as wide as the page, its messages arriving one after another. */
+/* The whole conversation shows on a phone too (the week window's phone rule cuts it off and fades it). */
+.opsWindow.opsWindow { width: 100%; max-height: none; mask-image: none; }
+.opsLog { display: flex; flex-direction: column; gap: 12px; min-height: 420px; padding: 20px; }
+.opsWindow .opsLog > * { font-size: 15px; }
+@media (prefers-reduced-motion: no-preference) {
+  .opsLog > * { animation: flowIn .5s var(--j-ease) both; animation-delay: calc(var(--m) * 900ms + 150ms); }
+}
+.opsNote { margin: 6px 0 0 !important; color: #5f5e5a; font-size: 13px !important; }
+.opsTest { display: grid; gap: 6px; }
+.opsTest p { display: flex; gap: 10px; margin: 0; padding: 8px 10px; border-radius: 10px; background: #fafaf8; font-size: 14px; }
+.opsTest b { flex: none; color: var(--j-gold-text); }
+.opsResult { display: grid; gap: 6px; }
+.opsResult tr[data-win] :is(th, td) { color: #1a7f45; font-weight: 600; }
+.opsWinner { display: flex; align-items: center; gap: 6px; margin: 0; padding: 6px 10px; border-radius: 8px; background: #fff7e0; color: #4a4946; font-size: 13px; }
+.opsWinner svg { flex: none; color: var(--j-gold-text); }
+.opsSeries ol { display: grid; gap: 4px; margin: 0; padding: 0 0 0 20px; font-size: 14px; }
+.opsClose { margin: 24px 0 0; color: var(--j-ink); font-size: clamp(18px, 1.6vw, 22px); font-weight: 600; }
