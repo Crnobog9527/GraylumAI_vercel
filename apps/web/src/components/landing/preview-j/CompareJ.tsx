@@ -32,14 +32,15 @@ export function pairTiming(generic: string, coach: string, coachFirst = false) {
  * usual two lines, then the coach types its answer, its own words from a real sample conversation (named under it).
  * The windows are pictures (inert); the text carries the meaning. Server HTML and reduced motion show everything.
  * Sample L (Owner 2026-10-17): `title` replaces the heading, `picks` keeps only those pairs (by index), and `next` adds
- * a closing line to a pair's coach reply (by index): what the person does next.
+ * a closing line to a pair's coach reply (by index): what the person does next. Samples M–O (Owner 2026-10-17, no dark
+ * blocks): `band="tint"` sets it on the light band.
  */
-export function CompareJ({ title, picks, next }: {
-  title?: string; picks?: readonly number[]; next?: Readonly<Record<number, string>>;
+export function CompareJ({ title, picks, next, band = 'ink' }: {
+  title?: string; picks?: readonly number[]; next?: Readonly<Record<number, string>>; band?: 'ink' | 'tint';
 } = {}) {
   const shown = (picks ?? J_COMPARE.pairs.map((_, index) => index)).map(index => ({ pair: J_COMPARE.pairs[index], index }));
   return (
-    <section aria-labelledby="compare-title" className={page.section} data-zone="compare" data-band="ink" data-region="对比区">
+    <section aria-labelledby="compare-title" className={page.section} data-zone="compare" data-band={band} data-region="对比区">
       <div className={page.wrap}>
         <h2 id="compare-title" className={styles.title}>
           {(title ?? H_COMPARE.title).split(/(?<=，)|(?=带你)/).map(part => <span key={part} className={styles.phrase}>{part}</span>)}
