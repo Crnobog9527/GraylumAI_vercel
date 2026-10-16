@@ -18,15 +18,22 @@ it('lists every label with its Chinese original', () => {
 });
 
 it('round-trips saved translations and drops empty inputs', () => {
-  const saved = { reportTitle: 'Report', steps: { 'step-1': 'About you' }, fields: { 'step-1': { goal: 'Goal' } },
-    reportSections: { 定位结论: 'Positioning' } };
+  const saved = { reportTitle: { original: '账号定位报告', text: 'Report' }, steps: { 'step-1': { original: '了解你', text: 'About you' } },
+    fields: { 'step-1': { goal: { original: '目标', text: 'Goal' } } }, reportSections: { 定位结论: 'Positioning' } };
   const draft = draftFrom(source, saved);
   expect(draft).toEqual({ reportTitle: 'Report', 'step:step-1': 'About you', 'field:step-1:goal': 'Goal', 'section:0': 'Positioning' });
   expect(translationsFrom(source, draft)).toEqual(saved);
   expect(translationsFrom(source, { ...draft, reportTitle: '  ', 'field:step-1:goal': '' }))
-    .toEqual({ steps: { 'step-1': 'About you' }, reportSections: { 定位结论: 'Positioning' } });
-  expect(translationsFrom(source, { 'step:step-2': ' Diagnosis ' })).toEqual({ steps: { 'step-2': 'Diagnosis' } });
+    .toEqual({ steps: saved.steps, reportSections: { 定位结论: 'Positioning' } });
+  expect(translationsFrom(source, { 'step:step-2': ' Diagnosis ' }))
+    .toEqual({ steps: { 'step-2': { original: '诊断', text: 'Diagnosis' } } });
   expect(draftFrom(source, undefined)).toEqual({});
+});
+
+it('starts empty for labels whose Chinese changed after the English was saved', () => {
+  expect(draftFrom(source, { reportTitle: { original: '旧标题', text: 'Old report' },
+    steps: { 'step-1': { original: '旧步骤', text: 'Old step' } }, fields: { 'step-1': { goal: { original: '目标', text: 'Goal' } } } }))
+    .toEqual({ 'field:step-1:goal': 'Goal' });
 });
 
 it('flags multi-line or over-long inputs before saving', () => {

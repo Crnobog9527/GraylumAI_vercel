@@ -49,8 +49,9 @@ describe('reply language (SKILL-I18N-HOOK)', () => {
     expect(text.split('Reply language (host rule)')).toHaveLength(2);
   });
 
-  it('leaves positioning mentor turns unchanged; their host rules already say so', () => {
-    expect(withPrimaryAddenda('base',{mentorText:'append-card-v1'})).toBe('base');
+  it('also applies to positioning mentor turns, whose host rules carry only the short version', () => {
+    expect(withPrimaryAddenda('base',{mentorText:'append-card-v1'} as never)).toBe('base'+REPLY_LANGUAGE_INSTRUCTIONS);
     expect(agentTurnInstructions()).toContain("Reply in the user's language");
+    expect(agentTurnInstructions()).not.toContain('Taiwan usage');
   });
 });

@@ -12,10 +12,14 @@ export type SkillDisplayLocale = typeof SKILL_DISPLAY_LOCALES[number];
 
 const text = z.string().trim().min(1).max(160).regex(/^[^\r\n\x00-\x1f]+$/);
 const key = z.string().min(1).max(160);
+// Each translation records the original it translates; when a republished Skill changes that text, it no
+// longer matches and the original shows again instead of a translation of different words.
+const entry = z.object({ original: key, text }).strict();
+export type SkillTranslationEntry = z.infer<typeof entry>;
 export const skillLocaleTranslations = z.object({
-  reportTitle: text.optional(),
-  steps: z.record(key, text).optional(),
-  fields: z.record(key, z.record(key, text)).optional(),
+  reportTitle: entry.optional(),
+  steps: z.record(key, entry).optional(),
+  fields: z.record(key, z.record(key, entry)).optional(),
   // Report sections have no id; they are keyed by their original title (reportGeneration.sections).
   reportSections: z.record(key, text).optional(),
 }).strict();
@@ -45,35 +49,41 @@ export function skillDisplaySource(workflow: WorkflowLike): SkillDisplaySource {
   };
 }
 
-const own = (record: Record<string, string> | undefined, name: string) =>
+const own = <T>(record: Record<string, T> | undefined, name: string) =>
   record && Object.hasOwn(record, name) ? record[name] : undefined;
+/** The translation of `original`, only while it was made for exactly that text. */
+const matching = (value: SkillTranslationEntry | undefined, original: string) =>
+  value && value.original === original ? value.text : undefined;
 
-/** Translation keys that do not name a label of this workflow (empty when every key matches). */
+/** Translations that do not name a label of this workflow, or were made for different words (empty when all match). */
 export function unknownTranslationKeys(source: SkillDisplaySource, value: SkillLocaleTranslations): string[] {
-  const steps = new Map(source.steps.map(step => [step.id, new Set(step.fields.map(field => field.id))]));
+  const steps = new Map(source.steps.map(step => [step.id, step]));
   const sections = new Set(source.reportSections);
   return [
-    ...Object.keys(value.steps ?? {}).filter(id => !steps.has(id)).map(id => `steps.${id}`),
-    ...Object.entries(value.fields ?? {}).flatMap(([stepId, fields]) => Object.keys(fields)
-      .filter(id => !steps.get(stepId)?.has(id)).map(id => `fields.${stepId}.${id}`)),
+    ...(value.reportTitle && value.reportTitle.original !== source.reportTitle ? ['reportTitle'] : []),
+    ...Object.entries(value.steps ?? {}).filter(([id, item]) => steps.get(id)?.title !== item.original).map(([id]) => `steps.${id}`),
+    ...Object.entries(value.fields ?? {}).flatMap(([stepId, fields]) => Object.entries(fields)
+      .filter(([id, item]) => steps.get(stepId)?.fields.find(field => field.id === id)?.title !== item.original)
+      .map(([id]) => `fields.${stepId}.${id}`)),
     ...Object.keys(value.reportSections ?? {}).filter(title => !sections.has(title)).map(title => `reportSections.${title}`),
   ];
 }
 
 /**
  * The labels to show for a locale: the translation when one exists for the current workflow, otherwise the
- * original. `undefined` locale (or Chinese) always returns the originals. Never changes ids or stored text.
+ * original. `undefined` locale (or Chinese) always returns the originals. A translation made for different
+ * words (the Skill was republished with a changed label) is ignored. Never changes ids or stored text.
  */
 export function localizedSkillLabels(source: SkillDisplaySource, translations: SkillDisplayTranslations | null | undefined,
   locale: SkillDisplayLocale | undefined): SkillDisplaySource {
   const value = locale ? translations?.[locale] : undefined;
   if (!value) return source;
   return {
-    reportTitle: value.reportTitle ?? source.reportTitle,
+    reportTitle: matching(value.reportTitle, source.reportTitle) ?? source.reportTitle,
     steps: source.steps.map(step => {
-      const fields = value.fields && Object.hasOwn(value.fields, step.id) ? value.fields[step.id] : undefined;
-      return { id: step.id, title: own(value.steps, step.id) ?? step.title,
-        fields: step.fields.map(field => ({ id: field.id, title: own(fields, field.id) ?? field.title })) };
+      const fields = own(value.fields, step.id);
+      return { id: step.id, title: matching(own(value.steps, step.id), step.title) ?? step.title,
+        fields: step.fields.map(field => ({ id: field.id, title: matching(own(fields, field.id), field.title) ?? field.title })) };
     }),
     reportSections: source.reportSections.map(title => own(value.reportSections, title) ?? title),
   };

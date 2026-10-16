@@ -19,15 +19,15 @@ const REQUIRE_LATEST_INSTRUCTIONS=
   'evidence that a search occurred. Do not claim verified current information without retrieved evidence.';
 // SKILL-I18N-HOOK (Owner 2026-10-12): Skills stay in Simplified Chinese; the AI answers in the user's language.
 // The model judges the language itself (docs/ENGINEERING.md section 6: no keyword or regex intent rules).
-// Positioning mentor turns (mentorText) already carry the same rule in their host rules, so they skip it.
+// Positioning mentor turns get it too: their host rules only say "Reply in the user's language".
 export const REPLY_LANGUAGE_INSTRUCTIONS=
   "\nReply language (host rule): the Skill is written in Chinese, but write replies, questions, card options and reports "+
   "in the user's language: that of their latest message, or of earlier ones when unclear (Traditional Chinese uses Taiwan "+
   "usage). A language the user explicitly asks for wins. With no user message this turn, follow the user's own words in "+
   "the material, else Simplified Chinese. Keep required exact strings (report headings, ids, JSON keys) unchanged.";
 export function withPrimaryAddenda(instructions:string,
-  context:{workspaceContext?:boolean;network?:string;positioningGate?:string;mentorText?:string}):string {
-  return instructions+(context.mentorText?'':REPLY_LANGUAGE_INSTRUCTIONS)+(context.workspaceContext?WORKSPACE_CONTEXT_INSTRUCTIONS:'')+
+  context:{workspaceContext?:boolean;network?:string;positioningGate?:string}):string {
+  return instructions+REPLY_LANGUAGE_INSTRUCTIONS+(context.workspaceContext?WORKSPACE_CONTEXT_INSTRUCTIONS:'')+
     (context.network==='require_latest'?REQUIRE_LATEST_INSTRUCTIONS:'')+
     // POSITIONING-GATE: frozen at admission only when Decisions was unavailable for this turn.
     (context.positioningGate===POSITIONING_FALLBACK?POSITIONING_FALLBACK_INSTRUCTIONS:'');

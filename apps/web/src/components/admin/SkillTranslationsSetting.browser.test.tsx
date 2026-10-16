@@ -109,7 +109,8 @@ it('lists each Chinese original, saves the English typed, then clears it, sendin
     await browserExpect(notice(page)).toContainText('已保存英文对照');
     expect(await updates(page)).toEqual([
       { moduleId: MODULE, locale: 'en', expectedModuleUpdatedAt: 'v0',
-        translations: { steps: { 'step-1': 'About you' }, fields: { 'step-1': { goal: 'Goal' } } } },
+        translations: { steps: { 'step-1': { original: '了解你', text: 'About you' } },
+          fields: { 'step-1': { goal: { original: '目标', text: 'Goal' } } } } },
       { moduleId: MODULE, locale: 'en', expectedModuleUpdatedAt: 'v1', translations: {} },
     ]);
     // The editor adopts exactly the versions its own saves produced.
@@ -119,7 +120,7 @@ it('lists each Chinese original, saves the English typed, then clears it, sendin
 }, 20000);
 
 it('shows saved English, refuses a stale editor and an invalid input in plain Chinese, adopting nothing', async () => {
-  const { page, errors } = await open({ version: 'v9', stored: { en: { reportTitle: 'Positioning report' } } });
+  const { page, errors } = await open({ version: 'v9', stored: { en: { reportTitle: { original: '账号定位报告', text: 'Positioning report' } } } });
   try {
     await browserExpect(page.getByTestId('skill-translation-reportTitle')).toHaveValue('Positioning report');
     await page.getByTestId('skill-translation-section:0').fill('x'.repeat(161));

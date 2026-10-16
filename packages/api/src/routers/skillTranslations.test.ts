@@ -50,9 +50,10 @@ it('admin reads the published labels, saves English, and gets the new module ver
   expect(opened).toMatchObject({ moduleId: f.module.id, moduleUpdatedAt: f.module.updated_at, translations: {} });
   expect(opened.source?.steps.map(step => step.title)).toEqual(['需求确认', '对标分析']);
   expect(opened.source?.steps[0]!.fields).toEqual([{ id: 'goal', title: '目标' }]);
-  const saved = await f.save({ reportTitle: 'Strategy', steps: { 'step-0': 'Your needs' }, fields: { 'step-0': { goal: 'Goal' } } });
-  expect(saved.translations).toEqual({ en: { reportTitle: 'Strategy', steps: { 'step-0': 'Your needs' },
-    fields: { 'step-0': { goal: 'Goal' } } } });
+  const english = { reportTitle: { original: 'Confirmed strategy', text: 'Strategy' },
+    steps: { 'step-0': { original: '需求确认', text: 'Your needs' } }, fields: { 'step-0': { goal: { original: '目标', text: 'Goal' } } } };
+  const saved = await f.save(english);
+  expect(saved.translations).toEqual({ en: english });
   expect(saved.moduleUpdatedAt).not.toBe(opened.moduleUpdatedAt);
   // Clearing every input removes the locale; the Chinese originals show again.
   expect((await f.save({}, saved.moduleUpdatedAt)).translations).toEqual({});
@@ -63,23 +64,26 @@ it('refuses a save from an editor opened before another change, without writing'
   const f = fixture();
   const opened = f.module.updated_at;
   f.module.updated_at = '2026-10-16T01:00:00.000+00:00'; // e.g. the social-media flag saved in another tab
-  await expect(f.save({ reportTitle: 'Strategy' }, opened)).rejects.toMatchObject({ code: 'CONFLICT', message: 'SKILL_TRANSLATIONS_CONFLICT' });
+  await expect(f.save({ reportTitle: { original: 'Confirmed strategy', text: 'Strategy' } }, opened)).rejects.toMatchObject({ code: 'CONFLICT', message: 'SKILL_TRANSLATIONS_CONFLICT' });
   expect(f.writes).toEqual([]);
 });
 
 it('refuses keys that are not labels of the published workflow, and unpublished Skills', async () => {
   const f = fixture();
-  for (const bad of [{ steps: { 'step-9': 'Gone' } }, { fields: { 'step-1': { goal: 'Goal' } } }, { reportSections: { 不存在: 'X' } }])
+  const t = (original: string, text: string) => ({ original, text });
+  // Unknown ids, and translations made for words the published Skill no longer uses (it was republished).
+  for (const bad of [{ steps: { 'step-9': t('需求确认', 'Gone') } }, { fields: { 'step-1': { goal: t('目标', 'Goal') } } },
+    { reportSections: { 不存在: 'X' } }, { steps: { 'step-0': t('旧的步骤名', 'Old') } }, { reportTitle: t('旧标题', 'Old') }])
     await expect(f.save(bad)).rejects.toMatchObject({ message: 'SKILL_TRANSLATIONS_UNKNOWN_KEY' });
   const unpublished = fixture('admin', { unpublished: true });
   expect((await unpublished.caller.get({ moduleId: unpublished.module.id })).source).toBeNull();
-  await expect(unpublished.save({ reportTitle: 'X' })).rejects.toMatchObject({ message: 'SKILL_TRANSLATIONS_NOT_PUBLISHED' });
+  await expect(unpublished.save({ reportTitle: t('Confirmed strategy', 'X') })).rejects.toMatchObject({ message: 'SKILL_TRANSLATIONS_NOT_PUBLISHED' });
   expect([...f.writes, ...unpublished.writes]).toEqual([]);
 });
 
 it('rejects malformed input before reading', async () => {
   const f = fixture();
-  for (const extra of [{ locale: 'fr' }, { translations: { steps: { 'step-0': 'a\nb' } } }, { translations: { other: 'x' } }])
+  for (const extra of [{ locale: 'fr' }, { translations: { steps: { 'step-0': { original: '需求确认', text: 'a\nb' } } } }, { translations: { other: 'x' } }])
     await expect(f.save({}, f.module.updated_at, extra)).rejects.toMatchObject({ code: 'BAD_REQUEST' });
   expect(f.writes).toEqual([]);
 });
@@ -88,7 +92,7 @@ it('ordinary users and anonymous callers are refused without reading or writing'
   for (const role of ['user', 'anonymous']) {
     const f = fixture(role);
     await expect(f.caller.get({ moduleId: f.module.id })).rejects.toBeTruthy();
-    await expect(f.save({ reportTitle: 'X' })).rejects.toBeTruthy();
+    await expect(f.save({ reportTitle: { original: 'Confirmed strategy', text: 'X' } })).rejects.toBeTruthy();
     expect(f.writes).toEqual([]);
   }
 });

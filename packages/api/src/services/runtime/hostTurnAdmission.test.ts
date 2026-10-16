@@ -11,6 +11,7 @@ import {agentTurnInstructions,AGENT_TURN_STABLE_PREFIX} from '../opc/agentTurnPr
 import {freezeHistorySelection,HOST_TURN_DATA_NOTICE_V1,type HostTurnContext} from './hostTurn';
 import {runtimeScopeInput} from './context';
 import {OPENING_INPUT} from '../../shared/opcQuestions';
+import {REPLY_LANGUAGE_INSTRUCTIONS} from './primaryInstructions';
 const skill='Pinned skill 正文';
 vi.mock('../skills/databaseSource',()=>({databaseSkillSource:()=>({list:async()=>[{revisionId:'10000000-0000-4000-8000-000000000003'}]})}));
 vi.mock('../skills/loader',()=>({identityOf:(value:unknown)=>value,activateSkill:async()=>({forModel:()=>skill})}));
@@ -118,7 +119,9 @@ it('uses identical marker reservation at the admission byte boundary with and wi
  const context=(await runtimeAdmissionService(f.user,f.admin,f.policy).prepare(f.input)).context;
  const {askQuestionToolBytes}=await import('./agentTools');
  const current=runtimeScopeInput(context.input,context.scopeMaterial,context.hostTurnContext);
- const edge=Buffer.byteLength(JSON.stringify({instructions:context.instructions,messages:[{role:'user',content:current}]}))+
+ // The executor appends the reply-language rule (SKILL-I18N-HOOK); admission sizes it as well.
+ const edge=Buffer.byteLength(JSON.stringify({instructions:context.instructions+REPLY_LANGUAGE_INSTRUCTIONS,
+  messages:[{role:'user',content:current}]}))+
   askQuestionToolBytes(true)+150+1024;
  for(const enabled of [true,false])for(const delta of [0,-1]){
   const sample=hostFixture();
@@ -140,7 +143,7 @@ it('keeps checklist values and update events outside the cached prefix and count
  expect(first.hostTurnContext).toEqual(host);
  expect(runtimeScopeInput(first.input,first.scopeMaterial,first.hostTurnContext)).toContain('手填事实');
  const {askQuestionToolBytes}=await import('./agentTools');
- const edge=Buffer.byteLength(JSON.stringify({instructions:first.instructions,messages:[{role:'user',
+ const edge=Buffer.byteLength(JSON.stringify({instructions:first.instructions+REPLY_LANGUAGE_INSTRUCTIONS,messages:[{role:'user',
   content:runtimeScopeInput(first.input,first.scopeMaterial,first.hostTurnContext)}]}))+askQuestionToolBytes(true)+150+1024;
  for(const delta of [0,-1]) {
   const sample=hostFixture();

@@ -31,34 +31,39 @@ export function translationRows(source: SkillDisplaySource): TranslationRow[] {
   ];
 }
 
-/** The saved English translations as form values; labels without one start empty. */
+type Entry = { original: string; text: string };
+const own = <T>(record: Record<string, T> | undefined, name: string) =>
+  record && Object.hasOwn(record, name) ? record[name] : undefined;
+
+/** The saved English as form values. Labels without one, or whose Chinese changed since, start empty. */
 export function draftFrom(source: SkillDisplaySource, saved: SkillLocaleTranslations | undefined): TranslationDraft {
   const draft: TranslationDraft = {};
-  const put = (key: string, value: string | undefined) => { if (value) draft[key] = value; };
-  const own = (record: Record<string, string> | undefined, name: string) =>
-    record && Object.hasOwn(record, name) ? record[name] : undefined;
-  put('reportTitle', saved?.reportTitle);
+  const put = (key: string, value: Entry | string | undefined, original: string) => {
+    const text = typeof value === 'string' ? value : value?.original === original ? value.text : undefined;
+    if (text) draft[key] = text;
+  };
+  put('reportTitle', saved?.reportTitle, source.reportTitle);
   for (const step of source.steps) {
-    put(`step:${step.id}`, own(saved?.steps, step.id));
-    const fields = saved?.fields && Object.hasOwn(saved.fields, step.id) ? saved.fields[step.id] : undefined;
-    for (const field of step.fields) put(`field:${step.id}:${field.id}`, own(fields, field.id));
+    put(`step:${step.id}`, own(saved?.steps, step.id), step.title);
+    const fields = own(saved?.fields, step.id);
+    for (const field of step.fields) put(`field:${step.id}:${field.id}`, own(fields, field.id), field.title);
   }
-  source.reportSections.forEach((title, index) => put(`section:${index}`, own(saved?.reportSections, title)));
+  source.reportSections.forEach((title, index) => put(`section:${index}`, own(saved?.reportSections, title), title));
   return draft;
 }
 
 /** The save payload: trimmed, empty inputs dropped (they fall back to the Chinese original). */
 export function translationsFrom(source: SkillDisplaySource, draft: TranslationDraft): SkillLocaleTranslations {
   const value = (key: string) => draft[key]?.trim() || undefined;
-  const steps: Record<string, string> = {};
-  const fields: Record<string, Record<string, string>> = {};
+  const steps: Record<string, Entry> = {};
+  const fields: Record<string, Record<string, Entry>> = {};
   const reportSections: Record<string, string> = {};
   for (const step of source.steps) {
     const title = value(`step:${step.id}`);
-    if (title) steps[step.id] = title;
+    if (title) steps[step.id] = { original: step.title, text: title };
     for (const field of step.fields) {
       const text = value(`field:${step.id}:${field.id}`);
-      if (text) (fields[step.id] ??= {})[field.id] = text;
+      if (text) (fields[step.id] ??= {})[field.id] = { original: field.title, text };
     }
   }
   source.reportSections.forEach((title, index) => {
@@ -66,8 +71,9 @@ export function translationsFrom(source: SkillDisplaySource, draft: TranslationD
     if (text) reportSections[title] = text;
   });
   const reportTitle = value('reportTitle');
-  return { ...(reportTitle ? { reportTitle } : {}), ...(Object.keys(steps).length ? { steps } : {}),
-    ...(Object.keys(fields).length ? { fields } : {}), ...(Object.keys(reportSections).length ? { reportSections } : {}) };
+  return { ...(reportTitle ? { reportTitle: { original: source.reportTitle, text: reportTitle } } : {}),
+    ...(Object.keys(steps).length ? { steps } : {}), ...(Object.keys(fields).length ? { fields } : {}),
+    ...(Object.keys(reportSections).length ? { reportSections } : {}) };
 }
 
 /** Same rule as the server: one line, at most 160 characters. Returns the first bad row's original, if any. */

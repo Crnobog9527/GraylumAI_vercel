@@ -7,7 +7,9 @@ BEGIN;
 -- Stored on modules like social_media_related (0219): editing a translation never republishes the Skill,
 -- and artifact_workflows.workflow (immutable, frozen into each round) never changes.
 -- Shape (checked by packages/api/src/shared/skillTranslations.ts):
---   {"en":{"reportTitle":"…","steps":{"<stepId>":"…"},"fields":{"<stepId>":{"<fieldId>":"…"}},"reportSections":{"<original>":"…"}}}
+--   {"en":{"reportTitle":{"original":"…","text":"…"},"steps":{"<stepId>":{"original":"…","text":"…"}},
+--    "fields":{"<stepId>":{"<fieldId>":{"original":"…","text":"…"}}},"reportSections":{"<original>":"…"}}}
+-- Each translation keeps the Chinese it was made for; after a republish changes that text it is not shown.
 ALTER TABLE public.modules ADD COLUMN IF NOT EXISTS display_translations jsonb NOT NULL DEFAULT '{}'::jsonb;
 COMMENT ON COLUMN public.modules.display_translations IS
  'SKILL-I18N-HOOK: per-locale display translations of user-visible Skill labels; the workflow stays the Chinese original.';
