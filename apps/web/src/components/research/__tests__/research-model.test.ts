@@ -10,6 +10,7 @@ import {
 import { publicLink } from "../evidence-list";
 import { refreshErrorText } from "../refresh-button";
 import { chargeText } from "../search-charges";
+import { toEvidenceEntries, toSearchCharges } from "../research-api";
 import { CALLS, CANDIDATE_CARD, CHARGES, FOLLOW_UP_CARD, KEYWORD_CARD, NOW, ROWS } from "./fixtures";
 
 describe("describeCall", () => {
@@ -118,5 +119,30 @@ describe("search charges and evidence", () => {
   it("maps refresh errors to plain sentences", () => {
     expect(refreshErrorText(new Error("RESEARCH_REFRESH_INVALID"))).toBe("这个账号现在不能刷新，可能正在读取中，请稍后再试。");
     expect(refreshErrorText(new Error("boom"))).toBe("刷新没有成功，请稍后再试。");
+  });
+});
+
+describe("server rows from research.toolCharges and research.evidence", () => {
+  it("keeps attributed tool calls, passes settlement through and marks unsettled ones", () => {
+    const charges = toSearchCharges([
+      { callId: "a", toolName: "web_search", args: { query: "q" }, source: "tool_usage", credits: "0.25" },
+      { callId: "b", toolName: null, args: null, source: "tool_usage", credits: "1" },
+      { callId: "c", toolName: "web_fetch", args: null, source: null, credits: null },
+    ]);
+    expect(charges.map(charge => charge.callId)).toEqual(["a", "c"]);
+    expect(charges.map(chargeText)).toEqual(["0.25 积分", "结算中"]);
+  });
+
+  it("maps evidence rows without inventing a route or a title", () => {
+    const [entry, ...rest] = toEvidenceEntries([
+      { operationId: "o1", toolName: "social_account", args: { platform: "douyin", account: "a" }, state: "succeeded",
+        fetchedAt: "2026-10-16T00:00:00Z", itemCount: 3, truncated: null, sources: ["https://x.test/a"],
+        sessionId: "s1", sessionTitle: null },
+      { operationId: "o2", toolName: null, args: null, state: "failed", fetchedAt: null, itemCount: null, truncated: null,
+        sources: [], sessionId: "s1", sessionTitle: "t" },
+    ]);
+    expect(rest).toEqual([]);
+    expect(entry).toMatchObject({ evidenceId: "o1", truncated: false, conversationTitle: "未命名对话", sourceUrls: ["https://x.test/a"] });
+    expect(entry).not.toHaveProperty("conversationHref");
   });
 });

@@ -13,7 +13,8 @@ export interface SearchCharge {
   callId: string;
   tool: ResearchToolName;
   args: unknown;
-  settlement: ToolSettlement;
+  /** Null while the call is not settled yet. */
+  settlement: ToolSettlement | null;
   /** Credits charged to the user for this call before the reply is rounded once (decimal text, e.g. "0.3"). */
   userCredits: string | null;
 }
@@ -28,6 +29,7 @@ export function chargeText(charge: SearchCharge): string {
     case "tool_failed":
     case "tool_failed_charged": return "没取到数据，不收费";
     case "tool_unknown": return "结果待核，不收费";
+    case null: return "结算中";
   }
 }
 

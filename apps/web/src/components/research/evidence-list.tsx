@@ -2,6 +2,7 @@
 // Library view of fetched evidence (RESEARCH_TOOLS_PLAN.md §4.3 "资料库展示"): every research lookup kept as
 // evidence, with what was looked up, when, how it ended and its public source links. No new library table: rows
 // come from the research operations the host already stores (0065 / 0263). Supplier names and costs never appear.
+import type { ReactNode } from "react";
 import type { ResearchToolName } from "../../../../../packages/api/src/services/research/tools/schemas";
 import { CALL_STATE_LABELS, describeRequest, type CallState } from "./research-model";
 import styles from "./research.module.css";
@@ -22,8 +23,8 @@ export interface EvidenceEntry {
   /** Public source links of the kept items, as stored. */
   sourceUrls: string[];
   conversationTitle: string;
-  /** Link back to the conversation the lookup belongs to. */
-  conversationHref: string;
+  /** Link back to the conversation the lookup belongs to, when the page knows its route. */
+  conversationHref?: string;
 }
 
 const STATE: Record<EvidenceState, CallState> = { succeeded: "success", failed: "missing", unknown: "pending" };
@@ -45,7 +46,7 @@ const formatTime = (value: string | null) => {
   return Number.isFinite(ms) ? new Date(ms).toISOString().slice(0, 16).replace("T", " ") : "—";
 };
 
-export function EvidenceList({ entries }: { entries: EvidenceEntry[] }) {
+export function EvidenceList({ entries, children }: { entries: EvidenceEntry[]; children?: ReactNode }) {
   const rows = entries.flatMap(entry => {
     const request = describeRequest(entry.tool, entry.args);
     return request ? [{ entry, request }] : [];
@@ -79,12 +80,15 @@ export function EvidenceList({ entries }: { entries: EvidenceEntry[] }) {
                     {links.length > SOURCES_SHOWN && <li className={styles.callMeta}>另有 {links.length - SOURCES_SHOWN} 个来源</li>}
                   </ul>
                 )}
-                <a className={styles.evidenceBack} href={entry.conversationHref}>所在对话：{entry.conversationTitle}</a>
+                {entry.conversationHref
+                  ? <a className={styles.evidenceBack} href={entry.conversationHref}>所在对话：{entry.conversationTitle}</a>
+                  : <span className={styles.evidenceBack}>所在对话：{entry.conversationTitle}</span>}
               </li>
             );
           })}
         </ul>
       )}
+      {children}
     </section>
   );
 }

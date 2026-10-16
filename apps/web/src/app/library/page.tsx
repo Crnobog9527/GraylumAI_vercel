@@ -11,9 +11,12 @@ import { ContentEditor } from '@/components/opc/content-editor';
 import { VersionCompare } from '@/components/opc/version-compare';
 import { StrategyOverviewDialog } from '@/components/opc/strategy-overview-dialog';
 import { MyDocuments } from '@/components/library/my-documents';
+import { LibraryEvidence } from '@/components/research/library-evidence';
 import styles from './library.module.css';
 
-type LibraryTab='topics'|'documents';
+type LibraryTab='topics'|'documents'|'evidence';
+const INTRO:Record<LibraryTab,string>={documents:'上传和管理你自己写的文章和参考资料。',
+ topics:'按平台和账号查看已采用选题、稿件和当前定位。',evidence:'AI 教练在对话里查过的公开数据和来源。'};
 
 type ContentVersion={id:string;title?:string|null;kind:'brief'|'script'|'storyboard'|'editing';version:number;status:'draft'|'final';body:string|null;contentAvailable:boolean;sourceContentId:string|null;executionId:string|null;requestId:string;createdAt:string};
 type Item={contentType?:string;workItemId:string;title:string;brief:string|null;day:string;createdAt?:string;lastActivityAt?:string;revision:number;sessionId:string;sourceAvailable:boolean;content:ContentVersion[];publication?:{revision:number;plannedDate:string|null;status:'unpublished'|'published';publishedDate:string|null;publishedVersion:number|null}};
@@ -95,9 +98,11 @@ export default function LibraryPage(){
   <nav className={styles.tabs} role="tablist" aria-label="资料库分类">
    <button type="button" role="tab" aria-selected={tab==='topics'} onClick={()=>chooseTab('topics')}>选题与稿件</button>
    <button type="button" role="tab" aria-selected={tab==='documents'} onClick={()=>chooseTab('documents')}>我的文档</button>
+   <button type="button" role="tab" aria-selected={tab==='evidence'} onClick={()=>chooseTab('evidence')}>取数记录</button>
   </nav>
-  <p className={styles.intro}>{tab==='documents'?'上传和管理你自己写的文章和参考资料。':'按平台和账号查看已采用选题、稿件和当前定位。'}</p>
-  {documentsOpened&&<div className={styles.documentsPane} hidden={tab!=='documents'}><MyDocuments/></div>}{tab!=='documents'&&<div className={styles.catalog}>
+  <p className={styles.intro}>{INTRO[tab]}</p>
+  {tab==='evidence'&&<div className={styles.evidencePane}><LibraryEvidence/></div>}
+  {documentsOpened&&<div className={styles.documentsPane} hidden={tab!=='documents'}><MyDocuments/></div>}{tab==='topics'&&<div className={styles.catalog}>
    <nav className={styles.catalogNav} aria-label="资料库平台与账号"><button type="button" aria-current={!selectedProject?'page':undefined} onClick={()=>{setSelectedProject('');setPage(1);}}>全部选题 <span>{count(accounts.reduce((n,a)=>n+a.items.length,0))}</span></button>{[...new Set(accounts.map(account=>account.platform))].map(platform=><div key={platform} className={styles.platform}><strong>{platform}<span>{count(accounts.filter(account=>account.platform===platform).reduce((n,a)=>n+a.items.length,0))}</span></strong>{accounts.filter(account=>account.platform===platform).map(account=><button key={account.projectId} type="button" aria-current={selectedProject===account.projectId?'page':undefined} onClick={()=>{setSelectedProject(account.projectId);setPage(1);}}>{(account.displayName??account.account)}<span>{count(account.items.length)}</span></button>)}</div>)}</nav>
    <div ref={contentRef} className={styles.catalogContent} onScroll={event=>{scroll.current=event.currentTarget.scrollTop;if(hydrated)sessionStorage.setItem('opc-library-view',JSON.stringify({search,selectedProject,statusFilter,sortOrder,page,scrollTop:scroll.current}));}}>
     <div className={styles.scopeHead}><div><h2>{selectedAccount?selectedAccount.platform+' · '+(selectedAccount.displayName??selectedAccount.account):'全部选题'}</h2><p>{count(rows.length)} 个选题 · {count(selectedAccount?1:accounts.length)} 个账号{selectedAccount?' · '+stageLabel[selectedAccount.stage]:''}</p></div>{selectedAccount&&<div className={styles.scopeActions}><button onClick={()=>setStrategyAccount({...selectedAccount,currentVersion:selectedAccount.sourceVersion??undefined})}>修改定位</button><Link href={'/positioning?account='+selectedAccount.projectId}>新建对话</Link><select aria-label={'当前阶段 '+(selectedAccount.displayName??selectedAccount.account)} value={selectedAccount.stage} onChange={event=>updateStage(selectedAccount,event.target.value as Account['stage'])}>{Object.entries(stageLabel).map(([value,label])=><option key={value} value={value}>{label}</option>)}</select></div>}</div>

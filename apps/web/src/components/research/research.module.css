@@ -96,3 +96,16 @@
 .sourceLinks{display:grid;gap:2px;margin:0;padding:0;list-style:none;font-size:12px;line-height:18px}
 .sourceLinks a{color:#555;overflow-wrap:anywhere}
 .evidenceBack{justify-self:start;color:#555;font-size:12px;line-height:18px}
+
+/* ---- Search details under a spend entry of the (dark) credit record page ---- */
+.chargeToggle{display:grid;gap:8px;margin-top:8px;font-family:var(--font-primary)}
+.linkButton{justify-self:start;padding:0;border:0;background:none;color:var(--text-tertiary);font:inherit;font-size:12px;
+  text-decoration:underline;cursor:pointer}
+.linkButton:hover{color:var(--text-primary)}
+.chargeToggle .charges,.chargeToggle .chargeRow{color:var(--text-primary)}
+.chargeToggle .head,.chargeToggle .hint,.chargeToggle .callMeta,.chargeToggle .chargeAmount{color:var(--text-tertiary)}
+.chargeToggle .chargeRow{background:rgba(255,255,255,.04)}
+.chargeToggle .chargeAmount[data-charged="true"]{color:var(--text-primary)}
+.chargeToggle .problem{color:var(--error)}
+.linkButtonLight{margin-left:6px;padding:0;border:0;background:none;color:#555;font:inherit;text-decoration:underline;cursor:pointer}
+.evidenceList+.secondary,.hint+.secondary{justify-self:start}
