@@ -33,7 +33,7 @@ describe('recognition client', () => {
   beforeEach(async () => {
     vi.stubEnv('NEXT_PUBLIC_LIBRARY_SCAN_RECOGNITION', 'true');
     const files = await libraryOcrAssets(webRoot) as unknown as Record<string, Buffer>;
-    vi.stubGlobal('fetch', async (url: string) => new Response(files[url.split('/').pop()!]!));
+    vi.stubGlobal('fetch', async (url: string) => new Response(new Uint8Array(files[url.split('/').pop()!]!)));
     run.mockReset();
   });
   afterEach(() => { vi.unstubAllEnvs(); vi.unstubAllGlobals(); });
