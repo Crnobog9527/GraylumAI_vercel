@@ -202,10 +202,12 @@ LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
 DECLARE n integer; total integer:=0;
 BEGIN
  PERFORM account_erasure_assert_closed(a);
- -- Posts and snapshots go first through the prune loop; detach retained rows from the brand now.
+ -- Posts and snapshots go first through the prune loop; detach retained rows from the brand now. Deletion is a new
+ -- cleanup episode (as in publish_monitor_disconnect): it must not inherit an exhausted takeover-disconnect retry count.
  UPDATE social_connections SET status='deleting',business_id=NULL,account_project_id=NULL,display_hint=NULL,
   profile_ref=NULL,consent_read=false,consent_auto_track=false,consent_publish=false,refresh_id=NULL,
-  refresh_cursor=NULL,lease_owner=NULL,lease_expires_at=NULL,updated_at=clock_timestamp()
+  refresh_cursor=NULL,lease_owner=NULL,lease_expires_at=NULL,deletion_attempts=0,deletion_error=NULL,
+  updated_at=clock_timestamp()
  WHERE actor_id=a AND provider_account_id IS NOT NULL AND status<>'deleting';
  GET DIAGNOSTICS n=ROW_COUNT;total:=total+n;
  UPDATE social_publish_jobs SET business_id=NULL,work_item_id=NULL,updated_at=clock_timestamp()
