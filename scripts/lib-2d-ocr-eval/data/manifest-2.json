@@ -1,0 +1,785 @@
+[
+ {
+  "id": "q01",
+  "cat": "perspective",
+  "font": "Songti SC",
+  "fontAvailable": true,
+  "w": 1172,
+  "h": 1658,
+  "bytes": 369224,
+  "degrade": {
+   "rot": 0.744,
+   "blur": 0.986,
+   "noise": 10,
+   "sp": 0,
+   "light": 0.433,
+   "scale": 0.709,
+   "q": 0.7,
+   "tint": true
+  },
+  "extra": {
+   "keystone": true,
+   "keystoneTop": 0.909,
+   "curlPx": -10
+  },
+  "gtChars": 1004
+ },
+ {
+  "id": "q02",
+  "cat": "perspective",
+  "font": "Hiragino Sans GB",
+  "fontAvailable": true,
+  "w": 1172,
+  "h": 1657,
+  "bytes": 373764,
+  "degrade": {
+   "rot": -1.446,
+   "blur": 0.952,
+   "noise": 10,
+   "sp": 0,
+   "light": 0.376,
+   "scale": 0.708,
+   "q": 0.7,
+   "tint": true
+  },
+  "extra": {
+   "keystone": true,
+   "keystoneTop": 0.908,
+   "curlPx": 10
+  },
+  "gtChars": 1023
+ },
+ {
+  "id": "q03",
+  "cat": "perspective",
+  "font": "STHeiti",
+  "fontAvailable": true,
+  "w": 1221,
+  "h": 1727,
+  "bytes": 467834,
+  "degrade": {
+   "rot": 1.052,
+   "blur": 0.751,
+   "noise": 10,
+   "sp": 0,
+   "light": 0.353,
+   "scale": 0.738,
+   "q": 0.7,
+   "tint": true
+  },
+  "extra": {
+   "keystone": true,
+   "keystoneTop": 0.843,
+   "curlPx": 10
+  },
+  "gtChars": 966
+ },
+ {
+  "id": "q04",
+  "cat": "perspective",
+  "font": "PingFang SC",
+  "fontAvailable": true,
+  "w": 1205,
+  "h": 1704,
+  "bytes": 393543,
+  "degrade": {
+   "rot": -1.845,
+   "blur": 0.923,
+   "noise": 10,
+   "sp": 0,
+   "light": 0.481,
+   "scale": 0.729,
+   "q": 0.7,
+   "tint": true
+  },
+  "extra": {
+   "keystone": true,
+   "keystoneTop": 0.873,
+   "curlPx": -18
+  },
+  "gtChars": 1064
+ },
+ {
+  "id": "q05",
+  "cat": "perspective",
+  "font": "Songti SC",
+  "fontAvailable": true,
+  "w": 1172,
+  "h": 1657,
+  "bytes": 415934,
+  "degrade": {
+   "rot": -2.123,
+   "blur": 0.647,
+   "noise": 10,
+   "sp": 0,
+   "light": 0.444,
+   "scale": 0.708,
+   "q": 0.7,
+   "tint": true
+  },
+  "extra": {
+   "keystone": true,
+   "keystoneTop": 0.848,
+   "curlPx": -11
+  },
+  "gtChars": 836
+ },
+ {
+  "id": "q06",
+  "cat": "perspective",
+  "font": "Hiragino Sans GB",
+  "fontAvailable": true,
+  "w": 1234,
+  "h": 1745,
+  "bytes": 401226,
+  "degrade": {
+   "rot": -0.635,
+   "blur": 0.904,
+   "noise": 10,
+   "sp": 0,
+   "light": 0.493,
+   "scale": 0.746,
+   "q": 0.7,
+   "tint": true
+  },
+  "extra": {
+   "keystone": true,
+   "keystoneTop": 0.902,
+   "curlPx": 10
+  },
+  "gtChars": 950
+ },
+ {
+  "id": "q07",
+  "cat": "upside_down",
+  "font": "STHeiti",
+  "fontAvailable": true,
+  "w": 1654,
+  "h": 2339,
+  "bytes": 643477,
+  "degrade": {
+   "rot": -0.217,
+   "blur": 0,
+   "noise": 6,
+   "sp": 0,
+   "light": 0,
+   "scale": 1,
+   "q": 0.8
+  },
+  "extra": {
+   "flip": true
+  },
+  "gtChars": 1048
+ },
+ {
+  "id": "q08",
+  "cat": "upside_down",
+  "font": "PingFang SC",
+  "fontAvailable": true,
+  "w": 1654,
+  "h": 2339,
+  "bytes": 663049,
+  "degrade": {
+   "rot": 0.708,
+   "blur": 0,
+   "noise": 6,
+   "sp": 0,
+   "light": 0,
+   "scale": 1,
+   "q": 0.8
+  },
+  "extra": {
+   "flip": true
+  },
+  "gtChars": 1070
+ },
+ {
+  "id": "q09",
+  "cat": "upside_down",
+  "font": "Songti SC",
+  "fontAvailable": true,
+  "w": 1654,
+  "h": 2339,
+  "bytes": 628361,
+  "degrade": {
+   "rot": -0.049,
+   "blur": 0,
+   "noise": 6,
+   "sp": 0,
+   "light": 0,
+   "scale": 1,
+   "q": 0.8
+  },
+  "extra": {
+   "flip": true
+  },
+  "gtChars": 969
+ },
+ {
+  "id": "q10",
+  "cat": "lowres_bw",
+  "font": "Hiragino Sans GB",
+  "fontAvailable": true,
+  "w": 827,
+  "h": 1170,
+  "bytes": 217107,
+  "degrade": {
+   "rot": -0.789,
+   "blur": 0,
+   "noise": 6,
+   "sp": 0,
+   "light": 0,
+   "scale": 1,
+   "q": 0.8
+  },
+  "extra": {
+   "bw": true,
+   "scale": 0.5
+  },
+  "gtChars": 1002
+ },
+ {
+  "id": "q11",
+  "cat": "lowres_bw",
+  "font": "STHeiti",
+  "fontAvailable": true,
+  "w": 827,
+  "h": 1170,
+  "bytes": 200790,
+  "degrade": {
+   "rot": -0.689,
+   "blur": 0,
+   "noise": 6,
+   "sp": 0,
+   "light": 0,
+   "scale": 1,
+   "q": 0.8
+  },
+  "extra": {
+   "bw": true,
+   "scale": 0.5
+  },
+  "gtChars": 939
+ },
+ {
+  "id": "q12",
+  "cat": "lowres_bw",
+  "font": "PingFang SC",
+  "fontAvailable": true,
+  "w": 827,
+  "h": 1170,
+  "bytes": 198683,
+  "degrade": {
+   "rot": 0.417,
+   "blur": 0,
+   "noise": 6,
+   "sp": 0,
+   "light": 0,
+   "scale": 1,
+   "q": 0.8
+  },
+  "extra": {
+   "bw": true,
+   "scale": 0.5
+  },
+  "gtChars": 908
+ },
+ {
+  "id": "q13",
+  "cat": "lowres_bw",
+  "font": "Songti SC",
+  "fontAvailable": true,
+  "w": 827,
+  "h": 1170,
+  "bytes": 193458,
+  "degrade": {
+   "rot": 0.497,
+   "blur": 0,
+   "noise": 6,
+   "sp": 0,
+   "light": 0,
+   "scale": 1,
+   "q": 0.8
+  },
+  "extra": {
+   "bw": true,
+   "scale": 0.5
+  },
+  "gtChars": 904
+ },
+ {
+  "id": "q14",
+  "cat": "lowres_bw",
+  "font": "Hiragino Sans GB",
+  "fontAvailable": true,
+  "w": 827,
+  "h": 1170,
+  "bytes": 190168,
+  "degrade": {
+   "rot": 0.172,
+   "blur": 0,
+   "noise": 6,
+   "sp": 0,
+   "light": 0,
+   "scale": 1,
+   "q": 0.8
+  },
+  "extra": {
+   "bw": true,
+   "scale": 0.5
+  },
+  "gtChars": 871
+ },
+ {
+  "id": "q15",
+  "cat": "shadow",
+  "font": "STHeiti",
+  "fontAvailable": true,
+  "w": 1654,
+  "h": 2339,
+  "bytes": 665294,
+  "degrade": {
+   "rot": -0.028,
+   "blur": 0,
+   "noise": 6,
+   "sp": 0,
+   "light": 0,
+   "scale": 1,
+   "q": 0.8
+  },
+  "extra": {
+   "shadow": true,
+   "shadowSide": "right"
+  },
+  "gtChars": 1007
+ },
+ {
+  "id": "q16",
+  "cat": "shadow",
+  "font": "PingFang SC",
+  "fontAvailable": true,
+  "w": 1654,
+  "h": 2339,
+  "bytes": 643142,
+  "degrade": {
+   "rot": 0.252,
+   "blur": 0,
+   "noise": 6,
+   "sp": 0,
+   "light": 0,
+   "scale": 1,
+   "q": 0.8
+  },
+  "extra": {
+   "shadow": true,
+   "shadowSide": "left"
+  },
+  "gtChars": 953
+ },
+ {
+  "id": "q17",
+  "cat": "shadow",
+  "font": "Songti SC",
+  "fontAvailable": true,
+  "w": 1654,
+  "h": 2339,
+  "bytes": 633322,
+  "degrade": {
+   "rot": -0.27,
+   "blur": 0,
+   "noise": 6,
+   "sp": 0,
+   "light": 0,
+   "scale": 1,
+   "q": 0.8
+  },
+  "extra": {
+   "shadow": true,
+   "shadowSide": "right"
+  },
+  "gtChars": 911
+ },
+ {
+  "id": "q18",
+  "cat": "shadow",
+  "font": "Hiragino Sans GB",
+  "fontAvailable": true,
+  "w": 1654,
+  "h": 2339,
+  "bytes": 640742,
+  "degrade": {
+   "rot": 0.64,
+   "blur": 0,
+   "noise": 6,
+   "sp": 0,
+   "light": 0,
+   "scale": 1,
+   "q": 0.8
+  },
+  "extra": {
+   "shadow": true,
+   "shadowSide": "left"
+  },
+  "gtChars": 963
+ },
+ {
+  "id": "q19",
+  "cat": "small_font",
+  "font": "STHeiti",
+  "fontAvailable": true,
+  "w": 1654,
+  "h": 2339,
+  "bytes": 686493,
+  "degrade": {
+   "rot": -0.324,
+   "blur": 0,
+   "noise": 6,
+   "sp": 0,
+   "light": 0,
+   "scale": 1,
+   "q": 0.8
+  },
+  "extra": {},
+  "gtChars": 1905
+ },
+ {
+  "id": "q20",
+  "cat": "small_font",
+  "font": "PingFang SC",
+  "fontAvailable": true,
+  "w": 1654,
+  "h": 2339,
+  "bytes": 697189,
+  "degrade": {
+   "rot": 0.553,
+   "blur": 0,
+   "noise": 6,
+   "sp": 0,
+   "light": 0,
+   "scale": 1,
+   "q": 0.8
+  },
+  "extra": {},
+  "gtChars": 1916
+ },
+ {
+  "id": "q21",
+  "cat": "small_font",
+  "font": "Songti SC",
+  "fontAvailable": true,
+  "w": 1654,
+  "h": 2339,
+  "bytes": 706224,
+  "degrade": {
+   "rot": -0.363,
+   "blur": 0,
+   "noise": 6,
+   "sp": 0,
+   "light": 0,
+   "scale": 1,
+   "q": 0.8
+  },
+  "extra": {},
+  "gtChars": 2007
+ },
+ {
+  "id": "q22",
+  "cat": "small_font",
+  "font": "Hiragino Sans GB",
+  "fontAvailable": true,
+  "w": 1654,
+  "h": 2339,
+  "bytes": 674370,
+  "degrade": {
+   "rot": 0.133,
+   "blur": 0,
+   "noise": 6,
+   "sp": 0,
+   "light": 0,
+   "scale": 1,
+   "q": 0.8
+  },
+  "extra": {},
+  "gtChars": 1840
+ },
+ {
+  "id": "q23",
+  "cat": "handwriting_font",
+  "font": "Hannotate SC",
+  "fontAvailable": true,
+  "w": 1654,
+  "h": 2339,
+  "bytes": 653827,
+  "degrade": {
+   "rot": -0.155,
+   "blur": 0,
+   "noise": 6,
+   "sp": 0,
+   "light": 0,
+   "scale": 1,
+   "q": 0.8
+  },
+  "extra": {},
+  "gtChars": 968
+ },
+ {
+  "id": "q24",
+  "cat": "handwriting_font",
+  "font": "HanziPen SC",
+  "fontAvailable": true,
+  "w": 1654,
+  "h": 2339,
+  "bytes": 625472,
+  "degrade": {
+   "rot": -0.028,
+   "blur": 0,
+   "noise": 6,
+   "sp": 0,
+   "light": 0,
+   "scale": 1,
+   "q": 0.8
+  },
+  "extra": {},
+  "gtChars": 892
+ },
+ {
+  "id": "q25",
+  "cat": "handwriting_font",
+  "font": "Xingkai SC",
+  "fontAvailable": true,
+  "w": 1654,
+  "h": 2339,
+  "bytes": 636791,
+  "degrade": {
+   "rot": -0.447,
+   "blur": 0,
+   "noise": 6,
+   "sp": 0,
+   "light": 0,
+   "scale": 1,
+   "q": 0.8
+  },
+  "extra": {},
+  "gtChars": 1119
+ },
+ {
+  "id": "q26",
+  "cat": "handwriting_font",
+  "font": "Hannotate SC",
+  "fontAvailable": true,
+  "w": 1654,
+  "h": 2339,
+  "bytes": 673960,
+  "degrade": {
+   "rot": 0.351,
+   "blur": 0,
+   "noise": 6,
+   "sp": 0,
+   "light": 0,
+   "scale": 1,
+   "q": 0.8
+  },
+  "extra": {},
+  "gtChars": 1026
+ },
+ {
+  "id": "q27",
+  "cat": "handwriting_font",
+  "font": "HanziPen SC",
+  "fontAvailable": true,
+  "w": 1654,
+  "h": 2339,
+  "bytes": 671365,
+  "degrade": {
+   "rot": 0.304,
+   "blur": 0,
+   "noise": 6,
+   "sp": 0,
+   "light": 0,
+   "scale": 1,
+   "q": 0.8
+  },
+  "extra": {},
+  "gtChars": 1025
+ },
+ {
+  "id": "q28",
+  "cat": "handwriting_font",
+  "font": "Xingkai SC",
+  "fontAvailable": true,
+  "w": 1654,
+  "h": 2339,
+  "bytes": 595094,
+  "degrade": {
+   "rot": -0.485,
+   "blur": 0,
+   "noise": 6,
+   "sp": 0,
+   "light": 0,
+   "scale": 1,
+   "q": 0.8
+  },
+  "extra": {},
+  "gtChars": 963
+ },
+ {
+  "id": "q29",
+  "cat": "word_embedded",
+  "font": "Songti SC",
+  "fontAvailable": true,
+  "w": 920,
+  "h": 612,
+  "bytes": 67211,
+  "degrade": {
+   "rot": 0.616,
+   "blur": 0.182,
+   "noise": 8,
+   "sp": 0,
+   "light": 0,
+   "scale": 0.556,
+   "q": 0.573
+  },
+  "extra": {},
+  "gtChars": 470
+ },
+ {
+  "id": "q30",
+  "cat": "word_embedded",
+  "font": "Hiragino Sans GB",
+  "fontAvailable": true,
+  "w": 877,
+  "h": 583,
+  "bytes": 60829,
+  "degrade": {
+   "rot": 0.023,
+   "blur": 0.06,
+   "noise": 8,
+   "sp": 0,
+   "light": 0,
+   "scale": 0.53,
+   "q": 0.517
+  },
+  "extra": {},
+  "gtChars": 398
+ },
+ {
+  "id": "q31",
+  "cat": "word_embedded",
+  "font": "STHeiti",
+  "fontAvailable": true,
+  "w": 886,
+  "h": 589,
+  "bytes": 82109,
+  "degrade": {
+   "rot": -0.06,
+   "blur": 0.509,
+   "noise": 8,
+   "sp": 0,
+   "light": 0,
+   "scale": 0.535,
+   "q": 0.637
+  },
+  "extra": {},
+  "gtChars": 414
+ },
+ {
+  "id": "q32",
+  "cat": "word_embedded",
+  "font": "PingFang SC",
+  "fontAvailable": true,
+  "w": 892,
+  "h": 593,
+  "bytes": 84257,
+  "degrade": {
+   "rot": 0.695,
+   "blur": 0.36,
+   "noise": 8,
+   "sp": 0,
+   "light": 0,
+   "scale": 0.539,
+   "q": 0.631
+  },
+  "extra": {},
+  "gtChars": 433
+ },
+ {
+  "id": "q33",
+  "cat": "word_embedded",
+  "font": "Songti SC",
+  "fontAvailable": true,
+  "w": 849,
+  "h": 565,
+  "bytes": 49333,
+  "degrade": {
+   "rot": -0.919,
+   "blur": 0.547,
+   "noise": 8,
+   "sp": 0,
+   "light": 0,
+   "scale": 0.514,
+   "q": 0.551
+  },
+  "extra": {},
+  "gtChars": 338
+ },
+ {
+  "id": "q34",
+  "cat": "word_embedded",
+  "font": "Hiragino Sans GB",
+  "fontAvailable": true,
+  "w": 844,
+  "h": 561,
+  "bytes": 57345,
+  "degrade": {
+   "rot": -0.354,
+   "blur": 0.196,
+   "noise": 8,
+   "sp": 0,
+   "light": 0,
+   "scale": 0.51,
+   "q": 0.515
+  },
+  "extra": {},
+  "gtChars": 409
+ },
+ {
+  "id": "q35",
+  "cat": "word_embedded",
+  "font": "STHeiti",
+  "fontAvailable": true,
+  "w": 938,
+  "h": 624,
+  "bytes": 70267,
+  "degrade": {
+   "rot": 1.157,
+   "blur": 0.1,
+   "noise": 8,
+   "sp": 0,
+   "light": 0,
+   "scale": 0.567,
+   "q": 0.517
+  },
+  "extra": {},
+  "gtChars": 437
+ },
+ {
+  "id": "q36",
+  "cat": "word_embedded",
+  "font": "PingFang SC",
+  "fontAvailable": true,
+  "w": 866,
+  "h": 576,
+  "bytes": 63670,
+  "degrade": {
+   "rot": 1.076,
+   "blur": 0.547,
+   "noise": 8,
+   "sp": 0,
+   "light": 0,
+   "scale": 0.523,
+   "q": 0.592
+  },
+  "extra": {},
+  "gtChars": 316
+ }
+]
